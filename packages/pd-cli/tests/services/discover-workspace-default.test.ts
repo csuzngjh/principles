@@ -132,34 +132,42 @@ describe('discoverWorkspaceDefault — cwd discovery (PRI-957)', () => {
 
     const result = discoverWorkspaceDefault();
 
+    expect(result!.kind).toBe('resolved');
     expect(result!.source).toBe('cwd');
     expect(result!.declared).toBe(false);
     expect(result!.workspaceDefault).toBe(canonicalPath(ws));
     const text = stderrText(stderrSpy);
     expect(text).toContain('workspace.default "./somewhere" is not an absolute path');
-    expect(text).toContain('Treating the directory you are standing in');
+    // PRI-957 review round 3 P2: discovery reports the finding only. Naming the
+    // resulting directory here would contradict the resolution stage whenever an
+    // explicit --workspace override points somewhere else.
+    expect(text).not.toContain('Treating the directory you are standing in');
+    expect(text).not.toContain('as the workspace');
 
     stderrSpy.mockRestore();
   });
 
-  it('names the resulting workspace when the config it found cannot be parsed', () => {
-    // PRI-957 review P2: an unparseable config used to be reported as a parse
-    // failure and then treated exactly like an absent one, so the operator saw a
-    // warning about a file and never a statement about the library the command
-    // would go on to read and write.
+  it('reports an unparseable config as unknown instead of handing back the directory', () => {
+    // PRI-957 review round 3 P1: this used to return the standing directory with
+    // declared:false, i.e. exactly the same shape as a config that legitimately
+    // declares nothing. resolveWorkspaceDir() then returned it, and pd pain record
+    // wrote to a workspace whose owner may have declared a different one.
     const ws = makeWorkspace('broken', 'version: 1\nworkspace:\n  default: [unclosed\n');
     stubEnvironment(ws);
     const stderrSpy = captureStderr();
 
     const result = discoverWorkspaceDefault();
 
+    expect(result!.kind).toBe('unparseable');
+    expect(result!.configPath).toBe(path.resolve(ws, '.pd', 'config.yaml'));
     expect(result!.source).toBe('cwd');
-    expect(result!.declared).toBe(false);
-    expect(result!.workspaceDefault).toBe(canonicalPath(ws));
+    // The unusable state must not be expressible as a path at all.
+    expect((result as { workspaceDefault?: string }).workspaceDefault).toBeUndefined();
     const text = stderrText(stderrSpy);
     expect(text).toContain('Could not parse');
     expect(text).toContain('its workspace.default is unknown');
-    expect(text).toContain(`Treating the directory you are standing in (${canonicalPath(ws)}) as the workspace.`);
+    expect(text).not.toContain('Treating the directory you are standing in');
+    expect(text).not.toContain('as the workspace');
 
     stderrSpy.mockRestore();
   });
@@ -177,6 +185,7 @@ describe('discoverWorkspaceDefault — cwd discovery (PRI-957)', () => {
 
     const result = discoverWorkspaceDefault();
 
+    expect(result!.kind).toBe('resolved');
     expect(result!.source).toBe('openclaw_default');
     expect(stderrText(stderrSpy)).toContain('Trying the next config location.');
 

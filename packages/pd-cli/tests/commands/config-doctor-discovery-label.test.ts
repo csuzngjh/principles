@@ -17,12 +17,9 @@ import * as os from 'node:os';
 
 const { discoveryRef } = vi.hoisted(() => ({
   discoveryRef: {
-    value: null as null | {
-      workspaceDefault: string;
-      configPath: string;
-      source: 'cwd' | 'env_var' | 'openclaw_default' | 'openclaw_plugin_config';
-      declared: boolean;
-    },
+    value: null as
+      | null
+      | import('../../src/services/pd-config-loader.js').WorkspaceDiscoveryResult,
   },
 }));
 
@@ -57,6 +54,7 @@ afterEach(() => {
 describe('config doctor — discovery label (PRI-957)', () => {
   it('labels a declared default as workspace.default', async () => {
     discoveryRef.value = {
+      kind: 'resolved',
       workspaceDefault: tmp,
       configPath: path.join(tmp, '.pd', 'config.yaml'),
       source: 'cwd',
@@ -71,6 +69,7 @@ describe('config doctor — discovery label (PRI-957)', () => {
 
   it('labels a bare cwd hit as discovered, never as a declaration', async () => {
     discoveryRef.value = {
+      kind: 'resolved',
       workspaceDefault: tmp,
       configPath: path.join(tmp, '.pd', 'config.yaml'),
       source: 'cwd',
@@ -84,5 +83,26 @@ describe('config doctor — discovery label (PRI-957)', () => {
     );
     expect(printed()).toContain('✓ resolved path matches the discovered workspace directory');
     expect(printed()).not.toContain(`workspace.default: ${tmp}`);
+  });
+
+  // PRI-957 review round 3 P1: an unparseable config means the declaration is
+  // UNKNOWN. Labelling it "discovered, no workspace.default declared" would assert
+  // a fact no readable config supports and hide that resolution now fails closed.
+  it('labels an unparseable config as unknown, not as an absent declaration', async () => {
+    const configPath = path.join(tmp, '.pd', 'config.yaml');
+    discoveryRef.value = {
+      kind: 'unparseable',
+      configPath,
+      source: 'cwd',
+      reason: 'bad indentation at line 2',
+    };
+
+    await handleConfigDoctor({ workspace: tmp });
+
+    const text = printed();
+    expect(text).toContain(`workspace config UNPARSEABLE: ${configPath} (source: cwd)`);
+    expect(text).toContain('bad indentation at line 2');
+    expect(text).toContain('fail closed');
+    expect(text).not.toContain('no workspace.default declared');
   });
 });

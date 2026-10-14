@@ -29,7 +29,16 @@ function formatTextOutput(output: DoctorOutput): string {
 
   // Workspace discovery info
   const discovery = discoverWorkspaceDefault();
-  if (discovery) {
+  if (discovery?.kind === 'unparseable') {
+    // PRI-957 review round 3 P1: an unparseable config means the declaration is
+    // UNKNOWN, not absent. Reporting it as "discovered, no workspace.default declared"
+    // would claim a fact no readable config supports, and hide that resolution now
+    // fails closed instead of falling back to the standing directory.
+    lines.push(
+      `workspace config UNPARSEABLE: ${discovery.configPath} (source: ${discovery.source}) — ${discovery.reason}`,
+    );
+    lines.push('  ⚠ workspace.default is unknown — commands without --workspace / PD_WORKSPACE_DIR fail closed');
+  } else if (discovery) {
     // PRI-957: only the cwd candidate may return a bare discovered directory, so the
     // label must not claim a declaration that no config file contains.
     const label = discovery.declared

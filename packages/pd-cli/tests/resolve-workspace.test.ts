@@ -34,11 +34,23 @@ function makeDiscovery(
 ): import('../src/services/pd-config-loader.js').WorkspaceDiscoveryResult {
   const { source = 'openclaw_default', declared = true } = opts;
   return {
+    kind: 'resolved',
     workspaceDefault,
     configPath: `${workspaceDefault}/.pd/config.yaml`,
     source,
     declared,
   };
+}
+
+/**
+ * A config that exists but cannot be read. Discovery deliberately carries no path
+ * for this case: an unknown declaration must not be expressible as a usable default
+ * (PRI-957 review round 3 P1).
+ */
+function makeUnparseable(
+  configPath = '/standing/ws/.pd/config.yaml',
+): import('../src/services/pd-config-loader.js').WorkspaceDiscoveryResult {
+  return { kind: 'unparseable', configPath, source: 'cwd', reason: 'bad indentation at line 2' };
 }
 
 const ORIGINAL_ENV = process.env.PD_WORKSPACE_DIR;
@@ -289,7 +301,7 @@ describe('resolveWorkspaceDir', () => {
     const text = stderrSpy.mock.calls.map((call) => String(call[0])).join('');
     expect(text).toContain('using workspace "/inferred/cwd/workspace"');
     expect(text).toContain('inferred from your current directory');
-    expect(text).toContain('no workspace.default in effect');
+    expect(text).toContain('no workspace.default declared');
     stderrSpy.mockRestore();
   });
 
@@ -311,6 +323,65 @@ describe('resolveWorkspaceDir', () => {
 
     expect(resolveWorkspaceDir()).toBe('/openclaw/workspace');
     expect(stderrSpy.mock.calls.map((call) => String(call[0])).join('')).toBe('');
+
+    stderrSpy.mockRestore();
+  });
+
+  // 19. PRI-957 review round 3 P1: an unparseable config is an UNKNOWN declaration,
+  // not an absent one. Without an override the chain must fail closed instead of
+  // handing the standing directory to a write command.
+  it('fails closed when the standing config cannot be parsed and nothing overrides it', () => {
+    mockDiscover.mockReturnValue(makeUnparseable());
+    expect(() => resolveWorkspaceDir()).toThrow(/Cannot resolve a workspace directory/);
+  });
+
+  // 20. The failure must name the file, the reason, and both escape hatches
+  // (cli-6-output-next-action) — a bare refusal is not actionable.
+  it('names the unparseable config and the explicit escape hatches when failing closed', () => {
+    mockDiscover.mockReturnValue(makeUnparseable('/standing/ws/.pd/config.yaml'));
+    let message = '';
+    try {
+      resolveWorkspaceDir();
+    } catch (err) {
+      message = err instanceof Error ? err.message : String(err);
+    }
+    expect(message).toContain('/standing/ws/.pd/config.yaml');
+    expect(message).toContain('bad indentation at line 2');
+    expect(message).toContain('--workspace');
+    expect(WORKSPACE_ENV).toBe('PD_WORKSPACE_DIR');
+    expect(message).toContain('PD_WORKSPACE_DIR');
+  });
+
+  // 21. Reverse test required by the review: broken config + explicit -w B must use
+  // B, and the only target statement must come from the resolution stage.
+  it('lets an explicit --workspace win over an unparseable config and states that target', () => {
+    mockDiscover.mockReturnValue(makeUnparseable());
+    const stderrSpy = captureStderr();
+
+    const result = resolveWorkspaceDir('/explicit/b');
+
+    expect(result).toBe('/explicit/b');
+    const text = stderrSpy.mock.calls.map((call) => String(call[0])).join('');
+    expect(text).toContain('using workspace "/explicit/b" from --workspace');
+    expect(text).toContain('could not be parsed');
+    // No known default exists, so no "differs from" claim may appear.
+    expect(text).not.toContain('differs from');
+
+    stderrSpy.mockRestore();
+  });
+
+  // 22. Same precedence for the environment override.
+  it('lets PD_WORKSPACE_DIR win over an unparseable config and states that target', () => {
+    mockDiscover.mockReturnValue(makeUnparseable());
+    process.env.PD_WORKSPACE_DIR = '/env/b';
+    const stderrSpy = captureStderr();
+
+    const result = resolveWorkspaceDir();
+
+    expect(result).toBe('/env/b');
+    const text = stderrSpy.mock.calls.map((call) => String(call[0])).join('');
+    expect(text).toContain('using workspace "/env/b" from PD_WORKSPACE_DIR');
+    expect(text).not.toContain('differs from');
 
     stderrSpy.mockRestore();
   });

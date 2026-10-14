@@ -13,10 +13,16 @@
  *   2. the inferred target is announced on stderr by the resolution stage, so the
  *      operator is never left guessing which library was written
  *      (rc-9-no-silent-fallback);
- *   3. an explicit -w keeps its precedence and stays quiet.
+ *   3. an explicit -w keeps its precedence and stays quiet;
+ *   4. a config that exists but cannot be parsed is UNKNOWN, not undeclared: with no
+ *      override the write is refused outright, and an explicit -w still wins
+ *      (PRI-957 review round 3 P1 — pain-record's own config-load failure only
+ *      warns and uses defaults, so resolution is the only gate that can stop it).
  *
  * The service is mocked exactly as in pain-record.test.ts — this is a wiring
- * test (cli-7), not a service contract test.
+ * test (cli-7), not a service contract test. It proves which target the write is
+ * aimed at and that no service is constructed when resolution refuses; it does not
+ * prove a full Pain record commits end to end.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
@@ -25,12 +31,7 @@ import * as path from 'path';
 
 const { discoveryRef, serviceCalls } = vi.hoisted(() => ({
   discoveryRef: {
-    current: null as {
-      workspaceDefault: string;
-      configPath: string;
-      source: 'cwd' | 'env_var' | 'openclaw_default' | 'openclaw_plugin_config';
-      declared: boolean;
-    } | null,
+    current: null as import('../../src/services/pd-config-loader.js').WorkspaceDiscoveryResult | null,
   },
   serviceCalls: [] as { ctor: Record<string, unknown>; recordPain: unknown }[],
 }));
@@ -152,6 +153,7 @@ describe('pd pain record — write target follows the workspace resolution chain
   it('writes into the workspace inferred from the current directory and says so', async () => {
     const inferred = path.join(workRoot, 'codex-ws');
     discoveryRef.current = {
+      kind: 'resolved',
       workspaceDefault: inferred,
       configPath: path.join(inferred, '.pd', 'config.yaml'),
       source: 'cwd',
@@ -164,12 +166,13 @@ describe('pd pain record — write target follows the workspace resolution chain
     expect(serviceCalls[0].ctor.workspaceDir).toBe(inferred);
     expect(serviceCalls[0].ctor.stateDir).toBe(`${inferred}/.state`);
     expect(stderrText()).toContain(`using workspace "${inferred}"`);
-    expect(stderrText()).toContain('no workspace.default in effect');
+    expect(stderrText()).toContain('no workspace.default declared');
   });
 
   it('does not announce a target the operator declared, or one an override chose', async () => {
     const declared = path.join(workRoot, 'declared-ws');
     discoveryRef.current = {
+      kind: 'resolved',
       workspaceDefault: declared,
       configPath: path.join(workRoot, 'somewhere', '.pd', 'config.yaml'),
       source: 'cwd',
@@ -184,6 +187,7 @@ describe('pd pain record — write target follows the workspace resolution chain
   it('writes into the -w target when one is given even if cwd discovery points elsewhere', async () => {
     const explicit = path.join(workRoot, 'explicit-ws');
     discoveryRef.current = {
+      kind: 'resolved',
       workspaceDefault: path.join(workRoot, 'standing-here'),
       configPath: path.join(workRoot, 'standing-here', '.pd', 'config.yaml'),
       source: 'cwd',
@@ -201,5 +205,43 @@ describe('pd pain record — write target follows the workspace resolution chain
 
     await expect(handlePainRecord({ reason: 'no workspace' })).rejects.toThrow(/No workspace directory configured/);
     expect(serviceCalls).toHaveLength(0);
+  });
+
+  // PRI-957 review round 3 P1 — the case the review found missing. A config that
+  // EXISTS but cannot be parsed leaves workspace.default unknown; before this fix the
+  // chain fell through to "the directory you are standing in" and pain-record wrote
+  // there (its own config-load failure only prints a warning and uses defaults).
+  it('refuses to write when the standing config exists but cannot be parsed (cli-5)', async () => {
+    const standing = path.join(workRoot, 'broken-ws');
+    discoveryRef.current = {
+      kind: 'unparseable',
+      configPath: path.join(standing, '.pd', 'config.yaml'),
+      source: 'cwd',
+      reason: 'bad indentation at line 2',
+    };
+
+    await expect(handlePainRecord({ reason: 'broken config' })).rejects.toThrow(
+      /Cannot resolve a workspace directory/,
+    );
+    expect(serviceCalls).toHaveLength(0);
+  });
+
+  // An explicit override is the operator stating the target themselves, so it keeps
+  // precedence even when the standing config is unreadable — and says which target won.
+  it('still writes into an explicit -w target when the standing config cannot be parsed', async () => {
+    const explicit = path.join(workRoot, 'explicit-ws');
+    discoveryRef.current = {
+      kind: 'unparseable',
+      configPath: path.join(workRoot, 'broken-ws', '.pd', 'config.yaml'),
+      source: 'cwd',
+      reason: 'bad indentation at line 2',
+    };
+
+    await handlePainRecord({ reason: 'broken config, explicit target', workspace: explicit });
+
+    expect(serviceCalls).toHaveLength(1);
+    expect(serviceCalls[0].ctor.workspaceDir).toBe(explicit);
+    expect(stderrText()).toContain(`using workspace "${explicit}" from --workspace`);
+    expect(stderrText()).toContain('could not be parsed');
   });
 });
