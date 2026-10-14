@@ -1871,7 +1871,16 @@
     "failedTasks": {
       "title": "失败任务",
       "subtitle": "管道中失败或需要人工审查的任务",
-      "empty": "没有失败任务。PD 管道运行正常。",
+      "empty": "当前查询范围内没有失败任务。这不等于管道健康——请结合下方学习队列状态判断。",
+      "pipeline": {
+        "title": "学习队列状态",
+        "statusHealthy": "正常推进",
+        "statusBacklogged": "有积压（仍在推进）",
+        "statusStalled": "疑似停滞",
+        "statusDisabled": "消费者已禁用",
+        "statusUnknown": "状态未知",
+        "nextActionPrefix": "建议："
+      },
       "error": "加载失败任务失败",
       "disabled": "失败任务可观测性已禁用。请在 .pd/config.yaml 中启用 'failed_tasks_observability' 以查看。",
       "createDraft": "创建反馈草稿",

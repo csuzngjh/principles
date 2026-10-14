@@ -1871,7 +1871,16 @@
     "failedTasks": {
       "title": "Failed Tasks",
       "subtitle": "Pipeline tasks that failed or need human review",
-      "empty": "No failed tasks. PD pipeline is healthy.",
+      "empty": "No failed tasks in the queried range. This does not mean the pipeline is healthy — check the learning-queue status below.",
+      "pipeline": {
+        "title": "Learning queue status",
+        "statusHealthy": "Progressing",
+        "statusBacklogged": "Backlogged (still progressing)",
+        "statusStalled": "Possibly stalled",
+        "statusDisabled": "Consumer disabled",
+        "statusUnknown": "Status unknown",
+        "nextActionPrefix": "Suggested: "
+      },
       "error": "Failed to load failed tasks",
       "disabled": "Failed tasks observability is disabled. Enable 'failed_tasks_observability' in .pd/config.yaml to view.",
       "createDraft": "Create Feedback Draft",
