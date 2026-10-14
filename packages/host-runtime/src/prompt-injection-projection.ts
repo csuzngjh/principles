@@ -185,7 +185,7 @@ export function resolvePromptInjectionRouteDecision(input: {
       declaredHostKinds: facts.declaredKinds,
       effectiveHostKinds: facts.effectiveKinds,
       unconfirmedReason: 'no_host_facts_and_flag_off: no host declaration or host evidence exists, and the applicable hosts would take different routes',
-      nextAction: 'pass an explicit target host (openclaw|codex), or let a host run once in this workspace so it persists its declaration',
+      nextAction: 'pass an explicit target host (openclaw|codex|workbuddy), or let a host run once in this workspace so it persists its declaration',
       perHost: standardHostRoutes(flagEnabled),
     };
   }
@@ -221,8 +221,8 @@ export function resolvePromptInjectionRouteDecision(input: {
     flagEnabled,
     declaredHostKinds: facts.declaredKinds,
     effectiveHostKinds: facts.effectiveKinds,
-    unconfirmedReason: 'multi_host_routes_differ: openclaw would take the legacy list route and codex the shared route under the current flag-off config',
-    nextAction: 'pass an explicit target host (openclaw|codex) for this request, or enable abstraction_layer_v1 so both hosts share one route',
+    unconfirmedReason: 'multi_host_routes_differ: openclaw would take the legacy list route while codex/workbuddy would take the shared route under the current flag-off config',
+    nextAction: 'pass an explicit target host (openclaw|codex|workbuddy) for this request, or enable abstraction_layer_v1 so all hosts share one route',
     perHost: standardHostRoutes(flagEnabled),
   };
 }
@@ -371,13 +371,19 @@ export async function buildLivePromptInjectionProjection(input: {
    * rather than assuming FIFO.
    */
   roundKey?: number;
-  /** AC-01: explicit route binding — 'codex' always shared, 'openclaw' by flag. */
+  /** AC-01: explicit route binding — 'codex'/'workbuddy' always shared, 'openclaw' by flag. */
   targetHost?: PromptInjectionTargetHost;
 }): Promise<PromptInjectionProjection> {
   const flagEnabled = computeFeatureFlagsFromConfig(
     loadPdConfigForPlugin(input.workspaceDir).effective,
   ).flags.abstraction_layer_v1?.enabled === true;
-  const sharedRoute = input.targetHost === 'codex' ? true : flagEnabled;
+  // Route face follows THE one route formula (review P2-2: a re-typed
+  // codex-only ternary forecast WorkBuddy as legacy_trim while its adapter
+  // renders shared unconditionally). No explicit target (console callers)
+  // keeps the flag-gated workspace default.
+  const sharedRoute = input.targetHost === undefined
+    ? flagEnabled
+    : promptRouteForHost(input.targetHost, flagEnabled) === 'shared_render';
 
   if (sharedRoute) {
     const context = await buildActivePrinciplePromptContext(input);

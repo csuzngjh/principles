@@ -231,13 +231,17 @@ describe('AC-01: resolveLivePromptInjectionProjection follows the resolved route
     expect(resolution.perHost.map((entry) => [entry.hostKind, entry.projection.route])).toEqual([
       ['openclaw', 'legacy_trim'],
       ['codex', 'shared_render'],
+      ['workbuddy', 'shared_render'],
     ]);
     // 列表路由计费范围与共享路由不同——两个数字都要有,且语义标注正确
     const openclaw = resolution.perHost[0].projection;
     const codex = resolution.perHost[1].projection;
+    const workbuddy = resolution.perHost[2].projection;
     expect(openclaw.budgetScope).toBe('selected_lines');
     expect(codex.budgetScope).toBe('full_directive_context');
+    expect(workbuddy.budgetScope).toBe('full_directive_context');
     expect(codex.usedChars).toBeGreaterThan(openclaw.usedChars);
+    expect(workbuddy.usedChars).toBe(codex.usedChars);
   });
 });
 
@@ -331,6 +335,7 @@ describe('AC-05/AC-02: checkPromptArtifactDeliverability — real identity, rout
       expect(result.perHost).toEqual([
         { hostKind: 'openclaw', fits: true, costChars: 1292 },
         { hostKind: 'codex', fits: false, costChars: 2009 },
+        { hostKind: 'workbuddy', fits: false, costChars: 2009 },
       ]);
     }
   });
@@ -385,7 +390,7 @@ describe('AC-02/AC-06: readPromptActivationInjectionStatuses — positive per-it
     expect(report.route.status).toBe('unconfirmed');
     expect(report.statuses).toHaveLength(1);
     expect(report.statuses[0].status).toBe('route_unconfirmed');
-    expect(report.statuses[0].perHostFits?.map((f) => f.hostKind)).toEqual(['openclaw', 'codex']);
+    expect(report.statuses[0].perHostFits?.map((f) => f.hostKind)).toEqual(['openclaw', 'codex', 'workbuddy']);
   });
 
   it('missing state.db and prompt-flag-off degrade with a global reason (never "all healthy")', async () => {

@@ -1771,7 +1771,7 @@ export function registerRuntimeActivationApproveCommand(parent: Command): Comman
     .option('--note <text>', 'Optional approval note')
     .option('-w, --workspace <path>', 'Workspace directory')
     .option('--json', 'Output raw JSON')
-    .option('--target-host <host>', 'Request-level target host for the prompt capacity precheck (openclaw|codex); omit to use workspace host facts')
+    .option('--target-host <host>', 'Request-level target host for the prompt capacity precheck (openclaw|codex|workbuddy); omit to use workspace host facts')
     .option('--retry-activation', 'Retry activation of an already approved record without changing its Owner decision')
     .option('--confirm-intent', 'Confirm that the revised statement preserves the reviewed Owner intent')
     .action(async (opts) => {
