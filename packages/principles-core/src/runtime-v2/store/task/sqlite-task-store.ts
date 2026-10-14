@@ -373,6 +373,72 @@ export class SqliteTaskStore implements TaskStore {
   }
 
   /**
+   * PRI-955 (R1 F11 C2/C4): exact learning-queue aggregates for the Console
+   * pipeline-health projection, computed in ONE read-only GROUP BY over the
+   * authoritative tasks table (no second state, no LIMIT truncation):
+   * - pendingCount per runner-kind task (status='pending')
+   * - oldest pending created_at (queue age)
+   * - newest succeeded updated_at per runner-kind task (recent-progress
+   *   evidence, scoped to learning-pipeline kinds — a global MAX would let
+   *   unrelated task kinds fake freshness)
+   *
+   * Read-only; throws storage_unavailable on malformed rows (rc-3), same as
+   * countFailedTasks.
+   */
+  async aggregatePipelineHealth(): Promise<{
+    pendingCount: number;
+    oldestPendingCreatedAt: string | null;
+    oldestPendingTaskKind: string | null;
+    lastSucceededAt: string | null;
+    /** PRI-955 review P1: unresolved states that preclude 'healthy' */
+    failedCount: number;
+    needsHumanReviewCount: number;
+    retryWaitCount: number;
+  }> {
+    const db = this.connection.getDb();
+    const kinds = ['dreamer', 'philosopher', 'scribe', 'artificer', 'evaluator', 'rollout_reviewer'];
+    const placeholders = kinds.map(() => '?').join(', ');
+    const pendingRow = db.prepare(
+      `SELECT COUNT(*) as cnt, MIN(created_at) as oldest, (SELECT task_kind FROM tasks WHERE status = 'pending' AND task_kind IN (${placeholders}) ORDER BY created_at ASC LIMIT 1) as oldest_kind FROM tasks WHERE status = 'pending' AND task_kind IN (${placeholders})`
+      // runtime-contract-exempt: ERR-001 better-sqlite3 .get() returns unknown; narrowing to Record<string, unknown> | undefined is type-only (cnt/oldest/oldest_kind are validated below via typeof checks)
+    ).get(...kinds, ...kinds) as Record<string, unknown> | undefined;
+    if (!pendingRow || typeof pendingRow.cnt !== 'number' || !Number.isInteger(pendingRow.cnt)) {
+      throw new PDRuntimeError(
+        'storage_unavailable',
+        'aggregatePipelineHealth: expected integer cnt from pending COUNT(*) query',
+      );
+    }
+    const succeededRow = db.prepare(
+      `SELECT MAX(updated_at) as last FROM tasks WHERE status = 'succeeded' AND task_kind IN (${placeholders})`
+      // runtime-contract-exempt: ERR-001 better-sqlite3 .get() returns unknown; narrowing to Record<string, unknown> | undefined is type-only (last is validated below via typeof check)
+    ).get(...kinds) as Record<string, unknown> | undefined;
+    const lastRaw = succeededRow?.last;
+    const lastSucceededAt = typeof lastRaw === 'string' && lastRaw.length > 0 ? lastRaw : null;
+    // PRI-955 review P1: exact counts of unresolved states that preclude 'healthy'
+    const unresolvedRow = db.prepare(
+      `SELECT ` +
+      `SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_cnt, ` +
+      `SUM(CASE WHEN status = 'needs_human_review' THEN 1 ELSE 0 END) as nhr_cnt, ` +
+      `SUM(CASE WHEN status = 'retry_wait' THEN 1 ELSE 0 END) as retry_cnt ` +
+      `FROM tasks WHERE task_kind IN (${placeholders})`
+      // runtime-contract-exempt: ERR-001 better-sqlite3 .get() returns unknown; narrowing is type-only (all fields validated below via typeof checks)
+    ).get(...kinds) as Record<string, unknown> | undefined;
+    const oldestRaw = pendingRow.oldest;
+    const failedRaw = unresolvedRow?.failed_cnt;
+    const nhrRaw = unresolvedRow?.nhr_cnt;
+    const retryRaw = unresolvedRow?.retry_cnt;
+    return {
+      pendingCount: pendingRow.cnt,
+      oldestPendingCreatedAt: typeof oldestRaw === 'string' && oldestRaw.length > 0 ? oldestRaw : null,
+      oldestPendingTaskKind: typeof pendingRow.oldest_kind === 'string' && pendingRow.oldest_kind.length > 0 ? pendingRow.oldest_kind : null,
+      lastSucceededAt,
+      failedCount: typeof failedRaw === 'number' && Number.isInteger(failedRaw) ? failedRaw : 0,
+      needsHumanReviewCount: typeof nhrRaw === 'number' && Number.isInteger(nhrRaw) ? nhrRaw : 0,
+      retryWaitCount: typeof retryRaw === 'number' && Number.isInteger(retryRaw) ? retryRaw : 0,
+    };
+  }
+
+  /**
    * Convert a raw DB row into a validated FailedTaskSummary.
    *
    * Trust boundary (rc-1, rc-2, rc-3): the row is UNTRUSTED data. Each field

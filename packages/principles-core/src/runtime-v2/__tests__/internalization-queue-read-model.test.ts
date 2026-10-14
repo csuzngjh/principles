@@ -280,7 +280,9 @@ describe('InternalizationQueueReadModel.getSnapshot', () => {
     model = new InternalizationQueueReadModel(sm);
     const snap = await model.getSnapshot();
 
-    expect(snap.readyTasks).toContainEqual({ taskId: 'ready_1', taskKind: 'dreamer', channel: 'prompt' });
+    // PRI-954: ReadyTask now also carries createdAt (queue age) — assert the
+    // identity fields via objectContaining so the additive field stays free.
+    expect(snap.readyTasks).toContainEqual(expect.objectContaining({ taskId: 'ready_1', taskKind: 'dreamer', channel: 'prompt' }));
     expect(snap.noReadyTasks).toBeNull();
   });
 
@@ -418,7 +420,7 @@ describe('InternalizationQueueReadModel.getSnapshot', () => {
     model = new InternalizationQueueReadModel(sm);
     const snap = await model.getSnapshot();
 
-    expect(snap.readyTasks).toContainEqual({ taskId: 'r1', taskKind: 'dreamer', channel: 'prompt' });
+    expect(snap.readyTasks).toContainEqual(expect.objectContaining({ taskId: 'r1', taskKind: 'dreamer', channel: 'prompt' }));
     expect(snap.unresolvableSummary.count).toBe(1);
     expect(snap.noReadyTasks).toBeNull();
   });
@@ -434,7 +436,7 @@ describe('InternalizationQueueReadModel.getSnapshot', () => {
     model = new InternalizationQueueReadModel(sm);
     const snap = await model.getSnapshot();
 
-    expect(snap.readyTasks).toContainEqual({ taskId: 'retry_1', taskKind: 'scribe', channel: 'prompt' });
+    expect(snap.readyTasks).toContainEqual(expect.objectContaining({ taskId: 'retry_1', taskKind: 'scribe', channel: 'prompt' }));
     expect(snap.unresolvableSummary.count).toBe(0);
   });
 

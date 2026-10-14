@@ -5,16 +5,17 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-describe('supported Codex version guard (ADR-0020 §11.2 baseline)', () => {
+describe('supported Codex version guard (ADR-0020 §11.2 baseline; PRI-953 extends the verified envelope to 0.162.1)', () => {
   it('pins the G1 contract baseline constants', () => {
     expect(CODEX_INGESTION_MIN_VERSION).toBe('0.148.0');
-    expect(CODEX_INGESTION_VERIFIED_VERSION).toBe('0.150.1');
+    expect(CODEX_INGESTION_VERIFIED_VERSION).toBe('0.162.1');
   });
 
-  it('accepts the verified range [0.148.0, 0.150.1]', () => {
+  it('accepts the verified range [0.148.0, 0.162.1]', () => {
     expect(classifyCodexVersion('0.148.0')).toEqual({ status: 'supported' });
     expect(classifyCodexVersion('0.149.3')).toEqual({ status: 'supported' });
     expect(classifyCodexVersion('0.150.1')).toEqual({ status: 'supported' });
+    expect(classifyCodexVersion('0.162.1')).toEqual({ status: 'supported' });
   });
 
   it('degrades explicitly below the minimum supported version', () => {
@@ -23,7 +24,7 @@ describe('supported Codex version guard (ADR-0020 §11.2 baseline)', () => {
   });
 
   it('degrades explicitly above the verified ceiling instead of guessing a newer schema', () => {
-    expect(classifyCodexVersion('0.151.0')).toEqual({ status: 'unverified_above', reason: 'codex_version_unverified' });
+    expect(classifyCodexVersion('0.163.0')).toEqual({ status: 'unverified_above', reason: 'codex_version_unverified' });
     expect(classifyCodexVersion('1.0.0')).toEqual({ status: 'unverified_above', reason: 'codex_version_unverified' });
   });
 
