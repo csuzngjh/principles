@@ -9,6 +9,13 @@
  * explicit BLOCKED reason — never mocked over, and an empty queue is a FAIL,
  * not a BLOCKED.
  *
+ * R2 (round-4, Owner mandate): every step of the full-learning scenario
+ * actually asserts its requirement — the principle-injection step FAILS loud
+ * (never a vacuous return) when the scenario's chain has no prompt-channel
+ * principle approval to verify, and the withdrawal step always proves the
+ * post-withdraw stop. Policy-terminal handling stays an explicit
+ * scenario-level classification, not a silent skip of a required step.
+ *
  * Learning acceptance correlates through the IDENTITY CHAIN only (P2
  * remediation): admission → principle_candidates → chain tasks (durable
  * pi_metadata.correlationId) → pi_artifacts → approvals → activations. The
@@ -601,6 +608,12 @@ registry.then(/^the user prompt still reaches the model$/, () => {
 // (shadow per the production writer, no injection assertion, no live
 // promotion); implementation/defer → the not_internalizable POLICY terminal,
 // reported explicitly (never a provider BLOCKED, never an injection PASS).
+// R2 (round-4, Owner mandate): this feature REQUIRES a completed principle
+// chain — the injection step FAILS loud (never a vacuous return) when the
+// chain has no prompt-channel principle approval to verify, and the
+// withdrawal step always asserts the post-withdraw stop. The policy terminal
+// stays an explicit SCENARIO-LEVEL classification (skip with the
+// POLICY-TERMINAL reason), never a silent skip of an individual step.
 registry.when(/^WorkBuddy reports a real tool failure through the hook \(eligible: synthetic-protocol Write failure via the real entry\)$/, () => {
   state.scenarioStartedAt = Date.now();
   freshGovernance();
@@ -714,12 +727,15 @@ registry.when(/^the background worker advances it toward a reviewable proposal$/
         console.error(`[bdd-learning] identity chain reached approvals: ${chainSummary(chain)}`);
         return;
       }
-      // Policy terminal (rc-9 explicit classification, NOT a provider BLOCKED
-      // and never a fake injection PASS): every candidate's production
-      // disposition is the intake policy refusal — no approval row will EVER
-      // exist for this chain, so cycling to the deadline would be dishonest.
+      // Policy terminal (rc-9 explicit SCENARIO-LEVEL classification, NOT a
+      // provider BLOCKED and never a fake injection PASS): every candidate's
+      // production disposition is the intake policy refusal — no approval row
+      // will EVER exist for this chain, so cycling to the deadline would be
+      // dishonest. The classification ends the WHOLE scenario here (explicit
+      // skip with the reason below) — it must never degrade into a silent
+      // skip of an individual required step (round-4 R2).
       if (chain !== null && chain.candidates.length > 0 && chain.candidates.every((c) => candidateDisposition(chain, c) === 'policy_terminal')) {
-        throw new BlockedScenarioError(`POLICY-TERMINAL: every candidate of diagnostician task ${chain.diagnosticianTaskId} ends at the not_internalizable intake policy refusal (approvals row absent BY DESIGN): ${chainSummary(chain)} — scenario reported as its policy terminal, NOT a provider BLOCKED and not an injection PASS`);
+        throw new BlockedScenarioError(`POLICY-TERMINAL: every candidate of diagnostician task ${chain.diagnosticianTaskId} ends at the not_internalizable intake policy refusal (approvals row absent BY DESIGN): ${chainSummary(chain)} — full principle learning did NOT run in this scenario; reported as its policy terminal, NOT a provider BLOCKED and not an injection PASS`);
       }
       // Admission terminal (rc-7 loop-state freshness): every ACTIONABLE
       // candidate's persisted confidence is below the admission gate's
@@ -850,13 +866,20 @@ registry.then(/^the approval is recorded from pending to approved with a live ac
 });
 registry.then(/^the next turn carries the learned principle directive$/, () => {
   expect(state.approval).toBeDefined();
-  // Channel dispatch (P2): the injection contract exists ONLY on the prompt
-  // channel. A rule/shadow primary must not be measured with the prompt ruler
-  // — the leg is skipped EXPLICITLY (logged, not a silent pass, not a FAIL).
-  if (state.approval!.channel !== 'prompt') {
-    console.error(`[bdd-learning] prompt-injection leg SKIPPED: primary approval channel='${state.approval!.channel}' (chain: ${state.chain ? chainSummary(state.chain) : 'n/a'}) — prompt injection applies only to prompt-channel candidates (P2 channel dispatch)`);
-    return;
-  }
+  // R2 (Owner mandate): this feature REQUIRES a completed principle chain. A
+  // non-prompt primary means THIS scenario's chain produced NO principle
+  // approval to verify — FAIL loud with the chain evidence. The former
+  // `return` here reported scenario success without a principle chain (the
+  // exact R2 defect: a rule-only chain passed vacuously). Channel dispatch
+  // stays where it belongs — the approve/activation steps measure each
+  // candidate on its own production channel — but the injection contract
+  // exists ONLY on the prompt channel, and only a prompt-channel approval
+  // satisfies this required step. Policy-terminal chains never reach this
+  // step (the advance step classifies them at scenario level first).
+  expect(
+    state.approval!.channel,
+    `FAIL: this scenario requires a completed principle chain, but the primary approval channel is '${state.approval!.channel}' (chain: ${state.chain ? chainSummary(state.chain) : 'n/a'}) — no principle approval exists to verify; a rule/shadow row can never substitute for the required injection leg`,
+  ).toBe('prompt');
   // PRODUCTION read contract: the chain artifact is the FULL ScribeOutput, and
   // the prompt channel resolves content.text falling back to
   // content.principleDraft.statement (prompt-activation-reader-contract) —
@@ -882,19 +905,23 @@ registry.then(/^the next turn carries the learned principle directive$/, () => {
 });
 registry.then(/^withdrawing the learned principle stops future governance$/, () => {
   expect(state.activationId).toBeDefined();
+  // R2 (Owner mandate): the scenario requires a completed principle chain, so
+  // the prompt injection leg MUST have run and produced the learned probe.
+  // The former non-prompt fallback (durable-row-only verification) let this
+  // step pass without the injection leg it exists to reverse — a vacuous
+  // path of the same R2 class. Channel dispatch stays in the approve/
+  // activation steps; this step always asserts its own requirement:
+  // deactivate through the REAL product entry, the durable row flips, and
+  // the next turn no longer injects the withdrawn statement.
+  expect(
+    state.learnedProbe,
+    'FAIL: the prompt injection leg did not run, so there is no injected statement to withdraw (this feature requires a completed principle chain)',
+  ).toBeDefined();
   // REAL product entry for withdrawal: `pd activation deactivate` (the same
   // CLI surface the Owner uses).
   const deactivate = pdCli(['activation', 'deactivate', '--activation-id', state.activationId!, '--workspace', state.governance!], 60_000);
   expect(deactivate.status).toBe(0);
-  if (state.learnedProbe !== undefined) {
-    // Prompt leg ran: the next turn must not inject the withdrawn statement.
-    const result = runEntry(state.home!, JSON.stringify(fixturePayload('user-prompt-submit.json', { cwd: state.project, session_id: 'bdd-learn-withdraw' })), 'UserPromptSubmit');
-    expect(result.status).toBe(0);
-    expect(result.stdout).not.toContain(state.learnedProbe!);
-    return;
-  }
-  // Non-prompt primary (channel dispatch): reversibility is asserted on the
-  // durable activation row; the injection probe leg was skipped explicitly.
+  // Durable reversibility on the store the CLI drives.
   const db = new Database(path.join(state.governance!, '.pd', 'state.db'), { readonly: true });
   try {
     const row = db.prepare('SELECT deactivated_at FROM activations WHERE activation_id = ?').get(state.activationId) as { deactivated_at: string | null } | undefined;
@@ -903,7 +930,10 @@ registry.then(/^withdrawing the learned principle stops future governance$/, () 
   } finally {
     db.close();
   }
-  console.error('[bdd-learning] post-withdraw injection probe SKIPPED: prompt leg not active for this chain (channel dispatch); withdrawal verified on the durable activation row');
+  // The next turn must not inject the withdrawn statement.
+  const result = runEntry(state.home!, JSON.stringify(fixturePayload('user-prompt-submit.json', { cwd: state.project, session_id: 'bdd-learn-withdraw' })), 'UserPromptSubmit');
+  expect(result.status).toBe(0);
+  expect(result.stdout).not.toContain(state.learnedProbe!);
 });
 
 const featureDir = resolveFeaturePath('docs/specs/features/story-a');

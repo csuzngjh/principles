@@ -44,6 +44,34 @@
  * failed assertions are FAIL (nonzero); ONLY runs.error_category='rate_limit'
  * is BLOCKED.
  *
+ * SCENARIO CONTRACT (round-4 R2 remediation, Owner mandate): the script runs
+ * THREE separately declared acceptance scenarios via `--scenario` (default
+ * full-principle-learning) — 完整原则学习 (full principle learning), 规则通道
+ * (rule channel), 政策拒绝 (policy refusal). Each scenario declares its
+ * REQUIRED step set and exit contract in the shared pure module
+ * `lib/learning-scenario-contract.mjs` (imported by this script AND by the
+ * regression tests — one source of truth for "what counts as success").
+ * Success is NEVER derived from "no FAIL rows" or a dynamic PASS count:
+ *   - FULL requires, from THIS run's identity chain: an actionable
+ *     prompt-channel candidate → proposal → real approval (exit 0 + ok) →
+ *     next-turn REAL injection of the approved statement → real deactivate →
+ *     post-withdraw stop. Missing ANY required leg (empty queue, no prompt
+ *     candidate, all-policy-terminal, rule-only, missing correlation,
+ *     approval failure) → FAIL, non-zero exit, explicit reason.
+ *   - RULE verifies the durable shadow activation row on its own channel and
+ *     never asserts prompt injection.
+ *   - POLICY proves the not_internalizable terminal honestly (POLICY rows)
+ *     and its output states explicitly that full learning did NOT run; a
+ *     policy refusal is NOT a provider BLOCKED.
+ * BLOCKED (exit 2) comes ONLY from persisted evidence: runs.error_category=
+ * 'rate_limit' on the chain's diagnostician task (or an unset provider key at
+ * preflight). Ordinary execution failures are never generalized into rate
+ * limits. The engine-capability probe (`real-eligible-signal`) is recorded
+ * BLOCKED with `blocking: false` BY DECLARATION — its scope is the evidence-
+ * class-1 observation; the acceptance chain's declared evidence class is
+ * SYNTHETIC-PROTOCOL input (evidence class 2), so the probe stays visible
+ * without owning the scenario exit.
+ *
  * Agent-loop model decisions are scripted by the local mock server (genuine
  * engine behavior); everything governance-side is the real product stack.
  */
@@ -52,6 +80,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import {
+  EXIT_CODES,
+  SCENARIOS,
+  SCENARIO_IDS,
+  STEPS,
+  VERDICTS,
+  evaluateScenario,
+  formatEvaluationReport,
+  resolveScenarioId,
+} from './lib/learning-scenario-contract.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const require = createRequire(path.join(REPO, 'package.json'));
@@ -75,30 +113,61 @@ const MARKET_NAME = 'pd-e2e-market';
 const PLUGIN_NAME = 'principles-disciple';
 const LLM_KEY_ENV = 'AMD_RADEON_API_KEY';
 
+// ── Scenario selection (--scenario, default full-principle-learning) ─────────
+/** undefined = flag not given (→ default); null = flag given WITHOUT a value
+ * (usage error, rc-3 — never silently resolve to the default). */
+function parseScenarioArg(argv) {
+  const flagIndex = argv.indexOf('--scenario');
+  if (flagIndex >= 0) {
+    const value = argv[flagIndex + 1];
+    return value === undefined || value.startsWith('--') ? null : value;
+  }
+  const withValue = argv.find((a) => a.startsWith('--scenario='));
+  return withValue ? withValue.slice('--scenario='.length) : undefined;
+}
+const RAW_SCENARIO = parseScenarioArg(process.argv);
+const SCENARIO = RAW_SCENARIO === null ? null : resolveScenarioId(RAW_SCENARIO);
+if (SCENARIO === null) {
+  console.error(RAW_SCENARIO === null
+    ? `--scenario requires a value — known: ${Object.values(SCENARIO_IDS).join(', ')} (aliases: full | rule | policy). Default: ${SCENARIO_IDS.FULL}`
+    : `unknown --scenario '${RAW_SCENARIO}' — known: ${Object.values(SCENARIO_IDS).join(', ')} (aliases: full | rule | policy). Default: ${SCENARIO_IDS.FULL}`);
+  process.exit(1);
+}
+console.log(`[scenario] ${SCENARIOS[SCENARIO].label} — required legs: ${Object.keys(SCENARIOS[SCENARIO].required).join(', ')}`);
+
 const results = [];
 const startedAt = new Date().toISOString();
-function record(step, verdict, detail) {
-  results.push({ step, verdict, detail });
-  console.log(`[${verdict}] ${step} — ${detail}`);
+function record(step, verdict, detail, options = {}) {
+  if (typeof step !== 'string' || step.length === 0) {
+    throw new Error(`record(): step must be a non-empty string (got ${JSON.stringify(step)}) — a mistyped STEPS constant must fail loud, not drift the contract (rc-3)`);
+  }
+  results.push({ step, verdict, detail, blocking: options.blocking !== false });
+  console.log(`[${verdict}] ${step} — ${detail}${options.blocking === false ? " (non-blocking for the scenario's exit contract, by declaration)" : ''}`);
 }
 
-/** THE single exit path (review §4): persists results, prints the summary and
- * sets the exit code (FAIL→1, BLOCKED→2, PASS→0). Every early return and the
- * crash handler route through here — the former bare `return`s exited 0 with
- * steps unrecorded (fake green). */
+/** THE single exit path (review §4 + round-4 R2): the exit code comes from
+ * the DECLARED scenario contract (lib/learning-scenario-contract.mjs — the
+ * required-step set), never from "no FAIL rows" or a dynamic PASS count.
+ * e2e-results.json stays the plain records array (the exit-code regression
+ * parses it); the contract evaluation persists alongside as
+ * e2e-evaluation.json. */
 function finalize() {
-  const failed = results.filter((r) => r.verdict === 'FAIL');
-  const blocked = results.filter((r) => r.verdict === 'BLOCKED');
-  console.log(`\nFull-learning E2E: ${results.filter((r) => r.verdict === 'PASS').length} PASS, ${failed.length} FAIL, ${blocked.length} BLOCKED (started ${startedAt})`);
+  const evaluation = evaluateScenario(SCENARIO, results);
+  const passCount = results.filter((r) => r.verdict === VERDICTS.PASS).length;
+  const failCount = results.filter((r) => r.verdict === VERDICTS.FAIL).length;
+  const blockedCount = results.filter((r) => r.verdict === VERDICTS.BLOCKED).length;
+  console.log(`\nFull-learning E2E [${SCENARIOS[SCENARIO].label}]: ${passCount} PASS, ${failCount} FAIL, ${blockedCount} BLOCKED (started ${startedAt})`);
+  console.log(formatEvaluationReport(evaluation));
   try {
     fs.mkdirSync(LAB_ROOT, { recursive: true });
     fs.writeFileSync(path.join(LAB_ROOT, 'e2e-results.json'), JSON.stringify(results, null, 2));
+    fs.writeFileSync(path.join(LAB_ROOT, 'e2e-evaluation.json'), JSON.stringify(evaluation, null, 2));
   } catch (error) {
     console.error(`results persist failed: ${error instanceof Error ? error.message : String(error)}`);
-    process.exitCode = 1;
+    process.exitCode = EXIT_CODES.FAIL;
     return;
   }
-  process.exitCode = failed.length === 0 && blocked.length === 0 ? 0 : blocked.length > 0 ? 2 : 1;
+  process.exitCode = evaluation.exitCode;
 }
 
 const engineEnv = {
@@ -375,16 +444,16 @@ function diagnosticianTaskStatus(diagTaskId) {
 
 async function main() {
   if (!fs.existsSync(ADAPTER_ENTRY) || !fs.existsSync(PD_CLI)) {
-    record('preflight', 'FAIL', 'build packages/workbuddy-adapter and packages/pd-cli first');
+    record(STEPS.PREFLIGHT, 'FAIL', 'build packages/workbuddy-adapter and packages/pd-cli first');
     return finalize();
   }
   if (!process.env[LLM_KEY_ENV]) {
-    record('preflight', 'BLOCKED', `${LLM_KEY_ENV} not set — real LLM unavailable; full-learning acceptance BLOCKED (not mocked)`);
+    record(STEPS.PREFLIGHT, 'BLOCKED', `${LLM_KEY_ENV} not set — real LLM unavailable; full-learning acceptance BLOCKED (not mocked)`);
     return finalize();
   }
   steps();
   governanceSetup();
-  record('preflight', 'PASS', `lab ${LAB_ROOT}; real LLM profile via env (key never logged)`);
+  record(STEPS.PREFLIGHT, 'PASS', `lab ${LAB_ROOT}; real LLM profile via env (key never logged)`);
 
   const mock = startMockServer();
   await new Promise((r) => setTimeout(r, 800));
@@ -405,7 +474,7 @@ async function main() {
     // Policy fact (frozen cross-host semantics): Bash failures are
     // evidence-only — tool_calls YES, pain NO. Admissibility of real failures
     // on this engine build is BLOCKED (see header + protocol probe).
-    record('real-failure-evidence', engineRan && toolRow ? 'PASS' : 'FAIL',
+    record(STEPS.REAL_FAILURE_EVIDENCE, engineRan && toolRow ? 'PASS' : 'FAIL',
       `engineRan=${engineRan} requests=${reqs.length}; tool_calls=${JSON.stringify(toolRow)}; pain=${JSON.stringify(realPain) ?? 'none (Bash evidence-only per frozen policy)'} stderr=${(run.stderr || '').slice(-200)}`);
 
     // ── real-eligible-signal: MEASURED, not assumed (review §4) ──
@@ -430,17 +499,18 @@ async function main() {
     traj.close();
     const writeRoundRan = wReqList.some((r) => JSON.stringify(r.body ?? '').includes('save the file now'));
     if (!writeRoundRan) {
-      record('real-eligible-signal', 'FAIL',
+      record(STEPS.REAL_ELIGIBLE_SIGNAL, 'FAIL',
         `inconclusive experiment: the engine never issued the Write (requests=${wReqList.length}) — mock/feeder problem, not engine evidence; stderr=${(run.stderr || '').slice(-200)}`);
     } else if (writePain) {
-      record('real-eligible-signal', 'PASS',
+      record(STEPS.REAL_ELIGIBLE_SIGNAL, 'PASS',
         `real Write failure recorded AND admission-eligible: tool_calls=${JSON.stringify(writeToolRow)} pain=${JSON.stringify(writePain)} (PostToolUse/Failure post-event observed on this build)`);
     } else if (writeToolRow) {
-      record('real-eligible-signal', 'PASS',
+      record(STEPS.REAL_ELIGIBLE_SIGNAL, 'PASS',
         `POLICY-EXCLUDED (still PASS): the real Write failure reached the adapter (tool_calls=${JSON.stringify(writeToolRow)}) but the admission trigger produced no pain — excluded by the admission policy (production WRITE_TOOLS set + trigger.shouldCreateDiagnosticTask), not by a wiring gap; chain below uses SYNTHETIC-PROTOCOL input (evidence class 2)`);
     } else {
-      record('real-eligible-signal', 'BLOCKED',
-        `engine produced the Write failure but fired no post-event the hook could observe (tool_calls=none) — engine 2.161.0 (SHA-256 1b1a01bc…) returns Write failures without PostToolUse/PostToolUseFailure until the Failure subscription is wired; probe-write-failure-shapes.mjs is the evidence. Chain below uses SYNTHETIC-PROTOCOL input through the real entry (evidence class 2).`);
+      record(STEPS.REAL_ELIGIBLE_SIGNAL, 'BLOCKED',
+        `engine produced the Write failure but fired no post-event the hook could observe (tool_calls=none) — engine 2.161.0 (SHA-256 1b1a01bc…) returns Write failures without PostToolUse/PostToolUseFailure until the Failure subscription is wired; probe-write-failure-shapes.mjs is the evidence. Chain below uses SYNTHETIC-PROTOCOL input through the real entry (evidence class 2)`,
+        { blocking: false });
     }
 
     // ── Evidence class 2: SYNTHETIC-PROTOCOL eligible signal through the REAL entry ──
@@ -449,7 +519,7 @@ async function main() {
     traj = new Database(path.join(GOV, '.state', 'trajectory.db'), { readonly: true });
     const synthPain = traj.prepare("SELECT canonical_pain_id, score, host_kind, runtime_task_id FROM pain_events WHERE host_kind = 'workbuddy' ORDER BY id DESC").get();
     traj.close();
-    record('eligible-signal-synthetic', synth.status === 0 && synthPain ? 'PASS' : 'FAIL',
+    record(STEPS.ELIGIBLE_SIGNAL_SYNTHETIC, synth.status === 0 && synthPain ? 'PASS' : 'FAIL',
       `synthetic Write-failure PostToolUse via real dist entry: status=${synth.status} pain=${JSON.stringify(synthPain)} stderr=${(synth.stderr || '').slice(-200)}`);
     if (!synthPain) return finalize();
 
@@ -502,35 +572,37 @@ async function main() {
       await new Promise((r2) => setTimeout(r2, 45_000));
     }
     if (blockedRateLimit !== null) {
-      record('background-chain', 'BLOCKED',
+      record(STEPS.BACKGROUND_CHAIN, 'BLOCKED',
         `the real LLM provider rate-limited the diagnostician (task=${blockedRateLimit}, runs.error_category=rate_limit) — chain verified up to the LLM boundary after ${cycles} cycles; re-run when the provider quota resets`);
       return finalize();
     }
     if (chainDefect !== null) {
-      record('background-chain', 'FAIL', `chain defect, not a provider state: ${chainDefect}`);
+      record(STEPS.BACKGROUND_CHAIN, 'FAIL', `chain defect, not a provider state: ${chainDefect}`);
       return finalize();
     }
     if (policyTerminalChain !== null) {
-      record('background-chain', 'PASS',
+      record(STEPS.BACKGROUND_CHAIN, 'PASS',
         `chain reached its designed policy terminal after ${cycles} REAL worker cycles (diagnosis + intake complete): ${chainSummary(policyTerminalChain)}`);
-      record('policy-terminal-candidates', 'POLICY',
+      record(STEPS.POLICY_TERMINAL_CANDIDATES, 'POLICY',
         `not_internalizable intake refusal is the production terminal for these kinds (MVP-disabled channel; approvals row absent BY DESIGN): ${chainSummary(policyTerminalChain)}`);
-      record('prompt-injection-leg', 'SKIP',
-        'no prompt/rule approval exists for a policy-terminal chain — injection + withdrawal legs skipped EXPLICITLY (policy classification, not a provider BLOCKED, not an injection PASS)');
+      record(STEPS.NEXT_TURN_INJECTION, 'SKIP',
+        'no approval exists for a policy-terminal chain — the injection leg did not run (policy classification, NOT a provider BLOCKED, NOT an injection PASS)');
+      record(STEPS.WITHDRAW, 'SKIP', 'no activation was injected (policy-terminal chain), so there is nothing to withdraw');
+      record(STEPS.POST_WITHDRAW, 'SKIP', 'no injection happened (policy-terminal chain), so no stop-of-injection turn is measurable');
       return finalize();
     }
-    record('background-chain', chainSelection ? 'PASS' : 'FAIL',
+    record(STEPS.BACKGROUND_CHAIN, chainSelection ? 'PASS' : 'FAIL',
       chainSelection
         ? `identity-chain approvals after ${cycles} REAL worker cycles (real LLM diagnostician), traceable to pain ${synthPain.canonical_pain_id} via task ${chainSelection.diagnosticianTaskId}`
         : `no identity-chain approval after ${cycles} cycles; last=${JSON.stringify(lastCycle).slice(0, 700)}`);
     if (!chainSelection) return finalize();
 
     // ── Denominator: every candidate's disposition is recorded ──
-    record('chain-disposition', 'PASS',
+    record(STEPS.CHAIN_DISPOSITION, 'PASS',
       `candidates traceable to diagnostician task ${chainSelection.diagnosticianTaskId}: ${chainSummary(chainSelection)}`);
     const policyCandidates = chainSelection.candidates.filter((c) => candidateDisposition(chainSelection, c) === 'policy_terminal');
     if (policyCandidates.length > 0) {
-      record('policy-terminal-candidates', 'POLICY',
+      record(STEPS.POLICY_TERMINAL_CANDIDATES, 'POLICY',
         `not_internalizable terminal (approvals absent BY DESIGN, not a provider BLOCKED): ${policyCandidates.map((c) => `${c.candidate_id}(kind=${c.recommendation_kind})`).join(', ')}`);
     }
 
@@ -538,7 +610,7 @@ async function main() {
     const promptApproval = chainSelection.pendingApprovals.find((a) => a.channel === 'prompt');
     for (const row of chainSelection.pendingApprovals) {
       if (row.channel !== 'prompt' && row.channel !== 'code_tool_hook') {
-        record('chain-disposition', 'FAIL', `unexpected approval channel '${row.channel}' for artifact ${row.artifact_id} (unknown channel is a chain defect, rc-3)`);
+        record(STEPS.CHAIN_DISPOSITION, 'FAIL', `unexpected approval channel '${row.channel}' for artifact ${row.artifact_id} (unknown channel is a chain defect, rc-3)`);
       }
     }
     // The primary approval drives the classic legs; prefer the prompt channel.
@@ -554,7 +626,7 @@ async function main() {
     }
     const primaryResult = approveResults.find((a) => a.row.approval_id === approval.approval_id);
     const approvedOk = Boolean(primaryResult) && primaryResult.exit === 0 && primaryResult.ok;
-    record('owner-approval', approvedOk ? 'PASS' : 'FAIL',
+    record(STEPS.OWNER_APPROVAL, approvedOk ? 'PASS' : 'FAIL',
       `pd activation approve (${approval.channel} channel, artifact=${approval.artifact_id}) exit=${primaryResult?.exit} ok=${primaryResult?.ok === true} activationId=${primaryResult?.activationId ?? '-'} stdout=${primaryResult?.stdout ?? ''} stderr=${primaryResult?.stderr ?? ''}`);
     if (!approvedOk) return finalize();
 
@@ -564,7 +636,7 @@ async function main() {
     // never hardcoded (P2 channel dispatch).
     for (const result of approveResults.filter((a) => a.row.channel === 'code_tool_hook')) {
       if (!(result.exit === 0 && result.ok)) {
-        record('rule-approval-activation', 'FAIL', `approve failed for ${result.row.approval_id}: exit=${result.exit} stderr=${result.stderr}`);
+        record(STEPS.RULE_APPROVAL_ACTIVATION, 'FAIL', `approve failed for ${result.row.approval_id}: exit=${result.exit} stderr=${result.stderr}`);
         continue;
       }
       let hookApproval = null;
@@ -578,7 +650,7 @@ async function main() {
           db.close();
         }
       } catch (error) {
-        record('rule-approval-activation', 'FAIL', `durable read failed: ${error instanceof Error ? error.message : String(error)}`);
+        record(STEPS.RULE_APPROVAL_ACTIVATION, 'FAIL', `durable read failed: ${error instanceof Error ? error.message : String(error)}`);
         continue;
       }
       const hookOk = hookApproval?.status === 'approved'
@@ -586,16 +658,21 @@ async function main() {
         && hookActivation.channel === 'code_tool_hook'
         && typeof hookActivation.action === 'string' && hookActivation.action.startsWith('code_tool_hook_')
         && hookActivation.deactivated_at === null;
-      record('rule-approval-activation', hookOk ? 'PASS' : 'FAIL',
+      record(STEPS.RULE_APPROVAL_ACTIVATION, hookOk ? 'PASS' : 'FAIL',
         `code_tool_hook candidate verified on ITS channel (no prompt assertion, no live promotion): approvals.status=${hookApproval?.status} activation=${JSON.stringify(hookActivation)}`);
     }
 
     // ── Prompt-channel legs: injection + withdrawal through the REAL engine ──
+    // R2: these rows stay SKIP when no prompt-channel approval exists (channel
+    // dispatch), but the SCENARIO CONTRACT now decides what that means — for
+    // full-principle-learning a rule-only chain is a missing-required-leg
+    // FAIL (non-zero, explicit reason), for rule-channel it is irrelevant,
+    // and for policy-refusal the POLICY rows above are the acceptance.
     if (!promptApproval) {
-      record('next-turn-injection', 'SKIP',
-        `no prompt-channel approval in this chain (channels=${chainSelection.pendingApprovals.map((a) => a.channel).join(',')}) — prompt injection leg skipped EXPLICITLY (P2 channel dispatch), not a FAIL`);
-      record('withdraw', 'SKIP', 'withdrawal leg belongs to the prompt-channel injection chain (no prompt activation in this chain)');
-      record('post-withdraw', 'SKIP', 'no prompt activation was injected, so no stop-of-injection turn is measurable');
+      record(STEPS.NEXT_TURN_INJECTION, 'SKIP',
+        `no prompt-channel approval in this chain (channels=${chainSelection.pendingApprovals.map((a) => a.channel).join(',')}) — the prompt injection leg did not run (P2 channel dispatch); scenario contract classifies this`);
+      record(STEPS.WITHDRAW, 'SKIP', 'withdrawal belongs to the prompt-channel injection chain (no prompt activation in this chain)');
+      record(STEPS.POST_WITHDRAW, 'SKIP', 'no prompt activation was injected, so no stop-of-injection turn is measurable');
       return finalize();
     }
 
@@ -612,7 +689,7 @@ async function main() {
       : db.prepare('SELECT activation_id, artifact_id, deactivated_at FROM activations WHERE artifact_id = ?').get(promptApproval.artifact_id);
     db.close();
     if (!activationRow) {
-      record('next-turn-injection', 'FAIL',
+      record(STEPS.NEXT_TURN_INJECTION, 'FAIL',
         `no live activation found for the approved prompt artifact ${promptApproval.artifact_id} (activationId=${primaryResult.activationId ?? '-'}) — approve reported ok but the activation row is missing`);
       return finalize();
     }
@@ -637,13 +714,13 @@ async function main() {
     const postReqs = mockReqsSince(before);
     const postRan = postReqs.length > 0 && postReqs.some((r) => JSON.stringify(r.body ?? '').includes('keep in mind'));
     const learned = postRan && probe.length > 0 && postReqs.some((r) => JSON.stringify(r.body ?? '').includes(probe));
-    record('next-turn-injection', learned && activationMatches ? 'PASS' : 'FAIL',
+    record(STEPS.NEXT_TURN_INJECTION, learned && activationMatches ? 'PASS' : 'FAIL',
       `roundRan=${postRan} requests=${postReqs.length}; probe=${JSON.stringify(probe.slice(0, 90))} (source=${statementSource}); activationMatchesApprovedArtifact=${activationMatches} activation=${JSON.stringify(activationRow)}; stderr=${(run.stderr || '').slice(-200)}`);
 
     // ── Withdraw through the product entry; next turn stops ──
     const withdraw = pdCli(['activation', 'deactivate', '--activation-id', activationRow.activation_id, '--workspace', GOV], 60_000);
     const withdrawOk = withdraw.status === 0 && /Deactivated/i.test(withdraw.stdout || '');
-    record('withdraw', withdrawOk ? 'PASS' : 'FAIL',
+    record(STEPS.WITHDRAW, withdrawOk ? 'PASS' : 'FAIL',
       `exit=${withdraw.status} stdout=${(withdraw.stdout || '').slice(0, 120)}`);
     before = mockReqCount();
     writeMockReply('e', textReply('learn5', 'ok'));
@@ -652,7 +729,7 @@ async function main() {
     const wReqs = mockReqsSince(before);
     const wRan = wReqs.length > 0 && wReqs.some((r) => JSON.stringify(r.body ?? '').includes('another question'));
     const stillThere = wReqs.some((r) => probe.length > 0 && JSON.stringify(r.body ?? '').includes(probe));
-    record('post-withdraw', wRan && !stillThere ? 'PASS' : 'FAIL',
+    record(STEPS.POST_WITHDRAW, wRan && !stillThere ? 'PASS' : 'FAIL',
       `roundRan=${wRan} requests=${wReqs.length}; statementStillInjected=${stillThere}`);
   } finally {
     mock.kill();
@@ -663,6 +740,6 @@ async function main() {
 
 main().catch((error) => {
   console.error('Full-learning E2E crashed:', error);
-  record('crash', 'FAIL', (error instanceof Error ? (error.stack ?? error.message) : String(error)).slice(0, 1000));
+  record(STEPS.CRASH, 'FAIL', (error instanceof Error ? (error.stack ?? error.message) : String(error)).slice(0, 1000));
   finalize();
 });

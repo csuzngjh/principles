@@ -37,6 +37,12 @@ function makeCopy(sourcePath, patches, scenarioDir) {
   }
   const copy = path.join(scenarioDir, 'script-copy.mjs');
   fs.writeFileSync(copy, src);
+  // The script imports sibling modules (./lib/learning-scenario-contract.mjs —
+  // the shared scenario contract); a copy in a temp dir must carry them or the
+  // import fails at module load, before any step runs. The REAL current lib is
+  // copied unmodified — the contract module is the SSoT under test.
+  const libDir = path.join(path.dirname(sourcePath), 'lib');
+  if (fs.existsSync(libDir)) fs.cpSync(libDir, path.join(scenarioDir, 'lib'), { recursive: true });
   return copy;
 }
 
