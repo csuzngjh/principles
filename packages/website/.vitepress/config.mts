@@ -39,6 +39,10 @@ export default defineConfig({
 
   head: [
     ['link', { rel: 'icon', href: '/images/favicon.svg' }],
+    // Google Search Console 所有权验证（URL 前缀资源 https://principles-website.pages.dev/）。
+    // *.pages.dev 的 NS 归 Cloudflare，我们无权放 DNS TXT，只能走这一条；删掉它等于
+    // 悄悄失去站长平台的 sitemap 提交与收录请求配额，所以 tests/seo-contract.test.mjs 有断言守着。
+    ['meta', { name: 'google-site-verification', content: 'Bj8PCwx4YUwfQKZZpL_uFHKJLSxWGOIBTaZd7M57vMc' }],
     // Fonts: Inter (VitePress built-in), JetBrains Mono (code), Noto Sans SC (Chinese)
     ['link', { rel: 'preconnect', href: 'https://fonts.googleapis.com' }],
     ['link', { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' }],
