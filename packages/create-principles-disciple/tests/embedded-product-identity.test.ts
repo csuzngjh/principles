@@ -69,8 +69,17 @@ function buildStampedAsset(workDir: string, commit: string = SOURCE_COMMIT): str
 
 function createFixtureInto(workDir: string): { inputDir: string } {
   const inputDir = path.join(workDir, 'input');
-  // Mirrors REQUIRED_COMPONENTS in build-release-asset.mjs.
-  for (const component of ['plugin', 'console', 'core', 'pd-cli', 'host-runtime', 'install-layout', 'release-manager', 'codex-adapter']) {
+  // Mirrors REQUIRED_COMPONENTS in build-release-asset.mjs — INCLUDING its
+  // conditional member: the script appends 'workbuddy-adapter' exactly when the
+  // source tree ships packages/workbuddy-adapter/package.json. A hard-coded
+  // list silently drifts from that condition, which is what happened when the
+  // third host landed (every case failed with "Release input is missing
+  // required component: workbuddy-adapter").
+  const components = ['plugin', 'console', 'core', 'pd-cli', 'host-runtime', 'install-layout', 'release-manager', 'codex-adapter'];
+  if (fs.existsSync(path.resolve(__dirname, '..', '..', '..', 'packages', 'workbuddy-adapter', 'package.json'))) {
+    components.push('workbuddy-adapter');
+  }
+  for (const component of components) {
     fs.mkdirSync(path.join(inputDir, component, 'node_modules', 'runtime-dependency'), { recursive: true });
     fs.writeFileSync(path.join(inputDir, component, 'package.json'), JSON.stringify({
       name: component,
