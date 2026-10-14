@@ -107,11 +107,33 @@ describe('E2E: pd candidate intake flow', () => {
   function insertPendingCandidate(candidateId: string, taskId: string, artifactId: string, runId: string) {
     const now = new Date().toISOString();
 
-    db.prepare('INSERT OR IGNORE INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
-      .run(taskId, 'diagnostician', 'succeeded', now, now);
+    // CR-03: the intake write permission is the full admission gate over
+    // persisted materials — seed an admitting diagnosis payload + output.
+    db.prepare('INSERT OR IGNORE INTO tasks (task_id, task_kind, status, created_at, updated_at, diagnostic_json, input_ref) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(taskId, 'diagnostician', 'succeeded', now, now, JSON.stringify({
+        sourcePainId: `pain-e2e-${candidateId}`,
+        reasonSummary: 'e2e seeded',
+        source: 'manual',
+        severity: 'moderate',
+        sessionIdHint: null,
+        agentIdHint: null,
+        provenance: 'owner_reported_no_host_trace',
+        provenanceReason: 'e2e fixture',
+        evidence: [{ sourceRef: 'e2e:trace-1', note: 'seeded evidence' }],
+        workspaceDir: null,
+      }), `pain-e2e-${candidateId}`);
 
-    db.prepare('INSERT OR IGNORE INTO runs (run_id, task_id, runtime_kind, execution_status, attempt_number, started_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(runId, taskId, 'openclaw-cli', 'completed', 1, now, now, now);
+    db.prepare('INSERT OR IGNORE INTO runs (run_id, task_id, runtime_kind, execution_status, attempt_number, started_at, created_at, updated_at, output_payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(runId, taskId, 'openclaw-cli', 'succeeded', 1, now, now, now, JSON.stringify({
+        valid: true,
+        diagnosisId: `diag-${candidateId}`,
+        summary: 'e2e seeded diagnosis',
+        rootCause: 'seeded root cause',
+        violatedPrinciples: [],
+        evidence: [{ sourceRef: 'e2e:trace-1', note: 'seeded output evidence' }],
+        recommendations: [{ kind: 'principle', description: 'Always write tests' }],
+        confidence: 0.95,
+      }));
 
     const artifactContent = JSON.stringify({
       recommendation: {

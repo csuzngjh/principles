@@ -425,6 +425,7 @@ export type {
   PainCandidateOutcome,
 } from './pain-signal-bridge.js';
 export { MAX_EVIDENCE_ENTRIES, MAX_EVIDENCE_NOTE_CHARS } from './pain-signal-bridge.js';
+export { evaluateAndPersistAdmissionFromStore } from './pain-signal-bridge.js';
 /** Deterministic diagnostician task id (`diagnosis_<painId>`) — the pain→task dedup key (Codex Governance Closure §13). */
 export { createDiagnosticianTaskId } from './pain-signal-bridge.js';
 /**
@@ -484,7 +485,21 @@ export { evaluateAdmission, evaluateCandidateAdmissions, evaluateCandidateAdmiss
 export type { AdmissionDecision, AdmissionGateInput, AdmissionGateResult, CandidateAdmissionResult, PainProvenance } from './admission-gate.js';
 
 // Evidence guards (PRI-345) — shared owner-exemption + short-circuit logic
-export { isOwnerExplicitManual, shouldShortCircuitEmptyEvidence } from './evidence-guards.js';
+export { isOwnerExplicitManual, shouldShortCircuitEmptyEvidence, isOwnerStatementEvidence } from './evidence-guards.js';
+export {
+  ADMISSION_POLICY_VERSION,
+  CANDIDATE_ADMISSION_SCHEMA_VERSION,
+  appendAdmissionEvaluation as appendAdmissionEvaluationDocument,
+  currentEvaluation as currentAdmissionEvaluation,
+  parseAdmissionDocument,
+  fingerprintMaterial as fingerprintAdmissionMaterial,
+} from './store/candidate/admission-document.js';
+export type {
+  AdmissionEvaluationRecord,
+  AdmissionProcessingRecord,
+  AdmissionProcessingState,
+  CandidateAdmissionDocument,
+} from './store/candidate/admission-document.js';
 
 // Pain-chain read model (PRI-14)
 export { PainChainReadModel } from './pain-chain-read-model.js';

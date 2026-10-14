@@ -15,6 +15,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as yaml from 'js-yaml';
+import { resolveNearestPdWorkspace } from '@principles/host-runtime';
 import { canonicalPath, isPathInside } from '../utils/path-security.js';
 import {
   validatePdConfig,
@@ -273,15 +274,47 @@ export function redactLoadResult(result: PdConfigLoadResult): RedactedPdConfigSu
 
 // ── Workspace Discovery ──────────────────────────────────────────────────────
 
-/** Result of workspace.default discovery from config files. */
-export interface WorkspaceDiscoveryResult {
-  /** The extracted workspace.default path. */
-  workspaceDefault: string;
-  /** Path to the config file that provided workspace.default. */
-  configPath: string;
-  /** How the config location was found. */
-  source: 'env_var' | 'openclaw_default' | 'openclaw_plugin_config';
-}
+/** How a workspace config location was found. */
+export type WorkspaceDiscoverySource =
+  | 'cwd'
+  | 'env_var'
+  | 'openclaw_default'
+  | 'openclaw_plugin_config';
+
+/**
+ * Result of workspace.default discovery from config files.
+ *
+ * Discriminated on `kind` because "found a config but could not read it" must not
+ * be expressible as a usable path. An unparseable `workspace.default` is UNKNOWN,
+ * not absent: the cwd candidate turns "nothing declared" into "this directory IS
+ * the workspace", so collapsing the two would hand a write target to a directory
+ * whose owner may well have declared a different one (PRI-957 review round 3 P1).
+ */
+export type WorkspaceDiscoveryResult =
+  | {
+      kind: 'resolved';
+      /**
+       * The workspace path this discovery points at. Either a declared
+       * `workspace.default` (`declared: true`) or, for a cwd hit only, the
+       * discovered directory itself (`declared: false`).
+       */
+      workspaceDefault: string;
+      /** Path to the config file that provided the value. */
+      configPath: string;
+      /** How the config location was found. */
+      source: WorkspaceDiscoverySource;
+      /** False when workspaceDefault is a discovered directory, not a declared value. */
+      declared: boolean;
+    }
+  | {
+      kind: 'unparseable';
+      /** Path to the config file that could not be parsed. */
+      configPath: string;
+      /** How the config location was found. */
+      source: WorkspaceDiscoverySource;
+      /** Parser error, surfaced as the operator-facing reason. */
+      reason: string;
+    };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && value !== undefined && typeof value === 'object' && !Array.isArray(value);
@@ -292,31 +325,56 @@ function isAbsolutePath(p: string): boolean {
   return /^[A-Za-z]:[\\/]/.test(p) || p.startsWith('\\\\') || p.startsWith('/');
 }
 
+/** Observability channel for workspace discovery (never throws). */
+function emitWorkspaceNotice(msg: string): void {
+  process.stderr.write(`[PD:workspace] ${msg}\n`);
+}
+
+/**
+ * Discriminated outcome of reading `workspace.default` out of one config file.
+ * An unreadable or rejected value must never be indistinguishable from an absent
+ * one: the cwd candidate turns "no declared default" into "this directory IS the
+ * workspace", so silently dropping a broken declaration would change which
+ * library gets queried without telling the operator (rc-9-no-silent-fallback,
+ * ERR-112). `parse_failed` is separate from `rejected` because an unparseable
+ * file says nothing about the operator's intent, while a parsed value that fails
+ * the shape check was written by them and is being ignored.
+ */
+type DeclaredWorkspaceDefault =
+  | { kind: 'absent' }
+  | { kind: 'parse_failed'; reason: string }
+  | { kind: 'rejected'; reason: string }
+  | { kind: 'declared'; value: string };
+
 /**
  * Lightweight extraction of workspace.default from a config file.
  * Does NOT run full validation — just parses YAML and reads the field.
  * Rejects relative paths to prevent PD from writing to unpredictable locations.
  */
-function extractWorkspaceDefault(configPath: string): string | null {
+function extractWorkspaceDefault(configPath: string): DeclaredWorkspaceDefault {
+  let parsed: unknown;
   try {
-    const raw = fs.readFileSync(configPath, 'utf8');
-    const parsed: unknown = yaml.load(raw, { schema: yaml.JSON_SCHEMA });
-    if (
-      isRecord(parsed) &&
-      isRecord(parsed.workspace) &&
-      typeof parsed.workspace.default === 'string' &&
-      parsed.workspace.default.length > 0 &&
-      isAbsolutePath(parsed.workspace.default)
-    ) {
-      return parsed.workspace.default;
-    }
+    parsed = yaml.load(fs.readFileSync(configPath, 'utf8'), { schema: yaml.JSON_SCHEMA });
   } catch (err) {
-    // Graceful degradation with observability: log but don't throw
-    process.stderr.write(
-      `[PD:workspace] WARN: Failed to parse workspace config at ${configPath}: ${err instanceof Error ? err.message : String(err)}\n`,
-    );
+    return {
+      kind: 'parse_failed',
+      reason: err instanceof Error ? err.message : String(err),
+    };
   }
-  return null;
+  if (!isRecord(parsed) || !isRecord(parsed.workspace) || parsed.workspace.default === undefined) {
+    return { kind: 'absent' };
+  }
+  const value: unknown = parsed.workspace.default;
+  if (typeof value !== 'string' || value.length === 0) {
+    return { kind: 'rejected', reason: 'workspace.default is not a non-empty string' };
+  }
+  if (!isAbsolutePath(value)) {
+    return {
+      kind: 'rejected',
+      reason: `workspace.default "${value}" is not an absolute path`,
+    };
+  }
+  return { kind: 'declared', value };
 }
 
 /**
@@ -348,8 +406,8 @@ function loadOpenClawPluginConfig(): { workspace?: string } | null {
         }
       } catch (err) {
         // Graceful degradation with observability: log but continue to next location
-        process.stderr.write(
-          `[PD:workspace] WARN: Failed to parse plugin config at ${loc}: ${err instanceof Error ? err.message : String(err)}\n`,
+        emitWorkspaceNotice(
+          `WARN: Failed to parse plugin config at ${loc}: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }
@@ -384,15 +442,57 @@ function assertConfigDirBoundary(dir: string, source: string): void {
 }
 
 /**
+ * Compare two directory paths for "same place" without touching the filesystem:
+ * forward slashes, no trailing separator, case-insensitive on Windows. Used only
+ * to decide whether to warn, never to pick a path.
+ */
+function isSameDirectory(a: string, b: string): boolean {
+  const norm = (p: string): string => {
+    const sliced = p.replace(/\\/g, '/').replace(/\/+$/, '');
+    return process.platform === 'win32' ? sliced.toLowerCase() : sliced;
+  };
+  return norm(path.normalize(a)) === norm(path.normalize(b));
+}
+
+/**
+ * Nearest directory at or above cwd that holds a `.pd/config.yaml`, or null.
+ * A filesystem-root hit is dropped: the boundary guard below would throw on it,
+ * and a root-level workspace is never intended.
+ */
+function nearestWorkspaceFromCwd(): string | null {
+  const resolution = resolveNearestPdWorkspace(process.cwd());
+  if (!resolution.ok) return null;
+  const normalized = path.normalize(resolution.workspaceDir);
+  if (normalized === path.parse(normalized).root) return null;
+  return normalized;
+}
+
+/**
  * Search known locations for a .pd/config.yaml that contains a workspace.default field.
  * This runs BEFORE workspace resolution and does NOT require knowing the workspace dir.
  *
- * Returns the extracted workspace.default path, or null if not found.
+ * Returns `kind: 'resolved'` for a usable pointer, `kind: 'unparseable'` when the cwd
+ * candidate's config exists but cannot be read (the caller must fail closed rather than
+ * treat an unknown declaration as an absent one), or null when no candidate resolves.
+ * Only the cwd candidate may resolve to a bare directory (`declared: false`); every
+ * other candidate must point at a declared workspace.default to count as a hit.
+ *
+ * Discovery reports findings only. It never states which workspace a command uses —
+ * that is resolveWorkspaceDir()'s sole declaration (PRI-957 review round 3 P2).
  */
 export function discoverWorkspaceDefault(): WorkspaceDiscoveryResult | null {
-  const candidates: { dir: string; source: 'env_var' | 'openclaw_default' | 'openclaw_plugin_config' }[] = [];
+  const candidates: { dir: string; source: WorkspaceDiscoverySource }[] = [];
 
-  // 1. If PD_WORKSPACE_DIR is set, check there first
+  // 0. The workspace the operator is standing in (CONFIGURATION_ARCHITECTURE.md §11.2
+  //    step 4.a). Multi-host installs keep one .pd/state.db per workspace, so a chain
+  //    that never looks at cwd silently queries another host's library and reports
+  //    "nothing found".
+  const cwdWorkspace = nearestWorkspaceFromCwd();
+  if (cwdWorkspace) {
+    candidates.push({ dir: cwdWorkspace, source: 'cwd' });
+  }
+
+  // 1. If PD_WORKSPACE_DIR is set, check there next
   const envWorkspace = process.env.PD_WORKSPACE_DIR?.trim();
   if (envWorkspace) {
     candidates.push({ dir: envWorkspace, source: 'env_var' });
@@ -422,9 +522,58 @@ export function discoverWorkspaceDefault(): WorkspaceDiscoveryResult | null {
       throw new Error(`Invalid config search dir (${source}): "${dir}" escapes its boundary`);
     }
     if (fs.existsSync(configPath)) {
-      const workspaceDefault = extractWorkspaceDefault(configPath);
-      if (workspaceDefault) {
-        return { workspaceDefault, configPath, source };
+      const declared = extractWorkspaceDefault(configPath);
+      // Discovery reports the finding and the candidate fallback ONLY — never the
+      // resulting target. Which workspace a command uses is stated by
+      // resolveWorkspaceDir() and nowhere else: an unparseable or rejected cwd config
+      // can still be overridden by --workspace / PD_WORKSPACE_DIR, so a discovery-time
+      // target claim would contradict the target actually used (PRI-957 r3 P2).
+      const fallbackNote = source === 'cwd' ? '' : ' Trying the next config location.';
+
+      if (declared.kind === 'parse_failed') {
+        emitWorkspaceNotice(
+          `WARN: Could not parse ${configPath} (${declared.reason}), so its workspace.default ` +
+            `is unknown (source: ${source}).${fallbackNote}`,
+        );
+        // Fail closed rather than guess. Standing in a workspace whose declaration
+        // cannot be read means "unknown", not "undeclared": neither this directory nor
+        // the next candidate is a safe answer, and this chain feeds write commands
+        // (pd pain record) as well as reads (PRI-957 review round 3 P1).
+        if (source === 'cwd') {
+          return { kind: 'unparseable', configPath, source, reason: declared.reason };
+        }
+        continue;
+      }
+
+      if (declared.kind === 'rejected') {
+        // A parsed-but-invalid value WAS written by the operator, so it is ignored
+        // loudly (ERR-112) and the cwd fallback below may still apply.
+        emitWorkspaceNotice(
+          `WARN: Ignoring ${declared.reason} in ${configPath} (source: ${source}).${fallbackNote}`,
+        );
+      }
+
+      if (declared.kind === 'declared') {
+        if (source === 'cwd' && !isSameDirectory(declared.value, candidateRoot)) {
+          // ERR-117 / EP-03: the CLI chain follows the declared default while the
+          // hook chain follows the nearest directory, so the divergence must be
+          // visible. Report the divergence only — which workspace a command ends
+          // up using is declared by the resolution stage, never twice from here
+          // (PRI-957 review P2: a discovery-time "using" claim contradicts the
+          // "using explicit override" line when -w points at this directory).
+          emitWorkspaceNotice(
+            `WARN: Standing in "${candidateRoot}" but its config declares workspace.default ` +
+              `"${declared.value}" (${configPath}): two different directories.`,
+          );
+        }
+        return { kind: 'resolved', workspaceDefault: declared.value, configPath, source, declared: true };
+      }
+
+      // A cwd hit IS a workspace when its config is readable and declares no usable
+      // workspace.default; the other candidates are mere pointers to a declared
+      // default, so they keep requiring the field.
+      if (source === 'cwd') {
+        return { kind: 'resolved', workspaceDefault: candidateRoot, configPath, source, declared: false };
       }
     }
   }

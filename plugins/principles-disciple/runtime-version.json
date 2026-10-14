@@ -1,6 +1,6 @@
 {
   "codexAdapter": "0.5.3",
   "hostRuntime": "0.8.2",
-  "core": "1.291.4",
+  "core": "1.291.5",
   "note": "Pinned runtime versions installed by $pd-setup. Pins must reference versions that EXIST on npm (1.74.1 was a working-tree-only number \u2014 the npm line is 1.250+). MINIMUM OWNER-CONTROL FLOOR: hostRuntime >= 0.1.1 \u2014 earlier versions lack global_rulecode_pauses / activation_control_states enforcement guards and execute retired-contract RuleCode (PRI-810); core below ~1.253 does not even bootstrap the activation_control_states schema. Release process: update these pins to the exact versions published in the same release, after `npm run check:runtime-pin` (real packaged capability probe) + npm smoke + install tests pass (ADR-0020 \u00a710.4 / CHATGPT_PLUGIN_MARKETPLACE_SPEC Phase D)."
 }
