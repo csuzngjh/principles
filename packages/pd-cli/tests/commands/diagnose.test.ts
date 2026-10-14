@@ -1,13 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
 import { Command } from 'commander';
 
-const { MockRuntimeStateManager, mockGetAdmissionDocument, mockAppendAdmissionEvaluation, mockGetRunsByTask, mockGetCandidateImpl, rearmGateSeams, mockGetCandidatesByTaskId, mockUpdateCandidateStatus, mockCreateTask, mockGetTask } = vi.hoisted(() => {
+const { MockRuntimeStateManager, mockGetAdmissionDocument, mockAppendAdmissionEvaluation, mockGetRunsByTask, mockGetRun, mockGetArtifact, mockGetCandidateImpl, rearmGateSeams, mockGetCandidatesByTaskId, mockUpdateCandidateStatus, mockCreateTask, mockGetTask } = vi.hoisted(() => {
   const mockGetCandidatesByTaskId = vi.fn().mockResolvedValue([]);
   const mockUpdateCandidateStatus = vi.fn().mockResolvedValue(undefined);
   const mockCreateTask = vi.fn().mockResolvedValue(undefined);
   const mockGetAdmissionDocument = vi.fn();
   const mockAppendAdmissionEvaluation = vi.fn();
   const mockGetRunsByTask = vi.fn();
+  // Round-5: the write gate resolves the candidate's own round via getRun.
+  const mockGetRun = vi.fn();
+  const mockGetArtifact = vi.fn();
   const mockGetCandidateImpl = vi.fn(async (candidateId: string) => {
     const all = await mockGetCandidatesByTaskId('any');
     return all.find((c: { candidateId: string }) => c.candidateId === candidateId) ?? null;
@@ -36,6 +39,12 @@ const { MockRuntimeStateManager, mockGetAdmissionDocument, mockAppendAdmissionEv
       runId: 'run-underlying', status: 'succeeded',
       outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd' }], confidence: 0.95 }),
     }]);
+    // Round-5: answer the owning-round lookup for the fixture sourceRunId.
+    mockGetRun.mockImplementation(async (runId: string) => (runId === 'run-underlying' ? {
+      runId: 'run-underlying', taskId: 'test-task-1', status: 'succeeded', executionStatus: 'succeeded' as const,
+      outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd' }], confidence: 0.95 }),
+    } : null));
+    mockGetArtifact.mockResolvedValue(null);
   }
   const mockGetTask = vi.fn().mockResolvedValue({
     taskId: 'test-task-1',
@@ -62,6 +71,8 @@ const { MockRuntimeStateManager, mockGetAdmissionDocument, mockAppendAdmissionEv
     appendAdmissionEvaluation = mockAppendAdmissionEvaluation;
     getCandidate = mockGetCandidateImpl;
     getRunsByTask = mockGetRunsByTask;
+    getRun = mockGetRun;
+    getArtifact = mockGetArtifact;
     connection = {} as Record<string, unknown>;
     taskStore = {};
     runStore = {};
@@ -71,7 +82,7 @@ const { MockRuntimeStateManager, mockGetAdmissionDocument, mockAppendAdmissionEv
       calculateBackoff: () => 10,
     });
   }
-  return { MockRuntimeStateManager, mockGetCandidatesByTaskId, mockUpdateCandidateStatus, mockCreateTask, mockGetTask, mockGetAdmissionDocument, mockAppendAdmissionEvaluation, mockGetRunsByTask, mockGetCandidateImpl, rearmGateSeams };
+  return { MockRuntimeStateManager, mockGetCandidatesByTaskId, mockUpdateCandidateStatus, mockCreateTask, mockGetTask, mockGetAdmissionDocument, mockAppendAdmissionEvaluation, mockGetRunsByTask, mockGetRun, mockGetArtifact, mockGetCandidateImpl, rearmGateSeams };
 }, { validateType: true });
 
 const { mockIntake, MockCandidateIntakeService } = vi.hoisted(() => {
@@ -675,8 +686,8 @@ describe('pd diagnose run — auto-intake after success', () => {
 
   it('INTAKE-01: successful diagnose + intake — candidates consumed, JSON includes intake evidence', async () => {
     const candidates = [
-      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'test-task-1', status: 'pending' },
-      { candidateId: 'cand-2', artifactId: 'art-2', taskId: 'test-task-1', status: 'pending' },
+      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'pending' },
+      { candidateId: 'cand-2', artifactId: 'art-2', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'pending' },
     ];
     mockGetCandidatesByTaskId.mockResolvedValue(candidates);
     mockIntake
@@ -724,8 +735,8 @@ describe('pd diagnose run — auto-intake after success', () => {
 
   it('INTAKE-02: successful diagnose + intake failure — exits non-zero with nextAction', async () => {
     const candidates = [
-      { candidateId: 'cand-ok', artifactId: 'art-1', taskId: 'test-task-1', status: 'pending' },
-      { candidateId: 'cand-fail', artifactId: 'art-2', taskId: 'test-task-1', status: 'pending' },
+      { candidateId: 'cand-ok', artifactId: 'art-1', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'pending' },
+      { candidateId: 'cand-fail', artifactId: 'art-2', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'pending' },
     ];
     mockGetCandidatesByTaskId.mockResolvedValue(candidates);
     mockIntake
@@ -763,8 +774,8 @@ describe('pd diagnose run — auto-intake after success', () => {
 
   it('INTAKE-02b (P2-4): parked candidate surfaces review guidance and is EXCLUDED from internalize nextAction', async () => {
     const candidates = [
-      { candidateId: 'cand-ok', artifactId: 'art-1', taskId: 'test-task-1', status: 'pending' },
-      { candidateId: 'cand-parked', artifactId: 'art-2', taskId: 'test-task-1', status: 'pending' },
+      { candidateId: 'cand-ok', artifactId: 'art-1', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'pending' },
+      { candidateId: 'cand-parked', artifactId: 'art-2', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'pending' },
     ];
     mockGetCandidatesByTaskId.mockResolvedValue(candidates);
     mockIntake
@@ -820,7 +831,7 @@ describe('pd diagnose run — auto-intake after success', () => {
 
   it('INTAKE-02c (P2-4): text output prints the parked candidate with review guidance', async () => {
     const candidates = [
-      { candidateId: 'cand-parked', artifactId: 'art-2', taskId: 'test-task-1', status: 'pending' },
+      { candidateId: 'cand-parked', artifactId: 'art-2', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'pending' },
     ];
     mockGetCandidatesByTaskId.mockResolvedValue(candidates);
     mockIntake.mockResolvedValue({
@@ -862,7 +873,7 @@ describe('pd diagnose run — auto-intake after success', () => {
 
   it('INTAKE-03: --no-intake skips intake, candidates remain pending with advisory', async () => {
     const candidates = [
-      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'test-task-1', status: 'pending' },
+      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'pending' },
     ];
     mockGetCandidatesByTaskId.mockResolvedValue(candidates);
 
@@ -900,7 +911,7 @@ describe('pd diagnose run — auto-intake after success', () => {
 
   it('INTAKE-04: --no-intake human-readable output shows advisory with manual intake commands', async () => {
     const candidates = [
-      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'test-task-1', status: 'pending' },
+      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'pending' },
     ];
     mockGetCandidatesByTaskId.mockResolvedValue(candidates);
 
@@ -926,7 +937,7 @@ describe('pd diagnose run — auto-intake after success', () => {
 
   it('INTAKE-05: intake failure human-readable output shows nextAction', async () => {
     const candidates = [
-      { candidateId: 'cand-fail', artifactId: 'art-1', taskId: 'test-task-1', status: 'pending' },
+      { candidateId: 'cand-fail', artifactId: 'art-1', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'pending' },
     ];
     mockGetCandidatesByTaskId.mockResolvedValue(candidates);
     mockIntake.mockImplementation(() => { throw new Error('Ledger write failed'); });
@@ -952,7 +963,7 @@ describe('pd diagnose run — auto-intake after success', () => {
 
   it('INTAKE-06: does not bypass ledger — consumed only set after intake succeeds', async () => {
     const candidates = [
-      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'test-task-1', status: 'pending' },
+      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'pending' },
     ];
     mockGetCandidatesByTaskId.mockResolvedValue(candidates);
     mockIntake.mockImplementation(() => { throw new Error('Ledger write failed'); });
@@ -976,7 +987,7 @@ describe('pd diagnose run — auto-intake after success', () => {
 
   it('INTAKE-07: already-consumed candidate — intake called but updateCandidateStatus skipped', async () => {
     const candidates = [
-      { candidateId: 'cand-consumed', artifactId: 'art-1', taskId: 'test-task-1', status: 'consumed' },
+      { candidateId: 'cand-consumed', artifactId: 'art-1', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'consumed' },
     ];
     mockGetCandidatesByTaskId.mockResolvedValue(candidates);
     mockIntake.mockResolvedValue({ outcome: 'ledger_entry', written: false, entry: { id: 'ledger-existing', title: 'Existing', status: 'probation' } });
@@ -1041,7 +1052,7 @@ describe('pd diagnose run — auto-intake after success', () => {
 
   it('INTAKE-09: successful diagnose + intake — human-readable output shows consumed candidates', async () => {
     const candidates = [
-      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'test-task-1', status: 'pending' },
+      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'pending' },
     ];
     mockGetCandidatesByTaskId.mockResolvedValue(candidates);
     mockIntake.mockResolvedValue({ outcome: 'ledger_entry', written: true, entry: { id: 'ledger-1', title: 'Principle 1', status: 'probation' } });
@@ -1092,7 +1103,7 @@ describe('pd diagnose run — auto-intake after success', () => {
 
   it('INTAKE-11: --json intake failure nextAction contains executable command with workspace', async () => {
     const candidates = [
-      { candidateId: 'cand-err', artifactId: 'art-1', taskId: 'test-task-1', status: 'pending' },
+      { candidateId: 'cand-err', artifactId: 'art-1', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'pending' },
     ];
     mockGetCandidatesByTaskId.mockResolvedValue(candidates);
     mockIntake.mockImplementation(() => { throw new Error('DB locked'); });
@@ -1438,7 +1449,7 @@ describe('Defect-004: pd diagnose run — dreamer seed after intake', () => {
 
   it('DREAMER-01: principle candidate — dreamer task created via createTask', async () => {
     const candidates = [
-      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'test-task-1', status: 'pending', recommendationKind: 'principle' },
+      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'pending', recommendationKind: 'principle' },
     ];
     mockGetCandidatesByTaskId.mockResolvedValue(candidates);
 
@@ -1465,7 +1476,7 @@ describe('Defect-004: pd diagnose run — dreamer seed after intake', () => {
 
   it('DREAMER-02: defer candidate — no dreamer task created', async () => {
     const candidates = [
-      { candidateId: 'cand-defer', artifactId: 'art-1', taskId: 'test-task-1', status: 'pending', recommendationKind: 'defer' },
+      { candidateId: 'cand-defer', artifactId: 'art-1', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'pending', recommendationKind: 'defer' },
     ];
     mockGetCandidatesByTaskId.mockResolvedValue(candidates);
 
@@ -1488,7 +1499,7 @@ describe('Defect-004: pd diagnose run — dreamer seed after intake', () => {
 
   it('DREAMER-03: implementation candidate — no dreamer task created', async () => {
     const candidates = [
-      { candidateId: 'cand-impl', artifactId: 'art-1', taskId: 'test-task-1', status: 'pending', recommendationKind: 'implementation' },
+      { candidateId: 'cand-impl', artifactId: 'art-1', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'pending', recommendationKind: 'implementation' },
     ];
     mockGetCandidatesByTaskId.mockResolvedValue(candidates);
 
@@ -1511,7 +1522,7 @@ describe('Defect-004: pd diagnose run — dreamer seed after intake', () => {
 
   it('DREAMER-04: --no-intake skips dreamer seed', async () => {
     const candidates = [
-      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'test-task-1', status: 'pending', recommendationKind: 'principle' },
+      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'pending', recommendationKind: 'principle' },
     ];
     mockGetCandidatesByTaskId.mockResolvedValue(candidates);
 
@@ -1535,7 +1546,7 @@ describe('Defect-004: pd diagnose run — dreamer seed after intake', () => {
 
   it('DREAMER-05: dreamer seed failure surfaces in intake results but does not fail the command', async () => {
     const candidates = [
-      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'test-task-1', status: 'pending', recommendationKind: 'principle' },
+      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'pending', recommendationKind: 'principle' },
     ];
     mockGetCandidatesByTaskId.mockResolvedValue(candidates);
     // Make createTask throw to simulate seed failure
@@ -1634,11 +1645,11 @@ describe('DEFECT-005 (PRI-514): defer intake_failed must not poison other candid
     });
 
     const candidates = [
-      { candidateId: 'cand-defer', artifactId: 'art-d', taskId: 'test-task-1', status: 'pending', recommendationKind: 'defer', confidence: 0.9 },
-      { candidateId: 'cand-principle', artifactId: 'art-p', taskId: 'test-task-1', status: 'pending', recommendationKind: 'principle', confidence: 0.9 },
-      { candidateId: 'cand-rule', artifactId: 'art-r', taskId: 'test-task-1', status: 'pending', recommendationKind: 'rule', confidence: 0.9 },
-      { candidateId: 'cand-prompt', artifactId: 'art-pp', taskId: 'test-task-1', status: 'pending', recommendationKind: 'prompt', confidence: 0.9 },
-      { candidateId: 'cand-impl', artifactId: 'art-i', taskId: 'test-task-1', status: 'pending', recommendationKind: 'implementation', confidence: 0.9 },
+      { candidateId: 'cand-defer', artifactId: 'art-d', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'pending', recommendationKind: 'defer', confidence: 0.9 },
+      { candidateId: 'cand-principle', artifactId: 'art-p', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'pending', recommendationKind: 'principle', confidence: 0.9 },
+      { candidateId: 'cand-rule', artifactId: 'art-r', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'pending', recommendationKind: 'rule', confidence: 0.9 },
+      { candidateId: 'cand-prompt', artifactId: 'art-pp', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'pending', recommendationKind: 'prompt', confidence: 0.9 },
+      { candidateId: 'cand-impl', artifactId: 'art-i', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'pending', recommendationKind: 'implementation', confidence: 0.9 },
     ];
     mockGetCandidatesByTaskId.mockResolvedValue(candidates);
 
@@ -1699,8 +1710,8 @@ describe('DEFECT-005 (PRI-514): defer intake_failed must not poison other candid
     });
 
     const candidates = [
-      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'test-task-1', status: 'pending', recommendationKind: 'principle', confidence: 0.9 },
-      { candidateId: 'cand-2', artifactId: 'art-2', taskId: 'test-task-1', status: 'pending', recommendationKind: 'rule', confidence: 0.9 },
+      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'pending', recommendationKind: 'principle', confidence: 0.9 },
+      { candidateId: 'cand-2', artifactId: 'art-2', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'pending', recommendationKind: 'rule', confidence: 0.9 },
     ];
     mockGetCandidatesByTaskId.mockResolvedValue(candidates);
 
@@ -1871,7 +1882,7 @@ describe('BUG-2 (PRI-442): sourcePainId resolution for dreamer seed', () => {
 
   it('passes resolved sourcePainId to buildDreamerSeedFromCandidate (lineage consistency)', async () => {
     const candidates = [
-      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'test-task-1', status: 'pending', recommendationKind: 'principle' },
+      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'pending', recommendationKind: 'principle' },
     ];
     mockGetCandidatesByTaskId.mockResolvedValue(candidates);
 
@@ -2020,7 +2031,7 @@ describe('PRI-935: pd diagnose run — pain_diagnoses ledger dispatch', () => {
 
   it('LEDGER-01: flag on + pain lineage → persistPainDiagnosis dispatched before intake, JSON says attempted', async () => {
     mockGetCandidatesByTaskId.mockResolvedValue([
-      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'test-task-1', status: 'pending', recommendationKind: 'principle' },
+      { candidateId: 'cand-1', artifactId: 'art-1', taskId: 'test-task-1', sourceRunId: 'run-underlying', status: 'pending', recommendationKind: 'principle' },
     ]);
 
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});

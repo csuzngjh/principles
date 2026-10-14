@@ -42,6 +42,16 @@ const { mockStateManager, mockAdapter, mockService, mockDb, mockLoadLedger, mock
       runId: 'run-underlying', status: 'succeeded',
       outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd' }], confidence: 0.95 }),
     }]),
+    // SPEC-CODEX-PAIN-CLOSURE-001 round-5: the write gate resolves each
+    // candidate's own diagnostic round via getRun(candidate.sourceRunId).
+    getRun: vi.fn(async (runId: string) => (runId === 'run-underlying' ? {
+      runId: 'run-underlying',
+      taskId: 'task-underlying',
+      status: 'succeeded',
+      executionStatus: 'succeeded' as const,
+      outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd' }], confidence: 0.95 }),
+    } : null)),
+    getArtifact: vi.fn().mockResolvedValue(null),
     getCandidatesByTaskId: vi.fn(async () => {
       const current = await mockStateManager.getCandidate();
       return current ? [current] : [];
@@ -304,6 +314,8 @@ describe('pd candidate repair', () => {
       candidateId: 'c1',
       status: 'consumed',
       artifactId: 'a1',
+      taskId: 'task-underlying',
+      sourceRunId: 'run-underlying',
       title: 'Test',
       description: 'desc',
     });
@@ -348,6 +360,8 @@ describe('pd candidate repair', () => {
       candidateId: 'c2',
       status: 'consumed',
       artifactId: 'a2',
+      taskId: 'task-underlying',
+      sourceRunId: 'run-underlying',
       title: 'Test 2',
       description: 'desc 2',
     });
@@ -404,6 +418,8 @@ describe('pd candidate repair', () => {
       candidateId: 'c3',
       status: 'pending',
       artifactId: 'a3',
+      taskId: 'task-underlying',
+      sourceRunId: 'run-underlying',
       title: 'Test 3',
       description: 'desc 3',
     });
@@ -423,6 +439,8 @@ describe('pd candidate repair', () => {
         candidateId: 'c-defer',
         status: 'consumed',
         artifactId: 'a1',
+        taskId: 'task-underlying',
+        sourceRunId: 'run-underlying',
         title: 'Deferred',
         description: 'desc',
         recommendationKind: 'defer',
@@ -445,6 +463,8 @@ describe('pd candidate repair', () => {
         candidateId: 'c-null',
         status: 'consumed',
         artifactId: 'a1',
+        taskId: 'task-underlying',
+        sourceRunId: 'run-underlying',
         title: 'Null conf',
         description: 'desc',
         recommendationKind: 'principle',
@@ -467,6 +487,8 @@ describe('pd candidate repair', () => {
         candidateId: 'c-ok',
         status: 'consumed',
         artifactId: 'a1',
+        taskId: 'task-underlying',
+        sourceRunId: 'run-underlying',
         title: 'OK',
         description: 'desc',
         recommendationKind: 'principle',

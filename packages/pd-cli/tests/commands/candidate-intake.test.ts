@@ -7,6 +7,17 @@ const { mockStateManager, mockAdapter, mockService, MockRuntimeStateManager, Moc
     initialize: vi.fn().mockResolvedValue(undefined),
     getCandidate: vi.fn(),
     getArtifact: vi.fn(),
+    // SPEC-CODEX-PAIN-CLOSURE-001 round-5: the admission write gate resolves
+    // each candidate's diagnostic output from its own source_run_id, so the
+    // mock must answer this seam with the run that produced the candidate
+    // (matching taskId) and carry the executionStatus the gate validates.
+    getRun: vi.fn(async (runId: string) => (runId === 'run-underlying' ? {
+      runId: 'run-underlying',
+      taskId: 'task-1',
+      status: 'succeeded',
+      executionStatus: 'succeeded' as const,
+      outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd' }], confidence: 0.95 }),
+    } : null)),
     close: vi.fn().mockResolvedValue(undefined),
     // SPEC-CODEX-PAIN-CLOSURE-001 CR-03: the persisted admission disposition is
     // the intake write permission; default mock = an admitted current evaluation.
@@ -160,6 +171,7 @@ describe('pd candidate intake', () => {
       candidateId: 'valid-id',
       artifactId: 'artifact-1',
       taskId: 'task-1',
+      sourceRunId: 'run-underlying',
       title: 'Test Principle',
       description: 'Test description',
       status: 'pending',
@@ -216,6 +228,7 @@ describe('pd candidate intake', () => {
       candidateId: 'valid-id',
       artifactId: 'artifact-1',
       taskId: 'task-1',
+      sourceRunId: 'run-underlying',
       title: 'Test Principle',
       description: 'Test description',
       status: 'pending',
@@ -255,6 +268,7 @@ describe('pd candidate intake', () => {
       candidateId: 'valid-id',
       artifactId: 'artifact-1',
       taskId: 'task-1',
+      sourceRunId: 'run-underlying',
       title: 'Test Principle',
       description: 'Test description',
       status: 'pending',
@@ -262,6 +276,11 @@ describe('pd candidate intake', () => {
 
     const mockArtifact = {
       artifactId: 'artifact-1',
+      // Round-5: the gate cross-checks the artifact's owning run/task against
+      // the candidate's lineage; the real artifacts table has both columns
+      // NOT NULL, so the fixture carries them too.
+      runId: 'run-underlying',
+      taskId: 'task-1',
       contentJson: JSON.stringify({
         recommendation: {
           title: 'Test Principle',
@@ -322,6 +341,7 @@ describe('pd candidate intake', () => {
       candidateId: 'valid-id',
       artifactId: 'artifact-1',
       taskId: 'task-1',
+      sourceRunId: 'run-underlying',
       title: 'Test Principle',
       description: 'Test description',
       status: 'pending',
@@ -329,6 +349,11 @@ describe('pd candidate intake', () => {
 
     const mockArtifact = {
       artifactId: 'artifact-1',
+      // Round-5: the gate cross-checks the artifact's owning run/task against
+      // the candidate's lineage; the real artifacts table has both columns
+      // NOT NULL, so the fixture carries them too.
+      runId: 'run-underlying',
+      taskId: 'task-1',
       contentJson: JSON.stringify({
         recommendation: {
           title: 'Test Principle',
@@ -372,6 +397,11 @@ describe('pd candidate intake', () => {
     const mockCandidate = {
       candidateId: 'valid-id',
       artifactId: 'artifact-1',
+      // Round-5: this fixture must clear the admission write gate (which binds
+      // the candidate to its own run) so the test still exercises the
+      // artifact-lookup failure below, rather than a lineage refusal.
+      taskId: 'task-1',
+      sourceRunId: 'run-underlying',
       title: 'Test',
       description: 'Test',
       status: 'pending',
@@ -417,6 +447,7 @@ describe('pd candidate intake', () => {
       candidateId: '',
       artifactId: 'artifact-1',
       taskId: 'task-1',
+      sourceRunId: 'run-underlying',
       title: 'Test',
       description: 'Test',
       status: 'pending',
@@ -449,6 +480,7 @@ describe('pd candidate intake', () => {
       candidateId: 'valid-id',
       artifactId: 'artifact-1',
       taskId: 'task-1',
+      sourceRunId: 'run-underlying',
       title: 'Test Principle',
       description: 'Test description',
       status: 'consumed', // Already consumed
@@ -485,6 +517,7 @@ describe('pd candidate intake', () => {
       candidateId: 'valid-id',
       artifactId: 'artifact-1',
       taskId: 'task-1',
+      sourceRunId: 'run-underlying',
       title: 'Test Principle',
       description: 'Test description',
       status: 'consumed', // Already consumed
@@ -533,6 +566,7 @@ describe('pd candidate intake', () => {
       candidateId: 'valid-id',
       artifactId: 'artifact-1',
       taskId: 'task-1',
+      sourceRunId: 'run-underlying',
       title: 'Test',
       description: 'Test',
       status: 'pending',
@@ -563,6 +597,7 @@ describe('pd candidate intake', () => {
       candidateId: 'valid-id',
       artifactId: 'artifact-1',
       taskId: 'task-1',
+      sourceRunId: 'run-underlying',
       title: 'Test Principle',
       description: 'Test description',
       status: 'pending',
@@ -612,6 +647,7 @@ describe('pd candidate intake', () => {
       candidateId: 'valid-id',
       artifactId: 'artifact-1',
       taskId: 'task-1',
+      sourceRunId: 'run-underlying',
       title: 'Test Principle',
       description: 'Test description',
       status: 'pending',
@@ -656,6 +692,7 @@ describe('pd candidate intake', () => {
         candidateId: 'defer-cand',
         artifactId: 'artifact-1',
         taskId: 'task-1',
+        sourceRunId: 'run-underlying',
         title: 'Deferred candidate',
         description: 'Should not be intakeable',
         status: 'pending',
@@ -687,6 +724,7 @@ describe('pd candidate intake', () => {
         candidateId: 'low-conf-cand',
         artifactId: 'artifact-1',
         taskId: 'task-1',
+        sourceRunId: 'run-underlying',
         title: 'Low confidence candidate',
         description: 'Should not be intakeable',
         status: 'pending',
@@ -716,6 +754,7 @@ describe('pd candidate intake', () => {
         candidateId: 'null-conf-cand',
         artifactId: 'artifact-1',
         taskId: 'task-1',
+        sourceRunId: 'run-underlying',
         title: 'Null confidence candidate',
         description: 'Should not be intakeable',
         status: 'pending',
@@ -742,6 +781,7 @@ describe('pd candidate intake', () => {
         candidateId: 'admitted-cand',
         artifactId: 'artifact-1',
         taskId: 'task-1',
+        sourceRunId: 'run-underlying',
         title: 'Admitted candidate',
         description: 'Should be intakeable',
         status: 'pending',

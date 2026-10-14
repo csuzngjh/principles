@@ -585,7 +585,13 @@ export async function evaluateAndPersistAdmissionFromStore(
     } catch {
       return refuse(`candidate_round_unresolved:${candidate.candidateId}:source_run_lookup_failed`);
     }
-    if (run === null) return refuse(`candidate_round_unresolved:${candidate.candidateId}:source_run_missing`);
+    // Defensive null/undefined: the store contract is `RunRecord | null`, but
+    // a partial or throwing-adjacent implementation can yield undefined — and
+    // a crash here would abort the whole gate instead of refusing this one
+    // candidate. Treat both as "the owning run is missing".
+    if (run === null || run === undefined) {
+      return refuse(`candidate_round_unresolved:${candidate.candidateId}:source_run_missing`);
+    }
     if (run.taskId !== candidate.taskId) {
       return refuse(`candidate_round_unresolved:${candidate.candidateId}:source_run_task_mismatch`);
     }
@@ -600,9 +606,11 @@ export async function evaluateAndPersistAdmissionFromStore(
       } catch {
         return refuse(`candidate_round_unresolved:${candidate.candidateId}:artifact_lookup_failed`);
       }
-      // A missing artifact row is tolerated for pre-artifact candidates, but a
-      // PRESENT artifact that belongs to another run/task is lineage corruption.
-      if (artifact !== null && (artifact.runId !== sourceRunId || artifact.taskId !== candidate.taskId)) {
+      // A missing artifact row (null OR undefined) is tolerated for
+      // pre-artifact candidates, but a PRESENT artifact belonging to another
+      // run/task is lineage corruption and refuses. The truthiness check keeps
+      // a partial implementation from crashing the gate.
+      if (artifact && (artifact.runId !== sourceRunId || artifact.taskId !== candidate.taskId)) {
         return refuse(`candidate_round_unresolved:${candidate.candidateId}:artifact_run_mismatch`);
       }
     }

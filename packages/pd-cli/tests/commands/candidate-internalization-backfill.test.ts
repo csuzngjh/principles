@@ -40,6 +40,15 @@ vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
           runId: 'run-underlying', taskId, status: 'succeeded',
           outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd' }], confidence: 0.95 }),
         }])),
+        // SPEC-CODEX-PAIN-CLOSURE-001 round-5: the write gate resolves a
+        // candidate's own round via getRun(candidate.sourceRunId). Fixtures set
+        // sourceRunId === taskId, so this seam answers with that owning run and
+        // carries the executionStatus the gate validates.
+        getRun: vi.fn(async (runId: string) => ({
+          runId, taskId: runId, status: 'succeeded', executionStatus: 'succeeded' as const,
+          outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd' }], confidence: 0.95 }),
+        })),
+        getArtifact: vi.fn().mockResolvedValue(null),
         getCandidatesByTaskId: vi.fn(async (taskId: string) => {
           // Test convention: candidate taskId is `diag-task-<candidateId>`.
           const current = await mockGetCandidate(taskId.replace(/^diag-task-/, ''));
@@ -161,6 +170,7 @@ function setupDefaultMocks(): void {
     Promise.resolve({
       candidateId: id,
       taskId: `diag-task-${id}`,
+      sourceRunId: `diag-task-${id}`,
       description: `candidate ${id}`,
       sourceRecommendationJson: JSON.stringify({ kind: 'principle', description: `candidate ${id}` }),
     }),
@@ -497,6 +507,7 @@ describe('Commander wiring for backfill --include-pending', () => {
     mockGetCandidate.mockResolvedValue({
       candidateId: 'cand-pending-1',
       taskId: 'diag-task-cand-pending-1',
+      sourceRunId: 'diag-task-cand-pending-1',
       description: 'test',
       sourceRecommendationJson: JSON.stringify({ kind: 'principle', description: 'test' }),
     });
@@ -518,6 +529,7 @@ describe('Commander wiring for backfill --include-pending', () => {
     mockGetCandidate.mockResolvedValue({
       candidateId: 'cand-defer-1',
       taskId: 'diag-task-cand-defer-1',
+      sourceRunId: 'diag-task-cand-defer-1',
       description: 'deferred candidate',
       recommendationKind: 'defer',
       confidence: 0.9,
