@@ -105,6 +105,7 @@ interface MockDeps {
 function makeMockDeps(overrides: {
   candidates?: CandidateRecord[];
   output?: DiagnosticianOutputV1;
+  runOutputPayload?: string;
   ledgerEntries?: Map<string, LedgerPrincipleEntry>;
   createTaskFn?: (input: Record<string, unknown>) => Promise<unknown>;
   getTaskFn?: (taskId: string) => Promise<unknown>;
@@ -132,7 +133,18 @@ function makeMockDeps(overrides: {
     updateTask: async () => undefined,
     getCandidatesByTaskId: async () => overrides.candidates ?? [],
     getRunsByTask: async () => [{ runId: RUN_ID, taskId: TASK_ID, status: 'succeeded' }],
+    getRun: async (runId: string) => {
+      const candidate = (overrides.candidates ?? []).find((item) => item.sourceRunId === runId);
+      return candidate ? { runId, taskId: candidate.taskId, executionStatus: 'succeeded', outputPayload: overrides.runOutputPayload ?? JSON.stringify(overrides.output ?? makeHighConfidenceOutput()) } : null;
+    },
+    getArtifact: async (artifactId: string) => {
+      const candidate = (overrides.candidates ?? []).find((item) => item.artifactId === artifactId);
+      return candidate ? { artifactId, runId: candidate.sourceRunId, taskId: candidate.taskId } : null;
+    },
     updateCandidateStatus: updateCandidateStatusMock,
+    getAdmissionDocument: async () => ({ ok: true, document: null }),
+    appendAdmissionEvaluation: async () => ({ status: 'appended' as const, document: { schemaVersion: 1 as const, evaluations: [], currentEvaluationId: null } }),
+    updateAdmissionProcessing: async () => true,
   } as unknown as RuntimeStateManager;
 
   const intakeService = {
@@ -379,9 +391,9 @@ describe('PRI-456: onDiagnosisComplete result-shaping characterization', () => {
     expect(result.message).not.toContain('dreamer_seed_failed');
   });
 
-  it('diagnosticianOutput=undefined: all candidates get needs_evidence → all_candidates_gated', async () => {
+  it('owning run output is unparseable: candidate gets needs_evidence even when the caller has no output', async () => {
     const candidates = [makeCandidate('c-undef', 'principle')];
-    const deps = makeMockDeps({ candidates });
+    const deps = makeMockDeps({ candidates, runOutputPayload: '{' });
     const bridge = createBridge(deps);
 
     const result = await bridge.onDiagnosisComplete({
@@ -395,7 +407,7 @@ describe('PRI-456: onDiagnosisComplete result-shaping characterization', () => {
     expect(result.status).toBe('degraded');
     expect(result.admissionResults).toBeDefined();
     expect(result.admissionResults?.[0]?.admission.decision).toBe('needs_evidence');
-    expect(result.admissionResults?.[0]?.admission.reason).toBe('diagnostician_output_unavailable');
+    expect(result.admissionResults?.[0]?.admission.reason).toContain('owning_output_unparseable');
     expect(result.message).toContain('all_candidates_gated');
   });
 });

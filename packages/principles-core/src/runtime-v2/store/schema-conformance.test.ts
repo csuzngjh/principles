@@ -310,7 +310,8 @@ describe('ArtifactRegistrySchema', () => {
     expect(names).toContain('trigger_pattern');
     expect(names).toContain('action');
     expect(names).toContain('abstracted_principle');
-    expect(columns).toHaveLength(16);
+    expect(names).toContain('admission_json');
+    expect(columns).toHaveLength(17);
   });
 
   // PRI-442 F13: schema CHECK constraint enforces consumed_at IS NOT NULL
@@ -759,7 +760,7 @@ describe('SchemaMigration', () => {
     rawDb.close();
   }
 
-  it('old schema principle_candidates gets 4 new columns after migration', () => {
+  it('old schema principle_candidates gets 5 new columns after migration', () => {
     createOldSchemaDb();
     connection = new SqliteConnection(tmpdir);
     const db = connection.getDb();
@@ -769,7 +770,8 @@ describe('SchemaMigration', () => {
     expect(names).toContain('trigger_pattern');
     expect(names).toContain('action');
     expect(names).toContain('abstracted_principle');
-    expect(columns).toHaveLength(16);
+    expect(names).toContain('admission_json');
+    expect(columns).toHaveLength(17);
   });
 
   it('old table with existing candidate row preserves data after migration', () => {
@@ -813,6 +815,7 @@ describe('SchemaMigration', () => {
     expect(names).toContain('trigger_pattern');
     expect(names).toContain('action');
     expect(names).toContain('abstracted_principle');
+    expect(names).toContain('admission_json');
     conn2.close();
   });
 
@@ -826,7 +829,8 @@ describe('SchemaMigration', () => {
     expect(names).toContain('trigger_pattern');
     expect(names).toContain('action');
     expect(names).toContain('abstracted_principle');
-    expect(columns).toHaveLength(16);
+    expect(names).toContain('admission_json');
+    expect(columns).toHaveLength(17);
   });
 
   it('readonly connection does not run migration', () => {

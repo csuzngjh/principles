@@ -30,6 +30,13 @@ export interface AdmissionGateInput {
   evidenceCount: number;
   inputEvidenceCount: number;
   provenance: PainProvenance | undefined;
+  /**
+   * SPEC-CODEX-PAIN-CLOSURE-001 CR-02: an explicit Owner statement was
+   * submitted with the pain (classification owner_statement). It satisfies
+   * ONLY the empty-input-evidence condition; every other gate (confidence,
+   * diagnostician output evidence, kind, reuse, approval) is unchanged.
+   */
+  ownerStatementPresent?: boolean;
 }
 
 export interface AdmissionGateResult {
@@ -49,7 +56,7 @@ export function evaluateAdmission(input: AdmissionGateInput): AdmissionGateResul
     };
   }
 
-  if (input.inputEvidenceCount === 0 && !isOwnerExplicitManual(input.provenance)) {
+  if (input.inputEvidenceCount === 0 && !isOwnerExplicitManual(input.provenance) && input.ownerStatementPresent !== true) {
     return {
       decision: 'needs_evidence',
       reason: 'input_evidence_empty',
@@ -93,9 +100,9 @@ export interface CandidateAdmissionResult {
 export function evaluateCandidateAdmissions(
   candidates: readonly { candidateId: string; recommendationKind: RecommendationKind }[],
   output: DiagnosticianOutputV1,
-  options: { provenance?: PainProvenance; inputEvidenceCount?: number } = {},
+  options: { provenance?: PainProvenance; inputEvidenceCount?: number; ownerStatementPresent?: boolean } = {},
 ): CandidateAdmissionResult[] {
-  const { provenance, inputEvidenceCount = 0 } = options;
+  const { provenance, inputEvidenceCount = 0, ownerStatementPresent } = options;
   return candidates.map((candidate) => {
     const gateInput: AdmissionGateInput = {
       recommendationKind: candidate.recommendationKind,
@@ -103,6 +110,7 @@ export function evaluateCandidateAdmissions(
       evidenceCount: output.evidence.length,
       inputEvidenceCount,
       provenance,
+      ...(ownerStatementPresent !== undefined ? { ownerStatementPresent } : {}),
     };
     return {
       candidateId: candidate.candidateId,
