@@ -19,6 +19,8 @@ AI 助手反复出错 → PD 识别模式 → 你审核 → AI 助手改进
 
 **前置条件**：Node.js 22 或更高版本，并已安装 OpenClaw CLI。
 
+> **其它宿主**：本指南以 OpenClaw 路径为例。Codex 走[插件市场](/zh/install?host=codex)。WorkBuddy Desktop 同样受支持——安装命令随下个发布版本可用，步骤见 [WorkBuddy 安装路径](/zh/install?host=workbuddy)。WorkBuddy 的一个关键差异：下文所有 PD 命令里的 `--workspace <路径>` 对 WorkBuddy 始终指向共享治理工作区 `~/.workbuddy/pd-workspace`，而不是项目目录。
+
 ### 1. 安装
 
 ```bash
