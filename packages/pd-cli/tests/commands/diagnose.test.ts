@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
 import { Command } from 'commander';
 
-const { MockRuntimeStateManager, mockGetAdmissionDocument, mockAppendAdmissionEvaluation, mockGetRunsByTask, mockGetRun, mockGetArtifact, mockGetCandidateImpl, rearmGateSeams, mockGetCandidatesByTaskId, mockUpdateCandidateStatus, mockCreateTask, mockGetTask } = vi.hoisted(() => {
+const { MockRuntimeStateManager, mockGetAdmissionDocument, mockAppendAdmissionEvaluation, mockGetRunsByTask, mockGetCandidateImpl, rearmGateSeams, mockGetCandidatesByTaskId, mockUpdateCandidateStatus, mockCreateTask, mockGetTask } = vi.hoisted(() => {
   const mockGetCandidatesByTaskId = vi.fn().mockResolvedValue([]);
   const mockUpdateCandidateStatus = vi.fn().mockResolvedValue(undefined);
   const mockCreateTask = vi.fn().mockResolvedValue(undefined);
