@@ -8,7 +8,14 @@ import type { DiagnosticianOutputV1 } from './diagnostician-output.js';
 import { DiagnosticianOutputV1Schema } from './diagnostician-output.js';
 import { Value } from '@sinclair/typebox/value';
 import { evaluateCandidateAdmissions, normalizePainProvenance } from './admission-gate.js';
-import { shouldShortCircuitEmptyEvidence } from './evidence-guards.js';
+import { shouldShortCircuitEmptyEvidence, isOwnerStatementEvidence } from './evidence-guards.js';
+import {
+  ADMISSION_POLICY_VERSION,
+  fingerprintMaterial,
+  fingerprintStatement,
+  type AdmissionEvaluationRecord,
+  type AdmissionProcessingRecord,
+} from './store/candidate/admission-document.js';
 import { parseRootCauseCategory } from './store/pain-diagnosis/pain-diagnosis-store.js';
 import { buildDreamerSeedFromCandidate, findExistingDreamerTask, ROUTE_CHANNEL_MAP, CANDIDATE_KIND_TO_ROUTE } from './internalization/intake-to-internalization-bridge.js';
 import { isRetryWaitBackoffElapsed } from './internalization/internalization-task-guards.js';
@@ -45,6 +52,9 @@ export const MAX_EVIDENCE_NOTE_CHARS = 200;
  * point of the field is that the Owner's own words survive verbatim.
  */
 export const MAX_CORRECTION_EVIDENCE_TEXT_CHARS = 2000;
+
+/** SPEC-CODEX-PAIN-CLOSURE-001 CR-05 (§9.2): automatic post-processing continuation budget. */
+export const MAX_POST_PROCESSING_ATTEMPTS = 3;
 
 /**
  * PRI-844: sanitize (strip PD tags / redact tokens / redact absolute paths)
@@ -304,7 +314,7 @@ function inferProvenance(data: PainDetectedData): PainProvenance {
  * payload itself carries a real (non-sentinel) session hint; a manual
  * source without a session normalizes to `owner_reported_no_host_trace`.
  */
-function validatePersistedIngressFacts(diagnosticJson: string | undefined): { provenance: PainProvenance; evidenceCount: number; errorCode: null } | { provenance: null; evidenceCount: null; errorCode: string } {
+function validatePersistedIngressFacts(diagnosticJson: string | undefined): { provenance: PainProvenance; evidenceCount: number; errorCode: null; correctionEvidence?: PainCorrectionEvidence } | { provenance: null; evidenceCount: null; errorCode: string } {
   if (typeof diagnosticJson !== 'string' || diagnosticJson.length === 0) {
     return { provenance: null, evidenceCount: null, errorCode: 'diagnostic_payload_invalid:missing' };
   }
@@ -321,6 +331,16 @@ function validatePersistedIngressFacts(diagnosticJson: string | undefined): { pr
     return { provenance: null, evidenceCount: null, errorCode: 'diagnostic_payload_invalid:not_an_object' };
   }
   const record = parsed;
+
+  // CR-02: the persisted correction evidence (including an explicit Owner
+  // statement) is part of the re-entry material — validated, never fabricated.
+  const persistedCorrection = record.correctionEvidence;
+  const correctionEvidence: PainCorrectionEvidence | undefined
+    = typeof persistedCorrection === 'object' && persistedCorrection !== null && !Array.isArray(persistedCorrection)
+      && typeof (persistedCorrection as Record<string, unknown>).text === 'string'
+      && ((persistedCorrection as Record<string, unknown>).text as string).length > 0
+      ? persistedCorrection as PainCorrectionEvidence
+      : undefined;
 
   const evidenceCount = countSubmittedEvidence(diagnosticJson);
   const hasProvenanceField = Object.hasOwn(record, 'provenance');
@@ -350,6 +370,7 @@ function validatePersistedIngressFacts(diagnosticJson: string | undefined): { pr
       provenance: deriveProvenanceFromIngressFacts(ingress.payload.origin, ingress.payload.correlation),
       evidenceCount,
       errorCode: null,
+      ...(correctionEvidence !== undefined ? { correctionEvidence } : {}),
     };
   }
 
@@ -357,7 +378,7 @@ function validatePersistedIngressFacts(diagnosticJson: string | undefined): { pr
   // provenance is the authority. This branch fabricates nothing — it only
   // reads what the writer persisted.
   if (provenance !== undefined) {
-    return { provenance, evidenceCount, errorCode: null };
+    return { provenance, evidenceCount, errorCode: null, ...(correctionEvidence !== undefined ? { correctionEvidence } : {}) };
   }
 
   // Legacy normalization branch (SPEC §9): no top-level provenance and no
@@ -370,7 +391,7 @@ function validatePersistedIngressFacts(diagnosticJson: string | undefined): { pr
     reason: typeof record.reasonSummary === 'string' ? record.reasonSummary : '',
     sessionId: typeof record.sessionIdHint === 'string' ? record.sessionIdHint : undefined,
   };
-  return { provenance: inferProvenance(recordData), evidenceCount, errorCode: null };
+  return { provenance: inferProvenance(recordData), evidenceCount, errorCode: null, ...(correctionEvidence !== undefined ? { correctionEvidence } : {}) };
 }
 
 function provenanceReason(provenance: PainProvenance): string {
@@ -473,6 +494,190 @@ export async function persistPainDiagnosis(deps: {
     });
   }
 }
+type CandidateRunResolution =
+  | { ok: true; output: DiagnosticianOutputV1; sourceRunId: string }
+  | { ok: false; reason: string };
+
+/** Resolve the persisted diagnosis material that actually minted one candidate. */
+async function resolveCandidateRunOutput(
+  stateManager: Pick<RuntimeStateManager, 'getRun' | 'getArtifact'>,
+  candidate: Pick<CandidateRecord, 'candidateId' | 'sourceRunId' | 'artifactId' | 'taskId'>,
+): Promise<CandidateRunResolution> {
+  const refuse = (reason: string): CandidateRunResolution => ({ ok: false, reason: `candidate_round_unresolved:${candidate.candidateId}:${reason}` });
+  const sourceRunId = typeof candidate.sourceRunId === 'string' ? candidate.sourceRunId : '';
+  if (sourceRunId.length === 0) return refuse('missing_source_run_id');
+  let run;
+  try {
+    run = await stateManager.getRun(sourceRunId);
+  } catch {
+    return refuse('source_run_lookup_failed');
+  }
+  if (run === null || run === undefined) return refuse('source_run_missing');
+  if (run.taskId !== candidate.taskId) return refuse('source_run_task_mismatch');
+  if (run.executionStatus !== 'succeeded') return refuse('source_run_not_succeeded');
+
+  const artifactId = typeof candidate.artifactId === 'string' ? candidate.artifactId : '';
+  if (artifactId.length > 0) {
+    let artifact;
+    try {
+      artifact = await stateManager.getArtifact(artifactId);
+    } catch {
+      return refuse('artifact_lookup_failed');
+    }
+    // Some legacy candidates may have no artifact row. A present row must
+    // identify the same task and run as the candidate's source.
+    if (artifact && (artifact.runId !== sourceRunId || artifact.taskId !== candidate.taskId)) {
+      return refuse('artifact_run_mismatch');
+    }
+  }
+
+  let output: DiagnosticianOutputV1 | undefined;
+  if (typeof run.outputPayload === 'string' && run.outputPayload.length > 0) {
+    try {
+      const parsed: unknown = JSON.parse(run.outputPayload);
+      if (Value.Check(DiagnosticianOutputV1Schema, parsed)) output = parsed;
+    } catch {
+      // Refuse this candidate; never substitute a different run's output.
+    }
+  }
+  if (output === undefined) return refuse('owning_output_unparseable');
+  return { ok: true, output, sourceRunId };
+}
+
+/**
+ * SPEC-CODEX-PAIN-CLOSURE-001 CR-03 (§7.2): full-gate re-evaluation from
+ * PERSISTED materials only (task diagnosticJson + candidate's source run), shared
+ * by the CLI mutation paths so their write permission can never contradict
+ * the production gate on the same material. The evaluation is PERSISTED as a
+ * new admission version (append-only; idempotent by material fingerprint).
+ */
+export async function evaluateAndPersistAdmissionFromStore(
+  stateManager: Pick<RuntimeStateManager, 'getTask' | 'getRunsByTask' | 'getRun' | 'getArtifact' | 'getCandidatesByTaskId' | 'appendAdmissionEvaluation'>,
+  candidateIds: readonly string[],
+  input: { taskId: string },
+): Promise<
+  { ok: true; decisions: Map<string, { decision: AdmissionDecision; reason: string; nextAction: string }> }
+  | { ok: false; reason: string; nextAction: string }
+> {
+  // SPEC review round-4 P1: resolve the REAL diagnosis lineage. A split-pipeline
+  // candidate hangs off the diag_router SUBTASK; the PARENT diagnostician task
+  // holds the original pain input (feedback + Owner statement + evidence) and
+  // the router subtask's own succeeded runs hold the diagnostic output. A flat
+  // pipeline keeps task === ingress === output source. The parent–child relation
+  // is validated (subtask.inputRef === parent.taskId, parent kind/status) — a
+  // mismatch refuses with a lineage reason instead of re-typing materials.
+  const task = await stateManager.getTask(input.taskId);
+  if (task === null) return { ok: false, reason: 'task_missing', nextAction: 'the diagnosis task no longer exists; re-run the diagnosis' };
+  // Persisted rows always carry task_kind (NOT NULL DDL); an undefined kind
+  // can only come from a partial test-double fixture and follows the flat path.
+  const isSplitSubtask = typeof task.taskKind === 'string' && task.taskKind.startsWith('diag_');
+  let ingressTask = task;
+  if (isSplitSubtask) {
+    const parentRef = typeof task.inputRef === 'string' ? task.inputRef : '';
+    const parent = parentRef.length > 0 ? await stateManager.getTask(parentRef) : null;
+    if (parent === null || parent.taskKind !== 'diagnostician' || parentRef !== task.inputRef || parent.status !== 'succeeded') {
+      return { ok: false, reason: 'diagnosis_lineage_inconsistent', nextAction: 'the router subtask does not resolve to a succeeded diagnostician parent; re-run the diagnosis before intake' };
+    }
+    ingressTask = parent;
+  } else if (typeof task.taskKind === 'string' && task.taskKind !== 'diagnostician') {
+    return { ok: false, reason: 'diagnosis_lineage_inconsistent', nextAction: `candidate task kind '${task.taskKind}' is not a diagnostician task or split stage; re-run the diagnosis` };
+  }
+  const reentry = validatePersistedIngressFacts(ingressTask.diagnosticJson);
+  if (reentry.errorCode !== null) {
+    return { ok: false, reason: reentry.errorCode, nextAction: 'the persisted diagnosis payload is unusable; re-run the diagnosis before intake' };
+  }
+  const ownerStatementPresent = isOwnerStatementEvidence(reentry.correctionEvidence);
+  const candidates = (await stateManager.getCandidatesByTaskId(ingressTask.taskId))
+    .filter((candidate) => candidateIds.includes(candidate.candidateId))
+    .filter((candidate) => candidate.taskId === input.taskId || candidate.taskId === ingressTask.taskId);
+  if (candidates.length !== candidateIds.length) {
+    return { ok: false, reason: 'diagnosis_lineage_inconsistent', nextAction: 'requested candidates do not resolve through the validated diagnosis lineage; re-run the diagnosis' };
+  }
+
+  /**
+   * SPEC review round-4 P1 (round binding): the diagnostic output is resolved
+   * PER CANDIDATE from that candidate's OWN `source_run_id`, cross-checked
+   * against its `artifact_id` + `task_id`. The previous shape picked the first
+   * parseable run by reverse task order and evaluated EVERY candidate against
+   * that one shared output, so a later round (r2) silently rewrote an earlier
+   * round's (r1) admission basis — confidence, evidence count and material
+   * fingerprint all came from the wrong diagnosis.
+   *
+   * Fail-closed (rc-3/rc-9): a missing run row, a non-succeeded run, a
+   * run/task mismatch, an artifact that belongs to a different run, or an
+   * unparseable owning output refuses the candidate. It NEVER falls back to
+   * another historical successful run of the same task — substituting a
+   * different round's material is the exact defect being closed.
+   */
+  // Resolve EVERY candidate's own round BEFORE any evaluation, so a single
+  // unresolved round refuses the whole call with zero writes instead of
+  // partially persisting a mixed-round admission set.
+  const resolvedRounds = new Map<string, Extract<CandidateRunResolution, { ok: true }>>();
+  for (const candidate of candidates) {
+    const resolved = await resolveCandidateRunOutput(stateManager, candidate);
+    if (!resolved.ok) {
+      return {
+        ok: false,
+        reason: 'candidate_diagnosis_round_unresolved',
+        nextAction: `candidate ${candidate.candidateId} does not resolve to its own diagnosis run output (${resolved.reason}); re-run the diagnosis for this round before intake`,
+      };
+    }
+    resolvedRounds.set(candidate.candidateId, resolved);
+  }
+
+  const decisions = new Map<string, { decision: AdmissionDecision; reason: string; nextAction: string }>();
+  const evaluatedAt = new Date().toISOString();
+  for (const candidate of candidates) {
+    const round = resolvedRounds.get(candidate.candidateId);
+    if (round === undefined) continue;
+    const {output} = round;
+    // The fingerprint is computed from THIS candidate's own material, so two
+    // rounds never collide on the same idempotency key.
+    const materialFingerprint = fingerprintMaterial([
+      JSON.stringify(output),
+      reentry.provenance,
+      String(reentry.evidenceCount),
+      ownerStatementPresent && reentry.correctionEvidence ? fingerprintStatement(reentry.correctionEvidence.text) : 'no-owner-statement',
+      round.sourceRunId,
+      candidate.candidateId,
+    ]);
+    const [admission] = evaluateCandidateAdmissions([candidate], output, {
+      provenance: reentry.provenance,
+      inputEvidenceCount: reentry.evidenceCount,
+      ...(ownerStatementPresent ? { ownerStatementPresent } : {}),
+    });
+    if (admission === undefined) continue;
+    decisions.set(candidate.candidateId, {
+      decision: admission.admission.decision,
+      reason: admission.admission.reason,
+      nextAction: admission.admission.nextAction,
+    });
+    const persisted = await stateManager.appendAdmissionEvaluation(candidate.candidateId, {
+      evaluationId: `ae_${fingerprintMaterial([candidate.candidateId, materialFingerprint, ADMISSION_POLICY_VERSION]).slice(0, 16)}`,
+      decision: admission.admission.decision,
+      reason: admission.admission.reason,
+      nextAction: admission.admission.nextAction,
+      evaluatedAt,
+      policyVersion: ADMISSION_POLICY_VERSION,
+      provenance: reentry.provenance,
+      inputEvidenceCount: reentry.evidenceCount,
+      ownerStatementPresent,
+      recommendationKind: candidate.rawRecommendationKind,
+      confidence: output.confidence,
+      materialFingerprint,
+      materialSummary: {
+        inputEvidenceCount: reentry.evidenceCount,
+        outputEvidenceCount: output.evidence.length,
+        ownerStatementPresent,
+        ...(ownerStatementPresent && reentry.correctionEvidence ? { statementFingerprint: fingerprintStatement(reentry.correctionEvidence.text) } : {}),
+      },
+    });
+    if (persisted.status === 'refused') {
+      return { ok: false, reason: `admission_persistence_failed:${persisted.reason}`, nextAction: 'inspect state.db principle_candidates; the evaluation was not saved and intake is blocked' };
+    }
+  }
+  return { ok: true, decisions };
+}
 
 export class PainSignalBridge {
   private readonly stateManager: RuntimeStateManager;
@@ -527,6 +732,139 @@ export class PainSignalBridge {
    * host process) may skip this; per-cycle workers MUST dispose to avoid
    * pinning the workspace SQLite files.
    */
+  /**
+   * SPEC-CODEX-PAIN-CLOSURE-001 CR-05 (SPEC §9.1): continue the post-processing
+   * of a SUCCEEDED diagnosis whose candidates never finished admission /
+   * intake / seeding (crash between router `markTaskSucceeded` and this
+   * bridge's post-processing, intake/seed exceptions, consumed-but-unseeded
+   * orphans, pre-CR-03 rows with no persisted disposition).
+   *
+   * Hard guarantees:
+   *   - NEVER re-runs the diagnosis LLM (materials come from the persisted
+   *     run output + diagnosticJson);
+   *   - idempotent (Ledger writes dedup via existsForCandidate, seeds dedup
+   *     via findExistingDreamerTask, admission appends dedup by material
+   *     fingerprint);
+   *   - bounded (candidates whose processing state is terminal — complete /
+   *     awaiting_owner / exhausted — are skipped and reported, not rescanned);
+   *   - read/CLI paths never call this; only the worker continuation does.
+   */
+  async resumeSucceededDiagnosisPostProcessing(input: { taskId: string }): Promise<{
+    status: 'resumed' | 'not_applicable' | 'blocked';
+    reason?: string;
+    nextAction?: string;
+    result?: PainSignalBridgeResult;
+    processedCandidateIds?: string[];
+    skipped?: { candidateId: string; reason: string }[];
+    remainingCount?: number;
+  }> {
+    const task = await this.stateManager.getTask(input.taskId);
+    if (task === null) return { status: 'not_applicable', reason: 'task_missing' };
+    if (task.status !== 'succeeded') return { status: 'not_applicable', reason: `task_not_succeeded:${task.status}` };
+
+    const candidates = await this.stateManager.getCandidatesByTaskId(input.taskId);
+    if (candidates.length === 0) return { status: 'not_applicable', reason: 'no_candidates' };
+
+    // Reconstruct the persisted diagnosis materials (output + ingress facts +
+    // correction evidence) — exactly what a fresh post-processing round sees.
+    const reentry = validatePersistedIngressFacts(task.diagnosticJson);
+    if (reentry.errorCode !== null) {
+      // SPEC §9.2 (review round-3 P1):确定无效材料不得每周期反复占预算。每个
+      // 候选持久化一条 needs_evidence 处置（材料不可解析）+ exhausted 终态，
+      // backlog 不再返回；原因与恢复入口（修复诊断）可查、可恢复。
+      const blockedAt = new Date().toISOString();
+      for (const candidate of candidates) {
+        try {
+          await this.stateManager.appendAdmissionEvaluation(candidate.candidateId, {
+            evaluationId: `ae_blocked_${fingerprintMaterial([candidate.candidateId, reentry.errorCode]).slice(0, 16)}`,
+            decision: 'needs_evidence',
+            reason: `diagnostic_material_unusable:${reentry.errorCode}`,
+            nextAction: 'repair or re-run the diagnosis via the supported CLI command; the candidate resumes automatically afterwards',
+            evaluatedAt: blockedAt,
+            policyVersion: ADMISSION_POLICY_VERSION,
+            provenance: 'automatic_hook',
+            inputEvidenceCount: 0,
+            ownerStatementPresent: false,
+            recommendationKind: candidate.rawRecommendationKind,
+            confidence: null,
+            materialFingerprint: fingerprintMaterial(['unusable', reentry.errorCode]),
+            materialSummary: { inputEvidenceCount: 0, outputEvidenceCount: 0, ownerStatementPresent: false },
+          });
+          await this.stateManager.updateAdmissionProcessing(candidate.candidateId, {
+            state: 'exhausted',
+            attempts: MAX_POST_PROCESSING_ATTEMPTS,
+            blockedReason: `diagnostic_material_unusable:${reentry.errorCode}`,
+          });
+        } catch {
+          // persistence of the terminal state itself failed → stay scannable
+          // (rc-9: the next cycle retries this bookkeeping)
+        }
+      }
+      return { status: 'blocked', reason: reentry.errorCode, nextAction: 'the persisted diagnosis payload is unusable; repair or re-run the diagnosis via the supported CLI command (candidates recorded terminal manual_action_required states)' };
+    }
+    const runs = await this.stateManager.getRunsByTask(input.taskId);
+    let output: DiagnosticianOutputV1 | undefined;
+    const parseV1 = (payload: string | undefined | null): DiagnosticianOutputV1 | undefined => {
+      if (typeof payload !== 'string' || payload.length === 0) return undefined;
+      try {
+        const parsedOutput: unknown = JSON.parse(payload);
+        return Value.Check(DiagnosticianOutputV1Schema, parsedOutput) ? parsedOutput : undefined;
+      } catch {
+        return undefined;
+      }
+    };
+    // SPEC §9.1 (review P1): the split pipeline commits candidates from the
+    // diag_router SUBTASK — the router's latest run output is the authoritative
+    // diagnostician output for continuation. The parent task's own run output
+    // is only a fallback for legacy flat pipelines (never a cache bypass: both
+    // sources are validated DiagnosticianOutputV1 persisted by the real run).
+    const routerRuns = await this.stateManager.getRunsByTask(`diag_router-${input.taskId}`);
+    for (let i = routerRuns.length - 1; i >= 0 && output === undefined; i -= 1) {
+      output = parseV1(routerRuns[i]?.outputPayload);
+    }
+    if (output === undefined) {
+      const latestRun = runs.at(-1);
+      output = parseV1(latestRun?.outputPayload);
+    }
+
+    // Skip candidates whose processing domain says the work is finished or
+    // blocked-with-budget-spent; they stay visible in `skipped`.
+    const skipped: { candidateId: string; reason: string }[] = [];
+    const eligible: typeof candidates = [];
+    for (const candidate of candidates) {
+      const admission = await this.stateManager.getAdmissionDocument(candidate.candidateId);
+      if (!admission.ok) {
+        skipped.push({ candidateId: candidate.candidateId, reason: `admission_document_unreadable:${admission.reason}` });
+        continue;
+      }
+      const processingState = admission.document?.processing?.state;
+      if (processingState === 'complete' || processingState === 'awaiting_owner' || processingState === 'exhausted') {
+        skipped.push({ candidateId: candidate.candidateId, reason: `processing_${processingState}` });
+        continue;
+      }
+      eligible.push(candidate);
+    }
+    if (eligible.length === 0) {
+      return { status: 'not_applicable', reason: 'no_eligible_candidates', skipped, remainingCount: 0 };
+    }
+
+    const result = await this.onDiagnosisComplete({
+      taskId: input.taskId,
+      diagnosticianOutput: output,
+      painId: typeof task.inputRef === 'string' && task.inputRef.length > 0 ? task.inputRef : `diagnosis-source:${input.taskId}`,
+      provenance: reentry.provenance,
+      inputEvidenceCount: reentry.evidenceCount,
+      ...(reentry.correctionEvidence !== undefined ? { correctionEvidence: reentry.correctionEvidence } : {}),
+    });
+    return {
+      status: 'resumed',
+      result,
+      processedCandidateIds: eligible.map((c) => c.candidateId),
+      skipped,
+      remainingCount: 0,
+    };
+  }
+
   async dispose(): Promise<void> {
     for (const resource of this.ownedResources) {
       try { await resource.close(); } catch { /* best-effort cleanup */ }
@@ -606,7 +944,8 @@ export class PainSignalBridge {
     // and source is not owner-initiated (manual/pain/skill:pain).
     // Zero side effects: no task creation, no runner call, no ledger writes.
     // IMPORTANT: Only short-circuit when there is NO existing task — idempotency must work.
-    if (!existingTask && shouldShortCircuitEmptyEvidence(data.evidence?.length ?? 0, data.source)) {
+    if (!existingTask && !isOwnerStatementEvidence(data.correctionEvidence)
+        && shouldShortCircuitEmptyEvidence(data.evidence?.length ?? 0, data.source)) {
       return {
         status: 'skipped',
         painId,
@@ -682,6 +1021,7 @@ export class PainSignalBridge {
       painId,
       provenance,
       inputEvidenceCount: data.evidence?.length ?? 0,
+      ...(data.correctionEvidence !== undefined ? { correctionEvidence: data.correctionEvidence } : {}),
     });
   }
 
@@ -788,7 +1128,55 @@ export class PainSignalBridge {
       painId,
       provenance: reentry.provenance,
       inputEvidenceCount: reentry.evidenceCount,
+      ...(reentry.correctionEvidence !== undefined ? { correctionEvidence: reentry.correctionEvidence } : {}),
     });
+  }
+
+  /** Fire-and-forget processing-domain update that must never break the loop (sync-safe). */
+  private safeUpdateAdmissionProcessing(candidateId: string, processing: AdmissionProcessingRecord): void {
+    try {
+      void this.stateManager.updateAdmissionProcessing(candidateId, processing).catch(() => undefined);
+    } catch {
+      // partial state-manager seams (test doubles) may not implement the
+      // processing domain; the primary outcome path stays authoritative
+    }
+  }
+
+  /**
+   * SPEC-CODEX-PAIN-CLOSURE-001 CR-05 (§9.2): bounded post-processing
+   * failure bookkeeping in the independent processing domain. Default budget
+   * is 3 automatic continuation attempts; exhaustion is a saved, readable
+   * terminal state (manual_action_required), never a silent loop. The
+   * diagnosis task's own attemptCount is never consumed by this.
+   */
+  private async recordPostProcessingFailure(candidateId: string, rawReason: string): Promise<void> {
+    try {
+      const read = await this.stateManager.getAdmissionDocument(candidateId);
+      if (!read.ok) return;
+      const current = read.document?.processing;
+      const attempts = (current?.attempts ?? 0) + 1;
+      const nowIso = new Date().toISOString();
+      const reason = rawReason.slice(0, 300);
+      const processing: AdmissionProcessingRecord = attempts >= MAX_POST_PROCESSING_ATTEMPTS
+        ? {
+          state: 'exhausted',
+          attempts,
+          lastAttemptAt: nowIso,
+          lastFailure: { reason, nextAction: 'manual_action_required: post-processing retry budget exhausted; inspect state.db principle_candidates and telemetry, then use the supported recovery command', at: nowIso },
+          blockedReason: `post_processing_attempts_exhausted:${rawReason.slice(0, 120)}`,
+        }
+        : {
+          state: 'in_progress',
+          attempts,
+          lastAttemptAt: nowIso,
+          lastFailure: { reason, nextAction: 'the workspace worker continuation retries this candidate automatically', at: nowIso },
+          nextRetryAt: new Date(Date.now() + Math.min(60_000 * 2 ** attempts, 15 * 60_000)).toISOString(),
+        };
+      await this.stateManager.updateAdmissionProcessing(candidateId, processing);
+    } catch {
+      // telemetry for the failure itself was already emitted by the caller;
+      // this bookkeeping must never mask the original processing result.
+    }
   }
 
   /**
@@ -803,8 +1191,12 @@ export class PainSignalBridge {
     painId: string;
     provenance: PainProvenance;
     inputEvidenceCount?: number;
+    /** SPEC-CODEX-PAIN-CLOSURE-001 CR-02: the pain's correction evidence, when one was submitted. */
+    correctionEvidence?: PainCorrectionEvidence;
   }): Promise<PainSignalBridgeResult> {
-    const { taskId, diagnosticianOutput, painId, provenance, inputEvidenceCount = 0 } = opts;
+    const { taskId, diagnosticianOutput, painId, provenance, inputEvidenceCount = 0, correctionEvidence } = opts;
+    const ownerStatementPresent = isOwnerStatementEvidence(correctionEvidence);
+    const statementFingerprint = ownerStatementPresent && correctionEvidence ? fingerprintStatement(correctionEvidence.text) : undefined;
     const candidates: CandidateRecord[] = await this.stateManager.getCandidatesByTaskId(taskId);
     const ledgerEntryIds: string[] = [];
 
@@ -820,18 +1212,108 @@ export class PainSignalBridge {
       );
     }
 
-    const admissionResults = diagnosticianOutput
-      ? evaluateCandidateAdmissions(candidates, diagnosticianOutput, { provenance, inputEvidenceCount })
-      : candidates.map((c) => ({
-          candidateId: c.candidateId,
-          recommendationKind: c.recommendationKind,
+    // Fresh completion and worker resume share the same per-candidate round
+    // resolver as CLI writes. Never apply the in-memory/latest task output to
+    // candidates minted by other runs of that task.
+    const candidateRounds = new Map<string, Extract<CandidateRunResolution, { ok: true }>>();
+    const admissionResults: CandidateAdmissionResult[] = [];
+    for (const candidate of candidates) {
+      const resolved = await resolveCandidateRunOutput(this.stateManager, candidate);
+      if (!resolved.ok) {
+        admissionResults.push({
+          candidateId: candidate.candidateId,
+          recommendationKind: candidate.recommendationKind,
           admission: {
-            decision: 'needs_evidence' as const,
-            reason: 'diagnostician_output_unavailable',
-            nextAction: 're_run_diagnosis_or_manual_review',
+            decision: 'needs_evidence',
+            reason: resolved.reason,
+            nextAction: 're-run the diagnosis that produced this candidate or send it for manual review',
             evidenceStatus: provenance,
           },
-        }));
+        });
+        continue;
+      }
+      candidateRounds.set(candidate.candidateId, resolved);
+      const [admission] = evaluateCandidateAdmissions([candidate], resolved.output, {
+        provenance,
+        inputEvidenceCount,
+        ...(ownerStatementPresent ? { ownerStatementPresent } : {}),
+      });
+      if (admission !== undefined) admissionResults.push(admission);
+    }
+
+    // SPEC-CODEX-PAIN-CLOSURE-001 CR-03 (PRI-958): persist every full-gate
+    // disposition on the candidate row BEFORE any intake/seed/consume write.
+    // A persistence failure must block this candidate's governance writes for
+    // the round (SPEC §7.1) — the diagnosis-success fact itself is untouched.
+    const admissionPersistBlocked = new Set<string>();
+    if (candidates.length > 0) {
+      const evaluatedAt = new Date().toISOString();
+      for (let i = 0; i < candidates.length; i++) {
+        const candidate = candidates[i];
+        const admission = admissionResults[i];
+        if (!candidate || !admission) continue;
+        const round = candidateRounds.get(candidate.candidateId);
+        const materialFingerprint = round
+          ? fingerprintMaterial([
+              JSON.stringify(round.output),
+              provenance,
+              String(inputEvidenceCount),
+              statementFingerprint ?? 'no-owner-statement',
+              round.sourceRunId,
+              candidate.candidateId,
+            ])
+          : fingerprintMaterial([
+              'candidate-round-unresolved',
+              admission.admission.reason,
+              provenance,
+              String(inputEvidenceCount),
+              candidate.candidateId,
+            ]);
+        const evaluation: AdmissionEvaluationRecord = {
+          evaluationId: `ae_${fingerprintMaterial([candidate.candidateId, materialFingerprint, ADMISSION_POLICY_VERSION]).slice(0, 16)}`,
+          decision: admission.admission.decision,
+          reason: admission.admission.reason,
+          nextAction: admission.admission.nextAction,
+          evaluatedAt,
+          policyVersion: ADMISSION_POLICY_VERSION,
+          provenance,
+          inputEvidenceCount,
+          ownerStatementPresent,
+          recommendationKind: candidate.rawRecommendationKind,
+          confidence: round?.output.confidence ?? null,
+          materialFingerprint,
+          materialSummary: {
+            inputEvidenceCount,
+            outputEvidenceCount: round?.output.evidence.length ?? 0,
+            ownerStatementPresent,
+            ...(statementFingerprint !== undefined ? { statementFingerprint } : {}),
+          },
+        };
+        try {
+          if (typeof this.stateManager.appendAdmissionEvaluation !== 'function') {
+            throw new Error('state_manager_admission_persistence_unavailable');
+          }
+          const persisted = await this.stateManager.appendAdmissionEvaluation(candidate.candidateId, evaluation);
+          if (persisted.status === 'refused') {
+            admissionPersistBlocked.add(candidate.candidateId);
+            this.eventEmitter?.emitTelemetry({
+              eventType: 'admission_persistence_failed',
+              traceId: candidate.candidateId,
+              timestamp: evaluatedAt,
+              payload: { reason: persisted.reason, nextAction: 'inspect state.db principle_candidates; the disposition was not saved and intake is blocked for this candidate this round' },
+            });
+          }
+        } catch (persistErr) {
+          admissionPersistBlocked.add(candidate.candidateId);
+          this.eventEmitter?.emitTelemetry({
+            eventType: 'admission_persistence_failed',
+            traceId: candidate.candidateId,
+            timestamp: evaluatedAt,
+            payload: { reason: persistErr instanceof Error ? persistErr.message : String(persistErr), nextAction: 'inspect state.db principle_candidates; the disposition was not saved and intake is blocked for this candidate this round' },
+          });
+        }
+      }
+    }
 
     const seedFailureCandidateIds: string[] = [];
     const notInternalizable: NotInternalizableCandidate[] = [];
@@ -853,13 +1335,41 @@ export class PainSignalBridge {
 
         if (admission.admission.decision !== 'admitted') {
           this.emitAdmissionEvent(candidate.candidateId, admission.admission);
+          // CR-03: a non-admitted disposition is a saved, explainable terminal
+          // state for this material — the worker must not keep rescanning it.
+          this.safeUpdateAdmissionProcessing(candidate.candidateId, {
+            state: 'awaiting_owner',
+            attempts: 0,
+            blockedReason: `${admission.admission.decision}:${admission.admission.reason}`,
+          });
           continue;
+        }
+
+        // CR-03 (SPEC §7.1): the disposition itself failed to persist — no
+        // Ledger write, no consume, no seed for this candidate this round.
+        if (admissionPersistBlocked.has(candidate.candidateId)) {
+          continue;
+        }
+
+        // CR-05 (SPEC §9.1): resume idempotency — when a previous round already
+        // wrote this candidate's Ledger entry, skip intake (no duplicate
+        // writes) and fall through to seed/link recovery below.
+        // CR-05 resume idempotency (guarded for adapters whose seam returns
+        // undefined instead of null): only a REAL persisted entry short-circuits.
+        const existingLedgerEntry = this.ledgerAdapter.existsForCandidate(candidate.candidateId) ?? null;
+        if (existingLedgerEntry !== null && typeof existingLedgerEntry.id === 'string') {
+          ledgerEntryIds.push(existingLedgerEntry.id);
+          ledgerEntryByCandidate.set(candidate.candidateId, existingLedgerEntry.id);
         }
 
         // sibling 隔离：一个 candidate 的 intake 失败不应中止整批（ERR-089 模式）
         let intakeResult;
         try {
-          intakeResult = await this.intakeService.intake(candidate.candidateId);
+          if (existingLedgerEntry !== null && typeof existingLedgerEntry.id === 'string') {
+            intakeResult = { outcome: 'ledger_entry' as const, written: false, entry: existingLedgerEntry };
+          } else {
+            intakeResult = await this.intakeService.intake(candidate.candidateId);
+          }
         } catch (intakeErr) {
           this.eventEmitter?.emitTelemetry({
             eventType: 'candidate_intake_failed',
@@ -867,6 +1377,10 @@ export class PainSignalBridge {
             timestamp: new Date().toISOString(),
             payload: { reason: intakeErr instanceof Error ? intakeErr.message : String(intakeErr) },
           });
+          // CR-05 (SPEC §9.1): the succeeded diagnosis with an unfinished
+          // intake is an orphan the worker continuation must pick up — record
+          // the attempt in the independent processing domain.
+          void this.recordPostProcessingFailure(candidate.candidateId, `intake_failed:${intakeErr instanceof Error ? intakeErr.message : String(intakeErr)}`).catch(() => undefined);
           continue;
         }
         // Phase 1 / PR1 (Principle Ledger write boundary): the intake service only
@@ -910,6 +1424,13 @@ export class PainSignalBridge {
           reuseReviewRequiredByCandidate.set(candidate.candidateId, {
             selectedPrincipleId: recommended?.selectedPrincipleId,
             confidence: recommended?.confidence,
+          });
+          // CR-05: waiting for the Owner's reuse decision is a saved
+          // awaiting-owner state, not a technical retry.
+          this.safeUpdateAdmissionProcessing(candidate.candidateId, {
+            state: 'awaiting_owner',
+            attempts: 0,
+            blockedReason: 'reuse_pending_owner',
           });
           continue;
         }
@@ -985,12 +1506,33 @@ export class PainSignalBridge {
             timestamp: new Date().toISOString(),
             payload: { error: String(seedErr) },
           });
+          // CR-05 (SPEC §9.1): seed failure is a post-processing orphan —
+          // consumed-but-unseeded must stay discoverable by the worker
+          // continuation (never hidden behind the consumed status).
+          void this.recordPostProcessingFailure(candidate.candidateId, `seed_failed:${String(seedErr)}`).catch(() => undefined);
         }
 
         if (candidate.status !== 'consumed') {
           await this.stateManager.updateCandidateStatus(candidate.candidateId, { status: 'consumed' });
         }
       }
+    }
+
+    // CR-03/CR-05: mark the candidates whose post-processing reached a real
+    // terminal state (seeded / ledger-written / not internalizable) complete
+    // so the worker continuation stops rescanning them.
+    for (let i = 0; i < candidates.length; i++) {
+      const candidate = candidates[i];
+      const admission = admissionResults[i];
+      if (!candidate || !admission || admission.admission.decision !== 'admitted') continue;
+      if (admissionPersistBlocked.has(candidate.candidateId)) continue;
+      if (seedFailureCandidateIds.includes(candidate.candidateId)) continue;
+      if (reuseReviewRequiredByCandidate.has(candidate.candidateId)) continue;
+      this.safeUpdateAdmissionProcessing(candidate.candidateId, {
+        state: 'complete',
+        attempts: 0,
+        completedAt: new Date().toISOString(),
+      });
     }
 
     const seedFailureNote = seedFailureCandidateIds.length > 0

@@ -22,9 +22,11 @@ import type { HostEventKind } from '@principles/core/host';
 import {
   ingestGovernanceObservations,
   readGovernanceCheckpoint,
+  recordVerifiedToolOutcomes,
   type GovernanceIngestDegradation,
   type GovernanceObservationInput,
   type GovernanceSignalCandidate,
+  type VerifiedToolOutcomeInput,
 } from '@principles/host-runtime';
 import { resolveCodexHome } from './codex-home.js';
 import { validateCodexTranscriptPath } from './transcript-path.js';
@@ -134,6 +136,39 @@ interface TranscriptDeltaArgs {
   readonly port: TranscriptPort;
 }
 
+/**
+ * SPEC-CODEX-PAIN-CLOSURE-001 CR-01: project decoded CommandExecution facts
+ * onto the shared verified-outcome upgrade. The transcript's model-level call
+ * name for the shell tool is `exec` while the PostToolUse hook names it
+ * `Bash` (g1 fixture 04-post-tool-use.json ↔ normal-tool-final-turn.jsonl,
+ * same tool_use_id) — the host-specific mapping stays here in the adapter.
+ */
+function collectVerifiedToolOutcomes(observations: readonly GovernanceObservationInput[]): VerifiedToolOutcomeInput[] {
+  const outcomes: VerifiedToolOutcomeInput[] = [];
+  for (const observation of observations) {
+    if (observation.kind !== 'tool_call' || observation.toolUseId === undefined) continue;
+    const facts = observation.toolFacts;
+    if (typeof facts !== 'object' || facts === null || Array.isArray(facts)) continue;
+    const {exitCode} = (facts as Record<string, unknown>);
+    if (typeof exitCode !== 'number' || !Number.isInteger(exitCode)) continue;
+    const rawName = (facts as Record<string, unknown>).toolName;
+    const toolName = rawName === 'exec' || typeof rawName !== 'string' || rawName.length === 0 ? 'Bash' : rawName;
+    const {stdout} = (facts as Record<string, unknown>);
+    const {stderr} = (facts as Record<string, unknown>);
+    const previewParts: string[] = [];
+    if (typeof stderr === 'string' && stderr.length > 0) previewParts.push(stderr);
+    if (typeof stdout === 'string' && stdout.length > 0) previewParts.push(stdout);
+    outcomes.push({
+      toolUseId: observation.toolUseId,
+      toolName,
+      params: (facts as Record<string, unknown>).command ?? undefined,
+      exitCode,
+      ...(previewParts.length > 0 ? { outputPreview: previewParts.join('\n') } : {}),
+    });
+  }
+  return outcomes;
+}
+
 function ingestTranscriptDelta({ fallbackRootSessionId, canonicalPath, identity, rolloutIdentity, workspaceDir, now, port }: TranscriptDeltaArgs): CodexIngestionOutcome {
   const checkpoint = readGovernanceCheckpoint({ workspaceDir, hostKind: 'codex', rolloutIdentity });
   if (checkpoint !== null && !('byteOffset' in checkpoint) && 'ok' in checkpoint && checkpoint.ok === false) {
@@ -193,6 +228,18 @@ function ingestTranscriptDelta({ fallbackRootSessionId, canonicalPath, identity,
   }
 
   const rootSessionId = decoded.rolloutMeta.rootSessionId ?? existing?.rootSessionId ?? fallbackRootSessionId;
+  // CR-01: upgrade text-only live observations with the host-verified exit
+  // codes BEFORE the checkpoint advances, so a write failure holds the delta
+  // and the next Stop retries instead of silently losing the verified facts.
+  const verifiedOutcomes = collectVerifiedToolOutcomes(decoded.observations);
+  if (verifiedOutcomes.length > 0) {
+    const verified = recordVerifiedToolOutcomes({ workspaceDir, sessionId: rootSessionId, outcomes: verifiedOutcomes });
+    const failed = verified.find((result) => result.status === 'unavailable');
+    if (failed !== undefined) {
+      const reason = failed.reason === 'trajectory_db_not_found' ? 'verified_outcome_db_unavailable' : `verified_outcome_write_failed:${failed.reason.split(':', 2)[1] ?? ''}`;
+      return { status: 'degraded', reason, nextAction: 'inspect the workspace trajectory database; the transcript checkpoint was NOT advanced, the next Stop retries this delta.', warnings: decoded.warnings };
+    }
+  }
   const result = ingestGovernanceObservations({
     workspaceDir,
     rollout: {

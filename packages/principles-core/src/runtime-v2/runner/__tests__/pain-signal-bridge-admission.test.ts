@@ -89,7 +89,19 @@ function makeBridgeDeps(overrides: {
     updateTask: async () => { return; },
     getCandidatesByTaskId: async () => overrides.candidates ?? [],
     getRunsByTask: async () => [{ runId: 'run-1', taskId: TASK_ID, status: 'succeeded' }],
+    getRun: async (runId: string) => {
+      const candidate = (overrides.candidates ?? []).find((item) => item.sourceRunId === runId);
+      return candidate ? { runId, taskId: candidate.taskId, executionStatus: 'succeeded', outputPayload: JSON.stringify(overrides.output ?? makeLowConfidenceOutput()) } : null;
+    },
+    getArtifact: async (artifactId: string) => {
+      const candidate = (overrides.candidates ?? []).find((item) => item.artifactId === artifactId);
+      return candidate ? { artifactId, runId: candidate.sourceRunId, taskId: candidate.taskId } : null;
+    },
     updateCandidateStatus: async () => { return; },
+    getAdmissionDocument: async () => ({ ok: true, document: null }),
+    appendAdmissionEvaluation: async () => ({ status: 'appended' as const, document: { schemaVersion: 1 as const, evaluations: [], currentEvaluationId: null } }),
+    updateAdmissionProcessing: async () => true,
+
   } as unknown as RuntimeStateManager;
 
   const runner = {
@@ -398,7 +410,18 @@ describe('PainSignalBridge dreamer task seeding', () => {
       updateTask: async () => { return; },
       getCandidatesByTaskId: async () => overrides.candidates,
       getRunsByTask: async () => [{ runId: 'run-1', taskId: TASK_ID_DREAMER, status: 'succeeded' }],
+      getRun: async (runId: string) => {
+        const candidate = overrides.candidates.find((item) => item.sourceRunId === runId);
+        return candidate ? { runId, taskId: candidate.taskId, executionStatus: 'succeeded', outputPayload: JSON.stringify(makeHighConfidenceOutput()) } : null;
+      },
+      getArtifact: async (artifactId: string) => {
+        const candidate = overrides.candidates.find((item) => item.artifactId === artifactId);
+        return candidate ? { artifactId, runId: candidate.sourceRunId, taskId: candidate.taskId } : null;
+      },
       updateCandidateStatus: updateCandidateStatusMock,
+      getAdmissionDocument: async () => ({ ok: true, document: null }),
+      appendAdmissionEvaluation: async () => ({ status: 'appended' as const, document: { schemaVersion: 1 as const, evaluations: [], currentEvaluationId: null } }),
+      updateAdmissionProcessing: async () => true,
     } as unknown as RuntimeStateManager;
 
     const runner = {

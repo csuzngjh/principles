@@ -90,18 +90,33 @@ async function seedPrincipleCandidate(opts: { painId?: string; confidence?: numb
   const now = new Date().toISOString();
 
   const taskId = randomUUID();
+  // SPEC-CODEX-PAIN-CLOSURE-001 CR-03: the intake write permission now comes
+  // from the full admission gate over persisted materials — seed a complete,
+  // admitting diagnosis (payload + parseable run output) so the fixture
+  // reflects a real admitted candidate instead of a bare row.
   await stateManager.taskStore.createTask({
     taskId,
     taskKind: 'diagnostician',
-    status: 'pending',
-    attemptCount: 0,
+    status: 'succeeded',
+    attemptCount: 1,
     maxAttempts: 3,
     leaseOwner: undefined,
     leaseExpiresAt: undefined,
     lastError: undefined,
-    inputRef: '',
+    inputRef: opts.painId ?? `pain-seed-${candidateId}`,
     resultRef: '',
-    diagnosticJson: undefined,
+    diagnosticJson: JSON.stringify({
+      sourcePainId: opts.painId ?? `pain-seed-${candidateId}`,
+      reasonSummary: 'seeded',
+      source: 'manual',
+      severity: 'moderate',
+      sessionIdHint: null,
+      agentIdHint: null,
+      provenance: 'owner_reported_no_host_trace',
+      provenanceReason: 'seeded fixture',
+      evidence: [{ sourceRef: 'seed:trace-1', note: 'seeded evidence entry' }],
+      workspaceDir: null,
+    }),
   });
   const runId = randomUUID();
   await stateManager.runStore.createRun({
@@ -112,6 +127,16 @@ async function seedPrincipleCandidate(opts: { painId?: string; confidence?: numb
     executionStatus: 'succeeded',
     startedAt: now,
     endedAt: now,
+    outputPayload: JSON.stringify({
+      valid: true,
+      diagnosisId: `diag-${candidateId}`,
+      summary: 'seeded diagnosis',
+      rootCause: 'seeded root cause',
+      violatedPrinciples: [],
+      evidence: [{ sourceRef: 'seed:trace-1', note: 'seeded output evidence' }],
+      recommendations: [{ kind: 'principle', description: CANDIDATE_TEXT }],
+      confidence: opts.confidence ?? 0.9,
+    }),
   });
   if (opts.painId !== undefined) {
     // Real pain_diagnoses write — the reuse evidence resolves its painId here.
@@ -165,6 +190,12 @@ async function seedPrincipleCandidate(opts: { painId?: string; confidence?: numb
       `${artifactId}::prompt`,
       now,
     );
+    // CR-03: getCandidatesByTaskId resolves through tasks→runs→commits —
+    // seed the commit link so the full-gate re-evaluation reaches the row.
+    db.prepare(`
+      INSERT INTO commits (commit_id, task_id, run_id, artifact_id, idempotency_key, status, created_at)
+      VALUES (?, ?, ?, ?, ?, 'committed', ?)
+    `).run(randomUUID(), taskId, runId, artifactId, `seed-${artifactId}`, now);
   } finally {
     db.close();
   }

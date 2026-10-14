@@ -34,11 +34,14 @@ import { DefaultRetryPolicy } from './lifecycle/retry-policy.js';
 import { DefaultRecoverySweep } from './lifecycle/recovery-sweep.js';
 import { SqliteCommitStore } from './commit/sqlite-commit-store.js';
 import { SqliteCandidateStore } from './candidate/sqlite-candidate-store.js';
+import { SqliteReconciliationCursorStore } from './reconciliation-cursor-store.js';
+import { reopenDiagnosticianFamilyInConnection } from './task/sqlite-family-reopen.js';
 import { SqliteArtifactStore } from './artifact/sqlite-artifact-store.js';
 import { SqlitePIArtifactStore } from './artifact/sqlite-pi-artifact-store.js';
 import { SqlitePainDiagnosisStore } from './pain-diagnosis/sqlite-pain-diagnosis-store.js';
 import type { CommitStore } from './commit/commit-store.js';
 import type { CandidateStore } from './candidate/candidate-store.js';
+import type { AdmissionEvaluationRecord, AdmissionProcessingRecord, CandidateAdmissionDocument } from './candidate/admission-document.js';
 import type { ArtifactStore } from './artifact/artifact-store.js';
 import type { PIArtifactStore } from '../internalization/pi-artifact.js';
 import type { PainDiagnosisRecord, PainDiagnosisStore, PainDiagnosisWriteInput } from './pain-diagnosis/pain-diagnosis-store.js';
@@ -51,6 +54,11 @@ import { updatePrinciple } from '../../principle-tree-ledger.js';
 // Re-export M5 types for backward compatibility
 export type { CommitRecord } from './commit/commit-store.js';
 export type { CandidateRecord } from './candidate/candidate-store.js';
+export type {
+  AdmissionEvaluationRecord,
+  AdmissionProcessingRecord,
+  CandidateAdmissionDocument,
+} from './candidate/admission-document.js';
 export type { ArtifactRecord, ArtifactWithCandidates } from './artifact/artifact-store.js';
 export type { PainDiagnosisRecord, PainDiagnosisWriteInput } from './pain-diagnosis/pain-diagnosis-store.js';
 
@@ -513,6 +521,68 @@ export class RuntimeStateManager {
   async transitionCandidateStatus(candidateId: string, expectedStatus: CandidateRecord['status'], newStatus: CandidateRecord['status']): Promise<boolean> {
     this.assertInitialized();
     return this._candidateStore.transitionCandidateStatus(candidateId, expectedStatus, newStatus);
+  }
+
+  /** SPEC-CODEX-PAIN-CLOSURE-001 CR-03 (PRI-958): persisted admission disposition. */
+  async getAdmissionDocument(candidateId: string): Promise<
+    { ok: true; document: CandidateAdmissionDocument | null } | { ok: false; reason: string }
+  > {
+    this.assertInitialized();
+    return this._candidateStore.getAdmissionDocument(candidateId);
+  }
+
+  async appendAdmissionEvaluation(candidateId: string, evaluation: AdmissionEvaluationRecord): Promise<
+    { status: 'appended' | 'reused'; document: CandidateAdmissionDocument } | { status: 'refused'; reason: string }
+  > {
+    this.assertInitialized();
+    return this._candidateStore.appendAdmissionEvaluation(candidateId, evaluation);
+  }
+
+  async updateAdmissionProcessing(candidateId: string, processing: AdmissionProcessingRecord): Promise<boolean> {
+    this.assertInitialized();
+    return this._candidateStore.updateAdmissionProcessing(candidateId, processing);
+  }
+
+  async reopenDiagnosticianFamilyAtomic(input: {
+    parentTaskId: string;
+    stageTaskIds: string[];
+    parentPatch: { diagnosticJson?: string };
+  }): Promise<{ reopened: boolean; leased: string[] }> {
+    this.assertInitialized();
+    // Store-owned SQL (PRI-47): the manager delegates, no inline SQL here.
+    return reopenDiagnosticianFamilyInConnection(this._connection, input);
+  }
+
+  /** SPEC §9.1 fair-share service cursor (same reconciliation_cursor authority, scoped). */
+  async getDiagnosticianServiceCursor(scope: string): Promise<{ lastUpdatedAt: string; lastTaskId: string } | null> {
+    this.assertInitialized();
+    const store = new SqliteReconciliationCursorStore(this._connection);
+    return store.get(scope);
+  }
+
+  async setDiagnosticianServiceCursor(scope: string, cursor: { lastUpdatedAt: string; lastTaskId: string }): Promise<void> {
+    this.assertInitialized();
+    const store = new SqliteReconciliationCursorStore(this._connection);
+    store.set(scope, cursor);
+  }
+
+  /**
+   * SPEC-CODEX-PAIN-CLOSURE-001 CR-05 (SPEC §9.1): the diagnosis post-processing
+   * backlog — candidates of SUCCEEDED diagnostician tasks whose admission /
+   * intake / seeding never completed. Includes pre-CR-03 pending rows with no
+   * persisted disposition (the original stuck-candidates incident shape) and
+   * rows whose processing domain is still open and whose nextRetryAt has
+   * elapsed. Terminal processing states (complete / awaiting_owner / exhausted)
+   * and admission_json-NULL consumed rows are excluded — they are saved
+   * explainable states, not work.
+   */
+  async listDiagnosisPostProcessingBacklog(options: { limit: number; nowIso?: string }): Promise<{
+    eligible: { candidateId: string; taskId: string; status: string; createdAt: string; processingState: string | null }[];
+    corrupt: { candidateId: string; taskId: string; status: string; createdAt: string }[];
+  }> {
+    this.assertInitialized();
+    // Store-owned query (PRI-47): the manager delegates; no inline SQL here.
+    return this._candidateStore.listDiagnosisPostProcessingBacklog(options);
   }
 
   async archivePrinciple(principleId: string): Promise<boolean> {
