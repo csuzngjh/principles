@@ -295,7 +295,13 @@ describe('WorkBuddyHostInstaller.install — engine registration path', () => {
       channel: 'stable', // owned by the update side — must survive (PRI-709 P0-1)
     }, null, 2));
 
-    await created.installer.install(installCtx(created));
+    // The hosts merge is UNCONDITIONAL once install() reaches it, so a missing
+    // 'workbuddy' below means install() bailed out at one of its preflights.
+    // Assert the outcome itself — not only the side effect — so the refusal
+    // reason surfaces. Awaiting without checking `success` is what let a
+    // Linux-only early return present as a confusing hosts diff.
+    const installResult = await created.installer.install(installCtx(created));
+    expect(installResult.success, `install refused: ${JSON.stringify(installResult)}`).toBe(true);
 
     const manifest = readJson(path.join(created.home, '.pd', 'install.json'));
     expect(manifest.hosts).toEqual(['openclaw', 'codex', 'workbuddy']);
