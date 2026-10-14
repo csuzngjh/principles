@@ -446,8 +446,9 @@ describe('round binding: the owning run is the only admissible output', () => {
       expect(result.ok).toBe(true);
       if (!result.ok) return;
       // Each candidate carries ITS OWN round's confidence — no shared output.
-      const strongDoc = (await admissionDoc(ws, strongId)) as { evaluations: { confidence: number | null }[] } | null;
-      const weakDoc = (await admissionDoc(ws, weakId)) as { evaluations: { confidence: number | null }[] } | null;
+      type EvalView = { evaluations: { confidence: number | null; materialFingerprint: string }[] } | null;
+      const strongDoc = (await admissionDoc(ws, strongId)) as EvalView;
+      const weakDoc = (await admissionDoc(ws, weakId)) as EvalView;
       expect(strongDoc?.evaluations[0]?.confidence).toBe(0.9);
       expect(weakDoc?.evaluations[0]?.confidence).toBe(0.2);
       expect(strongDoc?.evaluations[0]?.materialFingerprint).not.toBe(weakDoc?.evaluations[0]?.materialFingerprint);
@@ -681,7 +682,7 @@ describe('round binding: the owning run is the only admissible output', () => {
         getCandidatesByTaskId: ws.manager.getCandidatesByTaskId.bind(ws.manager),
         appendAdmissionEvaluation: ws.manager.appendAdmissionEvaluation.bind(ws.manager),
       };
-      const result = await evaluateAndPersistAdmissionFromStore(faulty as never, [candidateId], { taskId: router });
+      const result = await evaluateAndPersistAdmissionFromStore(faulty, [candidateId], { taskId: router });
       expect(result.ok).toBe(false);
       if (!result.ok) {
         expect(result.reason).toBe('candidate_diagnosis_round_unresolved');
@@ -707,7 +708,7 @@ describe('round binding: the owning run is the only admissible output', () => {
         getCandidatesByTaskId: ws.manager.getCandidatesByTaskId.bind(ws.manager),
         appendAdmissionEvaluation: ws.manager.appendAdmissionEvaluation.bind(ws.manager),
       };
-      const result = await evaluateAndPersistAdmissionFromStore(faulty as never, [candidateId], { taskId: router });
+      const result = await evaluateAndPersistAdmissionFromStore(faulty, [candidateId], { taskId: router });
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.nextAction).toContain('artifact_lookup_failed');
     } finally {
@@ -762,7 +763,7 @@ describe('round binding: the owning run is the only admissible output', () => {
         getArtifact: ws.manager.getArtifact.bind(ws.manager),
         getCandidatesByTaskId: ws.manager.getCandidatesByTaskId.bind(ws.manager),
       };
-      const result = await evaluateAndPersistAdmissionFromStore(refusing as never, [candidateId], { taskId: router });
+      const result = await evaluateAndPersistAdmissionFromStore(refusing, [candidateId], { taskId: router });
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.reason).toBe('admission_persistence_failed:locked_by_other_writer');
       // The real store still holds no evaluation — the refusal wrote nothing.
