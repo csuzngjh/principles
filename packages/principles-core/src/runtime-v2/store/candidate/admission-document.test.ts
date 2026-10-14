@@ -22,6 +22,7 @@ import {
   serializeAdmissionDocument,
   withProcessing,
   type AdmissionEvaluationRecord,
+  type CandidateAdmissionDocument,
 } from './admission-document.js';
 
 const NOW = '2026-10-14T12:00:00.000Z';
@@ -158,7 +159,7 @@ describe('serializeAdmissionDocument', () => {
       schemaVersion: CANDIDATE_ADMISSION_SCHEMA_VERSION,
       evaluations: [evaluation()],
       currentEvaluationId: 'eval-1',
-    });
+    } as CandidateAdmissionDocument);
     expect(result.ok).toBe(true);
   });
 
@@ -168,7 +169,7 @@ describe('serializeAdmissionDocument', () => {
       schemaVersion: CANDIDATE_ADMISSION_SCHEMA_VERSION,
       evaluations: [huge],
       currentEvaluationId: 'eval-1',
-    });
+    } as CandidateAdmissionDocument);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toBe('admission_json_size_exceeded');
   });
@@ -224,7 +225,7 @@ describe('currentEvaluation / withProcessing', () => {
   });
 
   it('resolves the pointed-at evaluation, and withProcessing attaches a processing block', () => {
-    const document = {
+    const document: CandidateAdmissionDocument = {
       schemaVersion: CANDIDATE_ADMISSION_SCHEMA_VERSION,
       evaluations: [evaluation({ evaluationId: 'e1' })],
       currentEvaluationId: 'e1',
