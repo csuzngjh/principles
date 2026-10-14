@@ -15,6 +15,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 import { SqliteConnection } from '../store/sqlite-connection.js';
 import { RuntimeStateManager } from '../store/runtime-state-manager.js';
@@ -278,6 +279,172 @@ describe('review S3: admission document atomic across two connections', () => {
       }
       connA.close();
       connB.close();
+    } finally {
+      await manager.close().catch(() => undefined);
+    }
+  });
+});
+
+describe('review round-3: bad material cannot starve healthy candidates', () => {
+  it('blocked resume records terminal states — the scan stops returning the bad pair and serves the healthy candidate', async () => {
+    const ws = await realWorkspace();
+    try {
+      const { manager } = ws;
+      // Two legacy BROKEN parent diagnoses (unparseable diagnosticJson), each with a candidate.
+      for (const bad of ['bad-a', 'bad-b']) {
+        const parentId = `diagnosis_${bad}`;
+        const routerId = `diag_router-${parentId}`;
+        await manager.createTask({ taskId: parentId, taskKind: 'diagnostician', inputRef: `pain-${bad}`, status: 'succeeded', attemptCount: 1, maxAttempts: 3, diagnosticJson: '[]' });
+        await manager.createTask({ taskId: routerId, taskKind: 'diag_router', inputRef: parentId, status: 'succeeded', attemptCount: 1, maxAttempts: 3 });
+        await manager.runStore.createRun({ runId: `run-${bad}`, taskId: routerId, runtimeKind: 'pi-ai', attemptNumber: 1, executionStatus: 'succeeded', startedAt: NOW, endedAt: NOW });
+        const connection = new SqliteConnection(ws.workspaceDir);
+        try {
+          const committer = new SqliteDiagnosticianCommitter(connection);
+          await committer.commit({ runId: `run-${bad}`, taskId: routerId, output: routerOutput(), idempotencyKey: `${routerId}:run-${bad}`, contentJson: '{}' });
+        } finally { connection.close(); }
+      }
+      // One healthy candidate.
+      const healthyId = await seedSplitDiagnosis(ws);
+
+      const runnerCalls: string[] = [];
+      const bridge = new PainSignalBridge({
+        stateManager: manager,
+        runner: { run: async (taskId: string): Promise<RunnerResult> => { runnerCalls.push(taskId); throw new Error('LLM must not run'); } },
+        intakeService: { intake: async (id: string) => ({ outcome: 'ledger_entry' as const, written: true, entry: { id: `ledger-${id}` } }) },
+        ledgerAdapter: { existsForCandidate: () => null },
+        autoIntakeEnabled: true,
+      } as never);
+
+      // limit=2, four consecutive rounds — the review's exact starvation shape.
+      for (let round = 0; round < 4; round += 1) {
+        const backlog = await manager.listDiagnosisPostProcessingBacklog({ limit: 2 });
+        for (const item of backlog) {
+          await bridge.resumeSucceededDiagnosisPostProcessing({ taskId: item.taskId });
+        }
+      }
+      // Healthy candidate served despite two bad items ahead.
+      const document = await manager.getAdmissionDocument(healthyId);
+      expect(document.ok && document.document?.evaluations.length).toBeGreaterThan(0);
+      expect(document.ok && document.document?.processing?.state).toBe('complete');
+      // Bad pairs are terminal: not returned by the scan anymore.
+      expect(await manager.listDiagnosisPostProcessingBacklog({ limit: 10 })).toHaveLength(0);
+      // Bad candidates keep a readable reason + recovery entry (rc-9).
+      const [badFirst] = await manager.getCandidatesByTaskId('diagnosis_bad-a');
+      if (badFirst === undefined) throw new Error('expected bad candidate');
+      const badDoc = await manager.getAdmissionDocument(badFirst.candidateId);
+      expect(badDoc.ok && badDoc.document?.processing?.state).toBe('exhausted');
+      expect(badDoc.ok && badDoc.document?.processing?.blockedReason).toContain('diagnostic_material_unusable');
+      expect(runnerCalls).toEqual([]);
+    } finally {
+      await ws.close();
+    }
+  });
+});
+
+describe('review round-3: atomic diagnostician family reopen', () => {
+  it('reopens parent + stages in one operation; a live lease refuses the WHOLE reopen (zero mutation)', async () => {
+    const ws = await realWorkspace();
+    try {
+      const { manager } = ws;
+      await manager.createTask({ taskId: 'diagnosis_p', taskKind: 'diagnostician', inputRef: 'pain-p', status: 'succeeded', attemptCount: 2, maxAttempts: 3, diagnosticJson: '{"sourcePainId":"pain-p"}' });
+      await manager.createTask({ taskId: 'diag_router-diagnosis_p', taskKind: 'diag_router', inputRef: 'diagnosis_p', status: 'succeeded', attemptCount: 2, maxAttempts: 3 });
+      await manager.createTask({ taskId: 'diag_rootcause-diagnosis_p', taskKind: 'diag_rootcause', inputRef: 'diagnosis_p', status: 'leased', attemptCount: 1, maxAttempts: 3, leaseOwner: 'other-worker' });
+      const refused = await manager.reopenDiagnosticianFamilyAtomic({
+        parentTaskId: 'diagnosis_p',
+        stageTaskIds: ['diag_rootcause-diagnosis_p', 'diag_router-diagnosis_p'],
+        parentPatch: { diagnosticJson: '{"sourcePainId":"pain-p","correctionEvidence":{"text":"stmt","classification":"owner_statement"}}' },
+      });
+      expect(refused).toEqual({ reopened: false, leased: ['diag_rootcause-diagnosis_p'] });
+      // zero mutation on refusal
+      const parent = await manager.getTask('diagnosis_p');
+      expect(parent?.status).toBe('succeeded');
+      expect(parent?.attemptCount).toBe(2);
+      expect(parent?.diagnosticJson).toBe('{"sourcePainId":"pain-p"}');
+      // without a lease: the whole family reopens atomically
+      await manager.updateTask('diag_rootcause-diagnosis_p', { status: 'failed' });
+      const ok = await manager.reopenDiagnosticianFamilyAtomic({
+        parentTaskId: 'diagnosis_p',
+        stageTaskIds: ['diag_rootcause-diagnosis_p', 'diag_router-diagnosis_p'],
+        parentPatch: { diagnosticJson: '{"sourcePainId":"pain-p","correctionEvidence":{"text":"stmt","classification":"owner_statement"}}' },
+      });
+      expect(ok).toEqual({ reopened: true, leased: [] });
+      for (const id of ['diagnosis_p', 'diag_router-diagnosis_p', 'diag_rootcause-diagnosis_p']) {
+        const t = await manager.getTask(id);
+        expect(t?.status).toBe('pending');
+        expect(t?.attemptCount).toBe(0);
+      }
+      const reopenedParent = await manager.getTask('diagnosis_p');
+      expect(reopenedParent?.diagnosticJson).toContain('owner_statement');
+    } finally {
+      await ws.close();
+    }
+  });
+});
+
+
+describe('review round-3: CAS regression proves the legacy read-modify-write loses updates', () => {
+  it('the pre-fix interleaving (read-read-write-write on two connections) DROPS an evaluation, the store does not', async () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-cas-legacy-'));
+    dirs.push(workspaceDir);
+    const manager = new RuntimeStateManager({ workspaceDir });
+    await manager.initialize();
+    try {
+      await manager.createTask({ taskId: 't-legacy', taskKind: 'diagnostician', inputRef: 'p', status: 'succeeded', attemptCount: 0, maxAttempts: 3 });
+      await manager.runStore.createRun({ runId: 'run-legacy', taskId: 't-legacy', runtimeKind: 'pi-ai', attemptNumber: 1, executionStatus: 'succeeded', startedAt: NOW, endedAt: NOW });
+      const connection = new SqliteConnection(workspaceDir);
+      const committer = new SqliteDiagnosticianCommitter(connection);
+      await committer.commit({ runId: 'run-legacy', taskId: 't-legacy', output: routerOutput(), idempotencyKey: 't-legacy:run-legacy', contentJson: '{}' });
+      connection.close();
+      const [legacyCandidate] = await manager.getCandidatesByTaskId('t-legacy');
+      if (legacyCandidate === undefined) throw new Error('expected candidate');
+
+      // STEP 1 - replay the EXACT pre-fix interleaving with raw SQL (the old
+      // implementation was: read column, merge in memory, UPDATE column).
+      // Proof this test can fail: under legacy semantics B's evaluation is lost.
+      const connA = new Database(path.join(workspaceDir, '.pd', 'state.db'));
+      const jsonBefore = (connA.prepare('SELECT admission_json j FROM principle_candidates WHERE candidate_id = ?').get(legacyCandidate.candidateId) as { j: string | null }).j ?? 'null';
+      const legacyB = (JSON.parse(jsonBefore) ?? { schemaVersion: 1, evaluations: [], currentEvaluationId: null }) as { schemaVersion: number; evaluations: { evaluationId: string }[]; currentEvaluationId: string | null };
+      legacyB.evaluations.push({ evaluationId: 'legacy-b' });
+      legacyB.currentEvaluationId = 'legacy-b';
+      connA.prepare('UPDATE principle_candidates SET admission_json = ? WHERE candidate_id = ?').run(JSON.stringify(legacyB), legacyCandidate.candidateId);
+      // A appends SECOND, still based on the STALE pre-B json (the legacy bug).
+      const legacyA = (JSON.parse(jsonBefore) ?? { schemaVersion: 1, evaluations: [], currentEvaluationId: null }) as { schemaVersion: number; evaluations: { evaluationId: string }[]; currentEvaluationId: string | null };
+      legacyA.evaluations.push({ evaluationId: 'legacy-a' });
+      legacyA.currentEvaluationId = 'legacy-a';
+      connA.prepare('UPDATE principle_candidates SET admission_json = ? WHERE candidate_id = ?').run(JSON.stringify(legacyA), legacyCandidate.candidateId);
+      const lost = JSON.parse((connA.prepare('SELECT admission_json j FROM principle_candidates WHERE candidate_id = ?').get(legacyCandidate.candidateId) as { j: string }).j);
+      expect(lost.evaluations.map((e: { evaluationId: string }) => e.evaluationId)).toEqual(['legacy-a']); // legacy-b LOST - the defect is real
+      connA.close();
+
+      // STEP 2 - the shipped store on a FRESH candidate: the same two-party
+      // pattern can never lose either update (BEGIN IMMEDIATE serializes it).
+      await manager.createTask({ taskId: 't-cas2', taskKind: 'diagnostician', inputRef: 'p2', status: 'succeeded', attemptCount: 0, maxAttempts: 3 });
+      await manager.runStore.createRun({ runId: 'run-cas2', taskId: 't-cas2', runtimeKind: 'pi-ai', attemptNumber: 1, executionStatus: 'succeeded', startedAt: NOW, endedAt: NOW });
+      const connection2 = new SqliteConnection(workspaceDir);
+      const committer2 = new SqliteDiagnosticianCommitter(connection2);
+      await committer2.commit({ runId: 'run-cas2', taskId: 't-cas2', output: routerOutput(), idempotencyKey: 't-cas2:run-cas2', contentJson: '{}' });
+      connection2.close();
+      const [casCandidate] = await manager.getCandidatesByTaskId('t-cas2');
+      if (casCandidate === undefined) throw new Error('expected cas candidate');
+      const connA2 = new SqliteConnection(workspaceDir);
+      const connB2 = new SqliteConnection(workspaceDir);
+      const { SqliteCandidateStore } = await import('../store/candidate/sqlite-candidate-store.js');
+      const storeA = new SqliteCandidateStore(connA2);
+      const storeB = new SqliteCandidateStore(connB2);
+      const evaluation = (id: string, fingerprint: string) => ({
+        evaluationId: id, decision: 'admitted' as const, reason: 'evidence_sufficient', nextAction: 'none',
+        evaluatedAt: NOW, policyVersion: 'admission-gate@cr-03', provenance: 'owner_reported_no_host_trace',
+        inputEvidenceCount: 1, ownerStatementPresent: false, recommendationKind: 'principle', confidence: 0.9,
+        materialFingerprint: fingerprint, materialSummary: { inputEvidenceCount: 1, outputEvidenceCount: 1, ownerStatementPresent: false },
+      });
+      await storeA.appendAdmissionEvaluation(casCandidate.candidateId, evaluation('cas-a', 'fp-a'));
+      await storeB.appendAdmissionEvaluation(casCandidate.candidateId, evaluation('cas-b', 'fp-b'));
+      await storeB.updateAdmissionProcessing(casCandidate.candidateId, { state: 'in_progress', attempts: 1 });
+      const finalDoc = await manager.getAdmissionDocument(casCandidate.candidateId);
+      expect(finalDoc.ok && finalDoc.document?.evaluations.map((e) => e.evaluationId)).toEqual(['cas-a', 'cas-b']);
+      expect(finalDoc.ok && finalDoc.document?.processing?.state).toBe('in_progress');
+      connA2.close();
+      connB2.close();
     } finally {
       await manager.close().catch(() => undefined);
     }

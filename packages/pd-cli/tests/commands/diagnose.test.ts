@@ -1,16 +1,51 @@
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
 import { Command } from 'commander';
 
-const { MockRuntimeStateManager, mockGetCandidatesByTaskId, mockUpdateCandidateStatus, mockCreateTask, mockGetTask } = vi.hoisted(() => {
+const { MockRuntimeStateManager, mockGetAdmissionDocument, mockAppendAdmissionEvaluation, mockGetRunsByTask, mockGetCandidateImpl, rearmGateSeams, mockGetCandidatesByTaskId, mockUpdateCandidateStatus, mockCreateTask, mockGetTask } = vi.hoisted(() => {
   const mockGetCandidatesByTaskId = vi.fn().mockResolvedValue([]);
   const mockUpdateCandidateStatus = vi.fn().mockResolvedValue(undefined);
   const mockCreateTask = vi.fn().mockResolvedValue(undefined);
+  const mockGetAdmissionDocument = vi.fn();
+  const mockAppendAdmissionEvaluation = vi.fn();
+  const mockGetRunsByTask = vi.fn();
+  const mockGetCandidateImpl = vi.fn(async (candidateId: string) => {
+    const all = await mockGetCandidatesByTaskId('any');
+    return all.find((c: { candidateId: string }) => c.candidateId === candidateId) ?? null;
+  });
+  function rearmGateSeams(): void {
+    mockGetTask.mockResolvedValue({
+      taskId: 'test-task-1', status: 'pending', attemptCount: 0, maxAttempts: 3, lastError: null,
+      diagnosticJson: JSON.stringify({ sourcePainId: 'pain-test', reasonSummary: 'r', source: 'manual', severity: 'moderate', sessionIdHint: null, agentIdHint: null, provenance: 'owner_reported_no_host_trace', provenanceReason: 'seeded', evidence: [{ sourceRef: 's:1', note: 'n' }], workspaceDir: null }),
+    });
+    mockGetAdmissionDocument.mockResolvedValue({
+      ok: true,
+      document: {
+        schemaVersion: 1,
+        evaluations: [{
+          evaluationId: 'ae_mock', decision: 'admitted', reason: 'evidence_sufficient', nextAction: 'none',
+          evaluatedAt: '2026-10-14T00:00:00.000Z', policyVersion: 'admission-gate@cr-03',
+          provenance: 'owner_reported_no_host_trace', inputEvidenceCount: 2, ownerStatementPresent: false,
+          recommendationKind: 'principle', confidence: 0.9, materialFingerprint: 'fp_mock',
+          materialSummary: { inputEvidenceCount: 2, outputEvidenceCount: 2, ownerStatementPresent: false },
+        }],
+        currentEvaluationId: 'ae_mock',
+      },
+    });
+    mockAppendAdmissionEvaluation.mockResolvedValue({ status: 'appended', document: { schemaVersion: 1, evaluations: [], currentEvaluationId: null } });
+    mockGetRunsByTask.mockResolvedValue([{
+      runId: 'run-underlying', status: 'succeeded',
+      outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd' }], confidence: 0.95 }),
+    }]);
+  }
   const mockGetTask = vi.fn().mockResolvedValue({
     taskId: 'test-task-1',
     status: 'pending',
     attemptCount: 0,
     maxAttempts: 3,
     lastError: null,
+    // SPEC review round-3 P1: the full admission re-evaluation reads the
+    // persisted diagnosis payload — keep it a complete admitting diagnosis.
+    diagnosticJson: JSON.stringify({ sourcePainId: 'pain-test', reasonSummary: 'r', source: 'manual', severity: 'moderate', sessionIdHint: null, agentIdHint: null, provenance: 'owner_reported_no_host_trace', provenanceReason: 'seeded', evidence: [{ sourceRef: 's:1', note: 'n' }], workspaceDir: null }),
   });
 
   class MockRuntimeStateManager {
@@ -20,6 +55,13 @@ const { MockRuntimeStateManager, mockGetCandidatesByTaskId, mockUpdateCandidateS
     createTask = mockCreateTask;
     getCandidatesByTaskId = mockGetCandidatesByTaskId;
     updateCandidateStatus = mockUpdateCandidateStatus;
+    // SPEC review round-3 P1: the full admission write gate reads these seams.
+    // Defaults = an admitted current disposition + admitting underlying
+    // materials, so existing diagnose/intake tests keep their original flow.
+    getAdmissionDocument = mockGetAdmissionDocument;
+    appendAdmissionEvaluation = mockAppendAdmissionEvaluation;
+    getCandidate = mockGetCandidateImpl;
+    getRunsByTask = mockGetRunsByTask;
     connection = {} as Record<string, unknown>;
     taskStore = {};
     runStore = {};
@@ -29,7 +71,7 @@ const { MockRuntimeStateManager, mockGetCandidatesByTaskId, mockUpdateCandidateS
       calculateBackoff: () => 10,
     });
   }
-  return { MockRuntimeStateManager, mockGetCandidatesByTaskId, mockUpdateCandidateStatus, mockCreateTask, mockGetTask };
+  return { MockRuntimeStateManager, mockGetCandidatesByTaskId, mockUpdateCandidateStatus, mockCreateTask, mockGetTask, mockGetAdmissionDocument, mockAppendAdmissionEvaluation, mockGetRunsByTask, mockGetCandidateImpl, rearmGateSeams };
 }, { validateType: true });
 
 const { mockIntake, MockCandidateIntakeService } = vi.hoisted(() => {
@@ -264,6 +306,12 @@ describe('pd diagnose run --runtime routing', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    rearmGateSeams();
+    // SPEC review round-3 P1: re-arm full-gate seams after clearAllMocks.
+    mockGetTask.mockResolvedValue({
+      taskId: 'test-task-1', status: 'pending', attemptCount: 0, maxAttempts: 3, lastError: null,
+      diagnosticJson: JSON.stringify({ sourcePainId: 'pain-test', reasonSummary: 'r', source: 'manual', severity: 'moderate', sessionIdHint: null, agentIdHint: null, provenance: 'owner_reported_no_host_trace', provenanceReason: 'seeded', evidence: [{ sourceRef: 's:1', note: 'n' }], workspaceDir: null }),
+    });
     const runtimeV2 = await import('@principles/core/runtime-v2');
     mockResolveRuntimeConfig = vi.mocked(runtimeV2.resolveRuntimeConfig);
     mockIsRuntimeConfigError = vi.mocked(runtimeV2.isRuntimeConfigError);
@@ -1382,6 +1430,9 @@ describe('Defect-004: pd diagnose run — dreamer seed after intake', () => {
     // so createTask gets called. Individual tests can override this if needed.
     mockGetTask.mockResolvedValue(null);
     mockIntake.mockReset();
+    // SPEC review round-3 P1: re-arm the full-gate seams cleared above — the
+    // write gate needs an admitting disposition + admitting run materials.
+    rearmGateSeams();
     mockIntake.mockResolvedValue({ outcome: 'ledger_entry', written: true, entry: { id: 'ledger-1', title: 'P1', status: 'probation' } });
   });
 
@@ -1536,6 +1587,7 @@ describe('DEFECT-005 (PRI-514): defer intake_failed must not poison other candid
     mockUpdateCandidateStatus.mockResolvedValue(undefined);
     mockCreateTask.mockResolvedValue(undefined);
     mockGetTask.mockResolvedValue(null);
+    rearmGateSeams();
     mockIntake.mockReset();
     mockIntake.mockResolvedValue({ outcome: 'ledger_entry', written: true, entry: { id: 'ledger-1', title: 'P1', status: 'probation' } });
     // Default: admit all candidates. Individual tests override for defer.
@@ -1603,6 +1655,7 @@ describe('DEFECT-005 (PRI-514): defer intake_failed must not poison other candid
     const jsonOutput = consoleSpy.mock.calls.find(call => {
       try {
         const parsed = JSON.parse(call[0] as string);
+    console.error('DEBUG-005', ...consoleSpy.mock.calls.map(c=>String(c[0]).slice(0,200)));
         return parsed.intake && Array.isArray(parsed.intake.candidates);
       } catch { return false; }
     });
@@ -1797,6 +1850,7 @@ describe('BUG-2 (PRI-442): sourcePainId resolution for dreamer seed', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     buildDreamerSeedCalls.length = 0;
+    rearmGateSeams();
     const { run } = await import('@principles/core/runtime-v2');
     vi.mocked(run).mockResolvedValue(SUCCEEDED_RESULT);
     mockGetCandidatesByTaskId.mockResolvedValue([]);
@@ -1806,6 +1860,13 @@ describe('BUG-2 (PRI-442): sourcePainId resolution for dreamer seed', () => {
     mockIntake.mockReset();
     mockIntake.mockResolvedValue({ outcome: 'ledger_entry', written: true, entry: { id: 'ledger-1', title: 'P1', status: 'probation' } });
     mockResolveSourcePainId.mockResolvedValue('pain_test-source-1');
+    // SPEC review round-3 P1: the full admission write gate reads the task's
+    // persisted diagnosis — re-point it at an admitting payload AFTER the
+    // generic null reset above.
+    mockGetTask.mockResolvedValue({
+      taskId: 'test-task-1', status: 'pending', attemptCount: 0, maxAttempts: 3, lastError: null,
+      diagnosticJson: JSON.stringify({ sourcePainId: 'pain_test-source-1', reasonSummary: 'r', source: 'manual', severity: 'moderate', sessionIdHint: null, agentIdHint: null, provenance: 'owner_reported_no_host_trace', provenanceReason: 'seeded', evidence: [{ sourceRef: 's:1', note: 'n' }], workspaceDir: null }),
+    });
   });
 
   it('passes resolved sourcePainId to buildDreamerSeedFromCandidate (lineage consistency)', async () => {
@@ -1926,6 +1987,7 @@ describe('PRI-638: pd diagnose run when Diagnostician capability is disabled', (
 describe('PRI-935: pd diagnose run — pain_diagnoses ledger dispatch', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
+    rearmGateSeams();
     const { run } = await import('@principles/core/runtime-v2');
     vi.mocked(run).mockResolvedValue(SUCCEEDED_RESULT);
     mockGetCandidatesByTaskId.mockResolvedValue([]);
@@ -1939,6 +2001,13 @@ describe('PRI-935: pd diagnose run — pain_diagnoses ledger dispatch', () => {
     const runtimeV2 = await import('@principles/core/runtime-v2');
     vi.mocked(runtimeV2.isFeatureEnabled).mockReturnValue(true);
     mockResolveSourcePainId.mockResolvedValue('pain_test-source-1');
+    // SPEC review round-3 P1: the full admission write gate reads the task's
+    // persisted diagnosis — re-point it at an admitting payload AFTER the
+    // generic null reset above.
+    mockGetTask.mockResolvedValue({
+      taskId: 'test-task-1', status: 'pending', attemptCount: 0, maxAttempts: 3, lastError: null,
+      diagnosticJson: JSON.stringify({ sourcePainId: 'pain_test-source-1', reasonSummary: 'r', source: 'manual', severity: 'moderate', sessionIdHint: null, agentIdHint: null, provenance: 'owner_reported_no_host_trace', provenanceReason: 'seeded', evidence: [{ sourceRef: 's:1', note: 'n' }], workspaceDir: null }),
+    });
   });
 
   function parseJsonLine(calls: Array<unknown[]>): Record<string, unknown> {

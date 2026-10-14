@@ -163,8 +163,17 @@ function writeLiveness(workspaceDir: string, patch: Record<string, unknown>): vo
       current = {};
     }
     const merged = { ...current, ...patch, updatedAt: new Date().toISOString() };
-    const tmp = path.join(stateDir, `${LIVENESS_FILE}.tmp`);
-    fs.writeFileSync(tmp, JSON.stringify(merged));
+    // CodeQL (insecure temporary file): the fixed predictable `.tmp` name is a
+    // symlink-swap surface in a shared state dir. Write+rename through an
+    // EXCLUSIVE random temp file in the same directory (O_EXCL | 0600) — the
+    // rename stays atomic within the directory.
+    const tmp = path.join(stateDir, `${LIVENESS_FILE}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 10)}.tmp`);
+    const fd = fs.openSync(tmp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
+    try {
+      fs.writeFileSync(fd, JSON.stringify(merged));
+    } finally {
+      fs.closeSync(fd);
+    }
     fs.renameSync(tmp, file);
   } catch {
     // liveness bookkeeping must never break the cycle (rc-9: the cycle report

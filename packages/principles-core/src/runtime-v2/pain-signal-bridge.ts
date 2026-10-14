@@ -674,7 +674,38 @@ export class PainSignalBridge {
     // correction evidence) — exactly what a fresh post-processing round sees.
     const reentry = validatePersistedIngressFacts(task.diagnosticJson);
     if (reentry.errorCode !== null) {
-      return { status: 'blocked', reason: reentry.errorCode, nextAction: 'the persisted diagnosis payload is unusable; repair or re-run the diagnosis via the supported CLI command' };
+      // SPEC §9.2 (review round-3 P1):确定无效材料不得每周期反复占预算。每个
+      // 候选持久化一条 needs_evidence 处置（材料不可解析）+ exhausted 终态，
+      // backlog 不再返回；原因与恢复入口（修复诊断）可查、可恢复。
+      const blockedAt = new Date().toISOString();
+      for (const candidate of candidates) {
+        try {
+          await this.stateManager.appendAdmissionEvaluation(candidate.candidateId, {
+            evaluationId: `ae_blocked_${fingerprintMaterial([candidate.candidateId, reentry.errorCode]).slice(0, 16)}`,
+            decision: 'needs_evidence',
+            reason: `diagnostic_material_unusable:${reentry.errorCode}`,
+            nextAction: 'repair or re-run the diagnosis via the supported CLI command; the candidate resumes automatically afterwards',
+            evaluatedAt: blockedAt,
+            policyVersion: ADMISSION_POLICY_VERSION,
+            provenance: 'automatic_hook',
+            inputEvidenceCount: 0,
+            ownerStatementPresent: false,
+            recommendationKind: candidate.rawRecommendationKind,
+            confidence: null,
+            materialFingerprint: fingerprintMaterial(['unusable', reentry.errorCode]),
+            materialSummary: { inputEvidenceCount: 0, outputEvidenceCount: 0, ownerStatementPresent: false },
+          });
+          await this.stateManager.updateAdmissionProcessing(candidate.candidateId, {
+            state: 'exhausted',
+            attempts: MAX_POST_PROCESSING_ATTEMPTS,
+            blockedReason: `diagnostic_material_unusable:${reentry.errorCode}`,
+          });
+        } catch {
+          // persistence of the terminal state itself failed → stay scannable
+          // (rc-9: the next cycle retries this bookkeeping)
+        }
+      }
+      return { status: 'blocked', reason: reentry.errorCode, nextAction: 'the persisted diagnosis payload is unusable; repair or re-run the diagnosis via the supported CLI command (candidates recorded terminal manual_action_required states)' };
     }
     const runs = await this.stateManager.getRunsByTask(input.taskId);
     let output: DiagnosticianOutputV1 | undefined;

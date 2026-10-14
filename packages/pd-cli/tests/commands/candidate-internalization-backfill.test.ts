@@ -34,6 +34,32 @@ vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
         close: mockClose,
         getCandidate: mockGetCandidate,
         getTask: mockGetTask,
+        // SPEC review S1: full admission write gate (defaults = admitted doc
+        // + admitting underlying materials; tests may override per case).
+        getRunsByTask: vi.fn(async (taskId: string) => ([{
+          runId: 'run-underlying', taskId, status: 'succeeded',
+          outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd' }], confidence: 0.95 }),
+        }])),
+        getCandidatesByTaskId: vi.fn(async (taskId: string) => {
+          // Test convention: candidate taskId is `diag-task-<candidateId>`.
+          const current = await mockGetCandidate(taskId.replace(/^diag-task-/, ''));
+          return current ? [current] : [];
+        }),
+        getAdmissionDocument: vi.fn().mockResolvedValue({
+          ok: true,
+          document: {
+            schemaVersion: 1,
+            evaluations: [{
+              evaluationId: 'ae_mock', decision: 'admitted', reason: 'evidence_sufficient', nextAction: 'none',
+              evaluatedAt: '2026-10-14T00:00:00.000Z', policyVersion: 'admission-gate@cr-03',
+              provenance: 'owner_reported_no_host_trace', inputEvidenceCount: 2, ownerStatementPresent: false,
+              recommendationKind: 'principle', confidence: 0.9, materialFingerprint: 'fp_mock',
+              materialSummary: { inputEvidenceCount: 2, outputEvidenceCount: 2, ownerStatementPresent: false },
+            }],
+            currentEvaluationId: 'ae_mock',
+          },
+        }),
+        appendAdmissionEvaluation: vi.fn().mockResolvedValue({ status: 'appended', document: { schemaVersion: 1, evaluations: [], currentEvaluationId: null } }),
         createTask: mockCreateTask,
         updateTaskDiagnosticJson: mockUpdateTaskDiagnosticJson,
         connection: {
@@ -147,7 +173,9 @@ function setupDefaultMocks(): void {
         taskId,
         taskKind: 'diagnostician',
         status: 'completed',
-        diagnosticJson: JSON.stringify({ sourcePainId: `pain-${taskId}` }),
+        // SPEC review S1: the full admission re-evaluation reads this payload —
+        // it must carry a complete admitting diagnosis (valid ingress + evidence).
+        diagnosticJson: JSON.stringify({ sourcePainId: `pain-${taskId}`, reasonSummary: 'r', source: 'manual', severity: 'moderate', sessionIdHint: null, agentIdHint: null, provenance: 'owner_reported_no_host_trace', provenanceReason: 'seeded', evidence: [{ sourceRef: 's:1', note: 'n' }], workspaceDir: null }),
       });
     }
     // Dreamer task lookup → null (no existing dreamer task)
@@ -282,7 +310,9 @@ describe('pd candidate internalization backfill', () => {
           taskId,
           taskKind: 'diagnostician',
           status: 'completed',
-          diagnosticJson: JSON.stringify({ sourcePainId: `pain-${taskId}` }),
+          // SPEC review S1: full admission re-evaluation reads this payload —
+          // keep it a complete admitting diagnosis.
+          diagnosticJson: JSON.stringify({ sourcePainId: `pain-${taskId}`, reasonSummary: 'r', source: 'manual', severity: 'moderate', sessionIdHint: null, agentIdHint: null, provenance: 'owner_reported_no_host_trace', provenanceReason: 'seeded', evidence: [{ sourceRef: 's:1', note: 'n' }], workspaceDir: null }),
         });
       }
       // Dreamer task already exists → idempotency check
@@ -466,6 +496,7 @@ describe('Commander wiring for backfill --include-pending', () => {
     });
     mockGetCandidate.mockResolvedValue({
       candidateId: 'cand-pending-1',
+      taskId: 'diag-task-cand-pending-1',
       description: 'test',
       sourceRecommendationJson: JSON.stringify({ kind: 'principle', description: 'test' }),
     });

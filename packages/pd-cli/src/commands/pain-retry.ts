@@ -54,6 +54,7 @@ import { resolveRuntimeFromPdConfig } from '../services/resolve-runtime-from-pd-
 import type { PDTaskStatus } from '@principles/core/runtime-v2';
 import { readOutputLanguageFromWorkspace } from '../config-reader.js';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
+import { enforceFullAdmissionForWrite } from '../services/admission-write-gate.js';
 import { createWorkspaceTelemetryEmitter } from '../services/workspace-telemetry.js';
 import { checkAdmissionGate } from './admission-gate.js';
 import * as path from 'path';
@@ -909,26 +910,33 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         channel: 'cli_owner_statement',
         ...(typeof payloadParsed.sessionIdHint === 'string' ? { sessionId: payloadParsed.sessionIdHint } : {}),
       };
-      await stateManager.updateTask(taskId, {
-        status: 'pending',
-        attemptCount: 0,
-        diagnosticJson: JSON.stringify(payloadParsed),
-      });
       const diagFamily = [
         `diag_rootcause-${taskId}`,
         `diag_distiller-${taskId}`,
         `diag_router-${taskId}`,
       ];
+      // SPEC review round-3 P1: the whole family reopens in ONE transaction —
+      // a crash can never leave a half-recovered family, and a live lease on
+      // any member refuses the entire reopen (the running diagnosis wins).
+      const reopen = await stateManager.reopenDiagnosticianFamilyAtomic({
+        parentTaskId: taskId,
+        stageTaskIds: diagFamily,
+        parentPatch: { diagnosticJson: JSON.stringify(payloadParsed) },
+      });
+      if (!reopen.reopened) {
+        return refuseExit(opts, {
+          painId: opts.painId, taskId,
+          reason: 'recovery_lease_conflict',
+          message: `A live diagnosis lease holds: ${reopen.leased.join(', ')} — the authorized recovery was NOT applied (zero mutation).`,
+          nextAction: 'Wait for the running diagnosis to finish, or route it to pd runtime recovery; then re-run this recovery.',
+        });
+      }
       for (const familyTaskId of diagFamily) {
         const stage = await stateManager.getTask(familyTaskId);
-        if (stage === null) continue;
-        if (stage.status === 'succeeded' || stage.status === 'failed' || stage.status === 'retry_wait') {
-          await stateManager.updateTask(familyTaskId, { status: 'pending', attemptCount: 0 });
-          recoveredTasks.push({ taskId: familyTaskId, forceApplied: true });
-        }
+        if (stage !== null && stage.status === 'pending') recoveredTasks.push({ taskId: familyTaskId, forceApplied: true });
       }
       task = await stateManager.getTask(taskId);
-      console.error(`[PD] owner statement attached to ${taskId}; authorized recovery re-opened the diagnosis family`);
+      console.error(`[PD] owner statement attached to ${taskId}; authorized recovery re-opened the diagnosis family atomically`);
     } else if (task && (task.status === 'failed' || task.status === 'retry_wait')) {
       const diagFamily = [
         taskId,
@@ -1068,7 +1076,10 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       // cli-5-failure-no-mutation: refusal path does not call intake(), does
       // not update candidate status, does not write ledger.
       // cli-6-output-next-action: refusal result carries admissionBlock.nextAction.
-      const admissionBlock = checkAdmissionGate(candidate);
+      // SPEC review round-3 P1: the FULL write gate (persisted disposition /
+      // re-evaluation), not the confidence/kind-only partial check — a
+      // corrupted or stale admission document can never be intaked here.
+      const admissionBlock = (await enforceFullAdmissionForWrite(stateManager, candidate.candidateId)) ?? checkAdmissionGate(candidate);
       if (admissionBlock) {
         intakeFailed = true;
         intakeResults.push({

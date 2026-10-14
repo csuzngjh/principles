@@ -35,6 +35,7 @@ import { DefaultRecoverySweep } from './lifecycle/recovery-sweep.js';
 import { SqliteCommitStore } from './commit/sqlite-commit-store.js';
 import { SqliteCandidateStore } from './candidate/sqlite-candidate-store.js';
 import { SqliteReconciliationCursorStore } from './reconciliation-cursor-store.js';
+import { reopenDiagnosticianFamilyInConnection } from './task/sqlite-family-reopen.js';
 import { SqliteArtifactStore } from './artifact/sqlite-artifact-store.js';
 import { SqlitePIArtifactStore } from './artifact/sqlite-pi-artifact-store.js';
 import { SqlitePainDiagnosisStore } from './pain-diagnosis/sqlite-pain-diagnosis-store.js';
@@ -540,6 +541,16 @@ export class RuntimeStateManager {
   async updateAdmissionProcessing(candidateId: string, processing: AdmissionProcessingRecord): Promise<boolean> {
     this.assertInitialized();
     return this._candidateStore.updateAdmissionProcessing(candidateId, processing);
+  }
+
+  async reopenDiagnosticianFamilyAtomic(input: {
+    parentTaskId: string;
+    stageTaskIds: string[];
+    parentPatch: { diagnosticJson?: string };
+  }): Promise<{ reopened: boolean; leased: string[] }> {
+    this.assertInitialized();
+    // Store-owned SQL (PRI-47): the manager delegates, no inline SQL here.
+    return reopenDiagnosticianFamilyInConnection(this._connection, input);
   }
 
   /** SPEC §9.1 fair-share service cursor (same reconciliation_cursor authority, scoped). */

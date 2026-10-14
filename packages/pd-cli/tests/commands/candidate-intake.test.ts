@@ -10,6 +10,19 @@ const { mockStateManager, mockAdapter, mockService, MockRuntimeStateManager, Moc
     close: vi.fn().mockResolvedValue(undefined),
     // SPEC-CODEX-PAIN-CLOSURE-001 CR-03: the persisted admission disposition is
     // the intake write permission; default mock = an admitted current evaluation.
+    getTask: vi.fn().mockResolvedValue({
+      taskId: 'task-underlying', status: 'succeeded',
+      diagnosticJson: JSON.stringify({ sourcePainId: 'p', reasonSummary: 'r', source: 'manual', severity: 'moderate', sessionIdHint: null, agentIdHint: null, provenance: 'owner_reported_no_host_trace', provenanceReason: 'seeded', evidence: [{ sourceRef: 's:1', note: 'n' }], workspaceDir: null }),
+    }),
+    getRunsByTask: vi.fn().mockResolvedValue([{
+      runId: 'run-underlying', status: 'succeeded',
+      outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd' }], confidence: 0.95 }),
+    }]),
+    appendAdmissionEvaluation: vi.fn().mockResolvedValue({ status: 'appended', document: { schemaVersion: 1, evaluations: [], currentEvaluationId: null } }),
+    getCandidatesByTaskId: vi.fn(async () => {
+      const current = await mockStateManager.getCandidate();
+      return current ? [current] : [];
+    }),
     getAdmissionDocument: vi.fn().mockResolvedValue({
       ok: true,
       document: {

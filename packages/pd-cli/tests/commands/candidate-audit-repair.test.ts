@@ -34,6 +34,33 @@ const { mockStateManager, mockAdapter, mockService, mockDb, mockLoadLedger, mock
   };
 
   const mockStateManager = {
+    getTask: vi.fn().mockResolvedValue({
+      taskId: 'task-underlying', status: 'succeeded',
+      diagnosticJson: JSON.stringify({ sourcePainId: 'p', reasonSummary: 'r', source: 'manual', severity: 'moderate', sessionIdHint: null, agentIdHint: null, provenance: 'owner_reported_no_host_trace', provenanceReason: 'seeded', evidence: [{ sourceRef: 's:1', note: 'n' }], workspaceDir: null }),
+    }),
+    getRunsByTask: vi.fn().mockResolvedValue([{
+      runId: 'run-underlying', status: 'succeeded',
+      outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd' }], confidence: 0.95 }),
+    }]),
+    getCandidatesByTaskId: vi.fn(async () => {
+      const current = await mockStateManager.getCandidate();
+      return current ? [current] : [];
+    }),
+    getAdmissionDocument: vi.fn().mockResolvedValue({
+      ok: true,
+      document: {
+        schemaVersion: 1,
+        evaluations: [{
+          evaluationId: 'ae_mock', decision: 'admitted', reason: 'evidence_sufficient', nextAction: 'none',
+          evaluatedAt: '2026-10-14T00:00:00.000Z', policyVersion: 'admission-gate@cr-03',
+          provenance: 'owner_reported_no_host_trace', inputEvidenceCount: 2, ownerStatementPresent: false,
+          recommendationKind: 'principle', confidence: 0.9, materialFingerprint: 'fp_mock',
+          materialSummary: { inputEvidenceCount: 2, outputEvidenceCount: 2, ownerStatementPresent: false },
+        }],
+        currentEvaluationId: 'ae_mock',
+      },
+    }),
+    appendAdmissionEvaluation: vi.fn().mockResolvedValue({ status: 'appended', document: { schemaVersion: 1, evaluations: [], currentEvaluationId: null } }),
     initialize: vi.fn().mockResolvedValue(undefined),
     getCandidate: vi.fn(),
     close: vi.fn().mockResolvedValue(undefined),

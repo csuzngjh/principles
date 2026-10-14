@@ -62,6 +62,19 @@ const { WORKSPACE,
   const mockStateManager = {
     initialize: vi.fn().mockResolvedValue(undefined),
     getCandidate: vi.fn(),
+    getTask: vi.fn().mockResolvedValue({
+      taskId: 'task-underlying', status: 'succeeded',
+      diagnosticJson: JSON.stringify({ sourcePainId: 'p', reasonSummary: 'r', source: 'manual', severity: 'moderate', sessionIdHint: null, agentIdHint: null, provenance: 'owner_reported_no_host_trace', provenanceReason: 'seeded', evidence: [{ sourceRef: 's:1', note: 'n' }], workspaceDir: null }),
+    }),
+    getRunsByTask: vi.fn().mockResolvedValue([{
+      runId: 'run-underlying', status: 'succeeded',
+      outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd' }], confidence: 0.95 }),
+    }]),
+    appendAdmissionEvaluation: vi.fn().mockResolvedValue({ status: 'appended', document: { schemaVersion: 1, evaluations: [], currentEvaluationId: null } }),
+    getCandidatesByTaskId: vi.fn(async () => {
+      const current = await mockStateManager.getCandidate();
+      return current ? [current] : [];
+    }),
     getAdmissionDocument: vi.fn().mockResolvedValue({
       ok: true,
       document: {
@@ -247,7 +260,9 @@ function diagnosticianTask(taskId: string) {
     taskId,
     taskKind: 'diagnostician',
     status: 'completed',
-    diagnosticJson: JSON.stringify({ sourcePainId: `pain-${taskId}` }),
+    // SPEC review S1: the full admission re-evaluation reads this payload —
+    // it must be a complete admitting diagnosis (valid ingress + evidence).
+    diagnosticJson: JSON.stringify({ sourcePainId: `pain-${taskId}`, reasonSummary: 'r', source: 'manual', severity: 'moderate', sessionIdHint: null, agentIdHint: null, provenance: 'owner_reported_no_host_trace', provenanceReason: 'seeded', evidence: [{ sourceRef: 's:1', note: 'n' }], workspaceDir: null }),
   };
 }
 
@@ -300,6 +315,32 @@ describe('R7 gate-bypass fix: wiring (the P0 itself)', () => {
     mockStateManager.getTask.mockReset();
     mockStateManager.getTask.mockImplementation((taskId: string) =>
       taskId.startsWith('diag-task-') ? Promise.resolve(diagnosticianTask(taskId)) : Promise.resolve(null));
+    // SPEC review S1: the full admission write gate reads these seams —
+    // vi.clearAllMocks() wipes the literal implementations above, so the
+    // admitting defaults are re-armed here every test.
+    mockStateManager.getAdmissionDocument.mockResolvedValue({
+      ok: true,
+      document: {
+        schemaVersion: 1,
+        evaluations: [{
+          evaluationId: 'ae_mock', decision: 'admitted', reason: 'evidence_sufficient', nextAction: 'none',
+          evaluatedAt: '2026-10-14T00:00:00.000Z', policyVersion: 'admission-gate@cr-03',
+          provenance: 'owner_reported_no_host_trace', inputEvidenceCount: 2, ownerStatementPresent: false,
+          recommendationKind: 'principle', confidence: 0.9, materialFingerprint: 'fp_mock',
+          materialSummary: { inputEvidenceCount: 2, outputEvidenceCount: 2, ownerStatementPresent: false },
+        }],
+        currentEvaluationId: 'ae_mock',
+      },
+    });
+    mockStateManager.appendAdmissionEvaluation.mockResolvedValue({ status: 'appended', document: { schemaVersion: 1, evaluations: [], currentEvaluationId: null } });
+    mockStateManager.getRunsByTask.mockResolvedValue([{
+      runId: 'run-underlying', status: 'succeeded',
+      outputPayload: JSON.stringify({ valid: true, diagnosisId: 'd', summary: 's', rootCause: 'rc', violatedPrinciples: [], evidence: [{ sourceRef: 's:1', note: 'n' }], recommendations: [{ kind: 'principle', description: 'd' }], confidence: 0.95 }),
+    }]);
+    mockStateManager.getCandidatesByTaskId.mockImplementation(async () => {
+      const current = await mockStateManager.getCandidate();
+      return current ? [current] : [];
+    });
     mockStateManager.createTask.mockReset();
     mockStateManager.createTask.mockImplementation((input: { taskId: string }) => Promise.resolve({ taskId: input.taskId }));
     mockAdapter.existsForCandidate.mockReturnValue(null);
