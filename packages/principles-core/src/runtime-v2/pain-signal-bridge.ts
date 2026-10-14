@@ -1201,8 +1201,10 @@ export class PainSignalBridge {
         // CR-05 (SPEC §9.1): resume idempotency — when a previous round already
         // wrote this candidate's Ledger entry, skip intake (no duplicate
         // writes) and fall through to seed/link recovery below.
-        const existingLedgerEntry = this.ledgerAdapter.existsForCandidate(candidate.candidateId);
-        if (existingLedgerEntry !== null) {
+        // CR-05 resume idempotency (guarded for adapters whose seam returns
+        // undefined instead of null): only a REAL persisted entry short-circuits.
+        const existingLedgerEntry = this.ledgerAdapter.existsForCandidate(candidate.candidateId) ?? null;
+        if (existingLedgerEntry !== null && typeof existingLedgerEntry.id === 'string') {
           ledgerEntryIds.push(existingLedgerEntry.id);
           ledgerEntryByCandidate.set(candidate.candidateId, existingLedgerEntry.id);
         }
@@ -1210,7 +1212,7 @@ export class PainSignalBridge {
         // sibling 隔离：一个 candidate 的 intake 失败不应中止整批（ERR-089 模式）
         let intakeResult;
         try {
-          if (existingLedgerEntry !== null) {
+          if (existingLedgerEntry !== null && typeof existingLedgerEntry.id === 'string') {
             intakeResult = { outcome: 'ledger_entry' as const, written: false, entry: existingLedgerEntry };
           } else {
             intakeResult = await this.intakeService.intake(candidate.candidateId);

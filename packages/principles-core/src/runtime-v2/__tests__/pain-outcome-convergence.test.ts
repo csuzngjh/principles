@@ -61,6 +61,9 @@ function makeBridge(): { bridge: PainSignalBridge; createdTasks: TaskRecord[] } 
     getTask: async () => null,
     createTask: async (t: TaskRecord) => { createdTasks.push(t); },
     updateCandidateStatus: async () => true,
+    getAdmissionDocument: async () => ({ ok: true, document: null }),
+    appendAdmissionEvaluation: async () => ({ status: 'appended' as const, document: { schemaVersion: 1 as const, evaluations: [], currentEvaluationId: null } }),
+    updateAdmissionProcessing: async () => true,
   } as unknown as RuntimeStateManager;
   const runner: DiagnosticianRunnerLike = {
     run: async () => ({ status: 'succeeded', taskId: TASK_ID, attemptCount: 1 }),

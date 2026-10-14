@@ -91,4 +91,10 @@ export interface CandidateStore {
    */
   updateAdmissionProcessing(candidateId: string, processing: AdmissionProcessingRecord): Promise<boolean>;
 
+  /**
+   * SPEC §9.1: the diagnosis post-processing backlog (router-candidate aware,
+   * orphan-inclusive). See SqliteCandidateStore for the resolution contract.
+   */
+  listDiagnosisPostProcessingBacklog(options: { limit: number; nowIso?: string }): { candidateId: string; taskId: string; status: string; createdAt: string; processingState: string | null }[];
+
 }

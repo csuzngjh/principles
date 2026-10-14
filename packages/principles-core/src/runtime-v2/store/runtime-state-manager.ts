@@ -34,6 +34,7 @@ import { DefaultRetryPolicy } from './lifecycle/retry-policy.js';
 import { DefaultRecoverySweep } from './lifecycle/recovery-sweep.js';
 import { SqliteCommitStore } from './commit/sqlite-commit-store.js';
 import { SqliteCandidateStore } from './candidate/sqlite-candidate-store.js';
+import { SqliteReconciliationCursorStore } from './reconciliation-cursor-store.js';
 import { SqliteArtifactStore } from './artifact/sqlite-artifact-store.js';
 import { SqlitePIArtifactStore } from './artifact/sqlite-pi-artifact-store.js';
 import { SqlitePainDiagnosisStore } from './pain-diagnosis/sqlite-pain-diagnosis-store.js';
@@ -541,6 +542,19 @@ export class RuntimeStateManager {
     return this._candidateStore.updateAdmissionProcessing(candidateId, processing);
   }
 
+  /** SPEC §9.1 fair-share service cursor (same reconciliation_cursor authority, scoped). */
+  async getDiagnosticianServiceCursor(scope: string): Promise<{ lastUpdatedAt: string; lastTaskId: string } | null> {
+    this.assertInitialized();
+    const store = new SqliteReconciliationCursorStore(this._connection);
+    return store.get(scope);
+  }
+
+  async setDiagnosticianServiceCursor(scope: string, cursor: { lastUpdatedAt: string; lastTaskId: string }): Promise<void> {
+    this.assertInitialized();
+    const store = new SqliteReconciliationCursorStore(this._connection);
+    store.set(scope, cursor);
+  }
+
   /**
    * SPEC-CODEX-PAIN-CLOSURE-001 CR-05 (SPEC §9.1): the diagnosis post-processing
    * backlog — candidates of SUCCEEDED diagnostician tasks whose admission /
@@ -555,48 +569,8 @@ export class RuntimeStateManager {
     { candidateId: string; taskId: string; status: string; createdAt: string; processingState: string | null }[]
   > {
     this.assertInitialized();
-    const db = this._connection.getDb();
-    const nowIso = options.nowIso ?? new Date().toISOString();
-    // SPEC-CODEX-PAIN-CLOSURE-001 §9.1 (review P1): candidates of the REAL
-    // split pipeline are committed by the diag_router SUBTASK (candidate.task_id
-    // = `diag_router-<parentTaskId>`), so the scan resolves each candidate's
-    // owning diagnostician PARENT through subtask.inputRef instead of requiring
-    // candidate.task_id to be the diagnostician task itself. `taskId` in the
-    // result is always the PARENT diagnostician task — the resume entry reads
-    // the original pain input from the parent diagnosticJson and the router
-    // output from the subtask's run (never re-running the diagnosis LLM).
-    // Legacy orphan coverage: admission_json IS NULL + consumed rows are
-    // included (consumed-but-unseeded pre-CR-03 records); the resume path is
-    // idempotent (Ledger dedup via existsForCandidate, seed dedup via
-    // findExistingDreamerTask) and moves them to a terminal processing state,
-    // so completed / awaiting-owner / exhausted rows never rescanned.
-    const rows = db.prepare(`
-      SELECT pc.candidate_id AS candidateId,
-             COALESCE(parent.task_id, ct.task_id) AS taskId,
-             pc.status AS status,
-             pc.created_at AS createdAt,
-             json_extract(pc.admission_json, '$.processing.state') AS processingState
-      FROM principle_candidates pc
-      JOIN tasks ct ON ct.task_id = pc.task_id
-      LEFT JOIN tasks parent
-        ON parent.task_id = ct.input_ref AND parent.task_kind = 'diagnostician'
-      WHERE COALESCE(parent.task_kind, ct.task_kind) = 'diagnostician'
-        AND COALESCE(parent.status, ct.status) = 'succeeded'
-        AND (
-          (pc.admission_json IS NULL AND pc.status IN ('pending', 'consumed'))
-          OR (
-            pc.admission_json IS NOT NULL
-            AND COALESCE(json_extract(pc.admission_json, '$.processing.state'), 'not_started') IN ('not_started', 'in_progress')
-            AND (
-              json_extract(pc.admission_json, '$.processing.nextRetryAt') IS NULL
-              OR json_extract(pc.admission_json, '$.processing.nextRetryAt') <= ?
-            )
-          )
-        )
-      ORDER BY pc.created_at ASC
-      LIMIT ?
-    `).all(nowIso, options.limit) as { candidateId: string; taskId: string; status: string; createdAt: string; processingState: string | null }[];
-    return rows;
+    // Store-owned query (PRI-47: the manager delegates; no inline SQL here).
+    return this._candidateStore.listDiagnosisPostProcessingBacklog(options);
   }
 
   async archivePrinciple(principleId: string): Promise<boolean> {

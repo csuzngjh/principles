@@ -179,17 +179,42 @@ function writeLiveness(workspaceDir: string, patch: Record<string, unknown>): vo
  * bounded (`limit`), and executePendingDiagnosis re-enforces the backoff
  * window on the chosen task — no double bookkeeping.
  */
-async function pickDiagnosticianCandidate(stateManager: Awaited<ReturnType<typeof createRuntimeStateHandle>>['stateManager'], limit: number): Promise<TaskRecord | null> {
+const DIAGNOSTICIAN_FAIR_SHARE_SCOPE = 'codex-worker-diagnostician-fair-share';
+
+/**
+ * SPEC §9.1 fair-share pick (review P1): pending and due-retry are both
+ * continuously-eligible classes; neither may starve the other while new
+ * pending signals keep arriving. A persistent round-robin cursor (stored in
+ * the existing reconciliation_cursor authority, so a worker restart does NOT
+ * reset it to pending-priority) alternates service between the two classes —
+ * each eligible class is served at least every other cycle, well inside the
+ * 3-full-cycle bound. Single-eligible work is always served.
+ */
+async function pickDiagnosticianCandidate(stateManager: Awaited<ReturnType<typeof createRuntimeStateHandle>>['stateManager'], limit: number, nowIso: string): Promise<TaskRecord | null> {
   const pending = await stateManager.listTasks({ taskKind: 'diagnostician', status: 'pending', orderBy: 'updated_at_asc', limit });
-  const [first] = pending;
-  if (first !== undefined) return first;
+  const [pendingTask] = pending;
+  let retryTask: TaskRecord | null = null;
   const retrying = await stateManager.listTasks({ taskKind: 'diagnostician', status: 'retry_wait', orderBy: 'updated_at_asc', limit });
   for (const candidate of retrying) {
     if (isRetryWaitBackoffElapsed(candidate.status, candidate.leaseExpiresAt)) {
-      return candidate;
+      retryTask = candidate;
+      break;
     }
   }
-  return null;
+  if (pendingTask === undefined && retryTask === null) return null;
+  if (retryTask === null) {
+    await stateManager.setDiagnosticianServiceCursor(DIAGNOSTICIAN_FAIR_SHARE_SCOPE, { lastUpdatedAt: nowIso, lastTaskId: 'pending' });
+    return pendingTask ?? null;
+  }
+  if (pendingTask === undefined) {
+    await stateManager.setDiagnosticianServiceCursor(DIAGNOSTICIAN_FAIR_SHARE_SCOPE, { lastUpdatedAt: nowIso, lastTaskId: 'retry_wait' });
+    return retryTask;
+  }
+  const cursor = await stateManager.getDiagnosticianServiceCursor(DIAGNOSTICIAN_FAIR_SHARE_SCOPE);
+  const serveRetryFirst = cursor?.lastTaskId !== 'retry_wait';
+  const servedClass = serveRetryFirst ? 'retry_wait' : 'pending';
+  await stateManager.setDiagnosticianServiceCursor(DIAGNOSTICIAN_FAIR_SHARE_SCOPE, { lastUpdatedAt: nowIso, lastTaskId: servedClass });
+  return serveRetryFirst ? retryTask : pendingTask;
 }
 
 /**
@@ -286,7 +311,7 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
         if (sweep.recovered > 0 || sweep.errors.length > 0) {
           emitEvent('CODEX_WORKER_RECOVERY_SWEEP', JSON.stringify({ recovered: sweep.recovered, failed: sweep.errors.length }));
         }
-        const candidate = await pickDiagnosticianCandidate(handle.stateManager, options.diagnosticianCandidateLimit ?? DEFAULT_DIAG_CANDIDATE_LIMIT);
+        const candidate = await pickDiagnosticianCandidate(handle.stateManager, options.diagnosticianCandidateLimit ?? DEFAULT_DIAG_CANDIDATE_LIMIT, new Date().toISOString());
         if (candidate !== null) {
           const stateDir = path.join(workspaceDir, '.state');
           const bridge = await createPainSignalBridge({

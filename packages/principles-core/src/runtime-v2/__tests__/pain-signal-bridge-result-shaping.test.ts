@@ -133,6 +133,9 @@ function makeMockDeps(overrides: {
     getCandidatesByTaskId: async () => overrides.candidates ?? [],
     getRunsByTask: async () => [{ runId: RUN_ID, taskId: TASK_ID, status: 'succeeded' }],
     updateCandidateStatus: updateCandidateStatusMock,
+    getAdmissionDocument: async () => ({ ok: true, document: null }),
+    appendAdmissionEvaluation: async () => ({ status: 'appended' as const, document: { schemaVersion: 1 as const, evaluations: [], currentEvaluationId: null } }),
+    updateAdmissionProcessing: async () => true,
   } as unknown as RuntimeStateManager;
 
   const intakeService = {

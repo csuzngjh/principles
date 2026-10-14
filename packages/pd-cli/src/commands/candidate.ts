@@ -484,6 +484,62 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
   }
 }
 
+
+/**
+ * SPEC-CODEX-PAIN-CLOSURE-001 CR-03 §7.2 (review S1): the shared WRITE
+ * permission gate for every candidate mutation entry (intake / repair /
+ * backfill / review --decide create). Semantics:
+ *   - corrupted / dangling-pointer admission document → refuse (fail closed,
+ *     never treated as "historically unrecorded");
+ *   - no document (pre-CR-03 record) → full re-evaluation from the persisted
+ *     materials, saved (idempotent);
+ *   - current admitted → revalidated against the current material (changed
+ *     material appends a NEW evaluation whose decision rules);
+ *   - current non-admitted → refuse.
+ * Returns null when the write may proceed; otherwise the structured refusal.
+ */
+async function enforceFullAdmissionForWrite(
+  stateManager: RuntimeStateManager,
+  candidateId: string,
+): Promise<{ decision: string; reason: string; nextAction: string } | null> {
+  const admissionDocument = await stateManager.getAdmissionDocument(candidateId);
+  if (admissionDocument.ok && admissionDocument.document !== null) {
+    const current = currentAdmissionEvaluation(admissionDocument.document);
+    if (current === null) {
+      return {
+        decision: 'needs_evidence',
+        reason: 'admission_document_current_evaluation_dangling',
+        nextAction: 'repair or re-run the diagnosis to regenerate the admission disposition; the write is refused until a valid current evaluation exists',
+      };
+    }
+    if (current.decision !== 'admitted') {
+      return { decision: current.decision, reason: current.reason, nextAction: current.nextAction };
+    }
+  } else if (!admissionDocument.ok) {
+    return {
+      decision: 'needs_evidence',
+      reason: `admission_document_unreadable:${admissionDocument.reason}`,
+      nextAction: 'inspect principle_candidates.admission_json for this candidate; repair or re-run the diagnosis before this write',
+    };
+  }
+  const candidate = await stateManager.getCandidate(candidateId);
+  if (candidate === null) {
+    return { decision: 'needs_evidence', reason: 'candidate_not_found', nextAction: 'verify the candidate id' };
+  }
+  const revalidated = await evaluateAndPersistAdmissionFromStore(stateManager, [candidateId], { taskId: candidate.taskId });
+  if (!revalidated.ok) {
+    return { decision: 'needs_evidence', reason: `admission_revalidation_failed:${revalidated.reason}`, nextAction: revalidated.nextAction };
+  }
+  const fresh = revalidated.decisions.get(candidateId);
+  if (fresh === undefined) {
+    return { decision: 'needs_evidence', reason: 'candidate_not_in_diagnosis_chain', nextAction: 're-run the diagnosis; the candidate is not reachable from its diagnosis task' };
+  }
+  if (fresh.decision !== 'admitted') {
+    return { decision: fresh.decision, reason: `${fresh.reason} (revalidated against current material)`, nextAction: fresh.nextAction };
+  }
+  return null;
+}
+
 // ── Show ───────────────────────────────────────────────────────────────────────
 
 export async function handleCandidateShow(opts: CandidateShowOptions): Promise<void> {
@@ -947,32 +1003,10 @@ export async function handleCandidateIntake(opts: CandidateIntakeOptions): Promi
     // FAST pre-refusal only. The write permission itself comes from the
     // persisted admission disposition; when it is missing (pre-CR-03 records)
     // a full re-evaluation from the persisted materials runs and is saved.
-    const admissionDocument = await stateManager.getAdmissionDocument(opts.candidateId);
-    let fullGate: { decision: string; reason: string; nextAction: string } | null = null;
-    let admissionNote: string | undefined;
-    if (admissionDocument.ok && admissionDocument.document !== null) {
-      const current = currentAdmissionEvaluation(admissionDocument.document);
-      if (current !== null) {
-        fullGate = { decision: current.decision, reason: current.reason, nextAction: current.nextAction };
-      } else {
-        admissionNote = 'admission document has no current evaluation';
-      }
-    } else if (!admissionDocument.ok) {
-      admissionNote = `admission document unreadable: ${admissionDocument.reason}`;
-    } else {
-      const reevaluated = await evaluateAndPersistAdmissionFromStore(stateManager, [opts.candidateId], { taskId: candidate.taskId });
-      if (reevaluated.ok) {
-        const decision = reevaluated.decisions.get(opts.candidateId);
-        if (decision !== undefined) {
-          fullGate = { decision: decision.decision, reason: `${decision.reason}${admissionNote !== undefined ? ` (re-evaluated; ${admissionNote})` : ' (re-evaluated; persisted)'}`, nextAction: decision.nextAction };
-        } else {
-          fullGate = { decision: 'needs_evidence', reason: 'candidate_not_in_diagnosis_chain', nextAction: 're-run the diagnosis; the candidate is not reachable from its diagnosis task' };
-        }
-      } else {
-        fullGate = { decision: 'needs_evidence', reason: reevaluated.reason, nextAction: reevaluated.nextAction };
-      }
-    }
-    if (fullGate !== null && fullGate.decision !== 'admitted') {
+    // SPEC CR-03 §7.2 (review S1): the persisted/full admission gate owns the
+    // write permission; the partial record check below stays a fast pre-refusal.
+    const fullGate = await enforceFullAdmissionForWrite(stateManager, opts.candidateId);
+    if (fullGate !== null) {
       const result = {
         candidateId: opts.candidateId,
         status: 'refused',
@@ -1186,7 +1220,11 @@ export async function handleCandidateReview(opts: CandidateReviewOptions): Promi
       // `create` keeps the pre-check: a low-confidence candidate still cannot
       // become a new Principle via the CLI.
       if (opts.decide === 'create') {
-        const admissionBlock = checkAdmissionGate(candidate);
+        // SPEC review S1: a CREATE decision is a governance write — it passes
+        // the full admission gate (the reuse verdict remains exempt by
+        // PRI-917 R5 F4: a reuse decision creates nothing).
+        const createFullGate = await enforceFullAdmissionForWrite(stateManager, opts.candidateId);
+        const admissionBlock = createFullGate ?? checkAdmissionGate(candidate);
         if (admissionBlock) {
           const payload = {
             candidateId: opts.candidateId,
@@ -1502,7 +1540,10 @@ export async function handleCandidateRepair(opts: CandidateRepairOptions): Promi
     // re-verify admission before re-intaking to prevent bypassing the gate.
     // A consumed candidate that would fail the gate indicates data corruption
     // or a prior bypass; refuse and surface the reason.
-    const admissionBlock = checkAdmissionGate(candidate);
+    // SPEC review S1: repair re-intake passes the SAME full write gate —
+    // a corrupted admission document can never be repaired into the Ledger.
+    const repairFullGate = await enforceFullAdmissionForWrite(stateManager, opts.candidateId);
+    const admissionBlock = repairFullGate ?? checkAdmissionGate(candidate);
     if (admissionBlock) {
       const result = {
         candidateId: opts.candidateId,
@@ -1836,7 +1877,9 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
 
       // PRI-442 Stage 4: admission gate check — refuse non-admitted pending
       // candidates to prevent backfill from bypassing the admission gate.
-      const admissionBlock = checkAdmissionGate(candidate);
+      // SPEC review S1: backfill writes pass the full admission gate too.
+      const backfillFullGate = await enforceFullAdmissionForWrite(stateManager, candidateId);
+      const admissionBlock = backfillFullGate ?? checkAdmissionGate(candidate);
       if (admissionBlock) {
         output.intakeFailed++;
         output.results.push({ candidateId, route: 'unknown', status: 'intake_failed', reason: `Admission gate refused: ${admissionBlock.reason}`, statusBefore: 'pending', statusAfter: 'pending', intakeDecision: 'skipped', seedDecision: 'skipped', nextAction: admissionBlock.nextAction });

@@ -67,6 +67,28 @@ export class MemoryCandidateStore implements CandidateStore {
     return true;
   }
 
+  listDiagnosisPostProcessingBacklog(options: { limit: number; nowIso?: string }): { candidateId: string; taskId: string; status: string; createdAt: string; processingState: string | null }[] {
+    // Test double: diagnostics succeeded + pending/NULL-or-open-processing candidates.
+    const nowMs = options.nowIso !== undefined ? Date.parse(options.nowIso) : Date.now();
+    const rows: { candidateId: string; taskId: string; status: string; createdAt: string; processingState: string | null }[] = [];
+    for (const candidate of this.candidates.values()) {
+      const document = this.admissions.get(candidate.candidateId) ?? null;
+      const state = document?.processing?.state ?? null;
+      const terminal = state === 'complete' || state === 'awaiting_owner' || state === 'exhausted';
+      if (terminal) continue;
+      const openProcessing = document !== null
+        && (state === 'not_started' || state === 'in_progress')
+        && (document.processing?.nextRetryAt === undefined || Date.parse(document.processing.nextRetryAt) <= nowMs);
+      if (document === null && (candidate.status === 'pending' || candidate.status === 'consumed')) {
+        rows.push({ candidateId: candidate.candidateId, taskId: candidate.taskId, status: candidate.status, createdAt: candidate.createdAt, processingState: null });
+      } else if (openProcessing) {
+        rows.push({ candidateId: candidate.candidateId, taskId: candidate.taskId, status: candidate.status, createdAt: candidate.createdAt, processingState: state });
+      }
+    }
+    rows.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return rows.slice(0, options.limit);
+  }
+
   insert(record: CandidateRecord): void {
     this.candidates.set(record.candidateId, record);
   }
