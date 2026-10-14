@@ -1,10 +1,10 @@
 # WorkBuddy Host Adapter SPEC — PD 第三宿主
 
-> Status: IMPLEMENTED v0.3.1 — v0.3.0 契约经实施与验收（2026-10-13，PRI-952）；实现状态见 §12，验收边界以 §12 为准，未验证项不得宣称支持。
-> Date: 2026-10-12（v0.3.0 整改稿）；2026-10-13（§12 实施状态补记）。
+> Status: IMPLEMENTED v0.4.0 — v0.3.x 契约经实施与验收（2026-10-13，PRI-952）；第三至五轮整改（安装链/代理绑定/路由面/学习验收/正式安装产物链）经 2026-10-14 独立复审 APPROVE。实现状态见 §12 与 §13，验收边界以 §13 为准，未验证项不得宣称支持。
+> Date: 2026-10-12（v0.3.0 整改稿）；2026-10-13（§12 实施状态补记）；2026-10-14（§13 三至五轮整改与正式安装验收矩阵）。
 > Code baseline: `b0f807b95d8c86e88fe46b7f2a63eec1923af24a`（整改基线）；实现分支见私有执行记录 STATE.md。
 > Input: 同日 v0.2.0、第一轮评审清单，以及 2026-08 的 feasibility / capability-map / adapter-verification 三份调研。
-> Review: 第二轮报告保存在独立 private docs 的 `docs/reviews/2026-10-12-workbuddy-spec-second-review.md`。第一轮报告及旧调研是历史证据，不是当前验收结果。独立实施后审查（REQUEST CHANGES→resolved）见私有执行记录。
+> Review: 第二轮报告保存在独立 private docs 的 `docs/reviews/2026-10-12-workbuddy-spec-second-review.md`。第一轮报告及旧调研是历史证据，不是当前验收结果。第三轮（third-remediation-review）、第四轮（fourth-…）、第五轮（fifth-…）评审与第六轮终审（round5-fix-review，APPROVE）均在私有 docs/reviews。
 > Authority: 本文不修改 ADR 或替 Owner 批准 OD；实现服从 AGENTS.md、ADR-0020、ADR-0027/0028。
 
 配套整改稿：[可行性](../plans/2026-08-workbuddy-plugin-feasibility.md)、[能力与机会](../plans/2026-08-28-workbuddy-capability-map-for-pd.md)、[历史取证及当前验证动作](../plans/2026-08-28-workbuddy-adapter-verification.md)。三份原始资料保留，本文链接指向同一隔离 worktree 内的修订稿。
@@ -238,6 +238,8 @@ v0.3.0：收窄故障阻断承诺并补 UserPromptSubmit；补治理目录与 wo
 
 v0.3.1（2026-10-13，实施后）：新增 §12 实施状态与支持矩阵。OD-01..08 均按推荐方案执行（Owner 启动授权记录于私有 DECISIONS）；P01–P06 真实宿主探针全部完成（engine 2.161.0）；四事件基线维持（P03 实证常规失败已进 PostToolUse，PostToolUseFailure 未纳入首版 hooks 注册）；治理目录冻结 `~/.workbuddy/pd-workspace`。真实宿主治理主回路（注入/阻断/证据/撤回）E2E 6/6 PASS。
 
+v0.4.0（2026-10-14，第三至五轮整改后）：新增 §13。安装 LLM profile 进治理工作区并全学习链代理绑定（S1/S2）；--base-url 自定义端点双模式 + URL 解析校验（S3）；路由面三宿主贯彻至投影/交付预检/事件证据/Console（R1）；学习验收三场景契约 + installed runner 复用唯一退出权威（R2/R2a/R2b）；正式安装产物同库学习链验收（R3，合成信号+真实治理 LLM+真实引擎注入/撤回分列）；npm 包入口 NOT RUN（发布状态边界）。第五轮评审（fifth-remediation）REQUEST CHANGES → 第六轮终审（round5-fix-review）APPROVE。
+
 ## 12. 实施状态与支持矩阵（2026-10-13，第二轮整改后 v0.3.2）
 
 真实宿主：WorkBuddy Desktop 5.8.1 / 引擎 `codebuddy-lite-wb.mjs` v2.161.0（SHA-256 `1b1a01bc…`，哈希变更后关键协议探针已复跑并修正两项结论，见下）。隔离机制 `WORKBUDDY_CONFIG_DIR`+`CODEBUDDY_CONFIG_DIR`（P0 实证）。
@@ -262,5 +264,33 @@ v0.3.1（2026-10-13，实施后）：新增 §12 实施状态与支持矩阵。O
 | 引擎自动发现 | **受限**：生产解析器只探 C 盘 Program Files；D 盘安装需 `PD_WORKBUDDY_ENGINE` env（direct-write fallback 注册后真实引擎可读取） | 第二轮审查 §3 |
 
 并发/升级/发布档：真实多入口并发、幂等重放、同参数独立调用有进程级测试；`npm pack`→`build-release-asset` 戳版 payload→支持安装器→隔离 HOME→真实引擎发现全链 **8/8 PASS**。
+
+## 13. 实施状态与支持矩阵（2026-10-14，第三至五轮整改后 v0.4.0）
+
+第三轮评审（安装 LLM profile 落点、source 字段、学习验收通道）、第四轮（S1 新安装代理绑定 P1、S2 缺省 model、R1 路由面一致性、R2 学习验收成功条件、R3 证据拼接）与第五轮（S3 端点输入双模式、R2a BDD 政策终态、R2b installed runner 退出权威、npm 包入口边界）的全部发现已关闭；第六轮独立复审（固定 `11ca0a76e`）APPROVE。修复提交链与证据分层见私有 `docs/reports/workbuddy-host-adapter-20261014-round4-remediation/`（STATE/ACCEPTANCE/EVIDENCE_INDEX）。
+
+### 13.1 证据分层（六类事实分开，不得互相背书）
+
+| 证据类 | 事实 | 代表证据 |
+|---|---|---|
+| 代码修复与目标测试 | S1 全链代理绑定（配置权威层 fresh 默认仅 enabled）；S2 缺省 model 共享解析；S3 端点双模式+URL 解析校验；R1 路由面三宿主贯彻；R2 场景契约唯一退出权威 | routing/installer/config/prompts 288、契约 42、route 30、adapter 非 BDD 117、exit-code 4/4、BDD 无 key 9+1 |
+| 正式安装产物执行 | run-4f（lab `e2e-installed-learn-1791968463858`，HEAD `96f1c988b`）：stamped payload→官方安装器（安装参数含 --base-url）→官方 init 三库→flag writer→真实引擎 | 14 必需腿 PASS，SCENARIO VERDICT OK exit 0；安装/运行时身份哈希入档 |
+| 合成协议信号（已标注） | 准入信号为 Write-failure PostToolUse 合成高分输入（score 90）经**已安装** adapter 入口 | pain `pain_host_36579636…`；真实 Bash/thrown 失败仅证据（score 20<70 政策地板），不拼接 |
+| 真实治理 LLM | 诊断/提案链（dreamer/philosopher/scribe/rollout_reviewer）走安装参数写就的 pi-ai profile（AMD RADEON 端点），7 轮真实 worker | runs 落盘 + 审批/激活行 |
+| 真实宿主注入/撤回 | 下一轮真实引擎请求携带 approved principleDraft.statement 原文；撤回后停止 | mock-req-log #4 注入 / #5#6 无探针；activation 已 Deactivated |
+| NOT RUN / 边界 | npm 包安装器入口（tarball-installer-entry）：registry `@principles/*` 0.2.7 早于工作区未发布导出 → 真实消费路径无法在发版前贯通，如实 SKIP（修它=发版）；thrown 失败自动准入=政策边界（Owner 决策点不变）；rule 通道 shadow 工具执行级观测未做；BDD 学习场景对 provider confidence/窗口方差敏感 | run-4f SKIP 证据；§12 保留行 |
+
+### 13.2 本轮新增产品面（§12 的增量）
+
+| 能力 | 状态 | 证据 |
+|---|---|---|
+| 安装参数 LLM profile 进治理工作区（--provider/--api-key-env/--model/--base-url；env PD_*） | Supported | routing 12/12；round-trip 写边界校验（loader 级） |
+| 全学习链代理绑定（新安装默认继承 defaultRuntime；存量显式行保留+待配置报告） | Supported（存量显式 openclaw 行需 Owner rebind 或按报告逐项配置） | core config 285 + 宿主安装 40；run-4f 全链实证 |
+| 缺省 model（省略→per-provider 真实默认；空白/非法 fail-loud） | Supported | S2 回归；readiness=ready |
+| 自定义端点（交互+非交互双模式；URL 解析校验；显式空白拒） | Supported | prompts-runtime-profile 4 + mvp-config 单元 + 写边界三态 |
+| 路由声明/投影/交付预检/事件证据/Console 三宿主一致 | Supported | route 30/30 + host-runtime 445 + pd-console 2806 |
+| 学习验收三场景（完整原则/规则通道/政策拒绝；必需步集own退出码） | Supported | 契约 42/42；exit-code 4/4；installed runner 同权威 |
+| 正式安装产物同库学习链 | **Supported（合成协议信号 + 真实治理 LLM + 真实引擎注入/撤回）** | run-4f exit 0 |
+| npm 包安装器入口（解包→npm install→自身 dist） | **NOT RUN（发布状态边界）**：待下一班发布列车补验；该腿不进必需集 | run-4f SKIP 证据 |
 
 本稿不构成 Owner 批准、部署授权或运行验收通过。原稿保留在用户提供的原目录，本稿在隔离 worktree 中供审阅。
