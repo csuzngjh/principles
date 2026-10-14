@@ -42,6 +42,9 @@ interface PrincipleCard {
   evaluability: string;
   /** Owner Decision Experience v1: backend-derived decision state (display only). */
   decisionState?: string;
+  /** PRI-956 (F15): runtime authority revoked (activations deactivated) — the
+   *  ledger status is asset lifecycle and never reflects deactivation. */
+  runtimeDeactivated?: boolean;
   updatedAt: string;
   createdAt: string;
   priority: string;
@@ -205,6 +208,8 @@ export function PrinciplesPage() {
   // Owner Decision Experience v1: backend semantic titles + decision states
   // (display-only — the page never re-derives decision qualification).
   const [ownerDecisionLibrary, setOwnerDecisionLibrary] = useState<OwnerDecisionLibraryData | null>(null);
+  // PRI-956 (F15, D3): runtime status cannot be confirmed when set
+  const [revocationUnavailable, setRevocationUnavailable] = useState<string | null>(null);
 
   // Fetch data
   const loadData = useCallback(async () => {
@@ -234,6 +239,8 @@ export function PrinciplesPage() {
       setCategories(pData.categories);
       // PRI-558: expose summary for the metrics bar
       setSummary(pData.summary);
+      // PRI-956 (F15, D3): propagate revocation check unavailability
+      setRevocationUnavailable(pData.revocationCheckUnavailable ?? null);
 
       const aData = aResult.success ? validateApprovalsGrouped(aResult.data) : null;
       setApprovalGroups(aData?.groups ?? []);
@@ -296,6 +303,7 @@ export function PrinciplesPage() {
       channels: uniqueChannels,
       evaluability: p.evaluability,
       decisionState: decision?.decisionState,
+      runtimeDeactivated: p.runtimeDeactivated === true,
       updatedAt: p.updatedAt,
       createdAt: p.createdAt,
       priority: p.priority,
@@ -336,6 +344,12 @@ export function PrinciplesPage() {
 
   return (
     <PageShell>
+      {/* PRI-956 (F15, D3): revocation status unavailability notice */}
+      {revocationUnavailable && (
+        <div className="mb-4 p-3 bg-amber-50 border border-amber-300 rounded-[var(--radius-md)] text-sm text-amber-800">
+          {t("principles.revocationStatusUnknown")}
+        </div>
+      )}
       {/* Header */}
       <SectionTitle>{t("principles.reviewTitle")}</SectionTitle>
       <ShinyText
@@ -650,6 +664,11 @@ export function PrinciplesPage() {
                       >
                         {decision.glyph} {t(decision.labelKey)}
                       </span>
+                      {card.runtimeDeactivated === true && (
+                        <span className="font-mono text-[11px] uppercase tracking-[0.02em] border rounded-[2px] px-2 py-0.5 border-amber-300 text-amber-700 bg-amber-50">
+                          {t("principles.runtimeDeactivated")}
+                        </span>
+                      )}
                     </div>
                     {decisionDate && (
                       <span className="font-mono text-[11px] text-ink-4 whitespace-nowrap">

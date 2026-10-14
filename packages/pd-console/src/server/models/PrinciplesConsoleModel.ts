@@ -107,6 +107,15 @@ export interface PrincipleListItem {
   conflictsWithCount: number;
   createdAt: string;
   updatedAt: string;
+  /**
+   * PRI-956 (F15): the ledger `status` is an ASSET lifecycle ("ingested &
+   * not archived") and has no deactivated value — a deactivated principle
+   * stays `active` here forever. When the runtime authority (activations
+   * table) says every prompt activation for this principle is deactivated,
+   * the route annotates it so the UI can disclose "runtime revoked" instead
+   * of implying "in effect" from the asset status alone.
+   */
+  runtimeDeactivated?: boolean;
   /** Detected language of the principle text ('en' | 'zh' | 'unknown'). PRI-332 */
   detectedLanguage: 'en' | 'zh' | 'unknown';
   /** Structured readability warning code — front-end renders via i18n. PRI-332 P1-5 */
@@ -150,6 +159,13 @@ export interface PrinciplesListOutput {
   categories?: Record<string, number>;
   /** If the approval cross-check was unavailable, this explains why (ERR-002) */
   approvalCrossCheckUnavailable?: string;
+  /**
+   * PRI-956 (F15, D3): if the activations-table query that determines
+   * CURRENT runtime revocation was unavailable, this explains why — the UI
+   * must express "runtime status cannot be confirmed" instead of defaulting
+   * to either active or revoked.
+   */
+  revocationCheckUnavailable?: string;
 }
 
 export type PrincipleFilter = 'all' | 'actionable';
@@ -300,7 +316,15 @@ export class PrinciplesConsoleModel {
     return ledger;
   }
 
-  async listPrinciples(filter?: PrincipleFilter, decidedPrincipleIds?: Set<string>, pendingApprovalPrincipleIds?: Set<string>): Promise<PrinciplesListOutput> {
+  /**
+   * PRI-956 (F15): decision-id sets from the route's cross-checks. All
+   * optional; `deactivated` comes from the activations table (runtime
+   * authority) and only annotates disclosure — never re-buckets.
+   */
+  async listPrinciples(filter?: PrincipleFilter, decisionIds?: { decided?: Set<string>; pendingApproval?: Set<string>; deactivated?: Set<string> }): Promise<PrinciplesListOutput> {
+    const decidedPrincipleIds = decisionIds?.decided;
+    const pendingApprovalPrincipleIds = decisionIds?.pendingApproval;
+    const deactivatedPrincipleIds = decisionIds?.deactivated;
     const ledger = this.loadLedger();
     const principles = Object.values(ledger.tree.principles);
 
@@ -342,6 +366,14 @@ export class PrinciplesConsoleModel {
     const classified = classifyPrinciples(items, decidedPrincipleIds, pendingApprovalPrincipleIds);
     const workspaceClassified = classified.filter((c) => c.category !== 'builtin');
     const workspaceItems = workspaceClassified.map((c) => c.principle);
+    // PRI-956 (F15): disclose runtime revocation — the ledger status above is
+    // asset lifecycle and never reflects deactivation; the runtime authority
+    // (activations table) is the only source for "currently revoked".
+    if (deactivatedPrincipleIds) {
+      for (const p of workspaceItems) {
+        if (deactivatedPrincipleIds.has(p.id)) p.runtimeDeactivated = true;
+      }
+    }
 
     // PRI-641: summary and categories are computed over the same workspace
     // corpus the caller sees, so `principles[]` and `summary` can never

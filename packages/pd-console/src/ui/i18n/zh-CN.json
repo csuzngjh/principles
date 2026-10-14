@@ -642,6 +642,8 @@
       "blockBehavior": "行为改变",
       "blockBehaviorFallback": "暂无确定性行为规则记录；该原则作为行为准则影响后续同类场景。",
       "govDecision": "治理决策",
+      "revocationStatusUnknown": "运行时停用状态无法确认——激活查询失败，状态未知。",
+      "runtimeDeactivated": "运行时已停用",
       "govApproved": "拥有者已批准",
       "govPending": "等待拥有者审查",
       "loading": "加载中…",

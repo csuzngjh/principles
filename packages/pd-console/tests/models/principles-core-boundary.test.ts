@@ -138,7 +138,7 @@ describe('PRI-641: PrinciplesConsoleModel core/workspace boundary', () => {
     // and the Core axiom can never become actionable either way.
     expect(result.principles).toHaveLength(0);
 
-    const withPending = await model.listPrinciples('actionable', undefined, new Set(['T-01', 'P_ACTIVE']));
+    const withPending = await model.listPrinciples('actionable', { pendingApproval: new Set(['T-01', 'P_ACTIVE']) });
     // Even with a (hypothetical) pending approval row naming T-01, the core
     // axiom is classified builtin before actionability, so it stays out.
     expect(withPending.principles.map((p) => p.id)).toEqual(['P_ACTIVE']);
