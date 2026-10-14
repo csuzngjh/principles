@@ -601,12 +601,61 @@ OpenClaw Plugin 同时服务多个 workspace 时：
 ### 11.2 pd-cli 工作区解析顺序
 
 ```
-pd-cli 启动时确定 workspaceDir：
+pd-cli 启动时确定 workspaceDir（resolveWorkspaceDir）：
 1. --workspace flag
 2. PD_WORKSPACE_DIR env
-3. 当前目录搜索 .pd/ 或 .state/principle_training_state.json
-4. ~/.openclaw/workspace-main/（默认）
+3. 所在工作区的 config 存在但解析失败 → fail-closed 报错（不回退到脚下目录）
+4. 发现默认（discoverWorkspaceDefault，候选按此顺序）：
+   a. 从当前目录向上找到的最近一个 .pd/config.yaml 所在目录（PRI-957 补实现）
+   b. PD_WORKSPACE_DIR 指向的目录
+   c. ~/.openclaw/workspace
+   d. OpenClaw plugin config（principles-disciple.json）的 workspace 字段
+   命中的 config 若声明了绝对路径 workspace.default，取该值；
+   只有 (a) 允许在 config **可读且未声明**时回退到该目录本身（"我就站在这个工作区里"）。
+5. 以上皆无 → 报错并给出 nextAction
 ```
+
+三种「拿不到声明值」的结果必须分开对待，因为这条链同时决定写入落点：
+
+| 结果 | 含义 | 处置 |
+| --- | --- | --- |
+| `absent` | config 可读，确实没写 `workspace.default` | cwd 候选回退到该目录本身，并由解析阶段宣布目标 |
+| `rejected` | config 可读，但声明值不是非空绝对路径 | 视为未声明（同上），stderr 打出 `WARN: Ignoring …` 说明被忽略的原因（ERR-112） |
+| `parse_failed` | config 存在但读不出来，声明值**未知** | **不得**当作未声明。无 `-w`/env 覆盖时 fail-closed 抛出；有显式覆盖时保留显式优先级 |
+
+`parse_failed` 单列的理由（PRI-957 评审第三轮 P1）：把「未知」当成「没声明」会让脚下
+这个目录变成写入目标，而它的主人很可能声明了另一个工作区；`pd pain record` 自身的
+config 加载失败只打 warning 就用 defaults 继续写，所以解析层是唯一能拦住它的闸门
+（cli-5：失败不得落状态）。
+
+**读写一体（PRI-957 评审 P1 的治理决定，Owner 第三轮确认支持）**：这条链是 pd-cli
+唯一的工作区权威，读命令与写命令（`pd pain record`、`pd candidate intake`、
+`pd runtime …`）都经由它取目标目录，因此 4.a 的 cwd 发现同样会改变写入落点：站在
+A 目录里就不再默默写进另一个宿主的库。选择「按当前目录」而不是「只对读命令生效」，
+理由是写入者本人就站在那个工作区里时，把治理数据写到别处才是真正的假动作；代价由
+可观测性兜住：只有**没人声明过**的结果（cwd 命中且 config 可读但未声明
+`workspace.default`）会在 stderr 说出被使用的工作区，声明值与既有的 openclaw 默认
+位置不加码。
+
+**谁声明「用了哪个工作区」**：发现阶段（`discoverWorkspaceDefault`）只报告它发现了
+什么（分歧、被忽略的声明、解析失败）以及候选回退方向，**从不宣布采用结果**；实际
+使用的工作区只由解析阶段（`resolveWorkspaceDir`）声明——带 `-w`/env 覆盖且存在可比
+较的声明值时是 `differs from …` 那条，覆盖了一个读不出来的 config 时是
+`using workspace "…" from --workspace（… could not be parsed …）` 那条，纯发现时是
+`using workspace "…" — inferred from your current directory（config: …; no workspace.default declared）`
+那条。同一个命令里不允许出现两句「我用的是 X」，也不允许发现阶段说出的目标与最终
+目标矛盾（PRI-957 评审第三轮 P2）。
+
+优先级说明：1 > 2 > 3 > 4 是**解析根目录**的优先级，1 > 2 不变；4.a 排在发现候选首位，
+是为了让「用户级 PD_WORKSPACE_DIR 覆盖了当前所在工作区」这一分歧经由既有的
+`differs from …` stderr 告警可见，而不是静默生效。告警措辞按发现结果区分：
+config 真声明了 `workspace.default` 时提示改配置，只有目录发现时提示去掉覆盖或补声明。
+
+与 hook 侧的分歧（ERR-117）：`packages/host-runtime` 的
+`resolveNearestPdWorkspace(cwd)` 停在**最近的目录**本身，不跟随 `workspace.default`；
+pd-cli 这条链会跟随声明值。因此站在 A 目录、config 指向 B 时，CLI 查 B 而 hook 写 A，
+这是刻意保留的既有语义（本票不动 hook 行为），靠 stderr 的
+`Standing in "…" but its config declares workspace.default "…"` 使其可见。
 
 ### 11.3 pd-console 单工作区
 

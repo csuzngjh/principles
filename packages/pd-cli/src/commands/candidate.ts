@@ -276,7 +276,11 @@ export async function handleCandidateList(opts: CandidateListOptions): Promise<v
     }
 
     if (result.candidates.length === 0) {
-      console.log(`No candidates found for task: ${opts.taskId}`);
+      // An empty result must name the library it queried: with one .pd/state.db per
+      // host workspace, "no candidates" and "wrong workspace" are otherwise identical
+      // to the Owner (PRI-957). Resolved for display so a relative -w still reads as
+      // the absolute directory the query hit.
+      console.log(`No candidates found for task: ${opts.taskId} (workspace: ${path.resolve(workspaceDir)})`);
       return;
     }
 
