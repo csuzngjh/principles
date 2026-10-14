@@ -317,6 +317,24 @@ export interface RuntimeProfileInput {
 }
 
 /**
+ * Round-4 S2: the per-provider default model — the ONE resolution the
+ * interactive prompt path has always applied (prompts.ts) and the
+ * non-interactive path now reuses, so an omitted `--model` yields a genuinely
+ * ready profile instead of an empty `pd.default.model` that fails
+ * `pi-ai profile missing required 'model' field` at the resolver.
+ *
+ * Returns '' for a provider without a known default — callers must treat that
+ * as "cannot resolve" (fail loud or require an explicit --model), never write
+ * an empty model. Keep in sync with prompts.ts RUNTIME_PROFILE_PROVIDERS.
+ */
+export function resolveDefaultModelForProvider(provider: string): string {
+  return provider === 'openai' ? 'gpt-4o-mini'
+    : provider === 'anthropic' ? 'claude-3-5-haiku-latest'
+    : provider === 'deepseek' ? 'deepseek-chat'
+    : '';
+}
+
+/**
  * PRI-308: Generate .pd/config.yaml content.
  *
  * This replaces the old feature-flags.yaml generation.

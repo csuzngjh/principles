@@ -54,6 +54,8 @@ import { loadPdConfigForPlugin } from '@principles/host-runtime';
 import {
   resolveAgentRuntimeBinding,
   checkAgentRuntimeReadiness,
+  createAdapterConfigFromProfile,
+  INTERNAL_AGENT_NAMES,
 } from '@principles/core/runtime-v2';
 import { getWorkbuddyWorkspaceDir } from '@principles/install-layout';
 import { execFile } from 'node:child_process';
@@ -358,8 +360,21 @@ describe('install() routes the LLM runtime profile into the WorkBuddy governance
     expect(governance.runtimeProfiles['pd.default']['provider']).toBe('');
     expect(governance.runtimeProfiles['pd.default']['apiKeyEnv']).toBe('');
     expect(governance.internalAgents.defaultRuntime).toBe('openclaw.default');
-    expect(governance.internalAgents.agents['diagnostician']['runtimeProfile']).toBe('openclaw.default');
-    expect(loadPdConfigForPlugin(lab.governanceDir).ok).toBe(true);
+    // Round-4 S1 authority contract: fresh init seeds NO explicit per-agent
+    // runtimeProfile rows — agents inherit defaultRuntime. This is precisely
+    // what lets an installer's defaultRuntime override reach the whole
+    // learning chain (and what keeps the vanilla default resolving every
+    // agent to openclaw.default, asserted below through the REAL loader).
+    expect(governance.internalAgents.agents['diagnostician']).toBeDefined();
+    expect(governance.internalAgents.agents['diagnostician']['runtimeProfile']).toBeUndefined();
+    const loaded = loadPdConfigForPlugin(lab.governanceDir);
+    expect(loaded.ok).toBe(true);
+    const diagnostician = resolveAgentRuntimeBinding(loaded.effective, 'diagnostician');
+    expect(diagnostician.ok).toBe(true);
+    if (diagnostician.ok) {
+      expect(diagnostician.profileId).toBe('openclaw.default');
+      expect(createAdapterConfigFromProfile(diagnostician.profile, lab.governanceDir).runtimeKind).toBe('openclaw-cli');
+    }
   });
 
   it('owner-customized profiles survive an install that passes an explicit profile (explicit override of pd.default only)', { timeout: 240_000 }, async () => {
@@ -440,5 +455,230 @@ describe('install() routes the LLM runtime profile into the WorkBuddy governance
       fs.chmodSync(path.dirname(lab.governanceConfigPath), 0o755);
       fs.chmodSync(lab.governanceConfigPath, 0o644);
     }
+  });
+});
+
+// ─── Round-4 S1: the WHOLE learning chain must ride the install runtime ─────
+//
+// Defect (round-4 independent audit, standards-profile-results.json): after a
+// fresh install with profile args the diagnostician resolved to pd.default
+// (pi-ai) but dreamer/scribe/artificer/signalCollector (and the rest of the
+// internalization chain) stayed explicitly bound to openclaw.default — the
+// fresh-config defaults seeded an explicit per-agent `runtimeProfile` row for
+// every agent, and a per-agent row outranks internalAgents.defaultRuntime in
+// resolveAgentRuntimeBinding.
+//
+// Harness: same REAL production boundary as above — REAL install(), REAL
+// `pd runtime init` subprocess (built pd-cli dist), REAL loader chain. The
+// fake-HOME lab carries no OpenClaw installation at all, so the
+// "no necessary agent resolves to openclaw-cli" assertions below are the
+// resolution-level isolation proof (no openclaw exists to delegate to).
+
+/** Sentinel env getter — the ONLY readiness input; never a real credential. */
+function sentinelEnv(name: string): string | undefined {
+  return name === 'WB_TEST_KEY' ? 'stub-sentinel-not-a-credential' : process.env[name];
+}
+
+describe('round-4 S1: fresh install binds the whole learning chain to the install-configured runtime', () => {
+
+  it('fresh install with profile args (model omitted): every learning agent resolves to pd.default (pi-ai, ready) — none to openclaw-cli — and the per-provider default model is applied', { timeout: 240_000 }, async () => {
+    const lab = currentLab();
+    // NO --model: the S2 per-provider default (openai → gpt-4o-mini) must make
+    // the profile genuinely ready instead of needs_setup.
+    const result = await install(
+      baseOptions(lab, { provider: 'openai', apiKeyEnv: 'WB_TEST_KEY' }),
+      lab.payloadDir,
+      { quiet: true },
+    );
+    expect(result.success, `install failed: ${result.error ?? result.reason} Next: ${result.nextAction}`).toBe(true);
+
+    // S2: the written profile carries the per-provider default model.
+    const governance = readGovernanceConfig(lab);
+    expect(governance.runtimeProfiles['pd.default']['model']).toBe('gpt-4o-mini');
+
+    // S1: EVERY internal agent — the diagnostician AND the whole
+    // dreamer→philosopher→scribe→artificer→evaluator→rolloutReviewer chain
+    // plus signalCollector/correctionObserver — resolves to the
+    // install-configured runtime.
+    const loaded = loadPdConfigForPlugin(lab.governanceDir);
+    expect(loaded.source).toBe('user_config');
+    expect(loaded.ok, `loader errors: ${JSON.stringify(loaded.errors)}`).toBe(true);
+    for (const name of INTERNAL_AGENT_NAMES) {
+      const binding = resolveAgentRuntimeBinding(loaded.effective, name);
+      if (!loaded.effective.config.internalAgents.agents[name]?.enabled) {
+        expect(binding.ok, `${name} is default-disabled`).toBe(false);
+        continue;
+      }
+      expect(binding.ok, `${name}: ${binding.ok ? '' : binding.reason}`).toBe(true);
+      if (!binding.ok) continue;
+      expect(binding.profileId, `${name} must ride the install runtime`).toBe('pd.default');
+      // Resolution-level isolation proof: the lab has no OpenClaw install, so
+      // any openclaw-cli resolution would be a silent wrong-host delegation.
+      const adapter = createAdapterConfigFromProfile(binding.profile, lab.governanceDir);
+      expect(adapter.runtimeKind, `${name} must not resolve to openclaw-cli`).toBe('pi-ai');
+      const readiness = checkAgentRuntimeReadiness(binding.profile, sentinelEnv);
+      expect(readiness.readiness, `${name}: ${readiness.reason ?? ''}`).toBe('ready');
+    }
+
+    // Fresh init seeds no explicit per-agent rows anymore → the installer has
+    // NO pending-config items to report on a fresh install.
+    const wb = (result.hostResults ?? []).find((h) => h.hostId === 'workbuddy');
+    expect(wb).toBeDefined();
+    const wbText = `${wb?.reason ?? ''} ${wb?.nextAction ?? ''}`;
+    expect(wbText).not.toContain('still bound to their explicit runtime profiles');
+  });
+
+  it('legacy workspace (old init wrote explicit openclaw.default rows): rows are KEPT and reported as pending-config in the installer result', { timeout: 240_000 }, async () => {
+    const lab = currentLab();
+    seedGovernanceWorkspace(lab, (config) => {
+      // Reproduce the OLD `pd runtime init` output: explicit per-agent
+      // openclaw.default rows for every agent. Indistinguishable from an
+      // Owner choice → the installer must keep them and REPORT, not override.
+      for (const name of INTERNAL_AGENT_NAMES) {
+        (config.internalAgents.agents[name] as Record<string, unknown>)['runtimeProfile'] = 'openclaw.default';
+      }
+    });
+
+    const result = await install(
+      baseOptions(lab, { provider: 'openai', apiKeyEnv: 'WB_TEST_KEY', model: 'test-model' }),
+      lab.payloadDir,
+      { quiet: true },
+    );
+    expect(result.success, `install failed: ${result.error ?? result.reason} Next: ${result.nextAction}`).toBe(true);
+
+    // The explicit rows survive (no silent override).
+    const governance = readGovernanceConfig(lab);
+    expect(governance.internalAgents.defaultRuntime).toBe('pd.default');
+    for (const name of INTERNAL_AGENT_NAMES) {
+      if (name === 'diagnostician') continue; // the declared install override
+      expect(governance.internalAgents.agents[name]['runtimeProfile'], name).toBe('openclaw.default');
+    }
+
+    // …and the installer result names them honestly as pending-config items.
+    const wb = (result.hostResults ?? []).find((h) => h.hostId === 'workbuddy');
+    expect(wb).toBeDefined();
+    const wbText = `${wb?.reason ?? ''} ${wb?.nextAction ?? ''}`;
+    expect(wbText).toContain('still bound to their explicit runtime profiles');
+    expect(wbText).toContain('dreamer');
+    expect(wbText).toContain('signalCollector');
+    expect(wbText).toContain('pd.default');
+
+    // Resolution-level truth of the report: those agents STILL resolve to
+    // openclaw.default (their Owner/init choice), not to the install runtime.
+    const loaded = loadPdConfigForPlugin(lab.governanceDir);
+    expect(loaded.ok).toBe(true);
+    const dreamer = resolveAgentRuntimeBinding(loaded.effective, 'dreamer');
+    expect(dreamer.ok).toBe(true);
+    if (dreamer.ok) {
+      expect(dreamer.profileId).toBe('openclaw.default');
+      expect(createAdapterConfigFromProfile(dreamer.profile, lab.governanceDir).runtimeKind).toBe('openclaw-cli');
+    }
+  });
+
+  it('explicit enabled:false agent stays disabled across an install (kill switch is Owner-authoritative)', { timeout: 240_000 }, async () => {
+    const lab = currentLab();
+    seedGovernanceWorkspace(lab, (config) => {
+      (config.internalAgents.agents['dreamer'] as Record<string, unknown>)['enabled'] = false;
+    });
+
+    const result = await install(
+      baseOptions(lab, { provider: 'openai', apiKeyEnv: 'WB_TEST_KEY', model: 'test-model' }),
+      lab.payloadDir,
+      { quiet: true },
+    );
+    expect(result.success, `install failed: ${result.error ?? result.reason} Next: ${result.nextAction}`).toBe(true);
+
+    const governance = readGovernanceConfig(lab);
+    expect(governance.internalAgents.agents['dreamer']['enabled']).toBe(false);
+
+    const loaded = loadPdConfigForPlugin(lab.governanceDir);
+    expect(loaded.ok).toBe(true);
+    const binding = resolveAgentRuntimeBinding(loaded.effective, 'dreamer');
+    expect(binding.ok).toBe(false);
+    if (!binding.ok) expect(binding.readiness).toBe('disabled');
+  });
+
+  it('multi-host coexistence: a workspace initialized by `pd runtime init` alone (openclaw/codex host shape) still resolves every enabled agent to openclaw.default', { timeout: 240_000 }, async () => {
+    const lab = currentLab();
+    seedGovernanceWorkspace(lab); // real runtime init, NO installer profile step
+
+    const governance = readGovernanceConfig(lab);
+    expect(governance.internalAgents.defaultRuntime).toBe('openclaw.default');
+
+    const loaded = loadPdConfigForPlugin(lab.governanceDir);
+    expect(loaded.ok, `loader errors: ${JSON.stringify(loaded.errors)}`).toBe(true);
+    for (const name of INTERNAL_AGENT_NAMES) {
+      if (!loaded.effective.config.internalAgents.agents[name]?.enabled) continue;
+      const binding = resolveAgentRuntimeBinding(loaded.effective, name);
+      expect(binding.ok, `${name}: ${binding.ok ? '' : binding.reason}`).toBe(true);
+      if (!binding.ok) continue;
+      expect(binding.profileId, `${name} stays on the OpenClaw runtime`).toBe('openclaw.default');
+      expect(createAdapterConfigFromProfile(binding.profile, lab.governanceDir).runtimeKind).toBe('openclaw-cli');
+    }
+  });
+});
+
+// ─── Round-4 S2: model handling at the governance write boundary ────────────
+//
+// Defect (round-4 audit, withModel:false half): --model is documented optional
+// with "a sensible default per provider", but the installer wrote an EMPTY
+// model into pd.default and the resolver failed with `pi-ai profile missing
+// required 'model' field` (needs_setup) — while the install reported success.
+// The interactive prompt path already owned per-provider defaults
+// (prompts.ts) — the write boundary now reuses that same resolution and
+// preserves an existing valid model (existing-coverage contract).
+
+describe('round-4 S2: model resolution at the governance write boundary', () => {
+
+  it('blank-string --model fails loud at the write boundary; the governance config is left untouched', { timeout: 240_000 }, async () => {
+    const lab = currentLab();
+    const result = await install(
+      baseOptions(lab, { provider: 'openai', apiKeyEnv: 'WB_TEST_KEY', model: '   ' }),
+      lab.payloadDir,
+      { quiet: true },
+    );
+    expect(result.success).toBe(false);
+    const failureText = `${result.error ?? ''} ${result.reason ?? ''}`;
+    expect(failureText).toContain('workbuddy_governance_profile_invalid');
+    expect(failureText).toContain('--model');
+
+    // No partial write: still exactly what `pd runtime init` laid down.
+    const governance = readGovernanceConfig(lab);
+    expect(governance.runtimeProfiles['pd.default']['provider']).toBe('');
+    expect(governance.internalAgents.defaultRuntime).toBe('openclaw.default');
+  });
+
+  it('existing valid pd.default model is PRESERVED when the install argument omits --model (existing-coverage contract)', { timeout: 240_000 }, async () => {
+    const lab = currentLab();
+    seedGovernanceWorkspace(lab, (config) => {
+      config.runtimeProfiles['pd.default'] = {
+        type: 'pi-ai',
+        provider: 'owner-provider',
+        model: 'owner-model',
+        apiKeyEnv: 'OWNER_DEFAULT_KEY_ENV',
+      };
+    });
+
+    const result = await install(
+      baseOptions(lab, { provider: 'openai', apiKeyEnv: 'WB_TEST_KEY' }), // no model
+      lab.payloadDir,
+      { quiet: true },
+    );
+    expect(result.success, `install failed: ${result.error ?? result.reason} Next: ${result.nextAction}`).toBe(true);
+
+    const governance = readGovernanceConfig(lab);
+    // The three install-collected fields win; the omitted model does NOT
+    // clobber the existing valid one.
+    expect(governance.runtimeProfiles['pd.default']['provider']).toBe('openai');
+    expect(governance.runtimeProfiles['pd.default']['apiKeyEnv']).toBe('WB_TEST_KEY');
+    expect(governance.runtimeProfiles['pd.default']['model']).toBe('owner-model');
+
+    const loaded = loadPdConfigForPlugin(lab.governanceDir);
+    expect(loaded.ok).toBe(true);
+    const binding = resolveAgentRuntimeBinding(loaded.effective, 'diagnostician');
+    expect(binding.ok).toBe(true);
+    if (!binding.ok) return;
+    const readiness = checkAgentRuntimeReadiness(binding.profile, sentinelEnv);
+    expect(readiness.readiness, readiness.reason ?? '').toBe('ready');
   });
 });

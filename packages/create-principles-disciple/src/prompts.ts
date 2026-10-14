@@ -2,7 +2,7 @@ import { select, confirm, input } from '@inquirer/prompts';
 import * as path from 'path';
 import * as os from 'os';
 import { detectWorkspace, type WorkspaceInfo } from './utils/env.js';
-import { MVP_CHANNELS, getHomeDir, type MvpChannel, type RuntimeProfileInput } from './mvp-config.js';
+import { MVP_CHANNELS, getHomeDir, type MvpChannel, type RuntimeProfileInput, resolveDefaultModelForProvider } from './mvp-config.js';
 import { getInstallLayoutPaths, getWorkbuddyWorkspaceDir } from '@principles/install-layout';
 import { setLanguage, getLanguage, t, type Language } from './i18n.js';
 import { type HostTarget } from './installers/index.js';
@@ -83,12 +83,11 @@ async function promptRuntimeProfile(): Promise<RuntimeProfileInput | undefined> 
   });
   if (apiKeyEnv.trim().toLowerCase() === 'skip') return undefined;
 
-  // Model is optional — sensible defaults exist per provider, user can override
-  // via console later. We don't prompt for it to keep onboarding short.
-  const modelDefault = providerChoice === 'openai' ? 'gpt-4o-mini'
-    : providerChoice === 'anthropic' ? 'claude-3-5-haiku-latest'
-    : providerChoice === 'deepseek' ? 'deepseek-chat'
-    : '';
+  // Model is optional — sensible defaults exist per provider (round-4 S2: the
+  // ONE shared resolution, also applied by the non-interactive install path
+  // and the governance write boundary), user can override via console later.
+  // We don't prompt for it to keep onboarding short.
+  const modelDefault = resolveDefaultModelForProvider(providerChoice);
 
   return {
     provider: providerChoice,

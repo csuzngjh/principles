@@ -54,7 +54,7 @@ import {
   type InstallHost,
 } from '@principles/install-layout';
 import { atomicReplaceTextFile } from '../utils/config-file-io.js';
-import { getHomeDir, generateConfigYamlContent, getConfigYamlPath } from '../mvp-config.js';
+import { getHomeDir, generateConfigYamlContent, getConfigYamlPath, resolveDefaultModelForProvider } from '../mvp-config.js';
 import type {
   HostInstaller,
   HostInstallContext,
@@ -604,7 +604,17 @@ export function readWorkbuddyGovernanceFlagOverride(governanceDir: string): bool
 const GOVERNANCE_PROFILE_ID = 'pd.default';
 
 type GovernanceProfileApplyResult =
-  | { ok: true; configPath: string; profileId: string }
+  | {
+    ok: true;
+    configPath: string;
+    profileId: string;
+    /** The model actually written (explicit, preserved, or per-provider default). */
+    model: string;
+    /** Agents whose EXPLICIT per-agent runtimeProfile still points elsewhere
+     *  after the override (legacy init rows / Owner rows). Reported, never
+     *  silently overridden (round-4 S1). */
+    pendingAgents: string[];
+  }
   | { ok: false; reason: string; nextAction: string };
 
 /**
@@ -623,6 +633,17 @@ type GovernanceProfileApplyResult =
  *   Other profiles and every other agent binding are preserved; the
  *   diagnostician's `enabled` kill switch is never touched (PRI-638: Owner
  *   capability authority stays with the Owner).
+ * - Model (round-4 S2): an explicit non-empty --model wins; when --model is
+ *   omitted, an existing non-empty pd.default model is PRESERVED
+ *   (existing-coverage contract) and otherwise the shared per-provider
+ *   default (resolveDefaultModelForProvider) is applied so the profile is
+ *   genuinely ready. An explicit BLANK --model fails loud — it never passes
+ *   validation and never writes an empty model.
+ * - Pending-config honesty (round-4 S1): agents whose EXPLICIT per-agent
+ *   runtimeProfile still points elsewhere after the override (legacy init
+ *   rows indistinguishable from Owner choices) are returned as
+ *   `pendingAgents` for the installer result — kept as-is, never silently
+ *   rebound.
  * - Only `apiKeyEnv` (an environment variable NAME) is ever written — no key
  *   material reaches config, logs or errors.
  * - The leading comment header of the existing config is preserved; the
@@ -631,7 +652,7 @@ type GovernanceProfileApplyResult =
  *   blocks cannot survive a parse-mutate-dump edit; the previous content is
  *   only ever replaced atomically AFTER a full round-trip verification.)
  * - Round-trip verified loader-grade (JSON_SCHEMA parse + non-empty
- *   provider/apiKeyEnv + binding assertions) BEFORE the atomic replace;
+ *   provider/model/apiKeyEnv + binding assertions) BEFORE the atomic replace;
  *   any mismatch or write failure leaves the file untouched and fails the
  *   install loudly (rc-3/rc-9).
  *
@@ -645,7 +666,6 @@ function applyWorkbuddyGovernanceRuntimeProfile(
   // rc-1/rc-3: validate here — upstream CLI validation is not trusted as a
   // substitute for a guard at the write boundary.
   const provider = typeof profile.provider === 'string' ? profile.provider.trim() : '';
-  const model = typeof profile.model === 'string' ? profile.model.trim() : '';
   const apiKeyEnv = typeof profile.apiKeyEnv === 'string' ? profile.apiKeyEnv.trim() : '';
   if (provider.length === 0 || apiKeyEnv.length === 0) {
     return {
@@ -654,6 +674,17 @@ function applyWorkbuddyGovernanceRuntimeProfile(
       nextAction: 'Re-run the installer with both --provider <openai|anthropic|deepseek> and --api-key-env <ENV_VAR_NAME>.',
     };
   }
+  // Round-4 S2: a blank --model is an EXPLICIT invalid value — reject it
+  // instead of silently treating it as omitted (an empty written model would
+  // fail the resolver later with needs_setup).
+  if (typeof profile.model === 'string' && profile.model.trim().length === 0) {
+    return {
+      ok: false,
+      reason: `workbuddy_governance_profile_invalid: --model was given but blank. Pass a non-empty model id, or omit --model to keep the existing configured model (or apply the per-provider default).`,
+      nextAction: 'Re-run the installer with --model <model-id> (or without --model).',
+    };
+  }
+  const modelArg = typeof profile.model === 'string' ? profile.model.trim() : '';
 
   const configPath = getConfigYamlPath(governanceDir);
   if (!existsSync(configPath)) {
@@ -699,8 +730,27 @@ function applyWorkbuddyGovernanceRuntimeProfile(
   }
 
   // Preserve unknown extra fields of an existing pd.default (baseUrl,
-  // timeoutMs, maxTokens, …); the three install-collected fields win.
+  // timeoutMs, maxTokens, …); the install-collected fields win.
   const existingProfile = isRecord(runtimeProfiles[GOVERNANCE_PROFILE_ID]) ? runtimeProfiles[GOVERNANCE_PROFILE_ID] : {};
+  // Round-4 S2 model resolution: explicit --model wins; omitted → preserve
+  // the existing valid model (existing-coverage contract); otherwise apply
+  // the shared per-provider default. No path writes an empty model.
+  const existingModel = typeof existingProfile.model === 'string' ? existingProfile.model.trim() : '';
+  let model = modelArg;
+  if (model.length === 0) {
+    if (existingModel.length > 0) {
+      model = existingModel;
+    } else {
+      model = resolveDefaultModelForProvider(provider);
+      if (model.length === 0) {
+        return {
+          ok: false,
+          reason: `workbuddy_governance_profile_model_unresolvable: --model was omitted and provider '${provider}' has no known default model.`,
+          nextAction: 'Re-run the installer with --model <model-id> for the selected provider.',
+        };
+      }
+    }
+  }
   runtimeProfiles[GOVERNANCE_PROFILE_ID] = {
     ...existingProfile,
     type: 'pi-ai',
@@ -713,6 +763,17 @@ function applyWorkbuddyGovernanceRuntimeProfile(
   // switch stays Owner-authoritative — PRI-638 — never re-enabled here).
   const existingBinding = isRecord(agentBindings.diagnostician) ? agentBindings.diagnostician : {};
   agentBindings.diagnostician = { ...existingBinding, runtimeProfile: GOVERNANCE_PROFILE_ID };
+  // Round-4 S1 pending-config honesty: agents whose EXPLICIT per-agent row
+  // still points elsewhere (legacy init rows / Owner rows — indistinguishable
+  // here, so never overridden) keep resolving to their own profile. Report
+  // them; the installer result carries the honest state and the rebind path.
+  // Data-driven from the config's own agents map — no second agent-name list.
+  const pendingAgents = Object.keys(agentBindings).filter((name) => {
+    const binding = agentBindings[name];
+    return isRecord(binding)
+      && typeof binding.runtimeProfile === 'string'
+      && binding.runtimeProfile !== GOVERNANCE_PROFILE_ID;
+  });
 
   // Preserve the leading comment header (the "single source of truth" banner
   // pd runtime init writes) and mark the installer override.
@@ -749,7 +810,7 @@ function applyWorkbuddyGovernanceRuntimeProfile(
   const verifyOk = isRecord(verifiedProfile)
     && verifiedProfile.type === 'pi-ai'
     && verifiedProfile.provider === provider && provider.length > 0
-    && verifiedProfile.model === model
+    && verifiedProfile.model === model && typeof model === 'string' && model.length > 0
     && verifiedProfile.apiKeyEnv === apiKeyEnv && apiKeyEnv.length > 0
     && verifiedInternal !== undefined
     && verifiedInternal.defaultRuntime === GOVERNANCE_PROFILE_ID
@@ -773,7 +834,7 @@ function applyWorkbuddyGovernanceRuntimeProfile(
       nextAction: `Check permissions under ${path.dirname(configPath)}, close tools holding the file, then re-run the installer.`,
     };
   }
-  return { ok: true, configPath, profileId: GOVERNANCE_PROFILE_ID };
+  return { ok: true, configPath, profileId: GOVERNANCE_PROFILE_ID, model, pendingAgents };
 }
 
 // ─── Detect details ─────────────────────────────────────────────────────────
@@ -1005,7 +1066,12 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     //     longer writes it into the project config.yaml for this host, so
     //     this is the single writer — no second truth.) Without a profile the
     //     governance config keeps its runtime-init default untouched.
+    //     Round-4 S1/S2: the applied result carries the model actually
+    //     written (explicit / preserved / per-provider default) and the
+    //     agents whose explicit bindings still resolve elsewhere — both are
+    //     reported on the installer result surface, never silently smoothed.
     let profileNote = '';
+    let profilePendingAgents: string[] = [];
     if (ctx.runtimeProfile) {
       const applied = applyWorkbuddyGovernanceRuntimeProfile(p.governanceDir, ctx.runtimeProfile);
       if (!applied.ok) {
@@ -1018,7 +1084,11 @@ export class WorkBuddyHostInstaller implements HostInstaller {
           nextAction: applied.nextAction,
         };
       }
-      profileNote = ` LLM runtime profile '${applied.profileId}' written to ${applied.configPath}.`;
+      profileNote = ` LLM runtime profile '${applied.profileId}' (provider ${ctx.runtimeProfile.provider}, model ${applied.model}) written to ${applied.configPath}.`;
+      if (applied.pendingAgents.length > 0) {
+        profilePendingAgents = applied.pendingAgents;
+        profileNote += ` Learning agent(s) ${applied.pendingAgents.join(', ')} still bound to their explicit runtime profiles — they keep resolving to their current runtime, not '${applied.profileId}'.`;
+      }
     }
 
     // 7. Record host + governance workspace in the install manifest (set union).
@@ -1037,13 +1107,19 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     // 8. Install ≠ enable (OD-03): the host.workbuddy flag stays at its quiet
     //    default (OFF). No config.yaml override is written here.
     const effectiveNote = 'Registration takes effect in NEW WorkBuddy sessions (or /reload-plugins in a running CLI session).';
+    // Round-4 S1: honest pending-config surface — legacy init rows and Owner
+    // rows are kept (no silent override); the rebind path is stated, never
+    // executed behind the Owner's back.
+    const pendingRebindNote = profilePendingAgents.length > 0
+      ? ` Pending config: agent(s) ${profilePendingAgents.join(', ')} still bind to their explicit runtime profiles; to rebind them to the install profile, set internalAgents.agents.<name>.runtimeProfile to '${GOVERNANCE_PROFILE_ID}' (or remove the per-agent runtimeProfile row so they inherit internalAgents.defaultRuntime) in ${path.join(p.governanceDir, '.pd', 'config.yaml')}.`
+      : '';
     return {
       success: true,
       hostId: this.hostId,
       configPath: p.settingsPath,
       configAction: registration.settingsAction,
       reason: `Registered ${WORKBUDDY_PLUGIN_KEY} via ${registration.mode}${registration.mode === 'engine' ? '' : ` (engine unreachable: ${registration.engineNote})`}. Governance workspace initialized at ${p.governanceDir}${governance.dbInit === 'skipped' ? ` (${governance.note})` : ''}.${profileNote} PD governance stays DISABLED until you explicitly enable it.`,
-      nextAction: `${effectiveNote}${governance.dbInit === 'skipped' ? ` After the install, run "pd runtime init --workspace ${p.governanceDir}" to create the governance databases.` : ''} To enable PD governance, set host.workbuddy: { enabled: true } in ${path.join(p.governanceDir, '.pd', 'config.yaml')} (the console flag surface or the installer enable API shows the target config first).`,
+      nextAction: `${effectiveNote}${governance.dbInit === 'skipped' ? ` After the install, run "pd runtime init --workspace ${p.governanceDir}" to create the governance databases.` : ''} To enable PD governance, set host.workbuddy: { enabled: true } in ${path.join(p.governanceDir, '.pd', 'config.yaml')} (the console flag surface or the installer enable API shows the target config first).${pendingRebindNote}`,
     };
   }
 

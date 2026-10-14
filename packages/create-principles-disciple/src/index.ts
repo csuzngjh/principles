@@ -232,6 +232,19 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
         process.exit(1);
         return;
       }
+      // Round-4 S2: a blank --model / PD_MODEL is an EXPLICIT invalid value —
+      // fail loud instead of silently treating it as omitted (the governance
+      // write boundary enforces the same rule).
+      if (typeof model === 'string' && model.trim().length === 0) {
+        const msg = `--model was given but blank. Pass a non-empty model id, or omit --model to keep the existing configured model (or apply the per-provider default).`;
+        if (jsonMode) {
+          console.log(JSON.stringify(buildFailureOutput('runtime_profile_invalid', msg), null, 2));
+        } else {
+          logger.error(msg);
+        }
+        process.exit(1);
+        return;
+      }
       cliOptions.runtimeProfile = { provider, apiKeyEnv, model: model || undefined };
     } else if (apiKeyEnv) {
       // rc-3: fail loud — apiKeyEnv without provider is unusable.
@@ -482,7 +495,7 @@ program
   // instead of leaving it empty (which would cause silent LLM failures).
   .option('--provider <provider>', 'LLM provider for pd.default profile (openai/anthropic/deepseek). Enables non-interactive runtime profile config.')
   .option('--api-key-env <name>', 'Environment variable name holding the LLM API key (e.g. OPENAI_API_KEY). Requires --provider.')
-  .option('--model <model>', 'LLM model id (optional; sensible default per provider if omitted)')
+  .option('--model <model>', 'LLM model id (optional; keeps the existing configured model, else applies the per-provider default)')
   // ADR-0020 §2.3: host target selector. Default 'openclaw' for backward compat.
   .option('--host <host>', `Host platform (${HOST_TARGETS.join('/')})`, 'openclaw')
   // Gateway lock prevention: auto-stop a running OpenClaw gateway before
