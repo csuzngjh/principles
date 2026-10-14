@@ -1,5 +1,6 @@
 ---
 'principles-disciple': patch
+'create-principles-disciple': patch
 ---
 
 fix(release): 把 openclaw-plugin 的 `@principles/core` 依赖范围对齐到一个**已发布**版本。
