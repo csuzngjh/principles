@@ -335,6 +335,10 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     // existing logging/output paths have a non-null value to print.
     const previousTaskStatus: PDTaskStatus | 'dead_lettered' = task ? task.status : 'dead_lettered';
     const previousLastError = task ? (task.lastError ?? null) : null;
+    // Authorized statement-based recovery of a succeeded task (CR-06): set by
+    // the pure-validation block above, applied ONLY after runtime/config/
+    // material checks pass (review S2: never mutate-then-refuse).
+    let recoveryPlanned: { statement: string; priorStatus: PDTaskStatus } | null = null;
 
     // SPEC-CODEX-PAIN-CLOSURE-001 CR-06: authorized bounded recovery with an
     // explicit Owner statement. The statement is validated the same way as
@@ -396,6 +400,10 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         else console.log(JSON.stringify(dryRunReport, null, 2));
         return;
       }
+      // SPEC review S2 fix: PURE validation only here — the task is NOT
+      // mutated before runtime/config/material checks pass. The authorized
+      // reopen happens after every check, at the family-recovery point below
+      // (a failure must leave the original state and input untouched).
       if (task && task.status === 'succeeded') {
         if (opts.confirm !== true && opts.force !== true) {
           return refuseExit(opts, {
@@ -405,32 +413,14 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
             nextAction: `Preview with --dry-run first, then add --confirm: pd pain retry --pain-id ${opts.painId} --owner-statement <text> --confirm`,
           });
         }
-        // Attach the statement as a NEW submission version and re-open the
-        // task: prior diagnosis/artifacts/admission history are preserved
-        // (the new evaluation version is appended, never overwritten).
-        let payloadParsed: Record<string, unknown> = {};
-        try {
-          const raw: unknown = JSON.parse(task.diagnosticJson ?? '{}');
-          if (isPlainRecord(raw)) payloadParsed = raw;
-        } catch {
-          payloadParsed = {};
-        }
-        payloadParsed.correctionEvidence = {
-          text: opts.ownerStatement,
-          classification: 'owner_statement',
-          channel: 'cli_owner_statement',
-          ...(typeof payloadParsed.sessionIdHint === 'string' ? { sessionId: payloadParsed.sessionIdHint } : {}),
+        recoveryPlanned = {
+          statement: opts.ownerStatement,
+          priorStatus: task.status,
         };
-        await stateManager.updateTask(taskId, {
-          status: 'pending',
-          diagnosticJson: JSON.stringify(payloadParsed),
-        });
-        task = await stateManager.getTask(taskId);
-        console.error(`[PD] owner statement attached to ${taskId}; diagnosis re-opened with the statement as input-basis version`);
       }
     }
 
-    if (task && task.status === 'succeeded' && !opts.force) {
+    if (task && task.status === 'succeeded' && !opts.force && recoveryPlanned === null) {
       return refuseExit(opts, {
         painId: opts.painId,
         taskId,
@@ -440,7 +430,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
       });
     }
 
-    if (task && !RETRYABLE_STATUSES.has(task.status) && task.status !== 'succeeded') {
+    if (task && !RETRYABLE_STATUSES.has(task.status) && task.status !== 'succeeded' && recoveryPlanned === null) {
       return refuseExit(opts, {
         painId: opts.painId,
         taskId,
@@ -898,7 +888,48 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     // live-lease states are deliberately NOT reset — the lease_conflict
     // nextAction below routes those to `pd runtime recovery`.
     const recoveredTasks: { taskId: string; forceApplied: boolean }[] = [];
-    if (task && (task.status === 'failed' || task.status === 'retry_wait')) {
+    // CR-06 (review S2): the authorized reopen runs HERE — after every pure
+    // validation (params/confirm/runtime/config/capability) has passed. The
+    // statement becomes a NEW input-basis version on the preserved task
+    // (prior runs/artifacts/admission history untouched; the re-evaluation
+    // appends a new version keyed by the new material fingerprint), and the
+    // diagnosis family is re-opened with fresh attempt budgets for this
+    // authorized round — new runs/attempt rows carry the lineage.
+    if (recoveryPlanned !== null && task !== null) {
+      let payloadParsed: Record<string, unknown> = {};
+      try {
+        const raw: unknown = JSON.parse(task.diagnosticJson ?? '{}');
+        if (isPlainRecord(raw)) payloadParsed = raw;
+      } catch {
+        payloadParsed = {};
+      }
+      payloadParsed.correctionEvidence = {
+        text: recoveryPlanned.statement,
+        classification: 'owner_statement',
+        channel: 'cli_owner_statement',
+        ...(typeof payloadParsed.sessionIdHint === 'string' ? { sessionId: payloadParsed.sessionIdHint } : {}),
+      };
+      await stateManager.updateTask(taskId, {
+        status: 'pending',
+        attemptCount: 0,
+        diagnosticJson: JSON.stringify(payloadParsed),
+      });
+      const diagFamily = [
+        `diag_rootcause-${taskId}`,
+        `diag_distiller-${taskId}`,
+        `diag_router-${taskId}`,
+      ];
+      for (const familyTaskId of diagFamily) {
+        const stage = await stateManager.getTask(familyTaskId);
+        if (stage === null) continue;
+        if (stage.status === 'succeeded' || stage.status === 'failed' || stage.status === 'retry_wait') {
+          await stateManager.updateTask(familyTaskId, { status: 'pending', attemptCount: 0 });
+          recoveredTasks.push({ taskId: familyTaskId, forceApplied: true });
+        }
+      }
+      task = await stateManager.getTask(taskId);
+      console.error(`[PD] owner statement attached to ${taskId}; authorized recovery re-opened the diagnosis family`);
+    } else if (task && (task.status === 'failed' || task.status === 'retry_wait')) {
       const diagFamily = [
         taskId,
         `diag_rootcause-${taskId}`,

@@ -677,15 +677,28 @@ export class PainSignalBridge {
       return { status: 'blocked', reason: reentry.errorCode, nextAction: 'the persisted diagnosis payload is unusable; repair or re-run the diagnosis via the supported CLI command' };
     }
     const runs = await this.stateManager.getRunsByTask(input.taskId);
-    const latestRun = runs.at(-1);
     let output: DiagnosticianOutputV1 | undefined;
-    if (latestRun !== undefined && typeof latestRun.outputPayload === 'string' && latestRun.outputPayload.length > 0) {
+    const parseV1 = (payload: string | undefined | null): DiagnosticianOutputV1 | undefined => {
+      if (typeof payload !== 'string' || payload.length === 0) return undefined;
       try {
-        const parsedOutput: unknown = JSON.parse(latestRun.outputPayload);
-        if (Value.Check(DiagnosticianOutputV1Schema, parsedOutput)) output = parsedOutput;
+        const parsedOutput: unknown = JSON.parse(payload);
+        return Value.Check(DiagnosticianOutputV1Schema, parsedOutput) ? parsedOutput : undefined;
       } catch {
-        output = undefined;
+        return undefined;
       }
+    };
+    // SPEC §9.1 (review P1): the split pipeline commits candidates from the
+    // diag_router SUBTASK — the router's latest run output is the authoritative
+    // diagnostician output for continuation. The parent task's own run output
+    // is only a fallback for legacy flat pipelines (never a cache bypass: both
+    // sources are validated DiagnosticianOutputV1 persisted by the real run).
+    const routerRuns = await this.stateManager.getRunsByTask(`diag_router-${input.taskId}`);
+    for (let i = routerRuns.length - 1; i >= 0 && output === undefined; i -= 1) {
+      output = parseV1(routerRuns[i]?.outputPayload);
+    }
+    if (output === undefined) {
+      const latestRun = runs.at(-1);
+      output = parseV1(latestRun?.outputPayload);
     }
 
     // Skip candidates whose processing domain says the work is finished or
