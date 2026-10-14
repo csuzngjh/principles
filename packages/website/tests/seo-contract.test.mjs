@@ -116,3 +116,15 @@ test('mirrored English and Chinese pages declare each other as alternates', asyn
     '中英镜像页必须互相声明 alternates，否则两个语言版本会互相抢排名',
   )
 })
+
+test('every public page carries the Search Console ownership token', async () => {
+  // 标签被顺手删掉时，GSC 验证不会立刻失效，而是在下次重新校验时才炸——
+  // 那时 sitemap 提交和收录请求配额已经没了。所以这条断言要跟着产物跑。
+  for (const file of publicPages()) {
+    const html = await read(file)
+    assert.ok(
+      /<meta name="google-site-verification" content="Bj8PCwx4YUwfQKZZpL_uFHKJLSxWGOIBTaZd7M57vMc">/.test(html),
+      `${file} 缺少 Search Console 所有权标记`,
+    )
+  }
+})
