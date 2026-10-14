@@ -576,11 +576,12 @@ export class RuntimeStateManager {
    * and admission_json-NULL consumed rows are excluded — they are saved
    * explainable states, not work.
    */
-  async listDiagnosisPostProcessingBacklog(options: { limit: number; nowIso?: string }): Promise<
-    { candidateId: string; taskId: string; status: string; createdAt: string; processingState: string | null }[]
-  > {
+  async listDiagnosisPostProcessingBacklog(options: { limit: number; nowIso?: string }): Promise<{
+    eligible: { candidateId: string; taskId: string; status: string; createdAt: string; processingState: string | null }[];
+    corrupt: { candidateId: string; taskId: string; status: string; createdAt: string }[];
+  }> {
     this.assertInitialized();
-    // Store-owned query (PRI-47: the manager delegates; no inline SQL here).
+    // Store-owned query (PRI-47): the manager delegates; no inline SQL here.
     return this._candidateStore.listDiagnosisPostProcessingBacklog(options);
   }
 

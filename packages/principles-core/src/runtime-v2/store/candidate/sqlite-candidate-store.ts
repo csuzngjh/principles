@@ -118,10 +118,19 @@ export class SqliteCandidateStore implements CandidateStore {
    * diagnostician task (the resume entry reads the original pain input from
    * the parent and the router output from the subtask run).
    */
-  listDiagnosisPostProcessingBacklog(options: { limit: number; nowIso?: string }): { candidateId: string; taskId: string; status: string; createdAt: string; processingState: string | null }[] {
+  listDiagnosisPostProcessingBacklog(options: { limit: number; nowIso?: string }): {
+    eligible: { candidateId: string; taskId: string; status: string; createdAt: string; processingState: string | null }[];
+    corrupt: { candidateId: string; taskId: string; status: string; createdAt: string }[];
+  } {
     const db = this.connection.getDb();
     const nowIso = options.nowIso ?? new Date().toISOString();
-    return db.prepare(`
+    // SPEC review round-4 P1: json_extract throws on malformed admission_json
+    // and would fail the WHOLE backlog scan. json_valid() filters without
+    // throwing: eligible rows need a parseable (or absent) document; corrupt
+    // rows are surfaced SEPARATELY as a candidate-level queryable blocker —
+    // never deleted, never treated as unrecorded, and never eligible for
+    // governance writes (the shared write gate independently refuses them).
+    const eligible = db.prepare(`
       SELECT pc.candidate_id AS candidateId,
              COALESCE(parent.task_id, ct.task_id) AS taskId,
              pc.status AS status,
@@ -133,6 +142,7 @@ export class SqliteCandidateStore implements CandidateStore {
         ON parent.task_id = ct.input_ref AND parent.task_kind = 'diagnostician'
       WHERE COALESCE(parent.task_kind, ct.task_kind) = 'diagnostician'
         AND COALESCE(parent.status, ct.status) = 'succeeded'
+        AND (pc.admission_json IS NULL OR json_valid(pc.admission_json) = 1)
         AND (
           (pc.admission_json IS NULL AND pc.status IN ('pending', 'consumed'))
           OR (
@@ -147,6 +157,22 @@ export class SqliteCandidateStore implements CandidateStore {
       ORDER BY pc.created_at ASC
       LIMIT ?
     `).all(nowIso, options.limit) as { candidateId: string; taskId: string; status: string; createdAt: string; processingState: string | null }[];
+    const corrupt = db.prepare(`
+      SELECT pc.candidate_id AS candidateId,
+             COALESCE(parent.task_id, ct.task_id) AS taskId,
+             pc.status AS status,
+             pc.created_at AS createdAt
+      FROM principle_candidates pc
+      JOIN tasks ct ON ct.task_id = pc.task_id
+      LEFT JOIN tasks parent
+        ON parent.task_id = ct.input_ref AND parent.task_kind = 'diagnostician'
+      WHERE COALESCE(parent.task_kind, ct.task_kind) = 'diagnostician'
+        AND COALESCE(parent.status, ct.status) = 'succeeded'
+        AND pc.admission_json IS NOT NULL AND json_valid(pc.admission_json) = 0
+      ORDER BY pc.created_at ASC
+    
+    `).all() as { candidateId: string; taskId: string; status: string; createdAt: string }[];
+    return { eligible, corrupt };
   }
 
   async getAdmissionDocument(candidateId: string): Promise<

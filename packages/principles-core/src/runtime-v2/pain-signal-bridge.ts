@@ -512,29 +512,62 @@ export async function evaluateAndPersistAdmissionFromStore(
   { ok: true; decisions: Map<string, { decision: AdmissionDecision; reason: string; nextAction: string }> }
   | { ok: false; reason: string; nextAction: string }
 > {
+  // SPEC review round-4 P1: resolve the REAL diagnosis lineage. A split-pipeline
+  // candidate hangs off the diag_router SUBTASK; the PARENT diagnostician task
+  // holds the original pain input (feedback + Owner statement + evidence) and
+  // the router subtask's own succeeded runs hold the diagnostic output. A flat
+  // pipeline keeps task === ingress === output source. The parent–child relation
+  // is validated (subtask.inputRef === parent.taskId, parent kind/status) — a
+  // mismatch refuses with a lineage reason instead of re-typing materials.
   const task = await stateManager.getTask(input.taskId);
   if (task === null) return { ok: false, reason: 'task_missing', nextAction: 'the diagnosis task no longer exists; re-run the diagnosis' };
-  const reentry = validatePersistedIngressFacts(task.diagnosticJson);
+  // Persisted rows always carry task_kind (NOT NULL DDL); an undefined kind
+  // can only come from a partial test-double fixture and follows the flat path.
+  const isSplitSubtask = typeof task.taskKind === 'string' && task.taskKind.startsWith('diag_');
+  let ingressTask = task;
+  const outputSourceTaskIds: string[] = [input.taskId];
+  if (isSplitSubtask) {
+    const parentRef = typeof task.inputRef === 'string' ? task.inputRef : '';
+    const parent = parentRef.length > 0 ? await stateManager.getTask(parentRef) : null;
+    if (parent === null || parent.taskKind !== 'diagnostician' || parentRef !== task.inputRef || parent.status !== 'succeeded') {
+      return { ok: false, reason: 'diagnosis_lineage_inconsistent', nextAction: 'the router subtask does not resolve to a succeeded diagnostician parent; re-run the diagnosis before intake' };
+    }
+    ingressTask = parent;
+    outputSourceTaskIds.unshift(input.taskId);
+  } else if (typeof task.taskKind === 'string' && task.taskKind !== 'diagnostician') {
+    return { ok: false, reason: 'diagnosis_lineage_inconsistent', nextAction: `candidate task kind '${task.taskKind}' is not a diagnostician task or split stage; re-run the diagnosis` };
+  }
+  const reentry = validatePersistedIngressFacts(ingressTask.diagnosticJson);
   if (reentry.errorCode !== null) {
     return { ok: false, reason: reentry.errorCode, nextAction: 'the persisted diagnosis payload is unusable; re-run the diagnosis before intake' };
   }
-  const runs = await stateManager.getRunsByTask(input.taskId);
-  const latestRun = runs.at(-1);
   let output: DiagnosticianOutputV1 | undefined;
-  if (latestRun !== undefined && typeof latestRun.outputPayload === 'string' && latestRun.outputPayload.length > 0) {
+  const parseV1 = (payload: string | undefined | null): DiagnosticianOutputV1 | undefined => {
+    if (typeof payload !== 'string' || payload.length === 0) return undefined;
     try {
-      const parsedOutput: unknown = JSON.parse(latestRun.outputPayload);
-      if (Value.Check(DiagnosticianOutputV1Schema, parsedOutput)) output = parsedOutput;
+      const parsedOutput: unknown = JSON.parse(payload);
+      return Value.Check(DiagnosticianOutputV1Schema, parsedOutput) ? parsedOutput : undefined;
     } catch {
-      output = undefined;
+      return undefined;
     }
+  };
+  for (const sourceTaskId of outputSourceTaskIds) {
+    const runs = await stateManager.getRunsByTask(sourceTaskId);
+    for (let i = runs.length - 1; i >= 0 && output === undefined; i -= 1) {
+      output = parseV1(runs[i]?.outputPayload);
+    }
+    if (output !== undefined) break;
   }
   if (output === undefined) {
     return { ok: false, reason: 'diagnostician_output_unavailable', nextAction: 're-run the diagnosis before intake (the persisted run carries no parseable output)' };
   }
   const ownerStatementPresent = isOwnerStatementEvidence(reentry.correctionEvidence);
-  const candidates = (await stateManager.getCandidatesByTaskId(input.taskId))
-    .filter((candidate) => candidateIds.includes(candidate.candidateId));
+  const candidates = (await stateManager.getCandidatesByTaskId(ingressTask.taskId))
+    .filter((candidate) => candidateIds.includes(candidate.candidateId))
+    .filter((candidate) => candidate.taskId === input.taskId || candidate.taskId === ingressTask.taskId);
+  if (candidates.length !== candidateIds.length) {
+    return { ok: false, reason: 'diagnosis_lineage_inconsistent', nextAction: 'requested candidates do not resolve through the validated diagnosis lineage; re-run the diagnosis' };
+  }
   const results = evaluateCandidateAdmissions(candidates, output, {
     provenance: reentry.provenance,
     inputEvidenceCount: reentry.evidenceCount,

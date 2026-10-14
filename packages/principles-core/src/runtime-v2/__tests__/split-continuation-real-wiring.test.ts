@@ -150,8 +150,9 @@ describe('review P1: split-pipeline continuation on REAL wiring', () => {
     try {
       const candidateId = await seedSplitDiagnosis(ws);
       const backlog = await ws.manager.listDiagnosisPostProcessingBacklog({ limit: 10 });
-      expect(backlog).toHaveLength(1);
-      expect(backlog[0]).toEqual(expect.objectContaining({
+      expect(backlog.corrupt).toHaveLength(0);
+      expect(backlog.eligible).toHaveLength(1);
+      expect(backlog.eligible[0]).toEqual(expect.objectContaining({
         candidateId,
         taskId: PARENT,
         status: 'pending',
@@ -167,8 +168,8 @@ describe('review P1: split-pipeline continuation on REAL wiring', () => {
     try {
       const candidateId = await seedSplitDiagnosis(ws, { candidateStatus: 'consumed' });
       const backlog = await ws.manager.listDiagnosisPostProcessingBacklog({ limit: 10 });
-      expect(backlog).toHaveLength(1);
-      expect(backlog[0]).toEqual(expect.objectContaining({ candidateId, taskId: PARENT, status: 'consumed' }));
+      expect(backlog.eligible).toHaveLength(1);
+      expect(backlog.eligible[0]).toEqual(expect.objectContaining({ candidateId, taskId: PARENT, status: 'consumed' }));
     } finally {
       await ws.close();
     }
@@ -208,7 +209,7 @@ describe('review P1: split-pipeline continuation on REAL wiring', () => {
       expect(document.ok && document.document?.currentEvaluationId !== null).toBe(true);
       expect(document.ok && document.document?.evaluations[0]?.decision).toBe('admitted');
       // terminal processing state → the next backlog scan no longer returns it
-      expect(await ws.manager.listDiagnosisPostProcessingBacklog({ limit: 10 })).toHaveLength(0);
+      expect(await ws.manager.listDiagnosisPostProcessingBacklog({ limit: 10 })).toEqual({ eligible: [], corrupt: [] });
       // idempotent: second resume is a no-op with no duplicate writes
       const second = await bridge.resumeSucceededDiagnosisPostProcessing({ taskId: PARENT });
       expect(second.status).toBe('not_applicable');
@@ -317,7 +318,7 @@ describe('review round-3: bad material cannot starve healthy candidates', () => 
 
       // limit=2, four consecutive rounds — the review's exact starvation shape.
       for (let round = 0; round < 4; round += 1) {
-        const backlog = await manager.listDiagnosisPostProcessingBacklog({ limit: 2 });
+        const { eligible: backlog } = await manager.listDiagnosisPostProcessingBacklog({ limit: 2 });
         for (const item of backlog) {
           await bridge.resumeSucceededDiagnosisPostProcessing({ taskId: item.taskId });
         }
@@ -327,7 +328,7 @@ describe('review round-3: bad material cannot starve healthy candidates', () => 
       expect(document.ok && document.document?.evaluations.length).toBeGreaterThan(0);
       expect(document.ok && document.document?.processing?.state).toBe('complete');
       // Bad pairs are terminal: not returned by the scan anymore.
-      expect(await manager.listDiagnosisPostProcessingBacklog({ limit: 10 })).toHaveLength(0);
+      expect(await manager.listDiagnosisPostProcessingBacklog({ limit: 10 })).toEqual({ eligible: [], corrupt: [] });
       // Bad candidates keep a readable reason + recovery entry (rc-9).
       const [badFirst] = await manager.getCandidatesByTaskId('diagnosis_bad-a');
       if (badFirst === undefined) throw new Error('expected bad candidate');
@@ -447,6 +448,91 @@ describe('review round-3: CAS regression proves the legacy read-modify-write los
       connB2.close();
     } finally {
       await manager.close().catch(() => undefined);
+    }
+  });
+});
+
+
+describe('review round-4 P1: shared write gate resolves REAL split lineage', () => {
+  it('the shared gate ADMITS a legal split candidate through the resolved lineage and persists the disposition', async () => {
+    const ws = await realWorkspace();
+    try {
+      const candidateId = await seedSplitDiagnosis(ws);
+      const { evaluateAndPersistAdmissionFromStore } = await import('../pain-signal-bridge.js');
+      const result = await evaluateAndPersistAdmissionFromStore(ws.manager, [candidateId], { taskId: ROUTER });
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        const decision = result.decisions.get(candidateId);
+        expect(decision).toEqual(expect.objectContaining({ decision: 'admitted', reason: 'evidence_sufficient' }));
+      }
+      const document = await ws.manager.getAdmissionDocument(candidateId);
+      expect(document.ok && document.document?.currentEvaluationId).toBeTruthy();
+      // The parent's Owner-statement channel rides through: provenance and
+      // evidence counts come from the PARENT diagnosticJson (1 evidence entry).
+      expect(document.ok && document.document?.evaluations[0]?.inputEvidenceCount).toBe(1);
+    } finally {
+      await ws.close();
+    }
+  });
+
+  it('refuses when the subtask does not resolve to a succeeded diagnostician parent (lineage inconsistent, zero writes)', async () => {
+    const ws = await realWorkspace();
+    try {
+      const candidateId = await seedSplitDiagnosis(ws);
+      // Break the parent link: router inputRef now points at a NON-existent task.
+      const db = new Database(path.join(ws.workspaceDir, '.pd', 'state.db'));
+      db.prepare('UPDATE tasks SET input_ref = ? WHERE task_id = ?').run('diagnosis_missing_parent', ROUTER);
+      db.close();
+      const { evaluateAndPersistAdmissionFromStore } = await import('../pain-signal-bridge.js');
+      const result = await evaluateAndPersistAdmissionFromStore(ws.manager, [candidateId], { taskId: ROUTER });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toBe('diagnosis_lineage_inconsistent');
+      const document = await ws.manager.getAdmissionDocument(candidateId);
+      expect(document.ok && document.document).toBeNull();
+    } finally {
+      await ws.close();
+    }
+  });
+});
+
+describe('review round-4 P1: corrupt admission_json cannot block the scan', () => {
+  it('NEGATIVE CONTROL: the pre-fix json_extract scan THROWS on a corrupt row', async () => {
+    const ws = await realWorkspace();
+    try {
+      const candidateId = await seedSplitDiagnosis(ws);
+      const db = new Database(path.join(ws.workspaceDir, '.pd', 'state.db'));
+      db.prepare('UPDATE principle_candidates SET admission_json = ? WHERE candidate_id = ?').run('{', candidateId);
+      db.close();
+      // Pre-fix query shape (json_extract without json_valid guard) — proves
+      // the defect is real: the whole scan throws.
+      const conn = new SqliteConnection(ws.workspaceDir);
+      try {
+        expect(() => conn.getDb().prepare(`
+          SELECT pc.candidate_id, json_extract(pc.admission_json, '$.processing.state') AS st
+          FROM principle_candidates pc
+        `).all()).toThrow();
+      } finally { conn.close(); }
+    } finally {
+      await ws.close();
+    }
+  });
+
+  it('the scan survives one corrupt + one healthy row: healthy stays eligible, corrupt is surfaced queryable', async () => {
+    const ws = await realWorkspace();
+    try {
+      const healthyId = await seedSplitDiagnosis(ws);
+      // Corrupt a SECOND candidate (same parent → same scan domain).
+      const db = new Database(path.join(ws.workspaceDir, '.pd', 'state.db'));
+      const secondId = 'cand-corrupt-round4';
+      db.prepare("INSERT INTO principle_candidates (candidate_id, artifact_id, task_id, source_run_id, title, description, confidence, source_recommendation_json, idempotency_key, status, created_at, recommendation_kind, admission_json) VALUES ('cand-corrupt-round4', (SELECT artifact_id FROM principle_candidates WHERE candidate_id = ?), (SELECT task_id FROM principle_candidates WHERE candidate_id = ?), (SELECT source_run_id FROM principle_candidates WHERE candidate_id = ?), 'T', 'D', 0.9, '{}', 'k-corrupt-round4', 'pending', '2026-10-14T11:00:00Z', 'principle', '{')")
+        .run(healthyId, healthyId, healthyId);
+      db.close();
+      const backlog = await ws.manager.listDiagnosisPostProcessingBacklog({ limit: 10 });
+      // No throw; healthy remains eligible; corrupt surfaced separately.
+      expect(backlog.eligible.map((r) => r.candidateId)).toContain(healthyId);
+      expect(backlog.corrupt.map((r) => r.candidateId)).toContain(secondId);
+    } finally {
+      await ws.close();
     }
   });
 });

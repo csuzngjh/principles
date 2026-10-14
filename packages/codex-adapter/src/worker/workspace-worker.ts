@@ -387,10 +387,16 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
     try {
       const handle = await createRuntimeStateHandle({ workspaceDir, readonly: false });
       try {
-        const backlog = await handle.stateManager.listDiagnosisPostProcessingBacklog({ limit: DEFAULT_POST_PROCESSING_LIMIT });
-        const backlogAll = await handle.stateManager.listDiagnosisPostProcessingBacklog({ limit: 200 });
+        const { eligible: backlog, corrupt } = await handle.stateManager.listDiagnosisPostProcessingBacklog({ limit: DEFAULT_POST_PROCESSING_LIMIT });
+        const { eligible: backlogAll, corrupt: corruptAll } = await handle.stateManager.listDiagnosisPostProcessingBacklog({ limit: 200 });
         const oldestCreatedAt = backlogAll[0]?.createdAt;
         const blocked: { candidateId: string; reason: string }[] = [];
+        // SPEC review round-4 P1: corrupt admission_json rows are surfaced as a
+        // candidate-level queryable blocker — never deleted, never eligible for
+        // writes, never blocking healthy work (the scan filters via json_valid).
+        for (const item of corruptAll) {
+          blocked.push({ candidateId: item.candidateId, reason: 'admission_json_corrupt: repair or re-run the diagnosis (pd candidate show reports the unreadable disposition)' });
+        }
         const resumedTaskIds = new Set<string>();
         if (backlog.length > 0) {
           const stateDir = path.join(workspaceDir, '.state');
@@ -419,6 +425,9 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
           oldestAgeMs: oldestCreatedAt !== undefined ? Math.max(0, Date.now() - Date.parse(oldestCreatedAt)) : null,
           blocked,
         };
+        if (corrupt.length > 0) {
+          emitEvent('CODEX_WORKER_ADMISSION_CORRUPT', JSON.stringify({ candidateIds: corruptAll.map((c) => c.candidateId) }));
+        }
         if (backlog.length > 0) {
           emitEvent('CODEX_WORKER_POST_PROCESSING', JSON.stringify(postProcessing));
         }
