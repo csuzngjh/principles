@@ -1808,6 +1808,8 @@ export interface PrincipleListItemData {
   conflictsWithCount: number;
   createdAt: string;
   updatedAt: string;
+  /** PRI-956 (F15): runtime authority revoked (activations deactivated). */
+  runtimeDeactivated?: boolean;
   /** PRI-332: Detected language of the principle text */
   detectedLanguage: string;
   /** PRI-332 P1-5: Structured readability warning code */
@@ -1859,6 +1861,12 @@ function validatePrincipleListItem(v: unknown): PrincipleListItemData | null {
     if (!isReadabilityWarningCode(v.readabilityWarningCode)) return null;
     result.readabilityWarningCode = v.readabilityWarningCode;
   }
+  // PRI-956 (F15): optional runtime-revocation disclosure — present only when
+  // the activations table reports a deactivated prompt activation.
+  if (Object.hasOwn(v, 'runtimeDeactivated')) {
+    if (v.runtimeDeactivated !== true) return null;
+    result.runtimeDeactivated = true;
+  }
   return result;
 }
 
@@ -1868,6 +1876,8 @@ export interface PrinciplesListData {
   categories?: Record<string, number>;
   /** If the approval cross-check was unavailable, this explains why (ERR-002) */
   approvalCrossCheckUnavailable?: string;
+  /** PRI-956 (F15, D3): if the activations-table query was unavailable, this explains why — runtime status cannot be confirmed */
+  revocationCheckUnavailable?: string;
 }
 
 // ── PD Core Principles (PRI-641) ─────────────────────────────────────────────
@@ -1950,11 +1960,20 @@ export function validatePrinciplesList(v: unknown): PrinciplesListData | null {
     ? v.approvalCrossCheckUnavailable
     : undefined;
 
+  // PRI-956 (F15, D3): revocationCheckUnavailable — optional string
+  if (Object.hasOwn(v, 'revocationCheckUnavailable') && !isString(v.revocationCheckUnavailable)) {
+    return null;
+  }
+  const revocationCheckUnavailable = isString(v.revocationCheckUnavailable)
+    ? v.revocationCheckUnavailable
+    : undefined;
+
   return {
     principles,
     summary: { candidate, probation, active, deprecated, archived, total },
     ...(categories !== undefined ? { categories } : {}),
     ...(approvalCrossCheckUnavailable !== undefined ? { approvalCrossCheckUnavailable } : {}),
+    ...(revocationCheckUnavailable !== undefined ? { revocationCheckUnavailable } : {}),
   };
 }
 

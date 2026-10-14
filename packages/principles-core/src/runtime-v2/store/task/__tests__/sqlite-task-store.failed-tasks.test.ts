@@ -571,4 +571,44 @@ describe('SqliteTaskStore failed-task observability', () => {
       expect(count).toBe(list.length);
     });
   });
+
+  // ── PRI-955 (R1 F11 C2/C4): aggregatePipelineHealth ─────────────────────────
+  describe('aggregatePipelineHealth — exact learning-queue aggregates', () => {
+    it('counts only pending runner-kind tasks; MIN(created_at) is the true queue head (no LIMIT truncation)', async () => {
+      for (let i = 0; i < 210; i++) {
+        await store.createTask(makeTaskInput({ taskId: 'p-bulk-' + i, taskKind: 'dreamer', status: 'pending' }));
+      }
+      const agg = await store.aggregatePipelineHealth();
+      expect(agg.pendingCount).toBe(210); // exact COUNT(*) — a LIMIT-200 list length would say 200
+      expect(agg.oldestPendingTaskKind).toBe('dreamer');
+      expect(typeof agg.oldestPendingCreatedAt).toBe('string');
+    });
+
+    it('lastSucceededAt is scoped to runner kinds — an unrelated succeeded task must not fake freshness (C4)', async () => {
+      await store.createTask(makeTaskInput({ taskId: 'unrelated', taskKind: 'diagnostician', status: 'succeeded' }));
+      const agg = await store.aggregatePipelineHealth();
+      expect(agg.pendingCount).toBe(0);
+      expect(agg.lastSucceededAt).toBeNull(); // diagnostician is NOT a learning-pipeline runner kind
+    });
+
+    it('runner-kind succeeded provides lastSucceededAt; failed and needs_human_review never count as progress', async () => {
+      await store.createTask(makeTaskInput({ taskId: 'phil-ok', taskKind: 'philosopher', status: 'succeeded' }));
+      await store.createTask(makeTaskInput({ taskId: 'phil-fail', taskKind: 'philosopher', status: 'failed' }));
+      await store.createTask(makeTaskInput({ taskId: 'scribe-nhr', taskKind: 'scribe', status: 'needs_human_review' }));
+      const agg = await store.aggregatePipelineHealth();
+      expect(agg.pendingCount).toBe(0); // failed/NHR are not pending
+      expect(agg.lastSucceededAt).not.toBeNull(); // but the runner-kind success still evidences progress
+    });
+
+    it('leased tasks are in flight, not pending; retry_wait is waiting (both reported via pendingCount=0)', async () => {
+      await store.createTask(makeTaskInput({ taskId: 'leased-one', taskKind: 'dreamer', status: 'pending', leaseOwner: 'worker', leaseExpiresAt: new Date(Date.now() + 60000).toISOString() }));
+      // leased task keeps status pending in the store — it IS counted, which
+      // is correct: in-flight work is still work the queue must finish.
+      const agg = await store.aggregatePipelineHealth();
+      expect(agg.pendingCount).toBe(1);
+      await store.createTask(makeTaskInput({ taskId: 'retry-one', taskKind: 'philosopher', status: 'retry_wait' }));
+      const agg2 = await store.aggregatePipelineHealth();
+      expect(agg2.pendingCount).toBe(1); // retry_wait is NOT status=pending — reported separately from pending
+    });
+  });
 });

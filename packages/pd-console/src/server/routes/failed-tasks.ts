@@ -195,6 +195,113 @@ interface RecoverDispatchOutcome {
   extras?: Record<string, unknown>;
 }
 
+// ── PRI-955 (F11): derived learning-queue health projection ─────────────────
+//
+// "No failed tasks" is NOT "the pipeline is healthy" — the dogfood run
+// (2026-10-13) had a 13-deep pending backlog with downstream stages starving
+// for 35+ minutes while this page reported the pipeline as healthy. The
+// health projection below is DERIVED on read from the same state.db facts the
+// failed-task list already uses (no second truth, no new persistence):
+// - pendingCount: pending runner-kind tasks (the learning queue)
+// - oldestPendingAgeMinutes: queue age of the oldest pending task
+// - lastProgressAt: newest succeeded transition (updated_at of the newest
+//   succeeded task) — evidence that the pipeline actually advanced recently
+// Status rules (documented, never over-claimed):
+//   stalled    — work is waiting AND nothing progressed inside the window
+//   backlogged — work is waiting and the pipeline still progresses
+//   healthy    — nothing waiting AND a succeeded transition inside the window
+//   unknown    — no usable evidence (fresh workspace, unreadable counters)
+const PIPELINE_STALL_WINDOW_MS = 30 * 60 * 1000;
+const PIPELINE_FRESH_WINDOW_MS = 24 * 60 * 60 * 1000;
+// Runner-kind scoping lives inside SqliteTaskStore.aggregatePipelineHealth
+// (the aggregate SQL itself), so unrelated task kinds can never fake freshness.
+
+export interface PipelineHealth {
+  status: 'healthy' | 'backlogged' | 'stalled' | 'disabled' | 'unknown';
+  pendingCount: number | null;
+  oldestPendingTaskKind: string | null;
+  oldestPendingAgeMinutes: number | null;
+  lastProgressAt: string | null;
+  note: string;
+  nextAction?: string;
+}
+
+function ageMinutes(iso: string | null | undefined, nowMs: number): number | null {
+  if (typeof iso !== 'string' || iso.length === 0) return null;
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return null;
+  return Math.max(0, Math.floor((nowMs - ms) / 60000));
+}
+
+async function derivePipelineHealth(store: SqliteTaskStore, consumerEnabled: boolean): Promise<PipelineHealth> {
+  const nowMs = Date.now();
+  try {
+    // C2/C4 (PRI-955 review): exact, untruncated aggregates over the
+    // authoritative tasks table, scoped to learning-pipeline runner kinds —
+    // a global MAX(succeeded) would let unrelated task kinds fake freshness,
+    // and a LIMIT-200 list length would misreport the queue size.
+    const agg = await store.aggregatePipelineHealth();
+    const {pendingCount} = agg;
+    const oldestPendingAgeMinutes = ageMinutes(agg.oldestPendingCreatedAt, nowMs);
+    const lastProgressAgeMinutes = ageMinutes(agg.lastSucceededAt, nowMs);
+    if (!consumerEnabled) {
+      return {
+        status: 'disabled', pendingCount, oldestPendingTaskKind: agg.oldestPendingTaskKind, oldestPendingAgeMinutes, lastProgressAt: agg.lastSucceededAt,
+        note: `内化自动消费者已禁用（internalization_auto_consumer=false）——学习管道不会推进。当前待处理 ${pendingCount} 个。`,
+        nextAction: '在 .pd/config.yaml 设置 features.internalization_auto_consumer.enabled=true，或改用 pd runtime internalization run-once 手动推进。',
+      };
+    }
+    if (pendingCount > 0) {
+      const stalled = (oldestPendingAgeMinutes ?? 0) > PIPELINE_STALL_WINDOW_MS / 60000
+        && (lastProgressAgeMinutes === null || lastProgressAgeMinutes > PIPELINE_STALL_WINDOW_MS / 60000);
+      if (stalled) {
+        return {
+          status: 'stalled', pendingCount, oldestPendingTaskKind: agg.oldestPendingTaskKind, oldestPendingAgeMinutes, lastProgressAt: agg.lastSucceededAt,
+          note: `学习队列有 ${pendingCount} 个待处理任务，最老等待 ${oldestPendingAgeMinutes ?? '?'} 分钟，且窗口内无任何推进。`,
+          nextAction: '检查内化消费者是否在运行（OpenClaw 自动消费 / pd codex worker），并查看任务队列明细。',
+        };
+      }
+      return {
+        status: 'backlogged', pendingCount, oldestPendingTaskKind: agg.oldestPendingTaskKind, oldestPendingAgeMinutes, lastProgressAt: agg.lastSucceededAt,
+        note: `学习队列有 ${pendingCount} 个待处理任务（最老等待 ${oldestPendingAgeMinutes ?? '?'} 分钟）；最近推进 ${agg.lastSucceededAt ?? '未知'}。`,
+        nextAction: '积压会随消费者周期逐步消化；若长时间不降，检查消费者运行状态与模型通道。',
+      };
+    }
+    // PRI-955 review P1: healthy requires NO unresolved states either —
+    // pendingCount=0 + recent success is NOT healthy if failed, NHR, or
+    // retry_wait tasks are still present.
+    if (agg.failedCount > 0 || agg.needsHumanReviewCount > 0 || agg.retryWaitCount > 0) {
+      const parts: string[] = [];
+      if (agg.failedCount > 0) parts.push(`${agg.failedCount} 个失败`);
+      if (agg.needsHumanReviewCount > 0) parts.push(`${agg.needsHumanReviewCount} 个需人工审查`);
+      if (agg.retryWaitCount > 0) parts.push(`${agg.retryWaitCount} 个等待重试`);
+      return {
+        status: 'backlogged', pendingCount: 0, oldestPendingTaskKind: null, oldestPendingAgeMinutes: null, lastProgressAt: agg.lastSucceededAt,
+        note: `学习队列无积压，但存在未解决任务：${parts.join('、')}。`,
+        nextAction: '在失败任务列表查看详情，或在治理焦点处理需人工审查的任务。',
+      };
+    }
+    if (lastProgressAgeMinutes !== null && lastProgressAgeMinutes <= PIPELINE_FRESH_WINDOW_MS / 60000) {
+      return {
+        status: 'healthy', pendingCount: 0, oldestPendingTaskKind: null, oldestPendingAgeMinutes: null, lastProgressAt: agg.lastSucceededAt,
+        note: `学习队列无积压；最近推进 ${agg.lastSucceededAt}。`,
+      };
+    }
+    return {
+      status: 'unknown', pendingCount: 0, oldestPendingTaskKind: null, oldestPendingAgeMinutes: null, lastProgressAt: agg.lastSucceededAt,
+      note: '当前没有待处理任务，但窗口内没有可确认的推进证据——无法判定管道健康。',
+      nextAction: '产生一次真实任务（或运行一次内化消费者）后回到本页复查。',
+    };
+  } catch {
+    // rc-9: 降级必须可观察——无法读取队列事实时报告 unknown，而非默认健康。
+    return {
+      status: 'unknown', pendingCount: null, oldestPendingTaskKind: null, oldestPendingAgeMinutes: null, lastProgressAt: null,
+      note: '学习队列状态不可读（计数失败）——无法判定管道健康。',
+      nextAction: '检查 .pd/state.db 可读性，或用 pd health 查看工作区诊断。',
+    };
+  }
+}
+
 /**
  * Dispatch one recovery attempt through the shared core services.
  *
@@ -417,7 +524,8 @@ export async function handleFailedTasksRoute(
         sendSuccess(res, {
           tasks: [],
           total: 0,
-          nextAction: 'No failed tasks. PD pipeline is healthy. (state.db not yet initialized — no tasks have been created.)',
+          pipeline: { status: 'unknown', pendingCount: null, oldestPendingTaskKind: null, oldestPendingAgeMinutes: null, lastProgressAt: null, note: 'state.db 尚未初始化——工作区还没有任何任务，管道健康状态未知。', nextAction: '运行时开始创建任务后回到本页复查。' },
+          nextAction: 'No failed tasks. (state.db not yet initialized — pipeline health is UNKNOWN until the runtime creates tasks.)',
         });
         return;
       }
@@ -441,18 +549,29 @@ export async function handleFailedTasksRoute(
           : {}),
       }));
 
-      // Only report "PD pipeline is healthy" when total === 0. When
-      // tasks.length === 0 but total > 0, the caller has paginated past the
-      // last page — returning "healthy" here would mask the failures that
-      // exist on earlier pages.
+      // PRI-955 (F11): "no failed tasks" ≠ "pipeline healthy" — derive the
+      // learning-queue health projection from the same state.db facts and let
+      // the UI show it next to the empty claim.
+      const consumerFlag = ctx.featureFlags && Object.hasOwn(ctx.featureFlags, 'internalization_auto_consumer')
+        ? ctx.featureFlags.internalization_auto_consumer
+        : undefined;
+      const consumerEnabled = consumerFlag ? consumerFlag.enabled === true : true; // 无该 flag 时无法断言禁用——不因缺失而宣称 disabled
+      const pipeline = await derivePipelineHealth(store, consumerEnabled);
+
+      // Only claim anything like "healthy" from the pipeline projection, never
+      // from the failed-task count alone. When tasks.length === 0 but
+      // total > 0, the caller has paginated past the last page.
       if (total === 0) {
         sendSuccess(res, {
           tasks: enriched,
           total,
-          nextAction: 'No failed tasks. PD pipeline is healthy.',
+          pipeline,
+          nextAction: pipeline.status === 'healthy'
+            ? `No failed tasks in the queried range. ${pipeline.note}`
+            : `No failed tasks in the queried range. Pipeline status: ${pipeline.status} — ${pipeline.note}`,
         });
       } else {
-        sendSuccess(res, { tasks: enriched, total });
+        sendSuccess(res, { tasks: enriched, total, pipeline });
       }
     } catch (err) {
       sendError(res, 500, 'failed_tasks_list_error', errorMessage(err));

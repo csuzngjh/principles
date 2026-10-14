@@ -226,10 +226,10 @@ describe('version guard through the real transcript session_meta', () => {
 
   it('a newer unverified Codex version degrades explicitly instead of guessing the schema', () => {
     const bytes = readFileSync(transcriptPath, 'utf8');
-    fs.writeFileSync(transcriptPath, bytes.replace('"cli_version":"0.150.1"', '"cli_version":"0.151.0"'));
+    fs.writeFileSync(transcriptPath, bytes.replace('"cli_version":"0.150.1"', '"cli_version":"0.163.0"'));
     const result = ingestCodexConversation(stopPayload(), 'turn_complete', { workspaceDir, env: { CODEX_HOME: codexHome } });
     expect(result.status).toBe('degraded');
-    if (result.status === 'degraded') expect(result.reason).toContain('codex_version_unverified:0.151.0');
+    if (result.status === 'degraded') expect(result.reason).toContain('codex_version_unverified:0.163.0');
   });
 
   it('the minimum supported version 0.148.0 ingests (no content_item_kinds in that contract)', () => {
@@ -240,6 +240,69 @@ describe('version guard through the real transcript session_meta', () => {
     if (!listed.ok) throw new Error('list failed');
     const kinds = listed.observations.map((row) => row.kind).sort();
     expect(kinds).toEqual(['assistant_turn', 'assistant_turn', 'tool_call', 'user_turn']);
+  });
+});
+
+describe('v0.162.1 real fixture (PRI-953: verified envelope extension)', () => {
+  const V162_SESSION = '0b21621e-0000-4000-8000-000000000001';
+  const V162_TURN = '0b21621e-0000-4000-8000-000000000002';
+  const V162_ROLLOUT = '0b21621e-0000-4000-8000-000000000001';
+
+  beforeEach(() => {
+    // Replace the default 0.150.1 fixture transcript with the real sanitized
+    // 0.162.1 capture; keep the same rollout filename convention so path
+    // authorization resolves inside the sandboxed CODEX_HOME.
+    transcriptPath = path.join(codexHome, 'sessions', '2026', '10', '13', `rollout-2026-10-13T00-44-09-${V162_ROLLOUT}.jsonl`);
+    fs.mkdirSync(path.dirname(transcriptPath), { recursive: true });
+    fs.copyFileSync(fs.realpathSync(new URL('transcripts/v0.162.1-tool-final-turn.jsonl', FIXTURES)), transcriptPath);
+  });
+
+  function v162StopPayload(): Record<string, unknown> {
+    return {
+      session_id: V162_SESSION,
+      turn_id: V162_TURN,
+      transcript_path: transcriptPath,
+      cwd: workspaceDir,
+      hook_event_name: 'Stop',
+      model: 'gpt-6-astra',
+      permission_mode: 'bypassPermissions',
+      stop_hook_active: false,
+      last_assistant_message: 'pd-smoke8-ok',
+    };
+  }
+
+  it('ingests the real sanitized 0.162.1 transcript through the unchanged production path', () => {
+    const result = ingestCodexConversation(v162StopPayload(), 'turn_complete', { workspaceDir, env: { CODEX_HOME: codexHome } });
+    expect(result.status).toBe('ok');
+    if (result.status === 'ok') {
+      expect(result.inserted).toBeGreaterThan(0);
+      // token_usage_record is a known-unknown record type at this version —
+      // designed tolerance, never a failure.
+      expect(result.warnings.every((w) => w.includes('unknown_record_type_skipped'))).toBe(true);
+    }
+    const listed = listGovernanceObservations({ workspaceDir, rolloutIdentity: V162_ROLLOUT });
+    if (!listed.ok) throw new Error('list failed');
+    expect(listed.observations.length).toBeGreaterThan(0);
+    const checkpoint = readGovernanceCheckpoint({ workspaceDir, hostKind: 'codex', rolloutIdentity: V162_ROLLOUT });
+    expect(checkpoint && 'byteOffset' in checkpoint ? checkpoint : null).toMatchObject({
+      cliVersion: '0.162.1',
+      rootSessionId: V162_SESSION,
+      byteOffset: fs.statSync(transcriptPath).size,
+    });
+  });
+
+  it('replaying the same 0.162.1 Stop is idempotent', () => {
+    ingestCodexConversation(v162StopPayload(), 'turn_complete', { workspaceDir, env: { CODEX_HOME: codexHome } });
+    const replay = ingestCodexConversation(v162StopPayload(), 'turn_complete', { workspaceDir, env: { CODEX_HOME: codexHome } });
+    expect(replay.status).toBe('ok');
+    if (replay.status === 'ok') {
+      expect(replay.inserted).toBe(0);
+      expect(replay.duplicates).toBe(0);
+    }
+    const listed = listGovernanceObservations({ workspaceDir, rolloutIdentity: V162_ROLLOUT });
+    if (!listed.ok) throw new Error('list failed');
+    const keys = listed.observations.map((row) => row.logicalKey);
+    expect(new Set(keys).size).toBe(keys.length);
   });
 });
 
