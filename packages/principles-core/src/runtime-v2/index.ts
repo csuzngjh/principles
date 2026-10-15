@@ -733,6 +733,16 @@ export {
 export type { BehaviorExamplePack, BehaviorExamplePackValidationResult } from './internalization/behavior-example-pack.js';
 export { validateBehaviorExamplePack } from './internalization/behavior-example-pack.js';
 
+// Evidence readiness gate (PRI-981 — SPEC-PD-IAER-001 FR-01)
+export type {
+  OwnerEvidenceSelection,
+  OwnerEvidenceReasonCode,
+  EvidenceAssemblyOutcome,
+  EvidenceReadinessInput,
+  EvidenceReadiness,
+} from './internalization/evidence-readiness.js';
+export { assessEvidenceReadiness } from './internalization/evidence-readiness.js';
+
 // Internalization route model (PRI-43)
 export type { InternalizationRouteKind, InternalizationRouteDecision } from './internalization/internalization-route.js';
 export { decideInternalizationRoute } from './internalization/internalization-route.js';
