@@ -141,7 +141,7 @@ function hydrateOrNull(task: TaskRecord): PITaskRecord | null {
 }
 
 function readDiagnosticJson(task: TaskRecord): string | null {
-  const raw = (task as unknown as Record<string, unknown>).diagnosticJson;
+  const raw = task.diagnosticJson;
   return typeof raw === 'string' && raw.trim() !== '' ? raw : null;
 }
 
