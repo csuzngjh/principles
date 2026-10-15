@@ -49,6 +49,7 @@ const PRINCIPLE_IDS = {
   clickApprove: 'e2e00000-0000-4000-8000-000000000008',
   clickReject: 'e2e00000-0000-4000-8000-000000000009',
   clickEdit: 'e2e00000-0000-4000-8000-00000000000a',
+  readability: 'e2e00000-0000-4000-8000-00000000000b',
 } as const;
 
 /** Minimal ledger principle entry for a seeded UUID identity. */
@@ -425,6 +426,33 @@ insertClickApproval.run(
   eightDaysAgo, '点击测试：编辑', 'Owner 审批：UI 点击编辑',
 );
 
+// ── 9a-2. SPEC-PD-CONSOLE-READABILITY-002 切片1：长文阅读分层 fixture ────────
+// scribe 真实形状（principleDraft.title+statement）。statement 为多行长文：
+// 含空行、编号、中文引号与 emoji，用于断言标题/正文分层、换行保留与
+// 文本安全渲染（不作为点击目标；点击用上面的 apr-click-* fixture）。
+const readabilityLongStatement = [
+  '“共享状态”的删除与整体重写必须先说明影响范围 😀',
+  '',
+  '1. 列出将被修改或删除的内容；',
+  '2. 说明不可逆后果与恢复方式；',
+  '3. 按已有确认规则取得 Owner 同意后再执行。',
+].join('\n');
+insertPiArtifact.run(
+  'artifact-readability-long', 'principle', 'task-readability-long', PRINCIPLE_IDS.readability,
+  '[]', 'validated', JSON.stringify({
+    principleId: PRINCIPLE_IDS.readability,
+    title: '先确认范围，再修改现有内容',
+    principleDraft: {
+      statement: readabilityLongStatement,
+      rationale: '长文阅读分层与换行保留的展示验证',
+    },
+  }), now, now,
+);
+insertClickApproval.run(
+  'apr-readability-long', 'artifact-readability-long', 'prompt', 'low', 'pending', 0.85,
+  eightDaysAgo, '阅读分层：长文展示', 'Owner 审批：长文阅读分层展示验证',
+);
+
 // ── 9b. principle_applications receipts (SPEC-PD-UIUX-001 R1) ────────────────
 // Four VERIFIED receipt states so the principle-detail receipt semantics can
 // be exercised against real pages (not just source contracts):
@@ -567,6 +595,7 @@ const ledgerPrinciples: Record<string, ReturnType<typeof seededLedgerPrinciple>>
   [PRINCIPLE_IDS.clickApprove]: seededLedgerPrinciple(PRINCIPLE_IDS.clickApprove, '点击批准测试原则', ['pain-e2e-click-approve']),
   [PRINCIPLE_IDS.clickReject]: seededLedgerPrinciple(PRINCIPLE_IDS.clickReject, '点击拒绝测试原则', ['pain-e2e-click-reject']),
   [PRINCIPLE_IDS.clickEdit]: seededLedgerPrinciple(PRINCIPLE_IDS.clickEdit, '点击编辑测试原则', ['pain-e2e-click-edit']),
+  [PRINCIPLE_IDS.readability]: seededLedgerPrinciple(PRINCIPLE_IDS.readability, readabilityLongStatement, ['pain-e2e-readability']),
 };
 const ledger = {
   _tree: {

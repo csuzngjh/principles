@@ -630,9 +630,12 @@ export function PrinciplesPage() {
                   {t("principles.updatedAt")}: {formatDate(card.updatedAt, i18n.language)}
                 </p>
 
-                {/* PRI-558: evolution narrative blocks (real fields or honest fallback) */}
+                {/* PRI-558: evolution narrative blocks (real fields or honest fallback).
+                    SPEC-PD-CONSOLE-READABILITY-002 切片1（R7）：候选描述与卡片
+                    内容同源，贴在「形成依据」里是同一材料的二次粘贴，冒充独立
+                    依据——改为诚实缺省文案；真正的依据来源待切片3 的证据定位。 */}
                 <EvolutionBlock label={t("principles.blockBasis")}>
-                  {ag?.candidateDescription ?? t("principles.blockBasisFallback")}
+                  {t("principles.blockBasisFallback")}
                 </EvolutionBlock>
                 <EvolutionBlock label={t("principles.blockImpact")}>
                   {/* Owner Decision v1 (AI User QA finding): the legacy copy

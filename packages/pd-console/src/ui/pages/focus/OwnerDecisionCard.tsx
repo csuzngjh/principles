@@ -204,15 +204,24 @@ export function OwnerDecisionCard({
           不再复用它）— 这里不再重复渲染同一段评审原文（PRI-787）。 */}
 
       {item.review && (
-        <div className="mb-2 flex flex-wrap gap-2 text-[10.5px] font-mono uppercase tracking-[0.06em]">
+        <div className="mb-2 flex flex-wrap items-center gap-2 text-[10.5px] font-mono uppercase tracking-[0.06em]">
           <span className="rounded-[2px] border border-line px-2 py-1 text-ink-3">
             {t(`pages.focus.ownerDecision.evidence.${item.review.evidence.completeness}`)}
           </span>
-          {item.review.evidence.deterministicChecks.map(check => (
-            <span key={check.check} className="rounded-[2px] border border-line px-2 py-1 text-ink-3">
-              {check.check}: {check.status}
-            </span>
-          ))}
+          {/* SPEC-PD-CONSOLE-READABILITY-002 切片1（R4）：原始检查码是内部技术
+              明细，收进折叠披露（不消失、不伪造解释）；完整度标签保持可见。 */}
+          <details data-testid={`owner-checks-${item.taskId}`}>
+            <summary className="cursor-pointer text-ink-4 hover:text-ink-3">
+              {t("pages.focus.ownerDecision.checksDisclosure")}
+            </summary>
+            <div className="mt-1 flex flex-wrap gap-2">
+              {item.review.evidence.deterministicChecks.map(check => (
+                <span key={check.check} className="rounded-[2px] border border-line px-2 py-1 text-ink-3">
+                  {check.check}: {check.status}
+                </span>
+              ))}
+            </div>
+          </details>
         </div>
       )}
 

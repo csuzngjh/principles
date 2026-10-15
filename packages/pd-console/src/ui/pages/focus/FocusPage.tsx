@@ -27,6 +27,7 @@ import type {
 import type { OwnerDecisionItemData } from "../../utils/validators.js";
 import type { PromptInjectionBudgetStatus } from "../../utils/validators.js";
 import { selectApprovalGroupDisplayTitle, showsUnlinkedCandidateNote, validateApprovalsGroupedData } from "./focus-validation.js";
+import { splitReadingTitleBody } from "../../utils/reading-layout.js";
 import { OwnerDecisionCard } from "./OwnerDecisionCard.js";
 import { localizeApprovalWarning, splitApprovalWarnings } from "../../utils/approval-warning-localization.js";
 
@@ -506,6 +507,9 @@ function PendingReviewCard({
   const displayTitle = selectApprovalGroupDisplayTitle(group)
     ?? t("pages.focus.untitledCandidate", { defaultValue: "待命名候选原则" });
   const unlinkedCandidateNote = showsUnlinkedCandidateNote(group);
+  // SPEC-PD-CONSOLE-READABILITY-002 切片1（R2/R3/R7）：候选描述可能是整段规则
+  // 正文——不再整段充当加粗标题。短标题只作预览，逐字全文由正文块承载。
+  const readingLayout = splitReadingTitleBody(displayTitle);
 
   async function applyDecisionToAllRecords(
     action: "approve" | "reject",
@@ -612,7 +616,7 @@ function PendingReviewCard({
       const { allSucceeded, failedCount, failureReason } = summarizeDecisionResults(results);
       const totalCount = results.length;
       if (allSucceeded) {
-        toast.success(t("pages.focus.editSucceeded", { defaultValue: "已保存修订" }));
+        toast.success(t("pages.focus.editSucceeded", { defaultValue: "已替换待审版本" }));
         setShowEditInput(false);
         setEditReason("");
         setNewArtifactId("");
@@ -620,7 +624,7 @@ function PendingReviewCard({
       } else {
         toast.error(
           t("pages.focus.partialFailure", {
-            defaultValue: `编辑完成，但 ${failedCount}/${totalCount} 条记录失败。`,
+            defaultValue: `替换完成，但 ${failedCount}/${totalCount} 条记录失败。`,
             failedCount,
             totalCount,
             reason: failureReason ?? t("pages.focus.unknownFailure", { defaultValue: "请检查服务日志。" }),
@@ -629,7 +633,7 @@ function PendingReviewCard({
         onDecisionApplied();
       }
     } catch {
-      toast.error(t("pages.focus.editFailed", { defaultValue: "编辑失败，请稍后重试。" }));
+      toast.error(t("pages.focus.editFailed", { defaultValue: "替换失败，请稍后重试。" }));
     } finally {
       setActionLoading(false);
     }
@@ -669,10 +673,22 @@ function PendingReviewCard({
         )}
       </div>
 
-      {/* Title — human-readable candidate description, NOT the fabricated principleId */}
-      <div className="mt-[14px] mb-2 font-semibold text-ink leading-snug">
-        {displayTitle}
+      {/* Title — human-readable candidate description, NOT the fabricated principleId.
+          切片1：标题只承载短预览（截断仅作预览），长文的逐字全文在正文块渲染。 */}
+      <div
+        className="mt-[14px] mb-2 font-semibold text-ink leading-snug"
+        data-testid={`candidate-title-${group.principleId}`}
+      >
+        {readingLayout.title}
       </div>
+      {readingLayout.body !== null && (
+        <div
+          className="mb-2 text-[15px] leading-relaxed text-ink whitespace-pre-wrap break-words"
+          data-testid={`candidate-body-${group.principleId}`}
+        >
+          {readingLayout.body}
+        </div>
+      )}
 
       {/* PRI-940: the pinned artifact is gone — degradation must be visible (rc-9),
           not a silently blank card; the raw artifact ID stays reachable via the
@@ -796,7 +812,7 @@ function PendingReviewCard({
           data-testid={`edit-btn-${group.principleId}`}
           className="inline-flex items-center border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
         >
-          {t("pages.focus.editAction", { defaultValue: "编辑" })}
+          {t("pages.focus.editAction", { defaultValue: "替换待审版本" })}
         </button>
         <button
           type="button"
@@ -854,7 +870,7 @@ function PendingReviewCard({
       {showEditInput && (
         <div className="mt-3 p-3 border border-gov/20 rounded-[var(--radius-md)]">
           <label className="block font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-2">
-            {t("pages.focus.editReasonLabel", { defaultValue: "编辑原因（必填）" })}
+            {t("pages.focus.editReasonLabel", { defaultValue: "替换原因（必填）" })}
           </label>
           <div className="mb-2 text-ink-4 text-[12px] font-mono">
             {t("pages.focus.currentArtifactLabel", { defaultValue: "当前工件" })}: {currentArtifactId}
@@ -872,7 +888,7 @@ function PendingReviewCard({
             value={editReason}
             onChange={(e) => setEditReason(e.target.value)}
             data-testid={`edit-reason-${group.principleId}`}
-            placeholder={t("pages.focus.editReasonPlaceholder", { defaultValue: "请说明编辑原因" })}
+            placeholder={t("pages.focus.editReasonPlaceholder", { defaultValue: "请说明为什么需要替换这份待审版本" })}
             className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-[13px] min-h-[80px] resize-y focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
           />
           <div className="flex gap-2 mt-2">
@@ -883,7 +899,7 @@ function PendingReviewCard({
               data-testid={`confirm-edit-${group.principleId}`}
               className="inline-flex items-center border border-gov text-gov bg-surface rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:bg-gov/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {t("pages.focus.confirmEdit", { defaultValue: "确认编辑" })}
+              {t("pages.focus.confirmEdit", { defaultValue: "确认替换" })}
             </button>
             <button
               type="button"

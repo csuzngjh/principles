@@ -120,7 +120,7 @@ function extractCandidateDescription(contentJson: string): string | null {
     const ruleRaw = ruleMatch ? ruleMatch[1] : undefined;
     const principleText = principleRaw ? principleRaw.trim() : null;
     const ruleText = ruleRaw ? ruleRaw.trim() : null;
-    if (principleText && ruleText) return `${principleText} �?${ruleText}`;
+    if (principleText && ruleText) return `${principleText} — ${ruleText}`;
     if (ruleText) return ruleText;
     if (principleText) return principleText;
   }
@@ -133,7 +133,7 @@ function extractCandidateDescription(contentJson: string): string | null {
     const draft = obj.principleDraft;
     const title = typeof draft.title === 'string' ? draft.title.trim() : '';
     const statement = typeof draft.statement === 'string' ? draft.statement.trim() : '';
-    if (title && statement) return `${title} �?${statement}`;
+    if (title && statement) return `${title} — ${statement}`;
     if (title) return title;
     if (statement) return statement;
   }
@@ -208,7 +208,7 @@ export class ApprovalsGroupedConsoleModel {
   async getApprovalsGrouped(targetHost?: PromptInjectionTargetHost): Promise<ApprovalsGroupedResponse> {
     const stateDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
     if (!fs.existsSync(stateDbPath)) {
-      return { groups: [], generatedAt: new Date().toISOString(), note: 'state.db not found �?workspace may not be initialized' };
+      return { groups: [], generatedAt: new Date().toISOString(), note: 'state.db not found — workspace may not be initialized' };
     }
 
     const conn = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true });
@@ -222,7 +222,7 @@ export class ApprovalsGroupedConsoleModel {
         allApprovals = await queue.listAll();
       } catch (err) {
         if (isMissingTableError(err)) {
-          return { groups: [], generatedAt: new Date().toISOString(), note: 'approval table not found �?workspace may not be initialized' };
+          return { groups: [], generatedAt: new Date().toISOString(), note: 'approval table not found — workspace may not be initialized' };
         }
         throw err;
       }
