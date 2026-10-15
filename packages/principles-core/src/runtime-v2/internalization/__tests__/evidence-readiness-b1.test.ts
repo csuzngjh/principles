@@ -19,6 +19,9 @@
  * metadata parse and the B1 recovery service all go through.
  */
 import { describe, expect, it } from 'vitest';
+// BehaviorExamplePack is DEFINED in behavior-example-pack.ts; evidence-readiness
+// imports it but does not re-export it (same import shape as evidence-readiness.test.ts).
+import type { BehaviorExamplePack } from '../behavior-example-pack.js';
 import {
   assessEvidenceReadiness,
   computeBehaviorExamplePackDigest,
@@ -26,7 +29,6 @@ import {
   isOwnerEvidenceScopeError,
   OWNER_EVIDENCE_SCOPE_ERROR_NAME,
   validateOwnerEvidenceSelectionShape,
-  type BehaviorExamplePack,
   type OwnerEvidenceSelection,
 } from '../evidence-readiness.js';
 import { createPITaskDiagnosticJson, parsePITaskMetadata } from '../pitask-metadata.js';
@@ -200,7 +202,7 @@ describe('extended persisted selection shape (B1 FR-03 provenance fields)', () =
       timeoutMs: 300_000,
       inputArtifactRefs: [],
       outputArtifactRefs: [],
-      ownerEvidenceSelection: { ...EXTENDED, revision: 'one' },
+      ownerEvidenceSelection: { ...EXTENDED, revision: 'one' as unknown as number },
     })) as Record<string, unknown>;
     expect(parsePITaskMetadata(JSON.stringify(raw))).toBeNull();
   });
