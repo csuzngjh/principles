@@ -486,11 +486,12 @@ describe('drill 8: product (cohort) vs tools checkout separation', () => {
   // impossible to merge: the order, the legs, the rehearsal legs, the
   // rehearsal loop and the build mapping must each cover every package the
   // manifests themselves say is publishable.
-  it('every publishable package is wired into the train: order + leg + rehearsal + build branch', async () => {
+  it('every publishable package is wired into the train: order + leg + rehearsal + build branch + channel build mirror', async () => {
     const { loadWorkspace } = (await loadModule('lib/workspace.mjs')) as {
-      loadWorkspace: (cwd: string) => { publishable: { dir: string }[] };
+      loadWorkspace: (cwd: string) => { publishable: { dir: string; name: string }[] };
     };
-    const dirs = loadWorkspace(REPO_ROOT).publishable.map((p) => p.dir);
+    const publishable = loadWorkspace(REPO_ROOT).publishable;
+    const dirs = publishable.map((p) => p.dir);
     expect(dirs.length).toBeGreaterThan(1);
     const t = trainText();
     const a = actionText();
@@ -518,6 +519,22 @@ describe('drill 8: product (cohort) vs tools checkout separation', () => {
     const loop = /for DIR in ([a-z0-9 _-]+); do/.exec(p)?.[1].trim().split(/\s+/);
     expect(loop, 'preflight must loop every publishable package').toBeTruthy();
     expect([...loop!].sort()).toEqual([...dirs].sort());
+
+    // The signed-channel axis hand-copies the same dependency-first build
+    // order (its comment claims "same component build order as the
+    // create-principles-disciple path in publish-npm.yml"). When
+    // @principles/workbuddy-adapter joined the train the copy was not
+    // refreshed, so release-metadata's dry-run died inside pd-cli's tsc with
+    // TS2307 (run 38675317722) — the same omission class as PRI-979, one
+    // seam later. The mirror must cover the publishable set too.
+    const meta = fs.readFileSync(path.join(REPO_ROOT, '.github', 'workflows', 'release-metadata.yml'), 'utf8');
+    const buildStep = /- name: Build release payload components\n\s+run: \|\n([\s\S]*?)\n\s+- name:/.exec(meta)?.[1];
+    expect(buildStep, 'release-metadata.yml must define the payload build step').toBeTruthy();
+    for (const pkg of publishable) {
+      const built =
+        buildStep!.includes(`--workspace=${pkg.name}`) || buildStep!.includes(`cd packages/${pkg.dir} &&`);
+      expect(built, `release-metadata.yml does not build ${pkg.name} (${pkg.dir})`).toBe(true);
+    }
   });
 
   it('the real committed manifests satisfy the static train contract in TRAIN_ORDER', async () => {

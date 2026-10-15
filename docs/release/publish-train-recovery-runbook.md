@@ -42,12 +42,15 @@ optional rehearsal job then runs all eight legs in `dry_run` mode: real
 control path, real cohort builds, real `npm pack` — **no upload**. A
 rehearsal is never evidence of a published version.
 
-Adding a publishable package means wiring it in three places at once — the
-train's `TRAIN_ORDER`, its own leg in both workflows, and a build branch in
-the publish action. Drill 8 of `scripts/__tests__/publish-recovery.test.ts`
-derives the set from the package manifests and fails the merge if any of the
-three drifts (PRI-979: `@principles/workbuddy-adapter` shipped with none of
-them, and the train only noticed at dispatch time).
+Adding a publishable package means wiring it into every seam the release
+control plane copies by hand: the train's `TRAIN_ORDER`, its own leg in both
+workflows, the rehearsal's registry loop, a build branch in the publish
+action, and the dependency-first build mirror in `release-metadata.yml`
+(the signed-channel axis). Drill 8 of `scripts/__tests__/publish-recovery.test.ts`
+derives the set from the package manifests and fails the merge if any seam
+drifts (PRI-979: `@principles/workbuddy-adapter` shipped with none of them,
+and the train only noticed at dispatch time; the channel mirror drifted the
+same way one axis later and killed dry-run run 38675317722 in pd-cli's tsc).
 
 ## Step 2 — recover with reused validation evidence
 
