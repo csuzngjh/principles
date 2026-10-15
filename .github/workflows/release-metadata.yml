@@ -130,6 +130,16 @@ on:
         required: false
         default: 'auto'
         type: string
+  # PRI-986 — daily CHANNEL PREFLIGHT. A schedule event carries no workflow
+  # inputs, so MODE falls back to 'dry-run' above, and Resolve publication
+  # inputs fails closed if a schedule event ever resolves to publish. This
+  # is a rehearsal only: it builds, signs and verifies the 9-leg matrix and
+  # publishes nothing — the signed channel pointer still advances solely by
+  # an explicit `mode=publish` dispatch (PRI-727 governance).
+  schedule:
+    # Daily 06:00 UTC = Beijing 14:00 — after the 04:00 npm reconciliation
+    # window, so the preflight rehearses the payload of a same-day train.
+    - cron: '0 6 * * *'
 
 concurrency:
   group: release-metadata-${{ github.event.inputs.channel || 'stable' }}
@@ -153,6 +163,7 @@ jobs:
       publication_sequence: ${{ steps.inputs.outputs.publication_sequence }}
       channel_version: ${{ steps.inputs.outputs.channel_version }}
       expires_at: ${{ steps.inputs.outputs.expires_at }}
+      readable_from: ${{ steps.inputs.outputs.readable_from }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -280,6 +291,15 @@ jobs:
           MODE: ${{ github.event.inputs.mode || 'dry-run' }}
           CHANNEL: ${{ github.event.inputs.channel || 'stable' }}
         run: |
+          # PRI-986 — a scheduled run is a PREFLIGHT and must never publish.
+          # MODE already falls back to 'dry-run' when the input is absent;
+          # this assertion makes that structural, so a future change to the
+          # input default or to any expression here cannot silently hand a
+          # cron run the publish path.
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$MODE" = "publish" ]; then
+            echo "::error::A scheduled run must never publish release metadata. mode=publish requires an explicit workflow_dispatch."
+            exit 1
+          fi
           SEQ="${{ github.event.inputs.publication_sequence }}"
           if [ "$SEQ" = "auto" ] || [ -z "$SEQ" ]; then
             SEQ=$(( ${{ steps.prev.outputs.prev_sequence || 0 }} + 1 ))
@@ -330,10 +350,31 @@ jobs:
             GUARD_ARGS+=(--channel-product-version "$CHANNEL_PRODUCT_VERSION")
           fi
           node scripts/check-product-version-channel.mjs "${GUARD_ARGS[@]}"
+          # PRI-853 says a blind default is not evidence, so the operator MUST
+          # pass data_schema_forward_readable_from for any real publication.
+          # A scheduled preflight carries no inputs at all, so for THAT event
+          # only the value is derived from the live channel pointer (the
+          # version installs actually run) and announced as derived. Any other
+          # event with an empty value still fails closed below.
+          READABLE_FROM="${{ github.event.inputs.data_schema_forward_readable_from }}"
+          if [ -z "$READABLE_FROM" ]; then
+            if [ "${{ github.event_name }}" = "schedule" ]; then
+              READABLE_FROM="$CHANNEL_PRODUCT_VERSION"
+              if [ -z "$READABLE_FROM" ]; then
+                echo "::error::Scheduled preflight has no live pointer to derive data_schema_forward_readable_from from — refusing to guess."
+                exit 1
+              fi
+              echo "::notice::Preflight-only derivation: data_schema_forward_readable_from=$READABLE_FROM comes from the live channel pointer, not from operator evidence. The publisher still validates it as a version."
+            else
+              echo "::error::data_schema_forward_readable_from is required (PRI-853): pass the oldest release whose data this candidate keeps readable, proven by tests."
+              exit 1
+            fi
+          fi
           echo "publication_sequence=$SEQ" >> "$GITHUB_OUTPUT"
           echo "channel_version=$PTR" >> "$GITHUB_OUTPUT"
           echo "expires_at=$EXPIRES" >> "$GITHUB_OUTPUT"
-          echo "publication inputs: sequence=$SEQ pointer=$PTR expires=$EXPIRES resolved_version=$RESOLVED_VERSION"
+          echo "readable_from=$READABLE_FROM" >> "$GITHUB_OUTPUT"
+          echo "publication inputs: sequence=$SEQ pointer=$PTR expires=$EXPIRES resolved_version=$RESOLVED_VERSION readable_from=$READABLE_FROM"
 
   # One leg per (platform, arch, Node ABI). Each leg builds NATIVELY on its own
   # runner — assertSupportedLocalReleaseTarget forbids cross-target builds, so
@@ -636,7 +677,7 @@ jobs:
             --publication-sequence "${{ needs.resolve-inputs.outputs.publication_sequence }}"
             --expires-at "${{ needs.resolve-inputs.outputs.expires_at }}"
             --min-bootstrap-version 1.0.0
-            --data-schema-forward-readable-from "${{ github.event.inputs.data_schema_forward_readable_from }}"
+            --data-schema-forward-readable-from "${{ needs.resolve-inputs.outputs.readable_from }}"
             --asset-base-url "$ASSET_BASE_URL"
             --asset-release-dir "$RUNNER_TEMP/asset-release"
             --output-dir "$RUNNER_TEMP/metadata-repo"

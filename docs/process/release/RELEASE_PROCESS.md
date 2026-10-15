@@ -30,7 +30,7 @@ Version Packages PR (bot, changesets/action)
 release cohort = that landing commit SHA (merge or squash — identity is
                     the reproduction, never the commit shape)
         ↓
-publish train (dispatched automatically, or weekly reconciliation window)
+publish train (dispatched automatically, or daily reconciliation window)
         =  checkout cohort SHA → exact name@version registry check
            → publish exact committed version, or skip if present+verified
         ↓  idempotent closing steps
@@ -46,7 +46,7 @@ Key contracts (enforced by `scripts/release/*` guards + tests):
   may not edit any `packages/*/package.json` `version` field.
 - **Release cohort** = the Version PR landing SHA (merge commit, squash or
   rebase — identity is the first-parent reproduction, never the shape).
-  Retries and the weekly window build that exact SHA; later main changes
+  Retries and the daily window build that exact SHA; later main changes
   cannot leak into a release.
 - **Exact-version publish** = the registry is queried for the exact
   `name@version`; absent → publish, present + matching provenance
@@ -111,12 +111,20 @@ versions equal "because they ship together".
   cohort by reproduction.
 - **Recovery / manual**: Actions → Publish to npm → Run, optionally pinning
   `cohort_sha` (empty = auto-detect the latest cohort).
-- **Weekly window** (Fri 04:00 UTC): reconciliation ONLY — pending cohort
+- **Daily window** (04:00 UTC): reconciliation ONLY — pending cohort
   publishes, incomplete closing steps; no versions are ever created. No
   cohort AND every committed version already on the registry → success
   no-op; no cohort but a committed version missing from the registry →
   CHAIN-BREAK ALARM (exit 1 + `::error::`; PRI-922: squash merges silently
-  stalled the whole npm chain).
+  stalled the whole npm chain). PRI-986: the window used to be weekly, which
+  left a Monday cohort unpublished for four days.
+- **Daily channel preflight** (06:00 UTC, `release-metadata.yml`): a
+  scheduled full-matrix DRY RUN of the signed channel — it proves the
+  publish path is alive without publishing. Publishing stays a human
+  decision: the workflow refuses `mode=publish` on a schedule, and a
+  scheduled run derives `data_schema_forward_readable_from` from the live
+  channel pointer (an operator dispatch must still pass it explicitly,
+  PRI-853).
 
 The Version PR bot (`changesets/action`, pinned) requires the
 `PD_VERSION_PR_TOKEN` secret (a fine-grained PAT with contents:write +
