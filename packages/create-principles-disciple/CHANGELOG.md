@@ -1,5 +1,12 @@
 # create-principles-disciple
 
+## 1.145.3
+
+### Patch Changes
+
+- eaf52c4: PRI-980 (SPEC-PD-IAER-001): bundle refresh — this release train patches `principles-disciple` (evidence-readiness preflight, channel-aware Artificer routing, owner evidence attach/resume, run-correlation telemetry) and `@principles/host-runtime`; the installer bundles the plugin, so it must be declared in the same release plan (release-intent rule N-5/C4). No installer code changes.
+- 364e37d: Console readability slice 1 (SPEC-PD-CONSOLE-READABILITY-002): fix static mojibake separators in candidate descriptions, split long rule text into short-title preview + verbatim body (newlines preserved, no bold h1 body), relabel approval record counts (no longer called behavioral evidence), rename the misleading "Edit" action to "Replace pending version", fold raw deterministic-check codes into a disclosure, and stop pasting the candidate description into the principles list "Formation Basis" block.
+
 ## 1.145.2
 
 ### Patch Changes

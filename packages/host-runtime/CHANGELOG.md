@@ -1,5 +1,17 @@
 # @principles/host-runtime
 
+## 0.9.2
+
+### Patch Changes
+
+- eaf52c4: PRI-982 (SPEC-PD-IAER-001 FR-02/FR-04/§4.2): consumer-side evidence preflight + authoritative channel routing for Artificer. The shared consumer cycle resolves the target channel from `pi_metadata.channel` (seed-time bridge authority): only `code_tool_hook` tasks enter ArtificerL2, prompt-channel tasks keep their legal non-L2 pipeline, unresolvable channels refuse to guess. `code_tool_hook` tasks pass a new `preflightArtificerOwnerEvidence` gate BEFORE any runner construction: no Owner selection or an invalid one atomically transitions the task to `needs_human_review` (CAS via `updateTaskIfDiagnosticJsonUnchanged`, humanReviewContext with the stable FR-04 reasonCode + nextAction) with zero LLM calls, zero run records and no attemptCount consumption; a missing host `behaviorEvidence` port degrades observably and leaves the task pending (SPEC §6.2). New optional PITaskMetadata field `ownerEvidenceSelection` (single shape authority shared with the readiness gate; bad values fail the whole metadata closed). The OpenClaw auto-consumer wires the production `BehaviorExamplePackAssembler` through the port (same assembly contract as run-rulehost). ArtificerRunner/prompt builder become channel-aware so the evidence contract no longer kills prompt-channel tasks, while injected packs keep full v2 echo protection on every channel. New telemetry events `artificer_evidence_readiness_checked` / `artificer_blocked_on_owner_evidence` (the latter persisted via the workspace critical-events allowlist).
+- eaf52c4: PRI-984 (SPEC-PD-IAER-001 FR-08): unified run-correlation payload for the Artificer evidence telemetry. `artificer_evidence_readiness_checked`, `artificer_blocked_on_owner_evidence`, `artificer_owner_evidence_attached` and `artificer_owner_evidence_resumed` now carry a single shared correlation block (`artificer-run-correlation.ts`, one definition, no per-site drift): taskId, attemptNumber (the task's attemptCount at event-write time; post-resume that is the new budget start certified by the authority reset), workspace, agentKind ('artificer'), executionMode ('preflight' | 'recovery'), a reasonCode on every event (the FR-04 code where one exists, otherwise the operation status — previously the ready/attached verdicts carried no reason field), and evidenceDigestPrefix (first 12 chars of the behavior-pack contentDigest — auditable without pack content; previously only the blocked/attach/resume paths referenced evidence). persistentRunId / adapterRunId stay semantically absent by design: every event fires before the lease-minted run row exists (consumer preflight runs on a dry-run wake — zero run rows) or outside any runtime invocation, and no placeholder ids are fabricated; the correlation joins the next lease's deterministic `run_<taskId>_<attempt>` row through (taskId, attemptNumber), proven on real SQLite by the recovery T10 integration test. The consumer cycle passes its workspaceDir into the preflight so production payloads always identify the workspace. rc-8: bounded scalars only — no raw tool output, no private trajectories.
+- Updated dependencies [eaf52c4]
+- Updated dependencies [eaf52c4]
+- Updated dependencies [eaf52c4]
+- Updated dependencies [eaf52c4]
+  - @principles/core@1.292.2
+
 ## 0.9.1
 
 ### Patch Changes

@@ -1,5 +1,22 @@
 # @principles/pd-cli
 
+## 1.157.0
+
+### Minor Changes
+
+- eaf52c4: feat(PRI-985): `pd runtime internalization audit-artificer-evidence` — SPEC-PD-IAER-001 FR-09 的只读历史审计命令。对 workspace `.pd/state.db` 以 readonly 连接（不 bootstrap、零写路径、无 --confirm）扫描 `pi-ai-l2`/`pi-ai` 两种 runtime_kind 下 reason 命中 `behavior_example_pack_missing` 的失败运行，按独立 Task ID 聚合（运行数 ≠ 任务数），每任务报告运行次数、失败分类计数、首次/末次时间、任务当前状态与 attempt/maxAttempts，并给出四类异常布尔标记（repeated_retry_consumption / succeeded_run_then_failed / has_governance_side_effects / pack_missing_failure，治理痕迹经 approvals ⋈ pi_artifacts.source_task_id 权威联查，源表缺失时如实标注 detection=unavailable）；汇总段含按 runtime_kind 与最终任务状态细分；每任务 nextAction 指向真实恢复入口（needs_human_review → `pd runtime internalization retry --confirm`，failed → `pd runtime recovery failed-tasks --confirm`，证据附加入口 PRI-983）。`--json` 严格单对象输出（cli-1），空结果为结构化空报告而非报错，DB 打不开/表缺失为结构化拒绝（exit 1，reason+nextAction，不做任何修复尝试）。
+
+### Patch Changes
+
+- eaf52c4: PRI-983 (SPEC-PD-IAER-001 FR-03/FR-06/FR-07): Owner evidence attach and controlled resume. New `pd runtime internalization evidence list|attach|resume` command group (all default dry-run, `--confirm` mutates): list surfaces Artificer tasks blocked on evidence (needs_human_review + stable FR-04 reasonCode) with pain linkage, missing fields and next actions; attach assembles through the production BehaviorExamplePackAssembler and persists the Owner selection into `pi_metadata.ownerEvidenceSelection` via the narrow diagnosticJson CAS with new provenance fields (revision, contentDigest, ownerOperation, attachedAt — ABSENT=legacy, single shape authority shared with the readiness gate); the task stays needs_human_review (attach never unblocks). resume re-assembles, verifies the stored sha256 contentDigest (mismatch → `owner_behavior_examples_stale`; cross-session → `owner_behavior_examples_scope_mismatch` via a new typed, structural scope-error classification in the plugin assembler — no message sniffing) and performs the atomic authority reset through the single recovery authority `ownerRetryNeedsHumanReviewTask`, which gains an optional CAS precondition (expected diagnosticJson + expected status) so at most one concurrent resume wins (T06); the attempt-budget reset is explicit, digest-verified and audited with previousAttemptCount in the existing `.state/recovery_actions.jsonl` append-only log. FR-07: the run-rulehost BEP gate and its confirm-time assembly now derive refusal reasons from the same shared Evidence Readiness judgment (`assessEvidenceReadiness`) the consumer preflight uses — identical inputs produce identical stable reason codes on both production entries, with no V1 fallback and unchanged command parameters. New telemetry events `artificer_owner_evidence_attached` / `artificer_owner_evidence_resumed` (bounded payloads, no raw trajectories).
+- Updated dependencies [eaf52c4]
+- Updated dependencies [eaf52c4]
+- Updated dependencies [eaf52c4]
+- Updated dependencies [eaf52c4]
+  - @principles/core@1.292.2
+  - @principles/host-runtime@0.9.2
+  - principles-disciple@2.1.5
+
 ## 1.156.1
 
 ### Patch Changes
