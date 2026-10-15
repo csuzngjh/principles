@@ -484,8 +484,8 @@ describe('drill 8: product (cohort) vs tools checkout separation', () => {
   // only surfaced at dispatch time (deps-preflight correctly refused to
   // publish pd-cli on top of it). This guard makes the same omission
   // impossible to merge: the order, the legs, the rehearsal legs, the
-  // rehearsal loop and the build mapping must each cover every package the
-  // manifests themselves say is publishable.
+  // rehearsal loop, the build mapping and the channel's build mirror must each
+  // cover every package the manifests themselves say is publishable.
   it('every publishable package is wired into the train: order + leg + rehearsal + build branch + channel build mirror', async () => {
     const { loadWorkspace } = (await loadModule('lib/workspace.mjs')) as {
       loadWorkspace: (cwd: string) => { publishable: { dir: string; name: string }[] };
