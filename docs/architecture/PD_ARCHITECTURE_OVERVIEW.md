@@ -17,7 +17,7 @@ Current Implementation 保留 workspace ledger 与既有管线；Phase 1 Added C
 >
 > **MVP-First 修订（ADR-0014）**: 首次种子客户验证只依赖 `prompt`、`code_tool_hook` / RuleHost、`defer_archive` 三个已实现通道。`SkillFileWriter`、Attribution、BALM、LRAS、GAP、MissionScheduler 均不得从本文件派工；重启只看 MVP 路线和 post-MVP 条件。
 >
-> **产品定义锚点**: 产品边界以 [`docs/product/PRODUCT_IDENTITY.md`](../../product/PRODUCT_IDENTITY.md) 为准。本文只解释组件和数据流，不得将 PD 扩展为任务执行引擎、通用记忆层或通用工具修复框架。
+> **产品定义锚点**: 产品边界以 [`docs/product/PRODUCT_IDENTITY.md`](../product/PRODUCT_IDENTITY.md) 为准。本文只解释组件和数据流，不得将 PD 扩展为任务执行引擎、通用记忆层或通用工具修复框架。
 
 本文档回答四个问题：
 1. PD 是什么？
@@ -538,13 +538,13 @@ PD 在做架构决策时，按以下优先级判断：
 
 | ADR | 主题 | 状态 |
 |-----|------|------|
-| [ADR-0001](../adr/0001-runtime-v2-service-boundaries.md) | Runtime V2 服务边界 | Accepted |
-| [ADR-0002](../adr/0002-hard-internalization-core-boundary.md) | 硬内化核心边界 | Accepted |
-| [ADR-0003](../adr/0003-peer-agent-state-machine-orchestration.md) | Peer Agent 状态机编排 | Accepted |
-| [ADR-0004](../adr/0004-l2-auto-correction-and-replay.md) | L2 自动校正与回放 | Accepted |
+| ADR-0001（Runtime V2 服务边界；该 ADR 文件已退役，不在本仓库） | Runtime V2 服务边界 | Accepted |
+| ADR-0002（硬内化核心边界；该 ADR 文件已退役，不在本仓库） | 硬内化核心边界 | Accepted |
+| ADR-0003（Peer Agent 状态机编排；该 ADR 文件已退役，不在本仓库） | Peer Agent 状态机编排 | Accepted |
+| ADR-0004（L2 自动校正与回放；该 ADR 文件已退役，不在本仓库） | L2 自动校正与回放 | Accepted |
 | [ADR-0005](../adr/0005-nocturnal-internalization-merger.md) | Nocturnal 与 Internalization Engine 合并 | Accepted |
-| [ADR-0006](../adr/0006-hybrid-activation-mechanism.md) | 5 通道混合激活机制 | Accepted |
-| [ADR-0007](../adr/0007-cli-vs-console-audience-separation.md) | pd-cli 与 pd-console 受众分离 | Accepted |
+| ADR-0006（5 通道混合激活机制；该 ADR 文件已退役，不在本仓库） | 5 通道混合激活机制 | Accepted |
+| ADR-0007（pd-cli 与 pd-console 受众分离；该 ADR 文件已退役，不在本仓库） | pd-cli 与 pd-console 受众分离 | Accepted |
 | ADR-0008 | Built-in Agent Lifecycle Manager（BALM）| Accepted |
 | ADR-0009 | Long-Running Agent Session（LRAS）| Accepted |
 | ADR-0010 | Goal-Aligned Pain Signal（GAP）| Accepted |

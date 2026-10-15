@@ -2,7 +2,7 @@
 
 > 日期：2026-05-12
 > 状态：待评审
-> 参考设计：[2026-05-12-pd-console-webui-migration-design.md](2026-05-12-pd-console-webui-migration-design.md)
+> 参考设计：[`../specs/2026-05-12-pd-console-webui-migration-design.md`](../specs/2026-05-12-pd-console-webui-migration-design.md)
 
 ---
 

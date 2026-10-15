@@ -1,6 +1,6 @@
 {
   "name": "@principles/workbuddy-adapter",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "WorkBuddy host adapter for Principles Disciple — implements the HostAdapter interface for WorkBuddy's Git Bash command-hook model (ADR-0020 third host, SPEC workbuddy-host-adapter v0.3.0).",
   "type": "module",
   "main": "./dist/index.js",
@@ -31,7 +31,9 @@
   "files": [
     "dist",
     "plugin",
-    "README.md"
+    "README.md",
+    "LICENSE",
+    "NOTICE"
   ],
   "scripts": {
     "build": "tsc",
@@ -40,9 +42,9 @@
     "lint": "eslint \"src/**/*.ts\""
   },
   "dependencies": {
-    "@principles/core": "^1.292.0",
-    "@principles/host-runtime": "^0.9.0",
-    "@principles/install-layout": "^0.3.0"
+    "@principles/core": "^1.292.1",
+    "@principles/host-runtime": "^0.9.1",
+    "@principles/install-layout": "^0.3.1"
   },
   "devDependencies": {
     "@types/node": "^26.4.1",
@@ -50,7 +52,7 @@
     "vite": "^8.3.0",
     "vitest": "^5.0.0"
   },
-  "license": "MIT",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/csuzngjh/principles.git",

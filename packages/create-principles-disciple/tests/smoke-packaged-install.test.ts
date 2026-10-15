@@ -5,6 +5,7 @@ import * as os from 'os';
 import { createRequire } from 'node:module';
 import { execFileSync, spawn } from 'child_process';
 import * as http from 'http';
+import semver from 'semver';
 import {
   INSTALL_LAYOUT_PACKAGE,
   classifyPrePublishCohort,
@@ -812,9 +813,24 @@ describe('Registry-resolved dependency install (npx parity)', () => {
         typeof resolvedLayoutManifest === 'object' && resolvedLayoutManifest !== null && 'version' in resolvedLayoutManifest
           ? String((resolvedLayoutManifest as Record<string, unknown>).version)
           : 'unknown';
-      // The declared range is ^0.2.0; a registry-resolved 0.1.x (the
-      // pre-2026-09-04 defect) must fail this assertion loudly.
-      expect(resolvedVersion.startsWith('0.2.'), `registry resolved install-layout@${resolvedVersion}, expected >=0.2.0 <0.3.0`).toBe(true);
+      // The registry version must satisfy the installer's CURRENT declared range.
+      // Do not freeze this test to a previous publishing cohort.
+      const declaredRange = stringField(
+        unknownField(readJsonFile(path.join(INSTALLER_DIR, 'package.json')), 'dependencies'),
+        INSTALL_LAYOUT_PACKAGE,
+      );
+      if (!declaredRange || !semver.validRange(declaredRange) || !semver.valid(resolvedVersion)) {
+        throw new Error('invalid registry resolution: version=' + resolvedVersion + ', range=' + declaredRange);
+      }
+      expect(
+        semver.satisfies(resolvedVersion, declaredRange),
+        'registry resolved install-layout@' + resolvedVersion + ' outside declared range ' + declaredRange,
+      ).toBe(true);
+      // Preserve the original compatibility floor (0.1.x lacked the required API).
+      expect(
+        semver.gte(resolvedVersion, '0.2.0'),
+        'registry resolved install-layout@' + resolvedVersion + ' below 0.2.0 minimum',
+      ).toBe(true);
 
       // 2. The interface check the whole gate exists for: the exact symbol
       //    whose absence crashed real npx installs.

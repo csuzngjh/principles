@@ -984,22 +984,22 @@ Phase 1 完成条件：
 
 ### 12.1 参考文件
 
-- [openclaw-plugin/ui/](file:///workspace/packages/openclaw-plugin/ui/src) - 旧 UI 代码
-- [openclaw-plugin/src/http/principles-console-route.ts](file:///workspace/packages/openclaw-plugin/src/http/principles-console-route.ts) - 旧 API 路由
-- [openclaw-plugin/src/service/control-ui-query-service.ts](file:///workspace/packages/openclaw-plugin/src/service/control-ui-query-service.ts) - 旧 Query Service
-- [pd-console/src/server.ts](file:///workspace/packages/pd-console/src/server.ts) - 当前 pd-console 服务器
-- [@principles/core/runtime-v2](file:///workspace/packages/principles-core/src/runtime-v2/index.ts) - Runtime V2 API
+- `packages/openclaw-plugin/ui/src` - 旧 UI 代码（已随本次迁移删除，不再存在于仓库）
+- `packages/openclaw-plugin/src/http/principles-console-route.ts` - 旧 API 路由（已随本次迁移删除）
+- `packages/openclaw-plugin/src/service/control-ui-query-service.ts` - 旧 Query Service（已随本次迁移删除）
+- [pd-console/src/server.ts](../../../packages/pd-console/src/server.ts) - 当前 pd-console 服务器
+- [@principles/core/runtime-v2](../../../packages/principles-core/src/runtime-v2/index.ts) - Runtime V2 API
 
 ### 12.2 runtime-v2 已验证能力
 
 | 模块 | 文件 | 用途 |
 |------|------|------|
-| OperatorHealthReadModel | [operator-health-read-model.ts](file:///workspace/packages/principles-core/src/runtime-v2/operator-health-read-model.ts) | 完整健康快照 |
-| GfiReadModel | [gfi/gfi-read-model.ts](file:///workspace/packages/principles-core/src/runtime-v2/gfi/gfi-read-model.ts) | GFI 快照和工作区健康 |
-| PainChainReadModel | [pain-chain-read-model.ts](file:///workspace/packages/principles-core/src/runtime-v2/pain-chain-read-model.ts) | Pain 链追踪 |
-| PruningReadModel | [pruning-read-model.ts](file:///workspace/packages/principles-core/src/runtime-v2/pruning-read-model.ts) | Principle 修剪信号 |
-| InternalizationQueueReadModel | [internalization-queue-read-model.ts](file:///workspace/packages/principles-core/src/runtime-v2/internalization-queue-read-model.ts) | PI 队列健康 |
-| RuntimeStateManager | [store/runtime-state-manager.ts](file:///workspace/packages/principles-core/src/runtime-v2/store/runtime-state-manager.ts) | 任务/运行/候选/Artifact |
+| OperatorHealthReadModel | [operator-health-read-model.ts](../../../packages/principles-core/src/runtime-v2/operator-health-read-model.ts) | 完整健康快照 |
+| GfiReadModel | [gfi/gfi-read-model.ts](../../../packages/principles-core/src/runtime-v2/gfi/gfi-read-model.ts) | GFI 快照和工作区健康 |
+| PainChainReadModel | [pain-chain-read-model.ts](../../../packages/principles-core/src/runtime-v2/pain-chain-read-model.ts) | Pain 链追踪 |
+| PruningReadModel | [pruning-read-model.ts](../../../packages/principles-core/src/runtime-v2/pruning-read-model.ts) | Principle 修剪信号 |
+| InternalizationQueueReadModel | [internalization-queue-read-model.ts](../../../packages/principles-core/src/runtime-v2/internalization-queue-read-model.ts) | PI 队列健康 |
+| RuntimeStateManager | [store/runtime-state-manager.ts](../../../packages/principles-core/src/runtime-v2/store/runtime-state-manager.ts) | 任务/运行/候选/Artifact |
 
 ### 12.3 术语表
 

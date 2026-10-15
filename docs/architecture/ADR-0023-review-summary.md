@@ -2,7 +2,7 @@
 
 > **Date**: 2026-09-04
 > **Subject**: [ADR-0023: PD Installation Architecture Decisions](../adr/0023-pd-installation-architecture-decisions.md)（Status: **Accepted**）
-> **Inputs**: [`PD_Installation_Architecture_v2.md`](PD_Installation_Architecture_v2.md)（Proposed）、[`PD_Current_Environment_Topology_Audit.md`](../audit/PD_Current_Environment_Topology_Audit.md)（只读拓扑审计）、本次会话对仓库/安装器/安装现场的复核
+> **Inputs**: [`PD_Installation_Architecture_v2.md`](PD_Installation_Architecture_v2.md)（Proposed）、`PD_Current_Environment_Topology_Audit.md`（只读拓扑审计，该文档不在本仓库）、本次会话对仓库/安装器/安装现场的复核
 > **Scope**: 审查与记录。**不含任何实施动作**（无生产代码修改、无 runtime 修复、无副本删除、无迁移执行）。
 
 ---

@@ -30,8 +30,6 @@ export default defineConfig(
       '**/*.d.ts',
       '**/vitest.config.ts',
       '**/vitest.config.mts',
-      '**/ui/src/**',
-      '**/test-fix.ts',
       '**/tests/**',
       'packages/*/scripts/**',
       'packages/website/**',

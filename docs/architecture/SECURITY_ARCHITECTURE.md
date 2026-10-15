@@ -779,5 +779,5 @@ PD 安全问题通过：
 - [`ACTIVATION_CHANNELS.md`](./ACTIVATION_CHANNELS.md) — 通道审批与 sandbox
 - [`OBSERVABILITY_ARCHITECTURE.md`](./OBSERVABILITY_ARCHITECTURE.md) — 审计日志
 - [`CONFIGURATION_ARCHITECTURE.md`](./CONFIGURATION_ARCHITECTURE.md) — 配置防篡改
-- [ADR-0004](../adr/0004-l2-auto-correction-and-replay.md) — GoldenTrace
-- [ADR-0006](../adr/0006-hybrid-activation-mechanism.md) — 审批流程
+- ADR-0004（L2 自动校正与回放；该 ADR 文件已退役，不在本仓库） — GoldenTrace
+- ADR-0006（5 通道混合激活机制；该 ADR 文件已退役，不在本仓库） — 审批流程

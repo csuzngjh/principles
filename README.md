@@ -327,4 +327,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## License
 
-[MIT License](LICENSE) — Copyright (c) 2026 Principles Disciple Contributors
+[Apache License 2.0](LICENSE) — Copyright (c) 2026 Principles Disciple Contributors. Earlier MIT grants remain valid; see [license transition](docs/legal/LICENSE_TRANSITION.md).

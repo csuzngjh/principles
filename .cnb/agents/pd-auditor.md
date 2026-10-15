@@ -136,11 +136,10 @@
    node scripts/check-generated-artifacts.cjs
    node scripts/check-security-baseline.js
    node scripts/check-error-handbook.cjs
-   node scripts/check-legacy-updater-usage.mjs
    记录原文输出与退出码（fail loud，不要只记"通过了"）
-   （`check-legacy-updater-usage.mjs` 在云构建机上必然输出 `UNDETERMINED`——
-    该机器没有 PD 安装，而"无法观察"≠"零使用"。这是设计行为，不是故障；
-    见 `docs/architecture/PRI-701-legacy-updater-usage-drain.md` §4。）
+   （`check-legacy-updater-usage.mjs` 已随 legacy updater 退役一并移除，
+     不再存在于仓库；云构建机上无需也不应执行它。
+     该 drain 章程的历史记录见 `docs/architecture/PRI-701-legacy-updater-usage-drain.md`。）
 3. 按 D1..D5 逐维度分析
 4. 对每条发现，回溯到证据
 5. 生成 cloud-audit-report.md（见 §6 v2 契约）

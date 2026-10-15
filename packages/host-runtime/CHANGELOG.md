@@ -1,5 +1,14 @@
 # @principles/host-runtime
 
+## 0.9.1
+
+### Patch Changes
+
+- ccc04eb: Switch distributed PD packages to Apache License 2.0, ship matching LICENSE/NOTICE files, and preserve the historical MIT notice. This is a licensing and packaging release without runtime feature changes.
+- Updated dependencies [ccc04eb]
+  - @principles/core@1.292.1
+  - @principles/install-layout@0.3.1
+
 ## 0.9.0
 
 ### Minor Changes

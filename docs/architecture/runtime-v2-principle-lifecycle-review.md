@@ -310,5 +310,5 @@ Each line should be valid JSON.
 
 ## Related Documents
 
-- [ADR-0001: Runtime v2 Service Boundaries](../adr/0001-runtime-v2-service-boundaries.md)
-- [PD Runtime v2 Milestone Roadmap](./pd-runtime-v2/runtime-v2-milestone-roadmap.md)
+- ADR-0001: Runtime v2 Service Boundaries（该 ADR 文件已退役，不在本仓库）
+- PD Runtime v2 Milestone Roadmap（该文档已随 `pd-runtime-v2/` 目录移除）
