@@ -35,6 +35,7 @@
 import type { RunHandle } from '../runtime-protocol.js';
 import type { ArtificerRuleOutput, ArtificerValidator, GoldenTraceCaseInput } from './artificer-output.js';
 import type { BehaviorExamplePack } from './behavior-example-pack.js';
+import { validateBehaviorExamplePack } from './behavior-example-pack.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
 import { computeFeatureFlagsFromConfig, isFeatureEnabled } from '../config/pd-config-feature-flags.js';
@@ -178,6 +179,9 @@ const DEFAULT_ARTIFICER_RUNNER_OPTIONS: Readonly<Omit<ResolvedArtificerRunnerOpt
   defaultMaxAttempts: 3,
   agentId: 'artificer',
 } as const;
+
+/** PRI-981 (rc-8): bounded preview of validator errors in evidence refusals. */
+const EVIDENCE_ERROR_PREVIEW_LIMIT = 8;
 
 export function resolveArtificerRunnerOptions(options: ArtificerRunnerOptions): ResolvedArtificerRunnerOptions {
   return {
@@ -825,8 +829,50 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
     // PRI-780: v2-only generation. Task-driven callers (consumer cycle,
     // run-once) have no Owner-labelled pack channel; a missing pack fails
     // this attempt LOUD before any LLM call — never a v1/action-only fallback.
+    //
+    // PRI-981 (SPEC-PD-IAER-001 FR-05): the refusal is now a STRUCTURED
+    // PDRuntimeError('input_invalid') instead of a plain Error. Plain Errors
+    // classify as execution_failed → the base runner retried them
+    // (production: 385 `behavior_example_pack_missing` L2 failures burned as
+    // execution_failed / max_attempts_exceeded). `input_invalid` is a
+    // permanent category for the artificer runner, so the task fails
+    // directly with no retry, no L1 fallback, no fresh budget. The stable
+    // `behavior_example_pack_missing` marker stays in the message for the
+    // historical audit and the PRI-780 B2 contract; reasonCode + nextAction
+    // travel in `details`, which the base runner persists to the task
+    // diagnostic (PRI-559 P0-2 path) so the evidence gap is actionable.
     if (this.behaviorExamplePack === undefined) {
-      throw new Error('behavior_example_pack_missing: v2-only Artificer generation requires a BehaviorExamplePack (Owner-labelled evidence, PRI-780); provide --behavior-examples');
+      throw new PDRuntimeError(
+        'input_invalid',
+        'behavior_example_pack_missing: v2-only Artificer generation requires a BehaviorExamplePack '
+          + '(Owner-labelled evidence, PRI-780 / SPEC-PD-IAER-001 FR-05); '
+          + 'owner must attach BehaviorExamplePack evidence; see SPEC-PD-IAER-001 FR-06 recovery entry',
+        {
+          reasonCode: 'owner_behavior_examples_required',
+          nextAction: 'owner must attach BehaviorExamplePack evidence; see SPEC-PD-IAER-001 FR-06 recovery entry',
+        },
+      );
+    }
+
+    // PRI-981 (SPEC-PD-IAER-001 FR-05) defensive guard: even when the entry
+    // preflight is bypassed, an injected pack that fails the one shared
+    // validator must never reach the model. Bounded error list (rc-8);
+    // same permanent `input_invalid` classification as the missing case.
+    const packValidation = validateBehaviorExamplePack(this.behaviorExamplePack);
+    if (!packValidation.valid) {
+      const boundedErrors = packValidation.errors.slice(0, EVIDENCE_ERROR_PREVIEW_LIMIT);
+      const overflow = packValidation.errors.length - boundedErrors.length;
+      throw new PDRuntimeError(
+        'input_invalid',
+        `behavior_example_pack_invalid: injected BehaviorExamplePack failed validateBehaviorExamplePack`
+          + ` (${boundedErrors.join('; ')}${overflow > 0 ? ` …[+${overflow} more]` : ''})`
+          + ` — SPEC-PD-IAER-001 FR-05 defensive guard`,
+        {
+          reasonCode: 'owner_behavior_examples_invalid',
+          nextAction: 'owner must correct the labelled evidence and resubmit via the SPEC-PD-IAER-001 FR-06 recovery entry',
+          validationErrors: boundedErrors,
+        },
+      );
     }
 
     const builder = new ArtificerPromptBuilder();
