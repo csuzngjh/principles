@@ -1,5 +1,17 @@
 # @principles/install-layout
 
+## 0.3.1
+
+### Patch Changes
+
+- ccc04eb: Switch distributed PD packages to Apache License 2.0, ship matching LICENSE/NOTICE files, and preserve the historical MIT notice. This is a licensing and packaging release without runtime feature changes.
+
+## 0.3.0
+
+### Minor Changes
+
+- 5e794be: WorkBuddy install contract: 'workbuddy' install host, workbuddyAdapterDir, getWorkbuddyWorkspaceDir (OD-07 governance workspace).
+
 ## 0.2.7
 
 ### Patch Changes

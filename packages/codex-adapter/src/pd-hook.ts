@@ -13,6 +13,7 @@ import { CodexHooksHostAdapter } from './host-adapter.js';
 import { CodexDecoderError, CodexEncoderError } from './codec/index.js';
 import { ingestCodexConversation } from './ingestion/ingestion.js';
 import { runGovernanceAdmission } from './ingestion/admission.js';
+import { parseOwnerStatementPrefix, recordExplicitOwnerStatement } from './ingestion/explicit-owner-statement.js';
 import { recordCodexPromptDeliveryEvidence, recordCodexDenyEvidence } from './codex-evidence-recorder.js';
 
 type EnvMap = Record<string, string | undefined>;
@@ -191,7 +192,7 @@ export function annotateContextWarnings(warnings: readonly string[]): string[] {
 // BEFORE dispatch so a live tool failure is admitted through the same
 // canonical derivation first and the production handler's duplicate probe
 // then converges to a no-op (exactly one pain per real tool call).
-async function runConversationIngestion(args: { rawPayload: unknown; kind: HostEventKind; workspaceDir: string; env: EnvMap }): Promise<string[]> {
+async function runConversationIngestion(args: { rawPayload: unknown; kind: HostEventKind; workspaceDir: string; env: EnvMap; suppressCorrectionCandidate?: boolean }): Promise<string[]> {
   const { rawPayload, kind, workspaceDir, env } = args;
   if (kind !== 'turn_complete' && kind !== 'before_prompt_build' && kind !== 'after_tool_call') return [];
   const diagnostics: string[] = [];
@@ -206,9 +207,15 @@ async function runConversationIngestion(args: { rawPayload: unknown; kind: HostE
       // Slice B admission: hook awaits only admission + durable enqueue —
       // never an LLM (SPEC §12/§13). Ordinary conversation returns no
       // candidates/no admissions and stays completely silent.
+      // CR-07: when the explicit Owner-statement entry already handled this
+      // turn's prompt, its generic correction candidate is suppressed so the
+      // observation passes through exactly one pain writer.
+      const candidates = args.suppressCorrectionCandidate === true
+        ? outcome.admissionCandidates.filter((candidate) => candidate.kind !== 'user_correction')
+        : outcome.admissionCandidates;
       const admission = await runGovernanceAdmission({
         workspaceDir,
-        candidates: outcome.admissionCandidates,
+        candidates,
       });
       for (const degradation of admission.degradations.slice(0, 2)) {
         diagnostics.push(diagnostic(degradation.reason, degradation.nextAction));
@@ -285,8 +292,62 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
       if (!health.ok) return { stdout: {}, exitCode: 0, stderr: [diagnostic(health.reason ?? 'runtime_unhealthy', health.nextAction ?? 'Inspect the Workspace runtime.')] };
       return { stdout: adapter.encodeOutput({ decision: 'allow', source: event.source }, 'session_start'), exitCode: 0, stderr: [] };
     }
+
+    // SPEC-CODEX-PAIN-CLOSURE-001 CR-07: the explicit Owner statement entry
+    // runs FIRST for the current user prompt — before the generic correction
+    // detection, so the same turn can never pass through two pain writers
+    // (the shared unique observation key dedups any replay). Works regardless
+    // of the codex_conversation_ingestion flag: only the transcript PATH is
+    // validated (rollout identity), never conversation content.
+    let explicitReceiptContext: string | undefined;
+    let explicitSuppressedGeneric = false;
+    const explicitDiagnostics: string[] = [];
+    if (event.kind === 'before_prompt_build') {
+      const rawRecord = parsed as Record<string, unknown>;
+      const prefixParse = parseOwnerStatementPrefix(typeof rawRecord?.prompt === 'string' ? rawRecord.prompt : undefined);
+      if (prefixParse.matched) {
+        explicitSuppressedGeneric = true;
+        if (prefixParse.text === null) {
+          explicitDiagnostics.push(diagnostic(
+            `owner_statement_${prefixParse.reason ?? 'rejected'}`,
+            prefixParse.reason === 'statement_too_long'
+              ? `The statement exceeds 500 characters; nothing was recorded. Resubmit within the limit.`
+              : 'The prefix carried no statement text; nothing was recorded. Resubmit as PD记录痛苦：<反馈原文>.',
+          ));
+        } else {
+          const receipt = await recordExplicitOwnerStatement({
+            rawPayload: parsed,
+            workspaceDir: resolution.workspaceDir,
+            statementText: prefixParse.text,
+            env: _env,
+          });
+          if (receipt.status === 'received') {
+            explicitReceiptContext = `[PD] 已收到痛苦反馈（painId=${receipt.painId}, taskId=${receipt.taskId}${receipt.disposition === 'already_admitted' ? ', 重复提交已合并为同一信号' : ''}）。后台将自动诊断；请在回复中如实转述本回执，不要声称仍在等待用户输入，也不要虚构诊断结论。${receipt.promotionDegraded !== undefined ? `（注意：会话证据提升暂不可用：${receipt.promotionDegraded}；诊断仍会基于你提交的陈述进行。）` : ''}`;
+            explicitDiagnostics.push(diagnostic(
+              `owner_statement_received:${receipt.painId}:${receipt.taskId}${receipt.promotionDegraded !== undefined ? `:promotion_degraded:${receipt.promotionDegraded}` : ''}`,
+              'Durable enqueue complete; the workspace worker continues diagnosis in the background.',
+            ));
+          } else {
+            explicitDiagnostics.push(diagnostic(
+              `owner_statement_${receipt.reason}`,
+              receipt.nextAction,
+            ));
+          }
+        }
+      }
+    }
+
     const ingestionDiagnostics = ingestionEnabled
-      ? await runConversationIngestion({ rawPayload: parsed, kind: event.kind, workspaceDir: resolution.workspaceDir, env: _env })
+      ? await runConversationIngestion({
+        rawPayload: parsed,
+        kind: event.kind,
+        workspaceDir: resolution.workspaceDir,
+        env: _env,
+        // CR-07: the explicit path already handled this turn's user prompt —
+        // suppress the generic correction candidate so exactly one writer
+        // processed the observation (A17).
+        ...(explicitSuppressedGeneric && event.kind === 'before_prompt_build' ? { suppressCorrectionCandidate: true } : {}),
+      })
       : [];
     // PD v2 Phase 1: evidence context for this subprocess invocation. The
     // ledger flag follows the OpenClaw convention (principle_receipt_ledger
@@ -327,6 +388,17 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
     // v2 enforcement is suspended (PRI-780); wired honestly for the day it
     // is not.
     const encoded = adapter.encodeOutput(result, event.kind);
+    // CR-07 (A16): the explicit-statement receipt rides as additional context
+    // so the model can answer truthfully about what happened (received +
+    // queued), instead of guessing or claiming it is still waiting for input.
+    if (explicitReceiptContext !== undefined && event.kind === 'before_prompt_build') {
+      const output = encoded as { hookSpecificOutput?: { additionalContext?: string } };
+      if (output.hookSpecificOutput !== undefined) {
+        output.hookSpecificOutput.additionalContext = output.hookSpecificOutput.additionalContext !== undefined
+          ? `${output.hookSpecificOutput.additionalContext}\n${explicitReceiptContext}`
+          : explicitReceiptContext;
+      }
+    }
     if (result.decision === 'deny') {
       try {
         let liveActivationId: string | undefined;
@@ -367,7 +439,7 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
         evidenceDiagnostics.push(diagnostic(`codex_evidence_deny_failed:${errorMessage(error)}`, 'The deny decision was already encoded; evidence replay from the durable source is safe.'));
       }
     }
-    const stderr = [...annotateContextWarnings(result.warnings ?? []).slice(0, 16).map((warning) => diagnostic(warning, 'Inspect PD Workspace state and retry; the hook failed open.')), ...evaluationDiagnostics, ...evidenceDiagnostics, ...ingestionDiagnostics];
+    const stderr = [...annotateContextWarnings(result.warnings ?? []).slice(0, 16).map((warning) => diagnostic(warning, 'Inspect PD Workspace state and retry; the hook failed open.')), ...evaluationDiagnostics, ...evidenceDiagnostics, ...explicitDiagnostics, ...ingestionDiagnostics];
     return { stdout: encoded, exitCode: 0, stderr };
   } catch (error) {
     const reason = error instanceof CodexEncoderError ? error.reason : `runtime_failed:${errorMessage(error)}`;

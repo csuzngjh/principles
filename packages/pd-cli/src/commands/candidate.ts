@@ -52,6 +52,7 @@ import { resolvePromptFullPipelineSeedMode } from '../services/pd-config-loader.
 import { createRemediationResult, remediationAction } from './remediation-output.js';
 import type { RemediationResult } from './remediation-output.js';
 import { checkAdmissionGate } from './admission-gate.js';
+import { enforceFullAdmissionForWrite } from '../services/admission-write-gate.js';
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
 
@@ -481,6 +482,7 @@ export async function handleCandidateInternalize(opts: CandidateInternalizeOptio
     await stateManager.close();
   }
 }
+
 
 // ── Show ───────────────────────────────────────────────────────────────────────
 
@@ -941,6 +943,31 @@ export async function handleCandidateIntake(opts: CandidateIntakeOptions): Promi
 
     // PRI-442 Stage 4: admission gate check — refuse non-admitted candidates
     // to prevent CLI from bypassing the production admission gate.
+    // SPEC-CODEX-PAIN-CLOSURE-001 CR-03 (§7.2): the partial record check is a
+    // FAST pre-refusal only. The write permission itself comes from the
+    // persisted admission disposition; when it is missing (pre-CR-03 records)
+    // a full re-evaluation from the persisted materials runs and is saved.
+    // SPEC CR-03 §7.2 (review S1): the persisted/full admission gate owns the
+    // write permission; the partial record check below stays a fast pre-refusal.
+    const fullGate = await enforceFullAdmissionForWrite(stateManager, opts.candidateId);
+    if (fullGate !== null) {
+      const result = {
+        candidateId: opts.candidateId,
+        status: 'refused',
+        admissionDecision: fullGate.decision,
+        reason: fullGate.reason,
+        nextAction: fullGate.nextAction,
+      };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.error(`Admission gate refused candidate ${opts.candidateId}: ${fullGate.decision}`);
+        console.error(`  Reason:      ${fullGate.reason}`);
+        console.error(`  Next Action: ${fullGate.nextAction}`);
+      }
+      process.exit(1);
+      return;
+    }
     const admissionBlock = checkAdmissionGate(candidate);
     if (admissionBlock) {
       const result = {
@@ -1137,7 +1164,11 @@ export async function handleCandidateReview(opts: CandidateReviewOptions): Promi
       // `create` keeps the pre-check: a low-confidence candidate still cannot
       // become a new Principle via the CLI.
       if (opts.decide === 'create') {
-        const admissionBlock = checkAdmissionGate(candidate);
+        // SPEC review S1: a CREATE decision is a governance write — it passes
+        // the full admission gate (the reuse verdict remains exempt by
+        // PRI-917 R5 F4: a reuse decision creates nothing).
+        const createFullGate = await enforceFullAdmissionForWrite(stateManager, opts.candidateId);
+        const admissionBlock = createFullGate ?? checkAdmissionGate(candidate);
         if (admissionBlock) {
           const payload = {
             candidateId: opts.candidateId,
@@ -1453,7 +1484,10 @@ export async function handleCandidateRepair(opts: CandidateRepairOptions): Promi
     // re-verify admission before re-intaking to prevent bypassing the gate.
     // A consumed candidate that would fail the gate indicates data corruption
     // or a prior bypass; refuse and surface the reason.
-    const admissionBlock = checkAdmissionGate(candidate);
+    // SPEC review S1: repair re-intake passes the SAME full write gate —
+    // a corrupted admission document can never be repaired into the Ledger.
+    const repairFullGate = await enforceFullAdmissionForWrite(stateManager, opts.candidateId);
+    const admissionBlock = repairFullGate ?? checkAdmissionGate(candidate);
     if (admissionBlock) {
       const result = {
         candidateId: opts.candidateId,
@@ -1787,7 +1821,9 @@ export async function handleCandidateInternalizationBackfill(opts: CandidateBack
 
       // PRI-442 Stage 4: admission gate check — refuse non-admitted pending
       // candidates to prevent backfill from bypassing the admission gate.
-      const admissionBlock = checkAdmissionGate(candidate);
+      // SPEC review S1: backfill writes pass the full admission gate too.
+      const backfillFullGate = await enforceFullAdmissionForWrite(stateManager, candidateId);
+      const admissionBlock = backfillFullGate ?? checkAdmissionGate(candidate);
       if (admissionBlock) {
         output.intakeFailed++;
         output.results.push({ candidateId, route: 'unknown', status: 'intake_failed', reason: `Admission gate refused: ${admissionBlock.reason}`, statusBefore: 'pending', statusAfter: 'pending', intakeDecision: 'skipped', seedDecision: 'skipped', nextAction: admissionBlock.nextAction });

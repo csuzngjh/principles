@@ -1,8 +1,8 @@
 <!-- generated-by: gsd-doc-writer -->
 
-> ⚠️ **废弃状态 (DEPRECATED)**: 本文档已被 [docs/architecture/](docs/architecture/README.md) 目录下的新架构文档替代。
-> - **废弃原因**: 原架构描述已被 [PD_SYSTEM_ARCHITECTURE.md](docs/architecture/PD_SYSTEM_ARCHITECTURE.md) 取代
-> - **替代文档**: 请查阅 [docs/architecture/README.md](docs/architecture/README.md) 获取当前架构文档索引
+> ⚠️ **废弃状态 (DEPRECATED)**: 本文档已被 [docs/architecture/](README.md) 目录下的新架构文档替代。
+> - **废弃原因**: 原架构描述已被新架构文档取代
+> - **替代文档**: 请查阅 [docs/architecture/README.md](README.md) 获取当前架构文档索引
 > - **废弃日期**: 2026-05-09
 
 ---
@@ -229,6 +229,6 @@ packages/create-principles-disciple/
 
 ## See Also
 
-- [USER_GUIDE.md](./USER_GUIDE.md) - Usage documentation
-- [EVOLUTION_POINTS_GUIDE.md](./EVOLUTION_POINTS_GUIDE.md) - Evolution system details
+- `USER_GUIDE.md` — 使用文档（该文件已移除；当前用户文档见 `packages/website/docs/`）
+- `EVOLUTION_POINTS_GUIDE.md` — 演化系统说明（该文件已移除）
 - [Runtime v2 Principle Lifecycle Review](./runtime-v2-principle-lifecycle-review.md) - Non-destructive pruning audit workflow (report → explain → review)

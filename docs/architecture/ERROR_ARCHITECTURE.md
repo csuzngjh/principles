@@ -152,4 +152,4 @@ Store Operations
 |------|------|
 | [PD_SYSTEM_ARCHITECTURE.md](./PD_SYSTEM_ARCHITECTURE.md) | 系统架构蓝图 |
 | [DATA_ARCHITECTURE.md](./DATA_ARCHITECTURE.md) | 数据存储架构 |
-| [ADR-0001](../adr/0001-runtime-v2-service-boundaries.md) | Runtime V2 Service Boundaries |
+| ADR-0001（Runtime V2 服务边界；该 ADR 文件已退役，不在本仓库） | Runtime V2 Service Boundaries |

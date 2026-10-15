@@ -650,7 +650,7 @@ export interface RuntimeV2PromptActivationsInjectedEventData {
   /** PRI-750: host run/turn id — DIRECT turn binding (OpenClaw `runId`; Codex `turn_id`). Optional: absent when the host supplies none. */
   runId?: string;
   /** Host that built this prompt; optional for backward-compatible event readers. */
-  hostKind?: 'openclaw' | 'codex';
+  hostKind?: 'openclaw' | 'codex' | 'workbuddy';
   /** Unique identity for this actual injection-event emission; never a synthetic run id. */
   eventId?: string;
   /** PRI-904: budget-packing policy that produced this injection. */
@@ -693,7 +693,7 @@ export const RuntimeV2PromptActivationsInjectedEventDataSchema = Type.Object({
   v2Truncated: Type.Optional(Type.Boolean()),
   crossBlockDuplicateIds: Type.Optional(Type.Array(Type.String())),
   runId: Type.Optional(Type.String()),
-  hostKind: Type.Optional(Type.Union([Type.Literal('openclaw'), Type.Literal('codex')])),
+  hostKind: Type.Optional(Type.Union([Type.Literal('openclaw'), Type.Literal('codex'), Type.Literal('workbuddy')])),
   eventId: Type.Optional(Type.String()),
   selectionPolicy: Type.Optional(Type.Union([Type.Literal('legacy_fifo_prefix_v1'), Type.Literal('fair_rotation_v1')])),
   eligibleCount: Type.Optional(Type.Number()),

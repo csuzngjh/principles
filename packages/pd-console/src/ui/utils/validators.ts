@@ -1291,10 +1291,10 @@ function validatePromptActivationInjectionStatus(v: unknown): PromptActivationIn
   if (Object.hasOwn(v, 'route') && (v.route === 'legacy_trim' || v.route === 'shared_render')) result.route = v.route;
   if (Object.hasOwn(v, 'reason') && isString(v.reason)) result.reason = v.reason;
   if (Object.hasOwn(v, 'perHostFits') && Array.isArray(v.perHostFits)) {
-    const perHostFits: { hostKind: 'openclaw' | 'codex'; fits: boolean }[] = [];
+    const perHostFits: { hostKind: 'openclaw' | 'codex' | 'workbuddy'; fits: boolean }[] = [];
     for (const entry of v.perHostFits) {
       if (!isObject(entry)) return null;
-      if ((entry.hostKind !== 'openclaw' && entry.hostKind !== 'codex') || typeof entry.fits !== 'boolean') return null;
+      if ((entry.hostKind !== 'openclaw' && entry.hostKind !== 'codex' && entry.hostKind !== 'workbuddy') || typeof entry.fits !== 'boolean') return null;
       perHostFits.push({ hostKind: entry.hostKind, fits: entry.fits });
     }
     result.perHostFits = perHostFits;
@@ -1351,7 +1351,7 @@ export function validateActivations(v: unknown): ActivationsData | null {
     const route = v.promptInjectionRoute;
     if ((route.status === 'confirmed' || route.status === 'unconfirmed') && typeof route.flagEnabled === 'boolean') {
       const summary: PromptInjectionRouteSummaryWire = { status: route.status, flagEnabled: route.flagEnabled };
-      if (Object.hasOwn(route, 'hostKind') && (route.hostKind === 'openclaw' || route.hostKind === 'codex')) summary.hostKind = route.hostKind;
+      if (Object.hasOwn(route, 'hostKind') && (route.hostKind === 'openclaw' || route.hostKind === 'codex' || route.hostKind === 'workbuddy')) summary.hostKind = route.hostKind;
       if (Object.hasOwn(route, 'route') && (route.route === 'legacy_trim' || route.route === 'shared_render')) summary.route = route.route;
       if (Object.hasOwn(route, 'unconfirmedReason') && isString(route.unconfirmedReason)) summary.unconfirmedReason = route.unconfirmedReason;
       if (Object.hasOwn(route, 'nextAction') && isString(route.nextAction)) summary.nextAction = route.nextAction;
@@ -1808,6 +1808,8 @@ export interface PrincipleListItemData {
   conflictsWithCount: number;
   createdAt: string;
   updatedAt: string;
+  /** PRI-956 (F15): runtime authority revoked (activations deactivated). */
+  runtimeDeactivated?: boolean;
   /** PRI-332: Detected language of the principle text */
   detectedLanguage: string;
   /** PRI-332 P1-5: Structured readability warning code */
@@ -1859,6 +1861,12 @@ function validatePrincipleListItem(v: unknown): PrincipleListItemData | null {
     if (!isReadabilityWarningCode(v.readabilityWarningCode)) return null;
     result.readabilityWarningCode = v.readabilityWarningCode;
   }
+  // PRI-956 (F15): optional runtime-revocation disclosure — present only when
+  // the activations table reports a deactivated prompt activation.
+  if (Object.hasOwn(v, 'runtimeDeactivated')) {
+    if (v.runtimeDeactivated !== true) return null;
+    result.runtimeDeactivated = true;
+  }
   return result;
 }
 
@@ -1868,6 +1876,8 @@ export interface PrinciplesListData {
   categories?: Record<string, number>;
   /** If the approval cross-check was unavailable, this explains why (ERR-002) */
   approvalCrossCheckUnavailable?: string;
+  /** PRI-956 (F15, D3): if the activations-table query was unavailable, this explains why — runtime status cannot be confirmed */
+  revocationCheckUnavailable?: string;
 }
 
 // ── PD Core Principles (PRI-641) ─────────────────────────────────────────────
@@ -1950,11 +1960,20 @@ export function validatePrinciplesList(v: unknown): PrinciplesListData | null {
     ? v.approvalCrossCheckUnavailable
     : undefined;
 
+  // PRI-956 (F15, D3): revocationCheckUnavailable — optional string
+  if (Object.hasOwn(v, 'revocationCheckUnavailable') && !isString(v.revocationCheckUnavailable)) {
+    return null;
+  }
+  const revocationCheckUnavailable = isString(v.revocationCheckUnavailable)
+    ? v.revocationCheckUnavailable
+    : undefined;
+
   return {
     principles,
     summary: { candidate, probation, active, deprecated, archived, total },
     ...(categories !== undefined ? { categories } : {}),
     ...(approvalCrossCheckUnavailable !== undefined ? { approvalCrossCheckUnavailable } : {}),
+    ...(revocationCheckUnavailable !== undefined ? { revocationCheckUnavailable } : {}),
   };
 }
 
@@ -2080,7 +2099,7 @@ export function validatePromptInjectionBudgetStatus(v: unknown): PromptInjection
   if (Object.hasOwn(v, 'capacityStatus') && (v.capacityStatus === 'confirmed' || v.capacityStatus === 'unconfirmed')) {
     result.capacityStatus = v.capacityStatus;
   }
-  if (Object.hasOwn(v, 'hostKind') && (v.hostKind === 'openclaw' || v.hostKind === 'codex')) {
+  if (Object.hasOwn(v, 'hostKind') && (v.hostKind === 'openclaw' || v.hostKind === 'codex' || v.hostKind === 'workbuddy')) {
     result.hostKind = v.hostKind;
   }
   if (Object.hasOwn(v, 'route') && (v.route === 'legacy_trim' || v.route === 'shared_render')) {
@@ -2113,7 +2132,7 @@ export function validatePromptInjectionBudgetStatus(v: unknown): PromptInjection
     for (const entry of v.perHost) {
       if (!isObject(entry)) return null;
       const { hostKind, route, usedChars: hostUsed, truncated: hostTruncated } = entry;
-      if ((hostKind !== 'openclaw' && hostKind !== 'codex')
+      if ((hostKind !== 'openclaw' && hostKind !== 'codex' && hostKind !== 'workbuddy')
         || (route !== 'legacy_trim' && route !== 'shared_render')
         || typeof hostUsed !== 'number' || !Number.isInteger(hostUsed) || hostUsed < 0
         || typeof hostTruncated !== 'boolean') {
@@ -2209,8 +2228,8 @@ export interface EvidenceChainRecordData {
   dreamerTaskStatus?: string;
   /** PRI-469: optional intent tension from diagnostician artifact (SPEC §16). */
   intentTension?: IntentTensionData;
-  /** PRI-625 Slice D: evidence host attribution — openclaw | codex | unknown. */
-  hostKind?: 'openclaw' | 'codex' | 'unknown';
+  /** PRI-625 Slice D: evidence host attribution — openclaw | codex | workbuddy | unknown. */
+  hostKind?: 'openclaw' | 'codex' | 'workbuddy' | 'unknown';
 }
 
 // ── Intent Tension (PRI-469, SPEC §16) ───────────────────────────────────────

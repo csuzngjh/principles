@@ -275,4 +275,12 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
     graduationCriteria: 'Slices A–D complete + R1 consent UX verified on installed path + opt-in dogfood release with no privacy/lineage P1 + explicit Owner default-on decision (SPEC §17)',
     retirementCriteria: 'Codex conversation ingestion descoped, or graduated and observability confirms stable default-on (flag collapses into host.codex contract)',
   },
+  'host.workbuddy': {
+    decision: 'KEEP_QUIET',
+    consumers: ['workbuddy-adapter plugin hook entry (pd-hook wrapper)', 'workbuddy-adapter workspace/worker entrypoints'],
+    evidence: 'WorkBuddy host adapter (SPEC workbuddy-host-adapter v0.3.0 OD-03, Owner startup authorization 2026-10-12); quiet default-off — install never enables; Phase 0 probes P01–P06 verified the real host contract (engine 2.161.0) before implementation',
+    decided: '2026-10-12',
+    graduationCriteria: 'Real-host governance loop E2E green on the installed path (injection/gate/evidence/approval/withdrawal) + regression of OpenClaw/Codex + explicit Owner default-on decision',
+    retirementCriteria: 'WorkBuddy host descoped, or graduated to core (mirrors host.codex contract after default-on decision)',
+  },
 };

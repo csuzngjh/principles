@@ -74,6 +74,8 @@ packages/create-principles-disciple/host-runtime/
 packages/create-principles-disciple/codex-adapter/
 # PRI-672: release-manager payload component built by bundle-plugin.mjs
 packages/create-principles-disciple/release-manager/
+# WorkBuddy third host: workbuddy-adapter payload component built by bundle-plugin.mjs
+packages/create-principles-disciple/workbuddy-adapter/
 
 # Local environment and state
 # .claude/ is ignored except for skills (shared with team)
@@ -82,7 +84,9 @@ packages/create-principles-disciple/release-manager/
 !.claude/skills/
 claude/
 .planning/
-plans/
+# Anchored to the checkout root: an unanchored `plans/` would also match
+# docs/plans/** and silently swallow every new plan dropped there.
+/plans/
 conductor/
 .principles/
 .state/

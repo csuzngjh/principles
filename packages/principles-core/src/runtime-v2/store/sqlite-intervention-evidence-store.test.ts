@@ -21,18 +21,37 @@ import { interventionEvidenceSourcePolicy } from '../receipt-coverage.js';
 import { normalizeInterventionEvidenceBatch } from '../intervention-evidence-normalizer.js';
 import type { InterventionEvidenceBatchInput } from '../types/intervention-evidence-contract.js';
 
+/**
+ * The default batch must stay FRESH regardless of the wall clock.
+ *
+ * These were hard-coded near-term literals (`2026-10-07T08:00:00Z`) chosen to
+ * look "recent" when the suite was written. Because the store expires any
+ * source older than INTERVENTION_SHORT_SOURCE_RETENTION_DAYS (7d), the literal
+ * silently crossed its own retention window on 2026-10-14T08:00Z: payloads got
+ * redacted to `[expired]` and two assertions in this file started failing with
+ * NO code change involved. Deriving the timestamps from "now" keeps the
+ * fixture's intent (a fresh source) stable forever.
+ *
+ * Deliberately-expired fixtures elsewhere in this file keep their own ancient
+ * constants (e.g. `2001-01-01T00:00:00Z`) — those must stay in the past.
+ */
+const FRESH_RECORDED_AT_MS = Date.now() - 60 * 60 * 1000;
+const FRESH_RECORDED_AT = new Date(FRESH_RECORDED_AT_MS).toISOString();
+/** `sourceTime` prefers the EARLIER of the two, so keep occurredAt just before. */
+const FRESH_OCCURRED_AT = new Date(FRESH_RECORDED_AT_MS - 1000).toISOString();
+
 function deliveryBatch(overrides: Partial<InterventionEvidenceBatchInput> = {}): InterventionEvidenceBatchInput {
   return {
     evidenceScopeId: 'scope-ws-1',
     sourceKind: 'openclaw_plugin_event_log',
     adapterVersion: 'openclaw-plugin@test',
-    recordedAt: '2026-10-07T08:00:00Z',
+    recordedAt: FRESH_RECORDED_AT,
     observations: [
       {
         observationKey: 'openclaw|delivery|prompt|sess-1|run-1|act-1',
-        sourceLocator: 'logs/events_2026-10-07.jsonl',
+        sourceLocator: 'logs/events_fresh.jsonl',
         kind: 'delivery',
-        occurredAt: '2026-10-07T07:59:59Z',
+        occurredAt: FRESH_OCCURRED_AT,
         nativeRefs: { hostKind: 'openclaw', sessionId: 'sess-1', runId: 'run-1' },
         principleId: 'T-01',
         contentRef: { principleId: 'T-01', artifactId: 'art-1', payloadDigest: 'sha256:aa00000000000000000000000000000000000000000000000000000000000000', resolution: 'resolved' },
@@ -817,5 +836,53 @@ describe('SqliteConnection busyTimeoutMs', () => {
     fs.mkdirSync(workspaceDir, { recursive: true });
     expect(() => new SqliteConnection({ workspaceDir, busyTimeoutMs: -1 })).toThrow(/non-negative integer/);
     expect(() => new SqliteConnection({ workspaceDir, busyTimeoutMs: 1.5 })).toThrow(/non-negative integer/);
+  });
+
+  it('migrates a pre-workbuddy capability-declarations CHECK on reopen, preserving rows and accepting workbuddy', () => {
+    // Simulate a workspace created before the third host: rebuild the table
+    // with the old `host_kind IN ('openclaw','codex')` CHECK and one codex
+    // declaration, then reopen — the guarded migration must widen the CHECK
+    // and carry the declaration across (declarative state, copy preserves).
+    const oldWs = path.join(tmpRoot, `wb-mig-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    fs.mkdirSync(oldWs, { recursive: true });
+    let seed = new SqliteConnection(oldWs);
+    let db = seed.getDb();
+    db.prepare('DROP TABLE intervention_capability_declarations').run();
+    db.prepare(`CREATE TABLE intervention_capability_declarations (
+      host_kind TEXT NOT NULL CHECK (host_kind IN ('openclaw','codex')),
+      capability TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('supported','unsupported','unknown')),
+      adapter_version TEXT NOT NULL,
+      channel TEXT NOT NULL,
+      max_confirmation TEXT,
+      note TEXT,
+      declared_at TEXT NOT NULL,
+      PRIMARY KEY (host_kind, capability)
+    )`).run();
+    db.prepare(`INSERT INTO intervention_capability_declarations
+      (host_kind, capability, status, adapter_version, channel, declared_at)
+      VALUES ('codex', 'agent_context_delivery', 'supported', 'codex-adapter@test', 'pd-hook', '2026-08-01T00:00:00Z')`).run();
+    seed.close();
+
+    const migrated = new SqliteConnection(oldWs);
+    const store2 = new SqliteInterventionEvidenceStore(migrated);
+    const workbuddy = normalized({
+      evidenceScopeId: 'scope-wb-mig',
+      sourceKind: 'workbuddy_pd_hook_event_log',
+      adapterVersion: 'workbuddy-adapter@test',
+      recordedAt: '2026-10-12T08:00:00Z',
+      capabilityDeclarations: [
+        { hostKind: 'workbuddy', capability: 'agent_context_delivery', status: 'supported', adapterVersion: 'workbuddy-adapter@test', channel: 'pd-hook', maxConfirmation: 'submitted', note: 'P04 probe verified' },
+      ],
+      observations: [],
+    });
+    const appended = store2.appendObservationBatch(workbuddy);
+    expect(appended.ok, appended.ok ? undefined : appended.reason).toBe(true);
+    const rows = migrated.getDb().prepare(
+      "SELECT host_kind, capability FROM intervention_capability_declarations ORDER BY host_kind",
+    ).all() as { host_kind: string; capability: string }[];
+    expect(rows).toContainEqual({ host_kind: 'codex', capability: 'agent_context_delivery' });
+    expect(rows).toContainEqual({ host_kind: 'workbuddy', capability: 'agent_context_delivery' });
+    migrated.close();
   });
 });

@@ -17,7 +17,7 @@ description: >-
   checkout, while every manifest, build script and package payload comes
   from the cohort checkout at the workspace root — fixing publish tooling
   must never require burning a new product version. Closing steps (tag /
-  GitHub Release / ClawHub) live in finalize-npm-release, AFTER all seven
+  GitHub Release / ClawHub) live in finalize-npm-release, AFTER all eight
   npm legs — they must never block an unuploaded package.
 inputs:
   pkg_dir:
@@ -165,18 +165,26 @@ runs:
       shell: bash
       run: |
         PKG_DIR="${{ inputs.pkg_dir }}"
-        if [ "$PKG_DIR" = "openclaw-plugin" ]; then
+        if [ "$PKG_DIR" = "principles-core" ]; then
+          # Built by the train job itself ("Build core") before any leg runs:
+          # core has no workspace dependency, so nothing here is missing.
+          # Listed explicitly so the mapping below stays exhaustive.
+          :
+        elif [ "$PKG_DIR" = "openclaw-plugin" ]; then
           npm run build --workspace=principles-disciple
         elif [ "$PKG_DIR" = "pd-cli" ]; then
           # pd-cli imports types from principles-disciple AND from
           # @principles/codex-adapter (codex-worker / codex-ingest-catchup /
-          # health-codex). The adapter must be built HERE, not inherited from
-          # leg 4/7's side effect: when the adapter version is unchanged from
-          # the prior cohort the leg resolves PRESENT_PRIOR and every
-          # ABSENT-gated step — including its build — is skipped, leaving no
-          # dist/ for pd-cli's tsc (run 35834470066, TS2307 x4).
+          # health-codex) AND from @principles/workbuddy-adapter
+          # (commands/workbuddy-worker). Those adapters must be built HERE, not
+          # inherited from their own leg's side effect: when an adapter version
+          # is unchanged from the prior cohort the leg resolves PRESENT_PRIOR
+          # and every ABSENT-gated step — including its build — is skipped,
+          # leaving no dist/ for pd-cli's tsc (run 35834470066, TS2307 x4;
+          # same class as PRI-979).
           npm run build --workspace=principles-disciple
           npm run build --workspace=@principles/codex-adapter
+          npm run build --workspace=@principles/workbuddy-adapter
           npm run build --workspace=@principles/pd-cli
         elif [ "$PKG_DIR" = "create-principles-disciple" ]; then
           # esbuild first (cleans dist, produces bundle.js), then tsc
@@ -190,6 +198,7 @@ runs:
           npm run build:production --workspace=principles-disciple
           npm run build:types --workspace=principles-disciple
           npm run build --workspace=@principles/codex-adapter
+          npm run build --workspace=@principles/workbuddy-adapter
           npm run build --workspace=@principles/pd-cli
           cd packages/create-principles-disciple && npm run build
           npm run build --workspace=@principles/pd-console
@@ -199,6 +208,13 @@ runs:
           npm run build --workspace=@principles/install-layout
         elif [ "$PKG_DIR" = "codex-adapter" ]; then
           npm run build --workspace=@principles/codex-adapter
+        elif [ "$PKG_DIR" = "workbuddy-adapter" ]; then
+          npm run build --workspace=@principles/workbuddy-adapter
+        else
+          # No silent no-op: an unmapped leg would pack without dist/ and ship
+          # a package whose `files` entries simply are not there (PRI-979).
+          echo "::error::No build branch for pkg_dir=$PKG_DIR in publish-npm-package/action.yml — add one before adding a train leg."
+          exit 1
         fi
 
     - name: Verify package dry-run

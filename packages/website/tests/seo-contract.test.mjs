@@ -128,3 +128,15 @@ test('every public page carries the Search Console ownership token', async () =>
     )
   }
 })
+
+test('every public page carries the Bing ownership token', async () => {
+  // 同上一条的理由，只是平台换成 Bing：标记没了的时候 Bing 不报错，下次重新校验
+  // 才发现，那时 sitemap 读数和每天 100 条的 URL 提交配额都还挂在验证状态上。
+  for (const file of publicPages()) {
+    const html = await read(file)
+    assert.ok(
+      /<meta name="msvalidate.01" content="0406CE95FAFB007F71CD3F1E4492C498">/.test(html),
+      `${file} 缺少 Bing 所有权标记`,
+    )
+  }
+})

@@ -70,6 +70,15 @@ export function buildLiveToolCandidate(args: {
     hostTurnId: fields.turnId,
     toolName: fields.toolName ?? '',
     source: CODEX_POST_TOOL_USE_SOURCE,
+    // Merge semantics (WorkBuddy × SPEC-CODEX-PAIN-CLOSURE-001): the same host
+    // `tool_use_id` feeds TWO consumers, so the candidate carries both views.
+    // I1 identity parity — the live handler derives the canonical pain from the
+    // same tool_use_id, so `toolCallId` must be present (one real call → one
+    // canonical pain across the admission + dispatch deliveries).
+    toolCallId: fields.toolUseId,
+    // CR-01 — `toolUseId` is recorded into tool_calls.tool_use_id and used for
+    // the admission dedup join against the live PostToolUse row.
+    toolUseId: fields.toolUseId,
     ...(fields.toolInput !== undefined ? { toolInput: fields.toolInput } : {}),
     ...(fields.toolResponse !== undefined ? { toolOutput: fields.toolResponse } : {}),
     observedAt: new Date().toISOString(),
@@ -111,6 +120,13 @@ export function buildTranscriptCandidates(observations: readonly GovernanceObser
         hostTurnId: observation.hostTurnId,
         toolName: typeof toolName === 'string' ? toolName : '',
         source: CODEX_POST_TOOL_USE_SOURCE,
+        // Merge semantics: both merged views of the same host tool_use_id.
+        // I1 identity parity — the decoded observation carries the same
+        // tool_use_id the live delivery derived its canonical pain from, so a
+        // transcript replay converges on that pain instead of a second one.
+        ...(typeof observation.toolUseId === 'string' && observation.toolUseId.length > 0 ? { toolCallId: observation.toolUseId } : {}),
+        // CR-01 — recorded into tool_calls.tool_use_id for the dedup join.
+        ...(observation.toolUseId !== undefined ? { toolUseId: observation.toolUseId } : {}),
         toolInput: own(facts, 'command') ?? null,
         ...(exitCode !== undefined ? { toolOutput: { exitCode, stdout: own(facts, 'stdout') ?? null, stderr: own(facts, 'stderr') ?? null } } : {}),
         observedAt: observation.observedAt,

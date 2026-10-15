@@ -3,9 +3,15 @@
  * Slice A; ADR-0020 §11.2 + G1 probe report §9).
  *
  * The G1 contract baseline is: minimum supported Codex 0.148.0, verified
- * on-device at 0.150.1. The transcript itself carries `session_meta.
- * payload.cli_version`, which is the version signal available inside a hook
- * subprocess (hook payloads carry no version field — G1 fixture contract).
+ * on-device at 0.150.1 and re-verified at 0.162.1 (PRI-953, 2026-10-13:
+ * on-device probe against real codex-cli 0.162.1 — 125/125 captured hook
+ * payloads decode, 8/8 real rollout transcripts ingest with only designed
+ * unknown-record-type skips; sanitized fixtures:
+ * tests/fixtures/g1-contract/hook-payloads/v0.162.1/ and
+ * transcripts/v0.162.1-tool-final-turn.jsonl). The transcript itself carries
+ * `session_meta.payload.cli_version`, which is the version signal available
+ * inside a hook subprocess (hook payloads carry no version field — G1
+ * fixture contract).
  *
  * Older-than-minimum and newer-than-verified versions both degrade
  * explicitly; an unknown version must never silently guess record fields.
@@ -14,7 +20,7 @@
  */
 
 export const CODEX_INGESTION_MIN_VERSION = '0.148.0';
-export const CODEX_INGESTION_VERIFIED_VERSION = '0.150.1';
+export const CODEX_INGESTION_VERIFIED_VERSION = '0.162.1';
 
 export type CodexVersionClassification =
   | { status: 'supported' }

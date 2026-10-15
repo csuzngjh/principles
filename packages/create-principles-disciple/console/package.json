@@ -22,7 +22,7 @@
     "verify:build": "node scripts/verify-build.mjs"
   },
   "dependencies": {
-    "@fontsource/jetbrains-mono": "^5.2.8",
+    "@fontsource/jetbrains-mono": "^5.3.0",
     "@principles/core": "file:../core",
     "@principles/host-runtime": "file:../host-runtime",
     "@principles/install-layout": "file:../install-layout",
@@ -40,18 +40,18 @@
     "clsx": "^2.1.1",
     "create-principles-disciple": "file:../release-manager",
     "i18next": "^26.4.2",
-    "js-yaml": "^5.4.1",
+    "js-yaml": "^5.4.3",
     "lucide-react": "^1.28.0",
     "postcss": "^8.5.14",
-    "postcss-cli": "^11.0.1",
+    "postcss-cli": "^12.0.0",
     "principles-disciple": "file:../plugin",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-i18next": "^17.0.11",
     "react-router-dom": "^7.18.3",
     "semver": "^7.8.5",
-    "sonner": "^2.0.7",
-    "tailwind-merge": "^3.6.0",
+    "sonner": "^2.0.8",
+    "tailwind-merge": "^3.7.0",
     "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
@@ -61,11 +61,11 @@
     "@types/node": "^26.4.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "@types/semver": "^7.7.1",
+    "@types/semver": "^7.8.0",
     "esbuild": "^0.28.2",
     "tsx": "^4.23.12",
     "typescript": "^7.0.2",
-    "vite": "^8.3.0",
+    "vite": "^8.3.4",
     "vitest": "^5.0.0"
   }
 }

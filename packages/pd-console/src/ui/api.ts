@@ -536,7 +536,7 @@ export interface EvidenceAuditRecordData {
 }
 
 export interface EvidenceAuditCapabilityData {
-  hostKind: "openclaw" | "codex";
+  hostKind: "openclaw" | "codex" | "workbuddy";
   capability: string;
   status: "supported" | "unsupported" | "unknown";
   adapterVersion: string;
@@ -781,7 +781,7 @@ async function fetchEvidenceAudit(
 
 // ── Approvals ─────────────────────────────────────────────────────────────────
 
-async function approveApproval(approvalId: string, note?: string, options?: { targetHost?: 'openclaw' | 'codex'; intentReviewed?: boolean; reviewedArtifactId?: string }): Promise<ApiResponse<ApprovalRecordData>> {
+async function approveApproval(approvalId: string, note?: string, options?: { targetHost?: 'openclaw' | 'codex' | 'workbuddy'; intentReviewed?: boolean; reviewedArtifactId?: string }): Promise<ApiResponse<ApprovalRecordData>> {
   return request<ApprovalRecordData>('/api/v1/approvals/' + encodeURIComponent(approvalId) + '/approve', {
     method: 'POST',
     body: JSON.stringify({ note, ...(options?.targetHost !== undefined ? { host: options.targetHost } : {}), ...(options?.intentReviewed !== undefined ? { intentReviewed: options.intentReviewed, reviewedArtifactId: options.reviewedArtifactId } : {}) }),
@@ -1120,12 +1120,12 @@ async function resolveOwnerDecision(taskId: string, body: {
   );
 }
 
-async function fetchApprovalsGrouped(targetHost?: 'openclaw' | 'codex'): Promise<ApiResponse<ApprovalsGroupedData>> {
+async function fetchApprovalsGrouped(targetHost?: 'openclaw' | 'codex' | 'workbuddy'): Promise<ApiResponse<ApprovalsGroupedData>> {
   const query = targetHost !== undefined ? `?host=${targetHost}` : '';
   return request<ApprovalsGroupedData>(`/api/v1/approvals/grouped${query}`, undefined, validateApprovalsGrouped);
 }
 
-async function fetchAllActivations(targetHost?: 'openclaw' | 'codex'): Promise<ApiResponse<ActivationsData>> {
+async function fetchAllActivations(targetHost?: 'openclaw' | 'codex' | 'workbuddy'): Promise<ApiResponse<ActivationsData>> {
   const query = targetHost !== undefined ? `?host=${targetHost}` : '';
   return request<ActivationsData>(`/api/v1/activations${query}`, undefined, validateActivations);
 }
@@ -1164,7 +1164,7 @@ export interface ProposeRevisionData {
 async function proposePromptRevision(
   activationId: string,
   statement: string,
-  targetHost?: 'openclaw' | 'codex',
+  targetHost?: 'openclaw' | 'codex' | 'workbuddy',
 ): Promise<ApiResponse<ProposeRevisionData>> {
   return request<ProposeRevisionData>(
     `/api/v1/activations/${encodeURIComponent(activationId)}/propose-revision`,

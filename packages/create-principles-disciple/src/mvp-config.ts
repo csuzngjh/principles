@@ -314,6 +314,44 @@ export interface RuntimeProfileInput {
   provider?: string;
   model?: string;
   apiKeyEnv?: string;
+  /** Round-4 R3: OpenAI-compatible custom endpoint. Present → pi-ai calls it
+   * directly and skips the provider model catalog (custom model ids like the
+   * AMD RADEON deployment are otherwise catalog-rejected). */
+  baseUrl?: string;
+}
+
+/**
+ * Round-4 S2: the per-provider default model — the ONE resolution the
+ * interactive prompt path has always applied (prompts.ts) and the
+ * non-interactive path now reuses, so an omitted `--model` yields a genuinely
+ * ready profile instead of an empty `pd.default.model` that fails
+ * `pi-ai profile missing required 'model' field` at the resolver.
+ *
+ * Returns '' for a provider without a known default — callers must treat that
+ * as "cannot resolve" (fail loud or require an explicit --model), never write
+ * an empty model. Keep in sync with prompts.ts RUNTIME_PROFILE_PROVIDERS.
+ */
+export function resolveDefaultModelForProvider(provider: string): string {
+  return provider === 'openai' ? 'gpt-4o-mini'
+    : provider === 'anthropic' ? 'claude-3-5-haiku-latest'
+    : provider === 'deepseek' ? 'deepseek-chat'
+    : '';
+}
+
+/**
+ * Round-5 S3: THE one custom-endpoint validation — real URL parsing (rc-3),
+ * not a protocol-prefix regex (`https://` alone parses to no hostname and
+ * would poison every governance LLM call). Shared by the interactive prompt,
+ * the CLI flag, and the governance write boundary. No network reachability
+ * check — only the URL is well-formed.
+ */
+export function isValidHttpBaseUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return (parsed.protocol === 'https:' || parsed.protocol === 'http:') && parsed.hostname.length > 0;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -360,6 +398,9 @@ export function generateConfigYamlContent(
         provider: runtimeProfile?.provider ?? '',
         model: runtimeProfile?.model ?? '',
         apiKeyEnv: runtimeProfile?.apiKeyEnv ?? '',
+        // Custom endpoint only when collected — an empty baseUrl must not be
+        // written (the resolver treats presence as "skip catalog validation").
+        ...(runtimeProfile?.baseUrl ? { baseUrl: runtimeProfile.baseUrl } : {}),
       },
       // Fallback: openclaw.default delegates LLM calls to the OpenClaw main
       // agent. Users can switch back via web console if pi-ai is unavailable.

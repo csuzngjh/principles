@@ -204,6 +204,39 @@ async function safeRunRecoverySweep(
  */
 const RECONCILIATION_BUDGET = 5;
 
+/**
+ * PRI-954 (F10) oldest-ready-stage-first ordering. Returns the configured
+ * runner kinds reordered to start at the stage that owns the globally oldest
+ * ready task (by `createdAt`); later stages keep their relative priority
+ * order, so dependency order inside one stage scan is untouched. Tasks
+ * without a readable createdAt sort last for ordering purposes (their stage
+ * keeps the default position) — unknown age never jumps the queue.
+ */
+export function orderKindsByOldestReadyStage<T extends string>(
+  runnerKinds: readonly T[],
+  readyTasks: readonly { taskKind: T; createdAt?: string }[],
+): T[] {
+  if (runnerKinds.length <= 1 || readyTasks.length === 0) return [...runnerKinds];
+  const priorityIndex = new Map<T, number>(runnerKinds.map((k, i) => [k, i] as const));
+  let oldest: { taskKind: T; createdAt: string; index: number } | null = null;
+  for (const task of readyTasks) {
+    if (typeof task.createdAt !== 'string' || task.createdAt.length === 0) continue;
+    const index = priorityIndex.get(task.taskKind);
+    if (index === undefined) continue; // stage outside this consumer's scope
+    if (
+      oldest === null ||
+      task.createdAt < oldest.createdAt ||
+      (task.createdAt === oldest.createdAt && index < oldest.index)
+    ) {
+      oldest = { taskKind: task.taskKind, createdAt: task.createdAt, index };
+    }
+  }
+  const startKind = oldest?.taskKind;
+  const startIndex = startKind !== undefined ? runnerKinds.indexOf(startKind) : -1;
+  if (startIndex <= 0) return [...runnerKinds];
+  return [...runnerKinds.slice(startIndex), ...runnerKinds.slice(0, startIndex)];
+}
+
 async function runReconciliationBudget(
   workspaceDir: string,
   orchestrator: InternalizationOrchestrator,
@@ -394,7 +427,18 @@ export async function runInternalizationConsumerCycle(
     let lastSkipDecision = 'no_ready_tasks';
     let lastSkipReason: string | undefined;
     let taskRuntimeConfig: Exclude<RuntimeConfigResult, RuntimeConfigError> | null = null;
-    for (const kind of decision.runnerKinds) {
+    // PRI-954 (F10): oldest-ready-stage-first fairness. The fixed dreamer-first
+    // order plus one-task-per-cycle let a continuous stream of new dreamer
+    // tasks (each real Pain creates one) keep downstream stages waiting for an
+    // unbounded number of cycles — measured at 35+ minutes of philosopher
+    // starvation under sustained load (2026-10-13 dogfood, findings F10).
+    // Starting the stage scan at the stage owning the GLOBALLY OLDEST ready
+    // task bounds every stage's wait without concurrency, without persisted
+    // scheduler state (works across one-shot `--once` worker processes), and
+    // without touching leases, idempotency, dependency order, or the
+    // single-task-per-cycle semantics. Ties keep the original priority order.
+    const orderedRunnerKinds = orderKindsByOldestReadyStage(decision.runnerKinds, snapshot.readyTasks);
+    for (const kind of orderedRunnerKinds) {
       const agentName = AGENT_NAME_FOR_TASK_KIND[kind];
       if (agentName === undefined) {
         lastSkipDecision = 'runtime_config_error';

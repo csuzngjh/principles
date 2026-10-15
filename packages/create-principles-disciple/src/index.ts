@@ -6,12 +6,14 @@ import { createRequire } from 'module';
 import { realpathSync } from 'node:fs';
 import { banner, logger, setQuietMode } from './utils/logger.js';
 import { runPrompts, type InstallOptions } from './prompts.js';
-import { install } from './installer.js';
+import { install, resolveConsoleWorkspaceDir } from './installer.js';
 import { uninstall, checkInstallStatus } from './uninstaller.js';
 import { checkEnvironment, detectWorkspace } from './utils/env.js';
 import {
   MVP_CHANNELS,
   buildFailureOutput,
+  getHomeDir,
+  isValidHttpBaseUrl,
 } from './mvp-config.js';
 import { setLanguage, t, getLanguage, isLanguage } from './i18n.js';
 import { isHostTarget, type HostTarget, HOST_TARGETS } from './installers/index.js';
@@ -231,10 +233,65 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
         process.exit(1);
         return;
       }
+      // Round-4 S2: a blank --model / PD_MODEL is an EXPLICIT invalid value —
+      // fail loud instead of silently treating it as omitted (the governance
+      // write boundary enforces the same rule).
+      if (typeof model === 'string' && model.trim().length === 0) {
+        const msg = `--model was given but blank. Pass a non-empty model id, or omit --model to keep the existing configured model (or apply the per-provider default).`;
+        if (jsonMode) {
+          console.log(JSON.stringify(buildFailureOutput('runtime_profile_invalid', msg), null, 2));
+        } else {
+          logger.error(msg);
+        }
+        process.exit(1);
+        return;
+      }
       cliOptions.runtimeProfile = { provider, apiKeyEnv, model: model || undefined };
+      // Round-4 R3 / round-5 S3: --base-url / PD_BASE_URL — an OpenAI-compatible
+      // custom endpoint. Present → pi-ai calls it directly and skips the
+      // provider model catalog. rc-3: an EXPLICIT blank value fails loud (same
+      // rule as blank --model); a value that does not parse as a real http(s)
+      // URL fails loud (a prefix regex let `https://` through).
+      const baseUrlRaw = typeof options.baseUrl === 'string' ? options.baseUrl : process.env.PD_BASE_URL;
+      if (baseUrlRaw !== undefined) {
+        const trimmed = baseUrlRaw.trim();
+        if (trimmed.length === 0) {
+          const msg = `--base-url was given but blank. Pass a valid http(s) endpoint URL, or omit --base-url to use the provider default.`;
+          if (jsonMode) {
+            console.log(JSON.stringify(buildFailureOutput('runtime_profile_invalid', msg), null, 2));
+          } else {
+            logger.error(msg);
+          }
+          process.exit(1);
+          return;
+        }
+        if (!isValidHttpBaseUrl(trimmed)) {
+          const msg = `--base-url "${trimmed}" is not a valid http(s) URL with a hostname.`;
+          if (jsonMode) {
+            console.log(JSON.stringify(buildFailureOutput('runtime_profile_invalid', msg), null, 2));
+          } else {
+            logger.error(msg);
+          }
+          process.exit(1);
+          return;
+        }
+        cliOptions.runtimeProfile.baseUrl = trimmed;
+      }
     } else if (apiKeyEnv) {
       // rc-3: fail loud — apiKeyEnv without provider is unusable.
       const msg = `--api-key-env given without --provider. Pass --provider openai (or set PD_PROVIDER).`;
+      if (jsonMode) {
+        console.log(JSON.stringify(buildFailureOutput('runtime_profile_incomplete', msg), null, 2));
+      } else {
+        logger.error(msg);
+      }
+      process.exit(1);
+      return;
+    } else if (options.baseUrl !== undefined || process.env.PD_BASE_URL !== undefined) {
+      // Round-5 S3 (rc-9/cli-6): an endpoint without a provider cannot attach
+      // to any profile — fail loud instead of silently dropping it (explicit
+      // blank included; blanks fail loud in the provider branch too).
+      const msg = `--base-url given without --provider. Pass --provider openai (or set PD_PROVIDER).`;
       if (jsonMode) {
         console.log(JSON.stringify(buildFailureOutput('runtime_profile_incomplete', msg), null, 2));
       } else {
@@ -287,6 +344,11 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
   }
   const pluginDir = pluginDirOverride ?? PLUGIN_DIR;
   const result = await install(installOptions, pluginDir, { quiet: jsonMode, nonInteractive: Boolean(nonInteractive) });
+  // WorkBuddy remediation (review round-2 #2): the operator-facing hints
+  // below must name the directory the console/canary actually manage — the
+  // governance workspace for the workbuddy host, the project dir otherwise
+  // (same resolution the installer's own nextActions use).
+  const operatorWorkspaceDir = resolveConsoleWorkspaceDir(host, result.workspaceDir, getHomeDir());
 
   if (jsonMode) {
     const output = toInstallJsonOutput(result);
@@ -321,19 +383,29 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
       console.log(`  Demo verification .............. ${result.verification.storyA}${result.verification.storyASkipReason ? ` (${result.verification.storyASkipReason})` : ''}`);
       // Fix-4: surface runtime profile status so the user knows whether LLM
       // features (diagnose, candidate intake, internalization) will work.
+      // Round-3 remediation P1: the WorkBuddy host writes the profile into
+      // the GOVERNANCE workspace config (and fails the install loudly if the
+      // write fails), so this success line can truthfully name that file —
+      // reaching it at all means the write was round-trip verified. Other
+      // hosts keep the project-dir profile (operatorWorkspaceDir === project
+      // workspace there); the line stays path-free for them (an existing
+      // valid config is preserved verbatim, so a path claim could be false).
       if (installOptions.runtimeProfile) {
-        console.log(`  LLM runtime profile ............ ${installOptions.runtimeProfile.provider} / ${installOptions.runtimeProfile.model ?? '(default)'} (key: $${installOptions.runtimeProfile.apiKeyEnv})`);
+        const profileLocation = host === 'workbuddy'
+          ? ` [written to ${path.join(operatorWorkspaceDir, '.pd', 'config.yaml')}]`
+          : '';
+        console.log(`  LLM runtime profile ............ ${installOptions.runtimeProfile.provider} / ${installOptions.runtimeProfile.model ?? '(default)'} (key: $${installOptions.runtimeProfile.apiKeyEnv})${profileLocation}`);
       } else {
-        console.log(`  LLM runtime profile ............ not configured (configure via console: pd console open --workspace "${result.workspaceDir}")`);
+        console.log(`  LLM runtime profile ............ not configured (configure via console: pd console open --workspace "${operatorWorkspaceDir}")`);
       }
       console.log();
       console.log(t('ready'));
-      console.log(`${t('diagnostics')}: pd runtime canary --workspace "${result.workspaceDir}" --json`);
+      console.log(`${t('diagnostics')}: pd runtime canary --workspace "${operatorWorkspaceDir}" --json`);
     } else if (result.components.plugin === 'verified' && (result.components.cli === 'verified' || result.components.cli === 'verified_local_only')) {
       const cliLabel = result.components.cli === 'verified_local_only' ? 'verified (local only)' : result.components.cli;
       const diagCmd = result.components.cli === 'verified_local_only' && result.components.cliLocalPath
-        ? `"${result.components.cliLocalPath}" runtime canary --workspace "${result.workspaceDir}" --json`
-        : `pd runtime canary --workspace "${result.workspaceDir}" --json`;
+        ? `"${result.components.cliLocalPath}" runtime canary --workspace "${operatorWorkspaceDir}" --json`
+        : `pd runtime canary --workspace "${operatorWorkspaceDir}" --json`;
       console.log();
       logger.warn(t('install_partial_complete'));
       console.log();
@@ -466,7 +538,8 @@ program
   // instead of leaving it empty (which would cause silent LLM failures).
   .option('--provider <provider>', 'LLM provider for pd.default profile (openai/anthropic/deepseek). Enables non-interactive runtime profile config.')
   .option('--api-key-env <name>', 'Environment variable name holding the LLM API key (e.g. OPENAI_API_KEY). Requires --provider.')
-  .option('--model <model>', 'LLM model id (optional; sensible default per provider if omitted)')
+  .option('--model <model>', 'LLM model id (optional; keeps the existing configured model, else applies the per-provider default)')
+  .option('--base-url <url>', 'OpenAI-compatible custom endpoint for pd.default (optional; present = call it directly, skip the provider model catalog). Env: PD_BASE_URL.')
   // ADR-0020 §2.3: host target selector. Default 'openclaw' for backward compat.
   .option('--host <host>', `Host platform (${HOST_TARGETS.join('/')})`, 'openclaw')
   // Gateway lock prevention: auto-stop a running OpenClaw gateway before

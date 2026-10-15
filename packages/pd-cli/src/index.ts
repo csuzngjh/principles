@@ -128,6 +128,7 @@ painCmd
   .option('--rollout-id <id>', 'PRI-743: Codex rollout identity — required by --host codex', undefined)
   .option('--host-turn-id <id>', 'PRI-743: Codex turn id — required by --host codex', undefined)
   .option('--logical-key <key>', 'PRI-743: Codex logical observation key override for --host codex (default: codex|<rollout-id>|<host-turn-id>|user)', undefined)
+  .option('--owner-statement <text>', 'SPEC-CODEX-PAIN-CLOSURE-001 CR-02: the Owner verbatim statement (explicit submission, max 500 chars, rejected when longer — never truncated). It satisfies only the empty-input-evidence admission condition and is disclosed as an unverified owner_statement.', undefined)
   .option('--wait', 'Wait for diagnosis to complete (sync mode, overrides async flag)')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
@@ -141,7 +142,7 @@ painCmd
   .description('List canonical pain events with host attribution (PRI-640)')
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('-l, --limit <number>', 'Max entries to show (default: 20)', parseInt)
-  .option('--host <kind>', 'Filter by host: openclaw | codex | unknown')
+  .option('--host <kind>', 'Filter by host: openclaw | codex | workbuddy | unknown')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handlePainList(opts);
@@ -706,6 +707,35 @@ codexCmd
     const { handleCodexWorker } = await import('./commands/codex-worker.js');
     const intervalMs = typeof opts.interval === 'string' ? Number.parseInt(opts.interval, 10) : undefined;
     await handleCodexWorker({
+      workspace: opts.workspace,
+      json: opts.json === true,
+      once: opts.once === true,
+      status: opts.status === true,
+      ...(intervalMs !== undefined && Number.isInteger(intervalMs) ? { intervalMs } : {}),
+    });
+  });
+
+// ── pd workbuddy — WorkBuddy host governance operations ──────────────────────
+// SPEC workbuddy-host-adapter §5 Part 5 (ADR-0020 third host): the worker is
+// the only operator command the WorkBuddy MVP needs — reconciliation,
+// diagnostician and downstream reuse the shared authorities; there is no
+// ingestion consent flow because the WorkBuddy MVP reads no transcript.
+const workbuddyCmd = program
+  .command('workbuddy')
+  .description('WorkBuddy host governance operations');
+
+workbuddyCmd
+  .command('worker')
+  .description('Run the WorkBuddy governance worker (reconciliation, diagnostician, downstream — no transcript ingestion)')
+  .option('-w, --workspace <path>', 'Governance workspace directory (default: the WorkBuddy governance workspace)')
+  .option('--once', 'Run exactly one bounded cycle and exit')
+  .option('--interval <ms>', 'Cycle interval for continuous mode (default 120000, minimum 1000)')
+  .option('--status', 'Report the §15 worker mode without executing anything')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    const { handleWorkbuddyWorker } = await import('./commands/workbuddy-worker.js');
+    const intervalMs = typeof opts.interval === 'string' ? Number.parseInt(opts.interval, 10) : undefined;
+    await handleWorkbuddyWorker({
       workspace: opts.workspace,
       json: opts.json === true,
       once: opts.once === true,

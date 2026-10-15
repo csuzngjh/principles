@@ -40,7 +40,7 @@ export interface InterventionIngressAppendResult {
 }
 
 export interface ExistingInterventionObservationSource {
-  sourceKind: 'openclaw_plugin_event_log' | 'codex_pd_hook_event_log';
+  sourceKind: 'openclaw_plugin_event_log' | 'codex_pd_hook_event_log' | 'workbuddy_pd_hook_event_log';
   sourceLocator: string;
   observationKey: string;
   principleId: string;

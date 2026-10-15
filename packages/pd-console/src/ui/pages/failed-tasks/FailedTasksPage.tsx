@@ -85,10 +85,22 @@ interface FailedTask {
   ownerDecisionRequired?: boolean;
 }
 
+interface PipelineHealthInfo {
+  status: "healthy" | "backlogged" | "stalled" | "disabled" | "unknown";
+  pendingCount: number | null;
+  oldestPendingTaskKind: string | null;
+  oldestPendingAgeMinutes: number | null;
+  lastProgressAt: string | null;
+  note: string;
+  nextAction?: string;
+}
+
 interface FailedTasksData {
   tasks: FailedTask[];
   total: number;
   nextAction?: string;
+  /** PRI-955 (F11): derived learning-queue health — "no failed tasks" is not "healthy". */
+  pipeline?: PipelineHealthInfo;
 }
 
 // ── Page state ───────────────────────────────────────────────────────────────
@@ -185,7 +197,28 @@ function validateFailedTasksData(v: unknown): FailedTasksData | null {
   const total = readNumber(v, "total");
   if (total === null) return null;
   const nextAction = readNullableString(v, "nextAction");
-  return { tasks, total, nextAction: nextAction ?? undefined };
+  // PRI-955 (F11): optional pipeline health block — an invalid block is
+  // omitted (never fails the whole payload), the page then renders nothing.
+  let pipeline: PipelineHealthInfo | undefined;
+  if (Object.hasOwn(v, "pipeline") && isObject(v.pipeline)) {
+    const p = v.pipeline;
+    const status = readString(p, "status");
+    const note = readString(p, "note");
+    if (status === "healthy" || status === "backlogged" || status === "stalled" || status === "disabled" || status === "unknown") {
+      if (note !== null) {
+        pipeline = {
+          status,
+          pendingCount: readNumber(p, "pendingCount"),
+          oldestPendingTaskKind: readNullableString(p, "oldestPendingTaskKind"),
+          oldestPendingAgeMinutes: readNumber(p, "oldestPendingAgeMinutes"),
+          lastProgressAt: readNullableString(p, "lastProgressAt"),
+          note,
+          nextAction: readNullableString(p, "nextAction") ?? undefined,
+        };
+      }
+    }
+  }
+  return { tasks, total, nextAction: nextAction ?? undefined, ...(pipeline ? { pipeline } : {}) };
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -465,10 +498,43 @@ interface LoadedContentProps {
   t: (key: string) => string;
 }
 
+/** PRI-955 (F11): derived learning-queue health block — never claims health
+ *  from the failed-task count alone. Facts come from the server projection. */
+function PipelineHealthCard({ pipeline, t }: { pipeline: PipelineHealthInfo; t: (key: string) => string }) {
+  const statusLabel =
+    pipeline.status === "healthy" ? t("pages.failedTasks.pipeline.statusHealthy")
+    : pipeline.status === "backlogged" ? t("pages.failedTasks.pipeline.statusBacklogged")
+    : pipeline.status === "stalled" ? t("pages.failedTasks.pipeline.statusStalled")
+    : t("pages.failedTasks.pipeline.statusUnknown");
+  const variant =
+    pipeline.status === "healthy" ? "default"
+    : pipeline.status === "stalled" ? "destructive"
+    : pipeline.status === "backlogged" ? "amber"
+    : "default";
+  return (
+    <div className="p-5 bg-panel border border-line rounded-[var(--radius-md)] mb-4">
+      <div className="flex items-center gap-3 mb-2">
+        <span className="text-[15px] font-semibold text-ink">{t("pages.failedTasks.pipeline.title")}</span>
+        <span className={`text-xs px-2 py-0.5 rounded-full border ${
+          variant === "destructive" ? "border-red-300 text-red-700 bg-red-50"
+          : variant === "amber" ? "border-amber-300 text-amber-700 bg-amber-50"
+          : "border-line text-ink-3 bg-canvas"
+        }`}>{statusLabel}</span>
+      </div>
+      <p className="text-ink-3 text-sm leading-relaxed">{pipeline.note}</p>
+      {pipeline.nextAction && (
+        <p className="text-ink-3 text-sm leading-relaxed mt-1">{t("pages.failedTasks.pipeline.nextActionPrefix")}{pipeline.nextAction}</p>
+      )}
+    </div>
+  );
+}
+
 function LoadedContent({ data, onCreateDraft, onRecover, initialExpandedTaskId, t }: LoadedContentProps) {
   const hasTasks = data.tasks.length > 0;
 
-  // Empty state — surface nextAction from the API (rc-9: no silent fallback)
+  // Empty state — surface nextAction from the API (rc-9: no silent fallback).
+  // PRI-955: the empty copy no longer claims the pipeline is healthy; the
+  // derived queue-health block carries that judgment with facts.
   if (!hasTasks) {
     return (
       <div className="py-8">
@@ -480,6 +546,7 @@ function LoadedContent({ data, onCreateDraft, onRecover, initialExpandedTaskId, 
             <p className="text-ink-3 text-sm leading-relaxed">{data.nextAction}</p>
           )}
         </div>
+        {data.pipeline && <PipelineHealthCard pipeline={data.pipeline} t={t} />}
       </div>
     );
   }
@@ -489,6 +556,7 @@ function LoadedContent({ data, onCreateDraft, onRecover, initialExpandedTaskId, 
 
   return (
     <>
+      {data.pipeline && <PipelineHealthCard pipeline={data.pipeline} t={t} />}
       <div className="space-y-6">
         {sortedKinds.map((kind) => {
           const tasks = grouped.get(kind);

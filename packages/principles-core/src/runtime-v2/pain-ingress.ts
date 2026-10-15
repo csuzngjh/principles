@@ -65,7 +65,7 @@ export interface LegacyPainSubmission {
   agentId?: string;
   traceId?: string;
   provenance: PainProvenance;
-  hostKind?: 'openclaw' | 'codex';
+  hostKind?: 'openclaw' | 'codex' | 'workbuddy';
   evidence: IngressEvidenceEntry[];
   /** Versioned rev-2 facts persisted beside the legacy top-level fields. */
   painIngress: PainIngressV1Payload;

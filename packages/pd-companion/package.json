@@ -13,7 +13,7 @@
     "verify-package": "node scripts/verify-package.mjs"
   },
   "dependencies": {
-    "@principles/install-layout": "^0.2.7"
+    "@principles/install-layout": "^0.3.1"
   },
   "devDependencies": {
     "@electron/asar": "4.3.1",
@@ -22,5 +22,6 @@
     "typescript": "^7.0.2",
     "vitest": "^5.0.0",
     "@types/node": "^26.4.1"
-  }
+  },
+  "license": "Apache-2.0"
 }

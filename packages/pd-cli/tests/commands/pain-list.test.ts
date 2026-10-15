@@ -118,12 +118,12 @@ describe('listPains (PRI-640 host filter)', () => {
     // --limit narrows the row list but must NOT narrow the distribution.
     const limited = await listPains(dbPath, { limit: 2 });
     expect(limited.count).toBe(2);
-    expect(limited.byHost).toEqual({ openclaw: 2, codex: 1, unknown: 2 });
+    expect(limited.byHost).toEqual({ openclaw: 2, codex: 1, workbuddy: 0, unknown: 2 });
 
     // --host narrows the row list but must NOT narrow the distribution.
     const filtered = await listPains(dbPath, { limit: 10, host: 'codex' });
     expect(filtered.count).toBe(1);
-    expect(filtered.byHost).toEqual({ openclaw: 2, codex: 1, unknown: 2 });
+    expect(filtered.byHost).toEqual({ openclaw: 2, codex: 1, workbuddy: 0, unknown: 2 });
   });
 
   it('PRI-743: byHost is null (never guessed) on a pre-PRI-640 database', async () => {
@@ -190,7 +190,7 @@ describe('handlePainList (CLI contract)', () => {
     expect(parsed.pains.map((p) => `${p.painId}:${p.host}`).sort()).toEqual(['pain_cli_cx:codex', 'pain_cli_oc:openclaw']);
     expect(parsed.hostFilter).toBeNull();
     expect(parsed.warnings).toEqual([]);
-    expect(parsed.byHost).toEqual({ openclaw: 1, codex: 1, unknown: 0 });
+    expect(parsed.byHost).toEqual({ openclaw: 1, codex: 1, workbuddy: 0, unknown: 0 });
   });
 
   it('--host filter is reflected in the JSON result', async () => {

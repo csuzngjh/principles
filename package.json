@@ -1,14 +1,15 @@
 {
   "name": "principles-disciple-monorepo",
-  "version": "2.3.3",
+  "version": "2.3.4",
   "description": "Principles Disciple - OpenClaw Plugin Monorepo",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "workspaces": [
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspace=@principles/core && npm run build --workspace=@principles/install-layout && npm run build --workspace=@principles/host-runtime && npm run build --workspace=@principles/codex-adapter && npm run build --workspace=principles-disciple && npm run build --workspace=create-principles-disciple",
+    "build": "npm run build --workspace=@principles/core && npm run build --workspace=@principles/install-layout && npm run build --workspace=@principles/host-runtime && npm run build --workspace=@principles/codex-adapter && npm run build --workspace=@principles/workbuddy-adapter && npm run build --workspace=principles-disciple && npm run build --workspace=create-principles-disciple",
     "lint": "npm run build --workspace=@principles/core && npm run build --workspace=@principles/install-layout && npm run build --workspace=@principles/host-runtime && node scripts/lint-by-package.mjs",
     "lint:fix": "npm run build --workspace=@principles/core && npm run build --workspace=@principles/install-layout && npm run build --workspace=@principles/host-runtime && node scripts/lint-by-package.mjs --fix",
     "typecheck:openclaw-plugin": "cd packages/openclaw-plugin && npx tsc --noEmit",
@@ -47,9 +48,10 @@
     "dev:lease": "node scripts/dev/workspace-lease.mjs",
     "dev:closure-lab": "node scripts/dev/pipeline-closure-lab/generate.mjs",
     "dev:evolution-evidence": "node scripts/dev/pipeline-evolution/collect-evidence.mjs",
+    "dev:pl-pilot": "node scripts/dev/principle-learning-lab/run-pilot.mjs",
     "dev:evolution-init": "node scripts/dev/pipeline-evolution/init-experiment.mjs",
     "test:scripts": "cd scripts && vitest run",
-    "test:guard-contracts": "npx vitest run tests/sync-plugin-installation-truth.test.js",
+    "test:guard-contracts": "npx vitest run tests/sync-plugin-installation-truth.test.js && node --test scripts/dev/workbuddy-probe/lib/console-owner-loop-assertions.regression.mjs",
     "ci:impact": "node scripts/ci/impact.mjs",
     "test:website": "npm test --workspace=@principles/website",
     "verify:merge": "node scripts/release/check-pr-release-intent.mjs && npm run check:generated-artifacts && npm run check:error-handbook && npm run check:telemetry-events -- --strict && npm run check:repo-hygiene && npm run check:runtime-contract && npm run check:docs-structure && npm run check:security-baseline && npm run check:workspace-tools && npm run test:guard-contracts && npm test --workspace=create-principles-disciple -- --run tests/release-target-matrix.test.ts && npm run build --workspace=@principles/core && npm run test:website && npm run lint && npm run build && npm run check:pipeline-contract && npm run build --workspace=@principles/pd-cli && npm run build --workspace=@principles/pd-console && npm run check:workspace-artifacts && npm run check:release-artifact-hygiene && npm run typecheck --workspace=@principles/core && npm run typecheck --workspace=@principles/pd-cli && npm run typecheck --workspace=@principles/install-layout && npm run typecheck:openclaw-plugin && npm run typecheck:pd-console && npm run typecheck:pd-companion && npm run check-satellite-bundle-deps && npm run check:runtime-writers",

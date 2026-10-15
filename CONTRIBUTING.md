@@ -137,3 +137,7 @@ Issue 链接: https://github.com/csuzngjh/principles/issues
 ---
 
 *最后更新: 2026-03-13*
+
+## 贡献者许可
+
+新的代码贡献应由有授权权利的贡献者按 [Apache License 2.0](LICENSE) 提供。请保留第三方代码与资产的原有版权声明及许可证，勿在未获授权的情况下重新许可他人作品。

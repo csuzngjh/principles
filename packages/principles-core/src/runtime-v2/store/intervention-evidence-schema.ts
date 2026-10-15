@@ -61,7 +61,7 @@ export const INTERVENTION_EVIDENCE_SCHEMA_STATEMENTS: readonly string[] = [
   'CREATE INDEX IF NOT EXISTS idx_ier_episode ON intervention_evidence_records(episode_key)',
   'CREATE INDEX IF NOT EXISTS idx_ier_effect ON intervention_evidence_records(effect_key)',
   `CREATE TABLE IF NOT EXISTS intervention_capability_declarations (
-    host_kind TEXT NOT NULL CHECK (host_kind IN ('openclaw','codex')),
+    host_kind TEXT NOT NULL CHECK (host_kind IN ('openclaw','codex','workbuddy')),
     capability TEXT NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('supported','unsupported','unknown')),
     adapter_version TEXT NOT NULL,

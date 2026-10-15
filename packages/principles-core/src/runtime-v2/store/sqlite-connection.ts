@@ -398,6 +398,7 @@ export class SqliteConnection {
         trigger_pattern TEXT,
         action TEXT,
         abstracted_principle TEXT,
+        admission_json TEXT,
         FOREIGN KEY (artifact_id) REFERENCES artifacts(artifact_id) ON DELETE CASCADE,
         FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE,
         FOREIGN KEY (source_run_id) REFERENCES runs(run_id) ON DELETE CASCADE,
@@ -793,6 +794,44 @@ export class SqliteConnection {
         throw error;
       }
     }
+
+    // WorkBuddy third host (SPEC workbuddy-host-adapter Part 2): existing
+    // workspaces carry the pre-workbuddy `host_kind IN ('openclaw','codex')`
+    // CHECK on intervention_capability_declarations, which rejects every
+    // workbuddy declaration. A bare CREATE TABLE statement (IF NOT EXISTS
+    // form) cannot alter an existing table's CHECK, so rebuild the table
+    // under the write lock with shape recheck (same pattern as the redaction
+    // migration above). The table is declarative adapter state (latest
+    // declaration wins), so the INSERT SELECT copy is preservation, not
+    // authority transfer. Wording note: the schema-orphan-detection static
+    // scan treats every "IF NOT EXISTS <word>" occurrence in this file as a
+    // table name, so this comment must not carry that DDL prefix verbatim.
+    const declarationDdl = (): unknown => db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'intervention_capability_declarations'",
+    ).get();
+    const declarationsDdlCurrent = (row: unknown): boolean =>
+      isRecord(row) && typeof row.sql === 'string' && row.sql.includes("'workbuddy'");
+    if (!declarationsDdlCurrent(declarationDdl())) {
+      const [createDeclarations] = INTERVENTION_EVIDENCE_SCHEMA_STATEMENTS.filter(
+        (statement) => statement.includes('intervention_capability_declarations'),
+      );
+      if (typeof createDeclarations !== 'string') {
+        throw new Error('intervention_capability_declarations DDL statement missing from schema');
+      }
+      db.prepare('BEGIN IMMEDIATE').run();
+      try {
+        if (!declarationsDdlCurrent(declarationDdl())) {
+          db.prepare('ALTER TABLE intervention_capability_declarations RENAME TO intervention_capability_declarations_pre_workbuddy').run();
+          db.prepare(createDeclarations).run();
+          db.prepare('INSERT INTO intervention_capability_declarations SELECT * FROM intervention_capability_declarations_pre_workbuddy').run();
+          db.prepare('DROP TABLE intervention_capability_declarations_pre_workbuddy').run();
+        }
+        db.prepare('COMMIT').run();
+      } catch (error) {
+        try { db.prepare('ROLLBACK').run(); } catch { /* migration tx may already be rolled back */ }
+        throw error;
+      }
+    }
   }
 
   private migrateSchema(): void {
@@ -811,6 +850,11 @@ export class SqliteConnection {
       { name: 'trigger_pattern', sql: 'ALTER TABLE principle_candidates ADD COLUMN trigger_pattern TEXT' },
       { name: 'action', sql: 'ALTER TABLE principle_candidates ADD COLUMN action TEXT' },
       { name: 'abstracted_principle', sql: 'ALTER TABLE principle_candidates ADD COLUMN abstracted_principle TEXT' },
+      // SPEC-CODEX-PAIN-CLOSURE-001 CR-03 (PRI-958): persisted admission
+      // disposition — immutable evaluation history + current pointer + an
+      // independent processing-progress domain. Additive; NULL = the
+      // pre-CR-03 era where dispositions were emitted as telemetry only.
+      { name: 'admission_json', sql: 'ALTER TABLE principle_candidates ADD COLUMN admission_json TEXT' },
     ];
 
     for (const migration of candidateMigrations) {

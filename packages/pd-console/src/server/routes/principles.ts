@@ -125,6 +125,68 @@ async function getDecidedPrincipleIds(workspaceDir: string): Promise<{
   }
 }
 
+/**
+ * PRI-956 (F15, R1 merge-readiness D1/D2): principle ids whose runtime
+ * authority is CURRENTLY revoked.
+ *
+ * The runtime authority is the activations table. A principle counts as
+ * revoked only when it has AT LEAST ONE activation AND NO activation in a
+ * still-active state (`deactivated_at` NULL/empty). This correctly handles:
+ * - deactivate (all activations deactivated → revoked),
+ * - deactivate then RE-ACTIVATE (a new/updated active activation exists →
+ *   NOT revoked),
+ * - SUPERSEDE (old activation deactivated, newer active one exists → NOT
+ *   revoked),
+ * - per-CHANNEL independence is preserved at the row level: a principle with
+ *   an active prompt activation but a deactivated hook activation (or vice
+ *   versa) still has an active row, so the global "runtime revoked" badge is
+ *   NOT shown (D2: no global claim while any channel authority survives).
+ *
+ * "Ever deactivated but currently active" is deliberately NOT reported — the
+ * original query proved history, not current state.
+ *
+ * Read-only; degrades with a reason like the decided-ids query (D3: the
+ * unavailableReason is propagated to the API/UI — status cannot be confirmed
+ * and must not default to either active or revoked).
+ */
+async function getDeactivatedPrincipleIds(workspaceDir: string): Promise<{ ids: Set<string>; unavailableReason?: string }> {
+  const dbPath = path.join(workspaceDir, '.pd', 'state.db');
+  if (!fs.existsSync(dbPath)) {
+    return { ids: new Set(), unavailableReason: 'activation_db_not_found' };
+  }
+  let closeFn: (() => void) | null = null;
+  try {
+    const { SqliteConnection } = await import('@principles/core/runtime-v2');
+    const conn = new SqliteConnection({ workspaceDir, readonly: true });
+    closeFn = () => conn.close();
+    const db = conn.getDb();
+    const rows = db.prepare(
+      "SELECT target_ref, " +
+      "SUM(CASE WHEN deactivated_at IS NULL OR deactivated_at = '' THEN 1 ELSE 0 END) AS active_count, " +
+      "COUNT(*) AS total " +
+      "FROM activations WHERE target_ref LIKE 'ledger://%' " +
+      "GROUP BY target_ref"
+    // runtime-contract-exempt: ERR-001 better-sqlite3 .all() returns unknown[]; narrowing to Record<string, unknown>[] is type-only (fields validated below via typeof checks)
+    ).all() as Record<string, unknown>[];
+    const ids = new Set<string>();
+    for (const row of rows) {
+      const ref = getOwnStringField(row, 'target_ref');
+      const {total} = row;
+      const activeCount = row.active_count;
+      if (ref === undefined || typeof total !== 'number' || typeof activeCount !== 'number') continue;
+      if (total > 0 && activeCount === 0) {
+        ids.add(ref.slice('ledger://'.length));
+      }
+    }
+    return { ids };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ids: new Set(), unavailableReason: `activation_query_failed: ${message}` };
+  } finally {
+    closeFn?.();
+  }
+}
+
 interface PrinciplesRouteParams {
   req: IncomingMessage;
   res: ServerResponse;
@@ -276,7 +338,16 @@ export async function handlePrinciplesRoute({
       const filter = (filterRaw !== null && VALID_FILTERS.has(filterRaw) ? filterRaw : 'actionable') as PrincipleFilter;
 
       const decidedResult = await getDecidedPrincipleIds(workspaceDir);
-      const result = await model.listPrinciples(filter, decidedResult.ids, decidedResult.pendingIds);
+      const deactivatedResult = await getDeactivatedPrincipleIds(workspaceDir);
+      const result = await model.listPrinciples(filter, {
+        decided: decidedResult.ids,
+        pendingApproval: decidedResult.pendingIds,
+        deactivated: deactivatedResult.ids,
+      });
+      // D3: revocation status must be observable when it cannot be confirmed
+      if (deactivatedResult.unavailableReason) {
+        result.revocationCheckUnavailable = deactivatedResult.unavailableReason;
+      }
       // Surface approval cross-check unavailability to the UI (ERR-002)
       if (decidedResult.unavailableReason) {
         result.approvalCrossCheckUnavailable = decidedResult.unavailableReason;

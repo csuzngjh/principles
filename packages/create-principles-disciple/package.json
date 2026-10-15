@@ -1,6 +1,6 @@
 {
   "name": "create-principles-disciple",
-  "version": "1.144.28",
+  "version": "1.145.1",
   "description": "Interactive CLI installer for Principles Disciple OpenClaw plugin",
   "type": "module",
   "bin": {
@@ -25,12 +25,14 @@
     "core",
     "host-runtime",
     "codex-adapter",
+    "workbuddy-adapter",
     "install-layout",
     "release-manager",
     "trust/root.json",
     "_release/product-identity.json",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "NOTICE"
   ],
   "scripts": {
     "build": "tsc",
@@ -54,9 +56,9 @@
     "interactive"
   ],
   "author": "csuzngjh",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "dependencies": {
-    "@principles/install-layout": "^0.2.7",
+    "@principles/install-layout": "^0.3.1",
     "@tufjs/models": "3.0.1",
     "@inquirer/prompts": "^8.7.2",
     "commander": "^14.0.3",
@@ -87,6 +89,6 @@
     "directory": "packages/create-principles-disciple"
   },
   "pd": {
-    "bundledPluginVersion": "2.0.2"
+    "bundledPluginVersion": "2.1.1"
   }
 }

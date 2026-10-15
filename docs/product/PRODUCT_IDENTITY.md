@@ -2,7 +2,7 @@
 
 > **Status**: Active canonical product boundary
 > **Read for**: new issues, product or architecture decisions, roadmap changes, user journeys, surfaced functionality, and MVP scope questions
-> **Scope authority**: [ADR-0014](docs/adr/0014-mvp-first-strategy-and-product-pivot.md)
+> **Scope authority**: [ADR-0014](../adr/0014-mvp-first-strategy-and-product-pivot.md)
 
 ## Definition
 
@@ -61,7 +61,7 @@ MVP success is an owner observing a better-aligned response in a comparable late
 
 ## Emotional Value
 
-PD features must deliver measurable emotional value to the Owner. Read [`docs/product/emotional-value.md`](docs/product/emotional-value.md) for the full framework.
+PD features must deliver measurable emotional value to the Owner. Read 私库 `docs/product/emotional-value.md`（`$PD_PRIVATE_DOCS_DIR`，按 AGENTS.md §26 从私库读取，不在公开仓库） for the full framework.
 
 Core promise: **把 Owner 面对 Agent 时的失控感、疲惫感、重复纠正感，转化为安心感、掌控感、沉淀感和清醒感。**
 

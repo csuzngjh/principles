@@ -1,0 +1,6 @@
+{
+  "name": "principles-disciple",
+  "version": "0.1.0",
+  "description": "Principles Disciple — Owner-governed behavior internalization for AI agents (WorkBuddy host adapter, ADR-0020 third host). Requires explicit setup and host.workbuddy feature enablement; inactive until then.",
+  "defaultEnabled": false
+}

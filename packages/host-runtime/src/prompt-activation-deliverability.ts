@@ -15,6 +15,7 @@ import {
 import { escapeXml } from '@principles/core/prompt-builder';
 import { loadPdConfigForPlugin } from './pd-config.js';
 import {
+  PROMPT_INJECTION_TARGET_HOSTS,
   PROMPT_INJECTION_UNIT,
   promptRouteForHost,
   resolvePromptInjectionRouteDecision,
@@ -217,8 +218,9 @@ export async function checkPromptArtifactDeliverability(input: {
 
   // Route unconfirmed: report per-host fit for every standard host instead of
   // guessing (R-A1) — the write gate refuses, the UI can show both facts.
-  const hosts: PromptInjectionTargetHost[] = ['openclaw', 'codex'];
-  const perHost = hosts.map((hostKind) => {
+  // Roster derives from the single SSoT list (review P3-1: a hand-typed
+  // two-host array dropped WorkBuddy from unconfirmed deliverability reports).
+  const perHost = PROMPT_INJECTION_TARGET_HOSTS.map((hostKind) => {
     const route = promptRouteForHost(hostKind, decision.flagEnabled);
     const { fits, costChars } = computePromptSingleItemFit({
       principle: resolved.principle,
@@ -230,7 +232,7 @@ export async function checkPromptArtifactDeliverability(input: {
   return {
     status: 'unconfirmed',
     reason: `route_unconfirmed: ${decision.unconfirmedReason ?? 'effective injection route cannot be confirmed'}`,
-    nextAction: decision.nextAction ?? 'pass an explicit target host (openclaw|codex)',
+    nextAction: decision.nextAction ?? 'pass an explicit target host (openclaw|codex|workbuddy)',
     perHost,
   };
 }

@@ -22,11 +22,16 @@
           <span class="host-desc">{{ isZh ? '使用 OpenAI Codex CLI / 桌面端 —— 两行命令从插件市场安装 PD 插件。' : 'Using OpenAI Codex CLI / desktop — two commands install the PD plugin from the marketplace.' }}</span>
           <span class="host-cta">{{ isZh ? '查看 Codex 安装步骤 →' : 'Codex install steps →' }}</span>
         </button>
+        <button type="button" class="host-entry" data-testid="install-host-workbuddy" @click="selectHost('workbuddy')">
+          <span class="host-name">WorkBuddy <span class="host-soon">{{ isZh ? '即将发布' : 'coming soon' }}</span></span>
+          <span class="host-desc">{{ isZh ? '使用 WorkBuddy Desktop —— 安装命令随 PD 下个发布版本可用；先看步骤与前置条件。' : 'Using WorkBuddy Desktop — the install command ships with the next PD release; preview the steps and prerequisites now.' }}</span>
+          <span class="host-cta">{{ isZh ? '预览 WorkBuddy 安装步骤 →' : 'Preview WorkBuddy install steps →' }}</span>
+        </button>
       </div>
       <p class="step-desc note-text">
         {{ isZh
-          ? '两个入口最终安装的是同一套 PD；区别只在于宿主环境的接入方式。不确定的话，看你的 Agent 是在哪个应用里运行的。'
-          : 'Both entries install the same PD; only the host integration differs. If unsure, check which application your Agent runs in.'
+          ? '三个入口最终安装的是同一套 PD；区别只在于宿主环境的接入方式。不确定的话，看你的 Agent 是在哪个应用里运行的。'
+          : 'All entries install the same PD; only the host integration differs. If unsure, check which application your Agent runs in.'
         }}
       </p>
     </section>
@@ -119,7 +124,7 @@
     </template>
 
     <!-- ── Codex path ─────────────────────────────────────────────────────── -->
-    <template v-else>
+    <template v-else-if="selectedHost === 'codex'">
       <div class="host-banner" data-testid="install-host-banner">
         <span>{{ isZh ? '当前路径：Codex 宿主（CLI / 桌面端）' : 'Current path: Codex host (CLI / desktop)' }}</span>
         <button type="button" class="host-switch" data-testid="install-host-switch" @click="selectHost(null)">
@@ -183,10 +188,173 @@
       <CompanionNote :is-zh="isZh" />
     </template>
 
+    <!-- ── WorkBuddy path ─────────────────────────────────────────────────── -->
+    <template v-else-if="selectedHost === 'workbuddy'">
+      <div class="host-banner" data-testid="install-host-banner">
+        <span>{{ isZh ? '当前路径：WorkBuddy Desktop 宿主' : 'Current path: WorkBuddy Desktop host' }}</span>
+        <button type="button" class="host-switch" data-testid="install-host-switch" @click="selectHost(null)">
+          {{ isZh ? '切换宿主' : 'Switch host' }}
+        </button>
+      </div>
+
+      <section class="release-gate" data-testid="install-workbuddy-release-gate">
+        <strong>{{ isZh ? '尚未发布：' : 'Not released yet:' }}</strong>
+        {{ isZh
+          ? 'WorkBuddy 宿主接入已完成实现并通过验收，但 npm 包尚未发布。下面的安装命令会随 PD 下个发布版本生效——在此之前运行会提示 --host workbuddy 不受支持。本页步骤与前置条件已按实现核对，可先行准备环境。'
+          : 'WorkBuddy host integration is implemented and accepted, but the npm package is not published yet. The install command below becomes usable with the next PD release — before that it reports --host workbuddy as unsupported. The steps and prerequisites below are verified against the implementation, so you can prepare your environment now.'
+        }}
+      </section>
+
+      <section class="guide-step">
+        <h2 class="step-title">{{ isZh ? '步骤 1 · 前置条件（WorkBuddy）' : 'Step 1 · Prerequisites (WorkBuddy)' }}</h2>
+        <ul class="prereq-list">
+          <li>
+            <strong>{{ isZh ? 'WorkBuddy Desktop（已在 5.8.1 实测）' : 'WorkBuddy Desktop (verified on 5.8.1)' }}</strong> —
+            {{ isZh ? '引擎 CLI 随 Desktop 一起安装，无需单独下载。' : 'the engine CLI ships inside Desktop — no separate download.' }}
+          </li>
+          <li>
+            <strong>Node.js ≥ 22</strong> —
+            <a href="https://nodejs.org/" target="_blank" rel="noopener">nodejs.org</a>
+          </li>
+        </ul>
+        <p class="step-desc">
+          {{ isZh
+            ? '引擎路径：安装器只自动探测 C 盘 Program Files（…\\WorkBuddy\\resources\\app.asar.unpacked\\cli\\dist\\codebuddy-lite-wb.mjs，实测版本 v2.161.0）。WorkBuddy 装在其它盘时，先设置环境变量 PD_WORKBUDDY_ENGINE 指向该引擎文件，再运行安装命令。'
+            : 'Engine path: the installer only auto-probes C-drive Program Files (…\\WorkBuddy\\resources\\app.asar.unpacked\\cli\\dist\\codebuddy-lite-wb.mjs, verified at v2.161.0). If WorkBuddy is installed on another drive, set the PD_WORKBUDDY_ENGINE environment variable to that engine file before running the install command.'
+          }}
+        </p>
+        <div class="command-row"><code>{{ engineEnvCommand }}</code><button type="button" :aria-label="copyLabel(isZh ? '引擎路径环境变量' : 'engine path env var')" aria-live="polite" data-umami-event="copy_engine_env_command" @click="copyCommand('engineEnv', engineEnvCommand)">{{ copyState('engineEnv') }}</button></div>
+      </section>
+
+      <section class="guide-step">
+        <h2 class="step-title">{{ isZh ? '步骤 2 · 安装并配置模型（WorkBuddy）' : 'Step 2 · Install and configure the model (WorkBuddy)' }}</h2>
+        <div class="command-row"><code>{{ workbuddyInstallCommand }}</code><button type="button" :aria-label="copyLabel(isZh ? 'WorkBuddy 安装命令' : 'WorkBuddy install command')" aria-live="polite" data-umami-event="copy_workbuddy_install_command" @click="copyCommand('wbInstall', workbuddyInstallCommand)">{{ copyState('wbInstall') }}</button></div>
+        <p class="step-desc">
+          {{ isZh
+            ? '参数含义：--provider 选择模型供应商（openai / anthropic / deepseek）；--api-key-env 是「存放 API 密钥的环境变量名」，PD 只记录名字、绝不保存密钥本体；--model 可省略（省略时按供应商使用默认模型）；--base-url 可选，指向 OpenAI 兼容自定义端点。'
+            : 'Flag meanings: --provider selects the model provider (openai / anthropic / deepseek); --api-key-env is the NAME of the environment variable holding your API key — PD stores the name only, never the key itself; --model may be omitted (the per-provider default applies); --base-url is optional and points to an OpenAI-compatible custom endpoint.'
+          }}
+        </p>
+        <div class="command-row"><code>{{ workbuddyInstallFullCommand }}</code><button type="button" :aria-label="copyLabel(isZh ? 'WorkBuddy 完整安装命令' : 'full WorkBuddy install command')" aria-live="polite" data-umami-event="copy_workbuddy_install_full_command" @click="copyCommand('wbInstallFull', workbuddyInstallFullCommand)">{{ copyState('wbInstallFull') }}</button></div>
+        <p class="step-desc">
+          {{ isZh
+            ? '也可以用环境变量代替这些参数：PD_PROVIDER / PD_API_KEY_ENV / PD_MODEL / PD_BASE_URL。安装器把模型配置写入治理工作区（见步骤 3），而不是项目目录。'
+            : 'Environment variables can replace these flags: PD_PROVIDER / PD_API_KEY_ENV / PD_MODEL / PD_BASE_URL. The installer writes the model config into the governance workspace (Step 3), not the project directory.'
+          }}
+        </p>
+      </section>
+
+      <section class="guide-step">
+        <h2 class="step-title">{{ isZh ? '步骤 3 · 显式启用治理（默认关闭）' : 'Step 3 · Enable governance explicitly (off by default)' }}</h2>
+        <p class="step-desc">
+          {{ isZh
+            ? '安装完成后 PD 治理默认关闭：安装只注册插件与治理工作区，不会自动改变 Agent 行为。启用入口是治理工作区的 config.yaml（~/.workbuddy/pd-workspace/.pd/config.yaml）：'
+            : 'After install, PD governance is OFF by default: installing only registers the plugin and the governance workspace — agent behavior is never changed automatically. The enable entry point is the governance workspace config.yaml (~/.workbuddy/pd-workspace/.pd/config.yaml):'
+          }}
+        </p>
+        <pre class="yaml-block"><code>features:
+  host.workbuddy:
+    enabled: true</code></pre>
+        <p class="step-desc">
+          {{ isZh
+            ? '改回 false 即关闭（可逆，关闭后钩子静默跳过、行为中性）。所有 WorkBuddy 项目共享这一份授权状态——治理工作区与项目目录是分开的，项目路径只用于工具路径判定。'
+            : 'Set it back to false to turn governance off again (reversible; while off, hooks skip silently and behavior stays neutral). All WorkBuddy projects share this one authorization state — the governance workspace is separate from project directories, which are only used for tool-path decisions.'
+          }}
+        </p>
+      </section>
+
+      <section class="guide-step">
+        <h2 class="step-title">{{ isZh ? '步骤 4 · 验证安装' : 'Step 4 · Verify the install' }}</h2>
+        <div class="command-row"><code>{{ workbuddyCanaryCommand }}</code><button type="button" :aria-label="copyLabel(isZh ? 'WorkBuddy 健康检查命令' : 'WorkBuddy health-check command')" aria-live="polite" data-umami-event="copy_canary_command" @click="copyCommand('wbCanary', workbuddyCanaryCommand)">{{ copyState('wbCanary') }}</button></div>
+        <p class="step-desc">
+          {{ isZh
+            ? '安装器成功输出里的就是这个命令（--workspace 指向治理工作区）。healthy 表示链路可用；degraded 表示存在非致命问题，按输出里的 summary / recommendedNextActions 处理。更完整的配置诊断：'
+            : 'This is exactly the command the installer prints on success (--workspace points at the governance workspace). healthy means the pipeline works; degraded means a non-fatal issue — follow summary / recommendedNextActions in the output. For a fuller config diagnosis:'
+          }}
+        </p>
+        <div class="command-row"><code>{{ workbuddyDoctorCommand }}</code><button type="button" :aria-label="copyLabel(isZh ? 'WorkBuddy 配置诊断命令' : 'WorkBuddy config doctor command')" aria-live="polite" data-umami-event="copy_doctor_command" @click="copyCommand('wbDoctor', workbuddyDoctorCommand)">{{ copyState('wbDoctor') }}</button></div>
+      </section>
+
+      <section class="guide-step">
+        <h2 class="step-title">{{ isZh ? '步骤 5 · Owner 审批 / 撤回 / 关闭' : 'Step 5 · Owner approve / withdraw / switch off' }}</h2>
+        <p class="step-desc">
+          {{ isZh
+            ? '原则提案在审核控制台审批；命令行等效操作：'
+            : 'Principle proposals are approved in the review console; the CLI equivalents:'
+          }}
+        </p>
+        <div class="command-row"><code>{{ workbuddyApproveCommand }}</code><button type="button" :aria-label="copyLabel(isZh ? '审批命令' : 'approve command')" aria-live="polite" data-umami-event="copy_approve_command" @click="copyCommand('wbApprove', workbuddyApproveCommand)">{{ copyState('wbApprove') }}</button></div>
+        <div class="command-row"><code>{{ workbuddyDeactivateCommand }}</code><button type="button" :aria-label="copyLabel(isZh ? '撤回命令' : 'deactivate command')" aria-live="polite" data-umami-event="copy_deactivate_command" @click="copyCommand('wbDeactivate', workbuddyDeactivateCommand)">{{ copyState('wbDeactivate') }}</button></div>
+        <p class="step-desc">
+          {{ isZh
+            ? '撤回后该原则立即停止注入。彻底关闭治理 = 把步骤 3 的 flag 改回 false（可逆，卸载另行保留治理数据）。治理后台任务的状态可用 pd workbuddy worker --status 查看。'
+            : 'A withdrawn principle stops being injected immediately. Switching governance fully off = setting the Step 3 flag back to false (reversible; uninstall keeps governance data). Check the governance background worker with pd workbuddy worker --status.'
+          }}
+        </p>
+      </section>
+
+      <section class="guide-step">
+        <h2 class="step-title">{{ isZh ? '常见失败与处理' : 'Common failures and fixes' }}</h2>
+        <div class="failure-table-wrap">
+          <table class="failure-table">
+          <thead>
+            <tr><th>{{ isZh ? '现象' : 'Symptom' }}</th><th>{{ isZh ? '含义' : 'Meaning' }}</th><th>{{ isZh ? '下一步' : 'Next action' }}</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>{{ isZh ? '模型未配置（needs_setup）' : 'Model not configured (needs_setup)' }}</td>
+              <td>{{ isZh ? '痛苦信号仍会被捕捉，但诊断/提案不会运行' : 'Pain signals are still captured, but diagnosis/proposals will not run' }}</td>
+              <td>{{ isZh ? '重跑安装命令补 --provider/--api-key-env，或在治理工作区 config.yaml 补 runtimeProfiles' : 'Re-run the install command with --provider/--api-key-env, or add runtimeProfiles in the governance config.yaml' }}</td>
+            </tr>
+            <tr>
+              <td>{{ isZh ? '凭据环境变量缺失' : 'Credential env var missing' }}</td>
+              <td>{{ isZh ? 'API key 存放的环境变量（如 OPENAI_API_KEY）在运行环境里没有值' : 'The env var holding the API key (e.g. OPENAI_API_KEY) has no value in the runtime environment' }}</td>
+              <td>{{ isZh ? '在宿主进程可见的环境里设置该变量；PD 从不保存密钥本体' : 'Set the variable in an environment the host process can see; PD never stores the key itself' }}</td>
+            </tr>
+            <tr>
+              <td>{{ isZh ? '供应商限额 / 不可用' : 'Provider quota / unavailability' }}</td>
+              <td>{{ isZh ? '诊断任务按 rate_limit → runtime_unavailable 分类失败，内化队列出现 blocked' : 'Diagnosis tasks fail classified rate_limit → runtime_unavailable; the internalization queue shows blocked entries' }}</td>
+              <td>{{ isZh ? '恢复额度后 pd runtime internalization retry --task <id> --confirm，并用 pd workbuddy worker --status 观察队列' : 'After quota recovers: pd runtime internalization retry --task <id> --confirm, and watch the queue with pd workbuddy worker --status' }}</td>
+            </tr>
+            <tr>
+              <td>{{ isZh ? '引擎路径未发现' : 'Engine path not found' }}</td>
+              <td>{{ isZh ? '安装器只探 C 盘 Program Files；其它盘的 WorkBuddy 引擎不会被自动发现' : 'The installer only probes C-drive Program Files; engines on other drives are not auto-discovered' }}</td>
+              <td>{{ isZh ? '设置 PD_WORKBUDDY_ENGINE 指向 codebuddy-lite-wb.mjs 后重跑；若提示未安装 WorkBuddy Desktop，先安装并启动一次' : 'Set PD_WORKBUDDY_ENGINE to codebuddy-lite-wb.mjs and re-run; if it reports WorkBuddy Desktop missing, install it and start it once' }}</td>
+            </tr>
+          </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="guide-step">
+        <h2 class="step-title">{{ isZh ? '支持范围（按已验证边界如实标注）' : 'Supported scope (stated by verified boundary)' }}</h2>
+        <ul class="scope-list">
+          <li>
+            <strong>{{ isZh ? '已验证：' : 'Verified:' }}</strong>
+            {{ isZh ? '原则注入（每轮 UserPromptSubmit 新鲜注入）、工具治理阻断（PreToolUse deny，超时 fail-closed）、真实失败证据入链、Owner 撤回（撤回即停注入）。' : 'principle injection (fresh every UserPromptSubmit round), tool-governance blocking (PreToolUse deny, fail-closed on timeout), real failure evidence into the evidence chain, and Owner withdrawal (withdrawal stops injection).' }}
+          </li>
+          <li>
+            <strong>{{ isZh ? '受限：' : 'Restricted:' }}</strong>
+            {{ isZh ? '「学习链」已按合成高分信号 + 真实治理 LLM + 真实引擎注入/撤回的安装验收打通（principle/rule 类信号可正常入队）；但「真实工具失败自动学习」不属于当前已验证范围。' : 'the learning chain has passed acceptance using a synthetic high-score signal + real governance LLM + real engine injection/withdrawal (principle/rule-class signals queue normally); "automatic learning from real tool failures" is NOT part of the verified scope.' }}
+          </li>
+          <li>
+            <strong>{{ isZh ? '不会自动准入：' : 'No automatic admission:' }}</strong>
+            {{ isZh ? '真实工具失败只作为证据记录——thrown 类失败无退出码，按政策地板计 20 分，低于 70 分准入线，不会自动进入诊断队列。这是一个 Owner 决策点（调整评分或启用 skill channel），且会影响全部宿主。' : 'real tool failures are recorded as evidence only — thrown failures carry no exit code and score 20 under the policy floor, below the 70-point admission line, so they never enter the diagnosis queue automatically. This is an Owner decision point (adjust scoring or enable the skill channel), and it would affect all hosts.' }}
+          </li>
+          <li>
+            <strong>{{ isZh ? '未覆盖：' : 'Not covered:' }}</strong>
+            {{ isZh ? 'rule/shadow 通道的工具执行级观测、resume/compact 后自动补注、modifiedInput 类反馈、以及 npm 包消费者入口（未发布）。我们不做「所有错误自动学习」或「行为改善已证明」的宣称；三个宿主的功能也不完全相同。' : 'tool-execution-level observation for the rule/shadow channel, automatic re-injection after resume/compact, modifiedInput-class feedback, and the npm-package consumer entry (unreleased). We do not claim that all errors are learned automatically or that behavior improvement is proven, and the three hosts are not feature-identical.' }}
+          </li>
+        </ul>
+      </section>
+
+      <CompanionNote :is-zh="isZh" />
+    </template>
+
     <div class="host-disclaimer">
       {{ isZh
-        ? 'OpenClaw 宿主：npx 一键安装（Node ≥ 22）。Codex（CLI/桌面端）：插件市场两行命令安装（Codex CLI ≥ 0.147）。Claude Code 支持规划中。'
-        : 'OpenClaw host: one-command npx install (Node ≥ 22). Codex (CLI/desktop): two-command plugin install (Codex CLI ≥ 0.147). Claude Code is planned.'
+        ? 'OpenClaw 宿主：npx 一键安装（Node ≥ 22）。Codex（CLI/桌面端）：插件市场两行命令安装（Codex CLI ≥ 0.147）。WorkBuddy Desktop：随 PD 下个发布版本可用（本页已可预览步骤）。Claude Code 支持规划中。'
+        : 'OpenClaw host: one-command npx install (Node ≥ 22). Codex (CLI/desktop): two-command plugin install (Codex CLI ≥ 0.147). WorkBuddy Desktop: available with the next PD release (steps previewable on this page). Claude Code is planned.'
       }}
     </div>
   </div>
@@ -198,7 +366,7 @@ import { useIsZh } from '../composables/useIsZh'
 import CompanionNote from './CompanionNote.vue'
 const isZh = useIsZh()
 
-type Host = 'openclaw' | 'codex' | null
+type Host = 'openclaw' | 'codex' | 'workbuddy' | null
 
 // SPEC-PD-UIUX-001 R7: the chosen host lives in the URL query (?host=), not in
 // persisted state — refresh, back and forward all reflect the URL, and nothing
@@ -209,7 +377,7 @@ function readHostFromUrl() {
   if (typeof window === 'undefined') return
   const params = new URLSearchParams(window.location.search)
   const value = params.get('host')
-  selectedHost.value = value === 'openclaw' || value === 'codex' ? value : null
+  selectedHost.value = value === 'openclaw' || value === 'codex' || value === 'workbuddy' ? value : null
 }
 
 function selectHost(host: Host) {
@@ -246,6 +414,31 @@ const codexHealthCommand = 'pd health --host codex'
 // Review round (P2): authoritative per the plugin itself — pd-setup.cjs fails
 // with pd_cli_unavailable and instructs exactly this install command.
 const pdCliCommand = 'npm install -g @principles/pd-cli'
+
+// ── WorkBuddy path ──
+// Release gate: the npm package carrying --host workbuddy is NOT published
+// yet — every WorkBuddy command on this page is labeled as coming with the
+// next release; the page never implies it can be run today.
+// All flags verified against the installer CLI definition:
+// --host workbuddy / --provider (openai|anthropic|deepseek) / --api-key-env /
+// --model (optional → per-provider default) / --base-url (OpenAI-compatible
+// endpoint); env forms PD_PROVIDER / PD_API_KEY_ENV / PD_MODEL / PD_BASE_URL.
+const workbuddyInstallCommand = 'npx create-principles-disciple --host workbuddy --provider openai --api-key-env OPENAI_API_KEY'
+const workbuddyInstallFullCommand = computed(() => isZh.value
+  ? 'npx create-principles-disciple --host workbuddy --provider openai --api-key-env OPENAI_API_KEY --model <模型ID> --base-url <OpenAI兼容端点>'
+  : 'npx create-principles-disciple --host workbuddy --provider openai --api-key-env OPENAI_API_KEY --model <model-id> --base-url <openai-compatible-endpoint>')
+const engineEnvCommand = computed(() => isZh.value
+  ? 'setx PD_WORKBUDDY_ENGINE "<WorkBuddy 安装目录>\\resources\\app.asar.unpacked\\cli\\dist\\codebuddy-lite-wb.mjs"'
+  : 'setx PD_WORKBUDDY_ENGINE "<WorkBuddy-install-dir>\\resources\\app.asar.unpacked\\cli\\dist\\codebuddy-lite-wb.mjs"')
+// The governance workspace is shared across all WorkBuddy projects and is the
+// directory the installer's own success output targets with canary/doctor.
+const workbuddyWorkspaceArg = computed(() => isZh.value
+  ? '"C:\\Users\\<你>\\.workbuddy\\pd-workspace"'
+  : '"C:\\Users\\<you>\\.workbuddy\\pd-workspace"')
+const workbuddyCanaryCommand = computed(() => `pd runtime canary --workspace ${workbuddyWorkspaceArg.value} --json`)
+const workbuddyDoctorCommand = computed(() => `pd config doctor --workspace ${workbuddyWorkspaceArg.value}`)
+const workbuddyApproveCommand = computed(() => `pd activation approve --approval-id <id> --workspace ${workbuddyWorkspaceArg.value}`)
+const workbuddyDeactivateCommand = computed(() => `pd activation deactivate --activation-id <id> --workspace ${workbuddyWorkspaceArg.value}`)
 
 const copiedKey = ref<string | null>(null)
 let copyTimer: number | null = null
@@ -485,6 +678,79 @@ function copyLabel(commandName: string) {
   border-radius: 8px;
   color: var(--text-secondary);
   font-size: 0.9rem;
+}
+
+/* ── WorkBuddy path ── */
+.host-soon {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 8px;
+  border: 1px solid var(--accent-border);
+  border-radius: 99px;
+  background: var(--accent-dim);
+  font-size: 0.68rem;
+  font-weight: 600;
+  vertical-align: middle;
+  color: var(--text-secondary);
+}
+.release-gate {
+  margin: 0 0 1.75rem;
+  padding: 14px 18px;
+  border: 1px solid var(--accent-border);
+  border-left: 4px solid var(--accent);
+  border-radius: 10px;
+  background: var(--accent-dim);
+  color: var(--text-secondary);
+  font-size: 0.92rem;
+  line-height: 1.7;
+}
+.release-gate strong { color: var(--text-main); }
+.yaml-block {
+  margin: 1rem 0;
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: #111827;
+  overflow-x: auto;
+}
+.yaml-block code {
+  font-family: var(--vp-font-family-mono);
+  font-size: 0.9rem;
+  color: #f8fafc;
+  white-space: pre;
+}
+.failure-table {
+  width: 100%;
+  margin: 1rem 0;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+}
+/* Narrow viewports: the three-column table cannot shrink below its content,
+ * so let the table scroll inside its own container instead of overflowing
+ * the page (review F2: 375px viewport clipped the third column). */
+.failure-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.failure-table th,
+.failure-table td {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+  line-height: 1.6;
+}
+.failure-table th { color: var(--text-main); background: var(--accent-dim); }
+.scope-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0;
+}
+.scope-list li {
+  padding: 0.5rem 0;
+  color: var(--text-secondary);
+  line-height: 1.7;
 }
 
 @media (max-width: 520px) {

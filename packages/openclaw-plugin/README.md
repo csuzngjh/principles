@@ -299,4 +299,4 @@ for the canonical product definition.
 
 ## License
 
-MIT License - [LICENSE](https://github.com/csuzngjh/principles/blob/main/LICENSE)
+Apache License 2.0 - [LICENSE](https://github.com/csuzngjh/principles/blob/main/LICENSE)

@@ -3,7 +3,7 @@ import * as path from 'node:path';
 export const INSTALL_LAYOUT_VERSION = 1 as const;
 export const INSTALL_LAYOUT_MODES = ['canonical', 'legacy'] as const;
 export type InstallLayoutMode = (typeof INSTALL_LAYOUT_MODES)[number];
-export const INSTALL_HOSTS = ['codex', 'openclaw'] as const;
+export const INSTALL_HOSTS = ['codex', 'openclaw', 'workbuddy'] as const;
 export type InstallHost = (typeof INSTALL_HOSTS)[number];
 
 export interface InstallManifest {
@@ -48,6 +48,13 @@ export interface InstallLayoutPaths {
    * links like any other runtime component.
    */
   codexAdapterDir: string;
+  /**
+   * WorkBuddy host adapter component (payload dir workbuddy-adapter/, npm
+   * name @principles/workbuddy-adapter; SPEC workbuddy-host-adapter §4.1).
+   * The WorkBuddy plugin wrapper resolves this dir to load the adapter entry
+   * the same way the Codex hook resolves the canonical runtime.
+   */
+  workbuddyAdapterDir: string;
 }
 
 export interface LayoutResolution {
@@ -109,7 +116,7 @@ export function parseInstallManifest(value: unknown): { manifest?: InstallManife
     return { error: 'install_manifest_malformed: mode must be canonical or legacy' };
   }
   if (!Array.isArray(value.hosts) || value.hosts.length === 0 || !value.hosts.every(isHost)) {
-    return { error: 'install_manifest_malformed: hosts must contain codex and/or openclaw' };
+    return { error: 'install_manifest_malformed: hosts must contain codex, openclaw and/or workbuddy' };
   }
   const hosts = [...new Set(value.hosts)];
   const workspaces = parseWorkspaceList(value.workspaces);
@@ -139,7 +146,21 @@ export function getInstallLayoutPaths(homeDir: string): InstallLayoutPaths {
     openClawExtensionDir: path.join(openClawDir, 'extensions', 'principles-disciple'),
     releaseManagerDir: path.join(runtimeDir, 'release-manager'),
     codexAdapterDir: path.join(runtimeDir, 'codex-adapter'),
+    workbuddyAdapterDir: path.join(runtimeDir, 'workbuddy-adapter'),
   };
+}
+
+/**
+ * WorkBuddy governance workspace (SPEC workbuddy-host-adapter §4.1 OD-07,
+ * frozen by Phase 0 probe P06 2026-10-12): an explicit user-level directory
+ * under the WorkBuddy config root, shared across projects, never auto-reused
+ * from Codex/OpenClaw state. projectDir stays the host cwd; this dir owns
+ * governance state (state.db / trajectory). The dir is CREATED only by the
+ * explicit setup flow — its absence means "not initialized", never a silent
+ * fallback to another host's database.
+ */
+export function getWorkbuddyWorkspaceDir(homeDir: string): string {
+  return path.join(path.resolve(homeDir), '.workbuddy', 'pd-workspace');
 }
 
 export function resolveInstallLayout(options: ResolveInstallLayoutOptions): LayoutResolution {

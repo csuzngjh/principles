@@ -28,7 +28,29 @@ import {
   type MvpChannel,
   type ComponentStatus,
   type VerificationResult,
+  isValidHttpBaseUrl,
 } from '../src/mvp-config.js';
+
+describe('round-5 S3: isValidHttpBaseUrl — real URL parsing, not a prefix regex', () => {
+  it('accepts well-formed http(s) endpoints with a hostname', () => {
+    expect(isValidHttpBaseUrl('https://llm.example.com/v1')).toBe(true);
+    expect(isValidHttpBaseUrl('http://127.0.0.1:8080/v1')).toBe(true);
+    expect(isValidHttpBaseUrl('https://developer.amd.com.cn/radeon/api/v1')).toBe(true);
+  });
+
+  it('rejects a protocol prefix with no hostname (`https://` — the round-5 repro)', () => {
+    expect(isValidHttpBaseUrl('https://')).toBe(false);
+    expect(isValidHttpBaseUrl('http://')).toBe(false);
+    expect(isValidHttpBaseUrl('https://?x=1')).toBe(false);
+  });
+
+  it('rejects malformed and non-http(s) input; blank is handled by callers (explicit blank fails loud)', () => {
+    expect(isValidHttpBaseUrl('not-a-url')).toBe(false);
+    expect(isValidHttpBaseUrl('ftp://files.example.com')).toBe(false);
+    expect(isValidHttpBaseUrl('javascript:alert(1)')).toBe(false);
+    expect(isValidHttpBaseUrl('')).toBe(false);
+  });
+});
 
 describe('MVP channel contract', () => {
   it('defines exactly three MVP channels', () => {

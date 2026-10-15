@@ -1,6 +1,6 @@
 {
   "name": "@principles/host-runtime",
-  "version": "0.8.3",
+  "version": "0.9.1",
   "description": "Shared host-neutral orchestration for Principles Disciple MVP-Core hook paths.",
   "type": "module",
   "main": "./dist/index.js",
@@ -13,7 +13,9 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE",
+    "NOTICE"
   ],
   "scripts": {
     "build": "tsc",
@@ -21,8 +23,8 @@
     "lint": "eslint \"src/**/*.ts\""
   },
   "dependencies": {
-    "@principles/core": "^1.291.6",
-    "@principles/install-layout": "^0.2.7",
+    "@principles/core": "^1.292.1",
+    "@principles/install-layout": "^0.3.1",
     "better-sqlite3": "^13.0.3",
     "js-yaml": "^5.4.3"
   },
@@ -38,5 +40,5 @@
     "type": "git",
     "url": "git+https://github.com/csuzngjh/principles.git"
   },
-  "license": "MIT"
+  "license": "Apache-2.0"
 }

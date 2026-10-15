@@ -1,6 +1,6 @@
 name: Finalize npm release (closing steps)
 description: >-
-  Closing steps for the release train, run AFTER all seven npm legs have
+  Closing steps for the release train, run AFTER all eight npm legs have
   uploaded or verified-skip (PRI-886 isolation): the vX.Y.Z plugin tag,
   the GitHub Release, and the ClawHub marketplace sync. Every step is an
   idempotent reconciliation (SPEC §24.2) — a re-dispatched train skips
