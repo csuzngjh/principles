@@ -25,12 +25,14 @@
     "directory": "packages/openclaw-plugin"
   },
   "author": "csuzngjh",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "files": [
     "dist",
     "templates",
     "assets",
-    "openclaw.plugin.json"
+    "openclaw.plugin.json",
+    "LICENSE",
+    "NOTICE"
   ],
   "publishConfig": {
     "access": "public"

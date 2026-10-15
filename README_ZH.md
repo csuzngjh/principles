@@ -254,6 +254,10 @@ Principles Disciple 试图把这个闭环变成一个本地、可观察、智能
 
 ---
 
+## 开源协议
+
+PD 当前采用 [Apache License 2.0](LICENSE)。历史 MIT 授权继续有效，详见 [许可证迁移说明](docs/legal/LICENSE_TRANSITION.md)。
+
 ## 🙏 致谢与启发 (Credits & Inspiration)
 
 > *"Pain + Reflection = Progress" (痛苦 + 反思 = 进步)*

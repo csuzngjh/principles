@@ -4,7 +4,7 @@
     <div class="footer-inner">
       <div class="footer-brand">
         <a class="brand-name" :href="isZh ? '/zh/' : '/'">Principles Disciple</a>
-        <span class="brand-meta">{{ isZh ? 'MIT 许可证 · Copyright © 2026 Principles Disciple Contributors' : 'MIT License · Copyright © 2026 Principles Disciple Contributors' }}</span>
+        <span class="brand-meta">{{ isZh ? 'Apache 2.0 许可证 · Copyright © 2026 Principles Disciple Contributors' : 'Apache 2.0 License · Copyright © 2026 Principles Disciple Contributors' }}</span>
       </div>
       <nav class="footer-nav" :aria-label="isZh ? '页脚导航' : 'Footer'">
         <a :href="isZh ? '/zh/docs/getting-started' : '/docs/getting-started'">{{ isZh ? '文档' : 'Docs' }}</a>
