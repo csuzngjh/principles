@@ -8,9 +8,9 @@ function record(value) {
 const nonblank = (value) => typeof value === 'string' && value.trim().length > 0;
 
 export function expectedChainFromResults(results) {
-  if (!Array.isArray(results)) return null;
+  if (!Array.isArray(results)) throw new Error('learning receipt must be an array');
   const owner = results.find((row) => record(row) && row.step === 'owner-approval' && row.verdict === 'PASS');
-  if (!owner) return null;
+  if (!owner) throw new Error('learning receipt has no passing owner-approval; refusing historical fallback');
   if (!nonblank(owner.detail)) throw new Error('owner-approval PASS has no detail to establish expected chain');
   const artifactId = /(?:^|\s)artifact=([^\s)]+)/.exec(owner.detail)?.[1];
   const activationId = /(?:^|\s)activationId=([^\s]+)/.exec(owner.detail)?.[1];
@@ -53,4 +53,3 @@ export function evaluateConsoleOwnerChain(approvalRows, activationRows, route, e
   return { ok: errors.length === 0, errors, matches, approvedPrompts: approvedPrompts.length,
     promptActivations: promptActivations.length, routeStatus: record(route) ? route.status : undefined };
 }
-

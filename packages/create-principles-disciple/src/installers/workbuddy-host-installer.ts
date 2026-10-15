@@ -176,16 +176,37 @@ export function resolveWorkbuddyPaths(homeDir: string): WorkbuddyPaths {
 }
 
 /**
+ * Enumerate Windows FIXED drives only. Letters can represent network or
+ * removable volumes; never treat A-Z as equivalent to fixed media.
+ * A failed/unsupported probe falls back to explicit ProgramFiles/SystemDrive
+ * paths, not a guess across mapped network drives.
+ */
+function workbuddyFixedDriveLetters(): string[] {
+  if (process.platform !== 'win32') return [];
+  const probe = spawnSync('powershell.exe', [
+    '-NoProfile', '-NonInteractive', '-Command',
+    '[System.IO.DriveInfo]::GetDrives() | Where-Object { $_.DriveType -eq [System.IO.DriveType]::Fixed } | ForEach-Object { $_.Name }',
+  ], { encoding: 'utf8', windowsHide: true, timeout: 5_000, maxBuffer: 8 * 1024 });
+  if (probe.error || probe.status !== 0 || typeof probe.stdout !== 'string') return [];
+  return probe.stdout.split(/\r?\n/).map((line) => line.trim())
+    .filter((root) => /^[A-Za-z]:\\$/.test(root))
+    .map((root) => root.slice(0, 2).toUpperCase());
+}
+
+/**
  * Candidate Program Files roots probed for the WorkBuddy engine, in order:
  * the env-declared Program Files (both variants), the SystemDrive root, then —
- * Windows only — the same two standard directories on every drive letter.
+ * Windows only — the same directories on each discovered fixed drive.
  *
  * G1 (2026-10-15): a Desktop install outside the SystemDrive's Program Files
  * (e.g. D:\Program Files\WorkBuddy, the machine this gap was proven on)
  * previously resolved to "engine not found", so install skipped its engine
  * verification and detect() reported an absent engine on a real installation.
  */
-export function workbuddyEngineCandidateRoots(env: Record<string, string | undefined> = process.env): string[] {
+export function workbuddyEngineCandidateRoots(
+  env: Record<string, string | undefined> = process.env,
+  fixedDriveLetters?: readonly string[],
+): string[] {
   const roots: string[] = [];
   const push = (value: unknown): void => {
     if (typeof value === 'string' && value.length > 0 && !roots.includes(value)) roots.push(value);
@@ -195,11 +216,11 @@ export function workbuddyEngineCandidateRoots(env: Record<string, string | undef
   const systemDrive = typeof env.SystemDrive === 'string' ? env.SystemDrive : '';
   if (systemDrive.length > 0) push(path.join(systemDrive, 'Program Files'));
   if (process.platform === 'win32') {
-    for (let code = 65; code <= 90; code++) {
-      const drive = `${String.fromCharCode(code)}:`;
+    for (const drive of fixedDriveLetters ?? workbuddyFixedDriveLetters()) {
+      if (!/^[A-Za-z]:$/.test(drive)) continue;
       if (systemDrive.length > 0 && drive.toLowerCase() === systemDrive.toLowerCase()) continue;
-      push(`${drive}\\Program Files`);
-      push(`${drive}\\Program Files (x86)`);
+      push(path.win32.join(drive + path.win32.sep, 'Program Files'));
+      push(path.win32.join(drive + path.win32.sep, 'Program Files (x86)'));
     }
   }
   return roots;

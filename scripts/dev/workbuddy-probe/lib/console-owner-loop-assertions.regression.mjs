@@ -1,5 +1,7 @@
 ﻿import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import { getJson } from './console-owner-loop-http.mjs';
 import { evaluateConsoleOwnerChain, expectedChainFromResults } from './console-owner-loop-assertions.mjs';
 
 const approved = { approvalId: 'apr-1', status: 'approved', channel: 'prompt',
@@ -52,7 +54,29 @@ test('missing/empty identity fields never qualify', () => {
 test('learning receipt binds to the exact owner-approved artifact and activation', () => {
   const receipt=[{step:'owner-approval', verdict:'PASS', detail:'pd activation approve via INSTALLED pd-cli (prompt channel, artifact=art-1) exit=0 ok=true activationId=act-1 stderr='}];
   assert.deepEqual(expectedChainFromResults(receipt), {artifactId:'art-1',activationId:'act-1'});
-  assert.equal(expectedChainFromResults([]), null);
+  assert.throws(() => expectedChainFromResults([]), /no passing owner-approval/);
+  assert.throws(() => expectedChainFromResults([{step:'owner-approval',verdict:'FAIL',detail:'failed'}]), /no passing owner-approval/);
+  assert.throws(() => expectedChainFromResults([{step:'owner-approval',verdict:'BLOCKED',detail:'no provider'}]), /no passing owner-approval/);
+  assert.throws(() => expectedChainFromResults(null), /must be an array/);
   assert.throws(()=>expectedChainFromResults([{step:'owner-approval',verdict:'PASS',detail:'no identity'}]), /lacks artifact/);
 });
 
+
+test('HTTP timeouts abort stalled headers AND a response that never ends', async () => {
+  const server = createServer((req, res) => {
+    if (req.url === '/body') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.write('{\"ok\":'); // keep body open forever
+    } // /headers deliberately sends nothing at all
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const addr = server.address();
+  assert.ok(addr && typeof addr === 'object');
+  try {
+    await assert.rejects(getJson('http://127.0.0.1:' + addr.port + '/headers', 100), /timeout|abort/i);
+    await assert.rejects(getJson('http://127.0.0.1:' + addr.port + '/body', 100), /timeout|abort/i);
+  } finally {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

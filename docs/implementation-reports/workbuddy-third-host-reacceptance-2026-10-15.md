@@ -158,3 +158,12 @@ E2E-01（插件发现）由 installer-run + installed-injection 的真实引擎�
 - 基于 `e2e-installed-learn-1792047098456` 的真实 Console API 验证：**5/5 PASS**；`--artifact-id definitely-not-this-lab` 故意篡改预期身份：**3 PASS / 2 FAIL，exit 1**。两个场景均在隔离治理 workspace 内只读运行，未产生新的模型请求。
 - `governance/experience` PASS 表示服务返回成功且有解析后的 schemaVersion，**不表示其业务 readiness 一定健康**；该 lab 的 `primaryAttention=degraded` 应如实保留。
 - **证据基线声明**：原先 17/17 真实学习链 `e2e-evaluation.json` 明确记载 `sourceCommit=3846fea63`；它支持已运行链路，但不能冒充 #2038 新提交的完整学习链重跑。收口仅复验 Console E2E、反例、相关工程门禁。Node 20、GUI /hooks、resume/compact、真实自然 Pain 自动触发完整学习场景仍维持原有未覆盖状态。
+## 12. PR #2038 CodeRabbit review closeout (2026-10-15)
+
+CodeRabbit 的三条 inline 意见经源码复核均属实，最小改动修复如下。
+
+- **驱动器类型 (review #4280795193)**：旧版 A:–Z: 枚举会包含网络/可移动卷。新逻辑通过 Windows 内置 PowerShell + .NET `System.IO.DriveInfo` 读取 `DriveType.Fixed`，超时 5 秒；探测不可用时仅保留显式 ProgramFiles/SystemDrive 候选，不扫描未知盘符。显式 `PD_WORKBUDDY_ENGINE` / `WB_ENGINE` 优先级保持。引擎路径测试扩至 5 项，本机 D 盘真实安装探测 PASS。
+- **HTTP 超时 (review #4280795202)**：所有 Console HTTP 请求设置 5 秒 AbortSignal 超时，响应头已返回但正文永不结束同样被中止。API 失败记为 FAIL 并在 finally 清理子进程；两种挂起 HTTP 响应回归通过。
+- **失败收据兜底 (review #4280795208)**：有 `e2e-results.json` 且无成功 `owner-approval` 时 fail-loud exit 1，不读取无关历史匹配作为本轮证据；只有收据文件不存在才允许历史 lab 进行同 artifact 匹配。明确拒绝 CLI 预期身份与收据身份冲突。
+
+真实 Console 验证（隔离学习 lab）：正确收据 5/5 PASS；不匹配 artifact exit 1；隔离目录中故意构造的 `owner-approval: FAIL` 收据（同一真实治理数据库）exit 1。未修改真实 WorkBuddy 设置，未重复发起 LLM 学习任务；原 17/17 真实学习链仍属其历史 sourceCommit。

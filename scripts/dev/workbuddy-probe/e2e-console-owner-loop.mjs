@@ -26,6 +26,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { evaluateConsoleOwnerChain, expectedChainFromResults } from './lib/console-owner-loop-assertions.mjs';
+import { getJson } from './lib/console-owner-loop-http.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const SERVER = path.join(REPO, 'packages', 'pd-console', 'dist', 'server.js');
@@ -75,14 +76,6 @@ function dataArray(payload) {
   return null;
 }
 
-async function getJson(url) {
-  const res = await fetch(url);
-  const body = await res.text();
-  let parsed;
-  try { parsed = JSON.parse(body); } catch { parsed = undefined; }
-  return { status: res.status, body, parsed };
-}
-
 async function main() {
   const args = parseArgs(process.argv);
   const gov = args.gov ?? newestInstalledLearnLabGov();
@@ -99,6 +92,10 @@ async function main() {
   // A scenario receipt pins this query to the SAME learning run, not just any old rows.
   const receipt = path.resolve(gov, '..', '..', '..', 'e2e-results.json');
   const fromLab = fs.existsSync(receipt) ? expectedChainFromResults(JSON.parse(fs.readFileSync(receipt, 'utf8'))) : null;
+  if (fromLab && ((args.artifactId !== undefined && args.artifactId !== fromLab.artifactId) ||
+      (args.activationId !== undefined && args.activationId !== fromLab.activationId))) {
+    throw new Error('CLI chain identity conflicts with the learning receipt; refusing unrelated historical rows');
+  }
   const expected = { ...(fromLab ?? {}),
     ...(args.artifactId !== undefined ? { artifactId: args.artifactId } : {}),
     ...(args.activationId !== undefined ? { activationId: args.activationId } : {}) };
@@ -160,6 +157,9 @@ async function main() {
     record('governance-experience', expOk ? 'PASS' : 'FAIL',
       expOk ? `status=200 keys=${Object.keys(experience.parsed?.data ?? experience.parsed ?? {}).slice(0, 8).join(',')}` : `status=${experience.status} body=${experience.body.slice(0, 160)}`);
     if (!expOk) failed = true;
+  } catch (error) {
+    record('console-api', 'FAIL', error instanceof Error ? error.message : String(error));
+    failed = true;
   } finally {
     child.kill();
   }
