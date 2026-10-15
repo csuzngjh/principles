@@ -43,7 +43,7 @@
  *
  * Usage:
  *   node deps-preflight.mjs --workspace-root <dir> \
- *        --order principles-core,install-layout,host-runtime,codex-adapter,openclaw-plugin,pd-cli,create-principles-disciple \
+ *        --order principles-core,install-layout,host-runtime,codex-adapter,workbuddy-adapter,openclaw-plugin,pd-cli,create-principles-disciple \
  *        [--package <dir>] [--static-only] [--json]
  */
 import fs from 'node:fs';
