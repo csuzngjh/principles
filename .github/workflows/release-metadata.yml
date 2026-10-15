@@ -450,6 +450,7 @@ jobs:
           npm run build:production --workspace=principles-disciple
           npm run build:types --workspace=principles-disciple
           npm run build --workspace=@principles/codex-adapter
+          npm run build --workspace=@principles/workbuddy-adapter
           npm run build --workspace=@principles/pd-cli
           (cd packages/create-principles-disciple && npm run build)
           npm run build --workspace=@principles/pd-console
