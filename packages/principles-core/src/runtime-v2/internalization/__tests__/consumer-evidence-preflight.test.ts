@@ -139,7 +139,7 @@ async function seedArtificerTask(workspaceDir: string, selection?: OwnerEvidence
 
 interface Fixture {
   workspaceDir: string;
-  run: (overrides?: { behaviorEvidencePortError?: unknown }) => ReturnType<typeof preflightArtificerOwnerEvidence>;
+  run: (overrides?: { behaviorEvidencePortError?: Error }) => ReturnType<typeof preflightArtificerOwnerEvidence>;
 }
 
 async function makeFixture(selection?: OwnerEvidenceSelection): Promise<Fixture> {
