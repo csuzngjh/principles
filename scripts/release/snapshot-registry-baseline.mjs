@@ -42,6 +42,7 @@ const PUBLISHABLE_DIRS = [
   'install-layout',
   'host-runtime',
   'codex-adapter',
+  'workbuddy-adapter',
   'pd-cli',
   'openclaw-plugin',
   'create-principles-disciple',

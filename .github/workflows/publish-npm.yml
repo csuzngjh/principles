@@ -225,9 +225,13 @@ jobs:
     env:
       # THE publish order (dependency topological): the single source lives
       # here and is passed explicitly to every control script that needs it.
-      TRAIN_ORDER: principles-core,install-layout,host-runtime,codex-adapter,openclaw-plugin,pd-cli,create-principles-disciple
+      # A new publishable package MUST be added here, get its own leg below,
+      # and get a build branch in .github/actions/publish-npm-package/action.yml
+      # (PRI-979: @principles/workbuddy-adapter shipped with none of the three,
+      # and deps-preflight correctly refused to publish pd-cli on top of it).
+      TRAIN_ORDER: principles-core,install-layout,host-runtime,codex-adapter,workbuddy-adapter,openclaw-plugin,pd-cli,create-principles-disciple
     steps:
-      # ONE job, SEVEN sequential npm legs: the step order below IS the
+      # ONE job, EIGHT sequential npm legs: the step order below IS the
       # dependency order. A failed step stops the job, so an upstream
       # publish failure blocks every downstream package. Every step
       # publishes its package's EXACT COMMITTED VERSION or skips it
@@ -324,7 +328,7 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Train product identity (at cohort SHA): $VERSION"
 
-      - name: Publish 1/7 @principles/core
+      - name: Publish 1/8 @principles/core
         uses: ./release-tools/.github/actions/publish-npm-package
         with:
           pkg_dir: principles-core
@@ -334,7 +338,7 @@ jobs:
           train_order: ${{ env.TRAIN_ORDER }}
           npm_token: ${{ secrets.NPM_TOKEN }}
 
-      - name: Publish 2/7 @principles/install-layout
+      - name: Publish 2/8 @principles/install-layout
         uses: ./release-tools/.github/actions/publish-npm-package
         with:
           pkg_dir: install-layout
@@ -344,7 +348,7 @@ jobs:
           train_order: ${{ env.TRAIN_ORDER }}
           npm_token: ${{ secrets.NPM_TOKEN }}
 
-      - name: Publish 3/7 @principles/host-runtime
+      - name: Publish 3/8 @principles/host-runtime
         uses: ./release-tools/.github/actions/publish-npm-package
         with:
           pkg_dir: host-runtime
@@ -354,7 +358,7 @@ jobs:
           train_order: ${{ env.TRAIN_ORDER }}
           npm_token: ${{ secrets.NPM_TOKEN }}
 
-      - name: Publish 4/7 @principles/codex-adapter
+      - name: Publish 4/8 @principles/codex-adapter
         uses: ./release-tools/.github/actions/publish-npm-package
         with:
           pkg_dir: codex-adapter
@@ -367,9 +371,23 @@ jobs:
       # Publish order is a DEPENDENCY topological order (SPEC §20): a package
       # is published only after every internal dependency it declares, so the
       # dependent's dependency preflight sees a resolvable range.
+      # @principles/workbuddy-adapter declares core + host-runtime +
+      # install-layout and is depended on by pd-cli (workbuddy-worker) and the
+      # installer bundle, so it publishes here — after its own deps, before
+      # its consumers (PRI-979).
+      - name: Publish 5/8 @principles/workbuddy-adapter
+        uses: ./release-tools/.github/actions/publish-npm-package
+        with:
+          pkg_dir: workbuddy-adapter
+          npm_name: '@principles/workbuddy-adapter'
+          cohort_sha: ${{ needs.resolve-cohort.outputs.cohort_sha }}
+          tools_dir: release-tools
+          train_order: ${{ env.TRAIN_ORDER }}
+          npm_token: ${{ secrets.NPM_TOKEN }}
+
       # @principles/pd-cli depends on principles-disciple (^2.0.2), so the
       # plugin publishes BEFORE pd-cli.
-      - name: Publish 5/7 principles-disciple (plugin)
+      - name: Publish 6/8 principles-disciple (plugin)
         uses: ./release-tools/.github/actions/publish-npm-package
         with:
           pkg_dir: openclaw-plugin
@@ -379,7 +397,7 @@ jobs:
           train_order: ${{ env.TRAIN_ORDER }}
           npm_token: ${{ secrets.NPM_TOKEN }}
 
-      - name: Publish 6/7 @principles/pd-cli
+      - name: Publish 7/8 @principles/pd-cli
         uses: ./release-tools/.github/actions/publish-npm-package
         with:
           pkg_dir: pd-cli
@@ -389,7 +407,7 @@ jobs:
           train_order: ${{ env.TRAIN_ORDER }}
           npm_token: ${{ secrets.NPM_TOKEN }}
 
-      - name: Publish 7/7 create-principles-disciple (installer)
+      - name: Publish 8/8 create-principles-disciple (installer)
         uses: ./release-tools/.github/actions/publish-npm-package
         with:
           pkg_dir: create-principles-disciple
@@ -403,7 +421,7 @@ jobs:
   publish-finalize:
     name: Finalize release (tag, GitHub Release, ClawHub)
     needs: [resolve-cohort, publish-full-product]
-    # Runs only after ALL SEVEN npm legs uploaded or verified-skip. Its own
+    # Runs only after ALL EIGHT npm legs uploaded or verified-skip. Its own
     # failures are visible (red job) and independently retriable by
     # re-dispatching the train (uploads skip; closing steps reconcile) —
     # but they can no longer block an npm package that never uploaded.

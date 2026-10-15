@@ -33,6 +33,7 @@ const ORDER = [
   'install-layout',
   'host-runtime',
   'codex-adapter',
+  'workbuddy-adapter',
   'openclaw-plugin',
   'pd-cli',
   'create-principles-disciple',
@@ -52,6 +53,11 @@ const COHORT_MANIFESTS: Record<string, { name: string; version: string; deps: Re
     version: '0.4.6',
     deps: { '@principles/core': '^1.287.1', '@principles/host-runtime': '^0.7.7', '@principles/install-layout': '^0.2.0' },
   },
+  'workbuddy-adapter': {
+    name: '@principles/workbuddy-adapter',
+    version: '0.2.0',
+    deps: { '@principles/core': '^1.287.1', '@principles/host-runtime': '^0.7.7', '@principles/install-layout': '^0.2.0' },
+  },
   'openclaw-plugin': { name: 'principles-disciple', version: '2.0.2', deps: { '@principles/core': '^1.287.0' } },
   'pd-cli': {
     name: '@principles/pd-cli',
@@ -59,6 +65,7 @@ const COHORT_MANIFESTS: Record<string, { name: string; version: string; deps: Re
     deps: {
       '@principles/core': '^1.287.1',
       '@principles/codex-adapter': '^0.4.6',
+      '@principles/workbuddy-adapter': '^0.2.0',
       '@principles/host-runtime': '^0.7.7',
       '@principles/install-layout': '^0.2.0',
       'principles-disciple': '^2.0.2',
@@ -468,8 +475,63 @@ describe('drill 8: product (cohort) vs tools checkout separation', () => {
     expect(t).toContain('ref: ${{ inputs.tools_ref || github.sha }}');
     expect(t).toContain('path: release-tools');
     // The publish action is loaded FROM the tools checkout.
-    expect(t.match(/uses: \.\/release-tools\/\.github\/actions\/publish-npm-package/g)?.length).toBe(7);
+    expect(t.match(/uses: \.\/release-tools\/\.github\/actions\/publish-npm-package/g)?.length).toBe(8);
     expect(t).toContain('uses: ./release-tools/.github/actions/finalize-npm-release');
+  });
+
+  // PRI-979: @principles/workbuddy-adapter became a publishable package with
+  // no TRAIN_ORDER entry, no npm leg and no build branch, and the omission
+  // only surfaced at dispatch time (deps-preflight correctly refused to
+  // publish pd-cli on top of it). This guard makes the same omission
+  // impossible to merge: the order, the legs, the rehearsal legs, the
+  // rehearsal loop and the build mapping must each cover every package the
+  // manifests themselves say is publishable.
+  it('every publishable package is wired into the train: order + leg + rehearsal + build branch', async () => {
+    const { loadWorkspace } = (await loadModule('lib/workspace.mjs')) as {
+      loadWorkspace: (cwd: string) => { publishable: { dir: string }[] };
+    };
+    const dirs = loadWorkspace(REPO_ROOT).publishable.map((p) => p.dir);
+    expect(dirs.length).toBeGreaterThan(1);
+    const t = trainText();
+    const a = actionText();
+    const p = fs.readFileSync(path.join(REPO_ROOT, '.github', 'workflows', 'publish-preflight.yml'), 'utf8');
+
+    const trainOrder = /^\s*TRAIN_ORDER: ([a-z0-9,_-]+)$/m.exec(t)?.[1].split(',');
+    expect(trainOrder, 'publish-npm.yml must define the train order as a TRAIN_ORDER env').toBeTruthy();
+    // The same SET the manifests promise, no more and no less — the workflow
+    // is the single source of the order itself, but never of the inventory.
+    expect([...trainOrder!].sort()).toEqual([...dirs].sort());
+    for (const dir of dirs) {
+      expect(t, `no npm leg for ${dir}`).toContain(`pkg_dir: ${dir}\n`);
+      expect(p, `no rehearsal leg for ${dir}`).toContain(`pkg_dir: ${dir}\n`);
+      expect(a, `no build mapping for ${dir}`).toContain(`"$PKG_DIR" = "${dir}"`);
+    }
+    // Every TRAIN_ORDER definition in either workflow must describe the same
+    // set (one per job is the most a job-scoped env allows), and no leg may
+    // re-copy the order as a literal — a per-leg copy is a drift surface.
+    for (const [wf, text] of [['publish-npm.yml', t], ['publish-preflight.yml', p]] as const) {
+      const defs = [...text.matchAll(/^\s*TRAIN_ORDER: ([a-z0-9,_-]+)$/gm)].map((m) => m[1]!);
+      expect(defs.length, `${wf} must define TRAIN_ORDER per job`).toBeGreaterThan(0);
+      for (const def of defs) expect(def.split(',').sort()).toEqual([...dirs].sort());
+      expect(text.match(/train_order: \$\{\{ env\.TRAIN_ORDER \}\}/g)?.length, `${wf} legs must reference env.TRAIN_ORDER`).toBe(dirs.length);
+    }
+    const loop = /for DIR in ([a-z0-9 _-]+); do/.exec(p)?.[1].trim().split(/\s+/);
+    expect(loop, 'preflight must loop every publishable package').toBeTruthy();
+    expect([...loop!].sort()).toEqual([...dirs].sort());
+  });
+
+  it('the real committed manifests satisfy the static train contract in TRAIN_ORDER', async () => {
+    const { buildTrainPlan, validatePlanStatic } = (await loadModule('deps-preflight.mjs')) as Record<
+      string,
+      (o: unknown) => unknown
+    >;
+    const trainOrder = /^\s*TRAIN_ORDER: ([a-z0-9,_-]+)$/m.exec(trainText())![1]!.split(',');
+    const plan = buildTrainPlan({ workspaceRoot: REPO_ROOT, order: trainOrder }) as unknown[];
+    const res = validatePlanStatic(plan) as { ok: boolean; errors: { kind: string; message: string }[] };
+    // Runs the SAME check the train runs before its first upload, against
+    // this checkout: an unorderable or unresolvable manifest set fails here
+    // in CI instead of burning a dispatch (and never an upload).
+    expect(res.ok, JSON.stringify(res.errors)).toBe(true);
   });
 
   it('the action reads manifests from the product workspace but invokes control scripts only via $TOOLS_DIR', () => {
@@ -697,9 +759,9 @@ describe('drill 10: closing-step isolation (workflow structure)', () => {
   const finalizeText = () => fs.readFileSync(path.join(REPO_ROOT, '.github', 'actions', 'finalize-npm-release', 'action.yml'), 'utf8');
   const actionText = () => fs.readFileSync(path.join(REPO_ROOT, '.github', 'actions', 'publish-npm-package', 'action.yml'), 'utf8');
 
-  it('the train job has exactly seven npm legs and ZERO closing steps', () => {
+  it('the train job has exactly eight npm legs and ZERO closing steps', () => {
     const t = trainText();
-    expect(t.match(/uses: \.\/release-tools\/\.github\/actions\/publish-npm-package/g)?.length).toBe(7);
+    expect(t.match(/uses: \.\/release-tools\/\.github\/actions\/publish-npm-package/g)?.length).toBe(8);
     for (const banned of ['Reconcile Git tag', 'gh release create', 'clawhub package publish', 'git push origin "$TAG"']) {
       expect(t).not.toContain(banned);
     }
@@ -742,7 +804,7 @@ describe('drill 10: closing-step isolation (workflow structure)', () => {
 
   it('the rehearsal/preflight workflow never uploads (dry_run legs, no write permissions)', () => {
     const p = fs.readFileSync(path.join(REPO_ROOT, '.github', 'workflows', 'publish-preflight.yml'), 'utf8');
-    expect(p.match(/dry_run: true/g)?.length).toBe(7);
+    expect(p.match(/dry_run: true/g)?.length).toBe(8);
     expect(p).not.toContain('id-token: write');
     expect(p).not.toContain('contents: write');
     expect(p).not.toContain('actions: write');

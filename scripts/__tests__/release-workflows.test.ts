@@ -117,7 +117,7 @@ describe('publish-npm-package action — exact committed version (T17-T23)', () 
   it('publish legs carry no closing steps — they live in finalize-npm-release (PRI-886)', () => {
     const t = text();
     // Closing steps moved to the separate finalize action that runs AFTER
-    // all seven npm legs: a tag/release/marketplace failure must never
+    // all eight npm legs: a tag/release/marketplace failure must never
     // block an unuploaded npm package.
     expect(t).not.toContain('Reconcile Git tag');
     expect(t).not.toContain('gh release create');
@@ -135,9 +135,20 @@ describe('publish-npm-package action — exact committed version (T17-T23)', () 
     const doc = loadWorkflow(rel) as { runs?: { steps?: Array<{ name?: string; run?: string }> } };
     const build = doc.runs?.steps?.find((s) => s.name === 'Build target package');
     expect(build?.run).toBeDefined();
-    const pdCliBranch = build!.run!.split('elif [ "$PKG_DIR" = ')[1];
-    expect(pdCliBranch).toContain('pd-cli" ]');
-    expect(pdCliBranch).toContain('npm run build --workspace=@principles/codex-adapter');
+    // Located by its own marker, never by branch position: the mapping is an
+    // if/elif chain that grows whenever a package joins the train (PRI-979).
+    const branch = (dir: string) => {
+      const run = build!.run!;
+      const start = run.indexOf(`[ "$PKG_DIR" = "${dir}" ]`);
+      expect(start, `no build branch for ${dir}`).toBeGreaterThan(-1);
+      const next = run.indexOf('elif [ "$PKG_DIR" = ', start);
+      return next === -1 ? run.slice(start) : run.slice(start, next);
+    };
+    expect(branch('pd-cli')).toContain('npm run build --workspace=@principles/codex-adapter');
+    // @principles/workbuddy-adapter is a pd-cli runtime import too
+    // (commands/workbuddy-worker) — same rule, same failure class.
+    expect(branch('pd-cli')).toContain('npm run build --workspace=@principles/workbuddy-adapter');
+    expect(branch('create-principles-disciple')).toContain('npm run build --workspace=@principles/workbuddy-adapter');
   });
 
   it('Verify package dry-run: a cosmetic head preview must never own the exit verdict', () => {
