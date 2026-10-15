@@ -273,6 +273,23 @@ describe('aggregation and id generation', () => {
     }
     expect(pids.size).toBe(2000);
     expect(oids.size).toBe(2000);
+    expect([...pids].every((id) => /^P-\d{8}T\d{6}Z-[0-9a-z]{10}$/.test(id))).toBe(true);
+    expect([...oids].every((id) => /^OCC-\d{8}T\d{6}Z-[0-9a-z]{10}$/.test(id))).toBe(true);
+    expect(validatePatternMeta({
+      ...patternMeta, recordId: generatePatternRecordId(),
+    }, 'p').error).toBeUndefined();
+    expect(validateOccurrenceMeta({
+      ...occurrenceMeta, occurrenceId: generateOccurrenceId(),
+    }, 'o').error).toBeUndefined();
+  });
+
+  it('accepts old six-character runtime IDs after the generator upgrade', () => {
+    expect(validatePatternMeta({
+      ...patternMeta, recordId: 'P-20261015T120000Z-abc234',
+    }, 'p').error).toBeUndefined();
+    expect(validateOccurrenceMeta({
+      ...occurrenceMeta, occurrenceId: 'OCC-20261015T120000Z-abc234',
+    }, 'o').error).toBeUndefined();
   });
 });
 

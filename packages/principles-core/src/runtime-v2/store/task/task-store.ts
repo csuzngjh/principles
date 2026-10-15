@@ -68,15 +68,20 @@ export interface TaskStore {
   /**
    * Narrow compare-and-swap (PRI-629 owner-resolution concurrency):
    * apply `patch` only when the task's current diagnostic_json is byte-equal
-   * to `expectedDiagnosticJson` (null matches a NULL column). Single SQL
-   * conditional mutation — no read→JS-compare→write race window. Returns the
-   * updated record on success, or null when the precondition failed (task
-   * missing or diagnostic_json changed concurrently).
+   * to `expectedDiagnosticJson` (null matches a NULL column) — and, when
+   * `options.expectedStatus` is given (PRI-983, SPEC-PD-IAER-001 §6.3), only
+   * while the task still sits in that status. Single conditional mutation —
+   * no read→JS-compare→write race window. Returns the updated record on
+   * success, or null when a precondition failed (task missing,
+   * diagnostic_json changed, or the status moved concurrently). The status
+   * precondition arbitrates resets whose metadata write is content-neutral
+   * (e.g. an authority reset with nothing to clear).
    */
   updateTaskIfDiagnosticJsonUnchanged(
     taskId: string,
     expectedDiagnosticJson: string | null,
     patch: TaskStoreUpdatePatch,
+    options?: { readonly expectedStatus?: string },
   ): Promise<TaskRecord | null>;
 
   /** List tasks with optional filter. */

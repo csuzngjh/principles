@@ -1,6 +1,7 @@
 import * as path from 'path';
 import {
   RuntimeStateManager,
+  hydratePITaskRecord,
   InternalizationOrchestrator,
   DreamerRunner,
   PhilosopherRunner,
@@ -554,6 +555,26 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
     if (wakeResult.decision === 'would_lease') {
       if (wakeResult.taskKind !== runnerKind) {
         throw new Error(`Invariant violation: wakeOnce returned taskKind=${wakeResult.taskKind} but runnerKind=${runnerKind}`);
+      }
+
+      // This CLI has no evidence assembly port. Never lease a Code Rule task
+      // here and fail it as input_invalid after consuming a run/attempt.
+      // The auto-consumer owns its Owner evidence preflight and L2 dispatch.
+      if (runnerKind === 'artificer' && runtimeKind !== 'test-double') {
+        const task = await stateManager.getTask(wakeResult.taskId);
+        const piTask = task ? hydratePITaskRecord(task) : null;
+        if (piTask?.channel !== 'prompt') {
+          const refused = {
+            decision: 'refused',
+            taskId: wakeResult.taskId,
+            reason: 'artificer_code_rule_run_once_unsupported',
+            nextAction: 'Run the shared auto-consumer for Code Rule tasks: it validates Owner evidence before leasing. run-once currently supports Artificer prompt-channel tasks only.',
+          };
+          if (opts.json) console.log(JSON.stringify(refused, null, 2));
+          else console.error('Run-once refused: ' + refused.reason + '. ' + refused.nextAction);
+          process.exitCode = 1;
+          return;
+        }
       }
 
       const eventEmitter = new StoreEventEmitter();

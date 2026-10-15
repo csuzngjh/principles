@@ -64,11 +64,11 @@ const VALID_CATEGORIES = new Set([
 ]);
 
 const DISPLAY_ID_PATTERN = /^ERR-\d{3,4}$/;
-const RECORD_ID_PATTERN = /^P-(ERR-\d{3,4}|\d{8}T\d{6}Z-[0-9a-z]{6})$/;
+const RECORD_ID_PATTERN = /^P-(ERR-\d{3,4}|\d{8}T\d{6}Z-(?:[0-9a-z]{6}|[0-9a-z]{10}))$/;
 // Two occurrence-id shapes:
-//   runtime   OCC-<compactUTC>-<rand6>          e.g. OCC-20260916T143000Z-a3k9
+//   runtime   OCC-<compactUTC>-<rand10>; legacy rand6 stays readable.
 //   migration OCC-<date>-err-NNN-r<index>       deterministic, re-runnable
-const OCCURRENCE_ID_RE = /^OCC-(\d{8}T\d{6}Z-[0-9a-z]{6}|\d{4}-\d{2}(?:-\d{2})?-err-\d{3,4}-r\d+)$/;
+const OCCURRENCE_ID_RE = /^OCC-(\d{8}T\d{6}Z-(?:[0-9a-z]{6}|[0-9a-z]{10})|\d{4}-\d{2}(?:-\d{2})?-err-\d{3,4}-r\d+)$/;
 const EP_ID_PATTERN = /^EP-\d{2}$/;
 
 /** Crockford-ish base32 (no confusing 0/O/1/I) for random suffixes. */
@@ -116,11 +116,11 @@ function compactUtc(now) {
 }
 
 function generatePatternRecordId(now = new Date()) {
-  return `P-${compactUtc(now)}-${randomSuffix(6)}`;
+  return `P-${compactUtc(now)}-${randomSuffix(10)}`;
 }
 
 function generateOccurrenceId(now = new Date()) {
-  return `OCC-${compactUtc(now)}-${randomSuffix(6)}`;
+  return `OCC-${compactUtc(now)}-${randomSuffix(10)}`;
 }
 
 /**
@@ -237,7 +237,7 @@ function validatePatternMeta(meta, label) {
     problems.push("recordType must be 'pattern'");
   }
   if (!has('recordId') || !isNonEmptyString(meta.recordId) || !RECORD_ID_PATTERN.test(meta.recordId)) {
-    problems.push('recordId must match P-(ERR-NNN|timestamp-rand6)');
+    problems.push('recordId must match P-(ERR-NNN|timestamp-rand6-or-rand10)');
   }
   if (!has('displayId') || !isNonEmptyString(meta.displayId) || !DISPLAY_ID_PATTERN.test(meta.displayId)) {
     problems.push('displayId must match ERR-NNN');
@@ -286,10 +286,10 @@ function validateOccurrenceMeta(meta, label) {
     problems.push("recordType must be 'occurrence'");
   }
   if (!has('occurrenceId') || !isNonEmptyString(meta.occurrenceId) || !OCCURRENCE_ID_RE.test(meta.occurrenceId)) {
-    problems.push('occurrenceId must match OCC-<date|compactUTC-rand4>');
+    problems.push('occurrenceId must match OCC-<date|compactUTC-rand6-or-rand10>');
   }
   if (!has('patternRecordId') || !isNonEmptyString(meta.patternRecordId) || !RECORD_ID_PATTERN.test(meta.patternRecordId)) {
-    problems.push('patternRecordId must match P-(ERR-NNN|timestamp-rand6)');
+    problems.push('patternRecordId must match P-(ERR-NNN|timestamp-rand6-or-rand10)');
   }
   if (!has('displayId') || !isNonEmptyString(meta.displayId) || !DISPLAY_ID_PATTERN.test(meta.displayId)) {
     problems.push('displayId must match ERR-NNN');

@@ -78,7 +78,7 @@ function observedAtToMs(observedAt) {
 }
 
 /** Id shape produced by `error:record add-occurrence` (vs migration ids). */
-const RUNTIME_OCCURRENCE_ID = /^OCC-\d{8}T\d{6}Z-[0-9a-z]{6}$/;
+const RUNTIME_OCCURRENCE_ID = /^OCC-\d{8}T\d{6}Z-(?:[0-9a-z]{6}|[0-9a-z]{10})$/;
 const STRUCTURED_RECURRENCE_FIELDS = ['originPattern', 'invariant', 'severity', 'escaped', 'caughtBy', 'guard'];
 
 /**

@@ -1,0 +1,454 @@
+/**
+ * PRI-982 (SPEC-PD-IAER-001 FR-02 / FR-04) — consumer evidence preflight.
+ *
+ * The authoritative PRE-MODEL gate for Artificer tasks on the
+ * `code_tool_hook` channel, invoked by the shared consumer cycle BEFORE any
+ * runner construction:
+ *
+ *   1. no `behaviorEvidence` port injected by the host → the evidence source
+ *      itself is unavailable. This is a HOST ASSEMBLY GAP, not "Owner has not
+ *      labeled" (SPEC §6.2) → `evidence_source_unavailable`, task untouched;
+ *      the caller must keep the task pending and degrade OBSERVABLY.
+ *   2. otherwise the ONE shared judgment (`assessEvidenceReadiness`, FR-01)
+ *      decides:
+ *        - ready            → the pack rides into the ArtificerRunner deps;
+ *        - required/invalid → atomic `needs_human_review` transition
+ *          (evaluator-runner NHR precedent: humanReviewContext written in the
+ *          SAME metadata mutation, read-back invariant, CAS via
+ *          `updateTaskIfDiagnosticJsonUnchanged` against concurrent
+ *          consumers). NO run record, NO attemptCount consumption, NO LLM
+ *          call, NO retry — and since needs_human_review is outside the
+ *          consumer wake scan (pending/retry_wait only), the task is never
+ *          auto-rewoken (FR-05/T02).
+ *
+ * Reason codes are the stable FR-04 IDs for Owner-evidence faults
+ * (`required`/`invalid`/`stale`/`scope_mismatch` via the typed scope
+ * classification). Evidence-SOURCE faults stay OUT of that vocabulary: a
+ * missing port → `evidence_source_unavailable`, a typed
+ * `evidence_source_error` from the assembler (trajectory store I/O, PRI-980
+ * review P2-1) → the §6.2 storage-fault degradation — task untouched, never
+ * an owner-fault NHR write.
+ *
+ * Telemetry: the two events are registered in the telemetry-event union in
+ * the same change (ERR-060: unregistered names are silently rewritten to
+ * `degradation_triggered`). `artificer_blocked_on_owner_evidence` is
+ * Owner-recovery evidence that must survive a crash — the host wires this
+ * emitter through WorkspaceTelemetryEmitter so it lands in the critical
+ * allowlist sink. Both payloads carry the unified FR-08 run-correlation
+ * block (PRI-984, artificer-run-correlation.ts); persistentRunId /
+ * adapterRunId are semantically absent here — the gate fires pre-lease, so
+ * no run row or runtime invocation exists.
+ *
+ * rc-1/rc-2: the selection arrives from parsed diagnosticJson (already
+ * guarded by pitask-metadata parse) and the assembled pack is re-validated by
+ * the shared validator inside the readiness gate — no `as` bypass.
+ * rc-8: failure details are bounded before they enter payloads.
+ * rc-9: every non-ready outcome carries reasonCode + nextAction.
+ *
+ * Spec: docs/specs/SPEC-PD-IAER-001-v1.0.md §5 FR-02, §6.1/§6.2
+ */
+import type { BehaviorExamplePack } from './behavior-example-pack.js';
+import {
+  assessEvidenceReadiness,
+  type OwnerEvidenceReasonCode,
+  type OwnerEvidenceSelection,
+} from './evidence-readiness.js';
+import { buildArtificerRunCorrelation } from './artificer-run-correlation.js';
+import { PDRuntimeError } from '../error-categories.js';
+import type { StoreEventEmitter } from '../store/event-emitter.js';
+import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
+import type { PITaskRecord } from './peer-runner-contracts.js';
+import type { HumanReviewContext } from './pitask-metadata.js';
+import { createPITaskDiagnosticJson, mergePITaskMetadata, hydratePITaskRecord, parseSeedSourcePainId } from './pitask-metadata.js';
+import type { TaskRecord } from '../task-status.js';
+
+/**
+ * Resolve the canonical Pain from the trusted seed along the persisted
+ * predecessor graph. Never infer Pain from model output or the Owner's
+ * selection. Multiple conflicting seeds and unresolvable ancestry fail closed.
+ */
+export async function resolveArtificerCanonicalPainId(
+  taskId: string,
+  getTask: (taskId: string) => Promise<TaskRecord | null>,
+): Promise<string | null> {
+  const pending = [taskId];
+  const seen = new Set<string>();
+  const pains = new Set<string>();
+  while (pending.length > 0 && seen.size < 64) {
+    const id = pending.shift();
+    if (id === undefined || seen.has(id)) continue;
+    seen.add(id);
+    const task = await getTask(id);
+    if (task === null) return null;
+    const sourcePainId = parseSeedSourcePainId(task.diagnosticJson);
+    if (sourcePainId !== null) pains.add(sourcePainId);
+    const piTask = hydratePITaskRecord(task);
+    if (piTask) {
+      for (const parentId of [piTask.parentTaskId, ...piTask.dependencyTaskIds]) {
+        if (typeof parentId === 'string' && parentId.length > 0 && !seen.has(parentId)) {
+          pending.push(parentId);
+        }
+      }
+    }
+  }
+  return pending.length === 0 && pains.size === 1 ? [...pains][0] ?? null : null;
+}
+
+/**
+ * Lineage marker for preflight NHR transitions. Honest by construction: this
+ * is NOT a persisted run id (`run_<taskId>_<attempt>` spelling is reserved
+ * for lease-minted runs — there is no run for a pure preflight block), and
+ * consumer-side recovery classification treats unknown reasonCodes as
+ * recovery-type review, which never resolves artifacts through sourceRunId.
+ */
+export const ARTIFICER_EVIDENCE_NHR_SOURCE_RUN_ID = 'evidence-preflight';
+
+/** Host-injected evidence assembly port (production: BehaviorExamplePackAssembler). */
+export interface BehaviorEvidencePort {
+  /**
+   * Assemble a validated BehaviorExamplePack from the Owner selection.
+   * Throws on any gap (missing pain, session-mismatched rows, invalid pack)
+   * — ERR-069 fail-loud convention. The gate classifies the throw
+   * structurally: typed scope kinds → FR-04 codes, the typed
+   * `evidence_source_error` kind → the §6.2 storage-fault degradation,
+   * plain errors → `invalid_evidence`.
+   */
+  assemble(selection: OwnerEvidenceSelection): BehaviorExamplePack;
+}
+
+export type ArtificerEvidencePreflightVerdict =
+  | {
+      readonly decision: 'ready';
+      readonly pack: BehaviorExamplePack;
+      /** `sha256:<hex>` content digest of the pack (FR-01 contract). */
+      readonly evidenceHash: string;
+      readonly sourcePainId: string;
+    }
+  | {
+      readonly decision: 'blocked';
+      readonly reasonCode: OwnerEvidenceReasonCode;
+      readonly nextAction: string;
+      readonly missingFields?: readonly string[];
+      readonly detail?: string;
+      /**
+       * Whether the needs_human_review transition durably landed (CAS +
+       * read-back). `false` = a concurrent writer won the diagnosticJson CAS;
+       * the caller must still NOT run the task, and surface the lost race
+       * observably.
+       */
+      readonly reviewPersisted: boolean;
+    }
+  | {
+      /**
+       * Evidence SOURCE failure (trajectory store I/O — PRI-980 review P2-1,
+       * SPEC §6.2 case 3: 保留明确的存储故障，不误判为 Owner 尚未标注).
+       * Same family as `evidence_source_unavailable`: the task is UNTOUCHED
+       * (stays wake-eligible — the next cycle retries assembly at zero model
+       * cost), NO needs_human_review write, NO owner-fault reasonCode. The
+       * degradation is observable (structured telemetry event + verdict).
+       */
+      readonly decision: 'evidence_source_error';
+      readonly reason: 'evidence_source_error';
+      readonly nextAction: string;
+      readonly detail?: string;
+    }
+  | {
+      /** Host assembly gap (port not injected) — task untouched. */
+      readonly decision: 'evidence_source_unavailable';
+    };
+
+export interface ArtificerEvidencePreflightParams {
+  readonly taskId: string;
+  /** Hydrated task record (channel already resolved by the caller). */
+  readonly piTask: PITaskRecord;
+  /** Lease-owner label for telemetry sessionId ('auto-consumer' | …). */
+  readonly owner: string;
+  /**
+   * Workspace root for the FR-08 run-correlation telemetry (PRI-984).
+   * Optional: the key is omitted from payloads when a direct caller has no
+   * workspace context — the production consumer cycle always provides it.
+   */
+  readonly workspaceDir?: string;
+  readonly stateManager: Pick<RuntimeStateManager, 'getTask' | 'updateTaskIfDiagnosticJsonUnchanged'>;
+  readonly eventEmitter: StoreEventEmitter;
+  /** Optional: absent = host assembly gap (SPEC §6.2 semantics). */
+  readonly behaviorEvidence?: BehaviorEvidencePort;
+}
+
+/** rc-8: bounded single-line detail for metadata payloads. */
+function boundedDetail(value: string, max = 480): string {
+  const flat = value.replace(/\s+/g, ' ').trim();
+  return flat.length > max ? `${flat.slice(0, max)}…[truncated]` : flat;
+}
+
+/**
+ * FR-04: the persisted NHR diagnostics must name the concrete out-edge — the
+ * `pd runtime internalization retry --confirm` recovery authority
+ * (ownerRetryNeedsHumanReviewTask) and the B1 evidence-attach entry.
+ */
+function withNhrOutEdge(nextAction: string): string {
+  return `${nextAction} Out-edge once evidence is attached (or to abandon this review): pd runtime internalization retry --confirm.`;
+}
+
+function readDiagnosticJson(task: PITaskRecord): string | null {
+  const raw = task.diagnosticJson;
+  return typeof raw === 'string' && raw.trim() !== '' ? raw : null;
+}
+
+/**
+ * SPEC-PD-IAER-001 §6.3: the exact set of statuses a task may sit in when the
+ * consumer preflight reaches it — `InternalizationOrchestrator.findCandidates`
+ * scans pending AND retry_wait, and the preflight runs on the dry-run wake of
+ * those candidates. The NHR transition may only land from a WAKE-ELIGIBLE
+ * status: `acquireLease` moves a task to `leased` WITHOUT touching
+ * diagnostic_json, so a consumer that read the task before another consumer
+ * leased it must LOSE this write (rc-9: observable lost race) instead of
+ * writing needs_human_review over an actively leased task.
+ */
+const WAKE_ELIGIBLE_NHR_SOURCES: readonly ['pending', 'retry_wait'] = ['pending', 'retry_wait'];
+
+/**
+ * Atomic needs_human_review transition (evaluator-runner NHR precedent):
+ * status + humanReviewContext in ONE CAS-guarded metadata write, then the
+ * read-back invariant (INV-2 class: only a durable effect may be reported).
+ *
+ * §6.3 status precondition: the store CAS takes a single expected-status
+ * literal, so the two wake-eligible sources are tried as two individually
+ * atomic conditional UPDATEs over the same read-time diagnosticJson snapshot.
+ * A task concurrently leased/moved by another consumer matches neither
+ * precondition → the write loses and `false` is reported — never a partial
+ * or clobbering effect.
+ */
+async function transitionToNeedsHumanReview(
+  params: ArtificerEvidencePreflightParams,
+  context: HumanReviewContext,
+): Promise<boolean> {
+  const { taskId, piTask, stateManager } = params;
+  const merged = mergePITaskMetadata(piTask, { humanReviewContext: context });
+  const patch = {
+    status: 'needs_human_review' as const,
+    diagnosticJson: createPITaskDiagnosticJson(merged),
+  };
+  const expectedDiagnosticJson = readDiagnosticJson(piTask);
+  let updated: Awaited<ReturnType<typeof stateManager.updateTaskIfDiagnosticJsonUnchanged>> = null;
+  for (const expectedStatus of WAKE_ELIGIBLE_NHR_SOURCES) {
+    updated = await stateManager.updateTaskIfDiagnosticJsonUnchanged(
+      taskId,
+      expectedDiagnosticJson,
+      patch,
+      { expectedStatus },
+    );
+    if (updated !== null) {
+      break;
+    }
+  }
+  if (!updated) {
+    return false;
+  }
+  const current = await stateManager.getTask(taskId);
+  if (!current || current.status !== 'needs_human_review') {
+    throw new PDRuntimeError(
+      'storage_unavailable',
+      `needs_human_review effect not durable for task ${taskId} (read-back status: ${current?.status ?? 'task_missing'})`,
+    );
+  }
+  return true;
+}
+
+/**
+ * Run the evidence readiness preflight for one code_tool_hook Artificer task.
+ * The caller owns channel resolution (pi_metadata.channel ===
+ * 'code_tool_hook'); this module never re-guesses channels.
+ */
+export async function preflightArtificerOwnerEvidence(
+  params: ArtificerEvidencePreflightParams,
+): Promise<ArtificerEvidencePreflightVerdict> {
+  const { taskId, piTask, owner, workspaceDir, eventEmitter, behaviorEvidence } = params;
+
+  // 1. Host assembly gap — never misread as "Owner has not labeled" (§6.2).
+  if (behaviorEvidence === undefined) {
+    return { decision: 'evidence_source_unavailable' };
+  }
+
+  const selection = piTask.ownerEvidenceSelection;
+  let readiness = assessEvidenceReadiness({
+    channelRequiresOwnerEvidence: true,
+    ownerSelection: selection ?? null,
+    assemblePack: selection !== undefined ? () => behaviorEvidence.assemble(selection) : undefined,
+  });
+  // The persisted digest is an Owner confirmation, not just a syntactic field.
+  // The trajectory may change AFTER resume and BEFORE the next consumer wake.
+  // An assembled but changed pack must never enter the model (TOCTOU guard).
+  if (readiness.status === 'ready'
+    && selection?.contentDigest !== undefined
+    && readiness.evidenceHash !== selection.contentDigest) {
+    readiness = {
+      status: 'invalid_evidence',
+      reasonCode: 'owner_behavior_examples_stale',
+      detail: 'assembled evidence digest differs from the Owner-confirmed digest',
+      nextAction: 'Evidence changed after Owner confirmation; re-attach fresh examples, verify and resume.',
+    };
+  }
+
+  if (readiness.status === 'ready') {
+    const canonicalPainId = await resolveArtificerCanonicalPainId(
+      taskId,
+      (id) => params.stateManager.getTask(id),
+    );
+    if (canonicalPainId === null || canonicalPainId !== readiness.sourcePainId) {
+      readiness = {
+        status: 'invalid_evidence',
+        reasonCode: 'owner_behavior_examples_scope_mismatch',
+        detail: 'Owner evidence Pain does not match a unique canonical task seed Pain',
+        nextAction: 'Inspect the task lineage and reselect evidence for its canonical source Pain.',
+      };
+    }
+  }
+
+  // Telemetry (FR-08): the gate ran — record the verdict with the unified
+  // run-correlation block (PRI-984; persistentRunId/adapterRunId are
+  // semantically absent pre-lease, see artificer-run-correlation.ts) + stable
+  // reasonCode + bounded references, never raw trajectories. reasonCode is
+  // the FR-04 code where one exists, otherwise the gate status itself
+  // ('ready'; 'not_applicable' cannot occur for this hard-coded channel gate
+  // and throws below).
+  eventEmitter.emitTelemetry({
+    eventType: 'artificer_evidence_readiness_checked',
+    traceId: taskId,
+    timestamp: new Date().toISOString(),
+    sessionId: owner,
+    agentId: 'artificer',
+    payload: {
+      ...buildArtificerRunCorrelation({
+        taskId,
+        attemptNumber: piTask.attemptCount,
+        executionMode: 'preflight',
+        reasonCode: readiness.status === 'owner_evidence_required' || readiness.status === 'invalid_evidence'
+          ? readiness.reasonCode
+          : readiness.status,
+        workspaceDir,
+        evidenceDigest: readiness.status === 'ready' ? readiness.evidenceHash : undefined,
+      }),
+      channel: 'code_tool_hook',
+      gateStatus: readiness.status,
+      ...(readiness.status === 'owner_evidence_required' ? { missingFields: [...readiness.missingFields] } : {}),
+      ...(readiness.status === 'invalid_evidence' ? { detail: boundedDetail(readiness.detail) } : {}),
+      ...(readiness.status === 'ready' ? { evidenceHash: readiness.evidenceHash, sourcePainId: readiness.sourcePainId } : {}),
+    },
+  });
+
+  if (readiness.status === 'ready') {
+    return {
+      decision: 'ready',
+      pack: readiness.pack,
+      evidenceHash: readiness.evidenceHash,
+      sourcePainId: readiness.sourcePainId,
+    };
+  }
+
+  if (readiness.status === 'not_applicable') {
+    // Unreachable by construction (channelRequiresOwnerEvidence is hard-coded
+    // true) — fail loud rather than silently proceeding evidence-less.
+    throw new PDRuntimeError('input_invalid', 'evidence preflight returned not_applicable for a code_tool_hook task — channel gate caller bug');
+  }
+
+  if (readiness.status === 'evidence_source_error') {
+    // PRI-980 review P2-1 — SPEC §6.2 case 3: a storage/I-O failure of the
+    // evidence source is preserved AS a storage fault. Same family as the
+    // absent port: the task stays wake-eligible (pending/retry_wait — the
+    // next cycle retries the assembly at zero model cost), NO NHR write, NO
+    // owner-fault reasonCode ever reaches the task. rc-9: the degradation is
+    // observable through the registered crash-durable blocked event carrying
+    // the storage reasonCode (never an FR-04 code) + nextAction; a concurrent
+    // write race is moot here because nothing is written.
+    eventEmitter.emitTelemetry({
+      eventType: 'artificer_blocked_on_owner_evidence',
+      traceId: taskId,
+      timestamp: new Date().toISOString(),
+      sessionId: owner,
+      agentId: 'artificer',
+      payload: {
+        ...buildArtificerRunCorrelation({
+          taskId,
+          attemptNumber: piTask.attemptCount,
+          executionMode: 'preflight',
+          reasonCode: 'evidence_source_error',
+          workspaceDir,
+        }),
+        nextAction: readiness.nextAction,
+        detail: boundedDetail(readiness.detail),
+        reviewPersisted: false,
+      },
+    });
+    return {
+      decision: 'evidence_source_error',
+      reason: 'evidence_source_error',
+      nextAction: readiness.nextAction,
+      detail: boundedDetail(readiness.detail),
+    };
+  }
+
+  const blocked: {
+    reasonCode: OwnerEvidenceReasonCode;
+    nextAction: string;
+    missingFields?: readonly string[];
+    detail?: string;
+  } = readiness.status === 'owner_evidence_required'
+    ? {
+        reasonCode: readiness.reasonCode,
+        nextAction: withNhrOutEdge(readiness.nextAction),
+        missingFields: readiness.missingFields,
+      }
+    : {
+        reasonCode: readiness.reasonCode,
+        nextAction: withNhrOutEdge(readiness.nextAction),
+        detail: boundedDetail(readiness.detail),
+      };
+
+  const reviewContext: HumanReviewContext = {
+    reasonCode: blocked.reasonCode,
+    sourceRunId: ARTIFICER_EVIDENCE_NHR_SOURCE_RUN_ID,
+    revisionEpoch: piTask.revisionCount ?? 0,
+    detail: boundedDetail(JSON.stringify({
+      missingFields: blocked.missingFields,
+      ...(blocked.detail !== undefined ? { detail: blocked.detail } : {}),
+      nextAction: blocked.nextAction,
+    })),
+    createdAt: new Date().toISOString(),
+  };
+  const reviewPersisted = await transitionToNeedsHumanReview(params, reviewContext);
+
+  // Owner-recovery evidence: must be durably observable even if the process
+  // dies right after the state transition. Carries the FR-08 correlation
+  // block (persistentRunId stays absent: the block happened pre-lease — no
+  // run row exists and none may be fabricated).
+  eventEmitter.emitTelemetry({
+    eventType: 'artificer_blocked_on_owner_evidence',
+    traceId: taskId,
+    timestamp: new Date().toISOString(),
+    sessionId: owner,
+    agentId: 'artificer',
+    payload: {
+      ...buildArtificerRunCorrelation({
+        taskId,
+        attemptNumber: piTask.attemptCount,
+        executionMode: 'preflight',
+        reasonCode: blocked.reasonCode,
+        workspaceDir,
+      }),
+      nextAction: blocked.nextAction,
+      ...(blocked.missingFields !== undefined ? { missingFields: [...blocked.missingFields] } : {}),
+      ...(blocked.detail !== undefined ? { detail: blocked.detail } : {}),
+      reviewPersisted,
+    },
+  });
+
+  return {
+    decision: 'blocked',
+    reasonCode: blocked.reasonCode,
+    nextAction: blocked.nextAction,
+    ...(blocked.missingFields !== undefined ? { missingFields: blocked.missingFields } : {}),
+    ...(blocked.detail !== undefined ? { detail: blocked.detail } : {}),
+    reviewPersisted,
+  };
+}

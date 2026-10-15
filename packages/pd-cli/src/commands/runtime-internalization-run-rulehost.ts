@@ -40,6 +40,9 @@ import {
 import type { EffectivePdConfig, InternalAgentName, PDRuntimeAdapter } from '@principles/core/runtime-v2';
 import type { BehaviorExamplePack } from '@principles/core/runtime-v2';
 import { storeEmitter } from '@principles/core/runtime-v2';
+// FR-07 (PRI-983): the shared Evidence Readiness judgment — same authority as
+// the consumer preflight and the evidence recovery commands.
+import { assessEvidenceReadiness } from '@principles/core/runtime-v2';
 import { WorkspaceTelemetryEmitter, resolveWorkspaceHostToolSemantics } from '@principles/host-runtime';
 import { resolveRuntimeFromPdConfig } from '../services/resolve-runtime-from-pd-config.js';
 import { resolveRuleHostReadiness } from '../services/rulehost-readiness.js';
@@ -582,16 +585,53 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
         const { BehaviorExamplePackAssembler, RuleHostEvidenceRegistry } = await import('principles-disciple/rulehost-evidence');
         try {
           const assembler = new BehaviorExamplePackAssembler({ workspaceDir, stateDir: path.join(workspaceDir, '.state') });
-          behaviorExamplePack = assembler.assemble({
+          // FR-07 (PRI-983): confirm-time assembly goes through the SAME
+          // shared Evidence Readiness judgment as the automatic consumer
+          // preflight (assessEvidenceReadiness + the assembler's typed scope
+          // errors) — identical (selection, trajectory) inputs now produce
+          // identical stable FR-04 reason codes on both production entries.
+          const ownerSelection = {
             sourcePainId: opts.painId,
             ownerDesiredOutcome: examplesResult.value.ownerDesiredOutcome,
             sourceNegativeToolCallId: examplesResult.value.sourceNegativeToolCallId,
             positiveToolCallIds: examplesResult.value.positiveToolCallIds,
-            projectDir: workspaceDir,
+          };
+          const evidenceReadiness = assessEvidenceReadiness({
+            channelRequiresOwnerEvidence: true,
+            ownerSelection,
+            assemblePack: () => assembler.assemble({ ...ownerSelection, projectDir: workspaceDir }),
           });
+          if (evidenceReadiness.status !== 'ready') {
+            // P1 fix (CodeRabbit PR2 Comment 1): fail fast on assembly failure
+            // instead of silently degrading to text_principle_only (rc-9).
+            // The refusal carries the stable reason code + bounded detail
+            // (behavior_examples_unreliable: prefix kept for the historical
+            // contract) — and mutates nothing (cli-5). PRI-980 review P2-1:
+            // a typed evidence_source_error (trajectory-store I/O) keeps its
+            // storage reason — never the owner-fault generic (§6.2).
+            const reason = evidenceReadiness.status === 'invalid_evidence'
+              ? `behavior_examples_unreliable: ${evidenceReadiness.reasonCode}: ${evidenceReadiness.detail}`
+              : evidenceReadiness.status === 'evidence_source_error'
+                ? `behavior_examples_unreliable: ${evidenceReadiness.reason}: ${evidenceReadiness.detail}`
+                : `behavior_examples_unreliable: owner_behavior_examples_invalid`;
+            const nextAction = evidenceReadiness.status === 'invalid_evidence' || evidenceReadiness.status === 'owner_evidence_required' || evidenceReadiness.status === 'evidence_source_error'
+              ? evidenceReadiness.nextAction
+              : 'verify pain lineage and tool call IDs reference existing trajectory rows';
+            if (opts.json) {
+              process.stdout.write(JSON.stringify({
+                status: 'failed',
+                reason,
+                nextAction,
+              }) + '\n');
+            } else {
+              console.error(`Error: ${reason}. ${nextAction}`);
+            }
+            process.exitCode = 1;
+            return;
+          }
+          behaviorExamplePack = evidenceReadiness.pack;
         } catch (error) {
-          // P1 fix (CodeRabbit PR2 Comment 1): fail fast on assembly failure
-          // instead of silently degrading to text_principle_only.
+          // Fail loud on non-evidence errors (module load failure etc.).
           const reason = `behavior_examples_unreliable: ${error instanceof Error ? error.message : String(error)}`;
           if (opts.json) {
             process.stdout.write(JSON.stringify({

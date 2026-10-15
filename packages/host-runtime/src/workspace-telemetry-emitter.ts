@@ -26,6 +26,14 @@ import { StoreEventEmitter, type TelemetryEvent } from '@principles/core/runtime
  *   - artificer_l2_complete（PRI-795 review P1：Artificer L2 的 completion
  *     证据 — abortOwner/budgetMs/elapsedMs/stopReason/tokenUsage — 必须
  *     crash 前落盘，否则 EP002-R3 的「失败后什么都查不到」重演）
+ *   - artificer_blocked_on_owner_evidence（PRI-982 / SPEC-PD-IAER-001
+ *     FR-04：consumer evidence preflight 把任务原子转入 needs_human_review
+ *     时的 Owner 恢复证据 — 稳定 reasonCode + nextAction + reviewPersisted。
+ *     与 artificer_l2_complete 同理必须 crash 前落盘：进程内 storeEmitter
+ *     生产装配零订阅者，事件丢失会让 NHR 任务变成「为什么被挡」的无头案
+ *     （EP002-R3 类）。注意 readiness_checked 刻意不入列：它对每个 gate
+ *     verdict 都发（含 ready），落盘会形成高频第二日志；blocked 才是
+ *     Owner 必须能事后取证的判定点）
  *   - reuse_gate_triggered（PRI-939 Option A：Reuse Review Gate 挂起观察，
  *     Owner 复用闭环的入口证据）
  *   - reuse_evaluation_unavailable（PRI-939 Option A：语义评估降级信号 —
@@ -45,6 +53,11 @@ const CRITICAL_EVENT_ALLOWLIST: ReadonlySet<string> = new Set([
   'evaluator_rule_assembled',
   'evaluator_rule_assembly_failed',
   'artificer_l2_complete',
+  // PRI-982 (SPEC-PD-IAER-001 FR-04): Owner-recovery evidence for a task the
+  // consumer evidence preflight just blocked into needs_human_review — stable
+  // reasonCode + nextAction must survive a crash (same EP002-R3 class as
+  // artificer_l2_complete above; justification in the header comment).
+  'artificer_blocked_on_owner_evidence',
   'reuse_gate_triggered',
   'reuse_evaluation_unavailable',
 ]);

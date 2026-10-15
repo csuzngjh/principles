@@ -35,7 +35,26 @@ export type OwnerRetryOutcome =
    * resolution）不允许 authority reset — Recover 不是治理出口（SPEC §17/INV-06）。
    * 出口 = 治理焦点的 Owner Decision（open_governance_focus）。
    */
-  | { status: 'rejected'; taskKind: string; previousStatus: string; reason: 'owner_decision_required'; nextAction: 'open_governance_focus' };
+  | { status: 'rejected'; taskKind: string; previousStatus: string; reason: 'owner_decision_required'; nextAction: 'open_governance_focus' }
+  /**
+   * PRI-983 (SPEC-PD-IAER-001 FR-06/T06): only with `options.expectedDiagnosticJson`
+   * — the CAS precondition was lost to a concurrent writer (another resume /
+   * metadata mutation landed between this caller's read and write). The task
+   * row is untouched; the caller must re-read and re-evaluate. Never returned
+   * by the legacy two-argument call shape.
+   */
+  | { status: 'conflict'; taskKind: string; previousStatus: string };
+
+export interface OwnerRetryOptions {
+  /**
+   * PRI-983: optional CAS precondition — apply the authority reset ONLY while
+   * the task's diagnostic_json is still byte-equal to this value (the caller's
+   * read). Absent (the existing two-argument call shape used by
+   * `pd runtime internalization retry` and the Console recover endpoint)
+   * keeps the exact historical unconditional-write semantics.
+   */
+  readonly expectedDiagnosticJson?: string | null;
+}
 
 /**
  * 对单个 needs_human_review 任务执行 Owner authority reset（→ pending）。
@@ -54,6 +73,7 @@ export type OwnerRetryOutcome =
 export async function ownerRetryNeedsHumanReviewTask(
   stateManager: RuntimeStateManager,
   taskId: string,
+  options?: OwnerRetryOptions,
 ): Promise<OwnerRetryOutcome> {
   const task = await stateManager.getTask(taskId);
   if (!task) {
@@ -103,11 +123,31 @@ export async function ownerRetryNeedsHumanReviewTask(
     runnerDecision: undefined,
     completionIntent: undefined,
   });
-  await stateManager.updateTask(taskId, {
-    status: 'pending',
+  const patch = {
+    status: 'pending' as const,
     attemptCount: 0,
     diagnosticJson: createPITaskDiagnosticJson(merged),
-  });
+  };
+  if (options?.expectedDiagnosticJson !== undefined) {
+    // PRI-983 CAS variant: single conditional UPDATE — the authority reset
+    // lands only while the task row is still byte-identical to the caller's
+    // read AND still sits in needs_human_review (SPEC §6.3: 前置状态 + 版本
+    // 检查). The status precondition is what arbitrates two concurrent
+    // resumes when the reset is content-neutral (an artificer NHR task has no
+    // runnerDecision/completionIntent to clear): the first writer moves the
+    // status to pending, the second's precondition fails → `conflict`.
+    const updated = await stateManager.updateTaskIfDiagnosticJsonUnchanged(
+      taskId,
+      options.expectedDiagnosticJson,
+      patch,
+      { expectedStatus: 'needs_human_review' },
+    );
+    if (!updated) {
+      return { status: 'conflict', taskKind: task.taskKind, previousStatus: task.status };
+    }
+  } else {
+    await stateManager.updateTask(taskId, patch);
+  }
 
   return {
     status: 'requeued',

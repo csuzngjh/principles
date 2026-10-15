@@ -748,6 +748,60 @@ export {
 export type { BehaviorExamplePack, BehaviorExamplePackValidationResult } from './internalization/behavior-example-pack.js';
 export { validateBehaviorExamplePack } from './internalization/behavior-example-pack.js';
 
+// Evidence readiness gate (PRI-981 — SPEC-PD-IAER-001 FR-01)
+export type {
+  OwnerEvidenceSelection,
+  OwnerEvidenceReasonCode,
+  EvidenceAssemblyOutcome,
+  EvidenceReadinessInput,
+  EvidenceReadiness,
+} from './internalization/evidence-readiness.js';
+export { assessEvidenceReadiness } from './internalization/evidence-readiness.js';
+
+// Consumer evidence preflight (PRI-982 — SPEC-PD-IAER-001 FR-02/FR-04)
+export type {
+  BehaviorEvidencePort,
+  ArtificerEvidencePreflightVerdict,
+} from './internalization/consumer-evidence-preflight.js';
+export {
+  preflightArtificerOwnerEvidence,
+  ARTIFICER_EVIDENCE_NHR_SOURCE_RUN_ID,
+} from './internalization/consumer-evidence-preflight.js';
+
+// Owner evidence attach/resume (PRI-983 — SPEC-PD-IAER-001 FR-03/FR-06)
+export type {
+  EvidenceWaitingTaskSummary,
+  AttachOwnerEvidenceInput,
+  OwnerEvidenceAttachOutcome,
+  ResumeOwnerEvidenceInput,
+  OwnerEvidenceResumeOutcome,
+} from './internalization/owner-evidence-recovery.js';
+export {
+  EVIDENCE_WAIT_REASON_CODES,
+  listEvidenceWaitingTasks,
+  attachOwnerEvidence,
+  resumeOwnerEvidenceTask,
+} from './internalization/owner-evidence-recovery.js';
+export {
+  computeBehaviorExamplePackDigest,
+  createOwnerEvidenceScopeError,
+  isOwnerEvidenceScopeError,
+  OWNER_EVIDENCE_SCOPE_ERROR_NAME,
+} from './internalization/evidence-readiness.js';
+export type {
+  OwnerEvidenceScopeMismatchKind,
+  OwnerEvidenceScopeError,
+} from './internalization/evidence-readiness.js';
+export type {
+  OwnerEvidenceActionKind,
+  OwnerEvidenceActionRecord,
+  AppendOwnerEvidenceActionInput,
+} from './recovery-actions-log.js';
+export {
+  appendOwnerEvidenceAction,
+  listOwnerEvidenceActions,
+} from './recovery-actions-log.js';
+
 // Internalization route model (PRI-43)
 export type { InternalizationRouteKind, InternalizationRouteDecision } from './internalization/internalization-route.js';
 export { decideInternalizationRoute } from './internalization/internalization-route.js';
