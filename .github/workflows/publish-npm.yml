@@ -37,9 +37,10 @@ name: Publish to npm
 #                        tools_ref pins the control plane (empty = the
 #                        dispatched commit). validation_run_id reuses
 #                        prior matrix evidence for the same cohort.
-#   schedule (Fri)     — weekly RECONCILIATION window only (SPEC §23): it
-#                        never creates versions, never merges the Version
-#                        PR; with nothing pending it succeeds as a no-op.
+#   schedule (daily)   — RECONCILIATION window only (SPEC §23): it never
+#                        creates versions, never merges the Version PR; with
+#                        nothing pending it succeeds as a no-op. Weekly left
+#                        a Monday cohort unpublished for four days.
 #
 # The old push-trigger auto-publish, commit-message bump inference,
 # registry-reset-then-bump, the manual dispatch bump input and the
@@ -62,8 +63,9 @@ on:
         required: false
         default: ''
   schedule:
-    # Every Friday 04:00 UTC = Beijing 12:00 — weekly reconciliation.
-    - cron: '0 4 * * 5'
+    # Daily 04:00 UTC = Beijing 12:00 — reconciliation window (PRI-986: the
+    # weekly window left a Monday cohort unpublished until Friday).
+    - cron: '0 4 * * *'
 
 concurrency:
   group: publish-npm-release-train
@@ -117,7 +119,7 @@ jobs:
           # negation resets $? to 0 and would make the exit-2 branch dead code.
           node scripts/release/resolve-release-cohort.mjs "${ARGS[@]}" > cohort.json && RC=0 || RC=$?
           if [ "$RC" -eq 2 ]; then
-            echo "No release cohort found — nothing pending. Weekly reconciliation no-op."
+            echo "No release cohort found — nothing pending. Daily reconciliation no-op."
             echo "has_cohort=false" >> "$GITHUB_OUTPUT"
             echo "cohort_sha=" >> "$GITHUB_OUTPUT"
             echo "pending_json=[]" >> "$GITHUB_OUTPUT"

@@ -194,11 +194,16 @@ describe('native release target matrix', () => {
     // Changesets cutover (SPEC v1.2): the per-package dispatch choice list
     // is GONE — the train has no authority to pick a package or invent a
     // version. It is dispatched with a cohort_sha (the Version Packages PR
-    // merge SHA) or auto-detects the latest cohort; the weekly window is
-    // reconciliation-only.
+    // merge SHA) or auto-detects the latest cohort; the reconciliation
+    // window is reconciliation-only.
     expect(publishWorkflow).not.toMatch(/type: choice/);
     expect(publishWorkflow).toMatch(/cohort_sha/);
-    expect(publishWorkflow).toMatch(/cron: '0 4 \* \* 5'/);
+    // The cadence invariant is "every day", not a particular clock time —
+    // asserting the day-of-week field only. A pinned full cron string turns
+    // every deliberate schedule change into a test edit (PRI-979 seam 6;
+    // PRI-986 moved Fri 04:00 UTC to daily 04:00 UTC and this is the second
+    // guard that had copied the literal).
+    expect(publishWorkflow).toMatch(/^[ \t]*(?:-[ \t]*)?cron: '[^']* [^']* [^']* [^']* \*'$/m);
     // Every train step receives the cohort SHA (exact-version provenance).
     const cohortUsages = publishWorkflow.match(/cohort_sha: \$\{\{ needs\.resolve-cohort\.outputs\.cohort_sha \}\}/g) ?? [];
     expect(cohortUsages.length).toBeGreaterThanOrEqual(7);

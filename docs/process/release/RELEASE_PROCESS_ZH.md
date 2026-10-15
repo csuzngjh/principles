@@ -26,7 +26,7 @@ Version Packages PR（机器人，changesets/action）
         ↓  Owner 审阅并合并        ← 唯一的版本落地路径
 release cohort = 该落地提交 SHA（merge / squash 皆可——身份是「复现」，不是提交形态）
         ↓
-发布火车（合并后自动派发；或每周对账窗口）
+发布火车（合并后自动派发；或每日对账窗口）
         =  checkout cohort SHA → 精确 name@version 查询 registry
            → 不存在则发布精确已提交版本；存在且身份匹配则跳过上传
         ↓  幂等收尾
@@ -40,7 +40,7 @@ tag vX.Y.Z（插件语义）/ GitHub Release / ClawHub
 - **版本落地** = 仅 Version Packages PR。普通 PR 不得修改任何
   `packages/*/package.json` 的 `version` 字段。
 - **Release cohort** = Version PR 落地提交 SHA（merge / squash 皆可，身份是
-  对第一父提交的复现，不是提交形态）。重试与每周窗口都从该 SHA 构建；
+  对第一父提交的复现，不是提交形态）。重试与每日窗口都从该 SHA 构建；
   之后 main 的新变化不会泄漏进已规划的发布。
 - **精确版本发布** = 按精确 `name@version` 查询 registry：不存在 → 发布；
   存在且来源匹配（gitHead = cohort SHA）→ 跳过上传并补齐收尾；冲突 /
@@ -94,10 +94,16 @@ runtime pin、或"因为一起发布就让版本相同"。
   火车（`version-packages.yml`；merge / squash 皆由复现证明身份）。
 - **恢复 / 手动**：Actions → Publish to npm → Run，可指定 `cohort_sha`
   （留空 = 自动探测最新 cohort）。
-- **每周窗口**（周五 04:00 UTC）：只做对账——补齐待发布 cohort 与未完成收尾；
+- **每日窗口**（04:00 UTC）：只做对账——补齐待发布 cohort 与未完成收尾；
   永不制造版本。无 cohort 且 registry 已含 main 上的全部精确版本 → 成功空跑；
   无 cohort 但 main 上有版本在 registry 缺失 → **断链告警**（exit 1 +
-  `::error::`，PRI-922：squash 合并曾让整条 npm 链静默停摆）。
+  `::error::`，PRI-922：squash 合并曾让整条 npm 链静默停摆）。PRI-986：窗口
+  原为每周五，周一落地的 cohort 要等四天才能发布。
+- **每日频道预演**（06:00 UTC，`release-metadata.yml`）：定时跑一次签名频道的
+  全矩阵 **dry-run**，证明发布通路是活的而不发布任何东西。发布仍是人的决策：
+  工作流对 schedule 事件拒绝 `mode=publish`；定时运行从线上频道指针推导
+  `data_schema_forward_readable_from`，手动 dispatch 仍必须显式传入（盲填的
+  默认值不是证据，PRI-853）。
 
 Version PR 机器人（`changesets/action`，已锁版本）**必须**配置
 `PD_VERSION_PR_TOKEN` secret（细粒度 PAT：contents:write +
