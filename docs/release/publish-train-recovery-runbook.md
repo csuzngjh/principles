@@ -22,7 +22,7 @@ remaining packages must publish from the SAME cohort.
   and the leg reconciles instead of uploading. No version is ever
   re-uploaded.
 - Closing steps (tag `vX.Y.Z`, GitHub Release, ClawHub) run in a separate
-  `publish-finalize` job AFTER all seven npm legs. Their failure is
+  `publish-finalize` job AFTER all eight npm legs. Their failure is
   visible but blocks nothing that has not already uploaded; re-dispatching
   retries them idempotently.
 
@@ -38,9 +38,16 @@ gh workflow run publish-preflight.yml --ref main \
 Verifies registry connectivity, per-package exact state against the
 cohort manifests, the static dependency plan (ranges + topological
 order), the tools checkout, and (when given) the validation evidence. The
-optional rehearsal job then runs all seven legs in `dry_run` mode: real
+optional rehearsal job then runs all eight legs in `dry_run` mode: real
 control path, real cohort builds, real `npm pack` — **no upload**. A
 rehearsal is never evidence of a published version.
+
+Adding a publishable package means wiring it in three places at once — the
+train's `TRAIN_ORDER`, its own leg in both workflows, and a build branch in
+the publish action. Drill 8 of `scripts/__tests__/publish-recovery.test.ts`
+derives the set from the package manifests and fails the merge if any of the
+three drifts (PRI-979: `@principles/workbuddy-adapter` shipped with none of
+them, and the train only noticed at dispatch time).
 
 ## Step 2 — recover with reused validation evidence
 

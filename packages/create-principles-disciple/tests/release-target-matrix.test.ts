@@ -228,22 +228,24 @@ describe('native release target matrix', () => {
     // error tolerance and no always/failure overrides.
     expect(serialJob).not.toContain('continue-on-error');
     expect(serialJob).not.toMatch(/if:\s*(always|failure)\(\)/);
-    // PRI-886: the publish action is loaded FROM the tools checkout, not
-    // the cohort workspace — tooling fixes must never require a new cohort.
-    const serialUsages =
-      serialJob.match(/uses: \.\/release-tools\/\.github\/actions\/publish-npm-package/g) ?? [];
-    expect(serialUsages).toHaveLength(7);
-
+    // The step list below IS the dependency order (one job, no matrix).
     const order = [...serialJob.matchAll(/pkg_dir: ([a-z-]+)\n/g)].map((match) => match[1] ?? '');
     expect(order).toEqual([
       'principles-core',
       'install-layout',
       'host-runtime',
       'codex-adapter',
+      'workbuddy-adapter',
       'openclaw-plugin',
       'pd-cli',
       'create-principles-disciple',
     ]);
+    // The publish action is loaded FROM the tools checkout, one use per leg
+    // (PRI-886). Both counts are derived from the list above so the ONLY
+    // place a new package must be added here is that list.
+    const serialUsages =
+      serialJob.match(/uses: \.\/release-tools\/\.github\/actions\/publish-npm-package/g) ?? [];
+    expect(serialUsages).toHaveLength(order.length);
     const at = (name: string): number => order.indexOf(name);
     // install-layout precedes host-runtime: host-runtime declares an EXACT
     // runtime dependency on @principles/install-layout@0.1.0 (currently
@@ -252,6 +254,11 @@ describe('native release target matrix', () => {
     expect(at('install-layout')).toBeLessThan(at('host-runtime'));
     expect(at('host-runtime')).toBeLessThan(at('codex-adapter'));
     expect(at('codex-adapter')).toBeLessThan(at('pd-cli'));
+    // workbuddy-adapter precedes pd-cli for the same reason: @principles/pd-cli
+    // declares a runtime dependency on it (commands/workbuddy-worker), so the
+    // pd-cli leg's dependency preflight must see it already published. PRI-979:
+    // this leg did not exist at all, and the train only noticed at dispatch.
+    expect(at('workbuddy-adapter')).toBeLessThan(at('pd-cli'));
     // openclaw-plugin precedes pd-cli: @principles/pd-cli declares a runtime
     // dependency on principles-disciple (the plugin, ^2.0.2 at the cohort).
     // Publishing pd-cli first makes its `check_resolvable` preflight fail
@@ -291,7 +298,7 @@ describe('native release target matrix', () => {
     expect(finalizeYml).toMatch(/GH_TOKEN: \$\{\{ inputs\.github_token \}\}/);
     expect(finalizeYml).toMatch(/CLAWHUB_TOKEN: \$\{\{ inputs\.clawhub_token \}\}/);
     const npmTokenUsages = serialJob.match(/npm_token: \$\{\{ secrets\.NPM_TOKEN \}\}/g) ?? [];
-    expect(npmTokenUsages).toHaveLength(7);
+    expect(npmTokenUsages).toHaveLength(order.length);
     const finalizeJobStart = publishWorkflow.indexOf('publish-finalize:');
     expect(finalizeJobStart).toBeGreaterThan(0);
     const finalizeJob = publishWorkflow.slice(finalizeJobStart);

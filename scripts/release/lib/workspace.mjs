@@ -8,15 +8,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-export const PUBLISHABLE_DIRS = [
-  'principles-core',
-  'install-layout',
-  'host-runtime',
-  'codex-adapter',
-  'pd-cli',
-  'openclaw-plugin',
-  'create-principles-disciple',
-];
+// Publishability is a manifest fact, not a list: `loadWorkspace().publishable`
+// below derives it from each package's `private` flag. The former hand-copied
+// inventory was removed (PRI-979) because a second list that a new package
+// must be added to by hand is exactly how @principles/workbuddy-adapter
+// drifted out of the release; the train's order is checked against this
+// derivation by drill 8 of scripts/__tests__/publish-recovery.test.ts.
 
 // C4 hard rules (SPEC §14): left package entering the final release plan
 // REQUIRES the right package to be in it too. This list is deliberately the
