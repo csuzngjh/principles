@@ -147,3 +147,14 @@ E2E-01（插件发现）由 installer-run + installed-injection 的真实引擎�
 
 - 本 session 代码改动：单一 PR revert 即可（G1 有独立测试，revert 后 S2 在 D 盘机器恢复 SKIP——即回到已知状态）。
 - 运行时回滚：`host.workbuddy.enabled: false`（flag-off = 中性 JSON + exit 0 + 可观察 skip）；卸载 = installer uninstall（仅删 PD-owned 条目）；`pd health --host workbuddy` 提供结构化诊断。
+
+## 11. E2E-06 同链断言收口（2026-10-15 补充）
+
+针对后续独立核查提出的「审批行与激活行各自存在，但未证明属于同一治理链」问题，本 PR 补充严格测试：
+
+- `e2e-console-owner-loop.mjs` 仅将已批准的 `prompt` 通道行计入审批通过；以 `artifactId` 精确关联审批和激活；核验 `activationId`、`prompt_activate` 行为、审批/激活时间顺序及 `promptInjectionRoute.hostKind=workbuddy`、`status=confirmed`。因学习链最终撤回，允许关联的激活行处于 `deactivated`，不能把 flag-off 误判为注入失败。
+- 对带 `e2e-results.json` 的学习 lab，从 `owner-approval` 原始收据固定预期 artifact/activation 身份；历史 lab 若无该收据，仅可报告「同 artifact 行关联」，不能假称同次实验的收据已验证。
+- `console-owner-loop-assertions.regression.mjs` 有 11 个 Node 内置测试，覆盖合法同链、错误通道、不匹配 artifact/activation、非 WorkBuddy 宿主、路由未确认、时间倒序/无效、字段缺失与收据不可解析。已纳入根 `test:guard-contracts`，通过 `verify:merge` 持续执行。
+- 基于 `e2e-installed-learn-1792047098456` 的真实 Console API 验证：**5/5 PASS**；`--artifact-id definitely-not-this-lab` 故意篡改预期身份：**3 PASS / 2 FAIL，exit 1**。两个场景均在隔离治理 workspace 内只读运行，未产生新的模型请求。
+- `governance/experience` PASS 表示服务返回成功且有解析后的 schemaVersion，**不表示其业务 readiness 一定健康**；该 lab 的 `primaryAttention=degraded` 应如实保留。
+- **证据基线声明**：原先 17/17 真实学习链 `e2e-evaluation.json` 明确记载 `sourceCommit=3846fea63`；它支持已运行链路，但不能冒充 #2038 新提交的完整学习链重跑。收口仅复验 Console E2E、反例、相关工程门禁。Node 20、GUI /hooks、resume/compact、真实自然 Pain 自动触发完整学习场景仍维持原有未覆盖状态。

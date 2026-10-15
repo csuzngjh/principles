@@ -25,17 +25,20 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { evaluateConsoleOwnerChain, expectedChainFromResults } from './lib/console-owner-loop-assertions.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const SERVER = path.join(REPO, 'packages', 'pd-console', 'dist', 'server.js');
 const LAB_ROOT = process.env.WB_E2E_LAB || path.resolve(REPO, '../../../wb-probe-lab');
 
 function parseArgs(argv) {
-  const args = { gov: undefined, port: 0, json: undefined };
+  const args = { gov: undefined, port: 0, json: undefined, artifactId: undefined, activationId: undefined };
   for (let i = 2; i < argv.length; i++) {
     if (argv[i] === '--gov') args.gov = argv[++i];
     else if (argv[i] === '--port') args.port = Number(argv[++i]);
     else if (argv[i] === '--json') args.json = argv[++i];
+    else if (argv[i] === '--artifact-id') args.artifactId = argv[++i];
+    else if (argv[i] === '--activation-id') args.activationId = argv[++i];
   }
   return args;
 }
@@ -93,6 +96,15 @@ async function main() {
   }
   record('workspace', 'PASS', `gov=${gov}`);
 
+  // A scenario receipt pins this query to the SAME learning run, not just any old rows.
+  const receipt = path.resolve(gov, '..', '..', '..', 'e2e-results.json');
+  const fromLab = fs.existsSync(receipt) ? expectedChainFromResults(JSON.parse(fs.readFileSync(receipt, 'utf8'))) : null;
+  const expected = { ...(fromLab ?? {}),
+    ...(args.artifactId !== undefined ? { artifactId: args.artifactId } : {}),
+    ...(args.activationId !== undefined ? { activationId: args.activationId } : {}) };
+  console.error('[chain-provenance] ' + (fromLab ? 'lab receipt' : 'matched rows only') +
+    ' artifact=' + (expected.artifactId ?? 'unbound') + ' activation=' + (expected.activationId ?? 'unbound'));
+
   const port = args.port || 3900 + Math.floor(Math.random() * 90);
   const child = spawn(process.execPath, [SERVER, '--workspace', gov, '--port', String(port), '--no-auth', '--host', '127.0.0.1'], {
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -118,39 +130,33 @@ async function main() {
 
   let failed = false;
   try {
-    // 2. Approvals: the chain's approved prompt-channel approval must be visible.
-    const approvals = await getJson(`http://127.0.0.1:${port}/api/v1/approvals`);
+    // 2+3. Assert an approved PROMPT approval links by artifact to the activation.
+    // A healthy API with unrelated rows is a hard FAIL, never a false green.
+    const approvals = await getJson('http://127.0.0.1:' + port + '/api/v1/approvals');
     const approvalRows = dataArray(approvals.parsed?.data ?? approvals.parsed);
-    if (approvals.status !== 200 || !Array.isArray(approvalRows)) {
-      record('approvals-visible', 'FAIL', `status=${approvals.status} shape=${JSON.stringify(approvals.body).slice(0, 200)}`);
-      failed = true;
-    } else {
-      const approved = approvalRows.filter((row) => row && typeof row === 'object' && row.status === 'approved');
-      const promptApproved = approved.filter((row) => row.channel === 'prompt' || row.channel === 'prompt_channel' || String(row.artifact_id ?? row.artifactId ?? '').includes('prompt'));
-      record('approvals-visible', approved.length > 0 ? 'PASS' : 'FAIL',
-        `${approvalRows.length} approval row(s), ${approved.length} approved, ${promptApproved.length} prompt-channel approved; sample=${JSON.stringify(approvalRows[0] ?? {}).slice(0, 220)}`);
-      if (approved.length === 0) failed = true;
-    }
-
-    // 3. Activations with the workbuddy target-host query (third-host contract).
-    const activations = await getJson(`http://127.0.0.1:${port}/api/v1/activations?host=workbuddy`);
-    const activationRows = dataArray(activations.parsed?.data ?? activations.parsed);
-    if (activations.status !== 200) {
-      record('activations-workbuddy', 'FAIL', `status=${activations.status} body=${activations.body.slice(0, 200)}`);
-      failed = true;
-    } else if (!Array.isArray(activationRows)) {
-      record('activations-workbuddy', 'FAIL', `unexpected shape: ${JSON.stringify(activations.body).slice(0, 200)}`);
-      failed = true;
-    } else {
-      const sample = activationRows[0] ?? {};
-      record('activations-workbuddy', activationRows.length > 0 ? 'PASS' : 'FAIL',
-        `${activationRows.length} activation row(s) under host=workbuddy; sample=${JSON.stringify(sample).slice(0, 260)}`);
-      if (activationRows.length === 0) failed = true;
-    }
+    const activations = await getJson('http://127.0.0.1:' + port + '/api/v1/activations?host=workbuddy');
+    const activationData = activations.parsed?.data ?? activations.parsed;
+    const activationRows = dataArray(activationData);
+    const chain = evaluateConsoleOwnerChain(approvalRows, activationRows, activationData?.promptInjectionRoute, expected);
+    const approvedOk = approvals.status === 200 && Array.isArray(approvalRows) &&
+      chain.approvedPrompts > 0 &&
+      (expected.artifactId === undefined || approvalRows.some((row) =>
+        row?.artifactId === expected.artifactId && row.channel === 'prompt' && row.status === 'approved'));
+    record('approvals-visible', approvedOk ? 'PASS' : 'FAIL',
+      'HTTP=' + approvals.status + ', approvedPrompts=' + chain.approvedPrompts +
+      ', expectedArtifact=' + (expected.artifactId ?? 'not-pinned'));
+    if (!approvedOk) failed = true;
+    const activationOk = activations.status === 200 && Array.isArray(activationRows) && chain.ok;
+    record('activations-workbuddy', activationOk ? 'PASS' : 'FAIL',
+      'HTTP=' + activations.status + ', route=' + String(chain.routeStatus) +
+      ', matched=' + JSON.stringify(chain.matches).slice(0, 220) +
+      ', errors=' + chain.errors.join('; '));
+    if (!activationOk) failed = true;
 
     // 4. Governance experience read-model.
     const experience = await getJson(`http://127.0.0.1:${port}/api/v1/governance/experience`);
-    const expOk = experience.status === 200 && experience.parsed != null;
+    const expOk = experience.status === 200 && experience.parsed?.success === true &&
+      experience.parsed?.data?.schemaVersion !== undefined;
     record('governance-experience', expOk ? 'PASS' : 'FAIL',
       expOk ? `status=200 keys=${Object.keys(experience.parsed?.data ?? experience.parsed ?? {}).slice(0, 8).join(',')}` : `status=${experience.status} body=${experience.body.slice(0, 160)}`);
     if (!expOk) failed = true;
