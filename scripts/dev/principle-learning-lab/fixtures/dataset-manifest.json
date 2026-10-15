@@ -1,0 +1,32 @@
+{
+  "schemaVersion": "pd-principles-dataset.v0.1",
+  "datasetId": "PLE-PILOT-01",
+  "datasetVersion": "0.1.0",
+  "episodeId": "PLE-PILOT-01",
+  "principleFamilyId": "verification-sufficiency-vs-efficiency",
+  "leakageGroupId": "PLE-PILOT-01-svc-config",
+  "episodeKind": "synthetic_pilot",
+  "synthetic": true,
+  "syntheticMarkers": ["synthetic_environment", "synthetic_feedback"],
+  "createdAt": "2026-10-15",
+  "specRef": "docs/specs/SPEC-PD-PL-001-principle-learning-dataset-v0.3.md",
+  "auditRefs": [
+    "docs/audit/SPEC-PD-PL-001-v0.3-PR-00A-reality-audit-20261015.md",
+    "docs/audit/SPEC-PD-PL-001-v0.3-PR-00B-pilot-review-20261015.md"
+  ],
+  "linearRefs": ["PRI-966", "PRI-967", "PRI-968", "PRI-969", "PRI-970", "PRI-971"],
+  "files": {
+    "episodes": ["episodes/PLE-PILOT-01.json"],
+    "histories": ["histories/E0.json", "histories/EA.json", "histories/EB.json", "histories/EN.json"],
+    "probes": ["probes/P1.json", "probes/P2.json", "probes/P3.json", "probes/P4.json"],
+    "judgments": ["judgments/gold.json", "judgments/calibration.json"],
+    "splits": "splits.json",
+    "worldManual": "world-manual.json"
+  },
+  "notes": [
+    "All histories and probe environments are SYNTHETIC research worlds (SPEC v0.3 §4.1).",
+    "No real Owner, Pain, Activation, or production Principle identity is represented.",
+    "Gold decision spaces and canary strings are judge-only; they must never enter actor input.",
+    "Dataset layout intentionally lives inside the lab (scripts/dev/principle-learning-lab/fixtures) following the closure-lab precedent, instead of the SPEC §6.1 suggested datasets/ root; the SPEC wording is a suggestion ('建议'), repository habit wins."
+  ]
+}

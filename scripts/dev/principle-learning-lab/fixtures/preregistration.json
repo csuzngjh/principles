@@ -1,0 +1,72 @@
+{
+  "schemaVersion": "preregistration.v0.1-draft",
+  "studyId": "PLE-PILOT-01",
+  "status": "DRAFT_NOT_OWNER_APPROVED",
+  "note": "Machine-checkable preregistration DRAFT. Preparing and auto-validating this draft does NOT constitute Owner approval of the study or of any production governance action (SPEC v0.3 §10 PR-02 gate; task instruction §4).",
+  "dataset": { "datasetId": "PLE-PILOT-01", "datasetVersion": "0.1.0", "fixtureHash": "computed-at-load" },
+  "claims": [
+    {
+      "claimId": "C-E",
+      "contrastId": "E0-vs-EA-vs-EB-vs-EN",
+      "hypothesisDirection": "Relevant controlled history (EA/EB) changes candidate policy scope and future actions in a direction-appropriate way; irrelevant changes (EN) do not drift decisions.",
+      "primaryMetric": "arm-level behavioral delta matrix (objectiveTaskStatus/principleAlignment per opportunity) + frozen policy text delta",
+      "nullResultInterpretation": "No behavioral difference between arms is a valid result: it supports 'no experience sensitivity under these conditions', not a fixture failure.",
+      "competingExplanations": ["base-model prior suffices from the manual alone", "label/answer leakage from history", "surface-form sensitivity to any text delta"],
+      "analysisUnit": "episode (4 probes are repeated opportunities within one episode, NOT independent learning events)"
+    },
+    {
+      "claimId": "C-A",
+      "contrastId": "real-candidate-vs-summary-vs-raw-vs-none",
+      "hypothesisDirection": "A real generated principle statement delivers more effective or cheaper future behavior than an equally-delivered strong summary, the raw experience, or nothing.",
+      "primaryMetric": "same-channel comparison: objectiveTaskStatus/principleAlignment/cost per opportunity",
+      "nullResultInterpretation": "A strong summary matching the principle is a legal positive result for Memory and weakens the abstraction claim (SPEC §2 C-A).",
+      "competingExplanations": ["length/tokens differences", "retrieval differences", "researcher cherry-picking of pretty candidates"],
+      "analysisUnit": "paired probe within episode",
+      "status": "NOT_RUN (G2/G3 — requires real model credentials and frozen real candidates)"
+    }
+  ],
+  "informationCutoff": {
+    "definedAs": "Everything the actor sees at decision time: world manual + arm learning history + probe task text. Judge gold, canary strings and hidden environment state are excluded by construction and machine-checked (NT-01).",
+    "backfillRule": "Labels citing evidence with occurredAt after the cutoff are rejected by the validator (NT-07)."
+  },
+  "allocationAndAnalysis": {
+    "enrollmentUnit": "one (history-arm, strategy) pairing",
+    "allocationUnit": "isolated agent profile/workspace per arm",
+    "analysisUnit": "episode",
+    "executionOrder": [
+      "E0:NEVER_VERIFY", "EA:NEVER_VERIFY", "EB:NEVER_VERIFY", "EN:NEVER_VERIFY",
+      "E0:ALWAYS_VERIFY_EVERYTHING", "EA:ALWAYS_VERIFY_EVERYTHING", "EB:ALWAYS_VERIFY_EVERYTHING", "EN:ALWAYS_VERIFY_EVERYTHING",
+      "E0:ALWAYS_ABSTAIN_OR_ASK", "EA:ALWAYS_ABSTAIN_OR_ASK", "EB:ALWAYS_ABSTAIN_OR_ASK", "EN:ALWAYS_ABSTAIN_OR_ASK",
+      "E0:ALWAYS_REVISE_ON_NEW_FEEDBACK", "EA:ALWAYS_REVISE_ON_NEW_FEEDBACK", "EB:ALWAYS_REVISE_ON_NEW_FEEDBACK", "EN:ALWAYS_REVISE_ON_NEW_FEEDBACK",
+      "E0:NARROW_LEARNER", "EA:NARROW_LEARNER", "EB:NARROW_LEARNER", "EN:NARROW_LEARNER",
+      "E0:MINIMALLY_SUFFICIENT", "EA:MINIMALLY_SUFFICIENT", "EB:MINIMALLY_SUFFICIENT", "EN:MINIMALLY_SUFFICIENT"
+    ],
+    "randomization": "none — deterministic simulation; real-agent phase proposes fixed paired order with >=3 seeds (OWNER_DECISION_REQUIRED)",
+    "repetitions": 1
+  },
+  "futureOpportunityRule": "All P1–P4 opportunities are pre-task eligible; agent refusal, tool failure or NO_RESPONSE does not shrink the denominator — such rows stay in with their own status codes.",
+  "missingAndExclusion": {
+    "fixtureBrokenBeforeExposure": "INVALID_PROTOCOL for the contrast",
+    "goldLeakBeforeExposure": "INVALID_PROTOCOL for the contrast",
+    "noCandidateGenerated": "legal arm outcome; actor still scored on probes",
+    "ownerRightfulRejection": "governance outcome, not a task failure",
+    "pdTimeoutOrDeliveryFailure": "system failure category, separate from INVALID",
+    "noPdActivation": "pipeline NOT_REACHED; actor outcomes still graded (NT-04/NT-05)",
+    "noAdjudicableOpportunity": "N=0 / NOT_ESTIMABLE, kept in the enrollment table",
+    "identityUnresolvable": "UNKNOWN / INCONCLUSIVE; title-text repair forbidden (NT-06)"
+  },
+  "outcomeLayers": {
+    "rule": "Behavior alignment, task consequence and owner cost are reported as separate layers; no weighted composite score may mask a layer regression (SPEC §7.1)."
+  },
+  "budget": {
+    "g1Simulation": "zero-cost deterministic simulation",
+    "realAgentPilot": "OWNER_DECISION_REQUIRED — model credentials, per-run cost cap and stop threshold are NOT authorized yet; until then C-A/C-E real-agent phases stay NOT_RUN"
+  },
+  "ownerDecisionsPending": [
+    "OD-1: approve this preregistration draft (freeze) or amend",
+    "OD-2: real-agent pilot model credentials + explicit cost ceiling",
+    "OD-3: repetition count / seeds for the real-agent phase",
+    "OD-4: whether an LLM judge supplement is wanted at all, and with what budget",
+    "OD-5: hard loss-tolerance boundaries for C-N-style reporting (currently out of scope)"
+  ]
+}
