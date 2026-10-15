@@ -171,6 +171,29 @@ function makeWorkspace(): string {
 async function seedEvidenceNhrTask(workspaceDir: string): Promise<void> {
   const handle = await createRuntimeStateHandle({ workspaceDir, readonly: false });
   try {
+    // Real chain: only the Dreamer seed owns the canonical Pain.
+    const dreamerSeed = createPITaskDiagnosticJson({
+      dependencyTaskIds: [], channel: 'code_tool_hook', timeoutMs: 300_000,
+      inputArtifactRefs: [], outputArtifactRefs: [],
+    });
+    await handle.stateManager.createTask({
+      taskId: 'dreamer-evidence-cli-seed', taskKind: 'dreamer',
+      status: 'succeeded', attemptCount: 1, maxAttempts: 3,
+      diagnosticJson: JSON.stringify({
+        ...JSON.parse(dreamerSeed) as Record<string, unknown>,
+        sourcePainId: 'pain_001',
+      }),
+    });
+    await handle.stateManager.createTask({
+      taskId: 'scribe-evidence-cli-seed', taskKind: 'scribe',
+      status: 'succeeded', attemptCount: 1, maxAttempts: 3,
+      diagnosticJson: createPITaskDiagnosticJson({
+        dependencyTaskIds: ['dreamer-evidence-cli-seed'],
+        parentTaskId: 'dreamer-evidence-cli-seed',
+        channel: 'code_tool_hook', timeoutMs: 300_000,
+        inputArtifactRefs: [], outputArtifactRefs: [],
+      }),
+    });
     await handle.stateManager.createTask({
       taskId: TASK_ID,
       taskKind: 'artificer',
@@ -178,7 +201,8 @@ async function seedEvidenceNhrTask(workspaceDir: string): Promise<void> {
       attemptCount: 2,
       maxAttempts: 3,
       diagnosticJson: createPITaskDiagnosticJson({
-        dependencyTaskIds: [],
+        dependencyTaskIds: ['scribe-evidence-cli-seed'],
+        parentTaskId: 'scribe-evidence-cli-seed',
         channel: 'code_tool_hook',
         timeoutMs: 300_000,
         inputArtifactRefs: [],
