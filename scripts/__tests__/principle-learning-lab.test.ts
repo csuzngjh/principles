@@ -428,6 +428,8 @@ describe('G2 wiring preparation (PRI-971)', () => {
     expect(d1.payloadHash).toBe(d2.payloadHash);
     expect(d1.channel).toBe('research-same-channel-v1');
     expect(() => deliverPayload({ armId: 'A', content: 'x'.repeat(2001) })).toThrow(/budget/);
+    // Boundary equality: exactly-at-budget passes (EP-09 required-evidence #5).
+    expect(() => deliverPayload({ armId: 'A', content: 'x'.repeat(2000) })).not.toThrow();
     const none = deliverPayload({ armId: 'A0', content: null });
     expect(none.payloadText).toBe('');
     expect(composeActorPrompt({ taskText: 'T', delivery: d1 })).toContain('policy text here');
