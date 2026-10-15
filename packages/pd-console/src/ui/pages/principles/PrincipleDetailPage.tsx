@@ -26,6 +26,7 @@ import { ReceiptCoverageDisclosure, getReceiptSourceStatusLabelKey } from "../..
 import { formatDate } from "../../utils/format-date.js";
 import { localizeAggregatedBlocker } from "../../utils/blocker-localization.js";
 import { groupByReasonCode, formatGroupedReasonLine } from "../../utils/attention-presentation.js";
+import { splitReadingTitleBody } from "../../utils/reading-layout.js";
 import type { OwnerGovernanceView } from '@principles/core/runtime-v2';
 import type {
   PrincipleDetail,
@@ -519,6 +520,13 @@ export function PrincipleDetailPage() {
   const receiptPresentation = receipts?.status === 'ok'
     ? getReceiptPresentation(receipts.effectCount, receipts.presenceCount)
     : null;
+  // 切片1（R2/R3/R7）：标题/正文分层——h1 只承载短标题预览；known 路径的逐字
+  // 全文在下方 learned 块渲染（一次），unknown 路径在此处正文块渲染（一次）。
+  const learnedText = ownerDecision?.learnedPrinciple.status === 'known'
+    ? ownerDecision.learnedPrinciple.value.text
+    : undefined;
+  const learnedKnown = learnedText !== undefined;
+  const headlineLayout = splitReadingTitleBody(learnedText ?? principle.text);
 
   return (
     <PageShell>
@@ -531,11 +539,20 @@ export function PrincipleDetailPage() {
       {/* ── Layer 1: Conclusion ─────────────────────────────────────────── */}
       <section className="mb-8">
         <SectionTitle>{t("principles.detail.conclusion")}</SectionTitle>
-        <h1 className="text-[22px] font-semibold text-ink leading-snug mb-3">
-          {ownerDecision?.learnedPrinciple.status === 'known'
-            ? ownerDecision.learnedPrinciple.value.text
-            : principle.text}
+        <h1
+          className="text-[22px] font-semibold text-ink leading-snug mb-3"
+          data-testid="principle-detail-title"
+        >
+          {headlineLayout.title}
         </h1>
+        {headlineLayout.body !== null && !learnedKnown && (
+          <div
+            className="mb-3 text-[15px] leading-relaxed text-ink whitespace-pre-wrap break-words"
+            data-testid="principle-detail-body"
+          >
+            {headlineLayout.body}
+          </div>
+        )}
         {ownerDecision !== null && ownerDecision.learnedPrinciple.status !== 'known' && (
           <p className="text-amber text-[13px] leading-relaxed mb-3" data-testid="owner-decision-technical-note">
             {t("principles.detail.ownerDecision.technicalOriginalNote", {
@@ -603,8 +620,8 @@ export function PrincipleDetailPage() {
               </p>
               {ownerDecision.learnedPrinciple.status === 'known' ? (
                 <>
-                  <p className="mt-1 text-ink-2 text-[14px] leading-relaxed">
-                    {ownerDecision.learnedPrinciple.value.text}
+                  <p className="mt-1 text-ink-2 text-[15px] leading-relaxed whitespace-pre-wrap break-words">
+                    {learnedText}
                   </p>
                   <p className="mt-1 text-ink-4 text-[12px]">
                     {t("principles.detail.ownerDecision.sourceTierLabel", {

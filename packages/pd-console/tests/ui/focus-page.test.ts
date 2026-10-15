@@ -495,7 +495,10 @@ describe("FocusPage: unlinked note wiring contract (PRI-941)", () => {
     // would bypass that rule entirely and put `unlinked:pi-art-…` back on the
     // card, so this pins that the title comes from the selector only.
     expect(src).not.toMatch(/\{\s*group\.principleTitle\s*\}/);
-    expect(src).toContain("{displayTitle}");
+    // SPEC-PD-CONSOLE-READABILITY-002 切片1：标题经 splitReadingTitleBody 分层后
+    // 渲染 readingLayout.title（displayTitle 的短预览）；不变量不变——标题只
+    // 来自选择器，不直渲分组键。全文另由 candidate-body 容器承载。
+    expect(src).toContain("{readingLayout.title}");
   });
 });
 
