@@ -408,6 +408,6 @@ Show progress during update:
 
 ## 13. References
 
-- [PRODUCT_IDENTITY.md](../../PRODUCT_IDENTITY.md) - Product definition
-- [AGENTS.md](../../AGENTS.md) - Project guidelines
-- [ADR-0014](../adr/0014-mvp-first-strategy-and-product-pivot.md) - MVP-First strategy
+- [PRODUCT_IDENTITY.md](../../product/PRODUCT_IDENTITY.md) - Product definition
+- [`AGENTS.md`](../../../AGENTS.md) - Project guidelines
+- [ADR-0014](../../adr/0014-mvp-first-strategy-and-product-pivot.md) - MVP-First strategy

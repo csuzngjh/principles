@@ -1050,8 +1050,8 @@ activation:
 
 ## 11. 关联文档
 
-- [ADR-0006](../adr/0006-hybrid-activation-mechanism.md) — 决策依据
-- [ADR-0004](../adr/0004-l2-auto-correction-and-replay.md) — code_tool_hook 通道的安全机制
+- ADR-0006（5 通道混合激活机制）— 决策依据；该 ADR 文件已退役，不在本仓库
+- ADR-0004（L2 自动校正与回放）— code_tool_hook 通道的安全机制；该 ADR 文件已退役，不在本仓库
 - [`PD_ARCHITECTURE_OVERVIEW.md`](./PD_ARCHITECTURE_OVERVIEW.md) — 上层视图
 - [`INTERNALIZATION_PIPELINE.md`](./INTERNALIZATION_PIPELINE.md) — 上游数据流
 - [`COMPONENTS.md`](./COMPONENTS.md) — 组件目录

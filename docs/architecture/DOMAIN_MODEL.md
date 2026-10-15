@@ -474,13 +474,13 @@ UI 文案可使用同义词；**代码、Schema、ADR、issue title 必须使用
 | [`INTERNALIZATION_PIPELINE.md`](./INTERNALIZATION_PIPELINE.md) | Pipeline 设计，使用本文术语 |
 | [`ACTIVATION_CHANNELS.md`](./ACTIVATION_CHANNELS.md) | 通道详细，扩展本文 §3 |
 | [`COMPONENTS.md`](./COMPONENTS.md) | 组件目录，引用本文实体 |
-| [ADR-0001](../adr/0001-runtime-v2-service-boundaries.md) | 服务边界 |
-| [ADR-0002](../adr/0002-hard-internalization-core-boundary.md) | Hard internalization 边界 |
-| [ADR-0003](../adr/0003-peer-agent-state-machine-orchestration.md) | Peer Agent 状态机（PIArtifact 起源）|
-| [ADR-0004](../adr/0004-l2-auto-correction-and-replay.md) | L2 自动校正与 GoldenTrace |
+| ADR-0001（Runtime V2 服务边界；该 ADR 文件已退役，不在本仓库） | 服务边界 |
+| ADR-0002（硬内化核心边界；该 ADR 文件已退役，不在本仓库） | Hard internalization 边界 |
+| ADR-0003（Peer Agent 状态机编排；该 ADR 文件已退役，不在本仓库） | Peer Agent 状态机（PIArtifact 起源）|
+| ADR-0004（L2 自动校正与回放；该 ADR 文件已退役，不在本仓库） | L2 自动校正与 GoldenTrace |
 | [ADR-0005](../adr/0005-nocturnal-internalization-merger.md) | Nocturnal 合并（NocturnalArtifact 弃用）|
-| [ADR-0006](../adr/0006-hybrid-activation-mechanism.md) | 5 通道混合激活（Approval 等概念引入）|
-| [ADR-0007](../adr/0007-cli-vs-console-audience-separation.md) | cli / console 受众分离 |
+| ADR-0006（5 通道混合激活机制；该 ADR 文件已退役，不在本仓库） | 5 通道混合激活（Approval 等概念引入）|
+| ADR-0007（pd-cli 与 pd-console 受众分离；该 ADR 文件已退役，不在本仓库） | cli / console 受众分离 |
 
 ---
 
