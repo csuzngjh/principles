@@ -31,7 +31,8 @@
     "trust/root.json",
     "_release/product-identity.json",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "NOTICE"
   ],
   "scripts": {
     "build": "tsc",

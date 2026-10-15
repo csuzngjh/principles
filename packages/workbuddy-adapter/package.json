@@ -31,7 +31,9 @@
   "files": [
     "dist",
     "plugin",
-    "README.md"
+    "README.md",
+    "LICENSE",
+    "NOTICE"
   ],
   "scripts": {
     "build": "tsc",

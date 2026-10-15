@@ -30,7 +30,9 @@
     "dist",
     "templates",
     "assets",
-    "openclaw.plugin.json"
+    "openclaw.plugin.json",
+    "LICENSE",
+    "NOTICE"
   ],
   "publishConfig": {
     "access": "public"
