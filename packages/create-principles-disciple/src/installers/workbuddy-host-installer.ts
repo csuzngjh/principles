@@ -76,7 +76,7 @@ export const WORKBUDDY_MARKETPLACE_NAME = 'principles-disciple-market';
 export const WORKBUDDY_PLUGIN_KEY = `${WORKBUDDY_PLUGIN_NAME}@${WORKBUDDY_MARKETPLACE_NAME}`;
 
 /** Engine CLI shipped with WorkBuddy Desktop (probe P01 frozen path). */
-const WORKBUDDY_ENGINE_RELATIVE = ['resources', 'app.asar.unpacked', 'cli', 'dist', 'codebuddy-lite-wb.mjs'];
+export const WORKBUDDY_ENGINE_RELATIVE = ['resources', 'app.asar.unpacked', 'cli', 'dist', 'codebuddy-lite-wb.mjs'];
 
 /** Engine command success markers (frozen by probe P01 regexes). */
 const MARKETPLACE_ADD_OK = /added successfully|already/i;
@@ -176,24 +176,70 @@ export function resolveWorkbuddyPaths(homeDir: string): WorkbuddyPaths {
 }
 
 /**
+ * Enumerate Windows FIXED drives only. Letters can represent network or
+ * removable volumes; never treat A-Z as equivalent to fixed media.
+ * A failed/unsupported probe falls back to explicit ProgramFiles/SystemDrive
+ * paths, not a guess across mapped network drives.
+ */
+function workbuddyFixedDriveLetters(): string[] {
+  if (process.platform !== 'win32') return [];
+  const probe = spawnSync('powershell.exe', [
+    '-NoProfile', '-NonInteractive', '-Command',
+    '[System.IO.DriveInfo]::GetDrives() | Where-Object { $_.DriveType -eq [System.IO.DriveType]::Fixed } | ForEach-Object { $_.Name }',
+  ], { encoding: 'utf8', windowsHide: true, timeout: 5_000, maxBuffer: 8 * 1024 });
+  if (probe.error || probe.status !== 0 || typeof probe.stdout !== 'string') return [];
+  return probe.stdout.split(/\r?\n/).map((line) => line.trim())
+    .filter((root) => /^[A-Za-z]:\\$/.test(root))
+    .map((root) => root.slice(0, 2).toUpperCase());
+}
+
+/**
+ * Candidate Program Files roots probed for the WorkBuddy engine, in order:
+ * the env-declared Program Files (both variants), the SystemDrive root, then —
+ * Windows only — the same directories on each discovered fixed drive.
+ *
+ * G1 (2026-10-15): a Desktop install outside the SystemDrive's Program Files
+ * (e.g. D:\Program Files\WorkBuddy, the machine this gap was proven on)
+ * previously resolved to "engine not found", so install skipped its engine
+ * verification and detect() reported an absent engine on a real installation.
+ */
+export function workbuddyEngineCandidateRoots(
+  env: Record<string, string | undefined> = process.env,
+  fixedDriveLetters?: readonly string[],
+): string[] {
+  const roots: string[] = [];
+  const push = (value: unknown): void => {
+    if (typeof value === 'string' && value.length > 0 && !roots.includes(value)) roots.push(value);
+  };
+  push(env.ProgramFiles);
+  push(env['ProgramFiles(x86)']);
+  const systemDrive = typeof env.SystemDrive === 'string' ? env.SystemDrive : '';
+  if (systemDrive.length > 0) push(path.join(systemDrive, 'Program Files'));
+  if (process.platform === 'win32') {
+    for (const drive of fixedDriveLetters ?? workbuddyFixedDriveLetters()) {
+      if (!/^[A-Za-z]:$/.test(drive)) continue;
+      if (systemDrive.length > 0 && drive.toLowerCase() === systemDrive.toLowerCase()) continue;
+      push(path.win32.join(drive + path.win32.sep, 'Program Files'));
+      push(path.win32.join(drive + path.win32.sep, 'Program Files (x86)'));
+    }
+  }
+  return roots;
+}
+
+/**
  * Resolve the WorkBuddy engine CLI path.
  *
  * Order: PD_WORKBUDDY_ENGINE / WB_ENGINE env override (probe convention) →
- * the Desktop install location under Program Files (frozen by probe P01).
- * The engine is NOT exposed on PATH — absence is a detectable, reportable
- * fact, never a guess.
+ * the Desktop install location under Program Files (frozen by probe P01),
+ * multi-drive per workbuddyEngineCandidateRoots. The engine is NOT exposed on
+ * PATH — absence is a detectable, reportable fact, never a guess.
  */
 export function resolveWorkbuddyEnginePath(): string | undefined {
   for (const envName of ['PD_WORKBUDDY_ENGINE', 'WB_ENGINE']) {
     const value = process.env[envName];
     if (value && value.length > 0 && existsSync(value)) return value;
   }
-  const roots = [
-    process.env.ProgramFiles,
-    process.env['ProgramFiles(x86)'],
-    process.env.SystemDrive ? path.join(process.env.SystemDrive, 'Program Files') : undefined,
-  ].filter((v): v is string => typeof v === 'string' && v.length > 0);
-  for (const root of roots) {
+  for (const root of workbuddyEngineCandidateRoots()) {
     const candidate = path.join(root, 'WorkBuddy', ...WORKBUDDY_ENGINE_RELATIVE);
     if (existsSync(candidate)) return candidate;
   }
