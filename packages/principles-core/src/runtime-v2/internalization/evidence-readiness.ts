@@ -26,11 +26,13 @@
  *
  * Reason codes (SPEC-PD-IAER-001 FR-04 stable IDs): `owner_behavior_examples_required`,
  * `owner_behavior_examples_invalid`, `owner_behavior_examples_stale`,
- * `owner_behavior_examples_scope_mismatch`. Stale/scope codes are part of the
- * stable contract for downstream consumers (A2 wiring, FR-04 recovery UX);
- * this pure gate reports `required` (nothing provided) or `invalid`
- * (provided but rejected) — the assembler owns scope/staleness rejection
- * today, and its failures surface here as `invalid`.
+ * `owner_behavior_examples_scope_mismatch`. This pure gate reports `required`
+ * (nothing provided), `invalid` (provided but rejected), and — since B1
+ * (PRI-983) — `stale` / `scope_mismatch` when the assembler fails with the
+ * typed `OwnerEvidenceScopeError` (structural classification, never message
+ * sniffing): unresolvable pain/row references are `stale` (FR-03: cleaned
+ * trajectories must never be silently reused), cross-session selections are
+ * `scope_mismatch`. Plain errors stay `invalid` (A2 behavior unchanged).
  *
  * Channel authority: whether the target channel requires Owner evidence at
  * all is DECLARED by the caller (`channelRequiresOwnerEvidence`) — this module
@@ -59,6 +61,27 @@ export interface OwnerEvidenceSelection {
   readonly positiveToolCallIds: readonly number[];
   /** Owner's natural-language desired outcome — non-empty. */
   readonly ownerDesiredOutcome: string;
+  /**
+   * B1 (PRI-983, SPEC FR-03): attach revision — 1 on first attach, +1 on every
+   * re-attach. ABSENT = legacy record written before revision tracking.
+   */
+  readonly revision?: number;
+  /**
+   * B1 (FR-03): `sha256:<hex>` content digest over the successfully assembled
+   * pack (canonical JSON, same convention as the readiness verdict hash).
+   * Resume re-assembles and refuses on mismatch — a silently stale reference
+   * can never re-enter the model (FR-03 "拒绝无声复用旧引用").
+   * ABSENT = legacy record; resume refuses un-digested selections.
+   */
+  readonly contentDigest?: string;
+  /**
+   * B1 (FR-03): authorized Owner operation label that wrote this selection
+   * (e.g. `cli:attach` / `cli:attach:<decidedBy>`). Evidence is only written
+   * by an explicit Owner operation — never by an internal agent (C-04).
+   */
+  readonly ownerOperation?: string;
+  /** B1 (FR-03): ISO timestamp of the attach. ABSENT = legacy. */
+  readonly attachedAt?: string;
 }
 
 /** Stable reason codes (SPEC-PD-IAER-001 FR-04). Do not rename. */
@@ -67,6 +90,74 @@ export type OwnerEvidenceReasonCode =
   | 'owner_behavior_examples_invalid'
   | 'owner_behavior_examples_stale'
   | 'owner_behavior_examples_scope_mismatch';
+
+// ── typed assembly-failure classification (B1, PRI-983) ────────────────────
+//
+// The plugin assembler previously failed evidence gaps with plain Errors, so
+// every assembly failure could only surface as `invalid_evidence` (A2
+// contract note). B1 adds a STRUCTURAL error classification — never message
+// sniffing — so resume can distinguish "trajectory cleaned/changed" (stale)
+// from "cross pain/session selection" (scope mismatch), the two stable FR-04
+// codes the recovery UX must separate.
+//
+// Cross-bundle note: the plugin bundle INLINES @principles/core (esbuild,
+// core not in `external`), so an `instanceof` check against this module's
+// class would fail across the pd-cli → plugin-bundle boundary. The stable
+// contract is therefore structural: the reserved error `name` plus a
+// validated `ownerEvidenceScopeKind` property (rc-5 hasOwn-style read, rc-1:
+// kind is validated, not trusted).
+
+/** Reserved error name for Owner evidence scope failures. Do not rename. */
+export const OWNER_EVIDENCE_SCOPE_ERROR_NAME = 'OwnerEvidenceScopeError';
+
+/**
+ * Structured kinds of an evidence-scope assembly failure:
+ *   - `pain_not_found` / `tool_call_not_found`: the trajectory the selection
+ *     references does not resolve (cleaned or wrong workspace) → the stable
+ *     STALE code (FR-03: a cleaned trajectory must never be silently reused);
+ *   - `session_mismatch`: a selected row belongs to another session → the
+ *     stable SCOPE code (SPEC FR-04 cross pain/session).
+ */
+export type OwnerEvidenceScopeMismatchKind =
+  | 'pain_not_found'
+  | 'tool_call_not_found'
+  | 'session_mismatch';
+
+const SCOPE_MISMATCH_KINDS: ReadonlySet<string> = new Set([
+  'pain_not_found',
+  'tool_call_not_found',
+  'session_mismatch',
+]);
+
+/** Map a structured scope failure to its stable FR-04 reason code. */
+function reasonCodeForScopeKind(kind: OwnerEvidenceScopeMismatchKind): OwnerEvidenceReasonCode {
+  return kind === 'session_mismatch'
+    ? 'owner_behavior_examples_scope_mismatch'
+    : 'owner_behavior_examples_stale';
+}
+
+/** Build the typed error the plugin assembler throws for scope failures. */
+export function createOwnerEvidenceScopeError(
+  kind: OwnerEvidenceScopeMismatchKind,
+  message: string,
+): Error {
+  const error = new Error(message);
+  error.name = OWNER_EVIDENCE_SCOPE_ERROR_NAME;
+  Object.assign(error, { ownerEvidenceScopeKind: kind });
+  return error;
+}
+
+export type OwnerEvidenceScopeError = Error & {
+  readonly ownerEvidenceScopeKind: OwnerEvidenceScopeMismatchKind;
+};
+
+/** Structural guard (cross-bundle safe — see module comment above). */
+export function isOwnerEvidenceScopeError(value: unknown): value is OwnerEvidenceScopeError {
+  if (!(value instanceof Error)) return false;
+  if ((value as { name?: unknown }).name !== OWNER_EVIDENCE_SCOPE_ERROR_NAME) return false;
+  const kind = (value as { ownerEvidenceScopeKind?: unknown }).ownerEvidenceScopeKind;
+  return typeof kind === 'string' && SCOPE_MISMATCH_KINDS.has(kind);
+}
 
 /** Pre-computed assembly outcome, for callers that already ran the assembler. */
 export type EvidenceAssemblyOutcome =
@@ -136,6 +227,9 @@ const MAX_POSITIVES = 3;
 /** rc-8: bounded previews for unknown failure details. */
 const MAX_DETAIL_LENGTH = 480;
 const MAX_VALIDATION_ERRORS = 8;
+
+/** `sha256:<64 lowercase hex chars>` — the only accepted contentDigest shape. */
+const CONTENT_DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
 
 // ── internal helpers ───────────────────────────────────────────────────────
 
@@ -217,11 +311,36 @@ export function validateOwnerEvidenceSelectionShape(selection: unknown): string[
     problems.push('ownerSelection.ownerDesiredOutcome must be a non-empty string');
   }
 
+  // ── B1 (PRI-983 FR-03) persisted provenance fields — optional (ABSENT =
+  // legacy A2 record), but presence MUST be well-formed: a corrupted
+  // provenance field fails the whole selection here, which (via the
+  // pitask-metadata parse delegation) fails the whole metadata closed.
+  if (Object.hasOwn(selection, 'revision') && selection.revision !== undefined) {
+    if (typeof selection.revision !== 'number' || !Number.isSafeInteger(selection.revision) || selection.revision < 1) {
+      problems.push('ownerSelection.revision must be a positive safe integer when present');
+    }
+  }
+  if (Object.hasOwn(selection, 'contentDigest') && selection.contentDigest !== undefined) {
+    if (typeof selection.contentDigest !== 'string' || !CONTENT_DIGEST_PATTERN.test(selection.contentDigest)) {
+      problems.push('ownerSelection.contentDigest must match sha256:<64 hex> when present');
+    }
+  }
+  if (Object.hasOwn(selection, 'ownerOperation') && selection.ownerOperation !== undefined) {
+    if (!isNonEmptyString(selection.ownerOperation)) {
+      problems.push('ownerSelection.ownerOperation must be a non-empty string when present');
+    }
+  }
+  if (Object.hasOwn(selection, 'attachedAt') && selection.attachedAt !== undefined) {
+    if (!isNonEmptyString(selection.attachedAt)) {
+      problems.push('ownerSelection.attachedAt must be a non-empty ISO string when present');
+    }
+  }
+
   return problems;
 }
 
 /** `sha256:<hex>` content digest over the pack's canonical JSON (rc-6: one hash convention). */
-function computeEvidenceHash(pack: BehaviorExamplePack): string {
+export function computeBehaviorExamplePackDigest(pack: BehaviorExamplePack): string {
   return `sha256:${createHash('sha256').update(JSON.stringify(pack), 'utf8').digest('hex')}`;
 }
 
@@ -289,6 +408,21 @@ export function assessEvidenceReadiness(input: EvidenceReadinessInput): Evidence
     }
   }
   if (pack === undefined) {
+    // B1: structured scope classification first (typed error, never message
+    // sniffing). pain/row unresolvable → stale (FR-03: cleaned trajectory must
+    // not be silently reused); cross-session selection → scope mismatch
+    // (SPEC FR-04). Everything else stays `invalid`.
+    if (isOwnerEvidenceScopeError(assemblyError)) {
+      const reasonCode = reasonCodeForScopeKind(assemblyError.ownerEvidenceScopeKind);
+      return {
+        status: 'invalid_evidence',
+        reasonCode,
+        detail: boundedDetail(`${assemblyError.ownerEvidenceScopeKind}: ${assemblyError.message}`),
+        nextAction: reasonCode === 'owner_behavior_examples_stale'
+          ? 'Trajectory evidence is missing or has changed; Owner must re-attach fresh examples (pd runtime internalization evidence attach --confirm) before this task can resume.'
+          : 'Owner must select tool calls that belong to the referenced pain session (cross pain/session selections are refused), then re-attach.',
+      };
+    }
     return {
       status: 'invalid_evidence',
       reasonCode: 'owner_behavior_examples_invalid',
@@ -316,7 +450,7 @@ export function assessEvidenceReadiness(input: EvidenceReadinessInput): Evidence
   return {
     status: 'ready',
     pack,
-    evidenceHash: computeEvidenceHash(pack),
+    evidenceHash: computeBehaviorExamplePackDigest(pack),
     sourcePainId: selection.sourcePainId,
   };
 }

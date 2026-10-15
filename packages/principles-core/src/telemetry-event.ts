@@ -144,6 +144,13 @@ export const TelemetryEventType = Type.Union([
   // Owner-recovery evidence for a task that just entered needs_human_review.
   Type.Literal('artificer_evidence_readiness_checked'),
   Type.Literal('artificer_blocked_on_owner_evidence'),
+  // PRI-983 (SPEC-PD-IAER-001 FR-03/FR-06/FR-08): the authorized Owner
+  // evidence operations — attach (selection persisted into pi_metadata, task
+  // STAYS needs_human_review) and resume (digest-verified authority reset back
+  // to pending). Payloads carry bounded references (revision / contentDigest /
+  // previousAttemptCount / decidedBy), never raw trajectories (rc-8).
+  Type.Literal('artificer_owner_evidence_attached'),
+  Type.Literal('artificer_owner_evidence_resumed'),
   // PRI-302: Evaluator runner events (BasePeerRunner migration)
   Type.Literal('evaluator_task_leased'),
   Type.Literal('evaluator_context_built'),

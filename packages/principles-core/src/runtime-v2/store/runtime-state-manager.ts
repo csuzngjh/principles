@@ -463,14 +463,19 @@ export class RuntimeStateManager {
    * Narrow CAS (PRI-629): apply patch only when the task's diagnostic_json is
    * still byte-equal to expectedDiagnosticJson. Returns null on precondition
    * failure — caller re-reads and re-evaluates (idempotent-or-conflict).
+   * PRI-983: `options.expectedStatus` additionally requires the task to still
+   * sit in that status (SPEC-PD-IAER-001 §6.3) — arbitrates content-neutral
+   * authority resets under concurrent writers.
    */
+  // eslint-disable-next-line @typescript-eslint/max-params -- the 4th parameter is a CAS PRECONDITION (SPEC-PD-IAER-001 §6.3), not write payload: folding it into the patch type would let it leak into TaskRecord on unconditional updateTask paths.
   async updateTaskIfDiagnosticJsonUnchanged(
     taskId: string,
     expectedDiagnosticJson: string | null,
     patch: TaskStoreUpdatePatch,
+    options?: { readonly expectedStatus?: string },
   ): Promise<TaskRecord | null> {
     this.assertInitialized();
-    return this._taskStore.updateTaskIfDiagnosticJsonUnchanged(taskId, expectedDiagnosticJson, patch);
+    return this._taskStore.updateTaskIfDiagnosticJsonUnchanged(taskId, expectedDiagnosticJson, patch, options);
   }
 
   /**

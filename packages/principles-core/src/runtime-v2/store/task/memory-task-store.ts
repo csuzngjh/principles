@@ -34,14 +34,19 @@ export class MemoryTaskStore implements TaskStore {
     return updated;
   }
 
+  // eslint-disable-next-line @typescript-eslint/max-params -- the 4th parameter is a CAS PRECONDITION (SPEC-PD-IAER-001 §6.3), not write payload: folding it into the patch type would let it leak into TaskRecord on unconditional updateTask paths.
   async updateTaskIfDiagnosticJsonUnchanged(
     taskId: string,
     expectedDiagnosticJson: string | null,
     patch: TaskStoreUpdatePatch,
+    options?: { readonly expectedStatus?: string },
   ): Promise<TaskRecord | null> {
     const existing = this.tasks.get(taskId);
     if (!existing) return null;
     if ((existing.diagnosticJson ?? null) !== expectedDiagnosticJson) return null;
+    // PRI-983 (SPEC §6.3): parity with SqliteTaskStore's expected-status
+    // precondition — content-neutral resets must still arbitrate on status.
+    if (options?.expectedStatus !== undefined && existing.status !== options.expectedStatus) return null;
     return this.updateTask(taskId, patch);
   }
 

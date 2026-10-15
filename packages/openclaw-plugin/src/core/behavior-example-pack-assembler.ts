@@ -22,6 +22,10 @@
 import { buildRuleHostAction } from '@principles/core/runtime-v2/internalization/rule-host-input-builder';
 import { computeBehaviorFacts } from '@principles/core/runtime-v2/internalization/rule-context-v2';
 import { validateBehaviorExamplePack } from '@principles/core/runtime-v2/internalization/behavior-example-pack';
+// Factory lives in evidence-readiness.ts (the classification authority); it is
+// consumed through the runtime-v2 barrel — core's exports field is an explicit
+// subpath allowlist and the readiness module is not (and need not be) on it.
+import { createOwnerEvidenceScopeError } from '@principles/core/runtime-v2';
 import type {
   RuleContextV2,
   BehaviorExamplePack,
@@ -107,7 +111,12 @@ export class BehaviorExamplePackAssembler {
   assemble(input: BehaviorExamplePackAssemblerInput): BehaviorExamplePack {
     const pain = this.db.getPainEventByCanonicalId(input.sourcePainId);
     if (!pain) {
-      throw new Error(
+      // PRI-983: typed scope classification (structural marker — the readiness
+      // contract maps this to the stable `owner_behavior_examples_stale`
+      // code; FR-03: an unresolvable pain reference must never be silently
+      // reused). Message text unchanged (historical audit signature).
+      throw createOwnerEvidenceScopeError(
+        'pain_not_found',
         `[BehaviorExamplePackAssembler] pain event not found for canonical_pain_id="${input.sourcePainId}" (ERR-069 fail loud)`,
       );
     }
@@ -117,7 +126,12 @@ export class BehaviorExamplePackAssembler {
     const positiveRows = input.positiveToolCallIds.map((id) => requireSelectedRow(this.db.getRuleHostEvidenceRow(id), id));
     for (const row of [negativeRow, ...positiveRows]) {
       if (row.sessionId !== pain.sessionId) {
-        throw new Error(`[BehaviorExamplePackAssembler] selected tool call ${row.id} session mismatch; all examples must belong to pain session ${pain.sessionId}`);
+        // PRI-983: cross pain/session selection → typed scope error → stable
+        // `owner_behavior_examples_scope_mismatch` at the readiness contract.
+        throw createOwnerEvidenceScopeError(
+          'session_mismatch',
+          `[BehaviorExamplePackAssembler] selected tool call ${row.id} session mismatch; all examples must belong to pain session ${pain.sessionId}`,
+        );
       }
     }
 
@@ -176,7 +190,14 @@ function validateOwnerSelection(input: BehaviorExamplePackAssemblerInput): void 
 }
 
 function requireSelectedRow(row: RuleHostEvidenceRow | null, id: number): RuleHostEvidenceRow {
-  if (!row) throw new Error(`[BehaviorExamplePackAssembler] selected tool call id=${id} not found`);
+  if (!row) {
+    // PRI-983: typed scope classification → stable `owner_behavior_examples_stale`
+    // at the readiness contract (the referenced trajectory row does not exist).
+    throw createOwnerEvidenceScopeError(
+      'tool_call_not_found',
+      `[BehaviorExamplePackAssembler] selected tool call id=${id} not found`,
+    );
+  }
   return row;
 }
 

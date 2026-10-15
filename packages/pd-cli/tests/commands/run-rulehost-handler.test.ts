@@ -20,7 +20,34 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import * as yaml from 'js-yaml';
+import { createOwnerEvidenceScopeError, type BehaviorExamplePack } from '@principles/core/runtime-v2';
 import { handleRunRuleHost } from '../../src/commands/runtime-internalization-run-rulehost.js';
+
+// PRI-983 (FR-07): the plugin assembler module is doubled file-wide so the
+// confirm-time assembly path can be exercised without a trajectory database.
+// Hoisted mocks are file-wide; the pre-existing describes never reach the
+// assembly path (no --behavior-examples), so this only adds a module that
+// nothing else in the file loads.
+const hoistedEvidence = vi.hoisted(() => ({
+  state: {
+    pack: null as BehaviorExamplePack | null,
+    throwOnError: null as unknown,
+  },
+}));
+
+vi.mock('principles-disciple/rulehost-evidence', () => {
+  class StubAssembler {
+    assemble(): BehaviorExamplePack {
+      if (hoistedEvidence.state.throwOnError !== null) throw hoistedEvidence.state.throwOnError;
+      if (hoistedEvidence.state.pack === null) throw new Error('stub pack not configured');
+      return hoistedEvidence.state.pack;
+    }
+  }
+  return {
+    BehaviorExamplePackAssembler: StubAssembler,
+    RuleHostEvidenceRegistry: { dispose: vi.fn() },
+  };
+});
 
 // ── workspace helpers ─────────────────────────────────────────────────────
 
@@ -904,5 +931,85 @@ describe('describePublicationOutcome — identity-gated refusal reporting (Codex
     expect(text).toContain('PUBLICATION REFUSED');
     expect(text).not.toContain('WAITING for owner review');
     expect(text).toContain('NOT enqueued for Owner review');
+  });
+});
+
+// ── PRI-983 (SPEC-PD-IAER-001 FR-07): CLI confirm-time assembly goes through
+// the shared Evidence Readiness judgment — a typed assembler scope failure
+// surfaces as the stable FR-04 reasonCode, identical to the consumer preflight.
+
+describe('handleRunRuleHost — FR-07 shared readiness classification (PRI-983)', () => {
+  let workspaceDir: string;
+  let savedEnv: NodeJS.ProcessEnv;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    hoistedEvidence.state.pack = null;
+    hoistedEvidence.state.throwOnError = null;
+    workspaceDir = mkTmpDir();
+    writeFullReadyConfig(workspaceDir);
+    savedEnv = { ...process.env };
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-test-key';
+    hoisted657.mockRunRuleHostPipeline.mockResolvedValue({
+      decision: 'candidate_ready_for_owner_review',
+      painId: 'pain-1', stages: [], scribeTaskId: 'scribe-1',
+      ruleArtifactId: null, principleArtifactId: null, approvalId: null, degradationReason: null,
+    });
+    process.exitCode = undefined;
+  });
+
+  afterEach(() => {
+    process.env = savedEnv;
+    try { fs.rmSync(workspaceDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
+  function writeExamplesFile(): string {
+    const filePath = path.join(workspaceDir, 'examples.json');
+    fs.writeFileSync(filePath, JSON.stringify({
+      ownerDesiredOutcome: 'block writes',
+      sourceNegativeToolCallId: 42,
+      positiveToolCallIds: [7],
+    }), 'utf8');
+    return filePath;
+  }
+
+  it('typed session_mismatch from the assembler → refusal carries owner_behavior_examples_scope_mismatch (same code as the consumer preflight), pipeline never runs', async () => {
+    hoistedEvidence.state.throwOnError = createOwnerEvidenceScopeError('session_mismatch', 'selected tool call 7 session mismatch; all examples must belong to pain session s-1');
+    const examplesPath = writeExamplesFile();
+
+    const { stdout, exitCode } = await captureStdio(() =>
+      handleRunRuleHost({ painId: 'pain-1', confirm: true, json: true, workspace: workspaceDir, behaviorExamples: examplesPath }),
+    );
+
+    expect(exitCode).toBe(1);
+    const payload = parseJsonObject(stdout.trim());
+    expect(payload.status).toBe('failed');
+    expect(String(payload.reason)).toContain('behavior_examples_unreliable: owner_behavior_examples_scope_mismatch');
+    expect(String(payload.reason)).toContain('session mismatch');
+    // cli-5: the refusal happens before any pipeline execution
+    expect(hoisted657.mockRunRuleHostPipeline).not.toHaveBeenCalled();
+  });
+
+  it('successful assembly still executes the pipeline with the pack (valid evidence runs normally)', async () => {
+    hoistedEvidence.state.pack = {
+      sourceNegativeCase: { caseId: 'n', kind: 'negative', toolName: 'write_file', params: {}, expectedDecision: 'block' },
+      ownerDesiredOutcome: 'block writes',
+      positiveCounterexamples: [{ caseId: 'p', kind: 'positive', toolName: 'write_file', params: {}, expectedDecision: 'allow' }],
+      evidenceRefs: ['pain:pain-1', 'tool_call:42', 'tool_call:7'],
+      redactionNotes: [],
+    };
+    const examplesPath = writeExamplesFile();
+
+    const { stdout, exitCode } = await captureStdio(() =>
+      handleRunRuleHost({ painId: 'pain-1', confirm: true, json: true, workspace: workspaceDir, behaviorExamples: examplesPath }),
+    );
+
+    expect(exitCode).toBeUndefined();
+    const payload = parseJsonObject(stdout.trim());
+    expect(payload.status).toBe('candidate_ready_for_owner_review');
+    expect(hoisted657.mockRunRuleHostPipeline).toHaveBeenCalledTimes(1);
+    // the assembled pack rides into the pipeline options (FR-07: valid evidence executes)
+    const pipelineOpts = hoisted657.mockRunRuleHostPipeline.mock.calls[0]?.[0] as { behaviorExamplePack?: BehaviorExamplePack };
+    expect(pipelineOpts.behaviorExamplePack).toEqual(hoistedEvidence.state.pack);
   });
 });

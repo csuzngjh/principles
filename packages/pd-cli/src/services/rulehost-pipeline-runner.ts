@@ -57,6 +57,9 @@ import {
   buildArtificerHostSemanticContext,
   // PRI-804(a): ledger identity lookup for the source_principle_id backfill.
   PrincipleTreeLedgerAdapter,
+  // PRI-983 (FR-07): the CLI gate refusal derives from the ONE shared
+  // Evidence Readiness judgment (same authority as the consumer preflight).
+  assessEvidenceReadiness,
 } from '@principles/core/runtime-v2';
 import type {
   AdversarialLoopResult,
@@ -452,11 +455,22 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
     // PRI-780: v2-only generation — an enabled code-rule capability without
     // an Owner-labelled BehaviorExamplePack refuses BEFORE any artificer LLM
     // stage runs. Never degrade to an action-only (v1) rule.
+    // FR-07 (PRI-983): the refusal vocabulary derives from the shared
+    // Evidence Readiness judgment (`assessEvidenceReadiness` — the same
+    // authority the consumer preflight and the evidence recovery commands
+    // use), so a missing pack reports the stable FR-04 reasonCode here too.
+    // The historical `behavior_example_pack_missing:` marker stays as the
+    // reason prefix (PRI-780 B2 contract + history audit signature).
     if (!opts.behaviorExamplePack) {
-      const reason = 'behavior_example_pack_missing: v2 is the only RuleCode generation contract (PRI-780); provide Owner-labelled behavior examples via --behavior-examples';
+      const evidenceVerdict = assessEvidenceReadiness({ channelRequiresOwnerEvidence: true, ownerSelection: null });
+      const refusalReasonCode = evidenceVerdict.status === 'owner_evidence_required' ? evidenceVerdict.reasonCode : 'owner_behavior_examples_invalid';
+      const refusalNextAction = evidenceVerdict.status === 'owner_evidence_required'
+        ? `${evidenceVerdict.nextAction} CLI path: provide Owner-labelled examples via --behavior-examples.`
+        : 'provide Owner-labelled behavior examples via --behavior-examples';
+      const reason = `behavior_example_pack_missing: ${refusalReasonCode} — v2 is the only RuleCode generation contract (PRI-780)`;
       stages.push({ name: 'adversarial_loop', status: 'failed', reason });
       onProgress('adversarial_loop', 'failed', reason);
-      return withGaps(rejectedResult(opts.painId, stages, reason), scribeOwnerRequirementGaps);
+      return withGaps(rejectedResult(opts.painId, stages, `${reason}; ${refusalNextAction}`), scribeOwnerRequirementGaps);
     }
     onProgress('adversarial_loop', 'start');
     // PRI-661: the loop's evaluator replay must use the SAME production gate
