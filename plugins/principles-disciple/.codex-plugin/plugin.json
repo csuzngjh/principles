@@ -8,7 +8,7 @@
   },
   "homepage": "https://github.com/csuzngjh/principles#readme",
   "repository": "https://github.com/csuzngjh/principles",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "keywords": ["principles", "governance", "hooks", "guardrails", "behavior"],
   "skills": "./skills/",
   "interface": {

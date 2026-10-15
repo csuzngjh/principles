@@ -38,5 +38,5 @@
     "type": "git",
     "url": "git+https://github.com/csuzngjh/principles.git"
   },
-  "license": "MIT"
+  "license": "Apache-2.0"
 }

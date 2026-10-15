@@ -55,7 +55,7 @@
     "interactive"
   ],
   "author": "csuzngjh",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "dependencies": {
     "@principles/install-layout": "^0.3.0",
     "@tufjs/models": "3.0.1",
