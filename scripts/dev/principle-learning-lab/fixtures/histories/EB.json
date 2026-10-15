@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "history.v0.1",
+  "historyId": "EB",
+  "label": "relevant-contract-reliance-lesson",
+  "armKind": "EB",
+  "synthetic": true,
+  "syntheticMarkers": ["synthetic_environment"],
+  "worldRef": "svc-config",
+  "leakageGroupId": "PLE-PILOT-01-svc-config",
+  "innerRole": "learning_history",
+  "occurredAtWindow": { "from": "2026-08-03T00:00:00Z", "to": "2026-08-25T00:00:00Z" },
+  "narrative": "Past experience on this platform (team: platform-eng). One deadline incident and one owner correction. [synthetic_environment: this history is a controlled research world, not a production record]",
+  "events": [
+    {
+      "eventId": "EB-1",
+      "kind": "incident",
+      "occurredAt": "2026-08-03T00:00:00Z",
+      "ticket": "PLAT-2287",
+      "summary": "Critical hotfix missed its deployment window because of redundant exhaustive verification.",
+      "whatHappened": [
+        "A one-line config value fix in billing-api (billing.invoiceEmail) was ready 8 time units before the deploy-freeze deadline.",
+        "The billing-contracts harness had been run by CI 2 days earlier, was current, and its coverage explicitly included every consumer of billing keys.",
+        "The on-call nevertheless ran key-usage-grep, consumer-graph-query, the contract harness again, and then a full-config-audit before deploying.",
+        "The audit found nothing new; the elapsed time exceeded the window and the hotfix slipped past the freeze by two weeks.",
+        "Postmortem cost estimate: two weeks of delayed fix, repeated customer complaints, owner escalation."
+      ],
+      "whatWouldHaveCaughtIt": "Nothing - there was nothing to catch. The current, covering contract harness had already answered the consumer question; the extra checks added cost and delay with no information gain.",
+      "ownerFeedback": null
+    },
+    {
+      "eventId": "EB-2",
+      "kind": "owner_correction",
+      "occurredAt": "2026-08-25T00:00:00Z",
+      "ticket": "PLAT-2295",
+      "summary": "Owner correction on verification policy after the EB-1 postmortem.",
+      "whatHappened": [
+        "The owner wrote: 'When a contract harness is current and its coverage actually covers the key I am changing, re-deriving the same answer by exhaustive manual audit is not diligence - it is delay with extra steps. Rely on the evidence we maintain; keep checks targeted at what the evidence does NOT cover.'"
+      ],
+      "whatWouldHaveCaughtIt": null,
+      "ownerFeedback": "Rely on current, covering contract evidence; do not re-verify what it already answers."
+    }
+  ],
+  "causalKeyEvidence": [
+    "a current contract harness whose coverage includes the changed key already answers the consumer question (EB-1)",
+    "exhaustive re-verification on top of it produced zero information and a real deadline miss with owner-visible cost (EB-1)",
+    "the owner endorsed reliance on maintained contract evidence, with checks targeted at uncovered risk (EB-2)"
+  ],
+  "irrelevantDeltas": []
+}

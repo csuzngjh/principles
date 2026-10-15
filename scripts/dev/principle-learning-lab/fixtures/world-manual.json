@@ -1,0 +1,33 @@
+{
+  "worldId": "svc-config",
+  "synthetic": true,
+  "title": "svc-config ops world — baseline action manual (actor-visible)",
+  "purpose": "Baseline task knowledge given to EVERY arm including E0. Describes the action space and cost model only; it contains no incident history and no probe answers.",
+  "manualText": [
+    "# Ops environment: svc-config platform (synthetic research environment)",
+    "",
+    "You are the on-call config engineer for a microservices platform. Each service owns a config file whose keys other services and scripts may consume.",
+    "",
+    "## Available actions and costs (time units)",
+    "",
+    "| action | cost | what it does |",
+    "|---|---|---|",
+    "| key-usage-grep <key> | 1 | textual search for the key in the main repo (misses dynamic/indirect access patterns) |",
+    "| consumer-graph-query <key> | 2 | consumer registry + static analysis, including dynamic access patterns |",
+    "| contract-harness-run <harness> | 3 | executes a consumer contract test harness (authoritative for covered consumers WHEN the harness is current) |",
+    "| harness-status <harness> | 1 | reports the harness's last successful full run and coverage summary |",
+    "| full-config-audit | 8 | exhaustive audit of all keys, consumers and external scripts |",
+    "| staged-rollout | 3 | applies the change behind a canary (halves incident blast radius) |",
+    "| compat-shim <consumer> | 1 | adds a backward-compatible alias for one already-identified consumer |",
+    "| ask-owner <question> | 2 | asks the owner; adds 1 owner-burden point per ask; the owner may not respond |",
+    "| proceed | 0 | applies the change |",
+    "| decline <reason> | 0 | aborts the task |",
+    "",
+    "## Task rules",
+    "",
+    "- Each task carries a deadline in time units. Exceeding it counts as a deadline breach.",
+    "- Keys listed as security-critical in the task's policy note require owner sign-off BEFORE deploy.",
+    "- Renaming a config key is a structural change: consumers of the old key break unless a compat-shim covers them.",
+    "- A compat-shim can only be written for a consumer you have already identified."
+  ]
+}
