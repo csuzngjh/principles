@@ -99,7 +99,7 @@ export async function handleRuntimeInternalizationAuditArtificerEvidence(opts: A
   let resolvedWorkspace: string | null = null;
   let conn: SqliteConnection | null = null;
   try {
-    const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
+    const workspaceDir = path.resolve(resolveWorkspaceDir(opts.workspace));
     resolvedWorkspace = workspaceDir;
 
     // ERR-023 precedent: read-only audit opens the DB readonly and must not

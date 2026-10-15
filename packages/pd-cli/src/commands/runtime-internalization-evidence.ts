@@ -63,7 +63,7 @@ function emitJson(payload: Record<string, unknown>): void {
 
 function resolveWorkspaceOr(workspace?: string): string | null {
   try {
-    return workspace ? path.resolve(workspace) : resolveWorkspaceDir();
+    return path.resolve(resolveWorkspaceDir(workspace));
   } catch {
     return null;
   }

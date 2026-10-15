@@ -110,13 +110,13 @@ async function seedArtificerTask(workspaceDir: string, selection?: OwnerEvidence
       attemptCount: 1,
       maxAttempts: 3,
       resultRef: 'scribe://run-1',
-      diagnosticJson: createPITaskDiagnosticJson({
+      diagnosticJson: JSON.stringify({ sourcePainId: 'pain_001', pi_metadata: {
         dependencyTaskIds: [],
         channel: 'code_tool_hook',
         timeoutMs: 300_000,
         inputArtifactRefs: [],
         outputArtifactRefs: [],
-      }),
+      }}),
     });
     await stateManager.createTask({
       taskId: TASK_ID,
@@ -546,5 +546,20 @@ describe('preflightArtificerOwnerEvidence (PRI-982 FR-02/FR-04)', () => {
     } finally {
       await handle.close().catch(() => undefined);
     }
+  });
+});
+
+describe('IAER regressions: Owner digest and canonical Pain', () => {
+  it('rejects a changed pack after Owner confirmation', async () => {
+    const fixture = await makeFixture({ ...VALID_SELECTION, contentDigest: 'sha256:' + 'a'.repeat(64) });
+    expect(await fixture.run()).toMatchObject({
+      decision: 'blocked', reasonCode: 'owner_behavior_examples_stale', reviewPersisted: true,
+    });
+  });
+  it('refuses evidence that belongs to a different task Pain', async () => {
+    const fixture = await makeFixture({ ...VALID_SELECTION, sourcePainId: 'pain_foreign' });
+    expect(await fixture.run()).toMatchObject({
+      decision: 'blocked', reasonCode: 'owner_behavior_examples_scope_mismatch', reviewPersisted: true,
+    });
   });
 });

@@ -207,7 +207,7 @@ async function readTask(workspaceDir: string) {
   }
 }
 
-function captureStdioJson(): { stdout: string[] } {
+function captureStdioJson(): { stdout: string[]; restore: () => void } {
   const stdout: string[] = [];
   const spy = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
     stdout.push(args.map(String).join(' '));

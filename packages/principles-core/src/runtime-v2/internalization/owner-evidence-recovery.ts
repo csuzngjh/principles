@@ -71,7 +71,7 @@ import {
   type OwnerEvidenceReasonCode,
   type OwnerEvidenceSelection,
 } from './evidence-readiness.js';
-import type { BehaviorEvidencePort } from './consumer-evidence-preflight.js';
+import { resolveArtificerCanonicalPainId, type BehaviorEvidencePort } from './consumer-evidence-preflight.js';
 import { buildArtificerRunCorrelation } from './artificer-run-correlation.js';
 import { ownerRetryNeedsHumanReviewTask } from './owner-retry.js';
 import { appendOwnerEvidenceAction } from '../recovery-actions-log.js';
@@ -303,6 +303,15 @@ export async function attachOwnerEvidence(
   const loaded = await loadEvidenceTask(stateManager, input.taskId);
   if (loaded.ok === false) return loaded.refusal;
   const { task, piTask } = loaded;
+  const canonicalPainId = await resolveArtificerCanonicalPainId(input.taskId, (id) => stateManager.getTask(id));
+  if (canonicalPainId === null || canonicalPainId !== input.selection.sourcePainId) {
+    return {
+      status: 'refused',
+      taskId: input.taskId,
+      reason: 'owner_behavior_examples_scope_mismatch',
+      nextAction: 'Selected Pain must match the task canonical seed Pain; inspect the task lineage before attaching evidence.',
+    };
+  }
 
   // One shared judgment: shape → assembly → pack contract (ready ⇒ pack +
   // digest). The shape check runs first even in dry-run so an unusable
@@ -398,6 +407,7 @@ export async function attachOwnerEvidence(
     input.taskId,
     readDiagnosticJson(task),
     { diagnosticJson: createPITaskDiagnosticJson(merged) },
+    { expectedStatus: 'needs_human_review' },
   );
   if (!updated) {
     return {
@@ -539,6 +549,15 @@ export async function resumeOwnerEvidenceTask(
     };
   }
 
+  const canonicalPainId = await resolveArtificerCanonicalPainId(input.taskId, (id) => stateManager.getTask(id));
+  if (canonicalPainId === null || canonicalPainId !== selection.sourcePainId) {
+    return {
+      status: 'refused',
+      taskId: input.taskId,
+      reason: 'owner_behavior_examples_scope_mismatch',
+      nextAction: 'Owner evidence does not match the canonical task Pain; re-attach evidence for this task lineage.',
+    };
+  }
   const readiness = assessEvidenceReadiness({
     channelRequiresOwnerEvidence: true,
     ownerSelection: selection,
@@ -699,6 +718,6 @@ export async function resumeOwnerEvidenceTask(
     previousAttemptCount,
     revision: selection.revision ?? 0,
     contentDigest: selection.contentDigest,
-    nextAction: 'Task requeued with its full history; the consumer cycle (or pd runtime internalization run-once) picks it up. The attempt budget reset is audited.',
+    nextAction: 'Task requeued with its full history; the evidence-aware auto-consumer picks up Code Rule tasks. run-once is not an evidence-capable execution entry. The attempt budget reset is audited.',
   };
 }

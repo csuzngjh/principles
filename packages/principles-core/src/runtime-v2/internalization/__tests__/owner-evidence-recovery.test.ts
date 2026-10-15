@@ -23,7 +23,7 @@
  *   - attach guards: pending task / non-evidence NHR task refused.
  *   - re-attach increments the revision under the CAS.
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -127,13 +127,13 @@ async function seedEvidenceNhrTask(workspaceDir: string, reasonCode: string): Pr
       attemptCount: 1,
       maxAttempts: 3,
       resultRef: 'scribe://run-1',
-      diagnosticJson: createPITaskDiagnosticJson({
+      diagnosticJson: JSON.stringify({ sourcePainId: 'pain_001', pi_metadata: {
         dependencyTaskIds: [],
         channel: 'code_tool_hook',
         timeoutMs: 300_000,
         inputArtifactRefs: [],
         outputArtifactRefs: [],
-      }),
+      }}),
     });
     await stateManager.createTask({
       taskId: TASK_ID,
@@ -734,5 +734,38 @@ describe('concurrency (T06)', () => {
       workspaceDir: fixture.workspaceDir, eventEmitter: collectingEmitter(), owner: 'pd-cli:evidence',
     }));
     expect(second).toMatchObject({ status: 'refused', reason: 'task_not_needs_human_review' });
+  });
+});
+
+describe('IAER authority regression', () => {
+  it('a concurrent requeue defeats attach CAS even when metadata was not changed', async () => {
+    const fixture = await makeFixture();
+    const outcome = await fixture.withHandle(async (sm) => {
+      const original = sm.updateTaskIfDiagnosticJsonUnchanged.bind(sm);
+      vi.spyOn(sm, 'updateTaskIfDiagnosticJsonUnchanged').mockImplementation(async (...args) => {
+        await sm.updateTask(TASK_ID, { status: 'pending' });
+        return original(...args);
+      });
+      return attachOwnerEvidence(sm, {
+        taskId: TASK_ID, selection: BASE_SELECTION, mode: 'confirm',
+        assemble: makePort(), workspaceDir: fixture.workspaceDir,
+        eventEmitter: collectingEmitter(), owner: 'test-owner',
+      });
+    });
+    expect(outcome.status).toBe('conflict');
+    const after = await readTask(fixture.workspaceDir);
+    expect(after.task?.status).toBe('pending');
+    expect(after.piTask?.ownerEvidenceSelection).toBeUndefined();
+  });
+  it('rejects a different canonical Pain before invoking the assembler', async () => {
+    const fixture = await makeFixture();
+    let calls = 0;
+    const outcome = await fixture.withHandle((sm) => attachOwnerEvidence(sm, {
+      taskId: TASK_ID, selection: { ...BASE_SELECTION, sourcePainId: 'pain_other' },
+      mode: 'confirm', assemble: { assemble: () => { calls++; return VALID_PACK; } },
+      workspaceDir: fixture.workspaceDir, eventEmitter: collectingEmitter(), owner: 'test-owner',
+    }));
+    expect(outcome).toMatchObject({ status: 'refused', reason: 'owner_behavior_examples_scope_mismatch' });
+    expect(calls).toBe(0);
   });
 });

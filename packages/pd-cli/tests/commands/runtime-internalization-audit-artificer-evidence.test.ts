@@ -17,7 +17,6 @@ import * as path from 'path';
 import { createHash } from 'crypto';
 import { Command } from 'commander';
 import Database from 'better-sqlite3';
-import { SqliteConnection } from '@principles/core/runtime-v2';
 import {
   handleRuntimeInternalizationAuditArtificerEvidence,
   registerRuntimeInternalizationAuditArtificerEvidenceCommand,

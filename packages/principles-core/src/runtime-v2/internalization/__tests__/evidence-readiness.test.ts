@@ -248,8 +248,10 @@ describe('assessEvidenceReadiness — pack validation failure (single validator 
   });
 
   it('hostile pack (prototype-pollution key) → invalid_evidence', () => {
-    const hostile = JSON.parse(JSON.stringify(makeValidPack())) as Record<string, unknown>;
-    Object.defineProperty(hostile, '__proto__', { value: 'polluted', enumerable: true });
+    // Parse an own __proto__ key as inert JSON data. Avoid assigning a string
+    // prototype through Object.defineProperty (CodeQL js/invalid-prototype-value).
+    const hostile = JSON.parse(JSON.stringify(makeValidPack())
+      .replace(/^\{/, '{"__proto__":"polluted",')) as Record<string, unknown>;
     const result = assessEvidenceReadiness({
       channelRequiresOwnerEvidence: true,
       ownerSelection: makeSelection(),

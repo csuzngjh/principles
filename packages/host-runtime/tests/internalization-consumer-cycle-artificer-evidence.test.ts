@@ -30,6 +30,7 @@ import {
   createOwnerEvidenceScopeError,
   hydratePITaskRecord,
   ArtificerRunner,
+  DreamerRunner,
   ArtificerL2Adapter,
   PiAiRuntimeAdapter,
   RuntimeStateManager,
@@ -119,7 +120,7 @@ async function seedCodeChannelChain(workspaceDir: string, selection?: OwnerEvide
       attemptCount: 1,
       maxAttempts: 3,
       resultRef: 'scribe://seed',
-      diagnosticJson: createPITaskDiagnosticJson({
+      diagnosticJson: JSON.stringify({ sourcePainId: 'pain_001', pi_metadata: {
         dependencyTaskIds: [],
         channel: 'code_tool_hook',
         timeoutMs: 300_000,
@@ -129,7 +130,7 @@ async function seedCodeChannelChain(workspaceDir: string, selection?: OwnerEvide
         // per-cycle succeeded-transition reconciliation would legitimately
         // create a SECOND artificer successor for the seeded scribe.
         correlationId: 'corr-001',
-      }),
+      }}),
     });
     await stateManager.createTask({
       taskId: ARTIFICER_TASK_ID,
@@ -246,8 +247,6 @@ async function countRunRows(workspaceDir: string, taskId: string): Promise<numbe
     await handle.close().catch(() => undefined);
   }
 }
-
-const logger = { info: () => undefined, warn: () => undefined, error: () => undefined };
 
 beforeEach(() => {
   vi.restoreAllMocks();
@@ -456,5 +455,49 @@ describe('runInternalizationConsumerCycle — PRI-982 evidence preflight + chann
     expect(payload.reason).toBe('evidence_source_error');
     expect(payload.nextAction).toContain('NOT an Owner evidence fault');
     expect(payload.detail).toContain('database is locked');
+  });
+});
+
+describe('IAER: stage fairness under evidence outage and code capability OFF', () => {
+  it('executes the next ready kind when the oldest Code Rule cannot assemble evidence', async () => {
+    const workspaceDir = makeWorkspace();
+    await seedCodeChannelChain(workspaceDir, VALID_SELECTION);
+    const handle = await createRuntimeStateHandle({ workspaceDir, readonly: false });
+    try {
+      await handle.stateManager.createTask({
+        taskId: 'dreamer-healthy-during-evidence-outage', taskKind: 'dreamer',
+        status: 'pending', attemptCount: 0, maxAttempts: 3,
+        diagnosticJson: createPITaskDiagnosticJson({
+          dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300_000,
+          inputArtifactRefs: [], outputArtifactRefs: [],
+        }),
+      });
+    } finally { await handle.close(); }
+    const seen: string[] = [];
+    vi.spyOn(DreamerRunner.prototype, 'run').mockImplementation(async (taskId) => {
+      seen.push(taskId);
+      return { status: 'succeeded', taskId, attemptCount: 1 };
+    });
+    const captured: CapturedRun[] = [];
+    spyArtificerRun(captured);
+    const outcome = await runInternalizationConsumerCycle(workspaceDir, makePorts());
+    expect(outcome.ran).toBe(true);
+    expect(seen).toEqual(['dreamer-healthy-during-evidence-outage']);
+    expect(captured).toHaveLength(0);
+    expect((await readTask(workspaceDir, ARTIFICER_TASK_ID)).task?.status).toBe('pending');
+  });
+  it('does not invoke Artificer with code_rule_capability OFF', async () => {
+    const workspaceDir = makeWorkspace();
+    await seedCodeChannelChain(workspaceDir, VALID_SELECTION);
+    const file = path.join(workspaceDir, '.pd', 'config.yaml');
+    const config = JSON.parse(fs.readFileSync(file, 'utf8')) as ReturnType<typeof getDefaultPdConfig>;
+    config.features.code_rule_capability.enabled = false;
+    fs.writeFileSync(file, JSON.stringify(config));
+    const captured: CapturedRun[] = [];
+    spyArtificerRun(captured);
+    const outcome = await runInternalizationConsumerCycle(workspaceDir, makePorts({ behaviorEvidence: assemblingPort() }));
+    expect(outcome).toMatchObject({ ran: false, skipReason: 'code_rule_capability_disabled' });
+    expect(captured).toHaveLength(0);
+    expect((await readTask(workspaceDir, ARTIFICER_TASK_ID)).task?.status).toBe('pending');
   });
 });

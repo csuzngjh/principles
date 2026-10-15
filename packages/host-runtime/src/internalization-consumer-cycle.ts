@@ -438,6 +438,24 @@ export async function runInternalizationConsumerCycle(
     // without touching leases, idempotency, dependency order, or the
     // single-task-per-cycle semantics. Ties keep the original priority order.
     const orderedRunnerKinds = orderKindsByOldestReadyStage(decision.runnerKinds, snapshot.readyTasks);
+    // PRI-634 A3: workspace-scoped telemetry sink. Constructed here (per-wake,
+    // workspaceDir in scope) so events from THIS workspace's runners are
+    // attributable to THIS workspace — a global subscriber on the storeEmitter
+    // singleton cannot (multi-workspace isolation, see
+    // workspace-telemetry-emitter.ts). Persist failures degrade through the
+    // host's structured event port, never break the runner.
+    // PRI-795 review P1: shared by the EvaluatorRunner AND the ArtificerL2
+    // adapter so `artificer_l2_complete` evidence (abortOwner/budget/elapsed/
+    // stopReason/tokenUsage) persists durably instead of vanishing with the
+    // process (the EP002-R3 "nothing recoverable after a failure" class).
+    const workspaceEmitter = new WorkspaceTelemetryEmitter(storeEmitter, workspaceDir, (detail) => {
+      emitEvent('WORKSPACE_TELEMETRY_PERSIST_FAILED', detail);
+    });
+
+
+    let artificerEvidence: ArtificerEvidencePreflightVerdict | null = null;
+    let authoritativeChannel: string | null = null;
+    let preflightSkipReason: string | undefined;
     for (const kind of orderedRunnerKinds) {
       const agentName = AGENT_NAME_FOR_TASK_KIND[kind];
       if (agentName === undefined) {
@@ -473,6 +491,110 @@ export async function runInternalizationConsumerCycle(
       }
       const candidate = await orchestrator.wakeOnce(kind);
       if (candidate.decision === 'would_lease') {
+        // PRI-982 (SPEC-PD-IAER-001 §4.2 / FR-02): authoritative channel routing
+        // for artificer tasks. The channel is written deterministically by the
+        // intake bridge at seed time (pi_metadata.channel — the SINGLE authority,
+        // inherited along the chain) and is read from the leased task's hydrated
+        // metadata here; the cycle NEVER guesses it from task names or model text.
+        //   - code_tool_hook → RuleCode sub-chain: evidence preflight FIRST, then
+        //     L2 (flag permitting) with the assembled pack injected;
+        //   - prompt → the legal non-L2 pipeline (PiAi), evidence-exempt
+        //     (production: 40 successes on that pipeline);
+        //   - unresolvable → refuse to guess: observable skip, no run (T08).
+        const leasedTaskForChannel = await stateManager.getTask(candidate.taskId);
+        const leasedPiTask = leasedTaskForChannel ? hydratePITaskRecord(leasedTaskForChannel) : null;
+        authoritativeChannel = leasedPiTask?.channel ?? null;
+
+        if (candidate.taskKind === 'artificer') {
+          if (authoritativeChannel === null || leasedPiTask === null) {
+            // Defensive: wakeOnce never leases non-hydratable tasks, so reaching
+            // here means the metadata corrupted between wake and read. Fail closed
+            // — never route an artificer task without an authoritative channel.
+            const channelInfo = JSON.stringify({
+              reason: 'artificer_channel_unresolvable',
+              taskId: candidate.taskId,
+              nextAction: 'Inspect and repair the task metadata (pi_metadata.channel); the consumer refuses to route an artificer task without an authoritative channel (SPEC-PD-IAER-001 §4.2, T08).',
+            });
+            emitEvent('INTERNALIZATION_CONSUMER_SKIP', channelInfo);
+            logger.warn(`[PD:${logLabel}] Artificer task ${candidate.taskId} skipped: authoritative channel unresolvable.`);
+            preflightSkipReason = 'artificer_channel_unresolvable';
+            continue;
+          }
+          if (authoritativeChannel === 'code_tool_hook') {
+            // Capability OFF must block generation, not merely select L1.
+            if (!loadFeatureFlagFromConfig(workspaceDir, 'code_rule_capability').enabled) {
+              emitEvent('INTERNALIZATION_CONSUMER_SKIP', JSON.stringify({
+                reason: 'code_rule_capability_disabled',
+                taskId: candidate.taskId,
+                taskKind: candidate.taskKind,
+                nextAction: 'Owner must enable code_rule_capability before Code Rule generation.',
+              }));
+              logger.warn('[PD:' + logLabel + '] Code Rule task ' + candidate.taskId + ' paused: capability disabled.');
+              preflightSkipReason = 'code_rule_capability_disabled';
+              continue;
+            }
+            artificerEvidence = await preflightArtificerOwnerEvidence({
+              taskId: candidate.taskId,
+              piTask: leasedPiTask,
+              owner,
+              workspaceDir, // FR-08 run-correlation telemetry (PRI-984)
+              stateManager,
+              eventEmitter: workspaceEmitter,
+              behaviorEvidence: ports.behaviorEvidence,
+            });
+            if (artificerEvidence.decision === 'evidence_source_unavailable') {
+              // SPEC §6.2: a host assembly gap is NOT "Owner has not labeled".
+              // The task stays pending (re-observable next cycle, zero model
+              // cost); the runner is never constructed evidence-less.
+              const gapInfo = JSON.stringify({
+                reason: 'evidence_source_unavailable',
+                taskId: candidate.taskId,
+                taskKind: candidate.taskKind,
+                nextAction: 'Host must wire the behaviorEvidence port (BehaviorExamplePackAssembler) into the consumer cycle ports; the task stays pending until then.',
+              });
+              emitEvent('INTERNALIZATION_CONSUMER_SKIP', gapInfo);
+              logger.warn(`[PD:${logLabel}] Artificer task ${candidate.taskId} skipped: evidence source unavailable (host must wire the behaviorEvidence port).`);
+              preflightSkipReason = 'evidence_source_unavailable';
+            continue;
+            }
+            if (artificerEvidence.decision === 'evidence_source_error') {
+              // PRI-980 review P2-1 — SPEC §6.2 case 3: a trajectory-store I/O
+              // fault is preserved AS a storage fault. Same family as the absent
+              // port: the task stays wake-eligible (the next cycle retries the
+              // assembly at zero model cost), the runner is never constructed,
+              // and the preflight already emitted the structured degradation
+              // telemetry (reason=evidence_source_error, reviewPersisted=false).
+              const storageInfo = JSON.stringify({
+                reason: 'evidence_source_error',
+                taskId: candidate.taskId,
+                taskKind: candidate.taskKind,
+                nextAction: artificerEvidence.nextAction,
+                ...(artificerEvidence.detail !== undefined ? { detail: artificerEvidence.detail } : {}),
+              });
+              emitEvent('INTERNALIZATION_CONSUMER_SKIP', storageInfo);
+              logger.warn(`[PD:${logLabel}] Artificer task ${candidate.taskId} skipped: evidence source error (storage fault preserved; task stays wake-eligible).`);
+              preflightSkipReason = 'evidence_source_error';
+            continue;
+            }
+            if (artificerEvidence.decision === 'blocked') {
+              // FR-04: the preflight already moved the task atomically into
+              // needs_human_review — outside the wake scan (pending/retry_wait
+              // only), so it is never auto-rewoken (FR-05/T02). reviewPersisted
+              // = false means a concurrent writer won the CAS; still no run.
+              emitEvent('INTERNALIZATION_CONSUMER_EVIDENCE_BLOCKED', JSON.stringify({
+                taskId: candidate.taskId,
+                reasonCode: artificerEvidence.reasonCode,
+                nextAction: artificerEvidence.nextAction,
+                ...(artificerEvidence.missingFields !== undefined ? { missingFields: [...artificerEvidence.missingFields] } : {}),
+                ...(artificerEvidence.detail !== undefined ? { detail: artificerEvidence.detail } : {}),
+                reviewPersisted: artificerEvidence.reviewPersisted,
+              }));
+              logger.warn(`[PD:${logLabel}] Artificer task ${candidate.taskId} blocked on Owner evidence (${artificerEvidence.reasonCode}, reviewPersisted=${artificerEvidence.reviewPersisted}).`);
+              preflightSkipReason = 'artificer_blocked_on_owner_evidence';
+            continue;
+            }
+          }
+        }
         wakeResult = candidate;
         taskRuntimeConfig = kindRuntime;
         break;
@@ -484,6 +606,10 @@ export async function runInternalizationConsumerCycle(
     }
 
     if (!wakeResult || taskRuntimeConfig === null) {
+      if (preflightSkipReason !== undefined) {
+        lastSkipDecision = preflightSkipReason;
+        lastSkipReason = undefined;
+      }
       // A: 预算由周期 finally 统一执行 (每周期恰一次,含 backlog 场景)
       const skipPayload: Record<string, unknown> = { decision: lastSkipDecision };
       if (lastSkipReason) {
@@ -497,110 +623,6 @@ export async function runInternalizationConsumerCycle(
     // PRI-719: everything downstream reads the LEASED TASK's resolved config —
     // the kind-specific profile, not the shared gate resolution.
     const taskRuntimeKind = taskRuntimeConfig.runtimeKind;
-
-    // PRI-634 A3: workspace-scoped telemetry sink. Constructed here (per-wake,
-    // workspaceDir in scope) so events from THIS workspace's runners are
-    // attributable to THIS workspace — a global subscriber on the storeEmitter
-    // singleton cannot (multi-workspace isolation, see
-    // workspace-telemetry-emitter.ts). Persist failures degrade through the
-    // host's structured event port, never break the runner.
-    // PRI-795 review P1: shared by the EvaluatorRunner AND the ArtificerL2
-    // adapter so `artificer_l2_complete` evidence (abortOwner/budget/elapsed/
-    // stopReason/tokenUsage) persists durably instead of vanishing with the
-    // process (the EP002-R3 "nothing recoverable after a failure" class).
-    const workspaceEmitter = new WorkspaceTelemetryEmitter(storeEmitter, workspaceDir, (detail) => {
-      emitEvent('WORKSPACE_TELEMETRY_PERSIST_FAILED', detail);
-    });
-
-    // PRI-982 (SPEC-PD-IAER-001 §4.2 / FR-02): authoritative channel routing
-    // for artificer tasks. The channel is written deterministically by the
-    // intake bridge at seed time (pi_metadata.channel — the SINGLE authority,
-    // inherited along the chain) and is read from the leased task's hydrated
-    // metadata here; the cycle NEVER guesses it from task names or model text.
-    //   - code_tool_hook → RuleCode sub-chain: evidence preflight FIRST, then
-    //     L2 (flag permitting) with the assembled pack injected;
-    //   - prompt → the legal non-L2 pipeline (PiAi), evidence-exempt
-    //     (production: 40 successes on that pipeline);
-    //   - unresolvable → refuse to guess: observable skip, no run (T08).
-    const leasedTaskForChannel = await stateManager.getTask(wakeResult.taskId);
-    const leasedPiTask = leasedTaskForChannel ? hydratePITaskRecord(leasedTaskForChannel) : null;
-    const authoritativeChannel = leasedPiTask?.channel ?? null;
-
-    let artificerEvidence: ArtificerEvidencePreflightVerdict | null = null;
-    if (wakeResult.taskKind === 'artificer') {
-      if (authoritativeChannel === null || leasedPiTask === null) {
-        // Defensive: wakeOnce never leases non-hydratable tasks, so reaching
-        // here means the metadata corrupted between wake and read. Fail closed
-        // — never route an artificer task without an authoritative channel.
-        const channelInfo = JSON.stringify({
-          reason: 'artificer_channel_unresolvable',
-          taskId: wakeResult.taskId,
-          nextAction: 'Inspect and repair the task metadata (pi_metadata.channel); the consumer refuses to route an artificer task without an authoritative channel (SPEC-PD-IAER-001 §4.2, T08).',
-        });
-        emitEvent('INTERNALIZATION_CONSUMER_SKIP', channelInfo);
-        logger.warn(`[PD:${logLabel}] Artificer task ${wakeResult.taskId} skipped: authoritative channel unresolvable.`);
-        return { ran: false, skipReason: 'artificer_channel_unresolvable', taskId: wakeResult.taskId, taskKind: wakeResult.taskKind };
-      }
-      if (authoritativeChannel === 'code_tool_hook') {
-        artificerEvidence = await preflightArtificerOwnerEvidence({
-          taskId: wakeResult.taskId,
-          piTask: leasedPiTask,
-          owner,
-          workspaceDir, // FR-08 run-correlation telemetry (PRI-984)
-          stateManager,
-          eventEmitter: workspaceEmitter,
-          behaviorEvidence: ports.behaviorEvidence,
-        });
-        if (artificerEvidence.decision === 'evidence_source_unavailable') {
-          // SPEC §6.2: a host assembly gap is NOT "Owner has not labeled".
-          // The task stays pending (re-observable next cycle, zero model
-          // cost); the runner is never constructed evidence-less.
-          const gapInfo = JSON.stringify({
-            reason: 'evidence_source_unavailable',
-            taskId: wakeResult.taskId,
-            taskKind: wakeResult.taskKind,
-            nextAction: 'Host must wire the behaviorEvidence port (BehaviorExamplePackAssembler) into the consumer cycle ports; the task stays pending until then.',
-          });
-          emitEvent('INTERNALIZATION_CONSUMER_SKIP', gapInfo);
-          logger.warn(`[PD:${logLabel}] Artificer task ${wakeResult.taskId} skipped: evidence source unavailable (host must wire the behaviorEvidence port).`);
-          return { ran: false, skipReason: 'evidence_source_unavailable', taskId: wakeResult.taskId, taskKind: wakeResult.taskKind };
-        }
-        if (artificerEvidence.decision === 'evidence_source_error') {
-          // PRI-980 review P2-1 — SPEC §6.2 case 3: a trajectory-store I/O
-          // fault is preserved AS a storage fault. Same family as the absent
-          // port: the task stays wake-eligible (the next cycle retries the
-          // assembly at zero model cost), the runner is never constructed,
-          // and the preflight already emitted the structured degradation
-          // telemetry (reason=evidence_source_error, reviewPersisted=false).
-          const storageInfo = JSON.stringify({
-            reason: 'evidence_source_error',
-            taskId: wakeResult.taskId,
-            taskKind: wakeResult.taskKind,
-            nextAction: artificerEvidence.nextAction,
-            ...(artificerEvidence.detail !== undefined ? { detail: artificerEvidence.detail } : {}),
-          });
-          emitEvent('INTERNALIZATION_CONSUMER_SKIP', storageInfo);
-          logger.warn(`[PD:${logLabel}] Artificer task ${wakeResult.taskId} skipped: evidence source error (storage fault preserved; task stays wake-eligible).`);
-          return { ran: false, skipReason: 'evidence_source_error', taskId: wakeResult.taskId, taskKind: wakeResult.taskKind };
-        }
-        if (artificerEvidence.decision === 'blocked') {
-          // FR-04: the preflight already moved the task atomically into
-          // needs_human_review — outside the wake scan (pending/retry_wait
-          // only), so it is never auto-rewoken (FR-05/T02). reviewPersisted
-          // = false means a concurrent writer won the CAS; still no run.
-          emitEvent('INTERNALIZATION_CONSUMER_EVIDENCE_BLOCKED', JSON.stringify({
-            taskId: wakeResult.taskId,
-            reasonCode: artificerEvidence.reasonCode,
-            nextAction: artificerEvidence.nextAction,
-            ...(artificerEvidence.missingFields !== undefined ? { missingFields: [...artificerEvidence.missingFields] } : {}),
-            ...(artificerEvidence.detail !== undefined ? { detail: artificerEvidence.detail } : {}),
-            reviewPersisted: artificerEvidence.reviewPersisted,
-          }));
-          logger.warn(`[PD:${logLabel}] Artificer task ${wakeResult.taskId} blocked on Owner evidence (${artificerEvidence.reasonCode}, reviewPersisted=${artificerEvidence.reviewPersisted}).`);
-          return { ran: false, skipReason: 'artificer_blocked_on_owner_evidence', taskId: wakeResult.taskId, taskKind: wakeResult.taskKind };
-        }
-      }
-    }
 
     let adapter: PDRuntimeAdapter;
     if (taskRuntimeKind === 'pi-ai') {

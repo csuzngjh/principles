@@ -59,7 +59,40 @@ import type { StoreEventEmitter } from '../store/event-emitter.js';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type { PITaskRecord } from './peer-runner-contracts.js';
 import type { HumanReviewContext } from './pitask-metadata.js';
-import { createPITaskDiagnosticJson, mergePITaskMetadata } from './pitask-metadata.js';
+import { createPITaskDiagnosticJson, mergePITaskMetadata, hydratePITaskRecord, parseSeedSourcePainId } from './pitask-metadata.js';
+import type { TaskRecord } from '../task-status.js';
+
+/**
+ * Resolve the canonical Pain from the trusted seed along the persisted
+ * predecessor graph. Never infer Pain from model output or the Owner's
+ * selection. Multiple conflicting seeds and unresolvable ancestry fail closed.
+ */
+export async function resolveArtificerCanonicalPainId(
+  taskId: string,
+  getTask: (taskId: string) => Promise<TaskRecord | null>,
+): Promise<string | null> {
+  const pending = [taskId];
+  const seen = new Set<string>();
+  const pains = new Set<string>();
+  while (pending.length > 0 && seen.size < 64) {
+    const id = pending.shift();
+    if (id === undefined || seen.has(id)) continue;
+    seen.add(id);
+    const task = await getTask(id);
+    if (task === null) return null;
+    const sourcePainId = parseSeedSourcePainId(task.diagnosticJson);
+    if (sourcePainId !== null) pains.add(sourcePainId);
+    const piTask = hydratePITaskRecord(task);
+    if (piTask) {
+      for (const parentId of [piTask.parentTaskId, ...piTask.dependencyTaskIds]) {
+        if (typeof parentId === 'string' && parentId.length > 0 && !seen.has(parentId)) {
+          pending.push(parentId);
+        }
+      }
+    }
+  }
+  return pending.length === 0 && pains.size === 1 ? [...pains][0] ?? null : null;
+}
 
 /**
  * Lineage marker for preflight NHR transitions. Honest by construction: this
@@ -238,11 +271,39 @@ export async function preflightArtificerOwnerEvidence(
   }
 
   const selection = piTask.ownerEvidenceSelection;
-  const readiness = assessEvidenceReadiness({
+  let readiness = assessEvidenceReadiness({
     channelRequiresOwnerEvidence: true,
     ownerSelection: selection ?? null,
     assemblePack: selection !== undefined ? () => behaviorEvidence.assemble(selection) : undefined,
   });
+  // The persisted digest is an Owner confirmation, not just a syntactic field.
+  // The trajectory may change AFTER resume and BEFORE the next consumer wake.
+  // An assembled but changed pack must never enter the model (TOCTOU guard).
+  if (readiness.status === 'ready'
+    && selection?.contentDigest !== undefined
+    && readiness.evidenceHash !== selection.contentDigest) {
+    readiness = {
+      status: 'invalid_evidence',
+      reasonCode: 'owner_behavior_examples_stale',
+      detail: 'assembled evidence digest differs from the Owner-confirmed digest',
+      nextAction: 'Evidence changed after Owner confirmation; re-attach fresh examples, verify and resume.',
+    };
+  }
+
+  if (readiness.status === 'ready') {
+    const canonicalPainId = await resolveArtificerCanonicalPainId(
+      taskId,
+      (id) => params.stateManager.getTask(id),
+    );
+    if (canonicalPainId === null || canonicalPainId !== readiness.sourcePainId) {
+      readiness = {
+        status: 'invalid_evidence',
+        reasonCode: 'owner_behavior_examples_scope_mismatch',
+        detail: 'Owner evidence Pain does not match a unique canonical task seed Pain',
+        nextAction: 'Inspect the task lineage and reselect evidence for its canonical source Pain.',
+      };
+    }
+  }
 
   // Telemetry (FR-08): the gate ran — record the verdict with the unified
   // run-correlation block (PRI-984; persistentRunId/adapterRunId are
