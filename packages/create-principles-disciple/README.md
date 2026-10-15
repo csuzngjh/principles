@@ -142,4 +142,4 @@ PR feedback uses the single-target `.github/workflows/release-reproducibility.ym
 
 ## License
 
-MIT
+Apache-2.0
