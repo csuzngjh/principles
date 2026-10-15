@@ -7,7 +7,7 @@
 > **Context**: PD 已从单一 OpenClaw plugin 演化为多组件平台（Runtime / Host Adapters / Console / Desktop Companion / SDK），需要重新定义安装与运行边界
 > **Supersedes**: 无。取代会话内起草的未编号草稿 `docs/architecture/ADR-0021-PD-Installation-Architecture-Decisions.md`（该草稿因编号与已 Accepted 的 ADR-0021 冲突而作废，内容已并入本 ADR）。
 > **Refines**: [ADR-0020](0020-codex-cli-host-adapter.md) §2（薄适配器与 host-runtime 抽象层）—— 本 ADR 在**安装/部署**层面细化 ADR-0020 的适配器边界，不改动其协议/编解码决策。
-> **Related**: [ADR-0014](0014-mvp-first-strategy-and-product-pivot.md)（MVP-First）；[ADR-0021](0021-anonymous-product-telemetry.md)（编号所有者，本 ADR 不触碰）；[ADR-0022](0022-owner-identity-registration.md)（`~/.pd/owner.json` 机器级作用域先例）；[PD Installation Architecture v2.0](../architecture/PD_Installation_Architecture_v2.md)；[环境拓扑只读审计](../audit/PD_Current_Environment_Topology_Audit.md)；[ADR-0023 审查报告](../architecture/ADR-0023-review-summary.md)
+> **Related**: [ADR-0014](0014-mvp-first-strategy-and-product-pivot.md)（MVP-First）；[ADR-0021](0021-anonymous-product-telemetry.md)（编号所有者，本 ADR 不触碰）；[ADR-0022](0022-owner-identity-registration.md)（`~/.pd/owner.json` 机器级作用域先例）；[PD Installation Architecture v2.0](../architecture/PD_Installation_Architecture_v2.md)；环境拓扑只读审计（`docs/audit/PD_Current_Environment_Topology_Audit.md`，该审计文档不在本仓库）；[ADR-0023 审查报告](../architecture/ADR-0023-review-summary.md)
 > **Scope**: **架构决策文档。** 本 ADR 固化边界，**不执行**任何实施动作（见 §4 Non-Goals）。
 
 ---

@@ -30,7 +30,7 @@ npm install
 npm run build
 ```
 
-The plugin uses a `postinstall` script that automatically runs `node scripts/install-dependencies.cjs` after `npm install`.
+The plugin uses a `postinstall` script that installs its build-time dependencies after `npm install`.
 
 ## Build Commands
 
@@ -39,7 +39,6 @@ All commands run from `packages/openclaw-plugin/`:
 | Command | Description |
 |---------|-------------|
 | `npm run build` | Compile TypeScript to JavaScript using `tsc` |
-| `npm run build:web` | Build web assets via `node scripts/build-web.mjs` |
 | `npm run build:bundle` | Create esbuild bundle and web assets |
 | `npm run build:production` | Production build with esbuild (minification) + web + build verification |
 | `npm run test` | Run the test suite with Vitest |
@@ -157,7 +156,7 @@ Tests are co-located with source or in `tests/` directory:
 
 ## Next Steps
 
-- See [GETTING-STARTED.md](./GETTING-STARTED.md) for first-run instructions
+- See [GETTING-STARTED.md](../README.md) for first-run instructions
 - See [TESTING.md](./TESTING.md) for detailed testing documentation
-- See [ARCHITECTURE.md](./ARCHITECTURE.md) for system design
-- See [CONTRIBUTING.md](../CONTRIBUTING.md) for the full contribution guidelines
+- See [ARCHITECTURE.md](../architecture/ARCHITECTURE.md) for system design
+- See [CONTRIBUTING.md](../../CONTRIBUTING.md) for the full contribution guidelines

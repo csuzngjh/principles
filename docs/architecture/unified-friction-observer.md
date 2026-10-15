@@ -48,7 +48,7 @@
 - **冷通道（异步）**：收集脱敏上下文，异步提交给 LLM 判断。不阻塞主 Agent。
 
 > [!WARNING]
-> **"廉价/本地 LLM" 是一个未满足的基础设施假设。** 现有 `EmpathyObserver`（[empathy-observer.ts](../../packages/principles-core/src/runtime-v2/observer/empathy-observer.ts)）通过 `PDRuntimeAdapter` 调用的是宿主 Agent 配置的同一个 LLM，不是独立的廉价模型。调用独立模型需要多 backend 支持（[post-mvp-conditional-roadmap.md §7 BALM](../plans/post-mvp-conditional-roadmap.md)，Hold 状态）。
+> **"廉价/本地 LLM" 是一个未满足的基础设施假设。** 现有 `EmpathyObserver`（`EmpathyObserver`（原 `runtime-v2/observer/empathy-observer.ts`，该文件已不在本仓库））通过 `PDRuntimeAdapter` 调用的是宿主 Agent 配置的同一个 LLM，不是独立的廉价模型。调用独立模型需要多 backend 支持（[post-mvp-conditional-roadmap.md §7 BALM](../plans/post-mvp-conditional-roadmap.md)，Hold 状态）。
 >
 > 可行的起步方式是复用宿主 Agent 的 `PDRuntimeAdapter`（和 `EmpathyObserver` 一样），但成本不低。"廉价模型"是进一步优化，不是前提。
 
@@ -113,4 +113,4 @@ MVP 前端 `default` 分支已有诚实降级（显示"未知来源"），为扩
 | [PD_Pain_Signal_Audit.md](PD_Pain_Signal_Audit.md) | 感知带宽分析驱动了本探索 |
 | [01-shared-constraints.md](../plans/2026-06-console-rebuild/01-shared-constraints.md) | Console G.2 数据契约（source 字段） |
 | [post-mvp-conditional-roadmap.md](../plans/post-mvp-conditional-roadmap.md) | UOP 尚未在此注册条目 |
-| [empathy-observer.ts](../../packages/principles-core/src/runtime-v2/observer/empathy-observer.ts) | 现有实现，spike 的起点 |
+| `EmpathyObserver`（原 `runtime-v2/observer/empathy-observer.ts`，该文件已不在本仓库） | 现有实现，spike 的起点 |

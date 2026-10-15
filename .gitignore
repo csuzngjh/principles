@@ -84,7 +84,9 @@ packages/create-principles-disciple/workbuddy-adapter/
 !.claude/skills/
 claude/
 .planning/
-plans/
+# Anchored to the checkout root: an unanchored `plans/` would also match
+# docs/plans/** and silently swallow every new plan dropped there.
+/plans/
 conductor/
 .principles/
 .state/

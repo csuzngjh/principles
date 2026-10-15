@@ -158,7 +158,7 @@ RTX4090 只用于有明确问题的离线回放与评估实验。是否需要本
 ### 主要实现证据
 
 - 激活审批行为：[activation-dispatcher.ts](../../packages/principles-core/src/runtime-v2/activation/activation-dispatcher.ts)。
-- Owner live 决策服务：[rule-host-owner-decision-service.ts](../../packages/principles-core/src/runtime-v2/activation/rule-host-owner-decision-service.ts)。
+- Owner live 决策服务：`rule-host-owner-decision-service.ts`（该文件已不在本仓库当前路径下）。
 - 旗标默认状态：[feature-flag-contract.ts](../../packages/principles-core/src/runtime-v2/feature-flags/feature-flag-contract.ts)。
 - RuleHost 生产门：[production-rulehost-gate.ts](../../packages/host-runtime/src/production-rulehost-gate.ts)。
 - Pain 生产入口：[production-pain-evidence.ts](../../packages/host-runtime/src/production-pain-evidence.ts)。

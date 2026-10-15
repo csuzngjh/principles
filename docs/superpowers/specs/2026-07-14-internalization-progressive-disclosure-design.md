@@ -239,7 +239,7 @@ Anthropic 对 context engineering 的定义：**找到最小的、高信号 toke
 | **B. 字段提取** | 零 LLM 成本 | 生成自身 summary（结构化字段已有） | 仅适用于自身字段，无法跨级提取 |
 | **C. 写入时单跳读取** | 单跳 I/O（读直接前驱） | 传递前驱 TL;DR | 依赖直接前驱已有 tldr 字段 |
 
-**v2 关键修正**：原方案推荐"字段提取"并声称"零成本"，但代码核查发现 scribe 的直接输入（philosopher artifact）**没有 pain 字段**（[philosopher-output.ts:22-29](file:///c:/Users/csuzn/.trae-cn/worktrees/principles/feat-review-linear-pri-511-513-fzZr81/packages/principles-core/src/runtime-v2/internalization/philosopher-output.ts) 只有 thesis/principleCandidate/risks）。因此跨级 TL;DR 无法通过字段提取获得，必须通过级联传播（方式 C）。
+**v2 关键修正**：原方案推荐"字段提取"并声称"零成本"，但代码核查发现 scribe 的直接输入（philosopher artifact）**没有 pain 字段**（[philosopher-output.ts:22-29](../../../packages/principles-core/src/runtime-v2/internalization/philosopher-output.ts) 只有 thesis/principleCandidate/risks）。因此跨级 TL;DR 无法通过字段提取获得，必须通过级联传播（方式 C）。
 
 **推荐组合**：
 - `tldr.self`：方式 A（LLM 主输出顺带生成）
@@ -418,7 +418,7 @@ async getAncestorByArtifactKind(
 ): Promise<PIArtifactRecord | null>;
 ```
 
-**注意**：不要用 stage 枚举（`'pain' | 'diagnosis' | ...`），因为 `PIArtifactKind` 只有 `principle/rule/skill/patch`（[peer-runner-contracts.ts:70-74](file:///c:/Users/csuzn/.trae-cn/worktrees/principles/feat-review-linear-pri-511-513-fzZr81/packages/principles-core/src/runtime-v2/internalization/peer-runner-contracts.ts)）。要判断"这是 dreamer artifact"，必须 `artifact.sourceTaskId → task.taskKind` 二跳查询。
+**注意**：不要用 stage 枚举（`'pain' | 'diagnosis' | ...`），因为 `PIArtifactKind` 只有 `principle/rule/skill/patch`（[peer-runner-contracts.ts:70-74](../../../packages/principles-core/src/runtime-v2/internalization/peer-runner-contracts.ts)）。要判断"这是 dreamer artifact"，必须 `artifact.sourceTaskId → task.taskKind` 二跳查询。
 
 #### 4.4.3 错误处理（rc-9-no-silent-fallback）
 
@@ -561,7 +561,7 @@ PRI-513 把 `intentConsistency` 重命名为 `painCoverage` + `compressionFideli
 
 **v2 修正**：原方案错误声称 `intentConsistency` 被 `artificer-prompt-builder.ts:12` 引用。代码核查证实：
 - `artificer-prompt-builder.ts` 中 **无** `intentConsistency` 匹配
-- 真正引用 `intentConsistency` 的是 [evaluator-runner.ts:68](file:///c:/Users/csuzn/.trae-cn/worktrees/principles/feat-review-linear-pri-511-513-fzZr81/packages/principles-core/src/runtime-v2/internalization/evaluator-runner.ts)（"judge intentConsistency"）+ [evaluator-output.ts:40](file:///c:/Users/csuzn/.trae-cn/worktrees/principles/feat-review-linear-pri-511-513-fzZr81/packages/principles-core/src/runtime-v2/internalization/evaluator-output.ts)（`EvaluatorCodeReview.intentConsistency` 字段）
+- 真正引用 `intentConsistency` 的是 [evaluator-runner.ts:68](../../../packages/principles-core/src/runtime-v2/internalization/evaluator-runner.ts)（"judge intentConsistency"）+ [evaluator-output.ts:40](../../../packages/principles-core/src/runtime-v2/internalization/evaluator-output.ts)（`EvaluatorCodeReview.intentConsistency` 字段）
 
 **影响**：重命名会破坏 **evaluator** 侧的 prompt 契约和 output schema，而非 artificer 侧。历史 evaluator artifact 的 contentJson 里有 `intentConsistency` 字段。
 
@@ -583,7 +583,7 @@ PRI-513 三段式校验新增两个失败点（pain→dreamer / dreamer→scribe
 
 ### 4.7 artifact 可变性与 TL;DR 一致性（v2 新增）
 
-**问题**：代码核查证实 artifact 是**可变的**（[sqlite-pi-artifact-store.ts:75-102](file:///c:/Users/csuzn/.trae-cn/worktrees/principles/feat-review-linear-pri-511-513-fzZr81/packages/principles-core/src/runtime-v2/store/artifact/sqlite-pi-artifact-store.ts)，`ON CONFLICT DO UPDATE`）。dreamer 重跑会 upsert 更新 dreamer artifact，下游 scribe 中冗余的 `tldr.predecessor` 立即过时。
+**问题**：代码核查证实 artifact 是**可变的**（[sqlite-pi-artifact-store.ts:75-102](../../../packages/principles-core/src/runtime-v2/store/artifact/sqlite-pi-artifact-store.ts)，`ON CONFLICT DO UPDATE`）。dreamer 重跑会 upsert 更新 dreamer artifact，下游 scribe 中冗余的 `tldr.predecessor` 立即过时。
 
 **缓解设计**：
 
@@ -647,14 +647,14 @@ if (isTldrStale(tldr, artifactStore)) {
 
 | 现有代码 | 演化方向 |
 |---------|---------|
-| `resolveDreamerContext`（[artificer-runner.ts:175-283](file:///c:/Users/csuzn/.trae-cn/worktrees/principles/feat-review-linear-pri-511-513-fzZr81/packages/principles-core/src/runtime-v2/internalization/artificer-runner.ts)） | → 演化为 TL;DR 读取 + tier2 降级回溯（保留现有逻辑作为 tldr 失效时的 fallback） |
-| `extractScribeArtifactId`（[evaluator-runner.ts:90-109](file:///c:/Users/csuzn/.trae-cn/worktrees/principles/feat-review-linear-pri-511-513-fzZr81/packages/principles-core/src/runtime-v2/internalization/evaluator-runner.ts)） | → 演化为 TL;DR 读取（保留现有逻辑作为 fallback） |
+| `resolveDreamerContext`（[artificer-runner.ts:175-283](../../../packages/principles-core/src/runtime-v2/internalization/artificer-runner.ts)） | → 演化为 TL;DR 读取 + tier2 降级回溯（保留现有逻辑作为 tldr 失效时的 fallback） |
+| `extractScribeArtifactId`（[evaluator-runner.ts:90-109](../../../packages/principles-core/src/runtime-v2/internalization/evaluator-runner.ts)） | → 演化为 TL;DR 读取（保留现有逻辑作为 fallback） |
 | `PIArtifactRecord.contentJson` | → 新增 `tldr` + `summary` 字段（向后兼容） |
 | 5 个 prompt builder | → 接收 `EnrichedContext`（manifest 解析后），无需条件分支 |
 | `PIArtifactStore.listLineage` | → 单跳，不递归；CandidateLineage 自己实现递归回溯 |
 
 **v2 修正**：
-- `extractScribeArtifactId` 实际查**两个**位置（[evaluator-runner.ts:90-109](file:///c:/Users/csuzn/.trae-cn/worktrees/principles/feat-review-linear-pri-511-513-fzZr81/packages/principles-core/src/runtime-v2/internalization/evaluator-runner.ts)）：(1) `sourceTrace.scribeArtifactId`，(2) 顶层 `sourceScribeArtifactId`（fallback）。演化时需保留此 fallback 逻辑
+- `extractScribeArtifactId` 实际查**两个**位置（[evaluator-runner.ts:90-109](../../../packages/principles-core/src/runtime-v2/internalization/evaluator-runner.ts)）：(1) `sourceTrace.scribeArtifactId`，(2) 顶层 `sourceScribeArtifactId`（fallback）。演化时需保留此 fallback 逻辑
 - `resolveDreamerContext` 是 110 行的复杂函数（含 rc-1/rc-2/rc-4/rc-5/rc-9 校验 + 7 种降级事件），不应直接删除，应保留为 tier2 降级路径
 
 ### 5.2 新增抽象
@@ -669,7 +669,7 @@ if (isTldrStale(tldr, artifactStore)) {
 
 ### 5.3 架构合规
 
-- **`antipattern-core-io` 不触发**：CandidateLineage 是纯逻辑，通过构造函数注入 `PIArtifactStore`，不 import fs/path（[io-seam-registry.json](file:///c:/Users/csuzn/.trae-cn/worktrees/principles/feat-review-linear-pri-511-513-fzZr81/packages/principles-core/io-seam-registry.json) 不需登记）
+- **`antipattern-core-io` 不触发**：CandidateLineage 是纯逻辑，通过构造函数注入 `PIArtifactStore`，不 import fs/path（[io-seam-registry.json](../../../packages/principles-core/io-seam-registry.json) 不需登记）
 - **`rc-1` / `rc-2` 合规**：解析 contentJson 走 unknown + Object.hasOwn，无 `as` 旁路（现有 `resolveDreamerContext` 已示范）
 - **`rc-9` 合规**：错误处理返回 Result 类型，不静默 fallback
 - **architecture-regression.test.ts 不触发**：candidate-lineage.ts 是纯逻辑，不登记 io-seam-registry
@@ -821,10 +821,10 @@ if (isTldrStale(tldr, artifactStore)) {
 - [Anthropic Agent Skills Specification](https://www.anthropic.com/) — Agent Skills 官方规范
 - [Anthropic Engineering: Effective context engineering for agents](https://www.anthropic.com/) — 官方对 context engineering 的定义
 - [Manus Agent Framework Lessons](https://manus.im/) — ReAct agent context bloat 实践细节
-- [ADR-0014 MVP-First Strategy](file:///c:/Users/csuzn/.trae-cn/worktrees/principles/feat-review-linear-pri-511-513-fzZr81/docs/adr/0014-mvp-first-strategy-and-product-pivot.md)
-- [PRODUCT_IDENTITY.md](file:///c:/Users/csuzn/.trae-cn/worktrees/principles/feat-review-linear-pri-511-513-fzZr81/docs/product/PRODUCT_IDENTITY.md)
-- [INTERNALIZATION_PIPELINE.md](file:///c:/Users/csuzn/.trae-cn/worktrees/principles/feat-review-linear-pri-511-513-fzZr81/docs/architecture/INTERNALIZATION_PIPELINE.md)
-- [2026-06-28-rulecode-context-v2 ADR](file:///c:/Users/csuzn/.trae-cn/worktrees/principles/feat-review-linear-pri-511-513-fzZr81/docs/adr/2026-06-28-rulecode-context-v2.md) — 最相似的近期上下文增强先例
+- [ADR-0014 MVP-First Strategy](../../adr/0014-mvp-first-strategy-and-product-pivot.md)
+- [PRODUCT_IDENTITY.md](../../product/PRODUCT_IDENTITY.md)
+- [INTERNALIZATION_PIPELINE.md](../../architecture/INTERNALIZATION_PIPELINE.md)
+- [2026-06-28-rulecode-context-v2 ADR](../../adr/2026-06-28-rulecode-context-v2.md) — 最相似的近期上下文增强先例
 
 ---
 

@@ -136,17 +136,12 @@
 
 | ADR | 状态 | 主题 |
 |-----|------|------|
-| [ADR-0001](../adr/0001-runtime-v2-service-boundaries.md) | Accepted | Runtime V2 服务边界 |
-| [ADR-0002](../adr/0002-hard-internalization-core-boundary.md) | Accepted | 硬内化核心边界 |
-| [ADR-0003](../adr/0003-peer-agent-state-machine-orchestration.md) | Accepted | Peer Agent 状态机编排 |
-| [ADR-0004](../adr/0004-l2-auto-correction-and-replay.md) | Accepted | L2 自动校正与回放 |
-| [ADR-0005](../adr/0005-nocturnal-internalization-merger.md) | Accepted | Nocturnal 与 Internalization 合并 |
-| [ADR-0006](../adr/0006-hybrid-activation-mechanism.md) | Accepted | 5 通道混合激活机制 |
-| [ADR-0007](../adr/0007-cli-vs-console-audience-separation.md) | Accepted | pd-cli 与 pd-console 受众分离 |
-| ADR-0008 | Accepted | Built-in Agent Lifecycle Manager（BALM）|
-| ADR-0009 | Accepted | Long-Running Agent Session（LRAS）|
-| ADR-0010 | Accepted | Goal-Aligned Pain Signal（GAP）|
-| ADR-0011 | Accepted | Three-Tier Task Model and MissionScheduler |
+| ADR-0001 ~ 0004、0006、0007 | 文件已不存在（退役） | 历史 ADR：Runtime V2 服务边界 / 硬内化核心边界 / Peer Agent 状态机编排 / L2 自动校正与回放 / 5 通道混合激活 / pd-cli 与 pd-console 受众分离。条目仅作历史引用，**不构成当前实施依据** |
+| [ADR-0005](../adr/0005-nocturnal-internalization-merger.md) | Accepted（部分被 ADR-0012 取代） | Nocturnal 与 Internalization 合并；`IdleTrigger` / OpenClaw 夜间调度保留段已被取代 |
+| [ADR-0008](../adr/0008-built-in-agent-lifecycle-manager.md) | Deferred by ADR-0014 | Built-in Agent Lifecycle Manager（BALM）— 不得作为当前实施依据 |
+| [ADR-0009](../adr/0009-long-running-agent-session.md) | Deferred by ADR-0014 | Long-Running Agent Session（LRAS）— 不得作为当前实施依据 |
+| [ADR-0010](../adr/0010-goal-aligned-pain-signal.md) | Partially retained；GAP expansion deferred by ADR-0014 | Goal-Aligned Pain Signal（GAP） |
+| [ADR-0011](../adr/0011-three-tier-task-model-and-mission-scheduler.md) | Deferred by ADR-0014（仅保留 PD-owned 显式调度边界） | Three-Tier Task Model and MissionScheduler |
 | [ADR-0012](../adr/0012-runtime-v2-standalone-scheduling-and-legacy-retirement.md) | Accepted | Runtime V2 独立调度与 legacy execution 退役；取代 IdleTrigger 保留决策 |
 | [ADR-0026](../adr/0026-cnb-token-injection-boundary.md) | Proposed | CNB_TOKEN 注入边界不可由 imports 配置消除（P0-01 归因修正）|
 | [ADR-0013](../adr/0013-attribution-pipeline-and-decision-observability.md) | Superseded by ADR-0014 / Deferred | 原 attribution 提案；ADR-0027 接受后替代旧设计路径 |
@@ -161,37 +156,40 @@
 
 ### 架构治理（Governance）
 
-> 导航核验：下表 `architecture-governance/` 链接目前没有可读取目标，保留为历史引用，不作为已读取的治理依据。本次不重建目录；现行要求读取本页「文档贡献规范」、架构总览 §8 和 AGENTS.md。
+> 导航核验：`architecture-governance/`、`reviews/`、`pd-runtime-v2/` 三个目录已从本仓库移除。
+> 下表保留其历史主题，但**不再作为可点击链接**。现行治理依据请读
+> [`AGENTS.md`](../../AGENTS.md)（架构守卫 §8 / §20）、
+> [`PD_ARCHITECTURE_OVERVIEW.md`](PD_ARCHITECTURE_OVERVIEW.md) 与 `scripts/check-*` 守卫脚本。
 
 | 文档 | 描述 |
 |------|------|
-| [`../architecture-governance/README.md`](../architecture-governance/README.md) | 渐进式架构治理 |
-| [`../architecture-governance/ARCHITECTURE_GUARDRAILS.md`](../architecture-governance/ARCHITECTURE_GUARDRAILS.md) | 架构守则 |
-| [`../architecture-governance/PRINCIPLE-TREE-ARCHITECTURE.md`](../architecture-governance/PRINCIPLE-TREE-ARCHITECTURE.md) | 原则树具象化约定（与 DOMAIN_MODEL 互补）|
-| [`../architecture-governance/GRADUAL_ROADMAP.md`](../architecture-governance/GRADUAL_ROADMAP.md) | 渐进式重构路线 |
-| [`../architecture-governance/PR_ARCHITECTURE_CHECKLIST.md`](../architecture-governance/PR_ARCHITECTURE_CHECKLIST.md) | PR 检查清单 |
+| `architecture-governance/PR_ARCHITECTURE_CHECKLIST.md`（已移除） | PR 检查清单；现行流程见 `AGENTS.md` §23 |
+| `architecture-governance/GRADUAL_ROADMAP.md`（已移除） | 渐进式重构路线 |
+| `architecture-governance/PRINCIPLE-TREE-ARCHITECTURE.md`（已移除） | 原则树具象化约定（与 DOMAIN_MODEL 互补） |
+| `architecture-governance/ARCHITECTURE_GUARDRAILS.md`（已移除） | 架构守则；现行法则见 `AGENTS.md` §20 |
+| `architecture-governance/README.md`（已移除） | 渐进式架构治理 — 历史主题 |
 
 ### 架构评审记录
 
 | 文档 | 描述 |
 |------|------|
-| [`../reviews/architecture-review-2026-05-15.md`](../reviews/architecture-review-2026-05-15.md) | 2026-05 架构评审 + 改进 RFC |
+| `reviews/architecture-review-2026-05-15.md`（已移除） | 2026-05 架构评审 + 改进 RFC — 历史记录 |
 
 ### Runtime V2 工作集
 
 | 文档 | 描述 |
 |------|------|
-| [`../pd-runtime-v2/README.md`](../pd-runtime-v2/README.md) | Runtime V2 文档索引 |
-| [`../pd-runtime-v2/runtime-v2-milestone-roadmap.md`](../pd-runtime-v2/runtime-v2-milestone-roadmap.md) | M1-M9 里程碑 |
+| [`PD_ARCHITECTURE_OVERVIEW.md`](PD_ARCHITECTURE_OVERVIEW.md) | Runtime V2 当前架构总览（替代已移除的 pd-runtime-v2 索引） |
+| `pd-runtime-v2/runtime-v2-milestone-roadmap.md`（已移除） | M1-M9 里程碑 — 历史记录 |
 
 ### 顶层文档
 
 | 文档 | 描述 |
 |------|------|
 | [`../../README.md`](../../README.md) | 项目首页 |
-| [`../GETTING-STARTED.md`](../GETTING-STARTED.md) | 用户入门 |
-| [`../USER_GUIDE.md`](../USER_GUIDE.md) | 用户指南 |
-| [`../DEVELOPMENT.md`](../DEVELOPMENT.md) | 开发指南 |
+| [`docs/README.md`](../README.md) | 文档总入口 |
+| [`docs/process/DEVELOPMENT.md`](../process/DEVELOPMENT.md) | 开发指南 |
+| [`CONTRIBUTING.md`](../../CONTRIBUTING.md) | 贡献流程 |
 
 ---
 
