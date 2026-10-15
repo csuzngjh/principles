@@ -177,8 +177,14 @@ function boundedDetail(value: unknown): string {
  * Semantics deliberately mirror `validateOwnerSelection` in the plugin
  * assembler (positive safe integers, 1..3 unique positives, non-empty text):
  * a present-but-unusable selection is REJECTED, never repaired here.
+ *
+ * PRI-982: exported as the SINGLE shape authority for the persisted
+ * `pi_metadata.ownerEvidenceSelection` field — pitask-metadata parse reuses
+ * this validator so the persistence layer and the readiness gate can never
+ * diverge on what a usable selection is. Takes `unknown` (rc-1: the metadata
+ * parse reads it from a DB row) and rejects non-objects itself.
  */
-function validateOwnerSelectionShape(selection: OwnerEvidenceSelection): string[] {
+export function validateOwnerEvidenceSelectionShape(selection: unknown): string[] {
   const problems: string[] = [];
   if (!isPlainObjectLike(selection)) {
     return ['ownerSelection must be a plain object'];
@@ -256,7 +262,7 @@ export function assessEvidenceReadiness(input: EvidenceReadinessInput): Evidence
   }
 
   // 3. Selection shape (untrusted — rc-1..rc-5; assembler-aligned rejection).
-  const selectionProblems = validateOwnerSelectionShape(selection);
+  const selectionProblems = validateOwnerEvidenceSelectionShape(selection);
   if (selectionProblems.length > 0) {
     return {
       status: 'invalid_evidence',

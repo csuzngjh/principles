@@ -134,6 +134,15 @@ interface ArtificerContext {
    * 契约原因——不再零新信息重试。Ephemeral，不回写、不进 RepairPayload。
    */
   readonly priorValidatorErrors?: LastValidatorErrors;
+  /**
+   * PRI-982 (SPEC-PD-IAER-001 §4.2): authoritative target channel, read from
+   * the task's hydrated `pi_metadata.channel` (written deterministically by
+   * the intake bridge at seed time — the runner NEVER guesses it from task
+   * names or model text). `null` = metadata did not hydrate; every consumer
+   * must then treat the task conservatively (fail closed toward the RuleCode
+   * evidence contract), never as 'prompt'.
+   */
+  readonly channel: string | null;
 }
 
 // ── Result Types (backward-compatible exports) ───────────────────────────────
@@ -201,8 +210,13 @@ export interface ArtificerRunnerDeps extends PeerRunnerDeps {
   /**
    * PRI-780: v2-only generation. The pack stays optional at the type level
    * only because task-driven constructors (consumer cycle, run-once) have no
-   * Owner-labelled pack channel — a missing pack fails the attempt LOUD at
-   * prompt-build time (no v1/action-only fallback exists).
+   * Owner-labelled pack channel.
+   *
+   * PRI-982 (SPEC-PD-IAER-001 §4.2): a missing pack fails the attempt LOUD
+   * for every channel EXCEPT an explicit `prompt` (that channel's legal
+   * non-L2 pipeline is evidence-exempt; unknown channels fail closed toward
+   * requiring evidence). An injected pack keeps full v2 echo protection on
+   * every channel.
    */
   readonly behaviorExamplePack?: BehaviorExamplePack;
 }
@@ -622,6 +636,11 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
 
     const piTask = hydratePITaskRecord(task);
     const deps = piTask?.dependencyTaskIds ?? [];
+    // PRI-982 (SPEC-PD-IAER-001 §4.2): the authoritative channel rides the
+    // context so invokeRuntime/validateOutput can apply the evidence contract
+    // per channel. `null` (metadata did not hydrate) must read as
+    // code_tool_hook-conservative downstream — never as an exemption.
+    const channel: string | null = piTask?.channel ?? null;
 
     // PRI-428: carry prior adversarial replay failures into the prompt when
     // this is a Round-2+ retry. Validated as non-empty string by the metadata
@@ -732,7 +751,7 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
 
     if (deps.length === 0) {
       this.emitEvent('no_dependencies', taskId, {});
-      return { contextHash: 'empty', scribeArtifact: null, sourceScribeArtifactId: null, adversarialFeedback, repairFeedback, revisionFeedback, ...repairEvidenceExtras };
+      return { contextHash: 'empty', scribeArtifact: null, sourceScribeArtifactId: null, adversarialFeedback, repairFeedback, revisionFeedback, channel, ...repairEvidenceExtras };
     }
 
     for (const depId of deps) {
@@ -787,6 +806,7 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
           adversarialFeedback,
           repairFeedback,
           revisionFeedback,
+          channel,
           ...repairEvidenceExtras,
           ...(resolvedDreamer !== undefined ? { dreamerContext: resolvedDreamer.dreamerContext } : {}),
         };
@@ -794,7 +814,7 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
     }
 
     this.emitEvent('no_scribe_artifact', taskId, {});
-    return { contextHash: 'empty', scribeArtifact: null, sourceScribeArtifactId: null, adversarialFeedback, repairFeedback, ...repairEvidenceExtras };
+    return { contextHash: 'empty', scribeArtifact: null, sourceScribeArtifactId: null, adversarialFeedback, repairFeedback, channel, ...repairEvidenceExtras };
   }
 
   async invokeRuntime(taskId: string, context: ArtificerContext): Promise<RunHandle> {
@@ -826,9 +846,10 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
     // the focused-manifest narrowing — see the comment at the capture site).
     const intentContract = extractIntentContract(fullScribeArtifact);
 
-    // PRI-780: v2-only generation. Task-driven callers (consumer cycle,
-    // run-once) have no Owner-labelled pack channel; a missing pack fails
-    // this attempt LOUD before any LLM call — never a v1/action-only fallback.
+    // PRI-780: v2-only generation for the RuleCode sub-chain. Task-driven
+    // callers (consumer cycle, run-once) have no Owner-labelled pack channel;
+    // a missing pack fails this attempt LOUD before any LLM call — never a
+    // v1/action-only fallback.
     //
     // PRI-981 (SPEC-PD-IAER-001 FR-05): the refusal is now a STRUCTURED
     // PDRuntimeError('input_invalid') instead of a plain Error. Plain Errors
@@ -841,7 +862,15 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
     // historical audit and the PRI-780 B2 contract; reasonCode + nextAction
     // travel in `details`, which the base runner persists to the task
     // diagnostic (PRI-559 P0-2 path) so the evidence gap is actionable.
-    if (this.behaviorExamplePack === undefined) {
+    //
+    // PRI-982 (SPEC-PD-IAER-001 §4.2): the requirement is CHANNEL-SCOPED.
+    // Only an explicit `prompt` channel is exempt — that channel's legal
+    // non-L2 pipeline produces text-principle output without Owner-labelled
+    // evidence (production: 40 successes on that pipeline; downstream
+    // assessArtificerCodeBearing + RuleHost activation gates still enforce
+    // C-03/C-05). Missing/unresolvable/unknown channels fail closed toward
+    // REQUIRING evidence — the runner never guesses.
+    if (this.behaviorExamplePack === undefined && context.channel !== 'prompt') {
       throw new PDRuntimeError(
         'input_invalid',
         'behavior_example_pack_missing: v2-only Artificer generation requires a BehaviorExamplePack '
@@ -858,26 +887,35 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
     // preflight is bypassed, an injected pack that fails the one shared
     // validator must never reach the model. Bounded error list (rc-8);
     // same permanent `input_invalid` classification as the missing case.
-    const packValidation = validateBehaviorExamplePack(this.behaviorExamplePack);
-    if (!packValidation.valid) {
-      const boundedErrors = packValidation.errors.slice(0, EVIDENCE_ERROR_PREVIEW_LIMIT);
-      const overflow = packValidation.errors.length - boundedErrors.length;
-      throw new PDRuntimeError(
-        'input_invalid',
-        `behavior_example_pack_invalid: injected BehaviorExamplePack failed validateBehaviorExamplePack`
-          + ` (${boundedErrors.join('; ')}${overflow > 0 ? ` …[+${overflow} more]` : ''})`
-          + ` — SPEC-PD-IAER-001 FR-05 defensive guard`,
-        {
-          reasonCode: 'owner_behavior_examples_invalid',
-          nextAction: 'owner must correct the labelled evidence and resubmit via the SPEC-PD-IAER-001 FR-06 recovery entry',
-          validationErrors: boundedErrors,
-        },
-      );
+    // PRI-982: applies only to an actually-INJECTED pack — a pack-absent
+    // prompt-channel task passed the channel-scoped guard above legally.
+    if (this.behaviorExamplePack !== undefined) {
+      const packValidation = validateBehaviorExamplePack(this.behaviorExamplePack);
+      if (!packValidation.valid) {
+        const boundedErrors = packValidation.errors.slice(0, EVIDENCE_ERROR_PREVIEW_LIMIT);
+        const overflow = packValidation.errors.length - boundedErrors.length;
+        throw new PDRuntimeError(
+          'input_invalid',
+          `behavior_example_pack_invalid: injected BehaviorExamplePack failed validateBehaviorExamplePack`
+            + ` (${boundedErrors.join('; ')}${overflow > 0 ? ` …[+${overflow} more]` : ''})`
+            + ` — SPEC-PD-IAER-001 FR-05 defensive guard`,
+          {
+            reasonCode: 'owner_behavior_examples_invalid',
+            nextAction: 'owner must correct the labelled evidence and resubmit via the SPEC-PD-IAER-001 FR-06 recovery entry',
+            validationErrors: boundedErrors,
+          },
+        );
+      }
     }
 
     const builder = new ArtificerPromptBuilder();
     const { message, systemPrompt } = builder.buildPrompt({
-      behaviorExamplePack: this.behaviorExamplePack,
+      // PRI-982: the pack rides the prompt only when actually injected; a
+      // pack-absent prompt-channel task builds its legal pack-less prompt.
+      ...(this.behaviorExamplePack !== undefined ? { behaviorExamplePack: this.behaviorExamplePack } : {}),
+      // PRI-982: caller-declared channel from pi_metadata (fail closed:
+      // anything but an explicit 'prompt' declares the RuleCode contract).
+      channel: context.channel === 'prompt' ? 'prompt' : 'code_tool_hook',
       taskId,
       contextHash: context.contextHash,
       scribeArtifact: scribeArtifactInput,
@@ -970,7 +1008,19 @@ ${context.revisionFeedback}
     // projection the prompt presented (the model can only copy what it
     // saw); validating against the raw pack would reject every honest
     // echo on real-sized workspaces.
-    const modeErrors = validateV2OutputContract(output, this.behaviorExamplePack !== undefined ? boundPackForPrompt(this.behaviorExamplePack) : undefined);
+    //
+    // PRI-982 (SPEC-PD-IAER-001 §4.2): the v2 Owner-echo contract applies
+    // whenever a pack is INJECTED (any channel — injected Owner evidence is
+    // protected everywhere). A pack-ABSENT prompt-channel task runs its legal
+    // non-L2 pipeline with no Owner labels to protect → no echo contract. A
+    // pack-ABSENT non-prompt task still fails the v2 contract (missing pack,
+    // unchanged PRI-780 rule — defense in depth behind the invokeRuntime
+    // guard).
+    const modeErrors = this.behaviorExamplePack !== undefined
+      ? validateV2OutputContract(output, boundPackForPrompt(this.behaviorExamplePack))
+      : context.channel === 'prompt'
+        ? []
+        : validateV2OutputContract(output, undefined);
 
     // Trust-boundary: validator returns `string | undefined` for errorCategory.
     // Must not `as`-cast; validate at runtime (ERR-001, ERR-005).

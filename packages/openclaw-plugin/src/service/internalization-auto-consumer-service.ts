@@ -13,6 +13,8 @@ import type { OpenClawPluginServiceContext, PluginLogger } from '../openclaw-sdk
 import { READ_ONLY_TOOL_NAMES, LOW_RISK_WRITE_TOOL_NAMES, HIGH_RISK_TOOL_NAMES, AGENT_TOOL_NAMES } from '../constants/tools.js';
 import { OPENCLAW_TOOL_SEMANTICS, OPENCLAW_TOOL_SEMANTIC_MAPPINGS } from '../constants/tool-semantics.js';
 import { runInternalizationConsumerCycle, INTERNALIZATION_AUTO_CONSUMER_FLAG_ID, saveHostToolDeclaration } from '@principles/host-runtime';
+import { BehaviorExamplePackAssembler } from '../core/behavior-example-pack-assembler.js';
+import path from 'node:path';
 import { loadFeatureFlagFromConfig } from '../core/pd-config-loader.js';
 import { SystemLogger } from '../core/system-logger.js';
 
@@ -96,6 +98,26 @@ export async function runConsumerCycle(
     toolSemantics: OPENCLAW_TOOL_SEMANTICS,
     // PRI-741: artificer generation gets the same host projection.
     hostKinds: ['openclaw'],
+    // PRI-982 (SPEC-PD-IAER-001 FR-02/FR-03): Owner evidence assembly for
+    // code_tool_hook artificer tasks. Lazily wraps the production
+    // BehaviorExamplePackAssembler so the TrajectoryDatabase (registry
+    // singleton; dispose stays with the registry, as in run-rulehost) is only
+    // opened when a task actually needs assembly. Construction parameters are
+    // IDENTICAL to the run-rulehost CLI (stateDir under .state, projectDir =
+    // workspaceDir) so consumer and CLI assemble one contract (FR-07).
+    behaviorEvidence: {
+      assemble: (selection) =>
+        new BehaviorExamplePackAssembler({
+          workspaceDir,
+          stateDir: path.join(workspaceDir, '.state'),
+        }).assemble({
+          sourcePainId: selection.sourcePainId,
+          ownerDesiredOutcome: selection.ownerDesiredOutcome,
+          sourceNegativeToolCallId: selection.sourceNegativeToolCallId,
+          positiveToolCallIds: selection.positiveToolCallIds,
+          projectDir: workspaceDir,
+        }),
+    },
   });
 }
 

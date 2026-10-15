@@ -61,10 +61,14 @@ import {
   // PRI-714: resolve outputLanguage from the same effective config the
   // runners already receive (EP-07: canonical resolved value, not raw input).
   resolveOutputLanguage,
+  hydratePITaskRecord,
+  preflightArtificerOwnerEvidence,
   type PDRuntimeAdapter,
   type RuntimeStateManager,
   type WakeOnceResult,
   type ToolSemanticRegistry,
+  type BehaviorEvidencePort,
+  type ArtificerEvidencePreflightVerdict,
 } from '@principles/core/runtime-v2';
 import { loadLedger } from '@principles/core/principle-tree-ledger';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from './pd-config.js';
@@ -112,6 +116,17 @@ export interface InternalizationConsumerCyclePorts {
    * omitted → the artificer prompt is built without host context.
    */
   readonly hostKinds?: readonly string[];
+  /**
+   * PRI-982 (SPEC-PD-IAER-001 FR-02/FR-03): host-injected Owner evidence
+   * assembly for code_tool_hook artificer tasks. The production
+   * implementation (openclaw-plugin) wraps `BehaviorExamplePackAssembler`;
+   * hosts that cannot assemble evidence (Codex worker as of PRI-982) omit it.
+   * Absent port + a code-channel task degrades OBSERVABLY
+   * (evidence_source_unavailable) and the task STAYS PENDING — a host
+   * assembly gap must never read as "Owner has not labeled" (SPEC §6.2),
+   * and the runner is never constructed evidence-less.
+   */
+  readonly behaviorEvidence?: BehaviorEvidencePort;
   /** Log label used in human log prefixes ('AutoConsumer' | 'CodexWorker' | …). */
   readonly logLabel: string;
   readonly envGetter?: (name: string) => string | undefined;
@@ -453,6 +468,77 @@ export async function runInternalizationConsumerCycle(
       emitEvent('WORKSPACE_TELEMETRY_PERSIST_FAILED', detail);
     });
 
+    // PRI-982 (SPEC-PD-IAER-001 §4.2 / FR-02): authoritative channel routing
+    // for artificer tasks. The channel is written deterministically by the
+    // intake bridge at seed time (pi_metadata.channel — the SINGLE authority,
+    // inherited along the chain) and is read from the leased task's hydrated
+    // metadata here; the cycle NEVER guesses it from task names or model text.
+    //   - code_tool_hook → RuleCode sub-chain: evidence preflight FIRST, then
+    //     L2 (flag permitting) with the assembled pack injected;
+    //   - prompt → the legal non-L2 pipeline (PiAi), evidence-exempt
+    //     (production: 40 successes on that pipeline);
+    //   - unresolvable → refuse to guess: observable skip, no run (T08).
+    const leasedTaskForChannel = await stateManager.getTask(wakeResult.taskId);
+    const leasedPiTask = leasedTaskForChannel ? hydratePITaskRecord(leasedTaskForChannel) : null;
+    const authoritativeChannel = leasedPiTask?.channel ?? null;
+
+    let artificerEvidence: ArtificerEvidencePreflightVerdict | null = null;
+    if (wakeResult.taskKind === 'artificer') {
+      if (authoritativeChannel === null || leasedPiTask === null) {
+        // Defensive: wakeOnce never leases non-hydratable tasks, so reaching
+        // here means the metadata corrupted between wake and read. Fail closed
+        // — never route an artificer task without an authoritative channel.
+        const channelInfo = JSON.stringify({
+          reason: 'artificer_channel_unresolvable',
+          taskId: wakeResult.taskId,
+          nextAction: 'Inspect and repair the task metadata (pi_metadata.channel); the consumer refuses to route an artificer task without an authoritative channel (SPEC-PD-IAER-001 §4.2, T08).',
+        });
+        emitEvent('INTERNALIZATION_CONSUMER_SKIP', channelInfo);
+        logger.warn(`[PD:${logLabel}] Artificer task ${wakeResult.taskId} skipped: authoritative channel unresolvable.`);
+        return { ran: false, skipReason: 'artificer_channel_unresolvable', taskId: wakeResult.taskId, taskKind: wakeResult.taskKind };
+      }
+      if (authoritativeChannel === 'code_tool_hook') {
+        artificerEvidence = await preflightArtificerOwnerEvidence({
+          taskId: wakeResult.taskId,
+          piTask: leasedPiTask,
+          owner,
+          stateManager,
+          eventEmitter: workspaceEmitter,
+          behaviorEvidence: ports.behaviorEvidence,
+        });
+        if (artificerEvidence.decision === 'evidence_source_unavailable') {
+          // SPEC §6.2: a host assembly gap is NOT "Owner has not labeled".
+          // The task stays pending (re-observable next cycle, zero model
+          // cost); the runner is never constructed evidence-less.
+          const gapInfo = JSON.stringify({
+            reason: 'evidence_source_unavailable',
+            taskId: wakeResult.taskId,
+            taskKind: wakeResult.taskKind,
+            nextAction: 'Host must wire the behaviorEvidence port (BehaviorExamplePackAssembler) into the consumer cycle ports; the task stays pending until then.',
+          });
+          emitEvent('INTERNALIZATION_CONSUMER_SKIP', gapInfo);
+          logger.warn(`[PD:${logLabel}] Artificer task ${wakeResult.taskId} skipped: evidence source unavailable (host must wire the behaviorEvidence port).`);
+          return { ran: false, skipReason: 'evidence_source_unavailable', taskId: wakeResult.taskId, taskKind: wakeResult.taskKind };
+        }
+        if (artificerEvidence.decision === 'blocked') {
+          // FR-04: the preflight already moved the task atomically into
+          // needs_human_review — outside the wake scan (pending/retry_wait
+          // only), so it is never auto-rewoken (FR-05/T02). reviewPersisted
+          // = false means a concurrent writer won the CAS; still no run.
+          emitEvent('INTERNALIZATION_CONSUMER_EVIDENCE_BLOCKED', JSON.stringify({
+            taskId: wakeResult.taskId,
+            reasonCode: artificerEvidence.reasonCode,
+            nextAction: artificerEvidence.nextAction,
+            ...(artificerEvidence.missingFields !== undefined ? { missingFields: [...artificerEvidence.missingFields] } : {}),
+            ...(artificerEvidence.detail !== undefined ? { detail: artificerEvidence.detail } : {}),
+            reviewPersisted: artificerEvidence.reviewPersisted,
+          }));
+          logger.warn(`[PD:${logLabel}] Artificer task ${wakeResult.taskId} blocked on Owner evidence (${artificerEvidence.reasonCode}, reviewPersisted=${artificerEvidence.reviewPersisted}).`);
+          return { ran: false, skipReason: 'artificer_blocked_on_owner_evidence', taskId: wakeResult.taskId, taskKind: wakeResult.taskKind };
+        }
+      }
+    }
+
     let adapter: PDRuntimeAdapter;
     if (taskRuntimeKind === 'pi-ai') {
       // PRI-419: when l2_dreamer flag is on AND this is a dreamer task, route
@@ -463,10 +549,16 @@ export async function runInternalizationConsumerCycle(
       // so the model can self-iterate before submitting. Honors the
       // code_rule_capability emergency-disable flag (PR #1661 CodeRabbit P1).
       const codeRuleFlag = loadFeatureFlagFromConfig(workspaceDir, 'code_rule_capability');
+      // PRI-982 (SPEC-PD-IAER-001 §4.2): the authoritative TARGET CHANNEL is
+      // part of the L2 selection — `pi_metadata.channel === 'code_tool_hook'`
+      // (the seed-time bridge authority). prompt-channel artificer tasks are
+      // misroutes on L2 (production: 54 failures) and keep the legal non-L2
+      // PiAi pipeline below; unresolvable channels never enter L2.
       if (
         wakeResult.taskKind === 'artificer'
         && taskRuntimeKind === 'pi-ai'
         && codeRuleFlag.enabled
+        && authoritativeChannel === 'code_tool_hook'
       ) {
         adapter = new ArtificerL2Adapter({
           // Profile readiness check guarantees these are non-undefined for
@@ -625,7 +717,16 @@ export async function runInternalizationConsumerCycle(
         break;
       case 'artificer':
         runner = new ArtificerRunner(
-          { stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultArtificerValidator() },
+          {
+            stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultArtificerValidator(),
+            // PRI-982 (SPEC-PD-IAER-001 FR-02): the preflight-assembled Owner
+            // evidence pack — present only when the authoritative channel is
+            // code_tool_hook AND the readiness gate returned ready (same
+            // ArtificerRunnerDeps shape as the run-rulehost CLI pipeline).
+            ...(artificerEvidence !== null && artificerEvidence.decision === 'ready'
+              ? { behaviorExamplePack: artificerEvidence.pack }
+              : {}),
+          },
           // PRI-741: thread the host semantic projection into generation.
           { ...runnerOptions, ...(artificerHostSemanticContext !== undefined ? { hostSemanticContext: artificerHostSemanticContext } : {}) },
         );

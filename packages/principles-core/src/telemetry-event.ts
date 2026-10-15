@@ -138,6 +138,12 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('artificer_output_extraction_failed'),
   Type.Literal('artificer_mark_failed_error'),
   Type.Literal('artificer_mark_retry_error'),
+  // PRI-982 (SPEC-PD-IAER-001 FR-02/FR-08): consumer-side evidence preflight.
+  // readiness_checked records every gate verdict (payload carries the stable
+  // FR-04 reasonCode / evidenceHash); blocked_on_owner_evidence carries the
+  // Owner-recovery evidence for a task that just entered needs_human_review.
+  Type.Literal('artificer_evidence_readiness_checked'),
+  Type.Literal('artificer_blocked_on_owner_evidence'),
   // PRI-302: Evaluator runner events (BasePeerRunner migration)
   Type.Literal('evaluator_task_leased'),
   Type.Literal('evaluator_context_built'),

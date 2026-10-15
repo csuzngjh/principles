@@ -34,6 +34,8 @@ import type {
 } from './peer-runner-contracts.js';
 import { isInternalizationChannel, isPipelineTopologyMode, isRunnerKind } from './peer-runner-contracts.js';
 import type { BoundEvidenceManifestV1 } from './owner-decision-review.js';
+import type { OwnerEvidenceSelection } from './evidence-readiness.js';
+import { validateOwnerEvidenceSelectionShape } from './evidence-readiness.js';
 
 /** Namespace key used inside diagnosticJson to isolate PI metadata. */
 export const PI_METADATA_KEY = 'pi_metadata' as const;
@@ -420,6 +422,17 @@ export interface PITaskMetadata {
    * 不是状态源 — effective decision 由 resolveEffectiveRunnerDecision 唯一解析。
    */
   ownerResolutions?: readonly OwnerResolutionRecord[];
+  /**
+   * PRI-982 (SPEC-PD-IAER-001 FR-03): Owner 标注的证据选择（sourcePainId /
+   * sourceNegativeToolCallId / positiveToolCallIds / ownerDesiredOutcome）。
+   * 只能由经授权的 Owner 操作写入（B1 CLI 附加；内部代理绝不自行填写）。
+   * ABSENT = Owner 尚未提供证据（consumer 前置拦截按 owner_evidence_required
+   * 处理）；present-but-malformed 使整包 metadata 为 null（rc-3 fail-closed，
+   * 与 completionIntent/humanReviewContext 同语义 — 损坏的 authority 记录必须
+   * 浮出，而不是静默降级成"无选择"）。形状校验复用
+   * validateOwnerEvidenceSelectionShape（与 readiness gate 单一权威）。
+   */
+  ownerEvidenceSelection?: OwnerEvidenceSelection;
 }
 
 /** evaluator / rollout_reviewer 的合法 runner 决策值 */
@@ -521,6 +534,7 @@ export function serializePITaskMetadata(metadata: PITaskMetadata): string {
       completionIntent: metadata.completionIntent,
       humanReviewContext: metadata.humanReviewContext,
       ownerResolutions: metadata.ownerResolutions,
+      ownerEvidenceSelection: metadata.ownerEvidenceSelection,
     },
   });
 }
@@ -558,6 +572,7 @@ export function mergePITaskMetadata(base: PITaskRecord, overrides: Partial<PITas
     completionIntent: base.completionIntent,
     humanReviewContext: base.humanReviewContext,
     ownerResolutions: base.ownerResolutions,
+    ownerEvidenceSelection: base.ownerEvidenceSelection,
     ...overrides,
   };
 }
@@ -646,6 +661,16 @@ function isValidRepairPayload(value: unknown): value is RepairPayload {
 }
 
 const OWNER_RESOLUTION_ACTIONS: ReadonlySet<string> = new Set(['accept_current', 'revise_once', 'reject_current']);
+
+/**
+ * Type guard over the SINGLE selection shape authority (evidence-readiness.ts).
+ * An empty problem list means the parsed value satisfies exactly the same
+ * structural contract the readiness gate enforces — one definition of "a
+ * usable Owner selection" (P4), no divergent metadata-local rules.
+ */
+function isValidOwnerEvidenceSelection(value: unknown): value is OwnerEvidenceSelection {
+  return validateOwnerEvidenceSelectionShape(value).length === 0;
+}
 
 function isNonEmptyString(v: unknown): v is string {
   return typeof v === 'string' && v.trim() !== '';
@@ -939,6 +964,16 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
     ({ ownerResolutions } = m);
   }
 
+  // ownerEvidenceSelection (PRI-982 FR-03): optional, full shape validation
+  // via the SINGLE selection authority (evidence-readiness.ts). A corrupted
+  // authority record fails the whole metadata (fail-closed) — it must never
+  // silently read as "Owner has not provided evidence".
+  let ownerEvidenceSelection: OwnerEvidenceSelection | undefined;
+  if (Object.hasOwn(m, 'ownerEvidenceSelection') && m.ownerEvidenceSelection !== undefined) {
+    if (!isValidOwnerEvidenceSelection(m.ownerEvidenceSelection)) return null;
+    ({ ownerEvidenceSelection } = m);
+  }
+
   return {
     dependencyTaskIds: m.dependencyTaskIds as string[],
     channel: m.channel,
@@ -961,6 +996,7 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
     completionIntent,
     humanReviewContext,
     ownerResolutions,
+    ownerEvidenceSelection,
   };
 }
 
@@ -1018,5 +1054,6 @@ export function hydratePITaskRecord(task: TaskRecord): PITaskRecord | null {
     completionIntent: meta.completionIntent,
     humanReviewContext: meta.humanReviewContext,
     ownerResolutions: meta.ownerResolutions,
+    ownerEvidenceSelection: meta.ownerEvidenceSelection,
   } as unknown as PITaskRecord;
 }

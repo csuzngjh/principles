@@ -75,7 +75,11 @@ function makeArtificerTask(): TaskRecord {
     updatedAt: new Date().toISOString(),
     diagnosticJson: createPITaskDiagnosticJson({
       dependencyTaskIds: [SCRIBE_TASK_ID],
-      channel: 'prompt',
+      // PRI-982 (SPEC-PD-IAER-001 §4.2): these tests pin the RuleCode
+      // sub-chain evidence contract, whose authoritative channel is
+      // code_tool_hook. The prompt channel is pack-exempt (see
+      // artificer-runner-channel-defense.test.ts).
+      channel: 'code_tool_hook',
       timeoutMs: 300_000,
       inputArtifactRefs: [],
       outputArtifactRefs: [],

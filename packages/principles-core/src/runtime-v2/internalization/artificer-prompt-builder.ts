@@ -58,12 +58,26 @@ export interface ArtificerHostSemanticContext {
 
 export interface ArtificerPromptBuilderInput {
   /**
-   * PRI-780: the Artificer generation contract is v2-only. The
-   * BehaviorExamplePack (Owner-labelled evidence) is REQUIRED — a missing or
-   * invalid pack fails generation loud instead of degrading to an action-only
-   * (v1) rule. There is no v1 mode anymore.
+   * PRI-780: the RuleCode generation contract is v2-only — the
+   * BehaviorExamplePack (Owner-labelled evidence) is REQUIRED on the
+   * code_tool_hook channel; a missing or invalid pack fails generation loud
+   * instead of degrading to an action-only (v1) rule.
+   *
+   * PRI-982 (SPEC-PD-IAER-001 §4.2): on the `prompt` channel the artificer
+   * runs its legal non-RuleCode pipeline without Owner-labelled evidence
+   * (production precedent: 40 successes on that pipeline), so the pack is
+   * optional there and the v2 CONTEXT instruction is omitted when absent.
+   * Undefined + a non-prompt channel still fails loud (unchanged PRI-780
+   * rule). When present on any channel the pack is validated and rendered.
    */
-  behaviorExamplePack: BehaviorExamplePack;
+  behaviorExamplePack?: BehaviorExamplePack;
+  /**
+   * PRI-982: caller-declared target channel (authority: `pi_metadata.channel`
+   * — the caller reads it from the hydrated task metadata, never guesses).
+   * Default `code_tool_hook` (fail closed toward the RuleCode evidence
+   * contract). Only an explicit `prompt` exempts a task from the pack.
+   */
+  channel?: 'prompt' | 'code_tool_hook';
   taskId: string;
   contextHash: string;
   sourceScribeArtifactId: string;
@@ -127,7 +141,12 @@ export interface ArtificerPromptBuilderInput {
 }
 
 export interface ArtificerPromptInput {
-  behaviorExamplePack: BehaviorExamplePack;
+  /**
+   * PRI-982: optional — ABSENT means a pack-less prompt-channel build (the
+   * legal non-RuleCode pipeline, SPEC-PD-IAER-001 §4.2); JSON serialization
+   * drops the key so the model never sees a null evidence block.
+   */
+  behaviorExamplePack?: BehaviorExamplePack;
   taskId: string;
   contextHash: string;
   sourceScribeArtifactId: string;
@@ -547,14 +566,26 @@ export function buildArtificerHostSemanticContext(
 export class ArtificerPromptBuilder {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
   buildPrompt(input: ArtificerPromptBuilderInput): ArtificerPromptBuildResult {
-    // PRI-780: v2-only. A missing or invalid BehaviorExamplePack is a hard
-    // generation failure — never a silent downgrade to an action-only rule.
-    const validation = validateBehaviorExamplePack(input.behaviorExamplePack);
-    if (!validation.valid) {
-      throw new Error(`behaviorExamplePack is required and must be valid (v2-only generation contract, PRI-780): ${validation.errors.join('; ')}`);
+    // PRI-780: v2-only RuleCode contract. A missing or invalid
+    // BehaviorExamplePack is a hard generation failure on the code_tool_hook
+    // channel (the default) — never a silent downgrade to an action-only rule.
+    // PRI-982 (SPEC-PD-IAER-001 §4.2): an explicit `prompt` channel may build
+    // WITHOUT a pack (its legal non-RuleCode pipeline); when a pack IS
+    // provided it is still validated and rendered on every channel.
+    const promptChannel = input.channel === 'prompt';
+    if (input.behaviorExamplePack !== undefined) {
+      const validation = validateBehaviorExamplePack(input.behaviorExamplePack);
+      if (!validation.valid) {
+        throw new Error(`behaviorExamplePack is required and must be valid (v2-only generation contract, PRI-780): ${validation.errors.join('; ')}`);
+      }
+    } else if (!promptChannel) {
+      throw new Error('behaviorExamplePack is required and must be valid (v2-only generation contract, PRI-780): no BehaviorExamplePack provided and the target channel is not the pack-exempt prompt channel (PRI-982)');
     }
     const artificerInstruction = ARTIFICER_PROTOCOL_INSTRUCTION
-      + V2_CONTEXT_INSTRUCTION
+      // PRI-982: the v2 CONTEXT instruction teaches the Owner-echo obligation,
+      // which only exists when Owner-labelled evidence is actually presented.
+      // Absent pack → absent block (prompt-channel builds stay coherent).
+      + (input.behaviorExamplePack !== undefined ? V2_CONTEXT_INSTRUCTION : '')
       // PRI-839: candidate-set guidance (absent = no block, prompt unchanged
       // for formations without resolvable dreamer proposals).
       + (input.dreamerContext !== undefined ? DREAMER_CANDIDATE_SET_INSTRUCTION : '')
@@ -568,7 +599,8 @@ export class ArtificerPromptBuilder {
       // EP002-R4: bounded projection — the pack's raw payloads can exceed the
       // 50k prompt cap on real workspaces; the LLM gets bounded previews while
       // the persisted pack (and everything downstream of it) keeps full fidelity.
-      behaviorExamplePack: boundPackForPrompt(input.behaviorExamplePack),
+      // PRI-982: omitted entirely on pack-less prompt-channel builds.
+      ...(input.behaviorExamplePack !== undefined ? { behaviorExamplePack: boundPackForPrompt(input.behaviorExamplePack) } : {}),
       taskId: input.taskId,
       contextHash: input.contextHash,
       sourceScribeArtifactId: input.sourceScribeArtifactId,

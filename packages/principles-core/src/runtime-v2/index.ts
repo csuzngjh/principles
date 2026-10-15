@@ -743,6 +743,16 @@ export type {
 } from './internalization/evidence-readiness.js';
 export { assessEvidenceReadiness } from './internalization/evidence-readiness.js';
 
+// Consumer evidence preflight (PRI-982 — SPEC-PD-IAER-001 FR-02/FR-04)
+export type {
+  BehaviorEvidencePort,
+  ArtificerEvidencePreflightVerdict,
+} from './internalization/consumer-evidence-preflight.js';
+export {
+  preflightArtificerOwnerEvidence,
+  ARTIFICER_EVIDENCE_NHR_SOURCE_RUN_ID,
+} from './internalization/consumer-evidence-preflight.js';
+
 // Internalization route model (PRI-43)
 export type { InternalizationRouteKind, InternalizationRouteDecision } from './internalization/internalization-route.js';
 export { decideInternalizationRoute } from './internalization/internalization-route.js';
