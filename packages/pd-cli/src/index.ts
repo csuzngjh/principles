@@ -37,6 +37,7 @@ import { handleRuntimeInternalizationQueue } from './commands/runtime-internaliz
 import { handleRuntimeInternalizationWakeOnce } from './commands/runtime-internalization-wake-once.js';
 import { handleRuntimeInternalizationRunOnce } from './commands/runtime-internalization-run-once.js';
 import { handleRuntimeInternalizationRetry } from './commands/runtime-internalization-retry.js';
+import { registerRuntimeInternalizationAuditArtificerEvidenceCommand } from './commands/runtime-internalization-audit-artificer-evidence.js';
 import { registerRunRuleHostCommand } from './commands/runtime-internalization-run-rulehost.js';
 import { handleCandidateList, handleCandidateShow, handleCandidateIntake, handleCandidateReview, handleCandidateAudit, handleCandidateRepair, handleCandidateRoute, handleCandidateInternalize, handleCandidateInternalizationBackfill } from './commands/candidate.js';
 import { handleArtifactShow } from './commands/artifact.js';
@@ -770,6 +771,10 @@ internalizationCmd
   });
 
 registerRunRuleHostCommand(internalizationCmd);
+
+// PRI-985 (SPEC-PD-IAER-001 FR-09): read-only history audit of
+// behavior_example_pack_missing failures, aggregated by task.
+registerRuntimeInternalizationAuditArtificerEvidenceCommand(internalizationCmd);
 
 internalizationCmd
   .command('integrity')
