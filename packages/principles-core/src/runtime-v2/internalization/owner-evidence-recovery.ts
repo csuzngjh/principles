@@ -22,7 +22,11 @@
  *   - audit: `.state/recovery_actions.jsonl` append family
  *     (appendOwnerEvidenceAction);
  *   - telemetry: `artificer_owner_evidence_attached` /
- *     `artificer_owner_evidence_resumed` (FR-08, bounded payloads, rc-8).
+ *     `artificer_owner_evidence_resumed` (FR-08, bounded payloads, rc-8),
+ *     both carrying the unified FR-08 run-correlation block (PRI-984,
+ *     artificer-run-correlation.ts); persistentRunId is semantically absent —
+ *     recovery runs against an NHR task / a pending requeue where no run row
+ *     exists yet.
  *
  * Contract decisions pinned here:
  *   - attach NEVER unblocks: the task stays `needs_human_review`; only the
@@ -68,6 +72,7 @@ import {
   type OwnerEvidenceSelection,
 } from './evidence-readiness.js';
 import type { BehaviorEvidencePort } from './consumer-evidence-preflight.js';
+import { buildArtificerRunCorrelation } from './artificer-run-correlation.js';
 import { ownerRetryNeedsHumanReviewTask } from './owner-retry.js';
 import { appendOwnerEvidenceAction } from '../recovery-actions-log.js';
 
@@ -411,6 +416,16 @@ export async function attachOwnerEvidence(
     sessionId: input.owner,
     agentId: 'artificer',
     payload: {
+      // FR-08 run-correlation block (PRI-984): attach never leases an NHR
+      // task → persistentRunId/adapterRunId are semantically absent.
+      ...buildArtificerRunCorrelation({
+        taskId: input.taskId,
+        attemptNumber: task.attemptCount, // attach never touches the budget — real value at write time
+        executionMode: 'recovery',
+        reasonCode: 'attached', // no failure reason code exists → the operation status
+        workspaceDir: input.workspaceDir,
+        evidenceDigest: readiness.evidenceHash,
+      }),
       painId: persisted.sourcePainId,
       revision,
       contentDigest: readiness.evidenceHash,
@@ -618,7 +633,19 @@ export async function resumeOwnerEvidenceTask(
     sessionId: input.owner,
     agentId: 'artificer',
     payload: {
-      reasonCode: 'owner_behavior_examples_verified',
+      // FR-08 run-correlation block (PRI-984): the resume requeues to
+      // pending; the next attempt's run row is minted by the NEXT lease
+      // (deterministic `run_<taskId>_<max+1>`), so persistentRunId stays
+      // absent here and the correlation joins through
+      // (taskId, attemptNumber) — proven by the recovery T10 test.
+      ...buildArtificerRunCorrelation({
+        taskId: input.taskId,
+        attemptNumber: 0, // the `requeued` outcome certifies the authority reset landed attemptCount=0 — the new budget start
+        executionMode: 'recovery',
+        reasonCode: 'owner_behavior_examples_verified',
+        workspaceDir: input.workspaceDir,
+        evidenceDigest: selection.contentDigest,
+      }),
       painId: selection.sourcePainId,
       revision: selection.revision ?? 0,
       contentDigest: selection.contentDigest,

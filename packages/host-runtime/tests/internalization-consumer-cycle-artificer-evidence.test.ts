@@ -35,6 +35,7 @@ import {
   getDefaultPdConfig,
   type BehaviorExamplePack,
   type OwnerEvidenceSelection,
+  type TelemetryEvent,
 } from '@principles/core/runtime-v2';
 import { runInternalizationConsumerCycle, type InternalizationConsumerCyclePorts } from '../src/internalization-consumer-cycle.js';
 
@@ -304,6 +305,27 @@ describe('runInternalizationConsumerCycle — PRI-982 evidence preflight + chann
     const sink = fs.readFileSync(path.join(workspaceDir, '.pd', 'telemetry', 'critical-events.jsonl'), 'utf-8');
     expect(sink).toContain('artificer_blocked_on_owner_evidence');
     expect(sink).toContain('owner_behavior_examples_required');
+    // FR-08 run-correlation block (PRI-984) survives the crash-durable sink:
+    // the persisted line carries the full correlation matrix (workspace = the
+    // real workspaceDir this cycle served); run ids stay semantically absent
+    // (preflight is pre-lease — zero run rows, asserted above).
+    const sinkEvents = sink.trim().split('\n').map((line) => JSON.parse(line) as TelemetryEvent);
+    const persistedBlocked = sinkEvents.find((e) => e.eventType === 'artificer_blocked_on_owner_evidence');
+    expect(persistedBlocked).toBeDefined();
+    expect(persistedBlocked?.payload).toMatchObject({
+      taskId: ARTIFICER_TASK_ID,
+      attemptNumber: 0,
+      workspace: workspaceDir,
+      agentKind: 'artificer',
+      executionMode: 'preflight',
+      reasonCode: 'owner_behavior_examples_required',
+      reviewPersisted: true,
+    });
+    expect(persistedBlocked?.payload.persistentRunId).toBeUndefined();
+    expect(persistedBlocked?.payload.adapterRunId).toBeUndefined();
+    // readiness_checked is deliberately NOT on the critical allowlist
+    // (per-verdict high-frequency event — see workspace-telemetry-emitter.ts).
+    expect(sinkEvents.some((e) => e.eventType === 'artificer_evidence_readiness_checked')).toBe(false);
   });
 
   it('T02: NHR task is outside the wake scan — 10 further cycles leave it stable', async () => {

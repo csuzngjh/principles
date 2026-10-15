@@ -31,7 +31,10 @@
  * `degradation_triggered`). `artificer_blocked_on_owner_evidence` is
  * Owner-recovery evidence that must survive a crash — the host wires this
  * emitter through WorkspaceTelemetryEmitter so it lands in the critical
- * allowlist sink.
+ * allowlist sink. Both payloads carry the unified FR-08 run-correlation
+ * block (PRI-984, artificer-run-correlation.ts); persistentRunId /
+ * adapterRunId are semantically absent here — the gate fires pre-lease, so
+ * no run row or runtime invocation exists.
  *
  * rc-1/rc-2: the selection arrives from parsed diagnosticJson (already
  * guarded by pitask-metadata parse) and the assembled pack is re-validated by
@@ -47,6 +50,7 @@ import {
   type OwnerEvidenceReasonCode,
   type OwnerEvidenceSelection,
 } from './evidence-readiness.js';
+import { buildArtificerRunCorrelation } from './artificer-run-correlation.js';
 import { PDRuntimeError } from '../error-categories.js';
 import type { StoreEventEmitter } from '../store/event-emitter.js';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
@@ -107,6 +111,12 @@ export interface ArtificerEvidencePreflightParams {
   readonly piTask: PITaskRecord;
   /** Lease-owner label for telemetry sessionId ('auto-consumer' | …). */
   readonly owner: string;
+  /**
+   * Workspace root for the FR-08 run-correlation telemetry (PRI-984).
+   * Optional: the key is omitted from payloads when a direct caller has no
+   * workspace context — the production consumer cycle always provides it.
+   */
+  readonly workspaceDir?: string;
   readonly stateManager: Pick<RuntimeStateManager, 'getTask' | 'updateTaskIfDiagnosticJsonUnchanged'>;
   readonly eventEmitter: StoreEventEmitter;
   /** Optional: absent = host assembly gap (SPEC §6.2 semantics). */
@@ -170,7 +180,7 @@ async function transitionToNeedsHumanReview(
 export async function preflightArtificerOwnerEvidence(
   params: ArtificerEvidencePreflightParams,
 ): Promise<ArtificerEvidencePreflightVerdict> {
-  const { taskId, piTask, owner, eventEmitter, behaviorEvidence } = params;
+  const { taskId, piTask, owner, workspaceDir, eventEmitter, behaviorEvidence } = params;
 
   // 1. Host assembly gap — never misread as "Owner has not labeled" (§6.2).
   if (behaviorEvidence === undefined) {
@@ -184,8 +194,13 @@ export async function preflightArtificerOwnerEvidence(
     assemblePack: selection !== undefined ? () => behaviorEvidence.assemble(selection) : undefined,
   });
 
-  // Telemetry (FR-08): the gate ran — record the verdict with stable
-  // reasonCode + bounded references, never raw trajectories.
+  // Telemetry (FR-08): the gate ran — record the verdict with the unified
+  // run-correlation block (PRI-984; persistentRunId/adapterRunId are
+  // semantically absent pre-lease, see artificer-run-correlation.ts) + stable
+  // reasonCode + bounded references, never raw trajectories. reasonCode is
+  // the FR-04 code where one exists, otherwise the gate status itself
+  // ('ready'; 'not_applicable' cannot occur for this hard-coded channel gate
+  // and throws below).
   eventEmitter.emitTelemetry({
     eventType: 'artificer_evidence_readiness_checked',
     traceId: taskId,
@@ -193,10 +208,20 @@ export async function preflightArtificerOwnerEvidence(
     sessionId: owner,
     agentId: 'artificer',
     payload: {
+      ...buildArtificerRunCorrelation({
+        taskId,
+        attemptNumber: piTask.attemptCount,
+        executionMode: 'preflight',
+        reasonCode: readiness.status === 'owner_evidence_required' || readiness.status === 'invalid_evidence'
+          ? readiness.reasonCode
+          : readiness.status,
+        workspaceDir,
+        evidenceDigest: readiness.status === 'ready' ? readiness.evidenceHash : undefined,
+      }),
       channel: 'code_tool_hook',
       gateStatus: readiness.status,
-      ...(readiness.status === 'owner_evidence_required' ? { reasonCode: readiness.reasonCode, missingFields: [...readiness.missingFields] } : {}),
-      ...(readiness.status === 'invalid_evidence' ? { reasonCode: readiness.reasonCode, detail: boundedDetail(readiness.detail) } : {}),
+      ...(readiness.status === 'owner_evidence_required' ? { missingFields: [...readiness.missingFields] } : {}),
+      ...(readiness.status === 'invalid_evidence' ? { detail: boundedDetail(readiness.detail) } : {}),
       ...(readiness.status === 'ready' ? { evidenceHash: readiness.evidenceHash, sourcePainId: readiness.sourcePainId } : {}),
     },
   });
@@ -247,7 +272,9 @@ export async function preflightArtificerOwnerEvidence(
   const reviewPersisted = await transitionToNeedsHumanReview(params, reviewContext);
 
   // Owner-recovery evidence: must be durably observable even if the process
-  // dies right after the state transition.
+  // dies right after the state transition. Carries the FR-08 correlation
+  // block (persistentRunId stays absent: the block happened pre-lease — no
+  // run row exists and none may be fabricated).
   eventEmitter.emitTelemetry({
     eventType: 'artificer_blocked_on_owner_evidence',
     traceId: taskId,
@@ -255,7 +282,13 @@ export async function preflightArtificerOwnerEvidence(
     sessionId: owner,
     agentId: 'artificer',
     payload: {
-      reasonCode: blocked.reasonCode,
+      ...buildArtificerRunCorrelation({
+        taskId,
+        attemptNumber: piTask.attemptCount,
+        executionMode: 'preflight',
+        reasonCode: blocked.reasonCode,
+        workspaceDir,
+      }),
       nextAction: blocked.nextAction,
       ...(blocked.missingFields !== undefined ? { missingFields: [...blocked.missingFields] } : {}),
       ...(blocked.detail !== undefined ? { detail: blocked.detail } : {}),

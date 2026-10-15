@@ -279,6 +279,25 @@ describe('attachOwnerEvidence (T05)', () => {
     const event = emitted.find((e) => e.eventType === 'artificer_owner_evidence_attached');
     expect(event).toBeDefined();
     expect(JSON.stringify(event)).not.toContain('block writes outside the workspace'); // rc-8: no raw owner text
+    // FR-08 run-correlation block (PRI-984): attach never leases an NHR task,
+    // so persistentRunId/adapterRunId are semantically absent.
+    expect(event?.payload).toMatchObject({
+      taskId: TASK_ID,
+      attemptNumber: 2, // the seeded task's real attemptCount — unchanged by attach
+      workspace: fixture.workspaceDir,
+      agentKind: 'artificer',
+      executionMode: 'recovery',
+      reasonCode: 'attached', // status: an attach has no failure reason code
+      painId: 'pain_001',
+      revision: 1,
+      ownerOperation: 'cli:attach:martin',
+      taskStillNeedsHumanReview: true,
+    });
+    expect(event?.payload.persistentRunId).toBeUndefined();
+    expect(event?.payload.adapterRunId).toBeUndefined();
+    // bounded digest prefix, cross-checked against the persisted authority
+    const { piTask: attachedPi } = await readTask(fixture.workspaceDir);
+    expect(event?.payload.evidenceDigestPrefix).toBe(attachedPi?.ownerEvidenceSelection?.contentDigest.slice(0, 12));
   });
 
   it('re-attach increments the revision under the CAS', async () => {
@@ -413,6 +432,24 @@ describe('resumeOwnerEvidenceTask (T05)', () => {
     expect(audit.map((a) => a.action)).toEqual(['attach_evidence', 'resume_evidence']);
     expect(audit[1]).toMatchObject({ previousAttemptCount: 2, operator: 'martin' });
     expect(emitted.some((e) => e.eventType === 'artificer_owner_evidence_resumed')).toBe(true);
+    // FR-08 run-correlation block (PRI-984): the resume requeues to pending —
+    // the next attempt's run row does not exist yet, so persistentRunId stays
+    // semantically absent (the T10 test below proves the join to it).
+    const resumedEvent = emitted.find((e) => e.eventType === 'artificer_owner_evidence_resumed');
+    expect(resumedEvent?.payload).toMatchObject({
+      taskId: TASK_ID,
+      attemptNumber: 0, // new budget start certified by the authority reset
+      workspace: fixture.workspaceDir,
+      agentKind: 'artificer',
+      executionMode: 'recovery',
+      reasonCode: 'owner_behavior_examples_verified',
+      previousAttemptCount: 2,
+      painId: 'pain_001',
+      revision: 1,
+    });
+    expect(resumedEvent?.payload.persistentRunId).toBeUndefined();
+    expect(resumedEvent?.payload.adapterRunId).toBeUndefined();
+    expect(resumedEvent?.payload.evidenceDigestPrefix).toBe(outcome.contentDigest.slice(0, 12));
 
     // the consumer gate now accepts the task again (A2 preflight → ready),
     // i.e. the task is re-schedulable through the real production gate.
@@ -463,6 +500,68 @@ describe('resumeOwnerEvidenceTask (T05)', () => {
 
     const runsAfter = await fixture.withHandle(async (sm) => (await sm.getValidRunsByTaskTolerant(TASK_ID)).runs.length);
     expect(runsAfter).toBe(1);
+  });
+
+  it('T10 (FR-08/AC-09): the correlation chain joins the resumed event to the lease-minted runs row', async () => {
+    // Seed the pre-evidence failure history: two consumed attempts left two
+    // runs rows (the deterministic lease spelling run_<taskId>_<attempt>).
+    const fixture = await makeFixture();
+    await fixture.withHandle(async (sm) => {
+      for (const attempt of [1, 2]) {
+        await sm.runStore.createRun({
+          runId: `run_${TASK_ID}_${attempt}`,
+          runtimeKind: 'pi-ai',
+          startedAt: new Date().toISOString(),
+          taskId: TASK_ID,
+          attemptNumber: attempt,
+          executionStatus: 'failed',
+          endedAt: new Date().toISOString(),
+          reason: 'historical attempt',
+          errorCategory: 'execution_failed',
+        });
+      }
+    });
+
+    // Attach + resume through the real authorities (events collected).
+    emitted = [];
+    const attached = await fixture.withHandle((sm) => attachOwnerEvidence(sm, {
+      taskId: TASK_ID, selection: BASE_SELECTION, mode: 'confirm',
+      assemble: makePort(), workspaceDir: fixture.workspaceDir,
+      eventEmitter: collectingEmitter(), owner: 'pd-cli:evidence',
+    }));
+    expect(attached.status).toBe('attached');
+    const outcome = await fixture.withHandle((sm) => resumeOwnerEvidenceTask(sm, {
+      taskId: TASK_ID, mode: 'confirm', decidedBy: 'martin',
+      assemble: makePort(), workspaceDir: fixture.workspaceDir,
+      eventEmitter: collectingEmitter(), owner: 'pd-cli:evidence',
+    }));
+    expect(outcome.status).toBe('resumed');
+    const resumedEvent = emitted.find((e) => e.eventType === 'artificer_owner_evidence_resumed');
+    expect(resumedEvent?.payload).toMatchObject({ taskId: TASK_ID, attemptNumber: 0, previousAttemptCount: 2 });
+
+    // The post-resume execution path: a REAL production lease mints the next
+    // attempt's run row under the deterministic `run_<taskId>_<max+1>`
+    // spelling — the persistentRunId value execution events carry. It must
+    // resolve to a physical runs row joined on (task_id, attempt_number).
+    const leased = await fixture.withHandle((sm) => sm.acquireLease({
+      taskId: TASK_ID,
+      owner: 'test-consumer',
+      runtimeKind: 'pi-ai',
+    }));
+    expect(leased.taskId).toBe(TASK_ID);
+    expect(leased.attemptCount).toBe(3); // history preserved: max(1,2) + 1
+
+    const { runs } = await fixture.withHandle(async (sm) => sm.getValidRunsByTaskTolerant(TASK_ID));
+    expect(runs.map((r) => r.runId)).toEqual([
+      `run_${TASK_ID}_1`,
+      `run_${TASK_ID}_2`,
+      `run_${TASK_ID}_3`,
+    ]);
+    for (const run of runs) {
+      // every persistentRunId issued downstream resolves to its own row
+      expect(run.runId).toBe(`run_${TASK_ID}_${run.attemptNumber}`);
+      expect(run.taskId).toBe(TASK_ID);
+    }
   });
 });
 

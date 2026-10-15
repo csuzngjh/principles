@@ -159,6 +159,7 @@ async function makeFixture(selection?: OwnerEvidenceSelection): Promise<Fixture>
           taskId: TASK_ID,
           piTask,
           owner: 'test-consumer',
+          workspaceDir,
           stateManager,
           eventEmitter: collectingEmitter(),
           behaviorEvidence: {
@@ -237,6 +238,70 @@ describe('preflightArtificerOwnerEvidence (PRI-982 FR-02/FR-04)', () => {
     // both telemetry events fired
     expect(emitted.some((e) => e.eventType === 'artificer_evidence_readiness_checked')).toBe(true);
     expect(emitted.some((e) => e.eventType === 'artificer_blocked_on_owner_evidence')).toBe(true);
+  });
+
+  it('FR-08: blocked events carry the unified run-correlation block (absent run ids are semantic)', async () => {
+    const fixture = await makeFixture(undefined);
+    const verdict = await fixture.run();
+    expect(verdict.decision).toBe('blocked');
+
+    const checked = emitted.find((e) => e.eventType === 'artificer_evidence_readiness_checked');
+    expect(checked).toBeDefined();
+    expect(checked?.traceId).toBe(TASK_ID);
+    expect(checked?.payload).toMatchObject({
+      // FR-08 correlation contract (PRI-984)
+      taskId: TASK_ID,
+      attemptNumber: 0, // the seeded task's real attemptCount at gate time
+      workspace: fixture.workspaceDir,
+      agentKind: 'artificer',
+      executionMode: 'preflight',
+      reasonCode: 'owner_behavior_examples_required',
+      // verdict references (unchanged A2 semantics)
+      channel: 'code_tool_hook',
+      gateStatus: 'owner_evidence_required',
+    });
+    // Absent run identifiers are SEMANTIC for a pre-lease gate: the consumer
+    // cycle drives the preflight on a dry-run wake (no lease → no run row)
+    // and no runtime was invoked — no placeholder ids may be fabricated.
+    expect(checked?.payload.persistentRunId).toBeUndefined();
+    expect(checked?.payload.adapterRunId).toBeUndefined();
+    // no pack was assembled on a block → no digest reference
+    expect(checked?.payload.evidenceDigestPrefix).toBeUndefined();
+
+    const blocked = emitted.find((e) => e.eventType === 'artificer_blocked_on_owner_evidence');
+    expect(blocked).toBeDefined();
+    expect(blocked?.payload).toMatchObject({
+      taskId: TASK_ID,
+      attemptNumber: 0,
+      workspace: fixture.workspaceDir,
+      agentKind: 'artificer',
+      executionMode: 'preflight',
+      reasonCode: 'owner_behavior_examples_required',
+      reviewPersisted: true,
+    });
+    expect(blocked?.payload.persistentRunId).toBeUndefined();
+    expect(blocked?.payload.adapterRunId).toBeUndefined();
+  });
+
+  it('FR-08: ready verdict carries reasonCode status + the bounded evidence digest prefix', async () => {
+    const fixture = await makeFixture(VALID_SELECTION);
+    const verdict = await fixture.run();
+    expect(verdict.decision).toBe('ready');
+
+    const checked = emitted.find((e) => e.eventType === 'artificer_evidence_readiness_checked');
+    expect(checked?.payload).toMatchObject({
+      taskId: TASK_ID,
+      attemptNumber: 0,
+      workspace: fixture.workspaceDir,
+      agentKind: 'artificer',
+      executionMode: 'preflight',
+      reasonCode: 'ready', // status when the gate has no failure reason code
+      gateStatus: 'ready',
+    });
+    if (verdict.decision !== 'ready') return;
+    // auditable reference without duplicating pack content: first 12 chars of
+    // the same digest the readiness verdict produced.
+    expect(checked?.payload.evidenceDigestPrefix).toBe(verdict.evidenceHash.slice(0, 12));
   });
 
   it('valid selection + assembling port → ready verdict, task stays pending, no NHR write', async () => {
@@ -325,6 +390,18 @@ describe('preflightArtificerOwnerEvidence (PRI-982 FR-02/FR-04)', () => {
       expect(verdict.decision).toBe('blocked');
       if (verdict.decision !== 'blocked') return;
       expect(verdict.reviewPersisted).toBe(false);
+      // FR-08 absent-branch: a caller without workspace context omits the key
+      // (never a placeholder) — the correlation block still identifies task +
+      // attempt + agent + mode + reason.
+      const blockedEvent = emitted.find((e) => e.eventType === 'artificer_blocked_on_owner_evidence');
+      expect(blockedEvent?.payload).toMatchObject({
+        taskId: TASK_ID,
+        attemptNumber: 0,
+        agentKind: 'artificer',
+        executionMode: 'preflight',
+        reasonCode: 'owner_behavior_examples_required',
+      });
+      expect(blockedEvent?.payload.workspace).toBeUndefined();
     } finally {
       await handle.close().catch(() => undefined);
     }

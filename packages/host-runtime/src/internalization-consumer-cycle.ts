@@ -502,6 +502,7 @@ export async function runInternalizationConsumerCycle(
           taskId: wakeResult.taskId,
           piTask: leasedPiTask,
           owner,
+          workspaceDir, // FR-08 run-correlation telemetry (PRI-984)
           stateManager,
           eventEmitter: workspaceEmitter,
           behaviorEvidence: ports.behaviorEvidence,
