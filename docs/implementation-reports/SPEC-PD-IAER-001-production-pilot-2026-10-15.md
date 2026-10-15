@@ -194,13 +194,32 @@
 
 ---
 
+## H. 追加：宿主重启后首轮生产观测（2026-10-15 15:34–15:55Z）
+
+Owner 于会话中途重启 OpenClaw gateway。只读核实结果：
+
+**新插件确认加载并周期运行**：`memory/logs/SYSTEM_2026-10-15.log` 记录 `INTERNALIZATION_CONSUMER_STARTED {"intervalMs":120000,"initialDelayMs":30000}` @ 15:34:17Z，此后每 2 分钟一轮消费周期（18789 端口监听，PID 4440）。安装版本此前已核实为 2.3.5（sourceCommit=f7d47ae0，含 IAER）。
+
+**新窗口首批周期行为**：每轮 `INTERNALIZATION_CONSUMER_SKIP {"reason":"no_ready_tasks","readyTaskCount":0}`；`runs` 表零新增、IAER NHR 零新增——新语义（预检门/NHR）尚无真实触发机会（见本节末尾）。
+
+**首轮观测发现两个新问题（均非 IAER 回归，不改变裁决）**：
+
+1. **P2-1（可观测性）**：`no_ready_tasks` 的真实原因是 `all_hydration_failed`——37 个 pending artificer 任务的 `pi_metadata` 被 `hydratePITaskRecord` fail-closed 拒绝（`repairPayload.requiredChanges` 为空数组，违反 `isValidRepairPayload` pitask-metadata.ts:619 的 rc-4 要求）。快照内部有完整诊断（`pd runtime internalization queue` 显示 `invalidMetadataCount:37` + `noReadyTasks.reason=all_hydration_failed` + 逐样本 taskId），但消费周期 SKIP 事件只带 `reason/readyTaskCount` 两个字段，**不透传 hydration 失败计数与真实原因**——心跳流上的饥饿不可见，违背 rc-9 精神。建议修复：SKIP 事件透传 `snapshot.noReadyTasks` 与 `invalidMetadataCount`。
+2. **P2-2（遗留僵尸数据）**：37 条全部为 09-15～09-21 的 `artificer-repair-rulehost-*` 任务（Pain `pain_host_cffdcb9f…` 的历史修复轮）。当前写入端不可能再产生该形态（evaluator-output.ts:509 PRI-630 收敛不变量强制 `needs_revision` 时 `requiredChanges` 非空），故**不是活写入 bug**；但 fail-closed hydration 使这些任务永远 pending——不可消费、不可 NHR、无终态处置命令，形成队列僵尸。需要 Owner 决策处置路径（如扩展 recovery 工具支持 invalid-metadata 终态标记），或按 DATA_CLEANUP_GUIDELINES 归档。
+
+**生产仍无可消费任务的原因链**（只读核实）：30 个 code_tool_hook pending = 上述僵尸；7 个 prompt pending 同样 `requiredChanges_EMPTY` 僵尸；evaluator/rollout_reviewer 各 1 条 pending 被依赖门挂起；diag_router 2 条 retry_wait 不在消费周期 runnerKinds 范围（诊断链自管）。85 个 terminal-failed 任务在唤醒扫描之外（设计如此）。因此**要看到新 IAER 语义真实运行，唯一路径仍是 §F P1-2 的 Owner 授权存量恢复或新 Pain 自然流入**。
+
+裁决维持 **CONDITIONAL PASS** 不变：P1-1（宿主重启）已由 Owner 完成；P1-2（真实 Pilot 授权）仍待 Owner；新发现降级为 P2 且不影响治理安全。
+
+---
+
 ## G. 结论
 
 任务书的六问回答：
 
 1. **实际完成了什么**：Phase 0 全量现实核查（代码/安装/调用链/生产快照）、Phase 1 隔离复现（182 用例 + verify:merge exit 0）、Phase 2 授权材料与样本预选、Phase 3 安装事务核实、Phase 4 旧窗口量化与本报告。
 2. **实际验证了什么**：调用链全环在源码层接线成立；Case A–E 安全不变量在真实 SQLite + 生产周期代码上自动化证明；安装运行时经官方事务更新到含修复版本（文件级+事务元数据双重锚定）；新 CLI 对真实生产库只读实跑成功；历史风暴零治理旁路。
-3. **哪些没有运行**：宿主重启后的生产消费周期（gateway 仍停止）；真实 Owner 证据 attach/resume；真实付费模型 Artificer L2 执行及后续 Evaluator；存量 85 任务恢复。
-4. **发现了哪些新缺陷**：无新的代码缺陷。两项流程性发现：(a) 更新事务停止 gateway 后不自启（宿主加载新代码断链，P1-1）；(b) 存量 failed 任务与新 NHR 语义之间的恢复出边依赖 Owner 显式动作（设计如此，非缺陷，列为 P2 决策项）。
+3. **哪些没有运行**（§H 追加后更新）：真实 Owner 证据 attach/resume；真实付费模型 Artificer L2 执行及后续 Evaluator；存量 85 任务恢复。宿主重启已完成（15:34Z），消费周期每 2 分钟运行但无可消费任务（§H）。
+4. **发现了哪些新缺陷**（§H 追加后更新）：无 P0/P1 代码缺陷。新增两项 P2：(a) 消费周期 SKIP 事件不透传 hydration 失败计数与真实 no-ready 原因（rc-9 可观测性缺口）；(b) 37 条 PRI-630 前遗留 repair 任务（空 requiredChanges）被 fail-closed hydration 排除后无终态处置路径，形成队列僵尸。另有两项流程性发现：(c) 更新事务停止 gateway 后不自启（已由 Owner 重启解决）；(d) 存量 failed 任务与新 NHR 语义之间的恢复出边依赖 Owner 显式动作（设计如此）。
 5. **是否达到 Production PASS**：**否 —— CONDITIONAL PASS**。解除条件：Owner 完成 §F P1 两项（重启宿主 + 授权单例真实 Pilot 并观测到一次完整 L2→Evaluator 闭环），且无新 P0/P1 缺陷。
 6. **下一步最值得做的一件事**：Owner 重启 gateway 并批准对候选链 605ba208 的单例真实 Pilot——这是唯一能把 CONDITIONAL 变 PASS 的动作，其余一切均已就绪。
