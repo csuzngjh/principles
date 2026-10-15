@@ -9,6 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   aggregateArtificerEvidenceRuns,
+  loadArtifactTaskIds,
   loadPackMissingRuns,
   loadSucceededTaskIds,
   type ArtificerEvidenceRunRow,
@@ -41,6 +42,7 @@ function taskRow(overrides: Partial<ArtificerEvidenceTaskRow> = {}): ArtificerEv
 }
 
 const NO_SUCCEEDED = new Set<string>();
+const NO_ARTIFACTS = new Set<string>();
 const NO_GOVERNANCE = new Set<string>();
 
 describe('aggregateArtificerEvidenceRuns', () => {
@@ -54,6 +56,7 @@ describe('aggregateArtificerEvidenceRuns', () => {
       runs,
       tasks: [taskRow()],
       succeededTaskIds: NO_SUCCEEDED,
+      succeededArtifactTaskIds: NO_ARTIFACTS,
       governanceTaskIds: NO_GOVERNANCE,
     });
 
@@ -78,6 +81,7 @@ describe('aggregateArtificerEvidenceRuns', () => {
       runs,
       tasks: [taskRow()],
       succeededTaskIds: NO_SUCCEEDED,
+      succeededArtifactTaskIds: NO_ARTIFACTS,
       governanceTaskIds: NO_GOVERNANCE,
     });
 
@@ -91,6 +95,7 @@ describe('aggregateArtificerEvidenceRuns', () => {
       runs,
       tasks: [taskRow()],
       succeededTaskIds: NO_SUCCEEDED,
+      succeededArtifactTaskIds: NO_ARTIFACTS,
       governanceTaskIds: NO_GOVERNANCE,
     });
     expect(report.tasks[0].anomalies.repeatedRetryConsumption).toBe(true);
@@ -101,29 +106,68 @@ describe('aggregateArtificerEvidenceRuns', () => {
       runs: [runRow()],
       tasks: [taskRow()],
       succeededTaskIds: NO_SUCCEEDED,
+      succeededArtifactTaskIds: NO_ARTIFACTS,
       governanceTaskIds: NO_GOVERNANCE,
     });
     expect(report.tasks[0].anomalies.repeatedRetryConsumption).toBe(false);
   });
 
-  it('flags succeeded_run_then_failed only when a succeeded run exists AND the task finally failed', () => {
+  it('flags succeeded_artifact_then_failed when a succeeded run exists AND the task finally failed', () => {
     const succeeded = new Set(['task-ok-final', 'task-failed-after-success']);
 
     const bothFlags = aggregateArtificerEvidenceRuns({
       runs: [runRow({ taskId: 'task-failed-after-success' })],
       tasks: [taskRow({ taskId: 'task-failed-after-success', status: 'failed' })],
       succeededTaskIds: succeeded,
+      succeededArtifactTaskIds: NO_ARTIFACTS,
       governanceTaskIds: NO_GOVERNANCE,
     });
-    expect(bothFlags.tasks[0].anomalies.succeededRunThenFailed).toBe(true);
+    expect(bothFlags.tasks[0].anomalies.succeededArtifactThenFailed).toBe(true);
+    expect(bothFlags.tasks[0].anomalies.succeededRun).toBe(true);
+    expect(bothFlags.tasks[0].anomalies.succeededArtifact).toBe(false);
 
     const succeededOnly = aggregateArtificerEvidenceRuns({
       runs: [runRow({ taskId: 'task-ok-final' })],
       tasks: [taskRow({ taskId: 'task-ok-final', status: 'succeeded' })],
       succeededTaskIds: succeeded,
+      succeededArtifactTaskIds: NO_ARTIFACTS,
       governanceTaskIds: NO_GOVERNANCE,
     });
-    expect(succeededOnly.tasks[0].anomalies.succeededRunThenFailed).toBe(false);
+    expect(succeededOnly.tasks[0].anomalies.succeededArtifactThenFailed).toBe(false);
+  });
+
+  // PRI-980 review P2-3 (FR-09 names successful 制品/artifacts): a task whose
+  // artificer artifact was produced but whose run row ended `failed` — the
+  // succeeded-RUN proxy under-reported exactly this class.
+  it('flags succeeded_artifact_then_failed when ALL runs failed but pi_artifacts has a row (P2-3)', () => {
+    const artifacts = new Set(['task-artifact-failed']);
+
+    const report = aggregateArtificerEvidenceRuns({
+      runs: [
+        runRow({ taskId: 'task-artifact-failed', attemptNumber: 1 }),
+        runRow({ taskId: 'task-artifact-failed', attemptNumber: 2, errorCategory: 'max_attempts_exceeded' }),
+      ],
+      tasks: [taskRow({ taskId: 'task-artifact-failed', status: 'failed' })],
+      succeededTaskIds: NO_SUCCEEDED, // no succeeded run rows at all
+      succeededArtifactTaskIds: artifacts,
+      governanceTaskIds: NO_GOVERNANCE, // and no approval trace either
+    });
+    expect(report.tasks[0].anomalies.succeededArtifact).toBe(true);
+    expect(report.tasks[0].anomalies.succeededRun).toBe(false);
+    expect(report.tasks[0].anomalies.succeededArtifactThenFailed).toBe(true);
+    expect(report.summary.anomalyCounts.succeededArtifactThenFailed).toBe(1);
+  });
+
+  it('does not flag succeeded_artifact_then_failed for a task that did not finally fail (artifact present)', () => {
+    const report = aggregateArtificerEvidenceRuns({
+      runs: [runRow({ taskId: 'task-artifact-nhr' })],
+      tasks: [taskRow({ taskId: 'task-artifact-nhr', status: 'needs_human_review' })],
+      succeededTaskIds: NO_SUCCEEDED,
+      succeededArtifactTaskIds: new Set(['task-artifact-nhr']),
+      governanceTaskIds: NO_GOVERNANCE,
+    });
+    expect(report.tasks[0].anomalies.succeededArtifact).toBe(true);
+    expect(report.tasks[0].anomalies.succeededArtifactThenFailed).toBe(false);
   });
 
   it('flags has_governance_side_effects from the provided governance task ids', () => {
@@ -132,6 +176,7 @@ describe('aggregateArtificerEvidenceRuns', () => {
       runs: [runRow()],
       tasks: [taskRow()],
       succeededTaskIds: NO_SUCCEEDED,
+      succeededArtifactTaskIds: NO_ARTIFACTS,
       governanceTaskIds: governance,
     });
     expect(report.tasks[0].anomalies.hasGovernanceSideEffects).toBe(true);
@@ -143,6 +188,7 @@ describe('aggregateArtificerEvidenceRuns', () => {
       runs: [runRow({ taskId: 't1' }), runRow({ taskId: 't2', startedAt: '2026-09-02T10:00:00.000Z' })],
       tasks: [taskRow({ taskId: 't1' }), taskRow({ taskId: 't2' })],
       succeededTaskIds: NO_SUCCEEDED,
+      succeededArtifactTaskIds: NO_ARTIFACTS,
       governanceTaskIds: NO_GOVERNANCE,
     });
     for (const task of report.tasks) {
@@ -156,6 +202,7 @@ describe('aggregateArtificerEvidenceRuns', () => {
       runs: [runRow({ taskId: 't-has-row' }), runRow({ taskId: 't-orphan', startedAt: '2026-09-02T10:00:00.000Z' })],
       tasks: [taskRow({ taskId: 't-has-row', status: 'needs_human_review' })],
       succeededTaskIds: NO_SUCCEEDED,
+      succeededArtifactTaskIds: NO_ARTIFACTS,
       governanceTaskIds: NO_GOVERNANCE,
     });
 
@@ -182,6 +229,7 @@ describe('aggregateArtificerEvidenceRuns', () => {
         taskRow({ taskId: 't-failed', status: 'failed', attemptCount: 3, maxAttempts: 3 }),
       ],
       succeededTaskIds: NO_SUCCEEDED,
+      succeededArtifactTaskIds: NO_ARTIFACTS,
       governanceTaskIds: NO_GOVERNANCE,
     });
 
@@ -203,6 +251,7 @@ describe('aggregateArtificerEvidenceRuns', () => {
       ],
       tasks: [taskRow({ taskId: 'b-task' }), taskRow({ taskId: 'a-task' })],
       succeededTaskIds: NO_SUCCEEDED,
+      succeededArtifactTaskIds: NO_ARTIFACTS,
       governanceTaskIds: NO_GOVERNANCE,
     });
     expect(report.tasks.map((t) => t.taskId)).toEqual(['a-task', 'b-task']);
@@ -213,6 +262,7 @@ describe('aggregateArtificerEvidenceRuns', () => {
       runs: [],
       tasks: [],
       succeededTaskIds: NO_SUCCEEDED,
+      succeededArtifactTaskIds: NO_ARTIFACTS,
       governanceTaskIds: NO_GOVERNANCE,
     });
     expect(report.summary.totalRuns).toBe(0);
@@ -226,6 +276,7 @@ describe('aggregateArtificerEvidenceRuns', () => {
       runs: [runRow()],
       tasks: [taskRow()],
       succeededTaskIds: NO_SUCCEEDED,
+      succeededArtifactTaskIds: NO_ARTIFACTS,
       governanceTaskIds: NO_GOVERNANCE,
       governanceDetection: 'approvals JOIN pi_artifacts ON source_task_id',
     });
@@ -235,6 +286,7 @@ describe('aggregateArtificerEvidenceRuns', () => {
       runs: [runRow()],
       tasks: [taskRow()],
       succeededTaskIds: NO_SUCCEEDED,
+      succeededArtifactTaskIds: NO_ARTIFACTS,
       governanceTaskIds: NO_GOVERNANCE,
       governanceDetection: 'unavailable',
     });
@@ -260,5 +312,22 @@ describe('row validation (rc-1/rc-3: DB rows are untrusted; malformed rows fail 
   it('rejects a succeeded-task row whose task_id is not a non-empty string', () => {
     const db = fakeDb([{ task_id: 42 }]);
     expect(() => loadSucceededTaskIds(db as never, ['t1'])).toThrow(/task_id/);
+  });
+
+  it('loadArtifactTaskIds returns null when pi_artifacts is absent (rc-9: honest unavailability)', () => {
+    // sqlite_master query returns no rows → the table does not exist.
+    const db = fakeDb([]);
+    expect(loadArtifactTaskIds(db as never, ['t1'])).toBeNull();
+  });
+
+  it('loadArtifactTaskIds validates artifact rows as untrusted (rc-1/rc-3)', () => {
+    // The stub answers per query: sqlite_master sees the table, the data
+    // query returns a malformed row.
+    const db = {
+      prepare: (sql: string) => ({
+        all: () => (sql.includes('sqlite_master') ? [{ name: 'pi_artifacts' }] : [{ task_id: '' }]),
+      }),
+    };
+    expect(() => loadArtifactTaskIds(db as never, ['t1'])).toThrow(/task_id/);
   });
 });

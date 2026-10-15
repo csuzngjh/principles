@@ -295,7 +295,16 @@ describe('ArtificerRunner defensive evidence guard (PRI-981 / SPEC-PD-IAER-001 F
     const details = (diagnostic as { output_failure_details?: Record<string, unknown> }).output_failure_details;
     expect(details).toBeTruthy();
     expect(details?.reasonCode).toBe('owner_behavior_examples_required');
-    expect(String(details?.nextAction)).toContain('owner');
+    // PRI-980 review P2-2: the nextAction must name the REAL out-chain. The
+    // task lands terminal-failed, and the recovery entry
+    // (loadEvidenceTask) refuses non-NHR tasks — so "just attach evidence"
+    // was not executable as stated.
+    const nextAction = String(details?.nextAction);
+    expect(nextAction).toContain('pd runtime recovery failed-tasks --confirm');
+    expect(nextAction).toContain('pd runtime internalization evidence attach --confirm');
+    expect(nextAction).toContain('pd runtime internalization evidence resume --confirm');
+    // the misleading one-hop guidance is gone
+    expect(nextAction).not.toContain('FR-06 recovery entry');
   });
 
   it('nextAction guidance is embedded in the failure reason for operator surfaces', async () => {
@@ -350,6 +359,10 @@ describe('ArtificerRunner defensive evidence guard (PRI-981 / SPEC-PD-IAER-001 F
     const diagnostic: unknown = JSON.parse(patch.diagnosticJson);
     const details = (diagnostic as { output_failure_details?: Record<string, unknown> }).output_failure_details;
     expect(details?.reasonCode).toBe('owner_behavior_examples_invalid');
+    // PRI-980 review P2-2: same truthful out-chain as the missing-pack guard.
+    const nextAction = String(details?.nextAction);
+    expect(nextAction).toContain('pd runtime recovery failed-tasks --confirm');
+    expect(nextAction).not.toContain('FR-06 recovery entry');
   });
 
   it('positive control: a valid pack passes the defensive guard and reaches the runtime', async () => {

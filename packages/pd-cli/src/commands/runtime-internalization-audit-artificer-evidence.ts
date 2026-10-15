@@ -68,7 +68,7 @@ function emit(out: AuditArtificerEvidenceOutput, json?: boolean): void {
   console.log(`  distinct tasks:    ${s?.distinctTasks ?? 0}`);
   console.log(`  by runtime kind:   ${Object.entries(s?.byRuntimeKind ?? {}).map(([k, v]) => `${k}=${v}`).join(', ') || '-'}`);
   console.log(`  by final status:   ${Object.entries(s?.byFinalTaskStatus ?? {}).map(([k, v]) => `${k}=${v}`).join(', ') || '-'}`);
-  console.log(`  anomalies:         repeatedRetry=${s?.anomalyCounts.repeatedRetryConsumption ?? 0}, succeededThenFailed=${s?.anomalyCounts.succeededRunThenFailed ?? 0}, governanceSideEffects=${s?.anomalyCounts.hasGovernanceSideEffects ?? 0} (detection: ${out.governanceDetection ?? 'unknown'})`);
+  console.log(`  anomalies:         repeatedRetry=${s?.anomalyCounts.repeatedRetryConsumption ?? 0}, succeededArtifactThenFailed=${s?.anomalyCounts.succeededArtifactThenFailed ?? 0}, governanceSideEffects=${s?.anomalyCounts.hasGovernanceSideEffects ?? 0} (detection: ${out.governanceDetection ?? 'unknown'})`);
   console.log(`  nextAction:        ${out.nextAction ?? ''}`);
   const tasks = out.tasks ?? [];
   if (tasks.length > 0) {
@@ -82,7 +82,7 @@ function emit(out: AuditArtificerEvidenceOutput, json?: boolean): void {
       console.log(`    window:     ${t.firstFailureAt} .. ${t.lastFailureAt}`);
       const flags = [
         t.anomalies.repeatedRetryConsumption ? 'repeated_retry_consumption' : null,
-        t.anomalies.succeededRunThenFailed ? 'succeeded_run_then_failed' : null,
+        t.anomalies.succeededArtifactThenFailed ? 'succeeded_artifact_then_failed' : null,
         t.anomalies.hasGovernanceSideEffects ? 'has_governance_side_effects' : null,
         t.anomalies.packMissingFailure ? 'pack_missing_failure' : null,
       ].filter((f): f is string => f !== null);

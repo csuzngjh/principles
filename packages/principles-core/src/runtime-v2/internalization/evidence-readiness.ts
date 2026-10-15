@@ -33,6 +33,9 @@
  * sniffing): unresolvable pain/row references are `stale` (FR-03: cleaned
  * trajectories must never be silently reused), cross-session selections are
  * `scope_mismatch`. Plain errors stay `invalid` (A2 behavior unchanged).
+ * PRI-980 review P2-1 adds the §6.2 storage-fault family: the typed
+ * `evidence_source_error` kind → a distinct `evidence_source_error` verdict
+ * that is NOT an FR-04 owner-fault code.
  *
  * Channel authority: whether the target channel requires Owner evidence at
  * all is DECLARED by the caller (`channelRequiresOwnerEvidence`) — this module
@@ -111,25 +114,39 @@ export type OwnerEvidenceReasonCode =
 export const OWNER_EVIDENCE_SCOPE_ERROR_NAME = 'OwnerEvidenceScopeError';
 
 /**
- * Structured kinds of an evidence-scope assembly failure:
+ * Structured kinds of a typed evidence-assembly failure:
  *   - `pain_not_found` / `tool_call_not_found`: the trajectory the selection
  *     references does not resolve (cleaned or wrong workspace) → the stable
  *     STALE code (FR-03: a cleaned trajectory must never be silently reused);
  *   - `session_mismatch`: a selected row belongs to another session → the
- *     stable SCOPE code (SPEC FR-04 cross pain/session).
+ *     stable SCOPE code (SPEC FR-04 cross pain/session);
+ *   - `evidence_source_error`: the evidence SOURCE itself failed (trajectory
+ *     store I/O: unavailable / locked / read error) → the §6.2 storage-fault
+ *     family, deliberately NOT an FR-04 Owner-fault code. Owner-reviewer
+ *     vocabulary: a PRI-980 review fix separates "Owner labelled bad
+ *     evidence" from "the evidence source could not be read" (§6.2: 保留明确
+ *     的存储故障，不误判为 Owner 尚未标注).
+ *
+ * (The type name predates the storage kind — it is the reserved typed-error
+ * family's stable name; do not rename, the plugin bundle relies on the
+ * structural `name` + kind contract.)
  */
 export type OwnerEvidenceScopeMismatchKind =
   | 'pain_not_found'
   | 'tool_call_not_found'
-  | 'session_mismatch';
+  | 'session_mismatch'
+  | 'evidence_source_error';
 
 const SCOPE_MISMATCH_KINDS: ReadonlySet<string> = new Set([
   'pain_not_found',
   'tool_call_not_found',
   'session_mismatch',
+  'evidence_source_error',
 ]);
 
-/** Map a structured scope failure to its stable FR-04 reason code. */
+/** Map a structured SCOPE failure to its stable FR-04 reason code.
+ *  `evidence_source_error` must never enter here — it is not an owner-fault
+ *  code and is routed by the readiness gate before this helper. */
 function reasonCodeForScopeKind(kind: OwnerEvidenceScopeMismatchKind): OwnerEvidenceReasonCode {
   return kind === 'session_mismatch'
     ? 'owner_behavior_examples_scope_mismatch'
@@ -175,8 +192,10 @@ export interface EvidenceReadinessInput {
   readonly ownerSelection?: OwnerEvidenceSelection | null;
   /**
    * Injected assembly step. Throws on failure (assembler ERR-069 fail-loud
-   * convention); the gate captures the throw as `invalid_evidence` with the
-   * bounded error detail — exception details are never swallowed.
+   * convention); the gate captures the throw and classifies it: typed scope
+   * kinds → the stable FR-04 codes, the typed `evidence_source_error` kind →
+   * the §6.2 storage-fault verdict, everything else → `invalid_evidence` with
+   * the bounded error detail — exception details are never swallowed.
    * Takes precedence over `assemblyResult` when both are provided.
    */
   readonly assemblePack?: () => BehaviorExamplePack;
@@ -206,6 +225,22 @@ export type EvidenceReadiness =
       readonly status: 'invalid_evidence';
       readonly reasonCode: OwnerEvidenceReasonCode;
       /** Bounded structured reason (rc-8) — why the evidence was rejected. */
+      readonly detail: string;
+      readonly nextAction: string;
+    }
+  | {
+      /**
+       * The evidence SOURCE failed (trajectory store I/O — PRI-980 review
+       * P2-1, SPEC §6.2 case 3). Deliberately NOT `invalid_evidence`: a
+       * storage fault must never read as "Owner labelled bad evidence".
+       * `reason` (not `reasonCode`) marks it as outside the FR-04
+       * Owner-fault vocabulary — callers must keep the task wake-eligible /
+       * untouched and degrade observably, never write an owner-fault NHR
+       * reason.
+       */
+      readonly status: 'evidence_source_error';
+      readonly reason: 'evidence_source_error';
+      /** Bounded structured reason (rc-8) — the underlying failure message. */
       readonly detail: string;
       readonly nextAction: string;
     }
@@ -411,8 +446,20 @@ export function assessEvidenceReadiness(input: EvidenceReadinessInput): Evidence
     // B1: structured scope classification first (typed error, never message
     // sniffing). pain/row unresolvable → stale (FR-03: cleaned trajectory must
     // not be silently reused); cross-session selection → scope mismatch
-    // (SPEC FR-04). Everything else stays `invalid`.
+    // (SPEC FR-04). PRI-980 review P2-1: a typed evidence_source_error (the
+    // assembler's trajectory-store I/O failure) is routed to the §6.2
+    // storage-fault family — task-side routing must keep the task
+    // wake-eligible, never write an owner-fault reason. Plain errors stay
+    // `invalid` (A2 behavior unchanged).
     if (isOwnerEvidenceScopeError(assemblyError)) {
+      if (assemblyError.ownerEvidenceScopeKind === 'evidence_source_error') {
+        return {
+          status: 'evidence_source_error',
+          reason: 'evidence_source_error',
+          detail: boundedDetail(assemblyError.message),
+          nextAction: 'The evidence source itself failed (trajectory store I/O); this is NOT an Owner evidence fault. The task stays wake-eligible and the next cycle retries assembly at zero model cost; if it persists, inspect the trajectory store for this workspace (pd runtime internalization integrity --json).',
+        };
+      }
       const reasonCode = reasonCodeForScopeKind(assemblyError.ownerEvidenceScopeKind);
       return {
         status: 'invalid_evidence',

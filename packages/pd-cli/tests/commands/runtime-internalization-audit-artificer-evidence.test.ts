@@ -197,7 +197,7 @@ describe('audit-artificer-evidence handler against a real state.db (T11)', () =>
     expect(out.governanceDetection).toContain('approvals');
   });
 
-  it('reports succeeded_run_then_failed when a succeeded run exists and the task finally failed', async () => {
+  it('reports succeeded_artifact_then_failed when a succeeded run exists and the task finally failed', async () => {
     const db = createStateDb();
     const insertTask = db.prepare(
       `INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts)
@@ -215,7 +215,43 @@ describe('audit-artificer-evidence handler against a real state.db (T11)', () =>
     const out = await runHandlerJson();
     const tasks = out.tasks as Array<Record<string, unknown>>;
     const taskC = tasks.find((t) => t.taskId === 'task-c') as Record<string, unknown>;
-    expect((taskC.anomalies as Record<string, boolean>).succeededRunThenFailed).toBe(true);
+    expect((taskC.anomalies as Record<string, boolean>).succeededArtifactThenFailed).toBe(true);
+    expect((taskC.anomalies as Record<string, boolean>).succeededRun).toBe(true);
+  });
+
+  // PRI-980 review P2-3 (FR-09 names successful 制品/artifacts): the marker
+  // must be ARTIFACT-authoritative — a task whose runs all ended `failed` but
+  // which produced a persisted artifact (pi_artifacts row, no approval trace)
+  // was invisible to the succeeded-run proxy.
+  it('flags succeeded_artifact_then_failed when all runs failed but pi_artifacts has a row (P2-3)', async () => {
+    const db = createStateDb();
+    db.prepare(
+      `INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts)
+       VALUES ('task-d', 'artificer', 'failed', '2026-09-01T09:00:00.000Z', '2026-09-02T09:00:00.000Z', 3, 3)`,
+    ).run();
+    db.prepare(
+      `INSERT INTO runs (run_id, task_id, runtime_kind, execution_status, started_at, ended_at, reason, error_category, attempt_number, created_at, updated_at)
+       VALUES
+        ('run-d1', 'task-d', 'pi-ai-l2', 'failed', '2026-09-01T10:00:00.000Z', '2026-09-01T10:01:00.000Z', 'behavior_example_pack_missing: retry', 'execution_failed', 1, '2026-09-01T10:00:00.000Z', '2026-09-01T10:01:00.000Z'),
+        ('run-d2', 'task-d', 'pi-ai-l2', 'failed', '2026-09-01T11:00:00.000Z', '2026-09-01T11:01:00.000Z', 'behavior_example_pack_missing: retry', 'max_attempts_exceeded', 2, '2026-09-01T11:00:00.000Z', '2026-09-01T11:01:00.000Z')`,
+    ).run();
+    // The artifact WAS produced and persisted — but no approval row exists,
+    // so only the new artifact signal can see it.
+    db.prepare(
+      `INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, lineage_artifact_ids, content_json, created_at, updated_at)
+       VALUES ('art-d-1', 'principle', 'task-d', '[]', '{}', '2026-09-01T10:30:00.000Z', '2026-09-01T10:30:00.000Z')`,
+    ).run();
+    db.close();
+
+    const out = await runHandlerJson();
+    const tasks = out.tasks as Array<Record<string, unknown>>;
+    const taskD = tasks.find((t) => t.taskId === 'task-d') as Record<string, unknown>;
+    const anomaliesD = taskD.anomalies as Record<string, boolean>;
+    expect(anomaliesD.succeededArtifactThenFailed).toBe(true);
+    expect(anomaliesD.succeededArtifact).toBe(true);
+    expect(anomaliesD.succeededRun).toBe(false);
+    // independence from the approvals join (governance stays false)
+    expect(anomaliesD.hasGovernanceSideEffects).toBe(false);
   });
 
   it('returns a structured empty result (not an error) when nothing matches', async () => {

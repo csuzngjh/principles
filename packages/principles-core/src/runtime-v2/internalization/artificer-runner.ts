@@ -875,10 +875,14 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
         'input_invalid',
         'behavior_example_pack_missing: v2-only Artificer generation requires a BehaviorExamplePack '
           + '(Owner-labelled evidence, PRI-780 / SPEC-PD-IAER-001 FR-05); '
-          + 'owner must attach BehaviorExamplePack evidence; see SPEC-PD-IAER-001 FR-06 recovery entry',
+          + 'this failure lands the task terminal-failed — recover it first and attach evidence (see nextAction)',
         {
           reasonCode: 'owner_behavior_examples_required',
-          nextAction: 'owner must attach BehaviorExamplePack evidence; see SPEC-PD-IAER-001 FR-06 recovery entry',
+          nextAction: 'this task is terminal-failed; the executable out-chain is: '
+            + 'pd runtime recovery failed-tasks --confirm (returns it to pending) → '
+            + 'the consumer evidence preflight parks it in needs_human_review → '
+            + 'pd runtime internalization evidence attach --confirm → '
+            + 'pd runtime internalization evidence resume --confirm',
         },
       );
     }
@@ -898,10 +902,14 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
           'input_invalid',
           `behavior_example_pack_invalid: injected BehaviorExamplePack failed validateBehaviorExamplePack`
             + ` (${boundedErrors.join('; ')}${overflow > 0 ? ` …[+${overflow} more]` : ''})`
-            + ` — SPEC-PD-IAER-001 FR-05 defensive guard`,
+            + ' — SPEC-PD-IAER-001 FR-05 defensive guard',
           {
             reasonCode: 'owner_behavior_examples_invalid',
-            nextAction: 'owner must correct the labelled evidence and resubmit via the SPEC-PD-IAER-001 FR-06 recovery entry',
+            nextAction: 'owner must re-attach valid labelled evidence; this task is terminal-failed, so the executable out-chain is: '
+              + 'pd runtime recovery failed-tasks --confirm (returns it to pending) → '
+              + 'the consumer evidence preflight parks it in needs_human_review → '
+              + 'pd runtime internalization evidence attach --confirm → '
+              + 'pd runtime internalization evidence resume --confirm',
             validationErrors: boundedErrors,
           },
         );

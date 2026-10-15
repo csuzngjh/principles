@@ -28,6 +28,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   createRuntimeStateHandle,
+  createOwnerEvidenceScopeError,
   createPITaskDiagnosticJson,
   hydratePITaskRecord,
   type BehaviorExamplePack,
@@ -334,6 +335,49 @@ describe('preflightArtificerOwnerEvidence (PRI-982 FR-02/FR-04)', () => {
     expect(task?.status).toBe('needs_human_review');
   });
 
+  // ── PRI-980 review P2-1 (SPEC §6.2 case 3): a trajectory-store I/O failure
+  // is a STORAGE fault with its own routing — never an owner-fault NHR write.
+
+  it('P2-1: typed evidence_source_error → structured degradation, task stays pending, NO NHR write', async () => {
+    const fixture = await makeFixture(VALID_SELECTION);
+    const verdict = await fixture.run({
+      behaviorEvidencePortError: createOwnerEvidenceScopeError(
+        'evidence_source_error',
+        '[BehaviorExamplePackAssembler] trajectory store pain lineage read failed (database is locked)',
+      ),
+    });
+
+    expect(verdict.decision).toBe('evidence_source_error');
+    if (verdict.decision !== 'evidence_source_error') return;
+    expect(verdict.reason).toBe('evidence_source_error');
+    expect(verdict.detail).toContain('database is locked');
+    expect(verdict.nextAction).toContain('NOT an Owner evidence fault');
+
+    // §6.2: the fault is preserved verbatim, no owner-fault reasonCode, the
+    // task is untouched (wake-eligible → the next cycle retries at zero
+    // model cost).
+    const task = await readTask(fixture.workspaceDir);
+    expect(task?.status).toBe('pending');
+    const hydrated = task ? hydratePITaskRecord(task) : null;
+    expect(hydrated?.humanReviewContext).toBeUndefined();
+
+    // rc-9 observability: the registered crash-durable blocked event carries
+    // the storage reasonCode + nextAction; reviewPersisted=false because
+    // nothing was written.
+    const blocked = emitted.find((e) => e.eventType === 'artificer_blocked_on_owner_evidence');
+    expect(blocked).toBeDefined();
+    expect(blocked?.payload).toMatchObject({
+      taskId: TASK_ID,
+      agentKind: 'artificer',
+      executionMode: 'preflight',
+      reasonCode: 'evidence_source_error',
+      reviewPersisted: false,
+    });
+    expect(String(blocked?.payload.nextAction)).toContain('NOT an Owner evidence fault');
+    // no NHR-write event family side effects
+    expect(emitted.some((e) => e.eventType === 'artificer_owner_evidence_attached')).toBe(false);
+  });
+
   it('port absent → evidence_source_unavailable, task untouched, no telemetry events', async () => {
     const workspaceDir = makeWorkspace();
     await seedArtificerTask(workspaceDir, undefined);
@@ -420,6 +464,85 @@ describe('preflightArtificerOwnerEvidence (PRI-982 FR-02/FR-04)', () => {
       const hydrated = task ? hydratePITaskRecord(task) : null;
       expect(hydrated?.humanReviewContext?.reasonCode).toBe('owner_behavior_examples_required');
       expect(hydrated?.humanReviewContext?.detail).toContain('nextAction');
+    } finally {
+      await handle.close().catch(() => undefined);
+    }
+  });
+
+  // ── PRI-980 review P1-1: the NHR transition carries the §6.3 STATUS
+  // precondition on top of the diagnosticJson CAS. `acquireLease` mutates
+  // status/lease/attempt_count but NOT diagnostic_json, so without the status
+  // precondition a consumer that read the task before another consumer leased
+  // it would NHR-park an actively leased task over its lease holder.
+
+  it('P1-1: actively leased task → NHR write LOSES the race observably (status stays leased, no review context)', async () => {
+    const workspaceDir = makeWorkspace();
+    await seedArtificerTask(workspaceDir, undefined);
+    emitted = [];
+    const handle = await createRuntimeStateHandle({ workspaceDir, readonly: false });
+    try {
+      const { stateManager } = handle;
+      // The gate's caller reads the task BEFORE the concurrent lease lands
+      // (the stale snapshot the real consumer passes after its dry-run wake).
+      const staleTask = await stateManager.getTask(TASK_ID);
+      const stalePiTask = staleTask ? hydratePITaskRecord(staleTask) : null;
+      if (!stalePiTask) throw new Error('fixture piTask did not hydrate');
+      // Concurrent consumer B acquires a REAL lease between A's read and A's
+      // CAS: status → leased, lease columns + attempt_count mutated,
+      // diagnostic_json byte-identical (the exact P1-1 interleave).
+      await stateManager.acquireLease({ taskId: TASK_ID, owner: 'consumer-b', runtimeKind: 'claude-cli' });
+      const verdict = await preflightArtificerOwnerEvidence({
+        taskId: TASK_ID,
+        piTask: stalePiTask,
+        owner: 'consumer-a',
+        stateManager,
+        eventEmitter: collectingEmitter(),
+        behaviorEvidence: { assemble: () => VALID_PACK },
+      });
+      expect(verdict.decision).toBe('blocked');
+      if (verdict.decision !== 'blocked') return;
+      expect(verdict.reasonCode).toBe('owner_behavior_examples_required');
+      expect(verdict.reviewPersisted).toBe(false); // observable lost race (rc-9)
+      const blockedEvent = emitted.find((e) => e.eventType === 'artificer_blocked_on_owner_evidence');
+      expect(blockedEvent?.payload).toMatchObject({ reviewPersisted: false });
+    } finally {
+      await handle.close().catch(() => undefined);
+    }
+    // Zero NHR effect over the lease holder: status/lease untouched, no
+    // humanReviewContext, diagnostic_json unchanged.
+    const task = await readTask(workspaceDir);
+    expect(task?.status).toBe('leased');
+    expect(task?.leaseOwner).toBe('consumer-b');
+    const hydrated = task ? hydratePITaskRecord(task) : null;
+    expect(hydrated?.humanReviewContext).toBeUndefined();
+  });
+
+  it('P1-1: retry_wait wake-eligible source still parks in NHR (status precondition covers the full wake scan)', async () => {
+    const workspaceDir = makeWorkspace();
+    await seedArtificerTask(workspaceDir, undefined);
+    const handle = await createRuntimeStateHandle({ workspaceDir, readonly: false });
+    try {
+      const { stateManager } = handle;
+      // findCandidates scans pending AND retry_wait; a retry_wait task is a
+      // legal preflight input, so its NHR write must NOT lose the new
+      // precondition.
+      await stateManager.updateTask(TASK_ID, { status: 'retry_wait' });
+      const task = await stateManager.getTask(TASK_ID);
+      const piTask = task ? hydratePITaskRecord(task) : null;
+      if (!piTask) throw new Error('fixture piTask did not hydrate');
+      const verdict = await preflightArtificerOwnerEvidence({
+        taskId: TASK_ID,
+        piTask,
+        owner: 'test-consumer',
+        stateManager,
+        eventEmitter: collectingEmitter(),
+        behaviorEvidence: { assemble: () => VALID_PACK },
+      });
+      expect(verdict.decision).toBe('blocked');
+      if (verdict.decision !== 'blocked') return;
+      expect(verdict.reviewPersisted).toBe(true);
+      const after = await stateManager.getTask(TASK_ID);
+      expect(after?.status).toBe('needs_human_review');
     } finally {
       await handle.close().catch(() => undefined);
     }

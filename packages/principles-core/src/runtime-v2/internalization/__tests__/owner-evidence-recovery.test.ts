@@ -297,7 +297,13 @@ describe('attachOwnerEvidence (T05)', () => {
     expect(event?.payload.adapterRunId).toBeUndefined();
     // bounded digest prefix, cross-checked against the persisted authority
     const { piTask: attachedPi } = await readTask(fixture.workspaceDir);
-    expect(event?.payload.evidenceDigestPrefix).toBe(attachedPi?.ownerEvidenceSelection?.contentDigest.slice(0, 12));
+    // rc-3: the digest is REQUIRED on a confirmed attach — assert it loudly
+    // instead of narrowing with a non-null assertion.
+    const attachedDigest = attachedPi?.ownerEvidenceSelection?.contentDigest;
+    if (attachedDigest === undefined) {
+      throw new Error('fixture: the attached selection must persist a contentDigest');
+    }
+    expect(event?.payload.evidenceDigestPrefix).toBe(attachedDigest.slice(0, 12));
   });
 
   it('re-attach increments the revision under the CAS', async () => {

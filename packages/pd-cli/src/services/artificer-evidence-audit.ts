@@ -8,7 +8,15 @@
  * anomaly markers:
  *
  * - repeatedRetryConsumption     — the same task consumed more than one failing run;
- * - succeededRunThenFailed       — the task also has a succeeded run but finally failed;
+ * - succeededArtifactThenFailed  — the task produced a succeeded run OR a persisted
+ *                                  artifact, yet finally failed (FR-09 names successful
+ *                                  制品/artifacts; the succeeded-RUN row alone was a proxy
+ *                                  that under-reported: `markTaskSucceeded` is the only
+ *                                  `succeeded` run writer, so a task whose artifact was
+ *                                  produced/validated but whose run row ended `failed`
+ *                                  was missed — PRI-980 review P2-3. Both sub-signals are
+ *                                  kept: `succeededRun` / `succeededArtifact`, the
+ *                                  aggregate is their OR);
  * - hasGovernanceSideEffects     — an approval trace exists for one of the task's artifacts;
  * - packMissingFailure           — the task has >=1 pack-missing run (the scan signature).
  *
@@ -52,7 +60,17 @@ export interface ArtificerEvidenceTaskRow {
 
 export interface ArtificerEvidenceAnomalies {
   repeatedRetryConsumption: boolean;
-  succeededRunThenFailed: boolean;
+  /**
+   * FR-09 aggregate marker (artifact-authoritative, PRI-980 review P2-3):
+   * the task produced a succeeded run OR a persisted artifact, yet finally
+   * failed. `pi_artifacts.source_task_id` is the verified artifact authority
+   * (same join shape as the governance detection).
+   */
+  succeededArtifactThenFailed: boolean;
+  /** Sub-signal: >=1 run row with execution_status='succeeded' (any runtime kind). */
+  succeededRun: boolean;
+  /** Sub-signal: >=1 pi_artifacts row with source_task_id = this task. */
+  succeededArtifact: boolean;
   hasGovernanceSideEffects: boolean;
   packMissingFailure: boolean;
 }
@@ -81,7 +99,7 @@ export interface ArtificerEvidenceAuditReport {
     byFinalTaskStatus: Record<string, number>;
     anomalyCounts: {
       repeatedRetryConsumption: number;
-      succeededRunThenFailed: number;
+      succeededArtifactThenFailed: number;
       hasGovernanceSideEffects: number;
       packMissingFailure: number;
     };
@@ -197,6 +215,8 @@ export interface AggregateArtificerEvidenceInput {
   tasks: readonly ArtificerEvidenceTaskRow[];
   /** Task ids that have at least one succeeded run (any runtime kind). */
   succeededTaskIds: ReadonlySet<string>;
+  /** Task ids with at least one persisted artifact (pi_artifacts.source_task_id). */
+  succeededArtifactTaskIds: ReadonlySet<string>;
   /** Task ids that have at least one approval trace (see GOVERNANCE_DETECTION_METHOD). */
   governanceTaskIds: ReadonlySet<string>;
   governanceDetection?: string;
@@ -245,9 +265,19 @@ export function aggregateArtificerEvidenceRuns(input: AggregateArtificerEvidence
       const task = tasksById.get(agg.taskId);
       const taskStatus = task?.status ?? null;
       const attemptsExhausted = task !== undefined && task.attemptCount >= task.maxAttempts;
+      // FR-09 (PRI-980 review P2-3): the "had a success but finally failed"
+      // marker is ARTIFACT-authoritative. The succeeded-run row alone is a
+      // proxy: `markTaskSucceeded` is the only writer of run status
+      // `succeeded`, so a task whose artificer artifact was produced but
+      // whose run row ended `failed` was under-reported. Both signals are
+      // kept and OR-merged.
+      const succeededRun = input.succeededTaskIds.has(agg.taskId);
+      const succeededArtifact = input.succeededArtifactTaskIds.has(agg.taskId);
       const anomalies: ArtificerEvidenceAnomalies = {
         repeatedRetryConsumption: agg.runCount > 1,
-        succeededRunThenFailed: input.succeededTaskIds.has(agg.taskId) && taskStatus === 'failed',
+        succeededArtifactThenFailed: (succeededRun || succeededArtifact) && taskStatus === 'failed',
+        succeededRun,
+        succeededArtifact,
         hasGovernanceSideEffects: input.governanceTaskIds.has(agg.taskId),
         packMissingFailure: true,
       };
@@ -270,7 +300,7 @@ export function aggregateArtificerEvidenceRuns(input: AggregateArtificerEvidence
   const byFinalTaskStatus: Record<string, number> = {};
   const anomalyCounts = {
     repeatedRetryConsumption: 0,
-    succeededRunThenFailed: 0,
+    succeededArtifactThenFailed: 0,
     hasGovernanceSideEffects: 0,
     packMissingFailure: 0,
   };
@@ -278,7 +308,7 @@ export function aggregateArtificerEvidenceRuns(input: AggregateArtificerEvidence
     const statusKey = task.taskStatus ?? 'unknown_missing_task_row';
     byFinalTaskStatus[statusKey] = (byFinalTaskStatus[statusKey] ?? 0) + 1;
     if (task.anomalies.repeatedRetryConsumption) anomalyCounts.repeatedRetryConsumption += 1;
-    if (task.anomalies.succeededRunThenFailed) anomalyCounts.succeededRunThenFailed += 1;
+    if (task.anomalies.succeededArtifactThenFailed) anomalyCounts.succeededArtifactThenFailed += 1;
     if (task.anomalies.hasGovernanceSideEffects) anomalyCounts.hasGovernanceSideEffects += 1;
     if (task.anomalies.packMissingFailure) anomalyCounts.packMissingFailure += 1;
   }
@@ -354,6 +384,38 @@ export function loadSucceededTaskIds(db: SqliteDatabase, taskIds: readonly strin
 }
 
 /**
+ * Task ids (of the audited set) with at least one persisted ARTIFACT — the
+ * FR-09 "成功制品" authority `pi_artifacts.source_task_id` (PRI-980 review
+ * P2-3; same join shape as `loadGovernanceTaskIds` without the approvals hop).
+ * Returns null when the table is absent (older state.db); for THIS signal the
+ * absence is semantically "no artifact was ever persisted", so the caller
+ * maps it to an empty set — never to an unavailable marker (the marker is
+ * provably false, not undetectable).
+ */
+export function loadArtifactTaskIds(db: SqliteDatabase, taskIds: readonly string[]): Set<string> | null {
+  const tables = db
+    .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'pi_artifacts'`)
+    .all();
+  const present = new Set(tables.map((row) => validateSingleStringColumn(row, 'name')));
+  if (!present.has('pi_artifacts')) {
+    return null;
+  }
+  const out = new Set<string>();
+  for (const chunkIds of chunk(taskIds, 500)) {
+    const placeholders = chunkIds.map(() => '?').join(', ');
+    const rows = db
+      .prepare(
+        `SELECT DISTINCT source_task_id AS task_id
+         FROM pi_artifacts
+         WHERE source_task_id IN (${placeholders})`,
+      )
+      .all(...chunkIds);
+    for (const row of rows) out.add(validateSingleStringColumn(row, 'task_id'));
+  }
+  return out;
+}
+
+/**
  * Task ids (of the audited set) with an approval trace, via the verified
  * approvals → pi_artifacts join. When either table is absent (older state.db)
  * returns null so the caller reports detection as unavailable (rc-9) — the
@@ -387,6 +449,7 @@ export interface ArtificerEvidenceAuditInputs {
   runs: ArtificerEvidenceRunRow[];
   tasks: ArtificerEvidenceTaskRow[];
   succeededTaskIds: Set<string>;
+  succeededArtifactTaskIds: Set<string>;
   governanceTaskIds: Set<string>;
   governanceDetection: string;
 }
@@ -397,11 +460,15 @@ export function loadArtificerEvidenceAuditInputs(db: SqliteDatabase): ArtificerE
   const taskIds = [...new Set(runs.map((r) => r.taskId))];
   const tasks = loadTaskRows(db, taskIds);
   const succeededTaskIds = loadSucceededTaskIds(db, taskIds);
+  // pi_artifacts absent ⇒ no artifact was ever persisted in this workspace ⇒
+  // the artifact signal is genuinely false (see loadArtifactTaskIds).
+  const artifactTaskIds = loadArtifactTaskIds(db, taskIds);
   const governance = loadGovernanceTaskIds(db, taskIds);
   return {
     runs,
     tasks,
     succeededTaskIds,
+    succeededArtifactTaskIds: artifactTaskIds ?? new Set<string>(),
     governanceTaskIds: governance ?? new Set<string>(),
     governanceDetection: governance === null ? GOVERNANCE_DETECTION_UNAVAILABLE : GOVERNANCE_DETECTION_METHOD,
   };

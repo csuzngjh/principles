@@ -250,7 +250,12 @@ async function loadEvidenceTask(
         status: 'refused',
         taskId,
         reason: 'task_not_needs_human_review',
-        nextAction: 'Only needs_human_review tasks waiting for Owner evidence accept this operation (pd runtime internalization evidence list).',
+        // PRI-980 review P2-2: name the REAL out-chain — a terminal-failed
+        // task (e.g. the run-once input_invalid landing) must first be
+        // recovered to pending before the consumer preflight can park it
+        // here for evidence attach.
+        nextAction: 'Only needs_human_review tasks waiting for Owner evidence accept this operation (pd runtime internalization evidence list). '
+          + 'A failed task returns to pending via pd runtime recovery failed-tasks --confirm; the consumer evidence preflight then parks it in needs_human_review for evidence attach.',
       },
     };
   }
@@ -334,6 +339,19 @@ export async function attachOwnerEvidence(
         taskId: input.taskId,
         reason: 'owner_behavior_examples_invalid',
         nextAction: 'Evidence gate returned not_applicable — caller bug (channel is hard-required for attach).',
+      };
+    }
+    if (readiness.status === 'evidence_source_error') {
+      // PRI-980 review P2-1 (SPEC §6.2 case 3): a trajectory-store I/O fault
+      // is not an Owner evidence fault — the refusal carries the storage
+      // reason verbatim and mutates nothing (attach is zero-mutation until
+      // its CAS anyway; cli-5).
+      return {
+        status: 'refused',
+        taskId: input.taskId,
+        reason: readiness.reason,
+        detail: readiness.detail,
+        nextAction: readiness.nextAction,
       };
     }
     return {
@@ -535,6 +553,20 @@ export async function resumeOwnerEvidenceTask(
         nextAction: 'Stored selection is unusable; re-attach with evidence attach --confirm.',
       };
     }
+    if (readiness.status === 'evidence_source_error') {
+      // PRI-980 review P2-1 (SPEC §6.2 case 3): a storage fault during the
+      // re-assembly must not read as a stale/invalid Owner selection. The
+      // task STAYS needs_human_review with its existing owner-fault reason
+      // untouched — the refusal reports the storage reason so the operator
+      // can retry when the store recovers.
+      return {
+        status: 'refused',
+        taskId: input.taskId,
+        reason: readiness.reason,
+        detail: readiness.detail,
+        nextAction: readiness.nextAction,
+      };
+    }
     return {
       status: 'refused',
       taskId: input.taskId,
@@ -640,7 +672,12 @@ export async function resumeOwnerEvidenceTask(
       // (taskId, attemptNumber) — proven by the recovery T10 test.
       ...buildArtificerRunCorrelation({
         taskId: input.taskId,
-        attemptNumber: 0, // the `requeued` outcome certifies the authority reset landed attemptCount=0 — the new budget start
+        // PRI-984/F-1 wording: this is the WRITE-TIME value the authority
+        // reset landed (attemptCount=0). It is NOT "a new budget start" — the
+        // NEXT lease renumbers attempt_count from run history
+        // (lease-manager.ts, T10 pins the renumbered value). The correlation
+        // join keys on this write-time value.
+        attemptNumber: 0,
         executionMode: 'recovery',
         reasonCode: 'owner_behavior_examples_verified',
         workspaceDir: input.workspaceDir,

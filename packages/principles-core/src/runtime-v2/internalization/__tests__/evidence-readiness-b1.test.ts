@@ -123,6 +123,36 @@ describe('typed assembly-failure classification (B1 FR-04)', () => {
     expect(verdict.reasonCode).toBe('owner_behavior_examples_invalid');
   });
 
+  // ── PRI-980 review P2-1 (SPEC §6.2 case 3): the evidence SOURCE failing is
+  // a storage fault with its OWN verdict — never an FR-04 owner-fault code.
+
+  it('evidence_source_error kind → the §6.2 storage-fault verdict, NOT an owner-fault code', () => {
+    const verdict = assessEvidenceReadiness({
+      channelRequiresOwnerEvidence: true,
+      ownerSelection: BASE_SELECTION,
+      assemblePack: () => {
+        throw createOwnerEvidenceScopeError(
+          'evidence_source_error',
+          '[BehaviorExamplePackAssembler] trajectory store pain lineage read failed (database is locked)',
+        );
+      },
+    });
+    expect(verdict.status).toBe('evidence_source_error');
+    if (verdict.status !== 'evidence_source_error') return;
+    expect(verdict.reason).toBe('evidence_source_error');
+    expect(verdict.detail).toContain('database is locked');
+    expect(verdict.nextAction).toContain('NOT an Owner evidence fault');
+  });
+
+  it('the structural guard accepts the storage kind and still rejects forged kinds', () => {
+    expect(isOwnerEvidenceScopeError(createOwnerEvidenceScopeError('evidence_source_error', 'x'))).toBe(true);
+    expect(isOwnerEvidenceScopeError(createOwnerEvidenceScopeError('session_mismatch', 'x'))).toBe(true);
+    const forgedKind = new Error('forged-kind');
+    forgedKind.name = OWNER_EVIDENCE_SCOPE_ERROR_NAME;
+    Object.assign(forgedKind, { ownerEvidenceScopeKind: 'not_a_kind' });
+    expect(isOwnerEvidenceScopeError(forgedKind)).toBe(false);
+  });
+
   it('isOwnerEvidenceScopeError is structural: name + validated kind, rejects forged/foreign values', () => {
     expect(isOwnerEvidenceScopeError(createOwnerEvidenceScopeError('session_mismatch', 'x'))).toBe(true);
     expect(isOwnerEvidenceScopeError(new Error('plain'))).toBe(false);

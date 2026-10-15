@@ -521,6 +521,24 @@ export async function runInternalizationConsumerCycle(
           logger.warn(`[PD:${logLabel}] Artificer task ${wakeResult.taskId} skipped: evidence source unavailable (host must wire the behaviorEvidence port).`);
           return { ran: false, skipReason: 'evidence_source_unavailable', taskId: wakeResult.taskId, taskKind: wakeResult.taskKind };
         }
+        if (artificerEvidence.decision === 'evidence_source_error') {
+          // PRI-980 review P2-1 — SPEC §6.2 case 3: a trajectory-store I/O
+          // fault is preserved AS a storage fault. Same family as the absent
+          // port: the task stays wake-eligible (the next cycle retries the
+          // assembly at zero model cost), the runner is never constructed,
+          // and the preflight already emitted the structured degradation
+          // telemetry (reason=evidence_source_error, reviewPersisted=false).
+          const storageInfo = JSON.stringify({
+            reason: 'evidence_source_error',
+            taskId: wakeResult.taskId,
+            taskKind: wakeResult.taskKind,
+            nextAction: artificerEvidence.nextAction,
+            ...(artificerEvidence.detail !== undefined ? { detail: artificerEvidence.detail } : {}),
+          });
+          emitEvent('INTERNALIZATION_CONSUMER_SKIP', storageInfo);
+          logger.warn(`[PD:${logLabel}] Artificer task ${wakeResult.taskId} skipped: evidence source error (storage fault preserved; task stays wake-eligible).`);
+          return { ran: false, skipReason: 'evidence_source_error', taskId: wakeResult.taskId, taskKind: wakeResult.taskKind };
+        }
         if (artificerEvidence.decision === 'blocked') {
           // FR-04: the preflight already moved the task atomically into
           // needs_human_review — outside the wake scan (pending/retry_wait

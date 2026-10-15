@@ -21,10 +21,13 @@
  *          consumer wake scan (pending/retry_wait only), the task is never
  *          auto-rewoken (FR-05/T02).
  *
- * Reason codes are the stable FR-04 IDs. Assembly failures surface as
- * `owner_behavior_examples_invalid` today — the plugin assembler owns
- * scope/staleness rejection and does not yet carry structured stale/scope
- * codes (evidence-readiness.ts contract); refining that mapping is B1 scope.
+ * Reason codes are the stable FR-04 IDs for Owner-evidence faults
+ * (`required`/`invalid`/`stale`/`scope_mismatch` via the typed scope
+ * classification). Evidence-SOURCE faults stay OUT of that vocabulary: a
+ * missing port → `evidence_source_unavailable`, a typed
+ * `evidence_source_error` from the assembler (trajectory store I/O, PRI-980
+ * review P2-1) → the §6.2 storage-fault degradation — task untouched, never
+ * an owner-fault NHR write.
  *
  * Telemetry: the two events are registered in the telemetry-event union in
  * the same change (ERR-060: unregistered names are silently rewritten to
@@ -72,8 +75,10 @@ export interface BehaviorEvidencePort {
   /**
    * Assemble a validated BehaviorExamplePack from the Owner selection.
    * Throws on any gap (missing pain, session-mismatched rows, invalid pack)
-   * — ERR-069 fail-loud convention; the gate captures the throw as
-   * `invalid_evidence`.
+   * — ERR-069 fail-loud convention. The gate classifies the throw
+   * structurally: typed scope kinds → FR-04 codes, the typed
+   * `evidence_source_error` kind → the §6.2 storage-fault degradation,
+   * plain errors → `invalid_evidence`.
    */
   assemble(selection: OwnerEvidenceSelection): BehaviorExamplePack;
 }
@@ -99,6 +104,20 @@ export type ArtificerEvidencePreflightVerdict =
        * observably.
        */
       readonly reviewPersisted: boolean;
+    }
+  | {
+      /**
+       * Evidence SOURCE failure (trajectory store I/O — PRI-980 review P2-1,
+       * SPEC §6.2 case 3: 保留明确的存储故障，不误判为 Owner 尚未标注).
+       * Same family as `evidence_source_unavailable`: the task is UNTOUCHED
+       * (stays wake-eligible — the next cycle retries assembly at zero model
+       * cost), NO needs_human_review write, NO owner-fault reasonCode. The
+       * degradation is observable (structured telemetry event + verdict).
+       */
+      readonly decision: 'evidence_source_error';
+      readonly reason: 'evidence_source_error';
+      readonly nextAction: string;
+      readonly detail?: string;
     }
   | {
       /** Host assembly gap (port not injected) — task untouched. */
@@ -144,9 +163,28 @@ function readDiagnosticJson(task: PITaskRecord): string | null {
 }
 
 /**
+ * SPEC-PD-IAER-001 §6.3: the exact set of statuses a task may sit in when the
+ * consumer preflight reaches it — `InternalizationOrchestrator.findCandidates`
+ * scans pending AND retry_wait, and the preflight runs on the dry-run wake of
+ * those candidates. The NHR transition may only land from a WAKE-ELIGIBLE
+ * status: `acquireLease` moves a task to `leased` WITHOUT touching
+ * diagnostic_json, so a consumer that read the task before another consumer
+ * leased it must LOSE this write (rc-9: observable lost race) instead of
+ * writing needs_human_review over an actively leased task.
+ */
+const WAKE_ELIGIBLE_NHR_SOURCES: readonly ['pending', 'retry_wait'] = ['pending', 'retry_wait'];
+
+/**
  * Atomic needs_human_review transition (evaluator-runner NHR precedent):
  * status + humanReviewContext in ONE CAS-guarded metadata write, then the
  * read-back invariant (INV-2 class: only a durable effect may be reported).
+ *
+ * §6.3 status precondition: the store CAS takes a single expected-status
+ * literal, so the two wake-eligible sources are tried as two individually
+ * atomic conditional UPDATEs over the same read-time diagnosticJson snapshot.
+ * A task concurrently leased/moved by another consumer matches neither
+ * precondition → the write loses and `false` is reported — never a partial
+ * or clobbering effect.
  */
 async function transitionToNeedsHumanReview(
   params: ArtificerEvidencePreflightParams,
@@ -154,11 +192,23 @@ async function transitionToNeedsHumanReview(
 ): Promise<boolean> {
   const { taskId, piTask, stateManager } = params;
   const merged = mergePITaskMetadata(piTask, { humanReviewContext: context });
-  const updated = await stateManager.updateTaskIfDiagnosticJsonUnchanged(
-    taskId,
-    readDiagnosticJson(piTask),
-    { status: 'needs_human_review', diagnosticJson: createPITaskDiagnosticJson(merged) },
-  );
+  const patch = {
+    status: 'needs_human_review' as const,
+    diagnosticJson: createPITaskDiagnosticJson(merged),
+  };
+  const expectedDiagnosticJson = readDiagnosticJson(piTask);
+  let updated: Awaited<ReturnType<typeof stateManager.updateTaskIfDiagnosticJsonUnchanged>> = null;
+  for (const expectedStatus of WAKE_ELIGIBLE_NHR_SOURCES) {
+    updated = await stateManager.updateTaskIfDiagnosticJsonUnchanged(
+      taskId,
+      expectedDiagnosticJson,
+      patch,
+      { expectedStatus },
+    );
+    if (updated !== null) {
+      break;
+    }
+  }
   if (!updated) {
     return false;
   }
@@ -239,6 +289,42 @@ export async function preflightArtificerOwnerEvidence(
     // Unreachable by construction (channelRequiresOwnerEvidence is hard-coded
     // true) — fail loud rather than silently proceeding evidence-less.
     throw new PDRuntimeError('input_invalid', 'evidence preflight returned not_applicable for a code_tool_hook task — channel gate caller bug');
+  }
+
+  if (readiness.status === 'evidence_source_error') {
+    // PRI-980 review P2-1 — SPEC §6.2 case 3: a storage/I-O failure of the
+    // evidence source is preserved AS a storage fault. Same family as the
+    // absent port: the task stays wake-eligible (pending/retry_wait — the
+    // next cycle retries the assembly at zero model cost), NO NHR write, NO
+    // owner-fault reasonCode ever reaches the task. rc-9: the degradation is
+    // observable through the registered crash-durable blocked event carrying
+    // the storage reasonCode (never an FR-04 code) + nextAction; a concurrent
+    // write race is moot here because nothing is written.
+    eventEmitter.emitTelemetry({
+      eventType: 'artificer_blocked_on_owner_evidence',
+      traceId: taskId,
+      timestamp: new Date().toISOString(),
+      sessionId: owner,
+      agentId: 'artificer',
+      payload: {
+        ...buildArtificerRunCorrelation({
+          taskId,
+          attemptNumber: piTask.attemptCount,
+          executionMode: 'preflight',
+          reasonCode: 'evidence_source_error',
+          workspaceDir,
+        }),
+        nextAction: readiness.nextAction,
+        detail: boundedDetail(readiness.detail),
+        reviewPersisted: false,
+      },
+    });
+    return {
+      decision: 'evidence_source_error',
+      reason: 'evidence_source_error',
+      nextAction: readiness.nextAction,
+      detail: boundedDetail(readiness.detail),
+    };
   }
 
   const blocked: {

@@ -27,6 +27,7 @@ import path from 'node:path';
 import {
   createRuntimeStateHandle,
   createPITaskDiagnosticJson,
+  createOwnerEvidenceScopeError,
   hydratePITaskRecord,
   ArtificerRunner,
   ArtificerL2Adapter,
@@ -413,5 +414,47 @@ describe('runInternalizationConsumerCycle — PRI-982 evidence preflight + chann
     const payload = JSON.parse(skip?.payload ?? '{}') as { reason?: string; nextAction?: string };
     expect(payload.reason).toBe('evidence_source_unavailable');
     expect(payload.nextAction).toContain('behaviorEvidence');
+  });
+
+  // ── PRI-980 review P2-1 (SPEC §6.2 case 3): a trajectory-store I/O failure
+  // during assembly is a STORAGE fault — the cycle must skip observably and
+  // keep the task wake-eligible, never run it evidence-less (the runner guard
+  // would fail it input_invalid) and never NHR-park it as an Owner fault.
+
+  it('P2-1: assembly throws typed evidence_source_error → skip, task stays pending, no runner, no NHR', async () => {
+    const workspaceDir = makeWorkspace();
+    await seedCodeChannelChain(workspaceDir, VALID_SELECTION);
+    const captured: CapturedRun[] = [];
+    const runTaskIds = spyArtificerRun(captured);
+    const events: Array<{ event: string; payload: string }> = [];
+
+    const outcome = await runInternalizationConsumerCycle(workspaceDir, makePorts({
+      behaviorEvidence: {
+        assemble: () => {
+          throw createOwnerEvidenceScopeError(
+            'evidence_source_error',
+            '[BehaviorExamplePackAssembler] trajectory store pain lineage read failed (database is locked)',
+          );
+        },
+      },
+      emitEvent: (event, payload) => events.push({ event, payload }),
+    }));
+
+    expect(outcome.ran).toBe(false);
+    expect(outcome.skipReason).toBe('evidence_source_error');
+    expect(runTaskIds).toHaveLength(0);
+    expect(await countRunRows(workspaceDir, ARTIFICER_TASK_ID)).toBe(0);
+    // §6.2: the storage fault is preserved — task untouched, no owner-fault
+    // review context.
+    const { task, hydrated } = await readTask(workspaceDir, ARTIFICER_TASK_ID);
+    expect(task?.status).toBe('pending');
+    expect(hydrated?.humanReviewContext).toBeUndefined();
+    // rc-9: observable structured degradation with the storage reason.
+    const skip = events.find((e) => e.event === 'INTERNALIZATION_CONSUMER_SKIP');
+    expect(skip).toBeDefined();
+    const payload = JSON.parse(skip?.payload ?? '{}') as { reason?: string; nextAction?: string; detail?: string };
+    expect(payload.reason).toBe('evidence_source_error');
+    expect(payload.nextAction).toContain('NOT an Owner evidence fault');
+    expect(payload.detail).toContain('database is locked');
   });
 });

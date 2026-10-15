@@ -1,8 +1,13 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { validateBehaviorExamplePack } from '@principles/core/runtime-v2';
+// The typed-error guard via the same registered LEAF subpath the assembler
+// itself consumes (satellite purity — no runtime-v2 barrel value import here).
+import {
+  isOwnerEvidenceScopeError,
+} from '@principles/core/runtime-v2/internalization/evidence-readiness';
 import { TrajectoryDatabase, TrajectoryRegistry } from '../../src/core/trajectory.js';
 import { BehaviorExamplePackAssembler } from '../../src/core/behavior-example-pack-assembler.js';
 
@@ -147,8 +152,65 @@ describe('BehaviorExamplePackAssembler — Owner-labelled examples', () => {
     const positiveId = db.recordToolCall({ sessionId: 'session-bad-params', toolName: 'write_file', outcome: 'success', paramsJson: { path: path.join(projectDir, 'ok.txt') } });
 
     expect(() => assembler.assemble({
-      sourcePainId: 'pain-owner-1', ownerDesiredOutcome: 'Owner outcome',
-      sourceNegativeToolCallId: negativeId, positiveToolCallIds: [positiveId], projectDir,
+      sourcePainId: 'pain-owner-1', ownerDesiredOutcome: 'Owner outcome', sourceNegativeToolCallId: negativeId,
+      positiveToolCallIds: [positiveId], projectDir,
     })).toThrow(/must parse to a non-array object/i);
+  });
+
+  // ── PRI-980 review P2-1 (SPEC-PD-IAER-001 §6.2 case 3): the trajectory
+  // STORE throwing is an I/O/storage failure of the evidence source — it must
+  // surface as the typed `evidence_source_error` kind (structural marker, no
+  // message sniffing) so the readiness contract never misreports it as an
+  // Owner evidence fault.
+
+  it('surfaces a trajectory-store read failure as the typed evidence_source_error kind', () => {
+    const { assembler, projectDir } = setup();
+    const storeFailure = vi.spyOn(TrajectoryDatabase.prototype, 'getPainEventByCanonicalId')
+      .mockImplementation(() => {
+        throw new Error('database is locked');
+      });
+    try {
+      let thrown: unknown;
+      try {
+        assembler.assemble({
+          sourcePainId: 'pain-owner-1',
+          ownerDesiredOutcome: 'Owner outcome',
+          sourceNegativeToolCallId: 1,
+          positiveToolCallIds: [2],
+          projectDir,
+        });
+      } catch (error) {
+        thrown = error;
+      }
+      expect(isOwnerEvidenceScopeError(thrown)).toBe(true);
+      if (isOwnerEvidenceScopeError(thrown)) {
+        expect(thrown.ownerEvidenceScopeKind).toBe('evidence_source_error');
+        expect(thrown.message).toContain('trajectory store');
+        expect(thrown.message).toContain('database is locked');
+      }
+    } finally {
+      storeFailure.mockRestore();
+    }
+  });
+
+  it('a data gap stays a scope failure, not evidence_source_error (no row != store failure)', () => {
+    const { db, assembler, projectDir } = setup();
+    seedPain(db, 'session-real', 'pain-real-1');
+    let thrown: unknown;
+    try {
+      assembler.assemble({
+        sourcePainId: 'pain-nonexistent',
+        ownerDesiredOutcome: 'Owner outcome',
+        sourceNegativeToolCallId: 1,
+        positiveToolCallIds: [2],
+        projectDir,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(isOwnerEvidenceScopeError(thrown)).toBe(true);
+    if (isOwnerEvidenceScopeError(thrown)) {
+      expect(thrown.ownerEvidenceScopeKind).toBe('pain_not_found');
+    }
   });
 });

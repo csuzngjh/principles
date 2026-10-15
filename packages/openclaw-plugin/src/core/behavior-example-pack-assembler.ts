@@ -13,6 +13,9 @@
  *   - rc-2: structural type guards, no `as T` on parsed input.
  *   - rc-5: Object.hasOwn over `in`.
  *   - rc-9: every failure path throws a structured Error with a clear reason.
+ *   - PRI-980 review P2-1: trajectory STORE I/O failures throw the typed
+ *     `evidence_source_error` (readTrajectoryStore) so the readiness contract
+ *     preserves them as storage faults, not Owner evidence faults (§6.2).
  *
  * Spec: docs/superpowers/specs/2026-06-27-rulecode-context-vision-design.md §7.2
  *
@@ -38,7 +41,6 @@ import { TrajectoryRegistry } from './trajectory.js';
 import type {
   RuleHostEvidenceRow,
   RuleHostContextRow,
-  RuleHostContextResult,
 } from './trajectory-types.js';
 import { assembleHistoryFromRows } from './rule-context-assembler.js';
 
@@ -78,6 +80,28 @@ const HISTORY_LIMIT = 100;
 
 const PROTO_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
 
+/**
+ * PRI-980 review P2-1 (SPEC-PD-IAER-001 §6.2 case 3): the trajectory STORE
+ * throwing is an I/O/storage failure of the evidence source itself — it must
+ * surface as the typed `evidence_source_error` kind so the readiness contract
+ * preserves it as a storage fault instead of misreporting "Owner labelled bad
+ * evidence". Structural, never message sniffing: the store RETURNING no row
+ * is a data gap (the typed scope kinds below); the store THROWING is the I/O
+ * failure signal. Assembler-owned data-shape validation errors stay plain
+ * Errors (→ `invalid`), unchanged.
+ */
+function readTrajectoryStore<T>(what: string, op: () => T): T {
+  try {
+    return op();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw createOwnerEvidenceScopeError(
+      'evidence_source_error',
+      `[BehaviorExamplePackAssembler] trajectory store ${what} failed (evidence source error, SPEC-PD-IAER-001 §6.2): ${message}`,
+    );
+  }
+}
+
 // ── type guards (rc-2: no `as` bypass) ─────────────────────────────────────
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -111,7 +135,10 @@ export class BehaviorExamplePackAssembler {
 
   /** Assemble only from explicit Owner labels; execution outcome is not a label. */
   assemble(input: BehaviorExamplePackAssemblerInput): BehaviorExamplePack {
-    const pain = this.db.getPainEventByCanonicalId(input.sourcePainId);
+    const pain = readTrajectoryStore(
+      `pain lineage read for canonical_pain_id="${input.sourcePainId}"`,
+      () => this.db.getPainEventByCanonicalId(input.sourcePainId),
+    );
     if (!pain) {
       // PRI-983: typed scope classification (structural marker — the readiness
       // contract maps this to the stable `owner_behavior_examples_stale`
@@ -124,8 +151,12 @@ export class BehaviorExamplePackAssembler {
     }
 
     validateOwnerSelection(input);
-    const negativeRow = requireSelectedRow(this.db.getRuleHostEvidenceRow(input.sourceNegativeToolCallId), input.sourceNegativeToolCallId);
-    const positiveRows = input.positiveToolCallIds.map((id) => requireSelectedRow(this.db.getRuleHostEvidenceRow(id), id));
+    const negativeRow = requireSelectedRow(
+      readTrajectoryStore(`evidence row read for id=${input.sourceNegativeToolCallId}`, () => this.db.getRuleHostEvidenceRow(input.sourceNegativeToolCallId)),
+      input.sourceNegativeToolCallId,
+    );
+    const positiveRows = input.positiveToolCallIds.map((id) =>
+      requireSelectedRow(readTrajectoryStore(`evidence row read for id=${id}`, () => this.db.getRuleHostEvidenceRow(id)), id));
     for (const row of [negativeRow, ...positiveRows]) {
       if (row.sessionId !== pain.sessionId) {
         // PRI-983: cross pain/session selection → typed scope error → stable
@@ -170,7 +201,10 @@ export class BehaviorExamplePackAssembler {
     const base = buildCaseFromRow(row, kind, expectedDecision, projectDir);
     const redaction = redactParams(base.params, projectDir);
     redactionNotes.push(...redaction.notes);
-    const historyResult: RuleHostContextResult = this.db.getRuleHostContextRowsBefore(row.sessionId, row.id, HISTORY_LIMIT);
+    const historyResult = readTrajectoryStore(
+      `context history read for session=${row.sessionId} before id=${row.id}`,
+      () => this.db.getRuleHostContextRowsBefore(row.sessionId, row.id, HISTORY_LIMIT),
+    );
     const history = assembleHistoryFromRows(historyResult.rows, historyResult.truncated, projectDir);
     const action = buildRuleHostAction(row.toolName, redaction.redacted, projectDir);
     const ruleContext: RuleContextV2 = { version: 2, history, facts: computeBehaviorFacts(history, action.normalizedPath || null, null) };

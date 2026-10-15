@@ -606,11 +606,15 @@ export async function handleRunRuleHost(opts: RunRuleHostOptions): Promise<void>
             // instead of silently degrading to text_principle_only (rc-9).
             // The refusal carries the stable reason code + bounded detail
             // (behavior_examples_unreliable: prefix kept for the historical
-            // contract) — and mutates nothing (cli-5).
+            // contract) — and mutates nothing (cli-5). PRI-980 review P2-1:
+            // a typed evidence_source_error (trajectory-store I/O) keeps its
+            // storage reason — never the owner-fault generic (§6.2).
             const reason = evidenceReadiness.status === 'invalid_evidence'
               ? `behavior_examples_unreliable: ${evidenceReadiness.reasonCode}: ${evidenceReadiness.detail}`
-              : `behavior_examples_unreliable: owner_behavior_examples_invalid`;
-            const nextAction = evidenceReadiness.status === 'invalid_evidence' || evidenceReadiness.status === 'owner_evidence_required'
+              : evidenceReadiness.status === 'evidence_source_error'
+                ? `behavior_examples_unreliable: ${evidenceReadiness.reason}: ${evidenceReadiness.detail}`
+                : `behavior_examples_unreliable: owner_behavior_examples_invalid`;
+            const nextAction = evidenceReadiness.status === 'invalid_evidence' || evidenceReadiness.status === 'owner_evidence_required' || evidenceReadiness.status === 'evidence_source_error'
               ? evidenceReadiness.nextAction
               : 'verify pain lineage and tool call IDs reference existing trajectory rows';
             if (opts.json) {
