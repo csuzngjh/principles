@@ -16,6 +16,7 @@
 
 import type { TaskRecord } from '../task-status.js';
 import type { RepairPayload, RunnerDecision, RolloutRevisionPayload, RunnerCompletionIntent, HumanReviewContext, OwnerResolutionRecord } from './pitask-metadata.js';
+import type { OwnerEvidenceSelection } from './evidence-readiness.js';
 
 // ── Internalization Channel Types ─────────────────────────────────────────────
 
@@ -179,6 +180,13 @@ export interface PITaskRecord extends TaskRecord {
   humanReviewContext?: HumanReviewContext;
   /** PRI-629: task-scoped Owner resolution log (append-only; not a state source). */
   ownerResolutions?: readonly OwnerResolutionRecord[];
+  /**
+   * PRI-982 (SPEC-PD-IAER-001 FR-03): Owner-labelled evidence selection —
+   * written only by the authorized Owner operation (never fabricated by an
+   * internal agent); ABSENT = evidence not yet provided. The single shape
+   * authority is `validateOwnerEvidenceSelectionShape` (evidence-readiness.ts).
+   */
+  ownerEvidenceSelection?: OwnerEvidenceSelection;
 }
 
 // ── Type Guards ───────────────────────────────────────────────────────────────

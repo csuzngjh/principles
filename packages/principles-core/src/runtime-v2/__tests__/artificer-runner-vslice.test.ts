@@ -52,7 +52,11 @@ function makeArtificerTask(overrides: Partial<TaskRecord> = {}): TaskRecord {
     updatedAt: new Date().toISOString(),
     diagnosticJson: createPITaskDiagnosticJson({
       dependencyTaskIds: [SCRIBE_TASK_ID],
-      channel: 'prompt',
+      // PRI-982 (SPEC-PD-IAER-001 §4.2): these runner-level fixtures pin the
+      // RuleCode evidence contract, whose authoritative channel is
+      // code_tool_hook. The prompt channel is pack-exempt (see
+      // artificer-runner-channel-defense.test.ts).
+      channel: 'code_tool_hook',
       timeoutMs: 300_000,
       inputArtifactRefs: [{ artifactType: 'principle', ref: 'pi-art-scribe-001-run-001' }],
       outputArtifactRefs: [],
@@ -510,6 +514,7 @@ describe('ArtificerRunner.validateOutput — v2 mode-error errorCategory (CodeRa
       sourceScribeArtifactId: null,
       adversarialFeedback: null,
       repairFeedback: null,
+      channel: 'code_tool_hook',
     };
 
     const result = await runner.validateOutput(output, ARTIFICER_TASK_ID, context);

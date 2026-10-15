@@ -126,16 +126,19 @@ export class SqliteTaskStore implements TaskStore {
     return (await this.getTask(taskId)) as TaskRecord;
   }
 
+  // eslint-disable-next-line @typescript-eslint/max-params -- the 4th parameter is a CAS PRECONDITION (SPEC-PD-IAER-001 §6.3), not write payload: folding it into the patch type would let it leak into TaskRecord on unconditional updateTask paths.
   async updateTaskIfDiagnosticJsonUnchanged(
     taskId: string,
     expectedDiagnosticJson: string | null,
     patch: TaskStoreUpdatePatch,
+    options?: { readonly expectedStatus?: string },
   ): Promise<TaskRecord | null> {
     return this.updateTaskWithPreconditions({
       taskId,
       expectedDiagnosticJson,
       artifacts: [],
       patch,
+      expectedStatus: options?.expectedStatus,
     });
   }
 
@@ -151,7 +154,7 @@ export class SqliteTaskStore implements TaskStore {
   }
 
   private async updateTaskWithPreconditions(
-    input: TaskArtifactCasInput,
+    input: TaskArtifactCasInput & { readonly expectedStatus?: string },
   ): Promise<TaskRecord | null> {
     const { taskId, expectedDiagnosticJson, artifacts, patch } = input;
     const db = this.connection.getDb();
@@ -170,6 +173,12 @@ export class SqliteTaskStore implements TaskStore {
     if (patch.diagnosticJson !== undefined) { sets.push('diagnostic_json = ?'); values.push(patch.diagnosticJson); }
 
     values.push(taskId, expectedDiagnosticJson);
+    // PRI-983 (SPEC §6.3): optional expected-status precondition — arbitrates
+    // status-transition CAS whose metadata write is content-neutral.
+    const statusCondition = input.expectedStatus !== undefined ? 'AND status IS ?' : '';
+    if (input.expectedStatus !== undefined) {
+      values.push(input.expectedStatus);
+    }
     const artifactConditions = artifacts.map(() => `EXISTS (
       SELECT 1 FROM pi_artifacts
       WHERE artifact_id = ?
@@ -190,7 +199,7 @@ export class SqliteTaskStore implements TaskStore {
     // precondition covers both a NULL column and a byte-equal JSON string.
     const result = db
       .prepare(`UPDATE tasks SET ${sets.join(', ')}
-        WHERE task_id = ? AND diagnostic_json IS ?
+        WHERE task_id = ? AND diagnostic_json IS ? ${statusCondition}
         ${artifactConditions.map((condition) => `AND ${condition}`).join('\n')}`)
       .run(...values);
 
