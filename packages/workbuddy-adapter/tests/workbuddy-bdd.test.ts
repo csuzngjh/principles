@@ -33,6 +33,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { afterAll, describe, expect, it } from 'vitest';
+import { ADMISSION_CONFIDENCE_THRESHOLD } from '@principles/core/runtime-v2';
 import { createStepRegistry, defineFeature } from '../../principles-core/tests/bdd/support/vitest-bdd.js';
 import { resolveFeaturePath } from '../../principles-core/tests/bdd/support/repo-root.js';
 import { runEntry } from './helpers/hook-runner.js';
@@ -118,8 +119,9 @@ const POLICY_TERMINAL_KINDS = new Set(['implementation', 'defer']);
  * whose persisted confidence is below it can NEVER be admitted, so its chain
  * can never reach an approval. Reading it from the candidate row keeps the
  * acceptance loop honest about a terminal state instead of cycling (rc-7).
+ * P3-3 (final review): imported from the production authority instead of a
+ * local copy so a threshold change cannot desynchronize this acceptance.
  */
-const ADMISSION_CONFIDENCE_THRESHOLD = 0.5;
 
 /**
  * A scenario cannot proceed for an HONEST environmental reason (real LLM

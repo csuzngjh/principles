@@ -45,6 +45,9 @@ import { defineScenario, evaluateScenario, formatEvaluationReport } from './lib/
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const require = createRequire(path.join(REPO, 'package.json'));
 const Database = require('better-sqlite3');
+// P3-3: the admission threshold comes from the production authority, never a
+// local copy (a threshold change must not desynchronize this acceptance).
+const { ADMISSION_CONFIDENCE_THRESHOLD } = require('@principles/core/runtime-v2');
 
 const LAB_ROOT = path.join(
   process.env.WB_E2E_LAB || path.resolve(REPO, '../../../wb-probe-lab'),
@@ -62,7 +65,6 @@ const LLM_MODEL = process.env.WB_E2E_LLM_MODEL || 'DeepSeek-V4-Flash-Vision-Exp'
 const LLM_KEY_ENV = 'AMD_RADEON_API_KEY';
 const LLM_BASE_URL = process.env.WB_E2E_LLM_BASE_URL || 'https://developer.amd.com.cn/radeon/api/v1';
 const POLICY_TERMINAL_KINDS = new Set(['implementation', 'defer']);
-const ADMISSION_CONFIDENCE_THRESHOLD = 0.5;
 
 const results = [];
 const startedAt = new Date().toISOString();
