@@ -1,5 +1,13 @@
 # principles-disciple
 
+## 2.1.4
+
+### Patch Changes
+
+- ccc04eb: Switch distributed PD packages to Apache License 2.0, ship matching LICENSE/NOTICE files, and preserve the historical MIT notice. This is a licensing and packaging release without runtime feature changes.
+- Updated dependencies [ccc04eb]
+  - @principles/core@1.292.1
+
 ## 2.1.3
 
 ### Patch Changes

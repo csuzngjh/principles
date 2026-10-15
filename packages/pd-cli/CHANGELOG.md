@@ -1,5 +1,18 @@
 # @principles/pd-cli
 
+## 1.156.1
+
+### Patch Changes
+
+- ccc04eb: Switch distributed PD packages to Apache License 2.0, ship matching LICENSE/NOTICE files, and preserve the historical MIT notice. This is a licensing and packaging release without runtime feature changes.
+- Updated dependencies [ccc04eb]
+  - @principles/codex-adapter@0.5.5
+  - @principles/core@1.292.1
+  - @principles/host-runtime@0.9.1
+  - @principles/install-layout@0.3.1
+  - @principles/workbuddy-adapter@0.2.1
+  - principles-disciple@2.1.4
+
 ## 1.156.0
 
 ### Minor Changes
