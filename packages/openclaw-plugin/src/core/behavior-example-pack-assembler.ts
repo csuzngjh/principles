@@ -23,9 +23,11 @@ import { buildRuleHostAction } from '@principles/core/runtime-v2/internalization
 import { computeBehaviorFacts } from '@principles/core/runtime-v2/internalization/rule-context-v2';
 import { validateBehaviorExamplePack } from '@principles/core/runtime-v2/internalization/behavior-example-pack';
 // Factory lives in evidence-readiness.ts (the classification authority); it is
-// consumed through the runtime-v2 barrel — core's exports field is an explicit
-// subpath allowlist and the readiness module is not (and need not be) on it.
-import { createOwnerEvidenceScopeError } from '@principles/core/runtime-v2';
+// consumed through its registered LEAF subpath. A VALUE import of the
+// runtime-v2 barrel on this satellite path re-pulls the whole LLM graph and
+// fails the satellite-purity guard (OPT-002, scripts/build/check-satellite-purity.mjs) —
+// the leaf is on core's exports allowlist for exactly this consumer.
+import { createOwnerEvidenceScopeError } from '@principles/core/runtime-v2/internalization/evidence-readiness';
 import type {
   RuleContextV2,
   BehaviorExamplePack,

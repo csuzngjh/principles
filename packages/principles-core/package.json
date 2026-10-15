@@ -74,6 +74,10 @@
       "types": "./dist/runtime-v2/internalization/behavior-example-pack.d.ts",
       "default": "./dist/runtime-v2/internalization/behavior-example-pack.js"
     },
+    "./runtime-v2/internalization/evidence-readiness": {
+      "types": "./dist/runtime-v2/internalization/evidence-readiness.d.ts",
+      "default": "./dist/runtime-v2/internalization/evidence-readiness.js"
+    },
     "./runtime-v2/internalization/tool-semantic-registry": {
       "types": "./dist/runtime-v2/internalization/tool-semantic-registry.d.ts",
       "default": "./dist/runtime-v2/internalization/tool-semantic-registry.js"
