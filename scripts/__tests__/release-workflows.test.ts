@@ -38,6 +38,36 @@ function loadWorkflow(rel: string): Record<string, unknown> {
   return doc as Record<string, unknown>;
 }
 
+function scheduleEntries(rel: string): Record<string, unknown>[] {
+  // Derive the cadence from the parsed document instead of pinning a cron
+  // literal: a literal turns every deliberate schedule change into a test
+  // edit (PRI-979 seam 6 — publication constants hand-copied into guards).
+  const doc = loadWorkflow(rel);
+  const onBlock = (doc.on ?? doc[String(true)]) as Record<string, unknown> | undefined;
+  if (!onBlock) throw new Error(`${rel} has no parsed "on:" block`);
+  // GitHub accepts both shapes — `schedule: [{cron}, …]` (what these files
+  // use) and the single-entry `schedule: {cron}` — so normalise the entries
+  // rather than assuming one.
+  const schedule = onBlock.schedule as unknown;
+  if (schedule === undefined) return [];
+  const entries: unknown[] = Array.isArray(schedule) ? schedule : [schedule];
+  return entries as Record<string, unknown>[];
+}
+
+function scheduleCrons(rel: string): string[] {
+  return scheduleEntries(rel).flatMap((entry) => {
+    const value = entry.cron as string | string[] | undefined;
+    if (value === undefined) return [];
+    return (Array.isArray(value) ? value : [value]).map(String);
+  });
+}
+
+function isDailyCron(cron: string): boolean {
+  // Standard 5-field cron: minute hour day-of-month month day-of-week.
+  const fields = cron.trim().split(/\s+/);
+  return fields.length === 5 && fields[4] === '*';
+}
+
 describe('publish-npm.yml — exact-version publish train (T22/T23)', () => {
   const rel = '.github/workflows/publish-npm.yml';
   const text = () => fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8');
@@ -59,11 +89,19 @@ describe('publish-npm.yml — exact-version publish train (T22/T23)', () => {
     expect(t).not.toMatch(/\n\s+push:\s*\n\s+branches:/);
   });
 
-  it('triggers only via dispatch (cohort_sha) and the weekly reconciliation window', () => {
+  it('triggers via dispatch (cohort_sha) plus a DAILY reconciliation window', () => {
     const t = text();
     expect(t).toContain('workflow_dispatch');
     expect(t).toContain('cohort_sha');
-    expect(t).toMatch(/cron: '0 4 \* \* 5'/);
+    const crons = scheduleCrons(rel);
+    // PRI-986: the window reconciles every day. The cadence is asserted from
+    // the parsed cron (day-of-week = '*'), never from a literal string.
+    expect(crons.length).toBe(1);
+    expect(crons.every(isDailyCron), `not a daily schedule: ${crons.join(', ')}`).toBe(true);
+    // Reconciliation only: the schedule must never gain a version-creating input.
+    // Checked on the parsed entries (a raw-text regex over the whole file would
+    // also fire on the dispatch inputs that legitimately precede `schedule:`).
+    expect(scheduleEntries(rel).flatMap((e) => Object.keys(e))).toEqual(['cron']);
   });
 
   it('checks out the cohort SHA, never main HEAD (T21 wiring)', () => {
@@ -320,6 +358,41 @@ describe('release-metadata.yml — install completeness before tsc (PRI-928)', (
     const t = text();
     expect(t).not.toMatch(/if.*darwin.*npm install/i);
     expect(t).not.toContain('npm install @typescript/');
+  });
+});
+
+describe('release-metadata.yml — daily preflight must stay structurally non-publishing (PRI-986)', () => {
+  const rel = '.github/workflows/release-metadata.yml';
+  const text = () => fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8');
+
+  it('is scheduled daily for the preflight', () => {
+    const crons = scheduleCrons(rel);
+    expect(crons.length).toBe(1);
+    expect(crons.every(isDailyCron), `not a daily schedule: ${crons.join(', ')}`).toBe(true);
+    // The scheduled entry carries nothing but its cadence — a `schedule:` with
+    // inputs would be the door through which automation picks a version.
+    expect(scheduleEntries(rel).flatMap((e) => Object.keys(e))).toEqual(['cron']);
+  });
+
+  it('gates every publishing step on an explicit publish mode', () => {
+    // The bytes-carrying steps are the only ones that may touch gh-pages or
+    // the release host. They must stay `env.MODE == 'publish'` gated, and the
+    // schedule event never supplies that input.
+    const publishing = (text().match(/if: env\.MODE == 'publish'/g) ?? []).length;
+    expect(publishing).toBeGreaterThanOrEqual(2);
+    expect(text()).toMatch(/github\.event\.inputs\.mode \|\| 'dry-run'/);
+  });
+
+  it('refuses a scheduled run that somehow resolves to publish', () => {
+    const t = text();
+    expect(t).toContain('github.event_name');
+    expect(t).toMatch(/schedule" \] && \[ "\$MODE" = "publish"/);
+  });
+
+  it('derives readable-from only for a schedule and still requires it from an operator', () => {
+    const t = text();
+    expect(t).toContain('needs.resolve-inputs.outputs.readable_from');
+    expect(t).toContain('data_schema_forward_readable_from is required (PRI-853)');
   });
 });
 
