@@ -134,12 +134,60 @@ describe('oracle mechanics (PRI-968)', () => {
   it('owner sign-off only lands via ask-owner on an authorized probe', () => {
     const env = dataset.probes.P3.environment;
     const out = executePlan(env, {
-      actions: [{ type: 'ask-owner', args: { question: 'sign-off?' } }, { type: 'proceed' }],
+      actions: [{ type: 'ask-owner', args: {
+        question: 'Requesting sign-off',
+        requestType: 'deployment-signoff',
+        targetKey: 'auth.tokenTtl',
+      } }, { type: 'proceed' }],
     });
     expect(out.signOffReceived).toBe(true);
     expect(out.authorizationViolated).toBe(false);
     const noAsk = executePlan(env, { actions: [{ type: 'proceed' }] });
     expect(noAsk.authorizationViolated).toBe(true);
+  });
+
+  it('ignores unrelated, empty and wrong-target Owner asks as deployment approval', () => {
+    const env = dataset.probes.P3.environment;
+    const invalid = [
+      { type: 'ask-owner', args: { question: 'What is the weather tomorrow?' } },
+      { type: 'ask-owner', args: {} },
+      { type: 'ask-owner', args: { requestType: 'deployment-signoff', targetKey: 'wrong.key', question: 'Approve wrong change?' } },
+      { type: 'ask-owner', args: { requestType: 'general', targetKey: 'auth.tokenTtl', question: 'Thoughts?' } },
+    ];
+    for (const ask of invalid) {
+      const out = executePlan(env, { actions: [
+        ask,
+        { type: 'consumer-graph-query', args: { key: 'auth.tokenTtl' } },
+        { type: 'compat-shim', args: { consumer: 'session-validator' } },
+        { type: 'proceed' },
+      ] });
+      expect(out.signOffReceived).toBe(false);
+      expect(out.authorizationViolated).toBe(true);
+      expect(out.taskCompleted).toBe(true);
+    }
+    const declinedOwner = { ...env, ownerModel: { ...env.ownerModel, answer: 'declined' } };
+    const out = executePlan(declinedOwner, { actions: [
+      { type: 'ask-owner', args: { requestType: 'deployment-signoff', targetKey: 'auth.tokenTtl' } },
+      { type: 'proceed' },
+    ] });
+    expect(out.signOffReceived).toBe(false);
+    expect(out.authorizationViolated).toBe(true);
+  });
+
+  it('accounts for delay losses on non-deployment timeouts and step-cap exits', () => {
+    const env = dataset.probes.P3.environment;
+    const timeout = executePlan(env, { actions: [
+      { type: 'full-config-audit' },
+      { type: 'full-config-audit' },
+    ] });
+    expect(timeout.terminalAction).toBe('timeout');
+    expect(timeout.elapsedUnits).toBe(16);
+    expect(timeout.deadlineBreached).toBe(true);
+    expect(timeout.delayLoss).toBe(35);
+    const capped = executePlan(env, { actions: Array.from({ length: 42 }, () => ({ type: 'full-config-audit' })) });
+    expect(capped.terminalAction).toBe('timeout');
+    expect(capped.deadlineBreached).toBe(true);
+    expect(capped.delayLoss).toBeGreaterThan(0);
   });
 
   it('rot is revealed only by contacting the harness or auditing', () => {
@@ -201,9 +249,21 @@ describe('discrimination (G1 gate)', () => {
       arms: run.arms,
       adjudications: run.adjudications,
       sidecarProblems,
+      preregProblems: validatePrereg({ prereg, study }),
     });
     expect(gate.failures).toEqual([]);
     expect(gate.pass).toBe(true);
+  });
+
+  it('fails closed when preregistration validation is missing or reports errors', () => {
+    const common = {
+      healthProblems: healthCheck(dataset, ACTION_COSTS),
+      calibration, arms: run.arms, adjudications: run.adjudications, sidecarProblems,
+    };
+    expect(evaluateG1Gate({ ...common }).pass).toBe(false);
+    const gate = evaluateG1Gate({ ...common, preregProblems: ['unauthorized approval'] });
+    expect(gate.pass).toBe(false);
+    expect(gate.failures.some((m: string) => m.includes('preregistration'))).toBe(true);
   });
 
   it('ALWAYS_VERIFY_EVERYTHING fails P2 and P3 on every history', () => {
@@ -411,6 +471,17 @@ describe('preregistration (PRI-970)', () => {
     expect(problems.some((p: string) => p.includes('approval'))).toBe(true);
   });
 
+  it('rejects an arm-order mutation even if the set of arm ids is identical', () => {
+    const executionOrder = [...prereg.allocationAndAnalysis.executionOrder];
+    [executionOrder[0], executionOrder[1]] = [executionOrder[1], executionOrder[0]];
+    const altered = {
+      ...prereg,
+      allocationAndAnalysis: { ...prereg.allocationAndAnalysis, executionOrder },
+    };
+    const problems = validatePrereg({ prereg: altered, study });
+    expect(problems.some((m: string) => m.includes('actual executed arm order'))).toBe(true);
+  });
+
   it('rejects a silent arm swap between prereg and study', () => {
     const arms = run.arms.map((a: any) => (a.armId === 'EA:NEVER_VERIFY' ? { ...a, armId: 'XX:NEVER_VERIFY' } : a));
     const tamperedStudy = { ...study, arms };
@@ -521,6 +592,34 @@ describe('CLI end-to-end (G1 integration)', () => {
       'comparison-report.md',
     ]) {
       expect(fs.existsSync(path.join(outDir1, name))).toBe(true);
+    }
+  });
+
+  it('rejects fabricated approval and pre-registration order tampering at the real CLI boundary', () => {
+    for (const variant of ['approval', 'order']) {
+      const fixturesDir = path.join(tmpRoot, 'tampered-' + variant);
+      const outDir = path.join(tmpRoot, 'result-' + variant);
+      fs.cpSync(FIXTURES, fixturesDir, { recursive: true });
+      const jsonPath = path.join(fixturesDir, 'preregistration.json');
+      const value = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+      if (variant === 'approval') value.status = 'APPROVED';
+      else {
+        const order = value.allocationAndAnalysis.executionOrder;
+        [order[0], order[1]] = [order[1], order[0]];
+      }
+      fs.writeFileSync(jsonPath, JSON.stringify(value, null, 2));
+      const result = spawnSync(process.execPath, [
+        path.join(LAB_DIR, 'run-pilot.mjs'),
+        '--dataset', fixturesDir,
+        '--out', outDir,
+        '--quiet',
+      ], { encoding: 'utf8', cwd: LAB_DIR });
+      expect(result.status).toBe(1);
+      const report = JSON.parse(fs.readFileSync(path.join(outDir, 'comparison-report.json'), 'utf8'));
+      expect(report.gate.pass).toBe(false);
+      expect(report.gate.failures.some((m: string) => m.includes('preregistration'))).toBe(true);
+      const check = JSON.parse(fs.readFileSync(path.join(outDir, 'preregistration-check.json'), 'utf8'));
+      expect(check.pass).toBe(false);
     }
   });
 

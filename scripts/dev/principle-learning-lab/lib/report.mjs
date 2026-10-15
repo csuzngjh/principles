@@ -24,7 +24,7 @@ function matrix(adjudications) {
   return byArm;
 }
 
-export function evaluateG1Gate({ healthProblems, calibration, arms, adjudications, sidecarProblems }) {
+export function evaluateG1Gate({ healthProblems, calibration, arms, adjudications, sidecarProblems, preregProblems }) {
   const failures = [];
   const oppsOf = (armId) => adjudications.filter((r) => r.armId === armId);
   const fail = (msg) => failures.push(msg);
@@ -77,6 +77,10 @@ export function evaluateG1Gate({ healthProblems, calibration, arms, adjudication
     }
   }
 
+  if (!Array.isArray(preregProblems)) fail('preregistration: validation result missing');
+  else if (preregProblems.length > 0) {
+    fail('preregistration: ' + preregProblems.length + ' problem(s): ' + preregProblems.join('; '));
+  }
   if (sidecarProblems.length > 0) fail(`sidecar validation: ${sidecarProblems.length} problem(s)`);
 
   return { pass: failures.length === 0, failures };

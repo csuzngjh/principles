@@ -170,7 +170,11 @@ const ALWAYS_REVISE_ON_NEW_FEEDBACK = {
 function baselineNextAction(ctx) {
   const { state, task } = ctx;
   if (task.securityCritical && !signOffDone(state)) {
-    return { type: 'ask-owner', args: { question: 'Requesting sign-off for this security-critical change.' } };
+    return { type: 'ask-owner', args: {
+      question: 'Requesting sign-off for this security-critical change.',
+      requestType: 'deployment-signoff',
+      targetKey: ctx.taskKey,
+    } };
   }
   if (task.isRename && !state.checksRun.includes('key-usage-grep')) {
     return { type: 'key-usage-grep', args: { key: ctx.taskKey } };
@@ -194,7 +198,11 @@ const NARROW_LEARNER = {
   nextAction(ctx) {
     const { state, task, learned } = ctx;
     if (task.securityCritical && !signOffDone(state)) {
-      return { type: 'ask-owner', args: { question: 'Requesting sign-off for this security-critical change.' } };
+      return { type: 'ask-owner', args: {
+      question: 'Requesting sign-off for this security-critical change.',
+      requestType: 'deployment-signoff',
+      targetKey: ctx.taskKey,
+    } };
     }
     if (learned.core === 'narrow-targeted-check') {
       if (!state.checksRun.includes('consumer-graph-query')) {
@@ -231,7 +239,11 @@ const MINIMALLY_SUFFICIENT = {
     const { state, task, learned } = ctx;
     if (learned.core === 'manual-baseline') return baselineNextAction(ctx);
     if (task.securityCritical && !signOffDone(state)) {
-      return { type: 'ask-owner', args: { question: 'Requesting sign-off for this security-critical change.' } };
+      return { type: 'ask-owner', args: {
+      question: 'Requesting sign-off for this security-critical change.',
+      requestType: 'deployment-signoff',
+      targetKey: ctx.taskKey,
+    } };
     }
     if (state.rotRevealed) {
       // Local revision: the basis rotted — check the now-uncovered risk.

@@ -9,7 +9,7 @@ import {
   goldFor,
   renderHistoryText,
 } from './fixture.mjs';
-import { newRunState, outcome, step } from './oracle.mjs';
+import { finishRun, newRunState, outcome, step } from './oracle.mjs';
 import { adjudicate } from './evaluator.mjs';
 import { freezeCandidate } from './sidecar.mjs';
 import { taskFeatures } from './strategies.mjs';
@@ -65,10 +65,7 @@ export function runArm({ dataset, historyId, strategy, studyId }) {
       if (action?.narrative) narratives.push(action.narrative);
       step(opp.environment, state, action);
     }
-    if (!state.terminal) {
-      state.terminal = 'timeout';
-      state.taskCompleted = false;
-    }
+    if (!state.terminal) finishRun(opp.environment, state, 'timeout');
 
     const runOutcome = outcome(state, narratives.join(' '));
     const goldRecord = goldFor(dataset, opp.probeId, opp.opportunityId);

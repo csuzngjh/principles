@@ -67,6 +67,10 @@ export function validatePrereg({ prereg, study }) {
       if (new Set(alloc.executionOrder).size !== alloc.executionOrder.length) {
         p('executionOrder contains duplicates');
       }
+      const actualOrder = (study.arms ?? []).map((a) => a.armId);
+      if (JSON.stringify(alloc.executionOrder) !== JSON.stringify(actualOrder)) {
+        p('executionOrder differs from the actual executed arm order (preregistration order mismatch)');
+      }
     }
     if (alloc.randomization === undefined) p('allocationAndAnalysis must declare randomization');
     if (alloc.repetitions === undefined) p('allocationAndAnalysis must declare repetitions');

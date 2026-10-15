@@ -254,7 +254,9 @@
           {
             "type": "ask-owner",
             "args": {
-              "question": "Requesting sign-off for security-critical change to auth.tokenTtl."
+              "question": "Requesting sign-off for security-critical change to auth.tokenTtl.",
+              "requestType": "deployment-signoff",
+              "targetKey": "auth.tokenTtl"
             }
           },
           {
@@ -294,7 +296,9 @@
           {
             "type": "ask-owner",
             "args": {
-              "question": "Requesting sign-off for security-critical change to auth.tokenTtl."
+              "question": "Requesting sign-off for security-critical change to auth.tokenTtl.",
+              "requestType": "deployment-signoff",
+              "targetKey": "auth.tokenTtl"
             }
           },
           {

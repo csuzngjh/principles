@@ -148,7 +148,7 @@ async function main() {
   const preregProblems = validatePrereg({ prereg, study });
 
   // 6. G1 gate.
-  const gate = evaluateG1Gate({ healthProblems, calibration, arms, adjudications, sidecarProblems });
+  const gate = evaluateG1Gate({ healthProblems, calibration, arms, adjudications, sidecarProblems, preregProblems });
 
   // 7. Write outputs.
   const runHash = studyHash(study, adjudications);
