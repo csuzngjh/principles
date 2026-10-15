@@ -52,6 +52,13 @@ drifts (PRI-979: `@principles/workbuddy-adapter` shipped with none of them,
 and the train only noticed at dispatch time; the channel mirror drifted the
 same way one axis later and killed dry-run run 38675317722 in pd-cli's tsc).
 
+A sixth copy of the same fact sat outside the control plane: the packaged
+install smoke asserted a literal `0.2.` for the registry-resolved
+`@principles/install-layout`, so it turned red by itself the moment the train
+published 0.3.0 — resolution correct, constant stale. Any expectation about a
+published version must be derived from the artifact's declared range, never
+typed into a test.
+
 ## Step 2 — recover with reused validation evidence
 
 ```bash
