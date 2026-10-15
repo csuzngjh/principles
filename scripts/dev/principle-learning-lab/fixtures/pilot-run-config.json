@@ -1,0 +1,66 @@
+{
+  "schemaVersion": "pilot-run-config.v0.1-draft",
+  "status": "NOT_AUTHORIZED",
+  "note": "G2 wiring template for the real-agent pilot. Preparing this config authorizes NOTHING: every field marked OWNER_DECISION_REQUIRED must be decided by the Owner before any real model runs (SPEC v0.3 §9.2/§10 PR-02; task instruction §5 exit conditions).",
+  "studyId": "PLE-PILOT-01",
+  "workspaceLayout": {
+    "root": "<lab-run-root>/arms/<armId>/",
+    "perArm": [
+      "isolated agent profile (own memory dir, own config)",
+      "memory-manifest.json fingerprinted BEFORE first run (buildMemoryManifest)",
+      "no shared cache across arms; the stub tests prove no cross-contamination",
+      "delivery only via deliverPayload() (research-same-channel-v1)"
+    ]
+  },
+  "deliveryChannel": "research-same-channel-v1",
+  "arms": [
+    {
+      "armId": "C-E/E0",
+      "historyId": "E0",
+      "generation": "none",
+      "deliveredContent": null
+    },
+    {
+      "armId": "C-E/EA",
+      "historyId": "EA",
+      "generation": "I0 reflection OR I1 pipeline (frozen real output)",
+      "deliveredContent": "frozen candidate bytes — never hand-polished"
+    },
+    {
+      "armId": "C-E/EB",
+      "historyId": "EB",
+      "generation": "same as EA",
+      "deliveredContent": "frozen candidate bytes"
+    },
+    {
+      "armId": "C-E/EN",
+      "historyId": "EN",
+      "generation": "same as EA",
+      "deliveredContent": "frozen candidate bytes"
+    }
+  ],
+  "cAContrastArms": {
+    "note": "Same channel, same position, same budget; only the CONTENT differs.",
+    "conditions": ["real generated principle", "high-quality ordinary memory summary (must be honestly strong — no weak strawman)", "raw experience text", "no added content"],
+    "controlsToRecord": ["delivered chars/tokens", "position", "retrieval method", "budget", "generation cost of each condition"]
+  },
+  "budgets": {
+    "model": "OWNER_DECISION_REQUIRED — provider, model id, per-run cost ceiling, stop threshold",
+    "maxRunsPerArm": "OWNER_DECISION_REQUIRED",
+    "repetitions": "OWNER_DECISION_REQUIRED (draft: >=3 seeds)",
+    "llmJudge": "OWNER_DECISION_REQUIRED — default remains mechanical-oracle-only"
+  },
+  "gatesBeforeRealRuns": [
+    "G1 gate PASS (this repository, automated)",
+    "preregistration frozen by Owner decision (OD-1)",
+    "memory manifests fingerprinted per arm",
+    "candidate freeze interface exercised (freezeCandidate)",
+    "stub wiring + isolation tests green (principle-learning-lab test suite)",
+    "model credentials and cost ceiling decided (OD-2)"
+  ],
+  "exitConditions": [
+    "credentials missing or cost ceiling undecided -> mark NOT_RUN, do not execute",
+    "isolation or contamination check fails -> stop, record, do not proceed",
+    "judge-only information leak detected -> stop, record INVALID_PROTOCOL"
+  ]
+}
