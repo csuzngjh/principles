@@ -138,6 +138,57 @@ describe('install layout', () => {
     });
   });
 
+  // ── RF-01 (review 2026-10-16): an unreadable manifest must not be bypassed
+  // through the legacy path. When the canonical runtime EXISTS, the manifest
+  // is the install-state authority; refusing to honor it (newer layoutVersion,
+  // structural damage) must refuse the whole resolution instead of silently
+  // launching whatever sits in the legacy extension dir.
+
+  it('RF-01: canonical runtime exists + newer layoutVersion + legacy dir present → refuse, never legacy fallback', () => {
+    const result = resolveInstallLayout({
+      homeDir: 'C:/Users/alice',
+      manifest: { layoutVersion: 2, mode: 'canonical', hosts: ['codex'] },
+      canonicalRuntimeExists: true,
+      legacyExtensionExists: true,
+    });
+    expect(result.mode).toBe('missing');
+    expect(result.manifest).toBeUndefined();
+    expect(result.reason).toBe('install_manifest_unsupported_version: 2');
+  });
+
+  it('RF-01: canonical runtime exists + structurally broken manifest + legacy dir present → refuse, never legacy fallback', () => {
+    const result = resolveInstallLayout({
+      homeDir: 'C:/Users/alice',
+      manifest: { layoutVersion: 1, mode: 'weird', hosts: ['codex'] },
+      canonicalRuntimeExists: true,
+      legacyExtensionExists: true,
+    });
+    expect(result.mode).toBe('missing');
+    expect(result.reason).toContain('install_manifest_malformed');
+  });
+
+  it('RF-01: a genuinely legacy-only install (no manifest at all, no canonical runtime) stays discoverable', () => {
+    const result = resolveInstallLayout({
+      homeDir: 'C:/Users/alice',
+      manifest: undefined,
+      canonicalRuntimeExists: false,
+      legacyExtensionExists: true,
+    });
+    expect(result.mode).toBe('legacy');
+    expect(result.nextAction).toContain('migrate');
+  });
+
+  it('RF-01: canonical runtime ABSENT + incompatible manifest + legacy dir present → legacy fallback remains available (nothing canonical to bypass)', () => {
+    const result = resolveInstallLayout({
+      homeDir: 'C:/Users/alice',
+      manifest: { layoutVersion: 2, mode: 'canonical', hosts: ['codex'] },
+      canonicalRuntimeExists: false,
+      legacyExtensionExists: true,
+    });
+    expect(result.mode).toBe('legacy');
+    expect(result.reason).toBe('install_manifest_unsupported_version: 2');
+  });
+
   it('accepts workbuddy as an install host and exposes its runtime adapter dir', () => {
     const paths = getInstallLayoutPaths('C:/Users/alice');
     const result = resolveInstallLayout({

@@ -256,6 +256,23 @@ export function resolveInstallLayout(options: ResolveInstallLayoutOptions): Layo
   if (parsed.manifest && parsed.manifest.mode === 'canonical' && options.canonicalRuntimeExists) {
     return { mode: 'canonical', paths, manifest: parsed.manifest, ...(warnings !== undefined ? { warnings } : {}) };
   }
+  // RF-01 (review 2026-10-16): when a canonical runtime EXISTS, the manifest
+  // is the install-state authority. A manifest that was READ but cannot be
+  // honored (newer layoutVersion, structural damage) must refuse the whole
+  // resolution — falling through to the legacy extension dir would launch a
+  // runtime that does not match the installed protocol. Legacy fallback stays
+  // legitimate only when the reader genuinely saw NO manifest (absent file →
+  // `options.manifest === undefined`), i.e. a real legacy-only install, or
+  // when there is no canonical runtime to bypass.
+  if (options.canonicalRuntimeExists && options.manifest !== undefined && parsed.manifest === undefined) {
+    return {
+      mode: 'missing',
+      paths,
+      reason: parsed.error ?? 'install_manifest_malformed',
+      nextAction: 'Run npx create-principles-disciple to install or repair PD.',
+      ...(warnings !== undefined ? { warnings } : {}),
+    };
+  }
   if (options.legacyExtensionExists) {
     return {
       mode: 'legacy',

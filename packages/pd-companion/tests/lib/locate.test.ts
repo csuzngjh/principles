@@ -75,17 +75,38 @@ describe('resolveInstalledRuntime', () => {
     expect(resolved?.missing?.nextAction).toContain('create-principles-disciple');
   });
 
-  it('carries the incompatible-version reason through the legacy fallback (the incident machine shape)', () => {
+  it('carries the incompatible-version reason through the legacy fallback when there is no canonical runtime to protect', () => {
     const resolved = resolveInstalledRuntime({
       homeDir: 'C:\\Users\\alice',
       manifest: { layoutVersion: 2, mode: 'canonical', hosts: ['codex'] },
       canonicalRuntimeExists: false,
       legacyExtensionExists: true,
     });
-    // mode legacy + CLI missing → main.ts reports fallbackReason, which maps
-    // to install_manifest_incompatible — never a blanket "not installed".
+    // Canonical dir ABSENT: nothing to bypass, the legacy discovery stays.
     expect(resolved?.runtime?.mode).toBe('legacy');
     expect(resolved?.runtime?.fallbackReason).toBe('install_manifest_unsupported_version: 2');
+  });
+
+  // RF-01 end-to-end chain (the incident machine shape — canonical runtime
+  // EXISTED): the resolution must refuse, and the refusal must land the Owner
+  // on the update-the-Companion page — never on a launched legacy CLI.
+  it('RF-01: refusal → install_manifest_incompatible degraded page with the Companion update entry', async () => {
+    const resolved = resolveInstalledRuntime({
+      homeDir: 'C:\\Users\\alice',
+      manifest: { layoutVersion: 2, mode: 'canonical', hosts: ['codex'] },
+      canonicalRuntimeExists: true,
+      legacyExtensionExists: true,
+    });
+    // main.ts: extDir stays undefined → startSupervision returns before any
+    // spawn; the reason flows to the supervisor unmapped-from-blanket.
+    expect(resolved?.runtime).toBeUndefined();
+    expect(resolved?.missing?.reason).toBe('install_manifest_unsupported_version: 2');
+    const { mapLaunchFailureReason } = await import('../../src/lib/supervisor.js');
+    const { describeDegraded } = await import('../../src/lib/degraded.js');
+    expect(mapLaunchFailureReason(resolved!.missing!.reason)).toBe('install_manifest_incompatible');
+    const page = describeDegraded('install_manifest_incompatible', resolved!.missing!.reason);
+    expect(page.nextAction).toContain('companion-v');
+    expect(page.nextAction).not.toContain('create-principles-disciple');
   });
 
   it('reports structural manifest damage as its own missing cause', () => {
