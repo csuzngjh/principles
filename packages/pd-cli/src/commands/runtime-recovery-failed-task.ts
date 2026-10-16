@@ -8,6 +8,7 @@ import {
   recoverSingleFailedTask,
   listRecoveryActions,
   hydratePITaskRecord,
+  type FailedTaskRecoveryAuditRecord,
 } from '@principles/core/runtime-v2';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { buildExecutionNextAction } from './runtime-recovery-failed-tasks.js';
@@ -92,9 +93,89 @@ function buildRecoveryNextAction(task: { taskId: string; taskKind: string; input
   return buildExecutionNextAction(task);
 }
 
-async function repairAuditProjection(opts: RecoveryFailedTaskOptions, workspaceDir: string): Promise<void> {
-  // Read-only DB handle (no bootstrap, no writes); the ONLY write this mode
-  // performs is the idempotent JSONL projection append.
+/**
+ * PRI-991 (r2 P2): the JSONL projection is a read-check-append sequence —
+ * concurrent confirm/repair processes can each observe an actionId missing
+ * and append it twice. This lock (O_EXCL create, git-12 precedent: an
+ * existing lock is never overwritten or auto-deleted) serializes ALL
+ * projections for one workspace so the check+append pair is atomic. A stale
+ * lock from a crashed holder blocks projections until a human removes it —
+ * the durable row facts are unaffected.
+ */
+function projectionLockPath(workspaceDir: string): string {
+  return path.join(workspaceDir, '.state', 'recovery_actions.jsonl.lock');
+}
+
+interface ProjectionOutcome {
+  ok: boolean;
+  projected: number;
+  skipped: number;
+  reasonCode?: string;
+  reason?: string;
+  nextAction?: string;
+}
+
+/**
+ * Project the durable recovery facts that are missing from the JSONL,
+ * serialized by the projection lock. Sync I/O inside the lock keeps the
+ * check+append pair atomic within the process and the lock file arbitrates
+ * across processes. Returns which records were projected / already present,
+ * or a structured refusal (lock held / sink failure) with ZERO appends.
+ */
+function projectRecoveryRecordsOnce(workspaceDir: string, taskId: string, records: readonly FailedTaskRecoveryAuditRecord[]): ProjectionOutcome {
+  fs.mkdirSync(path.join(workspaceDir, '.state'), { recursive: true });
+  const lockPath = projectionLockPath(workspaceDir);
+  let lockFd: number;
+  try {
+    lockFd = fs.openSync(lockPath, 'wx');
+  } catch {
+    return {
+      ok: false,
+      projected: 0,
+      skipped: 0,
+      reasonCode: 'audit_projection_locked',
+      reason: `Another projection holds ${lockPath}`,
+      nextAction: 'Wait for the concurrent projection to finish, or (if its holder process is gone) remove the stale lock file manually, then re-run',
+    };
+  }
+  try {
+    try {
+      fs.writeFileSync(lockPath, `${JSON.stringify({ pid: process.pid, at: new Date().toISOString() })}\n`);
+    } catch {
+      // Holder info is best-effort debugging aid — never blocks projection.
+    }
+    const projectedIds = new Set(listRecoveryActions(workspaceDir, { taskId }).map((a) => a.actionId));
+    const missing = records.filter((r) => !projectedIds.has(r.actionId));
+    for (const record of missing) {
+      appendRecoveryAction(workspaceDir, {
+        actionId: record.actionId,
+        taskId,
+        previousStatus: record.previousStatus,
+        result: 'recovered',
+        operator: record.operator ?? undefined,
+        forceApplied: record.budgetResetApplied,
+        previousAttemptCount: record.previousAttemptCount,
+      });
+    }
+    return { ok: true, projected: missing.length, skipped: records.length - missing.length };
+  } catch (err: unknown) {
+    return {
+      ok: false,
+      projected: 0,
+      skipped: 0,
+      reasonCode: 'audit_projection_failed',
+      reason: err instanceof Error ? err.message : String(err),
+      nextAction: 'Fix the audit sink (workspace/.state/recovery_actions.jsonl); the durable row facts are untouched — re-run --repair-audit afterwards',
+    };
+  } finally {
+    fs.closeSync(lockFd);
+    fs.rmSync(lockPath, { force: true });
+  }
+}
+
+async function repairAuditProjection(opts: RecoveryFailedTaskOptions, workspaceDir: string): Promise<void> {  // Read-only DB handle (no bootstrap, no writes); the ONLY write this mode
+  // performs is the idempotent JSONL projection append, serialized by the
+  // projection lock (r2 P2: check-then-append alone is not concurrency-safe).
   let handle: Awaited<ReturnType<typeof createRuntimeStateHandle>> | null = null;
   try {
     handle = await createRuntimeStateHandle({ workspaceDir, readonly: true, bootstrapIfMissing: false });
@@ -104,8 +185,8 @@ async function repairAuditProjection(opts: RecoveryFailedTaskOptions, workspaceD
       return;
     }
     const piTask = hydratePITaskRecord(rawTask);
-    const record = piTask?.lastFailedTaskRecovery;
-    if (!record) {
+    const records = piTask?.failedTaskRecoveries ?? [];
+    if (records.length === 0) {
       refusal({
         reason: 'No durable recovery fact in the task metadata — nothing to project',
         reasonCode: 'no_durable_recovery_record',
@@ -114,37 +195,27 @@ async function repairAuditProjection(opts: RecoveryFailedTaskOptions, workspaceD
       }, opts.json);
       return;
     }
-    const alreadyProjected = listRecoveryActions(workspaceDir, { taskId: String(opts.taskId) })
-      .some((a) => a.actionId === record.actionId);
-    if (alreadyProjected) {
-      emit({
-        ok: true,
-        mode: 'repair_audit',
+    const outcome = projectRecoveryRecordsOnce(workspaceDir, String(opts.taskId), records);
+    if (!outcome.ok) {
+      refusal({
+        reason: outcome.reason,
+        reasonCode: outcome.reasonCode,
         taskId: opts.taskId,
-        auditActionId: record.actionId,
-        auditStatus: 'already_projected',
-        nextAction: 'Nothing to do — the JSONL projection already carries this actionId',
+        nextAction: outcome.nextAction,
       }, opts.json);
       return;
     }
-    appendRecoveryAction(workspaceDir, {
-      actionId: record.actionId,
-      taskId: String(opts.taskId),
-      previousStatus: record.previousStatus,
-      result: 'recovered',
-      operator: record.operator ?? undefined,
-      forceApplied: record.budgetResetApplied,
-      previousAttemptCount: record.previousAttemptCount,
-    });
     emit({
       ok: true,
       mode: 'repair_audit',
       taskId: opts.taskId,
-      auditActionId: record.actionId,
-      auditStatus: 'repaired',
-      previousAttemptCount: record.previousAttemptCount,
-      newMaxAttempts: record.newMaxAttempts,
-      nextAction: 'Audit projection restored. Verify: pd runtime internalization queue --json (task state untouched by this mode)',
+      auditStatus: outcome.projected > 0 ? 'repaired' : 'already_projected',
+      projected: outcome.projected,
+      alreadyProjected: outcome.skipped,
+      totalDurableFacts: records.length,
+      nextAction: outcome.projected > 0
+        ? 'Audit projection restored. Verify: pd runtime internalization queue --json (task state untouched by this mode)'
+        : 'Nothing to do — the JSONL projection already carries every durable actionId',
     }, opts.json);
   } catch (err: unknown) {
     if (isSqliteUnavailable(err)) {
@@ -185,7 +256,21 @@ export async function handleRuntimeRecoveryFailedTask(opts: RecoveryFailedTaskOp
     return;
   }
 
-  const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
+  // PRI-991 (r2 P1-03): the UNIFIED workspace authority resolves every
+  // target — explicit flag included — so assertSafeDirectoryRoot (empty /
+  // parent traversal / filesystem root) and the config-difference warnings
+  // apply to this state-mutating command like every other CLI command.
+  let workspaceDir: string;
+  try {
+    workspaceDir = resolveWorkspaceDir(opts.workspace);
+  } catch (err: unknown) {
+    refusal({
+      reason: err instanceof Error ? err.message : String(err),
+      reasonCode: 'workspace_invalid',
+      nextAction: 'Provide a safe explicit workspace directory with --workspace <path> (no traversal segments, not a filesystem root)',
+    }, opts.json);
+    return;
+  }
 
   // PRI-991 (P1-01): refuse before opening ANY connection when the database
   // does not exist — dry-run must not create it, confirm must not bootstrap.
@@ -275,7 +360,32 @@ export async function handleRuntimeRecoveryFailedTask(opts: RecoveryFailedTaskOp
       return;
     }
 
-    const outcome = await recoverSingleFailedTask(stateManager, taskId, { resetBudget: opts.resetBudget ?? false });
+    // PRI-991 (r2 P1-02): BEFORE the CAS, project any durable facts from
+    // PRIOR recoveries that never made it to the JSONL — otherwise this
+    // recovery's array append (bounded retention) could be the last holder
+    // of an unprojected actionId. Projection failure aborts the confirm
+    // BEFORE any state change (cli-5): the Owner fixes the sink and retries.
+    const preTask = await stateManager.getTask(taskId);
+    const prePi = preTask ? hydratePITaskRecord(preTask) : null;
+    const preRecords = prePi?.failedTaskRecoveries ?? [];
+    if (preRecords.length > 0) {
+      const pre = projectRecoveryRecordsOnce(workspaceDir, taskId, preRecords);
+      if (!pre.ok) {
+        refusal({
+          reason: pre.reason ?? 'Audit projection failed before recovery',
+          reasonCode: pre.reasonCode ?? 'audit_projection_failed',
+          taskId,
+          nextAction: `${pre.nextAction} The recovery was NOT executed (zero state change) — retry after the audit sink is writable`,
+        }, opts.json);
+        return;
+      }
+    }
+
+    const outcome = await recoverSingleFailedTask(stateManager, taskId, {
+      resetBudget: opts.resetBudget ?? false,
+      // r2 P1-01: the label rides the durable fact in the SAME CAS.
+      operator: opts.decidedBy,
+    });
     if (outcome.status !== 'recovered') {
       // Lost a race against a concurrent writer, or a guard fired at mutation
       // time — structured refusal, zero writes.
@@ -292,26 +402,25 @@ export async function handleRuntimeRecoveryFailedTask(opts: RecoveryFailedTaskOp
     }
 
     // PRI-991 (P1-03): the durable audit fact is ALREADY committed inside the
-    // recovery CAS (task metadata `lastFailedTaskRecovery`, actionId shared).
-    // The JSONL line is a projection; a projection failure must never misreport
-    // the recovery as failed — and never asks the Owner to re-confirm.
+    // recovery CAS (task metadata failedTaskRecoveries, actionId shared).
+    // The JSONL line is a projection under the projection lock; a projection
+    // failure must never misreport the recovery as failed — and never asks
+    // the Owner to re-confirm.
     const current = await stateManager.getTask(taskId);
-    let auditStatus: 'projected' | 'recovered_but_audit_failed' = 'projected';
-    let auditFailureReason: string | undefined;
-    try {
-      appendRecoveryAction(workspaceDir, {
+    const projected = projectRecoveryRecordsOnce(workspaceDir, taskId, [
+      {
         actionId: outcome.actionId,
-        taskId,
+        recoveredAt: new Date().toISOString(),
+        operator: opts.decidedBy?.trim() ? opts.decidedBy.trim() : null,
         previousStatus: 'failed',
-        result: 'recovered',
-        operator: opts.decidedBy,
-        forceApplied: outcome.budgetResetApplied,
         previousAttemptCount: outcome.previousAttemptCount,
-      });
-    } catch (auditErr: unknown) {
-      auditStatus = 'recovered_but_audit_failed';
-      auditFailureReason = auditErr instanceof Error ? auditErr.message : String(auditErr);
-    }
+        previousMaxAttempts: outcome.previousMaxAttempts,
+        newMaxAttempts: outcome.newMaxAttempts,
+        budgetResetApplied: outcome.budgetResetApplied,
+      },
+    ]);
+    const auditStatus: 'projected' | 'recovered_but_audit_failed' = projected.ok ? 'projected' : 'recovered_but_audit_failed';
+    const auditFailureReason = projected.ok ? undefined : projected.reason;
 
     const nextAction = buildRecoveryNextAction({
       taskId,

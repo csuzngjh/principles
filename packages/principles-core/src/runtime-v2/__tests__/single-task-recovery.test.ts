@@ -248,9 +248,9 @@ describe('recoverSingleFailedTask (strict single-task path)', () => {
       const before = JSON.parse(String(seeded.diagnosticJson));
       const after = JSON.parse(String(task?.diagnosticJson));
       expect(after.pi_metadata).toMatchObject(before.pi_metadata);
-      expect(after.pi_metadata.lastFailedTaskRecovery).toBeDefined();
-      expect(after.pi_metadata.lastFailedTaskRecovery.previousAttemptCount).toBe(3);
-      expect(after.pi_metadata.lastFailedTaskRecovery.actionId).toBe((outcome as { actionId?: string }).actionId);
+      expect(after.pi_metadata.failedTaskRecoveries).toHaveLength(1);
+      expect(after.pi_metadata.failedTaskRecoveries[0].previousAttemptCount).toBe(3);
+      expect(after.pi_metadata.failedTaskRecoveries[0].actionId).toBe((outcome as { actionId?: string }).actionId);
     } finally {
       await handle.close();
     }

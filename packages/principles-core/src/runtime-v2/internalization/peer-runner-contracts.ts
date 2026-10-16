@@ -188,12 +188,12 @@ export interface PITaskRecord extends TaskRecord {
    */
   ownerEvidenceSelection?: OwnerEvidenceSelection;
   /**
-   * PRI-991 (P1-03): durable audit fact of a single-task failed→pending
+   * PRI-991 (P1-03/r2 P1-02): durable audit facts of single-task failed→pending
    * recovery, written in the SAME conditional UPDATE that moved the task to
    * pending. Shape authority: `isValidFailedTaskRecoveryAuditRecord`
    * (pitask-metadata.ts).
    */
-  lastFailedTaskRecovery?: FailedTaskRecoveryAuditRecord;
+  failedTaskRecoveries?: readonly FailedTaskRecoveryAuditRecord[];
 }
 
 // ── Type Guards ───────────────────────────────────────────────────────────────

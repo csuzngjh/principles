@@ -160,3 +160,18 @@ CLI 测试 T05：同一真实 SQLite 库中播种 **83 条** terminal-failed art
 ### 与既有写入路径的竞争窗口清单（P1-04 要求的盘点）
 
 能够更新 attempt/maxAttempts/lease/diagnosticJson 的写入路径：① runner 的 markTaskRetryWait/markTaskFailed/markTaskSucceeded（updateTask）；② LeaseManager acquire/release/renew；③ RecoverySweep（过期 lease 清理）；④ owner-retry / evidence attach/resume（自有 CAS，与恢复互斥由 status 门保证）；⑤ succeeded-transition reconciliation（仅 touched succeeded 任务）；⑥ 消费者预检 NHR 迁移（仅 pending/retry_wait 唤醒态，failed 不在其列）。除 ①②③ 外全部被 status 门天然隔离；①②③ 由本 PR 的全快照 CAS 覆盖。
+
+---
+
+## 12. 第二轮独立复审修复（2026-10-16，r2）
+
+| 缺陷 | 核实 | 根因 | 修复 | 测试 |
+| --- | --- | --- | --- | --- |
+| **r2-P1-01 操作人标签未随 CAS 持久** | 属实 | `recoverSingleFailedTask` 硬编码 `operator: null`，`--decidedBy` 只进 JSONL 投影——崩溃后 `--repair-audit` 只能恢复出 null | `recoverSingleFailedTask` opts 增加 `operator`，随同一条 CAS 写入行事实（语义不变：operator-provided label，非认证身份） | CLI：recover(crash)→repair 后 JSONL 行 `operator='owner/console-session-42'` |
+| **r2-P1-02 第二次恢复覆盖唯一持久事实** | 属实 | 单字段 `lastFailedTaskRecovery` 第二次 CAS 直接覆盖；未投影的旧 actionId 永久丢失 | 字段改为**追加式数组** `failedTaskRecoveries`（保留最近 `FAILED_TASK_RECOVERY_RETENTION=5` 条，逐元素 rc-3/rc-4 校验，超限 fail-closed）；且 CLI confirm 在 CAS **之前**先把既有未投影事实投影落盘（预投影失败 = 结构化拒绝、零状态变更，cli-5）——未投影事实在被覆盖前必先落 JSONL，数组为纵深保留 | 真实序列测试：recover#1 → JSONL 丢失 → 任务再失败 → recover#2 → 两条事实均存活且均投影（operator r1/r2 各自保留）；纯 core 双恢复（无 CLI 预投影）数组双记录 + repair 双投影 |
+| **r2-P1-03 绕过统一 Workspace 校验** | 属实 | 命令内 `path.resolve(opts.workspace)` 绕过 `resolveWorkspaceDir` 的 `assertSafeDirectoryRoot`（空/穿越/文件系统根）与配置差异警告——本命令可变更任务状态，不得例外 | 无条件走 `resolveWorkspaceDir(opts.workspace)` 单一权威；其抛错映射为结构化 `workspace_invalid` | 前导 `..` 遍历拒绝；文件系统根拒绝；显式合法 workspace 正常（既有 T01–T05 全绿） |
+| **r2-P2 repair-audit 并发可重复投影** | 属实 | check-then-append（TOCTOU）：两个并发 repair 同时发现缺失、各写一次 | 引入投影锁（`.state/recovery_actions.jsonl.lock`，O_EXCL 创建，git-12 先例：既存锁永不覆盖/自动删除，崩溃持有者需人工清理）；confirm 与 repair 的所有投影统一走 `projectRecoveryRecordsOnce`（锁内同步 check+append，原子）；持锁冲突 → 结构化 `audit_projection_locked` | 并发双 repair → 每 actionId 恰一行；持锁注入 → 拒绝且锁文件内容不被覆写 |
+
+**诚实边界（更新）**：r2-P1-02 修复后，原「legacy 无 metadata 任务投影不可恢复」边界不变；新增说明——数组保留最近 5 条，若同一任务连续 5 次恢复且全部未投影（极端磁盘故障持续 5 轮），最早事实按保留策略淘汰；CLI 预投影使该场景在实际操作序列中不可达（每轮 confirm 先清空未投影积压）。
+
+**测试规模（r2）**：CLI 25（+7，含双恢复双投影、并发 repair、持锁注入、traversal/根拒绝、operator 可恢复性）、core 577 全量相关回归（含新字段 parse/serialize/merge 与 hydration 兼容）、host-runtime 11、批量命令 18。lint 11/11、typecheck ×3、runtime-contract 0 新违规。

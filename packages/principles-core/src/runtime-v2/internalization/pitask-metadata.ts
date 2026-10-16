@@ -434,16 +434,21 @@ export interface PITaskMetadata {
    */
   ownerEvidenceSelection?: OwnerEvidenceSelection;
   /**
-   * PRI-991 (P1-03): durable audit fact of a single-task failed→pending
-   * recovery, written in the SAME conditional UPDATE that moves the task to
-   * pending. This is the crash-durable authority the JSONL projection
-   * (recovery_actions.jsonl) is repaired from — the JSONL is a projection,
-   * never the recovery audit's source of truth. Write-once at recovery time;
-   * presence-but-malformed fails the whole metadata (rc-3, same semantics as
-   * completionIntent/ownerEvidenceSelection).
+   * PRI-991 (P1-03): durable audit facts of single-task failed→pending
+   * recoveries, appended by the SAME conditional UPDATE that moves the task
+   * to pending. Append-only across recoveries of the same task (r2 P1-02: a
+   * second recovery must never destroy an unprojected prior fact); bounded
+   * to the most recent FAILED_TASK_RECOVERY_RETENTION entries. This is the
+   * crash-durable authority the JSONL projection (recovery_actions.jsonl)
+   * is repaired from — the JSONL is a projection, never the recovery audit's
+   * source of truth. Presence-but-malformed fails the whole metadata (rc-3,
+   * same semantics as completionIntent/ownerEvidenceSelection).
    */
-  lastFailedTaskRecovery?: FailedTaskRecoveryAuditRecord;
+  failedTaskRecoveries?: readonly FailedTaskRecoveryAuditRecord[];
 }
+
+/** PRI-991 (r2 P1-02): retention bound for durable per-task recovery facts. */
+export const FAILED_TASK_RECOVERY_RETENTION = 5;
 
 /** PRI-991 (P1-03): crash-durable single-task recovery audit fact. */
 export interface FailedTaskRecoveryAuditRecord {
@@ -559,7 +564,7 @@ export function serializePITaskMetadata(metadata: PITaskMetadata): string {
       humanReviewContext: metadata.humanReviewContext,
       ownerResolutions: metadata.ownerResolutions,
       ownerEvidenceSelection: metadata.ownerEvidenceSelection,
-      lastFailedTaskRecovery: metadata.lastFailedTaskRecovery,
+      failedTaskRecoveries: metadata.failedTaskRecoveries,
     },
   });
 }
@@ -598,7 +603,7 @@ export function mergePITaskMetadata(base: PITaskRecord, overrides: Partial<PITas
     humanReviewContext: base.humanReviewContext,
     ownerResolutions: base.ownerResolutions,
     ownerEvidenceSelection: base.ownerEvidenceSelection,
-    lastFailedTaskRecovery: base.lastFailedTaskRecovery,
+    failedTaskRecoveries: base.failedTaskRecoveries,
     ...overrides,
   };
 }
@@ -1023,11 +1028,18 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
     ({ ownerEvidenceSelection } = m);
   }
 
-  // lastFailedTaskRecovery (PRI-991 P1-03): optional, full shape validation —
-  // a corrupted recovery audit fact fails the whole metadata (rc-3), never a
-  // silent "this task was never recovered".
-  const { lastFailedTaskRecovery } = m;
-  if (lastFailedTaskRecovery !== undefined && !isValidFailedTaskRecoveryAuditRecord(lastFailedTaskRecovery)) return null;
+  // failedTaskRecoveries (PRI-991 P1-03, r2 P1-02): optional append-only
+  // array, full shape validation on EVERY element (rc-3/rc-4) — a corrupted
+  // recovery audit fact fails the whole metadata, never a silent "this task
+  // was never recovered". Bounded retention; over-long arrays fail closed.
+  const { failedTaskRecoveries } = m;
+  if (failedTaskRecoveries !== undefined) {
+    if (!Array.isArray(failedTaskRecoveries)) return null;
+    if (failedTaskRecoveries.length > FAILED_TASK_RECOVERY_RETENTION) return null;
+    for (const record of failedTaskRecoveries) {
+      if (!isValidFailedTaskRecoveryAuditRecord(record)) return null;
+    }
+  }
 
   return {
     dependencyTaskIds: m.dependencyTaskIds as string[],
@@ -1052,7 +1064,7 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
     humanReviewContext,
     ownerResolutions,
     ownerEvidenceSelection,
-    lastFailedTaskRecovery,
+    failedTaskRecoveries,
   };
 }
 
@@ -1111,6 +1123,6 @@ export function hydratePITaskRecord(task: TaskRecord): PITaskRecord | null {
     humanReviewContext: meta.humanReviewContext,
     ownerResolutions: meta.ownerResolutions,
     ownerEvidenceSelection: meta.ownerEvidenceSelection,
-    lastFailedTaskRecovery: meta.lastFailedTaskRecovery,
+    failedTaskRecoveries: meta.failedTaskRecoveries,
   } as unknown as PITaskRecord;
 }

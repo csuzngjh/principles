@@ -5,7 +5,7 @@ import type { TaskRecord } from './task-status.js';
 import type { TaskStoreUpdatePatch } from './store/task/task-store.js';
 import { PDRuntimeError } from './error-categories.js';
 import { isRunnerKind } from './internalization/peer-runner-contracts.js';
-import { hydratePITaskRecord, mergePITaskMetadata, createPITaskDiagnosticJson } from './internalization/pitask-metadata.js';
+import { hydratePITaskRecord, mergePITaskMetadata, createPITaskDiagnosticJson, FAILED_TASK_RECOVERY_RETENTION } from './internalization/pitask-metadata.js';
 import { ownerRetryNeedsHumanReviewTask } from './internalization/owner-retry.js';
 import type { OwnerRetryOutcome } from './internalization/owner-retry.js';
 import * as crypto from 'crypto';
@@ -108,7 +108,7 @@ export interface RecoverySweepService {
   /** PRI-991: read-only single-task recovery precheck. */
   inspectFailedTaskRecovery(taskId: string): Promise<FailedTaskRecoveryInspection>;
   /** PRI-991: strict single-task recovery (guards + CAS + opt-in budget reset). */
-  recoverSingleFailedTask(taskId: string, opts?: { resetBudget?: boolean }): Promise<SingleTaskRecoveryOutcome>;
+  recoverSingleFailedTask(taskId: string, opts?: { resetBudget?: boolean; operator?: string }): Promise<SingleTaskRecoveryOutcome>;
   /**
    * Governance Recovery Actions v1: Owner authority reset for a
    * needs_human_review task (→ pending, clears runnerDecision +
@@ -368,7 +368,7 @@ export async function inspectFailedTaskRecovery(
 export async function recoverSingleFailedTask(
   stateManager: Pick<RuntimeStateHandle['stateManager'], 'getTask' | 'updateTaskIfDiagnosticJsonUnchanged'>,
   taskId: string,
-  opts: { resetBudget?: boolean } = {},
+  opts: { resetBudget?: boolean; operator?: string } = {},
 ): Promise<SingleTaskRecoveryOutcome> {
   const task = await stateManager.getTask(taskId);
   if (!task) return { status: 'not_found' };
@@ -404,23 +404,32 @@ export async function recoverSingleFailedTask(
   }
 
   // PRI-991 (P1-03): the audit fact rides the SAME conditional UPDATE as the
-  // status change (write-once, crash-durable). The JSONL is a projection of
-  // this fact, never its source of truth. Only hydratable payloads carry the
-  // record — legacy absent-metadata payloads stay byte-identical (documented
+  // status change (crash-durable). The JSONL is a projection of this fact,
+  // never its source of truth. Only hydratable payloads carry the record —
+  // legacy absent-metadata payloads stay byte-identical (documented
   // reliability boundary: their JSONL projection has no row-fact fallback).
+  // r2 P1-01: the operator-provided label is part of the durable fact (an
+  // unprojected recovery must be repairable WITH its operator attribution);
+  // it remains a label, never an authenticated identity.
+  // r2 P1-02: the fact is APPENDED to the per-task array (bounded retention)
+  // — a second recovery must never destroy an unprojected prior fact.
   const actionId = crypto.randomUUID();
   if (metadataGuard.state === 'valid') {
+    const priorRecords = metadataGuard.piTask.failedTaskRecoveries ?? [];
     const merged = mergePITaskMetadata(metadataGuard.piTask, {
-      lastFailedTaskRecovery: {
-        actionId,
-        recoveredAt: new Date().toISOString(),
-        operator: null,
-        previousStatus: 'failed',
-        previousAttemptCount: task.attemptCount,
-        previousMaxAttempts: task.maxAttempts,
-        newMaxAttempts,
-        budgetResetApplied: isExhausted && opts.resetBudget === true,
-      },
+      failedTaskRecoveries: [
+        ...priorRecords,
+        {
+          actionId,
+          recoveredAt: new Date().toISOString(),
+          operator: opts.operator?.trim() ? opts.operator.trim() : null,
+          previousStatus: 'failed',
+          previousAttemptCount: task.attemptCount,
+          previousMaxAttempts: task.maxAttempts,
+          newMaxAttempts,
+          budgetResetApplied: isExhausted && opts.resetBudget === true,
+        },
+      ].slice(-FAILED_TASK_RECOVERY_RETENTION),
     });
     patch.diagnosticJson = createPITaskDiagnosticJson(merged);
   }
@@ -486,7 +495,7 @@ class RecoverySweepServiceImpl implements RecoverySweepService {
     return inspectFailedTaskRecovery(this.stateManager, taskId);
   }
 
-  async recoverSingleFailedTask(taskId: string, opts: { resetBudget?: boolean } = {}): Promise<SingleTaskRecoveryOutcome> {
+  async recoverSingleFailedTask(taskId: string, opts: { resetBudget?: boolean; operator?: string } = {}): Promise<SingleTaskRecoveryOutcome> {
     return recoverSingleFailedTask(this.stateManager, taskId, opts);
   }
 

@@ -442,10 +442,12 @@ describe('P1-03 — recovery state and audit consistency', () => {
     expect(record['newStatus']).toBe('pending');
     expect(record['previousAttemptCount']).toBe(1);
     expect(record['nextAction']).toBeTruthy();
-    // The durable compensation fact survives in the task row.
+    // The durable compensation fact survives in the task row (with the
+    // operator label — r2 P1-01).
     const task = await getTask(ws, TASK_ID);
     expect(task?.status).toBe('pending');
-    expect(String(task?.diagnosticJson)).toContain('lastFailedTaskRecovery');
+    expect(String(task?.diagnosticJson)).toContain('failedTaskRecoveries');
+    expect(String(task?.diagnosticJson)).toContain('"operator":"owner/test"');
   });
 
   it('T03-E/F: repair-audit re-projects the durable row fact idempotently (crash-window compensation)', async () => {
@@ -513,5 +515,165 @@ describe('P1-03 — recovery state and audit consistency', () => {
     expect(legacy).toBeDefined();
     const mine = actions.find((a) => a.taskId === TASK_ID);
     expect((mine as { previousAttemptCount?: number }).previousAttemptCount).toBe(3);
+  });
+});
+
+// ── PRI-991 review round 2: operator durability, multi-recovery retention,
+// workspace authority, concurrent repair idempotence ──
+
+describe('P1-01 (r2) — operator label is durable across the crash-repair path', () => {
+  it('--decidedBy survives in the row fact; --repair-audit restores it into JSONL', async () => {
+    const ws = makeWorkspace();
+    await seedTask(ws, failedArtificer({ taskId: TASK_ID, attemptCount: 1, maxAttempts: 3 }));
+    const cap = captureStdoutJson();
+    let actionId = '';
+    try {
+      await handleRuntimeRecoveryFailedTask({ workspace: ws, taskId: TASK_ID, confirm: true, decidedBy: 'owner/console-session-42', json: true });
+      actionId = String(cap.records[0]['auditActionId'] ?? '');
+      expect(actionId).not.toBe('');
+      // Simulate the crash window.
+      fs.rmSync(path.join(ws, '.state', 'recovery_actions.jsonl'));
+      process.exitCode = undefined;
+      await handleRuntimeRecoveryFailedTask({ workspace: ws, taskId: TASK_ID, repairAudit: true, json: true });
+    } finally {
+      cap.restore();
+    }
+    const repaired = listRecoveryActions(ws, { taskId: TASK_ID });
+    expect(repaired).toHaveLength(1);
+    expect(repaired[0].actionId).toBe(actionId);
+    expect(repaired[0].operator).toBe('owner/console-session-42');
+  });
+});
+
+describe('P1-02 (r2) — a second recovery never destroys an unprojected prior fact', () => {
+  it('recover → projection lost → task re-fails → second recover: BOTH facts survive and both project', async () => {
+    const ws = makeWorkspace();
+    await seedTask(ws, failedArtificer({ taskId: TASK_ID, attemptCount: 1, maxAttempts: 3 }));
+    const cap = captureStdoutJson();
+    try {
+      // Recovery #1 (exhausted budget reset), then the JSONL projection is lost.
+      await handleRuntimeRecoveryFailedTask({ workspace: ws, taskId: TASK_ID, confirm: true, decidedBy: 'owner/r1', resetBudget: true, json: true });
+      const firstActionId = String(cap.records[0]['auditActionId']);
+      fs.rmSync(path.join(ws, '.state', 'recovery_actions.jsonl'));
+
+      // The consumer runs the task again and it fails again (real store).
+      const handle = await createRuntimeStateHandle({ workspaceDir: ws, readonly: false });
+      try {
+        await handle.stateManager.updateTask(TASK_ID, {
+          status: 'failed',
+          attemptCount: 6,
+          maxAttempts: 6,
+          lastError: 'max_attempts_exceeded',
+        });
+      } finally {
+        await handle.close();
+      }
+
+      // Recovery #2 by the Owner.
+      process.exitCode = undefined;
+      await handleRuntimeRecoveryFailedTask({ workspace: ws, taskId: TASK_ID, confirm: true, decidedBy: 'owner/r2', resetBudget: true, json: true });
+      const secondActionId = String(cap.records[1]['auditActionId']);
+      expect(secondActionId).not.toBe('');
+      expect(secondActionId).not.toBe(firstActionId);
+    } finally {
+      cap.restore();
+    }
+    const actions = listRecoveryActions(ws, { taskId: TASK_ID });
+    const ids = actions.map((a) => a.actionId);
+    expect(ids).toHaveLength(2);
+    expect(actions.find((a) => a.operator === 'owner/r1')).toBeDefined();
+    expect(actions.find((a) => a.operator === 'owner/r2')).toBeDefined();
+  });
+
+  it('pure-core double recovery (no CLI pre-projection) retains both row facts; repair projects both', async () => {
+    const ws = makeWorkspace();
+    const handle = await createRuntimeStateHandle({ workspaceDir: ws, readonly: false });
+    try {
+      const { recoverSingleFailedTask } = await import('@principles/core/runtime-v2');
+      await seedTask(ws, failedArtificer({ taskId: TASK_ID, attemptCount: 1, maxAttempts: 3 }));
+      const r1 = await recoverSingleFailedTask(handle.stateManager, TASK_ID, { resetBudget: true, operator: 'owner/core-1' });
+      expect(r1.status).toBe('recovered');
+      await handle.stateManager.updateTask(TASK_ID, { status: 'failed', attemptCount: 6, maxAttempts: 6, lastError: 'max_attempts_exceeded' });
+      const r2 = await recoverSingleFailedTask(handle.stateManager, TASK_ID, { resetBudget: true, operator: 'owner/core-2' });
+      expect(r2.status).toBe('recovered');
+      const task = await handle.stateManager.getTask(TASK_ID);
+      const records = JSON.parse(String(task?.diagnosticJson)).pi_metadata.failedTaskRecoveries;
+      expect(records).toHaveLength(2);
+      expect(records.map((r: { actionId: string }) => r.actionId).sort())
+        .toEqual([(r1 as { actionId: string }).actionId, (r2 as { actionId: string }).actionId].sort());
+      expect(records[0].operator).toBe('owner/core-1');
+    } finally {
+      await handle.close();
+    }
+  });
+});
+
+describe('P1-03 (r2) — the unified workspace authority guards this command', () => {
+  it('parent traversal in --workspace is refused with a structured reason', async () => {
+    // Leading '..' segments survive path.normalize — the case the root
+    // validator is designed to reject.
+    const traversal = '..' + path.sep + '..' + path.sep + 'elsewhere-pd-recovery';
+    const cap = captureStdoutJson();
+    try {
+      await handleRuntimeRecoveryFailedTask({ workspace: traversal, taskId: TASK_ID, dryRun: true, json: true });
+    } finally {
+      cap.restore();
+    }
+    expect(process.exitCode).toBe(1);
+    expect(cap.records[0]['ok']).toBe(false);
+    expect(cap.records[0]['reasonCode']).toBe('workspace_invalid');
+    expect(cap.records[0]['nextAction']).toBeTruthy();
+  });
+
+  it('filesystem-root --workspace is refused', async () => {
+    const cap = captureStdoutJson();
+    try {
+      await handleRuntimeRecoveryFailedTask({ workspace: 'D:/', taskId: TASK_ID, dryRun: true, json: true });
+    } finally {
+      cap.restore();
+    }
+    expect(process.exitCode).toBe(1);
+    expect(cap.records[0]['reasonCode']).toBe('workspace_invalid');
+  });
+});
+
+describe('P2 (r2) — concurrent repair-audit is idempotent under contention', () => {
+  it('two concurrent repairs project exactly one line per actionId', async () => {
+    const ws = makeWorkspace();
+    await seedTask(ws, failedArtificer({ taskId: TASK_ID, attemptCount: 1, maxAttempts: 3 }));
+    const cap = captureStdoutJson();
+    try {
+      await handleRuntimeRecoveryFailedTask({ workspace: ws, taskId: TASK_ID, confirm: true, decidedBy: 'owner/x', json: true });
+      // Crash window: projection lost.
+      fs.rmSync(path.join(ws, '.state', 'recovery_actions.jsonl'));
+      // Two repair processes race.
+      await Promise.all([
+        handleRuntimeRecoveryFailedTask({ workspace: ws, taskId: TASK_ID, repairAudit: true, json: true }),
+        handleRuntimeRecoveryFailedTask({ workspace: ws, taskId: TASK_ID, repairAudit: true, json: true }),
+      ]);
+    } finally {
+      cap.restore();
+    }
+    expect(listRecoveryActions(ws, { taskId: TASK_ID })).toHaveLength(1);
+  });
+
+  it('a stale lock from another holder is refused, not silently overwritten', async () => {
+    const ws = makeWorkspace();
+    await seedTask(ws, failedArtificer({ taskId: TASK_ID, attemptCount: 1, maxAttempts: 3 }));
+    const cap = captureStdoutJson();
+    try {
+      await handleRuntimeRecoveryFailedTask({ workspace: ws, taskId: TASK_ID, confirm: true, json: true });
+      fs.rmSync(path.join(ws, '.state', 'recovery_actions.jsonl'));
+      // Another process holds the projection lock.
+      fs.writeFileSync(path.join(ws, '.state', 'recovery_actions.jsonl.lock'), '{"holder":"other-pid"}\n');
+      process.exitCode = undefined;
+      await handleRuntimeRecoveryFailedTask({ workspace: ws, taskId: TASK_ID, repairAudit: true, json: true });
+      expect(process.exitCode).toBe(1);
+      expect(cap.records[1]['ok']).toBe(false);
+      expect(cap.records[1]['reasonCode']).toBe('audit_projection_locked');
+      expect(fs.readFileSync(path.join(ws, '.state', 'recovery_actions.jsonl.lock'), 'utf-8')).toContain('other-pid');
+    } finally {
+      cap.restore();
+    }
   });
 });

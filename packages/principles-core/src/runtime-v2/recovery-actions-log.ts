@@ -65,7 +65,7 @@ export interface AppendRecoveryActionInput {
   previousAttemptCount?: number;
   /**
    * PRI-991 (P1-03): caller-supplied actionId matching the durable
-   * `lastFailedTaskRecovery` fact embedded in the task row by the same
+   * `failedTaskRecoveries` facts embedded in the task row by the same
    * recovery CAS. Required for the strict single-task path so the JSONL
    * projection and the row fact are the SAME audit event; omitted (fresh
    * random id) keeps the legacy caller contract.
