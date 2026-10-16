@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { execFileSync, spawn } from 'child_process';
 import * as http from 'http';
