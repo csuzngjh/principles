@@ -26,6 +26,7 @@ import * as path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import * as asar from '@electron/asar';
+import { assertInstallManifestCompat } from './bundled-parser-compat.mjs';
 
 export const RUNTIME_DEPENDENCY = '@principles/install-layout';
 export const MAIN_ENTRY = 'dist/main/main.js';
@@ -125,7 +126,29 @@ export async function verifyPackagedApp(appAsarPath) {
     if (typeof dependencyModule.getInstallLayoutPaths !== 'function') {
       throw new Error(`Packaged app verification failed — ${RUNTIME_DEPENDENCY} resolved to ${resolvedDependency} but does not export getInstallLayoutPaths().`);
     }
-    return { appAsar: appAsarPath, resolvedDependency };
+
+    // Cross-version compatibility gate (Fix C, 2026-10-16): the parser that
+    // ships INSIDE this artifact must accept the production manifest shape,
+    // tolerate a future host with a structured warning, and still fail closed
+    // on incompatible versions / structural damage. Repo source being correct
+    // is not evidence — 0.1.2 shipped a parser two contract generations old
+    // while CI only checked that files existed.
+    const compatRows = assertInstallManifestCompat(dependencyModule);
+
+    // Version consistency facts (Fix C §6): the Companion version and the
+    // bundled install-layout version are recorded so a release artifact can
+    // be audited against the release it claims to be.
+    const appPackage = JSON.parse(fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8'));
+    const dependencyPackage = JSON.parse(
+      fs.readFileSync(path.join(path.dirname(resolvedDependency), '..', 'package.json'), 'utf8'),
+    );
+    return {
+      appAsar: appAsarPath,
+      resolvedDependency,
+      appVersion: typeof appPackage.version === 'string' ? appPackage.version : 'unknown',
+      bundledInstallLayoutVersion: typeof dependencyPackage.version === 'string' ? dependencyPackage.version : 'unknown',
+      compatRows,
+    };
   } finally {
     fs.rmSync(extractedRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }
@@ -139,9 +162,13 @@ if (isDirectRun) {
   verifyPackagedApp(locatePackagedAppAsar(path.join(packageRoot, 'release')))
     .then((result) => {
       console.log(`Packaged app verified: ${result.appAsar}`);
+      console.log(`  app version          : ${result.appVersion}`);
       console.log(`  main entry           : ${MAIN_ENTRY}`);
       console.log(`  runtime dependency   : ${RUNTIME_DEPENDENCY}`);
+      console.log(`  bundled dep version  : ${result.bundledInstallLayoutVersion}`);
       console.log(`  resolved (extracted) : ${result.resolvedDependency}`);
+      console.log('  manifest cross-version compatibility:');
+      for (const row of result.compatRows) console.log(`    ✓ ${row}`);
     })
     .catch((error) => {
       console.error(error instanceof Error ? error.message : String(error));

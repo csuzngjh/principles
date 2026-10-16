@@ -28,13 +28,33 @@ afterAll(() => fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, r
  * Build a minimal packaged-app tree and pack it into a real app.asar.
  * Fixture names are contained under the mkdtemp root before any filesystem
  * use (resolve + explicit boundary check; no traversal fragments accepted).
+ * The default dependency JS implements the FULL manifest contract the
+ * cross-version gate enforces (ForwardCompat parse + persist helper) — the
+ * same shape the real bundled dist ships.
  */
 async function buildAppAsar(
   fixtureName: string,
   {
     includeDependency = true,
     includeMain = true,
-    dependencyJs = 'export function getInstallLayoutPaths(h) { return { runtimeDir: h }; }\n',
+    dependencyJs = [
+      'import { isAbsolute } from "node:path";',
+      'export const INSTALL_HOSTS = ["codex", "openclaw", "workbuddy"];',
+      'export function getInstallLayoutPaths(h) { return { runtimeDir: h }; }',
+      'export function parseInstallManifest(value) {',
+      '  if (value === null || typeof value !== "object" || Array.isArray(value)) return { error: "install_manifest_malformed: expected an object" };',
+      '  if (value.layoutVersion !== 1) return { error: "install_manifest_unsupported_version: " + String(value.layoutVersion) };',
+      '  if (value.mode !== "canonical" && value.mode !== "legacy") return { error: "install_manifest_malformed: mode" };',
+      '  if (!Array.isArray(value.hosts) || !value.hosts.every((h) => typeof h === "string" && h.length > 0)) return { error: "install_manifest_malformed: hosts" };',
+      '  if (value.workspaces !== undefined && (!Array.isArray(value.workspaces) || !value.workspaces.every((w) => typeof w === "string" && w.length > 0 && isAbsolute(w)))) return { error: "install_manifest_malformed: workspaces must be non-empty absolute paths" };',
+      '  const hosts = []; const unknownHosts = []; const warnings = [];',
+      '  for (const h of value.hosts) { if (INSTALL_HOSTS.includes(h)) hosts.push(h); else { unknownHosts.push(h); warnings.push({ code: "install_manifest_unknown_host", host: h }); } }',
+      '  return { manifest: { layoutVersion: 1, mode: value.mode, hosts, ...(unknownHosts.length > 0 ? { unknownHosts } : {}), workspaces: value.workspaces ?? [] }, ...(warnings.length > 0 ? { warnings } : {}) };',
+      '}',
+      'export function installManifestHostsForPersist(manifest) { return [...new Set([...(manifest?.hosts ?? []), ...(manifest?.unknownHosts ?? [])])]; }',
+      'export function resolveInstallLayout(options) { return { mode: "canonical", paths: {}, manifest: options.manifest }; }',
+      '',
+    ].join('\n'),
   }: { includeDependency?: boolean; includeMain?: boolean; dependencyJs?: string } = {},
 ): Promise<string> {
   const appDir = path.resolve(root, fixtureName);
