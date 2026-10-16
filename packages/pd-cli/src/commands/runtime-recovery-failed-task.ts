@@ -139,8 +139,11 @@ function projectRecoveryRecordsOnce(workspaceDir: string, taskId: string, record
     };
   }
   try {
+    // Write holder info THROUGH the already-held wx descriptor — reopening
+    // the path by name would be a file-system race (CodeQL js/file-system-
+    // race): the fd pins the inode this process created.
     try {
-      fs.writeFileSync(lockPath, `${JSON.stringify({ pid: process.pid, at: new Date().toISOString() })}\n`);
+      fs.writeFileSync(lockFd, `${JSON.stringify({ pid: process.pid, at: new Date().toISOString() })}\n`);
     } catch {
       // Holder info is best-effort debugging aid — never blocks projection.
     }

@@ -625,10 +625,14 @@ describe('P1-03 (r2) — the unified workspace authority guards this command', (
     expect(cap.records[0]['nextAction']).toBeTruthy();
   });
 
-  it('filesystem-root --workspace is refused', async () => {
+  it('filesystem-root --workspace is refused (platform-neutral)', async () => {
+    // The ACTUAL filesystem root of the running platform ('D:\' on Windows,
+    // '/' on Linux) — a hardcoded drive letter is a legal relative directory
+    // name on Linux CI and would not exercise the root rejection.
+    const root = path.parse(process.cwd()).root;
     const cap = captureStdoutJson();
     try {
-      await handleRuntimeRecoveryFailedTask({ workspace: 'D:/', taskId: TASK_ID, dryRun: true, json: true });
+      await handleRuntimeRecoveryFailedTask({ workspace: root, taskId: TASK_ID, dryRun: true, json: true });
     } finally {
       cap.restore();
     }
