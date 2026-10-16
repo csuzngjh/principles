@@ -64,6 +64,22 @@ jobs:
       - name: Verify packaged app (runtime dependency + manifest cross-version compatibility)
         run: npm run verify-package --workspace=@principles/pd-companion
 
+      # RF-03 (review 2026-10-16): a companion-vX.Y.Z tag must never produce
+      # an installer whose internal version disagrees with the tag or the
+      # repository. The version bump lands through a release-prep change
+      # BEFORE the tag is cut — tagging the wrong commit fails here, loudly,
+      # before anything is uploaded or published.
+      - name: Verify release version consistency (tag ↔ package.json ↔ app.asar)
+        if: startsWith(github.ref, 'refs/tags/companion-v')
+        run: npm run check:release-version --workspace=@principles/pd-companion -- --expect-tag "${GITHUB_REF_NAME#companion-v}"
+
+      # workflow_dispatch builds are manual TEST artifacts (no tag): repo ↔
+      # artifact agreement is still enforced, and the GitHub Release step
+      # below only ever runs on companion-v* tags.
+      - name: Verify artifact version consistency (manual dispatch build)
+        if: github.event_name == 'workflow_dispatch'
+        run: npm run check:release-version --workspace=@principles/pd-companion
+
       - name: Upload installer artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
