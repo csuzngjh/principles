@@ -27,6 +27,37 @@ describe('CorrectionObserver', () => {
     expect(prompt).toContain('error');
   });
 
+  // 生产实况：词库里 TP/FP 双双为 0 的条目占绝大多数，旧判据
+  // 「FP / (TP + FP) > 0.3」对它们恒不成立 ⇒ REMOVE 永不触发，死词只进不出，
+  // 200 顶满后学习通道整体冻结。判据必须能用 payload 里真实存在的证据评估。
+  it('gives REMOVE a criterion that works without any TP/FP history', () => {
+    const prompt = CorrectionObserver.buildPrompt(mockPayload);
+    expect(prompt).toContain('TP and FP stay 0 for such a term');
+    // 同时要求引用「是否再现」与「是否为整句」这两类可见证据
+    expect(prompt).toContain('matches nothing in the trajectory or recent messages');
+    expect(prompt).toContain('full user sentence');
+    // 并且明确保护仍在命中的词
+    expect(prompt).toContain('Do not recommend REMOVE for terms that appear as keywords in trajectory lines');
+  });
+
+  it('tells the model that updates keys are terms, not actions', () => {
+    const prompt = CorrectionObserver.buildPrompt(mockPayload);
+    expect(prompt).toContain('each KEY is the term itself');
+    expect(prompt).toContain('"updates": {"<term>"');
+  });
+
+  it('renders a keyword-less confirmed correction as an explicit gap', () => {
+    const prompt = CorrectionObserver.buildPrompt({
+      ...mockPayload,
+      trajectoryHistory: [
+        { sessionId: 'session-123', timestamp: '2026-05-30T16:00:00Z', term: '', userMessage: '我不清楚你改了什么' },
+      ],
+    });
+    expect(prompt).toContain('keyword="(none matched)"');
+    // 散文不再出现在词位上，模型便不会把它当成关键词原样 ADD 回库
+    expect(prompt).toContain('Never copy a trajectory keyword="(none matched)" line');
+  });
+
   it('runs successfully with valid output', async () => {
     const adapter = new TestDoubleRuntimeAdapter({
       onFetchOutput: (runId) => ({

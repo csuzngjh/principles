@@ -7,8 +7,10 @@
  *
  * Persistence contract:
  *   - Atomic write: temp-file-then-rename (T-38-02)
- *   - Cache invalidated after every write (D-05)
- *   - 200-term hard cap enforced before any write (T-38-01)
+ *   - Cache invalidated after every write (D-05), keyed by stateDir (EP-07)
+ *   - MAX_CORRECTION_KEYWORDS is a budget, not a freeze: at the cap the least
+ *     valuable llm-learned term is evicted so learning never stops (T-38-01).
+ *     seed/user terms are never evicted — they are Owner-authored authority.
  */
 
 import * as fs from 'fs';
@@ -28,10 +30,43 @@ const KEYWORD_STORE_FILE = 'correction_keywords.json';
 const MIN_KEYWORD_WEIGHT = 0.1;
 const MAX_KEYWORD_WEIGHT = 0.9;
 
-let _correctionCueCache: CorrectionKeywordStore | null = null;
+/**
+ * EP-07 / ERR-092: the store is per-stateDir, so the cache is a Map keyed by
+ * the resolved directory. A single-valued slot made one workspace's store
+ * flush into another workspace's file.
+ */
+const _correctionCueCache = new Map<string, CorrectionKeywordStore>();
+
+function cacheKey(stateDir: string): string {
+  return path.resolve(stateDir);
+}
 
 export function _resetCorrectionCueCache(): void {
-  _correctionCueCache = null;
+  _correctionCueCache.clear();
+}
+
+/**
+ * The one term-identity rule for this store. Detection compares lowercased
+ * substrings, so a learned term is the same term when it matches after
+ * trim + lowercase — writers and readers must not disagree (the observer
+ * echoes LLM text with surrounding whitespace).
+ */
+function normalizeTerm(term: string): string {
+  return term.trim().toLowerCase();
+}
+
+function indexOfTerm(keywords: CorrectionKeyword[], term: string): number {
+  const needle = normalizeTerm(term);
+  return keywords.findIndex((k) => normalizeTerm(k.term) === needle);
+}
+
+/** Lower tier = evicted first. See CorrectionCueLearner.evictLeastValuable(). */
+function evictionTier(keyword: CorrectionKeyword): number {
+  const tp = keyword.truePositiveCount ?? 0;
+  const fp = keyword.falsePositiveCount ?? 0;
+  if (tp > 0) return 2;
+  if (fp > 0) return 0;
+  return 1;
 }
 
 function createDefaultStore(): CorrectionKeywordStore {
@@ -45,15 +80,18 @@ function createDefaultStore(): CorrectionKeywordStore {
 }
 
 export function loadCorrectionKeywordStore(stateDir: string): CorrectionKeywordStore {
-  if (_correctionCueCache) return _correctionCueCache;
+  const key = cacheKey(stateDir);
+  const cached = _correctionCueCache.get(key);
+  if (cached) return cached;
 
   const filePath = path.join(stateDir, KEYWORD_STORE_FILE);
 
   if (fs.existsSync(filePath)) {
     try {
       const raw = fs.readFileSync(filePath, 'utf-8');
-      _correctionCueCache = JSON.parse(raw) as CorrectionKeywordStore;
-      return _correctionCueCache;
+      const loaded = JSON.parse(raw) as CorrectionKeywordStore;
+      _correctionCueCache.set(key, loaded);
+      return loaded;
     } catch {
       void 0;
     }
@@ -61,8 +99,8 @@ export function loadCorrectionKeywordStore(stateDir: string): CorrectionKeywordS
 
   const defaultStore = createDefaultStore();
   saveCorrectionKeywordStore(stateDir, defaultStore);
-  _correctionCueCache = defaultStore;
-  return _correctionCueCache;
+  _correctionCueCache.set(key, defaultStore);
+  return defaultStore;
 }
 
 export function saveCorrectionKeywordStore(
@@ -74,15 +112,15 @@ export function saveCorrectionKeywordStore(
   fs.mkdirSync(stateDir, { recursive: true });
   atomicWriteFileSync(filePath, JSON.stringify(store, null, 2));
 
-  _correctionCueCache = null;
+  _correctionCueCache.delete(cacheKey(stateDir));
 }
 
-let _instance: CorrectionCueLearner | null = null;
-let _lastStateDir: string | null = null;
+// EP-07: keyed by stateDir like the store cache — one process hosts several
+// workspaces (getSignalCollectorHost does the same for its hosts).
+const _instances = new Map<string, CorrectionCueLearner>();
 
 export function _resetCorrectionCueLearnerInstance(): void {
-  _instance = null;
-  _lastStateDir = null;
+  _instances.clear();
 }
 
 export class CorrectionCueLearner {
@@ -100,40 +138,55 @@ export class CorrectionCueLearner {
   // 无生产调用者，其维护的 hitCount 在观测面结构性恒 0。检测权威与 TP/FP
   // 反馈（recordTruePositive / recordFalsePositive）保持不变。
 
-  recordTruePositive(term: string): void {
-    const keyword = this.store.keywords.find(k => k.term.toLowerCase() === term.toLowerCase());
-    if (!keyword) return;
+  recordTruePositive(term: string): boolean {
+    const idx = indexOfTerm(this.store.keywords, term);
+    const keyword = idx < 0 ? undefined : this.store.keywords[idx];
+    if (!keyword) return false;
 
-    keyword.truePositiveCount = (keyword.truePositiveCount ?? 0) + 1;
-
-    const keywordIndex = this.store.keywords.findIndex(k => k.term.toLowerCase() === term.toLowerCase());
-    if (keywordIndex >= 0) {
-      this.store.keywords[keywordIndex] = { ...keyword };
-    }
-
+    this.store.keywords[idx] = {
+      ...keyword,
+      truePositiveCount: (keyword.truePositiveCount ?? 0) + 1,
+    };
     this.flush();
+    return true;
   }
 
-  recordFalsePositive(term: string): void {
-    const keyword = this.store.keywords.find(k => k.term.toLowerCase() === term.toLowerCase());
-    if (!keyword) return;
+  recordFalsePositive(term: string): boolean {
+    const idx = indexOfTerm(this.store.keywords, term);
+    const keyword = idx < 0 ? undefined : this.store.keywords[idx];
+    if (!keyword) return false;
 
-    keyword.falsePositiveCount = (keyword.falsePositiveCount ?? 0) + 1;
-
-    keyword.weight = Math.max(MIN_KEYWORD_WEIGHT, keyword.weight * 0.8);
-    keyword.lastHitAt = new Date().toISOString();
-
-    const keywordIndex = this.store.keywords.findIndex(k => k.term.toLowerCase() === term.toLowerCase());
-    if (keywordIndex >= 0) {
-      this.store.keywords[keywordIndex] = { ...keyword };
-    }
-
+    this.store.keywords[idx] = {
+      ...keyword,
+      falsePositiveCount: (keyword.falsePositiveCount ?? 0) + 1,
+      weight: Math.max(MIN_KEYWORD_WEIGHT, keyword.weight * 0.8),
+      lastHitAt: new Date().toISOString(),
+    };
     this.flush();
+    return true;
   }
 
-  add(keyword: Omit<CorrectionKeyword, 'addedAt'>): void {
-    if (this.store.keywords.length >= MAX_CORRECTION_KEYWORDS) {
-      throw new Error('Correction keyword store limit reached (200 terms)');
+  /**
+   * Insert a term, keeping the store inside MAX_CORRECTION_KEYWORDS.
+   *
+   * At the cap the least valuable `llm` term leaves first (see
+   * evictionTier), because throwing instead froze the learning channel
+   * permanently once the store filled up.
+   *
+   * @returns the evicted term, or null when nothing had to be evicted.
+   * @throws only when the store is full and holds no evictable term at all
+   *         (every entry is Owner-authored seed/user), i.e. a cap the system
+   *         is not allowed to resolve on its own.
+   */
+  add(keyword: Omit<CorrectionKeyword, 'addedAt'>): string | null {
+    const evicted = this.store.keywords.length >= MAX_CORRECTION_KEYWORDS
+      ? this.evictLeastValuable()
+      : null;
+
+    if (evicted === null && this.store.keywords.length >= MAX_CORRECTION_KEYWORDS) {
+      throw new Error(
+        `Correction keyword store limit reached (${MAX_CORRECTION_KEYWORDS} terms) and no learned term is evictable`,
+      );
     }
 
     const entry: CorrectionKeyword = {
@@ -143,35 +196,61 @@ export class CorrectionCueLearner {
 
     this.store.keywords.push(entry);
     this.flush();
+    return evicted;
   }
 
-  updateWeight(term: string, weight: number): void {
-    const keyword = this.store.keywords.find(
-      k => k.term.toLowerCase() === term.toLowerCase()
+  /**
+   * Rank learned terms by what the store itself proves about them, worst first:
+   * proven noise (FP without any TP) leaves before never-confirmed terms, which
+   * leave before confirmed-useful ones. Within a tier, low weight then old
+   * addition loses. seed/user entries are Owner authority and never compete.
+   */
+  private evictLeastValuable(): string | null {
+    const candidates: Array<{ keyword: CorrectionKeyword; index: number }> = [];
+    this.store.keywords.forEach((keyword, index) => {
+      if (keyword.source === 'llm') candidates.push({ keyword, index });
+    });
+    if (candidates.length === 0) return null;
+    candidates.sort((a, b) =>
+      evictionTier(a.keyword) - evictionTier(b.keyword)
+      || a.keyword.weight - b.keyword.weight
+      || a.keyword.addedAt.localeCompare(b.keyword.addedAt),
     );
-    if (!keyword) {
-      throw new Error(`Keyword not found: ${term}`);
-    }
 
-    keyword.weight = Math.max(MIN_KEYWORD_WEIGHT, Math.min(MAX_KEYWORD_WEIGHT, weight));
-    const idx = this.store.keywords.findIndex(
-      k => k.term.toLowerCase() === term.toLowerCase()
-    );
-    if (idx >= 0) {
-      this.store.keywords[idx] = { ...keyword };
-    }
+    const loser = candidates[0];
+    if (!loser) return null;
+    this.store.keywords.splice(loser.index, 1);
+    return loser.keyword.term;
+  }
+
+  /** @returns false when the term is not in the store (caller logs the skip). */
+  updateWeight(term: string, weight: number): boolean {
+    const idx = indexOfTerm(this.store.keywords, term);
+    const keyword = idx < 0 ? undefined : this.store.keywords[idx];
+    if (!keyword) return false;
+
+    this.store.keywords[idx] = {
+      ...keyword,
+      weight: Math.max(MIN_KEYWORD_WEIGHT, Math.min(MAX_KEYWORD_WEIGHT, weight)),
+    };
     this.flush();
+    return true;
   }
 
-  remove(term: string): void {
-    const idx = this.store.keywords.findIndex(
-      k => k.term.toLowerCase() === term.toLowerCase()
-    );
-    if (idx < 0) {
-      throw new Error(`Keyword not found: ${term}`);
-    }
+  /** @returns false when the term is not in the store (caller logs the skip). */
+  remove(term: string): boolean {
+    const idx = indexOfTerm(this.store.keywords, term);
+    if (idx < 0) return false;
+
     this.store.keywords.splice(idx, 1);
     this.flush();
+    return true;
+  }
+
+  /** Look a term up with the store's own identity rule (trim + lowercase). */
+  find(term: string): CorrectionKeyword | undefined {
+    const idx = indexOfTerm(this.store.keywords, term);
+    return idx < 0 ? undefined : this.store.keywords[idx];
   }
 
   getStore(): CorrectionKeywordStore {
@@ -187,10 +266,12 @@ export class CorrectionCueLearner {
   }
 
   static get(stateDir: string): CorrectionCueLearner {
-    if (!_instance || _lastStateDir !== stateDir) {
-      _instance = new CorrectionCueLearner(stateDir);
-      _lastStateDir = stateDir;
+    const key = cacheKey(stateDir);
+    let instance = _instances.get(key);
+    if (!instance) {
+      instance = new CorrectionCueLearner(stateDir);
+      _instances.set(key, instance);
     }
-    return _instance;
+    return instance;
   }
 }

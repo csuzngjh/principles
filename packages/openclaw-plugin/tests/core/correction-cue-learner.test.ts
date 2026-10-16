@@ -233,6 +233,172 @@ describe('CORR-05: 200-term limit', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// PRI-9xx: cap is a budget, not a freeze — least valuable learned term is evicted
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('CORR-05b: eviction at the cap keeps learning alive', () => {
+  const kw = (over: Partial<{ term: string; weight: number; source: 'seed' | 'llm' | 'user'; addedAt: string; truePositiveCount: number; falsePositiveCount: number }>) => ({
+    term: 't',
+    weight: 0.5,
+    source: 'llm' as const,
+    addedAt: '2026-01-01T00:00:00Z',
+    ...over,
+  });
+
+  function fillStore(entries: ReturnType<typeof kw>[]) {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ keywords: entries, version: 1 }));
+  }
+
+  function atCap(extra: number): ReturnType<typeof kw>[] {
+    return Array.from({ length: MAX_CORRECTION_KEYWORDS - extra }, (_, i) => kw({ term: `fill-${i}` }));
+  }
+
+  it('evicts the least valuable llm term instead of throwing, and reports it', () => {
+    fillStore([
+      ...atCap(3),
+      kw({ term: 'proven-noise', weight: 0.4, falsePositiveCount: 2 }),
+      kw({ term: 'never-confirmed', weight: 0.3 }),
+      kw({ term: 'proven-useful', weight: 0.2, truePositiveCount: 4 }),
+    ]);
+    const learner = new CorrectionCueLearner(tempDir());
+    expect(learner.getStore().keywords).toHaveLength(MAX_CORRECTION_KEYWORDS);
+
+    const evicted = learner.add({ term: 'new-term', weight: 0.6, source: 'llm' });
+
+    // 顺序：先出「有 FP 无 TP」的实证噪声，再出「从未被确认」的，最后才是有效词
+    expect(evicted).toBe('proven-noise');
+    const terms = learner.getStore().keywords.map(k => k.term);
+    expect(terms).not.toContain('proven-noise');
+    expect(terms).toContain('proven-useful');
+    expect(terms).toContain('new-term');
+    expect(learner.getStore().keywords).toHaveLength(MAX_CORRECTION_KEYWORDS);
+  });
+
+  it('evicts the never-confirmed term with the lowest weight and oldest addition', () => {
+    fillStore([
+      ...atCap(2),
+      kw({ term: 'cheap-old', weight: 0.2, addedAt: '2026-01-01T00:00:00Z' }),
+      kw({ term: 'cheap-new', weight: 0.2, addedAt: '2026-09-01T00:00:00Z' }),
+    ]);
+    const learner = new CorrectionCueLearner(tempDir());
+    expect(learner.add({ term: 'x', weight: 0.5, source: 'llm' })).toBe('cheap-old');
+  });
+
+  it('never evicts seed or user terms — only learned ones compete', () => {
+    fillStore([
+      kw({ term: 'seed-term', source: 'seed', weight: 0.1 }),
+      kw({ term: 'user-term', source: 'user', weight: 0.1 }),
+      ...atCap(2),
+    ]);
+    const learner = new CorrectionCueLearner(tempDir());
+    expect(learner.getStore().keywords).toHaveLength(MAX_CORRECTION_KEYWORDS);
+
+    const evicted = learner.add({ term: 'x', weight: 0.5, source: 'llm' });
+
+    const terms = learner.getStore().keywords.map(k => k.term);
+    expect(terms).toContain('seed-term');
+    expect(terms).toContain('user-term');
+    expect(evicted).not.toBeNull();
+    expect(evicted).not.toMatch(/^(seed-term|user-term)$/);
+  });
+
+  it('still refuses to grow when the store holds nothing the learning may evict', () => {
+    fillStore(Array.from({ length: MAX_CORRECTION_KEYWORDS }, (_, i) => kw({ term: `s-${i}`, source: 'seed' })));
+    const learner = new CorrectionCueLearner(tempDir());
+    expect(() => learner.add({ term: 'new', weight: 0.5, source: 'llm' })).toThrow(
+      'Correction keyword store limit reached (200 terms)',
+    );
+    expect(learner.getStore().keywords).toHaveLength(MAX_CORRECTION_KEYWORDS);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PRI-9xx: term identity rule is shared by every mutation (EP-07 rc-7 class)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('CORR-06: one term-identity rule for read and write', () => {
+  beforeEach(() => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
+      keywords: [{ term: '搞错了', weight: 0.5, source: 'llm', addedAt: '2026-01-01T00:00:00Z' }],
+      version: 1,
+    }));
+  });
+
+  it('resolves surrounding whitespace and case, which ADD already trimmed but UPDATE/REMOVE did not', () => {
+    const learner = new CorrectionCueLearner(tempDir());
+    expect(learner.updateWeight('  搞错了 ', 0.8)).toBe(true);
+    expect(learner.getStore().keywords[0].weight).toBe(0.8);
+    expect(learner.remove('\t搞错了\n')).toBe(true);
+    expect(learner.getStore().keywords).toHaveLength(0);
+  });
+
+  it('reports a miss as false instead of throwing, so the caller can log a reason', () => {
+    const learner = new CorrectionCueLearner(tempDir());
+    expect(learner.updateWeight('优化来优化去', 0.8)).toBe(false);
+    expect(learner.remove('优化来优化去')).toBe(false);
+    expect(learner.recordTruePositive('不存在')).toBe(false);
+    expect(learner.recordFalsePositive('不存在')).toBe(false);
+    expect(learner.find('不存在')).toBeUndefined();
+    expect(learner.find('  搞错了 ')).toMatchObject({ term: '搞错了' });
+  });
+
+  it('records TP/FP evidence with the same rule', () => {
+    const learner = new CorrectionCueLearner(tempDir());
+    expect(learner.recordTruePositive('搞错了')).toBe(true);
+    expect(learner.getStore().keywords[0].truePositiveCount).toBe(1);
+    expect(learner.recordFalsePositive(' 搞错了')).toBe(true);
+    expect(learner.getStore().keywords[0].falsePositiveCount).toBe(1);
+    expect(learner.getStore().keywords[0].weight).toBeCloseTo(0.4);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PRI-9xx: store cache is keyed by stateDir (EP-07 / ERR-092 class)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('CORR-07: per-stateDir cache — one workspace must not flush another store', () => {
+  it('loads and keeps distinct stores for distinct stateDirs in one process', () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockImplementation((p: any) => {
+      const dir = String(p);
+      const term = dir.includes('ws-a') ? 'from-a' : 'from-b';
+      return JSON.stringify({ keywords: [{ term, weight: 0.5, source: 'llm', addedAt: '2026-01-01T00:00:00Z' }], version: 1 });
+    });
+
+    const dirA = path.join(os.tmpdir(), 'ws-a-state');
+    const dirB = path.join(os.tmpdir(), 'ws-b-state');
+
+    const a = CorrectionCueLearner.get(dirA);
+    const b = CorrectionCueLearner.get(dirB);
+
+    expect(a.getStore().keywords[0].term).toBe('from-a');
+    // 旧实现的模块级单槽缓存会把 A 的词库交给 B，随后 B 的 flush 覆写 B 的文件
+    expect(b.getStore().keywords[0].term).toBe('from-b');
+    expect(a).not.toBe(b);
+  });
+
+  it('writes each workspace store to its own file', () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockImplementation((p: any) => JSON.stringify({
+      keywords: [{ term: String(p).includes('ws-a') ? 'from-a' : 'from-b', weight: 0.5, source: 'llm', addedAt: '2026-01-01T00:00:00Z' }],
+      version: 1,
+    }));
+    const dirA = path.join(os.tmpdir(), 'ws-a-write');
+    const dirB = path.join(os.tmpdir(), 'ws-b-write');
+
+    CorrectionCueLearner.get(dirA).updateWeight('from-a', 0.7);
+    CorrectionCueLearner.get(dirB).updateWeight('from-b', 0.7);
+
+    const written = vi.mocked(fs.writeFileSync).mock.calls.map(c => String(c[0]));
+    expect(written.some(p => p.startsWith(dirA))).toBe(true);
+    expect(written.some(p => p.startsWith(dirB))).toBe(true);
+  });
+});
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // CORR-11: Detection semantics
 // ═══════════════════════════════════════════════════════════════════════════════
 //

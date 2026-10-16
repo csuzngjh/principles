@@ -645,7 +645,10 @@ describe('PRI-788 G1: Stage2 确认回写 correction_detected', () => {
     await flushAsync();
 
     expect(wctx.trajectory.markUserTurnCorrection).toHaveBeenCalledTimes(1);
-    expect(wctx.trajectory.markUserTurnCorrection).toHaveBeenCalledWith(42, 'llm:明确指出改错了文件');
+    // correction_cue 的语义是"哪个词命中的"：Stage1 命中了 '不对'，回写就必须保留
+    // 这个词，不能被 LLM 判词覆盖（判词曾把 54/58 行的词位写成散文，喂给词库优化器
+    // 后整句被当成关键词入库）。
+    expect(wctx.trajectory.markUserTurnCorrection).toHaveBeenCalledWith(42, '不对');
     // 回写独立于 pain 事件——事件照常发出
     expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);
   });
@@ -831,6 +834,7 @@ describe('PRI-788 G2: confirmPendingSignal', () => {
     }));
 
     expect(result.disposition).toBe('confirmed');
+    // 队列项未带命中词（item.terms 缺失）→ 回退到判词，保留可追溯的 why。
     expect(wctx.trajectory.markUserTurnCorrection).toHaveBeenCalledWith(55, 'llm:确认是纠正');
     expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);
   });
@@ -1002,8 +1006,13 @@ describe('PRI-687 回归：强烈 Owner 纠正端到端可检出', () => {
     expect(terms.length).toBeGreaterThan(0);
     expect(terms).toContain('什么狗屎');
     expect(wasCorrection).toBe(true);
-    // G1 回写：标志位翻转，owner_message 证据通道恢复
+    // G1 回写：标志位翻转，owner_message 证据通道恢复。
+    // 词位保留 Stage1 命中的学习词，不再被 'llm:<判词>' 覆盖——命中词是
+    // earned precision 与词库优化归因的唯一依据。
     expect(wctx.trajectory.markUserTurnCorrection).toHaveBeenCalledWith(
+      14, expect.stringContaining('什么狗屎'),
+    );
+    expect(wctx.trajectory.markUserTurnCorrection).not.toHaveBeenCalledWith(
       14, expect.stringContaining('llm:'),
     );
     // pain 事件照发

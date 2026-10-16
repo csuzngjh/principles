@@ -7,15 +7,29 @@
  */
 
 import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
+import { SystemLogger } from '../core/system-logger.js';
 import type { CorrectionObserverOutputV1 as CorrectionObserverResult } from '@principles/core/runtime-v2';
 import type { PluginLogger } from '../openclaw-sdk.js';
 import { TrajectoryRegistry } from '../core/trajectory.js';
 
 /**
+ * `updates` is keyed BY term, so a key that is blank or is one of the action
+ * words means the model put the action in the key slot (observed in
+ * production: REMOVE term="add"). Such an entry carries no term and must never
+ * reach the store — rc-1/rc-2: untrusted output is not executed as written.
+ */
+const RESERVED_UPDATE_KEYS = new Set(['add', 'update', 'remove']);
+
+/**
  * Applies CorrectionObserverResult mutations to the keyword store.
- * - ADD: calls learner.add() with new keyword
- * - UPDATE: updates weight on existing keyword
- * - REMOVE: removes keyword from store
+ * - ADD: calls learner.add() with new keyword (evicts a learned term at cap)
+ * - UPDATE: updates weight on an existing keyword
+ * - REMOVE: removes keyword from store; Owner-authored seed terms are protected
+ *
+ * Every key is resolved with the store's own identity rule (trim + lowercase),
+ * and a key that does not resolve is an observable skip, not a thrown error:
+ * the model paraphrases terms constantly, and the old per-op exceptions turned
+ * that into ~47 WARN lines a day that hid real failures.
  */
 export class KeywordOptimizationService {
   private readonly stateDir: string;
@@ -33,36 +47,51 @@ export class KeywordOptimizationService {
 
     const updates = result.updates ?? {};
     if (result.updated && Object.keys(updates).length > 0) {
-      for (const [term, update] of Object.entries(updates)) {
+      for (const [rawKey, update] of Object.entries(updates)) {
+        const term = rawKey.trim().toLowerCase();
+        if (term === '' || RESERVED_UPDATE_KEYS.has(term)) {
+          this.skip(rawKey, update.action, `"${rawKey}" is not a term (blank or action word)`);
+          continue;
+        }
+
+        const existing = learner.find(term);
+        if (update.action !== 'add' && !existing) {
+          this.skip(rawKey, update.action, 'not in store');
+          continue;
+        }
+        if (update.action === 'remove' && existing?.source === 'seed') {
+          this.skip(rawKey, update.action, 'seed term is Owner-authored and cannot be removed by learning');
+          continue;
+        }
+
         try {
           switch (update.action) {
             case 'add': {
-              const normalizedTerm = term.trim().toLowerCase();
-              // Check for existing normalized term to avoid duplicates
-              const existing = learner.getStore().keywords.find(
-                k => k.term.toLowerCase() === normalizedTerm
-              );
               if (existing) {
-                this.logger?.info?.(`[KeywordOptimizationService] ADD skipped: "${term}" already exists as "${existing.term}"`);
+                this.audit('ADD_SKIPPED', `"${term}" already exists as "${existing.term}"`);
                 break;
               }
               const weight = update.weight !== undefined
                 ? Math.max(0.1, Math.min(0.9, update.weight))
                 : 0.5;
-              learner.add({ term: normalizedTerm, weight, source: 'llm' });
-              this.logger?.info?.(`[KeywordOptimizationService] ADD term="${normalizedTerm}" weight=${weight}`);
+              const evicted = learner.add({ term, weight, source: 'llm' });
+              this.audit(
+                'ADD',
+                evicted
+                  ? `term="${term}" weight=${weight} evicted="${evicted}" (store at cap)`
+                  : `term="${term}" weight=${weight}`,
+              );
               break;
             }
             case 'update': {
-              if (update.weight !== undefined) {
-                learner.updateWeight(term, update.weight);
-                this.logger?.info?.(`[KeywordOptimizationService] UPDATE term="${term}" weight=${update.weight}`);
-              }
+              if (update.weight === undefined) break;
+              learner.updateWeight(term, update.weight);
+              this.audit('UPDATE', `term="${term}" weight=${update.weight}`);
               break;
             }
             case 'remove': {
               learner.remove(term);
-              this.logger?.info?.(`[KeywordOptimizationService] REMOVE term="${term}"`);
+              this.audit('REMOVE', `term="${term}"`);
               break;
             }
           }
@@ -93,13 +122,31 @@ export class KeywordOptimizationService {
 
       for (const term of normalizedFpTerms) {
         try {
-          learner.recordFalsePositive(term);
-          this.logger?.info?.(`[KeywordOptimizationService] FP recorded for term="${term}" (weight x0.8)`);
+          if (learner.recordFalsePositive(term)) {
+            this.audit('FP_RECORDED', `term="${term}" (weight x0.8)`);
+          } else {
+            this.skip(term, 'fp', 'not in store');
+          }
         } catch (fpErr) {
           this.logger?.warn?.(`[KeywordOptimizationService] recordFalsePositive failed for term="${term}": ${String(fpErr)}`);
         }
       }
     }
+  }
+
+  /** One Owner-visible line per store mutation: plugin log + SYSTEM log. */
+  private audit(action: string, detail: string): void {
+    this.logger?.info?.(`[KeywordOptimizationService] ${action} ${detail}`);
+    SystemLogger.log(this.workspaceDir, 'KEYWORD_LEARNING', `${action} ${detail}`);
+  }
+
+  /**
+   * A verdict the store cannot act on. Reported, not thrown: the model
+   * paraphrases term keys constantly, and each refusal still needs a reason
+   * (rc-9 — degradation must be observable).
+   */
+  private skip(term: string, action: string, reason: string): void {
+    this.logger?.warn?.(`[KeywordOptimizationService] ${action.toUpperCase()} skipped for term="${term}": ${reason}`);
   }
 
   /**
@@ -117,10 +164,16 @@ export class KeywordOptimizationService {
         const turns = db.listUserTurnsForSession(sessionId);
         for (const turn of turns) {
           if (turn.correctionDetected) {
+            const cue = (turn.correctionCue ?? '').trim();
             history.push({
               sessionId,
               timestamp: turn.createdAt ?? new Date().toISOString(),
-              term: turn.correctionCue ?? 'unknown',
+              // A cue persisted as "llm:<reason>" is Stage2 verdict prose, not a
+              // keyword. Passing it through as `term` is what taught the
+              // optimizer to store whole sentences as terms (54 of 58 detected
+              // turns in the live workspace) — an empty term says honestly
+              // "this correction had no keyword match", which buildPrompt renders.
+              term: cue.startsWith('llm:') ? '' : cue,
               // PRI-823: carry the bounded raw excerpt (≤200 chars, persisted
               // per user_turn) so the observer can judge each hit event on its
               // own message text instead of guessing from the term alone. Same

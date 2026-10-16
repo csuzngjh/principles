@@ -323,7 +323,7 @@ export class SignalCollectorHost {
       // 回写，证据构建器与 correction_samples 闭环永远看不到这条纠正。标志位
       // 陈述"这条消息是纠正"的事实，独立于 pain 事件的 rate limit，故先于
       // routeStrong 执行。
-      this.writeBackConfirmedCorrection(pending.userTurnRowid, confirmed);
+      this.writeBackConfirmedCorrection(pending.userTurnRowid, confirmed, pending.output.matchedTerms);
       // PRI-788 G4: 健康度计数
       updateSignalHealth(this.wctx.stateDir, (s) => {
         s.stage2Confirmed += 1;
@@ -430,7 +430,7 @@ export class SignalCollectorHost {
     const confirmed = mapLlmResultToOutput(llmResult, item.excerpt, item.sessionId, this.config, new Date().toISOString());
     if (confirmed.isSignal && confirmed.strength === 'STRONG') {
       this.emitCueFeedback(item.terms, true);
-      this.writeBackConfirmedCorrection(item.userTurnRowid, confirmed);
+      this.writeBackConfirmedCorrection(item.userTurnRowid, confirmed, item.terms);
       // PRI-844: recover the Owner's VERBATIM turn — the persisted queue only
       // stores a 400-char excerpt. turnIndex comes from the numeric
       // occurrenceId; the full text comes from the user_turns row via rowid.
@@ -463,9 +463,21 @@ export class SignalCollectorHost {
    * 以 Stage1 写入返回的 rowid 精确寻址（rc-7）；rowid 缺失/行已不存在均为
    * 可观测降级，不阻塞路由。
    */
-  private writeBackConfirmedCorrection(userTurnRowid: number | undefined, confirmed: SignalCollectorOutput): void {
+  private writeBackConfirmedCorrection(
+    userTurnRowid: number | undefined,
+    confirmed: SignalCollectorOutput,
+    matchedTerms?: readonly string[],
+  ): void {
     if (userTurnRowid === undefined) return;
-    const cue = confirmed.llmReason ? `llm:${confirmed.llmReason.slice(0, 120)}` : null;
+    // correction_cue means "which keyword fired". Overwriting it with the
+    // Stage2 verdict prose destroyed exactly the evidence the keyword optimizer
+    // needs to attribute a correction to a term, and the prose was then echoed
+    // back into correction_keywords.json as a whole-sentence "term". Verdict
+    // prose is only used when no keyword fired at all.
+    const terms = matchedTerms ?? confirmed.matchedTerms ?? [];
+    const cue = terms.length > 0
+      ? terms.join(', ')
+      : (confirmed.llmReason ? `llm:${confirmed.llmReason.slice(0, 120)}` : null);
     try {
       const updated = this.wctx.trajectory?.markUserTurnCorrection(userTurnRowid, cue);
       if (updated === false) {
