@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { execFileSync, spawn } from 'child_process';
 import * as http from 'http';
@@ -859,6 +860,142 @@ describe('Registry-resolved dependency install (npx parity)', () => {
       expect(fs.existsSync(entry), 'installed installer entry missing').toBe(true);
       const { stdout } = await execFileAsync(process.execPath, [entry, '--version'], { timeout: 60_000 });
       expect(stdout.trim().length, '--version produced no output').toBeGreaterThan(0);
+    } finally {
+      cleanupDir(cleanDir);
+    }
+  }, 420_000);
+
+  // RF-02 (review 2026-10-16): the unknown-host write-back contract, tested
+  // against the EXACT dependency an npx user resolves — never the workspace
+  // symlink. Dual-mode by design so the gate stays honest on BOTH sides of
+  // the publish boundary:
+  //
+  //   - resolved install-layout carries installManifestHostsForPersist
+  //     (post-publish): unknown-host registrations must SURVIVE install
+  //     (codex + workbuddy merge), uninstall of a known host, and the shared
+  //     runtime must stay while any registration remains;
+  //   - it does not (today's 0.3.x registry — PUBLISH_BLOCKED): the installer
+  //     must REFUSE loudly instead of silently dropping the unknown host —
+  //     merge throws install_manifest_malformed (codex path), the workbuddy
+  //     merge reports ok:false with a zero-modification hard stop, and the
+  //     uninstall plan preserves the shared runtime. The gap stays visible;
+  //     no code path may claim forward-compat the dependency cannot deliver.
+  it('unknown-host write-back contract matches the RESOLVED registry dependency (dual-mode)', async () => {
+    const cleanDir = fs.mkdtempSync(path.join(TMPDIR, 'pd-registry-unknown-host-'));
+    try {
+      await npmRun(['install', tarballPath], { cwd: cleanDir, timeout: 300_000 });
+      const installedRoot = path.join(cleanDir, 'node_modules', 'create-principles-disciple');
+      const resolvedLayoutEntry = [
+        path.join(installedRoot, 'node_modules', '@principles', 'install-layout', 'dist', 'index.js'),
+        path.join(cleanDir, 'node_modules', '@principles', 'install-layout', 'dist', 'index.js'),
+      ].find((candidate) => fs.existsSync(candidate));
+      expect(resolvedLayoutEntry, 'registry-resolved install-layout missing').toBeTruthy();
+
+      const layoutModule = await import(pathToFileURL(resolvedLayoutEntry!).href);
+      const forwardCapable = typeof layoutModule.installManifestHostsForPersist === 'function';
+
+      const probe = `
+        import * as fs from 'node:fs';
+        import * as os from 'node:os';
+        import * as path from 'node:path';
+        import { pathToFileURL } from 'node:url';
+        const forwardCapable = ${JSON.stringify(forwardCapable)};
+        const installerRoot = ${JSON.stringify(installedRoot.replaceAll('\\', '/'))};
+        const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-rf02-home-'));
+        process.env.HOME = home;
+        process.env.USERPROFILE = home;
+        const pdDir = path.join(home, '.pd');
+        fs.mkdirSync(pdDir, { recursive: true });
+        const manifestPath = path.join(pdDir, 'install.json');
+        const writeManifest = (hosts) => fs.writeFileSync(manifestPath, JSON.stringify({ layoutVersion: 1, mode: 'canonical', hosts, workspaces: [] }, null, 2));
+        const readHosts = () => JSON.parse(fs.readFileSync(manifestPath, 'utf8')).hosts;
+        const results = { forwardCapable, checks: [] };
+        const record = (name, ok, detail) => { results.checks.push({ name, ok, detail }); if (!ok) results.failed = name; };
+        const { mergeInstallManifestHosts } = await import(pathToFileURL(path.join(installerRoot, 'dist', 'installer.js')).href);
+        const { mergeWorkbuddyIntoInstallManifest } = await import(pathToFileURL(path.join(installerRoot, 'dist', 'installers', 'workbuddy-host-installer.js')).href);
+        const { planSharedRuntimeUninstall } = await import(pathToFileURL(path.join(installerRoot, 'dist', 'uninstaller.js')).href);
+
+        // Scenario 1 — codex install onto a manifest carrying an unknown 4th host.
+        writeManifest(['openclaw', 'gamma']);
+        if (forwardCapable) {
+          const merged = mergeInstallManifestHosts(JSON.parse(fs.readFileSync(manifestPath, 'utf8')), 'codex');
+          record('codex install keeps unknown host', merged.includes('gamma') && merged.includes('codex') && merged.includes('openclaw'), merged.join(','));
+        } else {
+          let threw = null;
+          try { mergeInstallManifestHosts(JSON.parse(fs.readFileSync(manifestPath, 'utf8')), 'codex'); } catch (e) { threw = String(e && e.message || e); }
+          record('old dependency refuses loudly (no silent drop)', threw !== null && threw.includes('install_manifest_malformed'), threw ?? 'NO THROW');
+        }
+
+        // Scenario 2 — workbuddy merge onto a manifest carrying an unknown host.
+        writeManifest(['codex', 'gamma']);
+        const mergeResult = mergeWorkbuddyIntoInstallManifest(manifestPath, path.join(home, 'governance'));
+        if (forwardCapable) {
+          const hosts = readHosts();
+          record('workbuddy install keeps unknown host', mergeResult.ok === true && hosts.includes('gamma') && hosts.includes('workbuddy'), hosts.join(','));
+        } else {
+          let fileAfter = null;
+          try { fileAfter = readHosts(); } catch { /* unreadable counts as modification too */ }
+          record('old dependency hard-stops with zero modification',
+            mergeResult.ok === false && String(mergeResult.reason || '').includes('install_manifest_malformed')
+            && JSON.stringify(fileAfter) === JSON.stringify(['codex', 'gamma']),
+            'ok=' + String(mergeResult.ok) + ' hostsAfter=' + JSON.stringify(fileAfter));
+        }
+
+        // Scenario 3 — uninstalling a KNOWN host must not lose the unknown one,
+        // and the shared runtime must stay while any registration remains.
+        writeManifest(['codex', 'gamma']);
+        const plan = planSharedRuntimeUninstall('codex');
+        if (forwardCapable) {
+          record('uninstall keeps unknown host + shared runtime',
+            plan.removeSharedRuntime === false && JSON.stringify(plan.remainingHosts) === JSON.stringify(['gamma']),
+            'remove=' + String(plan.removeSharedRuntime) + ' remaining=' + JSON.stringify(plan.remainingHosts));
+        } else {
+          record('old dependency preserves runtime on unreadable manifest',
+            plan.removeSharedRuntime === false && typeof plan.warning === 'string' && plan.warning.includes('install_manifest_malformed'),
+            'remove=' + String(plan.removeSharedRuntime) + ' warning=' + String(plan.warning || 'none').slice(0, 120));
+        }
+
+        // Scenario 4 — structurally incompatible layoutVersion keeps refusing dangerous writes in BOTH modes.
+        writeManifest(['codex']);
+        fs.writeFileSync(manifestPath, JSON.stringify({ layoutVersion: 2, mode: 'canonical', hosts: ['codex'] }));
+        let v2Threw = null;
+        try { mergeInstallManifestHosts(JSON.parse(fs.readFileSync(manifestPath, 'utf8')), 'workbuddy'); } catch (e) { v2Threw = String(e && e.message || e); }
+        record('layoutVersion 2 write refused in both modes', v2Threw !== null && v2Threw.includes('install_manifest_unsupported_version'), v2Threw ?? 'NO THROW');
+
+        // Scenario 5 (positive mode only) — every legal host explicitly
+        // uninstalled → the pre-existing full-teardown rule applies.
+        if (forwardCapable) {
+          const allGone = planSharedRuntimeUninstall === null ? null : (() => {
+            writeManifest(['codex']);
+            return planSharedRuntimeUninstall('codex');
+          })();
+          record('all-known-uninstalled allows shared runtime removal (original rule intact)',
+            !!allGone && allGone.removeSharedRuntime === true && allGone.remainingHosts.length === 0,
+            'remove=' + String(allGone && allGone.removeSharedRuntime));
+        }
+
+        fs.rmSync(home, { recursive: true, force: true });
+        console.log(JSON.stringify(results));
+        process.exit(results.failed ? 4 : 0);
+      `;
+      const probePath = path.join(cleanDir, '__probe_unknown_host__.mjs');
+      fs.writeFileSync(probePath, probe, 'utf-8');
+      const { execFile } = await import('node:child_process');
+      const { promisify } = await import('node:util');
+      const execFileAsync = promisify(execFile);
+      try {
+        const { stdout } = await execFileAsync(process.execPath, [probePath], { timeout: 60_000 });
+        const results = JSON.parse(stdout.trim().split('\n').filter(Boolean).at(-1) ?? '{}');
+        for (const check of results.checks ?? []) {
+          console.warn(`[rf-02] ${check.ok ? 'PASS' : 'FAIL'} ${check.name}: ${check.detail}`);
+        }
+        expect(results.failed, `unknown-host contract violated at: ${results.failed} (resolved install-layout forwardCapable=${results.forwardCapable})`).toBeUndefined();
+        // The mode itself must be explicit: an accidental forwardCapable=true
+        // without a real export, or a silent downgrade, fails above.
+        expect(typeof results.forwardCapable).toBe('boolean');
+      } finally {
+        fs.rmSync(probePath, { force: true });
+      }
     } finally {
       cleanupDir(cleanDir);
     }

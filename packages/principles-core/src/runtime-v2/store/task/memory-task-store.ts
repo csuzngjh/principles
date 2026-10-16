@@ -39,7 +39,13 @@ export class MemoryTaskStore implements TaskStore {
     taskId: string,
     expectedDiagnosticJson: string | null,
     patch: TaskStoreUpdatePatch,
-    options?: { readonly expectedStatus?: string },
+    options?: {
+      readonly expectedStatus?: string;
+      readonly expectedAttemptCount?: number;
+      readonly expectedMaxAttempts?: number;
+      readonly expectedLeaseOwner?: string | null;
+      readonly expectedLeaseExpiresAt?: string | null;
+    },
   ): Promise<TaskRecord | null> {
     const existing = this.tasks.get(taskId);
     if (!existing) return null;
@@ -47,6 +53,12 @@ export class MemoryTaskStore implements TaskStore {
     // PRI-983 (SPEC §6.3): parity with SqliteTaskStore's expected-status
     // precondition — content-neutral resets must still arbitrate on status.
     if (options?.expectedStatus !== undefined && existing.status !== options.expectedStatus) return null;
+    // PRI-991 (P1-04): parity with SqliteTaskStore's full decision-snapshot
+    // preconditions (undefined = not asserted; null = assert NULL).
+    if (options?.expectedAttemptCount !== undefined && existing.attemptCount !== options.expectedAttemptCount) return null;
+    if (options?.expectedMaxAttempts !== undefined && existing.maxAttempts !== options.expectedMaxAttempts) return null;
+    if (options?.expectedLeaseOwner !== undefined && (existing.leaseOwner ?? null) !== options.expectedLeaseOwner) return null;
+    if (options?.expectedLeaseExpiresAt !== undefined && (existing.leaseExpiresAt ?? null) !== options.expectedLeaseExpiresAt) return null;
     return this.updateTask(taskId, patch);
   }
 

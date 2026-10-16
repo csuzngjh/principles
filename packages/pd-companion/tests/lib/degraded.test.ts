@@ -9,12 +9,18 @@ import {
 
 describe('describeDegraded (rc-9: every failure has reason + next action)', () => {
   it('returns title, description and nextAction for every reason key', () => {
-    for (const key of ['node_missing', 'pd_not_installed', 'workspace_missing', 'server_crash_loop', 'launch_failed'] as const) {
+    for (const key of ['node_missing', 'pd_not_installed', 'install_manifest_incompatible', 'workspace_missing', 'server_crash_loop', 'launch_failed'] as const) {
       const info = describeDegraded(key);
       expect(info.title.length).toBeGreaterThan(0);
       expect(info.description.length).toBeGreaterThan(0);
       expect(info.nextAction.length).toBeGreaterThan(0);
     }
+  });
+
+  it('the incompatible-manifest page carries the Companion update entry, not an installer re-run', () => {
+    const info = describeDegraded('install_manifest_incompatible', 'install_manifest_unsupported_version: 2');
+    expect(info.nextAction).toContain('companion-v');
+    expect(info.nextAction).not.toContain('create-principles-disciple');
   });
 
   it('prefers pd-cli nextAction when present (single source of guidance)', () => {

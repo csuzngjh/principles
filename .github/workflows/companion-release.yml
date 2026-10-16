@@ -44,15 +44,43 @@ jobs:
           npm run build --workspace=@principles/install-layout
           npm run build --workspace=@principles/pd-companion
 
+      # Unit/contract tests for the exact code that goes into the artifact —
+      # a release build must not ship code its own suite has never run
+      # against (the 0.1.2 parser brick passed a file-existence-only CI).
+      - name: Test companion package
+        run: npm test --workspace=@principles/pd-companion
+
       - name: Package NSIS installer
         run: npm run dist --workspace=@principles/pd-companion
 
       # Fail the build if the packaged app.asar lacks the runtime dependency
-      # (@principles/install-layout) or its Electron main entry cannot resolve
-      # it — checking only that the setup.exe file exists let a broken package
-      # through to end users (0.1.1 gap; see scripts/verify-package.mjs).
-      - name: Verify packaged app contains runtime dependency
+      # (@principles/install-layout), if its Electron main entry cannot
+      # resolve it — or if the BUNDLED parser cannot read the current
+      # production manifest shape (install manifest cross-version gate, Fix C
+      # 2026-10-16: 0.1.2 shipped install-layout 0.1.0 and bricked on the
+      # workbuddy 3-host manifest). Checking only that the setup.exe file
+      # exists let a broken package through to end users (0.1.1 gap; see
+      # scripts/verify-package.mjs).
+      - name: Verify packaged app (runtime dependency + manifest cross-version compatibility)
         run: npm run verify-package --workspace=@principles/pd-companion
+
+      # RF-03 (review 2026-10-16): a companion-vX.Y.Z tag must never produce
+      # an installer whose internal version disagrees with the tag or the
+      # repository. The version bump lands through a release-prep change
+      # BEFORE the tag is cut — tagging the wrong commit fails here, loudly,
+      # before anything is uploaded or published.
+      - name: Verify release version consistency (tag ↔ package.json ↔ app.asar)
+        if: startsWith(github.ref, 'refs/tags/companion-v')
+        # Tag extraction uses Bash parameter expansion, not Windows PowerShell.
+        shell: bash
+        run: npm run check:release-version --workspace=@principles/pd-companion -- --expect-tag "${GITHUB_REF_NAME#companion-v}"
+
+      # workflow_dispatch builds are manual TEST artifacts (no tag): repo ↔
+      # artifact agreement is still enforced, and the GitHub Release step
+      # below only ever runs on companion-v* tags.
+      - name: Verify artifact version consistency (manual dispatch build)
+        if: github.event_name == 'workflow_dispatch'
+        run: npm run check:release-version --workspace=@principles/pd-companion
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -53,6 +53,7 @@ import {
   INSTALL_LAYOUT_VERSION,
   type InstallHost,
 } from '@principles/install-layout';
+import { manifestHostsUnionForPersist } from '../manifest-host-union.js';
 import { atomicReplaceTextFile } from '../utils/config-file-io.js';
 import { getHomeDir, generateConfigYamlContent, getConfigYamlPath, resolveDefaultModelForProvider, isValidHttpBaseUrl } from '../mvp-config.js';
 import type {
@@ -429,7 +430,10 @@ export function mergeWorkbuddyIntoInstallManifest(
       nextAction: `Repair ~/.pd/install.json (layoutVersion ${INSTALL_LAYOUT_VERSION}, mode canonical, hosts array) and re-run.`,
     };
   }
-  const hosts: InstallHost[] = [...new Set([...(parsed.manifest?.hosts ?? []), 'workbuddy' as const])];
+  // Persisted hosts carry forward unknown registrations too
+  // (manifestHostsUnionForPersist) — rebuilding from parsed.manifest.hosts
+  // alone would silently unregister a host this reader version does not know.
+  const hosts: string[] = [...new Set([...manifestHostsUnionForPersist(parsed.manifest), 'workbuddy'])];
   const workspaces = mergeInstallManifestWorkspaces(parsed.manifest, governanceDir);
   let existingRecord: Record<string, unknown> = {};
   if (existed) {

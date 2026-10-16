@@ -45,10 +45,32 @@ describe('planSharedRuntimeUninstall', () => {
     });
   });
 
-  it('fails observable and preserves runtime when the manifest is malformed', () => {
+  // Forward compatibility (2026-10-16): an unknown host registration is a
+  // warning, not a malformed manifest. Uninstalling a KNOWN host must carry
+  // the unknown registration forward, and the shared runtime is only removed
+  // when NO registration (known or unknown) remains.
+  it('carries unknown host registrations forward when uninstalling a known host', () => {
+    writeManifest(['codex', 'unknown']);
+    expect(planSharedRuntimeUninstall('codex')).toMatchObject({
+      removeSharedRuntime: false,
+      remainingHosts: ['unknown'],
+      manifestHasTarget: true,
+    });
+  });
+
+  it('keeps the shared runtime while only an unknown host registration remains', () => {
     writeManifest(['codex', 'unknown']);
     const plan = planSharedRuntimeUninstall('codex');
     expect(plan.removeSharedRuntime).toBe(false);
-    expect(plan.warning).toContain('install_manifest_malformed');
+    expect(plan.remainingHosts).toEqual(['unknown']);
+  });
+
+  it('fails observable and preserves runtime when the manifest is structurally broken', () => {
+    writeManifest(['codex']);
+    const manifest = getInstallManifestPath();
+    fs.writeFileSync(manifest, JSON.stringify({ layoutVersion: 2, mode: 'canonical', hosts: ['codex'] }));
+    const plan = planSharedRuntimeUninstall('codex');
+    expect(plan.removeSharedRuntime).toBe(false);
+    expect(plan.warning).toContain('install_manifest_unsupported_version');
   });
 });
