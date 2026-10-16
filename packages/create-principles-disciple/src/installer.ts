@@ -38,7 +38,7 @@ import {
 } from './mvp-config.js';
 import { getHostInstallers, type HostTarget } from './installers/index.js';
 import type { HostInstallContext, HostInstallResult } from '@principles/core/host';
-import { INSTALL_LAYOUT_VERSION, getWorkbuddyWorkspaceDir, mergeInstallManifestWorkspaces, parseInstallManifest } from '@principles/install-layout';
+import { INSTALL_LAYOUT_VERSION, getWorkbuddyWorkspaceDir, installManifestHostsForPersist, mergeInstallManifestWorkspaces, parseInstallManifest } from '@principles/install-layout';
 import { detectOpenClawMainWorkspaceDivergence } from './utils/workspace-divergence.js';
 import { applySkillLanguageSelection, type SkillLanguage } from './skill-language.js';
 import {
@@ -193,13 +193,16 @@ function pluginInstallDirs(): string[] {
     : [getInstalledPluginDir()];
 }
 
-export function mergeInstallManifestHosts(current: unknown, host: HostTarget): ('codex' | 'openclaw' | 'workbuddy')[] {
-  const hosts = new Set<'codex' | 'openclaw' | 'workbuddy'>();
+export function mergeInstallManifestHosts(current: unknown, host: HostTarget): string[] {
+  const hosts = new Set<string>();
   const parsed = parseInstallManifest(current);
   if (current !== undefined && !parsed.manifest) {
     throw new Error(parsed.error ?? 'install_manifest_malformed');
   }
-  for (const existingHost of parsed.manifest?.hosts ?? []) hosts.add(existingHost);
+  // Persisted hosts must carry forward registrations this reader does not
+  // know (installManifestHostsForPersist) — rebuilding from manifest.hosts
+  // alone would silently unregister a newer host on every re-install.
+  for (const existingHost of installManifestHostsForPersist(parsed.manifest)) hosts.add(existingHost);
   if (host === 'all' || host === 'codex') hosts.add('codex');
   if (host === 'all' || host === 'openclaw') hosts.add('openclaw');
   // WorkBuddy is its own explicit target — 'all' must not attach a third host
@@ -208,7 +211,7 @@ export function mergeInstallManifestHosts(current: unknown, host: HostTarget): (
   return [...hosts];
 }
 
-function resolveInstallManifestHosts(host: HostTarget): ('codex' | 'openclaw' | 'workbuddy')[] {
+function resolveInstallManifestHosts(host: HostTarget): string[] {
   let current: unknown;
   try {
     current = JSON.parse(readFileSync(getInstallManifestPath(), 'utf8')) as unknown;
@@ -251,7 +254,7 @@ function resolveInstallManifestWorkspaces(workspaceDir: string, host?: HostTarge
   return workspaces;
 }
 
-function writeInstallManifest(hosts: ('codex' | 'openclaw' | 'workbuddy')[], workspaces: string[]): void {
+function writeInstallManifest(hosts: string[], workspaces: string[]): void {
   mkdirSync(getPdDir(), { recursive: true });
   // PRI-709 P0-1: merge into the existing record. This file has more than one
   // writer (the update side owns `channel` / `autoCheck` / `releaseMetadataUrl`);
@@ -3794,7 +3797,7 @@ export async function install(
   let runtimeBackupDir: string | null = null;
   // ADR-0024 D-2: non-null once the transaction is planned (first mutation is imminent).
   let journal: InstallerJournal | null = null;
-  let installManifestHosts: ('codex' | 'openclaw' | 'workbuddy')[];
+  let installManifestHosts: string[];
   const components: ComponentStatus = { plugin: 'skipped', cli: 'skipped', console: 'skipped' };
   const verification: VerificationResult = { features: 'skipped', storyA: 'skipped' };
   let consoleProcess: ChildProcess | null = null;

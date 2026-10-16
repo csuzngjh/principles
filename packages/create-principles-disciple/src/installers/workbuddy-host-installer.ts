@@ -48,6 +48,7 @@ import * as yaml from 'js-yaml';
 import {
   getInstallLayoutPaths,
   getWorkbuddyWorkspaceDir,
+  installManifestHostsForPersist,
   mergeInstallManifestWorkspaces,
   parseInstallManifest,
   INSTALL_LAYOUT_VERSION,
@@ -429,7 +430,10 @@ export function mergeWorkbuddyIntoInstallManifest(
       nextAction: `Repair ~/.pd/install.json (layoutVersion ${INSTALL_LAYOUT_VERSION}, mode canonical, hosts array) and re-run.`,
     };
   }
-  const hosts: InstallHost[] = [...new Set([...(parsed.manifest?.hosts ?? []), 'workbuddy' as const])];
+  // Persisted hosts carry forward unknown registrations too
+  // (installManifestHostsForPersist) — rebuilding from parsed.manifest.hosts
+  // alone would silently unregister a host this reader version does not know.
+  const hosts: string[] = [...new Set([...installManifestHostsForPersist(parsed.manifest), 'workbuddy'])];
   const workspaces = mergeInstallManifestWorkspaces(parsed.manifest, governanceDir);
   let existingRecord: Record<string, unknown> = {};
   if (existed) {

@@ -9,7 +9,23 @@ export type InstallHost = (typeof INSTALL_HOSTS)[number];
 export interface InstallManifest {
   layoutVersion: typeof INSTALL_LAYOUT_VERSION;
   mode: InstallLayoutMode;
+  /**
+   * Hosts THIS reader version recognizes. Host strings the reader does not
+   * know are NOT here — they land in `unknownHosts` so an install registered
+   * with a newer host keeps resolving instead of being rejected as malformed.
+   */
   hosts: InstallHost[];
+  /**
+   * Host strings present in the persisted `hosts` array that this reader
+   * version does not know (forward compatibility, 2026-10-16). A NEWER
+   * installer may register a host an OLDER reader never heard of; that is a
+   * compatibility warning, never "manifest malformed" — treating it as one
+   * made every pre-WorkBuddy Companion report `console_runtime_not_installed`
+   * against a healthy 3-host install and mass-stop its workers. Fail-closed
+   * stays reserved for structural damage: wrong layoutVersion, non-array or
+   * non-string hosts, bad mode, illegal workspace paths.
+   */
+  unknownHosts?: readonly string[];
   /**
    * Canonical absolute paths of Workspaces the install serves (PRI-624 Slice C).
    * Optional so pre-PRI-624 manifests stay valid; always normalized to
@@ -18,6 +34,12 @@ export interface InstallManifest {
    * from this list (SPEC §13 "canonical install manifest").
    */
   workspaces?: readonly string[];
+}
+
+/** Structured forward-compatibility observation from manifest parsing (rc-9). */
+export interface InstallManifestWarning {
+  code: 'install_manifest_unknown_host';
+  host: string;
 }
 
 export interface InstallLayoutPaths {
@@ -63,6 +85,8 @@ export interface LayoutResolution {
   manifest?: InstallManifest;
   reason?: string;
   nextAction?: string;
+  /** Forward-compatibility warnings surfaced while parsing the manifest. */
+  warnings?: readonly InstallManifestWarning[];
 }
 
 export interface ResolveInstallLayoutOptions {
@@ -80,6 +104,10 @@ function isHost(value: unknown): value is InstallHost {
   return typeof value === 'string' && (INSTALL_HOSTS as readonly string[]).includes(value);
 }
 
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0;
+}
+
 /** Workspace entries must be non-empty absolute paths — the Companion spawns per-Workspace workers keyed by canonical path. */
 function parseWorkspaceList(value: unknown): { workspaces?: string[]; error?: string } {
   if (value === undefined) return { workspaces: [] };
@@ -95,7 +123,8 @@ function parseWorkspaceList(value: unknown): { workspaces?: string[]; error?: st
   return { workspaces: resolved };
 }
 
-/** Merge one Workspace into a manifest's workspace list (installer write path). Idempotent by canonical path. */
+/**
+ * Merge one Workspace into a manifest's workspace list (installer write path). Idempotent by canonical path. */
 export function mergeInstallManifestWorkspaces(current: InstallManifest | undefined, workspaceDir: string): string[] {
   const canonical = path.resolve(workspaceDir);
   const resolved: string[] = [];
@@ -107,7 +136,24 @@ export function mergeInstallManifestWorkspaces(current: InstallManifest | undefi
   return resolved;
 }
 
-export function parseInstallManifest(value: unknown): { manifest?: InstallManifest; error?: string } {
+/**
+ * The `hosts` array a manifest WRITER must persist: every registration the
+ * reader recognized plus every unknown one, deduped, known hosts first.
+ * Writers that rebuild `hosts` from `manifest.hosts` alone silently DELETE a
+ * newer host's registration — the write-side twin of the read-side
+ * unknown-host brick (2026-10-16). `undefined` yields `[]` so the installer's
+ * fresh-install path keeps working unchanged.
+ */
+export function installManifestHostsForPersist(manifest: InstallManifest | undefined): string[] {
+  return [...new Set([...(manifest?.hosts ?? []), ...(manifest?.unknownHosts ?? [])])];
+}
+
+/**
+ * Parse the install manifest. Structural damage fails closed with `error`;
+ * a host string this reader version does not know is a `warnings` entry and
+ * the manifest still parses (forward compatibility — see `InstallManifest.unknownHosts`).
+ */
+export function parseInstallManifest(value: unknown): { manifest?: InstallManifest; warnings?: readonly InstallManifestWarning[]; error?: string } {
   if (!isRecord(value)) return { error: 'install_manifest_malformed: expected an object' };
   if (value.layoutVersion !== INSTALL_LAYOUT_VERSION) {
     return { error: `install_manifest_unsupported_version: ${String(value.layoutVersion)}` };
@@ -115,13 +161,53 @@ export function parseInstallManifest(value: unknown): { manifest?: InstallManife
   if (value.mode !== 'canonical' && value.mode !== 'legacy') {
     return { error: 'install_manifest_malformed: mode must be canonical or legacy' };
   }
-  if (!Array.isArray(value.hosts) || value.hosts.length === 0 || !value.hosts.every(isHost)) {
-    return { error: 'install_manifest_malformed: hosts must contain codex, openclaw and/or workbuddy' };
+  // Host entries must be non-empty strings; WHICH strings are valid hosts is
+  // version-relative knowledge, so unknown strings warn instead of failing.
+  if (!Array.isArray(value.hosts) || !value.hosts.every(isNonEmptyString)) {
+    return { error: 'install_manifest_malformed: hosts must be an array of host name strings' };
   }
-  const hosts = [...new Set(value.hosts)];
+  // Idempotency: the parser must re-read its own output. An all-unknown-hosts
+  // manifest parses to hosts: [] + unknownHosts, so the optional persisted
+  // `unknownHosts` field is accepted on input too (installManifestHostsForPersist
+  // reunifies them on write; writers persist the union into `hosts`).
+  let carriedUnknownHosts: readonly string[] = [];
+  if (value.unknownHosts !== undefined) {
+    if (!Array.isArray(value.unknownHosts) || !value.unknownHosts.every(isNonEmptyString)) {
+      return { error: 'install_manifest_malformed: unknownHosts must be an array of host name strings' };
+    }
+    carriedUnknownHosts = value.unknownHosts.filter((host) => !isHost(host));
+  }
+  if (value.hosts.length === 0 && carriedUnknownHosts.length === 0) {
+    return { error: 'install_manifest_malformed: hosts must contain at least one host' };
+  }
+  const hosts: InstallHost[] = [];
+  const unknownHosts: string[] = [];
+  const warnings: InstallManifestWarning[] = [];
+  for (const host of [...new Set(value.hosts)]) {
+    if (isHost(host)) hosts.push(host);
+    else {
+      unknownHosts.push(host);
+      warnings.push({ code: 'install_manifest_unknown_host', host });
+    }
+  }
+  for (const host of carriedUnknownHosts) {
+    if (!unknownHosts.includes(host)) {
+      unknownHosts.push(host);
+      warnings.push({ code: 'install_manifest_unknown_host', host });
+    }
+  }
   const workspaces = parseWorkspaceList(value.workspaces);
   if (workspaces.error) return { error: workspaces.error };
-  return { manifest: { layoutVersion: INSTALL_LAYOUT_VERSION, mode: value.mode, hosts, workspaces: workspaces.workspaces } };
+  return {
+    manifest: {
+      layoutVersion: INSTALL_LAYOUT_VERSION,
+      mode: value.mode,
+      hosts,
+      ...(unknownHosts.length > 0 ? { unknownHosts } : {}),
+      workspaces: workspaces.workspaces,
+    },
+    ...(warnings.length > 0 ? { warnings } : {}),
+  };
 }
 
 export function getInstallLayoutPaths(homeDir: string): InstallLayoutPaths {
@@ -166,8 +252,9 @@ export function getWorkbuddyWorkspaceDir(homeDir: string): string {
 export function resolveInstallLayout(options: ResolveInstallLayoutOptions): LayoutResolution {
   const paths = getInstallLayoutPaths(options.homeDir);
   const parsed = parseInstallManifest(options.manifest);
+  const { warnings } = parsed;
   if (parsed.manifest && parsed.manifest.mode === 'canonical' && options.canonicalRuntimeExists) {
-    return { mode: 'canonical', paths, manifest: parsed.manifest };
+    return { mode: 'canonical', paths, manifest: parsed.manifest, ...(warnings !== undefined ? { warnings } : {}) };
   }
   if (options.legacyExtensionExists) {
     return {
@@ -176,6 +263,7 @@ export function resolveInstallLayout(options: ResolveInstallLayoutOptions): Layo
       ...(parsed.manifest ? { manifest: parsed.manifest } : {}),
       reason: parsed.error ?? 'install_layout_legacy_fallback',
       nextAction: 'Run the installer update to migrate the shared runtime to ~/.pd/runtime.',
+      ...(warnings !== undefined ? { warnings } : {}),
     };
   }
   return {
