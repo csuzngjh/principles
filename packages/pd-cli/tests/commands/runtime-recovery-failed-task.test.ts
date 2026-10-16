@@ -641,6 +641,34 @@ describe('P1-03 (r2) — the unified workspace authority guards this command', (
   });
 });
 
+describe('cli-4: explicit --dry-run must never project an audit record', () => {
+  it('rejects --dry-run with --repair-audit without creating the missing JSONL projection', async () => {
+    const ws = makeWorkspace();
+    await seedTask(ws, failedArtificer({ taskId: TASK_ID, attemptCount: 1, maxAttempts: 3 }));
+    const auditPath = path.join(ws, '.state', 'recovery_actions.jsonl');
+    const cap = captureStdoutJson();
+    try {
+      await handleRuntimeRecoveryFailedTask({
+        workspace: ws, taskId: TASK_ID, confirm: true, decidedBy: 'owner/test', json: true,
+      });
+      expect(cap.records[0]['ok']).toBe(true);
+      fs.rmSync(auditPath);
+      const before = await getTask(ws, TASK_ID);
+      process.exitCode = undefined;
+      await handleRuntimeRecoveryFailedTask({
+        workspace: ws, taskId: TASK_ID, dryRun: true, repairAudit: true, json: true,
+      });
+      expect(cap.records[1]['ok']).toBe(false);
+      expect(cap.records[1]['reasonCode']).toBe('flag_conflict');
+      expect(process.exitCode).toBe(1);
+      expect(fs.existsSync(auditPath)).toBe(false);
+      expect(await getTask(ws, TASK_ID)).toEqual(before);
+    } finally {
+      cap.restore();
+    }
+  });
+});
+
 describe('P2 (r2) — concurrent repair-audit is idempotent under contention', () => {
   it('two concurrent repairs project exactly one line per actionId', async () => {
     const ws = makeWorkspace();
