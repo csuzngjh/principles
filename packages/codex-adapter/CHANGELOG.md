@@ -1,5 +1,17 @@
 # @principles/codex-adapter
 
+## 0.5.6
+
+### Patch Changes
+
+- 06152af: Connect Codex Owner-labelled behavior evidence to the shared internalization preflight. Reuse one validated assembler across OpenClaw, Codex and evidence attach/resume; read trajectory data without creating or migrating it and preserve host-specific semantics. Missing labels reach Owner review without model calls or attempts; missing/corrupt sources remain observable source faults.
+- Updated dependencies [fec1306]
+- Updated dependencies [574954a]
+- Updated dependencies [06152af]
+  - @principles/install-layout@0.4.0
+  - @principles/core@1.293.0
+  - @principles/host-runtime@0.10.0
+
 ## 0.5.5
 
 ### Patch Changes

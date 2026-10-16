@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.293.0
+
+### Minor Changes
+
+- 574954a: PRI-990: single-task failed recovery — pd runtime recovery failed-task --task-id <exact> (dry-run default, CAS-guarded confirm, explicit --reset-budget for exhausted budgets, recovery_actions.jsonl audit with previousAttemptCount). Core: recoverSingleFailedTask + inspectFailedTaskRecovery strict path; legacy batch recoverFailedTask upgraded to the same CAS precondition with unchanged observable behavior.
+
 ## 1.292.2
 
 ### Patch Changes
