@@ -964,7 +964,7 @@ recoveryCmd
     });
   });
 
-// PRI-990: exact single-task counterpart of `failed-tasks`. A batch --force
+// PRI-991: exact single-task counterpart of `failed-tasks`. A batch --force
 // resets the budget of EVERY exhausted failed task; this command recovers
 // exactly one Owner-selected task (CAS-guarded, audited, dry-run default).
 registerRuntimeRecoveryFailedTaskCommand(recoveryCmd);

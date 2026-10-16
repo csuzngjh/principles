@@ -2,7 +2,27 @@
 
 > 关联：SPEC-PD-IAER-001 / PR #2041（已并）/ PR #2045（Pilot 报告，CONDITIONAL PASS）
 > Linear：PRI-991（本工程工单）；PRI-980～985 维持 Done；PRI-988/989（P2）不受本报告影响
-> 执行者：ZCode（任务书《IAER Production Pilot P1 收口》）
+> 执行者：ZCode（任务书《IAER Production Pilot P1 收口》+《一次性修复指令：PR #2046》）
+
+---
+
+## 0. 评审修复轮（2026-10-16，NO-GO → 修复）
+
+首轮实现的评审结论为 NO-GO（4 项 P1 + 1 项 CI 阻断）。逐项核实结论、根因与修复：
+
+| 缺陷 | 核实结论 | 根因（精确位置） | 修复 | 红灯→绿灯 |
+| --- | --- | --- | --- | --- |
+| **P1-01 dry-run 非真只读** | 属实 | `runtime-recovery-failed-task.ts` 无条件 `readonly:false` 打开连接；底层 `SqliteConnection` 的 readonly 模式默认会 bootstrap 缺失的 DB（`sqlite-connection.ts:107`） | ① `createRuntimeStateHandle`/`RuntimeStateManagerOptions` 透传既有 `bootstrapIfMissing` 选项（默认 true 向后兼容）；② dry-run 以 `readonly:true + bootstrapIfMissing:false` 打开（零 mkdir/零 PRAGMA/零 schema 初始化）；③ 两模式先做 `state.db` 存在性前置检查 → 结构化 `storage_unavailable`；④ `SqliteError`（SQLITE_*）归类 storage_unavailable | T01-A（缺 DB 不创建任何文件/目录）、T01-B（state.db sha256 逐字节不变 + 无审计文件）、T01-C（schema-less 文件不被迁移，字节不变）、T01-F（confirm 仍可用）——修复前红、修复后绿 |
+| **P1-02 损坏 metadata 被当作"无 intent"** | 属实 | `recoverSingleFailedTask` 对 `hydrate===null` 不区分"无 pi_metadata"与"pi_metadata 损坏" | 结构化恢复资格合同（单一权威 `hydratePITaskRecord`，无第二解析器）：payload 缺失/无 `pi_metadata` 键 = 合法 legacy 形状（生产实证：6 条 failed diagnostician 均无 pi_metadata——completionIntent 不可能存在，放行保持与批量一致，T02-F）；`pi_metadata` 存在但 JSON 损坏/水合失败 = `invalid_task_metadata` 拒绝（fail-closed，含"损坏本应携带 pending intent"的攻击面测试）。畸形 JSON 由 SQLite 列级 `json_valid` CHECK 在存储层拦截（防御纵深，测试实证 store 拒绝写入）。dry-run 与 confirm 复用同一 `assessRecoveryMetadataGuard` | T02-A/B/C'/E/G 七用例 |
+| **P1-03 恢复成功但审计可能丢失且不可发现** | 属实 | CAS 提交与 `appendRecoveryAction` 跨存储无原子性；JSONL 失败时 CLI 误报 `recovery_error`；进程在两步之间崩溃则审计缺口不可检测 | 采用现有架构支持的最小可靠方案（无新表、无第二审计系统）：**恢复事实（`lastFailedTaskRecovery`：actionId/previousAttemptCount/previousMaxAttempts/newMaxAttempts/budgetResetApplied/operator 标签）随同一条 CAS UPDATE 写入任务自身 metadata**（PRI-982 `ownerEvidenceSelection` 同款可选字段扩展模式，形状校验 fail-closed）；JSONL 降级为该事实的**投影**；投影失败 → `recovered_but_audit_failed`（明确区分，exit 0，含全部状态事实，禁止 re-confirm）；新增 `--repair-audit` 幂等补偿（按 actionId 去重重投影，零任务变更）。**诚实边界**：metadata 可水合任务（全部 83 条候选群体）具备崩溃可恢复的持久事实；legacy 无 metadata 任务（diagnostician）其 JSONL 投影无行事实兜底——已在 --repair-audit 的 `no_durable_recovery_record` 拒绝与报告中如实声明 | T03-B（不可写审计 → recovered_but_audit_failed + 行事实在）、T03-E/F（删 JSONL 模拟崩溃窗口 → repair 重投影 actionId 一致 + 幂等无重复）、T03-C/D（refusal 路径零审计）、T03-G/H（previousAttemptCount 留存 + legacy 行兼容） |
+| **P1-04 CAS 未覆盖决策依赖的全部字段** | 属实 | 前置条件仅 status+diagnosticJson；并发写者改预算/lease（status 不变）可被覆盖 | 增强既有 CAS 原语（非新原语）：`updateTaskIfDiagnosticJsonUnchanged` options 增加 `expectedAttemptCount/expectedMaxAttempts/expectedLeaseOwner/expectedLeaseExpiresAt`（全部可选、AND、`IS` NULL 安全、向后兼容；sqlite 与 memory store 同款 parity）；两条恢复路径共享 `failedRecoveryPreconditions(task,'failed')` 全快照；重置预算的新值经同一 WHERE 保护，不覆盖他者新预算。**竞争窗口清单**（写入路径盘点）：runner 的 markTask*/updateTask、lease manager acquire/release、orchestrator reconcile、owner-retry/attach/resume（均 CAS）——报告 §3 | T04-A~F/H：真实竞争注入（包装 getTask 在守卫读后、CAS 前经真实 SQLite 改 attempt/max/lease/leaseExpiry/metadata）→ 全部 conflict 且字段保持他者写入值；T04-G 正常合同 3/3→0/6 不变；store 级 4 用例逐前置条件验证 |
+| **CI ERR-001** | 属实 | `readAuthoredChannel` 的 `as Record` cast（JSON.parse 不可信值） | 换 `isRecord` type guard（checker 官方 next-action 认可模式）；新增 core `isValidFailedTaskRecoveryAuditRecord` 同款守卫；不使用豁免注释、不禁用 checker | `check:runtime-contract` 通过（提交重写后） |
+| P2-A decidedBy 身份语义 | 属实 | 标签被可误读为已认证身份 | CLI help 与输出明确 "Operator-provided label … NOT an authenticated identity"；报告授权卡同步措辞 | 文案层 |
+| P2-B nextAction 分 kind | 属实 | 单一 generic 文案 | 导出并复用批量命令的 `buildExecutionNextAction`（单一 guidance 权威）；code_tool_hook Artificer 保留 IAER 证据门专用文案；diagnostician/diag_*/prompt Artificer 各得正确入口 | 文案层 |
+| P3-A 工单号 | 属实 | 首提交误引 PRI-990（他人紧急工单） | 注释/报告/changeset 全部更正为 PRI-991；PR 标题/正文/置顶评论已更正 | 已在案 |
+| P3-B 模型预算表述 | 属实 | "上限 12 次"是 Pilot 计划约定非运行时硬限制 | 授权卡改注：运行时既有约束为 maxAttempts=6 与 profile timeoutMs=300s；无 per-run 调用次数硬闸，Pilot 依赖 Owner 中止条件 | 报告层 |
+
+**测试规模（本轮）**：core single-task 26（+11）、store CAS 9（+5）、CLI 18（+7）、host-runtime 集成 11、既有恢复回归全绿（含 T16 批量行为与 83-任务隔离 T05）。
 
 ---
 
@@ -94,7 +114,7 @@ CLI 测试 T05：同一真实 SQLite 库中播种 **83 条** terminal-failed art
 - **消费者竞争**：gateway 在跑 2 分钟周期；恢复为 pending 后下一周期即触发证据预检（预期直接 NHR，等待 attach——不产生模型调用）；若周期恰在恢复瞬间租用该任务（概率极低），CAS 使恢复失败并报 conflict，零副作用
 - **回滚/补偿**：恢复本身不删任何数据；如需回退，任务可重新 `pd runtime internalization retry --confirm`（NHR→pending 方向不适用——回退路径为：任其留在 NHR 即无任何模型消耗；或将任务行手工置回 failed 需 Owner 明确指令，不自动执行）
 - **后续链路**：恢复 → 消费者 NHR → Owner `evidence attach --confirm`（选定负例 Tool Call 1 条 + 正例 1~3 条 + ownerDesiredOutcome）→ `evidence resume --confirm` → Artificer L2 真实执行
-- **模型预算**：Artificer L2 全链（生成→校验→确定性重放→提交）预计 3–8 次调用，**硬上限建议 12 次**；Provider=当前 zai glm-5.3 通道，单次 Pilot 预计量级为人民币个位数；**超额/连续失败中止条件**：同一任务 attempt 消耗达 6（新预算上限）或单次 L2 预算超时（profile timeoutMs=300s）即停，不自动重试
+- **模型预算**：Artificer L2 全链（生成→校验→确定性重放→提交）预计 3–8 次调用；**「上限 12 次」是本 Pilot 计划的 Owner 侧约定，不是运行时已实现的硬限制**（风险声明：运行时既有约束仅为 maxAttempts=6 与 profile timeoutMs=300s，不存在 per-run 模型调用次数硬闸；调用次数控制依赖 Owner 按下述中止条件人工介入）。Provider=当前 zai glm-5.3 通道，单次 Pilot 预计量级为人民币个位数；**超额/连续失败中止条件**：同一任务 attempt 消耗达 6（新预算上限）或单次 L2 预算超时（profile timeoutMs=300s）即停，不自动重试
 - **执行命令**（部署 PRI-991 PR 后）：
   1. `pd runtime recovery failed-task --task-id "artificer-605ba208-f9e9-42e4-9eb3-7730cd1031cd-code_tool_hook" --dry-run`（复核）
   2. `pd runtime recovery failed-task --task-id "artificer-605ba208-f9e9-42e4-9eb3-7730cd1031cd-code_tool_hook" --confirm --reset-budget --decidedBy owner/console`

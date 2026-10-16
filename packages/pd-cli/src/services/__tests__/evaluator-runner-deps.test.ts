@@ -344,7 +344,7 @@ describe('PRI-510 (DEFECT-004): createEvaluatorRunnerDeps wires repair loop into
     const base = { taskId: repairTaskId, taskKind: 'artificer', attemptCount: 1, maxAttempts: 3, createdAt: now, updatedAt: now, diagnosticJson: '{}' };
     for (const terminalStatus of ['succeeded', 'failed', 'needs_human_review'] as const) {
       createdTasks.length = 0;
-      createdTasks.push({ ...base, status: terminalStatus } as TaskRecord);
+      createdTasks.push({ ...base, status: terminalStatus });
       await expect(deps.seedArtificerRepairTask(params)).rejects.toThrow(new RegExp(`terminal status ${terminalStatus}`));
     }
   });

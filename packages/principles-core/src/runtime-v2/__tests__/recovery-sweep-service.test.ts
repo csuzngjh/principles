@@ -222,7 +222,13 @@ describe('recoverFailedTask — reset semantics unchanged (PRI-674)', () => {
         leaseExpiresAt: null,
         resultRef: null,
       },
-      { expectedStatus: 'failed' },
+      {
+        expectedStatus: 'failed',
+        expectedAttemptCount: 1,
+        expectedMaxAttempts: 3,
+        expectedLeaseOwner: 'runner-1',
+        expectedLeaseExpiresAt: '2026-09-08T01:00:00.000Z',
+      },
     );
     expect(result).toMatchObject({
       taskId: 'diag-parent',

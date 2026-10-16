@@ -234,14 +234,23 @@ describe('recoverSingleFailedTask (strict single-task path)', () => {
     }
   });
 
-  it('preserves the metadata payload across the recovery (diagnosticJson untouched)', async () => {
+  it('metadata preserved except the embedded recovery audit fact (PRI-991 P1-03 contract)', async () => {
     const ws = makeWorkspace();
     const handle = await createRuntimeStateHandle({ workspaceDir: ws, readonly: false });
     try {
       const seeded = await seed(handle, failedArtificer());
-      await recoverSingleFailedTask(handle.stateManager, seeded.taskId, { resetBudget: true });
+      const outcome = await recoverSingleFailedTask(handle.stateManager, seeded.taskId, { resetBudget: true });
+      expect(outcome.status).toBe('recovered');
       const task = await handle.stateManager.getTask(seeded.taskId);
-      expect(task?.diagnosticJson).toBe(seeded.diagnosticJson);
+      // Every original metadata field survives; the recovery audit fact is
+      // added (hydration normalization like rejectionCount may also appear,
+      // same as the owner-retry merge path).
+      const before = JSON.parse(String(seeded.diagnosticJson));
+      const after = JSON.parse(String(task?.diagnosticJson));
+      expect(after.pi_metadata).toMatchObject(before.pi_metadata);
+      expect(after.pi_metadata.lastFailedTaskRecovery).toBeDefined();
+      expect(after.pi_metadata.lastFailedTaskRecovery.previousAttemptCount).toBe(3);
+      expect(after.pi_metadata.lastFailedTaskRecovery.actionId).toBe((outcome as { actionId?: string }).actionId);
     } finally {
       await handle.close();
     }
@@ -363,6 +372,230 @@ describe('legacy recoverFailedTask keeps its batch contract under the CAS upgrad
 
       const repeat = await recoverFailedTask(handle.stateManager, 'artificer-batch-2', true);
       expect(repeat).toBeNull();
+    } finally {
+      await handle.close();
+    }
+  });
+});
+
+// ── PRI-991 review round: P1-02 metadata contract + P1-04 full-snapshot CAS ──
+
+import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
+
+describe('P1-02 — corrupted metadata fails closed (invalid_task_metadata)', () => {
+  it('refuses recovery when pi_metadata is present but corrupt (malformed repairPayload)', async () => {
+    const ws = makeWorkspace();
+    const handle = await createRuntimeStateHandle({ workspaceDir: ws, readonly: false });
+    try {
+      // pi_metadata present but repairPayload.requiredChanges = [] → hydration null
+      const corrupt = JSON.stringify({ pi_metadata: {
+        dependencyTaskIds: [], channel: 'code_tool_hook', timeoutMs: 300_000,
+        inputArtifactRefs: [], outputArtifactRefs: [],
+        repairPayload: { requiredChanges: [], concerns: [], previousScore: 0.9, repairIteration: 1, sourceArtificerArtifactId: 'a', sourceEvaluatorTaskId: 'e' },
+      }});
+      await seed(handle, failedArtificer({ diagnosticJson: corrupt }));
+      const inspection = await inspectFailedTaskRecovery(handle.stateManager, 'artificer-605ba208-f9e9-42e4-9eb3-7730cd1031cd-code_tool_hook');
+      expect(inspection.eligible).toBe(false);
+      expect(inspection.reasonCode).toBe('invalid_task_metadata');
+
+      const outcome = await recoverSingleFailedTask(handle.stateManager, 'artificer-605ba208-f9e9-42e4-9eb3-7730cd1031cd-code_tool_hook', { resetBudget: true });
+      expect(outcome.status).toBe('invalid_task_metadata');
+      const task = await handle.stateManager.getTask('artificer-605ba208-f9e9-42e4-9eb3-7730cd1031cd-code_tool_hook');
+      expect(task?.status).toBe('failed');
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('malformed JSON payloads are unreachable through SQLite itself (defense in depth at the column)', async () => {
+    // tasks.diagnostic_json carries a json_valid CHECK constraint — the store
+    // refuses to persist unparseable payloads, so the recovery path can only
+    // ever see parseable JSON (corrupt-SHAPE payloads are covered above). The
+    // invalid_task_metadata guard remains as defense for raw-file corruption
+    // scenarios where the constraint does not apply.
+    const ws = makeWorkspace();
+    const handle = await createRuntimeStateHandle({ workspaceDir: ws, readonly: false });
+    try {
+      await expect(seed(handle, failedArtificer({ diagnosticJson: '{"pi_metadata": {broken' })))
+        .rejects.toThrow(/malformed JSON/i);
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('refuses a corrupt payload that WOULD have carried a pending intent (guard cannot be bypassed by corruption)', async () => {
+    const ws = makeWorkspace();
+    const handle = await createRuntimeStateHandle({ workspaceDir: ws, readonly: false });
+    try {
+      // Corrupted BEYOND hydration: decision value invalid — hydration null.
+      const corruptIntent = JSON.stringify({ pi_metadata: {
+        dependencyTaskIds: [], channel: 'prompt', timeoutMs: 300_000,
+        inputArtifactRefs: [], outputArtifactRefs: [],
+        completionIntent: { decision: 'HALLUCINATED', sourceRunId: 'r', revisionEpoch: 0, status: 'pending' },
+      }});
+      await seed(handle, failedArtificer({ diagnosticJson: corruptIntent }));
+      const outcome = await recoverSingleFailedTask(handle.stateManager, 'artificer-605ba208-f9e9-42e4-9eb3-7730cd1031cd-code_tool_hook', { resetBudget: true });
+      expect(outcome.status).toBe('invalid_task_metadata');
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('allows legacy tasks WITHOUT pi_metadata (valid JSON or NULL payload) — diagnostician contract preserved (T02-F)', async () => {
+    const ws = makeWorkspace();
+    const handle = await createRuntimeStateHandle({ workspaceDir: ws, readonly: false });
+    try {
+      // Production shape: failed diagnostician tasks carry root-level JSON without pi_metadata.
+      await seed(handle, failedArtificer({ taskId: 'diag-parent-1', taskKind: 'diagnostician', attemptCount: 1, diagnosticJson: '{"sourcePainId":"pain_x"}' }));
+      const inspection = await inspectFailedTaskRecovery(handle.stateManager, 'diag-parent-1');
+      expect(inspection.eligible).toBe(true);
+      expect(inspection.reasonCode).toBe('eligible');
+      const outcome = await recoverSingleFailedTask(handle.stateManager, 'diag-parent-1');
+      expect(outcome.status).toBe('recovered');
+
+      // NULL payload: no metadata, no intent possible.
+      await seed(handle, failedArtificer({ taskId: 'artificer-legacy-null', attemptCount: 1, diagnosticJson: undefined }));
+      const outcome2 = await recoverSingleFailedTask(handle.stateManager, 'artificer-legacy-null');
+      expect(outcome2.status).toBe('recovered');
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('dry-run and confirm share the same metadata judgment (T02-G)', async () => {
+    const ws = makeWorkspace();
+    const handle = await createRuntimeStateHandle({ workspaceDir: ws, readonly: false });
+    try {
+      const corrupt = JSON.stringify({ pi_metadata: { dependencyTaskIds: 'not-an-array' } });
+      await seed(handle, failedArtificer({ diagnosticJson: corrupt }));
+      const inspection = await inspectFailedTaskRecovery(handle.stateManager, 'artificer-605ba208-f9e9-42e4-9eb3-7730cd1031cd-code_tool_hook');
+      const outcome = await recoverSingleFailedTask(handle.stateManager, 'artificer-605ba208-f9e9-42e4-9eb3-7730cd1031cd-code_tool_hook', { resetBudget: true });
+      expect(inspection.reasonCode).toBe('invalid_task_metadata');
+      expect(outcome.status).toBe('invalid_task_metadata');
+    } finally {
+      await handle.close();
+    }
+  });
+});
+
+describe('P1-04 — CAS covers every field the recovery decision depends on', () => {
+  interface GetTaskFn {
+    (taskId: string): Promise<TaskRecord | null>;
+  }
+  interface CasFn {
+    (
+      taskId: string,
+      expectedDiagnosticJson: string | null,
+      patch: Record<string, unknown>,
+      options?: { readonly expectedStatus?: string },
+    ): Promise<TaskRecord | null>;
+  }
+
+  /** Real race: the wrapped getTask mutates the row AFTER the guard read but
+   * BEFORE the CAS runs (interleaving via the await boundary) — through the
+   * REAL SQLite store, not a mock. */
+  function raceInjector(mgr: RuntimeStateManager, mutate: (manager: RuntimeStateManager) => Promise<void>): { getTask: GetTaskFn; updateTaskIfDiagnosticJsonUnchanged: CasFn } {
+    return {
+      getTask: async (taskId: string) => {
+        const task = await mgr.getTask(taskId);
+        await mutate(mgr);
+        return task;
+      },
+      updateTaskIfDiagnosticJsonUnchanged: (taskId, expectedDiagnosticJson, patch, options) =>
+        mgr.updateTaskIfDiagnosticJsonUnchanged(taskId, expectedDiagnosticJson, patch as never, options),
+    };
+  }
+
+  it('another writer bumps attemptCount after the read → conflict (T04-A), fields preserved (T04-H)', async () => {
+    const ws = makeWorkspace();
+    const handle = await createRuntimeStateHandle({ workspaceDir: ws, readonly: false });
+    try {
+      await seed(handle, failedArtificer());
+      const outcome = await recoverSingleFailedTask(raceInjector(handle.stateManager, async (mgr) => {
+        await mgr.updateTask('artificer-605ba208-f9e9-42e4-9eb3-7730cd1031cd-code_tool_hook', { attemptCount: 9 });
+      }), 'artificer-605ba208-f9e9-42e4-9eb3-7730cd1031cd-code_tool_hook', { resetBudget: true });
+      expect(outcome.status).toBe('conflict');
+      const task = await handle.stateManager.getTask('artificer-605ba208-f9e9-42e4-9eb3-7730cd1031cd-code_tool_hook');
+      expect(task?.status).toBe('failed');
+      expect(task?.attemptCount).toBe(9);
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('another writer changes maxAttempts after the read → conflict (T04-B)', async () => {
+    const ws = makeWorkspace();
+    const handle = await createRuntimeStateHandle({ workspaceDir: ws, readonly: false });
+    try {
+      await seed(handle, failedArtificer());
+      const outcome = await recoverSingleFailedTask(raceInjector(handle.stateManager, async (mgr) => {
+        await mgr.updateTask('artificer-605ba208-f9e9-42e4-9eb3-7730cd1031cd-code_tool_hook', { maxAttempts: 10 });
+      }), 'artificer-605ba208-f9e9-42e4-9eb3-7730cd1031cd-code_tool_hook', { resetBudget: true });
+      expect(outcome.status).toBe('conflict');
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('another writer acquires a lease after the read → conflict (T04-C)', async () => {
+    const ws = makeWorkspace();
+    const handle = await createRuntimeStateHandle({ workspaceDir: ws, readonly: false });
+    try {
+      await seed(handle, failedArtificer());
+      const outcome = await recoverSingleFailedTask(raceInjector(handle.stateManager, async (mgr) => {
+        await mgr.updateTask('artificer-605ba208-f9e9-42e4-9eb3-7730cd1031cd-code_tool_hook', {
+          leaseOwner: 'auto-consumer',
+          leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+        });
+      }), 'artificer-605ba208-f9e9-42e4-9eb3-7730cd1031cd-code_tool_hook', { resetBudget: true });
+      expect(outcome.status).toBe('conflict');
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('another writer changes ONLY the lease expiry after the read → conflict (T04-D)', async () => {
+    const ws = makeWorkspace();
+    const handle = await createRuntimeStateHandle({ workspaceDir: ws, readonly: false });
+    try {
+      await seed(handle, failedArtificer({
+        taskId: 'artificer-lease2',
+        leaseOwner: 'runner',
+        leaseExpiresAt: '2026-01-01T00:00:00.000Z',
+      }));
+      const outcome = await recoverSingleFailedTask(raceInjector(handle.stateManager, async (mgr) => {
+        await mgr.updateTask('artificer-lease2', { leaseExpiresAt: '2027-01-01T00:00:00.000Z' });
+      }), 'artificer-lease2', { resetBudget: true });
+      expect(outcome.status).toBe('conflict');
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('another writer changes diagnosticJson after the read → conflict (T04-E)', async () => {
+    const ws = makeWorkspace();
+    const handle = await createRuntimeStateHandle({ workspaceDir: ws, readonly: false });
+    try {
+      await seed(handle, failedArtificer());
+      const outcome = await recoverSingleFailedTask(raceInjector(handle.stateManager, async (mgr) => {
+        await mgr.updateTask('artificer-605ba208-f9e9-42e4-9eb3-7730cd1031cd-code_tool_hook', { diagnosticJson: '{"pi_metadata":{"tampered":true}}' });
+      }), 'artificer-605ba208-f9e9-42e4-9eb3-7730cd1031cd-code_tool_hook', { resetBudget: true });
+      expect(outcome.status).toBe('conflict');
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('happy path keeps the 3/3 → 0/6 contract under the extended preconditions (T04-G)', async () => {
+    const ws = makeWorkspace();
+    const handle = await createRuntimeStateHandle({ workspaceDir: ws, readonly: false });
+    try {
+      await seed(handle, failedArtificer());
+      const outcome = await recoverSingleFailedTask(handle.stateManager, 'artificer-605ba208-f9e9-42e4-9eb3-7730cd1031cd-code_tool_hook', { resetBudget: true });
+      expect(outcome.status).toBe('recovered');
+      if (outcome.status !== 'recovered') return;
+      expect(outcome.previousAttemptCount).toBe(3);
+      expect(outcome.newMaxAttempts).toBe(6);
     } finally {
       await handle.close();
     }

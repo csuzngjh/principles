@@ -44,8 +44,11 @@ const DIAG_STAGE_ID_PREFIXES = ['diag_rootcause-', 'diag_distiller-', 'diag_rout
  *   (SplitDiagnosticianRunner.ensureSubTask), with the
  *   diag_<stage>-<parentTaskId> ID convention as fallback. When the parent
  *   cannot be resolved we say so instead of printing a guessed command.
+ * PRI-991 (P2-B): exported and reused by the single-task recovery command so
+ * both recovery surfaces emit IDENTICAL per-kind execution guidance — no
+ * second guidance authority.
  */
-function buildExecutionNextAction(t: { taskId: string; taskKind: string; inputRef: string | null }): string {
+export function buildExecutionNextAction(t: { taskId: string; taskKind: string; inputRef: string | null }): string {
   // Branch on the authoritative taskKind, never on taskId shape.
   if (isDiagnosticianStageKind(t.taskKind)) {
     // Parent from persisted inputRef; fallback: diag_<stage>-<parentTaskId>

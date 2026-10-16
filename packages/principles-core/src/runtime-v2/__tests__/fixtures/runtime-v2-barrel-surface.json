@@ -1,6 +1,6 @@
 {
   "barrel": "src/runtime-v2/index.ts",
-  "count": 1908,
+  "count": 1909,
   "names": [
     "ADMISSION_CONFIDENCE_THRESHOLD",
     "ADMISSION_POLICY_VERSION",
@@ -432,6 +432,7 @@
     "FULL_CHAIN_CONSUMER_RUNNER_KINDS",
     "FailedTaskDetail",
     "FailedTaskFilter",
+    "FailedTaskRecoveryAuditRecord",
     "FailedTaskRecoveryInfo",
     "FailedTaskRecoveryInspection",
     "FailedTaskRecoveryResult",

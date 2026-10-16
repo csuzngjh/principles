@@ -1026,6 +1026,7 @@ export type {
   OwnerResolutionRecord,
   OwnerResolutionAction,
   OwnerResolutionStatus,
+  FailedTaskRecoveryAuditRecord,
 } from './internalization/pitask-metadata.js';
 
 export {

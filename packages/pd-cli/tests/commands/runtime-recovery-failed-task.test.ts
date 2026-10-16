@@ -352,3 +352,166 @@ describe('T16 — the existing batch failed-tasks command is unchanged', () => {
     expect((await getTask(ws, 'artificer-exh-1'))?.status).toBe('failed');
   });
 });
+
+// ── PRI-991 review round: P1-01 read-only dry-run + P1-03 audit consistency ──
+
+import { createHash } from 'node:crypto';
+
+function sha256File(p: string): string {
+  return createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+}
+
+describe('P1-01 — dry-run is truly read-only from the connection up', () => {
+  it('T01-A: missing state.db → structured storage_unavailable, NO files or dirs created', async () => {
+    const ws = makeWorkspace(); // .pd exists (makeWorkspace creates it), but NO state.db
+    const cap = captureStdoutJson();
+    try {
+      await handleRuntimeRecoveryFailedTask({ workspace: ws, taskId: TASK_ID, dryRun: true, json: true });
+    } finally {
+      cap.restore();
+    }
+    expect(process.exitCode).toBe(1);
+    const record = cap.records[0];
+    expect(record['ok']).toBe(false);
+    expect(record['reasonCode']).toBe('storage_unavailable');
+    expect(record['nextAction']).toBeTruthy();
+    expect(fs.existsSync(path.join(ws, '.pd', 'state.db'))).toBe(false);
+    expect(fs.existsSync(path.join(ws, '.pd', 'state.db-wal'))).toBe(false);
+    expect(fs.existsSync(path.join(ws, '.pd', 'state.db-shm'))).toBe(false);
+  });
+
+  it('T01-B: existing state.db → file bytes, task row and audit log untouched by dry-run', async () => {
+    const ws = makeWorkspace();
+    await seedTask(ws, failedArtificer());
+    const dbPath = path.join(ws, '.pd', 'state.db');
+    const before = sha256File(dbPath);
+    // The SEED's write connection may leave WAL sidecars — snapshot the dir
+    // and assert the dry-run adds/removes nothing.
+    const beforeListing = fs.readdirSync(path.join(ws, '.pd')).sort();
+    const cap = captureStdoutJson();
+    try {
+      await handleRuntimeRecoveryFailedTask({ workspace: ws, taskId: TASK_ID, dryRun: true, json: true });
+    } finally {
+      cap.restore();
+    }
+    expect(process.exitCode ?? 0).toBe(0);
+    // Zero DB-content writes: byte-identical state.db.
+    expect(sha256File(dbPath)).toBe(before);
+    // No audit file, and the ONLY new sidecar files are SQLite's read
+    // machinery for an existing WAL database (-shm/-wal; inherent to any
+    // reader, no schema/data effect). Nothing else may appear.
+    const after = fs.readdirSync(path.join(ws, '.pd')).sort();
+    const newFiles = after.filter((f) => !beforeListing.includes(f));
+    expect(newFiles.every((f) => f === 'state.db-shm' || f === 'state.db-wal')).toBe(true);
+    expect(fs.existsSync(path.join(ws, '.state', 'recovery_actions.jsonl'))).toBe(false);
+  });
+
+  it('T01-C: a schema-less sqlite file is NOT auto-migrated by dry-run', async () => {
+    const ws = makeWorkspace();
+    const dbPath = path.join(ws, '.pd', 'state.db');
+    fs.writeFileSync(dbPath, Buffer.from('SQLite format 3\0' + 'x'.repeat(64), 'binary'));
+    const before = sha256File(dbPath);
+    const cap = captureStdoutJson();
+    try {
+      await handleRuntimeRecoveryFailedTask({ workspace: ws, taskId: TASK_ID, dryRun: true, json: true });
+    } finally {
+      cap.restore();
+    }
+    expect(process.exitCode).toBe(1);
+    expect(cap.records[0]['reasonCode']).toBe('storage_unavailable');
+    expect(sha256File(dbPath)).toBe(before);
+  });
+});
+
+describe('P1-03 — recovery state and audit consistency', () => {
+  it('T03-B: unwritable audit sink → recovered_but_audit_failed, task IS recovered, facts reported', async () => {
+    const ws = makeWorkspace();
+    await seedTask(ws, failedArtificer({ taskId: TASK_ID, attemptCount: 1, maxAttempts: 3 }));
+    // Make the JSONL path undeliverable: a DIRECTORY where the audit file belongs.
+    fs.mkdirSync(path.join(ws, '.state'), { recursive: true });
+    fs.mkdirSync(path.join(ws, '.state', 'recovery_actions.jsonl'));
+    const cap = captureStdoutJson();
+    try {
+      await handleRuntimeRecoveryFailedTask({ workspace: ws, taskId: TASK_ID, confirm: true, decidedBy: 'owner/test', json: true });
+    } finally {
+      cap.restore();
+    }
+    const record = cap.records[0];
+    expect(record['ok']).toBe(true);
+    expect(record['auditStatus']).toBe('recovered_but_audit_failed');
+    expect(record['newStatus']).toBe('pending');
+    expect(record['previousAttemptCount']).toBe(1);
+    expect(record['nextAction']).toBeTruthy();
+    // The durable compensation fact survives in the task row.
+    const task = await getTask(ws, TASK_ID);
+    expect(task?.status).toBe('pending');
+    expect(String(task?.diagnosticJson)).toContain('lastFailedTaskRecovery');
+  });
+
+  it('T03-E/F: repair-audit re-projects the durable row fact idempotently (crash-window compensation)', async () => {
+    const ws = makeWorkspace();
+    await seedTask(ws, failedArtificer({ taskId: TASK_ID, attemptCount: 1, maxAttempts: 3 }));
+    const cap = captureStdoutJson();
+    let actionId = '';
+    try {
+      await handleRuntimeRecoveryFailedTask({ workspace: ws, taskId: TASK_ID, confirm: true, decidedBy: 'owner/test', json: true });
+      actionId = String(cap.records[0]['auditActionId'] ?? '');
+      expect(actionId).not.toBe('');
+      // Simulate the crash window: the JSONL projection was lost.
+      fs.rmSync(path.join(ws, '.state', 'recovery_actions.jsonl'));
+      expect(listRecoveryActions(ws, { taskId: TASK_ID })).toHaveLength(0);
+
+      // Repair #1: re-project from the durable row fact.
+      process.exitCode = undefined;
+      await handleRuntimeRecoveryFailedTask({ workspace: ws, taskId: TASK_ID, repairAudit: true, json: true });
+      expect(process.exitCode ?? 0).toBe(0);
+      const repaired = listRecoveryActions(ws, { taskId: TASK_ID });
+      expect(repaired).toHaveLength(1);
+      expect(repaired[0].actionId).toBe(actionId);
+      expect(repaired[0].previousStatus).toBe('failed');
+
+      // Repair #2 (T03-F): idempotent — no duplicate audit line.
+      process.exitCode = undefined;
+      await handleRuntimeRecoveryFailedTask({ workspace: ws, taskId: TASK_ID, repairAudit: true, json: true });
+      expect(listRecoveryActions(ws, { taskId: TASK_ID })).toHaveLength(1);
+    } finally {
+      cap.restore();
+    }
+  });
+
+  it('T03-C/D: refusal paths never write a success audit line', async () => {
+    const ws = makeWorkspace();
+    await seedTask(ws, failedArtificer({ taskId: TASK_ID }));
+    const cap = captureStdoutJson();
+    try {
+      await handleRuntimeRecoveryFailedTask({ workspace: ws, taskId: TASK_ID, confirm: true, json: true });
+      expect(cap.records[0]['reasonCode']).toBe('budget_exhausted');
+      expect(listRecoveryActions(ws)).toHaveLength(0);
+    } finally {
+      cap.restore();
+    }
+  });
+
+  it('T03-G/H: audit retains previousAttemptCount; legacy JSONL lines remain readable', async () => {
+    const ws = makeWorkspace();
+    await seedTask(ws, failedArtificer({ taskId: TASK_ID }));
+    fs.mkdirSync(path.join(ws, '.state'), { recursive: true });
+    fs.appendFileSync(path.join(ws, '.state', 'recovery_actions.jsonl'), JSON.stringify({
+      actionId: 'legacy-1', taskId: 'other-task', action: 'recover', previousStatus: 'failed',
+      operator: null, reason: null, createdAt: '2026-09-01T00:00:00.000Z', result: 'recovered',
+    }) + '\n', 'utf-8');
+
+    const cap = captureStdoutJson();
+    try {
+      await handleRuntimeRecoveryFailedTask({ workspace: ws, taskId: TASK_ID, confirm: true, resetBudget: true, json: true });
+    } finally {
+      cap.restore();
+    }
+    const actions = listRecoveryActions(ws);
+    expect(actions).toHaveLength(2);
+    const legacy = actions.find((a) => a.actionId === 'legacy-1');
+    expect(legacy).toBeDefined();
+    const mine = actions.find((a) => a.taskId === TASK_ID);
+    expect((mine as { previousAttemptCount?: number }).previousAttemptCount).toBe(3);
+  });
+});

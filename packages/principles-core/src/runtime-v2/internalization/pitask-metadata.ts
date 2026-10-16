@@ -433,6 +433,30 @@ export interface PITaskMetadata {
    * validateOwnerEvidenceSelectionShape（与 readiness gate 单一权威）。
    */
   ownerEvidenceSelection?: OwnerEvidenceSelection;
+  /**
+   * PRI-991 (P1-03): durable audit fact of a single-task failed→pending
+   * recovery, written in the SAME conditional UPDATE that moves the task to
+   * pending. This is the crash-durable authority the JSONL projection
+   * (recovery_actions.jsonl) is repaired from — the JSONL is a projection,
+   * never the recovery audit's source of truth. Write-once at recovery time;
+   * presence-but-malformed fails the whole metadata (rc-3, same semantics as
+   * completionIntent/ownerEvidenceSelection).
+   */
+  lastFailedTaskRecovery?: FailedTaskRecoveryAuditRecord;
+}
+
+/** PRI-991 (P1-03): crash-durable single-task recovery audit fact. */
+export interface FailedTaskRecoveryAuditRecord {
+  /** Matches the recovery_actions.jsonl projection line's actionId. */
+  readonly actionId: string;
+  readonly recoveredAt: string;
+  /** Operator-provided label (--decidedBy); NOT an authenticated identity. */
+  readonly operator: string | null;
+  readonly previousStatus: string;
+  readonly previousAttemptCount: number;
+  readonly previousMaxAttempts: number;
+  readonly newMaxAttempts: number;
+  readonly budgetResetApplied: boolean;
 }
 
 /** evaluator / rollout_reviewer 的合法 runner 决策值 */
@@ -535,6 +559,7 @@ export function serializePITaskMetadata(metadata: PITaskMetadata): string {
       humanReviewContext: metadata.humanReviewContext,
       ownerResolutions: metadata.ownerResolutions,
       ownerEvidenceSelection: metadata.ownerEvidenceSelection,
+      lastFailedTaskRecovery: metadata.lastFailedTaskRecovery,
     },
   });
 }
@@ -573,6 +598,7 @@ export function mergePITaskMetadata(base: PITaskRecord, overrides: Partial<PITas
     humanReviewContext: base.humanReviewContext,
     ownerResolutions: base.ownerResolutions,
     ownerEvidenceSelection: base.ownerEvidenceSelection,
+    lastFailedTaskRecovery: base.lastFailedTaskRecovery,
     ...overrides,
   };
 }
@@ -672,8 +698,31 @@ function isValidOwnerEvidenceSelection(value: unknown): value is OwnerEvidenceSe
   return validateOwnerEvidenceSelectionShape(value).length === 0;
 }
 
+
 function isNonEmptyString(v: unknown): v is string {
   return typeof v === 'string' && v.trim() !== '';
+}
+/** PRI-991 (P1-03): ERR-001-safe record narrowing for untrusted parsed JSON. */
+function isRecordMap(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * PRI-991 (P1-03): trust boundary for the durable single-task recovery audit
+ * fact read back from diagnosticJson (rc-1/rc-2 — type guard, no `as` bypass).
+ */
+export function isValidFailedTaskRecoveryAuditRecord(value: unknown): value is FailedTaskRecoveryAuditRecord {
+  if (!isRecordMap(value)) return false;
+  const r = value;
+  if (!isNonEmptyString(r.actionId)) return false;
+  if (!isNonEmptyString(r.recoveredAt)) return false;
+  if (!(r.operator === null || typeof r.operator === 'string')) return false;
+  if (typeof r.previousStatus !== 'string') return false;
+  if (typeof r.previousAttemptCount !== 'number' || !Number.isSafeInteger(r.previousAttemptCount) || r.previousAttemptCount < 0) return false;
+  if (typeof r.previousMaxAttempts !== 'number' || !Number.isSafeInteger(r.previousMaxAttempts) || r.previousMaxAttempts < 1) return false;
+  if (typeof r.newMaxAttempts !== 'number' || !Number.isSafeInteger(r.newMaxAttempts) || r.newMaxAttempts < 1) return false;
+  if (typeof r.budgetResetApplied !== 'boolean') return false;
+  return true;
 }
 
 /**
@@ -974,6 +1023,12 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
     ({ ownerEvidenceSelection } = m);
   }
 
+  // lastFailedTaskRecovery (PRI-991 P1-03): optional, full shape validation —
+  // a corrupted recovery audit fact fails the whole metadata (rc-3), never a
+  // silent "this task was never recovered".
+  const { lastFailedTaskRecovery } = m;
+  if (lastFailedTaskRecovery !== undefined && !isValidFailedTaskRecoveryAuditRecord(lastFailedTaskRecovery)) return null;
+
   return {
     dependencyTaskIds: m.dependencyTaskIds as string[],
     channel: m.channel,
@@ -997,6 +1052,7 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
     humanReviewContext,
     ownerResolutions,
     ownerEvidenceSelection,
+    lastFailedTaskRecovery,
   };
 }
 
@@ -1055,5 +1111,6 @@ export function hydratePITaskRecord(task: TaskRecord): PITaskRecord | null {
     humanReviewContext: meta.humanReviewContext,
     ownerResolutions: meta.ownerResolutions,
     ownerEvidenceSelection: meta.ownerEvidenceSelection,
+    lastFailedTaskRecovery: meta.lastFailedTaskRecovery,
   } as unknown as PITaskRecord;
 }
