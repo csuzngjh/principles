@@ -22,6 +22,7 @@ import {
 import type {
   BehaviorExamplePack,
 } from '../behavior-example-pack.js';
+import type { RuleContextV2 } from '../rule-context-v2.js';
 import type { GoldenTraceCaseInput } from '../artificer-output.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────
@@ -315,7 +316,7 @@ describe('SPEC-RULECODE-QUALITY-001 Q04 — identical-input label conflict detec
   });
 
   it('rejects opposite labels when the action AND the ruleContext are both identical (unsatisfiable pair)', () => {
-    const sharedContext = {
+    const sharedContext: RuleContextV2 = {
       version: 2,
       history: { status: 'available', truncated: false, calls: [] },
       facts: { priorReadOfTarget: 'no', readCount: 0, writeCount: 0, uniqueWritePathCount: 0, sameActionBlockCount: null },

@@ -425,11 +425,15 @@ describe('consumeSourceFaultBackoffSkip — cycle-entry backoff consumption (Q21
     let secondEncounter: boolean;
     try {
       const { stateManager } = handle;
-      const refreshed = hydratePITaskRecord(await stateManager.getTask(TASK_ID));
-      if (!refreshed) throw new Error('task missing');
+      const refreshedTask = await stateManager.getTask(TASK_ID);
+      if (refreshedTask === null) throw new Error('task missing');
+      const refreshed = hydratePITaskRecord(refreshedTask);
+      if (refreshed === null) throw new Error('task missing');
       firstEncounter = await consumeSourceFaultBackoffSkip(TASK_ID, refreshed, stateManager);
-      const afterSkip = hydratePITaskRecord(await stateManager.getTask(TASK_ID));
-      if (!afterSkip) throw new Error('task missing');
+      const afterSkipTask = await stateManager.getTask(TASK_ID);
+      if (afterSkipTask === null) throw new Error('task missing');
+      const afterSkip = hydratePITaskRecord(afterSkipTask);
+      if (afterSkip === null) throw new Error('task missing');
       expect(afterSkip.sourceFaultBackoff).toMatchObject({ consecutiveFailures: 1, skipCycles: 0 });
       secondEncounter = await consumeSourceFaultBackoffSkip(TASK_ID, afterSkip, stateManager);
     } finally {
