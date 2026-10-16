@@ -33,9 +33,8 @@
  * nothing (cli-2/cli-5/cli-6). No V1 fallback exists on any path (PRI-780).
  * No new feature flag: rollback = git revert (mvp-q-3).
  *
- * Lazy plugin import: `principles-disciple/rulehost-evidence` is loaded only
- * when an attach/resume actually needs assembly — same rationale as
- * run-rulehost (pd --version must not pull the plugin bundle).
+ * Host-neutral trajectory assembly is shared with the background worker.
+ * It uses persisted host tool declarations; unknown host semantics fail loud.
  */
 
 import * as path from 'path';
@@ -50,8 +49,8 @@ import {
   type OwnerEvidenceAttachOutcome,
   type OwnerEvidenceResumeOutcome,
   type BehaviorEvidencePort,
-  type BehaviorExamplePack,
 } from '@principles/core/runtime-v2';
+import { createWorkspaceBehaviorEvidencePort } from '@principles/host-runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
 // ── shared output ───────────────────────────────────────────────────────────
@@ -75,46 +74,15 @@ function workspaceReady(workspaceDir: string): boolean {
   return fs.existsSync(path.join(workspaceDir, '.pd', 'state.db'));
 }
 
-interface AssemblerModule {
-  BehaviorExamplePackAssembler: new (opts: { workspaceDir: string; stateDir: string }) => {
-    assemble(input: {
-      sourcePainId: string;
-      ownerDesiredOutcome: string;
-      sourceNegativeToolCallId: number;
-      positiveToolCallIds: readonly number[];
-      projectDir: string;
-    }): BehaviorExamplePack;
-  };
-  RuleHostEvidenceRegistry: { dispose(workspaceDir: string): unknown };
-}
-
-/**
- * Build the production BehaviorEvidencePort from the plugin assembler — the
- * exact chain run-rulehost uses (lazy import + registry dispose in finally).
- * Returns null when the plugin bundle is unavailable (structured refusal at
- * the caller — never a silent skip).
- */
+/** The same host-neutral assembler and trajectory reader used by the Codex worker. */
 async function withAssemblerPort<T>(
   workspaceDir: string,
   fn: (port: BehaviorEvidencePort) => Promise<T>,
 ): Promise<{ ok: true; value: T } | { ok: false; error: unknown }> {
-  let module: AssemblerModule;
   try {
-    module = await import('principles-disciple/rulehost-evidence');
+    return { ok: true, value: await fn(createWorkspaceBehaviorEvidencePort(workspaceDir)) };
   } catch (error) {
     return { ok: false, error };
-  }
-  const assembler = new module.BehaviorExamplePackAssembler({
-    workspaceDir,
-    stateDir: path.join(workspaceDir, '.state'),
-  });
-  try {
-    const value = await fn({
-      assemble: (selection) => assembler.assemble({ ...selection, projectDir: workspaceDir }),
-    });
-    return { ok: true, value };
-  } finally {
-    module.RuleHostEvidenceRegistry.dispose(workspaceDir);
   }
 }
 
@@ -300,7 +268,7 @@ export async function handleRuntimeInternalizationEvidenceAttach(opts: EvidenceA
     }));
     if (!outcome.ok) {
       const detail = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
-      refuse('evidence_source_unavailable', 'Verify the principles-disciple plugin bundle is installed next to pd-cli (installer layout) — assembly requires the BehaviorExamplePackAssembler.', detail);
+      refuse('evidence_source_unavailable', 'Verify the workspace trajectory store and host tool declaration are readable; restart the configured host to refresh its declaration.', detail);
       return;
     }
     const payload = attachOutcomePayload(taskId, outcome.value);
@@ -406,7 +374,7 @@ export async function handleRuntimeInternalizationEvidenceResume(opts: EvidenceR
     }));
     if (!outcome.ok) {
       const detail = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
-      refuse('evidence_source_unavailable', 'Verify the principles-disciple plugin bundle is installed next to pd-cli — resume verification requires re-assembly.', detail);
+      refuse('evidence_source_unavailable', 'Verify the workspace trajectory store and host tool declaration are readable; resume requires re-assembly from the same evidence.', detail);
       return;
     }
     const payload = resumeOutcomePayload(taskId, outcome.value);

@@ -337,3 +337,7 @@ export function createProductionHostRuntime(
     },
   });
 }
+
+export * from './behavior-example-pack-assembler.js';
+export * from './behavior-history.js';
+export * from './workspace-behavior-evidence.js';
