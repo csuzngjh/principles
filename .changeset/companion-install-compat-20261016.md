@@ -1,8 +1,11 @@
 ---
 '@principles/install-layout': minor
 'create-principles-disciple': patch
-'@principles/pd-companion': patch
 ---
+
+> Note: `@principles/pd-companion` is private and changesets-ignored; its
+> desktop release version bump (0.1.2 → 0.1.3) belongs to the companion
+> release-prep flow, not to this changeset.
 
 Fix the PD Companion install-compatibility brick (2026-10-16): Companion 0.1.2
 bundled install-layout 0.1.0, whose parser rejected the production 3-host
