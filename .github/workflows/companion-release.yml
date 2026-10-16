@@ -71,6 +71,8 @@ jobs:
       # before anything is uploaded or published.
       - name: Verify release version consistency (tag ↔ package.json ↔ app.asar)
         if: startsWith(github.ref, 'refs/tags/companion-v')
+        # Tag extraction uses Bash parameter expansion, not Windows PowerShell.
+        shell: bash
         run: npm run check:release-version --workspace=@principles/pd-companion -- --expect-tag "${GITHUB_REF_NAME#companion-v}"
 
       # workflow_dispatch builds are manual TEST artifacts (no tag): repo ↔

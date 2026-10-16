@@ -175,6 +175,26 @@ describe('unreadable install manifest must not mass-stop workers (2026-10-16 reg
     expect(ctx.registry.syncUnavailable()).toBeUndefined();
   });
 
+  it('R2-02: synchronous recovery event sees cleared state so the tray never re-renders a stale warning', () => {
+    let registry!: WorkspaceWorkerRegistry;
+    const seenAtRecovery: unknown[] = [];
+    registry = new WorkspaceWorkerRegistry({
+      spawnWorker: () => ({ kill() {}, once() {} }),
+      log: (event) => {
+        if (event === 'workspace_worker_sync_recovered') {
+          seenAtRecovery.push(registry.syncUnavailable());
+        }
+      },
+    });
+    registry.syncFromManifest({ kind: 'ok', workspaces: ['D:/Code/ws-a'] });
+    for (let i = 0; i < SYNC_UNAVAILABLE_ALERT_THRESHOLD; i += 1) {
+      registry.syncFromManifest(unavailable('install_manifest_read_failed: EACCES'));
+    }
+    registry.syncFromManifest({ kind: 'ok', workspaces: ['D:/Code/ws-a'] });
+    expect(seenAtRecovery).toEqual([undefined]);
+    expect(registry.activeWorkspaces()).toHaveLength(1);
+  });
+
   it('RF-04: the tray projection clears on recovery and a NEW episode escalates again (full lifecycle)', () => {
     const ctx = makeRegistry();
     ctx.registry.syncFromManifest({ kind: 'ok', workspaces: ['D:/Code/ws-a'] });

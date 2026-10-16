@@ -72,7 +72,8 @@ describe('resolveInstalledRuntime', () => {
     });
     expect(resolved?.runtime).toBeUndefined();
     expect(resolved?.missing?.reason).toBe('install_manifest_unsupported_version: 2');
-    expect(resolved?.missing?.nextAction).toContain('create-principles-disciple');
+    expect(resolved?.missing?.nextAction).toContain('companion-v');
+    expect(resolved?.missing?.nextAction).not.toContain('create-principles-disciple');
   });
 
   it('carries the incompatible-version reason through the legacy fallback when there is no canonical runtime to protect', () => {
@@ -104,7 +105,8 @@ describe('resolveInstalledRuntime', () => {
     const { mapLaunchFailureReason } = await import('../../src/lib/supervisor.js');
     const { describeDegraded } = await import('../../src/lib/degraded.js');
     expect(mapLaunchFailureReason(resolved!.missing!.reason)).toBe('install_manifest_incompatible');
-    const page = describeDegraded('install_manifest_incompatible', resolved!.missing!.reason);
+    const page = describeDegraded('install_manifest_incompatible', resolved!.missing!.reason, resolved!.missing!.nextAction);
+    expect(resolved!.missing!.nextAction).toContain('companion-v');
     expect(page.nextAction).toContain('companion-v');
     expect(page.nextAction).not.toContain('create-principles-disciple');
   });

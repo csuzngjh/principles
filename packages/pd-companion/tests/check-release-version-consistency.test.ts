@@ -80,3 +80,14 @@ describe('readAsarAppVersion / locatePackagedAppAsar (real archive)', () => {
     expect(() => locatePackagedAppAsar(path.join(root, 'empty-release'))).toThrow(/npm run dist/);
   });
 });
+
+describe('Windows release workflow tag extraction', () => {
+  it('R2-01: the tag step explicitly uses Bash for parameter expansion on windows-latest', () => {
+    const workflow = fs.readFileSync(path.resolve(import.meta.dirname, '../../../.github/workflows/companion-release.yml'), 'utf8');
+    const tagStep = workflow.split('- name: Verify release version consistency')[1]?.split('\n      - name:')[0];
+    expect(tagStep).toBeDefined();
+    expect(tagStep).toContain('shell: bash');
+    expect(tagStep).toContain('--expect-tag');
+    expect(workflow).toContain('runs-on: windows-latest');
+  });
+});

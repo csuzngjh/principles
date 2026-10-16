@@ -269,7 +269,9 @@ export function resolveInstallLayout(options: ResolveInstallLayoutOptions): Layo
       mode: 'missing',
       paths,
       reason: parsed.error ?? 'install_manifest_malformed',
-      nextAction: 'Run npx create-principles-disciple to install or repair PD.',
+      nextAction: parsed.error?.startsWith('install_manifest_unsupported_version')
+        ? 'Update PD Companion from https://github.com/csuzngjh/principles/releases (companion-v* Windows installer); do not reinstall the healthy PD runtime.'
+        : 'Run the PD installer/updater to repair the structurally damaged installation manifest.',
       ...(warnings !== undefined ? { warnings } : {}),
     };
   }

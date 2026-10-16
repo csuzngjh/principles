@@ -137,14 +137,19 @@ export class WorkspaceWorkerRegistry {
       // manifest leaves the stale "⚠ 安装清单读取失败" section on screen even
       // though nothing is wrong anymore. One event per episode; the sync
       // itself is unchanged (no worker restarts, plain reconciliation).
-      if (this.lastUnavailableReason !== undefined) {
-        this.log('workspace_worker_sync_recovered', {
-          previousReason: this.lastUnavailableReason,
-          unavailableReads: this.consecutiveUnavailableReads,
-        });
-      }
+      const previousReason = this.lastUnavailableReason;
+      const unavailableReads = this.consecutiveUnavailableReads;
+      // Registry logs are synchronous callbacks: Companion rebuilds its tray
+      // during this event. Clear the episode BEFORE notifying observers so
+      // syncUnavailable() is already empty when the tray reads it.
       this.consecutiveUnavailableReads = 0;
       this.lastUnavailableReason = undefined;
+      if (previousReason !== undefined) {
+        this.log('workspace_worker_sync_recovered', {
+          previousReason,
+          unavailableReads,
+        });
+      }
       this.sync(source.workspaces);
       return;
     }
