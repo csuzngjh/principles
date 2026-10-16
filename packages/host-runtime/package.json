@@ -10,7 +10,15 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./behavior-example-pack-assembler": {
+      "types": "./dist/behavior-example-pack-assembler.d.ts",
+      "default": "./dist/behavior-example-pack-assembler.js"
+    },
+    "./behavior-history": {
+      "types": "./dist/behavior-history.d.ts",
+      "default": "./dist/behavior-history.js"
+    }
   },
   "files": [
     "dist",

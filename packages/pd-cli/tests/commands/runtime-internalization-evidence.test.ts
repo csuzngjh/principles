@@ -13,7 +13,7 @@
  *     writes nothing, --confirm persists through the core service (T05 cycle
  *     through the CLI entry), refusals exit 1 with reason + nextAction
  *     (cli-2/cli-5/cli-6), --json prints exactly one JSON object (cli-1).
- *     Only the plugin assembler module is doubled (vi.mock) — the state
+ *     Only the host evidence port is doubled (vi.mock) — the state
  *     layer, CAS and audit are the production paths.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -36,7 +36,7 @@ import {
 } from '../../src/commands/runtime-internalization-evidence.js';
 import { listOwnerEvidenceActions } from '@principles/core/runtime-v2';
 
-// ── plugin module double ────────────────────────────────────────────────────
+// ── host evidence port double ────────────────────────────────────────────────────
 
 const V2_RULE_CONTEXT = {
   version: 2 as const,
@@ -67,19 +67,15 @@ const hoisted = vi.hoisted(() => ({
   },
 }));
 
-vi.mock('principles-disciple/rulehost-evidence', () => {
-  class StubAssembler {
-    assemble(): BehaviorExamplePack {
-      if (hoisted.state.throwOnError !== null) {
-        throw hoisted.state.throwOnError;
-      }
+vi.mock('@principles/host-runtime', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@principles/host-runtime')>();
+  return {
+    ...actual,
+    createWorkspaceBehaviorEvidencePort: () => ({ assemble(): BehaviorExamplePack {
+      if (hoisted.state.throwOnError !== null) throw hoisted.state.throwOnError;
       if (hoisted.state.pack === null) throw new Error('stub pack not configured');
       return hoisted.state.pack;
-    }
-  }
-  return {
-    BehaviorExamplePackAssembler: StubAssembler,
-    RuleHostEvidenceRegistry: { dispose: vi.fn() },
+    } }),
   };
 });
 

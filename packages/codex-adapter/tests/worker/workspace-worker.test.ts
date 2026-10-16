@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import {
+  ArtificerRunner,
+  createPITaskDiagnosticJson,
   createPainSignalBridge,
   createRuntimeStateHandle,
   getDefaultPdConfig,
@@ -17,6 +19,7 @@ import {
   type RunnerResult,
   type DiagnosticianOutputV1,
 } from '@principles/core/runtime-v2';
+import { BehaviorExamplePackAssembler } from '@principles/host-runtime';
 import { addPrincipleToLedger } from '@principles/core/principle-tree-ledger';
 import { runCodexWorkspaceWorkerCycle } from '../../src/worker/workspace-worker.js';
 import { setCodexTranscriptPortForTest } from '../../src/ingestion/ingestion.js';
@@ -673,6 +676,75 @@ describe('worker cycle — downstream reuse (shared executor)', () => {
     expect(result.report?.downstream?.ran).toBe(true);
     expect(dreamerRan).not.toBeNull();
     expect(['dreamer', undefined]).toContain(result.report?.downstream?.taskKind);
+  });
+
+  it('PRI-992: real worker with no labels reaches Owner review without model calls or attempts', async () => {
+    const ws = makeWorkspace({ ingestion: false });
+    const config = JSON.parse(fs.readFileSync(path.join(ws.root, '.pd', 'config.yaml'), 'utf8'));
+    config.features.internalization_full_chain.enabled = true;
+    config.internalAgents.agents.artificer.enabled = true;
+    fs.writeFileSync(path.join(ws.root, '.pd', 'config.yaml'), JSON.stringify(config));
+    const handle = await createRuntimeStateHandle({ workspaceDir: ws.root, readonly: false });
+    try {
+      await handle.stateManager.createTask({
+        taskId: 'artificer-pri992-code_tool_hook', taskKind: 'artificer', status: 'pending', attemptCount: 0, maxAttempts: 3,
+        diagnosticJson: createPITaskDiagnosticJson({ dependencyTaskIds: [], channel: 'code_tool_hook', timeoutMs: 300000, inputArtifactRefs: [], outputArtifactRefs: [] }),
+      });
+    } finally { await handle.close(); }
+    const runner = vi.spyOn(ArtificerRunner.prototype, 'run');
+    const result = await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
+    expect(result.report?.downstream?.skipReason).toBe('artificer_blocked_on_owner_evidence');
+    expect(runner).not.toHaveBeenCalled();
+    const read = await createRuntimeStateHandle({ workspaceDir: ws.root, readonly: false });
+    try {
+      expect(await read.stateManager.getTask('artificer-pri992-code_tool_hook')).toMatchObject({ status: 'needs_human_review', attemptCount: 0 });
+      expect((await read.stateManager.getValidRunsByTaskTolerant('artificer-pri992-code_tool_hook')).runs).toHaveLength(0);
+    } finally { await read.close(); }
+  });
+
+  it('PRI-992: labelled real worker assembles Codex history before reaching the model boundary', async () => {
+    const ws = makeWorkspace({ ingestion: false });
+    const config = JSON.parse(fs.readFileSync(path.join(ws.root, '.pd', 'config.yaml'), 'utf8'));
+    config.features.internalization_full_chain.enabled = true;
+    config.internalAgents.agents.artificer.enabled = true;
+    config.runtimeProfiles['test-artificer'] = { type: 'pi-ai', provider: 'openai', model: 'test', apiKeyEnv: 'PRI992_TEST_KEY' };
+    config.internalAgents.agents.artificer.runtimeProfile = 'test-artificer';
+    fs.writeFileSync(path.join(ws.root, '.pd', 'config.yaml'), JSON.stringify(config));
+    const db = new Database(path.join(ws.root, '.state', 'trajectory.db'));
+    db.prepare('INSERT INTO sessions (session_id,started_at,updated_at) VALUES (?,?,?)').run('pri992-session', 'now', 'now');
+    for (const [id, command] of [[991, 'git status'], [992, 'git commit']]) {
+      db.prepare('INSERT INTO tool_calls (id,session_id,tool_name,outcome,params_json,created_at) VALUES (?,?,?,?,?,?)').run(id, 'pri992-session', 'Bash', 'success', JSON.stringify({ command }), 'now');
+    }
+    db.prepare('INSERT INTO pain_events (session_id,source,score,canonical_pain_id,created_at) VALUES (?,?,?,?,?)').run('pri992-session', 'manual', 5, 'pri992-pain', 'now');
+    db.close();
+    const handle = await createRuntimeStateHandle({ workspaceDir: ws.root, readonly: false });
+    try {
+      const metadata = createPITaskDiagnosticJson({ dependencyTaskIds: [], channel: 'code_tool_hook', timeoutMs: 300000, inputArtifactRefs: [], outputArtifactRefs: [], ownerEvidenceSelection: {
+        sourcePainId: 'pri992-pain', sourceNegativeToolCallId: 992, positiveToolCallIds: [991], ownerDesiredOutcome: 'Test explicit labels only',
+      } });
+      const parsed: unknown = JSON.parse(metadata);
+      if (typeof parsed !== 'object' || parsed === null) throw new Error('Invalid test metadata');
+      await handle.stateManager.createTask({
+        taskId: 'artificer-pri992-labelled-code_tool_hook', taskKind: 'artificer', status: 'pending', attemptCount: 0, maxAttempts: 3,
+        diagnosticJson: JSON.stringify({ ...parsed, sourcePainId: 'pri992-pain' }),
+      });
+    } finally { await handle.close(); }
+    const assembly = vi.spyOn(BehaviorExamplePackAssembler.prototype, 'assemble');
+    let injectedPack: unknown;
+    const runner = vi.spyOn(ArtificerRunner.prototype, 'run').mockImplementation(async function (this: ArtificerRunner, taskId: string) {
+      injectedPack = Reflect.get(this, 'behaviorExamplePack');
+      return { status: 'failed', taskId, attemptCount: 0 };
+    });
+    process.env.PRI992_TEST_KEY = 'test-key';
+    const labelledOutcome = await runCodexWorkspaceWorkerCycle({ workspaceDir: ws.root, env: { CODEX_HOME: ws.codexHome } });
+    delete process.env.PRI992_TEST_KEY;
+    expect(labelledOutcome.report?.downstream?.taskKind).toBe('artificer');
+    expect(assembly).toHaveBeenCalledTimes(1);
+    const pack = assembly.mock.results[0]?.value;
+    expect(pack.sourceNegativeCase.ruleContext.history.calls[0].canonicalKind).toBe('execute');
+    expect(pack.evidenceRefs).toEqual(['pain:1', 'tool_call:992', 'tool_call:991']);
+    expect(runner).toHaveBeenCalledTimes(1);
+    expect(injectedPack).toEqual(pack);
   });
 
   it('PRI-634 A3 via the Codex path (AC-4): evaluator critical telemetry lands in THIS workspace sink through the shared cycle', async () => {
