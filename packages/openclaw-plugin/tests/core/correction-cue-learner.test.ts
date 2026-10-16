@@ -399,6 +399,88 @@ describe('CORR-07: per-stateDir cache — one workspace must not flush another s
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// CORR-08: Read-side validation (rc-1/rc-2) — the file is untrusted JSON
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('CORR-08: store is validated on read, never blind-cast', () => {
+  function readStore(json: string) {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(json);
+    return loadCorrectionKeywordStore(tempDir());
+  }
+
+  it('drops malformed rows and keeps the valid ones', () => {
+    const store = readStore(
+      JSON.stringify({
+        keywords: [
+          { term: '又错了', weight: 0.5, source: 'llm', addedAt: '2026-01-01T00:00:00Z' },
+          { term: 42, weight: 0.5, source: 'llm', addedAt: '2026-01-01T00:00:00Z' },
+          { term: '瞎写', weight: 0.5, source: 'guess', addedAt: '2026-01-01T00:00:00Z' },
+          { term: '漏了时间', weight: 0.5, source: 'llm' },
+        ],
+        version: 1,
+        lastOptimizedAt: '2026-01-01T00:00:00Z',
+      }),
+    );
+    expect(store.keywords.map((k) => k.term)).toEqual(['又错了']);
+  });
+
+  it('rejects a tampered non-integer TP count instead of trusting it', () => {
+    // host-runtime 用 TP>=3 把 llm 词升进 high 确定性路径，3.1 这类值必须出局。
+    const store = readStore(
+      JSON.stringify({
+        keywords: [
+          {
+            term: '又错了', weight: 0.5, source: 'llm', addedAt: '2026-01-01T00:00:00Z',
+            truePositiveCount: 3.1,
+          },
+        ],
+        version: 1,
+        lastOptimizedAt: '2026-01-01T00:00:00Z',
+      }),
+    );
+    expect(store.keywords).toHaveLength(0);
+  });
+
+  it('falls back to the seed store when keywords is not an array', () => {
+    const store = readStore(JSON.stringify({ keywords: {}, version: 1, lastOptimizedAt: 'x' }));
+    expect(store.keywords).toHaveLength(CORRECTION_SEED_KEYWORDS.length);
+    expect(vi.mocked(fs.writeFileSync).mock.calls.length).toBeGreaterThan(0);
+  });
+
+  it('keeps the persisted version and lastOptimizedAt instead of inventing them', () => {
+    const store = readStore(
+      JSON.stringify({
+        keywords: [
+          { term: '又错了', weight: 0.5, source: 'llm', addedAt: '2026-01-01T00:00:00Z' },
+        ],
+        version: 7,
+        lastOptimizedAt: '2026-05-01T00:00:00Z',
+      }),
+    );
+    expect(store.version).toBe(7);
+    expect(store.lastOptimizedAt).toBe('2026-05-01T00:00:00Z');
+  });
+
+  it('round-trips a store written by this module', () => {
+    const dir = tempDir();
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    const written = CorrectionCueLearner.get(dir);
+    written.add({ term: '又来', weight: 0.5, source: 'llm' });
+
+    const serialized = JSON.parse(String(vi.mocked(fs.writeFileSync).mock.calls.at(-1)?.[1]));
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(serialized));
+    _resetCorrectionCueCache();
+    _resetCorrectionCueLearnerInstance();
+
+    const reloaded = loadCorrectionKeywordStore(dir);
+    expect(reloaded.keywords.map((k) => k.term)).toContain('又来');
+    expect(reloaded.keywords).toHaveLength(serialized.keywords.length);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // CORR-11: Detection semantics
 // ═══════════════════════════════════════════════════════════════════════════════
 //

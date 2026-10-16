@@ -69,6 +69,57 @@ function evictionTier(keyword: CorrectionKeyword): number {
   return 1;
 }
 
+/**
+ * Read-side guard for the persisted store (rc-1/rc-2). The file is written by
+ * this module but read back as untrusted JSON, and its TP/FP counts gate the
+ * earned-high precision path in host-runtime, so decision-bearing fields are
+ * validated per row — the same contract as governance-signal-admission's
+ * reader, not a weaker second schema beside it (EP-07).
+ */
+function parseStoredKeywordStore(input: unknown): CorrectionKeywordStore | null {
+  if (typeof input !== 'object' || input === null) return null;
+  const record = input as Record<string, unknown>;
+  const rawKeywords: unknown = record.keywords;
+  if (!Array.isArray(rawKeywords)) return null;
+
+  const keywords: CorrectionKeyword[] = [];
+  let dropped = 0;
+  for (const raw of rawKeywords) {
+    if (!isStoredKeyword(raw)) {
+      dropped += 1;
+      continue;
+    }
+    keywords.push(raw);
+  }
+  if (dropped > 0) {
+    console.warn(
+      `[PD:CorrectionCue] ${KEYWORD_STORE_FILE}: ${dropped} malformed keyword row(s) ignored`,
+    );
+  }
+  // version/lastOptimizedAt are bookkeeping, not decisions: rejecting a store
+  // for a missing one would reset learned terms, so tolerate and re-stamp.
+  const version =
+    typeof record.version === 'number' && Number.isSafeInteger(record.version) && record.version >= 0
+      ? record.version
+      : 1;
+  const lastOptimizedAt =
+    typeof record.lastOptimizedAt === 'string' ? record.lastOptimizedAt : new Date().toISOString();
+  return { keywords, version, lastOptimizedAt };
+}
+
+function isStoredKeyword(raw: unknown): raw is CorrectionKeyword {
+  if (typeof raw !== 'object' || raw === null) return false;
+  const k = raw as Record<string, unknown>;
+  if (typeof k.term !== 'string' || k.term.trim() === '') return false;
+  if (typeof k.weight !== 'number' || !Number.isFinite(k.weight)) return false;
+  if (k.source !== 'seed' && k.source !== 'llm' && k.source !== 'user') return false;
+  if (typeof k.addedAt !== 'string') return false;
+  const isCount = (value: unknown): boolean =>
+    value === undefined ||
+    (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0);
+  return isCount(k.truePositiveCount) && isCount(k.falsePositiveCount);
+}
+
 function createDefaultStore(): CorrectionKeywordStore {
   const now = new Date().toISOString();
   const keywords: CorrectionKeyword[] = CORRECTION_SEED_KEYWORDS.map((k) => ({
@@ -89,11 +140,18 @@ export function loadCorrectionKeywordStore(stateDir: string): CorrectionKeywordS
   if (fs.existsSync(filePath)) {
     try {
       const raw = fs.readFileSync(filePath, 'utf-8');
-      const loaded = JSON.parse(raw) as CorrectionKeywordStore;
-      _correctionCueCache.set(key, loaded);
-      return loaded;
-    } catch {
-      void 0;
+      const loaded = parseStoredKeywordStore(JSON.parse(raw));
+      if (loaded) {
+        _correctionCueCache.set(key, loaded);
+        return loaded;
+      }
+      console.warn(
+        `[PD:CorrectionCue] ${KEYWORD_STORE_FILE} is not a valid store; replacing it with the seed store`,
+      );
+    } catch (err) {
+      console.warn(
+        `[PD:CorrectionCue] cannot parse ${KEYWORD_STORE_FILE} (${String(err)}); replacing it with the seed store`,
+      );
     }
   }
 
