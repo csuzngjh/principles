@@ -31,7 +31,7 @@
 | pain_diagnoses | 77 |
 | 工作区遥测（`.pd/telemetry/critical-events.jsonl`） | 192 条事件，最后写入 2026-10-06（旧窗口内停滞；新窗口 FR-08 关联事件待宿主重启后观测） |
 
-新安装 CLI 的只读审计（FR-09）对同一数据给出：401 runs / 83 artificer 任务，异常计数 `repeatedRetryConsumption=83`、`succeededArtifactThenFailed=17`、**`hasGovernanceSideEffects=0`**（风暴期间没有任何治理旁路——关键安全不变量在真实历史数据上成立）。
+新安装 CLI 的只读审计（FR-09）对同一数据给出：401 runs / 83 artificer 任务，异常计数 `repeatedRetryConsumption=83`、`succeededArtifactThenFailed=17`、**`hasGovernanceSideEffects=0`**（限定语：该计数仅表示审计所关联的审批/治理记录为零——即审计口径内无治理旁路；不构成「所有外部治理副作用均不存在」的全称证明）。
 
 ### 3. Actual Installed Version（分两个时刻，均为只读核查）
 
@@ -179,8 +179,8 @@
 **P0（安全/治理权威绕过）**：无新发现。
 
 **P1（真实工作流无法完成）**：
-1. [Owner] 重启 OpenClaw gateway（更新事务 23:01Z 停止后未拉起）——新插件加载与新窗口数据的前置条件；
-2. [Owner] 授权并执行单例真实 Pilot：对候选链 605ba208 执行 `recovery failed-tasks --confirm`（回 pending）→ 消费者预检自动 NHR → `evidence attach`（Owner 选定正负 Tool Call + ownerDesiredOutcome）→ `evidence resume` → 观察 Artificer L2 真实执行与 Evaluator 结果。授权材料见 §D Phase 2 小节（模型/调用上限/预算已声明）。
+1. ~~[Owner] 重启 OpenClaw gateway~~ — **已完成**（2026-10-15 15:34Z，见 §H）；
+2. [Owner] 授权并执行单例真实 Pilot。**更正（2026-10-16）**：初稿建议的 `pd runtime recovery failed-tasks --confirm` 不能完成单任务恢复——该命令是**批量**入口：不加 `--force` 时已耗尽预算（3/3）的目标任务会被跳过；加 `--force` 会对**所有** exhausted failed 任务批量重置预算（85 条全部回 pending），产生大规模非预期恢复风险。正确的单任务入口 `pd runtime recovery failed-task --task-id <exact> [--reset-budget]` 已实现（PRI-990，工程 PR 待 Owner 评审，**尚未部署到正式安装运行时**）；部署前生产侧不存在安全的单例恢复路径。授权材料见 §D Phase 2 小节与 PRI-990 PR 的 Owner 授权卡。
 
 **P2（兼容/恢复 UX/可观测性）**：
 3. [Owner 决策] 存量 85 个 terminal-failed artificer 任务的批量处置：逐 Pain 判断是否仍值得内化（attach 证据恢复）或归档；`audit-artificer-evidence` 输出已含逐任务 nextAction；
@@ -200,12 +200,12 @@ Owner 于会话中途重启 OpenClaw gateway。只读核实结果：
 
 **新插件确认加载并周期运行**：`memory/logs/SYSTEM_2026-10-15.log` 记录 `INTERNALIZATION_CONSUMER_STARTED {"intervalMs":120000,"initialDelayMs":30000}` @ 15:34:17Z，此后每 2 分钟一轮消费周期（18789 端口监听，PID 4440）。安装版本此前已核实为 2.3.5（sourceCommit=f7d47ae0，含 IAER）。
 
-**新窗口首批周期行为**：每轮 `INTERNALIZATION_CONSUMER_SKIP {"reason":"no_ready_tasks","readyTaskCount":0}`；`runs` 表零新增、IAER NHR 零新增——新语义（预检门/NHR）尚无真实触发机会（见本节末尾）。
+**新窗口首批周期行为**：每轮 `INTERNALIZATION_CONSUMER_SKIP {"reason":"no_ready_tasks","readyTaskCount":0}`；`runs` 表零新增、IAER NHR 零新增——新语义（预检门/NHR）尚无真实触发机会（见本节末尾）。**状态区分（避免误读）**：「gateway 已恢复 + 插件已加载 + 消费者周期运行」三者成立，但 ≠「有可执行任务」——生产队列当前没有任何能被新语义消费的任务（85 条 terminal-failed 在唤醒扫描之外、37 条僵尸 pending 被 hydration 排除），直至 Owner 完成单任务恢复授权（§F P1-2 更正版）。
 
 **首轮观测发现两个新问题（均非 IAER 回归，不改变裁决）**：
 
 1. **P2-1（可观测性）**：`no_ready_tasks` 的真实原因是 `all_hydration_failed`——37 个 pending artificer 任务的 `pi_metadata` 被 `hydratePITaskRecord` fail-closed 拒绝（`repairPayload.requiredChanges` 为空数组，违反 `isValidRepairPayload` pitask-metadata.ts:619 的 rc-4 要求）。快照内部有完整诊断（`pd runtime internalization queue` 显示 `invalidMetadataCount:37` + `noReadyTasks.reason=all_hydration_failed` + 逐样本 taskId），但消费周期 SKIP 事件只带 `reason/readyTaskCount` 两个字段，**不透传 hydration 失败计数与真实原因**——心跳流上的饥饿不可见，违背 rc-9 精神。建议修复：SKIP 事件透传 `snapshot.noReadyTasks` 与 `invalidMetadataCount`。
-2. **P2-2（遗留僵尸数据）**：37 条全部为 09-15～09-21 的 `artificer-repair-rulehost-*` 任务（Pain `pain_host_cffdcb9f…` 的历史修复轮）。当前写入端不可能再产生该形态（evaluator-output.ts:509 PRI-630 收敛不变量强制 `needs_revision` 时 `requiredChanges` 非空），故**不是活写入 bug**；但 fail-closed hydration 使这些任务永远 pending——不可消费、不可 NHR、无终态处置命令，形成队列僵尸。需要 Owner 决策处置路径（如扩展 recovery 工具支持 invalid-metadata 终态标记），或按 DATA_CLEANUP_GUIDELINES 归档。
+2. **P2-2（遗留僵尸数据）**：37 条全部为 09-15～09-21 的历史 repair 任务——**更正后的精确分类（2026-10-16 逐行核实）：`artificer-repair-rulehost-*` 12 条 + `artificer-repair-evaluator-*` 25 条**，均为 Pain `pain_host_cffdcb9f…` 的历史修复轮（初稿误写为全部 rulehost）。当前写入端不可能再产生该形态（evaluator-output.ts:509 PRI-630 收敛不变量强制 `needs_revision` 时 `requiredChanges` 非空），故**不是活写入 bug**；但 fail-closed hydration 使这些任务永远 pending——不可消费、不可 NHR、无终态处置命令，形成队列僵尸。需要 Owner 决策处置路径（如扩展 recovery 工具支持 invalid-metadata 终态标记），或按 DATA_CLEANUP_GUIDELINES 归档。
 
 **生产仍无可消费任务的原因链**（只读核实）：30 个 code_tool_hook pending = 上述僵尸；7 个 prompt pending 同样 `requiredChanges_EMPTY` 僵尸；evaluator/rollout_reviewer 各 1 条 pending 被依赖门挂起；diag_router 2 条 retry_wait 不在消费周期 runnerKinds 范围（诊断链自管）。85 个 terminal-failed 任务在唤醒扫描之外（设计如此）。因此**要看到新 IAER 语义真实运行，唯一路径仍是 §F P1-2 的 Owner 授权存量恢复或新 Pain 自然流入**。
 
