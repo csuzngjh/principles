@@ -39,9 +39,10 @@ describe('resolveInstalledRuntime', () => {
       canonicalRuntimeExists: true,
       legacyExtensionExists: false,
     });
-    expect(resolved?.mode).toBe('canonical');
-    expect(resolved?.root).toContain(path.join('.pd', 'runtime'));
-    expect(resolved?.pluginRoot).toContain(path.join('.pd', 'runtime', 'plugin'));
+    expect(resolved?.runtime.mode).toBe('canonical');
+    expect(resolved?.runtime.root).toContain(path.join('.pd', 'runtime'));
+    expect(resolved?.runtime.pluginRoot).toContain(path.join('.pd', 'runtime', 'plugin'));
+    expect(resolved?.missing).toBeUndefined();
   });
 
   it('keeps legacy OpenClaw installs discoverable', () => {
@@ -51,9 +52,62 @@ describe('resolveInstalledRuntime', () => {
       canonicalRuntimeExists: false,
       legacyExtensionExists: true,
     });
-    expect(resolved?.mode).toBe('legacy');
-    expect(resolved?.root).toContain(path.join('.openclaw', 'extensions'));
-    expect(resolved?.pluginRoot).toBe(resolved?.root);
+    expect(resolved?.runtime.mode).toBe('legacy');
+    expect(resolved?.runtime.root).toContain(path.join('.openclaw', 'extensions'));
+    expect(resolved?.runtime.pluginRoot).toBe(resolved?.runtime.root);
+    expect(typeof resolved?.runtime.fallbackReason).toBe('string');
+  });
+
+  // 2026-10-16: distinct failure causes must stay distinct (rc-9). The old
+  // collapsed shape (undefined for every missing mode) is exactly what turned
+  // "manifest this reader cannot understand" into the wrong "PD not installed"
+  // message for the Owner.
+
+  it('reports an incompatible layoutVersion as its own cause on a machine without the legacy dir', () => {
+    const resolved = resolveInstalledRuntime({
+      homeDir: 'C:\\Users\\alice',
+      manifest: { layoutVersion: 2, mode: 'canonical', hosts: ['codex'] },
+      canonicalRuntimeExists: true,
+      legacyExtensionExists: false,
+    });
+    expect(resolved?.runtime).toBeUndefined();
+    expect(resolved?.missing?.reason).toBe('install_manifest_unsupported_version: 2');
+    expect(resolved?.missing?.nextAction).toContain('create-principles-disciple');
+  });
+
+  it('carries the incompatible-version reason through the legacy fallback (the incident machine shape)', () => {
+    const resolved = resolveInstalledRuntime({
+      homeDir: 'C:\\Users\\alice',
+      manifest: { layoutVersion: 2, mode: 'canonical', hosts: ['codex'] },
+      canonicalRuntimeExists: false,
+      legacyExtensionExists: true,
+    });
+    // mode legacy + CLI missing → main.ts reports fallbackReason, which maps
+    // to install_manifest_incompatible — never a blanket "not installed".
+    expect(resolved?.runtime?.mode).toBe('legacy');
+    expect(resolved?.runtime?.fallbackReason).toBe('install_manifest_unsupported_version: 2');
+  });
+
+  it('reports structural manifest damage as its own missing cause', () => {
+    const resolved = resolveInstalledRuntime({
+      homeDir: 'C:\\Users\\alice',
+      manifest: { layoutVersion: 1, mode: 'weird', hosts: ['codex'] },
+      canonicalRuntimeExists: true,
+      legacyExtensionExists: false,
+    });
+    expect(resolved?.runtime).toBeUndefined();
+    expect(resolved?.missing?.reason).toContain('install_manifest_malformed');
+  });
+
+  it('surfaces forward-compatibility warnings for unknown hosts on a healthy canonical install', () => {
+    const resolved = resolveInstalledRuntime({
+      homeDir: 'C:\\Users\\alice',
+      manifest: { layoutVersion: 1, mode: 'canonical', hosts: ['codex', 'gamma'] },
+      canonicalRuntimeExists: true,
+      legacyExtensionExists: false,
+    });
+    expect(resolved?.runtime.mode).toBe('canonical');
+    expect(resolved?.warnings).toEqual([{ code: 'install_manifest_unknown_host', host: 'gamma' }]);
   });
 });
 

@@ -11,6 +11,9 @@
  *   - at most one worker child per CANONICAL workspace path (realpath);
  *   - workspaces removed from the manifest are stopped (their durable state
  *     keeps every pain/task/candidate — nothing is deleted here);
+ *   - a manifest that cannot be read or parsed stops NOTHING (it is no
+ *     evidence of de-authorization); the gap is logged and escalated
+ *     Owner-visibly instead (syncFromManifest, 2026-10-16);
  *   - crashed children restart with the same backoff ladder as the console
  *     supervisor, up to MAX_RESTART_ATTEMPTS, then surface degraded.
  */
@@ -47,6 +50,26 @@ interface WorkerEntry {
 
 const MAX_RESTART_ATTEMPTS = 3;
 const DEFAULT_RESTART_DELAYS_MS: readonly number[] = [1_000, 2_000, 4_000];
+/**
+ * Consecutive unavailable manifest reads after which the gap escalates to the
+ * persistent event (one-shot per episode; the Companion surfaces it
+ * Owner-visibly). At the default 60s sync cadence this is ~10 minutes — long
+ * enough to ride out transient read failures, short enough that a
+ * permanently unreadable manifest never stays silent (rc-9).
+ */
+export const SYNC_UNAVAILABLE_ALERT_THRESHOLD = 10;
+
+/**
+ * The outcome of reading the install manifest for one host's workspaces.
+ * A manifest that cannot be READ or PARSED says nothing about which
+ * workspaces are authorized — it must never be conflated with "valid
+ * manifest declaring zero workspaces" (the 2026-10-16 incident: an unknown
+ * host string made the old parser fail, `[]` flowed into sync(), and every
+ * running worker was mass-stopped as removed_from_manifest).
+ */
+export type WorkspaceManifestSource =
+  | { kind: 'ok'; workspaces: readonly string[] }
+  | { kind: 'unavailable'; reason: string };
 
 function defaultSchedule(callback: () => void, delayMs: number): { clear(): void } {
   const timer = setTimeout(callback, delayMs);
@@ -70,6 +93,8 @@ export class WorkspaceWorkerRegistry {
   private readonly log: NonNullable<WorkspaceWorkerRegistryDeps['log']>;
   private readonly restartDelaysMs: readonly number[];
   private readonly schedule: NonNullable<WorkspaceWorkerRegistryDeps['schedule']>;
+  private consecutiveUnavailableReads = 0;
+  private lastUnavailableReason: string | undefined;
 
   constructor(deps: WorkspaceWorkerRegistryDeps) {
     this.spawnWorker = deps.spawnWorker;
@@ -92,6 +117,45 @@ export class WorkspaceWorkerRegistry {
         this.startEntry(canonical);
       }
     }
+  }
+
+  /**
+   * Reconcile from a manifest READ outcome. `ok` syncs normally — an explicit
+   * workspace removal still stops its worker, and a valid empty manifest
+   * still syncs to empty. `unavailable` keeps every entry EXACTLY as it is
+   * (a manifest that cannot be read is no evidence any workspace was
+   * de-authorized) and logs a structured skip event; after
+   * SYNC_UNAVAILABLE_ALERT_THRESHOLD consecutive failures it escalates to a
+   * one-shot persistent event the Companion surfaces Owner-visibly. The next
+   * successful read reconciles everything at once.
+   */
+  syncFromManifest(source: WorkspaceManifestSource): void {
+    if (source.kind === 'ok') {
+      this.consecutiveUnavailableReads = 0;
+      this.lastUnavailableReason = undefined;
+      this.sync(source.workspaces);
+      return;
+    }
+    this.consecutiveUnavailableReads += 1;
+    this.lastUnavailableReason = source.reason;
+    this.log('workspace_worker_sync_skipped', {
+      reason: source.reason,
+      consecutiveUnavailableReads: this.consecutiveUnavailableReads,
+      runningWorkspaces: this.entries.size,
+    });
+    if (this.consecutiveUnavailableReads === SYNC_UNAVAILABLE_ALERT_THRESHOLD) {
+      this.log('workspace_worker_sync_unavailable_persistent', {
+        reason: source.reason,
+        consecutiveUnavailableReads: this.consecutiveUnavailableReads,
+        runningWorkspaces: this.entries.size,
+      });
+    }
+  }
+
+  /** The current unavailable episode, or undefined while the manifest reads fine (pure read, PRI-715 style). */
+  syncUnavailable(): { reason: string; consecutiveUnavailableReads: number } | undefined {
+    if (this.lastUnavailableReason === undefined) return undefined;
+    return { reason: this.lastUnavailableReason, consecutiveUnavailableReads: this.consecutiveUnavailableReads };
   }
 
   stopAll(): void {

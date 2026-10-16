@@ -22,7 +22,7 @@ import {
   resolvePdCliEntry,
   resolvePluginPackageJson,
 } from '../lib/locate.js';
-import { getInstallLayoutPaths } from '@principles/install-layout';
+import { getInstallLayoutPaths, type InstallManifestWarning } from '@principles/install-layout';
 import {
   tryParseConsoleOpenOutput,
   parsePluginVersion,
@@ -32,7 +32,7 @@ import {
 } from '../lib/launch-result.js';
 import { buildConsoleTokenStatus, isSameConsoleOrigin, type ConsoleTokenStatus } from '../lib/console-origin.js';
 import { ConsoleSupervisor } from '../lib/supervisor.js';
-import { buildDegradedPageHtml, buildDegradedWorkspacesTrayView, describeDegraded, describeWorkspaceWorkerDegraded } from '../lib/degraded.js';
+import { buildDegradedPageHtml, buildDegradedWorkspacesTrayView, buildSyncUnavailableTrayView, describeDegraded, describeWorkspaceWorkerDegraded, describeWorkspaceSyncUnavailable } from '../lib/degraded.js';
 import {
   defaultCompanionState,
   markApprovalsNotified,
@@ -46,7 +46,7 @@ import {
   parseUpdateCheckResponse,
   shouldNotifyUpdate,
 } from '../lib/poller.js';
-import { WorkspaceWorkerRegistry, type WorkerChild } from '../lib/workspace-workers.js';
+import { WorkspaceWorkerRegistry, type WorkerChild, type WorkspaceManifestSource } from '../lib/workspace-workers.js';
 import { parseInstallManifest } from '@principles/install-layout';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -228,29 +228,67 @@ function readInstalledVersion(): string | undefined {
   }
 }
 
+/** Structured errno code from a spawn/fs error, without relying on the NodeJS namespace (eslint no-undef). */
+function errnoCode(err: unknown): string {
+  if (err !== null && typeof err === 'object' && Object.hasOwn(err, 'code')) {
+    const { code } = err as { code?: unknown };
+    if (typeof code === 'string' && code.length > 0) return code;
+  }
+  return 'unknown';
+}
+
 function startSupervision(): void {
   const home = app.getPath('home');
   const paths = getInstallLayoutPaths(home);
   let manifest: unknown;
   try {
     manifest = JSON.parse(fs.readFileSync(paths.manifest, 'utf8')) as unknown;
-  } catch {
+  } catch (err) {
+    log('install_manifest_read_failed', { code: errnoCode(err) });
     manifest = undefined;
   }
-  const runtime = resolveInstalledRuntime({
+  const outcome = resolveInstalledRuntime({
     homeDir: home,
     manifest,
     canonicalRuntimeExists: fs.existsSync(paths.runtimeDir),
     legacyExtensionExists: fs.existsSync(paths.openClawExtensionDir),
   });
+  logManifestWarnings(outcome?.warnings);
+  const runtime = outcome?.runtime;
   extDir = runtime?.root;
   installedPluginDir = runtime?.pluginRoot;
-  if (extDir === undefined || !fs.existsSync(resolvePdCliEntry(extDir))) {
+  if (extDir === undefined) {
+    // Distinct failure causes reach the Owner distinctly (rc-9): a manifest
+    // written by a newer PD reads as "update the Companion", structural
+    // damage as "PD not installed" — never a blanket wrong message.
+    const missing = outcome?.missing;
     supervisor.start();
-    supervisor.onLaunchFailure({ reason: 'console_runtime_not_installed' });
+    supervisor.onLaunchFailure({
+      reason: missing?.reason ?? 'install_runtime_missing',
+      nextAction: missing?.nextAction,
+    });
     const s = supervisor.getState();
     if (s.kind === 'degraded') showDegradedPage(s.reason, s.detail, s.nextAction);
-    log('pd_not_installed');
+    log('pd_not_installed', { reason: missing?.reason ?? 'no_home' });
+    rebuildTrayMenu();
+    return;
+  }
+  if (runtime?.fallbackReason !== undefined) {
+    log('install_layout_legacy_fallback', { reason: runtime.fallbackReason });
+  }
+  if (!fs.existsSync(resolvePdCliEntry(extDir))) {
+    // Runtime resolved but the CLI entry is gone — a corrupt runtime is its
+    // own cause, separate from a missing install or an incompatible manifest.
+    // When the layout only resolved via legacy fallback BECAUSE the manifest
+    // version is newer than this reader (the 2026-10-16 incident machine
+    // shape), the Owner must see the update-the-Companion cause, not a
+    // blanket "runtime not installed".
+    const reason = runtime?.fallbackReason ?? 'console_runtime_not_installed';
+    supervisor.start();
+    supervisor.onLaunchFailure({ reason });
+    const s = supervisor.getState();
+    if (s.kind === 'degraded') showDegradedPage(s.reason, s.detail, s.nextAction);
+    log('pd_runtime_unusable', { mode: runtime?.mode, reason, root: extDir });
     rebuildTrayMenu();
     return;
   }
@@ -275,32 +313,69 @@ let workspaceWorkers: WorkspaceWorkerRegistry | undefined;
 let workbuddyWorkspaceWorkers: WorkspaceWorkerRegistry | undefined;
 let workbuddyWorkspaceWorkerTimer: ReturnType<typeof setInterval> | undefined;
 
-function manifestWorkspacesForHost(host: 'codex' | 'workbuddy'): string[] {
+/**
+ * Read the install manifest for one host's workspaces as an EXPLICIT outcome
+ * (2026-10-16): a manifest that cannot be read or parsed is
+ * { kind: 'unavailable' } — NEVER an empty workspace list. Conflating the two
+ * mass-stopped every running worker as removed_from_manifest when the bundled
+ * parser could not understand a newer manifest.
+ */
+function readManifestWorkspacesForHost(host: 'codex' | 'workbuddy'): WorkspaceManifestSource {
   const paths = getInstallLayoutPaths(app.getPath('home'));
-  let manifest: unknown;
+  let raw: string;
   try {
-    manifest = JSON.parse(fs.readFileSync(paths.manifest, 'utf8')) as unknown;
-  } catch {
-    return [];
+    raw = fs.readFileSync(paths.manifest, 'utf8');
+  } catch (err) {
+    return { kind: 'unavailable', reason: `install_manifest_read_failed: ${errnoCode(err)}` };
   }
-  const parsed = parseInstallManifest(manifest);
-  if (parsed.manifest === undefined) return [];
-  if (!parsed.manifest.hosts.includes(host)) return [];
-  return (parsed.manifest.workspaces ?? []).filter((workspace) => {
-    try {
-      return fs.statSync(workspace).isDirectory();
-    } catch {
-      return false;
-    }
-  });
+  let parsedManifest: unknown;
+  try {
+    parsedManifest = JSON.parse(raw) as unknown;
+  } catch (err) {
+    return { kind: 'unavailable', reason: `install_manifest_unparsable: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  const result = parseInstallManifest(parsedManifest);
+  if (result.manifest === undefined) {
+    return { kind: 'unavailable', reason: `install_manifest_invalid: ${result.error ?? 'unknown'}` };
+  }
+  logManifestWarnings(result.warnings);
+  if (!result.manifest.hosts.includes(host)) return { kind: 'ok', workspaces: [] };
+  return {
+    kind: 'ok',
+    workspaces: (result.manifest.workspaces ?? []).filter((workspace) => {
+      try {
+        return fs.statSync(workspace).isDirectory();
+      } catch {
+        return false;
+      }
+    }),
+  };
 }
 
+function manifestCodexWorkspacesSource(): WorkspaceManifestSource {
+  return readManifestWorkspacesForHost('codex');
+}
+
+function manifestWorkbuddyWorkspacesSource(): WorkspaceManifestSource {
+  return readManifestWorkspacesForHost('workbuddy');
+}
+
+/** Codex workspaces for liveness checks only (a read failure yields none — liveness is read-only). */
 function manifestCodexWorkspaces(): string[] {
-  return manifestWorkspacesForHost('codex');
+  const source = manifestCodexWorkspacesSource();
+  return source.kind === 'ok' ? [...source.workspaces] : [];
 }
 
-function manifestWorkbuddyWorkspaces(): string[] {
-  return manifestWorkspacesForHost('workbuddy');
+/** Forward-compatibility warnings are structured events, deduped per signature so the 60s sync loop does not spam. */
+const loggedManifestWarningSignatures = new Set<string>();
+function logManifestWarnings(warnings: readonly InstallManifestWarning[] | undefined): void {
+  if (warnings === undefined) return;
+  for (const warning of warnings) {
+    const signature = `${warning.code}:${warning.host}`;
+    if (loggedManifestWarningSignatures.has(signature)) continue;
+    loggedManifestWarningSignatures.add(signature);
+    log('install_manifest_warning', { code: warning.code, host: warning.host });
+  }
 }
 
 function spawnWorkspaceWorkerFor(workerCommand: 'codex' | 'workbuddy'): (canonicalWorkspaceDir: string) => WorkerChild {
@@ -354,13 +429,18 @@ function startWorkspaceWorkerSupervision(): void {
         // (review P1, PRI-715 §7F). The rebuild re-reads the registry, so the
         // ghost display dies with the entry.
         rebuildTrayMenu();
+      } else if (event === 'workspace_worker_sync_unavailable_persistent') {
+        // 2026-10-16: an unreadable manifest holds worker state and escalates
+        // Owner-visibly instead of mass-stopping — one-shot per episode.
+        notifyWorkspaceSyncUnavailable(fields ?? {});
+        rebuildTrayMenu();
       }
     },
   });
-  workspaceWorkers.sync(manifestCodexWorkspaces());
+  workspaceWorkers.syncFromManifest(manifestCodexWorkspacesSource());
   workspaceWorkerTimer = setInterval(() => {
     if (quitting) return;
-    workspaceWorkers?.sync(manifestCodexWorkspaces());
+    workspaceWorkers?.syncFromManifest(manifestCodexWorkspacesSource());
     // SPEC-CODEX-PAIN-CLOSURE-001 CR-08 (§9.3): supervision also reads the
     // worker's persisted liveness facts — a spawned process with no recent
     // cycle evidence is NOT alive progress. Meaningful transitions only
@@ -387,13 +467,16 @@ function startWorkspaceWorkerSupervision(): void {
         rebuildTrayMenu();
       } else if (event === 'workspace_worker_stopped') {
         rebuildTrayMenu();
+      } else if (event === 'workspace_worker_sync_unavailable_persistent') {
+        notifyWorkspaceSyncUnavailable(fields ?? {});
+        rebuildTrayMenu();
       }
     },
   });
-  workbuddyWorkspaceWorkers.sync(manifestWorkbuddyWorkspaces());
+  workbuddyWorkspaceWorkers.syncFromManifest(manifestWorkbuddyWorkspacesSource());
   workbuddyWorkspaceWorkerTimer = setInterval(() => {
     if (quitting) return;
-    workbuddyWorkspaceWorkers?.sync(manifestWorkbuddyWorkspaces());
+    workbuddyWorkspaceWorkers?.syncFromManifest(manifestWorkbuddyWorkspacesSource());
   }, WORKSPACE_WORKER_SYNC_INTERVAL_MS);
   workbuddyWorkspaceWorkerTimer.unref();
 }
@@ -453,6 +536,30 @@ function notifyWorkspaceDegraded(canonicalWorkspace: string): void {
   notification.on('click', () => showWindow());
   notification.show();
   log('notified_workspace_degraded', { workspace: canonicalWorkspace });
+}
+
+/**
+ * Owner-facing surface for the persistent unreadable-manifest escalation
+ * (2026-10-16): the notification itself is one-shot per episode because the
+ * registry fires the persistent event exactly once; fields are untrusted log
+ * payload and guarded before use (rc-1/rc-2).
+ */
+function notifyWorkspaceSyncUnavailable(fields: Record<string, unknown>): void {
+  const reason = typeof fields.reason === 'string' && fields.reason.length > 0 ? fields.reason : 'unknown';
+  const consecutive = typeof fields.consecutiveUnavailableReads === 'number' ? fields.consecutiveUnavailableReads : 0;
+  if (!Notification.isSupported()) {
+    log('notification_unsupported', { event: 'workspace_worker_sync_unavailable_persistent', reason });
+    return;
+  }
+  const info = describeWorkspaceSyncUnavailable({ reason, consecutiveUnavailableReads: consecutive });
+  const notification = new Notification({
+    title: info.title,
+    body: info.body,
+    icon: nativeImage.createFromPath(iconPath()),
+  });
+  notification.on('click', () => showWindow());
+  notification.show();
+  log('notified_workspace_sync_unavailable', { reason, consecutiveUnavailableReads: consecutive });
 }
 
 function stopWorkspaceWorkerSupervision(): void {
@@ -920,25 +1027,35 @@ async function updateCheckTick(): Promise<void> {
 function rebuildTrayMenu(): void {
   if (tray === undefined) return;
   const s = supervisor.getState();
-  // Pure read of the existing degraded state (PRI-715) — querying must never
-  // reset degradation, restart a worker or touch the manifest.
+  // Pure reads of the existing degraded/unavailable state (PRI-715 +
+  // 2026-10-16) — querying must never reset degradation, restart a worker or
+  // touch the manifest.
   const degradedView = buildDegradedWorkspacesTrayView([
     ...(workspaceWorkers?.degradedWorkspaces() ?? []),
     ...(workbuddyWorkspaceWorkers?.degradedWorkspaces() ?? []),
   ]);
+  const syncUnavailableView = buildSyncUnavailableTrayView(
+    [
+      workspaceWorkers?.syncUnavailable(),
+      workbuddyWorkspaceWorkers?.syncUnavailable(),
+    ].filter((episode): episode is NonNullable<typeof episode> => episode !== undefined),
+  );
   const supervisorLabel =
     s.kind === 'running'
       ? s.mode === 'managed' ? `控制台运行中（端口 ${s.port}）` : `控制台已连接·外部实例（端口 ${s.port}）`
       : s.kind === 'starting' || s.kind === 'restarting'
         ? '控制台启动中…'
         : '控制台未运行';
-  const statusLabel = supervisorLabel + degradedView.statusSuffix;
+  const statusLabel = supervisorLabel + degradedView.statusSuffix + syncUnavailableView.statusSuffix;
   tray.setToolTip(`PD Companion — ${statusLabel}`);
   const autoStart = app.getLoginItemSettings().openAtLogin;
-  const degradedSection: MenuItemConstructorOptions[] = degradedView.menuLabels.length > 0
+  const degradedSection: MenuItemConstructorOptions[] = [
+    ...degradedView.menuLabels,
+    ...syncUnavailableView.menuLabels,
+  ].length > 0
     ? [
         { type: 'separator' },
-        ...degradedView.menuLabels.map((label) => ({ label, enabled: false })),
+        ...[...degradedView.menuLabels, ...syncUnavailableView.menuLabels].map((label) => ({ label, enabled: false })),
       ]
     : [];
   const template: MenuItemConstructorOptions[] = [

@@ -23,6 +23,11 @@ const COPY: Record<DegradedReasonKey, DegradedInfo> = {
     description: '在 ~/.pd/runtime 未找到 PD 控制台运行时（旧版安装也会从 ~/.openclaw/extensions/principles-disciple 兼容查找）。',
     nextAction: '先运行 npx create-principles-disciple 完成安装，再从托盘菜单重启控制台服务。',
   },
+  install_manifest_incompatible: {
+    title: 'PD 安装清单与 Companion 版本不兼容',
+    description: '~/.pd/install.json 的 layoutVersion 高于本 Companion 支持的版本。PD 运行时本身可能完好，只是桌面端过旧、无法解读新清单。',
+    nextAction: '从 https://github.com/csuzngjh/principles/releases 下载最新 PD Companion（companion-v* 标签的 Windows 安装包）安装后重试；运行时无需重装。',
+  },
   workspace_missing: {
     title: '未找到 PD 工作区',
     description: '无法解析默认工作区。请显式指定一个工作区。',
@@ -92,6 +97,43 @@ export function buildDegradedWorkspacesTrayView(canonicalWorkspaces: readonly st
       ...canonicalWorkspaces.map((canonical) => `・${workspaceDisplayName(canonical)}（${canonical}）`),
       `恢复方式：${WORKER_DEGRADED_NEXT_ACTION}`,
     ],
+  };
+}
+
+// ── Manifest unreadable while workers keep running (2026-10-16) ─────────────
+// A manifest that cannot be read/parsed is NO evidence that any workspace was
+// de-authorized, so workers hold their state; the gap must still be visible
+// to the Owner (rc-9) — one tray section and a one-shot notification.
+
+export interface SyncUnavailableEpisode {
+  reason: string;
+  consecutiveUnavailableReads: number;
+}
+
+export interface SyncUnavailableTrayView {
+  statusSuffix: string;
+  menuLabels: string[];
+}
+
+/** Tray projection for an unreadable-manifest episode (pure read; collapses per-registry episodes into one section). */
+export function buildSyncUnavailableTrayView(episodes: readonly SyncUnavailableEpisode[]): SyncUnavailableTrayView {
+  if (episodes.length === 0) return { statusSuffix: '', menuLabels: [] };
+  const reads = Math.max(...episodes.map((episode) => episode.consecutiveUnavailableReads));
+  return {
+    statusSuffix: `；⚠ 安装清单读取失败`,
+    menuLabels: [
+      `⚠ ~/.pd/install.json 连续 ${reads} 次读取失败（工作区管道保持运行，未被误停）`,
+      ...episodes.map((episode) => `・原因：${episode.reason}`),
+      `说明：清单恢复可读后会自动对齐工作区管道；若持续失败，请检查文件或更新 PD Companion。`,
+    ],
+  };
+}
+
+/** One-shot notification copy for the persistent unreadable-manifest escalation. */
+export function describeWorkspaceSyncUnavailable(episode: SyncUnavailableEpisode): { title: string; body: string } {
+  return {
+    title: 'PD 无法读取安装清单',
+    body: `~/.pd/install.json 连续 ${episode.consecutiveUnavailableReads} 次读取失败（${episode.reason}）。为避免误停，已在运行的工作区管道保持不变；清单恢复后会自动对齐。若持续失败，请检查安装清单或更新 PD Companion。`,
   };
 }
 
