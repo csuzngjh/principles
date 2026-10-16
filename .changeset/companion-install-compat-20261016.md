@@ -7,13 +7,18 @@
 > desktop release version bump (0.1.2 → 0.1.3) belongs to the companion
 > release-prep flow, not to this changeset.
 >
-> Note: the installer package keeps a LOCAL twin of
-> `installManifestHostsForPersist` (`src/manifest-host-union.ts`) because the
-> registry still serves install-layout 0.3.x; with 0.3.x the parsed manifest
-> never carries `unknownHosts`, so the twin degrades to the exact pre-change
-> behavior. Retirement follow-up: once install-layout ≥0.4.0 is published and
-> this package's range is raised, switch both call sites back to the shared
-> export and delete the twin.
+> Note (RF-02, PUBLISH_BLOCKED until install-layout 0.4.0 publishes): the
+> npm-published installer resolves its install-layout dependency from the
+> registry, which still serves 0.3.x. While that holds, the installer's
+> unknown-host compatibility is REFUSE-ONLY: a manifest carrying a host the
+> dependency cannot parse makes install/merge fail closed
+> (install_manifest_malformed) instead of dropping the registration —
+> verified against the real registry resolution by the dual-mode parity test
+> in the packaged-install smoke suite. True forward-compat write-through
+> activates when this changeset's install-layout minor publishes (0.4.0) and
+> this package's range is raised to it; the local twin
+> (`src/manifest-host-union.ts`) must then be retired in favor of the shared
+> export, and the parity test flips to its positive mode automatically.
 
 Fix the PD Companion install-compatibility brick (2026-10-16): Companion 0.1.2
 bundled install-layout 0.1.0, whose parser rejected the production 3-host

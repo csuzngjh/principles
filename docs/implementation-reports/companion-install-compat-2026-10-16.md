@@ -2,6 +2,8 @@
 
 任务：修复 PD 更新后桌面版报「未找到已安装的 PD / console_runtime_not_installed」，并消除同类前向不兼容与 Worker 误停风险。
 
+> **RF 收口更新（同日第二轮，评审裁决后）**：本报告 §R 记录 RF-01～RF-05 的修复与验证；§7 的产物身份以 **RF 收口后重建的 0.1.2 版验证产物为准**（早前 0.1.3 预发布产物已被取代，保留 SHA 供追溯）。
+
 - 分支：`ai/adhoc-20261016-companion-install-compat`（基于 origin/main f7d47ae0f）
 - Fix B 独立工单：PRI-990（https://linear.app/principlesdisciple/issue/PRI-990 ）
 - 产物：`pd-companion-0.1.3-setup.exe`（SHA256 见 §7）
@@ -82,11 +84,18 @@
 
 ## 7. Windows 安装包
 
-- 路径：`D:\Code\_worktrees\principles\adhoc-20261016-companion-install-compat\packages\pd-companion\release\pd-companion-0.1.3-setup.exe`
-- SHA256：`850c79835d7d5e830fdfc49b2605fb372cea7880d52177e27f6f126fede3cadd`
-- app.asar SHA256：`3a46ed46c9ebc22d1b36a264aed33b3d211b8b9d76695a0eb65c122964fbd07f`
-- 应用版本 0.1.3（分支预发布产物；仓库内 version 字段按版本纪律保持 0.1.2，0.1.3 由伴随 changeset 注记的发版准备流程落地）；捆绑 install-layout 0.3.1；构建来源 commit：分支 `ai/adhoc-20261016-companion-install-compat`（基点 origin/main f7d47ae0f；修复提交 273d20e08 / 4423545f2 / b69b7bef + 门禁修正 a523824e 及后续 changeset 修正；产物对应 b69b7bef 时的最终代码）
-- asar 关键标记核验：16/17 PASS；唯一未命中项 `InstalledRuntimeOutcome` 为 TS 接口名（编译期擦除），运行时标记 `missing` 命中，非缺口
+### 7.1 RF 收口后验证产物（当前有效）
+
+- 路径：`D:\Code\_worktrees\principles\adhoc-20261016-companion-install-compat\packages\pd-companion\release\pd-companion-0.1.2-setup.exe`
+- SHA256：`3db30beefb820ac9cd5f305f57183407078d47415c2b4e5ad3a914436d8949a2`
+- app.asar SHA256：`3d6e77ab6983370e31740b95ce6e6e872584925c2aee9a618c1400332dc15ac3`
+- 应用版本 0.1.2（=仓库 package.json；版本一致性守卫实测 repo↔asar 一致）；捆绑 install-layout 0.3.1；包含全部 A/B/C + RF-01/RF-04 修复代码（asar 标记核验 4/4 PASS + 兼容矩阵 6/6）。
+- 正式 0.1.3 安装包由 CI tag 流程产出，须通过新的版本一致性守卫（RF-03）。
+
+### 7.2 已被取代的历史产物（仅追溯）
+
+- `pd-companion-0.1.3-setup.exe`，SHA256 `850c79835d7d5e830fdfc49b2605fb372cea7880d52177e27f6f126fede3cadd`（asar `3a46ed46…f07f`）——第一轮交付物，**不含 RF-01/RF-04 修复**，不应再用于安装验证。
+- 构建来源：分支 `ai/adhoc-20261016-companion-install-compat`（基点 origin/main f7d47ae0f）；首轮提交 273d20e08 / 4423545f2 / b69b7bef，RF 收口提交见 §R。
 
 ## 8. 验收状态（诚实分级）
 
@@ -104,6 +113,48 @@
 
 ## 10. Owner 最少操作
 
-1. 运行 `pd-companion-0.1.3-setup.exe`（官方 NSIS 安装器，覆盖安装即可，无需卸载；不需要重装 PD 运行时）。
+1. 运行 §7.1 的验证产物（官方 NSIS 安装器，覆盖安装即可，无需卸载；不需要重装 PD 运行时）。
 2. 打开 PD Companion：窗口应进入控制台而非「未找到已安装的 PD」；托盘菜单出现「控制台运行中（端口 xxxx）」；Companion 日志（`%APPDATA%/pd-companion/logs/companion-main.log`）应出现 `console_started` 且不再有 `pd_not_installed`。
 3. 之后 Worker 恢复由既有 sync 周期自动完成（无需任何手工干预）。
+
+---
+
+## R. RF 收口（2026-10-16 第二轮，评审裁决后）
+
+### R.1 RF-01 — 不兼容清单绕过 fail-closed：FIXED_VERIFIED
+
+- 修复：`resolveInstallLayout()` 新守卫——canonical 运行时存在 + 清单**已读到但不可解析**（版本不兼容或结构损坏）→ 整体拒绝（mode missing + 结构化原因），不再经 legacy 兜底启动不匹配协议的运行时；无清单文件（真 legacy-only）与 canonical 缺失的兜底路径原样保留。
+- 红灯先行：install-layout 2 例先红后绿；端到端链路测试锁定 locate 拒绝 → supervisor 映射 `install_manifest_incompatible` → 降级页含 companion-v 升级入口（startSupervision 在 extDir 未解析时于任何 spawn 之前返回——由链路测试 + coexistence 特征化共同锁定）。
+- 测试：install-layout 21/21、pd-companion 149→151（RF-01 链路 + RF-04）。
+
+### R.2 RF-02 — installer 未知宿主写回契约：FIXED_VERIFIED（代码层）+ PUBLISH_BLOCKED（发布层，如实标注）
+
+- registry 复核：`@principles/install-layout` 正式最新 = **0.3.1**（无 `installManifestHostsForPersist`）；workspace = 0.3.1 + 本地新导出（未发布）。npm installer 的前向兼容能力在 0.4.0 发布前**不具备写穿能力**，如实标注 PUBLISH_BLOCKED。
+- 新增**双模 registry-parity 测试**（打包安装冒烟套件，对真实 registry 解析的依赖运行，非 workspace 符号链接）：
+  - 负控（当前 0.3.x）：codex 合并对未知宿主清单**大声拒绝**（`install_manifest_malformed`，注册零丢失）；workbuddy 合并 `ok:false` 硬停**零修改**（文件字节不变）；卸载已知宿主时共享运行时保留；layoutVersion 2 危险写回两模式均拒绝。
+  - 正控（0.4.0 发布后自动翻转）：未知宿主在 codex/workbuddy 安装与已知宿主卸载后全部保留；全部合法宿主卸载后按原规则允许清理。
+- 本地正控预验（workspace 树等价探针）：5/5 PASS；负控分支由 CI 真实 registry 解析触发。
+- changeset 注明：发布阻断状态、twin 退役条件、parity 测试自动翻转行为。
+
+### R.3 RF-03 — 版本与 Tag 一致性：FIXED_VERIFIED（CI 守卫落地）
+
+- 新增发布版本一致性守卫（脚本 + 7 测试）：`companion-vX.Y.Z` tag ↔ 仓库 package.json ↔ **app.asar 内嵌版本**三方强制一致，不一致 fail loudly 于任何上传/发布之前；`workflow_dispatch`（无 tag）强制 repo↔asar 一致且明确为手动测试产物（GitHub Release 步骤本就只在 companion-v* tag 触发）。
+- 发版前置条件机械化：把 0.1.3 版本字段变更放在 tag 之前的 release-prep 变更中，tag 打错提交会被 CI 拒绝——不依赖人工记忆。
+- 实战验证：新产物上 `check:release-version` 实跑 PASS（0.1.2 = 0.1.2）。
+
+### R.4 RF-04 — Manifest 恢复后托盘未刷新：FIXED_VERIFIED
+
+- `unavailable → ok` 转换发射一次性 `workspace_worker_sync_recovered`（携带 previousReason/unavailableReads，幂等：同周期只发一次）；Companion 两个 registry 均接事件立即重建托盘/tooltip（纯显示刷新，零 worker 重启）；再次故障建立新周期，阈值后可再次升级。
+- 全生命周期测试：正常→持续失败→Owner 告警→恢复（事件一次、托盘投影清空、worker 无重启）→再次失败→二次升级。pd-companion 158/158。
+
+### R.5 RF-05 — statSync 不确定状态误停：FOLLOW_UP（独立工单 PRI-993）
+
+- 独立工单：https://linear.app/principlesdisciple/issue/PRI-993 （含最小复现、源码定位、三个候选修复方向、五条验收条件）。
+- 本 PR 不扩大范围（评审明示不顺带重构 Worker Registry）。生产风险如实披露：stat 瞬时失败可致误停，路径恢复后自动重启（消耗重启预算）；PRI-990 的「清单不可读整体保持」不覆盖单条 stat 失败。
+
+### R.6 RF 收口验证
+
+- install-layout 21/21；pd-companion 158/158；installer 相关面 59/59；host-runtime 479/479；lint 11/11；`verify:merge` exit 0（RF 头）。
+- 产物：§7.1（兼容矩阵 6/6、版本一致性 PASS、RF 标记 4/4）。
+- PR CI：见 PR #2047 最新 runs（RF 收口 head）。
+
