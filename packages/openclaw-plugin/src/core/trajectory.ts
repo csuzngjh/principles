@@ -252,13 +252,30 @@ function redactText(text: string): string {
 /** signal_confirmations 行 → camelCase 投影（terms_json 校验为 unknown，rc-1/2）。 */
 function rowToSignalConfirmation(row: Record<string, unknown>): SignalConfirmationRow {
   let terms: string[] = [];
+  let termsVerified = false;
   try {
     const parsed: unknown = JSON.parse(String(row.terms_json ?? '[]'));
     if (Array.isArray(parsed)) {
+      // Legacy queue row (pre-PRI-2053): only the raw Stage1 hits were stored,
+      // never the category each word carried at detection time. The correction-
+      // word attribution those hits would drive is therefore unrecoverable →
+      // load as UNVERIFIED so consumers degrade conservatively instead of
+      // guessing categories from today's store (rc-9, no speculation as fact).
       terms = parsed.filter((t): t is string => typeof t === 'string');
+    } else if (parsed !== null && typeof parsed === 'object') {
+      // runtime-contract-exempt: ERR-001 narrowed JSON.parse output solely for Object.hasOwn + property read; typeof/null guards precede and field types re-validated via Array.isArray before use (rc-1/2/4/5 held).
+      const obj = parsed as Record<string, unknown>;
+      if (Object.hasOwn(obj, 'correction')) {
+        const correction = obj.correction;
+        if (Array.isArray(correction)) {
+          terms = correction.filter((t): t is string => typeof t === 'string');
+          termsVerified = true;
+        }
+      }
     }
   } catch {
     terms = [];
+    termsVerified = false;
   }
   return {
     id: String(row.id),
@@ -267,6 +284,7 @@ function rowToSignalConfirmation(row: Record<string, unknown>): SignalConfirmati
     occurrenceId: String(row.occurrence_id),
     excerpt: String(row.excerpt),
     terms,
+    termsVerified,
     suggestedType: String(row.suggested_type),
     status: String(row.status) as SignalConfirmationStatus,
     attempts: Number(row.attempts ?? 0),
@@ -1338,7 +1356,11 @@ export class TrajectoryDatabase {
         input.userTurnRowid,
         input.occurrenceId,
         input.excerpt,
-        JSON.stringify(input.terms),
+        // PRI-2053: persist the attribution-bearing set ({correction:[...]}), not
+        // a bare array. A bare array cannot say which hits were `correction`
+        // class at detection time, and the batch path has no Stage1 snapshot to
+        // fall back on.
+        JSON.stringify({ correction: input.terms }),
         input.suggestedType,
         input.createdAt,
       );

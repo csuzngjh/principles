@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { CorrectionObserverResult } from '@principles/core/runtime-v2';
 
 // Shared mock objects so tests can mutate them after vi.mock runs
-const mockLearner = { add: vi.fn(), updateWeight: vi.fn(), remove: vi.fn(), recordFalsePositive: vi.fn(), recordTruePositive: vi.fn(), getStore: vi.fn(() => ({ keywords: [] })) };
+const mockLearner = { add: vi.fn(() => []), updateWeight: vi.fn(() => true), remove: vi.fn(() => true), recordFalsePositive: vi.fn(() => true), recordTruePositive: vi.fn(() => true), find: vi.fn(() => undefined), getStore: vi.fn(() => ({ keywords: [] })) };
 const mockDb = { listUserTurnsForSession: vi.fn(() => []), listRecentSessions: vi.fn(() => []) };
 
 // Mock the CorrectionCueLearner dependency
@@ -15,6 +15,12 @@ vi.mock('../../src/core/trajectory.js', () => ({
   TrajectoryRegistry: { get: vi.fn(() => mockDb) },
 }));
 
+// Store mutations are Owner-visible audit events; assert them instead of writing files
+const mockSystemLog = vi.fn();
+vi.mock('../../src/core/system-logger.js', () => ({
+  SystemLogger: { log: (...args: unknown[]) => mockSystemLog(...args) },
+}));
+
 import { KeywordOptimizationService } from '../../src/service/keyword-optimization-service.js';
 
 describe('KeywordOptimizationService', () => {
@@ -23,6 +29,11 @@ describe('KeywordOptimizationService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     KeywordOptimizationService.reset();
+    mockLearner.add.mockReturnValue([]);
+    mockLearner.updateWeight.mockReturnValue(true);
+    mockLearner.remove.mockReturnValue(true);
+    mockLearner.recordFalsePositive.mockReturnValue(true);
+    mockLearner.find.mockReturnValue(undefined);
     service = KeywordOptimizationService.get('/tmp/test-state', '/tmp/test-state', {
       info: vi.fn(),
       debug: vi.fn(),
@@ -42,6 +53,7 @@ describe('KeywordOptimizationService', () => {
     });
 
     it('UPDATE: calls learner.updateWeight() with clamped weight', () => {
+      mockLearner.find.mockReturnValue({ term: 'existing-term', weight: 0.5, source: 'llm', addedAt: 'x' });
       const result: CorrectionObserverResult = {
         updated: true,
         updates: { 'existing-term': { action: 'update', weight: 0.85, reasoning: 'test' } },
@@ -51,6 +63,7 @@ describe('KeywordOptimizationService', () => {
     });
 
     it('REMOVE: calls learner.remove() with term', () => {
+      mockLearner.find.mockReturnValue({ term: 'old-term', weight: 0.5, source: 'llm', addedAt: 'x' });
       const result: CorrectionObserverResult = {
         updated: true,
         updates: { 'old-term': { action: 'remove', reasoning: 'test' } },
@@ -88,6 +101,7 @@ describe('KeywordOptimizationService', () => {
     });
 
     it('PRI-812: records FP alongside store mutations (updated=true)', () => {
+      mockLearner.find.mockReturnValue({ term: 'another-term', weight: 0.5, source: 'llm', addedAt: 'x' });
       const result: CorrectionObserverResult = {
         updated: true,
         updates: { 'another-term': { action: 'update', weight: 0.3, reasoning: 'lower weight' } },
@@ -143,6 +157,9 @@ describe('KeywordOptimizationService', () => {
     });
 
     it('safety: a throwing store mutation is logged and skipped, batch continues', () => {
+      mockLearner.find.mockImplementation((term: string) =>
+        term === 'ghost-term' ? { term: 'ghost-term', weight: 0.5, source: 'llm', addedAt: 'x' } : undefined
+      );
       mockLearner.remove.mockImplementation(() => {
         throw new Error('keyword not found');
       });
@@ -162,6 +179,7 @@ describe('KeywordOptimizationService', () => {
 
   describe('updateWeight() clamp behavior', () => {
     it('clamps weight to 0.1-0.9 range via CorrectionCueLearner', () => {
+      mockLearner.find.mockReturnValue({ term: 'existing-term', weight: 0.5, source: 'llm', addedAt: 'x' });
       const result: CorrectionObserverResult = {
         updated: true,
         updates: { 'existing-term': { action: 'update', weight: 1.5, reasoning: 'test' } },
@@ -171,7 +189,258 @@ describe('KeywordOptimizationService', () => {
     });
   });
 
+  // ── P1-2: REMOVE 证据下限 — 有限近期窗口的缺席不是删除历史有效词的反证 ──────
+  describe('P1-2: REMOVE evidence floor', () => {
+    function svcWithLogger() {
+      const logger = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
+      return {
+        svc: new KeywordOptimizationService('/tmp/test-state', '/tmp/test-state', logger as any),
+        logger,
+      };
+    }
+
+    it('refuses to REMOVE a term with confirmed TPs (TP>0) on recent-window silence alone', () => {
+      mockLearner.find.mockReturnValue({
+        term: '有据之词', weight: 0.6, source: 'llm', addedAt: 'x',
+        truePositiveCount: 5, falsePositiveCount: 0,
+      });
+      const { svc, logger } = svcWithLogger();
+
+      svc.applyResult({
+        updated: true,
+        updates: { '有据之词': { action: 'remove', reasoning: 'not in the recent trajectory window' } },
+      } as any);
+
+      expect(mockLearner.remove).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'REMOVE skipped for term="有据之词": term has 5 confirmed correction(s); recent-window silence is not counter-evidence',
+        ),
+      );
+      // 被拒绝的删除绝不能留下"已成功删除"的审计
+      expect(mockSystemLog).not.toHaveBeenCalledWith(
+        '/tmp/test-state', 'KEYWORD_LEARNING', expect.stringContaining('REMOVE'),
+      );
+    });
+
+    it('still REMOVEs a never-confirmed learned term (TP=0, FP=0)', () => {
+      mockLearner.find.mockReturnValue({ term: '没据之词', weight: 0.5, source: 'llm', addedAt: 'x' });
+      service.applyResult({
+        updated: true,
+        updates: { '没据之词': { action: 'remove', reasoning: 'never confirmed, never fired' } },
+      } as any);
+
+      expect(mockLearner.remove).toHaveBeenCalledWith('没据之词');
+      expect(mockSystemLog).toHaveBeenCalledWith(
+        '/tmp/test-state', 'KEYWORD_LEARNING', 'REMOVE term="没据之词"',
+      );
+    });
+
+    it('still REMOVEs a learned term with real counter-evidence (FP>0, TP=0)', () => {
+      mockLearner.find.mockReturnValue({
+        term: '误报之词', weight: 0.3, source: 'llm', addedAt: 'x',
+        truePositiveCount: 0, falsePositiveCount: 3,
+      });
+      service.applyResult({
+        updated: true,
+        updates: { '误报之词': { action: 'remove', reasoning: 'FP ratio 1.0, no TP' } },
+      } as any);
+
+      expect(mockLearner.remove).toHaveBeenCalledWith('误报之词');
+    });
+
+    it('a refused REMOVE does not block the other legitimate operations in the batch', () => {
+      mockLearner.find.mockImplementation((term: string) => {
+        if (term === '受保护') {
+          return { term: '受保护', weight: 0.7, source: 'llm', addedAt: 'x', truePositiveCount: 4 };
+        }
+        if (term === '可删') {
+          return { term: '可删', weight: 0.4, source: 'llm', addedAt: 'x' };
+        }
+        return undefined;
+      });
+
+      service.applyResult({
+        updated: true,
+        updates: {
+          '受保护': { action: 'remove', reasoning: 'silent lately' },
+          '可删': { action: 'remove', reasoning: 'never confirmed' },
+        },
+      } as any);
+
+      expect(mockLearner.remove).toHaveBeenCalledTimes(1);
+      expect(mockLearner.remove).toHaveBeenCalledWith('可删');
+    });
+
+    it('learner.remove() returning false is a skip, never a fake REMOVE success audit', () => {
+      mockLearner.find.mockReturnValue({ term: '消失之词', weight: 0.5, source: 'llm', addedAt: 'x' });
+      mockLearner.remove.mockReturnValue(false);
+      const { svc, logger } = svcWithLogger();
+
+      svc.applyResult({
+        updated: true,
+        updates: { '消失之词': { action: 'remove', reasoning: 'stale' } },
+      } as any);
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('REMOVE skipped for term="消失之词": not in store'),
+      );
+      expect(mockSystemLog).not.toHaveBeenCalledWith(
+        '/tmp/test-state', 'KEYWORD_LEARNING', expect.stringContaining('REMOVE'),
+      );
+    });
+
+    it('learner.updateWeight() returning false is a skip, never a fake UPDATE success audit', () => {
+      mockLearner.find.mockReturnValue({ term: '消失之词', weight: 0.5, source: 'llm', addedAt: 'x' });
+      mockLearner.updateWeight.mockReturnValue(false);
+      const { svc, logger } = svcWithLogger();
+
+      svc.applyResult({
+        updated: true,
+        updates: { '消失之词': { action: 'update', weight: 0.8, reasoning: 'boost' } },
+      } as any);
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE skipped for term="消失之词": not in store'),
+      );
+      expect(mockSystemLog).not.toHaveBeenCalledWith(
+        '/tmp/test-state', 'KEYWORD_LEARNING', expect.stringContaining('UPDATE'),
+      );
+    });
+  });
+
+  describe('term key resolution (store-identity symmetry)', () => {
+    // 生产实况：优化器回吐的 key 带空白/大小写差异，ADD 归一化而 UPDATE/REMOVE
+    // 直接用原串，于是天天刷 "Keyword not found"。三者必须走同一条身份规则。
+    it('normalizes UPDATE/REMOVE keys with the same trim+lowercase rule as ADD', () => {
+      const stored = { term: '搞错了', weight: 0.5, source: 'llm', addedAt: 'x' };
+      mockLearner.find.mockReturnValue(stored);
+      const result: CorrectionObserverResult = {
+        updated: true,
+        updates: {
+          '  搞错了 ': { action: 'update', weight: 0.7, reasoning: 'r' },
+          '搞错了': { action: 'remove', reasoning: 'r' },
+        },
+      } as any;
+      service.applyResult(result);
+      expect(mockLearner.find).toHaveBeenCalledWith('搞错了');
+      expect(mockLearner.updateWeight).toHaveBeenCalledWith('搞错了', 0.7);
+      expect(mockLearner.remove).toHaveBeenCalledWith('搞错了');
+    });
+
+    it('skips UPDATE/REMOVE for a term that is not in the store, without calling the learner', () => {
+      mockLearner.find.mockReturnValue(undefined);
+      const logger = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() } as any;
+      // 直接构造：单例 get() 仍返回 beforeEach 建好的实例，其 logger 不是这里要断言的
+      const svc = new KeywordOptimizationService('/tmp/test-state', '/tmp/test-state', logger);
+      svc.applyResult({
+        updated: true,
+        updates: { '优化来优化去': { action: 'remove', reasoning: 'paraphrase' } },
+      } as any);
+      expect(mockLearner.remove).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('REMOVE skipped for term="优化来优化去": not in store'),
+      );
+    });
+
+    it('rejects an updates key that is blank or an action word instead of storing it', () => {
+      const result: CorrectionObserverResult = {
+        updated: true,
+        updates: {
+          'add': { action: 'remove', reasoning: 'key slot misused' },
+          '   ': { action: 'add', weight: 0.5, reasoning: 'no term' },
+        },
+      } as any;
+      service.applyResult(result);
+      expect(mockLearner.add).not.toHaveBeenCalled();
+      expect(mockLearner.remove).not.toHaveBeenCalled();
+    });
+
+    it('refuses to REMOVE a seed term — Owner-authored cues are not learning-reachable', () => {
+      mockLearner.find.mockReturnValue({ term: '搞错了', weight: 0.9, source: 'seed', addedAt: 'x' });
+      service.applyResult({
+        updated: true,
+        updates: { '搞错了': { action: 'remove', reasoning: 'llm decided' } },
+      } as any);
+      expect(mockLearner.remove).not.toHaveBeenCalled();
+    });
+
+    it('refuses to REMOVE a user-promoted term too', () => {
+      mockLearner.find.mockReturnValue({ term: '又错了', weight: 0.9, source: 'user', addedAt: 'x' });
+      service.applyResult({
+        updated: true,
+        updates: { '又错了': { action: 'remove', reasoning: 'llm decided' } },
+      } as any);
+      expect(mockLearner.remove).not.toHaveBeenCalled();
+    });
+
+    it('refuses to ADD a joined multi-term cue as if it were one term', () => {
+      mockLearner.find.mockReturnValue(undefined);
+      const logger = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() } as any;
+      const svc = new KeywordOptimizationService('/tmp/test-state', '/tmp/test-state', logger);
+      svc.applyResult({
+        updated: true,
+        updates: { '又错了, 改回去': { action: 'add', weight: 0.6, reasoning: 'r' } },
+      } as any);
+      expect(mockLearner.add).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('joined cue of several terms, not one learnable term'),
+      );
+    });
+
+    it('surfaces cap eviction in the mutation audit instead of freezing learning', () => {
+      mockLearner.add.mockReturnValue(['老的垃圾词']);
+      service.applyResult({
+        updated: true,
+        updates: { '新词': { action: 'add', weight: 0.6, reasoning: 'r' } },
+      } as any);
+      expect(mockSystemLog).toHaveBeenCalledWith(
+        '/tmp/test-state',
+        'KEYWORD_LEARNING',
+        expect.stringContaining('evicted=["老的垃圾词"] (store at cap)'),
+      );
+    });
+
+    it('does not re-ADD a term the store already holds, and audits the no-op', () => {
+      mockLearner.find.mockReturnValue({ term: '又错了', weight: 0.5, source: 'llm' });
+      service.applyResult({
+        updated: true,
+        updates: { '又错了 ': { action: 'add', weight: 0.6, reasoning: 'r' } },
+      } as any);
+      expect(mockLearner.add).not.toHaveBeenCalled();
+      expect(mockSystemLog).toHaveBeenCalledWith(
+        '/tmp/test-state', 'KEYWORD_LEARNING',
+        expect.stringContaining('ADD_SKIPPED "又错了" already exists as "又错了"'),
+      );
+    });
+
+    it('audits every applied mutation to the SYSTEM log (Owner-visible trail)', () => {
+      service.applyResult({
+        updated: true,
+        updates: { '新词': { action: 'add', weight: 0.6, reasoning: 'r' } },
+      } as any);
+      expect(mockSystemLog).toHaveBeenCalledWith(
+        '/tmp/test-state', 'KEYWORD_LEARNING', 'ADD term="新词" weight=0.6',
+      );
+    });
+  });
+
   describe('buildTrajectoryHistory()', () => {
+    it('reports a session it could not read instead of failing the whole history', async () => {
+      const logger = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
+      KeywordOptimizationService.reset();
+      const svc = KeywordOptimizationService.get('/tmp/test-state', '/tmp/test-state', logger as any);
+      mockDb.listUserTurnsForSession.mockImplementation(() => {
+        throw new Error('database is locked');
+      });
+      await expect(svc.buildTrajectoryHistory(['s1'])).resolves.toEqual([]);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to read trajectory for session s1'),
+      );
+      mockDb.listUserTurnsForSession.mockReturnValue([]);
+    });
+
+
     it('returns empty array when no sessions exist', async () => {
       const history = await service.buildTrajectoryHistory([]);
       expect(history).toEqual([]);
@@ -204,6 +473,34 @@ describe('KeywordOptimizationService', () => {
       expect(history[0].userMessage).toBe('User said wrong input');
       // 摘录缺失时回退为空串（不产生 undefined，schema 要求 string）
       expect(history[1].userMessage).toBe('');
+    });
+
+    it('does not hand Stage2 verdict prose to the optimizer as a term', async () => {
+      mockDb.listUserTurnsForSession = vi.fn(() => [
+        { id: 1, turnIndex: 0, rawExcerpt: '你到底改了什么', correctionDetected: true, correctionCue: 'llm:用户质疑改动无据', createdAt: '2024-01-01T00:01:00Z' },
+        { id: 2, turnIndex: 1, rawExcerpt: '这里搞错了', correctionDetected: true, correctionCue: '搞错了', createdAt: '2024-01-01T00:02:00Z' },
+      ] as any);
+
+      const history = await service.buildTrajectoryHistory(['session-1']);
+
+      // 判词行没有命中词 ⇒ term 必须是空串（渲染成 "(none matched)"），
+      // 否则散文会作为"关键词"被优化器原样入库——词库涨满的实际来源。
+      expect(history[0].term).toBe('');
+      expect(history[1].term).toBe('搞错了');
+    });
+
+    it('splits a multi-term cue into one event per term', async () => {
+      mockDb.listUserTurnsForSession = vi.fn(() => [
+        { id: 1, turnIndex: 0, rawExcerpt: '又错了，改回去', correctionDetected: true, correctionCue: '又错了, 改回去', createdAt: '2024-01-01T00:01:00Z' },
+      ] as any);
+
+      const history = await service.buildTrajectoryHistory(['session-1']);
+
+      // Stage1 joins every matched term with ", ". Handing that joined string
+      // to the optimizer as one "term" is how a composite that can never match
+      // again gets proposed for ADD — the observer must see the real terms.
+      expect(history.map((h) => h.term)).toEqual(['又错了', '改回去']);
+      expect(history[0]?.userMessage).toBe('又错了，改回去');
     });
 
     it('caps at 50 events', async () => {

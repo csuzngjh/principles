@@ -73,6 +73,20 @@ export function isUserInteractionTrigger(trigger: string | undefined): boolean {
   return trigger === 'user' || trigger === 'api' || trigger === undefined;
 }
 
+/**
+ * PRI-2053 归因不变量：Stage2 确认「整条消息是纠正」只证明消息级事实，不把每个
+ * Stage1 命中词升级为纠正词。只有 Stage1 检测当时在快照里属于 `correction`
+ * 类别的命中词才进入纠正词证据（correction_cue / TP / FP）；empathy 命中词不得
+ * 借消息级确认混入纠正证据链。快照必须用检测当时那份（detectSync 的 store），
+ * 不能用恢复时的当前词库代替。
+ */
+function correctionTermsOf(
+  matchedTerms: readonly string[],
+  snapshot: UnifiedKeywordStore,
+): string[] {
+  return matchedTerms.filter((term) => snapshot.terms[term]?.category === 'correction');
+}
+
 export function buildDefaultKeywordStore(): UnifiedKeywordStore {
   const terms: UnifiedKeywordStore['terms'] = {
     // 高精度纠正短语 (命中即判 STRONG,不走 LLM)
@@ -316,14 +330,18 @@ export class SignalCollectorHost {
     }
 
     // 3. 按 strength 分流
+    // PRI-2053: 归因词集只取 Stage1 快照里属于 correction 类的命中词——消息级
+    // 确认不改变每个命中词当时的类别（empathy 命中词不得升级为纠正词证据）。
+    const correctionTerms = correctionTermsOf(pending.output.matchedTerms, pending.storeSnapshot);
     if (confirmed.isSignal && confirmed.strength === 'STRONG') {
       // PRI-788 G3: LLM 确认是纠正 → 命中词记 TP（earned precision 证据）
-      this.emitCueFeedback(pending.output.matchedTerms, true);
+      this.emitCueFeedback(correctionTerms, true);
       // PRI-788 G1: LLM 确认的纠正回写标志位。Stage1 写入时歧义候选置 0，若不
       // 回写，证据构建器与 correction_samples 闭环永远看不到这条纠正。标志位
       // 陈述"这条消息是纠正"的事实，独立于 pain 事件的 rate limit，故先于
-      // routeStrong 执行。
-      this.writeBackConfirmedCorrection(pending.userTurnRowid, confirmed);
+      // routeStrong 执行。correctionTerms 为空时 cue 落 llm: 判词——保留
+      // "消息经 LLM 确认为纠正"的事实，但不伪造关键词。
+      this.writeBackConfirmedCorrection(pending.userTurnRowid, confirmed, correctionTerms);
       // PRI-788 G4: 健康度计数
       updateSignalHealth(this.wctx.stateDir, (s) => {
         s.stage2Confirmed += 1;
@@ -331,12 +349,12 @@ export class SignalCollectorHost {
       });
       this.routeStrong(confirmed, pending.sessionId, pending.text, pending.occurrenceId);
     } else if (confirmed.isSignal && confirmed.strength === 'WEAK') {
-      // LLM 判为情绪/挫败而非纠正 → 命中的纠正词记 FP
-      this.emitCueFeedback(pending.output.matchedTerms, false);
+      // LLM 判为情绪/挫败而非纠正 → 命中的纠正词记 FP（同样只用 correction 类词）
+      this.emitCueFeedback(correctionTerms, false);
       this.routeWeak(confirmed, pending.sessionId);
     } else {
-      // LLM 判为普通消息 → 命中词记 FP
-      this.emitCueFeedback(pending.output.matchedTerms, false);
+      // LLM 判为普通消息 → 命中词记 FP（同样只用 correction 类词）
+      this.emitCueFeedback(correctionTerms, false);
     }
   }
 
@@ -367,16 +385,18 @@ export class SignalCollectorHost {
       this.countStage2Dropped();
       return;
     }
-    const suggestedType = pending.output.matchedTerms.some(
-      (term) => pending.storeSnapshot.terms[term]?.category === 'correction',
-    ) ? 'correction' : 'empathy';
+    // PRI-2053: 归因必须在 Stage1 快照仍有效的此刻完成——批量恢复时 terms_json
+    // 只有词、没有当时的类别。持久化 correction 类命中词，suggestedType 与之一致
+    // （旧算式 some(category==='correction') 与本式等价，但只算一次，避免漂移）。
+    const correctionTerms = correctionTermsOf(pending.output.matchedTerms, pending.storeSnapshot);
+    const suggestedType = correctionTerms.length > 0 ? 'correction' : 'empathy';
     try {
       this.wctx.trajectory?.enqueueSignalConfirmation?.({
         sessionId: pending.sessionId,
         userTurnRowid: pending.userTurnRowid,
         occurrenceId: pending.occurrenceId,
         excerpt: pending.text.slice(0, 400),
-        terms: pending.output.matchedTerms,
+        terms: correctionTerms,
         suggestedType,
         createdAt: new Date().toISOString(),
       });
@@ -417,7 +437,19 @@ export class SignalCollectorHost {
    * attempts++，达上限转 abandoned）。
    */
   async confirmPendingSignal(
-    item: { sessionId: string; userTurnRowid: number; occurrenceId: string; excerpt: string; terms?: readonly string[] },
+    item: {
+      sessionId: string;
+      userTurnRowid: number;
+      occurrenceId: string;
+      excerpt: string;
+      terms?: readonly string[];
+      /**
+       * PRI-2053: `terms` 是否为「enqueue 时按 Stage1 快照筛出的 correction 类
+       * 命中词」。缺省 / false ⇒ 归因不可信（旧格式队列项），保守降级为无关键词
+       * 证据（rc-9：降级可见，不伪造）。
+       */
+      termsVerified?: boolean;
+    },
     classifier: SignalLlmClassifier,
   ): Promise<{ disposition: 'confirmed' | 'rejected' | 'failed'; detail: string }> {
     let llmResult: Awaited<ReturnType<SignalLlmClassifier>> = null;
@@ -428,9 +460,17 @@ export class SignalCollectorHost {
     }
     if (!llmResult) return { disposition: 'failed', detail: 'classifier unavailable' };
     const confirmed = mapLlmResultToOutput(llmResult, item.excerpt, item.sessionId, this.config, new Date().toISOString());
+    // PRI-2053 归因边界：恢复侧没有 Stage1 快照，只能使用入队时已验证的词集。
+    // 旧格式队列项无法恢复当时的类别 → 保守降级为空集：不把推测类别当作事实，
+    // 但消息级纠正事实照常保留（llm: 判词 + routeStrong）。
+    const correctionTerms = item.termsVerified ? (item.terms ?? []) : [];
+    if (item.termsVerified !== true && (item.terms?.length ?? 0) > 0) {
+      SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_CONFIRMATION_ATTRIBUTION_UNVERIFIED',
+        'queued signal carries unclassified Stage1 hits (pre-PRI-2053 row); correction-word attribution skipped, message-level correction preserved');
+    }
     if (confirmed.isSignal && confirmed.strength === 'STRONG') {
-      this.emitCueFeedback(item.terms, true);
-      this.writeBackConfirmedCorrection(item.userTurnRowid, confirmed);
+      this.emitCueFeedback(correctionTerms, true);
+      this.writeBackConfirmedCorrection(item.userTurnRowid, confirmed, correctionTerms);
       // PRI-844: recover the Owner's VERBATIM turn — the persisted queue only
       // stores a 400-char excerpt. turnIndex comes from the numeric
       // occurrenceId; the full text comes from the user_turns row via rowid.
@@ -450,11 +490,11 @@ export class SignalCollectorHost {
       return { disposition: 'confirmed', detail: confirmed.llmReason ?? 'confirmed correction' };
     }
     if (confirmed.isSignal && confirmed.strength === 'WEAK') {
-      this.emitCueFeedback(item.terms, false);
+      this.emitCueFeedback(correctionTerms, false);
       this.routeWeak(confirmed, item.sessionId);
       return { disposition: 'rejected', detail: 'weak/empathy at confirmation' };
     }
-    this.emitCueFeedback(item.terms, false);
+    this.emitCueFeedback(correctionTerms, false);
     return { disposition: 'rejected', detail: confirmed.llmReason ?? 'classified none' };
   }
 
@@ -463,9 +503,23 @@ export class SignalCollectorHost {
    * 以 Stage1 写入返回的 rowid 精确寻址（rc-7）；rowid 缺失/行已不存在均为
    * 可观测降级，不阻塞路由。
    */
-  private writeBackConfirmedCorrection(userTurnRowid: number | undefined, confirmed: SignalCollectorOutput): void {
+  private writeBackConfirmedCorrection(
+    userTurnRowid: number | undefined,
+    confirmed: SignalCollectorOutput,
+    matchedTerms: readonly string[],
+  ): void {
     if (userTurnRowid === undefined) return;
-    const cue = confirmed.llmReason ? `llm:${confirmed.llmReason.slice(0, 120)}` : null;
+    // correction_cue means "which keyword fired". Overwriting it with the
+    // Stage2 verdict prose destroyed exactly the evidence the keyword optimizer
+    // needs to attribute a correction to a term, and the prose was then echoed
+    // back into correction_keywords.json as a whole-sentence "term". Verdict
+    // prose is only used when no keyword fired at all.
+    // matchedTerms is required, not defaulted from `confirmed`: the Stage2
+    // verdict object always carries an empty list, so reading it back would
+    // silently fall into the prose branch for every keyword hit.
+    const cue = matchedTerms.length > 0
+      ? matchedTerms.join(', ')
+      : (confirmed.llmReason ? `llm:${confirmed.llmReason.slice(0, 120)}` : null);
     try {
       const updated = this.wctx.trajectory?.markUserTurnCorrection(userTurnRowid, cue);
       if (updated === false) {

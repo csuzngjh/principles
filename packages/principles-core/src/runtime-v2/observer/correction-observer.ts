@@ -91,7 +91,8 @@ export class CorrectionObserver {
       : '  (none)';
 
     const trajectory = trajectoryHistory.length > 0
-      ? trajectoryHistory.map(t => `  - [${t.sessionId}] ${t.term} (${t.timestamp}): ${t.userMessage.substring(0, MAX_TRAJECTORY_MESSAGE_LENGTH)}`)
+      ? trajectoryHistory
+        .map(t => `  - [${t.sessionId}] keyword="${t.term === '' ? '(none matched)' : t.term}" (${t.timestamp}): ${t.userMessage.substring(0, MAX_TRAJECTORY_MESSAGE_LENGTH)}`)
         .join('\n')
       : '  (none)';
 
@@ -108,6 +109,7 @@ export class CorrectionObserver {
       messages,
       '',
       '## Correction Trajectory (recent confirmed corrections, D-40-08):',
+      'Each line is one confirmed correction: the keyword that fired (or "(none matched)") plus the user text.',
       trajectory,
       '',
       '## Rules:',
@@ -116,16 +118,28 @@ export class CorrectionObserver {
       '    High-value patterns: corrective instructions and accountability ("我说的是…", "不是让你…", "谁让你…", "先确认再改", "又搞错了", "都说了…").',
       '    Low value: pure venting without a corrective point ("什么狗屎", "疯了") — those belong to empathy, not correction cues.',
       '  - Terms must be literal substrings as they appear in messages (matching is exact substring, lowercased).',
+      '  - A term is a MATCHER, so it has to be able to recur: store the shortest distinctive fragment',
+      '    ("改了个什么鬼", not "我不清楚你到底改了什么"). A full user sentence will never match again and is dead weight.',
+      '  - Never copy a trajectory keyword="(none matched)" line or an LLM reason into a term: those are prose, not keywords.',
       '- UPDATE: If a term\'s weight should change based on TP/FP ratio',
       '  - truePositiveCount = the term\'s match was LLM-confirmed as a real correction; falsePositiveCount = matched but not a correction.',
-      '- REMOVE: If a term\'s false positive rate (FP / (TP + FP)) exceeds 0.3 with few or no true positives',
+      '- REMOVE: a term is low value when ANY of these is true, and you must cite which:',
+      '  1. FP / (TP + FP) exceeds 0.3 with few or no true positives.',
+      '  2. It has NEVER been credited with a correction (TP=0) AND it matches nothing in the trajectory or recent messages above.',
+      '     Absence from that window is not evidence of absence: the window covers only the most recent sessions and a capped',
+      '     number of events, so a cue that fired earlier can look dormant here. Silence may condemn a never-confirmed cue;',
+      '     it must never condemn one the store has already credited (a term with TP>0 has earned its place).',
+      '  3. It is a full user sentence rather than a reusable fragment (it cannot recur verbatim).',
+      '  Do not recommend REMOVE for terms that appear as keywords in trajectory lines above — that is live proof they fire.',
+      '  Do not recommend REMOVE for a TP>0 term on recent silence alone; the caller rejects that verdict as under-evidenced.',
       '- FALSE POSITIVE: If a term appears in trajectory but the user message doesn\'t actually express frustration (e.g., user said "wrong" but in a factual context, not emotional)',
       '- fpAnalysisStatus: set to "completed" if you performed trajectory analysis (even if no FPs found), or "skipped" if trajectory was empty/unavailable',
+      '- In "updates", each KEY is the term itself, exactly as listed above for UPDATE/REMOVE. Never put the action word in the key.',
       '- Keep reasoning concise (max 100 chars)',
       '- Weight range: 0.1-0.9',
       '',
       'Return strict JSON (no markdown):',
-      '{"updated": boolean, "updates": {...}, "fpTerms": ["term1", ...], "fpAnalysisStatus": "completed" | "skipped", "summary": string}',
+      '{"updated": boolean, "updates": {"<term>": {"action": "add"|"update"|"remove", "weight": number, "reasoning": string}}, "fpTerms": ["term1", ...], "fpAnalysisStatus": "completed" | "skipped", "summary": string}',
       'Note: fpTerms is optional — only include if you identified clear false positives.',
     ].join('\n');
   }

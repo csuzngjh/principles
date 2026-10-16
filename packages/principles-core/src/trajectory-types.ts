@@ -293,7 +293,11 @@ export interface SignalConfirmationInput {
   /** 与 realtime 路径一致的 occurrence 身份（ADR-0020 §11.4，批量确认复现同一 canonical pain）。 */
   readonly occurrenceId: string;
   readonly excerpt: string;
-  /** Stage1 命中的词列表（JSON 落库）。 */
+  /**
+   * Stage1 命中词（JSON 落库）。PRI-2053 归因不变量：只携带 Stage1 快照判定为
+   * `correction` 类别的命中词。Stage2 确认「整条消息是纠正」不改变每个命中词
+   * 当时的类别，因此 empathy 命中词不得作为纠正词证据持久化。
+   */
   readonly terms: readonly string[];
   /** Stage1 建议类别：correction | empathy。 */
   readonly suggestedType: string;
@@ -307,7 +311,17 @@ export interface SignalConfirmationRow {
   readonly userTurnRowid: number;
   readonly occurrenceId: string;
   readonly excerpt: string;
+  /** 纠正词归因证据（语义与验证状态见 termsVerified）。 */
   readonly terms: readonly string[];
+  /**
+   * PRI-2053 归因证据是否可信：
+   * - `true`  → `terms` 是 enqueue 时按 Stage1 快照筛出的 correction 类命中词，
+   *   可直接用作纠正词证据（correction_cue / TP / FP）；
+   * - `false` → 旧格式队列项（terms_json 只存原始命中词，没有当时的类别快照），
+   *   归因不可恢复。消费者必须保守降级：不得把其中任何词当作纠正词证据，
+   *   只能保留消息级纠正事实（rc-9，降级可见）。
+   */
+  readonly termsVerified: boolean;
   readonly suggestedType: string;
   readonly status: SignalConfirmationStatus;
   readonly attempts: number;
