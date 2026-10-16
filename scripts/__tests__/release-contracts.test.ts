@@ -371,6 +371,41 @@ describe('guard: normal PR release-intent contract', () => {
     await git(['reset', '--hard', base]);
   });
 
+  // Companion desktop release-prep exemption (2026-10-16): the private
+  // desktop-only package can never materialize a version through the Version
+  // Packages PR (changesets ignores private packages), so its release-prep PR
+  // is the designed authority — integrity is enforced at tag time by the
+  // companion-release workflow's tag/package/asar consistency step.
+  it('N-version exemption: pd-companion version bump in a release-prep PR passes', async () => {
+    const base = await git(['rev-parse', 'HEAD']);
+    write(
+      'packages/pd-companion/package.json',
+      JSON.stringify({ name: '@principles/pd-companion', version: '0.1.3', main: 'dist/main/main.js', private: true }, null, 2) + '\n',
+    );
+    await commitAll('chore(companion): release-prep 0.1.3');
+    const r = await runGuard(base);
+    expect(r.code).toBe(0);
+    await git(['reset', '--hard', base]);
+  });
+
+  it('N-version exemption stays narrow: a public package next to the companion bump still fails', async () => {
+    const base = await git(['rev-parse', 'HEAD']);
+    write(
+      'packages/pd-companion/package.json',
+      JSON.stringify({ name: '@principles/pd-companion', version: '0.1.3', main: 'dist/main/main.js', private: true }, null, 2) + '\n',
+    );
+    write(
+      'packages/core/package.json',
+      JSON.stringify({ name: '@principles/core', version: '1.0.1', main: 'index.js' }, null, 2) + '\n',
+    );
+    await commitAll('chore: companion prep + hand core bump');
+    const r = await runGuard(base);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('N-version');
+    expect(r.stderr).toContain('packages/core/package.json');
+    await git(['reset', '--hard', base]);
+  });
+
   it('N-version bootstrap: a NEW package with its initial version passes when a changeset declares it (remediation 2026-10-13)', async () => {
     const base = await git(['rev-parse', 'HEAD']);
     // A brand-new publishable package born WITH its initial version — npm
