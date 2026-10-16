@@ -10,6 +10,7 @@ const mockAssertInitialized = vi.fn();
 const mockListTasks = vi.fn();
 const mockGetTask = vi.fn();
 const mockUpdateTask = vi.fn();
+const mockUpdateTaskIfDiagnosticJsonUnchanged = vi.fn();
 
 vi.mock('../store/runtime-state-manager.js', () => ({
   RuntimeStateManager: vi.fn().mockImplementation(function (this: Record<string, unknown>) {
@@ -22,6 +23,7 @@ vi.mock('../store/runtime-state-manager.js', () => ({
     this.listTasks = mockListTasks;
     this.getTask = mockGetTask;
     this.updateTask = mockUpdateTask;
+    this.updateTaskIfDiagnosticJsonUnchanged = mockUpdateTaskIfDiagnosticJsonUnchanged;
   }),
 }));
 
@@ -187,7 +189,7 @@ describe('recoverFailedTask — reset semantics unchanged (PRI-674)', () => {
     mockAssertInitialized.mockReturnValue(undefined);
   });
 
-  it('resets a failed diagnostician task to pending with lease/attempts/result cleared', async () => {
+  it('resets a failed diagnostician task to pending with lease/attempts/result cleared (CAS-guarded, PRI-990)', async () => {
     mockGetTask.mockResolvedValue(makeTask({
       taskId: 'diag-parent',
       taskKind: 'diagnostician',
@@ -197,27 +199,44 @@ describe('recoverFailedTask — reset semantics unchanged (PRI-674)', () => {
       leaseOwner: 'runner-1',
       leaseExpiresAt: '2026-09-08T01:00:00.000Z',
       resultRef: 'artifact://partial',
+      diagnosticJson: '{"pi_metadata":{}}',
     }));
-    mockUpdateTask.mockImplementation(async (taskId: string, patch: Partial<TaskRecord>) =>
-      makeTask({ taskId, taskKind: 'diagnostician', ...patch }));
+    mockUpdateTaskIfDiagnosticJsonUnchanged.mockImplementation(async (
+      taskId: string,
+      _expected: string | null,
+      patch: Partial<TaskRecord>,
+    ) => makeTask({ taskId, taskKind: 'diagnostician', ...patch }));
 
     const handle = await createRecoverySweepService({ workspaceDir: '/tmp/test-ws' });
     const result = await handle.service.recoverFailedTask('diag-parent');
 
-    expect(mockUpdateTask).toHaveBeenCalledWith('diag-parent', {
-      status: 'pending',
-      attemptCount: 0,
-      maxAttempts: 3,
-      lastError: null,
-      leaseOwner: null,
-      leaseExpiresAt: null,
-      resultRef: null,
-    });
+    expect(mockUpdateTaskIfDiagnosticJsonUnchanged).toHaveBeenCalledWith(
+      'diag-parent',
+      '{"pi_metadata":{}}',
+      {
+        status: 'pending',
+        attemptCount: 0,
+        maxAttempts: 3,
+        lastError: null,
+        leaseOwner: null,
+        leaseExpiresAt: null,
+        resultRef: null,
+      },
+      {
+        expectedStatus: 'failed',
+        expectedAttemptCount: 1,
+        expectedMaxAttempts: 3,
+        expectedLeaseOwner: 'runner-1',
+        expectedLeaseExpiresAt: '2026-09-08T01:00:00.000Z',
+      },
+    );
     expect(result).toMatchObject({
       taskId: 'diag-parent',
       previousStatus: 'failed',
       newStatus: 'pending',
       forceApplied: false,
+      previousAttemptCount: 1,
+      previousMaxAttempts: 3,
     });
   });
 
