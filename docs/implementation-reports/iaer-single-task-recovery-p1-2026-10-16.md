@@ -1,7 +1,7 @@
 # IAER Single-Task Recovery P1 实施报告（2026-10-16）
 
 > 关联：SPEC-PD-IAER-001 / PR #2041（已并）/ PR #2045（Pilot 报告，CONDITIONAL PASS）
-> Linear：PRI-990（本工程工单）；PRI-980～985 维持 Done；PRI-988/989（P2）不受本报告影响
+> Linear：PRI-991（本工程工单）；PRI-980～985 维持 Done；PRI-988/989（P2）不受本报告影响
 > 执行者：ZCode（任务书《IAER Production Pilot P1 收口》）
 
 ---
@@ -95,15 +95,15 @@ CLI 测试 T05：同一真实 SQLite 库中播种 **83 条** terminal-failed art
 - **回滚/补偿**：恢复本身不删任何数据；如需回退，任务可重新 `pd runtime internalization retry --confirm`（NHR→pending 方向不适用——回退路径为：任其留在 NHR 即无任何模型消耗；或将任务行手工置回 failed 需 Owner 明确指令，不自动执行）
 - **后续链路**：恢复 → 消费者 NHR → Owner `evidence attach --confirm`（选定负例 Tool Call 1 条 + 正例 1~3 条 + ownerDesiredOutcome）→ `evidence resume --confirm` → Artificer L2 真实执行
 - **模型预算**：Artificer L2 全链（生成→校验→确定性重放→提交）预计 3–8 次调用，**硬上限建议 12 次**；Provider=当前 zai glm-5.3 通道，单次 Pilot 预计量级为人民币个位数；**超额/连续失败中止条件**：同一任务 attempt 消耗达 6（新预算上限）或单次 L2 预算超时（profile timeoutMs=300s）即停，不自动重试
-- **执行命令**（部署 PRI-990 PR 后）：
+- **执行命令**（部署 PRI-991 PR 后）：
   1. `pd runtime recovery failed-task --task-id "artificer-605ba208-f9e9-42e4-9eb3-7730cd1031cd-code_tool_hook" --dry-run`（复核）
   2. `pd runtime recovery failed-task --task-id "artificer-605ba208-f9e9-42e4-9eb3-7730cd1031cd-code_tool_hook" --confirm --reset-budget --decidedBy owner/console`
   3. 约 2 分钟后：`pd runtime internalization evidence list --workspace "D:\.openclaw\workspace" --json`（应出现该任务于 NHR 等待清单）
 
 ## 8. PR 与 Linear
 
-- 工程 PR：见本报告关联 PR（PRI-990，独立分支 `ai/adhoc-20261016-iaer-single-recovery-x8k2m4-single-task-recovery`，不自动合并）
-- Linear：PRI-990（本工单，创建即关联 PR）；PRI-980～985 维持 Done；PRI-988/989（P2）不受本报告影响
+- 工程 PR：见本报告关联 PR（PRI-991，独立分支 `ai/adhoc-20261016-iaer-single-recovery-x8k2m4-single-task-recovery`，不自动合并）
+- Linear：PRI-991（本工单，创建即关联 PR）；PRI-980～985 维持 Done；PRI-988/989（P2）不受本报告影响
 - PR #2045 报告更正：随本次会话提交推送至 #2045 分支（撤回批量恢复建议、僵尸 12+25 分类、hasGovernanceSideEffects 限定语、gateway 状态区分、CONDITIONAL PASS 维持）
 
 ## 9. 剩余风险与回滚

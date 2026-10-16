@@ -1,5 +1,5 @@
 /**
- * PRI-990 — `pd runtime recovery failed-task` command tests.
+ * PRI-991 — `pd runtime recovery failed-task` command tests.
  *
  * Two layers, both through public seams (cli-7):
  *  1. Parser-level registration: the REAL Commander tree — required exact

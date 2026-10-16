@@ -1,5 +1,5 @@
 /**
- * PRI-990 — single-task failed recovery × the IAER evidence gate.
+ * PRI-991 — single-task failed recovery × the IAER evidence gate.
  *
  * Proves the recovered task re-enters the EXISTING production consumer path
  * with every IAER safety invariant intact (no shortcut from recovery to the

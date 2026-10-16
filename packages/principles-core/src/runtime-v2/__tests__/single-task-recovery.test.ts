@@ -1,5 +1,5 @@
 /**
- * PRI-990 — single-task failed recovery (strict path) against a REAL
+ * PRI-991 — single-task failed recovery (strict path) against a REAL
  * temp-workspace SQLite store.
  *
  * The batch `recoverFailedTask(taskId, force)` authority has existed in core
