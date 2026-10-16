@@ -1,5 +1,25 @@
 # @principles/pd-cli
 
+## 1.158.0
+
+### Minor Changes
+
+- 574954a: PRI-990: single-task failed recovery — pd runtime recovery failed-task --task-id <exact> (dry-run default, CAS-guarded confirm, explicit --reset-budget for exhausted budgets, recovery_actions.jsonl audit with previousAttemptCount). Core: recoverSingleFailedTask + inspectFailedTaskRecovery strict path; legacy batch recoverFailedTask upgraded to the same CAS precondition with unchanged observable behavior.
+
+### Patch Changes
+
+- ded73b8: Prevent explicit --dry-run --repair-audit from re-projecting recovery audit JSONL. Conflicting flags now fail closed before any writes.
+- 06152af: Connect Codex Owner-labelled behavior evidence to the shared internalization preflight. Reuse one validated assembler across OpenClaw, Codex and evidence attach/resume; read trajectory data without creating or migrating it and preserve host-specific semantics. Missing labels reach Owner review without model calls or attempts; missing/corrupt sources remain observable source faults.
+- Updated dependencies [fec1306]
+- Updated dependencies [574954a]
+- Updated dependencies [06152af]
+  - @principles/install-layout@0.4.0
+  - @principles/core@1.293.0
+  - @principles/host-runtime@0.10.0
+  - @principles/codex-adapter@0.5.6
+  - principles-disciple@2.1.6
+  - @principles/workbuddy-adapter@0.2.2
+
 ## 1.157.0
 
 ### Minor Changes

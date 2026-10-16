@@ -1,5 +1,13 @@
 # principles-disciple
 
+## 2.1.6
+
+### Patch Changes
+
+- 06152af: Connect Codex Owner-labelled behavior evidence to the shared internalization preflight. Reuse one validated assembler across OpenClaw, Codex and evidence attach/resume; read trajectory data without creating or migrating it and preserve host-specific semantics. Missing labels reach Owner review without model calls or attempts; missing/corrupt sources remain observable source faults.
+- Updated dependencies [574954a]
+  - @principles/core@1.293.0
+
 ## 2.1.5
 
 ### Patch Changes
