@@ -430,7 +430,7 @@ export class SignalCollectorHost {
     const confirmed = mapLlmResultToOutput(llmResult, item.excerpt, item.sessionId, this.config, new Date().toISOString());
     if (confirmed.isSignal && confirmed.strength === 'STRONG') {
       this.emitCueFeedback(item.terms, true);
-      this.writeBackConfirmedCorrection(item.userTurnRowid, confirmed, item.terms);
+      this.writeBackConfirmedCorrection(item.userTurnRowid, confirmed, item.terms ?? []);
       // PRI-844: recover the Owner's VERBATIM turn — the persisted queue only
       // stores a 400-char excerpt. turnIndex comes from the numeric
       // occurrenceId; the full text comes from the user_turns row via rowid.
@@ -466,7 +466,7 @@ export class SignalCollectorHost {
   private writeBackConfirmedCorrection(
     userTurnRowid: number | undefined,
     confirmed: SignalCollectorOutput,
-    matchedTerms?: readonly string[],
+    matchedTerms: readonly string[],
   ): void {
     if (userTurnRowid === undefined) return;
     // correction_cue means "which keyword fired". Overwriting it with the
@@ -474,9 +474,11 @@ export class SignalCollectorHost {
     // needs to attribute a correction to a term, and the prose was then echoed
     // back into correction_keywords.json as a whole-sentence "term". Verdict
     // prose is only used when no keyword fired at all.
-    const terms = matchedTerms ?? confirmed.matchedTerms ?? [];
-    const cue = terms.length > 0
-      ? terms.join(', ')
+    // matchedTerms is required, not defaulted from `confirmed`: the Stage2
+    // verdict object always carries an empty list, so reading it back would
+    // silently fall into the prose branch for every keyword hit.
+    const cue = matchedTerms.length > 0
+      ? matchedTerms.join(', ')
       : (confirmed.llmReason ? `llm:${confirmed.llmReason.slice(0, 120)}` : null);
     try {
       const updated = this.wctx.trajectory?.markUserTurnCorrection(userTurnRowid, cue);

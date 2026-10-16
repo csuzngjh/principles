@@ -71,9 +71,9 @@ function evictionTier(keyword: CorrectionKeyword): number {
 
 /**
  * Read-side guard for the persisted store (rc-1/rc-2). The file is written by
- * this module but read back as untrusted JSON, and its TP/FP counts gate the
- * earned-high precision path in host-runtime, so decision-bearing fields are
- * validated per row — the same contract as governance-signal-admission's
+ * this module but read back as untrusted JSON, and its weight/TP/FP values gate
+ * the earned-high precision path in host-runtime, so decision-bearing fields
+ * are validated per row — the same contract as governance-signal-admission's
  * reader, not a weaker second schema beside it (EP-07).
  */
 function parseStoredKeywordStore(input: unknown): CorrectionKeywordStore | null {
@@ -86,17 +86,22 @@ function parseStoredKeywordStore(input: unknown): CorrectionKeywordStore | null 
   if (!Array.isArray(rawKeywords)) return null;
 
   const keywords: CorrectionKeyword[] = [];
-  let dropped = 0;
+  const dropped: string[] = [];
   for (const raw of rawKeywords) {
-    if (!isStoredKeyword(raw)) {
-      dropped += 1;
-      continue;
+    const keyword = normalizeStoredKeyword(raw);
+    if (keyword) {
+      keywords.push(keyword);
+    } else {
+      dropped.push(previewRow(raw));
     }
-    keywords.push(raw);
   }
-  if (dropped > 0) {
+  if (dropped.length > 0) {
+    // A row that fails the guard is already inert to detection — host-runtime
+    // refuses the same fields on its read — so dropping it aligns the two
+    // readers instead of discarding usable data. Names stay in the log because
+    // this is the only trace of what the store no longer holds.
     console.warn(
-      `[PD:CorrectionCue] ${KEYWORD_STORE_FILE}: ${dropped} malformed keyword row(s) ignored`,
+      `[PD:CorrectionCue] ${KEYWORD_STORE_FILE}: ${dropped.length} unusable keyword row(s) ignored: ${dropped.slice(0, 3).join(' | ')}`,
     );
   }
   // version/lastOptimizedAt are bookkeeping, not decisions: rejecting a store
@@ -110,26 +115,55 @@ function parseStoredKeywordStore(input: unknown): CorrectionKeywordStore | null 
   };
 }
 
-function isStoredKeyword(raw: unknown): raw is CorrectionKeyword {
-  if (typeof raw !== 'object' || raw === null) return false;
-  const { term, weight, source, addedAt, truePositiveCount, falsePositiveCount } = raw as {
-    term?: unknown;
-    weight?: unknown;
-    source?: unknown;
-    addedAt?: unknown;
-    truePositiveCount?: unknown;
-    falsePositiveCount?: unknown;
-  };
-  if (typeof term !== 'string' || term.trim() === '') return false;
-  if (typeof weight !== 'number' || !Number.isFinite(weight)) return false;
-  if (source !== 'seed' && source !== 'llm' && source !== 'user') return false;
-  if (typeof addedAt !== 'string') return false;
+/**
+ * Validate the decision-bearing fields and rebuild the row (unknown extras are
+ * dropped). Lenient where nothing reads the field: a missing addedAt becomes ''
+ * (it only breaks an eviction tie-break) rather than costing a whole term.
+ */
+function normalizeStoredKeyword(raw: unknown): CorrectionKeyword | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const { term, weight, source, addedAt, truePositiveCount, falsePositiveCount, hitCount, lastHitAt } =
+    raw as {
+      term?: unknown;
+      weight?: unknown;
+      source?: unknown;
+      addedAt?: unknown;
+      truePositiveCount?: unknown;
+      falsePositiveCount?: unknown;
+      hitCount?: unknown;
+      lastHitAt?: unknown;
+    };
+  if (typeof term !== 'string' || term.trim() === '') return null;
+  // weight feeds precisionFor(): an out-of-range value would hand a term the
+  // high-certainty path, so the bound is part of the contract, not presentation.
+  if (typeof weight !== 'number' || !Number.isFinite(weight) || weight < 0 || weight > 1) return null;
+  if (source !== 'seed' && source !== 'llm' && source !== 'user') return null;
   // Earned precision counts gate host-runtime's high-certainty path: a corrupt
   // 3.1 or a negative must not be trusted (same stance as its strict reader).
   const isCount = (value: unknown): boolean =>
     value === undefined ||
     (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0);
-  return isCount(truePositiveCount) && isCount(falsePositiveCount);
+  if (!isCount(truePositiveCount) || !isCount(falsePositiveCount)) return null;
+
+  const keyword: CorrectionKeyword = {
+    term,
+    weight,
+    source,
+    addedAt: typeof addedAt === 'string' ? addedAt : '',
+  };
+  if (typeof hitCount === 'number') keyword.hitCount = hitCount;
+  if (typeof truePositiveCount === 'number') keyword.truePositiveCount = truePositiveCount;
+  if (typeof falsePositiveCount === 'number') keyword.falsePositiveCount = falsePositiveCount;
+  if (typeof lastHitAt === 'string') keyword.lastHitAt = lastHitAt;
+  return keyword;
+}
+
+/** Bounded, safe one-line identity for a rejected row (rc-8). */
+function previewRow(raw: unknown): string {
+  if (typeof raw !== 'object' || raw === null) return `<${typeof raw}>`;
+  const { term } = raw as { term?: unknown };
+  const label = typeof term === 'string' ? term.slice(0, 40) : `<${typeof term}>`;
+  return `"${label}"`;
 }
 
 function createDefaultStore(): CorrectionKeywordStore {

@@ -59,8 +59,8 @@ export class KeywordOptimizationService {
           this.skip(rawKey, update.action, 'not in store');
           continue;
         }
-        if (update.action === 'remove' && existing?.source === 'seed') {
-          this.skip(rawKey, update.action, 'seed term is Owner-authored and cannot be removed by learning');
+        if (update.action === 'remove' && existing !== undefined && existing.source !== 'llm') {
+          this.skip(rawKey, update.action, `${existing.source} term is Owner-authored, not machine-removable`);
           continue;
         }
 
@@ -69,6 +69,10 @@ export class KeywordOptimizationService {
             case 'add': {
               if (existing) {
                 this.audit('ADD_SKIPPED', `"${term}" already exists as "${existing.term}"`);
+                break;
+              }
+              if (term.includes(',')) {
+                this.skip(rawKey, 'add', 'joined cue of several terms, not one learnable term');
                 break;
               }
               const weight = update.weight !== undefined
@@ -165,25 +169,36 @@ export class KeywordOptimizationService {
         for (const turn of turns) {
           if (turn.correctionDetected) {
             const cue = (turn.correctionCue ?? '').trim();
-            history.push({
-              sessionId,
-              timestamp: turn.createdAt ?? new Date().toISOString(),
-              // A cue persisted as "llm:<reason>" is Stage2 verdict prose, not a
-              // keyword. Passing it through as `term` is what taught the
-              // optimizer to store whole sentences as terms (54 of 58 detected
-              // turns in the live workspace) — an empty term says honestly
-              // "this correction had no keyword match", which buildPrompt renders.
-              term: cue.startsWith('llm:') ? '' : cue,
-              // PRI-823: carry the bounded raw excerpt (≤200 chars, persisted
-              // per user_turn) so the observer can judge each hit event on its
-              // own message text instead of guessing from the term alone. Same
-              // data category recentMessages already delivers — no new storage
-              // or privacy surface. buildPrompt still caps rendering at 80
-              // chars/entry.
-              userMessage: turn.rawExcerpt ?? '',
-            });
+            // A cue persisted as "llm:<reason>" is Stage2 verdict prose, not a
+            // keyword. Passing it through as `term` is what taught the
+            // optimizer to store whole sentences as terms (52 of the 58
+            // detected turns in the live workspace) — an empty term says
+            // honestly "this correction had no keyword match", which
+            // buildPrompt renders.
+            const proseOnly = cue.startsWith('llm:');
+            // Stage1 joins every matched term with ", ", so one cue can name
+            // several terms. Emit one event per term: the observer judges and
+            // proposes per term, and a joined string handed to it as a single
+            // "term" is exactly the composite that would come back as an ADD
+            // candidate that can never match again.
+            const terms = proseOnly ? [''] : (cue.split(',').map((t) => t.trim()).filter((t) => t !== ''));
+            for (const term of terms.length > 0 ? terms : ['']) {
+              history.push({
+                sessionId,
+                timestamp: turn.createdAt ?? new Date().toISOString(),
+                term,
+                // PRI-823: carry the bounded raw excerpt (≤200 chars, persisted
+                // per user_turn) so the observer can judge each hit event on its
+                // own message text instead of guessing from the term alone. Same
+                // data category recentMessages already delivers — no new storage
+                // or privacy surface. buildPrompt still caps rendering at 80
+                // chars/entry.
+                userMessage: turn.rawExcerpt ?? '',
+              });
+              if (history.length >= 50) break; // Cap at 50 events
+            }
           }
-          if (history.length >= 50) break; // Cap at 50 events
+          if (history.length >= 50) break;
         }
       } catch (dbErr) {
         // Skip individual session DB errors — try remaining sessions

@@ -245,6 +245,29 @@ describe('KeywordOptimizationService', () => {
       expect(mockLearner.remove).not.toHaveBeenCalled();
     });
 
+    it('refuses to REMOVE a user-promoted term too', () => {
+      mockLearner.find.mockReturnValue({ term: '又错了', weight: 0.9, source: 'user', addedAt: 'x' });
+      service.applyResult({
+        updated: true,
+        updates: { '又错了': { action: 'remove', reasoning: 'llm decided' } },
+      } as any);
+      expect(mockLearner.remove).not.toHaveBeenCalled();
+    });
+
+    it('refuses to ADD a joined multi-term cue as if it were one term', () => {
+      mockLearner.find.mockReturnValue(undefined);
+      const logger = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() } as any;
+      const svc = new KeywordOptimizationService('/tmp/test-state', '/tmp/test-state', logger);
+      svc.applyResult({
+        updated: true,
+        updates: { '又错了, 改回去': { action: 'add', weight: 0.6, reasoning: 'r' } },
+      } as any);
+      expect(mockLearner.add).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('joined cue of several terms, not one learnable term'),
+      );
+    });
+
     it('surfaces cap eviction in the mutation audit instead of freezing learning', () => {
       mockLearner.add.mockReturnValue('老的垃圾词');
       service.applyResult({
@@ -316,6 +339,20 @@ describe('KeywordOptimizationService', () => {
       // 否则散文会作为"关键词"被优化器原样入库——词库涨满的实际来源。
       expect(history[0].term).toBe('');
       expect(history[1].term).toBe('搞错了');
+    });
+
+    it('splits a multi-term cue into one event per term', async () => {
+      mockDb.listUserTurnsForSession = vi.fn(() => [
+        { id: 1, turnIndex: 0, rawExcerpt: '又错了，改回去', correctionDetected: true, correctionCue: '又错了, 改回去', createdAt: '2024-01-01T00:01:00Z' },
+      ] as any);
+
+      const history = await service.buildTrajectoryHistory(['session-1']);
+
+      // Stage1 joins every matched term with ", ". Handing that joined string
+      // to the optimizer as one "term" is how a composite that can never match
+      // again gets proposed for ADD — the observer must see the real terms.
+      expect(history.map((h) => h.term)).toEqual(['又错了', '改回去']);
+      expect(history[0]?.userMessage).toBe('又错了，改回去');
     });
 
     it('caps at 50 events', async () => {

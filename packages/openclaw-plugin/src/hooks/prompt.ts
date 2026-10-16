@@ -227,8 +227,17 @@ export function getSignalCollectorHost(wctx: WorkspaceContext, logger?: PluginLo
       cueFeedbackRecorder: (terms, wasCorrection) => {
         const learner = CorrectionCueLearner.get(wctx.stateDir);
         for (const term of terms) {
-          if (wasCorrection) learner.recordTruePositive(term);
-          else learner.recordFalsePositive(term);
+          const recorded = wasCorrection
+            ? learner.recordTruePositive(term)
+            : learner.recordFalsePositive(term);
+          if (!recorded) {
+            // The term left the store between Stage1 detection and Stage2
+            // confirmation (cap eviction opened this window), so this piece of
+            // earned-precision evidence is lost — report it, don't drop it.
+            logger?.warn?.(
+              `[PD:SignalCollector] ${wasCorrection ? 'TP' : 'FP'} dropped: term="${term}" is no longer in the keyword store`,
+            );
+          }
         }
       },
     });

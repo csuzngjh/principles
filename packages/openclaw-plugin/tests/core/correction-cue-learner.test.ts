@@ -409,7 +409,7 @@ describe('CORR-08: store is validated on read, never blind-cast', () => {
     return loadCorrectionKeywordStore(tempDir());
   }
 
-  it('drops malformed rows and keeps the valid ones', () => {
+  it('drops unusable rows, keeps the rest, and repairs a missing addedAt', () => {
     const store = readStore(
       JSON.stringify({
         keywords: [
@@ -422,7 +422,23 @@ describe('CORR-08: store is validated on read, never blind-cast', () => {
         lastOptimizedAt: '2026-01-01T00:00:00Z',
       }),
     );
-    expect(store.keywords.map((k) => k.term)).toEqual(['又错了']);
+    expect(store.keywords.map((k) => k.term)).toEqual(['又错了', '漏了时间']);
+    expect(store.keywords[1]?.addedAt).toBe('');
+  });
+
+  it('rejects an out-of-range weight, which would otherwise open the high-certainty path', () => {
+    // weight drives precisionFor() for seed/user terms in host-runtime; a
+    // corrupt 1e9 must not be trusted just because it is a finite number.
+    for (const weight of [1e9, -5, '0.5', Number.NaN]) {
+      const store = readStore(
+        JSON.stringify({
+          keywords: [{ term: '又错了', weight, source: 'seed', addedAt: '2026-01-01T00:00:00Z' }],
+          version: 1,
+          lastOptimizedAt: '2026-01-01T00:00:00Z',
+        }),
+      );
+      expect(store.keywords).toHaveLength(0);
+    }
   });
 
   it('rejects a tampered non-integer TP count instead of trusting it', () => {
