@@ -175,3 +175,7 @@ CLI 测试 T05：同一真实 SQLite 库中播种 **83 条** terminal-failed art
 **诚实边界（更新）**：r2-P1-02 修复后，原「legacy 无 metadata 任务投影不可恢复」边界不变；新增说明——数组保留最近 5 条，若同一任务连续 5 次恢复且全部未投影（极端磁盘故障持续 5 轮），最早事实按保留策略淘汰；CLI 预投影使该场景在实际操作序列中不可达（每轮 confirm 先清空未投影积压）。
 
 **测试规模（r2）**：CLI 25（+7，含双恢复双投影、并发 repair、持锁注入、traversal/根拒绝、operator 可恢复性）、core 577 全量相关回归（含新字段 parse/serialize/merge 与 hydration 兼容）、host-runtime 11、批量命令 18。lint 11/11、typecheck ×3、runtime-contract 0 新违规。
+
+### r2 CI 收尾（head c334b0581）
+
+首轮 r2 提交（4fe13987d）的 CI 暴露两项收尾：① CodeQL `js/file-system-race`（high）——投影锁 `openSync('wx')` 后按路径名重开写 holder 信息构成 TOCTOU；改为经已持有 fd 写入（同 inode，构造性免竞态）。② 盘根拒绝测试硬编码 `D:/` 在 Linux CI 是合法相对目录（表现为 storage_unavailable 而非 workspace_invalid）——改为 `path.parse(process.cwd()).root` 平台中立推导。最终 head **c334b0581**：GitHub CI **32 项 pass**（Verify Merge Gate / CodeQL / Test×3 / Lint 等全部 required 绿；唯一非 pass 为 codecov/patch 补丁覆盖率 advisory，非 required）。本地 verify:merge r2 head REAL_EXIT=0（.tmp/verify-merge-r2.log）。
