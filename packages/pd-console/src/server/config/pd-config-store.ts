@@ -1342,6 +1342,9 @@ function extractProfileFields(
     if (Object.hasOwn(payload, 'maxRetries') && typeof payload.maxRetries === 'number') {
       result.maxRetries = payload.maxRetries;
     }
+    if (Object.hasOwn(payload, 'maxTokens')) {
+      result.maxTokens = payload.maxTokens;
+    }
     if (Object.hasOwn(payload, 'reasoning') && isReasoningLevel(payload.reasoning)) {
       result.reasoning = payload.reasoning;
     }

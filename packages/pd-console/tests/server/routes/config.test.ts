@@ -1802,6 +1802,86 @@ describe('POST /api/v1/config/profiles', () => {
 // ===========================================================================
 
 describe('PATCH /api/v1/config/profiles/:profileId', () => {
+  it('preserves maxTokens when updating other pi-ai profile fields', async () => {
+    writeConfig({
+      ...VALID_CONFIG,
+      runtimeProfiles: {
+        ...VALID_CONFIG.runtimeProfiles,
+        'anthropic-cloud': {
+          ...VALID_CONFIG.runtimeProfiles['anthropic-cloud'],
+          maxTokens: 32000,
+        },
+      },
+    });
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/profiles/anthropic-cloud',
+      body: { provider: 'zai', model: 'glm-5.3-flash' },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/anthropic-cloud' });
+
+    expect(res.statusCode).toBe(200);
+    const data = okEnvelope<{ profile: { provider: string; model: string; maxTokens: number } }>(res);
+    expect(data.profile).toMatchObject({ provider: 'zai', model: 'glm-5.3-flash', maxTokens: 32000 });
+
+    const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
+    const parsed = yaml.load(fs.readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+    const profiles = parsed.runtimeProfiles as Record<string, Record<string, unknown>>;
+    expect(profiles['anthropic-cloud'].maxTokens).toBe(32000);
+  });
+
+  it('allows an explicit maxTokens change', async () => {
+    writeConfig({
+      ...VALID_CONFIG,
+      runtimeProfiles: {
+        ...VALID_CONFIG.runtimeProfiles,
+        'anthropic-cloud': {
+          ...VALID_CONFIG.runtimeProfiles['anthropic-cloud'],
+          maxTokens: 32000,
+        },
+      },
+    });
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/profiles/anthropic-cloud',
+      body: { maxTokens: 24000 },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/anthropic-cloud' });
+
+    expect(res.statusCode).toBe(200);
+    const data = okEnvelope<{ profile: { maxTokens: number } }>(res);
+    expect(data.profile.maxTokens).toBe(24000);
+    const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
+    const parsed = yaml.load(fs.readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+    const profiles = parsed.runtimeProfiles as Record<string, Record<string, unknown>>;
+    expect(profiles['anthropic-cloud'].maxTokens).toBe(24000);
+  });
+
+  it('rejects zero maxTokens without writing config', async () => {
+    writeConfig({
+      ...VALID_CONFIG,
+      runtimeProfiles: {
+        ...VALID_CONFIG.runtimeProfiles,
+        'anthropic-cloud': {
+          ...VALID_CONFIG.runtimeProfiles['anthropic-cloud'],
+          maxTokens: 32000,
+        },
+      },
+    });
+    const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
+    const before = fs.readFileSync(configPath, 'utf8');
+    const req = createMockRequest('PATCH', {
+      url: '/api/v1/config/profiles/anthropic-cloud',
+      body: { maxTokens: 0 },
+    });
+    const res = createMockResponse();
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/anthropic-cloud' });
+
+    expect(res.statusCode).toBe(400);
+    expect(errorEnvelope(res).message).toContain('maxTokens');
+    expect(fs.readFileSync(configPath, 'utf8')).toBe(before);
+  });
+
   it('updates an existing openclaw profile', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('PATCH', {
