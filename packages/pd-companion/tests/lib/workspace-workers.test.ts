@@ -69,6 +69,24 @@ describe('canonicalWorkspacePath', () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  // Windows junctions are the common workspace alias (D:\... vs a junction
+  // pointing at it); a junction reached through a different spelling must
+  // canonicalize to ONE worker, and the junction must be cleaned up junction-
+  // safely (rmSync, never recursive target deletion).
+  it.skipIf(process.platform !== 'win32')('collapses a Windows junction to its target directory', () => {
+    const target = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-junction-target-'));
+    const link = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-junction-link-')), 'ws-link');
+    try {
+      fs.symlinkSync(target, link, 'junction');
+      expect(canonicalWorkspacePath(link)).toBe(canonicalWorkspacePath(target));
+      // A trailing separator on the junction spelling must not fork a worker.
+      expect(canonicalWorkspacePath(`${link}${path.sep}`)).toBe(canonicalWorkspacePath(target));
+    } finally {
+      fs.rmSync(path.dirname(link), { recursive: true, force: true });
+      fs.rmSync(target, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('WorkspaceWorkerRegistry (matrix A)', () => {

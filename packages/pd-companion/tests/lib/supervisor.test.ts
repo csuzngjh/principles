@@ -72,6 +72,15 @@ describe('ConsoleSupervisor — failure mapping (rc-9)', () => {
     expect(mapLaunchFailureReason('console_exited_with_code_1')).toBe('launch_failed');
   });
 
+  // 2026-10-16: install-layout failure causes stay distinct — a manifest from
+  // a NEWER PD reads as "update the Companion", never as "PD not installed".
+  it('maps install-layout resolution causes distinctly', () => {
+    expect(mapLaunchFailureReason('install_manifest_unsupported_version: 2')).toBe('install_manifest_incompatible');
+    expect(mapLaunchFailureReason('install_manifest_malformed: expected an object')).toBe('pd_not_installed');
+    expect(mapLaunchFailureReason('install_runtime_missing')).toBe('pd_not_installed');
+    expect(mapLaunchFailureReason('install_layout_legacy_fallback')).toBe('pd_not_installed');
+  });
+
   it('launch failure carries detail and nextAction into degraded', () => {
     const sup = new ConsoleSupervisor();
     sup.start();

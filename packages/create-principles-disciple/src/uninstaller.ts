@@ -43,7 +43,8 @@ export interface UninstallResult {
 
 interface SharedRuntimeUninstallPlan {
   removeSharedRuntime: boolean;
-  remainingHosts: ('codex' | 'openclaw' | 'workbuddy')[];
+  /** Known hosts still registered, plus unknown registrations carried forward (never dropped). */
+  remainingHosts: string[];
   manifestHasTarget: boolean;
   warning?: string;
 }
@@ -82,7 +83,13 @@ export function planSharedRuntimeUninstall(host: HostTarget): SharedRuntimeUnins
       };
     }
     const manifestHasTarget = parsed.manifest.hosts.includes(host);
-    const remainingHosts = parsed.manifest.hosts.filter(candidate => candidate !== host);
+    // Unknown host registrations survive an uninstall of a KNOWN host — the
+    // shared runtime may be serving a newer host this reader cannot name, so
+    // it is only removable when NO registration (known or unknown) remains.
+    const remainingHosts = [
+      ...parsed.manifest.hosts.filter(candidate => candidate !== host),
+      ...(parsed.manifest.unknownHosts ?? []),
+    ];
     return { removeSharedRuntime: remainingHosts.length === 0, remainingHosts, manifestHasTarget };
   } catch (error) {
     return {

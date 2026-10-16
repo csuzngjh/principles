@@ -99,8 +99,37 @@ describe('PRI-631 Console auth + PRI-624 workspace workers coexist in one main.t
   it('Workspace workers: whenReady 启动 supervision，manifest 驱动 sync', () => {
     const source = src();
     expect(source).toContain('startWorkspaceWorkerSupervision()');
-    expect(source).toContain('manifestCodexWorkspaces()');
+    expect(source).toContain('manifestCodexWorkspacesSource()');
     expect(source).toContain('new WorkspaceWorkerRegistry(');
+  });
+
+  it('Workspace workers (2026-10-16): 清单不可读走 syncFromManifest 显式状态，绝不回退空集合并 mass-stop', () => {
+    const source = src();
+    // 读清单的显式成功/失败状态——不再是“解析失败 → [] → sync([])”。
+    expect(source).toContain('readManifestWorkspacesForHost');
+    expect(source).toContain("kind: 'unavailable'");
+    expect(source).toContain('syncFromManifest(');
+    // 旧缺陷形状不得回归：registry 的 sync() 不允许直接接收清单读取函数的结果。
+    expect(source).not.toContain('.sync(manifestCodexWorkspaces');
+    expect(source).not.toContain('.sync(manifestWorkbuddyWorkspaces');
+    // 持续不可读升级为 Owner 可见通知 + 托盘投影。
+    expect(source).toContain("event === 'workspace_worker_sync_unavailable_persistent'");
+    expect(source).toContain('notifyWorkspaceSyncUnavailable(');
+    expect(source).toContain('buildSyncUnavailableTrayView(');
+    // RF-04：恢复事件必须立即重建托盘（纯显示刷新，不触碰 worker）。
+    expect(source).toContain("event === 'workspace_worker_sync_recovered'");
+    // 前向兼容告警有结构化日志（去重防刷屏）。
+    expect(source).toContain('install_manifest_warning');
+  });
+
+  it('Workspace workers (2026-10-16): 安装面解析失败按原因分流，不再一律 console_runtime_not_installed', () => {
+    const source = src();
+    expect(source).toContain('outcome?.missing');
+    expect(source).toContain("reason: missing?.reason ?? 'install_runtime_missing'");
+    // legacy 兜底可用的原因（含“清单版本高于读取器”）必须透传，而不是被
+    // console_runtime_not_installed 覆盖——这正是事故机上 Owner 看错原因的路径。
+    expect(source).toContain('runtime?.fallbackReason ??');
+    expect(source).toContain("'pd_runtime_unusable'");
   });
 
   it('Workspace workers: before-quit 先置 quitting 再 stopAll（不误杀重启定时器）', () => {

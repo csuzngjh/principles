@@ -11,6 +11,7 @@ import {
   getInstallLayoutPaths,
   resolveInstallLayout,
   type InstallLayoutMode,
+  type InstallManifestWarning,
 } from '@principles/install-layout';
 
 /** Absolute path of the installed PD extension dir, or undefined if no home. */
@@ -19,23 +20,58 @@ export function resolveExtensionDir(homeDir: string | undefined): string | undef
   return path.join(homeDir, '.openclaw', 'extensions', 'principles-disciple');
 }
 
-export function resolveInstalledRuntime(
-  options: {
-    homeDir: string | undefined;
-    manifest: unknown;
-    canonicalRuntimeExists: boolean;
-    legacyExtensionExists: boolean;
-  },
-): { root: string; pluginRoot: string; mode: InstallLayoutMode } | undefined {
+export interface InstalledRuntimeResolution {
+  root: string;
+  pluginRoot: string;
+  mode: InstallLayoutMode;
+  /** Structured reason when the layout fell back to legacy instead of canonical (rc-9). */
+  fallbackReason?: string;
+  fallbackNextAction?: string;
+}
+
+export interface MissingRuntimeInfo {
+  reason: string;
+  nextAction: string;
+}
+
+export interface InstalledRuntimeOutcome {
+  /** Present when a usable install (canonical or legacy) resolved. */
+  runtime?: InstalledRuntimeResolution;
+  /** Present ONLY when the layout did not resolve (mode 'missing') — the distinct failure cause (rc-9). */
+  missing?: MissingRuntimeInfo;
+  /** Forward-compatibility warnings from the manifest parse (unknown hosts etc.). */
+  warnings?: readonly InstallManifestWarning[];
+}
+
+export function resolveInstalledRuntime(options: {
+  homeDir: string | undefined;
+  manifest: unknown;
+  canonicalRuntimeExists: boolean;
+  legacyExtensionExists: boolean;
+}): InstalledRuntimeOutcome | undefined {
   const { homeDir, manifest, canonicalRuntimeExists, legacyExtensionExists } = options;
   if (homeDir === undefined || homeDir.trim() === '') return undefined;
   const paths = getInstallLayoutPaths(homeDir);
   const result = resolveInstallLayout({ homeDir, manifest, canonicalRuntimeExists, legacyExtensionExists });
-  if (result.mode === 'missing') return undefined;
+  if (result.mode === 'missing') {
+    return {
+      missing: {
+        reason: result.reason ?? 'install_runtime_missing',
+        nextAction: result.nextAction ?? 'Run npx create-principles-disciple to install or repair PD.',
+      },
+      ...(result.warnings !== undefined ? { warnings: result.warnings } : {}),
+    };
+  }
   return {
-    root: result.mode === 'canonical' ? paths.runtimeDir : paths.openClawExtensionDir,
-    pluginRoot: result.mode === 'canonical' ? paths.pluginDir : paths.openClawExtensionDir,
-    mode: result.mode,
+    runtime: {
+      root: result.mode === 'canonical' ? paths.runtimeDir : paths.openClawExtensionDir,
+      pluginRoot: result.mode === 'canonical' ? paths.pluginDir : paths.openClawExtensionDir,
+      mode: result.mode,
+      ...(result.mode === 'legacy' && result.reason !== undefined
+        ? { fallbackReason: result.reason, fallbackNextAction: result.nextAction }
+        : {}),
+    },
+    ...(result.warnings !== undefined ? { warnings: result.warnings } : {}),
   };
 }
 
