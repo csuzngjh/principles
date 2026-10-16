@@ -478,6 +478,21 @@ describe('CORR-08: store is validated on read, never blind-cast', () => {
     expect(store.lastOptimizedAt).toBe('2026-05-01T00:00:00Z');
   });
 
+  it('replaces an unparseable file with the seed store and says which stage failed', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const store = readStore('{ "keywords": [ ');
+    expect(store.keywords).toHaveLength(CORRECTION_SEED_KEYWORDS.length);
+    expect(warn.mock.calls.map((c) => String(c[0])).join(' | ')).toContain('cannot parse');
+    warn.mockRestore();
+  });
+
+  it('exposes the re-stamped optimization time through the instance', () => {
+    const dir = tempDir();
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    const learner = CorrectionCueLearner.get(dir);
+    expect(learner.getLastOptimizedAt()).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
   it('round-trips a store written by this module', () => {
     const dir = tempDir();
     vi.mocked(fs.existsSync).mockReturnValue(false);

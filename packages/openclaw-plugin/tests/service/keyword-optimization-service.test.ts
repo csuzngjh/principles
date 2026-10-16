@@ -281,6 +281,19 @@ describe('KeywordOptimizationService', () => {
       );
     });
 
+    it('does not re-ADD a term the store already holds, and audits the no-op', () => {
+      mockLearner.find.mockReturnValue({ term: '又错了', weight: 0.5, source: 'llm' });
+      service.applyResult({
+        updated: true,
+        updates: { '又错了 ': { action: 'add', weight: 0.6, reasoning: 'r' } },
+      } as any);
+      expect(mockLearner.add).not.toHaveBeenCalled();
+      expect(mockSystemLog).toHaveBeenCalledWith(
+        '/tmp/test-state', 'KEYWORD_LEARNING',
+        expect.stringContaining('ADD_SKIPPED "又错了" already exists as "又错了"'),
+      );
+    });
+
     it('audits every applied mutation to the SYSTEM log (Owner-visible trail)', () => {
       service.applyResult({
         updated: true,
@@ -293,6 +306,21 @@ describe('KeywordOptimizationService', () => {
   });
 
   describe('buildTrajectoryHistory()', () => {
+    it('reports a session it could not read instead of failing the whole history', async () => {
+      const logger = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
+      KeywordOptimizationService.reset();
+      const svc = KeywordOptimizationService.get('/tmp/test-state', '/tmp/test-state', logger as any);
+      mockDb.listUserTurnsForSession.mockImplementation(() => {
+        throw new Error('database is locked');
+      });
+      await expect(svc.buildTrajectoryHistory(['s1'])).resolves.toEqual([]);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Failed to read trajectory for session s1'),
+      );
+      mockDb.listUserTurnsForSession.mockReturnValue([]);
+    });
+
+
     it('returns empty array when no sessions exist', async () => {
       const history = await service.buildTrajectoryHistory([]);
       expect(history).toEqual([]);
