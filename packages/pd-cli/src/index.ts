@@ -52,6 +52,7 @@ import { handleRuntimeDiagnosticsExport } from './commands/runtime-diagnostics-e
 import { registerRuntimeCompatibilityScanCommand } from './commands/runtime-compatibility-scan.js';
 import { handleRuntimeRecoverySweep } from './commands/runtime-recovery.js';
 import { handleRuntimeRecoveryFailedTasks } from './commands/runtime-recovery-failed-tasks.js';
+import { registerRuntimeRecoveryFailedTaskCommand } from './commands/runtime-recovery-failed-task.js';
 import { handleRuntimeArtifactRepair } from './commands/runtime-artifact-repair.js';
 import {
   handleRuntimeActivationDeactivate,
@@ -962,6 +963,11 @@ recoveryCmd
       json: opts.json,
     });
   });
+
+// PRI-990: exact single-task counterpart of `failed-tasks`. A batch --force
+// resets the budget of EVERY exhausted failed task; this command recovers
+// exactly one Owner-selected task (CAS-guarded, audited, dry-run default).
+registerRuntimeRecoveryFailedTaskCommand(recoveryCmd);
 
 diagnosticsCmd
   .command('export')

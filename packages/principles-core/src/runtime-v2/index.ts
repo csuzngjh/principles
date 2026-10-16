@@ -1413,8 +1413,8 @@ export type {
 
 // ── Recovery Sweep Service (PRI-149 Tier 2) ────────────────────────────────
 
-export { createRecoverySweepService, recoverFailedTask } from './recovery-sweep-service.js';
-export type { RecoverySweepService, RecoverySweepServiceHandle, FailedTaskRecoveryInfo, FailedTaskRecoveryResult } from './recovery-sweep-service.js';
+export { createRecoverySweepService, recoverFailedTask, inspectFailedTaskRecovery, recoverSingleFailedTask } from './recovery-sweep-service.js';
+export type { RecoverySweepService, RecoverySweepServiceHandle, FailedTaskRecoveryInfo, FailedTaskRecoveryResult, FailedTaskRecoveryInspection, SingleTaskRecoveryOutcome } from './recovery-sweep-service.js';
 
 // Owner authority reset for needs_human_review tasks (shared by CLI retry and
 // Console recovery — Governance Recovery Actions v1)
