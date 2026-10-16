@@ -22,14 +22,25 @@ const RESERVED_UPDATE_KEYS = new Set(['add', 'update', 'remove']);
 
 /**
  * Applies CorrectionObserverResult mutations to the keyword store.
- * - ADD: calls learner.add() with new keyword (evicts a learned term at cap)
+ * - ADD: calls learner.add() with new keyword (evicts least-valuable learned
+ *   terms at/over the cap, with bounded convergence when the store is oversized)
  * - UPDATE: updates weight on an existing keyword
- * - REMOVE: removes keyword from store; Owner-authored seed terms are protected
+ * - REMOVE: removes keyword from store; Owner-authored seed terms and terms
+ *   with confirmed TPs are protected
  *
  * Every key is resolved with the store's own identity rule (trim + lowercase),
  * and a key that does not resolve is an observable skip, not a thrown error:
  * the model paraphrases terms constantly, and the old per-op exceptions turned
  * that into ~47 WARN lines a day that hid real failures.
+ *
+ * Persistence is layered and must not be conflated (P2-3):
+ *   - the keyword store itself is persisted synchronously and atomically by
+ *     CorrectionCueLearner.flush() (temp-file-then-rename). That is the only
+ *     durable mutation of record.
+ *   - the SYSTEM line emitted by audit() is best-effort, asynchronous and may
+ *     drop entries (SystemLogger appends fire-and-forget and swallows write
+ *     errors). It is an Owner-visible trace, not proof that the store write
+ *     happened; under disk pressure the two can legitimately disagree.
  */
 export class KeywordOptimizationService {
   private readonly stateDir: string;
@@ -59,9 +70,28 @@ export class KeywordOptimizationService {
           this.skip(rawKey, update.action, 'not in store');
           continue;
         }
-        if (update.action === 'remove' && existing !== undefined && existing.source !== 'llm') {
-          this.skip(rawKey, update.action, `${existing.source} term is Owner-authored, not machine-removable`);
-          continue;
+        if (update.action === 'remove' && existing !== undefined) {
+          if (existing.source !== 'llm') {
+            this.skip(rawKey, update.action, `${existing.source} term is Owner-authored, not machine-removable`);
+            continue;
+          }
+          // Evidence floor (P1-2): the observer only sees a bounded recent
+          // window, so "absent from trajectory/recentMessages" proves nothing
+          // about a term the store already credited. Without this guard, a
+          // confirmed correction cue (TP>0) could be deleted for silence it was
+          // never given a fair chance to break. Owner-authored seed/user
+          // authority is preserved above; the automatic cap eviction
+          // (learner.add → evictLeastValuable) is a separate, tier-ranked path
+          // and is deliberately NOT gated by this rule.
+          const truePositives = existing.truePositiveCount ?? 0;
+          if (truePositives > 0) {
+            this.skip(
+              rawKey,
+              update.action,
+              `term has ${truePositives} confirmed correction(s); recent-window silence is not counter-evidence`,
+            );
+            continue;
+          }
         }
 
         try {
@@ -79,22 +109,33 @@ export class KeywordOptimizationService {
                 ? Math.max(0.1, Math.min(0.9, update.weight))
                 : 0.5;
               const evicted = learner.add({ term, weight, source: 'llm' });
-              this.audit(
-                'ADD',
-                evicted
-                  ? `term="${term}" weight=${weight} evicted="${evicted}" (store at cap)`
-                  : `term="${term}" weight=${weight}`,
-              );
+              // PRI-2053: an oversized store can evict several terms in one ADD
+              // (bounded convergence). Every one of them is audited — recording
+              // only the last would hide which learned evidence actually left.
+              const evictionNote = evicted.length > 0
+                ? ` evicted=[${evicted.map((t) => `"${t}"`).join(', ')}] (store at cap)`
+                : '';
+              this.audit('ADD', `term="${term}" weight=${weight}${evictionNote}`);
               break;
             }
             case 'update': {
               if (update.weight === undefined) break;
-              learner.updateWeight(term, update.weight);
+              // A false return means the term vanished between find() and the
+              // write (cap eviction race): audit nothing, report the skip.
+              if (!learner.updateWeight(term, update.weight)) {
+                this.skip(rawKey, 'update', 'not in store');
+                break;
+              }
               this.audit('UPDATE', `term="${term}" weight=${update.weight}`);
               break;
             }
             case 'remove': {
-              learner.remove(term);
+              // Same rule for REMOVE: a false return must not be reported as a
+              // successful store mutation (rc-9 — no fake success audit).
+              if (!learner.remove(term)) {
+                this.skip(rawKey, 'remove', 'not in store');
+                break;
+              }
               this.audit('REMOVE', `term="${term}"`);
               break;
             }
@@ -138,7 +179,14 @@ export class KeywordOptimizationService {
     }
   }
 
-  /** One Owner-visible line per store mutation: plugin log + SYSTEM log. */
+  /**
+   * One Owner-visible line per store mutation: plugin log + SYSTEM log.
+   *
+   * The mutation is durable because the learner flushed the store before this
+   * call. The SYSTEM line is a best-effort audit trace (async appendFile that
+   * swallows errors): its absence never means the mutation did not happen, and
+   * its presence is never by itself evidence that it did.
+   */
   private audit(action: string, detail: string): void {
     this.logger?.info?.(`[KeywordOptimizationService] ${action} ${detail}`);
     SystemLogger.log(this.workspaceDir, 'KEYWORD_LEARNING', `${action} ${detail}`);

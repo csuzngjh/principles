@@ -1168,6 +1168,8 @@ describe('TrajectoryDatabase.signal_confirmations (PRI-788 G2)', () => {
       userTurnRowid: 101,
       occurrenceId: 'occ-101',
       terms: ['不对', '错了'],
+      // PRI-2053: enqueue 写入的是归因后的词集（{correction:[...]}），读回即已验证
+      termsVerified: true,
       suggestedType: 'correction',
       status: 'pending',
       attempts: 0,
@@ -1227,6 +1229,50 @@ describe('TrajectoryDatabase.signal_confirmations (PRI-788 G2)', () => {
 
     expect(db.countPendingSignalConfirmations()).toBe(1);
     expect(a.id).toBeDefined();
+    db.dispose();
+  });
+
+  // ── PRI-2053: 历史队列项的归因兼容 ────────────────────────────────────────
+  // 修复前的 terms_json 是裸数组（只有原始命中词，没有每个词当时的类别）。
+  // 这类行的纠正词归因不可恢复 → 必须回落为 UNVERIFIED，由消费者保守降级，
+  // 而不是用今天的词库去猜当时的类别（rc-9 / rc-2）。
+
+  it('PRI-2053: a legacy bare-array terms_json row loads as UNVERIFIED', () => {
+    const db = makeDb();
+    enqueue(db, 's1', 301, '2026-09-14T00:00:00Z');
+    (db as any).db
+      .prepare('UPDATE signal_confirmations SET terms_json = ? WHERE user_turn_rowid = ?')
+      .run(JSON.stringify(['不对', '搞什么']), 301);
+
+    const [item] = db.listPendingSignalConfirmations(10);
+    expect(item.terms).toEqual(['不对', '搞什么']);
+    expect(item.termsVerified).toBe(false);
+    db.dispose();
+  });
+
+  it('PRI-2053: malformed terms_json degrades to empty + unverified instead of throwing', () => {
+    const db = makeDb();
+    enqueue(db, 's1', 302, '2026-09-14T00:00:00Z');
+    (db as any).db
+      .prepare('UPDATE signal_confirmations SET terms_json = ? WHERE user_turn_rowid = ?')
+      .run('{not json', 302);
+
+    const [item] = db.listPendingSignalConfirmations(10);
+    expect(item.terms).toEqual([]);
+    expect(item.termsVerified).toBe(false);
+    db.dispose();
+  });
+
+  it('PRI-2053: an object row whose correction field is not an array stays unverified', () => {
+    const db = makeDb();
+    enqueue(db, 's1', 303, '2026-09-14T00:00:00Z');
+    (db as any).db
+      .prepare('UPDATE signal_confirmations SET terms_json = ? WHERE user_turn_rowid = ?')
+      .run(JSON.stringify({ correction: '不对' }), 303);
+
+    const [item] = db.listPendingSignalConfirmations(10);
+    expect(item.terms).toEqual([]);
+    expect(item.termsVerified).toBe(false);
     db.dispose();
   });
 });

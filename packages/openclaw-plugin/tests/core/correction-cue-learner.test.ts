@@ -267,7 +267,7 @@ describe('CORR-05b: eviction at the cap keeps learning alive', () => {
     const evicted = learner.add({ term: 'new-term', weight: 0.6, source: 'llm' });
 
     // 顺序：先出「有 FP 无 TP」的实证噪声，再出「从未被确认」的，最后才是有效词
-    expect(evicted).toBe('proven-noise');
+    expect(evicted).toEqual(['proven-noise']);
     const terms = learner.getStore().keywords.map(k => k.term);
     expect(terms).not.toContain('proven-noise');
     expect(terms).toContain('proven-useful');
@@ -282,7 +282,7 @@ describe('CORR-05b: eviction at the cap keeps learning alive', () => {
       kw({ term: 'cheap-new', weight: 0.2, addedAt: '2026-09-01T00:00:00Z' }),
     ]);
     const learner = new CorrectionCueLearner(tempDir());
-    expect(learner.add({ term: 'x', weight: 0.5, source: 'llm' })).toBe('cheap-old');
+    expect(learner.add({ term: 'x', weight: 0.5, source: 'llm' })).toEqual(['cheap-old']);
   });
 
   it('never evicts seed or user terms — only learned ones compete', () => {
@@ -299,8 +299,9 @@ describe('CORR-05b: eviction at the cap keeps learning alive', () => {
     const terms = learner.getStore().keywords.map(k => k.term);
     expect(terms).toContain('seed-term');
     expect(terms).toContain('user-term');
-    expect(evicted).not.toBeNull();
-    expect(evicted).not.toMatch(/^(seed-term|user-term)$/);
+    expect(evicted.length).toBeGreaterThan(0);
+    expect(evicted).not.toContain('seed-term');
+    expect(evicted).not.toContain('user-term');
   });
 
   it('still refuses to grow when the store holds nothing the learning may evict', () => {
@@ -310,6 +311,111 @@ describe('CORR-05b: eviction at the cap keeps learning alive', () => {
       'Correction keyword store limit reached (200 terms)',
     );
     expect(learner.getStore().keywords).toHaveLength(MAX_CORRECTION_KEYWORDS);
+  });
+
+  // ── PRI-2053: 超额库存的有界渐进收敛 ──────────────────────────────────────
+  // 历史遗留的超额库（如 372/200）在旧实现下每次 ADD 只是等量替换（先删一个
+  // 再加一个），数量永不下降；一次清空又会无逐词证据地批量删除历史学习成果。
+  // 收敛必须是有界的、按同一 tier 排序的、且只动 llm 词。
+
+  it('PRI-2053: an oversized store shrinks on every ADD instead of being replaced one-for-one', () => {
+    fillStore(Array.from({ length: 372 }, (_, i) => kw({ term: `over-${i}` })));
+    const learner = new CorrectionCueLearner(tempDir());
+    expect(learner.getStore().keywords).toHaveLength(372);
+
+    let previous = learner.getStore().keywords.length;
+    for (let round = 0; round < 5; round++) {
+      const evicted = learner.add({ term: `new-${round}`, weight: 0.5, source: 'llm' });
+      const now = learner.getStore().keywords.length;
+      expect(evicted.length).toBeGreaterThanOrEqual(2); // 腾位 + 至少一步收敛
+      expect(now).toBeLessThan(previous);               // 净减少（旧实现恒为 0）
+      previous = now;
+    }
+    expect(previous).toBe(372 - 4 * 5); // 每轮净 -4（淘汰 5、加入 1）
+  });
+
+  it('PRI-2053: convergence reaches the cap and stops there', () => {
+    fillStore(Array.from({ length: 205 }, (_, i) => kw({ term: `over-${i}` })));
+    const learner = new CorrectionCueLearner(tempDir());
+
+    let guard = 0;
+    while (learner.getStore().keywords.length > MAX_CORRECTION_KEYWORDS && guard < 100) {
+      learner.add({ term: `new-${guard}`, weight: 0.5, source: 'llm' });
+      guard += 1;
+    }
+
+    expect(learner.getStore().keywords.length).toBe(MAX_CORRECTION_KEYWORDS);
+    expect(guard).toBeLessThan(100);
+  });
+
+  it('PRI-2053 boundary 199 → ADD evicts nothing', () => {
+    fillStore(Array.from({ length: 199 }, (_, i) => kw({ term: `fill-${i}` })));
+    const learner = new CorrectionCueLearner(tempDir());
+
+    const evicted = learner.add({ term: 'new', weight: 0.5, source: 'llm' });
+
+    expect(evicted).toEqual([]);
+    expect(learner.getStore().keywords).toHaveLength(MAX_CORRECTION_KEYWORDS);
+  });
+
+  it('PRI-2053 boundary 200 → ADD evicts exactly one (historical behaviour preserved)', () => {
+    fillStore(Array.from({ length: MAX_CORRECTION_KEYWORDS }, (_, i) => kw({ term: `fill-${i}` })));
+    const learner = new CorrectionCueLearner(tempDir());
+
+    const evicted = learner.add({ term: 'new', weight: 0.5, source: 'llm' });
+
+    expect(evicted).toHaveLength(1);
+    expect(learner.getStore().keywords).toHaveLength(MAX_CORRECTION_KEYWORDS);
+  });
+
+  it('PRI-2053 boundary 201 → ADD converges back to the cap', () => {
+    fillStore(Array.from({ length: 201 }, (_, i) => kw({ term: `fill-${i}` })));
+    const learner = new CorrectionCueLearner(tempDir());
+
+    const evicted = learner.add({ term: 'new', weight: 0.5, source: 'llm' });
+
+    expect(evicted).toHaveLength(2);
+    expect(learner.getStore().keywords).toHaveLength(MAX_CORRECTION_KEYWORDS);
+  });
+
+  it('PRI-2053: an oversized all-seed store refuses to grow and mutates nothing (atomic failure)', () => {
+    fillStore(Array.from({ length: 205 }, (_, i) => kw({ term: `s-${i}`, source: 'seed' })));
+    const learner = new CorrectionCueLearner(tempDir());
+
+    expect(() => learner.add({ term: 'new', weight: 0.5, source: 'llm' })).toThrow(
+      'Correction keyword store limit reached (200 terms)',
+    );
+    // 失败不得先删除旧词再留下半成品状态
+    expect(learner.getStore().keywords).toHaveLength(205);
+  });
+
+  it('PRI-2053: convergence evicts worst-first and never touches seed/user', () => {
+    fillStore([
+      ...Array.from({ length: 202 }, (_, i) => kw({ term: `fill-${i}` })),
+      kw({ term: 'seed-term', source: 'seed' }),
+      kw({ term: 'user-term', source: 'user' }),
+      kw({ term: 'proven-noise', weight: 0.4, falsePositiveCount: 2 }),
+      kw({ term: 'never-confirmed', weight: 0.05 }),
+      kw({ term: 'proven-useful', weight: 0.9, truePositiveCount: 3 }),
+    ]);
+    const learner = new CorrectionCueLearner(tempDir());
+    expect(learner.getStore().keywords).toHaveLength(207);
+
+    const evicted = learner.add({ term: 'new', weight: 0.5, source: 'llm' });
+
+    // over = 7 → budget = min(8, 5) = 5：完整列表（不是只记最后一个）
+    expect(evicted).toHaveLength(5);
+    expect(evicted[0]).toBe('proven-noise');    // tier 0：有 FP 无 TP
+    expect(evicted[1]).toBe('never-confirmed'); // tier 1：最低权
+    expect(evicted).not.toContain('seed-term');
+    expect(evicted).not.toContain('user-term');
+
+    const terms = learner.getStore().keywords.map(k => k.term);
+    expect(terms).not.toContain('proven-noise');
+    expect(terms).toContain('proven-useful');
+    expect(terms).toContain('seed-term');
+    expect(terms).toContain('user-term');
+    expect(learner.getStore().keywords).toHaveLength(203);
   });
 });
 

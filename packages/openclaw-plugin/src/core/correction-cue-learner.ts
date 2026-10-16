@@ -31,6 +31,20 @@ const MIN_KEYWORD_WEIGHT = 0.1;
 const MAX_KEYWORD_WEIGHT = 0.9;
 
 /**
+ * PRI-2053: bounded convergence rate for a historically oversized store.
+ *
+ * A store can carry more than MAX_CORRECTION_KEYWORDS terms from an older
+ * build. Freeing exactly one slot per ADD then replaced one learned term with
+ * another forever — the count never moved (372 → 372). Clearing the whole
+ * backlog in one shot would instead bulk-delete learned evidence on no
+ * per-term grounds. So every successful ADD beyond the cap additionally evicts
+ * up to this many least-valuable `llm` terms, each through the same tier-ranked
+ * ordering and audit path as the normal single eviction. seed/user terms never
+ * participate, and a store with no evictable term still refuses to grow.
+ */
+const MAX_EVICTIONS_PER_ADD = 5;
+
+/**
  * EP-07 / ERR-092: the store is per-stateDir, so the cache is a Map keyed by
  * the resolved directory. A single-valued slot made one workspace's store
  * flush into another workspace's file.
@@ -273,24 +287,31 @@ export class CorrectionCueLearner {
   /**
    * Insert a term, keeping the store inside MAX_CORRECTION_KEYWORDS.
    *
-   * At the cap the least valuable `llm` term leaves first (see
+   * At/over the cap the least valuable `llm` terms leave first (see
    * evictionTier), because throwing instead froze the learning channel
-   * permanently once the store filled up.
+   * permanently once the store filled up. The store may already be OVERSIZED
+   * from an older build; in that case each ADD also evicts up to
+   * MAX_EVICTIONS_PER_ADD terms, so the count converges downwards instead of
+   * being replaced one-for-one forever.
    *
-   * @returns the evicted term, or null when nothing had to be evicted.
-   * @throws only when the store is full and holds no evictable term at all
-   *         (every entry is Owner-authored seed/user), i.e. a cap the system
-   *         is not allowed to resolve on its own.
+   * @returns the evicted terms (empty when the store had room).
+   * @throws only when the store is at/over the cap and holds no evictable term
+   *         at all (every entry is Owner-authored seed/user), i.e. a cap the
+   *         system is not allowed to resolve on its own.
    */
-  add(keyword: Omit<CorrectionKeyword, 'addedAt'>): string | null {
-    const evicted = this.store.keywords.length >= MAX_CORRECTION_KEYWORDS
-      ? this.evictLeastValuable()
-      : null;
-
-    if (evicted === null && this.store.keywords.length >= MAX_CORRECTION_KEYWORDS) {
-      throw new Error(
-        `Correction keyword store limit reached (${MAX_CORRECTION_KEYWORDS} terms) and no learned term is evictable`,
-      );
+  add(keyword: Omit<CorrectionKeyword, 'addedAt'>): string[] {
+    const evicted: string[] = [];
+    const over = this.store.keywords.length - MAX_CORRECTION_KEYWORDS;
+    if (over >= 0) {
+      // over = 0 (exactly at cap) → free exactly one slot: the historical
+      // behaviour. over > 0 → also take a bounded convergence step.
+      const budget = Math.min(over + 1, MAX_EVICTIONS_PER_ADD);
+      evicted.push(...this.evictLeastValuable(budget));
+      if (evicted.length === 0) {
+        throw new Error(
+          `Correction keyword store limit reached (${MAX_CORRECTION_KEYWORDS} terms) and no learned term is evictable`,
+        );
+      }
     }
 
     const entry: CorrectionKeyword = {
@@ -308,23 +329,31 @@ export class CorrectionCueLearner {
    * proven noise (FP without any TP) leaves before never-confirmed terms, which
    * leave before confirmed-useful ones. Within a tier, low weight then old
    * addition loses. seed/user entries are Owner authority and never compete.
+   *
+   * @param count maximum number of terms to evict (bounded by the caller).
+   * @returns evicted terms in eviction order (fewer than `count` when the store
+   *          holds fewer learned terms).
    */
-  private evictLeastValuable(): string | null {
-    const candidates: Array<{ keyword: CorrectionKeyword; index: number }> = [];
-    this.store.keywords.forEach((keyword, index) => {
-      if (keyword.source === 'llm') candidates.push({ keyword, index });
-    });
-    if (candidates.length === 0) return null;
-    candidates.sort((a, b) =>
-      evictionTier(a.keyword) - evictionTier(b.keyword)
-      || a.keyword.weight - b.keyword.weight
-      || a.keyword.addedAt.localeCompare(b.keyword.addedAt),
-    );
+  private evictLeastValuable(count: number): string[] {
+    const evicted: string[] = [];
+    for (let i = 0; i < count; i++) {
+      const candidates: Array<{ keyword: CorrectionKeyword; index: number }> = [];
+      this.store.keywords.forEach((keyword, index) => {
+        if (keyword.source === 'llm') candidates.push({ keyword, index });
+      });
+      if (candidates.length === 0) break;
+      candidates.sort((a, b) =>
+        evictionTier(a.keyword) - evictionTier(b.keyword)
+        || a.keyword.weight - b.keyword.weight
+        || a.keyword.addedAt.localeCompare(b.keyword.addedAt),
+      );
 
-    const loser = candidates[0];
-    if (!loser) return null;
-    this.store.keywords.splice(loser.index, 1);
-    return loser.keyword.term;
+      const loser = candidates[0];
+      if (!loser) break;
+      this.store.keywords.splice(loser.index, 1);
+      evicted.push(loser.keyword.term);
+    }
+    return evicted;
   }
 
   /** @returns false when the term is not in the store (caller logs the skip). */
@@ -365,6 +394,12 @@ export class CorrectionCueLearner {
     return this.store.lastOptimizedAt;
   }
 
+  /**
+   * The store's only durable write: an atomic temp-file-then-rename of
+   * correction_keywords.json (T-38-02). A successful flush — not a SYSTEM log
+   * line — is what makes a mutation real; the audit trail emitted by
+   * KeywordOptimizationService is best-effort and may be missing.
+   */
   flush(): void {
     saveCorrectionKeywordStore(this.stateDir, this.store);
   }

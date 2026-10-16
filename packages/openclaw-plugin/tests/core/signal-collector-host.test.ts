@@ -919,7 +919,8 @@ describe('PRI-788 G3: cueFeedbackRecorder TP/FP 反馈', () => {
     const wctx = makeMockWctx();
     const recorder = vi.fn();
     const host = makeHost(wctx, { keywordStore: testStore, config: testConfig, cueFeedbackRecorder: recorder });
-    const batchItem = { sessionId: 's', userTurnRowid: 9, occurrenceId: 'occ-9', excerpt: '这个不对', terms: ['不对'] };
+    // PRI-2053: terms 携带归因验证标志；未验证的旧队列行会保守降级为无关键词证据。
+    const batchItem = { sessionId: 's', userTurnRowid: 9, occurrenceId: 'occ-9', excerpt: '这个不对', terms: ['不对'], termsVerified: true };
 
     await host.confirmPendingSignal(batchItem, async () => ({
       is_feedback: true, type: 'correction', confidence: 0.9, reason: 'cue',
@@ -948,6 +949,158 @@ describe('PRI-788 G3: cueFeedbackRecorder TP/FP 反馈', () => {
 
     expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);
     expect(SystemLogger.log).toHaveBeenCalledWith('/tmp/test-ws', 'SIGNAL_CUE_FEEDBACK_FAIL', expect.stringContaining('learner broke'));
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PRI-2053 — Stage2 归因不变量
+//
+// Stage2 确认「整条消息是纠正」只证明消息级事实，不把每个 Stage1 命中词升级为
+// 纠正词。empathy 命中词不得进入 correction_cue / TP / FP；当没有任何 correction
+// 类命中时，消息级纠正事实仍必须保留（llm: 判词 + pain 事件）。
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('PRI-2053: Stage2 归因不变量', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function makeWctxForAttribution(rowid = 11) {
+    const wctx = makeMockWctx();
+    const trajectory = wctx.trajectory as unknown as Record<string, ReturnType<typeof vi.fn>>;
+    trajectory.recordUserTurn = vi.fn().mockReturnValue(rowid);
+    trajectory.markUserTurnCorrection = vi.fn().mockReturnValue(true);
+    return { wctx, trajectory };
+  }
+
+  const correctionVerdict = async () => ({
+    is_feedback: true, type: 'correction' as const, confidence: 0.9, reason: '用户不满',
+  });
+
+  it('仅命中 empathy ambiguous 词 + Stage2 判 correction → 消息确认，但 empathy 词不进入纠正词证据', async () => {
+    const { wctx, trajectory } = makeWctxForAttribution();
+    const recorder = vi.fn();
+    const host = makeHost(wctx, {
+      keywordStore: testStore,
+      config: testConfig,
+      llmClassifier: correctionVerdict,
+      cueFeedbackRecorder: recorder,
+    });
+
+    host.detectSync('你搞什么啊', 'sess-p13-empathy', 'user');
+    await flushAsync();
+
+    // 消息级纠正事实必须保留（这是真实发生的事件，不能因关键词过滤被丢）
+    expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);
+    expect(trajectory.markUserTurnCorrection).toHaveBeenCalledWith(11, 'llm:用户不满');
+    // 但 empathy 命中词不得获得纠正词 TP
+    expect(recorder).not.toHaveBeenCalled();
+  });
+
+  it('两个 ambiguous 词混合命中（correction + empathy）→ 只有 correction 词参与纠正词归因', async () => {
+    const { wctx, trajectory } = makeWctxForAttribution();
+    const recorder = vi.fn();
+    const host = makeHost(wctx, {
+      keywordStore: testStore,
+      config: testConfig,
+      llmClassifier: correctionVerdict,
+      cueFeedbackRecorder: recorder,
+    });
+
+    // '不对'(correction, ambiguous) 与 '搞什么'(empathy, ambiguous) 同时命中。
+    // 刻意不用 high 精度词：high 会短路同步 STRONG 路径，证明不了混合 ambiguous。
+    host.detectSync('你搞什么啊，这个不对', 'sess-p13-mixed', 'user');
+    await flushAsync();
+
+    expect(recorder).toHaveBeenCalledWith(['不对'], true);
+    expect(trajectory.markUserTurnCorrection).toHaveBeenCalledWith(11, '不对');
+  });
+
+  it('仅命中 correction ambiguous 词 → 原有归因不变', async () => {
+    const { wctx, trajectory } = makeWctxForAttribution();
+    const recorder = vi.fn();
+    const host = makeHost(wctx, {
+      keywordStore: testStore,
+      config: testConfig,
+      llmClassifier: correctionVerdict,
+      cueFeedbackRecorder: recorder,
+    });
+
+    host.detectSync('这个不对', 'sess-p13-correction-only', 'user');
+    await flushAsync();
+
+    expect(recorder).toHaveBeenCalledWith(['不对'], true);
+    expect(trajectory.markUserTurnCorrection).toHaveBeenCalledWith(11, '不对');
+  });
+
+  it('Stage2 判非 correction → 不为 empathy 词凭空产生纠正词证据', async () => {
+    const { wctx } = makeWctxForAttribution();
+    const recorder = vi.fn();
+    const host = makeHost(wctx, {
+      keywordStore: testStore,
+      config: testConfig,
+      llmClassifier: async () => ({
+        is_feedback: false, type: 'none' as const, confidence: 1, reason: '普通消息',
+      }),
+      cueFeedbackRecorder: recorder,
+    });
+
+    host.detectSync('你搞什么啊', 'sess-p13-none', 'user');
+    await flushAsync();
+
+    expect(recorder).not.toHaveBeenCalled();
+    expect(emitPainDetectedEvent).not.toHaveBeenCalled();
+  });
+
+  it('批量恢复路径与实时路径归因一致；旧格式行保守降级（不伪造证据）', async () => {
+    const { wctx, trajectory } = makeWctxForAttribution();
+    const recorder = vi.fn();
+    const host = makeHost(wctx, { keywordStore: testStore, config: testConfig, cueFeedbackRecorder: recorder });
+
+    // 新格式队列行（enqueue 时已按 Stage1 快照筛过）→ 与实时路径一致
+    const confirmed = await host.confirmPendingSignal(
+      {
+        sessionId: 's', userTurnRowid: 20, occurrenceId: '20',
+        excerpt: '你搞什么啊，这个不对', terms: ['不对'], termsVerified: true,
+      },
+      correctionVerdict,
+    );
+    expect(confirmed.disposition).toBe('confirmed');
+    expect(recorder).toHaveBeenLastCalledWith(['不对'], true);
+
+    // 旧格式队列行（只存了原始命中词，无当时的类别快照）→ 保守降级：
+    // 不得把其中任何词当作纠正词证据，但消息级纠正事实仍保留。
+    const legacy = await host.confirmPendingSignal(
+      {
+        sessionId: 's', userTurnRowid: 21, occurrenceId: '21',
+        excerpt: '你搞什么啊', terms: ['搞什么'],
+      },
+      correctionVerdict,
+    );
+    expect(legacy.disposition).toBe('confirmed');
+    expect(recorder).toHaveBeenCalledTimes(1); // 未新增
+    expect(trajectory.markUserTurnCorrection).toHaveBeenCalledWith(21, 'llm:用户不满');
+    expect(SystemLogger.log).toHaveBeenCalledWith(
+      '/tmp/test-ws', 'SIGNAL_CONFIRMATION_ATTRIBUTION_UNVERIFIED', expect.any(String),
+    );
+  });
+
+  it('LLM 抛错入队时只持久化 correction 类命中词（恢复侧无需历史快照）', async () => {
+    const { wctx, trajectory } = makeWctxForAttribution();
+    trajectory.enqueueSignalConfirmation = vi.fn();
+    const host = makeHost(wctx, {
+      keywordStore: testStore,
+      config: testConfig,
+      // LLM 存在但抛错：这条入队分支不做 empathy 短路，命中词会原样落库 ——
+      // 归因筛选必须在入队时完成，否则恢复侧只能拿到未分类的词。
+      llmClassifier: async () => { throw new Error('channel dead'); },
+    });
+
+    host.detectSync('你搞什么啊，这个不对', 'sess-p13-queue', 'user');
+    await flushAsync();
+
+    expect(trajectory.enqueueSignalConfirmation).toHaveBeenCalledTimes(1);
+    const arg = trajectory.enqueueSignalConfirmation.mock.calls[0][0];
+    expect(arg.terms).toEqual(['不对']); // empathy 命中词不进入纠正词证据
+    expect(arg.suggestedType).toBe('correction');
   });
 });
 

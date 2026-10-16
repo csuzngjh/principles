@@ -119,6 +119,8 @@ export async function batchConfirmPendingSignals(
                     occurrenceId: item.occurrenceId,
                     excerpt: item.excerpt,
                     terms: item.terms,
+                    // PRI-2053: 归因证据是否已验证（旧格式行 → false → 保守降级）。
+                    termsVerified: item.termsVerified,
                 },
                 classifier,
             );

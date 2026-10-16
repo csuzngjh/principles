@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { CorrectionObserverResult } from '@principles/core/runtime-v2';
 
 // Shared mock objects so tests can mutate them after vi.mock runs
-const mockLearner = { add: vi.fn(() => null), updateWeight: vi.fn(() => true), remove: vi.fn(() => true), recordFalsePositive: vi.fn(() => true), recordTruePositive: vi.fn(() => true), find: vi.fn(() => undefined), getStore: vi.fn(() => ({ keywords: [] })) };
+const mockLearner = { add: vi.fn(() => []), updateWeight: vi.fn(() => true), remove: vi.fn(() => true), recordFalsePositive: vi.fn(() => true), recordTruePositive: vi.fn(() => true), find: vi.fn(() => undefined), getStore: vi.fn(() => ({ keywords: [] })) };
 const mockDb = { listUserTurnsForSession: vi.fn(() => []), listRecentSessions: vi.fn(() => []) };
 
 // Mock the CorrectionCueLearner dependency
@@ -29,7 +29,7 @@ describe('KeywordOptimizationService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     KeywordOptimizationService.reset();
-    mockLearner.add.mockReturnValue(null);
+    mockLearner.add.mockReturnValue([]);
     mockLearner.updateWeight.mockReturnValue(true);
     mockLearner.remove.mockReturnValue(true);
     mockLearner.recordFalsePositive.mockReturnValue(true);
@@ -189,6 +189,126 @@ describe('KeywordOptimizationService', () => {
     });
   });
 
+  // ── P1-2: REMOVE 证据下限 — 有限近期窗口的缺席不是删除历史有效词的反证 ──────
+  describe('P1-2: REMOVE evidence floor', () => {
+    function svcWithLogger() {
+      const logger = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
+      return {
+        svc: new KeywordOptimizationService('/tmp/test-state', '/tmp/test-state', logger as any),
+        logger,
+      };
+    }
+
+    it('refuses to REMOVE a term with confirmed TPs (TP>0) on recent-window silence alone', () => {
+      mockLearner.find.mockReturnValue({
+        term: '有据之词', weight: 0.6, source: 'llm', addedAt: 'x',
+        truePositiveCount: 5, falsePositiveCount: 0,
+      });
+      const { svc, logger } = svcWithLogger();
+
+      svc.applyResult({
+        updated: true,
+        updates: { '有据之词': { action: 'remove', reasoning: 'not in the recent trajectory window' } },
+      } as any);
+
+      expect(mockLearner.remove).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'REMOVE skipped for term="有据之词": term has 5 confirmed correction(s); recent-window silence is not counter-evidence',
+        ),
+      );
+      // 被拒绝的删除绝不能留下"已成功删除"的审计
+      expect(mockSystemLog).not.toHaveBeenCalledWith(
+        '/tmp/test-state', 'KEYWORD_LEARNING', expect.stringContaining('REMOVE'),
+      );
+    });
+
+    it('still REMOVEs a never-confirmed learned term (TP=0, FP=0)', () => {
+      mockLearner.find.mockReturnValue({ term: '没据之词', weight: 0.5, source: 'llm', addedAt: 'x' });
+      service.applyResult({
+        updated: true,
+        updates: { '没据之词': { action: 'remove', reasoning: 'never confirmed, never fired' } },
+      } as any);
+
+      expect(mockLearner.remove).toHaveBeenCalledWith('没据之词');
+      expect(mockSystemLog).toHaveBeenCalledWith(
+        '/tmp/test-state', 'KEYWORD_LEARNING', 'REMOVE term="没据之词"',
+      );
+    });
+
+    it('still REMOVEs a learned term with real counter-evidence (FP>0, TP=0)', () => {
+      mockLearner.find.mockReturnValue({
+        term: '误报之词', weight: 0.3, source: 'llm', addedAt: 'x',
+        truePositiveCount: 0, falsePositiveCount: 3,
+      });
+      service.applyResult({
+        updated: true,
+        updates: { '误报之词': { action: 'remove', reasoning: 'FP ratio 1.0, no TP' } },
+      } as any);
+
+      expect(mockLearner.remove).toHaveBeenCalledWith('误报之词');
+    });
+
+    it('a refused REMOVE does not block the other legitimate operations in the batch', () => {
+      mockLearner.find.mockImplementation((term: string) => {
+        if (term === '受保护') {
+          return { term: '受保护', weight: 0.7, source: 'llm', addedAt: 'x', truePositiveCount: 4 };
+        }
+        if (term === '可删') {
+          return { term: '可删', weight: 0.4, source: 'llm', addedAt: 'x' };
+        }
+        return undefined;
+      });
+
+      service.applyResult({
+        updated: true,
+        updates: {
+          '受保护': { action: 'remove', reasoning: 'silent lately' },
+          '可删': { action: 'remove', reasoning: 'never confirmed' },
+        },
+      } as any);
+
+      expect(mockLearner.remove).toHaveBeenCalledTimes(1);
+      expect(mockLearner.remove).toHaveBeenCalledWith('可删');
+    });
+
+    it('learner.remove() returning false is a skip, never a fake REMOVE success audit', () => {
+      mockLearner.find.mockReturnValue({ term: '消失之词', weight: 0.5, source: 'llm', addedAt: 'x' });
+      mockLearner.remove.mockReturnValue(false);
+      const { svc, logger } = svcWithLogger();
+
+      svc.applyResult({
+        updated: true,
+        updates: { '消失之词': { action: 'remove', reasoning: 'stale' } },
+      } as any);
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('REMOVE skipped for term="消失之词": not in store'),
+      );
+      expect(mockSystemLog).not.toHaveBeenCalledWith(
+        '/tmp/test-state', 'KEYWORD_LEARNING', expect.stringContaining('REMOVE'),
+      );
+    });
+
+    it('learner.updateWeight() returning false is a skip, never a fake UPDATE success audit', () => {
+      mockLearner.find.mockReturnValue({ term: '消失之词', weight: 0.5, source: 'llm', addedAt: 'x' });
+      mockLearner.updateWeight.mockReturnValue(false);
+      const { svc, logger } = svcWithLogger();
+
+      svc.applyResult({
+        updated: true,
+        updates: { '消失之词': { action: 'update', weight: 0.8, reasoning: 'boost' } },
+      } as any);
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE skipped for term="消失之词": not in store'),
+      );
+      expect(mockSystemLog).not.toHaveBeenCalledWith(
+        '/tmp/test-state', 'KEYWORD_LEARNING', expect.stringContaining('UPDATE'),
+      );
+    });
+  });
+
   describe('term key resolution (store-identity symmetry)', () => {
     // 生产实况：优化器回吐的 key 带空白/大小写差异，ADD 归一化而 UPDATE/REMOVE
     // 直接用原串，于是天天刷 "Keyword not found"。三者必须走同一条身份规则。
@@ -269,7 +389,7 @@ describe('KeywordOptimizationService', () => {
     });
 
     it('surfaces cap eviction in the mutation audit instead of freezing learning', () => {
-      mockLearner.add.mockReturnValue('老的垃圾词');
+      mockLearner.add.mockReturnValue(['老的垃圾词']);
       service.applyResult({
         updated: true,
         updates: { '新词': { action: 'add', weight: 0.6, reasoning: 'r' } },
@@ -277,7 +397,7 @@ describe('KeywordOptimizationService', () => {
       expect(mockSystemLog).toHaveBeenCalledWith(
         '/tmp/test-state',
         'KEYWORD_LEARNING',
-        expect.stringContaining('evicted="老的垃圾词" (store at cap)'),
+        expect.stringContaining('evicted=["老的垃圾词"] (store at cap)'),
       );
     });
 

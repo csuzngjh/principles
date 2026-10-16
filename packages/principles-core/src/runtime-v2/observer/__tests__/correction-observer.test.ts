@@ -30,14 +30,20 @@ describe('CorrectionObserver', () => {
   // 生产实况：词库里 TP/FP 双双为 0 的条目占绝大多数，旧判据
   // 「FP / (TP + FP) > 0.3」对它们恒不成立 ⇒ REMOVE 永不触发，死词只进不出，
   // 200 顶满后学习通道整体冻结。判据必须能用 payload 里真实存在的证据评估。
-  it('gives REMOVE a criterion that works without any TP/FP history', () => {
+  //
+  // PRI-2053 修正：判据 2 只对「从未被确认过（TP=0）」的词成立。observer 看到的
+  // 只是一个有界的近期窗口，词在该窗口缺席不等于它从未生效——对 TP>0 的词必须
+  // 明确禁止"仅凭近期沉默"删除（调用侧 applyResult 也会拒绝这种 verdict）。
+  it('gives REMOVE a criterion that works without any TP/FP history, bounded by TP>0 protection', () => {
     const prompt = CorrectionObserver.buildPrompt(mockPayload);
-    expect(prompt).toContain('TP and FP stay 0 for such a term');
+    expect(prompt).toContain('NEVER been credited with a correction (TP=0)');
     // 同时要求引用「是否再现」与「是否为整句」这两类可见证据
     expect(prompt).toContain('matches nothing in the trajectory or recent messages');
     expect(prompt).toContain('full user sentence');
     // 并且明确保护仍在命中的词
     expect(prompt).toContain('Do not recommend REMOVE for terms that appear as keywords in trajectory lines');
+    // 以及保护已被确认过的词：近期缺席不是删除它们的反证
+    expect(prompt).toContain('Do not recommend REMOVE for a TP>0 term on recent silence alone');
   });
 
   it('tells the model that updates keys are terms, not actions', () => {
