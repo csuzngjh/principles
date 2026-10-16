@@ -37,6 +37,7 @@ import {
   type TaskRecord,
 } from '@principles/core/runtime-v2';
 import {
+  createWorkspaceBehaviorEvidencePort,
   loadPdConfigForPlugin,
   loadFeatureFlagFromConfig,
   reconcileGovernanceContinuation,
@@ -478,6 +479,7 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
     logLabel: 'CodexWorker',
     logger,
     emitEvent,
+    behaviorEvidence: createWorkspaceBehaviorEvidencePort(workspaceDir, CODEX_TOOL_SEMANTICS),
     toolSemantics: CODEX_TOOL_SEMANTICS,
     // PRI-741: artificer generation gets the Codex host projection
     // (Bash/apply_patch — evidence-bound, intentionally sparse).

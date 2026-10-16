@@ -24,7 +24,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import Database from 'better-sqlite3';
+import { createWorkspaceBehaviorEvidencePort } from '../src/workspace-behavior-evidence.js';
 import {
+  applyTrajectorySchemaBase,
+  buildToolSemanticRegistry,
   createRuntimeStateHandle,
   createPITaskDiagnosticJson,
   createOwnerEvidenceScopeError,
@@ -368,6 +372,54 @@ describe('runInternalizationConsumerCycle — PRI-982 evidence preflight + chann
     expect(captured[0]?.behaviorExamplePack).toEqual(VALID_PACK);
     const { task } = await readTask(workspaceDir, ARTIFICER_TASK_ID);
     expect(task?.status).toBe('succeeded');
+  });
+
+  it('PRI-992: real SQLite port injects the validated pack into the consumer runner boundary', async () => {
+    const workspaceDir = makeWorkspace();
+    await seedCodeChannelChain(workspaceDir, VALID_SELECTION);
+    fs.mkdirSync(path.join(workspaceDir, '.state'), { recursive: true });
+    const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+    applyTrajectorySchemaBase(db);
+    db.prepare('INSERT INTO sessions (session_id,started_at,updated_at) VALUES (?,?,?)').run('original-session', 'now', 'now');
+    for (const [id, command] of [[7, 'git status'], [42, 'git commit']]) {
+      db.prepare('INSERT INTO tool_calls (id,session_id,tool_name,outcome,params_json,created_at) VALUES (?,?,?,?,?,?)').run(id, 'original-session', 'Bash', 'success', JSON.stringify({ command }), 'now');
+    }
+    db.prepare('INSERT INTO pain_events (session_id,source,score,canonical_pain_id,created_at) VALUES (?,?,?,?,?)').run('original-session', 'manual', 5, 'pain_001', 'now');
+    db.close();
+    const built = buildToolSemanticRegistry([{ rawToolName: 'Bash', canonicalKind: 'execute' }]);
+    if (!built.ok) throw new Error('Invalid test host registry');
+    const captured: CapturedRun[] = [];
+    spyArtificerRun(captured);
+    const outcome = await runInternalizationConsumerCycle(workspaceDir, makePorts({
+      behaviorEvidence: createWorkspaceBehaviorEvidencePort(workspaceDir, built.registry),
+      toolSemantics: built.registry,
+    }));
+    expect(outcome.ran).toBe(true);
+    expect(captured).toHaveLength(1);
+    expect(captured[0]?.behaviorExamplePack?.sourceNegativeCase.toolName).toBe('Bash');
+    expect(captured[0]?.behaviorExamplePack?.sourceNegativeCase.ruleContext?.history.calls[0]?.canonicalKind).toBe('execute');
+    expect(captured[0]?.behaviorExamplePack?.evidenceRefs).toEqual(['pain:1', 'tool_call:42', 'tool_call:7']);
+  });
+
+  it('PRI-992: corrupt selected row remains a storage fault, not an Owner review fault', async () => {
+    const workspaceDir = makeWorkspace();
+    await seedCodeChannelChain(workspaceDir, VALID_SELECTION);
+    fs.mkdirSync(path.join(workspaceDir, '.state'), { recursive: true });
+    const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+    applyTrajectorySchemaBase(db);
+    db.prepare('INSERT INTO sessions (session_id,started_at,updated_at) VALUES (?,?,?)').run('original-session', 'now', 'now');
+    db.prepare('INSERT INTO tool_calls (id,session_id,tool_name,outcome,params_json,created_at) VALUES (?,?,?,?,?,?)').run(42, 'original-session', 'Bash', 'success', '{', 'now');
+    db.prepare('INSERT INTO pain_events (session_id,source,score,canonical_pain_id,created_at) VALUES (?,?,?,?,?)').run('original-session', 'manual', 5, 'pain_001', 'now');
+    db.close();
+    const built = buildToolSemanticRegistry([{ rawToolName: 'Bash', canonicalKind: 'execute' }]);
+    if (!built.ok) throw new Error('Invalid test host registry');
+    const captured: CapturedRun[] = [];
+    spyArtificerRun(captured);
+    const outcome = await runInternalizationConsumerCycle(workspaceDir, makePorts({ behaviorEvidence: createWorkspaceBehaviorEvidencePort(workspaceDir, built.registry) }));
+    expect(outcome.skipReason).toBe('evidence_source_error');
+    expect(captured).toHaveLength(0);
+    expect((await readTask(workspaceDir, ARTIFICER_TASK_ID)).task).toMatchObject({ status: 'pending', attemptCount: 0 });
+    expect(await countRunRows(workspaceDir, ARTIFICER_TASK_ID)).toBe(0);
   });
 
   it('T08b: prompt channel → non-L2 (PiAi) adapter, no pack requirement, task succeeds', async () => {
