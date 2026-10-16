@@ -8,6 +8,12 @@
  * end-to-end (3-host load, unknown 4th host, incompatible version, corrupt
  * fields, canonical preference). Registry lifecycle rows live in
  * workspace-workers-manifest-failure.test.ts.
+ *
+ * Windows-gated BY CONTRACT, not by convenience: the fixture carries real
+ * Windows workspace paths and the parser validates workspace absoluteness
+ * with the host's path semantics — a Windows production manifest is only
+ * meaningful on Windows (the Companion itself is Windows-only). The OS-neutral
+ * contract rows run everywhere via bundled-parser-compat.test.ts.
  */
 import { describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
@@ -21,7 +27,7 @@ function loadProductionFixture(): unknown {
   return JSON.parse(fs.readFileSync(FIXTURE_PATH, 'utf8')) as unknown;
 }
 
-describe('production 3-host manifest loads through the whole Companion resolution path', () => {
+describe.skipIf(process.platform !== 'win32')('production 3-host manifest loads through the whole Companion resolution path', () => {
   it('parses with zero warnings and every host recognized', () => {
     const { manifest, warnings, error } = parseInstallManifest(loadProductionFixture());
     expect(error).toBeUndefined();
@@ -63,7 +69,7 @@ describe('production 3-host manifest loads through the whole Companion resolutio
   });
 });
 
-describe('the same manifest shape stays forward- and backward-safe', () => {
+describe.skipIf(process.platform !== 'win32')('the same manifest shape stays forward- and backward-safe', () => {
   it('an unknown 4th host on the production shape warns instead of failing', () => {
     const fixture = loadProductionFixture() as Record<string, unknown>;
     const { manifest, warnings, error } = parseInstallManifest({

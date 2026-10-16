@@ -19,12 +19,14 @@
  * no fs, no home-dir state.
  */
 
-/** The production manifest shape (2026-10-16): three registered hosts. */
+/** The production manifest shape (2026-10-16): three registered hosts. Workspaces are built with path.resolve so the matrix runs identically on every host OS (workspace absoluteness is platform-relative by contract). */
+import * as path from 'node:path';
+
 export const PRODUCTION_SHAPED_MANIFEST = Object.freeze({
   layoutVersion: 1,
   mode: 'canonical',
   hosts: ['openclaw', 'codex', 'workbuddy'],
-  workspaces: ['C:\\pd\\ws-codex', 'C:\\Users\\demo\\.workbuddy\\pd-workspace'],
+  workspaces: Object.freeze([path.resolve('pd', 'ws-codex'), path.resolve('users', 'demo', '.workbuddy', 'pd-workspace')]),
 });
 
 /**
@@ -56,7 +58,7 @@ export function assertInstallManifestCompat(layout) {
   // Row 2 — canonical wins over legacy when the runtime exists (no wrong
   // legacy fallback on a healthy canonical install).
   const resolved = resolveInstallLayout({
-    homeDir: 'C:\\Users\\demo',
+    homeDir: path.resolve('users', 'demo'),
     manifest: PRODUCTION_SHAPED_MANIFEST,
     canonicalRuntimeExists: true,
     legacyExtensionExists: true,

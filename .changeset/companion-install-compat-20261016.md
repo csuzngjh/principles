@@ -6,6 +6,14 @@
 > Note: `@principles/pd-companion` is private and changesets-ignored; its
 > desktop release version bump (0.1.2 → 0.1.3) belongs to the companion
 > release-prep flow, not to this changeset.
+>
+> Note: the installer package keeps a LOCAL twin of
+> `installManifestHostsForPersist` (`src/manifest-host-union.ts`) because the
+> registry still serves install-layout 0.3.x; with 0.3.x the parsed manifest
+> never carries `unknownHosts`, so the twin degrades to the exact pre-change
+> behavior. Retirement follow-up: once install-layout ≥0.4.0 is published and
+> this package's range is raised, switch both call sites back to the shared
+> export and delete the twin.
 
 Fix the PD Companion install-compatibility brick (2026-10-16): Companion 0.1.2
 bundled install-layout 0.1.0, whose parser rejected the production 3-host
