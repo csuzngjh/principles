@@ -179,3 +179,12 @@ CLI 测试 T05：同一真实 SQLite 库中播种 **83 条** terminal-failed art
 ### r2 CI 收尾（head c334b0581）
 
 首轮 r2 提交（4fe13987d）的 CI 暴露两项收尾：① CodeQL `js/file-system-race`（high）——投影锁 `openSync('wx')` 后按路径名重开写 holder 信息构成 TOCTOU；改为经已持有 fd 写入（同 inode，构造性免竞态）。② 盘根拒绝测试硬编码 `D:/` 在 Linux CI 是合法相对目录（表现为 storage_unavailable 而非 workspace_invalid）——改为 `path.parse(process.cwd()).root` 平台中立推导。最终 head **c334b0581**：GitHub CI **32 项 pass**（Verify Merge Gate / CodeQL / Test×3 / Lint 等全部 required 绿；唯一非 pass 为 codecov/patch 补丁覆盖率 advisory，非 required）。本地 verify:merge r2 head REAL_EXIT=0（.tmp/verify-merge-r2.log）。
+
+
+## 13. 评审修复轮补充（2026-10-16）：CLI 旗标互斥收口
+
+- **缺陷**：显式组合 `--dry-run --repair-audit` 会使 CLI 在显式 dry-run 请求下重建 JSONL 审计投影，违反零写入合同。
+- **核实**：真实 SQLite 工作区先 confirm 成功再删除 JSONL，随后以 `dryRun:true, repairAudit:true` 调用处理器——JSONL 被重建（修复前行为），CLI 25 用例中 1 例失败。
+- **修复**：`--repair-audit` 与 `--confirm` 或显式 `--dry-run` 组合一律拒绝（`flag_conflict`），且发生在任何 Workspace/DB/JSONL I/O 之前；`--repair-audit` 单独使用语义不变。
+- **证据**：CLI 26/26 通过；含 83 条 failed Artificer 隔离（T05）等既有回归全绿。
+- **边界**：PRODUCTION PILOT NOT_RUN 维持；Merge Ready 以 GitHub CI 为准。

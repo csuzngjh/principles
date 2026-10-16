@@ -240,11 +240,14 @@ export async function handleRuntimeRecoveryFailedTask(opts: RecoveryFailedTaskOp
     }, opts.json);
     return;
   }
-  if (opts.repairAudit && opts.confirm) {
+  // Explicit --dry-run promises zero writes, including to recovery_actions.jsonl.
+  // --repair-audit is an intentional JSONL write operation, so neither execution
+  // mode flag may be combined with it (default no-flag dry-run remains distinct).
+  if (opts.repairAudit && (opts.confirm || opts.dryRun)) {
     refusal({
-      reason: 'Error: --repair-audit and --confirm are mutually exclusive',
+      reason: 'Error: --repair-audit cannot be combined with --confirm or --dry-run',
       reasonCode: 'flag_conflict',
-      nextAction: '--repair-audit only re-projects the JSONL audit from the durable row fact; it never mutates task state',
+      nextAction: 'Run --repair-audit alone to project the JSONL, or --dry-run alone for strictly zero-write inspection',
     }, opts.json);
     return;
   }
