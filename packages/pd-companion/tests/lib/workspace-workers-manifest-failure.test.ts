@@ -153,4 +153,45 @@ describe('unreadable install manifest must not mass-stop workers (2026-10-16 reg
     expect(info.body).toContain('保持不变');
     expect(info.body).toContain('自动对齐');
   });
+
+  // ── RF-04 (review 2026-10-16): recovery must be an OBSERVABLE transition ───
+
+  it('RF-04: unavailable → ok emits ONE recovery event naming the healed episode; workers untouched', () => {
+    const ctx = makeRegistry();
+    ctx.registry.syncFromManifest({ kind: 'ok', workspaces: ['D:/Code/ws-a'] });
+    for (let i = 0; i < SYNC_UNAVAILABLE_ALERT_THRESHOLD; i += 1) {
+      ctx.registry.syncFromManifest(unavailable('install_manifest_read_failed: EACCES'));
+    }
+    // Recovery on the next good read — same workspace set, nothing to restart.
+    ctx.registry.syncFromManifest({ kind: 'ok', workspaces: ['D:/Code/ws-a'] });
+    const recovered = ctx.events.filter((e) => e.event === 'workspace_worker_sync_recovered');
+    expect(recovered).toHaveLength(1);
+    expect(recovered[0]?.fields?.previousReason).toBe('install_manifest_read_failed: EACCES');
+    expect(recovered[0]?.fields?.unavailableReads).toBe(SYNC_UNAVAILABLE_ALERT_THRESHOLD);
+    // Idempotent recovery: a second good read does NOT re-emit.
+    ctx.registry.syncFromManifest({ kind: 'ok', workspaces: ['D:/Code/ws-a'] });
+    expect(ctx.events.filter((e) => e.event === 'workspace_worker_sync_recovered')).toHaveLength(1);
+    expect(ctx.spawnCalls).toHaveLength(1); // no worker respawn churn
+    expect(ctx.registry.syncUnavailable()).toBeUndefined();
+  });
+
+  it('RF-04: the tray projection clears on recovery and a NEW episode escalates again (full lifecycle)', () => {
+    const ctx = makeRegistry();
+    ctx.registry.syncFromManifest({ kind: 'ok', workspaces: ['D:/Code/ws-a'] });
+    for (let i = 0; i < SYNC_UNAVAILABLE_ALERT_THRESHOLD; i += 1) {
+      ctx.registry.syncFromManifest(unavailable('install_manifest_unparsable: torn write'));
+    }
+    expect(buildSyncUnavailableTrayView([ctx.registry.syncUnavailable()!]).statusSuffix).toContain('安装清单读取失败');
+    // Owner-alerted → recovered → tray projection must be empty again.
+    ctx.registry.syncFromManifest({ kind: 'ok', workspaces: ['D:/Code/ws-a'] });
+    expect(ctx.registry.syncUnavailable()).toBeUndefined();
+    expect(buildSyncUnavailableTrayView([]).menuLabels).toEqual([]);
+    // A NEW failure episode starts from one and escalates once more.
+    for (let i = 0; i < SYNC_UNAVAILABLE_ALERT_THRESHOLD; i += 1) {
+      ctx.registry.syncFromManifest(unavailable('install_manifest_read_failed: EPERM'));
+    }
+    const persistent = ctx.events.filter((e) => e.event === 'workspace_worker_sync_unavailable_persistent');
+    expect(persistent).toHaveLength(2);
+    expect(persistent[1]?.fields?.reason).toBe('install_manifest_read_failed: EPERM');
+  });
 });

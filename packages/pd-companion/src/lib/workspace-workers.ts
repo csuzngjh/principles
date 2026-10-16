@@ -131,6 +131,18 @@ export class WorkspaceWorkerRegistry {
    */
   syncFromManifest(source: WorkspaceManifestSource): void {
     if (source.kind === 'ok') {
+      // RF-04 (review 2026-10-16): recovery is an observable transition. The
+      // Companion rebuilds its tray from registry queries, which only happen
+      // on worker-state changes or escalations — without this event a healed
+      // manifest leaves the stale "⚠ 安装清单读取失败" section on screen even
+      // though nothing is wrong anymore. One event per episode; the sync
+      // itself is unchanged (no worker restarts, plain reconciliation).
+      if (this.lastUnavailableReason !== undefined) {
+        this.log('workspace_worker_sync_recovered', {
+          previousReason: this.lastUnavailableReason,
+          unavailableReads: this.consecutiveUnavailableReads,
+        });
+      }
       this.consecutiveUnavailableReads = 0;
       this.lastUnavailableReason = undefined;
       this.sync(source.workspaces);

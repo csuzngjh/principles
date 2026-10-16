@@ -434,6 +434,10 @@ function startWorkspaceWorkerSupervision(): void {
         // Owner-visibly instead of mass-stopping — one-shot per episode.
         notifyWorkspaceSyncUnavailable(fields ?? {});
         rebuildTrayMenu();
+      } else if (event === 'workspace_worker_sync_recovered') {
+        // RF-04: healed manifest → drop the stale tray warning immediately.
+        // Pure display refresh; sync already reconciled the workers.
+        rebuildTrayMenu();
       }
     },
   });
@@ -469,6 +473,8 @@ function startWorkspaceWorkerSupervision(): void {
         rebuildTrayMenu();
       } else if (event === 'workspace_worker_sync_unavailable_persistent') {
         notifyWorkspaceSyncUnavailable(fields ?? {});
+        rebuildTrayMenu();
+      } else if (event === 'workspace_worker_sync_recovered') {
         rebuildTrayMenu();
       }
     },

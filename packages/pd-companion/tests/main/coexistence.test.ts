@@ -116,6 +116,8 @@ describe('PRI-631 Console auth + PRI-624 workspace workers coexist in one main.t
     expect(source).toContain("event === 'workspace_worker_sync_unavailable_persistent'");
     expect(source).toContain('notifyWorkspaceSyncUnavailable(');
     expect(source).toContain('buildSyncUnavailableTrayView(');
+    // RF-04：恢复事件必须立即重建托盘（纯显示刷新，不触碰 worker）。
+    expect(source).toContain("event === 'workspace_worker_sync_recovered'");
     // 前向兼容告警有结构化日志（去重防刷屏）。
     expect(source).toContain('install_manifest_warning');
   });
