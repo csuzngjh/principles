@@ -63,12 +63,16 @@ import {
   resolveOutputLanguage,
   hydratePITaskRecord,
   preflightArtificerOwnerEvidence,
+  preflightArtificerIntentBasis,
+  consumeSourceFaultBackoffSkip,
+  advanceSourceFaultBackoff,
   type PDRuntimeAdapter,
   type RuntimeStateManager,
   type WakeOnceResult,
   type ToolSemanticRegistry,
   type BehaviorEvidencePort,
   type ArtificerEvidencePreflightVerdict,
+  type ArtificerTrustedFactsPort,
 } from '@principles/core/runtime-v2';
 import { loadLedger } from '@principles/core/principle-tree-ledger';
 import { loadPdConfigForPlugin, loadFeatureFlagFromConfig } from './pd-config.js';
@@ -127,6 +131,15 @@ export interface InternalizationConsumerCyclePorts {
    * and the runner is never constructed evidence-less.
    */
   readonly behaviorEvidence?: BehaviorEvidencePort;
+  /**
+   * SPEC-RULECODE-QUALITY-001 A1 (PRI-995): host-injected trusted-facts port
+   * for the artificer intent-basis preflight (SPEC 8.3 seam). Optional:
+   * absent + a scribe-declared required fact degrades OBSERVABLY
+   * (trusted_fact_provider_absent needs_human_review) and the runner is
+   * never constructed — a host capability gap never reads as an Owner fault
+   * or a transient error.
+   */
+  readonly trustedFacts?: ArtificerTrustedFactsPort;
   /** Log label used in human log prefixes ('AutoConsumer' | 'CodexWorker' | …). */
   readonly logLabel: string;
   readonly envGetter?: (name: string) => string | undefined;
@@ -533,6 +546,21 @@ export async function runInternalizationConsumerCycle(
               preflightSkipReason = 'code_rule_capability_disabled';
               continue;
             }
+            // SPEC-RULECODE-QUALITY-001 §9 (Q21): a pending source-fault backoff
+            // consumes one skip cycle per encounter — the task stays pending,
+            // zero model cost, and the technical retry happens only after the
+            // bounded 1-then-2-cycle backoff elapses (restart-durable).
+            if (await consumeSourceFaultBackoffSkip(candidate.taskId, leasedPiTask, stateManager)) {
+              const backoffInfo = JSON.stringify({
+                reason: 'source_fault_backoff_skip',
+                taskId: candidate.taskId,
+                nextAction: 'Transient source fault backoff in effect; the task retries automatically at zero model cost.',
+              });
+              emitEvent('INTERNALIZATION_CONSUMER_SKIP', backoffInfo);
+              logger.info(`[PD:${logLabel}] Artificer task ${candidate.taskId} skipped this cycle: source-fault backoff.`);
+              preflightSkipReason = 'source_fault_backoff_skip';
+              continue;
+            }
             artificerEvidence = await preflightArtificerOwnerEvidence({
               taskId: candidate.taskId,
               piTask: leasedPiTask,
@@ -564,16 +592,24 @@ export async function runInternalizationConsumerCycle(
               // assembly at zero model cost), the runner is never constructed,
               // and the preflight already emitted the structured degradation
               // telemetry (reason=evidence_source_error, reviewPersisted=false).
+              // SPEC-RULECODE-QUALITY-001 §9 (Q21/Q22): the transient fault now
+              // advances the SHARED bounded source-fault backoff (restart-
+              // durable counter; 3rd consecutive fault ends auto-retry in a
+              // source_fault_persistent review terminal — never an Owner label).
+              const persistentFault = await advanceSourceFaultBackoff(
+                { taskId: candidate.taskId, piTask: leasedPiTask, stateManager },
+                `evidence source error: ${artificerEvidence.detail ?? 'trajectory store I/O fault'}`,
+              );
               const storageInfo = JSON.stringify({
-                reason: 'evidence_source_error',
+                reason: persistentFault ? 'source_fault_persistent' : 'evidence_source_error',
                 taskId: candidate.taskId,
                 taskKind: candidate.taskKind,
                 nextAction: artificerEvidence.nextAction,
                 ...(artificerEvidence.detail !== undefined ? { detail: artificerEvidence.detail } : {}),
               });
               emitEvent('INTERNALIZATION_CONSUMER_SKIP', storageInfo);
-              logger.warn(`[PD:${logLabel}] Artificer task ${candidate.taskId} skipped: evidence source error (storage fault preserved; task stays wake-eligible).`);
-              preflightSkipReason = 'evidence_source_error';
+              logger.warn(`[PD:${logLabel}] Artificer task ${candidate.taskId} skipped: evidence source error (storage fault preserved; task stays wake-eligible${persistentFault ? '; auto-retry ended after repeated faults' : ''}).`);
+              preflightSkipReason = persistentFault ? 'source_fault_persistent' : 'evidence_source_error';
             continue;
             }
             if (artificerEvidence.decision === 'blocked') {
@@ -592,6 +628,61 @@ export async function runInternalizationConsumerCycle(
               logger.warn(`[PD:${logLabel}] Artificer task ${candidate.taskId} blocked on Owner evidence (${artificerEvidence.reasonCode}, reviewPersisted=${artificerEvidence.reviewPersisted}).`);
               preflightSkipReason = 'artificer_blocked_on_owner_evidence';
             continue;
+            }
+            // SPEC-RULECODE-QUALITY-001 A1 (Q01/Q20): intent-basis preflight —
+            // evidence-ready is necessary but NOT sufficient. The scribe
+            // artifact must carry a valid intentContract AND machine-readable
+            // executionConditions, and every declared required trusted fact
+            // must be resolvable through ports.trustedFacts. Any stop verdict
+            // moves the task to needs_human_review with a stable reasonCode
+            // and the runner is NEVER constructed (zero generation calls).
+            // The gate re-derives from the scribe artifact every run — a
+            // stored verification record is never a pass token.
+            const intentBasis = await preflightArtificerIntentBasis({
+              taskId: candidate.taskId,
+              piTask: leasedPiTask,
+              owner,
+              workspaceDir,
+              stateManager,
+              eventEmitter: workspaceEmitter,
+              ...(ports.trustedFacts !== undefined ? { trustedFacts: ports.trustedFacts } : {}),
+            });
+            if (intentBasis.decision === 'source_error') {
+              // Q21: transient artifact-store fault — the preflight already
+              // advanced the shared bounded backoff; task stays wake-eligible.
+              emitEvent('INTERNALIZATION_CONSUMER_SKIP', JSON.stringify({
+                reason: 'intent_source_error',
+                taskId: candidate.taskId,
+                nextAction: intentBasis.nextAction,
+                detail: intentBasis.detail,
+              }));
+              logger.warn(`[PD:${logLabel}] Artificer task ${candidate.taskId} skipped: intent-basis source error (transient; bounded backoff applies).`);
+              preflightSkipReason = 'intent_source_error';
+              continue;
+            }
+            if (intentBasis.decision === 'source_fault_persistent') {
+              emitEvent('INTERNALIZATION_CONSUMER_INTENT_BLOCKED', JSON.stringify({
+                taskId: candidate.taskId,
+                reasonCode: intentBasis.reasonCode,
+                nextAction: intentBasis.nextAction,
+                detail: intentBasis.detail,
+                reviewPersisted: intentBasis.reviewPersisted,
+              }));
+              logger.warn(`[PD:${logLabel}] Artificer task ${candidate.taskId} blocked: repeated source faults ended auto-retry (${intentBasis.reasonCode}).`);
+              preflightSkipReason = 'source_fault_persistent';
+              continue;
+            }
+            if (intentBasis.decision === 'blocked') {
+              emitEvent('INTERNALIZATION_CONSUMER_INTENT_BLOCKED', JSON.stringify({
+                taskId: candidate.taskId,
+                reasonCode: intentBasis.reasonCode,
+                nextAction: intentBasis.nextAction,
+                detail: intentBasis.detail,
+                reviewPersisted: intentBasis.reviewPersisted,
+              }));
+              logger.warn(`[PD:${logLabel}] Artificer task ${candidate.taskId} blocked on intent basis (${intentBasis.reasonCode}, reviewPersisted=${intentBasis.reviewPersisted}).`);
+              preflightSkipReason = 'artificer_blocked_on_intent_basis';
+              continue;
             }
           }
         }

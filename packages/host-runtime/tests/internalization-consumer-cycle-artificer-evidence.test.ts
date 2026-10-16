@@ -136,6 +136,43 @@ async function seedCodeChannelChain(workspaceDir: string, selection?: OwnerEvide
         correlationId: 'corr-001',
       }}),
     });
+    // SPEC-RULECODE-QUALITY-001 A1: the code channel now requires a complete
+    // intent basis (intentContract + executionConditions) before generation —
+    // the fixture seeds a scribe artifact declaring NO trusted external facts
+    // (the principle is enforceable from the observable input alone).
+    const now = new Date().toISOString();
+    await stateManager.piArtifactStore.upsertArtifact({
+      artifactId: `pi-art-${SCRIBE_TASK_ID}-run-1`,
+      artifactKind: 'principle',
+      sourceTaskId: SCRIBE_TASK_ID,
+      lineageArtifactIds: [],
+      validationStatus: 'validated',
+      contentJson: JSON.stringify({
+        taskId: SCRIBE_TASK_ID,
+        sourcePhilosopherArtifactId: 'art-phil-001',
+        principleDraft: {
+          title: 'Design confirmation before complex changes',
+          statement: 'Complex changes require confirmed design before implementation',
+          rationale: 'unconfirmed complex edits caused the original pain',
+          applicability: ['complex code changes'],
+          antiPatterns: ['implementing complex changes without design confirmation'],
+          confidence: 0.9,
+        },
+        sourceTrace: { philosopherArtifactId: 'art-phil-001' },
+        risks: [],
+        intentContract: {
+          ownerIntent: 'complex changes must not be implemented before the design is confirmed by the Owner',
+          targetBehavior: 'agent pauses complex edits and requests design confirmation first',
+          forbiddenBehavior: 'implementing complex changes without a confirmed design',
+          evidenceSource: 'pain:pain_001',
+          validationExpectation: 'rule blocks complex-change writes that carry no confirmed-design evidence',
+        },
+        executionConditions: { version: 1, requiredFacts: [] },
+        generatedAt: now,
+      }),
+      createdAt: now,
+      updatedAt: now,
+    });
     await stateManager.createTask({
       taskId: ARTIFICER_TASK_ID,
       taskKind: 'artificer',
