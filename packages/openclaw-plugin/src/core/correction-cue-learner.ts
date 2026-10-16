@@ -295,9 +295,9 @@ export class CorrectionCueLearner {
    * being replaced one-for-one forever.
    *
    * @returns the evicted terms (empty when the store had room).
-   * @throws only when the store is at/over the cap and holds no evictable term
-   *         at all (every entry is Owner-authored seed/user), i.e. a cap the
-   *         system is not allowed to resolve on its own.
+   * @throws when there are too few evictable learned terms to preserve the cap
+   *         (at 200) or to reduce the count (above 200), without touching Owner
+   *         seed/user authority. A failed ADD leaves the store unchanged.
    */
   add(keyword: Omit<CorrectionKeyword, 'addedAt'>): string[] {
     const evicted: string[] = [];
@@ -306,6 +306,17 @@ export class CorrectionCueLearner {
       // over = 0 (exactly at cap) → free exactly one slot: the historical
       // behaviour. over > 0 → also take a bounded convergence step.
       const budget = Math.min(over + 1, MAX_EVICTIONS_PER_ADD);
+      // Above the cap, evicting only one learned term and inserting one new
+      // term cannot converge (e.g. 200 Owner terms + 1 llm: 201 -> 201).
+      // Preflight BEFORE any splice so a rejected ADD cannot destroy evidence.
+      // At exactly the cap, a one-for-one learned replacement is still valid.
+      const minimumToEvict = over > 0 ? 2 : 1;
+      const available = this.store.keywords.filter(k => k.source === 'llm').length;
+      if (available < minimumToEvict) {
+        throw new Error(
+          `Correction keyword store limit reached (${MAX_CORRECTION_KEYWORDS} terms): only ${available} learned term(s) are evictable, need ${minimumToEvict} to ${over > 0 ? 'converge' : 'add'} without touching Owner terms`,
+        );
+      }
       evicted.push(...this.evictLeastValuable(budget));
       if (evicted.length === 0) {
         throw new Error(

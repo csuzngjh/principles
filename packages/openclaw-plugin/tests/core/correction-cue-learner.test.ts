@@ -389,6 +389,60 @@ describe('CORR-05b: eviction at the cap keeps learning alive', () => {
     expect(learner.getStore().keywords).toHaveLength(205);
   });
 
+  it('PRI-2053: at the exact cap a single learned term can still be replaced', () => {
+    fillStore([
+      ...Array.from({ length: 199 }, (_, i) => kw({ term: `owner-${i}`, source: 'seed' })),
+      kw({ term: 'one-llm' }),
+    ]);
+    const learner = new CorrectionCueLearner(tempDir());
+    expect(learner.add({ term: 'replacement', weight: 0.5, source: 'llm' })).toEqual(['one-llm']);
+    expect(learner.getStore().keywords).toHaveLength(MAX_CORRECTION_KEYWORDS);
+    expect(learner.getStore().keywords.some(k => k.term === 'owner-0')).toBe(true);
+    expect(learner.getStore().keywords.some(k => k.term === 'replacement')).toBe(true);
+  });
+
+  it('PRI-2053: oversized with one llm term rejects ADD rather than stalling convergence', () => {
+    fillStore([
+      ...Array.from({ length: 200 }, (_, i) => kw({ term: `owner-${i}`, source: i % 2 ? 'user' : 'seed' })),
+      kw({ term: 'last-llm', truePositiveCount: 5 }),
+    ]);
+    const learner = new CorrectionCueLearner(tempDir());
+    const before = structuredClone(learner.getStore().keywords);
+    expect(() => learner.add({ term: 'replacement', weight: 0.5, source: 'llm' })).toThrow(
+      'Correction keyword store limit reached (200 terms)',
+    );
+    expect(learner.getStore().keywords).toEqual(before);
+    expect(vi.mocked(fs.writeFileSync)).not.toHaveBeenCalled();
+  });
+
+  it('PRI-2053: oversized with two llm terms converges and retains Owner terms', () => {
+    fillStore([
+      ...Array.from({ length: 199 }, (_, i) => kw({ term: `owner-${i}`, source: 'seed' })),
+      kw({ term: 'noise', falsePositiveCount: 3 }),
+      kw({ term: 'unconfirmed' }),
+    ]);
+    const learner = new CorrectionCueLearner(tempDir());
+    expect(learner.add({ term: 'replacement', weight: 0.5, source: 'llm' }))
+      .toEqual(['noise', 'unconfirmed']);
+    const terms = learner.getStore().keywords.map(k => k.term);
+    expect(terms).toHaveLength(MAX_CORRECTION_KEYWORDS);
+    expect(terms).toContain('owner-0');
+    expect(terms).toContain('owner-198');
+    expect(terms).toContain('replacement');
+  });
+
+  it('PRI-2053: extreme oversize with one llm term remains unchanged on refusal', () => {
+    fillStore([
+      ...Array.from({ length: 371 }, (_, i) => kw({ term: `owner-${i}`, source: 'user' })),
+      kw({ term: 'last-llm' }),
+    ]);
+    const learner = new CorrectionCueLearner(tempDir());
+    expect(() => learner.add({ term: 'replacement', weight: 0.5, source: 'llm' })).toThrow();
+    expect(learner.getStore().keywords).toHaveLength(372);
+    expect(learner.getStore().keywords.some(k => k.term === 'last-llm')).toBe(true);
+    expect(learner.getStore().keywords.some(k => k.term === 'replacement')).toBe(false);
+  });
+
   it('PRI-2053: convergence evicts worst-first and never touches seed/user', () => {
     fillStore([
       ...Array.from({ length: 202 }, (_, i) => kw({ term: `fill-${i}` })),
