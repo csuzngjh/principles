@@ -78,8 +78,11 @@ function evictionTier(keyword: CorrectionKeyword): number {
  */
 function parseStoredKeywordStore(input: unknown): CorrectionKeywordStore | null {
   if (typeof input !== 'object' || input === null) return null;
-  const record = input as Record<string, unknown>;
-  const rawKeywords: unknown = record.keywords;
+  const { keywords: rawKeywords, version, lastOptimizedAt } = input as {
+    keywords?: unknown;
+    version?: unknown;
+    lastOptimizedAt?: unknown;
+  };
   if (!Array.isArray(rawKeywords)) return null;
 
   const keywords: CorrectionKeyword[] = [];
@@ -98,26 +101,35 @@ function parseStoredKeywordStore(input: unknown): CorrectionKeywordStore | null 
   }
   // version/lastOptimizedAt are bookkeeping, not decisions: rejecting a store
   // for a missing one would reset learned terms, so tolerate and re-stamp.
-  const version =
-    typeof record.version === 'number' && Number.isSafeInteger(record.version) && record.version >= 0
-      ? record.version
-      : 1;
-  const lastOptimizedAt =
-    typeof record.lastOptimizedAt === 'string' ? record.lastOptimizedAt : new Date().toISOString();
-  return { keywords, version, lastOptimizedAt };
+  return {
+    keywords,
+    version:
+      typeof version === 'number' && Number.isSafeInteger(version) && version >= 0 ? version : 1,
+    lastOptimizedAt:
+      typeof lastOptimizedAt === 'string' ? lastOptimizedAt : new Date().toISOString(),
+  };
 }
 
 function isStoredKeyword(raw: unknown): raw is CorrectionKeyword {
   if (typeof raw !== 'object' || raw === null) return false;
-  const k = raw as Record<string, unknown>;
-  if (typeof k.term !== 'string' || k.term.trim() === '') return false;
-  if (typeof k.weight !== 'number' || !Number.isFinite(k.weight)) return false;
-  if (k.source !== 'seed' && k.source !== 'llm' && k.source !== 'user') return false;
-  if (typeof k.addedAt !== 'string') return false;
+  const { term, weight, source, addedAt, truePositiveCount, falsePositiveCount } = raw as {
+    term?: unknown;
+    weight?: unknown;
+    source?: unknown;
+    addedAt?: unknown;
+    truePositiveCount?: unknown;
+    falsePositiveCount?: unknown;
+  };
+  if (typeof term !== 'string' || term.trim() === '') return false;
+  if (typeof weight !== 'number' || !Number.isFinite(weight)) return false;
+  if (source !== 'seed' && source !== 'llm' && source !== 'user') return false;
+  if (typeof addedAt !== 'string') return false;
+  // Earned precision counts gate host-runtime's high-certainty path: a corrupt
+  // 3.1 or a negative must not be trusted (same stance as its strict reader).
   const isCount = (value: unknown): boolean =>
     value === undefined ||
     (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0);
-  return isCount(k.truePositiveCount) && isCount(k.falsePositiveCount);
+  return isCount(truePositiveCount) && isCount(falsePositiveCount);
 }
 
 function createDefaultStore(): CorrectionKeywordStore {
