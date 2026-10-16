@@ -880,10 +880,47 @@ describe('Registry-resolved dependency install (npx parity)', () => {
   //     merge reports ok:false with a zero-modification hard stop, and the
   //     uninstall plan preserves the shared runtime. The gap stays visible;
   //     no code path may claim forward-compat the dependency cannot deliver.
-  it('unknown-host write-back contract matches the RESOLVED registry dependency (dual-mode)', async () => {
+  it('unknown-host write-back contract matches the RESOLVED registry dependency (dual-mode)', async (ctx) => {
     const cleanDir = fs.mkdtempSync(path.join(TMPDIR, 'pd-registry-unknown-host-'));
     try {
-      await npmRun(['install', tarballPath], { cwd: cleanDir, timeout: 300_000 });
+      // The Version PR cohort window: the release train raises this package's
+      // install-layout range to ^<cohortVersion> BEFORE the train publishes
+      // that version, so a clean-dir registry install fails with ETARGET by
+      // construction there. Admit exactly that shape through the same
+      // classifier as the npx parity gate below; every other failure stays
+      // loud (the 2026-09-04 defect shape must keep failing).
+      try {
+        await npmRun(['install', tarballPath], { cwd: cleanDir, timeout: 300_000 });
+      } catch (installErr) {
+        const errorText = [
+          (installErr as { message?: unknown }).message,
+          (installErr as { stderr?: unknown }).stderr,
+          (installErr as { stdout?: unknown }).stdout,
+        ]
+          .map((part) => (typeof part === 'string' ? part : ''))
+          .join('\n');
+        if (!/ETARGET|notarget/i.test(errorText) || !errorText.includes(`${INSTALL_LAYOUT_PACKAGE}@`)) {
+          throw installErr;
+        }
+        const registryVersions = await registryVersionsFor(INSTALL_LAYOUT_PACKAGE, cleanDir);
+        const installerManifest = readJsonFile(path.join(INSTALLER_DIR, 'package.json'));
+        const cohortNote =
+          registryVersions === null
+            ? null
+            : classifyPrePublishCohort({
+                npmErrorText: errorText,
+                range: stringField(unknownField(installerManifest, 'dependencies'), INSTALL_LAYOUT_PACKAGE),
+                localVersion: stringField(
+                  readJsonFile(path.resolve(INSTALLER_DIR, '..', 'install-layout', 'package.json')),
+                  'version',
+                ),
+                registryVersions,
+              });
+        if (cohortNote === null) throw installErr;
+        console.warn(`[rf-02] pre-publish cohort window — skipping registry resolution: ${cohortNote}`);
+        ctx.skip();
+        return;
+      }
       const installedRoot = path.join(cleanDir, 'node_modules', 'create-principles-disciple');
       const resolvedLayoutEntry = [
         path.join(installedRoot, 'node_modules', '@principles', 'install-layout', 'dist', 'index.js'),
