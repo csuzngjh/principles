@@ -137,3 +137,26 @@ CLI 测试 T05：同一真实 SQLite 库中播种 **83 条** terminal-failed art
 
 - **ENGINEERING GO** —— 单任务恢复代码、三层测试（真实 SQLite/并发/证据门集成）、typecheck、lint、merge gate 全部通过；
 - **PRODUCTION PILOT NOT_RUN** —— Owner 尚未授权恢复目标任务、附加证据与真实模型调用；新命令尚未经官方发布链部署到安装运行时。不以 Engineering GO 冒充 Production PASS。
+
+---
+
+## 11. 独立对抗性复审（修复轮后，2026-10-16）
+
+| # | 问题 | 结论 | 证据 |
+| --- | --- | --- | --- |
+| 1 | dry-run 是否真的从文件系统到 SQLite 都没有写入？ | **是**（除 SQLite 读 WAL 库的固有 -shm/-wal 读机制 sidecar，无任何内容写入） | T01-A（缺 DB：零文件/目录创建）；T01-B（state.db sha256 逐字节不变 + .pd 目录除固有 sidecar 外零新增 + 无审计文件）；T01-C（schema-less 文件不被迁移）；journal 模式对照实验：readonly 打开零 sidecar |
+| 2 | 恶意/损坏 metadata 能否让 completion intent 守卫失效？ | **否** | `assessRecoveryMetadataGuard`：pi_metadata 存在即必须过唯一权威 hydratePITaskRecord，失败 = `invalid_task_metadata` 拒绝（T02-A/B/E 含"损坏本应携带 pending intent"攻击面）；畸形 JSON 由列级 json_valid CHECK 拦截（store 拒绝写入实证）；无第二解析器 |
+| 3 | CAS 是否涵盖恢复所依赖的所有可变状态？ | **是** | 全快照前置（status+metadata+attempt+maxAttempts+leaseOwner+leaseExpiry）进同一条 UPDATE；store 级逐字段测试 + 真实竞争注入 T04-A~E 全部 conflict |
+| 4 | 并发写者能否绕过 Lease 检查？ | **否** | 守卫读（hasActiveLease）+ CAS WHERE lease_owner/lease_expires_at IS 快照双重覆盖；T04-C/D：读后 acquire/expiry 变更 → conflict |
+| 5 | 审计落盘失败是否存在无记录的成功恢复？ | **状态变更必有持久事实；JSONL 可能缺投影行**——按设计声明：行内 `lastFailedTaskRecovery` 即审计权威，JSONL 为投影；投影失败显式 `recovered_but_audit_failed` + `--repair-audit` 重投影 | T03-B/E/F |
+| 6 | 进程崩溃后能否可靠对账？ | **可水合任务：是**（行事实 actionId 对账 JSONL）；**legacy 无 metadata 任务：投影不可恢复**（已如实标注边界，无行事实兜底，属 rare legacy 形状） | repair-audit 实现 + `no_durable_recovery_record` 拒绝 |
+| 7 | 失败后再次 confirm 是否导致额外预算重置？ | **否** | 首次成功后 status=pending → 再 confirm = `not_failed` 拒绝（T09/T03-D）；CAS 输家不写任何字段（T04-H） |
+| 8 | 是否可能错误恢复其他历史任务？ | **否** | 精确 taskId（无前缀/通配）；T05：83 条中仅目标 1 条变更，其余 82 条逐字节比对一致 |
+| 9 | 是否可能绕过 IAER Evidence Gate？ | **否** | 恢复仅到 pending，不构造 runner/adapter；集成测试证明下一周期必经证据预检 → NHR（零 LLM/零 run）；capability OFF 不执行、无 V1 回退（T11–T15） |
+| 10 | 是否引入新持久化权威/子系统/不必要复杂度？ | **否** | 复用既有 CAS 原语（选项扩展）、既有审计通道（投影）、既有 metadata 序列化（可选字段）；无新表/无新 flag/无第二恢复系统；Complexity Delta 全 NO（1 个新增可选 metadata 字段） |
+
+**复审结论：P0/P1 未解决项 = 0。** 有一项诚实边界（见 #6 与 §0 P1-03）已显式声明而非隐藏。
+
+### 与既有写入路径的竞争窗口清单（P1-04 要求的盘点）
+
+能够更新 attempt/maxAttempts/lease/diagnosticJson 的写入路径：① runner 的 markTaskRetryWait/markTaskFailed/markTaskSucceeded（updateTask）；② LeaseManager acquire/release/renew；③ RecoverySweep（过期 lease 清理）；④ owner-retry / evidence attach/resume（自有 CAS，与恢复互斥由 status 门保证）；⑤ succeeded-transition reconciliation（仅 touched succeeded 任务）；⑥ 消费者预检 NHR 迁移（仅 pending/retry_wait 唤醒态，failed 不在其列）。除 ①②③ 外全部被 status 门天然隔离；①②③ 由本 PR 的全快照 CAS 覆盖。
