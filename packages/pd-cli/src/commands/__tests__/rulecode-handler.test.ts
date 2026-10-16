@@ -43,7 +43,7 @@ async function runHandler<T>(fn: () => Promise<T>): Promise<{ stdout: string; st
     errorSpy.mockRestore();
   }
 
-  const exitCode = process.exitCode;
+  const { exitCode } = process;
   process.exitCode = undefined;
 
   return {

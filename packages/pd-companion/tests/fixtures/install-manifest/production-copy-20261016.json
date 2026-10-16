@@ -1,0 +1,23 @@
+{
+  "layoutVersion": 1,
+  "mode": "canonical",
+  "hosts": [
+    "openclaw",
+    "codex",
+    "workbuddy"
+  ],
+  "workspaces": [
+    "D:\\.openclaw\\workspace",
+    "D:\\Code\\_worktrees\\principles\\.pd-test-temp\\vitest-20260925-010719-907591\\pd-920-sandbox-0147CD\\ws",
+    "D:\\.openclawworkspace",
+    "C:\\Users\\Administrator\\.codex\\pd-workspace",
+    "D:\\Code\\principles",
+    "D:\\Code\\_pdtest\\p1-acceptance\\codex-ws",
+    "D:\\Code\\_pdtest\\p1-closeout\\codex-ws",
+    "D:\\Code\\_pdtest\\p1-acceptance\\sandbox",
+    "D:\\Code\\_pdtest\\real-dogfood-20261013\\ws-codex",
+    "D:\\Code\\_pdtest\\reliability-r1-20261013\\workspaces\\upgrade-ws",
+    "C:\\Users\\Administrator\\.workbuddy\\pd-workspace"
+  ],
+  "releaseMetadataUrl": "https://csuzngjh.github.io/principles"
+}

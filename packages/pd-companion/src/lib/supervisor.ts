@@ -13,6 +13,7 @@
 export type DegradedReasonKey =
   | 'node_missing'
   | 'pd_not_installed'
+  | 'install_manifest_incompatible'
   | 'workspace_missing'
   | 'server_crash_loop'
   | 'launch_failed';
@@ -43,6 +44,18 @@ export function nextRestartDelayMs(attempt: number): number {
 export function mapLaunchFailureReason(reason: string): DegradedReasonKey {
   if (reason.startsWith('workspace_missing')) return 'workspace_missing';
   if (reason === 'console_runtime_not_installed' || reason === 'console_server_entry_missing' || reason === 'console_web_ui_missing') {
+    return 'pd_not_installed';
+  }
+  // Install-layout resolution failures carry their own structured reasons
+  // (2026-10-16): a manifest written by a NEWER PD must read as "desktop
+  // needs an update", not as "PD is not installed" — the old catch-all
+  // mislabeled a healthy install as absent.
+  if (reason.startsWith('install_manifest_unsupported_version')) return 'install_manifest_incompatible';
+  if (
+    reason === 'install_runtime_missing'
+    || reason === 'install_layout_legacy_fallback'
+    || reason.startsWith('install_manifest_malformed')
+  ) {
     return 'pd_not_installed';
   }
   return 'launch_failed';

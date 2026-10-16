@@ -45,6 +45,12 @@ export interface RecoveryActionRecord {
    * field existed and on non-forced recoveries.
    */
   forceApplied?: boolean;
+  /**
+   * PRI-991: attempt budget BEFORE the recovery reset (single-task path
+   * records it so the audit shows 3/3 → 0/6 style transitions). Absent on
+   * legacy records.
+   */
+  previousAttemptCount?: number;
   createdAt: string;
   result: RecoveryActionResult;
 }
@@ -56,6 +62,15 @@ export interface AppendRecoveryActionInput {
   operator?: string;
   reason?: string | null;
   forceApplied?: boolean;
+  previousAttemptCount?: number;
+  /**
+   * PRI-991 (P1-03): caller-supplied actionId matching the durable
+   * `failedTaskRecoveries` facts embedded in the task row by the same
+   * recovery CAS. Required for the strict single-task path so the JSONL
+   * projection and the row fact are the SAME audit event; omitted (fresh
+   * random id) keeps the legacy caller contract.
+   */
+  actionId?: string;
 }
 
 // ── Validation ─────────────────────────────────────────────────────────────────
@@ -105,7 +120,7 @@ export function appendRecoveryAction(
   ensureStateDir(workspaceDir);
 
   const record: RecoveryActionRecord = {
-    actionId: crypto.randomUUID(),
+    actionId: input.actionId ?? crypto.randomUUID(),
     taskId: input.taskId,
     action: 'recover',
     previousStatus: input.previousStatus,
@@ -114,6 +129,9 @@ export function appendRecoveryAction(
     // Omitted (not false) so records of ordinary recoveries stay identical to
     // the pre-force field set — old readers and line diffs don't see noise.
     ...(input.forceApplied === true ? { forceApplied: true as const } : {}),
+    ...(typeof input.previousAttemptCount === 'number' && Number.isSafeInteger(input.previousAttemptCount)
+      ? { previousAttemptCount: input.previousAttemptCount }
+      : {}),
     createdAt: new Date().toISOString(),
     result: input.result,
   };
@@ -137,6 +155,9 @@ function isRecoveryActionRecord(value: unknown): value is RecoveryActionRecord {
     // forceApplied is optional (legacy records predate it): absent is fine,
     // present-but-non-boolean means the line is malformed (rc-3).
     (!Object.hasOwn(rec, 'forceApplied') || typeof rec.forceApplied === 'boolean') &&
+    // previousAttemptCount is optional (PRI-991): same absent-fine /
+    // present-must-be-shape contract (rc-3).
+    (!Object.hasOwn(rec, 'previousAttemptCount') || (typeof rec.previousAttemptCount === 'number' && Number.isSafeInteger(rec.previousAttemptCount))) &&
     Object.hasOwn(rec, 'createdAt') && typeof rec.createdAt === 'string' &&
     Object.hasOwn(rec, 'result') && typeof rec.result === 'string' && VALID_RESULTS.has(rec.result)
   );
