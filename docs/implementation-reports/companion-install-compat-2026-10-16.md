@@ -35,8 +35,8 @@
 | `packages/pd-companion/src/lib/locate.ts` | `resolveInstalledRuntime` 返回 `{runtime?, missing?, warnings?}`，missing 携带结构化原因 | 区分「不认识宿主」「清单损坏」「运行时缺失」三种原因 |
 | `packages/pd-companion/scripts/verify-package.mjs` + `scripts/bundled-parser-compat.mjs` | 打包产物验证扩展：从 app.asar 提取捆绑解析器跑 6 行跨版本兼容矩阵；记录应用版本与捆绑 install-layout 版本 | 修复 C：验证产物而非仓库源码 |
 | `.github/workflows/companion-release.yml` | 打包前跑包级测试；verify 步骤升级为「运行时依赖 + 清单跨版本兼容」门 | 修复 C CI 防线：禁止发布仍含旧校验器的 Companion |
-| `packages/pd-companion/package.json` | 0.1.2 → 0.1.3 | 交付可区分版本的修复安装包 |
-| `.changeset/companion-install-compat-20261016.md` | install-layout minor | 版本火车推进 0.3.1 → 0.4.0 |
+| `packages/pd-companion/package.json` | 0.1.2（保持不变——N-version 门禁止普通 PR 改版本字段；0.1.3 由 changeset 在伴随流程/发版准备中推进） | 本地交付的 0.1.3 安装包为分支预发布产物，SHA 见 §7 |
+| `.changeset/companion-install-compat-20261016.md` | install-layout minor + create-principles-disciple patch（私有 pd-companion 不可入 changeset，仅正文注记） | 版本火车推进 0.3.1 → 0.4.0；installer 写回修复声明发布意图 |
 
 明确不做：未引入 `minReaderVersion` 协议（现有 `layoutVersion` + 未知宿主容忍已覆盖实际变更类）；未实现自动更新（降级页提供明确的 companion-v* 下载入口即可）。
 
@@ -67,7 +67,7 @@
 | pd-cli（消费方） | 构建 + `npx vitest run` | 1943 通过 / 0 失败（未构建 dist 时 83 失败为环境性，构建后消失，已按 EP-10 要求留证） |
 | host-runtime（消费方） | `npx vitest run` | 479/479 通过 |
 | 产物门 | `npm run verify-package`（对真实 app.asar） | 通过：3 宿主解析/canonical 优先/未知 4 宿主告警/写回保全/v2 拒绝/损坏拒绝 六行全 ✓ |
-| 合并门禁 | `npm run verify:merge` | 见 PR 描述（提交前全绿） |
+| 合并门禁 | `npm run verify:merge` | **PASS（exit 0）**——历经 4 次修正后全绿：①installer 包需显式 changeset（N-3）；②普通 PR 不得改 version 字段（N-version，已撤销手动 bump 改走 changeset/发版准备）；③changeset 不得混入 changesets 忽略的私有包；④我的临时日志须进 `.tmp/`（repo-hygiene） |
 
 生产清单只读副本回归样本：`packages/pd-companion/tests/fixtures/install-manifest/production-copy-20261016.json`（11 工作区、3 宿主的真实形状；README 注明来源与「不得为过测试而改样本」纪律）。生产清单本身零改动。
 
@@ -85,7 +85,7 @@
 - 路径：`D:\Code\_worktrees\principles\adhoc-20261016-companion-install-compat\packages\pd-companion\release\pd-companion-0.1.3-setup.exe`
 - SHA256：`850c79835d7d5e830fdfc49b2605fb372cea7880d52177e27f6f126fede3cadd`
 - app.asar SHA256：`3a46ed46c9ebc22d1b36a264aed33b3d211b8b9d76695a0eb65c122964fbd07f`
-- 应用版本 0.1.3；捆绑 install-layout 0.3.1；构建来源 commit：分支 `ai/adhoc-20261016-companion-install-compat`（基点 origin/main f7d47ae0f；提交 273d20e08 / 4423545f2 / b69b7bef，产物对应 head）
+- 应用版本 0.1.3（分支预发布产物；仓库内 version 字段按版本纪律保持 0.1.2，0.1.3 由伴随 changeset 注记的发版准备流程落地）；捆绑 install-layout 0.3.1；构建来源 commit：分支 `ai/adhoc-20261016-companion-install-compat`（基点 origin/main f7d47ae0f；修复提交 273d20e08 / 4423545f2 / b69b7bef + 门禁修正 a523824e 及后续 changeset 修正；产物对应 b69b7bef 时的最终代码）
 - asar 关键标记核验：16/17 PASS；唯一未命中项 `InstalledRuntimeOutcome` 为 TS 接口名（编译期擦除），运行时标记 `missing` 命中，非缺口
 
 ## 8. 验收状态（诚实分级）
