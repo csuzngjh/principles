@@ -10,8 +10,8 @@
  */
 
 import { Type, type Static } from '@sinclair/typebox';
-import type { IntentContractV1 } from './intent-contract.js';
-import { isValidIntentContractV1 } from './intent-contract.js';
+import type { IntentContractV1, ScribeExecutionConditionsV1 } from './intent-contract.js';
+import { isValidIntentContractV1, isValidScribeExecutionConditionsV1 } from './intent-contract.js';
 
 export interface ScribePrincipleDraft {
   readonly title: string;
@@ -43,6 +43,17 @@ export interface ScribeOutputV1 {
    * hard validator rejection — a corrupted anchor is worse than none.
    */
   readonly intentContract?: IntentContractV1;
+  /**
+   * SPEC-RULECODE-QUALITY-001 A1: machine-readable execution conditions —
+   * which trusted external facts (e.g. design_approval) the principle's
+   * enforcement depends on, each grounded in Owner-attributed text. Consumed
+   * by the artificer intent preflight BEFORE any generation call. Optional on
+   * the wire (legacy scribe artifacts predate it); present-but-malformed is
+   * a hard validator rejection — a corrupted condition record is worse than
+   * none. The declaration is a SCRIBE semantic judgment, never an Owner
+   * decision; the fact itself is resolved by a host trusted-facts port.
+   */
+  readonly executionConditions?: ScribeExecutionConditionsV1;
   /**
    * r6 review fix (P1-2, 2026-10-12): structured channel for Owner-attributed
    * requirements the scribe did NOT carry into the intentContract (narrowed,
@@ -81,6 +92,10 @@ export const ScribeOutputV1Schema = Type.Object({
   // DefaultScribeValidator via isValidIntentContractV1 — TypeBox Optional
   // keeps the wire shape additive for LLM-facing schema consumers).
   intentContract: Type.Optional(Type.Unknown()),
+  // SPEC-RULECODE-QUALITY-001 A1: optional execution-conditions declaration
+  // (same Optional-Unknown wire discipline as intentContract — element-level
+  // validation stays with the hand-rolled DefaultScribeValidator).
+  executionConditions: Type.Optional(Type.Unknown()),
   // r6 review fix (P1-2): optional structured coverage-gap channel. This
   // schema is a LIVE runtime contract (output-schema-registry → pi-ai
   // adapter → response_format json_schema with additionalProperties:false on
@@ -194,6 +209,15 @@ export class DefaultScribeValidator implements ScribeValidator {
     if (Object.hasOwn(output, 'intentContract') && output.intentContract !== undefined) {
       if (!isValidIntentContractV1(output.intentContract)) {
         errors.push('intentContract must contain non-empty string fields: ownerIntent, targetBehavior, forbiddenBehavior, evidenceSource, validationExpectation');
+      }
+    }
+
+    // executionConditions — SPEC-RULECODE-QUALITY-001 A1: optional, but
+    // present-but-malformed is a hard rejection (a corrupted condition
+    // declaration must surface at the trust boundary, not downstream).
+    if (Object.hasOwn(output, 'executionConditions') && output.executionConditions !== undefined) {
+      if (!isValidScribeExecutionConditionsV1(output.executionConditions)) {
+        errors.push('executionConditions must be { version: 1, requiredFacts: [{ factKind: non-empty string, required: boolean, textualBasis: non-empty string }] }');
       }
     }
 

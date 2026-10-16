@@ -41,6 +41,8 @@ import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../erro
 import { computeFeatureFlagsFromConfig, isFeatureEnabled } from '../config/pd-config-feature-flags.js';
 import { hydratePITaskRecord, type RepairPayload, type LastValidatorErrors, parseLastValidatorErrors, isFreshForNextAttempt } from './pitask-metadata.js';
 import { extractIntentContract } from './intent-contract.js';
+import { extractExecutionConditions } from './intent-contract.js';
+import { assessIntentBasis, type ArtificerTrustedFactsPort } from './artificer-intent-preflight.js';
 import { ArtificerPromptBuilder, boundPackForPrompt, type ArtificerDreamerContext, type ArtificerHostSemanticContext } from './artificer-prompt-builder.js';
 import { projectDreamerProposals, summarizeCandidateDifferences } from './formation-context.js';
 
@@ -219,6 +221,14 @@ export interface ArtificerRunnerDeps extends PeerRunnerDeps {
    * every channel.
    */
   readonly behaviorExamplePack?: BehaviorExamplePack;
+  /**
+   * SPEC-RULECODE-QUALITY-001 A1 (PRI-995): host trusted-facts port for the
+   * DEFENSIVE intent-basis guard (mirror of the consumer-cycle preflight, so
+   * direct run-once/CLI invocation cannot bypass the entry gate — Q20).
+   * Optional: absent + a scribe-declared required fact refuses generation
+   * loudly before any LLM call.
+   */
+  readonly trustedFacts?: ArtificerTrustedFactsPort;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -564,6 +574,8 @@ export interface ArtificerRunnerOptions extends PeerRunnerOptions {
 export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerRuleOutput> {
   private readonly validator: ArtificerValidator;
   private readonly behaviorExamplePack: BehaviorExamplePack | undefined;
+  /** SPEC-RULECODE-QUALITY-001 A1: defensive intent-basis guard's trusted-facts port. */
+  private readonly trustedFacts: ArtificerTrustedFactsPort | undefined;
   private readonly hostSemanticContext: ArtificerHostSemanticContext | undefined;
 
   constructor(deps: ArtificerRunnerDeps, options: ArtificerRunnerOptions) {
@@ -578,6 +590,7 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
     });
     this.validator = deps.validator;
     this.behaviorExamplePack = deps.behaviorExamplePack;
+    this.trustedFacts = deps.trustedFacts;
     this.hostSemanticContext = options.hostSemanticContext;
   }
 
@@ -846,6 +859,32 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
     // the focused-manifest narrowing — see the comment at the capture site).
     const intentContract = extractIntentContract(fullScribeArtifact);
 
+    // SPEC-RULECODE-QUALITY-001 A1 (Q20) — DEFENSIVE intent-basis guard:
+    // mirrors the consumer-cycle preflight so direct run-once/CLI invocation
+    // cannot bypass the entry gate. Re-derives from the CURRENT scribe
+    // artifact every attempt (a stored verification record is never a pass
+    // token, Q13); any stop verdict refuses generation LOUD, permanently
+    // (input_invalid), BEFORE any LLM call. The generator alone can never
+    // decide its own principle is exempt from its declared trusted facts.
+    const executionConditions = extractExecutionConditions(fullScribeArtifact);
+    if (context.channel !== 'prompt') {
+      const assessment = assessIntentBasis({
+        scribeArtifact: { artifactId: context.sourceScribeArtifactId, contentJson: context.scribeArtifact },
+        ...(this.trustedFacts !== undefined ? { trustedFacts: this.trustedFacts } : {}),
+        taskId,
+      });
+      if (assessment.status !== 'executable') {
+        throw new PDRuntimeError(
+          'input_invalid',
+          `intent_basis_unverified: ${assessment.reasonCode} — ${assessment.detail}`,
+          {
+            reasonCode: assessment.reasonCode,
+            nextAction: `${assessment.nextAction} The task is terminal-failed; recover it via pd runtime recovery failed-tasks --confirm once the intent basis is repaired, then the consumer intent preflight re-verifies it.`,
+          },
+        );
+      }
+    }
+
     // PRI-780: v2-only generation for the RuleCode sub-chain. Task-driven
     // callers (consumer cycle, run-once) have no Owner-labelled pack channel;
     // a missing pack fails this attempt LOUD before any LLM call — never a
@@ -945,6 +984,10 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
       // generation anchors to the explicit intent. extract returns null for
       // pre-contract artifacts → undefined keeps the prompt unchanged.
       intentContract: intentContract ?? undefined,
+      // SPEC-RULECODE-QUALITY-001 A2: forward the machine-readable execution
+      // conditions so generation knows which trusted external facts the
+      // principle depends on (and never encodes a self-filled proxy for them).
+      ...(executionConditions.conditions !== null ? { executionConditions: executionConditions.conditions } : {}),
       // PRI-741: forward the host semantic projection so generation matches by
       // canonicalKind and host-dispatchable tool names (undefined = prompt
       // unchanged when no host declaration is available).

@@ -238,5 +238,40 @@ export function validateBehaviorExamplePack(value: unknown): BehaviorExamplePack
     }));
   }
 
+  // ── SPEC-RULECODE-QUALITY-001 Q04: identical-EFFECTIVE-input label conflict ──
+  // The rule's effective input is action (toolName + params) AND its
+  // ruleContext (history window + facts). Two cases whose effective inputs
+  // are canonically identical but carry opposite labels are UNSATISFIABLE —
+  // no deterministic rule can pass both — and must fail loud at the pack
+  // trust boundary. Cases that differ in context (e.g. the read-before-write
+  // teaching pair: same params, different priorReadOfTarget) are materially
+  // different inputs and are NOT conflicts; their discrimination quality is
+  // the evaluator's semantic judgment, not the pack validator's.
+  if (errors.length === 0) {
+    const negative = value.sourceNegativeCase as { toolName: unknown; params: unknown; ruleContext?: unknown };
+    const positives = value.positiveCounterexamples as Array<{ toolName: unknown; params: unknown; ruleContext?: unknown }>;
+    const negativeKey = stableJsonStringify({ toolName: negative.toolName, params: negative.params, ruleContext: negative.ruleContext });
+    for (let i = 0; i < positives.length; i++) {
+      const positive = positives[i];
+      if (positive !== undefined && stableJsonStringify({ toolName: positive.toolName, params: positive.params, ruleContext: positive.ruleContext }) === negativeKey) {
+        errors.push(
+          `positiveCounterexamples[${i}] conflicting_label: identical effective input (toolName + params + ruleContext) as sourceNegativeCase but opposite expectedDecision — same input cannot carry both labels`,
+        );
+      }
+    }
+  }
+
   return fail(errors);
+}
+
+/** Key-stable JSON for value comparison (input labels compare by content, not key order). */
+function stableJsonStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => stableJsonStringify(entry)).join(',')}]`;
+  }
+  if (typeof value === 'object' && value !== null) {
+    const keys = Object.keys(value).filter((key) => key !== '__proto__' && key !== 'constructor' && key !== 'prototype').sort();
+    return `{${keys.map((key) => `${JSON.stringify(key)}:${stableJsonStringify((value as Record<string, unknown>)[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
 }

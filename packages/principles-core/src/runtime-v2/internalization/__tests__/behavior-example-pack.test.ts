@@ -265,3 +265,73 @@ describe('PRI-484 BehaviorExamplePack validator — hostile input (ERR-001 / ERR
     expect(result.valid).toBe(false);
   });
 });
+
+// ── SPEC-RULECODE-QUALITY-001 Q04: same input, opposite labels = conflict ──
+
+describe('SPEC-RULECODE-QUALITY-001 Q04 — identical-input label conflict detection', () => {
+  it('rejects a positive counterexample whose tool+params deep-equal the negative case (identical input, opposite labels)', () => {
+    const conflicting = makeValidPack({
+      positiveCounterexamples: [makePositiveCase({
+        caseId: 'pos-conflict',
+        toolName: 'write_file',
+        params: { path: 'src/a.ts' }, // identical to the negative case input
+        expectedDecision: 'allow',
+      })],
+    });
+    const result = validateBehaviorExamplePack(conflicting);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((message) => message.includes('conflicting_label'))).toBe(true);
+  });
+
+  it('still accepts a positive case that differs from the negative input in any parameter value', () => {
+    const nearMiss = makeValidPack({
+      positiveCounterexamples: [makePositiveCase({
+        caseId: 'pos-near',
+        toolName: 'write_file',
+        params: { path: 'src/a.ts', mode: 'read' }, // extra key → materially different input
+        expectedDecision: 'allow',
+      })],
+    });
+    const result = validateBehaviorExamplePack(nearMiss);
+    expect(result.valid).toBe(true);
+  });
+
+  it('accepts the read-before-write teaching pair: same params, DIFFERENT ruleContext (different effective input)', () => {
+    const teachingPair = makeValidPack({
+      positiveCounterexamples: [makePositiveCase({
+        caseId: 'pos-readfirst',
+        toolName: 'write_file',
+        params: { path: 'src/a.ts' }, // identical action params as the negative
+        expectedDecision: 'allow',
+        ruleContext: {
+          version: 2,
+          history: { status: 'available', truncated: false, calls: [{ sequenceId: 1, toolName: 'read_file', canonicalKind: 'read', normalizedPath: 'src/a.ts', paramsSummary: {}, outcome: 'success' }] },
+          facts: { priorReadOfTarget: 'yes', readCount: 1, writeCount: 0, uniqueWritePathCount: 0, sameActionBlockCount: null },
+        },
+      })],
+    });
+    const result = validateBehaviorExamplePack(teachingPair);
+    expect(result.valid).toBe(true);
+  });
+
+  it('rejects opposite labels when the action AND the ruleContext are both identical (unsatisfiable pair)', () => {
+    const sharedContext = {
+      version: 2,
+      history: { status: 'available', truncated: false, calls: [] },
+      facts: { priorReadOfTarget: 'no', readCount: 0, writeCount: 0, uniqueWritePathCount: 0, sameActionBlockCount: null },
+    };
+    const unsatisfiable = makeValidPack({
+      positiveCounterexamples: [makePositiveCase({
+        caseId: 'pos-same-everything',
+        toolName: 'write_file',
+        params: { path: 'src/a.ts' },
+        expectedDecision: 'allow',
+        ruleContext: sharedContext,
+      })],
+    });
+    (unsatisfiable.sourceNegativeCase as { ruleContext?: unknown }).ruleContext = sharedContext;
+    const result = validateBehaviorExamplePack(unsatisfiable);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((message) => message.includes('conflicting_label'))).toBe(true);
+  });
+});
