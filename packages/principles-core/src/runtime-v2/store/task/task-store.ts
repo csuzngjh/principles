@@ -70,18 +70,28 @@ export interface TaskStore {
    * apply `patch` only when the task's current diagnostic_json is byte-equal
    * to `expectedDiagnosticJson` (null matches a NULL column) — and, when
    * `options.expectedStatus` is given (PRI-983, SPEC-PD-IAER-001 §6.3), only
-   * while the task still sits in that status. Single conditional mutation —
-   * no read→JS-compare→write race window. Returns the updated record on
-   * success, or null when a precondition failed (task missing,
-   * diagnostic_json changed, or the status moved concurrently). The status
-   * precondition arbitrates resets whose metadata write is content-neutral
-   * (e.g. an authority reset with nothing to clear).
+   * while the task still sits in that status. PRI-991 (P1-04) extends the
+   * same single conditional UPDATE with the remaining decision-snapshot
+   * preconditions (attempt budget / maxAttempts / lease owner + expiry) so a
+   * caller whose decision depends on those fields cannot be raced by a
+   * writer that leaves status and metadata untouched. Single conditional
+   * mutation — no read→JS-compare→write race window. Returns the updated
+   * record on success, or null when any precondition failed (task missing,
+   * diagnostic_json changed, or the status/fields moved concurrently). The
+   * status precondition arbitrates resets whose metadata write is
+   * content-neutral (e.g. an authority reset with nothing to clear).
    */
   updateTaskIfDiagnosticJsonUnchanged(
     taskId: string,
     expectedDiagnosticJson: string | null,
     patch: TaskStoreUpdatePatch,
-    options?: { readonly expectedStatus?: string },
+    options?: {
+      readonly expectedStatus?: string;
+      readonly expectedAttemptCount?: number;
+      readonly expectedMaxAttempts?: number;
+      readonly expectedLeaseOwner?: string | null;
+      readonly expectedLeaseExpiresAt?: string | null;
+    },
   ): Promise<TaskRecord | null>;
 
   /** List tasks with optional filter. */

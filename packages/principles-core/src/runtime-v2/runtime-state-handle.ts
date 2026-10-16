@@ -8,10 +8,19 @@ export interface RuntimeStateHandle {
 export async function createRuntimeStateHandle(opts: {
   workspaceDir: string;
   readonly?: boolean;
+  /**
+   * PRI-991 (P1-01): when false, a missing state.db is never created — the
+   * open fails loudly instead. Strictly-readonly inspection paths (dry-run)
+   * combine `readonly: true` with `bootstrapIfMissing: false` so the handle
+   * cannot create files, directories, WAL journals or schema as a side
+   * effect. Default true (backward compatible).
+   */
+  bootstrapIfMissing?: boolean;
 }): Promise<RuntimeStateHandle> {
   const stateManager = new RuntimeStateManager({
     workspaceDir: opts.workspaceDir,
     readonly: opts.readonly ?? false,
+    bootstrapIfMissing: opts.bootstrapIfMissing,
   });
 
   let closed = false;

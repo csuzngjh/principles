@@ -73,6 +73,12 @@ export interface RuntimeStateManagerOptions {
   retryPolicyConfig?: RetryPolicyConfig;
   /** Open DB in readonly mode — skips schema init/migration, no writes allowed */
   readonly?: boolean;
+  /**
+   * PRI-991 (P1-01): when false, a missing state.db is NEVER bootstrapped —
+   * readonly callers fail loudly instead of silently creating databases.
+   * Default true (backward compatible). Forwarded to SqliteConnection.
+   */
+  bootstrapIfMissing?: boolean;
 }
 
 // ── RuntimeStateManager ──────────────────────────────────────────────────────
@@ -105,6 +111,7 @@ export class RuntimeStateManager {
     this._connection = new SqliteConnectionClass({
       workspaceDir: this.options.workspaceDir,
       readonly: this.options.readonly,
+      bootstrapIfMissing: this.options.bootstrapIfMissing,
     });
     this._taskStore = new SqliteTaskStore(this._connection);
     this._runStore = new SqliteRunStore(this._connection);
@@ -480,7 +487,13 @@ export class RuntimeStateManager {
     taskId: string,
     expectedDiagnosticJson: string | null,
     patch: TaskStoreUpdatePatch,
-    options?: { readonly expectedStatus?: string },
+    options?: {
+      readonly expectedStatus?: string;
+      readonly expectedAttemptCount?: number;
+      readonly expectedMaxAttempts?: number;
+      readonly expectedLeaseOwner?: string | null;
+      readonly expectedLeaseExpiresAt?: string | null;
+    },
   ): Promise<TaskRecord | null> {
     this.assertInitialized();
     return this._taskStore.updateTaskIfDiagnosticJsonUnchanged(taskId, expectedDiagnosticJson, patch, options);
