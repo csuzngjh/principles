@@ -178,6 +178,18 @@ function validateStringArray(value: unknown, opts: StringArrayValidationOptions)
  * loud is the caller's responsibility: an invalid pack must not silently
  * produce an empty pack).
  */
+/** Key-stable JSON for value comparison (input labels compare by content, not key order). */
+function stableJsonStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => stableJsonStringify(entry)).join(',')}]`;
+  }
+  if (typeof value === 'object' && value !== null) {
+    const keys = Object.keys(value).filter((key) => key !== '__proto__' && key !== 'constructor' && key !== 'prototype').sort();
+    return `{${keys.map((key) => `${JSON.stringify(key)}:${stableJsonStringify((value as Record<string, unknown>)[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
 export function validateBehaviorExamplePack(value: unknown): BehaviorExamplePackValidationResult {
   if (!isPlainObjectLike(value)) {
     return { valid: false, errors: ['BehaviorExamplePack must be a plain object'] };
@@ -249,7 +261,7 @@ export function validateBehaviorExamplePack(value: unknown): BehaviorExamplePack
   // the evaluator's semantic judgment, not the pack validator's.
   if (errors.length === 0) {
     const negative = value.sourceNegativeCase as { toolName: unknown; params: unknown; ruleContext?: unknown };
-    const positives = value.positiveCounterexamples as Array<{ toolName: unknown; params: unknown; ruleContext?: unknown }>;
+    const positives = value.positiveCounterexamples as { toolName: unknown; params: unknown; ruleContext?: unknown }[];
     const negativeKey = stableJsonStringify({ toolName: negative.toolName, params: negative.params, ruleContext: negative.ruleContext });
     for (let i = 0; i < positives.length; i++) {
       const positive = positives[i];
@@ -264,14 +276,3 @@ export function validateBehaviorExamplePack(value: unknown): BehaviorExamplePack
   return fail(errors);
 }
 
-/** Key-stable JSON for value comparison (input labels compare by content, not key order). */
-function stableJsonStringify(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map((entry) => stableJsonStringify(entry)).join(',')}]`;
-  }
-  if (typeof value === 'object' && value !== null) {
-    const keys = Object.keys(value).filter((key) => key !== '__proto__' && key !== 'constructor' && key !== 'prototype').sort();
-    return `{${keys.map((key) => `${JSON.stringify(key)}:${stableJsonStringify((value as Record<string, unknown>)[key])}`).join(',')}}`;
-  }
-  return JSON.stringify(value) ?? 'null';
-}

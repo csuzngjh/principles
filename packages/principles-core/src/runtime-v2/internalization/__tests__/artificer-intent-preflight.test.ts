@@ -80,7 +80,7 @@ function legacyScribeContent(): string {
 }
 
 /** Scribe artifact WITH executionConditions: no trusted external facts required. */
-function conditionsScribeContent(requiredFacts: Array<{ factKind: string; required: boolean; textualBasis: string }>): string {
+function conditionsScribeContent(requiredFacts: { factKind: string; required: boolean; textualBasis: string }[]): string {
   return JSON.stringify({
     taskId: SCRIBE_TASK_ID,
     sourcePhilosopherArtifactId: 'art-phil-001',
@@ -185,7 +185,7 @@ async function runPreflight(workspaceDir: string, overrides: RunOverrides = {}) 
       eventEmitter: collectingEmitter(),
       ...(overrides.trustedFacts !== undefined ? { trustedFacts: overrides.trustedFacts } : {}),
       ...(overrides.artifactStoreFault !== undefined
-        ? { artifactStore: { listBySourceTaskId: async () => { throw overrides.artifactStoreFault; } } }
+        ? { artifactStore: { listBySourceTaskId: async () => { throw new Error(overrides.artifactStoreFault?.message ?? 'artifact store fault'); } } }
         : {}),
     });
   } finally {
@@ -220,7 +220,7 @@ afterEach(async () => {
         await sleep(50);
       }
     }
-    if (lastError !== null) throw lastError;
+    if (lastError !== null) throw new Error(String(lastError));
   }
 });
 

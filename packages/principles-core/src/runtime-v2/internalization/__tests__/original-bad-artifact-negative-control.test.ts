@@ -37,8 +37,8 @@ const V2_CONTEXT = {
   facts: { priorReadOfTarget: 'unknown' as const, readCount: 0, writeCount: 0, uniqueWritePathCount: 0, sameActionBlockCount: null },
 };
 
-function bashCase(caseId: string, kind: 'negative' | 'positive', command: string, expectedDecision: 'allow' | 'block'): GoldenTraceCase {
-  return { caseId, kind, toolName: 'Bash', params: { command }, expectedDecision, ruleContext: { version: 2, ...V2_CONTEXT } };
+function bashCase(caseId: string, command: string, expected: { kind: 'negative' | 'positive'; decision: 'allow' | 'block' }): GoldenTraceCase {
+  return { caseId, kind: expected.kind, toolName: 'Bash', params: { command }, expectedDecision: expected.decision, ruleContext: { version: 2, ...V2_CONTEXT } };
 }
 
 const TRACE: GoldenTrace = {
@@ -47,13 +47,13 @@ const TRACE: GoldenTrace = {
   version: 1,
   cases: [
     // Q02 core: a self-filled marker is not an approval — must stay blocked.
-    bashCase('neg-selffilled-marker', 'negative', 'git commit -m "x owner-design-approved"', 'block'),
+    bashCase('neg-selffilled-marker', 'git commit -m "x owner-design-approved"', { kind: 'negative', decision: 'block' }),
     // Git variant: `git -C . commit` is still a finalizing commit.
-    bashCase('neg-git-c-variant', 'negative', 'git -C . commit -m "x"', 'block'),
+    bashCase('neg-git-c-variant', 'git -C . commit -m "x"', { kind: 'negative', decision: 'block' }),
     // Plain finalize without any marker stays blocked.
-    bashCase('neg-plain-commit', 'negative', 'git commit -m "x"', 'block'),
+    bashCase('neg-plain-commit', 'git commit -m "x"', { kind: 'negative', decision: 'block' }),
     // Read-only search whose text quotes "git commit" must NOT be blocked.
-    bashCase('pos-readonly-search', 'positive', 'rg "git commit" docs/', 'allow'),
+    bashCase('pos-readonly-search', 'rg "git commit" docs/', { kind: 'positive', decision: 'allow' }),
   ],
 };
 

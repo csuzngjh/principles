@@ -40,6 +40,7 @@
  * ArtificerRunner.invokeRuntime (PRI-981 precedent) so direct run-once/CLI
  * invocation cannot bypass the entry gate.
  */
+/* eslint-disable @typescript-eslint/no-use-before-define -- helper functions declared after the main entry, matching the adversarial-loop.ts convention */
 import { createHash } from 'node:crypto';
 import { extractIntentContract, extractExecutionConditions, type ScribeExecutionConditionsV1 } from './intent-contract.js';
 import { buildArtificerRunCorrelation } from './artificer-run-correlation.js';
@@ -251,7 +252,7 @@ async function resolveScribeArtifact(
     if (!depTask || depTask.taskKind !== 'scribe' || depTask.status !== 'succeeded') continue;
     const store: Pick<PIArtifactStore, 'listBySourceTaskId'> = artifactStore ?? stateManager.piArtifactStore;
     const artifacts = await store.listBySourceTaskId(depId);
-    const first = artifacts[0];
+    const [first] = artifacts;
     if (first !== undefined) {
       return { artifactId: first.artifactId, contentJson: first.contentJson };
     }
@@ -307,7 +308,7 @@ export function assessIntentBasis(input: {
   }
   const intentContract = extractIntentContract(parsed);
   if (intentContract === null) {
-    const hadKey = typeof parsed === 'object' && parsed !== null && Object.hasOwn(parsed as Record<string, unknown>, 'intentContract');
+    const hadKey = typeof parsed === 'object' && parsed !== null && Object.hasOwn(parsed, 'intentContract');
     return {
       status: 'intent_unverified',
       reasonCode: hadKey ? 'intent_contract_invalid' : 'intent_contract_missing',
