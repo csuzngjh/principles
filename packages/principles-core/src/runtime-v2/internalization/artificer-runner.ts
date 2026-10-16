@@ -858,32 +858,12 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
     // PRI-703 Phase 1: extract from the FULL scribe artifact (captured before
     // the focused-manifest narrowing — see the comment at the capture site).
     const intentContract = extractIntentContract(fullScribeArtifact);
-
-    // SPEC-RULECODE-QUALITY-001 A1 (Q20) — DEFENSIVE intent-basis guard:
-    // mirrors the consumer-cycle preflight so direct run-once/CLI invocation
-    // cannot bypass the entry gate. Re-derives from the CURRENT scribe
-    // artifact every attempt (a stored verification record is never a pass
-    // token, Q13); any stop verdict refuses generation LOUD, permanently
-    // (input_invalid), BEFORE any LLM call. The generator alone can never
-    // decide its own principle is exempt from its declared trusted facts.
+    // SPEC-RULECODE-QUALITY-001 A1: extracted here, consumed by the defensive
+    // intent guard AFTER the PRI-780/981 pack guards below — the older
+    // evidence contracts keep their diagnostic priority, so a task missing
+    // its pack still reports behavior_example_pack_missing, not the intent
+    // verdict (CI round 1: guard order flipped the stable marker).
     const executionConditions = extractExecutionConditions(fullScribeArtifact);
-    if (context.channel !== 'prompt') {
-      const assessment = assessIntentBasis({
-        scribeArtifact: { artifactId: context.sourceScribeArtifactId, contentJson: context.scribeArtifact },
-        ...(this.trustedFacts !== undefined ? { trustedFacts: this.trustedFacts } : {}),
-        taskId,
-      });
-      if (assessment.status !== 'executable') {
-        throw new PDRuntimeError(
-          'input_invalid',
-          `intent_basis_unverified: ${assessment.reasonCode} — ${assessment.detail}`,
-          {
-            reasonCode: assessment.reasonCode,
-            nextAction: `${assessment.nextAction} The task is terminal-failed; recover it via pd runtime recovery failed-tasks --confirm once the intent basis is repaired, then the consumer intent preflight re-verifies it.`,
-          },
-        );
-      }
-    }
 
     // PRI-780: v2-only generation for the RuleCode sub-chain. Task-driven
     // callers (consumer cycle, run-once) have no Owner-labelled pack channel;
@@ -950,6 +930,33 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
               + 'pd runtime internalization evidence attach --confirm → '
               + 'pd runtime internalization evidence resume --confirm',
             validationErrors: boundedErrors,
+          },
+        );
+      }
+    }
+
+    // SPEC-RULECODE-QUALITY-001 A1 (Q20) — DEFENSIVE intent-basis guard:
+    // mirrors the consumer-cycle preflight so direct run-once/CLI invocation
+    // cannot bypass the entry gate. Re-derives from the CURRENT scribe
+    // artifact every attempt (a stored verification record is never a pass
+    // token, Q13); any stop verdict refuses generation LOUD, permanently
+    // (input_invalid), BEFORE any LLM call. The generator alone can never
+    // decide its own principle is exempt from its declared trusted facts.
+    // Runs AFTER the PRI-780/981 pack guards so those older contracts keep
+    // their stable diagnostic markers (CI round 1).
+    if (context.channel !== 'prompt') {
+      const assessment = assessIntentBasis({
+        scribeArtifact: { artifactId: context.sourceScribeArtifactId, contentJson: context.scribeArtifact },
+        ...(this.trustedFacts !== undefined ? { trustedFacts: this.trustedFacts } : {}),
+        taskId,
+      });
+      if (assessment.status !== 'executable') {
+        throw new PDRuntimeError(
+          'input_invalid',
+          `intent_basis_unverified: ${assessment.reasonCode} — ${assessment.detail}`,
+          {
+            reasonCode: assessment.reasonCode,
+            nextAction: `${assessment.nextAction} The task is terminal-failed; recover it via pd runtime recovery failed-tasks --confirm once the intent basis is repaired, then the consumer intent preflight re-verifies it.`,
           },
         );
       }
