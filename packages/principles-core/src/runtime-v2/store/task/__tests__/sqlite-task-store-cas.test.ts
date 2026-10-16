@@ -125,4 +125,69 @@ describe('SqliteTaskStore.updateTaskIfDiagnosticJsonUnchanged (PRI-629 CAS)', ()
     expect(lineageRace).toBeNull();
     expect((await store.getTask(taskId))?.status).toBe('needs_human_review');
   });
+
+  // ── PRI-991 P1-04: extended preconditions — every field the recovery
+  // decision depends on joins the same conditional UPDATE. ──
+
+  it('expectedAttemptCount: concurrent budget change defeats the CAS (T04-A)', async () => {
+    const taskId = await createTask('{"pi_metadata":{"v":1}}');
+    await store.updateTask(taskId, { attemptCount: 9 });
+    const result = await store.updateTaskIfDiagnosticJsonUnchanged(
+      taskId, '{"pi_metadata":{"v":1}}', { status: 'pending' },
+      { expectedStatus: 'needs_human_review', expectedAttemptCount: 2 },
+    );
+    expect(result).toBeNull();
+    expect((await store.getTask(taskId))?.attemptCount).toBe(9);
+  });
+
+  it('expectedMaxAttempts: concurrent max change defeats the CAS (T04-B)', async () => {
+    const taskId = await createTask('{"pi_metadata":{"v":1}}');
+    await store.updateTask(taskId, { maxAttempts: 10 });
+    const result = await store.updateTaskIfDiagnosticJsonUnchanged(
+      taskId, '{"pi_metadata":{"v":1}}', { status: 'pending' },
+      { expectedMaxAttempts: 3 },
+    );
+    expect(result).toBeNull();
+  });
+
+  it('expectedLeaseOwner/expectedLeaseExpiresAt: lease acquisition after the read defeats the CAS (T04-C/D)', async () => {
+    const taskId = await createTask('{"pi_metadata":{"v":1}}');
+    // Read snapshot had no lease; a writer acquires one.
+    await store.updateTask(taskId, { leaseOwner: 'runner-1', leaseExpiresAt: '2027-01-01T00:00:00.000Z' });
+    const noLeaseLost = await store.updateTaskIfDiagnosticJsonUnchanged(
+      taskId, '{"pi_metadata":{"v":1}}', { status: 'pending' },
+      { expectedLeaseOwner: null, expectedLeaseExpiresAt: null },
+    );
+    expect(noLeaseLost).toBeNull();
+
+    // Expiry-only change with owner unchanged: the writer bumps the expiry
+    // AFTER the caller's read snapshot ('2026-01-01') — the CAS must lose.
+    const taskId2 = await createTask('{"pi_metadata":{"v":1}}');
+    await store.updateTask(taskId2, { leaseOwner: 'runner-1', leaseExpiresAt: '2026-01-01T00:00:00.000Z' });
+    await store.updateTask(taskId2, { leaseExpiresAt: '2027-01-01T00:00:00.000Z' });
+    const expiryRace = await store.updateTaskIfDiagnosticJsonUnchanged(
+      taskId2, '{"pi_metadata":{"v":1}}', { status: 'pending' },
+      { expectedLeaseOwner: 'runner-1', expectedLeaseExpiresAt: '2026-01-01T00:00:00.000Z' },
+    );
+    expect(expiryRace).toBeNull();
+    expect((await store.getTask(taskId2))?.leaseExpiresAt).toBe('2027-01-01T00:00:00.000Z');
+
+    // Matching full lease snapshot still passes.
+    const taskId3 = await createTask('{"pi_metadata":{"v":1}}');
+    await store.updateTask(taskId3, { leaseOwner: 'runner-1', leaseExpiresAt: '2026-01-01T00:00:00.000Z' });
+    const leaseMatch = await store.updateTaskIfDiagnosticJsonUnchanged(
+      taskId3, '{"pi_metadata":{"v":1}}', { status: 'pending' },
+      { expectedLeaseOwner: 'runner-1', expectedLeaseExpiresAt: '2026-01-01T00:00:00.000Z' },
+    );
+    expect(leaseMatch?.status).toBe('pending');
+  });
+
+  it('extended preconditions are individually optional (backward compatible)', async () => {
+    const taskId = await createTask('{"pi_metadata":{"v":1}}');
+    const ok = await store.updateTaskIfDiagnosticJsonUnchanged(
+      taskId, '{"pi_metadata":{"v":1}}', { status: 'pending' },
+      { expectedStatus: 'needs_human_review', expectedAttemptCount: 2, expectedMaxAttempts: 3, expectedLeaseOwner: null, expectedLeaseExpiresAt: null },
+    );
+    expect(ok?.status).toBe('pending');
+  });
 });

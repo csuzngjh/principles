@@ -433,6 +433,35 @@ export interface PITaskMetadata {
    * validateOwnerEvidenceSelectionShape（与 readiness gate 单一权威）。
    */
   ownerEvidenceSelection?: OwnerEvidenceSelection;
+  /**
+   * PRI-991 (P1-03): durable audit facts of single-task failed→pending
+   * recoveries, appended by the SAME conditional UPDATE that moves the task
+   * to pending. Append-only across recoveries of the same task (r2 P1-02: a
+   * second recovery must never destroy an unprojected prior fact); bounded
+   * to the most recent FAILED_TASK_RECOVERY_RETENTION entries. This is the
+   * crash-durable authority the JSONL projection (recovery_actions.jsonl)
+   * is repaired from — the JSONL is a projection, never the recovery audit's
+   * source of truth. Presence-but-malformed fails the whole metadata (rc-3,
+   * same semantics as completionIntent/ownerEvidenceSelection).
+   */
+  failedTaskRecoveries?: readonly FailedTaskRecoveryAuditRecord[];
+}
+
+/** PRI-991 (r2 P1-02): retention bound for durable per-task recovery facts. */
+export const FAILED_TASK_RECOVERY_RETENTION = 5;
+
+/** PRI-991 (P1-03): crash-durable single-task recovery audit fact. */
+export interface FailedTaskRecoveryAuditRecord {
+  /** Matches the recovery_actions.jsonl projection line's actionId. */
+  readonly actionId: string;
+  readonly recoveredAt: string;
+  /** Operator-provided label (--decidedBy); NOT an authenticated identity. */
+  readonly operator: string | null;
+  readonly previousStatus: string;
+  readonly previousAttemptCount: number;
+  readonly previousMaxAttempts: number;
+  readonly newMaxAttempts: number;
+  readonly budgetResetApplied: boolean;
 }
 
 /** evaluator / rollout_reviewer 的合法 runner 决策值 */
@@ -535,6 +564,7 @@ export function serializePITaskMetadata(metadata: PITaskMetadata): string {
       humanReviewContext: metadata.humanReviewContext,
       ownerResolutions: metadata.ownerResolutions,
       ownerEvidenceSelection: metadata.ownerEvidenceSelection,
+      failedTaskRecoveries: metadata.failedTaskRecoveries,
     },
   });
 }
@@ -573,6 +603,7 @@ export function mergePITaskMetadata(base: PITaskRecord, overrides: Partial<PITas
     humanReviewContext: base.humanReviewContext,
     ownerResolutions: base.ownerResolutions,
     ownerEvidenceSelection: base.ownerEvidenceSelection,
+    failedTaskRecoveries: base.failedTaskRecoveries,
     ...overrides,
   };
 }
@@ -672,8 +703,31 @@ function isValidOwnerEvidenceSelection(value: unknown): value is OwnerEvidenceSe
   return validateOwnerEvidenceSelectionShape(value).length === 0;
 }
 
+
 function isNonEmptyString(v: unknown): v is string {
   return typeof v === 'string' && v.trim() !== '';
+}
+/** PRI-991 (P1-03): ERR-001-safe record narrowing for untrusted parsed JSON. */
+function isRecordMap(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * PRI-991 (P1-03): trust boundary for the durable single-task recovery audit
+ * fact read back from diagnosticJson (rc-1/rc-2 — type guard, no `as` bypass).
+ */
+export function isValidFailedTaskRecoveryAuditRecord(value: unknown): value is FailedTaskRecoveryAuditRecord {
+  if (!isRecordMap(value)) return false;
+  const r = value;
+  if (!isNonEmptyString(r.actionId)) return false;
+  if (!isNonEmptyString(r.recoveredAt)) return false;
+  if (!(r.operator === null || typeof r.operator === 'string')) return false;
+  if (typeof r.previousStatus !== 'string') return false;
+  if (typeof r.previousAttemptCount !== 'number' || !Number.isSafeInteger(r.previousAttemptCount) || r.previousAttemptCount < 0) return false;
+  if (typeof r.previousMaxAttempts !== 'number' || !Number.isSafeInteger(r.previousMaxAttempts) || r.previousMaxAttempts < 1) return false;
+  if (typeof r.newMaxAttempts !== 'number' || !Number.isSafeInteger(r.newMaxAttempts) || r.newMaxAttempts < 1) return false;
+  if (typeof r.budgetResetApplied !== 'boolean') return false;
+  return true;
 }
 
 /**
@@ -974,6 +1028,19 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
     ({ ownerEvidenceSelection } = m);
   }
 
+  // failedTaskRecoveries (PRI-991 P1-03, r2 P1-02): optional append-only
+  // array, full shape validation on EVERY element (rc-3/rc-4) — a corrupted
+  // recovery audit fact fails the whole metadata, never a silent "this task
+  // was never recovered". Bounded retention; over-long arrays fail closed.
+  const { failedTaskRecoveries } = m;
+  if (failedTaskRecoveries !== undefined) {
+    if (!Array.isArray(failedTaskRecoveries)) return null;
+    if (failedTaskRecoveries.length > FAILED_TASK_RECOVERY_RETENTION) return null;
+    for (const record of failedTaskRecoveries) {
+      if (!isValidFailedTaskRecoveryAuditRecord(record)) return null;
+    }
+  }
+
   return {
     dependencyTaskIds: m.dependencyTaskIds as string[],
     channel: m.channel,
@@ -997,6 +1064,7 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
     humanReviewContext,
     ownerResolutions,
     ownerEvidenceSelection,
+    failedTaskRecoveries,
   };
 }
 
@@ -1055,5 +1123,6 @@ export function hydratePITaskRecord(task: TaskRecord): PITaskRecord | null {
     humanReviewContext: meta.humanReviewContext,
     ownerResolutions: meta.ownerResolutions,
     ownerEvidenceSelection: meta.ownerEvidenceSelection,
+    failedTaskRecoveries: meta.failedTaskRecoveries,
   } as unknown as PITaskRecord;
 }

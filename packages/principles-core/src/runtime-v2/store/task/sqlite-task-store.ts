@@ -131,7 +131,13 @@ export class SqliteTaskStore implements TaskStore {
     taskId: string,
     expectedDiagnosticJson: string | null,
     patch: TaskStoreUpdatePatch,
-    options?: { readonly expectedStatus?: string },
+    options?: {
+      readonly expectedStatus?: string;
+      readonly expectedAttemptCount?: number;
+      readonly expectedMaxAttempts?: number;
+      readonly expectedLeaseOwner?: string | null;
+      readonly expectedLeaseExpiresAt?: string | null;
+    },
   ): Promise<TaskRecord | null> {
     return this.updateTaskWithPreconditions({
       taskId,
@@ -139,6 +145,10 @@ export class SqliteTaskStore implements TaskStore {
       artifacts: [],
       patch,
       expectedStatus: options?.expectedStatus,
+      expectedAttemptCount: options?.expectedAttemptCount,
+      expectedMaxAttempts: options?.expectedMaxAttempts,
+      expectedLeaseOwner: options?.expectedLeaseOwner,
+      expectedLeaseExpiresAt: options?.expectedLeaseExpiresAt,
     });
   }
 
@@ -154,7 +164,20 @@ export class SqliteTaskStore implements TaskStore {
   }
 
   private async updateTaskWithPreconditions(
-    input: TaskArtifactCasInput & { readonly expectedStatus?: string },
+    input: TaskArtifactCasInput & {
+      readonly expectedStatus?: string;
+      /**
+       * PRI-991 (P1-04): full decision-snapshot preconditions. Every field the
+       * caller's decision depends on joins the SAME conditional UPDATE, so a
+       * concurrent writer that touches ANY of them (budget, lease) defeats the
+       * write even when status/diagnostic_json are unchanged. All optional and
+       * ANDed; `IS` gives NULL-safe equality for the lease columns.
+       */
+      readonly expectedAttemptCount?: number;
+      readonly expectedMaxAttempts?: number;
+      readonly expectedLeaseOwner?: string | null;
+      readonly expectedLeaseExpiresAt?: string | null;
+    },
   ): Promise<TaskRecord | null> {
     const { taskId, expectedDiagnosticJson, artifacts, patch } = input;
     const db = this.connection.getDb();
@@ -179,6 +202,15 @@ export class SqliteTaskStore implements TaskStore {
     if (input.expectedStatus !== undefined) {
       values.push(input.expectedStatus);
     }
+    // PRI-991 (P1-04): full decision-snapshot preconditions (NULL-safe `IS`).
+    const attemptCondition = input.expectedAttemptCount !== undefined ? 'AND attempt_count IS ?' : '';
+    if (input.expectedAttemptCount !== undefined) values.push(input.expectedAttemptCount);
+    const maxAttemptsCondition = input.expectedMaxAttempts !== undefined ? 'AND max_attempts IS ?' : '';
+    if (input.expectedMaxAttempts !== undefined) values.push(input.expectedMaxAttempts);
+    const leaseOwnerCondition = input.expectedLeaseOwner !== undefined ? 'AND lease_owner IS ?' : '';
+    if (input.expectedLeaseOwner !== undefined) values.push(input.expectedLeaseOwner);
+    const leaseExpiresCondition = input.expectedLeaseExpiresAt !== undefined ? 'AND lease_expires_at IS ?' : '';
+    if (input.expectedLeaseExpiresAt !== undefined) values.push(input.expectedLeaseExpiresAt);
     const artifactConditions = artifacts.map(() => `EXISTS (
       SELECT 1 FROM pi_artifacts
       WHERE artifact_id = ?
@@ -200,6 +232,10 @@ export class SqliteTaskStore implements TaskStore {
     const result = db
       .prepare(`UPDATE tasks SET ${sets.join(', ')}
         WHERE task_id = ? AND diagnostic_json IS ? ${statusCondition}
+        ${attemptCondition}
+        ${maxAttemptsCondition}
+        ${leaseOwnerCondition}
+        ${leaseExpiresCondition}
         ${artifactConditions.map((condition) => `AND ${condition}`).join('\n')}`)
       .run(...values);
 
