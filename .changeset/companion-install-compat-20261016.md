@@ -1,5 +1,6 @@
 ---
 '@principles/install-layout': minor
+'create-principles-disciple': patch
 ---
 
 Fix the PD Companion install-compatibility brick (2026-10-16): Companion 0.1.2
