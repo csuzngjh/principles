@@ -280,9 +280,20 @@ if (emptyDeclaration && nonEmptyDeclarations) {
 
 // Evaluate deferred version-field edits now that the changeset declarations
 // are known: a version edit survives ONLY as (a) baseline alignment (already
-// continued above) or (b) a NEW package whose initial version is declared by
-// a valid changeset in this same PR. Everything else fails.
-for (const { rel, fileNewInDiff } of deferredVersionChecks) {
+// continued above), (b) a NEW package whose initial version is declared by
+// a valid changeset in this same PR, or (c) the companion desktop
+// release-prep exemption below. Everything else fails.
+for (const { rel, dir, fileNewInDiff } of deferredVersionChecks) {
+  // (c) Companion desktop release-prep (2026-10-16, Owner-authorized):
+  // @principles/pd-companion is private and changesets-ignored, so its
+  // version can NEVER materialize through the Version Packages PR, and the
+  // baseline window is inapplicable (no npm registry presence). Its version
+  // authority is the companion desktop release flow: a release-prep PR bump
+  // consumed by the companion-v* tag, whose build enforces
+  // tag == package.json == app.asar (companion-release.yml
+  // version-consistency step). Exactly this directory is exempt; every
+  // npm-published package stays frozen.
+  if (dir === 'pd-companion') continue;
   if (fileNewInDiff) {
     const headPkg = JSON.parse(showFile(headSha, rel));
     if (declarations.has(headPkg.name)) continue; // new-package bootstrap with recorded intent
