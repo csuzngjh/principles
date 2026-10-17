@@ -50,6 +50,10 @@ const BASELINE_DDL = [
 
 const dirs: string[] = [];
 
+function scribeNow0(): string {
+  return new Date().toISOString();
+}
+
 interface WorkerWorkspace {
   root: string;
   codexHome: string;
@@ -720,13 +724,33 @@ describe('worker cycle — downstream reuse (shared executor)', () => {
     const handle = await createRuntimeStateHandle({ workspaceDir: ws.root, readonly: false });
     try {
       // SPEC-RULECODE-QUALITY-001 A1: the code channel requires a complete
-      // intent basis before generation — seed the scribe dependency + artifact
-      // (contract + executionConditions, no trusted external facts).
+      // intent basis before generation — seed the philosopher + scribe
+      // dependency legs and artifacts (R3: the gate binds the upstream
+      // philosopher material; no trusted external facts needed here).
+      await handle.stateManager.createTask({
+        taskId: 'philosopher-pri992-labelled', taskKind: 'philosopher', status: 'succeeded', attemptCount: 1, maxAttempts: 3,
+        resultRef: 'philosopher://seed',
+        diagnosticJson: JSON.stringify({ sourcePainId: 'pri992-pain', pi_metadata: {
+          dependencyTaskIds: [], channel: 'code_tool_hook', timeoutMs: 300000, inputArtifactRefs: [], outputArtifactRefs: [],
+          correlationId: 'pri992-labelled',
+        }}),
+      });
+      await handle.stateManager.piArtifactStore.upsertArtifact({
+        artifactId: 'pi-art-philosopher-pri992-labelled-run-1',
+        artifactKind: 'principle',
+        sourceTaskId: 'philosopher-pri992-labelled',
+        lineageArtifactIds: [],
+        validationStatus: 'validated',
+        contentJson: JSON.stringify({ taskId: 'philosopher-pri992-labelled', analysis: 'The agent checks git status before finalizing git actions; read-only investigation stays allowed.' }),
+        createdAt: scribeNow0(),
+        updatedAt: scribeNow0(),
+      });
       await handle.stateManager.createTask({
         taskId: 'scribe-pri992-labelled', taskKind: 'scribe', status: 'succeeded', attemptCount: 1, maxAttempts: 3,
         resultRef: 'scribe://seed',
         diagnosticJson: JSON.stringify({ sourcePainId: 'pri992-pain', pi_metadata: {
-          dependencyTaskIds: [], channel: 'code_tool_hook', timeoutMs: 300000, inputArtifactRefs: [], outputArtifactRefs: [],
+          dependencyTaskIds: ['philosopher-pri992-labelled'], channel: 'code_tool_hook', timeoutMs: 300000, inputArtifactRefs: [], outputArtifactRefs: [],
+          correlationId: 'pri992-labelled',
         }}),
       });
       const scribeNow = new Date().toISOString();

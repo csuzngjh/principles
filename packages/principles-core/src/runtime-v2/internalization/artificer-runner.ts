@@ -42,7 +42,7 @@ import { computeFeatureFlagsFromConfig, isFeatureEnabled } from '../config/pd-co
 import { hydratePITaskRecord, type RepairPayload, type LastValidatorErrors, parseLastValidatorErrors, isFreshForNextAttempt } from './pitask-metadata.js';
 import { extractIntentContract } from './intent-contract.js';
 import { extractExecutionConditions } from './intent-contract.js';
-import { assessIntentBasis, type ArtificerTrustedFactsPort } from './artificer-intent-preflight.js';
+import { assessIntentBasis, collectUpstreamNormalisedText, type ArtificerTrustedFactsPort } from './artificer-intent-preflight.js';
 import { ArtificerPromptBuilder, boundPackForPrompt, type ArtificerDreamerContext, type ArtificerHostSemanticContext } from './artificer-prompt-builder.js';
 import { projectDreamerProposals, summarizeCandidateDifferences } from './formation-context.js';
 
@@ -71,6 +71,12 @@ interface ArtificerContext {
   readonly contextHash: string;
   readonly scribeArtifact: string | null;
   readonly sourceScribeArtifactId: string | null;
+  /**
+   * SPEC-RULECODE-QUALITY-001 A1 (R3): the scribe task's OWN dependency task
+   * ids — the walk list for the upstream (philosopher) intent material the
+   * defensive mirror must bind to. Empty when no scribe dependency resolved.
+   */
+  readonly scribeDependencyTaskIds: readonly string[];
   /**
    * Prior adversarial replay failures (PRI-428). Non-null only on Round-2+
    * retries inside runAdversarialLoop, read from the task's
@@ -764,7 +770,7 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
 
     if (deps.length === 0) {
       this.emitEvent('no_dependencies', taskId, {});
-      return { contextHash: 'empty', scribeArtifact: null, sourceScribeArtifactId: null, adversarialFeedback, repairFeedback, revisionFeedback, channel, ...repairEvidenceExtras };
+      return { contextHash: 'empty', scribeArtifact: null, sourceScribeArtifactId: null, scribeDependencyTaskIds: [], adversarialFeedback, repairFeedback, revisionFeedback, channel, ...repairEvidenceExtras };
     }
 
     for (const depId of deps) {
@@ -816,6 +822,7 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
           contextHash: BasePeerRunner.hashContextRefs(contextRefs),
           scribeArtifact: firstArtifact.contentJson,
           sourceScribeArtifactId: firstArtifact.artifactId,
+          scribeDependencyTaskIds: hydratePITaskRecord(depTask)?.dependencyTaskIds ?? [],
           adversarialFeedback,
           repairFeedback,
           revisionFeedback,
@@ -827,7 +834,7 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
     }
 
     this.emitEvent('no_scribe_artifact', taskId, {});
-    return { contextHash: 'empty', scribeArtifact: null, sourceScribeArtifactId: null, adversarialFeedback, repairFeedback, channel, ...repairEvidenceExtras };
+    return { contextHash: 'empty', scribeArtifact: null, sourceScribeArtifactId: null, scribeDependencyTaskIds: [], adversarialFeedback, repairFeedback, channel, ...repairEvidenceExtras };
   }
 
   async invokeRuntime(taskId: string, context: ArtificerContext): Promise<RunHandle> {
@@ -945,8 +952,17 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
     // Runs AFTER the PRI-780/981 pack guards so those older contracts keep
     // their stable diagnostic markers (CI round 1).
     if (context.channel !== 'prompt') {
+      // R3: the defensive mirror binds the upstream material through the SAME
+      // shared resolver the entry gate uses — the mirror must agree with the
+      // gate, never be weaker.
+      const upstreamMaterial = await collectUpstreamNormalisedText(
+        (depId) => this.stateManager.getTask(depId),
+        (sourceTaskId) => this.artifactStore.listBySourceTaskId(sourceTaskId),
+        context.scribeDependencyTaskIds,
+      );
       const assessment = assessIntentBasis({
         scribeArtifact: { artifactId: context.sourceScribeArtifactId, contentJson: context.scribeArtifact },
+        upstreamMaterial,
         ...(this.trustedFacts !== undefined ? { trustedFacts: this.trustedFacts } : {}),
         taskId,
       });

@@ -117,11 +117,47 @@ function conditionsScribeContent(
   });
 }
 
-async function seedArtificerTask(workspaceDir: string, scribeContentJson: string): Promise<string> {
+const PHILOSOPHER_TASK_ID = 'philosopher-intent-001';
+/** Upstream material shared by the default fixtures — deliberately free of approval vocabulary. */
+const PHILOSOPHER_ANALYSIS = 'The agent must read the target file before writing it. Blind edits cascade: a write without a prior read corrupts files whose content the agent never saw.';
+
+async function seedArtificerTask(
+  workspaceDir: string,
+  scribeContentJson: string,
+  opts: { withPhilosopher?: boolean; upstreamAnalysis?: string } = {},
+): Promise<string> {
   const handle = await createRuntimeStateHandle({ workspaceDir, readonly: false });
   try {
     const { stateManager } = handle;
     const now = new Date().toISOString();
+    const withPhilosopher = opts.withPhilosopher !== false;
+    if (withPhilosopher) {
+      await stateManager.createTask({
+        taskId: PHILOSOPHER_TASK_ID,
+        taskKind: 'philosopher',
+        status: 'succeeded',
+        attemptCount: 1,
+        maxAttempts: 3,
+        resultRef: 'philosopher://seed',
+        diagnosticJson: JSON.stringify({ sourcePainId: 'pain_001', pi_metadata: {
+          dependencyTaskIds: [],
+          channel: 'code_tool_hook',
+          timeoutMs: 300_000,
+          inputArtifactRefs: [],
+          outputArtifactRefs: [],
+        }}),
+      });
+      await stateManager.piArtifactStore.upsertArtifact({
+        artifactId: `pi-art-${PHILOSOPHER_TASK_ID}-run-1`,
+        artifactKind: 'principle',
+        sourceTaskId: PHILOSOPHER_TASK_ID,
+        lineageArtifactIds: [],
+        validationStatus: 'validated',
+        contentJson: JSON.stringify({ taskId: PHILOSOPHER_TASK_ID, analysis: opts.upstreamAnalysis ?? PHILOSOPHER_ANALYSIS }),
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
     await stateManager.createTask({
       taskId: SCRIBE_TASK_ID,
       taskKind: 'scribe',
@@ -130,7 +166,7 @@ async function seedArtificerTask(workspaceDir: string, scribeContentJson: string
       maxAttempts: 3,
       resultRef: 'scribe://run-1',
       diagnosticJson: JSON.stringify({ sourcePainId: 'pain_001', pi_metadata: {
-        dependencyTaskIds: [],
+        dependencyTaskIds: withPhilosopher ? [PHILOSOPHER_TASK_ID] : [],
         channel: 'code_tool_hook',
         timeoutMs: 300_000,
         inputArtifactRefs: [],
@@ -348,6 +384,57 @@ describe('preflightArtificerIntentBasis — stop points (Q01/Q20)', () => {
     expect(verdict.decision).toBe('blocked');
     if (verdict.decision !== 'blocked') throw new Error('unreachable');
     expect(verdict.reasonCode).toBe('approval_dependency_undeclared');
+  });
+
+  // ── Owner review R3: under-reporting closure + upstream binding ──
+
+  it('OWNER-R3 EXACT: design_approval declared with required:false under approval-gated material stops (name check must count only required declarations)', async () => {
+    const workspaceDir = makeWorkspace();
+    // The R2 bypass shape, verbatim from the review: the declared fact KIND
+    // would satisfy the approval name check, but required:false filters it
+    // out downstream — the effective declaration is EMPTY. The audit口径
+    // counts only required:true declarations, so this stops.
+    await seedArtificerTask(workspaceDir, conditionsScribeContent([
+      {
+        factKind: 'design_approval',
+        required: false,
+        textualBasis: 'complex changes must not be implemented before the design is confirmed by the Owner',
+      },
+    ], { approval: true }));
+
+    const verdict = await runPreflight(workspaceDir);
+    expect(verdict.decision).toBe('blocked');
+    if (verdict.decision !== 'blocked') throw new Error('unreachable');
+    expect(verdict.reasonCode).toBe('approval_dependency_undeclared');
+    await expect(readTask(workspaceDir)).resolves.toMatchObject({ status: 'needs_human_review' });
+  });
+
+  it('OWNER-R3: no resolvable upstream (philosopher) material stops as upstream_material_unavailable — a verdict may never rest on the scribe artifact alone', async () => {
+    const workspaceDir = makeWorkspace();
+    // The R3 "同一份 Scribe 产物" shape: no philosopher leg at all.
+    await seedArtificerTask(workspaceDir, conditionsScribeContent([]), { withPhilosopher: false });
+
+    const verdict = await runPreflight(workspaceDir);
+    expect(verdict.decision).toBe('blocked');
+    if (verdict.decision !== 'blocked') throw new Error('unreachable');
+    expect(verdict.reasonCode).toBe('upstream_material_unavailable');
+    const task = await readTask(workspaceDir);
+    expect(task?.status).toBe('needs_human_review');
+  });
+
+  it('OWNER-R3: approval semantics in the UPSTREAM material with no declared approval fact stops (dual-pool sweep)', async () => {
+    const workspaceDir = makeWorkspace();
+    // Scribe material itself is approval-free; the leak lives UPSTREAM. The
+    // sweep covers both pools.
+    await seedArtificerTask(workspaceDir, conditionsScribeContent([]), {
+      upstreamAnalysis: '重大变更需先得到负责人确认同意：the Owner confirmed design must precede any complex implementation.',
+    });
+
+    const verdict = await runPreflight(workspaceDir);
+    expect(verdict.decision).toBe('blocked');
+    if (verdict.decision !== 'blocked') throw new Error('unreachable');
+    expect(verdict.reasonCode).toBe('approval_dependency_undeclared');
+    expect(verdict.detail).toContain('upstream');
   });
 
   it('a required fact whose textualBasis anchors nowhere in the intent material stops as textual_basis_unanchored', async () => {

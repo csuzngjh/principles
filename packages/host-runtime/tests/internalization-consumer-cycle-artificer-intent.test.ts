@@ -40,6 +40,10 @@ import { runInternalizationConsumerCycle, type InternalizationConsumerCyclePorts
 
 const dirs: string[] = [];
 
+function now0(): string {
+  return new Date().toISOString();
+}
+
 function makeWorkspace(): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-cycle-intent-'));
   dirs.push(root);
@@ -148,6 +152,37 @@ async function seedChain(workspaceDir: string, scribeContentJson: string): Promi
   const handle = await createRuntimeStateHandle({ workspaceDir, readonly: false });
   try {
     const { stateManager } = handle;
+    // R3: the intent gate binds upstream (philosopher) material — seed the leg.
+    const PHILOSOPHER_TASK_ID = 'philosopher-intent-corr-001';
+    await stateManager.createTask({
+      taskId: PHILOSOPHER_TASK_ID,
+      taskKind: 'philosopher',
+      status: 'succeeded',
+      attemptCount: 1,
+      maxAttempts: 3,
+      resultRef: 'philosopher://seed',
+      diagnosticJson: JSON.stringify({ sourcePainId: 'pain_001', pi_metadata: {
+        dependencyTaskIds: [],
+        channel: 'code_tool_hook',
+        // reconciliation keys successors on correlationId — without it the
+        // seeded succeeded philosopher gets a fresh scribe successor every
+        // cycle (T02 breakage).
+        correlationId: 'corr-intent-001',
+        timeoutMs: 300_000,
+        inputArtifactRefs: [],
+        outputArtifactRefs: [],
+      }}),
+    });
+    await stateManager.piArtifactStore.upsertArtifact({
+      artifactId: `pi-art-${PHILOSOPHER_TASK_ID}-run-1`,
+      artifactKind: 'principle',
+      sourceTaskId: PHILOSOPHER_TASK_ID,
+      lineageArtifactIds: [],
+      validationStatus: 'validated',
+      contentJson: JSON.stringify({ taskId: PHILOSOPHER_TASK_ID, analysis: 'The agent must read the target file before writing it; blind edits cascade.' }),
+      createdAt: now0(),
+      updatedAt: now0(),
+    });
     await stateManager.createTask({
       taskId: SCRIBE_TASK_ID,
       taskKind: 'scribe',
@@ -156,7 +191,7 @@ async function seedChain(workspaceDir: string, scribeContentJson: string): Promi
       maxAttempts: 3,
       resultRef: 'scribe://seed',
       diagnosticJson: JSON.stringify({ sourcePainId: 'pain_001', pi_metadata: {
-        dependencyTaskIds: [],
+        dependencyTaskIds: [PHILOSOPHER_TASK_ID],
         channel: 'code_tool_hook',
         timeoutMs: 300_000,
         inputArtifactRefs: [],

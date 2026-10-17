@@ -44,6 +44,29 @@ import type { TaskRecord } from '../task-status.js';
 const SCRIBE_TASK_ID = 'scribe-001';
 const ARTIFICER_TASK_ID = 'artificer-001';
 
+const PHILOSOPHER_TASK_ID = 'philosopher-runner-001';
+const PHILOSOPHER_ANALYSIS = 'The agent must read the target file before writing it. Blind edits cascade into silent corruption.';
+
+function makePhilosopherTask(): TaskRecord {
+  return {
+    taskId: PHILOSOPHER_TASK_ID,
+    taskKind: 'philosopher',
+    status: 'succeeded',
+    attemptCount: 1,
+    maxAttempts: 3,
+    resultRef: 'philosopher://run-001',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    diagnosticJson: createPITaskDiagnosticJson({
+      dependencyTaskIds: [],
+      channel: 'prompt',
+      timeoutMs: 300_000,
+      inputArtifactRefs: [],
+      outputArtifactRefs: [],
+    }),
+  };
+}
+
 function makeScribeTask(): TaskRecord {
   return {
     taskId: SCRIBE_TASK_ID,
@@ -55,7 +78,7 @@ function makeScribeTask(): TaskRecord {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     diagnosticJson: createPITaskDiagnosticJson({
-      dependencyTaskIds: [],
+      dependencyTaskIds: [PHILOSOPHER_TASK_ID],
       channel: 'prompt',
       timeoutMs: 300_000,
       inputArtifactRefs: [],
@@ -180,11 +203,13 @@ async function createHarness(depsOverrides: Partial<ArtificerRunnerDeps> = {}): 
   const artificerTask = makeArtificerTask();
   const scribeTask = makeScribeTask();
 
+  void depsOverrides; // (placeholder to keep formatting stable)
   const stateManager = {
     acquireLease: vi.fn().mockResolvedValue(artificerTask),
     getTask: vi.fn().mockImplementation((id: string) => {
       if (id === ARTIFICER_TASK_ID) return Promise.resolve(artificerTask);
       if (id === SCRIBE_TASK_ID) return Promise.resolve(scribeTask);
+      if (id === PHILOSOPHER_TASK_ID) return Promise.resolve(makePhilosopherTask());
       return Promise.resolve(null);
     }),
     getRunsByTask: vi.fn().mockResolvedValue([{
@@ -228,6 +253,16 @@ async function createHarness(depsOverrides: Partial<ArtificerRunnerDeps> = {}): 
 
   const artifactStore: PIArtifactStore = new MemoryPIArtifactStore();
   await artifactStore.upsertArtifact(makeScribeArtifact());
+  await artifactStore.upsertArtifact({
+    artifactId: 'pi-art-philosopher-runner-001',
+    artifactKind: 'principle',
+    sourceTaskId: PHILOSOPHER_TASK_ID,
+    lineageArtifactIds: [],
+    validationStatus: 'validated',
+    contentJson: JSON.stringify({ taskId: PHILOSOPHER_TASK_ID, analysis: PHILOSOPHER_ANALYSIS }),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
 
   return {
     stateManager: stateManager as unknown as Record<string, ReturnType<typeof vi.fn>>,

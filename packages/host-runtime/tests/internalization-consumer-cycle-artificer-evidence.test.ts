@@ -117,6 +117,35 @@ async function seedCodeChannelChain(workspaceDir: string, selection?: OwnerEvide
   const handle = await createRuntimeStateHandle({ workspaceDir, readonly: false });
   try {
     const { stateManager } = handle;
+    // R3: intent gate binds upstream (philosopher) material — seed the leg.
+    const PHILOSOPHER_TASK_ID = 'philosopher-corr-001';
+    await stateManager.createTask({
+      taskId: PHILOSOPHER_TASK_ID,
+      taskKind: 'philosopher',
+      status: 'succeeded',
+      attemptCount: 1,
+      maxAttempts: 3,
+      resultRef: 'philosopher://seed',
+      diagnosticJson: JSON.stringify({ sourcePainId: 'pain_001', pi_metadata: {
+        dependencyTaskIds: [],
+        channel: 'code_tool_hook',
+        // reconciliation keys successors on correlationId (see T02).
+        correlationId: 'corr-001',
+        timeoutMs: 300_000,
+        inputArtifactRefs: [],
+        outputArtifactRefs: [],
+      }}),
+    });
+    await stateManager.piArtifactStore.upsertArtifact({
+      artifactId: `pi-art-${PHILOSOPHER_TASK_ID}-run-1`,
+      artifactKind: 'principle',
+      sourceTaskId: PHILOSOPHER_TASK_ID,
+      lineageArtifactIds: [],
+      validationStatus: 'validated',
+      contentJson: JSON.stringify({ taskId: PHILOSOPHER_TASK_ID, analysis: 'The agent must read the target file before writing it; blind edits cascade.' }),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
     await stateManager.createTask({
       taskId: SCRIBE_TASK_ID,
       taskKind: 'scribe',
@@ -125,7 +154,7 @@ async function seedCodeChannelChain(workspaceDir: string, selection?: OwnerEvide
       maxAttempts: 3,
       resultRef: 'scribe://seed',
       diagnosticJson: JSON.stringify({ sourcePainId: 'pain_001', pi_metadata: {
-        dependencyTaskIds: [],
+        dependencyTaskIds: [PHILOSOPHER_TASK_ID],
         channel: 'code_tool_hook',
         timeoutMs: 300_000,
         inputArtifactRefs: [],

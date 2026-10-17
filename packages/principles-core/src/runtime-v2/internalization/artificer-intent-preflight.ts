@@ -52,6 +52,7 @@ import type { PITaskRecord } from './peer-runner-contracts.js';
 import type { HumanReviewContext } from './pitask-metadata.js';
 import {
   createPITaskDiagnosticJson,
+  hydratePITaskRecord,
   mergePITaskMetadata,
   SOURCE_FAULT_MAX_CONSECUTIVE_FAILURES,
   SOURCE_FAULT_PERSISTENT_REASON_CODE,
@@ -89,6 +90,7 @@ export type IntentBasisStopReasonCode =
   | 'execution_conditions_missing'
   | 'execution_conditions_invalid'
   | 'required_fact_conflict'
+  | 'upstream_material_unavailable'
   | 'approval_dependency_undeclared'
   | 'textual_basis_unanchored'
   | 'trusted_fact_provider_absent'
@@ -247,7 +249,7 @@ async function patchTaskMetadata(
  */
 async function resolveScribeArtifact(
   params: ArtificerIntentPreflightParams,
-): Promise<{ artifactId: string; contentJson: string } | null> {
+): Promise<{ artifactId: string; contentJson: string; scribeDependencyTaskIds: readonly string[] } | null> {
   const { piTask, stateManager, artifactStore } = params;
   for (const depId of piTask.dependencyTaskIds) {
     const depTask = await stateManager.getTask(depId);
@@ -256,10 +258,88 @@ async function resolveScribeArtifact(
     const artifacts = await store.listBySourceTaskId(depId);
     const [first] = artifacts;
     if (first !== undefined) {
-      return { artifactId: first.artifactId, contentJson: first.contentJson };
+      // The scribe task's OWN dependencies carry the upstream intent material
+      // (philosopher stage) — the second, independent leg of the intent basis
+      // (Owner review R3: a verdict may never rest on the scribe artifact
+      // alone, because every audited surface would then come from one model
+      // output).
+      const hydrated = hydratePITaskRecord(depTask);
+      const scribeDependencyTaskIds = hydrated?.dependencyTaskIds ?? [];
+      return { artifactId: first.artifactId, contentJson: first.contentJson, scribeDependencyTaskIds };
     }
   }
   return null;
+}
+
+/**
+ * Resolve the UPSTREAM intent material (philosopher stage) — the independent
+ * second leg the intent verdict must be bound to. Walks the scribe task's
+ * dependencies for a succeeded philosopher task and flattens its artifact's
+ * string content into a normalised material pool. Returns null when no
+ * philosopher artifact is resolvable — a condition the caller must treat as a
+ * STOP (a generation verdict that rests on the scribe artifact alone is
+ * exactly the under-reporting shape the R3 review reproduced).
+ */
+async function resolveUpstreamMaterial(
+  params: ArtificerIntentPreflightParams,
+  scribeDependencyTaskIds: readonly string[],
+): Promise<{ normalisedText: string } | null> {
+  const { stateManager, artifactStore } = params;
+  const store: Pick<PIArtifactStore, 'listBySourceTaskId'> = artifactStore ?? stateManager.piArtifactStore;
+  return collectUpstreamNormalisedText(
+    async (depId: string) => stateManager.getTask(depId),
+    (sourceTaskId: string) => store.listBySourceTaskId(sourceTaskId),
+    scribeDependencyTaskIds,
+  );
+}
+
+/**
+ * Shared upstream-material resolver (entry preflight AND the runner's
+ * defensive mirror use the SAME walk so the mirror can never be weaker than
+ * the gate).
+ */
+export async function collectUpstreamNormalisedText(
+  getTask: (taskId: string) => Promise<{ taskKind: string; status: string } | null>,
+  listBySourceTaskId: (sourceTaskId: string) => Promise<readonly { contentJson: string }[]>,
+  scribeDependencyTaskIds: readonly string[],
+): Promise<{ normalisedText: string } | null> {
+  for (const depId of scribeDependencyTaskIds) {
+    const depTask = await getTask(depId);
+    if (!depTask || depTask.taskKind !== 'philosopher' || depTask.status !== 'succeeded') continue;
+    const artifacts = await listBySourceTaskId(depId);
+    const [first] = artifacts;
+    if (first === undefined) continue;
+    const texts: string[] = [];
+    collectAllStrings(safeParseJson(first.contentJson), texts, 0);
+    return { normalisedText: normaliseForAnchor(texts.join(' ')) };
+  }
+  return null;
+}
+
+function safeParseJson(contentJson: string): unknown {
+  try {
+    return JSON.parse(contentJson);
+  } catch {
+    return null;
+  }
+}
+
+/** Depth-bounded string collector for the upstream material pool (rc-8 bound). */
+function collectAllStrings(value: unknown, out: string[], depth: number): void {
+  if (depth > 6 || out.length > 400) return;
+  if (typeof value === 'string') {
+    if (value.trim() !== '') out.push(value);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) collectAllStrings(entry, out, depth + 1);
+    return;
+  }
+  if (typeof value === 'object' && value !== null) {
+    for (const key of Object.keys(value)) {
+      collectAllStrings((value as Record<string, unknown>)[key], out, depth + 1);
+    }
+  }
 }
 
 interface IntentAssessmentStop {
@@ -296,6 +376,13 @@ interface IntentMaterial {
 
 /** Approval-semantics signal vocabulary (substring, EN+ZH). */
 const APPROVAL_SIGNAL_WORDS = ['confirm', 'approv', '批准', '确认'] as const;
+
+/** Which vocabulary words appear in a raw text (for upstream audit detail). */
+function approvalSignalsInText(text: string): readonly string[] {
+  if (typeof text !== 'string' || text.length === 0) return [];
+  const lower = text.toLowerCase();
+  return APPROVAL_SIGNAL_WORDS.filter((word) => lower.includes(word));
+}
 
 /**
  * Collect the intent-distillation material from the parsed scribe artifact:
@@ -356,16 +443,29 @@ function isTextualBasisAnchored(textualBasis: string, normalisedMaterial: string
  */
 export function assessIntentBasis(input: {
   scribeArtifact: { artifactId: string; contentJson: string } | null;
+  /** Upstream (philosopher) material pool. null = unresolvable → STOP (R3: the verdict may never rest on the scribe artifact alone). */
+  upstreamMaterial: { normalisedText: string } | null;
   trustedFacts?: ArtificerTrustedFactsPort;
   taskId: string;
 }): IntentAssessment {
-  const { scribeArtifact, trustedFacts } = input;
+  const { scribeArtifact, upstreamMaterial, trustedFacts } = input;
   if (scribeArtifact === null) {
     return {
       status: 'intent_unverified',
       reasonCode: 'scribe_dependency_unresolved',
       detail: 'no succeeded scribe dependency artifact resolvable for this artificer task',
       nextAction: 'Inspect the task lineage; the scribe stage must succeed and persist its artifact before code generation.',
+    };
+  }
+  // Owner review R3 — UPSTREAM BINDING: every audited surface below would be
+  // one model output grading itself if the scribe artifact were the only
+  // material. No philosopher material → no verdict.
+  if (upstreamMaterial === null) {
+    return {
+      status: 'intent_unverified',
+      reasonCode: 'upstream_material_unavailable',
+      detail: "no succeeded philosopher artifact resolvable from the scribe task's dependencies — the intent verdict may not rest on the scribe artifact alone",
+      nextAction: 'Inspect the task lineage; the philosopher stage must succeed and persist its artifact (the intent basis is verified against BOTH the scribe artifact and the upstream material).',
     };
   }
   let parsed: unknown;
@@ -417,47 +517,52 @@ export function assessIntentBasis(input: {
     requiredByKind.set(fact.factKind, fact.required);
   }
 
-  // SPEC-RULECODE-QUALITY-001 A1 (Owner review 2026-10-16, P1) — the scribe's
-  // declaration alone is NOT trusted as complete: the declaration is audited
-  // AGAINST the intent material it was distilled from, in both directions.
-  // Both audits only ever produce STOP points (safe side) — never an
-  // automatic approval verdict — so a false positive costs a re-run, while a
-  // missed leak would cost a fabricated-approval rule.
-  const intentMaterial = collectIntentMaterial(parsed);
-  const declaredFactKinds = conditions.requiredFacts.map((fact) => fact.factKind.toLowerCase()).join(' ');
-
-  // (1) Approval-dependency leak audit: the intent material carries approval
-  // semantics, yet NO declared factKind is an approval fact — the classic
-  // under-reporting shape (model fills requiredFacts: [] for an
-  // approval-gated principle). Deterministic contradiction audit, not a
-  // general classifier: it never decides approval states, it only refuses to
-  // let "requires confirmation" prose coexist with an empty approval
-  // declaration.
-  if (intentMaterial.hasApprovalSignal && !/approv/.test(declaredFactKinds)) {
-    return {
-      status: 'intent_unverified',
-      reasonCode: 'approval_dependency_undeclared',
-      detail: `intent material carries approval semantics (signal in: ${intentMaterial.approvalSignalFields.join(', ')}) but executionConditions declare no approval-kind required fact — an under-reported approval dependency must not reach generation`,
-      nextAction: 'Re-run the scribe stage: declare the approval dependency in executionConditions (factKind e.g. design_approval) with its textual basis, or correct the intent material if it overstates the requirement.',
-    };
+  // SPEC-RULECODE-QUALITY-001 A1 (Owner review R2/R3) — two-direction audit
+  // of the declaration against BOTH material pools (scribe + upstream).
+  // 口径 (R3 exact-bypass fix): only required:true declarations count as
+  // claimed — a required:false entry is semantically unclaimed (downstream
+  // filters it out), so design_approval + required:false must NOT satisfy
+  // the name check and then filter to an empty dependency set.
+  // The keyword sweep is a SECONDARY, stop-only layer; the PRIMARY guarantee
+  // is the upstream binding above. Known disclosed boundary (NOT closed):
+  // synonym phrasings absent from the small vocabulary can evade the sweep
+  // when BOTH layers use them — the structural answers are the upstream
+  // binding and the structured declaration, not vocabulary growth.
+  const scribeMaterial = collectIntentMaterial(parsed);
+  const effectiveFacts = conditions.requiredFacts.filter((fact) => fact.required);
+  const effectiveFactKinds = effectiveFacts.map((fact) => fact.factKind.toLowerCase()).join(' ');
+  const upstreamSignalFields = approvalSignalsInText(upstreamMaterial.normalisedText);
+  const pools: { label: string; hasSignal: boolean; fields: readonly string[] }[] = [
+    { label: 'scribe', hasSignal: scribeMaterial.hasApprovalSignal, fields: scribeMaterial.approvalSignalFields },
+    { label: 'upstream', hasSignal: upstreamSignalFields.length > 0, fields: upstreamSignalFields },
+  ];
+  for (const pool of pools) {
+    if (pool.hasSignal && !/approv/.test(effectiveFactKinds)) {
+      return {
+        status: 'intent_unverified',
+        reasonCode: 'approval_dependency_undeclared',
+        detail: `${pool.label} material carries approval semantics (signal in: ${pool.fields.join(', ')}) but executionConditions declare no REQUIRED approval-kind fact — an under-reported approval dependency must not reach generation`,
+        nextAction: 'Re-run the scribe stage: declare the approval dependency in executionConditions (factKind e.g. design_approval with required: true) with its textual basis, or correct the material if it overstates the requirement.',
+      };
+    }
   }
 
-  // (2) textualBasis anchoring: every declared fact's claimed basis must be
-  // traceable to the intent material (normalised substring anchor). A basis
-  // anchored nowhere is fabricated or mistyped — the declaration cannot be
-  // verified against the Owner-attributed material.
-  for (const fact of conditions.requiredFacts) {
-    if (!isTextualBasisAnchored(fact.textualBasis, intentMaterial.normalisedText)) {
+  // textualBasis anchoring — same required:true口径; the anchor pool is the
+  // UNION of the scribe intent material and the upstream material, so a fact
+  // requirement can be bound to the upstream intent it was distilled from.
+  const combinedPool = scribeMaterial.normalisedText + ' ' + upstreamMaterial.normalisedText;
+  for (const fact of effectiveFacts) {
+    if (!isTextualBasisAnchored(fact.textualBasis, combinedPool)) {
       return {
         status: 'intent_unverified',
         reasonCode: 'textual_basis_unanchored',
-        detail: `required fact '${fact.factKind}' textualBasis ("${fact.textualBasis.replace(/\s+/g, ' ').slice(0, 120)}") cannot be anchored in the intent material (intentContract + principleDraft.statement)`,
+        detail: `required fact '${fact.factKind}' textualBasis ("${fact.textualBasis.replace(/\s+/g, ' ').slice(0, 120)}") cannot be anchored in the intent material (scribe intentContract + statement + upstream philosopher material)`,
         nextAction: 'Re-run the scribe stage: quote or precisely cite the Owner-attributed text the fact requirement was read from.',
       };
     }
   }
 
-  const requiredFacts = conditions.requiredFacts.filter((fact) => fact.required);
+  const requiredFacts = effectiveFacts;
   if (requiredFacts.length > 0 && trustedFacts === undefined) {
     return {
       status: 'unsupported',
@@ -491,7 +596,7 @@ export async function preflightArtificerIntentBasis(
 ): Promise<ArtificerIntentPreflightVerdict> {
   const { taskId, piTask, owner, workspaceDir, eventEmitter, trustedFacts } = params;
 
-  let scribeArtifact: { artifactId: string; contentJson: string } | null;
+  let scribeArtifact: { artifactId: string; contentJson: string; scribeDependencyTaskIds: readonly string[] } | null;
   try {
     scribeArtifact = await resolveScribeArtifact(params);
   } catch (error: unknown) {
@@ -499,9 +604,22 @@ export async function preflightArtificerIntentBasis(
     const faultDetail = `artifact store read failed: ${error instanceof Error ? error.message : String(error)}`;
     return applySourceFault(params, faultDetail);
   }
+  // Owner review R3: resolve the UPSTREAM (philosopher) material — the second
+  // independent leg. Store I/O on this leg is a source fault like any other
+  // (Q21); a clean unresolvable result is a material stop, handled inside
+  // assessIntentBasis.
+  let upstreamMaterial: { normalisedText: string } | null = null;
+  if (scribeArtifact !== null) {
+    try {
+      upstreamMaterial = await resolveUpstreamMaterial(params, scribeArtifact.scribeDependencyTaskIds);
+    } catch (error: unknown) {
+      const faultDetail = `upstream artifact read failed: ${error instanceof Error ? error.message : String(error)}`;
+      return applySourceFault(params, faultDetail);
+    }
+  }
   // The assessment re-derives from the CURRENT artifact on every run — a
   // stored record is never consulted as a pass token (Q13/Q20).
-  const assessment = assessIntentBasis({ scribeArtifact, trustedFacts, taskId });
+  const assessment = assessIntentBasis({ scribeArtifact, upstreamMaterial, trustedFacts, taskId });
 
   eventEmitter.emitTelemetry({
     eventType: 'artificer_intent_basis_checked',
