@@ -97,3 +97,11 @@ New durable truth: NO；新持久状态: YES（intentBasisVerification/sourceFau
 - **P2-7（已修）**：executable 记录 CAS 失败时 recordPersisted=false 进入遥测 payload（rc-9）。
 - **P2-8（已修）**：SPEC v0.1/v0.2、评审核实、执行边界文档随本分支提交（docs/specs/）。
 - **P2-9（已修）**：assessIntentBasis 撤出公共 barrel（runner/测试直接文件导入）。
+
+## 最终上游材料停点修复（2026-10-17）
+
+修复共享 resolver 将损坏 JSON、空白内容或仅含身份字段的对象包装为有效依据的问题。只从正式 Philosopher 正文字段及既有 analysis 形状收集材料；无有效正文返回缺失，assessment 同时拒绝空白投影。消费预检与 Runner 防御继续复用同一实现，不增加审批权威或持久状态。
+
+验证：7 项真实 SQLite/store→resolver→preflight 负控在修复前全部失败，修复后通过；相关 core 三文件 104 项、host-runtime 四文件 27 项全部通过，core 重建、修改文件 ESLint、ERR 记录检查通过。独立静态复审无新增阻断。完整合并门禁由正常推送 hook 执行，远程 CI 以最终提交为准。
+
+复杂度增量：本次窄修复所有项均 NO。既有审批语义识别与两层模型重述的能力边界保持披露，不将材料非空误称为原意完整证明。未修改生产状态、安装文件或激活规则；B 的 NO-GO/BLOCKED 结论不变。

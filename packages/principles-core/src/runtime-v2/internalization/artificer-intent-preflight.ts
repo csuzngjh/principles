@@ -309,9 +309,17 @@ export async function collectUpstreamNormalisedText(
     const artifacts = await listBySourceTaskId(depId);
     const [first] = artifacts;
     if (first === undefined) continue;
+    const parsed = safeParseJson(first.contentJson);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
     const texts: string[] = [];
-    collectAllStrings(safeParseJson(first.contentJson), texts, 0);
-    return { normalisedText: normaliseForAnchor(texts.join(' ')) };
+    // Only intent-bearing fields count as upstream material. Artifact IDs
+    // and timestamps cannot turn an empty/corrupt analysis into evidence.
+    // `analysis` retains the existing compact philosopher material shape.
+    for (const key of ['thesis', 'principleCandidate', 'risks', 'analysis']) {
+      if (Object.hasOwn(parsed, key)) collectAllStrings(Reflect.get(parsed, key), texts, 0);
+    }
+    const normalisedText = normaliseForAnchor(texts.join(' '));
+    return normalisedText.length > 0 ? { normalisedText } : null;
   }
   return null;
 }
@@ -460,12 +468,12 @@ export function assessIntentBasis(input: {
   // Owner review R3 — UPSTREAM BINDING: every audited surface below would be
   // one model output grading itself if the scribe artifact were the only
   // material. No philosopher material → no verdict.
-  if (upstreamMaterial === null) {
+  if (upstreamMaterial === null || upstreamMaterial.normalisedText.trim() === '') {
     return {
       status: 'intent_unverified',
       reasonCode: 'upstream_material_unavailable',
-      detail: "no succeeded philosopher artifact resolvable from the scribe task's dependencies — the intent verdict may not rest on the scribe artifact alone",
-      nextAction: 'Inspect the task lineage; the philosopher stage must succeed and persist its artifact (the intent basis is verified against BOTH the scribe artifact and the upstream material).',
+      detail: "no valid, non-empty philosopher material resolvable from the scribe task's dependencies — missing, malformed, or empty upstream artifacts cannot establish the intent basis",
+      nextAction: 'Inspect the task lineage and philosopher artifact content; restore valid non-empty intent material before retrying generation.',
     };
   }
   let parsed: unknown;

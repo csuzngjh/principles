@@ -34,6 +34,8 @@ import {
 } from '../../index.js';
 import {
   preflightArtificerIntentBasis,
+  assessIntentBasis,
+  collectUpstreamNormalisedText,
   consumeSourceFaultBackoffSkip,
   ARTIFICER_INTENT_NHR_SOURCE_RUN_ID,
   type ArtificerTrustedFactsPort,
@@ -435,6 +437,67 @@ describe('preflightArtificerIntentBasis — stop points (Q01/Q20)', () => {
     if (verdict.decision !== 'blocked') throw new Error('unreachable');
     expect(verdict.reasonCode).toBe('approval_dependency_undeclared');
     expect(verdict.detail).toContain('upstream');
+  });
+
+  it.each([
+    ['malformed JSON', '{broken'],
+    ['empty object', '{}'],
+    ['null', 'null'],
+    ['array', '[]'],
+    ['scalar', '"not an artifact"'],
+    ['blank analysis', '{"analysis":"   "}'],
+    ['identity fields only', '{"taskId":"philosopher-intent-001","sourceDreamerArtifactId":"dreamer-001","generatedAt":"2026-10-17"}'],
+  ])('rejects %s upstream material before generation, rather than treating artifact existence as evidence', async (_label, contentJson) => {
+    const workspaceDir = makeWorkspace();
+    await seedArtificerTask(workspaceDir, conditionsScribeContent([]));
+    const handle = await createRuntimeStateHandle({ workspaceDir, readonly: false });
+    try {
+      const [artifact] = await handle.stateManager.piArtifactStore.listBySourceTaskId(PHILOSOPHER_TASK_ID);
+      if (!artifact) throw new Error('fixture philosopher artifact missing');
+      await handle.stateManager.piArtifactStore.upsertArtifact({
+        ...artifact,
+        contentJson,
+        updatedAt: new Date().toISOString(),
+      });
+    } finally {
+      await handle.close().catch(() => undefined);
+    }
+
+    const verdict = await runPreflight(workspaceDir);
+    expect(verdict.decision).toBe('blocked');
+    if (verdict.decision !== 'blocked') throw new Error('unreachable');
+    expect(verdict.logicalResult).toBe('intent_unverified');
+    expect(verdict.reasonCode).toBe('upstream_material_unavailable');
+    const task = await readTask(workspaceDir);
+    expect(task?.status).toBe('needs_human_review');
+  });
+
+  it('retains real philosopher thesis and candidate material while ignoring identity-only fields', async () => {
+    const material = await collectUpstreamNormalisedText(
+      async () => ({ taskKind: 'philosopher', status: 'succeeded' }),
+      async () => [{ contentJson: JSON.stringify({
+        taskId: PHILOSOPHER_TASK_ID,
+        sourceDreamerArtifactId: 'dreamer-001',
+        thesis: 'Read the target before writing it.',
+        principleCandidate: { title: 'Read before write', rationale: 'Blind writes lose information.', scope: 'File edits', confidence: 0.9 },
+        risks: [],
+        generatedAt: '2026-10-17',
+      }) }],
+      [PHILOSOPHER_TASK_ID],
+    );
+    expect(material?.normalisedText).toContain('readthetargetbeforewritingit');
+    expect(material?.normalisedText).not.toContain('dreamer');
+  });
+
+  it('the shared defensive assessment also refuses an empty upstream projection', () => {
+    const verdict = assessIntentBasis({
+      scribeArtifact: { artifactId: 'scribe-review', contentJson: conditionsScribeContent([]) },
+      upstreamMaterial: { normalisedText: '   ' },
+      taskId: TASK_ID,
+    });
+    expect(verdict.status).toBe('intent_unverified');
+    if (verdict.status === 'executable') throw new Error('unreachable');
+    expect(verdict.reasonCode).toBe('upstream_material_unavailable');
   });
 
   it('a required fact whose textualBasis anchors nowhere in the intent material stops as textual_basis_unanchored', async () => {
