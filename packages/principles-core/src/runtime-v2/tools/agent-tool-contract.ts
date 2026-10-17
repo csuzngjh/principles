@@ -20,7 +20,8 @@
  *
  * The submit_output tool does NOT terminate the loop via `terminate` (that is
  * unreliable — agent-loop uses .every() over the whole tool batch). Loop termination
- * is driven by shouldStopAfterTurn detecting the captured output (see L2AgentLoopAdapter §M3).
+ * is driven by finishTurn detecting the captured output (see L2AgentLoopAdapter §M3;
+ * Pi 1.2 name — formerly shouldStopAfterTurn).
  */
 import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import { Type } from 'typebox';
@@ -70,7 +71,7 @@ export { DreamerOutputV1Typebox as SubmitOutputSchema };
 
 // ── Captured-output container ─────────────────────────────────────────────────
 // The adapter reads this after the loop ends. submit_output stores its params here;
-// shouldStopAfterTurn checks it to decide termination.
+// finishTurn (Pi 1.2; formerly shouldStopAfterTurn) checks it to decide termination.
 
 export interface L2OutputCapture {
   output: unknown | null;
@@ -195,7 +196,7 @@ export function buildDreamerL2Tools(ctx: PdL2ToolContext): AgentTool[] {
       'Submit your final dreamer output. You MUST call this exactly once with a complete DreamerOutputV1 object (valid=true, taskId, 1-5 candidates, contextRefs, generatedAt). The loop stops after you call this. Do not emit the answer as free text — call this tool.',
     parameters: DreamerOutputV1Typebox,
     execute: async (_id, params): Promise<AgentToolResult<undefined>> => {
-      // Store the captured output. The adapter's shouldStopAfterTurn detects this and
+      // Store the captured output. The adapter's finishTurn detects this and
       // terminates the loop; terminate:true is a secondary hint only (unreliable across
       // a multi-tool batch — see ADR-0014 amendment §B.3 / review P0-2).
       ctx.outputCapture.output = params;

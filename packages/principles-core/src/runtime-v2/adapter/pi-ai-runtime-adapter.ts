@@ -21,7 +21,7 @@
 import { getModel, completeSimple } from '@earendil-works/pi-ai/compat';
 import { builtinPiAiProviderIds } from './pi-ai-catalog.js';
 import { getPiAiFetchForApi } from './pi-ai-http-transport.js';
-import type { Context, UserMessage, AssistantMessage, Model, SimpleStreamOptions } from '@earendil-works/pi-ai';
+import type { Context, UserMessage, AssistantMessage, Model, SimpleStreamOptions, ToolCall } from '@earendil-works/pi-ai';
 import { Value } from '@sinclair/typebox/value';
 import type { TSchema } from '@sinclair/typebox';
 import { PDRuntimeError } from '../error-categories.js';
@@ -1140,8 +1140,10 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         return { success: false, fallbackReason: 'provider_no_tool_use' };
       }
 
+      // Pi 1.2 (pi-ai 0.86): ToolCall.arguments narrowed to JsonObject —
+      // narrow with the SDK's own ToolCall type instead of a widened literal.
       const toolCallBlock = response.content.find(
-        (block): block is { type: 'toolCall'; id: string; name: string; arguments: Record<string, unknown> } =>
+        (block): block is ToolCall =>
           typeof block === 'object' && block !== null && Object.hasOwn(block, 'type') && block.type === 'toolCall',
       );
 
