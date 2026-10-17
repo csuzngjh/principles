@@ -45,6 +45,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, cpSync, writeFileSync } from 'node:fs';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
+import semver from 'semver';
 import {
   getInstallLayoutPaths,
   getWorkbuddyWorkspaceDir,
@@ -100,6 +101,22 @@ function userInstalledPluginRecord(value: unknown): Record<string, unknown> | un
   const records = Array.isArray(value) ? value : [value];
   return records.find((record): record is Record<string, unknown> =>
     isRecord(record) && record.scope === 'user' && record.projectPath === undefined);
+}
+
+function isSafePluginVersion(version: unknown): version is string {
+  return typeof version === 'string'
+    && /^[0-9][0-9A-Za-z.+-]*$/.test(version)
+    && semver.valid(version) !== null;
+}
+
+/** Deletion/writes may target only a strict child of our fixed cache root. */
+function workbuddyCacheVersionDir(cacheRoot: string, version: string): string | undefined {
+  if (!isSafePluginVersion(version)) return undefined;
+  const root = path.resolve(cacheRoot);
+  const target = path.resolve(root, version);
+  const relative = path.relative(root, target);
+  if (relative.length === 0 || path.isAbsolute(relative) || relative === '..' || relative.startsWith(`..${path.sep}`)) return undefined;
+  return target;
 }
 
 export interface WorkbuddyCommandResult {
@@ -375,6 +392,9 @@ export function findWorkbuddyPluginPayload(pluginDir: string, runtimeAdapterDir:
     if (!isRecord(manifest) || manifest.name !== WORKBUDDY_PLUGIN_NAME) {
       return { reason: `workbuddy_plugin_manifest_invalid: ${manifestPath} must declare name "${WORKBUDDY_PLUGIN_NAME}" (got ${isRecord(manifest) ? JSON.stringify(manifest.name) : 'unparsable manifest'}).` };
     }
+    if (!isSafePluginVersion(manifest.version)) {
+      return { reason: `workbuddy_plugin_version_invalid: ${manifestPath} must declare a safe single-segment semantic version.` };
+    }
     let hooks: unknown;
     try {
       hooks = JSON.parse(readFileSync(hooksPath, 'utf-8'));
@@ -396,7 +416,7 @@ export function findWorkbuddyPluginPayload(pluginDir: string, runtimeAdapterDir:
     if (!existsSync(path.join(root, 'scripts', 'pd-control.cjs'))) {
       return { reason: `workbuddy_plugin_control_missing: ${root} must ship scripts/pd-control.cjs for the pd-disable skill.` };
     }
-    const version = typeof manifest.version === 'string' && manifest.version.length > 0 ? manifest.version : '0.0.0';
+    const { version } = manifest;
     return { payload: { pluginDir: root, version } };
   }
   return {
@@ -1379,7 +1399,8 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     const rawEntry = registry.ok && isRecord(registry.value?.plugins)
       ? registry.value.plugins[WORKBUDDY_PLUGIN_KEY] : undefined;
     const entry = userInstalledPluginRecord(rawEntry);
-    const cacheDir = path.join(p.cachePluginRoot, version);
+    const cacheDir = workbuddyCacheVersionDir(p.cachePluginRoot, version);
+    if (cacheDir === undefined) return false;
     if (!isRecord(entry) || entry.version !== version || entry.installPath !== cacheDir) return false;
     const sourceDir = path.join(p.marketplaceRoot, WORKBUDDY_PLUGIN_NAME);
     const files = [
@@ -1428,6 +1449,10 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     engineNote: string,
   ): { ok: true; mode: 'direct-write'; settingsAction: 'created' | 'updated' | 'preserved'; engineNote: string } | { ok: false; reason: string; nextAction: string } {
     const p = this.paths();
+    const cacheVersionDir = workbuddyCacheVersionDir(p.cachePluginRoot, version);
+    if (cacheVersionDir === undefined) {
+      return { ok: false, reason: 'workbuddy_cache_path_invalid: version must resolve strictly inside the PD plugin cache root. No registration/cache write was performed.', nextAction: 'Reinstall with a valid WorkBuddy plugin payload.' };
+    }
     const settings = readHostJsonFile(p.settingsPath);
     if (!settings.ok) return { ok: false, reason: settings.reason, nextAction: settings.nextAction };
     const registry = readHostJsonFile(p.registryPath);
@@ -1446,7 +1471,6 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     const nextRegistry: Record<string, unknown> = { ...(registry.value ?? {}) };
     if (typeof nextRegistry.version !== 'number') nextRegistry.version = 2;
     const plugins = isRecord(nextRegistry.plugins) ? { ...nextRegistry.plugins } : {};
-    const cacheVersionDir = path.join(p.cachePluginRoot, version);
     const existingEntry = plugins[WORKBUDDY_PLUGIN_KEY];
     const previousUser = userInstalledPluginRecord(existingEntry);
     const now = new Date().toISOString();
@@ -1473,6 +1497,7 @@ export class WorkBuddyHostInstaller implements HostInstaller {
 
     // Versioned cache copy from our marketplace source.
     try {
+      if (workbuddyCacheVersionDir(p.cachePluginRoot, version) !== cacheVersionDir) throw new Error('workbuddy_cache_path_invalid');
       // Other scopes may still reference older versions of this same plugin.
       rmSync(cacheVersionDir, { recursive: true, force: true });
       cpSync(path.join(p.marketplaceRoot, WORKBUDDY_PLUGIN_NAME), cacheVersionDir, { recursive: true });

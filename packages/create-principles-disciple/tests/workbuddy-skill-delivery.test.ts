@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import * as tar from 'tar';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { WorkBuddyHostInstaller, resolveWorkbuddyPaths } from '../src/installers/workbuddy-host-installer.js';
+import { WorkBuddyHostInstaller, resolveWorkbuddyPaths, findWorkbuddyPluginPayload } from '../src/installers/workbuddy-host-installer.js';
 
 const adapter = path.resolve(__dirname, '../../workbuddy-adapter');
 const installerPackage = path.resolve(__dirname, '..');
@@ -38,6 +38,55 @@ afterEach(() => {
 });
 
 describe('WorkBuddy skills through production delivery boundaries', () => {
+  it.each(['../', '../../..', '..\\..\\..', '/absolute/path', 'C:\\absolute\\path', '\\\\server\\share', '.', '..', 'nested/version', 'nested\\version', '', ' 0.1.0', '1.2'])('rejects unsafe manifest version %j before all installer mutations', async (version) => {
+    const payload = temporaryDirectory();
+    const plugin = path.join(payload, 'workbuddy-adapter/plugin');
+    fs.cpSync(path.join(adapter, 'plugin'), plugin, { recursive: true });
+    const manifestPath = path.join(plugin, '.codebuddy-plugin/plugin.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    manifest.version = version;
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+    const home = temporaryDirectory();
+    process.env.WORKBUDDY_CONFIG_DIR = path.join(home, '.workbuddy');
+    const paths = resolveWorkbuddyPaths(home);
+    const sentinels = [
+      path.join(paths.cachePluginRoot, '0.0.9/owner.txt'),
+      path.join(path.dirname(paths.cachePluginRoot), 'neighbor/owner.txt'),
+      path.join(paths.marketplaceRoot, 'owner.txt'),
+      path.join(paths.governanceDir, '.pd/state.db'),
+      path.join(home, 'owner.txt'),
+    ];
+    for (const sentinel of sentinels) {
+      fs.mkdirSync(path.dirname(sentinel), { recursive: true });
+      fs.writeFileSync(sentinel, 'Preserve Owner data');
+    }
+    fs.writeFileSync(paths.settingsPath, '{"enabledPlugins":{"other@market":true},"owner":"preserve"}');
+    fs.mkdirSync(path.dirname(paths.registryPath), { recursive: true });
+    fs.writeFileSync(paths.registryPath, '{"version":2,"plugins":{"other@market":[{"scope":"user","version":"1.0.0","installPath":"preserve"}]}}');
+    const snapshot = () => fs.readdirSync(home, { recursive: true }).sort().map((entry) => {
+      const absolute = path.join(home, String(entry));
+      return [entry, fs.statSync(absolute).isFile() ? fs.readFileSync(absolute).toString('base64') : 'directory'];
+    });
+    const before = snapshot();
+    const installer = new WorkBuddyHostInstaller({ homeDir: () => home, enginePath: () => undefined });
+    const result = await installer.install({ workspaceDir: home, pluginDir: payload, language: 'en', mode: 'smart' });
+    expect(result.success).toBe(false);
+    expect(result.reason).toContain('workbuddy_plugin_version_invalid');
+    expect(snapshot()).toEqual(before);
+  });
+
+  it.each(['0.1.0', '1.2.3', '1.2.3-rc.1', '1.2.3+build.4', '1.2.3-rc.1+build.4'])('accepts safe semantic manifest version %s without normalizing its cache identity', (version) => {
+    const payload = temporaryDirectory();
+    const plugin = path.join(payload, 'workbuddy-adapter/plugin');
+    fs.cpSync(path.join(adapter, 'plugin'), plugin, { recursive: true });
+    const manifestPath = path.join(plugin, '.codebuddy-plugin/plugin.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    manifest.version = version;
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+    const result = findWorkbuddyPluginPayload(payload, path.join(payload, 'absent-runtime'));
+    expect(result.payload?.version, result.reason).toBe(version);
+  });
+
   async function oldCacheLab(engine: boolean) {
     const payload = temporaryDirectory();
     fs.cpSync(path.join(adapter, 'plugin'), path.join(payload, 'workbuddy-adapter/plugin'), { recursive: true });
