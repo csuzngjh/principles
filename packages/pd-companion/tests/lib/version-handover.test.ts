@@ -96,6 +96,15 @@ function waitExit(child: cp.ChildProcess, timeoutMs = 5_000): Promise<void> {
   });
 }
 
+/** waitExit for teardown paths: the listener MUST attach before the kill, or
+ * the one-shot exit event fires unobserved and the await hangs (missed on fast
+ * Linux CI where the process dies between two liveness polls). */
+async function killAndAwaitExit(child: cp.ChildProcess): Promise<void> {
+  const exited = waitExit(child);
+  child.kill();
+  await exited;
+}
+
 function managedRunning(serverPid: number): SupervisorState {
   return { kind: 'running', mode: 'managed', url: `http://${HOST}:3100`, port: 3100, serverPid };
 }
@@ -134,8 +143,7 @@ describe('version-handover (PRI-1012 P1) — the killable-handle guard', () => {
       await new Promise((r) => setTimeout(r, 250));
       expect(realProcessOps.isAlive(external.pid!)).toBe(true);
     } finally {
-      external.kill();
-      await waitExit(external).catch(() => undefined);
+      await killAndAwaitExit(external).catch(() => undefined);
     }
   }, 15_000);
 });
@@ -149,9 +157,12 @@ describe('version-handover (PRI-1012 P1) — real stop-and-confirm against real 
       const handle = ownedManagedHandle(managedRunning(old.pid!), true);
       expect(handle).toBeDefined();
 
+      // attach BEFORE the kill: the exit event is one-shot and the lib's
+      // liveness poll may observe death a tick before the event delivers
+      const oldExited = waitExit(old);
       const confirmed = await killManagedServerAndWait(handle!, realProcessOps, { timeoutMs: 5_000 });
       expect(confirmed).toBe(true);
-      await waitExit(old);
+      await oldExited;
       await waitForPortFree(port);
       expect(realProcessOps.isAlive(old.pid!)).toBe(false);
 
@@ -162,8 +173,7 @@ describe('version-handover (PRI-1012 P1) — real stop-and-confirm against real 
         expect(fresh.pid).not.toBe(old.pid);
         expect(realProcessOps.isAlive(fresh.pid!)).toBe(true);
       } finally {
-        fresh.kill();
-        await waitExit(fresh).catch(() => undefined);
+        await killAndAwaitExit(fresh).catch(() => undefined);
       }
     } catch (err) {
       old.kill();
@@ -198,9 +208,11 @@ describe('version-handover (PRI-1012 P1) — real stop-and-confirm against real 
     try {
       await waitForPort(port);
       // cliPid undefined — the wrapper is already gone (old pd-cli shape)
+      // attach BEFORE the kill (same one-shot event race as above)
+      const serverExited = waitExit(server);
       const confirmed = await killManagedServerAndWait({ serverPid: server.pid! }, realProcessOps, { timeoutMs: 5_000 });
       expect(confirmed).toBe(true);
-      await waitExit(server);
+      await serverExited;
     } catch (err) {
       server.kill();
       throw err;
