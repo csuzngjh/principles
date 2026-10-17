@@ -1,6 +1,6 @@
 {
   "barrel": "src/runtime-v2/index.ts",
-  "count": 1928,
+  "count": 1929,
   "names": [
     "ADMISSION_CONFIDENCE_THRESHOLD",
     "ADMISSION_POLICY_VERSION",
@@ -1492,6 +1492,7 @@
     "assessEvidenceReadiness",
     "attachOwnerEvidence",
     "auditCandidateLedgerConsistency",
+    "boundCorrectionEvidenceText",
     "boundedEvidence",
     "boundedFloodEvidence",
     "bucketDateFromTime",

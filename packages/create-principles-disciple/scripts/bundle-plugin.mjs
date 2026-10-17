@@ -160,6 +160,8 @@ const WORKBUDDY_ADAPTER_REQUIRED = [
   'package.json',
   join('plugin', '.codebuddy-plugin', 'plugin.json'),
   join('plugin', 'hooks', 'hooks.json'),
+  join('plugin', 'scripts', 'pd-control.cjs'),
+  ...['pd-record-pain', 'pd-status', 'pd-review', 'pd-disable'].map((skill) => join('plugin', 'skills', skill, 'SKILL.md')),
 ];
 
 const INSTALL_LAYOUT_REQUIRED = [

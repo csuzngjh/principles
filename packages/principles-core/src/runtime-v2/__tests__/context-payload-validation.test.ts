@@ -11,6 +11,7 @@
 import { describe, it, expect } from 'vitest';
 import { TypeCompiler } from '@sinclair/typebox/compiler';
 import {
+  PainCorrectionEvidenceSchema,
   HistoryQueryEntrySchema,
   TrajectoryLocateQuerySchema,
   TrajectoryCandidateSchema,
@@ -386,5 +387,14 @@ describe('PainEvidenceEntrySchema', () => {
     };
 
     expect(checkPainEvidenceEntry.Check(entry)).toBe(true);
+  });
+});
+
+describe('explicit WorkBuddy Owner correction evidence', () => {
+  const check = TypeCompiler.Compile(PainCorrectionEvidenceSchema);
+  it('accepts disclosed WorkBuddy authorship without asserting verification', () => {
+    expect(check.Check({ text: 'Owner words', classification: 'owner_statement', channel: 'workbuddy_explicit_prefix' })).toBe(true);
+    expect(check.Check({ text: 'Owner words', classification: 'runtime_verified', channel: 'workbuddy_explicit_prefix' })).toBe(false);
+    expect(check.Check({ text: 'Owner words', classification: 'owner_statement', channel: 'invented_channel' })).toBe(false);
   });
 });

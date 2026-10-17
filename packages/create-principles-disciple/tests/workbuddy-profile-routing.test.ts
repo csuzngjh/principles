@@ -114,6 +114,11 @@ function pdCliLauncherContent(): string {
 }
 
 function writeWorkbuddyPluginSkeleton(pluginDir: string, version = '0.3.0'): void {
+  // Skills/control are part of the production installer payload contract.
+  fs.cpSync(path.resolve(__dirname, '../../workbuddy-adapter/plugin/skills'), path.join(pluginDir, 'skills'), { recursive: true });
+  fs.mkdirSync(path.join(pluginDir, 'scripts'), { recursive: true });
+  fs.copyFileSync(path.resolve(__dirname, '../../workbuddy-adapter/plugin/scripts/pd-control.cjs'), path.join(pluginDir, 'scripts', 'pd-control.cjs'));
+
   fs.mkdirSync(path.join(pluginDir, '.codebuddy-plugin'), { recursive: true });
   fs.writeFileSync(
     path.join(pluginDir, '.codebuddy-plugin', 'plugin.json'),

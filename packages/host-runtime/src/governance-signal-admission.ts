@@ -47,6 +47,7 @@ import {
   createDiagnosticianTaskId,
   disposePainSignalBridgesForWorkspace,
   sanitizeString,
+  boundCorrectionEvidenceText,
   MAX_EVIDENCE_VALUE_CHARS,
   type GovernanceHostKind,
   type SignalCollectorConfig,
@@ -427,7 +428,7 @@ function openAdmissionStore(workspaceDir: string, factory?: ObservationDatabaseF
 
 export interface GovernanceCorrectionCandidate {
   readonly kind: 'user_correction';
-  readonly hostKind: 'codex';
+  readonly hostKind: 'codex' | 'workbuddy';
   readonly logicalObservationKey: string;
   readonly rolloutIdentity: string;
   readonly rootSessionId: string;
@@ -436,7 +437,7 @@ export interface GovernanceCorrectionCandidate {
   readonly observedAt: string;
   /**
    * SPEC-CODEX-PAIN-CLOSURE-001 CR-02/CR-07: the text is an EXPLICIT Owner
-   * statement (Codex `PD记录痛苦：` prefix). Explicit submissions bypass the
+   * statement (native current-user `PD记录痛苦：` prefix). Explicit submissions bypass the
    * STRONG+high-precision keyword gate — the Owner's explicit request is the
    * signal; nothing is inferred. Rate limiting and the unique observation-key
    * dedup still apply unchanged.
@@ -538,7 +539,7 @@ interface CorrectionPainArgs {
 
 function insertCorrectionPain({ db, candidate, workspaceDir, painId, detection, nowIso }: CorrectionPainArgs): string {
   const reason = candidate.explicitOwnerStatement === true
-    ? 'Codex explicit owner statement (PD记录痛苦 prefix)'
+    ? `${candidate.hostKind === 'workbuddy' ? 'WorkBuddy' : 'Codex'} explicit owner statement (PD记录痛苦 prefix)`
     : detection !== undefined && detection.matchedTerms.length > 0
       ? `User correction detected: ${detection.matchedTerms.join(', ')}`
       : 'User correction detected';
@@ -570,7 +571,7 @@ interface GovernanceTaskSubmissionPayload {
    * correction evidence (verbatim, classified) — never inside evidence[]
    * pseudo-trace entries and never summarized by an AI.
    */
-  readonly correctionEvidence?: { text: string; classification: 'owner_statement'; channel: 'codex_explicit_prefix' };
+  readonly correctionEvidence?: { text: string; classification: 'owner_statement'; channel: 'codex_explicit_prefix' | 'workbuddy_explicit_prefix' };
 }
 
 /**
@@ -613,13 +614,19 @@ function taskSubmissionPayload(candidate: GovernanceSignalCandidate, workspaceDi
       reason: reason || 'User correction detected',
       score: GOVERNANCE_STRONG_PAIN_SCORE,
       sessionId: candidate.rootSessionId,
-      hostKind: 'codex',
-      evidence: [{ sourceRef: `governance_observation:${candidate.logicalObservationKey}`, note: sanitizeString(candidate.text, workspaceDir) }],
+      hostKind: candidate.hostKind,
+      // WorkBuddy explicit intake has no transcript observation to promote.
+      // The classified Owner statement is its input basis, not a pseudo-trace.
+      evidence: candidate.hostKind === 'workbuddy' && candidate.explicitOwnerStatement === true
+        ? []
+        : [{ sourceRef: `governance_observation:${candidate.logicalObservationKey}`, note: sanitizeString(candidate.text, workspaceDir) }],
       // SPEC-CODEX-PAIN-CLOSURE-001 CR-02 (merged from main): an explicit
       // Owner statement rides as classified correction evidence — never
       // summarized by an AI, never inside evidence[] pseudo-trace entries.
       ...(candidate.explicitOwnerStatement === true
-        ? { correctionEvidence: { text: sanitizeString(candidate.text, workspaceDir), classification: 'owner_statement' as const, channel: 'codex_explicit_prefix' as const } }
+        ? { correctionEvidence: candidate.hostKind === 'workbuddy'
+          ? { text: boundCorrectionEvidenceText({ text: candidate.text, classification: 'owner_statement', channel: 'workbuddy_explicit_prefix' }, workspaceDir).text, classification: 'owner_statement' as const, channel: 'workbuddy_explicit_prefix' as const }
+          : { text: sanitizeString(candidate.text, workspaceDir), classification: 'owner_statement' as const, channel: 'codex_explicit_prefix' as const } }
         : {}),
     };
     return JSON.stringify(payload);
@@ -865,8 +872,8 @@ interface AdmitOneArgs {
 }
 
 function admitOne({ db, candidate, workspaceDir, now, nowIso, keywordStore, onDegradation }: AdmitOneArgs): GovernanceAdmissionOutcome {
-  if (candidate.hostKind !== 'codex') {
-    return { ok: false, reason: 'unsupported_host_kind', nextAction: 'governance signal admission currently accepts codex observations only' };
+  if (candidate.hostKind !== 'codex' && !(candidate.hostKind === 'workbuddy' && candidate.kind === 'user_correction' && candidate.explicitOwnerStatement === true)) {
+    return { ok: false, reason: 'unsupported_host_kind', nextAction: 'governance signal admission accepts Codex observations or explicit WorkBuddy Owner statements' };
   }
 
   const marker = db.prepare('SELECT * FROM governance_signal_admissions WHERE logical_observation_key = ?').get(candidate.logicalObservationKey);
@@ -956,7 +963,8 @@ function isGovernanceTaskPayload(value: unknown): value is GovernanceTaskSubmiss
   const correctionEvidence = own(value, 'correctionEvidence');
   const hasOwnerStatement = isRecord(correctionEvidence)
     && own(correctionEvidence, 'classification') === 'owner_statement'
-    && own(correctionEvidence, 'channel') === 'codex_explicit_prefix'
+    && (own(correctionEvidence, 'channel') === 'codex_explicit_prefix' && hostKind === 'codex'
+      || own(correctionEvidence, 'channel') === 'workbuddy_explicit_prefix' && hostKind === 'workbuddy')
     && typeof own(correctionEvidence, 'text') === 'string'
     && (own(correctionEvidence, 'text') as string).length > 0;
   if (correctionEvidence !== undefined && !hasOwnerStatement) return false;
