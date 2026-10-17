@@ -75,6 +75,7 @@ export const WORKBUDDY_PLUGIN_NAME = 'principles-disciple';
 export const WORKBUDDY_MARKETPLACE_NAME = 'principles-disciple-market';
 /** Registry/settings key: "principles-disciple@principles-disciple-market". */
 export const WORKBUDDY_PLUGIN_KEY = `${WORKBUDDY_PLUGIN_NAME}@${WORKBUDDY_MARKETPLACE_NAME}`;
+const WORKBUDDY_REQUIRED_SKILLS = ['pd-record-pain', 'pd-status', 'pd-review', 'pd-disable'];
 
 /** Engine CLI shipped with WorkBuddy Desktop (probe P01 frozen path). */
 export const WORKBUDDY_ENGINE_RELATIVE = ['resources', 'app.asar.unpacked', 'cli', 'dist', 'codebuddy-lite-wb.mjs'];
@@ -375,6 +376,18 @@ export function findWorkbuddyPluginPayload(pluginDir: string, runtimeAdapterDir:
     }
     if (!isRecord(hooks) || !isRecord(hooks.hooks)) {
       return { reason: `workbuddy_plugin_hooks_invalid: ${hooksPath} must contain a "hooks" object (frozen manifest-facts shape).` };
+    }
+    // Plugin-root discovery is the WorkBuddy skill delivery boundary. Do not
+    // register an old hook-only payload as a complete install.
+    for (const skill of WORKBUDDY_REQUIRED_SKILLS) {
+      const skillPath = path.join(root, 'skills', skill, 'SKILL.md');
+      try {
+        if (readFileSync(skillPath, 'utf-8').trim().length > 0) continue;
+      } catch { /* Missing/unreadable required skills fail before registration. */ }
+      return { reason: `workbuddy_plugin_skill_missing: required nonempty skill ${skillPath}. Reinstall with a complete WorkBuddy payload.` };
+    }
+    if (!existsSync(path.join(root, 'scripts', 'pd-control.cjs'))) {
+      return { reason: `workbuddy_plugin_control_missing: ${root} must ship scripts/pd-control.cjs for the pd-disable skill.` };
     }
     const version = typeof manifest.version === 'string' && manifest.version.length > 0 ? manifest.version : '0.0.0';
     return { payload: { pluginDir: root, version } };
@@ -1282,6 +1295,13 @@ export class WorkBuddyHostInstaller implements HostInstaller {
   ): { ok: true; mode: 'engine' | 'direct-write' | 'already-registered'; settingsAction: 'created' | 'updated' | 'preserved'; engineNote?: string } | { ok: false; reason: string; nextAction: string } {
     const p = this.paths();
 
+    // A registered old plugin can still be hook-only, even at the same
+    // manifest version. Reuse the installer-owned registration/cache writer
+    // rather than reporting a stale cache as an idempotent successful install.
+    if (details.registered && !this.pluginCacheMatchesPayload(version)) {
+      return this.directWriteRegistration(details, version, 'registered plugin cache differs from the current bundled payload; refreshed by installer');
+    }
+
     // Idempotent fast path: already registered AND enabled AND cached.
     if (details.registered && details.pluginEnabled && existsSync(p.cachePluginRoot)) {
       return { ok: true, mode: 'already-registered', settingsAction: 'preserved' };
@@ -1344,6 +1364,28 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     const direct = this.directWriteRegistration(details, version, 'engine binary not found');
     if (direct.ok) return direct;
     return { ok: false, reason: direct.reason, nextAction: direct.nextAction };
+  }
+
+  private pluginCacheMatchesPayload(version: string): boolean {
+    const p = this.paths();
+    const registry = readHostJsonFile(p.registryPath);
+    const entry = registry.ok && isRecord(registry.value?.plugins)
+      ? registry.value.plugins[WORKBUDDY_PLUGIN_KEY] : undefined;
+    const cacheDir = path.join(p.cachePluginRoot, version);
+    if (!isRecord(entry) || entry.version !== version || entry.installPath !== cacheDir) return false;
+    const sourceDir = path.join(p.marketplaceRoot, WORKBUDDY_PLUGIN_NAME);
+    const files = [
+      path.join('.codebuddy-plugin', 'plugin.json'),
+      path.join('hooks', 'hooks.json'),
+      path.join('scripts', 'wrapper.cjs'),
+      path.join('scripts', 'pd-control.cjs'),
+      ...WORKBUDDY_REQUIRED_SKILLS.map((skill) => path.join('skills', skill, 'SKILL.md')),
+    ];
+    try {
+      return files.every((file) => readFileSync(path.join(sourceDir, file)).equals(readFileSync(path.join(cacheDir, file))));
+    } catch {
+      return false;
+    }
   }
 
   /**

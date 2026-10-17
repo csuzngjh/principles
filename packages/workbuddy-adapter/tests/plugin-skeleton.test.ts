@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import { getInstallLayoutPaths } from '@principles/install-layout';
+import { load } from 'js-yaml';
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PLUGIN_ROOT = path.join(PACKAGE_ROOT, 'plugin');
@@ -19,6 +20,18 @@ const HOOKS = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, 'hooks', 'hooks.
 };
 
 describe('plugin manifest (probe P01 manifest facts)', () => {
+  it('ships four discoverable plugin-root skills and their disable command', () => {
+    for (const name of ['pd-record-pain', 'pd-status', 'pd-review', 'pd-disable']) {
+      const skill = fs.readFileSync(path.join(PLUGIN_ROOT, 'skills', name, 'SKILL.md'), 'utf8');
+      const frontmatter = skill.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
+      expect(frontmatter, `${name} has valid frontmatter delimiters`).not.toBeNull();
+      const metadata: unknown = load(frontmatter?.[1] ?? '');
+      expect(metadata).toMatchObject({ name, description: expect.any(String) });
+      expect(skill).toContain('.workbuddy/pd-workspace');
+    }
+    expect(fs.statSync(path.join(PLUGIN_ROOT, 'scripts', 'pd-control.cjs')).isFile()).toBe(true);
+  });
+
   it('declares a kebab-case name with a version', () => {
     expect(MANIFEST['name']).toBe('principles-disciple');
     expect(String(MANIFEST['name'])).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
