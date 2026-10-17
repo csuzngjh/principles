@@ -32,7 +32,7 @@ import {
 } from '../lib/launch-result.js';
 import { buildConsoleTokenStatus, isSameConsoleOrigin, type ConsoleTokenStatus } from '../lib/console-origin.js';
 import { entryFileVerdict, errnoCode } from '../lib/entry-verdict.js';
-import { ConsoleSupervisor } from '../lib/supervisor.js';
+import { ConsoleSupervisor, ENTRY_PENDING_REASON_PREFIX } from '../lib/supervisor.js';
 import { buildDegradedPageHtml, buildDegradedWorkspacesTrayView, buildSyncUnavailableTrayView, describeDegraded, describeWorkspaceWorkerDegraded, describeWorkspaceSyncUnavailable } from '../lib/degraded.js';
 import {
   defaultCompanionState,
@@ -69,6 +69,8 @@ let installedPluginDir: string | undefined;
 let pollTimer: ReturnType<typeof setInterval> | undefined;
 let updateTimer: ReturnType<typeof setInterval> | undefined;
 let workspaceWorkerTimer: ReturnType<typeof setInterval> | undefined;
+/** The single pending restart retry (see scheduleRestartRetry). */
+let restartRetryTimer: ReturnType<typeof setTimeout> | undefined;
 let quitting = false;
 let baselineRecorded = false;
 let consecutivePollFailures = 0;
@@ -202,6 +204,9 @@ function killSpawnedTree(child: ChildProcess | undefined): void {
 }
 
 function stopServer(): void {
+  // Cancelling a pending retry is part of stopping: an Owner-initiated restart
+  // must not be joined later by the timer of the chain it replaced.
+  clearRestartRetry();
   supervisor.markIntentionalStop();
   if (supervisor.ownsProcess()) {
     killSpawnedTree(cliChild);
@@ -256,7 +261,19 @@ function startSupervision(): void {
   if (runtime?.fallbackReason !== undefined) {
     log('install_layout_legacy_fallback', { reason: runtime.fallbackReason });
   }
-  if (!fs.existsSync(resolvePdCliEntry(extDir))) {
+  const coldStartEntry = entryFileVerdict(resolvePdCliEntry(extDir));
+  if (!coldStartEntry.ok && coldStartEntry.transient && runtime?.fallbackReason === undefined) {
+    // PRI-1012: during the update window the entry is simply not laid yet, and
+    // a boot-time autostart lands exactly here. Let spawnCli() run its bounded
+    // entry wait instead of degrading — the degraded copy for this reason tells
+    // the Owner to re-run the installer, which §1.1 forbids against a healthy
+    // install. A legacy-fallback layout is a different cause (this Companion
+    // build cannot read the newer manifest) and keeps its own diagnosis below.
+    if (!supervisor.start()) return;
+    spawnCli();
+    return;
+  }
+  if (!coldStartEntry.ok) {
     // Runtime resolved but the CLI entry is gone — a corrupt runtime is its
     // own cause, separate from a missing install or an incompatible manifest.
     // When the layout only resolved via legacy fallback BECAUSE the manifest
@@ -268,7 +285,7 @@ function startSupervision(): void {
     supervisor.onLaunchFailure({ reason });
     const s = supervisor.getState();
     if (s.kind === 'degraded') showDegradedPage(s.reason, s.detail, s.nextAction);
-    log('pd_runtime_unusable', { mode: runtime?.mode, reason, root: extDir });
+    log('pd_runtime_unusable', { mode: runtime?.mode, reason, root: extDir, detail: coldStartEntry.detail });
     rebuildTrayMenu();
     return;
   }
@@ -555,6 +572,38 @@ function stopWorkspaceWorkerSupervision(): void {
   workbuddyWorkspaceWorkers?.stopAll();
 }
 
+type RestartRetryReason = 'server_exit' | 'attached_server_lost' | 'version_change' | 'entry_wait';
+
+/**
+ * Four paths schedule a restart retry (crash ladder, attached-server-lost,
+ * version change, pd-cli entry wait), and each fire is gated on `restarting`.
+ * With independent timers two chains can be alive at once — a tray restart
+ * during a long entry wait re-arms the machine while the old timer is still
+ * due, and when the entry finally appears both spawn, so the second CLI returns
+ * `reused`, the supervisor stops owning the process and quit leaks a child.
+ * One handle makes "at most one retry pending" structural. A fire that the
+ * state guard rejects is logged: a retry that silently never ran is exactly the
+ * SILENT_NO_SPAWN shape seen in the field evidence.
+ */
+function scheduleRestartRetry(delayMs: number, why: RestartRetryReason): void {
+  clearRestartRetry();
+  restartRetryTimer = setTimeout(() => {
+    restartRetryTimer = undefined;
+    const s = supervisor.getState();
+    if (quitting || s.kind !== 'restarting') {
+      log('restart_retry_skipped', { why, quitting, state: s.kind });
+      return;
+    }
+    log('restart_retry_fired', { why, attempt: s.attempt, reason: s.reason });
+    spawnCli();
+  }, delayMs);
+}
+
+function clearRestartRetry(): void {
+  if (restartRetryTimer !== undefined) clearTimeout(restartRetryTimer);
+  restartRetryTimer = undefined;
+}
+
 function spawnCli(): void {
   if (extDir === undefined) return;
   // spawn argv hardening: program is the literal 'node' (resolved via PATH by
@@ -575,19 +624,20 @@ function spawnCli(): void {
       return;
     }
     const delay = supervisor.onEntryMissing(entryCheck.detail);
+    // fromVersion != targetVersion is this log's evidence that the version
+    // marker flipped since the last successful launch — i.e. an update was in
+    // flight — which is what separates the race from a broken install.
     log('pd_cli_entry_not_ready', {
       entry,
       detail: entryCheck.detail,
       state: supervisor.getState().kind,
       willRetryInMs: delay ?? 0,
+      waitsLeft: supervisor.entryWaitsLeft(),
+      fromVersion: serverStartedVersion,
       targetVersion: readInstalledVersion(),
     });
     reflectSupervisorState();
-    if (delay !== undefined) {
-      setTimeout(() => {
-        if (!quitting && supervisor.getState().kind === 'restarting') spawnCli();
-      }, delay);
-    }
+    if (delay !== undefined) scheduleRestartRetry(delay, 'entry_wait');
     return;
   }
   const tokenConfigured = Boolean(process.env.PD_CONSOLE_TOKEN?.trim());
@@ -675,10 +725,7 @@ function spawnCli(): void {
     const delay = supervisor.onServerExit(code);
     if (delay !== undefined) {
       log('server_exit_restart_scheduled', { code, delayMs: delay });
-      setTimeout(() => {
-        if (quitting) return;
-        if (supervisor.getState().kind === 'restarting') spawnCli();
-      }, delay);
+      scheduleRestartRetry(delay, 'server_exit');
     } else {
       log('server_exit_no_restart', { code });
       reflectSupervisorState();
@@ -941,9 +988,7 @@ async function pollTick(): Promise<void> {
       const delay = supervisor.onServerExit(null);
       if (delay !== undefined) {
         log('attached_server_lost_restart', { delayMs: delay });
-        setTimeout(() => {
-          if (!quitting && supervisor.getState().kind === 'restarting') spawnCli();
-        }, delay);
+        scheduleRestartRetry(delay, 'attached_server_lost');
       }
     }
     return;
@@ -982,11 +1027,7 @@ function watchInstalledVersion(): void {
     // npm-layer update applied from the console UI — restart server to run it
     log('version_change_restart', { from: serverStartedVersion, to: version });
     const delay = supervisor.onServerExit(null);
-    if (delay !== undefined) {
-      setTimeout(() => {
-        if (!quitting && supervisor.getState().kind === 'restarting') spawnCli();
-      }, delay);
-    }
+    if (delay !== undefined) scheduleRestartRetry(delay, 'version_change');
   } else {
     log('version_change_attached_no_action', { from: serverStartedVersion, to: version });
   }
@@ -1053,9 +1094,13 @@ function rebuildTrayMenu(): void {
   const supervisorLabel =
     s.kind === 'running'
       ? s.mode === 'managed' ? `控制台运行中（端口 ${s.port}）` : `控制台已连接·外部实例（端口 ${s.port}）`
-      : s.kind === 'starting' || s.kind === 'restarting'
-        ? '控制台启动中…'
-        : '控制台未运行';
+      : s.kind === 'restarting' && s.reason.startsWith(ENTRY_PENDING_REASON_PREFIX)
+        // Waiting on the update chain to lay the files is not "starting" and not
+        // a crash backoff — the Owner must be able to tell them apart (rc-9).
+        ? '等待 PD 更新完成…'
+        : s.kind === 'starting' || s.kind === 'restarting'
+          ? '控制台启动中…'
+          : '控制台未运行';
   const statusLabel = supervisorLabel + degradedView.statusSuffix + syncUnavailableView.statusSuffix;
   tray.setToolTip(`PD Companion — ${statusLabel}`);
   const autoStart = app.getLoginItemSettings().openAtLogin;

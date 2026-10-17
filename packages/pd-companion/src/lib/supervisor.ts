@@ -45,6 +45,9 @@ export const STABILITY_WINDOW_MS = 60_000;
  */
 export const ENTRY_WAIT_DELAYS_MS = [2_000, 5_000, 10_000, 20_000, 40_000, 60_000] as const;
 export const ENTRY_WAIT_TOTAL_MS = ENTRY_WAIT_DELAYS_MS.reduce((total, ms) => total + ms, 0);
+/** Prefix of the `restarting` reason set while waiting for the entry. The tray
+ * shows a distinct label for it, so this is the one place it is spelled. */
+export const ENTRY_PENDING_REASON_PREFIX = 'pd_cli_entry_pending';
 
 export interface LaunchFailureInput {
   reason: string;
@@ -105,6 +108,15 @@ export class ConsoleSupervisor {
   /** Whether the current server process was spawned by this supervisor. */
   ownsProcess(): boolean {
     return this.ownsSpawn;
+  }
+
+  /**
+   * How many entry waits are left before this episode degrades. Operators read
+   * it to judge whether to keep waiting or to intervene — a wait whose budget is
+   * unreadable is indistinguishable from a hang.
+   */
+  entryWaitsLeft(): number {
+    return Math.max(0, ENTRY_WAIT_DELAYS_MS.length - this.entryWaits);
   }
 
   /** Begin a launch attempt. Returns false when a start is not meaningful. */
@@ -182,7 +194,7 @@ export class ConsoleSupervisor {
       };
       return undefined;
     }
-    this.state = { kind: 'restarting', attempt: this.attempt, reason: `pd_cli_entry_pending_${this.entryWaits}` };
+    this.state = { kind: 'restarting', attempt: this.attempt, reason: `${ENTRY_PENDING_REASON_PREFIX}_${this.entryWaits}` };
     return ENTRY_WAIT_DELAYS_MS[this.entryWaits - 1];
   }
 

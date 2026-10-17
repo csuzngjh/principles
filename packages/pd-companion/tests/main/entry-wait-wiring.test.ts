@@ -53,17 +53,44 @@ describe('PRI-1012 — pd-cli entry check is a bounded wait, not an instant degr
     const marker = "log('pd_cli_entry_not_ready'";
     expect(source).toContain(marker);
     // the log must carry what the next operator needs to tell a race from damage
-    const event = source.slice(source.indexOf(marker), source.indexOf(marker) + 400);
-    for (const field of ['entry', 'detail', 'state', 'willRetryInMs', 'targetVersion']) {
+    const start = source.indexOf(marker);
+    const event = source.slice(start, source.indexOf('});', start));
+    for (const field of ['entry', 'detail', 'state', 'willRetryInMs', 'waitsLeft', 'fromVersion', 'targetVersion']) {
       expect(event, field).toMatch(new RegExp(`[({,]\\s*${field}\\s*[,:]`));
     }
   });
 
-  it('the retry is scheduled under the same quitting/state guard as the crash restart', () => {
+  it('every restart retry shares one guarded helper, so two chains cannot be live at once', () => {
     const source = src();
-    const guard = "if (!quitting && supervisor.getState().kind === 'restarting') spawnCli();";
-    expect(source.split(guard).length - 1).toBeGreaterThanOrEqual(3); // crash retry, version-change retry, entry retry
-    expect(source).toContain('if (delay !== undefined) {');
+    // one place decides when a pending retry fires
+    expect(source).toContain("restartRetryTimer = setTimeout(() => {");
+    const guard = "if (quitting || s.kind !== 'restarting') {";
+    expect(source.split(guard).length - 1).toBe(1);
+    // the entry wait is not free of that guard: a tray restart during a 60s wait
+    // must cancel the pending chain instead of spawning a second CLI the quit
+    // path no longer owns.
+    expect(source).toContain("scheduleRestartRetry(delay, 'entry_wait')");
+    for (const why of ['server_exit', 'attached_server_lost', 'version_change']) {
+      expect(source, why).toContain(`scheduleRestartRetry(delay, '${why}')`);
+    }
+    // no ad-hoc retry timers survive
+    expect(source).not.toContain("if (!quitting && supervisor.getState().kind === 'restarting') spawnCli();");
+    expect(source).toContain('  clearRestartRetry();\n  supervisor.markIntentionalStop();');
+  });
+
+  it('the cold-start path uses the same verdict and hands a transient miss to the wait', () => {
+    const source = src();
+    expect(source).toContain('const coldStartEntry = entryFileVerdict(resolvePdCliEntry(extDir))');
+    expect(source).toContain('coldStartEntry.transient && runtime?.fallbackReason === undefined');
+    // a raw existence test here degraded an in-flight update and told the Owner
+    // to re-run the installer — the §1.1 hazard this ticket is about
+    expect(source).not.toContain('fs.existsSync(resolvePdCliEntry(');
+  });
+
+  it('the tray says what is actually happening while the entry is waited on', () => {
+    const source = src();
+    expect(source).toContain('ENTRY_PENDING_REASON_PREFIX');
+    expect(source).toContain("'等待 PD 更新完成…'");
   });
 
   it('the update-chain race is documented where the wait budget is declared', () => {

@@ -45,7 +45,7 @@ const COPY: Record<DegradedReasonKey, DegradedInfo> = {
     // the installer over an existing install overwrites the current runtime with
     // the bundled version (AGENTS.md §1.1). Companion now waits out the update
     // chain itself, so reaching this page means that wait was exhausted.
-    nextAction: '若刚刚做过 PD 更新，稍等片刻后从托盘菜单再点一次「重启服务」；反复失败请查看日志（Companion 数据目录 logs/ 下）并记下原因。',
+    nextAction: '若刚刚做过 PD 更新，稍等片刻后从托盘菜单再点一次「重启控制台服务」；反复失败请查看日志（Companion 数据目录 logs/ 下）并记下原因。',
   },
 };
 

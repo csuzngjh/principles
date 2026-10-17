@@ -223,8 +223,22 @@ describe('ConsoleSupervisor — entry-wait ladder for the update race (PRI-1012)
     sup.start();
     for (const delay of ENTRY_WAIT_DELAYS_MS) expect(sup.onEntryMissing('stat ENOENT')).toBe(delay);
     expect(sup.onEntryMissing('stat ENOENT')).toBeUndefined(); // degraded now
-    expect(sup.requestRestart()).toBe(true); // tray restart = fresh episode
+    // restartFromTray() is stopServer() + start(); requestRestart() has no
+    // production caller, so this asserts the path the Owner can actually click.
+    expect(sup.start()).toBe(true);
+    expect(sup.entryWaitsLeft()).toBe(ENTRY_WAIT_DELAYS_MS.length);
     expect(sup.onEntryMissing('stat ENOENT')).toBe(ENTRY_WAIT_DELAYS_MS[0]);
+  });
+
+  it('the remaining wait budget is readable while a wait is pending', () => {
+    const sup = new ConsoleSupervisor();
+    sup.start();
+    expect(sup.entryWaitsLeft()).toBe(ENTRY_WAIT_DELAYS_MS.length);
+    sup.onEntryMissing('stat ENOENT');
+    expect(sup.entryWaitsLeft()).toBe(ENTRY_WAIT_DELAYS_MS.length - 1);
+    for (const delay of ENTRY_WAIT_DELAYS_MS.slice(1)) expect(sup.onEntryMissing('stat ENOENT')).toBe(delay);
+    expect(sup.onEntryMissing('stat ENOENT')).toBeUndefined();
+    expect(sup.entryWaitsLeft()).toBe(0); // never negative once the episode degraded
   });
 
   it('refuses to schedule a wait when no launch result is awaited', () => {
