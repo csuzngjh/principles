@@ -158,7 +158,8 @@ New durable source of truth: NO；New persisted schema/state: NO；New subsystem
 | L2 | host-runtime 全量 | `npx vitest run`（host-runtime，含 Owner-Evidence/意图门/consumer-cycle） | **511 passed / 0 failed** |
 | L3 | 锁检查 | `npm run check:release-locks --workspace=create-principles-disciple` | exit 0 |
 | L3 | 锁解析 | 7/7 pi 锁脚本核验 | 全部 `pi-ai=1.2.0, pi-agent-core=1.2.0, telemetry=1.3.0, link=0, 0.85.1 残留=0` |
-| L3 | 打包安装冒烟 | `test:smoke:packaged`（**Node22/npm10 便携工具链**驱动 vitest，npm 解析跟随 process.execPath） | 本地 Windows：10/13 PASS + 3 个环境性失败（600s 用例级硬编码超时的全量自包含安装、GNU tar 盘符转义、console 6 秒固定启动窗）；干净 main 基线本地 13 skipped（前置 build 失败）→ 本套件本地不可比，权威仲裁 = CI `smoke-packaged-install`（ubuntu+node22+30min），PR 上跟踪为 CI_PENDING |
+| L3 | 打包安装冒烟 | `test:smoke:packaged`（**Node22/npm10 便携工具链**驱动 vitest，npm 解析跟随 process.execPath） | 本地 Windows：10/13 PASS + 3 个环境性失败（600s 用例级硬编码超时的全量自包含安装、GNU tar 盘符转义、console 6 秒固定启动窗）；干净 main 基线本地 13 skipped（前置 build 失败）→ 本套件本地不可比；**CI 仲裁：`Test packaged install smoke` PASS（PR#2070，ubuntu+node22）——AC-5 达成**；`Test release asset smoke` CI 亦 PASS |
+| L3+ | CI 首轮发现并修复 | `Test codex-adapter` 首轮 FAIL → 修复 → CI 全绿 | 根因=测试种子器 `findNodeModulesDir` 从不检查根提升槽位（`rootNm/<dep>`），Pi 1.2 急切 import 图使 `partial-json` 进入注入路径 → 种子缺包 → hook ERR_MODULE_NOT_FOUND（真实安装不受影响）；修复 commit `2309cd14`（根槽位检查 + 闭包深度 5→8，ERR-164 在案）；本地 codex-plugin-bundle 32/32、codex-adapter 全量 290 passed / 1 skipped |
 | L3 | 卫星纯度 | `build:production` 内置 assertSatellitePurity | Forbidden dependency count: 0 |
 | L3 | 传递依赖 | `transitive-deps.test.ts` | 5/5 PASS |
 | L4 | 合并门禁 | `npm run verify:merge` @ head f4ad1c836 | **exit 0**（全门禁链通过；本表其余行在此前中间 head 实测） |
