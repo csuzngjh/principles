@@ -33,6 +33,7 @@ import {
 import { buildConsoleTokenStatus, isSameConsoleOrigin, type ConsoleTokenStatus } from '../lib/console-origin.js';
 import { entryFileVerdict, errnoCode } from '../lib/entry-verdict.js';
 import { ConsoleSupervisor, ENTRY_PENDING_REASON_PREFIX } from '../lib/supervisor.js';
+import { judgeVersionChangeLaunch, killManagedServerAndWait, ownedManagedHandle, realProcessOps, type ManagedServerHandle } from '../lib/version-handover.js';
 import { buildDegradedPageHtml, buildDegradedWorkspacesTrayView, buildSyncUnavailableTrayView, describeDegraded, describeWorkspaceWorkerDegraded, describeWorkspaceSyncUnavailable } from '../lib/degraded.js';
 import {
   defaultCompanionState,
@@ -76,6 +77,23 @@ let baselineRecorded = false;
 let consecutivePollFailures = 0;
 let serverStartedVersion: string | undefined;
 let currentPort: number | undefined;
+/**
+ * The version marker the update chain flipped to. Set while a version_change
+ * restart is in flight; a freshly spawned Console is only accepted as the new
+ * version when the version it actually runs equals this, so `reused` or a
+ * stale old process can never be mistaken for a completed upgrade (PRI-1012 P1).
+ * Cleared when the hand-over reaches any conclusion (accepted, mismatched,
+ * failed) or when an Owner stop cancels it — never at spawn time, or every
+ * retry of the chain would launch ungated.
+ */
+let pendingTargetVersion: string | undefined;
+/**
+ * CLI children whose exit is EXPECTED (a version-change hand-over stopped
+ * them). Their exit event must not burn the crash-restart budget or schedule a
+ * competing retry — the hand-over itself owns the respawn. Bounded: at most
+ * one entry per hand-over, removed when the exit fires.
+ */
+const expectedExitChildren = new Set<ChildProcess>();
 
 // ─── Logging (no tokens, no full URLs — ports and pids only) ────────────────
 
@@ -205,12 +223,34 @@ function killSpawnedTree(child: ChildProcess | undefined): void {
 
 function stopServer(): void {
   // Cancelling a pending retry is part of stopping: an Owner-initiated restart
-  // must not be joined later by the timer of the chain it replaced.
+  // must not be joined later by the timer of the chain it replaced. An Owner
+  // stop likewise cancels an in-flight version-change hand-over — the next
+  // launch is the Owner's, not the update chain's.
   clearRestartRetry();
+  pendingTargetVersion = undefined;
   supervisor.markIntentionalStop();
   if (supervisor.ownsProcess()) {
     killSpawnedTree(cliChild);
   }
+}
+
+/**
+ * Kill the currently owned managed Console and wait for it to truly exit,
+ * without touching the supervisor's `intentionalStop` flag — this path is a
+ * version-change hand-over, not an Owner stop, so the restarting guard must
+ * stay intact for the scheduled respawn. The killable handle must be
+ * snapshotted (via `ownedManagedHandle`) BEFORE the caller moves the machine
+ * to `restarting`: afterwards the ownership evidence no longer reads as
+ * running, and a late snapshot made this kill a silent no-op (PRI-1012 P1).
+ *
+ * Returns whether the exit was CONFIRMED — neither the server PID nor the CLI
+ * wrapper PID is alive any longer. False after `timeoutMs`: the old process
+ * is then abandoned rather than blocking the upgrade forever, and the retry
+ * ladder keeps trying to take the port. Never touches an `attached` external
+ * Console.
+ */
+async function killManagedServerAndConfirm(handle: ManagedServerHandle, timeoutMs = 5_000): Promise<boolean> {
+  return killManagedServerAndWait(handle, realProcessOps, { timeoutMs });
 }
 
 function readInstalledVersion(): string | undefined {
@@ -605,6 +645,12 @@ function clearRestartRetry(): void {
 }
 
 function spawnCli(): void {
+  // NOTE: pendingTargetVersion is deliberately NOT cleared here — a version
+  // hand-over re-enters this function through the retry ladder, and clearing
+  // at the door would launch the new attempt ungated, letting a `reused` old
+  // process pass as the upgraded one (PRI-1012 P1). The marker is cleared when
+  // the hand-over reaches a conclusion (handleLaunchResult) or is cancelled
+  // (stopServer).
   if (extDir === undefined) return;
   // spawn argv hardening: program is the literal 'node' (resolved via PATH by
   // the OS — never env-controlled); every path argument is validated above.
@@ -618,6 +664,7 @@ function spawnCli(): void {
     // of a healthy install. Wait it out (bounded) and log what was decided,
     // instead of degrading on the first stat failure with no trace.
     if (!entryCheck.transient) {
+      pendingTargetVersion = undefined;
       supervisor.onSpawnError(undefined, entryCheck.detail);
       log('pd_cli_entry_rejected', { entry, detail: entryCheck.detail, state: supervisor.getState().kind });
       reflectSupervisorState();
@@ -708,6 +755,13 @@ function spawnCli(): void {
 
   child.on('exit', (code) => {
     clearTimeout(timeout);
+    // A version-change hand-over stopped this CLI on purpose: its exit is the
+    // CONFIRMATION the hand-over waits for, not a crash. Counting it would
+    // double-burn the crash budget and schedule a retry racing the hand-over's.
+    if (expectedExitChildren.delete(child)) {
+      log('cli_exit_expected_version_change', { code });
+      return;
+    }
     const s = supervisor.getState();
     if (!resultSeen) {
       supervisor.onLaunchFailure({
@@ -752,6 +806,7 @@ function handleLaunchResult(parsed: ConsoleOpenResult): void {
         reason: `console_authentication_mode_mismatch: expected=${expectedMode}, actual=${parsed.authenticationMode ?? 'unverified'}`,
         nextAction: '停止现有 Console 后从 Companion 重试；如仍失败，请检查 PD_CONSOLE_TOKEN 配置。',
       });
+      pendingTargetVersion = undefined;
       log('console_authentication_mode_mismatch', {
         expectedMode,
         actualMode: parsed.authenticationMode ?? 'unverified',
@@ -763,6 +818,21 @@ function handleLaunchResult(parsed: ConsoleOpenResult): void {
   if (parsed.status === 'started') {
     serverStartedVersion = readInstalledVersion();
     currentPort = parsed.port;
+    // PRI-1012 P1: the hand-over completes only when the process that just
+    // started was launched from the install the update chain flipped to. The
+    // verdict helper is the single authority for that decision.
+    const verdict = judgeVersionChangeLaunch(pendingTargetVersion, parsed, serverStartedVersion);
+    if (verdict.action === 'reject_version_mismatch') {
+      log('version_change_rejected', { expected: verdict.expected, got: verdict.got });
+      pendingTargetVersion = undefined;
+      supervisor.onLaunchFailure({
+        reason: 'console_version_mismatch',
+        nextAction: '从托盘菜单再点一次「重启控制台服务」；如反复失败请查看 Companion 日志。',
+      });
+      reflectSupervisorState();
+      return;
+    }
+    pendingTargetVersion = undefined;
     supervisor.onLaunchStarted({ url: parsed.url, port: parsed.port, serverPid: parsed.serverPid, startedVersion: serverStartedVersion });
     const after = supervisor.getState();
     log('console_started', {
@@ -775,13 +845,23 @@ function handleLaunchResult(parsed: ConsoleOpenResult): void {
     void mainWindow?.loadURL(parsed.url).catch((err: unknown) => log('window_load_failed', { message: err instanceof Error ? err.message : String(err) }));
     startPolling();
   } else if (parsed.status === 'reused') {
+    // PRI-1012 P1: an external/old Console reused on the same port is NOT the
+    // new version. During a version_change hand-over keep waiting for the new
+    // process instead of claiming the upgrade is done.
     currentPort = parsed.port;
+    const verdict = judgeVersionChangeLaunch(pendingTargetVersion, parsed, undefined);
+    if (verdict.action === 'keep_waiting_stale_reused') {
+      log('version_change_reused_stale', { expected: pendingTargetVersion, port: verdict.port });
+      reflectSupervisorState();
+      return;
+    }
     serverStartedVersion = readInstalledVersion();
     supervisor.onLaunchReused(parsed.url, parsed.port);
     log('console_reused', { port: parsed.port, mode: 'attached' });
     void mainWindow?.loadURL(parsed.url).catch((err: unknown) => log('window_load_failed', { message: err instanceof Error ? err.message : String(err) }));
     startPolling();
   } else {
+    pendingTargetVersion = undefined;
     supervisor.onLaunchFailure({ reason: parsed.reason ?? parsed.status, nextAction: parsed.nextAction });
     log('console_launch_failed', { status: parsed.status, reason: parsed.reason });
   }
@@ -1024,10 +1104,34 @@ function watchInstalledVersion(): void {
   const version = readInstalledVersion();
   if (version === undefined || serverStartedVersion === undefined || version === serverStartedVersion) return;
   if (s.mode === 'managed') {
-    // npm-layer update applied from the console UI — restart server to run it
+    // npm-layer update applied from the console UI — stop the OLD server,
+    // confirm it has exited, then respawn the NEW version. The disk version
+    // marker alone is not proof a new process is running.
     log('version_change_restart', { from: serverStartedVersion, to: version });
+    // Snapshot the OWNERSHIP evidence while the machine still says
+    // `running` — after onServerExit(null) the state is `restarting`, and a
+    // snapshot taken there returned no handle, silently skipped the kill and
+    // left the old Console on the port (the PRI-1012 P1 defect).
+    const handle = ownedManagedHandle(s, supervisor.ownsProcess(), cliChild?.pid);
+    const oldChild = cliChild;
     const delay = supervisor.onServerExit(null);
-    if (delay !== undefined) scheduleRestartRetry(delay, 'version_change');
+    if (delay === undefined) return;
+    pendingTargetVersion = version;
+    const stopOld = handle === undefined
+      ? Promise.resolve(false)
+      : killManagedServerAndConfirm(handle).then((confirmed) => {
+          log('version_change_old_server_stopped', { serverPid: handle.serverPid, confirmed });
+          return confirmed;
+        });
+    void stopOld.then(() => {
+      if (quitting) return;
+      const now = supervisor.getState();
+      // The state machine may have moved on (quit / crash-loop / manual stop);
+      // only reschedule when we are still waiting to restart.
+      if (now.kind !== 'restarting') return;
+      scheduleRestartRetry(delay, 'version_change');
+    });
+    if (oldChild !== undefined) expectedExitChildren.add(oldChild);
   } else {
     log('version_change_attached_no_action', { from: serverStartedVersion, to: version });
   }

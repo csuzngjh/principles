@@ -75,7 +75,7 @@ describe('PRI-1012 — pd-cli entry check is a bounded wait, not an instant degr
     }
     // no ad-hoc retry timers survive
     expect(source).not.toContain("if (!quitting && supervisor.getState().kind === 'restarting') spawnCli();");
-    expect(source).toContain('  clearRestartRetry();\n  supervisor.markIntentionalStop();');
+    expect(source).toContain('  clearRestartRetry();\n  pendingTargetVersion = undefined;\n  supervisor.markIntentionalStop();');
   });
 
   it('the cold-start path uses the same verdict and hands a transient miss to the wait', () => {
@@ -100,3 +100,55 @@ describe('PRI-1012 — pd-cli entry check is a bounded wait, not an instant degr
     expect(supervisor).toContain('PRI-1012');
   });
 });
+
+describe('PRI-1012 P1 — version-change hand-over wiring', () => {
+  it('the hand-over snapshots ownership BEFORE the state leaves running, then stops through the lib seam', () => {
+    const source = src();
+    expect(source).toContain("from '../lib/version-handover.js'");
+    const start = source.indexOf('function watchInstalledVersion');
+    const watch = source.slice(start, source.indexOf('\nfunction ', start + 1));
+    // snapshot-then-transition: a handle read after onServerExit(null) found no
+    // `running` state anymore and silently skipped the kill — the review P1.
+    const snapshotAt = watch.indexOf('ownedManagedHandle(');
+    const exitAt = watch.indexOf('supervisor.onServerExit(null)');
+    expect(snapshotAt).toBeGreaterThan(-1);
+    expect(exitAt).toBeGreaterThan(snapshotAt);
+    // stop → confirm → respawn ordering, through the lib seam
+    expect(watch).toContain('killManagedServerAndConfirm(');
+    expect(watch).toContain("scheduleRestartRetry(delay, 'version_change')");
+    expect(watch.indexOf('killManagedServerAndConfirm(')).toBeLessThan(watch.indexOf("scheduleRestartRetry(delay, 'version_change')"));
+  });
+
+  it('a reused result during a hand-over is not acknowledged as the new version', () => {
+    const source = src();
+    const start = source.indexOf('function handleLaunchResult');
+    const handler = source.slice(start, source.indexOf('\nfunction ', start + 1));
+    // the stale-reused guard exists, and the external-instance acknowledgment
+    // may only happen after that guard returned
+    expect(handler).toContain('version_change_reused_stale');
+    expect(handler.indexOf('version_change_reused_stale')).toBeLessThan(handler.indexOf('supervisor.onLaunchReused'));
+  });
+
+  it('the CLI child a hand-over stopped on purpose does not burn the crash budget', () => {
+    const source = src();
+    expect(source).toContain('expectedExitChildren');
+    const exitStart = source.indexOf("child.on('exit'");
+    const exitHandler = source.slice(exitStart, source.indexOf('supervisor.onServerExit(code)', exitStart));
+    expect(exitHandler).toContain('expectedExitChildren.delete(child)');
+  });
+
+  it('the pending version marker survives a retry spawn and only clears at conclusions', () => {
+    const source = src();
+    const spawnStart = source.indexOf('function spawnCli');
+    const spawnBody = source.slice(spawnStart, source.indexOf('\nfunction ', spawnStart + 1));
+    // the only clear inside the spawn path is the terminal non-transient
+    // entry rejection — never at the door, or every retry would launch ungated
+    const clears = spawnBody.split('pendingTargetVersion = undefined').length - 1;
+    expect(clears).toBe(1);
+    expect(spawnBody).toContain('if (!entryCheck.transient)');
+    // Owner stop cancels the hand-over marker
+    const stopStart = source.indexOf('function stopServer');
+    expect(source.slice(stopStart, source.indexOf('\nfunction ', stopStart + 1))).toContain('pendingTargetVersion = undefined');
+  });
+});
+
