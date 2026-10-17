@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ArtificerRunner } from '../internalization/artificer-runner.js';
 import type { ArtificerRunnerDeps } from '../internalization/artificer-runner.js';
 import type { PIArtifactStore, PIArtifactRecord } from '../internalization/pi-artifact.js';
+import { collectUpstreamNormalisedText } from '../internalization/artificer-intent-preflight.js';
 import { MemoryPIArtifactStore } from '../internalization/pi-artifact-store.js';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type { PDRuntimeAdapter, RunHandle, RunStatus } from '../runtime-protocol.js';
@@ -20,6 +21,9 @@ import { PDRuntimeError } from '../error-categories.js';
 const SCRIBE_TASK_ID = 'scribe-001';
 const ARTIFICER_TASK_ID = 'artificer-001';
 
+const PHILOSOPHER_TASK_ID = 'philosopher-runner-001';
+const PHILOSOPHER_ANALYSIS = 'The agent must read the target file before writing it. Blind edits cascade into silent corruption.';
+
 function makeScribeTask(overrides: Partial<TaskRecord> = {}): TaskRecord {
   return {
     taskId: SCRIBE_TASK_ID,
@@ -31,7 +35,7 @@ function makeScribeTask(overrides: Partial<TaskRecord> = {}): TaskRecord {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     diagnosticJson: createPITaskDiagnosticJson({
-      dependencyTaskIds: [],
+      dependencyTaskIds: [PHILOSOPHER_TASK_ID],
       channel: 'prompt',
       timeoutMs: 300_000,
       inputArtifactRefs: [],
@@ -137,6 +141,14 @@ function makeScribeArtifact(): PIArtifactRecord {
         philosopherArtifactId: 'pi-art-philosopher-001',
       },
       risks: [],
+      intentContract: {
+        ownerIntent: 'async operations must carry explicit error handling',
+        targetBehavior: 'every async operation includes explicit error handling',
+        forbiddenBehavior: 'ignoring promise rejections and async failures',
+        evidenceSource: 'test fixture',
+        validationExpectation: 'rule enforces the error-handling contract on async operations',
+      },
+      executionConditions: { version: 1, requiredFacts: [] },
       generatedAt: new Date().toISOString(),
     }),
     createdAt: new Date().toISOString(),
@@ -160,6 +172,9 @@ describe('ArtificerRunner (PRI-111)', () => {
       getTask: vi.fn().mockImplementation((id: string) => {
         if (id === ARTIFICER_TASK_ID) return Promise.resolve(artificerTask);
         if (id === SCRIBE_TASK_ID) return Promise.resolve(scribeTask);
+        if (id === PHILOSOPHER_TASK_ID) {
+          return Promise.resolve(makeScribeTask({ taskId: PHILOSOPHER_TASK_ID, taskKind: 'philosopher', resultRef: 'philosopher://run-001' }));
+        }
         return Promise.resolve(null);
       }),
       getRunsByTask: vi.fn().mockResolvedValue([{
@@ -196,6 +211,18 @@ describe('ArtificerRunner (PRI-111)', () => {
     } as unknown as StoreEventEmitter;
 
     const validator = new DefaultArtificerValidator();
+
+    const effectiveStore = overrides.artifactStore ?? artifactStore;
+    void effectiveStore.upsertArtifact({
+      artifactId: 'pi-art-philosopher-runner-001',
+      artifactKind: 'principle',
+      sourceTaskId: PHILOSOPHER_TASK_ID,
+      lineageArtifactIds: [],
+      validationStatus: 'validated',
+      contentJson: JSON.stringify({ taskId: PHILOSOPHER_TASK_ID, analysis: PHILOSOPHER_ANALYSIS }),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }).catch(() => undefined);
 
     return {
       stateManager,
@@ -512,6 +539,7 @@ describe('ArtificerRunner.validateOutput — v2 mode-error errorCategory (CodeRa
       contextHash: 'test-hash',
       scribeArtifact: null,
       sourceScribeArtifactId: null,
+      scribeDependencyTaskIds: [],
       adversarialFeedback: null,
       repairFeedback: null,
       channel: 'code_tool_hook',
@@ -720,6 +748,14 @@ describe('ArtificerRunner integration: test-double captures sourceScribeArtifact
           antiPatterns: ['Ignoring promise rejections'],
           confidence: 0.9,
         },
+        intentContract: {
+          ownerIntent: 'async operations must carry explicit error handling',
+          targetBehavior: 'every async operation includes explicit error handling',
+          forbiddenBehavior: 'ignoring promise rejections and async failures',
+          evidenceSource: 'test fixture',
+          validationExpectation: 'rule enforces the error-handling contract on async operations',
+        },
+        executionConditions: { version: 1, requiredFacts: [] },
         sourceTrace: { philosopherArtifactId: 'pi-art-philosopher-001' },
         risks: [],
         generatedAt: new Date().toISOString(),
@@ -728,6 +764,17 @@ describe('ArtificerRunner integration: test-double captures sourceScribeArtifact
       updatedAt: new Date().toISOString(),
     };
     await artifactStore.upsertArtifact(scribeArtifact);
+    // R3: the defensive mirror binds upstream (philosopher) material.
+    await artifactStore.upsertArtifact({
+      artifactId: 'pi-art-philosopher-runner-001',
+      artifactKind: 'principle',
+      sourceTaskId: PHILOSOPHER_TASK_ID,
+      lineageArtifactIds: [],
+      validationStatus: 'validated',
+      contentJson: JSON.stringify({ taskId: PHILOSOPHER_TASK_ID, analysis: PHILOSOPHER_ANALYSIS }),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
 
     const artificerTask = makeArtificerTask();
 
@@ -777,6 +824,7 @@ describe('ArtificerRunner integration: test-double captures sourceScribeArtifact
       getTask: vi.fn().mockImplementation((id: string) => {
         if (id === ARTIFICER_TASK_ID) return Promise.resolve(artificerTask);
         if (id === SCRIBE_TASK_ID) return Promise.resolve(makeScribeTask());
+        if (id === PHILOSOPHER_TASK_ID) return Promise.resolve(makeScribeTask({ taskId: PHILOSOPHER_TASK_ID, taskKind: 'philosopher', resultRef: 'philosopher://run-001' }));
         return Promise.resolve(null);
       }),
       getRunsByTask: vi.fn().mockResolvedValue([{
