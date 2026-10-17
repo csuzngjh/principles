@@ -67,7 +67,7 @@
 
 **合并硬门（任一不满足禁止合并）**：AC-4（7/7 锁）、AC-8（Changeset + Release Intent Guard）、AC-1（verify:merge）。
 
-- **AC-1** `npm run verify:merge` 在迁移 PR 上 exit 0。【以最终提交态实测为准，见 PR Review Card；中间态曾在 changeset 未提交时于第一步 guard 处 FAIL（符合 guard 设计——它检查已提交 diff），changeset 入库后复跑】
+- **AC-1** `npm run verify:merge` 在迁移 PR 上 exit 0。【Phase 1 实测：**exit 0 @ head f4ad1c836 全门禁链**（含 Release Intent Guard/check:error-handbook/telemetry strict/repo-hygiene/runtime-contract/workspace-tools/guard-contracts/release-target-matrix/core build/website/lint/全仓 build/pipeline-contract/pd-cli+pd-console build/四包 typecheck/satellite-bundle-deps/runtime-writers）】
 - **AC-2** core 全量 vitest 0 failed。【Phase 1 实测：**8530 passed / 0 failed**（433 文件 +4 skipped，含 PRI-1011 新增测试在 Pi 1.2.0 下通过；两连跑确认）】
 - **AC-3** spike 套件 14/14：含请求形状（C6）、submit 终止、混合批次、轮上限、预算中止（Artificer 分类 timeout）、L1 回退恰一次、白名单外工具 isError 反馈、无 L1 回退路径无额外模型调用。【Phase 1 实测：PASS（与契约测试合计 212/212）】
 - **AC-4（合并硬门）** 全部 7 个含 pi 条目的 release-locks 解析 `pi-ai/pi-agent-core 1.2.0`（Node22/npm10 生成；无 `link:true` 记录；无 0.85.1 残留；任何锁部分再生成的中间态禁止合并——manifest 精确钉 1.2.0 而锁解析 0.85.1 时 `npm ci` 会大声失败，安装器直接不可用）。【Phase 1 实测：7/7 全部 1.2.0、telemetry 1.3.0、link=0、0.85.1 残留=0；`npm run check:release-locks --workspace=create-principles-disciple` exit 0】
@@ -161,7 +161,7 @@ New durable source of truth: NO；New persisted schema/state: NO；New subsystem
 | L3 | 打包安装冒烟 | `test:smoke:packaged`（**Node22/npm10 便携工具链**驱动 vitest，npm 解析跟随 process.execPath） | 本地 Windows：10/13 PASS + 3 个环境性失败（600s 用例级硬编码超时的全量自包含安装、GNU tar 盘符转义、console 6 秒固定启动窗）；干净 main 基线本地 13 skipped（前置 build 失败）→ 本套件本地不可比，权威仲裁 = CI `smoke-packaged-install`（ubuntu+node22+30min），PR 上跟踪为 CI_PENDING |
 | L3 | 卫星纯度 | `build:production` 内置 assertSatellitePurity | Forbidden dependency count: 0 |
 | L3 | 传递依赖 | `transitive-deps.test.ts` | 5/5 PASS |
-| L4 | 合并门禁 | `npm run verify:merge` | 【结果见 PR Review Card；以实际退出码为准】 |
+| L4 | 合并门禁 | `npm run verify:merge` @ head f4ad1c836 | **exit 0**（全门禁链通过；本表其余行在此前中间 head 实测） |
 | — | 发布意图 | `node scripts/release/check-pr-release-intent.mjs`（PR_BASE_SHA=d91b9e07e） | 【提交 changeset 后复跑，结果见 PR Review Card】 |
 
 ## 16. Phase 0 独立对抗性复审结论（历史记录，2026-10-17）
