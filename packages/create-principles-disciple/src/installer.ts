@@ -38,8 +38,7 @@ import {
 } from './mvp-config.js';
 import { getHostInstallers, type HostTarget } from './installers/index.js';
 import type { HostInstallContext, HostInstallResult } from '@principles/core/host';
-import { INSTALL_LAYOUT_VERSION, getWorkbuddyWorkspaceDir, mergeInstallManifestWorkspaces, parseInstallManifest } from '@principles/install-layout';
-import { manifestHostsUnionForPersist } from './manifest-host-union.js';
+import { INSTALL_LAYOUT_VERSION, getWorkbuddyWorkspaceDir, installManifestHostsForPersist, mergeInstallManifestWorkspaces, parseInstallManifest } from '@principles/install-layout';
 import { detectOpenClawMainWorkspaceDivergence } from './utils/workspace-divergence.js';
 import { applySkillLanguageSelection, type SkillLanguage } from './skill-language.js';
 import {
@@ -201,9 +200,9 @@ export function mergeInstallManifestHosts(current: unknown, host: HostTarget): s
     throw new Error(parsed.error ?? 'install_manifest_malformed');
   }
   // Persisted hosts must carry forward registrations this reader does not
-  // know (manifestHostsUnionForPersist) — rebuilding from manifest.hosts
+  // know (installManifestHostsForPersist) — rebuilding from manifest.hosts
   // alone would silently unregister a newer host on every re-install.
-  for (const existingHost of manifestHostsUnionForPersist(parsed.manifest)) hosts.add(existingHost);
+  for (const existingHost of installManifestHostsForPersist(parsed.manifest)) hosts.add(existingHost);
   if (host === 'all' || host === 'codex') hosts.add('codex');
   if (host === 'all' || host === 'openclaw') hosts.add('openclaw');
   // WorkBuddy is its own explicit target — 'all' must not attach a third host

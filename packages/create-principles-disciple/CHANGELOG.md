@@ -1,5 +1,22 @@
 # create-principles-disciple
 
+## 1.145.6
+
+### Patch Changes
+
+- ef04263: Retire the local manifest-host union twin: install-layout 0.4.0 is published,
+  so the installer imports the shared `installManifestHostsForPersist()` again
+  and the temporary local copy (added when the registry only served 0.3.x) is
+  deleted. The registry-parity dual-mode test now runs its POSITIVE mode
+  against the published dependency: an unknown future host survives codex
+  install, workbuddy install and known-host uninstall end-to-end.
+
+## 1.145.5
+
+### Patch Changes
+
+- 807fcab: 修正纠正词库到顶后学习通道冻结的根因：满 200 词时按证据淘汰最没用的学习词（seed/user 永不被淘汰），不再抛错；UPDATE/REMOVE 与 ADD 共用同一条词身份规则，未命中只记一次可读跳过；拒绝把动作词当 term 入库；学习不再删除 Owner 播种词；每次词库变更进 SYSTEM 日志。Stage2 回写不再用判词覆盖命中词，观察员据此拿到真实的 REMOVE 证据。
+
 ## 1.145.4
 
 ### Patch Changes
