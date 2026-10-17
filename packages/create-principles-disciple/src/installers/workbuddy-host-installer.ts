@@ -95,6 +95,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** Native v2 stores scope records as an array; old PD installs used one object. */
+function userInstalledPluginRecord(value: unknown): Record<string, unknown> | undefined {
+  const records = Array.isArray(value) ? value : [value];
+  return records.find((record): record is Record<string, unknown> =>
+    isRecord(record) && record.scope === 'user' && record.projectPath === undefined);
+}
+
 export interface WorkbuddyCommandResult {
   status: number | null;
   stdout: string;
@@ -1369,8 +1376,9 @@ export class WorkBuddyHostInstaller implements HostInstaller {
   private pluginCacheMatchesPayload(version: string): boolean {
     const p = this.paths();
     const registry = readHostJsonFile(p.registryPath);
-    const entry = registry.ok && isRecord(registry.value?.plugins)
+    const rawEntry = registry.ok && isRecord(registry.value?.plugins)
       ? registry.value.plugins[WORKBUDDY_PLUGIN_KEY] : undefined;
+    const entry = userInstalledPluginRecord(rawEntry);
     const cacheDir = path.join(p.cachePluginRoot, version);
     if (!isRecord(entry) || entry.version !== version || entry.installPath !== cacheDir) return false;
     const sourceDir = path.join(p.marketplaceRoot, WORKBUDDY_PLUGIN_NAME);
@@ -1410,8 +1418,8 @@ export class WorkBuddyHostInstaller implements HostInstaller {
   /**
    * Direct-write registration for engine-unreachable machines, aligned with the
    * frozen P01 formats: enabledPlugins[key]=true in settings.json (other keys
-   * and other plugins preserved), installed_plugins.json v2 entry
-   * {scope:'user', installPath, version, installedAt}, and the versioned cache
+   * and other plugins preserved), installed_plugins.json v2 user registration
+   * (native scope array or legacy object), and the versioned cache
    * copy under plugins/cache/<marketplace>/<plugin>/<version>/.
    */
   private directWriteRegistration(
@@ -1439,19 +1447,34 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     if (typeof nextRegistry.version !== 'number') nextRegistry.version = 2;
     const plugins = isRecord(nextRegistry.plugins) ? { ...nextRegistry.plugins } : {};
     const cacheVersionDir = path.join(p.cachePluginRoot, version);
-    plugins[WORKBUDDY_PLUGIN_KEY] = {
+    const existingEntry = plugins[WORKBUDDY_PLUGIN_KEY];
+    const previousUser = userInstalledPluginRecord(existingEntry);
+    const now = new Date().toISOString();
+    const userEntry = {
+      ...previousUser,
       scope: 'user',
       installPath: cacheVersionDir,
       version,
-      installedAt: new Date().toISOString(),
+      installedAt: typeof previousUser?.installedAt === 'string' ? previousUser.installedAt : now,
+      lastUpdated: now,
     };
+    // Update only the user registration. Project/local/managed records and
+    // unknown fields remain owned by the host, even under the same plugin key.
+    plugins[WORKBUDDY_PLUGIN_KEY] = Array.isArray(existingEntry)
+      ? previousUser !== undefined
+        ? existingEntry.map((record) => record === previousUser ? userEntry : record)
+        : [...existingEntry, userEntry]
+      : isRecord(existingEntry) && previousUser === undefined
+        ? [existingEntry, userEntry]
+        : userEntry;
     nextRegistry.plugins = plugins;
     const registryWrite = writeHostJsonFileProtected(p.registryPath, JSON.stringify(nextRegistry, null, 2) + '\n');
     if (!registryWrite.ok) return { ok: false, reason: registryWrite.reason, nextAction: registryWrite.nextAction };
 
     // Versioned cache copy from our marketplace source.
     try {
-      rmSync(p.cachePluginRoot, { recursive: true, force: true });
+      // Other scopes may still reference older versions of this same plugin.
+      rmSync(cacheVersionDir, { recursive: true, force: true });
       cpSync(path.join(p.marketplaceRoot, WORKBUDDY_PLUGIN_NAME), cacheVersionDir, { recursive: true });
     } catch (error) {
       return {

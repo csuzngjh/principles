@@ -1,0 +1,30 @@
+{
+  "version": 2,
+  "plugins": {
+    "principles-disciple@principles-disciple-market": [
+      {
+        "scope": "user",
+        "installPath": "USER_CACHE",
+        "version": "0.1.0",
+        "installedAt": "2026-10-17T08:26:05.778Z",
+        "lastUpdated": "2026-10-17T08:26:05.778Z",
+        "ownerMetadata": { "preserve": true }
+      },
+      {
+        "scope": "project",
+        "projectPath": "PROJECT_WORKSPACE",
+        "installPath": "PROJECT_CACHE",
+        "version": "0.0.9",
+        "installedAt": "2026-10-12T08:00:00.000Z",
+        "lastUpdated": "2026-10-12T08:00:00.000Z"
+      },
+      {
+        "scope": "local",
+        "projectPath": "PROJECT_WORKSPACE",
+        "installPath": "PROJECT_CACHE",
+        "version": "0.0.9",
+        "hostMetadata": "preserve"
+      }
+    ]
+  }
+}

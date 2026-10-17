@@ -100,6 +100,46 @@ describe('WorkBuddy skills through production delivery boundaries', () => {
     expect(fs.readFileSync(lab.otherPlugin, 'utf8')).toBe('Other plugin data');
   });
 
+  it.each([true, false])('preserves native v2 array scopes and older caches, then reinstalls without registry churn (engine=%s)', async (engine) => {
+    const lab = await oldCacheLab(engine);
+    const olderCache = path.join(lab.paths.cachePluginRoot, '0.0.9');
+    fs.mkdirSync(olderCache, { recursive: true });
+    const olderFile = path.join(olderCache, 'project-owner.txt');
+    fs.writeFileSync(olderFile, 'Existing project/local version');
+    // Native 2026-10-17 engine array receipt, paths redacted; project/local
+    // rows and Owner metadata supplement it to protect coexistence behavior.
+    const registry = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/workbuddy-installed-registry-v2-array.json'), 'utf8'), (_key, value: unknown) => {
+      if (value === 'USER_CACHE') return lab.cache;
+      if (value === 'PROJECT_CACHE') return olderCache;
+      if (value === 'PROJECT_WORKSPACE') return path.join(lab.paths.homeDir, 'project');
+      return value;
+    });
+    const pluginKey = 'principles-disciple@principles-disciple-market';
+    const untouchedScopes = registry.plugins[pluginKey].slice(1);
+    fs.writeFileSync(lab.paths.registryPath, JSON.stringify(registry));
+    const refreshed = await lab.installer.install(lab.context);
+    expect(refreshed.success, refreshed.reason).toBe(true);
+    const after = JSON.parse(fs.readFileSync(lab.paths.registryPath, 'utf8'));
+    expect(Array.isArray(after.plugins[pluginKey])).toBe(true);
+    expect(after.plugins[pluginKey]).toHaveLength(3);
+    expect(after.plugins[pluginKey].slice(1)).toEqual(untouchedScopes);
+    expect(after.plugins[pluginKey][0]).toMatchObject({
+      scope: 'user', installPath: lab.cache, version: '0.1.0',
+      installedAt: '2026-10-17T08:26:05.778Z', ownerMetadata: { preserve: true },
+    });
+    expect(fs.readFileSync(olderFile, 'utf8')).toBe('Existing project/local version');
+    for (const skill of requiredSkills) {
+      expect(fs.readFileSync(path.join(lab.cache, 'skills', skill, 'SKILL.md'), 'utf8')).toBe(fs.readFileSync(path.join(adapter, 'plugin/skills', skill, 'SKILL.md'), 'utf8'));
+    }
+    const registryBytes = fs.readFileSync(lab.paths.registryPath, 'utf8');
+    const repeated = await lab.installer.install(lab.context);
+    expect(repeated.success, repeated.reason).toBe(true);
+    expect(repeated.configAction).toBe('preserved');
+    expect(fs.readFileSync(lab.paths.registryPath, 'utf8')).toBe(registryBytes);
+    expect(fs.readFileSync(olderFile, 'utf8')).toBe('Existing project/local version');
+    expect(fs.readFileSync(lab.database, 'utf8')).toBe('Owner governance data');
+  });
+
   it('ships all skills through an actual adapter npm archive, official installer marketplace and versioned cache', async () => {
     const staging = temporaryDirectory();
     const nodeDir = path.dirname(process.execPath);
