@@ -2337,3 +2337,5 @@ export type {
   InterventionAuditReadOptions,
   InterventionSourceConflict,
 } from './store/sqlite-intervention-evidence-store.js';
+
+export { boundCorrectionEvidenceText } from './pain-signal-bridge.js';

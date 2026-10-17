@@ -44,6 +44,7 @@ import { WorkBuddyHooksHostAdapter } from './host-adapter.js';
 import { WORKBUDDY_TOOL_SEMANTICS } from './tool-semantics.js';
 import { resolveWorkbuddyWorkspace } from './workspace-resolution.js';
 import { WorkBuddyDecoderError, WorkBuddyEncoderError, isWorkBuddyHookOutput, WORKBUDDY_EVENT_PRE_TOOL_USE, type WorkBuddyHookOutput } from './codec/index.js';
+import { recordWorkbuddyOwnerStatement } from './explicit-owner-statement.js';
 import { recordWorkbuddyPromptDeliveryEvidence, recordWorkbuddyDenyEvidence } from './workbuddy-evidence-recorder.js';
 
 type EnvMap = Record<string, string | undefined>;
@@ -256,6 +257,13 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
   const projectDir = event.context.workspaceDir.length > 0 ? event.context.workspaceDir : undefined;
   event = { ...event, context: { ...event.context, workspaceDir: resolution.workspaceDir } };
 
+  const ownerReceipt = channelEventName === 'UserPromptSubmit'
+    ? await recordWorkbuddyOwnerStatement(event, resolution.workspaceDir)
+    : undefined;
+  const receiptOutput = (output: WorkBuddyHookOutput | null): WorkBuddyHookOutput | null => ownerReceipt === undefined ? output : {
+    hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: [ownerReceipt, output?.hookSpecificOutput.additionalContext].filter(Boolean).join('\n\n') },
+  };
+
   try {
     if (event.kind === 'session_start') {
       // SPEC §4.2: health check only — first version injects NO body, and the
@@ -356,7 +364,7 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
       ...evaluationDiagnostics,
       ...evidenceDiagnostics,
     ];
-    return { stdout: encoded, exitCode: 0, stderr };
+    return { stdout: receiptOutput(encoded), exitCode: 0, stderr: [...stderr, ...(ownerReceipt === undefined ? [] : [ownerReceipt])] };
   } catch (error) {
     const reason = error instanceof WorkBuddyEncoderError ? error.reason : `runtime_failed:${errorMessage(error)}`;
     const nextAction = error instanceof WorkBuddyEncoderError ? error.nextAction : 'Inspect the PD governance workspace state and retry.';
@@ -367,7 +375,7 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
     }
     // UserPromptSubmit: protect the prompt (exit 2 clears it — P02).
     // after_tool_call: the tool already ran — report evidence degradation only.
-    return neutralWithDiagnostics([diagnostic('degraded', reason, nextAction)]);
+    return { stdout: receiptOutput(null), exitCode: 0, stderr: [diagnostic('degraded', reason, nextAction), ...(ownerReceipt === undefined ? [] : [ownerReceipt])] };
   }
 }
 
