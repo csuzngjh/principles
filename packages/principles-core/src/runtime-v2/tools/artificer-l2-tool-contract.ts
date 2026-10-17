@@ -16,7 +16,7 @@
  *                          using the injected RefinerRuleHostGateDeps.
  *   - submit_rulecode    : the model's final ArtificerRuleOutput submission.
  *                          Stores into outputCapture; the adapter's
- *                          shouldStopAfterTurn detects the capture and stops.
+ *                          finishTurn detects the capture and stops.
  *
  * The submit_rulecode tool does NOT terminate the loop via `terminate` alone
  * (that is unreliable — agent-loop uses .every() over the whole tool batch,

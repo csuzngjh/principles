@@ -57,7 +57,11 @@ function copyPackage(sourceDir: string, targetDir: string): void {
  * `fromDir`: the nearest `node_modules/<dep>` on the ancestor path, ending at
  * the repo-root node_modules. npm may nest workspace deps (exact-pinned
  * versions conflicting at the root), so a root-only lookup silently misses
- * them and seeds a runtime that cannot load. */
+ * them and seeds a runtime that cannot load. Root-HOISTED deps are the dual
+ * case: they live at `rootNm/<dep>` itself, never at
+ * `rootNm/node_modules/<dep>`, so the ancestor walk must check the root
+ * package slot explicitly (Pi 1.2's eager import graph pulls root-hoisted
+ * `partial-json` on the injection path and a missed seed crashes the hook). */
 function findNodeModulesDir(fromDir: string, dep: string, rootNm: string): string | null {
   let dir = fromDir;
   // Workspace deps surface in node_modules as junctions/symlinks; resolve to
@@ -66,11 +70,13 @@ function findNodeModulesDir(fromDir: string, dep: string, rootNm: string): strin
   while (true) {
     const candidate = path.join(dir, 'node_modules', dep);
     if (fs.existsSync(candidate)) return candidate;
-    if (dir === rootNm || dir === path.dirname(rootNm)) return null;
+    if (dir === rootNm || dir === path.dirname(rootNm)) break;
     const parent = path.dirname(dir);
-    if (parent === dir) return null;
+    if (parent === dir) break;
     dir = parent;
   }
+  const rootHoisted = path.join(rootNm, dep);
+  return fs.existsSync(rootHoisted) ? rootHoisted : null;
 }
 
 /** Copy a package plus its transitive runtime dependencies resolved through
@@ -80,7 +86,10 @@ function copyPackageWithDeps(sourceDir: string, targetDir: string, nm: string, r
   copyPackage(sourceDir, targetDir);
   const queue: Array<{ source: string; target: string }> = [{ source: sourceDir, target: targetDir }];
   const seen = new Set<string>();
-  for (let depth = 0; depth < 5 && queue.length > 0; depth += 1) {
+  // Pi 1.2 widened the transitive closure (provider SDKs + proxy agents nest
+  // and chain deeper than 0.85's graph); 8 BFS layers keeps the seed complete
+  // without making the bound the failure mode.
+  for (let depth = 0; depth < 8 && queue.length > 0; depth += 1) {
     const layer = queue.splice(0);
     for (const item of layer) {
       let deps: Record<string, string> = {};

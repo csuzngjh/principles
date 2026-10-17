@@ -10,6 +10,8 @@ Feature: Companion 控制台服务监管生命周期
   - 快速连续崩溃按 1s/2s/4s 退避重启,超过 3 次进入 server_crash_loop 降级
   - 稳定运行(≥60s)后崩溃视为新一轮故障,重新计数
   - 主动退出(用户退出/手动重启)不触发自动重启
+  - 更新链先换版本标记、后铺组件目录:入口文件暂缺是可重试瞬态,按退避等待,
+    预算耗尽才降级;等待不消耗崩溃重启预算(PRI-1012)
 
   Background:
     Given 一个使用假时钟的 ConsoleSupervisor
@@ -48,3 +50,20 @@ Feature: Companion 控制台服务监管生命周期
     And supervisor 标记主动停止
     When 服务进程退出
     Then supervisor 状态回到 idle 且不再安排重启
+
+  @pri-1012 @entry-wait
+  Scenario: 更新链未铺完 pd-cli 目录时有界等待,预算耗尽才降级
+    When supervisor 启动后入口检查发现 pd-cli 文件暂缺
+    Then 安排 2000ms 后重试入口
+    When 入口检查再次失败
+    Then 安排 5000ms 后重试入口
+    When 入口检查连续失败直到等待预算耗尽
+    Then supervisor 进入 launch_failed 降级且不再安排入口等待
+    And 降级原因写明等待预算已用完
+
+  @pri-1012 @entry-wait-recovery
+  Scenario: 等待期间入口文件被铺好,下一次尝试正常进入 managed 运行
+    When supervisor 启动后入口检查发现 pd-cli 文件暂缺
+    Then 安排 2000ms 后重试入口
+    When 入口文件出现且控制台以 serverPid 4242 完成启动
+    Then supervisor 状态为 running 且 mode 为 managed
