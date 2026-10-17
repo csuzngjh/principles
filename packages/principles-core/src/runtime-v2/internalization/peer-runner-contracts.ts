@@ -15,7 +15,7 @@
  */
 
 import type { TaskRecord } from '../task-status.js';
-import type { RepairPayload, RunnerDecision, RolloutRevisionPayload, RunnerCompletionIntent, HumanReviewContext, OwnerResolutionRecord, FailedTaskRecoveryAuditRecord } from './pitask-metadata.js';
+import type { RepairPayload, RunnerDecision, RolloutRevisionPayload, RunnerCompletionIntent, HumanReviewContext, OwnerResolutionRecord, FailedTaskRecoveryAuditRecord, IntentBasisVerificationRecordV1, SourceFaultBackoffRecordV1 } from './pitask-metadata.js';
 import type { OwnerEvidenceSelection } from './evidence-readiness.js';
 
 // ── Internalization Channel Types ─────────────────────────────────────────────
@@ -194,6 +194,19 @@ export interface PITaskRecord extends TaskRecord {
    * (pitask-metadata.ts).
    */
   failedTaskRecoveries?: readonly FailedTaskRecoveryAuditRecord[];
+  /**
+   * SPEC-RULECODE-QUALITY-001 A1 (PRI-995): versioned DERIVED evidence of the
+   * deterministic intent-basis verification before artificer generation.
+   * Shape authority: `isValidIntentBasisVerificationRecord`
+   * (pitask-metadata.ts). Evidence only — never a pass token.
+   */
+  intentBasisVerification?: IntentBasisVerificationRecordV1;
+  /**
+   * SPEC-RULECODE-QUALITY-001 §9 (PRI-995): bounded technical-retry state for
+   * transient source faults on pre-model gates. Shape authority:
+   * `isValidSourceFaultBackoffRecord` (pitask-metadata.ts).
+   */
+  sourceFaultBackoff?: SourceFaultBackoffRecordV1;
 }
 
 // ── Type Guards ───────────────────────────────────────────────────────────────

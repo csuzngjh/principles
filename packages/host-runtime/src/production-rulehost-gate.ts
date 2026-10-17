@@ -151,6 +151,13 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
     if (action.normalizedPath === null) return { decision: 'allow', source: event.source, metadata: { evaluatedLiveRules: 0 } };
 
     let context: RuleContextV2 | undefined;
+    /**
+     * SPEC-RULECODE-QUALITY-001 A3 (Q10): the precise reason a v2 rule is
+     * suspended — carried into the skip warning so each fault kind (absent /
+     * undefined / invalid / failed / unavailable) is distinguishable in host
+     * telemetry instead of merging into one opaque 'unavailable'.
+     */
+    let contextFault: 'provider_absent' | 'provider_returned_undefined' | 'provider_invalid' | 'provider_failed' | undefined;
     let enrichment: RuleInputEnrichment = { currentGfi: 0, epTier: 0, bashRisk: 'unknown' };
     const request: ProductionRuleContextRequest = {
       workspaceDir: event.context.workspaceDir, sessionId: event.context.sessionId,
@@ -173,23 +180,32 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
         const candidate: unknown = await withinGateDeadline(options.ruleContextProvider(request), startedAt);
         if (candidate === undefined) {
           context = undefined;
+          contextFault = 'provider_returned_undefined';
         } else {
         const validation = validateRuleContextV2(candidate);
         if (isRuleContext(candidate)) context = candidate;
         else {
           context = UNAVAILABLE_RULE_CONTEXT;
+          contextFault = 'provider_invalid';
           addWarning(warnings, `rule_context_invalid: ${validation.errors.join('; ')}`, 'repair the host context provider');
         }
         }
       } catch (error: unknown) {
         context = UNAVAILABLE_RULE_CONTEXT;
+        contextFault = 'provider_failed';
         addWarning(warnings, `rule_context_provider_failed: ${error instanceof Error ? error.message : String(error)}`, 'inspect the host context provider and retry');
       }
+    } else {
+      contextFault = 'provider_absent';
     }
 
     const dbPath = path.join(event.context.workspaceDir, '.pd', 'state.db');
     if (remainingGateMs(startedAt) <= 0) {
-      return { decision: 'allow', source: event.source, warnings: [boundedWarning('gate_deadline_exceeded', 'inspect host context providers and active RuleCode resource use')] };
+      // SPEC-RULECODE-QUALITY-001 Q24: a deadline-exhausted allow must be
+      // observable as "no rule executed" (evaluatedLiveRules=0), never read
+      // as successful governance — isolated probe finding (the early return
+      // previously carried no evaluation facts at all).
+      return { decision: 'allow', source: event.source, warnings: [boundedWarning('gate_deadline_exceeded', 'inspect host context providers and active RuleCode resource use')], metadata: { evaluatedLiveRules: 0 } };
     }
     if (!fs.existsSync(dbPath)) {
       // Security audit run-1 (gate-failopen-allow-on-state-corruption):
@@ -366,8 +382,32 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
                 addWarning(warnings, `unsupported_context_version: ${String(content.requiresContextVersion)}`, 'regenerate the rule artifact for context version 2');
                 continue;
               }
-              if (!context) {
-                addWarning(warnings, 'rule_context_v2_unavailable', 'enable and wire the host rule context provider');
+              // SPEC-RULECODE-QUALITY-001 A3 / §7.1 (Q10): MANDATORY runtime
+              // suspension of context-dependent rules. A v2 rule may only
+              // execute when the provider resolved a schema-valid context
+              // whose history.status is 'available'. The old check (`!context`)
+              // let the truthy UNAVAILABLE_RULE_CONTEXT sentinel (provider
+              // invalid/thrown) and schema-valid unavailable contexts through,
+              // so a v2 rule without its own self-protection still executed on
+              // untrusted input. Skipping happens per-call, per-rule — healthy
+              // sibling rules (v1 or well-fed v2) keep evaluating, and no
+              // governance state changes. Intentional behavior change vs the
+              // pre-fix "legal unavailable still executed" path.
+              if (context === undefined || context.history.status !== 'available') {
+                // Reference identity against the frozen sentinel distinguishes
+                // "the provider faulted" from "the provider legitimately
+                // declared history unavailable" (same wire shape, different
+                // fault class — Q10 asserts them separately).
+                const fault = context === undefined
+                  ? (contextFault ?? 'provider_absent')
+                  : context === UNAVAILABLE_RULE_CONTEXT
+                    ? (contextFault ?? 'provider_invalid')
+                    : 'history_unavailable';
+                addWarning(
+                  warnings,
+                  `rule_context_v2_unavailable: ${fault} (activation=${activationId})`,
+                  'enable and wire the host rule context provider, or regenerate the rule without context dependence',
+                );
                 continue;
               }
             }

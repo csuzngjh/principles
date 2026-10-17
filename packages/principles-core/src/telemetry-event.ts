@@ -144,6 +144,14 @@ export const TelemetryEventType = Type.Union([
   // Owner-recovery evidence for a task that just entered needs_human_review.
   Type.Literal('artificer_evidence_readiness_checked'),
   Type.Literal('artificer_blocked_on_owner_evidence'),
+  // SPEC-RULECODE-QUALITY-001 A1 (PRI-995): consumer-side intent-basis
+  // preflight. intent_basis_checked records every gate verdict (payload
+  // carries the stable reasonCode + bounded detail); blocked_on_intent_basis
+  // carries the review evidence for a task that just entered
+  // needs_human_review on an intent/source-fault stop (never an Owner-fault
+  // label for source faults).
+  Type.Literal('artificer_intent_basis_checked'),
+  Type.Literal('artificer_blocked_on_intent_basis'),
   // PRI-983 (SPEC-PD-IAER-001 FR-03/FR-06/FR-08): the authorized Owner
   // evidence operations — attach (selection persisted into pi_metadata, task
   // STAYS needs_human_review) and resume (digest-verified authority reset back
