@@ -8,7 +8,7 @@ pre-commit:
       # Single authority for safe-write-clone judgement (AGENTS.md §23A):
       # protected branch / detached HEAD / unsafe git state / primary
       # checkout all fail closed. Judge-only — never mutates anything.
-      run: node scripts/dev/check-dev-worktree.mjs
+      run: node scripts/dev/check-dev-worktree.mjs --fast
     lint:
       glob: "*.ts"
       run: npx eslint --fix {staged_files}
@@ -29,11 +29,11 @@ pre-push:
     worktree-guard:
       # Same guard as pre-commit (see AGENTS.md §23A) — also replaces the old
       # protect-branch.cjs main/master push block, which it subsumes.
-      run: node scripts/dev/check-dev-worktree.mjs
-    verify-merge:
-      # Canonical merge gate. Keep this in sync with the required CI check.
-      run: npm run verify:merge
+      run: node scripts/dev/check-dev-worktree.mjs --fast
+    fast-push:
+      # Quick local feedback only; full verify:merge and package tests remain CI gates.
+      run: node scripts/dev/pre-push-fast.mjs
     # gitleaks removed by Owner decision (2026-10-17, push-latency review):
     # the full-history scan added push latency and duplicated no CI check;
-    # secret hygiene remains covered by repo-hygiene (pre-commit) and the
-    # Owner's own operational controls.
+    # repo-hygiene checks paths/file sizes, NOT secret contents; remaining
+    # secret-risk controls are operational (no automated secret-content scanner).

@@ -1471,11 +1471,12 @@ Fix valid findings before handoff.
 
 Use targeted tests during implementation.
 
-Before final handoff run the current canonical merge gate:
-
-```bash
-npm run verify:merge
-```
+Before PR handoff, run task-specific tests and the fast local pre-push checks.
+The canonical `verify:merge` and all per-package suites remain CI merge gates;
+check required PR statuses and never label a red/pending CI as green.
+Do not run full `npm run verify:merge` on every push or agent handoff.
+Run it manually when specifically needed (for example CI is unavailable,
+local merge-candidate investigation, or explicit Owner request).
 
 Also run task-specific tests not covered by that gate.
 

@@ -206,6 +206,13 @@ describe('check-dev-worktree guard', () => {
         warnings: Array<{ rule: string; message: string }>;
       };
       expect(out.violations.map((v) => v.rule)).toContain('primary-worktree');
+      // Fast hook mode preserves local-blocking rules but avoids expensive
+      // sibling status probes. Full default mode above still reports damage.
+      const fast = await runDevScript('check-dev-worktree.mjs', ['--json', '--fast'], { cwd: repo });
+      expect(fast.code).toBe(1);
+      const fastOut = JSON.parse(fast.stdout) as { violations: Array<{ rule: string }>; warnings: unknown[] };
+      expect(fastOut.violations.map((v) => v.rule)).toContain('primary-worktree');
+      expect(fastOut.warnings).toEqual([]);
       // The new warning layer reports the damaged sibling without blocking.
       const warning = out.warnings.find((w) => w.rule === 'worktree-unreadable');
       expect(warning).toBeDefined();

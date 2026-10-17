@@ -50,6 +50,7 @@ const FIXTURE_PACKAGES: Array<{ dir: string; name: string; deps?: Record<string,
     },
   },
   { dir: 'pd-companion', name: '@principles/pd-companion', deps: { '@principles/install-layout': '0.1.0' } },
+  { dir: 'workbuddy-adapter', name: '@principles/workbuddy-adapter', deps: { '@principles/core': '^1.74.1', '@principles/host-runtime': '^0.1.0', '@principles/install-layout': '0.1.0' } },
   {
     dir: 'pd-console',
     name: '@principles/pd-console',
@@ -151,6 +152,7 @@ describe('impact resolver — package semantics', () => {
       [
         '@principles/core',
         '@principles/codex-adapter',
+        '@principles/workbuddy-adapter',
         '@principles/host-runtime',
         '@principles/pd-cli',
         '@principles/pd-console',
@@ -160,6 +162,7 @@ describe('impact resolver — package semantics', () => {
     );
     expect(out.scopes.core).toBe(true);
     expect(out.scopes.hostRuntime).toBe(true);
+    expect(out.scopes.workbuddyAdapter).toBe(true);
     expect(out.scopes.plugin).toBe(true);
     expect(out.scopes.cli).toBe(true);
     expect(out.scopes.console).toBe(true);
@@ -194,6 +197,14 @@ describe('impact resolver — package semantics', () => {
     expect(out.reasons.release).toContain('asset');
   }, 60_000);
 
+  it('workbuddy-adapter-only change is scoped and does not imply release asset', async () => {
+    const head = await commit({ 'packages/workbuddy-adapter/src/change.ts': 'export const x = 1;\n' }, 'workbuddy');
+    const out = await impact('HEAD~1', head);
+    expect(out.scopes.workbuddyAdapter).toBe(true);
+    expect(out.changedPackages).toContain('@principles/workbuddy-adapter');
+    expect(out.affectedPackages).toEqual(['@principles/workbuddy-adapter']);
+    expect(out.scopes.release).toBe(false);
+  }, 60_000);
   it('cli-only change → cli scope only', async () => {
     const head = await commit({ 'packages/pd-cli/src/change.ts': 'export const x = 1;\n' }, 'cli');
     const out = await impact('HEAD~1', head);
@@ -208,6 +219,7 @@ describe('impact resolver — package semantics', () => {
     const head = await commit({ 'packages/host-runtime/src/change.ts': 'export const x = 1;\n' }, 'hr');
     const out = await impact('HEAD~1', head);
     expect(out.scopes.hostRuntime).toBe(true);
+    expect(out.scopes.workbuddyAdapter).toBe(true);
     expect(out.scopes.codexAdapter).toBe(true);
     expect(out.scopes.plugin).toBe(true);
     expect(out.scopes.cli).toBe(true);
@@ -233,6 +245,7 @@ describe('impact resolver — package semantics', () => {
     const out = await impact('HEAD~1', head);
     expect(out.scopes.installLayout).toBe(true);
     expect(out.scopes.hostRuntime).toBe(true);
+    expect(out.scopes.workbuddyAdapter).toBe(true);
     expect(out.scopes.companion).toBe(true);
     expect(out.scopes.installer).toBe(true);
     expect(out.scopes.release).toBe(true);

@@ -41,11 +41,12 @@ const PROTECTED_BRANCHES = new Set(['main', 'master']);
 const UNSAFE_STATE_MARKERS = ['rebase-merge', 'rebase-apply', 'MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD'];
 
 function parseArgs(argv) {
-  const args = { json: false };
+  const args = { json: false, fast: false };
   for (const arg of argv.slice(2)) {
     if (arg === '--json') args.json = true;
+    else if (arg === '--fast') args.fast = true;
     else if (arg === '-h' || arg === '--help') {
-      console.log('Usage: node scripts/dev/check-dev-worktree.mjs [--json]');
+      console.log('Usage: node scripts/dev/check-dev-worktree.mjs [--json] [--fast]');
       process.exit(0);
     } else {
       console.error('Unknown argument: ' + arg);
@@ -55,7 +56,7 @@ function parseArgs(argv) {
   return args;
 }
 
-async function collectViolations() {
+async function collectViolations({ fast = false } = {}) {
   const violations = [];
   let ctx = null;
   try {
@@ -122,6 +123,7 @@ async function collectViolations() {
   // uncommitted work) must become visible FAST instead of surfacing days
   // later as an unrecoverable surprise.
   const warnings = [];
+  if (fast) return { violations, warnings, ctx, lease: lease.summary };
   try {
     const worktrees = await listWorktrees(ctx.cwd);
     for (const wt of worktrees) {
@@ -186,7 +188,7 @@ function reportJson(violations, warnings, ctx, lease) {
 
 async function main() {
   const args = parseArgs(process.argv);
-  const { violations, warnings, ctx, lease } = await collectViolations();
+  const { violations, warnings, ctx, lease } = await collectViolations({ fast: args.fast });
   if (args.json) reportJson(violations, warnings, ctx, lease);
   else reportHuman(violations, warnings, ctx, lease);
 }
