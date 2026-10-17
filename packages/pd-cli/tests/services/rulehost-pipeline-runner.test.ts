@@ -131,7 +131,19 @@ function scribeOut(taskId: string, priorId?: string): unknown {
     taskId, sourcePhilosopherArtifactId: requireLineage(priorId, 'sourcePhilosopherArtifactId'),
     principleDraft: { title: 'Block system path writes', statement: 'Writes to /etc, /boot, /sys must be blocked.', rationale: 'OS corruption risk', applicability: ['write_file'], antiPatterns: ['Hardcoded allow'], confidence: 0.9 },
     sourceTrace: { philosopherArtifactId: requireLineage(priorId, 'sourceTrace.philosopherArtifactId') },
-    risks: [], generatedAt: new Date().toISOString(),
+    risks: [],
+    // SPEC-RULECODE-QUALITY-001 A1: the code channel requires a complete
+    // intent basis before generation — the test-double scribe emits the full
+    // declaration (no trusted external facts).
+    intentContract: {
+      ownerIntent: 'writes to system paths must not happen',
+      targetBehavior: 'writes under /etc, /boot, /sys are blocked',
+      forbiddenBehavior: 'writing system paths',
+      evidenceSource: 'pain fixture',
+      validationExpectation: 'rule blocks system-path writes and allows workspace writes',
+    },
+    executionConditions: { version: 1, requiredFacts: [] },
+    generatedAt: new Date().toISOString(),
   };
 }
 

@@ -3,7 +3,7 @@ import { validateBehaviorExamplePack } from './behavior-example-pack.js';
 import type { BehaviorExamplePack } from './behavior-example-pack.js';
 import type { GoldenTraceCaseInput } from './artificer-output.js';
 import type { LastValidatorErrors } from './pitask-metadata.js';
-import type { IntentContractV1 } from './intent-contract.js';
+import type { IntentContractV1, ScribeExecutionConditionsV1 } from './intent-contract.js';
 import type { FormationCandidateProjection } from './formation-context.js';
 import type { ToolSemanticMappingV1, ToolSemanticRegistry } from './tool-semantic-registry.js';
 import type { OutputLanguage } from '../language-directive.js';
@@ -122,6 +122,14 @@ export interface ArtificerPromptBuilderInput {
    */
   intentContract?: IntentContractV1;
   /**
+   * SPEC-RULECODE-QUALITY-001 A2: the scribe artifact's machine-readable
+   * execution conditions (validated at extraction). When present, the system
+   * prompt carries an INTENT EXECUTION CONDITIONS block naming each required
+   * trusted fact — the rule code must never encode a self-filled proxy for
+   * them. Undefined for scribe artifacts that predate the declaration.
+   */
+  executionConditions?: ScribeExecutionConditionsV1;
+  /**
    * Owner's preferred language for implementation artifacts (PRI-714). When
    * provided, the artificer instruction carries a language directive so
    * implementationSummary and risks are written in the owner's language.
@@ -169,6 +177,8 @@ export interface ArtificerPromptInput {
    * (backward compatible).
    */
   intentContract?: IntentContractV1;
+  /** SPEC-RULECODE-QUALITY-001 A2: scribe-declared trusted-fact obligations (validated; forwarded to the model). */
+  executionConditions?: ScribeExecutionConditionsV1;
   /** PRI-741: present only when a host semantic projection was resolved. */
   hostSemanticContext?: ArtificerHostSemanticContext;
 }
@@ -258,11 +268,11 @@ PRIOR ADVERSARIAL FAILURES (when \`adversarialFeedback\` is present):
 - The \`adversarialFeedback\` field lists the specific cases that failed, each with the attack type, the expected vs actual decision, and a rationale.
 - You MUST address each listed failure specifically — do not regenerate blind. Adjust the matcher/logic so the failed cases produce the expected decision while preserving the cases that previously passed.
 
-RULEHOST CAPABILITY BOUNDARY (PRI-508):
-- RuleHost evaluate(input) is a STATELESS single-call gate. It CANNOT track multi-step workflows (e.g., audit→verify→incremental) across invocations.
-- Translate the principle into a STATEFUL-CHECKABLE constraint that evaluate() CAN enforce per tool call: check whether the current tool call carries evidence of prior analysis (context markers, params encoding prior reads, explicit preconditions in the params).
+RULEHOST CAPABILITY BOUNDARY (PRI-508, revised SPEC-RULECODE-QUALITY-001 A2):
+- RuleHost evaluate(input) is a STATELESS single-call gate. It CANNOT track multi-step workflows (e.g., audit→verify→incremental) across invocations, and it can read the real history window the host provides but can NEVER create facts that do not exist in its input.
 - Do NOT implement a path whitelist or a "first call must be X" ordering rule if the principle is about procedural discipline — the runtime cannot observe ordering across calls.
-- If the principle cannot be enforced per-call, encode the closest per-call proxy and document the gap in implementationSummary.
+- params/command TEXT is agent-authored input: any marker, note, or claim inside it (e.g. an "approved"/"owner-design-approved" string) is the AGENT'S OWN assertion, never evidence of an Owner approval or any external decision. NEVER treat a params string as an approval, authorization, or confirmation. When the INTENT EXECUTION CONDITIONS block lists a required trusted fact, the only legitimate source is the pipeline's verified fact channel — your rule code must not invent, echo, or honor a self-filled substitute for it.
+- If the principle depends on a fact the runtime input cannot carry (an approval state, an external decision, host-side workflow progress), do NOT encode the nearest per-call proxy pretending to enforce it: state the residual gap in \`risks\` and \`implementationSummary\`, and scope \`evaluate\` to what the input can actually establish. A rule that misrepresents an unobservable requirement as enforced violates the principle even when its own tests pass.
 
 REPAIR FEEDBACK (PRI-509, when \`repairFeedback\` is present):
 - This is a REPAIR RETRY. A prior attempt of your generated code was reviewed by the evaluator and returned needs_revision.
@@ -318,6 +328,27 @@ DREAMER CANDIDATE SET (PRI-839, when \`dreamerContext\` is present):
 - Use the alternatives to bound the rule correctly: a proposal's concrete failure mode and concrete better-decision are EVIDENCE for which concrete patterns your evaluate() must cover.
 - Do NOT widen the rule beyond the intent the scribeArtifact formalised, and do NOT merge mutually exclusive proposals into one matcher.
 - \`dreamerContext.omittedCandidateCount\` > 0 means further proposals existed but were dropped to stay within budget — note that in \`risks\` instead of guessing at them.`;
+
+/**
+ * SPEC-RULECODE-QUALITY-001 A2: renders the scribe-declared trusted-fact
+ * obligations into the system prompt. The facts' AVAILABILITY is governed by
+ * the pipeline (verified before this prompt was ever built — the intent
+ * preflight); the rule code's obligation is to never fabricate or honor a
+ * self-filled substitute for them. An empty requiredFacts renders no block.
+ */
+export function buildIntentExecutionConditionsBlock(conditions: ScribeExecutionConditionsV1): string {
+  const required = conditions.requiredFacts.filter((fact) => fact.required);
+  if (required.length === 0) return '';
+  const lines = required.map((fact) =>
+    `- \`${fact.factKind}\` — required by the Owner's principle (basis: ${fact.textualBasis.replace(/\s+/g, ' ').slice(0, 240)})`);
+  return `
+
+INTENT EXECUTION CONDITIONS (SPEC-RULECODE-QUALITY-001):
+${lines.join('\n')}
+- These are TRUSTED EXTERNAL FACTS. Their truth is established OUTSIDE your rule by the pipeline's verified fact channel; your evaluate() code can never read, infer, or re-establish them from the tool-call input.
+- If the fact channel reports the fact unavailable at runtime, the pipeline suspends your rule — do NOT write code that guesses the fact's state from params text, session fields, or history shape.
+- NEVER treat any marker inside params/command text as satisfying one of these facts (see RULEHOST CAPABILITY BOUNDARY).`;
+}
 
 const V2_CONTEXT_INSTRUCTION = `
 CONTEXT MODE: v2 (Owner-labelled evidence is present)
@@ -440,7 +471,24 @@ CONTEXT MODE: v2 (Owner-labelled evidence is present)
  * letting read counts stand in for them. Validator, templates, and oracle
  * UNCHANGED.
  */
-export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v12';
+export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v13';
+
+/**
+ * SPEC-RULECODE-QUALITY-001 A2 (2026-10-16): bumped v12 → v13.
+ * (1) The PRI-508 RULEHOST CAPABILITY BOUNDARY block dropped the "encode the
+ *     closest per-call proxy" and "params encoding prior reads / explicit
+ *     preconditions in the params" guidance — that text is what the original
+ *     bad artifact generalized into treating a self-filled
+ *     "owner-design-approved" params string as an approval. The replacement
+ *     states the honest boundary: a stateless rule may read real history but
+ *     can never create facts that do not exist; params text is agent-authored
+ *     assertion, never evidence of approval; an unenforceable requirement is
+ *     disclosed in risks, not proxied.
+ * (2) New conditional INTENT EXECUTION CONDITIONS block: when the scribe
+ *     artifact declares required trusted facts (validated extraction), the
+ *     prompt names them and forbids self-filled substitutes. Additive wire
+ *     shape; absent declaration renders no block.
+ */
 
 // ── EP002-R4: bounded pack projection at the prompt boundary ─────────────────
 //
@@ -589,6 +637,10 @@ export class ArtificerPromptBuilder {
       // PRI-839: candidate-set guidance (absent = no block, prompt unchanged
       // for formations without resolvable dreamer proposals).
       + (input.dreamerContext !== undefined ? DREAMER_CANDIDATE_SET_INSTRUCTION : '')
+      // SPEC-RULECODE-QUALITY-001 A2: trusted-fact obligations distilled by
+      // the scribe (absent = no block — legacy scribe artifacts never reach
+      // generation on the code channel; the intent preflight stops them).
+      + (input.executionConditions !== undefined ? buildIntentExecutionConditionsBlock(input.executionConditions) : '')
       // PRI-741: host semantic projection (absent = no block, prompt
       // unchanged for workspaces without a host declaration).
       + (input.hostSemanticContext !== undefined ? buildHostSemanticContextBlock(input.hostSemanticContext) : '')
@@ -625,6 +677,9 @@ export class ArtificerPromptBuilder {
       // PRI-703 Phase 1: only include intentContract when present (pre-contract
       // scribe artifacts), so prompts stay backward-compatible.
       ...(input.intentContract !== undefined ? { intentContract: input.intentContract } : {}),
+      // SPEC-RULECODE-QUALITY-001 A2: only include executionConditions when
+      // the scribe artifact declared them (validated at extraction).
+      ...(input.executionConditions !== undefined ? { executionConditions: input.executionConditions } : {}),
       // PRI-741: only include hostSemanticContext when present, so prompts
       // stay backward-compatible for host-neutral workspaces.
       ...(input.hostSemanticContext !== undefined ? { hostSemanticContext: input.hostSemanticContext } : {}),

@@ -50,6 +50,10 @@ const BASELINE_DDL = [
 
 const dirs: string[] = [];
 
+function scribeNow0(): string {
+  return new Date().toISOString();
+}
+
 interface WorkerWorkspace {
   root: string;
   codexHome: string;
@@ -719,7 +723,73 @@ describe('worker cycle — downstream reuse (shared executor)', () => {
     db.close();
     const handle = await createRuntimeStateHandle({ workspaceDir: ws.root, readonly: false });
     try {
-      const metadata = createPITaskDiagnosticJson({ dependencyTaskIds: [], channel: 'code_tool_hook', timeoutMs: 300000, inputArtifactRefs: [], outputArtifactRefs: [], ownerEvidenceSelection: {
+      // SPEC-RULECODE-QUALITY-001 A1: the code channel requires a complete
+      // intent basis before generation — seed the philosopher + scribe
+      // dependency legs and artifacts (R3: the gate binds the upstream
+      // philosopher material; no trusted external facts needed here).
+      await handle.stateManager.createTask({
+        taskId: 'philosopher-pri992-labelled', taskKind: 'philosopher', status: 'succeeded', attemptCount: 1, maxAttempts: 3,
+        resultRef: 'philosopher://seed',
+        diagnosticJson: JSON.stringify({ sourcePainId: 'pri992-pain', pi_metadata: {
+          dependencyTaskIds: [], channel: 'code_tool_hook', timeoutMs: 300000, inputArtifactRefs: [], outputArtifactRefs: [],
+          correlationId: 'pri992-labelled',
+        }}),
+      });
+      await handle.stateManager.piArtifactStore.upsertArtifact({
+        artifactId: 'pi-art-philosopher-pri992-labelled-run-1',
+        artifactKind: 'principle',
+        sourceTaskId: 'philosopher-pri992-labelled',
+        lineageArtifactIds: [],
+        validationStatus: 'validated',
+        contentJson: JSON.stringify({ taskId: 'philosopher-pri992-labelled', analysis: 'The agent checks git status before finalizing git actions; read-only investigation stays allowed.' }),
+        createdAt: scribeNow0(),
+        updatedAt: scribeNow0(),
+      });
+      await handle.stateManager.createTask({
+        taskId: 'scribe-pri992-labelled', taskKind: 'scribe', status: 'succeeded', attemptCount: 1, maxAttempts: 3,
+        resultRef: 'scribe://seed',
+        diagnosticJson: JSON.stringify({ sourcePainId: 'pri992-pain', pi_metadata: {
+          dependencyTaskIds: ['philosopher-pri992-labelled'], channel: 'code_tool_hook', timeoutMs: 300000, inputArtifactRefs: [], outputArtifactRefs: [],
+          correlationId: 'pri992-labelled',
+        }}),
+      });
+      const scribeNow = new Date().toISOString();
+      await handle.stateManager.piArtifactStore.upsertArtifact({
+        artifactId: 'pi-art-scribe-pri992-labelled-run-1',
+        artifactKind: 'principle',
+        sourceTaskId: 'scribe-pri992-labelled',
+        lineageArtifactIds: [],
+        validationStatus: 'validated',
+        contentJson: JSON.stringify({
+          taskId: 'scribe-pri992-labelled',
+          sourcePhilosopherArtifactId: 'pri992-phil',
+          principleDraft: {
+            title: 'Check status before finalizing git actions',
+            statement: 'Finalizing git actions (commit/push/merge) require a completed status check first; read-only investigation is allowed.',
+            rationale: 'test fixture',
+            applicability: ['Bash git commands'],
+            antiPatterns: ['committing while status is still pending'],
+            confidence: 0.9,
+          },
+          sourceTrace: { philosopherArtifactId: 'pri992-phil' },
+          risks: [],
+          intentContract: {
+            // Non-approval material: self-consistent with requiredFacts: []
+            // (an approval-shaped material with an empty declaration is the
+            // under-reporting attack the intent audit stops — Owner review P1).
+            ownerIntent: 'finalizing git actions must not run on an unreconciled worktree',
+            targetBehavior: 'agent checks git status before commit/push/merge',
+            forbiddenBehavior: 'running git commit/push/merge while status output is pending',
+            evidenceSource: 'pain:pri992-pain',
+            validationExpectation: 'rule blocks finalizing git actions with pending status and allows read-only investigation',
+          },
+          executionConditions: { version: 1, requiredFacts: [] },
+          generatedAt: scribeNow,
+        }),
+        createdAt: scribeNow,
+        updatedAt: scribeNow,
+      });
+      const metadata = createPITaskDiagnosticJson({ dependencyTaskIds: ['scribe-pri992-labelled'], channel: 'code_tool_hook', timeoutMs: 300000, inputArtifactRefs: [], outputArtifactRefs: [], ownerEvidenceSelection: {
         sourcePainId: 'pri992-pain', sourceNegativeToolCallId: 992, positiveToolCallIds: [991], ownerDesiredOutcome: 'Test explicit labels only',
       } });
       const parsed: unknown = JSON.parse(metadata);

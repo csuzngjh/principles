@@ -142,6 +142,12 @@ ${coreAxiomsBlock}OUTPUT FORMAT (pure JSON, no markdown):
   },
   "risks": ["<risk 1>", "<risk 2>"],
   "ownerRequirementGaps": ["<Owner-attributed requirement NOT carried into the contract, with the reason — omit the field entirely when none>"],
+  "executionConditions": {
+    "version": 1,
+    "requiredFacts": [
+      {"factKind": "<trusted external fact kind the principle's enforcement depends on, e.g. design_approval>", "required": true, "textualBasis": "<the Owner-attributed text this requirement was read from>"}
+    ]
+  },
   "generatedAt": "<ISO-8601 timestamp>"
 }
 
@@ -157,6 +163,13 @@ OWNER-SOURCE GROUNDING (applies when formation evidence is present):
 - The requirements source is the diagnosis's Owner-attributed statements: rootCause, summary, violatedPrinciples, and evidence notes that state what the OWNER requires (e.g. "Owner 明确……必须先确认"). The diagnosis's implementation recommendations (kind=implementation / rule / principle) are the pipeline's own DESIGN PROPOSALS — candidate answers, never Owner requirements.
 - Every requirement you write into intentContract (ownerIntent / targetBehavior / forbiddenBehavior / validationExpectation) MUST be grounded in those Owner-attributed statements. A mechanism that appears only in recommendations or upstream proposals (e.g. a persisted confirmation-record store, an authorization table, a new input field) MUST NOT be presented as Owner-mandated: either omit it, or carry it as an explicitly derived implementation choice and mark it in risks with the prefix "derived_mechanism:".
 - Coverage check (when formation evidence is present): enumerate the Owner-attributed requirements you can see, then check each one against your contract. If any of them is NOT carried into the contract — narrowed (e.g. a requirement covering reads AND writes carried as write-only), partially carried, or dropped — you MUST declare it in the structured "ownerRequirementGaps" output field (one entry per uncovered requirement: the requirement and why it is not carried). The field is machine-consumed: the pipeline surfaces it to the Owner and the evaluator is obliged to treat those requirements as uncovered — an unresolved gap can only be closed by the Owner, never by silence. Silence about a dropped requirement is a fidelity defect, not a simplification.
+
+EXECUTION CONDITIONS (required — SPEC-RULECODE-QUALITY-001 A1):
+- "executionConditions" declares WHICH trusted external facts the principle's enforcement depends on — facts a per-tool-call rule input can never establish by itself (an Owner approval, an external confirmation, a host-side decision). Rule generation is gated on these being resolvable through a trusted-facts source; the generator can never self-declare them satisfied.
+- Ground each entry in the SAME Owner-attributed statements as the contract: textualBasis quotes (or precisely cites) the text that states the requirement. NEVER invent a fact requirement that no Owner-attributed text states, and NEVER omit one that it does state.
+- factKind vocabulary: use "design_approval" for requirements that an Owner/authority confirm a design BEFORE implementation. Use an empty requiredFacts array ("requiredFacts": []) when the principle is enforceable purely from the observable tool-call input and history window — that is a valid, common answer.
+- required: true = the fact MUST be resolvable for a faithful rule to exist. Entries with required:false may be omitted entirely.
+- executionConditions MUST be a nested JSON OBJECT with version exactly 1 — never a JSON-encoded string.
 
 CONSTRAINTS:
 - Output ONLY valid JSON (no markdown, no explanatory text, no code fences)
@@ -175,6 +188,7 @@ CONSTRAINTS:
 - sourceTrace.dreamerArtifactId: when input.sourceDreamerArtifactId is provided, it MUST be copied exactly from input.sourceDreamerArtifactId (non-empty string); omit the field only when the input does not carry one. Never scrape artifact content for ids — use the input field
 - risks MUST be an array of strings (can be empty if no risks identified)
 - generatedAt MUST be the current ISO-8601 timestamp (use the actual current time, NOT a placeholder)
+- executionConditions is REQUIRED: a nested JSON object { "version": 1, "requiredFacts": [...] }; use "requiredFacts": [] when the principle needs no trusted external fact. Every entry needs non-empty factKind, boolean required, non-empty textualBasis (see EXECUTION CONDITIONS above)
 - If the CORE AXIOMS section is provided, ensure the principle draft does not duplicate or contradict any existing core axiom. If overlap exists, note it in risks
 ${formationEvidenceBlock}${languageDirective}`;
 }
@@ -245,7 +259,21 @@ ${formationEvidenceBlock}${languageDirective}`;
  * (informational mechanism disclosure). Wire shape is additive; a run on v7
  * emits exactly the v6 shape plus the new optional field and version string.
  */
-export const SCRIBE_PROMPT_CONTRACT_VERSION = 'scribe-output-v1.prompt.v7';
+/**
+ * SPEC-RULECODE-QUALITY-001 A1 (2026-10-16): bumped v7 → v8. The OUTPUT
+ * FORMAT gains the structured `executionConditions` declaration ({version:1,
+ * requiredFacts:[{factKind,required,textualBasis}]}) + the EXECUTION
+ * CONDITIONS instruction block: which trusted external facts the principle's
+ * enforcement depends on, each grounded in the Owner-attributed text. The
+ * artificer intent preflight consumes it BEFORE any generation call — a
+ * declared required fact without a resolvable trusted source stops the chain
+ * at a reviewable point with zero model calls; the generator can never
+ * self-declare the fact satisfied. `requiredFacts: []` (enforceable from the
+ * observable input alone) is a valid, expected answer. Wire shape is
+ * additive; element validation is hand-rolled in DefaultScribeValidator
+ * (present-but-malformed is a hard rejection).
+ */
+export const SCRIBE_PROMPT_CONTRACT_VERSION = 'scribe-output-v1.prompt.v8';
 
 export class ScribePromptBuilder {
   private readonly coreGrounding: boolean;

@@ -768,6 +768,20 @@ export {
   ARTIFICER_EVIDENCE_NHR_SOURCE_RUN_ID,
 } from './internalization/consumer-evidence-preflight.js';
 
+// Artificer intent-basis preflight (SPEC-RULECODE-QUALITY-001 A1 — PRI-995)
+export type {
+  ArtificerTrustedFactsPort,
+  TrustedFactResolution,
+  ArtificerIntentPreflightVerdict,
+  IntentBasisStopReasonCode,
+} from './internalization/artificer-intent-preflight.js';
+export {
+  preflightArtificerIntentBasis,
+  consumeSourceFaultBackoffSkip,
+  advanceSourceFaultBackoff,
+  ARTIFICER_INTENT_NHR_SOURCE_RUN_ID,
+} from './internalization/artificer-intent-preflight.js';
+
 // Owner evidence attach/resume (PRI-983 — SPEC-PD-IAER-001 FR-03/FR-06)
 export type {
   EvidenceWaitingTaskSummary,
@@ -1027,6 +1041,9 @@ export type {
   OwnerResolutionAction,
   OwnerResolutionStatus,
   FailedTaskRecoveryAuditRecord,
+  IntentBasisVerificationRecordV1,
+  SourceFaultBackoffRecordV1,
+  TrustedFactResolutionKind,
 } from './internalization/pitask-metadata.js';
 
 export {
@@ -1038,7 +1055,21 @@ export {
   mergePITaskMetadata,
   artificerRepairTaskId,
   parseSeedSourcePainId,
+  isValidIntentBasisVerificationRecord,
+  isValidSourceFaultBackoffRecord,
+  SOURCE_FAULT_PERSISTENT_REASON_CODE,
+  SOURCE_FAULT_MAX_CONSECUTIVE_FAILURES,
 } from './internalization/pitask-metadata.js';
+
+// SPEC-RULECODE-QUALITY-001 A1: scribe execution-conditions declaration.
+export type {
+  ScribeExecutionConditionsV1,
+  ScribeRequiredFactV1,
+} from './internalization/intent-contract.js';
+export {
+  isValidScribeExecutionConditionsV1,
+  extractExecutionConditions,
+} from './internalization/intent-contract.js';
 
 // ── Internalization Orchestrator (PRI-68) ─────────────────────────────────────
 

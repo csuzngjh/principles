@@ -117,6 +117,35 @@ async function seedCodeChannelChain(workspaceDir: string, selection?: OwnerEvide
   const handle = await createRuntimeStateHandle({ workspaceDir, readonly: false });
   try {
     const { stateManager } = handle;
+    // R3: intent gate binds upstream (philosopher) material — seed the leg.
+    const PHILOSOPHER_TASK_ID = 'philosopher-corr-001';
+    await stateManager.createTask({
+      taskId: PHILOSOPHER_TASK_ID,
+      taskKind: 'philosopher',
+      status: 'succeeded',
+      attemptCount: 1,
+      maxAttempts: 3,
+      resultRef: 'philosopher://seed',
+      diagnosticJson: JSON.stringify({ sourcePainId: 'pain_001', pi_metadata: {
+        dependencyTaskIds: [],
+        channel: 'code_tool_hook',
+        // reconciliation keys successors on correlationId (see T02).
+        correlationId: 'corr-001',
+        timeoutMs: 300_000,
+        inputArtifactRefs: [],
+        outputArtifactRefs: [],
+      }}),
+    });
+    await stateManager.piArtifactStore.upsertArtifact({
+      artifactId: `pi-art-${PHILOSOPHER_TASK_ID}-run-1`,
+      artifactKind: 'principle',
+      sourceTaskId: PHILOSOPHER_TASK_ID,
+      lineageArtifactIds: [],
+      validationStatus: 'validated',
+      contentJson: JSON.stringify({ taskId: PHILOSOPHER_TASK_ID, analysis: 'The agent must read the target file before writing it; blind edits cascade.' }),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
     await stateManager.createTask({
       taskId: SCRIBE_TASK_ID,
       taskKind: 'scribe',
@@ -125,7 +154,7 @@ async function seedCodeChannelChain(workspaceDir: string, selection?: OwnerEvide
       maxAttempts: 3,
       resultRef: 'scribe://seed',
       diagnosticJson: JSON.stringify({ sourcePainId: 'pain_001', pi_metadata: {
-        dependencyTaskIds: [],
+        dependencyTaskIds: [PHILOSOPHER_TASK_ID],
         channel: 'code_tool_hook',
         timeoutMs: 300_000,
         inputArtifactRefs: [],
@@ -135,6 +164,46 @@ async function seedCodeChannelChain(workspaceDir: string, selection?: OwnerEvide
         // create a SECOND artificer successor for the seeded scribe.
         correlationId: 'corr-001',
       }}),
+    });
+    // SPEC-RULECODE-QUALITY-001 A1: the code channel now requires a complete
+    // intent basis (intentContract + executionConditions) before generation —
+    // the fixture seeds a scribe artifact declaring NO trusted external facts
+    // (the principle is enforceable from the observable input alone).
+    const now = new Date().toISOString();
+    await stateManager.piArtifactStore.upsertArtifact({
+      artifactId: `pi-art-${SCRIBE_TASK_ID}-run-1`,
+      artifactKind: 'principle',
+      sourceTaskId: SCRIBE_TASK_ID,
+      lineageArtifactIds: [],
+      validationStatus: 'validated',
+      contentJson: JSON.stringify({
+        taskId: SCRIBE_TASK_ID,
+        sourcePhilosopherArtifactId: 'art-phil-001',
+        principleDraft: {
+          title: 'Read before write',
+          statement: 'Files must be read before they are written',
+          rationale: 'blind edits caused the original pain',
+          applicability: ['write_file calls'],
+          antiPatterns: ['writing a file that was never read'],
+          confidence: 0.9,
+        },
+        sourceTrace: { philosopherArtifactId: 'art-phil-001' },
+        risks: [],
+        intentContract: {
+          // Non-approval material: self-consistent with requiredFacts: [] —
+          // an approval-shaped material with an empty declaration is the
+          // under-reporting attack the intent audit stops (Owner review P1).
+          ownerIntent: 'files must be read before they are written',
+          targetBehavior: 'every write to a file is preceded by a read of that file in the same session',
+          forbiddenBehavior: 'writing a file that was not read earlier in the session',
+          evidenceSource: 'pain:pain_001',
+          validationExpectation: 'rule blocks writes whose context facts show no prior read of the target',
+        },
+        executionConditions: { version: 1, requiredFacts: [] },
+        generatedAt: now,
+      }),
+      createdAt: now,
+      updatedAt: now,
     });
     await stateManager.createTask({
       taskId: ARTIFICER_TASK_ID,
