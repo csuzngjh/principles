@@ -160,6 +160,19 @@ function stdoutFromExecError(error: unknown): string {
   return typeof stdout === 'string' ? stdout : '';
 }
 
+/** rc-1/rc-2: distinguish a process that EXITED from one that was KILLED. A
+ * timeout kill, a signal, or a spawn/system error (code is a string, killed is
+ * true, or signal is set) means the process failed — stdout on that path is
+ * partial or stale output, never a report (PRI-1013 review round 2, P2). */
+function execFailureKind(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null) return undefined;
+  const rec = error as Record<string, unknown>;
+  if (rec.killed === true) return 'killed';
+  if (typeof rec.signal === 'string' && rec.signal.length > 0) return `signal ${rec.signal}`;
+  if (typeof rec.code === 'string') return rec.code;
+  return undefined;
+}
+
 /** rc-1/rc-2: same guard for the exit code, used only for the bounded operator detail. */
 function exitCodeOf(error: unknown): number | undefined {
   if (typeof error !== 'object' || error === null || !Object.hasOwn(error, 'code')) return undefined;
@@ -253,10 +266,15 @@ export function resolvePdCliEntry(): PdCliEntryResolution {
 export class CodexGovernanceHealthModel {
   private readonly workspaceDir: string;
   private readonly cliEntryOverride: string | null;
+  private readonly execTimeoutMs: number;
 
-  constructor(workspaceDir: string, cliEntryOverride?: string) {
+  constructor(workspaceDir: string, cliEntryOverride?: string, options?: { execTimeoutMs?: number }) {
     this.workspaceDir = workspaceDir;
     this.cliEntryOverride = cliEntryOverride ?? null;
+    // PRI-1013 review round 2 (P2): the timeout stays a production default;
+    // the option exists only so a regression test can trigger a REAL timeout
+    // kill without waiting 30s — never used in production wiring.
+    this.execTimeoutMs = options?.execTimeoutMs ?? 30_000;
   }
 
   async collect(): Promise<CodexGovernanceHealthResult> {
@@ -278,7 +296,7 @@ export class CodexGovernanceHealthModel {
       const result = await execFileAsync(
         process.execPath,
         [resolution.entry, 'health', '--host', 'codex', '--workspace', this.workspaceDir, '--json'],
-        { encoding: 'utf8', timeout: 30_000, windowsHide: true },
+        { encoding: 'utf8', timeout: this.execTimeoutMs, windowsHide: true },
       );
       ({ stdout } = result);
     } catch (error) {
@@ -288,12 +306,22 @@ export class CodexGovernanceHealthModel {
       // collection failure when stdout carries no report. On a machine where the
       // Codex host is disabled that was the normal case, and the panel rendered
       // the constant failure instead of the CLI's real blockers.
-      const report = parseCodexReport(stdoutFromExecError(error));
-      if (report !== undefined) return { status: 'ok', health: report };
+      //
+      // PRI-1013 review round 2 (P2): the ONLY exit that may carry a report
+      // out of this catch is the CLI's DESIGNED not-ready signal — exit 1 with
+      // ready === false (health-codex.ts sets exitCode = 1 iff !report.ready).
+      // A timeout kill, a signal, a spawn/system error, or any other exit code
+      // means the process failed; stdout on those paths is partial or stale
+      // output and must never render as `status:'ok'`.
+      const failureKind = execFailureKind(error);
       const exitCode = exitCodeOf(error);
+      if (failureKind === undefined && exitCode === 1) {
+        const report = parseCodexReport(stdoutFromExecError(error));
+        if (report !== undefined && report.ready === false) return { status: 'ok', health: report };
+      }
       return degradedCollection(
         'health_collection_failed',
-        `${boundedDetail(error)}${exitCode === undefined ? '' : ` [exit ${exitCode}]`}`,
+        `${boundedDetail(error)}${exitCode === undefined ? '' : ` [exit ${exitCode}]`}${failureKind === undefined ? '' : ` [${failureKind}]`}`,
       );
     }
     // cli-1: the CLI's --json mode prints exactly one (pretty-printed) JSON

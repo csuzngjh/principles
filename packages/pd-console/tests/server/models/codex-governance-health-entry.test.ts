@@ -245,4 +245,99 @@ describe('CodexGovernanceHealthModel pd-cli entry resolution (PRI-1013)', () => 
     expect(result.reason).toBe('report_unusable');
     fs.rmSync(dir, { recursive: true, force: true });
   });
+
+  // ── PRI-1013 review (P2): only the CLI's DESIGNED not-ready signal may carry
+  // a report out of the catch block. Any other exit code, a timeout kill, or an
+  // external signal is a collection failure no matter what stdout contains — a
+  // timed-out probe whose partial output happens to parse must never render as
+  // `status:'ok'` (unknown is not reported as healthy).
+
+  it('rejects an exit-1 run whose report claims ready:true — that violates the CLI exit contract', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-1013-cli-'));
+    const entry = writeCliScript(dir, [
+      'process.stdout.write(JSON.stringify({',
+      "  generatedAt: 'fixture', host: 'codex', workspace: 'fixture',",
+      '  ready: true, readyBlockers: [],',
+      '  warnings: [],',
+      '}));',
+      'process.exitCode = 1;',
+      '',
+    ].join('\n'));
+
+    const result = await new CodexGovernanceHealthModel(dir, entry).collect();
+
+    expect(result.status).toBe('unknown');
+    if (result.status !== 'unknown') return;
+    expect(result.reason).toBe('health_collection_failed');
+    expect(result.nextAction).toContain('pd health --host codex');
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('rejects an exit-2 run even when its stdout holds an otherwise valid report', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-1013-cli-'));
+    const entry = writeCliScript(dir, [
+      'process.stdout.write(JSON.stringify({',
+      "  generatedAt: 'fixture', host: 'codex', workspace: 'fixture',",
+      '  ready: false, readyBlockers: [\'host.codex: disabled\'],',
+      '  warnings: [],',
+      '}));',
+      'process.exitCode = 2;',
+      '',
+    ].join('\n'));
+
+    const result = await new CodexGovernanceHealthModel(dir, entry).collect();
+
+    expect(result.status).toBe('unknown');
+    if (result.status !== 'unknown') return;
+    expect(result.reason).toBe('health_collection_failed');
+    expect(result.nextAction).toContain('pd health --host codex');
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('rejects a timed-out run even when its stdout holds a complete valid report', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-1013-cli-'));
+    const entry = writeCliScript(dir, [
+      'process.stdout.write(JSON.stringify({',
+      "  generatedAt: 'fixture', host: 'codex', workspace: 'fixture',",
+      '  ready: true, readyBlockers: [],',
+      '  warnings: [],',
+      '}));',
+      // Keep the event loop alive past the model's injected timeout so Node
+      // itself kills the child — a REAL execution fault, not a synthetic one.
+      'setTimeout(() => {}, 30000);',
+      '',
+    ].join('\n'));
+
+    const result = await new CodexGovernanceHealthModel(dir, entry, { execTimeoutMs: 500 }).collect();
+
+    expect(result.status).toBe('unknown');
+    if (result.status !== 'unknown') return;
+    expect(result.reason).toBe('health_collection_failed');
+    expect(result.nextAction).toContain('pd health --host codex');
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('rejects a signalled run even when its stdout holds a valid report', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-1013-cli-'));
+    // The report claims ready:true so EVERY platform's view of a self-kill
+    // (POSIX: signal SIGTERM; Windows: some non-zero exit code, possibly 1)
+    // must reject it — a real subprocess killed mid-flight can never be an
+    // acceptable not-ready report.
+    const entry = writeCliScript(dir, [
+      'process.stdout.write(JSON.stringify({',
+      "  generatedAt: 'fixture', host: 'codex', workspace: 'fixture',",
+      '  ready: true, readyBlockers: [],',
+      '  warnings: [],',
+      '}));',
+      "process.kill(process.pid, 'SIGTERM');",
+      '',
+    ].join('\n'));
+
+    const result = await new CodexGovernanceHealthModel(dir, entry).collect();
+
+    expect(result.status).toBe('unknown');
+    if (result.status !== 'unknown') return;
+    expect(result.reason).toBe('health_collection_failed');
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
 });
