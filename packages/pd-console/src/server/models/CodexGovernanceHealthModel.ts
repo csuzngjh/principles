@@ -12,7 +12,15 @@
  *
  * Failure is explicit (rc-9): if the CLI cannot run, the model returns
  * `status: 'unknown'` with `ready: false` and a `health_collection_failed`
- * blocker — "unable to determine health" is never rendered as healthy.
+ * blocker — "unable to determine health" is never rendered as healthy. The
+ * CLI's own location is resolved from the install layout authority
+ * (`resolveUpdateLayout()`), not from the npm dependency graph — PRI-1013.
+ *
+ * A non-zero CLI exit is NOT by itself a collection failure: the CLI exits 1
+ * when the report it produced says governance is not ready (cli-2), and
+ * not-ready is the very signal this panel renders — PRI-1013 review found both
+ * halves of the same symptom (entry never resolved, then the resolved
+ * report discarded on exit 1).
  *
  * This is a *verbatim* report passthrough, not a projection: no field is
  * recomputed or filtered here.
@@ -23,6 +31,7 @@ import { promisify } from 'node:util';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import * as fs from 'node:fs';
+import { resolveUpdateLayout } from '../utils/installed-layout.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -67,19 +76,177 @@ export type CodexGovernanceHealthResult =
     productClaim: 'degraded';
   };
 
+export type PdCliEntryResolution =
+  | { ok: true; entry: string }
+  | { ok: false; reason: string; nextAction: string };
+
+/**
+ * Repair action for a machine whose install layout DOES resolve (§1.1: the
+ * installer/updater is the only legitimate writer of the install face, so the
+ * Owner is pointed at the update chain, never at hand-editing the runtime).
+ */
+const INSTALLED_REPAIR_ACTION =
+  'Finish or re-run the update from the Console update page; if that page reports the layout itself as unusable, repair the install with `npx create-principles-disciple`. Do not edit the runtime directory by hand, and do NOT install the CLI globally with npm — this resolver reads the install layout, not a global npm install.';
+
+/** Repair action for a source checkout with no install to resolve against. */
+const DEV_BUILD_ACTION =
+  'No PD install layout resolves for this home, so the Console used its own workspace dependency graph for pd-cli. In a source checkout run `npm run build` to emit packages/pd-cli/dist/index.js; on a user machine install PD with `npx create-principles-disciple`.';
+
 const require = createRequire(import.meta.url);
 
-function resolvePdCliEntry(): string | null {
-  // pd-cli dist entry, resolvable through the workspace node_modules links.
+/** rc-1/rc-2: the failure shape from fs is unknown — read `code` only if present. */
+function errnoCode(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null || !Object.hasOwn(error, 'code')) return undefined;
+  const { code } = error as { code?: unknown };
+  return typeof code === 'string' ? code : undefined;
+}
+
+/** rc-8: bounded rendering of an unknown value that goes into an API payload. */
+function boundedDetail(value: unknown): string {
+  return (value instanceof Error ? value.message : String(value)).slice(0, 160);
+}
+
+const MANUAL_RUN_ACTION =
+  'Run `pd health --host codex --workspace <dir>` manually to see the structured reason.';
+
+/**
+ * The degraded result for "the CLI authority produced nothing usable".
+ * `reason` separates the two failure classes (rc-9) — the subprocess could not
+ * be read at all vs. it printed something that is not a report — while the
+ * blocker keeps the single `health_collection_failed` family the panel renders.
+ */
+function degradedCollection(reason: string, detail: string): CodexGovernanceHealthResult {
+  return {
+    status: 'unknown',
+    ready: false,
+    readyBlockers: [`health_collection_failed: ${reason}`],
+    reason,
+    nextAction: detail.length > 0 ? `${MANUAL_RUN_ACTION} (${detail})` : MANUAL_RUN_ACTION,
+    productClaim: 'degraded',
+  };
+}
+
+/**
+ * rc-1..rc-4: stdout from a subprocess is untrusted runtime data even when the
+ * subprocess is our own CLI, so the report-bearing fields are checked before the
+ * passthrough cast. This is what distinguishes a real report ("not ready" is a
+ * valid report) from a usage/rejection JSON or truncated output — the cast below
+ * stays a verbatim passthrough of the CLI's documented contract (ERR-001,
+ * runtime-contract-exempt per PRI-625 review round 2) because it sits behind it.
+ */
+function parseCodexReport(text: string): CodexGovernanceHealth | undefined {
+  if (text.trim().length === 0) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined;
+  if (Reflect.get(parsed, 'host') !== 'codex') return undefined;
+  if (typeof Reflect.get(parsed, 'ready') !== 'boolean') return undefined;
+  if (typeof Reflect.get(parsed, 'generatedAt') !== 'string') return undefined;
+  const blockers = Reflect.get(parsed, 'readyBlockers');
+  if (!Array.isArray(blockers) || !blockers.every((b: unknown) => typeof b === 'string')) {
+    return undefined;
+  }
+  return parsed as CodexGovernanceHealth; // runtime-contract-exempt: ERR-001 verbatim passthrough of our own CLI's documented JSON contract after the field guards above — single authority, see PRI-625 review round 2.
+}
+
+/** rc-1/rc-2: the rejection object's shape is unknown — read `stdout` only if present. */
+function stdoutFromExecError(error: unknown): string {
+  if (typeof error !== 'object' || error === null || !Object.hasOwn(error, 'stdout')) return '';
+  const { stdout } = error as { stdout?: unknown };
+  return typeof stdout === 'string' ? stdout : '';
+}
+
+/** rc-1/rc-2: same guard for the exit code, used only for the bounded operator detail. */
+function exitCodeOf(error: unknown): number | undefined {
+  if (typeof error !== 'object' || error === null || !Object.hasOwn(error, 'code')) return undefined;
+  const { code } = error as { code?: unknown };
+  return typeof code === 'number' ? code : undefined;
+}
+
+/**
+ * Classify the entry the INSTALL LAYOUT pointed at. Each failure class gets its
+ * own reason so "not wired" (the PRI-1013 constant) can never be mistaken for
+ * "the runtime is actually broken" (rc-9, rc-3): ENOENT means the component was
+ * never delivered or an update was interrupted, a stat error other than ENOENT
+ * means the path could not be read, and a non-file means something else lives
+ * there.
+ */
+function installedEntryVerdict(entry: string): PdCliEntryResolution {
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(entry);
+  } catch (error) {
+    const code = errnoCode(error);
+    if (code === 'ENOENT' || code === 'ENOTDIR') {
+      return { ok: false, reason: 'pd_cli_entry_missing', nextAction: `${INSTALLED_REPAIR_ACTION} (missing: ${entry})` };
+    }
+    return {
+      ok: false,
+      reason: 'pd_cli_entry_unreadable',
+      nextAction: `${INSTALLED_REPAIR_ACTION} (stat ${entry} failed: ${code ?? boundedDetail(error)})`,
+    };
+  }
+  if (!stat.isFile()) {
+    return { ok: false, reason: 'pd_cli_entry_invalid', nextAction: `${INSTALLED_REPAIR_ACTION} (${entry} is not a regular file)` };
+  }
+  return { ok: true, entry };
+}
+
+/**
+ * Resolve the pd-cli entry to exec — PRI-1013.
+ *
+ * The install layout is the authority: components are delivered as siblings
+ * under `<runtime>/`, and console deliberately does NOT declare
+ * `@principles/pd-cli`, so `require.resolve` on that package name threw
+ * MODULE_NOT_FOUND on every installed machine and the item degraded forever
+ * (the delivery-surface half of this class is ERR-040: declaring the dependency
+ * would mean extending bundle-plugin, the installer link sync AND the console
+ * inline updater in one change — strictly more durable complexity than wiring
+ * the existing layout authority in here).
+ *
+ * The package graph is consulted only when NO install layout resolves, i.e. a
+ * source checkout: there the workspace links are the developer's own build.
+ * When the layout does resolve its answer is final — falling through to the npm
+ * graph could point at a different pd-cli generation than the install reports.
+ */
+export function resolvePdCliEntry(): PdCliEntryResolution {
+  let layout: ReturnType<typeof resolveUpdateLayout>;
+  try {
+    layout = resolveUpdateLayout();
+  } catch (error) {
+    // rc-9: a throwing layout reader is its own failure class, never folded
+    // into "not installed" — the repair action differs.
+    return {
+      ok: false,
+      reason: 'install_layout_error',
+      nextAction: `${INSTALLED_REPAIR_ACTION} (layout read failed: ${boundedDetail(error)})`,
+    };
+  }
+  if (layout !== undefined) {
+    return installedEntryVerdict(path.join(layout.pdCliDir, 'dist', 'index.js'));
+  }
   try {
     const pkgJsonPath = require.resolve('@principles/pd-cli/package.json');
     const packageRoot = path.dirname(pkgJsonPath);
     const entry = path.join(packageRoot, 'dist', 'index.js');
     const packageRootDir = path.resolve(packageRoot);
-    if (!path.resolve(entry).startsWith(packageRootDir + path.sep)) return null;
-    return fs.existsSync(entry) ? entry : null;
-  } catch {
-    return null;
+    if (!path.resolve(entry).startsWith(packageRootDir + path.sep)) {
+      return { ok: false, reason: 'pd_cli_entry_invalid', nextAction: `${DEV_BUILD_ACTION} (resolved entry escaped the package root ${packageRootDir})` };
+    }
+    // Deliberately no existsSync preflight — same reasoning as the onboarding
+    // route's `findPdCli()`: the Console test job runs before pd-cli is built,
+    // so an unbuilt entry must surface as the subprocess's own structured
+    // failure, not as an install-layout verdict.
+    return { ok: true, entry };
+  } catch (error) {
+    if (errnoCode(error) === 'MODULE_NOT_FOUND') {
+      return { ok: false, reason: 'install_layout_unresolved', nextAction: DEV_BUILD_ACTION };
+    }
+    return { ok: false, reason: 'install_layout_unresolved', nextAction: `${DEV_BUILD_ACTION} (${boundedDetail(error)})` };
   }
 }
 
@@ -93,38 +260,48 @@ export class CodexGovernanceHealthModel {
   }
 
   async collect(): Promise<CodexGovernanceHealthResult> {
-    const entry = this.cliEntryOverride ?? resolvePdCliEntry();
-    if (entry === null) {
+    const resolution: PdCliEntryResolution = this.cliEntryOverride !== null
+      ? { ok: true, entry: this.cliEntryOverride }
+      : resolvePdCliEntry();
+    if (!resolution.ok) {
       return {
         status: 'unknown',
         ready: false,
-        readyBlockers: ['health_collection_failed: pd_cli_unavailable'],
-        reason: 'pd_cli_unavailable',
-        nextAction: 'Install or build @principles/pd-cli (npm i -g @principles/pd-cli) so the Console can run `pd health --host codex`.',
+        readyBlockers: [`health_collection_failed: ${resolution.reason}`],
+        reason: resolution.reason,
+        nextAction: resolution.nextAction,
         productClaim: 'degraded',
       };
     }
+    let stdout: string;
     try {
-      const { stdout } = await execFileAsync(
+      const result = await execFileAsync(
         process.execPath,
-        [entry, 'health', '--host', 'codex', '--workspace', this.workspaceDir, '--json'],
+        [resolution.entry, 'health', '--host', 'codex', '--workspace', this.workspaceDir, '--json'],
         { encoding: 'utf8', timeout: 30_000, windowsHide: true },
       );
-      // cli-1: the CLI's --json mode prints exactly one (pretty-printed) JSON
-      // object on stdout — parse the whole stdout, not just the first `{` line.
-      // runtime-contract-exempt: ERR-001 verbatim passthrough of our own CLI's documented JSON contract — single authority, see PRI-625 review round 2.
-      const health = JSON.parse(stdout) as CodexGovernanceHealth;
-      return { status: 'ok', health };
+      ({ stdout } = result);
     } catch (error) {
-      const message = error instanceof Error ? error.message.slice(0, 200) : String(error);
-      return {
-        status: 'unknown',
-        ready: false,
-        readyBlockers: [`health_collection_failed: ${message}`],
-        reason: 'health_collection_failed',
-        nextAction: 'Run `pd health --host codex --workspace <dir>` manually to see the structured reason.',
-        productClaim: 'degraded',
-      };
+      // cli-2 + PRI-1013: `pd health --host codex` exits 1 when the report it
+      // produced says NOT READY — non-readiness is the actionable governance
+      // signal this panel exists to show, so a non-zero exit only counts as a
+      // collection failure when stdout carries no report. On a machine where the
+      // Codex host is disabled that was the normal case, and the panel rendered
+      // the constant failure instead of the CLI's real blockers.
+      const report = parseCodexReport(stdoutFromExecError(error));
+      if (report !== undefined) return { status: 'ok', health: report };
+      const exitCode = exitCodeOf(error);
+      return degradedCollection(
+        'health_collection_failed',
+        `${boundedDetail(error)}${exitCode === undefined ? '' : ` [exit ${exitCode}]`}`,
+      );
     }
+    // cli-1: the CLI's --json mode prints exactly one (pretty-printed) JSON
+    // object on stdout — parse the whole stdout, not just the first `{` line.
+    const report = parseCodexReport(stdout);
+    if (report === undefined) {
+      return degradedCollection('report_unusable', boundedDetail(stdout));
+    }
+    return { status: 'ok', health: report };
   }
 }
