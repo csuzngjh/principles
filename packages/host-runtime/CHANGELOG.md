@@ -1,5 +1,13 @@
 # @principles/host-runtime
 
+## 0.10.2
+
+### Patch Changes
+
+- b02ebb5: Connect WorkBuddy current-user explicit Owner pain submissions to existing governance admission and diagnostic task creation. Preserve native session/turn identity, unverified Owner evidence, bounded input rejection and model-visible receipts; retain Codex prefix behavior through the shared parser.
+- Updated dependencies [b02ebb5]
+  - @principles/core@1.293.4
+
 ## 0.10.1
 
 ### Patch Changes
