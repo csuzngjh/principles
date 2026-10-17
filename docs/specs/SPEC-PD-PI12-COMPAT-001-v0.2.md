@@ -115,7 +115,7 @@
 
 - 实施在独立 worktree（`npm run dev:worktree`），基于最新 origin/main（`d91b9e07e`），writer 认领租约。
 - 发布序（v0.2 修正：changeset **随本 PR 提交**，不是合并后动作）：changeset（core patch + installer patch）随 PR 入库 → Release Intent Guard PASS → PR 合并 → 常规版本列车消费 changeset 发版。**不单独发版**。发布注记须含一行 provider 更名提示（`azure-openai-responses` → `azure`，Phase 0 复审 F-7；PD 源零引用，仅影响用户手写配置）。
-- 回滚：`git revert` 迁移 commit 集（两 manifest + 三适配器 + 测试 + 锁）即恢复 0.85.1；release-locks 同步 revert。无 schema、无状态、无 flag，回滚零数据面。若已发版后回滚：安装器按锁回装 0.85.1，与运行时状态无耦合。
+- 回滚：`git revert` 迁移 commit 集（两 manifest + 三适配器 + 测试 + 锁 + **`.changeset/pi12-compat-upgrade.md`**——遗漏它会让版本列车对已回滚内容发布一次空 patch）即恢复 0.85.1；release-locks 同步 revert。无 schema、无状态、无 flag，回滚零数据面。若已发版后回滚：安装器按锁回装 0.85.1，与运行时状态无耦合。
 
 ## 11. 实施策略：单一原子合并单元（R6a 定案）
 
@@ -162,7 +162,7 @@ New durable source of truth: NO；New persisted schema/state: NO；New subsystem
 | L3 | 卫星纯度 | `build:production` 内置 assertSatellitePurity | Forbidden dependency count: 0 |
 | L3 | 传递依赖 | `transitive-deps.test.ts` | 5/5 PASS |
 | L4 | 合并门禁 | `npm run verify:merge` @ head f4ad1c836 | **exit 0**（全门禁链通过；本表其余行在此前中间 head 实测） |
-| — | 发布意图 | `node scripts/release/check-pr-release-intent.mjs`（PR_BASE_SHA=d91b9e07e） | 【提交 changeset 后复跑，结果见 PR Review Card】 |
+| — | 发布意图 | `node scripts/release/check-pr-release-intent.mjs`（PR_BASE_SHA=d91b9e07e） | **PASS @249285138f**（mode=normal，intent=@principles/core:patch + create-principles-disciple:patch；独立复审已复现） |
 
 ## 16. Phase 0 独立对抗性复审结论（历史记录，2026-10-17）
 
@@ -173,3 +173,7 @@ v0.1 §16 全文保留有效（12 问裁决、F-1..F-8 发现与处置、双裁�
 - F-6（过期注释）→ 已随迁移提交修正。
 - F-7（azure 发布注记）→ 列入 §10 发布序。
 - CONDITIONAL GO 条件 1/2 → 已满足；条件 3（AC-6）→ **NOT_RUN**，生产切换前须 PASS 或 OWNER_WAIVED；条件 4（首周遥测）→ 合并后动作。
+
+## 17. Phase 1 独立对抗复审结论（2026-10-17）
+
+有界单轮独立复审（只读，真实 diff `d91b9e07e..24928513f`，pi-mono 两 tag 源码逐项重核 + 9 锁程序化解析 + Release Intent Guard 独立复现）：**12 维度全部 OK，零 P0/P1/P2，MERGE READINESS GO**。关键确认：transcript 形状与 `declareToolChanges` 交互正确；finishTurn error/aborted 硬退出语义与上游逐行一致；无任何新增模型调用路径；Dreamer L1 回退与 Artificer fail-closed 原样；治理面零接触（PRI-995 区逐字节相同）；7/7 锁精确 1.2.0 且无混装；changeset 恰为两包 patch、无版本字段直改；测试为强化非弱化。P3 处置：P3-1/2/4 已在本 PR 修复（guard 结果入表、回滚集补 changeset、6 处过期注释更新）；P3-3 以最终 head 重跑 verify:merge 关闭；P3-5（锁内自版本随再生成同步，main 既存陈旧）与 P3-6（convertToLlm 对未知角色 throw 为既存 fail-loud 偏离，Pi 1.2 文档契约建议不抛——实践中不可达）记录不动作。

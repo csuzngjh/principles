@@ -134,7 +134,7 @@ describe('PRI-419 L2AgentLoopAdapter — submit_output capture (primary extracti
     const adapter = makeAdapter();
     // Simulate: the tool factory's submit_output execute() writes to outputCapture.
     // The adapter reads outputCapture.output after the loop. We can't directly set the
-    // capture from here, so we verify via the shouldStopAfterTurn hook: after the loop
+    // capture from here, so we verify via the finishTurn hook: after the loop
     // returns, the adapter checks outputCapture. To exercise the capture path, we make
     // runAgentLoop invoke the built tools' submit_output before returning.
     hoisted.impl = async (_p: unknown, context: { tools?: { name: string; execute: (id: string, params: unknown) => Promise<unknown> }[] }) => {

@@ -5,7 +5,7 @@
  *   - submit_rulecode capture terminates the loop and stores the output
  *   - maxTurns cap forces stop when submit_rulecode is never called
  *   - beforeToolCall whitelist blocks non-allowlisted tools
- *   - shouldStopAfterTurn checks output capture + turn count
+ *   - finishTurn (Pi 1.2; formerly shouldStopAfterTurn) checks output capture + turn count
  *   - no V1/L1 fallback: exhaustion throws PDRuntimeError
  *   - timeout: abort signal triggers timed_out failure
  *   - telemetry events (artificer_l2_turn / artificer_l2_complete) are emitted
@@ -311,7 +311,7 @@ describe('PRI-439 ArtificerL2Adapter — loop error', () => {
 
   // PRI-758/EP002-R3: LLM-call failures arrive as message_end with
   // stopReason 'error'/'aborted' — the loop ends without calling
-  // shouldStopAfterTurn, so the adapter must surface them loudly itself.
+  // shouldStopAfterTurn (Pi 1.2: finishTurn), so the adapter must surface them loudly itself.
   it('surfaces LLM stream stopReason=error as the failure reason', async () => {
     const adapter = makeAdapter();
     // eslint-disable-next-line @typescript-eslint/max-params -- mirrors the 5-param runAgentLoop signature
