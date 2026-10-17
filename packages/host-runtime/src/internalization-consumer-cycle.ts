@@ -902,6 +902,12 @@ export async function runInternalizationConsumerCycle(
             ...(artificerEvidence !== null && artificerEvidence.decision === 'ready'
               ? { behaviorExamplePack: artificerEvidence.pack }
               : {}),
+            // SPEC-RULECODE-QUALITY-001 A1 (Owner review P2): the SAME
+            // trusted-facts port the intent preflight used must ride into the
+            // runner so the defensive mirror sees the same fact resolutions —
+            // without this, a port-resolved task would pass the entry gate and
+            // then be refused by the runner's "provider absent" guard.
+            ...(ports.trustedFacts !== undefined ? { trustedFacts: ports.trustedFacts } : {}),
           },
           // PRI-741: thread the host semantic projection into generation.
           { ...runnerOptions, ...(artificerHostSemanticContext !== undefined ? { hostSemanticContext: artificerHostSemanticContext } : {}) },

@@ -740,21 +740,24 @@ describe('worker cycle — downstream reuse (shared executor)', () => {
           taskId: 'scribe-pri992-labelled',
           sourcePhilosopherArtifactId: 'pri992-phil',
           principleDraft: {
-            title: 'Finalizing git actions need confirmed design',
-            statement: 'Finalizing git actions (commit/push/merge) require confirmed design; read-only investigation is allowed.',
+            title: 'Check status before finalizing git actions',
+            statement: 'Finalizing git actions (commit/push/merge) require a completed status check first; read-only investigation is allowed.',
             rationale: 'test fixture',
             applicability: ['Bash git commands'],
-            antiPatterns: ['committing without design confirmation'],
+            antiPatterns: ['committing while status is still pending'],
             confidence: 0.9,
           },
           sourceTrace: { philosopherArtifactId: 'pri992-phil' },
           risks: [],
           intentContract: {
-            ownerIntent: 'finalizing git actions must not happen without confirmed design',
-            targetBehavior: 'agent pauses commit/push/merge until design is confirmed',
-            forbiddenBehavior: 'running git commit/push/merge without confirmed design',
+            // Non-approval material: self-consistent with requiredFacts: []
+            // (an approval-shaped material with an empty declaration is the
+            // under-reporting attack the intent audit stops — Owner review P1).
+            ownerIntent: 'finalizing git actions must not run on an unreconciled worktree',
+            targetBehavior: 'agent checks git status before commit/push/merge',
+            forbiddenBehavior: 'running git commit/push/merge while status output is pending',
             evidenceSource: 'pain:pri992-pain',
-            validationExpectation: 'rule blocks finalizing git actions and allows read-only investigation',
+            validationExpectation: 'rule blocks finalizing git actions with pending status and allows read-only investigation',
           },
           executionConditions: { version: 1, requiredFacts: [] },
           generatedAt: scribeNow,

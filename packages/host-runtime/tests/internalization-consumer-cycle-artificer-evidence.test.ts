@@ -151,21 +151,24 @@ async function seedCodeChannelChain(workspaceDir: string, selection?: OwnerEvide
         taskId: SCRIBE_TASK_ID,
         sourcePhilosopherArtifactId: 'art-phil-001',
         principleDraft: {
-          title: 'Design confirmation before complex changes',
-          statement: 'Complex changes require confirmed design before implementation',
-          rationale: 'unconfirmed complex edits caused the original pain',
-          applicability: ['complex code changes'],
-          antiPatterns: ['implementing complex changes without design confirmation'],
+          title: 'Read before write',
+          statement: 'Files must be read before they are written',
+          rationale: 'blind edits caused the original pain',
+          applicability: ['write_file calls'],
+          antiPatterns: ['writing a file that was never read'],
           confidence: 0.9,
         },
         sourceTrace: { philosopherArtifactId: 'art-phil-001' },
         risks: [],
         intentContract: {
-          ownerIntent: 'complex changes must not be implemented before the design is confirmed by the Owner',
-          targetBehavior: 'agent pauses complex edits and requests design confirmation first',
-          forbiddenBehavior: 'implementing complex changes without a confirmed design',
+          // Non-approval material: self-consistent with requiredFacts: [] —
+          // an approval-shaped material with an empty declaration is the
+          // under-reporting attack the intent audit stops (Owner review P1).
+          ownerIntent: 'files must be read before they are written',
+          targetBehavior: 'every write to a file is preceded by a read of that file in the same session',
+          forbiddenBehavior: 'writing a file that was not read earlier in the session',
           evidenceSource: 'pain:pain_001',
-          validationExpectation: 'rule blocks complex-change writes that carry no confirmed-design evidence',
+          validationExpectation: 'rule blocks writes whose context facts show no prior read of the target',
         },
         executionConditions: { version: 1, requiredFacts: [] },
         generatedAt: now,

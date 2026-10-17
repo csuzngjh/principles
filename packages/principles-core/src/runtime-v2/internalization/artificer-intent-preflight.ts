@@ -89,6 +89,8 @@ export type IntentBasisStopReasonCode =
   | 'execution_conditions_missing'
   | 'execution_conditions_invalid'
   | 'required_fact_conflict'
+  | 'approval_dependency_undeclared'
+  | 'textual_basis_unanchored'
   | 'trusted_fact_provider_absent'
   | 'trusted_fact_unknown'
   | typeof SOURCE_FAULT_PERSISTENT_REASON_CODE;
@@ -276,6 +278,77 @@ interface IntentAssessmentExecutable {
 type IntentAssessment = IntentAssessmentExecutable | IntentAssessmentStop;
 
 /**
+ * Normalise text for anchoring: lowercase, collapse whitespace, strip
+ * punctuation to a comparable spine. Deliberately language-mixed (the scribe
+ * contract can carry zh-CN or en material).
+ */
+function normaliseForAnchor(text: string): string {
+  return text.toLowerCase().replace(/[\s`'"“”‘’、，。：；！？（）\]{}()【】,.;:!?\-—_/\\*#]+/gu, '');
+}
+
+interface IntentMaterial {
+  /** Normalised concatenation of the intent-distillation surfaces. */
+  readonly normalisedText: string;
+  /** Which audited fields carry approval semantics (for the audit detail). */
+  readonly approvalSignalFields: readonly string[];
+  readonly hasApprovalSignal: boolean;
+}
+
+/** Approval-semantics signal vocabulary (substring, EN+ZH). */
+const APPROVAL_SIGNAL_WORDS = ['confirm', 'approv', '批准', '确认'] as const;
+
+/**
+ * Collect the intent-distillation material from the parsed scribe artifact:
+ * the four Owner-intent contract fields plus the principle draft statement —
+ * exactly the surfaces the scribe instructions require to be grounded in
+ * Owner-attributed text. Absent/ill-typed fields are skipped (the
+ * intentContract presence itself is already a precondition upstream).
+ */
+function collectIntentMaterial(parsed: unknown): IntentMaterial {
+  const fields: { name: string; text: string }[] = [];
+  const push = (name: string, value: unknown): void => {
+    if (typeof value === 'string' && value.trim() !== '') fields.push({ name, text: value });
+  };
+  if (typeof parsed === 'object' && parsed !== null) {
+    const record = parsed as Record<string, unknown>;
+    const draft = typeof record.principleDraft === 'object' && record.principleDraft !== null
+      ? (record.principleDraft as Record<string, unknown>)
+      : {};
+    push('principleDraft.statement', draft.statement);
+    if (typeof record.intentContract === 'object' && record.intentContract !== null) {
+      const contract = record.intentContract as Record<string, unknown>;
+      push('intentContract.ownerIntent', contract.ownerIntent);
+      push('intentContract.targetBehavior', contract.targetBehavior);
+      push('intentContract.forbiddenBehavior', contract.forbiddenBehavior);
+      push('intentContract.validationExpectation', contract.validationExpectation);
+    }
+  }
+  const normalisedText = normaliseForAnchor(fields.map((field) => field.text).join(' '));
+  const approvalSignalFields = fields
+    .filter((field) => APPROVAL_SIGNAL_WORDS.some((word) => field.text.toLowerCase().includes(word)))
+    .map((field) => field.name);
+  return {
+    normalisedText,
+    approvalSignalFields,
+    hasApprovalSignal: approvalSignalFields.length > 0,
+  };
+}
+
+/**
+ * A declared basis is anchored when a bounded normalised prefix of it appears
+ * in the normalised intent material (quote-or-precise-cite contract). Very
+ * short bases (<8 normalised chars) must appear in full — too little text to
+ * trust a partial anchor.
+ */
+function isTextualBasisAnchored(textualBasis: string, normalisedMaterial: string): boolean {
+  const normalisedBasis = normaliseForAnchor(textualBasis);
+  if (normalisedBasis.length < 4) return false;
+  if (normalisedMaterial.length === 0) return false;
+  const anchor = normalisedBasis.length >= 8 ? normalisedBasis.slice(0, 12) : normalisedBasis;
+  return normalisedMaterial.includes(anchor);
+}
+
+/**
  * The pure decision core (no I/O): assess the intent basis from the resolved
  * scribe artifact. Deterministic — no LLM, no keyword approval detection; the
  * condition basis is the scribe's structured declaration, never prose parsed
@@ -343,6 +416,47 @@ export function assessIntentBasis(input: {
     }
     requiredByKind.set(fact.factKind, fact.required);
   }
+
+  // SPEC-RULECODE-QUALITY-001 A1 (Owner review 2026-10-16, P1) — the scribe's
+  // declaration alone is NOT trusted as complete: the declaration is audited
+  // AGAINST the intent material it was distilled from, in both directions.
+  // Both audits only ever produce STOP points (safe side) — never an
+  // automatic approval verdict — so a false positive costs a re-run, while a
+  // missed leak would cost a fabricated-approval rule.
+  const intentMaterial = collectIntentMaterial(parsed);
+  const declaredFactKinds = conditions.requiredFacts.map((fact) => fact.factKind.toLowerCase()).join(' ');
+
+  // (1) Approval-dependency leak audit: the intent material carries approval
+  // semantics, yet NO declared factKind is an approval fact — the classic
+  // under-reporting shape (model fills requiredFacts: [] for an
+  // approval-gated principle). Deterministic contradiction audit, not a
+  // general classifier: it never decides approval states, it only refuses to
+  // let "requires confirmation" prose coexist with an empty approval
+  // declaration.
+  if (intentMaterial.hasApprovalSignal && !/approv/.test(declaredFactKinds)) {
+    return {
+      status: 'intent_unverified',
+      reasonCode: 'approval_dependency_undeclared',
+      detail: `intent material carries approval semantics (signal in: ${intentMaterial.approvalSignalFields.join(', ')}) but executionConditions declare no approval-kind required fact — an under-reported approval dependency must not reach generation`,
+      nextAction: 'Re-run the scribe stage: declare the approval dependency in executionConditions (factKind e.g. design_approval) with its textual basis, or correct the intent material if it overstates the requirement.',
+    };
+  }
+
+  // (2) textualBasis anchoring: every declared fact's claimed basis must be
+  // traceable to the intent material (normalised substring anchor). A basis
+  // anchored nowhere is fabricated or mistyped — the declaration cannot be
+  // verified against the Owner-attributed material.
+  for (const fact of conditions.requiredFacts) {
+    if (!isTextualBasisAnchored(fact.textualBasis, intentMaterial.normalisedText)) {
+      return {
+        status: 'intent_unverified',
+        reasonCode: 'textual_basis_unanchored',
+        detail: `required fact '${fact.factKind}' textualBasis ("${fact.textualBasis.replace(/\s+/g, ' ').slice(0, 120)}") cannot be anchored in the intent material (intentContract + principleDraft.statement)`,
+        nextAction: 'Re-run the scribe stage: quote or precisely cite the Owner-attributed text the fact requirement was read from.',
+      };
+    }
+  }
+
   const requiredFacts = conditions.requiredFacts.filter((fact) => fact.required);
   if (requiredFacts.length > 0 && trustedFacts === undefined) {
     return {

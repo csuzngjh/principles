@@ -52,11 +52,11 @@ function makeWorkspace(): string {
 }
 
 const INTENT_CONTRACT = {
-  ownerIntent: 'complex changes must not be implemented before the design is confirmed by the Owner',
-  targetBehavior: 'agent pauses complex edits and requests design confirmation first',
-  forbiddenBehavior: 'implementing complex changes without a confirmed design',
+  ownerIntent: 'files must be read before they are written',
+  targetBehavior: 'every write to a file is preceded by a read of that file in the same session',
+  forbiddenBehavior: 'writing a file that was not read earlier in the session',
   evidenceSource: 'pain:manual_1791868470372',
-  validationExpectation: 'rule blocks complex-change writes that carry no confirmed-design evidence',
+  validationExpectation: 'rule blocks writes whose context facts show no prior read of the target',
 };
 
 /** Scribe artifact WITHOUT executionConditions — the legacy/original-pain shape. */
@@ -80,21 +80,38 @@ function legacyScribeContent(): string {
 }
 
 /** Scribe artifact WITH executionConditions: no trusted external facts required. */
-function conditionsScribeContent(requiredFacts: { factKind: string; required: boolean; textualBasis: string }[]): string {
+function conditionsScribeContent(
+  requiredFacts: { factKind: string; required: boolean; textualBasis: string }[],
+  opts: { approval?: boolean } = {},
+): string {
+  // When opts.approval is set the intent material itself carries the approval
+  // semantics (matching the declared design_approval fact) — self-consistent.
+  const statement = opts.approval === true
+    ? 'Complex changes require confirmed design before implementation'
+    : 'Files must be read before they are written';
+  const contract = opts.approval === true
+    ? {
+        ownerIntent: 'complex changes must not be implemented before the design is confirmed by the Owner',
+        targetBehavior: 'agent pauses complex edits and requests design confirmation first',
+        forbiddenBehavior: 'implementing complex changes without a confirmed design',
+        evidenceSource: 'pain:manual_1791868470372',
+        validationExpectation: 'rule blocks complex-change writes that carry no confirmed-design evidence',
+      }
+    : INTENT_CONTRACT;
   return JSON.stringify({
     taskId: SCRIBE_TASK_ID,
     sourcePhilosopherArtifactId: 'art-phil-001',
     principleDraft: {
-      title: 'Design confirmation before complex changes',
-      statement: 'Complex changes require confirmed design before implementation',
-      rationale: 'unconfirmed complex edits caused the original pain',
-      applicability: ['complex code changes'],
-      antiPatterns: ['implementing complex changes without design confirmation'],
+      title: opts.approval === true ? 'Design confirmation before complex changes' : 'Read before write',
+      statement,
+      rationale: opts.approval === true ? 'unconfirmed complex edits caused the original pain' : 'blind edits caused the original pain',
+      applicability: opts.approval === true ? ['complex code changes'] : ['write_file calls'],
+      antiPatterns: opts.approval === true ? ['implementing complex changes without design confirmation'] : ['writing a file that was never read'],
       confidence: 0.9,
     },
     sourceTrace: { philosopherArtifactId: 'art-phil-001' },
     risks: [],
-    intentContract: INTENT_CONTRACT,
+    intentContract: contract,
     executionConditions: { version: 1, requiredFacts },
     generatedAt: '2026-10-16T00:00:00.000Z',
   });
@@ -249,7 +266,7 @@ describe('preflightArtificerIntentBasis — stop points (Q01/Q20)', () => {
     const workspaceDir = makeWorkspace();
     await seedArtificerTask(workspaceDir, conditionsScribeContent([
       { factKind: 'design_approval', required: true, textualBasis: 'complex changes require confirmed design before implementation' },
-    ]));
+    ], { approval: true }));
 
     const verdict = await runPreflight(workspaceDir);
     expect(verdict.decision).toBe('blocked');
@@ -264,7 +281,7 @@ describe('preflightArtificerIntentBasis — stop points (Q01/Q20)', () => {
     const workspaceDir = makeWorkspace();
     await seedArtificerTask(workspaceDir, conditionsScribeContent([
       { factKind: 'design_approval', required: true, textualBasis: 'complex changes require confirmed design before implementation' },
-    ]));
+    ], { approval: true }));
     const verdict = await runPreflight(workspaceDir, {
       trustedFacts: { resolveRequiredFact: () => ({ resolution: 'unknown' }) },
     });
@@ -299,6 +316,52 @@ describe('preflightArtificerIntentBasis — stop points (Q01/Q20)', () => {
     if (verdict.decision !== 'blocked') throw new Error('unreachable');
     expect(verdict.logicalResult).toBe('intent_conflict');
     expect(verdict.reasonCode).toBe('required_fact_conflict');
+  });
+
+  // ── Owner review 2026-10-16 P1: under-reporting audits ──
+
+  it('OWNER-REPRO: approval-gated intent with an under-reported requiredFacts: [] stops as approval_dependency_undeclared (not executable)', async () => {
+    const workspaceDir = makeWorkspace();
+    // The scribe declared NO facts for an approval-gated principle — the
+    // exact bypass shape from the Owner review. The gate must refuse.
+    await seedArtificerTask(workspaceDir, conditionsScribeContent([], { approval: true }));
+
+    const verdict = await runPreflight(workspaceDir);
+    expect(verdict.decision).toBe('blocked');
+    if (verdict.decision !== 'blocked') throw new Error('unreachable');
+    expect(verdict.logicalResult).toBe('intent_unverified');
+    expect(verdict.reasonCode).toBe('approval_dependency_undeclared');
+    expect(verdict.detail).toContain('approval');
+    const task = await readTask(workspaceDir);
+    expect(task?.status).toBe('needs_human_review');
+  });
+
+  it('OWNER-REPRO: required:false under-reporting of an approval fact stops the same way', async () => {
+    const workspaceDir = makeWorkspace();
+    // Same attack with a declared-but-not-required entry: the audit keys on
+    // the DECLARED KINDS, not the required flag.
+    await seedArtificerTask(workspaceDir, conditionsScribeContent([
+      { factKind: 'external_signoff', required: false, textualBasis: 'the design is confirmed by the Owner before implementation' },
+    ], { approval: true }));
+
+    const verdict = await runPreflight(workspaceDir);
+    expect(verdict.decision).toBe('blocked');
+    if (verdict.decision !== 'blocked') throw new Error('unreachable');
+    expect(verdict.reasonCode).toBe('approval_dependency_undeclared');
+  });
+
+  it('a required fact whose textualBasis anchors nowhere in the intent material stops as textual_basis_unanchored', async () => {
+    const workspaceDir = makeWorkspace();
+    await seedArtificerTask(workspaceDir, conditionsScribeContent([
+      // Anchored nowhere: the non-approval material never mentions sign-offs.
+      { factKind: 'external_signoff', required: true, textualBasis: 'the steering committee sign-off checklist requires it' },
+    ]));
+
+    const verdict = await runPreflight(workspaceDir);
+    expect(verdict.decision).toBe('blocked');
+    if (verdict.decision !== 'blocked') throw new Error('unreachable');
+    expect(verdict.logicalResult).toBe('intent_unverified');
+    expect(verdict.reasonCode).toBe('textual_basis_unanchored');
   });
 });
 

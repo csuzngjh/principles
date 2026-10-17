@@ -105,21 +105,40 @@ const INTENT_CONTRACT = {
   validationExpectation: 'rule blocks complex-change writes that carry no confirmed-design evidence',
 };
 
-function scribeContent(executionConditions?: { version: 1; requiredFacts: Array<{ factKind: string; required: boolean; textualBasis: string }> }): string {
+function scribeContent(
+  executionConditions?: { version: 1; requiredFacts: Array<{ factKind: string; required: boolean; textualBasis: string }> },
+  opts: { approval?: boolean } = {},
+): string {
+  // default = the approval-gated original-pain material; opts.approval=false
+  // yields a non-approval principle whose empty requiredFacts are
+  // self-consistent (the T-I2 executable case).
+  const approval = opts.approval !== false;
+  const intentContract = approval
+    ? INTENT_CONTRACT
+    : {
+        ownerIntent: 'files must be read before they are written',
+        targetBehavior: 'every write to a file is preceded by a read of that file in the same session',
+        forbiddenBehavior: 'writing a file that was not read earlier in the session',
+        evidenceSource: 'pain:pain_001',
+        validationExpectation: 'rule blocks writes whose context facts show no prior read of the target',
+      };
+  const statement = approval
+    ? 'Complex changes require confirmed design before implementation'
+    : 'Files must be read before they are written';
   return JSON.stringify({
     taskId: SCRIBE_TASK_ID,
     sourcePhilosopherArtifactId: 'art-phil-001',
     principleDraft: {
-      title: 'Design confirmation before complex changes',
-      statement: 'Complex changes require confirmed design before implementation',
-      rationale: 'unconfirmed complex edits caused the original pain',
-      applicability: ['complex code changes'],
-      antiPatterns: ['implementing complex changes without design confirmation'],
+      title: approval ? 'Design confirmation before complex changes' : 'Read before write',
+      statement,
+      rationale: approval ? 'unconfirmed complex edits caused the original pain' : 'blind edits caused the original pain',
+      applicability: approval ? ['complex code changes'] : ['write_file calls'],
+      antiPatterns: approval ? ['implementing complex changes without design confirmation'] : ['writing a file that was never read'],
       confidence: 0.9,
     },
     sourceTrace: { philosopherArtifactId: 'art-phil-001' },
     risks: [],
-    intentContract: INTENT_CONTRACT,
+    intentContract,
     ...(executionConditions !== undefined ? { executionConditions } : {}),
     generatedAt: '2026-10-16T00:00:00.000Z',
   });
@@ -180,11 +199,18 @@ async function seedChain(workspaceDir: string, scribeContentJson: string): Promi
 
 let runTaskIds: string[] = [];
 
+let capturedTrustedFacts: unknown = 'not-constructed';
+
 function spyArtificerRun(): void {
   runTaskIds = [];
+  capturedTrustedFacts = 'not-constructed';
   vi.spyOn(ArtificerRunner.prototype, 'run').mockImplementation(async function (this: ArtificerRunner, taskId: string) {
     runTaskIds.push(taskId);
-    const self = this as unknown as { stateManager: { markTaskSucceeded: (id: string, ref: string) => Promise<unknown> } };
+    const self = this as unknown as {
+      stateManager: { markTaskSucceeded: (id: string, ref: string) => Promise<unknown> };
+      trustedFacts?: unknown;
+    };
+    capturedTrustedFacts = self.trustedFacts === undefined ? undefined : self.trustedFacts;
     await self.stateManager.markTaskSucceeded(taskId, 'artificer://test-run');
     return { status: 'succeeded' as const, taskId, attemptCount: 0 };
   });
@@ -255,7 +281,11 @@ describe('consumer cycle — artificer intent-basis preflight wiring', () => {
 
   it('T-I2: complete intent basis lets the runner run and records the versioned verification', async () => {
     const workspaceDir = makeWorkspace();
-    await seedChain(workspaceDir, scribeContent({ version: 1, requiredFacts: [] }));
+    // Self-consistent executable: a principle enforceable from observable
+    // input, whose intent material carries NO approval semantics, declaring
+    // requiredFacts: [] (Owner review P1: an approval-shaped material with []
+    // is the under-reporting attack and stops — see the core audit tests).
+    await seedChain(workspaceDir, scribeContent({ version: 1, requiredFacts: [] }, { approval: false }));
     spyArtificerRun();
 
     const outcome = await runInternalizationConsumerCycle(workspaceDir, makePorts());
@@ -282,6 +312,29 @@ describe('consumer cycle — artificer intent-basis preflight wiring', () => {
     const { task, hydrated } = await readArtificerTask(workspaceDir);
     expect(task?.status).toBe('needs_human_review');
     expect(hydrated?.humanReviewContext?.reasonCode).toBe('trusted_fact_provider_absent');
+  });
+
+  it('T-I5 (Owner review P2): the trusted-facts port rides from ports into BOTH the preflight and the runner', async () => {
+    const workspaceDir = makeWorkspace();
+    // Approval-gated principle WITH a declared required fact; the port
+    // resolves it — the entry gate must pass AND the runner must be
+    // constructed carrying the SAME port (defensive mirror agreement).
+    await seedChain(workspaceDir, scribeContent({
+      version: 1,
+      requiredFacts: [{ factKind: 'design_approval', required: true, textualBasis: 'complex changes require confirmed design before implementation' }],
+    }, { approval: true }));
+    const resolvedPort = {
+      resolveRequiredFact: () => ({ resolution: 'approved' as const, detail: 'host decision record' }),
+    };
+    spyArtificerRun();
+
+    const outcome = await runInternalizationConsumerCycle(workspaceDir, {
+      ...makePorts(),
+      trustedFacts: resolvedPort,
+    });
+    expect(outcome.ran).toBe(true);
+    expect(runTaskIds).toEqual([ARTIFICER_TASK_ID]);
+    expect(capturedTrustedFacts).toBe(resolvedPort); // SAME port instance reached the runner
   });
 
   it('T-I4 (Q20): the runner itself refuses a legacy scribe artifact before any LLM call (bypass control)', async () => {
