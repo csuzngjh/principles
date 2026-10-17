@@ -11,7 +11,7 @@ const installerPackage = path.resolve(__dirname, '..');
 const requiredSkills = ['pd-record-pain', 'pd-status', 'pd-review', 'pd-disable'];
 const directories: string[] = [];
 const originalConfigDir = process.env.WORKBUDDY_CONFIG_DIR;
-const copyFailure = vi.hoisted((): { staging?: boolean } => ({}));
+const copyFailure = vi.hoisted((): { staging?: boolean; commitFile?: string } => ({}));
 
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs')>();
@@ -26,6 +26,15 @@ vi.mock('node:fs', async (importOriginal) => {
       }
       return actual.cpSync(...args);
     },
+    renameSync: (...args: Parameters<typeof actual.renameSync>) => {
+      // The registry/settings writer uses atomic rename. Fail exactly one
+      // commit after the cache swap, leaving rollback free to run normally.
+      if (copyFailure.commitFile === path.basename(String(args[1]))) {
+        delete copyFailure.commitFile;
+        throw new Error('injected registration commit failure');
+      }
+      return actual.renameSync(...args);
+    },
   };
 });
 
@@ -37,6 +46,7 @@ function temporaryDirectory(): string {
 
 afterEach(() => {
   delete copyFailure.staging;
+  delete copyFailure.commitFile;
   if (originalConfigDir === undefined) delete process.env.WORKBUDDY_CONFIG_DIR;
   else process.env.WORKBUDDY_CONFIG_DIR = originalConfigDir;
   for (const dir of directories.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
@@ -179,6 +189,24 @@ describe('WorkBuddy skills through production delivery boundaries', () => {
     expect(fs.readFileSync(lab.otherPlugin, 'utf8')).toBe('Other plugin data');
   });
 
+  it.each(['settings.json', 'installed_plugins.json'])('rolls back cache and BOTH host files when %s commit fails after swapping', async (commitFile) => {
+    const lab = await oldCacheLab(true);
+    const settingsBefore = fs.readFileSync(lab.paths.settingsPath, 'utf8');
+    const registryBefore = fs.readFileSync(lab.paths.registryPath, 'utf8');
+    const wrapperBefore = fs.readFileSync(path.join(lab.cache, 'scripts/wrapper.cjs'));
+    copyFailure.commitFile = commitFile;
+    const result = await lab.installer.install(lab.context);
+    expect(result.success).toBe(false);
+    expect(result.reason).toContain('workbuddy_registration_commit_failed');
+    expect(result.reason).toContain('Previous cache and registration state restored');
+    expect(fs.readFileSync(lab.paths.settingsPath, 'utf8')).toBe(settingsBefore);
+    expect(fs.readFileSync(lab.paths.registryPath, 'utf8')).toBe(registryBefore);
+    expect(fs.readFileSync(path.join(lab.cache, 'scripts/wrapper.cjs'))).toEqual(wrapperBefore);
+    expect(fs.existsSync(path.join(lab.cache, 'skills'))).toBe(false);
+    expect(fs.readdirSync(path.dirname(lab.paths.cachePluginRoot))
+      .filter((name) => name.startsWith('.pd-staging-') || name.startsWith('.pd-backup-'))).toEqual([]);
+  });
+
   it.each([true, false])('preserves native v2 array scopes and older caches, then reinstalls without registry churn (engine=%s)', async (engine) => {
     const lab = await oldCacheLab(engine);
     const olderCache = path.join(lab.paths.cachePluginRoot, '0.0.9');
@@ -248,6 +276,46 @@ describe('WorkBuddy skills through production delivery boundaries', () => {
     const settings = JSON.parse(fs.readFileSync(lab.paths.settingsPath, 'utf8'));
     expect(settings.enabledPlugins[pluginKey]).toBe(true);
     expect(result.preservedPaths).toContain(lab.paths.registryPath);
+    expect(fs.readFileSync(lab.database, 'utf8')).toBe('Owner governance data');
+  });
+
+  it('preserves non-user scope installations even when native engine is available', async () => {
+    const lab = await oldCacheLab(true);
+    const olderCache = path.join(lab.paths.cachePluginRoot, '0.0.9');
+    fs.mkdirSync(olderCache, { recursive: true });
+    fs.writeFileSync(path.join(olderCache, 'project-owner.txt'), 'Preserve project payload');
+    const pluginKey = 'principles-disciple@principles-disciple-market';
+    const registry = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/workbuddy-installed-registry-v2-array.json'), 'utf8'), (_key, value: unknown) => {
+      if (value === 'USER_CACHE') return lab.cache;
+      if (value === 'PROJECT_CACHE') return olderCache;
+      if (value === 'PROJECT_WORKSPACE') return path.join(lab.paths.homeDir, 'project');
+      return value;
+    });
+    fs.writeFileSync(lab.paths.registryPath, JSON.stringify(registry));
+    const result = await lab.installer.uninstall({ language: 'en', force: true });
+    expect(result.success, result.reason).toBe(true);
+    const after = JSON.parse(fs.readFileSync(lab.paths.registryPath, 'utf8'));
+    expect(after.plugins[pluginKey].map((record: { scope: string }) => record.scope)).toEqual(['project', 'local']);
+    expect(JSON.parse(fs.readFileSync(lab.paths.settingsPath, 'utf8')).enabledPlugins[pluginKey]).toBe(true);
+    expect(fs.readFileSync(path.join(olderCache, 'project-owner.txt'), 'utf8')).toBe('Preserve project payload');
+    expect(fs.existsSync(lab.paths.marketplaceRoot)).toBe(true);
+    expect(result.reason).toContain('bypassed host-wide engine commands');
+  });
+
+  it('refuses cache removal when registry is corrupt, even if plugin is not enabled', async () => {
+    const lab = await oldCacheLab(false);
+    const settings = JSON.parse(fs.readFileSync(lab.paths.settingsPath, 'utf8'));
+    settings.enabledPlugins['principles-disciple@principles-disciple-market'] = false;
+    fs.writeFileSync(lab.paths.settingsPath, JSON.stringify(settings));
+    fs.writeFileSync(lab.paths.registryPath, '{not valid json');
+    const originalSettings = fs.readFileSync(lab.paths.settingsPath, 'utf8');
+    const result = await lab.installer.uninstall({ language: 'en', force: true });
+    expect(result.success).toBe(false);
+    expect(result.reason).toContain('workbuddy_settings_unparsable');
+    expect(fs.readFileSync(lab.paths.registryPath, 'utf8')).toBe('{not valid json');
+    expect(fs.readFileSync(lab.paths.settingsPath, 'utf8')).toBe(originalSettings);
+    expect(fs.existsSync(path.join(lab.cache, 'scripts/wrapper.cjs'))).toBe(true);
+    expect(fs.existsSync(lab.paths.marketplaceRoot)).toBe(true);
     expect(fs.readFileSync(lab.database, 'utf8')).toBe('Owner governance data');
   });
 

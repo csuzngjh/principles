@@ -55,7 +55,7 @@ import {
   INSTALL_LAYOUT_VERSION,
   type InstallHost,
 } from '@principles/install-layout';
-import { atomicReplaceTextFile } from '../utils/config-file-io.js';
+import { atomicReplaceTextFile, errnoCode } from '../utils/config-file-io.js';
 import { getHomeDir, generateConfigYamlContent, getConfigYamlPath, resolveDefaultModelForProvider, isValidHttpBaseUrl } from '../mvp-config.js';
 import type {
   HostInstaller,
@@ -318,8 +318,13 @@ export function readHostJsonFile(filePath: string): JsonFileRead {
   let raw: string;
   try {
     raw = readFileSync(filePath, 'utf-8');
-  } catch {
-    return { ok: true, value: undefined, existed: false };
+  } catch (error) {
+    if (errnoCode(error) === 'ENOENT') return { ok: true, value: undefined, existed: false };
+    return {
+      ok: false, path: filePath,
+      reason: `workbuddy_settings_unreadable: cannot read ${filePath} (${error instanceof Error ? error.message : String(error)}). No PD write was performed.`,
+      nextAction: 'Restore host file read access before installing or uninstalling; do not delete caches while registry references are unknown.',
+    };
   }
   let parsed: unknown;
   try {
@@ -1487,6 +1492,16 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     if (!settings.ok) return { ok: false, reason: settings.reason, nextAction: settings.nextAction };
     const registry = readHostJsonFile(p.registryPath);
     if (!registry.ok) return { ok: false, reason: registry.reason, nextAction: registry.nextAction };
+    // Capture exact pre-install bytes so a later JSON commit failure can undo
+    // *both* host settings and the cache swap, including original formatting.
+    let originalSettingsBytes: string | undefined;
+    let originalRegistryBytes: string | undefined;
+    try {
+      if (settings.existed) originalSettingsBytes = readFileSync(p.settingsPath, 'utf-8');
+      if (registry.existed) originalRegistryBytes = readFileSync(p.registryPath, 'utf-8');
+    } catch (error) {
+      return { ok: false, reason: `workbuddy_registration_snapshot_failed: ${error instanceof Error ? error.message : String(error)}. No change was made.`, nextAction: 'Check host registry/settings permissions, then retry.' };
+    }
 
     // settings.json merge — computed here, WRITTEN after the cache lands (see
     // below): a failed payload must leave no registration state behind.
@@ -1532,6 +1547,7 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     // sibling, prove it complete, and only then swap. A failure (ENOSPC, EPERM
     // on a locked file, a partial cpSync) must leave the previous cache intact —
     // otherwise a failed upgrade trades a working old plugin for a broken one.
+    const previousCacheExisted = existsSync(cacheVersionDir);
     const cacheParent = path.resolve(path.dirname(p.cachePluginRoot));
     const stagingDir = path.join(cacheParent, `.pd-staging-${process.pid}-${Date.now()}`);
     const backupDir = path.join(cacheParent, `.pd-backup-${process.pid}-${Date.now()}`);
@@ -1565,7 +1581,8 @@ export class WorkBuddyHostInstaller implements HostInstaller {
         }
         throw swapError;
       }
-      rmSync(backupDir, { recursive: true, force: true });
+      // Do not discard the old cache until *both* JSON files are committed.
+      // A registry/settings write can still fail after a successful swap.
     } catch (error) {
       // The live cache is untouched (or restored); only our temp dir may remain.
       try { rmSync(stagingDir, { recursive: true, force: true }); } catch { /* reported below */ }
@@ -1579,14 +1596,47 @@ export class WorkBuddyHostInstaller implements HostInstaller {
       };
     }
 
-    // Cache is verified and in place — only now is the new registration state
-    // committed (settings first, then the registry the host resolves from).
+    // Cache is verified and in place. Commit the two host files, retaining
+    // the old cache until they both succeed; failures restore all three.
+    const rollbackCommit = (failedWrite: { reason: string; nextAction: string }) => {
+      const rollbackErrors: string[] = [];
+      try {
+        if (previousCacheExisted) {
+          if (!existsSync(backupDir)) throw new Error('previous cache backup missing');
+          rmSync(cacheVersionDir, { recursive: true, force: true });
+          renameSync(backupDir, cacheVersionDir);
+        } else {
+          rmSync(cacheVersionDir, { recursive: true, force: true });
+        }
+      } catch (error) {
+        rollbackErrors.push(`cache: ${error instanceof Error ? error.message : String(error)} (backup: ${backupDir})`);
+      }
+      const restoreJson = (file: string, original: string | undefined) => {
+        try {
+          if (original === undefined) {
+            rmSync(file, { force: true });
+          } else if (readFileSync(file, 'utf-8') !== original) {
+            const restored = writeHostJsonFileProtected(file, original);
+            if (!restored.ok) throw new Error(restored.reason);
+          }
+        } catch (error) {
+          rollbackErrors.push(`${file}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      };
+      restoreJson(p.settingsPath, originalSettingsBytes);
+      restoreJson(p.registryPath, originalRegistryBytes);
+      return {
+        ok: false as const,
+        reason: `workbuddy_registration_commit_failed: ${failedWrite.reason}. ${rollbackErrors.length === 0 ? 'Previous cache and registration state restored.' : `Rollback incomplete: ${rollbackErrors.join('; ')}`}`,
+        nextAction: rollbackErrors.length === 0 ? failedWrite.nextAction : 'Preserve the reported backup and repair the host registration before retrying.',
+      };
+    };
     const settingsWrite = writeHostJsonFileProtected(p.settingsPath, JSON.stringify(nextSettings, null, 2) + '\n');
-    if (!settingsWrite.ok) return { ok: false, reason: settingsWrite.reason, nextAction: settingsWrite.nextAction };
+    if (!settingsWrite.ok) return rollbackCommit(settingsWrite);
     const registryWrite = writeHostJsonFileProtected(p.registryPath, JSON.stringify(nextRegistry, null, 2) + '\n');
-    if (!registryWrite.ok) {
-      return { ok: false, reason: registryWrite.reason, nextAction: registryWrite.nextAction };
-    }
+    if (!registryWrite.ok) return rollbackCommit(registryWrite);
+    // The new installation is now committed; cleanup must not invalidate it.
+    try { rmSync(backupDir, { recursive: true, force: true }); } catch { /* orphan backup is recoverable, not a failed registration */ }
     return { ok: true, mode: 'direct-write', settingsAction, engineNote };
   }
 
@@ -1625,8 +1675,36 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     const failedPaths: string[] = [];
     const notes: string[] = [];
 
-    // 1. Disable first so hooks stop even if later steps fail (belt).
-    if (details.pluginEnabled) {
+    // Fail before ANY destructive operation when the native registry cannot be
+    // read. Treating an unreadable registry as "no references" risks deleting
+    // caches still owned by another scope.
+    const registryPreflight = readHostJsonFile(p.registryPath);
+    if (!registryPreflight.ok) {
+      return {
+        success: false, hostId: this.hostId, removedPaths,
+        preservedPaths: [p.registryPath, p.cachePluginRoot, p.marketplaceRoot],
+        reason: registryPreflight.reason, nextAction: registryPreflight.nextAction,
+      };
+    }
+    const settingsPreflight = readHostJsonFile(p.settingsPath);
+    if (!settingsPreflight.ok) {
+      return {
+        success: false, hostId: this.hostId, removedPaths,
+        preservedPaths: [p.settingsPath, p.registryPath, p.cachePluginRoot],
+        reason: settingsPreflight.reason, nextAction: settingsPreflight.nextAction,
+      };
+    }
+    const registeredEntry = isRecord(registryPreflight.value?.plugins)
+      ? registryPreflight.value.plugins[WORKBUDDY_PLUGIN_KEY] : undefined;
+    const otherScopesPresent = installedPluginRecords(registeredEntry)
+      .some((record) => !(record.scope === 'user' && record.projectPath === undefined));
+
+    // The native engine's disable/uninstall commands affect the entire plugin
+    // key (all scopes). They must not be used for a USER-only uninstall when
+    // project/local/managed registrations coexist.
+    if (otherScopesPresent) notes.push('other scopes remain: bypassed host-wide engine commands and preserved their registrations');
+    // 1. Disable first only if this key has no other scope owners.
+    if (details.pluginEnabled && !otherScopesPresent) {
       const disable = details.engineFound
         ? this.runEngine(['plugin', 'disable', WORKBUDDY_PLUGIN_KEY])
         : undefined;
@@ -1636,7 +1714,7 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     }
 
     // 2. Unregister via the engine when possible.
-    if (details.registered && details.engineFound) {
+    if (details.registered && details.engineFound && !otherScopesPresent) {
       const uninstall = this.runEngine(['plugin', 'uninstall', WORKBUDDY_PLUGIN_KEY]);
       const engineUninstalled = uninstall !== undefined && uninstall.status === 0 && PLUGIN_UNINSTALL_OK.test(uninstall.stdout + uninstall.stderr);
       if (!engineUninstalled && uninstall !== undefined) {
@@ -1675,7 +1753,15 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     //    Another scope may still load an older version from this same root, so
     //    the version dirs are swept individually instead of deleting the root.
     if (existsSync(p.cachePluginRoot)) {
-      const referenced = this.referencedCacheDirs();
+      const references = this.referencedCacheDirs();
+      if (!references.ok) {
+        return {
+          success: false, hostId: this.hostId, removedPaths,
+          preservedPaths: [...preservedPaths, p.cachePluginRoot, p.marketplaceRoot],
+          reason: references.reason, nextAction: references.nextAction,
+        };
+      }
+      const referenced = references.directories;
       let entries: string[] = [];
       try {
         entries = readdirSync(p.cachePluginRoot);
@@ -1685,7 +1771,13 @@ export class WorkBuddyHostInstaller implements HostInstaller {
         notes.push(`cache listing failed: ${error instanceof Error ? error.message : String(error)}`);
       }
       for (const name of entries) {
-        const versionDir = path.join(p.cachePluginRoot, name);
+        const versionDir = workbuddyCacheVersionDir(p.cachePluginRoot, name);
+        // Preserve unexpected/unknown cache children; only validated version
+        // directories may be removed by a user-scope uninstall.
+        if (versionDir === undefined) {
+          preservedPaths.push(path.join(p.cachePluginRoot, name));
+          continue;
+        }
         if (referenced.has(path.resolve(versionDir))) {
           preservedPaths.push(versionDir);
           continue;
@@ -1711,7 +1803,10 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     }
 
     // 5. Remove the PD-owned marketplace dir.
-    if (existsSync(p.marketplaceRoot)) {
+    if (otherScopesPresent) {
+      preservedPaths.push(p.marketplaceRoot);
+      notes.push('preserved marketplace and host manifest for remaining non-user scopes');
+    } else if (existsSync(p.marketplaceRoot)) {
       try {
         rmSync(p.marketplaceRoot, { recursive: true, force: true });
         removedPaths.push(p.marketplaceRoot);
@@ -1724,7 +1819,7 @@ export class WorkBuddyHostInstaller implements HostInstaller {
 
     // 6. Manifest bookkeeping: drop 'workbuddy' from hosts. The governance
     //    workspace entry and ALL governance data are preserved (§18 default).
-    removeWorkbuddyFromInstallManifestHosts(p.installManifestPath);
+    if (!otherScopesPresent) removeWorkbuddyFromInstallManifestHosts(p.installManifestPath);
     const governancePreservedByDesign = existsSync(p.governanceDir);
     if (governancePreservedByDesign) {
       preservedPaths.push(p.governanceDir);
@@ -1801,17 +1896,21 @@ export class WorkBuddyHostInstaller implements HostInstaller {
   }
 
   /** installPaths still referenced by ANY surviving scope record of our key. */
-  private referencedCacheDirs(): Set<string> {
+  private referencedCacheDirs():
+    | { ok: true; directories: Set<string> }
+    | { ok: false; reason: string; nextAction: string } {
     const p = this.paths();
     const registry = readHostJsonFile(p.registryPath);
+    if (!registry.ok) return { ok: false, reason: registry.reason, nextAction: registry.nextAction };
     const referenced = new Set<string>();
-    if (!registry.ok || !isRecord(registry.value?.plugins)) return referenced;
-    for (const record of installedPluginRecords(registry.value.plugins[WORKBUDDY_PLUGIN_KEY])) {
-      if (typeof record.installPath === 'string' && record.installPath.length > 0) {
-        referenced.add(path.resolve(record.installPath));
+    if (isRecord(registry.value?.plugins)) {
+      for (const record of installedPluginRecords(registry.value.plugins[WORKBUDDY_PLUGIN_KEY])) {
+        if (typeof record.installPath === 'string' && record.installPath.length > 0) {
+          referenced.add(path.resolve(record.installPath));
+        }
       }
     }
-    return referenced;
+    return { ok: true, directories: referenced };
   }
 
   // ─── detect ───────────────────────────────────────────────────────────────
