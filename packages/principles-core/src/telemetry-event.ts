@@ -44,6 +44,8 @@ import { Value } from '@sinclair/typebox/value';
  * - output_schema_invalid — PRI-200 schema validation failed (before repair)
  * - output_repair_exhausted — PRI-200 repair loop exhausted, output still invalid
  * - output_path_chosen / output_path_fallback — PRI-271 weak-model output path
+ * - llm_max_tokens_downshift — PRI-1011 output budget halved after a provider
+ *   rejected it, so the retry goes out with a smaller budget
  */
 export const TelemetryEventType = Type.Union([
   // M2: Task/Run state transition events
@@ -76,6 +78,8 @@ export const TelemetryEventType = Type.Union([
   // PRI-271: Weak-model output path events
   Type.Literal('output_path_chosen'),
   Type.Literal('output_path_fallback'),
+  // PRI-1011: provider rejected the requested output budget; the retry downshifts
+  Type.Literal('llm_max_tokens_downshift'),
   // PRI-67: Dreamer runner events
   Type.Literal('dreamer_task_leased'),
   Type.Literal('dreamer_context_built'),

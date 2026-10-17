@@ -51,6 +51,48 @@ import type {
 /** Output path strategy for structured output (PRI-271 B3). */
 export type OutputPathStrategy = 'tool_call_first' | 'json_mode_first' | 'free_form_only';
 
+/**
+ * PRI-1011: ceiling pi-ai applies itself when no explicit max_tokens is sent
+ * (`options.maxTokens ?? min(model.maxTokens, 32000)`). A downshift must start
+ * from this number when the profile leaves the budget to native defaulting,
+ * otherwise the next attempt would send `undefined` again — the exact value the
+ * provider just rejected.
+ */
+const PI_AI_NATIVE_MAX_TOKENS_CAP = 32_000;
+
+/**
+ * PRI-1011: floor for the downshift ladder. Below this a structured answer is
+ * routinely cut off (finish_reason=length), so continuing to halve would trade
+ * a provider rejection for a truncation instead of recovering.
+ */
+const MIN_MAX_TOKENS_BUDGET = 4_096;
+
+/**
+ * PRI-1011: provider signatures that mean "the output budget you asked for is
+ * above what this deployment allows right now" — a *parameter* rejection, not a
+ * transport failure. Deliberately narrow: rate limits, timeouts and generic 4xx
+ * must keep their existing classification and must not trigger a downshift.
+ */
+const MAX_TOKENS_REJECTED_PATTERN =
+  /max[_ ]?tokens\b[^\n]{0,120}exceed|[Ee]xceeds the maximum output tokens/;
+
+/**
+ * PRI-1011: next budget for a retry after a max_tokens rejection. Halves the
+ * budget the provider just rejected (materialising pi-ai's native ceiling when
+ * the profile set none) and never goes below MIN_MAX_TOKENS_BUDGET.
+ * Returns the `from`/`to` pair, or `undefined` when no smaller budget is
+ * available — the ladder reached its floor, or the ceiling is already below it.
+ */
+function nextMaxTokensBudget(
+  current: number | undefined,
+  modelMaxTokens: number | undefined,
+): { from: number; to: number } | undefined {
+  const from = current
+    ?? Math.min(modelMaxTokens ?? PI_AI_NATIVE_MAX_TOKENS_CAP, PI_AI_NATIVE_MAX_TOKENS_CAP);
+  const to = Math.max(MIN_MAX_TOKENS_BUDGET, Math.floor(from / 2));
+  return to < from ? { from, to } : undefined;
+}
+
 /** Result of a specific output path attempt (PRI-271 B3). */
 export type OutputPathLabel = 'tool_call' | 'json_object_mode' | 'free_form_with_repair';
 
@@ -1326,6 +1368,10 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
     } = options;
     let lastError: unknown = undefined;
     const overallStartTime = Date.now();
+    // PRI-1011: the output budget actually sent for THIS invocation. It starts at
+    // the profile value and only shrinks when a provider rejects it, so a config
+    // that was never rejected keeps its exact previous behavior.
+    let maxTokensBudget = this.resolveMaxTokens();
     const getDelay = (attemptIndex: number) => {
       return this.config._testBackoffDelayMs !== undefined
         ? this.config._testBackoffDelayMs
@@ -1365,7 +1411,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
           apiKey: options.apiKey,
           timeoutMs: currentTimeoutMs,
           maxRetries: 0, // disable pi-ai built-in retry to avoid double-retry
-          maxTokens: this.resolveMaxTokens(), // PRI-621: undefined = pi-ai native model ceiling
+          maxTokens: maxTokensBudget, // PRI-621: undefined = pi-ai native model ceiling; PRI-1011: shrinks on rejection
           fetch: getPiAiFetchForApi(model.api),
         };
         if (this.config.reasoning !== undefined && this.config.reasoning !== false) {
@@ -1432,6 +1478,10 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
           // ADR-0019: detect rate-limit signatures first and classify as rate_limit
           // (distinct from execution_failed) so downstream retryOrFail can degrade.
           const isRateLimit = /rate.?limit|429|quota|too many requests/i.test(rawMessage);
+          // PRI-1011: a rejected output budget is a parameter problem, not a
+          // transport one — resending the identical rejected value can only fail
+          // the same way, so the next attempt goes out with a smaller budget.
+          const isBudgetRejection = !isRateLimit && MAX_TOKENS_REJECTED_PATTERN.test(rawMessage);
           const errorCategory = isRateLimit ? 'rate_limit' : 'execution_failed';
           const pdErr = new PDRuntimeError(
             errorCategory,
@@ -1457,6 +1507,19 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
                 timeoutSource,
                 effectiveTimeoutMs,
               });
+            }
+            // PRI-1011: downshift BEFORE the next request goes out, so a rejected
+            // budget is never resent unchanged.
+            if (isBudgetRejection) {
+              const next = this.downshiftMaxTokensBudget({
+                model,
+                currentMaxTokens: maxTokensBudget,
+                providerEvidence: rawMessage,
+                input,
+                runId,
+                attempt,
+              });
+              if (next !== undefined) maxTokensBudget = next;
             }
             // ADR-0019: rate-limit uses 2× backoff since limits need more time to clear
             const delay = isRateLimit ? getDelay(attempt) * 2 : getDelay(attempt);
@@ -1533,6 +1596,8 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         // ADR-0019: detect rate-limit signatures in thrown errors too (SDK may throw 429)
         const errMsg = err instanceof Error ? err.message : String(err);
         const isRateLimitCatch = /rate.?limit|429|quota|too many requests/i.test(errMsg);
+        // PRI-1011: SDKs may throw the budget rejection instead of resolving it.
+        const isBudgetRejectionCatch = !isRateLimitCatch && MAX_TOKENS_REJECTED_PATTERN.test(errMsg);
         const catchCategory = isRateLimitCatch ? 'rate_limit' : 'execution_failed';
         const errorDetails = {
           retryAttempt: attempt,
@@ -1560,6 +1625,19 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
               effectiveTimeoutMs,
             });
           }
+          // PRI-1011: downshift BEFORE the next request goes out, so a rejected
+          // budget is never resent unchanged.
+          if (isBudgetRejectionCatch) {
+            const next = this.downshiftMaxTokensBudget({
+              model,
+              currentMaxTokens: maxTokensBudget,
+              providerEvidence: errMsg,
+              input,
+              runId,
+              attempt,
+            });
+            if (next !== undefined) maxTokensBudget = next;
+          }
           // ADR-0019: rate-limit uses 2× backoff
           const delay = isRateLimitCatch ? getDelay(attempt) * 2 : getDelay(attempt);
           await new Promise(r => setTimeout(r, delay));
@@ -1575,6 +1653,44 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       'execution_failed',
       `LLM completion failed after ${maxRetries + 1} attempts: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
     );
+  }
+
+  /**
+   * PRI-1011: move one step down the output-budget ladder and record it.
+   * Returns the budget the next attempt should send, or `undefined` when the
+   * ladder has nothing smaller to try.
+   */
+  private downshiftMaxTokensBudget(params: {
+    model: ReturnType<typeof resolveModel>;
+    currentMaxTokens: number | undefined;
+    providerEvidence: string;
+    input?: StartRunInput;
+    runId: string;
+    attempt: number;
+  }): number | undefined {
+    const { model, currentMaxTokens, providerEvidence, input, runId, attempt } = params;
+    const step = nextMaxTokensBudget(currentMaxTokens, model.maxTokens);
+    if (!step) return undefined;
+
+    this.eventEmitter.emitTelemetry({
+      eventType: 'llm_max_tokens_downshift',
+      traceId: input?.taskRef?.taskId ?? runId,
+      timestamp: new Date().toISOString(),
+      sessionId: 'pi-ai-adapter',
+      agentId: 'pi-ai-adapter',
+      payload: {
+        runId,
+        runtimeKind: 'pi-ai',
+        runnerKind: input?.agentSpec.agentId,
+        provider: this.config.provider,
+        model: this.config.model,
+        retryAttempt: attempt,
+        fromMaxTokens: step.from,
+        toMaxTokens: step.to,
+        providerEvidence: safeStringifyPreview(providerEvidence, 300),
+      },
+    });
+    return step.to;
   }
 
   private emitAttemptTelemetry(params: {

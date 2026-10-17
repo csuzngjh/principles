@@ -632,6 +632,137 @@ describe('PiAiRuntimeAdapter', () => {
     });
   });
 
+  // PRI-1011: a provider that rejects the requested output budget must not be
+  // retried with the identical rejected value — the next attempt downshifts.
+  describe('startRun() output-budget downshift (PRI-1011)', () => {
+    const BUDGET_REJECTED =
+      '400 {"message":"The requested max_tokens (32000) exceeds the maximum output tokens allowed for model DeepSeek-V4-Flash-Vision-Exp (null)","type":"invalid_request_error"}';
+
+    it('downshifts the budget on the retry after a provider budget rejection', async () => {
+      const budgets: number[] = [];
+      mockComplete.mockReset();
+      mockComplete.mockImplementation(async (_m: unknown, _c: unknown, opts: Record<string, unknown>) => {
+        budgets.push(opts.maxTokens as number);
+        if (budgets.length === 1) return makeErrorResponse(BUDGET_REJECTED);
+        return makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS));
+      });
+
+      const adapter = makeAdapter({ maxTokens: 32000, maxRetries: 2 });
+      await adapter.startRun(makeStartRunInput());
+
+      expect(budgets).toEqual([32000, 16000]);
+    });
+
+    it('emits an observable downshift event with from/to evidence', async () => {
+      mockComplete.mockReset();
+      mockComplete
+        .mockResolvedValueOnce(makeErrorResponse(BUDGET_REJECTED))
+        .mockResolvedValueOnce(makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS)));
+
+      const adapter = makeAdapter({ maxTokens: 32000, maxRetries: 2 });
+      await adapter.startRun(makeStartRunInput());
+
+      const event = findTelemetryEvent('llm_max_tokens_downshift');
+      expect(event).toBeDefined();
+      const payload = event?.payload as Record<string, unknown>;
+      expect(payload.fromMaxTokens).toBe(32000);
+      expect(payload.toMaxTokens).toBe(16000);
+      expect(payload.provider).toBe('openrouter');
+      expect(String(payload.providerEvidence)).toContain('exceeds the maximum output tokens');
+    });
+
+    it('applies no downshift for an unrelated provider 400', async () => {
+      const budgets: number[] = [];
+      mockComplete.mockReset();
+      mockComplete.mockImplementation(async (_m: unknown, _c: unknown, opts: Record<string, unknown>) => {
+        budgets.push(opts.maxTokens as number);
+        if (budgets.length === 1) return makeErrorResponse('400 {"message":"internal server error"}');
+        return makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS));
+      });
+
+      const adapter = makeAdapter({ maxTokens: 32000, maxRetries: 2 });
+      await adapter.startRun(makeStartRunInput());
+
+      expect(budgets).toEqual([32000, 32000]);
+      expect(findTelemetryEvent('llm_max_tokens_downshift')).toBeUndefined();
+    });
+
+    it('applies no downshift for a rate-limit rejection', async () => {
+      const budgets: number[] = [];
+      mockComplete.mockReset();
+      mockComplete.mockImplementation(async (_m: unknown, _c: unknown, opts: Record<string, unknown>) => {
+        budgets.push(opts.maxTokens as number);
+        if (budgets.length === 1) return makeErrorResponse('429 Too Many Requests');
+        return makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS));
+      });
+
+      const adapter = makeAdapter({ maxTokens: 32000, maxRetries: 2 });
+      await adapter.startRun(makeStartRunInput());
+
+      expect(budgets).toEqual([32000, 32000]);
+      expect(findTelemetryEvent('llm_max_tokens_downshift')).toBeUndefined();
+    });
+
+    it('downshifts thrown budget rejections too, not only resolved error responses', async () => {
+      const budgets: number[] = [];
+      mockComplete.mockReset();
+      mockComplete.mockImplementation(async (_m: unknown, _c: unknown, opts: Record<string, unknown>) => {
+        budgets.push(opts.maxTokens as number);
+        if (budgets.length === 1) throw new Error(BUDGET_REJECTED);
+        return makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS));
+      });
+
+      const adapter = makeAdapter({ maxTokens: 32000, maxRetries: 2 });
+      await adapter.startRun(makeStartRunInput());
+
+      expect(budgets).toEqual([32000, 16000]);
+    });
+
+    it('never drops the budget below the floor, and still fails loud when exhausted', async () => {
+      const budgets: number[] = [];
+      mockComplete.mockReset();
+      mockComplete.mockImplementation(async (_m: unknown, _c: unknown, opts: Record<string, unknown>) => {
+        budgets.push(opts.maxTokens as number);
+        return makeErrorResponse(BUDGET_REJECTED);
+      });
+
+      const adapter = makeAdapter({ maxTokens: 8192, maxRetries: 3 });
+
+      await expect(adapter.startRun(makeStartRunInput())).rejects.toMatchObject({
+        category: 'execution_failed',
+      });
+      // 8192 → 4096 → floor: the fourth attempt cannot go below 4096.
+      expect(budgets).toEqual([8192, 4096, 4096, 4096]);
+
+      // A rejection is never reported as success, and the evidence travels with
+      // the terminal failure so the Owner can see what was actually tried (rc-9).
+      // Retry attempts emit the same eventType too, so select the final one.
+      const failed = mockEmitTelemetry.mock.calls
+        .map((c: unknown[]) => c[0] as { eventType?: unknown; payload?: unknown })
+        .find(e => e.eventType === 'runtime_invocation_failed'
+          && (e.payload as Record<string, unknown>)?.finalFailure === true);
+      const payload = failed?.payload as Record<string, unknown>;
+      expect(payload.errorCategory).toBe('execution_failed');
+      expect(String(payload.providerEvidence)).toContain('exceeds the maximum output tokens');
+    });
+
+    it('materialises an explicit budget when the profile relies on pi-ai native defaulting', async () => {
+      const budgets: unknown[] = [];
+      mockComplete.mockReset();
+      mockComplete.mockImplementation(async (_m: unknown, _c: unknown, opts: Record<string, unknown>) => {
+        budgets.push(opts.maxTokens);
+        if (budgets.length === 1) return makeErrorResponse(BUDGET_REJECTED);
+        return makeAssistantMessage(JSON.stringify(VALID_DIAGNOSIS));
+      });
+
+      const adapter = makeAdapter({ maxRetries: 2 });
+      await adapter.startRun(makeStartRunInput());
+
+      // attempt 0: undefined = pi-ai native ceiling; attempt 1: half of that ceiling.
+      expect(budgets).toEqual([undefined, 16000]);
+    });
+  });
+
   // ── pollRun() ──
 
   describe('pollRun()', () => {
