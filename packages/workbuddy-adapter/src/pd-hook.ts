@@ -14,9 +14,9 @@
  *   encode/serialization fails
  *     → exit 2 + bounded stderr + EMPTY stdout (P02 verified exit 2 blocks
  *       the tool even when stdout is closed);
- *   UserPromptSubmit ANY failure
- *     → EMPTY stdout + exit 0 + degraded stderr (P02: exit 2 would CLEAR the
- *       user's prompt — protecting the prompt outranks reporting);
+ *   UserPromptSubmit failure
+ *     → exit 0 + degraded stderr; explicit Owner submissions may also carry
+ *       a bounded rejection context (exit 2 would CLEAR the user's prompt);
  *   PostToolUse ANY failure
  *     → EMPTY stdout + exit 0 + evidence-degradation stderr (the tool already
  *       ran; nothing can be blocked, so blocking language is never used);
@@ -38,7 +38,7 @@ import process from 'node:process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { appendEventLogLine, redactTelemetryString, isRuleHostEvaluatedEventData } from '@principles/core/runtime-v2';
 import type { HostEventEmitter, HostEventResult } from '@principles/core/host';
-import { createProductionHostRuntime, loadPdConfigForPlugin } from '@principles/host-runtime';
+import { createProductionHostRuntime, loadPdConfigForPlugin, parseOwnerStatementPrefix } from '@principles/host-runtime';
 import { computeFeatureFlagsFromConfig } from '@principles/core/runtime-v2';
 import { WorkBuddyHooksHostAdapter } from './host-adapter.js';
 import { WORKBUDDY_TOOL_SEMANTICS } from './tool-semantics.js';
@@ -225,7 +225,24 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
   catch (error) {
     const reason = error instanceof WorkBuddyDecoderError ? error.reason : `decode_threw:${errorMessage(error)}`;
     const nextAction = error instanceof WorkBuddyDecoderError ? error.nextAction : 'Inspect the WorkBuddy hook payload against the Phase 0 host contract.';
-    return channelFailure(channelEventName, reason, nextAction);
+    const failure = channelFailure(channelEventName, reason, nextAction);
+    // Rejection communicates failure, never grants Owner authority or bypasses
+    // decoding. Keep malformed native identity visible to the requesting Owner.
+    if (channelEventName === 'UserPromptSubmit' && typeof parsed === 'object' && parsed !== null
+      && Object.getOwnPropertyDescriptor(parsed, 'hook_event_name')?.value === 'UserPromptSubmit'
+      && parseOwnerStatementPrefix(Object.getOwnPropertyDescriptor(parsed, 'prompt')?.value).matched) {
+      const workspace = resolveWorkbuddyWorkspace(os.homedir());
+      if (workspace.status === 'ok') {
+        const config = loadPdConfigForPlugin(workspace.workspaceDir);
+        if (config.ok && computeFeatureFlagsFromConfig(config.effective).flags['host.workbuddy']?.enabled === true) {
+          failure.stdout = { hookSpecificOutput: {
+            hookEventName: 'UserPromptSubmit',
+            additionalContext: '[PD] host=workbuddy status=rejected reason=owner_statement_decode_invalid nextAction=Native hook input is invalid; nothing was recorded. Check PD status and submit a new current-user message.',
+          } };
+        }
+      }
+    }
+    return failure;
   }
 
   // OD-07/P06 governance workspace: explicit, user-level, shared across

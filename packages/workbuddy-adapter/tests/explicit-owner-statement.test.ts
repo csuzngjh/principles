@@ -91,11 +91,19 @@ describe('current Owner WorkBuddy statement through real production hook', () =>
     expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(1);
     expect(rows(ws.workspace, 'SELECT diagnostician_task_id FROM governance_signal_admissions')).toEqual([{ diagnostician_task_id: expect.any(String) }]);
   });
-  it('missing native session is a visible decode rejection, never a fabricated identity', () => {
-    const ws = setup(); const result = invoke(ws, { session_id: undefined });
-    expect(result.status).toBe(0); expect(result.stderr).toContain('session_id');
+  it.each([{ session_id: undefined }, { generation_id: '' }, { generation_id: 42 }, { transcript_path: [] }])('invalid native input is a model-visible rejection without invented identity: %j', (invalid) => {
+    const ws = setup(); const result = invoke(ws, invalid);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).hookSpecificOutput.additionalContext).toContain('status=rejected reason=owner_statement_decode_invalid');
     expect(result.stdout).not.toContain('status=received');
     expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(0);
+    expect(fs.existsSync(path.join(ws.workspace, '.pd/state.db'))).toBe(false);
+  });
+  it('does not add malformed-input context when the host is disabled or the input is not an explicit submission', () => {
+    const disabled = setup(false); expect(invoke(disabled, { session_id: undefined }).stdout).toBe('');
+    const ordinary = setup(); expect(invoke(ordinary, { session_id: undefined, prompt: 'ordinary message' }).stdout).toBe('');
+    expect(invoke(ordinary, { session_id: undefined, hook_event_name: 'PreToolUse' }).stdout).toBe('');
+    expect(rows(ordinary.workspace, 'SELECT * FROM pain_events')).toHaveLength(0);
   });
   it('exposes unavailable storage to the model without clearing the user prompt', () => {
     const ws = setup(); fs.rmSync(path.join(ws.workspace, '.state', 'trajectory.db')); const result = invoke(ws);
