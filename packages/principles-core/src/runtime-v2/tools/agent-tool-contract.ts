@@ -20,7 +20,8 @@
  *
  * The submit_output tool does NOT terminate the loop via `terminate` (that is
  * unreliable — agent-loop uses .every() over the whole tool batch). Loop termination
- * is driven by shouldStopAfterTurn detecting the captured output (see L2AgentLoopAdapter §M3).
+ * is driven by finishTurn detecting the captured output (see L2AgentLoopAdapter §M3;
+ * Pi 1.2 name — formerly shouldStopAfterTurn).
  */
 import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import { Type } from 'typebox';

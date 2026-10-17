@@ -18,7 +18,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 type LoopCfg = {
-  shouldStopAfterTurn?: () => boolean;
+  finishTurn?: (turn: { message: { stopReason: string } }) => unknown;
   beforeToolCall?: (ctx: { toolCall: { name: string } }) => Promise<unknown>;
   maxTokens?: number;
   timeoutMs?: number;
@@ -179,7 +179,7 @@ describe('PRI-439 ArtificerL2Adapter — submit_rulecode capture', () => {
     expect(output?.payload).toEqual(makeRuleOutput());
   });
 
-  it('shouldStopAfterTurn returns true after output is captured', async () => {
+  it('finishTurn ends after output is captured; error/aborted turns never count (Pi 1.2)', async () => {
     const adapter = makeAdapter({ maxTurns: 8 });
     hoisted.impl = async (_p: unknown, context: { tools?: { name: string; execute: (id: string, params: unknown) => Promise<unknown> }[] }) => {
       const submit = context.tools?.find((t) => t.name === 'submit_rulecode');
@@ -190,18 +190,22 @@ describe('PRI-439 ArtificerL2Adapter — submit_rulecode capture', () => {
     };
 
     await adapter.startRun(makeStartRun());
-    const stopFn = hoisted.lastLoopConfig.shouldStopAfterTurn;
-    expect(typeof stopFn).toBe('function');
-    if (!stopFn) return;
-    // After submit_rulecode captured output, the next shouldStopAfterTurn call returns true.
-    expect(stopFn()).toBe(true);
+    const finishFn = hoisted.lastLoopConfig.finishTurn;
+    expect(typeof finishFn).toBe('function');
+    if (!finishFn) return;
+    // After submit_rulecode captured output, the next finishTurn call ends the loop.
+    expect(finishFn({ message: { stopReason: 'stop' } })).toEqual({ action: 'end' });
+    // Pi 1.2 fires finishTurn on error/aborted turns too — guard returns
+    // undefined and does NOT count the turn (0.85 parity).
+    expect(finishFn({ message: { stopReason: 'error' } })).toBeUndefined();
+    expect(finishFn({ message: { stopReason: 'aborted' } })).toBeUndefined();
   });
 });
 
 // ── maxTurns cap ─────────────────────────────────────────────────────────────
 
 describe('PRI-439 ArtificerL2Adapter — maxTurns cap', () => {
-  it('shouldStopAfterTurn returns false below maxTurns and true at/above, WITHOUT submit_rulecode', async () => {
+  it('finishTurn continues below maxTurns and ends at/above, WITHOUT submit_rulecode', async () => {
     const adapter = makeAdapter({ maxTurns: 5 });
     hoisted.mockReturn = [
       { role: 'assistant', content: 'thinking...' },
@@ -210,14 +214,15 @@ describe('PRI-439 ArtificerL2Adapter — maxTurns cap', () => {
     await adapter.startRun(makeStartRun()).catch(() => {
       // startRun throws when no output is captured — that's expected here.
     });
-    const stopFn = hoisted.lastLoopConfig.shouldStopAfterTurn;
-    if (!stopFn) { expect.fail('shouldStopAfterTurn not wired'); return; }
-    expect(stopFn()).toBe(false); // turn 1
-    expect(stopFn()).toBe(false); // turn 2
-    expect(stopFn()).toBe(false); // turn 3
-    expect(stopFn()).toBe(false); // turn 4
-    expect(stopFn()).toBe(true);  // turn 5 (>= maxTurns)
-    expect(stopFn()).toBe(true);  // turn 6 (still >= maxTurns)
+    const finishFn = hoisted.lastLoopConfig.finishTurn;
+    if (!finishFn) { expect.fail('finishTurn not wired'); return; }
+    expect(finishFn({ message: { stopReason: 'stop' } })).toBeUndefined(); // turn 1
+    expect(finishFn({ message: { stopReason: 'stop' } })).toBeUndefined(); // turn 2
+    expect(finishFn({ message: { stopReason: 'stop' } })).toBeUndefined(); // turn 3
+    expect(finishFn({ message: { stopReason: 'stop' } })).toBeUndefined(); // turn 4
+    expect(finishFn({ message: { stopReason: 'stop' } })).toEqual({ action: 'end' }); // turn 5 (>= maxTurns)
+    expect(finishFn({ message: { stopReason: 'stop' } })).toEqual({ action: 'end' }); // turn 6 (still >= maxTurns)
+    expect(finishFn({ message: { stopReason: 'error' } })).toBeUndefined();
   });
 });
 
@@ -501,27 +506,36 @@ describe('PRI-439 ArtificerL2Adapter — input serialization', () => {
 // ── PRI-633 — layered systemPrompt placement ─────────────────────────────────
 
 describe('PRI-633 — layered systemPrompt placement', () => {
-  it('agentContext.systemPrompt = base → tool protocol → profile append; user message carries only task data', async () => {
-    let captured: { systemPrompt?: string; messages: { role: string; content: unknown }[]; tools?: { name: string; execute: (id: string, params: unknown) => Promise<unknown> }[] } | undefined;
-    hoisted.impl = async (_p: unknown, context: unknown) => {
-      captured = context as { systemPrompt?: string; messages: { role: string; content: unknown }[]; tools?: { name: string; execute: (id: string, params: unknown) => Promise<unknown> }[] };
-      const submit = captured.tools?.find((t) => t.name === 'submit_rulecode');
+  it('system prompt rides the transcript (Pi 1.2): prompts[0] = base → tool protocol → profile append; user message carries only task data', async () => {
+    let capturedPrompts: { role: string; content: unknown }[] | undefined;
+    let capturedContext: Record<string, unknown> | undefined;
+    hoisted.impl = async (p: unknown, context: unknown) => {
+      capturedPrompts = p as { role: string; content: unknown }[];
+      capturedContext = context as Record<string, unknown>;
+      const tools = (capturedContext?.tools ?? []) as { name: string; execute: (id: string, params: unknown) => Promise<unknown> }[];
+      const submit = tools.find((t) => t.name === 'submit_rulecode');
       if (submit) await submit.execute('call-1', makeRuleOutput());
       return [];
     };
     const adapter = makeAdapter({ systemPrompt: 'PROFILE APPEND LAYER' });
     await adapter.startRun(makeStartRun({ systemPrompt: 'BASE ROLE LAYER' }));
 
-    const sp = captured?.systemPrompt ?? '';
+    // Pi 1.2: AgentContext has no systemPrompt — the layered prompt is the
+    // leading transcript system message.
+    expect(capturedPrompts?.[0]?.role).toBe('system');
+    const sp = typeof capturedPrompts?.[0]?.content === 'string' ? capturedPrompts[0].content : '';
     expect(sp).toContain('BASE ROLE LAYER');
     expect(sp).toContain('--- Tool protocol (Artificer L2 mode, PRI-439) ---');
     expect(sp).toContain('PROFILE APPEND LAYER');
     expect(sp.indexOf('BASE ROLE LAYER')).toBeLessThan(sp.indexOf('--- Tool protocol'));
     expect(sp.indexOf('--- Tool protocol')).toBeLessThan(sp.indexOf('PROFILE APPEND LAYER'));
     // The user message no longer carries the tool protocol (PRI-633).
-    const first = captured?.messages[0];
+    const first = capturedPrompts?.[1];
     expect(first?.role).toBe('user');
     expect(first?.content).toBe('initial prompt');
+    // Pi 1.2: agentContext must not duplicate the prompts.
+    expect(Object.hasOwn(capturedContext ?? {}, 'systemPrompt')).toBe(false);
+    expect(capturedContext?.messages).toEqual([]);
   });
 });
 
