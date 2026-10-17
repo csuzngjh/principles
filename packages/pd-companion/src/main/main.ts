@@ -31,6 +31,7 @@ import {
   type ConsoleOpenResult,
 } from '../lib/launch-result.js';
 import { buildConsoleTokenStatus, isSameConsoleOrigin, type ConsoleTokenStatus } from '../lib/console-origin.js';
+import { entryFileVerdict, errnoCode } from '../lib/entry-verdict.js';
 import { ConsoleSupervisor } from '../lib/supervisor.js';
 import { buildDegradedPageHtml, buildDegradedWorkspacesTrayView, buildSyncUnavailableTrayView, describeDegraded, describeWorkspaceWorkerDegraded, describeWorkspaceSyncUnavailable } from '../lib/degraded.js';
 import {
@@ -108,18 +109,6 @@ function saveState(): boolean {
 }
 
 // ─── Spawn argument hardening ────────────────────────────────────────────────
-
-/** A path is argv-safe when absolute, control-char-free, and an existing file. */
-function isSafeExistingFile(candidate: string): boolean {
-  if (!path.isAbsolute(candidate)) return false;
-  // eslint-disable-next-line no-control-regex
-  if (/[\u0000-\u001f]/.test(candidate)) return false;
-  try {
-    return fs.statSync(candidate).isFile();
-  } catch {
-    return false;
-  }
-}
 
 /** Only pass the stored workspace override when it is a safe existing directory. */
 function validatedWorkspaceOverride(): string | undefined {
@@ -226,15 +215,6 @@ function readInstalledVersion(): string | undefined {
   } catch {
     return undefined;
   }
-}
-
-/** Structured errno code from a spawn/fs error, without relying on the NodeJS namespace (eslint no-undef). */
-function errnoCode(err: unknown): string {
-  if (err !== null && typeof err === 'object' && Object.hasOwn(err, 'code')) {
-    const { code } = err as { code?: unknown };
-    if (typeof code === 'string' && code.length > 0) return code;
-  }
-  return 'unknown';
 }
 
 function startSupervision(): void {
@@ -383,7 +363,7 @@ function spawnWorkspaceWorkerFor(workerCommand: 'codex' | 'workbuddy'): (canonic
     // Same system-node discipline as the console server: better-sqlite3 is
     // built for the SYSTEM Node ABI, never Electron's bundled Node.
     const entry = extDir !== undefined ? resolvePdCliEntry(extDir) : undefined;
-    if (entry === undefined || !isSafeExistingFile(entry)) {
+    if (entry === undefined || !entryFileVerdict(entry).ok) {
       throw new Error('pd-cli entry unavailable');
     }
     const child = spawn('node', [
@@ -575,15 +555,39 @@ function stopWorkspaceWorkerSupervision(): void {
   workbuddyWorkspaceWorkers?.stopAll();
 }
 
-function spawnCli(): void {  if (extDir === undefined) return;
+function spawnCli(): void {
+  if (extDir === undefined) return;
   // spawn argv hardening: program is the literal 'node' (resolved via PATH by
   // the OS — never env-controlled); every path argument is validated above.
   // The workspace override comes from a local state file and only reaches
   // argv after validatedWorkspaceOverride() confirms it is a real directory.
   const entry = resolvePdCliEntry(extDir);
-  if (!isSafeExistingFile(entry)) {
-    supervisor.onSpawnError(undefined, `pd-cli entry failed safety check: ${entry}`);
+  const entryCheck = entryFileVerdict(entry);
+  if (!entryCheck.ok) {
+    // PRI-1012: the update chain flips the installed version marker before it
+    // lays the component dirs, so a not-yet-present entry is a transient state
+    // of a healthy install. Wait it out (bounded) and log what was decided,
+    // instead of degrading on the first stat failure with no trace.
+    if (!entryCheck.transient) {
+      supervisor.onSpawnError(undefined, entryCheck.detail);
+      log('pd_cli_entry_rejected', { entry, detail: entryCheck.detail, state: supervisor.getState().kind });
+      reflectSupervisorState();
+      return;
+    }
+    const delay = supervisor.onEntryMissing(entryCheck.detail);
+    log('pd_cli_entry_not_ready', {
+      entry,
+      detail: entryCheck.detail,
+      state: supervisor.getState().kind,
+      willRetryInMs: delay ?? 0,
+      targetVersion: readInstalledVersion(),
+    });
     reflectSupervisorState();
+    if (delay !== undefined) {
+      setTimeout(() => {
+        if (!quitting && supervisor.getState().kind === 'restarting') spawnCli();
+      }, delay);
+    }
     return;
   }
   const tokenConfigured = Boolean(process.env.PD_CONSOLE_TOKEN?.trim());
@@ -1123,7 +1127,7 @@ if (!app.requestSingleInstanceLock()) {
     // Workspace workers need the installed pd-cli entry; when the runtime is
     // missing the console supervisor already surfaces the degraded state, and
     // spawning worker children would only produce a restart-error loop.
-    if (extDir !== undefined && isSafeExistingFile(resolvePdCliEntry(extDir))) {
+    if (extDir !== undefined && entryFileVerdict(resolvePdCliEntry(extDir)).ok) {
       startWorkspaceWorkerSupervision();
     }
 

@@ -2,7 +2,8 @@
  * Console supervisor state machine (pure logic — no Electron, no child_process).
  *
  * The main-process glue drives this machine with real events:
- *   start() → spawn → onSpawnError | onLaunchResult → running
+ *   start() → spawn → onEntryMissing (bounded wait) | onSpawnError
+ *                | onLaunchResult → running
  *   running(managed) + CLI exit → onServerExit → restarting (backoff ×3)
  *   restarting exhausted → degraded(server_crash_loop)
  *
@@ -29,6 +30,21 @@ export const MAX_RESTART_ATTEMPTS = 3;
 const RESTART_DELAYS_MS = [1_000, 2_000, 4_000] as const;
 /** Uptime after which a crash counts as a NEW failure episode (backoff resets). */
 export const STABILITY_WINDOW_MS = 60_000;
+
+/**
+ * Retry ladder for "the pd-cli entry is not on disk yet" (PRI-1012).
+ *
+ * The update chain flips the installed plugin's version marker BEFORE it lays
+ * the component directories, so `<runtime>/pd-cli/dist/index.js` can legitimately
+ * be absent for ~2 minutes while a perfectly healthy install is still being
+ * written. Evidence (2.3.6 transaction, 2026-10-16): `version_change_restart`
+ * fired at 14:11:29.004Z, the journal's `staged` step is at 14:13:18.941Z —
+ * a 1m50s head start for the restart. This ladder sums to 137s, i.e. that
+ * window plus margin; it is deliberately separate from RESTART_DELAYS_MS,
+ * which is a crash-loop guard and must keep its short horizon.
+ */
+export const ENTRY_WAIT_DELAYS_MS = [2_000, 5_000, 10_000, 20_000, 40_000, 60_000] as const;
+export const ENTRY_WAIT_TOTAL_MS = ENTRY_WAIT_DELAYS_MS.reduce((total, ms) => total + ms, 0);
 
 export interface LaunchFailureInput {
   reason: string;
@@ -73,6 +89,12 @@ export class ConsoleSupervisor {
    * must be reaped on quit (via the CLI process tree).
    */
   private ownsSpawn = false;
+  /**
+   * Entry-wait attempts spent in the CURRENT launch episode. Kept separate
+   * from `attempt` (the crash-loop counter) so waiting for the update chain to
+   * lay its files never burns the crash budget (PRI-1012).
+   */
+  private entryWaits = 0;
 
   constructor(private readonly now: () => number = () => Date.now()) {}
 
@@ -90,6 +112,7 @@ export class ConsoleSupervisor {
     if (this.state.kind === 'starting' || this.state.kind === 'running') return false;
     this.intentionalStop = false;
     this.attempt = 0;
+    this.entryWaits = 0;
     this.state = { kind: 'starting' };
     return true;
   }
@@ -104,6 +127,7 @@ export class ConsoleSupervisor {
     // NOTE: attempt is NOT reset here — quick-crash chains must accumulate.
     // The reset happens in onServerExit when uptime >= STABILITY_WINDOW_MS.
     this.lastStartAt = this.now();
+    this.entryWaits = 0; // the entry is on disk — the wait episode is over
     this.ownsSpawn = true; // fresh spawn — we own the process tree
     this.state = launch.serverPid === undefined
       ? { kind: 'running', mode: 'attached', url: launch.url, port: launch.port }
@@ -113,6 +137,7 @@ export class ConsoleSupervisor {
   onLaunchReused(url: string, port: number): void {
     if (!this.isAwaitingLaunchResult()) return;
     this.lastStartAt = this.now();
+    this.entryWaits = 0;
     this.ownsSpawn = false; // external instance — never kill it
     this.state = { kind: 'running', mode: 'attached', url, port };
   }
@@ -134,6 +159,31 @@ export class ConsoleSupervisor {
       return;
     }
     this.state = { kind: 'degraded', reason: 'launch_failed', detail: message };
+  }
+
+  /**
+   * The pd-cli entry file is not a readable file right now (PRI-1012). The
+   * update chain flips the version marker before it lays the component
+   * directories, so this is a transient of a healthy install, not a broken one.
+   *
+   * Returns the delay in ms before the next spawn attempt while the wait budget
+   * lasts (state moves to `restarting`, so the caller's timer guard behaves
+   * exactly like the crash-restart one); returns undefined once the budget is
+   * spent, having moved to `degraded` with the waited total in the detail.
+   */
+  onEntryMissing(detail: string): number | undefined {
+    if (!this.isAwaitingLaunchResult()) return undefined;
+    this.entryWaits += 1;
+    if (this.entryWaits > ENTRY_WAIT_DELAYS_MS.length) {
+      this.state = {
+        kind: 'degraded',
+        reason: 'launch_failed',
+        detail: `${detail} — entry still absent after ${ENTRY_WAIT_DELAYS_MS.length} waits (${ENTRY_WAIT_TOTAL_MS / 1000}s)`,
+      };
+      return undefined;
+    }
+    this.state = { kind: 'restarting', attempt: this.attempt, reason: `pd_cli_entry_pending_${this.entryWaits}` };
+    return ENTRY_WAIT_DELAYS_MS[this.entryWaits - 1];
   }
 
   /**

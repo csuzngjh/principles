@@ -40,8 +40,12 @@ const COPY: Record<DegradedReasonKey, DegradedInfo> = {
   },
   launch_failed: {
     title: '控制台启动失败',
-    description: 'pd console open 返回失败。详见下方原因。',
-    nextAction: '查看日志后从托盘菜单重试；如持续失败，重新运行 npx create-principles-disciple。',
+    description: '控制台服务未能拉起。详见下方原因。',
+    // Do NOT point at `npx create-principles-disciple` here (PRI-1012): re-running
+    // the installer over an existing install overwrites the current runtime with
+    // the bundled version (AGENTS.md §1.1). Companion now waits out the update
+    // chain itself, so reaching this page means that wait was exhausted.
+    nextAction: '若刚刚做过 PD 更新，稍等片刻后从托盘菜单再点一次「重启服务」；反复失败请查看日志（Companion 数据目录 logs/ 下）并记下原因。',
   },
 };
 
