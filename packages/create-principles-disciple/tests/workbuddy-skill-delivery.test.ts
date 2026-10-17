@@ -151,6 +151,8 @@ describe('WorkBuddy skills through production delivery boundaries', () => {
 
   it('reports cache refresh failure and leaves the previous cache loadable', async () => {
     const lab = await oldCacheLab(true);
+    const settingsBefore = fs.readFileSync(lab.paths.settingsPath, 'utf8');
+    const registryBefore = fs.readFileSync(lab.paths.registryPath, 'utf8');
     // The old cache is hook-only (skills + pd-control removed by the lab); the
     // hook still runs, so a failed refresh must never trade it for a partial copy.
     copyFailure.staging = true;
@@ -167,10 +169,9 @@ describe('WorkBuddy skills through production delivery boundaries', () => {
     expect(fs.existsSync(path.join(lab.cache, 'scripts/pd-control.cjs'))).toBe(false);
     expect(result.reason).toContain('workbuddy_cache_write_failed');
     expect(result.reason).toContain('previous cache payload was left in place');
-    // The registration was not advanced to a payload that never landed.
-    const registryAfter = JSON.parse(fs.readFileSync(lab.paths.registryPath, 'utf8'));
-    expect(registryAfter.plugins['principles-disciple@principles-disciple-market'])
-      .toMatchObject({ version: '0.1.0', installPath: lab.cache });
+    // No registration state was committed for a payload that never landed.
+    expect(fs.readFileSync(lab.paths.settingsPath, 'utf8')).toBe(settingsBefore);
+    expect(fs.readFileSync(lab.paths.registryPath, 'utf8')).toBe(registryBefore);
     // No staging/backup temp dirs left next to the version cache.
     expect(fs.readdirSync(path.dirname(lab.paths.cachePluginRoot))
       .filter((name) => name.startsWith('.pd-staging-') || name.startsWith('.pd-backup-'))).toEqual([]);

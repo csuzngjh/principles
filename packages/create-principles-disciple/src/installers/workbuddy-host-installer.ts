@@ -1488,13 +1488,12 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     const registry = readHostJsonFile(p.registryPath);
     if (!registry.ok) return { ok: false, reason: registry.reason, nextAction: registry.nextAction };
 
-    // settings.json merge
+    // settings.json merge — computed here, WRITTEN after the cache lands (see
+    // below): a failed payload must leave no registration state behind.
     const nextSettings: Record<string, unknown> = { ...(settings.value ?? {}) };
     const enabledPlugins = isRecord(nextSettings.enabledPlugins) ? { ...nextSettings.enabledPlugins } : {};
     enabledPlugins[WORKBUDDY_PLUGIN_KEY] = true;
     nextSettings.enabledPlugins = enabledPlugins;
-    const settingsWrite = writeHostJsonFileProtected(p.settingsPath, JSON.stringify(nextSettings, null, 2) + '\n');
-    if (!settingsWrite.ok) return { ok: false, reason: settingsWrite.reason, nextAction: settingsWrite.nextAction };
     const settingsAction = settings.existed ? 'updated' : 'created';
 
     // installed_plugins.json v2 merge (create with version 2 when absent)
@@ -1575,12 +1574,15 @@ export class WorkBuddyHostInstaller implements HostInstaller {
         : `the previous cache payload is preserved at ${backupDir} but could NOT be restored in place (${restoreFailure})`;
       return {
         ok: false,
-        reason: `${swapFailedReason(error)}. Settings were updated and the registration entry was NOT changed; ${cacheState}.`,
+        reason: `${swapFailedReason(error)}. No registration state was changed; ${cacheState}.`,
         nextAction: `Re-run the installer (idempotent), or run the engine command manually: node <engine> plugin install ${WORKBUDDY_PLUGIN_KEY}.`,
       };
     }
 
-    // Cache is verified and in place — only now does the host get pointed at it.
+    // Cache is verified and in place — only now is the new registration state
+    // committed (settings first, then the registry the host resolves from).
+    const settingsWrite = writeHostJsonFileProtected(p.settingsPath, JSON.stringify(nextSettings, null, 2) + '\n');
+    if (!settingsWrite.ok) return { ok: false, reason: settingsWrite.reason, nextAction: settingsWrite.nextAction };
     const registryWrite = writeHostJsonFileProtected(p.registryPath, JSON.stringify(nextRegistry, null, 2) + '\n');
     if (!registryWrite.ok) {
       return { ok: false, reason: registryWrite.reason, nextAction: registryWrite.nextAction };
