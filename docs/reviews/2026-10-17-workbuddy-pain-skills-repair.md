@@ -73,3 +73,19 @@
 已安装产物登记验收；当前不宣称真实用户安装已获得本次修复。
 完整真实 provider 学习、Owner 审批及行为改善不属于本次登记成功结论。
 现有宿主开关用于停用，源代码提交可回退；既有 Owner 数据不自动删除。
+
+## 外审修复（2026-10-17，HEAD 9c588492a 之后）
+
+外部评审给出 P1/P1/P2 三条阻塞项，本轮按最小面修复，并补了变异验证。
+
+| 问题 | 修复 | 变异证据（回退实现后实测） |
+| --- | --- | --- |
+| `Test principles-core` 红：新增 barrel 导出未同步 PRI-775 冻结快照 | `runtime-v2-barrel-surface.json` 加入 `boundCorrectionEvidenceText`，`count` 1928→1929。该导出有生产消费方（`host-runtime/src/governance-signal-admission.ts` 从 barrel 导入），不是 ghost export | 修复前 CI 日志实测 `+ added (1): boundCorrectionEvidenceText`；改前本地复现同一断言 |
+| 同版本刷新先删缓存再复制：复制失败会把可用插件换成半成品 | 先复制到 `.pd-staging-*`，按 `WORKBUDDY_PAYLOAD_FILES` 证明完整，再以 `.pd-backup-*` 做可回滚目录替换；**注册表写入推迟到缓存落地之后**，避免把宿主指向从未真正落地的版本 | 回退实现 + 把注入失败指向活缓存：新用例报 `the previous cache must survive a failed refresh: expected false to be true` |
+| 卸载删整键与版本缓存根，误伤 project/local scope | 卸载只移除 user scope 记录；`enabledPlugins` 仅在没有其他 scope 时清除；缓存按「仍被任何 scope 引用的 installPath」逐个版本清扫，根目录空了才删 | 回退实现：新用例在 `after.plugins[key].map` 处 `undefined`（整键被删） |
+
+补充说明：
+- 缓存校验同时把 `installPath` 比较改成 `path.resolve()` 归一，避免引擎写入路径形态差异导致每轮重装。
+- `pluginCacheMatchesPayload` 与暂存校验共用同一份 `WORKBUDDY_PAYLOAD_FILES`，不再是两份会漂移的清单。
+- 引擎自身的 `plugin uninstall` 仍按宿主冻结事实删除整键；本轮只约束 PD 自己写的那条路径。
+

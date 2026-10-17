@@ -11,14 +11,19 @@ const installerPackage = path.resolve(__dirname, '..');
 const requiredSkills = ['pd-record-pain', 'pd-status', 'pd-review', 'pd-disable'];
 const directories: string[] = [];
 const originalConfigDir = process.env.WORKBUDDY_CONFIG_DIR;
-const copyFailure = vi.hoisted((): { destination?: string } => ({}));
+const copyFailure = vi.hoisted((): { staging?: boolean } => ({}));
 
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs')>();
   return {
     ...actual,
     cpSync: (...args: Parameters<typeof actual.cpSync>) => {
-      if (copyFailure.destination !== undefined && String(args[1]) === copyFailure.destination) throw new Error('injected cache copy failure');
+      const destination = String(args[1]);
+      // staging=true fails the copy into the installer's temp dir, which is the
+      // real upgrade-failure shape (ENOSPC / EPERM) without knowing its name.
+      if (copyFailure.staging === true && path.basename(destination).startsWith('.pd-staging-')) {
+        throw new Error('injected cache copy failure');
+      }
       return actual.cpSync(...args);
     },
   };
@@ -31,7 +36,7 @@ function temporaryDirectory(): string {
 }
 
 afterEach(() => {
-  delete copyFailure.destination;
+  delete copyFailure.staging;
   if (originalConfigDir === undefined) delete process.env.WORKBUDDY_CONFIG_DIR;
   else process.env.WORKBUDDY_CONFIG_DIR = originalConfigDir;
   for (const dir of directories.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
@@ -63,9 +68,15 @@ describe('WorkBuddy skills through production delivery boundaries', () => {
     fs.writeFileSync(paths.settingsPath, '{"enabledPlugins":{"other@market":true},"owner":"preserve"}');
     fs.mkdirSync(path.dirname(paths.registryPath), { recursive: true });
     fs.writeFileSync(paths.registryPath, '{"version":2,"plugins":{"other@market":[{"scope":"user","version":"1.0.0","installPath":"preserve"}]}}');
+    // Reading the file directly (no stat-then-read check) keeps this a real
+    // snapshot of the bytes and avoids the TOCTOU shape js/file-system-race flags.
     const snapshot = () => fs.readdirSync(home, { recursive: true }).sort().map((entry) => {
       const absolute = path.join(home, String(entry));
-      return [entry, fs.statSync(absolute).isFile() ? fs.readFileSync(absolute).toString('base64') : 'directory'];
+      try {
+        return [entry, fs.readFileSync(absolute).toString('base64')];
+      } catch {
+        return [entry, 'directory'];
+      }
     });
     const before = snapshot();
     const installer = new WorkBuddyHostInstaller({ homeDir: () => home, enginePath: () => undefined });
@@ -138,13 +149,31 @@ describe('WorkBuddy skills through production delivery boundaries', () => {
     expect(fs.readFileSync(lab.otherPlugin, 'utf8')).toBe('Other plugin data');
   });
 
-  it('reports cache refresh failure rather than preserving a false success', async () => {
+  it('reports cache refresh failure and leaves the previous cache loadable', async () => {
     const lab = await oldCacheLab(true);
-    copyFailure.destination = lab.cache;
+    // The old cache is hook-only (skills + pd-control removed by the lab); the
+    // hook still runs, so a failed refresh must never trade it for a partial copy.
+    copyFailure.staging = true;
     const result = await lab.installer.install(lab.context);
     expect(result.success).toBe(false);
+    // Data first, wording second: a regression must fail on "the old plugin is
+    // gone", not on a message that happened to change.
+    expect(fs.existsSync(path.join(lab.cache, 'scripts/wrapper.cjs')), 'the previous cache must survive a failed refresh').toBe(true);
+    expect(JSON.parse(fs.readFileSync(path.join(lab.cache, '.codebuddy-plugin/plugin.json'), 'utf8')).version).toBe('0.1.0');
+    expect(fs.readFileSync(path.join(lab.cache, 'scripts/wrapper.cjs'), 'utf8').length).toBeGreaterThan(0);
+    expect(JSON.parse(fs.readFileSync(path.join(lab.cache, 'hooks/hooks.json'), 'utf8'))).toHaveProperty('hooks');
+    // No half-written pieces from the failed attempt.
+    expect(fs.existsSync(path.join(lab.cache, 'skills'))).toBe(false);
+    expect(fs.existsSync(path.join(lab.cache, 'scripts/pd-control.cjs'))).toBe(false);
     expect(result.reason).toContain('workbuddy_cache_write_failed');
-    expect(result.reason).toContain('cache copy is incomplete');
+    expect(result.reason).toContain('previous cache payload was left in place');
+    // The registration was not advanced to a payload that never landed.
+    const registryAfter = JSON.parse(fs.readFileSync(lab.paths.registryPath, 'utf8'));
+    expect(registryAfter.plugins['principles-disciple@principles-disciple-market'])
+      .toMatchObject({ version: '0.1.0', installPath: lab.cache });
+    // No staging/backup temp dirs left next to the version cache.
+    expect(fs.readdirSync(path.dirname(lab.paths.cachePluginRoot))
+      .filter((name) => name.startsWith('.pd-staging-') || name.startsWith('.pd-backup-'))).toEqual([]);
     expect(fs.readFileSync(lab.database, 'utf8')).toBe('Owner governance data');
     expect(fs.readFileSync(lab.otherPlugin, 'utf8')).toBe('Other plugin data');
   });
@@ -186,6 +215,38 @@ describe('WorkBuddy skills through production delivery boundaries', () => {
     expect(repeated.configAction).toBe('preserved');
     expect(fs.readFileSync(lab.paths.registryPath, 'utf8')).toBe(registryBytes);
     expect(fs.readFileSync(olderFile, 'utf8')).toBe('Existing project/local version');
+    expect(fs.readFileSync(lab.database, 'utf8')).toBe('Owner governance data');
+  });
+
+  it('uninstall removes only the user scope, keeping project/local registrations and their cache loadable', async () => {
+    // Direct-write path: the engine's own uninstall deletes the whole key (frozen
+    // host fact), so the scope discipline PD owns is proven where PD writes.
+    const lab = await oldCacheLab(false);
+    const olderCache = path.join(lab.paths.cachePluginRoot, '0.0.9');
+    fs.mkdirSync(olderCache, { recursive: true });
+    const olderFile = path.join(olderCache, 'project-owner.txt');
+    fs.writeFileSync(olderFile, 'Existing project/local version');
+    const pluginKey = 'principles-disciple@principles-disciple-market';
+    const registry = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/workbuddy-installed-registry-v2-array.json'), 'utf8'), (_key, value: unknown) => {
+      if (value === 'USER_CACHE') return lab.cache;
+      if (value === 'PROJECT_CACHE') return olderCache;
+      if (value === 'PROJECT_WORKSPACE') return path.join(lab.paths.homeDir, 'project');
+      return value;
+    });
+    fs.writeFileSync(lab.paths.registryPath, JSON.stringify(registry));
+
+    const result = await lab.installer.uninstall({ language: 'en', force: true });
+
+    expect(result.success, result.reason).toBe(true);
+    const after = JSON.parse(fs.readFileSync(lab.paths.registryPath, 'utf8'));
+    expect(after.plugins[pluginKey].map((record: { scope: string }) => record.scope)).toEqual(['project', 'local']);
+    // The user version dir is gone; the version another scope references survives.
+    expect(fs.existsSync(lab.cache)).toBe(false);
+    expect(fs.readFileSync(olderFile, 'utf8')).toBe('Existing project/local version');
+    // Still installed for those scopes, so the host-level enable entry stays.
+    const settings = JSON.parse(fs.readFileSync(lab.paths.settingsPath, 'utf8'));
+    expect(settings.enabledPlugins[pluginKey]).toBe(true);
+    expect(result.preservedPaths).toContain(lab.paths.registryPath);
     expect(fs.readFileSync(lab.database, 'utf8')).toBe('Owner governance data');
   });
 

@@ -42,7 +42,7 @@
  *   result reason; every result carries reason + nextAction.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, cpSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, cpSync, writeFileSync } from 'node:fs';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
 import semver from 'semver';
@@ -77,6 +77,20 @@ export const WORKBUDDY_MARKETPLACE_NAME = 'principles-disciple-market';
 /** Registry/settings key: "principles-disciple@principles-disciple-market". */
 export const WORKBUDDY_PLUGIN_KEY = `${WORKBUDDY_PLUGIN_NAME}@${WORKBUDDY_MARKETPLACE_NAME}`;
 const WORKBUDDY_REQUIRED_SKILLS = ['pd-record-pain', 'pd-status', 'pd-review', 'pd-disable'];
+
+/**
+ * Files the host needs to load this plugin. One list serves both the
+ * "is the cached payload current?" comparison and the "did the staged copy
+ * finish?" proof — two copies of this set would drift apart silently.
+ */
+const WORKBUDDY_PAYLOAD_FILES = [
+  path.join('.codebuddy-plugin', 'plugin.json'),
+  path.join('hooks', 'hooks.json'),
+  path.join('scripts', 'wrapper.cjs'),
+  path.join('scripts', 'pd-control.cjs'),
+  ...WORKBUDDY_REQUIRED_SKILLS.map((skill) => path.join('skills', skill, 'SKILL.md')),
+];
+
 
 /** Engine CLI shipped with WorkBuddy Desktop (probe P01 frozen path). */
 export const WORKBUDDY_ENGINE_RELATIVE = ['resources', 'app.asar.unpacked', 'cli', 'dist', 'codebuddy-lite-wb.mjs'];
@@ -117,6 +131,26 @@ function workbuddyCacheVersionDir(cacheRoot: string, version: string): string | 
   const relative = path.relative(root, target);
   if (relative.length === 0 || path.isAbsolute(relative) || relative === '..' || relative.startsWith(`..${path.sep}`)) return undefined;
   return target;
+}
+
+/** Every scope record PD may have written for its key (native array or legacy object). */
+function installedPluginRecords(value: unknown): Record<string, unknown>[] {
+  return (Array.isArray(value) ? value : [value]).filter(isRecord);
+}
+
+/**
+ * Proof that a *staged* cache payload is complete before it replaces the live
+ * one. Returns the first missing/empty required file, or undefined when the
+ * payload is loadable. Never trusts `cpSync` returning without throwing.
+ */
+function missingWorkbuddyPayloadFile(root: string): string | undefined {
+  for (const file of WORKBUDDY_PAYLOAD_FILES) {
+    try {
+      if (readFileSync(path.join(root, file)).length > 0) continue;
+    } catch { /* unreachable payload — reported below, never guessed */ }
+    return file;
+  }
+  return undefined;
 }
 
 export interface WorkbuddyCommandResult {
@@ -1401,17 +1435,13 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     const entry = userInstalledPluginRecord(rawEntry);
     const cacheDir = workbuddyCacheVersionDir(p.cachePluginRoot, version);
     if (cacheDir === undefined) return false;
-    if (!isRecord(entry) || entry.version !== version || entry.installPath !== cacheDir) return false;
+    // The host may write the same install path in a different (but equivalent)
+    // textual form; comparing raw strings would re-register on every run.
+    const entryInstallPath = typeof entry?.installPath === 'string' ? path.resolve(entry.installPath) : undefined;
+    if (!isRecord(entry) || entry.version !== version || entryInstallPath !== path.resolve(cacheDir)) return false;
     const sourceDir = path.join(p.marketplaceRoot, WORKBUDDY_PLUGIN_NAME);
-    const files = [
-      path.join('.codebuddy-plugin', 'plugin.json'),
-      path.join('hooks', 'hooks.json'),
-      path.join('scripts', 'wrapper.cjs'),
-      path.join('scripts', 'pd-control.cjs'),
-      ...WORKBUDDY_REQUIRED_SKILLS.map((skill) => path.join('skills', skill, 'SKILL.md')),
-    ];
     try {
-      return files.every((file) => readFileSync(path.join(sourceDir, file)).equals(readFileSync(path.join(cacheDir, file))));
+      return WORKBUDDY_PAYLOAD_FILES.every((file) => readFileSync(path.join(sourceDir, file)).equals(readFileSync(path.join(cacheDir, file))));
     } catch {
       return false;
     }
@@ -1492,21 +1522,68 @@ export class WorkBuddyHostInstaller implements HostInstaller {
         ? [existingEntry, userEntry]
         : userEntry;
     nextRegistry.plugins = plugins;
-    const registryWrite = writeHostJsonFileProtected(p.registryPath, JSON.stringify(nextRegistry, null, 2) + '\n');
-    if (!registryWrite.ok) return { ok: false, reason: registryWrite.reason, nextAction: registryWrite.nextAction };
+    // The registry write is DEFERRED until the cache payload is proven in place:
+    // pointing the host at a version whose directory was never materialized
+    // would turn a failed upgrade into an unloadable plugin.
 
     // Versioned cache copy from our marketplace source.
+    //
+    // A same-version refresh REPLACES the payload the host is currently loading,
+    // so the copy never targets the live directory: build it in a staging
+    // sibling, prove it complete, and only then swap. A failure (ENOSPC, EPERM
+    // on a locked file, a partial cpSync) must leave the previous cache intact —
+    // otherwise a failed upgrade trades a working old plugin for a broken one.
+    const cacheParent = path.resolve(path.dirname(p.cachePluginRoot));
+    const stagingDir = path.join(cacheParent, `.pd-staging-${process.pid}-${Date.now()}`);
+    const backupDir = path.join(cacheParent, `.pd-backup-${process.pid}-${Date.now()}`);
+    const swapFailedReason = (error: unknown): string =>
+      `workbuddy_cache_write_failed: ${error instanceof Error ? error.message : String(error)}`;
+    let restoreFailure: string | undefined;
     try {
       if (workbuddyCacheVersionDir(p.cachePluginRoot, version) !== cacheVersionDir) throw new Error('workbuddy_cache_path_invalid');
-      // Other scopes may still reference older versions of this same plugin.
-      rmSync(cacheVersionDir, { recursive: true, force: true });
-      cpSync(path.join(p.marketplaceRoot, WORKBUDDY_PLUGIN_NAME), cacheVersionDir, { recursive: true });
+      // Both temp paths are derived locally, but a future refactor must not be
+      // able to point them outside the marketplace cache parent.
+      if (path.dirname(path.resolve(stagingDir)) !== cacheParent || path.dirname(path.resolve(backupDir)) !== cacheParent) {
+        throw new Error('workbuddy_cache_path_invalid');
+      }
+      rmSync(stagingDir, { recursive: true, force: true });
+      rmSync(backupDir, { recursive: true, force: true });
+      cpSync(path.join(p.marketplaceRoot, WORKBUDDY_PLUGIN_NAME), stagingDir, { recursive: true });
+      const missing = missingWorkbuddyPayloadFile(stagingDir);
+      if (missing !== undefined) throw new Error(`staged payload is incomplete (missing or empty ${missing})`);
+      // Swap: move the live dir aside, move the verified payload in, drop the backup.
+      if (existsSync(cacheVersionDir)) renameSync(cacheVersionDir, backupDir);
+      try {
+        mkdirSync(path.dirname(cacheVersionDir), { recursive: true });
+        renameSync(stagingDir, cacheVersionDir);
+      } catch (swapError) {
+        // Never leave the host without a payload: put the previous one back.
+        try {
+          if (existsSync(backupDir)) renameSync(backupDir, cacheVersionDir);
+        } catch (restoreError) {
+          restoreFailure = restoreError instanceof Error ? restoreError.message : String(restoreError);
+          throw new Error(`workbuddy_cache_swap_failed: ${swapError instanceof Error ? swapError.message : String(swapError)}; restoring the previous cache also failed`, { cause: restoreError });
+        }
+        throw swapError;
+      }
+      rmSync(backupDir, { recursive: true, force: true });
     } catch (error) {
+      // The live cache is untouched (or restored); only our temp dir may remain.
+      try { rmSync(stagingDir, { recursive: true, force: true }); } catch { /* reported below */ }
+      const cacheState = restoreFailure === undefined
+        ? 'the previous cache payload was left in place'
+        : `the previous cache payload is preserved at ${backupDir} but could NOT be restored in place (${restoreFailure})`;
       return {
         ok: false,
-        reason: `workbuddy_cache_write_failed: ${error instanceof Error ? error.message : String(error)}. Settings and registry were updated; the cache copy is incomplete.`,
+        reason: `${swapFailedReason(error)}. Settings were updated and the registration entry was NOT changed; ${cacheState}.`,
         nextAction: `Re-run the installer (idempotent), or run the engine command manually: node <engine> plugin install ${WORKBUDDY_PLUGIN_KEY}.`,
       };
+    }
+
+    // Cache is verified and in place — only now does the host get pointed at it.
+    const registryWrite = writeHostJsonFileProtected(p.registryPath, JSON.stringify(nextRegistry, null, 2) + '\n');
+    if (!registryWrite.ok) {
+      return { ok: false, reason: registryWrite.reason, nextAction: registryWrite.nextAction };
     }
     return { ok: true, mode: 'direct-write', settingsAction, engineNote };
   }
@@ -1566,7 +1643,9 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     }
 
     // 3. Direct-write removal of the frozen-format entries when the engine did
-    //    not (or could not) remove them. Only OUR key is touched.
+    //    not (or could not) remove them. Only OUR key is touched, and only the
+    //    USER scope: a project/local/managed record under the same key owns its
+    //    own installPath and survives this uninstall.
     const afterEngine = this.detectDetails();
     if (afterEngine.registered || afterEngine.pluginEnabled) {
       const removal = this.directWriteRemoval();
@@ -1582,18 +1661,50 @@ export class WorkBuddyHostInstaller implements HostInstaller {
           nextAction: removal.nextAction,
         };
       }
-      removedPaths.push(p.settingsPath, p.registryPath);
+      if (removal.wroteSettings) removedPaths.push(p.settingsPath);
+      if (removal.wroteRegistry) removedPaths.push(p.registryPath);
+      if (removal.preservedScopes.length > 0) {
+        preservedPaths.push(p.registryPath);
+        notes.push(`preserved ${removal.preservedScopes.join('/')} scope registration(s) under ${WORKBUDDY_PLUGIN_KEY}; only the user scope was uninstalled.`);
+      }
     }
 
-    // 4. Remove OUR cache subtree (provable: cache/<OUR_MARKETPLACE>/<OUR_PLUGIN>).
+    // 4. Remove only cache versions that no surviving scope record references.
+    //    Another scope may still load an older version from this same root, so
+    //    the version dirs are swept individually instead of deleting the root.
     if (existsSync(p.cachePluginRoot)) {
+      const referenced = this.referencedCacheDirs();
+      let entries: string[] = [];
       try {
-        rmSync(p.cachePluginRoot, { recursive: true, force: true });
-        removedPaths.push(p.cachePluginRoot);
+        entries = readdirSync(p.cachePluginRoot);
       } catch (error) {
         failedPaths.push(p.cachePluginRoot);
         preservedPaths.push(p.cachePluginRoot);
-        notes.push(`cache removal failed: ${error instanceof Error ? error.message : String(error)}`);
+        notes.push(`cache listing failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      for (const name of entries) {
+        const versionDir = path.join(p.cachePluginRoot, name);
+        if (referenced.has(path.resolve(versionDir))) {
+          preservedPaths.push(versionDir);
+          continue;
+        }
+        try {
+          rmSync(versionDir, { recursive: true, force: true });
+          removedPaths.push(versionDir);
+        } catch (error) {
+          failedPaths.push(versionDir);
+          preservedPaths.push(versionDir);
+          notes.push(`cache removal failed for ${versionDir}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      // Drop the root itself only once nothing survives inside it.
+      try {
+        if (existsSync(p.cachePluginRoot) && readdirSync(p.cachePluginRoot).length === 0) {
+          rmSync(p.cachePluginRoot, { recursive: true, force: true });
+          removedPaths.push(p.cachePluginRoot);
+        }
+      } catch {
+        notes.push(`cache root cleanup skipped: ${p.cachePluginRoot} is not removable yet.`);
       }
     }
 
@@ -1636,30 +1747,69 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     };
   }
 
-  /** Remove only OUR entries from settings.json + installed_plugins.json (frozen formats). */
-  private directWriteRemoval(): { ok: true } | { ok: false; reason: string; nextAction: string } {
+  /**
+   * Remove the USER-scope registration only (frozen formats). Other scopes of
+   * the same key are host-owned: dropping the whole key would delete a
+   * project/local/managed install PD never owned.
+   */
+  private directWriteRemoval():
+    | { ok: true; wroteSettings: boolean; wroteRegistry: boolean; preservedScopes: string[] }
+    | { ok: false; reason: string; nextAction: string } {
     const p = this.paths();
     const settings = readHostJsonFile(p.settingsPath);
     if (!settings.ok) return { ok: false, reason: settings.reason, nextAction: settings.nextAction };
-    if (settings.existed && isRecord(settings.value?.enabledPlugins) && Object.hasOwn(settings.value.enabledPlugins, WORKBUDDY_PLUGIN_KEY)) {
+    const registry = readHostJsonFile(p.registryPath);
+    if (!registry.ok) return { ok: false, reason: registry.reason, nextAction: registry.nextAction };
+
+    const registered = registry.existed && isRecord(registry.value?.plugins)
+      ? registry.value.plugins[WORKBUDDY_PLUGIN_KEY] : undefined;
+    const allRecords = installedPluginRecords(registered);
+    const remaining = allRecords.filter((record) => !(record.scope === 'user' && record.projectPath === undefined));
+    const preservedScopes = [...new Set(remaining
+      .map((record) => (typeof record.scope === 'string' && record.scope.length > 0 ? record.scope : 'unknown')))];
+    const removedUserRecord = remaining.length !== allRecords.length;
+
+    // enabledPlugins is a single host-level value for the key: clear it only
+    // when no scope remains installed.
+    let wroteSettings = false;
+    if (remaining.length === 0
+      && settings.existed && isRecord(settings.value?.enabledPlugins)
+      && Object.hasOwn(settings.value.enabledPlugins, WORKBUDDY_PLUGIN_KEY)) {
       const nextSettings: Record<string, unknown> = { ...settings.value };
       const enabledPlugins = { ...nextSettings.enabledPlugins as Record<string, unknown> };
       delete enabledPlugins[WORKBUDDY_PLUGIN_KEY];
       nextSettings.enabledPlugins = enabledPlugins;
       const write = writeHostJsonFileProtected(p.settingsPath, JSON.stringify(nextSettings, null, 2) + '\n');
       if (!write.ok) return { ok: false, reason: write.reason, nextAction: write.nextAction };
+      wroteSettings = true;
     }
-    const registry = readHostJsonFile(p.registryPath);
-    if (!registry.ok) return { ok: false, reason: registry.reason, nextAction: registry.nextAction };
-    if (registry.existed && isRecord(registry.value?.plugins) && Object.hasOwn(registry.value.plugins, WORKBUDDY_PLUGIN_KEY)) {
+
+    let wroteRegistry = false;
+    if (removedUserRecord) {
       const nextRegistry: Record<string, unknown> = { ...registry.value };
       const plugins = { ...nextRegistry.plugins as Record<string, unknown> };
-      delete plugins[WORKBUDDY_PLUGIN_KEY];
+      if (remaining.length === 0) delete plugins[WORKBUDDY_PLUGIN_KEY];
+      else plugins[WORKBUDDY_PLUGIN_KEY] = Array.isArray(registered) ? remaining : remaining[0];
       nextRegistry.plugins = plugins;
       const write = writeHostJsonFileProtected(p.registryPath, JSON.stringify(nextRegistry, null, 2) + '\n');
       if (!write.ok) return { ok: false, reason: write.reason, nextAction: write.nextAction };
+      wroteRegistry = true;
     }
-    return { ok: true };
+    return { ok: true, wroteSettings, wroteRegistry, preservedScopes };
+  }
+
+  /** installPaths still referenced by ANY surviving scope record of our key. */
+  private referencedCacheDirs(): Set<string> {
+    const p = this.paths();
+    const registry = readHostJsonFile(p.registryPath);
+    const referenced = new Set<string>();
+    if (!registry.ok || !isRecord(registry.value?.plugins)) return referenced;
+    for (const record of installedPluginRecords(registry.value.plugins[WORKBUDDY_PLUGIN_KEY])) {
+      if (typeof record.installPath === 'string' && record.installPath.length > 0) {
+        referenced.add(path.resolve(record.installPath));
+      }
+    }
+    return referenced;
   }
 
   // ─── detect ───────────────────────────────────────────────────────────────
