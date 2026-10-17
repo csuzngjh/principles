@@ -417,7 +417,13 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
       this.config.systemPrompt,
     );
 
+    // Pi 1.2 (agent-core 0.86+): AgentContext.systemPrompt is gone — the system
+    // prompt rides the transcript as a leading SystemMessage, and runAgentLoop
+    // merges the tool declarations into it (declareToolChanges).
     const prompts: AgentMessage[] = [
+      ...(systemPrompt !== undefined && systemPrompt.length > 0
+        ? [{ role: 'system' as const, content: systemPrompt, timestamp: 0 }]
+        : []),
       { role: 'user', content: messageContent, timestamp: Date.now() },
     ];
 
@@ -445,9 +451,12 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
     };
 
     const tools = buildArtificerL2Tools(toolContext);
+    // Pi 1.2: prompts carry the full input (system + user). context.messages
+    // MUST stay empty — runAgentLoop builds [...context.messages, ...prompts],
+    // so passing prompts here (the 0.85 shape) duplicated the user message in
+    // every LLM request.
     const agentContext = {
-      systemPrompt: systemPrompt ?? '',
-      messages: prompts,
+      messages: [] as AgentMessage[],
       tools,
     };
 
@@ -485,8 +494,8 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
         ? { reasoning: this.config.reasoning }
         : {}),
       convertToLlm: (msgs: AgentMessage[]): Message[] => msgs.map((m): Message => {
-        if (m.role === 'user' || m.role === 'assistant' || m.role === 'toolResult') {
-          return m as Message;
+        if (m.role === 'user' || m.role === 'assistant' || m.role === 'toolResult' || m.role === 'system') {
+          return m;
         }
         throw new PDRuntimeError('output_invalid', `Artificer L2 convertToLlm encountered an unsupported message role: ${String((m as { role?: string }).role)}`);
       }),
@@ -496,9 +505,18 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
         }
         return undefined;
       },
-      shouldStopAfterTurn: () => {
+      // Pi 1.2 (0.87): finishTurn replaces shouldStopAfterTurn and ALSO fires on
+      // error/aborted turns (0.85 never called the hook there). Guard those
+      // first — before turnCount increments — to keep the 0.85 turn accounting
+      // and the hard-exit behavior intact.
+      finishTurn: (turn) => {
+        if (turn.message.stopReason === 'error' || turn.message.stopReason === 'aborted') {
+          return undefined;
+        }
         turnCount += 1;
-        return outputCapture.output !== null || turnCount >= maxTurns;
+        return outputCapture.output !== null || turnCount >= maxTurns
+          ? { action: 'end' }
+          : undefined;
       },
       // EP002-R3 (live evidence, glm-5.3-flash): the model sometimes ends its
       // turn with a plain-text draft instead of a tool call, which makes the
@@ -552,10 +570,11 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
 
     let loopError: string | null = null;
     // EP002-R3: streamAssistantResponse reports LLM-call failures as a message
-    // with stopReason 'error'/'aborted' and the agent loop then ends WITHOUT
-    // calling shouldStopAfterTurn — previously invisible (turnCount frozen,
-    // no nudge, generic failure reason). Capture it here so the underlying
-    // provider error surfaces loudly (rc-9) instead of a generic message.
+    // with stopReason 'error'/'aborted' and the agent loop then hard-exits —
+    // previously invisible (Pi 1.2 fires finishTurn there, but our guard
+    // ignores error/aborted turns, so turnCount stays frozen, no nudge,
+    // generic failure reason). Capture it here so the underlying provider
+    // error surfaces loudly (rc-9) instead of a generic message.
     let lastErrorMessage: string | null = null;
     let lastStopReason: string | null = null;
     let transcript: AgentMessage[] = [];

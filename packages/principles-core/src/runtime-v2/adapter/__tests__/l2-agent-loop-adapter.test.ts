@@ -12,7 +12,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // vi.hoisted runs before vi.mock factories, so shared mutable state lives here.
-type LoopCfg = { shouldStopAfterTurn?: () => boolean; beforeToolCall?: (ctx: { toolCall: { name: string } }) => Promise<unknown> };
+type LoopCfg = { finishTurn?: (turn: { message: { stopReason: string } }) => unknown; beforeToolCall?: (ctx: { toolCall: { name: string } }) => Promise<unknown> };
 type LoopImpl = ((...args: never[]) => Promise<unknown[]>) | null;
 
 const hoisted = vi.hoisted((): {
@@ -134,7 +134,7 @@ describe('PRI-419 L2AgentLoopAdapter — submit_output capture (primary extracti
     const adapter = makeAdapter();
     // Simulate: the tool factory's submit_output execute() writes to outputCapture.
     // The adapter reads outputCapture.output after the loop. We can't directly set the
-    // capture from here, so we verify via the shouldStopAfterTurn hook: after the loop
+    // capture from here, so we verify via the finishTurn hook: after the loop
     // returns, the adapter checks outputCapture. To exercise the capture path, we make
     // runAgentLoop invoke the built tools' submit_output before returning.
     hoisted.impl = async (_p: unknown, context: { tools?: { name: string; execute: (id: string, params: unknown) => Promise<unknown> }[] }) => {
@@ -151,7 +151,7 @@ describe('PRI-419 L2AgentLoopAdapter — submit_output capture (primary extracti
     expect(output?.payload).toEqual(VALID_DREAMER_OUTPUT);
   });
 
-  it('shouldStopAfterTurn returns true after output is captured', async () => {
+  it('finishTurn ends after output is captured; error/aborted turns never count (Pi 1.2)', async () => {
     const adapter = makeAdapter({ maxTurns: 5 });
     hoisted.impl = async (_p: unknown, context: { tools?: { name: string; execute: (id: string, params: unknown) => Promise<unknown> }[] }) => {
       const submit = context.tools?.find(t => t.name === 'submit_output');
@@ -162,35 +162,41 @@ describe('PRI-419 L2AgentLoopAdapter — submit_output capture (primary extracti
     };
 
     await adapter.startRun(makeStartRun());
-    const stopFn = hoisted.lastLoopConfig.shouldStopAfterTurn;
-    expect(typeof stopFn).toBe('function');
-    if (!stopFn) return;
-    // After submit_output captured output, the next shouldStopAfterTurn call returns true.
-    expect(stopFn()).toBe(true);
+    const finishFn = hoisted.lastLoopConfig.finishTurn;
+    expect(typeof finishFn).toBe('function');
+    if (!finishFn) return;
+    // After submit_output captured output, the next finishTurn call ends the loop.
+    expect(finishFn({ message: { stopReason: 'stop' } })).toEqual({ action: 'end' });
+    // Pi 1.2 fires finishTurn on error/aborted turns too (0.85 never called the
+    // hook there) — the guard must return undefined and NOT count the turn.
+    expect(finishFn({ message: { stopReason: 'error' } })).toBeUndefined();
+    expect(finishFn({ message: { stopReason: 'aborted' } })).toBeUndefined();
   });
 });
 
 describe('PRI-419 L2AgentLoopAdapter — maxTurns cap', () => {
-  it('shouldStopAfterTurn returns false below maxTurns and true at/above, WITHOUT submit_output', async () => {
+  it('finishTurn continues below maxTurns and ends at/above, WITHOUT submit_output', async () => {
     // Verifies the turn-cap path INDEPENDENTLY of output capture: submit_output is NOT
     // called, so stopping is driven purely by turnCount reaching maxTurns. Fallback
     // extraction (assistant message contains JSON) lets startRun succeed.
-    // The mocked runAgentLoop does NOT call shouldStopAfterTurn, so turnCount starts at 0.
-    // With maxTurns=5: calls 1-4 (turns 1-4, < 5) → false; call 5 (turn 5, >= 5) → true.
+    // The mocked runAgentLoop does NOT call finishTurn, so turnCount starts at 0.
+    // With maxTurns=5: calls 1-4 (turns 1-4, < 5) → continue; call 5 (turn 5, >= 5) → end.
     const adapter = makeAdapter({ maxTurns: 5 });
     hoisted.mockReturn = [
       { role: 'assistant', content: JSON.stringify(VALID_DREAMER_OUTPUT) },
     ];
 
     await adapter.startRun(makeStartRun());
-    const stopFn = hoisted.lastLoopConfig.shouldStopAfterTurn;
-    if (!stopFn) { expect.fail('shouldStopAfterTurn not wired'); return; }
-    expect(stopFn()).toBe(false); // turn 1
-    expect(stopFn()).toBe(false); // turn 2
-    expect(stopFn()).toBe(false); // turn 3
-    expect(stopFn()).toBe(false); // turn 4
-    expect(stopFn()).toBe(true);  // turn 5 (>= maxTurns)
-    expect(stopFn()).toBe(true);  // turn 6 (still >= maxTurns)
+    const finishFn = hoisted.lastLoopConfig.finishTurn;
+    if (!finishFn) { expect.fail('finishTurn not wired'); return; }
+    expect(finishFn({ message: { stopReason: 'stop' } })).toBeUndefined(); // turn 1
+    expect(finishFn({ message: { stopReason: 'stop' } })).toBeUndefined(); // turn 2
+    expect(finishFn({ message: { stopReason: 'stop' } })).toBeUndefined(); // turn 3
+    expect(finishFn({ message: { stopReason: 'stop' } })).toBeUndefined(); // turn 4
+    expect(finishFn({ message: { stopReason: 'stop' } })).toEqual({ action: 'end' }); // turn 5 (>= maxTurns)
+    expect(finishFn({ message: { stopReason: 'stop' } })).toEqual({ action: 'end' }); // turn 6 (still >= maxTurns)
+    // 0.85 parity: an error turn is a hard exit and never counts toward the cap.
+    expect(finishFn({ message: { stopReason: 'error' } })).toBeUndefined();
   });
 });
 
@@ -482,25 +488,34 @@ describe('PRI-419 L2AgentLoopAdapter — runs Map is bounded (P1-1)', () => {
 // ── PRI-633 — layered systemPrompt placement ──
 
 describe('PRI-633 — layered systemPrompt placement', () => {
-  it('agentContext.systemPrompt = base → tool protocol → profile append; user message carries only task data', async () => {
-    let captured: { systemPrompt?: string; messages: { role: string; content: unknown }[] } | undefined;
-    hoisted.impl = async (_p: unknown, context: unknown) => {
-      captured = context as { systemPrompt?: string; messages: { role: string; content: unknown }[] };
+  it('system prompt rides the transcript (Pi 1.2): prompts[0] = base → tool protocol → profile append; user message carries only task data', async () => {
+    let capturedPrompts: { role: string; content: unknown }[] | undefined;
+    let capturedContext: Record<string, unknown> | undefined;
+    hoisted.impl = async (p: unknown, context: unknown) => {
+      capturedPrompts = p as { role: string; content: unknown }[];
+      capturedContext = context as Record<string, unknown>;
       return [{ role: 'assistant', content: JSON.stringify(VALID_DREAMER_OUTPUT) }];
     };
     const adapter = makeAdapter({ systemPrompt: 'PROFILE APPEND LAYER' });
     await adapter.startRun(makeStartRun({ systemPrompt: 'BASE ROLE LAYER' }));
 
-    const sp = captured?.systemPrompt ?? '';
+    // Pi 1.2: AgentContext has no systemPrompt — the layered prompt is the
+    // leading transcript system message.
+    expect(capturedPrompts?.[0]?.role).toBe('system');
+    const sp = typeof capturedPrompts?.[0]?.content === 'string' ? capturedPrompts[0].content : '';
     expect(sp).toContain('BASE ROLE LAYER');
     expect(sp).toContain('--- Tool protocol (L2 mode) ---');
     expect(sp).toContain('PROFILE APPEND LAYER');
     expect(sp.indexOf('BASE ROLE LAYER')).toBeLessThan(sp.indexOf('--- Tool protocol'));
     expect(sp.indexOf('--- Tool protocol')).toBeLessThan(sp.indexOf('PROFILE APPEND LAYER'));
     // The user message no longer carries the tool protocol (PRI-633).
-    const first = captured?.messages[0];
+    const first = capturedPrompts?.[1];
     expect(first?.role).toBe('user');
     expect(first?.content).toBe('{"prompt":"generate candidates"}');
+    // Pi 1.2: agentContext must not duplicate the prompts (0.85 shape duplicated
+    // the user message in every LLM request).
+    expect(Object.hasOwn(capturedContext ?? {}, 'systemPrompt')).toBe(false);
+    expect(capturedContext?.messages).toEqual([]);
   });
 
   it('L1 fallback Context keeps base + profile append but NOT the tool protocol', async () => {

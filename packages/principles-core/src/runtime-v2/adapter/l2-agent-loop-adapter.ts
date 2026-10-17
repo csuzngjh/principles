@@ -6,9 +6,10 @@
  * completeSimple path in PiAiRuntimeAdapter.
  *
  * Why the low-level runAgentLoop() and not the Agent class (review P0-1):
- *   Agent.createLoopConfig() does NOT forward shouldStopAfterTurn (agent.ts:422-449),
- *   which is exactly the hook we need to (a) cap turns and (b) terminate the loop when
- *   submit_output captures output. runAgentLoop gives us shouldStopAfterTurn +
+ *   Agent.createLoopConfig() does NOT forward the turn-stop hook (agent.ts,
+ *   shouldStopAfterTurn in Pi 0.85 / finishTurn in Pi 1.2), which is exactly
+ *   the hook we need to (a) cap turns and (b) terminate the loop when
+ *   submit_output captures output. runAgentLoop gives us finishTurn +
  *   beforeToolCall + tools + abort signal in one config, and returns the final
  *   transcript directly. The Agent class adds steering/followup/session machinery the
  *   headless dreamer runner does not need.
@@ -17,7 +18,7 @@
  *   agent-loop's shouldTerminateToolBatch uses .every(r => r.result.terminate) over the
  *   whole batch (agent-loop.ts:544). If the model calls read_principles + submit_output
  *   in the same turn, the batch does not terminate. We instead stop via
- *   shouldStopAfterTurn checking the L2OutputCapture, which is turn-granular.
+ *   finishTurn checking the L2OutputCapture, which is turn-granular.
  *
  * Output extraction:
  *   1. Primary: the params captured by the submit_output tool (deterministic, the
@@ -168,7 +169,7 @@ export function resolveL2Model(
   for (const catalogProvider of knownProviders) {
     if (catalogProvider === provider) continue;
     // @ts-expect-error — runtime strings are acceptable against the literal-typed signature
-    const catalogModel = getModel(catalogProvider as KnownProvider, modelId);
+    const catalogModel = getModel(catalogProvider, modelId);
     if (!catalogModel || catalogModel.api !== 'openai-completions') continue;
     if (isProtocolComplete(catalogModel)) {
       return { ...catalogModel, provider, baseUrl };
@@ -406,7 +407,14 @@ export class L2AgentLoopAdapter implements PDRuntimeAdapter {
     // L1 fallback variant: base + profile append, NO tool protocol (no tools there).
     const baseSystemPrompt = mergeSystemPromptLayers(input.systemPrompt, this.config.systemPrompt);
 
+    // Pi 1.2 (agent-core 0.86+): AgentContext.systemPrompt is gone — the system
+    // prompt rides the transcript as a leading SystemMessage, and runAgentLoop
+    // merges the tool declarations into it (declareToolChanges). Seeding it here
+    // keeps the PRI-633 layered prompt on the 1.2 loop.
     const prompts: AgentMessage[] = [
+      ...(systemPrompt !== undefined && systemPrompt.length > 0
+        ? [{ role: 'system' as const, content: systemPrompt, timestamp: 0 }]
+        : []),
       { role: 'user', content: messageContent, timestamp: Date.now() },
     ];
 
@@ -455,9 +463,12 @@ export class L2AgentLoopAdapter implements PDRuntimeAdapter {
       };
 
       const tools = buildDreamerL2Tools(toolContext);
+      // Pi 1.2: prompts carry the full input (system + user). context.messages
+      // MUST stay empty — runAgentLoop builds [...context.messages, ...prompts],
+      // so passing prompts here (the 0.85 shape) duplicated the user message in
+      // every LLM request.
       const agentContext = {
-        systemPrompt: systemPrompt ?? '',
-        messages: prompts,
+        messages: [] as AgentMessage[],
         tools,
       };
 
@@ -465,8 +476,8 @@ export class L2AgentLoopAdapter implements PDRuntimeAdapter {
         model: resolveL2Model(this.config.provider, this.config.model, this.config.baseUrl),
         apiKey,
         convertToLlm: (msgs: AgentMessage[]): Message[] => msgs.map((m): Message => {
-          if (m.role === 'user' || m.role === 'assistant' || m.role === 'toolResult') {
-            return m as Message;
+          if (m.role === 'user' || m.role === 'assistant' || m.role === 'toolResult' || m.role === 'system') {
+            return m;
           }
           throw new PDRuntimeError('output_invalid', `L2 convertToLlm encountered an unsupported message role: ${String((m as { role?: string }).role)}`);
         }),
@@ -476,9 +487,18 @@ export class L2AgentLoopAdapter implements PDRuntimeAdapter {
           }
           return undefined;
         },
-        shouldStopAfterTurn: () => {
+        // Pi 1.2 (0.87): finishTurn replaces shouldStopAfterTurn. Semantics that
+        // matter here: it ALSO fires on error/aborted turns (0.85 never called
+        // the hook there), so guard those first — before turnCount increments —
+        // to keep the 0.85 turn accounting and the hard-exit behavior intact.
+        finishTurn: (turn) => {
+          if (turn.message.stopReason === 'error' || turn.message.stopReason === 'aborted') {
+            return undefined;
+          }
           turnCount += 1;
-          return outputCapture.output !== null || turnCount >= maxTurns;
+          return outputCapture.output !== null || turnCount >= maxTurns
+            ? { action: 'end' }
+            : undefined;
         },
       };
 

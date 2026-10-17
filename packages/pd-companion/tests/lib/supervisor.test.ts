@@ -5,6 +5,8 @@ import {
   nextRestartDelayMs,
   MAX_RESTART_ATTEMPTS,
   STABILITY_WINDOW_MS,
+  ENTRY_WAIT_DELAYS_MS,
+  ENTRY_WAIT_TOTAL_MS,
 } from '../../src/lib/supervisor.js';
 
 /** Fake clock: quick crashes (< STABILITY_WINDOW) accumulate attempts. */
@@ -165,6 +167,99 @@ describe('ConsoleSupervisor — crash loop protection (EP-03)', () => {
     expect(sup.requestRestart()).toBe(true);
     sup.onLaunchStarted({ url: 'http://127.0.0.1:3100', port: 3100, serverPid: 1 });
     expect(sup.requestRestart()).toBe(false);
+  });
+});
+
+describe('ConsoleSupervisor — entry-wait ladder for the update race (PRI-1012)', () => {
+  const entryPath = String.raw`C:\Users\admin\.pd\runtime\pd-cli\dist\index.js`;
+
+  it('waits a missing entry out with the full ladder, then degrades with the waited total', () => {
+    const sup = new ConsoleSupervisor();
+    sup.start();
+    const delays = ENTRY_WAIT_DELAYS_MS.map(() => sup.onEntryMissing(`stat ENOENT: ${entryPath}`));
+    expect(delays).toEqual([...ENTRY_WAIT_DELAYS_MS]);
+    expect(sup.getState().kind).toBe('restarting');
+
+    // budget exhausted → degraded, and the detail says how long it actually waited
+    expect(sup.onEntryMissing(`stat ENOENT: ${entryPath}`)).toBeUndefined();
+    const s = sup.getState();
+    expect(s.kind).toBe('degraded');
+    if (s.kind === 'degraded') {
+      expect(s.reason).toBe('launch_failed');
+      expect(s.detail).toContain(`${ENTRY_WAIT_DELAYS_MS.length} waits`);
+      expect(s.detail).toContain(`${ENTRY_WAIT_TOTAL_MS / 1000}s`);
+    }
+  });
+
+  it('burning the whole entry budget does NOT burn the crash-loop budget', () => {
+    const clock = makeClock();
+    const sup = new ConsoleSupervisor(clock.now);
+    sup.start();
+    for (const delay of ENTRY_WAIT_DELAYS_MS) expect(sup.onEntryMissing('stat ENOENT')).toBe(delay);
+    // the update chain finishes and the console launches
+    sup.onLaunchStarted({ url: 'http://127.0.0.1:3100', port: 3100, serverPid: 42 });
+    clock.advance(500); // quick crash — must still get the FULL crash ladder
+    expect(sup.onServerExit(1)).toBe(1_000);
+    sup.onLaunchStarted({ url: 'http://127.0.0.1:3100', port: 3100, serverPid: 43 });
+    clock.advance(500);
+    expect(sup.onServerExit(1)).toBe(2_000);
+  });
+
+  it('a launch result resets the entry budget for the next episode', () => {
+    const sup = new ConsoleSupervisor();
+    sup.start();
+    sup.onEntryMissing('stat ENOENT');
+    sup.onEntryMissing('stat ENOENT');
+    sup.onLaunchStarted({ url: 'http://127.0.0.1:3100', port: 3100, serverPid: 42 });
+    sup.markIntentionalStop();
+    sup.onServerExit(0);
+    sup.start();
+    // a later episode starts from the top of the ladder, not where it left off
+    expect(sup.onEntryMissing('stat ENOENT')).toBe(ENTRY_WAIT_DELAYS_MS[0]);
+  });
+
+  it('a manual restart resets the entry budget after exhaustion', () => {
+    const sup = new ConsoleSupervisor();
+    sup.start();
+    for (const delay of ENTRY_WAIT_DELAYS_MS) expect(sup.onEntryMissing('stat ENOENT')).toBe(delay);
+    expect(sup.onEntryMissing('stat ENOENT')).toBeUndefined(); // degraded now
+    // restartFromTray() is stopServer() + start(); requestRestart() has no
+    // production caller, so this asserts the path the Owner can actually click.
+    expect(sup.start()).toBe(true);
+    expect(sup.entryWaitsLeft()).toBe(ENTRY_WAIT_DELAYS_MS.length);
+    expect(sup.onEntryMissing('stat ENOENT')).toBe(ENTRY_WAIT_DELAYS_MS[0]);
+  });
+
+  it('the remaining wait budget is readable while a wait is pending', () => {
+    const sup = new ConsoleSupervisor();
+    sup.start();
+    expect(sup.entryWaitsLeft()).toBe(ENTRY_WAIT_DELAYS_MS.length);
+    sup.onEntryMissing('stat ENOENT');
+    expect(sup.entryWaitsLeft()).toBe(ENTRY_WAIT_DELAYS_MS.length - 1);
+    for (const delay of ENTRY_WAIT_DELAYS_MS.slice(1)) expect(sup.onEntryMissing('stat ENOENT')).toBe(delay);
+    expect(sup.onEntryMissing('stat ENOENT')).toBeUndefined();
+    expect(sup.entryWaitsLeft()).toBe(0); // never negative once the episode degraded
+  });
+
+  it('refuses to schedule a wait when no launch result is awaited', () => {
+    const idle = new ConsoleSupervisor();
+    expect(idle.onEntryMissing('stat ENOENT')).toBeUndefined();
+    expect(idle.getState().kind).toBe('idle');
+
+    const degraded = new ConsoleSupervisor();
+    degraded.start();
+    degraded.onSpawnError('EACCES', 'spawn refused');
+    expect(degraded.onEntryMissing('stat ENOENT')).toBeUndefined();
+    const s = degraded.getState();
+    expect(s.kind === 'degraded' && s.detail).toBe('spawn refused'); // not overwritten
+  });
+
+  it('the ladder outlasts the update window measured on the 2.3.6 install (1m50s)', () => {
+    // Evidence: version_change_restart at 14:11:29.004Z vs journal `staged` at
+    // 14:13:18.941Z. Shorten the ladder below that window and the race this
+    // ticket is about comes back.
+    expect(ENTRY_WAIT_TOTAL_MS).toBeGreaterThanOrEqual(110_000);
+    expect(ENTRY_WAIT_TOTAL_MS).toBe(ENTRY_WAIT_DELAYS_MS.reduce((a, b) => a + b, 0));
   });
 });
 
