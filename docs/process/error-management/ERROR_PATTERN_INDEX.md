@@ -212,8 +212,8 @@ For a task, pick the matching pattern cards, read the listed ERR records, and st
 
 - **Use when**: implementing retries, repairs, multi-attempt validation, evidence timelines, or iterative LLM repair.
 - **Failure mode**: current, next, and recorded state are conflated, so telemetry and repair prompts use stale errors.
-- **Must check**: each iteration reads fresh errors; records are written with current-iteration data; next-attempt state is not stored as current-attempt evidence.
-- **Representative ERRs**: ERR-018, ERR-067.
+- **Must check**: each iteration reads fresh errors; records are written with current-iteration data; next-attempt state is not stored as current-attempt evidence; **and the loop must be able to change the REQUEST, not only wait: an error class whose branches choose only "back off" or "give up" re-sends a payload the callee deterministically rejected, so N attempts are N copies of the same failure and the terminal error reads like instability (ERR-161)**.
+- **Representative ERRs**: ERR-018, ERR-067, ERR-161.
 - **Automation target**: tests with two distinct failing attempts and assertions on per-attempt recorded errors.
 
 ### EP-06 Source of Truth and Generated Artifacts
