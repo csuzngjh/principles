@@ -44,7 +44,7 @@ describe('pre-push/CI gate wiring', () => {
   it('does not run verify:merge on every push', () => {
     const hook = fs.readFileSync(path.join(root, 'lefthook.yml'), 'utf8');
     const push = hook.split('pre-push:')[1];
-    expect(push).toContain('run: node scripts/dev/check-dev-worktree.mjs');
+    expect(push).toContain('run: node scripts/dev/check-dev-worktree.mjs --fast');
     expect(push).toContain('run: node scripts/dev/pre-push-fast.mjs');
     expect(push).not.toContain('run: npm run verify:merge');
   });
