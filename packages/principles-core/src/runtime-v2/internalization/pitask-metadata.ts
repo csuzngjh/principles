@@ -445,7 +445,110 @@ export interface PITaskMetadata {
    * same semantics as completionIntent/ownerEvidenceSelection).
    */
   failedTaskRecoveries?: readonly FailedTaskRecoveryAuditRecord[];
+  /**
+   * SPEC-RULECODE-QUALITY-001 A1 (PRI-995): versioned DERIVED evidence of the
+   * deterministic intent-basis verification that ran before artificer
+   * generation (code_tool_hook channel). Written only by
+   * preflightArtificerIntentBasis on the executable verdict; binds the
+   * material digests it verified (scribe artifact / intent contract /
+   * execution conditions). It is evidence, NEVER a pass token — the
+   * preflight re-derives the assessment from the scribe artifact on every
+   * generation attempt, so any material change invalidates a prior record
+   * (Q13/Q20). Present-but-malformed fails the whole metadata (rc-3, same
+   * semantics as ownerEvidenceSelection).
+   */
+  intentBasisVerification?: IntentBasisVerificationRecordV1;
+  /**
+   * SPEC-RULECODE-QUALITY-001 §9 (PRI-995): bounded technical-retry state for
+   * transient SOURCE faults (artifact/trajectory store I/O) on pre-model
+   * gates — distinct from Owner-fault stop points. consecutiveFailures caps
+   * at 3; after the 3rd consecutive fault the task leaves auto-retry via a
+   * needs_human_review terminal with reasonCode source_fault_persistent
+   * (never an Owner label). skipCycles decrements once per consumer-cycle
+   * encounter (backoff 1 then 2 cycles), surviving restarts because it lives
+   * in state.db. A later successful read clears the record (history stays in
+   * telemetry events). Present-but-malformed fails the whole metadata (rc-3).
+   */
+  sourceFaultBackoff?: SourceFaultBackoffRecordV1;
 }
+
+/**
+ * SPEC-RULECODE-QUALITY-001 A1: the versioned derived verification record.
+ * checkedBy is always the deterministic preflight — an agent/LLM semantic
+ * judgment is NEVER recorded as the verifier of its own generation gate.
+ */
+export interface IntentBasisVerificationRecordV1 {
+  readonly version: 1;
+  readonly checkedAt: string;
+  readonly checkedBy: 'deterministic-preflight';
+  readonly sourceScribeArtifactId: string;
+  /** sha256:<hex> over the scribe artifact contentJson as verified. */
+  readonly scribeArtifactDigest: string;
+  /** sha256:<hex> over the extracted intentContract (absent when the contract was absent). */
+  readonly intentContractDigest?: string;
+  /** sha256:<hex> over the extracted executionConditions (absent when no conditions declared). */
+  readonly executionConditionsDigest?: string;
+  readonly requiredFacts: readonly { readonly factKind: string; readonly resolution: TrustedFactResolutionKind }[];
+  readonly result: 'executable';
+}
+
+/** SPEC 7.2 four-state trusted-fact resolution (fixed field meanings). */
+export type TrustedFactResolutionKind = 'approved' | 'not_approved' | 'not_required' | 'unknown';
+
+/** SPEC-RULECODE-QUALITY-001 §9: bounded source-fault retry state (see PITaskMetadata.sourceFaultBackoff). */
+export interface SourceFaultBackoffRecordV1 {
+  readonly version: 1;
+  readonly consecutiveFailures: number;
+  readonly skipCycles: number;
+  readonly lastReason: string;
+  readonly updatedAt: string;
+}
+
+const TRUSTED_FACT_RESOLUTION_KINDS: ReadonlySet<string> = new Set<string>([
+  'approved', 'not_approved', 'not_required', 'unknown',
+]);
+
+const SOURCE_FAULT_MAX_CONSECUTIVE_FAILURES = 3;
+
+/** rc-1/rc-2: structural validation for the derived verification record. */
+export function isValidIntentBasisVerificationRecord(value: unknown): value is IntentBasisVerificationRecordV1 {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  if (record.version !== 1) return false;
+  if (record.checkedBy !== 'deterministic-preflight') return false;
+  if (typeof record.checkedAt !== 'string' || record.checkedAt.trim() === '') return false;
+  if (typeof record.sourceScribeArtifactId !== 'string' || record.sourceScribeArtifactId.trim() === '') return false;
+  if (typeof record.scribeArtifactDigest !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(record.scribeArtifactDigest)) return false;
+  if (record.intentContractDigest !== undefined
+    && (typeof record.intentContractDigest !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(record.intentContractDigest))) return false;
+  if (record.executionConditionsDigest !== undefined
+    && (typeof record.executionConditionsDigest !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(record.executionConditionsDigest))) return false;
+  if (!Array.isArray(record.requiredFacts)) return false;
+  for (const fact of record.requiredFacts) {
+    if (typeof fact !== 'object' || fact === null || Array.isArray(fact)) return false;
+    const entry = fact as Record<string, unknown>;
+    if (typeof entry.factKind !== 'string' || entry.factKind.trim() === '') return false;
+    if (typeof entry.resolution !== 'string' || !TRUSTED_FACT_RESOLUTION_KINDS.has(entry.resolution)) return false;
+  }
+  if (record.result !== 'executable') return false;
+  return true;
+}
+
+/** rc-1/rc-2: structural validation for the source-fault backoff state. */
+export function isValidSourceFaultBackoffRecord(value: unknown): value is SourceFaultBackoffRecordV1 {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  if (record.version !== 1) return false;
+  if (typeof record.consecutiveFailures !== 'number' || !Number.isInteger(record.consecutiveFailures)
+    || record.consecutiveFailures < 1 || record.consecutiveFailures > SOURCE_FAULT_MAX_CONSECUTIVE_FAILURES) return false;
+  if (typeof record.skipCycles !== 'number' || !Number.isInteger(record.skipCycles) || record.skipCycles < 0) return false;
+  if (typeof record.lastReason !== 'string' || record.lastReason.trim() === '') return false;
+  if (typeof record.updatedAt !== 'string' || record.updatedAt.trim() === '') return false;
+  return true;
+}
+
+export const SOURCE_FAULT_PERSISTENT_REASON_CODE = 'source_fault_persistent';
+export { SOURCE_FAULT_MAX_CONSECUTIVE_FAILURES };
 
 /** PRI-991 (r2 P1-02): retention bound for durable per-task recovery facts. */
 export const FAILED_TASK_RECOVERY_RETENTION = 5;
@@ -565,6 +668,8 @@ export function serializePITaskMetadata(metadata: PITaskMetadata): string {
       ownerResolutions: metadata.ownerResolutions,
       ownerEvidenceSelection: metadata.ownerEvidenceSelection,
       failedTaskRecoveries: metadata.failedTaskRecoveries,
+      intentBasisVerification: metadata.intentBasisVerification,
+      sourceFaultBackoff: metadata.sourceFaultBackoff,
     },
   });
 }
@@ -604,6 +709,8 @@ export function mergePITaskMetadata(base: PITaskRecord, overrides: Partial<PITas
     ownerResolutions: base.ownerResolutions,
     ownerEvidenceSelection: base.ownerEvidenceSelection,
     failedTaskRecoveries: base.failedTaskRecoveries,
+    intentBasisVerification: base.intentBasisVerification,
+    sourceFaultBackoff: base.sourceFaultBackoff,
     ...overrides,
   };
 }
@@ -1041,6 +1148,21 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
     }
   }
 
+  // SPEC-RULECODE-QUALITY-001 A1/§9: both new authority-adjacent records are
+  // optional, present-but-malformed fails the whole metadata (rc-3 — a
+  // corrupted verification record or retry state must surface, never
+  // silently read as "never verified" / "no retry state").
+  let intentBasisVerification: IntentBasisVerificationRecordV1 | undefined;
+  if (Object.hasOwn(m, 'intentBasisVerification') && m.intentBasisVerification !== undefined) {
+    if (!isValidIntentBasisVerificationRecord(m.intentBasisVerification)) return null;
+    ({ intentBasisVerification } = m);
+  }
+  let sourceFaultBackoff: SourceFaultBackoffRecordV1 | undefined;
+  if (Object.hasOwn(m, 'sourceFaultBackoff') && m.sourceFaultBackoff !== undefined) {
+    if (!isValidSourceFaultBackoffRecord(m.sourceFaultBackoff)) return null;
+    ({ sourceFaultBackoff } = m);
+  }
+
   return {
     dependencyTaskIds: m.dependencyTaskIds as string[],
     channel: m.channel,
@@ -1065,6 +1187,8 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
     ownerResolutions,
     ownerEvidenceSelection,
     failedTaskRecoveries,
+    intentBasisVerification,
+    sourceFaultBackoff,
   };
 }
 
@@ -1124,5 +1248,7 @@ export function hydratePITaskRecord(task: TaskRecord): PITaskRecord | null {
     ownerResolutions: meta.ownerResolutions,
     ownerEvidenceSelection: meta.ownerEvidenceSelection,
     failedTaskRecoveries: meta.failedTaskRecoveries,
+    intentBasisVerification: meta.intentBasisVerification,
+    sourceFaultBackoff: meta.sourceFaultBackoff,
   } as unknown as PITaskRecord;
 }

@@ -992,9 +992,12 @@ describe('handleRunRuleHost — FR-07 shared readiness classification (PRI-983)'
 
   it('successful assembly still executes the pipeline with the pack (valid evidence runs normally)', async () => {
     hoistedEvidence.state.pack = {
-      sourceNegativeCase: { caseId: 'n', kind: 'negative', toolName: 'write_file', params: {}, expectedDecision: 'block' },
+      // SPEC-RULECODE-QUALITY-001 Q04: identical tool+params on opposite
+      // labels is a conflicting_label pack — the fixture uses materially
+      // different inputs, as a real Owner-labelled pack must.
+      sourceNegativeCase: { caseId: 'n', kind: 'negative', toolName: 'write_file', params: { path: '/etc/passwd' }, expectedDecision: 'block' },
       ownerDesiredOutcome: 'block writes',
-      positiveCounterexamples: [{ caseId: 'p', kind: 'positive', toolName: 'write_file', params: {}, expectedDecision: 'allow' }],
+      positiveCounterexamples: [{ caseId: 'p', kind: 'positive', toolName: 'write_file', params: { path: '/project/file.txt' }, expectedDecision: 'allow' }],
       evidenceRefs: ['pain:pain-1', 'tool_call:42', 'tool_call:7'],
       redactionNotes: [],
     };

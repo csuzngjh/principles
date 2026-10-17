@@ -135,23 +135,17 @@ function readText(relPath) {
   }
 }
 
-// 6. lefthook config includes gitleaks
+// 6. lefthook config exists
+// (gitleaks pre-push command removed by Owner decision 2026-10-17 —
+// push-latency review; the baseline no longer requires it.)
 {
   const content = readText('lefthook.yml');
   check(
     'lefthook.yml exists',
     content !== null,
     'lefthook.yml not found',
-    'lefthook is required for pre-push gitleaks hook',
+    'lefthook is required for the pre-push guard and merge gate',
   );
-  if (content !== null) {
-    check(
-      'lefthook has gitleaks command',
-      /gitleaks/.test(content),
-      'lefthook.yml missing gitleaks command',
-      'Add gitleaks command under pre-push in lefthook.yml',
-    );
-  }
 }
 
 // 7. PR-checks workflow includes npm audit

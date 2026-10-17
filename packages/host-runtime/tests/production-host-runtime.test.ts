@@ -472,8 +472,17 @@ describe('shared production RuleHost gate kernel', () => {
       ruleContextProvider: () => { throw new Error('UNIQUE_CONTEXT_PROVIDER_FAILURE_523'); },
       afterToolCall: async (event) => ({ decision: 'observe', source: event.source }),
     });
+    // SPEC-RULECODE-QUALITY-001 A3: the provider failure stays observable AND
+    // the shared gate now MANDATORILY suspends the v2 rule (this fixture rule
+    // carries its own unavailable self-protection, but the gate must skip it
+    // regardless — the suspension is no longer the rule's own job).
     await expect(degraded.dispatch(gateEvent(workspaceDir, '/etc/passwd'))).resolves.toMatchObject({
-      decision: 'allow', warnings: [expect.stringContaining('UNIQUE_CONTEXT_PROVIDER_FAILURE_523')],
+      decision: 'allow',
+      warnings: [
+        expect.stringContaining('UNIQUE_CONTEXT_PROVIDER_FAILURE_523'),
+        expect.stringMatching(/rule_context_v2_unavailable: provider_failed/),
+      ],
+      metadata: { evaluatedLiveRules: 0 },
     });
   });
 

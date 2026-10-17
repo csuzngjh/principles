@@ -304,6 +304,18 @@ function scribeOut(taskId: string, priorId?: string): unknown {
     },
     sourceTrace: { philosopherArtifactId: requireLineage(priorId, 'sourceTrace.philosopherArtifactId') },
     risks: [],
+    // SPEC-RULECODE-QUALITY-001 A1: the code channel requires the intent
+    // basis (contract + execution conditions) before generation; the
+    // test-double scribe emits the complete declaration (no trusted
+    // external facts — enforceable from the observable input).
+    intentContract: {
+      ownerIntent: 'writes must not happen without a prior read of the same target',
+      targetBehavior: 'agent reads the target file before writing it',
+      forbiddenBehavior: 'writing a file that was not read earlier in the session',
+      evidenceSource: 'pain:pri492-e2e',
+      validationExpectation: 'rule blocks writes whose context facts show no prior read of the target',
+    },
+    executionConditions: { version: 1, requiredFacts: [] },
     generatedAt: new Date().toISOString(),
   };
 }
