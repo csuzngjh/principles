@@ -149,6 +149,14 @@ afterEach(() => {
   wire.handler = null;
 });
 
+/** Guarded accessor (repo forbids non-null assertions): the indexed wire
+ * request after a toHaveLength assertion, failing loud instead of asserting. */
+function wireRequestAt(index: number, because: string): { url: string; body: Record<string, unknown> } {
+  const request = wire.requests[index];
+  if (request === undefined) throw new Error(`unreachable: ${because}`);
+  return request;
+}
+
 describe('per-request output budget reaches the serialized HTTP wire (PRI-966 G2)', () => {
   it('actor action round: 512 lands on the tool-call path request (tool_choice required, registered tool declared)', async () => {
     wire.handler = () => sseToolCallResponse('record_learning_lab_actor_action_v1', VALID_ACTION_JSON);
@@ -157,7 +165,7 @@ describe('per-request output budget reaches the serialized HTTP wire (PRI-966 G2
     const output = await adapter.fetchOutput(handle.runId);
 
     expect(wire.requests).toHaveLength(1);
-    const [{ url, body }] = wire.requests;
+    const { url, body } = wireRequestAt(0, 'requests.length === 1 asserted');
     expect(url.endsWith('/chat/completions')).toBe(true);
     expect(body.model).toBe('deepseek-v4-flash');
     expect(body.max_tokens).toBe(512); // ← the wire value, not just the options bag
@@ -174,7 +182,7 @@ describe('per-request output budget reaches the serialized HTTP wire (PRI-966 G2
     const output = await adapter.fetchOutput(handle.runId);
 
     expect(wire.requests).toHaveLength(1);
-    const [{ body }] = wire.requests;
+    const { body } = wireRequestAt(0, 'requests.length === 1 asserted');
     expect(body.max_tokens).toBe(512);
     const responseFormat = body.response_format as { type?: string };
     expect(responseFormat?.type).toBe('json_schema'); // proof this is the json path
@@ -188,7 +196,7 @@ describe('per-request output budget reaches the serialized HTTP wire (PRI-966 G2
     await adapter.fetchOutput(handle.runId);
 
     expect(wire.requests).toHaveLength(1);
-    const [{ body }] = wire.requests;
+    const { body } = wireRequestAt(0, 'requests.length === 1 asserted');
     expect(body.max_tokens).toBe(1024);
     expect(body.response_format).toBeUndefined(); // free-form path, no structured-output rewrite
   });
@@ -199,7 +207,12 @@ describe('per-request output budget reaches the serialized HTTP wire (PRI-966 G2
       sseTextResponse(VALID_ACTION_JSON), // repair response
     ];
     let call = 0;
-    wire.handler = () => responses[Math.min(call++, responses.length - 1)];
+    wire.handler = () => {
+      const next = responses[call];
+      call += 1;
+      if (next === undefined) throw new Error('budget-wire test bug: scripted repair responses exhausted');
+      return next;
+    };
     const { adapter } = makeAdapter({ outputPathStrategy: 'free_form_only' });
     const handle = await adapter.startRun(makeInput({ outputSchemaRef: LEARNING_LAB_ACTOR_ACTION_REF, maxTokens: 512 }));
     const output = await adapter.fetchOutput(handle.runId);
@@ -208,9 +221,9 @@ describe('per-request output budget reaches the serialized HTTP wire (PRI-966 G2
     for (const request of wire.requests) {
       expect(request.body.max_tokens).toBe(512); // every request of the run, repair included
     }
-    const second = wire.requests[1].body.messages as { content: unknown }[];
-    const first = wire.requests[0].body.messages as { content: unknown }[];
-    expect(JSON.stringify(second)).not.toBe(JSON.stringify(first)); // genuinely the repair prompt
+    const first = wireRequestAt(0, 'requests.length >= 2 asserted');
+    const second = wireRequestAt(1, 'requests.length >= 2 asserted');
+    expect(JSON.stringify(second.body.messages)).not.toBe(JSON.stringify(first.body.messages)); // genuinely the repair prompt
     expect(Value.Check(LearningLabActorActionV1Schema, output?.payload)).toBe(true);
   });
 
@@ -224,7 +237,7 @@ describe('per-request output budget reaches the serialized HTTP wire (PRI-966 G2
     await adapter.fetchOutput(handle.runId);
 
     expect(wire.requests).toHaveLength(1);
-    expect(wire.requests[0].body.max_tokens).toBe(384000);
+    expect(wireRequestAt(0, 'requests.length === 1 asserted').body.max_tokens).toBe(384000);
   });
 
   it('backward compat: absent per-request budget still applies the profile config.maxTokens', async () => {
@@ -234,7 +247,7 @@ describe('per-request output budget reaches the serialized HTTP wire (PRI-966 G2
     await adapter.fetchOutput(handle.runId);
 
     expect(wire.requests).toHaveLength(1);
-    expect(wire.requests[0].body.max_tokens).toBe(8000);
+    expect(wireRequestAt(0, 'requests.length === 1 asserted').body.max_tokens).toBe(8000);
   });
 
   it('priority: per-request caps the run even when the profile budget is larger (512 over config 4096)', async () => {
@@ -242,7 +255,7 @@ describe('per-request output budget reaches the serialized HTTP wire (PRI-966 G2
     const { adapter } = makeAdapter({ outputPathStrategy: 'json_mode_first', maxTokens: 4096 });
     const handle = await adapter.startRun(makeInput({ outputSchemaRef: LEARNING_LAB_ACTOR_ACTION_REF, maxTokens: 512 }));
     await adapter.fetchOutput(handle.runId);
-    expect(wire.requests[0].body.max_tokens).toBe(512);
+    expect(wireRequestAt(0, 'requests.length === 1 asserted').body.max_tokens).toBe(512);
   });
 
   it('priority: the profile config still wins over a larger per-request value (config 4096 over 8192, free-form path)', async () => {
@@ -250,7 +263,7 @@ describe('per-request output budget reaches the serialized HTTP wire (PRI-966 G2
     const { adapter } = makeAdapter({ outputPathStrategy: 'free_form_only', maxTokens: 4096 });
     const handle = await adapter.startRun(makeInput({ maxTokens: 8192 }));
     await adapter.fetchOutput(handle.runId);
-    expect(wire.requests[0].body.max_tokens).toBe(4096);
+    expect(wireRequestAt(0, 'requests.length === 1 asserted').body.max_tokens).toBe(4096);
   });
 
   it('priority: the model output ceiling wins over a huge per-request value (384000 over 900000, tool-call path)', async () => {
@@ -258,7 +271,7 @@ describe('per-request output budget reaches the serialized HTTP wire (PRI-966 G2
     const { adapter } = makeAdapter({ outputPathStrategy: 'tool_call_first' });
     const handle = await adapter.startRun(makeInput({ outputSchemaRef: LEARNING_LAB_ACTOR_ACTION_REF, maxTokens: 900_000 }));
     await adapter.fetchOutput(handle.runId);
-    expect(wire.requests[0].body.max_tokens).toBe(384000);
+    expect(wireRequestAt(0, 'requests.length === 1 asserted').body.max_tokens).toBe(384000);
   });
 
   it.each([0, -5, 12.5, Number.NaN, Number.POSITIVE_INFINITY])(
@@ -287,8 +300,8 @@ describe('per-request output budget reaches the serialized HTTP wire (PRI-966 G2
     const output = await adapter.fetchOutput(handle.runId);
 
     expect(wire.requests).toHaveLength(2);
-    expect(wire.requests[0].body.max_tokens).toBe(8192); // original per-request value
-    expect(wire.requests[1].body.max_tokens).toBe(4096); // halved by the ladder
+    expect(wireRequestAt(0, 'requests.length === 2 asserted').body.max_tokens).toBe(8192); // original per-request value
+    expect(wireRequestAt(1, 'requests.length === 2 asserted').body.max_tokens).toBe(4096); // halved by the ladder
     expect(output).toBeDefined();
     const downshift = events.find((event) => event.eventType === 'llm_max_tokens_downshift');
     expect(downshift).toBeDefined();
