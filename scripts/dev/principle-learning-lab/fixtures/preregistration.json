@@ -76,7 +76,8 @@
         "provider error rate or quota exhaustion -> stop, record, report"
       ],
       "costRecording": "Per-round usage (requests/steps/invalid/wallMs) recorded per opportunity in arm.usage; token usage recorded when the provider surfaces it (honest null when it does not — e.g. one-shot adapter telemetry carries no token counts); ESTIMATES are always labeled as estimates — actual spend is the provider invoice, cited in the study report."
-    }
+    },
+    "authorizationGate": "P1-02 fail-closed: real-model transports are constructed ONLY through createAuthorizedPiTransport, which verifies an OD-1/OD-2/OD-3 authorization record (frozen prereg + verified cost basis + explicit HTTP request caps + frozen run parameters, consistency-checked) BEFORE any transport exists — missing/stale/drifted authorization means zero HTTP requests. Offline fake-transport rehearsals need no authorization. Status strings in config files are never convertible into authorization by code."
   },
   "reportingPlan": {
     "rule": "Four separately-reported metric families; NO weighted composite score may mask a regression in any layer (SPEC §7.1).",

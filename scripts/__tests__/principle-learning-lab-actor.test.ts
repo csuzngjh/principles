@@ -236,7 +236,7 @@ describe('interactive actor loop (offline fake transport)', () => {
       opportunityId: 'P2',
     });
     expect(result.outcome.terminalAction).toBe('proceed');
-    expect(result.usage.requests).toBe(1);
+    expect(result.usage.modelRounds).toBe(1);
     expect(transport.calls()).toHaveLength(1); // the scripted second round was never consumed
   });
 
@@ -296,7 +296,7 @@ describe('interactive actor loop (offline fake transport)', () => {
       opportunityId: 'P1',
       caps,
     });
-    expect(result.usage.requests).toBe(2);
+    expect(result.usage.modelRounds).toBe(2);
     expect(result.failure?.kind).toBe('budget_capped');
     expect(result.actorRunStatus).toBe('INTERRUPTED');
     expect(result.outcome.terminalAction).toBe('timeout');
@@ -318,7 +318,7 @@ describe('interactive actor loop (offline fake transport)', () => {
     });
     expect(result.failure?.kind).toBe('invalid_protocol');
     expect(result.canaryLeak).toBe(canary);
-    expect(result.usage.requests).toBe(0); // the guard fired BEFORE the transport call
+    expect(result.usage.modelRounds).toBe(0); // the guard fired BEFORE the transport call
     expect(transport.calls()).toHaveLength(0);
   });
 });

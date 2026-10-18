@@ -154,6 +154,13 @@ export const StartRunInputSchema = Type.Object({
    * output ceiling. When absent, adapter/profile defaulting is unchanged
    * (backward compatible). Must be a positive finite integer; invalid values
    * fail loud (input_invalid) before any request is built.
+   *
+   * Cross-adapter contract (P2): PiAiRuntimeAdapter applies it on every
+   * completeSimple path (tool-call / json_schema / free-form / repair / retry
+   * ladder); the L2 agent-loop adapters apply it to every loop turn and the
+   * L1 fallback; OpenClawCliRuntimeAdapter CANNOT honor it (the host CLI owns
+   * its model calls) and FAILS LOUD on input.maxTokens !== undefined —
+   * silently ignoring the cap is forbidden (rc-9).
    */
   maxTokens: Type.Optional(Type.Number({ minimum: 1 })),
   idempotencyKey: Type.Optional(Type.String()),

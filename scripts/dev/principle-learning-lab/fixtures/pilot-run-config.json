@@ -47,14 +47,31 @@
   ],
   "cAContrastArms": {
     "note": "Same channel, same position, same budget; only the CONTENT differs.",
-    "conditions": ["real generated principle", "high-quality ordinary memory summary (must be honestly strong — no weak strawman)", "raw experience text", "no added content"],
-    "controlsToRecord": ["delivered chars/tokens", "position", "retrieval method", "budget", "generation cost of each condition"]
+    "conditions": [
+      "real generated principle",
+      "high-quality ordinary memory summary (must be honestly strong — no weak strawman)",
+      "raw experience text",
+      "no added content"
+    ],
+    "controlsToRecord": [
+      "delivered chars/tokens",
+      "position",
+      "retrieval method",
+      "budget",
+      "generation cost of each condition"
+    ]
   },
   "budgets": {
     "model": "OWNER_DECISION_REQUIRED — provider, model id, per-run cost ceiling, stop threshold",
     "maxRunsPerArm": "OWNER_DECISION_REQUIRED",
     "repetitions": "OWNER_DECISION_REQUIRED (draft: >=3 seeds)",
-    "llmJudge": "OWNER_DECISION_REQUIRED — default remains mechanical-oracle-only"
+    "llmJudge": "OWNER_DECISION_REQUIRED — default remains mechanical-oracle-only",
+    "httpRequests": {
+      "note": "P1-01: real outbound HTTP requests are enforced by a fail-closed ledger at the fetch boundary (opportunity -> arm -> study). Offline defaults are record-keeping for fake transports and are NEVER a cost authorization.",
+      "httpRequestsPerOpportunity": "OWNER_DECISION_REQUIRED",
+      "httpRequestsPerArm": "OWNER_DECISION_REQUIRED",
+      "httpRequestsPerStudy": "OWNER_DECISION_REQUIRED"
+    }
   },
   "gatesBeforeRealRuns": [
     "G1 gate PASS (this repository, automated)",
@@ -69,5 +86,20 @@
     "credentials missing or cost ceiling undecided -> mark NOT_RUN, do not execute",
     "isolation or contamination check fails -> stop, record, do not proceed",
     "judge-only information leak detected -> stop, record INVALID_PROTOCOL"
-  ]
+  ],
+  "realRunAuthorizationContract": {
+    "schemaVersion": "g2-real-run-authorization.v1",
+    "gate": "createAuthorizedPiTransport (lib/actor.mjs) runs verifyRealRunAuthorization BEFORE any transport/adapter exists — failure means zero HTTP requests can occur (fail-closed).",
+    "od1": {
+      "requirement": "preregistration.status must be exactly OWNER_APPROVED (DRAFT_NOT_OWNER_APPROVED can never authorize), plus authorization.od1 {approved: literal true, decisionRef, frozenFixtureHash == dataset.fixtureHash}"
+    },
+    "od2": {
+      "requirement": "authorization.od2 {provider, model, apiKeyEnv, baseUrl?, credentialsAvailable: literal true, perRunCostCapUsd, totalCostCapUsd, costBasisRef (official billing evidence), httpRequestsPerOpportunity/PerArm/PerStudy, stopCondition} — all explicit; offline defaults are not honored"
+    },
+    "od3": {
+      "requirement": "authorization.od3 {seeds >= 1, executionOrder, frozen: literal true}"
+    },
+    "consistencyChecks": "provider/model/apiKeyEnv/baseUrl and the three HTTP caps in the runtime call must equal the authorized values — any drift refuses before the first request",
+    "telemetryAttribution": "retry (llm_max_tokens_downshift) and repair (output_repair_attempted) counts are aggregated from adapter telemetry per arm; per-HTTP-attempt token usage comes from the ledger (null/unavailable when the provider stream carries none)"
+  }
 }

@@ -1,6 +1,6 @@
 {
   "barrel": "src/runtime-v2/index.ts",
-  "count": 1933,
+  "count": 1934,
   "names": [
     "ADMISSION_CONFIDENCE_THRESHOLD",
     "ADMISSION_POLICY_VERSION",
@@ -1694,6 +1694,7 @@
     "getFoundationalPrinciples",
     "getIntentFilename",
     "getOperatingPrinciples",
+    "getPiAiFetchForApi",
     "getSourceDescriptor",
     "getSurfaceIdForHook",
     "getSurfaceIdForService",

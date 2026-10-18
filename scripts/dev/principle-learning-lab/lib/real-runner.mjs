@@ -30,8 +30,12 @@ import { adjudicate } from './evaluator.mjs';
 import { freezeCandidate } from './sidecar.mjs';
 import { deliverPayload } from './g2.mjs';
 import { DEFAULT_REAL_ACTOR_CAPS, runRealActorOpportunity } from './actor.mjs';
+import { auditTokenUsage, createHttpBudgetLedger } from './http-budget.mjs';
+
+
 
 export const REAL_ACTOR_STRATEGY_ID = 'REAL_ACTOR_I0';
+export { auditTokenUsage };
 const KNOWN_ACTION_NAMES = Object.keys(ACTION_COSTS);
 const REFLECTION_MAX_TOKENS = 1024;
 const NONE_ARM_SENTINEL = '[none-arm: no I0 candidate generated — delivered content is empty by design]';
@@ -72,8 +76,23 @@ async function runI0Reflection({ transport, historyText, armId, caps }) {
  * Run one real-actor arm. Returns { arm, adjudications, actorInputs, usage, fatal }.
  * `fatal` is set only for judge-leak INVALID_PROTOCOL — the caller stops the study.
  */
-export async function runRealArm({ dataset, historyId, transport, caps = DEFAULT_REAL_ACTOR_CAPS, studyId }) {
+export async function runRealArm({ dataset, historyId, transport, caps = DEFAULT_REAL_ACTOR_CAPS, studyId, armLedger = null, budgets = null }) {
   const armId = `${historyId}:${REAL_ACTOR_STRATEGY_ID}`;
+  // P1-01: every opportunity runs inside its OWN child scope of the arm
+  // ledger; the arm scope itself hangs off the study ledger. cap null =
+  // record-only (offline rehearsal); a positive cap is fail-closed at the
+  // HTTP boundary. Levels never reset or overwrite each other.
+  const opportunityLedgers = [];
+  const makeOppLedger = (opportunityId) => {
+    if (!armLedger) return null;
+    const child = createHttpBudgetLedger({
+      scope: `${armId}#${opportunityId}`,
+      cap: budgets?.httpRequestsPerOpportunity ?? null,
+      parent: armLedger,
+    });
+    opportunityLedgers.push(child);
+    return child;
+  };
   const history = dataset.histories[historyId];
   const manualText = dataset.worldManual.manualText.join('\n');
 
@@ -123,18 +142,35 @@ export async function runRealArm({ dataset, historyId, transport, caps = DEFAULT
       // empty-channel receipt so the opportunity is scored, never skipped.
       effectiveDelivery = deliverPayload({ armId, content: null });
     }
-    const result = await runRealActorOpportunity({
-      transport,
-      environment: opp.environment,
-      knownActionNames: KNOWN_ACTION_NAMES,
-      manualText,
-      taskText,
-      delivery: effectiveDelivery,
-      goldRecord,
+    const opportunityLedger = makeOppLedger(opp.opportunityId);
+    // P1-01: route the transport-bound fetch's reserves through THIS
+    // opportunity scope so per-opportunity caps are enforced at the same
+    // outbound boundary (the transport holds the arm ledger's fetch).
+    if (armLedger && opportunityLedger) armLedger.setActiveChild(opportunityLedger);
+    let result;
+    try {
+      result = await runRealActorOpportunity({
+        transport,
+        environment: opp.environment,
+        knownActionNames: KNOWN_ACTION_NAMES,
+        manualText,
+        taskText,
+        delivery: effectiveDelivery,
+        goldRecord,
+        opportunityId: opp.opportunityId,
+        caps,
+        httpLedger: opportunityLedger,
+      });
+    } finally {
+      if (armLedger) armLedger.clearActiveChild();
+    }
+    opportunityUsage.push({
       opportunityId: opp.opportunityId,
-      caps,
+      ...result.usage,
+      actorRunStatus: result.actorRunStatus,
+      failure: result.failure,
+      budget: opportunityLedger ? opportunityLedger.snapshot() : null,
     });
-    opportunityUsage.push({ opportunityId: opp.opportunityId, ...result.usage, actorRunStatus: result.actorRunStatus, failure: result.failure });
     actorInputs.push({
       historyId,
       probeId: opp.probeId,
@@ -187,8 +223,19 @@ export async function runRealArm({ dataset, historyId, transport, caps = DEFAULT
     reflection,
     usage: {
       caps,
+      budgets,
       reflectionRequests: reflection.requests,
       opportunities: opportunityUsage,
+      // P1-01: arm-level HTTP budget snapshot (chain: opportunity → arm → study).
+      budget: armLedger ? armLedger.snapshot() : null,
+      // P1-03: per-request token audit (null usage rows stay explicit).
+      tokenAudit: armLedger
+        ? auditTokenUsage([...armLedger.requests(), ...opportunityLedgers.flatMap((l) => l.requests())])
+        : null,
+      // P1-01: retry/repair attribution (authorized Pi transports only — the
+      // factory attaches telemetry counters to the ledger; null = not wired).
+      retries: armLedger?.telemetry ? armLedger.telemetry.retries : null,
+      repairs: armLedger?.telemetry ? armLedger.telemetry.repairs : null,
     },
   };
 
@@ -197,16 +244,31 @@ export async function runRealArm({ dataset, historyId, transport, caps = DEFAULT
 
 /**
  * Run every real-actor arm on its OWN transport (cross-arm isolation), in the
- * preregistered history order. Stops at the first judge-leak INVALID_PROTOCOL
- * (remaining arms are not started — exitConditions) and reports `stopped`.
+ * preregistered history order, under the study-level HTTP budget (P1-01).
+ * Stops at the first judge-leak INVALID_PROTOCOL (remaining arms are not
+ * started — exitConditions) and reports `stopped`. `budgets` = explicit HTTP
+ * request caps {httpRequestsPerOpportunity, httpRequestsPerArm,
+ * httpRequestsPerStudy}; null caps are record-only (offline rehearsal) and are
+ * NEVER a real-experiment authorization (P1-02 gate covers that).
  */
-export async function runRealStudy({ dataset, transportForArm, caps = DEFAULT_REAL_ACTOR_CAPS, studyId, historyIds = ['E0', 'EA', 'EB', 'EN'] }) {
+export async function runRealStudy({ dataset, transportForArm, caps = DEFAULT_REAL_ACTOR_CAPS, studyId, historyIds = ['E0', 'EA', 'EB', 'EN'], budgets = null }) {
+  const studyLedger = createHttpBudgetLedger({
+    scope: `study:${studyId}`,
+    cap: budgets?.httpRequestsPerStudy ?? null,
+    reason: 'study-level cumulative HTTP request cap',
+  });
   const arms = [];
   const adjudications = [];
   const actorInputs = [];
   let stopped = null;
   for (const historyId of historyIds) {
-    const r = await runRealArm({ dataset, historyId, transport: transportForArm(historyId), caps, studyId });
+    const armLedger = createHttpBudgetLedger({
+      scope: `${historyId}:${REAL_ACTOR_STRATEGY_ID}`,
+      cap: budgets?.httpRequestsPerArm ?? null,
+      parent: studyLedger,
+      reason: 'arm-level HTTP request cap',
+    });
+    const r = await runRealArm({ dataset, historyId, transport: transportForArm(historyId, armLedger), caps, studyId, armLedger, budgets });
     arms.push(r.arm);
     adjudications.push(...r.adjudications);
     actorInputs.push(...r.actorInputs);
@@ -215,5 +277,5 @@ export async function runRealStudy({ dataset, transportForArm, caps = DEFAULT_RE
       break;
     }
   }
-  return { arms, adjudications, actorInputs, stopped };
+  return { arms, adjudications, actorInputs, stopped, budget: studyLedger.snapshot() };
 }
