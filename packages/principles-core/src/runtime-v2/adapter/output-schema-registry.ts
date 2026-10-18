@@ -29,6 +29,7 @@ import { RolloutReviewerOutputV1Schema } from '../internalization/rollout-review
 import { CorrectionObserverOutputV1Schema } from '../observer/correction-observer.js';
 import { SignalClassificationOutputV1Schema } from '../signal-collector/types.js';
 import { ReuseEvaluationOutputV1Schema } from '../principle-reuse/reuse-evaluation-output.js';
+import { LearningLabActorActionV1Schema } from '../learning-lab/actor-action-output.js';
 
 /**
  * Map of `outputSchemaRef` string → TypeBox schema. Keys match the
@@ -49,6 +50,10 @@ export const OUTPUT_SCHEMA_REGISTRY: ReadonlyMap<string, TSchema> = new Map<stri
   // PRI-917 v0.3.2: the Semantic Reuse Evaluation Capability's proposal contract
   // (proposal-only — its outputs are never persisted; SPEC section 4.2/10).
   ['reuse-evaluation-output-v1', ReuseEvaluationOutputV1Schema],
+  // PRI-966 G2: the Learning Lab real-actor round contract — one environment
+  // action per interactive round for the research actor. Production runners
+  // never pass this ref; see learning-lab/actor-action-output.ts.
+  ['learning-lab-actor-action-v1', LearningLabActorActionV1Schema],
 ]);
 
 /**

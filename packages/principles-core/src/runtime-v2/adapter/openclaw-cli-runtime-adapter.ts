@@ -69,6 +69,8 @@ export interface OpenClawCliRuntimeAdapterOptions {
    * If not provided, falls back to the global storeEmitter singleton.
    */
   eventEmitter?: StoreEventEmitter;
+  /** Test seam: inject a deterministic CLI runner without spawning a real process. */
+  cliProcessRunner?: typeof runCliProcess;
 }
 
 interface RunState {
@@ -332,12 +334,14 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
   private readonly workspaceDir?: string;
   private readonly agentId: string;
   private readonly eventEmitter: StoreEventEmitter;
+  private readonly cliProcessRunner: typeof runCliProcess;
 
   constructor(options: OpenClawCliRuntimeAdapterOptions) {
     this.runtimeMode = options.runtimeMode;
     this.workspaceDir = options.workspaceDir;
     this.agentId = options.agentId ?? 'main';
     this.eventEmitter = options.eventEmitter ?? storeEmitter;
+    this.cliProcessRunner = options.cliProcessRunner ?? runCliProcess;
   }
 
   // OCRA-01: kind() returns RuntimeKind literal 'openclaw-cli'
@@ -380,7 +384,7 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
 
     // Probe 1: verify openclaw binary is executable
     try {
-      const versionResult = await runCliProcess({
+      const versionResult = await this.cliProcessRunner({
         command: 'openclaw',
         args: ['--version'],
         cwd: this.workspaceDir,
@@ -436,7 +440,7 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
         listArgs.push('--local');
       }
 
-      const listResult = await runCliProcess({
+      const listResult = await this.cliProcessRunner({
         command: 'openclaw',
         args: listArgs,
         cwd: this.workspaceDir,
@@ -521,7 +525,7 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
         probeArgs.push('--local');
       }
 
-      const probeResult = await runCliProcess({
+      const probeResult = await this.cliProcessRunner({
         command: 'openclaw',
         args: probeArgs,
         cwd: this.workspaceDir,
@@ -644,6 +648,22 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
 
   // OCRA-02: startRun synchronously invokes openclaw agent with correct CLI args
   async startRun(input: StartRunInput): Promise<RunHandle> {
+    // PRI-966 G2 P2 contract (declared capability boundary): StartRunInput.
+    // maxTokens is a per-request model output budget. This adapter delegates
+    // to the OpenClaw host CLI process, which exposes NO per-request
+    // output-token control — honoring the field here is impossible, and
+    // silently ignoring it is forbidden (rc-9). Fail loud as input_invalid
+    // BEFORE any CLI process starts.
+    if (input.maxTokens !== undefined) {
+      throw new PDRuntimeError(
+        'input_invalid',
+        `OpenClawCliRuntimeAdapter does not support StartRunInput.maxTokens (received ${String(input.maxTokens)}): the host CLI owns its own model calls and exposes no per-request output-token control.`,
+        {
+          maxTokens: input.maxTokens,
+          nextAction: 'Use a PiAi/L2 runtime adapter for per-request output budgets, or omit maxTokens for this runtime.',
+        },
+      );
+    }
     const runId = crypto.randomUUID();
     const startedAt = new Date().toISOString();
 
@@ -709,7 +729,7 @@ export class OpenClawCliRuntimeAdapter implements PDRuntimeAdapter {
 
     const cliOutput: CliOutput = await (async () => {
       try {
-        return await runCliProcess({
+        return await this.cliProcessRunner({
           command: 'openclaw',
           args,
           cwd: this.workspaceDir,

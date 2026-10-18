@@ -362,6 +362,11 @@ export class L2AgentLoopAdapter implements PDRuntimeAdapter {
     const maxTurns = this.config.maxTurns ?? DEFAULT_MAX_TURNS;
     const maxEmptyRetries = this.config.maxEmptyRetries ?? DEFAULT_MAX_EMPTY_RETRIES;
     const l2FallbackToL1 = this.config.l2FallbackToL1 ?? true;
+    // PRI-966 G2 P2 contract: StartRunInput.maxTokens is the per-request hard
+    // cap for this run's model requests — every agent-loop turn AND the L1
+    // fallback. Validated fail-loud; capped by the model output ceiling;
+    // absent = unchanged pi-ai native defaulting.
+    const perRequestMaxTokens = this.resolvePerRequestMaxTokens(input);
     const abortController = new AbortController();
     this.abortControllers.set(runId, abortController);
     const budgetTimer = setTimeout(() => abortController.abort(), totalBudgetMs);
@@ -473,7 +478,10 @@ export class L2AgentLoopAdapter implements PDRuntimeAdapter {
       };
 
       const loopConfig: AgentLoopConfig = {
-        model: resolveL2Model(this.config.provider, this.config.model, this.config.baseUrl),
+        model: resolveL2Model(this.config.provider, this.config.model, this.config.baseUrl,
+          perRequestMaxTokens !== undefined ? { maxTokens: perRequestMaxTokens } : undefined),
+        // PRI-966 G2 P2: per-request output budget for every loop turn.
+        ...(perRequestMaxTokens !== undefined ? { maxTokens: perRequestMaxTokens } : {}),
         apiKey,
         convertToLlm: (msgs: AgentMessage[]): Message[] => msgs.map((m): Message => {
           if (m.role === 'user' || m.role === 'assistant' || m.role === 'toolResult' || m.role === 'system') {
@@ -597,7 +605,7 @@ export class L2AgentLoopAdapter implements PDRuntimeAdapter {
       // PRI-633: the fallback carries the layered base + profile system prompt
       // (no tool protocol — the L1 path has no tools).
       try {
-        const l1Output = await this.runL1Fallback(messageContent, apiKey, baseSystemPrompt);
+        const l1Output = await this.runL1Fallback(messageContent, apiKey, { systemPrompt: baseSystemPrompt, maxTokens: perRequestMaxTokens });
         runState.status = 'succeeded';
         runState.endedAt = new Date().toISOString();
         runState.output = { runId, payload: l1Output };
@@ -631,22 +639,54 @@ export class L2AgentLoopAdapter implements PDRuntimeAdapter {
   }
 
   /**
+   * PRI-966 G2 P2 contract: resolve StartRunInput.maxTokens for this run.
+   * Present: validated (positive finite integer, fail loud) and capped by the
+   * model's output ceiling — never raised above it. Absent: undefined (the
+   * run keeps pi-ai native defaulting — legacy behavior byte-identical).
+   */
+  private resolvePerRequestMaxTokens(input: StartRunInput): number | undefined {
+    const requested = input.maxTokens;
+    if (requested === undefined) return undefined;
+    if (typeof requested !== 'number' || !Number.isFinite(requested) || !Number.isInteger(requested) || requested < 1) {
+      throw new PDRuntimeError(
+        'input_invalid',
+        `StartRunInput.maxTokens must be a positive finite integer, got ${String(requested)}`,
+        { nextAction: 'Pass a positive integer output-token budget, or omit maxTokens to use the runtime default.' },
+      );
+    }
+    const ceiling = resolveL2Model(this.config.provider, this.config.model, this.config.baseUrl).maxTokens;
+    if (typeof ceiling === 'number' && Number.isFinite(ceiling) && ceiling >= 1 && ceiling < requested) {
+      return ceiling;
+    }
+    return requested;
+  }
+
+  /**
    * PRI-420: L1 one-shot fallback. Runs a single completeSimple call with the same prompt
    * (without tool instructions) and extracts JSON from the response. This is the safety net
    * when all L2 attempts fail — it ensures the dreamer still produces output.
+   * PRI-966 G2 P2: the per-request output budget applies here too (contract:
+   * no request path may bypass StartRunInput.maxTokens).
    */
   private async runL1Fallback(
     messageContent: string,
     apiKey: string,
-    systemPrompt?: string,
+    options: { systemPrompt?: string; maxTokens?: number } = {},
   ): Promise<unknown> {
-    const model = resolveL2Model(this.config.provider, this.config.model, this.config.baseUrl);
+    const { systemPrompt, maxTokens } = options;
+    const model = resolveL2Model(this.config.provider, this.config.model, this.config.baseUrl,
+      maxTokens !== undefined ? { maxTokens } : undefined);
     const userMessage = { role: 'user' as const, content: messageContent, timestamp: Date.now() };
     const context: Context = {
       messages: [userMessage],
       ...(systemPrompt ? { systemPrompt } : {}),
     };
-    const response = await completeSimple(model, context, { apiKey, signal: AbortSignal.timeout(120_000), fetch: getPiAiFetchForApi(model.api) });
+    const response = await completeSimple(model, context, {
+      apiKey,
+      signal: AbortSignal.timeout(120_000),
+      fetch: getPiAiFetchForApi(model.api),
+      ...(maxTokens !== undefined ? { maxTokens } : {}),
+    });
     // Extract the text content from the response and parse JSON.
     let text: string | null = null;
     if (typeof response.content === 'string') {

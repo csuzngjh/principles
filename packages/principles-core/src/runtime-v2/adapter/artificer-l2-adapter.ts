@@ -355,9 +355,35 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
     this.runs.set(runId, runState);
     this.evictOldRuns();
 
+    /**
+     * PRI-966 G2 P2 contract: StartRunInput.maxTokens (when the caller
+     * supplies one) is the per-request hard cap for this run —
+     * min(per-request, profile config, model ceiling); it is never raised
+     * above any existing authority. Absent: the profile default, unchanged.
+     */
+    const resolveEffectiveMaxTokens = (runInput: StartRunInput): number => {
+      const profile = this.config.maxTokens ?? DEFAULT_MAX_TOKENS;
+      const requested = runInput.maxTokens;
+      if (requested === undefined) return profile;
+      if (typeof requested !== 'number' || !Number.isFinite(requested) || !Number.isInteger(requested) || requested < 1) {
+        throw new PDRuntimeError(
+          'input_invalid',
+          `StartRunInput.maxTokens must be a positive finite integer, got ${String(requested)}`,
+          { nextAction: 'Pass a positive integer output-token budget, or omit maxTokens to use the runtime default.' },
+        );
+      }
+      let effective = Math.min(requested, profile);
+      const ceiling = resolveL2Model(this.config.provider, this.config.model, this.config.baseUrl).maxTokens;
+      if (typeof ceiling === 'number' && Number.isFinite(ceiling) && ceiling >= 1 && ceiling < effective) {
+        effective = ceiling;
+      }
+      return effective;
+    };
+
     const totalBudgetMs = this.config.totalBudgetMs ?? DEFAULT_TOTAL_BUDGET_MS;
     const maxTurns = this.config.maxTurns ?? DEFAULT_MAX_TURNS;
-    const maxTokens = this.config.maxTokens ?? DEFAULT_MAX_TOKENS;
+    // PRI-966 G2 P2 contract: see resolveEffectiveMaxTokens above.
+    const maxTokens = resolveEffectiveMaxTokens(input);
 
     const abortController = new AbortController();
     this.abortControllers.set(runId, abortController);

@@ -21,7 +21,7 @@
 import { getModel, completeSimple } from '@earendil-works/pi-ai/compat';
 import { builtinPiAiProviderIds } from './pi-ai-catalog.js';
 import { getPiAiFetchForApi } from './pi-ai-http-transport.js';
-import type { Context, UserMessage, AssistantMessage, Model, SimpleStreamOptions, ToolCall } from '@earendil-works/pi-ai';
+import type { Context, UserMessage, AssistantMessage, Model, SimpleStreamOptions, ToolCall, FetchFunction } from '@earendil-works/pi-ai';
 import { Value } from '@sinclair/typebox/value';
 import type { TSchema } from '@sinclair/typebox';
 import { PDRuntimeError } from '../error-categories.js';
@@ -75,6 +75,20 @@ const MIN_MAX_TOKENS_BUDGET = 4_096;
  */
 const MAX_TOKENS_REJECTED_PATTERN =
   /max[_ ]?tokens\b[^\n]{0,120}exceed|[Ee]xceeds the maximum output tokens/;
+
+/** PRI-966 G2 P1-03: bounded usage summary from an AssistantMessage. Fields
+ * stay null when the provider did not surface a count — never guessed. An
+ * all-zero usage object is pi-ai's "provider surfaced nothing" placeholder
+ * (stream outputs initialize usage at 0 and only overwrite it when the
+ * provider sends usage), so {0,0} is reported as null: understating beats
+ * fabricating. */
+function usageSummaryOf(usage: AssistantMessage['usage'] | undefined): { inputTokens: number | null; outputTokens: number | null; source: string } | null {
+  if (usage === undefined || usage === null || typeof usage !== 'object') return null;
+  const input = typeof usage.input === 'number' && Number.isFinite(usage.input) ? usage.input : null;
+  const output = typeof usage.output === 'number' && Number.isFinite(usage.output) ? usage.output : null;
+  if ((input === null || input === 0) && (output === null || output === 0)) return null;
+  return { inputTokens: input, outputTokens: output, source: 'adapter_response_usage' };
+}
 
 /**
  * PRI-1011: next budget for a retry after a max_tokens rejection. Halves the
@@ -150,6 +164,16 @@ export interface PiAiRuntimeAdapterConfig {
   systemPrompt?: string;
   /** Internal override for the retry delay backoff, primarily for fast unit testing. */
   _testBackoffDelayMs?: number;
+  /**
+   * Optional outbound HTTP fetch override applied at EVERY completeSimple
+   * boundary (PRI-966 G2 P1-01): callers that must enforce a request budget at
+   * the actual HTTP wire (e.g. the Learning Lab's fail-closed budget ledger)
+   * wrap the base fetch and pass it here — the override runs BEFORE each send,
+   * so an exhausted budget refuses the request before it leaves the process.
+   * Default (absent): getPiAiFetchForApi(model.api) — identical legacy
+   * transport behavior.
+   */
+  fetch?: FetchFunction;
 }
 
 /**
@@ -474,6 +498,47 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
     return this.config.maxTokens;
   }
 
+  /**
+   * Effective per-run output budget: StartRunInput.maxTokens (PRI-966 G2 lab
+   * actor / I0) when the caller supplies one, else exactly the pre-existing
+   * resolveMaxTokens() behavior (profile value or pi-ai native defaulting —
+   * byte-identical legacy behavior for callers that do not pass the field).
+   *
+   * A present per-request budget is a HARD cap for this run's requests, but it
+   * can never RAISE the budget above an existing authority: effective =
+   * min(per-request, profile config.maxTokens, model ceiling). Bogus
+   * non-positive profile values are ignored as ceilings (they were never
+   * honored budgets); the per-request value itself must be a positive finite
+   * integer — anything else fails loud (input_invalid) BEFORE any request is
+   * built (rc-3), so a broken budget can never silently disable budgeting.
+   */
+  private resolveEffectiveMaxTokens(input: StartRunInput, model: ReturnType<typeof resolveModel>): number | undefined {
+    const perRequest = input.maxTokens;
+    if (perRequest === undefined) {
+      return this.resolveMaxTokens();
+    }
+    if (typeof perRequest !== 'number' || !Number.isFinite(perRequest) || !Number.isInteger(perRequest) || perRequest < 1) {
+      throw new PDRuntimeError(
+        'input_invalid',
+        `StartRunInput.maxTokens must be a positive finite integer, got ${String(perRequest)}`,
+        {
+          maxTokens: perRequest,
+          nextAction: 'Pass a positive integer output-token budget, or omit maxTokens to use the profile default.',
+        },
+      );
+    }
+    let effective = perRequest;
+    const profile = this.config.maxTokens;
+    if (typeof profile === 'number' && Number.isFinite(profile) && profile >= 1 && profile < effective) {
+      effective = profile;
+    }
+    const modelCeiling = model.maxTokens;
+    if (typeof modelCeiling === 'number' && Number.isFinite(modelCeiling) && modelCeiling >= 1 && modelCeiling < effective) {
+      effective = modelCeiling;
+    }
+    return effective;
+  }
+
   async getCapabilities(): Promise<RuntimeCapabilities> {
     return this.defaultCapabilities;
   }
@@ -518,7 +583,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         timeoutMs,
         maxRetries: 0,
         maxTokens: this.resolveMaxTokens(),
-        fetch: getPiAiFetchForApi(model.api),
+        fetch: this.config.fetch ?? getPiAiFetchForApi(model.api),
       });
 
       // extractAssistantTextOrThrow normalizes resolved-error responses
@@ -635,6 +700,10 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
 
     // Get model
     const model = resolveModel(this.config.provider, this.config.model, this.config.baseUrl);
+    // Per-run output budget: each output path below resolves it through
+    // resolveEffectiveMaxTokens(input, model) — validating an explicit
+    // per-request budget BEFORE its first request is built, and applying the
+    // min(per-request, profile, model-ceiling) hard cap.
 
     // Emit runtime_invocation_started telemetry
     this.eventEmitter.emitTelemetry({
@@ -677,6 +746,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       const strategy = this.config.outputPathStrategy ?? 'tool_call_first';
 
       let validatedOutput: unknown = undefined;
+      let responseUsage: { inputTokens: number | null; outputTokens: number | null; source: string } | null = null;
       const schemaSummary = (schema && schemaRef) ? deriveSchemaSummary(schema) : undefined;
       // PRI-621 RC2: full serialized schema for the repair loop — the summary
       // alone leaves nested enums/constraints invisible to the repair LLM.
@@ -696,6 +766,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         const toolResult = await this.tryToolCallPath({ model, baseContext: context, schemaRef, schema, signal, apiKey, effectiveTimeoutMs, input, runId });
         if (toolResult.success && toolResult.output !== undefined) {
           validatedOutput = toolResult.output;
+          responseUsage = toolResult.usage ?? null;
           this.emitOutputPathTelemetry({ runId, input, path: 'tool_call', fallbackReason: null });
         } else {
           this.emitOutputPathTelemetry({ runId, input, path: null, fallbackReason: toolResult.fallbackReason ?? 'provider_no_tool_use' });
@@ -707,6 +778,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         const jsonResult = await this.tryJsonModePath({ model, baseContext: context, schemaRef, schema, signal, apiKey, effectiveTimeoutMs, input, runId });
         if (jsonResult.success && jsonResult.output !== undefined) {
           validatedOutput = jsonResult.output;
+          responseUsage = jsonResult.usage ?? null;
           this.emitOutputPathTelemetry({ runId, input, path: 'json_object_mode', fallbackReason: null });
         } else {
           this.emitOutputPathTelemetry({ runId, input, path: null, fallbackReason: jsonResult.fallbackReason ?? 'json_parse_failed' });
@@ -724,6 +796,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         // was indistinguishable from a true format error ("No valid JSON").
         // Fields are kept undefined when the provider did not supply them
         // (rc-3: no fabrication; rc-9: degradation stays observable).
+        responseUsage = usageSummaryOf(response.usage);
         const finishStopReason = typeof response.stopReason === 'string' ? response.stopReason : undefined;
         const finishOutputTokens = typeof response.usage?.output === 'number' && Number.isFinite(response.usage.output)
           ? response.usage.output
@@ -815,7 +888,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
             parsedOutput,
             schemaErrors,
             {
-              llmCaller: (prompt: string) => this.repairLLMCall(model, prompt, { signal, apiKey, systemPrompt }),
+              llmCaller: (prompt: string) => this.repairLLMCall(model, prompt, { signal, apiKey, systemPrompt, input }),
               schemaCheck: (value: unknown) => Value.Check(schema, value),
               schemaErrors: (value: unknown) =>
                 [...Value.Errors(schema, value)].map(e => ({ path: e.path, message: e.message, value: e.value })),
@@ -941,6 +1014,11 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         payload: {
           runId,
           runtimeKind: 'pi-ai',
+          // PRI-966 G2 P1-03: actual usage from the provider response that
+          // produced the run's output (null fields when the provider did not
+          // surface counts — never guessed). Repair/retry attempts are
+          // accounted separately at the HTTP ledger layer.
+          usage: responseUsage,
         },
       });
     } catch (err) {
@@ -1111,7 +1189,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       input: StartRunInput;
       runId: string;
     },
-  ): Promise<{ success: boolean; output?: unknown; fallbackReason?: string }> {
+  ): Promise<{ success: boolean; output?: unknown; fallbackReason?: string; usage?: { inputTokens: number | null; outputTokens: number | null; source: string } | null }> {
     try {
       const toolContext: Context = {
         ...params.baseContext,
@@ -1123,8 +1201,8 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         apiKey: params.apiKey,
         timeoutMs: params.effectiveTimeoutMs,
         maxRetries: 0,
-        maxTokens: this.resolveMaxTokens(),
-        fetch: getPiAiFetchForApi(params.model.api),
+        maxTokens: this.resolveEffectiveMaxTokens(params.input, params.model),
+        fetch: this.config.fetch ?? getPiAiFetchForApi(params.model.api),
         onPayload: (payload: unknown) => {
           if (typeof payload === 'object' && payload !== null) {
             const p = payload as Record<string, unknown>;
@@ -1167,7 +1245,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         ? stripLineageFields(toolArgs)
         : toolArgs;
 
-      return { success: true, output: protectedArgs };
+      return { success: true, output: protectedArgs, usage: usageSummaryOf(response.usage) };
     } catch (err) {
       if (err instanceof PDRuntimeError && (err.category === 'timeout' || err.category === 'runtime_unavailable')) {
         throw err;
@@ -1198,15 +1276,15 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       input: StartRunInput;
       runId: string;
     },
-  ): Promise<{ success: boolean; output?: unknown; fallbackReason?: string }> {
+  ): Promise<{ success: boolean; output?: unknown; fallbackReason?: string; usage?: { inputTokens: number | null; outputTokens: number | null; source: string } | null }> {
     try {
       const completeOptions: SimpleStreamOptions = {
         signal: params.signal,
         apiKey: params.apiKey,
         timeoutMs: params.effectiveTimeoutMs,
         maxRetries: 0,
-        maxTokens: this.resolveMaxTokens(),
-        fetch: getPiAiFetchForApi(params.model.api),
+        maxTokens: this.resolveEffectiveMaxTokens(params.input, params.model),
+        fetch: this.config.fetch ?? getPiAiFetchForApi(params.model.api),
         onPayload: (payload: unknown) => {
           if (typeof payload === 'object' && payload !== null) {
             const p = payload as Record<string, unknown>;
@@ -1248,7 +1326,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         ? stripLineageFields(parsed)
         : parsed;
 
-      return { success: true, output: protectedParsed };
+      return { success: true, output: protectedParsed, usage: usageSummaryOf(response.usage) };
     } catch (err) {
       if (err instanceof PDRuntimeError && (err.category === 'timeout' || err.category === 'runtime_unavailable')) {
         throw err;
@@ -1305,7 +1383,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
   private async repairLLMCall(
     model: ReturnType<typeof resolveModel>,
     prompt: string,
-    options: { signal: AbortSignal; apiKey: string; systemPrompt?: string },
+    options: { signal: AbortSignal; apiKey: string; systemPrompt?: string; input: StartRunInput },
   ): Promise<string | null> {
     const REPAIR_TIMEOUT_MS = 60_000;
     const repairSignal = AbortSignal.timeout(REPAIR_TIMEOUT_MS);
@@ -1327,7 +1405,14 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       apiKey: options.apiKey,
       timeoutMs: REPAIR_TIMEOUT_MS,
       maxRetries: 0,
-      maxTokens: this.resolveMaxTokens(),
+      maxTokens: this.resolveEffectiveMaxTokens(options.input, model),
+      // PRI-683 transport ownership: repair calls ride the same dedicated PD
+      // undici transport as every other path. This was the only completeSimple
+      // call site missing `fetch` — repair requests silently bypassed the PD
+      // transport (300s-cap bypass fix) AND the AC-6 wire recorder could not
+      // count them, so an authorized request budget was not enforceable on
+      // the repair path.
+      fetch: this.config.fetch ?? getPiAiFetchForApi(model.api),
     });
 
     // extractAssistantTextOrThrow throws:
@@ -1371,9 +1456,13 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
     let lastError: unknown = undefined;
     const overallStartTime = Date.now();
     // PRI-1011: the output budget actually sent for THIS invocation. It starts at
-    // the profile value and only shrinks when a provider rejects it, so a config
-    // that was never rejected keeps its exact previous behavior.
-    let maxTokensBudget = this.resolveMaxTokens();
+    // the per-run effective value (min of the per-request StartRunInput.maxTokens,
+    // profile config, model ceiling when the caller supplies one; otherwise the
+    // legacy profile value) and only shrinks when a provider rejects it, so a
+    // config that was never rejected keeps its exact previous behavior.
+    let maxTokensBudget = input !== undefined
+      ? this.resolveEffectiveMaxTokens(input, model)
+      : this.resolveMaxTokens();
     const getDelay = (attemptIndex: number) => {
       return this.config._testBackoffDelayMs !== undefined
         ? this.config._testBackoffDelayMs
@@ -1414,7 +1503,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
           timeoutMs: currentTimeoutMs,
           maxRetries: 0, // disable pi-ai built-in retry to avoid double-retry
           maxTokens: maxTokensBudget, // PRI-621: undefined = pi-ai native model ceiling; PRI-1011: shrinks on rejection
-          fetch: getPiAiFetchForApi(model.api),
+          fetch: this.config.fetch ?? getPiAiFetchForApi(model.api),
         };
         if (this.config.reasoning !== undefined && this.config.reasoning !== false) {
           completeOptions.reasoning = this.config.reasoning;

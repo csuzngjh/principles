@@ -1,7 +1,7 @@
 {
   "schemaVersion": "pilot-run-config.v0.1-draft",
   "status": "NOT_AUTHORIZED",
-  "note": "G2 wiring template for the real-agent pilot. Preparing this config authorizes NOTHING: every field marked OWNER_DECISION_REQUIRED must be decided by the Owner before any real model runs (SPEC v0.3 §9.2/§10 PR-02; task instruction §5 exit conditions).",
+  "note": "G2 wiring template for the real-agent pilot. Preparing this config authorizes NOTHING: every field marked OWNER_DECISION_REQUIRED must be decided by the Owner before any real model runs (SPEC v0.3 §9.2/§10 PR-02; task instruction §5 exit conditions). The actor wiring itself now EXISTS and is rehearsed offline (lib/actor.mjs + lib/real-runner.mjs + scripts/__tests__/principle-learning-lab-actor.test.ts, deterministic fake transports only).",
   "studyId": "PLE-PILOT-01",
   "workspaceLayout": {
     "root": "<lab-run-root>/arms/<armId>/",
@@ -13,6 +13,12 @@
     ]
   },
   "deliveryChannel": "research-same-channel-v1",
+  "actorWiring": {
+    "transport": "createPiAdapterTransport({ adapter }) in lib/actor.mjs — wraps the PRODUCTION PiAiRuntimeAdapter (startRun/fetchOutput boundary, outputSchemaRef 'learning-lab-actor-action-v1' registered in OUTPUT_SCHEMA_REGISTRY)",
+    "interactiveLoop": "runRealActorOpportunity() — one model round per oracle action, observation-reactive, hard caps enforced",
+    "capsTemplate": "DEFAULT_REAL_ACTOR_CAPS (lib/actor.mjs): maxStepsPerOpportunity=40, maxRequestsPerOpportunity=16, maxInvalidActions=2, maxTokensPerRequest=512, timeoutMsPerRequest=60s, totalBudgetMsPerOpportunity=300s — real-run values frozen at OD-2",
+    "offlineRehearsal": "scripts/__tests__/principle-learning-lab-actor.test.ts (18 tests: reactivity, terminal stop, bounded invalid, caps, NT-01 channel guard, cross-arm isolation, freeze integrity, sidecar validity, study-stop-on-leak)"
+  },
   "arms": [
     {
       "armId": "C-E/E0",
@@ -41,14 +47,31 @@
   ],
   "cAContrastArms": {
     "note": "Same channel, same position, same budget; only the CONTENT differs.",
-    "conditions": ["real generated principle", "high-quality ordinary memory summary (must be honestly strong — no weak strawman)", "raw experience text", "no added content"],
-    "controlsToRecord": ["delivered chars/tokens", "position", "retrieval method", "budget", "generation cost of each condition"]
+    "conditions": [
+      "real generated principle",
+      "high-quality ordinary memory summary (must be honestly strong — no weak strawman)",
+      "raw experience text",
+      "no added content"
+    ],
+    "controlsToRecord": [
+      "delivered chars/tokens",
+      "position",
+      "retrieval method",
+      "budget",
+      "generation cost of each condition"
+    ]
   },
   "budgets": {
     "model": "OWNER_DECISION_REQUIRED — provider, model id, per-run cost ceiling, stop threshold",
     "maxRunsPerArm": "OWNER_DECISION_REQUIRED",
     "repetitions": "OWNER_DECISION_REQUIRED (draft: >=3 seeds)",
-    "llmJudge": "OWNER_DECISION_REQUIRED — default remains mechanical-oracle-only"
+    "llmJudge": "OWNER_DECISION_REQUIRED — default remains mechanical-oracle-only",
+    "httpRequests": {
+      "note": "P1-01: real outbound HTTP requests are enforced by a fail-closed ledger at the fetch boundary (opportunity -> arm -> study). Offline defaults are record-keeping for fake transports and are NEVER a cost authorization.",
+      "httpRequestsPerOpportunity": "OWNER_DECISION_REQUIRED",
+      "httpRequestsPerArm": "OWNER_DECISION_REQUIRED",
+      "httpRequestsPerStudy": "OWNER_DECISION_REQUIRED"
+    }
   },
   "gatesBeforeRealRuns": [
     "G1 gate PASS (this repository, automated)",
@@ -56,11 +79,27 @@
     "memory manifests fingerprinted per arm",
     "candidate freeze interface exercised (freezeCandidate)",
     "stub wiring + isolation tests green (principle-learning-lab test suite)",
+    "real-actor offline rehearsal suite green (principle-learning-lab-actor test suite) — DONE 2026-10-18, 18/18",
     "model credentials and cost ceiling decided (OD-2)"
   ],
   "exitConditions": [
     "credentials missing or cost ceiling undecided -> mark NOT_RUN, do not execute",
     "isolation or contamination check fails -> stop, record, do not proceed",
     "judge-only information leak detected -> stop, record INVALID_PROTOCOL"
-  ]
+  ],
+  "realRunAuthorizationContract": {
+    "schemaVersion": "g2-real-run-authorization.v1",
+    "gate": "createAuthorizedPiTransport (lib/actor.mjs) requires a trusted synchronous evidenceVerifier for Owner-decision and official-pricing references, then validates all parameters and the shared study/arm ledgers BEFORE constructing a transport — failure means zero HTTP requests can occur (fail-closed).",
+    "od1": {
+      "requirement": "preregistration.status must be exactly OWNER_APPROVED (DRAFT_NOT_OWNER_APPROVED can never authorize), plus authorization.od1 {approved: literal true, decisionRef, frozenFixtureHash == dataset.fixtureHash}"
+    },
+    "od2": {
+      "requirement": "authorization.od2 {provider, model, apiKeyEnv, explicit baseUrl, credentialsAvailable: literal true, perRunCostCapUsd, totalCostCapUsd, costBasisRef verified by the trusted evidenceVerifier, costBasis {provider, model, currency: USD, input/output USD per million tokens, effectiveDate, maxInputTokensPerRequest, maxOutputTokensPerRequest}, httpRequestsPerOpportunity/PerArm/PerStudy, stopCondition} — all explicit; offline defaults are not honored"
+    },
+    "od3": {
+      "requirement": "authorization.od3 {seeds >= 1, executionOrder, frozen: literal true}"
+    },
+    "consistencyChecks": "provider/model/apiKeyEnv/baseUrl and HTTP caps must equal authorization; the per-arm ledger must enforce perRunCostCapUsd and share a study-rooted totalCostCapUsd ledger; the trusted evidenceVerifier must resolve the Owner decision and official pricing schedule and match the frozen fixture hash/rates. Each HTTP request is preflighted against authorized URL, model, UTF-8 input-token upper bound, output-token ceiling, and worst-case USD cost; USD reservations commit atomically with HTTP reservations before send. Any missing evidence, cap, body field, or ledger link refuses.",
+    "telemetryAttribution": "retry (llm_max_tokens_downshift) and repair (output_repair_attempted) counts are aggregated from adapter telemetry per arm; per-HTTP-attempt token usage comes from the ledger (null/unavailable when the provider stream carries none)"
+  }
 }
