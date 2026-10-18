@@ -173,6 +173,10 @@ export function createPiAdapterTransport({ adapter }) {
         contextItems: [],
         outputSchemaRef: request.outputSchemaRef,
         timeoutMs: request.timeoutMs,
+        // PRI-966 G2: per-request hard cap (StartRunInput.maxTokens) — the
+        // actor round (512) / I0 reflection (1024) budget reaches the model
+        // request instead of being dropped here.
+        maxTokens: request.maxTokens,
         systemPrompt: request.systemPrompt,
       });
       const output = await adapter.fetchOutput(handle.runId);

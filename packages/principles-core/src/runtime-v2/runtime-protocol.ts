@@ -146,6 +146,16 @@ export const StartRunInputSchema = Type.Object({
   outputSchemaRef: Type.Optional(Type.String()),
   artifactContractRef: Type.Optional(Type.String()),
   timeoutMs: Type.Number({ minimum: 0 }),
+  /**
+   * Optional per-request output-token budget (PRI-966 G2 Learning Lab actor).
+   * When present it is a HARD cap for THIS run's model requests:
+   * effective = min(maxTokens, profile config.maxTokens, model ceiling) — it
+   * can never raise the budget above the profile config or the model's own
+   * output ceiling. When absent, adapter/profile defaulting is unchanged
+   * (backward compatible). Must be a positive finite integer; invalid values
+   * fail loud (input_invalid) before any request is built.
+   */
+  maxTokens: Type.Optional(Type.Number({ minimum: 1 })),
   idempotencyKey: Type.Optional(Type.String()),
   preferredModel: Type.Optional(Type.String()),
   preferredRuntimeProfile: Type.Optional(Type.String()),

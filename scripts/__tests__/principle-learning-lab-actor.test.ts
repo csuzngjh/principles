@@ -108,7 +108,7 @@ describe('core contract ↔ lab registry (single action truth)', () => {
 });
 
 describe('production transport wiring (offline — fake adapter, no socket)', () => {
-  it('createPiAdapterTransport drives the PDRuntimeAdapter boundary with the registered schema ref', async () => {
+  it('createPiAdapterTransport drives the PDRuntimeAdapter boundary with the registered schema ref and the per-request budget', async () => {
     const started: any[] = [];
     const fakeAdapter = {
       async startRun(input: any) {
@@ -135,6 +135,7 @@ describe('production transport wiring (offline — fake adapter, no socket)', ()
     expect(started[0].inputPayload).toBe('USER');
     expect(started[0].systemPrompt).toBe('SYS');
     expect(started[0].contextItems).toEqual([]);
+    expect(started[0].maxTokens).toBe(512); // actor round budget reaches StartRunInput
   });
 
   it('a null fetchOutput becomes a labeled no_response failure', async () => {
@@ -154,6 +155,37 @@ describe('production transport wiring (offline — fake adapter, no socket)', ()
 
   it('rejects an adapter without the boundary methods', () => {
     expect(() => createPiAdapterTransport({ adapter: {} as any })).toThrow(/startRun\/fetchOutput/);
+  });
+
+  it('per-request budgets ride the real runner end-to-end: I0 reflection 1024, actor rounds 512', async () => {
+    const started: any[] = [];
+    let pendingIsI0 = false;
+    const fakeAdapter = {
+      async startRun(input: any) {
+        pendingIsI0 = String(input.taskRef?.taskId ?? '').endsWith('#i0-reflection');
+        started.push(input);
+        return { runId: `run-${started.length}` };
+      },
+      async fetchOutput(runId: string) {
+        return pendingIsI0
+          ? { runId, payload: { policyText: '[EA-policy-marker] fake policy' } }
+          : { runId, payload: { type: 'proceed' } };
+      },
+    };
+    const transport = createPiAdapterTransport({ adapter: fakeAdapter });
+    const { arm } = await runRealArm({ dataset, historyId: 'EA', transport, studyId: 'S' });
+    expect(arm.frozenCandidate.policyText).toBe('[EA-policy-marker] fake policy');
+
+    const i0Calls = started.filter((s) => String(s.taskRef?.taskId ?? '').endsWith('#i0-reflection'));
+    const roundCalls = started.filter((s) => !String(s.taskRef?.taskId ?? '').endsWith('#i0-reflection'));
+    expect(i0Calls.length).toBe(1);
+    expect(i0Calls[0].maxTokens).toBe(1024); // I0 reflection budget (REFLECTION_MAX_TOKENS)
+    expect(i0Calls[0].outputSchemaRef).toBeUndefined(); // free-form JSON path
+    expect(roundCalls.length).toBeGreaterThan(0);
+    for (const call of roundCalls) {
+      expect(call.maxTokens).toBe(512); // actor round budget (DEFAULT_REAL_ACTOR_CAPS.maxTokensPerRequest)
+      expect(call.outputSchemaRef).toBe('learning-lab-actor-action-v1');
+    }
   });
 });
 

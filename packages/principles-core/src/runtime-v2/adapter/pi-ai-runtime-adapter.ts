@@ -474,6 +474,47 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
     return this.config.maxTokens;
   }
 
+  /**
+   * Effective per-run output budget: StartRunInput.maxTokens (PRI-966 G2 lab
+   * actor / I0) when the caller supplies one, else exactly the pre-existing
+   * resolveMaxTokens() behavior (profile value or pi-ai native defaulting —
+   * byte-identical legacy behavior for callers that do not pass the field).
+   *
+   * A present per-request budget is a HARD cap for this run's requests, but it
+   * can never RAISE the budget above an existing authority: effective =
+   * min(per-request, profile config.maxTokens, model ceiling). Bogus
+   * non-positive profile values are ignored as ceilings (they were never
+   * honored budgets); the per-request value itself must be a positive finite
+   * integer — anything else fails loud (input_invalid) BEFORE any request is
+   * built (rc-3), so a broken budget can never silently disable budgeting.
+   */
+  private resolveEffectiveMaxTokens(input: StartRunInput, model: ReturnType<typeof resolveModel>): number | undefined {
+    const perRequest = input.maxTokens;
+    if (perRequest === undefined) {
+      return this.resolveMaxTokens();
+    }
+    if (typeof perRequest !== 'number' || !Number.isFinite(perRequest) || !Number.isInteger(perRequest) || perRequest < 1) {
+      throw new PDRuntimeError(
+        'input_invalid',
+        `StartRunInput.maxTokens must be a positive finite integer, got ${String(perRequest)}`,
+        {
+          maxTokens: perRequest,
+          nextAction: 'Pass a positive integer output-token budget, or omit maxTokens to use the profile default.',
+        },
+      );
+    }
+    let effective = perRequest;
+    const profile = this.config.maxTokens;
+    if (typeof profile === 'number' && Number.isFinite(profile) && profile >= 1 && profile < effective) {
+      effective = profile;
+    }
+    const modelCeiling = model.maxTokens;
+    if (typeof modelCeiling === 'number' && Number.isFinite(modelCeiling) && modelCeiling >= 1 && modelCeiling < effective) {
+      effective = modelCeiling;
+    }
+    return effective;
+  }
+
   async getCapabilities(): Promise<RuntimeCapabilities> {
     return this.defaultCapabilities;
   }
@@ -635,6 +676,10 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
 
     // Get model
     const model = resolveModel(this.config.provider, this.config.model, this.config.baseUrl);
+    // Per-run output budget: each output path below resolves it through
+    // resolveEffectiveMaxTokens(input, model) — validating an explicit
+    // per-request budget BEFORE its first request is built, and applying the
+    // min(per-request, profile, model-ceiling) hard cap.
 
     // Emit runtime_invocation_started telemetry
     this.eventEmitter.emitTelemetry({
@@ -815,7 +860,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
             parsedOutput,
             schemaErrors,
             {
-              llmCaller: (prompt: string) => this.repairLLMCall(model, prompt, { signal, apiKey, systemPrompt }),
+              llmCaller: (prompt: string) => this.repairLLMCall(model, prompt, { signal, apiKey, systemPrompt, input }),
               schemaCheck: (value: unknown) => Value.Check(schema, value),
               schemaErrors: (value: unknown) =>
                 [...Value.Errors(schema, value)].map(e => ({ path: e.path, message: e.message, value: e.value })),
@@ -1123,7 +1168,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         apiKey: params.apiKey,
         timeoutMs: params.effectiveTimeoutMs,
         maxRetries: 0,
-        maxTokens: this.resolveMaxTokens(),
+        maxTokens: this.resolveEffectiveMaxTokens(params.input, params.model),
         fetch: getPiAiFetchForApi(params.model.api),
         onPayload: (payload: unknown) => {
           if (typeof payload === 'object' && payload !== null) {
@@ -1205,7 +1250,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
         apiKey: params.apiKey,
         timeoutMs: params.effectiveTimeoutMs,
         maxRetries: 0,
-        maxTokens: this.resolveMaxTokens(),
+        maxTokens: this.resolveEffectiveMaxTokens(params.input, params.model),
         fetch: getPiAiFetchForApi(params.model.api),
         onPayload: (payload: unknown) => {
           if (typeof payload === 'object' && payload !== null) {
@@ -1305,7 +1350,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
   private async repairLLMCall(
     model: ReturnType<typeof resolveModel>,
     prompt: string,
-    options: { signal: AbortSignal; apiKey: string; systemPrompt?: string },
+    options: { signal: AbortSignal; apiKey: string; systemPrompt?: string; input: StartRunInput },
   ): Promise<string | null> {
     const REPAIR_TIMEOUT_MS = 60_000;
     const repairSignal = AbortSignal.timeout(REPAIR_TIMEOUT_MS);
@@ -1327,7 +1372,14 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       apiKey: options.apiKey,
       timeoutMs: REPAIR_TIMEOUT_MS,
       maxRetries: 0,
-      maxTokens: this.resolveMaxTokens(),
+      maxTokens: this.resolveEffectiveMaxTokens(options.input, model),
+      // PRI-683 transport ownership: repair calls ride the same dedicated PD
+      // undici transport as every other path. This was the only completeSimple
+      // call site missing `fetch` — repair requests silently bypassed the PD
+      // transport (300s-cap bypass fix) AND the AC-6 wire recorder could not
+      // count them, so an authorized request budget was not enforceable on
+      // the repair path.
+      fetch: getPiAiFetchForApi(model.api),
     });
 
     // extractAssistantTextOrThrow throws:
@@ -1371,9 +1423,13 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
     let lastError: unknown = undefined;
     const overallStartTime = Date.now();
     // PRI-1011: the output budget actually sent for THIS invocation. It starts at
-    // the profile value and only shrinks when a provider rejects it, so a config
-    // that was never rejected keeps its exact previous behavior.
-    let maxTokensBudget = this.resolveMaxTokens();
+    // the per-run effective value (min of the per-request StartRunInput.maxTokens,
+    // profile config, model ceiling when the caller supplies one; otherwise the
+    // legacy profile value) and only shrinks when a provider rejects it, so a
+    // config that was never rejected keeps its exact previous behavior.
+    let maxTokensBudget = input !== undefined
+      ? this.resolveEffectiveMaxTokens(input, model)
+      : this.resolveMaxTokens();
     const getDelay = (attemptIndex: number) => {
       return this.config._testBackoffDelayMs !== undefined
         ? this.config._testBackoffDelayMs
