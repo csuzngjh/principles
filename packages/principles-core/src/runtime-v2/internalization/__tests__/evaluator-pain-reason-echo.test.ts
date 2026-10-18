@@ -395,6 +395,11 @@ describe('PRI-861 — painReasonSummary echo into the production rule artifact',
 
   it('fails closed when a context-v2 artifact lacks the independent Owner case stamp', async () => {
     world = await makeWorld({ lineage: 'none', omitOwnerStamp: true });
+    const evalTask = await world.stateManager.getTask(EVAL_ID);
+    if (!evalTask) throw new Error('evaluator task missing');
+    await world.stateManager.updateTask(EVAL_ID, {
+      diagnosticJson: meta({ dependencyTaskIds: [ART_ID], channel: 'code_tool_hook' }),
+    });
     const result = await world.evaluator.run(EVAL_ID);
     expect(result.status).toBe('failed');
     expect((await world.store.listBySourceTaskId(EVAL_ID)).filter((a) => a.artifactKind === 'rule')).toHaveLength(0);

@@ -44,6 +44,7 @@ import {
   type TelemetryEvent,
 } from '@principles/core/runtime-v2';
 import { runInternalizationConsumerCycle, type InternalizationConsumerCyclePorts } from '../src/internalization-consumer-cycle.js';
+import { createEvaluatorRepairDeps } from '../src/internalization-consumer-governance.js';
 
 const dirs: string[] = [];
 
@@ -441,6 +442,65 @@ describe('runInternalizationConsumerCycle — PRI-982 evidence preflight + chann
     expect(captured[0]?.behaviorExamplePack).toEqual(VALID_PACK);
     const { task } = await readTask(workspaceDir, ARTIFICER_TASK_ID);
     expect(task?.status).toBe('succeeded');
+  });
+
+  it('repair seeder preserves the persisted Owner selection through real consumer preflight', async () => {
+    const workspaceDir = makeWorkspace();
+    await seedCodeChannelChain(workspaceDir, VALID_SELECTION);
+    const handle = await createRuntimeStateHandle({ workspaceDir, readonly: false });
+    let repairTaskId: string;
+    try {
+      await handle.stateManager.markTaskSucceeded(ARTIFICER_TASK_ID, 'artificer://original');
+      const repairDeps = createEvaluatorRepairDeps(workspaceDir, handle.stateManager);
+      repairTaskId = await repairDeps.seedArtificerRepairTask({
+        repairPayload: {
+          requiredChanges: ['preserve owner evidence'],
+          concerns: ['owner evidence selection must survive repair seeding'],
+          previousScore: 0.4,
+          repairIteration: 1,
+          sourceArtificerArtifactId: 'pi-art-original',
+          sourceEvaluatorTaskId: 'evaluator-repair-seed',
+        },
+        inheritedDependencyTaskIds: [SCRIBE_TASK_ID],
+        inheritedChannel: 'code_tool_hook',
+        inheritedPipelineMode: 'full_chain',
+        inheritedTimeoutMs: 300_000,
+        inheritedInputArtifactRefs: [],
+        ownerEvidenceSelection: VALID_SELECTION,
+      });
+    } finally {
+      await handle.close().catch(() => undefined);
+    }
+
+    fs.mkdirSync(path.join(workspaceDir, '.state'), { recursive: true });
+    const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+    applyTrajectorySchemaBase(db);
+    db.prepare('INSERT INTO sessions (session_id,started_at,updated_at) VALUES (?,?,?)').run('original-session', 'now', 'now');
+    for (const [id, command] of [[7, 'git status'], [42, 'git commit']]) {
+      db.prepare('INSERT INTO tool_calls (id,session_id,tool_name,outcome,params_json,created_at) VALUES (?,?,?,?,?,?)')
+        .run(id, 'original-session', 'Bash', 'success', JSON.stringify({ command }), 'now');
+    }
+    db.prepare('INSERT INTO pain_events (session_id,source,score,canonical_pain_id,created_at) VALUES (?,?,?,?,?)')
+      .run('original-session', 'manual', 5, 'pain_001', 'now');
+    db.close();
+    const built = buildToolSemanticRegistry([{ rawToolName: 'Bash', canonicalKind: 'execute' }]);
+    if (!built.ok) throw new Error('Invalid test host registry');
+    const evidence = createWorkspaceBehaviorEvidencePort(workspaceDir, built.registry);
+    const assemble = vi.fn((selection: OwnerEvidenceSelection) => evidence.assemble(selection));
+    const captured: CapturedRun[] = [];
+    const runTaskIds = spyArtificerRun(captured);
+    const outcome = await runInternalizationConsumerCycle(workspaceDir, makePorts({
+      behaviorEvidence: { assemble },
+      toolSemantics: built.registry,
+    }));
+
+    expect(outcome.ran).toBe(true);
+    expect(runTaskIds).toEqual([repairTaskId]);
+    expect(assemble).toHaveBeenCalledWith(VALID_SELECTION);
+    expect(captured).toHaveLength(1);
+    expect(captured[0]?.taskId).toBe(repairTaskId);
+    expect(captured[0]?.runtimeAdapter).toBeInstanceOf(ArtificerL2Adapter);
+    expect(captured[0]?.behaviorExamplePack?.sourceNegativeCase.toolName).toBe('Bash');
   });
 
   it('PRI-992: real SQLite port injects the validated pack into the consumer runner boundary', async () => {

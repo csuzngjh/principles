@@ -879,6 +879,9 @@ export function createEvaluatorRunnerDeps(inputs: CreateEvaluatorRunnerDepsInput
           timeoutMs: params.inheritedTimeoutMs,
           inputArtifactRefs: [...params.inheritedInputArtifactRefs],
           outputArtifactRefs: [],
+          ...(params.ownerEvidenceSelection !== undefined
+            ? { ownerEvidenceSelection: params.ownerEvidenceSelection }
+            : {}),
           repairPayload: params.repairPayload,
         }),
       });

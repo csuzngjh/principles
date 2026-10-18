@@ -324,7 +324,7 @@ describe('ScribeRunner (migrated to BasePeerRunner)', () => {
   it('valid runtime output marks task succeeded', async () => {
     const store = new MemoryPIArtifactStore();
     await store.upsertArtifact(makePhilosopherArtifact());
-    const deps = createMockDeps({ artifactStore: store });
+    const deps = createMockDeps({ artifactStore: store, validator: new DefaultScribeValidator({ requireRuleCodeContracts: true }) });
 
     const runner = new ScribeRunner(deps, {
       owner: 'test',
@@ -339,6 +339,28 @@ describe('ScribeRunner (migrated to BasePeerRunner)', () => {
       SCRIBE_TASK_ID,
       expect.stringContaining('scribe://'),
     );
+  });
+
+  it('strict new-generation Scribe validation rejects omitted contracts before writing an artifact', async () => {
+    const store = new MemoryPIArtifactStore();
+    await store.upsertArtifact(makePhilosopherArtifact());
+    const deps = createMockDeps({ artifactStore: store, validator: new DefaultScribeValidator({ requireRuleCodeContracts: true }) });
+    const output = makeScribeOutput();
+    delete (output as { intentContract?: ScribeOutputV1['intentContract'] }).intentContract;
+    delete (output as { executionConditions?: ScribeOutputV1['executionConditions'] }).executionConditions;
+    (deps.runtimeAdapter as unknown as Record<string, unknown>).fetchOutput = vi.fn().mockResolvedValue({ payload: output });
+
+    const runner = new ScribeRunner(deps, {
+      owner: 'test',
+      runtimeKind: 'scribe',
+      pollIntervalMs: 10,
+      timeoutMs: 1000,
+    });
+    const result = await runner.run(SCRIBE_TASK_ID);
+
+    expect(result.status).toBe('failed');
+    expect(deps.stateManager.markTaskSucceeded).not.toHaveBeenCalled();
+    expect(await store.listBySourceTaskId(SCRIBE_TASK_ID)).toHaveLength(0);
   });
 
   // ── Existing behavior: invalid output does not write artifact ──────────────

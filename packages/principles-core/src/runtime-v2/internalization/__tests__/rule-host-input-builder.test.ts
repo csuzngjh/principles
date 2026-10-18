@@ -157,6 +157,19 @@ describe('PRI-439 Phase 3: normalizePathPure — 6 path types', () => {
     expect(normalizePathPure('docs\\..\\..\\secrets.json', 'C:\\work\\project')).toBe('../secrets.json');
   });
 
+  it('preserves parent segments that escape a relative workspace root', async () => {
+    const { normalizePathPure } = await getModule();
+    expect(normalizePathPure('../secrets.json', '.')).toBe('../secrets.json');
+    expect(normalizePathPure('../../secrets.json', 'src')).toBe('../../secrets.json');
+    expect(normalizePathPure('../../../secrets.json', '.')).toBe('../../../secrets.json');
+  });
+
+  it('clamps relative traversal at the filesystem root for absolute workspaces', async () => {
+    const { normalizePathPure } = await getModule();
+    expect(normalizePathPure('../../../secrets.json', '/work/project')).toBe('../../secrets.json');
+    expect(normalizePathPure('a/../file.txt', '/work/project')).toBe('file.txt');
+  });
+
   it('uses final lexical ownership when relative segments leave and return to the workspace', async () => {
     const { normalizePathPure } = await getModule();
     expect(normalizePathPure('../project/docs/./readme.md', 'C:/work/project')).toBe('docs/readme.md');

@@ -87,3 +87,22 @@
 独立 Luna Standards / Spec 双轴评审，发现并修复 shadow 摘要漏绑定、历史缺项目归属、截断/未知工具的负事实误判、实时准入先写行导致后写判重丢项目、旧库准入迁移漏接。对应正式 ERR occurrence 为 `OCC-20261018T053043Z-jnqgx59egp`，准确标记交接前发现；无本轮缺陷已经生产逃逸的声称。
 
 Pass2 路由 HIGH EP-03/09/05/01/02/04：分别有显式停点、负控与真实生产入口、既有两轮修订、未知边界、跨包/旧库消费者、CLI/Hook协议回归证据。EP-11 无 i18n组件变更不适用；无新增宿主安装发现写入。没有实跑新 live Codex 会话，没有合并、发布、升级安装或批准/停用生产规则；原痛苦的 RuleCode 与长期行为收益仍未闭环。
+
+## R2：PR #2077 四项评审修复
+
+四条 CodeRabbit 评论均核实属实；修复留在原 PR，不重开工作树或另建交付目录。
+
+1. **项目身份规范化**：轨迹写入与历史查询都使用 `path.resolve`。真实 Hook→SQLite→provider 回归覆盖尾分隔符、`unused/..` 的 cwd；旧 NULL/非规范历史不猜补。
+2. **Scribe test-double 契约**：仅测试替身补齐明确的意图和执行条件，从真实输入获取 philosopher artifact ID。真实 SQLite、CLI handler 和 ScribeRunner 集成验证血缘与严格契约；缺字段负控保留，生产验证没有放松。
+3. **旧 V2 工件缺系统戳**：复用既有有界 Artificer 修订链，保持模型原判词与系统恢复处置分开；需要从当前有效 Owner pack 重新生成，禁止给历史产物补造戳记。恢复意图必须持久化并由中央 transition 仲裁，防止同时播种 rollout。独立复核进一步发现修订任务未继承原任务的 `ownerEvidenceSelection`，会让手工传 pack 的核心测试通过而真实 consumer 停在缺样例；因此 core→shared host seeder→真实 preflight，以及 CLI seeder 均需保持这一可信血缘。选择仍必须由当前 assembler 重新读取与校验，缺样例仍走现有证据停点。
+4. **相对根路径**：相对 projectDir 保留越界的完整 `..` 段，默认沙箱根 `.` 不再把 `../secrets.json` 折成内部路径；绝对文件系统根仍保持原有收敛语义。
+
+R2 没有新表、新服务、新开关、新网络能力或新审批权威。恢复使用既有 completion intent 的可选原因码，使重启继续遵守相同修订路由；旧 metadata 兼容，未知原因拒绝解析。复杂度增量是同一任务 metadata 的加法字段，必要性是防止瞬时恢复判断在重启后丢失；可由源码 revert 撤回。
+
+这些是源码与隔离接线修复，不是安装版验收。没有恢复生产原痛苦任务、伪造 Owner 标签或批准规则；原审批原则仍缺可信设计批准来源。
+
+R2 Standards / Specification 分轴复核：未放宽 runtime schema、Owner 样例或独立 replay 门；补齐的是现有修订链的持久恢复原因和证据选择接线。重启回归断言一次模型调用/一次修复播种；真实 Artificer→Evaluator→orchestrator 回归精确断言独立 replay 通过、validated Rule 工件和 `successor_created` 的 rollout 依赖。host 单独用真实 SQLite trajectory、assembler、consumer preflight 验证修订任务仍能读取当前 Owner 选择，CLI 覆盖同一选择的 metadata round-trip。既有缺样例、来源异常零 Artificer 调用的防御保持。
+
+Pass2（`origin/main`）HIGH EP-03/09/04/05/02/01：分别对应严格字段/可观测停点、真实后台入口、CLI 契约、持久化有界修订及重启去重、跨包 seeder 消费者、相对路径/未知边界；本轮不新增通用扫描器或重试平台。遥测注册、docs、security baseline、runtime-writers 与 pipeline-contract 均通过。四项根因由官方 ERR writer 复用 P-ERR-080/025/024 记录，未声称已经生产逃逸；无本轮新触发且未处置的热点。
+
+本地全量回归：core 8572 passed、6 skipped、3 todo（7 文件 skipped）；host-runtime 525 passed；Codex 298 passed、1 skipped；CLI 1973 passed、2 skipped（144 文件，maxWorkers=2）。远端当前 head 检查以 PR 最新验证节为准；不把本轮之前的 33 项绿色迁移为修复后当前 head 证据。本地第一轮 CLI 测试与 core 重建重叠，造成瞬时产物缺失/超时；停止重建后从冻结产物重跑，未据此修改产品代码或提高超时。

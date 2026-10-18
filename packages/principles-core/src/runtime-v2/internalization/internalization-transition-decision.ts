@@ -56,6 +56,9 @@ export interface TransitionDecisionInput {
    * 未组装,修复环必须先行),转 REVISION_REQUIRED 阻断 rollout 后继播种。
    */
   adversarialReplayFailed?: boolean;
+  /** System-owned completion intent requires Artificer regeneration before
+   * an approved evaluator may advance (the LLM verdict stays unchanged). */
+  ownerGoldenTraceProvenanceRecoveryRequired?: boolean;
 }
 
 export interface TransitionDecision {
@@ -71,7 +74,10 @@ const ROLLOUT_VERDICTS = new Set(['approve_rollout', 'needs_revision', 'reject']
  * 调用方 (orchestrator.commitNextTaskProposal) 是唯一后继播种漏斗。
  */
 export function decideInternalizationTransition(input: TransitionDecisionInput): TransitionDecision {
-  const { taskKind, taskStatus, runnerDecision, legacyRunnerDecision, isRepairTask, revisionCount, adversarialReplayFailed } = input;
+  const {
+    taskKind, taskStatus, runnerDecision, legacyRunnerDecision, isRepairTask,
+    revisionCount, adversarialReplayFailed, ownerGoldenTraceProvenanceRecoveryRequired,
+  } = input;
 
   // 1. 状态门: 只有 succeeded 的任务参与推进仲裁
   if (taskStatus === 'needs_human_review') {
@@ -89,6 +95,9 @@ export function decideInternalizationTransition(input: TransitionDecisionInput):
 
   // 3. 决策型 runner: durable verdict 第一,显式 legacy verdict 第二,皆无 → 阻断 (P0-3)
   if (taskKind === 'evaluator') {
+    if (ownerGoldenTraceProvenanceRecoveryRequired === true) {
+      return { kind: 'REVISION_REQUIRED', reason: 'evaluator_owner_golden_trace_provenance_recovery_required' };
+    }
     const verdict = runnerDecision
       ?? (legacyRunnerDecision !== undefined && EVALUATOR_VERDICTS.has(legacyRunnerDecision) ? legacyRunnerDecision : undefined);
     if (verdict === undefined) {
@@ -147,5 +156,8 @@ export function transitionInputFromTask(
     isRepairTask: piTask.repairPayload !== undefined,
     revisionCount: piTask.revisionCount ?? 0,
     ...(extras?.adversarialReplayFailed ? { adversarialReplayFailed: true } : {}),
+    ...(piTask.completionIntent?.transitionOverrideReason === 'owner_golden_trace_provenance_missing'
+      ? { ownerGoldenTraceProvenanceRecoveryRequired: true }
+      : {}),
   };
 }

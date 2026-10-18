@@ -54,6 +54,25 @@ describe('evaluateInRefinerSandbox', () => {
     ]);
   });
 
+  it('keeps a path outside the default relative sandbox workspace outside', () => {
+    let observed: { normalizedPath: string | null; isRiskPath: boolean } | undefined;
+    const trace = makeTrace([
+      makeCase({ caseId: 'relative-escape', expectedDecision: 'allow', params: { path: '../secrets.json' } }),
+    ]);
+    const result = evaluateInRefinerSandbox('safe code', trace, {
+      evaluateCode: (input) => {
+        observed = {
+          normalizedPath: input.action.normalizedPath,
+          isRiskPath: input.workspace.isRiskPath,
+        };
+        return { decision: 'allow', matched: false, reason: 'path is outside the relative workspace' };
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(observed).toEqual({ normalizedPath: '../secrets.json', isRiskPath: false });
+  });
+
   it('returns success=true when all cases pass', () => {
     const trace = makeTrace([
       makeCase({ caseId: 'neg-1', kind: 'negative', expectedDecision: 'block' }),

@@ -43,11 +43,12 @@ afterEach(() => {
 describe('Codex live RuleContextV2 history path', () => {
   it('decodes native PostToolUse, persists it through the production writer, and reads it at the next PreToolUse', async () => {
     const { workspaceDir, projectDir } = workspace();
+    const noncanonicalProjectDir = `${path.join(projectDir, 'unused', '..')}${path.sep}`;
     const common = {
       session_id: 'native-codex-session',
       turn_id: 'native-codex-turn',
       transcript_path: null,
-      cwd: projectDir,
+      cwd: noncanonicalProjectDir,
       model: 'gpt-5.6',
       permission_mode: 'default',
     };
@@ -62,8 +63,13 @@ describe('Codex live RuleContextV2 history path', () => {
     // Match pd-hook: project cwd remains decoded in options, while resolved
     // PD workspace owns the trajectory DB and is attached to HostEvent.context.
     const post = { ...decodedPost, context: { ...decodedPost.context, workspaceDir } };
-    const runtime = createProductionHostRuntime({ hostKind: 'codex', projectDir, toolSemantics: CODEX_TOOL_SEMANTICS });
+    const runtime = createProductionHostRuntime({ hostKind: 'codex', projectDir: noncanonicalProjectDir, toolSemantics: CODEX_TOOL_SEMANTICS });
     await runtime.dispatch(post);
+
+    const stored = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+    const storedProjectDir: unknown = stored.prepare('SELECT project_dir FROM tool_calls WHERE tool_use_id = ?').get('native-read-call');
+    stored.close();
+    expect(storedProjectDir).toEqual({ project_dir: path.resolve(projectDir) });
 
     const decodedPre = decodeCodexInput({
       ...common,
@@ -75,7 +81,7 @@ describe('Codex live RuleContextV2 history path', () => {
     const pre = { ...decodedPre, context: { ...decodedPre.context, workspaceDir } };
     const context = createCodexRuleContextProvider({
       workspaceDir,
-      projectDir,
+      projectDir: noncanonicalProjectDir,
       enabled: true,
       toolSemantics: CODEX_TOOL_SEMANTICS,
       cutoffAt: new Date(Date.now() + 1_000),

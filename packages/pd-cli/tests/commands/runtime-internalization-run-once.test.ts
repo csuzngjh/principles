@@ -1038,6 +1038,38 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     expect(output.artifactId).toBe('pi-art-task-scribe-001-run-scribe-001');
     expect(output.resultRef).toBe('scribe://run-scribe-001');
     expect(output.runnerResult.status).toBe('succeeded');
+
+    // Inspect the actual run-once test-double payload builder through the
+    // adapter constructor, then use the real strict Scribe parser/validator.
+    const testDouble = vi.mocked(
+      await import('@principles/core/runtime-v2').then(m => m.TestDoubleRuntimeAdapter),
+    );
+    const adapterArgs: unknown = testDouble.mock.calls.at(-1)?.[0];
+    const onStartRun: unknown = adapterArgs && typeof adapterArgs === 'object' ? Reflect.get(adapterArgs, 'onStartRun') : undefined;
+    const onFetchOutput: unknown = adapterArgs && typeof adapterArgs === 'object' ? Reflect.get(adapterArgs, 'onFetchOutput') : undefined;
+    expect(onStartRun).toBeTypeOf('function');
+    expect(onFetchOutput).toBeTypeOf('function');
+    if (typeof onStartRun !== 'function' || typeof onFetchOutput !== 'function') throw new Error('Scribe test-double callbacks are unavailable');
+    Reflect.apply(onStartRun, undefined, [{ inputPayload: JSON.stringify({ sourcePhilosopherArtifactId: 'pi-art-resolved-philosopher' }) }]);
+    const wrappedOutput: unknown = Reflect.apply(onFetchOutput, undefined, ['run-scribe-001']);
+    const payload: unknown = wrappedOutput && typeof wrappedOutput === 'object' ? Reflect.get(wrappedOutput, 'payload') : undefined;
+    const actualCore = await vi.importActual<typeof import('@principles/core/runtime-v2')>('@principles/core/runtime-v2');
+    const strictValidator = new actualCore.DefaultScribeValidator({ requireRuleCodeContracts: true });
+    expect(payload).toMatchObject({
+      sourcePhilosopherArtifactId: 'pi-art-resolved-philosopher',
+      sourceTrace: { philosopherArtifactId: 'pi-art-resolved-philosopher' },
+    });
+    expect(await strictValidator.validate(payload, 'task-scribe-001', 'pi-art-resolved-philosopher'))
+      .toMatchObject({ valid: true });
+
+    if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('Scribe test-double payload is not an object');
+    const missingContracts: Record<string, unknown> = { ...payload };
+    delete missingContracts['intentContract'];
+    delete missingContracts['executionConditions'];
+    const rejected = await strictValidator.validate(missingContracts, 'task-scribe-001', 'pi-art-resolved-philosopher');
+    expect(rejected.valid).toBe(false);
+    expect(rejected.errors).toContain('intentContract is required for new RuleCode generation');
+    expect(rejected.errors).toContain('executionConditions is required for new RuleCode generation');
   });
 
   it('auto-enqueue: --runner scribe creates artificer successor', async () => {

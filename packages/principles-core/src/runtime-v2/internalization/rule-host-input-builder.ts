@@ -30,12 +30,13 @@ interface ParsedPathRoot {
   segments: string[];
 }
 
-function resolveSegments(path: string): string[] {
+function resolveSegments(path: string, preserveLeadingParents = false): string[] {
   const result: string[] = [];
   for (const segment of path.split('/').filter((value) => value.length > 0)) {
     if (segment === '.') continue;
     if (segment === '..') {
-      if (result.length > 0) result.pop();
+      if (result.length > 0 && result[result.length - 1] !== '..') result.pop();
+      else if (preserveLeadingParents) result.push('..');
     } else {
       result.push(segment);
     }
@@ -72,7 +73,7 @@ function parsePathRoot(path: string): ParsedPathRoot {
     return { kind: 'posix', root: 'posix:/', segments: resolveSegments(path) };
   }
 
-  return { kind: 'relative', root: '', segments: resolveSegments(path) };
+  return { kind: 'relative', root: '', segments: resolveSegments(path, true) };
 }
 
 function isSegmentPrefix(path: string[], project: string[], caseInsensitive: boolean): boolean {
@@ -134,7 +135,8 @@ function normalizeAbsoluteOrRelative(
   for (const segment of originalFile.split('/').filter((value) => value.length > 0)) {
     if (segment === '.') continue;
     if (segment === '..') {
-      if (resolved.length > 0) resolved.pop();
+      if (resolved.length > 0 && resolved[resolved.length - 1] !== '..') resolved.pop();
+      else if (project.kind === 'relative') resolved.push('..');
     } else {
       resolved.push(segment);
     }

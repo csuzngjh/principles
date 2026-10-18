@@ -53,6 +53,7 @@ import {
 import { EvaluatorPromptBuilder, deriveRequirementLedger, type PreviousEvaluationContext, type HostToolCatalogFacts } from './evaluator-prompt-builder.js';
 import { resolveFormationContext } from './formation-context.js';
 import type { FormationContext, FormationTaskView } from './formation-context.js';
+import type { OwnerEvidenceSelection } from './evidence-readiness.js';
 import type { ArtificerHostSemanticContext } from './artificer-prompt-builder.js';
 import { reconcileLineageEcho, type InternalizationChannel, type PipelineTopologyMode, type ArtifactRef } from './peer-runner-contracts.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
@@ -84,6 +85,14 @@ function commonPrefixLength(a: string, b: string): number {
   let i = 0;
   while (i < x.length && i < y.length && x[i] === y[i]) i += 1;
   return i;
+}
+
+/** Drop any model-shaped replay claim when this run did not execute the gate. */
+function withoutAdversarialResult(output: EvaluatorOutputV1): EvaluatorOutputV1 {
+  if (!isEvaluatorOutputV2(output)) return output;
+  const { adversarialResult, ...sanitized } = output;
+  void adversarialResult;
+  return sanitized;
 }
 
 // ── Evaluator-specific context ────────────────────────────────────────────────
@@ -385,6 +394,8 @@ export interface SeedArtificerRepairParams {
   readonly inheritedTimeoutMs: number;
   /** Input artifact refs inherited from the original artificer task. */
   readonly inheritedInputArtifactRefs: readonly ArtifactRef[];
+  /** Authorized Owner evidence selection inherited from the original Artificer task. */
+  readonly ownerEvidenceSelection?: OwnerEvidenceSelection;
 }
 
 export interface EvaluatorRunnerDeps extends PeerRunnerDeps {
@@ -997,6 +1008,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // explicitly through applyEvaluatorDecisionEffects → maybeSeedArtificerRepair
     // keeps provenance structural rather than inferred.
     let diagnosticReplayEvidence: { ran: true; passed: boolean; failedCaseCount: number } | undefined;
+    let ownerStampRecoveryRequired = false;
 
     const gateAssessment = assessArtificerCodeBearing(context.artificerArtifact);
     const outputWantsGate = isEvaluatorOutputV2(output);
@@ -1092,12 +1104,48 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         });
       }
     } else if (!this.gateDeps) {
+      const taskChannel = hydratePITaskRecord(task)?.channel;
+      const sourceArtificer = context.artificerArtifact
+        ? this.parseArtificerArtifact(context.artificerArtifact)
+        : null;
+      const promptHasUnstampedV2Code = taskChannel === 'prompt'
+        && sourceArtificer?.requiresContextVersion === 2
+        && !Array.isArray(sourceArtificer.ownerGoldenTraceCases);
       this.emitEvent('adversarial_replay_skipped', taskId, {
         runId,
         reason: 'gate_deps_not_injected',
         nextAction: 'wire_gateDeps_createProductionGateDeps_into_evaluator_runner_assembly',
       });
-      if (gateAssessment.codeBearing) {
+      if (promptHasUnstampedV2Code) {
+        // An accidental prompt-channel V2 artifact is not a RuleCode request.
+        // Keep the ordinary prompt verdict, but drop any model-shaped replay
+        // claim so it cannot be mistaken for executed gate evidence.
+        finalOutput = withoutAdversarialResult(finalOutput);
+        await this.stateManager.updateRunOutput(runId, JSON.stringify(finalOutput));
+        try {
+          await this.artifactStore.upsertArtifact({
+            artifactId,
+            artifactKind: 'principle',
+            sourceTaskId: taskId,
+            lineageArtifactIds,
+            validationStatus: 'pending',
+            contentJson: JSON.stringify(finalOutput),
+            createdAt: now,
+            updatedAt: new Date().toISOString(),
+          });
+        } catch (persistErr) {
+          this.emitEvent('adversarial_result_persist_failed', taskId, {
+            runId,
+            errorMessage: persistErr instanceof Error ? persistErr.message : String(persistErr),
+          });
+        }
+        this.emitEvent('prompt_code_artifact_ignored', taskId, {
+          runId,
+          sourceArtificerArtifactId: context.sourceArtificerArtifactId,
+          reason: 'owner_golden_trace_stamp_missing',
+          nextAction: 'prompt_channel_does_not_create_rulecode_without_an_explicit_code_tool_hook_request',
+        });
+      } else if (gateAssessment.codeBearing) {
         // PRI-634 R2 (wiring regression guard): a code-bearing Artificer
         // artifact REQUIRES the deterministic gate. Proceeding would yield
         // succeeded + adversarialResult=null — the exact state that broke
@@ -1150,6 +1198,66 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
           });
         }
       } else if (gateAssessment.codeBearing) {
+        const missingOwnerStamp = replayOutcome.skipReason === 'owner_golden_trace_stamp_missing_or_invalid';
+        const taskChannel = hydratePITaskRecord(task)?.channel;
+        if (missingOwnerStamp && taskChannel === 'prompt') {
+          // Prompt-channel artifacts are not eligible to create RuleCode.
+          // Preserve the ordinary prompt result, but discard any model-shaped
+          // replay claim so it cannot masquerade as executed gate evidence.
+          finalOutput = withoutAdversarialResult(finalOutput);
+          await this.stateManager.updateRunOutput(runId, JSON.stringify(finalOutput));
+          try {
+            await this.artifactStore.upsertArtifact({
+              artifactId,
+              artifactKind: 'principle',
+              sourceTaskId: taskId,
+              lineageArtifactIds,
+              validationStatus: 'pending',
+              contentJson: JSON.stringify(finalOutput),
+              createdAt: now,
+              updatedAt: new Date().toISOString(),
+            });
+          } catch (persistErr) {
+            this.emitEvent('adversarial_result_persist_failed', taskId, {
+              runId,
+              errorMessage: persistErr instanceof Error ? persistErr.message : String(persistErr),
+            });
+          }
+          this.emitEvent('adversarial_replay_skipped', taskId, {
+            runId,
+            reason: replayOutcome.skipReason,
+            channel: 'prompt',
+            nextAction: 'prompt_channel_result_kept_without_rulecode_eligibility',
+          });
+        } else if (missingOwnerStamp && this.isRepairLoopEnabled()) {
+          // Missing system-owned provenance is recoverable through the existing
+          // bounded Artificer repair loop. Do not fabricate a gate result.
+          ownerStampRecoveryRequired = true;
+          finalOutput = withoutAdversarialResult(finalOutput);
+          await this.stateManager.updateRunOutput(runId, JSON.stringify(finalOutput));
+          try {
+            await this.artifactStore.upsertArtifact({
+              artifactId,
+              artifactKind: 'principle',
+              sourceTaskId: taskId,
+              lineageArtifactIds,
+              validationStatus: 'pending',
+              contentJson: JSON.stringify(finalOutput),
+              createdAt: now,
+              updatedAt: new Date().toISOString(),
+            });
+          } catch (persistErr) {
+            this.emitEvent('adversarial_result_persist_failed', taskId, {
+              runId,
+              errorMessage: persistErr instanceof Error ? persistErr.message : String(persistErr),
+            });
+          }
+          this.emitEvent('artificer_owner_stamp_repair_required', taskId, {
+            runId,
+            sourceArtificerArtifactId: context.sourceArtificerArtifactId,
+            nextAction: 'regenerate_artificer_from_current_validated_owner_behavior_example_pack',
+          });
+        } else {
         // ── PRI-634 R3 (terminal-state invariant) ──
         // A code-bearing Artificer artifact that reached `approved` MUST leave
         // this block carrying an adversarialResult. Anything else reproduces
@@ -1175,6 +1283,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
           errorCategory: 'input_invalid',
           failureReason: `PRI-634 R3: Artificer artifact ${context.sourceArtificerArtifactId ?? '(unknown)'} is code-bearing and the evaluator approved it, but the deterministic adversarial replay did not run (reason: ${replayOutcome.skipReason ?? 'unknown'}). Refusing to report succeeded with adversarialResult=null — that is the chain-48371236 terminal state. Fix: ${recoveryAction}`,
         });
+        }
       }
     }
 
@@ -1214,10 +1323,15 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       && finalOutput.evaluation.decision === 'approved'
       && finalOutput.adversarialResult?.passed === false
       && this.isRepairLoopEnabled();
+    const approvedOwnerStampRecovery = ownerStampRecoveryRequired
+      && finalOutput.evaluation.decision === 'approved';
 
     await this.recordCompletionOrThrow(taskId, runId, {
       decision: finalOutput.evaluation.decision,
       governanceEffect,
+      ...(approvedOwnerStampRecovery
+        ? { transitionOverrideReason: 'owner_golden_trace_provenance_missing' as const }
+        : {}),
     });
 
     const ruleAssemblyInput = {
@@ -1233,7 +1347,9 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       diagnosticReplayEvidence,
       // PRI-843: mismatch 处置在效果层先于一切 decision 分支执行
       ...(governanceEffect !== undefined ? { governanceEffect } : {}),
-      ...(approvedReplayFailed ? { transitionDecisionOverride: 'needs_revision' as const } : {}),
+      ...(approvedReplayFailed || approvedOwnerStampRecovery
+        ? { transitionDecisionOverride: 'needs_revision' as const }
+        : {}),
     });
     if (effectResult.kind === 'human_review') {
       return effectResult.result;
@@ -1682,9 +1798,10 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       readonly decision: string;
       /** Round-2 R2: deriveGovernanceEffect 的结论；record 只持久化不判断。 */
       readonly governanceEffect?: { selectedEffect?: 'needs_human_review'; effectReasonCode?: string };
+      readonly transitionOverrideReason?: 'owner_golden_trace_provenance_missing';
     },
   ): Promise<void> {
-    const { decision, governanceEffect } = decisionAndEffect;
+    const { decision, governanceEffect, transitionOverrideReason } = decisionAndEffect;
     try {
       const raw = await this.stateManager.getTask(taskId);
       if (!raw) throw new Error(`task ${taskId} not found`);
@@ -1705,6 +1822,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
           ...(governanceEffect?.effectReasonCode !== undefined
             ? { effectReasonCode: governanceEffect.effectReasonCode }
             : {}),
+          ...(transitionOverrideReason !== undefined ? { transitionOverrideReason } : {}),
         },
       });
       await this.stateManager.updateTaskDiagnosticJson(taskId, createPITaskDiagnosticJson(merged));
@@ -1855,6 +1973,9 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       contextHash,
       sourceArtificerArtifactId: assemblySourceId,
       ruleAssemblyInput: { artificerArtifact: artificerContent, sourceArtificerArtifactId: assemblySourceId },
+      ...(intent.transitionOverrideReason === 'owner_golden_trace_provenance_missing'
+        ? { transitionDecisionOverride: 'needs_revision' as const }
+        : {}),
     });
     if (effectResult.kind === 'human_review') {
       return effectResult.result;
@@ -2262,8 +2383,9 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // 的 partition) 派生; resume 路径经 recoverIntentOutput 后重读本 intent,
     // 无需重算也无需任何瞬时变量。瞬时 evidence 门只作 fresh 快路径与
     // 派生时的 provenance 校验, 不再是出界判定的唯一载体 (R2 漂移断点)。
+    const completionIntent = await this.readPendingOrAppliedCompletionIntent(evaluatorTaskId);
     {
-      const intent = await this.readPendingOrAppliedCompletionIntent(evaluatorTaskId);
+      const intent = completionIntent;
       // Round-3: hydrate 将 selectedEffect 归一化为 effect —— 读侧必须两键
       // 同读，否则 fresh 分支永不命中、静默回退瞬时 evidence (ERR-024 键不对称)。
       if ((intent?.selectedEffect ?? intent?.effect) === 'needs_human_review'
@@ -2370,7 +2492,12 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // out-of-scope case 清单随载荷流动 — 修复 LLM 明确知道哪些失败属于
     // 通道设计限制(不得尝试满足),哪些是真实 Rule 缺陷(必须修复)。
     const repairPayload: RepairPayload = {
-      requiredChanges: [...output.evaluation.requiredChanges],
+      requiredChanges: completionIntent?.transitionOverrideReason === 'owner_golden_trace_provenance_missing'
+        ? [
+            ...output.evaluation.requiredChanges,
+            'Regenerate this RuleCode from the current validated Owner BehaviorExamplePack so the persisted artifact carries the system-owned ownerGoldenTraceCases; preserve the approved principle semantics.',
+          ]
+        : [...output.evaluation.requiredChanges],
       concerns: [...output.evaluation.concerns],
       previousScore: output.evaluation.score,
       repairIteration: priorRepairIteration + 1,
@@ -2395,6 +2522,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     let inheritedPipelineMode: PipelineTopologyMode | undefined;
     let inheritedTimeoutMs = 300_000;
     let inheritedInputArtifactRefs: ArtifactRef[] = [];
+    let ownerEvidenceSelection: OwnerEvidenceSelection | undefined;
     for (const depId of evaluatorDeps) {
       const depTask = await this.stateManager.getTask(depId);
       if (!depTask) continue;
@@ -2406,6 +2534,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       inheritedPipelineMode = piArtificer.pipelineMode;
       inheritedTimeoutMs = piArtificer.timeoutMs;
       inheritedInputArtifactRefs = piArtificer.inputArtifactRefs;
+      ({ ownerEvidenceSelection } = piArtificer);
       break;
     }
 
@@ -2431,6 +2560,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         inheritedPipelineMode,
         inheritedTimeoutMs,
         inheritedInputArtifactRefs,
+        ownerEvidenceSelection,
       });
       this.emitEvent('repair_task_seeded', evaluatorTaskId, {
         repairTaskId,

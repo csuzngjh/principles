@@ -222,6 +222,9 @@ export function createEvaluatorRepairDeps(
           timeoutMs: params.inheritedTimeoutMs,
           inputArtifactRefs: [...params.inheritedInputArtifactRefs],
           outputArtifactRefs: [],
+          ...(params.ownerEvidenceSelection !== undefined
+            ? { ownerEvidenceSelection: params.ownerEvidenceSelection }
+            : {}),
           repairPayload: params.repairPayload,
         }),
       });
