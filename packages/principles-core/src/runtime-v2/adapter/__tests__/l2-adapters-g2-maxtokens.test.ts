@@ -15,8 +15,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 type LoopCfg = { maxTokens?: number; model?: unknown };
 
-const dreamerHoisted = vi.hoisted(() => ({ lastLoopConfig: {} }));
-const artificerHoisted = vi.hoisted(() => ({ lastLoopConfig: {}, expecting: false }));
+const dreamerHoisted = vi.hoisted((): { lastLoopConfig: LoopCfg } => ({ lastLoopConfig: {} }));
+const artificerHoisted = vi.hoisted((): { lastLoopConfig: LoopCfg; expecting: boolean } => ({ lastLoopConfig: {}, expecting: false }));
 
 vi.mock('@earendil-works/pi-agent-core', () => ({
   runAgentLoop: vi.fn(async (_prompts: unknown, _context: unknown, config: LoopCfg) => {
