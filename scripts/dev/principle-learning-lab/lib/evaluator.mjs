@@ -68,8 +68,14 @@ export function judgeObjectiveTaskStatus(outcome) {
 /**
  * Adjudicate one (arm, opportunity) run. Pure function of
  * (gold record, oracle outcome, arm metadata).
+ *
+ * `actorRunStatus` defaults to 'COMPLETED' (the G1 simulated case — a
+ * deterministic strategy always "completes"). Real-actor arms pass their own
+ * status (FAILED/NO_RESPONSE/INTERRUPTED); the row stays and is graded on its
+ * oracle outcome either way (prereg futureOpportunityRule — no denominator
+ * shrinking), NT-04/NT-05.
  */
-export function adjudicate({ studyId, armId, probeId, opportunityId, goldRecord, outcome }) {
+export function adjudicate({ studyId, armId, probeId, opportunityId, goldRecord, outcome, actorRunStatus = 'COMPLETED' }) {
   const alignment = judgeAlignment(goldRecord, outcome);
   const objectiveTaskStatus = judgeObjectiveTaskStatus(outcome);
   if (!ALIGNMENT_VALUES.includes(alignment.alignment)) throw new Error(`evaluator bug: bad alignment ${alignment.alignment}`);
@@ -86,7 +92,7 @@ export function adjudicate({ studyId, armId, probeId, opportunityId, goldRecord,
     // for every row, and actor outcomes are still graded normally (SPEC §6.2
     // requires this combination to be legal and tested).
     pipelineReachability: 'NOT_REACHED',
-    actorRunStatus: 'COMPLETED',
+    actorRunStatus,
     objectiveTaskStatus,
     principleAlignment: alignment.alignment,
     alignmentReasonCode: alignment.reasonCode,

@@ -60,11 +60,15 @@ scripts/dev/principle-learning-lab/
 │   ├── runner.mjs           # arm 执行引擎（学习→冻结→交互执行→裁定）
 │   ├── report.mjs           # G1 gate + comparison-report 渲染
 │   ├── prereg.mjs           # 预注册草案机器校验（PRI-970）
-│   └── g2.mjs               # G2 接线：同通道投递/Model Stub/Memory Manifest/污染检查（PRI-971）
+│   ├── g2.mjs               # G2 接线：同通道投递/Model Stub/Memory Manifest/污染检查（PRI-971）
+│   ├── actor.mjs            # G2 真实 Actor：transport seam（生产 PiAiRuntimeAdapter / 离线 Fake）+
+│                            #  逐轮交互循环（请求/步数/token/超时/无效输出全部有界，NT-01 通道守卫）
+│   └── real-runner.mjs      # G2 真实 arm 引擎：I0 反思→freezeCandidate→同通道投递→Oracle→三层裁定
 ├── fixtures/                # 冻结研究数据集（本 lab 拥有；SPEC §6.1 的 datasets/ 布局仅是建议，
 │                            #  仓库习惯是 lab 自持夹具，与 closure-lab 一致）
 │   └── pilot-run-config.json# 真实 Agent Pilot 运行配置模板（NOT_AUTHORIZED）
-scripts/__tests__/principle-learning-lab.test.ts   # 46 项回归（含 8 硬负测试）
+scripts/__tests__/principle-learning-lab.test.ts        # 51 项回归（含 8 硬负测试）
+scripts/__tests__/principle-learning-lab-actor.test.ts # 18 项真实 Actor 离线演练（B4；零网络）
 ```
 
 ## 4. G1 gate（实验必须能失败）
@@ -101,6 +105,24 @@ scripts/__tests__/principle-learning-lab.test.ts   # 46 项回归（含 8 硬负
 - **Memory Manifest**（`buildMemoryManifest`）：真实 profile 运行前指纹全部外部规则/记忆文件。
 - **运行配置**（`fixtures/pilot-run-config.json`）：`NOT_AUTHORIZED`；预算/凭据/重复次数全部
   `OWNER_DECISION_REQUIRED`。真实实验在 Owner 决策前一律 NOT_RUN。
+
+### 6.1 真实 Actor 接线（2026-10-18 交付，仍 NOT_RUN）
+
+- **`lib/actor.mjs`**：G2 stub 抽象扩展为可交互真实 Actor。模型调用走单一 transport seam：
+  `createPiAdapterTransport` 包裹**生产 `PiAiRuntimeAdapter`**（startRun/fetchOutput 边界 +
+  注册表 schema ref `learning-lab-actor-action-v1`，复用生产 tool-call/json_schema/有界修复机制，
+  不另造模型调用框架）；`createFakeActorTransport` 是确定性离线演练 provider（零网络）。
+  逐轮循环内置硬上限（请求 16/机会、步数 40=Oracle STEP_CAP、单请求 token 512、超时 60s、
+  总预算 300s、无效输出最多 2 次有界重提），无效动作永不进 Oracle；NT-01 守卫扫**通道文本**
+  （system+任务+投递内容）——gold canary 同时是隐藏消费者 ID，经 Oracle 动作**挣来的**观察
+  揭示它们是任务本身，不是泄漏。
+- **`lib/real-runner.mjs`**：`runRealArm`/`runRealStudy`——I0 反思（1 次调用）→
+  `freezeCandidate`（原样字节+hash，不润色；E0 无内容 arm 用透明哨兵）→ 同通道投递 →
+  逐机会交互执行 → 同一三层裁定器。judge 泄漏即停整场研究（后续 arm 不启动）。
+- **离线演练**（`scripts/__tests__/principle-learning-lab-actor.test.ts`，18 项）：观察驱动的
+  动作改变、终局后零调用、无效/超时有界、上限证据、canary 通道守卫、跨 arm 隔离、
+  冻结完整性、Oracle↔裁定一致、sidecar 校验通过、泄漏停止研究。
+  **演练通过 ≠ 真实学习有效**——claims 状态保持 NOT_ESTIMABLE 直到 OD 授权的真实运行。
 
 ## 7. 与既有 Evolution Lab 的兼容性
 

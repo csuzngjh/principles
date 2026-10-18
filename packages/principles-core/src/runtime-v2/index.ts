@@ -1206,6 +1206,15 @@ export {
   ArtificerSourceTraceSchema,
 } from './internalization/artificer-output.js';
 
+// PRI-966 G2 — Learning Lab real-actor round contract (research-only consumer;
+// registered in OUTPUT_SCHEMA_REGISTRY so PiAiRuntimeAdapter serves the ref).
+export {
+  LearningLabActorActionV1Schema,
+  LEARNING_LAB_ACTOR_ACTION_REF,
+  LEARNING_LAB_ACTOR_ACTION_NAMES,
+} from './learning-lab/actor-action-output.js';
+export type { LearningLabActorActionV1 } from './learning-lab/actor-action-output.js';
+
 export type {
   ArtificerRunnerResultStatus,
   ArtificerRunnerResult,

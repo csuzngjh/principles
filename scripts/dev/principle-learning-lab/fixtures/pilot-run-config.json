@@ -1,7 +1,7 @@
 {
   "schemaVersion": "pilot-run-config.v0.1-draft",
   "status": "NOT_AUTHORIZED",
-  "note": "G2 wiring template for the real-agent pilot. Preparing this config authorizes NOTHING: every field marked OWNER_DECISION_REQUIRED must be decided by the Owner before any real model runs (SPEC v0.3 §9.2/§10 PR-02; task instruction §5 exit conditions).",
+  "note": "G2 wiring template for the real-agent pilot. Preparing this config authorizes NOTHING: every field marked OWNER_DECISION_REQUIRED must be decided by the Owner before any real model runs (SPEC v0.3 §9.2/§10 PR-02; task instruction §5 exit conditions). The actor wiring itself now EXISTS and is rehearsed offline (lib/actor.mjs + lib/real-runner.mjs + scripts/__tests__/principle-learning-lab-actor.test.ts, deterministic fake transports only).",
   "studyId": "PLE-PILOT-01",
   "workspaceLayout": {
     "root": "<lab-run-root>/arms/<armId>/",
@@ -13,6 +13,12 @@
     ]
   },
   "deliveryChannel": "research-same-channel-v1",
+  "actorWiring": {
+    "transport": "createPiAdapterTransport({ adapter }) in lib/actor.mjs — wraps the PRODUCTION PiAiRuntimeAdapter (startRun/fetchOutput boundary, outputSchemaRef 'learning-lab-actor-action-v1' registered in OUTPUT_SCHEMA_REGISTRY)",
+    "interactiveLoop": "runRealActorOpportunity() — one model round per oracle action, observation-reactive, hard caps enforced",
+    "capsTemplate": "DEFAULT_REAL_ACTOR_CAPS (lib/actor.mjs): maxStepsPerOpportunity=40, maxRequestsPerOpportunity=16, maxInvalidActions=2, maxTokensPerRequest=512, timeoutMsPerRequest=60s, totalBudgetMsPerOpportunity=300s — real-run values frozen at OD-2",
+    "offlineRehearsal": "scripts/__tests__/principle-learning-lab-actor.test.ts (18 tests: reactivity, terminal stop, bounded invalid, caps, NT-01 channel guard, cross-arm isolation, freeze integrity, sidecar validity, study-stop-on-leak)"
+  },
   "arms": [
     {
       "armId": "C-E/E0",
@@ -56,6 +62,7 @@
     "memory manifests fingerprinted per arm",
     "candidate freeze interface exercised (freezeCandidate)",
     "stub wiring + isolation tests green (principle-learning-lab test suite)",
+    "real-actor offline rehearsal suite green (principle-learning-lab-actor test suite) — DONE 2026-10-18, 18/18",
     "model credentials and cost ceiling decided (OD-2)"
   ],
   "exitConditions": [
