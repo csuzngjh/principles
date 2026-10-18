@@ -52,6 +52,33 @@ export class BudgetExhaustedError extends Error {
   }
 }
 
+export class CostBudgetExhaustedError extends Error {
+  constructor({ scope, usedUsd, requestedUsd, capUsd, reason }) {
+    const detail = requestedUsd > 0
+      ? `reserved $${usedUsd.toFixed(6)} + worst-case request $${requestedUsd.toFixed(6)} exceeds $${capUsd.toFixed(6)}`
+      : `a safe request-cost bound could not be established (cap $${capUsd.toFixed(6)})`;
+    super(
+      `USD cost budget refused at scope '${scope}': ${detail}; ` +
+      `refusing outbound request BEFORE send (fail-closed)${reason ? ` — ${reason}` : ''}`,
+    );
+    this.name = 'CostBudgetExhaustedError';
+    this.code = 'cost_budget_exhausted';
+    this.scope = scope;
+    this.used = usedUsd;
+    this.cap = capUsd;
+    this.requestedUsd = requestedUsd;
+    this.reason = reason ?? null;
+  }
+}
+
+function validateCostCap(scope, capUsd) {
+  if (capUsd === null || capUsd === undefined) return null;
+  if (typeof capUsd !== 'number' || !Number.isFinite(capUsd) || capUsd <= 0) {
+    throw new Error(`http-budget: ${scope} costCapUsd must be a positive finite number or null, got ${String(capUsd)}`);
+  }
+  return capUsd;
+}
+
 function validateCap(scope, cap) {
   if (cap === null || cap === undefined) return null; // uncapped (record-only) — explicit
   if (typeof cap !== 'number' || !Number.isFinite(cap) || !Number.isInteger(cap) || cap < 1) {
@@ -65,12 +92,14 @@ function validateCap(scope, cap) {
  * a positive integer cap is enforced fail-closed on every reserve().
  * `parent` links the ancestor chain (opportunity → arm → study).
  */
-export function createHttpBudgetLedger({ scope, cap = null, parent = null, reason = null } = {}) {
+export function createHttpBudgetLedger({ scope, cap = null, costCapUsd = null, parent = null, reason = null } = {}) {
   const effectiveCap = validateCap(scope, cap);
+  const effectiveCostCapUsd = validateCostCap(scope, costCapUsd);
   if (parent !== null && typeof parent.reserve !== 'function') {
     throw new Error('http-budget: parent must be a ledger scope');
   }
   let used = 0;
+  let costUsedUsd = 0;
   let seq = 0;
   let activeChild = null;
   const rows = [];
@@ -84,11 +113,16 @@ export function createHttpBudgetLedger({ scope, cap = null, parent = null, reaso
   const ledger = {
     scope,
     cap: effectiveCap,
+    costCapUsd: effectiveCostCapUsd,
     parentScope: parent,
     reason,
     /** Total requests reserved at THIS scope (descendant rows excluded). */
     used() {
       return used;
+    },
+    /** Worst-case USD reserved at THIS scope, including descendant requests. */
+    costUsedUsd() {
+      return costUsedUsd;
     },
     /**
      * P1-01: attach the CURRENT opportunity scope. The transport binds one
@@ -106,25 +140,39 @@ export function createHttpBudgetLedger({ scope, cap = null, parent = null, reaso
       activeChild = null;
     },
     /**
-     * Atomically reserve ONE outbound HTTP request across the active child
-     * (if attached), this scope and all ancestors. Throws
-     * BudgetExhaustedError (before any send) when any scope is out of
-     * headroom. Synchronous by design: two concurrent callers race for the
-     * last slot and exactly one wins.
+     * Atomically reserve one outbound HTTP request AND its conservative
+     * worst-case USD cost across the active child, this scope and ancestors.
+     * Both limits are checked before any counters commit, so neither budget
+     * can be consumed when the other refuses the request.
      */
-    reserve(reserveReason) {
+    reserve(reserveReason, estimatedCostUsd = 0) {
+      if (typeof estimatedCostUsd !== 'number' || !Number.isFinite(estimatedCostUsd) || estimatedCostUsd < 0) {
+        throw new Error(`http-budget: estimatedCostUsd must be finite and non-negative, got ${String(estimatedCostUsd)}`);
+      }
       const nodes = chain();
       for (const node of nodes) {
         if (node.cap !== null && node.used() + 1 > node.cap) {
-          // The exhausting scope's own configured reason is the audit
-          // authority; the caller's per-request reason is the fallback.
           throw new BudgetExhaustedError({ scope: node.scope, used: node.used(), cap: node.cap, reason: node.reason ?? reserveReason });
         }
       }
-      for (const node of nodes) node.commitOne();
+      for (const node of nodes) {
+        if (node.costCapUsd !== null && node.costUsedUsd() + estimatedCostUsd > node.costCapUsd + 1e-12) {
+          throw new CostBudgetExhaustedError({
+            scope: node.scope,
+            usedUsd: node.costUsedUsd(),
+            requestedUsd: estimatedCostUsd,
+            capUsd: node.costCapUsd,
+            reason: node.reason ?? reserveReason,
+          });
+        }
+      }
+      for (const node of nodes) {
+        node.commitOne();
+        node.commitCost(estimatedCostUsd);
+      }
       const target = activeChild ?? ledger;
       const requestId = target.allocateRequestId();
-      return { requestId, reservedAt: new Date().toISOString(), target };
+      return { requestId, reservedAt: new Date().toISOString(), target, reservedCostUsd: estimatedCostUsd };
     },
     /** Record the settled outcome of a reserved request (audit row). */
     record(grant, info) {
@@ -134,17 +182,22 @@ export function createHttpBudgetLedger({ scope, cap = null, parent = null, reaso
     requests() {
       return rows.slice();
     },
-    /** Recursive snapshot: this scope plus the whole ancestor chain. */
+    /** Recursive request and USD reservation snapshots. */
     snapshot() {
       const levels = [];
+      const costLevels = [];
       for (let cur = ledger; cur !== null; cur = cur.parentScope) {
         levels.push({ scope: cur.scope, cap: cur.cap, used: cur.used() });
+        costLevels.push({ scope: cur.scope, capUsd: cur.costCapUsd, reservedUsd: cur.costUsedUsd() });
       }
-      return { levels, requests: rows.slice() };
+      return { levels, costLevels, requests: rows.slice() };
     },
     // internal
     commitOne() {
       used += 1;
+    },
+    commitCost(amountUsd) {
+      costUsedUsd += amountUsd;
     },
     allocateRequestId() {
       seq += 1;
@@ -224,15 +277,148 @@ export async function extractResponseUsage(response) {
 }
 
 /**
- * Wrap the REAL base fetch with the ledger: reserve BEFORE send (fail-closed),
- * record the settled outcome AFTER (status/elapsed/usage — usage nullable).
+ * Build a pre-send USD estimator from a VERIFIED provider/model price schedule.
+ * The request body's UTF-8 byte count is used as a conservative upper bound on
+ * input tokens; the API request must carry an explicit output-token ceiling.
+ * The guard only estimates. The hierarchical ledger atomically reserves this
+ * upper bound against both per-arm and whole-study USD caps before the socket
+ * is touched. Missing/uninspectable fields fail closed.
  */
-export function createBudgetedFetch({ ledger, baseFetch }) {
+export function createCostBudgetGuard({
+  provider,
+  model,
+  baseUrl,
+  inputUsdPerMillionTokens,
+  outputUsdPerMillionTokens,
+  maxInputTokensPerRequest,
+  maxOutputTokensPerRequest,
+  perRequestCostCapUsd,
+} = {}) {
+  const nonNegativeRate = (value) => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+  const positiveInt = (value) => Number.isSafeInteger(value) && value > 0;
+  if (typeof provider !== 'string' || !provider.trim()) throw new Error('cost guard: provider is required');
+  if (typeof model !== 'string' || !model.trim()) throw new Error('cost guard: model is required');
+  if (typeof baseUrl !== 'string' || !baseUrl.trim()) throw new Error('cost guard: authorized baseUrl is required');
+  let authorizedBase;
+  try {
+    authorizedBase = new URL(baseUrl);
+    if (!['https:', 'http:'].includes(authorizedBase.protocol)) throw new Error('unsupported protocol');
+  } catch {
+    throw new Error('cost guard: baseUrl must be an absolute HTTP(S) URL');
+  }
+  if (!nonNegativeRate(inputUsdPerMillionTokens) || !nonNegativeRate(outputUsdPerMillionTokens)) {
+    throw new Error('cost guard: verified input/output USD-per-million-token rates are required');
+  }
+  if (!positiveInt(maxInputTokensPerRequest) || !positiveInt(maxOutputTokensPerRequest)) {
+    throw new Error('cost guard: positive integer input/output token ceilings are required');
+  }
+  if (typeof perRequestCostCapUsd !== 'number' || !Number.isFinite(perRequestCostCapUsd) || perRequestCostCapUsd <= 0) {
+    throw new Error('cost guard: perRequestCostCapUsd must be a positive finite number');
+  }
+
+  const refuse = (reason, requestedUsd = 0) => {
+    throw new CostBudgetExhaustedError({
+      scope: 'request-preflight',
+      usedUsd: 0,
+      requestedUsd,
+      capUsd: perRequestCostCapUsd,
+      reason,
+    });
+  };
+
+  return {
+    provider,
+    model,
+    baseUrl: authorizedBase.href,
+    estimate({ input, init } = {}) {
+      const rawUrl = typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.href
+          : typeof input?.url === 'string'
+            ? input.url
+            : null;
+      let requestUrl;
+      try {
+        if (!rawUrl) refuse('request URL is missing or cannot be inspected');
+        requestUrl = new URL(rawUrl);
+      } catch {
+        refuse('request URL is not an absolute URL');
+      }
+      const authorizedPath = authorizedBase.pathname.replace(/\/+$/, '');
+      if (requestUrl.origin !== authorizedBase.origin ||
+          (authorizedPath && requestUrl.pathname !== authorizedPath && !requestUrl.pathname.startsWith(`${authorizedPath}/`))) {
+        refuse(`request URL ${requestUrl.href} is outside authorized baseUrl ${authorizedBase.href}`);
+      }
+
+      const body = init?.body;
+      let bodyText;
+      if (typeof body === 'string') {
+        bodyText = body;
+      } else if (body instanceof Uint8Array) {
+        bodyText = new TextDecoder().decode(body);
+      } else if (body instanceof ArrayBuffer) {
+        bodyText = new TextDecoder().decode(new Uint8Array(body));
+      } else {
+        refuse('request body is missing or not synchronously inspectable');
+      }
+
+      let payload;
+      try {
+        payload = JSON.parse(bodyText);
+      } catch {
+        refuse('request body is not valid JSON; cannot prove a bounded request cost');
+      }
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        refuse('request body must be a JSON object');
+      }
+      if (payload.model !== model) {
+        refuse(`request model ${String(payload.model)} does not match authorized model ${model}`);
+      }
+
+      const outputLimit = payload.max_tokens ?? payload.max_completion_tokens ?? payload.max_output_tokens;
+      if (!positiveInt(outputLimit)) {
+        refuse('request has no positive explicit max_tokens/max_completion_tokens/max_output_tokens');
+      }
+      if (outputLimit > maxOutputTokensPerRequest) {
+        refuse(`request output-token ceiling ${outputLimit} exceeds authorized ${maxOutputTokensPerRequest}`);
+      }
+
+      // Every token consumes at least one UTF-8 byte; counting the entire JSON
+      // body (not just messages) deliberately overestimates prompt token usage.
+      const inputTokenUpperBound = new TextEncoder().encode(bodyText).length;
+      if (inputTokenUpperBound > maxInputTokensPerRequest) {
+        refuse(`request body upper bound ${inputTokenUpperBound} tokens exceeds authorized ${maxInputTokensPerRequest}`);
+      }
+
+      const rawUsd = (
+        inputTokenUpperBound * inputUsdPerMillionTokens +
+        outputLimit * outputUsdPerMillionTokens
+      ) / 1_000_000;
+      // Round UP to a micro-dollar so floating point never under-reserves.
+      const worstCaseUsd = Math.ceil(rawUsd * 1_000_000) / 1_000_000;
+      if (worstCaseUsd > perRequestCostCapUsd + 1e-12) {
+        refuse(`worst-case request cost $${worstCaseUsd.toFixed(6)} exceeds per-run cap $${perRequestCostCapUsd.toFixed(6)}`, worstCaseUsd);
+      }
+      return worstCaseUsd;
+    },
+  };
+}
+
+/**
+ * Wrap the REAL base fetch with the ledger: reserve HTTP and worst-case USD
+ * budget atomically BEFORE send; record settled status/elapsed/usage afterward.
+ */
+export function createBudgetedFetch({ ledger, baseFetch, costGuard = null }) {
   if (typeof baseFetch !== 'function') {
     throw new Error('createBudgetedFetch: baseFetch is required (wrap the real PRI-683 transport, never bypass it)');
   }
   return async function budgetedFetch(input, init) {
-    const grant = ledger.reserve(typeof input === 'string' || input instanceof URL ? String(input) : 'outbound request');
+    const estimatedCostUsd = costGuard ? costGuard.estimate({ input, init }) : 0;
+    const grant = ledger.reserve(
+      typeof input === 'string' || input instanceof URL ? String(input) : 'outbound request',
+      estimatedCostUsd,
+    );
     const startedAtMs = Date.now();
     try {
       const response = await baseFetch(input, init);
@@ -241,15 +427,19 @@ export function createBudgetedFetch({ ledger, baseFetch }) {
         url: String(input),
         status: response.status,
         elapsedMs: Date.now() - startedAtMs,
+        reservedCostUsd: grant.reservedCostUsd,
         tokenUsage: usage,
         usageSource,
       });
       return response;
     } catch (err) {
+      // A request may have reached the provider before the transport failed;
+      // keep its conservative USD reservation and audit row.
       ledger.record(grant, {
         url: String(input),
         status: null,
         elapsedMs: Date.now() - startedAtMs,
+        reservedCostUsd: grant.reservedCostUsd,
         error: err instanceof Error ? err.message : String(err),
         tokenUsage: null,
         usageSource: 'unavailable',

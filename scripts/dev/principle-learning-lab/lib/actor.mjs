@@ -30,7 +30,7 @@
 import { finishRun, newRunState, outcome, step } from './oracle.mjs';
 import { scanGoldLeak } from './fixture.mjs';
 import { DELIVERY_CHANNEL } from './g2.mjs';
-import { BudgetExhaustedError, createBudgetedFetch } from './http-budget.mjs';
+import { BudgetExhaustedError, createBudgetedFetch, createCostBudgetGuard } from './http-budget.mjs';
 
 /** Lab-side defaults for OFFLINE REHEARSAL ONLY (fake transports). These are
  * record-keeping values for deterministic tests — they are NEVER a real
@@ -67,7 +67,7 @@ export const PREREG_FROZEN_STATUS = 'OWNER_APPROVED';
  * plus consistency: the adapter config this gate will build MUST equal the
  * authorized values (any drift refuses before the first request).
  */
-export function verifyRealRunAuthorization({ authorization, prereg, dataset, adapterConfig, budgets }) {
+export function verifyRealRunAuthorization({ authorization, prereg, dataset, adapterConfig, budgets, evidenceVerifier }) {
   const problems = [];
   const check = (ok, message) => { if (!ok) problems.push(message); };
 
@@ -76,6 +76,8 @@ export function verifyRealRunAuthorization({ authorization, prereg, dataset, ada
   if (problems.length === 0) {
     check(authorization.schemaVersion === REAL_RUN_AUTHORIZATION_SCHEMA,
       `authorization.schemaVersion must be ${REAL_RUN_AUTHORIZATION_SCHEMA}`);
+    check(typeof evidenceVerifier === 'function',
+      'trusted evidenceVerifier missing — real-model authorization references must resolve to authoritative evidence before transport construction');
 
     // OD-1 — preregistration approved AND frozen.
     check(prereg !== null && typeof prereg === 'object' && prereg.status === PREREG_FROZEN_STATUS,
@@ -85,8 +87,20 @@ export function verifyRealRunAuthorization({ authorization, prereg, dataset, ada
     if (authorization.od1 && typeof authorization.od1 === 'object') {
       check(authorization.od1.approved === true,
         'OD-1: authorization.od1.approved must be literal true (no implicit approval)');
-      check(typeof authorization.od1.decisionRef === 'string' && authorization.od1.decisionRef.length > 0,
+      check(typeof authorization.od1.decisionRef === 'string' && authorization.od1.decisionRef.trim().length > 0,
         'OD-1: authorization.od1.decisionRef must name the Owner decision record');
+      if (typeof evidenceVerifier === 'function' && typeof authorization.od1.decisionRef === 'string' && authorization.od1.decisionRef.trim()) {
+        let decisionEvidence;
+        try {
+          decisionEvidence = evidenceVerifier({ kind: 'owner-decision', reference: authorization.od1.decisionRef, expectedFixtureHash: dataset.fixtureHash });
+        } catch (error) {
+          check(false, `OD-1: Owner decision evidence verification failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        check(decisionEvidence?.verified === true, 'OD-1: Owner decision reference was not verified by the trusted evidence resolver');
+        check(decisionEvidence?.reference === authorization.od1.decisionRef, 'OD-1: verified Owner decision reference does not match decisionRef');
+        check(decisionEvidence?.approved === true, 'OD-1: referenced Owner decision is not explicitly approved');
+        check(decisionEvidence?.frozenFixtureHash === dataset.fixtureHash, 'OD-1: referenced Owner decision does not approve the loaded frozen fixture hash');
+      }
       check(authorization.od1.frozenFixtureHash === dataset.fixtureHash,
         `OD-1: authorization.od1.frozenFixtureHash does not equal the loaded dataset fixtureHash (${dataset.fixtureHash.slice(0, 12)}…) — study would run on different data than approved`);
     }
@@ -97,6 +111,7 @@ export function verifyRealRunAuthorization({ authorization, prereg, dataset, ada
     if (od2 && typeof od2 === 'object') {
       check(typeof od2.provider === 'string' && od2.provider.length > 0, 'OD-2: provider missing');
       check(typeof od2.model === 'string' && od2.model.length > 0, 'OD-2: model missing');
+      check(typeof od2.baseUrl === 'string' && od2.baseUrl.trim().length > 0, 'OD-2: baseUrl missing — real HTTP destination must be explicit');
       check(typeof od2.apiKeyEnv === 'string' && od2.apiKeyEnv.length > 0, 'OD-2: apiKeyEnv missing');
       check(od2.credentialsAvailable === true,
         'OD-2: credentialsAvailable must be literal true after Owner-side verification');
@@ -107,9 +122,48 @@ export function verifyRealRunAuthorization({ authorization, prereg, dataset, ada
         'OD-2: totalCostCapUsd must be >= perRunCostCapUsd');
       check(typeof od2.stopCondition === 'string' && od2.stopCondition.length > 0,
         'OD-2: stopCondition (abort threshold description) missing');
-      // Cost basis must be verified, not assumed: the record carries its own evidence.
-      check(typeof od2.costBasisRef === 'string' && od2.costBasisRef.length > 0,
+      // A non-empty URL/string is not evidence. The trusted resolver must
+      // independently resolve and verify the cited official pricing schedule.
+      check(typeof od2.costBasisRef === 'string' && od2.costBasisRef.trim().length > 0,
         'OD-2: costBasisRef missing — official billing evidence is a precondition (AC-6 BLOCKED_COST_GUARD)');
+      const costBasis = od2.costBasis;
+      check(costBasis !== null && typeof costBasis === 'object' && !Array.isArray(costBasis),
+        'OD-2: costBasis schedule missing — USD caps cannot be enforced without explicit model pricing and token ceilings');
+      if (costBasis && typeof costBasis === 'object') {
+        const nonNegativeRate = (value) => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+        const positiveInt = (value) => Number.isSafeInteger(value) && value > 0;
+        check(costBasis.provider === od2.provider, 'OD-2: costBasis.provider must match authorized provider');
+        check(costBasis.model === od2.model, 'OD-2: costBasis.model must match authorized model');
+        check(costBasis.currency === 'USD', 'OD-2: costBasis.currency must be USD');
+        check(nonNegativeRate(costBasis.inputUsdPerMillionTokens), 'OD-2: costBasis.inputUsdPerMillionTokens must be finite and non-negative');
+        check(nonNegativeRate(costBasis.outputUsdPerMillionTokens), 'OD-2: costBasis.outputUsdPerMillionTokens must be finite and non-negative');
+        check(positiveInt(costBasis.maxInputTokensPerRequest), 'OD-2: costBasis.maxInputTokensPerRequest must be a positive integer');
+        check(positiveInt(costBasis.maxOutputTokensPerRequest), 'OD-2: costBasis.maxOutputTokensPerRequest must be a positive integer');
+        check(typeof costBasis.effectiveDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(costBasis.effectiveDate),
+          'OD-2: costBasis.effectiveDate must be an explicit YYYY-MM-DD date');
+        if (typeof evidenceVerifier === 'function' && typeof od2.costBasisRef === 'string' && od2.costBasisRef.trim()) {
+          let pricingEvidence;
+          try {
+            pricingEvidence = evidenceVerifier({
+              kind: 'cost-basis',
+              reference: od2.costBasisRef,
+              provider: od2.provider,
+              model: od2.model,
+            });
+          } catch (error) {
+            check(false, `OD-2: official pricing evidence verification failed: ${error instanceof Error ? error.message : String(error)}`);
+          }
+          check(pricingEvidence?.verified === true, 'OD-2: costBasisRef was not verified by the trusted evidence resolver');
+          check(pricingEvidence?.reference === od2.costBasisRef, 'OD-2: verified pricing reference does not match costBasisRef');
+          check(pricingEvidence?.provider === costBasis.provider && pricingEvidence?.model === costBasis.model,
+            'OD-2: verified pricing evidence provider/model does not match authorization');
+          check(pricingEvidence?.currency === costBasis.currency &&
+            pricingEvidence?.inputUsdPerMillionTokens === costBasis.inputUsdPerMillionTokens &&
+            pricingEvidence?.outputUsdPerMillionTokens === costBasis.outputUsdPerMillionTokens &&
+            pricingEvidence?.effectiveDate === costBasis.effectiveDate,
+          'OD-2: authorized pricing rates/date do not match the verified official pricing evidence');
+        }
+      }
     }
 
     // OD-3 — repetitions/seeds/execution order frozen.
@@ -140,6 +194,10 @@ export function verifyRealRunAuthorization({ authorization, prereg, dataset, ada
         'drift: budgets.httpRequestsPerArm != authorized value');
       check(budgets.httpRequestsPerStudy === authorization.od2.httpRequestsPerStudy,
         'drift: budgets.httpRequestsPerStudy != authorized value');
+      check(budgets.perRunCostCapUsd === authorization.od2.perRunCostCapUsd,
+        'drift: budgets.perRunCostCapUsd != authorized value');
+      check(budgets.totalCostCapUsd === authorization.od2.totalCostCapUsd,
+        'drift: budgets.totalCostCapUsd != authorized value');
     }
   }
 
@@ -163,9 +221,9 @@ export function verifyRealRunAuthorization({ authorization, prereg, dataset, ada
  * reserves budget before send. `adapterConfig.fetch` must be left unset (the
  * budgeted fetch wraps the real PRI-683 transport itself).
  */
-export async function createAuthorizedPiTransport({ authorization, prereg, dataset, adapterConfig, budgets, ledger }) {
-  verifyRealRunAuthorization({ authorization, prereg, dataset, adapterConfig, budgets });
-  if (!ledger || typeof ledger.reserve !== 'function') {
+export async function createAuthorizedPiTransport({ authorization, prereg, dataset, adapterConfig, budgets, ledger, evidenceVerifier }) {
+  verifyRealRunAuthorization({ authorization, prereg, dataset, adapterConfig, budgets, evidenceVerifier });
+  if (!ledger || typeof ledger.reserve !== 'function' || typeof ledger.snapshot !== 'function') {
     throw new Error('createAuthorizedPiTransport: ledger (lib/http-budget.mjs) is required for real transports');
   }
   if (adapterConfig.fetch !== undefined) {
@@ -174,6 +232,38 @@ export async function createAuthorizedPiTransport({ authorization, prereg, datas
   if (adapterConfig.eventEmitter !== undefined) {
     throw new Error('createAuthorizedPiTransport: adapterConfig.eventEmitter must be unset — the gate owns telemetry (retry/repair counters)');
   }
+
+  // The per-arm ledger must be linked to a shared study ledger. This is what
+  // makes the total USD ceiling cumulative across all arms, not one cap per
+  // adapter instance. A missing/mismatched chain is a hard refusal.
+  const ledgerSnapshot = ledger.snapshot();
+  const costLevels = ledgerSnapshot.costLevels;
+  const requestLevels = ledgerSnapshot.levels;
+  const armCostLevel = costLevels?.[0];
+  const studyCostLevel = costLevels?.find((level) => level.scope.startsWith('study:'));
+  const armRequestLevel = requestLevels?.[0];
+  const studyRequestLevel = requestLevels?.find((level) => level.scope.startsWith('study:'));
+  if (!armCostLevel || armCostLevel.scope !== ledger.scope ||
+      armCostLevel.capUsd !== authorization.od2.perRunCostCapUsd ||
+      !studyCostLevel || studyCostLevel.capUsd !== authorization.od2.totalCostCapUsd ||
+      !armRequestLevel || armRequestLevel.scope !== ledger.scope ||
+      armRequestLevel.cap !== authorization.od2.httpRequestsPerArm ||
+      !studyRequestLevel || studyRequestLevel.cap !== authorization.od2.httpRequestsPerStudy) {
+    throw new Error('createAuthorizedPiTransport: ledger must match the authorized arm/study HTTP caps and per-run/total USD caps before transport construction');
+  }
+
+  const costBasis = authorization.od2.costBasis;
+  const costGuard = createCostBudgetGuard({
+    provider: authorization.od2.provider,
+    model: authorization.od2.model,
+    baseUrl: authorization.od2.baseUrl,
+    inputUsdPerMillionTokens: costBasis.inputUsdPerMillionTokens,
+    outputUsdPerMillionTokens: costBasis.outputUsdPerMillionTokens,
+    maxInputTokensPerRequest: costBasis.maxInputTokensPerRequest,
+    maxOutputTokensPerRequest: costBasis.maxOutputTokensPerRequest,
+    perRequestCostCapUsd: authorization.od2.perRunCostCapUsd,
+  });
+
   // Dynamic import: the offline fake path never loads core; here it is
   // required — the budgeted fetch wraps the REAL PRI-683 transport.
   const core = await import('@principles/core/runtime-v2');
@@ -190,7 +280,11 @@ export async function createAuthorizedPiTransport({ authorization, prereg, datas
     if (event.eventType === 'output_repair_attempted') telemetry.repairs += Number(event.payload?.attemptsUsed ?? 0);
   });
   ledger.telemetry = telemetry;
-  const budgetedFetch = createBudgetedFetch({ ledger, baseFetch: (input, init) => getPiAiFetchForApi('openai-completions')(input, init) });
+  const budgetedFetch = createBudgetedFetch({
+    ledger,
+    costGuard,
+    baseFetch: (input, init) => getPiAiFetchForApi('openai-completions')(input, init),
+  });
   const adapter = new PiAiRuntimeAdapter({ ...adapterConfig, eventEmitter: emitter, fetch: budgetedFetch });
   const transport = createPiAdapterTransport({ adapter });
   return { transport, adapter };
@@ -454,11 +548,19 @@ export async function runRealActorOpportunity({
       modelRounds += 1;
     } catch (err) {
       modelRounds += 1;
-      if (err instanceof BudgetExhaustedError || err?.code === 'budget_exhausted') {
-        // P1-01 fail-closed: the HTTP ledger refused BEFORE the request was
-        // sent. Auditable termination — the ledger snapshot (kept by the
-        // runner) carries used/cap and every settled request row.
-        failure = { kind: 'budget_exhausted', reason: err.message, scope: err.scope, used: err.used, cap: err.cap };
+      if (err instanceof BudgetExhaustedError || err?.code === 'budget_exhausted' || err?.code === 'cost_budget_exhausted') {
+        // P1-01 fail-closed: HTTP or USD reservation refused BEFORE send.
+        // The ledger snapshot carries request counts and conservative USD
+        // reservations for every settled/attempted outbound request.
+        failure = {
+          kind: 'budget_exhausted',
+          budgetType: err?.code === 'cost_budget_exhausted' ? 'usd' : 'http_requests',
+          reason: err.message,
+          scope: err.scope,
+          used: err.used,
+          cap: err.cap,
+          requestedUsd: err.requestedUsd,
+        };
         break;
       }
       failure = { kind: err?.code === 'no_response' ? 'no_response' : 'transport_error', reason: err?.message ?? String(err) };

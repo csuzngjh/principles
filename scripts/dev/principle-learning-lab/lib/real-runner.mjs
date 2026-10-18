@@ -255,7 +255,8 @@ export async function runRealStudy({ dataset, transportForArm, caps = DEFAULT_RE
   const studyLedger = createHttpBudgetLedger({
     scope: `study:${studyId}`,
     cap: budgets?.httpRequestsPerStudy ?? null,
-    reason: 'study-level cumulative HTTP request cap',
+    costCapUsd: budgets?.totalCostCapUsd ?? null,
+    reason: 'study-level cumulative HTTP/USD cost cap',
   });
   const arms = [];
   const adjudications = [];
@@ -265,8 +266,9 @@ export async function runRealStudy({ dataset, transportForArm, caps = DEFAULT_RE
     const armLedger = createHttpBudgetLedger({
       scope: `${historyId}:${REAL_ACTOR_STRATEGY_ID}`,
       cap: budgets?.httpRequestsPerArm ?? null,
+      costCapUsd: budgets?.perRunCostCapUsd ?? null,
       parent: studyLedger,
-      reason: 'arm-level HTTP request cap',
+      reason: 'arm-level HTTP/USD cost cap',
     });
     const r = await runRealArm({ dataset, historyId, transport: transportForArm(historyId, armLedger), caps, studyId, armLedger, budgets });
     arms.push(r.arm);

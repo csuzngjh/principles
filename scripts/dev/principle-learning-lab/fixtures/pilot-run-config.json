@@ -89,17 +89,17 @@
   ],
   "realRunAuthorizationContract": {
     "schemaVersion": "g2-real-run-authorization.v1",
-    "gate": "createAuthorizedPiTransport (lib/actor.mjs) runs verifyRealRunAuthorization BEFORE any transport/adapter exists — failure means zero HTTP requests can occur (fail-closed).",
+    "gate": "createAuthorizedPiTransport (lib/actor.mjs) requires a trusted synchronous evidenceVerifier for Owner-decision and official-pricing references, then validates all parameters and the shared study/arm ledgers BEFORE constructing a transport — failure means zero HTTP requests can occur (fail-closed).",
     "od1": {
       "requirement": "preregistration.status must be exactly OWNER_APPROVED (DRAFT_NOT_OWNER_APPROVED can never authorize), plus authorization.od1 {approved: literal true, decisionRef, frozenFixtureHash == dataset.fixtureHash}"
     },
     "od2": {
-      "requirement": "authorization.od2 {provider, model, apiKeyEnv, baseUrl?, credentialsAvailable: literal true, perRunCostCapUsd, totalCostCapUsd, costBasisRef (official billing evidence), httpRequestsPerOpportunity/PerArm/PerStudy, stopCondition} — all explicit; offline defaults are not honored"
+      "requirement": "authorization.od2 {provider, model, apiKeyEnv, explicit baseUrl, credentialsAvailable: literal true, perRunCostCapUsd, totalCostCapUsd, costBasisRef verified by the trusted evidenceVerifier, costBasis {provider, model, currency: USD, input/output USD per million tokens, effectiveDate, maxInputTokensPerRequest, maxOutputTokensPerRequest}, httpRequestsPerOpportunity/PerArm/PerStudy, stopCondition} — all explicit; offline defaults are not honored"
     },
     "od3": {
       "requirement": "authorization.od3 {seeds >= 1, executionOrder, frozen: literal true}"
     },
-    "consistencyChecks": "provider/model/apiKeyEnv/baseUrl and the three HTTP caps in the runtime call must equal the authorized values — any drift refuses before the first request",
+    "consistencyChecks": "provider/model/apiKeyEnv/baseUrl and HTTP caps must equal authorization; the per-arm ledger must enforce perRunCostCapUsd and share a study-rooted totalCostCapUsd ledger; the trusted evidenceVerifier must resolve the Owner decision and official pricing schedule and match the frozen fixture hash/rates. Each HTTP request is preflighted against authorized URL, model, UTF-8 input-token upper bound, output-token ceiling, and worst-case USD cost; USD reservations commit atomically with HTTP reservations before send. Any missing evidence, cap, body field, or ledger link refuses.",
     "telemetryAttribution": "retry (llm_max_tokens_downshift) and repair (output_repair_attempted) counts are aggregated from adapter telemetry per arm; per-HTTP-attempt token usage comes from the ledger (null/unavailable when the provider stream carries none)"
   }
 }

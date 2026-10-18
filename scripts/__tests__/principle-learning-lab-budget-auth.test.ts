@@ -17,8 +17,10 @@ declare module 'vitest' {
 
 import {
   BudgetExhaustedError,
+  CostBudgetExhaustedError,
   auditTokenUsage,
   createBudgetedFetch,
+  createCostBudgetGuard,
   createHttpBudgetLedger,
 } from '../dev/principle-learning-lab/lib/http-budget.mjs';
 import {
@@ -77,7 +79,17 @@ function validAuthorization() {
       credentialsAvailable: true,
       perRunCostCapUsd: 0.2,
       totalCostCapUsd: 1.0,
-      costBasisRef: 'official-provider-pricing-page-snapshot (to be supplied by OD-2)',
+      costBasisRef: 'official-provider-pricing-page-snapshot (test verifier only)',
+      costBasis: {
+        provider: 'sensenova',
+        model: 'deepseek-v4-flash',
+        currency: 'USD',
+        inputUsdPerMillionTokens: 0.5,
+        outputUsdPerMillionTokens: 1.5,
+        maxInputTokensPerRequest: 50_000,
+        maxOutputTokensPerRequest: 1_024,
+        effectiveDate: '2026-10-01',
+      },
       httpRequestsPerOpportunity: 24,
       httpRequestsPerArm: 130,
       httpRequestsPerStudy: 540,
@@ -92,7 +104,41 @@ function validAuthorization() {
 }
 
 function validBudgets() {
-  return { httpRequestsPerOpportunity: 24, httpRequestsPerArm: 130, httpRequestsPerStudy: 540 };
+  return {
+    httpRequestsPerOpportunity: 24,
+    httpRequestsPerArm: 130,
+    httpRequestsPerStudy: 540,
+    perRunCostCapUsd: 0.2,
+    totalCostCapUsd: 1.0,
+  };
+}
+
+/** Unit-only verifier fixture; production must wire a trusted authoritative resolver. */
+function testEvidenceVerifier() {
+  const auth = validAuthorization();
+  return ({ kind, reference }: { kind: string; reference: string }) => {
+    if (kind === 'owner-decision') {
+      return {
+        verified: true,
+        reference,
+        approved: true,
+        frozenFixtureHash: dataset.fixtureHash,
+      };
+    }
+    if (kind === 'cost-basis') {
+      return {
+        verified: true,
+        reference,
+        provider: auth.od2.provider,
+        model: auth.od2.model,
+        currency: auth.od2.costBasis.currency,
+        inputUsdPerMillionTokens: auth.od2.costBasis.inputUsdPerMillionTokens,
+        outputUsdPerMillionTokens: auth.od2.costBasis.outputUsdPerMillionTokens,
+        effectiveDate: auth.od2.costBasis.effectiveDate,
+      };
+    }
+    return { verified: false, reference };
+  };
 }
 
 function frozenPrereg() {
@@ -325,17 +371,23 @@ describe('P1-02: real-model transport authorization gate (zero HTTP on refusal)'
   it('createAuthorizedPiTransport refuses fetch/eventEmitter injection (no bypass path) and builds a budget-wired adapter when valid', { timeout: 120_000 }, async () => {
     const bypass = { ...validAdapterConfig, fetch: (async () => new Response('{}')) as unknown };
     await expect(
-      createAuthorizedPiTransport({ authorization: validAuthorization(), prereg: frozenPrereg(), dataset, adapterConfig: bypass, budgets: validBudgets(), ledger: createHttpBudgetLedger({ scope: 'x', cap: 5 }) }),
+      createAuthorizedPiTransport({ authorization: validAuthorization(), prereg: frozenPrereg(), dataset, adapterConfig: bypass, budgets: validBudgets(), ledger: createHttpBudgetLedger({ scope: 'x', cap: 5 }), evidenceVerifier: testEvidenceVerifier() }),
     ).rejects.toThrow(/adapterConfig\.fetch must be unset/);
 
     const emitterBypass = { ...validAdapterConfig, eventEmitter: {} as unknown };
     await expect(
-      createAuthorizedPiTransport({ authorization: validAuthorization(), prereg: frozenPrereg(), dataset, adapterConfig: emitterBypass, budgets: validBudgets(), ledger: createHttpBudgetLedger({ scope: 'x', cap: 5 }) }),
+      createAuthorizedPiTransport({ authorization: validAuthorization(), prereg: frozenPrereg(), dataset, adapterConfig: emitterBypass, budgets: validBudgets(), ledger: createHttpBudgetLedger({ scope: 'x', cap: 5 }), evidenceVerifier: testEvidenceVerifier() }),
     ).rejects.toThrow(/eventEmitter must be unset/);
 
     // Valid gate → transport exists; the wired fetch is the budgeted one: with
     // the ledger already at cap, calling it refuses BEFORE any network access.
-    const ledger = createHttpBudgetLedger({ scope: 'EA:REAL_ACTOR_I0', cap: 1 });
+    const studyLedger = createHttpBudgetLedger({ scope: 'study:AUTH-TEST', cap: 540, costCapUsd: 1.0 });
+    const ledger = createHttpBudgetLedger({
+      scope: 'EA:REAL_ACTOR_I0',
+      cap: 130,
+      costCapUsd: 0.2,
+      parent: studyLedger,
+    });
     const { transport, adapter } = await createAuthorizedPiTransport({
       authorization: validAuthorization(),
       prereg: frozenPrereg(),
@@ -343,12 +395,14 @@ describe('P1-02: real-model transport authorization gate (zero HTTP on refusal)'
       adapterConfig: validAdapterConfig,
       budgets: validBudgets(),
       ledger,
+      evidenceVerifier: testEvidenceVerifier(),
     });
     expect(transport.kind).toBe('pi-adapter');
     const wiredConfig = (adapter as unknown as { config: { fetch: unknown } }).config;
     expect(typeof wiredConfig.fetch).toBe('function');
-    ledger.reserve('consume the single slot');
-    await expect((wiredConfig.fetch as (i: string, init?: unknown) => Promise<unknown>)('https://unit.test/would-be-real', {})).rejects.toBeInstanceOf(BudgetExhaustedError);
+    for (let i = 0; i < 130; i += 1) ledger.reserve('consume the arm HTTP cap');
+    const boundedBody = JSON.stringify({ model: 'deepseek-v4-flash', messages: [{ role: 'user', content: 'offline guard check' }], max_tokens: 1 });
+    await expect((wiredConfig.fetch as (i: string, init?: unknown) => Promise<unknown>)('https://token.sensenova.cn/v1/chat/completions', { method: 'POST', body: boundedBody })).rejects.toBeInstanceOf(BudgetExhaustedError);
     expect(ledger.telemetry).toEqual({ retries: 0, repairs: 0 });
   });
 });
@@ -714,17 +768,23 @@ describe('P1-02: real-model transport authorization gate (zero HTTP on refusal)'
   it('createAuthorizedPiTransport refuses fetch/eventEmitter injection (no bypass path) and builds a budget-wired adapter when valid', { timeout: 120_000 }, async () => {
     const bypass = { ...validAdapterConfig, fetch: (async () => new Response('{}')) as unknown };
     await expect(
-      createAuthorizedPiTransport({ authorization: validAuthorization(), prereg: frozenPrereg(), dataset, adapterConfig: bypass, budgets: validBudgets(), ledger: createHttpBudgetLedger({ scope: 'x', cap: 5 }) }),
+      createAuthorizedPiTransport({ authorization: validAuthorization(), prereg: frozenPrereg(), dataset, adapterConfig: bypass, budgets: validBudgets(), ledger: createHttpBudgetLedger({ scope: 'x', cap: 5 }), evidenceVerifier: testEvidenceVerifier() }),
     ).rejects.toThrow(/adapterConfig\.fetch must be unset/);
 
     const emitterBypass = { ...validAdapterConfig, eventEmitter: {} as unknown };
     await expect(
-      createAuthorizedPiTransport({ authorization: validAuthorization(), prereg: frozenPrereg(), dataset, adapterConfig: emitterBypass, budgets: validBudgets(), ledger: createHttpBudgetLedger({ scope: 'x', cap: 5 }) }),
+      createAuthorizedPiTransport({ authorization: validAuthorization(), prereg: frozenPrereg(), dataset, adapterConfig: emitterBypass, budgets: validBudgets(), ledger: createHttpBudgetLedger({ scope: 'x', cap: 5 }), evidenceVerifier: testEvidenceVerifier() }),
     ).rejects.toThrow(/eventEmitter must be unset/);
 
     // Valid gate → transport exists; the wired fetch is the budgeted one: with
     // the ledger already at cap, calling it refuses BEFORE any network access.
-    const ledger = createHttpBudgetLedger({ scope: 'EA:REAL_ACTOR_I0', cap: 1 });
+    const studyLedger = createHttpBudgetLedger({ scope: 'study:AUTH-TEST', cap: 540, costCapUsd: 1.0 });
+    const ledger = createHttpBudgetLedger({
+      scope: 'EA:REAL_ACTOR_I0',
+      cap: 130,
+      costCapUsd: 0.2,
+      parent: studyLedger,
+    });
     const { transport, adapter } = await createAuthorizedPiTransport({
       authorization: validAuthorization(),
       prereg: frozenPrereg(),
@@ -732,12 +792,14 @@ describe('P1-02: real-model transport authorization gate (zero HTTP on refusal)'
       adapterConfig: validAdapterConfig,
       budgets: validBudgets(),
       ledger,
+      evidenceVerifier: testEvidenceVerifier(),
     });
     expect(transport.kind).toBe('pi-adapter');
     const wiredConfig = (adapter as unknown as { config: { fetch: unknown } }).config;
     expect(typeof wiredConfig.fetch).toBe('function');
-    ledger.reserve('consume the single slot');
-    await expect((wiredConfig.fetch as (i: string, init?: unknown) => Promise<unknown>)('https://unit.test/would-be-real', {})).rejects.toBeInstanceOf(BudgetExhaustedError);
+    for (let i = 0; i < 130; i += 1) ledger.reserve('consume the arm HTTP cap');
+    const boundedBody = JSON.stringify({ model: 'deepseek-v4-flash', messages: [{ role: 'user', content: 'offline guard check' }], max_tokens: 1 });
+    await expect((wiredConfig.fetch as (i: string, init?: unknown) => Promise<unknown>)('https://token.sensenova.cn/v1/chat/completions', { method: 'POST', body: boundedBody })).rejects.toBeInstanceOf(BudgetExhaustedError);
     expect(ledger.telemetry).toEqual({ retries: 0, repairs: 0 });
   });
 });
@@ -859,27 +921,109 @@ describe('P1-01/P1-03: actor loop and runner budget/usage integration (offline, 
   });
 });
 
-// ── assertion helper: gate refusals must be RealRunAuthorizationError ───────
+describe('P1-01 USD cost guard: conservative pre-send reservation', () => {
+  const costGuard = () => createCostBudgetGuard({
+    provider: 'provider-a',
+    model: 'model-a',
+    baseUrl: 'https://unit.test',
+    inputUsdPerMillionTokens: 1,
+    outputUsdPerMillionTokens: 10,
+    maxInputTokensPerRequest: 10_000,
+    maxOutputTokensPerRequest: 1_024,
+    perRequestCostCapUsd: 0.2,
+  });
+  const body = JSON.stringify({
+    model: 'model-a',
+    messages: [{ role: 'user', content: 'bounded test request' }],
+    max_tokens: 1_000,
+  });
 
-async function expectAuthRefusalAsync(fn: () => Promise<unknown> | unknown, pattern: RegExp): Promise<void> {
-  try {
-    await fn();
-  } catch (err) {
-    expect((err as Error).name).toBe('RealRunAuthorizationError');
-    expect((err as Error).message).toMatch(pattern);
-    return;
-  }
-  throw new Error('expected the authorization gate to refuse, but it did not throw');
-}
+  it('reserves arm and shared study USD caps before send; a later arm cannot exceed the study cap', async () => {
+    const study = createHttpBudgetLedger({ scope: 'study:usd', costCapUsd: 0.015 });
+    const armA = createHttpBudgetLedger({ scope: 'arm:A', costCapUsd: 0.012, parent: study });
+    const armB = createHttpBudgetLedger({ scope: 'arm:B', costCapUsd: 0.012, parent: study });
+    let baseCalls = 0;
+    const baseFetch = async () => {
+      baseCalls += 1;
+      return sseResponseWithUsage('{}', { prompt_tokens: 1, completion_tokens: 1 });
+    };
+    const fetchA = createBudgetedFetch({ ledger: armA, costGuard: costGuard(), baseFetch });
+    const fetchB = createBudgetedFetch({ ledger: armB, costGuard: costGuard(), baseFetch });
 
-function expectAuthRefusal(fn: () => unknown, pattern: RegExp): void {
-  try {
-    fn();
-  } catch (err) {
-    expect((err as Error).name).toBe('RealRunAuthorizationError');
-    expect((err as Error).message).toMatch(pattern);
-    expect(Array.isArray((err as { problems?: unknown[] }).problems)).toBe(true);
-    return;
-  }
-  throw new Error('expected the authorization gate to refuse, but it did not throw');
-}
+    await fetchA('https://unit.test/a', { method: 'POST', body });
+    await expect(fetchB('https://unit.test/b', { method: 'POST', body })).rejects.toBeInstanceOf(CostBudgetExhaustedError);
+
+    expect(baseCalls).toBe(1);
+    expect(armA.snapshot().costLevels[0].reservedUsd).toBeGreaterThan(0);
+    expect(study.snapshot().costLevels[0].reservedUsd).toBeGreaterThan(0);
+    expect(study.snapshot().costLevels[0].reservedUsd).toBeLessThanOrEqual(0.015);
+  });
+
+  it('fails closed before HTTP when the body has no explicit output-token ceiling', async () => {
+    const ledger = createHttpBudgetLedger({ scope: 'arm:bad-request', costCapUsd: 0.2 });
+    let baseCalls = 0;
+    const fetch = createBudgetedFetch({
+      ledger,
+      costGuard: costGuard(),
+      baseFetch: async () => {
+        baseCalls += 1;
+        return new Response('{}');
+      },
+    });
+    await expect(fetch('https://unit.test/no-cap', {
+      method: 'POST',
+      body: JSON.stringify({ model: 'model-a', messages: [{ role: 'user', content: 'no output cap' }] }),
+    })).rejects.toBeInstanceOf(CostBudgetExhaustedError);
+    expect(baseCalls).toBe(0);
+    expect(ledger.used()).toBe(0);
+    expect(ledger.costUsedUsd()).toBe(0);
+  });
+});
+
+describe('P1-02 trusted authorization evidence', () => {
+  it('refuses non-empty approval/pricing references unless a trusted resolver verifies them', () => {
+    expect(() => verifyRealRunAuthorization({
+      authorization: validAuthorization(),
+      prereg: frozenPrereg(),
+      dataset,
+      adapterConfig: validAdapterConfig,
+      budgets: validBudgets(),
+    })).toThrowRealRunAuthorization(/trusted evidenceVerifier missing/);
+  });
+
+  it('refuses a decision reference whose authoritative evidence does not approve the frozen fixture', () => {
+    const verifier = testEvidenceVerifier();
+    const unapprovedVerifier = (request: { kind: string; reference: string }) => {
+      const evidence = verifier(request);
+      return request.kind === 'owner-decision'
+        ? { ...evidence, approved: false }
+        : evidence;
+    };
+    expect(() => verifyRealRunAuthorization({
+      authorization: validAuthorization(),
+      prereg: frozenPrereg(),
+      dataset,
+      adapterConfig: validAdapterConfig,
+      budgets: validBudgets(),
+      evidenceVerifier: unapprovedVerifier,
+    })).toThrowRealRunAuthorization(/referenced Owner decision is not explicitly approved/);
+  });
+
+  it('refuses rates that differ from the independently verified official price schedule', () => {
+    const verifier = testEvidenceVerifier();
+    const stalePriceVerifier = (request: { kind: string; reference: string }) => {
+      const evidence = verifier(request);
+      return request.kind === 'cost-basis'
+        ? { ...evidence, outputUsdPerMillionTokens: evidence.outputUsdPerMillionTokens + 1 }
+        : evidence;
+    };
+    expect(() => verifyRealRunAuthorization({
+      authorization: validAuthorization(),
+      prereg: frozenPrereg(),
+      dataset,
+      adapterConfig: validAdapterConfig,
+      budgets: validBudgets(),
+      evidenceVerifier: stalePriceVerifier,
+    })).toThrowRealRunAuthorization(/do not match the verified official pricing evidence/);
+  });
+});
