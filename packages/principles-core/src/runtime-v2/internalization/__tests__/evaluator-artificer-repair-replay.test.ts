@@ -291,7 +291,7 @@ describe('PRI-634 PR-A: FAIL → durable evidence → repair retrieval → PASS 
     expect(eval1Content.evaluation?.decision).toBe('needs_revision'); // verdict not overridden
     expect(eval1Content.adversarialResult?.passed).toBe(false);
     const failedCases = eval1Content.adversarialResult?.failedCases ?? [];
-    expect(failedCases.length).toBeGreaterThanOrEqual(5); // 5 v2 cases at minimum all crashed
+    expect(failedCases).toHaveLength(4); // Owner positive + Owner negative + 2 context-availability cases all crashed
     for (const failure of failedCases) {
       expect(typeof failure.errorType).toBe('string');           // SPEC §14: errorType is its own field
       expect(failure.errorType).toBe('runtime_error');
@@ -309,6 +309,12 @@ describe('PRI-634 PR-A: FAIL → durable evidence → repair retrieval → PASS 
     expect(String(v2Unavailable.caseInput)).toContain('tool=');
     expect(String(v2Unavailable.caseInput)).toContain('context:');
     expect(String(v2Unavailable.caseInput)).toContain('case rationale:');
+
+    // The negative acceptance remains independently sourced from the restored
+    // Owner pack; a generic template or model-authored example cannot replace it.
+    const ownerNegative = failedCases.find((f) => f.caseId === 'owner:neg-1');
+    expect(ownerNegative).toBeDefined();
+    expect(ownerNegative).toMatchObject({ expectedDecision: 'block', errorType: 'runtime_error' });
 
     // (2) The repair round was seeded with the bounded control summary only.
     expect(seededRepair.payload).toBeDefined();

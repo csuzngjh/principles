@@ -369,7 +369,7 @@ export async function runRuleHostPipeline(opts: RuleHostPipelineOptions): Promis
     await createInternalizationTask(stateManager, scribeTaskId, 'scribe', [philosopherTaskId], channel, timeoutMs);
     const scribeRunner = new ScribeRunner(
       {
-        stateManager, runtimeAdapter: agentAdapters.scribe, eventEmitter, validator: new DefaultScribeValidator(), artifactStore,
+        stateManager, runtimeAdapter: agentAdapters.scribe, eventEmitter, validator: new DefaultScribeValidator({ requireRuleCodeContracts: true }), artifactStore,
         // I2 — CHAIN STAMPING: stamp the ledger principle UUID at write time
         // so the artifact reaches the dispatcher gate with a resolvable
         // identity. backfillScribeIdentity below stays authoritative for the

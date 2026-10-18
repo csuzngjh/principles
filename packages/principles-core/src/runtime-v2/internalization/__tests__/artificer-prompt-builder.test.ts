@@ -85,7 +85,7 @@ describe('ArtificerPromptBuilder', () => {
     // SPEC-RULECODE-QUALITY-001 A2 — bumped v12 → v13: closest-per-call-proxy
     // and params-precondition guidance deleted (self-filled approval source),
     // conditional INTENT EXECUTION CONDITIONS block added.
-    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v13');
+    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v14');
   });
 
   // ── PRI-741: canonicalKind-first contract + host semantic projection ──
@@ -248,7 +248,7 @@ describe('PRI-484 / PRI-780 Artificer prompt context contract', () => {
   });
 
   it('declares the contract version bump history v1 → … → v13 (PRI-634 PR-A, PRI-700, PRI-741, PRI-780, PRI-817, PRI-839, PD v2 Phase 1 r3, PD v2 Phase 1 closeout, review round, SPEC-RULECODE-QUALITY-001 A2)', () => {
-    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v13');
+    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v14');
   });
 
   // PD v2 Phase 1 host acceptance (2026-10-10): validateV2OutputContract rejects
@@ -278,7 +278,7 @@ describe('PRI-484 / PRI-780 Artificer prompt context contract', () => {
   });
 
   it('marks the OUTPUT FORMAT example caseIds as placeholders, not real ids', () => {
-    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toMatch(/caseIds and paths inside the example are PLACEHOLDERS/i);
+    expect(ARTIFICER_PROTOCOL_INSTRUCTION).toMatch(/caseIds, tools and paths inside the example are PLACEHOLDERS/i);
   });
 
   // PD v2 Phase 1 closeout (2026-10-11): the live p1-closeout chain produced a

@@ -22,6 +22,7 @@ import {
   type IntentContractV1,
 } from '../intent-contract.js';
 import { DefaultScribeValidator } from '../scribe-output.js';
+import { ScribeOutputV1Schema } from '../scribe-output.js';
 import {
   attributionFromLayer,
   partitionV2OutOfScopeFailures,
@@ -137,6 +138,23 @@ describe('1. Intent Consistency — contract flows scribe → prompt → rule ar
     delete legacy.intentContract;
     const result = await validator.validate(legacy, 'scribe-1', 'pi-art-phil-1');
     expect(result.valid).toBe(true);
+  });
+
+  it('new Scribe generation rejects missing execution conditions and contract while legacy validation stays compatible', async () => {
+    const validator = new DefaultScribeValidator();
+    const legacy = scribeOutputWithContract() as Record<string, unknown>;
+    delete legacy.intentContract;
+    const legacyResult = await validator.validate(legacy, 'scribe-1', 'pi-art-phil-1');
+    expect(legacyResult.valid).toBe(true);
+
+    const generated = await new DefaultScribeValidator({ requireRuleCodeContracts: true }).validate(legacy, 'scribe-1', 'pi-art-phil-1');
+    expect(generated.valid).toBe(false);
+    expect(generated.errors.join(' ')).toContain('intentContract is required for new RuleCode generation');
+    expect(generated.errors.join(' ')).toContain('executionConditions is required for new RuleCode generation');
+  });
+
+  it('live Scribe output schema requires both RuleCode contracts while legacy parsing remains separate', () => {
+    expect(ScribeOutputV1Schema.required).toEqual(expect.arrayContaining(['intentContract', 'executionConditions']));
   });
 });
 
@@ -294,23 +312,30 @@ describe('2. Failure Attribution — where/why/what-next classification', () => 
     expect(partition.inScope).toEqual([]);
   });
 
-  it('V2_TEMPLATE_CASE_IDS stays equivalent to the generator output (drift would silently re-open the death loop)', () => {
+  it('only context-only templates receive a fixed allow oracle; unsupported policy templates stay in-scope', () => {
     const generated = generateV2ContextAdversarialCases({
       toolName: 'write_file',
       targetPath: '/workspace/report.md',
       canonicalKind: 'write',
     });
-    const generatedIds = new Set(generated.map((c) => c.caseId));
-    expect(generatedIds.size).toBe(5);
-    expect([...generatedIds].sort()).toEqual([...V2_TEMPLATE_CASE_IDS].sort());
-    // Round-2 R1: the oracle-expected decision per generated template must
-    // match the partition's oracle map — generator drift in expectations is
-    // caught here, not silently in production routing.
+    expect(generated.map((c) => c.caseId)).toEqual(['v2-unavailable', 'v2-truncated']);
+    expect([...V2_TEMPLATE_CASE_IDS].sort()).toEqual(['v2-truncated', 'v2-unavailable'].sort());
     for (const c of generated) {
       const oracle = v2TemplateOracleExpectedDecision(c.caseId);
       expect(oracle).not.toBeNull();
       expect(oracle).toBe(c.expectedDecision);
     }
+    // Old durable traces retain their compile-time expectations, but these
+    // policy cases are no longer emitted as generic current templates.
+    expect(v2TemplateOracleExpectedDecision('v2-alias')).toBe('allow');
+    expect(v2TemplateOracleExpectedDecision('v2-path-boundary')).toBe('block');
+    expect(v2TemplateOracleExpectedDecision('v2-combination')).toBe('block');
+    const unsupported = partitionV2OutOfScopeFailures({
+      requiresContextVersion: undefined,
+      failedCases: [{ caseId: 'v2-path-boundary', expectedDecision: 'allow' }],
+    });
+    expect(unsupported.isPureOutOfScope).toBe(false);
+    expect(unsupported.inScope).toEqual(['v2-path-boundary']);
   });
 });
 

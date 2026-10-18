@@ -34,6 +34,12 @@ describe('PRI-439 Phase 3: normalizePathPure — 6 path types', () => {
     expect(normalizePathPure('/etc/passwd', '/project')).toBe('/etc/passwd');
   });
 
+  it('resolves dot segments in POSIX absolute paths before checking the project boundary', async () => {
+    const { normalizePathPure } = await getModule();
+    expect(normalizePathPure('/work/project/src/../index.ts', '/work/project')).toBe('index.ts');
+    expect(normalizePathPure('/work/project-old/index.ts', '/work/project')).toBe('/work/project-old/index.ts');
+  });
+
   // ── Type 2: Absolute Windows ─────────────────────────────────────────────
 
   it('type 2: absolute Windows path relativizes to Windows project dir', async () => {
@@ -62,14 +68,14 @@ describe('PRI-439 Phase 3: normalizePathPure — 6 path types', () => {
 
   // ── Type 5: Relative ../ (escapes project) ───────────────────────────────
 
-  it('type 5: relative ../ that escapes project returns original', async () => {
+  it('type 5: relative ../ outside project stays relative to the project root', async () => {
     const { normalizePathPure } = await getModule();
     expect(normalizePathPure('../src/index.ts', '/project')).toBe('../src/index.ts');
   });
 
-  it('type 5: relative ../../ that escapes project returns original', async () => {
+  it('type 5: multiple parent segments are resolved from the filesystem root', async () => {
     const { normalizePathPure } = await getModule();
-    expect(normalizePathPure('../../src/index.ts', '/project')).toBe('../../src/index.ts');
+    expect(normalizePathPure('../../src/index.ts', '/project')).toBe('../src/index.ts');
   });
 
   // ── Type 6: Empty/null ───────────────────────────────────────────────────
@@ -123,6 +129,11 @@ describe('PRI-439 Phase 3: normalizePathPure — 6 path types', () => {
     expect(upper).toBe(lower);
   });
 
+  it('compares Windows workspace path segments without case sensitivity', async () => {
+    const { normalizePathPure } = await getModule();
+    expect(normalizePathPure('d:/WORK/PROJECT/src/file.ts', 'D:/work/project')).toBe('src/file.ts');
+  });
+
   it('trailing slash on path is handled', async () => {
     const { normalizePathPure } = await getModule();
     // Trailing slash is dropped by split('/').filter(s => s.length > 0),
@@ -133,6 +144,107 @@ describe('PRI-439 Phase 3: normalizePathPure — 6 path types', () => {
   it('workspace root with trailing slash relativizes correctly', async () => {
     const { normalizePathPure } = await getModule();
     expect(normalizePathPure('/project/src/index.ts', '/project/')).toBe('src/index.ts');
+  });
+
+  it('resolves internal dot segments before returning a workspace-relative path', async () => {
+    const { normalizePathPure } = await getModule();
+    expect(normalizePathPure('a/../file.txt', '/work/project')).toBe('file.txt');
+  });
+
+  it('normalizes relative paths whose final lexical target is outside the workspace', async () => {
+    const { normalizePathPure } = await getModule();
+    expect(normalizePathPure('docs/../../secrets.json', 'C:/work/project')).toBe('../secrets.json');
+    expect(normalizePathPure('docs\\..\\..\\secrets.json', 'C:\\work\\project')).toBe('../secrets.json');
+  });
+
+  it('uses final lexical ownership when relative segments leave and return to the workspace', async () => {
+    const { normalizePathPure } = await getModule();
+    expect(normalizePathPure('../project/docs/./readme.md', 'C:/work/project')).toBe('docs/readme.md');
+  });
+
+  it('does not relativize an absolute path from a different Windows drive', async () => {
+    const { normalizePathPure } = await getModule();
+    expect(normalizePathPure('D:/work/project/file.txt', 'C:/work/project')).toBe('D:/work/project/file.txt');
+  });
+
+  it('recognizes the workspace root and does not confuse a prefix sibling with the root', async () => {
+    const { normalizePathPure } = await getModule();
+    expect(normalizePathPure('/work/project', '/work/project/')).toBe('.');
+    expect(normalizePathPure('/work/project-old/file.txt', '/work/project')).toBe('/work/project-old/file.txt');
+  });
+
+  it('preserves UNC paths and does not treat them as POSIX workspace paths', async () => {
+    const { normalizePathPure } = await getModule();
+    expect(normalizePathPure('\\\\server\\share\\folder\\file.txt', 'C:\\work\\project'))
+      .toBe('//server/share/folder/file.txt');
+  });
+
+  it('normalizes absolute paths inside a UNC workspace by share boundary', async () => {
+    const { normalizePathPure } = await getModule();
+    expect(normalizePathPure('\\\\server\\share\\project\\src\\a.ts', '\\\\server\\share\\project'))
+      .toBe('src/a.ts');
+    expect(normalizePathPure('\\\\server\\share-old\\project\\a.ts', '\\\\server\\share\\project'))
+      .toBe('//server/share-old/project/a.ts');
+  });
+
+  it('normalizes the UNC workspace root itself to dot and compares server/share case-insensitively', async () => {
+    const { normalizePathPure } = await getModule();
+    expect(normalizePathPure('\\\\SERVER\\SHARE\\PROJECT', '\\\\server\\share\\project\\'))
+      .toBe('.');
+    expect(normalizePathPure('\\\\SERVER\\SHARE\\PROJECT\\src\\a.ts', '\\\\server\\share\\project'))
+      .toBe('src/a.ts');
+  });
+
+  it('preserves Windows root-relative paths whose drive cannot be established lexically', async () => {
+    const { normalizePathPure } = await getModule();
+    expect(normalizePathPure('\\work\\project\\file.txt', 'C:\\work\\project'))
+      .toBe('/work/project/file.txt');
+  });
+
+  it('does not add shell parsing beyond the existing mutation-target heuristic', async () => {
+    const { buildRuleHostAction } = await getModule();
+    const command = 'echo safe && printf ok';
+    const action = buildRuleHostAction('bash', { command }, '/work/project', { isBashTool: true });
+    expect(action.normalizedPath).toBe(command);
+  });
+
+  it('does not normalize an unrecognized shell command into a workspace-relative file path', async () => {
+    const { buildRuleHostAction } = await getModule();
+    const command = 'echo docs/../secrets.json';
+    const action = buildRuleHostAction('bash', { command }, '/work/project', { isBashTool: true });
+    expect(action.normalizedPath).toBe(command);
+  });
+
+  it('normalizes an explicit path ahead of an opaque shell command', async () => {
+    const { buildRuleHostAction } = await getModule();
+    const action = buildRuleHostAction(
+      'bash',
+      { file_path: 'src/../safe.ts', command: 'echo docs/../secrets.json' },
+      '/work/project',
+      { isBashTool: true },
+    );
+    expect(action.normalizedPath).toBe('safe.ts');
+  });
+
+  it('normalizes a shell mutation target extracted by the existing heuristic', async () => {
+    const { buildRuleHostAction } = await getModule();
+    const action = buildRuleHostAction(
+      'bash',
+      { command: 'echo payload > docs/../secrets.json' },
+      '/work/project',
+      { isBashTool: true },
+    );
+    expect(action.normalizedPath).toBe('secrets.json');
+  });
+
+  it('derives the existing system-path risk fact from normalizedPath only', async () => {
+    const { isSensitiveSystemPath } = await getModule();
+    expect(isSensitiveSystemPath('/etc')).toBe(true);
+    expect(isSensitiveSystemPath('/etc/passwd')).toBe(true);
+    expect(isSensitiveSystemPath('/etc/../tmp/passwd')).toBe(false);
+    expect(isSensitiveSystemPath('/etc-backup/passwd')).toBe(false);
+    expect(isSensitiveSystemPath('etc/passwd')).toBe(false);
+    expect(isSensitiveSystemPath(null)).toBe(false);
   });
 });
 

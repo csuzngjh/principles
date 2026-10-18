@@ -75,6 +75,16 @@ function makeScribeOutput(): ScribeOutputV1 {
     },
     risks: ['May add latency from error checking'],
     generatedAt: new Date().toISOString(),
+    intentContract: {
+      ownerIntent: 'Handle failures from async operations deliberately.',
+      targetBehavior: 'Include explicit error handling for async operations.',
+      forbiddenBehavior: 'Ignore or leave rejected async operations unhandled.',
+      evidenceSource: 'the source Philosopher principle candidate',
+      validationExpectation: 'A generated rule must match the explicit error-handling principle.',
+    },
+    // This new-generation fixture explicitly declares no external facts are
+    // required; legacy outputs may omit this field and remain readable.
+    executionConditions: { version: 1, requiredFacts: [] },
   };
 }
 

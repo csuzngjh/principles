@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { SqliteApprovalQueueStore } from '../sqlite-approval-store.js';
 import { SqliteConnection } from '../../store/sqlite-connection.js';
+import { computeArtifactDigest, verifyPiArtifactRowDigest } from '../promotion-evidence-snapshot.js';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';
@@ -8,6 +9,12 @@ import fs from 'fs';
 function createTestConnection(): SqliteConnection {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-test-approval-'));
   return new SqliteConnection(tmpDir);
+}
+
+function readArtifactRow(db: ReturnType<SqliteConnection['getDb']>, artifactId: string): Record<string, unknown> {
+  const row: unknown = db.prepare('SELECT * FROM pi_artifacts WHERE artifact_id = ?').get(artifactId);
+  if (row === null || typeof row !== 'object' || Array.isArray(row)) throw new Error(`missing artifact row: ${artifactId}`);
+  return Object.fromEntries(Object.entries(row));
 }
 
 describe('SqliteApprovalQueueStore', () => {
@@ -87,6 +94,65 @@ describe('SqliteApprovalQueueStore', () => {
       expect(result.record.decidedBy).toBe('user-1');
       expect(result.record.decisionNote).toBe('LGTM');
     }
+  });
+
+  it('binds an owner approval to the exact current artifact snapshot', async () => {
+    const created = await store.enqueue({ artifactId: 'art-1', channel: 'code_tool_hook', riskLevel: 'high' }, '2026-05-18T00:00:00Z');
+    const db = connection.getDb();
+    const result = await store.approve(created.approvalId, 'user-1', 'LGTM');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const expectedDigest = computeArtifactDigest({
+      artifactId: 'art-1',
+      artifactKind: 'principle',
+      sourceTaskId: 'task-1',
+      lineageArtifactIds: [],
+      validationStatus: 'pending',
+      contentJson: '{}',
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+    });
+    expect(result.record.artifactDigest).toBe(expectedDigest);
+    expect(db.prepare('SELECT artifact_digest FROM approvals WHERE approval_id = ?').get(created.approvalId))
+      .toEqual({ artifact_digest: expectedDigest });
+    const approvedDigest = result.record.artifactDigest;
+    expect(typeof approvedDigest).toBe('string');
+    if (typeof approvedDigest !== 'string') return;
+
+    // A copied/forged RuleCode marker cannot make changed artifact content inherit the old approval.
+    db.prepare("UPDATE pi_artifacts SET content_json = '{\"ruleHostInputContract\":{\"version\":1}}' WHERE artifact_id = 'art-1'").run();
+    const changedArtifact = readArtifactRow(db, 'art-1');
+    const changedContent = changedArtifact.content_json;
+    expect(typeof changedContent).toBe('string');
+    if (typeof changedContent !== 'string') return;
+    expect(verifyPiArtifactRowDigest(changedArtifact, changedContent, approvedDigest).outcome)
+      .toBe('tampered');
+  });
+
+  it('keeps legacy approvals with a null artifact digest unbound', async () => {
+    const created = await store.enqueue({ artifactId: 'art-1', channel: 'code_tool_hook', riskLevel: 'high' }, '2026-05-18T00:00:00Z');
+    const db = connection.getDb();
+    db.prepare('UPDATE approvals SET status = ?, artifact_digest = NULL WHERE approval_id = ?').run('approved', created.approvalId);
+
+    const legacy = await store.getById(created.approvalId);
+    expect(legacy?.status).toBe('approved');
+    expect(legacy?.artifactDigest).toBeUndefined();
+    expect(verifyPiArtifactRowDigest(
+      readArtifactRow(db, 'art-1'),
+      '{}',
+      legacy?.artifactDigest ?? null,
+    ).outcome).toBe('no_binding');
+  });
+
+  it('does not approve or bind when the current artifact snapshot is malformed', async () => {
+    const created = await store.enqueue({ artifactId: 'art-1', channel: 'code_tool_hook', riskLevel: 'high' }, '2026-05-18T00:00:00Z');
+    const db = connection.getDb();
+    db.prepare("UPDATE pi_artifacts SET lineage_artifact_ids = 'not-json' WHERE artifact_id = 'art-1'").run();
+
+    await expect(store.approve(created.approvalId, 'user-1')).rejects.toThrow();
+    expect(db.prepare('SELECT status, artifact_digest FROM approvals WHERE approval_id = ?').get(created.approvalId))
+      .toEqual({ status: 'pending', artifact_digest: null });
   });
 
   it('reject changes status to rejected', async () => {

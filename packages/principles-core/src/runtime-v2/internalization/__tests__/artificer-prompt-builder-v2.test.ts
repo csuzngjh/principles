@@ -53,6 +53,16 @@ describe('ArtificerPromptBuilder V2 contract', () => {
     expect(result.systemPrompt).toMatch(/must.*requiresContextVersion.*2/i);
   });
 
+  it('keeps risk-path decisions inside the current principle and action scope', () => {
+    const result = new ArtificerPromptBuilder().buildPrompt({
+      taskId: 'task-risk-scope', contextHash: 'hash-risk', sourceScribeArtifactId: 'scribe-risk', scribeArtifact: {},
+      behaviorExamplePack: minimalPack,
+    });
+    expect(result.systemPrompt).toMatch(/risk-path signal.*inside this principle.s explicit applicability and action scope/i);
+    expect(result.systemPrompt).toMatch(/outside the principle scope, return allow with matched: false/i);
+    expect(result.systemPrompt).not.toMatch(/if helpers\.isRiskPath\(\) is true.*MUST be block/i);
+  });
+
   // EP002-R4: real workspaces produce real-sized tool-call payloads — a single
   // example (full file content / edit diff) can exceed the whole 50k prompt
   // budget (live workspace measured: pack 115,198 chars, of which ONE case's

@@ -316,7 +316,7 @@ export function deriveProductionCorrectionPainIdentity(fields: {
 
 const REQUIRED_COLUMNS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   sessions: { session_id: 'TEXT', started_at: 'TEXT', updated_at: 'TEXT' },
-  tool_calls: { session_id: 'TEXT', tool_name: 'TEXT', outcome: 'TEXT', duration_ms: 'INTEGER', exit_code: 'INTEGER', error_type: 'TEXT', error_message: 'TEXT', gfi_before: 'REAL', gfi_after: 'REAL', params_json: 'TEXT', result_preview: 'TEXT', created_at: 'TEXT' },
+  tool_calls: { session_id: 'TEXT', tool_name: 'TEXT', outcome: 'TEXT', duration_ms: 'INTEGER', exit_code: 'INTEGER', error_type: 'TEXT', error_message: 'TEXT', gfi_before: 'REAL', gfi_after: 'REAL', params_json: 'TEXT', result_preview: 'TEXT', created_at: 'TEXT', project_dir: 'TEXT' },
   pain_events: { session_id: 'TEXT', source: 'TEXT', score: 'REAL', reason: 'TEXT', severity: 'TEXT', origin: 'TEXT', confidence: 'REAL', text: 'TEXT', canonical_pain_id: 'TEXT', runtime_task_id: 'TEXT', host_kind: 'TEXT', created_at: 'TEXT' },
 };
 
@@ -365,7 +365,7 @@ function hasCanonicalSchema(db: Database.Database): boolean {
   db.prepare('SELECT 1 FROM tool_calls WHERE session_id = ? AND tool_name = ? AND params_json = ? AND outcome = ? AND exit_code IS ? AND error_message IS ? AND result_preview IS ?');
   db.prepare('SELECT 1 FROM pain_events WHERE canonical_pain_id = ?');
   db.prepare('INSERT INTO sessions (session_id, started_at, updated_at) VALUES (?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET updated_at = excluded.updated_at');
-  db.prepare('INSERT INTO tool_calls (session_id, tool_name, outcome, duration_ms, exit_code, error_type, error_message, gfi_before, gfi_after, params_json, result_preview, created_at, tool_use_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+  db.prepare('INSERT INTO tool_calls (session_id, tool_name, outcome, duration_ms, exit_code, error_type, error_message, gfi_before, gfi_after, params_json, result_preview, created_at, tool_use_id, project_dir) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
   db.prepare('INSERT INTO pain_events (session_id, source, score, reason, severity, origin, confidence, text, canonical_pain_id, runtime_task_id, host_kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
   return true;
 }
@@ -386,6 +386,18 @@ function ensureToolCallsToolUseIdColumn(db: Database.Database): void {
   } catch {
     // A concurrent writer may have added it between the check and the ALTER;
     // the prepared-statement readiness check below fails loud if it is truly absent.
+  }
+}
+
+/** Additive migration for verified host cwd binding; legacy rows stay NULL. */
+function ensureToolCallsProjectDirColumn(db: Database.Database): void {
+  const columns: unknown[] = db.prepare('PRAGMA table_info(tool_calls)').all();
+  if (columns.some((row) => pragmaField(row, 'name') === 'project_dir')) return;
+  try {
+    db.exec('ALTER TABLE tool_calls ADD COLUMN project_dir TEXT');
+  } catch {
+    // A concurrent writer may have added it between the check and the ALTER;
+    // the prepared-statement readiness check below fails loud if absent.
   }
 }
 
@@ -480,7 +492,7 @@ export function recordVerifiedToolOutcomes(args: {
  * this shared handler (OpenClaw / Codex adapters) — never guessed inside the
  * writer. Omitted -> NULL (unknown).
  */
-export function createProductionPainEvidenceHandler(options: { painEnrichmentProvider?: PainEnrichmentProvider; painDatabaseFactory?: PainDatabaseFactory; hostKind?: GovernanceHostKind; events?: HostEventEmitter } = {}) {
+export function createProductionPainEvidenceHandler(options: { painEnrichmentProvider?: PainEnrichmentProvider; painDatabaseFactory?: PainDatabaseFactory; hostKind?: GovernanceHostKind; projectDir?: string; events?: HostEventEmitter } = {}) {
   return async (event: HostEvent): Promise<HostEventResult> => {
     // PRI-750: shared-path tool event with the host's natural turn/tool ids
     // (Codex turn_id → runId, tool_use_id → toolCallId) so receipt events
@@ -514,6 +526,7 @@ export function createProductionPainEvidenceHandler(options: { painEnrichmentPro
       db = options.painDatabaseFactory ? options.painDatabaseFactory(dbPath) : new Database(dbPath);
       db.pragma('busy_timeout = 5000');
       ensureToolCallsToolUseIdColumn(db);
+      ensureToolCallsProjectDirColumn(db);
       if (!hasCanonicalSchema(db)) {
         db.close();
         db = undefined;
@@ -615,8 +628,8 @@ export function createProductionPainEvidenceHandler(options: { painEnrichmentPro
           return;
         }
         db.prepare(`INSERT INTO sessions (session_id, started_at, updated_at) VALUES (?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET updated_at = excluded.updated_at`).run(event.context.sessionId, createdAt, createdAt);
-        db.prepare(`INSERT INTO tool_calls (session_id, tool_name, outcome, duration_ms, exit_code, error_type, error_message, gfi_before, gfi_after, params_json, result_preview, created_at, tool_use_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-          .run(event.context.sessionId, toolName, outcome.outcome, outcome.durationMs ?? null, outcome.exitCode, outcome.error ? outcome.error.split(/[\s:]/, 1)[0] : null, outcome.error ?? null, null, null, paramsJson, resultPreview, createdAt, event.context.toolCallId ?? null);
+        db.prepare(`INSERT INTO tool_calls (session_id, tool_name, outcome, duration_ms, exit_code, error_type, error_message, gfi_before, gfi_after, params_json, result_preview, created_at, tool_use_id, project_dir) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(event.context.sessionId, toolName, outcome.outcome, outcome.durationMs ?? null, outcome.exitCode, outcome.error ? outcome.error.split(/[\s:]/, 1)[0] : null, outcome.error ?? null, null, null, paramsJson, resultPreview, createdAt, event.context.toolCallId ?? null, options.projectDir ?? event.context.workspaceDir);
         if (admitted) {
           // Raw observation only (Pain Diagnosis Persistence SPEC §8): the
           // pain row must record WHAT happened, not WHY. Attribution

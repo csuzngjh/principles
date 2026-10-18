@@ -6,7 +6,7 @@ import process from 'node:process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { appendEventLogLine, redactTelemetryString, isRuleHostEvaluatedEventData, type RuleHostEvaluatedEventData } from '@principles/core/runtime-v2';
 import type { HostEventEmitter, HostEventKind } from '@principles/core/host';
-import { createProductionHostRuntime, loadPdConfigForPlugin, resolveNearestPdWorkspace } from '@principles/host-runtime';
+import { createCodexRuleContextProvider, createProductionHostRuntime, loadPdConfigForPlugin, resolveNearestPdWorkspace } from '@principles/host-runtime';
 import { CODEX_TOOL_SEMANTICS } from './tool-semantics.js';
 import { computeFeatureFlagsFromConfig } from '@principles/core/runtime-v2';
 import { CodexHooksHostAdapter } from './host-adapter.js';
@@ -160,28 +160,6 @@ function recordRuleHostEvaluations(stateDir: string, sessionId: string | undefin
   return diagnostics;
 }
 
-/**
- * PRI-780 Codex capability declaration (structured UNSUPPORTED — suspension
- * semantics, revised after Codex review round 2 P1): the Codex host has no
- * runtime context provider, and the "unavailable → allow" contract is
- * generation-time prompt discipline, NOT a runtime-enforced invariant. Handing
- * v2 rules a truthy unavailable-posture context would let a persisted rule
- * evaluate context-blind and DENY tool calls that were previously suspended —
- * a silent governance behavior change. Codex therefore passes NO context
- * provider: the shared gate skips v2 rules with its structured
- * `rule_context_v2_unavailable` warning, and this hook annotates that warning
- * with the explicit host-unsupported reason before it reaches Codex stderr
- * (see annotateContextWarnings — ticket option B: 明确 unsupported + 结构化
- * warning, never a silent skip).
- */
-const CODEX_CONTEXT_UNSUPPORTED_NOTE = 'codex_runtime_context_unsupported: the Codex host provides no runtime context provider; v2 rules stay suspended on this host';
-
-export function annotateContextWarnings(warnings: readonly string[]): string[] {
-  return warnings.map((warning) => warning.startsWith('rule_context_v2_unavailable')
-    ? `${warning}; ${CODEX_CONTEXT_UNSUPPORTED_NOTE}`
-    : warning);
-}
-
 // Bounded governance-observation ingestion (Codex Governance Closure Slice
 // A) followed by the Slice B signal-admission pass (SPEC §12/§13): detection
 // → canonical pain → evidence promotion → one pending Diagnostician task.
@@ -192,12 +170,12 @@ export function annotateContextWarnings(warnings: readonly string[]): string[] {
 // BEFORE dispatch so a live tool failure is admitted through the same
 // canonical derivation first and the production handler's duplicate probe
 // then converges to a no-op (exactly one pain per real tool call).
-async function runConversationIngestion(args: { rawPayload: unknown; kind: HostEventKind; workspaceDir: string; env: EnvMap; suppressCorrectionCandidate?: boolean }): Promise<string[]> {
-  const { rawPayload, kind, workspaceDir, env } = args;
+async function runConversationIngestion(args: { rawPayload: unknown; kind: HostEventKind; workspaceDir: string; projectDir?: string; env: EnvMap; suppressCorrectionCandidate?: boolean }): Promise<string[]> {
+  const { rawPayload, kind, workspaceDir, projectDir, env } = args;
   if (kind !== 'turn_complete' && kind !== 'before_prompt_build' && kind !== 'after_tool_call') return [];
   const diagnostics: string[] = [];
   try {
-    const outcome = ingestCodexConversation(rawPayload, kind, { workspaceDir, env });
+    const outcome = ingestCodexConversation(rawPayload, kind, { workspaceDir, ...(projectDir !== undefined ? { projectDir } : {}), env });
     if (outcome.status === 'degraded') {
       diagnostics.push(diagnostic(outcome.reason, outcome.nextAction));
     } else {
@@ -240,6 +218,9 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
     const nextAction = error instanceof CodexDecoderError ? error.nextAction : 'Inspect the Codex 0.147 hook payload.';
     return { stdout: {}, exitCode: 0, stderr: [diagnostic(reason, nextAction)] };
   }
+  // Capture the PreToolUse boundary before ingestion, governance or runtime
+  // work can consume time; history must never include rows written afterwards.
+  const hookEpoch = new Date();
 
   // Initializing the user workspace explicitly opts Codex into shared
   // governance. Otherwise preserve the existing per-project resolution.
@@ -342,6 +323,7 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
         rawPayload: parsed,
         kind: event.kind,
         workspaceDir: resolution.workspaceDir,
+        projectDir: requestedCwd,
         env: _env,
         // CR-07: the explicit path already handled this turn's user prompt —
         // suppress the generic correction candidate so exactly one writer
@@ -367,10 +349,15 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
       projectDir: requestedCwd,
       hostKind: 'codex',
       toolSemantics: CODEX_TOOL_SEMANTICS,
+      ruleContextProvider: createCodexRuleContextProvider({
+        workspaceDir: resolution.workspaceDir,
+        projectDir: requestedCwd,
+        enabled: flags.rulecode_context_v2?.enabled === true && ingestionEnabled,
+        cutoffAt: hookEpoch,
+        currentToolUseId: event.context.toolCallId ?? '',
+        toolSemantics: CODEX_TOOL_SEMANTICS,
+      }),
       events: codexEventEmitter(path.join(resolution.workspaceDir, '.state'), evidenceContext),
-      // PRI-780 (revised after Codex review round 2 P1): NO context provider —
-      // v2 rules stay SUSPENDED on Codex (never loaded context-blind). See
-      // annotateContextWarnings for the structured unsupported declaration.
     }).dispatch(event);
     // PRI-813: the shared gate's evaluation facts leave through metadata —
     // persist them here (telemetry persistence is host-side business; the
@@ -382,11 +369,10 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
       event.context.sessionId,
       result.metadata?.evaluations,
     );
-    // PD v2 Phase 1: encode BEFORE recording an attributed deny — a
-    // runtime_verified application claims only what reached the stdout
-    // channel (codex_permission_decision_encoded boundary). Dormant while
-    // v2 enforcement is suspended (PRI-780); wired honestly for the day it
-    // is not.
+    // Encode before recording an attributed deny: runtime_verified evidence
+    // claims only what reached stdout (codex_permission_decision_encoded).
+    // V2 rules remain suspended by the shared gate when this provider reports
+    // unavailable history; that degraded state is preserved in stderr.
     const encoded = adapter.encodeOutput(result, event.kind);
     // CR-07 (A16): the explicit-statement receipt rides as additional context
     // so the model can answer truthfully about what happened (received +
@@ -439,7 +425,7 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
         evidenceDiagnostics.push(diagnostic(`codex_evidence_deny_failed:${errorMessage(error)}`, 'The deny decision was already encoded; evidence replay from the durable source is safe.'));
       }
     }
-    const stderr = [...annotateContextWarnings(result.warnings ?? []).slice(0, 16).map((warning) => diagnostic(warning, 'Inspect PD Workspace state and retry; the hook failed open.')), ...evaluationDiagnostics, ...evidenceDiagnostics, ...explicitDiagnostics, ...ingestionDiagnostics];
+    const stderr = [...(result.warnings ?? []).slice(0, 16).map((warning) => diagnostic(warning, 'Inspect PD Workspace state and retry; the hook failed open.')), ...evaluationDiagnostics, ...evidenceDiagnostics, ...explicitDiagnostics, ...ingestionDiagnostics];
     return { stdout: encoded, exitCode: 0, stderr };
   } catch (error) {
     const reason = error instanceof CodexEncoderError ? error.reason : `runtime_failed:${errorMessage(error)}`;

@@ -1,5 +1,5 @@
 /** Shared validated history assembly; host vocabulary is supplied by its owner. */
-import { extractFilePathFromParams, normalizePathPure } from '@principles/core/runtime-v2/internalization/rule-host-input-builder';
+import { buildRuleHostAction } from '@principles/core/runtime-v2/internalization/rule-host-input-builder';
 import type { CanonicalKind, RuleHistoryWindow, RuleToolCallRecord, RuleToolOutcome, ToolSemanticRegistry } from '@principles/core/runtime-v2';
 import type { RuleHostContextRow } from '@principles/core/trajectory-types';
 const VALID_OUTCOMES: ReadonlySet<string> = new Set<RuleToolOutcome>(['success', 'failure', 'blocked']);
@@ -65,14 +65,9 @@ export function assembleBehaviorHistory(
     // while the gate classified them as bash/write (vocabulary drift).
     const canonicalKind: CanonicalKind = toolSemantics.resolve(toolName);
 
-    // Extract normalized path using the same pure logic as buildRuleHostAction
-    // (avoids production/replay drift, spec §4.4)
-    const rawPath = extractFilePathFromParams(parsedParams, {
-      isBashTool: canonicalKind === 'execute',
-      isWriteTool: canonicalKind === 'write',
-      toolName,
-    });
-    const normalizedPath = normalizePathPure(rawPath, projectDir);
+    // Use the shared action builder so history and live/replay preserve the
+    // same distinction between extracted paths and opaque shell commands.
+    const {normalizedPath} = buildRuleHostAction(toolName, parsedParams, projectDir, { canonicalKind });
 
     records.push({
       sequenceId: row.id,

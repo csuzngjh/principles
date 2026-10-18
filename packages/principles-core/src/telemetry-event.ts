@@ -278,6 +278,8 @@ export const TelemetryEventType = Type.Union([
   //   merge, sandbox threw) with a structured reason.
   Type.Literal('evaluator_adversarial_replay'),
   Type.Literal('evaluator_adversarial_replay_skipped'),
+  // PRI-1015: no current host semantic proof, so no Codex V2 compatibility stamp.
+  Type.Literal('evaluator_rule_host_input_contract_skipped'),
   // PRI-741: emitted when the host-name parity replay case is intentionally
   // not generated (no host semantic projection, author name already host-real,
   // no host tool with the author's canonical kind) with a structured reason.

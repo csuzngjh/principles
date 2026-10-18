@@ -613,7 +613,7 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
           );
           runnerResult = await runner.run(wakeResult.taskId);
         } else if (runnerKind === 'scribe') {
-          const validator = new DefaultScribeValidator();
+          const validator = new DefaultScribeValidator({ requireRuleCodeContracts: true });
           const runner = new ScribeRunner(
             {
               stateManager, runtimeAdapter, eventEmitter, validator, artifactStore,

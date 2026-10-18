@@ -872,7 +872,7 @@ export async function runInternalizationConsumerCycle(
       case 'scribe':
         runner = new ScribeRunner(
           {
-            stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultScribeValidator(),
+            stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultScribeValidator({ requireRuleCodeContracts: true }),
             // I2 — CHAIN STAMPING (Owner review of PR #1856, P1): the scribe
             // stamps the ledger principle UUID (minted at intake, keyed by the
             // dreamer task seed's candidateId) onto the artifact it writes, so

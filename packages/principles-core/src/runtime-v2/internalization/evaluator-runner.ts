@@ -2613,7 +2613,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       return { updatedOutput: null, skipReason: 'artificer_artifact_unparseable' };
     }
 
-    const { implementationCode, goldenTraceCases, affectedTools } = artificerParsed;
+    const { implementationCode, goldenTraceCases, ownerGoldenTraceCases, affectedTools, requiresContextVersion } = artificerParsed;
     if (typeof implementationCode !== 'string' || implementationCode.trim() === '') {
       // Artificer output is V1 (no code) but the evaluator emitted V2. This is
       // a mismatch — degrade rather than replay against missing code.
@@ -2628,7 +2628,37 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // Merge positive cases from the Artificer golden trace into the adversarial
     // trace. buildGoldenTraceFromArtificer validates each case structurally
     // (Runtime Contract Rule 4) and returns ok=false on any malformed entry.
-    const positiveCases = this.extractPositiveCases(goldenTraceCases);
+    let positiveCases: GoldenTraceCase[];
+    let ownerNegativeCases: GoldenTraceCase[] = [];
+    if (requiresContextVersion === 2) {
+      if (!Array.isArray(ownerGoldenTraceCases)) {
+        this.emitEvent('adversarial_replay_skipped', taskId, {
+          runId,
+          reason: 'owner_golden_trace_stamp_missing_or_invalid',
+          nextAction: 'regenerate_artificer_artifact_from_the_current_validated_owner_behavior_example_pack',
+        });
+        return { updatedOutput: null, skipReason: 'owner_golden_trace_stamp_missing_or_invalid' };
+      }
+      const ownerBuild = buildGoldenTraceFromArtificer({ cases: ownerGoldenTraceCases });
+      const ownerPositives = ownerBuild.ok ? ownerBuild.trace.cases.filter((c) => c.kind === 'positive') : [];
+      ownerNegativeCases = ownerBuild.ok ? ownerBuild.trace.cases.filter((c) => c.kind === 'negative') : [];
+      if (!ownerBuild.ok || ownerPositives.length === 0 || ownerNegativeCases.length === 0
+        || ownerBuild.trace.cases.some((c) => c.expectedDecision === 'propose_correction')
+        || ownerNegativeCases.some((c) => c.expectedDecision !== 'block')) {
+        this.emitEvent('adversarial_replay_skipped', taskId, {
+          runId,
+          reason: 'owner_golden_trace_stamp_invalid_or_missing_positive_negative_pair',
+          nextAction: 'restore_a_validated_owner_pack_with_at_least_one_allow_positive_and_one_block_negative_case',
+        });
+        return { updatedOutput: null, skipReason: 'owner_golden_trace_stamp_invalid_or_missing_positive_negative_pair' };
+      }
+      positiveCases = ownerPositives;
+    } else {
+      // Legacy v1 artifacts predate the system-owned pack stamp and remain
+      // readable. New context-v2 RuleCode never falls back to model-authored
+      // examples as its independent Owner acceptance baseline.
+      positiveCases = this.extractPositiveCases(goldenTraceCases);
+    }
     if (positiveCases.length === 0) {
       this.emitEvent('adversarial_replay_skipped', taskId, {
         runId,
@@ -2638,10 +2668,9 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       return { updatedOutput: null, skipReason: 'no_positive_case_in_artificer_golden_trace' };
     }
 
-    // (3) PRI-485 Phase 6: auto-generate 5 v2 adversarial cases from the
-    // Artificer's target kind and one complete positive write case. These defend
-    // against the most common false-positive patterns (unavailable/truncation/
-    // alias/path/combination). Degrade with telemetry (rc-9) if the spec
+    // Derive context availability cases from one complete positive write case.
+    // Business decisions come from the Owner pack, not generic path policies.
+    // Degrade with telemetry (rc-9) if the spec
     // cannot be derived for a write target — auxiliary cases cannot replace them.
     // PRI-634 R1: V1-shaped outputs carry no adversarialCases — the merged
     // set below then relies entirely on the auto-generated v2 cases.
@@ -2654,8 +2683,22 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     }
     // PRI-741: host-name parity case — the rule must reach the same decision
     // under the REAL host tool name as under the author's vocabulary.
-    const hostAliasCase = this.generateHostAliasCase(goldenTraceCases, taskId, runId);
+    const hostAliasCase = this.generateHostAliasCase(
+      requiresContextVersion === 2 ? ownerGoldenTraceCases : goldenTraceCases,
+      taskId,
+      runId,
+    );
+    const ownerNegativeAdversarial: AdversarialCase[] = ownerNegativeCases.map((ownerCase) => ({
+      caseId: `owner:${ownerCase.caseId}`,
+      attackType: 'boundary',
+      toolName: ownerCase.toolName,
+      params: ownerCase.params,
+      expectedDecision: 'block',
+      rationale: 'System-restored Owner-labelled negative behavior example; expected decision comes from the validated BehaviorExamplePack.',
+      ...(ownerCase.ruleContext !== undefined ? { ruleContext: ownerCase.ruleContext } : {}),
+    }));
     const mergedAdversarialCases: AdversarialCase[] = [
+      ...ownerNegativeAdversarial,
       ...v2Cases,
       ...(hostAliasCase !== null ? [hostAliasCase] : []),
       ...llmCases,
@@ -2825,6 +2868,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
   ): {
     readonly implementationCode: unknown;
     readonly goldenTraceCases: unknown;
+    readonly ownerGoldenTraceCases: unknown;
     readonly affectedTools: unknown;
     readonly requiresContextVersion: unknown;
     readonly evidenceRefs: unknown;
@@ -2839,6 +2883,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     return {
       implementationCode: parsed.implementationCode,
       goldenTraceCases: parsed.goldenTraceCases,
+      ownerGoldenTraceCases: parsed.ownerGoldenTraceCases,
       affectedTools: parsed.affectedTools,
       requiresContextVersion: parsed.requiresContextVersion,
       evidenceRefs: parsed.evidenceRefs,
@@ -3472,6 +3517,25 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       });
     }
 
+    const hostContext = this.hostSemanticContext;
+    const hostKinds = hostContext?.hostKinds;
+    const hasHostInputContract = requiresContextVersion === 2
+      && hostContext !== null
+      && Array.isArray(hostKinds)
+      && hostKinds.length > 0
+      && hostKinds.every((kind) => typeof kind === 'string' && kind.trim() !== '')
+      && Array.isArray(hostContext.tools)
+      && hostContext.tools.length > 0
+      && hostContext.tools.every((tool) => typeof tool.rawToolName === 'string' && tool.rawToolName.trim() !== ''
+        && typeof tool.canonicalKind === 'string' && tool.canonicalKind.trim() !== '');
+    if (requiresContextVersion === 2 && !hasHostInputContract) {
+      this.emitEvent('rule_host_input_contract_skipped', taskId, {
+        runId,
+        reason: hostContext === null ? 'host_semantic_context_missing' : 'host_semantic_context_invalid_or_empty',
+        nextAction: 'provide_the_nonempty_host_semantic_projection_used_by_the_deterministic_gate',
+      });
+    }
+
     const ruleContent = {
       implementationCode,
       goldenTrace: traceBuild.trace,
@@ -3483,6 +3547,9 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       sourceArtificerArtifactId: assemblyInput.sourceArtificerArtifactId ?? output.sourceArtificerArtifactId,
       adversarialResult: output.adversarialResult,
       ...(requiresContextVersion === 2 ? { requiresContextVersion } : {}),
+      ...(hasHostInputContract ? {
+        ruleHostInputContract: { version: 1, contextVersion: 2, hostKinds: [...hostKinds] },
+      } : {}),
       // PRI-490: preserve evidenceRefs from Artificer artifact into rule artifact.
       // Only include when the array is valid (non-empty strings) — v1 rules may omit.
       ...(requiresContextVersion === 2 && Array.isArray(evidenceRefs) && evidenceRefs.every((e: unknown) => typeof e === 'string' && e.trim() !== '')

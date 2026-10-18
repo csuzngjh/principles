@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import Database from 'better-sqlite3';
-import { getDefaultPdConfig, SqliteActivationStateStore, SqliteConnection, summarizeRuleCodeShadowEvents } from '@principles/core/runtime-v2';
+import { getDefaultPdConfig, SqliteActivationStateStore, SqliteApprovalQueueStore, SqliteConnection, summarizeRuleCodeShadowEvents } from '@principles/core/runtime-v2';
 import { createStepRegistry, defineFeature } from '../../principles-core/tests/bdd/support/vitest-bdd.js';
 import { resolveFeaturePath } from '../../principles-core/tests/bdd/support/repo-root.js';
 
@@ -42,6 +42,19 @@ function trajectory(root: string): void {
     CREATE UNIQUE INDEX idx_pain_events_canonical_pain_id ON pain_events(canonical_pain_id) WHERE canonical_pain_id IS NOT NULL;
   `);
   db.close();
+}
+function readRuleHostEvaluated(root: string): { ts: string; type: string; category: string; sessionId: string | undefined; data: Record<string, unknown> }[] {
+  const logsDir = path.join(root, '.state', 'logs');
+  if (!fs.existsSync(logsDir)) return [];
+  const rows: { ts: string; type: string; category: string; sessionId: string | undefined; data: Record<string, unknown> }[] = [];
+  for (const file of fs.readdirSync(logsDir).filter(name => name.startsWith('events_') && name.endsWith('.jsonl'))) {
+    for (const line of fs.readFileSync(path.join(logsDir, file), 'utf8').split(/\r?\n/)) {
+      if (line.trim().length === 0) continue;
+      const parsed = JSON.parse(line) as { type?: string };
+      if (parsed.type === 'rulehost_evaluated') rows.push(parsed as { ts: string; type: string; category: string; sessionId: string | undefined; data: Record<string, unknown> });
+    }
+  }
+  return rows;
 }
 afterEach(() => { for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true }); });
 
@@ -135,44 +148,97 @@ describe('PRI-780 Codex runtime context capability declaration (v2 rules)', () =
   }
 
   it('PRI-780 (rev 2): a v2 rule stays SUSPENDED on Codex — never executed context-blind — with the structured unsupported warning', async () => {
-    // Codex review round 2 P1: the unavailable→allow contract is prompt-level
-    // discipline, not runtime-enforced; this rule blocks WITHOUT inspecting
-    // context, so if it were loaded it would deny. The allow here proves the
-    // suspension, and the stderr annotation makes the unsupported declaration
-    // explicit (never a silent skip).
+    // Historical artifacts have no system-stamped Codex context contract or
+    // matching Owner approval. Even though this code would deny if evaluated,
+    // the old activation remains ineligible after the provider is wired.
     const root = workspaceWithRuleContext(true);
     await v2Rule(root);
     const suspended = invoke({ ...base(root), hook_event_name: 'PreToolUse', tool_name: 'write_file', tool_input: { file_path: path.join(root, 'ctxdecl-always-780.txt'), content: 'x' }, tool_use_id: 'call-suspended' });
     expect(JSON.parse(suspended.stdout)).toEqual({ hookSpecificOutput: { hookEventName: 'PreToolUse' } });
-    expect(suspended.stderr).toContain('rule_context_v2_unavailable');
-    expect(suspended.stderr).toContain('codex_runtime_context_unsupported');
+    expect(suspended.stderr).toContain('codex_rule_context_v2_unqualified');
+    expect(suspended.stderr).not.toContain('rule_context_v2_unavailable');
   });
 
-  it('flag OFF (kill switch): the same v2 rule is suspended with the structured warning, not silently enforced', async () => {
+  it('flag OFF: an unqualified historical v2 rule stays suspended and observable', async () => {
     const root = workspaceWithRuleContext(false);
     await v2Rule(root);
     const suspended = invoke({ ...base(root), hook_event_name: 'PreToolUse', tool_name: 'write_file', tool_input: { file_path: path.join(root, 'ctxdecl-always-780.txt'), content: 'x' }, tool_use_id: 'call-suspended' });
     expect(JSON.parse(suspended.stdout)).toEqual({ hookSpecificOutput: { hookEventName: 'PreToolUse' } });
-    expect(suspended.stderr).toContain('rule_context_v2_unavailable');
+    expect(suspended.stderr).toContain('codex_rule_context_v2_unqualified');
+  });
+
+  it('runs an Owner-approved, system-stamped Codex V2 shadow rule through the real hook with valid same-session history', async () => {
+    const root = workspaceWithRuleContext(true);
+    const config = getDefaultPdConfig();
+    config.features['host.codex'].enabled = true;
+    config.features['rulecode_context_v2'].enabled = true;
+    config.features.codex_conversation_ingestion.enabled = true;
+    fs.writeFileSync(path.join(root, '.pd', 'config.yaml'), JSON.stringify(config));
+    trajectory(root);
+    const target = path.join(root, 'qualified-context-1015.txt');
+    const ruleId = 'R_CODEX_V2_QUALIFIED_1015';
+    const artifactId = 'art-codex-v2-qualified-1015';
+    const code = `function evaluate(input) { if (input.context && input.context.history.status === 'available' && input.context.facts.writeCount > 0) return { decision: 'block', matched: true, reason: 'CODEX_V2_CONTEXT_LOADED_1015' }; return { decision: 'allow', matched: false, reason: 'context absent' }; } var meta={name:'codex-v2-qualified',version:'1',ruleId:'${ruleId}',coversCondition:'all'};`;
+    await artifact(root, {
+      id: artifactId,
+      kind: 'rule',
+      principleId: 'P_CODEX_V2_QUALIFIED_1015',
+      ruleId,
+      content: {
+        principleId: 'P_CODEX_V2_QUALIFIED_1015',
+        ruleId,
+        requiresContextVersion: 2,
+        ruleHostInputContract: { version: 1, contextVersion: 2, hostKinds: ['codex'] },
+        implementationCode: code,
+      },
+      channel: 'code_tool_hook',
+      action: 'code_tool_hook_shadow_activate',
+      target: `impl://${ruleId}`,
+    });
+    const connection = new SqliteConnection(root);
+    try {
+      const approvals = new SqliteApprovalQueueStore(connection);
+      const pending = await approvals.enqueue({ artifactId, channel: 'code_tool_hook', riskLevel: 'high' }, new Date().toISOString());
+      const approved = await approvals.approve(pending.approvalId, 'codex-v2-test-owner', 'qualified context integration fixture');
+      expect(approved.ok).toBe(true);
+    } finally { connection.close(); }
+
+    // The live failure candidate writes first, then the PostToolUse runtime
+    // sees the same tool_use_id and deduplicates. Its native cwd must survive
+    // admission so a same-project PreToolUse can safely consume the row.
+    const prior = invoke({
+      ...base(root),
+      hook_event_name: 'PostToolUse',
+      tool_name: 'apply_patch',
+      tool_input: { file_path: target, patch: 'fixture' },
+      tool_response: { exitCode: 1, error: 'EACCES: fixture failure' },
+      tool_use_id: 'codex-v2-prior-1015',
+    });
+    expect(prior.status).toBe(0);
+    const history = new Database(path.join(root, '.state', 'trajectory.db'), { readonly: true });
+    const priorRows = history.prepare('SELECT project_dir, outcome FROM tool_calls WHERE session_id = ? AND tool_use_id = ?')
+      .all('codex-session-523', 'codex-v2-prior-1015');
+    history.close();
+    expect(priorRows).toEqual([{ project_dir: root, outcome: 'failure' }]);
+    const result = invoke({
+      ...base(root),
+      hook_event_name: 'PreToolUse',
+      tool_name: 'apply_patch',
+      tool_input: { file_path: target, patch: 'next' },
+      tool_use_id: 'codex-v2-current-1015',
+    });
+    expect(JSON.parse(result.stdout)).toEqual({ hookSpecificOutput: { hookEventName: 'PreToolUse' } });
+    expect(readRuleHostEvaluated(root).some(row => row.data['activationId'] === `act-${artifactId}`
+      && row.data['activationMode'] === 'shadow'
+      && row.data['decision'] === 'block'
+      && row.data['matched'] === true)).toBe(true);
+    expect(result.stderr).not.toContain('codex_rule_context_v2_unqualified');
+    expect(result.stderr).not.toContain('rule_context_v2_unavailable');
   });
 });
 
 describe('PRI-813 shared shadow evidence reconnection', () => {
   const SHADOW_RULE_CODE_813 = (ruleId: string, marker: string) => `function evaluate(input) { if (input.action.normalizedPath.indexOf('${marker}') >= 0) return { decision: 'block', matched: true, reason: 'CODEX_SHADOW_WOULD_BLOCK_813' }; return { decision: 'allow', matched: false, reason: 'safe' }; } var meta={name:'codex-shadow-813',version:'1',ruleId:'${ruleId}',coversCondition:'all'};`;
-
-  function readRuleHostEvaluated(root: string): { ts: string; type: string; category: string; sessionId: string | undefined; data: Record<string, unknown> }[] {
-    const logsDir = path.join(root, '.state', 'logs');
-    if (!fs.existsSync(logsDir)) return [];
-    const rows: { ts: string; type: string; category: string; sessionId: string | undefined; data: Record<string, unknown> }[] = [];
-    for (const file of fs.readdirSync(logsDir).filter(name => name.startsWith('events_') && name.endsWith('.jsonl'))) {
-      for (const line of fs.readFileSync(path.join(logsDir, file), 'utf8').split(/\r?\n/)) {
-        if (line.trim().length === 0) continue;
-        const parsed = JSON.parse(line) as { type?: string };
-        if (parsed.type === 'rulehost_evaluated') rows.push(parsed as { ts: string; type: string; category: string; sessionId: string | undefined; data: Record<string, unknown> });
-      }
-    }
-    return rows;
-  }
 
   it('records canonical shadow rulehost_evaluated evidence with the exact activationId while the host action stays allowed', async () => {
     const root = workspace();
@@ -245,8 +311,7 @@ describe('PRI-813 shared shadow evidence reconnection', () => {
     await artifact(root, { id: 'art-v2shadow-813', kind: 'rule', principleId: 'P_CODEX_V2SHADOW_813', ruleId: 'R_CODEX_V2SHADOW_813', content: { principleId: 'P_CODEX_V2SHADOW_813', ruleId: 'R_CODEX_V2SHADOW_813', requiresContextVersion: 2, implementationCode: SHADOW_RULE_CODE_813('R_CODEX_V2SHADOW_813', 'v2shadow-813') }, channel: 'code_tool_hook', action: 'code_tool_hook_shadow_activate', target: 'impl://R_CODEX_V2SHADOW_813' });
     const result = invoke({ ...base(root), hook_event_name: 'PreToolUse', tool_name: 'write_file', tool_input: { file_path: path.join(root, 'v2shadow-813.txt'), content: 'x' }, tool_use_id: 'call-v2shadow-813' });
     expect(JSON.parse(result.stdout)).toEqual({ hookSpecificOutput: { hookEventName: 'PreToolUse' } });
-    expect(result.stderr).toContain('rule_context_v2_unavailable');
-    expect(result.stderr).toContain('codex_runtime_context_unsupported');
+    expect(result.stderr).toContain('codex_rule_context_v2_unqualified');
     expect(readRuleHostEvaluated(root).filter(row => row.data['activationMode'] === 'shadow')).toEqual([]);
   });
 

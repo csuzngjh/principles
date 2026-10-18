@@ -1059,8 +1059,11 @@ ${context.revisionFeedback}
       return output;
     }
     const record = output as Record<string, unknown>;
-    if (!Array.isArray(record.goldenTraceCases)) return output;
     const bounded = boundPackForPrompt(this.behaviorExamplePack);
+    // This provenance is system-owned. It is independent of the model's echo
+    // and is the Evaluator's source for Owner-labelled replay cases.
+    record.ownerGoldenTraceCases = [bounded.sourceNegativeCase, ...bounded.positiveCounterexamples];
+    if (!Array.isArray(record.goldenTraceCases)) return record;
     const authoritative = new Map<string, GoldenTraceCaseInput>();
     for (const ownerCase of [bounded.sourceNegativeCase, ...bounded.positiveCounterexamples]) {
       authoritative.set(ownerCase.caseId, ownerCase);

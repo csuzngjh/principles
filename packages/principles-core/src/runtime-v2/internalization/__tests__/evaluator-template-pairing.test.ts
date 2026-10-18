@@ -56,6 +56,7 @@ async function run(options: {
   decision?: 'approved' | 'needs_revision';
   auxiliary?: boolean;
   implementationCode?: string;
+  ownerCases?: GoldenTraceCase[];
 }) {
   for (const [taskId, taskKind, dependencyTaskIds] of [
     [ARTIFICER, 'artificer', []], [EVALUATOR, 'evaluator', [ARTIFICER]],
@@ -69,7 +70,8 @@ async function run(options: {
   await store.upsertArtifact({ artifactId: ARTIFACT, artifactKind: 'principle', sourceTaskId: ARTIFICER,
     lineageArtifactIds: [], validationStatus: 'validated', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     contentJson: JSON.stringify({ implementationCode: options.implementationCode ?? RULE, affectedTools: [options.affectedTool ?? 'edit_file'],
-      goldenTraceCases: [{ caseId: 'negative-risk', kind: 'negative', toolName: 'edit_file', params: { path: '/etc/passwd' }, expectedDecision: 'block' }, ...options.positives] }),
+      ...(options.ownerCases ? { requiresContextVersion: 2, ownerGoldenTraceCases: options.ownerCases } : {}),
+      goldenTraceCases: options.ownerCases ?? [{ caseId: 'negative-risk', kind: 'negative', toolName: 'edit_file', params: { path: '/etc/passwd' }, expectedDecision: 'block' }, ...options.positives] }),
   });
   const decision = options.decision ?? 'approved';
   const payload = {
@@ -111,9 +113,8 @@ describe('B1: derive write templates from one complete positive example', () => 
     expect(outcome.result.status).toBe('succeeded');
     expect(outcome.traces).toHaveLength(1);
     const templates = outcome.traces[0]?.filter((item) => item.caseId.startsWith('v2-'));
-    expect(templates).toHaveLength(5);
+    expect(templates).toHaveLength(2);
     expect(templates?.find((item) => item.caseId === 'v2-unavailable')).toMatchObject({ toolName: 'write', params: { path: '/workspace/right.ts' } });
-    expect(templates?.find((item) => item.caseId === 'v2-path-boundary')).toMatchObject({ toolName: 'write', params: { path: '/workspace/right.ts.bak' } });
   });
   it('keeps scanning after a write example with no usable path', async () => {
     const outcome = await run({ positives: [positive('empty-write', 'edit_file', { path: ' ', file_path: 7 }), positive('complete-write', 'write', { path: '/workspace/later.ts' })] });
@@ -162,11 +163,13 @@ describe('B1: derive write templates from one complete positive example', () => 
     expect(outcome.content).toHaveProperty('adversarialResult.passed', true);
     expect(events).toContainEqual(expect.objectContaining({ eventType: 'evaluator_v2_adversarial_cases_skipped', payload: expect.objectContaining({ reason: 'non_write_canonical_kind_for_v2_adversarial_cases' }) }));
   });
-  it('preserves the path-boundary failure for a rule that permits unread writes', async () => {
-    const outcome = await run({ positives: [positive('write', 'write', { path: '/workspace/right.ts' })],
+  it('keeps an Owner-labelled negative action binding without inventing a path-boundary policy', async () => {
+    const ownerNegative: GoldenTraceCase = { caseId: 'owner-unread-write', kind: 'negative', toolName: 'write', params: { path: '/workspace/right.ts.bak' }, expectedDecision: 'block', ruleContext: { version: 2, history: { status: 'available', truncated: false, calls: [] }, facts: { priorReadOfTarget: 'no', readCount: 0, writeCount: 0, uniqueWritePathCount: 0, sameActionBlockCount: null } } };
+    const ownerPositive: GoldenTraceCase = { caseId: 'owner-read-write', kind: 'positive', toolName: 'write', params: { path: '/workspace/right.ts' }, expectedDecision: 'allow', ruleContext: { version: 2, history: { status: 'available', truncated: false, calls: [] }, facts: { priorReadOfTarget: 'yes', readCount: 1, writeCount: 0, uniqueWritePathCount: 0, sameActionBlockCount: null } } };
+    const outcome = await run({ positives: [], ownerCases: [ownerNegative, ownerPositive],
       implementationCode: 'function evaluate(input) { return input.action.normalizedPath === "/etc/passwd" ? { decision: "block", matched: true, reason: "risk" } : { decision: "allow", matched: false, reason: "allow" }; }' });
-    expect(outcome.traces[0]?.filter((item) => item.caseId.startsWith('v2-'))).toHaveLength(5);
+    expect(outcome.traces[0]?.filter((item) => item.caseId.startsWith('v2-'))).toHaveLength(2);
     expect(outcome.content).toHaveProperty('adversarialResult.passed', false);
-    expect(outcome.content).toHaveProperty('adversarialResult.failedCases', expect.arrayContaining([expect.objectContaining({ caseId: 'v2-path-boundary', expectedDecision: 'block', actualDecision: 'allow' })]));
+    expect(outcome.content).toHaveProperty('adversarialResult.failedCases', expect.arrayContaining([expect.objectContaining({ caseId: 'owner:owner-unread-write', expectedDecision: 'block', actualDecision: 'allow' })]));
   });
 });
