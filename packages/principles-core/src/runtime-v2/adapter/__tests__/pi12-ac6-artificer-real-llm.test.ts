@@ -39,6 +39,9 @@ import { ArtificerL2Adapter } from '../artificer-l2-adapter.js';
 import type { StartRunInput } from '../../runtime-protocol.js';
 import { ArtificerRuleOutputSchema, DefaultArtificerValidator } from '../../internalization/artificer-output.js';
 import { createProductionGateDeps } from '../../activation/production-gate-deps.js';
+import { buildGoldenTraceFromArtificer } from '../../golden-trace.js';
+import { evaluateRefinerRuleHostGate } from '../../internalization/refiner-rulehost-gate.js';
+import { checkForbiddenPatterns, checkReturnStatementsMissingFields, checkMatchedFalseDecisions } from '../../internalization/rule-code-validator.js';
 import type { TelemetryEvent } from '../../../telemetry-event.js';
 import { StoreEventEmitter } from '../../store/event-emitter.js';
 import { getLlmE2eConfig } from '../../__tests__/fixtures/llm-e2e-config.js';
@@ -78,6 +81,7 @@ describe.skipIf(!config)('SPEC-PD-PI12-COMPAT-001 AC-6 B2 — Artificer L2 on re
       gateDeps: createProductionGateDeps(),
       validator: new DefaultArtificerValidator(),
       maxTurns: 8,
+      maxTokens: 4096,
       totalBudgetMs: 2 * cfg.timeoutMs,
       reasoning: cfg.reasoning,
       eventEmitter: emitter,
@@ -102,18 +106,41 @@ describe.skipIf(!config)('SPEC-PD-PI12-COMPAT-001 AC-6 B2 — Artificer L2 on re
       const { payload } = output;
       expect(Value.Check(ArtificerRuleOutputSchema, payload)).toBe(true);
 
-      // Full tool journey on the wire — the model ran the real治理 chain, and
-      // submit_rulecode could only capture after DefaultArtificerValidator passed.
-      const toolEvents = events
+      // Pi executes tools sequentially. Check successful, ordered execution.
+      const toolRuns = events
         .filter((event) => event.eventType === 'artificer_l2_turn')
-        .map((event) => (event.payload as { toolName?: string }).toolName)
-        .filter((toolName): toolName is string => toolName !== undefined);
-      expect(toolEvents).toEqual(expect.arrayContaining([
-        'read_rulecode_spec',
-        'validate_rulecode',
-        'replay_rulecode',
-        'submit_rulecode',
-      ]));
+        .map((event) => event.payload as { toolName?: string; ok?: boolean })
+        .filter((run): run is { toolName: string; ok: boolean } =>
+          typeof run.toolName === 'string' && typeof run.ok === 'boolean');
+      const readAt = toolRuns.findIndex((run) => run.toolName === 'read_rulecode_spec' && run.ok);
+      const validateAt = toolRuns.findIndex((run, i) => i > readAt && run.toolName === 'validate_rulecode' && run.ok);
+      const replayAt = toolRuns.findIndex((run, i) => i > validateAt && run.toolName === 'replay_rulecode' && run.ok);
+      const submitAt = toolRuns.findIndex((run, i) => i > replayAt && run.toolName === 'submit_rulecode' && run.ok);
+      expect(readAt).toBeGreaterThanOrEqual(0);
+      expect(validateAt).toBeGreaterThan(readAt);
+      expect(replayAt).toBeGreaterThan(validateAt);
+      expect(submitAt).toBeGreaterThan(replayAt);
+
+      // A validate_rulecode event with ok=true can still return INVALID.
+      // Therefore verify the exact submitted code against real static checks
+      // and the canonical sandbox replay, not tool-name presence alone.
+      const rule = Value.Decode(ArtificerRuleOutputSchema, payload);
+      expect([
+        ...checkForbiddenPatterns(rule.implementationCode),
+        ...checkReturnStatementsMissingFields(rule.implementationCode),
+        ...checkMatchedFalseDecisions(rule.implementationCode),
+      ]).toEqual([]);
+      const golden = buildGoldenTraceFromArtificer({
+        cases: rule.goldenTraceCases,
+        sourceArtifactId: undefined,
+      });
+      expect(golden.ok).toBe(true);
+      if (!golden.ok) throw new Error('ac6-b2: submitted golden trace invalid');
+      const gateResult = evaluateRefinerRuleHostGate(
+        { code: rule.implementationCode, goldenTrace: golden.trace },
+        createProductionGateDeps(),
+      );
+      expect(gateResult.decision).toBe('accepted_shadow');
 
       // Complete telemetry with the PRI-795 evidence block: real elapsed time,
       // budget, and token usage surfaced by the production adapter.
@@ -130,7 +157,11 @@ describe.skipIf(!config)('SPEC-PD-PI12-COMPAT-001 AC-6 B2 — Artificer L2 on re
       for (const request of requests) {
         expect(request.hasAuthorizationHeader).toBe(true);
         expect(request.messageRoles[0]).toBe('system');
-        expect(request.messageRoles.filter((role) => role === 'user')).toHaveLength(1);
+        // Pi getFollowUpMessages may add up to two corrective user turns.
+        const userCount = request.messageRoles.filter((role) => role === 'user').length;
+        expect(userCount).toBeGreaterThanOrEqual(1);
+        expect(userCount).toBeLessThanOrEqual(3);
+        expect(request.userTextPreviews.filter((msg) => msg.startsWith('taskId: ' + TASK_ID + '.'))).toHaveLength(1);
       }
 
       console.log(
@@ -143,7 +174,7 @@ describe.skipIf(!config)('SPEC-PD-PI12-COMPAT-001 AC-6 B2 — Artificer L2 on re
           hardCap: recorder.maxRequests,
           durationMs,
           tokenUsage: evidence?.tokenUsage,
-          toolsInvoked: toolEvents,
+          toolsInvoked: toolRuns.map((run) => ({ name: run.toolName, ok: run.ok })),
         }),
       );
     } finally {

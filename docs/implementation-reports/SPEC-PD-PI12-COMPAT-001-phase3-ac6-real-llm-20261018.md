@@ -122,7 +122,7 @@ Owner Review Card（摘要）
 
 **结论：无含 Provider/模型/测试范围/请求数/费用上限的 Owner 授权记录 → 不设 `LLM_E2E_ENABLED`、不动用 key、不自行宣布 OWNER_WAIVED；按任务书完成测试代码、预检与 Faux 回归，AC-6 维持 NOT_RUN。**
 
-预算框架（授权就绪形态，已固化在测试内）：每场景 1 次完整执行、总硬上限 3+6+3=12 请求（发送前强制）、只走既有低成本 provider（sensenova/deepseek-v4-flash）、一切自动重试关闭、超时/预算/异常立即终止、不使用真实私人历史数据（golden trace/诊断输入均为合成）。Token 单价不在仓库内，报告以请求次数+token 计数披露，费用上限由请求硬上限保障。
+预算框架（授权就绪形态，已固化在测试内）：每场景 1 次完整执行、总硬上限 3+6+3=12 请求（发送前强制）、只走既有低成本 provider（sensenova/deepseek-v4-flash）、一切自动重试关闭、超时/预算/异常立即终止、不使用真实私人历史数据（golden trace/诊断输入均为合成）。Token 单价不在仓库内，报告以请求次数+token 计数披露，请求次数由发送前硬上限保障；费用不能仅由请求次数保证，仍须 Owner 基于指定模型的输入/输出价格、上下文规模与单次输出上限核准。当前测试无实时美元费用熔断，不得宣称 1 USD 硬门已满足。
 
 ## 6. 修复对应的代码与回归测试
 
@@ -169,3 +169,46 @@ KEEP 不代表 AC-6 已过。生产切换前仍须（SPEC §12）：AC-6 → PAS
 | 变更声明 | `.changeset/` 空 changeset（显式 no-release：纯测试+文档，无生产代码变更） |
 
 生产代码改动：**0 行**。
+
+
+## 11. Review Fix (verified against Pi v1.2.0)
+
+Scope: AC-6 tests and report only; no production runtime or credential changes.
+
+- Pi Chat Completions serializes messages as objects with role and content.
+  Previously the AC-6 observer passed a whole message into a string/array-only
+  helper and returned undefined. Correctly traverse the message content field.
+- Artificer AC-6 now requires ordered, successful read/validate/replay/submit,
+  rechecks final code with the real static validators, and replays the submitted
+  code and trace through the production VM gate. A validate tool event with
+  ok=true means execution completed; it does NOT imply static result VALID.
+- Pi may append up to two corrective user messages. The test checks that the
+  original user task occurs once while allowing bounded follow-up instructions.
+- Artificer and One-shot tests now set 4096/1024 output-token ceilings.
+  Dreamer has no exposed maxTokens config on its adapter and remains dependent
+  on the SDK/model ceiling. The per-test 3/6/3 HTTP request caps are real
+  hard caps, but they are NOT USD spending caps. Provider-specific prices and
+  the total worst-case cost must be reviewed by Owner before any paid run.
+  No realtime dollar-budget breaker exists in this PR.
+- Five offline harness tests cover message-object and multimodal content,
+  follow-up messages, bounded/redacted observations, and pre-send request cap.
+
+AC-6 real-provider E2Es remain NOT_RUN. This Review Fix neither grants paid
+model authorization nor waives production gates.
+
+## 12. Review Fix verification (2026-10-18)
+
+Changed files: three AC-6 test fixtures/harness modules, one additional
+offline harness test file, and this implementation report. Production code:
+zero lines changed.
+
+- Core typecheck: PASS, exit 0.
+- Targeted ESLint: PASS with --max-warnings 0.
+- Offline Pi 1.2 spikes + new harness suite: 19/19 PASS (14+5).
+- Three real-provider suites without Owner switch: 3 SKIPPED, exit 0.
+- Full npm run verify:merge: PASS, exit 0; pre-existing repository-wide
+  lint warnings in unrelated files do not affect this pass.
+- All tests in this Review Fix were offline; no paid provider requests.
+
+The earlier four-test-file count refers to the initial PR. This fix adds a
+fifth test file, pi12-ac6-harness.test.ts. Real AC-6 remains NOT_RUN.

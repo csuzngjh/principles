@@ -43,6 +43,8 @@ export interface RecordedRequest {
   systemTextPreview?: string;
   /** Bounded preview of the first user message. */
   userTextPreview?: string;
+  /** Bounded user previews to distinguish duplication from follow-up messages. */
+  userTextPreviews: string[];
   /** Names from the wire `tools` array, when declared. */
   declaredToolNames: string[];
   /** Post-onPayload `tool_choice`, when the request carries one. */
@@ -91,14 +93,19 @@ export function startRecorder(maxRequests: number): WireRecorder {
 }
 
 function textOf(content: unknown): string | undefined {
-  if (typeof content === 'string') {
-    return content;
-  }
+  if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
-    const textBlock = content.find((block): block is { type: 'text'; text: string } => {
-      return typeof block === 'object' && block !== null && Object.hasOwn(block, 'type') && (block as { type?: unknown }).type === 'text';
+    const block = content.find((item): item is { type: 'text'; text: string } => {
+      if (typeof item !== 'object' || item === null
+        || !Object.hasOwn(item, 'type') || !Object.hasOwn(item, 'text')) return false;
+      const record = item as Record<string, unknown>;
+      return record.type === 'text' && typeof record.text === 'string';
     });
-    return textBlock?.text;
+    return block?.text;
+  }
+  if (typeof content === 'object' && content !== null && Object.hasOwn(content, 'content')) {
+    // Pi 1.2 sends {role, content} message objects on the HTTP wire.
+    return textOf((content as { content: unknown }).content);
   }
   return undefined;
 }
@@ -166,6 +173,11 @@ export function observeRequest(input: Parameters<FetchFunction>[0], init: Parame
   }
 
   const rawMessages = parsed !== undefined && Array.isArray(parsed.messages) ? (parsed.messages as unknown[]) : [];
+  const userMessages = rawMessages.filter((m) => typeof m === 'object' && m !== null
+    && Object.hasOwn(m, 'role') && (m as { role?: unknown }).role === 'user');
+  const userTextPreviews = userMessages.slice(0, 4)
+    .map((m) => bounded(textOf(m)))
+    .filter((preview): preview is string => preview !== undefined);
   const messageRoles = rawMessages.map((message) => {
     if (typeof message === 'object' && message !== null && Object.hasOwn(message, 'role')) {
       return String((message as { role: unknown }).role);
@@ -198,7 +210,8 @@ export function observeRequest(input: Parameters<FetchFunction>[0], init: Parame
     hasAuthorizationHeader: hasAuthorizationHeader(init?.headers),
     messageRoles,
     systemTextPreview: bounded(textOf(rawMessages[0])),
-    userTextPreview: bounded(textOf(rawMessages.find((m) => typeof m === 'object' && m !== null && (m as { role?: unknown }).role === 'user'))),
+    userTextPreview: userTextPreviews[0],
+    userTextPreviews,
     declaredToolNames,
     toolChoice: parsed?.tool_choice,
     responseFormat: parsed?.response_format,

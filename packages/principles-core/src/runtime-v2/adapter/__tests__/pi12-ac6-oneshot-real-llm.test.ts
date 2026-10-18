@@ -58,6 +58,8 @@ describe.skipIf(!config)('SPEC-PD-PI12-COMPAT-001 AC-6 B3 — One-shot json_sche
       apiKeyEnv: cfg.apiKeyEnv,
       baseUrl: cfg.baseUrl,
       maxRetries: 0,
+      maxTokens: 1024,
+      maxRepairAttempts: 0,
       timeoutMs: cfg.timeoutMs,
       outputPathStrategy: 'json_mode_first',
       reasoning: cfg.reasoning,
