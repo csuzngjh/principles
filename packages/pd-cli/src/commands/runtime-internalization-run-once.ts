@@ -246,7 +246,21 @@ function buildTestDoubleAdapter(runnerKind: string, taskId: string): PDRuntimeAd
     });
   }
   if (runnerKind === 'scribe') {
+    let capturedSourcePhilosopherArtifactId = '';
     return new TestDoubleRuntimeAdapter({
+      onStartRun: (input) => {
+        try {
+          const payloadStr = typeof input.inputPayload === 'string' ? input.inputPayload : JSON.stringify(input.inputPayload);
+          const parsed: unknown = JSON.parse(payloadStr);
+          if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+            const sourceId: unknown = Reflect.get(parsed, 'sourcePhilosopherArtifactId');
+            if (typeof sourceId === 'string' && sourceId.trim() !== '') {
+              capturedSourcePhilosopherArtifactId = sourceId;
+            }
+          }
+        } catch { /* empty lineage fails the strict Scribe validator */ }
+        return { runId: `td-scribe-${Date.now()}`, runtimeKind: 'test-double', startedAt: new Date().toISOString() };
+      },
       onPollRun: (_runId: string) => ({
         runId: _runId,
         status: 'succeeded',
@@ -257,17 +271,28 @@ function buildTestDoubleAdapter(runnerKind: string, taskId: string): PDRuntimeAd
         runId: _runId,
         payload: {
           taskId,
-          sourcePhilosopherArtifactId: 'pi-art-test-philosopher',
+          sourcePhilosopherArtifactId: capturedSourcePhilosopherArtifactId,
           principleDraft: {
             title: 'Test Principle Draft',
-            statement: 'Test principle statement',
-            rationale: 'Test rationale',
-            applicability: ['All operations'],
-            antiPatterns: ['Ignoring validation'],
+            statement: 'Before changing a system, verify the current requirement and affected behavior; do not act on unverified assumptions.',
+            rationale: 'Checking the stated requirement and affected behavior prevents avoidable changes based on assumptions.',
+            applicability: ['Changes to an existing system'],
+            antiPatterns: ['Making changes based only on an unverified assumption'],
             confidence: 0.8,
           },
+          intentContract: {
+            ownerIntent: 'Preserve the stated requirement while making changes.',
+            targetBehavior: 'Before changing a system, verify the current requirement and affected behavior.',
+            forbiddenBehavior: 'Do not make changes based only on an unverified assumption.',
+            evidenceSource: 'The source Philosopher principle draft and rationale.',
+            validationExpectation: 'The proposed change is checked against the stated requirement and affected behavior.',
+          },
+          // This fixture's principle requires no trusted external facts; the
+          // explicit empty declaration keeps the test double aligned with the
+          // strict new-generation contract without weakening production validation.
+          executionConditions: { version: 1, requiredFacts: [] },
           sourceTrace: {
-            philosopherArtifactId: 'pi-art-test-philosopher',
+            philosopherArtifactId: capturedSourcePhilosopherArtifactId,
           },
           risks: [],
           generatedAt: new Date().toISOString(),
@@ -613,7 +638,7 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
           );
           runnerResult = await runner.run(wakeResult.taskId);
         } else if (runnerKind === 'scribe') {
-          const validator = new DefaultScribeValidator();
+          const validator = new DefaultScribeValidator({ requireRuleCodeContracts: true });
           const runner = new ScribeRunner(
             {
               stateManager, runtimeAdapter, eventEmitter, validator, artifactStore,

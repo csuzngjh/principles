@@ -108,6 +108,22 @@ function admit(candidates: readonly (GovernanceCorrectionCandidate | GovernanceT
   return admitGovernanceSignals({ workspaceDir, candidates, now, keywordStore: buildSharedSeedKeywordStore() });
 }
 
+it('adds nullable tool-call project scope to legacy trajectory schema without assigning old rows a cwd', () => {
+  const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+  db.prepare(`INSERT INTO tool_calls (session_id, tool_name, outcome, params_json, created_at)
+    VALUES (?, ?, ?, ?, ?)`)
+    .run('legacy-session', 'apply_patch', 'success', '{}', NOW.toISOString());
+  db.close();
+
+  const result = admit([correction()]);
+  expect(result.ok).toBe(true);
+  expect(withTrajectory((sqlite) => sqlite.prepare('SELECT project_dir FROM tool_calls WHERE session_id = ?').get('legacy-session')))
+    .toEqual({ project_dir: null });
+  expect(withTrajectory((sqlite) => sqlite.prepare('PRAGMA table_info(tool_calls)').all()
+    .some((row) => typeof row === 'object' && row !== null && Reflect.get(row, 'name') === 'project_dir')))
+    .toBe(true);
+});
+
 /**
  * Slice A promotion substrate: ingest the rollout PLUS its triggering user turn
  * so evidence promotion can succeed. promoteGovernanceEvidence requires BOTH
@@ -465,6 +481,13 @@ describe('tool failure admission (SPEC §10/§12)', () => {
     expect(withTrajectory((db) => db.prepare('SELECT COUNT(*) AS n FROM tool_calls').get())).toEqual({ n: 2 });
     const distinctPains = withTrajectory((db) => db.prepare('SELECT COUNT(DISTINCT canonical_pain_id) AS n FROM pain_events').get()) as { n: number };
     expect(distinctPains.n).toBeGreaterThanOrEqual(1);
+  });
+
+  it('records only a supplied absolute host project cwd on a newly admitted live tool call', () => {
+    const result = admit([toolFailure({ projectDir: workspaceDir, toolUseId: 'exec-tool-1' })]);
+    expect(result.outcomes?.[0]).toMatchObject({ disposition: 'admitted' });
+    expect(withTrajectory((db) => db.prepare('SELECT project_dir FROM tool_calls WHERE tool_use_id = ?').get('exec-tool-1')))
+      .toEqual({ project_dir: path.resolve(workspaceDir) });
   });
 
   it('rejects successful calls and non-write tools (conservative gate)', () => {

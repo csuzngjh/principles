@@ -278,6 +278,12 @@ export const TelemetryEventType = Type.Union([
   //   merge, sandbox threw) with a structured reason.
   Type.Literal('evaluator_adversarial_replay'),
   Type.Literal('evaluator_adversarial_replay_skipped'),
+  // PRI-1015: legacy V2 artifacts without the system Owner-pack stamp route
+  // through bounded Artificer regeneration; prompt-channel code is ignored.
+  Type.Literal('evaluator_artificer_owner_stamp_repair_required'),
+  Type.Literal('evaluator_prompt_code_artifact_ignored'),
+  // PRI-1015: no current host semantic proof, so no Codex V2 compatibility stamp.
+  Type.Literal('evaluator_rule_host_input_contract_skipped'),
   // PRI-741: emitted when the host-name parity replay case is intentionally
   // not generated (no host semantic projection, author name already host-real,
   // no host tool with the author's canonical kind) with a structured reason.

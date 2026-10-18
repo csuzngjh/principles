@@ -130,6 +130,12 @@ function makeValidSeedParams(): SeedArtificerRepairParams {
     inheritedInputArtifactRefs: [
       { artifactType: 'principle', ref: 'pi-art-scribe-001' },
     ],
+    ownerEvidenceSelection: {
+      sourcePainId: 'pain-cli-001',
+      sourceNegativeToolCallId: 42,
+      positiveToolCallIds: [7],
+      ownerDesiredOutcome: 'preserve the Owner-selected example set',
+    },
   };
 }
 
@@ -288,6 +294,7 @@ describe('PRI-510 (DEFECT-004): createEvaluatorRunnerDeps wires repair loop into
     expect(meta.channel).toBe(params.inheritedChannel);
     expect(meta.timeoutMs).toBe(params.inheritedTimeoutMs);
     expect(meta.inputArtifactRefs).toEqual(params.inheritedInputArtifactRefs);
+    expect(meta.ownerEvidenceSelection).toEqual(params.ownerEvidenceSelection);
   });
 
   it('seedArtificerRepairTask → deterministic id + replay reuse (P0-4); 不同 iteration 不同 id (rc-7)', async () => {

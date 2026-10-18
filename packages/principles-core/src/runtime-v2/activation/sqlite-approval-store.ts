@@ -12,9 +12,34 @@ import type {
   ActivationRiskLevel,
 } from './activation-types.js';
 import type { SqliteConnection } from '../store/sqlite-connection.js';
+import { mapPiArtifactRow, type PiArtifactRow } from '../store/artifact/sqlite-pi-artifact-store.js';
+import { computeArtifactDigest } from './promotion-evidence-snapshot.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isPiArtifactRow(value: unknown): value is PiArtifactRow {
+  if (!isRecord(value)) return false;
+  const nullableString = (field: string): boolean => value[field] === null || typeof value[field] === 'string';
+  if (
+    typeof value.artifact_id !== 'string'
+    || typeof value.artifact_kind !== 'string'
+    || typeof value.source_task_id !== 'string'
+    || !nullableString('source_principle_id')
+    || !nullableString('source_rule_id')
+    || typeof value.lineage_artifact_ids !== 'string'
+    || typeof value.validation_status !== 'string'
+    || typeof value.content_json !== 'string'
+    || typeof value.created_at !== 'string'
+    || typeof value.updated_at !== 'string'
+  ) return false;
+  try {
+    const lineage: unknown = JSON.parse(value.lineage_artifact_ids);
+    return Array.isArray(lineage) && lineage.every((id: unknown) => typeof id === 'string');
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -66,6 +91,7 @@ function mapRowToRecord(row: unknown): ApprovalRecord | null {
   return {
     approvalId,
     artifactId,
+    artifactDigest: readOptionalStringField(row, 'artifact_digest'),
     channel: channel as InternalizationChannel,
     riskLevel: riskLevel as ActivationRiskLevel,
     status: status as ApprovalStatus,
@@ -90,6 +116,7 @@ function mapRowToRecord(row: unknown): ApprovalRecord | null {
 interface ApprovalRow {
   approval_id: string;
   artifact_id: string;
+  artifact_digest: string | null;
   channel: string;
   risk_level: string;
   status: string;
@@ -114,6 +141,7 @@ function rowToRecord(row: ApprovalRow): ApprovalRecord {
   return {
     approvalId: row.approval_id,
     artifactId: row.artifact_id,
+    artifactDigest: row.artifact_digest ?? undefined,
     channel: row.channel as InternalizationChannel,
     riskLevel: row.risk_level as ActivationRiskLevel,
     status: row.status as ApprovalStatus,
@@ -226,17 +254,40 @@ export class SqliteApprovalQueueStore implements ApprovalQueueStore {
   async approve(approvalId: string, decidedBy: string, note?: string): Promise<ApprovalDecisionResult> {
     const db = this.connection.getDb();
     const now = new Date().toISOString();
-    // Single atomic statement: UPDATE + RETURNING eliminates the race window
-    // between UPDATE and subsequent SELECT (ERR-015 stale state pattern).
-    const record = mapRowToRecord(db.prepare(
-      "UPDATE approvals SET status = 'approved', decided_at = ?, decided_by = ?, decision_note = ? WHERE approval_id = ? AND status = 'pending' RETURNING *"
-    ).get(now, decidedBy, note ?? null, approvalId));
-    if (!record) {
-      const fresh = db.prepare('SELECT status FROM approvals WHERE approval_id = ?').get(approvalId) as { status: string } | undefined;
-      if (!fresh) return { ok: false, error: 'not_found' };
-      return { ok: false, error: 'already_decided', status: fresh.status as ApprovalStatus };
+    // The snapshot read, digest calculation, and decision update share one write
+    // transaction so no intervening artifact edit can inherit the Owner approval.
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const current: unknown = db.prepare('SELECT status FROM approvals WHERE approval_id = ?').get(approvalId);
+      if (current === undefined) {
+        db.exec('COMMIT');
+        return { ok: false, error: 'not_found' };
+      }
+      if (!isRecord(current) || typeof current.status !== 'string' || !isApprovalStatsKey(current.status)) {
+        throw new Error(`ApprovalQueue approve failed: malformed decision status for ${approvalId}`);
+      }
+      if (current.status !== 'pending') {
+        db.exec('COMMIT');
+        return { ok: false, error: 'already_decided', status: current.status };
+      }
+
+      const approvalRow = mapRowToRecord(db.prepare('SELECT * FROM approvals WHERE approval_id = ?').get(approvalId));
+      if (!approvalRow) throw new Error(`ApprovalQueue approve failed: malformed row for ${approvalId}`);
+      const artifactRow: unknown = db.prepare('SELECT * FROM pi_artifacts WHERE artifact_id = ?').get(approvalRow.artifactId);
+      if (!isPiArtifactRow(artifactRow)) {
+        throw new Error(`ApprovalQueue approve failed: current PI artifact snapshot is missing or malformed for ${approvalRow.artifactId}`);
+      }
+      const artifactDigest = computeArtifactDigest(mapPiArtifactRow(artifactRow));
+      const record = mapRowToRecord(db.prepare(
+        "UPDATE approvals SET status = 'approved', decided_at = ?, decided_by = ?, decision_note = ?, artifact_digest = ? WHERE approval_id = ? AND status = 'pending' RETURNING *"
+      ).get(now, decidedBy, note ?? null, artifactDigest, approvalId));
+      if (!record) throw new Error(`ApprovalQueue approve failed: pending decision disappeared for ${approvalId}`);
+      db.exec('COMMIT');
+      return { ok: true, record };
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch { /* best effort */ }
+      throw error;
     }
-    return { ok: true, record };
   }
 
   async reject(approvalId: string, decidedBy: string, reason: string): Promise<ApprovalDecisionResult> {
@@ -260,7 +311,7 @@ export class SqliteApprovalQueueStore implements ApprovalQueueStore {
     const existing = db.prepare('SELECT status FROM approvals WHERE approval_id = ?').get(approvalId) as { status: string } | undefined;
     if (!existing) return { ok: false, error: 'not_found' };
     if (existing.status !== 'approved') return { ok: false, error: 'not_approved' };
-    db.prepare("UPDATE approvals SET status = 'pending', decided_at = NULL, decided_by = NULL, decision_note = NULL WHERE approval_id = ? AND status = 'approved'").run(approvalId);
+    db.prepare("UPDATE approvals SET status = 'pending', decided_at = NULL, decided_by = NULL, decision_note = NULL, artifact_digest = NULL WHERE approval_id = ? AND status = 'approved'").run(approvalId);
     return { ok: true };
   }
 
@@ -271,7 +322,7 @@ export class SqliteApprovalQueueStore implements ApprovalQueueStore {
     // Derives previous_artifact_id from current DB value to prevent lineage
     // drift during concurrent edits (ERR-004/ERR-008).
     const record = mapRowToRecord(db.prepare(
-      "UPDATE approvals SET previous_artifact_id = artifact_id, artifact_id = ?, edited_at = ?, edited_by = ?, edit_reason = ? WHERE approval_id = ? AND status = 'pending' RETURNING *"
+      "UPDATE approvals SET previous_artifact_id = artifact_id, artifact_id = ?, artifact_digest = NULL, edited_at = ?, edited_by = ?, edit_reason = ? WHERE approval_id = ? AND status = 'pending' RETURNING *"
     ).get(input.newArtifactId, input.now, input.editedBy, input.editReason, input.approvalId));
     if (!record) {
       const fresh = db.prepare('SELECT status FROM approvals WHERE approval_id = ?').get(input.approvalId) as { status: string } | undefined;

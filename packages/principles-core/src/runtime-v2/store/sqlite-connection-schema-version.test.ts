@@ -41,6 +41,36 @@ describe('schema_version table (P2-10)', () => {
     expect(conn.getSchemaVersion()).toBe('002');
   });
 
+  it('adds nullable approval artifact binding through the existing additive migration', () => {
+    const conn = makeConnection();
+    const db = conn.getDb();
+    const columns = db.prepare('PRAGMA table_info(approvals)').all() as { name: string; notnull: number }[];
+    expect(columns.find((column) => column.name === 'artifact_digest')?.notnull).toBe(0);
+    expect(conn.getSchemaVersion()).toBe('002');
+  });
+
+  it('repairs a pre-binding approvals table on reopen without rewriting old approval data', () => {
+    const dir = path.join(os.tmpdir(), `pd-schema-approval-binding-${process.pid}-${Date.now()}`);
+    fs.mkdirSync(dir, { recursive: true });
+    tempDirs.push(dir);
+
+    const first = new SqliteConnection(dir);
+    const firstDb = first.getDb();
+    firstDb.prepare("INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES ('task-1', 'diagnosis', 'pending', 't', 't')").run();
+    firstDb.prepare("INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at) VALUES ('artifact-1', 'principle', 'task-1', '[]', 'pending', '{}', 't', 't')").run();
+    firstDb.prepare("INSERT INTO approvals (approval_id, artifact_id, channel, risk_level, status, requested_at) VALUES ('approval-1', 'artifact-1', 'code_tool_hook', 'high', 'approved', 't')").run();
+    firstDb.exec('ALTER TABLE approvals DROP COLUMN artifact_digest');
+    first.close();
+
+    const reopened = new SqliteConnection(dir);
+    const reopenedDb = reopened.getDb();
+    const columns = reopenedDb.prepare('PRAGMA table_info(approvals)').all() as { name: string }[];
+    const row: unknown = reopenedDb.prepare('SELECT status, artifact_digest FROM approvals WHERE approval_id = ?').get('approval-1');
+    expect(columns.some((column) => column.name === 'artifact_digest')).toBe(true);
+    expect(row).toEqual({ status: 'approved', artifact_digest: null });
+    reopened.close();
+  });
+
   it('tracks version increments', () => {
     const conn = makeConnection();
     conn.getDb();

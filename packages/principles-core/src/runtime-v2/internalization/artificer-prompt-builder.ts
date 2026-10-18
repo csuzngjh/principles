@@ -222,15 +222,15 @@ OUTPUT FORMAT (pure JSON, no markdown):
   },
   "evidenceRefs": ["<copy exactly from the behaviorExamplePack evidenceRefs; every ref, in order>"],
   "risks": ["<risk 1>", "<risk 2>"],
-  "implementationCode": "function evaluate(input, helpers) { if (input.action.canonicalKind === 'write' && typeof input.action.normalizedPath === 'string' && input.action.normalizedPath.startsWith('/system/')) { return { decision: 'block', matched: true, reason: 'write to system path' }; } return { decision: 'allow', matched: false, reason: 'no risk pattern' }; }",
+  "implementationCode": "function evaluate(input, helpers) { return { decision: 'allow', matched: false, reason: 'placeholder only; implement current Owner-defined behavior' }; }",
   "goldenTraceCases": [
-    {"caseId":"negative-1","kind":"negative","toolName":"write","params":{"path":"/system/file"},"expectedDecision":"block","ruleContext":{"version":2,"history":{"status":"available","truncated":false,"calls":[]},"facts":{"priorReadOfTarget":"unknown","readCount":0,"writeCount":0,"uniqueWritePathCount":0,"sameActionBlockCount":null}}},
-    {"caseId":"positive-1","kind":"positive","toolName":"write","params":{"path":"/workspace/file"},"expectedDecision":"allow","ruleContext":{"version":2,"history":{"status":"available","truncated":false,"calls":[]},"facts":{"priorReadOfTarget":"unknown","readCount":0,"writeCount":0,"uniqueWritePathCount":0,"sameActionBlockCount":null}}}
+    {"caseId":"negative-1","kind":"negative","toolName":"<Owner case tool>","params":{"path":"<Owner negative case target>"},"expectedDecision":"block","ruleContext":{"version":2,"history":{"status":"available","truncated":false,"calls":[]},"facts":{"priorReadOfTarget":"unknown","readCount":0,"writeCount":0,"uniqueWritePathCount":0,"sameActionBlockCount":null}}},
+    {"caseId":"positive-1","kind":"positive","toolName":"<Owner case tool>","params":{"path":"<Owner positive case target>"},"expectedDecision":"allow","ruleContext":{"version":2,"history":{"status":"available","truncated":false,"calls":[]},"facts":{"priorReadOfTarget":"unknown","readCount":0,"writeCount":0,"uniqueWritePathCount":0,"sameActionBlockCount":null}}}
   ],
   "affectedTools": ["write"],
   "generatedAt": "<ISO-8601 timestamp>"
 }
-NOTE: the example above IS the full v2 contract — requiresContextVersion, evidenceRefs, and case-level ruleContext are REQUIRED fields (see the CONTEXT MODE block below), not optional extras. The caseIds and paths inside the example are PLACEHOLDERS: the real Owner-labelled caseIds are the ones carried by input.behaviorExamplePack and MUST be used verbatim (see CONTEXT MODE below).
+NOTE: the example above IS the full v2 contract — requiresContextVersion, evidenceRefs, and case-level ruleContext are REQUIRED fields (see the CONTEXT MODE block below), not optional extras. The code, caseIds, tools and paths inside the example are PLACEHOLDERS: derive behavior only from the current principle and Owner-labelled examples; use the real Owner-labelled caseIds carried by input.behaviorExamplePack verbatim (see CONTEXT MODE below).
 
 CONSTRAINTS:
 - Output ONLY valid JSON (no markdown, no explanatory text, no code fences)
@@ -245,7 +245,7 @@ CONSTRAINTS:
 - EVERY return statement inside evaluate() MUST include ALL three fields: decision, matched, reason
 - Do NOT return partial objects — missing fields will fail sandbox validation and block activation
 - GOOD: return { decision: 'allow', matched: false, reason: 'path is within workspace, no risk' }
-- GOOD: return { decision: 'block', matched: true, reason: 'write to system path outside workspace' }
+- GOOD: return { decision: 'block', matched: true, reason: 'the in-scope action matches the Owner-labelled negative example' }
 - BAD:  return { matched: false } — missing decision and reason, will be rejected
 - BAD:  return { decision: 'allow', matched: true } — missing reason, will be rejected
 - input.action contains toolName, normalizedPath, paramsSummary, and canonicalKind
@@ -257,7 +257,7 @@ CONSTRAINTS:
 - NEVER call string methods on paramsSummary itself — paramsSummary.includes(...), paramsSummary.startsWith(...), paramsSummary.match(...) are always bugs and will crash with "is not a function"
 - To inspect a parameter, access its specific key (e.g. paramsSummary.path) and guard its type at runtime (typeof paramsSummary.path === 'string') before using it as a string
 - For path logic prefer input.action.normalizedPath (a normalized string) over reading raw params strings
-- ADVERSARIAL GUARD CONTRACT: when your rule declares requiresContextVersion: 2, action-level safety still dominates the context — if helpers.isRiskPath() is true the decision MUST be block regardless of input.context; writes to well-known sensitive system locations (/etc/**, system configuration outside the governed workspace) must block even when context reports priorReadOfTarget === 'yes' (a context-provided read outside the workspace is untrusted signal, never authorization)
+- PRINCIPLE-SCOPED RISK HANDLING: a risk-path signal is relevant only when the current action is inside this principle's explicit applicability and action scope. Do not make every rule block whenever helpers.isRiskPath() is true, and do not add a system-path deny policy unless the Owner-attributed principle or an independent approved host policy requires it. Outside the principle scope, return allow with matched: false. For in-scope actions, follow only the behavior supported by this principle and its Owner-labelled examples; a general risk signal or path name alone does not establish the expected decision.
 - implementationCode MUST be deterministic and self-contained: no imports, require, eval, Function, I/O, network, timers, Date.now, or randomness
 - goldenTraceCases MUST contain 2-10 cases with at least one positive allow case and one negative block case
 - goldenTraceCases expectedDecision MUST be only "allow" or "block" — do NOT emit "propose_correction", "requireApproval", or "auto_correct" (seed-user MVP only supports allow/block; all other action types are rejected by the schema validator)
@@ -471,7 +471,7 @@ CONTEXT MODE: v2 (Owner-labelled evidence is present)
  * letting read counts stand in for them. Validator, templates, and oracle
  * UNCHANGED.
  */
-export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v13';
+export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v14';
 
 /**
  * SPEC-RULECODE-QUALITY-001 A2 (2026-10-16): bumped v12 → v13.

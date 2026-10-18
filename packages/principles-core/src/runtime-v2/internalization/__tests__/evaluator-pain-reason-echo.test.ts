@@ -35,6 +35,7 @@ import { RuleHostWriter } from '../../activation/writers/rule-host-writer.js';
 import type { WriterInput } from '../../activation/activation-types.js';
 import { FORMATION_FIELD_MAX_CHARS } from '../formation-context.js';
 import type { PDRuntimeAdapter } from '../../runtime-protocol.js';
+import type { ArtificerHostSemanticContext } from '../artificer-prompt-builder.js';
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -130,17 +131,19 @@ const GOOD_RULE_CODE = `function evaluate(input, helpers) {
   return { decision: 'allow', matched: false, reason: 'no risk signal' };
 }`;
 
-function artificerV2Content(): Record<string, unknown> {
+function artificerV2Content(forgeStamp = false, includeOwnerStamp = true): Record<string, unknown> {
   return {
     taskId: ART_ID,
     sourceScribeArtifactId: SCRIBE_ART,
     requiresContextVersion: 2,
+    ...(forgeStamp ? { ruleHostInputContract: { version: 1, contextVersion: 2, hostKinds: ['model-claimed'] } } : {}),
     evidenceRefs: ['pain://pr861-1'],
     implementationSummary: 'read-before-write guard',
     sourceTrace: { scribeArtifactId: SCRIBE_ART },
     risks: [],
     implementationCode: GOOD_RULE_CODE,
     goldenTraceCases: [NEG_CASE, POS_CASE],
+    ...(includeOwnerStamp ? { ownerGoldenTraceCases: [NEG_CASE, POS_CASE] } : {}),
     affectedTools: ['write_file'],
     generatedAt: '2026-09-20T00:00:00.000Z',
   };
@@ -182,7 +185,13 @@ function meta(o: Record<string, unknown> = {}): string {
   });
 }
 
-async function makeWorld(opts: { lineage: 'full' | 'none' | 'broken-diag'; summary?: string }): Promise<World> {
+async function makeWorld(opts: {
+  lineage: 'full' | 'none' | 'broken-diag';
+  summary?: string;
+  hostSemanticContext?: ArtificerHostSemanticContext;
+  forgeStamp?: boolean;
+  omitOwnerStamp?: boolean;
+}): Promise<World> {
   const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pri861-echo-'));
   const stateManager = new RuntimeStateManager({ workspaceDir });
   await stateManager.initialize();
@@ -222,7 +231,7 @@ async function makeWorld(opts: { lineage: 'full' | 'none' | 'broken-diag'; summa
   await mkTask({ id: SCRIBE_ID, kind: 'scribe', deps: withDreamer ? [DREAMER_ID] : [] });
   await upsert({ artifactId: SCRIBE_ART, sourceTaskId: SCRIBE_ID, content: scribeContent(withDreamer), lineage: withDreamer ? [DREAMER_ART] : [] });
   await mkTask({ id: ART_ID, kind: 'artificer', deps: [SCRIBE_ID] });
-  await upsert({ artifactId: ART_ART, sourceTaskId: ART_ID, content: artificerV2Content(), lineage: [SCRIBE_ART] });
+  await upsert({ artifactId: ART_ART, sourceTaskId: ART_ID, content: artificerV2Content(opts.forgeStamp, !opts.omitOwnerStamp), lineage: [SCRIBE_ART] });
   await stateManager.createTask({
     taskId: EVAL_ID, taskKind: 'evaluator', status: 'pending', attemptCount: 0, maxAttempts: 3,
     diagnosticJson: meta({ dependencyTaskIds: [ART_ID] }),
@@ -251,6 +260,7 @@ async function makeWorld(opts: { lineage: 'full' | 'none' | 'broken-diag'; summa
     {
       owner: 'pri861-test', runtimeKind: 'test-double', pollIntervalMs: 5, timeoutMs: 5_000,
       gateDeps: createProductionGateDeps(),
+      ...(opts.hostSemanticContext ? { hostSemanticContext: opts.hostSemanticContext } : {}),
     },
   );
 
@@ -355,6 +365,48 @@ describe('PRI-861 — painReasonSummary echo into the production rule artifact',
       createdAt: ruleArtifact.createdAt,
       updatedAt: ruleArtifact.updatedAt,
     })).toBe('RuleHost candidate requires human approval before activation.');
+  }, 60_000);
+
+  it('system stamps a V2 rule only from a real host context after the evaluator gate passes', async () => {
+    world = await makeWorld({
+      lineage: 'none',
+      forgeStamp: true,
+      hostSemanticContext: { hostKinds: ['openclaw'], tools: [{ rawToolName: 'write_file', canonicalKind: 'write' }] },
+    });
+    const result = await world.evaluator.run(EVAL_ID);
+    expect(result.status).toBe('succeeded');
+    const ruleArtifact = (await world.store.listBySourceTaskId(EVAL_ID)).find((a) => a.artifactKind === 'rule');
+    expect(ruleArtifact).toBeDefined();
+    if (!ruleArtifact) return;
+    const ruleContent = JSON.parse(ruleArtifact.contentJson) as Record<string, unknown>;
+    expect(ruleContent.ruleHostInputContract).toEqual({ version: 1, contextVersion: 2, hostKinds: ['openclaw'] });
+  }, 60_000);
+
+  it('does not carry a model-supplied stamp into the rule artifact when host context is unavailable', async () => {
+    world = await makeWorld({ lineage: 'none', forgeStamp: true });
+    const result = await world.evaluator.run(EVAL_ID);
+    expect(result.status).toBe('succeeded');
+    const ruleArtifact = (await world.store.listBySourceTaskId(EVAL_ID)).find((a) => a.artifactKind === 'rule');
+    expect(ruleArtifact).toBeDefined();
+    if (!ruleArtifact) return;
+    const ruleContent = JSON.parse(ruleArtifact.contentJson) as Record<string, unknown>;
+    expect(Object.hasOwn(ruleContent, 'ruleHostInputContract')).toBe(false);
+  }, 60_000);
+
+  it('fails closed when a context-v2 artifact lacks the independent Owner case stamp', async () => {
+    world = await makeWorld({ lineage: 'none', omitOwnerStamp: true });
+    const evalTask = await world.stateManager.getTask(EVAL_ID);
+    if (!evalTask) throw new Error('evaluator task missing');
+    await world.stateManager.updateTask(EVAL_ID, {
+      diagnosticJson: meta({ dependencyTaskIds: [ART_ID], channel: 'code_tool_hook' }),
+    });
+    const result = await world.evaluator.run(EVAL_ID);
+    expect(result.status).toBe('failed');
+    expect((await world.store.listBySourceTaskId(EVAL_ID)).filter((a) => a.artifactKind === 'rule')).toHaveLength(0);
+    expect(world.emitted).toContainEqual(expect.objectContaining({
+      eventType: 'evaluator_adversarial_replay_skipped',
+      payload: expect.objectContaining({ reason: 'owner_golden_trace_stamp_missing_or_invalid', nextAction: expect.any(String) }),
+    }));
   }, 60_000);
 
   it('dreamer lineage present but diagnosis unresolvable: field absent, skip event names the diagnosis gap, assembly succeeds', async () => {

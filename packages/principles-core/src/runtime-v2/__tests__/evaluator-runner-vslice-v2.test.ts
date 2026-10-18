@@ -248,6 +248,9 @@ function makeRuleContextV2ArtificerArtifact(): PIArtifactRecord {
     traceCase.ruleContext = ruleContext;
   }
   parsed.requiresContextVersion = 2;
+  // The independent replay baseline is restored from the Owner-approved
+  // BehaviorExamplePack, never inferred from the model's golden examples.
+  parsed.ownerGoldenTraceCases = structuredClone(cases);
   // PRI-490: v2 artifacts must carry evidenceRefs preserved from
   // BehaviorExamplePack. The fixture includes them so downstream tests
   // can verify the evaluator preserves them into the assembled rule artifact.
@@ -609,13 +612,12 @@ describe('EvaluatorRunner V2 — adversarial sandbox replay (PRI-426)', () => {
     const positives = cases.filter((c) => c.kind === 'positive');
     expect(positives.length).toBeGreaterThanOrEqual(1);
     // All adversarial cases preserved as negative. PRI-485 Phase 6: the runner
-    // now auto-generates 5 v2 adversarial cases (unavailable/truncation/alias/
-    // path/combination) and prepends them to the LLM-supplied 3 adversarial
-    // cases, so the merged trace carries 8 negative cases total.
+    // now auto-generates 2 context-availability cases and prepends them to the
+    // LLM-supplied 3 adversarial cases, so this legacy fixture has 5 negatives.
     const negatives = cases.filter((c) => c.kind === 'negative');
-    expect(negatives.length).toBe(8);
-    // PRI-485: the 5 v2 caseIds must be present in the merged trace.
-    const v2CaseIds = ['v2-unavailable', 'v2-truncated', 'v2-alias', 'v2-path-boundary', 'v2-combination'];
+    expect(negatives.length).toBe(5);
+    // PRI-485: only the two context-availability templates are generated.
+    const v2CaseIds = ['v2-unavailable', 'v2-truncated'];
     for (const id of v2CaseIds) {
       expect(negatives.find((c) => c.caseId === id), `v2 case ${id} missing`).toBeDefined();
     }

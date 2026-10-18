@@ -99,9 +99,18 @@ export function attributionFromLayer(layer: FailureLayer): FailureAttribution {
 export const V2_TEMPLATE_CASE_IDS: ReadonlySet<string> = new Set([
   'v2-unavailable',
   'v2-truncated',
-  'v2-alias',
-  'v2-path-boundary',
-  'v2-combination',
+]);
+
+/**
+ * Historical template IDs are still recognized when reading old evaluator
+ * artifacts, but the current generator no longer emits these policy guesses.
+ * Keeping their old oracle preserves repair/out-of-scope routing for durable
+ * legacy traces without making them current generic templates again.
+ */
+const DEPRECATED_V2_TEMPLATE_EXPECTATIONS: ReadonlyMap<string, 'allow' | 'block'> = new Map([
+  ['v2-alias', 'allow'],
+  ['v2-path-boundary', 'block'],
+  ['v2-combination', 'block'],
 ]);
 
 /**
@@ -122,14 +131,12 @@ export const V2_TEMPLATE_CASE_IDS: ReadonlySet<string> = new Set([
 export const V2_CONTEXT_ONLY_TEMPLATE_EXPECTED_ALLOW: ReadonlyMap<string, 'allow'> = new Map([
   ['v2-unavailable', 'allow'],
   ['v2-truncated', 'allow'],
-  ['v2-alias', 'allow'],
 ]);
 
 /** The oracle expected decision for a known v2 template caseId (compile-time fact), or null for unknown ids. */
 export function v2TemplateOracleExpectedDecision(caseId: string): 'allow' | 'block' | null {
   if (V2_CONTEXT_ONLY_TEMPLATE_EXPECTED_ALLOW.has(caseId)) return 'allow';
-  if (caseId === 'v2-path-boundary' || caseId === 'v2-combination') return 'block';
-  return null;
+  return DEPRECATED_V2_TEMPLATE_EXPECTATIONS.get(caseId) ?? null;
 }
 
 /**

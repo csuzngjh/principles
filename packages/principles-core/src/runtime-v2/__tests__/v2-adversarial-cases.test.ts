@@ -4,10 +4,8 @@
  * TDD RED — asserts behavior not yet implemented in v2-adversarial-cases.ts.
  *
  * Spec: docs/superpowers/specs/2026-06-27-rulecode-context-vision-design.md
- *   - §7.4 Evaluator: 5 adversarial categories (unavailable/truncation/
- *     alias/path/combination) auto-generated to defend against false-positive
- *     blocks.
- *   - §10.1 acceptance: 5 categories must pass.
+ *   - §7.4 Evaluator: generic generation is limited to context-availability
+ *     boundaries. Principle-specific action outcomes come from Owner evidence.
  *
  * ERR checklist:
  *   - ERR-069: generated cases share the AdversarialCase schema; validate
@@ -61,19 +59,16 @@ async function validateCases(cases: readonly AdversarialCase[]): Promise<string[
 describe('generateV2ContextAdversarialCases (PRI-485 Phase 6)', () => {
   // ── shape & count ─────────────────────────────────────────────────────────
 
-  it('returns exactly 5 cases', () => {
+  it('returns exactly the two principle-neutral context availability cases', () => {
     const cases = generateV2ContextAdversarialCases(SPEC);
-    expect(cases).toHaveLength(5);
+    expect(cases).toHaveLength(2);
   });
 
-  it('returns the 5 canonical caseIds in stable order', () => {
+  it('returns the two current caseIds in stable order', () => {
     const cases = generateV2ContextAdversarialCases(SPEC);
     expect(cases.map((c) => c.caseId)).toEqual([
       'v2-unavailable',
       'v2-truncated',
-      'v2-alias',
-      'v2-path-boundary',
-      'v2-combination',
     ]);
   });
 
@@ -132,58 +127,12 @@ describe('generateV2ContextAdversarialCases (PRI-485 Phase 6)', () => {
     expect(c.ruleContext?.facts.uniqueWritePathCount).toBeNull();
   });
 
-  // ── case 3: alias ────────────────────────────────────────────────────────
-
-  it('case v2-alias: history shows read_file on targetPath, expects allow for write_file', () => {
+  it('does not invent alias, sibling-path, or risk-combination decisions without Owner-labelled evidence', () => {
     const cases = generateV2ContextAdversarialCases(SPEC);
-    const c = cases.find((x) => x.caseId === 'v2-alias');
-    expect(c).toBeDefined();
-    if (!c) return;
-    expect(c.toolName).toBe(SPEC.toolName);
-    expect(c.expectedDecision).toBe('allow');
-    expect(c.ruleContext?.history.status).toBe('available');
-    expect(c.ruleContext?.history.truncated).toBe(false);
-    expect(c.ruleContext?.facts.priorReadOfTarget).toBe('yes');
-    // History contains a read_file call on the target path.
-    const readCall = c.ruleContext?.history.calls.find(
-      (call) => call.canonicalKind === 'read' && call.normalizedPath === SPEC.targetPath,
-    );
-    expect(readCall).toBeDefined();
-  });
-
-  // ── case 4: path-boundary ────────────────────────────────────────────────
-
-  it('case v2-path-boundary: targetPath + .bak must not be treated as already-read, expects block', () => {
-    const cases = generateV2ContextAdversarialCases(SPEC);
-    const c = cases.find((x) => x.caseId === 'v2-path-boundary');
-    expect(c).toBeDefined();
-    if (!c) return;
-    expect(c.expectedDecision).toBe('block');
-    expect(c.params).toEqual({ path: `${SPEC.targetPath}.bak` });
-    // History shows prior read on targetPath (NOT on targetPath.bak).
-    expect(c.ruleContext?.facts.priorReadOfTarget).toBe('no');
-    // Sanity: even though targetPath appears as a substring of targetPath.bak,
-    // priorReadOfTarget must be 'no' — proving no substring matching.
-    const bakPath = `${SPEC.targetPath}.bak`;
-    const readOnBak = c.ruleContext?.history.calls.find(
-      (call) => call.canonicalKind === 'read' && call.normalizedPath === bakPath,
-    );
-    expect(readOnBak).toBeUndefined();
-  });
-
-  // ── case 5: combination ──────────────────────────────────────────────────
-
-  it('case v2-combination: v2 context says priorRead=yes but action path is risky, expects block (v1 dominates)', () => {
-    const cases = generateV2ContextAdversarialCases(SPEC);
-    const c = cases.find((x) => x.caseId === 'v2-combination');
-    expect(c).toBeDefined();
-    if (!c) return;
-    expect(c.expectedDecision).toBe('block');
-    // The action targets a risk path (/etc/passwd).
-    expect(c.params).toEqual({ path: '/etc/passwd' });
-    // v2 context fabricates priorRead=yes on /etc/passwd — but the rule must
-    // still block because the v1 action-only risk-path check dominates.
-    expect(c.ruleContext?.facts.priorReadOfTarget).toBe('yes');
+    expect(cases.map((c) => c.caseId)).not.toContain('v2-alias');
+    expect(cases.map((c) => c.caseId)).not.toContain('v2-path-boundary');
+    expect(cases.map((c) => c.caseId)).not.toContain('v2-combination');
+    expect(cases.every((c) => c.params.path === SPEC.targetPath)).toBe(true);
   });
 
   // ── adversarialCasesToGoldenTrace preserves ruleContext ──────────────────
@@ -193,7 +142,7 @@ describe('generateV2ContextAdversarialCases (PRI-485 Phase 6)', () => {
     const result = adversarialCasesToGoldenTrace(cases);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.trace.cases).toHaveLength(5);
+    expect(result.trace.cases).toHaveLength(2);
     for (const original of cases) {
       const converted = result.trace.cases.find((c) => c.caseId === original.caseId);
       expect(converted, `converted case ${original.caseId} missing`).toBeDefined();

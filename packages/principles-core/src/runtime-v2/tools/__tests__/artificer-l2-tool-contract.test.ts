@@ -145,6 +145,8 @@ describe('PRI-439 read_rulecode_spec tool', () => {
     expect(text).not.toContain('is "block" or "propose_correction"');
     expect(text).toContain('ruleContext (REQUIRED on every case');
     expect(text).toContain('unavailable posture');
+    expect(text).toMatch(/risk-path signal is relevant only when the current action is inside[\s\S]*principle applicability and declared action scope/i);
+    expect(text).not.toMatch(/if helpers\.isRiskPath\(\) is true.*MUST.*block/i);
   });
 
   it('emits telemetry on success', async () => {

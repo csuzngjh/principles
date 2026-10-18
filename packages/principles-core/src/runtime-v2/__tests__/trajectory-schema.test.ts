@@ -124,4 +124,23 @@ describe('PRI-774: canonical trajectory schema module', () => {
     expect(after.c).toBe(1);
     db.close();
   });
+
+  it('adds nullable tool-call project scope without assigning historical rows a cwd', () => {
+    const db = new Database(':memory:');
+    db.exec(`CREATE TABLE tool_calls (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, tool_name TEXT NOT NULL,
+      outcome TEXT NOT NULL, duration_ms INTEGER, exit_code INTEGER, error_type TEXT, error_message TEXT,
+      gfi_before REAL, gfi_after REAL, params_json TEXT NOT NULL, created_at TEXT NOT NULL
+    )`);
+    db.prepare('INSERT INTO tool_calls (session_id, tool_name, outcome, params_json, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run('legacy-session', 'apply_patch', 'success', '{"file_path":"relative.txt"}', '2026-10-18T10:00:00.000Z');
+
+    applyTrajectorySchemaBase(db);
+
+    const columns = db.prepare('PRAGMA table_info(tool_calls)').all() as { name: string; notnull: number }[];
+    expect(columns.some((column) => column.name === 'project_dir' && column.notnull === 0)).toBe(true);
+    const row = db.prepare('SELECT session_id, tool_name, project_dir FROM tool_calls WHERE session_id = ?').get('legacy-session');
+    expect(row).toEqual({ session_id: 'legacy-session', tool_name: 'apply_patch', project_dir: null });
+    db.close();
+  });
 });

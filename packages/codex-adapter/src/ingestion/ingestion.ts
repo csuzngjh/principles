@@ -37,6 +37,8 @@ import { buildLiveCorrectionCandidate, buildLiveToolCandidate, buildTranscriptCa
 
 export interface CodexIngestionOptions {
   readonly workspaceDir: string;
+  /** Native live-hook cwd; intentionally omitted for transcript catch-up. */
+  readonly projectDir?: string;
   readonly env?: { CODEX_HOME?: string | undefined };
   readonly now?: Date;
   readonly port?: TranscriptPort;
@@ -66,10 +68,11 @@ interface LiveObservationArgs {
   readonly fields: PayloadFields;
   readonly rolloutIdentity: string;
   readonly workspaceDir: string;
+  readonly projectDir?: string;
   readonly now: Date;
 }
 
-function ingestLiveObservation({ fields, rolloutIdentity, workspaceDir, now }: LiveObservationArgs): CodexIngestionOutcome {
+function ingestLiveObservation({ fields, rolloutIdentity, workspaceDir, projectDir, now }: LiveObservationArgs): CodexIngestionOutcome {
   const nowIso = now.toISOString();
   let observation: GovernanceObservationInput | null = null;
   if (fields.turnId !== null && fields.prompt !== null) {
@@ -117,7 +120,7 @@ function ingestLiveObservation({ fields, rolloutIdentity, workspaceDir, now }: L
   // candidate (SPEC §12) — the caller (pd-hook) runs detection/admission.
   const candidate = observation.kind === 'user_turn'
     ? buildLiveCorrectionCandidate({ fields, rolloutIdentity })
-    : buildLiveToolCandidate({ fields, rolloutIdentity });
+    : buildLiveToolCandidate({ fields, rolloutIdentity, ...(projectDir !== undefined ? { projectDir } : {}) });
   return {
     status: 'ok', inserted: result.inserted, enriched: result.enriched, duplicates: result.duplicates, warnings: result.warnings, lagBytes: 0,
     admissionCandidates: candidate !== null ? [candidate] : [],
@@ -322,7 +325,7 @@ export function ingestCodexConversation(rawPayload: unknown, kind: HostEventKind
   const now = options.now ?? new Date();
 
   if (kind === 'before_prompt_build' || kind === 'after_tool_call') {
-    return ingestLiveObservation({ fields, rolloutIdentity: validated.rolloutIdentity, workspaceDir: options.workspaceDir, now });
+    return ingestLiveObservation({ fields, rolloutIdentity: validated.rolloutIdentity, workspaceDir: options.workspaceDir, ...(options.projectDir !== undefined ? { projectDir: options.projectDir } : {}), now });
   }
   return ingestTranscriptDelta({
     fallbackRootSessionId: fields.sessionId,

@@ -81,6 +81,23 @@ export const ScribeSourceTraceSchema = Type.Object({
   philosopherArtifactId: Type.String({ minLength: 1 }),
 });
 
+const ScribeIntentContractSchema = Type.Object({
+  ownerIntent: Type.String({ minLength: 1 }),
+  targetBehavior: Type.String({ minLength: 1 }),
+  forbiddenBehavior: Type.String({ minLength: 1 }),
+  evidenceSource: Type.String({ minLength: 1 }),
+  validationExpectation: Type.String({ minLength: 1 }),
+});
+
+const ScribeExecutionConditionsSchema = Type.Object({
+  version: Type.Literal(1),
+  requiredFacts: Type.Array(Type.Object({
+    factKind: Type.String({ minLength: 1 }),
+    required: Type.Boolean(),
+    textualBasis: Type.String({ minLength: 1 }),
+  })),
+});
+
 export const ScribeOutputV1Schema = Type.Object({
   taskId: Type.String({ minLength: 1 }),
   sourcePhilosopherArtifactId: Type.String({ minLength: 1 }),
@@ -88,14 +105,11 @@ export const ScribeOutputV1Schema = Type.Object({
   sourceTrace: ScribeSourceTraceSchema,
   risks: Type.Array(Type.String()),
   generatedAt: Type.String({ minLength: 1 }),
-  // PRI-703 Phase 1: optional intent contract (validated by the hand-rolled
-  // DefaultScribeValidator via isValidIntentContractV1 — TypeBox Optional
-  // keeps the wire shape additive for LLM-facing schema consumers).
-  intentContract: Type.Optional(Type.Unknown()),
-  // SPEC-RULECODE-QUALITY-001 A1: optional execution-conditions declaration
-  // (same Optional-Unknown wire discipline as intentContract — element-level
-  // validation stays with the hand-rolled DefaultScribeValidator).
-  executionConditions: Type.Optional(Type.Unknown()),
+  // New Scribe generation requires both RuleCode anchors. Legacy artifact
+  // readers remain compatible through the optional fields on ScribeOutputV1
+  // and the extraction helpers; this schema only describes new model output.
+  intentContract: ScribeIntentContractSchema,
+  executionConditions: ScribeExecutionConditionsSchema,
   // r6 review fix (P1-2): optional structured coverage-gap channel. This
   // schema is a LIVE runtime contract (output-schema-registry → pi-ai
   // adapter → response_format json_schema with additionalProperties:false on
@@ -121,7 +135,11 @@ export interface ScribeValidator {
    * Receives `unknown` — must perform runtime validation before
    * treating as ScribeOutputV1 (ERR-001, ERR-005).
    */
-  validate(output: unknown, taskId: string, expectedSourcePhilosopherArtifactId?: string): Promise<ScribeValidationResult>;
+  validate(
+    output: unknown,
+    taskId: string,
+    expectedSourcePhilosopherArtifactId?: string,
+  ): Promise<ScribeValidationResult>;
 }
 
 /** Runtime type guard: true if v is a non-null plain object (not an array). */
@@ -130,8 +148,17 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 }
 
 export class DefaultScribeValidator implements ScribeValidator {
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
-  async validate(output: unknown, taskId: string, expectedSourcePhilosopherArtifactId?: string): Promise<ScribeValidationResult> {
+  private readonly requireRuleCodeContracts: boolean;
+
+  constructor(options: { readonly requireRuleCodeContracts?: boolean } = {}) {
+    this.requireRuleCodeContracts = options.requireRuleCodeContracts ?? false;
+  }
+
+  async validate(
+    output: unknown,
+    taskId: string,
+    expectedSourcePhilosopherArtifactId?: string,
+  ): Promise<ScribeValidationResult> {
     const errors: string[] = [];
 
     if (!isRecord(output)) {
@@ -206,7 +233,11 @@ export class DefaultScribeValidator implements ScribeValidator {
     // intentContract — PRI-703 Phase 1: optional, but present-but-malformed
     // is a hard rejection (the contract is the alignment anchor for rule
     // generation / evaluation / repair; a corrupted anchor is worse than none).
-    if (Object.hasOwn(output, 'intentContract') && output.intentContract !== undefined) {
+    const hasIntentContract = Object.hasOwn(output, 'intentContract') && output.intentContract !== undefined;
+    if (this.requireRuleCodeContracts && !hasIntentContract) {
+      errors.push('intentContract is required for new RuleCode generation');
+    }
+    if (hasIntentContract) {
       if (!isValidIntentContractV1(output.intentContract)) {
         errors.push('intentContract must contain non-empty string fields: ownerIntent, targetBehavior, forbiddenBehavior, evidenceSource, validationExpectation');
       }
@@ -215,7 +246,11 @@ export class DefaultScribeValidator implements ScribeValidator {
     // executionConditions — SPEC-RULECODE-QUALITY-001 A1: optional, but
     // present-but-malformed is a hard rejection (a corrupted condition
     // declaration must surface at the trust boundary, not downstream).
-    if (Object.hasOwn(output, 'executionConditions') && output.executionConditions !== undefined) {
+    const hasExecutionConditions = Object.hasOwn(output, 'executionConditions') && output.executionConditions !== undefined;
+    if (this.requireRuleCodeContracts && !hasExecutionConditions) {
+      errors.push('executionConditions is required for new RuleCode generation');
+    }
+    if (hasExecutionConditions) {
       if (!isValidScribeExecutionConditionsV1(output.executionConditions)) {
         errors.push('executionConditions must be { version: 1, requiredFacts: [{ factKind: non-empty string, required: boolean, textualBasis: non-empty string }] }');
       }

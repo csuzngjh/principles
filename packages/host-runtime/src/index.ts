@@ -255,6 +255,7 @@ export function createProductionHostRuntime(
   } = {},
 ): HostRuntime {
   const productionGate = createProductionRuleHostGate({
+    ...(options.hostKind ? { hostKind: options.hostKind } : {}),
     ...(options.projectDir ? { projectDir: options.projectDir } : {}),
     ...(options.ruleContextProvider ? { ruleContextProvider: options.ruleContextProvider } : {}),
     ...(options.ruleInputEnrichmentProvider ? { ruleInputEnrichmentProvider: options.ruleInputEnrichmentProvider } : {}),
@@ -266,6 +267,7 @@ export function createProductionHostRuntime(
       ...(options.painEnrichmentProvider ? { painEnrichmentProvider: options.painEnrichmentProvider } : {}),
       ...(options.painDatabaseFactory ? { painDatabaseFactory: options.painDatabaseFactory } : {}),
       ...(options.hostKind ? { hostKind: options.hostKind } : {}),
+      ...(options.projectDir ? { projectDir: options.projectDir } : {}),
       ...(options.events ? { events: options.events } : {}),
     }),
     beforeToolCall: options.beforeToolCall ?? productionGate,
@@ -340,6 +342,7 @@ export function createProductionHostRuntime(
 
 export * from './behavior-example-pack-assembler.js';
 export * from './behavior-history.js';
-export * from './workspace-behavior-evidence.js';
+export * from './codex-rule-context-provider.js';
+export { createWorkspaceBehaviorEvidencePort } from './workspace-behavior-evidence.js';
 
 export * from './explicit-owner-statement-prefix.js';

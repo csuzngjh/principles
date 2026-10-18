@@ -329,6 +329,28 @@ describe('InternalizationOrchestrator.commitNextTaskProposal — transition gate
 // ── 元数据 round-trip (新字段) ────────────────────────────────────────────────
 
 describe('PITaskMetadata new fields round-trip', () => {
+  it('system provenance-recovery intent blocks approved ADVANCE until Artificer regeneration', () => {
+    const task = makeTask({
+      taskId: 'owner-stamp-recovery', taskKind: 'evaluator', status: 'succeeded',
+      meta: makeMeta({
+        runnerDecision: 'approved',
+        completionIntent: {
+          decision: 'approved', sourceRunId: 'run-owner-stamp', revisionEpoch: 0, status: 'applied',
+          transitionOverrideReason: 'owner_golden_trace_provenance_missing',
+        },
+      }),
+    });
+    const piTask = hydratePITaskRecord(task);
+    expect(piTask).not.toBeNull();
+    if (!piTask) return;
+
+    expect(piTask.runnerDecision).toBe('approved'); // semantic verdict stays truthful
+    expect(decideInternalizationTransition(transitionInputFromTask(piTask))).toMatchObject({
+      kind: 'REVISION_REQUIRED',
+      reason: 'evaluator_owner_golden_trace_provenance_recovery_required',
+    });
+  });
+
   it('runnerDecision / revisionCount / revisionFeedback / rolloutRevisionPayload 持久化往返', () => {
     const meta = makeMeta({
       runnerDecision: 'needs_revision',
@@ -366,6 +388,22 @@ describe('PITaskMetadata new fields round-trip', () => {
       taskId: 't', taskKind: 'evaluator', status: 'succeeded',
       createdAt: '', updatedAt: '', attemptCount: 0, maxAttempts: 3,
       diagnosticJson: bad,
+    } as TaskRecord;
+    expect(hydratePITaskRecord(task)).toBeNull();
+  });
+
+  it('completion intent rejects unknown system recovery reasons fail-closed', () => {
+    const task = {
+      taskId: 'invalid-owner-stamp-recovery', taskKind: 'evaluator', status: 'succeeded',
+      createdAt: '', updatedAt: '', attemptCount: 0, maxAttempts: 3,
+      diagnosticJson: JSON.stringify({ pi_metadata: {
+        dependencyTaskIds: [], channel: 'prompt', timeoutMs: 1000,
+        inputArtifactRefs: [], outputArtifactRefs: [],
+        completionIntent: {
+          decision: 'approved', sourceRunId: 'run-invalid', revisionEpoch: 0, status: 'pending',
+          transitionOverrideReason: 'model_says_repair',
+        },
+      } }),
     } as TaskRecord;
     expect(hydratePITaskRecord(task)).toBeNull();
   });

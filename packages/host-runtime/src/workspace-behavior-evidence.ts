@@ -69,3 +69,48 @@ export function createWorkspaceBehaviorEvidencePort(workspaceDir: string, toolSe
     },
   };
 }
+
+/**
+ * Read one bounded, same-session history window from the canonical trajectory
+ * database. The timestamp is the caller's pre-event cutoff; rows at or after
+ * it are excluded so replayed/future calls cannot enter a live RuleContext.
+ * This is read-only and never creates or migrates trajectory state.
+ */
+export function readWorkspaceRuleContextRowsBefore(
+  workspaceDir: string,
+  input: { sessionId: string; projectDir: string; beforeCreatedAt: string; excludeToolUseId: string; limit: number },
+): { rows: readonly RuleHostContextRow[]; truncated: boolean; unscopedPriorRows: boolean } {
+  const { sessionId, projectDir, beforeCreatedAt, excludeToolUseId, limit } = input;
+  if (sessionId.trim().length === 0) throw new Error('history_session_id_invalid');
+  if (!path.isAbsolute(projectDir)) throw new Error('history_project_dir_invalid');
+  if (excludeToolUseId.trim().length === 0) throw new Error('history_tool_use_id_invalid');
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error('history_limit_invalid');
+  if (!Number.isFinite(Date.parse(beforeCreatedAt))) throw new Error('history_cutoff_invalid');
+
+  const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true, fileMustExist: true });
+  try {
+    db.pragma('busy_timeout = 100');
+    return db.transaction(() => {
+      const rows: unknown[] = db.prepare(`
+        SELECT id, tool_name, outcome, params_json
+        FROM tool_calls
+        WHERE session_id = ? AND project_dir = ? AND created_at < ? AND (tool_use_id IS NULL OR tool_use_id <> ?)
+        ORDER BY created_at DESC, id DESC
+        LIMIT ?
+      `).all(sessionId, projectDir, beforeCreatedAt, excludeToolUseId, limit + 1);
+      const unscoped: unknown = db.prepare(`
+        SELECT 1 AS found FROM tool_calls
+        WHERE session_id = ? AND project_dir IS NULL AND created_at < ?
+          AND (tool_use_id IS NULL OR tool_use_id <> ?) LIMIT 1
+      `).get(sessionId, beforeCreatedAt, excludeToolUseId);
+      if (!Array.isArray(rows)) throw new Error('history_query_invalid');
+      return {
+        rows: rows.slice(0, limit).reverse().map(contextRow),
+        truncated: rows.length > limit,
+        unscopedPriorRows: unscoped !== undefined,
+      };
+    })();
+  } finally {
+    db.close();
+  }
+}

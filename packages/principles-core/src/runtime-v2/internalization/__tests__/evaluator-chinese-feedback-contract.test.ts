@@ -126,6 +126,9 @@ function artificerOutput(implementationCode: string, scribeArtifactId: string, t
     risks: [],
     implementationCode,
     goldenTraceCases: GOLDEN_TRACE_CASES,
+    // This is intentionally forged: ArtificerRunner must replace it with the
+    // independently restored, bounded Owner pack before persistence.
+    ownerGoldenTraceCases: [{ caseId: 'model-forged', kind: 'positive', toolName: 'write_file', params: { path: '/model' }, expectedDecision: 'allow' }],
     affectedTools: ['write_file'],
     generatedAt: new Date().toISOString(),
   };
@@ -307,6 +310,8 @@ describe('PRI-714 review fix: Chinese evaluator feedback through repair + re-eva
     const repairArtifact = repairArtifacts.find((a) => a.artifactKind === 'principle');
     expect(repairArtifact).toBeDefined();
     if (!repairArtifact) return;
+    const persistedArtificer = JSON.parse(repairArtifact.contentJson) as { ownerGoldenTraceCases?: unknown[] };
+    expect(persistedArtificer.ownerGoldenTraceCases).toEqual([NEG_CASE, POS_CASE]);
 
     // ── Round 2: evaluator approves; the Chinese prior requirement flows in
     //    via previousEvaluation and the verbatim Chinese ledger echo PASSES

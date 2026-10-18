@@ -58,6 +58,7 @@ export function buildLiveCorrectionCandidate(args: {
 export function buildLiveToolCandidate(args: {
   fields: PayloadFields;
   rolloutIdentity: string;
+  projectDir?: string;
 }): GovernanceSignalCandidate | null {
   const { fields } = args;
   if (fields.turnId === null || fields.toolUseId === null) return null;
@@ -79,6 +80,7 @@ export function buildLiveToolCandidate(args: {
     // CR-01 — `toolUseId` is recorded into tool_calls.tool_use_id and used for
     // the admission dedup join against the live PostToolUse row.
     toolUseId: fields.toolUseId,
+    ...(args.projectDir !== undefined ? { projectDir: args.projectDir } : {}),
     ...(fields.toolInput !== undefined ? { toolInput: fields.toolInput } : {}),
     ...(fields.toolResponse !== undefined ? { toolOutput: fields.toolResponse } : {}),
     observedAt: new Date().toISOString(),

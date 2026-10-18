@@ -18,7 +18,9 @@ import {
   type RuleHostMeta,
   type RuleHostResult,
   type ToolSemanticRegistry,
+  type GovernanceHostKind,
 } from '@principles/core/runtime-v2';
+import { isSensitiveSystemPath } from '@principles/core/runtime-v2/internalization/rule-host-input-builder';
 import { scanRetiredContractSymbols } from './legacy-rule-contract-symbols.js';
 import { recordDegradedEnforcement } from './degraded-enforcement-marker.js';
 import type { HostEvent, HostEventResult } from '@principles/core/host';
@@ -28,6 +30,7 @@ import {
   RULE_BATCH_SOURCE_BYTES,
   RULE_SOURCE_BYTES,
   type RuleImplementationRuntime,
+  type RuleBatchEvaluation,
 } from './rule-implementation-runtime.js';
 
 const WARNING_LIMIT = 500;
@@ -113,6 +116,7 @@ export type RuleInputEnrichmentProvider = (request: ProductionRuleContextRequest
 
 export interface ProductionRuleHostGateOptions {
   projectDir?: string;
+  hostKind?: GovernanceHostKind;
   ruleContextProvider?: RuleContextProvider;
   ruleInputEnrichmentProvider?: RuleInputEnrichmentProvider;
   implementationRuntime?: RuleImplementationRuntime;
@@ -235,6 +239,8 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
         SELECT a.activation_id, a.artifact_id, a.target_ref, a.action,
                c.enforcement, c.isolation_decision_id,
                p.source_rule_id, p.source_principle_id,
+               EXISTS (SELECT 1 FROM approvals ap WHERE ap.artifact_id = a.artifact_id
+                 AND ap.channel = 'code_tool_hook' AND ap.status = 'approved') AS owner_approved,
                length(CAST(p.content_json AS BLOB)) AS content_bytes,
                (SELECT d.artifact_digest FROM activation_decisions d
                 WHERE d.subject_kind = 'activation' AND d.activation_id = a.activation_id
@@ -290,8 +296,8 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
           // through the SAME budget/content/context validation and
           // evaluateBatch pipeline as live rows, but their results are
           // collected as observations only and never join mergeDecisions
-          // (shadow observes, never enforces). The v2 gate below stays ahead
-          // of any evaluation, so Codex v2 shadow remains suspended.
+          // (shadow observes, never enforces). The v2 qualification and context
+          // checks below remain ahead of evaluation for both activation modes.
           const activationMode: 'live' | 'shadow' | null = row.action === 'code_tool_hook_live_activate'
             ? 'live'
             : row.action === 'code_tool_hook_shadow_activate' ? 'shadow' : null;
@@ -382,6 +388,42 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
                 addWarning(warnings, `unsupported_context_version: ${String(content.requiresContextVersion)}`, 'regenerate the rule artifact for context version 2');
                 continue;
               }
+              // Codex V2 is opt-in per regenerated, Owner-approved artifact.
+              // This system-stamped contract is emitted only after current
+              // evaluator replay; merely wiring history must not revive old
+              // activations. Live execution additionally needs the existing
+              // promotion decision's binding to this exact artifact snapshot.
+              if (options.hostKind === 'codex') {
+                const contract = content.ruleHostInputContract;
+                const hosts = isRecord(contract) ? contract.hostKinds : undefined;
+                let contentBindingVerified = digestCheck.outcome === 'verified';
+                if (activationMode === 'shadow' && row.owner_approved === 1) {
+                  // Old databases remain readable without writing a migration
+                  // from this enforcement reader. A legacy approval without a
+                  // content digest cannot grant Codex V2 execution eligibility.
+                  const approvalColumns: unknown[] = connection.getDb().prepare('PRAGMA table_info(approvals)').all();
+                  if (approvalColumns.some((column) => isRecord(column) && column.name === 'artifact_digest')) {
+                    const approval: unknown = connection.getDb().prepare(`
+                      SELECT artifact_digest FROM approvals
+                      WHERE artifact_id = ? AND channel = 'code_tool_hook' AND status = 'approved'
+                      ORDER BY decided_at DESC LIMIT 1
+                    `).get(artifactId);
+                    const approvalDigest = isRecord(approval) && typeof approval.artifact_digest === 'string'
+                      ? approval.artifact_digest : null;
+                    contentBindingVerified = verifyPiArtifactRowDigest(contentRow, contentJson, approvalDigest).outcome === 'verified';
+                  } else {
+                    contentBindingVerified = false;
+                  }
+                }
+                if (!isRecord(contract) || contract.version !== 1 || contract.contextVersion !== 2
+                  || !Array.isArray(hosts) || !hosts.every((host: unknown) => typeof host === 'string')
+                  || !hosts.includes('codex') || row.owner_approved !== 1
+                  || !contentBindingVerified) {
+                  addWarning(warnings, `codex_rule_context_v2_unqualified: activation=${activationId}`,
+                    'regenerate and replay this artifact for Codex, approve it for shadow observation, and use the existing Owner promotion flow for live execution');
+                  continue;
+                }
+              }
               // SPEC-RULECODE-QUALITY-001 A3 / §7.1 (Q10): MANDATORY runtime
               // suspension of context-dependent rules. A v2 rule may only
               // execute when the provider resolved a schema-valid context
@@ -440,7 +482,7 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
 
       const hostInput: RuleHostInput = {
         action,
-        workspace: { isRiskPath: false },
+                workspace: { isRiskPath: isSensitiveSystemPath(action.normalizedPath) },
         session: { sessionId: event.context.sessionId, currentGfi: enrichment.currentGfi },
         evolution: { epTier: enrichment.epTier },
         derived: { estimatedLineChanges: estimateLineChanges({ toolName: input.toolName, params: input.params }), bashRisk: enrichment.bashRisk },
@@ -462,7 +504,9 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
       if (remaining <= 0) {
         return { decision: 'allow', source: event.source, warnings: [boundedWarning('gate_deadline_exceeded', 'reduce active RuleCode count or source size and retry')], metadata: { evaluatedLiveRules: 0 } };
       }
-      const liveBatch = implementationRuntime.evaluateBatch(
+      const liveBatch: RuleBatchEvaluation = liveCandidates.length === 0
+        ? { ok: true, results: [] }
+        : implementationRuntime.evaluateBatch(
         liveCandidates.map((candidate) => ({ source: candidate.source, filename: `activation-${candidate.implId}` })),
         hostInput,
         remaining,

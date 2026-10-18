@@ -28,6 +28,51 @@ function makeTrace(cases: GoldenTraceCase[] = [makeCase()]): GoldenTrace {
 }
 
 describe('evaluateInRefinerSandbox', () => {
+  it('uses the shared normalized action path for the existing /etc risk fact', () => {
+    const observed: { normalizedPath: string | null; isRiskPath: boolean }[] = [];
+    const trace = makeTrace([
+      makeCase({ caseId: 'etc-root', expectedDecision: 'block', params: { path: '/etc/passwd' } }),
+      makeCase({ caseId: 'etc-prefix-sibling', expectedDecision: 'allow', params: { path: '/etc-backup/passwd' } }),
+    ]);
+    const result = evaluateInRefinerSandbox('safe code', trace, {
+      projectDir: '/workspace',
+      evaluateCode: (input) => {
+        observed.push({
+          normalizedPath: input.action.normalizedPath,
+          isRiskPath: input.workspace.isRiskPath,
+        });
+        return input.workspace.isRiskPath
+          ? { decision: 'block', matched: true, reason: 'system path' }
+          : { decision: 'allow', matched: false, reason: 'outside sensitive prefix' };
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(observed).toEqual([
+      { normalizedPath: '/etc/passwd', isRiskPath: true },
+      { normalizedPath: '/etc-backup/passwd', isRiskPath: false },
+    ]);
+  });
+
+  it('keeps a path outside the default relative sandbox workspace outside', () => {
+    let observed: { normalizedPath: string | null; isRiskPath: boolean } | undefined;
+    const trace = makeTrace([
+      makeCase({ caseId: 'relative-escape', expectedDecision: 'allow', params: { path: '../secrets.json' } }),
+    ]);
+    const result = evaluateInRefinerSandbox('safe code', trace, {
+      evaluateCode: (input) => {
+        observed = {
+          normalizedPath: input.action.normalizedPath,
+          isRiskPath: input.workspace.isRiskPath,
+        };
+        return { decision: 'allow', matched: false, reason: 'path is outside the relative workspace' };
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(observed).toEqual({ normalizedPath: '../secrets.json', isRiskPath: false });
+  });
+
   it('returns success=true when all cases pass', () => {
     const trace = makeTrace([
       makeCase({ caseId: 'neg-1', kind: 'negative', expectedDecision: 'block' }),

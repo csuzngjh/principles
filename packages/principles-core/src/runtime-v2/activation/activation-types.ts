@@ -182,6 +182,8 @@ export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
 export interface ApprovalRecord {
   approvalId: string;
   artifactId: string;
+  /** Digest of the PI artifact snapshot present when the Owner approved it; absent for legacy rows. */
+  artifactDigest?: string;
   channel: InternalizationChannel;
   riskLevel: ActivationRiskLevel;
   status: ApprovalStatus;

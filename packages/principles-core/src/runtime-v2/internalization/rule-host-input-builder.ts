@@ -24,130 +24,177 @@ import type { CanonicalKind } from './rule-context-v2.js';
 
 // ── Path normalization (pure, no node:path) ─────────────────────────────────
 
+interface ParsedPathRoot {
+  kind: 'posix' | 'drive' | 'unc' | 'relative' | 'drive-relative';
+  root: string;
+  segments: string[];
+}
+
+function resolveSegments(path: string, preserveLeadingParents = false): string[] {
+  const result: string[] = [];
+  for (const segment of path.split('/').filter((value) => value.length > 0)) {
+    if (segment === '.') continue;
+    if (segment === '..') {
+      if (result.length > 0 && result[result.length - 1] !== '..') result.pop();
+      else if (preserveLeadingParents) result.push('..');
+    } else {
+      result.push(segment);
+    }
+  }
+  return result;
+}
+
+function parsePathRoot(path: string): ParsedPathRoot {
+  const drive = /^([a-zA-Z]):(?:\/|$)/.exec(path);
+  if (drive) {
+    return {
+      kind: 'drive',
+      root: `drive:${(drive[1] ?? '').toUpperCase()}`,
+      segments: resolveSegments(path.slice(2)),
+    };
+  }
+
+  if (/^[a-zA-Z]:/.test(path)) {
+    return { kind: 'drive-relative', root: path.slice(0, 2).toUpperCase(), segments: [] };
+  }
+
+  if (/^\/\/[^/]+(?:\/|$)/.test(path)) {
+    const rawSegments = path.slice(2).split('/').filter((segment) => segment.length > 0);
+    const server = rawSegments[0] ?? '';
+    const share = rawSegments[1] ?? '';
+    return {
+      kind: 'unc',
+      root: `unc:${server}/${share}`,
+      segments: resolveSegments(rawSegments.slice(2).join('/')),
+    };
+  }
+
+  if (path.startsWith('/')) {
+    return { kind: 'posix', root: 'posix:/', segments: resolveSegments(path) };
+  }
+
+  return { kind: 'relative', root: '', segments: resolveSegments(path, true) };
+}
+
+function isSegmentPrefix(path: string[], project: string[], caseInsensitive: boolean): boolean {
+  if (path.length < project.length) return false;
+  return project.every((segment, index) => {
+    const candidate = path[index] ?? '';
+    return caseInsensitive
+      ? candidate.toLowerCase() === segment.toLowerCase()
+      : candidate === segment;
+  });
+}
+
+function relativeSegments(from: string[], to: string[], caseInsensitive: boolean): string {
+  let commonLength = 0;
+  while (commonLength < from.length && commonLength < to.length) {
+    const left = from[commonLength] ?? '';
+    const right = to[commonLength] ?? '';
+    const equal = caseInsensitive
+      ? left.toLowerCase() === right.toLowerCase()
+      : left === right;
+    if (!equal) break;
+    commonLength++;
+  }
+  const parts = [
+    ...Array.from({ length: from.length - commonLength }, () => '..'),
+    ...to.slice(commonLength),
+  ];
+  return parts.join('/') || '.';
+}
+
+function renderUnc(path: ParsedPathRoot): string {
+  const [server, share] = path.root.slice('unc:'.length).split('/');
+  const tail = path.segments.join('/');
+  return `//${server ?? ''}/${share ?? ''}${tail ? `/${tail}` : ''}`;
+}
+
+function normalizeAbsoluteOrRelative(
+  file: ParsedPathRoot,
+  project: ParsedPathRoot,
+  originalFile: string,
+): string {
+  if (file.kind === 'drive-relative') return originalFile;
+  if (file.kind === 'unc' && file.root.endsWith('/')) return originalFile;
+
+  if (file.kind !== 'relative') {
+    const sameRoot = file.kind === project.kind && (
+      file.kind === 'unc'
+        ? file.root.toLowerCase() === project.root.toLowerCase()
+        : file.root === project.root
+    );
+    if (!sameRoot) return file.kind === 'unc' ? renderUnc(file) : originalFile;
+    if (!isSegmentPrefix(file.segments, project.segments, file.kind === 'drive' || file.kind === 'unc')) {
+      return file.kind === 'unc' ? renderUnc(file) : originalFile;
+    }
+    return file.segments.slice(project.segments.length).join('/') || '.';
+  }
+
+  const resolved = [...project.segments];
+  for (const segment of originalFile.split('/').filter((value) => value.length > 0)) {
+    if (segment === '.') continue;
+    if (segment === '..') {
+      if (resolved.length > 0 && resolved[resolved.length - 1] !== '..') resolved.pop();
+      else if (project.kind === 'relative') resolved.push('..');
+    } else {
+      resolved.push(segment);
+    }
+  }
+
+  const caseInsensitive = project.kind === 'drive' || project.kind === 'unc';
+  if (isSegmentPrefix(resolved, project.segments, caseInsensitive)) {
+    return resolved.slice(project.segments.length).join('/') || '.';
+  }
+
+  return relativeSegments(project.segments, resolved, caseInsensitive);
+}
+
 /**
  * Normalize a file path to a project-relative POSIX-style path.
  *
  * Returns '' for empty/null/undefined input.
- * Returns the original path (with separators normalized to /) if the path
- * escapes the project directory (starts with ../ after relativization).
+ * Returns the normalized original path when it cannot be proven to belong to
+ * the project directory. This is a lexical check only; it does not resolve
+ * symlinks or other filesystem aliases.
  *
  * This function is deterministic — the same inputs produce the same output
  * regardless of the host platform.
  */
-export function normalizePathPure(
-  filePath: string | null | undefined,
-  projectDir: string,
-): string {
+export function normalizePathPure(filePath: string | null | undefined, projectDir: string): string {
   if (!filePath || typeof filePath !== 'string') return '';
 
-  // Normalize separators to POSIX
-  const file = filePath.replace(/\\/g, '/');
-  const project = projectDir.replace(/\\/g, '/');
+  const normalizedFile = filePath.replace(/\\/g, '/');
+  const normalizedProject = projectDir.replace(/\\/g, '/');
 
-  // Detect Windows drive letters (e.g. D:/path)
-  const fileHasDrive = file.length >= 2 && file[1] === ':';
-  const projectHasDrive = project.length >= 2 && project[1] === ':';
+  // Synthetic paths are labels, not filesystem paths.
+  if (normalizedFile.startsWith('<tool:') && normalizedFile.endsWith('>')) return normalizedFile;
 
-  // If file has drive but project doesn't, convert file to WSL-style path
-  // (D:/path -> /mnt/d/path) so both are in the same coordinate system.
-  let fileNormalized = file;
-  if (fileHasDrive && !projectHasDrive) {
-    fileNormalized = `/mnt/${file.charAt(0).toLowerCase()}${file.slice(2)}`;
+  let fileRoot = parsePathRoot(normalizedFile);
+  const projectRoot = parsePathRoot(normalizedProject);
+
+  // Preserve the established Windows-to-WSL mapping when only the file path
+  // has a drive root. It remains external unless the POSIX workspace is under
+  // the corresponding /mnt/<drive> path.
+  if (fileRoot.kind === 'drive' && projectRoot.kind !== 'drive' && projectRoot.kind !== 'unc') {
+    const driveLetter = fileRoot.root.slice(-1).toLowerCase();
+    const wslPath = `/mnt/${driveLetter}/${fileRoot.segments.join('/')}`;
+    fileRoot = parsePathRoot(wslPath);
+    return normalizeAbsoluteOrRelative(fileRoot, projectRoot, wslPath);
   }
 
-  // Strip drive letter prefix for segment-based comparison
-  const fileBody = fileHasDrive && projectHasDrive
-    ? fileNormalized.slice(2)
-    : fileNormalized;
-  const projectBody = projectHasDrive
-    ? project.slice(2)
-    : project;
-
-  const fileIsAbsolute = fileBody.startsWith('/');
-  const projectIsAbsolute = projectBody.startsWith('/');
-
-  if (fileIsAbsolute && projectIsAbsolute) {
-    // Both absolute — compute relative path
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define
-    const rel = posixRelative(projectBody, fileBody);
-    if (rel.startsWith('../')) {
-      return fileNormalized;
-    }
-    return rel;
-  }
-
-  if (!fileIsAbsolute) {
-    // File is relative — join with project body, then compute relative
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define
-    const joined = posixJoin(projectBody, fileBody);
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define
-    const rel = posixRelative(projectBody, joined);
-    if (rel.startsWith('../')) {
-      return fileNormalized;
-    }
-    return rel;
-  }
-
-  // File is absolute but project is not (or vice versa) — can't relativize
-  return fileNormalized;
+  return normalizeAbsoluteOrRelative(fileRoot, projectRoot, normalizedFile);
 }
 
 /**
- * Compute the relative path from `from` to `to` using POSIX semantics.
- * Both inputs must use / as separator.
+ * The existing RuleCode risk fact for well-known POSIX system configuration
+ * paths. The input must be the shared builder's normalizedPath so sandbox and
+ * live evaluation classify the same action snapshot. This is lexical only.
  */
-function posixRelative(from: string, to: string): string {
-  const fromSegs = from.split('/').filter((s) => s.length > 0);
-  const toSegs = to.split('/').filter((s) => s.length > 0);
-
-  // Find common prefix length
-  let commonLen = 0;
-  while (
-    commonLen < fromSegs.length &&
-    commonLen < toSegs.length &&
-    fromSegs[commonLen] === toSegs[commonLen]
-  ) {
-    commonLen++;
-  }
-
-  const upCount = fromSegs.length - commonLen;
-  const downSegs = toSegs.slice(commonLen);
-
-  const parts: string[] = [];
-  for (let i = 0; i < upCount; i++) {
-    parts.push('..');
-  }
-  parts.push(...downSegs);
-
-  return parts.length === 0 ? '.' : parts.join('/');
-}
-
-/**
- * Join a base path and a relative path using POSIX semantics.
- * Resolves . and .. segments. The result always starts with /.
- */
-function posixJoin(base: string, rel: string): string {
-  const baseSegs = base.split('/').filter((s) => s.length > 0);
-  const relSegs = rel.split('/').filter((s) => s.length > 0);
-  const result: string[] = [];
-
-  for (const seg of baseSegs) {
-    if (seg === '..') {
-      if (result.length > 0) result.pop();
-    } else if (seg !== '.') {
-      result.push(seg);
-    }
-  }
-
-  for (const seg of relSegs) {
-    if (seg === '..') {
-      if (result.length > 0) result.pop();
-    } else if (seg !== '.') {
-      result.push(seg);
-    }
-  }
-
-  return '/' + result.join('/');
+export function isSensitiveSystemPath(normalizedPath: string | null | undefined): boolean {
+  if (typeof normalizedPath !== 'string' || normalizedPath.length === 0) return false;
+  const parsed = parsePathRoot(normalizedPath.replace(/\\/g, '/'));
+  return parsed.kind === 'posix' && parsed.segments[0]?.toLowerCase() === 'etc';
 }
 
 // ── File path extraction from tool params ────────────────────────────────────
@@ -170,6 +217,45 @@ export interface ExtractFilePathOptions {
   canonicalKind?: CanonicalKind;
 }
 
+interface ExtractedFilePathInput {
+  value: string | null;
+  /** False only when the legacy extractor returns a whole command, not a path. */
+  isPath: boolean;
+}
+
+function extractFilePathInput(
+  params: Record<string, unknown>,
+  options: ExtractFilePathOptions,
+): ExtractedFilePathInput {
+  // 1. Direct path-like params
+  const directPath =
+    params.file_path || params.path || params.file || params.target;
+  if (typeof directPath === 'string' && directPath.length > 0) {
+    return { value: directPath, isPath: true };
+  }
+
+  // 2. Bash command mutation regex
+  if (options.isBashTool) {
+    const command = String(params.command || params.args || '');
+    if (command) {
+      const mutationMatch =
+        /(?:>|>>|sed\s+-i|rm|mv|mkdir|touch|cp)\s+(?:-[a-zA-Z]+\s+)*([^\s;&|<>]+)/.exec(command);
+      if (mutationMatch && mutationMatch[1]) {
+        return { value: mutationMatch[1], isPath: true };
+      }
+      // Bash command without a clear file target — return the full command
+      return { value: command, isPath: false };
+    }
+  }
+
+  // 3. Synthetic path for pathless write tools
+  if (options.isWriteTool && options.toolName) {
+    return { value: `<tool:${options.toolName}>`, isPath: true };
+  }
+
+  return { value: null, isPath: true };
+}
+
 /**
  * Extract the file path from tool call params, using the same heuristic
  * as the production OpenClaw Gate (gate.ts).
@@ -185,33 +271,7 @@ export function extractFilePathFromParams(
   params: Record<string, unknown>,
   options: ExtractFilePathOptions = {},
 ): string | null {
-  // 1. Direct path-like params
-  const directPath =
-    params.file_path || params.path || params.file || params.target;
-  if (typeof directPath === 'string' && directPath.length > 0) {
-    return directPath;
-  }
-
-  // 2. Bash command mutation regex
-  if (options.isBashTool) {
-    const command = String(params.command || params.args || '');
-    if (command) {
-      const mutationMatch =
-        /(?:>|>>|sed\s+-i|rm|mv|mkdir|touch|cp)\s+(?:-[a-zA-Z]+\s+)*([^\s;&|<>]+)/.exec(command);
-      if (mutationMatch && mutationMatch[1]) {
-        return mutationMatch[1];
-      }
-      // Bash command without a clear file target — return the full command
-      return command;
-    }
-  }
-
-  // 3. Synthetic path for pathless write tools
-  if (options.isWriteTool && options.toolName) {
-    return `<tool:${options.toolName}>`;
-  }
-
-  return null;
+  return extractFilePathInput(params, options).value;
 }
 
 // ── Action snapshot builder ──────────────────────────────────────────────────
@@ -259,8 +319,10 @@ export function buildRuleHostAction(
   options: BuildRuleHostActionOptions = {},
 ): RuleHostInput['action'] {
   const effectiveOptions = withDerivedHints(options);
-  const filePath = extractFilePathFromParams(params, { ...effectiveOptions, toolName });
-  const normalizedPath = normalizePathPure(filePath, projectDir);
+  const extractedPath = extractFilePathInput(params, { ...effectiveOptions, toolName });
+  const normalizedPath = extractedPath.isPath
+    ? normalizePathPure(extractedPath.value, projectDir)
+    : extractedPath.value;
   return {
     toolName,
     normalizedPath,

@@ -39,11 +39,7 @@ const HOST_MAPPINGS: readonly ToolSemanticMappingV1[] = [
 ];
 
 /**
- * A realistic write-after-read guard that satisfies both the fixture's golden
- * cases and the runner's 5 auto-generated v2 adversarial templates:
- * risk-path writes always block (v1 action check dominates); otherwise a
- * write is allowed only with prior-read evidence or an explicitly benign
- * context posture (unavailable/truncated/unknown fail open).
+ * A rule grounded in the fixture's Owner-labelled read-before-write pair.
  * Registry-sensitive: it keys off action.canonicalKind — the field the host
  * tool registry injects into replay inputs.
  */
@@ -55,9 +51,6 @@ const PASSING_CODE = [
   '  const p = typeof params.path === "string" ? params.path : "";',
   '  if (kind !== "write") {',
   '    return { decision: "allow", matched: false, reason: "not a write" };',
-  '  }',
-  '  if (p.indexOf("/etc/") === 0) {',
-  '    return { decision: "block", matched: true, reason: "risk path write" };',
   '  }',
   '  const ctx = input && input.context ? input.context : null;',
   '  const facts = ctx && ctx.facts ? ctx.facts : {};',
@@ -78,15 +71,28 @@ const REPLAY_FAILING_CODE = [
   '}',
 ].join('\n');
 
-const GOLDEN_CASES = [
-  { caseId: 'c-neg', kind: 'negative', toolName: 'write_file', params: { path: '/etc/passwd' }, expectedDecision: 'block' },
-  { caseId: 'c-pos', kind: 'positive', toolName: 'write_file', params: { path: '/project/src/safe.ts' }, expectedDecision: 'allow' },
+const OWNER_CASE_CONTEXT = {
+  version: 2,
+  history: { status: 'available', truncated: false, calls: [] },
+  facts: { priorReadOfTarget: 'no', readCount: 0, writeCount: 0, uniqueWritePathCount: 0, sameActionBlockCount: null },
+};
+const OWNER_GOLDEN_CASES = [
+  { caseId: 'owner-unread-write', kind: 'negative', toolName: 'write_file', params: { path: '/workspace/right.ts' }, expectedDecision: 'block', ruleContext: OWNER_CASE_CONTEXT },
+  { caseId: 'owner-read-write', kind: 'positive', toolName: 'write_file', params: { path: '/workspace/right.ts' }, expectedDecision: 'allow', ruleContext: {
+    ...OWNER_CASE_CONTEXT,
+    facts: { ...OWNER_CASE_CONTEXT.facts, priorReadOfTarget: 'yes', readCount: 1 },
+  } },
 ];
 
 function codeBearingArtificerContent(implementationCode: string): string {
   return JSON.stringify({
     implementationCode,
-    goldenTraceCases: GOLDEN_CASES,
+    requiresContextVersion: 2,
+    evidenceRefs: ['owner-pack://run-once-parity/read-before-write'],
+    goldenTraceCases: OWNER_GOLDEN_CASES,
+    // Persisted by the system from the restored Owner pack; never model output.
+    ownerGoldenTraceCases: OWNER_GOLDEN_CASES,
+    ruleHostInputContract: { version: 1, contextVersion: 2, hostKinds: ['openclaw'] },
     affectedTools: ['write_file'],
   });
 }
@@ -170,7 +176,7 @@ function consumerCycleFormulaReplay(implementationCode: string): { passed: boole
   // directly (same documented pattern as evaluator-gate-authority fixtures).
   const result = gateDeps.evaluateInSandbox(implementationCode, {
     version: 1,
-    cases: GOLDEN_CASES.map((c) => ({ ...c })),
+    cases: OWNER_GOLDEN_CASES.map((c) => ({ ...c })),
     createdAt: '2026-09-04T00:00:00.000Z',
   } as never);
   return {
@@ -232,11 +238,8 @@ describe('run-once evaluator runtime parity (PRI-661)', () => {
     const adversarial = (artifact?.adversarialResult ?? null) as { passed?: boolean; failedCases?: Array<{ caseId?: string }> } | null;
     expect(adversarial).not.toBeNull();
     expect(adversarial?.passed).toBe(false);
-    // The auto-generated v2 templates expecting block are the ones a
-    // never-blocking rule fails (path-boundary + combination at minimum).
     const failedIds = (adversarial?.failedCases ?? []).map((c) => c.caseId);
-    expect(failedIds).toContain('v2-path-boundary');
-    expect(failedIds).toContain('v2-combination');
+    expect(failedIds).toContain('owner:owner-unread-write');
 
     // The deterministic verdict the approval chain would consume matches the
     // consumer-cycle formula for the same artifact content.

@@ -470,6 +470,11 @@ export class SqliteConnection {
       }
     }
 
+    // Codex V2 Owner-approval binding; NULL preserves pre-binding approvals as legacy.
+    if (!existingApprovalCols.has('artifact_digest')) {
+      db.exec('ALTER TABLE approvals ADD COLUMN artifact_digest TEXT');
+    }
+
     db.exec(`
       CREATE TABLE IF NOT EXISTS activations (
         activation_id TEXT NOT NULL,

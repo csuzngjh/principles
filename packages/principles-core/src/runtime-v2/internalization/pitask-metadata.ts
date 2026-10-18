@@ -611,6 +611,11 @@ export interface RunnerCompletionIntent {
    * 缺失 = governance_transition（旧行为）。解析层 effect 与本键同读。
    */
   readonly selectedEffect?: 'needs_human_review';
+  /** System-selected repair routing when an approved V2 artifact lacks the
+   * system-owned Owner-pack provenance required for independent replay.
+   * The semantic verdict remains `decision`; this marker only makes the
+   * existing bounded Artificer repair effect crash-resumable. */
+  readonly transitionOverrideReason?: 'owner_golden_trace_provenance_missing';
   /**
    * Round-2 R2: selectedEffect 的结构化原因码（evaluator_test_out_of_scope /
    * evaluator_repair_budget_exhausted / evaluator_repair_seed_failed）。
@@ -1099,6 +1104,12 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
       if (typeof r.effectReasonCode !== 'string' || r.effectReasonCode.trim() === '') return null;
       ({ effectReasonCode } = r);
     }
+    let transitionOverrideReason: 'owner_golden_trace_provenance_missing' | undefined;
+    const { transitionOverrideReason: rawTransitionOverrideReason } = r;
+    if (rawTransitionOverrideReason !== undefined) {
+      if (rawTransitionOverrideReason !== 'owner_golden_trace_provenance_missing') return null;
+      transitionOverrideReason = rawTransitionOverrideReason;
+    }
     completionIntent = {
       decision: r.decision as RunnerDecision,
       sourceRunId: r.sourceRunId,
@@ -1107,6 +1118,7 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
       revisionIteration,
       ...(effect !== undefined ? { effect } : {}),
       ...(effectReasonCode !== undefined ? { effectReasonCode } : {}),
+      ...(transitionOverrideReason !== undefined ? { transitionOverrideReason } : {}),
     };
   }
 

@@ -165,7 +165,7 @@ describe('PRI-438: Approval API nextAction and error handling', () => {
       expect(nextAction).toContain('artifact');
     });
 
-    it('includes structured reason in message', async () => {
+    it('reports a missing artifact snapshot as a pre-write refusal with actionable recovery', async () => {
       const approvalId = seedApproval('code_tool_hook', 'pending', {
         summary: 'Code tool hook approval (no artifact)',
         riskLevel: 'high',
@@ -182,6 +182,16 @@ describe('PRI-438: Approval API nextAction and error handling', () => {
       const message = getStringField(rec, 'message');
       expect(message).toBeDefined();
       expect(message).toContain('Reason:');
+      expect(message).toContain('current PI artifact snapshot is missing or malformed');
+      expect(getStringField(rec, 'nextAction')).toMatch(/inspect.*artifact.*approval status/i);
+
+      const db = sqliteConn.getDb();
+      const approval: unknown = db.prepare(
+        'SELECT status, artifact_digest FROM approvals WHERE approval_id = ?',
+      ).get(approvalId);
+      expect(approval).toEqual({ status: 'pending', artifact_digest: null });
+      expect(db.prepare('SELECT COUNT(*) AS count FROM activations WHERE artifact_id = ?')
+        .get(`artifact-${approvalId}`)).toEqual({ count: 0 });
     });
 
     it('indicates approval rollback status in message', async () => {
