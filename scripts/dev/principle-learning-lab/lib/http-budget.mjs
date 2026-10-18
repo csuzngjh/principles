@@ -421,7 +421,12 @@ export function createBudgetedFetch({ ledger, baseFetch, costGuard = null }) {
     );
     const startedAtMs = Date.now();
     try {
-      const response = await baseFetch(input, init);
+      // Redirects are intentionally not followed inside undici: an automatic
+      // redirect can create a second outbound request to an unapproved host
+      // without passing through this budget/cost guard. Surface the 3xx to the
+      // SDK instead; any follow-up must be a new guarded fetch.
+      const safeInit = { ...(init ?? {}), redirect: 'manual' };
+      const response = await baseFetch(input, safeInit);
       const { usage, usageSource } = await extractResponseUsage(response);
       ledger.record(grant, {
         url: String(input),

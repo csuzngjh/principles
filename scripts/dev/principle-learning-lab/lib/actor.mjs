@@ -122,6 +122,12 @@ export function verifyRealRunAuthorization({ authorization, prereg, dataset, ada
         'OD-2: totalCostCapUsd must be >= perRunCostCapUsd');
       check(typeof od2.stopCondition === 'string' && od2.stopCondition.length > 0,
         'OD-2: stopCondition (abort threshold description) missing');
+      // All three request scopes are mandatory hard limits for a real run.
+      // A null cap turns a ledger scope into record-only mode and is forbidden.
+      for (const field of ['httpRequestsPerOpportunity', 'httpRequestsPerArm', 'httpRequestsPerStudy']) {
+        check(Number.isSafeInteger(od2[field]) && od2[field] > 0,
+          'OD-2: ' + field + ' must be a positive safe integer');
+      }
       // A non-empty URL/string is not evidence. The trusted resolver must
       // independently resolve and verify the cited official pricing schedule.
       check(typeof od2.costBasisRef === 'string' && od2.costBasisRef.trim().length > 0,
@@ -170,11 +176,14 @@ export function verifyRealRunAuthorization({ authorization, prereg, dataset, ada
     const od3 = authorization.od3;
     check(od3 !== null && typeof od3 === 'object', 'OD-3: authorization.od3 record missing');
     if (od3 && typeof od3 === 'object') {
-      check(typeof od3.seeds === 'number' && Number.isInteger(od3.seeds) && od3.seeds >= 1,
-        'OD-3: seeds must be a positive integer');
+      check(Number.isSafeInteger(od3.seeds) && od3.seeds >= 1,
+        'OD-3: seeds must be a positive safe integer');
       check(od3.frozen === true, 'OD-3: od3.frozen must be literal true');
-      check(Array.isArray(od3.executionOrder) && od3.executionOrder.length > 0,
-        'OD-3: executionOrder missing');
+      const expectedExecutionOrder = Object.keys(dataset && dataset.histories ? dataset.histories : {});
+      check(Array.isArray(od3.executionOrder) &&
+        od3.executionOrder.length === expectedExecutionOrder.length &&
+        od3.executionOrder.every((armId, index) => armId === expectedExecutionOrder[index]),
+        'OD-3: executionOrder must exactly match dataset history order [' + expectedExecutionOrder.join(', ') + ']');
     }
 
     // Consistency — the adapter/budgets this gate would build must equal the

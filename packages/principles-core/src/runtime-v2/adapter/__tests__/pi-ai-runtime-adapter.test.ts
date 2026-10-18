@@ -339,7 +339,12 @@ describe('PiAiRuntimeAdapter', () => {
       const [, , options] = mockComplete.mock.calls[0] as [unknown, unknown, Record<string, unknown>];
       expect(options.apiKey).toBe('test-key-123');
       expect(options.maxRetries).toBe(0);
-      expect(options.timeoutMs).toBe(90_000);
+      // Effective timeout is computed against an absolute deadline, so a few
+      // milliseconds can elapse before completeSimple receives the option.
+      // Keep the assertion on input-over-config precedence without assuming a
+      // zero-duration test execution.
+      expect(options.timeoutMs).toBeGreaterThan(80_000);
+      expect(options.timeoutMs).toBeLessThanOrEqual(90_000);
     });
 
     it('returns RunHandle with runId, runtimeKind="pi-ai", and valid ISO startedAt', async () => {
