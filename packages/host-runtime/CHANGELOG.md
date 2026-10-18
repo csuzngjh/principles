@@ -1,5 +1,13 @@
 # @principles/host-runtime
 
+## 0.10.3
+
+### Patch Changes
+
+- 1a127e2: 修复 RuleCode 新生成契约与路径事实，统一原则范围内的语义验收，并为经过逐规则复验的 Codex V2 规则接通运行上下文。
+- Updated dependencies [1a127e2]
+  - @principles/core@1.293.5
+
 ## 0.10.2
 
 ### Patch Changes
