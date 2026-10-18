@@ -209,6 +209,18 @@ export async function handleApprovalsRoute(
       const message = getErrorMessage(err);
       if (message === 'Request body too large') {
         sendError(res, 413, 'payload_too_large', message);
+      } else if (message.includes('current PI artifact snapshot is missing or malformed')) {
+        // The approval store checks the artifact snapshot before writing the
+        // Owner decision so it can bind the approval digest atomically. Keep
+        // this expected pre-write refusal actionable instead of exposing it
+        // as an opaque server error.
+        sendError(
+          res,
+          500,
+          'approve_error',
+          `Approval could not be completed. Reason: ${message}`,
+          { nextAction: 'Inspect the referenced PI artifact and current approval status; restore or edit the artifact if needed, then retry.' },
+        );
       } else {
         sendError(res, 500, 'approve_error', message);
       }
