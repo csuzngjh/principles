@@ -9,17 +9,20 @@
  * never fired for those updates, so the running Console kept serving the
  * previous build indefinitely. The marker also flips while components are
  * still being laid (before the journal `staged` transition), which is the
- * race PRI-1012 had to absorb with a bounded entry wait, and it does not move
- * back when a transaction rolls over, so a rolled-back install stayed a
- * restart target.
+ * race PRI-1012 had to absorb with a bounded entry wait, and a failed
+ * transaction puts the old extension tree back (`restoreBackup` → journal
+ * `rolled_back`), so a marker-driven restart can point at bytes that no longer
+ * exist.
  *
- * `~/.pd/active.json` is the installation authority: written at activation,
- * after the component tree is complete, and flipped on every release and on
- * every rollback. Its `releaseId` is the release identity — an opaque sha256
- * digest over the identity inputs (product version, source commit, asset
- * identities, minimum bootstrap version; see `release-identity.ts` in the
- * installer), never a string this module may parse or compare piece by piece.
- * `generation` is the monotonic activation counter.
+ * `~/.pd/active.json` is the installation authority. Its only production writer
+ * is the installer's commit point, which runs after the transaction journal
+ * reaches `confirmed` — so the record names the release that is actually
+ * deployed, and a transaction that fails or rolls back never replaces it.
+ * `generation` is the monotonic activation counter and never moves backwards.
+ * `releaseId` is the release identity — an opaque sha256 digest over the
+ * identity inputs (product version, source commit, asset identities, minimum
+ * bootstrap version; see `release-identity.ts` in the installer), never a
+ * string this module may parse or compare piece by piece.
  *
  * This module deliberately validates only what Companion must be able to trust
  * about a record: that it is a version-1 object carrying a complete identity
