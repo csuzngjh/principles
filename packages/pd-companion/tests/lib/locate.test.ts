@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as path from 'node:path';
 import {
   buildConsoleOpenArgs,
+  resolveActiveRecordPath,
   resolveExtensionDir,
   resolveInstalledRuntime,
   resolvePdCliEntry,
@@ -28,6 +29,17 @@ describe('resolvePdCliEntry / resolvePluginPackageJson', () => {
   it('points at pd-cli/dist/index.js and extension package.json', () => {
     expect(resolvePdCliEntry('/ext')).toBe(path.join('/ext', 'pd-cli', 'dist', 'index.js'));
     expect(resolvePluginPackageJson('/ext')).toBe(path.join('/ext', 'package.json'));
+  });
+});
+
+describe('resolveActiveRecordPath (PRI-1016)', () => {
+  it('is ~/.pd/active.json — the same file the update chain writes at activation', () => {
+    const home = path.resolve('C:\\Users\\alice');
+    expect(resolveActiveRecordPath(home)).toBe(path.join(home, '.pd', 'active.json'));
+  });
+
+  it('normalizes a relative home instead of guessing a second location', () => {
+    expect(path.isAbsolute(resolveActiveRecordPath('.'))).toBe(true);
   });
 });
 

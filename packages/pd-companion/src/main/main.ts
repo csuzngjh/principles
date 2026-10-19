@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   buildConsoleOpenArgs,
+  resolveActiveRecordPath,
   resolveInstalledRuntime,
   resolvePdCliEntry,
   resolvePluginPackageJson,
@@ -34,6 +35,7 @@ import { buildConsoleTokenStatus, isSameConsoleOrigin, type ConsoleTokenStatus }
 import { entryFileVerdict, errnoCode } from '../lib/entry-verdict.js';
 import { ConsoleSupervisor, ENTRY_PENDING_REASON_PREFIX } from '../lib/supervisor.js';
 import { judgeVersionChangeLaunch, killManagedServerAndWait, ownedManagedHandle, realProcessOps, type ManagedServerHandle } from '../lib/version-handover.js';
+import { judgeReleaseWatch, readActiveRelease, type ActiveReleaseRead, type ReleaseIdentity } from '../lib/release-watch.js';
 import { buildDegradedPageHtml, buildDegradedWorkspacesTrayView, buildSyncUnavailableTrayView, describeDegraded, describeWorkspaceWorkerDegraded, describeWorkspaceSyncUnavailable } from '../lib/degraded.js';
 import {
   defaultCompanionState,
@@ -67,6 +69,8 @@ let stateFilePath = '';
 let logFilePath = '';
 let extDir: string | undefined;
 let installedPluginDir: string | undefined;
+/** `~/.pd/active.json` — the installation authority the version watch decides on (PRI-1016). */
+let activeRecordPath: string | undefined;
 let pollTimer: ReturnType<typeof setInterval> | undefined;
 let updateTimer: ReturnType<typeof setInterval> | undefined;
 let workspaceWorkerTimer: ReturnType<typeof setInterval> | undefined;
@@ -75,18 +79,36 @@ let restartRetryTimer: ReturnType<typeof setTimeout> | undefined;
 let quitting = false;
 let baselineRecorded = false;
 let consecutivePollFailures = 0;
-let serverStartedVersion: string | undefined;
-let currentPort: number | undefined;
 /**
- * The version marker the update chain flipped to. Set while a version_change
- * restart is in flight; a freshly spawned Console is only accepted as the new
- * version when the version it actually runs equals this, so `reused` or a
- * stale old process can never be mistaken for a completed upgrade (PRI-1012 P1).
- * Cleared when the hand-over reaches any conclusion (accepted, mismatched,
- * failed) or when an Owner stop cancels it — never at spawn time, or every
- * retry of the chain would launch ungated.
+ * The plugin component version the currently running Console was launched
+ * against. DIAGNOSTIC ONLY (logs, degraded detail) — it is a component axis
+ * and must never decide a restart; see `serverStartedRelease` (PRI-1016).
  */
-let pendingTargetVersion: string | undefined;
+let serverStartedVersion: string | undefined;
+/**
+ * The installation authority (`~/.pd/active.json`) the currently running
+ * Console was launched against. The version watch and the hand-over gate
+ * decide on this identity, because it flips exactly once per applied release —
+ * including releases that change no component version — and it moves back when
+ * a transaction rolls over. Undefined means no attributable baseline: nothing
+ * is killed on a guess.
+ */
+let serverStartedRelease: ReleaseIdentity | undefined;
+let currentPort: number | undefined;
+/** The last authority-read failure reason already logged, so a broken record
+ *  is reported once per change instead of every 30s poll tick. */
+let lastAuthorityWatchReason: string | undefined;
+/**
+ * The release identity the update chain activated, captured while a
+ * version-change hand-over is in flight. A freshly spawned Console is only
+ * accepted as the new release when the installation authority it was launched
+ * from still reads this, so `reused` or a stale old process can never be
+ * mistaken for a completed upgrade (PRI-1012 P1). Cleared when the hand-over
+ * reaches any conclusion (accepted, mismatched, failed) or when an Owner stop
+ * cancels it — never at spawn time, or every retry of the chain would launch
+ * ungated.
+ */
+let pendingTargetRelease: ReleaseIdentity | undefined;
 /**
  * CLI children whose exit is EXPECTED (a version-change hand-over stopped
  * them). Their exit event must not burn the crash-restart budget or schedule a
@@ -227,7 +249,11 @@ function stopServer(): void {
   // stop likewise cancels an in-flight version-change hand-over — the next
   // launch is the Owner's, not the update chain's.
   clearRestartRetry();
-  pendingTargetVersion = undefined;
+  pendingTargetRelease = undefined;
+  // An Owner stop also drops the attribution baseline: the next launch is the
+  // Owner's, and a new Console must re-read which release it started on rather
+  // than let a stale baseline suppress (or trigger) the next hand-over.
+  serverStartedRelease = undefined;
   supervisor.markIntentionalStop();
   if (supervisor.ownsProcess()) {
     killSpawnedTree(cliChild);
@@ -262,9 +288,20 @@ function readInstalledVersion(): string | undefined {
   }
 }
 
+/**
+ * Read the installation authority for the current process decision. An
+ * unresolved path (no home) is reported with its own reason rather than
+ * silently reading nothing.
+ */
+function readActiveRecord(): ActiveReleaseRead {
+  if (activeRecordPath === undefined) return { ok: false, reason: 'active_record_path_unresolved' };
+  return readActiveRelease(activeRecordPath, fs);
+}
+
 function startSupervision(): void {
   const home = app.getPath('home');
   const paths = getInstallLayoutPaths(home);
+  activeRecordPath = resolveActiveRecordPath(home);
   let manifest: unknown;
   try {
     manifest = JSON.parse(fs.readFileSync(paths.manifest, 'utf8')) as unknown;
@@ -645,7 +682,7 @@ function clearRestartRetry(): void {
 }
 
 function spawnCli(): void {
-  // NOTE: pendingTargetVersion is deliberately NOT cleared here — a version
+  // NOTE: pendingTargetRelease is deliberately NOT cleared here — a version
   // hand-over re-enters this function through the retry ladder, and clearing
   // at the door would launch the new attempt ungated, letting a `reused` old
   // process pass as the upgraded one (PRI-1012 P1). The marker is cleared when
@@ -664,7 +701,7 @@ function spawnCli(): void {
     // of a healthy install. Wait it out (bounded) and log what was decided,
     // instead of degrading on the first stat failure with no trace.
     if (!entryCheck.transient) {
-      pendingTargetVersion = undefined;
+      pendingTargetRelease = undefined;
       supervisor.onSpawnError(undefined, entryCheck.detail);
       log('pd_cli_entry_rejected', { entry, detail: entryCheck.detail, state: supervisor.getState().kind });
       reflectSupervisorState();
@@ -806,7 +843,7 @@ function handleLaunchResult(parsed: ConsoleOpenResult): void {
         reason: `console_authentication_mode_mismatch: expected=${expectedMode}, actual=${parsed.authenticationMode ?? 'unverified'}`,
         nextAction: '停止现有 Console 后从 Companion 重试；如仍失败，请检查 PD_CONSOLE_TOKEN 配置。',
       });
-      pendingTargetVersion = undefined;
+      pendingTargetRelease = undefined;
       log('console_authentication_mode_mismatch', {
         expectedMode,
         actualMode: parsed.authenticationMode ?? 'unverified',
@@ -817,14 +854,18 @@ function handleLaunchResult(parsed: ConsoleOpenResult): void {
   }
   if (parsed.status === 'started') {
     serverStartedVersion = readInstalledVersion();
+    const record = readActiveRecord();
+    serverStartedRelease = record.ok ? record.identity : undefined;
+    if (!record.ok) log('release_baseline_unavailable', { stage: 'started', reason: record.reason });
     currentPort = parsed.port;
-    // PRI-1012 P1: the hand-over completes only when the process that just
-    // started was launched from the install the update chain flipped to. The
-    // verdict helper is the single authority for that decision.
-    const verdict = judgeVersionChangeLaunch(pendingTargetVersion, parsed, serverStartedVersion);
+    // PRI-1012 P1 + PRI-1016: the hand-over completes only when the process
+    // that just started was launched from the release the update chain
+    // activated. The gate compares installation-authority identities — a
+    // component version number cannot prove which release is live.
+    const verdict = judgeVersionChangeLaunch(pendingTargetRelease?.releaseId, parsed, record.ok ? record.identity.releaseId : undefined);
     if (verdict.action === 'reject_version_mismatch') {
       log('version_change_rejected', { expected: verdict.expected, got: verdict.got });
-      pendingTargetVersion = undefined;
+      pendingTargetRelease = undefined;
       supervisor.onLaunchFailure({
         reason: 'console_version_mismatch',
         nextAction: '从托盘菜单再点一次「重启控制台服务」；如反复失败请查看 Companion 日志。',
@@ -832,7 +873,7 @@ function handleLaunchResult(parsed: ConsoleOpenResult): void {
       reflectSupervisorState();
       return;
     }
-    pendingTargetVersion = undefined;
+    pendingTargetRelease = undefined;
     supervisor.onLaunchStarted({ url: parsed.url, port: parsed.port, serverPid: parsed.serverPid, startedVersion: serverStartedVersion });
     const after = supervisor.getState();
     log('console_started', {
@@ -849,19 +890,22 @@ function handleLaunchResult(parsed: ConsoleOpenResult): void {
     // new version. During a version_change hand-over keep waiting for the new
     // process instead of claiming the upgrade is done.
     currentPort = parsed.port;
-    const verdict = judgeVersionChangeLaunch(pendingTargetVersion, parsed, undefined);
+    const verdict = judgeVersionChangeLaunch(pendingTargetRelease?.releaseId, parsed, undefined);
     if (verdict.action === 'keep_waiting_stale_reused') {
-      log('version_change_reused_stale', { expected: pendingTargetVersion, port: verdict.port });
+      log('version_change_reused_stale', { expected: pendingTargetRelease?.releaseId, port: verdict.port });
       reflectSupervisorState();
       return;
     }
     serverStartedVersion = readInstalledVersion();
+    const record = readActiveRecord();
+    serverStartedRelease = record.ok ? record.identity : undefined;
+    if (!record.ok) log('release_baseline_unavailable', { stage: 'reused', reason: record.reason });
     supervisor.onLaunchReused(parsed.url, parsed.port);
     log('console_reused', { port: parsed.port, mode: 'attached' });
     void mainWindow?.loadURL(parsed.url).catch((err: unknown) => log('window_load_failed', { message: err instanceof Error ? err.message : String(err) }));
     startPolling();
   } else {
-    pendingTargetVersion = undefined;
+    pendingTargetRelease = undefined;
     supervisor.onLaunchFailure({ reason: parsed.reason ?? parsed.status, nextAction: parsed.nextAction });
     log('console_launch_failed', { status: parsed.status, reason: parsed.reason });
   }
@@ -1095,45 +1139,90 @@ async function pollTick(): Promise<void> {
     saveState();
     notifyApprovals(diff.notifyIds.length, snapshot.pendingCount);
   }
-  watchInstalledVersion();
+  watchInstalledRelease();
 }
 
-function watchInstalledVersion(): void {
+/**
+ * Hand the managed Console over to the release the update chain activated
+ * (PRI-1016). The decision reads `~/.pd/active.json` — the installation
+ * authority — not the plugin component version: a release can lay new
+ * console/core code without bumping that package, and the authority is also
+ * what moves back on a rollback. `release-watch.ts` owns the decision; this is
+ * the production wiring and the executor (the existing restart ladder).
+ */
+function watchInstalledRelease(): void {
   const s = supervisor.getState();
   if (s.kind !== 'running') return;
-  const version = readInstalledVersion();
-  if (version === undefined || serverStartedVersion === undefined || version === serverStartedVersion) return;
-  if (s.mode === 'managed') {
-    // npm-layer update applied from the console UI — stop the OLD server,
-    // confirm it has exited, then respawn the NEW version. The disk version
-    // marker alone is not proof a new process is running.
-    log('version_change_restart', { from: serverStartedVersion, to: version });
-    // Snapshot the OWNERSHIP evidence while the machine still says
-    // `running` — after onServerExit(null) the state is `restarting`, and a
-    // snapshot taken there returned no handle, silently skipped the kill and
-    // left the old Console on the port (the PRI-1012 P1 defect).
-    const handle = ownedManagedHandle(s, supervisor.ownsProcess(), cliChild?.pid);
-    const oldChild = cliChild;
-    const delay = supervisor.onServerExit(null);
-    if (delay === undefined) return;
-    pendingTargetVersion = version;
-    const stopOld = handle === undefined
-      ? Promise.resolve(false)
-      : killManagedServerAndConfirm(handle).then((confirmed) => {
-          log('version_change_old_server_stopped', { serverPid: handle.serverPid, confirmed });
-          return confirmed;
-        });
-    void stopOld.then(() => {
-      if (quitting) return;
-      const now = supervisor.getState();
-      // The state machine may have moved on (quit / crash-loop / manual stop);
-      // only reschedule when we are still waiting to restart.
-      if (now.kind !== 'restarting') return;
-      scheduleRestartRetry(delay, 'version_change');
-    });
-    if (oldChild !== undefined) expectedExitChildren.add(oldChild);
-  } else {
-    log('version_change_attached_no_action', { from: serverStartedVersion, to: version });
+  const decision = judgeReleaseWatch({
+    read: readActiveRecord(),
+    started: serverStartedRelease,
+    mode: s.mode,
+  });
+  switch (decision.action) {
+    case 'no_change':
+      lastAuthorityWatchReason = undefined;
+      return;
+    case 'authority_unavailable':
+      // Fail closed: no restart, and no silent fallback to the component
+      // marker. Report once per reason change, not every poll tick (rc-9).
+      if (decision.reason !== lastAuthorityWatchReason) {
+        lastAuthorityWatchReason = decision.reason;
+        log('release_watch_unavailable', { reason: decision.reason });
+      }
+      return;
+    case 'no_baseline':
+      if (lastAuthorityWatchReason !== 'no_baseline') {
+        lastAuthorityWatchReason = 'no_baseline';
+        log('release_watch_unavailable', { reason: 'no_baseline' });
+      }
+      return;
+    case 'attached_no_action':
+      log('version_change_attached_no_action', {
+        from: decision.from.releaseId,
+        to: decision.to.releaseId,
+        fromVersion: decision.from.productVersion,
+        toVersion: decision.to.productVersion,
+      });
+      return;
+    case 'restart': {
+      // npm-layer update applied from the console UI — stop the OLD server,
+      // confirm it has exited, then respawn the NEW release. The authority
+      // record alone is not proof a new process is running.
+      log('version_change_restart', {
+        from: decision.from.releaseId,
+        to: decision.to.releaseId,
+        fromGeneration: decision.from.generation,
+        toGeneration: decision.to.generation,
+        fromVersion: decision.from.productVersion,
+        toVersion: decision.to.productVersion,
+      });
+      lastAuthorityWatchReason = undefined;
+      // Snapshot the OWNERSHIP evidence while the machine still says
+      // `running` — after onServerExit(null) the state is `restarting`, and a
+      // snapshot taken there returned no handle, silently skipped the kill and
+      // left the old Console on the port (the PRI-1012 P1 defect).
+      const handle = ownedManagedHandle(s, supervisor.ownsProcess(), cliChild?.pid);
+      const oldChild = cliChild;
+      const delay = supervisor.onServerExit(null);
+      if (delay === undefined) return;
+      pendingTargetRelease = decision.to;
+      const stopOld = handle === undefined
+        ? Promise.resolve(false)
+        : killManagedServerAndConfirm(handle).then((confirmed) => {
+            log('version_change_old_server_stopped', { serverPid: handle.serverPid, confirmed });
+            return confirmed;
+          });
+      void stopOld.then(() => {
+        if (quitting) return;
+        const now = supervisor.getState();
+        // The state machine may have moved on (quit / crash-loop / manual stop);
+        // only reschedule when we are still waiting to restart.
+        if (now.kind !== 'restarting') return;
+        scheduleRestartRetry(delay, 'version_change');
+      });
+      if (oldChild !== undefined) expectedExitChildren.add(oldChild);
+      return;
+    }
   }
 }
 
