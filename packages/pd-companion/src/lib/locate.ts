@@ -80,9 +80,23 @@ export function resolvePdCliEntry(extDir: string): string {
   return path.join(extDir, 'pd-cli', 'dist', 'index.js');
 }
 
-/** Plugin package.json inside the extension dir — the installed-version source. */
+/**
+ * Plugin package.json inside the extension dir — the installed component
+ * version. Diagnostic display only since PRI-1016: it is on the component axis
+ * and a signed release can change it not at all, so it never decides anything.
+ */
 export function resolvePluginPackageJson(extDir: string): string {
   return path.join(extDir, 'package.json');
+}
+
+/**
+ * `~/.pd/active.json` — the installation authority, written at activation by
+ * the update chain (`resolvePdHomePaths.activeRecordPath` in
+ * create-principles-disciple). Derived from the shared layout's `pdDir` so this
+ * app cannot disagree with the rest of the install tree.
+ */
+export function resolveActiveRecordPath(homeDir: string): string {
+  return path.join(getInstallLayoutPaths(homeDir).pdDir, 'active.json');
 }
 
 /**

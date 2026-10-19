@@ -1,7 +1,8 @@
 /**
  * Version-change handover for a Companion-owned managed Console (PRI-1012 P1).
  *
- * When the installed version marker flips while a managed Console is running,
+ * When the installed release changes (`~/.pd/active.json` flips at activation,
+ * PRI-1016) while a managed Console is running,
  * the old process must be explicitly stopped and its exit CONFIRMED before the
  * new entry is spawned. Two field-verified hazards motivated this module:
  *
@@ -99,22 +100,26 @@ export type HandoverLaunchVerdict =
  * every result is handled normally; during a hand-over a `reused` result is
  * the OLD process still holding the port and only keeps the wait going, a
  * `started` result completes the switch only when the install the new process
- * was launched from still reads the target version, and everything else is a
+ * was launched from still reads the target release, and everything else is a
  * terminal failure that must clear the pending marker (rc-9 — the failure is
  * reported, not silently retried into a false success).
+ *
+ * Both identity arguments are `~/.pd/active.json` release ids (PRI-1016). A
+ * component package version must never be passed here: it says which package
+ * version is on disk, not which release the update chain activated.
  */
 export function judgeVersionChangeLaunch(
-  pendingTargetVersion: string | undefined,
+  pendingTargetReleaseId: string | undefined,
   result: { status: 'started' | 'reused' | 'failed' | 'refused'; port: number },
-  installedVersion: string | undefined,
+  activeReleaseId: string | undefined,
 ): HandoverLaunchVerdict {
-  if (pendingTargetVersion === undefined) {
+  if (pendingTargetReleaseId === undefined) {
     return result.status === 'started' || result.status === 'reused' ? { action: 'accept' } : { action: 'fail_terminal' };
   }
   if (result.status === 'reused') return { action: 'keep_waiting_stale_reused', port: result.port };
   if (result.status !== 'started') return { action: 'fail_terminal' };
-  if (installedVersion !== pendingTargetVersion) {
-    return { action: 'reject_version_mismatch', expected: pendingTargetVersion, got: installedVersion };
+  if (activeReleaseId !== pendingTargetReleaseId) {
+    return { action: 'reject_version_mismatch', expected: pendingTargetReleaseId, got: activeReleaseId };
   }
   return { action: 'accept_pending_new_version' };
 }
