@@ -39,7 +39,7 @@ import {
   findWorkbuddyPluginPayload,
 } from '../src/installers/workbuddy-host-installer.js';
 import { getHostInstallers, isHostTarget, WorkBuddyHostInstaller as WiredInstaller } from '../src/installers/index.js';
-import { computeEffectiveFlags, computeFeatureFlagsFromConfig, DEFAULT_FEATURE_FLAGS } from '@principles/core/runtime-v2';
+import { computeEffectiveFlags, computeFeatureFlagsFromConfig, DEFAULT_FEATURE_FLAGS, getDefaultPdConfig } from '@principles/core/runtime-v2';
 import { loadPdConfigForPlugin } from '@principles/host-runtime';
 
 function parseYaml(text: string): Record<string, unknown> {
@@ -284,8 +284,11 @@ describe('WorkBuddyHostInstaller.install — engine registration path', () => {
     expect(fs.existsSync(governanceConfigPath)).toBe(true);
     const governanceConfig = parseYaml(fs.readFileSync(governanceConfigPath, 'utf8'));
     expect(governanceConfig.version).toBe(1);
-    expect(governanceConfig.features).toEqual({}); // no override — OD-03
-    expect(created.installer.detectDetails().flagOverride).toBeNull();
+    expect(governanceConfig.features).toMatchObject({
+      'host.workbuddy': { enabled: true, category: 'quiet' },
+      workbuddy_live_keyword_pain: { enabled: true, category: 'quiet' },
+    });
+    expect(created.installer.detectDetails().flagOverride).toBe(true);
     expect(created.installer.detectDetails().governanceInitialized).toBe(true);
   });
 
@@ -320,6 +323,27 @@ describe('WorkBuddyHostInstaller.install — engine registration path', () => {
     // install-layout's merge resolves canonical absolute paths (win32 separators).
     expect((manifest.workspaces as string[])).toContain(elsewhereWorkspace);
     expect((manifest.workspaces as string[])).toContain(path.join(created.home, '.workbuddy', 'pd-workspace'));
+  });
+
+  it('never enables keyword detection when an existing governance config was present', async () => {
+    const created = lab();
+    const configPath = path.join(created.home, '.workbuddy', 'pd-workspace', '.pd', 'config.yaml');
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    const original = getDefaultPdConfig();
+    // Existing opt-outs are protected from install defaults, even if the
+    // WorkBuddy plugin is not yet registered on this machine.
+    original.features['host.workbuddy']!.enabled = false;
+    original.features.workbuddy_live_keyword_pain!.enabled = false;
+    fs.writeFileSync(configPath, JSON.stringify(original));
+    const originalBytes = fs.readFileSync(configPath, 'utf8');
+    const result = await created.installer.install(installCtx(created));
+    expect(result.success, result.reason).toBe(true);
+    expect(fs.readFileSync(configPath, 'utf8')).toBe(originalBytes);
+    const loaded = loadPdConfigForPlugin(path.join(created.home, '.workbuddy', 'pd-workspace'));
+    expect(loaded.ok).toBe(true);
+    const flags = computeFeatureFlagsFromConfig(loaded.effective).flags;
+    expect(flags['host.workbuddy']?.enabled).toBe(false);
+    expect(flags.workbuddy_live_keyword_pain?.enabled).toBe(false);
   });
 
   it('is idempotent: reinstall preserves state and reports preserved', async () => {
@@ -497,14 +521,14 @@ describe('writeHostJsonFileProtected — backup + atomic replace discipline', ()
 // ─── enable / disable (OD-03 explicit opt-in) ────────────────────────────────
 
 describe('WorkBuddyHostInstaller — explicit governance enable/disable', () => {
-  it('install leaves host.workbuddy OFF under the core production flag resolver', async () => {
+  it('fresh install explicitly enables host while registry remains OFF for existing users', async () => {
     const created = lab();
     await created.installer.install(installCtx(created));
 
     // No explicit override → registry default (quiet, false) via computeEffectiveFlags.
     const effective = computeEffectiveFlags({}, DEFAULT_FEATURE_FLAGS, 'memory://installed-config');
     expect(effective.flags['host.workbuddy'].enabled).toBe(false);
-    expect(created.installer.detectDetails().flagOverride).toBeNull();
+    expect(created.installer.detectDetails().flagOverride).toBe(true);
   });
 
   it('describes the exact target config BEFORE any write (informed consent)', () => {

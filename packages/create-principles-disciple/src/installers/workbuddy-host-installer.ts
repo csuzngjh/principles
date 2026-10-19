@@ -17,7 +17,7 @@
  *   result always reports WHICH mode ran (rc-9 — never a silent degradation).
  *
  * Install ≠ enable (OD-03): install registers the plugin but NEVER flips the
- * host.workbuddy feature flag (quiet, default OFF). Explicit enable is a
+ * existing host.workbuddy feature flag (quiet, registry default OFF). Explicit enable remains a
  * separate, user-visible step (enableGovernance below).
  *
  * Governance workspace (OD-07, frozen by probe P06): install explicitly
@@ -589,6 +589,43 @@ export type FlagOverrideResult = { ok: true; configPath: string; enabled: boolea
  * keys preserved), creating a loader-valid config from the installer template
  * when absent. Atomic write; round-trip verified.
  */
+
+/**
+ * On genuinely new WorkBuddy installations only, persist both gates in the
+ * newly created governance workspace. Never change registry defaults: old
+ * workspaces with sparse flags must NOT silently enable on upgrade.
+ * Both entries are validated and atomically committed in one file write.
+ */
+function enableFreshWorkbuddyKeywordPain(governanceDir: string): FlagOverrideResult {
+  const configPath = path.join(governanceDir, '.pd', 'config.yaml');
+  let raw: unknown;
+  try { raw = yaml.load(readFileSync(configPath, 'utf-8')); }
+  catch { return { ok: false, reason: 'fresh_workbuddy_config_unreadable', nextAction: 'Repair governance config and retry.' }; }
+  if (!isRecord(raw) || !isRecord(raw.features)) {
+    return { ok: false, reason: 'fresh_workbuddy_features_invalid', nextAction: 'Governance config needs a features mapping.' };
+  }
+  const oldHost = raw.features['host.workbuddy'];
+  const oldKeyword = raw.features.workbuddy_live_keyword_pain;
+  const features = {
+    ...raw.features,
+    'host.workbuddy': { ...(isRecord(oldHost) ? oldHost : {}), enabled: true, category: WORKBUDDY_FLAG_CATEGORY },
+    workbuddy_live_keyword_pain: { ...(isRecord(oldKeyword) ? oldKeyword : {}), enabled: true, category: WORKBUDDY_FLAG_CATEGORY },
+  };
+  const next = yaml.dump({ ...raw, features }, { lineWidth: -1, noRefs: true });
+  try {
+    const verify: unknown = yaml.load(next);
+    if (!isRecord(verify) || !isRecord(verify.features) ||
+      !isRecord(verify.features['host.workbuddy']) || verify.features['host.workbuddy'].enabled !== true ||
+      !isRecord(verify.features.workbuddy_live_keyword_pain) || verify.features.workbuddy_live_keyword_pain.enabled !== true) {
+      return { ok: false, reason: 'fresh_workbuddy_flags_verification_failed', nextAction: 'No changes written.' };
+    }
+    atomicReplaceTextFile(configPath, next);
+  } catch {
+    return { ok: false, reason: 'fresh_workbuddy_flag_write_failed', nextAction: 'Repair config storage and retry.' };
+  }
+  return { ok: true, configPath, enabled: true };
+}
+
 export function setWorkbuddyGovernanceFlag(governanceDir: string, enabled: boolean): FlagOverrideResult {
   const configDir = path.join(governanceDir, '.pd');
   const configPath = path.join(configDir, 'config.yaml');
@@ -1127,6 +1164,7 @@ export class WorkBuddyHostInstaller implements HostInstaller {
   async install(ctx: HostInstallContext): Promise<HostInstallResult> {
     const p = this.paths();
     const details = this.detectDetails();
+    const freshKeywordInstall = !details.registered && !existsSync(path.join(p.governanceDir, '.pd', 'config.yaml'));
 
     // 1. Preflight: host presence + hook runtime prerequisites.
     if (!details.hostFound && !details.engineFound) {
@@ -1263,6 +1301,16 @@ export class WorkBuddyHostInstaller implements HostInstaller {
 
     // 8. Install ≠ enable (OD-03): the host.workbuddy flag stays at its quiet
     //    default (OFF). No config.yaml override is written here.
+    // Only a truly NEW WorkBuddy governance workspace gets both gates on.
+    // Existing config and reinstalls retain their previous effective state.
+    const keywordDefaults = freshKeywordInstall ? enableFreshWorkbuddyKeywordPain(p.governanceDir) : null;
+    if (keywordDefaults !== null && !keywordDefaults.ok) {
+      return { success: false, hostId: this.hostId, configPath: p.settingsPath,
+        configAction: registration.settingsAction, reason: keywordDefaults.reason, nextAction: keywordDefaults.nextAction };
+    }
+    const keywordDefaultsNote = keywordDefaults !== null
+      ? ' New WorkBuddy governance and four-term keyword Pain detection are ENABLED by default.'
+      : ' Existing governance flags were PRESERVED without implicit opt-in.';
     const effectiveNote = 'Registration takes effect in NEW WorkBuddy sessions (or /reload-plugins in a running CLI session).';
     // Round-4 S1: honest pending-config surface — legacy init rows and Owner
     // rows are kept (no silent override); the rebind path is stated, never
@@ -1275,8 +1323,8 @@ export class WorkBuddyHostInstaller implements HostInstaller {
       hostId: this.hostId,
       configPath: p.settingsPath,
       configAction: registration.settingsAction,
-      reason: `Registered ${WORKBUDDY_PLUGIN_KEY} via ${registration.mode}${registration.mode === 'engine' ? '' : ` (engine unreachable: ${registration.engineNote})`}. Governance workspace initialized at ${p.governanceDir}${governance.dbInit === 'skipped' ? ` (${governance.note})` : ''}.${profileNote} PD governance stays DISABLED until you explicitly enable it.`,
-      nextAction: `${effectiveNote}${governance.dbInit === 'skipped' ? ` After the install, run "pd runtime init --workspace ${p.governanceDir}" to create the governance databases.` : ''} To enable PD governance, set host.workbuddy: { enabled: true } in ${path.join(p.governanceDir, '.pd', 'config.yaml')} (the console flag surface or the installer enable API shows the target config first).${pendingRebindNote}`,
+      reason: `Registered ${WORKBUDDY_PLUGIN_KEY} via ${registration.mode}${registration.mode === 'engine' ? '' : ` (engine unreachable: ${registration.engineNote})`}. Governance workspace initialized at ${p.governanceDir}${governance.dbInit === 'skipped' ? ` (${governance.note})` : ''}.${profileNote}${keywordDefaultsNote}`,
+      nextAction: `${effectiveNote}${governance.dbInit === 'skipped' ? ` After the install, run "pd runtime init --workspace ${p.governanceDir}" to create the governance databases.` : ''} To disable keyword Pain, set features.workbuddy_live_keyword_pain.enabled=false; to disable all WorkBuddy governance, set features.host.workbuddy.enabled=false. Existing workspaces retain their prior settings.${pendingRebindNote}`,
     };
   }
 

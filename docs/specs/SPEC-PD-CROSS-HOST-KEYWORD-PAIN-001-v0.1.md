@@ -200,3 +200,7 @@ WorkBuddy UserPromptSubmit ── host.workbuddy ── P0 opt-in ──┤
 ---
 
 **状态声明：** 该文件是依据 `origin/main@9f2184d6` 的**改造 SPEC**，不是已实施报告；未更改任何运行代码、配置、用户 Pain、审批或 PR。
+
+## Owner decision addendum (2026-10-19): fresh-install default ON for WorkBuddy
+
+New, first-time WorkBuddy installations MUST explicitly persist both host.workbuddy.enabled=true and workbuddy_live_keyword_pain.enabled=true in their NEW governance workspace. Existing users, upgrades and reinstalls MUST retain existing effective settings. Central quiet registry defaults remain OFF for backward safety. This supersedes P0 default-OFF language above ONLY for the fresh WorkBuddy installer path. Do NOT enable codex_conversation_ingestion or imply Codex live-only is ready.

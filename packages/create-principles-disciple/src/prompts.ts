@@ -140,7 +140,7 @@ async function promptHost(defaultHost: HostTarget = 'openclaw'): Promise<HostTar
       {
         name: 'WorkBuddy',
         value: 'workbuddy' as const,
-        description: 'Registers the PD plugin into WorkBuddy\'s marketplace (~/.pd/workbuddy-marketplace → engine plugin install). Governance stays OFF until explicitly enabled.',
+        description: 'Registers the PD plugin into WorkBuddy\'s marketplace (~/.pd/workbuddy-marketplace → engine plugin install). New installs enable WorkBuddy governance and keyword Pain detection; existing settings are preserved.',
       },
       {
         name: 'All hosts',

@@ -196,7 +196,10 @@ describe.skipIf(!PD_CLI_AVAILABLE)('R1 chain: real install → enable → real w
     // install ≠ enable (OD-03): the flag resolves to its registry default OFF.
     const installed = loadPdConfigForPlugin(lab.governance);
     expect(installed.ok, `installed config must validate: ${JSON.stringify(installed.errors)}`).toBe(true);
-    expect(computeFeatureFlagsFromConfig(installed.effective).flags['host.workbuddy']?.enabled).toBe(false);
+    expect(computeFeatureFlagsFromConfig(installed.effective).flags['host.workbuddy']?.enabled).toBe(true);
+    expect(computeFeatureFlagsFromConfig(installed.effective).flags.workbuddy_live_keyword_pain?.enabled).toBe(true);
+    // Exercise legacy disabled-workspace behavior explicitly after testing the new-install default.
+    expect(lab.installer.disableGovernance().ok).toBe(true);
 
     // ── 2. Production-store activation injection (registered, flag still OFF).
     await injectActivation(lab.governance);
