@@ -36,6 +36,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import {
   collectSync,
+  computeFeatureFlagsFromConfig,
   CORRECTION_SEED_KEYWORDS,
   buildToolFailureObservation,
   evaluateTriage,
@@ -613,7 +614,8 @@ function toolFailureTaskPayload(fields: {
   return JSON.stringify(payload);
 }
 
-function taskSubmissionPayload(candidate: GovernanceSignalCandidate, workspaceDir: string, reason: string): string {
+function taskSubmissionPayload(candidate: GovernanceSignalCandidate, workspaceDir: string, details: { reason: string; canonicalPainId?: string }): string {
+  const {reason,canonicalPainId} = details;
   if (candidate.kind === 'user_correction') {
     // P1-1 privacy (review round 2): sanitize the FULL text before any
     // truncation — a token crossing the 200-char boundary must be redacted, not
@@ -627,9 +629,14 @@ function taskSubmissionPayload(candidate: GovernanceSignalCandidate, workspaceDi
       hostKind: candidate.hostKind,
       // WorkBuddy explicit intake has no transcript observation to promote.
       // The classified Owner statement is its input basis, not a pseudo-trace.
-      evidence: candidate.hostKind === 'workbuddy' && candidate.explicitOwnerStatement === true
-        ? []
-        : [{ sourceRef: `governance_observation:${candidate.logicalObservationKey}`, note: sanitizeString(candidate.text, workspaceDir) }],
+      evidence: candidate.hostKind === 'workbuddy'
+        ? candidate.explicitOwnerStatement === true ? [] : [{
+          // WorkBuddy has no governance_observation, anchor to the canonical
+          // Pain persisted in this same trajectory.db transaction.
+          sourceRef: 'pain_event:' + (canonicalPainId ?? ''),
+          note: sanitizeString(candidate.text, workspaceDir),
+        }]
+        : [{ sourceRef: 'governance_observation:' + candidate.logicalObservationKey, note: sanitizeString(candidate.text, workspaceDir) }],
       // SPEC-CODEX-PAIN-CLOSURE-001 CR-02 (merged from main): an explicit
       // Owner statement rides as classified correction evidence — never
       // summarized by an AI, never inside evidence[] pseudo-trace entries.
@@ -760,7 +767,7 @@ function admitCorrection({ db, candidate, workspaceDir, now, nowIso, keywordStor
         // detection, so `detection` is optional — no ruleVersion exists for them.
         ruleVersion: detection?.ruleVersion ?? null,
         reason,
-        payloadJson: taskSubmissionPayload(candidate, workspaceDir, reason),
+        payloadJson: taskSubmissionPayload(candidate, workspaceDir, { reason, canonicalPainId: painId }),
         nowIso,
       });
     })();
@@ -860,7 +867,7 @@ function admitToolFailure({ db, candidate, workspaceDir, nowIso }: AdmitToolFail
         canonicalPainId: painId,
         ruleVersion: null,
         reason: sanitizeString(reason, workspaceDir),
-        payloadJson: taskSubmissionPayload(candidate, workspaceDir, reason),
+        payloadJson: taskSubmissionPayload(candidate, workspaceDir, { reason }),
         nowIso,
       });
     }
@@ -882,10 +889,11 @@ interface AdmitOneArgs {
   nowIso: string;
   keywordStore?: UnifiedKeywordStore;
   onDegradation?: (code: string, message: string) => void;
+  trustedWorkbuddyLive?: boolean;
 }
 
-function admitOne({ db, candidate, workspaceDir, now, nowIso, keywordStore, onDegradation }: AdmitOneArgs): GovernanceAdmissionOutcome {
-  if (candidate.hostKind !== 'codex' && !(candidate.hostKind === 'workbuddy' && candidate.kind === 'user_correction' && candidate.explicitOwnerStatement === true)) {
+function admitOne({ db, candidate, workspaceDir, now, nowIso, keywordStore, onDegradation, trustedWorkbuddyLive }: AdmitOneArgs): GovernanceAdmissionOutcome {
+  if (candidate.hostKind !== 'codex' && !(candidate.hostKind === 'workbuddy' && candidate.kind === 'user_correction' && (candidate.explicitOwnerStatement === true || trustedWorkbuddyLive === true))) {
     return { ok: false, reason: 'unsupported_host_kind', nextAction: 'governance signal admission accepts Codex observations or explicit WorkBuddy Owner statements' };
   }
 
@@ -928,7 +936,7 @@ export type AdmitGovernanceSignalsResult =
  * trajectory.db transaction (marker + pain row + quota together), so one
  * failing candidate never rolls back another's admission.
  */
-export function admitGovernanceSignals(input: AdmitGovernanceSignalsInput): AdmitGovernanceSignalsResult {
+function admitGovernanceSignalsInternal(input: AdmitGovernanceSignalsInput, trustedWorkbuddyLive = false): AdmitGovernanceSignalsResult {
   const opened = openAdmissionStore(input.workspaceDir, input.databaseFactory);
   if (!('db' in opened)) return opened;
   const { db, close } = opened;
@@ -943,7 +951,7 @@ export function admitGovernanceSignals(input: AdmitGovernanceSignalsInput): Admi
   const outcomes: GovernanceAdmissionOutcome[] = [];
   try {
     for (const candidate of input.candidates) {
-      outcomes.push(admitOne({ db, candidate, workspaceDir, now, nowIso, ...(input.keywordStore ? { keywordStore: input.keywordStore } : {}), ...(input.onDegradation ? { onDegradation: input.onDegradation } : {}) }));
+      outcomes.push(admitOne({ db, candidate, workspaceDir, now, nowIso, ...(input.keywordStore ? { keywordStore: input.keywordStore } : {}), ...(input.onDegradation ? { onDegradation: input.onDegradation } : {}), trustedWorkbuddyLive }));
     }
     return { ok: true, outcomes };
   } catch (error) {
@@ -954,6 +962,97 @@ export function admitGovernanceSignals(input: AdmitGovernanceSignalsInput): Admi
   }
 }
 
+
+/** Public generic intake stays Codex + explicit WorkBuddy only. */
+export function admitGovernanceSignals(input: AdmitGovernanceSignalsInput): AdmitGovernanceSignalsResult {
+  return admitGovernanceSignalsInternal(input);
+}
+
+/** P0: a four-term projection of existing canonical high-precision seeds. */
+const WORKBUDDY_AUTO_TERMS = new Set(['这是错的', '不要自作主张', '不应该这么做', '又搞错']);
+const WORKBUDDY_MAX_PROMPT_BYTES = 16 * 1024;
+function workbuddyP0KeywordStore(): UnifiedKeywordStore {
+  const seed = buildSharedSeedKeywordStore();
+  const terms: UnifiedKeywordStore['terms'] = {};
+  for (const [term, def] of Object.entries(seed.terms)) {
+    if (WORKBUDDY_AUTO_TERMS.has(term) && def.category === 'correction' && def.precision === 'high') {
+      terms[term] = def;
+    }
+  }
+  return { version: seed.version, terms };
+}
+
+/** Pure check: no DB, no filesystem, no classifier, no historical transcript. */
+export function assessWorkbuddyLiveKeyword(text: string, sessionId: string): {
+  matched: boolean; reason: 'matched' | 'not_a_signal' | 'prompt_too_large';
+} {
+  if (Buffer.byteLength(text, 'utf8') > WORKBUDDY_MAX_PROMPT_BYTES) {
+    return { matched: false, reason: 'prompt_too_large' };
+  }
+  const store = workbuddyP0KeywordStore();
+  // Prefer precision to recall: reject quoted/embedded/reported phrases.
+  if (!Object.keys(store.terms).some(term => text.trimStart().toLowerCase().startsWith(term.toLowerCase()))) {
+    return { matched: false, reason: 'not_a_signal' };
+  }
+  const out = collectSync(text, sessionId, store, SYNC_DETECTION_CONFIG, new Date().toISOString());
+  const matched = out.isSignal && out.strength === 'STRONG' &&
+    out.type === 'correction' && out.matchedPrecision === 'high';
+  return { matched, reason: matched ? 'matched' : 'not_a_signal' };
+}
+
+/**
+ * Narrow native event gateway: validate true current user origin and flags.
+ * The ordinary generic admission API cannot bypass this WorkBuddy gate.
+ */
+export function admitTrustedWorkbuddyLiveCorrection(input: {
+  workspaceDir: string;
+  rawEvent: unknown;
+  now?: Date;
+  databaseFactory?: ObservationDatabaseFactory;
+}): AdmitGovernanceSignalsResult {
+  const raw = input.rawEvent;
+  if (!isRecord(raw) || own(raw, 'hook_event_name') !== 'UserPromptSubmit' ||
+      own(raw, 'is_internal_continuation') !== false) {
+    return { ok: false, reason: 'native_current_user_unverified', nextAction: 'Require a real current WorkBuddy UserPromptSubmit event.' };
+  }
+  const sessionId = own(raw, 'session_id');
+  const generationId = own(raw, 'generation_id');
+  const prompt = own(raw, 'prompt');
+  if (typeof sessionId !== 'string' || !sessionId.trim() ||
+      typeof generationId !== 'string' || !generationId.trim() ||
+      typeof prompt !== 'string') {
+    return { ok: false, reason: 'native_identity_invalid', nextAction: 'Require nonblank native session_id/generation_id and prompt.' };
+  }
+  const config = loadPdConfigForPlugin(input.workspaceDir);
+  if (!config.ok) return { ok: false, reason: 'workbuddy_config_invalid', nextAction: 'Repair WorkBuddy governance workspace config.' };
+  const {flags} = computeFeatureFlagsFromConfig(config.effective);
+  if (flags['host.workbuddy']?.enabled !== true || flags.workbuddy_live_keyword_pain?.enabled !== true) {
+    return { ok: false, reason: 'workbuddy_auto_disabled', nextAction: 'Explicitly enable both WorkBuddy host and live keyword Pain.' };
+  }
+  if (prompt.trimStart().startsWith('PD记录痛苦')) {
+    return { ok: false, reason: 'explicit_owner_statement_reserved', nextAction: 'Use original Owner intake; no keyword fallback.' };
+  }
+  if (!assessWorkbuddyLiveKeyword(prompt, sessionId).matched) {
+    return { ok: true, outcomes: [] };
+  }
+  const nativeIdentity = JSON.stringify(['workbuddy', sessionId, generationId]);
+  return admitGovernanceSignalsInternal({
+    workspaceDir: input.workspaceDir,
+    candidates: [{
+      kind: 'user_correction',
+      hostKind: 'workbuddy',
+      logicalObservationKey: nativeIdentity + '|user',
+      rolloutIdentity: JSON.stringify(['workbuddy', sessionId]),
+      rootSessionId: sessionId,
+      hostTurnId: nativeIdentity,
+      text: prompt,
+      observedAt: (input.now ?? new Date()).toISOString(),
+    }],
+    keywordStore: workbuddyP0KeywordStore(),
+    ...(input.now ? { now: input.now } : {}),
+    ...(input.databaseFactory ? { databaseFactory: input.databaseFactory } : {}),
+  }, true);
+}
 // ─── Diagnostician continuation (one pain → exactly one pending task) ───────
 
 function isGovernanceTaskPayload(value: unknown): value is GovernanceTaskSubmissionPayload {

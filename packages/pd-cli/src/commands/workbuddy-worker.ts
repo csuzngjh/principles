@@ -25,7 +25,8 @@ import path from 'node:path';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { getWorkbuddyWorkspaceDir } from '@principles/install-layout';
 import { runWorkbuddyWorkspaceWorkerCycle, type WorkbuddyWorkerCycleResult } from '@principles/workbuddy-adapter';
-import { computeWorkbuddyWorkerStatusMode } from '@principles/host-runtime';
+import { computeWorkbuddyWorkerStatusMode, loadPdConfigForPlugin } from '@principles/host-runtime';
+import { computeFeatureFlagsFromConfig } from '@principles/core/runtime-v2';
 import { getInstallLayoutPaths, parseInstallManifest } from '@principles/install-layout';
 
 const DEFAULT_INTERVAL_MS = 120_000;
@@ -44,6 +45,7 @@ export interface WorkbuddyWorkerStatusReport {
   workspace: string;
   mode: 'ready' | 'manual_action_required' | 'paused' | 'degraded';
   registeredInInstallManifest: boolean;
+  keywordPain: { enabled: boolean; mode: 'off' | 'keyword_only'; source: string };
   reason?: string;
   nextAction?: string;
 }
@@ -69,12 +71,17 @@ async function printStatusReport(workspace: string, json: boolean): Promise<void
   // (no execution, no lease, no LLM, no transcript I/O).
   const evaluation = computeWorkbuddyWorkerStatusMode({ workspaceDir: workspace, registeredInInstallManifest: registered });
 
+  const keywordConfig = loadPdConfigForPlugin(workspace);
+  const keywordFlags = keywordConfig.ok ? computeFeatureFlagsFromConfig(keywordConfig.effective).flags : null;
+  const keywordFlag = keywordFlags?.workbuddy_live_keyword_pain;
+  const keywordEnabled = keywordFlags?.['host.workbuddy']?.enabled === true && keywordFlag?.enabled === true;
   const report: WorkbuddyWorkerStatusReport = {
     generatedAt,
     host: 'workbuddy',
     workspace,
     mode: evaluation.mode,
     registeredInInstallManifest: registered,
+    keywordPain: { enabled: keywordEnabled, mode: keywordEnabled ? 'keyword_only' : 'off', source: keywordFlag?.source ?? 'unknown' },
     ...(evaluation.reason !== undefined ? { reason: evaluation.reason } : {}),
     ...(evaluation.nextAction !== undefined ? { nextAction: evaluation.nextAction } : {}),
     ...(manifestError !== undefined ? { reason: `${evaluation.reason ?? manifestError}` } : {}),
@@ -84,6 +91,7 @@ async function printStatusReport(workspace: string, json: boolean): Promise<void
     return;
   }
   const lines = [
+    '  auto keyword Pain: ' + report.keywordPain.mode + ' (source=' + report.keywordPain.source + ')',
     `WorkBuddy governance worker status (${workspace})`,
     `  mode: ${report.mode}`,
     `  registered in install manifest: ${registered}`,

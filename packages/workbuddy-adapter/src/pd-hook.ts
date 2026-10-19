@@ -38,7 +38,7 @@ import process from 'node:process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { appendEventLogLine, redactTelemetryString, isRuleHostEvaluatedEventData } from '@principles/core/runtime-v2';
 import type { HostEventEmitter, HostEventResult } from '@principles/core/host';
-import { createProductionHostRuntime, loadPdConfigForPlugin, parseOwnerStatementPrefix } from '@principles/host-runtime';
+import { createProductionHostRuntime, loadPdConfigForPlugin, parseOwnerStatementPrefix, assessWorkbuddyLiveKeyword, admitTrustedWorkbuddyLiveCorrection, ensureGovernanceDiagnosticianTask } from '@principles/host-runtime';
 import { computeFeatureFlagsFromConfig } from '@principles/core/runtime-v2';
 import { WorkBuddyHooksHostAdapter } from './host-adapter.js';
 import { WORKBUDDY_TOOL_SEMANTICS } from './tool-semantics.js';
@@ -277,6 +277,71 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
   const ownerReceipt = channelEventName === 'UserPromptSubmit'
     ? await recordWorkbuddyOwnerStatement(event, resolution.workspaceDir)
     : undefined;
+  // SPEC-PD-CROSS-HOST-KEYWORD-PAIN-001 P0: only a REAL current-user
+  // UserPromptSubmit may enter this quiet, default-OFF live keyword path.
+  // It does not inspect transcripts or alter normal hook stdout / exit codes.
+  const autoDiagnostics: string[] = [];
+  if (channelEventName === 'UserPromptSubmit' &&
+      event.kind === 'before_prompt_build' &&
+      flags.workbuddy_live_keyword_pain?.enabled === true) {
+    try {
+      const raw = parsed as Record<string, unknown>;
+      const prompt = event.context.promptContent;
+      const fromOwner = Object.getOwnPropertyDescriptor(raw, 'is_internal_continuation')?.value === false;
+      const nativeId = event.context.turnId;
+      const explicitReserved = typeof prompt === 'string' && prompt.trimStart().startsWith('PD记录痛苦');
+      if (fromOwner && nativeId !== undefined && nativeId.trim().length > 0 &&
+          typeof prompt === 'string' && !explicitReserved) {
+        const matched = assessWorkbuddyLiveKeyword(prompt, event.context.sessionId);
+        if (matched.matched) {
+          const admitted = admitTrustedWorkbuddyLiveCorrection({
+            workspaceDir: resolution.workspaceDir,
+            rawEvent: parsed,
+          });
+          if (!admitted.ok) {
+            autoDiagnostics.push(diagnostic('degraded', 'workbuddy_keyword_admission_' + admitted.reason, admitted.nextAction));
+          } else {
+            for (const outcome of admitted.outcomes) {
+              if (!('disposition' in outcome)) {
+                autoDiagnostics.push(diagnostic('degraded', 'workbuddy_keyword_admission_rejected', outcome.reason));
+                continue;
+              }
+              if (outcome.disposition === 'admitted' || outcome.disposition === 'already_admitted') {
+                const ensured = await ensureGovernanceDiagnosticianTask({
+                  workspaceDir: resolution.workspaceDir,
+                  logicalObservationKey: outcome.logicalObservationKey,
+                  canonicalPainId: outcome.canonicalPainId,
+                });
+                if (!ensured.ok) {
+                  autoDiagnostics.push(diagnostic('degraded', 'workbuddy_keyword_task_' + ensured.reason, ensured.nextAction));
+                } else {
+                  // Metadata only: never log the raw prompt or fabricate a
+                  // completed diagnosis, approval or activation.
+                  try {
+                    appendEventLogLine(path.join(resolution.workspaceDir, '.state'), {
+                      ts: new Date().toISOString(),
+                      type: 'workbuddy_keyword_pain_admitted',
+                      category: 'detected',
+                      sessionId: event.context.sessionId,
+                      data: { hostKind: 'workbuddy', outcome: outcome.disposition,
+                        painId: outcome.canonicalPainId, taskId: ensured.taskId },
+                    });
+                  } catch { /* Evidence-log failure must not block the prompt. */ }
+                }
+              } else if (outcome.disposition === 'rate_limited') {
+                autoDiagnostics.push(diagnostic('degraded', 'workbuddy_keyword_rate_limited', 'Per-session strong signal limit reached; no new Pain was created.'));
+              }
+            }
+          }
+        } else if (matched.reason === 'prompt_too_large') {
+          autoDiagnostics.push(diagnostic('degraded', 'workbuddy_keyword_prompt_too_large', 'Oversized prompt was not scanned or persisted as a keyword signal.'));
+        }
+      }
+    } catch (error) {
+      autoDiagnostics.push(diagnostic('degraded', 'workbuddy_keyword_unexpected:' + errorMessage(error), 'The current prompt was preserved; inspect the governance workspace.'));
+    }
+  }
+
   const receiptOutput = (output: WorkBuddyHookOutput | null): WorkBuddyHookOutput | null => ownerReceipt === undefined ? output : {
     hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: [ownerReceipt, output?.hookSpecificOutput.additionalContext].filter(Boolean).join('\n\n') },
   };
@@ -380,6 +445,7 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
       ...annotateContextWarnings(result.warnings ?? []).slice(0, 16).map((warning) => diagnostic('degraded', warning, 'Inspect the PD governance workspace state and retry; the hook stayed permissive (allow+warnings is degraded health, not fail-closed).')),
       ...evaluationDiagnostics,
       ...evidenceDiagnostics,
+      ...autoDiagnostics,
     ];
     return { stdout: receiptOutput(encoded), exitCode: 0, stderr: [...stderr, ...(ownerReceipt === undefined ? [] : [ownerReceipt])] };
   } catch (error) {
@@ -392,7 +458,7 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
     }
     // UserPromptSubmit: protect the prompt (exit 2 clears it — P02).
     // after_tool_call: the tool already ran — report evidence degradation only.
-    return { stdout: receiptOutput(null), exitCode: 0, stderr: [diagnostic('degraded', reason, nextAction), ...(ownerReceipt === undefined ? [] : [ownerReceipt])] };
+    return { stdout: receiptOutput(null), exitCode: 0, stderr: [diagnostic('degraded', reason, nextAction), ...autoDiagnostics, ...(ownerReceipt === undefined ? [] : [ownerReceipt])] };
   }
 }
 
