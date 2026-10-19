@@ -120,6 +120,16 @@ describe('readActiveRelease — real files, fail-closed with a distinct reason',
     expect(read.ok).toBe(false);
     if (!read.ok) expect(read.reason).toContain('active_record_read_failed: EACCES: permission denied');
   });
+
+  it('caps the error detail so a corrupt record cannot become an unbounded log line (rc-8)', () => {
+    const fake = { existsSync: () => true, readFileSync: () => { throw new Error('x'.repeat(4000)); } };
+    const read = readActiveRelease('whatever', fake);
+    expect(read.ok).toBe(false);
+    if (!read.ok) {
+      expect(read.reason.startsWith('active_record_read_failed: ')).toBe(true);
+      expect(read.reason.length).toBeLessThanOrEqual('active_record_read_failed: '.length + 161);
+    }
+  });
 });
 
 describe('judgeReleaseWatch — the release record decides, the component marker cannot', () => {

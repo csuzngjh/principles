@@ -37,6 +37,15 @@ export type ActiveReleaseRead =
   | { readonly ok: false; readonly reason: string };
 
 /**
+ * A parse error's message quotes part of the corrupt file, so the reason that
+ * reaches the log is capped — same bound as `entry-verdict.ts` (rc-8).
+ */
+function briefError(err: unknown): string {
+  const text = err instanceof Error ? err.message : String(err);
+  return text.length > 160 ? `${text.slice(0, 160)}…` : text;
+}
+
+/**
  * Parse the active release record from an already-read JSON value (rc-1: the
  * file content is untrusted input until these checks pass). Absent file and
  * read/parse failures are decided by `readActiveRelease`, which owns the I/O.
@@ -49,7 +58,7 @@ export function parseActiveRelease(value: unknown): ActiveReleaseRead {
   // A record from a newer layout version may mean different fields; refusing
   // to decide is safer than restarting a healthy Console on a guess.
   if (record.schemaVersion !== 1) {
-    return { ok: false, reason: `active_record_schema_version_unsupported: ${JSON.stringify(record.schemaVersion)}` };
+    return { ok: false, reason: `active_record_schema_version_unsupported: ${briefError(JSON.stringify(record.schemaVersion))}` };
   }
   const { releaseId, generation, productVersion } = record;
   if (typeof releaseId !== 'string' || releaseId.length === 0) {
@@ -83,13 +92,13 @@ export function readActiveRelease(activeRecordPath: string, fs: {
   try {
     text = fs.readFileSync(activeRecordPath, 'utf8');
   } catch (err) {
-    return { ok: false, reason: `active_record_read_failed: ${err instanceof Error ? err.message : String(err)}` };
+    return { ok: false, reason: `active_record_read_failed: ${briefError(err)}` };
   }
   let value: unknown;
   try {
     value = JSON.parse(text) as unknown;
   } catch (err) {
-    return { ok: false, reason: `active_record_json_invalid: ${err instanceof Error ? err.message : String(err)}` };
+    return { ok: false, reason: `active_record_json_invalid: ${briefError(err)}` };
   }
   return parseActiveRelease(value);
 }
