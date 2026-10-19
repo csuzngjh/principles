@@ -1,6 +1,6 @@
 {
   "name": "@principles/pd-cli",
-  "version": "1.158.1",
+  "version": "1.158.2",
   "description": "PD CLI — Pain recording, sample management, and governance tasks for Principles Disciple",
   "type": "module",
   "bin": {
@@ -21,10 +21,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@principles/core": "^1.293.5",
+    "@principles/core": "^1.294.1",
     "@principles/codex-adapter": "^0.5.8",
-    "@principles/workbuddy-adapter": "^0.2.2",
-    "@principles/host-runtime": "^0.10.3",
+    "@principles/workbuddy-adapter": "^0.2.4",
+    "@principles/host-runtime": "^0.10.4",
     "@principles/install-layout": "^0.4.0",
     "principles-disciple": "^2.1.6",
     "better-sqlite3": "^13.0.3",

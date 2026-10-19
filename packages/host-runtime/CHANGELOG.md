@@ -1,5 +1,13 @@
 # @principles/host-runtime
 
+## 0.10.4
+
+### Patch Changes
+
+- bf5aed3: Introduce an opt-in WorkBuddy native current-user keyword Pain path using the shared high-precision detector, canonical Pain admission and Diagnostician task continuation. Expose effective keyword detection status; leave the feature off by default and preserve Codex ingestion consent boundaries.
+- Updated dependencies [bf5aed3]
+  - @principles/core@1.294.1
+
 ## 0.10.3
 
 ### Patch Changes
