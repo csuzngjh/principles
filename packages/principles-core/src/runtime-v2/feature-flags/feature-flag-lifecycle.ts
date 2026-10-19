@@ -275,6 +275,14 @@ export const QUIET_FLAG_LIFECYCLE: Readonly<Record<string, QuietFlagLifecycleEnt
     graduationCriteria: 'Slices A–D complete + R1 consent UX verified on installed path + opt-in dogfood release with no privacy/lineage P1 + explicit Owner default-on decision (SPEC §17)',
     retirementCriteria: 'Codex conversation ingestion descoped, or graduated and observability confirms stable default-on (flag collapses into host.codex contract)',
   },
+  workbuddy_live_keyword_pain: {
+    decision: 'KEEP_QUIET',
+    consumers: ['workbuddy-adapter/src/pd-hook.ts', 'host-runtime/src/governance-signal-admission.ts'],
+    evidence: 'SPEC-PD-CROSS-HOST-KEYWORD-PAIN-001 P0; Owner opt-in; live current user only; no transcript reads',
+    decided: '2026-10-19',
+    graduationCriteria: 'Live host E2E + latency + explicit Owner default-on decision',
+    retirementCriteria: 'Feature removed or replaced with explicitly approved migration',
+  },
   'host.workbuddy': {
     decision: 'KEEP_QUIET',
     consumers: ['workbuddy-adapter plugin hook entry (pd-hook wrapper)', 'workbuddy-adapter workspace/worker entrypoints'],
