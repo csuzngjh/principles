@@ -15,11 +15,18 @@
  *
  * `~/.pd/active.json` is the installation authority: written at activation,
  * after the component tree is complete, and flipped on every release and on
- * every rollback. Its `releaseId` is the release identity (productVersion +
- * sourceCommit), `generation` is the monotonic activation counter.
+ * every rollback. Its `releaseId` is the release identity — an opaque sha256
+ * digest over the identity inputs (product version, source commit, asset
+ * identities, minimum bootstrap version; see `release-identity.ts` in the
+ * installer), never a string this module may parse or compare piece by piece.
+ * `generation` is the monotonic activation counter.
  *
- * This module deliberately validates only the fields the decision consumes.
- * The strict full-schema reader belongs to the update chain
+ * This module deliberately validates only what Companion must be able to trust
+ * about a record: that it is a version-1 object carrying a complete identity
+ * with the audit fields beside it. `generation` and `productVersion` are not
+ * compared by the decision — they are required because a record that lost them
+ * is not the record the update chain writes, and because every hand-over is
+ * logged as from/to. The strict full-schema reader belongs to the update chain
  * (`transaction-journal.ts readActiveRecord`); duplicating that contract here
  * would make Companion a second de-facto schema authority and would refuse a
  * restart for any future field it has not been taught about.
@@ -49,8 +56,10 @@ function briefError(err: unknown): string {
  * Parse the active release record from an already-read JSON value (rc-1: the
  * file content is untrusted input until these checks pass). Absent file and
  * read/parse failures are decided by `readActiveRelease`, which owns the I/O.
+ * Internal by design: the only reader-facing contract is `readActiveRelease`,
+ * so no caller can hand this a value it obtained some other way.
  */
-export function parseActiveRelease(value: unknown): ActiveReleaseRead {
+function parseActiveRelease(value: unknown): ActiveReleaseRead {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     return { ok: false, reason: 'active_record_not_object' };
   }
@@ -76,10 +85,10 @@ export function parseActiveRelease(value: unknown): ActiveReleaseRead {
 /**
  * Read `~/.pd/active.json` (the path is derived from the shared install layout
  * by `locate.ts resolveActiveRecordPath`, never from a caller-supplied string).
- * Fail-closed with a distinct structured
- * reason for every failure class (rc-3/rc-9) — a legacy install without the
- * record, an unreadable file, and malformed content are different situations
- * an operator must be able to tell apart from the log.
+ * Fail-closed with a distinct structured reason for every failure class
+ * (rc-3/rc-9) — a legacy install without the record, an unreadable file, and
+ * malformed content are different situations an operator must be able to tell
+ * apart from the log.
  */
 export function readActiveRelease(activeRecordPath: string, fs: {
   existsSync(target: string): boolean;

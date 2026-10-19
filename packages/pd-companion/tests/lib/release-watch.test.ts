@@ -13,7 +13,6 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   judgeReleaseWatch,
-  parseActiveRelease,
   readActiveRelease,
   type ActiveReleaseRead,
   type ReleaseIdentity,
@@ -44,25 +43,34 @@ function okRead(id: ReleaseIdentity): ActiveReleaseRead {
   return { ok: true, identity: id };
 }
 
-function failedRead(reason: string): ActiveReleaseRead {
-  return { ok: false, reason };
+/**
+ * Feed a record value through the real reader with a synthetic file, so every
+ * case — the ones that reach the parser and the ones that never get that far —
+ * is decided by the same public entry point production calls.
+ */
+function readValue(value: unknown): ActiveReleaseRead {
+  return readActiveRelease('synthetic-active.json', {
+    existsSync: () => true,
+    readFileSync: () => JSON.stringify(value),
+  });
 }
 
-describe('parseActiveRelease — only the decision fields are required', () => {
+describe('readActiveRelease — a version-1 record with a complete identity', () => {
   it('accepts a well-formed record and exposes its identity', () => {
-    const parsed = parseActiveRelease(record());
-    expect(parsed).toEqual({ ok: true, identity: { releaseId: RELEASE_A, generation: 47, productVersion: '2.3.8' } });
+    expect(readValue(record())).toEqual({
+      ok: true,
+      identity: { releaseId: RELEASE_A, generation: 47, productVersion: '2.3.8' },
+    });
   });
 
   it('ignores fields the watch does not decide on, so a newer writer does not blind the watchdog', () => {
-    const parsed = parseActiveRelease(record({ someFutureField: { nested: true }, releaseMetadataDigest: 'not-a-digest' }));
-    expect(parsed.ok).toBe(true);
+    expect(readValue(record({ someFutureField: { nested: true }, releaseMetadataDigest: 'not-a-digest' })).ok).toBe(true);
   });
 
   it('keeps an optional legacy field absent without failing', () => {
     const withoutCommit = record();
     delete withoutCommit.sourceCommit;
-    expect(parseActiveRelease(withoutCommit).ok).toBe(true);
+    expect(readValue(withoutCommit).ok).toBe(true);
   });
 
   it('refuses a record it cannot attribute to a release (rc-3)', () => {
@@ -79,9 +87,9 @@ describe('parseActiveRelease — only the decision fields are required', () => {
       [record({ productVersion: '' }), 'active_record_product_version_missing'],
     ];
     for (const [value, expected] of cases) {
-      const parsed = parseActiveRelease(value);
-      expect(parsed.ok, JSON.stringify(expected)).toBe(false);
-      if (!parsed.ok) expect(parsed.reason.startsWith(expected), parsed.reason).toBe(true);
+      const read = readValue(value);
+      expect(read.ok, JSON.stringify(expected)).toBe(false);
+      if (!read.ok) expect(read.reason.startsWith(expected), read.reason).toBe(true);
     }
   });
 });
@@ -177,6 +185,18 @@ describe('judgeReleaseWatch — the release record decides, the component marker
     expect(decision.action).toBe('restart');
   });
 
+  it('stays silent on a component-version change alone — the retired axis lost its say', () => {
+    // PRI-1016 acceptance 1, reverse direction: plugin 2.1.7 → 2.1.8 while the
+    // installed release identity does not move. The old rule restarted the
+    // Console on that; the release authority says nothing changed, and the
+    // decision function cannot even be handed a component version.
+    const retiredPredicateFires = '2.1.8' !== '2.1.7';
+    expect(retiredPredicateFires).toBe(true);
+
+    const started = identity(RELEASE_A, 47, '2.3.8');
+    expect(judgeReleaseWatch({ read: okRead(started), started, mode: 'managed' })).toEqual({ action: 'no_change' });
+  });
+
   it('treats a rollback as a release change, so the Console is handed back', () => {
     // active.json went back to the previous release id after a failed apply.
     const decision = judgeReleaseWatch({
@@ -197,9 +217,19 @@ describe('judgeReleaseWatch — the release record decides, the component marker
   });
 
   it('takes no action when the authority cannot be read, with the reason carried through', () => {
-    for (const reason of ['active_record_absent', 'active_record_json_invalid: boom', 'active_record_schema_version_unsupported: 2']) {
-      const decision = judgeReleaseWatch({ read: failedRead(reason), started: identity(RELEASE_A, 47, '2.3.8'), mode: 'managed' });
-      expect(decision).toEqual({ action: 'authority_unavailable', reason });
+    // The failing reads come FROM the reader, not from hand-copied strings —
+    // otherwise this test would keep passing when a reason code is renamed.
+    const missing = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-release-watch-')), 'active.json');
+    const failing: ActiveReleaseRead[] = [
+      readActiveRelease(missing, fs),
+      readValue(record({ schemaVersion: 2 })),
+      readValue(record({ releaseId: '' })),
+    ];
+    for (const read of failing) {
+      expect(read.ok).toBe(false);
+      if (read.ok) continue;
+      const decision = judgeReleaseWatch({ read, started: identity(RELEASE_A, 47, '2.3.8'), mode: 'managed' });
+      expect(decision).toEqual({ action: 'authority_unavailable', reason: read.reason });
     }
   });
 

@@ -708,9 +708,13 @@ function spawnCli(): void {
       return;
     }
     const delay = supervisor.onEntryMissing(entryCheck.detail);
-    // fromVersion != targetVersion is this log's evidence that the version
-    // marker flipped since the last successful launch — i.e. an update was in
-    // flight — which is what separates the race from a broken install.
+    // What tells a race from damage is the release pair: `fromReleaseId !=
+    // targetReleaseId` means the installation authority moved since this process
+    // was launched, i.e. a release landed and its components are still being
+    // laid. The component pair above is kept for the older log readers, but the
+    // marker alone no longer proves anything — a release can land without
+    // bumping it (PRI-1016).
+    const authority = readActiveRecord();
     log('pd_cli_entry_not_ready', {
       entry,
       detail: entryCheck.detail,
@@ -719,6 +723,9 @@ function spawnCli(): void {
       waitsLeft: supervisor.entryWaitsLeft(),
       fromVersion: serverStartedVersion,
       targetVersion: readInstalledVersion(),
+      fromReleaseId: serverStartedRelease?.releaseId,
+      targetReleaseId: authority.ok ? authority.identity.releaseId : undefined,
+      authorityUnavailable: authority.ok ? undefined : authority.reason,
     });
     reflectSupervisorState();
     if (delay !== undefined) scheduleRestartRetry(delay, 'entry_wait');
@@ -880,6 +887,10 @@ function handleLaunchResult(parsed: ConsoleOpenResult): void {
       port: parsed.port,
       serverPid: parsed.serverPid,
       version: serverStartedVersion,
+      // the release this process is attributed to — same source as the baseline
+      // the watch compares against, so the two log lines can be reconciled (rc-6)
+      releaseId: serverStartedRelease?.releaseId,
+      generation: serverStartedRelease?.generation,
       mode: after.kind === 'running' ? after.mode : 'unknown',
       ownsProcess: supervisor.ownsProcess(),
     });
@@ -901,7 +912,12 @@ function handleLaunchResult(parsed: ConsoleOpenResult): void {
     serverStartedRelease = record.ok ? record.identity : undefined;
     if (!record.ok) log('release_baseline_unavailable', { stage: 'reused', reason: record.reason });
     supervisor.onLaunchReused(parsed.url, parsed.port);
-    log('console_reused', { port: parsed.port, mode: 'attached' });
+    log('console_reused', {
+      port: parsed.port,
+      mode: 'attached',
+      releaseId: serverStartedRelease?.releaseId,
+      generation: serverStartedRelease?.generation,
+    });
     void mainWindow?.loadURL(parsed.url).catch((err: unknown) => log('window_load_failed', { message: err instanceof Error ? err.message : String(err) }));
     startPolling();
   } else {
@@ -1167,13 +1183,22 @@ function watchInstalledRelease(): void {
       // marker. Report once per reason change, not every poll tick (rc-9).
       if (decision.reason !== lastAuthorityWatchReason) {
         lastAuthorityWatchReason = decision.reason;
-        log('release_watch_unavailable', { reason: decision.reason });
+        log('release_watch_unavailable', {
+          reason: decision.reason,
+          nextAction: '确认 ~/.pd/active.json 存在且是更新链写出的记录；随后从托盘「重启控制台服务」重新登记基线。',
+        });
       }
       return;
     case 'no_baseline':
+      // The running process cannot be attributed to a release, so it is never
+      // killed on a guess. The recovery is explicit: the next launch records a
+      // baseline (handleLaunchResult reads the authority on both paths).
       if (lastAuthorityWatchReason !== 'no_baseline') {
         lastAuthorityWatchReason = 'no_baseline';
-        log('release_watch_unavailable', { reason: 'no_baseline' });
+        log('release_watch_unavailable', {
+          reason: 'no_baseline',
+          nextAction: '从托盘「重启控制台服务」；重启后基线会重新登记，看门狗恢复自动交接。',
+        });
       }
       return;
     case 'attached_no_action':

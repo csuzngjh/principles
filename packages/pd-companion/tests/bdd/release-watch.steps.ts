@@ -9,9 +9,12 @@
  * to the component marker.
  */
 import { expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import {
   judgeReleaseWatch,
+  readActiveRelease,
   type ActiveReleaseRead,
   type ReleaseIdentity,
   type ReleaseWatchDecision,
@@ -22,20 +25,57 @@ import { resolveFeaturePath } from './support/repo-root.js';
 const registry = createStepRegistry();
 
 /**
- * Release labels used in the feature. A release identity is
- * `productVersion + sourceCommit` (the real formula), so two labels can share a
- * product version while still being different releases — which is precisely the
- * case the old component-version comparison was blind to.
+ * Release labels used in the feature. `releaseId` is an opaque sha256 digest
+ * over the release identity inputs (`release-identity.ts` in the installer), so
+ * the fixture uses fixed 64-hex digests and never derives one from a version
+ * string — a watchdog that read parts of it would break on the first digest
+ * change. Two labels can share a product version while still being different
+ * releases, which is precisely the case the old component-version comparison
+ * was blind to.
  */
-const RELEASES: Record<'A' | 'B', { productVersion: string; sourceCommit: string }> = {
-  A: { productVersion: '2.3.7', sourceCommit: 'a'.repeat(40) },
-  B: { productVersion: '2.3.8', sourceCommit: 'b'.repeat(40) },
+const RELEASES: Record<'A' | 'B', { releaseId: string; productVersion: string }> = {
+  A: { releaseId: 'a'.repeat(64), productVersion: '2.3.7' },
+  B: { releaseId: 'b'.repeat(64), productVersion: '2.3.8' },
 };
 
 function release(label: 'A' | 'B', generation: number, productVersionOverride?: string): ReleaseIdentity {
-  const { sourceCommit } = RELEASES[label];
-  const productVersion = productVersionOverride ?? RELEASES[label].productVersion;
-  return { releaseId: `${productVersion}+${sourceCommit}`, generation, productVersion };
+  const { releaseId } = RELEASES[label];
+  return { releaseId, generation, productVersion: productVersionOverride ?? RELEASES[label].productVersion };
+}
+
+const recordShape = {
+  schemaVersion: 1,
+  generation: 47,
+  releaseId: RELEASES.A.releaseId,
+  productVersion: RELEASES.A.productVersion,
+};
+
+/**
+ * Produce an authority read failure the way production does: write a REAL
+ * `active.json` (or leave it missing) and run it through `readActiveRelease`.
+ * A scenario that merely stated a reason string would keep passing even if the
+ * reader stopped producing it, so unknown reasons are refused here rather than
+ * faked (rc-9).
+ */
+function readAuthorityFailure(reason: string): ActiveReleaseRead {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-release-watch-bdd-'));
+  const file = path.join(dir, 'active.json');
+  const write = (content: string): ActiveReleaseRead => {
+    fs.writeFileSync(file, content, 'utf8');
+    return readActiveRelease(file, fs);
+  };
+  switch (reason) {
+    case 'active_record_absent':
+      return readActiveRelease(file, fs);
+    case 'active_record_json_invalid':
+      return write('{"schemaVersion":1,"gener');
+    case 'active_record_not_object':
+      return write('[]');
+    case 'active_record_schema_version_unsupported':
+      return write(JSON.stringify({ ...recordShape, schemaVersion: 2 }));
+    default:
+      throw new Error(`场景声明的失败原因没有对应的真实记录可读: ${reason}`);
+  }
 }
 
 interface Fixture {
@@ -44,6 +84,13 @@ interface Fixture {
   mode: 'managed' | 'attached';
   /** The identity `read` currently holds, kept so a step can assert the target. */
   authority: ReleaseIdentity | undefined;
+  /**
+   * The plugin's component version before/after, when a scenario bothers to
+   * state it. `judgeReleaseWatch` never receives it — a scenario that changes
+   * only this and still gets `no_change` is the proof that the retired axis lost
+   * its say (PRI-1016 acceptance 1, reverse direction).
+   */
+  marker: { from: string; to: string } | undefined;
   decision: ReleaseWatchDecision;
 }
 
@@ -61,6 +108,7 @@ registry.given('一个已启动的 Companion 看门狗夹具', (ctx) => {
     started: undefined,
     mode: 'managed',
     authority: undefined,
+    marker: undefined,
     decision: { action: 'no_change' },
   } satisfies Fixture;
 });
@@ -73,14 +121,18 @@ registry.when(
   new RegExp(
     String.raw`^运行中的发布是 ${RELEASE_TOKEN},安装权威是 ${RELEASE_TOKEN}` +
       String.raw`(?:,产品版本号两边都是 (\d+\.\d+\.\d+))?` +
+      String.raw`(?:,插件组件号从 (\d+\.\d+\.\d+) 变成 (\d+\.\d+\.\d+))?` +
       String.raw`,实例(?:由|是) ?(Companion 托管|附着的外部控制台)$`,
   ),
-  (ctx, startedLabel, startedGen, authorityLabel, authorityGen, versionOverride, ownerText) => {
+  (ctx, startedLabel, startedGen, authorityLabel, authorityGen, versionOverride, markerFrom, markerTo, ownerText) => {
     const f = fixture(ctx);
     const override = versionOverride === '' ? undefined : String(versionOverride);
     f.started = release(startedLabel as 'A' | 'B', Number(startedGen), override);
     f.authority = release(authorityLabel as 'A' | 'B', Number(authorityGen), override);
     f.read = { ok: true, identity: f.authority };
+    f.marker = markerFrom === '' || markerTo === ''
+      ? undefined
+      : { from: String(markerFrom), to: String(markerTo) };
     f.mode = String(ownerText).trim() === 'Companion 托管' ? 'managed' : 'attached';
     decide(f);
   },
@@ -92,7 +144,7 @@ registry.when(
     const f = fixture(ctx);
     f.started = release(startedLabel as 'A' | 'B', Number(startedGen));
     f.authority = undefined;
-    f.read = { ok: false, reason: String(reason) };
+    f.read = readAuthorityFailure(String(reason));
     f.mode = 'managed';
     decide(f);
   },
@@ -123,11 +175,24 @@ registry.then(/^交接目标是发布 ([AB])$/, (ctx, label) => {
   }
   // The target must be the authority's own identity, not any component marker.
   expect(f.decision.to).toBe(f.authority);
-  expect(f.decision.to.releaseId).toContain(RELEASES[label as 'A' | 'B'].sourceCommit);
+  expect(f.decision.to.releaseId).toBe(RELEASES[label as 'A' | 'B'].releaseId);
 });
 
 registry.then('看门狗判定为只报告不动手', (ctx) => {
   expect(fixture(ctx).decision.action).toBe('attached_no_action');
+});
+
+registry.then('看门狗判定为无变化', (ctx) => {
+  expect(fixture(ctx).decision.action).toBe('no_change');
+});
+
+// The scenario's premise, asserted rather than assumed: the retired predicate
+// compared this field, so a case where it moves and the release identity does
+// not is exactly where the old axis fired for no reason (ERR-148, reverse).
+registry.then('组件号这一轴确实动了,旧判据在这里会交接', (ctx) => {
+  const { marker } = fixture(ctx);
+  if (marker === undefined) throw new Error('场景没有给出插件组件号的前后值');
+  expect(marker.from !== marker.to).toBe(true);
 });
 
 registry.then('看门狗判定为不交接', (ctx) => {
@@ -146,7 +211,7 @@ registry.then(/^不交接的原因就是 ([a-z_]+)$/, (ctx, reason) => {
 
 // ── Load and register feature ──────────────────────────────────────────────────
 
-const featureText = readFileSync(
+const featureText = fs.readFileSync(
   resolveFeaturePath('docs/specs/features/companion/release-watch.feature'),
   'utf8',
 );
