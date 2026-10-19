@@ -1,5 +1,13 @@
 # create-principles-disciple
 
+## 1.145.11
+
+### Patch Changes
+
+- 0dc0431: chore(deps): bump @sinclair/typebox 0.34.49 -> 0.34.52（#2087）。typebox 是 core / plugin / console 的运行时 dependency，console 随 installer 分发，故 core、plugin 与 installer 各声明 patch。
+- 96bff72: chore(deps): bump @principles/install-layout 0.2.7 -> 0.4.0（#2088）。install-layout 是 installer 的运行时 dependency，随 create-principles-disciple 工件分发，installer 声明 patch。
+- 9c4f766: chore(deps): bump i18next 26.4.2 -> 26.4.7（#2089）。i18next 是 pd-console 运行时 dependency，console 随 installer 分发，installer 声明 patch。
+
 ## 1.145.10
 
 ### Patch Changes
