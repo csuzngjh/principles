@@ -39,7 +39,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "create-principles-disciple": "*",
-    "i18next": "^26.4.2",
+    "i18next": "^26.4.7",
     "js-yaml": "^5.4.3",
     "lucide-react": "^1.28.0",
     "postcss": "^8.5.14",
@@ -55,7 +55,7 @@
     "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
-    "@playwright/test": "^1.61.1",
+    "@playwright/test": "^1.64.1",
     "@types/better-sqlite3": "^9.6.0",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^26.4.1",
