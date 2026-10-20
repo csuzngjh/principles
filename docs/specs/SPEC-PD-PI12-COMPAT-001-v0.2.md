@@ -178,3 +178,16 @@ v0.1 §16 全文保留有效（12 问裁决、F-1..F-8 发现与处置、双裁�
 ## 17. Phase 1 独立对抗复审结论（2026-10-17）
 
 有界单轮独立复审（只读，真实 diff `d91b9e07e..24928513f`，pi-mono 两 tag 源码逐项重核 + 9 锁程序化解析 + Release Intent Guard 独立复现）：**12 维度全部 OK，零 P0/P1/P2，MERGE READINESS GO**。关键确认：transcript 形状与 `declareToolChanges` 交互正确；finishTurn error/aborted 硬退出语义与上游逐行一致；无任何新增模型调用路径；Dreamer L1 回退与 Artificer fail-closed 原样；治理面零接触（PRI-995 区逐字节相同）；7/7 锁精确 1.2.0 且无混装；changeset 恰为两包 patch、无版本字段直改；测试为强化非弱化。P3 处置：P3-1/2/4 已在本 PR 修复（guard 结果入表、回滚集补 changeset、6 处过期注释更新）；P3-3 以最终 head 重跑 verify:merge 关闭；P3-5（锁内自版本随再生成同步，main 既存陈旧）与 P3-6（convertToLlm 对未知角色 throw 为既存 fail-loud 偏离，Pi 1.2 文档契约建议不抛——实践中不可达）记录不动作。
+
+
+---
+
+## 附录 A（2026-10-20 复核修订，非追溯性状态说明）：Code Mode 后续研究
+
+> 此附录不改变 v0.2 的迁移范围、合并/发布硬门、版本差异矩阵、历史测试记录及 AC-6 真实 LLM 状态机；v0.1/v0.2 继续作为当时的实施资料保存。
+
+- **迁移现状**：截至 2026-10-19，主干 `packages/principles-core/package.json` 明确声明 `pi-ai@1.2.0` 和 `pi-agent-core@1.2.0`，说明 Pi 兼容迁移的代码已合入；不因此把任何未做的真实模型验收自动标记 PASS。对 `AC-6` 继续引用它自身的真实模型测试/Owner 豁免证据，不由另一实验替代。
+- **原 SPEC §13 保持有效**：Code Mode、Pi Durable 和 Agent 自适应执行模式均是此版本兼容迁移的非目标；不追加其依赖、feature flag、runtime 默认路径或发布门槛。
+- **后续独立规范**：[SPEC-PD-CODEMODE-001 v0.2](SPEC-PD-CODEMODE-001-v0.2.md) 先审查 PD 是否有值得采用 Code Mode 的真实场景。Pi Agent Core 1.2.0 已声明 Node `>=22.19.0`，Code Mode 1.3.0 也要求 `>=22.19.0`，而 PD 安装器仍声明 `>=22.0.0`；这是既有元数据不一致，不是 Code Mode 新增的最低版本要求。该独立 SPEC 仍需验证 worker/WASM、嵌套调用授权和相对确定性组合工具的净收益。
+- **区分独立验收**：Pi 1.2 的真实 LLM E2E（AC-6）、IAER Production Pilot、Code Mode P0/P1/P2 实验分别裁决，不能合并计算结果或互相代填 PASS。
+- **默认及回滚**：Code Mode 暂未成为 PD 生产依赖，未批准上线或自动开启。即使独立 PoC 成功，也须另行验证并批准试点启停、安装/发行资产和回滚。
