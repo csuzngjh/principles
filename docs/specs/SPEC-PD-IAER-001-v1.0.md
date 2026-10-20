@@ -742,3 +742,16 @@ leased -> running -> validated -> succeeded
 研究并验证 L1、L1+、L2 的任务选择策略；优先开展 RootCause 的受控证据检索实验，不预设多轮一定优于单轮。
 
 两项均不得成为本 SPEC 的合并前置依赖。
+
+
+---
+
+## 附录 A（2026-10-20 复核修订，非追溯性状态说明）：与 Code Mode 研究的边界
+
+> 此附录为后续架构关系说明；**不重写 2026 年制定 IAER v1.0 时的 Pi 0.85.1 版本基线、生产审计证据、FR/AC、既有验收结论及 Owner 审批语义**。
+
+1. 2026-10-19 仓库主干已经声明 `@earendil-works/pi-ai@1.2.0` 和 `pi-agent-core@1.2.0`。这是后续 Pi 兼容迁移的实现事实，不代表本 IAER SPEC 当时的 Pi 0.85.1 数据写错。
+2. 新增独立研究规范 [SPEC-PD-CODEMODE-001 v0.2](SPEC-PD-CODEMODE-001-v0.2.md)。该规范先执行 U-01 至 U-05 的真实场景资格门；资格门不通过时不新增依赖、不写运行时代码、不开展集成 PoC。只有候选场景与 B1 简单替代方案比较证明值得继续，才进入受限对照实验；本规范不改变本 SPEC §3.2 的“不引入 Codemode/Pi Durable”及 §5、§12 的证据前置/Owner 恢复硬门。
+3. 不论将来是否采用 Code Mode，`BehaviorExamplePack` 缺失、失效或 scope 不匹配时都必须在模型与脚本执行前拦截，**模型=0、Code Mode=0、回放=0**；不得自动生成 Owner 案例或绕过 Console 审批与 RuleHost。
+4. §14 中 `SPEC-PD-AGENT-EXECUTION-POLICY-001` 是独立的 L1/L1+/L2 选择策略规划，不可与 Code Mode（选定工具执行后如何组合调用）混为同一机制；本次主干文档目录未发现该独立 SPEC 文件。
+5. 以上衔接仅为新增研究索引，不是对 IAER 实施完成、真实 Pilot PASS 或 Code Mode 启用的判定。
