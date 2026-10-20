@@ -1,19 +1,19 @@
 {
-  "generatedAt": "2026-10-20T13:07:23.926Z",
+  "generatedAt": "2026-10-20T23:49:01.976Z",
   "spec": "SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001",
   "unit": "utf16_code_units (String.prototype.length — NOT model tokens)",
   "policy": {
     "version": "model_aware_v1",
     "formula": "budgetChars = min(4000, max(500, floor(2000 * W / 128000)))",
-    "minBudgetChars": 500,
-    "maxBudgetChars": 4000,
+    "minBudgetChars": 1250,
+    "maxBudgetChars": 16000,
     "fallbackBudgetChars": 2000,
     "windowToBudgetSanity": {
-      "32K": 500,
-      "64K": 1000,
+      "32K": 1250,
+      "64K": 1250,
       "128K": 2000,
       "256K": 4000,
-      "1M": 4000
+      "1M": 15625
     }
   },
   "scenario": "16 persisted candidates (14 × 60 chars, 2 × 1200 chars) per tier workspace, 40 forced round keys on the list route; shared route runs the same resolution through buildActivePrinciplePromptContext",
@@ -21,43 +21,45 @@
     {
       "label": "32K",
       "windowTokens": 32000,
-      "budgetChars": 500,
+      "budgetChars": 1250,
       "capacitySource": "host_effective_window",
       "capacityStatus": "confirmed",
+      "fallbackReason": null,
       "policyVersion": "model_aware_v1",
       "list": {
         "candidates": 16,
-        "avgInjected": 6,
-        "avgUsedChars": 488,
+        "avgInjected": 12.7,
+        "avgUsedChars": 1111,
         "truncatedRounds": 40,
-        "avgOversizedPerRound": 2
+        "avgOversizedPerRound": 0
       },
       "shared": {
-        "injected": 0,
-        "usedChars": 0,
-        "truncated": false,
-        "oversized": 1,
-        "dropped": 0,
+        "injected": 2,
+        "usedChars": 1056,
+        "truncated": true,
+        "oversized": 0,
+        "dropped": 1,
         "selectionPolicy": "legacy_fifo_prefix_v1"
       }
     },
     {
       "label": "64K",
       "windowTokens": 64000,
-      "budgetChars": 1000,
+      "budgetChars": 1250,
       "capacitySource": "host_effective_window",
       "capacityStatus": "confirmed",
+      "fallbackReason": null,
       "policyVersion": "model_aware_v1",
       "list": {
         "candidates": 16,
-        "avgInjected": 12,
-        "avgUsedChars": 944,
+        "avgInjected": 12.7,
+        "avgUsedChars": 1111,
         "truncatedRounds": 40,
-        "avgOversizedPerRound": 2
+        "avgOversizedPerRound": 0
       },
       "shared": {
-        "injected": 1,
-        "usedChars": 825,
+        "injected": 2,
+        "usedChars": 1056,
         "truncated": true,
         "oversized": 0,
         "dropped": 1,
@@ -70,6 +72,7 @@
       "budgetChars": 2000,
       "capacitySource": "host_effective_window",
       "capacityStatus": "confirmed",
+      "fallbackReason": null,
       "policyVersion": "model_aware_v1",
       "list": {
         "candidates": 16,
@@ -93,6 +96,7 @@
       "budgetChars": 4000,
       "capacitySource": "host_effective_window",
       "capacityStatus": "confirmed",
+      "fallbackReason": null,
       "policyVersion": "model_aware_v1",
       "list": {
         "candidates": 16,
@@ -113,9 +117,10 @@
     {
       "label": "1000K",
       "windowTokens": 1000000,
-      "budgetChars": 4000,
+      "budgetChars": 15625,
       "capacitySource": "host_effective_window",
       "capacityStatus": "confirmed",
+      "fallbackReason": null,
       "policyVersion": "model_aware_v1",
       "list": {
         "candidates": 16,
@@ -125,11 +130,11 @@
         "avgOversizedPerRound": 0
       },
       "shared": {
-        "injected": 14,
-        "usedChars": 3828,
-        "truncated": true,
+        "injected": 16,
+        "usedChars": 6568,
+        "truncated": false,
         "oversized": 0,
-        "dropped": 1,
+        "dropped": 0,
         "selectionPolicy": "legacy_fifo_prefix_v1"
       }
     },
@@ -139,6 +144,7 @@
       "budgetChars": 2000,
       "capacitySource": "legacy_fallback",
       "capacityStatus": "unknown",
+      "fallbackReason": "host_capacity_absent",
       "policyVersion": "model_aware_v1",
       "list": {
         "candidates": 16,

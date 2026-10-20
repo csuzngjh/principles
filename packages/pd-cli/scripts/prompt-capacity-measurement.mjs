@@ -286,6 +286,7 @@ async function modelAwareTierScenario(windowTokens, selfReport) {
     budgetChars,
     capacitySource: resolution.capacitySource,
     capacityStatus: resolution.capacityStatus,
+    fallbackReason: resolution.fallbackReason ?? null,
     policyVersion: resolution.policyVersion,
     list: {
       candidates: listPrinciples.length,
@@ -477,7 +478,7 @@ async function main() {
   ma.push('');
   ma.push(`生成时间：${maPayload.generatedAt}　测量入口：\`packages/pd-cli/scripts/prompt-capacity-measurement.mjs\`（真实生产构建器 + 受控临时工作区）。`);
   ma.push('');
-  ma.push(`政策：\`${maPayload.policy.formula}\`（下限 ${PROMPT_BUDGET_MIN_CHARS} / 硬上限 ${PROMPT_BUDGET_MAX_CHARS} / 未知回退 ${RUNTIME_V2_PRINCIPLE_BUDGET} 字符，UTF-16 字符，**不是 token**）。`);
+  ma.push(`政策：\`${maPayload.policy.formula}\`（下限 ${PROMPT_BUDGET_MIN_CHARS} / 目标上限 ${PROMPT_BUDGET_MAX_CHARS} / 未知回退 ${RUNTIME_V2_PRINCIPLE_BUDGET} 字符，UTF-16 字符，**不是 token**）。下限为实测锚定：共享路由单条最小有效原则完整渲染 849 字符（自报关）/ 1204 字符（自报开），任何更低下限都会复现 32K 零注入缺陷；上限为目标值，1M 档位按公式精确得出 15625，不假装恰好等于上限。`);
   ma.push('');
   ma.push('## 容量档位 × 两路由对照');
   ma.push('');
@@ -488,8 +489,9 @@ async function main() {
   }
   ma.push('');
   ma.push('要点：');
-  ma.push('- 未知容量档位如实回退 2000 字符（`legacy_fallback` / `unknown`），与既有生产行为一致；无任何伪造的动态支持。');
-  ma.push('- 1M 档位预算被硬上限压回 4000 字符——预算不会随窗口无限增长。');
+  ma.push('- 未知容量档位如实回退 2000 字符（`legacy_fallback` / `unknown` + 有界原因码），与既有生产行为一致；无任何伪造的动态支持。');
+  ma.push('- 1M 档位预算按公式精确为 15625 字符（≥1.024M 才触顶 16000）——上限是目标边界，不是必须达到的固定值。');
+  ma.push('- 32K 档位（=下限 1250）经真实生产构建器验证：共享路由在自报开/关两种状态下均至少完整注入一条最小有效原则（v0.1 的 500 下限在该档位注入 0 条，已修复并以回归测试钉住）。');
   ma.push('- 超长排除/截断语义在各档位下与既有选择器一致（同一 `trimToBudget` 与共享渲染路径，只是预算数值变化）。');
   ma.push('');
   ma.push('## 共享路径真实 dispatch 预算来源证据（生产 createProductionHostRuntime）');

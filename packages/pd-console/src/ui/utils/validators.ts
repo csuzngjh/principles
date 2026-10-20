@@ -2150,9 +2150,19 @@ export function validatePromptInjectionBudgetStatus(v: unknown): PromptInjection
   if (
     Object.hasOwn(v, 'budgetCapacitySource')
     && (v.budgetCapacitySource === 'host_effective_window' || v.budgetCapacitySource === 'pi_catalog_exact'
-      || v.budgetCapacitySource === 'pi_catalog_unambiguous' || v.budgetCapacitySource === 'legacy_fallback')
+      || v.budgetCapacitySource === 'legacy_fallback')
   ) {
     result.budgetCapacitySource = v.budgetCapacitySource;
+  }
+  if (
+    Object.hasOwn(v, 'budgetFallbackReason')
+    && (v.budgetFallbackReason === 'host_capacity_absent' || v.budgetFallbackReason === 'host_capacity_source_untrusted'
+      || v.budgetFallbackReason === 'host_capacity_invalid_value' || v.budgetFallbackReason === 'catalog_unavailable'
+      || v.budgetFallbackReason === 'model_identity_absent' || v.budgetFallbackReason === 'catalog_no_exact_match'
+      || v.budgetFallbackReason === 'catalog_no_match_for_model_id' || v.budgetFallbackReason === 'catalog_ambiguous_model_id'
+      || v.budgetFallbackReason === 'catalog_provider_absent' || v.budgetFallbackReason === 'catalog_metadata_invalid')
+  ) {
+    result.budgetFallbackReason = v.budgetFallbackReason;
   }
   if (Object.hasOwn(v, 'budgetCapacityStatus') && (v.budgetCapacityStatus === 'confirmed' || v.budgetCapacityStatus === 'unknown')) {
     result.budgetCapacityStatus = v.budgetCapacityStatus;

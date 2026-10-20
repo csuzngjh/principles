@@ -124,9 +124,25 @@ export interface PromptInjectionBudgetStatus {
    * model-accurate forecast. Absent behaves as the legacy fixed view
    * (pre-SPEC payload compat).
    */
-  budgetCapacitySource?: 'host_effective_window' | 'pi_catalog_exact' | 'pi_catalog_unambiguous' | 'legacy_fallback';
+  budgetCapacitySource?: 'host_effective_window' | 'pi_catalog_exact' | 'legacy_fallback';
   /** confirmed = a real context window was resolved; unknown = fixed-budget fallback. */
   budgetCapacityStatus?: 'confirmed' | 'unknown';
   /** The context window the budget was derived from; present only when confirmed. */
   budgetContextWindowTokens?: number;
+  /**
+   * SPEC §7 v0.2: bounded machine-readable reason — present only when
+   * budgetCapacityStatus is 'unknown'. Closed set mirroring the core
+   * `PromptBudgetFallbackReason`; never free-form detail or user content.
+   */
+  budgetFallbackReason?:
+    | 'host_capacity_absent'
+    | 'host_capacity_source_untrusted'
+    | 'host_capacity_invalid_value'
+    | 'catalog_unavailable'
+    | 'model_identity_absent'
+    | 'catalog_no_exact_match'
+    | 'catalog_no_match_for_model_id'
+    | 'catalog_ambiguous_model_id'
+    | 'catalog_provider_absent'
+    | 'catalog_metadata_invalid';
 }

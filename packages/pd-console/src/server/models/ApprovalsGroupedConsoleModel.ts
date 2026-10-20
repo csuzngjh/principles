@@ -205,12 +205,18 @@ async function candidatePromptBudgetTierFit(
   if (deliverability.status === 'deliverable') return 'fits_all_tiers';
   if (deliverability.status === 'model_dependent') return 'model_dependent';
   if (deliverability.status === 'undeliverable') return 'exceeds_max_tier';
-  // Route/artifact unconfirmed: aggregate the per-host tier verdicts — any
-  // max-tier overflow is oversized everywhere that matters; only an
-  // all-hosts fits-everywhere sweep may promise unconditionally; anything
-  // mixed is model-dependent. Without per-host facts, do not promise at all.
+  // Route/artifact unconfirmed: aggregate the per-host tier verdicts
+  // MONOTONICALLY. The list route bills ~700 fewer chars than the shared
+  // route for the same entry (fixed wrapper delta), so "shared exceeds but
+  // list does not" is REACHABLE (e.g. a ~15300-char statement: list ≈15341
+  // = model_dependent, shared ≈16058 = exceeds). Collapsing that to
+  // exceeds_max_tier would tell an OpenClaw owner their entry can never
+  // inject when a large-window list-route host could carry it. Only when
+  // EVERY applicable host exceeds is "oversized everywhere" true; any
+  // disagreement leaves the honest model_dependent. Without per-host
+  // facts, do not promise at all.
   if (deliverability.perHost && deliverability.perHost.length > 0) {
-    if (deliverability.perHost.some((entry) => entry.tierFit === 'exceeds_max_tier')) {
+    if (deliverability.perHost.every((entry) => entry.tierFit === 'exceeds_max_tier')) {
       return 'exceeds_max_tier';
     }
     if (deliverability.perHost.every((entry) => entry.tierFit === 'fits_all_tiers')) {
@@ -464,6 +470,7 @@ export class ApprovalsGroupedConsoleModel {
               usedChars: entry.projection.usedChars,
               truncated: entry.projection.truncated,
             })),
+            ...(reference?.budgetFallbackReason !== undefined ? { budgetFallbackReason: reference.budgetFallbackReason } : {}),
           },
         };
       }
@@ -492,6 +499,7 @@ export class ApprovalsGroupedConsoleModel {
           ...(projection.budgetCapacitySource !== undefined ? { budgetCapacitySource: projection.budgetCapacitySource } : {}),
           ...(projection.budgetCapacityStatus !== undefined ? { budgetCapacityStatus: projection.budgetCapacityStatus } : {}),
           ...(projection.budgetContextWindowTokens != null ? { budgetContextWindowTokens: projection.budgetContextWindowTokens } : {}),
+          ...(projection.budgetFallbackReason !== undefined ? { budgetFallbackReason: projection.budgetFallbackReason } : {}),
         },
       };
     } catch (err: unknown) {

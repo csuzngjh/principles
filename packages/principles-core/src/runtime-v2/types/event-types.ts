@@ -681,11 +681,27 @@ export interface RuntimeV2PromptActivationsInjectedEventData {
    */
   budgetPolicyVersion?: string;
   /** Which fact produced the budget (host window / catalog / legacy fallback). */
-  budgetCapacitySource?: 'host_effective_window' | 'pi_catalog_exact' | 'pi_catalog_unambiguous' | 'legacy_fallback';
+  budgetCapacitySource?: 'host_effective_window' | 'pi_catalog_exact' | 'legacy_fallback';
   /** confirmed = a real context window was resolved; unknown = fixed-budget fallback. */
   budgetCapacityStatus?: 'confirmed' | 'unknown';
   /** The context window the budget was derived from; present only when confirmed. */
   budgetContextWindowTokens?: number;
+  /**
+   * SPEC §7 (v0.2): bounded machine-readable fallback reason — present only
+   * when budgetCapacityStatus is 'unknown'. Closed literal set shared with
+   * `PromptBudgetFallbackReason`; never free-form detail, never user content.
+   */
+  budgetFallbackReason?:
+    | 'host_capacity_absent'
+    | 'host_capacity_source_untrusted'
+    | 'host_capacity_invalid_value'
+    | 'catalog_unavailable'
+    | 'model_identity_absent'
+    | 'catalog_no_exact_match'
+    | 'catalog_no_match_for_model_id'
+    | 'catalog_ambiguous_model_id'
+    | 'catalog_provider_absent'
+    | 'catalog_metadata_invalid';
 }
 
 export const RuntimeV2PromptActivationsInjectedEventDataSchema = Type.Object({
@@ -723,11 +739,22 @@ export const RuntimeV2PromptActivationsInjectedEventDataSchema = Type.Object({
   budgetCapacitySource: Type.Optional(Type.Union([
     Type.Literal('host_effective_window'),
     Type.Literal('pi_catalog_exact'),
-    Type.Literal('pi_catalog_unambiguous'),
     Type.Literal('legacy_fallback'),
   ])),
   budgetCapacityStatus: Type.Optional(Type.Union([Type.Literal('confirmed'), Type.Literal('unknown')])),
   budgetContextWindowTokens: Type.Optional(Type.Number()),
+  budgetFallbackReason: Type.Optional(Type.Union([
+    Type.Literal('host_capacity_absent'),
+    Type.Literal('host_capacity_source_untrusted'),
+    Type.Literal('host_capacity_invalid_value'),
+    Type.Literal('catalog_unavailable'),
+    Type.Literal('model_identity_absent'),
+    Type.Literal('catalog_no_exact_match'),
+    Type.Literal('catalog_no_match_for_model_id'),
+    Type.Literal('catalog_ambiguous_model_id'),
+    Type.Literal('catalog_provider_absent'),
+    Type.Literal('catalog_metadata_invalid'),
+  ])),
 });
 export type RuntimeV2PromptActivationsInjectedEventDataStatic = Static<typeof RuntimeV2PromptActivationsInjectedEventDataSchema>;
 

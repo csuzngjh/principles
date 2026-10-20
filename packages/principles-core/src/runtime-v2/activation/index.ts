@@ -153,6 +153,7 @@ export {
 export type {
   PromptBudgetCapacitySource,
   PromptBudgetCapacityStatus,
+  PromptBudgetFallbackReason,
   PromptBudgetResolution,
   PromptBudgetTierFit,
   PromptModelCatalog,

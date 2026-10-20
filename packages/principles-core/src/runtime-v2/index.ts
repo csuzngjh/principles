@@ -1658,6 +1658,7 @@ export type {
   TrimToBudgetResult,
   PromptBudgetCapacitySource,
   PromptBudgetCapacityStatus,
+  PromptBudgetFallbackReason,
   PromptBudgetResolution,
   PromptBudgetTierFit,
   PromptModelCatalog,

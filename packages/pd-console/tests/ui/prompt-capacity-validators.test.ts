@@ -153,6 +153,22 @@ describe('validateActivations — per-activation injection status (R-A3)', () =>
     expect(v?.activations[0]?.promptInjection?.reason).toBe('multi_host_routes_differ');
   });
 
+  it('SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §7: passes budgetFallbackReason through the closed whitelist and drops foreign codes', () => {
+    const ok = validatePromptInjectionBudgetStatus({
+      budget: 2000, usedChars: 0, truncated: false,
+      budgetCapacitySource: 'legacy_fallback', budgetCapacityStatus: 'unknown',
+      budgetFallbackReason: 'catalog_ambiguous_model_id',
+    });
+    expect(ok?.budgetFallbackReason).toBe('catalog_ambiguous_model_id');
+    const foreign = validatePromptInjectionBudgetStatus({
+      budget: 2000, usedChars: 0, truncated: false,
+      budgetFallbackReason: 'some_free_form_detail:with-colons',
+    });
+    // Drop-on-invalid: a free-form string must never reach the UI.
+    expect(foreign?.budgetFallbackReason).toBeUndefined();
+    expect(foreign?.budget).toBe(2000);
+  });
+
   it('SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: parses model_dependent rows (never a definite yes/no)', () => {
     const v = validateActivations({
       activations: [

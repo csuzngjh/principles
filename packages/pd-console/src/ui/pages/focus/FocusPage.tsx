@@ -788,7 +788,8 @@ function PendingReviewCard({
                     window: promptInjection.budgetContextWindowTokens ?? 0,
                   })
                 : t("pages.focus.promptBudgetFallbackNote", {
-                    defaultValue: "按固定回退预算估算（控制台未绑定运行时模型）",
+                    defaultValue: "按固定回退预算估算（控制台未绑定运行时模型{{reason}}）",
+                    reason: promptInjection.budgetFallbackReason !== undefined ? `，原因: ${promptInjection.budgetFallbackReason}` : "",
                   })
             }`}
           </div>

@@ -311,6 +311,10 @@ export interface PromptInjectionProjection {
   budgetCapacityStatus?: PromptBudgetResolution['capacityStatus'];
   budgetContextWindowTokens?: number | null;
   budgetPolicyVersion?: PromptBudgetResolution['policyVersion'];
+  /** SPEC §7 v0.2: bounded fallback reason code; present only on legacy_fallback. */
+  budgetFallbackReason?: PromptBudgetResolution['fallbackReason'];
+  /** Non-sensitive log context; never emitted to events. */
+  budgetFallbackDetail?: string;
 }
 
 /**
@@ -437,6 +441,8 @@ export async function buildLivePromptInjectionProjection(input: {
       budgetCapacityStatus: context.budgetCapacityStatus,
       budgetContextWindowTokens: context.budgetContextWindowTokens,
       budgetPolicyVersion: context.budgetPolicyVersion,
+      ...(context.budgetFallbackReason !== undefined ? { budgetFallbackReason: context.budgetFallbackReason } : {}),
+      ...(context.budgetFallbackDetail !== undefined ? { budgetFallbackDetail: context.budgetFallbackDetail } : {}),
     };
   }
 
@@ -465,6 +471,8 @@ export async function buildLivePromptInjectionProjection(input: {
       budgetCapacityStatus: promptBudget.capacityStatus,
       budgetContextWindowTokens: promptBudget.contextWindowTokens,
       budgetPolicyVersion: promptBudget.policyVersion,
+      ...(promptBudget.fallbackReason !== undefined ? { budgetFallbackReason: promptBudget.fallbackReason } : {}),
+      ...(promptBudget.fallbackDetail !== undefined ? { budgetFallbackDetail: promptBudget.fallbackDetail } : {}),
     };
   }
   // PR-1894: pass the caller's round key so the forecast runs the SAME
@@ -509,6 +517,8 @@ export async function buildLivePromptInjectionProjection(input: {
     budgetCapacityStatus: promptBudget.capacityStatus,
     budgetContextWindowTokens: promptBudget.contextWindowTokens,
     budgetPolicyVersion: promptBudget.policyVersion,
+    ...(promptBudget.fallbackReason !== undefined ? { budgetFallbackReason: promptBudget.fallbackReason } : {}),
+    ...(promptBudget.fallbackDetail !== undefined ? { budgetFallbackDetail: promptBudget.fallbackDetail } : {}),
   };
 }
 

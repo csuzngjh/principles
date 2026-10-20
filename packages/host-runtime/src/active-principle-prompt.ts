@@ -51,6 +51,10 @@ export interface ActivePrinciplePromptResult {
   budgetCapacityStatus?: PromptBudgetResolution['capacityStatus'];
   budgetContextWindowTokens?: number | null;
   budgetPolicyVersion?: PromptBudgetResolution['policyVersion'];
+  /** SPEC §7 v0.2: bounded fallback reason code; present only on legacy_fallback. */
+  budgetFallbackReason?: PromptBudgetResolution['fallbackReason'];
+  /** Non-sensitive log context (provider/model ids); never emitted to events. */
+  budgetFallbackDetail?: string;
 }
 
 export interface PromptActivationCandidates {
@@ -173,6 +177,8 @@ export async function buildActivePrinciplePromptContext(input: {
       budgetCapacityStatus: promptBudget.capacityStatus,
       budgetContextWindowTokens: promptBudget.contextWindowTokens,
       budgetPolicyVersion: promptBudget.policyVersion,
+      ...(promptBudget.fallbackReason !== undefined ? { budgetFallbackReason: promptBudget.fallbackReason } : {}),
+      ...(promptBudget.fallbackDetail !== undefined ? { budgetFallbackDetail: promptBudget.fallbackDetail } : {}),
     };
   }
 
@@ -250,5 +256,7 @@ export async function buildActivePrinciplePromptContext(input: {
     budgetCapacityStatus: promptBudget.capacityStatus,
     budgetContextWindowTokens: promptBudget.contextWindowTokens,
     budgetPolicyVersion: promptBudget.policyVersion,
+    ...(promptBudget.fallbackReason !== undefined ? { budgetFallbackReason: promptBudget.fallbackReason } : {}),
+    ...(promptBudget.fallbackDetail !== undefined ? { budgetFallbackDetail: promptBudget.fallbackDetail } : {}),
   };
 }

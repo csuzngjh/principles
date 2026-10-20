@@ -1,8 +1,8 @@
 # SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001
 ## 模型上下文感知的原则注入预算
 
-**版本：** v0.1
-**日期：** 2026-10-20
+**版本：** v0.2（Owner 修复轮修订：实测下限 1250、目标上限 16000、目录信任修正、回退原因码）
+**日期：** 2026-10-20（v0.2 同日修订）
 **状态：** Proposed — 待 Owner 审阅
 **目标：** Runtime V2 原则注入预算动态化
 **调查基线：** PD `origin/main` 快照 `a57cc3e07ab860e4c646d8f5fc5366d49fc88e97`（原调查基于 `ec66d2338`，实施前已更新基线），`@principles/core` 1.294.x；Pi AI 依赖版本 1.2.0（`packages/principles-core` runtime dependency）。
@@ -141,15 +141,17 @@ Pi 的通用 Token 估算器采用粗略字符比例，不是精确的模型专�
 
 第一阶段继续使用 UTF-16 字符预算，以避免同时迁移序列化计费体系和容量预检合同。
 
-| 参数 | 初始值 | 含义 |
+| 参数 | 值 | 含义 |
 |---|---:|---|
 | `BASE_BUDGET_CHARS` | 2000 | 基准预算 |
 | `REFERENCE_CONTEXT_WINDOW_TOKENS` | 128000 | 基准上下文容量 |
-| `MIN_BUDGET_CHARS` | 500 | 动态预算下限 |
-| `MAX_BUDGET_CHARS` | 4000 | 动态预算硬上限 |
+| `MIN_BUDGET_CHARS` | 1250 | 动态预算下限（实测锚定，见下） |
+| `MAX_BUDGET_CHARS` | 16000 | 动态预算目标上限（Owner 目标） |
 | `FALLBACK_BUDGET_CHARS` | 2000 | 容量未知时沿用的旧预算 |
 
 128000 是本 SPEC 选择的初始政策锚点，不代表所有用户的模型都具有该容量，也不代表该预算已被证明是行为效果最优值。实际效果必须通过受控测量验证。
+
+**下限 1250 是实测结论，不是假定**（真实生产序列化器，2026-10-20 修复轮）：共享路由按完整 directive 计费，单条最小有效原则（86 字符陈述）的完整渲染成本为 **849 字符**（自报关闭）/ **1204 字符**（自报开启）。旧 v0.1 的 500 下限使 32K 模型在该路由注入 **0 条**原则（已审计缺陷）；1000 下限在自报开启时同样零注入。1250 是覆盖两种自报状态的首个整值。列表路由单条成本约 132 字符，远低于下限。
 
 ### 4.2 动态预算公式
 
@@ -157,8 +159,8 @@ Pi 的通用 Token 估算器采用粗略字符比例，不是精确的模型专�
 
 \[
 B(W)=\min\left(
-4000,\;
-\max\left(500,\;
+16000,\;
+\max\left(1250,\;
 \left\lfloor 2000\frac{W}{128000}\right\rfloor
 \right)
 \right)
@@ -171,27 +173,29 @@ B(W)=\min\left(
 
 参考结果：
 
-| 有效上下文窗口 | 原则注入预算 |
-|---:|---:|
-| 32K | 500 字符 |
-| 64K | 1000 字符 |
-| 128K | 2000 字符 |
-| 256K | 4000 字符 |
-| 1M | 4000 字符 |
-| 未知或无效 | 2000 字符 |
+| 有效上下文窗口 | 原则注入预算 | 说明 |
+|---:|---:|---|
+| 32K | 1250 字符 | 公式原始值 500，向上钳制到实测下限 |
+| 64K | 1250 字符 | 公式原始值 1000，向上钳制到实测下限 |
+| 128K | 2000 字符 | 基准锚点 |
+| 256K | 4000 字符 | |
+| 1M | 15625 字符 | 公式精确值；16000 是上限，不是必须达到的固定值 |
+| ≥1.024M | 16000 字符 | 公式触顶 |
+| 未知或无效 | 2000 字符 | 固定回退（诚实降级，不伪装成已确认容量） |
 
-以上为初始政策，不是精确 Token 换算。4000 字符是硬上限，避免大窗口模型导致原则注入规模无限增长。
+以上为初始政策，不是精确 Token 换算。16000 字符是目标上限，避免大窗口模型导致原则注入规模无限增长。
 
 ### 4.3 容量解析优先级
 
 建立纯函数形式的容量解析器（实现名 `resolvePromptBudget`）。函数名称可以按仓库现有命名规范调整，但必须保持单一实现。
 
-优先级如下：
+优先级如下（v0.2 修订）：
 
 1. **宿主提供的有效上下文容量。** OpenClaw 在来源可信且数值有效时优先使用 `contextTokenBudget`。
-2. **Pi AI 的精确模型元数据。** 使用已安装模型目录中的准确 `provider + modelId` 匹配。
-3. **无提供商身份的模型 ID 查找。** 只有当已安装目录中所有完全匹配的候选模型都具有相同、有效的 `contextWindow`，且不存在自定义端点歧义时，才允许使用。否则返回未知。
-4. **固定预算降级。** 没有可信容量、模型映射冲突、元数据无效或查找失败时，使用 2000 字符。
+2. **Pi AI 的精确模型元数据。** 宿主**声明了 provider 身份**且已安装目录中存在准确 `provider + modelId` 匹配时使用其 `contextWindow`。
+3. **固定预算降级。** 没有可信容量、模型映射缺失/歧义、元数据无效或查找失败时，使用 2000 字符。
+
+**v0.2 信任修正（删除无 provider 同名档）：** v0.1 曾允许"无 provider 身份但目录中同名条目容量一致"时采用 `pi_catalog_unambiguous`。该档位已删除：仅凭模型名称一致——无论多么一致——都无法证明当前部署不是自定义端点/代理（其容量可能与目录不同），因此永远不能标记 `confirmed`（§2.2 规则 3 与本节规则：只有能证明容量对应当前实际运行模型或其有效限制时才可确认）。无 provider 的查找一律降级；歧义探测仅保留用于诊断原因码（`catalog_ambiguous_model_id` 与 `catalog_provider_absent` 之别）。
 
 具体规则：
 
@@ -213,14 +217,15 @@ B(W)=\min\left(
 - `policyVersion`
 - `fallbackReason`（需要降级时）
 
-来源分类：
+来源分类（v0.2）：
 
 - `host_effective_window`
 - `pi_catalog_exact`
-- `pi_catalog_unambiguous`
 - `legacy_fallback`
 
 `capacityStatus` 必须区分已确认（`confirmed`）和未知（`unknown`）。不得通过伪造默认模型或容量来提高确认率。
+
+降级时必须携带**有界的机器可读原因码**（`PromptBudgetFallbackReason` 闭合集；事件只携带代码，绝不携带自由文本细节、用户提示词、原则正文或私有端点地址）：`host_capacity_absent` / `host_capacity_source_untrusted` / `host_capacity_invalid_value` / `catalog_unavailable` / `model_identity_absent` / `catalog_no_exact_match` / `catalog_no_match_for_model_id` / `catalog_ambiguous_model_id` / `catalog_provider_absent` / `catalog_metadata_invalid`。注入事件新增可选字段 `budgetFallbackReason`；旧事件缺失该字段按"政策未知"读取，不得解释为零容量或已确认容量。plugin-local 与共享路径在同等条件下必须给出一致的原因码。
 
 ---
 
@@ -246,6 +251,8 @@ B(W)=\min\left(
 4. 如果目录中不存在精确匹配或存在歧义，使用 2000 字符预算。
 5. 不因模型元数据缺失而阻断 Hook 或修改工具的 allow/deny 决策。
 
+**当前 Codex 模型的明确结论（v0.2 修复轮，实测）：** Codex Hook 契约（探针夹具 v0.162.1）只提供裸 `model` 字符串（如 `gpt-6-astra`），无 provider 身份、无容量字段。该名称在已安装目录中跨 provider 容量矛盾（azure/openai/openai-codex/radius = 272000；cloudflare-ai-gateway/github-copilot/opencode = 1050000），且按 §4.3 v0.2 无 provider 一律不确认。因此**当前 Codex 环境使用固定 2000 字符回退（`legacy_fallback`/`unknown`，原因码 `catalog_ambiguous_model_id`），这是诚实行为而非缺陷**；不得凭名称猜测 provider（如目录中的 `openai-codex` 命名空间）来伪造动态容量。此项列为已知限制：若未来上游 Hook 提供 provider/容量字段，可立即受益于既有解析链。
+
 ### 5.3 WorkBuddy
 
 1. 保持现有 Hook 合同不变，不擅自新增必填字段。
@@ -254,6 +261,8 @@ B(W)=\min\left(
 4. 如果无法获得权威来源，使用固定 2000 字符预算，并在诊断结果中明确标记 `legacy_fallback`。
 
 **v1 不得宣称 WorkBuddy 已经实现动态容量，除非有真实运行证据。** 后续可以独立扩展其容量来源，但不能为了三宿主表面一致而猜测数据。
+
+**v0.2 现状：** WorkBuddy 冻结契约中 `model` 仅为 observed-optional 字段（解码器软消费，畸形不阻塞）；无 provider 身份，按 §4.3 v0.2 无 provider 一律不确认——即使目录同名唯一（如 `glm-4.7`）也保持 2000 回退（原因码 `catalog_provider_absent`）。此前 v0.1 曾经由同名唯一匹配产生过 3200 动态预算，该路径已按信任修正删除。
 
 ---
 
@@ -292,12 +301,12 @@ B(W)=\min\left(
 
 Owner 审批时，Console/CLI 通常不能保证获得执行该激活的实时模型身份，因此不能假装知道当前模型的动态预算。
 
-修改 `checkPromptArtifactDeliverability` 的容量判断：
+修改 `checkPromptArtifactDeliverability` 的容量判断（v0.2 边界 = 1250/16000）：
 
-- 单条成本不超过最小预算：可确认在所有受支持预算档位下单条可装入。
-- 单条成本高于最小预算但不超过最大预算：返回 `model_dependent`，说明是否能注入取决于运行时模型容量。
-- 单条成本超过最大预算：返回 `undeliverable`，给出明确原因和 `nextAction`。
-- 路由或工件事实无法确认：保留 `unconfirmed`。
+- 单条成本不超过 1250 字符：可确认在所有受支持预算档位下单条可装入（`deliverable`，budget 字段 = 1250 即最严档位）。
+- 单条成本高于 1250 但不超过 16000 字符：返回 `model_dependent`，说明是否能注入取决于运行时模型容量（放行 + 提示，不是拒绝也不是承诺）。
+- 单条成本超过 16000 字符：返回 `undeliverable`，给出明确原因和 `nextAction`。
+- 路由或工件事实无法确认：保留 `unconfirmed`；跨宿主聚合必须单调——仅当**所有**适用宿主都超出上限才判 `exceeds_max_tier`，混合情形报 `model_dependent`（列表路由比共享路由少计约 718 字符包装成本，"共享超限但列表未超限"真实可达，不得把局部不可投递表述为全部宿主不可投递）。
 
 容量未知时，不得把 `model_dependent` 显示成确定可注入，也不得因为模型尚未绑定就声称该原则永久不可注入。
 
@@ -324,10 +333,11 @@ Owner 审批时，Console/CLI 通常不能保证获得执行该激活的实时�
 增加（可选字段）：
 
 - `budgetPolicyVersion`
-- `capacitySource`
-- `capacityStatus`
-- `contextWindowTokens`
-（`budget` 字段已存在，即本次解析得到的 `budgetChars`。）
+- `budgetCapacitySource`
+- `budgetCapacityStatus`
+- `budgetContextWindowTokens`
+- `budgetFallbackReason`（v0.2：仅降级时出现的有界原因码，闭合集见 §4.4）
+（`budget` 字段已存在，即本次解析得到的 `budgetChars`——必须记录实际执行值，不得回填常量。）
 
 保留现有 `injectedCharCount`、`budget`、`hostKind`、截断和选择策略字段。
 
@@ -412,14 +422,14 @@ Owner 审批时，Console/CLI 通常不能保证获得执行该激活的实时�
 
 | ID | 验收要求 |
 |---|---|
-| AC-01 | 预算公式、上下限和 2000 字符回退均有完整单元测试。 |
+| AC-01 | 预算公式、上下限（1250/16000）和 2000 字符回退均有完整单元测试，覆盖 32K/64K/128K/256K/1M/≥1.024M 各档位。 |
 | AC-02 | OpenClaw 在有效 Hook 容量可用时确实使用该容量，而不是继续读取固定常量。 |
-| AC-03 | Codex 的模型 ID 只有经过可信解析才能参与预算计算；未知或歧义时正确回退。 |
+| AC-03 | Codex 的模型 ID 只有经过可信解析（宿主声明的 provider + 精确匹配）才能参与预算计算；无 provider（含目录同名一致）、未知或歧义时一律诚实回退并携带原因码。 |
 | AC-04 | WorkBuddy 不存在权威容量来源时，明确报告回退，不伪造动态支持。 |
 | AC-05 | `maxTokens` 不被用作 `contextWindow`；自定义端点不会无条件继承其他提供商的容量。 |
-| AC-06 | 所有真实注入路径均受动态预算或明确的固定预算回退约束，预算不超过 4000 字符。 |
+| AC-06 | 所有真实注入路径均受动态预算或明确的固定预算回退约束，预算不超过 16000 字符（目标上限）；32K 档位下至少一条最小有效原则可在两种自报状态下完整注入（实测锚定 1250 下限）。 |
 | AC-07 | 实际注入、预检、容量状态和 Console 投影共享相同的预算政策和路由计费口径。 |
-| AC-08 | 审批时容量未知的原则使用 `model_dependent` 等诚实状态，不错误承诺一定注入或永久不可注入。 |
+| AC-08 | 审批时容量未知的原则使用 `model_dependent` 等诚实状态（边界 1250/16000），不错误承诺一定注入或永久不可注入；跨宿主混合判定不得报为全体超限。 |
 | AC-09 | 原有公平轮转、FIFO 降级、去重、超长识别及 Owner 审批语义无回归。 |
 | AC-10 | 不增加每轮网络调用、数据库、schema 迁移或新的模型服务。 |
 | AC-11 | `PD_PROMPT_CAPACITY_V1` 原有测试与容量测量回归通过，并新增各容量档位的生产构建器测量。 |

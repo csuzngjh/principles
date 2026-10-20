@@ -709,9 +709,9 @@ export async function handleBeforePromptBuild(
       });
       if (v2PromptBudget.capacityStatus === 'unknown' && v2PromptBudget.fallbackReason) {
         // Per-turn debug noise control: the injection EVENT already records
-        // capacityStatus=legacy_fallback (SPEC §7 observability); the log is
-        // for local diagnosis only.
-        logger?.debug?.(`[PD:RuntimeV2] Model-aware budget fell back to ${v2PromptBudget.budgetChars}c (reason: ${v2PromptBudget.fallbackReason})`);
+        // capacityStatus=legacy_fallback + the bounded reason code (SPEC §7);
+        // the log adds the non-sensitive detail for local diagnosis only.
+        logger?.debug?.(`[PD:RuntimeV2] Model-aware budget fell back to ${v2PromptBudget.budgetChars}c (reason: ${v2PromptBudget.fallbackReason}; detail: ${v2PromptBudget.fallbackDetail ?? 'n/a'})`);
       } else {
         logger?.info?.(`[PD:RuntimeV2] Model-aware budget ${v2PromptBudget.budgetChars}c (source: ${v2PromptBudget.capacitySource}, window: ${v2PromptBudget.contextWindowTokens} tokens)`);
       }
@@ -787,6 +787,9 @@ export async function handleBeforePromptBuild(
         ...(sharedActivePrinciplePrompt?.budgetCapacitySource !== undefined ? { budgetCapacitySource: sharedActivePrinciplePrompt.budgetCapacitySource } : v2PromptBudget !== undefined ? { budgetCapacitySource: v2PromptBudget.capacitySource } : {}),
         ...(sharedActivePrinciplePrompt?.budgetCapacityStatus !== undefined ? { budgetCapacityStatus: sharedActivePrinciplePrompt.budgetCapacityStatus } : v2PromptBudget !== undefined ? { budgetCapacityStatus: v2PromptBudget.capacityStatus } : {}),
         ...(sharedActivePrinciplePrompt != null && sharedActivePrinciplePrompt.budgetContextWindowTokens != null ? { budgetContextWindowTokens: sharedActivePrinciplePrompt.budgetContextWindowTokens } : v2PromptBudget != null && v2PromptBudget.contextWindowTokens != null ? { budgetContextWindowTokens: v2PromptBudget.contextWindowTokens } : {}),
+        // SPEC §7 v0.2: bounded fallback reason code — same facts, same code
+        // on both routes (shared carries its own resolution's code).
+        ...(sharedActivePrinciplePrompt?.budgetFallbackReason !== undefined ? { budgetFallbackReason: sharedActivePrinciplePrompt.budgetFallbackReason } : v2PromptBudget?.fallbackReason !== undefined ? { budgetFallbackReason: v2PromptBudget.fallbackReason } : {}),
         ...(runtimeV2PrincipleIds.size === 0
           ? {
               skipReason: sharedActivePrinciplePrompt

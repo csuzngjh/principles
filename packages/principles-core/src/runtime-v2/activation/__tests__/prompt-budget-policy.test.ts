@@ -23,19 +23,27 @@ function fakeCatalog(entries: { provider: string; modelId: string; contextWindow
   };
 }
 
-describe('promptBudgetCharsForContextWindow (SPEC §4.2 formula)', () => {
-  it('maps the reference table exactly', () => {
-    expect(promptBudgetCharsForContextWindow(32_000)).toBe(500);
-    expect(promptBudgetCharsForContextWindow(64_000)).toBe(1000);
+describe('promptBudgetCharsForContextWindow (SPEC §4.2 formula, v0.2 bounds)', () => {
+  it('maps the reference table exactly (32K/64K clamp UP to the measured floor)', () => {
+    // Raw formula values: 32K→500, 64K→1000 — both below the measured
+    // usable floor (1250), so both clamp UP. Below the floor the shared
+    // route injects ZERO principles (audited defect).
+    expect(promptBudgetCharsForContextWindow(32_000)).toBe(1250);
+    expect(promptBudgetCharsForContextWindow(64_000)).toBe(1250);
     expect(promptBudgetCharsForContextWindow(128_000)).toBe(2000);
     expect(promptBudgetCharsForContextWindow(256_000)).toBe(4000);
-    expect(promptBudgetCharsForContextWindow(1_000_000)).toBe(4000);
+    // 1M maps to floor(2000 × 1_000_000 / 128_000) = 15625 — the 16000 cap
+    // is an upper bound, not a value the formula must reach.
+    expect(promptBudgetCharsForContextWindow(1_000_000)).toBe(15625);
+    // The cap is reached only at ≥ 1.024M tokens.
+    expect(promptBudgetCharsForContextWindow(1_024_000)).toBe(16000);
+    expect(promptBudgetCharsForContextWindow(2_000_000)).toBe(16000);
   });
 
   it('floors below the minimum tier and never exceeds the hard ceiling', () => {
-    // 16K would scale to 250 chars — clamped up to the 500 floor.
+    // 16K would scale to 250 chars — clamped up to the 1250 floor.
     expect(promptBudgetCharsForContextWindow(16_384)).toBe(PROMPT_BUDGET_MIN_CHARS);
-    // A plausibly-large window would scale far beyond 4000 — clamped down.
+    // A plausibly-large window would scale far beyond 16000 — clamped down.
     expect(promptBudgetCharsForContextWindow(10_000_000)).toBe(PROMPT_BUDGET_MAX_CHARS);
     // Non-integer scaling floors down: 200K → 3125.
     expect(promptBudgetCharsForContextWindow(200_000)).toBe(3125);
@@ -62,18 +70,19 @@ describe('isValidContextWindowTokens (rc-1/rc-2 runtime validation)', () => {
   });
 });
 
-describe('classifySingleItemBudgetTier (SPEC §6.3)', () => {
-  it('classifies against the supported [min, max] budget range', () => {
+describe('classifySingleItemBudgetTier (SPEC §6.3, v0.2 bounds)', () => {
+  it('classifies against the supported [1250, 16000] budget range', () => {
     expect(classifySingleItemBudgetTier(0)).toBe('fits_all_tiers');
-    expect(classifySingleItemBudgetTier(500)).toBe('fits_all_tiers');
-    expect(classifySingleItemBudgetTier(501)).toBe('model_dependent');
+    expect(classifySingleItemBudgetTier(1249)).toBe('fits_all_tiers');
+    expect(classifySingleItemBudgetTier(1250)).toBe('fits_all_tiers');
+    expect(classifySingleItemBudgetTier(1251)).toBe('model_dependent');
     expect(classifySingleItemBudgetTier(2000)).toBe('model_dependent');
-    expect(classifySingleItemBudgetTier(4000)).toBe('model_dependent');
-    expect(classifySingleItemBudgetTier(4001)).toBe('exceeds_max_tier');
+    expect(classifySingleItemBudgetTier(16000)).toBe('model_dependent');
+    expect(classifySingleItemBudgetTier(16001)).toBe('exceeds_max_tier');
   });
 });
 
-describe('resolvePromptBudget priority chain (SPEC §4.3)', () => {
+describe('resolvePromptBudget priority chain (SPEC §4.3 v0.2)', () => {
   const catalog = fakeCatalog([
     { provider: 'p1', modelId: 'model-x', contextWindowTokens: 200_000 },
     { provider: 'p2', modelId: 'model-x', contextWindowTokens: 200_000 },
@@ -81,7 +90,7 @@ describe('resolvePromptBudget priority chain (SPEC §4.3)', () => {
     { provider: 'p1', modelId: 'model-y', contextWindowTokens: 1_000_000 },
   ]);
 
-  it('resolves the legacy fallback when no facts exist at all', () => {
+  it('resolves the legacy fallback with a bounded reason code when no facts exist', () => {
     const result = resolvePromptBudget();
     expect(result).toMatchObject({
       budgetChars: 2000,
@@ -90,7 +99,7 @@ describe('resolvePromptBudget priority chain (SPEC §4.3)', () => {
       contextWindowTokens: null,
       policyVersion: 'model_aware_v1',
     });
-    expect(result.fallbackReason).toContain('host_capacity_absent');
+    expect(result.fallbackReason).toBe('host_capacity_absent');
   });
 
   it('priority 1: a trusted host window wins over everything else', () => {
@@ -105,6 +114,7 @@ describe('resolvePromptBudget priority chain (SPEC §4.3)', () => {
       capacityStatus: 'confirmed',
       contextWindowTokens: 256_000,
     });
+    expect(result.fallbackReason).toBeUndefined();
   });
 
   it('trusts every model-specific upstream source (model | modelsConfig | agentContextTokens)', () => {
@@ -127,14 +137,24 @@ describe('resolvePromptBudget priority chain (SPEC §4.3)', () => {
     expect(result.budgetChars).toBe(3125);
   });
 
-  it('unknown/absent host source values are treated as untrusted, not guessed', () => {
+  it('unknown/absent host source values are untrusted; the code survives a catalog rescue', () => {
     for (const source of ['weird-future-value', undefined, '']) {
       const result = resolvePromptBudget({
         hostCapacity: { contextTokenBudget: 128_000, contextWindowSource: source },
+        modelIdentity: { providerId: 'p1', modelId: 'model-x' },
+        catalog,
       });
-      expect(result.capacitySource, `source=${String(source)}`).toBe('legacy_fallback');
-      expect(result.fallbackReason).toContain('host_capacity_source_untrusted');
+      // The catalog CAN rescue the budget, but the reported reason stays the
+      // host-stage failure (why the trusted window was not used).
+      expect(result.capacitySource, `source=${String(source)}`).toBe('pi_catalog_exact');
+      expect(result.fallbackReason, `source=${String(source)}`).toBeUndefined();
     }
+    // Without a catalog rescue the host-stage reason is the one reported.
+    const unrescued = resolvePromptBudget({
+      hostCapacity: { contextTokenBudget: 128_000, contextWindowSource: 'weird' },
+    });
+    expect(unrescued.capacitySource).toBe('legacy_fallback');
+    expect(unrescued.fallbackReason).toBe('host_capacity_source_untrusted');
   });
 
   it('a trusted source with an invalid value degrades instead of clamping the lie', () => {
@@ -143,58 +163,71 @@ describe('resolvePromptBudget priority chain (SPEC §4.3)', () => {
         hostCapacity: { contextTokenBudget: bad, contextWindowSource: 'model' },
       });
       expect(result.capacitySource, `value=${String(bad)}`).toBe('legacy_fallback');
-      expect(result.fallbackReason).toContain('host_capacity_invalid_value');
+      expect(result.fallbackReason).toBe('host_capacity_invalid_value');
     }
   });
 
-  it('priority 2: exact provider+modelId catalog match', () => {
+  it('priority 2: exact provider+modelId catalog match (host-declared provider)', () => {
     const result = resolvePromptBudget({
       modelIdentity: { providerId: 'p1', modelId: 'model-y' },
       catalog,
     });
     expect(result).toMatchObject({
-      budgetChars: 4000,
+      budgetChars: 15625,
       capacitySource: 'pi_catalog_exact',
       capacityStatus: 'confirmed',
       contextWindowTokens: 1_000_000,
     });
   });
 
-  it('priority 3: provider-less lookup only with a unanimous catalog', () => {
-    const unanimous = resolvePromptBudget({
-      modelIdentity: { modelId: 'model-y' },
+  it('priority 2 miss: provider declared but absent from the catalog', () => {
+    const result = resolvePromptBudget({
+      modelIdentity: { providerId: 'p1', modelId: 'no-such-model' },
       catalog,
     });
-    expect(unanimous.capacitySource).toBe('pi_catalog_unambiguous');
-    expect(unanimous.contextWindowTokens).toBe(1_000_000);
+    expect(result.capacitySource).toBe('legacy_fallback');
+    expect(result.fallbackReason).toBe('catalog_no_exact_match');
+  });
 
-    const ambiguous = resolvePromptBudget({
+  it('v0.2 trust amendment: provider-less lookups NEVER confirm — ambiguous names report ambiguity', () => {
+    const result = resolvePromptBudget({
       modelIdentity: { modelId: 'model-x' },
       catalog,
     });
-    expect(ambiguous.capacitySource).toBe('legacy_fallback');
-    expect(ambiguous.fallbackReason).toContain('catalog_ambiguous_model_id');
+    expect(result.capacitySource).toBe('legacy_fallback');
+    expect(result.capacityStatus).toBe('unknown');
+    expect(result.fallbackReason).toBe('catalog_ambiguous_model_id');
+    expect(result.budgetChars).toBe(2000);
   });
 
-  it('provider-less lookup with no catalog hits and exact-miss both fall back honestly', () => {
-    expect(
-      resolvePromptBudget({ modelIdentity: { modelId: 'no-such-model' }, catalog }).fallbackReason,
-    ).toContain('catalog_no_match_for_model_id');
-    expect(
-      resolvePromptBudget({ modelIdentity: { providerId: 'p1', modelId: 'no-such-model' }, catalog }).fallbackReason,
-    ).toContain('catalog_no_exact_match');
+  it('provider-less unanimous names STILL fall back (custom-endpoint risk), with their own code', () => {
+    const result = resolvePromptBudget({
+      modelIdentity: { modelId: 'model-y' },
+      catalog,
+    });
+    expect(result.capacitySource).toBe('legacy_fallback');
+    expect(result.fallbackReason).toBe('catalog_provider_absent');
+    expect(result.budgetChars).toBe(2000);
   });
 
-  it('empty-string identity fields are absent identities, not identities', () => {
+  it('provider-less with no catalog hits falls back honestly', () => {
+    const result = resolvePromptBudget({ modelIdentity: { modelId: 'no-such-model' }, catalog });
+    expect(result.capacitySource).toBe('legacy_fallback');
+    expect(result.fallbackReason).toBe('catalog_no_match_for_model_id');
+  });
+
+  it('empty-string identity fields are absent identities, not identities (unified absence code)', () => {
     const result = resolvePromptBudget({ modelIdentity: { providerId: '', modelId: '' }, catalog });
     expect(result.capacitySource).toBe('legacy_fallback');
-    expect(result.fallbackReason).toContain('model_identity_absent');
+    // An all-empty identity claim carries no usable fact — the resolver
+    // reports the root cause (nothing to resolve from), not a catalog error.
+    expect(result.fallbackReason).toBe('host_capacity_absent');
   });
 
   it('without a catalog binding, model identity alone cannot produce a dynamic budget', () => {
     const result = resolvePromptBudget({ modelIdentity: { providerId: 'p1', modelId: 'model-y' } });
     expect(result.capacitySource).toBe('legacy_fallback');
-    expect(result.fallbackReason).toContain('catalog_unavailable');
+    expect(result.fallbackReason).toBe('catalog_unavailable');
     expect(result.budgetChars).toBe(2000);
   });
 
@@ -204,7 +237,32 @@ describe('resolvePromptBudget priority chain (SPEC §4.3)', () => {
     ]);
     expect(
       resolvePromptBudget({ modelIdentity: { providerId: 'p1', modelId: 'model-bad' }, catalog: broken }).fallbackReason,
-    ).toContain('catalog_metadata_invalid');
+    ).toBe('catalog_metadata_invalid');
+  });
+
+  it('fallback reasons stay within the closed code set (event-safe)', () => {
+    const CODES = new Set([
+      'host_capacity_absent', 'host_capacity_source_untrusted', 'host_capacity_invalid_value',
+      'catalog_unavailable', 'model_identity_absent', 'catalog_no_exact_match',
+      'catalog_no_match_for_model_id', 'catalog_ambiguous_model_id', 'catalog_provider_absent',
+      'catalog_metadata_invalid',
+    ]);
+    const probes = [
+      resolvePromptBudget(),
+      resolvePromptBudget({ hostCapacity: { contextTokenBudget: 1, contextWindowSource: 'model' }, catalog }),
+      resolvePromptBudget({ hostCapacity: { contextTokenBudget: 128_000, contextWindowSource: 'default' } }),
+      resolvePromptBudget({ modelIdentity: { modelId: 'model-x' }, catalog }),
+      resolvePromptBudget({ modelIdentity: { modelId: 'model-y' }, catalog }),
+      resolvePromptBudget({ modelIdentity: { modelId: 'zzz' }, catalog }),
+      resolvePromptBudget({ modelIdentity: { providerId: 'p1', modelId: 'zzz' }, catalog }),
+      resolvePromptBudget({ modelIdentity: { providerId: 'p1', modelId: '' }, catalog }),
+      resolvePromptBudget({ modelIdentity: { providerId: 'p1', modelId: 'model-y' } }),
+    ];
+    for (const r of probes) {
+      if (r.fallbackReason !== undefined) {
+        expect(CODES.has(r.fallbackReason), `code=${r.fallbackReason}`).toBe(true);
+      }
+    }
   });
 });
 
@@ -214,7 +272,7 @@ describe('getPromptModelCatalog against the installed pi-ai 1.2.0 catalog', () =
     const exact = catalog.exact('anthropic', 'claude-sonnet-4-5');
     expect(exact).toBeDefined();
     expect(exact?.contextWindowTokens).toBe(200_000);
-    // 200K → floor(2000 × 200000 / 128000) = 3125, under the 4000 ceiling.
+    // 200K → floor(2000 × 200000 / 128000) = 3125, under the 16000 ceiling.
     const resolved = resolvePromptBudget({
       modelIdentity: { providerId: 'anthropic', modelId: 'claude-sonnet-4-5' },
       catalog,
@@ -235,13 +293,13 @@ describe('getPromptModelCatalog against the installed pi-ai 1.2.0 catalog', () =
     }
   });
 
-  it('a real conflicting cross-provider id (gpt-5) falls back instead of picking a winner', () => {
+  it('a real conflicting cross-provider id (gpt-5) falls back with the ambiguity code', () => {
     const resolved = resolvePromptBudget({
       modelIdentity: { modelId: 'gpt-5' },
       catalog: getPromptModelCatalog(),
     });
     expect(resolved.capacitySource).toBe('legacy_fallback');
-    expect(resolved.fallbackReason).toContain('catalog_ambiguous_model_id:gpt-5');
+    expect(resolved.fallbackReason).toBe('catalog_ambiguous_model_id');
   });
 
   it('custom/nonexistent provider ids never inherit another provider capacity (SPEC §2.2)', () => {
@@ -250,6 +308,7 @@ describe('getPromptModelCatalog against the installed pi-ai 1.2.0 catalog', () =
       catalog: getPromptModelCatalog(),
     });
     expect(resolved.capacitySource).toBe('legacy_fallback');
+    expect(resolved.fallbackReason).toBe('catalog_no_exact_match');
     expect(resolved.budgetChars).toBe(2000);
   });
 });

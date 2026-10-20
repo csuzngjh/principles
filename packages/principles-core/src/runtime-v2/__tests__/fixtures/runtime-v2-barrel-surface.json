@@ -1,6 +1,6 @@
 {
   "barrel": "src/runtime-v2/index.ts",
-  "count": 1956,
+  "count": 1957,
   "names": [
     "ADMISSION_CONFIDENCE_THRESHOLD",
     "ADMISSION_POLICY_VERSION",
@@ -1043,6 +1043,7 @@
     "PromptActivationReaderResult",
     "PromptBudgetCapacitySource",
     "PromptBudgetCapacityStatus",
+    "PromptBudgetFallbackReason",
     "PromptBudgetHostCapacityFact",
     "PromptBudgetResolution",
     "PromptBudgetTierFit",

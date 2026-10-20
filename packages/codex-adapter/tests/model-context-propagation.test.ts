@@ -56,10 +56,10 @@ describe('Codex decoder carries model identity for the model-aware budget', () =
     });
     expect(resolution.budgetChars).toBe(2000);
     expect(resolution.capacitySource).toBe('legacy_fallback');
-    expect(resolution.fallbackReason).toContain('catalog_ambiguous_model_id:gpt-6-astra');
+    expect(resolution.fallbackReason).toBe('catalog_ambiguous_model_id');
   });
 
-  it('a catalog-unambiguous model id resolves a dynamic budget through the same path', () => {
+  it('v0.2 trust amendment: even a catalog-unanimous model id without a provider falls back (custom-endpoint risk)', () => {
     const payload = fixture('02-user-prompt-submit.json') as Record<string, unknown>;
     payload.model = 'glm-4.7';
     const event = decodeCodexInput(payload);
@@ -67,9 +67,12 @@ describe('Codex decoder carries model identity for the model-aware budget', () =
       modelIdentity: { modelId: event.context.modelContext?.modelId },
       catalog: getPromptModelCatalog(),
     });
-    // glm-4.7 exists only under provider zai with contextWindow 204800.
-    expect(resolution.capacitySource).toBe('pi_catalog_unambiguous');
-    expect(resolution.contextWindowTokens).toBe(204800);
-    expect(resolution.budgetChars).toBe(3200);
+    // glm-4.7 exists only under provider zai (contextWindow 204800), but the
+    // Codex hook contract carries NO provider identity — a name-only match
+    // cannot prove the deployment is not a custom endpoint, so the budget
+    // stays the honest fixed fallback (never a guessed dynamic capacity).
+    expect(resolution.capacitySource).toBe('legacy_fallback');
+    expect(resolution.fallbackReason).toBe('catalog_provider_absent');
+    expect(resolution.budgetChars).toBe(2000);
   });
 });

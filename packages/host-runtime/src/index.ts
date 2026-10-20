@@ -337,6 +337,10 @@ export function createProductionHostRuntime(
           ...(prompt.budgetCapacitySource !== undefined ? { budgetCapacitySource: prompt.budgetCapacitySource } : {}),
           ...(prompt.budgetCapacityStatus !== undefined ? { budgetCapacityStatus: prompt.budgetCapacityStatus } : {}),
           ...(prompt.budgetContextWindowTokens != null ? { budgetContextWindowTokens: prompt.budgetContextWindowTokens } : {}),
+          // SPEC §7 v0.2: the bounded fallback reason code rides the event so
+          // operators can tell model-identity absence from catalog ambiguity
+          // etc. without touching logs. Detail stays out of events.
+          ...(prompt.budgetFallbackReason !== undefined ? { budgetFallbackReason: prompt.budgetFallbackReason } : {}),
           // PRI-904: selection diagnostics (bounded, optional). On this route
           // the policy is legacy_fifo_prefix_v1 and NO rotation provenance is
           // emitted — a fair claim would be untrue here (see above).

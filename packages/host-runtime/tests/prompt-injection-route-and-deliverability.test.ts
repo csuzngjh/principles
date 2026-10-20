@@ -5,6 +5,8 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import * as yaml from 'js-yaml';
 import {
+  PROMPT_BUDGET_MAX_CHARS,
+  PROMPT_BUDGET_MIN_CHARS,
   RUNTIME_V2_PRINCIPLE_BUDGET,
   SqliteActivationStateStore,
   SqliteConnection,
@@ -335,24 +337,24 @@ describe('AC-05/AC-02: checkPromptArtifactDeliverability — real identity, rout
     const textFor = (cost: number) => 'x'.repeat(cost - header.length - 1 - '- [B-1] '.length);
     const artifactFor = (text: string) => ({ artifactId: 'art-B-1', artifactKind: 'principle', contentJson: JSON.stringify({ principleId: 'B-1', text }), validationStatus: 'validated' as const });
 
-    // Exactly at the MIN supported tier (500): deliverable everywhere.
-    expect(joinedCost(textFor(500).length)).toBe(500);
-    const atMin = await checkPromptArtifactDeliverability({ workspaceDir: dir, artifact: artifactFor(textFor(500)) });
+    // Exactly at the MIN supported tier (1250, measured floor): deliverable everywhere.
+    expect(joinedCost(textFor(PROMPT_BUDGET_MIN_CHARS).length)).toBe(PROMPT_BUDGET_MIN_CHARS);
+    const atMin = await checkPromptArtifactDeliverability({ workspaceDir: dir, artifact: artifactFor(textFor(PROMPT_BUDGET_MIN_CHARS)) });
     expect(atMin.status).toBe('deliverable');
-    if (atMin.status === 'deliverable') expect(atMin.costChars).toBe(500);
+    if (atMin.status === 'deliverable') expect(atMin.costChars).toBe(PROMPT_BUDGET_MIN_CHARS);
 
     // Two over the min tier: still injectable on larger models — model_dependent.
-    const overMin = await checkPromptArtifactDeliverability({ workspaceDir: dir, artifact: artifactFor(textFor(502)) });
+    const overMin = await checkPromptArtifactDeliverability({ workspaceDir: dir, artifact: artifactFor(textFor(PROMPT_BUDGET_MIN_CHARS + 2)) });
     expect(overMin.status).toBe('model_dependent');
-    if (overMin.status === 'model_dependent') expect(overMin.costChars).toBe(502);
+    if (overMin.status === 'model_dependent') expect(overMin.costChars).toBe(PROMPT_BUDGET_MIN_CHARS + 2);
 
-    // Exactly at the MAX supported tier (4000): model_dependent, not refused.
-    const atMax = await checkPromptArtifactDeliverability({ workspaceDir: dir, artifact: artifactFor(textFor(4000)) });
+    // Exactly at the MAX supported tier (16000, Owner target): model_dependent, not refused.
+    const atMax = await checkPromptArtifactDeliverability({ workspaceDir: dir, artifact: artifactFor(textFor(PROMPT_BUDGET_MAX_CHARS)) });
     expect(atMax.status).toBe('model_dependent');
-    if (atMax.status === 'model_dependent') expect(atMax.costChars).toBe(4000);
+    if (atMax.status === 'model_dependent') expect(atMax.costChars).toBe(PROMPT_BUDGET_MAX_CHARS);
 
     // Two chars over the max tier: undeliverable by exactly 2.
-    const over = await checkPromptArtifactDeliverability({ workspaceDir: dir, artifact: artifactFor(textFor(4002)) });
+    const over = await checkPromptArtifactDeliverability({ workspaceDir: dir, artifact: artifactFor(textFor(PROMPT_BUDGET_MAX_CHARS + 2)) });
     expect(over.status).toBe('undeliverable');
     if (over.status === 'undeliverable') {
       expect(over.overByChars).toBe(2);
@@ -366,7 +368,7 @@ describe('AC-05/AC-02: checkPromptArtifactDeliverability — real identity, rout
     const artifact = { artifactId: 'art-SR', artifactKind: 'principle', contentJson: JSON.stringify({ principleId: 'SR-1', text }), validationStatus: 'validated' as const };
     const listDir = tempWorkspace({ declare: ['openclaw'] });
     const listResult = await checkPromptArtifactDeliverability({ workspaceDir: listDir, artifact });
-    // 1292 serialized chars sit inside the supported 500..4000 range but above
+    // 1292 serialized chars sit inside the supported 1250..16000 range but above
     // the min tier — model-dependent on the list route.
     expect(listResult.status).toBe('model_dependent');
     if (listResult.status === 'model_dependent') expect(listResult.costChars).toBe(1292);
@@ -403,8 +405,9 @@ describe('AC-05/AC-02: checkPromptArtifactDeliverability — real identity, rout
       expect(codexResult.costChars).toBe(result.costChars);
     }
 
-    // 超出最大支持档位才不可投递（共享路由完整渲染计费）
-    const hugeArtifact = { ...artifact, contentJson: JSON.stringify({ principleId: 'WB-3', text: 'S'.repeat(4300) }) };
+    // 超出最大支持档位才不可投递（共享路由完整渲染计费；17000 字符正文在
+    // 共享路由 ≈17763 > 16000 上限，在列表路由 ≈17041 同样超限）
+    const hugeArtifact = { ...artifact, contentJson: JSON.stringify({ principleId: 'WB-3', text: 'S'.repeat(17000) }) };
     const undeliverable = await checkPromptArtifactDeliverability({ workspaceDir: dir, targetHost: 'workbuddy', artifact: hugeArtifact });
     expect(undeliverable.status).toBe('undeliverable');
     if (undeliverable.status === 'undeliverable') {
@@ -415,21 +418,22 @@ describe('AC-05/AC-02: checkPromptArtifactDeliverability — real identity, rout
     }
   });
 
-  it('self-report switch: the footer is billed — a candidate inside the max tier without it becomes undeliverable with it (3809 → 4164)', async () => {
-    // 1200-char text costs 1959 plain / 2314 with footer (footer = +355).
-    // Scale to 3050 so the footer crosses the 4000 max tier: 3809 → 4164.
-    const artifact = { artifactId: 'art-SR', artifactKind: 'principle', contentJson: JSON.stringify({ principleId: 'SR-1', text: 'S'.repeat(3050) }), validationStatus: 'validated' as const };
+  it('self-report switch: the footer is billed — a candidate inside the max tier without it becomes undeliverable with it (15759 → 16114)', async () => {
+    // The footer costs +355 chars (measured). Scale the text to 15000 so the
+    // plain render (15759) stays inside the 16000 max tier while the footer
+    // render (16114) crosses it — the footer alone flips the verdict.
+    const artifact = { artifactId: 'art-SR', artifactKind: 'principle', contentJson: JSON.stringify({ principleId: 'SR-1', text: 'S'.repeat(15000) }), validationStatus: 'validated' as const };
     const plainDir = tempWorkspace({ declare: ['codex'] });
     const plain = await checkPromptArtifactDeliverability({ workspaceDir: plainDir, artifact });
     expect(plain.status).toBe('model_dependent');
-    if (plain.status === 'model_dependent') expect(plain.costChars).toBe(3809);
+    if (plain.status === 'model_dependent') expect(plain.costChars).toBe(15759);
 
     const selfReportDir = tempWorkspace({ declare: ['codex'], selfReport: true });
     const withFooter = await checkPromptArtifactDeliverability({ workspaceDir: selfReportDir, artifact });
     expect(withFooter.status).toBe('undeliverable');
     if (withFooter.status === 'undeliverable') {
-      expect(withFooter.costChars).toBe(4164);
-      expect(withFooter.overByChars).toBe(164);
+      expect(withFooter.costChars).toBe(16114);
+      expect(withFooter.overByChars).toBe(114);
     }
   });
 
@@ -448,9 +452,11 @@ describe('AC-05/AC-02: checkPromptArtifactDeliverability — real identity, rout
 
   it('unconfirmed route → per-host tier facts, never a guessed verdict', async () => {
     const dir = tempWorkspace({ declare: ['openclaw', 'codex'] });
-    // A 100-char entry fits every tier on the list route but only
-    // larger-context models on the shared route — real divergence per host.
-    const artifact = { artifactId: 'art-SR', artifactKind: 'principle', contentJson: JSON.stringify({ principleId: 'SR-1', text: 'S'.repeat(100) }), validationStatus: 'validated' as const };
+    // The list route bills ~718 fewer chars than the shared route for the
+    // same entry (fixed wrapper delta). An 800-char statement lands at
+    // ≈841 on the list route (fits ALL tiers) but ≈1563 on the shared route
+    // (model_dependent) — a REAL per-host divergence the UI must show.
+    const artifact = { artifactId: 'art-SR', artifactKind: 'principle', contentJson: JSON.stringify({ principleId: 'SR-1', text: 'S'.repeat(800) }), validationStatus: 'validated' as const };
     const result = await checkPromptArtifactDeliverability({ workspaceDir: dir, artifact });
     expect(result.status).toBe('unconfirmed');
     if (result.status === 'unconfirmed') {
@@ -481,10 +487,10 @@ describe('AC-02/AC-06: readPromptActivationInjectionStatuses — positive per-it
     const dir = tempWorkspace({ declare: ['openclaw'] });
     await seedActivation(dir, 'K-1', '第一条短原则');
     await seedActivation(dir, 'K-2', '第二条短原则');
-    // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: 单条超出最大支持档位(4000)才是
+    // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 v0.2: 单条超出最大支持档位(16000)才是
     // oversized；2000 字符正文(列表计费 ≈2042)落在支持区间内 → model_dependent。
     await seedActivation(dir, 'K-BIG', 'Z'.repeat(2000));
-    await seedActivation(dir, 'K-HUGE', 'Z'.repeat(4300));
+    await seedActivation(dir, 'K-HUGE', 'Z'.repeat(17000));
     const report = await readPromptActivationInjectionStatuses({ workspaceDir: dir });
     expect(report.route.status).toBe('confirmed');
     const byId = new Map(report.statuses.map((s) => [s.activationId, s]));

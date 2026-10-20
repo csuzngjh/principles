@@ -70,13 +70,17 @@ describe('WorkBuddy decoder carries optional model identity (soft, non-blocking)
     expect(resolution.budgetChars).toBe(2000);
     expect(resolution.capacitySource).toBe('legacy_fallback');
     expect(resolution.capacityStatus).toBe('unknown');
+    expect(resolution.fallbackReason).toBe('catalog_ambiguous_model_id');
 
-    // glm-4.7 is unambiguous (provider zai, 204800 tokens) → dynamic budget.
-    const dynamic = resolvePromptBudget({
+    // v0.2 trust amendment: even a catalog-unanimous id (glm-4.7, only zai,
+    // 204800 tokens) stays on the fixed fallback — the WorkBuddy contract
+    // exposes no provider identity, so no name-only match may be confirmed.
+    const unanimous = resolvePromptBudget({
       modelIdentity: { modelId: 'glm-4.7' },
       catalog: getPromptModelCatalog(),
     });
-    expect(dynamic.capacitySource).toBe('pi_catalog_unambiguous');
-    expect(dynamic.budgetChars).toBe(3200);
+    expect(unanimous.capacitySource).toBe('legacy_fallback');
+    expect(unanimous.fallbackReason).toBe('catalog_provider_absent');
+    expect(unanimous.budgetChars).toBe(2000);
   });
 });
