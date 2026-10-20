@@ -327,82 +327,110 @@ describe('AC-05/AC-02: checkPromptArtifactDeliverability — real identity, rout
     expect(disabledResult.reason).toContain('prompt_feature_disabled');
   });
 
-  it('list route: an entry exactly filling the budget is deliverable; two chars over the joined-line boundary is refused by exactly 1', async () => {
+  it('list route: tier boundaries — exactly at the min tier is deliverable, mid-band is model_dependent, two chars over the max tier is refused by exactly 2 (SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §6.3)', async () => {
     const dir = tempWorkspace({ declare: ['openclaw'] });
     const header = 'Runtime V2 activated principles:';
-    // 内部计费含尾换行: header + '\n' + entry + '\n' ≤ 2000 ⇔ join(header+entry) ≤ 2000
-    const fitLen = RUNTIME_V2_PRINCIPLE_BUDGET - header.length - 1 - '- [B-1] '.length - 1;
-    const artifact = { artifactId: 'art-B-1', artifactKind: 'principle', contentJson: JSON.stringify({ principleId: 'B-1', text: 'x'.repeat(fitLen) }), validationStatus: 'validated' };
-    const ok = await checkPromptArtifactDeliverability({ workspaceDir: dir, artifact });
-    expect(ok.status).toBe('deliverable');
-    if (ok.status === 'deliverable') expect(ok.costChars).toBe(RUNTIME_V2_PRINCIPLE_BUDGET - 1);
+    // 内部计费含尾换行: join(header+entry) = header + 1 + '- [B-1] ' + textLen
+    const joinedCost = (textLen: number) => header.length + 1 + '- [B-1] '.length + textLen;
+    const textFor = (cost: number) => 'x'.repeat(cost - header.length - 1 - '- [B-1] '.length);
+    const artifactFor = (text: string) => ({ artifactId: 'art-B-1', artifactKind: 'principle', contentJson: JSON.stringify({ principleId: 'B-1', text }), validationStatus: 'validated' as const });
 
-    const over = { ...artifact, contentJson: JSON.stringify({ principleId: 'B-1', text: 'x'.repeat(fitLen + 2) }) };
-    const bad = await checkPromptArtifactDeliverability({ workspaceDir: dir, artifact: over });
-    expect(bad.status).toBe('undeliverable');
-    if (bad.status === 'undeliverable') {
-      expect(bad.overByChars).toBe(1);
-      expect(bad.reason).toBe('single_item_exceeds_budget');
-      expect(bad.nextAction).toContain('modify to injectable version');
+    // Exactly at the MIN supported tier (500): deliverable everywhere.
+    expect(joinedCost(textFor(500).length)).toBe(500);
+    const atMin = await checkPromptArtifactDeliverability({ workspaceDir: dir, artifact: artifactFor(textFor(500)) });
+    expect(atMin.status).toBe('deliverable');
+    if (atMin.status === 'deliverable') expect(atMin.costChars).toBe(500);
+
+    // Two over the min tier: still injectable on larger models — model_dependent.
+    const overMin = await checkPromptArtifactDeliverability({ workspaceDir: dir, artifact: artifactFor(textFor(502)) });
+    expect(overMin.status).toBe('model_dependent');
+    if (overMin.status === 'model_dependent') expect(overMin.costChars).toBe(502);
+
+    // Exactly at the MAX supported tier (4000): model_dependent, not refused.
+    const atMax = await checkPromptArtifactDeliverability({ workspaceDir: dir, artifact: artifactFor(textFor(4000)) });
+    expect(atMax.status).toBe('model_dependent');
+    if (atMax.status === 'model_dependent') expect(atMax.costChars).toBe(4000);
+
+    // Two chars over the max tier: undeliverable by exactly 2.
+    const over = await checkPromptArtifactDeliverability({ workspaceDir: dir, artifact: artifactFor(textFor(4002)) });
+    expect(over.status).toBe('undeliverable');
+    if (over.status === 'undeliverable') {
+      expect(over.overByChars).toBe(2);
+      expect(over.reason).toBe('single_item_exceeds_budget');
+      expect(over.nextAction).toContain('modify to injectable version');
     }
   });
 
-  it('route divergence: the same candidate fits the list route but not the shared route', async () => {
+  it('route divergence: the same candidate is tier-classified by each route own serializer (list vs shared bill different costs)', async () => {
     const text = 'S'.repeat(1250);
-    const artifact = { artifactId: 'art-SR', artifactKind: 'principle', contentJson: JSON.stringify({ principleId: 'SR-1', text }), validationStatus: 'validated' };
+    const artifact = { artifactId: 'art-SR', artifactKind: 'principle', contentJson: JSON.stringify({ principleId: 'SR-1', text }), validationStatus: 'validated' as const };
     const listDir = tempWorkspace({ declare: ['openclaw'] });
     const listResult = await checkPromptArtifactDeliverability({ workspaceDir: listDir, artifact });
-    expect(listResult.status).toBe('deliverable');
-    if (listResult.status === 'deliverable') expect(listResult.costChars).toBe(1292);
+    // 1292 serialized chars sit inside the supported 500..4000 range but above
+    // the min tier — model-dependent on the list route.
+    expect(listResult.status).toBe('model_dependent');
+    if (listResult.status === 'model_dependent') expect(listResult.costChars).toBe(1292);
 
     const sharedDir = tempWorkspace({ declare: ['codex'] });
     const sharedResult = await checkPromptArtifactDeliverability({ workspaceDir: sharedDir, artifact });
-    expect(sharedResult.status).toBe('undeliverable');
-    if (sharedResult.status === 'undeliverable') {
+    expect(sharedResult.status).toBe('model_dependent');
+    if (sharedResult.status === 'model_dependent') {
+      // The shared route bills the full directive render — 717 chars MORE for
+      // the same candidate. Both serializers stay the single cost authority.
       expect(sharedResult.costChars).toBe(2009);
-      expect(sharedResult.overByChars).toBe(9);
       expect(sharedResult.budgetScope).toBe('full_directive_context');
     }
   });
 
-  it('an explicit workbuddy target measures the single-item fit on the shared route, identical to codex', async () => {
+  it('an explicit workbuddy target measures the single-item tier fit on the shared route, identical to codex', async () => {
     const text = 'S'.repeat(1250);
-    const artifact = { artifactId: 'art-WB', artifactKind: 'principle', contentJson: JSON.stringify({ principleId: 'WB-1', text }), validationStatus: 'validated' };
+    const artifact = { artifactId: 'art-WB', artifactKind: 'principle', contentJson: JSON.stringify({ principleId: 'WB-1', text }), validationStatus: 'validated' as const };
     const dir = tempWorkspace({ declare: ['openclaw'] });
     const result = await checkPromptArtifactDeliverability({ workspaceDir: dir, targetHost: 'workbuddy', artifact });
-    expect(result.status).toBe('undeliverable');
-    if (result.status === 'undeliverable') {
+    expect(result.status).toBe('model_dependent');
+    if (result.status === 'model_dependent') {
       expect(result.route).toBe('shared_render');
       expect(result.hostKind).toBe('workbuddy');
       expect(result.basis).toBe('explicit_target');
       expect(result.costChars).toBe(2009);
-      expect(result.overByChars).toBe(9);
       expect(result.budgetScope).toBe('full_directive_context');
     }
 
-    // 同一候选在 workbuddy 显式目标下装入/超长的分界与 codex 完全一致
-    const shortArtifact = { ...artifact, contentJson: JSON.stringify({ principleId: 'WB-2', text: 'short' }) };
-    const ok = await checkPromptArtifactDeliverability({ workspaceDir: dir, targetHost: 'workbuddy', artifact: shortArtifact });
-    expect(ok.status).toBe('deliverable');
-    if (ok.status === 'deliverable') {
-      expect(ok.route).toBe('shared_render');
-      expect(ok.hostKind).toBe('workbuddy');
-      expect(ok.budgetScope).toBe('full_directive_context');
-      expect(ok.unit).toBe('utf16_code_units');
+    // 同一候选在 workbuddy 与 codex 显式目标下的判定完全一致（等价性证据）
+    const codexResult = await checkPromptArtifactDeliverability({ workspaceDir: dir, targetHost: 'codex', artifact });
+    expect(codexResult.status).toBe(result.status);
+    if (codexResult.status === 'model_dependent' && result.status === 'model_dependent') {
+      expect(codexResult.costChars).toBe(result.costChars);
+    }
+
+    // 超出最大支持档位才不可投递（共享路由完整渲染计费）
+    const hugeArtifact = { ...artifact, contentJson: JSON.stringify({ principleId: 'WB-3', text: 'S'.repeat(4300) }) };
+    const undeliverable = await checkPromptArtifactDeliverability({ workspaceDir: dir, targetHost: 'workbuddy', artifact: hugeArtifact });
+    expect(undeliverable.status).toBe('undeliverable');
+    if (undeliverable.status === 'undeliverable') {
+      expect(undeliverable.route).toBe('shared_render');
+      expect(undeliverable.hostKind).toBe('workbuddy');
+      expect(undeliverable.budgetScope).toBe('full_directive_context');
+      expect(undeliverable.unit).toBe('utf16_code_units');
     }
   });
 
-  it('self-report switch: a candidate fitting the shared render without the footer becomes undeliverable with it (1959 → 2314)', async () => {
-    const artifact = { artifactId: 'art-SR', artifactKind: 'principle', contentJson: JSON.stringify({ principleId: 'SR-1', text: 'S'.repeat(1200) }), validationStatus: 'validated' };
+  it('self-report switch: the footer is billed — a candidate inside the max tier without it becomes undeliverable with it (3809 → 4164)', async () => {
+    // 1200-char text costs 1959 plain / 2314 with footer (footer = +355).
+    // Scale to 3050 so the footer crosses the 4000 max tier: 3809 → 4164.
+    const artifact = { artifactId: 'art-SR', artifactKind: 'principle', contentJson: JSON.stringify({ principleId: 'SR-1', text: 'S'.repeat(3050) }), validationStatus: 'validated' as const };
     const plainDir = tempWorkspace({ declare: ['codex'] });
     const plain = await checkPromptArtifactDeliverability({ workspaceDir: plainDir, artifact });
-    expect(plain.status).toBe('deliverable');
-    if (plain.status === 'deliverable') expect(plain.costChars).toBe(1959);
+    expect(plain.status).toBe('model_dependent');
+    if (plain.status === 'model_dependent') expect(plain.costChars).toBe(3809);
 
     const selfReportDir = tempWorkspace({ declare: ['codex'], selfReport: true });
     const withFooter = await checkPromptArtifactDeliverability({ workspaceDir: selfReportDir, artifact });
     expect(withFooter.status).toBe('undeliverable');
-    if (withFooter.status === 'undeliverable') expect(withFooter.costChars).toBe(2314);
+    if (withFooter.status === 'undeliverable') {
+      expect(withFooter.costChars).toBe(4164);
+      expect(withFooter.overByChars).toBe(164);
+    }
   });
 
   it('uses the REAL resolved principle id (a title-derived id is measured, not a 36-char UUID allowance)', () => {
@@ -418,18 +446,21 @@ describe('AC-05/AC-02: checkPromptArtifactDeliverability — real identity, rout
     expect(fit.costChars).not.toBe('Runtime V2 activated principles:'.length + 1 + `- [${'0'.repeat(36)}] ${'x'.repeat(30)}`.length);
   });
 
-  it('unconfirmed route → per-host fit facts, never a guessed verdict', async () => {
+  it('unconfirmed route → per-host tier facts, never a guessed verdict', async () => {
     const dir = tempWorkspace({ declare: ['openclaw', 'codex'] });
-    const artifact = { artifactId: 'art-SR', artifactKind: 'principle', contentJson: JSON.stringify({ principleId: 'SR-1', text: 'S'.repeat(1250) }), validationStatus: 'validated' };
+    // A 100-char entry fits every tier on the list route but only
+    // larger-context models on the shared route — real divergence per host.
+    const artifact = { artifactId: 'art-SR', artifactKind: 'principle', contentJson: JSON.stringify({ principleId: 'SR-1', text: 'S'.repeat(100) }), validationStatus: 'validated' as const };
     const result = await checkPromptArtifactDeliverability({ workspaceDir: dir, artifact });
     expect(result.status).toBe('unconfirmed');
     if (result.status === 'unconfirmed') {
       expect(result.reason).toContain('route_unconfirmed');
-      expect(result.perHost).toEqual([
-        { hostKind: 'openclaw', fits: true, costChars: 1292 },
-        { hostKind: 'codex', fits: false, costChars: 2009 },
-        { hostKind: 'workbuddy', fits: false, costChars: 2009 },
+      expect(result.perHost?.map((e) => ({ hostKind: e.hostKind, tierFit: e.tierFit }))).toEqual([
+        { hostKind: 'openclaw', tierFit: 'fits_all_tiers' },
+        { hostKind: 'codex', tierFit: 'model_dependent' },
+        { hostKind: 'workbuddy', tierFit: 'model_dependent' },
       ]);
+      expect(result.perHost?.every((e) => typeof e.costChars === 'number')).toBe(true);
     }
   });
 
@@ -450,17 +481,22 @@ describe('AC-02/AC-06: readPromptActivationInjectionStatuses — positive per-it
     const dir = tempWorkspace({ declare: ['openclaw'] });
     await seedActivation(dir, 'K-1', '第一条短原则');
     await seedActivation(dir, 'K-2', '第二条短原则');
-    // 单条即超长(列表路由 header+entry > 2000)
+    // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: 单条超出最大支持档位(4000)才是
+    // oversized；2000 字符正文(列表计费 ≈2042)落在支持区间内 → model_dependent。
     await seedActivation(dir, 'K-BIG', 'Z'.repeat(2000));
+    await seedActivation(dir, 'K-HUGE', 'Z'.repeat(4300));
     const report = await readPromptActivationInjectionStatuses({ workspaceDir: dir });
     expect(report.route.status).toBe('confirmed');
     const byId = new Map(report.statuses.map((s) => [s.activationId, s]));
     expect(byId.get('act-K-1')?.status).toBe('injectable');
     expect(byId.get('act-K-1')?.inCurrentWindow).toBe(true);
     expect(byId.get('act-K-1')?.costChars).toBeGreaterThan(0);
-    expect(byId.get('act-K-BIG')?.status).toBe('oversized');
+    expect(byId.get('act-K-BIG')?.status).toBe('model_dependent');
     expect(byId.get('act-K-BIG')?.inCurrentWindow).toBe(false);
-    expect(byId.get('act-K-BIG')?.reason).toContain('single_item_exceeds_budget');
+    expect(byId.get('act-K-BIG')?.reason).toContain('model_dependent_capacity');
+    expect(byId.get('act-K-HUGE')?.status).toBe('oversized');
+    expect(byId.get('act-K-HUGE')?.inCurrentWindow).toBe(false);
+    expect(byId.get('act-K-HUGE')?.reason).toContain('single_item_exceeds_budget');
   });
 
   it('window full but single-item deliverable → window_excluded, not oversized', async () => {

@@ -1,5 +1,5 @@
 import { createProductionHostRuntime, type ActivePrinciplePromptResult, type HostRuntime, type ProductionRuleContextRequest, type ProductionPainEnrichment } from '@principles/host-runtime';
-import type { HostEvent, HostEventContext, HostEventResult } from '@principles/core/host';
+import type { HostEvent, HostEventContext, HostEventResult, HostModelContext } from '@principles/core/host';
 import { OPENCLAW_TOOL_SEMANTICS } from '../constants/tool-semantics.js';
 import type {
   PluginHookAgentContext,
@@ -40,6 +40,31 @@ export interface OpenClawHostRuntime {
 
 function contextFor(workspaceDir: string, sessionId: string | undefined, toolName?: string): HostEventContext {
   return { workspaceDir, sessionId: sessionId ?? 'openclaw:session-unavailable', toolName };
+}
+
+/**
+ * SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: forward the hook context's model
+ * facts (untrusted until the budget resolver validates them) so the shared
+ * path resolves the injection budget from the SAME host facts the
+ * plugin-local route sees. Fields are copied only when present — a host
+ * context without model identity stays without model identity (WorkBuddy
+ * semantics), never a guessed default.
+ */
+function modelContextFor(context: PluginHookAgentContext): HostModelContext | undefined {
+  const modelContext: { modelProviderId?: string; modelId?: string; contextTokenBudget?: unknown; contextWindowSource?: unknown } = {};
+  if (typeof context.modelProviderId === 'string' && context.modelProviderId.length > 0) {
+    modelContext.modelProviderId = context.modelProviderId;
+  }
+  if (typeof context.modelId === 'string' && context.modelId.length > 0) {
+    modelContext.modelId = context.modelId;
+  }
+  if (context.contextTokenBudget !== undefined) {
+    modelContext.contextTokenBudget = context.contextTokenBudget;
+  }
+  if (context.contextWindowSource !== undefined) {
+    modelContext.contextWindowSource = context.contextWindowSource;
+  }
+  return Object.keys(modelContext).length > 0 ? (modelContext as HostModelContext) : undefined;
 }
 
 export function createOpenClawHostRuntime(options: OpenClawHostRuntimeOptions): OpenClawHostRuntime {
@@ -116,6 +141,7 @@ export function createOpenClawHostRuntime(options: OpenClawHostRuntimeOptions): 
   async function dispatch(payload: NativePayload, workspaceDir: string, sessionId: string | undefined): Promise<NativeResult> {
     const token = {};
     payloads.set(token, payload);
+    const modelContext = modelContextFor(payload.context);
     const event: HostEvent = {
       kind: payload.kind,
       context: {
@@ -124,6 +150,7 @@ export function createOpenClawHostRuntime(options: OpenClawHostRuntimeOptions): 
           toolInput: payload.event.params ?? {},
           toolOutput: { error: payload.event.error, result: payload.event.result, durationMs: payload.event.durationMs },
         } : {}),
+        ...(modelContext !== undefined ? { modelContext } : {}),
       },
       rawPayload: payload.kind === 'before_tool_call'
         ? { nativeToken: token, toolInput: { toolName: payload.event.toolName, params: payload.event.params ?? {} } }

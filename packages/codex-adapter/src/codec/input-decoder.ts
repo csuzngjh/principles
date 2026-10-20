@@ -60,14 +60,19 @@ function requiredUnknown(value: Record<string, unknown>, key: string): unknown {
   return own(value, key);
 }
 
-function validateCommon(raw: Record<string, unknown>, needsTurn: boolean): { workspaceDir: string; sessionId: string; turnId?: string } {
+function validateCommon(raw: Record<string, unknown>, needsTurn: boolean): { base: { workspaceDir: string; sessionId: string; turnId?: string }; modelId: string } {
   const sessionId = requiredString(raw, 'session_id');
   requiredNullableString(raw, 'transcript_path');
   const workspaceDir = requiredString(raw, 'cwd');
-  requiredString(raw, 'model');
+  // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: keep the VALIDATED model identity
+  // (was: checked then discarded). It is an identity string only — never a
+  // capacity; the budget resolver turns it into a budget via the installed
+  // catalog, falling back to the fixed budget on unknown/ambiguous ids. It
+  // must not block the hook or leak into tool allow/deny decisions.
+  const modelId = requiredString(raw, 'model');
   requiredString(raw, 'permission_mode');
   const turnId = needsTurn ? requiredString(raw, 'turn_id') : undefined;
-  return { workspaceDir, sessionId, ...(turnId ? { turnId } : {}) };
+  return { base: { workspaceDir, sessionId, ...(turnId ? { turnId } : {}) }, modelId };
 }
 
 export function decodeCodexInput(raw: unknown): HostEvent {
@@ -75,7 +80,10 @@ export function decodeCodexInput(raw: unknown): HostEvent {
   const eventName = requiredString(raw, 'hook_event_name');
   const kind = EVENT_KINDS.get(eventName);
   if (!kind) throw new CodexDecoderError(`unknown hook_event_name "${eventName}"`, 'Configure only PreToolUse, PostToolUse, UserPromptSubmit, SessionStart, or Stop.');
-  const common = validateCommon(raw, kind !== 'session_start');
+  const { base, modelId } = validateCommon(raw, kind !== 'session_start');
+  // Model identity rides every event context under modelContext (budget
+  // resolution happens on the prompt path; other paths carry it harmlessly).
+  const common = { ...base, modelContext: { modelId } };
   let context: HostEventContext;
   let rawPayload: unknown = raw;
   if (kind === 'before_tool_call' || kind === 'after_tool_call') {

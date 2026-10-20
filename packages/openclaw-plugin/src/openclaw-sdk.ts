@@ -343,7 +343,15 @@ export interface PluginHookAgentContext {
   trigger?: string;
   channelId?: string;
   contextTokenBudget?: number;
-  contextWindowSource?: 'model' | 'config';
+  /**
+   * Provenance of contextTokenBudget, synced to the upstream
+   * PluginHookContextWindowSource union (openclaw
+   * src/plugins/hook-agent-context.types.ts):
+   * "model" (model metadata) | "modelsConfig" (per-model config) |
+   * "agentContextTokens" (agent-level cap) | "default" (host had no
+   * model-specific fact — NOT trustworthy as a model capacity).
+   */
+  contextWindowSource?: 'model' | 'modelsConfig' | 'agentContextTokens' | 'default';
   contextWindowReferenceTokens?: number;
   senderExternalId?: string;
   channelContext?: unknown;

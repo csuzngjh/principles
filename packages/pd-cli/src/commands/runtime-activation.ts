@@ -1392,12 +1392,25 @@ export async function handleActivationApprove(opts: ActivationApproveOptions): P
         const errMsg = err instanceof Error ? err.message : String(err);
         deliverability = { status: 'unconfirmed' as const, reason: `prompt_capacity_precheck_failed: ${errMsg}`, nextAction: 'check the workspace .pd/state.db readability and retry the approval' };
       }
-      if (deliverability.status !== 'deliverable') {
+      // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §6.3: model_dependent is NOT a
+      // refusal — the entry fits within the supported budget range and its
+      // injectability depends on the runtime model. The approval proceeds
+      // with an observable notice (rc-9); only undeliverable/unconfirmed
+      // refuse as before. cli-1: in --json mode stdout stays exactly the
+      // machine-readable result — the notice goes to stderr there.
+      if (deliverability.status === 'model_dependent') {
+        const notice = `prompt_capacity_model_dependent: this principle's own serialized entry is ${deliverability.costChars} chars — it fits the supported ${deliverability.budgetMinChars}..${deliverability.budgetMaxChars} budget range only on larger-context models; it may be excluded at runtime on smaller-context models. ${deliverability.nextAction}`;
+        if (opts.json) {
+          console.error(notice);
+        } else {
+          console.log(`notice: ${notice}`);
+        }
+      } else if (deliverability.status !== 'deliverable') {
         const detail = deliverability.status === 'undeliverable'
-          ? `single_item_exceeds_budget: this principle's own serialized entry is ${deliverability.costChars} chars > the ${deliverability.budget}-char budget on the ${deliverability.route === 'shared_render' ? 'shared full-render' : 'list-entry'} route${deliverability.hostKind !== undefined ? ` (host ${deliverability.hostKind})` : ''} — approving it could never inject it`
+          ? `single_item_exceeds_budget: this principle's own serialized entry is ${deliverability.costChars} chars > the ${deliverability.budget}-char maximum supported budget on the ${deliverability.route === 'shared_render' ? 'shared full-render' : 'list-entry'} route${deliverability.hostKind !== undefined ? ` (host ${deliverability.hostKind})` : ''} — approving it could never inject it`
           : deliverability.reason;
         const perHostNote = deliverability.status === 'unconfirmed' && deliverability.perHost !== undefined
-          ? ` per-host fit: ${deliverability.perHost.map((entry) => `${entry.hostKind}=${entry.fits ? 'fits' : 'oversized'}(${entry.costChars}c)`).join(', ')}`
+          ? ` per-host fit: ${deliverability.perHost.map((entry) => `${entry.hostKind}=${entry.tierFit}(${entry.costChars}c)`).join(', ')}`
           : '';
         const result: ApproveResult = {
           ok: false,

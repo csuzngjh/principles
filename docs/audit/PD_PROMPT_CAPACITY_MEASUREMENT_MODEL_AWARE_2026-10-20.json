@@ -1,0 +1,198 @@
+{
+  "generatedAt": "2026-10-20T13:07:23.926Z",
+  "spec": "SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001",
+  "unit": "utf16_code_units (String.prototype.length — NOT model tokens)",
+  "policy": {
+    "version": "model_aware_v1",
+    "formula": "budgetChars = min(4000, max(500, floor(2000 * W / 128000)))",
+    "minBudgetChars": 500,
+    "maxBudgetChars": 4000,
+    "fallbackBudgetChars": 2000,
+    "windowToBudgetSanity": {
+      "32K": 500,
+      "64K": 1000,
+      "128K": 2000,
+      "256K": 4000,
+      "1M": 4000
+    }
+  },
+  "scenario": "16 persisted candidates (14 × 60 chars, 2 × 1200 chars) per tier workspace, 40 forced round keys on the list route; shared route runs the same resolution through buildActivePrinciplePromptContext",
+  "tiers": [
+    {
+      "label": "32K",
+      "windowTokens": 32000,
+      "budgetChars": 500,
+      "capacitySource": "host_effective_window",
+      "capacityStatus": "confirmed",
+      "policyVersion": "model_aware_v1",
+      "list": {
+        "candidates": 16,
+        "avgInjected": 6,
+        "avgUsedChars": 488,
+        "truncatedRounds": 40,
+        "avgOversizedPerRound": 2
+      },
+      "shared": {
+        "injected": 0,
+        "usedChars": 0,
+        "truncated": false,
+        "oversized": 1,
+        "dropped": 0,
+        "selectionPolicy": "legacy_fifo_prefix_v1"
+      }
+    },
+    {
+      "label": "64K",
+      "windowTokens": 64000,
+      "budgetChars": 1000,
+      "capacitySource": "host_effective_window",
+      "capacityStatus": "confirmed",
+      "policyVersion": "model_aware_v1",
+      "list": {
+        "candidates": 16,
+        "avgInjected": 12,
+        "avgUsedChars": 944,
+        "truncatedRounds": 40,
+        "avgOversizedPerRound": 2
+      },
+      "shared": {
+        "injected": 1,
+        "usedChars": 825,
+        "truncated": true,
+        "oversized": 0,
+        "dropped": 1,
+        "selectionPolicy": "legacy_fifo_prefix_v1"
+      }
+    },
+    {
+      "label": "128K",
+      "windowTokens": 128000,
+      "budgetChars": 2000,
+      "capacitySource": "host_effective_window",
+      "capacityStatus": "confirmed",
+      "policyVersion": "model_aware_v1",
+      "list": {
+        "candidates": 16,
+        "avgInjected": 11.5,
+        "avgUsedChars": 1618,
+        "truncatedRounds": 40,
+        "avgOversizedPerRound": 0
+      },
+      "shared": {
+        "injected": 6,
+        "usedChars": 1980,
+        "truncated": true,
+        "oversized": 0,
+        "dropped": 1,
+        "selectionPolicy": "legacy_fifo_prefix_v1"
+      }
+    },
+    {
+      "label": "256K",
+      "windowTokens": 256000,
+      "budgetChars": 4000,
+      "capacitySource": "host_effective_window",
+      "capacityStatus": "confirmed",
+      "policyVersion": "model_aware_v1",
+      "list": {
+        "candidates": 16,
+        "avgInjected": 16,
+        "avgUsedChars": 3526,
+        "truncatedRounds": 0,
+        "avgOversizedPerRound": 0
+      },
+      "shared": {
+        "injected": 14,
+        "usedChars": 3828,
+        "truncated": true,
+        "oversized": 0,
+        "dropped": 1,
+        "selectionPolicy": "legacy_fifo_prefix_v1"
+      }
+    },
+    {
+      "label": "1000K",
+      "windowTokens": 1000000,
+      "budgetChars": 4000,
+      "capacitySource": "host_effective_window",
+      "capacityStatus": "confirmed",
+      "policyVersion": "model_aware_v1",
+      "list": {
+        "candidates": 16,
+        "avgInjected": 16,
+        "avgUsedChars": 3526,
+        "truncatedRounds": 0,
+        "avgOversizedPerRound": 0
+      },
+      "shared": {
+        "injected": 14,
+        "usedChars": 3828,
+        "truncated": true,
+        "oversized": 0,
+        "dropped": 1,
+        "selectionPolicy": "legacy_fifo_prefix_v1"
+      }
+    },
+    {
+      "label": "unknown",
+      "windowTokens": null,
+      "budgetChars": 2000,
+      "capacitySource": "legacy_fallback",
+      "capacityStatus": "unknown",
+      "policyVersion": "model_aware_v1",
+      "list": {
+        "candidates": 16,
+        "avgInjected": 11.5,
+        "avgUsedChars": 1618,
+        "truncatedRounds": 40,
+        "avgOversizedPerRound": 0
+      },
+      "shared": {
+        "injected": 6,
+        "usedChars": 1980,
+        "truncated": true,
+        "oversized": 0,
+        "dropped": 1,
+        "selectionPolicy": "legacy_fifo_prefix_v1"
+      }
+    }
+  ],
+  "sharedDispatchEvidence": [
+    {
+      "dispatch": "trusted host window 256K",
+      "budget": 4000,
+      "budgetCapacitySource": "host_effective_window",
+      "budgetCapacityStatus": "confirmed",
+      "budgetContextWindowTokens": 256000,
+      "injectedCount": 7
+    },
+    {
+      "dispatch": "untrusted source default",
+      "budget": 2000,
+      "budgetCapacitySource": "legacy_fallback",
+      "budgetCapacityStatus": "unknown",
+      "budgetContextWindowTokens": null,
+      "injectedCount": 6
+    },
+    {
+      "dispatch": "ambiguous bare model id",
+      "budget": 2000,
+      "budgetCapacitySource": "legacy_fallback",
+      "budgetCapacityStatus": "unknown",
+      "budgetContextWindowTokens": null,
+      "injectedCount": 6
+    },
+    {
+      "dispatch": "no model facts (WorkBuddy contract)",
+      "budget": 2000,
+      "budgetCapacitySource": "legacy_fallback",
+      "budgetCapacityStatus": "unknown",
+      "budgetContextWindowTokens": null,
+      "injectedCount": 6
+    }
+  ],
+  "catalogNote": "catalog metadata is available in-process via getPromptModelCatalog() (installed pi-ai 1.2.0 static catalog); no network calls are made at any point",
+  "pdTokenCost": null,
+  "pdTokenCostReason": "no tokenizer/model binding held by this measurement; whole-request usage cannot be attributed to PD output (SPEC §6) — recorded as null, never approximated by chars",
+  "interpretation": "注入条数/字符数是容量事实，不是行为改善证据；行为改善需要独立的真实 Agent 对照与回放。"
+}

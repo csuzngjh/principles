@@ -749,7 +749,13 @@ function PendingReviewCard({
           className="mt-3 rounded-[3px] border border-amber/40 bg-amber/5 px-3 py-2 text-[12.5px] text-amber"
           data-testid={`approve-queue-badge-${group.principleId}`}
         >
-          {promptInjection.productionRotates === true && group.fitsPromptBudget === true
+          {promptInjection.productionRotates === true && group.fitsPromptBudget === true && group.promptBudgetTierFit === "model_dependent"
+            ? t("pages.focus.approveQueueBadgeRotationModelDependent", {
+                defaultValue: "批准后可能排队：提示词注入位已满（{{used}}/{{budget}} 字符）。这条原则的篇幅在较小上下文模型的注入预算内装不下，轮到它时也未必进入提示词——是否生效取决于当时模型的上限。",
+                used: promptInjection.usedChars,
+                budget: promptInjection.budget,
+              })
+            : promptInjection.productionRotates === true && group.fitsPromptBudget === true
             ? t("pages.focus.approveQueueBadgeRotation", {
                 defaultValue: "批准后可能排队：提示词注入位已满（{{used}}/{{budget}} 字符）。当前按公平轮转选取，新原则会在后续轮次自行轮到，无需停用旧原则。",
                 used: promptInjection.usedChars,
@@ -775,6 +781,16 @@ function PendingReviewCard({
                     : "",
                 })}
             {promptInjection.hostKind !== undefined ? ` · ${promptInjection.hostKind === "openclaw" ? "OpenClaw" : promptInjection.hostKind === "workbuddy" ? "WorkBuddy" : "Codex"}` : ""}
+            {` · ${
+              promptInjection.budgetCapacityStatus === "confirmed"
+                ? t("pages.focus.promptBudgetModelAwareNote", {
+                    defaultValue: "预算按已确认的模型上下文解析（{{window}} tokens）",
+                    window: promptInjection.budgetContextWindowTokens ?? 0,
+                  })
+                : t("pages.focus.promptBudgetFallbackNote", {
+                    defaultValue: "按固定回退预算估算（控制台未绑定运行时模型）",
+                  })
+            }`}
           </div>
         </div>
       )}

@@ -797,7 +797,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
       .run(new Date().toISOString());
     const db = sqliteConn.getDb();
     const base = Date.now();
-    const hugeText = 'H'.repeat(3000);
+    const hugeText = 'H'.repeat(4300);
     for (let i = 0; i < 2; i += 1) {
       const artifactId = `art-oversize-filler-${i}-${base}`;
       const principleId = newPrincipleId();
@@ -925,10 +925,10 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     const artifactId = `art-oversized-${base}`;
     const approvalId = `apr-oversized-${base}`;
     const principleId = newPrincipleId();
-    seedLedgerPrinciple(principleId, 'O'.repeat(2000));
+    seedLedgerPrinciple(principleId, 'O'.repeat(4300));
     await seedPrincipleArtifact(artifactId, {
       sourcePrincipleId: principleId,
-      contentJson: { principleId, text: 'O'.repeat(2000) },
+      contentJson: { principleId, text: 'O'.repeat(4300) },
     });
     await seedPendingApproval(approvalId, artifactId, 'prompt');
 
@@ -982,7 +982,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
       sourceRuleId: undefined,
       lineageArtifactIds: [],
       validationStatus: 'validated',
-      contentJson: JSON.stringify({ principleId, text: 'L'.repeat(2100) }),
+      contentJson: JSON.stringify({ principleId, text: 'L'.repeat(4300) }),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });

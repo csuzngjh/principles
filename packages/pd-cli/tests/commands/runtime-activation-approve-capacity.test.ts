@@ -104,8 +104,12 @@ describe('pd activation approve — prompt capacity write gate (B1/AC-07, real w
 
   it('refuses an undeliverable statement BEFORE any write: structured JSON, exit 1, approval pending, no activation, ledger candidate', async () => {
     const principleId = newPrincipleId();
-    seedLedgerPrinciple(principleId, 'O'.repeat(2100));
-    await seedArtifact('art-cli-oversize', principleId, 'O'.repeat(2100));
+    // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §6.3: undeliverable now means the
+    // entry exceeds the MAXIMUM supported budget (4000 chars) — a 2100-char
+    // statement is model_dependent (see the dedicated test below), so the
+    // refusal fixture must exceed the max tier on the list route.
+    seedLedgerPrinciple(principleId, 'O'.repeat(4300));
+    await seedArtifact('art-cli-oversize', principleId, 'O'.repeat(4300));
     await seedPendingApproval('apr-cli-oversize', 'art-cli-oversize');
 
     await handleActivationApprove({ workspace: tmpDir, approvalId: 'apr-cli-oversize', json: true });
@@ -118,6 +122,7 @@ describe('pd activation approve — prompt capacity write gate (B1/AC-07, real w
     expect(output.ok).toBe(false);
     expect(output.reason).toContain('prompt_capacity_refused');
     expect(output.reason).toContain('single_item_exceeds_budget');
+    expect(output.reason).toContain('4000-char maximum supported budget');
     expect(output.nextAction).toContain('modify to injectable version');
     expect(process.exitCode).toBe(1);
 
@@ -130,6 +135,36 @@ describe('pd activation approve — prompt capacity write gate (B1/AC-07, real w
       .prepare('SELECT COUNT(*) AS n FROM activations WHERE artifact_id = ?')
       .get('art-cli-oversize') as { n: number };
     expect(activationCount.n).toBe(0);
+  });
+
+  it('SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §6.3: a model_dependent statement (fits 500..4000 only) PROCEEDS with an observable notice, never a refusal', async () => {
+    const principleId = newPrincipleId();
+    // 2100 chars on the list route ≈ 2149 serialized: > the 500 floor, ≤ the
+    // 4000 ceiling — injectability depends on the runtime model.
+    seedLedgerPrinciple(principleId, 'M'.repeat(2100));
+    await seedArtifact('art-cli-mid', principleId, 'M'.repeat(2100));
+    await seedPendingApproval('apr-cli-mid', 'art-cli-mid');
+
+    await handleActivationApprove({ workspace: tmpDir, approvalId: 'apr-cli-mid', json: true });
+
+    // cli-1 intact: stdout carries exactly one JSON object — the RESULT, not
+    // a notice banner. The notice is observable on stderr (rc-9).
+    expect(consoleLogSpy).toHaveBeenCalledTimes(1);
+    const output = JSON.parse(consoleLogSpy.mock.calls[0][0] as string) as {
+      ok: boolean; activationId?: string; reason?: string;
+    };
+    expect(output.ok).toBe(true);
+    expect(typeof output.activationId).toBe('string');
+    expect(process.exitCode).toBe(0);
+    const stderr = consoleErrorSpy.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(stderr).toContain('prompt_capacity_model_dependent');
+    expect(stderr).toContain('500..4000');
+    expect(stderr).toMatch(/serialized entry is \d+ chars/);
+    // The approval was NOT refused by uncertainty.
+    const approvalRow = sqliteConn.getDb()
+      .prepare('SELECT status FROM approvals WHERE approval_id = ?')
+      .get('apr-cli-mid') as { status: string };
+    expect(approvalRow.status).toBe('approved');
   });
 
   it('refuses with route_unconfirmed when host facts are absent and no --target-host is given; --target-host codex restores the shared-route verdict', async () => {

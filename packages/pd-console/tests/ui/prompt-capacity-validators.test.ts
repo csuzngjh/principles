@@ -140,17 +140,28 @@ describe('validateActivations — per-activation injection status (R-A3)', () =>
     expect(v?.promptInjectionRoute).toEqual({ status: 'confirmed', hostKind: 'openclaw', route: 'legacy_trim', flagEnabled: false });
   });
 
-  it('parses route_unconfirmed rows with per-host fits and reason', () => {
+  it('parses route_unconfirmed rows with per-host tier fits and reason', () => {
     const v = validateActivations({
       activations: [
-        { ...baseActivation(), promptInjection: { activationId: 'act-1', status: 'route_unconfirmed', reason: 'multi_host_routes_differ', perHostFits: [{ hostKind: 'openclaw', fits: true }, { hostKind: 'codex', fits: false }] } },
+        { ...baseActivation(), promptInjection: { activationId: 'act-1', status: 'route_unconfirmed', reason: 'multi_host_routes_differ', perHostFits: [{ hostKind: 'openclaw', tierFit: 'fits_all_tiers' }, { hostKind: 'codex', tierFit: 'model_dependent' }] } },
       ],
       status: 'ok',
     });
     expect(v?.activations[0]?.promptInjection?.perHostFits).toEqual([
-      { hostKind: 'openclaw', fits: true }, { hostKind: 'codex', fits: false },
+      { hostKind: 'openclaw', tierFit: 'fits_all_tiers' }, { hostKind: 'codex', tierFit: 'model_dependent' },
     ]);
     expect(v?.activations[0]?.promptInjection?.reason).toBe('multi_host_routes_differ');
+  });
+
+  it('SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: parses model_dependent rows (never a definite yes/no)', () => {
+    const v = validateActivations({
+      activations: [
+        { ...baseActivation(), promptInjection: { activationId: 'act-1', status: 'model_dependent', inCurrentWindow: false, costChars: 3200, budget: 2000, budgetScope: 'full_directive_context', route: 'shared_render', reason: 'model_dependent_capacity: ...' } },
+      ],
+      status: 'ok',
+    });
+    expect(v?.activations[0]?.promptInjection?.status).toBe('model_dependent');
+    expect(v?.activations[0]?.promptInjection?.costChars).toBe(3200);
   });
 
   it('keeps resolution_failed rows with their structured reason', () => {
@@ -170,7 +181,7 @@ describe('validateActivations — per-activation injection status (R-A3)', () =>
     });
     expect(dropped?.activations[0]?.promptInjection).toBeUndefined();
     const malformed = validateActivations({
-      activations: [{ ...baseActivation(), promptInjection: { activationId: 'act-1', status: 'injectable', perHostFits: [{ hostKind: 'vscode', fits: true }] } }],
+      activations: [{ ...baseActivation(), promptInjection: { activationId: 'act-1', status: 'injectable', perHostFits: [{ hostKind: 'vscode', tierFit: 'model_dependent' }] } }],
       status: 'ok',
     });
     // The status object fails validation → the optional nested field is

@@ -48,11 +48,23 @@ export interface ApprovalGroup {
   /**
    * PR-1894: whether this candidate's own serialized prompt entry fits the
    * injection budget on its own. `false` means the entry is oversized, so fair
-   * rotation can NEVER inject it �?the pre-approval badge must not promise it
+   * rotation can NEVER inject it — the pre-approval badge must not promise it
    * will come around. Computed server-side with the production serializer
    * (the client has no access to the escaped, serialized size).
+   * SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: `true` now means "fits within the
+   * supported budget range" — see `promptBudgetTierFit` for whether that is
+   * unconditional (fits every tier) or model-dependent.
    */
   fitsPromptBudget?: boolean;
+  /**
+   * SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §6.3: honest tier classification of
+   * the candidate's own serialized entry against the supported
+   * [min, max] budget range. `model_dependent` = fits only on
+   * larger-context models — the badge must qualify rotation promises, not
+   * promise unconditionally. `unconfirmed` mirrors the precheck's honest
+   * unknown.
+   */
+  promptBudgetTierFit?: 'fits_all_tiers' | 'model_dependent' | 'exceeds_max_tier' | 'unconfirmed';
   revisionReviewUnavailable?: boolean;
   revisionReview?: { oldStatement: string; newStatement: string; intentFields: Record<string, string> };
   /**
@@ -159,23 +171,25 @@ function extractCandidateDescription(contentJson: string): string | null {
 }
 
 /**
- * PR-1894 → PD_PROMPT_CAPACITY_V1 R-A2: would this candidate's own prompt
- * entry fit the injection budget if it were the ONLY entry?
+ * PR-1894 → PD_PROMPT_CAPACITY_V1 R-A2 → SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001:
+ * classify this candidate's own prompt entry against the SUPPORTED budget
+ * range (not one fixed number — approval time cannot know the executing
+ * model).
  *
- * The judgment now comes from the ONE shared host-runtime precheck
+ * The judgment comes from the ONE shared host-runtime precheck
  * (`checkPromptArtifactDeliverability`): the REAL resolved principle id (not a
  * fixed 36-char UUID allowance — a title-derived id can only be longer), the
  * effective route's own serializer (list entry vs full directive render incl.
  * the self-report footer), and an honest `unconfirmed` verdict when the route
- * or the artifact content cannot be confirmed. `false` is also the
- * conservative answer for unconfirmed candidates — an unknown size must
+ * or the artifact content cannot be confirmed. `unconfirmed` is also the
+ * conservative answer when the precheck itself fails — an unknown size must
  * never become a rotation promise (rc-9).
  */
-async function candidateFitsPromptBudget(
+async function candidatePromptBudgetTierFit(
   workspaceDir: string,
   artifact: PIArtifactRecord | null,
   targetHost?: PromptInjectionTargetHost,
-): Promise<boolean> {
+): Promise<NonNullable<ApprovalGroup['promptBudgetTierFit']>> {
   const deliverability = await checkPromptArtifactDeliverability({
     workspaceDir,
     targetHost,
@@ -188,14 +202,23 @@ async function candidateFitsPromptBudget(
       }
       : null,
   });
-  if (deliverability.status === 'deliverable') return true;
-  if (deliverability.status === 'undeliverable') return false;
-  // Unconfirmed: with per-host facts, only promise when EVERY applicable host
-  // can deliver; without them, do not promise at all.
+  if (deliverability.status === 'deliverable') return 'fits_all_tiers';
+  if (deliverability.status === 'model_dependent') return 'model_dependent';
+  if (deliverability.status === 'undeliverable') return 'exceeds_max_tier';
+  // Route/artifact unconfirmed: aggregate the per-host tier verdicts — any
+  // max-tier overflow is oversized everywhere that matters; only an
+  // all-hosts fits-everywhere sweep may promise unconditionally; anything
+  // mixed is model-dependent. Without per-host facts, do not promise at all.
   if (deliverability.perHost && deliverability.perHost.length > 0) {
-    return deliverability.perHost.every((entry) => entry.fits);
+    if (deliverability.perHost.some((entry) => entry.tierFit === 'exceeds_max_tier')) {
+      return 'exceeds_max_tier';
+    }
+    if (deliverability.perHost.every((entry) => entry.tierFit === 'fits_all_tiers')) {
+      return 'fits_all_tiers';
+    }
+    return 'model_dependent';
   }
-  return false;
+  return 'unconfirmed';
 }
 
 export class ApprovalsGroupedConsoleModel {
@@ -240,7 +263,7 @@ export class ApprovalsGroupedConsoleModel {
       // PR-1894: per-artifact "does this entry fit the budget alone" fact, so
       // the pre-approval badge never promises rotation for an entry that is
       // oversized (rotation cannot rescue a per-entry overflow).
-      const artifactFitsBudgetMap = new Map<string, boolean>();
+      const artifactFitsBudgetMap = new Map<string, NonNullable<ApprovalGroup['promptBudgetTierFit']>>();
       const revisionReviewUnavailable = new Set<string>();
       const revisionReviews = new Map<string, NonNullable<ApprovalGroup['revisionReview']>>();
       // PRI-940: which approval artifacts are MISSING from the store (superseded
@@ -288,13 +311,13 @@ export class ApprovalsGroupedConsoleModel {
               }
               if (!detection.ok || (detection.target !== null && !revisionReviews.has(artifact.artifactId))) revisionReviewUnavailable.add(artifact.artifactId);
             }
-            artifactFitsBudgetMap.set(approval.artifactId, await candidateFitsPromptBudget(this.workspaceDir, artifact, targetHost));
+            artifactFitsBudgetMap.set(approval.artifactId, await candidatePromptBudgetTierFit(this.workspaceDir, artifact, targetHost));
             artifactUnavailableMap.set(approval.artifactId, artifact === null);
           } catch (err) {
             if (isMissingTableError(err)) {
               artifactPrincipleMap.set(approval.artifactId, null);
               artifactDescriptionMap.set(approval.artifactId, null);
-              artifactFitsBudgetMap.set(approval.artifactId, false);
+              artifactFitsBudgetMap.set(approval.artifactId, 'unconfirmed');
               artifactUnavailableMap.set(approval.artifactId, true);
             } else {
               throw err;
@@ -367,10 +390,18 @@ export class ApprovalsGroupedConsoleModel {
           principleTitle,
           candidateDescription,
           status,
-          // PR-1894: undefined-safe �?absent when the artifact could not be
+          // PR-1894: undefined-safe — absent when the artifact could not be
           // read, which the UI treats as "do not promise rotation".
+          // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: the boolean stays the
+          // rotation-promise signal (true = within the supported budget
+          // range); the tier fit carries the honest fits-everywhere vs
+          // model-dependent distinction.
           ...(firstArtifactId !== undefined && artifactFitsBudgetMap.has(firstArtifactId)
-            ? { fitsPromptBudget: artifactFitsBudgetMap.get(firstArtifactId) === true }
+            ? {
+              fitsPromptBudget: artifactFitsBudgetMap.get(firstArtifactId) === 'fits_all_tiers'
+                || artifactFitsBudgetMap.get(firstArtifactId) === 'model_dependent',
+              promptBudgetTierFit: artifactFitsBudgetMap.get(firstArtifactId),
+            }
             : {}),
           // PRI-940: absent when the pinned artifact is readable — same
           // spread style as fitsPromptBudget so the wire contract stays
@@ -454,6 +485,13 @@ export class ApprovalsGroupedConsoleModel {
           ...(projection.fullRenderChars !== undefined ? { fullRenderChars: projection.fullRenderChars } : {}),
           oversizedActivationIds: projection.oversizedActivationIds,
           oversizedDiagnosticTruncated: projection.oversizedDiagnosticTruncated,
+          // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §7: budget provenance — the
+          // console holds no runtime model facts, so this is the fixed-budget
+          // view by construction; the UI must label it as such rather than
+          // presenting it as a model-accurate forecast.
+          ...(projection.budgetCapacitySource !== undefined ? { budgetCapacitySource: projection.budgetCapacitySource } : {}),
+          ...(projection.budgetCapacityStatus !== undefined ? { budgetCapacityStatus: projection.budgetCapacityStatus } : {}),
+          ...(projection.budgetContextWindowTokens != null ? { budgetContextWindowTokens: projection.budgetContextWindowTokens } : {}),
         },
       };
     } catch (err: unknown) {

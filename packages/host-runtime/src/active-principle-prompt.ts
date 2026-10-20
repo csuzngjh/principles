@@ -1,5 +1,4 @@
 import {
-  RUNTIME_V2_PRINCIPLE_BUDGET,
   SqliteActivationStateStore,
   SqliteConnection,
   SqlitePIArtifactStore,
@@ -7,7 +6,9 @@ import {
   filterPromptActivations,
   renderPrinciplesToDirectives,
   resolvePrincipleFromArtifact,
+  resolvePromptBudget,
   type ActivatedPrinciple,
+  type PromptBudgetResolution,
   type PromptSelectionPolicy,
 } from '@principles/core/runtime-v2';
 import fs from 'node:fs';
@@ -40,6 +41,16 @@ export interface ActivePrinciplePromptResult {
   droppedActivationIds?: string[];
   /** PRI-904 (bounded, max 16): activation ids that cannot fit even in an empty payload. */
   oversizedActivationIds?: string[];
+  /**
+   * SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: provenance of the `budget` this
+   * selection ran under (capacity source/status + the resolved context
+   * window). Present on every result; `legacy_fallback` + `unknown` means
+   * no model capacity could be confirmed and the fixed budget was used.
+   */
+  budgetCapacitySource?: PromptBudgetResolution['capacitySource'];
+  budgetCapacityStatus?: PromptBudgetResolution['capacityStatus'];
+  budgetContextWindowTokens?: number | null;
+  budgetPolicyVersion?: PromptBudgetResolution['policyVersion'];
 }
 
 export interface PromptActivationCandidates {
@@ -137,15 +148,31 @@ export async function buildActivePrinciplePromptContext(input: {
    * characterization baseline).
    */
   roundKey?: number;
+  /**
+   * SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §6.1: the budget resolution for
+   * THIS request, resolved once by the entry point that holds the model
+   * facts. Absent → the resolver's no-facts default (legacy fixed 2000,
+   * capacityStatus unknown) — the historical behavior, used by callers with
+   * no model context (console projections, WorkBuddy without model facts).
+   */
+  promptBudget?: PromptBudgetResolution;
 }): Promise<ActivePrinciplePromptResult> {
+  // One resolution per request (SPEC §6.1): the caller's pre-resolved budget
+  // or the fixed-fallback default — never a per-line constant read.
+  const promptBudget = input.promptBudget ?? resolvePromptBudget();
+  const budgetChars = promptBudget.budgetChars;
   const { principles, excludedPrincipleIds, warnings, aborted, selfReportEnabled } =
     await readPromptActivationCandidates(input);
   if (aborted) {
     return {
       additionalContext: '', principleIds: [], activationIds: [], artifactIds: [], warnings,
-      budget: RUNTIME_V2_PRINCIPLE_BUDGET, truncated: false, excludedPrincipleIds,
+      budget: budgetChars, truncated: false, excludedPrincipleIds,
       excludedCount: excludedPrincipleIds.length, allValidatedPrinciplesExcluded: false,
       selectionPolicy: 'legacy_fifo_prefix_v1', eligibleCount: 0,
+      budgetCapacitySource: promptBudget.capacitySource,
+      budgetCapacityStatus: promptBudget.capacityStatus,
+      budgetContextWindowTokens: promptBudget.contextWindowTokens,
+      budgetPolicyVersion: promptBudget.policyVersion,
     };
   }
 
@@ -170,7 +197,7 @@ export async function buildActivePrinciplePromptContext(input: {
   const oversizedActivationIds: string[] = [];
   const standaloneFits = (principle: ActivatedPrinciple): boolean =>
     renderPrinciplesToDirectives([principle], new Set([principle.principleId]), { escapeFn: escapeXml, selfReportInstruction: selfReportEnabled }).length
-      <= RUNTIME_V2_PRINCIPLE_BUDGET;
+    <= budgetChars;
 
   const scanOrder: ActivatedPrinciple[] = rotationStartIndex === undefined
     ? principles
@@ -183,7 +210,7 @@ export async function buildActivePrinciplePromptContext(input: {
       new Set(candidate.map((entry) => entry.principleId)),
       { escapeFn: escapeXml, selfReportInstruction: selfReportEnabled },
     );
-    if (candidateContext.length > RUNTIME_V2_PRINCIPLE_BUDGET) {
+    if (candidateContext.length > budgetChars) {
       if (standaloneFits(principle)) {
         // Fits alone but not now — normal budget truncation.
         truncated = true;
@@ -208,7 +235,7 @@ export async function buildActivePrinciplePromptContext(input: {
     activationIds: included.map((principle) => principle.activationId),
     artifactIds: included.map((principle) => principle.artifactId),
     warnings,
-    budget: RUNTIME_V2_PRINCIPLE_BUDGET,
+    budget: budgetChars,
     truncated,
     excludedPrincipleIds,
     excludedCount: excludedPrincipleIds.length,
@@ -219,5 +246,9 @@ export async function buildActivePrinciplePromptContext(input: {
     ...(rotationStartIndex !== undefined ? { rotationStartIndex } : {}),
     ...(droppedActivationIds.length > 0 ? { droppedActivationIds } : {}),
     ...(oversizedActivationIds.length > 0 ? { oversizedActivationIds } : {}),
+    budgetCapacitySource: promptBudget.capacitySource,
+    budgetCapacityStatus: promptBudget.capacityStatus,
+    budgetContextWindowTokens: promptBudget.contextWindowTokens,
+    budgetPolicyVersion: promptBudget.policyVersion,
   };
 }

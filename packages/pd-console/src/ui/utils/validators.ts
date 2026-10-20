@@ -1275,7 +1275,7 @@ export interface ActivationRecordData {
 }
 
 const PROMPT_INJECTION_STATUS_KINDS: ReadonlySet<string> = new Set([
-  'injectable', 'oversized', 'window_excluded', 'resolution_failed', 'route_unconfirmed',
+  'injectable', 'oversized', 'model_dependent', 'window_excluded', 'resolution_failed', 'route_unconfirmed',
 ]);
 
 /** rc-1..rc-4: validate the per-activation injection status as untrusted input. */
@@ -1291,11 +1291,14 @@ function validatePromptActivationInjectionStatus(v: unknown): PromptActivationIn
   if (Object.hasOwn(v, 'route') && (v.route === 'legacy_trim' || v.route === 'shared_render')) result.route = v.route;
   if (Object.hasOwn(v, 'reason') && isString(v.reason)) result.reason = v.reason;
   if (Object.hasOwn(v, 'perHostFits') && Array.isArray(v.perHostFits)) {
-    const perHostFits: { hostKind: 'openclaw' | 'codex' | 'workbuddy'; fits: boolean }[] = [];
+    const perHostFits: PromptActivationInjectionStatusWire['perHostFits'] = [];
     for (const entry of v.perHostFits) {
       if (!isObject(entry)) return null;
-      if ((entry.hostKind !== 'openclaw' && entry.hostKind !== 'codex' && entry.hostKind !== 'workbuddy') || typeof entry.fits !== 'boolean') return null;
-      perHostFits.push({ hostKind: entry.hostKind, fits: entry.fits });
+      if (
+        (entry.hostKind !== 'openclaw' && entry.hostKind !== 'codex' && entry.hostKind !== 'workbuddy')
+        || (entry.tierFit !== 'fits_all_tiers' && entry.tierFit !== 'model_dependent' && entry.tierFit !== 'exceeds_max_tier')
+      ) return null;
+      perHostFits.push({ hostKind: entry.hostKind, tierFit: entry.tierFit });
     }
     result.perHostFits = perHostFits;
   }
@@ -2011,6 +2014,12 @@ export interface ApprovalGroupData {
   revisionReview?: { oldStatement: string; newStatement: string; intentFields: Record<string, string> };
   fitsPromptBudget?: boolean;
   /**
+   * SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: honest tier classification of the
+   * candidate's own entry vs the supported budget range. `model_dependent`
+   * qualifies the rotation promise (fits only on larger-context models).
+   */
+  promptBudgetTierFit?: 'fits_all_tiers' | 'model_dependent' | 'exceeds_max_tier' | 'unconfirmed';
+  /**
    * PRI-940: the pinned artifact is missing from the store, so the card has no
    * human-readable payload and `principleTitle` carries the synthesized
    * `unlinked:<artifactId>` machine id, which must never render as a title.
@@ -2053,6 +2062,15 @@ function validateApprovalGroup(v: unknown): ApprovalGroupData | null {
   // copy that promises nothing rather than rendering an unverified claim.
   if (Object.hasOwn(v, 'fitsPromptBudget') && typeof v.fitsPromptBudget === 'boolean') {
     result.fitsPromptBudget = v.fitsPromptBudget;
+  }
+  // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: optional tier fit, whitelist +
+  // drop-on-invalid (same rule). Absent keeps the boolean-only behavior.
+  if (
+    Object.hasOwn(v, 'promptBudgetTierFit')
+    && (v.promptBudgetTierFit === 'fits_all_tiers' || v.promptBudgetTierFit === 'model_dependent'
+      || v.promptBudgetTierFit === 'exceeds_max_tier' || v.promptBudgetTierFit === 'unconfirmed')
+  ) {
+    result.promptBudgetTierFit = v.promptBudgetTierFit;
   }
   // PRI-940: optional artifactUnavailable. Only a real boolean is propagated; a
   // present-but-wrong value is dropped so the card keeps its plain untitled
@@ -2125,6 +2143,22 @@ export function validatePromptInjectionBudgetStatus(v: unknown): PromptInjection
   }
   if (Object.hasOwn(v, 'nextAction') && isString(v.nextAction)) {
     result.nextAction = v.nextAction;
+  }
+  // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §7: budget provenance, additive +
+  // drop-on-invalid. Absent behaves as the legacy fixed-budget view
+  // (pre-SPEC server compat).
+  if (
+    Object.hasOwn(v, 'budgetCapacitySource')
+    && (v.budgetCapacitySource === 'host_effective_window' || v.budgetCapacitySource === 'pi_catalog_exact'
+      || v.budgetCapacitySource === 'pi_catalog_unambiguous' || v.budgetCapacitySource === 'legacy_fallback')
+  ) {
+    result.budgetCapacitySource = v.budgetCapacitySource;
+  }
+  if (Object.hasOwn(v, 'budgetCapacityStatus') && (v.budgetCapacityStatus === 'confirmed' || v.budgetCapacityStatus === 'unknown')) {
+    result.budgetCapacityStatus = v.budgetCapacityStatus;
+  }
+  if (Object.hasOwn(v, 'budgetContextWindowTokens') && typeof v.budgetContextWindowTokens === 'number' && Number.isInteger(v.budgetContextWindowTokens) && v.budgetContextWindowTokens > 0) {
+    result.budgetContextWindowTokens = v.budgetContextWindowTokens;
   }
   if (Object.hasOwn(v, 'perHost') && Array.isArray(v.perHost)) {
     // rc-4: validate every element, not just "is array".

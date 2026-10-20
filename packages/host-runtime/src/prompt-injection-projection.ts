@@ -1,9 +1,10 @@
 import {
-  RUNTIME_V2_PRINCIPLE_BUDGET,
   computeFeatureFlagsFromConfig,
   renderPrinciplesToDirectives,
+  resolvePromptBudget,
   trimToBudget,
   type ActivatedPrinciple,
+  type PromptBudgetResolution,
   type PromptSelectionPolicy,
 } from '@principles/core/runtime-v2';
 import { escapeXml } from '@principles/core/prompt-builder';
@@ -300,6 +301,16 @@ export interface PromptInjectionProjection {
    * route (where `usedChars` already IS the full render).
    */
   fullRenderChars?: number;
+  /**
+   * SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §6.1/§7: provenance of `budget` —
+   * the same policy/resolution the real injection runs, so consumers can
+   * tell "runtime capacity confirmed" apart from "fixed-budget fallback"
+   * instead of assuming the forecast matches every model.
+   */
+  budgetCapacitySource?: PromptBudgetResolution['capacitySource'];
+  budgetCapacityStatus?: PromptBudgetResolution['capacityStatus'];
+  budgetContextWindowTokens?: number | null;
+  budgetPolicyVersion?: PromptBudgetResolution['policyVersion'];
 }
 
 /**
@@ -376,7 +387,16 @@ export async function buildLivePromptInjectionProjection(input: {
   roundKey?: number;
   /** AC-01: explicit route binding — 'codex'/'workbuddy' always shared, 'openclaw' by flag. */
   targetHost?: PromptInjectionTargetHost;
+  /**
+   * SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §6.1: budget resolution this
+   * projection must run under. Absent → the fixed-fallback default (the
+   * honest "no runtime capacity confirmed" policy), NOT a silent second
+   * policy. Callers holding live model facts (the plugin hook) pass the
+   * SAME resolution the injection uses.
+   */
+  promptBudget?: PromptBudgetResolution;
 }): Promise<PromptInjectionProjection> {
+  const promptBudget = input.promptBudget ?? resolvePromptBudget();
   const flagEnabled = computeFeatureFlagsFromConfig(
     loadPdConfigForPlugin(input.workspaceDir).effective,
   ).flags.abstraction_layer_v1?.enabled === true;
@@ -389,7 +409,7 @@ export async function buildLivePromptInjectionProjection(input: {
     : promptRouteForHost(input.targetHost, flagEnabled) === 'shared_render';
 
   if (sharedRoute) {
-    const context = await buildActivePrinciplePromptContext(input);
+    const context = await buildActivePrinciplePromptContext({ ...input, promptBudget });
     const oversized = context.oversizedActivationIds ?? [];
     const dropped = context.droppedActivationIds ?? [];
     return {
@@ -413,6 +433,10 @@ export async function buildLivePromptInjectionProjection(input: {
       droppedActivationIds: dropped,
       oversizedDiagnosticTruncated: isDiagnosticCapHit(oversized),
       droppedDiagnosticTruncated: isDiagnosticCapHit(dropped),
+      budgetCapacitySource: context.budgetCapacitySource,
+      budgetCapacityStatus: context.budgetCapacityStatus,
+      budgetContextWindowTokens: context.budgetContextWindowTokens,
+      budgetPolicyVersion: context.budgetPolicyVersion,
     };
   }
 
@@ -421,7 +445,7 @@ export async function buildLivePromptInjectionProjection(input: {
   if (candidates.aborted || principles.length === 0) {
     return {
       route: 'legacy_trim',
-      budget: RUNTIME_V2_PRINCIPLE_BUDGET,
+      budget: promptBudget.budgetChars,
       usedChars: 0,
       truncated: false,
       injectedPrincipleIds: [],
@@ -437,11 +461,15 @@ export async function buildLivePromptInjectionProjection(input: {
       droppedActivationIds: [],
       oversizedDiagnosticTruncated: false,
       droppedDiagnosticTruncated: false,
+      budgetCapacitySource: promptBudget.capacitySource,
+      budgetCapacityStatus: promptBudget.capacityStatus,
+      budgetContextWindowTokens: promptBudget.contextWindowTokens,
+      budgetPolicyVersion: promptBudget.policyVersion,
     };
   }
   // PR-1894: pass the caller's round key so the forecast runs the SAME
   // packing policy production runs this turn.
-  const trimmed = trimToBudget(principles, RUNTIME_V2_PRINCIPLE_BUDGET, escapeXml, input.roundKey);
+  const trimmed = trimToBudget(principles, promptBudget.budgetChars, escapeXml, input.roundKey);
   const injected = principles.filter((p) => trimmed.injectedIds.has(p.principleId));
   // PR-1894: the legacy_trim route IS the OpenClaw plugin-local route, which
   // rotates on every recorded user turn (PRI-904). Reachability is therefore
@@ -451,7 +479,7 @@ export async function buildLivePromptInjectionProjection(input: {
   // keeps telling the Owner to deactivate healthy principles.
   const eventuallyInjectedActivationIds = collectReachableActivationIds(
     principles,
-    RUNTIME_V2_PRINCIPLE_BUDGET,
+    promptBudget.budgetChars,
   );
   const fullRenderChars = renderPrinciplesToDirectives(
     injected,
@@ -460,7 +488,7 @@ export async function buildLivePromptInjectionProjection(input: {
   ).length;
   return {
     route: 'legacy_trim',
-    budget: RUNTIME_V2_PRINCIPLE_BUDGET,
+    budget: promptBudget.budgetChars,
     usedChars: trimmed.lines.join('\n').length,
     truncated: trimmed.truncated,
     injectedPrincipleIds: [...trimmed.injectedIds],
@@ -477,6 +505,10 @@ export async function buildLivePromptInjectionProjection(input: {
     oversizedDiagnosticTruncated: isDiagnosticCapHit(trimmed.oversizedActivationIds),
     droppedDiagnosticTruncated: isDiagnosticCapHit(trimmed.droppedActivationIds),
     ...(injected.length > 0 ? { fullRenderChars } : {}),
+    budgetCapacitySource: promptBudget.capacitySource,
+    budgetCapacityStatus: promptBudget.capacityStatus,
+    budgetContextWindowTokens: promptBudget.contextWindowTokens,
+    budgetPolicyVersion: promptBudget.policyVersion,
   };
 }
 

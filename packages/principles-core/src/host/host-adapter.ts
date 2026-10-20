@@ -54,6 +54,27 @@ export const HOST_EVENT_KINDS: readonly HostEventKind[] = [
 
 // ─── Unified event context ──────────────────────────────────────────────────
 /**
+ * Model identity/capacity facts a host can attach to an event for the
+ * model-aware prompt budget (SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001).
+ *
+ * All fields are UNTRUSTED runtime values (rc-1): decoders only forward what
+ * the raw payload carried; every consumer must validate through
+ * `resolvePromptBudget` (runtime-v2/activation/prompt-budget-policy.ts),
+ * which is the single authority that decides trust and clamping. A missing
+ * modelContext is valid — the budget resolves to the legacy fixed fallback.
+ */
+export interface HostModelContext {
+  /** Host-declared model provider id (OpenClaw `modelProviderId`). */
+  readonly modelProviderId?: string;
+  /** Host-declared model id (OpenClaw/Codex/WorkBuddy `model`). */
+  readonly modelId?: string;
+  /** Host-resolved effective context-token budget (OpenClaw `contextTokenBudget`). Untrusted number. */
+  readonly contextTokenBudget?: unknown;
+  /** Provenance of `contextTokenBudget` (OpenClaw `contextWindowSource`). Untrusted string. */
+  readonly contextWindowSource?: unknown;
+}
+
+/**
  * Normalized context extracted from a host's raw hook payload.
  *
  * Lineage fields (sessionId, turnId) MUST come from the same raw payload —
@@ -89,6 +110,13 @@ export interface HostEventContext {
   readonly promptContent?: string;
   /** Session start source (e.g. Codex SessionStart.source). */
   readonly source?: string;
+  /**
+   * SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: optional model facts carried from
+   * the host hook payload. Absent on hosts/payloads without model identity —
+   * consumers fall back to the fixed budget policy. Untrusted (see
+   * HostModelContext).
+   */
+  readonly modelContext?: HostModelContext;
 }
 
 // ─── Unified event ──────────────────────────────────────────────────────────

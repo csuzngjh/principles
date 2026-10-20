@@ -75,6 +75,19 @@ function validateApprovalGroup(raw: unknown): ApprovalGroup | null {
     if (typeof fits !== "boolean") return null;
     fitsPromptBudget = fits;
   }
+  // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: promptBudgetTierFit is optional,
+  // whitelist-checked. model_dependent qualifies the rotation promise.
+  let promptBudgetTierFit: "fits_all_tiers" | "model_dependent" | "exceeds_max_tier" | "unconfirmed" | undefined;
+  if (Object.hasOwn(raw, "promptBudgetTierFit")) {
+    const { promptBudgetTierFit: tier } = raw;
+    if (
+      tier !== "fits_all_tiers" && tier !== "model_dependent"
+      && tier !== "exceeds_max_tier" && tier !== "unconfirmed"
+    ) {
+      return null;
+    }
+    promptBudgetTierFit = tier;
+  }
   // PRI-940: artifactUnavailable is optional. ERR-009 discipline — present but
   // wrong type fails loud (return null); absent stays undefined, which keeps
   // the card title rendering exactly as before.
@@ -90,6 +103,7 @@ function validateApprovalGroup(raw: unknown): ApprovalGroup | null {
     candidateDescription,
     status,
     fitsPromptBudget,
+    promptBudgetTierFit,
     artifactUnavailable,
     records: validRecords,
   };
