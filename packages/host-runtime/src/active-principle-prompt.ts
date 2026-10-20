@@ -160,7 +160,7 @@ export async function buildActivePrinciplePromptContext(input: {
   // One resolution per request (SPEC §6.1): the caller's pre-resolved budget
   // or the fixed-fallback default — never a per-line constant read.
   const promptBudget = input.promptBudget ?? resolvePromptBudget();
-  const budgetChars = promptBudget.budgetChars;
+  const { budgetChars } = promptBudget;
   const { principles, excludedPrincipleIds, warnings, aborted, selfReportEnabled } =
     await readPromptActivationCandidates(input);
   if (aborted) {
