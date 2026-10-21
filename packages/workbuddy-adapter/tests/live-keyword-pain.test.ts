@@ -97,4 +97,29 @@ describe('P0 WorkBuddy live keyword Pain', () => {
     for (let i = 0; i < 6; i += 1) expect(invoke(ws, { generation_id: 'quota-' + i }).status).toBe(0);
     expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(5);
   });
+
+  // AUDIT-P3-01 (2026-10-21): 共享学习词库接入——其他宿主积累的 earned-high
+  // 学习词在 WorkBuddy 真实 hook 链路生效；未达门槛的学习词与转述不触发。
+  it('learned earned-high term from the shared store triggers one Pain through the real hook', () => {
+    const ws = setup();
+    fs.writeFileSync(path.join(ws.workspace, '.state', 'correction_keywords.json'), JSON.stringify({
+      keywords: [
+        { term: '方向完全反了', weight: 0.9, source: 'llm', truePositiveCount: 3, falsePositiveCount: 0 },
+        { term: '可能不太对', weight: 0.9, source: 'llm', truePositiveCount: 1, falsePositiveCount: 0 },
+      ],
+    }));
+    // earned-high 学习词开局 → 恰一条 Pain。
+    expect(invoke(ws, { prompt: '方向完全反了，停下', generation_id: 'native-learned-1' }).status).toBe(0);
+    expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(1);
+    expect(rows(ws.workspace, 'SELECT host_kind FROM pain_events')[0]).toMatchObject({ host_kind: 'workbuddy' });
+    // 未达 high 门槛的学习词（TP=1）→ 零新增。
+    expect(invoke(ws, { prompt: '可能不太对', generation_id: 'native-learned-2' }).status).toBe(0);
+    expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(1);
+    // 转述（词不在句首）→ 零新增（startsWith 预过滤不因学习词放宽）。
+    expect(invoke(ws, { prompt: '他说方向完全反了', generation_id: 'native-learned-3' }).status).toBe(0);
+    expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(1);
+    // P0 四词行为不回归。
+    expect(invoke(ws, { generation_id: 'native-learned-4' }).status).toBe(0);
+    expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(2);
+  });
 });

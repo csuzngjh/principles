@@ -38,7 +38,7 @@ import process from 'node:process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { appendEventLogLine, redactTelemetryString, isRuleHostEvaluatedEventData } from '@principles/core/runtime-v2';
 import type { HostEventEmitter, HostEventResult } from '@principles/core/host';
-import { createProductionHostRuntime, loadPdConfigForPlugin, parseOwnerStatementPrefix, assessWorkbuddyLiveKeyword, admitTrustedWorkbuddyLiveCorrection, ensureGovernanceDiagnosticianTask } from '@principles/host-runtime';
+import { createProductionHostRuntime, loadPdConfigForPlugin, parseOwnerStatementPrefix, assessWorkbuddyLiveKeyword, resolveSharedCorrectionKeywordStoreForDetection, admitTrustedWorkbuddyLiveCorrection, ensureGovernanceDiagnosticianTask } from '@principles/host-runtime';
 import { computeFeatureFlagsFromConfig } from '@principles/core/runtime-v2';
 import { WorkBuddyHooksHostAdapter } from './host-adapter.js';
 import { WORKBUDDY_TOOL_SEMANTICS } from './tool-semantics.js';
@@ -292,7 +292,14 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
       const explicitReserved = typeof prompt === 'string' && prompt.trimStart().startsWith('PD记录痛苦');
       if (fromOwner && nativeId !== undefined && nativeId.trim().length > 0 &&
           typeof prompt === 'string' && !explicitReserved) {
-        const matched = assessWorkbuddyLiveKeyword(prompt, event.context.sessionId);
+        // AUDIT-P3-01: 预检与 admitTrustedWorkbuddyLiveCorrection 内部使用同一份
+        // 共享 live 词库（seed ∪ learned）——预检不会漏掉学习词，也不会比准入
+        // 更宽。startsWith 预过滤与 matched 判据不变（无 LLM、无 transcript）。
+        const matched = assessWorkbuddyLiveKeyword(
+          prompt,
+          event.context.sessionId,
+          resolveSharedCorrectionKeywordStoreForDetection(resolution.workspaceDir),
+        );
         if (matched.matched) {
           const admitted = admitTrustedWorkbuddyLiveCorrection({
             workspaceDir: resolution.workspaceDir,
