@@ -156,6 +156,6 @@ readRuntimePromptBudgetObservations({ workspaceDir: 'C:/Users/Administrator/.wor
 - **真实宿主 E2E**：安装态 2.3.9 的 WorkBuddy 真实事件已被新读取器验证（见 C2）；真实
   OpenClaw Hook 观测未取得（网关空闲，工作区事件停留在 10-18），confirmed 路径的真实宿主
   验收仍为**未验证**。跨层一致性由“生产 dispatch → 生产 EventLog → Console → UI 合同”的
-  16 例测试证明，不以合成测试冒充真实宿主验收。Codex/WorkBuddy 的容量来源限制不变
+  17 例测试证明，不以合成测试冒充真实宿主验收。Codex/WorkBuddy 的容量来源限制不变
   （Codex 生产路径仅 modelId、无 provider；WorkBuddy 无容量字段，恒回退）。
 - 观测读取按最近 7 个日志文件有界；更早的观测本就会超过 24h 时效界，无信息损失。
