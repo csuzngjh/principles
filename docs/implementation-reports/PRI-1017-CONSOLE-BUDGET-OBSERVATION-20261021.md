@@ -32,8 +32,8 @@ PR #2093（SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001）合并后：
 
 - `readRuntimePromptBudgetObservations({workspaceDir})`：扫描既有事件 JSONL（目录清单
   `RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS = ['.pd/logs', '.state/logs']`，与 RuleCode 遥测
-  收集器同一常量，ERR-031 单一来源；最多最近 7 个日志文件、单文件末尾 4 MiB 尾部窗口，
-  裁剪计入 `truncatedFiles`，I/O 有界），取每个宿主最近一次
+  收集器同一常量，ERR-031 单一来源；每个候选目录最多最近 7 个日志文件（双目录最坏 14 个
+  文件 / 56 MiB）、单文件末尾 4 MiB 尾部窗口，裁剪计入 `truncatedFiles`，I/O 有界），取每个宿主最近一次
   注入事件的预算观测。不可信输入纪律：行级 `unknown` 解析 + 闭合集校验
   （capacitySource / capacityStatus / fallbackReason / hostKind / policyVersion），结构无效
   计入 `parseFailures`；无溯源字段的旧事件计入 `legacyEventsSkipped`（不重解释）；
@@ -111,18 +111,54 @@ PR #2093（SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001）合并后：
   `truncatedFiles` 计数与 note；新增两例测试——超限文件的尾部观测仍被读出且裁切残行不计
   解析失败、仅存在于被裁前缀的观测不被复活（诚实缺席）。未改事件 Schema、未新增状态源。
 
+## B3. 评审复核与修复（P2-3 / P2-4，2026-10-21）
+
+- **P2-3 属实（信息缺失，非正确性缺陷）。** `checkPromptInjectionBudget` 在
+  `resolution.status === 'unconfirmed'` 分支直接 return，早于 `budgetBasisNote` 的构造，
+  所以逐宿主预测只给 `host=list (1953c/4000c)` 这类数字，看不出该宿主的数字来自
+  可信观测、运行时自身回退、过期观测的 Console 回退，还是完全无观测。
+  修复：把基准文案抽成模块级 `describeBudgetBasis(hostKind, facts)`，未确认分支为每个宿主
+  附加**该宿主自己的**基准，确认分支改为调用同一 helper（输出逐字节不变，P2-1 四例仍绿）。
+- **可达性取证（不弱化容量门）。** 评审建议的"真实 HTTP 审批路由集成测试"经源码核实不可达：
+  `checkPromptArtifactDeliverabilityById` 在未确认路由返回 `status: 'unconfirmed'`
+  （`prompt-activation-deliverability.ts:288`），`approve()` 的
+  `precheckPromptCapacity` 在任何治理写入**之前**返回 422（PD_PROMPT_CAPACITY_V1 AC-07，
+  已有测试保护）；已批准但非 `retryActivation` 的记录则返回 409。因此审批后的
+  `injection_capacity_unconfirmed` 分支只在"写前预检与写后投影之间路由判定翻转"的竞态窗口
+  可达。为它构造测试只能放宽 AC-07，属于任务明令禁止的动作。
+  改以两个真实 HTTP 集成测试覆盖同一混合观测工作区：
+  1. grouped 路由（`/api/v1/approvals/grouped`）逐宿主基准——openclaw 观测 4000 + 观测时间、
+     codex 运行时自身回退 2000 + `host_capacity_absent` + 观测时间、workbuddy 仅有 48h 过期观测
+     → 2000 + `runtime_budget_observation_stale` 且**无**观测时间；
+  2. approve 路由在同一混合观测下仍写前拒绝（422 / `route_unconfirmed` / 逐宿主 tier 事实 /
+     审批保持 pending），并证明一条可信 256K 观测**不会**把未确认路由说成已确认——
+     观测是预算证据，不是路由证据。
+- **P2-4 属实（合同一致性，非现网性能故障）。** `slice(-RUNTIME_BUDGET_OBSERVATION_MAX_FILES)`
+  在候选目录循环**内部**，`.pd/logs` 与 `.state/logs` 都在时单次读取的真实上界是 14 个文件 /
+  56 MiB，而 SPEC §6.5 与实施报告写成"最多 7 个日文件"。
+  选择方案二（保留每目录上限 + 修正合同语义），理由：全局 7 会按目录扫描顺序饿死另一侧的
+  最新观测，而"最新观测可能在任一侧"正是本读取器的核心不变式（已有跨目录最新胜出测试）。
+  已同步修正：常量文档注释、SPEC §6.5 规则 10 与 AC-14、实施报告 B/A/E 三处、changeset 文案；
+  新增双目录上限单元测试（9 天 × 2 目录 → `filesRead` 恰为 14、两侧最新观测都读出、
+  超出每目录上限的旧文件被丢弃）。
+- **本轮验证**：host-runtime 单元 31/31、全量 570/570（48 文件）；pd-console
+  `governance-approve-activation` 24/24、跨层 17/17、cr8 路由 13/13、UI 合同通过，
+  全量 2916 passed + 1 expected fail（147 文件）；host-runtime / pd-console `tsc --noEmit` 通过；
+  `npm run lint` 11/11 包通过；`error:context --base origin/main` 复跑 HIGH 集合与上一轮一致
+  （无新增未处理项）。
+
 ## C. 测试证据
 
 | 层 | 文件 / 命令 | 结果 |
 |---|---|---|
-| host-runtime 单元 | `npx vitest run tests/prompt-injection-budget-observation.test.ts`（30 例：读取/最新胜出/宿主分桶/工作区分隔/大小写/符号链接越界/旧事件/异政策/不可信字段/解析失败/双目录/时效三态/未来时间戳/公式一致性/上下界 clamp/逐宿主选择/重建形状/超大文件尾部读取/被裁前缀不复活） | 30/30 |
+| host-runtime 单元 | `npx vitest run tests/prompt-injection-budget-observation.test.ts`（31 例：读取/最新胜出/宿主分桶/工作区分隔/大小写/符号链接越界/旧事件/异政策/不可信字段/解析失败/双目录/时效三态/未来时间戳/公式一致性/上下界 clamp/逐宿主选择/重建形状/超大文件尾部读取/被裁前缀不复活/**双目录每目录上限（9 天 × 2 目录 → 读 14 文件、两侧最新观测都在、超上限旧文件被丢）**） | 31/31 |
 | pd-console 跨层 | `npx vitest run tests/models/prompt-budget-console-observation.test.ts`（17 例：**生产 dispatch → 真实 EventLog writer → `.state/logs` → Console 读取 → UI 合同**；A1–A3 256K→4000；C1–C4 `model_dependent`/`oversized`/clamp 边界；B1–B10 无观测/48h 过期/宿主不匹配/不可信字段/逐宿主/未来时间戳/矛盾溯源/坏行容忍/运行时自身回退观测） | 17/17 |
 | pd-console 合同 | `npx vitest run tests/ui/prompt-capacity-validators.test.ts tests/ui/focus-page.test.ts tests/ui/activation-page.test.ts` | 198/198 |
 | pd-console 路由合同 | `npx vitest run tests/server/routes/cr8-data-contract.test.ts`（13 例；新增 `?host=workbuddy` 200 + 读取真实观测 4000/256K + 未知宿主 400） | 13/13 |
-| host-runtime 全量 | `cd packages/host-runtime && npx vitest run` | 569/569（48 文件） |
-| pd-console 全量 | `cd packages/pd-console && npx vitest run` | 2914 passed + 1 expected fail（147 文件） |
+| host-runtime 全量 | `cd packages/host-runtime && npx vitest run` | 570/570（48 文件） |
+| pd-console 全量 | `cd packages/pd-console && npx vitest run` | 2916 passed + 1 expected fail（147 文件，P2-3 复跑） |
 | openclaw-plugin 插件路由 | `cd packages/openclaw-plugin && npx vitest run tests/hooks/runtime-v2-prompt-activation.test.ts` | 44/44（含 2 例新增：256K→4000 溯源；无宿主事实→2000+`host_capacity_absent`） |
-| 审批告警跨层（P2-1） | `npx vitest run tests/integration/governance-approve-activation.test.ts`（22 例；新增 4 例：256K→4000 / 运行时回退 2000 / 48h 过期 / 无观测） | 22/22 |
+| 审批告警跨层（P2-1 / P2-3） | `npx vitest run tests/integration/governance-approve-activation.test.ts`（24 例；P2-1 新增 4 例：256K→4000 / 运行时回退 2000 / 48h 过期 / 无观测；P2-3 新增 2 例：未确认路由下 grouped HTTP 逐宿主基准 / 混合观测下 approve HTTP 仍写前拒绝） | 24/24 |
 | 类型检查 | core / pd-cli / install-layout / openclaw-plugin / pd-console / pd-companion `tsc --noEmit` | 全部通过 |
 | 质量门禁 | `check:telemetry-events --strict`、`check:runtime-contract`、`check:docs-structure`、`check:error-handbook`、`check:repo-hygiene`、`check:runtime-writers`、`check:security-baseline`、`check:generated-artifacts`、`check:pipeline-contract`、`check:workspace-tools`、`lint` | 全部通过 |
 
@@ -182,6 +218,7 @@ readRuntimePromptBudgetObservations({ workspaceDir: 'C:/Users/Administrator/.wor
   验收仍为**未验证**。跨层一致性由“生产 dispatch → 生产 EventLog → Console → UI 合同”的
   17 例测试证明，不以合成测试冒充真实宿主验收。Codex/WorkBuddy 的容量来源限制不变
   （Codex 生产路径仅 modelId、无 provider；WorkBuddy 无容量字段，恒回退）。
-- 观测读取有双重上限：最近 7 个日文件 + 单文件末尾 4 MiB。超限文件计入 `truncatedFiles`，
+- 观测读取有双重上限：每个候选日志目录最近 7 个日文件 + 单文件末尾 4 MiB（双目录最坏
+  14 个文件 / 56 MiB）。超限文件计入 `truncatedFiles`，
   裁切残行不解析；若某宿主最近一次注入事件早于尾部窗口，读取器诚实报"无观测"并走固定
   回退，不伪造。真实日志实测最大单文件 1.17 MB（见 B2），当前远低于该上限。

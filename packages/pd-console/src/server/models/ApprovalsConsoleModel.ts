@@ -52,6 +52,34 @@ function isActivationSuccess(activation: ActivationDecision): boolean {
   return activation.decision === 'activated' || activation.decision === 'already_activated';
 }
 
+/**
+ * PRI-1017 (SPEC §6.5 rules 1/8): name the budget basis a forecast ACTUALLY
+ * ran under. Every case is spelled out — silence reads as "the console is not
+ * bound to the runtime", and on an unconfirmed route a per-host number
+ * without its own basis lets one host's observation look like another host's
+ * confirmation.
+ */
+function describeBudgetBasis(
+  hostKind: PromptInjectionTargetHost,
+  facts: Pick<ReturnType<typeof selectConsoleRuntimeBudgetFacts>, 'perHost' | 'stalePerHost'>,
+): string {
+  const used = facts.perHost.get(hostKind);
+  if (used !== undefined) {
+    return used.capacityStatus === 'confirmed'
+      ? `budget basis=runtime_observation (${hostKind}, observed at ${used.observedAt})`
+      // A usable observation can itself be the runtime's honest fallback (the
+      // host supplied no trusted capacity). The number is then the fixed
+      // budget, not a host window — say so.
+      : `budget basis=runtime_observation_fallback (${hostKind}, runtime reason=${used.fallbackReason ?? 'unknown'}, observed at ${used.observedAt})`;
+  }
+  const stale = facts.stalePerHost.get(hostKind);
+  if (stale !== undefined) {
+    return `budget basis=fixed_fallback (the runtime budget observation for ${hostKind} is stale — older than 24h and NOT used as the current budget)`;
+  }
+  // No observation at all: the number is the console's fixed fallback.
+  return `budget basis=fixed_fallback (no runtime budget observation for ${hostKind})`;
+}
+
 type UnsupportedChannelResult = { ok: false; error: 'unsupported_channel'; channel: string };
 type ChannelGuardedDecisionResult = ApprovalDecisionResult | UnsupportedChannelResult;
 
@@ -434,7 +462,10 @@ export class ApprovalsConsoleModel {
       return `injection_budget_check_failed: could not recompute the prompt injection projection from the runtime budget observation (${message}); the activation is committed but its injection status is unverified. nextAction=check .pd/state.db and event log readability and re-run pd runtime activation list`;
     }
     if (resolution.status === 'unconfirmed') {
-      return `injection_capacity_unconfirmed: the activation is committed but this workspace's effective injection route cannot be confirmed (${resolution.decision.unconfirmedReason ?? 'unknown reason'}); per-host forecasts: ${resolution.perHost.map((entry) => `${entry.hostKind}=${entry.projection.route} (${entry.projection.usedChars}c/${entry.projection.budget}c${entry.projection.truncated ? ', truncated' : ''})`).join('; ')}. nextAction=${resolution.decision.nextAction ?? 'pass an explicit target host (openclaw|codex|workbuddy)'}`;
+      // Each per-host forecast ran under ITS OWN budget basis (observation,
+      // runtime fallback, stale fallback, or no observation) — the headline
+      // numbers must never imply a single host's confirmation covers them all.
+      return `injection_capacity_unconfirmed: the activation is committed but this workspace's effective injection route cannot be confirmed (${resolution.decision.unconfirmedReason ?? 'unknown reason'}); per-host forecasts: ${resolution.perHost.map((entry) => `${entry.hostKind}=${entry.projection.route} (${entry.projection.usedChars}c/${entry.projection.budget}c${entry.projection.truncated ? ', truncated' : ''}) ${describeBudgetBasis(entry.hostKind, budgetFacts)}`).join('; ')}. nextAction=${resolution.decision.nextAction ?? 'pass an explicit target host (openclaw|codex|workbuddy)'}`;
     }
     const {projection} = resolution;
     if (projection.injectedActivationIds.includes(activationId)) {
@@ -443,24 +474,7 @@ export class ApprovalsConsoleModel {
     // Never let a stale observation masquerade as the current budget in the
     // warning: name the basis the forecast actually ran under.
     const decidedHost = resolution.decision.hostKind;
-    const usedObservation = decidedHost !== undefined ? budgetFacts.perHost.get(decidedHost) : undefined;
-    const staleObservation = decidedHost !== undefined && usedObservation === undefined
-      ? budgetFacts.stalePerHost.get(decidedHost)
-      : undefined;
-    const budgetBasisNote = decidedHost === undefined
-      ? ''
-      : staleObservation !== undefined
-        ? ` budget basis=fixed_fallback (the runtime budget observation for ${decidedHost} is stale — older than 24h and NOT used as the current budget)`
-        : usedObservation !== undefined
-          ? usedObservation.capacityStatus === 'confirmed'
-            ? ` budget basis=runtime_observation (${decidedHost}, observed at ${usedObservation.observedAt})`
-            // A usable observation can itself be the runtime's honest fallback
-            // (the host supplied no trusted capacity). The number is then the
-            // fixed budget, not a host window — say so.
-            : ` budget basis=runtime_observation_fallback (${decidedHost}, runtime reason=${usedObservation.fallbackReason ?? 'unknown'}, observed at ${usedObservation.observedAt})`
-          // No observation at all: the warning's number is the console's fixed
-          // fallback. Name that basis too — silence reads like "unbound".
-          : ` budget basis=fixed_fallback (no runtime budget observation for ${decidedHost})`;
+    const budgetBasisNote = decidedHost === undefined ? '' : ` ${describeBudgetBasis(decidedHost, budgetFacts)}`;
     const projectionDetail = projection.warnings.length > 0 ? ` projection warnings: ${projection.warnings.join(' | ')}` : '';
     // AC-02/R-A3: oversized is independent of `truncated` — say WHY first.
     if (projection.oversizedActivationIds.includes(activationId)) {

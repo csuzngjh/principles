@@ -45,10 +45,11 @@ import {
  * - Events predating the model-aware policy carry no provenance fields; they
  *   are counted as `legacyEventsSkipped` and produce NO observation — a
  *   missing provenance field is "policy unknown", never a capacity claim.
- * - Bounded I/O: only the newest bytes of the most recent daily files are
- *   read (tail window), so a runaway or crafted log cannot make a Console
- *   request read an unbounded amount of data. Only bounded budget metadata is
- *   retained and returned; other event payloads are not cached.
+ * - Bounded I/O: only the newest bytes of the most recent daily files are read
+ *   (tail window), the file cap applying PER candidate log directory, so a
+ *   runaway or crafted log cannot make a Console request read an unbounded
+ *   amount of data. Only bounded budget metadata is retained and returned;
+ *   other event payloads are not cached.
  */
 
 /**
@@ -59,7 +60,17 @@ import {
  */
 export const RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS: readonly string[] = ['.pd/logs', '.state/logs'];
 
-/** Bounded I/O: only the most recent daily files are scanned. */
+/**
+ * Bounded I/O: only the most recent daily files are scanned — PER candidate
+ * log directory (`RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS`), not globally. The
+ * cap is deliberately per directory: both directories describe the same
+ * workspace's log convention and either can hold the newest event for a given
+ * host (the reader takes latest-wins ACROSS them), so a global cap would let
+ * one directory's files starve the other and drop a live host observation.
+ * Worst case per read is therefore `RUNTIME_BUDGET_OBSERVATION_MAX_FILES ×
+ * RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS.length` files (14 today) and the same
+ * count × `RUNTIME_BUDGET_OBSERVATION_MAX_FILE_BYTES` bytes (56 MiB today).
+ */
 export const RUNTIME_BUDGET_OBSERVATION_MAX_FILES = 7;
 
 /**
@@ -389,7 +400,7 @@ export function readRuntimePromptBudgetObservations(input: {
     legacyEventsSkipped: legacyEventsSkipped.count,
     foreignPolicyEventsSkipped: foreignPolicyEventsSkipped.count,
     truncatedFiles: truncatedFiles.count,
-    note: 'observations are PAST runtime facts bound to one host; absence means UNKNOWN (never a fabricated window); events without model-aware budget provenance, or computed under a different policy version, are skipped, not reinterpreted; files larger than the bounded tail window are counted in truncatedFiles (older prefix skipped, newest event per host still inside the window)',
+    note: 'observations are PAST runtime facts bound to one host; absence means UNKNOWN (never a fabricated window); events without model-aware budget provenance, or computed under a different policy version, are skipped, not reinterpreted; the bounded read takes the newest daily files per candidate log directory and files larger than the tail window are counted in truncatedFiles (older prefix skipped, newest event per host still inside the window)',
   };
 }
 

@@ -341,9 +341,9 @@ Console 不持有实时宿主事实（独立进程、无 Hook 上下文），但
 7. **不可信输入纪律。** 事件行按 `unknown` 解析，闭合集校验（capacitySource / capacityStatus / fallbackReason / hostKind），结构无效行计入 `parseFailures`  loud 跳过，绝不猜测量。
 8. **诚实降级。** 无观测 / 观测过期 / 宿主不匹配 / 字段不可信时，保留现有固定回退预算与原有原因码（如 `host_capacity_absent`），不得伪造上下文窗口。
 9. **治理边界不变。** 预算观测失败不得跳过或放宽审批、激活、撤销与回滚流程。
-10. **有界读取。** 只扫描最近 7 个日文件，每个文件只读取末尾 4 MiB（`RUNTIME_BUDGET_OBSERVATION_MAX_FILE_BYTES`）；被截断的文件计入 `truncatedFiles`，裁切处的半个 JSON 行不得解析。日志超限时降级为"该事实不在窗口内 / 固定回退"，绝不阻塞 Console 请求或读取无界数据。
+10. **有界读取。** 每个候选日志目录（`RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS`：`.pd/logs` 与 `.state/logs`）各扫描最近 7 个日文件（`RUNTIME_BUDGET_OBSERVATION_MAX_FILES`），每个文件只读取末尾 4 MiB（`RUNTIME_BUDGET_OBSERVATION_MAX_FILE_BYTES`）。上限按目录生效（而非全局）是为了让后扫的目录不会饿死先扫的目录——最新观测可能落在任一侧，全局 7 个会按目录顺序丢掉另一侧的最新观测。因此单次读取的最坏总量是 14 个文件 / 56 MiB。被截断的文件计入 `truncatedFiles`，裁切处的半个 JSON 行不得解析。日志超限时降级为"该事实不在窗口内 / 固定回退"，绝不阻塞 Console 请求或读取无界数据。
 
-未确认路由（`capacityStatus: 'unconfirmed'`）下，逐宿主预测各自使用该宿主自己的观测（或各自的诚实回退），payload 中每个 perHost 条目携带自己的预算基准与观测时间；标题数字继续保持"未绑定具体宿主"的语义，不得冒充任一宿主的当前实际预算。
+未确认路由（`capacityStatus: 'unconfirmed'`）下，逐宿主预测各自使用该宿主自己的观测（或各自的诚实回退），payload 中每个 perHost 条目携带自己的预算基准与观测时间；标题数字继续保持"未绑定具体宿主"的语义，不得冒充任一宿主的当前实际预算。同一条规则延伸到审批后告警的未确认分支：`per-host forecasts` 每一项必须自带该宿主的预算基准标签（观测 / 运行时自身回退 / 过期回退 / 无观测），不得只给数字。注意写入前容量预检（AC-07）会在未确认路由上直接拒绝审批，因此该告警分支只在"预检与投影之间路由判定翻转"的竞态窗口内可达；它的可达面是 grouped HTTP 路由与逐宿主 payload，容量门本身不得为测试而放宽。
 
 ---
 
@@ -456,7 +456,7 @@ Console 不持有实时宿主事实（独立进程、无 Hook 上下文），但
 | AC-11 | `PD_PROMPT_CAPACITY_V1` 原有测试与容量测量回归通过，并新增各容量档位的生产构建器测量。 |
 | AC-12 | OpenClaw、Codex、WorkBuddy 的实际接入结果分别有证据；不得以共享 helper 单测代替真实宿主验证。 |
 | AC-13 | CI、构建、类型检查、插件打包检查和受影响测试全部通过。 |
-| AC-14 | Console 与运行时预算数据链一致（PRI-1017）：通过生产注入事件发射 → Console 读取的跨层测试证明——可信 256K 观测下 grouped/activations 表面返回 4000 字符预算及来源、观测时间；审批后告警同样按观测预算与依据（`runtime_observation` / `runtime_observation_fallback` / `fixed_fallback`）输出；无观测/过期/宿主不匹配/不可信字段时诚实回退（含 `runtime_budget_observation_stale` 原因码）；(1250, 16000] 区间条目在 Console 层仍判 `model_dependent`，不因观测预算变大而误报为可注入；观测读取有界（tail window），超限文件计入 `truncatedFiles` 且不解析裁切残行。 |
+| AC-14 | Console 与运行时预算数据链一致（PRI-1017）：通过生产注入事件发射 → Console 读取的跨层测试证明——可信 256K 观测下 grouped/activations 表面返回 4000 字符预算及来源、观测时间；审批后告警同样按观测预算与依据（`runtime_observation` / `runtime_observation_fallback` / `fixed_fallback`）输出；无观测/过期/宿主不匹配/不可信字段时诚实回退（含 `runtime_budget_observation_stale` 原因码）；(1250, 16000] 区间条目在 Console 层仍判 `model_dependent`，不因观测预算变大而误报为可注入；观测读取有界（tail window，每候选目录最多 7 个日文件、最坏总量 14 个文件 / 56 MiB），超限文件计入 `truncatedFiles` 且不解析裁切残行，并有双目录上限测试证明后扫目录不被饿死；未确认路由下逐宿主条目（grouped payload 与审批告警的 per-host forecasts）各自携带自己的预算基准。 |
 
 ## 11. 回滚与交付要求
 

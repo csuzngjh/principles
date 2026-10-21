@@ -895,6 +895,162 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     expect(warning).toContain('budget basis=fixed_fallback (no runtime budget observation for openclaw)');
   });
 
+  // PRI-1017 review finding P2-3: on an UNCONFIRMED route every per-host
+  // forecast must carry ITS OWN budget basis — one host's confirmed observation
+  // is never another host's confirmation, and a fallback must not read as a
+  // measurement.
+  //
+  // Reachability, proven from the source rather than assumed: the real HTTP
+  // approve route runs `precheckPromptCapacity` BEFORE any governance write
+  // (PD_PROMPT_CAPACITY_V1 AC-07), and an unconfirmed route is refused there
+  // (`category: 'route_unconfirmed'`), so the post-approval
+  // `injection_capacity_unconfirmed` warning only fires in a route-flip race
+  // between the precheck and the post-activation forecast. Testing it by
+  // forcing that state would mean weakening the capacity gate, so these two
+  // tests pin what production actually offers for the same mixed-observation
+  // workspace: (1) the same-basis payload on the real grouped HTTP route, and
+  // (2) the refuse-before-write behavior of the real approve HTTP route, which
+  // must not be talked out of it by a fresh 256K observation — an observation
+  // is budget evidence, never route evidence.
+  it('unconfirmed route with mixed bases: the grouped HTTP route gives every host its own budget provenance', async () => {
+    clearRuntimeBudgetLogs();
+    ensureDefaultConfig();
+
+    // A second real host shares this workspace. With the abstraction flag off,
+    // openclaw takes the list route while codex/workbuddy take the shared
+    // route, so the effective route is honestly unconfirmed.
+    const declarationPath = path.join(tmpDir, '.pd', 'host-tool-semantics', 'codex.json');
+    const saved = saveHostToolDeclaration(tmpDir, {
+      version: 1,
+      hostKind: 'codex',
+      mappings: [{ rawToolName: 'shell', canonicalKind: 'execute' }],
+      declaredAt: new Date().toISOString(),
+    });
+    expect(saved.ok).toBe(true);
+
+    try {
+      // openclaw: real production dispatch under a trusted 256K window.
+      await dispatchRuntimeInjection({ contextTokenBudget: 256_000, contextWindowSource: 'model', modelId: 'claude-sonnet-4-5' });
+      // codex: a usable observation that is itself the runtime's honest fallback.
+      appendRawInjectionEvent(new Date().toISOString(), {
+        hostKind: 'codex',
+        budget: 2000,
+        budgetCapacitySource: 'legacy_fallback',
+        budgetCapacityStatus: 'unknown',
+        budgetFallbackReason: 'host_capacity_absent',
+      });
+      // workbuddy: only a 48h-old observation exists, so it must not be used.
+      appendRawInjectionEvent(new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(), {
+        hostKind: 'workbuddy',
+        budget: 4000,
+        budgetCapacitySource: 'host_effective_window',
+        budgetCapacityStatus: 'confirmed',
+        budgetContextWindowTokens: 256_000,
+      });
+
+      const { status, body } = await fetchJson('/api/v1/approvals/grouped');
+      expect(status).toBe(200);
+      const promptInjection = getDataObject(body)?.['promptInjection'];
+      expect(isRecord(promptInjection)).toBe(true);
+      expect(promptInjection!['capacityStatus']).toBe('unconfirmed');
+      const perHost = promptInjection!['perHost'];
+      expect(Array.isArray(perHost)).toBe(true);
+      const byHost = new Map<string, Record<string, unknown>>((perHost as unknown[])
+        .filter(isRecord)
+        .map((entry) => [getStringField(entry, 'hostKind') ?? '', entry]));
+
+      // Observed: the host's own number plus the time it was observed.
+      const openclaw = byHost.get('openclaw');
+      expect(openclaw?.['budget']).toBe(4000);
+      expect(typeof openclaw?.['budgetObservedAt']).toBe('string');
+      expect(openclaw?.['budgetFallbackReason']).toBeUndefined();
+
+      // Runtime fallback: a fact the runtime really recorded, labelled as a
+      // fallback and traceable to the runtime's own reason.
+      const codex = byHost.get('codex');
+      expect(codex?.['budget']).toBe(2000);
+      expect(codex?.['budgetCapacitySource']).toBe('legacy_fallback');
+      expect(codex?.['budgetFallbackReason']).toBe('host_capacity_absent');
+      expect(typeof codex?.['budgetObservedAt']).toBe('string');
+
+      // Stale-only: the console fallback, the stale reason, and NO timestamp —
+      // the old observation is never presented as the current budget.
+      const workbuddy = byHost.get('workbuddy');
+      expect(workbuddy?.['budget']).toBe(2000);
+      expect(workbuddy?.['budgetFallbackReason']).toBe('runtime_budget_observation_stale');
+      expect(workbuddy?.['budgetObservedAt']).toBeUndefined();
+    } finally {
+      // Restore the single-host workspace so later tests keep the confirmed route.
+      fs.rmSync(declarationPath, { force: true });
+      clearRuntimeBudgetLogs();
+    }
+  });
+
+  it('unconfirmed route with mixed observations: approve is still refused before any write (an observation never confirms the route)', async () => {
+    deactivateActivePromptActivations();
+    clearRuntimeBudgetLogs();
+    ensureDefaultConfig();
+
+    const declarationPath = path.join(tmpDir, '.pd', 'host-tool-semantics', 'codex.json');
+    const saved = saveHostToolDeclaration(tmpDir, {
+      version: 1,
+      hostKind: 'codex',
+      mappings: [{ rawToolName: 'shell', canonicalKind: 'execute' }],
+      declaredAt: new Date().toISOString(),
+    });
+    expect(saved.ok).toBe(true);
+
+    const base = Date.now();
+    const principleId = newPrincipleId();
+    const artifactId = `art-mixed-unconf-${base}`;
+    const approvalId = `apr-mixed-unconf-${base}`;
+    seedLedgerPrinciple(principleId, 'mixed observation unconfirmed route principle');
+    await seedPrincipleArtifact(artifactId, {
+      sourcePrincipleId: principleId,
+      contentJson: { principleId, text: 'mixed observation unconfirmed route principle' },
+    });
+    await seedPendingApproval(approvalId, artifactId, 'prompt');
+
+    try {
+      await dispatchRuntimeInjection({ contextTokenBudget: 256_000, contextWindowSource: 'model', modelId: 'claude-sonnet-4-5' });
+      appendRawInjectionEvent(new Date().toISOString(), {
+        hostKind: 'codex',
+        budget: 2000,
+        budgetCapacitySource: 'legacy_fallback',
+        budgetCapacityStatus: 'unknown',
+        budgetFallbackReason: 'host_capacity_absent',
+      });
+
+      const res = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note: 'PRI-1017 P2-3 mixed observations' }),
+      });
+      expect(res.status).toBe(422);
+      const body = res.body as { error?: string; message?: string; capacity?: unknown };
+      expect(body.error).toBe('prompt_capacity_refused');
+      expect(String(body.message)).toContain('route_unconfirmed');
+      // The refusal still names each host it forecast under, so the Owner sees
+      // the per-host gap rather than one borrowed verdict.
+      const capacity = body.capacity;
+      expect(isRecord(capacity)).toBe(true);
+      expect((capacity as { category?: string }).category).toBe('route_unconfirmed');
+      const perHost = (capacity as { perHost?: unknown }).perHost;
+      expect(Array.isArray(perHost)).toBe(true);
+      const hosts = (perHost as unknown[]).filter(isRecord)
+        .map((entry) => getStringField(entry, 'hostKind'))
+        .sort();
+      expect(hosts).toEqual(['codex', 'openclaw', 'workbuddy']);
+
+      // No governance write happened: the approval remains pending.
+      const detail = await fetchJson(`/api/v1/approvals/${approvalId}`);
+      expect(getStringField(getDataObject(detail.body), 'status')).toBe('pending');
+    } finally {
+      fs.rmSync(declarationPath, { force: true });
+      clearRuntimeBudgetLogs();
+    }
+  });
+
   // PR-1894: on the shared route (abstraction_layer_v1 ON) the production path
   // deliberately passes no round key, so nothing is merely "queued" — an
   // out-of-window activation IS starved and the FIFO wording is correct. This

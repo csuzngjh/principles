@@ -6,6 +6,7 @@ import { PROMPT_BUDGET_POLICY_VERSION } from '@principles/core/runtime-v2';
 import {
   RUNTIME_BUDGET_OBSERVATION_MAX_AGE_MS,
   RUNTIME_BUDGET_OBSERVATION_MAX_FILE_BYTES,
+  RUNTIME_BUDGET_OBSERVATION_MAX_FILES,
   RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS,
   readRuntimePromptBudgetObservations,
   runtimeBudgetObservationToResolution,
@@ -348,6 +349,42 @@ describe('PRI-1017: readRuntimePromptBudgetObservations', () => {
     expect(report.observations).toHaveLength(1);
     expect(report.observations[0]?.budgetChars).toBe(3125);
     expect(report.filesRead.length).toBe(2);
+  });
+
+  it('the file cap applies PER candidate directory: the later directory is never starved and files beyond the cap are dropped', () => {
+    const dir = tempWorkspace();
+    const dates = ['2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04', '2026-10-05', '2026-10-06', '2026-10-07', '2026-10-08', '2026-10-09'];
+    const event = (hostKind: string, ts: string, budget: number, window: number) => injectedEvent({
+      ts,
+      data: {
+        ...baseData(),
+        workspaceDir: dir,
+        hostKind,
+        budget,
+        budgetCapacitySource: 'host_effective_window',
+        budgetCapacityStatus: 'confirmed',
+        budgetContextWindowTokens: window,
+        budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION,
+      },
+    });
+    // Both conventions carry 9 daily files — more than the cap.
+    for (const date of dates) {
+      writeEvents(dir, '.pd/logs', date, [event('codex', `${date}T04:00:00.000Z`, 4000, 256_000)]);
+      writeEvents(dir, '.state/logs', date, [event('openclaw', `${date}T05:00:00.000Z`, 3125, 200_000)]);
+    }
+    // A workbuddy observation that exists ONLY in the oldest file of the first
+    // directory: beyond the per-directory cap, so it must be dropped.
+    writeEvents(dir, '.pd/logs', '2026-10-01', [event('workbuddy', '2026-10-01T04:30:00.000Z', 4000, 256_000)]);
+
+    const report = readRuntimePromptBudgetObservations({ workspaceDir: dir, now: new Date('2026-10-09T12:00:00.000Z') });
+    const expectedTotal = RUNTIME_BUDGET_OBSERVATION_MAX_FILES * RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS.length;
+    // The real worst-case read is cap × directories (14 today), NOT 7 overall —
+    // a global cap would let the first directory consume the whole budget and
+    // silently drop the second directory's live host observation.
+    expect(report.filesRead).toHaveLength(expectedTotal);
+    const hosts = report.observations.map((observation) => observation.hostKind).sort();
+    expect(hosts).toEqual(['codex', 'openclaw']);
+    expect(report.observations.find((observation) => observation.hostKind === 'openclaw')?.budgetChars).toBe(3125);
   });
 
   it('an in-logs symlink cannot redirect the read outside the workspace log root', () => {
