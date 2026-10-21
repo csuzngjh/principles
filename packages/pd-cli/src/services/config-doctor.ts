@@ -501,6 +501,16 @@ export function buildSignalHealthEntry(stateDir: string): SignalHealthEntry {
     return entry;
   }
 
+  // AUDIT-P2-02/P2-04: 有积压且批量确认在跳过 → 队列消费不出去，Owner 必须
+  // 看见（不再是不可见的 permanent pending）。区分「暂存待下轮」与「站桩」。
+  const {counts} = entry;
+  if (counts && counts.pendingCount > 0 && counts.stage2BatchSkipped > 0) {
+    entry.status = 'degraded';
+    entry.reason = `Signal confirmation backlog stands at ${counts.pendingCount} pending rows while batch confirmation was skipped ${counts.stage2BatchSkipped} time(s) today — the signal classifier is unavailable`;
+    entry.nextAction = 'Fix the signal_collector runtime profile (provider/model/apiKeyEnv), then run pd config doctor again; pending rows are preserved and will be consumed once the classifier resolves';
+    return entry;
+  }
+
   const parsedTime = updatedAt === null ? Number.NaN : Date.parse(updatedAt);
   if (updatedAt === null || Number.isNaN(parsedTime) || (Date.now() - parsedTime) > SIGNAL_HEALTH_STALE_MS) {
     entry.status = 'degraded';
