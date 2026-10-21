@@ -117,7 +117,7 @@
 
 ## 6. 未解决风险 / 未验证事项 / 预存环境问题
 
-1. **CI 状态**：四个 PR 的检查在报告撰写时仍在运行（首跑中 PR #2101 的 Verify Merge Gate 曾因 changeset 未声明 installer 失败，已补 `create-principles-disciple` 并推送 `7eb6bcf4d`/`f1f34c6df`，重跑结果以 PR 页为准）。**不声称任何未完成的 CI 为绿**。
+1. **CI 状态（终态）**：四个 PR 全部绿——#2101 **32 SUCCESS**（含 Verify Merge Gate 2m37s PASS）、#2102 7 SUCCESS、#2103 33 SUCCESS + 1 SKIPPED、#2104 31 SUCCESS + 1 SKIPPED（GitHub statusCheckRollup 权威口径，2026-10-21 23:5x 本地时间核查）。首跑中 PR #2101 的 Verify Merge Gate 曾因 changeset 未声明 installer 失败（N-5/C4：插件发版须连带 create-principles-disciple），已补声明并推送（`7eb6bcf4d`/`f1f34c6df`），重跑全绿。
 2. **预存环境失败**（均有基线复现证据，与本次改动无关）：
    - `principle-application-ledger.steps.test.ts` EPERM×2：Windows 临时目录清理 flake（未改动基线同失败）。
    - `template-anti-regression.test.ts`：Windows GNU tar 对 worktree 路径双转义（tar 在 PD 逻辑前失败）——建议另立 issue。
