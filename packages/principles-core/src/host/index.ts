@@ -11,6 +11,7 @@
 export type {
   HostEventKind,
   HostEventContext,
+  HostModelContext,
   HostEvent,
   HostDecision,
   HostEventResult,

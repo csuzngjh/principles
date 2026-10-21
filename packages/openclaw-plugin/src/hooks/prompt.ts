@@ -11,8 +11,8 @@ import type { ContextInjectionConfig } from '../types.js';
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
 import { PathResolver } from '../core/path-resolver.js';
 import { selectPrinciplesForInjection, DEFAULT_PRINCIPLE_BUDGET } from '../core/principle-injection.js';
-import { getCachedMaskedPrincipleSet, RUNTIME_V2_PRINCIPLE_BUDGET, trimToBudget, renderPrinciplesToDirectives, formatCorePrinciplesList, resolveOutputLanguage, DEFAULT_OUTPUT_LANGUAGE } from '@principles/core/runtime-v2';
-import type { ResolvedOutputLanguage, PromptSelectionPolicy } from '@principles/core/runtime-v2';
+import { getCachedMaskedPrincipleSet, RUNTIME_V2_PRINCIPLE_BUDGET, getPromptModelCatalog, resolvePromptBudget, trimToBudget, renderPrinciplesToDirectives, formatCorePrinciplesList, resolveOutputLanguage, DEFAULT_OUTPUT_LANGUAGE } from '@principles/core/runtime-v2';
+import type { PromptBudgetResolution, ResolvedOutputLanguage, PromptSelectionPolicy } from '@principles/core/runtime-v2';
 import { nextSessionTurnOrdinal } from '@principles/core/trajectory-store';
 import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
 import { PromptActivationReader } from '../core/runtime-v2-prompt-activation-reader.js';
@@ -613,6 +613,12 @@ export async function handleBeforePromptBuild(
   let v2OversizedActivationIds: string[] | undefined;
   // Hoisted so the owner_approved_behavior_directives section can access them
   let dedupedV2: Array<{ principleId: string; text: string; artifactId: string; activationId: string }> = [];
+  // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: the plugin-local route's budget
+  // resolution (resolved lazily below from THIS hook's model facts). The
+  // shared route carries its own resolution in sharedActivePrinciplePrompt —
+  // resolved by host-runtime from the same facts — so exactly one resolution
+  // feeds each injection.
+  let v2PromptBudget: PromptBudgetResolution | undefined;
   try {
     const reader = sharedActivePrinciplePrompt ? undefined : new PromptActivationReader(wctx.workspaceDir, { logger });
     const v2Result = sharedActivePrinciplePrompt
@@ -684,7 +690,32 @@ export async function handleBeforePromptBuild(
           logger?.warn?.(`[PD:RuntimeV2] Fair-rotation round ordinal unavailable (${String(ordinalErr)}); falling back to legacy FIFO selection for this build`);
         }
       }
-      const selection = trimToBudget(dedupedV2, RUNTIME_V2_PRINCIPLE_BUDGET, escapeXml, v2RoundKey);
+      // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: resolve the injection budget
+      // ONCE for this build from the host hook's own model facts (effective
+      // context window first, installed Pi AI catalog as metadata fallback,
+      // legacy 2000 with an observable reason when nothing is confirmable).
+      // The shared route resolves the same facts inside host-runtime — same
+      // resolver, same catalog, deterministic same result.
+      v2PromptBudget = resolvePromptBudget({
+        hostCapacity: {
+          contextTokenBudget: ctx.contextTokenBudget,
+          contextWindowSource: ctx.contextWindowSource,
+        },
+        modelIdentity: {
+          providerId: ctx.modelProviderId,
+          modelId: ctx.modelId,
+        },
+        catalog: getPromptModelCatalog(),
+      });
+      if (v2PromptBudget.capacityStatus === 'unknown' && v2PromptBudget.fallbackReason) {
+        // Per-turn debug noise control: the injection EVENT already records
+        // capacityStatus=legacy_fallback + the bounded reason code (SPEC §7);
+        // the log adds the non-sensitive detail for local diagnosis only.
+        logger?.debug?.(`[PD:RuntimeV2] Model-aware budget fell back to ${v2PromptBudget.budgetChars}c (reason: ${v2PromptBudget.fallbackReason}; detail: ${v2PromptBudget.fallbackDetail ?? 'n/a'})`);
+      } else {
+        logger?.info?.(`[PD:RuntimeV2] Model-aware budget ${v2PromptBudget.budgetChars}c (source: ${v2PromptBudget.capacitySource}, window: ${v2PromptBudget.contextWindowTokens} tokens)`);
+      }
+      const selection = trimToBudget(dedupedV2, v2PromptBudget.budgetChars, escapeXml, v2RoundKey);
       const { lines, injectedIds, truncated } = selection;
       v2Truncated = truncated;
       v2SelectionPolicy = selection.selectionPolicy;
@@ -694,7 +725,7 @@ export async function handleBeforePromptBuild(
       v2DroppedActivationIds = selection.droppedActivationIds;
       v2OversizedActivationIds = selection.oversizedActivationIds;
       if (truncated) {
-        logger?.info?.(`[PD:RuntimeV2] Principle budget reached (${RUNTIME_V2_PRINCIPLE_BUDGET}c) — ${injectedIds.size} principles injected under ${selection.selectionPolicy} (round=${v2RoundKey ?? 'n/a'}, start=${selection.rotationStartIndex ?? 0}, dropped=${selection.droppedActivationIds.length}, oversized=${selection.oversizedActivationIds.length})`);
+        logger?.info?.(`[PD:RuntimeV2] Principle budget reached (${v2PromptBudget.budgetChars}c) — ${injectedIds.size} principles injected under ${selection.selectionPolicy} (round=${v2RoundKey ?? 'n/a'}, start=${selection.rotationStartIndex ?? 0}, dropped=${selection.droppedActivationIds.length}, oversized=${selection.oversizedActivationIds.length})`);
       }
       for (const id of injectedIds) {
         runtimeV2PrincipleIds.add(id);
@@ -712,6 +743,12 @@ export async function handleBeforePromptBuild(
       // budget truncation (rc-6-adjacent). All three arrays derive from the
       // same aligned list so index alignment cannot drift between them.
       const alignedPrinciples = alignInjectedPrinciples(dedupedV2, runtimeV2PrincipleIds);
+      // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: the budget THIS injection ran
+      // under — the shared route's own resolution (host-runtime resolved from
+      // the same hook facts), or the plugin-local resolution. Never a
+      // restated constant: a recorded budget that differs from the executed
+      // one is a silent lie.
+      const v2EventBudget = sharedActivePrinciplePrompt?.budget ?? v2PromptBudget?.budgetChars ?? RUNTIME_V2_PRINCIPLE_BUDGET;
       eventLog.recordRuntimeV2ActivationsInjected({
         hostKind: 'openclaw',
         eventId: randomUUID(),
@@ -728,7 +765,7 @@ export async function handleBeforePromptBuild(
         injectedCount: runtimeV2PrincipleIds.size,
         skippedWarnings: v2Result.warnings,
         injectedCharCount: runtimeV2PrinciplesContent.length,
-        budget: RUNTIME_V2_PRINCIPLE_BUDGET,
+        budget: v2EventBudget,
         legacySelectedCount: legacyInjectedIds.length,
         legacyTotalChars,
         legacyTruncated,
@@ -742,6 +779,17 @@ export async function handleBeforePromptBuild(
         ...(v2RoundOrdinal !== undefined ? { selectionRoundOrdinal: v2RoundOrdinal, selectionRoundSource: 'session_user_turn_ordinal' as const } : {}),
         ...(v2DroppedActivationIds !== undefined && v2DroppedActivationIds.length > 0 ? { droppedActivationIds: v2DroppedActivationIds } : {}),
         ...(v2OversizedActivationIds !== undefined && v2OversizedActivationIds.length > 0 ? { oversizedActivationIds: v2OversizedActivationIds } : {}),
+        // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: budget provenance travels
+        // with the event — shared route carries its own resolution, local
+        // route the one resolved above; absent resolution (aborted build)
+        // means policy unknown, which readers must treat as fixed-budget.
+        ...(sharedActivePrinciplePrompt?.budgetPolicyVersion !== undefined ? { budgetPolicyVersion: sharedActivePrinciplePrompt.budgetPolicyVersion } : v2PromptBudget !== undefined ? { budgetPolicyVersion: v2PromptBudget.policyVersion } : {}),
+        ...(sharedActivePrinciplePrompt?.budgetCapacitySource !== undefined ? { budgetCapacitySource: sharedActivePrinciplePrompt.budgetCapacitySource } : v2PromptBudget !== undefined ? { budgetCapacitySource: v2PromptBudget.capacitySource } : {}),
+        ...(sharedActivePrinciplePrompt?.budgetCapacityStatus !== undefined ? { budgetCapacityStatus: sharedActivePrinciplePrompt.budgetCapacityStatus } : v2PromptBudget !== undefined ? { budgetCapacityStatus: v2PromptBudget.capacityStatus } : {}),
+        ...(sharedActivePrinciplePrompt != null && sharedActivePrinciplePrompt.budgetContextWindowTokens != null ? { budgetContextWindowTokens: sharedActivePrinciplePrompt.budgetContextWindowTokens } : v2PromptBudget != null && v2PromptBudget.contextWindowTokens != null ? { budgetContextWindowTokens: v2PromptBudget.contextWindowTokens } : {}),
+        // SPEC §7 v0.2: bounded fallback reason code — same facts, same code
+        // on both routes (shared carries its own resolution's code).
+        ...(sharedActivePrinciplePrompt?.budgetFallbackReason !== undefined ? { budgetFallbackReason: sharedActivePrinciplePrompt.budgetFallbackReason } : v2PromptBudget?.fallbackReason !== undefined ? { budgetFallbackReason: v2PromptBudget.fallbackReason } : {}),
         ...(runtimeV2PrincipleIds.size === 0
           ? {
               skipReason: sharedActivePrinciplePrompt

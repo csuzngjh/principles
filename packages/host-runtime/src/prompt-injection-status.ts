@@ -1,13 +1,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  RUNTIME_V2_PRINCIPLE_BUDGET,
+  PROMPT_BUDGET_MAX_CHARS,
+  PROMPT_BUDGET_MIN_CHARS,
   SqliteActivationStateStore,
   SqliteConnection,
   SqlitePIArtifactStore,
+  classifySingleItemBudgetTier,
   computeFeatureFlagsFromConfig,
   filterPromptActivations,
   resolvePrincipleFromArtifact,
+  type PromptBudgetTierFit,
 } from '@principles/core/runtime-v2';
 import { loadPdConfigForPlugin } from './pd-config.js';
 import { computePromptSingleItemFit } from './prompt-activation-deliverability.js';
@@ -32,11 +35,20 @@ import {
  * `route_unconfirmed` surfaces AC-01's honest unknown instead of a guess.
  * No compliance/遵守 counts are produced here — absence of injection logs is
  * NOT reported as "zero compliance" (AC-12 boundary).
+ *
+ * SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: "oversized" now means the entry
+ * exceeds the MAXIMUM supported budget (never injectable on any supported
+ * model); a row that misses the CURRENT projection budget but fits within
+ * the supported [min, max] range is `model_dependent` — whether it injects
+ * depends on the runtime model's context window, which this surface cannot
+ * see. Budget figures come from the projection's resolution (legacy
+ * fallback when no runtime capacity is confirmed), never a bare constant.
  */
 
 export type PromptActivationInjectionStatusKind =
   | 'injectable'
   | 'oversized'
+  | 'model_dependent'
   | 'window_excluded'
   | 'resolution_failed'
   | 'route_unconfirmed';
@@ -45,17 +57,23 @@ export interface PromptActivationInjectionStatus {
   activationId: string;
   principleId?: string;
   status: PromptActivationInjectionStatusKind;
-  /** Present for injectable/window_excluded/oversized under a confirmed route. */
+  /**
+   * Present for injectable/window_excluded/oversized/model_dependent under a
+   * confirmed route. For model_dependent rows it keeps the POSITIVE window
+   * fact: true = the entry fits THIS surface's (usually fallback) projection
+   * window, but still exceeds the measured floor — a smaller-context runtime
+   * model would exclude it.
+   */
   inCurrentWindow?: boolean;
   /** Present when the single-item cost was computable. */
   costChars?: number;
   budget?: number;
   budgetScope?: PromptInjectionBudgetScope;
   route?: PromptInjectionRouteName;
-  /** Present for resolution_failed / route_unconfirmed (structured reason). */
+  /** Present for resolution_failed / route_unconfirmed / model_dependent (structured reason). */
   reason?: string;
-  /** Present for route_unconfirmed: per-host single-item fit facts. */
-  perHostFits?: readonly { hostKind: PromptInjectionTargetHost; fits: boolean }[];
+  /** Present for route_unconfirmed: per-host single-item tier fit facts. */
+  perHostFits?: readonly { hostKind: PromptInjectionTargetHost; tierFit: PromptBudgetTierFit }[];
 }
 
 export interface PromptActivationInjectionStatusReport {
@@ -160,12 +178,12 @@ export async function readPromptActivationInjectionStatuses(input: {
       }
       const perHostFits = PROMPT_INJECTION_TARGET_HOSTS.map((hostKind) => {
         const hostRoute = promptRouteForHost(hostKind, route.flagEnabled);
-        const { fits } = computePromptSingleItemFit({
+        const { costChars } = computePromptSingleItemFit({
           principle: { principleId: row.principleId, text: row.text, artifactId: '', activationId: row.activationId },
           route: hostRoute,
           selfReportEnabled,
         });
-        return { hostKind, fits };
+        return { hostKind, tierFit: classifySingleItemBudgetTier(costChars) };
       });
       return {
         activationId: row.activationId,
@@ -191,20 +209,43 @@ export async function readPromptActivationInjectionStatuses(input: {
       principle: { principleId: row.principleId, text: row.text, artifactId: '', activationId: row.activationId },
       route: projection.route,
       selfReportEnabled,
+      budget: projection.budget,
     });
     const inCurrentWindow = projection.injectedActivationIds.includes(row.activationId);
     const budgetScope: PromptInjectionBudgetScope = projection.budgetScope;
-    if (!fits) {
+    const serialization = projection.route === 'shared_render' ? 'full directive render' : 'list entry';
+    // Tier verdict FIRST (SPEC §6.3): the projection budget on this surface
+    // is usually the fixed fallback (2000) — the console holds no runtime
+    // model facts. An entry in (MIN, fallback] fits THAT estimate and may
+    // even sit in the current window, but it exceeds the measured floor, so
+    // on a 32K/64K model (budget = floor) it would NOT inject. Reporting it
+    // as an unconditional `injectable` would contradict the approval-time
+    // `model_dependent` verdict for the very same artifact.
+    const tierFit = classifySingleItemBudgetTier(costChars);
+    if (tierFit === 'exceeds_max_tier') {
       return {
         activationId: row.activationId,
         principleId: row.principleId,
         status: 'oversized',
         inCurrentWindow: false,
         costChars,
-        budget: RUNTIME_V2_PRINCIPLE_BUDGET,
+        budget: projection.budget,
         budgetScope,
         route: projection.route,
-        reason: `single_item_exceeds_budget: this principle's own entry is ${costChars} chars > ${RUNTIME_V2_PRINCIPLE_BUDGET} under the ${projection.route === 'shared_render' ? 'full directive render' : 'list entry'} serialization`,
+        reason: `single_item_exceeds_budget: this principle's own entry is ${costChars} chars > the ${PROMPT_BUDGET_MAX_CHARS}-char maximum supported budget under the ${serialization} serialization`,
+      };
+    }
+    if (tierFit === 'model_dependent') {
+      return {
+        activationId: row.activationId,
+        principleId: row.principleId,
+        status: 'model_dependent',
+        inCurrentWindow,
+        costChars,
+        budget: projection.budget,
+        budgetScope,
+        route: projection.route,
+        reason: `model_dependent_capacity: this principle's own entry is ${costChars} chars — above the ${PROMPT_BUDGET_MIN_CHARS}-char measured floor, so smaller-context models exclude it${fits ? ' even though it fits this surface\'s fallback-budget estimate' : ''}; injection depends on the runtime model`,
       };
     }
     return {
@@ -213,7 +254,7 @@ export async function readPromptActivationInjectionStatuses(input: {
       status: inCurrentWindow ? 'injectable' : 'window_excluded',
       inCurrentWindow,
       costChars,
-      budget: RUNTIME_V2_PRINCIPLE_BUDGET,
+      budget: projection.budget,
       budgetScope,
       route: projection.route,
     };

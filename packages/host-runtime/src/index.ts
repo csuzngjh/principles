@@ -6,7 +6,7 @@ import {
   type HostEventResult,
   type HostEventEmitter,
 } from '@principles/core/host';
-import { RUNTIME_V2_PRINCIPLE_BUDGET } from '@principles/core/runtime-v2';
+import { getPromptModelCatalog, resolvePromptBudget } from '@principles/core/runtime-v2';
 import { buildActivePrinciplePromptContext } from './active-principle-prompt.js';
 import { createProductionRuleHostGate, type RuleContextProvider, type RuleInputEnrichmentProvider } from './production-rulehost-gate.js';
 import type { RuleImplementationRuntime } from './rule-implementation-runtime.js';
@@ -285,6 +285,26 @@ export function createProductionHostRuntime(
       const prompt = await buildActivePrinciplePromptContext({
         workspaceDir: event.context.workspaceDir,
         excludePrincipleIds: options.promptExcludePrincipleIds?.(event),
+        promptBudget: resolvePromptBudget({
+          // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: resolve ONCE per request
+          // from the host's own hook facts (OpenClaw effective window /
+          // Codex+WorkBuddy model id) against the installed local Pi AI
+          // catalog — no network, no LLM call. Missing/untrusted facts
+          // resolve to the legacy fixed budget with an observable reason.
+          hostCapacity: event.context.modelContext === undefined
+            ? undefined
+            : {
+              contextTokenBudget: event.context.modelContext.contextTokenBudget,
+              contextWindowSource: event.context.modelContext.contextWindowSource,
+            },
+          modelIdentity: event.context.modelContext === undefined
+            ? undefined
+            : {
+              providerId: event.context.modelContext.modelProviderId,
+              modelId: event.context.modelContext.modelId,
+            },
+          catalog: getPromptModelCatalog(),
+        }),
       });
       // PRI-750: record the injection event on the shared path with the host
       // turn id (Codex turn_id → runId) so receipt events carry a turn-level
@@ -305,11 +325,22 @@ export function createProductionHostRuntime(
           injectedCount: prompt.principleIds.length,
           skippedWarnings: prompt.warnings,
           injectedCharCount: prompt.additionalContext.length,
-          budget: RUNTIME_V2_PRINCIPLE_BUDGET,
+          budget: prompt.budget,
           ...(options.hostKind === 'openclaw' || options.hostKind === 'codex' || options.hostKind === 'workbuddy' ? { hostKind: options.hostKind } : {}),
           eventId: randomUUID(),
           ...(prompt.truncated !== undefined ? { v2Truncated: prompt.truncated } : {}),
           ...(event.context.turnId !== undefined ? { runId: event.context.turnId } : {}),
+          // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: budget provenance — the
+          // recorded budget is the one THIS injection actually ran under
+          // (prompt.budget), never a constant restated after the fact.
+          ...(prompt.budgetPolicyVersion !== undefined ? { budgetPolicyVersion: prompt.budgetPolicyVersion } : {}),
+          ...(prompt.budgetCapacitySource !== undefined ? { budgetCapacitySource: prompt.budgetCapacitySource } : {}),
+          ...(prompt.budgetCapacityStatus !== undefined ? { budgetCapacityStatus: prompt.budgetCapacityStatus } : {}),
+          ...(prompt.budgetContextWindowTokens != null ? { budgetContextWindowTokens: prompt.budgetContextWindowTokens } : {}),
+          // SPEC §7 v0.2: the bounded fallback reason code rides the event so
+          // operators can tell model-identity absence from catalog ambiguity
+          // etc. without touching logs. Detail stays out of events.
+          ...(prompt.budgetFallbackReason !== undefined ? { budgetFallbackReason: prompt.budgetFallbackReason } : {}),
           // PRI-904: selection diagnostics (bounded, optional). On this route
           // the policy is legacy_fifo_prefix_v1 and NO rotation provenance is
           // emitted — a fair claim would be untrue here (see above).

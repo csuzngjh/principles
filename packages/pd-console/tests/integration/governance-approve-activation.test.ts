@@ -797,7 +797,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
       .run(new Date().toISOString());
     const db = sqliteConn.getDb();
     const base = Date.now();
-    const hugeText = 'H'.repeat(3000);
+    const hugeText = 'H'.repeat(17000);
     for (let i = 0; i < 2; i += 1) {
       const artifactId = `art-oversize-filler-${i}-${base}`;
       const principleId = newPrincipleId();
@@ -925,10 +925,10 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     const artifactId = `art-oversized-${base}`;
     const approvalId = `apr-oversized-${base}`;
     const principleId = newPrincipleId();
-    seedLedgerPrinciple(principleId, 'O'.repeat(2000));
+    seedLedgerPrinciple(principleId, 'O'.repeat(17000));
     await seedPrincipleArtifact(artifactId, {
       sourcePrincipleId: principleId,
-      contentJson: { principleId, text: 'O'.repeat(2000) },
+      contentJson: { principleId, text: 'O'.repeat(17000) },
     });
     await seedPendingApproval(approvalId, artifactId, 'prompt');
 
@@ -982,7 +982,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
       sourceRuleId: undefined,
       lineageArtifactIds: [],
       validationStatus: 'validated',
-      contentJson: JSON.stringify({ principleId, text: 'L'.repeat(2100) }),
+      contentJson: JSON.stringify({ principleId, text: 'L'.repeat(17000) }),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
@@ -1037,6 +1037,46 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
       body: JSON.stringify({ note: 'host facts restored' }),
     });
     expect(res2.status).toBe(200);
+  });
+
+  it('SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §6: cross-host aggregation stays monotone — a shared-route-only overflow does NOT brand the entry oversized everywhere (real counterexample)', async () => {
+    // 15400-char statement: list route bills ≈15474 (model_dependent —
+    // injectable on larger-context models), shared route bills ≈16163
+    // (exceeds the 16000 max tier). The OLD aggregation (any host exceeds →
+    // exceeds) reported exceeds_max_tier, wrongly telling an OpenClaw owner
+    // this entry could never inject. Route is unconfirmed here (openclaw
+    // declaration removed, flag off) so the per-host aggregation runs.
+    const base = Date.now();
+    const artifactId = `art-agg-cx-${base}`;
+    const approvalId = `apr-agg-cx-${base}`;
+    const principleId = newPrincipleId();
+    seedLedgerPrinciple(principleId, 'M'.repeat(15400));
+    await seedPrincipleArtifact(artifactId, {
+      sourcePrincipleId: principleId,
+      contentJson: { principleId, text: 'M'.repeat(15400) },
+    });
+    await seedPendingApproval(approvalId, artifactId, 'prompt');
+
+    const declarationPath = path.join(tmpDir, '.pd', 'host-tool-semantics', 'openclaw.json');
+    let declarationBackup: string | null = null;
+    try { declarationBackup = fs.readFileSync(declarationPath, 'utf8'); } catch { /* absent */ }
+    fs.rmSync(declarationPath, { force: true });
+    try {
+      const grouped = await fetchJson('/api/v1/approvals/grouped');
+      expect(grouped.status).toBe(200);
+      const data = getDataObject(grouped.body);
+      expect(isRecord(data)).toBe(true);
+      const groups = (data as { groups?: unknown[] }).groups ?? [];
+      const match = groups.find((g) => isRecord(g) && (g as { principleId?: unknown }).principleId === principleId);
+      expect(match, 'group for the aggregation-counterexample principle').toBeTruthy();
+      const group = match as { promptBudgetTierFit?: string; fitsPromptBudget?: boolean };
+      // Mixed per-host verdicts (list model_dependent + shared exceeds) must
+      // aggregate to the honest model_dependent, not exceeds_max_tier.
+      expect(group.promptBudgetTierFit).toBe('model_dependent');
+      expect(group.fitsPromptBudget).toBe(true);
+    } finally {
+      if (declarationBackup !== null) fs.writeFileSync(declarationPath, declarationBackup, 'utf8');
+    }
   });
 
   it('AC-09: window full but single item deliverable → activation proceeds with the queued (rotation) explanation, not a global admission gate', async () => {

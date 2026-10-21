@@ -132,3 +132,32 @@ export type {
   PromptSelectionPolicy,
   TrimToBudgetResult,
 } from './prompt-activation-reader-contract.js';
+
+// SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: model-context-aware budget policy.
+export {
+  PROMPT_BUDGET_POLICY_VERSION,
+  PROMPT_BUDGET_BASE_CHARS,
+  PROMPT_BUDGET_REFERENCE_CONTEXT_WINDOW_TOKENS,
+  PROMPT_BUDGET_MIN_CHARS,
+  PROMPT_BUDGET_MAX_CHARS,
+  PROMPT_BUDGET_FALLBACK_CHARS,
+  MIN_PLAUSIBLE_CONTEXT_WINDOW_TOKENS,
+  MAX_PLAUSIBLE_CONTEXT_WINDOW_TOKENS,
+  TRUSTED_HOST_CONTEXT_WINDOW_SOURCES,
+  isValidContextWindowTokens,
+  promptBudgetCharsForContextWindow,
+  classifySingleItemBudgetTier,
+  resolvePromptBudget,
+} from './prompt-budget-policy.js';
+
+export type {
+  PromptBudgetCapacitySource,
+  PromptBudgetCapacityStatus,
+  PromptBudgetFallbackReason,
+  PromptBudgetResolution,
+  PromptBudgetTierFit,
+  PromptModelCatalog,
+  PromptModelCatalogEntry,
+  PromptBudgetHostCapacityFact,
+  ResolvePromptBudgetInput,
+} from './prompt-budget-policy.js';

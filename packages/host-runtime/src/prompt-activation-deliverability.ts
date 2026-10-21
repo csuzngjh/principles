@@ -1,9 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  RUNTIME_V2_PRINCIPLE_BUDGET,
+  PROMPT_BUDGET_FALLBACK_CHARS,
+  PROMPT_BUDGET_MAX_CHARS,
+  PROMPT_BUDGET_MIN_CHARS,
   SqliteConnection,
   SqlitePIArtifactStore,
+  classifySingleItemBudgetTier,
   computeFeatureFlagsFromConfig,
   listEntryLine,
   renderPrinciplesToDirectives,
@@ -11,6 +14,7 @@ import {
   trimToBudget,
   type ActivatedPrinciple,
   type ActivationStatusRecord,
+  type PromptBudgetTierFit,
 } from '@principles/core/runtime-v2';
 import { escapeXml } from '@principles/core/prompt-builder';
 import { loadPdConfigForPlugin } from './pd-config.js';
@@ -53,11 +57,37 @@ export type PromptArtifactDeliverability =
     route: PromptInjectionRouteName;
     hostKind?: PromptInjectionTargetHost;
     basis?: PromptInjectionRouteDecision['basis'];
+    /**
+     * The budget this judgment is binding against: the MINIMUM supported
+     * tier — a deliverable here fits under EVERY supported budget
+     * (SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §6.3), so the strictest tier is
+     * the honest evidence.
+     */
     budget: number;
+    budgetMinChars: number;
+    budgetMaxChars: number;
     /** Single-item cost in UTF-16 code units under the bound route's serializer. */
     costChars: number;
     budgetScope: PromptInjectionBudgetScope;
     unit: typeof PROMPT_INJECTION_UNIT;
+  }
+  | {
+    /**
+     * SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §6.3: the artifact fits under
+     * SOME supported budgets but not all — whether it injects depends on the
+     * runtime model's context window. NOT a promise of injection and NOT a
+     * permanent refusal; approval flow proceeds unchanged.
+     */
+    status: 'model_dependent';
+    route: PromptInjectionRouteName;
+    hostKind?: PromptInjectionTargetHost;
+    basis?: PromptInjectionRouteDecision['basis'];
+    budgetMinChars: number;
+    budgetMaxChars: number;
+    costChars: number;
+    budgetScope: PromptInjectionBudgetScope;
+    unit: typeof PROMPT_INJECTION_UNIT;
+    nextAction: string;
   }
   | {
     status: 'undeliverable';
@@ -65,7 +95,10 @@ export type PromptArtifactDeliverability =
     route: PromptInjectionRouteName;
     hostKind?: PromptInjectionTargetHost;
     basis?: PromptInjectionRouteDecision['basis'];
+    /** The budget this judgment is binding against: the MAXIMUM supported tier. */
     budget: number;
+    budgetMinChars: number;
+    budgetMaxChars: number;
     costChars: number;
     overByChars: number;
     budgetScope: PromptInjectionBudgetScope;
@@ -77,8 +110,8 @@ export type PromptArtifactDeliverability =
     /** Stable machine-readable reason (route facts or artifact content unresolvable). */
     reason: string;
     nextAction: string;
-    /** Route-unconfirmed case: per-host single-item fit so the UI can show both. */
-    perHost?: readonly { hostKind: PromptInjectionTargetHost; fits: boolean; costChars: number }[];
+    /** Route-unconfirmed case: per-host single-item tier fit so the UI can show both. */
+    perHost?: readonly { hostKind: PromptInjectionTargetHost; tierFit: PromptBudgetTierFit; costChars: number }[];
   };
 
 function syntheticPendingActivation(artifactId: string): ActivationStatusRecord {
@@ -125,21 +158,27 @@ function selfReportEnabledFor(workspaceDir: string): boolean {
  * lines). For an entry that does NOT fit, trimToBudget returns only the
  * header line, so the would-be cost is reconstructed from the header line it
  * DID return plus the real entry line (same format authority, listEntryLine).
+ *
+ * The budget parameter defaults to the legacy fixed budget: approval-time
+ * callers hold no runtime model facts, and SPEC §6.3 requires the fixed
+ * fallback — never an invented capacity — when none can be confirmed.
  */
 export function computePromptSingleItemFit(input: {
   principle: ActivatedPrinciple;
   route: PromptInjectionRouteName;
   selfReportEnabled: boolean;
+  budget?: number;
 }): { fits: boolean; costChars: number } {
+  const budget = input.budget ?? PROMPT_BUDGET_FALLBACK_CHARS;
   if (input.route === 'shared_render') {
     const render = renderPrinciplesToDirectives(
       [input.principle],
       new Set([input.principle.principleId]),
       { escapeFn: escapeXml, selfReportInstruction: input.selfReportEnabled },
     );
-    return { fits: render.length <= RUNTIME_V2_PRINCIPLE_BUDGET, costChars: render.length };
+    return { fits: render.length <= budget, costChars: render.length };
   }
-  const trimmed = trimToBudget([input.principle], RUNTIME_V2_PRINCIPLE_BUDGET, escapeXml);
+  const trimmed = trimToBudget([input.principle], budget, escapeXml);
   const fits = trimmed.injectedIds.has(input.principle.principleId);
   const costChars = trimmed.lines.length > 1
     ? trimmed.lines.join('\n').length
@@ -149,6 +188,9 @@ export function computePromptSingleItemFit(input: {
 
 const UNDELIVERABLE_NEXT_ACTION =
   'shorten the principle statement and resubmit, or use the activations page "modify to injectable version" entry to create a replacement artifact (the approval facts are preserved)';
+
+const MODEL_DEPENDENT_NEXT_ACTION =
+  'this principle fits the injection budget only on models with a larger context window; it may be excluded at runtime on smaller-context models — the approval itself is unaffected';
 
 /**
  * Precheck one artifact against the workspace's effective injection route.
@@ -181,7 +223,7 @@ export async function checkPromptArtifactDeliverability(input: {
   });
 
   if (decision.status === 'confirmed' && decision.route !== undefined) {
-    const { fits, costChars } = computePromptSingleItemFit({
+    const { costChars } = computePromptSingleItemFit({
       principle: resolved.principle,
       route: decision.route,
       selfReportEnabled,
@@ -189,45 +231,57 @@ export async function checkPromptArtifactDeliverability(input: {
     const budgetScope: PromptInjectionBudgetScope = decision.route === 'shared_render'
       ? 'full_directive_context'
       : 'selected_lines';
-    if (fits) {
+    const shared = {
+      route: decision.route,
+      ...(decision.hostKind !== undefined ? { hostKind: decision.hostKind } : {}),
+      ...(decision.basis !== undefined ? { basis: decision.basis } : {}),
+      budgetMinChars: PROMPT_BUDGET_MIN_CHARS,
+      budgetMaxChars: PROMPT_BUDGET_MAX_CHARS,
+      costChars,
+      budgetScope,
+      unit: PROMPT_INJECTION_UNIT,
+    };
+    // SPEC §6.3: approval time holds no runtime model identity — classify
+    // against the SUPPORTED budget range instead of pretending to know the
+    // executing model's window.
+    const tierFit = classifySingleItemBudgetTier(costChars);
+    if (tierFit === 'fits_all_tiers') {
       return {
         status: 'deliverable',
-        route: decision.route,
-        ...(decision.hostKind !== undefined ? { hostKind: decision.hostKind } : {}),
-        ...(decision.basis !== undefined ? { basis: decision.basis } : {}),
-        budget: RUNTIME_V2_PRINCIPLE_BUDGET,
-        costChars,
-        budgetScope,
-        unit: PROMPT_INJECTION_UNIT,
+        ...shared,
+        budget: PROMPT_BUDGET_MIN_CHARS,
+      };
+    }
+    if (tierFit === 'model_dependent') {
+      return {
+        status: 'model_dependent',
+        ...shared,
+        nextAction: MODEL_DEPENDENT_NEXT_ACTION,
       };
     }
     return {
       status: 'undeliverable',
+      ...shared,
       reason: 'single_item_exceeds_budget',
-      route: decision.route,
-      ...(decision.hostKind !== undefined ? { hostKind: decision.hostKind } : {}),
-      ...(decision.basis !== undefined ? { basis: decision.basis } : {}),
-      budget: RUNTIME_V2_PRINCIPLE_BUDGET,
-      costChars,
-      overByChars: costChars - RUNTIME_V2_PRINCIPLE_BUDGET,
-      budgetScope,
-      unit: PROMPT_INJECTION_UNIT,
+      budget: PROMPT_BUDGET_MAX_CHARS,
+      overByChars: costChars - PROMPT_BUDGET_MAX_CHARS,
       nextAction: UNDELIVERABLE_NEXT_ACTION,
     };
   }
 
-  // Route unconfirmed: report per-host fit for every standard host instead of
-  // guessing (R-A1) — the write gate refuses, the UI can show both facts.
-  // Roster derives from the single SSoT list (review P3-1: a hand-typed
-  // two-host array dropped WorkBuddy from unconfirmed deliverability reports).
+  // Route unconfirmed: report per-host tier fit for every standard host
+  // instead of guessing (R-A1) — the write gate refuses, the UI can show
+  // both facts. Roster derives from the single SSoT list (review P3-1: a
+  // hand-typed two-host array dropped WorkBuddy from unconfirmed
+  // deliverability reports).
   const perHost = PROMPT_INJECTION_TARGET_HOSTS.map((hostKind) => {
     const route = promptRouteForHost(hostKind, decision.flagEnabled);
-    const { fits, costChars } = computePromptSingleItemFit({
+    const { costChars } = computePromptSingleItemFit({
       principle: resolved.principle,
       route,
       selfReportEnabled,
     });
-    return { hostKind, fits, costChars };
+    return { hostKind, tierFit: classifySingleItemBudgetTier(costChars), costChars };
   });
   return {
     status: 'unconfirmed',

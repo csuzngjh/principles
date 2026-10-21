@@ -185,6 +185,19 @@ export function decodeWorkbuddyInput(raw: unknown): HostEvent {
   const turnId = consumedOptionalString(raw, 'generation_id');
   const base = { sessionId, ...(turnId !== undefined ? { turnId } : {}) };
 
+  // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §5.3: `model` is an OBSERVED
+  // OPTIONAL field of the frozen host contract — the only model identity
+  // this host exposes (no capacity field exists). Consumed SOFTLY (absent or
+  // malformed → undefined, fixed-budget fallback) rather than
+  // consumedOptionalString's fail-loud: SPEC §8.6 forbids metadata failure
+  // from blocking the host conversation, and a bad model string degrades to
+  // the legacy budget instead of erroring the hook. Dynamic support is
+  // therefore catalog-unambiguous-match-only — never a guessed capacity.
+  const rawModel = own(raw, 'model');
+  const modelId = typeof rawModel === 'string' && rawModel.trim().length > 0 ? rawModel : undefined;
+  const modelContext = modelId !== undefined ? { modelId } : undefined;
+  const baseWithContext = modelContext !== undefined ? { ...base, modelContext } : base;
+
   let context: HostEventContext;
   let rawPayload: unknown = raw;
   if (kind === 'session_start') {
@@ -195,11 +208,11 @@ export function decodeWorkbuddyInput(raw: unknown): HostEvent {
     requiredString(raw, 'permission_mode');
     requiredString(raw, 'client');
     requiredString(raw, 'version');
-    context = { ...base, workspaceDir: '', source };
+    context = { ...baseWithContext, workspaceDir: '', source };
   } else if (kind === 'before_prompt_build') {
     const cwd = requiredAbsoluteCwd(raw);
     validateOptionalStringType(raw, 'permission_mode');
-    context = { ...base, workspaceDir: cwd, promptContent: requiredString(raw, 'prompt') };
+    context = { ...baseWithContext, workspaceDir: cwd, promptContent: requiredString(raw, 'prompt') };
   } else {
     const cwd = requiredAbsoluteCwd(raw);
     validateOptionalStringType(raw, 'permission_mode');
@@ -220,9 +233,9 @@ export function decodeWorkbuddyInput(raw: unknown): HostEvent {
         const thrownError = requiredString(raw, 'error');
         toolOutput = { result: raw, error: thrownError };
       }
-      context = { ...base, workspaceDir: cwd, toolName, ...(callId !== undefined ? { toolCallId: callId } : {}), toolInput, toolOutput };
+      context = { ...baseWithContext, workspaceDir: cwd, toolName, ...(callId !== undefined ? { toolCallId: callId } : {}), toolInput, toolOutput };
     } else {
-      context = { ...base, workspaceDir: cwd, toolName, ...(callId !== undefined ? { toolCallId: callId } : {}), toolInput };
+      context = { ...baseWithContext, workspaceDir: cwd, toolName, ...(callId !== undefined ? { toolCallId: callId } : {}), toolInput };
     }
     // The shared production gate reads its tool tuple from rawPayload.toolInput
     // (production-rulehost-gate readToolInput contract).

@@ -101,7 +101,7 @@ export type ApproveWithActivationResult =
       budget?: number;
       costChars?: number;
       overByChars?: number;
-      perHost?: { hostKind: 'openclaw' | 'codex' | 'workbuddy'; fits: boolean; costChars: number }[];
+      perHost?: { hostKind: 'openclaw' | 'codex' | 'workbuddy'; tierFit: 'fits_all_tiers' | 'model_dependent' | 'exceeds_max_tier'; costChars: number }[];
     };
   };
 
@@ -352,6 +352,12 @@ export class ApprovalsConsoleModel {
       };
     }
     if (deliverability.status === 'deliverable') return undefined;
+    // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §6.3: model_dependent is NOT a
+    // refusal — the entry fits within the supported budget range and whether
+    // it injects depends on the runtime model. The approval proceeds; the
+    // honest uncertainty is already visible on the pre-approval badge
+    // (promptBudgetTierFit) and the activation status surface.
+    if (deliverability.status === 'model_dependent') return undefined;
     if (deliverability.status === 'undeliverable') {
       return {
         ok: false,
@@ -376,7 +382,7 @@ export class ApprovalsConsoleModel {
       capacity: {
         category: deliverability.reason.startsWith('route_unconfirmed') ? 'route_unconfirmed' : 'content_unconfirmed',
         ...(deliverability.perHost !== undefined
-          ? { perHost: deliverability.perHost.map((entry) => ({ hostKind: entry.hostKind, fits: entry.fits, costChars: entry.costChars })) }
+          ? { perHost: deliverability.perHost.map((entry) => ({ hostKind: entry.hostKind, tierFit: entry.tierFit, costChars: entry.costChars })) }
           : {}),
       },
     };

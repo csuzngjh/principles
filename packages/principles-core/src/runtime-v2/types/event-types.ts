@@ -673,6 +673,35 @@ export interface RuntimeV2PromptActivationsInjectedEventData {
   droppedActivationIds?: string[];
   /** PRI-904 (bounded, max 16): activation ids whose single entry exceeds the whole principle budget (never fit alone). */
   oversizedActivationIds?: string[];
+  /**
+   * SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: provenance of the `budget` this
+   * injection actually ran under. Optional — historical events predate the
+   * model-aware policy and MUST keep reading as fixed-budget events (a
+   * missing field is "policy unknown", never "capacity zero").
+   */
+  budgetPolicyVersion?: string;
+  /** Which fact produced the budget (host window / catalog / legacy fallback). */
+  budgetCapacitySource?: 'host_effective_window' | 'pi_catalog_exact' | 'legacy_fallback';
+  /** confirmed = a real context window was resolved; unknown = fixed-budget fallback. */
+  budgetCapacityStatus?: 'confirmed' | 'unknown';
+  /** The context window the budget was derived from; present only when confirmed. */
+  budgetContextWindowTokens?: number;
+  /**
+   * SPEC §7 (v0.2): bounded machine-readable fallback reason — present only
+   * when budgetCapacityStatus is 'unknown'. Closed literal set shared with
+   * `PromptBudgetFallbackReason`; never free-form detail, never user content.
+   */
+  budgetFallbackReason?:
+    | 'host_capacity_absent'
+    | 'host_capacity_source_untrusted'
+    | 'host_capacity_invalid_value'
+    | 'catalog_unavailable'
+    | 'model_identity_absent'
+    | 'catalog_no_exact_match'
+    | 'catalog_no_match_for_model_id'
+    | 'catalog_ambiguous_model_id'
+    | 'catalog_provider_absent'
+    | 'catalog_metadata_invalid';
 }
 
 export const RuntimeV2PromptActivationsInjectedEventDataSchema = Type.Object({
@@ -704,6 +733,28 @@ export const RuntimeV2PromptActivationsInjectedEventDataSchema = Type.Object({
   // are capped at 16 ids by the selector, and the wire contract says so.
   droppedActivationIds: Type.Optional(Type.Array(Type.String(), { maxItems: 16 })),
   oversizedActivationIds: Type.Optional(Type.Array(Type.String(), { maxItems: 16 })),
+  // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: budget provenance (all optional —
+  // old events and old readers stay valid).
+  budgetPolicyVersion: Type.Optional(Type.String()),
+  budgetCapacitySource: Type.Optional(Type.Union([
+    Type.Literal('host_effective_window'),
+    Type.Literal('pi_catalog_exact'),
+    Type.Literal('legacy_fallback'),
+  ])),
+  budgetCapacityStatus: Type.Optional(Type.Union([Type.Literal('confirmed'), Type.Literal('unknown')])),
+  budgetContextWindowTokens: Type.Optional(Type.Number()),
+  budgetFallbackReason: Type.Optional(Type.Union([
+    Type.Literal('host_capacity_absent'),
+    Type.Literal('host_capacity_source_untrusted'),
+    Type.Literal('host_capacity_invalid_value'),
+    Type.Literal('catalog_unavailable'),
+    Type.Literal('model_identity_absent'),
+    Type.Literal('catalog_no_exact_match'),
+    Type.Literal('catalog_no_match_for_model_id'),
+    Type.Literal('catalog_ambiguous_model_id'),
+    Type.Literal('catalog_provider_absent'),
+    Type.Literal('catalog_metadata_invalid'),
+  ])),
 });
 export type RuntimeV2PromptActivationsInjectedEventDataStatic = Static<typeof RuntimeV2PromptActivationsInjectedEventDataSchema>;
 

@@ -380,7 +380,7 @@ export type { PiAiRuntimeAdapterConfig } from './adapter/pi-ai-runtime-adapter.j
 export { getPiAiFetchForApi } from './adapter/pi-ai-http-transport.js';
 // PRI-621 PR2 review: core capability wrapper so cross-package callers query
 // the pi-ai builtin catalog without declaring pi-ai themselves (EP-06).
-export { builtinPiAiProviderIds, isBuiltinPiAiProvider } from './adapter/pi-ai-catalog.js';
+export { builtinPiAiProviderIds, isBuiltinPiAiProvider, getPromptModelCatalog } from './adapter/pi-ai-catalog.js';
 
 // PrincipleTreeLedgerAdapter (M8)
 export { PrincipleTreeLedgerAdapter } from './adapter/principle-tree-ledger-adapter.js';
@@ -1626,6 +1626,19 @@ export {
   trimToBudget,
   listEntryLine,
   renderPrinciplesToDirectives,
+  PROMPT_BUDGET_POLICY_VERSION,
+  PROMPT_BUDGET_BASE_CHARS,
+  PROMPT_BUDGET_REFERENCE_CONTEXT_WINDOW_TOKENS,
+  PROMPT_BUDGET_MIN_CHARS,
+  PROMPT_BUDGET_MAX_CHARS,
+  PROMPT_BUDGET_FALLBACK_CHARS,
+  MIN_PLAUSIBLE_CONTEXT_WINDOW_TOKENS,
+  MAX_PLAUSIBLE_CONTEXT_WINDOW_TOKENS,
+  TRUSTED_HOST_CONTEXT_WINDOW_SOURCES,
+  isValidContextWindowTokens,
+  promptBudgetCharsForContextWindow,
+  classifySingleItemBudgetTier,
+  resolvePromptBudget,
   createProductionGateDeps,
   compileHardenedRuleEvaluator,
   ApprovalCompletionService,
@@ -1643,6 +1656,15 @@ export type {
   PromptActivationReaderResult,
   PromptSelectionPolicy,
   TrimToBudgetResult,
+  PromptBudgetCapacitySource,
+  PromptBudgetCapacityStatus,
+  PromptBudgetFallbackReason,
+  PromptBudgetResolution,
+  PromptBudgetTierFit,
+  PromptModelCatalog,
+  PromptModelCatalogEntry,
+  PromptBudgetHostCapacityFact,
+  ResolvePromptBudgetInput,
   ApprovalCompletionInput,
   ApprovalCompletionResult,
   ArtifactDigestCheck,

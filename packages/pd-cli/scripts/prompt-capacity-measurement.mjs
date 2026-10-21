@@ -26,9 +26,16 @@ import path from 'node:path';
 import * as yaml from 'js-yaml';
 import {
   RUNTIME_V2_PRINCIPLE_BUDGET,
+  PROMPT_BUDGET_BASE_CHARS,
+  PROMPT_BUDGET_MAX_CHARS,
+  PROMPT_BUDGET_MIN_CHARS,
+  PROMPT_BUDGET_REFERENCE_CONTEXT_WINDOW_TOKENS,
   SqliteConnection,
   SqliteActivationStateStore,
   getDefaultPdConfig,
+  getPromptModelCatalog,
+  promptBudgetCharsForContextWindow,
+  resolvePromptBudget,
   trimToBudget,
   renderPrinciplesToDirectives,
   appendEventLogLine,
@@ -45,6 +52,8 @@ import {
 const ROOT = path.resolve(import.meta.dirname, '..', '..', '..');
 const OUT_MD = path.join(ROOT, 'docs', 'audit', 'PD_PROMPT_CAPACITY_MEASUREMENT_2026-10-07.md');
 const OUT_JSON = path.join(ROOT, 'docs', 'audit', 'PD_PROMPT_CAPACITY_MEASUREMENT_2026-10-07.json');
+const OUT_MD_MA = path.join(ROOT, 'docs', 'audit', 'PD_PROMPT_CAPACITY_MEASUREMENT_MODEL_AWARE_2026-10-20.md');
+const OUT_JSON_MA = path.join(ROOT, 'docs', 'audit', 'PD_PROMPT_CAPACITY_MEASUREMENT_MODEL_AWARE_2026-10-20.json');
 
 function makeWorkspace(opts) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-measure-'));
@@ -232,6 +241,116 @@ async function budgetCandidateReplay() {
   };
 }
 
+/**
+ * SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 Phase 4: capacity-tier measurement.
+ *
+ * For each tier (32K/64K/128K/256K/1M/unknown) resolve the budget through
+ * the PRODUCTION resolver (host_effective_window for the numeric tiers,
+ * no-facts legacy fallback for "unknown") and run BOTH real routes under
+ * that resolution:
+ *   - list route: the real trimToBudget selector, 40 forced round keys;
+ *   - shared route: buildActivePrinciplePromptContext with the same
+ *     resolution (the exact object the production entry points pass).
+ * Reports budget/source/status + injected counts / chars / oversized /
+ * truncation per tier. Character counts are UTF-16 units, NOT tokens.
+ */
+const TIER_MIX = { short: 14, long: 2, oversized: 0 };
+const TIER_ROUNDS = 40;
+
+async function modelAwareTierScenario(windowTokens, selfReport) {
+  const resolution = windowTokens === null
+    ? resolvePromptBudget()
+    : resolvePromptBudget({ hostCapacity: { contextTokenBudget: windowTokens, contextWindowSource: 'model' } });
+  const budgetChars = resolution.budgetChars;
+  const label = windowTokens === null ? 'unknown' : `${Math.round(windowTokens / 1000)}K`;
+
+  const listDir = makeWorkspace({ selfReport });
+  seedCandidates(listDir, TIER_MIX);
+  const { principles: listPrinciples } = await readPromptActivationCandidates({ workspaceDir: listDir });
+  let injectedSum = 0, usedSum = 0, truncatedRounds = 0, oversizedSum = 0;
+  for (let k = 0; k < TIER_ROUNDS; k += 1) {
+    const trimmed = trimToBudget(listPrinciples, budgetChars, escapeXml, k % Math.max(listPrinciples.length, 1));
+    injectedSum += [...trimmed.injectedIds].length;
+    usedSum += trimmed.lines.join('\n').length;
+    if (trimmed.truncated) truncatedRounds += 1;
+    oversizedSum += trimmed.oversizedActivationIds.length;
+  }
+  fs.rmSync(listDir, { recursive: true, force: true });
+
+  const sharedDir = makeWorkspace({ sharedFlag: true, selfReport });
+  seedCandidates(sharedDir, TIER_MIX);
+  const shared = await buildActivePrinciplePromptContext({ workspaceDir: sharedDir, promptBudget: resolution });
+  fs.rmSync(sharedDir, { recursive: true, force: true });
+
+  return {
+    label,
+    windowTokens,
+    budgetChars,
+    capacitySource: resolution.capacitySource,
+    capacityStatus: resolution.capacityStatus,
+    fallbackReason: resolution.fallbackReason ?? null,
+    policyVersion: resolution.policyVersion,
+    list: {
+      candidates: listPrinciples.length,
+      avgInjected: +(injectedSum / TIER_ROUNDS).toFixed(2),
+      avgUsedChars: Math.round(usedSum / TIER_ROUNDS),
+      truncatedRounds,
+      avgOversizedPerRound: +(oversizedSum / TIER_ROUNDS).toFixed(2),
+    },
+    shared: {
+      injected: shared.principleIds.length,
+      usedChars: shared.additionalContext.length,
+      truncated: shared.truncated,
+      oversized: shared.oversizedActivationIds?.length ?? 0,
+      dropped: shared.droppedActivationIds?.length ?? 0,
+      selectionPolicy: shared.selectionPolicy,
+    },
+  };
+}
+
+async function modelAwareSharedDispatchEvidence() {
+  // AC-12-style real-path proof for the model-aware wiring: dispatch the
+  // production host runtime with a HostEventContext.modelContext host window
+  // and read back the emitted event's budget provenance.
+  const dir = makeWorkspace({ sharedFlag: true });
+  seedCandidates(dir, { short: 6, long: 2, oversized: 1 });
+  const events = [];
+  const runtime = createProductionHostRuntime({
+    hostKind: 'codex',
+    events: {
+      recordRuntimeV2ActivationsInjected: (data) => { events.push(data); },
+      recordToolCall: () => { /* not exercised by the prompt route */ },
+    },
+  });
+  const dispatches = [
+    { label: 'trusted host window 256K', modelContext: { contextTokenBudget: 256_000, contextWindowSource: 'model' } },
+    { label: 'untrusted source default', modelContext: { contextTokenBudget: 999_999, contextWindowSource: 'default' } },
+    { label: 'ambiguous bare model id', modelContext: { modelId: 'gpt-5' } },
+    { label: 'no model facts (WorkBuddy contract)', modelContext: undefined },
+  ];
+  const results = [];
+  for (const d of dispatches) {
+    await runtime.dispatch({
+      kind: 'before_prompt_build',
+      source: 'codex:measurement',
+      rawPayload: { note: 'model-aware measurement drive' },
+      context: { workspaceDir: dir, sessionId: 'measure-model-aware', ...(d.modelContext !== undefined ? { modelContext: d.modelContext } : {}) },
+    });
+    const event = events[events.length - 1];
+    results.push({
+      dispatch: d.label,
+      budget: event.budget,
+      budgetCapacitySource: event.budgetCapacitySource,
+      budgetCapacityStatus: event.budgetCapacityStatus,
+      budgetContextWindowTokens: event.budgetContextWindowTokens ?? null,
+      budgetFallbackReason: event.budgetFallbackReason ?? null,
+      injectedCount: event.injectedCount,
+    });
+  }
+  fs.rmSync(dir, { recursive: true, force: true });
+  return results;
+}
+
 async function main() {
   console.log('[measure] building replay workspace…');
 
@@ -250,6 +369,19 @@ async function main() {
   }
   const withEvents = await sharedPathWithEvents({ short: 6, long: 2, oversized: 1 });
   const replay = await budgetCandidateReplay();
+
+  // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 Phase 4 tier measurement.
+  const tierWindows = [32_000, 64_000, 128_000, 256_000, 1_000_000, null];
+  const tierScenarios = [];
+  for (const windowTokens of tierWindows) {
+    // Both self-report flag states: the shared route bills the footer, so
+    // the tier table must carry evidence for each state it makes claims
+    // about (the 32K floor claim in particular).
+    for (const selfReport of [false, true]) {
+      tierScenarios.push({ selfReport, ...(await modelAwareTierScenario(windowTokens, selfReport)) });
+    }
+  }
+  const sharedDispatchEvidence = await modelAwareSharedDispatchEvidence();
 
   const sanityWs = makeWorkspace({});
   const routeSanity = resolvePromptInjectionRouteDecision({ workspaceDir: sanityWs, targetHost: undefined });
@@ -319,6 +451,74 @@ async function main() {
   fs.writeFileSync(OUT_MD, lines.join('\n') + '\n', 'utf8');
   console.log(`[measure] wrote ${OUT_MD}`);
   console.log(`[measure] wrote ${OUT_JSON}`);
+
+  // ── SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 Phase 4 outputs ──
+  const maPayload = {
+    generatedAt: payload.generatedAt,
+    spec: 'SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001',
+    unit: 'utf16_code_units (String.prototype.length — NOT model tokens)',
+    policy: {
+      version: 'model_aware_v1',
+      // Interpolated from the live constants so the narrative can never
+      // drift from the policy this script actually runs (v0.2 fix: the
+      // hand-written string still said 500/4000 after the re-bound).
+      formula: `budgetChars = min(${PROMPT_BUDGET_MAX_CHARS}, max(${PROMPT_BUDGET_MIN_CHARS}, floor(${PROMPT_BUDGET_BASE_CHARS} * W / ${PROMPT_BUDGET_REFERENCE_CONTEXT_WINDOW_TOKENS})))`,
+      minBudgetChars: PROMPT_BUDGET_MIN_CHARS,
+      maxBudgetChars: PROMPT_BUDGET_MAX_CHARS,
+      fallbackBudgetChars: RUNTIME_V2_PRINCIPLE_BUDGET,
+      windowToBudgetSanity: {
+        '32K': promptBudgetCharsForContextWindow(32_000),
+        '64K': promptBudgetCharsForContextWindow(64_000),
+        '128K': promptBudgetCharsForContextWindow(128_000),
+        '256K': promptBudgetCharsForContextWindow(256_000),
+        '1M': promptBudgetCharsForContextWindow(1_000_000),
+      },
+    },
+    scenario: `16 persisted candidates (14 × 60 chars, 2 × 1200 chars) per tier workspace, ${TIER_ROUNDS} forced round keys on the list route; shared route runs the same resolution through buildActivePrinciplePromptContext`,
+    tiers: tierScenarios,
+    sharedDispatchEvidence,
+    catalogNote: 'catalog metadata is available in-process via getPromptModelCatalog() (installed pi-ai 1.2.0 static catalog); no network calls are made at any point',
+    pdTokenCost: null,
+    pdTokenCostReason: payload.pdTokenCostReason,
+    interpretation: '注入条数/字符数是容量事实，不是行为改善证据；行为改善需要独立的真实 Agent 对照与回放。',
+  };
+  fs.writeFileSync(OUT_JSON_MA, JSON.stringify(maPayload, null, 2), 'utf8');
+
+  const ma = [];
+  ma.push('# PD 模型感知注入预算测量报告（SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 Phase 4）');
+  ma.push('');
+  ma.push(`生成时间：${maPayload.generatedAt}　测量入口：\`packages/pd-cli/scripts/prompt-capacity-measurement.mjs\`（真实生产构建器 + 受控临时工作区）。`);
+  ma.push('');
+  ma.push(`政策：\`${maPayload.policy.formula}\`（下限 ${PROMPT_BUDGET_MIN_CHARS} / 目标上限 ${PROMPT_BUDGET_MAX_CHARS} / 未知回退 ${RUNTIME_V2_PRINCIPLE_BUDGET} 字符，UTF-16 字符，**不是 token**）。下限为实测锚定：共享路由单条最小有效原则完整渲染 849 字符（自报关）/ 1204 字符（自报开），任何更低下限都会复现 32K 零注入缺陷；上限为目标值，1M 档位按公式精确得出 15625，不假装恰好等于上限。`);
+  ma.push('');
+  ma.push('## 容量档位 × 两路由对照');
+  ma.push('');
+  ma.push('| 容量档位 | 自报 | 预算(字符) | 来源 | 状态 | 列表:平均注入 | 列表:平均字符 | 列表:截断轮次 | 共享:注入 | 共享:字符 | 共享:截断 |');
+  ma.push('| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |');
+  for (const t of tierScenarios) {
+    ma.push(`| ${t.label} | ${t.selfReport ? '开' : '关'} | ${t.budgetChars} | ${t.capacitySource} | ${t.capacityStatus} | ${t.list.avgInjected} | ${t.list.avgUsedChars} | ${t.list.truncatedRounds}/${TIER_ROUNDS} | ${t.shared.injected} | ${t.shared.usedChars} | ${t.shared.truncated} |`);
+  }
+  ma.push('');
+  ma.push('要点：');
+  ma.push('- 未知容量档位如实回退 2000 字符（`legacy_fallback` / `unknown` + 有界原因码），与既有生产行为一致；无任何伪造的动态支持。');
+  ma.push('- 1M 档位预算按公式精确为 15625 字符（≥1.024M 才触顶 16000）——上限是目标边界，不是必须达到的固定值。');
+  ma.push('- 32K 档位（=下限 1250）经真实生产构建器验证：共享路由在自报开/关两种状态下均至少完整注入一条最小有效原则（v0.1 的 500 下限在该档位注入 0 条，已修复并以回归测试钉住）。');
+  ma.push('- 超长排除/截断语义在各档位下与既有选择器一致（同一 `trimToBudget` 与共享渲染路径，只是预算数值变化）。');
+  ma.push('');
+  ma.push('## 共享路径真实 dispatch 预算来源证据（生产 createProductionHostRuntime）');
+  ma.push('');
+  ma.push('```json');
+  ma.push(JSON.stringify(sharedDispatchEvidence, null, 2));
+  ma.push('```');
+  ma.push('');
+  ma.push('## 完整数据');
+  ma.push('');
+  ma.push('```json');
+  ma.push(JSON.stringify(tierScenarios, null, 2));
+  ma.push('```');
+  fs.writeFileSync(OUT_MD_MA, ma.join('\n') + '\n', 'utf8');
+  console.log(`[measure] wrote ${OUT_MD_MA}`);
+  console.log(`[measure] wrote ${OUT_JSON_MA}`);
 }
 
 await main();

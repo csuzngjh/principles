@@ -31,15 +31,25 @@ export interface PromptInjectionPerHostForecast {
  */
 export interface PromptActivationInjectionStatusWire {
   activationId: string;
-  status: 'injectable' | 'oversized' | 'window_excluded' | 'resolution_failed' | 'route_unconfirmed';
+  /**
+   * SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: `model_dependent` = the row's own
+   * entry misses the CURRENT projection budget but fits within the supported
+   * [min, max] budget range — injectability depends on the runtime model's
+   * context window, which this surface cannot see (never displayed as a
+   * definite yes or a permanent no).
+   */
+  status: 'injectable' | 'oversized' | 'model_dependent' | 'window_excluded' | 'resolution_failed' | 'route_unconfirmed';
   inCurrentWindow?: boolean;
   costChars?: number;
   budget?: number;
   budgetScope?: PromptInjectionBudgetScopeName;
   route?: PromptInjectionRouteName;
   reason?: string;
-  perHostFits?: { hostKind: PromptInjectionTargetHostName; fits: boolean }[];
+  perHostFits?: { hostKind: PromptInjectionTargetHostName; tierFit: PromptBudgetTierFitName }[];
 }
+
+/** Tier classification of a single serialized entry vs the supported budget range. */
+export type PromptBudgetTierFitName = 'fits_all_tiers' | 'model_dependent' | 'exceeds_max_tier';
 
 /** Route context attached to the activations payload (AC-01 visibility). */
 export interface PromptInjectionRouteSummaryWire {
@@ -106,4 +116,33 @@ export interface PromptInjectionBudgetStatus {
   nextAction?: string;
   /** Present when capacityStatus === 'unconfirmed': per-host forecasts. */
   perHost?: PromptInjectionPerHostForecast[];
+  /**
+   * SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §7: provenance of `budget` — the
+   * same resolution the real injection runs. `legacy_fallback` + `unknown`
+   * means these numbers are the fixed-budget view (no runtime model capacity
+   * was confirmed); the UI must present them as such, not as a
+   * model-accurate forecast. Absent behaves as the legacy fixed view
+   * (pre-SPEC payload compat).
+   */
+  budgetCapacitySource?: 'host_effective_window' | 'pi_catalog_exact' | 'legacy_fallback';
+  /** confirmed = a real context window was resolved; unknown = fixed-budget fallback. */
+  budgetCapacityStatus?: 'confirmed' | 'unknown';
+  /** The context window the budget was derived from; present only when confirmed. */
+  budgetContextWindowTokens?: number;
+  /**
+   * SPEC §7 v0.2: bounded machine-readable reason — present only when
+   * budgetCapacityStatus is 'unknown'. Closed set mirroring the core
+   * `PromptBudgetFallbackReason`; never free-form detail or user content.
+   */
+  budgetFallbackReason?:
+    | 'host_capacity_absent'
+    | 'host_capacity_source_untrusted'
+    | 'host_capacity_invalid_value'
+    | 'catalog_unavailable'
+    | 'model_identity_absent'
+    | 'catalog_no_exact_match'
+    | 'catalog_no_match_for_model_id'
+    | 'catalog_ambiguous_model_id'
+    | 'catalog_provider_absent'
+    | 'catalog_metadata_invalid';
 }

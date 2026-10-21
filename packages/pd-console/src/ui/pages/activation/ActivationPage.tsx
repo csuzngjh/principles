@@ -36,6 +36,18 @@ import {
 import { enumLabel } from "../../utils/enum-labels.js";
 import { formatDate } from "../../utils/format-date.js";
 
+// SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: per-host fit is a TIER verdict, not
+// a bare boolean — "depends on the model" must render as its own state,
+// never as a definite yes (fits_all_tiers) or a permanent no (exceeds_max).
+type TierFit = "fits_all_tiers" | "model_dependent" | "exceeds_max_tier" | undefined;
+type Translate = (key: string, opts?: Record<string, unknown>) => string;
+function tierFitLabel(t: Translate, tierFit: TierFit): string {
+  if (tierFit === undefined) return t("pages.activation.fitUnknown", { defaultValue: "未知" });
+  if (tierFit === "fits_all_tiers") return t("pages.activation.fitYes", { defaultValue: "可装入" });
+  if (tierFit === "model_dependent") return t("pages.activation.fitModelDependent", { defaultValue: "视模型而定" });
+  return t("pages.activation.fitNo", { defaultValue: "超长" });
+}
+
 // Date+time rendering options — mirrors the old default toLocaleString() shape
 // (numeric date, hours/minutes/seconds) while following the UI language.
 const DATETIME_OPTS: Intl.DateTimeFormatOptions = {
@@ -312,7 +324,7 @@ function ActivationFactCard({
               className={`text-[12.5px] leading-relaxed ${
                 record.promptInjection.status === "injectable"
                   ? "text-ink-2"
-                  : record.promptInjection.status === "window_excluded"
+                  : record.promptInjection.status === "window_excluded" || record.promptInjection.status === "model_dependent"
                     ? "text-amber"
                     : "text-danger"
               }`}
@@ -341,6 +353,11 @@ function ActivationFactCard({
                   cost: record.promptInjection.costChars ?? 0,
                   budget: record.promptInjection.budget ?? 0,
                 })}
+              {record.promptInjection.status === "model_dependent" &&
+                t("pages.activation.injectionModelDependent", {
+                  defaultValue: "取决于模型上下文：单条 {{cost}} 字符在最小预算内装不下、但在支持上限内——较小上下文模型会排除它，较大模型可注入",
+                  cost: record.promptInjection.costChars ?? 0,
+                })}
               {record.promptInjection.status === "resolution_failed" &&
                 t("pages.activation.injectionResolutionFailed", {
                   defaultValue: "无法判定：{{reason}}",
@@ -350,9 +367,9 @@ function ActivationFactCard({
                 <>
                   {t("pages.activation.injectionRouteUnconfirmed", {
                     defaultValue: "当前宿主容量未确认：OpenClaw {{oc}} / Codex {{cx}} / WorkBuddy {{wb}}",
-                    oc: record.promptInjection.perHostFits?.find((f) => f.hostKind === "openclaw")?.fits === undefined ? t("pages.activation.fitUnknown", { defaultValue: "未知" }) : record.promptInjection.perHostFits?.find((f) => f.hostKind === "openclaw")?.fits ? t("pages.activation.fitYes", { defaultValue: "可装入" }) : t("pages.activation.fitNo", { defaultValue: "超长" }),
-                    cx: record.promptInjection.perHostFits?.find((f) => f.hostKind === "codex")?.fits === undefined ? t("pages.activation.fitUnknown", { defaultValue: "未知" }) : record.promptInjection.perHostFits?.find((f) => f.hostKind === "codex")?.fits ? t("pages.activation.fitYes", { defaultValue: "可装入" }) : t("pages.activation.fitNo", { defaultValue: "超长" }),
-                    wb: record.promptInjection.perHostFits?.find((f) => f.hostKind === "workbuddy")?.fits === undefined ? t("pages.activation.fitUnknown", { defaultValue: "未知" }) : record.promptInjection.perHostFits?.find((f) => f.hostKind === "workbuddy")?.fits ? t("pages.activation.fitYes", { defaultValue: "可装入" }) : t("pages.activation.fitNo", { defaultValue: "超长" }),
+                    oc: tierFitLabel(t, record.promptInjection.perHostFits?.find((f) => f.hostKind === "openclaw")?.tierFit),
+                    cx: tierFitLabel(t, record.promptInjection.perHostFits?.find((f) => f.hostKind === "codex")?.tierFit),
+                    wb: tierFitLabel(t, record.promptInjection.perHostFits?.find((f) => f.hostKind === "workbuddy")?.tierFit),
                   })}
                   {record.promptInjection.reason !== undefined && (
                     <span className="block text-ink-4 text-[11.5px]">{record.promptInjection.reason}</span>

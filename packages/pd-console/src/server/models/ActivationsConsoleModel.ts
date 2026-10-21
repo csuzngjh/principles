@@ -448,7 +448,7 @@ export class ActivationsConsoleModel {
             ...(entry.route !== undefined ? { route: entry.route } : {}),
             ...(entry.reason !== undefined ? { reason: entry.reason } : {}),
             ...(entry.perHostFits !== undefined
-              ? { perHostFits: entry.perHostFits.map((fit) => ({ hostKind: fit.hostKind, fits: fit.fits })) }
+              ? { perHostFits: entry.perHostFits.map((fit) => ({ hostKind: fit.hostKind, tierFit: fit.tierFit })) }
               : {}),
           },
         ]));
