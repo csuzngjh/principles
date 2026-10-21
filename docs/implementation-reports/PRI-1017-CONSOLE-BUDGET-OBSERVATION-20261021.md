@@ -122,7 +122,7 @@ PR #2093（SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001）合并后：
 
 ```
 readRuntimePromptBudgetObservations({ workspaceDir: 'C:/Users/Administrator/.workbuddy/pd-workspace',
-                                       now: 2026-10-21T14:50:00Z })
+                                       now: 2026-10-21T06:46:00Z })
 → filesRead=7, lines=7715, legacyEventsSkipped=181, foreignPolicyEventsSkipped=0, parseFailures=0
 → observations=[{ hostKind:'workbuddy', budgetChars:2000, capacitySource:'legacy_fallback',
                    capacityStatus:'unknown', contextWindowTokens:null,
