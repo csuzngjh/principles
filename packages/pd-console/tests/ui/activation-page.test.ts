@@ -12,6 +12,7 @@
  */
 
 import { describe, it, expect } from "vitest";
+import * as fs from "node:fs";
 import {
   validateActivationRecord,
   validateActivationsData,
@@ -517,5 +518,41 @@ describe("Activation: forbidden terms never appear in i18n", () => {
     }
 
     checkNoForbidden(enActivation!, "pages.activation");
+  });
+});
+
+// ── PRI-1017: runtime budget observation note ───────────────────────────────
+
+describe("Activation page: PRI-1017 budget observation note contract", () => {
+  const src = fs.readFileSync(
+    new URL("../../src/ui/pages/activation/ActivationPage.tsx", import.meta.url), "utf-8");
+
+  it("only shows the observation note for a CONFIRMED observation with a real window", () => {
+    // A usable observation can itself be the runtime's fallback (no trusted
+    // host capacity): rendering it with a host-window label and window 0 would
+    // be a fabricated claim.
+    expect(src).toContain('route.budgetCapacityStatus === "confirmed"');
+    expect(src).toContain("route.budgetObservedAt !== undefined");
+    expect(src).toContain("route.budgetContextWindowTokens !== undefined");
+  });
+
+  it("shows the bounded reason for a fallback basis, with the observation time when one exists", () => {
+    expect(src).toContain('route.budgetCapacityStatus === "unknown" && route.budgetFallbackReason !== undefined');
+    expect(src).toContain("pages.focus.promptBudgetFallbackObservedSuffix");
+    expect(src).toContain("pages.activation.budgetFallbackNote");
+  });
+
+  it("both locales define the notes with their interpolation placeholders", () => {
+    const enActivation = enJson.pages?.activation as Record<string, unknown> | undefined;
+    const zhActivation = zhJson.pages?.activation as Record<string, unknown> | undefined;
+    for (const [lang, copy] of [["en", enActivation], ["zh", zhActivation]] as const) {
+      expect(typeof copy?.budgetObservedNote, lang).toBe("string");
+      expect(String(copy?.budgetObservedNote), lang).toContain("{{source}}");
+      expect(String(copy?.budgetObservedNote), lang).toContain("{{window}}");
+      expect(String(copy?.budgetObservedNote), lang).toContain("{{observedAt}}");
+      expect(typeof copy?.budgetFallbackNote, lang).toBe("string");
+      expect(String(copy?.budgetFallbackNote), lang).toContain("{{reason}}");
+      expect(String(copy?.budgetFallbackNote), lang).toContain("{{observed}}");
+    }
   });
 });

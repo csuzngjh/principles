@@ -40,7 +40,15 @@ import type {
 export type { FeedbackChannelId, FeedbackChannelStatus, FeedbackChannelsData, FeedbackSubmitResult };
 
 // PRI-908: the injection-budget forecast shape has one authority in shared/, too.
-import type { PromptInjectionBudgetStatus, PromptInjectionPerHostForecast, PromptActivationInjectionStatusWire, PromptInjectionRouteSummaryWire } from '../../shared/prompt-injection-contract.js';
+import type {
+  PromptBudgetCapacitySourceWire,
+  PromptBudgetCapacityStatusWire,
+  PromptBudgetFallbackReasonWire,
+  PromptInjectionBudgetStatus,
+  PromptInjectionPerHostForecast,
+  PromptActivationInjectionStatusWire,
+  PromptInjectionRouteSummaryWire,
+} from '../../shared/prompt-injection-contract.js';
 export type { PromptInjectionBudgetStatus };
 
 // ── Primitive guards ──────────────────────────────────────────────────────────
@@ -119,6 +127,34 @@ function isGovernanceTimestamp(value: unknown): value is string {
 
 function hasOwnFields(value: Record<string, unknown>, fields: string[]): boolean {
   return fields.every(field => Object.hasOwn(value, field));
+}
+
+const PROMPT_BUDGET_FALLBACK_REASONS: ReadonlySet<string> = new Set([
+  'host_capacity_absent',
+  'host_capacity_source_untrusted',
+  'host_capacity_invalid_value',
+  'catalog_unavailable',
+  'model_identity_absent',
+  'catalog_no_exact_match',
+  'catalog_no_match_for_model_id',
+  'catalog_ambiguous_model_id',
+  'catalog_provider_absent',
+  'catalog_metadata_invalid',
+  // PRI-1017: console-side bounded code — a runtime observation exists but
+  // is too old to be presented as the current budget.
+  'runtime_budget_observation_stale',
+]);
+
+function isPromptBudgetFallbackReason(value: unknown): value is PromptBudgetFallbackReasonWire {
+  return isString(value) && PROMPT_BUDGET_FALLBACK_REASONS.has(value);
+}
+
+function isPromptBudgetCapacitySource(value: unknown): value is PromptBudgetCapacitySourceWire {
+  return value === 'host_effective_window' || value === 'pi_catalog_exact' || value === 'legacy_fallback';
+}
+
+function isPromptBudgetCapacityStatus(value: unknown): value is PromptBudgetCapacityStatusWire {
+  return value === 'confirmed' || value === 'unknown';
 }
 
 function isStringEnum(value: unknown, allowed: Set<string>): value is string {
@@ -1359,6 +1395,24 @@ export function validateActivations(v: unknown): ActivationsData | null {
       if (Object.hasOwn(route, 'unconfirmedReason') && isString(route.unconfirmedReason)) summary.unconfirmedReason = route.unconfirmedReason;
       if (Object.hasOwn(route, 'nextAction') && isString(route.nextAction)) summary.nextAction = route.nextAction;
       if (Object.hasOwn(route, 'globalReason') && isString(route.globalReason)) summary.globalReason = route.globalReason;
+      // PRI-1017: runtime budget observation timestamp the per-row budget
+      // figures were computed under (additive, drop-on-invalid).
+      if (Object.hasOwn(route, 'budgetObservedAt') && isString(route.budgetObservedAt) && route.budgetObservedAt.length > 0 && Number.isFinite(Date.parse(route.budgetObservedAt))) {
+        summary.budgetObservedAt = route.budgetObservedAt;
+      }
+      if (Object.hasOwn(route, 'budgetCapacitySource') && isPromptBudgetCapacitySource(route.budgetCapacitySource)) {
+        summary.budgetCapacitySource = route.budgetCapacitySource;
+      }
+      if (Object.hasOwn(route, 'budgetCapacityStatus') && isPromptBudgetCapacityStatus(route.budgetCapacityStatus)) {
+        summary.budgetCapacityStatus = route.budgetCapacityStatus;
+      }
+      if (Object.hasOwn(route, 'budgetContextWindowTokens') && typeof route.budgetContextWindowTokens === 'number'
+        && Number.isInteger(route.budgetContextWindowTokens) && route.budgetContextWindowTokens > 0) {
+        summary.budgetContextWindowTokens = route.budgetContextWindowTokens;
+      }
+      if (Object.hasOwn(route, 'budgetFallbackReason') && isPromptBudgetFallbackReason(route.budgetFallbackReason)) {
+        summary.budgetFallbackReason = route.budgetFallbackReason;
+      }
       result.promptInjectionRoute = summary;
     }
   }
@@ -2147,28 +2201,22 @@ export function validatePromptInjectionBudgetStatus(v: unknown): PromptInjection
   // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §7: budget provenance, additive +
   // drop-on-invalid. Absent behaves as the legacy fixed-budget view
   // (pre-SPEC server compat).
-  if (
-    Object.hasOwn(v, 'budgetCapacitySource')
-    && (v.budgetCapacitySource === 'host_effective_window' || v.budgetCapacitySource === 'pi_catalog_exact'
-      || v.budgetCapacitySource === 'legacy_fallback')
-  ) {
+  if (Object.hasOwn(v, 'budgetCapacitySource') && isPromptBudgetCapacitySource(v.budgetCapacitySource)) {
     result.budgetCapacitySource = v.budgetCapacitySource;
   }
-  if (
-    Object.hasOwn(v, 'budgetFallbackReason')
-    && (v.budgetFallbackReason === 'host_capacity_absent' || v.budgetFallbackReason === 'host_capacity_source_untrusted'
-      || v.budgetFallbackReason === 'host_capacity_invalid_value' || v.budgetFallbackReason === 'catalog_unavailable'
-      || v.budgetFallbackReason === 'model_identity_absent' || v.budgetFallbackReason === 'catalog_no_exact_match'
-      || v.budgetFallbackReason === 'catalog_no_match_for_model_id' || v.budgetFallbackReason === 'catalog_ambiguous_model_id'
-      || v.budgetFallbackReason === 'catalog_provider_absent' || v.budgetFallbackReason === 'catalog_metadata_invalid')
-  ) {
+  if (Object.hasOwn(v, 'budgetFallbackReason') && isPromptBudgetFallbackReason(v.budgetFallbackReason)) {
     result.budgetFallbackReason = v.budgetFallbackReason;
   }
-  if (Object.hasOwn(v, 'budgetCapacityStatus') && (v.budgetCapacityStatus === 'confirmed' || v.budgetCapacityStatus === 'unknown')) {
+  if (Object.hasOwn(v, 'budgetCapacityStatus') && isPromptBudgetCapacityStatus(v.budgetCapacityStatus)) {
     result.budgetCapacityStatus = v.budgetCapacityStatus;
   }
   if (Object.hasOwn(v, 'budgetContextWindowTokens') && typeof v.budgetContextWindowTokens === 'number' && Number.isInteger(v.budgetContextWindowTokens) && v.budgetContextWindowTokens > 0) {
     result.budgetContextWindowTokens = v.budgetContextWindowTokens;
+  }
+  // PRI-1017: observation timestamp — a PAST runtime fact, never a live
+  // claim. Present-but-invalid drops (rc-1/rc-2), never propagated.
+  if (Object.hasOwn(v, 'budgetObservedAt') && isString(v.budgetObservedAt) && v.budgetObservedAt.length > 0 && Number.isFinite(Date.parse(v.budgetObservedAt))) {
+    result.budgetObservedAt = v.budgetObservedAt;
   }
   if (Object.hasOwn(v, 'perHost') && Array.isArray(v.perHost)) {
     // rc-4: validate every element, not just "is array".
@@ -2182,7 +2230,26 @@ export function validatePromptInjectionBudgetStatus(v: unknown): PromptInjection
         || typeof hostTruncated !== 'boolean') {
         return null;
       }
-      perHost.push({ hostKind, route, usedChars: hostUsed, truncated: hostTruncated });
+      const forecast: PromptInjectionPerHostForecast = { hostKind, route, usedChars: hostUsed, truncated: hostTruncated };
+      // PRI-1017: per-host budget basis (additive, drop-on-invalid). Absent
+      // behaves as the pre-PRI-1017 payload where the headline budget was
+      // shared — the UI must not present one host's window as another's.
+      if (Object.hasOwn(entry, 'budget') && typeof entry.budget === 'number' && Number.isInteger(entry.budget) && entry.budget > 0) {
+        forecast.budget = entry.budget;
+      }
+      if (Object.hasOwn(entry, 'budgetCapacitySource') && isPromptBudgetCapacitySource(entry.budgetCapacitySource)) {
+        forecast.budgetCapacitySource = entry.budgetCapacitySource;
+      }
+      if (Object.hasOwn(entry, 'budgetCapacityStatus') && isPromptBudgetCapacityStatus(entry.budgetCapacityStatus)) {
+        forecast.budgetCapacityStatus = entry.budgetCapacityStatus;
+      }
+      if (Object.hasOwn(entry, 'budgetObservedAt') && isString(entry.budgetObservedAt) && entry.budgetObservedAt.length > 0 && Number.isFinite(Date.parse(entry.budgetObservedAt))) {
+        forecast.budgetObservedAt = entry.budgetObservedAt;
+      }
+      if (Object.hasOwn(entry, 'budgetFallbackReason') && isPromptBudgetFallbackReason(entry.budgetFallbackReason)) {
+        forecast.budgetFallbackReason = entry.budgetFallbackReason;
+      }
+      perHost.push(forecast);
     }
     result.perHost = perHost;
   }

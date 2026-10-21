@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { ApprovalsGroupedConsoleModel } from '../models/ApprovalsGroupedConsoleModel.js';
 import { sendSuccess, sendError, sendNotFound, sendBadRequest } from '../utils/response.js';
-import type { PromptInjectionTargetHost } from '@principles/host-runtime';
+import { isPromptInjectionTargetHost, type PromptInjectionTargetHost } from '@principles/host-runtime';
 
 const models = new Map<string, ApprovalsGroupedConsoleModel>();
 
@@ -27,12 +27,14 @@ export async function handleApprovalsGroupedRoute(
   // PD_PROMPT_CAPACITY_V1 R-A1: request-level target host for the capacity
   // forecast — the request-scoped selection entry when the workspace's
   // applicable hosts would take different routes. No new persisted config.
+  // The roster is the host-runtime one (openclaw|codex|workbuddy) — the
+  // focus page offers all three, so the API must accept all three.
   const url = new URL(req.url ?? '/api/v1/approvals/grouped', 'http://localhost');
   let targetHost: PromptInjectionTargetHost | undefined;
   const rawHost = url.searchParams.get('host');
   if (rawHost !== null) {
-    if (rawHost !== 'openclaw' && rawHost !== 'codex') {
-      sendBadRequest(res, 'host must be one of: openclaw, codex');
+    if (!isPromptInjectionTargetHost(rawHost)) {
+      sendBadRequest(res, 'host must be one of: openclaw, codex, workbuddy');
       return;
     }
     targetHost = rawHost;

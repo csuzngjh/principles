@@ -24,6 +24,10 @@ export * from './prompt-injection-status.js';
 // SPEC PD_PROMPT_CAPACITY_V1 Phase C (AC-12): honest read-model over the
 // existing injection-event JSONL — unknown vs proven-zero never conflated.
 export * from './prompt-injection-event-evidence.js';
+// PRI-1017: runtime budget OBSERVATION read model over the SAME injection
+// events — console surfaces forecast under the budget the last real
+// injection used (SPEC §6.1), labelled with source + observation time.
+export * from './prompt-injection-budget-observation.js';
 export * from './pd-config.js';
 export * from './production-rulehost-gate.js';
 export * from './rule-implementation-runtime.js';

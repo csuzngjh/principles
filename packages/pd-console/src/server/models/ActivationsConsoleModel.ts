@@ -15,7 +15,7 @@ import {
   buildPromotionEvidenceSnapshot,
 } from '@principles/core/runtime-v2';
 import type { ActivationStatusRecord, PIArtifactRecord, PIArtifactSnapshot, PromotionReadinessResult, PromotionEvidenceSnapshot, ActivationControlState, ActivationDecisionRecord, GlobalRuleCodePause, OwnerPromotionActor, OwnerPromotionResult } from '@principles/core/runtime-v2';
-import { resolvePromotionHostLiveness, resolveWorkspaceHostToolSemantics, readPromptActivationInjectionStatuses, type PromptInjectionTargetHost } from '@principles/host-runtime';
+import { resolvePromotionHostLiveness, resolveWorkspaceHostToolSemantics, readPromptActivationInjectionStatuses, runtimeBudgetObservationToResolution, selectConsoleRuntimeBudgetFacts, RUNTIME_BUDGET_OBSERVATION_STALE_REASON, RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS, type PromptInjectionTargetHost } from '@principles/host-runtime';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
 import type { PromptActivationInjectionStatusWire, PromptInjectionRouteSummaryWire } from '../../shared/prompt-injection-contract.js';
 import * as fs from 'node:fs';
@@ -182,9 +182,11 @@ function unavailableShadowSummary(): PromotionEvidenceSnapshot['shadowSummary'] 
  * that path made every activation's shadow metrics report "unavailable" in the
  * console while real evaluations accumulated unread in `.state/logs`. Readers
  * scan both candidates until the writer migrates (ERR-031: both readers derive
- * from this same list).
+ * from this same list — the single source is the host-runtime constant
+ * `RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS`, shared with the PRI-1017 budget
+ * observation reader so the two readers can never drift).
  */
-export const RULECODE_EVENT_LOG_CANDIDATE_DIRS: readonly string[] = ['.pd/logs', '.state/logs'];
+export const RULECODE_EVENT_LOG_CANDIDATE_DIRS: readonly string[] = RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS;
 
 export interface CollectedRuleCodeEventEntries {
   entries: unknown[];
@@ -423,10 +425,35 @@ export class ActivationsConsoleModel {
       // status with positive single-item evidence. Degradation is observable
       // (route summary carries the reason) and never turns a row "healthy"
       // by omission (rc-9 / AC-06).
+      // PRI-1017: the status projection runs under the workspace's most
+      // recent runtime budget OBSERVATION for the target host, so per-row
+      // `budget` figures match the budget the last real injection used —
+      // SPEC §6.1's same-budget rule for this surface too.
       let promptInjectionRoute: PromptInjectionRouteSummaryWire | undefined;
       let statusByActivation: Map<string, PromptActivationInjectionStatusWire> | undefined;
       try {
-        const report = await readPromptActivationInjectionStatuses({ workspaceDir: this.workspaceDir, targetHost });
+        const budgetFacts = selectConsoleRuntimeBudgetFacts({
+          workspaceDir: this.workspaceDir,
+          ...(targetHost !== undefined ? { targetHost } : {}),
+        });
+        const perHostBudget = new Map(
+          [...budgetFacts.perHost].map(([hostKind, observation]) => [hostKind, runtimeBudgetObservationToResolution(observation)] as const),
+        );
+        const report = await readPromptActivationInjectionStatuses({
+          workspaceDir: this.workspaceDir,
+          ...(targetHost !== undefined ? { targetHost } : {}),
+          ...(budgetFacts.selected !== undefined
+            ? { promptBudget: runtimeBudgetObservationToResolution(budgetFacts.selected) }
+            : {}),
+          ...(perHostBudget.size > 0 ? { perHostPromptBudget: Object.fromEntries(perHostBudget) } : {}),
+        });
+        // The status report resolved the route internally; bind the observation
+        // to THAT host only. A stale observation is never presented as current.
+        const decidedHost = report.route.status === 'confirmed' ? report.route.hostKind : undefined;
+        const usedObservation = decidedHost !== undefined ? budgetFacts.perHost.get(decidedHost) : undefined;
+        const staleObservation = decidedHost !== undefined && usedObservation === undefined
+          ? budgetFacts.stalePerHost.get(decidedHost)
+          : undefined;
         promptInjectionRoute = {
           status: report.route.status,
           ...(report.route.hostKind !== undefined ? { hostKind: report.route.hostKind } : {}),
@@ -435,6 +462,15 @@ export class ActivationsConsoleModel {
           ...(report.route.unconfirmedReason !== undefined ? { unconfirmedReason: report.route.unconfirmedReason } : {}),
           ...(report.route.nextAction !== undefined ? { nextAction: report.route.nextAction } : {}),
           ...(report.globalReason !== undefined ? { globalReason: report.globalReason } : {}),
+          ...(report.budgetProvenance?.capacitySource !== undefined ? { budgetCapacitySource: report.budgetProvenance.capacitySource } : {}),
+          ...(report.budgetProvenance?.capacityStatus !== undefined ? { budgetCapacityStatus: report.budgetProvenance.capacityStatus } : {}),
+          ...(report.budgetProvenance?.contextWindowTokens !== undefined ? { budgetContextWindowTokens: report.budgetProvenance.contextWindowTokens } : {}),
+          ...(staleObservation !== undefined
+            ? { budgetFallbackReason: RUNTIME_BUDGET_OBSERVATION_STALE_REASON }
+            : report.budgetProvenance?.fallbackReason !== undefined
+              ? { budgetFallbackReason: report.budgetProvenance.fallbackReason }
+              : {}),
+          ...(usedObservation !== undefined ? { budgetObservedAt: usedObservation.observedAt } : {}),
         };
         statusByActivation = new Map(report.statuses.map((entry): [string, PromptActivationInjectionStatusWire] => [
           entry.activationId,

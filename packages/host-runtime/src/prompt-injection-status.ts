@@ -10,6 +10,10 @@ import {
   computeFeatureFlagsFromConfig,
   filterPromptActivations,
   resolvePrincipleFromArtifact,
+  type PromptBudgetCapacitySource,
+  type PromptBudgetCapacityStatus,
+  type PromptBudgetFallbackReason,
+  type PromptBudgetResolution,
   type PromptBudgetTierFit,
 } from '@principles/core/runtime-v2';
 import { loadPdConfigForPlugin } from './pd-config.js';
@@ -76,6 +80,19 @@ export interface PromptActivationInjectionStatus {
   perHostFits?: readonly { hostKind: PromptInjectionTargetHost; tierFit: PromptBudgetTierFit }[];
 }
 
+/**
+ * PRI-1017: provenance of the budget the rows were measured against, copied
+ * from the SAME resolution the projection ran under. Optional on every field
+ * so a caller can degrade without inventing a capacity fact.
+ */
+export interface PromptActivationBudgetProvenance {
+  capacitySource?: PromptBudgetCapacitySource;
+  capacityStatus?: PromptBudgetCapacityStatus;
+  contextWindowTokens?: number;
+  policyVersion?: string;
+  fallbackReason?: PromptBudgetFallbackReason;
+}
+
 export interface PromptActivationInjectionStatusReport {
   route: PromptInjectionRouteDecision;
   /** Empty when injection is globally unavailable (prompt flag off / state.db missing) — see `globalReason`. */
@@ -83,11 +100,26 @@ export interface PromptActivationInjectionStatusReport {
   warnings: string[];
   /** Present when no status could be computed at all (fail-loud degradation, rc-9). */
   globalReason?: string;
+  /** Present for a confirmed route: the budget basis every row was measured under. */
+  budgetProvenance?: PromptActivationBudgetProvenance;
 }
 
 export async function readPromptActivationInjectionStatuses(input: {
   workspaceDir: string;
   targetHost?: PromptInjectionTargetHost;
+  /**
+   * SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §6.1 / PRI-1017: budget resolution
+   * the status projection must run under — console callers pass the
+   * resolution rebuilt from the workspace's most recent runtime budget
+   * observation. Absent → the honest fixed-fallback default.
+   */
+  promptBudget?: PromptBudgetResolution;
+  /**
+   * PRI-1017: per-host observations for a route confirmed by WORKSPACE FACTS
+   * (no request-level targetHost). The projection uses only the resolved
+   * host's own budget; an unidentified shared route stays on the fallback.
+   */
+  perHostPromptBudget?: Partial<Record<PromptInjectionTargetHost, PromptBudgetResolution>>;
 }): Promise<PromptActivationInjectionStatusReport> {
   const config = loadPdConfigForPlugin(input.workspaceDir);
   const warnings: string[] = [];
@@ -196,9 +228,12 @@ export async function readPromptActivationInjectionStatuses(input: {
     return { route, statuses, warnings };
   }
 
+  const decidedBudget = input.promptBudget
+    ?? (route.hostKind !== undefined ? input.perHostPromptBudget?.[route.hostKind] : undefined);
   const projection = await buildLivePromptInjectionProjection({
     workspaceDir: input.workspaceDir,
     targetHost: route.hostKind,
+    ...(decidedBudget !== undefined ? { promptBudget: decidedBudget } : {}),
   });
   warnings.push(...projection.warnings);
   const statuses: PromptActivationInjectionStatus[] = rows.map((row) => {
@@ -215,12 +250,12 @@ export async function readPromptActivationInjectionStatuses(input: {
     const budgetScope: PromptInjectionBudgetScope = projection.budgetScope;
     const serialization = projection.route === 'shared_render' ? 'full directive render' : 'list entry';
     // Tier verdict FIRST (SPEC §6.3): the projection budget on this surface
-    // is usually the fixed fallback (2000) — the console holds no runtime
-    // model facts. An entry in (MIN, fallback] fits THAT estimate and may
-    // even sit in the current window, but it exceeds the measured floor, so
-    // on a 32K/64K model (budget = floor) it would NOT inject. Reporting it
-    // as an unconditional `injectable` would contradict the approval-time
-    // `model_dependent` verdict for the very same artifact.
+    // is the fixed fallback (2000) unless the caller passed a runtime budget
+    // OBSERVATION (PRI-1017) — and even then an entry in (MIN, fallback]
+    // exceeds the measured floor, so on a 32K/64K model (budget = floor) it
+    // would NOT inject. Reporting it as an unconditional `injectable` would
+    // contradict the approval-time `model_dependent` verdict for the very
+    // same artifact.
     const tierFit = classifySingleItemBudgetTier(costChars);
     if (tierFit === 'exceeds_max_tier') {
       return {
@@ -259,5 +294,16 @@ export async function readPromptActivationInjectionStatuses(input: {
       route: projection.route,
     };
   });
-  return { route, statuses, warnings };
+  return {
+    route,
+    statuses,
+    warnings,
+    budgetProvenance: {
+      ...(projection.budgetCapacitySource !== undefined ? { capacitySource: projection.budgetCapacitySource } : {}),
+      ...(projection.budgetCapacityStatus !== undefined ? { capacityStatus: projection.budgetCapacityStatus } : {}),
+      ...(typeof projection.budgetContextWindowTokens === 'number' ? { contextWindowTokens: projection.budgetContextWindowTokens } : {}),
+      ...(projection.budgetPolicyVersion !== undefined ? { policyVersion: projection.budgetPolicyVersion } : {}),
+      ...(projection.budgetFallbackReason !== undefined ? { fallbackReason: projection.budgetFallbackReason } : {}),
+    },
+  };
 }

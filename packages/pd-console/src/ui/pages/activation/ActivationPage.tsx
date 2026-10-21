@@ -865,6 +865,59 @@ export function ActivationPage() {
           {t("pages.activation.sectionActive")}
         </SectionTitle>
 
+        {/* PRI-1017: the per-row budget figures come from the workspace's most
+            recent runtime budget OBSERVATION when one exists — label it as a
+            past observation, never as a live confirmation. Absent = the honest
+            fixed-fallback projection (with its bounded reason). */}
+        {(() => {
+          const route = activationsData?.promptInjectionRoute;
+          if (route?.status !== "confirmed") return null;
+          // The "observed" copy names a source + window. Only a CONFIRMED
+          // observation carries those facts; a usable observation can itself
+          // be the runtime's fallback (no trusted host capacity), and showing
+          // window=0 with a host-window label would be a fabricated claim.
+          if (
+            route.budgetCapacityStatus === "confirmed"
+            && route.budgetObservedAt !== undefined
+            && route.budgetContextWindowTokens !== undefined
+          ) {
+            return (
+              <p className="mb-3 text-[12px] text-ink-3" data-testid="activation-budget-observed-note">
+                {t("pages.activation.budgetObservedNote", {
+                  defaultValue: "注入状态中的预算数字取自最近一次运行时观测（来源 {{source}}，上下文 {{window}} tokens，观测于 {{observedAt}}），并非实时确认值。",
+                  source: route.budgetCapacitySource === "pi_catalog_exact"
+                    ? t("pages.focus.budgetCapacitySourcePiCatalog", { defaultValue: "模型目录精确匹配" })
+                    : t("pages.focus.budgetCapacitySourceHostWindow", { defaultValue: "宿主有效上下文窗口" }),
+                  window: route.budgetContextWindowTokens,
+                  observedAt: route.budgetObservedAt,
+                })}
+              </p>
+            );
+          }
+          if (route.budgetCapacityStatus === "unknown" && route.budgetFallbackReason !== undefined) {
+            const observedSuffix = route.budgetObservedAt !== undefined
+              // The runtime's own most recent injection ALSO fell back — the
+              // reason is that observation's, not a console-only guess.
+              ? t("pages.focus.promptBudgetFallbackObservedSuffix", {
+                  defaultValue: "；运行时最近一次观测于 {{observedAt}}",
+                  observedAt: route.budgetObservedAt,
+                })
+              : "";
+            return (
+              <p className="mb-3 text-[12px] text-ink-3" data-testid="activation-budget-fallback-note">
+                {t("pages.activation.budgetFallbackNote", {
+                  defaultValue: "注入状态按固定回退预算估算（{{reason}}{{observed}}）。",
+                  reason: t(`pages.focus.budgetFallbackReason.${route.budgetFallbackReason}`, {
+                    defaultValue: route.budgetFallbackReason,
+                  }),
+                  observed: observedSuffix,
+                })}
+              </p>
+            );
+          }
+          return null;
+        })()}
+
         {ordinaryActive.length > 0 ? (
           <div className="space-y-[14px]">
             {ordinaryActive.map((record) => (

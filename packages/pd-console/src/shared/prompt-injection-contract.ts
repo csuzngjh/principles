@@ -16,11 +16,56 @@ export type PromptInjectionTargetHostName = 'openclaw' | 'codex' | 'workbuddy';
 export type PromptInjectionRouteName = 'legacy_trim' | 'shared_render';
 export type PromptInjectionBudgetScopeName = 'selected_lines' | 'full_directive_context';
 
+export type PromptBudgetCapacitySourceWire = 'host_effective_window' | 'pi_catalog_exact' | 'legacy_fallback';
+export type PromptBudgetCapacityStatusWire = 'confirmed' | 'unknown';
+
+/**
+ * Bounded machine-readable fallback reason. Closed set mirroring the core
+ * `PromptBudgetFallbackReason` plus the console-side observation code
+ * `runtime_budget_observation_stale` (PRI-1017: a runtime observation exists
+ * but is too old to be presented as the current budget). Never free-form
+ * detail or user content.
+ */
+export type PromptBudgetFallbackReasonWire =
+  | 'host_capacity_absent'
+  | 'host_capacity_source_untrusted'
+  | 'host_capacity_invalid_value'
+  | 'catalog_unavailable'
+  | 'model_identity_absent'
+  | 'catalog_no_exact_match'
+  | 'catalog_no_match_for_model_id'
+  | 'catalog_ambiguous_model_id'
+  | 'catalog_provider_absent'
+  | 'catalog_metadata_invalid'
+  | 'runtime_budget_observation_stale';
+
 export interface PromptInjectionPerHostForecast {
   hostKind: PromptInjectionTargetHostName;
   route: PromptInjectionRouteName;
   usedChars: number;
   truncated: boolean;
+  /**
+   * PRI-1017: the budget THIS host's forecast ran under — per-host forecasts
+   * no longer share one headline budget (each host carries its own runtime
+   * budget observation or its own honest fallback).
+   */
+  budget?: number;
+  /** Provenance of this host's `budget` (absent = legacy fixed view). */
+  budgetCapacitySource?: PromptBudgetCapacitySourceWire;
+  /** confirmed = a real window fact; unknown = fixed fallback for this host. */
+  budgetCapacityStatus?: PromptBudgetCapacityStatusWire;
+  /**
+   * PRI-1017: ISO timestamp of the runtime budget observation this host's
+   * budget came from (absent = no observation; the fixed fallback applies).
+   * A PAST fact — the UI labels it as the most recent observation, never as
+   * a live confirmation.
+   */
+  budgetObservedAt?: string;
+  /**
+   * PRI-1017: this host's OWN fallback reason. Per-host so one host's
+   * missing capacity is never attributed to another host.
+   */
+  budgetFallbackReason?: PromptBudgetFallbackReasonWire;
 }
 
 /**
@@ -61,6 +106,19 @@ export interface PromptInjectionRouteSummaryWire {
   nextAction?: string;
   /** Present when no status could be computed at all (fail-loud degradation). */
   globalReason?: string;
+  /**
+   * PRI-1017: ISO timestamp of the runtime budget observation the per-row
+   * `budget` figures were computed under (absent = fixed fallback). A PAST
+   * fact — label it as the most recent observation, never as live.
+   */
+  budgetObservedAt?: string;
+  /** PRI-1017: provenance of the budget basis behind the per-row figures. */
+  budgetCapacitySource?: PromptBudgetCapacitySourceWire;
+  budgetCapacityStatus?: PromptBudgetCapacityStatusWire;
+  /** Present only when the budget basis was confirmed from a real window. */
+  budgetContextWindowTokens?: number;
+  /** Present only when the rows were measured under the fixed fallback. */
+  budgetFallbackReason?: PromptBudgetFallbackReasonWire;
 }
 
 export interface PromptInjectionBudgetStatus {
@@ -117,6 +175,15 @@ export interface PromptInjectionBudgetStatus {
   /** Present when capacityStatus === 'unconfirmed': per-host forecasts. */
   perHost?: PromptInjectionPerHostForecast[];
   /**
+   * PRI-1017: ISO timestamp of the runtime budget OBSERVATION `budget` and
+   * the provenance fields came from (absent = no usable observation; the
+   * numbers are the console's own fixed-fallback projection). The console
+   * holds no live host facts: an observation is the budget the LAST real
+   * injection ran under, and the UI must say so — never present it as a
+   * live confirmation.
+   */
+  budgetObservedAt?: string;
+  /**
    * SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §7: provenance of `budget` — the
    * same resolution the real injection runs. `legacy_fallback` + `unknown`
    * means these numbers are the fixed-budget view (no runtime model capacity
@@ -124,25 +191,14 @@ export interface PromptInjectionBudgetStatus {
    * model-accurate forecast. Absent behaves as the legacy fixed view
    * (pre-SPEC payload compat).
    */
-  budgetCapacitySource?: 'host_effective_window' | 'pi_catalog_exact' | 'legacy_fallback';
+  budgetCapacitySource?: PromptBudgetCapacitySourceWire;
   /** confirmed = a real context window was resolved; unknown = fixed-budget fallback. */
-  budgetCapacityStatus?: 'confirmed' | 'unknown';
+  budgetCapacityStatus?: PromptBudgetCapacityStatusWire;
   /** The context window the budget was derived from; present only when confirmed. */
   budgetContextWindowTokens?: number;
   /**
    * SPEC §7 v0.2: bounded machine-readable reason — present only when
-   * budgetCapacityStatus is 'unknown'. Closed set mirroring the core
-   * `PromptBudgetFallbackReason`; never free-form detail or user content.
+   * budgetCapacityStatus is 'unknown'. See `PromptBudgetFallbackReasonWire`.
    */
-  budgetFallbackReason?:
-    | 'host_capacity_absent'
-    | 'host_capacity_source_untrusted'
-    | 'host_capacity_invalid_value'
-    | 'catalog_unavailable'
-    | 'model_identity_absent'
-    | 'catalog_no_exact_match'
-    | 'catalog_no_match_for_model_id'
-    | 'catalog_ambiguous_model_id'
-    | 'catalog_provider_absent'
-    | 'catalog_metadata_invalid';
+  budgetFallbackReason?: PromptBudgetFallbackReasonWire;
 }
