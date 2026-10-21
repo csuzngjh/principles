@@ -117,6 +117,123 @@ describe('validatePromptInjectionBudgetStatus — PD_PROMPT_CAPACITY_V1 fields',
   });
 });
 
+/**
+ * PRI-1017: runtime budget OBSERVATION fields on the wire contract.
+ * The observation is a PAST runtime fact — additive optional fields,
+ * drop-on-invalid; a pre-PRI-1017 payload (no new fields) still validates.
+ */
+describe('validatePromptInjectionBudgetStatus — PRI-1017 budget observation fields', () => {
+  it('keeps a confirmed payload backed by a runtime observation (source + window + observedAt)', () => {
+    const v = validatePromptInjectionBudgetStatus({
+      ...baseStatus(),
+      capacityStatus: 'confirmed',
+      hostKind: 'openclaw',
+      budget: 4000,
+      budgetCapacitySource: 'host_effective_window',
+      budgetCapacityStatus: 'confirmed',
+      budgetContextWindowTokens: 256_000,
+      budgetObservedAt: '2026-10-21T04:00:00.000Z',
+    });
+    expect(v?.budgetCapacitySource).toBe('host_effective_window');
+    expect(v?.budgetContextWindowTokens).toBe(256_000);
+    expect(v?.budgetObservedAt).toBe('2026-10-21T04:00:00.000Z');
+  });
+
+  it('keeps the console-side stale reason code alongside the closed core reason set', () => {
+    const stale = validatePromptInjectionBudgetStatus({
+      ...baseStatus(),
+      budgetCapacityStatus: 'unknown',
+      budgetFallbackReason: 'runtime_budget_observation_stale',
+    });
+    expect(stale?.budgetFallbackReason).toBe('runtime_budget_observation_stale');
+    const core = validatePromptInjectionBudgetStatus({
+      ...baseStatus(),
+      budgetCapacityStatus: 'unknown',
+      budgetFallbackReason: 'host_capacity_source_untrusted',
+    });
+    expect(core?.budgetFallbackReason).toBe('host_capacity_source_untrusted');
+  });
+
+  it.each([
+    ['budgetObservedAt', 'yesterday'],
+    ['budgetObservedAt', 1750000000000],
+    ['budgetObservedAt', ''],
+    ['budgetFallbackReason', 'made_up_reason'],
+    ['budgetCapacitySource', 'vibes'],
+    ['budgetCapacityStatus', 'probably'],
+    ['budgetContextWindowTokens', 0],
+  ])('drops invalid %s (%p) without nulling the payload', (field, value) => {
+    const v = validatePromptInjectionBudgetStatus({ ...baseStatus(), [field]: value });
+    expect(v).not.toBeNull();
+    expect(v?.[field as keyof typeof v]).toBeUndefined();
+  });
+
+  it('per-host forecasts carry their own budget basis (additive, drop-on-invalid per field)', () => {
+    const v = validatePromptInjectionBudgetStatus({
+      ...baseStatus(),
+      capacityStatus: 'unconfirmed',
+      perHost: [
+        {
+          hostKind: 'openclaw', route: 'legacy_trim', usedChars: 1855, truncated: true,
+          budget: 4000, budgetCapacitySource: 'host_effective_window', budgetCapacityStatus: 'confirmed',
+          budgetObservedAt: '2026-10-21T04:00:00.000Z',
+        },
+        { hostKind: 'codex', route: 'shared_render', usedChars: 1980, truncated: false },
+      ],
+    });
+    expect(v?.perHost?.[0]).toEqual({
+      hostKind: 'openclaw', route: 'legacy_trim', usedChars: 1855, truncated: true,
+      budget: 4000, budgetCapacitySource: 'host_effective_window', budgetCapacityStatus: 'confirmed',
+      budgetObservedAt: '2026-10-21T04:00:00.000Z',
+    });
+    // A host without an observation keeps the pre-PRI-1017 shape exactly.
+    expect(v?.perHost?.[1]).toEqual({ hostKind: 'codex', route: 'shared_render', usedChars: 1980, truncated: false });
+  });
+
+  it('drops invalid per-host additive fields without nulling the entry', () => {
+    const v = validatePromptInjectionBudgetStatus({
+      ...baseStatus(),
+      capacityStatus: 'unconfirmed',
+      perHost: [
+        {
+          hostKind: 'openclaw', route: 'legacy_trim', usedChars: 1855, truncated: true,
+          budget: -1, budgetCapacitySource: 'nope', budgetCapacityStatus: 'maybe',
+          budgetObservedAt: 'last tuesday', budgetFallbackReason: 'not_a_reason',
+        },
+      ],
+    });
+    expect(v?.perHost?.[0]).toEqual({ hostKind: 'openclaw', route: 'legacy_trim', usedChars: 1855, truncated: true });
+  });
+
+  it('per-host fallback reason travels through the closed whitelist (each host keeps its own)', () => {
+    const v = validatePromptInjectionBudgetStatus({
+      ...baseStatus(),
+      capacityStatus: 'unconfirmed',
+      perHost: [
+        { hostKind: 'openclaw', route: 'legacy_trim', usedChars: 1855, truncated: true, budgetFallbackReason: 'runtime_budget_observation_stale' },
+        { hostKind: 'codex', route: 'shared_render', usedChars: 1980, truncated: true, budgetFallbackReason: 'host_capacity_absent' },
+      ],
+    });
+    expect(v?.perHost?.[0]?.budgetFallbackReason).toBe('runtime_budget_observation_stale');
+    expect(v?.perHost?.[1]?.budgetFallbackReason).toBe('host_capacity_absent');
+    // Top-level reason is NOT populated from the first host (no impersonation).
+    expect(v?.budgetFallbackReason).toBeUndefined();
+  });
+
+  it('a pre-PRI-1017 payload (no observation fields) still validates unchanged', () => {
+    const v = validatePromptInjectionBudgetStatus({
+      ...baseStatus(),
+      capacityStatus: 'confirmed',
+      hostKind: 'codex',
+      budgetCapacitySource: 'legacy_fallback',
+      budgetCapacityStatus: 'unknown',
+      budgetFallbackReason: 'host_capacity_absent',
+    });
+    expect(v?.budgetObservedAt).toBeUndefined();
+    expect(v?.budgetFallbackReason).toBe('host_capacity_absent');
+  });
+});
+
 function baseActivation(): Record<string, unknown> {
   return {
     activationId: 'act-1', artifactId: 'art-1', principleId: 'p-1', channel: 'prompt',
@@ -178,6 +295,54 @@ describe('validateActivations — per-activation injection status (R-A3)', () =>
     });
     expect(v?.activations[0]?.promptInjection?.status).toBe('model_dependent');
     expect(v?.activations[0]?.promptInjection?.costChars).toBe(3200);
+  });
+
+  it('PRI-1017: route summary carries the runtime budget observation timestamp (drop-on-invalid)', () => {
+    const v = validateActivations({
+      activations: [
+        { ...baseActivation(), promptInjection: { activationId: 'act-1', status: 'injectable', inCurrentWindow: true, costChars: 852, budget: 4000, budgetScope: 'full_directive_context', route: 'shared_render' } },
+      ],
+      status: 'ok',
+      promptInjectionRoute: {
+        status: 'confirmed', hostKind: 'codex', route: 'shared_render', flagEnabled: false,
+        budgetObservedAt: '2026-10-21T04:00:00.000Z',
+      },
+    });
+    expect(v?.promptInjectionRoute?.budgetObservedAt).toBe('2026-10-21T04:00:00.000Z');
+    const invalid = validateActivations({
+      activations: [],
+      status: 'ok',
+      promptInjectionRoute: { status: 'confirmed', flagEnabled: false, budgetObservedAt: 'sometime' },
+    });
+    expect(invalid?.promptInjectionRoute?.budgetObservedAt).toBeUndefined();
+    expect(invalid?.promptInjectionRoute?.status).toBe('confirmed');
+  });
+
+  it('PRI-1017: route summary budget provenance is validated field-by-field (source/status/window/reason)', () => {
+    const valid = validateActivations({
+      activations: [],
+      status: 'ok',
+      promptInjectionRoute: {
+        status: 'confirmed', hostKind: 'codex', route: 'shared_render', flagEnabled: false,
+        budgetCapacitySource: 'legacy_fallback', budgetCapacityStatus: 'unknown',
+        budgetFallbackReason: 'host_capacity_absent', budgetObservedAt: '2026-10-21T04:00:00.000Z',
+      },
+    });
+    expect(valid?.promptInjectionRoute).toMatchObject({
+      budgetCapacitySource: 'legacy_fallback',
+      budgetCapacityStatus: 'unknown',
+      budgetFallbackReason: 'host_capacity_absent',
+    });
+    const invalid = validateActivations({
+      activations: [],
+      status: 'ok',
+      promptInjectionRoute: {
+        status: 'confirmed', flagEnabled: false,
+        budgetCapacitySource: 'vibes', budgetCapacityStatus: 'probably',
+        budgetContextWindowTokens: -5, budgetFallbackReason: 'free_form_detail',
+      },
+    });
+    expect(invalid?.promptInjectionRoute).toEqual({ status: 'confirmed', flagEnabled: false });
   });
 
   it('keeps resolution_failed rows with their structured reason', () => {

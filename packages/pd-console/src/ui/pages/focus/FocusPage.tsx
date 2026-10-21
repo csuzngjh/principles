@@ -744,7 +744,10 @@ function PendingReviewCard({
           PD_PROMPT_CAPACITY_V1 R-A2: 预测窗口（Console 无真实轮次键），并标注
           计费范围——列表路由按选中行计费、共享路由按完整注入块计费，两个
           数字不能混称为同一个"占用"。 */}
-      {decidedOutcome === null && primaryChannel === "prompt" && promptInjection?.truncated === true && (
+      {/* PRI-1017/4.3: an unconfirmed route has no single current host, so a
+          numeric "used/budget" badge would impersonate whichever host the
+          payload lists first. Per-host facts live in the capacity banner. */}
+      {decidedOutcome === null && primaryChannel === "prompt" && promptInjection?.truncated === true && promptInjection.capacityStatus !== "unconfirmed" && (
         <div
           className="mt-3 rounded-[3px] border border-amber/40 bg-amber/5 px-3 py-2 text-[12.5px] text-amber"
           data-testid={`approve-queue-badge-${group.principleId}`}
@@ -782,25 +785,55 @@ function PendingReviewCard({
                 })}
             {promptInjection.hostKind !== undefined ? ` · ${promptInjection.hostKind === "openclaw" ? "OpenClaw" : promptInjection.hostKind === "workbuddy" ? "WorkBuddy" : "Codex"}` : ""}
             {` · ${
-              promptInjection.budgetCapacityStatus === "confirmed"
-                ? t("pages.focus.promptBudgetModelAwareNote", {
-                    defaultValue: "预算按已确认的模型上下文解析（{{window}} tokens）",
-                    window: promptInjection.budgetContextWindowTokens ?? 0,
-                  })
-                : t("pages.focus.promptBudgetFallbackNote", {
-                    defaultValue: "按固定回退预算估算（控制台未绑定运行时模型{{reason}}）",
-                    reason: promptInjection.budgetFallbackReason !== undefined
-                      ? t("pages.focus.promptBudgetFallbackReasonSuffix", {
-                          defaultValue: "，原因: {{code}}",
-                          // The raw bounded code stays the default: it is the
-                          // grep-able identifier shared with events/logs. Locales
-                          // may override via pages.focus.budgetFallbackReason.<code>.
-                          code: t(`pages.focus.budgetFallbackReason.${promptInjection.budgetFallbackReason}`, {
+              // A "confirmed" claim is only renderable when the window is
+              // present: a payload missing it must not print "0 tokens".
+              promptInjection.budgetCapacityStatus === "confirmed" && promptInjection.budgetContextWindowTokens !== undefined
+                ? promptInjection.budgetObservedAt !== undefined
+                  // PRI-1017: the budget comes from the workspace's most
+                  // recent RUNTIME OBSERVATION (the last real injection) —
+                  // say so, with source + window + observation time. Never
+                  // present a past observation as a live confirmation.
+                  ? t("pages.focus.promptBudgetObservedNote", {
+                      defaultValue: "预算取自最近一次运行时观测（来源 {{source}}，上下文 {{window}} tokens，观测于 {{observedAt}}）",
+                      source: promptInjection.budgetCapacitySource === "pi_catalog_exact"
+                        ? t("pages.focus.budgetCapacitySourcePiCatalog", { defaultValue: "模型目录精确匹配" })
+                        : t("pages.focus.budgetCapacitySourceHostWindow", { defaultValue: "宿主有效上下文窗口" }),
+                      window: promptInjection.budgetContextWindowTokens,
+                      observedAt: promptInjection.budgetObservedAt,
+                    })
+                  : t("pages.focus.promptBudgetModelAwareNote", {
+                      defaultValue: "预算按已确认的模型上下文解析（{{window}} tokens）",
+                      window: promptInjection.budgetContextWindowTokens,
+                    })
+                : promptInjection.budgetObservedAt !== undefined
+                  // PRI-1017: a fallback that still carries an observation
+                  // timestamp IS the runtime's own honest fallback (the last
+                  // injection resolved 2000 with a reason). Saying "console
+                  // not bound to the runtime model" here would be false — the
+                  // console DID use the runtime's last observation.
+                  ? t("pages.focus.promptBudgetFallbackObservedNote", {
+                      defaultValue: "运行时最近一次观测未确认宿主容量，预算按固定回退估算（{{reason}}，观测于 {{observedAt}}）",
+                      reason: promptInjection.budgetFallbackReason !== undefined
+                        ? t(`pages.focus.budgetFallbackReason.${promptInjection.budgetFallbackReason}`, {
                             defaultValue: promptInjection.budgetFallbackReason,
-                          }),
-                        })
-                      : "",
-                  })
+                          })
+                        : "unknown",
+                      observedAt: promptInjection.budgetObservedAt,
+                    })
+                  : t("pages.focus.promptBudgetFallbackNote", {
+                      defaultValue: "按固定回退预算估算（控制台未绑定运行时模型{{reason}}）",
+                      reason: promptInjection.budgetFallbackReason !== undefined
+                        ? t("pages.focus.promptBudgetFallbackReasonSuffix", {
+                            defaultValue: "，原因: {{code}}",
+                            // The raw bounded code stays the default: it is the
+                            // grep-able identifier shared with events/logs. Locales
+                            // may override via pages.focus.budgetFallbackReason.<code>.
+                            code: t(`pages.focus.budgetFallbackReason.${promptInjection.budgetFallbackReason}`, {
+                              defaultValue: promptInjection.budgetFallbackReason,
+                            }),
+                          })
+                        : "",
+                    })
             }`}
           </div>
         </div>
@@ -1607,9 +1640,26 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
                       ? t("pages.focus.promptCapacitySharedRoute")
                       : t("pages.focus.promptCapacityListRoute"),
                     used: entry.usedChars,
-                    budget: unconfirmed.budget,
+                    // PRI-1017: each host shows ITS OWN budget basis (runtime
+                    // observation or its own honest fallback) — never the
+                    // shared headline number.
+                    budget: entry.budget ?? unconfirmed.budget,
                     full: entry.truncated ? t("pages.focus.promptCapacityPerHostFull") : "",
+                    observed: entry.budgetObservedAt !== undefined
+                      ? t("pages.focus.promptCapacityPerHostObserved", {
+                          defaultValue: "（预算来自该宿主最近一次运行时观测，观测于 {{observedAt}}）",
+                          observedAt: entry.budgetObservedAt,
+                        })
+                      : "",
                   })}
+                  {entry.budgetFallbackReason !== undefined && (
+                    <span data-testid={`prompt-capacity-perhost-reason-${entry.hostKind}`}>
+                      {" · "}
+                      {t(`pages.focus.budgetFallbackReason.${entry.budgetFallbackReason}`, {
+                        defaultValue: entry.budgetFallbackReason,
+                      })}
+                    </span>
+                  )}
                 </li>
               ))}
             </ul>

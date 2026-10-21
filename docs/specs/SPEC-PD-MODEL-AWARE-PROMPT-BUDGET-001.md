@@ -324,6 +324,27 @@ Owner 审批时，Console/CLI 通常不能保证获得执行该激活的实时�
 - 未提供轮转键时，不得宣称具备轮转公平性。
 - 单条超过整个预算的原则仍明确报告为超长，而不是普通预算竞争。
 
+### 6.5 Console 运行时预算观测（PRI-1017 数据链）
+
+PR #2093 合并后出现一个数据链缺口：运行时已按宿主可信容量解析预算（如 256K → 4000 字符）并写入注入事件，但 Console 预测仍调用无参 `resolvePromptBudget()`，固定回退 2000 字符——Owner 看到 `1953/2000`，而生产注入实际使用 4000。本节规定该缺口的修复契约。
+
+Console 不持有实时宿主事实（独立进程、无 Hook 上下文），但**运行时的预算解析结果已经持久化**在现有注入事件 `runtime_v2_prompt_activations_injected`（`<workspaceDir>/{.pd,.state}/logs/events_<date>.jsonl`）中。修复方式是**连接而非新建**：Console 侧只读模型读取该工作区、该宿主最近一次注入事件的预算事实，作为预测的预算基准。
+
+规则：
+
+1. **观测是过去事实，不是实时确认。** UI 必须携带观测时间（`budgetObservedAt`）并如实标注"最近一次运行时观测"；不得呈现为当前实时确认值。
+2. **宿主绑定。** 观测按 `hostKind` 分桶；指定宿主只使用该宿主的观测。OpenClaw 的容量不得用于 Codex 或 WorkBuddy 的预测；宿主不匹配时诚实回退，不借用其他宿主数字。
+3. **时效性。** 观测超过 24 小时（`RUNTIME_BUDGET_OBSERVATION_MAX_AGE_MS`）视为过期：不得宣称为当前事实，Console 回退到固定预算，并携带可追踪原因码 `runtime_budget_observation_stale`。
+4. **策略版本绑定。** 事件的 `budgetPolicyVersion` 与当前政策不一致时，该观测不得作为当前预算依据（公式可能已变）。
+5. **历史事件不重解释。** 没有预算溯源字段的旧事件不产生观测（缺失 = 政策未知，不是容量为零，也不是固定回退的确认）。
+6. **不新建第二状态源。** 观测只读自既有事件 JSONL；不新建数据库表、不复制预算状态、不改写事件。预测仍走同一 `resolveLivePromptInjectionProjection` / `buildLivePromptInjectionProjection`（§6.1），只是把观测重建的 `PromptBudgetResolution` 作为 `promptBudget` 传入。
+7. **不可信输入纪律。** 事件行按 `unknown` 解析，闭合集校验（capacitySource / capacityStatus / fallbackReason / hostKind），结构无效行计入 `parseFailures`  loud 跳过，绝不猜测量。
+8. **诚实降级。** 无观测 / 观测过期 / 宿主不匹配 / 字段不可信时，保留现有固定回退预算与原有原因码（如 `host_capacity_absent`），不得伪造上下文窗口。
+9. **治理边界不变。** 预算观测失败不得跳过或放宽审批、激活、撤销与回滚流程。
+10. **有界读取。** 每个候选日志目录（`RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS`：`.pd/logs` 与 `.state/logs`）各扫描最近 7 个日文件（`RUNTIME_BUDGET_OBSERVATION_MAX_FILES`），每个文件只读取末尾 4 MiB（`RUNTIME_BUDGET_OBSERVATION_MAX_FILE_BYTES`）。上限按目录生效（而非全局）是为了让后扫的目录不会饿死先扫的目录——最新观测可能落在任一侧，全局 7 个会按目录顺序丢掉另一侧的最新观测。因此单次读取的最坏总量是 14 个文件 / 56 MiB。被截断的文件计入 `truncatedFiles`，裁切处的半个 JSON 行不得解析。日志超限时降级为"该事实不在窗口内 / 固定回退"，绝不阻塞 Console 请求或读取无界数据。
+
+未确认路由（`capacityStatus: 'unconfirmed'`）下，逐宿主预测各自使用该宿主自己的观测（或各自的诚实回退），payload 中每个 perHost 条目携带自己的预算基准与观测时间；标题数字继续保持"未绑定具体宿主"的语义，不得冒充任一宿主的当前实际预算。同一条规则延伸到审批后告警的未确认分支：`per-host forecasts` 每一项必须自带该宿主的预算基准标签（观测 / 运行时自身回退 / 过期回退 / 无观测），不得只给数字。注意写入前容量预检（AC-07）会在未确认路由上直接拒绝审批，因此该告警分支只在"预检与投影之间路由判定翻转"的竞态窗口内可达；它的可达面是 grouped HTTP 路由与逐宿主 payload，容量门本身不得为测试而放宽。
+
 ---
 
 ## 7. 可观测性
@@ -435,6 +456,7 @@ Owner 审批时，Console/CLI 通常不能保证获得执行该激活的实时�
 | AC-11 | `PD_PROMPT_CAPACITY_V1` 原有测试与容量测量回归通过，并新增各容量档位的生产构建器测量。 |
 | AC-12 | OpenClaw、Codex、WorkBuddy 的实际接入结果分别有证据；不得以共享 helper 单测代替真实宿主验证。 |
 | AC-13 | CI、构建、类型检查、插件打包检查和受影响测试全部通过。 |
+| AC-14 | Console 与运行时预算数据链一致（PRI-1017）：通过生产注入事件发射 → Console 读取的跨层测试证明——可信 256K 观测下 grouped/activations 表面返回 4000 字符预算及来源、观测时间；审批后告警同样按观测预算与依据（`runtime_observation` / `runtime_observation_fallback` / `fixed_fallback`）输出；无观测/过期/宿主不匹配/不可信字段时诚实回退（含 `runtime_budget_observation_stale` 原因码）；(1250, 16000] 区间条目在 Console 层仍判 `model_dependent`，不因观测预算变大而误报为可注入；观测读取有界（tail window，每候选目录最多 7 个日文件、最坏总量 14 个文件 / 56 MiB），超限文件计入 `truncatedFiles` 且不解析裁切残行，并有双目录上限测试证明后扫目录不被饿死；未确认路由下逐宿主条目（grouped payload 与审批告警的 per-host forecasts）各自携带自己的预算基准。 |
 
 ## 11. 回滚与交付要求
 

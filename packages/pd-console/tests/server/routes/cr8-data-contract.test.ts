@@ -509,6 +509,51 @@ describe('CR8 Backend Data Contract Routes', () => {
       expect(typeof promptInjection!['truncated']).toBe('boolean');
     });
 
+    it('PRI-1017: the route accepts every roster host and carries the runtime budget observation it read', async () => {
+      // The focus page offers openclaw/codex/workbuddy, but this route used to
+      // reject workbuddy with 400 — the request never reached the model.
+      const logsDir = path.join(tmpDir, '.state', 'logs');
+      fs.mkdirSync(logsDir, { recursive: true });
+      fs.appendFileSync(
+        path.join(logsDir, 'events_2026-10-21.jsonl'),
+        JSON.stringify({
+          ts: new Date().toISOString(),
+          date: '2026-10-21',
+          type: 'runtime_v2_prompt_activations_injected',
+          category: 'injected',
+          sessionId: 'route-budget',
+          data: {
+            sessionId: 'route-budget',
+            workspaceDir: tmpDir,
+            activationIds: [],
+            budget: 4000,
+            hostKind: 'workbuddy',
+            budgetPolicyVersion: 'model_aware_v1',
+            budgetCapacitySource: 'host_effective_window',
+            budgetCapacityStatus: 'confirmed',
+            budgetContextWindowTokens: 256000,
+          },
+        }) + '\n',
+        'utf8',
+      );
+
+      const { status, body } = await fetchJson('/api/v1/approvals/grouped?host=workbuddy');
+      expect(status).toBe(200);
+      const data = getDataObject(body);
+      expect(data).toBeDefined();
+      const promptInjection = data!['promptInjection'];
+      expect(isRecord(promptInjection)).toBe(true);
+      expect(promptInjection!['hostKind']).toBe('workbuddy');
+      expect(promptInjection!['capacityStatus']).toBe('confirmed');
+      expect(promptInjection!['budget']).toBe(4000);
+      expect(promptInjection!['budgetCapacitySource']).toBe('host_effective_window');
+      expect(promptInjection!['budgetContextWindowTokens']).toBe(256000);
+      expect(typeof promptInjection!['budgetObservedAt']).toBe('string');
+
+      const unknown = await fetchJson('/api/v1/approvals/grouped?host=cursor');
+      expect(unknown.status).toBe(400);
+    });
+
     it('PRI-940: flags artifactUnavailable when the pinned artifact is missing from the store', async () => {
       // Real case (2026-10-06, live 2.2.0): an approval pinned to
       // `pi-art-scribe-…_prompt_3` whose row was superseded by `_4`. The store

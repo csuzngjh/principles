@@ -176,18 +176,30 @@ function makeCtx(overrides: {
   trigger?: string;
   sessionId?: string;
   runId?: string;
+  contextTokenBudget?: number;
+  contextWindowSource?: string;
+  modelProviderId?: string;
+  modelId?: string;
 } = {}) {
   const {
     workspaceDir = tempWorkspaceDir,
     trigger = 'user',
     sessionId = 'test-session-v2',
     runId,
+    contextTokenBudget,
+    contextWindowSource,
+    modelProviderId,
+    modelId,
   } = overrides;
   return {
     workspaceDir,
     trigger,
     sessionId,
     ...(runId !== undefined ? { runId } : {}),
+    ...(contextTokenBudget !== undefined ? { contextTokenBudget } : {}),
+    ...(contextWindowSource !== undefined ? { contextWindowSource } : {}),
+    ...(modelProviderId !== undefined ? { modelProviderId } : {}),
+    ...(modelId !== undefined ? { modelId } : {}),
     api: {
       logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
       runtime: {},
@@ -688,6 +700,64 @@ describe('Runtime V2 prompt activation observability events', () => {
     expect(payload.sessionId).toBe('test-session-v2');
     expect(payload.workspaceDir).toBe(tempWorkspaceDir);
     expect(payload.skippedWarnings).toEqual([]);
+  });
+
+  // PRI-1017: the plugin-local production route (OpenClaw) is the ONLY route
+  // whose events carry a trustworthy host window. The Console budget reader
+  // consumes exactly these fields, so their presence/shape is a cross-layer
+  // contract: 256K host facts must land as budget=4000 + confirmed provenance,
+  // and absent facts must land as the honest 2000 fallback with its reason.
+  it('records model-aware budget provenance from host model facts (256K → 4000)', async () => {
+    const artifactId = 'art-v2-obs-model-001';
+    const principleId = 'princ-v2-obs-model-001';
+    insertValidatedPrincipleArtifact({ artifactId, principleId });
+    await insertPromptActivation({ artifactId, principleId });
+
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const mockEventLog = (EventLogService.get as ReturnType<typeof vi.fn>)();
+    const spy = mockEventLog.recordRuntimeV2ActivationsInjected as ReturnType<typeof vi.fn>;
+    spy.mockClear();
+
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({
+      contextTokenBudget: 256_000,
+      contextWindowSource: 'model',
+      modelProviderId: 'anthropic',
+      modelId: 'claude-sonnet-4-5',
+    }));
+
+    expect(spy).toHaveBeenCalled();
+    const payload = spy.mock.calls[0][0];
+    expect(payload.budget).toBe(4000);
+    expect(payload.budgetCapacitySource).toBe('host_effective_window');
+    expect(payload.budgetCapacityStatus).toBe('confirmed');
+    expect(payload.budgetContextWindowTokens).toBe(256_000);
+    expect(payload.budgetPolicyVersion).toBe('model_aware_v1');
+    expect(payload.budgetFallbackReason).toBeUndefined();
+  });
+
+  it('records the honest fixed fallback + reason when the host supplies no capacity facts', async () => {
+    const artifactId = 'art-v2-obs-fallback-001';
+    const principleId = 'princ-v2-obs-fallback-001';
+    insertValidatedPrincipleArtifact({ artifactId, principleId });
+    await insertPromptActivation({ artifactId, principleId });
+
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const mockEventLog = (EventLogService.get as ReturnType<typeof vi.fn>)();
+    const spy = mockEventLog.recordRuntimeV2ActivationsInjected as ReturnType<typeof vi.fn>;
+    spy.mockClear();
+
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+
+    expect(spy).toHaveBeenCalled();
+    const payload = spy.mock.calls[0][0];
+    expect(payload.budget).toBe(RUNTIME_V2_PRINCIPLE_BUDGET);
+    expect(payload.budgetCapacitySource).toBe('legacy_fallback');
+    expect(payload.budgetCapacityStatus).toBe('unknown');
+    expect(payload.budgetContextWindowTokens).toBeUndefined();
+    expect(payload.budgetPolicyVersion).toBe('model_aware_v1');
+    expect(payload.budgetFallbackReason).toBe('host_capacity_absent');
   });
 
   it('emits skipReason when no validated activations exist', async () => {

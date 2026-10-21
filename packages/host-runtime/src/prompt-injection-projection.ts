@@ -548,21 +548,52 @@ export async function resolveLivePromptInjectionProjection(input: {
   targetHost?: PromptInjectionTargetHost;
   excludePrincipleIds?: ReadonlySet<string>;
   roundKey?: number;
+  /**
+   * SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §6.1 / PRI-1017: budget resolution
+   * the confirmed projection must run under. Console callers pass the
+   * resolution rebuilt from the workspace's most recent runtime budget
+   * OBSERVATION (`runtimeBudgetObservationToResolution`) so the forecast uses
+   * the same budget the last real injection used. Absent → the fixed-fallback
+   * default (the honest "no runtime capacity confirmed" policy).
+   */
+  promptBudget?: PromptBudgetResolution;
+  /**
+   * PRI-1017: per-host budget resolutions for the unconfirmed per-host
+   * forecasts. Each host's projection runs under THAT host's observation —
+   * never another host's window. Absent per host → that host's honest
+   * fixed-fallback default.
+   */
+  perHostPromptBudget?: Partial<Record<PromptInjectionTargetHost, PromptBudgetResolution>>;
 }): Promise<LivePromptInjectionProjectionResolution> {
-  const decision = resolvePromptInjectionRouteDecision(input);
+  const { promptBudget, perHostPromptBudget, ...projectionInput } = input;
+  const decision = resolvePromptInjectionRouteDecision(projectionInput);
   if (decision.status === 'confirmed') {
+    // PRI-1017: the route can be confirmed by WORKSPACE FACTS without any
+    // request-level targetHost (a single-host workspace). The caller then has
+    // no `promptBudget`, but it does have that host's own observation in the
+    // per-host map — use it. A flag-shared route with no hostKind stays on
+    // the honest fallback: no host was identified, so no host's window may
+    // be borrowed.
+    const decidedBudget = promptBudget
+      ?? (decision.hostKind !== undefined ? perHostPromptBudget?.[decision.hostKind] : undefined);
     const projection = await buildLivePromptInjectionProjection({
-      ...input,
+      ...projectionInput,
       targetHost: decision.hostKind,
+      ...(decidedBudget !== undefined ? { promptBudget: decidedBudget } : {}),
     });
     return { status: 'confirmed', decision, projection };
   }
   const hosts = decision.perHost?.map((entry) => entry.hostKind) ?? [...PROMPT_INJECTION_TARGET_HOSTS];
   const perHost: { hostKind: PromptInjectionTargetHost; projection: PromptInjectionProjection }[] = [];
   for (const hostKind of hosts) {
+    const hostBudget = perHostPromptBudget?.[hostKind];
     perHost.push({
       hostKind,
-      projection: await buildLivePromptInjectionProjection({ ...input, targetHost: hostKind }),
+      projection: await buildLivePromptInjectionProjection({
+        ...projectionInput,
+        targetHost: hostKind,
+        ...(hostBudget !== undefined ? { promptBudget: hostBudget } : {}),
+      }),
     });
   }
   return { status: 'unconfirmed', decision, perHost };

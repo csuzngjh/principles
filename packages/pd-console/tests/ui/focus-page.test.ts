@@ -998,3 +998,80 @@ describe("SPEC-PD-UIUX-001 R2: Focus page reading order contract", () => {
     expect(src).toContain("selectDecisionSurfaceItems(ownerDecisionItems, groupedAvailable)");
   });
 });
+
+// ── PRI-1017: budget observation → Focus surface contract ────────────────────
+// The console now forecasts under the runtime's most recent OBSERVATION. The
+// payload shape is covered by prompt-capacity-validators.test.ts; this suite
+// pins what the Owner is actually shown (no jsdom here, matching the existing
+// source-assertion style above).
+describe("FocusPage: PRI-1017 budget observation rendering contract", () => {
+  const focusSrc = fs.readFileSync(
+    nodePath.resolve(__dirname, "../../src/ui/pages/focus/FocusPage.tsx"), "utf-8");
+  const enFocus = loadFocusI18n("../../src/ui/i18n/en.json");
+  const zhFocus = loadFocusI18n("../../src/ui/i18n/zh-CN.json");
+  const allReasonCodes = [
+    "host_capacity_absent",
+    "host_capacity_source_untrusted",
+    "host_capacity_invalid_value",
+    "catalog_unavailable",
+    "model_identity_absent",
+    "catalog_no_exact_match",
+    "catalog_no_match_for_model_id",
+    "catalog_ambiguous_model_id",
+    "catalog_provider_absent",
+    "catalog_metadata_invalid",
+    "runtime_budget_observation_stale",
+  ];
+
+  it("never renders the numeric queue badge on an unconfirmed route (no first-host impersonation)", () => {
+    expect(focusSrc).toContain(
+      'promptInjection?.truncated === true && promptInjection.capacityStatus !== "unconfirmed"',
+    );
+  });
+
+  it("an observation-backed budget is labelled as a PAST observation, with source + window", () => {
+    expect(focusSrc).toContain('t("pages.focus.promptBudgetObservedNote"');
+    for (const focus of [enFocus, zhFocus]) {
+      const note = getOwnString(focus, "promptBudgetObservedNote") ?? "";
+      expect(note).toContain("{{source}}");
+      expect(note).toContain("{{window}}");
+      expect(note).toContain("{{observedAt}}");
+    }
+  });
+
+  it("a confirmed claim is only rendered with a window present (never '0 tokens')", () => {
+    expect(focusSrc).toContain(
+      'promptInjection.budgetCapacityStatus === "confirmed" && promptInjection.budgetContextWindowTokens !== undefined',
+    );
+    expect(focusSrc).not.toContain("promptInjection.budgetContextWindowTokens ?? 0");
+  });
+
+  it("per-host lists render each host's OWN budget, observation and reason", () => {
+    expect(focusSrc).toContain("budget: entry.budget ?? unconfirmed.budget");
+    expect(focusSrc).toContain('data-testid={`prompt-capacity-perhost-reason-${entry.hostKind}`}');
+    for (const focus of [enFocus, zhFocus]) {
+      const reasons = getOwnRecord(focus, "budgetFallbackReason");
+      expect(reasons).toBeDefined();
+      for (const code of allReasonCodes) {
+        const copy = reasons === undefined ? undefined : getOwnString(reasons, code);
+        expect(typeof copy, code).toBe("string");
+        expect((copy ?? "").length, code).toBeGreaterThan(2);
+      }
+    }
+  });
+
+  it("the fallback copy carries the bounded reason and, when available, the observation time", () => {
+    // A usable runtime observation that is itself a fallback is NOT "console
+    // not bound to the runtime model" — the console did use that observation.
+    expect(focusSrc).toContain('t("pages.focus.promptBudgetFallbackObservedNote"');
+    for (const focus of [enFocus, zhFocus]) {
+      expect(getOwnString(focus, "promptBudgetFallbackNote") ?? "").toContain("{{reason}}");
+      expect(getOwnString(focus, "promptBudgetFallbackNote") ?? "").not.toContain("{{observed}}");
+      expect(getOwnString(focus, "promptBudgetFallbackReasonSuffix") ?? "").toContain("{{code}}");
+      expect(getOwnString(focus, "promptBudgetFallbackObservedSuffix") ?? "").toContain("{{observedAt}}");
+      const observedNote = getOwnString(focus, "promptBudgetFallbackObservedNote") ?? "";
+      expect(observedNote).toContain("{{reason}}");
+      expect(observedNote).toContain("{{observedAt}}");
+    }
+  });
+});

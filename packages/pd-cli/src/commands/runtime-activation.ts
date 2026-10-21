@@ -28,7 +28,7 @@ import {
   detectPromptReplacementTarget,
 } from '@principles/core/runtime-v2';
 import type { LedgerIdentityLookupDeps, SqliteConnection } from '@principles/core/runtime-v2';
-import { checkPromptArtifactDeliverabilityById } from '@principles/host-runtime';
+import { checkPromptArtifactDeliverabilityById, RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS } from '@principles/host-runtime';
 
 /**
  * I3 upgrade (Owner review of PR #1856, P1): ledger-aware identity deps for
@@ -98,9 +98,11 @@ function unavailableShadowSummary(): PromotionEvidenceSnapshot['shadowSummary'] 
  * `.state/logs`. No production code ever created `.pd/logs`, so scanning only
  * that path made every shadow metric report "unavailable" while 2500+ real
  * evaluations sat unread in `.state/logs`. Readers scan both candidates until
- * the writer migrates (ERR-031: both readers derive from this same list).
+ * the writer migrates (ERR-031: every reader derives from the host-runtime
+ * constant `RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS` — console, CLI and the
+ * PRI-1017 budget-observation reader share ONE list, so they cannot drift).
  */
-export const RULECODE_EVENT_LOG_CANDIDATE_DIRS: readonly string[] = ['.pd/logs', '.state/logs'];
+export const RULECODE_EVENT_LOG_CANDIDATE_DIRS: readonly string[] = RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS;
 
 export interface CollectedRuleCodeEventEntries {
   entries: unknown[];

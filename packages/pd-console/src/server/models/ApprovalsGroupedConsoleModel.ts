@@ -10,6 +10,9 @@ import {
 import {
   checkPromptArtifactDeliverability,
   resolveLivePromptInjectionProjection,
+  RUNTIME_BUDGET_OBSERVATION_STALE_REASON,
+  runtimeBudgetObservationToResolution,
+  selectConsoleRuntimeBudgetFacts,
   type PromptInjectionTargetHost,
 } from '@principles/host-runtime';
 import { loadLedger } from '@principles/core/principle-tree-ledger';
@@ -445,16 +448,50 @@ export class ApprovalsGroupedConsoleModel {
    * only: a projection failure omits the field — the approve-time precheck
    * (B1) remains the fail-loud gate (rc-9), so this must never fail the
    * grouped read.
+   *
+   * PRI-1017: the forecast now runs under the workspace's most recent
+   * RUNTIME BUDGET OBSERVATION (the budget the last real injection used,
+   * read from the existing `runtime_v2_prompt_activations_injected` events)
+   * instead of the console's own parameterless fallback — SPEC
+   * §6.1 forbids the injection and the console forecasting under different
+   * budgets. The observation is a PAST fact: `budgetObservedAt` travels with
+   * the payload so the UI labels it as such. No observation, an observation
+   * for a different host, or an observation past the freshness bound ⇒ the
+   * honest fixed-fallback projection (with `runtime_budget_observation_stale`
+   * when a stale observation exists). No second budget state is created:
+   * the events remain the single runtime record and this is a read model.
    */
   private async readPromptInjectionBudgetStatus(targetHost?: PromptInjectionTargetHost): Promise<{ promptInjection?: PromptInjectionBudgetStatus }> {
     try {
+      const facts = selectConsoleRuntimeBudgetFacts({
+        workspaceDir: this.workspaceDir,
+        ...(targetHost !== undefined ? { targetHost } : {}),
+      });
+      const perHostBudget = new Map(
+        [...facts.perHost].map(([hostKind, observation]) => [hostKind, runtimeBudgetObservationToResolution(observation)] as const),
+      );
       const resolution = await resolveLivePromptInjectionProjection({
         workspaceDir: this.workspaceDir,
-        targetHost,
+        ...(targetHost !== undefined ? { targetHost } : {}),
+        ...(facts.selected !== undefined
+          ? { promptBudget: runtimeBudgetObservationToResolution(facts.selected) }
+          : {}),
+        ...(perHostBudget.size > 0
+          ? { perHostPromptBudget: Object.fromEntries(perHostBudget) }
+          : {}),
       });
       if (resolution.status === 'unconfirmed') {
         // The numbers still come from the flag-based view so the badge can
         // show SOMETHING, but capacityStatus marks them not authoritative.
+        // PRI-1017: each per-host forecast runs under THAT host's own
+        // observation (or its own fallback) — no host's window is smuggled
+        // into another host's number, and the headline reference is never
+        // presented as the current host's actual budget (the banner says so).
+        // The top-level numbers are a legacy REFERENCE view only (required
+        // fields for old consumers). Under `capacityStatus: 'unconfirmed'`
+        // they bind to no host, so the UI must never present them as the
+        // current host's actual budget — every host's own basis is in
+        // `perHost`, including its own fallback reason.
         const reference = resolution.perHost[0]?.projection;
         return {
           promptInjection: {
@@ -464,17 +501,37 @@ export class ApprovalsGroupedConsoleModel {
             capacityStatus: 'unconfirmed',
             unconfirmedReason: resolution.decision.unconfirmedReason ?? 'effective injection route cannot be confirmed',
             nextAction: resolution.decision.nextAction ?? 'pass an explicit target host (openclaw|codex|workbuddy)',
-            perHost: resolution.perHost.map((entry) => ({
-              hostKind: entry.hostKind,
-              route: entry.projection.route,
-              usedChars: entry.projection.usedChars,
-              truncated: entry.projection.truncated,
-            })),
-            ...(reference?.budgetFallbackReason !== undefined ? { budgetFallbackReason: reference.budgetFallbackReason } : {}),
+            perHost: resolution.perHost.map((entry) => {
+              const observation = facts.perHost.get(entry.hostKind);
+              const stale = observation === undefined ? facts.stalePerHost.get(entry.hostKind) : undefined;
+              return {
+                hostKind: entry.hostKind,
+                route: entry.projection.route,
+                usedChars: entry.projection.usedChars,
+                truncated: entry.projection.truncated,
+                budget: entry.projection.budget,
+                ...(entry.projection.budgetCapacitySource !== undefined ? { budgetCapacitySource: entry.projection.budgetCapacitySource } : {}),
+                ...(entry.projection.budgetCapacityStatus !== undefined ? { budgetCapacityStatus: entry.projection.budgetCapacityStatus } : {}),
+                ...(observation !== undefined ? { budgetObservedAt: observation.observedAt } : {}),
+                ...(stale !== undefined
+                  ? { budgetFallbackReason: RUNTIME_BUDGET_OBSERVATION_STALE_REASON }
+                  : entry.projection.budgetFallbackReason !== undefined
+                    ? { budgetFallbackReason: entry.projection.budgetFallbackReason }
+                    : {}),
+              };
+            }),
           },
         };
       }
       const {projection} = resolution;
+      // Bind the observation to the host the route actually resolved to — not
+      // to a request parameter that may be absent (single-host workspace) or
+      // to whichever host happens to appear first.
+      const decidedHost = resolution.decision.hostKind;
+      const usedObservation = decidedHost !== undefined ? facts.perHost.get(decidedHost) : undefined;
+      const staleObservation = decidedHost !== undefined && usedObservation === undefined
+        ? facts.stalePerHost.get(decidedHost)
+        : undefined;
       return {
         promptInjection: {
           budget: projection.budget,
@@ -492,14 +549,19 @@ export class ApprovalsGroupedConsoleModel {
           ...(projection.fullRenderChars !== undefined ? { fullRenderChars: projection.fullRenderChars } : {}),
           oversizedActivationIds: projection.oversizedActivationIds,
           oversizedDiagnosticTruncated: projection.oversizedDiagnosticTruncated,
-          // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §7: budget provenance — the
-          // console holds no runtime model facts, so this is the fixed-budget
-          // view by construction; the UI must label it as such rather than
-          // presenting it as a model-accurate forecast.
+          // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §7: budget provenance — when
+          // a runtime budget OBSERVATION backs this forecast (PRI-1017) the
+          // numbers are the ones the last real injection used; otherwise this
+          // is the fixed-budget view and the UI labels it as such.
           ...(projection.budgetCapacitySource !== undefined ? { budgetCapacitySource: projection.budgetCapacitySource } : {}),
           ...(projection.budgetCapacityStatus !== undefined ? { budgetCapacityStatus: projection.budgetCapacityStatus } : {}),
           ...(projection.budgetContextWindowTokens != null ? { budgetContextWindowTokens: projection.budgetContextWindowTokens } : {}),
           ...(projection.budgetFallbackReason !== undefined ? { budgetFallbackReason: projection.budgetFallbackReason } : {}),
+          // A stale observation is NOT a current fact: the honest reason code
+          // replaces the generic absence code so the UI can say why the
+          // runtime's last budget was not used.
+          ...(staleObservation !== undefined ? { budgetFallbackReason: RUNTIME_BUDGET_OBSERVATION_STALE_REASON } : {}),
+          ...(usedObservation !== undefined ? { budgetObservedAt: usedObservation.observedAt } : {}),
         },
       };
     } catch (err: unknown) {

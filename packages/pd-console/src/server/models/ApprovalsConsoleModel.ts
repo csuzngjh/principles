@@ -33,6 +33,8 @@ import {
   resolveWorkspaceHostToolSemantics,
   checkPromptArtifactDeliverabilityById,
   resolveLivePromptInjectionProjection,
+  runtimeBudgetObservationToResolution,
+  selectConsoleRuntimeBudgetFacts,
   type PromptArtifactDeliverability,
   type PromptInjectionTargetHost,
 } from '@principles/host-runtime';
@@ -48,6 +50,34 @@ function isMissingTableError(err: unknown): boolean {
 
 function isActivationSuccess(activation: ActivationDecision): boolean {
   return activation.decision === 'activated' || activation.decision === 'already_activated';
+}
+
+/**
+ * PRI-1017 (SPEC §6.5 rules 1/8): name the budget basis a forecast ACTUALLY
+ * ran under. Every case is spelled out — silence reads as "the console is not
+ * bound to the runtime", and on an unconfirmed route a per-host number
+ * without its own basis lets one host's observation look like another host's
+ * confirmation.
+ */
+function describeBudgetBasis(
+  hostKind: PromptInjectionTargetHost,
+  facts: Pick<ReturnType<typeof selectConsoleRuntimeBudgetFacts>, 'perHost' | 'stalePerHost'>,
+): string {
+  const used = facts.perHost.get(hostKind);
+  if (used !== undefined) {
+    return used.capacityStatus === 'confirmed'
+      ? `budget basis=runtime_observation (${hostKind}, observed at ${used.observedAt})`
+      // A usable observation can itself be the runtime's honest fallback (the
+      // host supplied no trusted capacity). The number is then the fixed
+      // budget, not a host window — say so.
+      : `budget basis=runtime_observation_fallback (${hostKind}, runtime reason=${used.fallbackReason ?? 'unknown'}, observed at ${used.observedAt})`;
+  }
+  const stale = facts.stalePerHost.get(hostKind);
+  if (stale !== undefined) {
+    return `budget basis=fixed_fallback (the runtime budget observation for ${hostKind} is stale — older than 24h and NOT used as the current budget)`;
+  }
+  // No observation at all: the number is the console's fixed fallback.
+  return `budget basis=fixed_fallback (no runtime budget observation for ${hostKind})`;
 }
 
 type UnsupportedChannelResult = { ok: false; error: 'unsupported_channel'; channel: string };
@@ -402,29 +432,56 @@ export class ApprovalsConsoleModel {
    */
   private async checkPromptInjectionBudget(activationId: string, targetHost?: PromptInjectionTargetHost): Promise<string | undefined> {
     let resolution;
+    let budgetFacts: ReturnType<typeof selectConsoleRuntimeBudgetFacts>;
+    // PRI-1017: the post-approval forecast runs under the workspace's most
+    // recent runtime budget OBSERVATION for the target host (per-host for
+    // unconfirmed routes), so the warning describes the budget the last real
+    // injection used — SPEC §6.1's same-budget rule. The read model degrades
+    // to "no observation" on unreadable logs; a projection failure below stays
+    // a traceable warning because the activation is already committed.
     try {
+      budgetFacts = selectConsoleRuntimeBudgetFacts({
+        workspaceDir: this.workspaceDir,
+        ...(targetHost !== undefined ? { targetHost } : {}),
+      });
+      const perHostBudget = new Map(
+        [...budgetFacts.perHost].map(([hostKind, observation]) => [hostKind, runtimeBudgetObservationToResolution(observation)] as const),
+      );
       resolution = await resolveLivePromptInjectionProjection({
         workspaceDir: this.workspaceDir,
-        targetHost,
+        ...(targetHost !== undefined ? { targetHost } : {}),
+        ...(budgetFacts.selected !== undefined
+          ? { promptBudget: runtimeBudgetObservationToResolution(budgetFacts.selected) }
+          : {}),
+        ...(perHostBudget.size > 0
+          ? { perHostPromptBudget: Object.fromEntries(perHostBudget) }
+          : {}),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      return `injection_budget_check_failed: could not recompute the prompt injection projection (${message}); the activation is committed but its injection status is unverified. nextAction=check .pd/state.db readability and re-run pd runtime activation list`;
+      return `injection_budget_check_failed: could not recompute the prompt injection projection from the runtime budget observation (${message}); the activation is committed but its injection status is unverified. nextAction=check .pd/state.db and event log readability and re-run pd runtime activation list`;
     }
     if (resolution.status === 'unconfirmed') {
-      return `injection_capacity_unconfirmed: the activation is committed but this workspace's effective injection route cannot be confirmed (${resolution.decision.unconfirmedReason ?? 'unknown reason'}); per-host forecasts: ${resolution.perHost.map((entry) => `${entry.hostKind}=${entry.projection.route} (${entry.projection.usedChars}c${entry.projection.truncated ? ', truncated' : ''})`).join('; ')}. nextAction=${resolution.decision.nextAction ?? 'pass an explicit target host (openclaw|codex|workbuddy)'}`;
+      // Each per-host forecast ran under ITS OWN budget basis (observation,
+      // runtime fallback, stale fallback, or no observation) — the headline
+      // numbers must never imply a single host's confirmation covers them all.
+      return `injection_capacity_unconfirmed: the activation is committed but this workspace's effective injection route cannot be confirmed (${resolution.decision.unconfirmedReason ?? 'unknown reason'}); per-host forecasts: ${resolution.perHost.map((entry) => `${entry.hostKind}=${entry.projection.route} (${entry.projection.usedChars}c/${entry.projection.budget}c${entry.projection.truncated ? ', truncated' : ''}) ${describeBudgetBasis(entry.hostKind, budgetFacts)}`).join('; ')}. nextAction=${resolution.decision.nextAction ?? 'pass an explicit target host (openclaw|codex|workbuddy)'}`;
     }
     const {projection} = resolution;
     if (projection.injectedActivationIds.includes(activationId)) {
       return undefined;
     }
+    // Never let a stale observation masquerade as the current budget in the
+    // warning: name the basis the forecast actually ran under.
+    const decidedHost = resolution.decision.hostKind;
+    const budgetBasisNote = decidedHost === undefined ? '' : ` ${describeBudgetBasis(decidedHost, budgetFacts)}`;
     const projectionDetail = projection.warnings.length > 0 ? ` projection warnings: ${projection.warnings.join(' | ')}` : '';
     // AC-02/R-A3: oversized is independent of `truncated` — say WHY first.
     if (projection.oversizedActivationIds.includes(activationId)) {
       const scopeNote = projection.route === 'shared_render'
         ? 'the full directive render of this single principle exceeds the cap'
         : 'its own list entry exceeds the cap';
-      return `injection_oversized: the activation is committed but ${scopeNote} (${projection.budget} chars, measured in UTF-16 units on the ${projection.route} route) — it can never enter the prompt as written, regardless of rotation or free capacity. nextAction=shorten the statement via the activations page "modify to injectable version" entry, or deactivate this activation`;
+      return `injection_oversized: the activation is committed but ${scopeNote} (${projection.budget} chars, measured in UTF-16 units on the ${projection.route} route) — it can never enter the prompt as written, regardless of rotation or free capacity.${budgetBasisNote} nextAction=shorten the statement via the activations page "modify to injectable version" entry, or deactivate this activation`;
     }
     if (!projection.truncated) {
       // Not included and the budget did NOT truncate — the projection skipped
@@ -439,7 +496,7 @@ export class ApprovalsConsoleModel {
     // empty reachability set falls through to the starvation branch below.
     if (projection.productionRotates && projection.eventuallyInjectedActivationIds.includes(activationId)) {
       const window = projection.eligibleCount;
-      return `injection_budget_queued: the activation is committed but sits outside the CURRENT prompt injection window (${projection.budget}c; ${projection.injectedActivationIds.length} of ${window} eligible activations injected this round; production selection policy fair_rotation_v1). Fair rotation advances the window by one position per recorded user turn, so this principle WILL enter agent behavior within at most ${window} consecutive user turns of a continuously advancing session — deactivating older principles is NOT required. nextAction=none; verify presence via the activations page or the prompt injection telemetry`;
+      return `injection_budget_queued: the activation is committed but sits outside the CURRENT prompt injection window (${projection.budget}c; ${projection.injectedActivationIds.length} of ${window} eligible activations injected this round; production selection policy fair_rotation_v1).${budgetBasisNote} Fair rotation advances the window by one position per recorded user turn, so this principle WILL enter agent behavior within at most ${window} consecutive user turns of a continuously advancing session — deactivating older principles is NOT required. nextAction=none; verify presence via the activations page or the prompt injection telemetry`;
     }
     // PR-1894: report the PRODUCTION policy, not the policy this forecast
     // happened to run. The console holds no session round key, so its own
@@ -454,7 +511,7 @@ export class ApprovalsConsoleModel {
     const unreachableNote = projection.productionRotates
       ? ' (this forecast ran without a round key, so the window shown is the legacy FIFO prefix; the entry is unreachable because it exceeds the budget on its own, not because of its position)'
       : '';
-    return `injection_budget_excluded: the activation is committed but the prompt injection budget (${projection.budget}c) is full and this activation is not reachable under the ${policyNote}; ${projection.injectedActivationIds.length}/${projection.eligibleCount} eligible injected${unreachableNote} — this principle will NOT enter agent behavior until capacity frees up. nextAction=review the activations page and deactivate superseded principles`;
+    return `injection_budget_excluded: the activation is committed but the prompt injection budget (${projection.budget}c) is full and this activation is not reachable under the ${policyNote}; ${projection.injectedActivationIds.length}/${projection.eligibleCount} eligible injected${unreachableNote}.${budgetBasisNote} This principle will NOT enter agent behavior until capacity frees up. nextAction=review the activations page and deactivate superseded principles`;
   }
 
   /**
