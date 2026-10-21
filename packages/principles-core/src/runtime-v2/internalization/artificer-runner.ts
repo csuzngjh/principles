@@ -39,7 +39,7 @@ import { validateBehaviorExamplePack } from './behavior-example-pack.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
 import { computeFeatureFlagsFromConfig, isFeatureEnabled } from '../config/pd-config-feature-flags.js';
-import { hydratePITaskRecord, type RepairPayload, type LastValidatorErrors, parseLastValidatorErrors, isFreshForNextAttempt } from './pitask-metadata.js';
+import { hydratePITaskRecord, type RepairPayload, type LastValidatorErrors, parseLastValidatorErrors, parseSeedSourcePainId, isFreshForNextAttempt } from './pitask-metadata.js';
 import { extractIntentContract } from './intent-contract.js';
 import { extractExecutionConditions } from './intent-contract.js';
 import { assessIntentBasis, collectUpstreamNormalisedText, type ArtificerTrustedFactsPort } from './artificer-intent-preflight.js';
@@ -958,7 +958,25 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
       const upstreamMaterial = await collectUpstreamNormalisedText(
         (depId) => this.stateManager.getTask(depId),
         (sourceTaskId) => this.artifactStore.listBySourceTaskId(sourceTaskId),
-        context.scribeDependencyTaskIds,
+        {
+          scribeDependencyTaskIds: context.scribeDependencyTaskIds,
+          formationSource: {
+            scribeContentJson: context.scribeArtifact ?? '',
+            artifactStore: this.artifactStore,
+            lookupTask: async (formationTaskId) => {
+              const task = await this.stateManager.getTask(formationTaskId);
+              if (!task) return null;
+              const hydrated = hydratePITaskRecord(task);
+              return {
+                taskKind: task.taskKind,
+                status: task.status,
+                dependencyTaskIds: hydrated?.dependencyTaskIds ?? [],
+                canonicalSourcePainId: parseSeedSourcePainId(task.diagnosticJson),
+              };
+            },
+            taskId,
+          },
+        },
       );
       const assessment = assessIntentBasis({
         scribeArtifact: { artifactId: context.sourceScribeArtifactId, contentJson: context.scribeArtifact },

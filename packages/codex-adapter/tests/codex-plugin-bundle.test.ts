@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -29,6 +29,21 @@ function tempDir(prefix: string): string {
   tempDirs.push(dir);
   return dir;
 }
+
+beforeEach(() => {
+  const home = tempDir('pd-plugin-codex-home-');
+  const codexHome = path.join(home, '.codex');
+  fs.mkdirSync(codexHome, { recursive: true });
+  // All child processes inherit this isolated host home, so setup/status/
+  // disable tests can only resolve workspaces beneath their own fixture.
+  vi.stubEnv('CODEX_HOME', codexHome);
+  vi.stubEnv('HOME', home);
+  vi.stubEnv('USERPROFILE', home);
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 afterAll(() => {
   // Large seeded node_modules dirs are slow to delete on Windows; the
@@ -455,7 +470,11 @@ describe('first-run $pd-setup (real user flow)', () => {
     // $pd-setup must own first-run creation (derive marketplace from the
     // installed cache path) or every fresh install dead-ends.
     const fakeHome = tempDir('pd-firstrun-home-');
-    const cachePlugin = path.join(fakeHome, '.codex', 'plugins', 'cache', 'principles', 'principles-disciple', '0.1.0');
+    const pluginManifest: unknown = JSON.parse(fs.readFileSync(path.join(pluginDir, '.codex-plugin', 'plugin.json'), 'utf8'));
+    if (!isRecord(pluginManifest) || typeof pluginManifest.version !== 'string') {
+      throw new Error('Codex plugin manifest is missing its string version');
+    }
+    const cachePlugin = path.join(fakeHome, '.codex', 'plugins', 'cache', 'principles', 'principles-disciple', pluginManifest.version);
     fs.mkdirSync(cachePlugin, { recursive: true });
     fs.cpSync(pluginDir, cachePlugin, { recursive: true });
     const workspace = tempDir('pd-firstrun-ws-');
@@ -469,16 +488,30 @@ describe('first-run $pd-setup (real user flow)', () => {
       env: { ...process.env, CODEX_HOME: path.join(fakeHome, '.codex'), HOME: fakeHome, USERPROFILE: fakeHome, HOMEDRIVE: path.parse(fakeHome).root.slice(0, 2), HOMEPATH: fakeHome.slice(2).split(path.sep).join('/'), PLUGIN_DATA: undefined },
     });
     expect(result.status, result.stderr.slice(0, 400)).toBe(0);
-    const report = JSON.parse(result.stdout) as { pluginData: string; runtime: Record<string, string>; runtimeInstalled: string };
+    const report: unknown = JSON.parse(result.stdout);
+    if (!isRecord(report)) {
+      throw new Error('setup report is malformed');
+    }
+    const { pluginRoot, pluginData, runtime } = report;
+    if (typeof pluginRoot !== 'string' || typeof pluginData !== 'string' || !isRecord(runtime)) {
+      throw new Error('setup report is missing its plugin root, data directory, or runtime versions');
+    }
+    if (typeof runtime.codexAdapter !== 'string' || typeof runtime.hostRuntime !== 'string' || typeof runtime.core !== 'string') {
+      throw new Error('setup report contains malformed runtime versions');
+    }
+    expect(pluginRoot).toBe(cachePlugin);
     // The data dir was derived + created under the fake home, not the real one.
-    expect(report.pluginData.startsWith(fakeHome)).toBe(true);
-    expect(fs.existsSync(path.join(report.pluginData, 'runtime', 'node_modules', '@principles', 'codex-adapter', 'dist', 'pd-hook.js'))).toBe(true);
+    expect(pluginData.startsWith(fakeHome)).toBe(true);
+    expect(fs.existsSync(path.join(pluginData, 'runtime', 'node_modules', '@principles', 'codex-adapter', 'dist', 'pd-hook.js'))).toBe(true);
     // PRI-810: assert against the pin SOURCE OF TRUTH, not a hardcoded copy —
     // the previous hardcoded '0.1.0' expectations locked the drift in place.
-    const pins = JSON.parse(fs.readFileSync(path.join(pluginDir, 'runtime-version.json'), 'utf8')) as { codexAdapter: string; hostRuntime: string; core: string };
-    expect(report.runtime.codexAdapter).toBe(pins.codexAdapter);
-    expect(report.runtime.hostRuntime).toBe(pins.hostRuntime);
-    expect(report.runtime.core).toBe(pins.core);
+    const pins: unknown = JSON.parse(fs.readFileSync(path.join(pluginDir, 'runtime-version.json'), 'utf8'));
+    if (!isRecord(pins) || typeof pins.codexAdapter !== 'string' || typeof pins.hostRuntime !== 'string' || typeof pins.core !== 'string') {
+      throw new Error('runtime pin file is missing a package version');
+    }
+    expect(runtime.codexAdapter).toBe(pins.codexAdapter);
+    expect(runtime.hostRuntime).toBe(pins.hostRuntime);
+    expect(runtime.core).toBe(pins.core);
 
     // PRI-810 regression guard: the freshly installed runtime must satisfy the
     // Owner emergency-control capability contract (global pause / safety

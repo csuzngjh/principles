@@ -50,6 +50,12 @@ import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type { PIArtifactStore } from './pi-artifact.js';
 import type { PITaskRecord } from './peer-runner-contracts.js';
 import type { HumanReviewContext } from './pitask-metadata.js';
+import { parseSeedSourcePainId } from './pitask-metadata.js';
+import {
+  resolveFormationContext,
+  type FormationArtifactReader,
+  type FormationTaskView,
+} from './formation-context.js';
 import {
   createPITaskDiagnosticJson,
   hydratePITaskRecord,
@@ -146,7 +152,7 @@ export interface ArtificerIntentPreflightParams {
    * Test seam for store-fault injection: overrides the artifact listing used
    * to resolve the scribe artifact. Production never passes it.
    */
-  readonly artifactStore?: Pick<PIArtifactStore, 'listBySourceTaskId'>;
+  readonly artifactStore?: Pick<PIArtifactStore, 'listBySourceTaskId' | 'getArtifactById'>;
 }
 
 /**
@@ -282,15 +288,55 @@ async function resolveScribeArtifact(
  */
 async function resolveUpstreamMaterial(
   params: ArtificerIntentPreflightParams,
-  scribeDependencyTaskIds: readonly string[],
+  scribeArtifact: Pick<ResolvedScribeArtifact, 'contentJson' | 'scribeDependencyTaskIds'>,
+  taskId: string,
 ): Promise<{ normalisedText: string } | null> {
   const { stateManager, artifactStore } = params;
-  const store: Pick<PIArtifactStore, 'listBySourceTaskId'> = artifactStore ?? stateManager.piArtifactStore;
+  const store: Pick<PIArtifactStore, 'listBySourceTaskId' | 'getArtifactById'> = artifactStore ?? stateManager.piArtifactStore;
   return collectUpstreamNormalisedText(
     async (depId: string) => stateManager.getTask(depId),
     (sourceTaskId: string) => store.listBySourceTaskId(sourceTaskId),
-    scribeDependencyTaskIds,
+    {
+      scribeDependencyTaskIds: scribeArtifact.scribeDependencyTaskIds,
+      formationSource: {
+        scribeContentJson: scribeArtifact.contentJson,
+        artifactStore: store,
+        lookupTask: async (formationTaskId) => {
+          const task = await stateManager.getTask(formationTaskId);
+          if (!task) return null;
+          const hydrated = hydratePITaskRecord(task);
+          return {
+            taskKind: task.taskKind,
+            status: task.status,
+            dependencyTaskIds: hydrated?.dependencyTaskIds ?? [],
+            canonicalSourcePainId: parseSeedSourcePainId(task.diagnosticJson),
+          };
+        },
+        taskId,
+      },
+    },
   );
+}
+
+interface ResolvedScribeArtifact {
+  readonly contentJson: string;
+  readonly scribeDependencyTaskIds: readonly string[];
+}
+
+interface UpstreamMaterialOptions {
+  readonly scribeDependencyTaskIds: readonly string[];
+  readonly formationSource?: IntentFormationSourceResolver;
+}
+
+interface IntentFormationSourceTaskView extends FormationTaskView {
+  readonly canonicalSourcePainId: string | null;
+}
+
+interface IntentFormationSourceResolver {
+  readonly scribeContentJson: string;
+  readonly artifactStore: FormationArtifactReader;
+  readonly lookupTask: (taskId: string) => Promise<IntentFormationSourceTaskView | null>;
+  readonly taskId: string;
 }
 
 /**
@@ -301,8 +347,9 @@ async function resolveUpstreamMaterial(
 export async function collectUpstreamNormalisedText(
   getTask: (taskId: string) => Promise<{ taskKind: string; status: string } | null>,
   listBySourceTaskId: (sourceTaskId: string) => Promise<readonly { contentJson: string }[]>,
-  scribeDependencyTaskIds: readonly string[],
+  options: UpstreamMaterialOptions,
 ): Promise<{ normalisedText: string } | null> {
+  const { scribeDependencyTaskIds, formationSource } = options;
   for (const depId of scribeDependencyTaskIds) {
     const depTask = await getTask(depId);
     if (!depTask || depTask.taskKind !== 'philosopher' || depTask.status !== 'succeeded') continue;
@@ -318,10 +365,71 @@ export async function collectUpstreamNormalisedText(
     for (const key of ['thesis', 'principleCandidate', 'risks', 'analysis']) {
       if (Object.hasOwn(parsed, key)) collectAllStrings(Reflect.get(parsed, key), texts, 0);
     }
+
+    // PRI-1018: connect the original Owner-attributed diagnosis evidence that
+    // the Scribe received through the existing formation resolver. Both ids
+    // must agree with the persisted Scribe↔Philosopher link; proposals and
+    // diagnosis recommendations remain candidate/model material, never Owner
+    // intent anchors.
+    if (formationSource !== undefined) {
+      const philosopherDreamerArtifactId = readOwnNonEmptyString(parsed, 'sourceDreamerArtifactId');
+      const scribeParsed = safeParseJson(formationSource.scribeContentJson);
+      const scribeTrace = isRecord(scribeParsed) && Object.hasOwn(scribeParsed, 'sourceTrace')
+        ? Reflect.get(scribeParsed, 'sourceTrace')
+        : null;
+      const scribeDreamerArtifactId = readOwnNonEmptyString(scribeTrace, 'dreamerArtifactId');
+      if (philosopherDreamerArtifactId !== null
+        && scribeDreamerArtifactId !== null
+        && philosopherDreamerArtifactId !== scribeDreamerArtifactId) {
+        return null;
+      }
+      if (philosopherDreamerArtifactId !== null && philosopherDreamerArtifactId === scribeDreamerArtifactId) {
+        const canonicalPainByTaskId = new Map<string, string | null>();
+        const formation = await resolveFormationContext({
+          sourceDreamerArtifactId: philosopherDreamerArtifactId,
+          artifactStore: formationSource.artifactStore,
+          lookupTask: async (formationTaskId) => {
+            const task = await formationSource.lookupTask(formationTaskId);
+            if (task !== null) canonicalPainByTaskId.set(formationTaskId, task.canonicalSourcePainId);
+            return task;
+          },
+          emitEvent: () => undefined,
+          taskId: formationSource.taskId,
+        });
+        const diagnosis = formation?.sourceDiagnosis;
+        const dreamerPainId = formation === undefined
+          ? null
+          : canonicalPainByTaskId.get(formation.provenance.sourceDreamerTaskId) ?? null;
+        const diagnosisPainId = diagnosis === undefined
+          ? null
+          : canonicalPainByTaskId.get(diagnosis.taskId) ?? null;
+        if (formation !== undefined && dreamerPainId !== null && formation.provenance.sourcePainId !== null
+          && formation.provenance.sourcePainId !== dreamerPainId) return null;
+        if (dreamerPainId !== null && diagnosisPainId !== null && diagnosisPainId !== dreamerPainId) return null;
+        const painLineageMatches = formation !== undefined
+          && dreamerPainId !== null
+          && formation.provenance.sourcePainId === dreamerPainId
+          && (diagnosisPainId === null || diagnosisPainId === dreamerPainId);
+        if (diagnosis !== undefined && painLineageMatches) {
+          for (const evidence of diagnosis.evidence) texts.push(evidence.note);
+        }
+      }
+    }
+
     const normalisedText = normaliseForAnchor(texts.join(' '));
     return normalisedText.length > 0 ? { normalisedText } : null;
   }
   return null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readOwnNonEmptyString(value: unknown, key: string): string | null {
+  if (!isRecord(value) || !Object.hasOwn(value, key)) return null;
+  const field = Reflect.get(value, key);
+  return typeof field === 'string' && field.trim() !== '' ? field : null;
 }
 
 function safeParseJson(contentJson: string): unknown {
@@ -619,7 +727,7 @@ export async function preflightArtificerIntentBasis(
   let upstreamMaterial: { normalisedText: string } | null = null;
   if (scribeArtifact !== null) {
     try {
-      upstreamMaterial = await resolveUpstreamMaterial(params, scribeArtifact.scribeDependencyTaskIds);
+      upstreamMaterial = await resolveUpstreamMaterial(params, scribeArtifact, taskId);
     } catch (error: unknown) {
       const faultDetail = `upstream artifact read failed: ${error instanceof Error ? error.message : String(error)}`;
       return applySourceFault(params, faultDetail);

@@ -206,6 +206,118 @@ async function seedArtificerTask(
   }
 }
 
+const DREAMER_TASK_ID = 'dreamer-owner-source-001';
+const DREAMER_ARTIFACT_ID = 'pi-art-dreamer-owner-source-001';
+const DIAGNOSIS_TASK_ID = 'diag-owner-source-001';
+const DIAGNOSIS_ARTIFACT_ID = 'pi-art-diag-owner-source-001';
+const OWNER_SOURCE_QUOTE = '非简单行为变更先调查现状，交付SPEC和技术方案，明确调用链、输入输出、成本、失败处理、验收及回滚，经Owner确认后再编码';
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function safeJsonRecord(contentJson: string): Record<string, unknown> {
+  const parsed: unknown = JSON.parse(contentJson);
+  if (!isRecord(parsed)) {
+    throw new Error('fixture artifact must be a JSON object');
+  }
+  return parsed;
+}
+
+async function attachFormationOwnerEvidence(
+  workspaceDir: string,
+  options: {
+    evidenceNote?: string;
+    recommendation?: string;
+    dreamerSeedPainId?: string;
+    dreamerOutputPainId?: string;
+    scribeDreamerArtifactId?: string;
+  } = {},
+): Promise<void> {
+  const handle = await createRuntimeStateHandle({ workspaceDir, readonly: false });
+  try {
+    const { stateManager } = handle;
+    const now = new Date().toISOString();
+    const sourcePainId = options.dreamerSeedPainId ?? 'pain_001';
+    await stateManager.createTask({
+      taskId: DIAGNOSIS_TASK_ID,
+      taskKind: 'diag_router',
+      status: 'succeeded',
+      attemptCount: 1,
+      maxAttempts: 3,
+      resultRef: 'diag://owner-source',
+      diagnosticJson: JSON.stringify({ sourcePainId, pi_metadata: {
+        dependencyTaskIds: [], channel: 'code_tool_hook', timeoutMs: 300_000,
+        inputArtifactRefs: [], outputArtifactRefs: [],
+      }}),
+    });
+    await stateManager.piArtifactStore.upsertArtifact({
+      artifactId: DIAGNOSIS_ARTIFACT_ID,
+      artifactKind: 'principle',
+      sourceTaskId: DIAGNOSIS_TASK_ID,
+      lineageArtifactIds: [],
+      validationStatus: 'validated',
+      contentJson: JSON.stringify({
+        summary: 'Owner requirement recorded in diagnosis evidence.',
+        rootCause: 'The task was implemented without the requested investigation and design approval.',
+        violatedPrinciples: [],
+        evidence: [{ sourceRef: 'trajectory://owner-source/turn-4', note: options.evidenceNote ?? OWNER_SOURCE_QUOTE }],
+        recommendations: [{ kind: 'principle', description: options.recommendation ?? 'Read the contract before writing.' }],
+      }),
+      createdAt: now,
+      updatedAt: now,
+    });
+    await stateManager.createTask({
+      taskId: DREAMER_TASK_ID,
+      taskKind: 'dreamer',
+      status: 'succeeded',
+      attemptCount: 1,
+      maxAttempts: 3,
+      resultRef: 'dreamer://owner-source',
+      diagnosticJson: JSON.stringify({ sourcePainId, pi_metadata: {
+        dependencyTaskIds: [DIAGNOSIS_TASK_ID], channel: 'code_tool_hook', timeoutMs: 300_000,
+        inputArtifactRefs: [], outputArtifactRefs: [],
+      }}),
+    });
+    await stateManager.piArtifactStore.upsertArtifact({
+      artifactId: DREAMER_ARTIFACT_ID,
+      artifactKind: 'principle',
+      sourceTaskId: DREAMER_TASK_ID,
+      lineageArtifactIds: [DIAGNOSIS_ARTIFACT_ID],
+      validationStatus: 'validated',
+      contentJson: JSON.stringify({
+        sourcePainId: options.dreamerOutputPainId ?? sourcePainId,
+        candidates: [],
+        contextRefs: [],
+      }),
+      createdAt: now,
+      updatedAt: now,
+    });
+    const [philosopherArtifact] = await stateManager.piArtifactStore.listBySourceTaskId(PHILOSOPHER_TASK_ID);
+    const [scribeArtifact] = await stateManager.piArtifactStore.listBySourceTaskId(SCRIBE_TASK_ID);
+    if (!philosopherArtifact || !scribeArtifact) throw new Error('formation source fixture artifact missing');
+    const philosopherContent = safeJsonRecord(philosopherArtifact.contentJson);
+    philosopherContent.sourceDreamerArtifactId = DREAMER_ARTIFACT_ID;
+    const scribeContent = safeJsonRecord(scribeArtifact.contentJson);
+    scribeContent.sourceTrace = {
+      philosopherArtifactId: philosopherArtifact.artifactId,
+      dreamerArtifactId: options.scribeDreamerArtifactId ?? DREAMER_ARTIFACT_ID,
+    };
+    await stateManager.piArtifactStore.upsertArtifact({
+      ...philosopherArtifact,
+      contentJson: JSON.stringify(philosopherContent),
+      updatedAt: now,
+    });
+    await stateManager.piArtifactStore.upsertArtifact({
+      ...scribeArtifact,
+      contentJson: JSON.stringify(scribeContent),
+      updatedAt: now,
+    });
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
+}
+
 let emitted: TelemetryEvent[] = [];
 function collectingEmitter(): StoreEventEmitter {
   const emitter = {
@@ -240,7 +352,10 @@ async function runPreflight(workspaceDir: string, overrides: RunOverrides = {}) 
       eventEmitter: collectingEmitter(),
       ...(overrides.trustedFacts !== undefined ? { trustedFacts: overrides.trustedFacts } : {}),
       ...(overrides.artifactStoreFault !== undefined
-        ? { artifactStore: { listBySourceTaskId: async () => { throw new Error(overrides.artifactStoreFault?.message ?? 'artifact store fault'); } } }
+        ? { artifactStore: {
+            listBySourceTaskId: async () => { throw new Error(overrides.artifactStoreFault?.message ?? 'artifact store fault'); },
+            getArtifactById: async () => { throw new Error(overrides.artifactStoreFault?.message ?? 'artifact store fault'); },
+          } }
         : {}),
     });
   } finally {
@@ -483,7 +598,7 @@ describe('preflightArtificerIntentBasis — stop points (Q01/Q20)', () => {
         risks: [],
         generatedAt: '2026-10-17',
       }) }],
-      [PHILOSOPHER_TASK_ID],
+      { scribeDependencyTaskIds: [PHILOSOPHER_TASK_ID] },
     );
     expect(material?.normalisedText).toContain('readthetargetbeforewritingit');
     expect(material?.normalisedText).not.toContain('dreamer');
@@ -512,6 +627,55 @@ describe('preflightArtificerIntentBasis — stop points (Q01/Q20)', () => {
     if (verdict.decision !== 'blocked') throw new Error('unreachable');
     expect(verdict.logicalResult).toBe('intent_unverified');
     expect(verdict.reasonCode).toBe('textual_basis_unanchored');
+  });
+
+  it('anchors a required fact to Owner-attributed sourceDiagnosis evidence through the real formation lineage', async () => {
+    const workspaceDir = makeWorkspace();
+    await seedArtificerTask(workspaceDir, conditionsScribeContent([
+      { factKind: 'design_approval', required: true, textualBasis: OWNER_SOURCE_QUOTE },
+    ]));
+    await attachFormationOwnerEvidence(workspaceDir);
+
+    const verdict = await runPreflight(workspaceDir);
+    expect(verdict.decision).toBe('blocked');
+    if (verdict.decision !== 'blocked') throw new Error('unreachable');
+    // The old collector stopped at textual_basis_unanchored. The repair only
+    // establishes the Owner quote's anchor; without a trusted fact provider the
+    // contract still stops safely before generation.
+    expect(verdict.logicalResult).toBe('unsupported');
+    expect(verdict.reasonCode).toBe('trusted_fact_provider_absent');
+  });
+
+  it('does not treat diagnosis recommendations as Owner-source anchors', async () => {
+    const workspaceDir = makeWorkspace();
+    await seedArtificerTask(workspaceDir, conditionsScribeContent([
+      { factKind: 'design_approval', required: true, textualBasis: OWNER_SOURCE_QUOTE },
+    ]));
+    await attachFormationOwnerEvidence(workspaceDir, {
+      evidenceNote: 'The agent edited the file without first reading it.',
+      recommendation: OWNER_SOURCE_QUOTE,
+    });
+
+    const verdict = await runPreflight(workspaceDir);
+    expect(verdict.decision).toBe('blocked');
+    if (verdict.decision !== 'blocked') throw new Error('unreachable');
+    expect(verdict.reasonCode).toBe('textual_basis_unanchored');
+  });
+
+  it.each([
+    ['Scribe dreamer trace points at a different artifact', { scribeDreamerArtifactId: 'pi-art-dreamer-other' }],
+    ['Dreamer artifact pain disagrees with its canonical seed', { dreamerSeedPainId: 'pain_other', dreamerOutputPainId: 'pain_001' }],
+  ])('does not borrow Owner text across %s', async (_label, sourceOverrides) => {
+    const workspaceDir = makeWorkspace();
+    await seedArtificerTask(workspaceDir, conditionsScribeContent([
+      { factKind: 'design_approval', required: true, textualBasis: OWNER_SOURCE_QUOTE },
+    ]), { upstreamAnalysis: OWNER_SOURCE_QUOTE });
+    await attachFormationOwnerEvidence(workspaceDir, sourceOverrides);
+
+    const verdict = await runPreflight(workspaceDir);
+    expect(verdict.decision).toBe('blocked');
+    if (verdict.decision !== 'blocked') throw new Error('unreachable');
+    expect(verdict.reasonCode).toBe('upstream_material_unavailable');
   });
 });
 
