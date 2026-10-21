@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-10-20T23:49:01.976Z",
+  "generatedAt": "2026-10-21T00:27:35.227Z",
   "spec": "SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001",
   "unit": "utf16_code_units (String.prototype.length — NOT model tokens)",
   "policy": {
     "version": "model_aware_v1",
-    "formula": "budgetChars = min(4000, max(500, floor(2000 * W / 128000)))",
+    "formula": "budgetChars = min(16000, max(1250, floor(2000 * W / 128000)))",
     "minBudgetChars": 1250,
     "maxBudgetChars": 16000,
     "fallbackBudgetChars": 2000,

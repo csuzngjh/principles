@@ -26,8 +26,10 @@ import path from 'node:path';
 import * as yaml from 'js-yaml';
 import {
   RUNTIME_V2_PRINCIPLE_BUDGET,
+  PROMPT_BUDGET_BASE_CHARS,
   PROMPT_BUDGET_MAX_CHARS,
   PROMPT_BUDGET_MIN_CHARS,
+  PROMPT_BUDGET_REFERENCE_CONTEXT_WINDOW_TOKENS,
   SqliteConnection,
   SqliteActivationStateStore,
   getDefaultPdConfig,
@@ -451,7 +453,10 @@ async function main() {
     unit: 'utf16_code_units (String.prototype.length — NOT model tokens)',
     policy: {
       version: 'model_aware_v1',
-      formula: 'budgetChars = min(4000, max(500, floor(2000 * W / 128000)))',
+      // Interpolated from the live constants so the narrative can never
+      // drift from the policy this script actually runs (v0.2 fix: the
+      // hand-written string still said 500/4000 after the re-bound).
+      formula: `budgetChars = min(${PROMPT_BUDGET_MAX_CHARS}, max(${PROMPT_BUDGET_MIN_CHARS}, floor(${PROMPT_BUDGET_BASE_CHARS} * W / ${PROMPT_BUDGET_REFERENCE_CONTEXT_WINDOW_TOKENS})))`,
       minBudgetChars: PROMPT_BUDGET_MIN_CHARS,
       maxBudgetChars: PROMPT_BUDGET_MAX_CHARS,
       fallbackBudgetChars: RUNTIME_V2_PRINCIPLE_BUDGET,
