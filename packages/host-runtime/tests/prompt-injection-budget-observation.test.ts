@@ -5,6 +5,7 @@ import path from 'node:path';
 import { PROMPT_BUDGET_POLICY_VERSION } from '@principles/core/runtime-v2';
 import {
   RUNTIME_BUDGET_OBSERVATION_MAX_AGE_MS,
+  RUNTIME_BUDGET_OBSERVATION_MAX_FILE_BYTES,
   RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS,
   readRuntimePromptBudgetObservations,
   runtimeBudgetObservationToResolution,
@@ -371,6 +372,66 @@ describe('PRI-1017: readRuntimePromptBudgetObservations', () => {
     const report = readRuntimePromptBudgetObservations({ workspaceDir: dir });
     expect(report.observations).toEqual([]);
     expect(report.filesRead).toEqual([]);
+  });
+
+  it('a log larger than the read window is tail-read: the newest observation survives, truncation is counted, the cut line is never parsed', () => {
+    const dir = tempWorkspace();
+    const logsDir = path.join(dir, '.state', 'logs');
+    fs.mkdirSync(logsDir, { recursive: true });
+    const file = path.join(logsDir, 'events_2026-10-21.jsonl');
+    // Unrelated events dominate the file, so an unbounded reader would
+    // materialise the whole thing before finding the one fact it needs.
+    const filler = JSON.stringify({ ts: '2026-10-21T03:00:00.000Z', type: 'tool_call', data: { payload: 'x'.repeat(64 * 1024) } }) + '\n';
+    const fillerCount = Math.ceil(RUNTIME_BUDGET_OBSERVATION_MAX_FILE_BYTES / filler.length) + 5;
+    fs.writeFileSync(file, filler.repeat(fillerCount), 'utf8');
+    fs.appendFileSync(file, JSON.stringify(injectedEvent({
+      ts: '2026-10-21T04:00:00.000Z',
+      data: {
+        ...baseData(),
+        workspaceDir: dir,
+        hostKind: 'openclaw',
+        budget: 4000,
+        budgetCapacitySource: 'host_effective_window',
+        budgetCapacityStatus: 'confirmed',
+        budgetContextWindowTokens: 256_000,
+        budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION,
+      },
+    })) + '\n', 'utf8');
+
+    const report = readRuntimePromptBudgetObservations({ workspaceDir: dir });
+    expect(report.truncatedFiles).toBe(1);
+    expect(report.parseFailures).toBe(0);
+    expect(report.lines).toBeLessThan(fillerCount);
+    expect(report.observations).toHaveLength(1);
+    expect(report.observations[0]).toMatchObject({ hostKind: 'openclaw', budgetChars: 4000 });
+  });
+
+  it('an observation only present in the skipped prefix is NOT resurrected — absence stays UNKNOWN', () => {
+    const dir = tempWorkspace();
+    const logsDir = path.join(dir, '.state', 'logs');
+    fs.mkdirSync(logsDir, { recursive: true });
+    const file = path.join(logsDir, 'events_2026-10-21.jsonl');
+    fs.appendFileSync(file, JSON.stringify(injectedEvent({
+      ts: '2026-10-21T02:00:00.000Z',
+      data: {
+        ...baseData(),
+        workspaceDir: dir,
+        hostKind: 'openclaw',
+        budget: 4000,
+        budgetCapacitySource: 'host_effective_window',
+        budgetCapacityStatus: 'confirmed',
+        budgetContextWindowTokens: 256_000,
+        budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION,
+      },
+    })) + '\n', 'utf8');
+    const filler = JSON.stringify({ ts: '2026-10-21T03:00:00.000Z', type: 'tool_call', data: { payload: 'x'.repeat(64 * 1024) } }) + '\n';
+    const fillerCount = Math.ceil(RUNTIME_BUDGET_OBSERVATION_MAX_FILE_BYTES / filler.length) + 5;
+    fs.appendFileSync(file, filler.repeat(fillerCount), 'utf8');
+
+    const report = readRuntimePromptBudgetObservations({ workspaceDir: dir });
+    expect(report.truncatedFiles).toBe(1);
+    expect(report.observations).toEqual([]);
+    expect(report.note).toContain('truncatedFiles');
   });
 });
 

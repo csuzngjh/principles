@@ -40,7 +40,10 @@ import {
 } from '@principles/core/runtime-v2';
 import { loadLedger } from '@principles/core/principle-tree-ledger';
 import type { LedgerPrincipleEntry } from '@principles/core/runtime-v2';
-import { saveHostToolDeclaration } from '@principles/host-runtime';
+import { createProductionHostRuntime, saveHostToolDeclaration } from '@principles/host-runtime';
+// REAL v1 writer, resolved to openclaw-plugin source via vitest alias — the
+// component production uses to emit injection events.
+import { EventLog } from 'principles-disciple/event-log';
 import { handleApprovalsRoute, disposeApprovalsModels } from '../../src/server/routes/approvals.js';
 import { handleApprovalsGroupedRoute, disposeApprovalsGroupedModels } from '../../src/server/routes/approvals-grouped.js';
 import { handleActivationsRoute, disposeActivationsModels } from '../../src/server/routes/activations.js';
@@ -143,6 +146,132 @@ async function seedPendingApproval(approvalId: string, artifactId: string, chann
   if (generatedId !== approvalId) {
     db.prepare('UPDATE approvals SET approval_id = ? WHERE approval_id = ?').run(approvalId, generatedId);
   }
+}
+
+// ── PRI-1017: approval-warning budget fixture ───────────────────────────────
+
+function deactivateActivePromptActivations(): void {
+  sqliteConn.getDb()
+    .prepare("UPDATE activations SET deactivated_at = ? WHERE channel = 'prompt' AND deactivated_at IS NULL")
+    .run(new Date().toISOString());
+}
+
+function clearRuntimeBudgetLogs(): void {
+  fs.rmSync(path.join(tmpDir, '.state', 'logs'), { recursive: true, force: true });
+}
+
+function ensureDefaultConfig(): void {
+  const configPath = path.join(tmpDir, '.pd', 'config.yaml');
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  try {
+    fs.accessSync(configPath);
+  } catch {
+    fs.writeFileSync(configPath, yaml.dump(getDefaultPdConfig()), 'utf8');
+  }
+}
+
+async function seedActivePromptFillers(label: string, count: number, textLength: number): Promise<void> {
+  const db = sqliteConn.getDb();
+  const base = Date.now();
+  const text = 'F'.repeat(textLength);
+  for (let i = 0; i < count; i += 1) {
+    const artifactId = `art-${label}-filler-${i}-${base}`;
+    const principleId = newPrincipleId();
+    seedLedgerPrinciple(principleId, text);
+    await seedPrincipleArtifact(artifactId, {
+      sourcePrincipleId: principleId,
+      contentJson: { principleId, text },
+    });
+    db.prepare(
+      `INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, promoted_at, deactivated_at)
+       VALUES (?, ?, ?, 'prompt', 'prompt_activate', ?, ?, NULL, NULL)`,
+    ).run(
+      `act_prompt_${principleId}`,
+      `${artifactId}::prompt`,
+      artifactId,
+      `ledger://${principleId}`,
+      new Date(base - (count - i) * 60_000).toISOString(),
+    );
+  }
+}
+
+/** Emit a REAL injection event through the production runtime + EventLog writer. */
+async function dispatchRuntimeInjection(
+  modelContext?: { contextTokenBudget: number; contextWindowSource: 'model'; modelId: string },
+): Promise<void> {
+  const eventLog = new EventLog(path.join(tmpDir, '.state'));
+  try {
+    const runtime = createProductionHostRuntime({
+      hostKind: 'openclaw',
+      events: {
+        recordRuntimeV2ActivationsInjected: (data) => eventLog.recordRuntimeV2ActivationsInjected(data),
+        recordToolCall: () => { /* not under test */ },
+      },
+    });
+    await runtime.dispatch({
+      kind: 'before_prompt_build',
+      context: { workspaceDir: tmpDir, sessionId: 'sess-approve-budget', ...(modelContext !== undefined ? { modelContext } : {}) },
+      rawPayload: {},
+      source: 'openclaw:user_prompt_submit',
+    });
+    eventLog.flush();
+  } finally {
+    eventLog.dispose();
+  }
+}
+
+/** Direct JSONL fixture for shapes the live dispatch cannot produce (age). */
+function appendRawInjectionEvent(ts: string, data: Record<string, unknown>): void {
+  const logsDir = path.join(tmpDir, '.state', 'logs');
+  fs.mkdirSync(logsDir, { recursive: true });
+  const date = ts.slice(0, 10);
+  fs.appendFileSync(
+    path.join(logsDir, `events_${date}.jsonl`),
+    JSON.stringify({
+      ts,
+      date,
+      type: 'runtime_v2_prompt_activations_injected',
+      category: 'injected',
+      sessionId: 'sess-approve-budget',
+      data: {
+        sessionId: 'sess-approve-budget',
+        workspaceDir: tmpDir,
+        activationIds: [],
+        artifactIds: [],
+        principleIds: [],
+        injectedCount: 0,
+        injectedCharCount: 0,
+        budget: 2000,
+        hostKind: 'openclaw',
+        budgetPolicyVersion: 'model_aware_v1',
+        ...data,
+      },
+    }) + '\n',
+    'utf8',
+  );
+}
+
+/** Approve a fresh prompt principle and return the post-commit warning, if any. */
+async function approveFreshPromptPrinciple(label: string, text: string): Promise<string | undefined> {
+  const base = Date.now();
+  const principleId = newPrincipleId();
+  const artifactId = `art-${label}-new-${base}`;
+  const approvalId = `apr-${label}-new-${base}`;
+  seedLedgerPrinciple(principleId, text);
+  await seedPrincipleArtifact(artifactId, {
+    sourcePrincipleId: principleId,
+    contentJson: { principleId, text },
+  });
+  await seedPendingApproval(approvalId, artifactId, 'prompt');
+  const res = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ note: `PRI-1017 warning basis: ${label}` }),
+  });
+  expect(res.status).toBe(200);
+  const data = getDataObject(res.body);
+  expect(getStringField(data, 'status')).toBe('approved');
+  return getStringField(data, 'warning');
 }
 
 // ── Integration Tests ───────────────────────────────────────────────────────
@@ -697,6 +826,73 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     expect(warning).toContain('injection_budget_queued');
     expect(warning).toContain('nextAction=');
     expect(warning).toContain('deactivating older principles is NOT required');
+  });
+
+  // PRI-1017 review finding P2-1: the post-approval warning is the THIRD
+  // console surface changed by this PR and previously had no test that wrote a
+  // runtime budget observation. These tests drive the real approve route (real
+  // SQLite + real EventLog) across all four budget bases.
+
+  it('approve warning runs under the observed 256K → 4000 budget and names its basis + observation time', async () => {
+    deactivateActivePromptActivations();
+    clearRuntimeBudgetLogs();
+    ensureDefaultConfig();
+    await seedActivePromptFillers('obs4000', 24, 220);
+    await dispatchRuntimeInjection({ contextTokenBudget: 256_000, contextWindowSource: 'model', modelId: 'claude-sonnet-4-5' });
+
+    const warning = await approveFreshPromptPrinciple('obs4000', 'N'.repeat(220));
+    expect(warning).withContext('observed-budget exclusion must surface a warning').toBeDefined();
+    // The forecast ran under the OBSERVED budget, not the console fallback.
+    expect(warning).toContain('(4000c');
+    expect(warning).toContain('budget basis=runtime_observation (openclaw, observed at ');
+    expect(warning).toContain('injection_budget_queued');
+    clearRuntimeBudgetLogs();
+  });
+
+  it('approve warning runs under a usable runtime FALLBACK observation (2000) and carries the runtime reason', async () => {
+    deactivateActivePromptActivations();
+    clearRuntimeBudgetLogs();
+    ensureDefaultConfig();
+    await seedActivePromptFillers('obsfallback', 8, 220);
+    // No model context: the runtime itself honestly resolves the fixed fallback.
+    await dispatchRuntimeInjection();
+
+    const warning = await approveFreshPromptPrinciple('obsfallback', 'N'.repeat(220));
+    expect(warning).toBeDefined();
+    expect(warning).toContain('(2000c');
+    expect(warning).toContain('budget basis=runtime_observation_fallback (openclaw, runtime reason=host_capacity_absent, observed at ');
+    clearRuntimeBudgetLogs();
+  });
+
+  it('a stale observation is never presented as current: approve warning falls back to 2000 and says so', async () => {
+    deactivateActivePromptActivations();
+    clearRuntimeBudgetLogs();
+    ensureDefaultConfig();
+    await seedActivePromptFillers('obsstale', 8, 220);
+    appendRawInjectionEvent(new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(), {
+      budget: 4000,
+      budgetCapacitySource: 'host_effective_window',
+      budgetCapacityStatus: 'confirmed',
+      budgetContextWindowTokens: 256_000,
+    });
+
+    const warning = await approveFreshPromptPrinciple('obsstale', 'N'.repeat(220));
+    expect(warning).toBeDefined();
+    expect(warning).toContain('(2000c');
+    expect(warning).toContain('budget basis=fixed_fallback (the runtime budget observation for openclaw is stale');
+    clearRuntimeBudgetLogs();
+  });
+
+  it('with no observation at all the warning names the fixed fallback instead of staying silent', async () => {
+    deactivateActivePromptActivations();
+    clearRuntimeBudgetLogs();
+    ensureDefaultConfig();
+    await seedActivePromptFillers('obsnone', 8, 220);
+
+    const warning = await approveFreshPromptPrinciple('obsnone', 'N'.repeat(220));
+    expect(warning).toBeDefined();
+    expect(warning).toContain('(2000c');
+    expect(warning).toContain('budget basis=fixed_fallback (no runtime budget observation for openclaw)');
   });
 
   // PR-1894: on the shared route (abstraction_layer_v1 ON) the production path

@@ -447,16 +447,20 @@ export class ApprovalsConsoleModel {
     const staleObservation = decidedHost !== undefined && usedObservation === undefined
       ? budgetFacts.stalePerHost.get(decidedHost)
       : undefined;
-    const budgetBasisNote = staleObservation !== undefined
-      ? ` budget basis=fixed_fallback (the runtime budget observation for ${decidedHost} is stale — older than 24h and NOT used as the current budget)`
-      : usedObservation !== undefined
-        ? usedObservation.capacityStatus === 'confirmed'
-          ? ` budget basis=runtime_observation (${decidedHost}, observed at ${usedObservation.observedAt})`
-          // A usable observation can itself be the runtime's honest fallback
-          // (the host supplied no trusted capacity). The number is then the
-          // fixed budget, not a host window — say so.
-          : ` budget basis=runtime_observation_fallback (${decidedHost}, runtime reason=${usedObservation.fallbackReason ?? 'unknown'}, observed at ${usedObservation.observedAt})`
-        : '';
+    const budgetBasisNote = decidedHost === undefined
+      ? ''
+      : staleObservation !== undefined
+        ? ` budget basis=fixed_fallback (the runtime budget observation for ${decidedHost} is stale — older than 24h and NOT used as the current budget)`
+        : usedObservation !== undefined
+          ? usedObservation.capacityStatus === 'confirmed'
+            ? ` budget basis=runtime_observation (${decidedHost}, observed at ${usedObservation.observedAt})`
+            // A usable observation can itself be the runtime's honest fallback
+            // (the host supplied no trusted capacity). The number is then the
+            // fixed budget, not a host window — say so.
+            : ` budget basis=runtime_observation_fallback (${decidedHost}, runtime reason=${usedObservation.fallbackReason ?? 'unknown'}, observed at ${usedObservation.observedAt})`
+          // No observation at all: the warning's number is the console's fixed
+          // fallback. Name that basis too — silence reads like "unbound".
+          : ` budget basis=fixed_fallback (no runtime budget observation for ${decidedHost})`;
     const projectionDetail = projection.warnings.length > 0 ? ` projection warnings: ${projection.warnings.join(' | ')}` : '';
     // AC-02/R-A3: oversized is independent of `truncated` — say WHY first.
     if (projection.oversizedActivationIds.includes(activationId)) {

@@ -45,8 +45,10 @@ import {
  * - Events predating the model-aware policy carry no provenance fields; they
  *   are counted as `legacyEventsSkipped` and produce NO observation — a
  *   missing provenance field is "policy unknown", never a capacity claim.
- * - No principle text, prompt content or credentials are read; only bounded
- *   budget metadata.
+ * - Bounded I/O: only the newest bytes of the most recent daily files are
+ *   read (tail window), so a runaway or crafted log cannot make a Console
+ *   request read an unbounded amount of data. Only bounded budget metadata is
+ *   retained and returned; other event payloads are not cached.
  */
 
 /**
@@ -59,6 +61,16 @@ export const RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS: readonly string[] = ['.pd/logs
 
 /** Bounded I/O: only the most recent daily files are scanned. */
 export const RUNTIME_BUDGET_OBSERVATION_MAX_FILES = 7;
+
+/**
+ * Bounded I/O: per file, only the newest bytes are read. The writer appends,
+ * so the latest observation per host lives at the TAIL; a file larger than
+ * this window is tail-read and its older prefix skipped (counted in
+ * `truncatedFiles`) instead of materialising an unbounded log in the console
+ * process. 4 MiB is ~3.4x the largest real day observed on 2026-10-21
+ * (WorkBuddy 1.17 MiB, Codex 0.87 MiB, OpenClaw 0.98 MiB across 7 files).
+ */
+export const RUNTIME_BUDGET_OBSERVATION_MAX_FILE_BYTES = 4 * 1024 * 1024;
 
 /**
  * Maximum age of an observation that may be presented as a CURRENT runtime
@@ -110,6 +122,11 @@ export interface RuntimeBudgetObservationReport {
   legacyEventsSkipped: number;
   /** Injection events whose budget policy version differs from the current one. */
   foreignPolicyEventsSkipped: number;
+  /**
+   * Files larger than the bounded read window whose older prefix was skipped.
+   * Non-zero means `lines`/skip counters describe the read window only.
+   */
+  truncatedFiles: number;
   note: string;
 }
 
@@ -231,6 +248,44 @@ function narrowObservation(parsed: unknown, workspaceDir: string, nowMs: number)
 }
 
 /**
+ * Read at most the newest `RUNTIME_BUDGET_OBSERVATION_MAX_FILE_BYTES` of a
+ * log file. When the prefix is skipped, the partial first line after the cut
+ * is dropped so a half-written JSON line can never be parsed. Returns null
+ * when the file cannot be opened/read (the caller skips it loudly elsewhere).
+ */
+function readBoundedLogText(filePath: string): { text: string; truncated: boolean } | null {
+  let fd: number;
+  try {
+    fd = fs.openSync(filePath, 'r');
+  } catch {
+    return null;
+  }
+  try {
+    const { size } = fs.fstatSync(fd);
+    const start = Math.max(0, size - RUNTIME_BUDGET_OBSERVATION_MAX_FILE_BYTES);
+    const length = size - start;
+    if (length <= 0) return { text: '', truncated: false };
+    const buffer = Buffer.allocUnsafe(length);
+    let offset = 0;
+    while (offset < length) {
+      const read = fs.readSync(fd, buffer, offset, length - offset, start + offset);
+      if (read <= 0) break;
+      offset += read;
+    }
+    let text = buffer.subarray(0, offset).toString('utf8');
+    if (start > 0) {
+      const newline = text.indexOf('\n');
+      text = newline === -1 ? '' : text.slice(newline + 1);
+    }
+    return { text, truncated: start > 0 };
+  } catch {
+    return null;
+  } finally {
+    try { fs.closeSync(fd); } catch { /* fd already closed */ }
+  }
+}
+
+/**
  * Read the most recent budget observation per host from the workspace's
  * runtime-v2 event logs. Never throws: an unreadable log directory degrades
  * to an empty report with an explicit note (absence is UNKNOWN, not zero).
@@ -247,6 +302,7 @@ export function readRuntimePromptBudgetObservations(input: {
   const parseFailures = { count: 0 };
   const legacyEventsSkipped = { count: 0 };
   const foreignPolicyEventsSkipped = { count: 0 };
+  const truncatedFiles = { count: 0 };
   const latest = new Map<PromptInjectionTargetHost, RuntimePromptBudgetObservation>();
   for (const candidate of RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS) {
     const logsRoot = path.resolve(workspaceDir, ...candidate.split('/'));
@@ -282,13 +338,10 @@ export function readRuntimePromptBudgetObservations(input: {
       }
       if (!canonicalFile.startsWith(canonicalRoot + path.sep)) continue;
       filesRead.push(canonicalFile);
-      let raw: string;
-      try {
-        raw = fs.readFileSync(canonicalFile, 'utf8');
-      } catch {
-        continue;
-      }
-      for (const line of raw.split('\n')) {
+      const bounded = readBoundedLogText(canonicalFile);
+      if (bounded === null) continue;
+      if (bounded.truncated) truncatedFiles.count += 1;
+      for (const line of bounded.text.split('\n')) {
         if (line.trim().length === 0) continue;
         lines.count += 1;
         let parsed: unknown;
@@ -335,7 +388,8 @@ export function readRuntimePromptBudgetObservations(input: {
     parseFailures: parseFailures.count,
     legacyEventsSkipped: legacyEventsSkipped.count,
     foreignPolicyEventsSkipped: foreignPolicyEventsSkipped.count,
-    note: 'observations are PAST runtime facts bound to one host; absence means UNKNOWN (never a fabricated window); events without model-aware budget provenance, or computed under a different policy version, are skipped, not reinterpreted',
+    truncatedFiles: truncatedFiles.count,
+    note: 'observations are PAST runtime facts bound to one host; absence means UNKNOWN (never a fabricated window); events without model-aware budget provenance, or computed under a different policy version, are skipped, not reinterpreted; files larger than the bounded tail window are counted in truncatedFiles (older prefix skipped, newest event per host still inside the window)',
   };
 }
 

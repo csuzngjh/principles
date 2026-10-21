@@ -32,7 +32,8 @@ PR #2093（SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001）合并后：
 
 - `readRuntimePromptBudgetObservations({workspaceDir})`：扫描既有事件 JSONL（目录清单
   `RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS = ['.pd/logs', '.state/logs']`，与 RuleCode 遥测
-  收集器同一常量，ERR-031 单一来源；最多最近 7 个日志文件，I/O 有界），取每个宿主最近一次
+  收集器同一常量，ERR-031 单一来源；最多最近 7 个日志文件、单文件末尾 4 MiB 尾部窗口，
+  裁剪计入 `truncatedFiles`，I/O 有界），取每个宿主最近一次
   注入事件的预算观测。不可信输入纪律：行级 `unknown` 解析 + 闭合集校验
   （capacitySource / capacityStatus / fallbackReason / hostKind / policyVersion），结构无效
   计入 `parseFailures`；无溯源字段的旧事件计入 `legacyEventsSkipped`（不重解释）；
@@ -59,7 +60,7 @@ PR #2093（SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001）合并后：
 3. `ApprovalsConsoleModel.checkPromptInjectionBudget`（批准后告警）：同一机制；未确认
    路由的 per-host 预告带上各自预算；告警文本注明预算基准
    （`runtime_observation` / `runtime_observation_fallback`（附运行时原因码）/
-   `fixed_fallback`（观测过期）），不让旧观测冒充当前预算。
+   `fixed_fallback`（观测过期，或根本无观测）），不让旧观测冒充当前预算。
 4. `pd-cli` 的 `RULECODE_EVENT_LOG_CANDIDATE_DIRS` 改为别名引用 host-runtime 同一常量
    （ERR-031 单一来源；行为不变）。
 
@@ -91,20 +92,43 @@ PR #2093（SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001）合并后：
 **未做（有意识的最小面）：** 不新建数据库/第二状态源；不改治理权限；不改事件 Schema
 （字段已在 PR #2093 齐全）；不改预算公式；不把固定回退换成其他常量。
 
+## B2. 评审复核与修复（P2-1 / P2-2，2026-10-21）
+
+外部评审提出两条 P2，均按仓库事实复核并修复：
+
+- **P2-1 属实。** `ApprovalsConsoleModel.checkPromptInjectionBudget` 的批准后告警是本次
+  三个消费面之一，但既有 `governance-approve-activation.test.ts` 只覆盖无观测/2000 回退，
+  从未写入运行时预算观测，也未断言 `budget basis=...`；跨层测试只覆盖 grouped/activations。
+  修复：在**既有审批集成测试**（真实 SQLite + 真实 EventLog writer + 真实 HTTP approve
+  路由）新增 4 例——确认观测 256K→4000、运行时自身回退观测 2000 +
+  `host_capacity_absent`、48h 过期、完全无观测；并让无观测分支显式输出
+  `budget basis=fixed_fallback (no runtime budget observation for <host>)`，不再沉默。
+- **P2-2 属实（资源控制风险，非现网故障）。** 旧实现 `readFileSync` 整文件读入后
+  `split`/`JSON.parse`，只限制了文件数量。真实规模实测（只读）：WorkBuddy 7 文件
+  2.90 MB / 7830 行 / 最大单文件 1.17 MB；OpenClaw 2 文件 1.43 MB；Codex 7 文件
+  3.49 MB；同样工作量的读取+逐行解析耗时 8.8–18.2 ms。修复：每个文件只读取末尾 4 MiB
+  （`RUNTIME_BUDGET_OBSERVATION_MAX_FILE_BYTES`），裁切处丢弃半个 JSON 行；报告新增
+  `truncatedFiles` 计数与 note；新增两例测试——超限文件的尾部观测仍被读出且裁切残行不计
+  解析失败、仅存在于被裁前缀的观测不被复活（诚实缺席）。未改事件 Schema、未新增状态源。
+
 ## C. 测试证据
 
 | 层 | 文件 / 命令 | 结果 |
 |---|---|---|
-| host-runtime 单元 | `npx vitest run tests/prompt-injection-budget-observation.test.ts`（28 例：读取/最新胜出/宿主分桶/工作区分隔/大小写/符号链接越界/旧事件/异政策/不可信字段/解析失败/双目录/时效三态/未来时间戳/公式一致性/上下界 clamp/逐宿主选择/重建形状） | 28/28 |
+| host-runtime 单元 | `npx vitest run tests/prompt-injection-budget-observation.test.ts`（30 例：读取/最新胜出/宿主分桶/工作区分隔/大小写/符号链接越界/旧事件/异政策/不可信字段/解析失败/双目录/时效三态/未来时间戳/公式一致性/上下界 clamp/逐宿主选择/重建形状/超大文件尾部读取/被裁前缀不复活） | 30/30 |
 | pd-console 跨层 | `npx vitest run tests/models/prompt-budget-console-observation.test.ts`（17 例：**生产 dispatch → 真实 EventLog writer → `.state/logs` → Console 读取 → UI 合同**；A1–A3 256K→4000；C1–C4 `model_dependent`/`oversized`/clamp 边界；B1–B10 无观测/48h 过期/宿主不匹配/不可信字段/逐宿主/未来时间戳/矛盾溯源/坏行容忍/运行时自身回退观测） | 17/17 |
 | pd-console 合同 | `npx vitest run tests/ui/prompt-capacity-validators.test.ts tests/ui/focus-page.test.ts tests/ui/activation-page.test.ts` | 198/198 |
 | pd-console 路由合同 | `npx vitest run tests/server/routes/cr8-data-contract.test.ts`（13 例；新增 `?host=workbuddy` 200 + 读取真实观测 4000/256K + 未知宿主 400） | 13/13 |
-| host-runtime 全量 | `cd packages/host-runtime && npx vitest run` | 567/567（48 文件） |
-| pd-console 全量 | `cd packages/pd-console && npx vitest run` | 2910 passed + 1 expected fail（147 文件，含新增路由例） |
+| host-runtime 全量 | `cd packages/host-runtime && npx vitest run` | 569/569（48 文件） |
+| pd-console 全量 | `cd packages/pd-console && npx vitest run` | 2914 passed + 1 expected fail（147 文件） |
 | openclaw-plugin 插件路由 | `cd packages/openclaw-plugin && npx vitest run tests/hooks/runtime-v2-prompt-activation.test.ts` | 44/44（含 2 例新增：256K→4000 溯源；无宿主事实→2000+`host_capacity_absent`） |
-| 治理回归 | `npx vitest run tests/integration/governance-approve-activation.test.ts` | 18/18 |
+| 审批告警跨层（P2-1） | `npx vitest run tests/integration/governance-approve-activation.test.ts`（22 例；新增 4 例：256K→4000 / 运行时回退 2000 / 48h 过期 / 无观测） | 22/22 |
 | 类型检查 | core / pd-cli / install-layout / openclaw-plugin / pd-console / pd-companion `tsc --noEmit` | 全部通过 |
 | 质量门禁 | `check:telemetry-events --strict`、`check:runtime-contract`、`check:docs-structure`、`check:error-handbook`、`check:repo-hygiene`、`check:runtime-writers`、`check:security-baseline`、`check:generated-artifacts`、`check:pipeline-contract`、`check:workspace-tools`、`lint` | 全部通过 |
+
+首次 pd-console 全量出现 1 例 `tests/integration/evidence-chain-cross-source.test.ts` 的
+`fetch failed: bad port`（Windows 保留端口段，既有环境坑，与本改动无关）；单文件复跑
+7/7，全量复跑恢复为 2914 passed + 1 expected fail。
 
 **测试 A 的关键设计（非伪造）：** 用 `createProductionHostRuntime({hostKind:'codex'})`
  dispatch 一个带 `modelContext {contextTokenBudget: 256_000, contextWindowSource: 'model'}`
@@ -158,4 +182,6 @@ readRuntimePromptBudgetObservations({ workspaceDir: 'C:/Users/Administrator/.wor
   验收仍为**未验证**。跨层一致性由“生产 dispatch → 生产 EventLog → Console → UI 合同”的
   17 例测试证明，不以合成测试冒充真实宿主验收。Codex/WorkBuddy 的容量来源限制不变
   （Codex 生产路径仅 modelId、无 provider；WorkBuddy 无容量字段，恒回退）。
-- 观测读取按最近 7 个日志文件有界；更早的观测本就会超过 24h 时效界，无信息损失。
+- 观测读取有双重上限：最近 7 个日文件 + 单文件末尾 4 MiB。超限文件计入 `truncatedFiles`，
+  裁切残行不解析；若某宿主最近一次注入事件早于尾部窗口，读取器诚实报"无观测"并走固定
+  回退，不伪造。真实日志实测最大单文件 1.17 MB（见 B2），当前远低于该上限。
