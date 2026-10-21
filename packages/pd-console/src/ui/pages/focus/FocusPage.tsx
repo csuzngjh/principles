@@ -789,7 +789,17 @@ function PendingReviewCard({
                   })
                 : t("pages.focus.promptBudgetFallbackNote", {
                     defaultValue: "按固定回退预算估算（控制台未绑定运行时模型{{reason}}）",
-                    reason: promptInjection.budgetFallbackReason !== undefined ? `，原因: ${promptInjection.budgetFallbackReason}` : "",
+                    reason: promptInjection.budgetFallbackReason !== undefined
+                      ? t("pages.focus.promptBudgetFallbackReasonSuffix", {
+                          defaultValue: "，原因: {{code}}",
+                          // The raw bounded code stays the default: it is the
+                          // grep-able identifier shared with events/logs. Locales
+                          // may override via pages.focus.budgetFallbackReason.<code>.
+                          code: t(`pages.focus.budgetFallbackReason.${promptInjection.budgetFallbackReason}`, {
+                            defaultValue: promptInjection.budgetFallbackReason,
+                          }),
+                        })
+                      : "",
                   })
             }`}
           </div>

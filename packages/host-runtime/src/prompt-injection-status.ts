@@ -57,7 +57,13 @@ export interface PromptActivationInjectionStatus {
   activationId: string;
   principleId?: string;
   status: PromptActivationInjectionStatusKind;
-  /** Present for injectable/window_excluded/oversized/model_dependent under a confirmed route. */
+  /**
+   * Present for injectable/window_excluded/oversized/model_dependent under a
+   * confirmed route. For model_dependent rows it keeps the POSITIVE window
+   * fact: true = the entry fits THIS surface's (usually fallback) projection
+   * window, but still exceeds the measured floor — a smaller-context runtime
+   * model would exclude it.
+   */
   inCurrentWindow?: boolean;
   /** Present when the single-item cost was computable. */
   costChars?: number;
@@ -207,33 +213,39 @@ export async function readPromptActivationInjectionStatuses(input: {
     });
     const inCurrentWindow = projection.injectedActivationIds.includes(row.activationId);
     const budgetScope: PromptInjectionBudgetScope = projection.budgetScope;
-    if (!fits) {
-      // Tier-aware honesty (SPEC §6.3): only an entry exceeding the MAXIMUM
-      // supported budget is oversized (never injectable); a miss within the
-      // supported range is model-dependent, not a permanent refusal.
-      if (classifySingleItemBudgetTier(costChars) === 'exceeds_max_tier') {
-        return {
-          activationId: row.activationId,
-          principleId: row.principleId,
-          status: 'oversized',
-          inCurrentWindow: false,
-          costChars,
-          budget: projection.budget,
-          budgetScope,
-          route: projection.route,
-          reason: `single_item_exceeds_budget: this principle's own entry is ${costChars} chars > the ${PROMPT_BUDGET_MAX_CHARS}-char maximum supported budget under the ${projection.route === 'shared_render' ? 'full directive render' : 'list entry'} serialization`,
-        };
-      }
+    const serialization = projection.route === 'shared_render' ? 'full directive render' : 'list entry';
+    // Tier verdict FIRST (SPEC §6.3): the projection budget on this surface
+    // is usually the fixed fallback (2000) — the console holds no runtime
+    // model facts. An entry in (MIN, fallback] fits THAT estimate and may
+    // even sit in the current window, but it exceeds the measured floor, so
+    // on a 32K/64K model (budget = floor) it would NOT inject. Reporting it
+    // as an unconditional `injectable` would contradict the approval-time
+    // `model_dependent` verdict for the very same artifact.
+    const tierFit = classifySingleItemBudgetTier(costChars);
+    if (tierFit === 'exceeds_max_tier') {
       return {
         activationId: row.activationId,
         principleId: row.principleId,
-        status: 'model_dependent',
+        status: 'oversized',
         inCurrentWindow: false,
         costChars,
         budget: projection.budget,
         budgetScope,
         route: projection.route,
-        reason: `model_dependent_capacity: this principle's own entry is ${costChars} chars — it fits the ${PROMPT_BUDGET_MIN_CHARS}..${PROMPT_BUDGET_MAX_CHARS} supported budget range only on larger-context models; injection depends on the runtime model`,
+        reason: `single_item_exceeds_budget: this principle's own entry is ${costChars} chars > the ${PROMPT_BUDGET_MAX_CHARS}-char maximum supported budget under the ${serialization} serialization`,
+      };
+    }
+    if (tierFit === 'model_dependent') {
+      return {
+        activationId: row.activationId,
+        principleId: row.principleId,
+        status: 'model_dependent',
+        inCurrentWindow,
+        costChars,
+        budget: projection.budget,
+        budgetScope,
+        route: projection.route,
+        reason: `model_dependent_capacity: this principle's own entry is ${costChars} chars — above the ${PROMPT_BUDGET_MIN_CHARS}-char measured floor, so smaller-context models exclude it${fits ? ' even though it fits this surface\'s fallback-budget estimate' : ''}; injection depends on the runtime model`,
       };
     }
     return {

@@ -505,17 +505,45 @@ describe('AC-02/AC-06: readPromptActivationInjectionStatuses — positive per-it
     expect(byId.get('act-K-HUGE')?.reason).toContain('single_item_exceeds_budget');
   });
 
-  it('window full but single-item deliverable → window_excluded, not oversized', async () => {
+  it('SPEC §6.3 consistency: an entry in (1250, 2000] that fits the fallback estimate is model_dependent — never an unconditional injectable (CodeRabbit review)', async () => {
+    // 1500-char statement → list-route cost ≈1574: fits the console's
+    // fallback projection budget (2000), sits IN the current window, yet
+    // exceeds the measured floor — on a 32K/64K model (budget = floor) it
+    // would NOT inject. The status surface must tell the Owner exactly what
+    // the approval-time precheck tells them: model_dependent.
+    const dir = tempWorkspace({ declare: ['openclaw'] });
+    await seedActivation(dir, 'MID-BAND', 'B'.repeat(1500));
+    const report = await readPromptActivationInjectionStatuses({ workspaceDir: dir });
+    expect(report.route.status).toBe('confirmed');
+    const row = report.statuses[0];
+    expect(row.status).toBe('model_dependent');
+    expect(row.inCurrentWindow).toBe(true);
+    expect(row.costChars).toBeGreaterThan(1250);
+    expect(row.costChars).toBeLessThanOrEqual(2000);
+    expect(row.reason).toContain('model_dependent_capacity');
+    expect(row.reason).toContain('fallback-budget estimate');
+  });
+
+  it('window full but single-item deliverable → window_excluded, not oversized (mid-band filler is model_dependent, keeping its window fact)', async () => {
     const dir = tempWorkspace({ declare: ['openclaw'] });
     const header = 'Runtime V2 activated principles:';
     const bigLen = RUNTIME_V2_PRINCIPLE_BUDGET - header.length - 1 - '- [W-1] '.length - 1;
-    await seedActivation(dir, 'W-1', 'x'.repeat(bigLen)); // 恰好占满
+    await seedActivation(dir, 'W-1', 'x'.repeat(bigLen)); // 恰好占满（成本 1999 ∈ (1250,2000] 中带）
     await seedActivation(dir, 'W-2', '第二条原则');
     const report = await readPromptActivationInjectionStatuses({ workspaceDir: dir });
     const byId = new Map(report.statuses.map((s) => [s.activationId, s]));
-    expect(byId.get('act-W-1')?.status).toBe('injectable');
+    // Tier-first (SPEC §6.3): the 1999-char filler exceeds the measured floor,
+    // so it is model_dependent — but keeps the POSITIVE window fact (it does
+    // sit in this fallback-budget projection).
+    expect(byId.get('act-W-1')?.status).toBe('model_dependent');
+    expect(byId.get('act-W-1')?.inCurrentWindow).toBe(true);
+    expect(byId.get('act-W-1')?.reason).toContain('model_dependent_capacity');
     expect(byId.get('act-W-2')?.status).toBe('window_excluded');
     expect(byId.get('act-W-2')?.inCurrentWindow).toBe(false);
+    // Neither row is oversized — a full window must never be reported as a
+    // per-entry overflow.
+    expect(byId.get('act-W-1')?.status).not.toBe('oversized');
+    expect(byId.get('act-W-2')?.status).not.toBe('oversized');
   });
 
   it('unconfirmed route → every row route_unconfirmed with per-host fits', async () => {

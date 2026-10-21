@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-21T00:27:35.227Z",
+  "generatedAt": "2026-10-21T00:53:27.289Z",
   "spec": "SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001",
   "unit": "utf16_code_units (String.prototype.length — NOT model tokens)",
   "policy": {
@@ -19,6 +19,7 @@
   "scenario": "16 persisted candidates (14 × 60 chars, 2 × 1200 chars) per tier workspace, 40 forced round keys on the list route; shared route runs the same resolution through buildActivePrinciplePromptContext",
   "tiers": [
     {
+      "selfReport": false,
       "label": "32K",
       "windowTokens": 32000,
       "budgetChars": 1250,
@@ -43,6 +44,32 @@
       }
     },
     {
+      "selfReport": true,
+      "label": "32K",
+      "windowTokens": 32000,
+      "budgetChars": 1250,
+      "capacitySource": "host_effective_window",
+      "capacityStatus": "confirmed",
+      "fallbackReason": null,
+      "policyVersion": "model_aware_v1",
+      "list": {
+        "candidates": 16,
+        "avgInjected": 12.7,
+        "avgUsedChars": 1111,
+        "truncatedRounds": 40,
+        "avgOversizedPerRound": 0
+      },
+      "shared": {
+        "injected": 1,
+        "usedChars": 1180,
+        "truncated": true,
+        "oversized": 0,
+        "dropped": 1,
+        "selectionPolicy": "legacy_fifo_prefix_v1"
+      }
+    },
+    {
+      "selfReport": false,
       "label": "64K",
       "windowTokens": 64000,
       "budgetChars": 1250,
@@ -67,6 +94,32 @@
       }
     },
     {
+      "selfReport": true,
+      "label": "64K",
+      "windowTokens": 64000,
+      "budgetChars": 1250,
+      "capacitySource": "host_effective_window",
+      "capacityStatus": "confirmed",
+      "fallbackReason": null,
+      "policyVersion": "model_aware_v1",
+      "list": {
+        "candidates": 16,
+        "avgInjected": 12.7,
+        "avgUsedChars": 1111,
+        "truncatedRounds": 40,
+        "avgOversizedPerRound": 0
+      },
+      "shared": {
+        "injected": 1,
+        "usedChars": 1180,
+        "truncated": true,
+        "oversized": 0,
+        "dropped": 1,
+        "selectionPolicy": "legacy_fifo_prefix_v1"
+      }
+    },
+    {
+      "selfReport": false,
       "label": "128K",
       "windowTokens": 128000,
       "budgetChars": 2000,
@@ -91,6 +144,32 @@
       }
     },
     {
+      "selfReport": true,
+      "label": "128K",
+      "windowTokens": 128000,
+      "budgetChars": 2000,
+      "capacitySource": "host_effective_window",
+      "capacityStatus": "confirmed",
+      "fallbackReason": null,
+      "policyVersion": "model_aware_v1",
+      "list": {
+        "candidates": 16,
+        "avgInjected": 11.5,
+        "avgUsedChars": 1618,
+        "truncatedRounds": 40,
+        "avgOversizedPerRound": 0
+      },
+      "shared": {
+        "injected": 4,
+        "usedChars": 1873,
+        "truncated": true,
+        "oversized": 0,
+        "dropped": 1,
+        "selectionPolicy": "legacy_fifo_prefix_v1"
+      }
+    },
+    {
+      "selfReport": false,
       "label": "256K",
       "windowTokens": 256000,
       "budgetChars": 4000,
@@ -115,6 +194,32 @@
       }
     },
     {
+      "selfReport": true,
+      "label": "256K",
+      "windowTokens": 256000,
+      "budgetChars": 4000,
+      "capacitySource": "host_effective_window",
+      "capacityStatus": "confirmed",
+      "fallbackReason": null,
+      "policyVersion": "model_aware_v1",
+      "list": {
+        "candidates": 16,
+        "avgInjected": 16,
+        "avgUsedChars": 3526,
+        "truncatedRounds": 0,
+        "avgOversizedPerRound": 0
+      },
+      "shared": {
+        "injected": 13,
+        "usedChars": 3952,
+        "truncated": true,
+        "oversized": 0,
+        "dropped": 1,
+        "selectionPolicy": "legacy_fifo_prefix_v1"
+      }
+    },
+    {
+      "selfReport": false,
       "label": "1000K",
       "windowTokens": 1000000,
       "budgetChars": 15625,
@@ -139,6 +244,32 @@
       }
     },
     {
+      "selfReport": true,
+      "label": "1000K",
+      "windowTokens": 1000000,
+      "budgetChars": 15625,
+      "capacitySource": "host_effective_window",
+      "capacityStatus": "confirmed",
+      "fallbackReason": null,
+      "policyVersion": "model_aware_v1",
+      "list": {
+        "candidates": 16,
+        "avgInjected": 16,
+        "avgUsedChars": 3526,
+        "truncatedRounds": 0,
+        "avgOversizedPerRound": 0
+      },
+      "shared": {
+        "injected": 16,
+        "usedChars": 6923,
+        "truncated": false,
+        "oversized": 0,
+        "dropped": 0,
+        "selectionPolicy": "legacy_fifo_prefix_v1"
+      }
+    },
+    {
+      "selfReport": false,
       "label": "unknown",
       "windowTokens": null,
       "budgetChars": 2000,
@@ -161,6 +292,31 @@
         "dropped": 1,
         "selectionPolicy": "legacy_fifo_prefix_v1"
       }
+    },
+    {
+      "selfReport": true,
+      "label": "unknown",
+      "windowTokens": null,
+      "budgetChars": 2000,
+      "capacitySource": "legacy_fallback",
+      "capacityStatus": "unknown",
+      "fallbackReason": "host_capacity_absent",
+      "policyVersion": "model_aware_v1",
+      "list": {
+        "candidates": 16,
+        "avgInjected": 11.5,
+        "avgUsedChars": 1618,
+        "truncatedRounds": 40,
+        "avgOversizedPerRound": 0
+      },
+      "shared": {
+        "injected": 4,
+        "usedChars": 1873,
+        "truncated": true,
+        "oversized": 0,
+        "dropped": 1,
+        "selectionPolicy": "legacy_fifo_prefix_v1"
+      }
     }
   ],
   "sharedDispatchEvidence": [
@@ -170,6 +326,7 @@
       "budgetCapacitySource": "host_effective_window",
       "budgetCapacityStatus": "confirmed",
       "budgetContextWindowTokens": 256000,
+      "budgetFallbackReason": null,
       "injectedCount": 7
     },
     {
@@ -178,6 +335,7 @@
       "budgetCapacitySource": "legacy_fallback",
       "budgetCapacityStatus": "unknown",
       "budgetContextWindowTokens": null,
+      "budgetFallbackReason": "host_capacity_source_untrusted",
       "injectedCount": 6
     },
     {
@@ -186,6 +344,7 @@
       "budgetCapacitySource": "legacy_fallback",
       "budgetCapacityStatus": "unknown",
       "budgetContextWindowTokens": null,
+      "budgetFallbackReason": "catalog_ambiguous_model_id",
       "injectedCount": 6
     },
     {
@@ -194,6 +353,7 @@
       "budgetCapacitySource": "legacy_fallback",
       "budgetCapacityStatus": "unknown",
       "budgetContextWindowTokens": null,
+      "budgetFallbackReason": "host_capacity_absent",
       "injectedCount": 6
     }
   ],

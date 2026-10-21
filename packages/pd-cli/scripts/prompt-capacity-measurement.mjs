@@ -343,6 +343,7 @@ async function modelAwareSharedDispatchEvidence() {
       budgetCapacitySource: event.budgetCapacitySource,
       budgetCapacityStatus: event.budgetCapacityStatus,
       budgetContextWindowTokens: event.budgetContextWindowTokens ?? null,
+      budgetFallbackReason: event.budgetFallbackReason ?? null,
       injectedCount: event.injectedCount,
     });
   }
@@ -373,7 +374,12 @@ async function main() {
   const tierWindows = [32_000, 64_000, 128_000, 256_000, 1_000_000, null];
   const tierScenarios = [];
   for (const windowTokens of tierWindows) {
-    tierScenarios.push(await modelAwareTierScenario(windowTokens, false));
+    // Both self-report flag states: the shared route bills the footer, so
+    // the tier table must carry evidence for each state it makes claims
+    // about (the 32K floor claim in particular).
+    for (const selfReport of [false, true]) {
+      tierScenarios.push({ selfReport, ...(await modelAwareTierScenario(windowTokens, selfReport)) });
+    }
   }
   const sharedDispatchEvidence = await modelAwareSharedDispatchEvidence();
 
@@ -487,10 +493,10 @@ async function main() {
   ma.push('');
   ma.push('## 容量档位 × 两路由对照');
   ma.push('');
-  ma.push('| 容量档位 | 预算(字符) | 来源 | 状态 | 列表:平均注入 | 列表:平均字符 | 列表:截断轮次 | 共享:注入 | 共享:字符 | 共享:截断 |');
-  ma.push('| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |');
+  ma.push('| 容量档位 | 自报 | 预算(字符) | 来源 | 状态 | 列表:平均注入 | 列表:平均字符 | 列表:截断轮次 | 共享:注入 | 共享:字符 | 共享:截断 |');
+  ma.push('| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |');
   for (const t of tierScenarios) {
-    ma.push(`| ${t.label} | ${t.budgetChars} | ${t.capacitySource} | ${t.capacityStatus} | ${t.list.avgInjected} | ${t.list.avgUsedChars} | ${t.list.truncatedRounds}/${TIER_ROUNDS} | ${t.shared.injected} | ${t.shared.usedChars} | ${t.shared.truncated} |`);
+    ma.push(`| ${t.label} | ${t.selfReport ? '开' : '关'} | ${t.budgetChars} | ${t.capacitySource} | ${t.capacityStatus} | ${t.list.avgInjected} | ${t.list.avgUsedChars} | ${t.list.truncatedRounds}/${TIER_ROUNDS} | ${t.shared.injected} | ${t.shared.usedChars} | ${t.shared.truncated} |`);
   }
   ma.push('');
   ma.push('要点：');
