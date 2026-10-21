@@ -276,6 +276,11 @@ export class SignalCollectorHost {
     // 1. Stage2 LLM 确认
     let confirmed: SignalCollectorOutput;
     if (this.llmClassifier && this.config.enableLlmStage) {
+      // AUDIT-P2-02: 实际发起的分类调用计数。注意：本分支位于 detectSync 的
+      // 同步调用栈上（async 函数体在首个 await 前同步执行），计数写入必须推迟
+      // 到微任务，否则会把健康文件读改写带回 before_prompt_build（AUDIT-P2-01
+      // 的同族问题，countStage1Strong 惯例）。
+      this.countStage2Invocation();
       let llmResult = null;
       try {
         llmResult = await this.llmClassifier(pending.text, this.config.promptTemplate);
@@ -303,6 +308,12 @@ export class SignalCollectorHost {
       // 保留旧版 empathy keyword matcher 的 GFI 累积行为,避免 LLM 未配置(默认)时
       // empathy 检测完全失效。correction ambiguous 候选仍然丢弃(旧版 correction cue
       // 不触发 trackFriction,仅 recordUserTurn,已在 detectSync 中完成)。
+      //
+      // AUDIT-P2-01: 本降级分支没有执行任何 await —— async 函数体在首个 await 前
+      // 同步执行，因此这里到达 queueUnconfirmedForBatch / countStage2Dropped 时仍在
+      // detectSync（before_prompt_build）的同步调用栈上。健康计数写入已统一推迟到
+      // 微任务；enqueueSignalConfirmation 的 SQLite 持久化保持同步（可靠性优先：
+      // 候选落库不能被进程事件循环淘汰，AUDIT 整改明确禁止异步化队列记录）。
       if (pending.output.matchedPrecision === 'ambiguous' && pending.output.matchedTerms.length > 0) {
         const hasEmpathyMatch = pending.output.matchedTerms.some(
           (term) => pending.storeSnapshot.terms[term]?.category === 'empathy',
@@ -378,6 +389,10 @@ export class SignalCollectorHost {
    *
    * 只入队"词库命中过的歧义候选"：零命中的普通消息体量与噪声不可控，其纠正
    * 语义覆盖由 G3 的词库扩充/earned 解锁承担。
+   *
+   * AUDIT-P2-01: stage2Queued 计数推迟到微任务执行（本方法可从无 await 的
+   * 降级分支同步到达）；SQLite 入队本身保持同步——它是可靠性要求，不是旁路
+   * 观测，微任务/事件循环淘汰不能承担丢候选的风险。
    */
   private queueUnconfirmedForBatch(pending: PendingSignal, reason: string): void {
     if (pending.userTurnRowid === undefined) { this.countStage2Dropped(); return; } // 无行可回写，持久化无意义
@@ -400,7 +415,7 @@ export class SignalCollectorHost {
         suggestedType,
         createdAt: new Date().toISOString(),
       });
-      updateSignalHealth(this.wctx.stateDir, (s) => { s.stage2Queued += 1; });
+      this.countStage2Queued();
       SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_CONFIRMATION_QUEUED',
         `${reason}; queued for batch confirmation (suggested=${suggestedType})`);
     } catch (e) {
@@ -410,9 +425,36 @@ export class SignalCollectorHost {
     }
   }
 
-  /** PRI-788 G4: 未经确认就消失的候选计数（旁路，失败不阻塞）。 */
+  /**
+   * PRI-788 G4: 未经确认就消失的候选计数（旁路，失败不阻塞）。
+   * AUDIT-P2-01: 推迟到微任务——本计数可从无 await 的降级分支同步到达，
+   * 不能把健康文件读改写留在 before_prompt_build 的同步调用栈上。
+   */
   private countStage2Dropped(): void {
-    updateSignalHealth(this.wctx.stateDir, (s) => { s.stage2Dropped += 1; });
+    const stateDir = this.wctx.stateDir;
+    queueMicrotask(() => {
+      updateSignalHealth(stateDir, (s) => { s.stage2Dropped += 1; });
+    });
+  }
+
+  /** AUDIT-P2-02: 入队计数（旁路），与 countStage2Dropped 同理推迟到微任务。 */
+  private countStage2Queued(): void {
+    const stateDir = this.wctx.stateDir;
+    queueMicrotask(() => {
+      updateSignalHealth(stateDir, (s) => { s.stage2Queued += 1; });
+    });
+  }
+
+  /**
+   * AUDIT-P2-02: Stage2 分类调用计数（旁路）。realtime 路径的调用点位于
+   * detectSync 的同步调用栈上（async 函数体首个 await 前同步执行），批量路径
+   * 虽在后台周期内，也复用同一惯例推迟到微任务，保证两种路径计数语义一致。
+   */
+  private countStage2Invocation(): void {
+    const stateDir = this.wctx.stateDir;
+    queueMicrotask(() => {
+      updateSignalHealth(stateDir, (s) => { s.stage2Invocations += 1; });
+    });
   }
 
   /**
@@ -452,6 +494,9 @@ export class SignalCollectorHost {
     },
     classifier: SignalLlmClassifier,
   ): Promise<{ disposition: 'confirmed' | 'rejected' | 'failed'; detail: string }> {
+    // AUDIT-P2-02: 批量确认的补跑同样是一次真实的 Stage2 分类调用（花钱），
+    // 与 realtime 路径共用 stage2Invocations 计数。
+    this.countStage2Invocation();
     let llmResult: Awaited<ReturnType<SignalLlmClassifier>> = null;
     try {
       llmResult = await classifier(item.excerpt, '');
