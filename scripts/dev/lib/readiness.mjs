@@ -35,8 +35,8 @@ import { verifyBuildStamp } from './build-state.mjs';
  *
  * Scoped to the packages the root build authority covers, for the same reason as
  * L2: a worktree bootstrapped with the supported `npm run build` must not be
- * failed for an artifact that authority never promised (pd-cli and pd-console
- * build outside the root chain).
+ * failed for an artifact that authority never promised (pd-console,
+ * pd-companion, and the website build outside the root chain).
  *
  * @returns {{probes: Array<{label: string, specifier: string}>, bins: Array<{label: string, file: string, specifier: string}>}}
  */
