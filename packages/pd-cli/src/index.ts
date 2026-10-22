@@ -248,15 +248,17 @@ const rtRunCmd = program
 rtRunCmd
   .command('list <taskId>')
   .description('List all runs for a task')
-  .action(async (taskId) => {
-    await handleRunList({ taskId });
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .action(async (taskId, opts) => {
+    await handleRunList({ taskId, workspace: opts.workspace });
   });
 
 rtRunCmd
   .command('show <runId>')
   .description('Show detailed run information')
-  .action(async (runId) => {
-    await handleRunShow({ id: runId });
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .action(async (runId, opts) => {
+    await handleRunShow({ id: runId, workspace: opts.workspace });
   });
 
 // ── Runtime v2 trajectory/history/context commands ────────────────────────────鈹€鈹€

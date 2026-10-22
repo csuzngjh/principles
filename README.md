@@ -107,7 +107,7 @@ codex plugin marketplace add csuzngjh/principles
 codex plugin add principles-disciple@principles
 ```
 
-Then in a Codex session: run $pd-setup once per workspace, trust the hooks via /hooks, and review with $pd-review (the existing owner console). $pd-disable stops all Codex behavior instantly and reversibly; $pd-status reports health. Prerequisites and details: [ADR-0020](docs/adr/0020-codex-cli-host-adapter.md).
+Then in a Codex session: use $pd-control setup once per workspace and trust the hooks via /hooks. PD's normal behavior should not require explicit skill invocation; use $pd-cli-operator for troubleshooting, submit explicit feedback through the supported Owner pain-entry format, and use $pd-review when you want to open the Owner Console. Use $pd-control disable to stop Codex behavior and $pd-control enable to resume it; both operations preserve workspace data. Prerequisites and details: [ADR-0020](docs/adr/0020-codex-cli-host-adapter.md).
 
 ## What it does
 

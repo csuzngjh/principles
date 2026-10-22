@@ -3,7 +3,7 @@
  * `pd health --host codex`. R1 merge-readiness revision (A1–A4).
  *
  * Answers three questions the pre-existing surface could not:
- * 1. What runtime do hooks ACTUALLY execute? `$pd-setup` installs the pinned
+ * 1. What runtime do hooks ACTUALLY execute? `$pd-control setup` installs the pinned
  *    @principles runtime into PLUGIN_DATA — pd-cli's own npm dependency
  *    version says nothing about it, so a stale install was invisible.
  * 2. Is that runtime in sync with the marketplace pin, and can the machine's
@@ -18,7 +18,7 @@
  *   available, versions identical.
  * - STALE_INSTALL: both present, versions differ.
  * - MISSING_RUNTIME: no PLUGIN_DATA runtime installed (hooks cannot execute).
- * - PIN_UNAVAILABLE: marketplace cache/pin unreadable or absent — a $pd-setup
+ * - PIN_UNAVAILABLE: marketplace cache/pin unreadable or absent — a $pd-control setup
  *   re-run cannot be relied on to install anything.
  * - VERSION_UNREADABLE: both layers exist but at least one version string is
  *   unreadable — matched/stale cannot be distinguished.
@@ -63,13 +63,13 @@ export type CodexInstallHealth =
 
 export const CODEX_INSTALL_NEXT_ACTIONS = {
   staleInstall:
-    'Refresh the plugin cache (`codex plugin remove principles-disciple@principles && codex plugin add principles-disciple@principles`) and re-run the $pd-setup skill so the pinned runtime is reinstalled.',
+    'Refresh the plugin cache (`codex plugin remove principles-disciple@principles && codex plugin add principles-disciple@principles`) and re-run the $pd-control setup skill so the pinned runtime is reinstalled.',
   missingRuntime:
-    'Run the $pd-setup skill in this workspace (or `codex plugin add principles-disciple@principles` first if the plugin cache is missing) so the pinned runtime is installed.',
+    'Run the $pd-control setup skill in this workspace (or `codex plugin add principles-disciple@principles` first if the plugin cache is missing) so the pinned runtime is installed.',
   pinUnavailable:
-    'The marketplace cache for principles-disciple is missing or unreadable, so a $pd-setup re-run cannot be trusted. Re-add the plugin (`codex plugin add principles-disciple@principles`), then re-run $pd-setup.',
+    'The marketplace cache for principles-disciple is missing or unreadable, so a $pd-control setup re-run cannot be trusted. Re-add the plugin (`codex plugin add principles-disciple@principles`), then re-run $pd-control setup.',
   versionUnreadable:
-    'The installed runtime and/or the marketplace pin exists but its version string is unreadable. Reinstall the plugin and re-run $pd-setup so versions can be verified.',
+    'The installed runtime and/or the marketplace pin exists but its version string is unreadable. Reinstall the plugin and re-run $pd-control setup so versions can be verified.',
   unverifiedCli:
     'The Codex CLI is newer than the verified ingestion contract of this PD release. Update PD (the release whose adapter verifies this Codex version); conversation ingestion stays off until then. Hook enforcement surfaces are separate and unaffected.',
 } as const;
@@ -145,7 +145,7 @@ export function assessCodexInstall(env: { CODEX_HOME?: string }, homeDir: string
     pluginDataPresent = true;
     pluginDataAdapterVersion = typeof parsed.version === 'string' && parsed.version.length > 0 ? parsed.version : null;
   } catch { /* not installed → null */ }
-  // Marketplace cache pin (what a $pd-setup re-run would install) — A3.
+  // Marketplace cache pin (what a $pd-control setup re-run would install) — A3.
   const cacheSelection = selectMarketplaceCacheVersionDir(codexHome, fsMod);
   const marketplacePinAdapterVersion = cacheSelection
     ? (typeof cacheSelection.pin.codexAdapter === 'string' && cacheSelection.pin.codexAdapter.length > 0 ? cacheSelection.pin.codexAdapter : null)

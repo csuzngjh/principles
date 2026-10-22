@@ -43,6 +43,9 @@ function compareVersionDirs(a, b) {
  *   --plugin-root arg > PLUGIN_ROOT env > glob of the Codex plugin cache
  *   (~/.codex/plugins/cache/<marketplace>/principles-disciple/<version>/),
  *   selecting by NUMERIC semver (lexical sort would pick 0.9.0 over 0.10.0).
+ * When several marketplaces tie at the same highest version, no ordering can
+ * prove which plugin Codex is actually using — that is an explicit ambiguity
+ * failure, never a guess.
  * Returns { ok: true, pluginRoot } or { ok: false, reason, nextAction }.
  */
 function locatePluginRoot(explicit) {
@@ -54,14 +57,14 @@ function locatePluginRoot(explicit) {
   }
   if (process.env.PLUGIN_ROOT) return { ok: true, pluginRoot: process.env.PLUGIN_ROOT };
   const cacheDir = path.join(codexDir(), 'plugins', 'cache');
-  const candidates = [];
+  const candidates = []; // { root, marketplace }
   try {
     for (const marketplace of fs.readdirSync(cacheDir)) {
       const pluginDir = path.join(cacheDir, marketplace, 'principles-disciple');
       try {
         for (const version of fs.readdirSync(pluginDir)) {
           const root = path.join(pluginDir, version);
-          if (fs.existsSync(path.join(root, '.codex-plugin', 'plugin.json'))) candidates.push(root);
+          if (fs.existsSync(path.join(root, '.codex-plugin', 'plugin.json'))) candidates.push({ root, marketplace });
         }
       } catch { /* marketplace dir without this plugin */ }
     }
@@ -73,8 +76,17 @@ function locatePluginRoot(explicit) {
       nextAction: 'Install the plugin first: codex plugin add principles-disciple@principles (after the marketplace is configured), then re-run.',
     };
   }
-  candidates.sort((a, b) => compareVersionDirs(path.basename(a), path.basename(b)));
-  return { ok: true, pluginRoot: candidates[candidates.length - 1] };
+  candidates.sort((a, b) => compareVersionDirs(path.basename(a.root), path.basename(b.root)));
+  const newest = candidates[candidates.length - 1];
+  const tied = candidates.filter((c) => compareVersionDirs(path.basename(c.root), path.basename(newest.root)) === 0);
+  if (tied.length > 1) {
+    return {
+      ok: false,
+      reason: 'plugin_root_ambiguous',
+      nextAction: `Multiple marketplaces provide principles-disciple at the same highest version (${tied.map((c) => c.root).join(', ')}). Pass --plugin-root <dir> explicitly.`,
+    };
+  }
+  return { ok: true, pluginRoot: newest.root };
 }
 
 /**
@@ -104,7 +116,7 @@ function locatePluginData(explicit) {
   return {
     ok: false,
     reason: 'plugin_data_not_found',
-    nextAction: 'Run the $pd-setup skill — it creates the plugin data directory and installs the pinned runtime.',
+    nextAction: 'Run the $pd-control setup skill — it creates the plugin data directory and installs the pinned runtime.',
   };
 }
 
@@ -157,7 +169,7 @@ function locateWorkspace(startDir) {
   return {
     ok: false,
     reason: 'workspace_not_initialized',
-    nextAction: 'No .pd/config.yaml found in this directory or any parent. Run the $pd-setup skill here first.',
+    nextAction: 'No .pd/config.yaml found in this directory or any parent. Run the $pd-control setup skill here first.',
   };
 }
 
@@ -249,3 +261,74 @@ module.exports = {
   pdEntryFromShimLines,
   requireFlagValue,
 };
+
+// CLI entry: the single authoritative way for skills to run a shipped script.
+// Skills locate THIS file (it ships in every version's scripts/ dir) and run
+// the target through `--exec`, so plugin-root selection happens once, here,
+// instead of per-skill shell globs over each target script — which silently
+// fell back to an older plugin when the newest install stopped shipping the
+// script, and could not prove marketplace provenance. The require.main guard
+// keeps require() consumers (pd-hook/pd-status/pd-setup/…) at zero impact.
+if (require.main === module) {
+  const { spawnSync } = require('child_process');
+  const USAGE = 'Usage: node pd-locate.cjs [--plugin-root <dir>] --exec <scriptRelPath> [-- <args...>]';
+  const failCli = (reason, nextAction) => {
+    console.error(`[PD:locate] status=failed reason=${reason}`);
+    console.error(`[PD:locate] nextAction=${nextAction}`);
+  };
+  const usageExit = () => {
+    console.error(USAGE);
+    process.exit(2);
+  };
+
+  const argv = process.argv.slice(2);
+  let pluginRootFlag;
+  let scriptRelPath;
+  const passthrough = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === '--') {
+      passthrough.push(...argv.slice(i + 1));
+      break;
+    }
+    if (arg === '--plugin-root' || arg === '--exec') {
+      const value = requireFlagValue(argv, i, arg);
+      if (!value.ok) usageExit();
+      if (arg === '--plugin-root') pluginRootFlag = value.value;
+      else scriptRelPath = value.value;
+      i += 1;
+      continue;
+    }
+    usageExit();
+  }
+  if (!scriptRelPath) usageExit();
+
+  // scriptRelPath is untrusted skill input (rc-1): it must name a file INSIDE
+  // the plugin root, so absolute paths and `..` segments are rejected outright.
+  if (path.isAbsolute(scriptRelPath) || scriptRelPath.split(/[\\/]/).includes('..')) {
+    failCli('script_path_invalid', `Pass a plugin-root-relative script path (got: ${scriptRelPath}).`);
+    process.exit(1);
+  }
+
+  const root = locatePluginRoot(pluginRootFlag);
+  if (!root.ok) {
+    failCli(root.reason, root.nextAction);
+    process.exit(1);
+  }
+
+  const scriptPath = path.join(root.pluginRoot, scriptRelPath);
+  if (!fs.existsSync(scriptPath)) {
+    failCli(
+      'plugin_script_missing',
+      `The newest installed plugin (${root.pluginRoot}) does not ship ${scriptRelPath}; refusing to fall back to an older version. Check the plugin installation, or pass --plugin-root <dir> of the install that ships the script.`,
+    );
+    process.exit(1);
+  }
+
+  const result = spawnSync(process.execPath, [scriptPath, ...passthrough], { stdio: 'inherit' });
+  if (result.error) {
+    failCli(`script_spawn_failed:${result.error.code ?? result.error.message}`, `Verify that ${scriptPath} is readable, then re-run.`);
+    process.exit(1);
+  }
+  process.exit(result.status ?? 1);
+}

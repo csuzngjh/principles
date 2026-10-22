@@ -14,7 +14,7 @@
  * - default: print disclosure, then interactive prompt (TTY) for an explicit
  *   yes/no; EOF/abort mutates nothing and records nothing.
  * - --accept / --decline: non-interactive explicit decision (the plugin's
- *   $pd-setup presents the disclosure itself, then calls one of these).
+ *   $pd-control setup presents the disclosure itself, then calls one of these).
  * - --show-disclosure: print the frozen text for the requested language and
  *   exit; no mutation, no record.
  *

@@ -21,7 +21,7 @@ const HOOKS = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, 'hooks', 'hooks.
 
 describe('plugin manifest (probe P01 manifest facts)', () => {
   it('ships four discoverable plugin-root skills and their disable command', () => {
-    for (const name of ['pd-record-pain', 'pd-status', 'pd-review', 'pd-disable']) {
+    for (const name of ['pd-cli-operator', 'pd-pain-signal', 'pd-review', 'pd-control']) {
       const skill = fs.readFileSync(path.join(PLUGIN_ROOT, 'skills', name, 'SKILL.md'), 'utf8');
       const frontmatter = skill.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
       expect(frontmatter, `${name} has valid frontmatter delimiters`).not.toBeNull();

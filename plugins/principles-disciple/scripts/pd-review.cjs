@@ -47,7 +47,7 @@ function main() {
 
   console.log('[PD:review] console launching');
   console.log(`  workspace : ${ws.workspaceDir}`);
-  console.log('  next      : the console opens in your browser (default http://127.0.0.1:3100). Approve or reject pending principles/activations there; `pd activation list/approve/deactivate` remains the CLI fallback.');
+  console.log('  next      : the console opens in your browser (default http://127.0.0.1:3100). Approve or reject pending principles/activations there; `pd activation list/approve/deactivate` is an Owner-operated terminal path, never an agent fallback.');
 }
 
 main();

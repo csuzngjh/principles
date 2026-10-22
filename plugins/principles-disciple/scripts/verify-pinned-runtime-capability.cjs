@@ -8,7 +8,7 @@
  *
  * It runs against INSTALLED package bytes only — never monorepo source — by
  * resolving @principles/* from --runtime-dir/node_modules (the same layout
- * $pd-setup produces). Scenarios:
+ * $pd-control setup produces). Scenarios:
  *
  *   S1 baseline            live eligible RuleCode enforces (deny)
  *   S2 global pause        global_rulecode_pauses.status='paused' → allow + structured reason
@@ -128,7 +128,7 @@ async function verifyPinnedRuntimeCapability(options = {}) {
       const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
       info = { pkg, version: manifest.version, physical: manifestPath.split(path.sep).join('/').replace('/package.json', '') };
     } catch (error) {
-      fail('probe_package_unresolved:' + pkg + ':' + String(error && error.message).slice(0, 120), 're-run $pd-setup so the pinned runtime is installed');
+      fail('probe_package_unresolved:' + pkg + ':' + String(error && error.message).slice(0, 120), 're-run $pd-control setup so the pinned runtime is installed');
     }
     identities.push(info);
   }
@@ -140,7 +140,7 @@ async function verifyPinnedRuntimeCapability(options = {}) {
     ({ SqliteConnection } = requireFromRuntime('@principles/core/runtime-v2'));
     ({ createProductionRuleHostGate } = requireFromRuntime('@principles/host-runtime'));
   } catch (error) {
-    fail('probe_import_failed:' + String(error && error.message).slice(0, 200), 'verify the installed runtime layout matches $pd-setup output');
+    fail('probe_import_failed:' + String(error && error.message).slice(0, 200), 'verify the installed runtime layout matches $pd-control setup output');
   }
   if (typeof createProductionRuleHostGate !== 'function') {
     fail('probe_gate_not_exported', 'installed @principles/host-runtime does not export createProductionRuleHostGate — packaging contract broken');

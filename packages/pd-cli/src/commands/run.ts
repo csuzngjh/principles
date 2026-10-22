@@ -2,18 +2,22 @@
  * pd run list/show commands — Runtime v2 run inspection.
  *
  * Usage:
- *   pd run list <taskId>
- *   pd run show <runId>
+ *   pd run list <taskId> [--workspace <path>]
+ *   pd run show <runId> [--workspace <path>]
  */
+import * as path from 'path';
 import { RuntimeStateManager } from '@principles/core';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
 interface RunListOptions {
   taskId: string;
+  workspace?: string;
 }
 
 export async function handleRunList(opts: RunListOptions): Promise<void> {
-  const workspaceDir = resolveWorkspaceDir();
+  const workspaceDir = opts.workspace
+    ? path.resolve(opts.workspace)
+    : resolveWorkspaceDir();
   const stateManager = new RuntimeStateManager({ workspaceDir });
   await stateManager.initialize();
 
@@ -47,10 +51,13 @@ export async function handleRunList(opts: RunListOptions): Promise<void> {
 
 interface RunShowOptions {
   id: string;
+  workspace?: string;
 }
 
 export async function handleRunShow(opts: RunShowOptions): Promise<void> {
-  const workspaceDir = resolveWorkspaceDir();
+  const workspaceDir = opts.workspace
+    ? path.resolve(opts.workspace)
+    : resolveWorkspaceDir();
   const stateManager = new RuntimeStateManager({ workspaceDir });
   await stateManager.initialize();
 

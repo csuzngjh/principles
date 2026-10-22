@@ -41,27 +41,24 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const packageRoot = resolve(__dirname, '..');
 
-/** The only skills allowed to ship (PRI-547 set minus PRI-548 SOP-role retirement). */
+/** The four focused logical capabilities allowed in the published OpenClaw plugin. */
 const EXPECTED_SKILLS = [
   'pd-cli-operator',
-  'pd-implementer',
-  'pd-mentor',
+  'pd-control',
   'pd-pain-signal',
-  'pd-runtime-v2',
+  'pd-review',
 ] as const;
 
 /**
- * Model-invocation boundary (PRI-547 AC-02/AC-03): every skill must declare
- * `disable-model-invocation` EXPLICITLY. Only the three narrow PD operational
- * skills stay model-discoverable; the remaining SOP role skills must not enter
- * the model prompt on their own.
+ * Every published skill declares the OpenClaw-specific invocation flag.
+ * The four narrow PD capabilities are discoverable; general coding roles and
+ * the overlapping Runtime V2 entry are not shipped as separate skills.
  */
 const EXPECTED_MODEL_INVOCATION_DISABLED: Record<string, boolean> = {
   'pd-cli-operator': false,
-  'pd-implementer': true,
-  'pd-mentor': true,
+  'pd-control': false,
   'pd-pain-signal': false,
-  'pd-runtime-v2': false,
+  'pd-review': false,
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {

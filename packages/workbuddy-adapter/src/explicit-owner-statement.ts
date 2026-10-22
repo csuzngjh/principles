@@ -4,10 +4,18 @@ import type { HostEvent } from '@principles/core/host';
 /** Only this native current-user hook can assert Owner authorship. No transcript is read. */
 export async function recordWorkbuddyOwnerStatement(event: HostEvent, workspaceDir: string): Promise<string | undefined> {
   if (event.kind !== 'before_prompt_build') return undefined;
-  const parsed = parseOwnerStatementPrefix(event.context.promptContent);
-  if (!parsed.matched) return undefined;
   const rejected = (reason: string, nextAction: string): string =>
     `[PD] host=workbuddy status=rejected reason=owner_statement_${reason} nextAction=${nextAction}`;
+  const parsed = parseOwnerStatementPrefix(event.context.promptContent);
+  if (!parsed.matched) {
+    // Near-miss prefixes (e.g. half-width colon, leading whitespace) must not
+    // vanish silently: the Owner clearly intended the explicit channel, so
+    // return an actionable format notice instead of no feedback at all.
+    if (typeof event.context.promptContent === 'string' && event.context.promptContent.trimStart().startsWith('PD记录痛苦')) {
+      return rejected('prefix_format', 'Use the exact prefix PD记录痛苦： (full-width colon) at the very start, followed by the Owner statement of 1–500 characters; nothing was recorded.');
+    }
+    return undefined;
+  }
   if (parsed.text === null) return rejected(parsed.reason ?? 'statement_empty', 'Resubmit PD记录痛苦：<Owner statement of 1–500 characters>; nothing was recorded.');
   const raw = event.rawPayload;
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)

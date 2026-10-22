@@ -1,90 +1,52 @@
 ---
 name: pd-cli-operator
-description: Use this skill when operating the Principles Disciple `pd` CLI: probing runtime health, manually recording pain, inspecting tasks/runs/candidates/artifacts, intaking candidates, viewing flow policy, or tracing pain-to-ledger chains. It routes CLI commands safely and forbids direct `.state/.pain_flag` writes.
+description: Use for read-only PD health checks, querying pains/tasks/runs/candidates/artifacts, tracing pain-to-principle evidence, or diagnosing PD CLI and Runtime issues. Do not use for pain registration, Owner governance review, or host setup/control.
 disable-model-invocation: false
 ---
 
 # PD CLI Operator
 
-Use the `pd` CLI as the supported operator surface. Do not modify PD state files by hand unless a command explicitly says to do so.
+Use the existing PD CLI to inspect facts and locate pipeline breaks. This skill routes operations; it does not implement a second business logic path.
 
-## Runtime V2 Pain Diagnosis
+## Workflow
 
-Manual pain diagnosis (bind a recorded session so diagnosis carries real
-trajectory evidence):
-```bash
-pd pain record --reason "<reason>" --score <0-100> --workspace "<workspace>" --session "<session-id>" --json
-```
+1. **Resolve the workspace.** Use the authoritative workspace supplied by the current OpenClaw host/plugin context. When a command requires `--workspace`, pass the confirmed absolute path. If the workspace is unknown, report the blocker instead of guessing from the current directory or another host.
+2. **Discover actual commands.** Start with `pd --help`, then inspect the target command's `--help`. The installed CLI is authoritative.
+3. **Prefer read-only inspection.** Choose the smallest set of queries that answers the question; do not scan unrelated workspaces.
+4. **Trace each stage.** Verify pain registration, diagnostic task, run result, candidate, admission, and Owner governance separately. Never infer that the whole chain completed from one status field.
+5. **Report evidence.** Separate confirmed facts, unknowns, the blocked stage, and next steps. Distinguish command success from business success.
 
-- Without `--session` the record is an honest unbound Owner report: no
-  trajectory evidence, candidates likely gated (`needs_evidence`) by the
-  admission threshold — the CLI output warns about this.
-- `--session <id>` is validated up front; a missing session fails with
-  `session_not_found` before anything is written. When the binding is
-  verified but the trajectory evidence is empty or unreadable, the record
-  degrades honestly to bound + evidence-unavailable and the admission gate
-  decides — no evidence is fabricated.
-- A successful command returning a `painId` is only a record receipt; whether
-  the diagnosis produced candidates and whether they were admitted is decided
-  by `candidateIds` / `admissionResults` / `ledgerEntryIds` in the JSON
-  output. Activation is a separate stage that follows Owner approval.
+## Common read-only commands
 
-Success requires:
-- `status` is `succeeded`
-- candidates are ADMITTED, not merely generated: check `admissionResults` /
-  `candidateOutcomes` for `admitted` decisions and non-empty `ledgerEntryIds`
+Confirm that the installed CLI supports a command before running it:
 
-Forbidden:
-- Do not write `.state/.pain_flag`.
-- Do not use `write_file`, shell redirection, `Set-Content`, `Out-File`, or `node -e` to create pain flags.
+- Health: `pd health --workspace "<workspace>" --json`
+- Runtime probe: `pd runtime probe --runtime pi-ai --workspace "<workspace>" --json`
+- Flow policy: `pd runtime flow show --workspace "<workspace>" --json`
+- Pain list and admission evidence: `pd pain list --workspace "<workspace>" --json`, `pd pain evidence --workspace "<workspace>" --json`
+- Pain-to-principle trace: `pd runtime trace show --pain-id "<painId>" --workspace "<workspace>" --json`
+- Task and run: `pd task show "<taskId>" --workspace "<workspace>" --json`, `pd run show "<runId>" --workspace "<workspace>"`
+- Candidates and artifacts: `pd candidate list --task-id "<taskId>" --workspace "<workspace>" --json`, `pd candidate show "<candidateId>" --workspace "<workspace>" --json`, `pd artifact show "<artifactId>" --workspace "<workspace>" --json`
 
-## Health And Policy
+OpenClaw's `/pd-status` primarily reports host status such as GFI/Pain dictionary; it is not a substitute for Runtime health or tracing a specific task.
 
-Runtime probe:
-```bash
-pd runtime probe --runtime pi-ai --workspace "<workspace>" --json
-```
+## Interpret results correctly
 
-Flow policy:
-```bash
-pd runtime flow show --workspace "<workspace>" --json
-```
+- A `painId` proves only that pain registration returned a receipt.
+- Task creation does not prove diagnosis completed.
+- Candidate generation does not prove admission; inspect the actual admission decision and corresponding ledger evidence.
+- Admission does not prove Owner approval or activation; opening the Console does not prove a governance decision was made.
 
-## Trace Pain-To-Ledger Chain (PRI-455 promoted)
+## Writes and failures
 
-Trace the full evidence chain from pain signal to principle ledger:
-```bash
-pd trace show --pain-id "<painId>" --workspace "<workspace>" --json
-```
+This skill is read-only by default. Before any retry, recovery, repair, or other side effect, confirm user intent, command help, eligibility, and impact. Use dry-run first when supported and read back the resulting state afterward. Do not blindly retry commands that may have side effects.
 
-## Activation Management (PRI-455 promoted)
+When the CLI is unavailable, preserve the actual error and distinguish missing installation, uninitialized workspace, insufficient permissions, and Runtime failure. Route host installation, initialization, disablement, or recovery to `pd-control`.
 
-List active activations:
-```bash
-pd activation list --workspace "<workspace>" --json
-```
+## Never
 
-Deactivate (rollback) an activation:
-```bash
-pd activation deactivate --activation-id "<activationId>" --workspace "<workspace>" --json
-```
-
-## Inspect Runtime V2 Objects
-
-Tasks and runs:
-```bash
-pd task show --task-id "<taskId>" --json
-pd run show --run-id "<runId>" --json
-```
-
-Candidates and artifacts:
-```bash
-pd candidate list --workspace "<workspace>" --json
-pd candidate show --candidate-id "<candidateId>" --workspace "<workspace>" --json
-pd artifact show --artifact-id "<artifactId>" --workspace "<workspace>" --json
-```
-
-Manual intake:
-```bash
-pd candidate intake --candidate-id "<candidateId>" --workspace "<workspace>" --json
-```
+- Edit the database, ledger, configuration, or internal artifacts directly.
+- Write `.state/.pain_flag` or call legacy `write_pain_flag`.
+- Fabricate runtime evidence or present a hypothesis as a confirmed root cause.
+- Approve, reject, or activate a principle through CLI, scripts, or another skill.
+- Treat exit code 0 as automatic proof of business success.

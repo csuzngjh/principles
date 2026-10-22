@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * $pd-status — calm, actionable workspace + plugin health snapshot.
+ * $pd-cli-operator — calm, actionable workspace + plugin health snapshot.
  *
  * Combines: plugin install, runtime install + pinned version match, Node
  * version, workspace resolution (nearest .pd/config.yaml), host.codex flag
@@ -136,7 +136,7 @@ function detectHookTrust() {
     if (!match) return { detectable: false, trusted: undefined, reason: 'hooks_setting_not_found', nextAction: 'Run /hooks in Codex and trust the Principles Disciple hooks.' };
     return { detectable: true, trusted: match[1] === 'true' };
   } catch {
-    return { detectable: false, trusted: undefined, reason: 'config_toml_not_found', nextAction: 'Run Codex once to create ~/.codex/config.toml, then re-run $pd-status.' };
+    return { detectable: false, trusted: undefined, reason: 'config_toml_not_found', nextAction: 'Run Codex once to create ~/.codex/config.toml, then re-run $pd-cli-operator.' };
   }
 }
 
@@ -170,16 +170,16 @@ function main() {
     const adapter = readInstalledVersion(runtimeDir, '@principles/codex-adapter');
     const hostRuntime = readInstalledVersion(runtimeDir, '@principles/host-runtime');
     if (adapter === 'not-installed') {
-      push('runtime', 'degraded', 'runtime not installed in plugin data', 'Run the $pd-setup skill to install the pinned runtime.');
+      push('runtime', 'degraded', 'runtime not installed in plugin data', 'Run the $pd-control setup skill to install the pinned runtime.');
     } else if (pins === null || typeof pins.codexAdapter !== 'string' || typeof pins.hostRuntime !== 'string') {
       push('runtime', 'ok', `adapter@${adapter} host-runtime@${hostRuntime} (pin unverified${root.ok ? '' : ' — plugin root not located'})`);
     } else if (adapter !== pins.codexAdapter || hostRuntime !== pins.hostRuntime) {
-      push('runtime', 'degraded', `installed adapter@${adapter}+host-runtime@${hostRuntime} != pinned ${pins.codexAdapter}+${pins.hostRuntime}`, 'Re-run $pd-setup to realign the runtime with the pinned versions.');
+      push('runtime', 'degraded', `installed adapter@${adapter}+host-runtime@${hostRuntime} != pinned ${pins.codexAdapter}+${pins.hostRuntime}`, 'Re-run $pd-control setup to realign the runtime with the pinned versions.');
     } else {
       push('runtime', 'ok', `adapter@${adapter} host-runtime@${hostRuntime} (pinned match)`);
     }
   } else {
-    push('runtime', 'degraded', data.reason, `${data.nextAction} Then run $pd-setup.`);
+    push('runtime', 'degraded', data.reason, `${data.nextAction} Then run $pd-control setup.`);
   }
 
   const workspaceDir = path.resolve(args.workspace ?? process.cwd());
@@ -187,7 +187,7 @@ function main() {
   if (ws.ok) {
     const flag = readHostCodexFlag(path.join(ws.workspaceDir, '.pd', 'config.yaml'));
     if (flag.enabled === true) push('workspace', 'ok', `${ws.workspaceDir} — host.codex enabled (config override)`);
-    else if (flag.enabled === false) push('workspace', 'degraded', `${ws.workspaceDir} — host.codex DISABLED (config override)`, 'Run $pd-disable --enable (or set features.host.codex.enabled=true in .pd/config.yaml) to activate PD.');
+    else if (flag.enabled === false) push('workspace', 'degraded', `${ws.workspaceDir} — host.codex DISABLED (config override)`, 'Run $pd-control enable to activate PD.');
     else if (flag.registryDefault) push('workspace', 'ok', `${ws.workspaceDir} — host.codex not overridden in config (follows registry default; run with --pd-health for the runtime-resolved state)`);
     else if (flag.reason === 'features_invalid') push('workspace', 'degraded', `${ws.workspaceDir} — config features section invalid (validatePdConfig would reject it)`, 'Fix the features section in .pd/config.yaml: it must be a map of flag objects ({ id: { category, enabled } }); a missing or non-map section fails config validation.');
     else push('workspace', 'degraded', `${ws.workspaceDir} — host.codex entry invalid (${flag.reason ?? 'parse'})`, 'Fix features.host.codex in .pd/config.yaml: the entry must be an object with a boolean enabled field, or remove the entry to follow the registry default.');

@@ -1,85 +1,52 @@
 ---
 name: pd-cli-operator
-description: 操作 Principles Disciple `pd` CLI 时使用：运行时健康检查、手动记录痛苦、查看 task/run/candidate/artifact、intake candidate、查看 flow policy、追踪痛苦到原则的证据链。本技能提供安全 CLI 路由，并禁止直接写 `.state/.pain_flag`。
+description: 当需要只读检查 PD 运行健康、查询痛苦/任务/运行/候选/工件，或追踪痛苦到原则的证据链时使用。用于 PD CLI 与 Runtime 排障；不用于登记痛苦、Owner 治理审阅或宿主管理。
 disable-model-invocation: false
 ---
 
 # PD CLI Operator
 
-把 `pd` CLI 当作唯一受支持的操作界面。不要手工修改 PD state 文件，除非某个 CLI 命令明确要求这样做。
+通过现有 PD CLI 查询事实、定位链路断点，并给出基于证据的结论。本技能只负责操作路由，不实现第二套业务逻辑。
 
-## Runtime V2 痛苦诊断
+## 工作流程
 
-手动痛苦诊断（绑定已记录的会话，让诊断携带真实轨迹证据）：
-```bash
-pd pain record --reason "<reason>" --score <0-100> --workspace "<workspace>" --session "<session-id>" --json
-```
+1. **确认工作区。** 使用当前 OpenClaw 宿主/插件上下文提供的权威工作区。命令要求 `--workspace` 时传入已确认的绝对路径。无法确定工作区就先报告阻塞，不要从当前目录、最近目录或其他宿主猜测。
+2. **发现真实命令。** 先检查 `pd --help`，再检查目标命令的 `--help`。命令名和参数以当前安装版本为准。
+3. **优先只读检查。** 按问题选择最少的查询命令，不遍历无关工作区。
+4. **逐段追踪。** 分别核实痛苦登记、诊断任务、运行结果、候选、准入和 Owner 治理结果，不由单个状态字段推断整条链路已完成。
+5. **报告证据。** 说明已确认事实、未知部分、阻塞层和下一步；区分命令成功与业务目标成功。
 
-- 不带 `--session` 的记录是诚实的 unbound Owner 报告：没有轨迹证据，
-  候选大概率被准入阈值拦为 `needs_evidence` —— CLI 输出会明确警告。
-- `--session <id>` 会先校验；会话不存在时以 `session_not_found` 失败，
-  不会写入任何内容。会话验证通过但轨迹证据为空或不可读时，按
-  bound + 证据不可用诚实降级提交，由 admission gate 评判，不会伪造证据。
-- 命令成功返回 `painId` 只代表记录回执；诊断是否产出候选、候选是否被
-  准入，以 JSON 输出中的 `candidateIds` / `admissionResults` /
-  `ledgerEntryIds` 为准。激活是 Owner 批准之后的独立阶段。
+## 常用只读命令
 
-成功标准：
-- `status` 是 `succeeded`
-- 候选被**准入**而非仅被生成：检查 `admissionResults` /
-  `candidateOutcomes` 中的 `admitted` 决策和 `ledgerEntryIds` 非空
+先确认当前 CLI 支持这些命令，再按需执行：
 
-禁止：
-- 不要写 `.state/.pain_flag`。
-- 不要用 `write_file`、shell 重定向、`Set-Content`、`Out-File` 或 `node -e` 创建 pain flag。
+- 健康检查：`pd health --workspace "<workspace>" --json`
+- Runtime 探针：`pd runtime probe --runtime pi-ai --workspace "<workspace>" --json`
+- 流程策略：`pd runtime flow show --workspace "<workspace>" --json`
+- 痛苦列表与准入证据：`pd pain list --workspace "<workspace>" --json`、`pd pain evidence --workspace "<workspace>" --json`
+- 痛苦到原则的追踪：`pd runtime trace show --pain-id "<painId>" --workspace "<workspace>" --json`
+- 任务与运行：`pd task show "<taskId>" --workspace "<workspace>" --json`、`pd run show "<runId>" --workspace "<workspace>"`
+- 候选与工件：`pd candidate list --task-id "<taskId>" --workspace "<workspace>" --json`、`pd candidate show "<candidateId>" --workspace "<workspace>" --json`、`pd artifact show "<artifactId>" --workspace "<workspace>" --json`
 
-## 健康检查和策略
+OpenClaw 的 `/pd-status` 主要展示 GFI/Pain 词典等宿主状态，不应代替 Runtime 健康检查或具体任务追踪。
 
-运行时探针：
-```bash
-pd runtime probe --runtime pi-ai --workspace "<workspace>" --json
-```
+## 结果判定
 
-业务流策略：
-```bash
-pd runtime flow show --workspace "<workspace>" --json
-```
+- `painId` 只证明痛苦登记有回执。
+- 任务创建不等于诊断完成。
+- 候选生成不等于通过准入；必须检查实际 admission 决策及对应账本证据。
+- 准入成功不等于 Owner 已批准或原则已激活；打开 Console 也不等于完成治理决定。
 
-## 追踪痛苦到原则链（PRI-455 提升）
+## 写操作与失败
 
-追踪从痛苦信号到原则账本的完整证据链：
-```bash
-pd trace show --pain-id "<painId>" --workspace "<workspace>" --json
-```
+本技能默认只读。若需要重试、恢复、修复或其他有副作用的操作，先确认用户意图、命令帮助、资格条件和影响范围；支持时先 dry-run，执行后读回真实状态。不要盲目重试可能产生副作用的命令。
 
-## 激活管理（PRI-455 提升）
+CLI 不可用时，保留真实错误并区分未安装、工作区未初始化、权限不足与 Runtime 故障。需要安装、初始化、停用或恢复宿主接入时转交 `pd-control`。
 
-列出当前激活：
-```bash
-pd activation list --workspace "<workspace>" --json
-```
+## 禁止
 
-停用（回滚）激活：
-```bash
-pd activation deactivate --activation-id "<activationId>" --workspace "<workspace>" --json
-```
-
-## 查看 Runtime V2 对象
-
-Tasks 和 runs：
-```bash
-pd task show --task-id "<taskId>" --json
-pd run show --run-id "<runId>" --json
-```
-
-Candidates 和 artifacts：
-```bash
-pd candidate list --workspace "<workspace>" --json
-pd candidate show --candidate-id "<candidateId>" --workspace "<workspace>" --json
-pd artifact show --artifact-id "<artifactId>" --workspace "<workspace>" --json
-```
-
-手动 intake：
-```bash
-pd candidate intake --candidate-id "<candidateId>" --workspace "<workspace>" --json
-```
+- 不直接修改数据库、账本、配置或内部工件。
+- 不写 `.state/.pain_flag`，不调用 legacy `write_pain_flag`。
+- 不伪造运行证据或把推测写成已确认根因。
+- 不通过 CLI、脚本或其他技能批准、拒绝或激活原则。
+- 不将命令退出码为 0 自动等同于业务成功。

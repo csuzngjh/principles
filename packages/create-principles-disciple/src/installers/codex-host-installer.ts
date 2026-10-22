@@ -242,7 +242,7 @@ export class CodexHostInstaller implements HostInstaller {
    * This method NEVER writes hook registrations anymore. It returns a
    * structured refusal that points at the supported path, and when a legacy
    * PD global registration is detected it offers the explicit migration
-   * route (precise uninstall → Marketplace plugin → $pd-setup consent).
+   * route (precise uninstall → Marketplace plugin → $pd-control setup consent).
    */
   async install(_ctx: HostInstallContext): Promise<HostInstallResult> {
     const hooksJsonPath = getCodexHooksJsonPath();
@@ -254,7 +254,7 @@ export class CodexHostInstaller implements HostInstaller {
         configPath: hooksJsonPath,
         configAction: 'skipped',
         reason: 'A legacy PD global Codex hook registration was detected (async PostToolUse in ~/.codex/hooks.json). The legacy global installer is retired (SPEC rev 2 §17) and cannot update it.',
-        nextAction: 'Migrate to the Marketplace plugin: 1) npx create-principles-disciple uninstall --host codex  (removes ONLY PD-owned entries; evidence is preserved); 2) codex plugin add principles-disciple@principles; 3) run the plugin setup ($pd-setup) — it presents the ingestion disclosure and records consent.',
+        nextAction: 'Migrate to the Marketplace plugin: 1) npx create-principles-disciple uninstall --host codex  (removes ONLY PD-owned entries; evidence is preserved); 2) codex plugin add principles-disciple@principles; 3) run the plugin setup ($pd-control setup) — it presents the ingestion disclosure and records consent.',
       };
     }
     return {
@@ -263,7 +263,7 @@ export class CodexHostInstaller implements HostInstaller {
       configPath: hooksJsonPath,
       configAction: 'skipped',
       reason: 'New Codex global hook registrations are retired (SPEC rev 2 §17). The Marketplace plugin is the only supported new install path for Codex.',
-      nextAction: 'Install the plugin: codex plugin add principles-disciple@principles — then run its setup ($pd-setup), which verifies Node/runtime/workspace/trust and records the conversation-ingestion consent.',
+      nextAction: 'Install the plugin: codex plugin add principles-disciple@principles — then run its setup ($pd-control setup), which verifies Node/runtime/workspace/trust and records the conversation-ingestion consent.',
     };
   }
 

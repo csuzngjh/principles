@@ -142,16 +142,16 @@
           <li>
             <strong>pd CLI</strong> —
             {{ isZh
-              ? 'Codex 路径的工作区初始化（$pd-setup）与 $pd-review 需要 pd 命令；缺失时按插件提示安装：'
-              : 'the Codex path workspace setup ($pd-setup) and $pd-review require the pd command; if missing, install it as the plugin instructs:'
+              ? 'Codex 路径的工作区初始化（$pd-control setup）与 $pd-review 需要 pd 命令；缺失时按插件提示安装：'
+              : 'the Codex path workspace setup ($pd-control setup) and $pd-review require the pd command; if missing, install it as the plugin instructs:'
             }}
           </li>
         </ul>
         <div class="command-row"><code>{{ pdCliCommand }}</code><button type="button" :aria-label="copyLabel(isZh ? '安装 pd CLI 命令' : 'install pd CLI command')" aria-live="polite" data-umami-event="copy_pd_cli_command" @click="copyCommand('pdCli', pdCliCommand)">{{ copyState('pdCli') }}</button></div>
         <p class="step-desc">
           {{ isZh
-            ? '插件安装后的 $pd-setup 会校验 Node 运行时、工作区与信任链，缺什么会明确告诉你。'
-            : 'after installing the plugin, $pd-setup verifies the Node runtime, workspace, and trust chain — it names anything missing.'
+            ? '插件安装后的 $pd-control setup 会校验 Node 运行时、工作区与信任链，缺什么会明确告诉你。'
+            : 'after installing the plugin, $pd-control setup verifies the Node runtime, workspace, and trust chain — it names anything missing.'
           }}
         </p>
       </section>
@@ -162,8 +162,8 @@
         <div class="command-row"><code>{{ codexPluginCommand }}</code><button type="button" :aria-label="copyLabel(isZh ? '安装插件命令' : 'install plugin command')" aria-live="polite" data-umami-event="copy_codex_plugin_command" @click="copyCommand('codexPlugin', codexPluginCommand)">{{ copyState('codexPlugin') }}</button></div>
         <p class="step-desc">
           {{ isZh
-            ? '安装插件后，在 Codex 会话中运行 $pd-setup 初始化工作区，并通过 /hooks 信任 PD 钩子。$pd-review 打开审核控制台，$pd-disable 一键停用。'
-            : 'After installing the plugin, run $pd-setup in a Codex session to initialize the workspace, then trust the PD hooks via /hooks. $pd-review opens the owner console; $pd-disable stops PD instantly.'
+            ? '安装插件后，在 Codex 会话中运行 $pd-control setup 初始化工作区，并通过 /hooks 信任 PD 钩子。用 $pd-cli-operator 检查状态，$pd-review 打开 Owner Console；$pd-control disable/enable 可停用或恢复。'
+            : 'After installing the plugin, run $pd-control setup in a Codex session to initialize the workspace, then trust the PD hooks via /hooks. Use $pd-cli-operator for status, $pd-review to open the Owner Console, and $pd-control disable/enable to stop or resume PD.'
           }}
         </p>
       </section>
@@ -172,8 +172,8 @@
         <h2 class="step-title">{{ isZh ? '步骤 3 · 验证安装（Codex）' : 'Step 3 · Verify the install (Codex)' }}</h2>
         <p class="step-desc">
           {{ isZh
-            ? '$pd-setup 完成后，$pd-review 能打开审核控制台即说明插件链路可用。命令行健康检查：'
-            : 'Once $pd-setup completes, opening the review console via $pd-review confirms the plugin path works. CLI health check:'
+            ? '$pd-control setup 完成后，$pd-review 能打开审核控制台即说明插件链路可用。命令行健康检查：'
+            : 'Once $pd-control setup completes, opening the review console via $pd-review confirms the plugin path works. CLI health check:'
           }}
         </p>
         <div class="command-row"><code>{{ codexHealthCommand }}</code><button type="button" :aria-label="copyLabel(isZh ? 'Codex 健康检查命令' : 'Codex health-check command')" aria-live="polite" data-umami-event="copy_canary_command" @click="copyCommand('codexHealth', codexHealthCommand)">{{ copyState('codexHealth') }}</button></div>
