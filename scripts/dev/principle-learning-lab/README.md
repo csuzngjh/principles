@@ -119,6 +119,17 @@ scripts/__tests__/principle-learning-lab-actor.test.ts # 18 项真实 Actor 离�
 - **`lib/real-runner.mjs`**：`runRealArm`/`runRealStudy`——I0 反思（1 次调用）→
   `freezeCandidate`（原样字节+hash，不润色；E0 无内容 arm 用透明哨兵）→ 同通道投递 →
   逐机会交互执行 → 同一三层裁定器。judge 泄漏即停整场研究（后续 arm 不启动）。
+- **C-A 四条件内容形态**（`runRealArm` 的 `contentMode`，预注册 contrastId
+  real-candidate-vs-summary-vs-raw-vs-none / SPEC §4.2 抽象对照）：`policy`（默认，I0 反思）、
+  `summary`（**一次**同形摘要调用——与 I0 相同的传输轮次/1024 token 预算/自由 JSON 路径，
+  指令是"如实强摘要"：保留一切具体事实与历史自记录的教训，对照点是表达形态而非信息量）、
+  `raw`（冻结的历史字节本身，零生成调用；EA/EB/EN 渲染 1696/1739/1845 字符均在 2000 字符
+  通道预算内，超限在投递门诚实失败而非截断）、`none`（无投递内容——E0 流程，可用于任一
+  历史做配对对照）。四条件**只差内容**：通道/位置/budgetChars 完全一致（deliveryInvariance）。
+  `runRealStudy` 接受 `armSpecs: [{historyId, contentMode}]`（同一历史的四向对照=四条 spec；
+  旧 `historyIds` 语义不变）。真实研究的 arm 清单与顺序仍是 Owner 的 OD-3 决策——本机制
+  只让任何预注册选择可执行。arm 侧 `reflection` 字段更名为 `generation`
+  （`{stage, requests, failure}`），数据质量理由前缀随之取自 stage。
 - **离线演练**（`scripts/__tests__/principle-learning-lab-actor.test.ts`，18 项）：观察驱动的
   动作改变、终局后零调用、无效/超时有界、上限证据、canary 通道守卫、跨 arm 隔离、
   冻结完整性、Oracle↔裁定一致、sidecar 校验通过、泄漏停止研究。
