@@ -36,6 +36,7 @@ import { buildPairedReport, evaluateRehearsalGate } from './lib/prr-paired.mjs';
 import { buildDraftFreeze, validateFreezeForRealRun } from './lib/prr-freeze.mjs';
 import {
   assertStateUnchanged,
+  classifyLedgerAvailability,
   measureLedgerPrinciples,
   readSyntheticLedger,
   rehearseSqliteReadonlySemantics,
@@ -97,8 +98,9 @@ async function rehearseLedgerSemantics({ workDir }) {
   const p = (msg) => problems.push(msg);
   const cases = [];
 
-  const runCase = async ({ case: caseName, prepare, expectedClass, expect }) => {
+  const runCase = async ({ case: caseName, prepare, expectedClass, expect, authorization, trueZeroEvidence }) => {
     const dir = path.join(workDir, caseName);
+    fs.rmSync(dir, { recursive: true, force: true }); // rehearsal-owned output; keep reruns idempotent
     fs.mkdirSync(dir, { recursive: true });
     prepare(dir);
     const before = snapshotTree(dir);
@@ -107,7 +109,7 @@ async function rehearseLedgerSemantics({ workDir }) {
       p(`${caseName}: ${problem}`);
       return;
     }
-    const measure = measureLedgerPrinciples({ coreResult });
+    const measure = measureLedgerPrinciples({ coreResult, authorization, trueZeroEvidence });
     stateProblems.push(...assertStateUnchanged(before, snapshotTree(dir), caseName));
     if (measure.availabilityClass !== expectedClass) {
       p(`${caseName}: availability class ${measure.availabilityClass} != expected ${expectedClass}`);
@@ -118,15 +120,22 @@ async function rehearseLedgerSemantics({ workDir }) {
         p(`${caseName}: ${field} = ${JSON.stringify(actual)} != expected ${JSON.stringify(expected)}`);
       }
     }
-    // The core anti-pattern check: a non-ok ledger must NEVER surface as a
-    // confident zero eligible count (B0 G5 / v1.3 §1.2).
+    // The core anti-pattern checks: a non-ok ledger must NEVER surface as a
+    // confident zero eligible count, and a zero count must never claim a
+    // proven true zero without independent evidence (B0 G5 / v1.3 §1.2 / F-03).
     if (expectedClass === 'unreadable' && measure.m1.count === 0) {
       p(`${caseName}: unreadable ledger was misreported as 0 eligible principles`);
+    }
+    if (measure.m1.trueZero === true && !trueZeroEvidence) {
+      p(`${caseName}: trueZero=true without independent auditable evidence`);
     }
     if (expectedClass === 'ok_but_empty_ledger' && measure.m1.trueZero !== false) {
       p(`${caseName}: parse-lenient empty ledger must not be marked a proven true zero`);
     }
-    cases.push({ case: caseName, expectedClass, measure: { availabilityClass: measure.availabilityClass, m1: measure.m1, m2: measure.m2, m4: measure.m4, m5: measure.m5 } });
+    if (measure.m1.reasonCode === 'availability_status_unknown') {
+      p(`${caseName}: unknown availability leaked into a declared-class case`);
+    }
+    cases.push({ case: caseName, expectedClass, measure: { availabilityClass: measure.availabilityClass, authorizationBasis: measure.authorizationBasis, m1: measure.m1, m2: measure.m2, m3: measure.m3, m4: measure.m4, m5: measure.m5 } });
   };
 
   await runCase({
@@ -136,8 +145,9 @@ async function rehearseLedgerSemantics({ workDir }) {
       { id: 'p-syn-2', status: 'active', derivedFromPainIds: [], reuseEvidence: [{ candidateId: 'cand-syn-1', painId: 'pain-syn-1', evidenceQuality: 'exact' }] },
       { id: 'p-syn-3', status: 'deactivated', derivedFromPainIds: [], reuseEvidence: [] },
     ]),
+    authorization: { summaryFieldsAllowed: true },
     expectedClass: 'ok',
-    expect: { 'm1.count': 2, 'm2.count': 2, 'm3.count': 2, 'm4.count': 1 },
+    expect: { 'm1.count': 2, 'm2.count': 2, 'm3.count': 2, 'm4.count': 1, 'm3.reasonCode': 'ok' },
     // cand-syn-1 is claimed by p-syn-1 (derived) AND p-syn-2 (reuse) — an
     // explicit M4 conflict; both principles still locate pain-syn-1 (M2), the
     // conflict is flagged, never resolved by last-write-wins.
@@ -154,7 +164,15 @@ async function rehearseLedgerSemantics({ workDir }) {
     case: 'ledger-zero-byte',
     prepare: (dir) => fs.writeFileSync(path.join(dir, 'principle_training_state.json'), '', 'utf8'),
     expectedClass: 'empty',
-    expect: { 'm1.count': 0, 'm1.trueZero': true },
+    expect: { 'm1.count': 0, 'm1.trueZero': false, 'm1.reasonCode': 'ledger_empty__true_zero_unproven_requires_independent_evidence' },
+  });
+
+  await runCase({
+    case: 'ledger-zero-byte-with-independent-evidence',
+    prepare: (dir) => fs.writeFileSync(path.join(dir, 'principle_training_state.json'), '', 'utf8'),
+    trueZeroEvidence: { auditor: 'offline-rehearsal', recordRef: 'synthetic independent audit record (fixture)' },
+    expectedClass: 'empty',
+    expect: { 'm1.count': 0, 'm1.trueZero': true, 'm1.reasonCode': 'ledger_empty_with_independent_true_zero_evidence' },
   });
 
   await runCase({
@@ -171,6 +189,7 @@ async function rehearseLedgerSemantics({ workDir }) {
       { id: 'p-syn-b', status: 'active', derivedFromPainIds: ['cand-shared'], reuseEvidence: [] },
       { id: 'p-syn-c', status: 'active', derivedFromPainIds: [], reuseEvidence: [{ candidateId: 'cand-clean', painId: 'pain-clean', evidenceQuality: 'excerpt_only' }] },
     ]),
+    authorization: { summaryFieldsAllowed: true },
     expectedClass: 'ok',
     expect: {
       'm4.count': 1,
@@ -180,20 +199,81 @@ async function rehearseLedgerSemantics({ workDir }) {
     },
   });
 
-  // D-01-not-granted variant: summary fields unauthorized → M3 zero with the
-  // field name, never a silent 0.
+  // D-01 authorization semantics — three declared/undeclared states must be
+  // observably different; omission is treated as UNAUTHORIZED, never allowed.
   {
-    const dir = path.join(workDir, 'ledger-summary-unauthorized');
-    fs.mkdirSync(dir, { recursive: true });
-    buildLedgerFixture(dir, [
+    const fixture = [
       { id: 'p-syn-u', status: 'active', derivedFromPainIds: [], reuseEvidence: [{ candidateId: 'cand-u', painId: 'pain-u', evidenceQuality: 'exact' }] },
-    ]);
-    const { coreResult } = await readSyntheticLedger(dir);
-    const measure = measureLedgerPrinciples({ coreResult, authorization: { summaryFieldsAllowed: false } });
-    if (measure.m3.count !== 0 || measure.m5.unauthorizedCount !== 1 || !measure.m5.unauthorizedField) {
-      p(`ledger-summary-unauthorized: M3=${measure.m3.count} M5.unauthorized=${measure.m5.unauthorizedCount} — unauthorized summaries must be counted with the field name, not silently zeroed`);
+    ];
+    const build = (dir) => buildLedgerFixture(dir, fixture);
+
+    await runCase({
+      case: 'ledger-authorization-omitted',
+      prepare: build,
+      expectedClass: 'ok',
+      expect: {
+        'm3.count': 0,
+        'm3.reasonCode': 'summary_authorization_not_declared',
+        'm5.unauthorizedCount': 1,
+      },
+    });
+    if (cases.length > 0) {
+      const last = cases[cases.length - 1];
+      if (last.measure.authorizationBasis !== 'NOT_DECLARED_TREATED_AS_UNAUTHORIZED' || last.measure.m5.unauthorizedField == null) {
+        p('ledger-authorization-omitted: basis/field markers missing — omission must be observably unauthorized');
+      }
     }
-    cases.push({ case: 'ledger-summary-unauthorized', expectedClass: 'ok', measure: { availabilityClass: measure.availabilityClass, m3: measure.m3, m5: measure.m5 } });
+
+    await runCase({
+      case: 'ledger-summary-unauthorized',
+      prepare: build,
+      authorization: { summaryFieldsAllowed: false },
+      expectedClass: 'ok',
+      expect: {
+        'm3.count': 0,
+        'm3.reasonCode': 'summary_fields_unauthorized_d01',
+        'm5.unauthorizedCount': 1,
+      },
+    });
+    if (cases[cases.length - 1].measure.authorizationBasis !== 'D01_NOT_GRANTED_DECLARED') {
+      p('ledger-summary-unauthorized: declared-false basis marker missing');
+    }
+
+    await runCase({
+      case: 'ledger-summary-authorized',
+      prepare: build,
+      authorization: { summaryFieldsAllowed: true },
+      expectedClass: 'ok',
+      expect: { 'm3.count': 1, 'm3.reasonCode': 'ok', 'm5.unauthorizedCount': 0 },
+    });
+    if (cases[cases.length - 1].measure.authorizationBasis !== 'D01_GRANTED_DECLARED') {
+      p('ledger-summary-authorized: declared-true basis marker missing');
+    }
+  }
+
+  // Unknown availability status + malformed authorization must fail loud.
+  {
+    const unknownStatus = classifyLedgerAvailability({ ledger: {}, availability: {} });
+    const missingStatus = classifyLedgerAvailability({});
+    const inconsistent = classifyLedgerAvailability({ availability: { status: 'unreadable' }, ledger: { tree: { principles: { p: {} } } } });
+    if (unknownStatus !== 'unmeasurable_unknown_availability' || missingStatus !== 'unmeasurable_unknown_availability') {
+      p(`unknown/missing availability must be unmeasurable (got ${unknownStatus}/${missingStatus})`);
+    }
+    if (inconsistent !== 'unreadable') {
+      p(`authority status must win over ledger content (got ${inconsistent})`);
+    }
+    const unknownMeasure = measureLedgerPrinciples({ coreResult: { availability: {} }, authorization: { summaryFieldsAllowed: true } });
+    if (unknownMeasure.m1.count !== null || unknownMeasure.m1.reasonCode !== 'availability_status_unknown' || unknownMeasure.m1.trueZero !== false) {
+      p(`unknown availability must measure nothing (${JSON.stringify(unknownMeasure.m1)})`);
+    }
+    let malformedThrew = false;
+    try {
+      measureLedgerPrinciples({ coreResult: { availability: { status: 'ok' } }, authorization: { summaryFieldsAllowed: 'yes' } });
+    } catch {
+      malformedThrew = true;
+    }
+    if (!malformedThrew) p('malformed authorization (non-boolean summaryFieldsAllowed) must throw (rc-3)');
+    cases.push({ case: 'semantic-probe-unknown-status-and-authorization', expectedClass: 'unmeasurable_unknown_availability', measure: { availabilityClass: unknownStatus, authorizationBasis: 'D01_GRANTED_DECLARED', m1: unknownMeasure.m1 } });
   }
 
   return { problems, stateProblems, cases };

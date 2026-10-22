@@ -143,47 +143,80 @@ export function validateFreezeRecord(freeze) {
 }
 
 /**
- * Fail-closed REAL-RUN gate (B0 §5/§6). Returns { problems, minPairsEligible }.
+ * Fail-closed REAL-RUN gate (B0 §5/§6). Returns { problems, minPairsEligible,
+ * pairDenominator }.
  *
- * `verifyOwnerApproval` is a trusted, caller-supplied resolver:
- *   ({ decisionRef }) => { verified: boolean, approved: boolean, reason?: string }
- * In production it resolves the Owner decision record from the authoritative
- * store; nothing in this module substitutes a default for it. If it is not a
- * function, real-run validation fails closed.
+ * REQUIRED INPUTS — any missing one is a hard refusal, never a skipped check:
+ *   - freeze: the freeze record itself;
+ *   - preregBody: the preregistration body whose canonical SHA-256 must match
+ *     the recorded hash (omitting it can never skip the FZ-15 check);
+ *   - dataset: the actually loaded dataset, for the mandatory FZ-01
+ *     taskSetHash cross-check (omitting it can never skip the FZ-01 check);
+ *   - verifyOwnerApproval: a trusted, caller-supplied resolver
+ *       ({ decisionRef }) => { verified, approved, frozenCommitSha, reason? }
+ *     returning undefined/null/{} /verified:false/approved:false/throwing are
+ *     ALL refusals. It must also bind the frozen commit: evidence.frozenCommitSha
+ *     must exist and equal ownerApproval.frozenCommitSha — a 40-hex string in
+ *     the freeze record alone is NOT a valid approval.
  *
- * `dataset` (optional) cross-checks FZ-01: the frozen taskSetHash must equal
- * the loaded dataset's fixtureHash — a study may not run on data other than
- * what was frozen.
+ * Nothing here reads env vars, defaults or script arguments to fill an
+ * authorization gap. A DRAFT record is refused; offline rehearsals must not
+ * fabricate Owner approval (the rehearsal gate relies on the refusal).
  */
 export function validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval, dataset }) {
-  const problems = validateFreezeRecord(freeze);
+  const problems = [];
   const p = (msg) => problems.push(msg);
 
-  if (problems.length > 0) return { problems, minPairsEligible: null };
+  // Required-input gate: a missing input refuses the run outright.
+  if (freeze === undefined || freeze === null) {
+    p('freeze record missing — real run refused');
+    return { problems, minPairsEligible: null, pairDenominator: null };
+  }
+  if (preregBody === undefined || preregBody === null) {
+    p('FZ-15: preregBody missing — the preregistration body hash check cannot be skipped; real run refused');
+  }
+  if (dataset === undefined || dataset === null) {
+    p('FZ-01: dataset missing — the frozen taskSetHash cannot be cross-checked without the actually loaded dataset; real run refused');
+  }
+  if (typeof verifyOwnerApproval !== 'function') {
+    p('FZ-15: trusted Owner-approval verifier missing — real-run authorization cannot be established without an authoritative decision-record resolver; real run refused');
+  }
+
+  problems.push(...validateFreezeRecord(freeze));
+  if (problems.length > 0) return { problems, minPairsEligible: null, pairDenominator: null };
 
   if (freeze.status !== PRR_FREEZE_FROZEN_STATUS) {
     p(`freeze.status must be ${PRR_FREEZE_FROZEN_STATUS} before any real A/C run (current: ${freeze.status})`);
   }
+
+  // FZ-15 — preregistration body hash (mandatory; preregBody is a required
+  // input above, so this check always executes).
   if (preregBody !== undefined && preregBody !== null) {
     const actualHash = preregBodyHash(preregBody);
     if (freeze.prereg.canonicalSha256 !== actualHash) {
       p(`FZ-15: preregistration body hash mismatch (record=${freeze.prereg.canonicalSha256.slice(0, 12)}…, actual=${actualHash.slice(0, 12)}…) — the body changed after freezing: INVALID_PROTOCOL, start a new studyId`);
     }
   }
-  if (typeof verifyOwnerApproval !== 'function') {
-    p('FZ-15: trusted Owner-approval verifier missing — real-run authorization cannot be established without an authoritative decision-record resolver');
-  } else if (isPlainObject(freeze.ownerApproval)) {
+
+  // FZ-15 — trusted verifier verdict. Only verified===true AND approved===true
+  // together (and a commit binding) authorize; every other shape refuses.
+  if (typeof verifyOwnerApproval === 'function' && isPlainObject(freeze.ownerApproval)) {
     let evidence;
     try {
       evidence = verifyOwnerApproval({ decisionRef: freeze.ownerApproval.decisionRef });
     } catch (error) {
       p(`FZ-15: Owner approval verification failed: ${error instanceof Error ? error.message : String(error)}`);
     }
-    if (evidence && evidence.verified !== true) {
-      p(`FZ-15: Owner decision ref was not verified (${evidence.reason ?? 'no reason given'})`);
-    }
-    if (evidence && evidence.verified === true && evidence.approved !== true) {
-      p('FZ-15: referenced Owner decision is not an approval');
+    if (evidence === undefined || evidence === null) {
+      p('FZ-15: Owner-approval verifier returned no evidence (undefined/null) — fail-closed refusal');
+    } else if (!isPlainObject(evidence)) {
+      p('FZ-15: Owner-approval verifier returned a non-object evidence — fail-closed refusal');
+    } else if (evidence.verified !== true || evidence.approved !== true) {
+      p(`FZ-15: Owner decision not BOTH verified and approved (verified=${JSON.stringify(evidence.verified)}, approved=${JSON.stringify(evidence.approved)}${evidence.reason ? `; reason: ${evidence.reason}` : ''}) — fail-closed refusal`);
+    } else if (typeof evidence.frozenCommitSha !== 'string' || !/^[0-9a-f]{40}$/.test(evidence.frozenCommitSha)) {
+      p('FZ-15: verified approval carries no frozenCommitSha binding — the authoritative decision record must pin the frozen commit; real run refused');
+    } else if (evidence.frozenCommitSha !== freeze.ownerApproval.frozenCommitSha) {
+      p(`FZ-15: frozenCommitSha mismatch between the freeze record (${freeze.ownerApproval.frozenCommitSha.slice(0, 8)}…) and the authoritative Owner decision (${evidence.frozenCommitSha.slice(0, 8)}…) — the freeze is not bound to the approved protocol; real run refused`);
     }
   }
 
@@ -195,21 +228,25 @@ export function validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApprov
     p(`real run refused — freeze items not frozen: ${missing.join(', ')} (every FZ item needs an Owner-approved value before any real A/C result exists)`);
   }
 
-  // FZ-01 cross-check against the actually loaded dataset.
+  // FZ-01 cross-check against the actually loaded dataset — the hash must
+  // EXIST, be a well-formed SHA-256, and match exactly. A missing hash refuses.
   if (dataset) {
     const fz01 = freeze.items.find((i) => i.id === 'FZ-01');
-    const frozenHash = fz01 && isPlainObject(fz01.value) ? fz01.value.taskSetHash : null;
-    if (typeof frozenHash === 'string') {
-      if (frozenHash !== dataset.fixtureHash) {
-        p(`FZ-01: frozen taskSetHash ${frozenHash.slice(0, 12)}… does not equal the loaded dataset hash ${dataset.fixtureHash.slice(0, 12)}… — the study would run on different tasks than approved`);
-      }
+    const frozenHash = fz01 && isPlainObject(fz01.value) ? fz01.value.taskSetHash : undefined;
+    if (typeof frozenHash !== 'string' || !/^[0-9a-f]{64}$/.test(frozenHash)) {
+      p('FZ-01: value.taskSetHash missing or not a 64-hex SHA-256 — real run refused (the frozen task identity is a mandatory freeze value)');
+    } else if (frozenHash !== dataset.fixtureHash) {
+      p(`FZ-01: frozen taskSetHash ${frozenHash.slice(0, 12)}… does not equal the loaded dataset hash ${dataset.fixtureHash.slice(0, 12)}… — the study would run on different tasks than approved`);
     }
   }
 
   // FZ-11: N must be derived from FZ-09's detectable difference, and the
-  // actual task count must not fall below the declared minimum paired count
-  // (below minimum → UNPROVEN by AC-S7, never a silent pass).
+  // comparison denominator is the number of COMPLETE A/C pairs — tasks whose
+  // C material is ruled unauthorized before exposure are NOT complete pairs
+  // (Gate B plan §3.4: exclusions happen before the denominator). Below the
+  // minimum → UNPROVEN by AC-S7; the frozen threshold is never lowered.
   let minPairsEligible = null;
+  let pairDenominator = null;
   const fz11 = freeze.items.find((i) => i.id === 'FZ-11');
   if (fz11 && isPlainObject(fz11.value)) {
     const minPairs = fz11.value.minPairs;
@@ -221,13 +258,19 @@ export function validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApprov
       p('FZ-11: value.derivationBasis must state how minPairs was derived from FZ-09 (B0 §5.1 rule 2 — no unexplained N)');
     }
     if (Number.isSafeInteger(minPairs) && minPairs >= 1 && basis && dataset) {
-      const pairCount = dataset.tasks?.tasks?.length ?? 0;
-      minPairsEligible = pairCount >= minPairs;
+      const allTasks = dataset.tasks?.tasks ?? [];
+      const unauthorized = allTasks.filter((t) => t?.historyMaterial?.disclosureStatus === 'unauthorized');
+      pairDenominator = {
+        totalTasks: allTasks.length,
+        completePairs: allTasks.length - unauthorized.length,
+        excludedUnauthorizedTasks: unauthorized.length,
+      };
+      minPairsEligible = pairDenominator.completePairs >= minPairs;
       if (minPairsEligible === false) {
-        p(`FZ-11: available task pairs (${pairCount}) fall below the declared minimum (${minPairs}) — by AC-S7 the study outcome is UNPROVEN, not a pass`);
+        p(`FZ-11: complete A/C pairs (${pairDenominator.completePairs} of ${pairDenominator.totalTasks} tasks; ${pairDenominator.excludedUnauthorizedTasks} excluded pre-exposure) fall below the declared minimum (${minPairs}) — by AC-S7 the study outcome is UNPROVEN, not a pass; original data and exclusion records are retained and the frozen threshold is never lowered`);
       }
     }
   }
 
-  return { problems, minPairsEligible };
+  return { problems, minPairsEligible, pairDenominator };
 }

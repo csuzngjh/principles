@@ -59,7 +59,8 @@ function fullyFrozenRecord(preregBody: any, overrides: Record<string, unknown> =
   };
 }
 
-const verifyOk = () => ({ verified: true, approved: true });
+const FROZEN_COMMIT = 'a'.repeat(40);
+const verifyOk = () => ({ verified: true, approved: true, frozenCommitSha: FROZEN_COMMIT });
 
 describe('freeze record structure', () => {
   const preregBody = { studyId: 'test', note: 'body' };
@@ -102,37 +103,120 @@ describe('freeze real-run gate (fail-closed)', () => {
 
   it('a fully-frozen record with a trusted verifier passes', () => {
     const freeze = fullyFrozenRecord(preregBody);
-    const { problems, minPairsEligible } = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifyOk, dataset });
+    const { problems, minPairsEligible, pairDenominator } = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifyOk, dataset });
     expect(problems).toEqual([]);
-    expect(minPairsEligible).toBe(true); // 13 tasks >= minPairs 3
+    // 13 tasks − 1 unauthorized C material = 12 complete A/C pairs.
+    expect(pairDenominator).toEqual({ totalTasks: 13, completePairs: 12, excludedUnauthorizedTasks: 1 });
+    expect(minPairsEligible).toBe(true); // 12 complete pairs >= minPairs 3
   });
 
-  it('refuses without a trusted verifier function (no default authorization)', () => {
+  it('required inputs are mandatory: missing preregBody / dataset / verifier each refuse', () => {
     const freeze = fullyFrozenRecord(preregBody);
-    const { problems } = validateFreezeForRealRun({ freeze, preregBody, dataset });
-    expect(problems.some((p: string) => p.includes('trusted Owner-approval verifier missing'))).toBe(true);
+    const noBody = validateFreezeForRealRun({ freeze, preregBody: undefined, verifyOwnerApproval: verifyOk, dataset });
+    expect(noBody.problems.some((p: string) => p.includes('preregBody missing'))).toBe(true);
+    expect(noBody.minPairsEligible).toBeNull();
+
+    const noDataset = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifyOk, dataset: undefined });
+    expect(noDataset.problems.some((p: string) => p.includes('dataset missing'))).toBe(true);
+
+    const noVerifier = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: undefined, dataset });
+    expect(noVerifier.problems.some((p: string) => p.includes('verifier missing'))).toBe(true);
+
+    const noFreeze = validateFreezeForRealRun({ freeze: undefined, preregBody, verifyOwnerApproval: verifyOk, dataset });
+    expect(noFetchOk(noFreeze)).toBe(true);
+  });
+  function noFetchOk(result: any) {
+    return result.problems.some((p: string) => p.includes('freeze record missing'));
+  }
+
+  it('FZ-01 taskSetHash must EXIST and be well-formed — a missing hash refuses (never skipped)', () => {
+    const freeze = fullyFrozenRecord(preregBody);
+    const fz01: any = freeze.items.find((i: any) => i.id === 'FZ-01');
+    fz01.value = { datasetId: 'x' }; // no taskSetHash at all
+    const { problems } = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifyOk, dataset });
+    expect(problems.some((p: string) => p.includes('taskSetHash missing or not a 64-hex'))).toBe(true);
+
+    fz01.value = { taskSetHash: 'not-a-hash' };
+    const { problems: p2 } = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifyOk, dataset });
+    expect(p2.some((p: string) => p.includes('taskSetHash missing or not a 64-hex'))).toBe(true);
   });
 
-  it('refuses when the verifier rejects the decision reference', () => {
+  it('verifier returning undefined / null / {} each refuse fail-closed', () => {
+    for (const [label, verifier] of [
+      ['undefined', () => undefined],
+      ['null', () => null],
+      ['empty object', () => ({})],
+      ['wrong-shape object', () => ({ hello: 1 })],
+    ] as const) {
+      const freeze = fullyFrozenRecord(preregBody);
+      const { problems } = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifier as never, dataset });
+      expect(problems.length, label).toBeGreaterThan(0);
+      expect(problems.join('; '), label).toMatch(/FZ-15/);
+    }
+  });
+
+  it('verified-only or approved-only verdicts refuse (must be BOTH)', () => {
+    const freeze = fullyFrozenRecord(preregBody);
+    const verifiedOnly = validateFreezeForRealRun({
+      freeze, preregBody,
+      verifyOwnerApproval: () => ({ verified: true, approved: false, frozenCommitSha: FROZEN_COMMIT }),
+      dataset,
+    });
+    expect(verifiedOnly.problems.some((p: string) => p.includes('not BOTH verified and approved'))).toBe(true);
+
+    const approvedOnly = validateFreezeForRealRun({
+      freeze, preregBody,
+      verifyOwnerApproval: () => ({ verified: false, approved: true, frozenCommitSha: FROZEN_COMMIT }),
+      dataset,
+    });
+    expect(approvedOnly.problems.some((p: string) => p.includes('not BOTH verified and approved'))).toBe(true);
+  });
+
+  it('verified approval without a commit binding refuses — 40-hex in the record alone is not approval', () => {
+    const freeze = fullyFrozenRecord(preregBody);
+    const noBinding = validateFreezeForRealRun({
+      freeze, preregBody,
+      verifyOwnerApproval: () => ({ verified: true, approved: true }), // no frozenCommitSha
+      dataset,
+    });
+    expect(noBinding.problems.some((p: string) => p.includes('no frozenCommitSha binding'))).toBe(true);
+
+    const mismatched = validateFreezeForRealRun({
+      freeze, preregBody,
+      verifyOwnerApproval: () => ({ verified: true, approved: true, frozenCommitSha: 'b'.repeat(40) }),
+      dataset,
+    });
+    expect(mismatched.problems.some((p: string) => p.includes('frozenCommitSha mismatch'))).toBe(true);
+  });
+
+  it('verifier throwing refuses', () => {
     const freeze = fullyFrozenRecord(preregBody);
     const { problems } = validateFreezeForRealRun({
       freeze,
       preregBody,
-      verifyOwnerApproval: () => ({ verified: false, reason: 'no such decision record' }),
+      verifyOwnerApproval: () => {
+        throw new Error('authoritative store unreachable');
+      },
       dataset,
     });
-    expect(problems.some((p: string) => p.includes('not verified'))).toBe(true);
+    expect(problems.some((p: string) => p.includes('Owner approval verification failed'))).toBe(true);
   });
 
-  it('refuses when the verifier confirms the record is NOT an approval', () => {
+  it('FZ-11 complete-pair denominator: 12 complete pairs (13 tasks − 1 unauthorized exclusion)', () => {
     const freeze = fullyFrozenRecord(preregBody);
-    const { problems } = validateFreezeForRealRun({
-      freeze,
-      preregBody,
-      verifyOwnerApproval: () => ({ verified: true, approved: false }),
-      dataset,
-    });
-    expect(problems.some((p: string) => p.includes('not an approval'))).toBe(true);
+    // minPairs = 13 → exceeds the 12 complete pairs → UNPROVEN, never padded.
+    const fz11: any = freeze.items.find((i: any) => i.id === 'FZ-11');
+    fz11.value = { minPairs: 13, derivationBasis: 'owner-frozen detectable difference' };
+    const short = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifyOk, dataset });
+    expect(short.pairDenominator).toEqual({ totalTasks: 13, completePairs: 12, excludedUnauthorizedTasks: 1 });
+    expect(short.minPairsEligible).toBe(false);
+    expect(short.problems.some((p: string) => p.includes('UNPROVEN') && p.includes('12 of 13'))).toBe(true);
+
+    // minPairs = 12 → passes the count comparison (all other gates still hold).
+    fz11.value = { minPairs: 12, derivationBasis: 'owner-frozen detectable difference' };
+    const exact = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifyOk, dataset });
+    expect(exact.minPairsEligible).toBe(true);
+    expect(exact.problems).toEqual([]);
   });
 
   it('prereg body edited after freezing → INVALID_PROTOCOL hash mismatch', () => {
@@ -148,15 +232,6 @@ describe('freeze real-run gate (fail-closed)', () => {
     fz01.value = { taskSetHash: '0'.repeat(64) };
     const { problems } = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifyOk, dataset });
     expect(problems.some((p: string) => p.includes('FZ-01'))).toBe(true);
-  });
-
-  it('minPairs above the available task count → UNPROVEN flag, never a pass', () => {
-    const freeze = fullyFrozenRecord(preregBody);
-    const fz11: any = freeze.items.find((i: any) => i.id === 'FZ-11');
-    fz11.value = { minPairs: 999, derivationBasis: 'over-ambitious detectable difference' };
-    const { problems, minPairsEligible } = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifyOk, dataset });
-    expect(minPairsEligible).toBe(false);
-    expect(problems.some((p: string) => p.includes('UNPROVEN'))).toBe(true);
   });
 
   it('minPairs without a derivation basis is refused (no unexplained N)', () => {
@@ -198,13 +273,74 @@ describe('ledger availability four-way classification', () => {
   });
 
   it('unreadable and lenient-empty ledgers never report a proven true zero (M1)', () => {
-    const unreadable = measureLedgerPrinciples({ coreResult: { availability: { status: 'unreadable' } } });
+    const unreadable = measureLedgerPrinciples({ coreResult: { availability: { status: 'unreadable' } }, authorization: { summaryFieldsAllowed: true } });
     expect(unreadable.m1.count).toBeNull();
     expect(unreadable.m1.trueZero).toBe(false);
     expect(unreadable.m1.reasonCode).toBe('ledger_unreadable');
-    const empty = measureLedgerPrinciples({ coreResult: { availability: { status: 'empty' } } });
+    // 'empty' means missing/zero-byte/lenient file — the parsed count is 0 but
+    // that state alone canNOT prove a genuinely empty population.
+    const empty = measureLedgerPrinciples({ coreResult: { availability: { status: 'empty' } }, authorization: { summaryFieldsAllowed: true } });
     expect(empty.m1.count).toBe(0);
-    expect(empty.m1.trueZero).toBe(true);
+    expect(empty.m1.trueZero).toBe(false);
+    expect(empty.m1.reasonCode).toBe('ledger_empty__true_zero_unproven_requires_independent_evidence');
+  });
+
+  it('a true-zero claim requires independent auditable evidence, not inference from empty', () => {
+    const empty = { availability: { status: 'empty' } };
+    const withEvidence = measureLedgerPrinciples({
+      coreResult: empty,
+      authorization: { summaryFieldsAllowed: true },
+      trueZeroEvidence: { auditor: 'independent-audit', recordRef: 'audit-record-1' },
+    });
+    expect(withEvidence.m1.trueZero).toBe(true);
+    expect(withEvidence.m1.reasonCode).toBe('ledger_empty_with_independent_true_zero_evidence');
+    expect(withEvidence.m1.trueZeroEvidence).toEqual({ auditor: 'independent-audit', recordRef: 'audit-record-1' });
+
+    // Evidence missing either field is not auditable evidence.
+    const weakEvidence = measureLedgerPrinciples({
+      coreResult: empty,
+      authorization: { summaryFieldsAllowed: true },
+      trueZeroEvidence: { auditor: 'independent-audit' },
+    });
+    expect(weakEvidence.m1.trueZero).toBe(false);
+  });
+
+  it('unknown/missing availability status is unmeasurable (fail-loud, never inferred)', () => {
+    expect(classifyLedgerAvailability({ ledger: {}, availability: {} })).toBe('unmeasurable_unknown_availability');
+    expect(classifyLedgerAvailability({})).toBe('unmeasurable_unknown_availability');
+    expect(classifyLedgerAvailability({ availability: { status: 'corrupted-index' } })).toBe('unmeasurable_unknown_availability');
+    // Authority status wins over ledger content: unreadable stays unreadable.
+    expect(classifyLedgerAvailability({ availability: { status: 'unreadable' }, ledger: { tree: { principles: { p: {} } } } })).toBe('unreadable');
+
+    const measure = measureLedgerPrinciples({ coreResult: { availability: { status: 'corrupted-index' } }, authorization: { summaryFieldsAllowed: true } });
+    expect(measure.m1).toMatchObject({ count: null, trueZero: false, reasonCode: 'availability_status_unknown' });
+    expect(measure.m2.count).toBeNull();
+    expect(measure.m3.count).toBeNull();
+  });
+
+  it('malformed authorization throws (rc-3); omission is observably unauthorized', () => {
+    const ok = { availability: { status: 'ok' }, ledger: { tree: { principles: { p1: { id: 'p1', status: 'active', derivedFromPainIds: [], reuseEvidence: [{ candidateId: 'c', painId: 'pain', evidenceQuality: 'exact' }] } } } } };
+    for (const bad of [() => {}, { summaryFieldsAllowed: 'yes' }, { nope: true }, 'granted'] as unknown[]) {
+      expect(() => measureLedgerPrinciples({ coreResult: ok, authorization: bad as never })).toThrow(/explicit boolean summaryFieldsAllowed/);
+    }
+
+    const omitted = measureLedgerPrinciples({ coreResult: ok });
+    expect(omitted.authorizationBasis).toBe('NOT_DECLARED_TREATED_AS_UNAUTHORIZED');
+    expect(omitted.m3).toMatchObject({ count: 0, reasonCode: 'summary_authorization_not_declared' });
+    expect(omitted.m5.unauthorizedCount).toBe(1);
+    expect(omitted.m5.unauthorizedField).toBeTruthy();
+  });
+
+  it('authorization declared-false vs declared-true produce different observable behavior', () => {
+    const ok = { availability: { status: 'ok' }, ledger: { tree: { principles: { p1: { id: 'p1', status: 'active', derivedFromPainIds: [], reuseEvidence: [{ candidateId: 'c', painId: 'pain', evidenceQuality: 'exact' }] } } } } };
+    const denied = measureLedgerPrinciples({ coreResult: ok, authorization: { summaryFieldsAllowed: false } });
+    expect(denied.authorizationBasis).toBe('D01_NOT_GRANTED_DECLARED');
+    expect(denied.m3).toMatchObject({ count: 0, reasonCode: 'summary_fields_unauthorized_d01' });
+
+    const granted = measureLedgerPrinciples({ coreResult: ok, authorization: { summaryFieldsAllowed: true } });
+    expect(granted.authorizationBasis).toBe('D01_GRANTED_DECLARED');
+    expect(granted.m3).toMatchObject({ count: 1, reasonCode: 'ok' });
+    expect(granted.m5.unauthorizedField).toBeNull();
   });
 });
 
@@ -220,6 +356,7 @@ describe('M1~M5 offline measurement logic', () => {
 
   it('counts eligibility, traceability, completeness separately with explicit ambiguity', () => {
     const measure = measureLedgerPrinciples({
+      authorization: { summaryFieldsAllowed: true },
       coreResult: coreResult([
         { id: 'p1', status: 'active', derivedFromPainIds: ['c1'], reuseEvidence: [] },
         { id: 'p2', status: 'active', derivedFromPainIds: [], reuseEvidence: [{ candidateId: 'c1', painId: 'pain1', evidenceQuality: 'exact' }] },
@@ -254,7 +391,9 @@ describe('M1~M5 offline measurement logic', () => {
       ]),
       authorization: { summaryFieldsAllowed: false },
     });
+    expect(measure.authorizationBasis).toBe('D01_NOT_GRANTED_DECLARED');
     expect(measure.m3.count).toBe(0);
+    expect(measure.m3.reasonCode).toBe('summary_fields_unauthorized_d01');
     expect(measure.m5.unauthorizedCount).toBe(1);
     expect(measure.m5.unauthorizedField).toContain('D-01');
   });

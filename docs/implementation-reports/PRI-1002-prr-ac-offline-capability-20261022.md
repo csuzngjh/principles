@@ -11,6 +11,8 @@
 | 真实数据 M1~M5 | **NOT_MEASURED**（离线判定逻辑已实现并用合成夹具验证；真实测量待 D-01/D-02） |
 | Gate B / Gate C | BLOCKED / NOT_GRANTED（不变） |
 
+> **Owner Review 修复轮（2026-10-22，PR #2115 审查意见）**：首轮交付（head `ccaf96552`）经 Owner 审查发现四类缺陷——真实运行门的必需输入与验证器形态漏洞、FZ-11 配对分母虚高、`empty` 账本状态被误读为真零、未知成本被 `?? 0` 当零。全部修复见 **§6 修复轮记录**，回归由 55 项扩至 64 项。
+
 ---
 
 ## Owner Review Card
@@ -19,7 +21,7 @@
 
 **2. Before**：`principle-learning-lab` 只有 PLE-PILOT-01 世界（24 arms × 5 opportunities 的策略对比）。它证明流程可运行，但与 PRR 的 A/C 对照无任务交集；`validatePrereg()` 只认 `preregistration.v0.1-draft`；无逐任务配对差值视图；无负迁移独立维度；全仓 grep `negativeTransfer` 零命中（B0 G2 证据）。
 
-**3. After**：`scripts/dev/principle-learning-lab/prr/` 新增 PRR 专属离线 A/C 运行器（一条命令跑通 A/C 投递→裁定→配对→冻结门→只读语义→预演门），55 项新回归测试全绿，全量 scripts 套件 949/949 全绿，预演门 PASS（studyHash 确定性）。
+**3. After**：`scripts/dev/principle-learning-lab/prr/` 新增 PRR 专属离线 A/C 运行器（一条命令跑通 A/C 投递→裁定→配对→冻结门→只读语义→预演门），64 项回归测试全绿（首轮 55 + 修复轮 9），全量 scripts 套件 958/958 全绿，预演门 PASS（studyHash 确定性）。
 
 **4. Existing mechanism reused**：同通道投递 `deliverPayload()`（g2.mjs）、跨组污染检测 `checkNoCrossContamination()`/`verifyPromptIsolation()`、外部记忆指纹 `buildMemoryManifest()`、canonical-JSON 哈希（fixture.mjs）、五值裁定词汇与机械裁定纪律（evaluator.mjs 范式）、预注册"拒绝伪造批准"策略（prereg.mjs 范式）、`readLedgerFileState`（core 既有权威，动态导入复用，未重实现）、better-sqlite3 `{readonly:true, fileMustExist:true}` 只读打开模式（workspace-behavior-evidence.ts 同族合同）。
 
@@ -38,7 +40,7 @@ New external/network capability:    NO  （零网络；fail-closed 冻结门拒�
 
 **6. Design reason**：B0 明令"用原有测试工具/评审，不建设实验平台"。所有新代码是既有 lab 内的数据文件 + 纯函数模块；身份/账本读取复用 core 权威；唯一的"门"（冻结校验）从 `validatePrereg` 的拒绝伪造策略派生，且比它更严（fail-closed 到条目级）。
 
-**7. Verification**：见 §3（55/55 + 949/949 + 预演门 PASS + 确定性双跑字节同一）。
+**7. Verification**：见 §3（64/64 + 958/958 + 预演门 PASS + 确定性双跑字节同一；修复细节见 §6）。
 
 **8. Risk**：合成行为脚本的"任务设计区分度"只代表夹具质量，不代表真实模型区分度；M1~M5 离线判定逻辑与真实 PainChainReadModel/任务种子权威的接线是 B1 授权后工作（当前以 deps 注入点预留）；研究夹具目录（B0 G6）仍未决策。
 
@@ -69,8 +71,8 @@ npm run dev:prr-rehearsal
 [prr-lab] design-check battery: 13/13 PASS
 [prr-lab] readonly semantics: PASS
 [prr-lab] read-only state unchanged: PASS
-[prr-lab] studyHash=2775d58c428f5f27c200603c126ce4564abb2f909336d127e33cb6e87a4cc21a
-[prr-lab] freeze real-run gate: REFUSED (2 problem(s) — draft cannot authorize)
+[prr-lab] studyHash=2c61181b039f7a3091d190b56ec2dea61248a83b2430fb893d9ef287d2dfe184
+[prr-lab] freeze real-run gate: REFUSED (3 problem(s) — draft cannot authorize; 含修复轮新增的 FZ-01 taskSetHash 强制项)
 [prr-lab] rehearsal gate: PASS
 ```
 
@@ -107,9 +109,9 @@ M1~M5 离线判定逻辑（Gate B 方案 §2）：`measureLedgerPrinciples()`—
 ### 1.3 合成测试、回归测试及运行命令
 
 ```bash
-# PRR 专属回归（55 用例）
+# PRR 专属回归（64 用例）
 cd scripts && npx vitest run __tests__/prr-ac-lab.test.ts __tests__/prr-freeze-readonly.test.ts
-# 全量 scripts 套件（含既有 lab 646 行套件）：50 文件 / 949 用例全绿
+# 全量 scripts 套件（含既有 lab 646 行套件）：50 文件 / 958 用例全绿
 npm run test:scripts
 # 离线预演（gate PASS，exit 0）
 npm run dev:prr-rehearsal
@@ -127,7 +129,7 @@ npm run dev:prr-rehearsal
 
 ### 1.6 研究结论
 
-**本轮结论：离线能力 GO（工程就绪）；价值问题维持 UNPROVEN；Gate B 执行维持 BLOCKED。** 可复核依据：§1.1 命令与输出、`rehearsal-result.json`、55+949 测试。本报告不将文档完成、CI 通过或合成测试通过表述为任何真实产品收益（B0 §10.2 边界）。
+**本轮结论：离线能力 GO（工程就绪）；价值问题维持 UNPROVEN；Gate B 执行维持 BLOCKED。** 可复核依据：§1.1 命令与输出、`rehearsal-result.json`、64+958 测试。本报告不将文档完成、CI 通过或合成测试通过表述为任何真实产品收益（B0 §10.2 边界）。
 
 ### 1.7 Gate C
 
@@ -145,16 +147,17 @@ npm run dev:prr-rehearsal
 - FZ-01 冻结 `taskSetHash` 必须等于实际加载的数据集 fixtureHash；
 - FZ-11 `minPairs` 必须带推导依据；可用任务对数低于 minPairs → 显式 `UNPROVEN` 标记，绝不放宽凑数。
 
-## 3. 验证汇总
+## 3. 验证汇总（Owner Review 修复轮后）
 
 | 项 | 结果 |
 |---|---|
-| 新增 PRR 回归 | 55/55 PASS（prr-ac-lab 34 + prr-freeze-readonly 21） |
-| 全量 scripts 套件 | 949/949 PASS（50 文件） |
-| 离线预演门 | PASS（studyHash `2775d58c…cc21a`） |
-| 确定性 | 双跑 `rehearsal-result.json` 字节同一 |
-| lint | 新增文件 0 error（scripts/__tests__ 不在 eslint 配置覆盖内，与既有 scripts 测试一致） |
-| 生产路径影响 | 零（无生产源码改动；`git status` 仅新增 scripts/ 下文件 + docs + changeset） |
+| 新增 PRR 回归 | **64/64 PASS**（prr-ac-lab 36 + prr-freeze-readonly 28；首轮 55 项全保留，修复轮新增 9 项拒绝/边界场景） |
+| 全量 scripts 套件 | **958/958 PASS**（50 文件） |
+| 离线预演门 | PASS（studyHash `2c61181b…dfe184`；冻结门对 DRAFT 拒绝问题数 2→3，新增的正是 FZ-01 taskSetHash 强制项） |
+| 确定性 | 双跑 `rehearsal-result.json` 字节同一（cmp 验证） |
+| lint | 新增/修改 lab 文件 0 error |
+| 生产路径影响 | 零（无生产源码改动） |
+| CI（首轮提交时） | 32/32 全绿含 Verify Merge Gate；修复提交推送后 CI 重跑待核对 |
 
 ## 4. 集中的 Owner 待决清单（本轮不打断离线工作的全部授权缺口）
 
@@ -193,3 +196,69 @@ docs/implementation-reports/PRI-1002-prr-ac-offline-capability-20261022.md （�
 研究夹具 `.tmp/prr-ac-fixtures/`（6 个 JSON）与预演产物 `.tmp/prr-ac-rehearsal/` 均为 gitignored，不入库。
 
 **状态收口：PRR 离线 A/C 能力交付（FIXTURE_ONLY）；真实数据 NOT_MEASURED；真实 A/C NOT_RUN；Gate B BLOCKED；Gate C NOT_GRANTED。**
+
+---
+
+## 6. Owner Review 修复轮记录（2026-10-22，PR #2115）
+
+Owner 审查首轮（head `ccaf96552`）发现四类缺陷。以下逐项记录修复前后的行为变化；每项均有新增回归测试实际触发对应拒绝/边界分支（非仅调用 helper）。
+
+### 6.1 真实运行门 `validateFreezeForRealRun()`（prr-freeze.mjs）
+
+| 缺陷 | 修复前 | 修复后 |
+|---|---|---|
+| 必需输入可缺失 | `preregBody` 缺失 → 跳过 FZ-15 哈希核对；`dataset` 缺失 → 跳过 FZ-01 对账；`verifyOwnerApproval` 缺失 → 仅报一条问题但仍继续处理其余 | 三者任一缺失即列为拒绝项，且哈希/对账检查永远执行（preregBody/dataset 为必需参数，缺失 = 真实运行被拒） |
+| 验证器形态漏洞 | 仅显式检查 `verified!==true` 与 `approved!==true` 两分支；`undefined`/`null`/`{}`/错误形状对象会落入相同拒绝消息但缺少独立负控 | `undefined`/`null`/非对象/`verified:false`/`approved:false`/抛异常六种形态各自独立拒绝消息；必须 `verified===true && approved===true` 同时成立 |
+| commit 绑定缺失 | `ownerApproval.frozenCommitSha` 仅验 40-hex 格式即视为有效批准 | 验证器证据必须携带 `frozenCommitSha` 且与冻结记录精确一致——权威 Owner 决策记录与冻结协议的绑定是批准的必要条件；仅格式正确不再是批准 |
+| FZ-01 可跳过 | 仅当 `taskSetHash` 是字符串时才比较；缺失/格式错静默通过 | `taskSetHash` 必须存在、64-hex 格式正确、且与实际加载数据集 `fixtureHash` 精确相等；缺失即拒绝 |
+
+新增测试：verifier 返回 undefined/null/{}/错误形状/仅 verified/仅 approved/无 commit 绑定/commit 不一致/抛异常共 8 场景；缺 preregBody/缺 dataset/缺 verifier/缺 freeze 共 4 场景；FZ-01 缺 hash/格式错 2 场景。全部断言拒绝消息真实产生。
+
+### 6.2 FZ-11 完整配对分母（prr-freeze.mjs + prr-paired.mjs）
+
+| 缺陷 | 修复前 | 修复后 |
+|---|---|---|
+| 配对分母虚高 | `minPairs` 与 `dataset.tasks.tasks.length`（13，含 1 项 C 组未授权任务）比较 | 与**完整 A/C 配对数**比较：`{ totalTasks, completePairs, excludedUnauthorizedTasks }` 显式输出；运行前判定未授权的 C 材料不计入配对分母。合成夹具现为 **12 完整配对**：`minPairs=13` → 不足并落 UNPROVEN（保留原始数据与排除说明，绝不降阈值）；`minPairs=12` → 数量比较通过 |
+| 报告配对数虚高 | `byType.pairs` 计入仅剩 A 组结果的行（excluded C） | `pairs` 只计双侧齐备的完整配对；`excludedUnpaired` 单独记录（AC-T1：totalTasks=6、pairs=5、excludedUnpaired=1）；`totalTasks` 同时保留 |
+
+### 6.3 账本状态与授权语义（prr-readonly.mjs）
+
+| 缺陷 | 修复前 | 修复后 |
+|---|---|---|
+| `empty` 误读为真零 | `availability.status==='empty'` → `m1.trueZero=true`（"genuinely empty ledger"） | `empty`（文件缺失/零字节/宽松解析）只产生解析计数 0，`trueZero` 恒为 `false`，reasonCode=`ledger_empty__true_zero_unproven_requires_independent_evidence`。真零声明需要调用方提供**独立可审计证据** `trueZeroEvidence={auditor,recordRef}`（字段不全视为无证据）；提供后 reasonCode 变为 `…_with_independent_true_zero_evidence` 并在输出中保留证据字段 |
+| 未知状态被推断 | `classifyLedgerAvailability()` 只认三种状态字符串，其余 fallthrough 进 ok 分支——缺失/未知 `availability.status` 会被当 `ok` 处理 | 新增 `unmeasurable_unknown_availability` 类：非 `ok/empty/unreadable` 的状态（含完全缺失）一律不可测；`m1/m2/m3.count=null`、reasonCode=`availability_status_unknown`、trueZero=false；权威状态优先于账本内容（status=unreadable + 有原则 → unreadable）。类枚举扩为五值 |
+| 许可性授权默认 | `authorization = { summaryFieldsAllowed: true }` 默认放行——D-01 未批准即默认计算 M3 | 默认值移除：**省略** → `authorizationBasis=NOT_DECLARED_TREATED_AS_UNAUTHORIZED`（fail-closed，M3 拒算，reasonCode=`summary_authorization_not_declared`）；**false** → `D01_NOT_GRANTED_DECLARED`；**true** → `D01_GRANTED_DECLARED` 才计算 M3。形状非法（非对象/非布尔字段）直接抛错（rc-3）。三种状态行为可观察且不同；未授权时 M5 带字段名（`pain_structured_summary`）与原因码 |
+
+新增测试：缺文件/零字节/宽松解析/非法 JSON 各状态与计数不混淆；真零证据正例+弱证据反例；unknown/missing/状态-内容不一致 3 场景；authorization 省略/false/true 三态各断言 basis 与 M3/M5 行为；malformed 抛错。
+
+### 6.4 未知成本差值（prr-paired.mjs）
+
+| 缺陷 | 修复前 | 修复后 |
+|---|---|---|
+| `?? 0` 把未知当零 | `costDelta.requests = (c.cost.requests ?? 0) − (a.cost.requests ?? 0)`——任一侧未报告即产生虚假数值差 | 仅当 A/C 双侧均为有限数字才计算差值；任一侧未知 → 该字段差值 `null`，字段名与两侧原值记入 `unknownCostFields`，`measurementBasis` 标记 `PARTIAL_UNKNOWN_NULLS_RETAINED`（双侧齐全时 `PAIRED_NUMERIC_DIFF`）。覆盖 requests/toolCalls/tokensIn/tokensOut/wallMs 与 owner.asks/owner.corrections。五值主判定与"无合成总分"原则不变 |
+
+新增测试：双侧 token 未知 → 差值 null + unknownCostFields 列出；双侧 requests 已知 → 真实数值差（−3）；混合场景 basis 标记断言。
+
+### 6.5 修复轮验证证据
+
+```text
+cd scripts && npx vitest run __tests__/prr-ac-lab.test.ts __tests__/prr-freeze-readonly.test.ts
+  → Test Files 2 passed, Tests 64 passed (64)
+npm run test:scripts
+  → Test Files 50 passed, Tests 958 passed (958)
+npm run dev:prr-rehearsal
+  → rehearsal gate: PASS（studyHash=2c61181b039f7a3091d190b56ec2dea61248a83b2430fb893d9ef287d2dfe184）
+  → freeze real-run gate: REFUSED（3 problem(s)——DRAFT + 15 项未冻结 + FZ-01 taskSetHash 缺失强制项）
+双跑 cmp rehearsal-result.json → 字节同一
+```
+
+预演用例面扩展：`ledger-zero-byte-with-independent-evidence`（真零须独立证据）、`ledger-authorization-omitted/summary-unauthorized/summary-authorized`（三态对照）、`semantic-probe-unknown-status-and-authorization`（未知状态 fail-loud + malformed 抛错）。六项 B0 §10.3 预演语义保持全部 PASS。
+
+### 6.6 修复轮剩余限制（如实保留）
+
+- `trueZeroEvidence` 是离线声明式参数：它证明"调用方持有独立审计记录"，本模块不核验该记录本身的真实性——真实实验中该参数的采信规则须在 FZ-12 冻结；
+- 配对分母的未授权判定来源是数据集的 `historyMaterial.disclosureStatus` 声明字段；真实实验中该声明的权威来源（D-01 批准记录）在 B1 接线时须与冻结记录对账；
+- G8（PRR 授权记录 schema 是否复用 `g2-real-run-authorization.v1`）仍未决——本轮的 verifier 是接口约定，真实 resolver 待 O-05 裁决后实现；
+- 其余 Owner 待决清单（§4）不变。
+
+**修复轮后状态收口：离线能力 GO（缺陷已修复并复验）；真实 M1～M5 NOT_MEASURED；真实 A/C NOT_RUN；Gate B BLOCKED；Gate C NOT_GRANTED。**

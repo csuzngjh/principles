@@ -55,18 +55,40 @@ export function buildPairedReport({ studyId, adjudications, exclusions = [], tas
       delta = { mainComparison: 'C_EXCLUDED_UNAUTHORIZED', note: 'C material ruled unauthorized before exposure; A-only row retained' };
     } else if (a && c && !eitherNonMain) {
       const ord = (r) => MAIN_VERDICT_ORDINAL[r.verdict];
+      // Unknown cost is NOT zero: a delta is computed only when BOTH sides are
+      // finite numbers; otherwise it stays null and is listed as unknown.
+      const numDelta = (cv, av) => (typeof cv === 'number' && Number.isFinite(cv) && typeof av === 'number' && Number.isFinite(av) ? cv - av : null);
+      const unknownCostFields = [];
+      const costDelta = {
+        requests: numDelta(c.cost.requests, a.cost.requests),
+        toolCalls: numDelta(c.cost.toolCalls, a.cost.toolCalls),
+        tokensIn: numDelta(c.cost.tokensIn, a.cost.tokensIn),
+        tokensOut: numDelta(c.cost.tokensOut, a.cost.tokensOut),
+        wallMs: numDelta(c.cost.wallMs, a.cost.wallMs),
+      };
+      for (const [field, value] of Object.entries(costDelta)) {
+        if (value === null) unknownCostFields.push(`${field}: C=${JSON.stringify(c.cost[field] ?? null)}, A=${JSON.stringify(a.cost[field] ?? null)}`);
+      }
+      const ownerCostDelta = {
+        asks: numDelta(c.ownerCost.asks, a.ownerCost.asks),
+        corrections: numDelta(c.ownerCost.corrections, a.ownerCost.corrections),
+      };
+      for (const [field, value] of Object.entries(ownerCostDelta)) {
+        if (value === null) unknownCostFields.push(`owner.${field}: C=${JSON.stringify(c.ownerCost[field] ?? null)}, A=${JSON.stringify(a.ownerCost[field] ?? null)}`);
+      }
       delta = {
         mainComparison: ord(c) > ord(a) ? 'IMPROVED' : ord(c) < ord(a) ? 'DEGRADED' : 'SAME',
         acm1Delta: (c.verdict === 'ALIGNED' || c.verdict === 'ACCEPTABLE' ? 1 : 0) - (a.verdict === 'ALIGNED' || a.verdict === 'ACCEPTABLE' ? 1 : 0),
         costDelta: {
-          requests: (c.cost.requests ?? 0) - (a.cost.requests ?? 0),
-          toolCalls: (c.cost.toolCalls ?? 0) - (a.cost.toolCalls ?? 0),
+          ...costDelta,
           tokenBasis: c.cost.tokenBasis === 'REPORTED' && a.cost.tokenBasis === 'REPORTED' ? 'REPORTED' : 'NOT_REPORTED_BY_STUB',
+          measurementBasis: unknownCostFields.length === 0 ? 'PAIRED_NUMERIC_DIFF' : 'PARTIAL_UNKNOWN_NULLS_RETAINED',
         },
         ownerCostDelta: {
-          asks: (c.ownerCost.asks ?? 0) - (a.ownerCost.asks ?? 0),
-          corrections: (c.ownerCost.corrections ?? 0) - (a.ownerCost.corrections ?? 0),
+          ...ownerCostDelta,
+          measurementBasis: Object.values(ownerCostDelta).some((v) => v === null) ? 'PARTIAL_UNKNOWN_NULLS_RETAINED' : 'PAIRED_NUMERIC_DIFF',
         },
+        unknownCostFields,
       };
     } else if (a && c && eitherNonMain) {
       delta = { mainComparison: 'INCONCLUSIVE_PAIR', note: 'at least one side is INCONCLUSIVE/NOT_APPLICABLE — 单列, excluded from the main judgement' };
@@ -83,12 +105,17 @@ export function buildPairedReport({ studyId, adjudications, exclusions = [], tas
   }
 
   // Group summaries by task type (grouping rule fixed before the run — no
-  // post-hoc subgroups, B0 §4.3).
+  // post-hoc subgroups, B0 §4.3). `pairs` counts COMPLETE A/C pairs only:
+  // A-only rows (unauthorized C exclusion, missing C behavior) are recorded
+  // separately as excludedUnpaired — never padded into the pair count.
   const byType = {};
   for (const type of ['AC-T1', 'AC-T2', 'AC-T3']) {
     const rowsOfType = pairedRows.filter((r) => r.taskType === type);
+    const completePairRows = rowsOfType.filter((r) => r.A !== null && r.C !== null && r.C !== 'EXCLUDED_UNAUTHORIZED');
     byType[type] = {
-      pairs: rowsOfType.length,
+      totalTasks: rowsOfType.length,
+      pairs: completePairRows.length,
+      excludedUnpaired: rowsOfType.length - completePairRows.length,
       improved: rowsOfType.filter((r) => r.delta.mainComparison === 'IMPROVED').length,
       same: rowsOfType.filter((r) => r.delta.mainComparison === 'SAME').length,
       degraded: rowsOfType.filter((r) => r.delta.mainComparison === 'DEGRADED').length,

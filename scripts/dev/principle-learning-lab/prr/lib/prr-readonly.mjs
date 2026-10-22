@@ -82,10 +82,13 @@ export function assertStateUnchanged(before, after, label = 'state') {
 
 // ── Ledger availability: four-way classification (never a silent zero) ──
 
-export const LEDGER_AVAILABILITY_CLASSES = ['ok', 'ok_but_empty_ledger', 'empty', 'unreadable'];
+export const LEDGER_AVAILABILITY_CLASSES = ['ok', 'ok_but_empty_ledger', 'empty', 'unreadable', 'unmeasurable_unknown_availability'];
 
 /**
- * Map a readLedgerFileState() result to the measurement four-way class.
+ * Map a readLedgerFileState() result to the measurement class. FAIL-LOUD:
+ * only the core authority's explicitly known statuses are recognized; a
+ * missing or unknown availability.status returns
+ * 'unmeasurable_unknown_availability' and is NEVER inferred as ok/empty.
  * `coreResult` = { ledger, availability: { status } } from
  * @principles/core/principle-tree-ledger (the existing authority — reused,
  * never reimplemented here).
@@ -94,6 +97,7 @@ export function classifyLedgerAvailability(coreResult) {
   const status = coreResult?.availability?.status;
   if (status === 'unreadable') return 'unreadable';
   if (status === 'empty') return 'empty';
+  if (status !== 'ok') return 'unmeasurable_unknown_availability';
   // status === 'ok': distinguish a real ledger from a lenient empty parse.
   const ledger = coreResult?.ledger;
   const principles = ledger?.tree?.principles;
@@ -112,31 +116,74 @@ function isPlainObject(v) {
  * Offline M1~M5 判定逻辑 over a parsed ledger (Gate B experiment plan §2).
  * Pure function; the caller owns HOW the ledger was read (authority reuse).
  *
- * `authorization` = { summaryFieldsAllowed: boolean } — the offline stand-in
- * for the D-01 field whitelist. When summary fields are not allowed, M3
- * entries are classified UNAUTHORIZED with the field name, not silently 0.
+ * `authorization` — NO permissive default. Omitting it is treated as
+ * UNAUTHORIZED with its own explicit basis ('NOT_DECLARED_TREATED_AS_UNAUTHORIZED');
+ * a malformed shape (non-object, or summaryFieldsAllowed not a boolean) throws
+ * (rc-3 fail-loud). Only `{ summaryFieldsAllowed: true }` allows M3 to depend
+ * on summary fields; unauthorized/undeclared runs count those entries under
+ * M5 with the field name and never emit an M3 completeness result.
  *
- * Returns { m1..m5 } with explicit denominators, classifications and reason
- * codes. No value is ever a bare 0 without a classification proving it.
+ * `trueZeroEvidence` — optional INDEPENDENT, auditable evidence ({ auditor,
+ * recordRef }) that a zero eligible-principle count reflects a genuinely empty
+ * population. `availability.status === 'empty'` only tells us the file was
+ * missing/zero-byte/lenient-parsed — it is NOT proof of a true zero, so
+ * without this evidence trueZero stays false everywhere.
  */
-export function measureLedgerPrinciples({ coreResult, authorization = { summaryFieldsAllowed: true }, eligibilityScope = 'active_valid__synthetic_default_d02_pending' }) {
-  const availabilityClass = classifyLedgerAvailability(coreResult);
+export function measureLedgerPrinciples({ coreResult, authorization, trueZeroEvidence, eligibilityScope = 'active_valid__synthetic_default_d02_pending' }) {
+  let summaryFieldsAllowed = false;
+  let authorizationBasis = 'NOT_DECLARED_TREATED_AS_UNAUTHORIZED';
+  if (authorization !== undefined && authorization !== null) {
+    if (typeof authorization !== 'object' || Array.isArray(authorization) || typeof authorization.summaryFieldsAllowed !== 'boolean') {
+      throw new Error('measureLedgerPrinciples: authorization must be an object with an explicit boolean summaryFieldsAllowed (omit the argument to be treated as unauthorized, never permissive)');
+    }
+    summaryFieldsAllowed = authorization.summaryFieldsAllowed;
+    authorizationBasis = summaryFieldsAllowed ? 'D01_GRANTED_DECLARED' : 'D01_NOT_GRANTED_DECLARED';
+  }
+  const trueZeroProven = isPlainObject(trueZeroEvidence)
+    && typeof trueZeroEvidence.auditor === 'string' && trueZeroEvidence.auditor.trim() !== ''
+    && typeof trueZeroEvidence.recordRef === 'string' && trueZeroEvidence.recordRef.trim() !== '';
 
-  const base = { availabilityClass, eligibilityScope };
+  const availabilityClass = classifyLedgerAvailability(coreResult);
+  const base = { availabilityClass, eligibilityScope, authorizationBasis };
+
+  if (availabilityClass === 'unmeasurable_unknown_availability') {
+    // Fail-loud: an unrecognized availability status is never mapped onto a count.
+    return {
+      ...base,
+      m1: { count: null, trueZero: false, reasonCode: 'availability_status_unknown', note: `readLedgerFileState availability.status=${JSON.stringify(coreResult?.availability?.status ?? null)} is not a recognized authority state — measurement refused rather than inferred` },
+      m2: { count: null, reasonCode: 'availability_status_unknown' },
+      m3: { count: null, reasonCode: 'availability_status_unknown' },
+      m4: { count: 0, details: [], reasonCode: 'availability_status_unknown' },
+      m5: { unauthorizedCount: 0, unavailableCount: 0, unauthorizedField: authorizationBasis === 'D01_GRANTED_DECLARED' ? null : 'pain_structured_summary', reasons: ['availability_status_unknown'] },
+    };
+  }
   if (availabilityClass !== 'ok' && availabilityClass !== 'ok_but_empty_ledger') {
-    // empty → true zero (genuinely empty ledger); unreadable → NOT a zero.
+    // unreadable → NEVER a zero. empty (missing/zero-byte file) → the PARSED
+    // count is 0, but that state alone cannot prove a genuine empty population
+    // (F-03: the API cannot distinguish provenance) — trueZero requires the
+    // caller's independent auditable evidence.
     return {
       ...base,
       m1: {
         count: availabilityClass === 'empty' ? 0 : null,
-        trueZero: availabilityClass === 'empty',
-        reasonCode: availabilityClass === 'empty' ? 'ledger_empty' : 'ledger_unreadable',
-        note: availabilityClass === 'empty' ? 'genuinely empty ledger — a proven true zero' : 'unreadable ledger must never be reported as 0 eligible principles',
+        trueZero: availabilityClass === 'empty' && trueZeroProven,
+        trueZeroEvidence: trueZeroProven ? trueZeroEvidence : null,
+        reasonCode: availabilityClass === 'empty'
+          ? (trueZeroProven ? 'ledger_empty_with_independent_true_zero_evidence' : 'ledger_empty__true_zero_unproven_requires_independent_evidence')
+          : 'ledger_unreadable',
+        note: availabilityClass === 'empty'
+          ? 'parsed count is 0, but readLedgerFileState empty covers missing/zero-byte/lenient states and cannot alone prove a genuinely empty ledger — trueZero stays false without independent auditable evidence'
+          : 'unreadable ledger must never be reported as 0 eligible principles',
       },
-      m2: { count: availabilityClass === 'empty' ? 0 : null, reasonCode: base.availabilityClass === 'empty' ? 'ledger_empty' : 'ledger_unreadable' },
+      m2: { count: availabilityClass === 'empty' ? 0 : null, reasonCode: availabilityClass === 'empty' ? 'ledger_empty__true_zero_unproven' : 'ledger_unreadable' },
       m3: { count: availabilityClass === 'empty' ? 0 : null, reasonCode: 'ledger_empty_or_unreadable' },
-      m4: { count: 0, details: [], reasonCode: availabilityClass === 'empty' ? 'no_principles_to_conflict' : 'not_measurable_ledger_unreadable' },
-      m5: { unauthorizedCount: 0, unavailableCount: 0, reasons: [availabilityClass === 'empty' ? 'ledger_empty' : 'ledger_unreadable'] },
+      m4: { count: 0, details: [], reasonCode: availabilityClass === 'empty' ? 'no_parsed_principles_to_conflict' : 'not_measurable_ledger_unreadable' },
+      m5: {
+        unauthorizedCount: 0,
+        unauthorizedField: summaryFieldsAllowed ? null : 'pain_structured_summary',
+        unavailableCount: 0,
+        reasons: [availabilityClass === 'empty' ? 'ledger_empty' : 'ledger_unreadable'],
+      },
     };
   }
 
@@ -202,7 +249,7 @@ export function measureLedgerPrinciples({ coreResult, authorization = { summaryF
     }
     const unresolvedCandidates = derivedCandidates.filter((c) => !resolvedFromCandidates.has(c));
     const resolvedPainIds = [...new Set([...directPainIds, ...resolvedViaDerived])];
-    const completePainIds = authorization.summaryFieldsAllowed
+    const completePainIds = summaryFieldsAllowed
       ? resolvedPainIds.filter((painId) => {
         const quality = painIdToEvidenceQuality.get(painId);
         return quality === 'exact' || quality === 'excerpt_only';
@@ -214,7 +261,7 @@ export function measureLedgerPrinciples({ coreResult, authorization = { summaryF
       ambiguousCandidates: ambiguousDerived,
       unresolvedCandidates,
       completeEvidencePainIds: completePainIds,
-      unauthorizedSummaryPainIds: authorization.summaryFieldsAllowed ? [] : resolvedPainIds,
+      unauthorizedSummaryPainIds: summaryFieldsAllowed ? [] : resolvedPainIds,
     });
   }
 
@@ -222,29 +269,44 @@ export function measureLedgerPrinciples({ coreResult, authorization = { summaryF
     ...base,
     m1: {
       count: eligible.length,
-      // A structurally-real 'ok' ledger proves its own zero; a parse-lenient
-      // ok_but_empty_ledger does NOT (F-04) — 0 is the parsed result only.
-      trueZero: availabilityClass === 'ok',
-      reasonCode: availabilityClass === 'ok_but_empty_ledger' ? 'ok_but_empty_ledger__semantic_review_required' : 'ok',
+      // trueZero only with independent auditable evidence — a parsed zero
+      // (either class) is never auto-proclaimed a genuine empty population.
+      trueZero: eligible.length === 0 && trueZeroProven,
+      trueZeroEvidence: eligible.length === 0 && trueZeroProven ? trueZeroEvidence : null,
+      reasonCode: availabilityClass === 'ok_but_empty_ledger'
+        ? 'ok_but_empty_ledger__semantic_review_required'
+        : (eligible.length === 0 && !trueZeroProven ? 'zero_count_needs_independent_true_zero_evidence' : 'ok'),
       note: availabilityClass === 'ok_but_empty_ledger'
         ? 'parse-lenient empty ledger: 0 is the parsed result, NOT a proven true zero — semantic review required before any report (F-04)'
-        : null,
+        : (eligible.length === 0 && !trueZeroProven ? 'structurally valid ledger parses to 0 principles; a true-zero claim still requires independent auditable evidence' : null),
     },
     m2: {
       count: perPrinciple.filter((p) => p.resolvedPainIds.length > 0).length,
       denominator: perPrinciple.length,
       ambiguousFlagged: perPrinciple.filter((p) => p.ambiguousCandidates.length > 0).length,
     },
-    m3: {
-      count: perPrinciple.filter((p) => p.completeEvidencePainIds.length > 0).length,
-      denominator: perPrinciple.length,
-    },
+    m3: summaryFieldsAllowed
+      ? {
+        count: perPrinciple.filter((p) => p.completeEvidencePainIds.length > 0).length,
+        denominator: perPrinciple.length,
+        reasonCode: 'ok',
+      }
+      : {
+        // Authorization not granted/declared: NO M3 completeness result that
+        // depends on summary fields — explicit zero with the field name.
+        count: 0,
+        denominator: perPrinciple.length,
+        reasonCode: authorizationBasis === 'NOT_DECLARED_TREATED_AS_UNAUTHORIZED'
+          ? 'summary_authorization_not_declared'
+          : 'summary_fields_unauthorized_d01',
+        unauthorizedField: 'pain_structured_summary',
+      },
     m4: { count: conflicts.length, details: conflicts },
     m5: {
       unauthorizedCount: perPrinciple.reduce((sum, p) => sum + p.unauthorizedSummaryPainIds.length, 0),
-      unauthorizedField: authorization.summaryFieldsAllowed ? null : 'pain_structured_summary (D-01 not granted)',
+      unauthorizedField: summaryFieldsAllowed ? null : 'pain_structured_summary (D-01 not granted or not declared)',
       unavailableCount: perPrinciple.reduce((sum, p) => sum + (p.resolvedPainIds.length - p.completeEvidencePainIds.length - p.unauthorizedSummaryPainIds.length), 0),
-      reasons: ['evidenceQuality_unavailable_or_context_only'],
+      reasons: summaryFieldsAllowed ? ['evidenceQuality_unavailable_or_context_only'] : ['summary_fields_not_authorized', 'evidenceQuality_unavailable_or_context_only'],
     },
     perPrinciple,
   };
