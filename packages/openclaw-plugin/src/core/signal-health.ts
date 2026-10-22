@@ -6,10 +6,13 @@
  * `<workspace>/.state/signal-health.json`，供 `pd config doctor` 呈现。
  *
  * 契约：
- *  - 当日计数（stage1Strong/stage2Confirmed/stage2Queued/stage2Dropped）在跨日
- *    首次写入时归零；时间戳字段为绝对 ISO 值。
+ *  - 当日计数（stage1Strong/stage2Confirmed/stage2Queued/stage2Dropped/
+ *    stage2Invocations/stage2BatchSkipped）在跨日首次写入时归零；时间戳字段
+ *    为绝对 ISO 值。
  *  - 写失败绝不抛出（健康度是旁路观测，不阻塞检测管线）——记 SYSTEM log（rc-9）。
  *  - 文件缺失/损坏按默认值重建，读取方（doctor）自行 unknown 呈现。
+ *  - AUDIT-P2-02：stage2Invocations/stage2BatchSkipped 为新增字段，升级前的
+ *    旧文件缺这两个键仍合法（读作 0）；写路径始终写入完整新格式。
  */
 import * as fs from 'fs';
 import * as path from 'path';
@@ -24,6 +27,20 @@ export interface SignalHealthState {
   stage2Confirmed: number;
   stage2Queued: number;
   stage2Dropped: number;
+  /**
+   * AUDIT-P2-02 (2026-10-21): 当日实际发起的 Stage2 LLM 分类调用次数
+   * （realtime detectAsyncAndRoute + 批量确认 confirmPendingSignal 都算——
+   * 两者都是花同一个 signal classifier 的钱）。计数时点：真正发起 classifier
+   * 调用前；降级/空队列/未配置不计数。跨日归零；旧文件缺失按 0 读。
+   */
+  stage2Invocations: number;
+  /**
+   * AUDIT-P2-02 (2026-10-21): 当日因分类器不可用被整批跳过的批量确认次数。
+   * 只在「队列非空但 classifier 解析失败」时 +1（空队列不计数——没有工作被
+   * 跳过）。让 Owner 能区分「没检测到信号 / 没调用模型 / 队列没被消费」。
+   * 跨日归零；旧文件缺失按 0 读。
+   */
+  stage2BatchSkipped: number;
   /** 最近一次刷新的队列深度（非计数） */
   pendingCount: number;
   lastStage2SuccessAt: string | null;
@@ -41,6 +58,8 @@ function defaultState(now: Date): SignalHealthState {
     stage2Confirmed: 0,
     stage2Queued: 0,
     stage2Dropped: 0,
+    stage2Invocations: 0,
+    stage2BatchSkipped: 0,
     pendingCount: 0,
     lastStage2SuccessAt: null,
     observerLastSuccessAt: null,
@@ -55,52 +74,88 @@ function healthFilePath(stateDir: string): string {
 }
 
 /**
- * 结构校验：只接受带全部必需数值/字符串字段的对象（ERR-001/ERR-013）。
+ * 结构校验 + 解析：只接受带全部必需数值/字符串字段的对象（ERR-001/ERR-013），
+ * 并逐字段构造出完整的 SignalHealthState。
  * 用 Object.hasOwn + typeof 做运行时收窄，避免 `in` 命中原型链、
  * 也避免 `as` 把未校验数据直接断言成领域类型。
+ *
+ * AUDIT-P2-02 向后兼容规则：stage2Invocations / stage2BatchSkipped 是新增
+ * 字段——升级前的旧健康文件没有它们，必须照常解析（缺省读作 0），
+ * 否则升级会让 doctor 从「有计数」退化成 unknown。字段存在时仍必须是 number。
  */
-function isSignalHealthState(value: unknown): value is SignalHealthState {
+function parseSignalHealthState(value: unknown): SignalHealthState | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return false;
+    return null;
   }
   const obj = value as Record<string, unknown>;
-  const numericFields = [
-    'stage1Strong',
-    'stage2Confirmed',
-    'stage2Queued',
-    'stage2Dropped',
-    'pendingCount',
-    'observerConsecutiveFailures',
-  ] as const;
-  for (const field of numericFields) {
-    if (!Object.hasOwn(obj, field) || typeof obj[field] !== 'number') {
-      return false;
-    }
+  const requiredNum = (key: string): number | null => {
+    if (!Object.hasOwn(obj, key)) return null;
+    const v = obj[key];
+    return typeof v === 'number' ? v : null;
+  };
+  const optionalNum = (key: string): number => {
+    const v = obj[key];
+    return typeof v === 'number' ? v : 0;
+  };
+  const optionalStr = (key: string): string | null => {
+    const v = obj[key];
+    return typeof v === 'string' ? v : null;
+  };
+  const stage1Strong = requiredNum('stage1Strong');
+  const stage2Confirmed = requiredNum('stage2Confirmed');
+  const stage2Queued = requiredNum('stage2Queued');
+  const stage2Dropped = requiredNum('stage2Dropped');
+  const pendingCount = requiredNum('pendingCount');
+  const observerConsecutiveFailures = requiredNum('observerConsecutiveFailures');
+  const day = optionalStr('day');
+  const updatedAt = optionalStr('updatedAt');
+  if (
+    stage1Strong === null || stage2Confirmed === null || stage2Queued === null ||
+    stage2Dropped === null || pendingCount === null || observerConsecutiveFailures === null ||
+    day === null || updatedAt === null
+  ) {
+    return null;
   }
-  return (
-    typeof obj['day'] === 'string' &&
-    typeof obj['updatedAt'] === 'string'
-  );
+  // 新字段存在但非数值 → 视为损坏（与旧必需字段同一纪律）。
+  if (Object.hasOwn(obj, 'stage2Invocations') && typeof obj['stage2Invocations'] !== 'number') return null;
+  if (Object.hasOwn(obj, 'stage2BatchSkipped') && typeof obj['stage2BatchSkipped'] !== 'number') return null;
+  return {
+    stage1Strong,
+    stage2Confirmed,
+    stage2Queued,
+    stage2Dropped,
+    stage2Invocations: optionalNum('stage2Invocations'),
+    stage2BatchSkipped: optionalNum('stage2BatchSkipped'),
+    pendingCount,
+    lastStage2SuccessAt: optionalStr('lastStage2SuccessAt'),
+    observerLastSuccessAt: optionalStr('observerLastSuccessAt'),
+    observerConsecutiveFailures,
+    day,
+    updatedAt,
+  };
 }
 
 function loadState(stateDir: string, now: Date): SignalHealthState {
   try {
     const raw = fs.readFileSync(healthFilePath(stateDir), 'utf-8');
     const parsed: unknown = JSON.parse(raw);
-    if (isSignalHealthState(parsed)) {
+    const state = parseSignalHealthState(parsed);
+    if (state) {
       const today = now.toISOString().slice(0, 10);
-      if (parsed.day !== today) {
-        // 跨日：计数归零，时间戳与失败计数保留
+      if (state.day !== today) {
+        // 跨日：当日计数归零（含 AUDIT-P2-02 新增计数），时间戳与失败计数保留
         return {
-          ...parsed,
+          ...state,
           stage1Strong: 0,
           stage2Confirmed: 0,
           stage2Queued: 0,
           stage2Dropped: 0,
+          stage2Invocations: 0,
+          stage2BatchSkipped: 0,
           day: today,
         };
       }
-      return parsed;
+      return state;
     }
   } catch {
     // 缺失/损坏 → 重建默认值（doctor 侧以 updatedAt/字段存在性呈现 unknown）
@@ -110,12 +165,13 @@ function loadState(stateDir: string, now: Date): SignalHealthState {
 
 /**
  * 读健康状态（doctor 用）。文件缺失/损坏返回 null，由读取方呈现 unknown。
+ * 旧格式（无 AUDIT-P2-02 新增计数字段）照常解析，缺省字段读作 0。
  */
 export function readSignalHealth(stateDir: string): SignalHealthState | null {
   try {
     const raw = fs.readFileSync(healthFilePath(stateDir), 'utf-8');
     const parsed: unknown = JSON.parse(raw);
-    return isSignalHealthState(parsed) ? parsed : null;
+    return parseSignalHealthState(parsed);
   } catch {
     return null;
   }

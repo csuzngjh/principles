@@ -134,6 +134,10 @@ export interface SignalHealthEntry {
     stage2Confirmed: number;
     stage2Queued: number;
     stage2Dropped: number;
+    /** AUDIT-P2-02: 实际发起的 Stage2 LLM 分类调用次数（旧文件缺省 0）。 */
+    stage2Invocations: number;
+    /** AUDIT-P2-02: 因分类器不可用被整批跳过的批量确认次数（旧文件缺省 0）。 */
+    stage2BatchSkipped: number;
     pendingCount: number;
   } | null;
   lastStage2SuccessAt: string | null;
@@ -478,6 +482,8 @@ export function buildSignalHealthEntry(stateDir: string): SignalHealthEntry {
       stage2Confirmed: numberOr(parsed.stage2Confirmed, 0),
       stage2Queued: numberOr(parsed.stage2Queued, 0),
       stage2Dropped: numberOr(parsed.stage2Dropped, 0),
+      stage2Invocations: numberOr(parsed.stage2Invocations, 0),
+      stage2BatchSkipped: numberOr(parsed.stage2BatchSkipped, 0),
       pendingCount: numberOr(parsed.pendingCount, 0),
     },
     lastStage2SuccessAt: stringOrNull(parsed.lastStage2SuccessAt),
