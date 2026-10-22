@@ -20,7 +20,7 @@
  * This file only locks the DISCLOSURE, not the behavior.
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync, existsSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -94,17 +94,26 @@ describe('root READMEs — local-first framing must disclose the optional outbou
   });
 });
 
-describe('pd-mentor skill — declared scope covers the options its flow offers', () => {
-  const cases = [
-    { lang: 'zh', scopeMarker: '工作区清理' },
-    { lang: 'en', scopeMarker: 'workspace cleaning' },
-  ] as const;
+describe('published PD skills — focused capability routing', () => {
+  const expected = ['pd-cli-operator', 'pd-control', 'pd-pain-signal', 'pd-review'];
+  const retired = ['pd-implementer', 'pd-mentor', 'pd-runtime-v2'];
 
-  for (const { lang, scopeMarker } of cases) {
-    it(`${lang} frontmatter declares the workspace-cleaning scenario the menu offers`, () => {
-      const skill = readFileSync(join(packageRoot, 'templates', 'langs', lang, 'skills', 'pd-mentor', 'SKILL.md'), 'utf-8');
-      const frontmatter = skill.split('---')[1] ?? '';
-      expect(frontmatter, `${lang} description must cover the workspace-cleaning flow option`).toContain(scopeMarker);
+  for (const lang of ['zh', 'en'] as const) {
+    it(`${lang} ships the four focused skills with non-empty, task-specific descriptions`, () => {
+      const root = join(packageRoot, 'templates', 'langs', lang, 'skills');
+      const actual = readdirSync(root)
+        .filter((name) => existsSync(join(root, name, 'SKILL.md')))
+        .sort();
+      expect(actual).toEqual([...expected].sort());
+      for (const name of expected) {
+        const skill = readFileSync(join(root, name, 'SKILL.md'), 'utf-8');
+        const frontmatter = skill.split('---')[1] ?? '';
+        expect(frontmatter, `${lang}/${name} must declare a description`).toMatch(/description:\s*\S/);
+        expect(skill.split(/\r?\n/).length, `${lang}/${name} stays concise`).toBeLessThan(500);
+      }
+      for (const name of retired) {
+        expect(actual, `${lang} must not publish retired skill ${name}`).not.toContain(name);
+      }
     });
   }
 });

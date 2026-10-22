@@ -15,7 +15,7 @@ import Database from 'better-sqlite3';
  * entry, the wrapper's fail-open contract, and an installed-layout run with a
  * PLUGIN_ROOT path containing spaces (ADR-0020 §10.5) against the real
  * host-runtime dispatch. The PLUGIN_DATA runtime is seeded by copying built
- * dists and their node_modules dependencies into the exact layout $pd-setup's
+ * dists and their node_modules dependencies into the exact layout $pd-control setup's
  * npm install produces; tarball installability itself is proven separately by
  * published-codex-adapter-bundle.test.ts.
  */
@@ -230,7 +230,7 @@ describe('repo marketplace entry (.agents/plugins/marketplace.json)', () => {
   });
 
   it('ships every skill the plan requires with SKILL.md frontmatter', () => {
-    for (const skill of ['pd-setup', 'pd-status', 'pd-review', 'pd-disable']) {
+    for (const skill of ['pd-cli-operator', 'pd-pain-signal', 'pd-review', 'pd-control']) {
       const skillFile = path.join(pluginDir, 'skills', skill, 'SKILL.md');
       expect(fs.existsSync(skillFile)).toBe(true);
       const raw = fs.readFileSync(skillFile, 'utf8');
@@ -255,7 +255,7 @@ describe('wrapper (hooks/pd-hook.cjs) runtime resolution', () => {
     expect(result.status).toBe(0);
     expect(JSON.parse(result.stdout)).toEqual({});
     expect(result.stderr).toContain('pd_runtime_not_installed');
-    expect(result.stderr).toContain('$pd-setup');
+    expect(result.stderr).toContain('$pd-control');
   }, 90_000);
 });
 
@@ -269,7 +269,7 @@ describe('installed-layout plugin run with a spaced PLUGIN_ROOT (ADR-0020 §10.5
     spacedRoot = path.join(tempDir('pd plugin root-'), 'principles-disciple');
     fs.cpSync(pluginDir, spacedRoot, { recursive: true });
     // 2. Seed PLUGIN_DATA/runtime/node_modules with the built packages and
-    //    their dependency closure in the exact layout $pd-setup produces.
+    //    their dependency closure in the exact layout $pd-control setup produces.
     const nm = path.join(pluginData = tempDir('pd-plugin-data-'), 'runtime', 'node_modules');
     const rootNm = path.join(repoRoot, 'node_modules');
     copyPackageWithDeps(path.join(repoRoot, 'packages', 'codex-adapter'), path.join(nm, '@principles', 'codex-adapter'), nm, rootNm);
@@ -464,10 +464,10 @@ describe('pd-cli discovery Windows fallback (pd-locate)', () => {
   }, 60_000);
 });
 
-describe('first-run $pd-setup (real user flow)', () => {
+describe('first-run $pd-control setup (real user flow)', () => {
   it('creates the plugin data dir Codex never creates, and npm-installs the pinned runtime', async () => {
     // Codex 0.147 SETS PLUGIN_DATA for hooks but does NOT create the dir —
-    // $pd-setup must own first-run creation (derive marketplace from the
+    // $pd-control setup must own first-run creation (derive marketplace from the
     // installed cache path) or every fresh install dead-ends.
     const fakeHome = tempDir('pd-firstrun-home-');
     const pluginManifest: unknown = JSON.parse(fs.readFileSync(path.join(pluginDir, '.codex-plugin', 'plugin.json'), 'utf8'));
@@ -516,7 +516,7 @@ describe('first-run $pd-setup (real user flow)', () => {
     // PRI-810 regression guard: the freshly installed runtime must satisfy the
     // Owner emergency-control capability contract (global pause / safety
     // isolation / retired-contract backstop). Runs IN-PROCESS against the real
-    // installed bytes $pd-setup just produced — a pin that regresses to a
+    // installed bytes $pd-control setup just produced — a pin that regresses to a
     // guard-less version fails HERE. pathToFileURL (not a bare path) keeps the
     // dynamic import valid on Windows drive-letter paths.
     const probeModule = (await import(pathToFileURL(path.join(cachePlugin, 'scripts', 'verify-pinned-runtime-capability.cjs')).href)) as {
@@ -584,7 +584,7 @@ describe('pd-disable.cjs kill switch', () => {
 // fake degradation, and never a failed kill switch. These tests run the REAL
 // bundled scripts against the REAL fresh-config shape.
 
-describe('PRI-645 sparse fresh config × bundled $pd-status / $pd-disable', () => {
+describe('PRI-645 sparse fresh config × bundled $pd-cli-operator / $pd-control disable', () => {
   /** Run a bundled skill script in a temp workspace. Subprocess shape per the
    * registered write-gate seam: dynamic import + boundary-validated entry +
    * promisified execFile (never rejects — returns captured stdout/stderr). */
@@ -612,7 +612,7 @@ describe('PRI-645 sparse fresh config × bundled $pd-status / $pd-disable', () =
     return configPath;
   }
 
-  it('$pd-status reports registry-default (ok) instead of a fake degradation on features: {}', async () => {
+  it('$pd-cli-operator reports registry-default (ok) instead of a fake degradation on features: {}', async () => {
     const workspace = tempDir('pd-status-sparse-ws-');
     writeSparseConfig(workspace, 'version: 1\nfeatures: {}\n');
     const dataDir = tempDir('pd-status-sparse-data-');
@@ -624,7 +624,7 @@ describe('PRI-645 sparse fresh config × bundled $pd-status / $pd-disable', () =
     expect(result.stdout).not.toContain('host_codex_entry_missing');
   }, 60_000);
 
-  it('$pd-disable inserts the explicit override into a sparse fresh config and re-enables (block YAML)', async () => {
+  it('$pd-control disable inserts the explicit override into a sparse fresh config and re-enables (block YAML)', async () => {
     const workspace = tempDir('pd-disable-sparse-ws-');
     const configPath = writeSparseConfig(workspace, 'version: 1\nfeatures: {}\n');
 
@@ -642,7 +642,7 @@ describe('PRI-645 sparse fresh config × bundled $pd-status / $pd-disable', () =
     expect(fs.readFileSync(configPath, 'utf8')).toMatch(/host\.codex:[\s\S]*?enabled:\s*true/);
   }, 60_000);
 
-  it('$pd-disable inserts the override into a sparse flow-style (JSON) config', async () => {
+  it('$pd-control disable inserts the override into a sparse flow-style (JSON) config', async () => {
     const workspace = tempDir('pd-disable-sparse-json-ws-');
     const configPath = writeSparseConfig(workspace, JSON.stringify({ version: 1, features: {} }));
 

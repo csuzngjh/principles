@@ -110,10 +110,9 @@ for (const [path, config] of Object.entries(expectedCounts)) {
 // outside the ADR-0014 product boundary).
 const EXPECTED_SKILLS = [
   'pd-cli-operator',
-  'pd-implementer',
-  'pd-mentor',
+  'pd-control',
   'pd-pain-signal',
-  'pd-runtime-v2',
+  'pd-review',
 ];
 
 for (const lang of ['zh', 'en']) {

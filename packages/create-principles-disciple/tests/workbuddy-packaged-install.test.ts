@@ -137,7 +137,7 @@ describe('WorkBuddy distribution — packaging contract', () => {
       expect(tarEntries.has('package/workbuddy-adapter/dist/index.js')).toBe(true);
       expect(tarEntries.has('package/workbuddy-adapter/plugin/.codebuddy-plugin/plugin.json')).toBe(true);
       expect(tarEntries.has('package/workbuddy-adapter/plugin/hooks/hooks.json')).toBe(true);
-      for (const skill of ['pd-record-pain', 'pd-status', 'pd-review', 'pd-disable']) {
+      for (const skill of ['pd-cli-operator', 'pd-pain-signal', 'pd-review', 'pd-control']) {
         expect(tarEntries.has(`package/workbuddy-adapter/plugin/skills/${skill}/SKILL.md`), skill).toBe(true);
       }
       expect(tarEntries.has('package/workbuddy-adapter/plugin/scripts/pd-control.cjs')).toBe(true);

@@ -476,7 +476,7 @@ export async function handleHealthCodex(opts: CodexHealthOptions = {}): Promise<
 
   // ── PRI-953 (R1 A2): installed runtime vs marketplace pin + CLI signals ────
   // `adapterVersion` above is pd-cli's own dependency; hooks execute whatever
-  // $pd-setup installed into PLUGIN_DATA. While conversation ingestion is
+  // $pd-control setup installed into PLUGIN_DATA. While conversation ingestion is
   // enabled, ANY install state that cannot be verified as INSTALLED_AND_MATCHED
   // is a §15 ready blocker with a nextAction — fail-open fake health is the
   // F2 defect class. With ingestion disabled these stay warnings: hook

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * $pd-setup — per-workspace PD initialization for the Codex plugin.
+ * $pd-control setup — per-workspace PD initialization for the Codex plugin.
  *
  * Steps (ADR-0020 §10.4; SPEC rev 2 §17 + G2A frozen disclosure, Slice D):
  *   1. Fail loud when Node < 22 or npm is unavailable (the plugin does not
@@ -114,12 +114,12 @@ async function main() {
   //    same floor as the installer's env gate and engines field (PRI-697).
   const major = Number.parseInt(process.versions.node.split('.')[0], 10);
   if (!Number.isFinite(major) || major < 22) {
-    fail(`node_version_unsupported:${process.versions.node}`, 'Install Node.js >= 22 (https://nodejs.org), restart Codex, and re-run $pd-setup.');
+    fail(`node_version_unsupported:${process.versions.node}`, 'Install Node.js >= 22 (https://nodejs.org), restart Codex, and re-run $pd-control setup.');
     return;
   }
   const npmProbe = runNpm(['--version'], { stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000 });
   if (npmProbe.status !== 0) {
-    fail('npm_not_available', 'npm must be on PATH (it ships with Node.js). Verify with `npm --version` in a terminal, then re-run $pd-setup.');
+    fail('npm_not_available', 'npm must be on PATH (it ships with Node.js). Verify with `npm --version` in a terminal, then re-run $pd-control setup.');
     return;
   }
 
@@ -205,7 +205,7 @@ async function main() {
     if (install.status !== 0) {
       fail(
         `runtime_install_failed:${String(install.stderr).slice(0, 300).replace(/\s+/g, ' ')}`,
-        'Check network/npm access. If the @principles packages are not yet published, wait for the release announcement, then re-run $pd-setup.',
+        'Check network/npm access. If the @principles packages are not yet published, wait for the release announcement, then re-run $pd-control setup.',
       );
       return;
     }
@@ -216,7 +216,7 @@ async function main() {
   // Verify the runtime resolves from the installed location.
   const adapterEntry = path.join(runtimeDir, 'node_modules', '@principles', 'codex-adapter', 'dist', 'pd-hook.js');
   if (!fs.existsSync(adapterEntry)) {
-    fail('runtime_install_incomplete', 'The adapter entry is missing after install. Re-run $pd-setup; if it repeats, remove the plugin data dir and retry.');
+    fail('runtime_install_incomplete', 'The adapter entry is missing after install. Re-run $pd-control setup; if it repeats, remove the plugin data dir and retry.');
     return;
   }
 
@@ -225,14 +225,14 @@ async function main() {
   if (!args.skipInit) {
     const pd = pdCliCommand();
     if (!pd) {
-      fail('pd_cli_unavailable', 'Install the PD CLI globally first: npm install -g @principles/pd-cli — then re-run $pd-setup. (--skip-init skips this check.)');
+      fail('pd_cli_unavailable', 'Install the PD CLI globally first: npm install -g @principles/pd-cli — then re-run $pd-control setup. (--skip-init skips this check.)');
       return;
     }
     const init = spawnSync(pd.command, [...pd.prefix, 'runtime', 'init', '--workspace', workspaceDir, '--confirm'], { encoding: 'utf8', timeout: 120_000 });
     if (init.error || init.status !== 0) {
       fail(
         `pd_runtime_init_failed:${(init.error ? init.error.message : String(init.stderr)).slice(0, 200).replace(/\s+/g, ' ')}`,
-        'Reinstall the PD CLI (npm install -g @principles/pd-cli) and re-run $pd-setup. (--skip-init skips this check.)',
+        'Reinstall the PD CLI (npm install -g @principles/pd-cli) and re-run $pd-control setup. (--skip-init skips this check.)',
       );
       return;
     }
@@ -246,7 +246,7 @@ async function main() {
   try {
     workerRegistration = await registerWorkspaceWorker(workspaceDir);
   } catch (error) {
-    fail(`worker_registration_failed:${error.message.slice(0, 160)}`, 'Restore the canonical PD install manifest/runtime and re-run $pd-setup. The existing manifest was not replaced.');
+    fail(`worker_registration_failed:${error.message.slice(0, 160)}`, 'Restore the canonical PD install manifest/runtime and re-run $pd-control setup. The existing manifest was not replaced.');
     return;
   }
 
@@ -363,7 +363,7 @@ async function runIngestionConsentStep(pd, workspaceDir, args) {
       const answer = (await rl.question('是否开启 Codex 对话观察？ y = 开启（已读上述说明） / n = 保持关闭: ')).trim().toLowerCase();
       if (answer === 'y' || answer === 'yes') decision = 'accept';
       else if (answer === 'n' || answer === 'no') decision = 'decline';
-      else return skip('no_explicit_decision — nothing was changed; re-run $pd-setup or `pd codex setup`');
+      else return skip('no_explicit_decision — nothing was changed; re-run $pd-control setup or `pd codex setup`');
     } finally {
       rl.close();
     }
@@ -393,5 +393,5 @@ async function runIngestionConsentStep(pd, workspaceDir, args) {
 }
 
 main().catch((error) => {
-  fail(`setup_crashed:${error instanceof Error ? error.message.slice(0, 160) : String(error)}`, 'Re-run $pd-setup; if it repeats, report the reason above.');
+  fail(`setup_crashed:${error instanceof Error ? error.message.slice(0, 160) : String(error)}`, 'Re-run $pd-control setup; if it repeats, report the reason above.');
 });

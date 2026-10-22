@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * $pd-disable — the Codex kill switch (mvp-q-3).
+ * $pd-control disable — the Codex kill switch (mvp-q-3).
  *
  * Sets features.host.codex.enabled=false in the nearest .pd/config.yaml.
  * Every Codex hook then returns the neutral allow/empty result with an
@@ -171,7 +171,7 @@ function main() {
   console.log(target
     ? '  PD Codex behavior is ACTIVE again — prompt injection, tool gating, and pain capture resume on the next hook invocation.'
     : '  PD Codex behavior is now STOPPED: every Codex hook returns the neutral allow/empty result with a skip reason, and no PD business state is written. OpenClaw and workspace data are untouched.');
-  if (!target) console.log('  re-enable → run $pd-disable --enable (or set features.host.codex.enabled=true manually).');
+  if (!target) console.log('  re-enable → run $pd-control enable.');
 }
 
 main();

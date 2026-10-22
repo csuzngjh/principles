@@ -1,71 +1,45 @@
 ---
 name: pd-pain-signal
-description: Manually trigger a Principles Disciple Runtime V2 pain diagnosis. Use this when the user reports the agent is stuck, looping, unresponsive, or asks to record/trigger a pain signal. In an OpenClaw session, direct the Owner to the /pd-pain command (it binds the real session automatically). From outside a session, use `pd pain record --session <id>`. Never write `.state/.pain_flag` and never use legacy write_pain_flag tooling.
+description: Use when the Owner explicitly asks to record an agent behavior problem, register a pain signal, or trace whether feedback entered the diagnostic pipeline. Automatic pain detection remains the responsibility of existing hooks, host entrypoints, and Runtime.
 disable-model-invocation: false
 ---
 
-# Pain Signal (Runtime V2)
+# PD Pain Signal
 
-Session evidence is what lets a diagnosis carry real trajectory evidence. A
-pain recorded without a session is a legal unbound Owner report: it carries no
-trajectory evidence, its diagnosis confidence tends to be low, and its
-candidates are likely gated as `needs_evidence` by the admission gate — the
-Owner's report is stored, but usually nothing is internalized.
+## Purpose
 
-## In an OpenClaw session (preferred)
+Send the Owner's real behavior feedback through the existing PD pain-registration and diagnosis pipeline while preserving the original statement, source, and available session evidence. This skill does not reimplement detection, deduplication, admission, or diagnosis.
 
-Ask the Owner to run the host command in the conversation where the pain
-occurred:
+## Steps
 
-```text
-/pd-pain <describe the issue>
-```
+1. **Check whether it was already recorded.** The current message may already have been handled by a hook or host entrypoint. If a real receipt exists, reuse its pain/task IDs. Do not submit a duplicate. If registration is not observable, do not claim success or blindly retry.
+2. **Preserve the Owner's words.** Use only a statement the Owner explicitly provided. Do not add a technical root cause, score, or tool-failure fact. Quoted text, tool output, and model paraphrases must not be presented as a new Owner submission.
+3. **Use the trusted host entrypoint.**
+   - In the OpenClaw session where the issue occurred, when the Owner explicitly requests registration, use the host command `/pd-pain <issue description>`. OpenClaw binds the authenticated current session.
+   - Outside the session, use the CLI only with a known, validated session: `pd pain record --reason "<reason>" --score <0-100> --workspace "<workspace>" --session "<session-id>" --json`.
+4. **Never guess identity.** Do not guess, scan the database, pick the "latest" session, or substitute another host's ID. If the required session identity is missing, stop that CLI path and explain why.
+5. **Verify the receipt.** Report registration only when the actual receipt confirms it. Without a receipt, say registration is unconfirmed.
 
-`/pd-pain` receives the authenticated current session from OpenClaw and
-submits the session's trajectory evidence automatically. You cannot obtain a
-trusted session ID yourself (none is injected into tool executions); never
-guess, scan, or pick the "latest" session.
+## Evidence and success criteria
 
-## Outside a session (CLI)
+- A real pain ID proves only that registration returned a receipt, not that diagnosis completed.
+- Generated candidates are not necessarily admitted.
+- Check the actual `admissionResults` / `candidateOutcomes` for an `admitted` decision and its non-empty `ledgerEntryIds`. A non-empty `candidateIds` alone is not success.
+- Report `needs_evidence`, `deferred`, and explicit admission rejection honestly. Never bypass the admission gate or fabricate trajectory evidence to increase confidence.
+- The Owner's statement, host trajectory, model diagnosis, admission result, Owner approval, and activation state are distinct evidence types.
 
-Bind an explicitly known session id recorded in this workspace:
+## Failure handling
 
-```bash
-pd pain record --reason "<reason>" --score <0-100> --workspace "<workspace>" --session "<session-id>" --json
-```
+- Registration failure: preserve the real error and the host-provided next action.
+- Duplicate risk: check existing receipts and idempotency first.
+- Missing or untrusted session: stop; never guess.
+- CLI/hook unavailable: ask `pd-cli-operator` to inspect status; route installation repair to `pd-control`.
+- If the Owner wants to inspect resulting candidates, use `pd-review` to open the Console; do not re-register the same feedback.
 
-- `--session <id>` is validated against the workspace trajectory: a missing
-  session fails with `session_not_found` before anything is written.
-- When the `--session` binding is verified but the trajectory evidence is
-  empty or unreadable (the session is real), the record is submitted as an
-  honest bound + evidence-unavailable degrade: no evidence is fabricated and
-  the admission gate decides what empty evidence is worth, instead of a hard
-  refusal.
-- Recording without `--session` is allowed as an unbound Owner report, but it
-  attaches no evidence and its candidates will likely be gated
-  (`needs_evidence`) by the admission gate — the CLI output says so explicitly.
+## Never
 
-## Forbidden
-
-- Do not write `.state/.pain_flag` directly.
-- Do not use `write_file`, shell redirection, `Set-Content`, `Out-File`, `node -e`, or any other file-writing method to create `.state/.pain_flag`.
-- Do not use `write_pain_flag`. That was a legacy path.
-- Do not guess, scan for, or infer a session ID. Use `/pd-pain` or an id the Owner provides.
-
-## Verify
-
-Use:
-```bash
-pd runtime probe --runtime pi-ai --workspace "<workspace>" --json
-pd candidate list --workspace "<workspace>" --json
-pd runtime flow show --workspace "<workspace>" --json
-```
-
-Success requires admitted candidates, not merely generated ones: check
-`admissionResults` for `admitted` decisions and non-empty `ledgerEntryIds`.
-A successful command returning a `painId` is only a record receipt — it does
-not mean the diagnosis produced candidates or that anything was admitted.
-Candidates reported as `needs_evidence` or `deferred` were NOT internalized —
-if candidates are gated, re-record with `/pd-pain` or `--session` so the
-diagnosis carries real trajectory evidence. Activation is a separate stage
-that follows Owner approval; this flow never activates anything by itself.
+- Write `.state/.pain_flag` or call legacy `write_pain_flag`.
+- Fabricate the Owner's words, session ID, turn ID, or tool failure.
+- Re-submit an event whose registration is confirmed.
+- Modify the pain database, candidate ledger, or admission state directly.
+- Approve, activate, or edit a principle.

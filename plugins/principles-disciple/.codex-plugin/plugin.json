@@ -14,7 +14,7 @@
   "interface": {
     "displayName": "Principles Disciple",
     "shortDescription": "Owner-governed principles that actually steer Codex",
-    "longDescription": "Principles Disciple turns your corrections into durable behavior: approved principles are injected into session context, owner-approved rules can deny risky tool calls before they run, and failed tool calls are recorded as reviewable evidence. Run $pd-setup to initialize a workspace, $pd-status to inspect health, $pd-review to open the owner console, and $pd-disable to stop all Codex behavior immediately.",
+    "longDescription": "Principles Disciple turns your corrections into durable behavior: approved principles are injected into session context, owner-approved rules can deny risky tool calls before they run, and failed tool calls are recorded as reviewable evidence. Use $pd-control for explicit setup/disable/enable requests, $pd-cli-operator to troubleshoot health, and $pd-review to open the Owner Console. Normal PD behavior should not require users to invoke a skill by name; explicit feedback uses the host's supported Owner pain-entry format.",
     "developerName": "Principles Disciple",
     "category": "Productivity",
     "websiteURL": "https://github.com/csuzngjh/principles",

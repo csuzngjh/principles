@@ -76,7 +76,7 @@ export const WORKBUDDY_PLUGIN_NAME = 'principles-disciple';
 export const WORKBUDDY_MARKETPLACE_NAME = 'principles-disciple-market';
 /** Registry/settings key: "principles-disciple@principles-disciple-market". */
 export const WORKBUDDY_PLUGIN_KEY = `${WORKBUDDY_PLUGIN_NAME}@${WORKBUDDY_MARKETPLACE_NAME}`;
-const WORKBUDDY_REQUIRED_SKILLS = ['pd-record-pain', 'pd-status', 'pd-review', 'pd-disable'];
+const WORKBUDDY_REQUIRED_SKILLS = ['pd-cli-operator', 'pd-pain-signal', 'pd-review', 'pd-control'];
 
 /**
  * Files the host needs to load this plugin. One list serves both the

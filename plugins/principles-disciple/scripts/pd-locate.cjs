@@ -104,7 +104,7 @@ function locatePluginData(explicit) {
   return {
     ok: false,
     reason: 'plugin_data_not_found',
-    nextAction: 'Run the $pd-setup skill — it creates the plugin data directory and installs the pinned runtime.',
+    nextAction: 'Run the $pd-control setup skill — it creates the plugin data directory and installs the pinned runtime.',
   };
 }
 
@@ -157,7 +157,7 @@ function locateWorkspace(startDir) {
   return {
     ok: false,
     reason: 'workspace_not_initialized',
-    nextAction: 'No .pd/config.yaml found in this directory or any parent. Run the $pd-setup skill here first.',
+    nextAction: 'No .pd/config.yaml found in this directory or any parent. Run the $pd-control setup skill here first.',
   };
 }
 

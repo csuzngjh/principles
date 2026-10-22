@@ -126,10 +126,10 @@ vi.mock('../../src/commands/health-codex-install.js', () => ({
     cliStatusSource: 'current_cli',
   })),
   CODEX_INSTALL_NEXT_ACTIONS: {
-    staleInstall: 'refresh plugin + re-run $pd-setup',
-    missingRuntime: 're-run $pd-setup',
-    pinUnavailable: 're-add plugin + re-run $pd-setup',
-    versionUnreadable: 'reinstall plugin + re-run $pd-setup',
+    staleInstall: 'refresh plugin + re-run $pd-control setup',
+    missingRuntime: 're-run $pd-control setup',
+    pinUnavailable: 're-add plugin + re-run $pd-control setup',
+    versionUnreadable: 'reinstall plugin + re-run $pd-control setup',
     unverifiedCli: 'update PD',
   },
 }));

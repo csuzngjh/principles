@@ -162,8 +162,8 @@
         <div class="command-row"><code>{{ codexPluginCommand }}</code><button type="button" :aria-label="copyLabel(isZh ? '安装插件命令' : 'install plugin command')" aria-live="polite" data-umami-event="copy_codex_plugin_command" @click="copyCommand('codexPlugin', codexPluginCommand)">{{ copyState('codexPlugin') }}</button></div>
         <p class="step-desc">
           {{ isZh
-            ? '安装插件后，在 Codex 会话中运行 $pd-setup 初始化工作区，并通过 /hooks 信任 PD 钩子。$pd-review 打开审核控制台，$pd-disable 一键停用。'
-            : 'After installing the plugin, run $pd-setup in a Codex session to initialize the workspace, then trust the PD hooks via /hooks. $pd-review opens the owner console; $pd-disable stops PD instantly.'
+            ? '安装插件后，在 Codex 会话中运行 $pd-control setup 初始化工作区，并通过 /hooks 信任 PD 钩子。用 $pd-cli-operator 检查状态，$pd-review 打开 Owner Console；$pd-control disable/enable 可停用或恢复。'
+            : 'After installing the plugin, run $pd-control setup in a Codex session to initialize the workspace, then trust the PD hooks via /hooks. Use $pd-cli-operator for status, $pd-review to open the Owner Console, and $pd-control disable/enable to stop or resume PD.'
           }}
         </p>
       </section>

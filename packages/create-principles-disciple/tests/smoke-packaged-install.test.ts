@@ -453,18 +453,18 @@ describe('Real packaged install smoke test', () => {
     // maintainer-approved MVP skill set in both languages.
     const APPROVED_SKILLS = [
       'pd-cli-operator',
-      'pd-implementer',
-      'pd-mentor',
+      'pd-control',
       'pd-pain-signal',
-      'pd-runtime-v2',
+      'pd-review',
     ];
     const LEGACY_SKILLS = [
       'admin', 'bootstrap-tools', 'deductive-audit', 'evolution-framework-update',
       'evolve-system', 'evolve-task', 'feedback', 'init-strategy', 'inject-rule',
       'manage-okr', 'pain', 'profile', 'reflection', 'reflection-log', 'report',
       'root-cause', 'triage', 'watch-evolution', 'pd-reporter', 'pd-reviewer',
-      // PRI-548 follow-up: generic SOP role skills retired from the plugin.
+      // Retired generic SOP roles and superseded overlapping PD skills.
       'pd-auditor', 'pd-explorer', 'pd-planner',
+      'pd-implementer', 'pd-mentor', 'pd-runtime-v2',
     ];
     const listing = execFileSync('tar', ['-tf', path.basename(tarballPath)], {
       stdio: 'pipe',

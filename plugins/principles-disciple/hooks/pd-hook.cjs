@@ -10,7 +10,7 @@
  * host-runtime dispatch) sees the exact bytes Codex wrote.
  *
  * Runtime resolution order:
- *   1. ${PLUGIN_DATA}/runtime/node_modules — installed by the $pd-setup skill
+ *   1. ${PLUGIN_DATA}/runtime/node_modules — installed by the $pd-control setup skill
  *      with versions pinned in ${PLUGIN_ROOT}/runtime-version.json.
  *   2. The global npm root (`npm install -g @principles/codex-adapter`),
  *      probed ONLY when (1) fails: the probe spawns npm, and paying that on
@@ -69,7 +69,7 @@ const entry = resolveAdapterEntry();
 if (!entry) {
   failOpen(
     'pd_runtime_not_installed',
-    'Run the $pd-setup skill in this workspace to install the pinned PD runtime (or npm install -g @principles/codex-adapter), then retry.',
+    'Run the $pd-control setup skill in this workspace to install the pinned PD runtime (or npm install -g @principles/codex-adapter), then retry.',
   );
 }
 
@@ -77,7 +77,7 @@ if (!entry) {
 // adapter is killed here instead, spawnSync reaps the child (no orphan).
 const result = spawnSync(process.execPath, [entry], { stdio: 'inherit', timeout: 120_000 });
 if (result.error) {
-  failOpen(`pd_runtime_spawn_failed:${result.error.message.slice(0, 200)}`, 'Re-run $pd-setup to reinstall the PD runtime, then retry.');
+  failOpen(`pd_runtime_spawn_failed:${result.error.message.slice(0, 200)}`, 'Re-run $pd-control setup to reinstall the PD runtime, then retry.');
 }
 // The adapter owns the exit contract (always 0: fail-open); propagate anything
 // else verbatim so anomalies stay observable instead of being masked here.

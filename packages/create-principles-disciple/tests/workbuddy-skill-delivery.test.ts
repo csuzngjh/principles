@@ -8,7 +8,7 @@ import { WorkBuddyHostInstaller, resolveWorkbuddyPaths, findWorkbuddyPluginPaylo
 
 const adapter = path.resolve(__dirname, '../../workbuddy-adapter');
 const installerPackage = path.resolve(__dirname, '..');
-const requiredSkills = ['pd-record-pain', 'pd-status', 'pd-review', 'pd-disable'];
+const requiredSkills = ['pd-cli-operator', 'pd-pain-signal', 'pd-review', 'pd-control'];
 const directories: string[] = [];
 const originalConfigDir = process.env.WORKBUDDY_CONFIG_DIR;
 const copyFailure = vi.hoisted((): { staging?: boolean; commitFile?: string } => ({}));
