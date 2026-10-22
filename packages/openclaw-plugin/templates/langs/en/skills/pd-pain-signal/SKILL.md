@@ -17,7 +17,7 @@ Send the Owner's real behavior feedback through the existing PD pain-registratio
 3. **Use the trusted host entrypoint.**
    - In the OpenClaw session where the issue occurred, when the Owner explicitly requests registration, use the host command `/pd-pain <issue description>`. OpenClaw binds the authenticated current session.
    - Outside the session, use the CLI only with a known, validated session: `pd pain record --reason "<reason>" --score <0-100> --workspace "<workspace>" --session "<session-id>" --json`.
-4. **Never guess identity.** Do not guess, scan the database, pick the "latest" session, or substitute another host's ID. If the required session identity is missing, stop that CLI path and explain why.
+4. **Do not guess session IDs.** Never scan the database, pick the "latest" session, or substitute another host's ID. If the required session identity is missing, stop that CLI path and explain why.
 5. **Verify the receipt.** Report registration only when the actual receipt confirms it. Without a receipt, say registration is unconfirmed.
 
 ## Evidence and success criteria
