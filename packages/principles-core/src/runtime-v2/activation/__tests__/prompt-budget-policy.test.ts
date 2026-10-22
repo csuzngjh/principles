@@ -312,3 +312,55 @@ describe('getPromptModelCatalog against the installed pi-ai 1.2.0 catalog', () =
     expect(resolved.budgetChars).toBe(2000);
   });
 });
+
+describe('resolvePromptBudget tier 0: operator_declared (PRI-1020)', () => {
+  it('an Owner declaration outranks a trusted host window and the catalog', () => {
+    const result = resolvePromptBudget({
+      operatorDeclared: { contextWindowTokens: 262_144 },
+      hostCapacity: { contextTokenBudget: 128_000, contextWindowSource: 'model' },
+      modelIdentity: { providerId: 'p1', modelId: 'model-y' },
+    });
+    expect(result).toMatchObject({
+      budgetChars: 4096,
+      capacitySource: 'operator_declared',
+      capacityStatus: 'confirmed',
+      contextWindowTokens: 262_144,
+      policyVersion: 'model_aware_v1',
+    });
+    expect(result.fallbackReason).toBeUndefined();
+  });
+
+  it('resolves confirmed from the declaration alone (no host facts, no catalog)', () => {
+    const result = resolvePromptBudget({ operatorDeclared: { contextWindowTokens: 1_000_000 } });
+    expect(result).toMatchObject({
+      budgetChars: 15_625,
+      capacitySource: 'operator_declared',
+      capacityStatus: 'confirmed',
+      contextWindowTokens: 1_000_000,
+    });
+  });
+
+  it('clamps at the policy ceiling (1M+ windows cap at 16000 chars)', () => {
+    const result = resolvePromptBudget({ operatorDeclared: { contextWindowTokens: 10_000_000 } });
+    expect(result.budgetChars).toBe(16_000);
+    expect(result.capacitySource).toBe('operator_declared');
+  });
+
+  it('an invalid declaration is ignored defensively: the chain runs as if undeclared', () => {
+    for (const bad of [500, 200_000.5, 200_000_000, '262144', null]) {
+      const result = resolvePromptBudget({ operatorDeclared: { contextWindowTokens: bad } });
+      expect(result.capacitySource, `declared=${String(bad)}`).toBe('legacy_fallback');
+      expect(result.budgetChars).toBe(2000);
+      expect(result.fallbackReason).toBe('host_capacity_absent');
+    }
+  });
+
+  it('an invalid declaration does not mask trusted host facts downstream', () => {
+    const result = resolvePromptBudget({
+      operatorDeclared: { contextWindowTokens: 500 },
+      hostCapacity: { contextTokenBudget: 256_000, contextWindowSource: 'modelsConfig' },
+    });
+    expect(result.capacitySource).toBe('host_effective_window');
+    expect(result.budgetChars).toBe(4000);
+  });
+});

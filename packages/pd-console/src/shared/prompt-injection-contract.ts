@@ -16,7 +16,7 @@ export type PromptInjectionTargetHostName = 'openclaw' | 'codex' | 'workbuddy';
 export type PromptInjectionRouteName = 'legacy_trim' | 'shared_render';
 export type PromptInjectionBudgetScopeName = 'selected_lines' | 'full_directive_context';
 
-export type PromptBudgetCapacitySourceWire = 'host_effective_window' | 'pi_catalog_exact' | 'legacy_fallback';
+export type PromptBudgetCapacitySourceWire = 'operator_declared' | 'host_effective_window' | 'pi_catalog_exact' | 'legacy_fallback';
 export type PromptBudgetCapacityStatusWire = 'confirmed' | 'unknown';
 
 /**

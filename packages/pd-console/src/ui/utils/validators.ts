@@ -150,7 +150,7 @@ function isPromptBudgetFallbackReason(value: unknown): value is PromptBudgetFall
 }
 
 function isPromptBudgetCapacitySource(value: unknown): value is PromptBudgetCapacitySourceWire {
-  return value === 'host_effective_window' || value === 'pi_catalog_exact' || value === 'legacy_fallback';
+  return value === 'operator_declared' || value === 'host_effective_window' || value === 'pi_catalog_exact' || value === 'legacy_fallback';
 }
 
 function isPromptBudgetCapacityStatus(value: unknown): value is PromptBudgetCapacityStatusWire {

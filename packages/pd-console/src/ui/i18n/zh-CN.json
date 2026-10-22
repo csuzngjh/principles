@@ -102,6 +102,7 @@
       "promptCapacityListRoute": "列表注入（按选中行计费）",
       "promptCapacityPerHostEntry": "{{host}}：{{billing}} — {{used}}/{{budget}} 字符{{full}}{{observed}}",
       "promptCapacityPerHostFull": "（已满）",
+      "promptCapacityPerHostDeclared": "（预算来自工作区配置声明）",
       "promptCapacityPerHostObserved": "（预算来自该宿主最近一次运行时观测，观测于 {{observedAt}}）",
       "promptCapacityViewAsHost": "按 {{host}} 查看",
       "promptCapacityClearHost": "清除选择",
@@ -116,6 +117,8 @@
       "promptBudgetFallbackObservedSuffix": "；运行时最近一次观测于 {{observedAt}}",
       "budgetCapacitySourceHostWindow": "宿主有效上下文窗口",
       "budgetCapacitySourcePiCatalog": "模型目录精确匹配",
+      "budgetCapacitySourceOperatorDeclared": "工作区配置声明",
+      "budgetCapacitySourceOperatorDeclaredSuffix": "，来源: 工作区配置声明",
       "budgetFallbackReason": {
         "host_capacity_absent": "宿主未提供上下文容量事实",
         "host_capacity_source_untrusted": "宿主容量来源不可信",

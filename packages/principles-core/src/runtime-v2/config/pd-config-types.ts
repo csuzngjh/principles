@@ -190,6 +190,41 @@ export interface ReuseEvaluationConfig {
   timeoutMs?: number;
 }
 
+// ── Prompt Budget Config (PRI-1020 / SPEC-PD-OPERATOR-DECLARED-PROMPT-BUDGET-001) ──
+
+/**
+ * Host kinds eligible for a per-host declared context-window override.
+ * Closed set — mirrors the runtime hostKind union; an unknown host key in
+ * config is a load-time error, not a silently ignored entry.
+ */
+export const PROMPT_BUDGET_HOST_KINDS = ['openclaw', 'codex', 'workbuddy'] as const;
+export type PromptBudgetHostKind = (typeof PROMPT_BUDGET_HOST_KINDS)[number];
+
+/**
+ * Owner-declared model capacity (SPEC-PD-OPERATOR-DECLARED-PROMPT-BUDGET-001).
+ *
+ * An explicit context-window cap authored by the Owner in `.pd/config.yaml` —
+ * the workspace's final capacity authority, the same trust class as the
+ * upstream `agentContextTokens` explicit cap. It exists for hosts that cannot
+ * auto-confirm a window (Codex/WorkBuddy adapters forward model identity
+ * only; custom model ids never match the installed catalog), so the real
+ * window would otherwise be stuck at the legacy 2000-char fallback forever.
+ *
+ * The whole section is optional: absent ⇒ the budget chain behaves exactly as
+ * before (zero migration). Values are plausibility-validated at load time
+ * with the SAME bounds the budget policy enforces, so a declared value can
+ * never look confirmed while the policy would reject it.
+ */
+export interface PromptBudgetConfig {
+  /**
+   * Global declared context window in tokens — the fallback declaration for
+   * every host. Integer within the policy's plausibility bounds.
+   */
+  declaredContextWindowTokens?: number;
+  /** Per-host override over `declaredContextWindowTokens` (hostKind → tokens). */
+  hosts?: Partial<Record<PromptBudgetHostKind, number>>;
+}
+
 // ── Principles Config (PRI-336) ──────────────────────────────────────────────
 
 import type { OutputLanguage } from '../language-directive.js';
@@ -329,6 +364,12 @@ export interface PdConfig {
    * configs; the effective layer resolves the defaults.
    */
   reuseEvaluation?: ReuseEvaluationConfig;
+  /**
+   * Owner-declared model capacity (PRI-1020) — optional; absent ⇒ the
+   * injection budget chain is unchanged. Values validated at load with the
+   * budget policy's plausibility bounds.
+   */
+  promptBudget?: PromptBudgetConfig;
   /** Agent behavioral profile — partial user input; defaults resolved in effective config (PRI-304). */
   profile?: Partial<ProfileConfig>;
   /** Context injection configuration — partial user input; defaults resolved in effective config. */
@@ -423,6 +464,8 @@ export interface RedactedPdConfigSummary {
   contextInjection?: ContextInjectionConfig;
   /** PRI-917 v0.3.2 §8 — Semantic Reuse Evaluation Capability (read-only display). */
   reuseEvaluation?: ReuseEvaluationConfig;
+  /** PRI-1020 — Owner-declared model capacity (read-only display). */
+  promptBudget?: PromptBudgetConfig;
   warnings: string[];
 }
 

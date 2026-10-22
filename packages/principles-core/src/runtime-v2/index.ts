@@ -2046,6 +2046,9 @@ export {
   VALID_DIAGNOSTICS_MODES,
   DANGEROUS_KEYS as PD_CONFIG_DANGEROUS_KEYS,
   validatePdConfig,
+  // PRI-1020: owner-declared capacity (promptBudget config section)
+  PROMPT_BUDGET_HOST_KINDS,
+  operatorDeclaredContextWindow,
   DEFAULT_FEATURE_FLAGS as PD_DEFAULT_FEATURE_FLAGS,
   DEFAULT_RUNTIME_PROFILE_ID,
   DEFAULT_RUNTIME_PROFILE,
@@ -2101,6 +2104,8 @@ export type {
   RedactedAgentSummary,
   RedactedFeatureSummary,
   RedactedPdConfigSummary,
+  PromptBudgetConfig,
+  PromptBudgetHostKind,
   EffectiveFeatureFlag,
   FeatureFlagsResult,
 } from './config/index.js';

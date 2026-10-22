@@ -40,7 +40,10 @@ import {
   VALID_DIAGNOSTICS_MODES,
   VALID_PROJECT_FOCUS_MODES,
   DANGEROUS_KEYS,
+  PROMPT_BUDGET_HOST_KINDS,
+  type PromptBudgetConfig,
 } from './pd-config-types.js';
+import { MIN_PLAUSIBLE_CONTEXT_WINDOW_TOKENS, MAX_PLAUSIBLE_CONTEXT_WINDOW_TOKENS } from '../activation/prompt-budget-policy.js';
 import { validateProfileConfig } from './pd-validate-profile.js';
 import { VALID_OUTPUT_LANGUAGES, isValidOutputLanguage } from '../language-directive.js';
 
@@ -51,6 +54,13 @@ import { VALID_OUTPUT_LANGUAGES, isValidOutputLanguage } from '../language-direc
  * ghost configuration starts (the feature-flag lesson, generalized).
  */
 const REUSE_EVALUATION_KEYS: ReadonlySet<string> = new Set(['enabled', 'runtimeProfile', 'timeoutMs']);
+
+/**
+ * PRI-1020 — the dedicated `promptBudget` section's closed key set. Same
+ * fail-loud posture as reuseEvaluation: a key nothing reads is ghost
+ * configuration.
+ */
+const PROMPT_BUDGET_KEYS: ReadonlySet<string> = new Set(['declaredContextWindowTokens', 'hosts']);
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -77,6 +87,20 @@ function err(path: string, reason: string, nextAction: string): PdConfigValidati
 function readOwn(obj: Record<string, unknown>, key: string): unknown {
   if (DANGEROUS_KEYS.has(key)) return undefined;
   return Object.hasOwn(obj, key) ? obj[key] : undefined;
+}
+
+/**
+ * PRI-1020 — declared-window value guard. Bounds come from the budget policy
+ * (single authority) so config and policy can never disagree about what a
+ * plausible declared window is.
+ */
+function isValidDeclaredWindowValue(value: unknown): value is number {
+  return (
+    isNumber(value) &&
+    Number.isInteger(value) &&
+    value >= MIN_PLAUSIBLE_CONTEXT_WINDOW_TOKENS &&
+    value <= MAX_PLAUSIBLE_CONTEXT_WINDOW_TOKENS
+  );
 }
 
 // ── Safe Preview ────────────────────────────────────────────────────────────
@@ -810,6 +834,51 @@ export function validatePdConfig(raw: unknown): PdConfigValidationResult {
     }
   }
 
+  // promptBudget (optional — PRI-1020). Legacy configs have no such section
+  // and must keep loading unchanged (zero migration); a present but malformed
+  // section is a hard error, never a silent drop (rc-3). Values reuse the
+  // budget policy's plausibility bounds so a declared window can never look
+  // confirmed here while the policy would reject it.
+  const promptBudgetRaw = readOwn(raw, 'promptBudget');
+  let promptBudget: PromptBudgetConfig | undefined;
+  if (promptBudgetRaw !== undefined) {
+    if (!isRecord(promptBudgetRaw)) {
+      errors.push(err('promptBudget', `promptBudget must be an object, got ${safePreview(promptBudgetRaw)}`, 'Set promptBudget to a mapping (e.g. promptBudget: { declaredContextWindowTokens: 262144 })'));
+    } else {
+      for (const key of Object.keys(promptBudgetRaw)) {
+        if (!PROMPT_BUDGET_KEYS.has(key)) {
+          errors.push(err(`promptBudget.${key}`, `unknown key '${key}' in promptBudget`, `Remove '${key}'; only ${[...PROMPT_BUDGET_KEYS].join(', ')} are supported`));
+        }
+      }
+      const declaredWindowRaw = readOwn(promptBudgetRaw, 'declaredContextWindowTokens');
+      if (declaredWindowRaw !== undefined && !isValidDeclaredWindowValue(declaredWindowRaw)) {
+        errors.push(err('promptBudget.declaredContextWindowTokens', `declaredContextWindowTokens must be an integer between ${MIN_PLAUSIBLE_CONTEXT_WINDOW_TOKENS} and ${MAX_PLAUSIBLE_CONTEXT_WINDOW_TOKENS}, got ${safePreview(declaredWindowRaw)}`, 'Set promptBudget.declaredContextWindowTokens to the model context window in tokens (e.g. 262144), or remove the key'));
+      }
+      const hostsRaw = readOwn(promptBudgetRaw, 'hosts');
+      if (hostsRaw !== undefined) {
+        if (!isRecord(hostsRaw)) {
+          errors.push(err('promptBudget.hosts', `hosts must be an object, got ${safePreview(hostsRaw)}`, `Set promptBudget.hosts to a mapping keyed by ${PROMPT_BUDGET_HOST_KINDS.join(', ')}`));
+        } else {
+          for (const [hostKey, hostValue] of Object.entries(hostsRaw)) {
+            if (!(PROMPT_BUDGET_HOST_KINDS as readonly string[]).includes(hostKey)) {
+              errors.push(err(`promptBudget.hosts.${hostKey}`, `unknown host '${hostKey}' in promptBudget.hosts`, `Only ${PROMPT_BUDGET_HOST_KINDS.join(', ')} are supported`));
+            } else if (!isValidDeclaredWindowValue(hostValue)) {
+              errors.push(err(`promptBudget.hosts.${hostKey}`, `host window must be an integer between ${MIN_PLAUSIBLE_CONTEXT_WINDOW_TOKENS} and ${MAX_PLAUSIBLE_CONTEXT_WINDOW_TOKENS}, got ${safePreview(hostValue)}`, `Set promptBudget.hosts.${hostKey} to the model context window in tokens (e.g. 262144), or remove the key`));
+            }
+          }
+        }
+      }
+      if (errors.every((e) => !e.path.startsWith('promptBudget'))) {
+        promptBudget = {
+          ...(isValidDeclaredWindowValue(declaredWindowRaw) ? { declaredContextWindowTokens: declaredWindowRaw } : {}),
+          ...(isRecord(hostsRaw) && Object.keys(hostsRaw).length > 0
+            ? { hosts: Object.fromEntries(Object.entries(hostsRaw).filter(([k, v]) => (PROMPT_BUDGET_HOST_KINDS as readonly string[]).includes(k) && isValidDeclaredWindowValue(v))) }
+            : {}),
+        };
+      }
+    }
+  }
+
   // principles (optional — PRI-336). Must survive validation into the returned
   // PdConfig: `principles.outputLanguage` is the canonical language SSOT that
   // loadPdConfigForPlugin consumers (prompt injection, principle generation)
@@ -848,6 +917,7 @@ export function validatePdConfig(raw: unknown): PdConfigValidationResult {
     ui: ui ?? { diagnostics: { mode: 'simple' } },
     ...(principles ? { principles } : {}),
     ...(reuseEvaluation ? { reuseEvaluation } : {}),
+    ...(promptBudget ? { promptBudget } : {}),
     ...(profile ? { profile } : {}),
     ...(contextInjection ? { contextInjection } : {}),
   };
