@@ -18,7 +18,7 @@ Bash / zsh:
 PowerShell:
 
     $pdCodexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE ".codex" }
-    node (Get-ChildItem "$pdCodexHome\plugins\cache\*\principles-disciple\*\scripts\pd-setup.cjs" | Sort-Object FullName | Select-Object -Last 1).FullName
+    node (Get-ChildItem "$pdCodexHome\plugins\cache\*\principles-disciple\*\scripts\pd-setup.cjs" | Sort-Object { [version]$_.Directory.Parent.Name } | Select-Object -Last 1).FullName
 
 Supported options include `--skip-init`, `--json`, `--workspace <absolute-path>`, and `--ingest accept|decline|skip`. Check the script's current help before using optional flags. Never edit `.pd/config.yaml` by hand.
 
@@ -37,7 +37,7 @@ Bash / zsh:
 PowerShell:
 
     $pdCodexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE ".codex" }
-    node (Get-ChildItem "$pdCodexHome\plugins\cache\*\principles-disciple\*\scripts\pd-disable.cjs" | Sort-Object FullName | Select-Object -Last 1).FullName
+    node (Get-ChildItem "$pdCodexHome\plugins\cache\*\principles-disciple\*\scripts\pd-disable.cjs" | Sort-Object { [version]$_.Directory.Parent.Name } | Select-Object -Last 1).FullName
 
 Append `--enable` only when the Owner explicitly asks to re-enable PD. Verify the script's actual receipt; do not infer success from process exit alone. The kill switch must work even when the Runtime is missing and must preserve `.pd/`, `.state/`, and other hosts' settings.
 

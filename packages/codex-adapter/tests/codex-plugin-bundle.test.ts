@@ -715,3 +715,108 @@ describe('PRI-645 sparse fresh config × bundled $pd-cli-operator / $pd-control 
     expect(wsCheck.detail ?? '').not.toContain('invalid');
   }, 60_000);
 });
+
+// ── PR #2106 review: PowerShell cache-selection ordering ──
+//
+// The skills' PowerShell snippets pick the newest plugin cache entry with
+// `Sort-Object { [version]$_.Directory.Parent.Name }` — numeric semver
+// ordering, the same semantics as pd-locate.cjs compareVersionDirs. The
+// previous `Sort-Object FullName` sorted the FULL PATH as a string, so a
+// cache holding both 1.9.0 and 1.10.0 picked 1.9.0 ("1.10.0" sorts before
+// "1.9.0" lexically). These tests pin both the documented text and the
+// executed selection behavior of the real command.
+
+describe('skill cache-selection PowerShell ordering (PR #2106 review)', () => {
+  const numericSortExpr = /Sort-Object \{ \[version\]\$_\.Directory\.Parent\.Name \}/;
+
+  /** Extract the real PowerShell selection command from a SKILL.md so the
+   * dynamic tests exercise the documented text, not a re-typed copy. */
+  function extractSelectionCommand(skillFile: string): string {
+    const raw = fs.readFileSync(skillFile, 'utf8');
+    const homeAssignment = raw.match(/^[ \t]*\$pdCodexHome = .*$/m)?.[0];
+    const pipeline = raw.match(/node \((Get-ChildItem[^\n]*?)\)\.FullName(?: --json)?\s*$/m)?.[1];
+    if (!homeAssignment || !pipeline) {
+      throw new Error(`no PowerShell cache-selection command found in ${skillFile}`);
+    }
+    return `${homeAssignment}; (${pipeline}).FullName`;
+  }
+
+  /** Seed a fake CODEX_HOME cache with one scripts/pd-status.cjs stub per
+   * version dir name (valid semvers, and/or an invalid dir for the
+   * fail-loud case). */
+  function seedFakeCache(versions: string[]): { fakeHome: string; codexHome: string } {
+    const fakeHome = tempDir('pd-ps-version-home-');
+    const codexHome = path.join(fakeHome, '.codex');
+    for (const version of versions) {
+      const script = path.join(codexHome, 'plugins', 'cache', 'principles-marketplace', 'principles-disciple', version, 'scripts', 'pd-status.cjs');
+      fs.mkdirSync(path.dirname(script), { recursive: true });
+      fs.writeFileSync(script, '// stub\n', 'utf8');
+    }
+    return { fakeHome, codexHome };
+  }
+
+  /** Windows prefers pwsh with a powershell.exe fallback; elsewhere only
+   * pwsh exists. A spawnSync probe distinguishes ENOENT from failure. */
+  function findPowerShell(): string | undefined {
+    const candidates = process.platform === 'win32' ? ['pwsh', 'powershell'] : ['pwsh'];
+    for (const bin of candidates) {
+      const probe = spawnSync(bin, ['-NoProfile', '-NonInteractive', '-Command', 'exit 0'], { encoding: 'utf8', timeout: 30_000 });
+      if (probe.error === undefined) return bin;
+    }
+    return undefined;
+  }
+
+  it('SKILL.md PowerShell snippets never sort the plugin cache by FullName string', () => {
+    for (const skill of ['pd-cli-operator', 'pd-control', 'pd-review']) {
+      const raw = fs.readFileSync(path.join(pluginDir, 'skills', skill, 'SKILL.md'), 'utf8');
+      expect(raw, skill).not.toContain('Sort-Object FullName');
+      for (const line of raw.split(/\r?\n/)) {
+        if (!line.includes('Get-ChildItem')) continue;
+        expect(line, `${skill}: ${line.trim()}`).toMatch(numericSortExpr);
+      }
+    }
+  });
+
+  it('selects 1.10.0 over 1.9.0 when both plugin cache versions are installed', (ctx) => {
+    const psBin = findPowerShell();
+    if (!psBin) {
+      console.log('[PR #2106] no PowerShell (pwsh/powershell) found on this machine — skipping the dynamic cache-selection run');
+      ctx.skip();
+      return;
+    }
+    const { fakeHome, codexHome } = seedFakeCache(['1.9.0', '1.10.0']);
+    const result = spawnSync(psBin, ['-NoProfile', '-NonInteractive', '-Command', extractSelectionCommand(path.join(pluginDir, 'skills', 'pd-cli-operator', 'SKILL.md'))], {
+      encoding: 'utf8',
+      env: { ...process.env, CODEX_HOME: codexHome, USERPROFILE: fakeHome },
+      timeout: 60_000,
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('1.10.0');
+    expect(result.stdout).not.toContain('1.9.0');
+  }, 90_000);
+
+  it('makes an invalid version dir observable instead of silently selecting it', (ctx) => {
+    const psBin = findPowerShell();
+    if (!psBin) {
+      console.log('[PR #2106] no PowerShell (pwsh/powershell) found on this machine — skipping the dynamic invalid-version run');
+      ctx.skip();
+      return;
+    }
+    // Probed on-device (pwsh 7.6.2 + Windows PowerShell 5.1): the failed
+    // [version] cast is a per-element Sort-Object error — reported on
+    // stderr while the VALID versions still sort numerically and the exit
+    // code stays 0. Loudness therefore means "stderr names the bad dir and
+    // it is never selected", not "exit code != 0".
+    const { fakeHome, codexHome } = seedFakeCache(['1.9.0', '1.10.0', 'not-a-version']);
+    const result = spawnSync(psBin, ['-NoProfile', '-NonInteractive', '-Command', extractSelectionCommand(path.join(pluginDir, 'skills', 'pd-cli-operator', 'SKILL.md'))], {
+      encoding: 'utf8',
+      env: { ...process.env, CODEX_HOME: codexHome, USERPROFILE: fakeHome },
+      timeout: 60_000,
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.stderr).toContain('not-a-version');
+    expect(result.stdout).toContain('1.10.0');
+    expect(result.stdout).not.toContain('not-a-version');
+  }, 90_000);
+});

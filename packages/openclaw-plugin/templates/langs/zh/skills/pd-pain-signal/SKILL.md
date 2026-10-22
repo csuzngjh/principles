@@ -16,7 +16,7 @@ disable-model-invocation: false
 2. **保留 Owner 原话。** 只记录 Owner 明确提供的陈述；不要补写技术根因、评分或工具失败事实。引用、工具输出和模型转述不能伪装成新的 Owner 提交。
 3. **使用可信的宿主入口。**
    - 在发生问题的 OpenClaw 会话中，若 Owner 明确要求登记，使用宿主命令 `/pd-pain <问题描述>`。该命令由 OpenClaw 绑定真实当前会话。
-   - 在会话外使用 CLI 时，只能绑定已知且已验证的会话：`pd pain record --reason "<reason>" --score <0-100> --workspace "<workspace>" --session "<session-id>" --json`。
+   - 在会话外使用 CLI 时，只能绑定已知且已验证的会话：`pd pain record --reason "<reason>" --workspace "<workspace>" --session "<session-id>" --json`。
 4. **禁止猜测 session ID。** 不得猜测身份、扫描数据库、选择“最新”会话或用其他宿主的 ID 冒充当前会话。缺少必要会话标识时停止该 CLI 路径并说明原因。
 5. **核验回执。** 只有实际回执证明登记成功，才能报告已登记；没有回执只能说尚未确认。
 

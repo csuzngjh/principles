@@ -17,7 +17,7 @@ description: Open the official PD Owner Console in the correct Codex governance 
    PowerShell:
 
        $pdCodexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE ".codex" }
-       node (Get-ChildItem "$pdCodexHome\plugins\cache\*\principles-disciple\*\scripts\pd-review.cjs" | Sort-Object FullName | Select-Object -Last 1).FullName
+       node (Get-ChildItem "$pdCodexHome\plugins\cache\*\principles-disciple\*\scripts\pd-review.cjs" | Sort-Object { [version]$_.Directory.Parent.Name } | Select-Object -Last 1).FullName
 
 3. Report the Console URL and startup state only when returned by the script. If the script fails, preserve the error and route installation/status checks to `pd-cli-operator` or `pd-control`.
 4. The Owner reviews the evidence and completes any approval, rejection, or activation decision inside the Web Console.

@@ -16,7 +16,7 @@ Bash / zsh:
 PowerShell:
 
     $pdCodexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE ".codex" }
-    node (Get-ChildItem "$pdCodexHome\plugins\cache\*\principles-disciple\*\scripts\pd-status.cjs" | Sort-Object FullName | Select-Object -Last 1).FullName --json
+    node (Get-ChildItem "$pdCodexHome\plugins\cache\*\principles-disciple\*\scripts\pd-status.cjs" | Sort-Object { [version]$_.Directory.Parent.Name } | Select-Object -Last 1).FullName --json
 
 This checks plugin/runtime installation, pinned runtime version, `host.codex`, Hook trust, and workspace resolution. If the script cannot be found, report an installation problem; do not choose an arbitrary stale cache path.
 
