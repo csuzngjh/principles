@@ -2,7 +2,7 @@
 
 | 项目 | 值 |
 |---|---|
-| 状态 | **READY FOR REVIEW** — 矩阵本身是文档 PR 交付物；矩阵显示的 Gate B 整体就绪性为 **BLOCKED**。（2026-10-18 PRI-1000 修订：P-02 基线新鲜度复验更新，v1.0 → v1.1） |
+| 状态 | **READY FOR REVIEW** — 矩阵本身是文档 PR 交付物；矩阵显示的 Gate B 整体就绪性为 **BLOCKED**。（2026-10-18 PRI-1000 修订：P-02 基线新鲜度复验更新，v1.0 → v1.1；2026-10-22 PRI-1001 增量审计：新增 §3 基线注记，P-02 行原文不变，v1.1 → v1.2） |
 | 用法 | 每行是一个 Gate B 启动前置条件。Owner 逐行裁决；全部 ≥ 准入行完成后，GATE_B_EXECUTION 才可从 BLOCKED 翻为可执行 |
 
 ## 1. 门禁状态矩阵
@@ -31,4 +31,37 @@
 - 本矩阵不授权任何真实数据读取；Recall 实现不在矩阵范围
 - **2026-10-18 PRI-1000 基线新鲜度复核**：Gate A 审计于 `f2539e07e` 复验成立 → **Gate A = GO（仅审计收口裁决）**；GATE_B_EXECUTION 维持 BLOCKED，本行不构成 Gate B 或 Gate C 授权。证据：`docs/implementation-reports/SPEC-PD-PRR-001-gate-a-main-freshness-delta-20261018.md`
 
-**Gate A→B 准入矩阵 v1.1 END**
+## 3. 2026-10-22 增量基线注记（PRI-1001，v1.2）
+
+> 本节为**追加注记**，不改写 §1/§2 任何既有结论。P-02 行原文保留在其记录基线上继续成立。
+
+| 项 | 值 |
+|---|---|
+| 本轮审计基线 | `origin/main` = `2fb3b04c8fae1fc865f2297ea448dc4c531ff7cf`（`git fetch` 后 `git rev-parse` 实测） |
+| P-02 原 PASS 绑定基线 | `f2539e07ee0f4d2353c5e3897da81b6ef3b787ca`（2026-10-18） |
+| 增量区间 | `f2539e07e → 2fb3b04c8`，35 个提交 |
+| 完整报告 | `docs/implementation-reports/SPEC-PD-PRR-001-gate-a-incremental-audit-20261022.md` |
+
+### 3.1 P-02 的分项状态（不改变 §1 表格中的 P-02 单元格）
+
+| 分项 | 状态 | 依据 |
+|---|---|---|
+| A-01 三个权威文件字节同一 | ✅ VERIFIED | `git diff --stat f2539e07e..2fb3b04c8 -- <3 文件>` 空输出 |
+| A-03 只读合同 | ✅ VERIFIED（增量实测） | 18 项合成探针：缺库不创建、字节/journal/schema 不变、无 `-wal`/`-shm`、旧 schema 抛错且零迁移 |
+| A-03 "五个证明对象全部零变更"表述 | ❌ 在当前基线不再成立 | `workspace-behavior-evidence.ts` +45（新增 `readWorkspaceRuleContextRowsBefore()`）、`trajectory-schema.ts` +9/−1（`project_dir` 列） |
+| 30/30 Gate A 夹具在新基线重放 | ⛔ **NOT_RUN（不可复现）** | 夹具未入库（`git ls-files` 无命中），仅存于上一轮 gitignored `.tmp/` |
+
+**P-02 当前建议状态：`NOT_REVALIDATED_AT_CURRENT_MAIN`**
+—— 不是 PASS，也不是 FAIL；是"分项已审计、关键一项无证据可复现"。
+
+### 3.2 对 Gate B 准入的影响
+
+- 准入条件 ⑤（"只读读取已通过准入矩阵全部条目"）在当前 main 上**不成立**（P-02 未完整复验）；
+- 该结论**不新增**阻断理由：P-06～P-10 仍 `PENDING`、P-12 未做，Gate B 本就是 `BLOCKED`；
+- 恢复 P-02 的最小路径见报告 §8.4（两条路线，均需 Owner 选择或一次夹具入库 PR）。
+
+### 3.3 本节不构成的授权
+
+本节不授权任何 Gate B/C 动作，不改变 D-01～D-05 状态，不替代 Owner 对 P-02 证据等级的接受决定。
+
+**Gate A→B 准入矩阵 v1.2 END**
