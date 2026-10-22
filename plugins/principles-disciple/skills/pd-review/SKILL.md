@@ -8,16 +8,16 @@ description: Open the official PD Owner Console in the correct Codex governance 
 ## Steps
 
 1. Use the workspace resolved by the installed PD plugin. Do not assume the current project directory is authoritative: Codex may use an explicitly initialized shared governance workspace.
-2. Run the installed review script.
+2. Run the installed review script through the shipped locator (`scripts/pd-locate.cjs`).
 
    Bash / zsh:
 
-       node "$(ls -1d "${CODEX_HOME:-$HOME/.codex}/plugins/cache/"*/principles-disciple/*/scripts/pd-review.cjs 2>/dev/null | (sort -V 2>/dev/null || sort) | tail -1)"
+       node "$(ls -1d "${CODEX_HOME:-$HOME/.codex}/plugins/cache/"*/principles-disciple/*/scripts/pd-locate.cjs 2>/dev/null | (sort -V 2>/dev/null || sort) | tail -1)" --exec scripts/pd-review.cjs
 
    PowerShell:
 
        $pdCodexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE ".codex" }
-       node (Get-ChildItem "$pdCodexHome\plugins\cache\*\principles-disciple\*\scripts\pd-review.cjs" | Sort-Object { [version]$_.Directory.Parent.Name } | Select-Object -Last 1).FullName
+       node (Get-ChildItem "$pdCodexHome\plugins\cache\*\principles-disciple\*\scripts\pd-locate.cjs" | Sort-Object { [version]$_.Directory.Parent.Name } | Select-Object -Last 1).FullName --exec scripts/pd-review.cjs
 
 3. Report the Console URL and startup state only when returned by the script. If the script fails, preserve the error and route installation/status checks to `pd-cli-operator` or `pd-control`.
 4. The Owner reviews the evidence and completes any approval, rejection, or activation decision inside the Web Console.

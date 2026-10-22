@@ -16,7 +16,7 @@ description: 检查 WorkBuddy 中 PD 的运行状态、治理开关、worker 活
        pd runtime features --workspace "<用户主目录>/.workbuddy/pd-workspace" --json
        pd workbuddy worker --status --workspace "<用户主目录>/.workbuddy/pd-workspace" --json
 
-2. 按需使用 CLI 帮助确认其他只读命令的可用性，再查询痛苦、任务、运行记录、候选或证据链，例如 `pd pain list --workspace "<workspace>" --json`、`pd task show "<taskId>" --workspace "<workspace>" --json`、`pd run show "<runId>"`、`pd runtime trace show --pain-id "<painId>" --workspace "<workspace>" --json`。其中 `<workspace>` 必须替换为上面的 WorkBuddy 固定治理工作区，不能换成当前项目目录。
+2. 按需使用 CLI 帮助确认其他只读命令的可用性，再查询痛苦、任务、运行记录、候选或证据链，例如 `pd pain list --workspace "<workspace>" --json`、`pd task show "<taskId>" --workspace "<workspace>" --json`、`pd run show "<runId>" --workspace "<workspace>"`、`pd runtime trace show --pain-id "<painId>" --workspace "<workspace>" --json`。其中 `<workspace>` 必须替换为上面的 WorkBuddy 固定治理工作区，不能换成当前项目目录。
 3. 报告真实输出中的 `host.workbuddy` 开关、worker 模式和错误原因。worker 已注册不等于 worker 正在运行；插件存在不等于技能已加载；健康检查通过不等于某条痛苦已经完成诊断。
 4. 追踪具体问题时使用登记回执中的真实 ID，逐段核实登记、诊断、候选准入和治理状态。
 

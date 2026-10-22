@@ -25,7 +25,7 @@ disable-model-invocation: false
 - 流程策略：`pd runtime flow show --workspace "<workspace>" --json`
 - 痛苦列表与准入证据：`pd pain list --workspace "<workspace>" --json`、`pd pain evidence --workspace "<workspace>" --json`
 - 痛苦到原则的追踪：`pd runtime trace show --pain-id "<painId>" --workspace "<workspace>" --json`
-- 任务与运行：`pd task show "<taskId>" --workspace "<workspace>" --json`、`pd run show "<runId>"`
+- 任务与运行：`pd task show "<taskId>" --workspace "<workspace>" --json`、`pd run show "<runId>" --workspace "<workspace>"`
 - 候选与工件：`pd candidate list --task-id "<taskId>" --workspace "<workspace>" --json`、`pd candidate show "<candidateId>" --workspace "<workspace>" --json`、`pd artifact show "<artifactId>" --workspace "<workspace>" --json`
 
 OpenClaw 的 `/pd-status` 主要展示 GFI/Pain 词典等宿主状态，不应代替 Runtime 健康检查或具体任务追踪。

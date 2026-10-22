@@ -61,8 +61,15 @@ describe('current Owner WorkBuddy statement through real production hook', () =>
     const ws = setup(false); const result = invoke(ws); expect(result.stdout).toBe(''); expect(result.stderr).toContain('host.workbuddy_disabled');
     expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(0);
   });
-  for (const prompt of ['普通纠正反馈', '> PD记录痛苦：引用', '他说 PD记录痛苦：引用', ' PD记录痛苦：非前缀', 'PD记录痛苦:半角']) it(`does not infer explicit submission: ${prompt}`, () => {
+  for (const prompt of ['普通纠正反馈', '> PD记录痛苦：引用', '他说 PD记录痛苦：引用']) it(`does not infer explicit submission: ${prompt}`, () => {
     const ws = setup(); expect(invoke(ws, { prompt }).stdout).not.toContain('owner_statement'); expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(0);
+  });
+  for (const prompt of [' PD记录痛苦：非前缀', 'PD记录痛苦:半角', 'PD记录痛苦']) it(`recovers a near-miss prefix with an actionable format notice: ${prompt}`, () => {
+    const ws = setup(); const result = invoke(ws, { prompt }); expect(result.status).toBe(0);
+    expect(result.stdout).toContain('status=rejected reason=owner_statement_prefix_format');
+    expect(result.stdout).toContain('full-width colon');
+    expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(0);
+    expect(fs.existsSync(path.join(ws.workspace, '.pd', 'state.db'))).toBe(false);
   });
   it('retains the existing session quota rather than granting explicit intake unlimited admission', () => {
     const ws = setup();

@@ -7,31 +7,31 @@ description: Inspect whether PD is installed and active in Codex, query Runtime 
 
 ## 1. Verify the Codex integration first
 
-Run the bundled status script for the installed plugin version; let the plugin resolve its authoritative workspace.
+Run the bundled status script for the installed plugin version through the shipped locator (`scripts/pd-locate.cjs`); let the plugin resolve its authoritative workspace.
 
 Bash / zsh:
 
-    node "$(ls -1d "${CODEX_HOME:-$HOME/.codex}/plugins/cache/"*/principles-disciple/*/scripts/pd-status.cjs 2>/dev/null | (sort -V 2>/dev/null || sort) | tail -1)" --json
+    node "$(ls -1d "${CODEX_HOME:-$HOME/.codex}/plugins/cache/"*/principles-disciple/*/scripts/pd-locate.cjs 2>/dev/null | (sort -V 2>/dev/null || sort) | tail -1)" --exec scripts/pd-status.cjs -- --json
 
 PowerShell:
 
     $pdCodexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE ".codex" }
-    node (Get-ChildItem "$pdCodexHome\plugins\cache\*\principles-disciple\*\scripts\pd-status.cjs" | Sort-Object { [version]$_.Directory.Parent.Name } | Select-Object -Last 1).FullName --json
+    node (Get-ChildItem "$pdCodexHome\plugins\cache\*\principles-disciple\*\scripts\pd-locate.cjs" | Sort-Object { [version]$_.Directory.Parent.Name } | Select-Object -Last 1).FullName --exec scripts/pd-status.cjs -- --json
 
-This checks plugin/runtime installation, pinned runtime version, `host.codex`, Hook trust, and workspace resolution. If the script cannot be found, report an installation problem; do not choose an arbitrary stale cache path.
+This checks plugin/runtime installation, pinned runtime version, `host.codex`, Hook trust, and workspace resolution. The shipped locator resolves the plugin root once (newest installed version), reports marketplace ambiguity instead of guessing, and refuses to fall back to an older version when the newest install does not ship the target script. If the script cannot be found, report an installation problem; do not choose an arbitrary stale cache path.
 
 ## 2. Query only the state needed
 
 When the status result points to a Runtime or business-pipeline issue, use the installed `pd` CLI and check its actual help first:
 
-- `pd health --host codex --json`
+- `pd health --host codex --workspace "<workspace>" --json`
 - `pd runtime probe --runtime pi-ai --workspace "<workspace>" --json`
 - `pd runtime flow show --workspace "<workspace>" --json`
 - `pd pain list --workspace "<workspace>" --json`
 - `pd pain evidence --workspace "<workspace>" --json`
 - `pd runtime trace show --pain-id "<painId>" --workspace "<workspace>" --json`
 - `pd task show "<taskId>" --workspace "<workspace>" --json`
-- `pd run show "<runId>"`
+- `pd run show "<runId>" --workspace "<workspace>"`
 - `pd candidate list --task-id "<taskId>" --workspace "<workspace>" --json`
 - `pd candidate show "<candidateId>" --workspace "<workspace>" --json`
 - `pd artifact show "<artifactId>" --workspace "<workspace>" --json`

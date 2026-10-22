@@ -716,43 +716,69 @@ describe('PRI-645 sparse fresh config × bundled $pd-cli-operator / $pd-control 
   }, 60_000);
 });
 
-// ── PR #2106 review: PowerShell cache-selection ordering ──
+// ── PR #2106 review rounds: single-authority locator entrypoint ──
 //
-// The skills' PowerShell snippets pick the newest plugin cache entry with
-// `Sort-Object { [version]$_.Directory.Parent.Name }` — numeric semver
-// ordering, the same semantics as pd-locate.cjs compareVersionDirs. The
-// previous `Sort-Object FullName` sorted the FULL PATH as a string, so a
-// cache holding both 1.9.0 and 1.10.0 picked 1.9.0 ("1.10.0" sorts before
-// "1.9.0" lexically). These tests pin both the documented text and the
-// executed selection behavior of the real command.
+// Round 1 fixed the PowerShell cache ordering (numeric semver via
+// `Sort-Object { [version]$_.Directory.Parent.Name }`). Round 2 removes the
+// deeper defect: the skills used to glob for EACH TARGET SCRIPT and pick the
+// highest version by that script file, which silently fell back to an older
+// plugin when the newest install stopped shipping the script, and could not
+// prove marketplace provenance. Every skill command now globs only for the
+// shipped locator (scripts/pd-locate.cjs) and runs the target through
+// `--exec`: the locator pins the plugin root once (plugin.json-validated,
+// numeric semver, marketplace tie → explicit ambiguity error), then requires
+// the script to exist in THAT root — never falling back to an older version.
 
-describe('skill cache-selection PowerShell ordering (PR #2106 review)', () => {
+describe('skill locator entrypoint via pd-locate.cjs (PR #2106 review round 2)', () => {
   const numericSortExpr = /Sort-Object \{ \[version\]\$_\.Directory\.Parent\.Name \}/;
+  const targetScripts = ['pd-status.cjs', 'pd-setup.cjs', 'pd-disable.cjs', 'pd-review.cjs'];
+  const realLocator = path.join(pluginDir, 'scripts', 'pd-locate.cjs');
+  // Stub target scripts print their own absolute path + the argv they received,
+  // so tests can see WHICH installed version ran and that `--`-separated flags
+  // were passed through to the target.
+  const stubScript = "console.log(require('path').resolve(__filename)); console.log(JSON.stringify(process.argv.slice(2)));";
 
-  /** Extract the real PowerShell selection command from a SKILL.md so the
-   * dynamic tests exercise the documented text, not a re-typed copy. */
-  function extractSelectionCommand(skillFile: string): string {
-    const raw = fs.readFileSync(skillFile, 'utf8');
-    const homeAssignment = raw.match(/^[ \t]*\$pdCodexHome = .*$/m)?.[0];
-    const pipeline = raw.match(/node \((Get-ChildItem[^\n]*?)\)\.FullName(?: --json)?\s*$/m)?.[1];
-    if (!homeAssignment || !pipeline) {
-      throw new Error(`no PowerShell cache-selection command found in ${skillFile}`);
+  interface VersionSeed { version: string; scripts?: string[] }
+  interface MarketplaceSeed { name: string; versions: VersionSeed[] }
+
+  /** Seed a fake CODEX_HOME plugin cache in the REAL install layout: every
+   * version dir gets a `.codex-plugin/plugin.json` stub, a copy of the REAL
+   * pd-locate.cjs, and stub target scripts. `scripts: []` (or omitting the
+   * target) seeds a version that ships the locator but NOT that target —
+   * exactly the layout that used to trigger the silent older-version
+   * fallback. Returns the fake CODEX_HOME path. */
+  function seedInstalledCache(fakeHome: string, marketplaces: MarketplaceSeed[]): string {
+    const codexHome = path.join(fakeHome, '.codex');
+    for (const mp of marketplaces) {
+      for (const v of mp.versions) {
+        const root = path.join(codexHome, 'plugins', 'cache', mp.name, 'principles-disciple', v.version);
+        fs.mkdirSync(path.join(root, '.codex-plugin'), { recursive: true });
+        fs.writeFileSync(path.join(root, '.codex-plugin', 'plugin.json'), JSON.stringify({ name: 'principles-disciple' }), 'utf8');
+        fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
+        fs.copyFileSync(realLocator, path.join(root, 'scripts', 'pd-locate.cjs'));
+        for (const script of v.scripts ?? []) {
+          fs.writeFileSync(path.join(root, 'scripts', script), stubScript, 'utf8');
+        }
+      }
     }
-    return `${homeAssignment}; (${pipeline}).FullName`;
+    return codexHome;
   }
 
-  /** Seed a fake CODEX_HOME cache with one scripts/pd-status.cjs stub per
-   * version dir name (valid semvers, and/or an invalid dir for the
-   * fail-loud case). */
-  function seedFakeCache(versions: string[]): { fakeHome: string; codexHome: string } {
-    const fakeHome = tempDir('pd-ps-version-home-');
-    const codexHome = path.join(fakeHome, '.codex');
-    for (const version of versions) {
-      const script = path.join(codexHome, 'plugins', 'cache', 'principles-marketplace', 'principles-disciple', version, 'scripts', 'pd-status.cjs');
-      fs.mkdirSync(path.dirname(script), { recursive: true });
-      fs.writeFileSync(script, '// stub\n', 'utf8');
+  /** Extract the full PowerShell skill command (assignment + node line) that
+   * runs `--exec scripts/<targetScript>` so the dynamic tests execute the
+   * DOCUMENTED text, not a re-typed copy. */
+  function extractSkillCommand(skillFile: string, targetScript: string): string {
+    const raw = fs.readFileSync(skillFile, 'utf8');
+    const homeAssignment = raw.match(/^[ \t]*\$pdCodexHome = .*$/m)?.[0];
+    const nodeLine = raw
+      .split(/\r?\n/)
+      .find((line) => line.includes('Get-ChildItem') && line.includes(`--exec scripts/${targetScript}`));
+    if (!homeAssignment || !nodeLine) {
+      throw new Error(`no PowerShell locator command for ${targetScript} found in ${skillFile}`);
     }
-    return { fakeHome, codexHome };
+    // `exit $LASTEXITCODE` propagates the node child's exit code out of pwsh,
+    // so fail-loud contracts can be asserted on status, not just on stderr.
+    return `${homeAssignment}; ${nodeLine.trim()}; exit $LASTEXITCODE`;
   }
 
   /** Windows prefers pwsh with a powershell.exe fallback; elsewhere only
@@ -766,57 +792,191 @@ describe('skill cache-selection PowerShell ordering (PR #2106 review)', () => {
     return undefined;
   }
 
-  it('SKILL.md PowerShell snippets never sort the plugin cache by FullName string', () => {
+  function runInPwsh(psBin: string, command: string, fakeHome: string, codexHome: string) {
+    return spawnSync(psBin, ['-NoProfile', '-NonInteractive', '-Command', command], {
+      encoding: 'utf8',
+      env: { ...process.env, CODEX_HOME: codexHome, USERPROFILE: fakeHome },
+      timeout: 60_000,
+    });
+  }
+
+  it('SKILL.md PowerShell snippets route through the shipped locator, never per-target-script cache globs', () => {
     for (const skill of ['pd-cli-operator', 'pd-control', 'pd-review']) {
       const raw = fs.readFileSync(path.join(pluginDir, 'skills', skill, 'SKILL.md'), 'utf8');
       expect(raw, skill).not.toContain('Sort-Object FullName');
-      for (const line of raw.split(/\r?\n/)) {
-        if (!line.includes('Get-ChildItem')) continue;
+      const lines = raw.split(/\r?\n/).filter((line) => line.includes('Get-ChildItem'));
+      expect(lines.length, skill).toBeGreaterThan(0);
+      for (const line of lines) {
         expect(line, `${skill}: ${line.trim()}`).toMatch(numericSortExpr);
+        expect(line, `${skill}: ${line.trim()}`).toContain('--exec scripts/');
+        const glob = line.match(/Get-ChildItem "([^"]+)"/)?.[1] ?? '';
+        expect(glob, `${skill}: ${line.trim()}`).toContain('pd-locate.cjs');
+        for (const target of targetScripts) {
+          // Globbing a target script directly would reintroduce per-script
+          // (fallback-prone) cache selection.
+          expect(glob, `${skill}: ${line.trim()}`).not.toContain(target);
+        }
       }
     }
   });
 
-  it('selects 1.10.0 over 1.9.0 when both plugin cache versions are installed', (ctx) => {
+  it('status skill command selects 1.10.0 over 1.9.0 and passes -- --json through (scenario A)', (ctx) => {
     const psBin = findPowerShell();
     if (!psBin) {
-      console.log('[PR #2106] no PowerShell (pwsh/powershell) found on this machine — skipping the dynamic cache-selection run');
+      console.log('[PR #2106] no PowerShell (pwsh/powershell) found on this machine — skipping the dynamic locator scenario A');
       ctx.skip();
       return;
     }
-    const { fakeHome, codexHome } = seedFakeCache(['1.9.0', '1.10.0']);
-    const result = spawnSync(psBin, ['-NoProfile', '-NonInteractive', '-Command', extractSelectionCommand(path.join(pluginDir, 'skills', 'pd-cli-operator', 'SKILL.md'))], {
-      encoding: 'utf8',
-      env: { ...process.env, CODEX_HOME: codexHome, USERPROFILE: fakeHome },
-      timeout: 60_000,
-    });
+    const fakeHome = tempDir('pd-locate-e2e-home-');
+    const codexHome = seedInstalledCache(fakeHome, [
+      { name: 'm1', versions: [{ version: '1.9.0', scripts: ['pd-status.cjs'] }, { version: '1.10.0', scripts: ['pd-status.cjs'] }] },
+    ]);
+    const result = runInPwsh(psBin, extractSkillCommand(path.join(pluginDir, 'skills', 'pd-cli-operator', 'SKILL.md'), 'pd-status.cjs'), fakeHome, codexHome);
     expect(result.error).toBeUndefined();
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('1.10.0');
     expect(result.stdout).not.toContain('1.9.0');
+    expect(result.stdout).toContain('["--json"]'); // flags after -- reached the target script
   }, 90_000);
 
-  it('makes an invalid version dir observable instead of silently selecting it', (ctx) => {
+  it('status skill command refuses to run an older version when the newest install lacks the script (scenario B)', (ctx) => {
     const psBin = findPowerShell();
     if (!psBin) {
-      console.log('[PR #2106] no PowerShell (pwsh/powershell) found on this machine — skipping the dynamic invalid-version run');
+      console.log('[PR #2106] no PowerShell (pwsh/powershell) found on this machine — skipping the dynamic locator scenario B');
       ctx.skip();
       return;
     }
-    // Probed on-device (pwsh 7.6.2 + Windows PowerShell 5.1): the failed
-    // [version] cast is a per-element Sort-Object error — reported on
-    // stderr while the VALID versions still sort numerically and the exit
-    // code stays 0. Loudness therefore means "stderr names the bad dir and
-    // it is never selected", not "exit code != 0".
-    const { fakeHome, codexHome } = seedFakeCache(['1.9.0', '1.10.0', 'not-a-version']);
-    const result = spawnSync(psBin, ['-NoProfile', '-NonInteractive', '-Command', extractSelectionCommand(path.join(pluginDir, 'skills', 'pd-cli-operator', 'SKILL.md'))], {
-      encoding: 'utf8',
-      env: { ...process.env, CODEX_HOME: codexHome, USERPROFILE: fakeHome },
-      timeout: 60_000,
-    });
+    const fakeHome = tempDir('pd-locate-e2e-home-');
+    // Newest install ships the locator + plugin.json but NOT pd-status.cjs;
+    // 1.9.0 ships everything. The old per-script glob would have run 1.9.0.
+    const codexHome = seedInstalledCache(fakeHome, [
+      { name: 'm1', versions: [{ version: '1.9.0', scripts: ['pd-status.cjs'] }, { version: '1.10.0', scripts: [] }] },
+    ]);
+    const result = runInPwsh(psBin, extractSkillCommand(path.join(pluginDir, 'skills', 'pd-cli-operator', 'SKILL.md'), 'pd-status.cjs'), fakeHome, codexHome);
     expect(result.error).toBeUndefined();
-    expect(result.stderr).toContain('not-a-version');
-    expect(result.stdout).toContain('1.10.0');
-    expect(result.stdout).not.toContain('not-a-version');
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('plugin_script_missing');
+    // No fallback execution: the 1.9.0 stub never ran (node children inherit
+    // pwsh's streams, so combined output proves which script — if any — ran).
+    expect(`${result.stdout}${result.stderr}`).not.toContain(path.join('1.9.0', 'scripts', 'pd-status.cjs'));
+    expect(`${result.stdout}${result.stderr}`).not.toContain('["--json"]');
   }, 90_000);
+
+  it('status skill command fails loud on a marketplace tie instead of guessing (scenario C)', (ctx) => {
+    const psBin = findPowerShell();
+    if (!psBin) {
+      console.log('[PR #2106] no PowerShell (pwsh/powershell) found on this machine — skipping the dynamic locator scenario C');
+      ctx.skip();
+      return;
+    }
+    const fakeHome = tempDir('pd-locate-e2e-home-');
+    const codexHome = seedInstalledCache(fakeHome, [
+      { name: 'm1', versions: [{ version: '1.10.0', scripts: ['pd-status.cjs'] }] },
+      { name: 'm2', versions: [{ version: '1.10.0', scripts: ['pd-status.cjs'] }] },
+    ]);
+    const result = runInPwsh(psBin, extractSkillCommand(path.join(pluginDir, 'skills', 'pd-cli-operator', 'SKILL.md'), 'pd-status.cjs'), fakeHome, codexHome);
+    expect(result.error).toBeUndefined();
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('plugin_root_ambiguous');
+    expect(`${result.stdout}${result.stderr}`).not.toContain('pd-status.cjs'); // no stub executed
+  }, 90_000);
+
+  // Library-level contract of the CLI entry itself: plain node, no pwsh, runs
+  // on every platform. These pin the exact behavior the skill commands rely on.
+  describe('pd-locate.cjs --exec CLI (node-level, cross-platform)', () => {
+    function runLocator(codexHome: string, fakeHome: string, args: string[]) {
+      return spawnSync(process.execPath, [realLocator, ...args], {
+        encoding: 'utf8',
+        env: { ...process.env, CODEX_HOME: codexHome, USERPROFILE: fakeHome },
+        timeout: 60_000,
+      });
+    }
+
+    it('picks the newest version across marketplaces and passes -- flags through', () => {
+      const fakeHome = tempDir('pd-locate-lib-home-');
+      const codexHome = seedInstalledCache(fakeHome, [
+        { name: 'm1', versions: [{ version: '1.9.0', scripts: ['pd-status.cjs'] }] },
+        { name: 'm2', versions: [{ version: '1.10.0', scripts: ['pd-status.cjs'] }] },
+      ]);
+      const result = runLocator(codexHome, fakeHome, ['--exec', 'scripts/pd-status.cjs', '--', '--json']);
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain(path.join('m2', 'principles-disciple', '1.10.0', 'scripts', 'pd-status.cjs'));
+      expect(result.stdout).toContain('["--json"]');
+      expect(result.stdout).not.toContain('1.9.0');
+    }, 90_000);
+
+    it('fails with plugin_root_ambiguous when two marketplaces tie at the newest version', () => {
+      const fakeHome = tempDir('pd-locate-lib-home-');
+      const codexHome = seedInstalledCache(fakeHome, [
+        { name: 'm1', versions: [{ version: '1.10.0', scripts: ['pd-status.cjs'] }] },
+        { name: 'm2', versions: [{ version: '1.10.0', scripts: ['pd-status.cjs'] }] },
+      ]);
+      const result = runLocator(codexHome, fakeHome, ['--exec', 'scripts/pd-status.cjs']);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('plugin_root_ambiguous');
+      expect(result.stderr).toContain('m1');
+      expect(result.stderr).toContain('m2');
+      expect(`${result.stdout}${result.stderr}`).not.toContain('pd-status.cjs'); // nothing executed
+    }, 90_000);
+
+    it('fails with plugin_script_missing when the newest root lacks the script — no older-version fallback', () => {
+      const fakeHome = tempDir('pd-locate-lib-home-');
+      const codexHome = seedInstalledCache(fakeHome, [
+        { name: 'm1', versions: [{ version: '1.9.0', scripts: ['pd-status.cjs'] }, { version: '1.10.0', scripts: [] }] },
+      ]);
+      const result = runLocator(codexHome, fakeHome, ['--exec', 'scripts/pd-status.cjs']);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('plugin_script_missing');
+      expect(result.stderr).toContain('refusing to fall back');
+      expect(result.stderr).toContain('1.10.0');
+      expect(`${result.stdout}${result.stderr}`).not.toContain(path.join('1.9.0', 'scripts', 'pd-status.cjs'));
+    }, 90_000);
+
+    it('rejects --exec paths that escape the plugin root (absolute and ..)', () => {
+      const fakeHome = tempDir('pd-locate-lib-home-');
+      const codexHome = seedInstalledCache(fakeHome, [
+        { name: 'm1', versions: [{ version: '1.10.0', scripts: ['pd-status.cjs'] }] },
+      ]);
+      for (const bad of ['../escape.cjs', path.join(codexHome, 'plugins', 'cache', 'escape.cjs')]) {
+        const result = runLocator(codexHome, fakeHome, ['--exec', bad]);
+        expect(result.status, bad).not.toBe(0);
+        expect(result.stderr, bad).toContain('script_path_invalid');
+      }
+    }, 90_000);
+
+    it('fails with plugin_not_installed on an empty cache', () => {
+      const fakeHome = tempDir('pd-locate-lib-home-');
+      const codexHome = path.join(fakeHome, '.codex');
+      fs.mkdirSync(path.join(codexHome, 'plugins', 'cache'), { recursive: true });
+      const result = runLocator(codexHome, fakeHome, ['--exec', 'scripts/pd-status.cjs']);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('plugin_not_installed');
+    }, 90_000);
+
+    it('--plugin-root takes precedence over cache enumeration', () => {
+      const fakeHome = tempDir('pd-locate-lib-home-');
+      // A root OUTSIDE the (empty) cache that is a valid plugin install.
+      const fakeRoot = tempDir('pd-locate-explicit-root-');
+      fs.mkdirSync(path.join(fakeRoot, '.codex-plugin'), { recursive: true });
+      fs.writeFileSync(path.join(fakeRoot, '.codex-plugin', 'plugin.json'), JSON.stringify({ name: 'principles-disciple' }), 'utf8');
+      fs.mkdirSync(path.join(fakeRoot, 'scripts'), { recursive: true });
+      fs.writeFileSync(path.join(fakeRoot, 'scripts', 'x.cjs'), stubScript, 'utf8');
+      const codexHome = path.join(fakeHome, '.codex');
+      fs.mkdirSync(path.join(codexHome, 'plugins', 'cache'), { recursive: true });
+      const result = runLocator(codexHome, fakeHome, ['--plugin-root', fakeRoot, '--exec', 'scripts/x.cjs']);
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain(path.join(fakeRoot, 'scripts', 'x.cjs'));
+    }, 90_000);
+
+    it('prints usage and exits non-zero without --exec', () => {
+      const fakeHome = tempDir('pd-locate-lib-home-');
+      const codexHome = path.join(fakeHome, '.codex');
+      fs.mkdirSync(codexHome, { recursive: true });
+      const result = runLocator(codexHome, fakeHome, []);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('Usage');
+    }, 90_000);
+  });
 });

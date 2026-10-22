@@ -25,7 +25,7 @@ Confirm that the installed CLI supports a command before running it:
 - Flow policy: `pd runtime flow show --workspace "<workspace>" --json`
 - Pain list and admission evidence: `pd pain list --workspace "<workspace>" --json`, `pd pain evidence --workspace "<workspace>" --json`
 - Pain-to-principle trace: `pd runtime trace show --pain-id "<painId>" --workspace "<workspace>" --json`
-- Task and run: `pd task show "<taskId>" --workspace "<workspace>" --json`, `pd run show "<runId>"`
+- Task and run: `pd task show "<taskId>" --workspace "<workspace>" --json`, `pd run show "<runId>" --workspace "<workspace>"`
 - Candidates and artifacts: `pd candidate list --task-id "<taskId>" --workspace "<workspace>" --json`, `pd candidate show "<candidateId>" --workspace "<workspace>" --json`, `pd artifact show "<artifactId>" --workspace "<workspace>" --json`
 
 OpenClaw's `/pd-status` primarily reports host status such as GFI/Pain dictionary; it is not a substitute for Runtime health or tracing a specific task.
