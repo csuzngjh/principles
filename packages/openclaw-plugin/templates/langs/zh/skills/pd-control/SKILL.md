@@ -20,11 +20,23 @@ disable-model-invocation: false
 
 执行前检查当前安装器的帮助和前置条件；不要在缺少授权、网络或依赖条件时声称安装成功。完成后用 `pd-cli-operator` 做只读健康检查。
 
-### 停用或重新启用
+### 停用
 
-使用 OpenClaw 自身正式的插件管理入口。先检查 `openclaw plugins --help`，只调用当前安装版本帮助中实际列出的启用/停用操作，并确认目标插件是 `principles-disciple`。
+只有 Owner 明确要求停用时，执行：
 
-本插件当前没有在 PD 技能中提供一个可跨版本保证的独立启停 CLI 命令。如果宿主帮助中没有支持的操作，明确报告暂不支持；不要猜测命令，也不要直接编辑 `openclaw.json` 或 `.pd/config.yaml`。
+    openclaw plugins disable principles-disciple
+
+该命令通过 OpenClaw 正式插件管理入口更改启用状态，不会删除已安装文件。执行后检查 `openclaw plugins list --enabled --json`，确认 `principles-disciple` 不再处于启用列表。若 Gateway 正在运行，命令会通过 Gateway 应用状态变化；仍需区分“开关已关闭”和“此前已启动的任务已全部停止”。
+
+### 启用或恢复
+
+只有 Owner 明确要求启用时，执行：
+
+    openclaw plugins enable principles-disciple
+
+如果返回 capability consent、allowlist、denylist 或其他策略阻止信息，不要自动添加 `--accept-capabilities`，也不要手工改 `openclaw.json`。保留完整回执，向 Owner 说明需要作出的选择或策略问题；只有 Owner 明确同意相关 capability 后，才按 OpenClaw 返回的准确重试指令继续。
+
+执行后先检查 `openclaw plugins list --enabled --json`，再运行 `openclaw plugins inspect principles-disciple --runtime --json` 检查当前插件注册的运行时能力。冷清单或 inspect 结果本身仍不能证明真实 Hook 已生效；需要时用一条安全的真实宿主事件核验。
 
 ## 成功判定
 

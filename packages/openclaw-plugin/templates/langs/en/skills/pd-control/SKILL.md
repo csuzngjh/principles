@@ -20,11 +20,23 @@ Only when the Owner explicitly requests installation/initialization, use the doc
 
 Check the installed version's help and prerequisites first. Do not claim success when authorization, network, or dependency requirements are missing. After installation, use `pd-cli-operator` for a read-only health check.
 
-### Disable or re-enable
+### Disable
 
-Use OpenClaw's own official plugin-management surface. First inspect `openclaw plugins --help`; invoke only an enable/disable operation actually listed by the installed version, and verify the target is `principles-disciple`.
+Only when the Owner explicitly requests disablement, run:
 
-The PD skill package does not currently provide a standalone enable/disable CLI guaranteed across OpenClaw versions. If the host help does not expose a supported operation, report that it is unsupported; do not guess a command or edit `openclaw.json` or `.pd/config.yaml` directly.
+    openclaw plugins disable principles-disciple
+
+This uses OpenClaw's official plugin-management route and does not delete installed files. Then inspect `openclaw plugins list --enabled --json` and confirm `principles-disciple` is no longer enabled. When a Gateway is running, the command applies the state change through that Gateway; distinguish a disabled switch from proof that every previously started task has stopped.
+
+### Enable or resume
+
+Only when the Owner explicitly requests enablement, run:
+
+    openclaw plugins enable principles-disciple
+
+If the command reports capability consent, allowlist, denylist, or another policy block, do not automatically add `--accept-capabilities` and do not edit `openclaw.json` by hand. Preserve the full receipt and explain the required choice or policy issue to the Owner. Continue with the exact retry command returned by OpenClaw only after the Owner explicitly consents to the requested capabilities.
+
+Afterward, inspect `openclaw plugins list --enabled --json`, then run `openclaw plugins inspect principles-disciple --runtime --json` to check registered runtime capabilities. A cold inventory or inspect result alone still does not prove a real Hook is effective; when needed, verify with a safe real host event.
 
 ## Success criteria
 
