@@ -594,3 +594,125 @@ describe('resolveCorrectionObserver — Configuration Resolution (PRI-307)', () 
     }
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AUDIT-P2-04 (2026-10-21): 批量确认消费者与 correction_observer 解耦。
+// 队列（signal_confirmations）的生产者与确认 classifier 都归属 signal_collector
+// 能力域；周期启动门改为「correction_observer 或 signal_collector 任一开启」。
+// correction_observer 保持默认关闭且仍独占周期性词库优化。
+// ═══════════════════════════════════════════════════════════════════════════
+
+function configResult(overrides: { enabled: boolean; readiness?: string; reason?: string }) {
+  return {
+    enabled: overrides.enabled,
+    readiness: (overrides.readiness ?? (overrides.enabled ? 'not_ready' : 'disabled')) as never,
+    source: 'defaults',
+    reason: overrides.reason ?? `flag ${overrides.enabled ? 'enabled' : 'disabled'}`,
+    nextAction: 'test',
+    runtimeProfileId: overrides.enabled ? 'pd.anthropic-sonnet' : null,
+    runtimeProfileType: overrides.enabled ? 'pi-ai' : null,
+    apiKeyEnv: overrides.enabled ? 'ANTHROPIC_API_KEY' : null,
+    apiKeyPresent: false,
+    provider: overrides.enabled ? 'anthropic' : null,
+    model: overrides.enabled ? 'claude-3-5-sonnet' : null,
+    timeoutMs: null,
+    maxTokens: null,
+    baseUrl: null,
+  };
+}
+
+describe('AUDIT-P2-04: 启动门解耦 — correction_observer 关闭时消费者仍运行', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+  });
+  afterEach(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+    vi.useRealTimers();
+    CorrectionObserverService.stop?.({} as any);
+  });
+
+  function overrideGates(corrObserver: ReturnType<typeof configResult>, signalCollector: ReturnType<typeof configResult>) {
+    return import('../../src/core/pd-config-loader.js').then(({ resolveObserverConfig }) => {
+      vi.mocked(resolveObserverConfig).mockImplementation(
+        (_dir: string, flagId: string) => (flagId === 'correction_observer' ? corrObserver : signalCollector) as never,
+      );
+    });
+  }
+
+  // 与服务模块私有常量保持一致（CORRECTION_OBSERVER_INITIAL_DELAY_MS / INTERVAL_MS）。
+  const INITIAL_DELAY_MS = 10_000;
+  const INTERVAL_MS = 15 * 60 * 1000;
+
+  it('两 flag 全关 → 不启动周期（无 Starting 日志、推进定时器后无健康文件）', async () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-p2-04-both-off-'));
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    await overrideGates(configResult({ enabled: false }), configResult({ enabled: false }));
+    try {
+      CorrectionObserverService.start({ workspaceDir, logger, config: { get: () => undefined } } as any);
+      expect(logger.info).not.toHaveBeenCalledWith(expect.stringContaining('[PD:CorrectionObserver] Starting'));
+      await vi.advanceTimersByTimeAsync(INITIAL_DELAY_MS + 5_000);
+      expect(fs.existsSync(path.join(workspaceDir, '.state', 'signal-health.json'))).toBe(false);
+    } finally {
+      safeRmDir(workspaceDir);
+    }
+  });
+
+  it('correction_observer 关 + signal_collector 开 → 消费者-only 启动：周期跑但优化 dispatch 不发生', async () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-p2-04-consumer-only-'));
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    await overrideGates(configResult({ enabled: false }), configResult({ enabled: true }));
+    try {
+      CorrectionObserverService.start({ workspaceDir, logger, config: { get: () => undefined } } as any);
+      // 模式可见：明确告知消费者-only，不静默。
+      expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('confirmation-consumer-only mode'));
+
+      // 推进过初始延迟 → 周期执行：健康文件被写（pendingCount 刷新 + 周期成功标记），
+      // 但关键词优化 dispatch 从未发生（correction_observer 仍关）。
+      await vi.advanceTimersByTimeAsync(INITIAL_DELAY_MS + 5_000);
+      expect(mockDispatch).not.toHaveBeenCalled();
+      const healthPath = path.join(workspaceDir, '.state', 'signal-health.json');
+      expect(fs.existsSync(healthPath)).toBe(true);
+      const health = JSON.parse(fs.readFileSync(healthPath, 'utf-8')) as Record<string, unknown>;
+      expect(health['observerLastSuccessAt']).toBeTypeOf('string');
+    } finally {
+      safeRmDir(workspaceDir);
+    }
+  });
+
+  it('correction_observer needs_setup + signal_collector 开 → 消费者-only 启动（旧行为会整体拒绝）', async () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-p2-04-observer-setup-'));
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    await overrideGates(
+      configResult({ enabled: true, readiness: 'needs_setup', reason: "Environment variable 'ANTHROPIC_API_KEY' is not set" }),
+      configResult({ enabled: true }),
+    );
+    try {
+      CorrectionObserverService.start({ workspaceDir, logger, config: { get: () => undefined } } as any);
+      expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('confirmation-consumer-only mode'));
+      await vi.advanceTimersByTimeAsync(INITIAL_DELAY_MS + 5_000);
+      expect(mockDispatch).not.toHaveBeenCalled();
+      expect(fs.existsSync(path.join(workspaceDir, '.state', 'signal-health.json'))).toBe(true);
+    } finally {
+      safeRmDir(workspaceDir);
+    }
+  });
+
+  it('stop 后无残留定时器：stop→推进时间→不再有新的健康写入', async () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-p2-04-stop-'));
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    await overrideGates(configResult({ enabled: false }), configResult({ enabled: true }));
+    try {
+      CorrectionObserverService.start({ workspaceDir, logger, config: { get: () => undefined } } as any);
+      await vi.advanceTimersByTimeAsync(INITIAL_DELAY_MS + 5_000);
+      const healthPath = path.join(workspaceDir, '.state', 'signal-health.json');
+      const before = fs.readFileSync(healthPath, 'utf-8');
+
+      CorrectionObserverService.stop?.({} as any);
+      await vi.advanceTimersByTimeAsync(INTERVAL_MS * 2);
+      expect(fs.readFileSync(healthPath, 'utf-8')).toBe(before);
+    } finally {
+      safeRmDir(workspaceDir);
+    }
+  });
+});

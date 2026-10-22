@@ -134,6 +134,10 @@ export interface SignalHealthEntry {
     stage2Confirmed: number;
     stage2Queued: number;
     stage2Dropped: number;
+    /** AUDIT-P2-02: 实际发起的 Stage2 LLM 分类调用次数（旧文件缺省 0）。 */
+    stage2Invocations: number;
+    /** AUDIT-P2-02: 因分类器不可用被整批跳过的批量确认次数（旧文件缺省 0）。 */
+    stage2BatchSkipped: number;
     pendingCount: number;
   } | null;
   lastStage2SuccessAt: string | null;
@@ -478,6 +482,8 @@ export function buildSignalHealthEntry(stateDir: string): SignalHealthEntry {
       stage2Confirmed: numberOr(parsed.stage2Confirmed, 0),
       stage2Queued: numberOr(parsed.stage2Queued, 0),
       stage2Dropped: numberOr(parsed.stage2Dropped, 0),
+      stage2Invocations: numberOr(parsed.stage2Invocations, 0),
+      stage2BatchSkipped: numberOr(parsed.stage2BatchSkipped, 0),
       pendingCount: numberOr(parsed.pendingCount, 0),
     },
     lastStage2SuccessAt: stringOrNull(parsed.lastStage2SuccessAt),
@@ -495,6 +501,9 @@ export function buildSignalHealthEntry(stateDir: string): SignalHealthEntry {
     return entry;
   }
 
+  // 陈旧判据优先于积压判据：>24h 未更新说明插件已停（或从未写出新快照），
+  // 此时文件里的 pending/skipped 只是停服前的历史；"分类器不可用"会让 Owner
+  // 去修 runtime profile，而真正的结论是插件没在跑。先报更根本的那一个。
   const parsedTime = updatedAt === null ? Number.NaN : Date.parse(updatedAt);
   if (updatedAt === null || Number.isNaN(parsedTime) || (Date.now() - parsedTime) > SIGNAL_HEALTH_STALE_MS) {
     entry.status = 'degraded';
@@ -502,7 +511,19 @@ export function buildSignalHealthEntry(stateDir: string): SignalHealthEntry {
       ? 'Health file carries no timestamp'
       : `Signal health not updated for >24h (last: ${updatedAt})`;
     entry.nextAction = 'Verify the OpenClaw plugin is running and the signal_collector / correction_observer flags are enabled';
+    return entry;
   }
+
+  // AUDIT-P2-02/P2-04: 有积压且批量确认在跳过 → 队列消费不出去，Owner 必须
+  // 看见（不再是不可见的 permanent pending）。区分「暂存待下轮」与「站桩」。
+  const {counts} = entry;
+  if (counts && counts.pendingCount > 0 && counts.stage2BatchSkipped > 0) {
+    entry.status = 'degraded';
+    entry.reason = `Signal confirmation backlog stands at ${counts.pendingCount} pending rows while batch confirmation was skipped ${counts.stage2BatchSkipped} time(s) today — the signal classifier is unavailable`;
+    entry.nextAction = 'Fix the signal_collector runtime profile (provider/model/apiKeyEnv), then run pd config doctor again; pending rows are preserved and will be consumed once the classifier resolves';
+    return entry;
+  }
+
   return entry;
 }
 

@@ -982,19 +982,40 @@ function workbuddyP0KeywordStore(): UnifiedKeywordStore {
   return { version: seed.version, terms };
 }
 
-/** Pure check: no DB, no filesystem, no classifier, no historical transcript. */
-export function assessWorkbuddyLiveKeyword(text: string, sessionId: string): {
+/**
+ * AUDIT-P3-01 (2026-10-21): WorkBuddy live-keyword 检测接入共享 live 词库
+ * （`<workspace>/.state/correction_keywords.json`，seed ∪ learned，mtime 刷新，
+ * 文件缺失/损坏降级 seed-only）。返回的是完整共享 store——"只允许 high 精度
+ * correction 词触发自动 Pain"由 assess 的 matched 判据（isSignal && STRONG &&
+ * correction && matchedPrecision==='high'）与 admitOne 的 isStrongHighPrecision
+ * 门共同强制，与 OpenClaw 检测共享同一套 precision 语义（earned-high 需
+ * TP≥3 且零 FP；owner_promoted/seed 需权重≥0.7）。
+ */
+export function resolveSharedCorrectionKeywordStoreForDetection(workspaceDir: string): UnifiedKeywordStore {
+  return createSharedCorrectionKeywordStore({ workspaceDir }).resolve();
+}
+
+/**
+ * Pure check: no DB, no classifier, no historical transcript. The optional
+ * store parameter is how the shared live vocabulary enters (AUDIT-P3-01);
+ * omitted, the check keeps the P0 four-term projection (backward compatible).
+ */
+export function assessWorkbuddyLiveKeyword(
+  text: string,
+  sessionId: string,
+  store?: UnifiedKeywordStore,
+): {
   matched: boolean; reason: 'matched' | 'not_a_signal' | 'prompt_too_large';
 } {
   if (Buffer.byteLength(text, 'utf8') > WORKBUDDY_MAX_PROMPT_BYTES) {
     return { matched: false, reason: 'prompt_too_large' };
   }
-  const store = workbuddyP0KeywordStore();
+  const resolved = store ?? workbuddyP0KeywordStore();
   // Prefer precision to recall: reject quoted/embedded/reported phrases.
-  if (!Object.keys(store.terms).some(term => text.trimStart().toLowerCase().startsWith(term.toLowerCase()))) {
+  if (!Object.keys(resolved.terms).some(term => text.trimStart().toLowerCase().startsWith(term.toLowerCase()))) {
     return { matched: false, reason: 'not_a_signal' };
   }
-  const out = collectSync(text, sessionId, store, SYNC_DETECTION_CONFIG, new Date().toISOString());
+  const out = collectSync(text, sessionId, resolved, SYNC_DETECTION_CONFIG, new Date().toISOString());
   const matched = out.isSignal && out.strength === 'STRONG' &&
     out.type === 'correction' && out.matchedPrecision === 'high';
   return { matched, reason: matched ? 'matched' : 'not_a_signal' };
@@ -1032,7 +1053,11 @@ export function admitTrustedWorkbuddyLiveCorrection(input: {
   if (prompt.trimStart().startsWith('PD记录痛苦')) {
     return { ok: false, reason: 'explicit_owner_statement_reserved', nextAction: 'Use original Owner intake; no keyword fallback.' };
   }
-  if (!assessWorkbuddyLiveKeyword(prompt, sessionId).matched) {
+  // AUDIT-P3-01: 预检与准入共用同一份共享 live 词库（单一真理源）——预检命中
+  // 词与 admitOne 的检测判定不会漂移。自动 Pain 仍只允许 high 精度 correction
+  // 词（两道门各自强制），无 LLM、无 transcript 读取。
+  const sharedStore = resolveSharedCorrectionKeywordStoreForDetection(input.workspaceDir);
+  if (!assessWorkbuddyLiveKeyword(prompt, sessionId, sharedStore).matched) {
     return { ok: true, outcomes: [] };
   }
   const nativeIdentity = JSON.stringify(['workbuddy', sessionId, generationId]);
@@ -1048,7 +1073,7 @@ export function admitTrustedWorkbuddyLiveCorrection(input: {
       text: prompt,
       observedAt: (input.now ?? new Date()).toISOString(),
     }],
-    keywordStore: workbuddyP0KeywordStore(),
+    keywordStore: sharedStore,
     ...(input.now ? { now: input.now } : {}),
     ...(input.databaseFactory ? { databaseFactory: input.databaseFactory } : {}),
   }, true);

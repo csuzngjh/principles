@@ -6,7 +6,11 @@
  * 单条异常不中断整批。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import type { WorkspaceContext } from '../../src/core/workspace-context.js';
+import { readSignalHealth } from '../../src/core/signal-health.js';
 
 const mockClassifier = vi.fn();
 const mockConfirmPendingSignal = vi.fn();
@@ -83,6 +87,76 @@ describe('batchConfirmPendingSignals (PRI-788 G2)', () => {
     expect(trajectory.bumpSignalConfirmationAttempt).not.toHaveBeenCalled();
     expect(trajectory.markSignalConfirmationResult).not.toHaveBeenCalled();
     expect(mockConfirmPendingSignal).not.toHaveBeenCalled();
+  });
+
+  it('AUDIT-P2-02: classifier 不可用且队列非空 → stage2BatchSkipped 计数（跳过可见，不再只是 debug 日志）', async () => {
+    classifierSlot.instance = null;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-p2-04-skip-count-'));
+    const stateDir = path.join(tmp, '.state');
+    const pending = makePendingRow();
+    const trajectory = {
+      listPendingSignalConfirmations: vi.fn(() => [pending]),
+      bumpSignalConfirmationAttempt: vi.fn(() => 1),
+      markSignalConfirmationResult: vi.fn(() => true),
+    };
+    const wctx = { workspaceDir: tmp, stateDir, trajectory } as unknown as WorkspaceContext;
+
+    try {
+      const resolved = await batchConfirmPendingSignals(wctx, console);
+      expect(resolved).toBe(0);
+      const health = readSignalHealth(stateDir);
+      expect(health).not.toBeNull();
+      expect(health?.stage2BatchSkipped).toBe(1);
+      // 记录原样保留：不算失败、不终结。
+      expect(trajectory.bumpSignalConfirmationAttempt).not.toHaveBeenCalled();
+      expect(trajectory.markSignalConfirmationResult).not.toHaveBeenCalled();
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('AUDIT-P2-02: 空队列即使 classifier 不可用也不计数（没有工作被跳过）', async () => {
+    classifierSlot.instance = null;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-p2-04-skip-empty-'));
+    const stateDir = path.join(tmp, '.state');
+    const trajectory = {
+      listPendingSignalConfirmations: vi.fn(() => []),
+      bumpSignalConfirmationAttempt: vi.fn(() => 1),
+      markSignalConfirmationResult: vi.fn(() => true),
+    };
+    const wctx = { workspaceDir: tmp, stateDir, trajectory } as unknown as WorkspaceContext;
+
+    try {
+      const resolved = await batchConfirmPendingSignals(wctx, console);
+      expect(resolved).toBe(0);
+      // 队列为空时在解析 classifier 之前就返回——零模型调用、零跳过计数。
+      expect(readSignalHealth(stateDir)).toBeNull();
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('AUDIT-P2-04: classifier 恢复后积压记录被消费（confirmed 终态 + 计数）', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-p2-04-recover-'));
+    const stateDir = path.join(tmp, '.state');
+    const pending = makePendingRow({ id: 'sq_recover' });
+    const trajectory = {
+      listPendingSignalConfirmations: vi.fn(() => [pending]),
+      bumpSignalConfirmationAttempt: vi.fn(() => 1),
+      markSignalConfirmationResult: vi.fn(() => true),
+    };
+    const wctx = { workspaceDir: tmp, stateDir, trajectory } as unknown as WorkspaceContext;
+    mockConfirmPendingSignal.mockResolvedValueOnce({ disposition: 'confirmed', detail: '确认纠正' });
+
+    try {
+      const resolved = await batchConfirmPendingSignals(wctx, console);
+      expect(resolved).toBe(1);
+      expect(trajectory.markSignalConfirmationResult).toHaveBeenCalledWith('sq_recover', 'confirmed', '确认纠正');
+      const health = readSignalHealth(stateDir);
+      expect(health?.stage2Confirmed).toBe(1);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 
   it('host dispositions forwarded: confirmed/rejected are persisted as terminal states', async () => {
