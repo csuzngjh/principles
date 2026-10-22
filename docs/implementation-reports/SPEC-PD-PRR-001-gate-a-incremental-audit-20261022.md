@@ -437,3 +437,19 @@ npx vitest run .tmp/pri-1001-audit/legacy-probe.test.ts --root=.
 - B0 预注册：`docs/specs/SPEC-PD-PRR-001-Gate-B0-AC-preregistration-20261022.md`（PR #2111）
 
 **SPEC-PD-PRR-001 Gate A 增量审计 2026-10-22 END**
+
+---
+
+## 附 D：后续更新（2026-10-22 深夜，PR #2113 之后）
+
+本报告是**时点审计产物**，其上文结论在出具时（`2fb3b04c8`，夹具未入库）成立，未因下述事件改写。
+
+| 事件 | 内容 |
+|---|---|
+| 原始夹具已恢复 | 2026-10-17 Gate A 的两套夹具（13 + 17 = 30 项断言）在 PRI-1000 历史 worktree 的 gitignored `.tmp/` 中被找到，**逐字节原样**入库至 `packages/principles-core/tests/fixtures/gate-a-reproducibility/`（PR #2113） |
+| 30/30 实跑通过 | 在 `origin/main` @ `2fb3b04c8` 上：`fixture-ledger` 13/13 PASS、`fixture-sqlite` 17/17 PASS，合计 **30/30，0 失败** |
+| 定向回归 | 同基线 3 个定向测试文件 **43/43 用例 PASS，0 失败**（口径为 vitest 用例数，非原报告的"断言条数"，见矩阵 §3.1 披露） |
+| P-02 状态变化 | §8 建议的 `NOT_REVALIDATED_AT_CURRENT_MAIN` 已由准入矩阵 **v1.4** 更新为 `PASS`（适用基线 `2fb3b04c8`） |
+| Gate B | **仍为 `BLOCKED`**（P-06～P-10 `PENDING`、P-12 未做）——P-02 恢复 PASS 不解除任何 Owner 决策项 |
+
+§8.4 的"路线 1（夹具入库）"已由 PR #2113 完成；§9 的未覆盖项（U9～U14、R-A～R-C）**不变**，其中"30/30 夹具重放 NOT_RUN"一项已转为"已复跑通过"，其余仍开放。
