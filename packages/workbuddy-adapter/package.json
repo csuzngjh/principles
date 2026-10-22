@@ -1,6 +1,6 @@
 {
   "name": "@principles/workbuddy-adapter",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "description": "WorkBuddy host adapter for Principles Disciple — implements the HostAdapter interface for WorkBuddy's Git Bash command-hook model (ADR-0020 third host, SPEC workbuddy-host-adapter v0.3.0).",
   "type": "module",
   "main": "./dist/index.js",
