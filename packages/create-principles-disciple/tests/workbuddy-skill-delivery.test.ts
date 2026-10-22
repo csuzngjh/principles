@@ -108,25 +108,48 @@ describe('WorkBuddy skills through production delivery boundaries', () => {
     expect(result.payload?.version, result.reason).toBe(version);
   });
 
+  /** Cache dir names derive from manifest versions: whitelist strict numeric
+   * X.Y.Z and prove the resolved path stays inside the cache root. */
+  function versionedCacheDir(cacheRoot: string, version: string): string {
+    if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error(`non-numeric plugin version: ${version}`);
+    const resolved = path.resolve(cacheRoot, version);
+    if (!resolved.startsWith(path.resolve(cacheRoot) + path.sep)) throw new Error('cache path escaped the cache root');
+    return resolved;
+  }
+
+  /** Read a fixed file under a proven root: the join can never leave root. */
+  function fileUnderRoot(root: string, ...segments: string[]): string {
+    const resolved = path.resolve(root, ...segments);
+    if (!resolved.startsWith(path.resolve(root) + path.sep)) throw new Error('path escaped its root');
+    return resolved;
+  }
+
   async function oldCacheLab(engine: boolean) {
     const payload = temporaryDirectory();
-    fs.cpSync(path.join(adapter, 'plugin'), path.join(payload, 'workbuddy-adapter/plugin'), { recursive: true });
+    const payloadRoot = path.resolve(payload);
+    fs.cpSync(path.join(adapter, 'plugin'), fileUnderRoot(payloadRoot, 'workbuddy-adapter', 'plugin'), { recursive: true });
+    // The cache version directory follows the payload manifest, so this lab
+    // keeps modeling the real upgrade shape as the shipped plugin version
+    // moves (0.1.0 → 0.2.0 → …) instead of pinning a stale literal.
+    const manifestPath = fileUnderRoot(payloadRoot, 'workbuddy-adapter', 'plugin', '.codebuddy-plugin', 'plugin.json');
+    const shippedVersion = (JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as { version: unknown }).version;
+    if (typeof shippedVersion !== 'string') throw new Error(`unexpected shipped plugin version: ${String(shippedVersion)}`);
     const home = temporaryDirectory();
     process.env.WORKBUDDY_CONFIG_DIR = path.join(home, '.workbuddy');
     fs.mkdirSync(process.env.WORKBUDDY_CONFIG_DIR);
     const installer = new WorkBuddyHostInstaller({
       homeDir: () => home,
-      enginePath: () => engine ? path.join(__dirname, 'fixtures/workbuddy-fake-engine.mjs') : undefined,
+      enginePath: () => engine ? fileUnderRoot(__dirname, 'fixtures', 'workbuddy-fake-engine.mjs') : undefined,
     });
     const context = { workspaceDir: home, pluginDir: payload, language: 'en', mode: 'smart' as const };
     const installed = await installer.install(context);
     expect(installed.success, installed.reason).toBe(true);
     const paths = resolveWorkbuddyPaths(home);
-    const cache = path.join(paths.cachePluginRoot, '0.1.0');
-    // Real old shipped shape: same 0.1.0 manifest, hooks/wrapper, zero skills.
-    expect(JSON.parse(fs.readFileSync(path.join(cache, '.codebuddy-plugin/plugin.json'), 'utf8')).version).toBe('0.1.0');
-    fs.rmSync(path.join(cache, 'skills'), { recursive: true });
-    fs.unlinkSync(path.join(cache, 'scripts/pd-control.cjs'));
+    const cache = versionedCacheDir(paths.cachePluginRoot, shippedVersion);
+    // Real old shipped shape: same manifest version, hooks/wrapper, zero skills.
+    expect(JSON.parse(fs.readFileSync(fileUnderRoot(cache, '.codebuddy-plugin', 'plugin.json'), 'utf8')).version).toBe(shippedVersion);
+    fs.rmSync(fileUnderRoot(cache, 'skills'), { recursive: true });
+    fs.unlinkSync(fileUnderRoot(cache, 'scripts', 'pd-control.cjs'));
     const database = path.join(paths.governanceDir, '.pd/state.db');
     fs.writeFileSync(database, 'Owner governance data');
     const otherPlugin = path.join(paths.configDir, 'plugins/cache/other/plugin/1.0.0/owner.txt');
@@ -139,22 +162,49 @@ describe('WorkBuddy skills through production delivery boundaries', () => {
     const registry = JSON.parse(fs.readFileSync(paths.registryPath, 'utf8'));
     registry.plugins['other@market'] = { version: '1.0.0', installPath: path.dirname(otherPlugin) };
     fs.writeFileSync(paths.registryPath, JSON.stringify(registry));
-    return { installer, context, cache, paths, database, otherPlugin };
+    return { installer, context, cache, paths, database, otherPlugin, payloadRoot, manifestPath, shippedVersion };
   }
 
-  it.each([true, false])('refreshes registered hook-only 0.1.0 cache from a same-version complete payload (engine=%s)', async (engine) => {
+  it.each([true, false])('refreshes registered hook-only cache from a same-version complete payload (engine=%s)', async (engine) => {
     const lab = await oldCacheLab(engine);
     const result = await lab.installer.install(lab.context);
     expect(result.success, result.reason).toBe(true);
     expect(result.reason).toContain('refreshed by installer');
     for (const skill of requiredSkills) {
-      expect(fs.readFileSync(path.join(lab.cache, 'skills', skill, 'SKILL.md'), 'utf8')).toBe(fs.readFileSync(path.join(adapter, 'plugin/skills', skill, 'SKILL.md'), 'utf8'));
+      expect(fs.readFileSync(fileUnderRoot(lab.cache, 'skills', skill, 'SKILL.md'), 'utf8')).toBe(fs.readFileSync(path.join(adapter, 'plugin', 'skills', skill, 'SKILL.md'), 'utf8'));
     }
-    expect(fs.readFileSync(path.join(lab.cache, 'scripts/pd-control.cjs'), 'utf8')).toBe(fs.readFileSync(path.join(adapter, 'plugin/scripts/pd-control.cjs'), 'utf8'));
+    expect(fs.readFileSync(fileUnderRoot(lab.cache, 'scripts', 'pd-control.cjs'), 'utf8')).toBe(fs.readFileSync(path.join(adapter, 'plugin', 'scripts', 'pd-control.cjs'), 'utf8'));
     const registry = JSON.parse(fs.readFileSync(lab.paths.registryPath, 'utf8'));
-    expect(registry.plugins['principles-disciple@principles-disciple-market']).toMatchObject({ version: '0.1.0', installPath: lab.cache });
+    expect(registry.plugins['principles-disciple@principles-disciple-market']).toMatchObject({ version: lab.shippedVersion, installPath: lab.cache });
     expect(registry.plugins['other@market']).toEqual({ version: '1.0.0', installPath: path.dirname(lab.otherPlugin) });
     expect(JSON.parse(fs.readFileSync(lab.paths.settingsPath, 'utf8'))).toMatchObject({ ownerSetting: 'preserve', enabledPlugins: { 'other@market': true } });
+    expect(fs.readFileSync(lab.database, 'utf8')).toBe('Owner governance data');
+    expect(fs.readFileSync(lab.otherPlugin, 'utf8')).toBe('Other plugin data');
+  });
+
+  it('upgrades to a higher plugin version into its own cache dir, repoints registration, and keeps governance data', async () => {
+    const lab = await oldCacheLab(true);
+    // The next shipped release: bump the payload manifest's minor (the same
+    // move a release PR makes) and re-run the installer over the existing
+    // cache. nextVersion stays within the whitelisted X.Y.Z shape.
+    const parts = lab.shippedVersion.split('.').map((part) => Number(part));
+    const nextVersion = `${parts[0]}.${parts[1] + 1}.0`;
+    versionedCacheDir(lab.paths.cachePluginRoot, nextVersion); // validates the shape before it names a directory
+    const manifest = JSON.parse(fs.readFileSync(lab.manifestPath, 'utf8')) as { version: string };
+    manifest.version = nextVersion;
+    fs.writeFileSync(lab.manifestPath, JSON.stringify(manifest, null, 2));
+    const result = await lab.installer.install(lab.context);
+    expect(result.success, result.reason).toBe(true);
+    const newCache = versionedCacheDir(lab.paths.cachePluginRoot, nextVersion);
+    for (const skill of requiredSkills) {
+      expect(fs.readFileSync(fileUnderRoot(newCache, 'skills', skill, 'SKILL.md'), 'utf8')).toBe(fs.readFileSync(path.join(adapter, 'plugin', 'skills', skill, 'SKILL.md'), 'utf8'));
+    }
+    expect(fs.readFileSync(fileUnderRoot(newCache, 'scripts', 'pd-control.cjs'), 'utf8')).toBe(fs.readFileSync(path.join(adapter, 'plugin', 'scripts', 'pd-control.cjs'), 'utf8'));
+    const registry = JSON.parse(fs.readFileSync(lab.paths.registryPath, 'utf8'));
+    expect(registry.plugins['principles-disciple@principles-disciple-market']).toMatchObject({ version: nextVersion, installPath: newCache });
+    // The old version dir stays on disk (inert until uninstall sweeps it) but
+    // nothing points at it anymore.
+    expect(fs.existsSync(fileUnderRoot(lab.cache, 'scripts', 'wrapper.cjs'))).toBe(true);
     expect(fs.readFileSync(lab.database, 'utf8')).toBe('Owner governance data');
     expect(fs.readFileSync(lab.otherPlugin, 'utf8')).toBe('Other plugin data');
   });
@@ -171,7 +221,7 @@ describe('WorkBuddy skills through production delivery boundaries', () => {
     // Data first, wording second: a regression must fail on "the old plugin is
     // gone", not on a message that happened to change.
     expect(fs.existsSync(path.join(lab.cache, 'scripts/wrapper.cjs')), 'the previous cache must survive a failed refresh').toBe(true);
-    expect(JSON.parse(fs.readFileSync(path.join(lab.cache, '.codebuddy-plugin/plugin.json'), 'utf8')).version).toBe('0.1.0');
+    expect(JSON.parse(fs.readFileSync(path.join(lab.cache, '.codebuddy-plugin/plugin.json'), 'utf8')).version).toBe(lab.shippedVersion);
     expect(fs.readFileSync(path.join(lab.cache, 'scripts/wrapper.cjs'), 'utf8').length).toBeGreaterThan(0);
     expect(JSON.parse(fs.readFileSync(path.join(lab.cache, 'hooks/hooks.json'), 'utf8'))).toHaveProperty('hooks');
     // No half-written pieces from the failed attempt.
@@ -231,7 +281,7 @@ describe('WorkBuddy skills through production delivery boundaries', () => {
     expect(after.plugins[pluginKey]).toHaveLength(3);
     expect(after.plugins[pluginKey].slice(1)).toEqual(untouchedScopes);
     expect(after.plugins[pluginKey][0]).toMatchObject({
-      scope: 'user', installPath: lab.cache, version: '0.1.0',
+      scope: 'user', installPath: lab.cache, version: lab.shippedVersion,
       installedAt: '2026-10-17T08:26:05.778Z', ownerMetadata: { preserve: true },
     });
     expect(fs.readFileSync(olderFile, 'utf8')).toBe('Existing project/local version');
