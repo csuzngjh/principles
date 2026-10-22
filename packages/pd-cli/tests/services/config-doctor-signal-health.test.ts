@@ -148,4 +148,15 @@ describe('buildSignalHealthEntry (AUDIT-P2-04 队列积压分级)', () => {
     const entry = buildSignalHealthEntry(stateDir);
     expect(entry.status).toBe('ok');
   });
+
+  it('陈旧文件 + 积压/跳过 → 先报插件停更，而不是误报分类器不可用', () => {
+    const stateDir = makeStateDir();
+    const stale = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+    writeHealth(stateDir, { pendingCount: 7, stage2BatchSkipped: 4, updatedAt: stale });
+    const entry = buildSignalHealthEntry(stateDir);
+    expect(entry.status).toBe('degraded');
+    expect(entry.reason).toContain('not updated for >24h');
+    expect(entry.reason).not.toContain('classifier is unavailable');
+    expect(entry.nextAction).toContain('plugin is running');
+  });
 });

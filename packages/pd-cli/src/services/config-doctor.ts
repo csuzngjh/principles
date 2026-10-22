@@ -501,6 +501,19 @@ export function buildSignalHealthEntry(stateDir: string): SignalHealthEntry {
     return entry;
   }
 
+  // 陈旧判据优先于积压判据：>24h 未更新说明插件已停（或从未写出新快照），
+  // 此时文件里的 pending/skipped 只是停服前的历史；"分类器不可用"会让 Owner
+  // 去修 runtime profile，而真正的结论是插件没在跑。先报更根本的那一个。
+  const parsedTime = updatedAt === null ? Number.NaN : Date.parse(updatedAt);
+  if (updatedAt === null || Number.isNaN(parsedTime) || (Date.now() - parsedTime) > SIGNAL_HEALTH_STALE_MS) {
+    entry.status = 'degraded';
+    entry.reason = updatedAt === null
+      ? 'Health file carries no timestamp'
+      : `Signal health not updated for >24h (last: ${updatedAt})`;
+    entry.nextAction = 'Verify the OpenClaw plugin is running and the signal_collector / correction_observer flags are enabled';
+    return entry;
+  }
+
   // AUDIT-P2-02/P2-04: 有积压且批量确认在跳过 → 队列消费不出去，Owner 必须
   // 看见（不再是不可见的 permanent pending）。区分「暂存待下轮」与「站桩」。
   const {counts} = entry;
@@ -511,14 +524,6 @@ export function buildSignalHealthEntry(stateDir: string): SignalHealthEntry {
     return entry;
   }
 
-  const parsedTime = updatedAt === null ? Number.NaN : Date.parse(updatedAt);
-  if (updatedAt === null || Number.isNaN(parsedTime) || (Date.now() - parsedTime) > SIGNAL_HEALTH_STALE_MS) {
-    entry.status = 'degraded';
-    entry.reason = updatedAt === null
-      ? 'Health file carries no timestamp'
-      : `Signal health not updated for >24h (last: ${updatedAt})`;
-    entry.nextAction = 'Verify the OpenClaw plugin is running and the signal_collector / correction_observer flags are enabled';
-  }
   return entry;
 }
 
