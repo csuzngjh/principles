@@ -58,6 +58,18 @@ export function preregBodyHash(preregBody) {
 }
 
 /**
+ * Canonical-JSON SHA-256 over the FULL freeze items array (every FZ value,
+ * status and approval ref). This is the content identity the Owner approval
+ * binds to: changing ANY frozen value (e.g. FZ-11.minPairs, FZ-06 budget,
+ * FZ-13 STOP conditions) while keeping the old decisionRef/commitSha changes
+ * this hash, so the real-run gate can detect the tamper against the
+ * authoritative hash held by the trusted verifier.
+ */
+export function freezeItemsHash(freeze) {
+  return sha256(canonicalJson(freeze.items));
+}
+
+/**
  * Build the honest DRAFT freeze record: all fifteen items enumerated with
  * OWNER_DECISION_REQUIRED and null values. `preregBody` is the preregistration
  * document as a plain object; its canonical hash is recorded so any later
@@ -153,17 +165,28 @@ export function validateFreezeRecord(freeze) {
  *   - dataset: the actually loaded dataset, for the mandatory FZ-01
  *     taskSetHash cross-check (omitting it can never skip the FZ-01 check);
  *   - verifyOwnerApproval: a trusted, caller-supplied resolver
- *       ({ decisionRef }) => { verified, approved, frozenCommitSha, reason? }
+ *       ({ decisionRef }) => {
+ *         verified, approved,
+ *         frozenCommitSha,        // commit the Owner approval was bound to
+ *         approvedFreezeItemsHash // canonical content hash of the freeze
+ *       }                         // record the Owner actually approved
  *     returning undefined/null/{} /verified:false/approved:false/throwing are
- *     ALL refusals. It must also bind the frozen commit: evidence.frozenCommitSha
- *     must exist and equal ownerApproval.frozenCommitSha — a 40-hex string in
- *     the freeze record alone is NOT a valid approval.
+ *     ALL refusals. Bindings enforced against the SUBMITTED record:
+ *       - evidence.frozenCommitSha must exist and equal
+ *         ownerApproval.frozenCommitSha;
+ *       - evidence.approvedFreezeItemsHash must exist and equal
+ *         freezeItemsHash(freeze) — a hash over ALL submitted items, so ANY
+ *         tampered frozen value (budget, minPairs, STOP, gold…) fails the
+ *         content reconciliation even when decisionRef/commitSha are kept;
+ *       - optional `runningCommitSha`: when the caller supplies the commit the
+ *         run actually executes from, it must equal evidence.frozenCommitSha
+ *         (the approved code state), not just the two record fields.
  *
  * Nothing here reads env vars, defaults or script arguments to fill an
  * authorization gap. A DRAFT record is refused; offline rehearsals must not
  * fabricate Owner approval (the rehearsal gate relies on the refusal).
  */
-export function validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval, dataset }) {
+export function validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval, dataset, runningCommitSha }) {
   const problems = [];
   const p = (msg) => problems.push(msg);
 
@@ -199,7 +222,7 @@ export function validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApprov
   }
 
   // FZ-15 — trusted verifier verdict. Only verified===true AND approved===true
-  // together (and a commit binding) authorize; every other shape refuses.
+  // together (plus BOTH bindings) authorize; every other shape refuses.
   if (typeof verifyOwnerApproval === 'function' && isPlainObject(freeze.ownerApproval)) {
     let evidence;
     try {
@@ -217,6 +240,26 @@ export function validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApprov
       p('FZ-15: verified approval carries no frozenCommitSha binding — the authoritative decision record must pin the frozen commit; real run refused');
     } else if (evidence.frozenCommitSha !== freeze.ownerApproval.frozenCommitSha) {
       p(`FZ-15: frozenCommitSha mismatch between the freeze record (${freeze.ownerApproval.frozenCommitSha.slice(0, 8)}…) and the authoritative Owner decision (${evidence.frozenCommitSha.slice(0, 8)}…) — the freeze is not bound to the approved protocol; real run refused`);
+    } else if (typeof evidence.approvedFreezeItemsHash !== 'string' || !/^[0-9a-f]{64}$/.test(evidence.approvedFreezeItemsHash)) {
+      p('FZ-15: verified approval carries no approvedFreezeItemsHash — the authoritative decision record must pin the canonical content hash of the freeze record it approved; real run refused');
+    } else {
+      // Content reconciliation over ALL submitted freeze items: any changed
+      // value (budget, minPairs, STOP, gold…) breaks this even when
+      // decisionRef and commitSha are kept (SPEC §5.2 — a modified frozen
+      // value invalidates the round).
+      const actualItemsHash = freezeItemsHash(freeze);
+      if (evidence.approvedFreezeItemsHash !== actualItemsHash) {
+        p(`FZ-15: freeze content reconciliation FAILED — submitted items hash ${actualItemsHash.slice(0, 12)}… does not equal the Owner-approved hash ${evidence.approvedFreezeItemsHash.slice(0, 12)}…; a frozen value was changed after approval: INVALID_PROTOCOL, start a new studyId`);
+      }
+    }
+    // Optional running-commit check: when the caller declares the commit this
+    // run actually executes from, it must be the approved one.
+    if (evidence && isPlainObject(evidence) && evidence.verified === true && evidence.approved === true && typeof evidence.frozenCommitSha === 'string') {
+      if (runningCommitSha !== undefined && runningCommitSha !== null) {
+        if (runningCommitSha !== evidence.frozenCommitSha) {
+          p(`FZ-15: running commit ${String(runningCommitSha).slice(0, 8)}… differs from the Owner-approved frozen commit ${evidence.frozenCommitSha.slice(0, 8)}… — the run would not execute the approved code state; real run refused`);
+        }
+      }
     }
   }
 
@@ -240,34 +283,39 @@ export function validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApprov
     }
   }
 
-  // FZ-11: N must be derived from FZ-09's detectable difference, and the
-  // comparison denominator is the number of COMPLETE A/C pairs — tasks whose
-  // C material is ruled unauthorized before exposure are NOT complete pairs
-  // (Gate B plan §3.4: exclusions happen before the denominator). Below the
-  // minimum → UNPROVEN by AC-S7; the frozen threshold is never lowered.
+  // FZ-11: the sample-size gate can NEVER be skipped by an ill-formed value.
+  // A present FZ-11 item whose value is not the contract object is a refusal,
+  // not a silent bypass (owner review round 2).
   let minPairsEligible = null;
   let pairDenominator = null;
   const fz11 = freeze.items.find((i) => i.id === 'FZ-11');
-  if (fz11 && isPlainObject(fz11.value)) {
-    const minPairs = fz11.value.minPairs;
-    const basis = fz11.value.derivationBasis;
-    if (!Number.isSafeInteger(minPairs) || minPairs < 1) {
-      p('FZ-11: value.minPairs must be a positive integer derived from the FZ-09 detectable difference');
-    }
-    if (typeof basis !== 'string' || basis.trim() === '') {
-      p('FZ-11: value.derivationBasis must state how minPairs was derived from FZ-09 (B0 §5.1 rule 2 — no unexplained N)');
-    }
-    if (Number.isSafeInteger(minPairs) && minPairs >= 1 && basis && dataset) {
-      const allTasks = dataset.tasks?.tasks ?? [];
-      const unauthorized = allTasks.filter((t) => t?.historyMaterial?.disclosureStatus === 'unauthorized');
-      pairDenominator = {
-        totalTasks: allTasks.length,
-        completePairs: allTasks.length - unauthorized.length,
-        excludedUnauthorizedTasks: unauthorized.length,
-      };
-      minPairsEligible = pairDenominator.completePairs >= minPairs;
-      if (minPairsEligible === false) {
-        p(`FZ-11: complete A/C pairs (${pairDenominator.completePairs} of ${pairDenominator.totalTasks} tasks; ${pairDenominator.excludedUnauthorizedTasks} excluded pre-exposure) fall below the declared minimum (${minPairs}) — by AC-S7 the study outcome is UNPROVEN, not a pass; original data and exclusion records are retained and the frozen threshold is never lowered`);
+  if (fz11) {
+    if (!isPlainObject(fz11.value)) {
+      p(`FZ-11: value must be an object { minPairs, derivationBasis } (got ${fz11.value === null ? 'null' : typeof fz11.value}${Array.isArray(fz11.value) ? ' array' : ''}) — the minimum-pairs gate cannot be skipped by replacing the value with another type; real run refused`);
+    } else {
+      const minPairs = fz11.value.minPairs;
+      const basis = fz11.value.derivationBasis;
+      const basisValid = typeof basis === 'string' && basis.trim() !== '';
+      if (!Number.isSafeInteger(minPairs) || minPairs < 1) {
+        p(`FZ-11: value.minPairs must be a positive integer derived from the FZ-09 detectable difference (got ${JSON.stringify(minPairs ?? null)})`);
+      }
+      if (!basisValid) {
+        p('FZ-11: value.derivationBasis must state how minPairs was derived from FZ-09 (B0 §5.1 rule 2 — no unexplained N)');
+      }
+      // The count comparison only runs when BOTH declared fields are valid —
+      // a partially valid value must not yield a sample-size verdict.
+      if (Number.isSafeInteger(minPairs) && minPairs >= 1 && basisValid && dataset) {
+        const allTasks = dataset.tasks?.tasks ?? [];
+        const unauthorized = allTasks.filter((t) => t?.historyMaterial?.disclosureStatus === 'unauthorized');
+        pairDenominator = {
+          totalTasks: allTasks.length,
+          completePairs: allTasks.length - unauthorized.length,
+          excludedUnauthorizedTasks: unauthorized.length,
+        };
+        minPairsEligible = pairDenominator.completePairs >= minPairs;
+        if (minPairsEligible === false) {
+          p(`FZ-11: complete A/C pairs (${pairDenominator.completePairs} of ${pairDenominator.totalTasks} tasks; ${pairDenominator.excludedUnauthorizedTasks} excluded pre-exposure) fall below the declared minimum (${minPairs}) — by AC-S7 the study outcome is UNPROVEN, not a pass; original data and exclusion records are retained and the frozen threshold is never lowered`);
+        }
       }
     }
   }

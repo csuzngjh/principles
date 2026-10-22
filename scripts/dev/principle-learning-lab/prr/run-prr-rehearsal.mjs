@@ -176,6 +176,22 @@ async function rehearseLedgerSemantics({ workDir }) {
   });
 
   await runCase({
+    case: 'ledger-malformed-entries',
+    prepare: (dir) => fs.writeFileSync(path.join(dir, 'principle_training_state.json'), JSON.stringify({ tree: { principles: { p1: 'garbage-string-entry', p2: { title: 'no id here' } } } }), 'utf8'),
+    trueZeroEvidence: { auditor: 'offline-rehearsal', recordRef: 'synthetic independent audit record (fixture)' },
+    expectedClass: 'malformed_entries__semantic_review_required',
+    expect: { 'm1.count': null, 'm1.trueZero': false, 'm1.reasonCode': 'malformed_ledger_entries__semantic_review_required' },
+  });
+
+  await runCase({
+    case: 'ledger-lenient-empty-cannot-be-true-zero',
+    prepare: (dir) => fs.writeFileSync(path.join(dir, 'principle_training_state.json'), '[]', 'utf8'),
+    trueZeroEvidence: { auditor: 'offline-rehearsal', recordRef: 'synthetic independent audit record (fixture)' },
+    expectedClass: 'ok_but_empty_ledger',
+    expect: { 'm1.count': 0, 'm1.trueZero': false, 'm1.reasonCode': 'ok_but_empty_ledger__semantic_review_required' },
+  });
+
+  await runCase({
     case: 'ledger-invalid-json',
     prepare: (dir) => fs.writeFileSync(path.join(dir, 'principle_training_state.json'), '{"tree": nope', 'utf8'),
     expectedClass: 'unreadable',
@@ -251,7 +267,9 @@ async function rehearseLedgerSemantics({ workDir }) {
     }
   }
 
-  // Unknown availability status + malformed authorization must fail loud.
+  // Unknown availability status, malformed entries and malformed
+  // authorization must fail loud; trueZero must be unreachable from any
+  // malformed path even when evidence is supplied.
   {
     const unknownStatus = classifyLedgerAvailability({ ledger: {}, availability: {} });
     const missingStatus = classifyLedgerAvailability({});
@@ -262,9 +280,22 @@ async function rehearseLedgerSemantics({ workDir }) {
     if (inconsistent !== 'unreadable') {
       p(`authority status must win over ledger content (got ${inconsistent})`);
     }
+    const stringEntry = classifyLedgerAvailability({ availability: { status: 'ok' }, ledger: { tree: { principles: { p1: 'garbage' } } } });
+    const noStatusEntry = classifyLedgerAvailability({ availability: { status: 'ok' }, ledger: { tree: { principles: { p1: { id: 'p1' } } } } });
+    if (stringEntry !== 'malformed_entries__semantic_review_required' || noStatusEntry !== 'malformed_entries__semantic_review_required') {
+      p(`malformed entries must be semantic-review cases (got ${stringEntry}/${noStatusEntry})`);
+    }
     const unknownMeasure = measureLedgerPrinciples({ coreResult: { availability: {} }, authorization: { summaryFieldsAllowed: true } });
     if (unknownMeasure.m1.count !== null || unknownMeasure.m1.reasonCode !== 'availability_status_unknown' || unknownMeasure.m1.trueZero !== false) {
       p(`unknown availability must measure nothing (${JSON.stringify(unknownMeasure.m1)})`);
+    }
+    const lenientEmpty = measureLedgerPrinciples({
+      coreResult: { availability: { status: 'ok' }, ledger: { tree: {} } },
+      authorization: { summaryFieldsAllowed: true },
+      trueZeroEvidence: { auditor: 'x', recordRef: 'y' },
+    });
+    if (lenientEmpty.m1.trueZero !== false) {
+      p(`parse-lenient empty ledger must never be promoted to trueZero (${JSON.stringify(lenientEmpty.m1)})`);
     }
     let malformedThrew = false;
     try {
@@ -274,6 +305,7 @@ async function rehearseLedgerSemantics({ workDir }) {
     }
     if (!malformedThrew) p('malformed authorization (non-boolean summaryFieldsAllowed) must throw (rc-3)');
     cases.push({ case: 'semantic-probe-unknown-status-and-authorization', expectedClass: 'unmeasurable_unknown_availability', measure: { availabilityClass: unknownStatus, authorizationBasis: 'D01_GRANTED_DECLARED', m1: unknownMeasure.m1 } });
+    cases.push({ case: 'semantic-probe-malformed-entries', expectedClass: 'malformed_entries__semantic_review_required', measure: { availabilityClass: stringEntry, authorizationBasis: 'D01_GRANTED_DECLARED', m1: { trueZero: lenientEmpty.m1.trueZero } } });
   }
 
   return { problems, stateProblems, cases };

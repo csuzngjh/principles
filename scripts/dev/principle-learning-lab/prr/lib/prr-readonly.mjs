@@ -82,13 +82,39 @@ export function assertStateUnchanged(before, after, label = 'state') {
 
 // ── Ledger availability: four-way classification (never a silent zero) ──
 
-export const LEDGER_AVAILABILITY_CLASSES = ['ok', 'ok_but_empty_ledger', 'empty', 'unreadable', 'unmeasurable_unknown_availability'];
+export const LEDGER_AVAILABILITY_CLASSES = [
+  'ok',
+  'ok_but_empty_ledger',
+  'empty',
+  'unreadable',
+  'unmeasurable_unknown_availability',
+  'malformed_entries__semantic_review_required',
+];
+
+/**
+ * A principle entry is structurally usable only if it is a plain object with
+ * a string id AND a string status. The id+status pair matters because the
+ * core's lenient parser (parseHybridLedger) silently DROPS non-object entries
+ * and BACKFILLS id-less object entries with defaults ({id:<key>,
+ * derivedFromPainIds:[]}...) — those half-filled entries carry no `status`,
+ * so requiring it exposes them as malformed instead of letting them masquerade
+ * as a valid population that happens to count zero (owner review round 2).
+ */
+function isUsablePrincipleEntry(entry) {
+  return isPlainObject(entry)
+    && typeof entry.id === 'string' && entry.id !== ''
+    && typeof entry.status === 'string' && entry.status !== '';
+}
 
 /**
  * Map a readLedgerFileState() result to the measurement class. FAIL-LOUD:
  * only the core authority's explicitly known statuses are recognized; a
  * missing or unknown availability.status returns
  * 'unmeasurable_unknown_availability' and is NEVER inferred as ok/empty.
+ * A structurally 'ok' status with unparseable entries (e.g. tree.principles
+ * whose values are strings, arrays or id-less objects) returns
+ * 'malformed_entries__semantic_review_required' — the parsed key count alone
+ * never establishes a proven true zero (owner review round 2).
  * `coreResult` = { ledger, availability: { status } } from
  * @principles/core/principle-tree-ledger (the existing authority — reused,
  * never reimplemented here).
@@ -98,14 +124,22 @@ export function classifyLedgerAvailability(coreResult) {
   if (status === 'unreadable') return 'unreadable';
   if (status === 'empty') return 'empty';
   if (status !== 'ok') return 'unmeasurable_unknown_availability';
-  // status === 'ok': distinguish a real ledger from a lenient empty parse.
-  const ledger = coreResult?.ledger;
-  const principles = ledger?.tree?.principles;
-  const hasAnyPrinciple = principles != null && Object.keys(principles).length > 0;
-  if (hasAnyPrinciple) return 'ok';
-  // Syntactically valid but structurally empty ('[]', '"str"', '12345', 'null',
-  // or an object without tree.principles) — parseHybridLedger leniency (F-04).
-  return 'ok_but_empty_ledger';
+  // status === 'ok': inspect the ledger STRUCTURE before trusting any count.
+  const principles = coreResult?.ledger?.tree?.principles;
+  if (principles == null || typeof principles !== 'object' || Array.isArray(principles)) {
+    // Structurally invalid container — lenient core parsing landed us here
+    // (F-04); it is not a proven empty ledger and not a measurable one.
+    return 'ok_but_empty_ledger';
+  }
+  const entries = Object.values(principles);
+  if (entries.length === 0) return 'ok_but_empty_ledger';
+  // Any unusable entry poisons the whole ledger: silently dropping it (and
+  // reporting the remainder, possibly zero) is exactly the parse-leniency
+  // trap this module exists to prevent.
+  if (entries.some((entry) => !isUsablePrincipleEntry(entry))) {
+    return 'malformed_entries__semantic_review_required';
+  }
+  return 'ok';
 }
 
 function isPlainObject(v) {
@@ -146,15 +180,31 @@ export function measureLedgerPrinciples({ coreResult, authorization, trueZeroEvi
   const availabilityClass = classifyLedgerAvailability(coreResult);
   const base = { availabilityClass, eligibilityScope, authorizationBasis };
 
-  if (availabilityClass === 'unmeasurable_unknown_availability') {
-    // Fail-loud: an unrecognized availability status is never mapped onto a count.
+  if (availabilityClass === 'unmeasurable_unknown_availability' || availabilityClass === 'malformed_entries__semantic_review_required') {
+    // Fail-loud: an unrecognized availability status OR unparseable ledger
+    // entries are never mapped onto a count — a zero parsed out of a
+    // malformed ledger is not a proven true zero (owner review round 2).
+    const malformed = availabilityClass === 'malformed_entries__semantic_review_required';
     return {
       ...base,
-      m1: { count: null, trueZero: false, reasonCode: 'availability_status_unknown', note: `readLedgerFileState availability.status=${JSON.stringify(coreResult?.availability?.status ?? null)} is not a recognized authority state — measurement refused rather than inferred` },
-      m2: { count: null, reasonCode: 'availability_status_unknown' },
-      m3: { count: null, reasonCode: 'availability_status_unknown' },
-      m4: { count: 0, details: [], reasonCode: 'availability_status_unknown' },
-      m5: { unauthorizedCount: 0, unavailableCount: 0, unauthorizedField: authorizationBasis === 'D01_GRANTED_DECLARED' ? null : 'pain_structured_summary', reasons: ['availability_status_unknown'] },
+      m1: {
+        count: null,
+        trueZero: false,
+        trueZeroEvidence: null,
+        reasonCode: malformed ? 'malformed_ledger_entries__semantic_review_required' : 'availability_status_unknown',
+        note: malformed
+          ? 'ledger entries are structurally unusable (non-object or id-less entries) — the parsed population is NOT a proven empty ledger; semantic review required before any M1 report'
+          : `readLedgerFileState availability.status=${JSON.stringify(coreResult?.availability?.status ?? null)} is not a recognized authority state — measurement refused rather than inferred`,
+      },
+      m2: { count: null, reasonCode: malformed ? 'malformed_ledger_entries' : 'availability_status_unknown' },
+      m3: { count: null, reasonCode: malformed ? 'malformed_ledger_entries' : 'availability_status_unknown' },
+      m4: { count: 0, details: [], reasonCode: malformed ? 'malformed_ledger_entries' : 'availability_status_unknown' },
+      m5: {
+        unauthorizedCount: 0,
+        unavailableCount: 0,
+        unauthorizedField: summaryFieldsAllowed ? null : 'pain_structured_summary',
+        reasons: [malformed ? 'malformed_ledger_entries' : 'availability_status_unknown'],
+      },
     };
   }
   if (availabilityClass !== 'ok' && availabilityClass !== 'ok_but_empty_ledger') {
@@ -269,15 +319,17 @@ export function measureLedgerPrinciples({ coreResult, authorization, trueZeroEvi
     ...base,
     m1: {
       count: eligible.length,
-      // trueZero only with independent auditable evidence — a parsed zero
-      // (either class) is never auto-proclaimed a genuine empty population.
-      trueZero: eligible.length === 0 && trueZeroProven,
-      trueZeroEvidence: eligible.length === 0 && trueZeroProven ? trueZeroEvidence : null,
+      // trueZero ONLY for a structurally complete ledger (class 'ok' — every
+      // entry usable) with independent auditable evidence. ok_but_empty_ledger
+      // (parse-lenient emptiness that may have swallowed entries) can NEVER
+      // be promoted to a proven true zero, evidence or not.
+      trueZero: availabilityClass === 'ok' && eligible.length === 0 && trueZeroProven,
+      trueZeroEvidence: availabilityClass === 'ok' && eligible.length === 0 && trueZeroProven ? trueZeroEvidence : null,
       reasonCode: availabilityClass === 'ok_but_empty_ledger'
         ? 'ok_but_empty_ledger__semantic_review_required'
         : (eligible.length === 0 && !trueZeroProven ? 'zero_count_needs_independent_true_zero_evidence' : 'ok'),
       note: availabilityClass === 'ok_but_empty_ledger'
-        ? 'parse-lenient empty ledger: 0 is the parsed result, NOT a proven true zero — semantic review required before any report (F-04)'
+        ? 'parse-lenient empty ledger: 0 is the parsed result, NOT a proven true zero — the lenient parser may have swallowed entries, so semantic review is required before any report and no evidence parameter can promote it (F-04)'
         : (eligible.length === 0 && !trueZeroProven ? 'structurally valid ledger parses to 0 principles; a true-zero claim still requires independent auditable evidence' : null),
     },
     m2: {

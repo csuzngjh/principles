@@ -13,6 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import {
   buildDraftFreeze,
+  freezeItemsHash,
   FZ_IDS,
   preregBodyHash,
   validateFreezeForRealRun,
@@ -60,7 +61,15 @@ function fullyFrozenRecord(preregBody: any, overrides: Record<string, unknown> =
 }
 
 const FROZEN_COMMIT = 'a'.repeat(40);
-const verifyOk = () => ({ verified: true, approved: true, frozenCommitSha: FROZEN_COMMIT });
+// The trusted verifier holds the AUTHORITATIVE hash of the freeze record the
+// Owner actually approved — computed here from the record under test so the
+// happy path binds, and from a snapshot in the tamper tests so tampering fails.
+const verifyOkFor = (freeze: any) => () => ({
+  verified: true,
+  approved: true,
+  frozenCommitSha: FROZEN_COMMIT,
+  approvedFreezeItemsHash: freezeItemsHash(freeze),
+});
 
 describe('freeze record structure', () => {
   const preregBody = { studyId: 'test', note: 'body' };
@@ -103,7 +112,7 @@ describe('freeze real-run gate (fail-closed)', () => {
 
   it('a fully-frozen record with a trusted verifier passes', () => {
     const freeze = fullyFrozenRecord(preregBody);
-    const { problems, minPairsEligible, pairDenominator } = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifyOk, dataset });
+    const { problems, minPairsEligible, pairDenominator } = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifyOkFor(freeze), dataset });
     expect(problems).toEqual([]);
     // 13 tasks − 1 unauthorized C material = 12 complete A/C pairs.
     expect(pairDenominator).toEqual({ totalTasks: 13, completePairs: 12, excludedUnauthorizedTasks: 1 });
@@ -112,17 +121,17 @@ describe('freeze real-run gate (fail-closed)', () => {
 
   it('required inputs are mandatory: missing preregBody / dataset / verifier each refuse', () => {
     const freeze = fullyFrozenRecord(preregBody);
-    const noBody = validateFreezeForRealRun({ freeze, preregBody: undefined, verifyOwnerApproval: verifyOk, dataset });
+    const noBody = validateFreezeForRealRun({ freeze, preregBody: undefined, verifyOwnerApproval: verifyOkFor(freeze), dataset });
     expect(noBody.problems.some((p: string) => p.includes('preregBody missing'))).toBe(true);
     expect(noBody.minPairsEligible).toBeNull();
 
-    const noDataset = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifyOk, dataset: undefined });
+    const noDataset = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifyOkFor(freeze), dataset: undefined });
     expect(noDataset.problems.some((p: string) => p.includes('dataset missing'))).toBe(true);
 
     const noVerifier = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: undefined, dataset });
     expect(noVerifier.problems.some((p: string) => p.includes('verifier missing'))).toBe(true);
 
-    const noFreeze = validateFreezeForRealRun({ freeze: undefined, preregBody, verifyOwnerApproval: verifyOk, dataset });
+    const noFreeze = validateFreezeForRealRun({ freeze: undefined, preregBody, verifyOwnerApproval: verifyOkFor(freeze), dataset });
     expect(noFetchOk(noFreeze)).toBe(true);
   });
   function noFetchOk(result: any) {
@@ -133,11 +142,11 @@ describe('freeze real-run gate (fail-closed)', () => {
     const freeze = fullyFrozenRecord(preregBody);
     const fz01: any = freeze.items.find((i: any) => i.id === 'FZ-01');
     fz01.value = { datasetId: 'x' }; // no taskSetHash at all
-    const { problems } = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifyOk, dataset });
+    const { problems } = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifyOkFor(freeze), dataset });
     expect(problems.some((p: string) => p.includes('taskSetHash missing or not a 64-hex'))).toBe(true);
 
     fz01.value = { taskSetHash: 'not-a-hash' };
-    const { problems: p2 } = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifyOk, dataset });
+    const { problems: p2 } = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifyOkFor(freeze), dataset });
     expect(p2.some((p: string) => p.includes('taskSetHash missing or not a 64-hex'))).toBe(true);
   });
 
@@ -207,14 +216,14 @@ describe('freeze real-run gate (fail-closed)', () => {
     // minPairs = 13 → exceeds the 12 complete pairs → UNPROVEN, never padded.
     const fz11: any = freeze.items.find((i: any) => i.id === 'FZ-11');
     fz11.value = { minPairs: 13, derivationBasis: 'owner-frozen detectable difference' };
-    const short = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifyOk, dataset });
+    const short = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifyOkFor(freeze), dataset });
     expect(short.pairDenominator).toEqual({ totalTasks: 13, completePairs: 12, excludedUnauthorizedTasks: 1 });
     expect(short.minPairsEligible).toBe(false);
     expect(short.problems.some((p: string) => p.includes('UNPROVEN') && p.includes('12 of 13'))).toBe(true);
 
     // minPairs = 12 → passes the count comparison (all other gates still hold).
     fz11.value = { minPairs: 12, derivationBasis: 'owner-frozen detectable difference' };
-    const exact = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifyOk, dataset });
+    const exact = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifyOkFor(freeze), dataset });
     expect(exact.minPairsEligible).toBe(true);
     expect(exact.problems).toEqual([]);
   });
@@ -222,7 +231,7 @@ describe('freeze real-run gate (fail-closed)', () => {
   it('prereg body edited after freezing → INVALID_PROTOCOL hash mismatch', () => {
     const freeze = fullyFrozenRecord(preregBody);
     const edited = { ...preregBody, note: 'body (quietly amended after seeing results)' };
-    const { problems } = validateFreezeForRealRun({ freeze, preregBody: edited, verifyOwnerApproval: verifyOk, dataset });
+    const { problems } = validateFreezeForRealRun({ freeze, preregBody: edited, verifyOwnerApproval: verifyOkFor(freeze), dataset });
     expect(problems.some((p: string) => p.includes('INVALID_PROTOCOL'))).toBe(true);
   });
 
@@ -230,7 +239,7 @@ describe('freeze real-run gate (fail-closed)', () => {
     const freeze = fullyFrozenRecord(preregBody);
     const fz01: any = freeze.items.find((i: any) => i.id === 'FZ-01');
     fz01.value = { taskSetHash: '0'.repeat(64) };
-    const { problems } = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifyOk, dataset });
+    const { problems } = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifyOkFor(freeze), dataset });
     expect(problems.some((p: string) => p.includes('FZ-01'))).toBe(true);
   });
 
@@ -238,13 +247,101 @@ describe('freeze real-run gate (fail-closed)', () => {
     const freeze = fullyFrozenRecord(preregBody);
     const fz11: any = freeze.items.find((i: any) => i.id === 'FZ-11');
     fz11.value = { minPairs: 3 };
-    const { problems } = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifyOk, dataset });
+    const { problems } = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifyOkFor(freeze), dataset });
     expect(problems.some((p: string) => p.includes('derivationBasis'))).toBe(true);
   });
 
   it('preregBodyHash is stable and canonicalization-sensitive', () => {
     expect(preregBodyHash({ b: 1, a: 2 })).toBe(preregBodyHash({ a: 2, b: 1 }));
     expect(preregBodyHash({ a: 2, b: 1 })).not.toBe(preregBodyHash({ a: 2, b: 3 }));
+  });
+
+  // ── Owner review round 2 — P1-1: freeze values must bind to the approved record ──
+  it('tampering with ANY frozen value fails the content reconciliation (P1-1)', () => {
+    const freeze = fullyFrozenRecord(preregBody);
+    // The verifier holds the hash of the record AS APPROVED.
+    const approvedHash = freezeItemsHash(freeze);
+    const verifierOfApproved = () => ({
+      verified: true,
+      approved: true,
+      frozenCommitSha: FROZEN_COMMIT,
+      approvedFreezeItemsHash: approvedHash,
+    });
+
+    const cases: [string, (f: any) => void][] = [
+      ['FZ-11.minPairs', (f) => { const it = f.items.find((i: any) => i.id === 'FZ-11'); it.value = { minPairs: 1, derivationBasis: it.value.derivationBasis }; }],
+      ['FZ-06 budget', (f) => { const it = f.items.find((i: any) => i.id === 'FZ-06'); it.value = { totalCostCapUsd: 999999, note: 'quietly raised' }; }],
+      ['FZ-13 STOP conditions', (f) => { const it = f.items.find((i: any) => i.id === 'FZ-13'); it.value = { stopConditions: ['never stop'] }; }],
+      ['FZ-01 taskSetHash', (f) => { const it = f.items.find((i: any) => i.id === 'FZ-01'); it.value.taskSetHash = 'f'.repeat(64); }],
+      ['an ownerApprovalRef', (f) => { f.items.find((i: any) => i.id === 'FZ-02').ownerApprovalRef = 'some-other-ref'; }],
+    ];
+    for (const [label, mutate] of cases) {
+      const tampered = fullyFrozenRecord(preregBody);
+      mutate(tampered);
+      const { problems } = validateFreezeForRealRun({ freeze: tampered, preregBody, verifyOwnerApproval: verifierOfApproved, dataset });
+      expect(problems.some((p: string) => p.includes('freeze content reconciliation FAILED')), label).toBe(true);
+      expect(problems.some((p: string) => p.includes('INVALID_PROTOCOL')), label).toBe(true);
+    }
+  });
+
+  it('approval without an itemsHash binding refuses (P1-1 completeness)', () => {
+    const freeze = fullyFrozenRecord(preregBody);
+    const { problems } = validateFreezeForRealRun({
+      freeze,
+      preregBody,
+      verifyOwnerApproval: () => ({ verified: true, approved: true, frozenCommitSha: FROZEN_COMMIT }),
+      dataset,
+    });
+    expect(problems.some((p: string) => p.includes('no approvedFreezeItemsHash'))).toBe(true);
+  });
+
+  it('a running commit differing from the approved frozen commit refuses (P1-1)', () => {
+    const freeze = fullyFrozenRecord(preregBody);
+    const mismatched = validateFreezeForRealRun({
+      freeze, preregBody, verifyOwnerApproval: verifyOkFor(freeze), dataset,
+      runningCommitSha: 'c'.repeat(40),
+    });
+    expect(mismatched.problems.some((p: string) => p.includes('running commit') && p.includes('differs from the Owner-approved frozen commit'))).toBe(true);
+
+    const matching = validateFreezeForRealRun({
+      freeze, preregBody, verifyOwnerApproval: verifyOkFor(freeze), dataset,
+      runningCommitSha: FROZEN_COMMIT,
+    });
+    expect(matching.problems).toEqual([]);
+  });
+
+  it('freezeItemsHash is deterministic and changes with any item', () => {
+    const a = fullyFrozenRecord(preregBody);
+    const b = fullyFrozenRecord(preregBody);
+    expect(freezeItemsHash(a)).toBe(freezeItemsHash(b));
+    const c = fullyFrozenRecord(preregBody);
+    c.items.find((i: any) => i.id === 'FZ-11').value.minPairs = 99;
+    expect(freezeItemsHash(c)).not.toBe(freezeItemsHash(a));
+  });
+
+  // ── Owner review round 2 — P1-2: ill-formed FZ-11 value must not skip the gate ──
+  it('FZ-11 value of any non-contract type refuses instead of skipping the sample gate (P1-2)', () => {
+    const variants: [string, unknown][] = [
+      ['string value', 'frozen'],
+      ['empty array value', []],
+      ['null value', null],
+      ['object without minPairs', { derivationBasis: 'some basis' }],
+      ['minPairs zero', { minPairs: 0, derivationBasis: 'basis' }],
+      ['minPairs negative', { minPairs: -2, derivationBasis: 'basis' }],
+      ['minPairs non-integer', { minPairs: 2.5, derivationBasis: 'basis' }],
+      ['minPairs numeric string', { minPairs: '12', derivationBasis: 'basis' }],
+      ['missing derivationBasis', { minPairs: 12 }],
+      ['empty derivationBasis', { minPairs: 12, derivationBasis: '   ' }],
+    ];
+    for (const [label, value] of variants) {
+      const freeze = fullyFrozenRecord(preregBody);
+      const fz11: any = freeze.items.find((i: any) => i.id === 'FZ-11');
+      fz11.value = value as never;
+      const { problems, minPairsEligible } = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifyOkFor(freeze), dataset });
+      expect(problems.length, label).toBeGreaterThan(0);
+      expect(problems.join('; '), label).toMatch(/FZ-11/);
+      expect(minPairsEligible, label).toBeNull();
+    }
   });
 });
 
@@ -256,6 +353,58 @@ describe('ledger availability four-way classification', () => {
 
   it('ok with real principles', () => {
     expect(classifyLedgerAvailability(ledgerWithPrinciples)).toBe('ok');
+  });
+
+  // ── Owner review round 2 — P1-3: malformed entries are never a proven zero ──
+  it('unusable principle entries make the ledger malformed, never ok (P1-3)', () => {
+    const ok = { availability: { status: 'ok' } };
+    const ledger = (principles: unknown) => ({ availability: { status: 'ok' }, ledger: { tree: { principles: principles as never } } });
+    expect(classifyLedgerAvailability(ledger({ p1: 'garbage-string-entry' }))).toBe('malformed_entries__semantic_review_required');
+    expect(classifyLedgerAvailability(ledger({ p1: ['array-entry'] }))).toBe('malformed_entries__semantic_review_required');
+    expect(classifyLedgerAvailability(ledger({ p1: 42 }))).toBe('malformed_entries__semantic_review_required');
+    expect(classifyLedgerAvailability(ledger({ p1: null }))).toBe('malformed_entries__semantic_review_required');
+    expect(classifyLedgerAvailability(ledger({ p1: { title: 'object without id' } }))).toBe('malformed_entries__semantic_review_required');
+    // Core's lenient parser backfills id-less entries WITHOUT a status — the
+    // half-filled result is malformed, not a valid population.
+    expect(classifyLedgerAvailability(ledger({ p1: { id: 'p1' } }))).toBe('malformed_entries__semantic_review_required');
+    // Mixed valid + invalid poisons the whole ledger (no silent filtering).
+    expect(classifyLedgerAvailability(ledger({ p1: { id: 'p1', status: 'active' }, p2: 'garbage' }))).toBe('malformed_entries__semantic_review_required');
+    // Non-object principles container stays a parse-leniency case.
+    expect(classifyLedgerAvailability({ ...ok, ledger: { tree: { principles: [] } } })).toBe('ok_but_empty_ledger');
+  });
+
+  it('a malformed ledger measures NOTHING — even supplied evidence cannot produce trueZero (P1-3)', () => {
+    const malformed = { availability: { status: 'ok' }, ledger: { tree: { principles: { p1: 'garbage' } } } };
+    const m = measureLedgerPrinciples({
+      coreResult: malformed,
+      authorization: { summaryFieldsAllowed: true },
+      trueZeroEvidence: { auditor: 'independent-audit', recordRef: 'audit-record-1' },
+    });
+    expect(m.availabilityClass).toBe('malformed_entries__semantic_review_required');
+    expect(m.m1).toMatchObject({ count: null, trueZero: false, reasonCode: 'malformed_ledger_entries__semantic_review_required' });
+    expect(m.m2.count).toBeNull();
+    expect(m.m3.count).toBeNull();
+  });
+
+  it('a parse-lenient empty ledger can NEVER be promoted to trueZero, evidence or not (P1-3)', () => {
+    const lenient = { availability: { status: 'ok' }, ledger: { tree: {} } };
+    const m = measureLedgerPrinciples({
+      coreResult: lenient,
+      authorization: { summaryFieldsAllowed: true },
+      trueZeroEvidence: { auditor: 'independent-audit', recordRef: 'audit-record-1' },
+    });
+    expect(m.m1).toMatchObject({ count: 0, trueZero: false, reasonCode: 'ok_but_empty_ledger__semantic_review_required' });
+    // The only reachable trueZero path: structurally complete ledger, all
+    // entries usable, zero eligible, PLUS independent evidence.
+    const completeButInactive = { availability: { status: 'ok' }, ledger: { tree: { principles: { p1: { id: 'p1', status: 'deactivated' } } } } };
+    const proven = measureLedgerPrinciples({
+      coreResult: completeButInactive,
+      authorization: { summaryFieldsAllowed: true },
+      trueZeroEvidence: { auditor: 'independent-audit', recordRef: 'audit-record-1' },
+    });
+    expect(proven.m1.trueZero).toBe(true);
+    const unproven = measureLedgerPrinciples({ coreResult: completeButInactive, authorization: { summaryFieldsAllowed: true } });
+    expect(unproven.m1.trueZero).toBe(false);
   });
 
   it('ok_but_empty_ledger for parse-lenient structural empties (F-04)', () => {

@@ -12,6 +12,8 @@
 | Gate B / Gate C | BLOCKED / NOT_GRANTED（不变） |
 
 > **Owner Review 修复轮（2026-10-22，PR #2115 审查意见）**：首轮交付（head `ccaf96552`）经 Owner 审查发现四类缺陷——真实运行门的必需输入与验证器形态漏洞、FZ-11 配对分母虚高、`empty` 账本状态被误读为真零、未知成本被 `?? 0` 当零。全部修复见 **§6 修复轮记录**，回归由 55 项扩至 64 项。
+>
+> **Owner Review 第二轮修复（2026-10-23，head `a6f68c03d` 审查意见）**：经核实的三项 P1——冻结取值未与 Owner 批准内容对账（只比两个 SHA 字符串）、FZ-11 非法值形态可跳过样本量门、畸形账本条目可被报为已证明真零。全部修复见 **§7 第二轮修复记录**，回归由 64 项扩至 72 项。其中第三项在真实 core 读取下核实出比评审描述更深的一层：core 宽松解析会**静默丢弃**字符串条目并给缺 id 的对象条目**回填默认值（无 status）**，修复以 id+status 双字段契约暴露该半成品形态。
 
 ---
 
@@ -21,7 +23,7 @@
 
 **2. Before**：`principle-learning-lab` 只有 PLE-PILOT-01 世界（24 arms × 5 opportunities 的策略对比）。它证明流程可运行，但与 PRR 的 A/C 对照无任务交集；`validatePrereg()` 只认 `preregistration.v0.1-draft`；无逐任务配对差值视图；无负迁移独立维度；全仓 grep `negativeTransfer` 零命中（B0 G2 证据）。
 
-**3. After**：`scripts/dev/principle-learning-lab/prr/` 新增 PRR 专属离线 A/C 运行器（一条命令跑通 A/C 投递→裁定→配对→冻结门→只读语义→预演门），64 项回归测试全绿（首轮 55 + 修复轮 9），全量 scripts 套件 958/958 全绿，预演门 PASS（studyHash 确定性）。
+**3. After**：`scripts/dev/principle-learning-lab/prr/` 新增 PRR 专属离线 A/C 运行器（一条命令跑通 A/C 投递→裁定→配对→冻结门→只读语义→预演门），72 项回归测试全绿（55 → 64 → 72 三轮递进），全量 scripts 套件 966/966 全绿，预演门 PASS（studyHash 确定性）。
 
 **4. Existing mechanism reused**：同通道投递 `deliverPayload()`（g2.mjs）、跨组污染检测 `checkNoCrossContamination()`/`verifyPromptIsolation()`、外部记忆指纹 `buildMemoryManifest()`、canonical-JSON 哈希（fixture.mjs）、五值裁定词汇与机械裁定纪律（evaluator.mjs 范式）、预注册"拒绝伪造批准"策略（prereg.mjs 范式）、`readLedgerFileState`（core 既有权威，动态导入复用，未重实现）、better-sqlite3 `{readonly:true, fileMustExist:true}` 只读打开模式（workspace-behavior-evidence.ts 同族合同）。
 
@@ -40,7 +42,7 @@ New external/network capability:    NO  （零网络；fail-closed 冻结门拒�
 
 **6. Design reason**：B0 明令"用原有测试工具/评审，不建设实验平台"。所有新代码是既有 lab 内的数据文件 + 纯函数模块；身份/账本读取复用 core 权威；唯一的"门"（冻结校验）从 `validatePrereg` 的拒绝伪造策略派生，且比它更严（fail-closed 到条目级）。
 
-**7. Verification**：见 §3（64/64 + 958/958 + 预演门 PASS + 确定性双跑字节同一；修复细节见 §6）。
+**7. Verification**：见 §3（72/72 + 966/966 + 预演门 PASS + 确定性双跑字节同一；修复细节见 §6）。
 
 **8. Risk**：合成行为脚本的"任务设计区分度"只代表夹具质量，不代表真实模型区分度；M1~M5 离线判定逻辑与真实 PainChainReadModel/任务种子权威的接线是 B1 授权后工作（当前以 deps 注入点预留）；研究夹具目录（B0 G6）仍未决策。
 
@@ -71,8 +73,8 @@ npm run dev:prr-rehearsal
 [prr-lab] design-check battery: 13/13 PASS
 [prr-lab] readonly semantics: PASS
 [prr-lab] read-only state unchanged: PASS
-[prr-lab] studyHash=2c61181b039f7a3091d190b56ec2dea61248a83b2430fb893d9ef287d2dfe184
-[prr-lab] freeze real-run gate: REFUSED (3 problem(s) — draft cannot authorize; 含修复轮新增的 FZ-01 taskSetHash 强制项)
+[prr-lab] studyHash=525d9a40e22983f083c6ada59fd081945f496da73648608b4d7cb46837c78e08
+[prr-lab] freeze real-run gate: REFUSED (4 problem(s) — draft cannot authorize; 含两轮修复新增的 FZ-01 强制项与 itemsHash 绑定项)
 [prr-lab] rehearsal gate: PASS
 ```
 
@@ -151,9 +153,9 @@ npm run dev:prr-rehearsal
 
 | 项 | 结果 |
 |---|---|
-| 新增 PRR 回归 | **64/64 PASS**（prr-ac-lab 36 + prr-freeze-readonly 28；首轮 55 项全保留，修复轮新增 9 项拒绝/边界场景） |
-| 全量 scripts 套件 | **958/958 PASS**（50 文件） |
-| 离线预演门 | PASS（studyHash `2c61181b…dfe184`；冻结门对 DRAFT 拒绝问题数 2→3，新增的正是 FZ-01 taskSetHash 强制项） |
+| 新增 PRR 回归 | **72/72 PASS**（prr-ac-lab 36 + prr-freeze-readonly 36；55→64（一轮修复）→72（二轮修复），全部历史用例保留） |
+| 全量 scripts 套件 | **966/966 PASS**（50 文件） |
+| 离线预演门 | PASS（studyHash `525d9a40…c78e08`；冻结门对 DRAFT 拒绝问题数逐轮增至 4——每轮新增的正是当轮的强制绑定项） |
 | 确定性 | 双跑 `rehearsal-result.json` 字节同一（cmp 验证） |
 | lint | 新增/修改 lab 文件 0 error |
 | 生产路径影响 | 零（无生产源码改动） |
@@ -262,3 +264,61 @@ npm run dev:prr-rehearsal
 - 其余 Owner 待决清单（§4）不变。
 
 **修复轮后状态收口：离线能力 GO（缺陷已修复并复验）；真实 M1～M5 NOT_MEASURED；真实 A/C NOT_RUN；Gate B BLOCKED；Gate C NOT_GRANTED。**
+
+---
+
+## 7. Owner Review 第二轮修复记录（2026-10-23，head `a6f68c03d` 审查意见）
+
+三项 P1 逐项核实**全部属实**后修复。每项均有新增回归测试实际触发对应拒绝/边界分支。
+
+### 7.1 P1-1：冻结取值未绑定 Owner 批准的内容（prr-freeze.mjs）
+
+| 项 | 修复前 | 修复后 |
+|---|---|---|
+| 内容对账 | 门只比较 `evidence.frozenCommitSha === freeze.ownerApproval.frozenCommitSha` 两个输入字段——篡改 items 任何取值（如 FZ-11.minPairs 3→1）后保留 decisionRef 与 SHA 即可通过 | 新增 `freezeItemsHash(freeze)`（对**全部** items 的 canonical-JSON SHA-256）；验证器证据必须携带 `approvedFreezeItemsHash`（Owner 批准记录绑定的冻结内容哈希）并与提交记录的哈希**精确一致**。篡改 FZ-11.minPairs / FZ-06 预算 / FZ-13 STOP / FZ-01 哈希 / 任一 ownerApprovalRef → `freeze content reconciliation FAILED … INVALID_PROTOCOL`，重开 studyId |
+| 运行提交核对 | 无 | 新增可选输入 `runningCommitSha`：调用方声明实际执行所依据的提交时，必须与 `evidence.frozenCommitSha`（获批代码状态）一致，否则拒绝；未提供时不改变其余绑定 |
+| 缺失绑定 | — | 验证器证据缺 `approvedFreezeItemsHash`（或格式非 64-hex）即拒绝——批准必须同时绑定 commit 与冻结内容 |
+
+新增测试：五类篡改场景（保留原批准哈希）全部断言 `reconciliation FAILED` + `INVALID_PROTOCOL`；缺 itemsHash 绑定拒绝；`runningCommitSha` 不一致拒绝/一致通过；`freezeItemsHash` 确定性与敏感性。
+
+### 7.2 P1-2：FZ-11 非法值形态跳过样本量门（prr-freeze.mjs）
+
+| 项 | 修复前 | 修复后 |
+|---|---|---|
+| 形状守卫 | `if (fz11 && isPlainObject(fz11.value))` ——value 为字符串/数组时整个分支静默跳过，`minPairsEligible` 保持 null 且无任何问题项 | 守卫改为 `if (fz11)`：value 非契约对象 → 明确拒绝（`the minimum-pairs gate cannot be skipped by replacing the value with another type`）；进入对象分支后 minPairs/derivationBasis 各自校验，且**数量比较仅在两字段均有效时执行**（部分有效不再产出样本量判定） |
+
+新增测试：十种非法形态（字符串/空数组/null/缺 minPairs/minPairs=0/负数/2.5/数字字符串/缺 derivationBasis/空白 derivationBasis）逐一断言真实门禁输出含 FZ-11 拒绝且 `minPairsEligible === null`。
+
+### 7.3 P1-3：畸形账本条目被报为已证明真零（prr-readonly.mjs）
+
+**核实补充**：评审描述的场景在真实 core 读取（`readLedgerFileState`）下表现更隐蔽——core 宽松解析（parseHybridLedger）会**静默丢弃**非对象条目（`{p1:"garbage"}` 归空），并给缺 id 的对象条目**回填默认值**（`{title:…}` → `{id:'p2', derivedFromPainIds:[], …}` 但**无 status**）。因此畸形在 core 输出层的可见形态是"半成品条目 + 合法空集"。
+
+| 项 | 修复前 | 修复后 |
+|---|---|---|
+| 条目契约 | `classifyLedgerAvailability` 只查 `Object.keys(principles).length > 0`；`{p1:"garbage"}` → 分类 ok；混合畸形经 measure 过滤后 `count:0`，提供 evidence 时 `trueZero:true, reasonCode:'ok'` | 合法条目契约 = plain object + **非空字符串 id + 非空字符串 status**（status 双字段暴露 core 回填的半成品）。任一不可用条目毒化整个账本 → 新类 `malformed_entries__semantic_review_required`（不静默过滤残留计数）；measure 对该类输出 `m1/m2/m3.count=null, trueZero=false, reasonCode='malformed_ledger_entries__semantic_review_required'` |
+| 宽松归空提升 | `ok_but_empty_ledger` 在提供 evidence 时 `trueZero` 可为 true | `trueZero` 仅在**结构完整分类（ok，条目全合法）**+ 零 eligible + 独立证据三条件同时成立时可为 true；`ok_but_empty_ledger` 恒 false（宽松解析正是可能吞数据的通道，evidence 参数不可对冲解析层不确定性），note 明示理由 |
+| 类枚举 | 五值 | 六值（新增 `malformed_entries__semantic_review_required`） |
+
+新增测试：字符串/数组/数字/null/缺 id/缺 status/混合畸形/非对象容器八场景分类断言；畸形账本 measure 全 null + trueZero false（即使提供 evidence）；宽松归空 + evidence 仍 false；唯一可达 trueZero 路径（完整账本 + 全非 active + 证据）正反两控。CLI 预演新增 `ledger-malformed-entries`（经**真实 core 读取**验证混合畸形 → 不可测）与 `ledger-lenient-empty-cannot-be-true-zero` 用例，并在语义探针段加入直连探针。
+
+### 7.4 第二轮修复验证证据
+
+```text
+cd scripts && npx vitest run __tests__/prr-ac-lab.test.ts __tests__/prr-freeze-readonly.test.ts
+  → Test Files 2 passed, Tests 72 passed (72)
+npm run test:scripts
+  → Test Files 50 passed, Tests 966 passed (966)
+npm run dev:prr-rehearsal
+  → rehearsal gate: PASS（studyHash=525d9a40e22983f083c6ada59fd081945f496da73648608b4d7cb46837c78e08）
+  → freeze real-run gate: REFUSED（4 problem(s)——DRAFT + 15 项未冻结 + FZ-01 强制 + itemsHash 绑定缺失）
+双跑 cmp rehearsal-result.json → 字节同一；lint 0 error
+```
+
+### 7.5 第二轮剩余限制（如实保留）
+
+- `freezeItemsHash` 的权威副本由受信验证器持有——若验证器本身被诱导为篡改后的记录重新计算哈希，门无法察觉（受信解析器是 FZ-15 的信任根，其实现归属是 O-05 裁决范围）；
+- `runningCommitSha` 为可选输入：不提供时门不做运行提交核对（离线预演无此绑定需求；真实实验的提供义务须在 FZ-12/FZ-15 冻结时明确）；
+- core 宽松解析丢弃字符串条目的行为发生在 core 读取层内部，本模块只能对 core 输出防御（缺 status 回填已暴露）；从源头收紧 parseHybridLedger 属 core 生产代码变更，超出本 PR 边界；
+- 其余 Owner 待决清单（§4）与 §6.6 限制不变。
+
+**第二轮修复后状态收口：离线能力 GO（三项 P1 已修复并复验）；真实 M1～M5 NOT_MEASURED；真实 A/C NOT_RUN；Gate B BLOCKED；Gate C NOT_GRANTED。**
