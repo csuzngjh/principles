@@ -50,6 +50,7 @@
     "dev:closure-lab": "node scripts/dev/pipeline-closure-lab/generate.mjs",
     "dev:evolution-evidence": "node scripts/dev/pipeline-evolution/collect-evidence.mjs",
     "dev:pl-pilot": "node scripts/dev/principle-learning-lab/run-pilot.mjs",
+    "dev:prr-rehearsal": "node scripts/dev/principle-learning-lab/prr/run-prr-rehearsal.mjs --dataset .tmp/prr-ac-fixtures --out .tmp/prr-ac-rehearsal",
     "dev:evolution-init": "node scripts/dev/pipeline-evolution/init-experiment.mjs",
     "test:scripts": "cd scripts && vitest run",
     "test:guard-contracts": "npx vitest run tests/sync-plugin-installation-truth.test.js && node --test scripts/dev/workbuddy-probe/lib/console-owner-loop-assertions.regression.mjs",
