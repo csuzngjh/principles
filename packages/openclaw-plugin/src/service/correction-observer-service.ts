@@ -85,6 +85,10 @@ export async function batchConfirmPendingSignals(
 
     const classifier = createSignalLlmClassifierFromConfig(wctx, logger);
     if (!classifier) {
+        // AUDIT-P2-02: 有积压但 classifier 不可用 → 可见跳过计数（doctor 呈现
+        // degraded：队列站桩 + 分类器配置失效）。不 bump attempts——通道死≠候选
+        // 失败，记录原样保留等待通道恢复。
+        updateSignalHealth(wctx.stateDir, (s) => { s.stage2BatchSkipped += 1; });
         logger?.debug?.('[PD:CorrectionObserver] batch confirm skipped: signal classifier unavailable');
         return 0;
     }
@@ -342,24 +346,48 @@ export const CorrectionObserverService: CorrectionObserverServiceShape = {
             return;
         }
 
-        // PRI-307: Check observer config before starting
+        // PRI-307 + AUDIT-P2-04: 本周期承载两个能力，各自的门是独立的：
+        //  ① signal_confirmations 批量确认 —— 归属 signal_collector 能力域
+        //     （队列的生产者与确认用的 classifier 都解析自 signal_collector 配置）；
+        //  ② 关键词优化 dispatch —— 仍只由 correction_observer 门控
+        //     （resolveCorrectionObserver 在其 flag 关闭时每轮返回 null，
+        //      周期对优化部分退化为 no-op）。
+        // 解耦消除审计发现的 permanent-pending 失效模式：correction_observer
+        // 关闭（默认）而 signal_collector 开启（默认）时，队列仍被每周期消费。
+        // 不会静默开启周期性词库优化——那仍需要 correction_observer=true。
         const observerConfig = resolveObserverConfig(
             workspaceDir,
             'correction_observer',
             'correctionObserver',
             logger,
         );
+        const consumerConfig = resolveObserverConfig(
+            workspaceDir,
+            'signal_collector',
+            'signalCollector',
+            logger,
+        );
+        const confirmConsumerEnabled = consumerConfig.enabled;
 
-        if (!observerConfig.enabled) {
-            // Disabled → no start, no noisy cycling. Single structured log.
+        if (!observerConfig.enabled && !confirmConsumerEnabled) {
+            // 两者皆关 → 不启动周期（结构化单条日志，不刷屏）。
+            logger?.info?.(
+                `[PD:CorrectionObserver] correction_observer disabled and signal_collector disabled — periodic cycle (batch confirmation + optimization) not started. ${observerConfig.nextAction}`,
+            );
+            return;
+        }
+
+        if (observerConfig.enabled && observerConfig.readiness === 'needs_setup' && !confirmConsumerEnabled) {
+            // 旧行为保留：observer 启用但未配置且消费者无门可依 → 不启动。
             logger?.info?.(`[PD:CorrectionObserver] ${observerConfig.reason}. ${observerConfig.nextAction}`);
             return;
         }
 
-        if (observerConfig.readiness === 'needs_setup') {
-            // Enabled but missing setup → structured needs_setup, no noisy cycling
-            logger?.info?.(`[PD:CorrectionObserver] ${observerConfig.reason}. ${observerConfig.nextAction}`);
-            return;
+        const observerModeActive = observerConfig.enabled && observerConfig.readiness !== 'needs_setup';
+        if (!observerModeActive) {
+            logger?.info?.(
+                `[PD:CorrectionObserver] confirmation-consumer-only mode: batch-confirming persisted signal_confirmations every cycle; keyword optimization observer is ${observerConfig.enabled ? 'needs_setup' : 'disabled'}. ${observerConfig.nextAction}`,
+            );
         }
 
         startedWorkspaces.add(workspaceDir);
