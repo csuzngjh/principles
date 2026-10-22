@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.295.1
+
+### Patch Changes
+
+- c754ef5: Align RuleCode intent verification with the original Owner-attributed diagnosis evidence supplied to Scribe, while preserving lineage checks and trusted-approval requirements.
+
 ## 1.295.0
 
 ### Minor Changes
