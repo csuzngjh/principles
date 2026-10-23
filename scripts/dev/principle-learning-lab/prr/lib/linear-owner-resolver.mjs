@@ -115,7 +115,7 @@ async function fetchApprovalComments(client) {
     query($id: String!) {
       issue(id: $id) {
         creator { id name active }
-        comments(first: 100, orderBy: createdAtDesc) {
+        comments(first: 100, orderBy: createdAt) {
           nodes {
             body
             createdAt
