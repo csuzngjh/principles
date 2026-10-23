@@ -1,5 +1,6 @@
 import type { ApiResponse } from "../types.js";
 import type { OwnerDecisionsData, OwnerResolutionResultData, OwnerDecisionInboxData, OwnerDecisionLibraryData } from "./utils/validators.js";
+import type { DesignGateAction, DesignGateDecision, DesignGateDeclaration, DesignGateScope } from "@principles/core/runtime-v2/internalization/design-gate-facts";
 import { clearStoredToken, loadStoredToken, storeToken } from "./utils/token-storage.js";
 import {
   validateErrorResponse,
@@ -1389,6 +1390,144 @@ async function dispatchFollowUp(
     validateFollowUpResponse,
   );
 }
+
+// ── Local Codex Design Gate declarations ────────────────────────────────────
+
+export interface DesignGateObservedSession {
+  projectWorkspacePath: string;
+  hostSessionId: string;
+}
+
+export interface DesignGateDeclarationInput {
+  projectWorkspacePath: string;
+  hostSessionId: string;
+  specPath: string;
+  scope: DesignGateScope;
+  decision: DesignGateDecision;
+}
+
+function isDesignGateRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function validateDesignGateSessions(value: unknown): { sessions: DesignGateObservedSession[] } | null {
+  if (!isDesignGateRecord(value) || !Array.isArray(value.sessions)) return null;
+  const sessions: DesignGateObservedSession[] = [];
+  for (const entry of value.sessions) {
+    if (!isDesignGateRecord(entry)
+      || typeof entry.projectWorkspacePath !== "string" || entry.projectWorkspacePath.trim() === ""
+      || typeof entry.hostSessionId !== "string" || entry.hostSessionId.trim() === "") return null;
+    sessions.push({ projectWorkspacePath: entry.projectWorkspacePath, hostSessionId: entry.hostSessionId });
+  }
+  return { sessions };
+}
+
+function isDesignGateAction(value: unknown): value is DesignGateAction {
+  return value === "read" || value === "write" || value === "execute";
+}
+
+function isDesignGateDecisionValue(value: unknown): value is DesignGateDecision {
+  return value === "approved" || value === "not_approved" || value === "not_required";
+}
+
+function isNonEmptyDesignGateString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function isDesignGateStringArray(value: unknown): value is string[] {
+  if (!Array.isArray(value)) return false;
+  for (let index = 0; index < value.length; index += 1) {
+    if (!Object.hasOwn(value, index) || !isNonEmptyDesignGateString(value[index])) return false;
+  }
+  return true;
+}
+
+/**
+ * Field-by-field mirror of the server declaration contract (rc-1 style) —
+ * the browser bundle never runtime-imports the Node-oriented core barrel, so
+ * the wire format is re-validated locally; the server remains the authority.
+ */
+function isDesignGateDeclarationValue(value: unknown): value is DesignGateDeclaration {
+  if (!isDesignGateRecord(value)) return false;
+  if (!Object.hasOwn(value, "sourceRef") || !isNonEmptyDesignGateString(value.sourceRef)) return false;
+  if (!isNonEmptyDesignGateString(value.governanceWorkspacePath)) return false;
+  if (!isNonEmptyDesignGateString(value.projectWorkspacePath)) return false;
+  if (!isNonEmptyDesignGateString(value.hostSessionId)) return false;
+  if (!isNonEmptyDesignGateString(value.taskRef)) return false;
+  if (!isNonEmptyDesignGateString(value.specPath) || !isNonEmptyDesignGateString(value.specDigest)) return false;
+  if (!isDesignGateRecord(value.scope)) return false;
+  if (!Object.hasOwn(value.scope, "paths") || !Object.hasOwn(value.scope, "actions")) return false;
+  if (!isDesignGateStringArray(value.scope.paths) || value.scope.paths.length === 0) return false;
+  if (!Array.isArray(value.scope.actions) || value.scope.actions.length === 0) return false;
+  for (let index = 0; index < value.scope.actions.length; index += 1) {
+    if (!Object.hasOwn(value.scope.actions, index) || !isDesignGateAction(value.scope.actions[index])) return false;
+  }
+  if (!isDesignGateDecisionValue(value.decision)) return false;
+  if (typeof value.revision !== "number" || !Number.isSafeInteger(value.revision) || value.revision < 1) return false;
+  if (typeof value.revoked !== "boolean") return false;
+  if (!isDesignGateRecord(value.actor)
+    || !Object.hasOwn(value.actor, "ownerId") || !Object.hasOwn(value.actor, "credentialId")
+    || !isNonEmptyDesignGateString(value.actor.ownerId) || !isNonEmptyDesignGateString(value.actor.credentialId)) return false;
+  if (!isNonEmptyDesignGateString(value.decidedAt)) return false;
+  return true;
+}
+
+function validateDesignGateDeclarationEnvelope(value: unknown): { declaration: DesignGateDeclaration | null } | null {
+  if (!isDesignGateRecord(value) || !Object.hasOwn(value, "declaration")) return null;
+  if (value.declaration === null) return { declaration: null };
+  return isDesignGateDeclarationValue(value.declaration) ? { declaration: value.declaration } : null;
+}
+
+const designGateBasePath = "/api/v1/governance/design-gate";
+
+async function fetchDesignGateSessions(): Promise<ApiResponse<{ sessions: DesignGateObservedSession[] }>> {
+  return request(`${designGateBasePath}/sessions`, undefined, validateDesignGateSessions);
+}
+
+async function fetchDesignGateDeclaration(
+  projectWorkspacePath: string,
+  hostSessionId: string,
+): Promise<ApiResponse<{ declaration: DesignGateDeclaration | null }>> {
+  const query = new URLSearchParams({ projectWorkspacePath, hostSessionId });
+  return request(
+    `${designGateBasePath}/declaration?${query.toString()}`,
+    undefined,
+    validateDesignGateDeclarationEnvelope,
+  );
+}
+
+async function createDesignGateDeclaration(
+  input: DesignGateDeclarationInput,
+): Promise<ApiResponse<{ declaration: DesignGateDeclaration | null }>> {
+  return request(
+    `${designGateBasePath}/declarations`,
+    { method: "POST", body: JSON.stringify(input) },
+    validateDesignGateDeclarationEnvelope,
+  );
+}
+
+async function updateDesignGateDecision(
+  sourceRef: string,
+  expectedRevision: number,
+  decision: DesignGateDecision,
+): Promise<ApiResponse<{ declaration: DesignGateDeclaration | null }>> {
+  return request(
+    `${designGateBasePath}/declarations/${encodeURIComponent(sourceRef)}/decision`,
+    { method: "POST", body: JSON.stringify({ expectedRevision, decision }) },
+    validateDesignGateDeclarationEnvelope,
+  );
+}
+
+async function revokeDesignGateDeclaration(
+  sourceRef: string,
+  expectedRevision: number,
+): Promise<ApiResponse<{ declaration: DesignGateDeclaration | null }>> {
+  return request(
+    `${designGateBasePath}/declarations/${encodeURIComponent(sourceRef)}/revoke`,
+    { method: "POST", body: JSON.stringify({ expectedRevision }) },
+    validateDesignGateDeclarationEnvelope,
+  );
+}
 // ── Exports ───────────────────────────────────────────────────────────────────
 
 export {
@@ -1469,7 +1608,14 @@ export {
   listIntentDecisionsByTaskId,
   fetchIntentDecisionSummary,
   dispatchFollowUp,
+  fetchDesignGateSessions,
+  fetchDesignGateDeclaration,
+  createDesignGateDeclaration,
+  updateDesignGateDecision,
+  revokeDesignGateDeclaration,
 };
+
+export type { DesignGateAction, DesignGateDecision, DesignGateDeclaration, DesignGateScope };
 
 // ── Type re-exports (consumer-facing aliases) ─────────────────────────────────
 // These types are imported by page components. They are defined in validators.ts

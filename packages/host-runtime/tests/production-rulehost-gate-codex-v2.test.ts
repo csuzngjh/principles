@@ -78,7 +78,7 @@ function baseArtifactRow(contentJson: string): PiArtifactRow {
 
 interface SeedOptions {
   action: 'code_tool_hook_live_activate' | 'code_tool_hook_shadow_activate';
-  contract?: { version: number; contextVersion: number; hostKinds: string[] };
+  contract?: { version: number; contextVersion: number; hostKinds: string[]; requiredFactKinds?: string[] };
   approved?: boolean;
   promoted?: boolean;
   implementationCode?: string;
@@ -305,6 +305,162 @@ describe('production RuleHost gate — Codex V2 artifact qualification', () => {
       expect(calls.some((call) => call.ruleCount === 1)).toBe(true);
       expect(JSON.stringify(result.metadata?.evaluations)).toContain('"decision":"block"');
       expect(JSON.stringify(result.metadata?.evaluations)).toContain('"activationMode":"shadow"');
+    } finally {
+      connection.close();
+    }
+  });
+
+  it('skips a stamped design-approval dependency on unknown while a healthy sibling still runs', async () => {
+    const workspaceDir = tempWorkspace();
+    const connection = await seedCodexRule(workspaceDir, {
+      action: 'code_tool_hook_shadow_activate',
+      contract: { version: 1, contextVersion: 2, hostKinds: ['codex'], requiredFactKinds: ['design_approval'] },
+      approved: true,
+    });
+    try {
+      const db = connection.getDb();
+      const siblingId = `${ARTIFACT_ID}-sibling`;
+      const siblingTaskId = `${ARTIFACT_ID}-sibling-task`;
+      const siblingRuleId = `${RULE_ID}_SIBLING`;
+      const siblingContent = {
+        principleId: 'P_CODEX_V2_GATE_1015',
+        ruleId: siblingRuleId,
+        implementationCode: SCOPED_CODE.replaceAll(RULE_ID, siblingRuleId),
+        requiresContextVersion: 2,
+        ruleHostInputContract: { version: 1, contextVersion: 2, hostKinds: ['codex'] },
+      };
+      db.prepare(`INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at)
+        VALUES (?, 'diagnosis', 'pending', ?, ?)`).run(siblingTaskId, NOW, NOW);
+      const siblingRow = baseArtifactRow(JSON.stringify(siblingContent));
+      db.prepare(`INSERT INTO pi_artifacts
+        (artifact_id, artifact_kind, source_task_id, source_principle_id, source_rule_id,
+         lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+        siblingId, siblingRow.artifact_kind, siblingTaskId, siblingRow.source_principle_id,
+        siblingRuleId, siblingRow.lineage_artifact_ids, siblingRow.validation_status,
+        siblingRow.content_json, NOW, NOW,
+      );
+      await new SqliteActivationStateStore(connection).recordActivation({
+        activationId: `${ACTIVATION_ID}-sibling`,
+        idempotencyKey: `${siblingId}::codex-v2-gate`,
+        artifactId: siblingId,
+        channel: 'code_tool_hook',
+        action: 'code_tool_hook_shadow_activate',
+        targetRef: `impl://${siblingRuleId}`,
+        activatedAt: NOW,
+        deactivatedAt: null,
+      });
+      const approvals = new SqliteApprovalQueueStore(connection);
+      const approval = await approvals.enqueue({ artifactId: siblingId, channel: 'code_tool_hook', riskLevel: 'high' }, NOW);
+      const decision = await approvals.approve(approval.approvalId, 'owner-test', 'Healthy sibling fixture');
+      if (!decision.ok) throw new Error(`test sibling approval fixture failed: ${decision.error}`);
+
+      const unknownContext: RuleContextV2 = {
+        ...AVAILABLE_CONTEXT,
+        facts: {
+          ...AVAILABLE_CONTEXT.facts,
+          designGate: {
+            version: 1, sourceRef: null, revision: null, requiresApproval: true, taskRef: 'codex:session',
+            specDigest: null, scopeRef: null, decisionTaskRef: null, decisionSpecDigest: null,
+            decisionScopeRef: null, resolution: 'unknown', revoked: false, invalidationReason: 'unregistered_scope',
+          },
+        },
+      };
+      const calls: { ruleCount: number; input: unknown }[] = [];
+      const result = await makeGate(trackingRuntime(calls), () => unknownContext)(gateEvent(workspaceDir, '/etc/shadow'));
+      expect(result.decision).toBe('allow');
+      expect(result.warnings?.join('\n')).toContain('rule_required_fact_unavailable: design_approval');
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.ruleCount).toBe(1);
+    } finally {
+      connection.close();
+    }
+  });
+
+  it('executes a design-approval-dependent V2 rule on an actionable fact even when history is unavailable', async () => {
+    const workspaceDir = tempWorkspace();
+    const connection = await seedCodexRule(workspaceDir, {
+      action: 'code_tool_hook_live_activate',
+      contract: { version: 1, contextVersion: 2, hostKinds: ['codex'], requiredFactKinds: ['design_approval'] },
+      approved: true,
+      promoted: true,
+    });
+    try {
+      // A brand-new Codex session has no prior history: the provider resolves
+      // the authoritative not_approved fact beside an unavailable history.
+      // SPEC-RULECODE-CODEX-LOCAL-CLOSURE-001 §6 still requires the managed
+      // action to be blocked, so the fact-dependent rule must execute.
+      const noHistoryWithNotApproved: RuleContextV2 = {
+        version: 2,
+        history: { status: 'unavailable', unavailableReason: 'no_prior_session_history', truncated: false, calls: [] },
+        facts: {
+          priorReadOfTarget: 'unknown',
+          readCount: null,
+          writeCount: null,
+          uniqueWritePathCount: null,
+          sameActionBlockCount: null,
+          designGate: {
+            version: 1,
+            sourceRef: 'owner-design-gate-1',
+            revision: 1,
+            requiresApproval: true,
+            taskRef: 'codex:session',
+            specDigest: 'sha256:spec',
+            scopeRef: 'sha256:scope',
+            decisionTaskRef: 'codex:session',
+            decisionSpecDigest: 'sha256:spec',
+            decisionScopeRef: 'sha256:scope',
+            resolution: 'not_approved',
+            revoked: false,
+          },
+        },
+      };
+      const calls: { ruleCount: number; input: unknown }[] = [];
+      const result = await makeGate(trackingRuntime(calls), () => noHistoryWithNotApproved)(gateEvent(workspaceDir, '/etc/shadow'));
+      expect(result.decision).toBe('deny');
+      expect(result.reason).toBe('CODEX_V2_TRACKED_BLOCK_1015');
+      expect(result.metadata?.evaluatedLiveRules).toBe(1);
+      expect(result.warnings?.join('\n') ?? '').not.toContain('rule_context_v2_unavailable');
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.ruleCount).toBe(1);
+    } finally {
+      connection.close();
+    }
+  });
+
+  it('still suspends the design-approval-dependent V2 rule when history is unavailable and the fact is unknown', async () => {
+    const workspaceDir = tempWorkspace();
+    const connection = await seedCodexRule(workspaceDir, {
+      action: 'code_tool_hook_live_activate',
+      contract: { version: 1, contextVersion: 2, hostKinds: ['codex'], requiredFactKinds: ['design_approval'] },
+      approved: true,
+      promoted: true,
+    });
+    try {
+      // Unknown is neither approval nor rejection (SPEC §6): the dependent
+      // rule stays suspended and explicitly recorded as uncovered.
+      const noHistoryWithUnknown: RuleContextV2 = {
+        version: 2,
+        history: { status: 'unavailable', unavailableReason: 'no_prior_session_history', truncated: false, calls: [] },
+        facts: {
+          priorReadOfTarget: 'unknown',
+          readCount: null,
+          writeCount: null,
+          uniqueWritePathCount: null,
+          sameActionBlockCount: null,
+          designGate: {
+            version: 1, sourceRef: null, revision: null, requiresApproval: true, taskRef: 'codex:session',
+            specDigest: null, scopeRef: null, decisionTaskRef: null, decisionSpecDigest: null,
+            decisionScopeRef: null, resolution: 'unknown', revoked: false, invalidationReason: 'unregistered_scope',
+          },
+        },
+      };
+      const calls: { ruleCount: number; input: unknown }[] = [];
+      const result = await makeGate(trackingRuntime(calls), () => noHistoryWithUnknown)(gateEvent(workspaceDir, '/etc/shadow'));
+      expect(result.decision).toBe('allow');
+      expect(result.warnings?.join('\n')).toMatch(/rule_context_v2_unavailable.*history_unavailable/);
+      expect(result.metadata?.evaluatedLiveRules).toBe(0);
+      expect(calls).toEqual([]);
     } finally {
       connection.close();
     }

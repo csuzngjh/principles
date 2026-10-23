@@ -352,7 +352,7 @@ describe('consumer cycle — artificer intent-basis preflight wiring', () => {
   it('T-I5 (Owner review P2): the trusted-facts port rides from ports into BOTH the preflight and the runner', async () => {
     const workspaceDir = makeWorkspace();
     // Approval-gated principle WITH a declared required fact; the port
-    // resolves it — the entry gate must pass AND the runner must be
+    // declares the runtime fact capability — the entry gate must pass AND the runner must be
     // constructed carrying the SAME port (defensive mirror agreement).
     await seedChain(workspaceDir, scribeContent({
       version: 1,
@@ -360,6 +360,7 @@ describe('consumer cycle — artificer intent-basis preflight wiring', () => {
     }, { approval: true }));
     const resolvedPort = {
       resolveRequiredFact: () => ({ resolution: 'approved' as const, detail: 'host decision record' }),
+      describeRequiredFact: () => ({ supported: true, schemaVersion: '1', inputPath: 'input.context.facts.designGate', source: 'codex-native-pretool-design-gate-v1' }),
     };
     spyArtificerRun();
 
