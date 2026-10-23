@@ -3,7 +3,7 @@
   "studyId": "PLE-PILOT-01-CE",
   "note": "C-E four-history contrast authorization DRAFT (PENDING OWNER APPROVAL — owner-decision.json carries approved:false until the Owner signs it). Route identical to the completed C-A round: external zai-coding-cn/glm-5.3-flash through createAuthorizedPiTransport + the P1-01 HTTP/USD ledger. E0's none-history semantics (no generation call, sentinel freeze, empty same-channel payload) are the runner's built-in E0 flow.",
   "od1": {
-    "approved": false,
+    "approved": true,
     "decisionRef": "owner-decision.json",
     "frozenFixtureHash": "4c3ea4ab29ced329c28d916c8be0360952ca0d23b36786f64693e9319391e9a4"
   },
