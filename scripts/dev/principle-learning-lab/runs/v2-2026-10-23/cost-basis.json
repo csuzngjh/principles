@@ -1,0 +1,12 @@
+{
+  "kind": "cost-basis",
+  "provider": "zai-coding-cn",
+  "model": "glm-5.3-flash",
+  "currency": "USD",
+  "inputUsdPerMillionTokens": 0.15,
+  "outputUsdPerMillionTokens": 0.5,
+  "cacheReadUsdPerMillionTokens": 0.03,
+  "effectiveDate": "2026-10-23",
+  "officialPriceVerified": false,
+  "source": "Identical route and semantics to the completed C-A and C-E rounds (runs/formal-2026-10-23/cost-basis.json): pi-ai catalog data/zai-coding-cn.json cross-checked against third-party trackers (Oct 2026). Coding Plan is a FIXED QUOTA per Owner — list prices serve only as the conservative pre-send reservation ceiling."
+}

@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "splits.v0.1",
+  "episodeId": "PLE-PILOT-01",
+  "outerSplit": {
+    "method-development": {
+      "episodeIds": ["PLE-PILOT-01"],
+      "note": "Everything in this pilot is method-development. No outer held-out exists yet; independent generalization claims are NOT_AVAILABLE (SPEC v0.3 §5.1)."
+    },
+    "method-held-out": {
+      "episodeIds": [],
+      "status": "NOT_AVAILABLE"
+    }
+  },
+  "innerSplit": {
+    "rule": "Within one PLE, the agent sees the episode's learning history (innerRole=learning_history) and is evaluated on unseen future probes (innerRole=future_probe). This does not violate the outer split.",
+    "learningHistoryVisible": true,
+    "futureProbesVisibleBeforeRun": false
+  },
+  "leakageGroups": [
+    {
+      "leakageGroupId": "PLE-PILOT-01-svc-config",
+      "memberFiles": ["histories/*", "probes/*", "judgments/*"],
+      "rule": "History from this leakage group may enter actor input ONLY for runs of this same episode's probes. A fixture from any other leakage group must be rejected at actor-input assembly."
+    }
+  ]
+}

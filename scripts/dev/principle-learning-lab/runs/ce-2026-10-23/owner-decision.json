@@ -1,0 +1,10 @@
+{
+  "kind": "owner-decision",
+  "approved": true,
+  "decidedBy": "Owner, in-session instruction 2026-10-23: 'ZCode 执行指令：立即启动 Principle Learning C-E 三种子正式实验' — explicitly approving PLE-PILOT-01-CE on zai-coding-cn/glm-5.3-flash (endpoint https://open.bigmodel.cn/api/coding/paas/v4), conditions E0/EA/EB/EN, 3 seeds, order E0→EA→EB→EN per seed, token caps 8192/1024, HTTP caps 48/256/1536, shadow-price ceilings US$0.50/arm and US$5.00 total, frozen preregistration and mechanical Oracle for adjudication; C-A three-seed artifacts read-only.",
+  "decidedAt": "2026-10-23T08:30:00Z",
+  "fixtureHash": "4c3ea4ab29ced329c28d916c8be0360952ca0d23b36786f64693e9319391e9a4",
+  "scope": "C-E four-history contrast (E0 vs EA vs EB vs EN, each through the same policy generation) via the external route zai-coding-cn/glm-5.3-flash, 3 seeds, preregistered metrics/oracle/stop-conditions unchanged. No production governance actions; C-A artifacts read-only.",
+  "note": "Signed per the Owner's explicit in-session authorization. The preregistration FILE stays an untouched frozen DRAFT; this record is the Owner approval artifact the formal entry point joins with it (see composeApprovedPreregView).",
+  "preregistrationHash": "0d1ba5914fa0f638a5656a5f9ec733f1f17344483b588e9521ab1dc41b7a2b38"
+}
