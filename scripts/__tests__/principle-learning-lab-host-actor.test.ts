@@ -495,9 +495,12 @@ describe('stdout official event format (root cause of the 2026-10-23 zero-event 
     // OS temp dir) — repo-local, lifecycle-cleaned, and out of the
     // shared-OS-temp attack surface CodeQL flags
     const fs = require('node:fs');
-    const os = require('node:os');
     const path = require('node:path');
-    const msgFile = path.join(process.env.TMPDIR ?? os.tmpdir(), `pl-lab-test-lastmsg-${process.pid}.txt`);
+    const managedRoot = process.env.TMPDIR;
+    if (typeof managedRoot !== 'string' || managedRoot.length === 0) {
+      throw new Error('TMPDIR must be set by the test lifecycle (repo-local temp root)');
+    }
+    const msgFile = path.join(managedRoot, `pl-lab-test-lastmsg-${process.pid}.txt`);
     fs.writeFileSync(msgFile, 'STALE CONTENT FROM A PREVIOUS RUN', 'utf8'); // poisoning attempt
     const { transport, calls } = makeTransport({
       outputLastMessageFile: msgFile,
