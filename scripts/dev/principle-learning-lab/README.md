@@ -130,6 +130,31 @@ scripts/__tests__/principle-learning-lab-actor.test.ts # 18 项真实 Actor 离�
   旧 `historyIds` 语义不变）。真实研究的 arm 清单与顺序仍是 Owner 的 OD-3 决策——本机制
   只让任何预注册选择可执行。arm 侧 `reflection` 字段更名为 `generation`
   （`{stage, requests, failure}`），数据质量理由前缀随之取自 stage。
+
+### 6.2 宿主原生 transport（`lib/host-actor.mjs`，2026-10-23 交付，零网络演练）
+
+- **两类执行路径严格分立**：外部路径（`actor.mjs`，pi-ai + P1-01 HTTP/USD 账本）与宿主
+  路径（本文件）互斥、互不冒充。`runRealStudy(hostTransportFactory=…, hostBudgets=…)` 走
+  宿主模式时**不创建 HTTP 账本也不虚构任何请求数/USD 预留**；`budgets` 与
+  `hostTransportFactory` 同时给出即拒绝（混跑会破坏 C-A 同通道对照）。
+- **宿主调用机制**：`createCodexHostTransport` 驱动 Owner 的 Codex CLI headless 接口——
+  首轮 `codex exec --json -m <model> -C <scratch> -s read-only --thread-source pl-lab`，
+  后续轮 `codex exec resume <session-id>`；每机会一个新会话（机会间零会话记忆泄漏），
+  轮内同会话保持观察连续性；`resume --last` 禁用（共享 CODEX_HOME 下会拿错会话——
+  session id 只从宿主事件流提取，缺失即 fail-loud）。
+- **模型身份纪律**：requested `-m` vs 宿主自报（`thread_settings_applied`）逐会话核对；
+  MISMATCH/UNVERIFIED 的 arm 全行标 UNCERTAIN——排除出正式结论，分母不删。
+- **进程级预算（宿主调用不经过 fetch，P1-01 账本不适用且不模拟）**：
+  `createHostProcessLedger` 三层（机会→arm→study）；exec/会话数是 spawn 前硬上限；
+  Token/wall-clock 是**事后观察值**，累计到限即拒绝下一次 spawn——当轮已在宿主侧发生，
+  如实记账不冒充发送前费用硬限（rc-9）。
+- **用量语义**：轮增量取 `token_count.info.last_token_usage`（`total_token_usage` 是会话
+  累计值，逐轮累加会重复计数）；缺失用量记 unavailable，永不补零（P1-03）。
+- **零网络演练**（`scripts/__tests__/principle-learning-lab-host-actor.test.ts`，17 项）：
+  spawn stub + 本机 rollout 真实形状的脱敏事件 fixture——会话生命周期/resume 纪律/
+  机会隔离/JSONL 容错/action 校验/用量语义/身份纪律/预算链/超时与非零退出/fail-closed。
+  **离线演练 ≠ 宿主连通性验证**；`gpt-6-luna` 在 CLI models_cache 为 `visibility:"list"`
+  （支持证据），真实身份以授权冒烟的宿主自报为准。
 - **离线演练**（`scripts/__tests__/principle-learning-lab-actor.test.ts`，18 项）：观察驱动的
   动作改变、终局后零调用、无效/超时有界、上限证据、canary 通道守卫、跨 arm 隔离、
   冻结完整性、Oracle↔裁定一致、sidecar 校验通过、泄漏停止研究。

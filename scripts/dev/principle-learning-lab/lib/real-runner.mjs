@@ -40,6 +40,7 @@ import { freezeCandidate } from './sidecar.mjs';
 import { deliverPayload } from './g2.mjs';
 import { DEFAULT_REAL_ACTOR_CAPS, runRealActorOpportunity } from './actor.mjs';
 import { auditTokenUsage, createHttpBudgetLedger } from './http-budget.mjs';
+import { createHostProcessLedger } from './host-actor.mjs';
 
 
 
@@ -325,20 +326,45 @@ export async function runRealArm({ dataset, historyId, transport, caps = DEFAULT
 
 /**
  * Run every real-actor arm on its OWN transport (cross-arm isolation), in the
- * given arm order, under the study-level HTTP budget (P1-01). Stops at the
- * first judge-leak INVALID_PROTOCOL (remaining arms are not started —
- * exitConditions) and reports `stopped`.
+ * given arm order. Stops at the first judge-leak INVALID_PROTOCOL (remaining
+ * arms are not started — exitConditions) and reports `stopped`.
  *
  * Arms are given either as `armSpecs` ([{historyId, contentMode='policy'}] —
  * the C-A four-way contrast is four specs on one history) or as the legacy
  * `historyIds` (each implying contentMode 'policy'). The exact arm list and
  * order for a real study is the Owner's OD-3 decision; this runner only makes
- * any preregistered choice executable. `budgets` = explicit HTTP request caps
- * {httpRequestsPerOpportunity, httpRequestsPerArm, httpRequestsPerStudy};
- * null caps are record-only (offline rehearsal) and are NEVER a real-experiment
- * authorization (P1-02 gate covers that).
+ * any preregistered choice executable.
+ *
+ * TWO MUTUALLY EXCLUSIVE EXECUTION MODES — never mixed within one study
+ * (a C-A contrast must not vary execution path across arms):
+ *
+ * 1. EXTERNAL (default): `transportForArm(historyId, armLedger, contentMode)`
+ *    builds a pi-ai transport per arm; `budgets` = explicit HTTP request caps
+ *    {httpRequestsPerOpportunity, httpRequestsPerArm, httpRequestsPerStudy,
+ *    perRunCostCapUsd, totalCostCapUsd} enforced by the P1-01 HTTP/USD ledger.
+ *    Null caps are record-only (offline rehearsal) and are NEVER a
+ *    real-experiment authorization (P1-02 gate covers that).
+ *
+ * 2. HOST (`hostTransportFactory` provided): arms execute on the OWNER'S
+ *    Codex CLI via lib/host-actor.mjs. The HTTP/USD ledger is NOT built and
+ *    NEVER simulated for this path — the enforceable boundary is the PROCESS
+ *    boundary (exec/session pre-spawn caps + observed token/wall feedback),
+ *    carried by `hostBudgets`:
+ *    {model, maxExecProcessesPerOpportunity, maxExecProcessesPerArm,
+ *     maxExecProcessesPerStudy, maxSessionsPerArm, maxTokensPerOpportunity,
+ *     maxTokensPerStudy, wallMsPerOpportunity, wallMsPerStudy,
+ *     timeoutMsPerCall, profile, outputSchemaFile, extraArgs, threadSource}.
+ *    The factory receives {historyId, contentMode, armId, scratchRoot,
+ *    hostLedger, hostBudgets} and returns a transport exposing
+ *    complete()/hostSnapshot(). Per-arm scratch directories are created under
+ *    `scratchBase` (spawn cwd isolation; never the repo, never user data).
+ *    An arm whose host snapshot is not identity-VERIFIED gets every row
+ *    marked UNCERTAIN — such results are excluded from formal claims.
  */
-export async function runRealStudy({ dataset, transportForArm, caps = DEFAULT_REAL_ACTOR_CAPS, studyId, historyIds = ['E0', 'EA', 'EB', 'EN'], armSpecs = null, budgets = null }) {
+export async function runRealStudy({ dataset, transportForArm, caps = DEFAULT_REAL_ACTOR_CAPS, studyId, historyIds = ['E0', 'EA', 'EB', 'EN'], armSpecs = null, budgets = null, hostTransportFactory = null, hostBudgets = null, scratchBase = null }) {
+  if (transportForArm === undefined && hostTransportFactory === null) {
+    throw new Error('runRealStudy: transportForArm or hostTransportFactory is required');
+  }
   const specs = (armSpecs ?? historyIds.map((historyId) => ({ historyId, contentMode: 'policy' })))
     .map((spec) => (typeof spec === 'string' ? { historyId: spec, contentMode: 'policy' } : spec));
   const seenArmIds = new Set();
@@ -355,35 +381,102 @@ export async function runRealStudy({ dataset, transportForArm, caps = DEFAULT_RE
     }
     seenArmIds.add(armId);
   }
-  const studyLedger = createHttpBudgetLedger({
-    scope: `study:${studyId}`,
-    cap: budgets?.httpRequestsPerStudy ?? null,
-    costCapUsd: budgets?.totalCostCapUsd ?? null,
-    reason: 'study-level cumulative HTTP/USD cost cap',
-  });
+  const hostMode = hostTransportFactory !== null;
+  if (hostMode) {
+    if (hostBudgets === null || typeof hostBudgets !== 'object') {
+      throw new Error('runRealStudy: host mode requires explicit hostBudgets (process caps are the ONLY cost boundary on the host path — they are never defaulted)');
+    }
+    if (budgets !== null) {
+      throw new Error('runRealStudy: budgets (HTTP/USD caps) and hostTransportFactory are mutually exclusive — the host path must never be dressed up as metered HTTP traffic');
+    }
+    if (typeof hostBudgets.model !== 'string' || hostBudgets.model.trim().length === 0) {
+      throw new Error('runRealStudy: hostBudgets.model (requested host model id) is required');
+    }
+  }
+  const studyLedger = hostMode
+    ? null // no HTTP ledger on the host path — and never a simulated one
+    : createHttpBudgetLedger({
+        scope: `study:${studyId}`,
+        cap: budgets?.httpRequestsPerStudy ?? null,
+        costCapUsd: budgets?.totalCostCapUsd ?? null,
+        reason: 'study-level cumulative HTTP/USD cost cap',
+      });
+  const studyHostLedger = hostMode
+    ? createHostProcessLedger({
+        scope: `study:${studyId}:host`,
+        caps: {
+          maxExecProcesses: hostBudgets.maxExecProcessesPerStudy,
+          maxTokens: hostBudgets.maxTokensPerStudy,
+          wallMsBudgetMs: hostBudgets.wallMsPerStudy,
+        },
+        reason: 'study-level host process caps (exec/token-feedback/wall-clock)',
+      })
+    : null;
+  const fs = hostMode ? await import('node:fs') : null;
+  const os = hostMode ? await import('node:os') : null;
+  const pathMod = hostMode ? await import('node:path') : null;
+  const hostArmTransports = new Map();
   const arms = [];
   const adjudications = [];
   const actorInputs = [];
   let stopped = null;
   for (const spec of specs) {
     const armId = realArmId(spec.historyId, spec.contentMode);
-    const armLedger = createHttpBudgetLedger({
-      scope: armId,
-      cap: budgets?.httpRequestsPerArm ?? null,
-      costCapUsd: budgets?.perRunCostCapUsd ?? null,
-      parent: studyLedger,
-      reason: 'arm-level HTTP/USD cost cap',
-    });
+    let armLedger = null;
+    let transport;
+    if (hostMode) {
+      const sanitized = armId.replace(/[^A-Za-z0-9._-]+/g, '_');
+      const base = scratchBase ?? pathMod.join(os.tmpdir(), 'pl-lab-host-scratch');
+      fs.mkdirSync(base, { recursive: true });
+      const scratchRoot = fs.mkdtempSync(pathMod.join(base, `${sanitized}-`));
+      const armHostLedger = createHostProcessLedger({
+        scope: armId,
+        caps: {
+          maxExecProcesses: hostBudgets.maxExecProcessesPerArm,
+          maxSessions: hostBudgets.maxSessionsPerArm,
+          maxTokens: hostBudgets.maxTokensPerArm ?? null,
+          wallMsBudgetMs: hostBudgets.wallMsPerArm ?? null,
+        },
+        parent: studyHostLedger,
+        reason: 'arm-level host process caps',
+      });
+      transport = hostTransportFactory({ historyId: spec.historyId, contentMode: spec.contentMode, armId, scratchRoot, hostLedger: armHostLedger, hostBudgets });
+      hostArmTransports.set(armId, transport);
+    } else {
+      armLedger = createHttpBudgetLedger({
+        scope: armId,
+        cap: budgets?.httpRequestsPerArm ?? null,
+        costCapUsd: budgets?.perRunCostCapUsd ?? null,
+        parent: studyLedger,
+        reason: 'arm-level HTTP/USD cost cap',
+      });
+      transport = transportForArm(spec.historyId, armLedger, spec.contentMode);
+    }
     const r = await runRealArm({
       dataset,
       historyId: spec.historyId,
       contentMode: spec.contentMode,
-      transport: transportForArm(spec.historyId, armLedger, spec.contentMode),
+      transport,
       caps,
       studyId,
       armLedger,
-      budgets,
+      budgets: hostMode ? null : budgets,
     });
+    if (hostMode) {
+      // Host audit surfaces ride the arm's usage block; the HTTP fields stay
+      // null (no HTTP ledger exists on this path — none is invented).
+      const snapshot = typeof transport.hostSnapshot === 'function' ? transport.hostSnapshot() : null;
+      r.arm.usage.hostProcessBudget = snapshot;
+      // Identity discipline: an arm whose host did not VERIFY the requested
+      // model is excluded from formal results — rows stay (denominator rule)
+      // but are flagged UNCERTAIN with the reason on every row.
+      if (snapshot !== null && snapshot.identityStatus !== 'VERIFIED') {
+        for (const row of r.adjudications) {
+          row.dataQualityFlag = 'UNCERTAIN';
+          row.dataQualityReasons.push(`host model identity ${snapshot.identityStatus} (requested ${snapshot.requestedModel}${snapshot.observedModel ? `, host reported ${snapshot.observedModel}` : ', host reported nothing'}) — excluded from formal results`);
+        }
+      }
+    }
     arms.push(r.arm);
     adjudications.push(...r.adjudications);
     actorInputs.push(...r.actorInputs);
@@ -392,5 +485,12 @@ export async function runRealStudy({ dataset, transportForArm, caps = DEFAULT_RE
       break;
     }
   }
-  return { arms, adjudications, actorInputs, stopped, budget: studyLedger.snapshot() };
+  return {
+    arms,
+    adjudications,
+    actorInputs,
+    stopped,
+    budget: studyLedger ? studyLedger.snapshot() : null,
+    hostBudget: studyHostLedger ? studyHostLedger.snapshot() : null,
+  };
 }
