@@ -48,6 +48,7 @@ function parseArgs(argv) {
     if (a === '--authorization') args.authorization = argv[++i];
     else if (a === '--seed-count') args.seedCount = Number(argv[++i]);
     else if (a === '--start-seed') args.startSeed = Number(argv[++i]);
+    else if (a === '--arms') args.arms = argv[++i];
     else if (a === '--out') args.out = argv[++i];
     else if (a === '--dry-run') args.dryRun = true;
     else {
@@ -58,21 +59,39 @@ function parseArgs(argv) {
   return args;
 }
 
-// The C-A contrast arms (prereg contrastId real-candidate-vs-summary-vs-raw-
-// vs-none): one history (EA — the relevant high-stakes lesson), four content
-// conditions, FIXED paired order, repeated per seed. Nothing here redefines
-// the experiment — the conditions are the preregistration's own.
-const FORMAL_ARM_SPECS = [
-  { historyId: 'EA', contentMode: 'policy' },
-  { historyId: 'EA', contentMode: 'summary' },
-  { historyId: 'EA', contentMode: 'raw' },
-  { historyId: 'EA', contentMode: 'none' },
-];
+// Both arm plans are the preregistration's OWN contrasts — nothing here
+// redefines the experiment:
+//   formal-ca (contrastId real-candidate-vs-summary-vs-raw-vs-none): one
+//     history (EA), four same-channel content conditions, fixed paired order.
+//   formal-ce (contrastId E0-vs-EA-vs-EB-vs-EN): the four FROZEN histories,
+//     each through the same policy (I0-reflection) generation — E0's
+//     none-history semantics (no generation call, sentinel freeze, empty
+//     same-channel payload) are exactly the runner's built-in E0 flow.
+const FORMAL_ARM_PLANS = {
+  'formal-ca': [
+    { historyId: 'EA', contentMode: 'policy' },
+    { historyId: 'EA', contentMode: 'summary' },
+    { historyId: 'EA', contentMode: 'raw' },
+    { historyId: 'EA', contentMode: 'none' },
+  ],
+  'formal-ce': [
+    { historyId: 'E0', contentMode: 'policy' },
+    { historyId: 'EA', contentMode: 'policy' },
+    { historyId: 'EB', contentMode: 'policy' },
+    { historyId: 'EN', contentMode: 'policy' },
+  ],
+};
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args.authorization) {
     console.error('[formal] REFUSED: --authorization <file> is required (fail-closed)');
+    process.exit(1);
+  }
+  const armPlanName = args.arms ?? 'formal-ca';
+  const FORMAL_ARM_SPECS = FORMAL_ARM_PLANS[armPlanName];
+  if (!FORMAL_ARM_SPECS) {
+    console.error(`[formal] REFUSED: --arms must be one of: ${Object.keys(FORMAL_ARM_PLANS).join(', ')}`);
     process.exit(1);
   }
   if (!Number.isSafeInteger(args.seedCount) || args.seedCount < 1 || args.seedCount > 3) {
@@ -155,7 +174,7 @@ async function main() {
   // window and output-dir occupancy are checked BEFORE the dry-run return so
   // a dry run audits the exact plan (and collisions) a real run would hit.
   const studyIdBase = authorization.studyId ?? 'PLE-PILOT-01-FORMAL';
-  console.log(`[formal] arms: ${FORMAL_ARM_SPECS.map((s) => `${s.historyId}:${s.contentMode}`).join(' → ')} × ${args.seedCount} seed(s)`);
+  console.log(`[formal] arms (${armPlanName}): ${FORMAL_ARM_SPECS.map((s) => `${s.historyId}:${s.contentMode}`).join(' → ')} × ${args.seedCount} seed(s)`);
 
   // Study ids: the single-seed-from-1 invocation keeps the historical base id
   // (Seed 1's on-disk identity); every other seed gets its own -S<seed> id so
@@ -175,7 +194,7 @@ async function main() {
   console.log(`[formal] seeds ${args.startSeed}..${args.startSeed + args.seedCount - 1} → ${seedPlan.map((p) => p.studyId).join(', ')}`);
 
   if (args.dryRun) {
-    console.log('[formal] DRY RUN — authorization, credentials, hash, caps, seed window and output occupancy all verified; zero model calls made. Plan hash:', require0(canonicalJson({ studyIdBase, budgets, adapterConfig, armSpecs: FORMAL_ARM_SPECS, seedCount: args.seedCount, seedPlan: seedPlan.map((p) => p.studyId) })));
+    console.log('[formal] DRY RUN — authorization, credentials, hash, caps, seed window and output occupancy all verified; zero model calls made. Plan hash:', require0(canonicalJson({ armPlanName, studyIdBase, budgets, adapterConfig, armSpecs: FORMAL_ARM_SPECS, seedCount: args.seedCount, seedPlan: seedPlan.map((p) => p.studyId) })));
     return;
   }
 
@@ -206,23 +225,29 @@ async function main() {
       },
     });
 
-    // sidecar + audit + report
+    // sidecar + audit + report. The enrolled claim is the one this plan
+    // actually contrasts; the other stays honestly NOT_ESTIMABLE.
+    const enrolledCE = armPlanName === 'formal-ce';
     const claims = [
       {
         claimId: 'C-E',
         contrastId: 'E0-vs-EA-vs-EB-vs-EN',
-        competingExplanations: ['single-history formal run — C-E contrasts are out of scope for this run'],
+        competingExplanations: preregDraft.claims.find((c) => c.claimId === 'C-E').competingExplanations,
         analysisUnit: 'episode',
-        status: 'NOT_ESTIMABLE',
-        interpretation: 'This formal run executes the C-A contrast only; C-E history contrasts were not enrolled.',
+        status: enrolledCE ? 'PARTIALLY_OBSERVABLE' : 'NOT_ESTIMABLE',
+        interpretation: enrolledCE
+          ? 'Formal four-history contrast through the same policy generation. See comparison layers in the adjudications; EA-vs-EN equivalence is the stability requirement.'
+          : 'This run executed the C-A contrast only; the C-E history contrasts were not enrolled.',
       },
       {
         claimId: 'C-A',
         contrastId: 'real-candidate-vs-summary-vs-raw-vs-none',
         competingExplanations: preregDraft.claims.find((c) => c.claimId === 'C-A').competingExplanations,
         analysisUnit: 'paired probe within episode',
-        status: 'PARTIALLY_OBSERVABLE',
-        interpretation: 'Formal same-channel four-condition contrast on the EA history. See comparison-report.json for the four separately-reported metric families.',
+        status: enrolledCE ? 'NOT_ESTIMABLE' : 'PARTIALLY_OBSERVABLE',
+        interpretation: enrolledCE
+          ? 'This run executed the C-E contrast only; the C-A content conditions were not enrolled (C-A three-seed evidence lives in runs/formal-2026-10-23).'
+          : 'Formal same-channel four-condition contrast on the EA history. See comparison-report.json for the four separately-reported metric families.',
       },
     ];
     const study = buildStudySidecar({
