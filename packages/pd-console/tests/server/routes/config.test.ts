@@ -205,9 +205,16 @@ describe('GET /api/v1/config/summary', () => {
       agents: { name: string; runtimeProfileId: string; runtimeProfileLabel: string }[];
     }>(res);
     expect(data.source).toBe('user_config');
-    // 3 user profiles; openclaw.default is already in VALID_CONFIG, so the MVP
-    // default profile is not merged again by computeEffectivePdConfig.
-    expect(data.runtimeProfiles).toHaveLength(3);
+    // 3 user profiles, plus the pi-ai default that computeEffectivePdConfig
+    // auto-injects under ADR-0029 (the seeded default id is 'pd.default', not
+    // the legacy 'openclaw.default' these fixtures still carry). A legacy
+    // openclaw profile is read-only tolerated, never dropped.
+    expect(data.runtimeProfiles.map((p) => p.id).sort()).toEqual([
+      'anthropic-cloud',
+      'lmstudio-local',
+      'openclaw.default',
+      'pd.default',
+    ]);
     expect(data.agents).toHaveLength(9); // all internal agents (empathyObserver retired in PRI-819)
   });
 
@@ -488,7 +495,7 @@ describe('PATCH /api/v1/config/agents/:agentName/binding', () => {
     // No config file exists
     const req = createMockRequest('PATCH', {
       url: '/api/v1/config/agents/diagnostician/binding',
-      body: { runtimeProfile: 'openclaw.default', enabled: true },
+      body: { runtimeProfile: 'pd.default', enabled: true },
     });
     const res = createMockResponse();
     await handleConfigRoute(req, res, {
@@ -560,7 +567,7 @@ describe('PATCH /api/v1/config/agents/:agentName/binding', () => {
 // ===========================================================================
 
 describe('GET /api/v1/config/readiness/:agentName', () => {
-  it('returns ready for openclaw default profile', async () => {
+  it('returns needs_setup for an agent on a retired openclaw profile (ADR-0029)', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('GET', {
       url: '/api/v1/config/readiness/dreamer',
@@ -580,10 +587,17 @@ describe('GET /api/v1/config/readiness/:agentName', () => {
       nextAction?: string;
     }>(res);
     expect(data.agent).toBe('dreamer');
-    expect(data.readiness).toBe('ready');
+    // The old contract was "ready out of the box" because the call was
+    // delegated to a host CLI agent session. ADR-0029 retires that backend,
+    // so a legacy openclaw profile is never ready — it must tell the Owner
+    // what to configure instead of silently borrowing the host's model.
+    expect(data.readiness).toBe('needs_setup');
+    expect(data.profileId).toBe('openclaw.default');
+    expect(data.reason).toMatch(/retired|ADR-0029/i);
+    expect(data.nextAction).toMatch(/pi-ai/);
   });
 
-  it('returns ready for openclaw profile with provider+model', async () => {
+  it('returns needs_setup for a retired openclaw profile even with provider+model', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('GET', {
       url: '/api/v1/config/readiness/diagnostician',
@@ -595,10 +609,12 @@ describe('GET /api/v1/config/readiness/:agentName', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    const data = okEnvelope<{ agent: string; readiness: string; profileId: string }>(res);
+    const data = okEnvelope<{ agent: string; readiness: string; profileId: string; reason?: string }>(res);
     expect(data.agent).toBe('diagnostician');
-    expect(data.readiness).toBe('ready');
+    expect(data.readiness).toBe('needs_setup');
     expect(data.profileId).toBe('lmstudio-local');
+    // The legacy host-model reference is named so the Owner can re-point it.
+    expect(data.reason).toMatch(/lmstudio/);
   });
 
   it('returns disabled for disabled agent', async () => {
@@ -706,11 +722,15 @@ describe('GET /api/v1/config/readiness/:agentName', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    const data = okEnvelope<{ agent: string; readiness: string }>(res);
+    const data = okEnvelope<{ agent: string; readiness: string; profileId: string; reason?: string; nextAction?: string }>(res);
     expect(data.agent).toBe('diagnostician');
-    // Default profile is openclaw.default (MVP default runtime) → ready
-    // out of the box, no env var or user setup required.
-    expect(data.readiness).toBe('ready');
+    // ADR-0029: the seeded default is PD's own pi-ai profile with provider/
+    // model/apiKeyEnv empty, so a brand-new workspace reports needs_setup with
+    // an actionable next step — the LLM configuration requirement is surfaced,
+    // not hidden behind delegation to a host the user may not even have.
+    expect(data.readiness).toBe('needs_setup');
+    expect(data.profileId).toBe('pd.default');
+    expect(data.nextAction).toMatch(/pi-ai|config\.yaml|Control Center/i);
   });
 
   it('returns unknown readiness when config is malformed', async () => {
@@ -2358,7 +2378,7 @@ describe('PRI-645: Console writers on a sparse fresh workspace', () => {
     // (registry defaults are resolved at read time, never written back).
     const req = createMockRequest('PATCH', {
       url: '/api/v1/config/agents/diagnostician/binding',
-      body: { runtimeProfile: 'openclaw.default', enabled: true },
+      body: { runtimeProfile: 'pd.default', enabled: true },
     });
     const res = createMockResponse();
     await handleConfigRoute(req, res, {
@@ -2373,7 +2393,7 @@ describe('PRI-645: Console writers on a sparse fresh workspace', () => {
   it('updateDefaultRuntime on a config-less workspace creates a sparse features section, not a registry snapshot', async () => {
     const req = createMockRequest('PATCH', {
       url: '/api/v1/config/default-runtime',
-      body: { defaultRuntime: 'openclaw.default' },
+      body: { defaultRuntime: 'pd.default' },
     });
     const res = createMockResponse();
     await handleConfigRoute(req, res, {

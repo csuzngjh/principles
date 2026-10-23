@@ -5,7 +5,7 @@ import * as os from 'os';
 import * as yaml from 'js-yaml';
 import Database from 'better-sqlite3';
 import { runConsumerCycle } from '../src/service/internalization-auto-consumer-service.js';
-import { DreamerRunner, PhilosopherRunner, OpenClawCliRuntimeAdapter, PiAiRuntimeAdapter, RuntimeStateManager, InternalizationOrchestrator } from '@principles/core/runtime-v2';
+import { DreamerRunner, PhilosopherRunner, PiAiRuntimeAdapter, RuntimeStateManager, InternalizationOrchestrator } from '@principles/core/runtime-v2';
 import { SystemLogger } from '../src/core/system-logger.js';
 
 // We mock the dictionary service to prevent unwanted DB lookups
@@ -65,19 +65,27 @@ describe('Auto-Consumer Unhandled Runner Crash Recovery', () => {
         internalization_auto_consumer: { category: 'quiet', enabled: true },
       },
       runtimeProfiles: {
-        'openclaw.default': { type: 'openclaw', source: 'default' },
+        // ADR-0029: pi-ai is the only backend, and a ready profile is what an
+        // install-configured workspace has. These tests are about consumer
+        // recovery/dispatch, not about setup.
+        'pd.default': {
+          type: 'pi-ai', provider: 'test-provider', model: 'test-model',
+          apiKeyEnv: 'PD_AUTO_CONSUMER_TEST_KEY', baseUrl: 'http://127.0.0.1:8080/v1',
+        },
       },
       internalAgents: {
-        defaultRuntime: 'openclaw.default',
+        defaultRuntime: 'pd.default',
         agents: {
           dreamer: { enabled: true },
         },
       },
     };
     fs.writeFileSync(configPath, yaml.dump(config, { schema: yaml.JSON_SCHEMA }), 'utf8');
+    process.env.PD_AUTO_CONSUMER_TEST_KEY = 'test-key';
   });
 
   afterEach(() => {
+    delete process.env.PD_AUTO_CONSUMER_TEST_KEY;
     vi.restoreAllMocks();
     try {
       fs.rmSync(workspaceDir, { recursive: true, force: true });
@@ -163,7 +171,21 @@ describe('Auto-Consumer Unhandled Runner Crash Recovery', () => {
     }
   });
 
-  it('does not construct PiAiRuntimeAdapter fallback when config specifies openclaw.default runtime', async () => {
+  it('does not construct any runtime adapter for a retired openclaw profile (ADR-0029)', async () => {
+    // The config is written the way a pre-ADR-0029 install left it. The profile
+    // still parses, but nothing may run on it: the cycle must skip the stage
+    // instead of resolving an adapter for a host CLI agent session.
+    fs.writeFileSync(
+      path.join(workspaceDir, '.pd', 'config.yaml'),
+      yaml.dump({
+        version: 1,
+        features: { internalization_auto_consumer: { category: 'quiet', enabled: true } },
+        runtimeProfiles: { 'openclaw.default': { type: 'openclaw', source: 'default' } },
+        internalAgents: { defaultRuntime: 'openclaw.default', agents: { dreamer: { enabled: true } } },
+      }, { schema: yaml.JSON_SCHEMA }),
+      'utf8',
+    );
+
     // Insert a pending task in DB
     const db = new Database(dbPath);
     const now = new Date().toISOString();
@@ -182,16 +204,9 @@ describe('Auto-Consumer Unhandled Runner Crash Recovery', () => {
     `).run('dreamer-task-2', 'dreamer', 'pending', 0, 3, diagJson, now, now);
     db.close();
 
-    function hasRuntimeAdapter(value: unknown): value is { runtimeAdapter: unknown } {
-      return typeof value === 'object' && value !== null && Object.hasOwn(value, 'runtimeAdapter');
-    }
-
-    // Track the runtimeAdapter passed to DreamerRunner
-    let capturedAdapter: unknown = null;
-    vi.spyOn(DreamerRunner.prototype, 'run').mockImplementation(async function (this: unknown, _tId) {
-      if (hasRuntimeAdapter(this)) {
-        capturedAdapter = this.runtimeAdapter;
-      }
+    let runnerCalled = false;
+    vi.spyOn(DreamerRunner.prototype, 'run').mockImplementation(async () => {
+      runnerCalled = true;
       return {
         status: 'succeeded',
         runId: 'mock-run',
@@ -209,13 +224,13 @@ describe('Auto-Consumer Unhandled Runner Crash Recovery', () => {
 
     await runConsumerCycle(workspaceDir, mockLogger);
 
-    // Verify a runner run was triggered and we captured the adapter
-    expect(capturedAdapter).toBeDefined();
-    expect(capturedAdapter).not.toBeNull();
-
-    // The captured adapter should be an instance of OpenClawCliRuntimeAdapter, not PiAiRuntimeAdapter
-    expect(capturedAdapter).toBeInstanceOf(OpenClawCliRuntimeAdapter);
-    expect(capturedAdapter).not.toBeInstanceOf(PiAiRuntimeAdapter);
+    // No lease, no runner, no adapter — the task is still pending and untouched.
+    expect(runnerCalled).toBe(false);
+    const after = new Database(dbPath);
+    const task = after.prepare('SELECT status, attempt_count FROM tasks WHERE task_id = ?').get('dreamer-task-2') as { status: string; attempt_count: number } | undefined;
+    after.close();
+    expect(task?.status).toBe('pending');
+    expect(task?.attempt_count).toBe(0);
   });
 
   it('dispatches PhilosopherRunner (not DreamerRunner) when a philosopher task is ready under full-chain scope', async () => {
@@ -261,8 +276,13 @@ describe('Auto-Consumer Unhandled Runner Crash Recovery', () => {
         internalization_auto_consumer: { category: 'quiet', enabled: true },
         internalization_full_chain: { category: 'core', enabled: false },
       },
-      runtimeProfiles: { 'openclaw.default': { type: 'openclaw', source: 'default' } },
-      internalAgents: { defaultRuntime: 'openclaw.default', agents: { dreamer: { enabled: true } } },
+      runtimeProfiles: {
+        'pd.default': {
+          type: 'pi-ai', provider: 'test-provider', model: 'test-model',
+          apiKeyEnv: 'PD_AUTO_CONSUMER_TEST_KEY', baseUrl: 'http://127.0.0.1:8080/v1',
+        },
+      },
+      internalAgents: { defaultRuntime: 'pd.default', agents: { dreamer: { enabled: true } } },
     };
     fs.writeFileSync(configPath, yaml.dump(config, { schema: yaml.JSON_SCHEMA }), 'utf8');
 
@@ -339,19 +359,27 @@ describe('Auto-Consumer Per-Cycle Recovery Sweep (PRI-554)', () => {
         internalization_auto_consumer: { category: 'quiet', enabled: true },
       },
       runtimeProfiles: {
-        'openclaw.default': { type: 'openclaw', source: 'default' },
+        // ADR-0029: pi-ai is the only backend, and a ready profile is what an
+        // install-configured workspace has. These tests are about consumer
+        // recovery/dispatch, not about setup.
+        'pd.default': {
+          type: 'pi-ai', provider: 'test-provider', model: 'test-model',
+          apiKeyEnv: 'PD_AUTO_CONSUMER_TEST_KEY', baseUrl: 'http://127.0.0.1:8080/v1',
+        },
       },
       internalAgents: {
-        defaultRuntime: 'openclaw.default',
+        defaultRuntime: 'pd.default',
         agents: {
           dreamer: { enabled: true },
         },
       },
     };
     fs.writeFileSync(configPath, yaml.dump(config, { schema: yaml.JSON_SCHEMA }), 'utf8');
+    process.env.PD_AUTO_CONSUMER_TEST_KEY = 'test-key';
   });
 
   afterEach(() => {
+    delete process.env.PD_AUTO_CONSUMER_TEST_KEY;
     vi.restoreAllMocks();
     try {
       fs.rmSync(workspaceDir, { recursive: true, force: true });

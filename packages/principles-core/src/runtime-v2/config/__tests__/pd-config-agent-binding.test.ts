@@ -100,7 +100,9 @@ describe('resolveAgentRuntimeBinding', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.profileId).toBe(DEFAULT_RUNTIME_PROFILE_ID);
-    expect(result.profile.type).toBe('openclaw');
+    // ADR-0029: the default profile is pi-ai — PD no longer seeds or selects an
+    // openclaw profile.
+    expect(result.profile.type).toBe('pi-ai');
     expect(result.source).toBe('default_runtime');
   });
 
@@ -303,30 +305,33 @@ describe('resolveAgentRuntimeBinding', () => {
 // ── checkAgentRuntimeReadiness ───────────────────────────────────────────────
 
 describe('checkAgentRuntimeReadiness', () => {
-  it('returns ready for openclaw profile with source=default', () => {
-    const result = checkAgentRuntimeReadiness(
-      { type: 'openclaw', source: 'default' },
-      () => undefined,
-    );
-    expect(result.readiness).toBe('ready');
-  });
+  // ADR-0029: the 'openclaw' profile type is retired read-only legacy. Every
+  // shape of it — including the two that used to report 'ready' because
+  // readiness was delegated to the host — must now report needs_setup with a
+  // reason and a pi-ai nextAction. A retired backend can never look ready.
+  const legacyOpenClawProfiles = [
+    { label: 'source=default', profile: { type: 'openclaw', source: 'default' } },
+    { label: 'provider+model', profile: { type: 'openclaw', provider: 'lmstudio', model: 'qwen3.6-27b-mtp' } },
+    { label: 'no fields', profile: { type: 'openclaw' } },
+  ] as const;
 
-  it('returns ready for openclaw profile with provider+model', () => {
+  for (const { label, profile } of legacyOpenClawProfiles) {
+    it(`returns needs_setup for a retired openclaw profile (${label})`, () => {
+      const result = checkAgentRuntimeReadiness(profile, () => undefined);
+      expect(result.readiness).toBe('needs_setup');
+      expect(result.reason).toBeTruthy();
+      expect(result.nextAction).toBeTruthy();
+      expect(result.reason).toContain('retired');
+      expect(result.nextAction).toContain('pi-ai');
+    });
+  }
+
+  it('names the host model a retired openclaw profile referenced', () => {
     const result = checkAgentRuntimeReadiness(
       { type: 'openclaw', provider: 'lmstudio', model: 'qwen3.6-27b-mtp' },
       () => undefined,
     );
-    expect(result.readiness).toBe('ready');
-  });
-
-  it('returns needs_setup for openclaw profile without provider or model', () => {
-    const result = checkAgentRuntimeReadiness(
-      { type: 'openclaw' },
-      () => undefined,
-    );
-    expect(result.readiness).toBe('needs_setup');
-    expect(result.reason).toBeTruthy();
-    expect(result.nextAction).toBeTruthy();
+    expect(result.reason).toContain('lmstudio/qwen3.6-27b-mtp');
   });
 
   it('AC4: returns not_ready for pi-ai profile when apiKeyEnv is missing from env', () => {

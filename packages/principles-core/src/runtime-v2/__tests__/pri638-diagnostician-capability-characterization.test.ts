@@ -21,7 +21,8 @@
  * Everything below runs real production wiring: computeEffectivePdConfig →
  * createPainSignalBridge → PainSignalBridge → RuntimeStateManager (real SQLite
  * on a temp workspace). The provider entry point
- * (OpenClawCliRuntimeAdapter.startRun) is stubbed so probes stay deterministic.
+ * (PiAiRuntimeAdapter.startRun — pi-ai is the only internal-agent runtime
+ * backend, ADR-0029) is stubbed so probes stay deterministic.
  */
 
 import fs from 'node:fs';
@@ -35,7 +36,7 @@ import {
   DisabledDiagnosticianRunner,
   DIAGNOSTICIAN_DISABLED_FAILURE_REASON,
 } from '../pain-signal-runtime-factory.js';
-import { OpenClawCliRuntimeAdapter } from '../adapter/openclaw-cli-runtime-adapter.js';
+import { PiAiRuntimeAdapter } from '../adapter/pi-ai-runtime-adapter.js';
 import { PrincipleTreeLedgerAdapter } from '../adapter/principle-tree-ledger-adapter.js';
 import { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import { PainSignalBridge } from '../pain-signal-bridge.js';
@@ -73,7 +74,12 @@ function effectiveConfigFor(opts: { agentEnabled: boolean; splitPipeline?: boole
     ...base,
     runtimeProfiles: {
       ...base.runtimeProfiles,
-      'pri638-openclaw': { type: 'openclaw', provider: 'lmstudio', model: 'qwen3.6-27b-mtp' },
+      'pri638-pi-ai': {
+        type: 'pi-ai',
+        provider: 'anthropic',
+        model: 'claude-3-5-sonnet',
+        apiKeyEnv: 'PRI638_CHARACTERIZATION_KEY',
+      },
     },
     internalAgents: {
       defaultRuntime: base.internalAgents.defaultRuntime,
@@ -81,7 +87,7 @@ function effectiveConfigFor(opts: { agentEnabled: boolean; splitPipeline?: boole
         ...base.internalAgents.agents,
         diagnostician: {
           enabled: opts.agentEnabled,
-          runtimeProfile: 'pri638-openclaw',
+          runtimeProfile: 'pri638-pi-ai',
         },
       },
     },
@@ -97,6 +103,12 @@ function effectiveConfigFor(opts: { agentEnabled: boolean; splitPipeline?: boole
 
 const PAIN_ID = 'pain-pri638-1';
 const TASK_ID = `diagnosis_${PAIN_ID}`;
+
+// pi-ai readiness needs the referenced env var to exist; this supplies a
+// sentinel for exactly that name and nothing else, so the characterization
+// still runs with a "no other environment" surface (no credential material).
+const readyEnv = (name: string): string | undefined =>
+  name === 'PRI638_CHARACTERIZATION_KEY' ? 'test-sentinel-not-a-credential' : undefined;
 
 function makeOutput(rootCause: string, over: Partial<DiagnosticianOutputV1> = {}): DiagnosticianOutputV1 {
   return {
@@ -121,7 +133,7 @@ describe('PRI-638 — unified disabled semantics (capability = internalAgents.di
     fs.mkdirSync(stateDir, { recursive: true });
 
     const startRunSpy = vi
-      .spyOn(OpenClawCliRuntimeAdapter.prototype, 'startRun')
+      .spyOn(PiAiRuntimeAdapter.prototype, 'startRun')
       .mockRejectedValue(new Error('pri638-probe: provider boundary reached'));
     startRunSpy.mockClear();
 
@@ -131,7 +143,7 @@ describe('PRI-638 — unified disabled semantics (capability = internalAgents.di
       ledgerAdapter: new PrincipleTreeLedgerAdapter({ stateDir }),
       owner: 'pri638',
       effectiveConfig: effectiveConfigFor({ agentEnabled: false }),
-      getEnvVar: () => undefined,
+      getEnvVar: readyEnv,
     });
 
     const result = await bridge.onPainDetected({
@@ -175,7 +187,7 @@ describe('PRI-638 — unified disabled semantics (capability = internalAgents.di
         ledgerAdapter: new PrincipleTreeLedgerAdapter({ stateDir }),
         owner: 'pri638',
         effectiveConfig: effectiveConfigFor({ agentEnabled: false, splitPipeline }),
-        getEnvVar: () => undefined,
+        getEnvVar: readyEnv,
       });
       const painId = `pain-pri638-split-${splitPipeline}`;
       const result = await bridge.onPainDetected({
@@ -212,7 +224,7 @@ describe('PRI-638 — unified disabled semantics (capability = internalAgents.di
       ledgerAdapter: new PrincipleTreeLedgerAdapter({ stateDir }),
       owner: 'pri638',
       effectiveConfig: effectiveConfigFor({ agentEnabled: true }),
-      getEnvVar: () => undefined,
+      getEnvVar: readyEnv,
     });
 
     // The pipeline run itself is not probed here: its per-stage budget
@@ -239,7 +251,7 @@ describe('PRI-638 — recovery contract (disabled → re-enable → diagnosis re
       ledgerAdapter,
       owner: 'pri638',
       effectiveConfig: effectiveConfigFor({ agentEnabled: false }),
-      getEnvVar: () => undefined,
+      getEnvVar: readyEnv,
     });
     const disabledResult = await disabledBridge.onPainDetected({
       painId: PAIN_ID,
@@ -320,7 +332,7 @@ describe('PRI-638 P1-A — disabled re-trigger preserves durable task state', ()
       ledgerAdapter: new PrincipleTreeLedgerAdapter({ stateDir }),
       owner: 'pri638-p1a',
       effectiveConfig: effectiveConfigFor({ agentEnabled: false }),
-      getEnvVar: () => undefined,
+      getEnvVar: readyEnv,
     });
   }
 
@@ -341,7 +353,7 @@ describe('PRI-638 P1-A — disabled re-trigger preserves durable task state', ()
     const workspaceDir = makeWorkspace();
     const stateDir = path.join(workspaceDir, '.state');
     fs.mkdirSync(stateDir, { recursive: true });
-    const startRunSpy = vi.spyOn(OpenClawCliRuntimeAdapter.prototype, 'startRun').mockRejectedValue(new Error('probe'));
+    const startRunSpy = vi.spyOn(PiAiRuntimeAdapter.prototype, 'startRun').mockRejectedValue(new Error('probe'));
     startRunSpy.mockClear();
 
     const bridge = await makeDisabledBridge(workspaceDir, stateDir);

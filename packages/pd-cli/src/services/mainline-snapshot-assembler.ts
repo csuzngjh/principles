@@ -18,6 +18,7 @@
 import {
   RuntimeStateManager,
   assertMainlineContract,
+  DEFAULT_RUNTIME_PROFILE_ID,
   EMPTY_CONTEXT_SENTINEL,
   hydratePITaskRecord,
   resolveAgentRuntimeBinding,
@@ -130,7 +131,7 @@ function hashContextRefs(contextRefs: string[]): string {
 function buildDefaultReadiness(workspaceDir: string, warnings: string[]): RuntimeReadinessSnapshot {
   const configLoadResult = loadPdConfig(workspaceDir);
   const effective = configLoadResult.ok ? configLoadResult.effective : configLoadResult.defaults;
-  const defaultProfile = effective.config?.internalAgents?.defaultRuntime ?? 'openclaw.default';
+  const defaultProfile = effective.config?.internalAgents?.defaultRuntime ?? DEFAULT_RUNTIME_PROFILE_ID;
 
   if (!configLoadResult.ok) {
     for (const err of configLoadResult.errors) {

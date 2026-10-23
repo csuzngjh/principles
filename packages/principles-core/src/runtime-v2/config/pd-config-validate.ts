@@ -736,6 +736,12 @@ export function validatePdConfig(raw: unknown): PdConfigValidationResult {
       const profileResult = validateRuntimeProfile(profilesRaw[key], `runtimeProfiles.${key}`, key);
       if (profileResult.ok) {
         runtimeProfiles[key] = profileResult.value;
+        // ADR-0029: the openclaw backend is retired but still readable, so a
+        // legacy profile must NOT invalidate the config. It is accepted with an
+        // observable warning (rc-9) and its agents resolve to needs_setup.
+        if (profileResult.value.type === 'openclaw') {
+          warnings.push(`runtime profile '${key}' uses the retired 'openclaw' backend (ADR-0029): PD no longer runs internal agents through a host CLI session, so agents bound to it report needs_setup until a pi-ai profile is configured`);
+        }
       } else {
         errors.push(...profileResult.errors);
       }

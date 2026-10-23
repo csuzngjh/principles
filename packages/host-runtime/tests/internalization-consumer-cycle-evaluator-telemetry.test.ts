@@ -40,6 +40,13 @@ function makeWorkspace(): string {
   const config = getDefaultPdConfig();
   config.features.internalization_auto_consumer.enabled = true;
   config.features.internalization_full_chain.enabled = true;
+  // ADR-0029: the shipped default pi-ai profile carries empty placeholders and
+  // is deliberately `needs_setup`; these tests are about telemetry routing, so
+  // declare the ready profile the sibling cycle tests use.
+  (config.runtimeProfiles as Record<string, unknown>)['pd.default'] = {
+    type: 'pi-ai', provider: 'base-prov', model: 'base-model', apiKeyEnv: 'EVAL_TELEMETRY_KEY',
+  };
+  (config.internalAgents as { defaultRuntime: string }).defaultRuntime = 'pd.default';
   // JSON is valid YAML — same trick the Codex worker tests use.
   fs.writeFileSync(path.join(root, '.pd', 'config.yaml'), JSON.stringify(config));
   return root;
@@ -125,10 +132,12 @@ function spyEvaluatorRun(eventsPerRun: TelemetryEvent[][]): string[] {
 const logger = { info: () => undefined, warn: () => undefined, error: () => undefined };
 
 beforeEach(() => {
+  process.env.EVAL_TELEMETRY_KEY = 'test-key';
   vi.restoreAllMocks();
 });
 
 afterEach(async () => {
+  delete process.env.EVAL_TELEMETRY_KEY;
   vi.restoreAllMocks();
   const { disposePainSignalBridgesForWorkspace } = await import('@principles/core/runtime-v2');
   for (const dir of dirs) {

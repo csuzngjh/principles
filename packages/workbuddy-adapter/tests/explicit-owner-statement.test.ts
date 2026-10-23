@@ -6,7 +6,7 @@ import { runEntry } from './helpers/hook-runner.js';
 import { cleanupTempDirs, fixturePayload, makeGovernance, makeHome, makeProjectDir, makeTrajectory } from './helpers/workbench.js';
 afterAll(cleanupTempDirs);
 function setup(enabled = true) {
-  const home = makeHome(); const workspace = makeGovernance(home, { workbuddyFlag: enabled }); makeTrajectory(workspace);
+  const home = makeHome(); const workspace = makeGovernance(home, { workbuddyFlag: enabled, readyRuntime: true }); makeTrajectory(workspace);
   return { home, workspace, payload: fixturePayload('user-prompt-submit.json', { cwd: makeProjectDir(home, 'owner'), prompt: 'PD记录痛苦：未核对调用方就修改了公共接口' }) };
 }
 function rows(workspace: string, sql: string) {
