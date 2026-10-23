@@ -94,6 +94,18 @@ export function createCodexRuleContextProvider(options: CodexRuleContextProvider
       ? raw.toolInput.params
       : null;
     const readonlyExecute = targetKind === 'execute' && safeReadonlyCommand(rawParams);
+    // Fail fast before the fact resolution below: a non-string or empty
+    // sessionId cannot bind a declaration (an empty id resolves the fact to
+    // unknown) and would otherwise throw inside resolveCodexDesignGateFact,
+    // surfacing as a provider_failed fault instead of the precise reason.
+    // The enabled and workspace-scope checks deliberately stay AFTER
+    // resolution: the design-gate fact is independent of the
+    // rulecode_context_v2 capability (it reads the governance declaration
+    // store directly), so those degraded paths must still carry the resolved
+    // fact for enforcement (SPEC-RULECODE-CODEX-LOCAL-CLOSURE-001 §6).
+    if (typeof request.sessionId !== 'string' || request.sessionId.trim().length === 0) {
+      return unavailable('session_id_invalid');
+    }
     const designGate = resolveCodexDesignGateFact({
       governanceWorkspacePath: workspaceDir,
       projectWorkspacePath: projectDir,
@@ -111,7 +123,6 @@ export function createCodexRuleContextProvider(options: CodexRuleContextProvider
     });
     if (!options.enabled) return unavailable('codex_rule_context_disabled', designGate);
     if (path.resolve(request.workspaceDir) !== workspaceDir) return unavailable('workspace_scope_mismatch', designGate);
-    if (typeof request.sessionId !== 'string' || request.sessionId.trim().length === 0) return unavailable('session_id_invalid', designGate);
 
     const toolInput = isRecord(raw) && isRecord(raw.toolInput) ? raw.toolInput : null;
     if (toolInput === null

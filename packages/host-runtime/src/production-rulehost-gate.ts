@@ -442,7 +442,24 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
               // sibling rules (v1 or well-fed v2) keep evaluating, and no
               // governance state changes. Intentional behavior change vs the
               // pre-fix "legal unavailable still executed" path.
-              if (context === undefined || context.history.status !== 'available') {
+              //
+              // PRI-1019 exception: a rule whose ONLY declared dependence is
+              // the design_approval fact stays eligible on an actionable fact
+              // (resolution !== 'unknown') even when history is unavailable.
+              // SPEC-RULECODE-CODEX-LOCAL-CLOSURE-001 §6 requires a managed
+              // action with an authoritative not_approved to be blocked
+              // regardless of history, and the Artificer prompt contract
+              // (V2_CONTEXT_INSTRUCTION) requires history-dependent behavior
+              // to allow while the independently supplied fact stays
+              // enforceable. Without this exception the first managed action
+              // of a new session (no prior history) would never evaluate the
+              // rule, and an authoritative not_approved could not block.
+              const designGateFact = context?.facts.designGate;
+              const designGateActionable = designGateFact !== undefined && designGateFact.resolution !== 'unknown'
+                ? designGateFact
+                : undefined;
+              if ((context === undefined || context.history.status !== 'available')
+                && !(requiresDesignGateFact(content.ruleHostInputContract) && designGateActionable !== undefined)) {
                 // Reference identity against the frozen sentinel distinguishes
                 // "the provider faulted" from "the provider legitimately
                 // declared history unavailable" (same wire shape, different
@@ -467,13 +484,10 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
                     'regenerate the rule artifact from validated Scribe execution conditions');
                   continue;
                 }
-                if (requiresDesignGateFact(inputContract)) {
-                  const { designGate } = context.facts;
-                  if (designGate === undefined || designGate.resolution === 'unknown') {
-                    addWarning(warnings, `rule_required_fact_unavailable: design_approval (activation=${activationId})`,
-                      'verify the current Owner design declaration and scope before retrying');
-                    continue;
-                  }
+                if (requiresDesignGateFact(inputContract) && designGateActionable === undefined) {
+                  addWarning(warnings, `rule_required_fact_unavailable: design_approval (activation=${activationId})`,
+                    'verify the current Owner design declaration and scope before retrying');
+                  continue;
                 }
               }
             }

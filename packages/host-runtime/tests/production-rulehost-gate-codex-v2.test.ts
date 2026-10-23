@@ -377,6 +377,95 @@ describe('production RuleHost gate — Codex V2 artifact qualification', () => {
     }
   });
 
+  it('executes a design-approval-dependent V2 rule on an actionable fact even when history is unavailable', async () => {
+    const workspaceDir = tempWorkspace();
+    const connection = await seedCodexRule(workspaceDir, {
+      action: 'code_tool_hook_live_activate',
+      contract: { version: 1, contextVersion: 2, hostKinds: ['codex'], requiredFactKinds: ['design_approval'] },
+      approved: true,
+      promoted: true,
+    });
+    try {
+      // A brand-new Codex session has no prior history: the provider resolves
+      // the authoritative not_approved fact beside an unavailable history.
+      // SPEC-RULECODE-CODEX-LOCAL-CLOSURE-001 §6 still requires the managed
+      // action to be blocked, so the fact-dependent rule must execute.
+      const noHistoryWithNotApproved: RuleContextV2 = {
+        version: 2,
+        history: { status: 'unavailable', unavailableReason: 'no_prior_session_history', truncated: false, calls: [] },
+        facts: {
+          priorReadOfTarget: 'unknown',
+          readCount: null,
+          writeCount: null,
+          uniqueWritePathCount: null,
+          sameActionBlockCount: null,
+          designGate: {
+            version: 1,
+            sourceRef: 'owner-design-gate-1',
+            revision: 1,
+            requiresApproval: true,
+            taskRef: 'codex:session',
+            specDigest: 'sha256:spec',
+            scopeRef: 'sha256:scope',
+            decisionTaskRef: 'codex:session',
+            decisionSpecDigest: 'sha256:spec',
+            decisionScopeRef: 'sha256:scope',
+            resolution: 'not_approved',
+            revoked: false,
+          },
+        },
+      };
+      const calls: { ruleCount: number; input: unknown }[] = [];
+      const result = await makeGate(trackingRuntime(calls), () => noHistoryWithNotApproved)(gateEvent(workspaceDir, '/etc/shadow'));
+      expect(result.decision).toBe('deny');
+      expect(result.reason).toBe('CODEX_V2_TRACKED_BLOCK_1015');
+      expect(result.metadata?.evaluatedLiveRules).toBe(1);
+      expect(result.warnings?.join('\n') ?? '').not.toContain('rule_context_v2_unavailable');
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.ruleCount).toBe(1);
+    } finally {
+      connection.close();
+    }
+  });
+
+  it('still suspends the design-approval-dependent V2 rule when history is unavailable and the fact is unknown', async () => {
+    const workspaceDir = tempWorkspace();
+    const connection = await seedCodexRule(workspaceDir, {
+      action: 'code_tool_hook_live_activate',
+      contract: { version: 1, contextVersion: 2, hostKinds: ['codex'], requiredFactKinds: ['design_approval'] },
+      approved: true,
+      promoted: true,
+    });
+    try {
+      // Unknown is neither approval nor rejection (SPEC §6): the dependent
+      // rule stays suspended and explicitly recorded as uncovered.
+      const noHistoryWithUnknown: RuleContextV2 = {
+        version: 2,
+        history: { status: 'unavailable', unavailableReason: 'no_prior_session_history', truncated: false, calls: [] },
+        facts: {
+          priorReadOfTarget: 'unknown',
+          readCount: null,
+          writeCount: null,
+          uniqueWritePathCount: null,
+          sameActionBlockCount: null,
+          designGate: {
+            version: 1, sourceRef: null, revision: null, requiresApproval: true, taskRef: 'codex:session',
+            specDigest: null, scopeRef: null, decisionTaskRef: null, decisionSpecDigest: null,
+            decisionScopeRef: null, resolution: 'unknown', revoked: false, invalidationReason: 'unregistered_scope',
+          },
+        },
+      };
+      const calls: { ruleCount: number; input: unknown }[] = [];
+      const result = await makeGate(trackingRuntime(calls), () => noHistoryWithUnknown)(gateEvent(workspaceDir, '/etc/shadow'));
+      expect(result.decision).toBe('allow');
+      expect(result.warnings?.join('\n')).toMatch(/rule_context_v2_unavailable.*history_unavailable/);
+      expect(result.metadata?.evaluatedLiveRules).toBe(0);
+      expect(calls).toEqual([]);
+    } finally {
+      connection.close();
+    }
+  });
+
   it('continues to isolate a qualified Codex V2 rule when its context provider is invalid', async () => {
     const workspaceDir = tempWorkspace();
     const connection = await seedCodexRule(workspaceDir, {
