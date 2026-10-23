@@ -185,7 +185,34 @@ async function main() {
   // window and output-dir occupancy are checked BEFORE the dry-run return so
   // a dry run audits the exact plan (and collisions) a real run would hit.
   const studyIdBase = authorization.studyId ?? 'PLE-PILOT-01-FORMAL';
-  console.log(`[formal] arms (${armPlanName}): ${FORMAL_ARM_SPECS.map((s) => `${s.historyId}:${s.contentMode}`).join(' → ')} × ${args.seedCount} seed(s)`);
+
+  // Order counterbalancing (v2 only): a fixed arm order across all seeds
+  // would confound condition with wall-clock position (provider drift,
+  // time-of-day effects) — with 3 seeds the correlation would be perfect.
+  // The deterministic Latin rectangle below (pre-registered in the v2
+  // preregistration, NO randomness) gives every condition a mix of early /
+  // middle / late positions. Within-seed pairing (the analysis unit) is
+  // untouched: each seed still runs all five conditions back-to-back in one
+  // isolated session chain. v1 plans keep their historical fixed order
+  // (their rounds are complete).
+  const V2_SEED_ARM_ORDERS = {
+    1: [0, 1, 2, 3, 4], // E0 → G → EA → EB → EN
+    2: [2, 3, 4, 0, 1], // EA → EB → EN → E0 → G
+    3: [4, 0, 1, 2, 3], // EN → E0 → G → EA → EB
+  };
+  const armSpecsForSeed = (seed) => {
+    const order = armPlanName === 'formal-v2' ? V2_SEED_ARM_ORDERS[seed] : null;
+    const specs = order
+      ? order.map((i) => ({ ...FORMAL_ARM_SPECS[i] }))
+      : FORMAL_ARM_SPECS.map((s) => ({ ...s }));
+    return { specs, orderLabel: specs.map((s) => `${s.historyId}:${s.contentMode}`).join(' → ') };
+  };
+  if (armPlanName === 'formal-v2') {
+    console.log('[formal] arms (formal-v2): per-seed deterministic Latin rectangle —');
+    for (const seed of [1, 2, 3]) console.log(`  seed ${seed}: ${armSpecsForSeed(seed).orderLabel}`);
+  } else {
+    console.log(`[formal] arms (${armPlanName}): ${FORMAL_ARM_SPECS.map((s) => `${s.historyId}:${s.contentMode}`).join(' → ')} × ${args.seedCount} seed(s)`);
+  }
 
   // Study ids: the single-seed-from-1 invocation keeps the historical base id
   // (Seed 1's on-disk identity); every other seed gets its own -S<seed> id so
@@ -205,7 +232,10 @@ async function main() {
   console.log(`[formal] seeds ${args.startSeed}..${args.startSeed + args.seedCount - 1} → ${seedPlan.map((p) => p.studyId).join(', ')}`);
 
   if (args.dryRun) {
-    console.log('[formal] DRY RUN — authorization, credentials, hash, caps, seed window and output occupancy all verified; zero model calls made. Plan hash:', require0(canonicalJson({ armPlanName, studyIdBase, budgets, adapterConfig, armSpecs: FORMAL_ARM_SPECS, seedCount: args.seedCount, seedPlan: seedPlan.map((p) => p.studyId) })));
+    const orderPlan = armPlanName === 'formal-v2'
+      ? Object.fromEntries([1, 2, 3].map((seed) => [seed, armSpecsForSeed(seed).orderLabel]))
+      : { fixed: FORMAL_ARM_SPECS.map((s) => `${s.historyId}:${s.contentMode}`).join(' → ') };
+    console.log('[formal] DRY RUN — authorization, credentials, hash, caps, seed window and output occupancy all verified; zero model calls made. Plan hash:', require0(canonicalJson({ armPlanName, studyIdBase, budgets, adapterConfig, armSpecs: FORMAL_ARM_SPECS, seedCount: args.seedCount, seedPlan: seedPlan.map((p) => p.studyId), orderPlan })));
     return;
   }
 
@@ -213,11 +243,12 @@ async function main() {
   fs.mkdirSync(outRoot, { recursive: true });
   for (const { seed, studyId, outDir } of seedPlan) {
     fs.mkdirSync(outDir, { recursive: true });
-    console.log(`[formal] === seed ${seed} (range ${args.startSeed}..${args.startSeed + args.seedCount - 1}): ${studyId} ===`);
+    const { orderLabel } = armSpecsForSeed(seed);
+    console.log(`[formal] === seed ${seed} (range ${args.startSeed}..${args.startSeed + args.seedCount - 1}): ${studyId} | arms: ${orderLabel} ===`);
     const run = await runRealStudy({
       dataset,
       studyId,
-      armSpecs: FORMAL_ARM_SPECS.map((s) => ({ ...s })),
+      armSpecs: armSpecsForSeed(seed).specs,
       budgets,
       transportForArm: (historyId, armLedger, contentMode) => {
         // The gate builds the ONLY real transport (budgeted fetch + verified

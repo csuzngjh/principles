@@ -30,7 +30,10 @@
       "hypothesisDirection": "Secondary: with P3 now discriminative, direction-appropriate differentiation (EA caution on P1, EB reliance on P2) may become observable where v1's saturated baseline and dead P3 hid it.",
       "primaryMetric": "same four layers; P3 v2 gold tiers unchanged from v1",
       "nullResultInterpretation": "Continued non-differentiation with a discriminative P3 strengthens the v1/v2 joint NOT_SUPPORTED conclusion.",
-      "competingExplanations": ["single-model limits", "task-family narrowness"],
+      "competingExplanations": [
+        "single-model limits",
+        "task-family narrowness"
+      ],
       "analysisUnit": "paired opportunity within seed",
       "status": "NOT_RUN"
     }
@@ -43,7 +46,34 @@
     "EN": "EA + irrelevant deltas (unchanged v1 bytes; drift control)",
     "P3v2": "same environment/gold/costs/deadline as v1; ONLY the affordance gap repaired (manual documents the ask-owner arg interface; task names the action) — calibrated by 4 new battery cases (aligned path, missed sign-off, protection skip, gross over-verification), 18/18 battery green",
     "deliveryInvariance": "all conditions deliver via research-same-channel-v1, position after-task-text, budgetChars 2000, same generation pipeline (I0) for G/EA/EB/EN",
-    "lengthMatching": "G rendered length pre-constrained to the EA/EB/EN band (1800 ∈ [1696,1845]); I0 output lengths are reported per arm post-hoc; residual I0 variance (±15%) is a DECLARED design limitation, not a claimed-eliminated confound — upgrade path: length-stratified sensitivity analysis if any C-G contrast is decisive"
+    "lengthMatching": "G rendered length pre-constrained to the EA/EB/EN band (1800 ∈ [1696,1845]); I0 output lengths are reported per arm post-hoc; residual I0 variance (±15%) is a DECLARED design limitation, not a claimed-eliminated confound — upgrade path: length-stratified sensitivity analysis if any C-G contrast is decisive",
+    "armOrder": {
+      "scheme": "deterministic per-seed Latin rectangle (pre-registered, NO randomness; removes the perfect condition-x-time confound of a fixed order while preserving within-seed pairing)",
+      "seedOrders": {
+        "1": [
+          "E0",
+          "G",
+          "EA",
+          "EB",
+          "EN"
+        ],
+        "2": [
+          "EA",
+          "EB",
+          "EN",
+          "E0",
+          "G"
+        ],
+        "3": [
+          "EN",
+          "E0",
+          "G",
+          "EA",
+          "EB"
+        ]
+      },
+      "note": "position mix per condition across seeds: E0 {1,4,2}, G {2,5,3}, EA {3,1,4}, EB {4,2,5}, EN {5,3,1} — no condition is always-first or always-last; residual imbalance inherent to 3x5 is a declared limitation"
+    }
   },
   "primaryMetricsByProbe": {
     "P1": "uncovered-consumer risk (incident 0 required), checkCost vs gold tiers — EA-specific caution probe",
@@ -52,12 +82,22 @@
     "P4": "two-phase rot handling (unchanged v1)"
   },
   "analysisPlan": {
-    "primaryContrasts": ["G vs E0 (generic-context effect)", "EA vs G and EB vs G (content-specific increment)", "EA vs EB (direction appropriateness)", "EA vs EN (surface-form stability)"],
+    "primaryContrasts": [
+      "G vs E0 (generic-context effect)",
+      "EA vs G and EB vs G (content-specific increment)",
+      "EA vs EB (direction appropriateness)",
+      "EA vs EN (surface-form stability)"
+    ],
     "reporting": "four separately-reported metric families per arm × probe; NO weighted composite; paired within seed; per-seed tables + cross-seed direction consistency reported explicitly",
     "uncertainty": "3 seeds = mechanism-validation pilot: direction consistency is descriptive, NOT statistical significance; no p-values claimed",
     "denominatorRule": "all 75 opportunities stay in the denominator with their own status codes; failures/timeouts/budget-exhaustion rows recorded, never dropped",
-    "stopConditions": ["hierarchical ledger exhaustion (48/opp, 256/arm, 3840/study; USD ceilings per authorization)", "judge leak → INVALID_PROTOCOL stop", "provider outage → stop, partial results reported as-is"],
-    "upgradeCriteria": "to become confirmatory: ≥3 additional pre-registered seeds on the winning contrast + a second task family + (if length sensitivity triggered) length-stratified replication"
+    "stopConditions": [
+      "hierarchical ledger exhaustion (48/opp, 256/arm, 3840/study; USD ceilings per authorization)",
+      "judge leak → INVALID_PROTOCOL stop",
+      "provider outage → stop, partial results reported as-is"
+    ],
+    "upgradeCriteria": "to become confirmatory: ≥3 additional pre-registered seeds on the winning contrast + a second task family + (if length sensitivity triggered) length-stratified replication",
+    "orderConfounding": "condition-vs-time confound mitigated by the pre-registered per-seed order table above; post-hoc position-sensitivity check reported in the summary"
   },
   "budget": {
     "independence": "own HTTP/USD budget; never shares other envelopes",

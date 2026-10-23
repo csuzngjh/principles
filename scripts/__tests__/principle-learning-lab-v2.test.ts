@@ -145,7 +145,7 @@ describe('five-condition formal-v2 plan (gate sequence, zero network)', () => {
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain('does not carry approved: true');
   });
-  it('with a signed record the plan previews the five conditions in frozen order over seeds 1..3', () => {
+  it('with a signed record the plan previews the five conditions over seeds 1..3 with the pre-registered per-seed Latin rectangle', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pl-v2-signed-'));
     fs.writeFileSync(path.join(dir, 'owner-decision.json'), JSON.stringify({
       approved: true, fixtureHash: v2.fixtureHash, decidedBy: 'Owner (test fixture)', decidedAt: '2026-10-23T00:00:00Z', scope: 'test',
@@ -159,9 +159,30 @@ describe('five-condition formal-v2 plan (gate sequence, zero network)', () => {
     const r = runCli(['--authorization', path.join(dir, 'authorization.json'), '--dataset', V2, '--arms', 'formal-v2', '--start-seed', '1', '--seed-count', '3', '--dry-run', '--out', out]);
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('dataset PLE-PILOT-02');
-    expect(r.stdout).toContain('E0:policy → G:policy → EA:policy → EB:policy → EN:policy');
+    // the pre-registered deterministic order table (preregistration.json contrastDesign.armOrder)
+    expect(r.stdout).toContain('seed 1: E0:policy → G:policy → EA:policy → EB:policy → EN:policy');
+    expect(r.stdout).toContain('seed 2: EA:policy → EB:policy → EN:policy → E0:policy → G:policy');
+    expect(r.stdout).toContain('seed 3: EN:policy → E0:policy → G:policy → EA:policy → EB:policy');
     expect(r.stdout).toContain('seeds 1..3 → PLE-PILOT-02-G-S1, PLE-PILOT-02-G-S2, PLE-PILOT-02-G-S3');
     expect(r.stdout).toContain('DRY RUN');
+    // Latin-rectangle property: across the three seeds every condition holds a
+    // MIX of positions — no condition is always-first or always-last (the
+    // fixed-order condition-x-time confound is broken)
+    const orders = [
+      ['E0', 'G', 'EA', 'EB', 'EN'],
+      ['EA', 'EB', 'EN', 'E0', 'G'],
+      ['EN', 'E0', 'G', 'EA', 'EB'],
+    ];
+    for (const cond of ['E0', 'G', 'EA', 'EB', 'EN']) {
+      const positions = orders.map((o) => o.indexOf(cond) + 1);
+      expect(new Set(positions).size).toBe(3); // three distinct positions
+      expect(Math.max(...positions) - Math.min(...positions)).toBeGreaterThanOrEqual(2);
+    }
+    // and the order table in the preregistration matches the CLI table
+    const preregOrders = (v2 as any).byFile ? JSON.parse(fs.readFileSync(path.join(V2, 'preregistration.json'), 'utf8')).contrastDesign.armOrder.seedOrders : null;
+    for (const [seed, order] of Object.entries<any>(preregOrders)) {
+      expect(order).toEqual(orders[Number(seed) - 1]);
+    }
   });
   it('the v2 plan refuses against the V1 dataset (G history absent there — fail-loud, no silent substitution)', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pl-v2-signed-'));
