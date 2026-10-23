@@ -122,11 +122,11 @@ describe('formal CLI gate sequence (child process, --dry-run, zero network)', ()
     expect(r.stdout).toContain('EA:policy → EA:summary → EA:raw → EA:none');
   });
 
-  it('the default seed-1 window refuses when Seed 1 already holds a completed study (no silent re-run)', () => {
-    const r = runCli();
-    expect(r.status).not.toBe(0);
-    expect(r.stderr).toContain('never re-run or overwritten');
-  });
+  // NOTE: the default seed-1 anti-overwrite refusal is environment-dependent
+  // (it needs Seed 1's completed output in the real output root — true on a
+  // dev machine, false on clean CI). Its protection is asserted by the
+  // temp-dir simulation below ("completed seeds are never re-run or
+  // overwritten"), so no real-root test exists here.
 
   it('missing credentials refuse before any HTTP (fail-closed, zero requests)', () => {
     const r = runCliWithoutCredential();
