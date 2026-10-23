@@ -7,6 +7,8 @@ import { SqliteConnection, SqliteActivationStateStore, SqlitePIArtifactStore, tr
 import type { ActivationStatusRecord } from '@principles/core/runtime-v2';
 import Database from 'better-sqlite3';
 import { PromptActivationReader, RUNTIME_V2_PRINCIPLE_BUDGET } from '../../src/core/runtime-v2-prompt-activation-reader.js';
+import * as yaml from 'js-yaml';
+import { getDefaultPdConfig } from '@principles/core/runtime-v2';
 import { escapeXml } from '@principles/core/prompt-builder';
 
 const TEST_PRINCIPLE_TEXT = 'UNIQUE_RUNTIME_V2_TEST_PRINCIPLE_7x9k2';
@@ -732,6 +734,43 @@ describe('Runtime V2 prompt activation observability events', () => {
     expect(payload.budgetCapacitySource).toBe('host_effective_window');
     expect(payload.budgetCapacityStatus).toBe('confirmed');
     expect(payload.budgetContextWindowTokens).toBe(256_000);
+    expect(payload.budgetPolicyVersion).toBe('model_aware_v1');
+    expect(payload.budgetFallbackReason).toBeUndefined();
+  });
+
+  // PRI-1020: the Owner's declared window (promptBudget config section) is
+  // tier 0 — it outranks the host's own trusted window on the plugin-local
+  // route too, and the event carries operator_declared provenance.
+  it('records operator_declared provenance when the workspace declares a window (outranks host facts)', async () => {
+    const artifactId = 'art-v2-obs-declared-001';
+    const principleId = 'princ-v2-obs-declared-001';
+    insertValidatedPrincipleArtifact({ artifactId, principleId });
+    await insertPromptActivation({ artifactId, principleId });
+
+    const config = getDefaultPdConfig();
+    config.promptBudget = { declaredContextWindowTokens: 262144, hosts: { openclaw: 400000 } };
+    fs.writeFileSync(path.join(tempWorkspaceDir, '.pd', 'config.yaml'), yaml.dump(config), 'utf8');
+
+    const { EventLogService } = await import('../../src/core/event-log.js');
+    const mockEventLog = (EventLogService.get as ReturnType<typeof vi.fn>)();
+    const spy = mockEventLog.recordRuntimeV2ActivationsInjected as ReturnType<typeof vi.fn>;
+    spy.mockClear();
+
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+    // The host ALSO reports a trusted window — the per-host declaration wins.
+    await handleBeforePromptBuild(makeMinimalEvent(), makeCtx({
+      contextTokenBudget: 256_000,
+      contextWindowSource: 'model',
+      modelProviderId: 'anthropic',
+      modelId: 'claude-sonnet-4-5',
+    }));
+
+    expect(spy).toHaveBeenCalled();
+    const payload = spy.mock.calls[0][0];
+    expect(payload.budget).toBe(6250); // 400000 tokens → floor(2000 × 400000 / 128000)
+    expect(payload.budgetCapacitySource).toBe('operator_declared');
+    expect(payload.budgetCapacityStatus).toBe('confirmed');
+    expect(payload.budgetContextWindowTokens).toBe(400_000);
     expect(payload.budgetPolicyVersion).toBe('model_aware_v1');
     expect(payload.budgetFallbackReason).toBeUndefined();
   });

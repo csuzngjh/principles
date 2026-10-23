@@ -189,6 +189,8 @@ export function redactPdConfig(effective: EffectivePdConfig): RedactedPdConfigSu
     contextInjection: effective.resolvedContextInjection,
     // PRI-917 v0.3.2 §8: advisory-only capability config; no secrets, safe to show.
     reuseEvaluation: config.reuseEvaluation,
+    // PRI-1020: owner-declared capacity windows; token counts only, no secrets.
+    promptBudget: config.promptBudget,
     warnings,
   };
 }

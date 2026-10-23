@@ -680,8 +680,8 @@ export interface RuntimeV2PromptActivationsInjectedEventData {
    * missing field is "policy unknown", never "capacity zero").
    */
   budgetPolicyVersion?: string;
-  /** Which fact produced the budget (host window / catalog / legacy fallback). */
-  budgetCapacitySource?: 'host_effective_window' | 'pi_catalog_exact' | 'legacy_fallback';
+  /** Which fact produced the budget (owner declaration / host window / catalog / legacy fallback). */
+  budgetCapacitySource?: 'operator_declared' | 'host_effective_window' | 'pi_catalog_exact' | 'legacy_fallback';
   /** confirmed = a real context window was resolved; unknown = fixed-budget fallback. */
   budgetCapacityStatus?: 'confirmed' | 'unknown';
   /** The context window the budget was derived from; present only when confirmed. */
@@ -737,6 +737,7 @@ export const RuntimeV2PromptActivationsInjectedEventDataSchema = Type.Object({
   // old events and old readers stay valid).
   budgetPolicyVersion: Type.Optional(Type.String()),
   budgetCapacitySource: Type.Optional(Type.Union([
+    Type.Literal('operator_declared'),
     Type.Literal('host_effective_window'),
     Type.Literal('pi_catalog_exact'),
     Type.Literal('legacy_fallback'),

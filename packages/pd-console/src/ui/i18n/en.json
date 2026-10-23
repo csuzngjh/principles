@@ -102,6 +102,7 @@
       "promptCapacityListRoute": "list injection (billed on the selected lines)",
       "promptCapacityPerHostEntry": "{{host}}: {{billing}} — {{used}}/{{budget}} chars{{full}}{{observed}}",
       "promptCapacityPerHostFull": " (full)",
+      "promptCapacityPerHostDeclared": "(budget from the workspace config declaration)",
       "promptCapacityPerHostObserved": " (budget from this host's most recent runtime observation at {{observedAt}})",
       "promptCapacityViewAsHost": "View as {{host}}",
       "promptCapacityClearHost": "Clear selection",
@@ -116,6 +117,8 @@
       "promptBudgetFallbackObservedSuffix": "; the runtime's most recent observation was at {{observedAt}}",
       "budgetCapacitySourceHostWindow": "host effective context window",
       "budgetCapacitySourcePiCatalog": "exact model catalog match",
+      "budgetCapacitySourceOperatorDeclared": "workspace config declaration",
+      "budgetCapacitySourceOperatorDeclaredSuffix": ", source: workspace config declaration",
       "budgetFallbackReason": {
         "host_capacity_absent": "the host provided no context capacity fact",
         "host_capacity_source_untrusted": "the host capacity source is untrusted",

@@ -32,12 +32,14 @@ import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-st
 import {
   resolveWorkspaceHostToolSemantics,
   checkPromptArtifactDeliverabilityById,
+  operatorDeclaredBudgetResolution,
   resolveLivePromptInjectionProjection,
   runtimeBudgetObservationToResolution,
   selectConsoleRuntimeBudgetFacts,
   type PromptArtifactDeliverability,
   type PromptInjectionTargetHost,
 } from '@principles/host-runtime';
+import { PROMPT_BUDGET_HOST_KINDS, type PromptBudgetResolution } from '@principles/core/runtime-v2';
 
 const MVP_PROVEN_CHANNELS: ReadonlySet<string> = new Set<string>(MVP_CHANNELS);
 
@@ -62,6 +64,7 @@ function isActivationSuccess(activation: ActivationDecision): boolean {
 function describeBudgetBasis(
   hostKind: PromptInjectionTargetHost,
   facts: Pick<ReturnType<typeof selectConsoleRuntimeBudgetFacts>, 'perHost' | 'stalePerHost'>,
+  declared?: PromptBudgetResolution,
 ): string {
   const used = facts.perHost.get(hostKind);
   if (used !== undefined) {
@@ -71,6 +74,11 @@ function describeBudgetBasis(
       // host supplied no trusted capacity). The number is then the fixed
       // budget, not a host window — say so.
       : `budget basis=runtime_observation_fallback (${hostKind}, runtime reason=${used.fallbackReason ?? 'unknown'}, observed at ${used.observedAt})`;
+  }
+  // PRI-1020: the Owner's declared window backing this forecast — name it as
+  // a declaration, never as a runtime fact.
+  if (declared !== undefined) {
+    return `budget basis=operator_declared (${hostKind}, context window declared as ${declared.contextWindowTokens ?? 'unknown'} tokens in .pd/config.yaml)`;
   }
   const stale = facts.stalePerHost.get(hostKind);
   if (stale !== undefined) {
@@ -433,6 +441,11 @@ export class ApprovalsConsoleModel {
   private async checkPromptInjectionBudget(activationId: string, targetHost?: PromptInjectionTargetHost): Promise<string | undefined> {
     let resolution;
     let budgetFacts: ReturnType<typeof selectConsoleRuntimeBudgetFacts>;
+    // PRI-1020: declared bases per host (Owner's promptBudget config), used
+    // when a host has no fresh runtime observation. Scoped here so the basis
+    // descriptions at the call sites below see the same facts the projection
+    // ran under.
+    let declaredBudgetByHost = new Map<PromptInjectionTargetHost, PromptBudgetResolution>();
     // PRI-1017: the post-approval forecast runs under the workspace's most
     // recent runtime budget OBSERVATION for the target host (per-host for
     // unconfirmed routes), so the warning describes the budget the last real
@@ -447,6 +460,18 @@ export class ApprovalsConsoleModel {
       const perHostBudget = new Map(
         [...budgetFacts.perHost].map(([hostKind, observation]) => [hostKind, runtimeBudgetObservationToResolution(observation)] as const),
       );
+      // PRI-1020: no fresh observation ⇒ the Owner's declared basis, same as
+      // the grouped/activations surfaces; a fresh observation still wins.
+      const configLoad = loadPdConfig(this.workspaceDir);
+      const declaredConfig = configLoad.ok ? configLoad.effective.config.promptBudget : undefined;
+      for (const hostKind of PROMPT_BUDGET_HOST_KINDS) {
+        if (perHostBudget.has(hostKind)) continue;
+        const declared = operatorDeclaredBudgetResolution(declaredConfig, hostKind);
+        if (declared !== undefined) {
+          perHostBudget.set(hostKind, declared);
+          declaredBudgetByHost.set(hostKind, declared);
+        }
+      }
       resolution = await resolveLivePromptInjectionProjection({
         workspaceDir: this.workspaceDir,
         ...(targetHost !== undefined ? { targetHost } : {}),
@@ -465,7 +490,7 @@ export class ApprovalsConsoleModel {
       // Each per-host forecast ran under ITS OWN budget basis (observation,
       // runtime fallback, stale fallback, or no observation) — the headline
       // numbers must never imply a single host's confirmation covers them all.
-      return `injection_capacity_unconfirmed: the activation is committed but this workspace's effective injection route cannot be confirmed (${resolution.decision.unconfirmedReason ?? 'unknown reason'}); per-host forecasts: ${resolution.perHost.map((entry) => `${entry.hostKind}=${entry.projection.route} (${entry.projection.usedChars}c/${entry.projection.budget}c${entry.projection.truncated ? ', truncated' : ''}) ${describeBudgetBasis(entry.hostKind, budgetFacts)}`).join('; ')}. nextAction=${resolution.decision.nextAction ?? 'pass an explicit target host (openclaw|codex|workbuddy)'}`;
+      return `injection_capacity_unconfirmed: the activation is committed but this workspace's effective injection route cannot be confirmed (${resolution.decision.unconfirmedReason ?? 'unknown reason'}); per-host forecasts: ${resolution.perHost.map((entry) => `${entry.hostKind}=${entry.projection.route} (${entry.projection.usedChars}c/${entry.projection.budget}c${entry.projection.truncated ? ', truncated' : ''}) ${describeBudgetBasis(entry.hostKind, budgetFacts, declaredBudgetByHost.get(entry.hostKind))}`).join('; ')}. nextAction=${resolution.decision.nextAction ?? 'pass an explicit target host (openclaw|codex|workbuddy)'}`;
     }
     const {projection} = resolution;
     if (projection.injectedActivationIds.includes(activationId)) {
@@ -474,7 +499,7 @@ export class ApprovalsConsoleModel {
     // Never let a stale observation masquerade as the current budget in the
     // warning: name the basis the forecast actually ran under.
     const decidedHost = resolution.decision.hostKind;
-    const budgetBasisNote = decidedHost === undefined ? '' : ` ${describeBudgetBasis(decidedHost, budgetFacts)}`;
+    const budgetBasisNote = decidedHost === undefined ? '' : ` ${describeBudgetBasis(decidedHost, budgetFacts, declaredBudgetByHost.get(decidedHost))}`;
     const projectionDetail = projection.warnings.length > 0 ? ` projection warnings: ${projection.warnings.join(' | ')}` : '';
     // AC-02/R-A3: oversized is independent of `truncated` — say WHY first.
     if (projection.oversizedActivationIds.includes(activationId)) {

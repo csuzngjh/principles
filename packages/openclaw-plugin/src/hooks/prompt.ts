@@ -11,7 +11,7 @@ import type { ContextInjectionConfig } from '../types.js';
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
 import { PathResolver } from '../core/path-resolver.js';
 import { selectPrinciplesForInjection, DEFAULT_PRINCIPLE_BUDGET } from '../core/principle-injection.js';
-import { getCachedMaskedPrincipleSet, RUNTIME_V2_PRINCIPLE_BUDGET, getPromptModelCatalog, resolvePromptBudget, trimToBudget, renderPrinciplesToDirectives, formatCorePrinciplesList, resolveOutputLanguage, DEFAULT_OUTPUT_LANGUAGE } from '@principles/core/runtime-v2';
+import { getCachedMaskedPrincipleSet, RUNTIME_V2_PRINCIPLE_BUDGET, getPromptModelCatalog, operatorDeclaredContextWindow, resolvePromptBudget, trimToBudget, renderPrinciplesToDirectives, formatCorePrinciplesList, resolveOutputLanguage, DEFAULT_OUTPUT_LANGUAGE } from '@principles/core/runtime-v2';
 import type { PromptBudgetResolution, ResolvedOutputLanguage, PromptSelectionPolicy } from '@principles/core/runtime-v2';
 import { nextSessionTurnOrdinal } from '@principles/core/trajectory-store';
 import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
@@ -696,7 +696,16 @@ export async function handleBeforePromptBuild(
       // legacy 2000 with an observable reason when nothing is confirmable).
       // The shared route resolves the same facts inside host-runtime — same
       // resolver, same catalog, deterministic same result.
+      // PRI-1020: the Owner's declared window (.pd/config.yaml promptBudget)
+      // outranks all of these (tier 0); plugin-local route hostKind is always
+      // openclaw. Loader never throws; malformed config degrades to no
+      // declaration and is warned about by the other config readers here.
+      const declaredWindow = operatorDeclaredContextWindow(
+        loadPdConfigForPlugin(workspaceDir).effective.config.promptBudget,
+        'openclaw',
+      );
       v2PromptBudget = resolvePromptBudget({
+        ...(declaredWindow !== undefined ? { operatorDeclared: { contextWindowTokens: declaredWindow } } : {}),
         hostCapacity: {
           contextTokenBudget: ctx.contextTokenBudget,
           contextWindowSource: ctx.contextWindowSource,

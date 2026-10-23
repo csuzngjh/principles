@@ -9,14 +9,17 @@ import {
 } from '@principles/core/runtime-v2';
 import {
   checkPromptArtifactDeliverability,
+  operatorDeclaredBudgetResolution,
   resolveLivePromptInjectionProjection,
   RUNTIME_BUDGET_OBSERVATION_STALE_REASON,
   runtimeBudgetObservationToResolution,
   selectConsoleRuntimeBudgetFacts,
   type PromptInjectionTargetHost,
 } from '@principles/host-runtime';
+import { PROMPT_BUDGET_HOST_KINDS } from '@principles/core/runtime-v2';
 import { loadLedger } from '@principles/core/principle-tree-ledger';
 import type { ApprovalRecord, PIArtifactRecord } from '@principles/core/runtime-v2';
+import { loadPdConfig } from '../config/pd-config-store.js';
 import {
   createArtifactPrincipleResolutionDeps,
   resolveArtifactPrincipleId,
@@ -470,6 +473,22 @@ export class ApprovalsGroupedConsoleModel {
       const perHostBudget = new Map(
         [...facts.perHost].map(([hostKind, observation]) => [hostKind, runtimeBudgetObservationToResolution(observation)] as const),
       );
+      // PRI-1020: a host with NO fresh runtime observation falls back to the
+      // Owner's declared basis (.pd/config.yaml promptBudget) instead of the
+      // fixed 2000 — resolved through the same tier-0 policy branch the real
+      // injection uses, so forecast and injection can never disagree. A fresh
+      // observation still wins (it is what the runtime actually did last).
+      const configLoad = loadPdConfig(this.workspaceDir);
+      const declaredConfig = configLoad.ok ? configLoad.effective.config.promptBudget : undefined;
+      const declaredHosts = new Set<PromptInjectionTargetHost>();
+      for (const hostKind of PROMPT_BUDGET_HOST_KINDS) {
+        if (perHostBudget.has(hostKind)) continue;
+        const declared = operatorDeclaredBudgetResolution(declaredConfig, hostKind);
+        if (declared !== undefined) {
+          perHostBudget.set(hostKind, declared);
+          declaredHosts.add(hostKind);
+        }
+      }
       const resolution = await resolveLivePromptInjectionProjection({
         workspaceDir: this.workspaceDir,
         ...(targetHost !== undefined ? { targetHost } : {}),
@@ -503,7 +522,13 @@ export class ApprovalsGroupedConsoleModel {
             nextAction: resolution.decision.nextAction ?? 'pass an explicit target host (openclaw|codex|workbuddy)',
             perHost: resolution.perHost.map((entry) => {
               const observation = facts.perHost.get(entry.hostKind);
-              const stale = observation === undefined ? facts.stalePerHost.get(entry.hostKind) : undefined;
+              // PRI-1020: the stale marker explains a FALLBACK that ignored a
+              // too-old observation; it must not contradict a declared basis
+              // that was actually used.
+              const declaredUsed = observation === undefined && declaredHosts.has(entry.hostKind);
+              const stale = observation === undefined && !declaredUsed
+                ? facts.stalePerHost.get(entry.hostKind)
+                : undefined;
               return {
                 hostKind: entry.hostKind,
                 route: entry.projection.route,
@@ -529,7 +554,8 @@ export class ApprovalsGroupedConsoleModel {
       // to whichever host happens to appear first.
       const decidedHost = resolution.decision.hostKind;
       const usedObservation = decidedHost !== undefined ? facts.perHost.get(decidedHost) : undefined;
-      const staleObservation = decidedHost !== undefined && usedObservation === undefined
+      const declaredHeadlineUsed = decidedHost !== undefined && usedObservation === undefined && declaredHosts.has(decidedHost);
+      const staleObservation = decidedHost !== undefined && usedObservation === undefined && !declaredHeadlineUsed
         ? facts.stalePerHost.get(decidedHost)
         : undefined;
       return {

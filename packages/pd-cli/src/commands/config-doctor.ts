@@ -118,6 +118,24 @@ function formatTextOutput(output: DoctorOutput): string {
   }
   lines.push('');
 
+  // PRI-1020: the Owner-declared context windows are tier 0 of the injection
+  // budget chain. Show what is declared so an operator can see WHY a budget
+  // scaled (or why it stayed at the 2000 fallback).
+  lines.push('Prompt injection budget declaration:');
+  if (output.promptBudget.declaredContextWindowTokens === undefined && output.promptBudget.hosts === undefined) {
+    lines.push('  declared: (nothing — budget resolves from host facts / model catalog / fixed fallback)');
+  } else {
+    if (output.promptBudget.declaredContextWindowTokens !== undefined) {
+      lines.push(`  global:   ${output.promptBudget.declaredContextWindowTokens} tokens`);
+    }
+    if (output.promptBudget.hosts !== undefined) {
+      for (const [hostKind, tokens] of Object.entries(output.promptBudget.hosts)) {
+        lines.push(`  ${hostKind}:   ${tokens} tokens`);
+      }
+    }
+  }
+  lines.push('');
+
   lines.push('Provider health:');
   if (output.providerHealth.length === 0) {
     lines.push('  (no providers discovered)');
