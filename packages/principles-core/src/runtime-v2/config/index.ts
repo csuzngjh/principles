@@ -23,6 +23,8 @@ export type {
   WorkspaceEnvironment,
   PrinciplesConfig,
   ReuseEvaluationConfig,
+  PromptBudgetConfig,
+  PromptBudgetHostKind,
   PdConfig,
   PdConfigValidationError,
   PdConfigValidationResultOk,
@@ -55,6 +57,8 @@ export {
   DANGEROUS_KEYS,
   // PRI-587 Workspace environment enum
   WORKSPACE_ENVIRONMENTS,
+  // PRI-1020 prompt-budget host kinds
+  PROMPT_BUDGET_HOST_KINDS,
   // PRI-304 Enums
   PROFILE_AUDIT_LEVELS,
   PROFILE_EVOLUTION_MODES,
@@ -92,6 +96,7 @@ export {
 // Effective config
 export {
   computeEffectivePdConfig,
+  operatorDeclaredContextWindow,
 } from './pd-config-effective.js';
 
 // Redaction

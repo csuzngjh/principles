@@ -47,6 +47,8 @@ interface WorkspaceOpts {
   sharedFlag?: boolean;
   selfReport?: boolean;
   declare?: PromptInjectionTargetHost[];
+  /** PRI-1020: Owner-declared capacity written into .pd/config.yaml. */
+  promptBudget?: { declaredContextWindowTokens?: number; hosts?: Record<string, number> };
 }
 
 function tempWorkspace(opts?: WorkspaceOpts): string {
@@ -54,6 +56,9 @@ function tempWorkspace(opts?: WorkspaceOpts): string {
   tempDirs.push(workspaceDir);
   fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
   const config = getDefaultPdConfig();
+  if (opts?.promptBudget !== undefined) {
+    config.promptBudget = opts.promptBudget;
+  }
   if (opts?.sharedFlag) {
     config.features.abstraction_layer_v1 = { ...config.features.abstraction_layer_v1, enabled: true };
   }
@@ -337,6 +342,48 @@ describe('AC-02/AC-04/AC-06: the shared production path resolves from modelConte
     expect(event.injectedCharCount).toBeLessThanOrEqual(4000);
     // The recorded event validates against the TypeBox wire schema.
     expect(Value.Check(RuntimeV2PromptActivationsInjectedEventDataSchema, event)).toBe(true);
+  });
+
+  it('PRI-1020 tier 0: an Owner declaration outranks trusted host facts and drives the event provenance', async () => {
+    const dir = tempWorkspace({
+      sharedFlag: true,
+      declare: ['codex'],
+      promptBudget: { declaredContextWindowTokens: 262_144, hosts: { codex: 400_000 } },
+    });
+    await seedActivation(dir, 'od-1', 'declared principle');
+    const { events, injected } = captureEmitter();
+    const runtime = createProductionHostRuntime({ hostKind: 'codex', events });
+    // The host ALSO reports a trusted window, but the per-host declaration
+    // wins: 400000 tokens → 6250 chars.
+    await runtime.dispatch(promptEvent(dir, {
+      contextTokenBudget: 256_000,
+      contextWindowSource: 'model',
+      modelId: 'claude-sonnet-4-5',
+    }));
+    const event = injected[0];
+    expect(event.budget).toBe(6250);
+    expect(event.budgetCapacitySource).toBe('operator_declared');
+    expect(event.budgetCapacityStatus).toBe('confirmed');
+    expect(event.budgetContextWindowTokens).toBe(400_000);
+    expect(event.budgetPolicyVersion).toBe('model_aware_v1');
+    expect(Value.Check(RuntimeV2PromptActivationsInjectedEventDataSchema, event)).toBe(true);
+  });
+
+  it('PRI-1020: the global declaration backs a host with no model facts at all', async () => {
+    const dir = tempWorkspace({
+      sharedFlag: true,
+      declare: ['workbuddy'],
+      promptBudget: { declaredContextWindowTokens: 262_144 },
+    });
+    await seedActivation(dir, 'od-2', 'globally declared principle');
+    const { events, injected } = captureEmitter();
+    const runtime = createProductionHostRuntime({ hostKind: 'workbuddy', events });
+    await runtime.dispatch(promptEvent(dir));
+    const event = injected[0];
+    expect(event.budget).toBe(4096);
+    expect(event.budgetCapacitySource).toBe('operator_declared');
+    expect(event.budgetCapacityStatus).toBe('confirmed');
+    expect(event.budgetContextWindowTokens).toBe(262_144);
   });
 
   it('an untrusted host source falls back honestly (fixed budget, unknown status, observable bounded reason)', async () => {

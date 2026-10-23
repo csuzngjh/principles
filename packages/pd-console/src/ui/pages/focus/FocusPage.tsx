@@ -795,15 +795,24 @@ function PendingReviewCard({
                   // present a past observation as a live confirmation.
                   ? t("pages.focus.promptBudgetObservedNote", {
                       defaultValue: "预算取自最近一次运行时观测（来源 {{source}}，上下文 {{window}} tokens，观测于 {{observedAt}}）",
+                      // PRI-1020: three-way source label — the owner-declared
+                      // basis reads as a declaration, never as a runtime fact.
                       source: promptInjection.budgetCapacitySource === "pi_catalog_exact"
                         ? t("pages.focus.budgetCapacitySourcePiCatalog", { defaultValue: "模型目录精确匹配" })
-                        : t("pages.focus.budgetCapacitySourceHostWindow", { defaultValue: "宿主有效上下文窗口" }),
+                        : promptInjection.budgetCapacitySource === "operator_declared"
+                          ? t("pages.focus.budgetCapacitySourceOperatorDeclared", { defaultValue: "工作区配置声明" })
+                          : t("pages.focus.budgetCapacitySourceHostWindow", { defaultValue: "宿主有效上下文窗口" }),
                       window: promptInjection.budgetContextWindowTokens,
                       observedAt: promptInjection.budgetObservedAt,
                     })
                   : t("pages.focus.promptBudgetModelAwareNote", {
-                      defaultValue: "预算按已确认的模型上下文解析（{{window}} tokens）",
+                      defaultValue: "预算按已确认的模型上下文解析（{{window}} tokens{{sourceSuffix}}）",
                       window: promptInjection.budgetContextWindowTokens,
+                      // PRI-1020: without an observation, a confirmed budget can
+                      // only come from the Owner's declaration — say so.
+                      sourceSuffix: promptInjection.budgetCapacitySource === "operator_declared"
+                        ? t("pages.focus.budgetCapacitySourceOperatorDeclaredSuffix", { defaultValue: "，来源: 工作区配置声明" })
+                        : "",
                     })
                 : promptInjection.budgetObservedAt !== undefined
                   // PRI-1017: a fallback that still carries an observation
@@ -1650,7 +1659,14 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
                           defaultValue: "（预算来自该宿主最近一次运行时观测，观测于 {{observedAt}}）",
                           observedAt: entry.budgetObservedAt,
                         })
-                      : "",
+                      // PRI-1020: a declared basis is the Owner's own config
+                      // fact — label it as a declaration, never as an
+                      // observation.
+                      : entry.budgetCapacitySource === "operator_declared"
+                        ? t("pages.focus.promptCapacityPerHostDeclared", {
+                            defaultValue: "（预算来自工作区配置声明）",
+                          })
+                        : "",
                   })}
                   {entry.budgetFallbackReason !== undefined && (
                     <span data-testid={`prompt-capacity-perhost-reason-${entry.hostKind}`}>
