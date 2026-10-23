@@ -16,11 +16,14 @@ import {
   freezeItemsHash,
   FZ_IDS,
   preregBodyHash,
+  protocolApprovalDigest,
   validateFreezeForRealRun,
   validateFreezeRecord,
 } from '../dev/principle-learning-lab/prr/lib/prr-freeze.mjs';
+import { verifyDatasetIntegrity } from '../dev/principle-learning-lab/prr/lib/prr-dataset.mjs';
 import {
   assertStateUnchanged,
+  authoritativePrincipleStatuses,
   classifyLedgerAvailability,
   measureLedgerPrinciples,
   snapshotTree,
@@ -61,15 +64,28 @@ function fullyFrozenRecord(preregBody: any, overrides: Record<string, unknown> =
 }
 
 const FROZEN_COMMIT = 'a'.repeat(40);
-// The trusted verifier holds the AUTHORITATIVE hash of the freeze record the
-// Owner actually approved — computed here from the record under test so the
-// happy path binds, and from a snapshot in the tamper tests so tampering fails.
-const verifyOkFor = (freeze: any) => () => ({
-  verified: true,
-  approved: true,
-  frozenCommitSha: FROZEN_COMMIT,
-  approvedFreezeItemsHash: freezeItemsHash(freeze),
-});
+
+/**
+ * Simulate the REAL approval order (owner review round 3, P1-1): the Owner
+ * approves a protocol ONCE — a deep-cloned snapshot is digested and the
+ * digest SAVED — and later verifications resolve the saved decision record.
+ * The verifier therefore NEVER recomputes a digest from the object currently
+ * under test: a tampered record cannot launder itself into "approved".
+ */
+function approveOnce(freeze: any, preregBody: any) {
+  const snapshot = JSON.parse(JSON.stringify(freeze));
+  const saved = {
+    protocolDigest: protocolApprovalDigest({ freeze: snapshot, preregBody }),
+    frozenCommitSha: snapshot.ownerApproval.frozenCommitSha as string,
+  };
+  const verifier = () => ({
+    verified: true,
+    approved: true,
+    frozenCommitSha: saved.frozenCommitSha,
+    approvedProtocolDigest: saved.protocolDigest,
+  });
+  return { saved, verifier };
+}
 
 describe('freeze record structure', () => {
   const preregBody = { studyId: 'test', note: 'body' };
@@ -109,44 +125,80 @@ describe('freeze record structure', () => {
 
 describe('freeze real-run gate (fail-closed)', () => {
   const preregBody = { studyId: 'test', note: 'body' };
+  // A trusted execution context would source this (verified runner / CI);
+  // tests pass it explicitly — it is REQUIRED since owner review round 3.
+  const RUNNING_COMMIT = FROZEN_COMMIT;
 
-  it('a fully-frozen record with a trusted verifier passes', () => {
+  function frozenWithApproval() {
     const freeze = fullyFrozenRecord(preregBody);
-    const { problems, minPairsEligible, pairDenominator } = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifyOkFor(freeze), dataset });
+    const { saved, verifier } = approveOnce(freeze, preregBody);
+    return { freeze, saved, verifier };
+  }
+
+  it('a fully-frozen record with a saved Owner approval and trusted running commit passes', () => {
+    const { freeze, verifier } = frozenWithApproval();
+    const { problems, minPairsEligible, pairDenominator } = validateFreezeForRealRun({
+      freeze, preregBody, verifyOwnerApproval: verifier, dataset, runningCommitSha: RUNNING_COMMIT,
+    });
     expect(problems).toEqual([]);
     // 13 tasks − 1 unauthorized C material = 12 complete A/C pairs.
     expect(pairDenominator).toEqual({ totalTasks: 13, completePairs: 12, excludedUnauthorizedTasks: 1 });
     expect(minPairsEligible).toBe(true); // 12 complete pairs >= minPairs 3
   });
 
-  it('required inputs are mandatory: missing preregBody / dataset / verifier each refuse', () => {
-    const freeze = fullyFrozenRecord(preregBody);
-    const noBody = validateFreezeForRealRun({ freeze, preregBody: undefined, verifyOwnerApproval: verifyOkFor(freeze), dataset });
+  it('required inputs are mandatory: missing preregBody / dataset / verifier / runningCommitSha each refuse', () => {
+    const { freeze, verifier } = frozenWithApproval();
+    const noBody = validateFreezeForRealRun({ freeze, preregBody: undefined, verifyOwnerApproval: verifier, dataset, runningCommitSha: RUNNING_COMMIT });
     expect(noBody.problems.some((p: string) => p.includes('preregBody missing'))).toBe(true);
     expect(noBody.minPairsEligible).toBeNull();
 
-    const noDataset = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifyOkFor(freeze), dataset: undefined });
+    const noDataset = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifier, dataset: undefined, runningCommitSha: RUNNING_COMMIT });
     expect(noDataset.problems.some((p: string) => p.includes('dataset missing'))).toBe(true);
 
-    const noVerifier = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: undefined, dataset });
+    const noVerifier = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: undefined, dataset, runningCommitSha: RUNNING_COMMIT });
     expect(noVerifier.problems.some((p: string) => p.includes('verifier missing'))).toBe(true);
 
-    const noFreeze = validateFreezeForRealRun({ freeze: undefined, preregBody, verifyOwnerApproval: verifyOkFor(freeze), dataset });
-    expect(noFetchOk(noFreeze)).toBe(true);
+    const noFreeze = validateFreezeForRealRun({ freeze: undefined, preregBody, verifyOwnerApproval: verifier, dataset, runningCommitSha: RUNNING_COMMIT });
+    expect(noFreeze.problems.some((p: string) => p.includes('freeze record missing'))).toBe(true);
   });
-  function noFetchOk(result: any) {
-    return result.problems.some((p: string) => p.includes('freeze record missing'));
-  }
+
+  // ── Owner review round 3 — P1-2: runningCommitSha is mandatory ──
+  it('runningCommitSha missing / malformed / mismatched each refuse; matching passes (P1-2)', () => {
+    for (const [label, sha] of [
+      ['missing', undefined],
+      ['null', null],
+      ['not-a-sha string', 'HEAD'],
+      ['short hash', 'a'.repeat(7)],
+      ['non-hex', 'g'.repeat(40)],
+    ] as [string, unknown][]) {
+      const { freeze, verifier } = frozenWithApproval();
+      const { problems } = validateFreezeForRealRun({
+        freeze, preregBody, verifyOwnerApproval: verifier, dataset,
+        runningCommitSha: sha as never,
+      });
+      expect(problems.some((p: string) => p.includes('runningCommitSha missing or not a 40-hex')), label).toBe(true);
+    }
+
+    const { freeze, verifier } = frozenWithApproval();
+    const mismatched = validateFreezeForRealRun({
+      freeze, preregBody, verifyOwnerApproval: verifier, dataset, runningCommitSha: 'c'.repeat(40),
+    });
+    expect(mismatched.problems.some((p: string) => p.includes('running commit') && p.includes('differs from the Owner-approved frozen commit'))).toBe(true);
+
+    // The verifier refuses to simply echo the record's SHA as the running one:
+    // the test's mismatch above IS a differing value, and a record-copying
+    // caller would pass it — the gate compares against the SAVED approval.
+  });
 
   it('FZ-01 taskSetHash must EXIST and be well-formed — a missing hash refuses (never skipped)', () => {
-    const freeze = fullyFrozenRecord(preregBody);
+    const { freeze, verifier } = frozenWithApproval();
     const fz01: any = freeze.items.find((i: any) => i.id === 'FZ-01');
     fz01.value = { datasetId: 'x' }; // no taskSetHash at all
-    const { problems } = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifyOkFor(freeze), dataset });
+    const { problems } = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifier, dataset, runningCommitSha: RUNNING_COMMIT });
     expect(problems.some((p: string) => p.includes('taskSetHash missing or not a 64-hex'))).toBe(true);
 
     fz01.value = { taskSetHash: 'not-a-hash' };
-    const { problems: p2 } = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifyOkFor(freeze), dataset });
+    const { problems: p2 } = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifier, dataset, runningCommitSha: RUNNING_COMMIT });
     expect(p2.some((p: string) => p.includes('taskSetHash missing or not a 64-hex'))).toBe(true);
   });
 
@@ -157,170 +209,172 @@ describe('freeze real-run gate (fail-closed)', () => {
       ['empty object', () => ({})],
       ['wrong-shape object', () => ({ hello: 1 })],
     ] as const) {
-      const freeze = fullyFrozenRecord(preregBody);
-      const { problems } = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifier as never, dataset });
+      const { freeze } = frozenWithApproval();
+      const { problems } = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifier as never, dataset, runningCommitSha: RUNNING_COMMIT });
       expect(problems.length, label).toBeGreaterThan(0);
       expect(problems.join('; '), label).toMatch(/FZ-15/);
     }
   });
 
   it('verified-only or approved-only verdicts refuse (must be BOTH)', () => {
-    const freeze = fullyFrozenRecord(preregBody);
+    const { freeze } = frozenWithApproval();
     const verifiedOnly = validateFreezeForRealRun({
       freeze, preregBody,
-      verifyOwnerApproval: () => ({ verified: true, approved: false, frozenCommitSha: FROZEN_COMMIT }),
-      dataset,
+      verifyOwnerApproval: () => ({ verified: true, approved: false, frozenCommitSha: FROZEN_COMMIT, approvedProtocolDigest: protocolApprovalDigest({ freeze, preregBody }) }),
+      dataset, runningCommitSha: RUNNING_COMMIT,
     });
     expect(verifiedOnly.problems.some((p: string) => p.includes('not BOTH verified and approved'))).toBe(true);
 
     const approvedOnly = validateFreezeForRealRun({
       freeze, preregBody,
-      verifyOwnerApproval: () => ({ verified: false, approved: true, frozenCommitSha: FROZEN_COMMIT }),
-      dataset,
+      verifyOwnerApproval: () => ({ verified: false, approved: true, frozenCommitSha: FROZEN_COMMIT, approvedProtocolDigest: protocolApprovalDigest({ freeze, preregBody }) }),
+      dataset, runningCommitSha: RUNNING_COMMIT,
     });
     expect(approvedOnly.problems.some((p: string) => p.includes('not BOTH verified and approved'))).toBe(true);
   });
 
   it('verified approval without a commit binding refuses — 40-hex in the record alone is not approval', () => {
-    const freeze = fullyFrozenRecord(preregBody);
+    const { freeze } = frozenWithApproval();
     const noBinding = validateFreezeForRealRun({
       freeze, preregBody,
-      verifyOwnerApproval: () => ({ verified: true, approved: true }), // no frozenCommitSha
-      dataset,
+      verifyOwnerApproval: () => ({ verified: true, approved: true, approvedProtocolDigest: protocolApprovalDigest({ freeze, preregBody }) }),
+      dataset, runningCommitSha: RUNNING_COMMIT,
     });
     expect(noBinding.problems.some((p: string) => p.includes('no frozenCommitSha binding'))).toBe(true);
 
     const mismatched = validateFreezeForRealRun({
       freeze, preregBody,
-      verifyOwnerApproval: () => ({ verified: true, approved: true, frozenCommitSha: 'b'.repeat(40) }),
-      dataset,
+      verifyOwnerApproval: () => ({ verified: true, approved: true, frozenCommitSha: 'b'.repeat(40), approvedProtocolDigest: protocolApprovalDigest({ freeze, preregBody }) }),
+      dataset, runningCommitSha: RUNNING_COMMIT,
     });
     expect(mismatched.problems.some((p: string) => p.includes('frozenCommitSha mismatch'))).toBe(true);
   });
 
   it('verifier throwing refuses', () => {
-    const freeze = fullyFrozenRecord(preregBody);
+    const { freeze } = frozenWithApproval();
     const { problems } = validateFreezeForRealRun({
       freeze,
       preregBody,
       verifyOwnerApproval: () => {
         throw new Error('authoritative store unreachable');
       },
-      dataset,
+      dataset, runningCommitSha: RUNNING_COMMIT,
     });
     expect(problems.some((p: string) => p.includes('Owner approval verification failed'))).toBe(true);
   });
 
+  // ── Owner review round 3 — P1-1: the approval binds the COMPLETE protocol ──
+  it('mutating the prereg body, studyId, or ANY frozen value fails against the SAVED approval digest (P1-1)', () => {
+    // Approve once, save the digest.
+    const approvedFreeze = fullyFrozenRecord(preregBody);
+    const { saved } = approveOnce(approvedFreeze, preregBody);
+    const verifierOfSaved = () => ({
+      verified: true,
+      approved: true,
+      frozenCommitSha: saved.frozenCommitSha,
+      approvedProtocolDigest: saved.protocolDigest,
+    });
+
+    const cases: [string, (f: any, body: any) => void][] = [
+      ['prereg body text edited (record hash stale)', (f, body) => { body.note = 'quietly amended after approval'; }],
+      ['prereg body edited AND record hash synced, approval NOT re-obtained', (f, body) => {
+        body.note = 'amended';
+        f.prereg.canonicalSha256 = preregBodyHash(body);
+      }],
+      ['studyId changed', (f, body) => { body.studyId = 'other-study'; f.studyId = 'other-study'; }],
+      ['studyId changed in freeze only', (f) => { f.studyId = 'other-study'; }],
+      ['FZ-11.minPairs', (f) => { const it = f.items.find((i: any) => i.id === 'FZ-11'); it.value = { minPairs: 1, derivationBasis: it.value.derivationBasis }; }],
+      ['FZ-06 budget', (f) => { const it = f.items.find((i: any) => i.id === 'FZ-06'); it.value = { totalCostCapUsd: 999999, note: 'quietly raised' }; }],
+      ['FZ-13 STOP conditions', (f) => { const it = f.items.find((i: any) => i.id === 'FZ-13'); it.value = { stopConditions: ['never stop'] }; }],
+      ['FZ-01 taskSetHash', (f) => { const it = f.items.find((i: any) => i.id === 'FZ-01'); it.value.taskSetHash = 'f'.repeat(64); }],
+      ['an ownerApprovalRef', (f) => { f.items.find((i: any) => i.id === 'FZ-02').ownerApprovalRef = 'some-other-ref'; }],
+      ['an item status downgraded', (f) => { f.items.find((i: any) => i.id === 'FZ-07').status = 'OWNER_DECISION_REQUIRED'; }],
+    ];
+    for (const [label, mutate] of cases) {
+      const tamperedFreeze = fullyFrozenRecord(preregBody);
+      const tamperedBody = { ...preregBody };
+      mutate(tamperedFreeze, tamperedBody);
+      const { problems } = validateFreezeForRealRun({
+        freeze: tamperedFreeze, preregBody: tamperedBody, verifyOwnerApproval: verifierOfSaved, dataset, runningCommitSha: RUNNING_COMMIT,
+      });
+      // studyId-only changes refuse via the identity check; value/ref changes
+      // via the saved-digest reconciliation; a downgraded item status trips
+      // the structural validator first (fabricated value on a non-frozen
+      // item) — every path must refuse, each with its own explicit message.
+      const refused = problems.some((p: string) => p.includes('protocol approval reconciliation FAILED') || p.includes('studyId mismatch') || p.includes('fabricate values'))
+        && problems.some((p: string) => p.includes('INVALID_PROTOCOL') || p.includes('real run refused') || p.includes('fabricate values'));
+      expect(problems.length, label).toBeGreaterThan(0);
+      expect(refused, label).toBe(true);
+    }
+  });
+
+  it('studyId identity: prereg body without studyId, or mismatching the freeze record, refuses (P1-1)', () => {
+    const { freeze, verifier } = frozenWithApproval();
+    const noStudyId = validateFreezeForRealRun({
+      freeze, preregBody: { note: 'no study id' }, verifyOwnerApproval: verifier, dataset, runningCommitSha: RUNNING_COMMIT,
+    });
+    expect(noStudyId.problems.some((p: string) => p.includes('preregBody.studyId missing'))).toBe(true);
+
+    const mismatch = validateFreezeForRealRun({
+      freeze, preregBody: { studyId: 'other-study', note: 'body' }, verifyOwnerApproval: verifier, dataset, runningCommitSha: RUNNING_COMMIT,
+    });
+    expect(mismatch.problems.some((p: string) => p.includes('studyId mismatch'))).toBe(true);
+  });
+
+  it('old-format approval records without approvedProtocolDigest refuse — never auto-completed (P1-1)', () => {
+    const { freeze } = frozenWithApproval();
+    const oldFormat = validateFreezeForRealRun({
+      freeze, preregBody,
+      verifyOwnerApproval: () => ({ verified: true, approved: true, frozenCommitSha: FROZEN_COMMIT, approvedFreezeItemsHash: freezeItemsHash(freeze) }),
+      dataset, runningCommitSha: RUNNING_COMMIT,
+    });
+    expect(oldFormat.problems.some((p: string) => p.includes('no approvedProtocolDigest'))).toBe(true);
+  });
+
+  it('freezeItemsHash / protocolApprovalDigest are deterministic and change with any component', () => {
+    const a = fullyFrozenRecord(preregBody);
+    const b = fullyFrozenRecord(preregBody);
+    expect(freezeItemsHash(a)).toBe(freezeItemsHash(b));
+    expect(protocolApprovalDigest({ freeze: a, preregBody })).toBe(protocolApprovalDigest({ freeze: b, preregBody }));
+    const c = fullyFrozenRecord(preregBody);
+    c.items.find((i: any) => i.id === 'FZ-11').value.minPairs = 99;
+    expect(freezeItemsHash(c)).not.toBe(freezeItemsHash(a));
+    expect(protocolApprovalDigest({ freeze: c, preregBody })).not.toBe(protocolApprovalDigest({ freeze: a, preregBody }));
+    expect(protocolApprovalDigest({ freeze: a, preregBody: { studyId: 'test', note: 'other' } })).not.toBe(protocolApprovalDigest({ freeze: a, preregBody }));
+    expect(protocolApprovalDigest({ freeze: { ...a, studyId: 'zzz' }, preregBody })).not.toBe(protocolApprovalDigest({ freeze: a, preregBody }));
+  });
+
   it('FZ-11 complete-pair denominator: 12 complete pairs (13 tasks − 1 unauthorized exclusion)', () => {
-    const freeze = fullyFrozenRecord(preregBody);
+    const { freeze, verifier } = frozenWithApproval();
     // minPairs = 13 → exceeds the 12 complete pairs → UNPROVEN, never padded.
     const fz11: any = freeze.items.find((i: any) => i.id === 'FZ-11');
     fz11.value = { minPairs: 13, derivationBasis: 'owner-frozen detectable difference' };
-    const short = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifyOkFor(freeze), dataset });
+    const { saved: savedShort, verifier: vShort } = approveOnce(freeze, preregBody);
+    const short = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: vShort, dataset, runningCommitSha: RUNNING_COMMIT });
     expect(short.pairDenominator).toEqual({ totalTasks: 13, completePairs: 12, excludedUnauthorizedTasks: 1 });
     expect(short.minPairsEligible).toBe(false);
     expect(short.problems.some((p: string) => p.includes('UNPROVEN') && p.includes('12 of 13'))).toBe(true);
 
     // minPairs = 12 → passes the count comparison (all other gates still hold).
-    fz11.value = { minPairs: 12, derivationBasis: 'owner-frozen detectable difference' };
-    const exact = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifyOkFor(freeze), dataset });
+    const freeze12 = fullyFrozenRecord(preregBody);
+    const fz11b: any = freeze12.items.find((i: any) => i.id === 'FZ-11');
+    fz11b.value = { minPairs: 12, derivationBasis: 'owner-frozen detectable difference' };
+    const { verifier: vExact } = approveOnce(freeze12, preregBody);
+    const exact = validateFreezeForRealRun({ freeze: freeze12, preregBody, verifyOwnerApproval: vExact, dataset, runningCommitSha: RUNNING_COMMIT });
     expect(exact.minPairsEligible).toBe(true);
     expect(exact.problems).toEqual([]);
-  });
-
-  it('prereg body edited after freezing → INVALID_PROTOCOL hash mismatch', () => {
-    const freeze = fullyFrozenRecord(preregBody);
-    const edited = { ...preregBody, note: 'body (quietly amended after seeing results)' };
-    const { problems } = validateFreezeForRealRun({ freeze, preregBody: edited, verifyOwnerApproval: verifyOkFor(freeze), dataset });
-    expect(problems.some((p: string) => p.includes('INVALID_PROTOCOL'))).toBe(true);
-  });
-
-  it('frozen taskSetHash must equal the loaded dataset (FZ-01)', () => {
-    const freeze = fullyFrozenRecord(preregBody);
-    const fz01: any = freeze.items.find((i: any) => i.id === 'FZ-01');
-    fz01.value = { taskSetHash: '0'.repeat(64) };
-    const { problems } = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifyOkFor(freeze), dataset });
-    expect(problems.some((p: string) => p.includes('FZ-01'))).toBe(true);
   });
 
   it('minPairs without a derivation basis is refused (no unexplained N)', () => {
     const freeze = fullyFrozenRecord(preregBody);
     const fz11: any = freeze.items.find((i: any) => i.id === 'FZ-11');
     fz11.value = { minPairs: 3 };
-    const { problems } = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifyOkFor(freeze), dataset });
+    const { verifier } = approveOnce(freeze, preregBody);
+    const { problems } = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifier, dataset, runningCommitSha: RUNNING_COMMIT });
     expect(problems.some((p: string) => p.includes('derivationBasis'))).toBe(true);
   });
 
-  it('preregBodyHash is stable and canonicalization-sensitive', () => {
-    expect(preregBodyHash({ b: 1, a: 2 })).toBe(preregBodyHash({ a: 2, b: 1 }));
-    expect(preregBodyHash({ a: 2, b: 1 })).not.toBe(preregBodyHash({ a: 2, b: 3 }));
-  });
-
-  // ── Owner review round 2 — P1-1: freeze values must bind to the approved record ──
-  it('tampering with ANY frozen value fails the content reconciliation (P1-1)', () => {
-    const freeze = fullyFrozenRecord(preregBody);
-    // The verifier holds the hash of the record AS APPROVED.
-    const approvedHash = freezeItemsHash(freeze);
-    const verifierOfApproved = () => ({
-      verified: true,
-      approved: true,
-      frozenCommitSha: FROZEN_COMMIT,
-      approvedFreezeItemsHash: approvedHash,
-    });
-
-    const cases: [string, (f: any) => void][] = [
-      ['FZ-11.minPairs', (f) => { const it = f.items.find((i: any) => i.id === 'FZ-11'); it.value = { minPairs: 1, derivationBasis: it.value.derivationBasis }; }],
-      ['FZ-06 budget', (f) => { const it = f.items.find((i: any) => i.id === 'FZ-06'); it.value = { totalCostCapUsd: 999999, note: 'quietly raised' }; }],
-      ['FZ-13 STOP conditions', (f) => { const it = f.items.find((i: any) => i.id === 'FZ-13'); it.value = { stopConditions: ['never stop'] }; }],
-      ['FZ-01 taskSetHash', (f) => { const it = f.items.find((i: any) => i.id === 'FZ-01'); it.value.taskSetHash = 'f'.repeat(64); }],
-      ['an ownerApprovalRef', (f) => { f.items.find((i: any) => i.id === 'FZ-02').ownerApprovalRef = 'some-other-ref'; }],
-    ];
-    for (const [label, mutate] of cases) {
-      const tampered = fullyFrozenRecord(preregBody);
-      mutate(tampered);
-      const { problems } = validateFreezeForRealRun({ freeze: tampered, preregBody, verifyOwnerApproval: verifierOfApproved, dataset });
-      expect(problems.some((p: string) => p.includes('freeze content reconciliation FAILED')), label).toBe(true);
-      expect(problems.some((p: string) => p.includes('INVALID_PROTOCOL')), label).toBe(true);
-    }
-  });
-
-  it('approval without an itemsHash binding refuses (P1-1 completeness)', () => {
-    const freeze = fullyFrozenRecord(preregBody);
-    const { problems } = validateFreezeForRealRun({
-      freeze,
-      preregBody,
-      verifyOwnerApproval: () => ({ verified: true, approved: true, frozenCommitSha: FROZEN_COMMIT }),
-      dataset,
-    });
-    expect(problems.some((p: string) => p.includes('no approvedFreezeItemsHash'))).toBe(true);
-  });
-
-  it('a running commit differing from the approved frozen commit refuses (P1-1)', () => {
-    const freeze = fullyFrozenRecord(preregBody);
-    const mismatched = validateFreezeForRealRun({
-      freeze, preregBody, verifyOwnerApproval: verifyOkFor(freeze), dataset,
-      runningCommitSha: 'c'.repeat(40),
-    });
-    expect(mismatched.problems.some((p: string) => p.includes('running commit') && p.includes('differs from the Owner-approved frozen commit'))).toBe(true);
-
-    const matching = validateFreezeForRealRun({
-      freeze, preregBody, verifyOwnerApproval: verifyOkFor(freeze), dataset,
-      runningCommitSha: FROZEN_COMMIT,
-    });
-    expect(matching.problems).toEqual([]);
-  });
-
-  it('freezeItemsHash is deterministic and changes with any item', () => {
-    const a = fullyFrozenRecord(preregBody);
-    const b = fullyFrozenRecord(preregBody);
-    expect(freezeItemsHash(a)).toBe(freezeItemsHash(b));
-    const c = fullyFrozenRecord(preregBody);
-    c.items.find((i: any) => i.id === 'FZ-11').value.minPairs = 99;
-    expect(freezeItemsHash(c)).not.toBe(freezeItemsHash(a));
-  });
-
-  // ── Owner review round 2 — P1-2: ill-formed FZ-11 value must not skip the gate ──
-  it('FZ-11 value of any non-contract type refuses instead of skipping the sample gate (P1-2)', () => {
+  it('FZ-11 value of any non-contract type refuses instead of skipping the sample gate (P1-2, round 2)', () => {
     const variants: [string, unknown][] = [
       ['string value', 'frozen'],
       ['empty array value', []],
@@ -337,11 +391,78 @@ describe('freeze real-run gate (fail-closed)', () => {
       const freeze = fullyFrozenRecord(preregBody);
       const fz11: any = freeze.items.find((i: any) => i.id === 'FZ-11');
       fz11.value = value as never;
-      const { problems, minPairsEligible } = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifyOkFor(freeze), dataset });
+      const { verifier } = approveOnce(freeze, preregBody);
+      const { problems, minPairsEligible } = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval: verifier, dataset, runningCommitSha: RUNNING_COMMIT });
       expect(problems.length, label).toBeGreaterThan(0);
       expect(problems.join('; '), label).toMatch(/FZ-11/);
       expect(minPairsEligible, label).toBeNull();
     }
+  });
+
+  // ── Owner review round 3 — P1-4: dataset integrity is re-verified at gate time ──
+  it('a lying cached fixtureHash cannot mask post-load dataset mutation (P1-4)', () => {
+    // Simulate an attacker bypassing the deep freeze: clone the loaded dataset
+    // (JSON round-trip breaks the shared references), mutate task content,
+    // keep the ORIGINAL cached fixtureHash. The gate must refuse BOTH because
+    // the consumed structures are no longer the hashed snapshot objects AND
+    // any byFile-side mutation shows up in the recomputed hash.
+    const mutated = structuredClone(JSON.parse(JSON.stringify(dataset)));
+    mutated.tasks.tasks[0].taskText = 'tampered task text after approval';
+    expect(mutated.fixtureHash).toBe(dataset.fixtureHash); // the cache still lies
+    const { freeze, verifier } = frozenWithApproval();
+    const { problems } = validateFreezeForRealRun({
+      freeze, preregBody, verifyOwnerApproval: verifier, dataset: mutated, runningCommitSha: RUNNING_COMMIT,
+    });
+    expect(problems.some((p: string) => p.includes('dataset integrity FAILED')), 'clone+mutate refuses').toBe(true);
+
+    // A byFile-side mutation trips the recomputed-hash check explicitly.
+    const byFileMutated = structuredClone(JSON.parse(JSON.stringify(dataset)));
+    byFileMutated.byFile['tasks.json'].tasks[0].taskText = 'tampered raw file data';
+    const { problems: p2 } = validateFreezeForRealRun({
+      freeze, preregBody, verifyOwnerApproval: verifier, dataset: byFileMutated, runningCommitSha: RUNNING_COMMIT,
+    });
+    expect(p2.some((p: string) => p.includes('dataset integrity FAILED') && p.includes('content changed after loading')), 'byFile mutation refuses').toBe(true);
+  });
+
+  it('replacing a task / nested field / byFile entry is caught by the recomputed hash (P1-4)', () => {
+    const { freeze, verifier } = frozenWithApproval();
+    const variants: [string, (d: any) => void][] = [
+      ['replace a task entry', (d) => { d.tasks.tasks[1] = { ...d.tasks.tasks[1], taskText: 'replaced' }; }],
+      ['mutate a nested task field', (d) => { d.tasks.tasks[0].historyMaterial.text = 'mutated history'; }],
+      ['mutate gold', (d) => { d.gold.gold['t1-history-decides'].acceptedDecisionIds = ['d-hijacked']; }],
+      ['mutate byFile directly', (d) => { d.byFile['principles.json'].principles[0].text = 'hijacked'; }],
+      ['mutate behaviors the run consumes', (d) => { d.behaviors.behaviors['C:t1-history-decides'].output.decisionId = 'd-hijacked'; }],
+    ];
+    for (const [label, mutate] of variants) {
+      const mutated = structuredClone(JSON.parse(JSON.stringify(dataset)));
+      mutate(mutated);
+      const { problems } = validateFreezeForRealRun({
+        freeze, preregBody, verifyOwnerApproval: verifier, dataset: mutated, runningCommitSha: RUNNING_COMMIT,
+      });
+      expect(problems.some((p: string) => p.includes('dataset integrity FAILED')), label).toBe(true);
+    }
+  });
+
+  it('verifyDatasetIntegrity accepts the untouched dataset and detects direct byFile tampering', () => {
+    expect(verifyDatasetIntegrity(dataset)).toMatchObject({ ok: true });
+    const mutated = structuredClone(JSON.parse(JSON.stringify(dataset)));
+    mutated.byFile['tasks.json'].tasks.pop();
+    expect(verifyDatasetIntegrity(mutated).ok).toBe(false);
+    expect(verifyDatasetIntegrity(mutated).currentHash).not.toBe(mutated.fixtureHash);
+  });
+
+  it('post-load mutation is BLOCKED at the object level: the loaded dataset is deep-frozen (P1-4)', () => {
+    // Raw file data, consumed structures and derived indexes are all frozen —
+    // strict-mode assignment throws instead of silently diverging from the
+    // hashed snapshot.
+    expect(() => { (dataset.tasks.tasks[0] as any).taskText = 'mutated'; }).toThrow();
+    expect(() => { (dataset.byFile['tasks.json'] as any).tasks.pop(); }).toThrow();
+    expect(() => { (dataset.gold.gold['t1-history-decides'] as any).acceptedDecisionIds = ['x']; }).toThrow();
+    expect(() => { (dataset.behaviors.behaviors['C:t1-history-decides'] as any).status = 'INVALID_OUTPUT'; }).toThrow();
+    expect(() => dataset.tasksById.set('rogue', {} as never)).toThrow();
+    expect(() => { (dataset as any).goldByTask['rogue'] = {}; }).toThrow();
+    // And the verified snapshot is untouched by all of the above.
+    expect(verifyDatasetIntegrity(dataset)).toMatchObject({ ok: true });
   });
 });
 
@@ -394,17 +515,61 @@ describe('ledger availability four-way classification', () => {
       trueZeroEvidence: { auditor: 'independent-audit', recordRef: 'audit-record-1' },
     });
     expect(m.m1).toMatchObject({ count: 0, trueZero: false, reasonCode: 'ok_but_empty_ledger__semantic_review_required' });
+    // Owner review round 3, P2: M2/M3/M4 of a parse-lenient emptiness are
+    // UNMEASURABLE — never a normal zero with a success reason code.
+    expect(m.m2).toMatchObject({ count: null, denominator: null, reasonCode: 'ok_but_empty_ledger__semantic_review_required' });
+    expect(m.m3).toMatchObject({ count: null, reasonCode: 'ok_but_empty_ledger__semantic_review_required' });
+    expect(m.m4.count).toBeNull();
     // The only reachable trueZero path: structurally complete ledger, all
-    // entries usable, zero eligible, PLUS independent evidence.
-    const completeButInactive = { availability: { status: 'ok' }, ledger: { tree: { principles: { p1: { id: 'p1', status: 'deactivated' } } } } };
+    // entries usable (authoritative statuses), zero eligible, PLUS evidence.
+    const completeButInactive = { availability: { status: 'ok' }, ledger: { tree: { principles: { p1: { id: 'p1', status: 'archived' } } } } };
     const proven = measureLedgerPrinciples({
       coreResult: completeButInactive,
       authorization: { summaryFieldsAllowed: true },
       trueZeroEvidence: { auditor: 'independent-audit', recordRef: 'audit-record-1' },
     });
     expect(proven.m1.trueZero).toBe(true);
+    // The complete-ledger control keeps normal, measurable M2/M3 output.
+    expect(proven.m2.count).toBe(0);
+    expect(proven.m2.denominator).toBe(0); // archived entry is not eligible → empty perPrinciple
     const unproven = measureLedgerPrinciples({ coreResult: completeButInactive, authorization: { summaryFieldsAllowed: true } });
     expect(unproven.m1.trueZero).toBe(false);
+  });
+
+  it('status validity follows the Core authoritative enum, not a local list (P1-3, round 3)', () => {
+    // The allowlist is schema-driven from PrincipleFactSchema — the union of
+    // its literals is the authoritative contract.
+    const statuses = authoritativePrincipleStatuses();
+    expect(statuses.length).toBeGreaterThanOrEqual(5);
+    expect(statuses).toContain('active');
+    expect(statuses).toContain('archived');
+    expect(statuses).not.toContain('deactivated'); // not a Core authority value
+
+    const ok = { availability: { status: 'ok' } };
+    const ledgerOf = (status: unknown) => ({
+      availability: { status: 'ok' },
+      ledger: { tree: { principles: { p1: { id: 'p1', status: status as never } } } },
+    });
+    // Every authoritative status classifies as usable.
+    for (const status of statuses) {
+      expect(classifyLedgerAvailability(ledgerOf(status)), `status ${status}`).toBe('ok');
+    }
+    // Non-authoritative / malformed status values poison the ledger.
+    for (const [label, status] of [
+      ['deactivated (retired value)', 'deactivated'],
+      ['garbage', 'garbage'],
+      ['empty string', ''],
+      ['null', null],
+      ['missing', undefined],
+      ['non-string', 7],
+    ] as [string, unknown][]) {
+      expect(classifyLedgerAvailability(ledgerOf(status)), label).toBe('malformed_entries__semantic_review_required');
+      const m = measureLedgerPrinciples({ coreResult: ledgerOf(status), authorization: { summaryFieldsAllowed: true } });
+      expect(m.m1, label).toMatchObject({ count: null, trueZero: false });
+      expect(m.m1.reasonCode, label).toBe('malformed_ledger_entries__semantic_review_required');
+      expect(m.m2.count, label).toBeNull();
+      expect(m.m3.count, label).toBeNull();
+    }
   });
 
   it('ok_but_empty_ledger for parse-lenient structural empties (F-04)', () => {
@@ -510,10 +675,10 @@ describe('M1~M5 offline measurement logic', () => {
         { id: 'p1', status: 'active', derivedFromPainIds: ['c1'], reuseEvidence: [] },
         { id: 'p2', status: 'active', derivedFromPainIds: [], reuseEvidence: [{ candidateId: 'c1', painId: 'pain1', evidenceQuality: 'exact' }] },
         { id: 'p3', status: 'active', derivedFromPainIds: [], reuseEvidence: [{ candidateId: 'cX', painId: 'pain3', evidenceQuality: 'context_only' }] },
-        { id: 'p4', status: 'deactivated', derivedFromPainIds: [], reuseEvidence: [{ candidateId: 'c4', painId: 'pain4', evidenceQuality: 'exact' }] },
+        { id: 'p4', status: 'archived', derivedFromPainIds: [], reuseEvidence: [{ candidateId: 'c4', painId: 'pain4', evidenceQuality: 'exact' }] },
       ]),
     });
-    expect(measure.m1.count).toBe(3); // deactivated p4 excluded from eligibility
+    expect(measure.m1.count).toBe(3); // archived (authoritative non-active) p4 excluded from eligibility
     expect(measure.m2.count).toBe(3); // p1 via derived-candidate cross-check, p2/p3 direct
     expect(measure.m3.count).toBe(2); // pain3 is context_only → not complete; pain4 belongs to ineligible p4
     expect(measure.m4.count).toBe(1); // c1 claimed by p1 (derived) AND p2 (reuse) — flagged explicitly

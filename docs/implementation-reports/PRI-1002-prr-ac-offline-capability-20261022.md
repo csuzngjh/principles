@@ -14,6 +14,8 @@
 > **Owner Review 修复轮（2026-10-22，PR #2115 审查意见）**：首轮交付（head `ccaf96552`）经 Owner 审查发现四类缺陷——真实运行门的必需输入与验证器形态漏洞、FZ-11 配对分母虚高、`empty` 账本状态被误读为真零、未知成本被 `?? 0` 当零。全部修复见 **§6 修复轮记录**，回归由 55 项扩至 64 项。
 >
 > **Owner Review 第二轮修复（2026-10-23，head `a6f68c03d` 审查意见）**：经核实的三项 P1——冻结取值未与 Owner 批准内容对账（只比两个 SHA 字符串）、FZ-11 非法值形态可跳过样本量门、畸形账本条目可被报为已证明真零。全部修复见 **§7 第二轮修复记录**，回归由 64 项扩至 72 项。其中第三项在真实 core 读取下核实出比评审描述更深的一层：core 宽松解析会**静默丢弃**字符串条目并给缺 id 的对象条目**回填默认值（无 status）**，修复以 id+status 双字段契约暴露该半成品形态。
+>
+> **Owner Review 第三轮修复（2026-10-23，head `aa8cbf5a3` 审查意见）**：五项——Owner 批准未绑定完整协议（studyId+正文+全部条目）、runningCommitSha 可缺省、status 未复用 Core 权威枚举、FZ-01 信任加载时缓存哈希、宽松空账本输出误导性 M2/M3 零值。全部修复见 **§8 第三轮修复记录**，回归由 72 项扩至 75 项。
 
 ---
 
@@ -322,3 +324,81 @@ npm run dev:prr-rehearsal
 - 其余 Owner 待决清单（§4）与 §6.6 限制不变。
 
 **第二轮修复后状态收口：离线能力 GO（三项 P1 已修复并复验）；真实 M1～M5 NOT_MEASURED；真实 A/C NOT_RUN；Gate B BLOCKED；Gate C NOT_GRANTED。**
+
+---
+
+## 8. Owner Review 第三轮修复记录（2026-10-23，head `aa8cbf5a3` 审查意见）
+
+五项逐项核实属实后修复。变更范围仍限于 `scripts/dev/principle-learning-lab/prr/` 研究树与其测试，生产源码零改动。
+
+### 8.1 P1-1：Owner 批准绑定完整冻结协议（prr-freeze.mjs）
+
+| 项 | 修复前 | 修复后 |
+|---|---|---|
+| 协议摘要 | `approvedFreezeItemsHash` 只覆盖 items——studyId 与预注册正文不在绑定内 | 新增 `protocolApprovalDigest({freeze, preregBody})`：canonical-JSON SHA-256 over `{digestVersion, studyId, preregCanonicalSha256, freezeItemsSha256}`——字段顺序无关，任何有意义的协议内容变化（studyId/正文/任一条目）都改变摘要 |
+| 验证器合同 | verifier 证据为 itemsHash（旧格式） | 扩展为 `approvedProtocolDigest`：必须由验证器按 `decisionRef` 查询**实际 Owner 决策记录**并返回**批准时保存**的摘要；旧格式记录（无该字段）一律拒绝，不自动补值、不解释为已批准 |
+| studyId 身份 | 未检查 | `preregBody.studyId` 必须存在且与 `freeze.studyId` 一致；正文哈希核对保持 |
+| 测试辅助缺陷（评审点名） | `verifyOkFor(freeze)` 每次验证时对**当前待验证对象**动态计算哈希——被篡改内容自动成为"批准内容" | `approveOnce(freeze, preregBody)`：批准动作只发生一次——对 deep-cloned 快照计算摘要并保存，verifier 永远返回保存值；测试模拟"先批准→再篡改→验证拒绝"的真实顺序 |
+
+新增/更新测试：正文改动但记录哈希未更新→拒绝；正文与记录哈希同步更新但未重新批准→拒绝（digest reconciliation FAILED + INVALID_PROTOCOL）；studyId 改动（body/freeze 任一侧）→拒绝；篡改 FZ-01/06/11/13、ownerApprovalRef、条目 status 降级→拒绝；缺协议摘要/旧格式批准记录→拒绝；正确批准的不可变快照→通过。
+
+### 8.2 P1-2：runningCommitSha 必需（prr-freeze.mjs）
+
+| 项 | 修复前 | 修复后 |
+|---|---|---|
+| 必需性 | 可选输入，提供时才核对 | 必需：缺失/非 40-hex → 显式拒绝（`a real run must declare the commit it actually executes from, from a trusted runner/CI context`）；与验证器返回的**独立批准记录** `frozenCommitSha` 不一致 → 拒绝 |
+| 来源可信 | 未声明 | 合同文档写明：必须来自受信执行上下文（经验证的运行器/CI checkout）；从 `freeze.ownerApproval.frozenCommitSha` 复制不属于受信来源 |
+| 真实入口事实 | — | **如实记录**：本仓库当前没有真实 A/C 执行入口；门在仓库内的唯一调用方是离线预演（它依赖门**拒绝**其 DRAFT）。接入真实运行器属 B1 工作，届时必须以受信 runningCommitSha 通过本门 |
+
+新增测试：缺失/null/'HEAD'/短哈希/非 hex 五形态拒绝；与批准 SHA 不同拒绝；一致（且其余门禁满足）通过。
+
+### 8.3 P1-3：status 复用 Core 权威枚举（prr-readonly.mjs）
+
+| 项 | 修复前 | 修复后 |
+|---|---|---|
+| 枚举来源 | 本地检查"非空字符串" | 模块加载时从 `@principles/core/runtime-v2` 公开导出的 **`PrincipleFactSchema.properties.state`**（TypeBox Union Literals）提取权威值集（当前解析为 candidate/active/archived/deprecated/probation）——schema 驱动，Core 枚举演进自动跟随；解析失败 = 模块加载失败（fail-loud），绝不静默空表 |
+| 分类规则 | 非空字符串即合法 | status 缺失/非字符串/空串/不在权威枚举（含已退役的 `deactivated`）→ 整个账本 `malformed_entries__semantic_review_required` 不可测；混合合法+非法同样整体不可测，绝不静默过滤后计余量 |
+
+测试修正与新增：正向夹具中不符合权威枚举的 `deactivated` 全部改为 `archived`；新增权威枚举逐值通过 + 六种非法 status（deactivated/garbage/''/null/缺失/非字符串）逐一断言真实测量 `m1.count=null, trueZero=false, reasonCode='malformed_ledger_entries__semantic_review_required'`、M2/M3 不可测。
+
+### 8.4 P1-4：FZ-01 保护实际执行的数据集快照（prr-dataset.mjs + prr-freeze.mjs）
+
+| 项 | 修复前 | 修复后 |
+|---|---|---|
+| 哈希信任 | 门使用 `loadPrrDataset()` 缓存的 `fixtureHash`——加载后改动 byFile/tasks 内容，缓存不变，验证继续通过 | 门在验证时**重算**当前内容哈希（`verifyDatasetIntegrity()`），三方对账：FZ-01.taskSetHash == 重算哈希 == 缓存哈希；不一致即拒绝 |
+| 消费结构一致性 | 未检查（新发现的绕过面：JSON round-trip/structuredClone 会打破 `tasks === byFile['tasks.json']` 共享引用，篡改消费结构对 byFile 哈希不可见） | `verifyDatasetIntegrity` 同时校验六个消费结构（manifest/principles/tasks/gold/behaviors/designChecks）与 byFile 对应文件**是同一对象**、三个派生索引（tasksById/principlesById/goldByTask）仍绑定已验证快照条目；任一失败 → 专门拒绝消息 |
+| 修改阻止 | 无 | `loadPrrDataset` 返回前 **deep-freeze**（含 Map/Set：先钉死 set/delete/clear 变异方法再冻结——`Object.freeze` 单独不阻止 Map 内部变异）；严格模式下任何加载后赋值/索引变异直接 throw |
+
+新增测试：克隆体改任务内容但保留原缓存哈希 → 拒绝；替换任务/改嵌套字段/改 gold/直改 byFile/改行为脚本五变体 → 重算哈希拒绝；deep-freeze 六种原地修改（tasks/byFile/gold/behaviors/tasksById.set/goldByTask 赋值）全部 throw 且快照完好；未改动数据集完整性 ok 正控。
+
+### 8.5 P2：宽松空账本不再输出误导性 M2/M3 零值（prr-readonly.mjs）
+
+| 项 | 修复前 | 修复后 |
+|---|---|---|
+| M2/M3 | `ok_but_empty_ledger` 走主分支，输出 `count:0, denominator:0`，M3 授权时 `reasonCode:'ok'` | 专用分支：M1 保留解析 `count:0` + `trueZero:false` + 语义审查码；**M2/M3/M4 全部不可测**（count/denominator 为 null + 审查码）——宽松解析可能吞了条目，正常零值会把解析不确定性洗白成可信测量 |
+| 一致性 | — | 畸形账本与未知可用性状态已是同等 fail-closed 语义（null + 各自原因码）；完整合法账本（含非 active 权威状态）继续输出正常测量正控 |
+
+新增测试：宽松空账本+独立证据 → M1 仍不可提升、M2/M3 不可测断言；畸形账本 M2/M3/M4 不得产生正常零值；完整账本正控 M2/M3 正常可测。
+
+### 8.6 第三轮修复验证证据
+
+```text
+cd scripts && npx vitest run __tests__/prr-ac-lab.test.ts __tests__/prr-freeze-readonly.test.ts
+  → Test Files 2 passed, Tests 75 passed (75)
+npm run test:scripts
+  → Test Files 50 passed, Tests 969 passed (969)
+npm run dev:prr-rehearsal
+  → rehearsal gate: PASS（studyHash=5923049372f4a777f84fe0c7bfae47a06186961b622d3f86f2eafa316fc46a91）
+  → freeze real-run gate: REFUSED（5 problem(s)——DRAFT + items 未冻结 + FZ-01 强制 + 协议摘要缺失 + runningCommitSha 必需）
+双跑 cmp rehearsal-result.json → 字节同一；npx eslint scripts/dev/principle-learning-lab/prr/ → 0 error
+git diff --check → OK；变更仅 scripts/ 研究树 5 文件 + 报告，生产源码零改动
+```
+
+### 8.7 第三轮剩余限制（如实保留）
+
+- `runningCommitSha` 的"受信来源"由合同声明与调用方义务承担——本门无法在离线环境验证一个 SHA 确实来自经验证的运行器；真实运行器的接线（B1）必须把该来源的证明写入 FZ 冻结与遥测；
+- 受信验证器仍是 FZ-15 的信任根：它返回的 `approvedProtocolDigest` 必须来自真正独立的 Owner 决策记录存储；其真实实现归属 O-05 裁决范围；
+- Core 宽松解析（parseHybridLedger 丢弃/回填条目）的源头收紧属 core 生产代码变更，超出本 PR 边界；本模块在其输出之上以 id+status 权威契约防御；
+- 其余 Owner 待决清单（§4）、§6.6/§7.5 限制不变。
+
+**第三轮修复后状态收口：离线能力 GO（五项已修复并复验）；真实 M1～M5 NOT_MEASURED；真实 A/C NOT_RUN；Gate B BLOCKED；Gate C NOT_GRANTED。**

@@ -143,7 +143,7 @@ async function rehearseLedgerSemantics({ workDir }) {
     prepare: (dir) => buildLedgerFixture(dir, [
       { id: 'p-syn-1', status: 'active', derivedFromPainIds: ['cand-syn-1'], reuseEvidence: [] },
       { id: 'p-syn-2', status: 'active', derivedFromPainIds: [], reuseEvidence: [{ candidateId: 'cand-syn-1', painId: 'pain-syn-1', evidenceQuality: 'exact' }] },
-      { id: 'p-syn-3', status: 'deactivated', derivedFromPainIds: [], reuseEvidence: [] },
+      { id: 'p-syn-3', status: 'archived', derivedFromPainIds: [], reuseEvidence: [] },
     ]),
     authorization: { summaryFieldsAllowed: true },
     expectedClass: 'ok',

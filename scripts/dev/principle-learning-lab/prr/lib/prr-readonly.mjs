@@ -21,6 +21,36 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 
+// ── Core authoritative principle-status contract (owner review round 3, P1-3) ──
+//
+// The usable-entry check MUST follow the Core authority's status enum, not a
+// local copy. The authoritative definition lives in the public TypeBox schema
+// `PrincipleFactSchema` (runtime-v2 governance projection contract): its
+// `state` field is a Type.Union of literals and is exported from
+// `@principles/core/runtime-v2`. We extract the literal set FROM THE SCHEMA so
+// a future Core enum change flows through automatically; resolution failure is
+// a module-load failure (fail-loud), never a silently-empty allowlist.
+const CORE_PRINCIPLE_STATUSES = await (async () => {
+  try {
+    const governance = await import('@principles/core/runtime-v2');
+    const stateSchema = governance?.PrincipleFactSchema?.properties?.state;
+    const values = Array.isArray(stateSchema?.anyOf)
+      ? stateSchema.anyOf.map((s) => s?.const).filter((v) => typeof v === 'string' && v !== '')
+      : [];
+    if (values.length === 0) {
+      throw new Error('PrincipleFactSchema.properties.state.anyOf yielded no literal values');
+    }
+    return new Set(values);
+  } catch (error) {
+    throw new Error(`prr-readonly: cannot resolve the Core authoritative principle-status contract: ${error instanceof Error ? error.message : String(error)}`);
+  }
+})();
+
+/** Authoritative status values, extracted from the Core schema (for reports). */
+export function authoritativePrincipleStatuses() {
+  return [...CORE_PRINCIPLE_STATUSES].sort();
+}
+
 // ── state snapshot / unchanged assertion (v1.3 §5.2 contract 5) ──
 
 function sha256File(file) {
@@ -93,17 +123,20 @@ export const LEDGER_AVAILABILITY_CLASSES = [
 
 /**
  * A principle entry is structurally usable only if it is a plain object with
- * a string id AND a string status. The id+status pair matters because the
- * core's lenient parser (parseHybridLedger) silently DROPS non-object entries
- * and BACKFILLS id-less object entries with defaults ({id:<key>,
- * derivedFromPainIds:[]}...) — those half-filled entries carry no `status`,
- * so requiring it exposes them as malformed instead of letting them masquerade
- * as a valid population that happens to count zero (owner review round 2).
+ * a non-empty string id AND a `status` that is a member of the CORE
+ * AUTHORITATIVE status enum (extracted from the public PrincipleFactSchema —
+ * candidate/active/archived/deprecated/probation at resolution time; never a
+ * local copy). The id+status pair matters because the core's lenient parser
+ * (parseHybridLedger) silently DROPS non-object entries and BACKFILLS id-less
+ * object entries with defaults ({id:<key>, derivedFromPainIds:[]}...) — those
+ * half-filled entries carry no authoritative `status`, so the enum check
+ * exposes them as malformed instead of letting them masquerade as a valid
+ * population (owner reviews rounds 2+3).
  */
 function isUsablePrincipleEntry(entry) {
   return isPlainObject(entry)
     && typeof entry.id === 'string' && entry.id !== ''
-    && typeof entry.status === 'string' && entry.status !== '';
+    && typeof entry.status === 'string' && CORE_PRINCIPLE_STATUSES.has(entry.status);
 }
 
 /**
@@ -234,6 +267,41 @@ export function measureLedgerPrinciples({ coreResult, authorization, trueZeroEvi
         unavailableCount: 0,
         reasons: [availabilityClass === 'empty' ? 'ledger_empty' : 'ledger_unreadable'],
       },
+    };
+  }
+
+  if (availabilityClass === 'ok_but_empty_ledger') {
+    // Owner review round 3, P2: a parse-lenient emptiness may have SWALLOWED
+    // entries (the lenient parser drops what it cannot shape), so only M1's
+    // parsed zero is reportable — and even that is never a proven true zero.
+    // Every metric that depends on a COMPLETE ledger (M2 traceability, M3
+    // completeness, M4 conflict detection) is UNMEASURABLE here: a normal
+    // count:0/denominator:0 or a success reasonCode would launder the
+    // parse-leniency uncertainty into a trustworthy-looking measurement.
+    return {
+      ...base,
+      m1: {
+        count: 0,
+        trueZero: false,
+        trueZeroEvidence: null,
+        reasonCode: 'ok_but_empty_ledger__semantic_review_required',
+        note: 'parse-lenient empty ledger: 0 is the parsed result, NOT a proven true zero — the lenient parser may have swallowed entries, so semantic review is required before any report and no evidence parameter can promote it (F-04)',
+      },
+      m2: { count: null, denominator: null, reasonCode: 'ok_but_empty_ledger__semantic_review_required' },
+      m3: {
+        count: null,
+        denominator: null,
+        reasonCode: 'ok_but_empty_ledger__semantic_review_required',
+        unauthorizedField: summaryFieldsAllowed ? null : 'pain_structured_summary',
+      },
+      m4: { count: null, details: [], reasonCode: 'ok_but_empty_ledger__semantic_review_required' },
+      m5: {
+        unauthorizedCount: 0,
+        unauthorizedField: summaryFieldsAllowed ? null : 'pain_structured_summary (D-01 not granted or not declared)',
+        unavailableCount: 0,
+        reasons: ['ok_but_empty_ledger__semantic_review_required'],
+      },
+      perPrinciple: [],
     };
   }
 

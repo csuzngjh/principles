@@ -20,6 +20,7 @@
 // refused until validateFreezeForRealRun() returns zero problems.
 
 import { canonicalJson, sha256 } from '../../lib/fixture.mjs';
+import { verifyDatasetIntegrity } from './prr-dataset.mjs';
 
 export const PRR_FREEZE_SCHEMA = 'prr-b0-freeze.v0.1';
 export const PRR_FREEZE_DRAFT_STATUS = 'DRAFT_NOT_OWNER_APPROVED';
@@ -59,14 +60,29 @@ export function preregBodyHash(preregBody) {
 
 /**
  * Canonical-JSON SHA-256 over the FULL freeze items array (every FZ value,
- * status and approval ref). This is the content identity the Owner approval
- * binds to: changing ANY frozen value (e.g. FZ-11.minPairs, FZ-06 budget,
- * FZ-13 STOP conditions) while keeping the old decisionRef/commitSha changes
- * this hash, so the real-run gate can detect the tamper against the
- * authoritative hash held by the trusted verifier.
+ * status and approval ref). Component of the protocol approval digest.
  */
 export function freezeItemsHash(freeze) {
   return sha256(canonicalJson(freeze.items));
+}
+
+/**
+ * COMPLETE protocol approval digest (owner review round 3, P1-1): binds the
+ * Owner approval to
+ *   - the studyId,
+ *   - the canonical SHA-256 of the preregistration body, AND
+ *   - the canonical content of ALL freeze items (values, statuses, approval refs).
+ * Deterministic and order-insensitive (canonical JSON). ANY meaningful change
+ * to the protocol changes this digest, so an approval saved against one
+ * protocol can never authorize a mutated one.
+ */
+export function protocolApprovalDigest({ freeze, preregBody }) {
+  return sha256(canonicalJson({
+    digestVersion: 'prr-protocol-approval.v1',
+    studyId: freeze.studyId,
+    preregCanonicalSha256: preregBodyHash(preregBody),
+    freezeItemsSha256: freezeItemsHash(freeze),
+  }));
 }
 
 /**
@@ -160,31 +176,33 @@ export function validateFreezeRecord(freeze) {
  *
  * REQUIRED INPUTS — any missing one is a hard refusal, never a skipped check:
  *   - freeze: the freeze record itself;
- *   - preregBody: the preregistration body whose canonical SHA-256 must match
- *     the recorded hash (omitting it can never skip the FZ-15 check);
- *   - dataset: the actually loaded dataset, for the mandatory FZ-01
- *     taskSetHash cross-check (omitting it can never skip the FZ-01 check);
- *   - verifyOwnerApproval: a trusted, caller-supplied resolver
+ *   - preregBody: the preregistration body; its canonical SHA-256 AND its
+ *     studyId must match the freeze record (omitting it can never skip a check);
+ *   - dataset: the actually loaded dataset — its CURRENT contents are
+ *     re-hashed at gate time (the load-time cached fixtureHash is never
+ *     trusted alone) and cross-checked against FZ-01.taskSetHash;
+ *   - verifyOwnerApproval: a trusted resolver that queries the ACTUAL Owner
+ *     decision record by decisionRef and returns the bindings SAVED AT
+ *     APPROVAL TIME — never a digest recomputed from the submitted record:
  *       ({ decisionRef }) => {
  *         verified, approved,
  *         frozenCommitSha,        // commit the Owner approval was bound to
- *         approvedFreezeItemsHash // canonical content hash of the freeze
- *       }                         // record the Owner actually approved
- *     returning undefined/null/{} /verified:false/approved:false/throwing are
- *     ALL refusals. Bindings enforced against the SUBMITTED record:
- *       - evidence.frozenCommitSha must exist and equal
- *         ownerApproval.frozenCommitSha;
- *       - evidence.approvedFreezeItemsHash must exist and equal
- *         freezeItemsHash(freeze) — a hash over ALL submitted items, so ANY
- *         tampered frozen value (budget, minPairs, STOP, gold…) fails the
- *         content reconciliation even when decisionRef/commitSha are kept;
- *       - optional `runningCommitSha`: when the caller supplies the commit the
- *         run actually executes from, it must equal evidence.frozenCommitSha
- *         (the approved code state), not just the two record fields.
+ *         approvedProtocolDigest, // protocolApprovalDigest of the approved protocol
+ *       }
+ *     undefined/null/{}/wrong-shape/verified:false/approved:false/throwing/
+ *     old-format records without approvedProtocolDigest are ALL refusals.
+ *   - runningCommitSha: the commit the run ACTUALLY executes from, from a
+ *     trusted execution context (verified runner / CI checkout). REQUIRED —
+ *     missing/malformed/differing-from-approved all refuse. Copying
+ *     freeze.ownerApproval.frozenCommitSha into it is not a trusted source.
  *
  * Nothing here reads env vars, defaults or script arguments to fill an
  * authorization gap. A DRAFT record is refused; offline rehearsals must not
  * fabricate Owner approval (the rehearsal gate relies on the refusal).
+ * NOTE: this repository currently has NO real A/C execution entry point — the
+ * only in-repo caller is the offline rehearsal, which relies on this gate
+ * REFUSING its draft. Wiring a real runner is B1 work and must pass this gate
+ * with a trusted runningCommitSha.
  */
 export function validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval, dataset, runningCommitSha }) {
   const problems = [];
@@ -204,25 +222,46 @@ export function validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApprov
   if (typeof verifyOwnerApproval !== 'function') {
     p('FZ-15: trusted Owner-approval verifier missing — real-run authorization cannot be established without an authoritative decision-record resolver; real run refused');
   }
+  // P1-2: the actual execution commit is MANDATORY and must be a well-formed
+  // Git SHA from a trusted execution context.
+  if (typeof runningCommitSha !== 'string' || !/^[0-9a-f]{40}$/.test(runningCommitSha)) {
+    p(`FZ-15: runningCommitSha missing or not a 40-hex commit SHA (got ${runningCommitSha === undefined ? 'undefined' : typeof runningCommitSha}) — a real run must declare the commit it actually executes from, from a trusted runner/CI context; real run refused`);
+  }
 
+  const problemsBeforeFreezeChecks = problems.length;
   problems.push(...validateFreezeRecord(freeze));
-  if (problems.length > 0) return { problems, minPairsEligible: null, pairDenominator: null };
+  // Only bail when the freeze record itself cannot be inspected further;
+  // otherwise run EVERY remaining check so one refusal surfaces all its
+  // problems (missing input reports must not mask the item-level verdicts).
+  if (!isPlainObject(freeze) || !Array.isArray(freeze.items)) {
+    return { problems, minPairsEligible: null, pairDenominator: null };
+  }
+  // A run with ANY missing required input is refused outright and must not
+  // also emit a sample-size verdict (no partial authorization semantics).
+  const requiredInputMissing = problemsBeforeFreezeChecks > 0;
 
   if (freeze.status !== PRR_FREEZE_FROZEN_STATUS) {
     p(`freeze.status must be ${PRR_FREEZE_FROZEN_STATUS} before any real A/C run (current: ${freeze.status})`);
   }
 
-  // FZ-15 — preregistration body hash (mandatory; preregBody is a required
-  // input above, so this check always executes).
+  // P1-1: the submitted preregistration body must belong to THIS study —
+  // studyId identity between body and freeze record is part of the protocol.
   if (preregBody !== undefined && preregBody !== null) {
-    const actualHash = preregBodyHash(preregBody);
-    if (freeze.prereg.canonicalSha256 !== actualHash) {
-      p(`FZ-15: preregistration body hash mismatch (record=${freeze.prereg.canonicalSha256.slice(0, 12)}…, actual=${actualHash.slice(0, 12)}…) — the body changed after freezing: INVALID_PROTOCOL, start a new studyId`);
+    if (typeof preregBody.studyId !== 'string' || preregBody.studyId === '') {
+      p('FZ-15: preregBody.studyId missing — the preregistration body must name the study it belongs to; real run refused');
+    } else if (preregBody.studyId !== freeze.studyId) {
+      p(`FZ-15: studyId mismatch between the preregistration body (${preregBody.studyId}) and the freeze record (${freeze.studyId}) — real run refused`);
+    }
+    if (isPlainObject(freeze.prereg)) {
+      const actualHash = preregBodyHash(preregBody);
+      if (freeze.prereg.canonicalSha256 !== actualHash) {
+        p(`FZ-15: preregistration body hash mismatch (record=${freeze.prereg.canonicalSha256.slice(0, 12)}…, actual=${actualHash.slice(0, 12)}…) — the body changed after freezing: INVALID_PROTOCOL, start a new studyId`);
+      }
     }
   }
 
   // FZ-15 — trusted verifier verdict. Only verified===true AND approved===true
-  // together (plus BOTH bindings) authorize; every other shape refuses.
+  // together (plus commit and COMPLETE protocol digest bindings) authorize.
   if (typeof verifyOwnerApproval === 'function' && isPlainObject(freeze.ownerApproval)) {
     let evidence;
     try {
@@ -240,25 +279,27 @@ export function validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApprov
       p('FZ-15: verified approval carries no frozenCommitSha binding — the authoritative decision record must pin the frozen commit; real run refused');
     } else if (evidence.frozenCommitSha !== freeze.ownerApproval.frozenCommitSha) {
       p(`FZ-15: frozenCommitSha mismatch between the freeze record (${freeze.ownerApproval.frozenCommitSha.slice(0, 8)}…) and the authoritative Owner decision (${evidence.frozenCommitSha.slice(0, 8)}…) — the freeze is not bound to the approved protocol; real run refused`);
-    } else if (typeof evidence.approvedFreezeItemsHash !== 'string' || !/^[0-9a-f]{64}$/.test(evidence.approvedFreezeItemsHash)) {
-      p('FZ-15: verified approval carries no approvedFreezeItemsHash — the authoritative decision record must pin the canonical content hash of the freeze record it approved; real run refused');
+    } else if (typeof evidence.approvedProtocolDigest !== 'string' || !/^[0-9a-f]{64}$/.test(evidence.approvedProtocolDigest)) {
+      // Old-format approval records without the complete protocol digest are
+      // refused — never auto-completed or interpreted as approved (P1-1).
+      p('FZ-15: verified approval carries no approvedProtocolDigest — the authoritative decision record must pin the COMPLETE protocol approval digest (studyId + prereg hash + all freeze items); records saved in an older format without it are not valid for a real run; real run refused');
+    } else if (preregBody === undefined || preregBody === null) {
+      // The body is a required input and its absence was already refused; the
+      // digest simply cannot be computed against it, so nothing reconciles.
     } else {
-      // Content reconciliation over ALL submitted freeze items: any changed
-      // value (budget, minPairs, STOP, gold…) breaks this even when
-      // decisionRef and commitSha are kept (SPEC §5.2 — a modified frozen
-      // value invalidates the round).
-      const actualItemsHash = freezeItemsHash(freeze);
-      if (evidence.approvedFreezeItemsHash !== actualItemsHash) {
-        p(`FZ-15: freeze content reconciliation FAILED — submitted items hash ${actualItemsHash.slice(0, 12)}… does not equal the Owner-approved hash ${evidence.approvedFreezeItemsHash.slice(0, 12)}…; a frozen value was changed after approval: INVALID_PROTOCOL, start a new studyId`);
+      // COMPLETE protocol reconciliation against the INDEPENDENTLY SAVED
+      // digest: any change to studyId, the prereg body, or ANY freeze item
+      // (budget, minPairs, STOP, gold, approval refs…) breaks this even when
+      // decisionRef and commitSha are kept (SPEC §5.2).
+      const actualDigest = protocolApprovalDigest({ freeze, preregBody });
+      if (evidence.approvedProtocolDigest !== actualDigest) {
+        p(`FZ-15: protocol approval reconciliation FAILED — submitted protocol digest ${actualDigest.slice(0, 12)}… does not equal the Owner-approved digest ${evidence.approvedProtocolDigest.slice(0, 12)}…; the studyId, preregistration body, or a frozen value was changed after approval: INVALID_PROTOCOL, start a new studyId`);
       }
     }
-    // Optional running-commit check: when the caller declares the commit this
-    // run actually executes from, it must be the approved one.
-    if (evidence && isPlainObject(evidence) && evidence.verified === true && evidence.approved === true && typeof evidence.frozenCommitSha === 'string') {
-      if (runningCommitSha !== undefined && runningCommitSha !== null) {
-        if (runningCommitSha !== evidence.frozenCommitSha) {
-          p(`FZ-15: running commit ${String(runningCommitSha).slice(0, 8)}… differs from the Owner-approved frozen commit ${evidence.frozenCommitSha.slice(0, 8)}… — the run would not execute the approved code state; real run refused`);
-        }
+    // P1-2: the actual execution commit must equal the approved one.
+    if (typeof runningCommitSha === 'string' && isPlainObject(evidence) && evidence.verified === true && evidence.approved === true && typeof evidence.frozenCommitSha === 'string') {
+      if (runningCommitSha !== evidence.frozenCommitSha) {
+        p(`FZ-15: running commit ${runningCommitSha.slice(0, 8)}… differs from the Owner-approved frozen commit ${evidence.frozenCommitSha.slice(0, 8)}… — the run would not execute the approved code state; real run refused`);
       }
     }
   }
@@ -271,15 +312,34 @@ export function validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApprov
     p(`real run refused — freeze items not frozen: ${missing.join(', ')} (every FZ item needs an Owner-approved value before any real A/C result exists)`);
   }
 
-  // FZ-01 cross-check against the actually loaded dataset — the hash must
-  // EXIST, be a well-formed SHA-256, and match exactly. A missing hash refuses.
+  // FZ-01 cross-check (P1-4): the gate RECOMPUTES the dataset hash from its
+  // current contents and verifies the CONSUMED structures ARE the hashed
+  // snapshot (a cloned/rebuilt dataset breaks shared references and is
+  // refused even when its byFile bytes still hash to the cached value).
   if (dataset) {
-    const fz01 = freeze.items.find((i) => i.id === 'FZ-01');
-    const frozenHash = fz01 && isPlainObject(fz01.value) ? fz01.value.taskSetHash : undefined;
-    if (typeof frozenHash !== 'string' || !/^[0-9a-f]{64}$/.test(frozenHash)) {
-      p('FZ-01: value.taskSetHash missing or not a 64-hex SHA-256 — real run refused (the frozen task identity is a mandatory freeze value)');
-    } else if (frozenHash !== dataset.fixtureHash) {
-      p(`FZ-01: frozen taskSetHash ${frozenHash.slice(0, 12)}… does not equal the loaded dataset hash ${dataset.fixtureHash.slice(0, 12)}… — the study would run on different tasks than approved`);
+    let integrity = null;
+    try {
+      integrity = verifyDatasetIntegrity(dataset);
+    } catch (error) {
+      p(`FZ-01: dataset integrity could not be verified: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (integrity && !integrity.hashUnchanged) {
+      p(`FZ-01: dataset integrity FAILED — content changed after loading (cached fixtureHash ${integrity.cachedHash.slice(0, 12)}…, recomputed ${integrity.currentHash.slice(0, 12)}…); the run would consume data different from the loaded snapshot; real run refused`);
+    }
+    if (integrity && !integrity.consumedIdentityShared) {
+      p('FZ-01: dataset integrity FAILED — the structures a run consumes (tasks/gold/behaviors/…) are not the same objects as the hashed snapshot (cloned or rebuilt dataset); refusing to run on unverified data');
+    }
+    if (integrity && !integrity.derivedIndexesBound) {
+      p('FZ-01: dataset integrity FAILED — derived lookup indexes (tasksById/principlesById/goldByTask) no longer reference the verified snapshot entries; real run refused');
+    }
+    if (integrity && integrity.ok) {
+      const fz01 = freeze.items.find((i) => i.id === 'FZ-01');
+      const frozenHash = fz01 && isPlainObject(fz01.value) ? fz01.value.taskSetHash : undefined;
+      if (typeof frozenHash !== 'string' || !/^[0-9a-f]{64}$/.test(frozenHash)) {
+        p('FZ-01: value.taskSetHash missing or not a 64-hex SHA-256 — real run refused (the frozen task identity is a mandatory freeze value)');
+      } else if (frozenHash !== integrity.currentHash) {
+        p(`FZ-01: frozen taskSetHash ${frozenHash.slice(0, 12)}… does not equal the RECOMPUTED dataset hash ${integrity.currentHash.slice(0, 12)}… — the study would run on different tasks than approved`);
+      }
     }
   }
 
@@ -302,9 +362,10 @@ export function validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApprov
       if (!basisValid) {
         p('FZ-11: value.derivationBasis must state how minPairs was derived from FZ-09 (B0 §5.1 rule 2 — no unexplained N)');
       }
-      // The count comparison only runs when BOTH declared fields are valid —
-      // a partially valid value must not yield a sample-size verdict.
-      if (Number.isSafeInteger(minPairs) && minPairs >= 1 && basisValid && dataset) {
+      // The count comparison only runs when BOTH declared fields are valid
+      // AND no required input is missing — a partially valid value or a
+      // refused run must not yield a sample-size verdict.
+      if (Number.isSafeInteger(minPairs) && minPairs >= 1 && basisValid && !requiredInputMissing && dataset) {
         const allTasks = dataset.tasks?.tasks ?? [];
         const unauthorized = allTasks.filter((t) => t?.historyMaterial?.disclosureStatus === 'unauthorized');
         pairDenominator = {

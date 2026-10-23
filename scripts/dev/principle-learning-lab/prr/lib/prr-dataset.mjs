@@ -65,6 +65,78 @@ export function computeDatasetHash(byFile) {
 }
 
 /**
+ * Recursively freeze a loaded dataset (owner review round 3, P1-4): every
+ * nested object/array — and every value inside Maps/Sets — becomes immutable,
+ * so post-load mutation of raw file data OR derived indexes (tasksById,
+ * principlesById, goldByTask) throws in strict-mode ESM instead of silently
+ * diverging from the hashed snapshot. Depth-bounded by the fixture's size.
+ */
+function deepFreeze(value, depth = 0) {
+  if (value === null || typeof value !== 'object' || Object.isFrozen(value) || depth > 32) return value;
+  if (value instanceof Map) {
+    for (const child of value.values()) deepFreeze(child, depth + 1);
+    // Object.freeze alone does NOT stop Map internals — pin the mutators
+    // BEFORE freezing (defineProperty needs an extensible target).
+    const mapThrower = () => { throw new TypeError('dataset is frozen: derived index maps cannot be mutated'); };
+    Object.defineProperty(value, 'set', { value: mapThrower });
+    Object.defineProperty(value, 'delete', { value: mapThrower });
+    Object.defineProperty(value, 'clear', { value: mapThrower });
+    Object.freeze(value);
+  } else if (value instanceof Set) {
+    for (const child of value) deepFreeze(child, depth + 1);
+    const setThrower = () => { throw new TypeError('dataset is frozen: derived index sets cannot be mutated'); };
+    Object.defineProperty(value, 'add', { value: setThrower });
+    Object.defineProperty(value, 'delete', { value: setThrower });
+    Object.defineProperty(value, 'clear', { value: setThrower });
+    Object.freeze(value);
+  } else {
+    Object.freeze(value);
+    for (const child of Object.values(value)) deepFreeze(child, depth + 1);
+  }
+  return value;
+}
+
+/**
+ * Recompute the dataset's canonical hash from its CURRENT contents AND verify
+ * that every structure a run actually CONSUMES is the same object as the
+ * hashed byFile snapshot (owner review round 3, P1-4).
+ *
+ * Hashing byFile alone is not sufficient: a cloned/rebuilt dataset (JSON
+ * round-trip, structuredClone) breaks the shared references, so mutations to
+ * the consumed `tasks`/`gold`/`behaviors` structures would be invisible to a
+ * byFile-only hash. The identity checks close that path; the real-run gate
+ * refuses unless BOTH the recomputed hash matches the cached one AND every
+ * consumed structure is the verified snapshot itself.
+ */
+const CONSUMED_FILE_FIELDS = [
+  ['manifest', 'dataset-manifest.json'],
+  ['principles', 'principles.json'],
+  ['tasks', 'tasks.json'],
+  ['gold', 'gold.json'],
+  ['behaviors', 'behaviors.json'],
+  ['designChecks', 'design-checks.json'],
+];
+
+export function verifyDatasetIntegrity(dataset) {
+  const currentHash = computeDatasetHash(dataset.byFile);
+  const hashUnchanged = currentHash === dataset.fixtureHash;
+  const consumedIdentityShared = CONSUMED_FILE_FIELDS.every(([field, file]) => dataset[field] === dataset.byFile[file]);
+  const derivedIndexesBound = dataset.tasksById instanceof Map
+    && [...dataset.tasksById.values()].every((t) => dataset.tasks.tasks.includes(t))
+    && dataset.principlesById instanceof Map
+    && [...dataset.principlesById.values()].every((p) => dataset.principles.principles.includes(p))
+    && Object.entries(dataset.goldByTask).every(([id, g]) => dataset.gold.gold[id] === g);
+  return {
+    ok: hashUnchanged && consumedIdentityShared && derivedIndexesBound,
+    cachedHash: dataset.fixtureHash,
+    currentHash,
+    hashUnchanged,
+    consumedIdentityShared,
+    derivedIndexesBound,
+  };
+}
+
+/**
  * Load and lightly structure a PRR A/C dataset directory.
  * Throws loudly on unreadable/malformed files (rc-3); semantic checks live in
  * healthCheck() so callers get one complete problem list.
@@ -83,7 +155,10 @@ export function loadPrrDataset(dir) {
   const principlesById = new Map((principles.principles ?? []).map((p) => [p.principleId, p]));
   const goldByTask = gold.gold ?? {};
 
-  return {
+  // P1-4: the returned structure is DEEP-FROZEN — raw file data and derived
+  // indexes alike cannot be mutated after loading without throwing, so the
+  // hashed snapshot and the consumed data cannot silently diverge.
+  return deepFreeze({
     dir,
     manifest,
     principles,
@@ -96,7 +171,7 @@ export function loadPrrDataset(dir) {
     principlesById,
     goldByTask,
     fixtureHash: computeDatasetHash(byFile),
-  };
+  });
 }
 
 function isPlainObject(v) {
