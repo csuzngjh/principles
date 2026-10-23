@@ -450,8 +450,10 @@ export async function runRealStudy({ dataset, transportForArm, caps = DEFAULT_RE
         parent: studyLedger,
         reason: 'arm-level HTTP/USD cost cap',
       });
-      transport = transportForArm(spec.historyId, armLedger, spec.contentMode);
+      transport = await transportForArm(spec.historyId, armLedger, spec.contentMode);
     }
+    // transportForArm may be async (the authorized factory awaits the core
+    // import); a synchronous factory keeps working unchanged under await.
     const r = await runRealArm({
       dataset,
       historyId: spec.historyId,

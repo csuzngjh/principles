@@ -1,0 +1,42 @@
+{
+  "schemaVersion": "g2-real-run-authorization.v1",
+  "studyId": "PLE-PILOT-01-FORMAL",
+  "note": "Formal C-A contrast authorization (Owner instruction 2026-10-23 — see owner-decision.json). Route: external zai-coding-cn/glm-5.3-flash through createAuthorizedPiTransport + the P1-01 HTTP/USD ledger. USD figures are list-price reservation CEILINGS; the Coding Plan draws fixed quota, not per-token billing.",
+  "od1": {
+    "approved": true,
+    "decisionRef": "owner-decision.json",
+    "frozenFixtureHash": "4c3ea4ab29ced329c28d916c8be0360952ca0d23b36786f64693e9319391e9a4"
+  },
+  "od2": {
+    "provider": "zai-coding-cn",
+    "model": "glm-5.3-flash",
+    "apiKeyEnv": "ZAI_CODING_CN_API_KEY",
+    "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
+    "credentialsAvailable": true,
+    "perRunCostCapUsd": 0.5,
+    "totalCostCapUsd": 5,
+    "costBasisRef": "cost-basis.json",
+    "costBasis": {
+      "provider": "zai-coding-cn",
+      "model": "glm-5.3-flash",
+      "currency": "USD",
+      "inputUsdPerMillionTokens": 0.15,
+      "outputUsdPerMillionTokens": 0.5,
+      "cacheReadUsdPerMillionTokens": 0.03,
+      "maxInputTokensPerRequest": 8192,
+      "maxOutputTokensPerRequest": 1024,
+      "effectiveDate": "2026-10-23"
+    },
+    "httpRequestsPerOpportunity": 48,
+    "httpRequestsPerArm": 256,
+    "httpRequestsPerStudy": 1536,
+    "stopCondition": "hierarchical ledger exhaustion (opportunity 48 / arm 256 / study 1536 requests; USD ceilings above) or preregistered study stop conditions (judge leak INVALID_PROTOCOL), whichever first; partial results reported as-is",
+    "costBillingSemantics": "Coding Plan fixed quota — plan draws recorded from provider usage fields; the USD ledger reserves list-price ceilings pre-send and never represents actual billing"
+  },
+  "od3": {
+    "seeds": 1,
+    "executionOrder": ["E0", "EA", "EB", "EN"],
+    "frozen": true,
+    "armOrderNote": "C-A contrast arms (EA history): policy -> summary -> raw -> none, fixed paired order per seed; seeds repeat the same order in fully isolated sessions"
+  }
+}
