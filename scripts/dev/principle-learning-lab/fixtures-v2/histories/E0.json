@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "history.v0.1",
+  "historyId": "E0",
+  "label": "no-history",
+  "armKind": "E0",
+  "synthetic": true,
+  "syntheticMarkers": ["synthetic_environment"],
+  "worldRef": "svc-config",
+  "leakageGroupId": "PLE-PILOT-01-svc-config",
+  "innerRole": "learning_history",
+  "occurredAtWindow": null,
+  "narrative": "No prior incident or feedback history is available for this domain. You have the platform action manual only.",
+  "events": [],
+  "causalKeyEvidence": [],
+  "irrelevantDeltas": []
+}

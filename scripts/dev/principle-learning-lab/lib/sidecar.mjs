@@ -153,8 +153,12 @@ export function validateSidecar({ dataset, study, adjudications, actorInputs, kn
       if (fc.principleId !== null && fc.principleId !== undefined) {
         p(`arm ${arm.armId} fabricates principleId '${fc.principleId}' — G1 has no real Principle identity (NT-06)`);
       }
-      if (fc.sourceStage !== 'simulated-learn' && fc.sourceStage !== 'i0-reflection' && fc.sourceStage !== 'i1-pipeline') {
-        p(`arm ${arm.armId} frozenCandidate.sourceStage must be simulated-learn|i0-reflection|i1-pipeline`);
+      // 'model-summary' and 'raw-history' are the C-A contrast conditions
+      // (prereg real-candidate-vs-summary-vs-raw-vs-none): same freeze
+      // mechanics, source stage names what produced the delivered bytes.
+      const SOURCE_STAGES = ['simulated-learn', 'i0-reflection', 'i1-pipeline', 'model-summary', 'raw-history'];
+      if (!SOURCE_STAGES.includes(fc.sourceStage)) {
+        p(`arm ${arm.armId} frozenCandidate.sourceStage must be ${SOURCE_STAGES.join('|')}`);
       }
     }
   }

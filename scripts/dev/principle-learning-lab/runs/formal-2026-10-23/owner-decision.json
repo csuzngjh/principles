@@ -1,0 +1,10 @@
+{
+  "kind": "owner-decision",
+  "approved": true,
+  "decidedBy": "Owner, in-session instruction 2026-10-23: provided the ZAI_CODING_CN_API_KEY credential and ordered '不要再去纠结什么价格了，编程套餐是固定额度的，尽快开始实验' (start the experiment now; the Coding Plan is a fixed quota).",
+  "decidedAt": "2026-10-23T04:30:00Z",
+  "fixtureHash": "4c3ea4ab29ced329c28d916c8be0360952ca0d23b36786f64693e9319391e9a4",
+  "scope": "Single formal C-A contrast run: EA history x four same-channel conditions (policy|summary|raw|none) via the external route zai-coding-cn/glm-5.3-flash, seed count per CLI invocation (max 3), preregistered metrics/oracle/stop-conditions unchanged. No production governance actions.",
+  "note": "The preregistration FILE stays an untouched frozen DRAFT; this record is the Owner approval artifact the formal entry point joins with it (see composeApprovedPreregView).",
+  "preregistrationHash": "0d1ba5914fa0f638a5656a5f9ec733f1f17344483b588e9521ab1dc41b7a2b38"
+}

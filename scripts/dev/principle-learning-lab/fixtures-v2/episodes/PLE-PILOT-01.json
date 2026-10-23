@@ -1,0 +1,89 @@
+{
+  "schemaVersion": "ple.v0.1",
+  "episodeId": "PLE-PILOT-01",
+  "principleFamilyId": "verification-sufficiency-vs-efficiency",
+  "leakageGroupId": "PLE-PILOT-01-svc-config",
+  "outerSplit": "method-development",
+  "episodeKind": "synthetic_pilot",
+  "synthetic": true,
+  "informationCutoff": "2026-10-15T00:00:00Z",
+  "researchQuestions": [
+    "RQ1: Does the presence and content of controlled verification-related history change candidate policy scope and observable future actions in a direction-appropriate way (C-E)?",
+    "RQ2: Do irrelevant history changes (EN) leave decisions stable (drift control)?",
+    "RQ3: When reliable counter-evidence arrives, does the agent revise locally while retaining correct behavior in untouched old contexts (plasticity + stability)?"
+  ],
+  "claimIds": ["C-E", "C-A"],
+  "learningSignal": ["pain", "correction", "counterevidence", "environment_change"],
+  "theme": "dynamic trade-off between verification sufficiency and efficiency",
+  "themeQuestion": "How does one choose the minimally sufficient discriminating verification under evidence uncertainty, check cost, failure risk, task deadline and owner authorization?",
+  "evidenceRefs": [
+    {
+      "sourceKind": "synthetic_environment",
+      "claim": "EA world: hidden dynamic consumer breakage with high loss; a cheap targeted check was discriminative",
+      "sourceExactRef": "fixtures/histories/EA.json#event-EA-1",
+      "occurredAt": "2026-07-12T00:00:00Z",
+      "recordedAt": "2026-10-15T00:00:00Z",
+      "hash": "derived-at-load",
+      "status": "synthetic",
+      "permission": "research-internal",
+      "realOrSynthetic": "synthetic"
+    },
+    {
+      "sourceKind": "synthetic_environment",
+      "claim": "EB world: current credible contract harness made exhaustive re-verification net-negative (missed hotfix deadline)",
+      "sourceExactRef": "fixtures/histories/EB.json#event-EB-1",
+      "occurredAt": "2026-08-03T00:00:00Z",
+      "recordedAt": "2026-10-15T00:00:00Z",
+      "hash": "derived-at-load",
+      "status": "synthetic",
+      "permission": "research-internal",
+      "realOrSynthetic": "synthetic"
+    },
+    {
+      "sourceKind": "synthetic_feedback",
+      "claim": "Owner correction reinforcing targeted-check practice in the EA world",
+      "sourceExactRef": "fixtures/histories/EA.json#event-EA-2",
+      "occurredAt": "2026-08-20T00:00:00Z",
+      "recordedAt": "2026-10-15T00:00:00Z",
+      "hash": "derived-at-load",
+      "status": "synthetic",
+      "permission": "research-internal",
+      "realOrSynthetic": "synthetic"
+    },
+    {
+      "sourceKind": "synthetic_feedback",
+      "claim": "Owner correction reinforcing contract-reliance in the EB world",
+      "sourceExactRef": "fixtures/histories/EB.json#event-EB-2",
+      "occurredAt": "2026-08-25T00:00:00Z",
+      "recordedAt": "2026-10-15T00:00:00Z",
+      "hash": "derived-at-load",
+      "status": "synthetic",
+      "permission": "research-internal",
+      "realOrSynthetic": "synthetic"
+    }
+  ],
+  "initialDecision": {
+    "primaryDecision": "PRINCIPLE_CANDIDATE",
+    "concurrentRecommendations": ["OBSERVE_MORE"],
+    "producer": "research-design",
+    "stage": "episode-design",
+    "authority": "research_label",
+    "assumptions": [
+      "Verification sufficiency decisions recur in this synthetic world family.",
+      "Both over-verification and under-verification have measurable costs in the fixture."
+    ],
+    "decisionTime": "2026-10-15T00:00:00Z",
+    "status": "preregistered",
+    "note": "Conditional research suggestion only (SPEC v0.3 §3.2); not a production necessity truth."
+  },
+  "principleRef": null,
+  "artifactRef": null,
+  "deliveryRef": null,
+  "learningInputs": {
+    "historyIds": ["E0", "EA", "EB", "EN"],
+    "worldManualRef": "fixtures/world-manual.json"
+  },
+  "futureProbeRefs": ["P1", "P2", "P3", "P4"],
+  "revisionTriggerRefs": ["P4:phase-a"],
+  "status": "fixture-frozen"
+}
