@@ -186,7 +186,8 @@ describe('readiness on a self-contained worktree', () => {
   it('scopes L2/L3 to what the root build authority promises', async () => {
     await buildWorkspace(root);
     // A package that exists but that the root build does not cover must not be
-    // required to have an artifact — pd-console/pd-companion build elsewhere.
+    // required to have an artifact — pd-companion builds elsewhere (pd-console
+    // joined the root build authority after the 2026-10-23 stale-dist incident).
     writeJson(under(root, 'packages', 'c', 'package.json'), {
       name: '@x/c',
       version: '1.0.0',
