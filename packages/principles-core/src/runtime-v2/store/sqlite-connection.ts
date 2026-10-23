@@ -660,6 +660,38 @@ export class SqliteConnection {
         WHERE pain_id IS NOT NULL;
     `);
 
+    // PRI-1019: one append-only authority for local Codex design-gate
+    // declarations. Each decision/revocation appends a new revision; readers
+    // derive the current state by selecting the latest sequence for a binding.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS design_gate_declarations (
+        sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+        source_ref TEXT NOT NULL,
+        governance_workspace_path TEXT NOT NULL,
+        project_workspace_path TEXT NOT NULL,
+        host_session_id TEXT NOT NULL,
+        task_ref TEXT NOT NULL,
+        spec_path TEXT NOT NULL,
+        spec_digest TEXT NOT NULL,
+        scope_json TEXT NOT NULL,
+        decision TEXT NOT NULL CHECK (decision IN ('approved','not_approved','not_required')),
+        revision INTEGER NOT NULL CHECK (revision >= 1),
+        revoked INTEGER NOT NULL CHECK (revoked IN (0,1)),
+        owner_id TEXT NOT NULL CHECK (length(trim(owner_id)) > 0),
+        credential_id TEXT NOT NULL CHECK (length(trim(credential_id)) > 0),
+        decided_at TEXT NOT NULL,
+        UNIQUE(source_ref, revision)
+      );
+      CREATE INDEX IF NOT EXISTS idx_design_gate_binding_latest
+        ON design_gate_declarations(project_workspace_path, host_session_id, sequence DESC);
+      CREATE INDEX IF NOT EXISTS idx_design_gate_source_revision
+        ON design_gate_declarations(source_ref, revision DESC);
+      CREATE TRIGGER IF NOT EXISTS design_gate_declarations_no_update
+        BEFORE UPDATE ON design_gate_declarations BEGIN SELECT RAISE(ABORT, 'design-gate declaration revisions are immutable'); END;
+      CREATE TRIGGER IF NOT EXISTS design_gate_declarations_no_delete
+        BEFORE DELETE ON design_gate_declarations BEGIN SELECT RAISE(ABORT, 'design-gate declaration revisions are immutable'); END;
+    `);
+
     // INTENT.md doc version snapshots (SPEC bilingual+lifecycle).
     // Mirrors the intent_decisions audit pattern: immutable snapshots, hash linkage.
     db.exec(`

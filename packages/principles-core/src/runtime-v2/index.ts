@@ -2046,6 +2046,9 @@ export {
   VALID_DIAGNOSTICS_MODES,
   DANGEROUS_KEYS as PD_CONFIG_DANGEROUS_KEYS,
   validatePdConfig,
+  // PRI-1020: owner-declared capacity (promptBudget config section)
+  PROMPT_BUDGET_HOST_KINDS,
+  operatorDeclaredContextWindow,
   DEFAULT_FEATURE_FLAGS as PD_DEFAULT_FEATURE_FLAGS,
   DEFAULT_RUNTIME_PROFILE_ID,
   DEFAULT_RUNTIME_PROFILE,
@@ -2101,6 +2104,8 @@ export type {
   RedactedAgentSummary,
   RedactedFeatureSummary,
   RedactedPdConfigSummary,
+  PromptBudgetConfig,
+  PromptBudgetHostKind,
   EffectiveFeatureFlag,
   FeatureFlagsResult,
 } from './config/index.js';
@@ -2374,3 +2379,8 @@ export type {
 } from './store/sqlite-intervention-evidence-store.js';
 
 export { boundCorrectionEvidenceText } from './pain-signal-bridge.js';
+
+// PRI-1019: the one Owner-design declaration contract and persisted authority.
+export { DESIGN_GATE_FACT_SCHEMA_VERSION, isDesignGateFact, isDesignGateDeclaration } from './internalization/design-gate-facts.js';
+export type { DesignGateFact, DesignGateDeclaration, DesignGateActor, DesignGateScope, DesignGateAction, DesignGateDecision, DesignGateInvalidationReason } from './internalization/design-gate-facts.js';
+export { SqliteDesignGateStore, DesignGateStoreError } from './store/design-gate/sqlite-design-gate-store.js';

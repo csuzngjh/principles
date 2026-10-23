@@ -74,6 +74,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function requiresDesignGateFact(value: unknown): boolean {
+  if (!isRecord(value) || !Object.hasOwn(value, 'requiredFactKinds')) return false;
+  return Array.isArray(value.requiredFactKinds)
+    && value.requiredFactKinds.every((kind: unknown) => typeof kind === 'string')
+    && value.requiredFactKinds.includes('design_approval');
+}
+
 interface ToolInput { toolName: string; params: Record<string, unknown> }
 
 function readToolInput(rawPayload: unknown): ToolInput | null {
@@ -435,7 +442,24 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
               // sibling rules (v1 or well-fed v2) keep evaluating, and no
               // governance state changes. Intentional behavior change vs the
               // pre-fix "legal unavailable still executed" path.
-              if (context === undefined || context.history.status !== 'available') {
+              //
+              // PRI-1019 exception: a rule whose ONLY declared dependence is
+              // the design_approval fact stays eligible on an actionable fact
+              // (resolution !== 'unknown') even when history is unavailable.
+              // SPEC-RULECODE-CODEX-LOCAL-CLOSURE-001 §6 requires a managed
+              // action with an authoritative not_approved to be blocked
+              // regardless of history, and the Artificer prompt contract
+              // (V2_CONTEXT_INSTRUCTION) requires history-dependent behavior
+              // to allow while the independently supplied fact stays
+              // enforceable. Without this exception the first managed action
+              // of a new session (no prior history) would never evaluate the
+              // rule, and an authoritative not_approved could not block.
+              const designGateFact = context?.facts.designGate;
+              const designGateActionable = designGateFact !== undefined && designGateFact.resolution !== 'unknown'
+                ? designGateFact
+                : undefined;
+              if ((context === undefined || context.history.status !== 'available')
+                && !(requiresDesignGateFact(content.ruleHostInputContract) && designGateActionable !== undefined)) {
                 // Reference identity against the frozen sentinel distinguishes
                 // "the provider faulted" from "the provider legitimately
                 // declared history unavailable" (same wire shape, different
@@ -451,6 +475,20 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
                   'enable and wire the host rule context provider, or regenerate the rule without context dependence',
                 );
                 continue;
+              }
+              const inputContract = content.ruleHostInputContract;
+              if (isRecord(inputContract) && Object.hasOwn(inputContract, 'requiredFactKinds')) {
+                if (!Array.isArray(inputContract.requiredFactKinds)
+                  || !inputContract.requiredFactKinds.every((kind: unknown) => typeof kind === 'string')) {
+                  addWarning(warnings, `rule_required_fact_contract_invalid: activation=${activationId}`,
+                    'regenerate the rule artifact from validated Scribe execution conditions');
+                  continue;
+                }
+                if (requiresDesignGateFact(inputContract) && designGateActionable === undefined) {
+                  addWarning(warnings, `rule_required_fact_unavailable: design_approval (activation=${activationId})`,
+                    'verify the current Owner design declaration and scope before retrying');
+                  continue;
+                }
               }
             }
             const ruleId = typeof content.ruleId === 'string' ? content.ruleId : typeof row.source_rule_id === 'string' ? row.source_rule_id : artifactId;

@@ -887,7 +887,9 @@ export function ActivationPage() {
                   defaultValue: "注入状态中的预算数字取自最近一次运行时观测（来源 {{source}}，上下文 {{window}} tokens，观测于 {{observedAt}}），并非实时确认值。",
                   source: route.budgetCapacitySource === "pi_catalog_exact"
                     ? t("pages.focus.budgetCapacitySourcePiCatalog", { defaultValue: "模型目录精确匹配" })
-                    : t("pages.focus.budgetCapacitySourceHostWindow", { defaultValue: "宿主有效上下文窗口" }),
+                    : route.budgetCapacitySource === "operator_declared"
+                      ? t("pages.focus.budgetCapacitySourceOperatorDeclared", { defaultValue: "工作区配置声明" })
+                      : t("pages.focus.budgetCapacitySourceHostWindow", { defaultValue: "宿主有效上下文窗口" }),
                   window: route.budgetContextWindowTokens,
                   observedAt: route.budgetObservedAt,
                 })}

@@ -5,10 +5,13 @@ import {
   RUNTIME_V2_PRINCIPLE_BUDGET,
   isValidContextWindowTokens,
   promptBudgetCharsForContextWindow,
+  resolvePromptBudget,
+  operatorDeclaredContextWindow,
   type PromptBudgetCapacitySource,
   type PromptBudgetCapacityStatus,
   type PromptBudgetFallbackReason,
   type PromptBudgetResolution,
+  type PromptBudgetConfig,
 } from '@principles/core/runtime-v2';
 import {
   isPromptInjectionTargetHost,
@@ -170,6 +173,7 @@ function parseObservedAt(value: string): number | null {
 }
 
 const BUDGET_CAPACITY_SOURCES: ReadonlySet<string> = new Set([
+  'operator_declared',
   'host_effective_window',
   'pi_catalog_exact',
   'legacy_fallback',
@@ -235,7 +239,11 @@ function narrowObservation(parsed: unknown, workspaceDir: string, nowMs: number)
   // formula derives from it; the legacy fallback needs the legacy budget, no
   // window, and a bounded reason. Anything else is not a trustworthy fact.
   if (rawStatus === 'confirmed') {
-    if (rawSource !== 'host_effective_window' && rawSource !== 'pi_catalog_exact') return null;
+    // PRI-1020: operator_declared joins the confirmed set — a declared window
+    // is a real window (the Owner's explicit cap), so its observations carry
+    // the window and the exact formula budget like the other confirmed
+    // sources.
+    if (rawSource !== 'operator_declared' && rawSource !== 'host_effective_window' && rawSource !== 'pi_catalog_exact') return null;
     if (!isValidContextWindowTokens(rawWindow)) return null;
     if (budget !== promptBudgetCharsForContextWindow(rawWindow)) return null;
     if (rawReason !== undefined) return null;
@@ -513,4 +521,21 @@ export function runtimeBudgetObservationToResolution(
     policyVersion: observation.policyVersion ?? PROMPT_BUDGET_POLICY_VERSION,
     ...(observation.fallbackReason !== null ? { fallbackReason: observation.fallbackReason } : {}),
   };
+}
+
+/**
+ * PRI-1020: the Owner's declared window as a budget resolution, for console
+ * surfaces with NO fresh runtime observation. Goes through the same single
+ * resolver (tier 0) so an injected forecast and the console fallback can
+ * never disagree about what a declaration means. Undefined when the
+ * workspace declares nothing — the caller then keeps the historical fixed
+ * fallback.
+ */
+export function operatorDeclaredBudgetResolution(
+  promptBudget: PromptBudgetConfig | undefined,
+  hostKind: PromptInjectionTargetHost,
+): PromptBudgetResolution | undefined {
+  const declaredWindow = operatorDeclaredContextWindow(promptBudget, hostKind);
+  if (declaredWindow === undefined) return undefined;
+  return resolvePromptBudget({ operatorDeclared: { contextWindowTokens: declaredWindow } });
 }

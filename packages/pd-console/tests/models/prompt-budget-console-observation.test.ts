@@ -41,11 +41,19 @@ import { validatePromptInjectionBudgetStatus } from '../../src/ui/utils/validato
 
 const tempDirs: string[] = [];
 
-function makeWorkspace(opts?: { declare?: PromptInjectionTargetHost[] }): string {
+function makeWorkspace(opts?: {
+  declare?: PromptInjectionTargetHost[];
+  /** PRI-1020: Owner-declared capacity written into .pd/config.yaml. */
+  promptBudget?: { declaredContextWindowTokens?: number; hosts?: Record<string, number> };
+}): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-console-budget-'));
   tempDirs.push(dir);
   fs.mkdirSync(path.join(dir, '.pd'), { recursive: true });
-  fs.writeFileSync(path.join(dir, '.pd', 'config.yaml'), yaml.dump(getDefaultPdConfig()), 'utf8');
+  const workspaceConfig = getDefaultPdConfig();
+  if (opts?.promptBudget !== undefined) {
+    workspaceConfig.promptBudget = opts.promptBudget;
+  }
+  fs.writeFileSync(path.join(dir, '.pd', 'config.yaml'), yaml.dump(workspaceConfig), 'utf8');
   for (const hostKind of opts?.declare ?? []) {
     const saved = saveHostToolDeclaration(dir, {
       version: 1,
@@ -510,5 +518,92 @@ describe('PRI-1017 B: missing / stale / mismatched / untrusted observations degr
     const activations = await new ActivationsConsoleModel(dir).getActivations();
     expect(activations.promptInjectionRoute?.budgetFallbackReason).toBe('catalog_no_match_for_model_id');
     expect(activations.promptInjectionRoute?.budgetObservedAt).toBeDefined();
+  });
+});
+
+describe('PRI-1020: the Owner-declared basis backs console surfaces with no fresh observation', () => {
+  it('D1: a declared target host drives the confirmed forecast (and passes the wire contract)', async () => {
+    const dir = makeWorkspace({
+      declare: ['codex'],
+      promptBudget: { declaredContextWindowTokens: 262144, hosts: { codex: 400000 } },
+    });
+    await seedActivation(dir, 'decl-d1', '声明预算端到端验证原则：先确认事实，再行动。' + 'z'.repeat(80));
+
+    const grouped = await new ApprovalsGroupedConsoleModel(dir).getApprovalsGrouped('codex');
+    const promptInjection = grouped.promptInjection;
+    expect(promptInjection).toBeDefined();
+    // No observation exists — the declaration is the basis. 400000 tokens → 6250 chars.
+    expect(promptInjection?.budget).toBe(6250);
+    expect(promptInjection?.capacityStatus).toBe('confirmed');
+    expect(promptInjection?.budgetCapacitySource).toBe('operator_declared');
+    expect(promptInjection?.budgetCapacityStatus).toBe('confirmed');
+    expect(promptInjection?.budgetContextWindowTokens).toBe(400000);
+    expect(promptInjection?.budgetObservedAt).toBeUndefined();
+    expect(validatePromptInjectionBudgetStatus(promptInjection)).toEqual(promptInjection);
+  });
+
+  it('D2: unconfirmed route — each per-host forecast carries ITS OWN declared basis', async () => {
+    const dir = makeWorkspace({
+      promptBudget: { declaredContextWindowTokens: 262144, hosts: { codex: 400000 } },
+    });
+    await seedActivation(dir, 'decl-d2', '未确认路由声明基座验证原则');
+    const grouped = await new ApprovalsGroupedConsoleModel(dir).getApprovalsGrouped();
+    const promptInjection = grouped.promptInjection;
+    expect(promptInjection?.capacityStatus).toBe('unconfirmed');
+    const perHost = promptInjection?.perHost ?? [];
+    const codex = perHost.find((entry) => entry.hostKind === 'codex');
+    const workbuddy = perHost.find((entry) => entry.hostKind === 'workbuddy');
+    const openclaw = perHost.find((entry) => entry.hostKind === 'openclaw');
+    // Per-host override (400000 → 6250) vs global (262144 → 4096).
+    expect(codex?.budget).toBe(6250);
+    expect(codex?.budgetCapacitySource).toBe('operator_declared');
+    expect(codex?.budgetObservedAt).toBeUndefined();
+    expect(workbuddy?.budget).toBe(4096);
+    expect(workbuddy?.budgetCapacitySource).toBe('operator_declared');
+    expect(openclaw?.budget).toBe(4096);
+    expect(openclaw?.budgetCapacitySource).toBe('operator_declared');
+    // A declared basis is confirmed — no fallback reason may contradict it.
+    expect(codex?.budgetFallbackReason).toBeUndefined();
+    expect(workbuddy?.budgetFallbackReason).toBeUndefined();
+    expect(validatePromptInjectionBudgetStatus(promptInjection)).toEqual(promptInjection);
+  });
+
+  it('D3: a fresh runtime observation still outranks the declaration (it is what actually ran)', async () => {
+    const dir = makeWorkspace({
+      declare: ['codex'],
+      promptBudget: { hosts: { codex: 400000 } },
+    });
+    await seedActivation(dir, 'decl-d3', '观测优先于声明验证原则：先确认事实，再行动。' + 'z'.repeat(80));
+    // A FRESH observation of an injection that ran under the host's OWN
+    // trusted window (recorded before the declaration was added). Tier 0
+    // governs the next injection, but the console forecast follows the most
+    // recent RUNTIME fact while it is fresh — never a declaration that
+    // contradicts what the runtime actually did last.
+    writeRawEvent(dir, new Date().toISOString(), budgetEventData(dir, { ...TRUSTED_256K, hostKind: 'codex' }));
+
+    const grouped = await new ApprovalsGroupedConsoleModel(dir).getApprovalsGrouped('codex');
+    expect(grouped.promptInjection?.budget).toBe(4000);
+    expect(grouped.promptInjection?.budgetCapacitySource).toBe('host_effective_window');
+    expect(grouped.promptInjection?.budgetObservedAt).toBeDefined();
+
+    const activations = await new ActivationsConsoleModel(dir).getActivations('codex');
+    expect(activations.promptInjectionRoute?.budgetCapacitySource).toBe('host_effective_window');
+    expect(activations.promptInjectionRoute?.budgetObservedAt).toBeDefined();
+  });
+
+  it('D4: the activations surface forecasts under the declared basis when no observation exists', async () => {
+    const dir = makeWorkspace({
+      declare: ['codex'],
+      promptBudget: { hosts: { codex: 400000 } },
+    });
+    await seedActivation(dir, 'decl-d4', '激活页声明基座验证原则：先确认事实，再行动。' + 'z'.repeat(80));
+
+    const activations = await new ActivationsConsoleModel(dir).getActivations('codex');
+    const row = activations.activations.find((entry) => entry.promptInjection !== undefined);
+    expect(row?.promptInjection?.budget).toBe(6250);
+    expect(row?.promptInjection?.status).toBe('injectable');
+    expect(activations.promptInjectionRoute?.budgetCapacitySource).toBe('operator_declared');
+    expect(activations.promptInjectionRoute?.budgetCapacityStatus).toBe('confirmed');
+    expect(activations.promptInjectionRoute?.budgetObservedAt).toBeUndefined();
   });
 });
