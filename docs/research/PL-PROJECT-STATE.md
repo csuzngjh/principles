@@ -1,7 +1,7 @@
 # Principle Learning 项目状态（唯一权威）
 
 > 本文档是 Principle Learning 研究项目的唯一状态来源。后续任何 AI 执行前必须先读本文件。
-> 最后更新：2026-10-23；分支 `ai/PRI-966-ca-content-modes` HEAD `5c11c908b`（PR #2116）。
+> 最后更新：2026-10-23（**PR #2116 已合并**：merge commit `471092d60`，82 files，全部 PL 成果入 main）；后续工作基于 main 最新基线。
 > 维护规则：状态变化时更新本文件对应小节；禁止另建竞争性状态报告。
 
 ## 1. 研究协议
@@ -55,16 +55,15 @@
 ## 6. Git / PR / CI 状态
 
 - 分支 `ai/PRI-966-ca-content-modes`，HEAD `5c11c908b`（含最新 main merge），工作区干净
-- PR #2116：OPEN / MERGEABLE；CI 31 pass / CLEAN（修复历程：satellite-purity 瞬态→rerun 绿；环境依赖测试删除 0a6391f05；PR 基线过期 merge main 5c11c908b；CodeQL 8 项全修 dfcdf4703+c6df59d74）
-- CodeQL review threads：历史 8 项已 resolved；当前 0 未解决
+- PR #2116：**MERGED**（merge commit `471092d60`）；CI 31 pass / CLEAN / CodeQL 0 未解决 thread
 
 ## 7. 任务看板
 
 | 状态 | 项 |
 |---|---|
 | **已完成** | C-A 三种子；C-E 三种子；联合审计；Luna 三轮冒烟与修复；fixture v2（G/P3 修复/拉丁矩/18 案校准/prereg 草案）；授权链（evidenceVerifier+preregHash fail-closed）；159 项离线测试 |
-| **进行中** | 无（等待 Owner 批准 v2） |
-| **被阻塞** | v2 正式实验（等 OD-v2-1/2/3）；C-D/C-N（依赖 v2 结果与生产交付机制）；Luna 宿主（等输出通道与模型输出质量解决） |
+| **进行中** | 等待 Owner 批准 OD-v2-1/2/3（授权材料已就绪） |
+| **被阻塞** | C-D/C-N（依赖 v2 结果与生产交付机制）；Luna 宿主（等输出通道与模型输出质量解决） |
 | **尚未开始** | 确认性实验升级（预注册升级标准已定义）；第二任务族；P3-revised 独立任务 |
 
 ## 8. 证据索引与边界
