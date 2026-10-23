@@ -16,6 +16,8 @@
 > **Owner Review 第二轮修复（2026-10-23，head `a6f68c03d` 审查意见）**：经核实的三项 P1——冻结取值未与 Owner 批准内容对账（只比两个 SHA 字符串）、FZ-11 非法值形态可跳过样本量门、畸形账本条目可被报为已证明真零。全部修复见 **§7 第二轮修复记录**，回归由 64 项扩至 72 项。其中第三项在真实 core 读取下核实出比评审描述更深的一层：core 宽松解析会**静默丢弃**字符串条目并给缺 id 的对象条目**回填默认值（无 status）**，修复以 id+status 双字段契约暴露该半成品形态。
 >
 > **Owner Review 第三轮修复（2026-10-23，head `aa8cbf5a3` 审查意见）**：五项——Owner 批准未绑定完整协议（studyId+正文+全部条目）、runningCommitSha 可缺省、status 未复用 Core 权威枚举、FZ-01 信任加载时缓存哈希、宽松空账本输出误导性 M2/M3 零值。全部修复见 **§8 第三轮修复记录**，回归由 72 项扩至 75 项。
+>
+> **Owner Review 第四轮修复（2026-10-23，head `cd4e271bc` 审查意见）**：三项——`verifyDatasetIntegrity()` 派生索引校验不足且 Map 防变异可被原型方法绕过、status 应直用规范权威常量 `PRINCIPLE_STATUSES` 而非从 schema 提取、不可测账本状态的 M4/M5 等指标仍输出伪零。全部修复见 **§9 第四轮修复记录**，回归由 75 项扩至 87 项。
 
 ---
 
@@ -402,3 +404,63 @@ git diff --check → OK；变更仅 scripts/ 研究树 5 文件 + 报告，生�
 - 其余 Owner 待决清单（§4）、§6.6/§7.5 限制不变。
 
 **第三轮修复后状态收口：离线能力 GO（五项已修复并复验）；真实 M1～M5 NOT_MEASURED；真实 A/C NOT_RUN；Gate B BLOCKED；Gate C NOT_GRANTED。**
+
+---
+
+## 9. Owner Review 第四轮修复记录（2026-10-23，head `cd4e271bc` 审查意见）
+
+三项逐项核实属实后修复。变更仍限于 PRR 实验室代码、测试与本报告，生产源码零改动。
+
+### 9.1 P1-4：派生索引完整性与 Map 防变异（prr-dataset.mjs + prr-freeze.mjs）
+
+| 项 | 修复前 | 修复后 |
+|---|---|---|
+| 派生索引校验 | 仅"Map 中的值属于原始数组"——容忍缺失键、错误键值映射、额外键 | `derivedMapMatchesSource()`：Map 大小必须等于源数组长度（重复 ID 导致的歧义由 size 检出）、键集合与源 ID 集合完全一致（无缺失/无额外/无外来键）、**每键映射到源数组中同一对象**（`map.get(id) === entry`）；`tasksById`/`principlesById` 同规则；`goldByTask` 全键覆盖 + 每值与已验证 gold 记录对象身份一致 + 无缺失/额外键。任一失败 `derivedIndexesBound=false` → `ok=false` |
+| Map 防变异 | 实例方法钉死（`defineProperty` 覆盖 set/delete/clear）——可被 `Map.prototype.set.call(map,…)` 绕过 | `createReadOnlyMapProxy()`：对永不暴露的 inner Map 建 Proxy——`instanceof Map` 与 get/has/size/forEach/keys/values/entries 全兼容；直接 `set/delete/clear` 命中 get-trap 拒绝；**`Map.prototype.*.call(proxy,…)` 因 Proxy 无 [[MapData]] 内部槽天然 incompatible-receiver TypeError**（本机实测四种原型攻击全部抛错）；属性写入/删除/定义走 set/deleteProperty/defineProperty trap 拒绝；`freezeDeepAndWrap` 重构为带 WeakMap 记忆的深冻结变换，**保留共享对象身份**（`tasks === byFile['tasks.json']` 不被重建破坏），内部 Map 从不外泄（回调只收值） |
+
+新增测试（全部调用真实 `verifyDatasetIntegrity()`，必要时再过门）：完整数据集通过正控；删 `tasksById` 条目失败；任务 ID 指向另一合法任务对象失败；删 `principlesById` 条目失败；原则键指向另一合法原则失败；删 `goldByTask` 条目失败；索引额外键（tasksById 与 goldByTask 双测）失败；重复 taskId 歧义经 size 检出失败；`Map.prototype.set/delete/clear.call()` 四种攻击全部抛错且事后 `verifyDatasetIntegrity(dataset).ok === true`（快照未被触及）；既有 deep-freeze/共享身份/重算哈希/门拒绝测试全部保留并通过。
+
+### 9.2 P1-3：直用 Core 规范权威常量 `PRINCIPLE_STATUSES`（prr-readonly.mjs）
+
+| 项 | 修复前 | 修复后 |
+|---|---|---|
+| 枚举来源 | 从 `PrincipleFactSchema.properties.state`（TypeBox Union）提取字面值 | 直接消费 `@principles/core/runtime-v2` 导出的**规范权威常量 `PRINCIPLE_STATUSES`**（`runtime-v2/types/principle-enums.ts`，其文档注释即要求一切表示 DERIVE 自该常量、不得重打字面量；`PrincipleStatusSchema` 本身也由它构建）——单一来源、最严格绑定；形状非法（非数组/空/含非字符串）或解析失败 = 模块加载失败（fail-loud 保持） |
+| 校验行为 | — | 不变：混合合法与非法条目整账本拒绝；`deactivated`/garbage/''/null/缺失/非字符串逐形态不可测 |
+
+测试更新：`authoritativePrincipleStatuses()` 必须与 Core 导出 `PRINCIPLE_STATUSES` 精确一致（测试直接 import 该常量对账）；`PRINCIPLE_STATUSES` 逐值通过合法性检查；非法形态逐个不可测断言保持。
+
+### 9.3 P2：不可测账本指标不再伪装为零（prr-readonly.mjs）
+
+四类状态语义统一（`unmeasurable: true` 标记 + null 数值 + 专属原因码；`details` 保留数组合同形态、由原因码明确标记不可测）：
+
+| 状态 | M1 | M2/M3/M4 | M5 |
+|---|---|---|---|
+| `ok`（完整可测） | 正常计数 | 正常计数（正控不回退） | 正常计数 |
+| `ok_but_empty_ledger` | `count:0` + `trueZero:false` + 审查码（证据不可提升） | 全部 `null` + `unmeasurable:true` + 审查码 | `unauthorizedCount/unavailableCount: null` |
+| `malformed_entries` / `unmeasurable_unknown` | `count:null` | 全部 `null`（证据不可绕过门禁） | 全部 `null` |
+| `empty` | `count:0`；真零仅凭独立证据（既有规则不变） | **不再输出成功形态零值**——全部 `null`（空账本不是溯源/完整性/冲突的可测分母） | 全部 `null` |
+| `unreadable` | `count:null`（`ledger_unreadable`） | 全部 `null` | 全部 `null` |
+
+新增测试：`ok` 正控 M1~M5 数字输出不回退（`unmeasurable` 字段不存在）；`ok_but_empty_ledger` 全指标断言（含带证据场景）；malformed/unknown 全指标无伪零值；`unreadable` 与 `empty` 明确区分；`empty` 无证据不能证真零、有证据仅 M1 提升；既有正控（counts eligibility / authorization 三态 / CLI 只读快照不变断言）全部保留并通过。
+
+### 9.4 第四轮修复验证证据
+
+```text
+cd scripts && npx vitest run __tests__/prr-ac-lab.test.ts __tests__/prr-freeze-readonly.test.ts
+  → Test Files 2 passed, Tests 87 passed (87)
+npm run test:scripts
+  → Test Files 50 passed, Tests 981 passed (981)
+npm run dev:prr-rehearsal
+  → rehearsal gate: PASS（studyHash=338a07723aff5d5f7b00e33a5d6c5a19472bd24f0b1ad947edb4cd433c407dd4）
+  → freeze real-run gate: REFUSED（5 problem(s)）
+双跑 cmp rehearsal-result.json → 字节同一；npx eslint scripts/dev/principle-learning-lab/prr/ → 0 error
+git diff --check → OK；变更仅 PRR 实验室 3 文件 + 测试 + 报告，生产源码零改动，无网络/模型调用/新增执行入口
+```
+
+### 9.5 第四轮剩余限制（如实保留）
+
+- `runningCommitSha` 受信来源证明、verifier 信任根实现归属（O-05）、Core 宽松解析源头收紧——沿用 §8.7 各项，本轮未变；
+- 只读 Map 代理依赖"Proxy 无 Map 内部槽"这一引擎行为实现原型方法拒绝（V8/JSC 一致）；若未来宿主要求在无 Proxy 环境运行，需等价替代设计（当前 Node ≥18 均满足）；
+- 其余 Owner 待决清单（§4）不变。
+
+**第四轮修复后状态收口：离线能力 GO（三项已修复并复验）；真实 M1～M5 NOT_MEASURED；真实 A/C NOT_RUN；Gate B BLOCKED；Gate C NOT_GRANTED。**

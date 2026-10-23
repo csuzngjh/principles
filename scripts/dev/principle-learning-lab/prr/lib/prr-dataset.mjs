@@ -65,35 +65,63 @@ export function computeDatasetHash(byFile) {
 }
 
 /**
- * Recursively freeze a loaded dataset (owner review round 3, P1-4): every
- * nested object/array — and every value inside Maps/Sets — becomes immutable,
- * so post-load mutation of raw file data OR derived indexes (tasksById,
- * principlesById, goldByTask) throws in strict-mode ESM instead of silently
- * diverging from the hashed snapshot. Depth-bounded by the fixture's size.
+ * A genuinely read-only Map view (owner review round 4, P1-4). The previous
+ * instance-method pinning was bypassable via `Map.prototype.set.call(map,…)`;
+ * a Proxy over a never-exposed inner Map closes that path:
+ *   - `instanceof Map`, get/has/size/forEach/keys/values/entries all work;
+ *   - `map.set/delete/clear` hit the get-trap thrower;
+ *   - `Map.prototype.set.call(proxy,…)` cannot reach the inner [[MapData]]
+ *     (a Proxy has no Map internal slot → incompatible-receiver TypeError);
+ *   - property writes/deletes/defines are trapped, and the inner Map is
+ *     never exposed (callbacks only receive values).
  */
-function deepFreeze(value, depth = 0) {
-  if (value === null || typeof value !== 'object' || Object.isFrozen(value) || depth > 32) return value;
+function createReadOnlyMapProxy(inner) {
+  const MUTATORS = new Set(['set', 'delete', 'clear']);
+  return new Proxy(inner, {
+    get(target, prop) {
+      if (MUTATORS.has(prop)) {
+        return () => { throw new TypeError('dataset is frozen: derived index maps cannot be mutated'); };
+      }
+      const v = Reflect.get(target, prop, target);
+      return typeof v === 'function' ? v.bind(target) : v;
+    },
+    set() { throw new TypeError('dataset is frozen: derived index maps cannot be mutated'); },
+    deleteProperty() { throw new TypeError('dataset is frozen: derived index maps cannot be mutated'); },
+    defineProperty() { throw new TypeError('dataset is frozen: derived index maps cannot be mutated'); },
+  });
+}
+
+/**
+ * Deeply freeze a loaded dataset (owner review round 3+4, P1-4). Plain
+ * objects/arrays are rebuilt frozen; Maps are REBUILT into read-only proxies
+ * (see createReadOnlyMapProxy) so no mutable inner Map ever escapes. The
+ * WeakMap memo preserves SHARED OBJECT IDENTITY through the transformation —
+ * `tasks` and `byFile['tasks.json']` stay the same frozen object, which the
+ * integrity check depends on. Depth-bounded; cyclic structures are handled by
+ * placeholder memoization.
+ */
+function freezeDeepAndWrap(value, depth, cache) {
+  if (value === null || typeof value !== 'object' || depth > 32) return value;
+  if (cache.has(value)) return cache.get(value);
   if (value instanceof Map) {
-    for (const child of value.values()) deepFreeze(child, depth + 1);
-    // Object.freeze alone does NOT stop Map internals — pin the mutators
-    // BEFORE freezing (defineProperty needs an extensible target).
-    const mapThrower = () => { throw new TypeError('dataset is frozen: derived index maps cannot be mutated'); };
-    Object.defineProperty(value, 'set', { value: mapThrower });
-    Object.defineProperty(value, 'delete', { value: mapThrower });
-    Object.defineProperty(value, 'clear', { value: mapThrower });
-    Object.freeze(value);
-  } else if (value instanceof Set) {
-    for (const child of value) deepFreeze(child, depth + 1);
-    const setThrower = () => { throw new TypeError('dataset is frozen: derived index sets cannot be mutated'); };
-    Object.defineProperty(value, 'add', { value: setThrower });
-    Object.defineProperty(value, 'delete', { value: setThrower });
-    Object.defineProperty(value, 'clear', { value: setThrower });
-    Object.freeze(value);
-  } else {
-    Object.freeze(value);
-    for (const child of Object.values(value)) deepFreeze(child, depth + 1);
+    const inner = new Map();
+    cache.set(value, inner); // placeholder first, for cycle safety
+    for (const [k, v] of value.entries()) inner.set(k, freezeDeepAndWrap(v, depth + 1, cache));
+    const proxy = createReadOnlyMapProxy(inner);
+    cache.set(value, proxy);
+    return proxy;
   }
-  return value;
+  if (Array.isArray(value)) {
+    const arr = value.map((v) => freezeDeepAndWrap(v, depth + 1, cache));
+    Object.freeze(arr);
+    cache.set(value, arr);
+    return arr;
+  }
+  const out = {};
+  cache.set(value, out);
+  for (const [k, v] of Object.entries(value)) out[k] = freezeDeepAndWrap(v, depth + 1, cache);
+  Object.freeze(out);
+  return out;
 }
 
 /**
@@ -117,15 +145,50 @@ const CONSUMED_FILE_FIELDS = [
   ['designChecks', 'design-checks.json'],
 ];
 
+/**
+ * Exact integrity check for one derived index map against its source array:
+ * the Map must have EXACTLY the source ids as keys (no missing, no extra, no
+ * duplicates via the size check) and every key must map to THE SAME object as
+ * in the verified source array (no wrong-value mapping).
+ */
+function derivedMapMatchesSource(map, sourceArray, idField) {
+  if (!(map instanceof Map)) return false;
+  if (map.size !== sourceArray.length) return false;
+  const ids = new Set();
+  for (const entry of sourceArray) {
+    const id = entry?.[idField];
+    if (typeof id !== 'string' || id === '' || ids.has(id)) return false; // duplicate ids are ambiguous
+    ids.add(id);
+    if (map.get(id) !== entry) return false;
+  }
+  for (const key of map.keys()) {
+    if (!ids.has(key)) return false; // extra/foreign key
+  }
+  return true;
+}
+
 export function verifyDatasetIntegrity(dataset) {
   const currentHash = computeDatasetHash(dataset.byFile);
   const hashUnchanged = currentHash === dataset.fixtureHash;
   const consumedIdentityShared = CONSUMED_FILE_FIELDS.every(([field, file]) => dataset[field] === dataset.byFile[file]);
-  const derivedIndexesBound = dataset.tasksById instanceof Map
-    && [...dataset.tasksById.values()].every((t) => dataset.tasks.tasks.includes(t))
-    && dataset.principlesById instanceof Map
-    && [...dataset.principlesById.values()].every((p) => dataset.principles.principles.includes(p))
-    && Object.entries(dataset.goldByTask).every(([id, g]) => dataset.gold.gold[id] === g);
+  // Owner review round 4, P1-4: the derived indexes must be EXACTLY consistent
+  // with the frozen sources — full key coverage, no extra keys, correct size,
+  // and per-key object identity. "Every value belongs to the source array" was
+  // not sufficient: it tolerated missing keys, swapped mappings and extras.
+  const derivedIndexesBound = derivedMapMatchesSource(dataset.tasksById, dataset.tasks?.tasks ?? [], 'taskId')
+    && derivedMapMatchesSource(dataset.principlesById, dataset.principles?.principles ?? [], 'principleId')
+    && (() => {
+      const goldKeys = Object.keys(dataset.gold?.gold ?? {});
+      if (goldKeys.length !== Object.keys(dataset.goldByTask ?? {}).length) return false;
+      for (const k of goldKeys) {
+        if (!Object.hasOwn(dataset.goldByTask, k)) return false; // missing key
+        if (dataset.goldByTask[k] !== dataset.gold.gold[k]) return false; // wrong mapping
+      }
+      for (const k of Object.keys(dataset.goldByTask)) {
+        if (!Object.hasOwn(dataset.gold.gold, k)) return false; // extra key
+      }
+      return true;
+    })();
   return {
     ok: hashUnchanged && consumedIdentityShared && derivedIndexesBound,
     cachedHash: dataset.fixtureHash,
@@ -155,10 +218,12 @@ export function loadPrrDataset(dir) {
   const principlesById = new Map((principles.principles ?? []).map((p) => [p.principleId, p]));
   const goldByTask = gold.gold ?? {};
 
-  // P1-4: the returned structure is DEEP-FROZEN — raw file data and derived
-  // indexes alike cannot be mutated after loading without throwing, so the
-  // hashed snapshot and the consumed data cannot silently diverge.
-  return deepFreeze({
+  // P1-4 (rounds 3+4): the returned structure is deeply frozen AND derived
+  // indexes become genuinely read-only proxies — raw file data and derived
+  // indexes alike cannot be mutated after loading (directly OR through
+  // Map.prototype.*.call), so the hashed snapshot and the consumed data
+  // cannot silently diverge.
+  return freezeDeepAndWrap({
     dir,
     manifest,
     principles,
@@ -171,7 +236,7 @@ export function loadPrrDataset(dir) {
     principlesById,
     goldByTask,
     fixtureHash: computeDatasetHash(byFile),
-  });
+  }, 0, new WeakMap());
 }
 
 function isPlainObject(v) {

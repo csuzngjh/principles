@@ -21,32 +21,31 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 
-// ── Core authoritative principle-status contract (owner review round 3, P1-3) ──
+// ── Core authoritative principle-status contract (owner review rounds 3+4) ──
 //
 // The usable-entry check MUST follow the Core authority's status enum, not a
-// local copy. The authoritative definition lives in the public TypeBox schema
-// `PrincipleFactSchema` (runtime-v2 governance projection contract): its
-// `state` field is a Type.Union of literals and is exported from
-// `@principles/core/runtime-v2`. We extract the literal set FROM THE SCHEMA so
-// a future Core enum change flows through automatically; resolution failure is
-// a module-load failure (fail-loud), never a silently-empty allowlist.
+// local copy. The canonical authority is the exported `PRINCIPLE_STATUSES`
+// constant (`runtime-v2/types/principle-enums.ts`, re-exported from
+// `@principles/core/runtime-v2`); its own doc comment requires every other
+// representation to DERIVE from it — never re-type the literals. The TypeBox
+// `PrincipleStatusSchema` is itself built from this array, so consuming the
+// constant directly is the strictest, single-source binding. Resolution
+// failure is a module-load failure (fail-loud), never a silently-empty
+// allowlist.
 const CORE_PRINCIPLE_STATUSES = await (async () => {
   try {
     const governance = await import('@principles/core/runtime-v2');
-    const stateSchema = governance?.PrincipleFactSchema?.properties?.state;
-    const values = Array.isArray(stateSchema?.anyOf)
-      ? stateSchema.anyOf.map((s) => s?.const).filter((v) => typeof v === 'string' && v !== '')
-      : [];
-    if (values.length === 0) {
-      throw new Error('PrincipleFactSchema.properties.state.anyOf yielded no literal values');
+    const statuses = governance?.PRINCIPLE_STATUSES;
+    if (!Array.isArray(statuses) || statuses.length === 0 || statuses.some((s) => typeof s !== 'string' || s === '')) {
+      throw new Error('PRINCIPLE_STATUSES is not a non-empty string array');
     }
-    return new Set(values);
+    return new Set(statuses);
   } catch (error) {
-    throw new Error(`prr-readonly: cannot resolve the Core authoritative principle-status contract: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`prr-readonly: cannot resolve the Core authoritative principle-status contract (PRINCIPLE_STATUSES): ${error instanceof Error ? error.message : String(error)}`);
   }
 })();
 
-/** Authoritative status values, extracted from the Core schema (for reports). */
+/** Authoritative status values, from the Core constant (for reports). */
 export function authoritativePrincipleStatuses() {
   return [...CORE_PRINCIPLE_STATUSES].sort();
 }
@@ -231,10 +230,15 @@ export function measureLedgerPrinciples({ coreResult, authorization, trueZeroEvi
       },
       m2: { count: null, reasonCode: malformed ? 'malformed_ledger_entries' : 'availability_status_unknown' },
       m3: { count: null, reasonCode: malformed ? 'malformed_ledger_entries' : 'availability_status_unknown' },
-      m4: { count: 0, details: [], reasonCode: malformed ? 'malformed_ledger_entries' : 'availability_status_unknown' },
+      // Owner review round 4, P2: unmeasurable metrics never masquerade as
+      // zeros. `details` keeps its array contract shape, but `count` is null
+      // and the reason code marks the whole metric UNMEASURABLE — an empty
+      // details array alone must not read as "measured, no conflicts".
+      m4: { count: null, details: [], unmeasurable: true, reasonCode: malformed ? 'malformed_ledger_entries' : 'availability_status_unknown' },
       m5: {
-        unauthorizedCount: 0,
-        unavailableCount: 0,
+        unauthorizedCount: null,
+        unavailableCount: null,
+        unmeasurable: true,
         unauthorizedField: summaryFieldsAllowed ? null : 'pain_structured_summary',
         reasons: [malformed ? 'malformed_ledger_entries' : 'availability_status_unknown'],
       },
@@ -258,13 +262,18 @@ export function measureLedgerPrinciples({ coreResult, authorization, trueZeroEvi
           ? 'parsed count is 0, but readLedgerFileState empty covers missing/zero-byte/lenient states and cannot alone prove a genuinely empty ledger — trueZero stays false without independent auditable evidence'
           : 'unreadable ledger must never be reported as 0 eligible principles',
       },
-      m2: { count: availabilityClass === 'empty' ? 0 : null, reasonCode: availabilityClass === 'empty' ? 'ledger_empty__true_zero_unproven' : 'ledger_unreadable' },
-      m3: { count: availabilityClass === 'empty' ? 0 : null, reasonCode: 'ledger_empty_or_unreadable' },
-      m4: { count: 0, details: [], reasonCode: availabilityClass === 'empty' ? 'no_parsed_principles_to_conflict' : 'not_measurable_ledger_unreadable' },
+      // Owner review round 4, P2: M2~M5 may only return numbers when the
+      // metric actually has a measurable denominator — "the ledger is empty"
+      // is not a measurement of traceability, completeness, conflicts or
+      // authorization gaps, so unmeasurable fields are null (never zeros).
+      m2: { count: null, denominator: null, unmeasurable: true, reasonCode: 'ledger_empty__true_zero_unproven' },
+      m3: { count: null, denominator: null, unmeasurable: true, reasonCode: 'ledger_empty_or_unreadable' },
+      m4: { count: null, details: [], unmeasurable: true, reasonCode: availabilityClass === 'empty' ? 'no_parsed_principles_to_conflict' : 'not_measurable_ledger_unreadable' },
       m5: {
-        unauthorizedCount: 0,
+        unauthorizedCount: null,
+        unavailableCount: null,
+        unmeasurable: true,
         unauthorizedField: summaryFieldsAllowed ? null : 'pain_structured_summary',
-        unavailableCount: 0,
         reasons: [availabilityClass === 'empty' ? 'ledger_empty' : 'ledger_unreadable'],
       },
     };
@@ -287,18 +296,20 @@ export function measureLedgerPrinciples({ coreResult, authorization, trueZeroEvi
         reasonCode: 'ok_but_empty_ledger__semantic_review_required',
         note: 'parse-lenient empty ledger: 0 is the parsed result, NOT a proven true zero — the lenient parser may have swallowed entries, so semantic review is required before any report and no evidence parameter can promote it (F-04)',
       },
-      m2: { count: null, denominator: null, reasonCode: 'ok_but_empty_ledger__semantic_review_required' },
+      m2: { count: null, denominator: null, unmeasurable: true, reasonCode: 'ok_but_empty_ledger__semantic_review_required' },
       m3: {
         count: null,
         denominator: null,
+        unmeasurable: true,
         reasonCode: 'ok_but_empty_ledger__semantic_review_required',
         unauthorizedField: summaryFieldsAllowed ? null : 'pain_structured_summary',
       },
-      m4: { count: null, details: [], reasonCode: 'ok_but_empty_ledger__semantic_review_required' },
+      m4: { count: null, details: [], unmeasurable: true, reasonCode: 'ok_but_empty_ledger__semantic_review_required' },
       m5: {
-        unauthorizedCount: 0,
+        unauthorizedCount: null,
+        unavailableCount: null,
+        unmeasurable: true,
         unauthorizedField: summaryFieldsAllowed ? null : 'pain_structured_summary (D-01 not granted or not declared)',
-        unavailableCount: 0,
         reasons: ['ok_but_empty_ledger__semantic_review_required'],
       },
       perPrinciple: [],

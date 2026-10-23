@@ -28,6 +28,7 @@ import {
   measureLedgerPrinciples,
   snapshotTree,
 } from '../dev/principle-learning-lab/prr/lib/prr-readonly.mjs';
+import { PRINCIPLE_STATUSES } from '@principles/core/runtime-v2';
 import { buildPrrDatasetFiles, writePrrDataset } from './prr-test-fixtures';
 import { loadPrrDataset } from '../dev/principle-learning-lab/prr/lib/prr-dataset.mjs';
 
@@ -464,6 +465,84 @@ describe('freeze real-run gate (fail-closed)', () => {
     // And the verified snapshot is untouched by all of the above.
     expect(verifyDatasetIntegrity(dataset)).toMatchObject({ ok: true });
   });
+
+  // ── Owner review round 4 — P1-4: derived indexes must be EXACTLY consistent ──
+  // JSON round-trips break the frozen shared references, so a clone's derived
+  // indexes are rebuilt from the cloned sources; this isolates the DERIVED
+  // dimension under test (the shared-identity dimension has its own tests).
+  function cloneWithRebuiltIndexes() {
+    const mutated = structuredClone(JSON.parse(JSON.stringify(dataset)));
+    mutated.tasksById = new Map(mutated.tasks.tasks.map((t: any) => [t.taskId, t]));
+    mutated.principlesById = new Map(mutated.principles.principles.map((p: any) => [p.principleId, p]));
+    mutated.goldByTask = { ...mutated.gold.gold };
+    return mutated;
+  }
+
+  it('deleting a tasksById entry fails the derived-index integrity check (P1-4)', () => {
+    const mutated = cloneWithRebuiltIndexes();
+    mutated.tasksById.delete(mutated.tasks.tasks[0].taskId);
+    const result = verifyDatasetIntegrity(mutated);
+    expect(result.derivedIndexesBound).toBe(false);
+    expect(result.ok).toBe(false);
+  });
+
+  it('mapping a task id to ANOTHER legitimate task object fails (P1-4)', () => {
+    const mutated = cloneWithRebuiltIndexes();
+    const [first, second] = mutated.tasks.tasks;
+    mutated.tasksById.set(first.taskId, second); // wrong value mapping
+    const result = verifyDatasetIntegrity(mutated);
+    expect(result.derivedIndexesBound).toBe(false);
+    expect(result.ok).toBe(false);
+  });
+
+  it('deleting a principlesById entry fails (P1-4)', () => {
+    const mutated = cloneWithRebuiltIndexes();
+    mutated.principlesById.delete(mutated.principles.principles[0].principleId);
+    expect(verifyDatasetIntegrity(mutated)).toMatchObject({ derivedIndexesBound: false, ok: false });
+  });
+
+  it('mapping a principle key to ANOTHER legitimate principle fails (P1-4)', () => {
+    const mutated = cloneWithRebuiltIndexes();
+    const [first, second] = mutated.principles.principles;
+    mutated.principlesById.set(first.principleId, second);
+    expect(verifyDatasetIntegrity(mutated)).toMatchObject({ derivedIndexesBound: false, ok: false });
+  });
+
+  it('deleting a goldByTask entry fails (P1-4)', () => {
+    const mutated = cloneWithRebuiltIndexes();
+    delete mutated.goldByTask['t1-history-decides'];
+    expect(verifyDatasetIntegrity(mutated)).toMatchObject({ derivedIndexesBound: false, ok: false });
+  });
+
+  it('extra keys in a derived index fail (P1-4)', () => {
+    const mutated = cloneWithRebuiltIndexes();
+    mutated.tasksById.set('extra-key', mutated.tasks.tasks[0]);
+    expect(verifyDatasetIntegrity(mutated)).toMatchObject({ derivedIndexesBound: false, ok: false });
+
+    const mutatedGold = cloneWithRebuiltIndexes();
+    (mutatedGold as any).goldByTask['extra-key'] = mutatedGold.gold.gold['t1-history-decides'];
+    expect(verifyDatasetIntegrity(mutatedGold)).toMatchObject({ derivedIndexesBound: false, ok: false });
+  });
+
+  it('duplicate task ids (ambiguous index) fail via the size check (P1-4)', () => {
+    const mutated = cloneWithRebuiltIndexes();
+    mutated.tasks.tasks[1].taskId = mutated.tasks.tasks[0].taskId; // two tasks, one id
+    expect(verifyDatasetIntegrity(mutated)).toMatchObject({ derivedIndexesBound: false, ok: false });
+  });
+
+  it('Map.prototype.*.call() cannot mutate the protected indexes, and integrity still passes (P1-4)', () => {
+    for (const attack of [
+      () => Map.prototype.set.call(dataset.tasksById, 'rogue', {}),
+      () => Map.prototype.delete.call(dataset.tasksById, dataset.tasks.tasks[0].taskId),
+      () => Map.prototype.clear.call(dataset.tasksById),
+      () => Map.prototype.set.call(dataset.principlesById, 'rogue', {}),
+    ]) {
+      expect(attack).toThrow(/incompatible receiver|cannot be mutated/);
+    }
+    expect(() => dataset.tasksById.set('rogue', {} as never)).toThrow(/cannot be mutated/);
+    // Nothing changed — the verified snapshot still passes.
+    expect(verifyDatasetIntegrity(dataset)).toMatchObject({ ok: true, derivedIndexesBound: true });
+  });
 });
 
 describe('ledger availability four-way classification', () => {
@@ -536,14 +615,10 @@ describe('ledger availability four-way classification', () => {
     expect(unproven.m1.trueZero).toBe(false);
   });
 
-  it('status validity follows the Core authoritative enum, not a local list (P1-3, round 3)', () => {
-    // The allowlist is schema-driven from PrincipleFactSchema — the union of
-    // its literals is the authoritative contract.
-    const statuses = authoritativePrincipleStatuses();
-    expect(statuses.length).toBeGreaterThanOrEqual(5);
-    expect(statuses).toContain('active');
-    expect(statuses).toContain('archived');
-    expect(statuses).not.toContain('deactivated'); // not a Core authority value
+  it('status validity follows the Core authoritative enum, not a local list (P1-3, rounds 3+4)', () => {
+    // Round 4: the allowlist must be exactly the canonical Core export
+    // PRINCIPLE_STATUSES (runtime-v2/types/principle-enums.ts) — no local copy.
+    expect(authoritativePrincipleStatuses()).toEqual([...PRINCIPLE_STATUSES].sort());
 
     const ok = { availability: { status: 'ok' } };
     const ledgerOf = (status: unknown) => ({
@@ -551,7 +626,7 @@ describe('ledger availability four-way classification', () => {
       ledger: { tree: { principles: { p1: { id: 'p1', status: status as never } } } },
     });
     // Every authoritative status classifies as usable.
-    for (const status of statuses) {
+    for (const status of PRINCIPLE_STATUSES) {
       expect(classifyLedgerAvailability(ledgerOf(status)), `status ${status}`).toBe('ok');
     }
     // Non-authoritative / malformed status values poison the ledger.
@@ -710,6 +785,84 @@ describe('M1~M5 offline measurement logic', () => {
     expect(measure.m3.reasonCode).toBe('summary_fields_unauthorized_d01');
     expect(measure.m5.unauthorizedCount).toBe(1);
     expect(measure.m5.unauthorizedField).toContain('D-01');
+  });
+
+  // ── Owner review round 4 — P2: unmeasurable ledger states never emit pseudo-zeros ──
+  const LENIENT_EMPTY = { availability: { status: 'ok' }, ledger: { tree: {} } };
+  const MALFORMED = { availability: { status: 'ok' }, ledger: { tree: { principles: { p1: 'garbage' } } } };
+  const UNKNOWN = { availability: { status: 'corrupted-index' } };
+  const UNREADABLE = { availability: { status: 'unreadable' } };
+  const EMPTY = { availability: { status: 'empty' } };
+  const EVIDENCE = { auditor: 'independent-audit', recordRef: 'audit-record-1' };
+
+  it('measurable-control (ok ledger) keeps numeric M1~M5 output — no regression to nulls', () => {
+    const measure = measureLedgerPrinciples({
+      authorization: { summaryFieldsAllowed: true },
+      coreResult: coreResult([
+        { id: 'p1', status: 'active', derivedFromPainIds: [], reuseEvidence: [{ candidateId: 'c1', painId: 'pain1', evidenceQuality: 'exact' }] },
+      ]),
+    });
+    expect(measure.availabilityClass).toBe('ok');
+    expect(measure.m1.count).toBe(1);
+    expect(measure.m2.count).toBe(1);
+    expect(measure.m3.count).toBe(1);
+    // The single candidate claim here has exactly one owner → zero conflicts,
+    // as a REAL measured zero (numeric, not an unmeasurable null).
+    expect(measure.m4.count).toBe(0);
+    expect(Array.isArray(measure.m4.details)).toBe(true);
+    expect(measure.m5.unauthorizedCount).toBe(0);
+    expect(measure.m5.unavailableCount).toBe(0);
+    expect(measure.m4.unmeasurable).toBeUndefined();
+    expect(measure.m5.unmeasurable).toBeUndefined();
+  });
+
+  it('ok_but_empty_ledger: M1 parsed zero only; M2/M3/M4/M5 carry NO pseudo-zero numbers (P2)', () => {
+    const measure = measureLedgerPrinciples({ coreResult: LENIENT_EMPTY, authorization: { summaryFieldsAllowed: true }, trueZeroEvidence: EVIDENCE });
+    expect(measure.m1).toMatchObject({ count: 0, trueZero: false, reasonCode: 'ok_but_empty_ledger__semantic_review_required' });
+    expect(measure.m2).toMatchObject({ count: null, denominator: null, unmeasurable: true, reasonCode: 'ok_but_empty_ledger__semantic_review_required' });
+    expect(measure.m3).toMatchObject({ count: null, denominator: null, unmeasurable: true, reasonCode: 'ok_but_empty_ledger__semantic_review_required' });
+    expect(measure.m4).toMatchObject({ count: null, unmeasurable: true, reasonCode: 'ok_but_empty_ledger__semantic_review_required' });
+    expect(measure.m5).toMatchObject({ unauthorizedCount: null, unavailableCount: null, unmeasurable: true, reasons: ['ok_but_empty_ledger__semantic_review_required'] });
+  });
+
+  it('malformed and unknown-availability ledgers produce NO pseudo-zeros anywhere in M1~M5 (P2)', () => {
+    for (const [label, core] of [['malformed', MALFORMED], ['unknown', UNKNOWN]] as [string, unknown][]) {
+      const m = measureLedgerPrinciples({ coreResult: core as never, authorization: { summaryFieldsAllowed: true }, trueZeroEvidence: EVIDENCE });
+      expect(m.m1.count, label).toBeNull();
+      expect(m.m1.trueZero, label).toBe(false);
+      expect(m.m2.count, label).toBeNull();
+      expect(m.m3.count, label).toBeNull();
+      expect(m.m4.count, label).toBeNull();
+      expect(m.m4.unmeasurable, label).toBe(true);
+      expect(m.m5.unauthorizedCount, label).toBeNull();
+      expect(m.m5.unavailableCount, label).toBeNull();
+      expect(m.m5.unmeasurable, label).toBe(true);
+      // A supplied evidence parameter cannot bypass the malformed/unknown gates.
+      expect(m.m1.trueZeroEvidence, label).toBeNull();
+    }
+  });
+
+  it('unreadable vs empty are clearly distinguished; empty without evidence cannot prove a true zero (P2)', () => {
+    const unreadable = measureLedgerPrinciples({ coreResult: UNREADABLE, authorization: { summaryFieldsAllowed: true } });
+    expect(unreadable.m1).toMatchObject({ count: null, trueZero: false, reasonCode: 'ledger_unreadable' });
+    expect(unreadable.m2.count).toBeNull();
+    expect(unreadable.m4.count).toBeNull();
+    expect(unreadable.m5.unauthorizedCount).toBeNull();
+
+    const emptyUnproven = measureLedgerPrinciples({ coreResult: EMPTY, authorization: { summaryFieldsAllowed: true } });
+    expect(emptyUnproven.m1).toMatchObject({ count: 0, trueZero: false, reasonCode: 'ledger_empty__true_zero_unproven_requires_independent_evidence' });
+    expect(emptyUnproven.m2).toMatchObject({ count: null, unmeasurable: true, reasonCode: 'ledger_empty__true_zero_unproven' });
+    expect(emptyUnproven.m3).toMatchObject({ count: null, unmeasurable: true, reasonCode: 'ledger_empty_or_unreadable' });
+    expect(emptyUnproven.m4.count).toBeNull();
+    expect(emptyUnproven.m5.unauthorizedCount).toBeNull();
+    expect(emptyUnproven.m5.unavailableCount).toBeNull();
+
+    // empty WITH independent evidence: M1 may claim the proven true zero; the
+    // rest of the metrics still have no measured denominator.
+    const emptyProven = measureLedgerPrinciples({ coreResult: EMPTY, authorization: { summaryFieldsAllowed: true }, trueZeroEvidence: EVIDENCE });
+    expect(emptyProven.m1).toMatchObject({ count: 0, trueZero: true, reasonCode: 'ledger_empty_with_independent_true_zero_evidence', trueZeroEvidence: EVIDENCE });
+    expect(emptyProven.m2.count).toBeNull();
+    expect(emptyProven.m5.unmeasurable).toBe(true);
   });
 });
 
