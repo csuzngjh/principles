@@ -503,3 +503,39 @@ git diff --check → OK；变更仅 prr-dataset.mjs + 测试 + 报告，生产�
 沿用 §8.7/§9.5 各项（runningCommitSha 受信来源、verifier 信任根归属 O-05、Core 宽松解析源头收紧超边界）。只读代理的引擎行为依赖与 §9.5 相同。
 
 **第五轮修复后状态收口：离线能力 GO；真实 M1～M5 NOT_MEASURED；真实 A/C NOT_RUN；Gate B BLOCKED；Gate C NOT_GRANTED。**
+
+---
+
+## 11. 真实 A/C 执行入口交付（2026-10-23，#2115 合并后推进）
+
+PR #2115 合并（d2e88bbe0）后按 Owner 指令推进真实实验准备：
+
+### 11.1 合并后基线检查（限界：2fb3b04c8 → main）
+
+- **三大身份权威零变更**：`ledger-identity.ts` / `principle-tree-ledger.ts` / `pain-chain-read-model.ts` 字节未动——P-02 核心结论静态维持；
+- `governance-observation-store.ts` / `trajectory-store.ts` 零变更——只读边界负面结论原样；
+- #2117（PRI-1019）新增 `design_gate_declarations` 写路径 DDL（bootstrap schema 内）与只读函数 `listObservedDesignGateSessions()`（readonly + fileMustExist 契约合规）——均为 PRI-1019 自有面，**与 PRR 计划读取路径零交集，无实质性风险**（#2117 CI 34 pass）。
+
+### 11.2 受授权执行入口（默认关闭、双层 fail-closed）
+
+| 文件 | 内容 |
+|---|---|
+| `prr/lib/prr-real-runner.mjs` | 纯编排：PRR 冻结门（`validateFreezeForRealRun`：冻结记录+协议摘要+受信运行提交+决策记录对账）零问题才执行 → A/C 逐任务经 `deliverPayload` 同通道投递 → `transport.complete()` 单轮决策 → B0 §8.2 失败分类（timeout/no_response/budget/invalid 行保留分母）→ `adjudicatePrr` → `buildPairedReport`。runner 自身零 socket，transport 由调用方注入 |
+| `prr/run-prr-real.mjs` | CLI 入口（OFF by default）：无冻结/预注册/授权文件即退出非零（无默认值、无环境变量回退）；`--transport mock` 为接线演练（scripted，零模型调用）；`--transport pi` 走既有 PRI-966 授权链（`createAuthorizedPiTransport` 的 P1-02 OD-1/2/3 门 + 预算账本，FZ-06 冻结值构造授权记录，授权缺失 = transport 不存在 = 零 HTTP） |
+
+### 11.3 验证证据
+
+```text
+cd scripts && npx vitest run __tests__/prr-real-runner.test.ts → 6/6 PASS
+  （门链拒绝三形态 / mock 全链 25 行分母 + NT-1 检出 + 失败行保留 / 失败分类映射）
+npm run test:scripts → 51 文件 / 989 tests 全绿（两次连续运行确认稳定）
+npm run dev:prr-rehearsal → rehearsal gate PASS（既有行为不回归）
+CLI 实测：无参数 exit=1；文件缺失 exit=1；mock 全链 executed=true（25 行）；
+  篡改冻结记录 → "protocol approval reconciliation FAILED … INVALID_PROTOCOL" exit=1（零 transport 构造）
+```
+
+### 11.4 状态与阻断
+
+- **已交付**：可被授权激活的执行入口 + Owner 决策清单（已按推荐值整理至 Linear PRI-1001：Codex/单一 workspace/结构化摘要与 ID/禁 Raw/外发 0/复用 g2 授权门；Owner 专属取值未代填）；
+- **仍阻断**：FZ-01~FZ-15 全部 Owner 决策未决——真实 A/C **NOT_RUN**、真实 M1~M5 **NOT_MEASURED**、Gate B **BLOCKED**、Gate C **NOT_GRANTED**；Owner 勾选并签发冻结记录后，`run-prr-real.mjs` 即为预注册实验的执行路径；
+- Gate B 正向结果前不开发 Recall 生产功能、不接 Tool/Skill、不扩宿主（指令第 7 条）。
