@@ -110,12 +110,22 @@ describe('formal CLI gate sequence (child process, --dry-run, zero network)', ()
     });
   }
 
-  it('full happy path: every gate passes and the dry run stops before any transport exists', () => {
-    const r = runCli();
+  it('full happy path (seed 2..3 continuation): every gate passes and the dry run stops before any transport exists', () => {
+    // the default seed-1 output directory already holds Seed 1's completed
+    // study on this machine — the continuation window 2..3 is the real
+    // happy path, and the seed-1 collision is asserted separately below
+    const r = runCli({ extra: ['--start-seed', '2', '--seed-count', '2'] });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('authorization verified');
+    expect(r.stdout).toContain('seeds 2..3 → PLE-PILOT-01-FORMAL-S2, PLE-PILOT-01-FORMAL-S3');
     expect(r.stdout).toContain('DRY RUN');
     expect(r.stdout).toContain('EA:policy → EA:summary → EA:raw → EA:none');
+  });
+
+  it('the default seed-1 window refuses when Seed 1 already holds a completed study (no silent re-run)', () => {
+    const r = runCli();
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('never re-run or overwritten');
   });
 
   it('missing credentials refuse before any HTTP (fail-closed, zero requests)', () => {
@@ -152,5 +162,28 @@ describe('formal CLI gate sequence (child process, --dry-run, zero network)', ()
     expect(r.stdout).toContain('EA:raw');
     expect(r.stdout).toContain('EA:none');
     expect((r.stdout.match(/EA:/g) ?? []).length).toBe(4);
+  });
+
+  it('start-seed window is bounded by the preregistered 1-3 range (no silent seed 4)', () => {
+    const ok = runCli({ extra: ['--start-seed', '2', '--seed-count', '2'] });
+    expect(ok.status).toBe(0);
+    expect(ok.stdout).toContain('seeds 2..3 → PLE-PILOT-01-FORMAL-S2, PLE-PILOT-01-FORMAL-S3');
+    expect(ok.stdout).toContain('DRY RUN');
+    for (const bad of [['--start-seed', '0'], ['--start-seed', '4'], ['--start-seed', '2', '--seed-count', '3']]) {
+      const r = runCli({ extra: bad });
+      expect(r.status).not.toBe(0);
+      expect(r.stderr).toMatch(/preregistered 1-3 range|must be an integer/);
+    }
+  });
+
+  it('completed seeds are never re-run or overwritten (seed 1 output presence refuses)', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pl-formal-out-'));
+    // the historical seed-1 invocation wrote the base study id; simulate its
+    // completed output being present in the output root
+    fs.mkdirSync(path.join(dir, 'PLE-PILOT-01-FORMAL'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'PLE-PILOT-01-FORMAL', 'principle-study.json'), '{}', 'utf8');
+    const r = runCli({ extra: ['--out', dir] });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('never re-run or overwritten');
   });
 });

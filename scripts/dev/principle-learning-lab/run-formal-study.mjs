@@ -42,11 +42,12 @@ const { verifyRealRunAuthorization } = await import(url(path.join(LIB, 'actor.mj
 const { createFileEvidenceVerifier, composeApprovedPreregView } = await import(url(path.join(LIB, 'evidence-verifier.mjs')));
 
 function parseArgs(argv) {
-  const args = { seedCount: 1, out: null, dryRun: false, authorization: null };
+  const args = { seedCount: 1, startSeed: 1, out: null, dryRun: false, authorization: null };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--authorization') args.authorization = argv[++i];
     else if (a === '--seed-count') args.seedCount = Number(argv[++i]);
+    else if (a === '--start-seed') args.startSeed = Number(argv[++i]);
     else if (a === '--out') args.out = argv[++i];
     else if (a === '--dry-run') args.dryRun = true;
     else {
@@ -76,6 +77,14 @@ async function main() {
   }
   if (!Number.isSafeInteger(args.seedCount) || args.seedCount < 1 || args.seedCount > 3) {
     console.error('[formal] REFUSED: --seed-count must be an integer in [1,3] (preregistered plan)');
+    process.exit(1);
+  }
+  if (!Number.isSafeInteger(args.startSeed) || args.startSeed < 1 || args.startSeed > 3) {
+    console.error('[formal] REFUSED: --start-seed must be an integer in [1,3] (preregistered plan)');
+    process.exit(1);
+  }
+  if (args.startSeed + args.seedCount - 1 > 3) {
+    console.error(`[formal] REFUSED: seeds ${args.startSeed}..${args.startSeed + args.seedCount - 1} exceed the preregistered 1-3 range`);
     process.exit(1);
   }
   const authPath = path.resolve(args.authorization);
@@ -142,23 +151,39 @@ async function main() {
   console.log(`[formal] authorization verified (decision: ${decision.decidedBy} @ ${decision.decidedAt}; cost basis effective ${costEvidence.effectiveDate}, officialPriceVerified=${costEvidence.officialPriceVerified})`);
   console.log(`[formal] plan-quota semantics: ${authorization.od2.costBillingSemantics ?? 'per-token list-price ceiling reserved; actual plan draw recorded from usage'}`);
 
-  // 7. arm list + a machine-checkable plan summary.
+  // 7. arm list + seed window + a machine-checkable plan summary. The seed
+  // window and output-dir occupancy are checked BEFORE the dry-run return so
+  // a dry run audits the exact plan (and collisions) a real run would hit.
   const studyIdBase = authorization.studyId ?? 'PLE-PILOT-01-FORMAL';
   console.log(`[formal] arms: ${FORMAL_ARM_SPECS.map((s) => `${s.historyId}:${s.contentMode}`).join(' → ')} × ${args.seedCount} seed(s)`);
 
+  // Study ids: the single-seed-from-1 invocation keeps the historical base id
+  // (Seed 1's on-disk identity); every other seed gets its own -S<seed> id so
+  // completed seeds are NEVER re-run or overwritten.
+  const outRoot = args.out ?? path.join(SCRIPT_DIR, '..', '..', '..', '.tmp', 'principle-learning-lab', 'FORMAL');
+  const seedPlan = [];
+  for (let seed = args.startSeed; seed < args.startSeed + args.seedCount; seed += 1) {
+    const studyId = args.seedCount === 1 && args.startSeed === 1 ? studyIdBase : `${studyIdBase}-S${seed}`;
+    seedPlan.push({ seed, studyId, outDir: path.join(outRoot, studyId) });
+  }
+  for (const plan of seedPlan) {
+    if (fs.existsSync(path.join(plan.outDir, 'principle-study.json'))) {
+      console.error(`[formal] REFUSED: ${plan.outDir} already holds a completed study — completed seeds are never re-run or overwritten`);
+      process.exit(1);
+    }
+  }
+  console.log(`[formal] seeds ${args.startSeed}..${args.startSeed + args.seedCount - 1} → ${seedPlan.map((p) => p.studyId).join(', ')}`);
+
   if (args.dryRun) {
-    console.log('[formal] DRY RUN — authorization, credentials, hash and caps all verified; zero model calls made. Plan hash:', require0(canonicalJson({ studyIdBase, budgets, adapterConfig, armSpecs: FORMAL_ARM_SPECS, seedCount: args.seedCount })));
+    console.log('[formal] DRY RUN — authorization, credentials, hash, caps, seed window and output occupancy all verified; zero model calls made. Plan hash:', require0(canonicalJson({ studyIdBase, budgets, adapterConfig, armSpecs: FORMAL_ARM_SPECS, seedCount: args.seedCount, seedPlan: seedPlan.map((p) => p.studyId) })));
     return;
   }
 
   // 8-10. run per seed, each seed = one isolated study (own ledgers/arms).
-  const outRoot = args.out ?? path.join(SCRIPT_DIR, '..', '..', '..', '.tmp', 'principle-learning-lab', 'FORMAL');
   fs.mkdirSync(outRoot, { recursive: true });
-  for (let seed = 1; seed <= args.seedCount; seed += 1) {
-    const studyId = args.seedCount === 1 ? studyIdBase : `${studyIdBase}-S${seed}`;
-    const outDir = path.join(outRoot, studyId);
+  for (const { seed, studyId, outDir } of seedPlan) {
     fs.mkdirSync(outDir, { recursive: true });
-    console.log(`[formal] === seed ${seed}/${args.seedCount}: ${studyId} ===`);
+    console.log(`[formal] === seed ${seed} (range ${args.startSeed}..${args.startSeed + args.seedCount - 1}): ${studyId} ===`);
     const run = await runRealStudy({
       dataset,
       studyId,
