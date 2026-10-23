@@ -117,16 +117,47 @@ describe('linear-owner-resolver (stable-id identity binding, round 8)', () => {
     expect(approval.reason).toContain('none by the configured Owner id');
   });
 
-  it('an UNCONFIGURED expected Owner id is fail-closed for every signature', async () => {
+  it('an UNCONFIGURED expected Owner id falls back to the PRI-1001 creator id (Linear-authoritative)', async () => {
+    delete process.env.LINEAR_OWNER_ID;
+    // Mock mirrors the resolver query shape: creator + comments.
+    const client = {
+      request: async () => ({
+        data: { issue: {
+          creator: { id: OWNER_ID, name: OWNER_NAME, active: true },
+          comments: { nodes: [{ body: approvalBody(), createdAt: '2026-10-23T00:00:00.000Z', user: { id: OWNER_ID, name: OWNER_NAME, active: true } }] },
+        } },
+      }),
+    };
+    const approval = await fetchOwnerApproval({ client });
+    expect(approval.verified).toBe(true); // creator-id fallback accepts the Owner signature
+    expect(approval.authorId).toBe(OWNER_ID);
+  });
+
+  it('creator fallback still refuses when the signature author differs from the creator', async () => {
+    delete process.env.LINEAR_OWNER_ID;
+    const client = {
+      request: async () => ({
+        data: { issue: {
+          creator: { id: OWNER_ID, name: OWNER_NAME, active: true },
+          comments: { nodes: [{ body: approvalBody(), createdAt: '2026-10-23T00:00:00.000Z', user: { id: '99999999-8888-7777-6666-555555555555', name: 'impostor', active: true } }] },
+        } },
+      }),
+    };
+    const approval = await fetchOwnerApproval({ client });
+    expect(approval.verified).toBe(false);
+    expect(approval.reason).toContain('none by the configured Owner id');
+  });
+
+  it('an UNCONFIGURED expected Owner id is fail-closed when Linear reports no creator', async () => {
     delete process.env.LINEAR_OWNER_ID;
     const approval = await fetchOwnerApproval({ client: mockClient([happyComment]) });
     expect(approval.verified).toBe(false);
-    expect(approval.reason).toContain('expected Owner id is not configured (LINEAR_OWNER_ID)');
+    expect(approval.reason).toContain('cannot establish the expected Owner identity');
     // And the runner gate would then refuse — the signature is never accepted
     // on display-name similarity alone.
     const result = await verify({ ...OWNER_DECISION_REQ, client: mockClient([happyComment]) });
     expect(result.verified).toBe(false);
-    expect(result.reason).toContain('expected Owner id is not configured');
+    expect(result.reason).toContain('cannot establish the expected Owner identity');
   });
 
   it('an identity query failure refuses (transport error caught and turned into unverified)', async () => {
@@ -226,8 +257,9 @@ describe('linear-owner-resolver (stable-id identity binding, round 8)', () => {
     expect(pricing.reason).toContain('a-different-costBasisRef');
   });
 
-  it('cost-basis is fail-closed when the Owner id is unconfigured', async () => {
+  it('cost-basis falls back to the creator id too; fail-closed when Linear reports no creator', async () => {
     delete process.env.LINEAR_OWNER_ID;
+    // mockClient has no creator field → Linear reports no creator → fail-closed.
     const pricing = await verify({
       kind: 'cost-basis',
       reference: COST_REF,
@@ -237,7 +269,26 @@ describe('linear-owner-resolver (stable-id identity binding, round 8)', () => {
       client: mockClient([happyComment]),
     });
     expect(pricing.verified).toBe(false);
-    expect(String(pricing.reason)).toContain('expected Owner id is not configured');
+    expect(String(pricing.reason)).toContain('cannot establish the expected Owner identity');
+
+    // With a creator present, the fallback accepts a matching signature.
+    const clientWithCreator = {
+      request: async () => ({
+        data: { issue: {
+          creator: { id: OWNER_ID, name: OWNER_NAME, active: true },
+          comments: { nodes: [{ body: approvalBody(), createdAt: '2026-10-23T00:00:00.000Z', user: { id: OWNER_ID, name: OWNER_NAME, active: true } }] },
+        } },
+      }),
+    };
+    const pricingOk = await verify({
+      kind: 'cost-basis',
+      reference: COST_REF,
+      provider: 'zai',
+      model: 'glm-4.7',
+      expectedBudget: OWNER_DECISION_REQ.expectedBudget,
+      client: clientWithCreator,
+    });
+    expect(pricingOk.verified).toBe(true);
   });
 
   it('every authoritative status is usable and statuses keep deriving from the schema', async () => {

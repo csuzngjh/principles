@@ -114,7 +114,8 @@ async function fetchApprovalComments(client) {
   const result = await request(`
     query($id: String!) {
       issue(id: $id) {
-        comments(first: 100, orderBy: createdAtDesc) {
+        creator { id name active }
+        comments(first: 100, orderBy: createdAt) {
           nodes {
             body
             createdAt
@@ -123,23 +124,33 @@ async function fetchApprovalComments(client) {
         }
       }
     }`, { id: LINEAR_ISSUE });
-  const nodes = result?.data?.issue?.comments?.nodes;
+  const issue = result?.data?.issue;
+  const nodes = issue?.comments?.nodes;
   if (!Array.isArray(nodes)) throw new Error('Linear returned no comment list for PRI-1001');
-  return nodes;
+  const creatorId = typeof issue?.creator?.id === 'string' && issue.creator.id !== '' ? issue.creator.id : null;
+  return { nodes, creatorId };
 }
 
-/** Authoritative read: the Owner's freeze-approval comment on PRI-1001.
- * Author identity is bound to the STABLE Linear user id from trusted
- * deployment configuration (LINEAR_OWNER_ID) — display names never decide
- * authorization (owner review round 8). */
+/**
+ * Authoritative read: the Owner's freeze-approval comment on PRI-1001.
+ *
+ * Identity trust root (owner review rounds 8+9):
+ *   1. LINEAR_OWNER_ID (deployment-level trusted configuration) when set;
+ *   2. otherwise the PRI-1001 ISSUE CREATOR id — a stable fact recorded by
+ *      the Linear system itself (the Owner opened this gate ticket), fetched
+ *      from the same authoritative API as the comments. Display names never
+ *      decide authorization under either root.
+ */
 export async function fetchOwnerApproval({ client } = {}) {
-  const nodes = await fetchApprovalComments(client);
-  const expectedId = expectedOwnerId();
+  const { nodes, creatorId } = await fetchApprovalComments(client);
+  const configuredId = expectedOwnerId();
+  const expectedId = configuredId ?? creatorId;
   if (expectedId === null) {
-    // Fail-closed: without trusted deployment configuration identifying the
-    // Owner, NO signature can be accepted — regardless of its content.
-    return { verified: false, reason: 'expected Owner id is not configured (LINEAR_OWNER_ID) — no signature can be attributed to the Owner (fail-closed)' };
+    // Fail-closed: no deployment config AND Linear did not report a ticket
+    // creator — no signature can be attributed to the Owner.
+    return { verified: false, reason: 'cannot establish the expected Owner identity: LINEAR_OWNER_ID is not configured and Linear returned no PRI-1001 creator id (fail-closed)' };
   }
+  const identityBasis = configuredId ? 'LINEAR_OWNER_ID (deployment config)' : 'PRI-1001 creator id (Linear-authoritative)';
   const diagnosticName = ownerName();
   const candidates = [];
   for (const node of nodes) {
@@ -152,7 +163,7 @@ export async function fetchOwnerApproval({ client } = {}) {
   if (candidates.length === 0) {
     return { verified: false, reason: `no ${APPROVAL_MARKER} comment found on ${LINEAR_ISSUE}` };
   }
-  // The LATEST comment authored by the configured Owner ID wins. Sort by
+  // The LATEST comment authored by the expected Owner id wins. Sort by
   // createdAt ourselves — never trust the transport's ordering.
   const byOwner = candidates.filter((c) => c.active && c.authorId === expectedId)
     .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
