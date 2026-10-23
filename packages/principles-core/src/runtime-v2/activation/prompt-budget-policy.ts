@@ -9,7 +9,12 @@
  * without patching module state, and production callers share one catalog
  * binding (`getPromptModelCatalog` in adapter/pi-ai-catalog.ts).
  *
- * Priority chain (SPEC §4.3, v0.2):
+ * Priority chain (SPEC §4.3 v0.2, amended by
+ * SPEC-PD-OPERATOR-DECLARED-PROMPT-BUDGET-001):
+ *   0. operator_declared — the Owner's explicit per-workspace capacity
+ *      declaration (`.pd/config.yaml` promptBudget, per-host override over a
+ *      global value). An authored explicit cap — the same trust class as
+ *      `agentContextTokens` — and the workspace's final authority;
  *   1. host_effective_window — the host hook's effective context-token
  *      budget when its source is model-specific or an explicit cap
  *      (model | modelsConfig | agentContextTokens; `default` and unknown
@@ -86,6 +91,7 @@ export const TRUSTED_HOST_CONTEXT_WINDOW_SOURCES: ReadonlySet<string> = new Set(
 ]);
 
 export type PromptBudgetCapacitySource =
+  | 'operator_declared'
   | 'host_effective_window'
   | 'pi_catalog_exact'
   | 'legacy_fallback';
@@ -183,6 +189,17 @@ export interface PromptBudgetHostCapacityFact {
 }
 
 export interface ResolvePromptBudgetInput {
+  /**
+   * Owner-declared workspace capacity (SPEC-PD-OPERATOR-DECLARED-PROMPT-BUDGET-001):
+   * the promptBudget section of `.pd/config.yaml`, resolved by the caller to
+   * the per-host value (`hosts[hostKind] ?? declaredContextWindowTokens`).
+   * Untrusted here (rc-1) — validated with the same plausibility guard; an
+   * invalid declaration is ignored and the chain falls through (the config
+   * layer already hard-errors on it at load time).
+   */
+  operatorDeclared?: {
+    contextWindowTokens?: unknown;
+  };
   hostCapacity?: PromptBudgetHostCapacityFact;
   modelIdentity?: {
     providerId?: unknown;
@@ -288,11 +305,28 @@ function resolveFromCatalog(input: ResolvePromptBudgetInput | undefined, hostSta
 }
 
 /**
- * THE single budget resolver (SPEC §4.3). Deterministic pure function:
+ * THE single budget resolver (SPEC §4.3, amended by
+ * SPEC-PD-OPERATOR-DECLARED-PROMPT-BUDGET-001). Deterministic pure function:
  * same facts in, same resolution out, one result per request reused by the
  * selector, serializer, projection and precheck (SPEC §6.1).
  */
 export function resolvePromptBudget(input?: ResolvePromptBudgetInput): PromptBudgetResolution {
+  // Tier 0 — the Owner's explicit declaration is the workspace's final
+  // capacity authority (an authored explicit cap, the same trust class as
+  // agentContextTokens). Invalid values are ignored defensively — the config
+  // layer hard-errors on them at load time, so reaching here with an invalid
+  // value means a direct API caller bypassed config validation; the chain
+  // then behaves exactly as if nothing was declared.
+  const declaredWindow = input?.operatorDeclared?.contextWindowTokens;
+  if (declaredWindow !== undefined && isValidContextWindowTokens(declaredWindow)) {
+    return {
+      budgetChars: promptBudgetCharsForContextWindow(declaredWindow),
+      capacitySource: 'operator_declared',
+      capacityStatus: 'confirmed',
+      contextWindowTokens: declaredWindow,
+      policyVersion: PROMPT_BUDGET_POLICY_VERSION,
+    };
+  }
   const hostCapacity = input?.hostCapacity;
   if (hostCapacity !== undefined) {
     const hasBudget = hostCapacity.contextTokenBudget !== undefined;

@@ -321,6 +321,39 @@ describe('PRI-1017: readRuntimePromptBudgetObservations', () => {
     expect(report.legacyEventsSkipped).toBe(5);
   });
 
+  it('PRI-1020: an operator_declared observation is a confirmed fact (declared window + exact formula budget)', () => {
+    const dir = tempWorkspace();
+    writeEvents(dir, '.pd/logs', '2026-10-21', [
+      injectedEvent({ data: { ...baseData(), workspaceDir: dir, hostKind: 'codex', budget: 4096, budgetCapacitySource: 'operator_declared', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 262_144, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
+    ]);
+    const report = readRuntimePromptBudgetObservations({ workspaceDir: dir });
+    expect(report.observations).toHaveLength(1);
+    expect(report.observations[0]?.budgetChars).toBe(4096);
+    expect(report.observations[0]?.capacitySource).toBe('operator_declared');
+    const resolution = runtimeBudgetObservationToResolution(report.observations[0]!);
+    expect(resolution).toMatchObject({
+      budgetChars: 4096,
+      capacitySource: 'operator_declared',
+      capacityStatus: 'confirmed',
+      contextWindowTokens: 262_144,
+    });
+  });
+
+  it('PRI-1020: incoherent operator_declared observations are dropped, never guessed', () => {
+    const dir = tempWorkspace();
+    writeEvents(dir, '.pd/logs', '2026-10-21', [
+      // declared source but the budget is NOT what the formula derives
+      injectedEvent({ data: { ...baseData(), workspaceDir: dir, hostKind: 'codex', budget: 2000, budgetCapacitySource: 'operator_declared', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 262_144, budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
+      // declared source claiming unknown status (unknown belongs to legacy_fallback only)
+      injectedEvent({ data: { ...baseData(), workspaceDir: dir, hostKind: 'codex', budget: 4096, budgetCapacitySource: 'operator_declared', budgetCapacityStatus: 'unknown', budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
+      // declared source carrying a fallback reason (confirmed sources never do)
+      injectedEvent({ data: { ...baseData(), workspaceDir: dir, hostKind: 'codex', budget: 4096, budgetCapacitySource: 'operator_declared', budgetCapacityStatus: 'confirmed', budgetContextWindowTokens: 262_144, budgetFallbackReason: 'host_capacity_absent', budgetPolicyVersion: PROMPT_BUDGET_POLICY_VERSION } }),
+    ]);
+    const report = readRuntimePromptBudgetObservations({ workspaceDir: dir });
+    expect(report.observations).toEqual([]);
+    expect(report.legacyEventsSkipped).toBe(3);
+  });
+
   it('malformed JSON lines are counted loudly (parseFailures), never guessed', () => {
     const dir = tempWorkspace();
     fs.mkdirSync(path.join(dir, '.state', 'logs'), { recursive: true });

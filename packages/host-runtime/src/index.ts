@@ -6,7 +6,8 @@ import {
   type HostEventResult,
   type HostEventEmitter,
 } from '@principles/core/host';
-import { getPromptModelCatalog, resolvePromptBudget } from '@principles/core/runtime-v2';
+import { getPromptModelCatalog, operatorDeclaredContextWindow, resolvePromptBudget } from '@principles/core/runtime-v2';
+import { loadPdConfigForPlugin } from './pd-config.js';
 import { buildActivePrinciplePromptContext } from './active-principle-prompt.js';
 import { createProductionRuleHostGate, type RuleContextProvider, type RuleInputEnrichmentProvider } from './production-rulehost-gate.js';
 import type { RuleImplementationRuntime } from './rule-implementation-runtime.js';
@@ -286,6 +287,19 @@ export function createProductionHostRuntime(
       // reports `legacy_fifo_prefix_v1` honestly. The selector's fair-rotation
       // capability is retained and stays reachable for callers that DO hold a
       // legitimate advancing round authority.
+      // PRI-1020: the Owner's declared window (.pd/config.yaml promptBudget)
+      // is tier 0 of the budget chain — resolved per host and fed into the
+      // SAME single resolver below. One extra sync config read per prompt
+      // build (the candidates reader loads it independently): deliberate, so
+      // a config flip applies on the next turn with no cache to invalidate.
+      // Malformed config degrades to defaults (no declaration) and is already
+      // surfaced as config_invalid warnings by readPromptActivationCandidates.
+      const promptBudgetHostKind = options.hostKind === 'openclaw' || options.hostKind === 'codex' || options.hostKind === 'workbuddy'
+        ? options.hostKind
+        : undefined;
+      const declaredWindow = promptBudgetHostKind === undefined
+        ? undefined
+        : operatorDeclaredContextWindow(loadPdConfigForPlugin(event.context.workspaceDir).effective.config.promptBudget, promptBudgetHostKind);
       const prompt = await buildActivePrinciplePromptContext({
         workspaceDir: event.context.workspaceDir,
         excludePrincipleIds: options.promptExcludePrincipleIds?.(event),
@@ -295,6 +309,8 @@ export function createProductionHostRuntime(
           // Codex+WorkBuddy model id) against the installed local Pi AI
           // catalog — no network, no LLM call. Missing/untrusted facts
           // resolve to the legacy fixed budget with an observable reason.
+          // PRI-1020: an Owner declaration outranks all of these (tier 0).
+          ...(declaredWindow !== undefined ? { operatorDeclared: { contextWindowTokens: declaredWindow } } : {}),
           hostCapacity: event.context.modelContext === undefined
             ? undefined
             : {

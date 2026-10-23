@@ -115,6 +115,15 @@ export interface DoctorOutput {
     profileConfigured: boolean;
     timeoutMs?: number;
   };
+  /**
+   * PRI-1020 — Owner-declared model capacity (promptBudget config section).
+   * Read-only display; absent keys mean "nothing declared" (the budget chain
+   * then uses host facts / catalog / fixed fallback as before).
+   */
+  promptBudget: {
+    declaredContextWindowTokens?: number;
+    hosts?: Partial<Record<'openclaw' | 'codex' | 'workbuddy', number>>;
+  };
   providerHealth: ProviderHealthEntry[];
   warnings: string[];
   reason?: string;
@@ -721,6 +730,12 @@ export async function buildDoctorOutput(input: BuildDoctorInput): Promise<Doctor
       runtimeProfile: redacted.reuseEvaluation?.runtimeProfile ?? redacted.defaultRuntime,
       profileConfigured: profileMap.has(redacted.reuseEvaluation?.runtimeProfile ?? redacted.defaultRuntime),
       ...(redacted.reuseEvaluation?.timeoutMs !== undefined ? { timeoutMs: redacted.reuseEvaluation.timeoutMs } : {}),
+    },
+    promptBudget: {
+      ...(redacted.promptBudget?.declaredContextWindowTokens !== undefined
+        ? { declaredContextWindowTokens: redacted.promptBudget.declaredContextWindowTokens }
+        : {}),
+      ...(redacted.promptBudget?.hosts !== undefined ? { hosts: redacted.promptBudget.hosts } : {}),
     },
     providerHealth,
     warnings,

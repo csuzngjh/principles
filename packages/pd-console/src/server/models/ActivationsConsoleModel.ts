@@ -15,7 +15,8 @@ import {
   buildPromotionEvidenceSnapshot,
 } from '@principles/core/runtime-v2';
 import type { ActivationStatusRecord, PIArtifactRecord, PIArtifactSnapshot, PromotionReadinessResult, PromotionEvidenceSnapshot, ActivationControlState, ActivationDecisionRecord, GlobalRuleCodePause, OwnerPromotionActor, OwnerPromotionResult } from '@principles/core/runtime-v2';
-import { resolvePromotionHostLiveness, resolveWorkspaceHostToolSemantics, readPromptActivationInjectionStatuses, runtimeBudgetObservationToResolution, selectConsoleRuntimeBudgetFacts, RUNTIME_BUDGET_OBSERVATION_STALE_REASON, RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS, type PromptInjectionTargetHost } from '@principles/host-runtime';
+import { resolvePromotionHostLiveness, resolveWorkspaceHostToolSemantics, readPromptActivationInjectionStatuses, operatorDeclaredBudgetResolution, runtimeBudgetObservationToResolution, selectConsoleRuntimeBudgetFacts, RUNTIME_BUDGET_OBSERVATION_STALE_REASON, RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS, type PromptInjectionTargetHost } from '@principles/host-runtime';
+import { PROMPT_BUDGET_HOST_KINDS } from '@principles/core/runtime-v2';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
 import type { PromptActivationInjectionStatusWire, PromptInjectionRouteSummaryWire } from '../../shared/prompt-injection-contract.js';
 import * as fs from 'node:fs';
@@ -439,6 +440,20 @@ export class ActivationsConsoleModel {
         const perHostBudget = new Map(
           [...budgetFacts.perHost].map(([hostKind, observation]) => [hostKind, runtimeBudgetObservationToResolution(observation)] as const),
         );
+        // PRI-1020: hosts with no fresh observation fall back to the Owner's
+        // declared basis (.pd/config.yaml promptBudget), same as the grouped
+        // surface — observation wins when present.
+        const configLoad = loadPdConfig(this.workspaceDir);
+        const declaredConfig = configLoad.ok ? configLoad.effective.config.promptBudget : undefined;
+        const declaredHosts = new Set<PromptInjectionTargetHost>();
+        for (const hostKind of PROMPT_BUDGET_HOST_KINDS) {
+          if (perHostBudget.has(hostKind)) continue;
+          const declared = operatorDeclaredBudgetResolution(declaredConfig, hostKind);
+          if (declared !== undefined) {
+            perHostBudget.set(hostKind, declared);
+            declaredHosts.add(hostKind);
+          }
+        }
         const report = await readPromptActivationInjectionStatuses({
           workspaceDir: this.workspaceDir,
           ...(targetHost !== undefined ? { targetHost } : {}),
@@ -449,9 +464,11 @@ export class ActivationsConsoleModel {
         });
         // The status report resolved the route internally; bind the observation
         // to THAT host only. A stale observation is never presented as current.
+        // PRI-1020: nor when a declared basis actually backed the route — the
+        // stale marker would contradict the declared source label.
         const decidedHost = report.route.status === 'confirmed' ? report.route.hostKind : undefined;
         const usedObservation = decidedHost !== undefined ? budgetFacts.perHost.get(decidedHost) : undefined;
-        const staleObservation = decidedHost !== undefined && usedObservation === undefined
+        const staleObservation = decidedHost !== undefined && usedObservation === undefined && !declaredHosts.has(decidedHost)
           ? budgetFacts.stalePerHost.get(decidedHost)
           : undefined;
         promptInjectionRoute = {

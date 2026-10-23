@@ -19,6 +19,8 @@ import {
   INTERNAL_AGENT_NAMES,
   DANGEROUS_KEYS,
   type ReuseEvaluationConfig,
+  type PromptBudgetConfig,
+  type PromptBudgetHostKind,
 } from './pd-config-types.js';
 import {
   DEFAULT_FEATURE_FLAGS,
@@ -265,6 +267,7 @@ export function computeEffectivePdConfig(userConfig: PdConfig | null | undefined
     ui,
     principles,
     reuseEvaluation,
+    ...(userConfig.promptBudget ? { promptBudget: userConfig.promptBudget } : {}),
     ...(userConfig.profile ? { profile: userConfig.profile } : {}),
     ...(userConfig.contextInjection ? { contextInjection: userConfig.contextInjection } : {}),
   };
@@ -277,4 +280,17 @@ export function computeEffectivePdConfig(userConfig: PdConfig | null | undefined
     resolvedProfile,
     resolvedContextInjection,
   };
+}
+
+/**
+ * PRI-1020 — resolve the Owner-declared context window for one host:
+ * the per-host override wins over the global declaration; undefined when
+ * nothing is declared (the budget chain then behaves exactly as before).
+ * Pure lookup — the plausibility/integer validation happened at load time.
+ */
+export function operatorDeclaredContextWindow(
+  promptBudget: PromptBudgetConfig | undefined,
+  hostKind: PromptBudgetHostKind,
+): number | undefined {
+  return promptBudget?.hosts?.[hostKind] ?? promptBudget?.declaredContextWindowTokens;
 }
