@@ -807,7 +807,7 @@ export function createCodexHostTransport({
         throw err;
       }
 
-      const { lastAgentText: streamAgentText, roundUsage: streamUsage, threadIds, errorEventText, recognizedEvents } = consumeEvents(result.events);
+      const { lastAgentText: streamAgentText, roundUsage: streamUsage, threadIds, errorEventText: errorEventTextFromStream, recognizedEvents } = consumeEvents(result.events);
       // --output-last-message (official interface): when present and non-empty
       // it is the AUTHORITATIVE final message (the file was deleted before
       // the spawn, so its existence proves this round produced it). The
@@ -826,6 +826,9 @@ export function createCodexHostTransport({
           try { fs.rmSync(outputLastMessageFile, { force: true }); } catch { /* best-effort cleanup */ }
         }
       }
+      // errorEventText is MUTABLE after this point: the rollout read-back may
+      // surface the terminal error when the stdout stream carried none.
+      let errorEventText = errorEventTextFromStream;
       if (isNewSession) {
         const resolved = threadIds[0] ?? null;
         if (resolved === null) {
@@ -868,7 +871,7 @@ export function createCodexHostTransport({
               streamUsage.usageSource = evidence.usage.usageSource;
             }
             if (evidence.found && evidence.terminalError && !errorEventText) {
-              errorEventText = errorEventText ?? evidence.terminalError;
+              errorEventText = evidence.terminalError;
             }
           } catch { // read-back is best-effort: identity simply stays UNVERIFIED
           }

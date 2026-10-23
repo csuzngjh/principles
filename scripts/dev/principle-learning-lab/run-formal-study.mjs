@@ -21,7 +21,6 @@
 // Exit 0 = study completed and sidecar valid; 1 = refused or failed (honest).
 
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -30,14 +29,13 @@ const LIB = path.join(SCRIPT_DIR, 'lib');
 const url = (p) => 'file:///' + p.replace(/\\/g, '/');
 
 const { loadDataset, canonicalJson } = await import(url(path.join(LIB, 'fixture.mjs')));
-const { validatePrereg } = await import(url(path.join(LIB, 'prereg.mjs')));
 const {
   buildStudySidecar,
   adjudicationsToJsonl,
   studyHash,
   validateSidecar,
 } = await import(url(path.join(LIB, 'sidecar.mjs')));
-const { runRealStudy, REAL_CONTENT_MODES } = await import(url(path.join(LIB, 'real-runner.mjs')));
+const { runRealStudy } = await import(url(path.join(LIB, 'real-runner.mjs')));
 const { verifyRealRunAuthorization } = await import(url(path.join(LIB, 'actor.mjs')));
 const { createFileEvidenceVerifier, composeApprovedPreregView } = await import(url(path.join(LIB, 'evidence-verifier.mjs')));
 
@@ -138,9 +136,10 @@ async function main() {
   });
 
   // 5. credentials must exist in the environment BEFORE any call is planned.
+  // The variable NAME is never logged — only the fact of absence.
   const apiKey = process.env[authorization.od2.apiKeyEnv];
   if (typeof apiKey !== 'string' || apiKey.trim().length === 0) {
-    console.error(`[formal] REFUSED: ${authorization.od2.apiKeyEnv} is not set — credentials missing (fail-closed, zero HTTP)`);
+    console.error('[formal] REFUSED: the credential environment variable named in authorization.od2.apiKeyEnv is not set — credentials missing (fail-closed, zero HTTP)');
     process.exit(1);
   }
 

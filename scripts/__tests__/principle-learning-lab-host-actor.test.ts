@@ -331,8 +331,6 @@ describe('model identity discipline', () => {
 });
 
 describe('process-level budget protection', () => {
-  const baseCaps = { maxExecProcessesPerStudy: 100, maxSessionsPerArm: 10, maxTokensPerOpportunity: null, maxTokensPerStudy: null, wallMsPerOpportunity: null, wallMsPerStudy: null };
-
   it('exec cap refuses the NEXT spawn BEFORE the child exists (chain: opportunity → arm → study)', () => {
     const arm = createHostProcessLedger({ scope: 'arm', caps: { maxExecProcesses: 2 } });
     arm.reserveExec({});
@@ -493,10 +491,13 @@ describe('stdout official event format (root cause of the 2026-10-23 zero-event 
   });
 
   it('--output-last-message file is the authoritative final message; pre-existing files are deleted pre-spawn (no stale poisoning); the file is cleaned up after', async () => {
+    // the last-message file lives in the vitest-managed temp root (not the
+    // OS temp dir) — repo-local, lifecycle-cleaned, and out of the
+    // shared-OS-temp attack surface CodeQL flags
     const fs = require('node:fs');
     const os = require('node:os');
     const path = require('node:path');
-    const msgFile = path.join(os.tmpdir(), `pl-lab-test-lastmsg-${process.pid}.txt`);
+    const msgFile = path.join(process.env.TMPDIR ?? os.tmpdir(), `pl-lab-test-lastmsg-${process.pid}.txt`);
     fs.writeFileSync(msgFile, 'STALE CONTENT FROM A PREVIOUS RUN', 'utf8'); // poisoning attempt
     const { transport, calls } = makeTransport({
       outputLastMessageFile: msgFile,
