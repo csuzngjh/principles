@@ -381,3 +381,7 @@ export * from './codex-rule-context-provider.js';
 export { createWorkspaceBehaviorEvidencePort } from './workspace-behavior-evidence.js';
 
 export * from './explicit-owner-statement-prefix.js';
+
+export { listObservedDesignGateSessions } from './workspace-behavior-evidence.js';
+export { readDesignGateSpecSnapshot, describeCodexRuleContextFact } from './design-gate-facts.js';
+export { createCodexArtificerTrustedFactsPort } from './codex-artificer-trusted-facts.js';
