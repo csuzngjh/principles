@@ -17,6 +17,7 @@ import {
   normalizeSchemaForOpenAiStrict,
   normalizeSchemaForOpenAiStrictFull,
   opportunityIdFromTaskId,
+  readRolloutEvidenceForSession,
   stripNullFields,
 } from '../dev/principle-learning-lab/lib/host-actor.mjs';
 import { validateActorAction } from '../dev/principle-learning-lab/lib/actor.mjs';
@@ -72,7 +73,7 @@ const usage = (input: number, output: number) => ({
 const OK_ACTION = '{"type":"proceed"}';
 const OK_PROBE = { stdout: 'codex-cli 0.163.0\n', status: 0 };
 
-type RoundSpec = { events: any[]; rawLines?: string[]; exitCode?: number; chunkEvery?: number; hangMs?: number; emitError?: boolean };
+type RoundSpec = { events: any[]; rawLines?: string[]; exitCode?: number; chunkEvery?: number; hangMs?: number; emitError?: boolean; writeLastMessageFile?: string };
 
 /** Deterministic spawn stub: consumes the CLI args + prompt, emits the
  * scripted stdout in controllable chunks, then closes with the scripted
@@ -99,6 +100,13 @@ function fakeSpawn(script: (args: string[], prompt: string) => RoundSpec | Round
       const prompt = Buffer.concat(chunks).toString('utf8');
       calls.push({ args, prompt });
       const spec = (Array.isArray(fn) ? (fn as any)[calls.length - 1] : fn(args, prompt)) as RoundSpec;
+      // model the CLI writing --output-last-message BEFORE closing stdout
+      if (spec.writeLastMessageFile !== undefined) {
+        // resolve the -o path from the args the transport actually passed
+        const oIdx = args.indexOf('--output-last-message');
+        const target = oIdx >= 0 ? args[oIdx + 1] : null;
+        if (target !== null) require('node:fs').writeFileSync(target, spec.writeLastMessageFile, 'utf8');
+      }
       const text = [
         ...spec.events.map((e) => JSON.stringify(e)),
         ...(spec.rawLines ?? []),
@@ -436,6 +444,83 @@ describe('runner dispatch and isolation', () => {
     expect(calls).toHaveLength(2); // no hidden extra spawns
     expect(opportunityIdFromTaskId('EA:REAL_ACTOR_I0#P4:phase-a#turn3')).toBe('P4:phase-a');
     expect(opportunityIdFromTaskId('bad-format')).toBeNull();
+  });
+});
+
+describe('stdout official event format (root cause of the 2026-10-23 zero-event failure)', () => {
+  // `codex exec --json` emits TOP-LEVEL snake_case events (official docs),
+  // NOT the rollout's event_msg-wrapped CamelCase ones. Both are accepted.
+  const officialRound = (threadId: string) => [
+    { type: 'thread.started', thread_id: threadId },
+    { type: 'turn.started', turn_id: 'turn_1' },
+    { type: 'item.completed', thread_id: threadId, item: { id: 'it1', type: 'agent_message', text: '{"type":"proceed"}' } },
+    { type: 'turn.completed', thread_id: threadId, turn_id: 'turn_1', usage: { input_tokens: 32524, cached_input_tokens: 0, output_tokens: 137, reasoning_output_tokens: 0, total_tokens: 32661 } },
+  ];
+
+  it('official-format stream: thread id, agent message and turn usage are all recognized', async () => {
+    const { transport, calls } = makeTransport({}, () => ({ events: officialRound('0f1e2d3c-official-0001') }));
+    const out = await transport.complete(requestId('P1', 1));
+    expect(out.payload).toEqual({ type: 'proceed' });
+    expect(out.hostRound.usage.totalTokens).toBe(32661);
+    expect(out.hostRound.usage.inputTokens).toBe(32524);
+    expect(calls[0].prompt).toContain('USER'); // stdin channel intact
+    expect(transport.hostSnapshot().identityStatus).toBe('MODEL_IDENTITY_UNVERIFIED'); // official stream has NO model event — honest
+  });
+
+  it('stdout empty but exit 0 (the live failure shape) fails LOUDLY with a full stream audit, never a guess', async () => {
+    const { transport } = makeTransport({}, () => ({ events: [] }));
+    await expect(transport.complete(requestId('P1', 1))).rejects.toThrow(/parsed 0 events, 0 recognized, exit 0/);
+  });
+
+  it('identity read-back under the id-exact contract: model comes from the session-matched rollout, usage cross-fills, mismatch still detected', async () => {
+    const { transport } = makeTransport({
+      codexHome: '/tmp/fake-codex-home',
+      readRollout: ({ sessionId }: any) => (sessionId === '0f1e2d3c-official-0002'
+        ? { found: true, model: 'gpt-6-luna', modelProviderId: 'openai', usage: { inputTokens: 32524, outputTokens: 137, totalTokens: 32661, usageSource: 'rollout_token_usage_record' } }
+        : { found: false, reason: 'no match' }),
+    }, () => ({ events: officialRound('0f1e2d3c-official-0002') }));
+    const out = await transport.complete(requestId('P1', 1));
+    const snap = transport.hostSnapshot();
+    expect(snap.identityStatus).toBe('VERIFIED'); // via session-id-matched rollout read-back
+    expect(snap.identityEvidenceSource).toContain('rollout-readback');
+    expect(out.hostRound.usage.totalTokens).toBe(32661); // cross-filled from the same session's record
+    // mismatch path
+    const mismatch = makeTransport({
+      readRollout: () => ({ found: true, model: 'gpt-6-astra', modelProviderId: 'openai' }),
+    }, () => ({ events: officialRound('0f1e2d3c-official-0003') }));
+    await mismatch.transport.complete(requestId('P1', 1));
+    expect(mismatch.transport.hostSnapshot().identityStatus).toBe('MODEL_IDENTITY_MISMATCH');
+  });
+
+  it('--output-last-message file is the authoritative final message; pre-existing files are deleted pre-spawn (no stale poisoning); the file is cleaned up after', async () => {
+    const fs = require('node:fs');
+    const os = require('node:os');
+    const path = require('node:path');
+    const msgFile = path.join(os.tmpdir(), `pl-lab-test-lastmsg-${process.pid}.txt`);
+    fs.writeFileSync(msgFile, 'STALE CONTENT FROM A PREVIOUS RUN', 'utf8'); // poisoning attempt
+    const { transport, calls } = makeTransport({
+      outputLastMessageFile: msgFile,
+    }, () => ({
+      events: officialRound('0f1e2d3c-official-0004'),
+      writeLastMessageFile: '{"type":"proceed","args":{"key":"from-file"}}',
+    }));
+    const out = await transport.complete(requestId('P1', 1));
+    expect(out.payload).toEqual({ type: 'proceed', args: { key: 'from-file' } }); // file content won over the stream's proceed
+    expect(fs.existsSync(msgFile)).toBe(false); // cleaned up after reading
+    // and a round whose CLI never writes the file falls back to the stream
+    const fallback = makeTransport({ outputLastMessageFile: msgFile }, () => ({ events: officialRound('0f1e2d3c-official-0005') }));
+    const out2 = await fallback.transport.complete(requestId('P1', 1));
+    expect(out2.payload).toEqual({ type: 'proceed' }); // stream channel
+    expect(calls.length).toBeGreaterThan(0);
+  });
+
+  it('readRolloutEvidenceForSession: id-exact match, ambiguity refused, zero fabrication', () => {
+    // contract validation without touching the real CODEX_HOME: required args
+    expect(() => readRolloutEvidenceForSession({} as any)).toThrow(/sessionId is required/);
+    // a session id that cannot exist in any rollout directory returns found:false
+    const missing = readRolloutEvidenceForSession({ sessionId: '00000000-0000-7000-8000-000000000000', now: new Date('2026-01-01T00:00:00Z') });
+    expect(missing.found).toBe(false);
+    expect(missing.ambiguous).toBe(false);
   });
 });
 
