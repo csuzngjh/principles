@@ -16,7 +16,7 @@
  * - rc-5-object-hasown-not-in: uses Object.hasOwn for untrusted keys.
  * - rc-9-no-silent-fallback: every result includes reason + nextAction.
  */
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import type {
@@ -91,9 +91,10 @@ function getPluginExtDir(): string {
 }
 
 /**
- * OpenClaw host installer — writes/merges ~/.openclaw/openclaw.json and
- * ~/.openclaw/plugins/installs.json. Does NOT install bundled components
- * (core/pd-cli/console) — that's the shared installer's job.
+ * OpenClaw host installer — writes/merges ~/.openclaw/openclaw.json only.
+ * Plugin installation records belong to the OpenClaw host; PD must not write
+ * them (see PRI-1021). Does NOT install bundled components (core/pd-cli/
+ * console) — that's the shared installer's job.
  */
 export class OpenClawHostInstaller implements HostInstaller {
   readonly hostId = 'openclaw';
@@ -219,9 +220,6 @@ export class OpenClawHostInstaller implements HostInstaller {
       const mergedConfigObj = ensureConversationAccess(configObj);
       writeFileSync(configPath, JSON.stringify(mergedConfigObj, null, 2));
 
-      // Write install record to installs.json (the canonical store)
-      this.writeInstallRecord(configDir);
-
       return {
         success: true,
         hostId: this.hostId,
@@ -241,78 +239,6 @@ export class OpenClawHostInstaller implements HostInstaller {
         reason: `Failed to update openclaw.json: ${reason}`,
         nextAction: 'Check file permissions on ~/.openclaw/openclaw.json and re-run installer.',
       };
-    }
-  }
-
-  /**
-   * Write install record to ~/.openclaw/plugins/installs.json.
-   * Non-fatal on failure — OpenClaw manages this file and will self-heal.
-   */
-  // eslint-disable-next-line @typescript-eslint/class-methods-use-this
-  private writeInstallRecord(configDir: string): void {
-    const installsDir = path.join(configDir, 'plugins');
-    const installsPath = path.join(installsDir, 'installs.json');
-    try {
-      // CodeQL TOCTOU fix: mkdirSync is idempotent (no pre-check needed);
-      // readFileSync uses try/catch instead of existsSync+read.
-      if (!existsSync(installsDir)) {
-        mkdirSync(installsDir, { recursive: true });
-      }
-      // rc-3/rc-9: Only initialize a fresh record on ENOENT (file doesn't exist).
-      // For any other read/parse failure (EACCES, EIO, malformed JSON), or when the
-      // parsed value is not a record, RETURN without writing — overwriting would
-      // destroy other plugins' installRecords. Non-fatal: OpenClaw self-heals.
-      let installs: Record<string, unknown>;
-      try {
-        const raw = readFileSync(installsPath, 'utf-8');
-        const parsed: unknown = JSON.parse(raw);
-        if (!isRecord(parsed)) {
-          // Parsed to a non-object (array/string/null) — preserve original file.
-          return;
-        }
-        // rc-3/rc-9: if installRecords exists but is not a record (null/array/
-        // string), preserve the original file rather than overwriting it with
-        // an empty object. Missing installRecords is a compatible format and
-        // will be initialized to {} below (CodeRabbit #3762804744).
-        if (Object.hasOwn(parsed, 'installRecords') && !isRecord(parsed.installRecords)) {
-          return;
-        }
-        installs = parsed;
-      } catch (err) {
-        const code = getErrorCode(err);
-        if (code === 'ENOENT') {
-          // File doesn't exist — initialize fresh record (first install).
-          installs = { version: 1, installRecords: {} };
-        } else {
-          // EACCES / EIO / malformed JSON — preserve original file, do not overwrite.
-          return;
-        }
-      }
-      // rc-2: isRecord narrows installRecords without `as` cast (ERR-001 recurrence).
-      // Replaces the prior `typeof !== 'object'` check — isRecord also rejects arrays,
-      // which the old check silently allowed through.
-      const installRecords: Record<string, unknown> = isRecord(installs.installRecords)
-        ? installs.installRecords
-        : {};
-      const extDir = getPluginExtDir();
-      const pkgPath = path.join(extDir, 'package.json');
-      let version: string | undefined = undefined;
-      try {
-        const pkg: unknown = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-        if (isRecord(pkg) && Object.hasOwn(pkg, 'version') && typeof pkg.version === 'string') {
-          ({ version } = pkg);
-        }
-      } catch { /* ignore — ENOENT or malformed package.json */ }
-      installRecords['principles-disciple'] = {
-        source: 'path',
-        installPath: extDir,
-        ...(version ? { version } : {}),
-        installedAt: new Date().toISOString(),
-      };
-      installs.installRecords = installRecords;
-      writeFileSync(installsPath, JSON.stringify(installs, null, 2));
-    } catch {
-      // Non-fatal — installs.json is managed by OpenClaw and will self-heal
     }
   }
 
