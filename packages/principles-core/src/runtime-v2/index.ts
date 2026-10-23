@@ -2374,3 +2374,8 @@ export type {
 } from './store/sqlite-intervention-evidence-store.js';
 
 export { boundCorrectionEvidenceText } from './pain-signal-bridge.js';
+
+// PRI-1019: the one Owner-design declaration contract and persisted authority.
+export { DESIGN_GATE_FACT_SCHEMA_VERSION, isDesignGateFact, isDesignGateDeclaration } from './internalization/design-gate-facts.js';
+export type { DesignGateFact, DesignGateDeclaration, DesignGateActor, DesignGateScope, DesignGateAction, DesignGateDecision, DesignGateInvalidationReason } from './internalization/design-gate-facts.js';
+export { SqliteDesignGateStore, DesignGateStoreError } from './store/design-gate/sqlite-design-gate-store.js';

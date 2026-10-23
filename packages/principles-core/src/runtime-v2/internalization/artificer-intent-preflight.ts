@@ -51,6 +51,7 @@ import type { PIArtifactStore } from './pi-artifact.js';
 import type { PITaskRecord } from './peer-runner-contracts.js';
 import type { HumanReviewContext } from './pitask-metadata.js';
 import { parseSeedSourcePainId } from './pitask-metadata.js';
+import { DESIGN_GATE_FACT_SCHEMA_VERSION } from './design-gate-facts.js';
 import {
   resolveFormationContext,
   type FormationArtifactReader,
@@ -85,6 +86,16 @@ export interface TrustedFactResolution {
  */
 export interface ArtificerTrustedFactsPort {
   resolveRequiredFact(request: { factKind: string; taskId: string }): TrustedFactResolution;
+  /**
+   * Declares that the host can provide this fact contract to generated rules.
+   * This is a capability check, not a resolution of the current PI task.
+   */
+  describeRequiredFact?(request: { factKind: string }): {
+    readonly supported: boolean;
+    readonly schemaVersion?: string;
+    readonly inputPath?: string;
+    readonly source?: string;
+  };
 }
 
 /** Stable stop-point reason codes (Owner-facing vocabulary, SPEC 5.3). */
@@ -689,6 +700,28 @@ export function assessIntentBasis(input: {
   }
   const resolutions: { factKind: string; resolution: TrustedFactResolution['resolution'] }[] = [];
   for (const fact of requiredFacts) {
+    if (fact.factKind === 'design_approval') {
+      const capability = trustedFacts?.describeRequiredFact?.({ factKind: fact.factKind });
+      const capabilityMatchesContract = capability !== undefined
+        && capability.supported === true
+        && capability.schemaVersion === DESIGN_GATE_FACT_SCHEMA_VERSION
+        && capability.inputPath === 'input.context.facts.designGate'
+        && typeof capability.source === 'string'
+        && capability.source.trim().length > 0
+        && capability.source.length <= 200;
+      if (!capabilityMatchesContract) {
+        return {
+          status: 'unsupported',
+          reasonCode: 'trusted_fact_provider_absent',
+          detail: `executionConditions require design_approval but the host does not declare the DesignGateFact v${DESIGN_GATE_FACT_SCHEMA_VERSION} contract at input.context.facts.designGate`,
+          nextAction: 'Host capability gap, not a task approval result: connect a trusted design-gate fact source before generating rules that depend on it.',
+        };
+      }
+      // Generation asks whether this contract is available to the runtime,
+      // not whether the internal PI generation task itself is approved.
+      resolutions.push({ factKind: fact.factKind, resolution: 'unknown' });
+      continue;
+    }
     const outcome = trustedFacts?.resolveRequiredFact({ factKind: fact.factKind, taskId: input.taskId });
     if (outcome === undefined || outcome.resolution === 'unknown') {
       return {

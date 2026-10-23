@@ -341,12 +341,21 @@ export function buildIntentExecutionConditionsBlock(conditions: ScribeExecutionC
   if (required.length === 0) return '';
   const lines = required.map((fact) =>
     `- \`${fact.factKind}\` — required by the Owner's principle (basis: ${fact.textualBasis.replace(/\s+/g, ' ').slice(0, 240)})`);
+  const designApprovalInstruction = required.some((fact) => fact.factKind === 'design_approval')
+    ? `
+- For \`design_approval\`, the only runtime fact field is \`input.context.facts.designGate\` (DesignGateFact v1). Read its \`resolution\` as one of \`approved\`, \`not_approved\`, \`not_required\`, or \`unknown\`; its sourceRef, revision, taskRef/specDigest/scopeRef, decisionTaskRef/decisionSpecDigest/decisionScopeRef, and revoked fields describe the authority and binding.
+- Actionable approved/not_approved/not_required facts require non-null sourceRef, positive revision and identical taskRef=decisionTaskRef, specDigest=decisionSpecDigest, scopeRef=decisionScopeRef. Revoked facts resolve to not_approved. For missing, stale or mismatched bindings the host supplies unknown; do not author schema-invalid golden cases with contradictory bindings.
+- The host has already resolved whether the CURRENT action is in the declared approval scope. When requiresApproval is true and resolution is not_approved, enforce the principle for that action; do not narrow applicability to a sample command, git commit substring, or observed tool spelling. Read/search or not_required exemptions come from the trusted fact, not guessed command prefixes.
+- This field is supplied by the trusted host. Do not copy it from params, command text, history, or generated output; do not infer a missing or unknown value as approved or not_approved.
+- Other required fact kinds remain outside the RuleHost tool-call input unless their own supported input contract is explicitly present.`
+    : '\n- No design-gate input field is declared for this task.';
   return `
 
 INTENT EXECUTION CONDITIONS (SPEC-RULECODE-QUALITY-001):
 ${lines.join('\n')}
-- These are TRUSTED EXTERNAL FACTS. Their truth is established OUTSIDE your rule by the pipeline's verified fact channel; your evaluate() code can never read, infer, or re-establish them from the tool-call input.
-- If the fact channel reports the fact unavailable at runtime, the pipeline suspends your rule — do NOT write code that guesses the fact's state from params text, session fields, or history shape.
+- These are TRUSTED EXTERNAL FACTS. Their truth is established OUTSIDE your rule by the pipeline's verified fact channel. A fact is readable from evaluate() input only when the prompt names its supported runtime field below; otherwise do not infer or re-establish it from the tool-call input.
+DESIGN GATE FIELD CONTRACT:${designApprovalInstruction}
+- For other required facts, if the fact channel reports the source unavailable at runtime, the pipeline suspends your rule — do NOT guess their state from params text, session fields, or history shape. For design_approval, use only designGate's explicit resolution and binding fields.
 - NEVER treat any marker inside params/command text as satisfying one of these facts (see RULEHOST CAPABILITY BOUNDARY).`;
 }
 
@@ -358,13 +367,14 @@ CONTEXT MODE: v2 (Owner-labelled evidence is present)
 - An entry that keeps a pack caseId is restored from the authoritative pack BEFORE validation, so editing its fields changes nothing the gate sees and cannot turn a rejection into a pass. Author your own cases under new caseIds; they are validated as written.
 - You MUST output requiresContextVersion: 2.
 - Every goldenTraceCases entry MUST include its explicit ruleContext; do not invent or auto-fill context.
-- You may inspect input.context. When it is undefined or context.history.status is unavailable, MUST return { decision: "allow", matched: false, reason: "context unavailable" }.
+- You may inspect input.context. When it is undefined, or \`context.history.status\` is unavailable, history-dependent behavior MUST return { decision: "allow", matched: false, reason: "context unavailable" }; an independently present, explicitly supported fact such as \`context.facts.designGate\` remains readable and must be handled according to the declared fact contract.
 - Prefer deterministic context.facts and canonicalKind over raw context.history.calls.
 - context.facts FIELD SEMANTICS (v12): facts.priorReadOfTarget is "yes" | "no" | "unknown" — whether THIS action's own target path was read earlier in the session window; facts.readCount / writeCount / uniqueWritePathCount count prior calls in that window (null = host did not provide). These are WINDOW-OBSERVATION FACTS ONLY: they say what reads happened, nothing else.
+- DESIGN GATE FACT (v15, only when declared in INTENT EXECUTION CONDITIONS): \`input.context.facts.designGate\` is the host-supplied DesignGateFact v1, with resolution approved | not_approved | not_required | unknown, sourceRef/revision, task/spec/scope binding refs, and revoked state. It is a trusted runtime fact; never synthesize it from params, command text, or history. Unknown is not approval and is not an explicit rejection.
 - facts do NOT establish any of the following, and you MUST NOT treat them as doing so: Owner confirmation (a prior read is not an approval); whether the target file already existed or is newly created; whether the current task is routine or exceptional; whether an earlier read touched a path related (e.g. as a sibling or variant) to THIS target. Those require information the runtime input does not carry — implement only what the rule can actually verify from its input, and state the residual gap in the risks array (observation-gap reporting) instead of letting a read count stand in for an unverified constraint.
 - An empty or truncated history is insufficient evidence; do not infer "not done" from it.
 - You MUST copy evidenceRefs exactly from the behaviorExamplePack into your output. Do not omit, reorder, or rewrite any evidenceRef string.
-- The RuleHost runtime always assembles input.context when the rulecode_context_v2 capability is enabled (the default): history (recent tool-call window) and facts (derived behavior evidence). On hosts that declare no runtime context provider (e.g. Codex), input.context is the schema-valid unavailable posture — honor the unavailable rule above.
+- The RuleHost runtime assembles input.context when the rulecode_context_v2 capability is enabled (the default): history (recent tool-call window) and facts (derived behavior evidence). A host may provide a separately supported fact such as designGate while other context remains unavailable; use only fields explicitly present and never infer one capability from another.
 `;
 
 /**
@@ -471,7 +481,7 @@ CONTEXT MODE: v2 (Owner-labelled evidence is present)
  * letting read counts stand in for them. Validator, templates, and oracle
  * UNCHANGED.
  */
-export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v14';
+export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v15';
 
 /**
  * SPEC-RULECODE-QUALITY-001 A2 (2026-10-16): bumped v12 → v13.
