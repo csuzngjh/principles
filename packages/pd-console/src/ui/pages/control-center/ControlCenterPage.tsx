@@ -32,6 +32,7 @@ import { WorkflowDiagram } from "./WorkflowDiagram.js";
 import { AgentGroup } from "./AgentGroup.js";
 import { AgentCard, type AgentLocale } from "./AgentCard.js";
 import { RuntimeProfileManager } from "./RuntimeProfileManager.js";
+import { DesignGatePanel } from "./DesignGatePanel.js";
 import {
   AGENT_GROUPS,
   AGENT_METADATA,
@@ -875,6 +876,8 @@ export function ControlCenterPage() {
         readiness={overallReadiness}
         agents={configData.agents}
       />
+
+      <DesignGatePanel />
 
       {/* Section 2: Internal Agents — 按依赖分组 */}
       <section className="mt-8" aria-labelledby="section-agents">

@@ -19,6 +19,7 @@
  */
 
 import { baselineToolAlias as TOOL_ALIAS } from './tool-semantic-baseline.js';
+import { isDesignGateFact, type DesignGateFact } from './design-gate-facts.js';
 
 // ── public types ───────────────────────────────────────────────────────────
 
@@ -52,6 +53,8 @@ export interface RuleBehaviorFacts {
   writeCount: number | null;
   uniqueWritePathCount: number | null;
   sameActionBlockCount: number | null;
+  /** Host-derived Owner declaration; never copied from tool parameters. */
+  designGate?: DesignGateFact;
 }
 
 export interface RuleContextV2 {
@@ -224,6 +227,9 @@ export function validateRuleBehaviorFacts(value: unknown): ValidationResult {
   }
   if (!isNullOrNonNegativeFinite(value.sameActionBlockCount)) {
     errors.push('sameActionBlockCount must be a non-negative finite number or null');
+  }
+  if (Object.hasOwn(value, 'designGate') && !isDesignGateFact(value.designGate)) {
+    errors.push('designGate must be a valid versioned host fact');
   }
 
   return fail(errors);

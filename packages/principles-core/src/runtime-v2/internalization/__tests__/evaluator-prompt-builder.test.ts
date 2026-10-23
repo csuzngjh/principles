@@ -3,6 +3,7 @@ import {
   EvaluatorPromptBuilder,
   EVALUATOR_PROTOCOL_INSTRUCTION,
   EVALUATOR_PROMPT_CONTRACT_VERSION,
+  EVALUATOR_DESIGN_GATE_ADDENDUM,
 } from '../evaluator-prompt-builder.js';
 import { extractJsonObject } from '../../adapter/json-extractor.js';
 
@@ -37,7 +38,7 @@ describe('EvaluatorPromptBuilder', () => {
     expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('sourceTrace.artificerArtifactId MUST be copied exactly from input.sourceArtificerArtifactId');
   });
 
-  it('promptContractVersion value is evaluator-output-v1.prompt.v10 (r6 review-fix anchor)', () => {
+  it('promptContractVersion value is evaluator-output-v1.prompt.v11 (design-gate review fact)', () => {
     // v7 (2026-10-11 closeout) anchored the first kind-semantics clause but
     // asserted a FALSE mapping ("EVERY writeTools entry dispatches as
     // 'write'") — the real OpenClaw catalog's writeTools is a risk grouping
@@ -45,7 +46,126 @@ describe('EvaluatorPromptBuilder', () => {
     // agent-delegation tool dispatching 'agent'. v8 (review round) makes the
     // host's OWN tool-to-kind mapping the authority and keeps unknown when
     // no mapping is present.
-    expect(EVALUATOR_PROMPT_CONTRACT_VERSION).toBe('evaluator-output-v1.prompt.v10');
+    expect(EVALUATOR_PROMPT_CONTRACT_VERSION).toBe('evaluator-output-v1.prompt.v11');
+  });
+
+  it('explains the supported designGate fact and keeps its four states distinct', () => {
+    const designGate = {
+      version: 1,
+      sourceRef: 'declaration:1',
+      revision: 1,
+      requiresApproval: true,
+      taskRef: 'task:1',
+      specDigest: 'sha256:spec',
+      scopeRef: 'scope:1',
+      decisionTaskRef: 'task:1',
+      decisionSpecDigest: 'sha256:spec',
+      decisionScopeRef: 'scope:1',
+      resolution: 'unknown',
+      revoked: false,
+    };
+    const { systemPrompt } = builder.buildPrompt({
+      ...input,
+      artificerArtifact: {
+        goldenTraceCases: [{ ruleContext: { facts: { designGate } } }],
+      },
+    });
+    expect(systemPrompt).toContain(EVALUATOR_DESIGN_GATE_ADDENDUM);
+    expect(systemPrompt).toContain('input.context.facts.designGate');
+    expect(systemPrompt).toContain('not_required');
+    expect(systemPrompt).toContain('is neither approval nor explicit rejection');
+    expect(systemPrompt).not.toContain('EXPERIMENT_ONLY_OWNER_AUTHORIZED_FIXTURE');
+  });
+
+  it('deduplicates the authoritative owner mirror too, without changing either stored replay set', () => {
+    const history = { status: 'available', truncated: false, calls: [{ sequenceId: 1, toolName: 'read', canonicalKind: 'read', normalizedPath: '/workspace/source', paramsSummary: { content: 'x'.repeat(28000) }, outcome: 'success' }] };
+    const entry = { caseId: 'same-owner-case', ruleContext: { history, facts: { designGate: { resolution: 'not_approved' } } } };
+    const artifact = { goldenTraceCases: [entry], ownerGoldenTraceCases: [entry] };
+    const before = JSON.stringify(artifact);
+    const prompt = builder.buildPrompt({ ...input, artificerArtifact: artifact });
+    expect(prompt.message.length).toBeLessThan(50000);
+    expect(prompt.message).toContain('evaluatorDisplayNote');
+    expect(JSON.stringify(artifact)).toBe(before);
+  });
+
+  it('deduplicates only repeated golden histories in evaluator display and preserves the source artifact', () => {
+    const history = {
+      status: 'available',
+      truncated: false,
+      calls: [{
+        sequenceId: 1,
+        toolName: 'read',
+        canonicalKind: 'read',
+        normalizedPath: '/workspace/large-file',
+        paramsSummary: { content: 'x'.repeat(14_000) },
+        outcome: 'success',
+      }],
+    };
+    const artifact = {
+      implementationCode: 'return { decision: "allow", matched: false };',
+      goldenTraceCases: Array.from({ length: 5 }, (_, index) => ({
+        caseId: `case-${index + 1}`,
+        kind: index === 0 ? 'negative' : 'positive',
+        toolName: 'write',
+        params: { path: `/workspace/file-${index + 1}` },
+        expectedDecision: index === 0 ? 'block' : 'allow',
+        ruleContext: {
+          version: 2,
+          history,
+          facts: {
+            priorReadOfTarget: 'unknown',
+            readCount: null,
+            writeCount: null,
+            uniqueWritePathCount: null,
+            sameActionBlockCount: null,
+            designGate: { version: 1, resolution: 'unknown' },
+          },
+        },
+      })),
+    };
+    const originalJson = JSON.stringify(artifact);
+
+    const result = builder.buildPrompt({ ...input, artificerArtifact: artifact });
+    const displayedArtifact = result.promptInput.artificerArtifact;
+    expect(result.message.length).toBeLessThan(50_000);
+    expect(JSON.stringify(artifact)).toBe(originalJson);
+    if (typeof displayedArtifact !== 'object' || displayedArtifact === null || Array.isArray(displayedArtifact)) {
+      throw new Error('unreachable: displayed artifact is an object');
+    }
+    const displayedCases = Reflect.get(displayedArtifact, 'goldenTraceCases');
+    if (!Array.isArray(displayedCases)) throw new Error('unreachable: displayed cases are an array');
+    expect(displayedCases[0]).toMatchObject({
+      caseId: 'case-1',
+      params: { path: '/workspace/file-1' },
+      expectedDecision: 'block',
+      ruleContext: { history: { calls: [{ paramsSummary: { content: 'x'.repeat(14_000) } }] } },
+    });
+    expect(displayedCases[1]).toMatchObject({
+      caseId: 'case-2',
+      params: { path: '/workspace/file-2' },
+      expectedDecision: 'allow',
+      ruleContext: { history: { calls: [], truncated: true } },
+      evaluatorDisplayNote: expect.stringContaining('case-1'),
+    });
+    expect(result.systemPrompt).toContain('stored artifact and deterministic replay retain the full original');
+  });
+
+  it('still fails explicitly when a unique core history alone exceeds the prompt budget', () => {
+    const artifact = {
+      goldenTraceCases: [{
+        caseId: 'unique-history',
+        ruleContext: {
+          version: 2,
+          history: {
+            status: 'available',
+            truncated: false,
+            calls: [{ sequenceId: 1, toolName: 'read', canonicalKind: 'read', normalizedPath: null, paramsSummary: { content: 'x'.repeat(51_000) }, outcome: 'success' }],
+          },
+          facts: { priorReadOfTarget: 'unknown', readCount: null, writeCount: null, uniqueWritePathCount: null, sameActionBlockCount: null },
+        },
+      }],
+    };
+    expect(() => builder.buildPrompt({ ...input, artificerArtifact: artifact })).toThrow(/prompt input exceeds 50000 characters/);
   });
 
   // ── prompt.v9 (2026-10-12 r6): requiredChanges expressibility + ungrounded

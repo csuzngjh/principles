@@ -65,7 +65,7 @@ import type {
 } from '../runner/peer-runner-types.js';
 import type { EffectivePdConfig } from '../config/pd-config-types.js';
 import type { OutputLanguage } from '../language-directive.js';
-import { extractIntentContract, type IntentContractV1 } from './intent-contract.js';
+import { extractExecutionConditions, extractIntentContract, type IntentContractV1 } from './intent-contract.js';
 // PRI-426: single-round adversarial sandbox replay in succeedTask.
 import { evaluateRefinerRuleHostGate, type RefinerRuleHostGateDeps } from './refiner-rulehost-gate.js';
 import { attributionFromLayer, partitionV2OutOfScopeFailures, resolveRequiresContextVersionFromArtifact } from './rule-reliability-validation.js';
@@ -2827,8 +2827,30 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       rationale: 'System-restored Owner-labelled negative behavior example; expected decision comes from the validated BehaviorExamplePack.',
       ...(ownerCase.ruleContext !== undefined ? { ruleContext: ownerCase.ruleContext } : {}),
     }));
+    // A trusted design fact scopes the invocation already. Changing its command
+    // spelling must not bypass the same denied scope (counterfactual, not history).
+    const designScopeCases: AdversarialCase[] = [];
+    if (context.scribeArtifact !== null) {
+      let scribe: unknown;
+      try { scribe = JSON.parse(context.scribeArtifact); } catch { scribe = null; }
+      const conditions = extractExecutionConditions(scribe);
+      if (!conditions.corrupted && conditions.conditions?.requiredFacts.some((fact) => fact.required && fact.factKind === 'design_approval')) {
+        for (const ownerCase of ownerNegativeCases) {
+          const fact = ownerCase.ruleContext?.facts.designGate;
+          const semantic = this.hostSemanticContext?.tools.find((tool) => tool.rawToolName === ownerCase.toolName);
+          if (semantic?.canonicalKind !== 'execute' || fact?.resolution !== 'not_approved' || !fact.requiresApproval) continue;
+          designScopeCases.push({
+            caseId: `design-scope:${ownerCase.caseId}`, attackType: 'omission', toolName: ownerCase.toolName,
+            params: { command: 'node -e "process.stdout.write(123)"' }, expectedDecision: 'block',
+            rationale: 'System-derived counterfactual: the same trusted denied invocation scope cannot depend on command spelling; not a claim about historical behavior.',
+            ruleContext: ownerCase.ruleContext,
+          });
+        }
+      }
+    }
     const mergedAdversarialCases: AdversarialCase[] = [
       ...ownerNegativeAdversarial,
+      ...designScopeCases,
       ...v2Cases,
       ...(hostAliasCase !== null ? [hostAliasCase] : []),
       ...llmCases,
@@ -3658,6 +3680,35 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       && hostContext.tools.length > 0
       && hostContext.tools.every((tool) => typeof tool.rawToolName === 'string' && tool.rawToolName.trim() !== ''
         && typeof tool.canonicalKind === 'string' && tool.canonicalKind.trim() !== '');
+    let requiredFactKinds: string[] | undefined;
+    if (typeof bearerPrincipleContentJson === 'string') {
+      let scribeArtifact: unknown;
+      try {
+        scribeArtifact = JSON.parse(bearerPrincipleContentJson);
+      } catch {
+        this.emitEvent('rule_assembly_failed', taskId, {
+          runId,
+          reason: 'scribe_principle_artifact_unparseable',
+          nextAction: 'verify_the_source_scribe_artifact_before_assembling_a_rule',
+        });
+        return null;
+      }
+      const executionConditions = extractExecutionConditions(scribeArtifact);
+      if (executionConditions.corrupted) {
+        this.emitEvent('rule_assembly_failed', taskId, {
+          runId,
+          reason: 'scribe_execution_conditions_corrupted',
+          nextAction: 'repair_or_regenerate_the_source_scribe_artifact_before_assembling_a_rule',
+        });
+        return null;
+      }
+      if (executionConditions.conditions !== null) {
+        const designApprovalRequired = executionConditions.conditions.requiredFacts.some(
+          (fact) => fact.required && fact.factKind === 'design_approval',
+        );
+        if (designApprovalRequired) requiredFactKinds = ['design_approval'];
+      }
+    }
     if (requiresContextVersion === 2 && !hasHostInputContract) {
       this.emitEvent('rule_host_input_contract_skipped', taskId, {
         runId,
@@ -3678,7 +3729,12 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       adversarialResult: output.adversarialResult,
       ...(requiresContextVersion === 2 ? { requiresContextVersion } : {}),
       ...(hasHostInputContract ? {
-        ruleHostInputContract: { version: 1, contextVersion: 2, hostKinds: [...hostKinds] },
+        ruleHostInputContract: {
+          version: 1,
+          contextVersion: 2,
+          hostKinds: [...hostKinds],
+          ...(requiredFactKinds !== undefined ? { requiredFactKinds } : {}),
+        },
       } : {}),
       // PRI-490: preserve evidenceRefs from Artificer artifact into rule artifact.
       // Only include when the array is valid (non-empty strings) — v1 rules may omit.

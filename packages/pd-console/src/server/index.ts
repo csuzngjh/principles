@@ -34,6 +34,7 @@ import { handleApprovalsGroupedRoute, disposeApprovalsGroupedModels } from './ro
 import { handleGovernanceRoute, handleGovernanceExperienceRoute, resolveOwnerConfigSnapshot, disposeGovernanceModels } from './routes/governance.js';
 import { handleOwnerDecisionsRoute } from './routes/owner-decisions.js';
 import { handleEvidenceOutcomesRoute } from './routes/evidence-outcomes.js';
+import { handleDesignGateRoute } from './routes/design-gate.js';
 import { handleOwnerDecisionInboxRoute, handleOwnerDecisionViewRoute, handleOwnerDecisionLibraryRoute, parseOwnerDecisionViewSubPath } from './routes/owner-decision.js';
 import { handleOwnerIdentityRoute } from './routes/owner-identity.js';
 import { handleEvidenceChainRoute, disposeEvidenceChainModels } from './routes/evidence-chain.js';
@@ -585,6 +586,18 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
           ownerIdentity: authEnabledForOwner
             ? { ownerId, credentialId }
             : null,
+        }))(req, res);
+        return;
+      }
+
+      if (urlPath.startsWith('/api/v1/governance/design-gate/')) {
+        const identity = resolveOwnerIdentity(process.env, defaultOwnerIdentityHomeDir());
+        const { ownerId, credentialId } = identity;
+        asyncHandler(() => handleDesignGateRoute(req, res, {
+          workspaceDir: services.workspaceDir,
+          subPath: urlPath.slice('/api/v1/governance/design-gate'.length),
+          ownerIdentity: services.authConfig.isEnabled() && ownerId !== null && credentialId !== null
+            ? { ownerId, credentialId } : null,
         }))(req, res);
         return;
       }
