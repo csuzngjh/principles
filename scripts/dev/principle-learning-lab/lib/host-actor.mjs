@@ -212,22 +212,20 @@ export function opportunityIdFromTaskId(taskId) {
 }
 
 /**
- * Normalize a TypeBox/JSON schema for OpenAI structured outputs
- * (response_format json_schema). The API rejected the lab's registered
- * action schema live: `Invalid schema for response_format
- * 'codex_output_schema': 'schema.required' is required` — one object node
- * (the optional `args` map) had no `required` key at all.
+ * Rewrite pass over a TypeBox/JSON schema toward the OpenAI Structured
+ * Outputs subset. Official rules (developers.openai.com structured-outputs,
+ * supported-schemas): ALL fields must be listed in `required` (optionality
+ * is emulated with null-unions), every object sets
+ * `additionalProperties: false`, and the supported type set is
+ * String/Number/Boolean/Integer/Object/Array/Enum/anyOf — `const` is NOT
+ * supported, so `{const: X, type: "string"}` branches are rewritten to the
+ * equivalent `{type: "string", enum: [X]}`. `$schema`/`$id` are dropped.
  *
- * MINIMAL, SEMANTICS-PRESERVING fix: every object node gets an explicit
- * `required` ONLY when it had none (empty array — no property is forcibly
- * made required, the action contract is untouched) and an explicit
- * `additionalProperties: false` when absent. Whether OpenAI's strict mode
- * additionally demands every property listed in `required` (its docs
- * suggest so) can only be settled by a real call — if the API still
- * refuses, its error names the next node and the Owner decides between
- * strict-full (all properties required) and a record-typed args map.
- *
- * Pure function; returns a new schema tree, never mutates the input.
+ * This pass alone does NOT widen `required` — use
+ * `normalizeSchemaForOpenAiStrictFull` for the real host rounds, which adds
+ * the strict-optionality pass (all properties required, originally-optional
+ * ones nullable) and pairs with `stripNullFields` to restore the original
+ * omitted-semantics before validateActorAction. Pure; never mutates input.
  */
 export function normalizeSchemaForOpenAiStrict(schema) {
   if (Array.isArray(schema)) {
@@ -242,13 +240,19 @@ export function normalizeSchemaForOpenAiStrict(schema) {
       out.properties = Object.fromEntries(
         Object.entries(value).map(([name, sub]) => [name, normalizeSchemaForOpenAiStrict(sub)]),
       );
-    } else if (['anyOf', 'oneOf', 'allOf'].includes(key) && Array.isArray(value)) {
+    } else if (['anyOf', 'oneOf'].includes(key) && Array.isArray(value)) {
       out[key] = value.map((sub) => normalizeSchemaForOpenAiStrict(sub));
     } else if (key === '$schema' || key === '$id') {
       continue; // irrelevant (and sometimes unwelcome) to the API
     } else {
       out[key] = value;
     }
+  }
+  // const is outside the supported keyword set; a single-value enum is its
+  // exact equivalent and IS supported.
+  if (out.const !== undefined) {
+    out.enum = [out.const];
+    delete out.const;
   }
   if (out.type === 'object') {
     if (out.required === undefined) {
@@ -257,6 +261,90 @@ export function normalizeSchemaForOpenAiStrict(schema) {
     if (out.additionalProperties === undefined) {
       out.additionalProperties = false;
     }
+  }
+  return out;
+}
+
+/** Make one property schema nullable, in the form the official docs use:
+ * enums gain `null` in the value list, string types become
+ * `["<type>", "null"]`, type arrays gain "null", complex nodes gain an
+ * anyOf `{type: "null"}` branch (the docs' linked-list pattern). */
+function makeNullable(nodeSchema) {
+  const s = nodeSchema;
+  if (s === null || typeof s !== 'object' || Array.isArray(s)) return s;
+  if (Array.isArray(s.enum) && !s.enum.includes(null)) {
+    return { ...s, enum: [...s.enum, null] };
+  }
+  if (typeof s.type === 'string') {
+    return { ...s, type: [s.type, 'null'] };
+  }
+  if (Array.isArray(s.type) && !s.type.includes('null')) {
+    return { ...s, type: [...s.type, 'null'] };
+  }
+  if (Array.isArray(s.anyOf)) {
+    return { ...s, anyOf: [...s.anyOf, { type: 'null' }] };
+  }
+  return { anyOf: [{ ...s }, { type: 'null' }] };
+}
+
+/**
+ * Full normalization used by REAL host rounds: the rewrite pass above plus
+ * the strict-optionality pass — every object's `required` lists ALL of its
+ * properties, and properties that were NOT required in the original schema
+ * become nullable (strict mode's only way to express optionality).
+ *
+ * The ACTION CONTRACT IS UNCHANGED on the wire round-trip: optional fields
+ * arrive null on the wire and `stripNullFields` deletes them again before
+ * validateActorAction, restoring the exact omitted-semantics. Pure;
+ * idempotent; never mutates the input.
+ */
+export function normalizeSchemaForOpenAiStrictFull(schema) {
+  const rewritten = normalizeSchemaForOpenAiStrict(schema);
+  const walk = (node) => {
+    if (Array.isArray(node)) return node.map(walk);
+    if (node === null || typeof node !== 'object') return node;
+    const out = {};
+    for (const [key, value] of Object.entries(node)) {
+      if (key === 'properties' && value !== null && typeof value === 'object' && !Array.isArray(value)) {
+        const originalRequired = Array.isArray(node.required) ? node.required : [];
+        out.properties = Object.fromEntries(
+          Object.entries(value).map(([name, sub]) => [
+            name,
+            originalRequired.includes(name) ? walk(sub) : makeNullable(walk(sub)),
+          ]),
+        );
+      } else if (['anyOf', 'oneOf'].includes(key) && Array.isArray(value)) {
+        out[key] = value.map(walk);
+      } else {
+        out[key] = value;
+      }
+    }
+    if (out.type === 'object' && out.properties !== undefined) {
+      out.required = Object.keys(out.properties);
+    }
+    return out;
+  };
+  return walk(rewritten);
+}
+
+/**
+ * Restore the original omitted-semantics on a model reply BEFORE the lab's
+ * action validation: strict schemas force optional fields to be present
+ * (as null) on the wire; the action contract expresses optionality by
+ * ABSENCE. Recursively deletes properties whose value is exactly null.
+ * Non-object values pass through untouched.
+ */
+export function stripNullFields(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => stripNullFields(item));
+  }
+  if (value === null || typeof value !== 'object') {
+    return value;
+  }
+  const out = {};
+  for (const [key, v] of Object.entries(value)) {
+    if (v === null) continue; // optional field the model null-filled → omitted
+    out[key] = stripNullFields(v);
   }
   return out;
 }
@@ -587,6 +675,10 @@ export function createCodexHostTransport({
       } catch {
         throw Object.assign(new Error(`codex-host transport: final agent message is not valid JSON (first 120 chars: ${lastAgentText.trim().slice(0, 120)})`), { code: 'invalid_output' });
       }
+      // Strict schemas force optional fields to arrive as explicit nulls on
+      // the wire; the action contract expresses optionality by absence.
+      // Restore it HERE — before the payload reaches validateActorAction.
+      payload = stripNullFields(payload);
       return {
         payload,
         runId: `${sessionId}#round${roundNo}`,

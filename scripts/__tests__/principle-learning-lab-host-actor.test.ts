@@ -15,8 +15,11 @@ import {
   createCodexHostTransport,
   createHostProcessLedger,
   normalizeSchemaForOpenAiStrict,
+  normalizeSchemaForOpenAiStrictFull,
   opportunityIdFromTaskId,
+  stripNullFields,
 } from '../dev/principle-learning-lab/lib/host-actor.mjs';
+import { validateActorAction } from '../dev/principle-learning-lab/lib/actor.mjs';
 import { runRealActorOpportunity } from '../dev/principle-learning-lab/lib/actor.mjs';
 import { runRealStudy } from '../dev/principle-learning-lab/lib/real-runner.mjs';
 import { loadDataset, goldFor } from '../dev/principle-learning-lab/lib/fixture.mjs';
@@ -436,12 +439,11 @@ describe('runner dispatch and isolation', () => {
   });
 });
 
-describe('OpenAI strict schema normalization (found live: schema.required is required)', () => {
-  // shape mirrors learning-lab-actor-action-v1: root object with required,
-  // an anyOf-const action union, and an OPTIONAL args object node that had
-  // neither `required` nor `additionalProperties` — the exact node OpenAI
-  // rejected with 400 'schema.required' is required.
-  const labSchema = {
+describe('OpenAI strict schema normalization (official rules, live 400 root-caused)', () => {
+  // shape mirrors learning-lab-actor-action-v1: root object with a required
+  // anyOf-const action union, an OPTIONAL args object node, and an OPTIONAL
+  // narrative string — exactly the tree OpenAI rejected live.
+  const labSchema = () => JSON.parse(JSON.stringify({
     additionalProperties: false,
     type: 'object',
     required: ['type'],
@@ -450,29 +452,66 @@ describe('OpenAI strict schema normalization (found live: schema.required is req
       args: { type: 'object', properties: { key: { type: 'string' }, consumer: { type: 'string' } } },
       narrative: { type: 'string' },
     },
-  };
+  }));
 
-  it('every object node carries an explicit required and additionalProperties:false; nothing else changes', () => {
-    const out = normalizeSchemaForOpenAiStrict(JSON.parse(JSON.stringify(labSchema)));
-    expect(out.required).toEqual(['type']); // root contract untouched
-    expect(out.additionalProperties).toBe(false);
-    // the node that broke the API call:
+  it('rewrite pass: const → single-value enum; missing required/additionalProperties made explicit; input tree untouched', () => {
+    const input = labSchema();
+    const out = normalizeSchemaForOpenAiStrict(input);
+    // const is outside the supported keyword set — enum is its exact equivalent
+    expect(out.properties.type.anyOf[0]).toEqual({ type: 'string', enum: ['proceed'] });
+    expect(out.properties.type.anyOf[0].const).toBeUndefined();
+    // rewrite pass alone does NOT widen required (documented behavior)
+    expect(out.required).toEqual(['type']);
     expect(out.properties.args.required).toEqual([]);
     expect(out.properties.args.additionalProperties).toBe(false);
-    // no property was forcibly made required (semantics preserved)
-    expect(out.properties.args.required).not.toContain('key');
-    expect(out.properties.type.anyOf).toEqual(labSchema.properties.type.anyOf);
+    expect(input.properties.type.anyOf[0].const).toBe('proceed'); // input never mutated
   });
 
-  it('is pure and idempotent; nested anyOf branches are normalized too', () => {
-    const input = JSON.parse(JSON.stringify(labSchema));
-    const once = normalizeSchemaForOpenAiStrict(input);
-    const twice = normalizeSchemaForOpenAiStrict(once);
-    expect(twice).toEqual(once);
-    expect(input).toEqual(labSchema); // input tree never mutated
-    const nested = { type: 'object', anyOf: [{ type: 'object', properties: { x: { type: 'string' } } }] };
-    const fixed = normalizeSchemaForOpenAiStrict(nested);
-    expect(fixed.anyOf[0].required).toEqual([]);
-    expect(fixed.anyOf[0].additionalProperties).toBe(false);
+  it('FULL pass (used for real host rounds): every object lists ALL properties in required; originally-optional ones are nullable per the official null-union forms', () => {
+    const out = normalizeSchemaForOpenAiStrictFull(labSchema());
+    // strict rule "all fields must be required"
+    expect(out.required).toEqual(['type', 'args', 'narrative']);
+    expect(out.properties.args.required).toEqual(['key', 'consumer']);
+    expect(out.properties.args.additionalProperties).toBe(false);
+    // optionality via the documented null unions — root args/narrative
+    expect(out.properties.narrative.type).toEqual(['string', 'null']);
+    expect(out.properties.args.type).toEqual(['object', 'null']);
+    // nested args properties were optional too → nullable each
+    expect(out.properties.args.properties.key.type).toEqual(['string', 'null']);
+    // originally-REQUIRED type union stays non-null; const became enum
+    expect(out.properties.type.anyOf).toEqual([{ type: 'string', enum: ['proceed'] }, { type: 'string', enum: ['compat-shim'] }]);
+    // idempotent
+    expect(normalizeSchemaForOpenAiStrictFull(out)).toEqual(out);
+  });
+
+  it('strict round-trip preserves the action contract: null-filled wire forms strip back to the omitted-semantics the validator knows', () => {
+    // a model obeying the strict schema emits every property; unneeded
+    // optional parameters arrive as explicit null
+    const wireAction = {
+      type: 'compat-shim',
+      args: { key: null, consumer: 'svc-b', narrative: null },
+      narrative: null,
+    };
+    const action = stripNullFields(wireAction);
+    // restored to EXACTLY the omitted-semantics contract
+    expect(action).toEqual({ type: 'compat-shim', args: { consumer: 'svc-b' } });
+    expect(validateActorAction(action, ['compat-shim', 'proceed']).ok).toBe(true);
+    // the model may also send the truly-minimal form
+    expect(validateActorAction(stripNullFields({ type: 'proceed', args: null, narrative: null }), ['compat-shim', 'proceed'])).toMatchObject({ ok: true });
+  });
+
+  it('illegal actions are still rejected after stripping; stripNullFields is pure and neutral on non-objects', () => {
+    // unknown action type still fails
+    expect(validateActorAction(stripNullFields({ type: 'teleport', args: null }), ['proceed']).ok).toBe(false);
+    // null-typed arg VALUES (not just absent fields) would violate the
+    // string-values contract — stripping removes only the null-optional
+    // fields the strict schema forced; a non-null contract field keeps its
+    // type checking
+    expect(validateActorAction(stripNullFields({ type: 'proceed', args: { key: 42 } }), ['proceed']).ok).toBe(false);
+    // helpers stay neutral where they must
+    expect(stripNullFields('plain')).toBe('plain');
+    expect(stripNullFields(null)).toBeNull();
+    // array ELEMENTS are values, not optional properties — null stays
+    expect(stripNullFields([1, null, { a: null, b: 2 }])).toEqual([1, null, { b: 2 }]);
   });
 });
