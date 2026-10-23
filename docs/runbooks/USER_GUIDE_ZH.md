@@ -22,6 +22,31 @@
 | `active` | 正式生效 |
 | `archived` | 已归档，不再生效 |
 
+## 开始之前：先给 PD 一个 LLM
+
+PD 的内部智能体——diagnostician、dreamer、scribe、artificer、signal collector——用**您自己的** provider 账号发起 LLM 调用。PD 不带密钥，也不保存密钥值。
+
+能不能跑起来，取决于 `<workspace>/.pd/config.yaml` 里 `pd.default` 这三个字段：
+
+```yaml
+runtimeProfiles:
+  pd.default:
+    type: pi-ai
+    provider: anthropic            # 安装器接受 openai | anthropic | deepseek
+    model: claude-3-5-haiku-latest
+    apiKeyEnv: ANTHROPIC_API_KEY   # 存放密钥的环境变量“名字”，不是密钥
+```
+
+也可以在安装时就指定：
+
+```bash
+npx create-principles-disciple --yes --provider anthropic --api-key-env ANTHROPIC_API_KEY
+```
+
+或者之后在控制台里设置：`pd console open --workspace "<路径>"` → 控制中心 → 运行时配置。
+
+**跳过这一步会怎样**：痛苦信号照样捕捉、照样留存，但诊断不会运行，也不会提出任何原则。`pd config doctor --workspace "<路径>"` 会报 `needs_setup` 并点名将缺的字段；控制中心会把这一节标成「需配置」。
+
 ## 日常命令
 
 ### `/pd-status`
@@ -208,6 +233,10 @@ Legacy replay 生成路径已在 PRI-230 退役，当前没有 CLI 入口可以�
 ### "有些功能看起来被禁用了或者缺失"
 
 部分子系统（如 `correction_observer`）**默认关闭**，这是 MVP-Quiet 设计（ADR-0014），不是故障。在种子客户证据支持更大范围激活之前，它们会保持关闭。你可以在工作区的 `.pd/config.yaml` 中查看哪些子系统已启用。
+
+### 「痛苦信号一直在收，却从不提出原则」
+
+这基本都是 LLM 运行时配置的问题，不是链路坏了。诊断和提出原则是用您自己的 provider 账号发起的 LLM 调用；`provider`、`model` 或 `apiKeyEnv` 缺任何一个，智能体就会停在 `needs_setup` 不再往下走。先跑 `pd config doctor --workspace "<路径>"`，它会点名将缺的字段；补齐办法见本手册开头的「开始之前：先给 PD 一个 LLM」一节。
 
 ## 可视化控制台
 

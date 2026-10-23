@@ -1459,7 +1459,7 @@
       "configDisabled": "All agents are disabled.",
       "configErrors": "Configuration Errors",
       "internalAgents": "Internal Agents",
-      "internalAgentsDescription": "Each PD internal agent uses an OpenClaw runtime profile. Keys stay outside PD.",
+      "internalAgentsDescription": "Each PD internal agent runs on the runtime profile you configure — provider, model, and the name of the environment variable holding your API key. Keys stay outside PD.",
       "defaultRuntime": "Default Runtime",
       "defaultRuntimeDescription": "The default runtime profile for agents without explicit overrides.",
       "advancedDiagnostics": "Advanced Diagnostics",
