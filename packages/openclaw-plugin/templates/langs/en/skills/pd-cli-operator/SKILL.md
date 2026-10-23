@@ -30,6 +30,22 @@ Confirm that the installed CLI supports a command before running it:
 
 OpenClaw's `/pd-status` primarily reports host status such as GFI/Pain dictionary; it is not a substitute for Runtime health or tracing a specific task.
 
+## Recall a principle's historical pains
+
+Use `pd pain recall` when the principle text alone is not enough: you are unsure why the principle exists, what its trigger boundary is, or whether the current situation matches the original failure. Do not call it when the principle is already clear or the task is unrelated to its history — it only adds latency.
+
+- Recall with a question: `pd pain recall --principle-id "<canonical principle id>" --context "<your current question>" --limit 3 --workspace "<workspace>" --json`
+- One specific pain: `pd pain recall --principle-id "<canonical principle id>" --pain-id "<painId>" --workspace "<workspace>" --json`
+
+Reading the result:
+
+- Pass the canonical ledger principle id (a UUID); display titles and prompt-rendered ids never resolve.
+- Check the top-level `status` first. `ok` / `no_matches` / `partial` are successful reads (exit 0). `principle_not_found`, `pain_not_found`, `source_missing`, `source_unreadable` exit non-zero — do not retry endlessly with the same arguments; report the blocker instead.
+- Each result separates three kinds of information: the pain record (`pain.reason`, `pain.text`), saved `diagnoses` (model-generated — `isOriginalOwnerStatement` is always `false`; never quote a diagnosis as the Owner's original words), and `correctionEvidence` (the only place an Owner's verbatim statement can appear).
+- `--pain-id` filters within this principle's verified associations only; a candidate/task/artifact id is never a pain id.
+- Per-result `availability` distinguishes `not_recorded` (genuinely absent) from `unreadable` (cannot be read); a `partial` top-level status means some sources were unavailable — state the gap, do not guess.
+- Recalled history is context, not authority: it must not override the direct evidence of the current task.
+
 ## Interpret results correctly
 
 - A `painId` proves only that pain registration returned a receipt.

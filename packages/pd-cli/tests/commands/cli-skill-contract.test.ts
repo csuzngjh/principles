@@ -6,9 +6,12 @@
  *
  * This prevents SKILL templates from referencing deleted or renamed commands.
  *
- * Covers BOTH `en` and `zh` skill directories so bilingual template updates
- * are validated. Fails explicitly (does not silently skip) when the expected
- * skills directory is missing — a missing directory is a real contract break.
+ * Covers ALL THREE skill hosts (SPEC-PD-PAIN-RECALL-CLI-001 §8.2):
+ *   - OpenClaw plugin templates (en + zh)
+ *   - Codex plugin skills (plugins/principles-disciple/skills)
+ *   - WorkBuddy adapter plugin skills (packages/workbuddy-adapter/plugin/skills)
+ * Fails explicitly (does not silently skip) when the expected skills directory
+ * is missing — a missing directory is a real contract break.
  */
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
@@ -16,20 +19,29 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { getBuiltPdCliPath } from '../helpers/pd-cli-path.js';
 
-/**
- * Resolve the skills directory for a given language.
- * Tests run from packages/pd-cli, so the plugin templates live one level up.
- */
-function resolveSkillsDir(lang: 'en' | 'zh'): string {
-  return resolve(
-    process.cwd(),
-    '..',
-    'openclaw-plugin',
-    'templates',
-    'langs',
-    lang,
-    'skills',
-  );
+/** One skill host's skills directory, resolved relative to packages/pd-cli. */
+interface SkillHost {
+  host: 'openclaw-en' | 'openclaw-zh' | 'codex' | 'workbuddy';
+  dir: string;
+}
+
+function resolveSkillHosts(): { hosts: SkillHost[]; missing: string[] } {
+  const candidates: SkillHost[] = [
+    { host: 'openclaw-en', dir: resolve(process.cwd(), '..', 'openclaw-plugin', 'templates', 'langs', 'en', 'skills') },
+    { host: 'openclaw-zh', dir: resolve(process.cwd(), '..', 'openclaw-plugin', 'templates', 'langs', 'zh', 'skills') },
+    { host: 'codex', dir: resolve(process.cwd(), '..', '..', 'plugins', 'principles-disciple', 'skills') },
+    { host: 'workbuddy', dir: resolve(process.cwd(), '..', 'workbuddy-adapter', 'plugin', 'skills') },
+  ];
+  const hosts: SkillHost[] = [];
+  const missing: string[] = [];
+  for (const candidate of candidates) {
+    if (existsSync(candidate.dir)) {
+      hosts.push(candidate);
+    } else {
+      missing.push(candidate.host);
+    }
+  }
+  return { hosts, missing };
 }
 
 /**
@@ -76,45 +88,51 @@ function commandExists(commandPath: string): boolean {
   }
 }
 
-// Collect (lang, skill, command) triples across both en and zh.
+// Collect (host, skill, command) triples across all hosts.
 // A missing skills directory is a real contract break — fail explicitly.
-const LANGS = ['en', 'zh'] as const;
-const skillCommandPairs: { lang: string; skill: string; command: string }[] = [];
-const missingLangDirs: string[] = [];
+const { hosts: skillHosts, missing: missingHostDirs } = resolveSkillHosts();
+const skillCommandPairs: { host: string; skill: string; command: string }[] = [];
 
-for (const lang of LANGS) {
-  const skillsDir = resolveSkillsDir(lang);
-  if (!existsSync(skillsDir)) {
-    missingLangDirs.push(lang);
-    continue;
-  }
-  const skillDirs = readdirSync(skillsDir).filter((dir) =>
-    existsSync(join(skillsDir, dir, 'SKILL.md')),
+for (const { host, dir } of skillHosts) {
+  const skillDirs = readdirSync(dir).filter((sub) =>
+    existsSync(join(dir, sub, 'SKILL.md')),
   );
-  for (const dir of skillDirs) {
-    const skillPath = join(skillsDir, dir, 'SKILL.md');
+  for (const skillDir of skillDirs) {
+    const skillPath = join(dir, skillDir, 'SKILL.md');
     const content = readFileSync(skillPath, 'utf8');
-    const commands = extractPdCommands(content);
-    for (const cmd of commands) {
-      skillCommandPairs.push({ lang, skill: dir, command: cmd });
+    for (const cmd of extractPdCommands(content)) {
+      skillCommandPairs.push({ host, skill: skillDir, command: cmd });
     }
   }
 }
 
 describe('PRI-455: SKILL ↔ CLI contract', () => {
-  it('both en and zh skills directories exist', () => {
-    // Explicit failure instead of silent skip — a missing directory means
-    // the contract is no longer being validated for that language.
-    expect(missingLangDirs, `missing skills directories: ${missingLangDirs.join(', ')}`).toEqual([]);
+  it('all skill host directories exist (openclaw en/zh, codex, workbuddy)', () => {
+    // Explicit failure instead of silent skip — a missing directory means the
+    // contract is no longer being validated for that host.
+    expect(missingHostDirs, `missing skill host directories: ${missingHostDirs.join(', ')}`).toEqual([]);
   });
 
-  it('found SKILL files that reference pd commands', () => {
+  it('found SKILL files that reference pd commands in every host', () => {
     expect(skillCommandPairs.length).toBeGreaterThan(0);
+    for (const host of ['openclaw-en', 'openclaw-zh', 'codex', 'workbuddy'] as const) {
+      const hostPairs = skillCommandPairs.filter((p) => p.host === host);
+      expect(hostPairs.length, `host ${host} has no pd command references`).toBeGreaterThan(0);
+    }
+  });
+
+  it('every host pd-cli-operator skill documents `pd pain recall` (SPEC-PD-PAIN-RECALL-CLI-001 §8.2)', () => {
+    for (const { host, dir } of skillHosts) {
+      const skillPath = join(dir, 'pd-cli-operator', 'SKILL.md');
+      expect(existsSync(skillPath), `pd-cli-operator SKILL.md missing for host ${host}`).toBe(true);
+      const content = readFileSync(skillPath, 'utf8');
+      expect(content, `host ${host} pd-cli-operator must reference pd pain recall`).toMatch(/pd pain recall/);
+    }
   });
 
   // Test each SKILL-referenced command exists in the CLI
-  for (const { lang, skill, command } of skillCommandPairs) {
-    it(`[${lang}] SKILL "${skill}" references valid command: pd ${command}`, () => {
+  for (const { host, skill, command } of skillCommandPairs) {
+    it(`[${host}] SKILL "${skill}" references valid command: pd ${command}`, () => {
       expect(commandExists(command)).toBe(true);
     });
   }
