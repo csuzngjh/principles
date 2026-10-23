@@ -1,0 +1,2789 @@
+{
+  "schemaVersion": "principle-study.v1",
+  "studyId": "PLE-PILOT-01-FORMAL-S3",
+  "specRef": "docs/specs/SPEC-PD-PL-001-principle-learning-dataset-v0.3.md",
+  "dataset": {
+    "datasetId": "PLE-PILOT-01",
+    "datasetVersion": "0.1.0",
+    "fixtureHash": "4c3ea4ab29ced329c28d916c8be0360952ca0d23b36786f64693e9319391e9a4"
+  },
+  "claims": [
+    {
+      "claimId": "C-E",
+      "contrastId": "E0-vs-EA-vs-EB-vs-EN",
+      "competingExplanations": [
+        "single-history formal run — C-E contrasts are out of scope for this run"
+      ],
+      "analysisUnit": "episode",
+      "status": "NOT_ESTIMABLE",
+      "interpretation": "This formal run executes the C-A contrast only; C-E history contrasts were not enrolled."
+    },
+    {
+      "claimId": "C-A",
+      "contrastId": "real-candidate-vs-summary-vs-raw-vs-none",
+      "competingExplanations": [
+        "length/tokens differences",
+        "retrieval differences",
+        "researcher cherry-picking of pretty candidates"
+      ],
+      "analysisUnit": "paired probe within episode",
+      "status": "PARTIALLY_OBSERVABLE",
+      "interpretation": "Formal same-channel four-condition contrast on the EA history. See comparison-report.json for the four separately-reported metric families."
+    }
+  ],
+  "arms": [
+    {
+      "armId": "EA:REAL_ACTOR_I0",
+      "historyId": "EA",
+      "contentMode": "policy",
+      "strategyId": "REAL_ACTOR_I0",
+      "strategyKind": "real-actor-i0",
+      "actorKind": "real",
+      "allocationUnit": "episode",
+      "informationCutoff": "2026-10-15T00:00:00Z",
+      "initialMemoryManifest": {
+        "schemaVersion": "memory-manifest.v0.1",
+        "entries": [],
+        "note": "lab real-actor arm — no external memory files; OD-authorized runs fingerprint real profiles via buildMemoryManifest before first run"
+      },
+      "frozenCandidate": {
+        "policyText": "Before any structural change to shared config keys, schemas, or interfaces (renames, deletions, format changes), I will first run a targeted consumer-graph-query (rather than relying on textual/grep searches) to identify all consumers, including dynamic or environment-interpolated access that text search misses. If dynamic consumers exist, I will add compatibility shims or coordinate migration with them before proceeding, and verify rollback/repair paths for any state that could be irreversibly corrupted. I will keep these checks targeted and discriminating—one check that actually answers the specific risk question—avoiding exhaustive audits of everything, per owner feedback. For high-blast-radius changes, I will also consider whether failure modes are silent (e.g., zero-limit batching) and add alerting/validation to surface them quickly instead of allowing hours of undetected corruption.",
+        "contentHash": "cb73117a5e2bcdeb026fcafd41a52c6fb98d651e8285539397bcba9c9c5b15b0",
+        "byteLength": 905,
+        "sourceStage": "i0-reflection",
+        "deliveredRepresentation": "real_i0_policy_text",
+        "principleId": null,
+        "principleIdStatus": "UNKNOWN"
+      },
+      "delivery": {
+        "channel": "research-same-channel-v1",
+        "armId": "EA:REAL_ACTOR_I0",
+        "payloadText": "Before any structural change to shared config keys, schemas, or interfaces (renames, deletions, format changes), I will first run a targeted consumer-graph-query (rather than relying on textual/grep searches) to identify all consumers, including dynamic or environment-interpolated access that text search misses. If dynamic consumers exist, I will add compatibility shims or coordinate migration with them before proceeding, and verify rollback/repair paths for any state that could be irreversibly corrupted. I will keep these checks targeted and discriminating—one check that actually answers the specific risk question—avoiding exhaustive audits of everything, per owner feedback. For high-blast-radius changes, I will also consider whether failure modes are silent (e.g., zero-limit batching) and add alerting/validation to surface them quickly instead of allowing hours of undetected corruption.",
+        "payloadHash": "cb73117a5e2bcdeb026fcafd41a52c6fb98d651e8285539397bcba9c9c5b15b0",
+        "deliveredBytes": 905,
+        "position": "after-task-text",
+        "budgetChars": 2000,
+        "deliveredAt": null
+      },
+      "generation": {
+        "stage": "i0-reflection",
+        "requests": 1,
+        "failure": null
+      },
+      "usage": {
+        "caps": {
+          "maxStepsPerOpportunity": 40,
+          "maxRequestsPerOpportunity": 16,
+          "maxInvalidActions": 2,
+          "maxTokensPerRequest": 512,
+          "timeoutMsPerRequest": 60000,
+          "totalBudgetMsPerOpportunity": 300000
+        },
+        "budgets": {
+          "httpRequestsPerOpportunity": 48,
+          "httpRequestsPerArm": 256,
+          "httpRequestsPerStudy": 1536,
+          "perRunCostCapUsd": 0.5,
+          "totalCostCapUsd": 5
+        },
+        "generationRequests": 1,
+        "opportunities": [
+          {
+            "opportunityId": "P1",
+            "modelRounds": 3,
+            "httpRequests": 4,
+            "invalidActions": 0,
+            "steps": 3,
+            "wallMs": 9274,
+            "actorRunStatus": "COMPLETED",
+            "failure": null,
+            "budget": {
+              "levels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0#P1",
+                  "cap": 48,
+                  "used": 4
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0",
+                  "cap": 256,
+                  "used": 5
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "cap": 1536,
+                  "used": 5
+                }
+              ],
+              "costLevels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0#P1",
+                  "capUsd": null,
+                  "reservedUsd": 0.004156999999999999
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0",
+                  "capUsd": 0.5,
+                  "reservedUsd": 0.004999999999999999
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "capUsd": 5,
+                  "reservedUsd": 0.004999999999999999
+                }
+              ],
+              "requests": [
+                {
+                  "requestId": "EA:REAL_ACTOR_I0#P1#req-1",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 1767,
+                  "reservedCostUsd": 0.001021,
+                  "tokenUsage": {
+                    "inputTokens": 1278,
+                    "outputTokens": 53
+                  },
+                  "usageSource": "http_stream_usage"
+                },
+                {
+                  "requestId": "EA:REAL_ACTOR_I0#P1#req-2",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 2208,
+                  "reservedCostUsd": 0.00104,
+                  "tokenUsage": {
+                    "inputTokens": 1305,
+                    "outputTokens": 75
+                  },
+                  "usageSource": "http_stream_usage"
+                },
+                {
+                  "requestId": "EA:REAL_ACTOR_I0#P1#req-3",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 2421,
+                  "reservedCostUsd": 0.001061,
+                  "tokenUsage": {
+                    "inputTokens": 1338,
+                    "outputTokens": 54
+                  },
+                  "usageSource": "http_stream_usage"
+                },
+                {
+                  "requestId": "EA:REAL_ACTOR_I0#P1#req-4",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 2871,
+                  "reservedCostUsd": 0.001035,
+                  "tokenUsage": {
+                    "inputTokens": 844,
+                    "outputTokens": 26
+                  },
+                  "usageSource": "http_stream_usage"
+                }
+              ]
+            }
+          },
+          {
+            "opportunityId": "P2",
+            "modelRounds": 3,
+            "httpRequests": 3,
+            "invalidActions": 0,
+            "steps": 3,
+            "wallMs": 12654,
+            "actorRunStatus": "COMPLETED",
+            "failure": null,
+            "budget": {
+              "levels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0#P2",
+                  "cap": 48,
+                  "used": 3
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0",
+                  "cap": 256,
+                  "used": 8
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "cap": 1536,
+                  "used": 8
+                }
+              ],
+              "costLevels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0#P2",
+                  "capUsd": null,
+                  "reservedUsd": 0.003326
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0",
+                  "capUsd": 0.5,
+                  "reservedUsd": 0.008326
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "capUsd": 5,
+                  "reservedUsd": 0.008326
+                }
+              ],
+              "requests": [
+                {
+                  "requestId": "EA:REAL_ACTOR_I0#P2#req-1",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 4675,
+                  "reservedCostUsd": 0.001089,
+                  "tokenUsage": {
+                    "inputTokens": 1375,
+                    "outputTokens": 186
+                  },
+                  "usageSource": "http_stream_usage"
+                },
+                {
+                  "requestId": "EA:REAL_ACTOR_I0#P2#req-2",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 2213,
+                  "reservedCostUsd": 0.001107,
+                  "tokenUsage": {
+                    "inputTokens": 1405,
+                    "outputTokens": 74
+                  },
+                  "usageSource": "http_stream_usage"
+                },
+                {
+                  "requestId": "EA:REAL_ACTOR_I0#P2#req-3",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 5759,
+                  "reservedCostUsd": 0.00113,
+                  "tokenUsage": {
+                    "inputTokens": 1440,
+                    "outputTokens": 86
+                  },
+                  "usageSource": "http_stream_usage"
+                }
+              ]
+            }
+          },
+          {
+            "opportunityId": "P3",
+            "modelRounds": 2,
+            "httpRequests": 2,
+            "invalidActions": 0,
+            "steps": 2,
+            "wallMs": 13418,
+            "actorRunStatus": "COMPLETED",
+            "failure": null,
+            "budget": {
+              "levels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0#P3",
+                  "cap": 48,
+                  "used": 2
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0",
+                  "cap": 256,
+                  "used": 10
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "cap": 1536,
+                  "used": 10
+                }
+              ],
+              "costLevels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0#P3",
+                  "capUsd": null,
+                  "reservedUsd": 0.0021650000000000003
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0",
+                  "capUsd": 0.5,
+                  "reservedUsd": 0.010491
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "capUsd": 5,
+                  "reservedUsd": 0.010491
+                }
+              ],
+              "requests": [
+                {
+                  "requestId": "EA:REAL_ACTOR_I0#P3#req-1",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 6800,
+                  "reservedCostUsd": 0.001062,
+                  "tokenUsage": {
+                    "inputTokens": 1336,
+                    "outputTokens": 130
+                  },
+                  "usageSource": "http_stream_usage"
+                },
+                {
+                  "requestId": "EA:REAL_ACTOR_I0#P3#req-2",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 6614,
+                  "reservedCostUsd": 0.001103,
+                  "tokenUsage": {
+                    "inputTokens": 1399,
+                    "outputTokens": 132
+                  },
+                  "usageSource": "http_stream_usage"
+                }
+              ]
+            }
+          },
+          {
+            "opportunityId": "P4:phase-a",
+            "modelRounds": 4,
+            "httpRequests": 4,
+            "invalidActions": 0,
+            "steps": 4,
+            "wallMs": 22221,
+            "actorRunStatus": "COMPLETED",
+            "failure": null,
+            "budget": {
+              "levels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0#P4:phase-a",
+                  "cap": 48,
+                  "used": 4
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0",
+                  "cap": 256,
+                  "used": 14
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "cap": 1536,
+                  "used": 14
+                }
+              ],
+              "costLevels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0#P4:phase-a",
+                  "capUsd": null,
+                  "reservedUsd": 0.00432
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0",
+                  "capUsd": 0.5,
+                  "reservedUsd": 0.014811
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "capUsd": 5,
+                  "reservedUsd": 0.014811
+                }
+              ],
+              "requests": [
+                {
+                  "requestId": "EA:REAL_ACTOR_I0#P4:phase-a#req-1",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 4777,
+                  "reservedCostUsd": 0.001042,
+                  "tokenUsage": {
+                    "inputTokens": 1315,
+                    "outputTokens": 53
+                  },
+                  "usageSource": "http_stream_usage"
+                },
+                {
+                  "requestId": "EA:REAL_ACTOR_I0#P4:phase-a#req-2",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 2244,
+                  "reservedCostUsd": 0.00106,
+                  "tokenUsage": {
+                    "inputTokens": 1339,
+                    "outputTokens": 74
+                  },
+                  "usageSource": "http_stream_usage"
+                },
+                {
+                  "requestId": "EA:REAL_ACTOR_I0#P4:phase-a#req-3",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 6009,
+                  "reservedCostUsd": 0.001087,
+                  "tokenUsage": {
+                    "inputTokens": 1376,
+                    "outputTokens": 96
+                  },
+                  "usageSource": "http_stream_usage"
+                },
+                {
+                  "requestId": "EA:REAL_ACTOR_I0#P4:phase-a#req-4",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 9183,
+                  "reservedCostUsd": 0.001131,
+                  "tokenUsage": {
+                    "inputTokens": 1443,
+                    "outputTokens": 184
+                  },
+                  "usageSource": "http_stream_usage"
+                }
+              ]
+            }
+          },
+          {
+            "opportunityId": "P4:phase-b",
+            "modelRounds": 1,
+            "httpRequests": 1,
+            "invalidActions": 0,
+            "steps": 1,
+            "wallMs": 6899,
+            "actorRunStatus": "COMPLETED",
+            "failure": null,
+            "budget": {
+              "levels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0#P4:phase-b",
+                  "cap": 48,
+                  "used": 1
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0",
+                  "cap": 256,
+                  "used": 15
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "cap": 1536,
+                  "used": 15
+                }
+              ],
+              "costLevels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0#P4:phase-b",
+                  "capUsd": null,
+                  "reservedUsd": 0.001105
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0",
+                  "capUsd": 0.5,
+                  "reservedUsd": 0.015916
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "capUsd": 5,
+                  "reservedUsd": 0.015916
+                }
+              ],
+              "requests": [
+                {
+                  "requestId": "EA:REAL_ACTOR_I0#P4:phase-b#req-1",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 6897,
+                  "reservedCostUsd": 0.001105,
+                  "tokenUsage": {
+                    "inputTokens": 1402,
+                    "outputTokens": 138
+                  },
+                  "usageSource": "http_stream_usage"
+                }
+              ]
+            }
+          }
+        ],
+        "budget": {
+          "levels": [
+            {
+              "scope": "EA:REAL_ACTOR_I0",
+              "cap": 256,
+              "used": 15
+            },
+            {
+              "scope": "study:PLE-PILOT-01-FORMAL-S3",
+              "cap": 1536,
+              "used": 15
+            }
+          ],
+          "costLevels": [
+            {
+              "scope": "EA:REAL_ACTOR_I0",
+              "capUsd": 0.5,
+              "reservedUsd": 0.015916
+            },
+            {
+              "scope": "study:PLE-PILOT-01-FORMAL-S3",
+              "capUsd": 5,
+              "reservedUsd": 0.015916
+            }
+          ],
+          "requests": [
+            {
+              "requestId": "EA:REAL_ACTOR_I0#req-1",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 5528,
+              "reservedCostUsd": 0.000843,
+              "tokenUsage": {
+                "inputTokens": 414,
+                "outputTokens": 177
+              },
+              "usageSource": "http_stream_usage"
+            }
+          ]
+        },
+        "tokenAudit": {
+          "httpRequests": 15,
+          "requestsWithUsage": 15,
+          "requestsWithoutUsage": 0,
+          "inputTokens": 19009,
+          "outputTokens": 1538,
+          "totalsAvailable": true,
+          "usageSourceCounts": {
+            "http_stream_usage": 15
+          },
+          "rows": [
+            {
+              "requestId": "EA:REAL_ACTOR_I0#req-1",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 5528,
+              "reservedCostUsd": 0.000843,
+              "tokenUsage": {
+                "inputTokens": 414,
+                "outputTokens": 177
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0#P1#req-1",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 1767,
+              "reservedCostUsd": 0.001021,
+              "tokenUsage": {
+                "inputTokens": 1278,
+                "outputTokens": 53
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0#P1#req-2",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 2208,
+              "reservedCostUsd": 0.00104,
+              "tokenUsage": {
+                "inputTokens": 1305,
+                "outputTokens": 75
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0#P1#req-3",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 2421,
+              "reservedCostUsd": 0.001061,
+              "tokenUsage": {
+                "inputTokens": 1338,
+                "outputTokens": 54
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0#P1#req-4",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 2871,
+              "reservedCostUsd": 0.001035,
+              "tokenUsage": {
+                "inputTokens": 844,
+                "outputTokens": 26
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0#P2#req-1",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 4675,
+              "reservedCostUsd": 0.001089,
+              "tokenUsage": {
+                "inputTokens": 1375,
+                "outputTokens": 186
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0#P2#req-2",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 2213,
+              "reservedCostUsd": 0.001107,
+              "tokenUsage": {
+                "inputTokens": 1405,
+                "outputTokens": 74
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0#P2#req-3",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 5759,
+              "reservedCostUsd": 0.00113,
+              "tokenUsage": {
+                "inputTokens": 1440,
+                "outputTokens": 86
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0#P3#req-1",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 6800,
+              "reservedCostUsd": 0.001062,
+              "tokenUsage": {
+                "inputTokens": 1336,
+                "outputTokens": 130
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0#P3#req-2",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 6614,
+              "reservedCostUsd": 0.001103,
+              "tokenUsage": {
+                "inputTokens": 1399,
+                "outputTokens": 132
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0#P4:phase-a#req-1",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 4777,
+              "reservedCostUsd": 0.001042,
+              "tokenUsage": {
+                "inputTokens": 1315,
+                "outputTokens": 53
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0#P4:phase-a#req-2",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 2244,
+              "reservedCostUsd": 0.00106,
+              "tokenUsage": {
+                "inputTokens": 1339,
+                "outputTokens": 74
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0#P4:phase-a#req-3",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 6009,
+              "reservedCostUsd": 0.001087,
+              "tokenUsage": {
+                "inputTokens": 1376,
+                "outputTokens": 96
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0#P4:phase-a#req-4",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 9183,
+              "reservedCostUsd": 0.001131,
+              "tokenUsage": {
+                "inputTokens": 1443,
+                "outputTokens": 184
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0#P4:phase-b#req-1",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 6897,
+              "reservedCostUsd": 0.001105,
+              "tokenUsage": {
+                "inputTokens": 1402,
+                "outputTokens": 138
+              },
+              "usageSource": "http_stream_usage"
+            }
+          ]
+        },
+        "retries": 0,
+        "repairs": 0
+      }
+    },
+    {
+      "armId": "EA:REAL_ACTOR_I0:summary",
+      "historyId": "EA",
+      "contentMode": "summary",
+      "strategyId": "REAL_ACTOR_I0",
+      "strategyKind": "real-actor-i0",
+      "actorKind": "real",
+      "allocationUnit": "episode",
+      "informationCutoff": "2026-10-15T00:00:00Z",
+      "initialMemoryManifest": {
+        "schemaVersion": "memory-manifest.v0.1",
+        "entries": [],
+        "note": "lab real-actor arm — no external memory files; OD-authorized runs fingerprint real profiles via buildMemoryManifest before first run"
+      },
+      "frozenCandidate": {
+        "policyText": "Team platform-eng. Incident PLAT-2214: renaming config key orders.maxBatch -> orders.batchCap in orders-api after only a textual repo grep (key-usage-grep) caused an outage — report-builder consumed the key via environment-variable interpolation (invisible to grep), silently batched with zero limit for 6 hours, and the nightly reconciliation wrote corrupted ledger rows; rollback could not restore them, yielding permanent loss of some reconciliation history and high recovery effort. Lesson recorded in history: a consumer-graph-query (~2 time units) resolves env-interpolated access patterns and would have identified report-builder before the rename. Owner correction PLAT-2310 (positive): before renaming a key in inventory-api, on-call ran consumer-graph-query first, found one dynamic consumer, added a compat-shim for it, then proceeded; owner endorsed this as exactly the desired care — one targeted, discriminating check that answers the risk question before structural changes, not exhaustive audits of everything. Operational rule for future tasks: before any config-key rename/structural change, run the cheap discriminating check (consumer-graph-query for dynamic/interpolated consumers) and shim any dynamic consumers rather than relying on textual search.",
+        "contentHash": "1c46c7aaa5ee5287aba26e7318a2d69f14af0e636850363a79687aae969b1d86",
+        "byteLength": 1276,
+        "sourceStage": "model-summary",
+        "deliveredRepresentation": "model_summary_text",
+        "principleId": null,
+        "principleIdStatus": "UNKNOWN"
+      },
+      "delivery": {
+        "channel": "research-same-channel-v1",
+        "armId": "EA:REAL_ACTOR_I0:summary",
+        "payloadText": "Team platform-eng. Incident PLAT-2214: renaming config key orders.maxBatch -> orders.batchCap in orders-api after only a textual repo grep (key-usage-grep) caused an outage — report-builder consumed the key via environment-variable interpolation (invisible to grep), silently batched with zero limit for 6 hours, and the nightly reconciliation wrote corrupted ledger rows; rollback could not restore them, yielding permanent loss of some reconciliation history and high recovery effort. Lesson recorded in history: a consumer-graph-query (~2 time units) resolves env-interpolated access patterns and would have identified report-builder before the rename. Owner correction PLAT-2310 (positive): before renaming a key in inventory-api, on-call ran consumer-graph-query first, found one dynamic consumer, added a compat-shim for it, then proceeded; owner endorsed this as exactly the desired care — one targeted, discriminating check that answers the risk question before structural changes, not exhaustive audits of everything. Operational rule for future tasks: before any config-key rename/structural change, run the cheap discriminating check (consumer-graph-query for dynamic/interpolated consumers) and shim any dynamic consumers rather than relying on textual search.",
+        "payloadHash": "1c46c7aaa5ee5287aba26e7318a2d69f14af0e636850363a79687aae969b1d86",
+        "deliveredBytes": 1276,
+        "position": "after-task-text",
+        "budgetChars": 2000,
+        "deliveredAt": null
+      },
+      "generation": {
+        "stage": "model-summary",
+        "requests": 1,
+        "failure": null
+      },
+      "usage": {
+        "caps": {
+          "maxStepsPerOpportunity": 40,
+          "maxRequestsPerOpportunity": 16,
+          "maxInvalidActions": 2,
+          "maxTokensPerRequest": 512,
+          "timeoutMsPerRequest": 60000,
+          "totalBudgetMsPerOpportunity": 300000
+        },
+        "budgets": {
+          "httpRequestsPerOpportunity": 48,
+          "httpRequestsPerArm": 256,
+          "httpRequestsPerStudy": 1536,
+          "perRunCostCapUsd": 0.5,
+          "totalCostCapUsd": 5
+        },
+        "generationRequests": 1,
+        "opportunities": [
+          {
+            "opportunityId": "P1",
+            "modelRounds": 3,
+            "httpRequests": 3,
+            "invalidActions": 0,
+            "steps": 3,
+            "wallMs": 10985,
+            "actorRunStatus": "COMPLETED",
+            "failure": null,
+            "budget": {
+              "levels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0:summary#P1",
+                  "cap": 48,
+                  "used": 3
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0:summary",
+                  "cap": 256,
+                  "used": 4
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "cap": 1536,
+                  "used": 19
+                }
+              ],
+              "costLevels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0:summary#P1",
+                  "capUsd": null,
+                  "reservedUsd": 0.003295
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0:summary",
+                  "capUsd": 0.5,
+                  "reservedUsd": 0.004168
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "capUsd": 5,
+                  "reservedUsd": 0.020083999999999998
+                }
+              ],
+              "requests": [
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:summary#P1#req-1",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 5052,
+                  "reservedCostUsd": 0.001077,
+                  "tokenUsage": {
+                    "inputTokens": 1352,
+                    "outputTokens": 64
+                  },
+                  "usageSource": "http_stream_usage"
+                },
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:summary#P1#req-2",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 3923,
+                  "reservedCostUsd": 0.001095,
+                  "tokenUsage": {
+                    "inputTokens": 1379,
+                    "outputTokens": 67
+                  },
+                  "usageSource": "http_stream_usage"
+                },
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:summary#P1#req-3",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 2007,
+                  "reservedCostUsd": 0.001123,
+                  "tokenUsage": {
+                    "inputTokens": 1419,
+                    "outputTokens": 57
+                  },
+                  "usageSource": "http_stream_usage"
+                }
+              ]
+            }
+          },
+          {
+            "opportunityId": "P2",
+            "modelRounds": 2,
+            "httpRequests": 2,
+            "invalidActions": 0,
+            "steps": 2,
+            "wallMs": 10114,
+            "actorRunStatus": "COMPLETED",
+            "failure": null,
+            "budget": {
+              "levels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0:summary#P2",
+                  "cap": 48,
+                  "used": 2
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0:summary",
+                  "cap": 256,
+                  "used": 6
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "cap": 1536,
+                  "used": 21
+                }
+              ],
+              "costLevels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0:summary#P2",
+                  "capUsd": null,
+                  "reservedUsd": 0.002306
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0:summary",
+                  "capUsd": 0.5,
+                  "reservedUsd": 0.006474
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "capUsd": 5,
+                  "reservedUsd": 0.022389999999999997
+                }
+              ],
+              "requests": [
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:summary#P2#req-1",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 2906,
+                  "reservedCostUsd": 0.001145,
+                  "tokenUsage": {
+                    "inputTokens": 1449,
+                    "outputTokens": 91
+                  },
+                  "usageSource": "http_stream_usage"
+                },
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:summary#P2#req-2",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 7205,
+                  "reservedCostUsd": 0.001161,
+                  "tokenUsage": {
+                    "inputTokens": 1473,
+                    "outputTokens": 106
+                  },
+                  "usageSource": "http_stream_usage"
+                }
+              ]
+            }
+          },
+          {
+            "opportunityId": "P3",
+            "modelRounds": 2,
+            "httpRequests": 2,
+            "invalidActions": 0,
+            "steps": 2,
+            "wallMs": 10290,
+            "actorRunStatus": "COMPLETED",
+            "failure": null,
+            "budget": {
+              "levels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0:summary#P3",
+                  "cap": 48,
+                  "used": 2
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0:summary",
+                  "cap": 256,
+                  "used": 8
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "cap": 1536,
+                  "used": 23
+                }
+              ],
+              "costLevels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0:summary#P3",
+                  "capUsd": null,
+                  "reservedUsd": 0.002268
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0:summary",
+                  "capUsd": 0.5,
+                  "reservedUsd": 0.008742
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "capUsd": 5,
+                  "reservedUsd": 0.024658
+                }
+              ],
+              "requests": [
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:summary#P3#req-1",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 6281,
+                  "reservedCostUsd": 0.001118,
+                  "tokenUsage": {
+                    "inputTokens": 1410,
+                    "outputTokens": 133
+                  },
+                  "usageSource": "http_stream_usage"
+                },
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:summary#P3#req-2",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 4005,
+                  "reservedCostUsd": 0.00115,
+                  "tokenUsage": {
+                    "inputTokens": 1461,
+                    "outputTokens": 124
+                  },
+                  "usageSource": "http_stream_usage"
+                }
+              ]
+            }
+          },
+          {
+            "opportunityId": "P4:phase-a",
+            "modelRounds": 4,
+            "httpRequests": 4,
+            "invalidActions": 0,
+            "steps": 4,
+            "wallMs": 15335,
+            "actorRunStatus": "COMPLETED",
+            "failure": null,
+            "budget": {
+              "levels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0:summary#P4:phase-a",
+                  "cap": 48,
+                  "used": 4
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0:summary",
+                  "cap": 256,
+                  "used": 12
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "cap": 1536,
+                  "used": 27
+                }
+              ],
+              "costLevels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0:summary#P4:phase-a",
+                  "capUsd": null,
+                  "reservedUsd": 0.004531
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0:summary",
+                  "capUsd": 0.5,
+                  "reservedUsd": 0.013273000000000002
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "capUsd": 5,
+                  "reservedUsd": 0.029189
+                }
+              ],
+              "requests": [
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:summary#P4:phase-a#req-1",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 2497,
+                  "reservedCostUsd": 0.001097,
+                  "tokenUsage": {
+                    "inputTokens": 1389,
+                    "outputTokens": 100
+                  },
+                  "usageSource": "http_stream_usage"
+                },
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:summary#P4:phase-a#req-2",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 2844,
+                  "reservedCostUsd": 0.001115,
+                  "tokenUsage": {
+                    "inputTokens": 1413,
+                    "outputTokens": 100
+                  },
+                  "usageSource": "http_stream_usage"
+                },
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:summary#P4:phase-a#req-3",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 3613,
+                  "reservedCostUsd": 0.001137,
+                  "tokenUsage": {
+                    "inputTokens": 1444,
+                    "outputTokens": 125
+                  },
+                  "usageSource": "http_stream_usage"
+                },
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:summary#P4:phase-a#req-4",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 6375,
+                  "reservedCostUsd": 0.001182,
+                  "tokenUsage": {
+                    "inputTokens": 1511,
+                    "outputTokens": 99
+                  },
+                  "usageSource": "http_stream_usage"
+                }
+              ]
+            }
+          },
+          {
+            "opportunityId": "P4:phase-b",
+            "modelRounds": 1,
+            "httpRequests": 1,
+            "invalidActions": 0,
+            "steps": 1,
+            "wallMs": 6322,
+            "actorRunStatus": "COMPLETED",
+            "failure": null,
+            "budget": {
+              "levels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0:summary#P4:phase-b",
+                  "cap": 48,
+                  "used": 1
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0:summary",
+                  "cap": 256,
+                  "used": 13
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "cap": 1536,
+                  "used": 28
+                }
+              ],
+              "costLevels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0:summary#P4:phase-b",
+                  "capUsd": null,
+                  "reservedUsd": 0.001161
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0:summary",
+                  "capUsd": 0.5,
+                  "reservedUsd": 0.014434000000000002
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "capUsd": 5,
+                  "reservedUsd": 0.03035
+                }
+              ],
+              "requests": [
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:summary#P4:phase-b#req-1",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 6321,
+                  "reservedCostUsd": 0.001161,
+                  "tokenUsage": {
+                    "inputTokens": 1476,
+                    "outputTokens": 115
+                  },
+                  "usageSource": "http_stream_usage"
+                }
+              ]
+            }
+          }
+        ],
+        "budget": {
+          "levels": [
+            {
+              "scope": "EA:REAL_ACTOR_I0:summary",
+              "cap": 256,
+              "used": 13
+            },
+            {
+              "scope": "study:PLE-PILOT-01-FORMAL-S3",
+              "cap": 1536,
+              "used": 28
+            }
+          ],
+          "costLevels": [
+            {
+              "scope": "EA:REAL_ACTOR_I0:summary",
+              "capUsd": 0.5,
+              "reservedUsd": 0.014434000000000002
+            },
+            {
+              "scope": "study:PLE-PILOT-01-FORMAL-S3",
+              "capUsd": 5,
+              "reservedUsd": 0.03035
+            }
+          ],
+          "requests": [
+            {
+              "requestId": "EA:REAL_ACTOR_I0:summary#req-1",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 6551,
+              "reservedCostUsd": 0.000873,
+              "tokenUsage": {
+                "inputTokens": 455,
+                "outputTokens": 258
+              },
+              "usageSource": "http_stream_usage"
+            }
+          ]
+        },
+        "tokenAudit": {
+          "httpRequests": 13,
+          "requestsWithUsage": 13,
+          "requestsWithoutUsage": 0,
+          "inputTokens": 17631,
+          "outputTokens": 1439,
+          "totalsAvailable": true,
+          "usageSourceCounts": {
+            "http_stream_usage": 13
+          },
+          "rows": [
+            {
+              "requestId": "EA:REAL_ACTOR_I0:summary#req-1",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 6551,
+              "reservedCostUsd": 0.000873,
+              "tokenUsage": {
+                "inputTokens": 455,
+                "outputTokens": 258
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:summary#P1#req-1",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 5052,
+              "reservedCostUsd": 0.001077,
+              "tokenUsage": {
+                "inputTokens": 1352,
+                "outputTokens": 64
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:summary#P1#req-2",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 3923,
+              "reservedCostUsd": 0.001095,
+              "tokenUsage": {
+                "inputTokens": 1379,
+                "outputTokens": 67
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:summary#P1#req-3",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 2007,
+              "reservedCostUsd": 0.001123,
+              "tokenUsage": {
+                "inputTokens": 1419,
+                "outputTokens": 57
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:summary#P2#req-1",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 2906,
+              "reservedCostUsd": 0.001145,
+              "tokenUsage": {
+                "inputTokens": 1449,
+                "outputTokens": 91
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:summary#P2#req-2",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 7205,
+              "reservedCostUsd": 0.001161,
+              "tokenUsage": {
+                "inputTokens": 1473,
+                "outputTokens": 106
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:summary#P3#req-1",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 6281,
+              "reservedCostUsd": 0.001118,
+              "tokenUsage": {
+                "inputTokens": 1410,
+                "outputTokens": 133
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:summary#P3#req-2",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 4005,
+              "reservedCostUsd": 0.00115,
+              "tokenUsage": {
+                "inputTokens": 1461,
+                "outputTokens": 124
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:summary#P4:phase-a#req-1",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 2497,
+              "reservedCostUsd": 0.001097,
+              "tokenUsage": {
+                "inputTokens": 1389,
+                "outputTokens": 100
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:summary#P4:phase-a#req-2",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 2844,
+              "reservedCostUsd": 0.001115,
+              "tokenUsage": {
+                "inputTokens": 1413,
+                "outputTokens": 100
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:summary#P4:phase-a#req-3",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 3613,
+              "reservedCostUsd": 0.001137,
+              "tokenUsage": {
+                "inputTokens": 1444,
+                "outputTokens": 125
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:summary#P4:phase-a#req-4",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 6375,
+              "reservedCostUsd": 0.001182,
+              "tokenUsage": {
+                "inputTokens": 1511,
+                "outputTokens": 99
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:summary#P4:phase-b#req-1",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 6321,
+              "reservedCostUsd": 0.001161,
+              "tokenUsage": {
+                "inputTokens": 1476,
+                "outputTokens": 115
+              },
+              "usageSource": "http_stream_usage"
+            }
+          ]
+        },
+        "retries": 0,
+        "repairs": 0
+      }
+    },
+    {
+      "armId": "EA:REAL_ACTOR_I0:raw",
+      "historyId": "EA",
+      "contentMode": "raw",
+      "strategyId": "REAL_ACTOR_I0",
+      "strategyKind": "real-actor-i0",
+      "actorKind": "real",
+      "allocationUnit": "episode",
+      "informationCutoff": "2026-10-15T00:00:00Z",
+      "initialMemoryManifest": {
+        "schemaVersion": "memory-manifest.v0.1",
+        "entries": [],
+        "note": "lab real-actor arm — no external memory files; OD-authorized runs fingerprint real profiles via buildMemoryManifest before first run"
+      },
+      "frozenCandidate": {
+        "policyText": "## Learning history: EA (relevant-high-risk-lesson)\nPast experience on this platform (team: platform-eng). One production incident and one owner correction. [synthetic_environment: this history is a controlled research world, not a production record]\n\n### incident PLAT-2214 — Production outage after a config key rename in orders-api (orders.maxBatch -> orders.batchCap).\n- The engineer renamed the key after a textual repo search (key-usage-grep) showed no matches besides orders-api itself.\n- An internal tool, report-builder, read orders.maxBatch through an environment-variable interpolation, so the textual search did not see it.\n- report-builder silently batched with a zero limit for 6 hours; the nightly reconciliation wrote corrupted ledger rows.\n- Rollback could not restore the corrupted rows; the damage was partially irreversible.\n- Postmortem cost estimate: 6h outage, high recovery effort, permanent loss of some reconciliation history.\nWhat would have caught it: A consumer-graph-query (2 time units) resolves environment-interpolated access patterns and would have listed report-builder before the rename.\n\n### owner_correction PLAT-2310 — Positive correction after a later structural change in inventory-api.\n- Before renaming a key in inventory-api, the on-call ran a consumer-graph-query first, found one dynamic consumer, added a compat-shim for it, then proceeded.\n- The owner replied: 'This is exactly the level of care I want: one targeted check that actually discriminates the risk, then proceed. Not a full audit of everything - just the check that answers the question.'\nOwner feedback: Targeted, discriminating checks before structural changes; not exhaustive checks.",
+        "contentHash": "cccb0bf7479e80e80d49b2b8d5c4a150f9a98cd832ca48c716e18744febcba47",
+        "byteLength": 1700,
+        "sourceStage": "raw-history",
+        "deliveredRepresentation": "raw_history_text",
+        "principleId": null,
+        "principleIdStatus": "UNKNOWN"
+      },
+      "delivery": {
+        "channel": "research-same-channel-v1",
+        "armId": "EA:REAL_ACTOR_I0:raw",
+        "payloadText": "## Learning history: EA (relevant-high-risk-lesson)\nPast experience on this platform (team: platform-eng). One production incident and one owner correction. [synthetic_environment: this history is a controlled research world, not a production record]\n\n### incident PLAT-2214 — Production outage after a config key rename in orders-api (orders.maxBatch -> orders.batchCap).\n- The engineer renamed the key after a textual repo search (key-usage-grep) showed no matches besides orders-api itself.\n- An internal tool, report-builder, read orders.maxBatch through an environment-variable interpolation, so the textual search did not see it.\n- report-builder silently batched with a zero limit for 6 hours; the nightly reconciliation wrote corrupted ledger rows.\n- Rollback could not restore the corrupted rows; the damage was partially irreversible.\n- Postmortem cost estimate: 6h outage, high recovery effort, permanent loss of some reconciliation history.\nWhat would have caught it: A consumer-graph-query (2 time units) resolves environment-interpolated access patterns and would have listed report-builder before the rename.\n\n### owner_correction PLAT-2310 — Positive correction after a later structural change in inventory-api.\n- Before renaming a key in inventory-api, the on-call ran a consumer-graph-query first, found one dynamic consumer, added a compat-shim for it, then proceeded.\n- The owner replied: 'This is exactly the level of care I want: one targeted check that actually discriminates the risk, then proceed. Not a full audit of everything - just the check that answers the question.'\nOwner feedback: Targeted, discriminating checks before structural changes; not exhaustive checks.",
+        "payloadHash": "cccb0bf7479e80e80d49b2b8d5c4a150f9a98cd832ca48c716e18744febcba47",
+        "deliveredBytes": 1700,
+        "position": "after-task-text",
+        "budgetChars": 2000,
+        "deliveredAt": null
+      },
+      "generation": {
+        "stage": "raw-history",
+        "requests": 0,
+        "failure": null
+      },
+      "usage": {
+        "caps": {
+          "maxStepsPerOpportunity": 40,
+          "maxRequestsPerOpportunity": 16,
+          "maxInvalidActions": 2,
+          "maxTokensPerRequest": 512,
+          "timeoutMsPerRequest": 60000,
+          "totalBudgetMsPerOpportunity": 300000
+        },
+        "budgets": {
+          "httpRequestsPerOpportunity": 48,
+          "httpRequestsPerArm": 256,
+          "httpRequestsPerStudy": 1536,
+          "perRunCostCapUsd": 0.5,
+          "totalCostCapUsd": 5
+        },
+        "generationRequests": 0,
+        "opportunities": [
+          {
+            "opportunityId": "P1",
+            "modelRounds": 3,
+            "httpRequests": 3,
+            "invalidActions": 0,
+            "steps": 3,
+            "wallMs": 7683,
+            "actorRunStatus": "COMPLETED",
+            "failure": null,
+            "budget": {
+              "levels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0:raw#P1",
+                  "cap": 48,
+                  "used": 3
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0:raw",
+                  "cap": 256,
+                  "used": 3
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "cap": 1536,
+                  "used": 31
+                }
+              ],
+              "costLevels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0:raw#P1",
+                  "capUsd": null,
+                  "reservedUsd": 0.003486
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0:raw",
+                  "capUsd": 0.5,
+                  "reservedUsd": 0.003486
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "capUsd": 5,
+                  "reservedUsd": 0.033836000000000005
+                }
+              ],
+              "requests": [
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:raw#P1#req-1",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 2432,
+                  "reservedCostUsd": 0.001142,
+                  "tokenUsage": {
+                    "inputTokens": 1450,
+                    "outputTokens": 69
+                  },
+                  "usageSource": "http_stream_usage"
+                },
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:raw#P1#req-2",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 3032,
+                  "reservedCostUsd": 0.001161,
+                  "tokenUsage": {
+                    "inputTokens": 1477,
+                    "outputTokens": 98
+                  },
+                  "usageSource": "http_stream_usage"
+                },
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:raw#P1#req-3",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 2215,
+                  "reservedCostUsd": 0.001183,
+                  "tokenUsage": {
+                    "inputTokens": 1510,
+                    "outputTokens": 63
+                  },
+                  "usageSource": "http_stream_usage"
+                }
+              ]
+            }
+          },
+          {
+            "opportunityId": "P2",
+            "modelRounds": 2,
+            "httpRequests": 2,
+            "invalidActions": 0,
+            "steps": 2,
+            "wallMs": 7327,
+            "actorRunStatus": "COMPLETED",
+            "failure": null,
+            "budget": {
+              "levels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0:raw#P2",
+                  "cap": 48,
+                  "used": 2
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0:raw",
+                  "cap": 256,
+                  "used": 5
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "cap": 1536,
+                  "used": 33
+                }
+              ],
+              "costLevels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0:raw#P2",
+                  "capUsd": null,
+                  "reservedUsd": 0.002436
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0:raw",
+                  "capUsd": 0.5,
+                  "reservedUsd": 0.005922
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "capUsd": 5,
+                  "reservedUsd": 0.036272000000000006
+                }
+              ],
+              "requests": [
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:raw#P2#req-1",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 4432,
+                  "reservedCostUsd": 0.00121,
+                  "tokenUsage": {
+                    "inputTokens": 1547,
+                    "outputTokens": 152
+                  },
+                  "usageSource": "http_stream_usage"
+                },
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:raw#P2#req-2",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 2891,
+                  "reservedCostUsd": 0.001226,
+                  "tokenUsage": {
+                    "inputTokens": 1571,
+                    "outputTokens": 85
+                  },
+                  "usageSource": "http_stream_usage"
+                }
+              ]
+            }
+          },
+          {
+            "opportunityId": "P3",
+            "modelRounds": 3,
+            "httpRequests": 3,
+            "invalidActions": 0,
+            "steps": 3,
+            "wallMs": 22207,
+            "actorRunStatus": "COMPLETED",
+            "failure": null,
+            "budget": {
+              "levels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0:raw#P3",
+                  "cap": 48,
+                  "used": 3
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0:raw",
+                  "cap": 256,
+                  "used": 8
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "cap": 1536,
+                  "used": 36
+                }
+              ],
+              "costLevels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0:raw#P3",
+                  "capUsd": null,
+                  "reservedUsd": 0.003642
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0:raw",
+                  "capUsd": 0.5,
+                  "reservedUsd": 0.009564000000000001
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "capUsd": 5,
+                  "reservedUsd": 0.039914
+                }
+              ],
+              "requests": [
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:raw#P3#req-1",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 6274,
+                  "reservedCostUsd": 0.001184,
+                  "tokenUsage": {
+                    "inputTokens": 1508,
+                    "outputTokens": 269
+                  },
+                  "usageSource": "http_stream_usage"
+                },
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:raw#P3#req-2",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 8411,
+                  "reservedCostUsd": 0.001219,
+                  "tokenUsage": {
+                    "inputTokens": 1565,
+                    "outputTokens": 190
+                  },
+                  "usageSource": "http_stream_usage"
+                },
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:raw#P3#req-3",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 7515,
+                  "reservedCostUsd": 0.001239,
+                  "tokenUsage": {
+                    "inputTokens": 1599,
+                    "outputTokens": 145
+                  },
+                  "usageSource": "http_stream_usage"
+                }
+              ]
+            }
+          },
+          {
+            "opportunityId": "P4:phase-a",
+            "modelRounds": 4,
+            "httpRequests": 4,
+            "invalidActions": 0,
+            "steps": 4,
+            "wallMs": 18399,
+            "actorRunStatus": "COMPLETED",
+            "failure": null,
+            "budget": {
+              "levels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0:raw#P4:phase-a",
+                  "cap": 48,
+                  "used": 4
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0:raw",
+                  "cap": 256,
+                  "used": 12
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "cap": 1536,
+                  "used": 40
+                }
+              ],
+              "costLevels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0:raw#P4:phase-a",
+                  "capUsd": null,
+                  "reservedUsd": 0.004795
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0:raw",
+                  "capUsd": 0.5,
+                  "reservedUsd": 0.014359
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "capUsd": 5,
+                  "reservedUsd": 0.044709
+                }
+              ],
+              "requests": [
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:raw#P4:phase-a#req-1",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 3713,
+                  "reservedCostUsd": 0.001163,
+                  "tokenUsage": {
+                    "inputTokens": 1487,
+                    "outputTokens": 123
+                  },
+                  "usageSource": "http_stream_usage"
+                },
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:raw#P4:phase-a#req-2",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 1919,
+                  "reservedCostUsd": 0.001181,
+                  "tokenUsage": {
+                    "inputTokens": 1511,
+                    "outputTokens": 54
+                  },
+                  "usageSource": "http_stream_usage"
+                },
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:raw#P4:phase-a#req-3",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 6363,
+                  "reservedCostUsd": 0.001203,
+                  "tokenUsage": {
+                    "inputTokens": 1542,
+                    "outputTokens": 198
+                  },
+                  "usageSource": "http_stream_usage"
+                },
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:raw#P4:phase-a#req-4",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 6390,
+                  "reservedCostUsd": 0.001248,
+                  "tokenUsage": {
+                    "inputTokens": 1609,
+                    "outputTokens": 191
+                  },
+                  "usageSource": "http_stream_usage"
+                }
+              ]
+            }
+          },
+          {
+            "opportunityId": "P4:phase-b",
+            "modelRounds": 1,
+            "httpRequests": 1,
+            "invalidActions": 0,
+            "steps": 1,
+            "wallMs": 6383,
+            "actorRunStatus": "COMPLETED",
+            "failure": null,
+            "budget": {
+              "levels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0:raw#P4:phase-b",
+                  "cap": 48,
+                  "used": 1
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0:raw",
+                  "cap": 256,
+                  "used": 13
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "cap": 1536,
+                  "used": 41
+                }
+              ],
+              "costLevels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0:raw#P4:phase-b",
+                  "capUsd": null,
+                  "reservedUsd": 0.001227
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0:raw",
+                  "capUsd": 0.5,
+                  "reservedUsd": 0.015586000000000001
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "capUsd": 5,
+                  "reservedUsd": 0.045936
+                }
+              ],
+              "requests": [
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:raw#P4:phase-b#req-1",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 6380,
+                  "reservedCostUsd": 0.001227,
+                  "tokenUsage": {
+                    "inputTokens": 1574,
+                    "outputTokens": 137
+                  },
+                  "usageSource": "http_stream_usage"
+                }
+              ]
+            }
+          }
+        ],
+        "budget": {
+          "levels": [
+            {
+              "scope": "EA:REAL_ACTOR_I0:raw",
+              "cap": 256,
+              "used": 13
+            },
+            {
+              "scope": "study:PLE-PILOT-01-FORMAL-S3",
+              "cap": 1536,
+              "used": 41
+            }
+          ],
+          "costLevels": [
+            {
+              "scope": "EA:REAL_ACTOR_I0:raw",
+              "capUsd": 0.5,
+              "reservedUsd": 0.015586000000000001
+            },
+            {
+              "scope": "study:PLE-PILOT-01-FORMAL-S3",
+              "capUsd": 5,
+              "reservedUsd": 0.045936
+            }
+          ],
+          "requests": []
+        },
+        "tokenAudit": {
+          "httpRequests": 13,
+          "requestsWithUsage": 13,
+          "requestsWithoutUsage": 0,
+          "inputTokens": 19950,
+          "outputTokens": 1774,
+          "totalsAvailable": true,
+          "usageSourceCounts": {
+            "http_stream_usage": 13
+          },
+          "rows": [
+            {
+              "requestId": "EA:REAL_ACTOR_I0:raw#P1#req-1",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 2432,
+              "reservedCostUsd": 0.001142,
+              "tokenUsage": {
+                "inputTokens": 1450,
+                "outputTokens": 69
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:raw#P1#req-2",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 3032,
+              "reservedCostUsd": 0.001161,
+              "tokenUsage": {
+                "inputTokens": 1477,
+                "outputTokens": 98
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:raw#P1#req-3",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 2215,
+              "reservedCostUsd": 0.001183,
+              "tokenUsage": {
+                "inputTokens": 1510,
+                "outputTokens": 63
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:raw#P2#req-1",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 4432,
+              "reservedCostUsd": 0.00121,
+              "tokenUsage": {
+                "inputTokens": 1547,
+                "outputTokens": 152
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:raw#P2#req-2",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 2891,
+              "reservedCostUsd": 0.001226,
+              "tokenUsage": {
+                "inputTokens": 1571,
+                "outputTokens": 85
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:raw#P3#req-1",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 6274,
+              "reservedCostUsd": 0.001184,
+              "tokenUsage": {
+                "inputTokens": 1508,
+                "outputTokens": 269
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:raw#P3#req-2",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 8411,
+              "reservedCostUsd": 0.001219,
+              "tokenUsage": {
+                "inputTokens": 1565,
+                "outputTokens": 190
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:raw#P3#req-3",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 7515,
+              "reservedCostUsd": 0.001239,
+              "tokenUsage": {
+                "inputTokens": 1599,
+                "outputTokens": 145
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:raw#P4:phase-a#req-1",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 3713,
+              "reservedCostUsd": 0.001163,
+              "tokenUsage": {
+                "inputTokens": 1487,
+                "outputTokens": 123
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:raw#P4:phase-a#req-2",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 1919,
+              "reservedCostUsd": 0.001181,
+              "tokenUsage": {
+                "inputTokens": 1511,
+                "outputTokens": 54
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:raw#P4:phase-a#req-3",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 6363,
+              "reservedCostUsd": 0.001203,
+              "tokenUsage": {
+                "inputTokens": 1542,
+                "outputTokens": 198
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:raw#P4:phase-a#req-4",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 6390,
+              "reservedCostUsd": 0.001248,
+              "tokenUsage": {
+                "inputTokens": 1609,
+                "outputTokens": 191
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:raw#P4:phase-b#req-1",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 6380,
+              "reservedCostUsd": 0.001227,
+              "tokenUsage": {
+                "inputTokens": 1574,
+                "outputTokens": 137
+              },
+              "usageSource": "http_stream_usage"
+            }
+          ]
+        },
+        "retries": 0,
+        "repairs": 0
+      }
+    },
+    {
+      "armId": "EA:REAL_ACTOR_I0:none",
+      "historyId": "EA",
+      "contentMode": "none",
+      "strategyId": "REAL_ACTOR_I0",
+      "strategyKind": "real-actor-i0",
+      "actorKind": "real",
+      "allocationUnit": "episode",
+      "informationCutoff": "2026-10-15T00:00:00Z",
+      "initialMemoryManifest": {
+        "schemaVersion": "memory-manifest.v0.1",
+        "entries": [],
+        "note": "lab real-actor arm — no external memory files; OD-authorized runs fingerprint real profiles via buildMemoryManifest before first run"
+      },
+      "frozenCandidate": {
+        "policyText": "[none-arm: no I0 candidate generated — delivered content is empty by design]",
+        "contentHash": "ba025e7fbe2e6b8c8994db4fec57b5acd08cfbae421804106eb3bbead6343d83",
+        "byteLength": 78,
+        "sourceStage": "i0-reflection",
+        "deliveredRepresentation": "none",
+        "principleId": null,
+        "principleIdStatus": "UNKNOWN"
+      },
+      "delivery": {
+        "channel": "research-same-channel-v1",
+        "armId": "EA:REAL_ACTOR_I0:none",
+        "payloadText": "",
+        "payloadHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "deliveredBytes": 0,
+        "position": "after-task-text",
+        "budgetChars": 2000,
+        "deliveredAt": null
+      },
+      "generation": {
+        "stage": "none",
+        "requests": 0,
+        "failure": null
+      },
+      "usage": {
+        "caps": {
+          "maxStepsPerOpportunity": 40,
+          "maxRequestsPerOpportunity": 16,
+          "maxInvalidActions": 2,
+          "maxTokensPerRequest": 512,
+          "timeoutMsPerRequest": 60000,
+          "totalBudgetMsPerOpportunity": 300000
+        },
+        "budgets": {
+          "httpRequestsPerOpportunity": 48,
+          "httpRequestsPerArm": 256,
+          "httpRequestsPerStudy": 1536,
+          "perRunCostCapUsd": 0.5,
+          "totalCostCapUsd": 5
+        },
+        "generationRequests": 0,
+        "opportunities": [
+          {
+            "opportunityId": "P1",
+            "modelRounds": 4,
+            "httpRequests": 4,
+            "invalidActions": 0,
+            "steps": 4,
+            "wallMs": 19068,
+            "actorRunStatus": "COMPLETED",
+            "failure": null,
+            "budget": {
+              "levels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0:none#P1",
+                  "cap": 48,
+                  "used": 4
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0:none",
+                  "cap": 256,
+                  "used": 4
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "cap": 1536,
+                  "used": 45
+                }
+              ],
+              "costLevels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0:none#P1",
+                  "capUsd": null,
+                  "reservedUsd": 0.003661
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0:none",
+                  "capUsd": 0.5,
+                  "reservedUsd": 0.003661
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "capUsd": 5,
+                  "reservedUsd": 0.049597
+                }
+              ],
+              "requests": [
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:none#P1#req-1",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 6028,
+                  "reservedCostUsd": 0.000885,
+                  "tokenUsage": {
+                    "inputTokens": 1110,
+                    "outputTokens": 94
+                  },
+                  "usageSource": "http_stream_usage"
+                },
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:none#P1#req-2",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 5675,
+                  "reservedCostUsd": 0.000904,
+                  "tokenUsage": {
+                    "inputTokens": 1137,
+                    "outputTokens": 92
+                  },
+                  "usageSource": "http_stream_usage"
+                },
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:none#P1#req-3",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 2258,
+                  "reservedCostUsd": 0.000926,
+                  "tokenUsage": {
+                    "inputTokens": 1170,
+                    "outputTokens": 52
+                  },
+                  "usageSource": "http_stream_usage"
+                },
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:none#P1#req-4",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 5101,
+                  "reservedCostUsd": 0.000946,
+                  "tokenUsage": {
+                    "inputTokens": 1204,
+                    "outputTokens": 60
+                  },
+                  "usageSource": "http_stream_usage"
+                }
+              ]
+            }
+          },
+          {
+            "opportunityId": "P2",
+            "modelRounds": 3,
+            "httpRequests": 3,
+            "invalidActions": 0,
+            "steps": 3,
+            "wallMs": 26679,
+            "actorRunStatus": "COMPLETED",
+            "failure": null,
+            "budget": {
+              "levels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0:none#P2",
+                  "cap": 48,
+                  "used": 3
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0:none",
+                  "cap": 256,
+                  "used": 7
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "cap": 1536,
+                  "used": 48
+                }
+              ],
+              "costLevels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0:none#P2",
+                  "capUsd": null,
+                  "reservedUsd": 0.00293
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0:none",
+                  "capUsd": 0.5,
+                  "reservedUsd": 0.0065910000000000005
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "capUsd": 5,
+                  "reservedUsd": 0.052527000000000004
+                }
+              ],
+              "requests": [
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:none#P2#req-1",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 6773,
+                  "reservedCostUsd": 0.000953,
+                  "tokenUsage": {
+                    "inputTokens": 1207,
+                    "outputTokens": 163
+                  },
+                  "usageSource": "http_stream_usage"
+                },
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:none#P2#req-2",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 10938,
+                  "reservedCostUsd": 0.000977,
+                  "tokenUsage": {
+                    "inputTokens": 1243,
+                    "outputTokens": 154
+                  },
+                  "usageSource": "http_stream_usage"
+                },
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:none#P2#req-3",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 8955,
+                  "reservedCostUsd": 0.001,
+                  "tokenUsage": {
+                    "inputTokens": 1278,
+                    "outputTokens": 173
+                  },
+                  "usageSource": "http_stream_usage"
+                }
+              ]
+            }
+          },
+          {
+            "opportunityId": "P3",
+            "modelRounds": 3,
+            "httpRequests": 3,
+            "invalidActions": 0,
+            "steps": 3,
+            "wallMs": 14191,
+            "actorRunStatus": "COMPLETED",
+            "failure": null,
+            "budget": {
+              "levels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0:none#P3",
+                  "cap": 48,
+                  "used": 3
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0:none",
+                  "cap": 256,
+                  "used": 10
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "cap": 1536,
+                  "used": 51
+                }
+              ],
+              "costLevels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0:none#P3",
+                  "capUsd": null,
+                  "reservedUsd": 0.002875
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0:none",
+                  "capUsd": 0.5,
+                  "reservedUsd": 0.009466
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "capUsd": 5,
+                  "reservedUsd": 0.055402
+                }
+              ],
+              "requests": [
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:none#P3#req-1",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 3569,
+                  "reservedCostUsd": 0.000927,
+                  "tokenUsage": {
+                    "inputTokens": 1168,
+                    "outputTokens": 119
+                  },
+                  "usageSource": "http_stream_usage"
+                },
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:none#P3#req-2",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 7175,
+                  "reservedCostUsd": 0.000951,
+                  "tokenUsage": {
+                    "inputTokens": 1209,
+                    "outputTokens": 117
+                  },
+                  "usageSource": "http_stream_usage"
+                },
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:none#P3#req-3",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 3436,
+                  "reservedCostUsd": 0.000997,
+                  "tokenUsage": {
+                    "inputTokens": 1277,
+                    "outputTokens": 109
+                  },
+                  "usageSource": "http_stream_usage"
+                }
+              ]
+            }
+          },
+          {
+            "opportunityId": "P4:phase-a",
+            "modelRounds": 5,
+            "httpRequests": 5,
+            "invalidActions": 0,
+            "steps": 5,
+            "wallMs": 27257,
+            "actorRunStatus": "COMPLETED",
+            "failure": null,
+            "budget": {
+              "levels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0:none#P4:phase-a",
+                  "cap": 48,
+                  "used": 5
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0:none",
+                  "cap": 256,
+                  "used": 15
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "cap": 1536,
+                  "used": 56
+                }
+              ],
+              "costLevels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0:none#P4:phase-a",
+                  "capUsd": null,
+                  "reservedUsd": 0.004819
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0:none",
+                  "capUsd": 0.5,
+                  "reservedUsd": 0.014284999999999999
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "capUsd": 5,
+                  "reservedUsd": 0.06022099999999999
+                }
+              ],
+              "requests": [
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:none#P4:phase-a#req-1",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 6702,
+                  "reservedCostUsd": 0.000906,
+                  "tokenUsage": {
+                    "inputTokens": 1147,
+                    "outputTokens": 159
+                  },
+                  "usageSource": "http_stream_usage"
+                },
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:none#P4:phase-a#req-2",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 4203,
+                  "reservedCostUsd": 0.000943,
+                  "tokenUsage": {
+                    "inputTokens": 1203,
+                    "outputTokens": 127
+                  },
+                  "usageSource": "http_stream_usage"
+                },
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:none#P4:phase-a#req-3",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 2966,
+                  "reservedCostUsd": 0.000969,
+                  "tokenUsage": {
+                    "inputTokens": 1238,
+                    "outputTokens": 102
+                  },
+                  "usageSource": "http_stream_usage"
+                },
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:none#P4:phase-a#req-4",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 3745,
+                  "reservedCostUsd": 0.00099,
+                  "tokenUsage": {
+                    "inputTokens": 1269,
+                    "outputTokens": 131
+                  },
+                  "usageSource": "http_stream_usage"
+                },
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:none#P4:phase-a#req-5",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 9631,
+                  "reservedCostUsd": 0.001011,
+                  "tokenUsage": {
+                    "inputTokens": 1303,
+                    "outputTokens": 92
+                  },
+                  "usageSource": "http_stream_usage"
+                }
+              ]
+            }
+          },
+          {
+            "opportunityId": "P4:phase-b",
+            "modelRounds": 1,
+            "httpRequests": 1,
+            "invalidActions": 0,
+            "steps": 1,
+            "wallMs": 7411,
+            "actorRunStatus": "COMPLETED",
+            "failure": null,
+            "budget": {
+              "levels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0:none#P4:phase-b",
+                  "cap": 48,
+                  "used": 1
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0:none",
+                  "cap": 256,
+                  "used": 16
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "cap": 1536,
+                  "used": 57
+                }
+              ],
+              "costLevels": [
+                {
+                  "scope": "EA:REAL_ACTOR_I0:none#P4:phase-b",
+                  "capUsd": null,
+                  "reservedUsd": 0.00097
+                },
+                {
+                  "scope": "EA:REAL_ACTOR_I0:none",
+                  "capUsd": 0.5,
+                  "reservedUsd": 0.015255
+                },
+                {
+                  "scope": "study:PLE-PILOT-01-FORMAL-S3",
+                  "capUsd": 5,
+                  "reservedUsd": 0.06119099999999999
+                }
+              ],
+              "requests": [
+                {
+                  "requestId": "EA:REAL_ACTOR_I0:none#P4:phase-b#req-1",
+                  "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+                  "status": 200,
+                  "elapsedMs": 7408,
+                  "reservedCostUsd": 0.00097,
+                  "tokenUsage": {
+                    "inputTokens": 1234,
+                    "outputTokens": 107
+                  },
+                  "usageSource": "http_stream_usage"
+                }
+              ]
+            }
+          }
+        ],
+        "budget": {
+          "levels": [
+            {
+              "scope": "EA:REAL_ACTOR_I0:none",
+              "cap": 256,
+              "used": 16
+            },
+            {
+              "scope": "study:PLE-PILOT-01-FORMAL-S3",
+              "cap": 1536,
+              "used": 57
+            }
+          ],
+          "costLevels": [
+            {
+              "scope": "EA:REAL_ACTOR_I0:none",
+              "capUsd": 0.5,
+              "reservedUsd": 0.015255
+            },
+            {
+              "scope": "study:PLE-PILOT-01-FORMAL-S3",
+              "capUsd": 5,
+              "reservedUsd": 0.06119099999999999
+            }
+          ],
+          "requests": []
+        },
+        "tokenAudit": {
+          "httpRequests": 16,
+          "requestsWithUsage": 16,
+          "requestsWithoutUsage": 0,
+          "inputTokens": 19397,
+          "outputTokens": 1851,
+          "totalsAvailable": true,
+          "usageSourceCounts": {
+            "http_stream_usage": 16
+          },
+          "rows": [
+            {
+              "requestId": "EA:REAL_ACTOR_I0:none#P1#req-1",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 6028,
+              "reservedCostUsd": 0.000885,
+              "tokenUsage": {
+                "inputTokens": 1110,
+                "outputTokens": 94
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:none#P1#req-2",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 5675,
+              "reservedCostUsd": 0.000904,
+              "tokenUsage": {
+                "inputTokens": 1137,
+                "outputTokens": 92
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:none#P1#req-3",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 2258,
+              "reservedCostUsd": 0.000926,
+              "tokenUsage": {
+                "inputTokens": 1170,
+                "outputTokens": 52
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:none#P1#req-4",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 5101,
+              "reservedCostUsd": 0.000946,
+              "tokenUsage": {
+                "inputTokens": 1204,
+                "outputTokens": 60
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:none#P2#req-1",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 6773,
+              "reservedCostUsd": 0.000953,
+              "tokenUsage": {
+                "inputTokens": 1207,
+                "outputTokens": 163
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:none#P2#req-2",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 10938,
+              "reservedCostUsd": 0.000977,
+              "tokenUsage": {
+                "inputTokens": 1243,
+                "outputTokens": 154
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:none#P2#req-3",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 8955,
+              "reservedCostUsd": 0.001,
+              "tokenUsage": {
+                "inputTokens": 1278,
+                "outputTokens": 173
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:none#P3#req-1",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 3569,
+              "reservedCostUsd": 0.000927,
+              "tokenUsage": {
+                "inputTokens": 1168,
+                "outputTokens": 119
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:none#P3#req-2",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 7175,
+              "reservedCostUsd": 0.000951,
+              "tokenUsage": {
+                "inputTokens": 1209,
+                "outputTokens": 117
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:none#P3#req-3",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 3436,
+              "reservedCostUsd": 0.000997,
+              "tokenUsage": {
+                "inputTokens": 1277,
+                "outputTokens": 109
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:none#P4:phase-a#req-1",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 6702,
+              "reservedCostUsd": 0.000906,
+              "tokenUsage": {
+                "inputTokens": 1147,
+                "outputTokens": 159
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:none#P4:phase-a#req-2",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 4203,
+              "reservedCostUsd": 0.000943,
+              "tokenUsage": {
+                "inputTokens": 1203,
+                "outputTokens": 127
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:none#P4:phase-a#req-3",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 2966,
+              "reservedCostUsd": 0.000969,
+              "tokenUsage": {
+                "inputTokens": 1238,
+                "outputTokens": 102
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:none#P4:phase-a#req-4",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 3745,
+              "reservedCostUsd": 0.00099,
+              "tokenUsage": {
+                "inputTokens": 1269,
+                "outputTokens": 131
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:none#P4:phase-a#req-5",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 9631,
+              "reservedCostUsd": 0.001011,
+              "tokenUsage": {
+                "inputTokens": 1303,
+                "outputTokens": 92
+              },
+              "usageSource": "http_stream_usage"
+            },
+            {
+              "requestId": "EA:REAL_ACTOR_I0:none#P4:phase-b#req-1",
+              "url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions",
+              "status": 200,
+              "elapsedMs": 7408,
+              "reservedCostUsd": 0.00097,
+              "tokenUsage": {
+                "inputTokens": 1234,
+                "outputTokens": 107
+              },
+              "usageSource": "http_stream_usage"
+            }
+          ]
+        },
+        "retries": 0,
+        "repairs": 0
+      }
+    }
+  ],
+  "assignment": {
+    "randomization": "none — fixed paired order per seed (preregistered)",
+    "executionOrder": [
+      "EA:REAL_ACTOR_I0",
+      "EA:REAL_ACTOR_I0:summary",
+      "EA:REAL_ACTOR_I0:raw",
+      "EA:REAL_ACTOR_I0:none"
+    ],
+    "repetitions": 1
+  },
+  "runtime": {
+    "host": "external-model",
+    "model": "zai-coding-cn/glm-5.3-flash",
+    "costModel": "Coding Plan fixed quota — plan draws recorded from provider usage fields; the USD ledger reserves list-price ceilings pre-send and never represents actual billing",
+    "llmJudge": "NOT_SUPPORTED (mechanical oracle only)",
+    "pipelineReachabilityPolicy": "research-side same-channel delivery; no production PD activation is claimed",
+    "seed": 3
+  },
+  "authorityNote": "Research view only. Runtime facts (if any) remain owned by the production stores; this sidecar fabricates no governance records."
+}

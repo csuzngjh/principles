@@ -503,3 +503,159 @@ git diff --check → OK；变更仅 prr-dataset.mjs + 测试 + 报告，生产�
 沿用 §8.7/§9.5 各项（runningCommitSha 受信来源、verifier 信任根归属 O-05、Core 宽松解析源头收紧超边界）。只读代理的引擎行为依赖与 §9.5 相同。
 
 **第五轮修复后状态收口：离线能力 GO；真实 M1～M5 NOT_MEASURED；真实 A/C NOT_RUN；Gate B BLOCKED；Gate C NOT_GRANTED。**
+
+---
+
+## 12. 真实 A/C 执行入口——第六轮阻断缺陷修复（2026-10-23，head `06e8e7a68` 审查意见）
+
+执行入口（§11）经审查发现五类阻断缺陷，逐项对照真实实现修复：
+
+### 12.1 PI 授权工厂参数与数据契约
+
+| 缺陷 | 修复 |
+|---|---|
+| `budgets` 参数缺失（OD-2 drift 检查必拒） | CLI 传入完整 `budgets = {httpRequestsPerOpportunity/PerArm/PerStudy, perRunCostCapUsd, totalCostCapUsd}`，与 od2 逐字段对账 |
+| `adapterConfig.apiKeyEnv` 不匹配（drift：此前传 `apiKey` 环境变量值） | 传 `apiKeyEnv: budget.apiKeyEnv`（与 od2 逐字对账；凭据仍只从环境变量读取） |
+| OD-3 执行顺序与 PRR 数据集不兼容（actor 读 `dataset.histories`，PRR 是 tasks） | runner 的精确执行顺序（A/C × tasks）以兼容视图 `histories` 暴露给 OD-3 校验——顺序即冻结的执行顺序，非伪造 |
+| 预算层级构造错误（`createHttpBudgetLedger` 无 study* 参数） | 正确两级链：study parent（`cap=httpRequestsPerStudy, costCapUsd=totalCostCapUsd`）→ arm child（`cap=httpRequestsPerArm, costCapUsd=perRunCostCapUsd, parent=study`）；`createAuthorizedPiTransport` 对 arm==per-run 与 study==total 的 cost/request 双层对账因此真实生效 |
+| 定价证据无独立验证（此前 cost-basis 请求返回 undefined，靠字段缺省放行的方向错误） | 受信 resolver 必须返回 `{verified, reference, provider, model, currency, input/outputUsdPerMillionTokens, max*TokensPerRequest, effectiveDate}`，与 od2.costBasis 全字段对账（OD-2 现有校验全部激活）；自报 `costBasisRef` 不再可能单独通过 |
+
+### 12.2 transport 注入接口
+
+`--transport pi` 的 `transportFor = () => ({ transport })` 不符合 runner 期望的 `{complete}` 对象——已修复为直接返回 transport。A/C 隔离语义明确化：Pi transport 为**无状态单轮 `complete()`**，A/C 隔离由投递内容隔离与无共享会话状态保证（预注册要求），已写入代码契约注释。
+
+### 12.3 Owner 授权信任根
+
+- 同一份调用方 JSON 的 `approvedBy:"owner"` 不再被当作独立证据：`--transport pi` **强制要求** `--evidence-resolver <module>`（独立受信模块，default-export `verify()`），缺失即拒绝（"the real execution path is NOT ready without it"）；mock 演练保留。
+- resolver 必须独立核验：批准状态、`approvedProtocolDigest`、`frozenCommitSha`、以及**官方定价证据**（cost-basis kind）——全部在 CLI 内与冻结值逐字段对账，自报字段不可能通过。
+- 工作区完整性：`git rev-parse HEAD` 之外增加 `git status --porcelain` 检查——**脏工作区拒绝 pi 运行**（运行代码无法证明与获批提交一致）；mock 需显式 `--allow-dirty-worktree-for-mock`。
+
+### 12.4 数据准入与 STOP 语义
+
+- 数据集语义校验（`healthCheckPrrDataset`）**前置到任何 transport 构造之前**；
+- C 组材料仅 `authorized_synthetic` 可投递——runner 内第二道断言（缺失/未知状态 throw，防线纵深）；
+- 全局预算（FZ-06 `httpRequestsPerStudy`）**调用前检查**：live 账本（`budgetTelemetry`，权威来源）或已累计任务计数达到上限 → 立即停止，剩余任务逐行进入 `notExecutedTasks`（`study_budget_exhausted`），保留已执行结果；
+- 未知请求计数**不再推断为 1**：`behaviorFromRoundPayload` 的 requests 保持 null；`denominators.requestCounterBasis` 显式标注 `budget_ledger`/`task_reported`/`UNKNOWN`。
+
+### 12.5 新增测试（`prr-real-pi.test.ts`，10 项；mock Pi adapter + 可信 resolver + 真实账本层级）
+
+| 测试 | 断言 |
+|---|---|
+| 全要素有效 → PI 工厂构造 runner 兼容 transport | `complete` 存在；构造后 fetch spy = 0（构造不发 HTTP）；单轮经 mock adapter 返回 payload |
+| budgets 缺失 | `budgets missing` 拒绝且 fetch=0 |
+| OD-3 错误执行顺序 | `executionOrder must exactly match` 拒绝且 fetch=0 |
+| 定价证据无效 | `costBasisRef was not verified` 拒绝且 fetch=0 |
+| 授权 budgets drift（perRunCostCapUsd 999） | `drift: budgets.perRunCostCapUsd` 拒绝且 fetch=0 |
+| 未批准决策记录 | PRR 门 `not BOTH verified and approved`，零构造 |
+| 全局 STOP（cap=2） | 调用恰 2 次即停；`notExecutedTasks` = 26−2−1（排除行单列）；分母如实 |
+| **账本权威计数**（账本已用 3/3） | **0 次调用即停**——task-reported usage 全 null 也不推断；`requestCounterBasis='budget_ledger'` |
+| 未知披露状态 | healthCheck 拒 + runner 内部 throw `non-authorized disclosure status`（门先 UNPROVEN 拒绝的场景由 FZ-11 断言另行覆盖） |
+| 未知成本字段 | requests 恒 null，不发明计数 |
+
+既有回归（runner 门链拒绝/mock 全链/CLI 三场景/89+9 项）全部保留并通过。
+
+### 12.6 验证证据
+
+```text
+cd scripts && npx vitest run __tests__/prr-real-pi.test.ts __tests__/prr-real-runner.test.ts → 16/16 PASS
+npm run test:scripts → 52 文件 / 999 tests 全绿
+npm run dev:prr-rehearsal → rehearsal gate PASS（studyHash 338a0772… 不变）
+npm run verify:merge → PASS（本地）
+npx eslint（prr/ + 新测试文件）→ 0 error；git diff --check → OK
+```
+
+### 12.7 第六轮剩余限制
+
+- 受信 resolver 的**生产实现**（对接真实 Owner 决策记录存储与官方定价源）仍属 O-05——本轮交付其契约与强制点：没有它，`--transport pi` 无法启动；
+- 脏工作区检查基于 `git status --porcelain`（未跟踪文件计入）；"运行代码与获批提交一致"的更强证明（构建产物哈希）留待 B1 冻结时定义；
+- 真实 M1～M5 仍 NOT_MEASURED；真实 A/C 仍 NOT_RUN；Gate B BLOCKED；Gate C NOT_GRANTED。
+
+---
+
+## 11. 真实 A/C 执行入口交付（2026-10-23，#2115 合并后推进）
+
+PR #2115 合并（d2e88bbe0）后按 Owner 指令推进真实实验准备：
+
+### 11.1 合并后基线检查（限界：2fb3b04c8 → main）
+
+- **三大身份权威零变更**：`ledger-identity.ts` / `principle-tree-ledger.ts` / `pain-chain-read-model.ts` 字节未动——P-02 核心结论静态维持；
+- `governance-observation-store.ts` / `trajectory-store.ts` 零变更——只读边界负面结论原样；
+- #2117（PRI-1019）新增 `design_gate_declarations` 写路径 DDL（bootstrap schema 内）与只读函数 `listObservedDesignGateSessions()`（readonly + fileMustExist 契约合规）——均为 PRI-1019 自有面，**与 PRR 计划读取路径零交集，无实质性风险**（#2117 CI 34 pass）。
+
+### 11.2 受授权执行入口（默认关闭、双层 fail-closed）
+
+| 文件 | 内容 |
+|---|---|
+| `prr/lib/prr-real-runner.mjs` | 纯编排：PRR 冻结门（`validateFreezeForRealRun`：冻结记录+协议摘要+受信运行提交+决策记录对账）零问题才执行 → A/C 逐任务经 `deliverPayload` 同通道投递 → `transport.complete()` 单轮决策 → B0 §8.2 失败分类（timeout/no_response/budget/invalid 行保留分母）→ `adjudicatePrr` → `buildPairedReport`。runner 自身零 socket，transport 由调用方注入 |
+| `prr/run-prr-real.mjs` | CLI 入口（OFF by default）：无冻结/预注册/授权文件即退出非零（无默认值、无环境变量回退）；`--transport mock` 为接线演练（scripted，零模型调用）；`--transport pi` 走既有 PRI-966 授权链（`createAuthorizedPiTransport` 的 P1-02 OD-1/2/3 门 + 预算账本，FZ-06 冻结值构造授权记录，授权缺失 = transport 不存在 = 零 HTTP） |
+
+### 11.3 验证证据
+
+```text
+cd scripts && npx vitest run __tests__/prr-real-runner.test.ts → 6/6 PASS
+  （门链拒绝三形态 / mock 全链 25 行分母 + NT-1 检出 + 失败行保留 / 失败分类映射）
+npm run test:scripts → 51 文件 / 989 tests 全绿（两次连续运行确认稳定）
+npm run dev:prr-rehearsal → rehearsal gate PASS（既有行为不回归）
+CLI 实测：无参数 exit=1；文件缺失 exit=1；mock 全链 executed=true（25 行）；
+  篡改冻结记录 → "protocol approval reconciliation FAILED … INVALID_PROTOCOL" exit=1（零 transport 构造）
+```
+
+### 11.4 状态与阻断
+
+- **已交付**：可被授权激活的执行入口 + Owner 决策清单（已按推荐值整理至 Linear PRI-1001：Codex/单一 workspace/结构化摘要与 ID/禁 Raw/外发 0/复用 g2 授权门；Owner 专属取值未代填）；
+- **仍阻断**：FZ-01~FZ-15 全部 Owner 决策未决——真实 A/C **NOT_RUN**、真实 M1~M5 **NOT_MEASURED**、Gate B **BLOCKED**、Gate C **NOT_GRANTED**；Owner 勾选并签发冻结记录后，`run-prr-real.mjs` 即为预注册实验的执行路径；
+- Gate B 正向结果前不开发 Recall 生产功能、不接 Tool/Skill、不扩宿主（指令第 7 条）。
+
+---
+
+## 13. 第七轮定向修复（2026-10-23，head `41feb12de` 审查意见；最后一轮）
+
+### 13.1 A：Owner 授权证据绑定（run-prr-real.mjs 重构）
+
+| 缺陷 | 修复 |
+|---|---|
+| `expectedProtocolDigest` 恒为 undefined（三元两臂均 undefined 的笔误） | CLI 现场计算 `protocolApprovalDigest({freeze, preregBody})`（完整协议摘要：studyId+正文哈希+全部冻结条目）并作为 `expectedProtocolDigest` 传给 resolver |
+| 传参不全 | resolver 现接收完整期望集：协议摘要、冻结提交 SHA、数据集哈希、预算（FZ-06 冻结值）、决策引用 |
+| 对账不严 | 十项严格对账：resolver 必须返回 verified、approved、decisionRef、approvedProtocolDigest、frozenCommitSha、frozenFixtureHash 与官方定价证据（verified + reference==costBasisRef）——任一缺失/不一致即 `trusted-evidence reconciliation FAILED` 拒绝 |
+| `trustedEvidenceVerifier` 补造字段（本地填 `frozenFixtureHash: dataset.fixtureHash`、pricing reference 回退到入参） | 改为**纯透传** reconciled attestation——resolver 未核验的字段保持 undefined，工厂自身 OD 校验随后拒绝 |
+| 调用方 JSON 当独立证明 | **架构重构**：`verifyOwnerApproval` 门闭包的证据改**只来自 resolver attestation**（reconcile 通过后）；无 resolver 时闭包恒 `verified:false`（"the authorization file is not independent evidence of approval"）——authorization JSON 降级为纯路由元数据；`pi` 无 resolver 在任何其他检查前拒绝 |
+| resolver 对账时机 | **前置**到 preflight 之前（门用的证据即已对账的证据），mock/pi 共用同一对账阶段 |
+
+### 13.2 B：预算 STOP 与分母（prr-real-runner.mjs + CLI）
+
+- **arm/study 语义分离**：文档与实现明确——PRR 账本链（study parent → arm child）中每次请求对整链预留，arm 子账本**不是**"每个 arm 各自的独立预算"，而是唯一执行链的上界；study 上界约束整个实验；
+- **双 scope pre-call 检查**：arm 与 study 两个上限均在**调用前**检查（live 账本权威计数优先，任务上报有限计数兜底），任一触顶 → 立即停止（reasonCode `arm_budget_exhausted`/`study_budget_exhausted`）；
+- 剩余任务完整进入 `notExecutedTasks`（保留原始分母与停止原因）；已执行行如实保留；
+- 未知请求量不推断（null）；测试未降低任何预算约束。
+
+### 13.3 C：新增测试（`prr-real-cli.test.ts` 8 项，真实 CLI spawn + 独立 resolver 模块；runner arm-STOP 1 项）
+
+| 测试 | 断言 |
+|---|---|
+| 有效 resolver + mock | exit 0 + "Trusted evidence reconciled" + executed=true（25 行分母） |
+| 协议摘要不匹配（freeze 篡改 FZ-11，resolver 持原摘要） | `trusted-evidence reconciliation FAILED` + `protocol digest does not match`，exit≠0，无 real-run-result 产出（拒绝先于 transport） |
+| 冻结提交不匹配（resolver 持不同 commit） | `frozen commit does not match`，exit≠0 |
+| 数据集哈希不匹配（resolver 持不同 fixtureHash） | `dataset hash does not match`，exit≠0 |
+| 决策引用不匹配 | `decisionRef … does not match`，exit≠0 |
+| 定价证据未验证/引用不同 | 双消息拒绝，exit≠0 |
+| pi 无 resolver | `NOT ready` 拒绝 |
+| arm 账本耗尽（arm level 40/40） | **0 次调用即停**，26−1 项全部 `arm_budget_exhausted` 保留，`counterBasis='budget_ledger'` |
+
+既有测试全部保留：real-path 16/16、PI 工厂 10/10、全量 52 文件全绿。
+
+### 13.4 第七轮验证证据
+
+```text
+cd scripts && npx vitest run（real-path 三套件）→ 24/24 PASS
+npm run test:scripts → 52 文件 / 全绿
+npm run dev:prr-rehearsal → rehearsal gate PASS
+npx eslint（prr/ + spawn helper）→ 0 error；git diff --check → OK
+npm run verify:merge → PASS（本地）
+```
+
+### 13.5 第七轮剩余限制
+
+- resolver 的生产实现（真实 Owner 决策记录存储 + 官方定价源）仍属 O-05——契约与强制点已交付；
+- 真实 M1～M5 NOT_MEASURED；真实 A/C NOT_RUN；Gate B BLOCKED；Gate C NOT_GRANTED。
+
+**第七轮状态收口：离线能力 GO；执行入口授权链完整（信任根=独立 resolver，缺即拒）；真实实验仍待 Owner 冻结授权。**

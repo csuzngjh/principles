@@ -1,0 +1,46 @@
+{
+  "schemaVersion": "history.v0.1",
+  "historyId": "G",
+  "label": "generic-context-control",
+  "armKind": "generic_context",
+  "synthetic": true,
+  "syntheticMarkers": ["synthetic_environment", "generic_context_control_no_lesson_content"],
+  "worldRef": "svc-config",
+  "leakageGroupId": "PLE-PILOT-01-svc-config",
+  "innerRole": "learning_history",
+  "occurredAtWindow": "2026-03..2026-05",
+  "narrative": "Past experience on this platform (team: platform-eng). One painful night shift and one owner correction about working practices. [synthetic_environment: this history is a controlled research world, not a production record]",
+  "events": [
+    {
+      "eventId": "G-1",
+      "kind": "incident",
+      "occurredAt": "2026-03-11T21:40:00Z",
+      "ticket": "OPS-8812",
+      "summary": "a routine service restart turned into a four-hour night because the recovery steps lived only in one engineer's head",
+      "whatHappened": [
+        "A memory-pressure alert prompted a standard restart of the ingestion service.",
+        "The service came up healthy, but a background re-index job had been left half-finished; nobody on shift knew it existed because the maintenance procedure was never written down.",
+        "The on-call engineer spent the night reconstructing the re-index steps from shell history and old chat messages while the pipeline ran degraded.",
+        "The review found the procedure had been performed eleven times before, always undocumented."
+      ],
+      "ownerFeedback": "Owner feedback: if a step matters enough that skipping it causes an outage, it matters enough to live in the runbook. Document procedures while doing them."
+    },
+    {
+      "eventId": "G-2",
+      "kind": "owner-correction",
+      "occurredAt": "2026-05-06T16:10:00Z",
+      "ticket": "OPS-9044",
+      "summary": "a Friday-evening change shipped with nobody watching the dashboards it affected",
+      "whatHappened": [
+        "A small configuration cleanup was deployed late on a Friday, right as most of the team signed off for the weekend.",
+        "The dashboards that would have shown the slow error-rate creep were the ones nobody had on rotation that evening.",
+        "The issue surfaced Monday morning through a partner ticket instead of our own monitoring.",
+        "The change itself was fine; the timing and the absent watch coverage were the problem."
+      ],
+      "ownerFeedback": "Owner feedback: schedule changes for times when someone is actually watching the systems they touch, and keep dashboards maintained well enough that watching is possible."
+    }
+  ],
+  "causalKeyEvidence": [],
+  "irrelevantDeltas": [],
+  "designNote": "Generic-context control for the v2 study: structurally a learning history (same rendering, same channel), but its two lessons are operational-hygiene content (documentation discipline; change timing and watch coverage). It deliberately contains NO guidance about verification depth, consumer discovery, harness reliance, or sign-off — the treatment content under study. Authored fixed (not model-generated) so its bytes are frozen with the dataset hash."
+}
