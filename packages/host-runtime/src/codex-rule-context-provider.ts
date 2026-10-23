@@ -8,22 +8,57 @@ import {
 import type { ProductionRuleContextRequest, RuleContextProvider } from './production-rulehost-gate.js';
 import { assembleBehaviorHistory } from './behavior-history.js';
 import { readWorkspaceRuleContextRowsBefore } from './workspace-behavior-evidence.js';
+import { readLatestCodexDesignGateDeclaration, resolveCodexDesignGateFact } from './design-gate-facts.js';
 
 const HISTORY_LIMIT = 100;
 const MAX_REASON_LENGTH = 240;
+const MAX_PATCH_BYTES = 1024 * 1024;
+const APPROVED_READONLY_COMMANDS = new Set([
+  'git status',
+  'git status --short',
+  'git diff --stat',
+  'git log -1 --oneline',
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function unavailable(reason: string): RuleContextV2 {
+function patchTargets(params: Record<string, unknown> | null, projectDir: string): string[] | undefined {
+  if (params === null) return undefined;
+  const patch = typeof params.patch === 'string'
+    ? params.patch
+    : typeof params.input === 'string' ? params.input : null;
+  if (patch === null || Buffer.byteLength(patch, 'utf8') > MAX_PATCH_BYTES) return undefined;
+  const targets: string[] = [];
+  for (const line of patch.split(/\r?\n/)) {
+    const match = /^\*\*\* (?:Add|Update|Delete) File: (.+)$|^\*\*\* Move (?:from|to): (.+)$/.exec(line);
+    if (!match) continue;
+    const value = (match[1] ?? match[2] ?? '').trim();
+    if (value.length === 0 || value.includes('\0')) return undefined;
+    targets.push(path.resolve(projectDir, value));
+  }
+  return targets.length > 0 ? targets : undefined;
+}
+
+function safeReadonlyCommand(params: Record<string, unknown> | null): boolean {
+  if (params === null) return false;
+  const command = typeof params.command === 'string' ? params.command : null;
+  return command !== null && APPROVED_READONLY_COMMANDS.has(command.trim());
+}
+
+function unavailable(reason: string, designGate?: RuleContextV2['facts']['designGate']): RuleContextV2 {
   const history: RuleHistoryWindow = {
     status: 'unavailable',
     unavailableReason: reason.replace(/\s+/g, ' ').slice(0, MAX_REASON_LENGTH),
     truncated: false,
     calls: [],
   };
-  return { version: 2, history, facts: computeBehaviorFacts(history, null, null) };
+  return {
+    version: 2,
+    history,
+    facts: { ...computeBehaviorFacts(history, null, null), ...(designGate !== undefined ? { designGate } : {}) },
+  };
 }
 
 export interface CodexRuleContextProviderOptions {
@@ -52,22 +87,43 @@ export function createCodexRuleContextProvider(options: CodexRuleContextProvider
   const projectDir = path.resolve(options.projectDir);
 
   return (request: ProductionRuleContextRequest): unknown => {
-    if (!options.enabled) return unavailable('codex_rule_context_disabled');
-    if (path.resolve(request.workspaceDir) !== workspaceDir) return unavailable('workspace_scope_mismatch');
-    if (typeof request.sessionId !== 'string' || request.sessionId.trim().length === 0) return unavailable('session_id_invalid');
-
+    const canonicalKind = options.toolSemantics.resolve(request.toolName);
+    const targetKind = canonicalKind === 'agent' ? 'other' : canonicalKind;
     const raw = request.rawPayload;
+    const rawParams = isRecord(raw) && isRecord(raw.toolInput) && isRecord(raw.toolInput.params)
+      ? raw.toolInput.params
+      : null;
+    const readonlyExecute = targetKind === 'execute' && safeReadonlyCommand(rawParams);
+    const designGate = resolveCodexDesignGateFact({
+      governanceWorkspacePath: workspaceDir,
+      projectWorkspacePath: projectDir,
+      hostSessionId: request.sessionId,
+      targetPath: targetKind === 'execute' ? projectDir : request.targetPath,
+      ...(targetKind === 'write' && request.toolName === 'apply_patch'
+        ? { targetPaths: patchTargets(rawParams, projectDir) ?? [] }
+        : {}),
+      ...(targetKind === 'execute' ? { projectScopedExecution: true } : {}),
+      toolKind: readonlyExecute ? 'read' : targetKind,
+    }, {
+      getLatestDeclaration(projectWorkspacePath, hostSessionId) {
+        return readLatestCodexDesignGateDeclaration(workspaceDir, projectWorkspacePath, hostSessionId);
+      },
+    });
+    if (!options.enabled) return unavailable('codex_rule_context_disabled', designGate);
+    if (path.resolve(request.workspaceDir) !== workspaceDir) return unavailable('workspace_scope_mismatch', designGate);
+    if (typeof request.sessionId !== 'string' || request.sessionId.trim().length === 0) return unavailable('session_id_invalid', designGate);
+
     const toolInput = isRecord(raw) && isRecord(raw.toolInput) ? raw.toolInput : null;
     if (toolInput === null
       || toolInput.toolName !== request.toolName
       || !isRecord(toolInput.params)
       || !path.isAbsolute(projectDir)
       || options.currentToolUseId.trim().length === 0) {
-      return unavailable('codex_pre_tool_scope_mismatch');
+      return unavailable('codex_pre_tool_scope_mismatch', designGate);
     }
 
     const cutoff = options.cutoffAt;
-    if (!(cutoff instanceof Date) || !Number.isFinite(cutoff.getTime())) return unavailable('history_cutoff_invalid');
+    if (!(cutoff instanceof Date) || !Number.isFinite(cutoff.getTime())) return unavailable('history_cutoff_invalid', designGate);
     try {
       const historyRows = readWorkspaceRuleContextRowsBefore(
         workspaceDir,
@@ -79,8 +135,8 @@ export function createCodexRuleContextProvider(options: CodexRuleContextProvider
           limit: HISTORY_LIMIT,
         },
       );
-      if (historyRows.unscopedPriorRows) return unavailable('trajectory_project_scope_incomplete');
-      if (historyRows.rows.length === 0) return unavailable('no_prior_session_history');
+      if (historyRows.unscopedPriorRows) return unavailable('trajectory_project_scope_incomplete', designGate);
+      if (historyRows.rows.length === 0) return unavailable('no_prior_session_history', designGate);
       const history = assembleBehaviorHistory(historyRows.rows, historyRows.truncated, {
         projectDir,
         toolSemantics: options.toolSemantics,
@@ -104,10 +160,10 @@ export function createCodexRuleContextProvider(options: CodexRuleContextProvider
       return {
         version: 2,
         history,
-        facts,
+        facts: { ...facts, designGate },
       } satisfies RuleContextV2;
     } catch (error: unknown) {
-      return unavailable(`trajectory_history_unavailable:${error instanceof Error ? error.message : String(error)}`);
+      return unavailable(`trajectory_history_unavailable:${error instanceof Error ? error.message : String(error)}`, designGate);
     }
   };
 }

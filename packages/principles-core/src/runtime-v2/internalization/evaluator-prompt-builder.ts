@@ -180,6 +180,63 @@ export interface EvaluatorPromptInput {
   promptContractVersion: string;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Keep exact repeated golden histories once in the evaluator display. This is
+ * a prompt-only projection: the caller's artifact and every case field other
+ * than a repeated history remain untouched for storage and deterministic replay.
+ */
+export function projectRepeatedGoldenHistoriesForEvaluator(artifact: unknown): unknown {
+  if (!isRecord(artifact)) return artifact;
+  const firstCaseByHistory = new Map<string, string>();
+  let changed = false;
+  const projected: Record<string, unknown> = { ...artifact };
+  for (const field of ['goldenTraceCases', 'ownerGoldenTraceCases']) {
+    const entries = artifact[field];
+    if (!Array.isArray(entries)) continue;
+    projected[field] = entries.map((entry, index) => {
+    if (!isRecord(entry) || !isRecord(entry.ruleContext) || !isRecord(entry.ruleContext.history)) return entry;
+    const { history } = entry.ruleContext;
+    let historyKey: string | undefined;
+    try {
+      historyKey = JSON.stringify(history);
+    } catch {
+      return entry;
+    }
+    if (historyKey === undefined) return entry;
+    const caseId = typeof entry.caseId === 'string' && entry.caseId.trim() !== ''
+      ? entry.caseId
+      : `case-${index + 1}`;
+    const firstCaseId = firstCaseByHistory.get(historyKey);
+    if (firstCaseId === undefined) {
+      firstCaseByHistory.set(historyKey, caseId);
+      return entry;
+    }
+    changed = true;
+    return {
+      ...entry,
+      ruleContext: {
+        ...entry.ruleContext,
+        history: { ...history, calls: [], truncated: true },
+      },
+      evaluatorDisplayNote: `This case's exact history is repeated in case ${firstCaseId}; it is omitted from this evaluator prompt only. The stored artifact and deterministic replay retain the complete original history.`,
+    };
+    });
+  }
+  return changed ? projected : artifact;
+}
+
+function artifactHasDesignGate(artifact: unknown): boolean {
+  if (!isRecord(artifact) || !Array.isArray(artifact.goldenTraceCases)) return false;
+  return artifact.goldenTraceCases.some((entry) => {
+    if (!isRecord(entry) || !isRecord(entry.ruleContext) || !isRecord(entry.ruleContext.facts)) return false;
+    return Object.hasOwn(entry.ruleContext.facts, 'designGate');
+  });
+}
+
 export interface EvaluatorPromptBuildResult {
   readonly message: string;
   readonly promptInput: EvaluatorPromptInput;
@@ -413,7 +470,14 @@ PRIOR OUTPUT-CONTRACT REJECTIONS (when \`priorValidatorErrors\` is present):
 //    defeating one is situation (c) → mismatchFindings → Owner.
 // Additive: mismatchFindings is optional on the wire; a run without formation
 // evidence sees only the new CONSTRAINTS clause and the version string.
-export const EVALUATOR_PROMPT_CONTRACT_VERSION = 'evaluator-output-v1.prompt.v10';
+export const EVALUATOR_PROMPT_CONTRACT_VERSION = 'evaluator-output-v1.prompt.v11';
+
+export const EVALUATOR_DESIGN_GATE_ADDENDUM = `
+
+DESIGN GATE FACT (when present in an artificer goldenTraceCase ruleContext.facts):
+The runtime input path is \`input.context.facts.designGate\`. It is a host-supplied DesignGateFact v1 with resolution \`approved\`, \`not_approved\`, \`not_required\`, or \`unknown\`, plus sourceRef/revision, task/spec/scope binding refs, and revoked state. Read the actual case value and binding; never infer approval from params, command text, history, or a missing field. \`unknown\` is neither approval nor explicit rejection.
+
+EVALUATOR DISPLAY NOTE: when a case carries evaluatorDisplayNote, its exact repeated history is abbreviated in this prompt only. Treat it as the same history named by the note; the stored artifact and deterministic replay retain the full original.`;
 
 export class EvaluatorPromptBuilder {
   // eslint-disable-next-line @typescript-eslint/class-methods-use-this
@@ -425,7 +489,7 @@ export class EvaluatorPromptBuilder {
       taskId: input.taskId,
       contextHash: input.contextHash,
       sourceArtificerArtifactId: input.sourceArtificerArtifactId,
-      artificerArtifact: input.artificerArtifact,
+      artificerArtifact: projectRepeatedGoldenHistoriesForEvaluator(input.artificerArtifact),
       scribeArtifact: input.scribeArtifact,
       previousEvaluation: input.previousEvaluation,
       hostToolCatalog: input.hostToolCatalog,
@@ -460,10 +524,13 @@ export class EvaluatorPromptBuilder {
     const validatorFeedbackAddendum = input.priorValidatorErrors !== undefined
       ? EVALUATOR_VALIDATOR_FEEDBACK_ADDENDUM
       : '';
+    const designGateAddendum = artifactHasDesignGate(input.artificerArtifact)
+      ? EVALUATOR_DESIGN_GATE_ADDENDUM
+      : '';
     return {
       message,
       promptInput,
-      systemPrompt: EVALUATOR_PROTOCOL_INSTRUCTION + formationAddendum + validatorFeedbackAddendum + languageDirective,
+      systemPrompt: EVALUATOR_PROTOCOL_INSTRUCTION + formationAddendum + validatorFeedbackAddendum + designGateAddendum + languageDirective,
     };
   }
 }

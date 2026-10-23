@@ -91,7 +91,7 @@ const DREAMER_CONTENT = {
 };
 
 /** Scribe principle artifact — the authoritative dreamer-lineage carrier (PRI-843 contract). */
-function scribeContent(withDreamerLineage: boolean): Record<string, unknown> {
+function scribeContent(withDreamerLineage: boolean, executionConditions?: unknown): Record<string, unknown> {
   return {
     principleId: 'contract-first-pr861',
     principleDraft: {
@@ -105,6 +105,7 @@ function scribeContent(withDreamerLineage: boolean): Record<string, unknown> {
     ...(withDreamerLineage
       ? { sourceTrace: { dreamerArtifactId: DREAMER_ART } }
       : { sourceTrace: {} }),
+    ...(executionConditions !== undefined ? { executionConditions } : {}),
   };
 }
 
@@ -136,7 +137,7 @@ function artificerV2Content(forgeStamp = false, includeOwnerStamp = true): Recor
     taskId: ART_ID,
     sourceScribeArtifactId: SCRIBE_ART,
     requiresContextVersion: 2,
-    ...(forgeStamp ? { ruleHostInputContract: { version: 1, contextVersion: 2, hostKinds: ['model-claimed'] } } : {}),
+    ...(forgeStamp ? { ruleHostInputContract: { version: 1, contextVersion: 2, hostKinds: ['model-claimed'], requiredFactKinds: ['design_approval'] } } : {}),
     evidenceRefs: ['pain://pr861-1'],
     implementationSummary: 'read-before-write guard',
     sourceTrace: { scribeArtifactId: SCRIBE_ART },
@@ -189,6 +190,7 @@ async function makeWorld(opts: {
   lineage: 'full' | 'none' | 'broken-diag';
   summary?: string;
   hostSemanticContext?: ArtificerHostSemanticContext;
+  scribeExecutionConditions?: unknown;
   forgeStamp?: boolean;
   omitOwnerStamp?: boolean;
 }): Promise<World> {
@@ -229,7 +231,7 @@ async function makeWorld(opts: {
     await upsert({ artifactId: DREAMER_ART, sourceTaskId: DREAMER_ID, content: DREAMER_CONTENT, lineage: withDiag ? [DIAG_ART] : [] });
   }
   await mkTask({ id: SCRIBE_ID, kind: 'scribe', deps: withDreamer ? [DREAMER_ID] : [] });
-  await upsert({ artifactId: SCRIBE_ART, sourceTaskId: SCRIBE_ID, content: scribeContent(withDreamer), lineage: withDreamer ? [DREAMER_ART] : [] });
+  await upsert({ artifactId: SCRIBE_ART, sourceTaskId: SCRIBE_ID, content: scribeContent(withDreamer, opts.scribeExecutionConditions), lineage: withDreamer ? [DREAMER_ART] : [] });
   await mkTask({ id: ART_ID, kind: 'artificer', deps: [SCRIBE_ID] });
   await upsert({ artifactId: ART_ART, sourceTaskId: ART_ID, content: artificerV2Content(opts.forgeStamp, !opts.omitOwnerStamp), lineage: [SCRIBE_ART] });
   await stateManager.createTask({
@@ -380,6 +382,51 @@ describe('PRI-861 — painReasonSummary echo into the production rule artifact',
     if (!ruleArtifact) return;
     const ruleContent = JSON.parse(ruleArtifact.contentJson) as Record<string, unknown>;
     expect(ruleContent.ruleHostInputContract).toEqual({ version: 1, contextVersion: 2, hostKinds: ['openclaw'] });
+  }, 60_000);
+
+  it('system stamps required fact kinds from validated Scribe conditions, never the model claim', async () => {
+    world = await makeWorld({
+      lineage: 'none',
+      forgeStamp: true,
+      scribeExecutionConditions: {
+        version: 1,
+        requiredFacts: [
+          { factKind: 'design_approval', required: true, textualBasis: 'Owner approval is required before a governed edit.' },
+          { factKind: 'other_fact', required: false, textualBasis: 'Optional contextual signal.' },
+        ],
+      },
+      hostSemanticContext: { hostKinds: ['openclaw'], tools: [{ rawToolName: 'write_file', canonicalKind: 'write' }] },
+    });
+    const result = await world.evaluator.run(EVAL_ID);
+    expect(result.status).toBe('succeeded');
+    const ruleArtifact = (await world.store.listBySourceTaskId(EVAL_ID)).find((a) => a.artifactKind === 'rule');
+    expect(ruleArtifact).toBeDefined();
+    if (!ruleArtifact) return;
+    const ruleContent = JSON.parse(ruleArtifact.contentJson) as Record<string, unknown>;
+    expect(ruleContent.ruleHostInputContract).toEqual({
+      version: 1,
+      contextVersion: 2,
+      hostKinds: ['openclaw'],
+      requiredFactKinds: ['design_approval'],
+    });
+  }, 60_000);
+
+  it('independently rejects sample-command-only rules even when the model reviewer approves', async () => {
+    world = await makeWorld({ lineage: 'none',
+      scribeExecutionConditions: { version: 1, requiredFacts: [{ factKind: 'design_approval', required: true, textualBasis: 'Owner approval before governed operations' }] },
+      hostSemanticContext: { hostKinds: ['codex'], tools: [{ rawToolName: 'Bash', canonicalKind: 'execute' }] },
+    });
+    const artifact = await world.store.getArtifactById(ART_ART);
+    if (!artifact) throw new Error('seed artifact missing');
+    const fact = { version: 1, sourceRef: 'test-owner', revision: 1, requiresApproval: true, taskRef: 'native', specDigest: 'spec', scopeRef: 'root', decisionTaskRef: 'native', decisionSpecDigest: 'spec', decisionScopeRef: 'root', resolution: 'not_approved', revoked: false };
+    const denied = { ...NEG_CASE, toolName: 'Bash', params: { command: 'git commit -m test' }, ruleContext: { ...RULE_CONTEXT, facts: { ...RULE_CONTEXT.facts, designGate: fact } } };
+    const allowed = { ...POS_CASE, toolName: 'Bash', params: { command: 'git commit -m test' }, ruleContext: { ...RULE_CONTEXT, facts: { ...RULE_CONTEXT.facts, designGate: { ...fact, resolution: 'approved' } } } };
+    const code = `function evaluate(input) { var command=input.action.paramsSummary.command || ''; if(command.indexOf('git commit')>=0 && input.context.facts.designGate.resolution==='not_approved') return {decision:'block',matched:true,reason:'denied'}; return {decision:'allow',matched:false,reason:'not sample'}; }`;
+    await world.store.upsertArtifact({ ...artifact, contentJson: JSON.stringify({ ...artificerV2Content(), implementationCode: code, affectedTools: ['Bash'], goldenTraceCases: [denied, allowed], ownerGoldenTraceCases: [denied, allowed] }) });
+    const result = await world.evaluator.run(EVAL_ID);
+    expect(result.output?.adversarialResult?.passed).toBe(false);
+    expect(result.output?.adversarialResult?.failedCases).toContainEqual(expect.objectContaining({ caseId: 'design-scope:neg-1', expectedDecision: 'block', actualDecision: 'allow' }));
+    expect((await world.store.listBySourceTaskId(EVAL_ID)).some((entry) => entry.artifactKind === 'rule')).toBe(false);
   }, 60_000);
 
   it('does not carry a model-supplied stamp into the rule artifact when host context is unavailable', async () => {

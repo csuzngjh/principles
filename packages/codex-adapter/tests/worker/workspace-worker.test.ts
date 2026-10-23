@@ -801,8 +801,10 @@ describe('worker cycle — downstream reuse (shared executor)', () => {
     } finally { await handle.close(); }
     const assembly = vi.spyOn(BehaviorExamplePackAssembler.prototype, 'assemble');
     let injectedPack: unknown;
+    let injectedTrustedFacts: unknown;
     const runner = vi.spyOn(ArtificerRunner.prototype, 'run').mockImplementation(async function (this: ArtificerRunner, taskId: string) {
       injectedPack = Reflect.get(this, 'behaviorExamplePack');
+      injectedTrustedFacts = Reflect.get(this, 'trustedFacts');
       return { status: 'failed', taskId, attemptCount: 0 };
     });
     process.env.PRI992_TEST_KEY = 'test-key';
@@ -815,6 +817,22 @@ describe('worker cycle — downstream reuse (shared executor)', () => {
     expect(pack.evidenceRefs).toEqual(['pain:1', 'tool_call:992', 'tool_call:991']);
     expect(runner).toHaveBeenCalledTimes(1);
     expect(injectedPack).toEqual(pack);
+    expect(injectedTrustedFacts).toMatchObject({
+      describeRequiredFact: expect.any(Function),
+      resolveRequiredFact: expect.any(Function),
+    });
+    const trustedFacts = injectedTrustedFacts as {
+      describeRequiredFact: (request: { factKind: string }) => unknown;
+      resolveRequiredFact: (request: { factKind: string; taskId: string }) => unknown;
+    };
+    expect(trustedFacts.describeRequiredFact({ factKind: 'design_approval' })).toMatchObject({
+      supported: true,
+      schemaVersion: '1',
+      inputPath: 'input.context.facts.designGate',
+      source: expect.stringContaining('codex-native'),
+    });
+    expect(trustedFacts.resolveRequiredFact({ factKind: 'design_approval', taskId: 'artificer-pri992-labelled-code_tool_hook' }))
+      .toMatchObject({ resolution: 'unknown' });
   });
 
   it('PRI-634 A3 via the Codex path (AC-4): evaluator critical telemetry lands in THIS workspace sink through the shared cycle', async () => {

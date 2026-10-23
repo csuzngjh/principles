@@ -85,7 +85,7 @@ describe('ArtificerPromptBuilder', () => {
     // SPEC-RULECODE-QUALITY-001 A2 — bumped v12 → v13: closest-per-call-proxy
     // and params-precondition guidance deleted (self-filled approval source),
     // conditional INTENT EXECUTION CONDITIONS block added.
-    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v14');
+    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v15');
   });
 
   // ── PRI-741: canonicalKind-first contract + host semantic projection ──
@@ -248,7 +248,7 @@ describe('PRI-484 / PRI-780 Artificer prompt context contract', () => {
   });
 
   it('declares the contract version bump history v1 → … → v13 (PRI-634 PR-A, PRI-700, PRI-741, PRI-780, PRI-817, PRI-839, PD v2 Phase 1 r3, PD v2 Phase 1 closeout, review round, SPEC-RULECODE-QUALITY-001 A2)', () => {
-    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v14');
+    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v15');
   });
 
   // PD v2 Phase 1 host acceptance (2026-10-10): validateV2OutputContract rejects
@@ -324,6 +324,32 @@ describe('PRI-484 / PRI-780 Artificer prompt context contract', () => {
     expect(systemPrompt).not.toContain('is a legitimate edit of an inspected target');
     expect(systemPrompt).not.toContain('is a fresh session, not a violation');
     expect(systemPrompt).not.toContain('Write-discipline principles');
+  });
+
+  it('documents the trusted designGate field and four resolutions without claiming params can establish approval', () => {
+    const { systemPrompt } = new ArtificerPromptBuilder().buildPrompt({
+      taskId: 'task',
+      contextHash: 'hash',
+      sourceScribeArtifactId: 'scribe',
+      scribeArtifact: {},
+      behaviorExamplePack: validBehaviorExamplePack,
+      executionConditions: {
+        version: 1,
+        requiredFacts: [{
+          factKind: 'design_approval',
+          required: true,
+          textualBasis: 'complex changes require confirmed design before implementation',
+        }],
+      },
+    });
+    expect(systemPrompt).toContain('input.context.facts.designGate');
+    expect(systemPrompt).toContain('approved');
+    expect(systemPrompt).toContain('not_approved');
+    expect(systemPrompt).toContain('not_required');
+    expect(systemPrompt).toContain('unknown');
+    expect(systemPrompt).toContain('taskRef/specDigest/scopeRef');
+    expect(systemPrompt).toContain('Do not copy it from params, command text, history, or generated output');
+    expect(systemPrompt).not.toContain('EXPERIMENT_ONLY_OWNER_AUTHORIZED_FIXTURE');
   });
 
   it('v11 repair guidance names the Input evidence line and forbids hard-coding the literal path', () => {

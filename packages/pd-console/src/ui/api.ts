@@ -1,5 +1,7 @@
 import type { ApiResponse } from "../types.js";
 import type { OwnerDecisionsData, OwnerResolutionResultData, OwnerDecisionInboxData, OwnerDecisionLibraryData } from "./utils/validators.js";
+import { isDesignGateDeclaration } from "@principles/core/runtime-v2/internalization/design-gate-facts";
+import type { DesignGateDecision, DesignGateDeclaration, DesignGateScope } from "@principles/core/runtime-v2/internalization/design-gate-facts";
 import { clearStoredToken, loadStoredToken, storeToken } from "./utils/token-storage.js";
 import {
   validateErrorResponse,
@@ -1389,6 +1391,94 @@ async function dispatchFollowUp(
     validateFollowUpResponse,
   );
 }
+
+// ── Local Codex Design Gate declarations ────────────────────────────────────
+
+export interface DesignGateObservedSession {
+  projectWorkspacePath: string;
+  hostSessionId: string;
+}
+
+export interface DesignGateDeclarationInput {
+  projectWorkspacePath: string;
+  hostSessionId: string;
+  specPath: string;
+  scope: DesignGateScope;
+  decision: DesignGateDecision;
+}
+
+function isDesignGateRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function validateDesignGateSessions(value: unknown): { sessions: DesignGateObservedSession[] } | null {
+  if (!isDesignGateRecord(value) || !Array.isArray(value.sessions)) return null;
+  const sessions: DesignGateObservedSession[] = [];
+  for (const entry of value.sessions) {
+    if (!isDesignGateRecord(entry)
+      || typeof entry.projectWorkspacePath !== "string" || entry.projectWorkspacePath.trim() === ""
+      || typeof entry.hostSessionId !== "string" || entry.hostSessionId.trim() === "") return null;
+    sessions.push({ projectWorkspacePath: entry.projectWorkspacePath, hostSessionId: entry.hostSessionId });
+  }
+  return { sessions };
+}
+
+function validateDesignGateDeclarationEnvelope(value: unknown): { declaration: DesignGateDeclaration | null } | null {
+  if (!isDesignGateRecord(value) || !Object.hasOwn(value, "declaration")) return null;
+  if (value.declaration === null) return { declaration: null };
+  return isDesignGateDeclaration(value.declaration) ? { declaration: value.declaration } : null;
+}
+
+const designGateBasePath = "/api/v1/governance/design-gate";
+
+async function fetchDesignGateSessions(): Promise<ApiResponse<{ sessions: DesignGateObservedSession[] }>> {
+  return request(`${designGateBasePath}/sessions`, undefined, validateDesignGateSessions);
+}
+
+async function fetchDesignGateDeclaration(
+  projectWorkspacePath: string,
+  hostSessionId: string,
+): Promise<ApiResponse<{ declaration: DesignGateDeclaration | null }>> {
+  const query = new URLSearchParams({ projectWorkspacePath, hostSessionId });
+  return request(
+    `${designGateBasePath}/declaration?${query.toString()}`,
+    undefined,
+    validateDesignGateDeclarationEnvelope,
+  );
+}
+
+async function createDesignGateDeclaration(
+  input: DesignGateDeclarationInput,
+): Promise<ApiResponse<{ declaration: DesignGateDeclaration | null }>> {
+  return request(
+    `${designGateBasePath}/declarations`,
+    { method: "POST", body: JSON.stringify(input) },
+    validateDesignGateDeclarationEnvelope,
+  );
+}
+
+async function updateDesignGateDecision(
+  sourceRef: string,
+  expectedRevision: number,
+  decision: DesignGateDecision,
+): Promise<ApiResponse<{ declaration: DesignGateDeclaration | null }>> {
+  return request(
+    `${designGateBasePath}/declarations/${encodeURIComponent(sourceRef)}/decision`,
+    { method: "POST", body: JSON.stringify({ expectedRevision, decision }) },
+    validateDesignGateDeclarationEnvelope,
+  );
+}
+
+async function revokeDesignGateDeclaration(
+  sourceRef: string,
+  expectedRevision: number,
+): Promise<ApiResponse<{ declaration: DesignGateDeclaration | null }>> {
+  return request(
+    `${designGateBasePath}/declarations/${encodeURIComponent(sourceRef)}/revoke`,
+    { method: "POST", body: JSON.stringify({ expectedRevision }) },
+    validateDesignGateDeclarationEnvelope,
+  );
+}
 // ── Exports ───────────────────────────────────────────────────────────────────
 
 export {
@@ -1469,7 +1559,14 @@ export {
   listIntentDecisionsByTaskId,
   fetchIntentDecisionSummary,
   dispatchFollowUp,
+  fetchDesignGateSessions,
+  fetchDesignGateDeclaration,
+  createDesignGateDeclaration,
+  updateDesignGateDecision,
+  revokeDesignGateDeclaration,
 };
+
+export type { DesignGateAction, DesignGateDecision, DesignGateDeclaration, DesignGateScope } from "@principles/core/runtime-v2/internalization/design-gate-facts";
 
 // ── Type re-exports (consumer-facing aliases) ─────────────────────────────────
 // These types are imported by page components. They are defined in validators.ts

@@ -74,6 +74,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function requiresDesignGateFact(value: unknown): boolean {
+  if (!isRecord(value) || !Object.hasOwn(value, 'requiredFactKinds')) return false;
+  return Array.isArray(value.requiredFactKinds)
+    && value.requiredFactKinds.every((kind: unknown) => typeof kind === 'string')
+    && value.requiredFactKinds.includes('design_approval');
+}
+
 interface ToolInput { toolName: string; params: Record<string, unknown> }
 
 function readToolInput(rawPayload: unknown): ToolInput | null {
@@ -451,6 +458,23 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
                   'enable and wire the host rule context provider, or regenerate the rule without context dependence',
                 );
                 continue;
+              }
+              const inputContract = content.ruleHostInputContract;
+              if (isRecord(inputContract) && Object.hasOwn(inputContract, 'requiredFactKinds')) {
+                if (!Array.isArray(inputContract.requiredFactKinds)
+                  || !inputContract.requiredFactKinds.every((kind: unknown) => typeof kind === 'string')) {
+                  addWarning(warnings, `rule_required_fact_contract_invalid: activation=${activationId}`,
+                    'regenerate the rule artifact from validated Scribe execution conditions');
+                  continue;
+                }
+                if (requiresDesignGateFact(inputContract)) {
+                  const { designGate } = context.facts;
+                  if (designGate === undefined || designGate.resolution === 'unknown') {
+                    addWarning(warnings, `rule_required_fact_unavailable: design_approval (activation=${activationId})`,
+                      'verify the current Owner design declaration and scope before retrying');
+                    continue;
+                  }
+                }
               }
             }
             const ruleId = typeof content.ruleId === 'string' ? content.ruleId : typeof row.source_rule_id === 'string' ? row.source_rule_id : artifactId;

@@ -430,7 +430,7 @@ describe('preflightArtificerIntentBasis — stop points (Q01/Q20)', () => {
     expect(task?.status).toBe('needs_human_review');
   });
 
-  it('a trusted-facts port resolving the fact to unknown stops as needs_evidence (capability present, fact pending)', async () => {
+  it('a legacy resolution-only port does not establish design_approval capability', async () => {
     const workspaceDir = makeWorkspace();
     await seedArtificerTask(workspaceDir, conditionsScribeContent([
       { factKind: 'design_approval', required: true, textualBasis: 'complex changes require confirmed design before implementation' },
@@ -440,9 +440,65 @@ describe('preflightArtificerIntentBasis — stop points (Q01/Q20)', () => {
     });
     expect(verdict.decision).toBe('blocked');
     if (verdict.decision !== 'blocked') throw new Error('unreachable');
-    expect(verdict.logicalResult).toBe('needs_evidence');
-    expect(verdict.reasonCode).toBe('trusted_fact_unknown');
+    expect(verdict.logicalResult).toBe('unsupported');
+    expect(verdict.reasonCode).toBe('trusted_fact_provider_absent');
     await expect(readTask(workspaceDir)).resolves.toMatchObject({ status: 'needs_human_review' });
+  });
+
+  it('supported design_approval capability permits generation without resolving the current PI task as approved', () => {
+    let legacyResolutionCalls = 0;
+    const assessment = assessIntentBasis({
+      scribeArtifact: {
+        artifactId: 'scribe-design-gate',
+        contentJson: conditionsScribeContent([
+          { factKind: 'design_approval', required: true, textualBasis: 'complex changes require confirmed design before implementation' },
+        ], { approval: true }),
+      },
+      upstreamMaterial: { normalisedText: 'complexchangesrequireconfirmeddesignbeforeimplementation' },
+      taskId: 'pi-generation-task',
+      trustedFacts: {
+        describeRequiredFact: () => ({
+          supported: true,
+          schemaVersion: '1',
+          inputPath: 'input.context.facts.designGate',
+          source: 'codex-native-pretool-design-gate-v1',
+        }),
+        resolveRequiredFact: () => {
+          legacyResolutionCalls += 1;
+          return { resolution: 'not_approved' };
+        },
+      },
+    });
+
+    expect(assessment.status).toBe('executable');
+    if (assessment.status !== 'executable') throw new Error('unreachable');
+    expect(assessment.requiredFacts).toEqual([{ factKind: 'design_approval', resolution: 'unknown' }]);
+    expect(legacyResolutionCalls).toBe(0);
+  });
+
+  it.each([
+    ['wrong schema', { supported: true, schemaVersion: '2', inputPath: 'input.context.facts.designGate', source: 'native' }],
+    ['wrong input path', { supported: true, schemaVersion: '1', inputPath: 'params.designGate', source: 'native' }],
+    ['missing source', { supported: true, schemaVersion: '1', inputPath: 'input.context.facts.designGate' }],
+    ['unsupported', { supported: false, schemaVersion: '1', inputPath: 'input.context.facts.designGate', source: 'native' }],
+  ])('design_approval stops before generation when host capability has %s', (_label, capability) => {
+    const assessment = assessIntentBasis({
+      scribeArtifact: {
+        artifactId: 'scribe-design-gate',
+        contentJson: conditionsScribeContent([
+          { factKind: 'design_approval', required: true, textualBasis: 'complex changes require confirmed design before implementation' },
+        ], { approval: true }),
+      },
+      upstreamMaterial: { normalisedText: 'complexchangesrequireconfirmeddesignbeforeimplementation' },
+      taskId: 'pi-generation-task',
+      trustedFacts: {
+        describeRequiredFact: () => capability,
+        resolveRequiredFact: () => ({ resolution: 'approved' }),
+      },
+    });
+    expect(assessment.status).toBe('unsupported');
+    if (assessment.status === 'executable') throw new Error('unreachable');
+    expect(assessment.reasonCode).toBe('trusted_fact_provider_absent');
   });
 
   it('malformed executionConditions stops as intent_unverified (corrupted anchor fails loud)', async () => {
