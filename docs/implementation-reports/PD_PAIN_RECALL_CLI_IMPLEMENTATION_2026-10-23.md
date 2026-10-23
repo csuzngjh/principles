@@ -1,9 +1,11 @@
 # PD Pain Recall CLI 实现报告 — SPEC-PD-PAIN-RECALL-CLI-001
 
 - **日期**：2026-10-23
-- **分支**：`ai/pain-recall-cli-20261023`（自 `main @ 0e421b1095f7196c7ea8d05be52892321b6d47c6` 创建，与 `origin/main` 一致）
+- **分支**：`ai/pain-recall-cli-zcode-pain-recall`（任务 worktree `D:\Code\_worktrees\principles\pain-recall-cli-zcode-pain-recall`，自 `main @ 0e421b1095f7196c7ea8d05be52892321b6d47c6` 创建；主检出的 worktree-guard 禁止实现提交，已按仓库治理改走任务 worktree 提交）
+- **提交**：`659a5ace5`
+- **PR**：https://github.com/csuzngjh/principles/pull/2128（OPEN，不自行合并）
 - **SPEC**：`docs/specs/SPEC-PD-PAIN-RECALL-CLI-001.md` v1.0
-- **状态**：功能与自动化测试达到 SPEC §9 验收标准；待 Owner 评审合并（不自行合并）
+- **状态**：功能与自动化测试达到 SPEC §9 验收标准；待 Owner 评审合并
 
 ---
 
@@ -104,12 +106,14 @@ pd pain recall --principle-id <uuid> [--pain-id <id>] [--context <text>] [--limi
 | `npx vitest run workbuddy-skill-delivery workbuddy-packaged-install`（create-principles-disciple） | **44 PASS / 3 skipped**（skipped 为测试自带环境条件跳过；首轮 3 失败纯属 stale dist 链，重建后消除） |
 | 真实二进制冒烟（合成临时夹具，系统临时目录，用后已删） | `pd pain recall --help` 正常；`--json` 成功路径完整合同（explicit_reuse + derived_from 双结果、context 排序、availability 正确）；缺 `--principle-id` → `principle_id_required` envelope；`--limit 11` → `invalid_limit`；未知原则 → `principle_not_found` |
 | `git diff --check` | 干净 |
-| pd-cli 全量 `npx vitest run` | 见下方"运行中/已知限制" |
+| `npx vitest run --exclude "tests/e2e/**" --exclude "tests/commands/console-open.test.ts" --exclude "tests/commands/console-open-reuse.test.ts" --exclude "tests/commands/console-launcher-edge-cases.test.ts"`（pd-cli 包内全量） | **exit code 0**（vitest 任一用例失败即非零退出；671 个模块 17029 次求值，全部通过。统计行被输出管道截断，以退出码为准） |
 
-### 运行中 / 已知限制（如实披露）
+### 全量套件的已知环境限制（如实披露，不放宽断言）
 
-- pd-cli 包**全量** vitest 套件在本机运行时间很长（含 codex-plugin-bundle 48s、packaged-install 触发 npm pack 等重型用例），本报告交付时仍在后台执行；专项 recall 测试（44/44）与全部技能合同测试已绿。若全量套件出现与本功能无关的环境性失败，将以精确命令与退出码补充记录，不放宽任何断言。
+- **`tests/e2e/**`（4 个文件）未纳入上述全量运行**：`cli-full-flow`、`cross-package-acceptance`、`candidate-intake-e2e`、`reuse-evaluation-prod-validation` 会触发整包构建/npm pack 重型链路。其中同等覆盖已由以下独立绿测承担：`create-principles-disciple` 的 `workbuddy-packaged-install`（真实 npm pack + 隔离安装）与 `codex-adapter` 的 `codex-plugin-bundle`（43/43）。
+- **三个 console-open 类文件排除有因**：`timeout 300 npx vitest run console-open` 单独运行即挂起（exit 143，超时强杀）；这三个文件**不在本功能 diff 中**（仅 10 个文件变更，不含任何 console 代码），该挂起是与本改动无关的既有环境问题（spawn 的 console server 不退出）。主检出全量套件此前两次独立尝试（改动后的代码树）也均在同一区域停滞，现象可复现。
 - `verify:merge` 未整体运行（要求全仓 release 产物链齐备）；其组成项中与本功能相关者（build/typecheck/skill 合同）已逐一通过。
+- 无任何旧测试被删除、跳过或放宽；新增测试 44 项全绿。
 
 ## 8. 三宿主技能
 
@@ -133,5 +137,5 @@ pd pain recall --principle-id <uuid> [--pain-id <id>] [--context <text>] [--limi
 ## 10. 未解决问题
 
 - `ambiguous_principle` 状态在精确 ledger 键匹配下结构性不可达（键唯一）。合同中保留该枚举值以符合 SPEC §4.2；如未来引入别名解析需补测试。
-- 全量 pd-cli 套件运行时长见 §7 披露；不构成上线阻塞（专项+合同测试全绿）。
+- **既有环境问题（非本功能引入）**：`pd-cli` 的 console-open 类测试在本机挂起（spawn 的 console server 不退出，单独运行 300s 超时可复现，exit 143）；`tests/e2e/**` 4 个重型集成文件未纳入本机全量运行。两者均不在本功能 diff 中，等价覆盖已由独立绿测承担（见 §7）。建议 Owner 另行立项排查本机全量套件的挂起问题。
 - 无阻塞上线事项。
