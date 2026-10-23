@@ -65,25 +65,49 @@ export function computeDatasetHash(byFile) {
 }
 
 /**
- * A genuinely read-only Map view (owner review round 4, P1-4). The previous
- * instance-method pinning was bypassable via `Map.prototype.set.call(map,…)`;
- * a Proxy over a never-exposed inner Map closes that path:
- *   - `instanceof Map`, get/has/size/forEach/keys/values/entries all work;
- *   - `map.set/delete/clear` hit the get-trap thrower;
- *   - `Map.prototype.set.call(proxy,…)` cannot reach the inner [[MapData]]
+ * A genuinely read-only Map view (owner reviews rounds 4+5, P1-4). The Proxy
+ * wraps a never-exposed inner Map:
+ *   - `instanceof Map`, get/has/size/forEach/keys/values/entries and
+ *     for-of iteration all keep working;
+ *   - direct `map.set/delete/clear` hit the get-trap thrower;
+ *   - `Map.prototype.*.call(proxy,…)` cannot reach the inner [[MapData]]
  *     (a Proxy has no Map internal slot → incompatible-receiver TypeError);
- *   - property writes/deletes/defines are trapped, and the inner Map is
- *     never exposed (callbacks only receive values).
+ *   - NOTHING else is bound to the inner Map: `valueOf()`/`toString()` are
+ *     returned unbound, so calling them on the proxy yields the proxy itself,
+ *     never the inner Map (round-5 leak #1);
+ *   - `forEach` is reimplemented and hands the callback the READ-ONLY PROXY
+ *     as its third argument, never the inner Map the native method would pass
+ *     (round-5 leak #2).
  */
+const READONLY_MAP_MUTATORS = new Set(['set', 'delete', 'clear']);
+const READONLY_MAP_BOUND_READS = new Set(['get', 'has', 'keys', 'values', 'entries']);
+
 function createReadOnlyMapProxy(inner) {
-  const MUTATORS = new Set(['set', 'delete', 'clear']);
   return new Proxy(inner, {
-    get(target, prop) {
-      if (MUTATORS.has(prop)) {
+    get(target, prop, receiver) {
+      if (READONLY_MAP_MUTATORS.has(prop)) {
         return () => { throw new TypeError('dataset is frozen: derived index maps cannot be mutated'); };
       }
-      const v = Reflect.get(target, prop, target);
-      return typeof v === 'function' ? v.bind(target) : v;
+      if (prop === 'size') return Reflect.get(target, 'size', target);
+      if (prop === 'forEach') {
+        // The native Map.prototype.forEach passes the MAP ITSELF as the
+        // callback's third argument; hand the callback the proxy instead.
+        return (callback, thisArg) => {
+          if (typeof callback !== 'function') throw new TypeError(`${typeof callback} is not a function`);
+          for (const [k, v] of target.entries()) callback.call(thisArg, v, k, receiver);
+        };
+      }
+      // Read-only accessors/iterators: binding to the inner Map is safe —
+      // their `this` is only used for reads and their results (values and
+      // fresh iterator objects) never expose the Map itself.
+      if (READONLY_MAP_BOUND_READS.has(prop) || prop === Symbol.iterator) {
+        const v = Reflect.get(target, prop, target);
+        return typeof v === 'function' ? v.bind(target) : v;
+      }
+      // Everything else (valueOf, toString, constructor, custom symbols …)
+      // is returned UNBOUND: invoked as proxy.method() the `this` is the
+      // proxy, so valueOf() yields the proxy — never the inner Map.
+      return Reflect.get(target, prop, target);
     },
     set() { throw new TypeError('dataset is frozen: derived index maps cannot be mutated'); },
     deleteProperty() { throw new TypeError('dataset is frozen: derived index maps cannot be mutated'); },
@@ -105,10 +129,9 @@ function freezeDeepAndWrap(value, depth, cache) {
   if (cache.has(value)) return cache.get(value);
   if (value instanceof Map) {
     const inner = new Map();
-    cache.set(value, inner); // placeholder first, for cycle safety
-    for (const [k, v] of value.entries()) inner.set(k, freezeDeepAndWrap(v, depth + 1, cache));
     const proxy = createReadOnlyMapProxy(inner);
-    cache.set(value, proxy);
+    cache.set(value, proxy); // placeholder for cycle safety — always the proxy, never the inner Map
+    for (const [k, v] of value.entries()) inner.set(k, freezeDeepAndWrap(v, depth + 1, cache));
     return proxy;
   }
   if (Array.isArray(value)) {

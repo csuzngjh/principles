@@ -543,6 +543,34 @@ describe('freeze real-run gate (fail-closed)', () => {
     // Nothing changed — the verified snapshot still passes.
     expect(verifyDatasetIntegrity(dataset)).toMatchObject({ ok: true, derivedIndexesBound: true });
   });
+
+  // ── Owner review round 5 — no internal-object leak through the readonly proxy ──
+  it('valueOf() yields the proxy itself, never the mutable inner Map (round 5)', () => {
+    const revealed = (dataset.tasksById as any).valueOf();
+    expect(revealed).toBe(dataset.tasksById); // the proxy, not the inner Map
+    // Even if a caller chains prototype attacks through the revealed value,
+    // it is still the read-only proxy: the inner Map is unreachable.
+    expect(() => Map.prototype.set.call(revealed, 'rogue', {})).toThrow();
+    expect(verifyDatasetIntegrity(dataset)).toMatchObject({ ok: true });
+  });
+
+  it('forEach hands the callback the READ-ONLY proxy as its third argument (round 5)', () => {
+    const seen: unknown[] = [];
+    let observed = 0;
+    dataset.tasksById.forEach((value, key, mapArg) => {
+      seen.push(mapArg);
+      observed += 1;
+      // The third argument IS the readonly proxy — every mutation route fails.
+      expect(mapArg).toBe(dataset.tasksById);
+      expect(() => Map.prototype.set.call(mapArg, 'rogue', {})).toThrow();
+      expect(() => (mapArg as any).set('rogue', {})).toThrow();
+      expect(() => Map.prototype.delete.call(mapArg, key)).toThrow();
+    });
+    expect(observed).toBe(dataset.tasks.tasks.length);
+    expect(new Set(seen).size).toBe(1); // every callback saw the same proxy
+    // The underlying indexes are untouched by all attempted attacks.
+    expect(verifyDatasetIntegrity(dataset)).toMatchObject({ ok: true, derivedIndexesBound: true });
+  });
 });
 
 describe('ledger availability four-way classification', () => {

@@ -18,6 +18,8 @@
 > **Owner Review 第三轮修复（2026-10-23，head `aa8cbf5a3` 审查意见）**：五项——Owner 批准未绑定完整协议（studyId+正文+全部条目）、runningCommitSha 可缺省、status 未复用 Core 权威枚举、FZ-01 信任加载时缓存哈希、宽松空账本输出误导性 M2/M3 零值。全部修复见 **§8 第三轮修复记录**，回归由 72 项扩至 75 项。
 >
 > **Owner Review 第四轮修复（2026-10-23，head `cd4e271bc` 审查意见）**：三项——`verifyDatasetIntegrity()` 派生索引校验不足且 Map 防变异可被原型方法绕过、status 应直用规范权威常量 `PRINCIPLE_STATUSES` 而非从 schema 提取、不可测账本状态的 M4/M5 等指标仍输出伪零。全部修复见 **§9 第四轮修复记录**，回归由 75 项扩至 87 项。
+>
+> **Owner Review 第五轮定向修复（2026-10-23，head `0c10bb895` 审查意见）**：只读 Map Proxy 的内部对象泄漏——`valueOf()` 因无差别 bind 返回内部 Map、`forEach` 原生实现把内部 Map 作为回调第三参数传出（两者均可被 `Map.prototype.set.call` 直接变异内部索引）。修复见 **§10**，回归由 87 项扩至 89 项。
 
 ---
 
@@ -464,3 +466,40 @@ git diff --check → OK；变更仅 PRR 实验室 3 文件 + 测试 + 报告，�
 - 其余 Owner 待决清单（§4）不变。
 
 **第四轮修复后状态收口：离线能力 GO（三项已修复并复验）；真实 M1～M5 NOT_MEASURED；真实 A/C NOT_RUN；Gate B BLOCKED；Gate C NOT_GRANTED。**
+
+---
+
+## 10. Owner Review 第五轮定向修复记录（2026-10-23，head `0c10bb895` 审查意见）
+
+### 10.1 只读 Map Proxy 的内部对象泄漏（prr-dataset.mjs `createReadOnlyMapProxy`）
+
+两个泄漏点经实测**全部属实**（修复前探针：`valueOf()` 返回内部 Map 且 `Map.prototype.set.call(v,…)` 变异成功；`forEach` 回调第三参数为内部 Map 且全部 13 次迭代中攻击均成功）：
+
+| 泄漏点 | 修复前 | 修复后 |
+|---|---|---|
+| `valueOf()` | get trap 无差别 `bind(target)`——`Object.prototype.valueOf` 绑定内部 Map 后调用返回内部 Map 本体，原型攻击可直接变异索引 | 不再无条件 bind：白名单之外的方法原样返回（未绑定）——`proxy.valueOf()` 的 `this` 是代理自身，返回代理而非内部 Map |
+| `forEach` 第三参数 | 原生 `Map.prototype.forEach.bind(target)` 把内部 Map 作为回调第三参数传出 | `forEach` 重实现：遍历 inner entries，回调第三参数显式传**只读代理**（receiver）；非函数回调 loud 抛错 |
+| 无差别 bind | 所有函数属性一律 `bind(target)` | 仅白名单读方法（get/has/keys/values/entries/Symbol.iterator——`this` 只用于读、返回值与新建迭代器不暴露 Map）保持绑定；其余一切原样返回 |
+
+兼容性保持：`instanceof Map`、get/has/size/迭代/for-of/展开 全部不变（本机实测 13 条目 size/展开/for-of 一致）。附带的循环引用占位细节同步修正（cache 占位始终为代理，不再短暂暴露 inner）。
+
+新增回归测试（2 项）：`valueOf() yields the proxy itself, never the mutable inner Map`——断言返回值即代理、经其发起的原型攻击抛错、事后 integrity ok；`forEach hands the callback the READ-ONLY proxy as its third argument`——逐条目断言第三参数即代理、原型/直接两种攻击均抛错、13 条目全部观察到同一代理、事后 `ok:true` + `derivedIndexesBound:true`。既有四种 `Map.prototype.*.call()` 攻击测试继续通过。
+
+### 10.2 第五轮验证证据
+
+```text
+cd scripts && npx vitest run __tests__/prr-ac-lab.test.ts __tests__/prr-freeze-readonly.test.ts
+  → Test Files 2 passed, Tests 89 passed (89)
+npm run test:scripts
+  → Test Files 50 passed, Tests 983 passed (983)
+npm run dev:prr-rehearsal
+  → rehearsal gate: PASS（studyHash=338a07723aff5d5f7b00e33a5d6c5a19472bd24f0b1ad947edb4cd433c407dd4）
+双跑 cmp rehearsal-result.json → 字节同一；npx eslint scripts/dev/principle-learning-lab/prr/ → 0 error
+git diff --check → OK；变更仅 prr-dataset.mjs + 测试 + 报告，生产源码零改动
+```
+
+### 10.3 第五轮剩余限制
+
+沿用 §8.7/§9.5 各项（runningCommitSha 受信来源、verifier 信任根归属 O-05、Core 宽松解析源头收紧超边界）。只读代理的引擎行为依赖与 §9.5 相同。
+
+**第五轮修复后状态收口：离线能力 GO；真实 M1～M5 NOT_MEASURED；真实 A/C NOT_RUN；Gate B BLOCKED；Gate C NOT_GRANTED。**
