@@ -458,6 +458,10 @@ runtime_scheduling:
 
 ### 9.4 runtime.yaml
 
+> ⚠️ 历史设计，代码中无加载点（`default_kind` / `runtime-scheduling.yaml` 在仓库内零命中）。
+> 其中的 `openclaw_cli` 后端已由 [ADR-0029](../adr/0029-openclaw-subagent-runtime-retired.md)
+> 正式退役，内置代理运行时以 `.pd/config.yaml` 的 `pi-ai` profile 为唯一权威；本节示例不得作为实现依据。
+
 ```yaml
 # {workspace}/.pd/config/runtime.yaml
 runtime:

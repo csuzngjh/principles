@@ -3,6 +3,10 @@
 - 状态：Proposed
 - 日期：2026-09-09
 - 关联：PRI-633、DPB-07（PR #399，milestone v2.5，m6-03）
+- 作用域（2026-10-23 追加）：[ADR-0029](0029-openclaw-subagent-runtime-retired.md) 已退役
+  `OpenClawCliRuntimeAdapter`。下文第 4 条的 OpenClaw 分支与「后果·负向」里的 message
+  文件格式变化自此只作为历史记录保留；systemPrompt 折叠语义现在只在 pi-ai / L2 适配器
+  路径上生效。历史正文按 AGENTS.md §3.1 不重写。
 
 ## 背景
 
