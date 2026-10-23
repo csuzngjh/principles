@@ -140,7 +140,7 @@ async function main() {
           expectedBudget: budget,
         }),
         pricing: budget?.costBasisRef
-          ? await trusted({ kind: 'cost-basis', reference: budget.costBasisRef, provider: budget.provider, model: budget.model })
+          ? await trusted({ kind: 'cost-basis', reference: budget.costBasisRef, provider: budget.provider, model: budget.model, expectedBudget: budget })
           : null,
       };
     } catch (error) {
