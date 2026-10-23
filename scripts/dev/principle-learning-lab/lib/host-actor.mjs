@@ -323,12 +323,22 @@ export function createCodexHostTransport({
       let settled = false;
       let timedOut = false;
       const startedAt = Date.now();
+      // PROMPT VIA STDIN (rc): `codex exec -` reads the instructions from
+      // stdin. Windows CreateProcess quoting is unreliable for multi-line
+      // argv values (a multi-line prompt arg reaches codex truncated, which
+      // then waits on stdin and exits 1) — the pipe is the exact, tested
+      // channel. `-` marks the prompt position explicitly on both exec and
+      // `exec resume`.
+      const childArgs = [...args, '-'];
       try {
-        child = spawnProcess(codexBin, [...args, promptText], { cwd: scratchRoot, stdio: ['ignore', 'pipe', 'pipe'] });
+        child = spawnProcess(codexBin, childArgs, { cwd: scratchRoot, stdio: ['pipe', 'pipe', 'pipe'] });
       } catch (err) {
-        reject(Object.assign(new Error(`codex spawn failed: ${err?.message ?? String(err)}`), { code: 'spawn_failed' }));
+        reject(Object.assign(new Error(`codex spawn failed: ${err?.message ?? String(err)}`), { code: 'spawn_failed', wallMs: 0 }));
         return;
       }
+      child.stdin?.on('error', () => { /* EPIPE if codex exits early — the close handler reports the real failure */ });
+      child.stdin?.write(promptText, 'utf8');
+      child.stdin?.end();
       const timer = setTimeout(() => {
         timedOut = true;
         try { child.kill('SIGKILL'); } catch { /* already gone */ }

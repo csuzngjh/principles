@@ -77,9 +77,6 @@ function fakeSpawn(script: (args: string[], prompt: string) => RoundSpec | Round
   const calls: { args: string[]; prompt: string }[] = [];
   const fn = script as (args: string[], prompt: string) => RoundSpec | RoundSpec[];
   const spawnFn = (_bin: string, args: string[], _opts: any) => {
-    const prompt = String(args[args.length - 1]);
-    calls.push({ args, prompt });
-    const spec = (Array.isArray(fn) ? (fn as any)[calls.length - 1] : fn(args, prompt)) as RoundSpec;
     const child = new EventEmitter() as any;
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
@@ -89,25 +86,35 @@ function fakeSpawn(script: (args: string[], prompt: string) => RoundSpec | Round
       queueMicrotask(() => child.emit('close', null));
       return true;
     };
-    const text = [
-      ...spec.events.map((e) => JSON.stringify(e)),
-      ...(spec.rawLines ?? []),
-    ].join('\n') + (spec.exitCode !== undefined && spec.exitCode !== 0 ? '' : '\n');
-    queueMicrotask(() => {
-      if (spec.emitError) {
-        child.emit('error', new Error('simulated spawn error'));
-        return;
-      }
-      const step = spec.chunkEvery ?? 7; // small odd chunks force reassembly
-      for (let i = 0; i < text.length; i += step) child.stdout.emit('data', Buffer.from(text.slice(i, i + step), 'utf8'));
-      if (spec.exitCode !== undefined && spec.exitCode !== 0) child.stderr.emit('data', Buffer.from('simulated failure', 'utf8'));
-      if (spec.hangMs !== undefined) {
-        // never closes within the test window — the timeout must kill it
-      } else {
-        child.exitCode = spec.exitCode ?? 0;
-        child.emit('close', spec.exitCode ?? 0);
-      }
-    });
+    // prompt arrives via stdin (multi-line argv is unreliable on Windows);
+    // the scripted round only starts once the prompt stream closes.
+    const chunks: Buffer[] = [];
+    child.stdin = new EventEmitter() as any;
+    child.stdin.write = (chunk: any) => { chunks.push(Buffer.from(chunk)); return true; };
+    child.stdin.end = () => {
+      const prompt = Buffer.concat(chunks).toString('utf8');
+      calls.push({ args, prompt });
+      const spec = (Array.isArray(fn) ? (fn as any)[calls.length - 1] : fn(args, prompt)) as RoundSpec;
+      const text = [
+        ...spec.events.map((e) => JSON.stringify(e)),
+        ...(spec.rawLines ?? []),
+      ].join('\n') + (spec.exitCode !== undefined && spec.exitCode !== 0 ? '' : '\n');
+      queueMicrotask(() => {
+        if (spec.emitError) {
+          child.emit('error', new Error('simulated spawn error'));
+          return;
+        }
+        const step = spec.chunkEvery ?? 7; // small odd chunks force reassembly
+        for (let i = 0; i < text.length; i += step) child.stdout.emit('data', Buffer.from(text.slice(i, i + step), 'utf8'));
+        if (spec.exitCode !== undefined && spec.exitCode !== 0) child.stderr.emit('data', Buffer.from('simulated failure', 'utf8'));
+        if (spec.hangMs !== undefined) {
+          // never closes within the test window — the timeout must kill it
+        } else {
+          child.exitCode = spec.exitCode ?? 0;
+          child.emit('close', spec.exitCode ?? 0);
+        }
+      });
+    };
     return child;
   };
   return { spawnFn, calls };
@@ -153,7 +160,9 @@ describe('session lifecycle and resume discipline', () => {
     expect(calls).toHaveLength(3);
     expect(calls[0].args[0]).toBe('exec'); // first round: plain exec
     expect(calls[0].args).not.toContain('resume');
+    expect(calls[0].args[calls[0].args.length - 1]).toBe('-'); // prompt rides stdin, argv marker only
     expect(calls[1].args.slice(0, 3)).toEqual(['exec', 'resume', SESSION_ID]); // same session id
+    expect(calls[1].args[calls[1].args.length - 1]).toBe('-');
     expect(calls[2].args[0]).toBe('exec'); // new opportunity → NEW session
     expect(calls[2].args).not.toContain('resume');
     const snap = transport.hostSnapshot();
