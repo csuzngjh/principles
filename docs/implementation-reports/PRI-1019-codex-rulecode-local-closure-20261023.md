@@ -38,7 +38,7 @@
 
 最终代码 SHA-256：`1f7783cd9aefb6ba10063776abc136bc20639aee5a0aee3725458bb151d9acef`。
 
-原 21 案并非全盲；部分案例早已反馈给模型，本轮不同命令反例也进入修订反馈。另 3 个新增有效情景构成最终 24 项：其中 18 个合法上下文做规则回放，7 个输入校验拒绝。早期辅助脚本把 unapproved 误匹配为 approved、抹平了事实差异，其结果已作废，不能引用旧 independent-replay.json 声称质量通过。
+原 21 案并非全盲；部分案例早已反馈给模型，本轮不同命令反例也进入修订反馈。复用原 20 项冻结样例及原报告中的第 21 项复合命令，再加 4 项新情景，共 25 项：其中 18 个合法上下文做规则回放，7 个输入校验拒绝。早期辅助脚本把 unapproved 误匹配为 approved、抹平了事实差异，其结果已作废，不能引用旧 independent-replay.json 声称质量通过。
 
 长期回归位于 host-runtime/tests/fixtures/pri1019-generated-design-gate.json：代码字节不变；命令、路径及引用已脱敏，明确为 counterfactual 测试，绝非真实历史 Owner 批准。始终放行/始终阻止负控均失败。
 
