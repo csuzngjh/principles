@@ -27,7 +27,8 @@
 //
 // Environment: LINEAR_API_KEY (or ~/.linear_api_key) — read via the existing
 // linear-cli client; never logged. LINEAR_OWNER_NAME may override the Owner
-// display-name check (default: the workspace's single Owner, "gong wesley").
+// display-name kept for DIAGNOSTICS ONLY (LINEAR_OWNER_NAME) — authorization
+// is decided by the STABLE USER ID binding below (owner review round 8).
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -35,8 +36,20 @@ import path from 'node:path';
 
 export const LINEAR_ISSUE = 'PRI-1001';
 export const APPROVAL_MARKER = '[PRR-FREEZE-APPROVAL]';
-const DEFAULT_OWNER_NAME = 'gong wesley';
 const LINEAR_ENDPOINT = process.env.LINEAR_GRAPHQL_URL || 'https://api.linear.app/graphql';
+
+/**
+ * TRUST ROOT (owner review round 8): the expected Owner's STABLE Linear user
+ * id. It MUST come from deployment-level trusted configuration
+ * (LINEAR_OWNER_ID env) — never from execution arguments, never from the
+ * signing comment itself. Unconfigured = every signature refuses
+ * (fail-closed); LINEAR_OWNER_NAME remains display/diagnostic only and can
+ * NEVER satisfy the identity check on its own.
+ */
+export function expectedOwnerId() {
+  const id = process.env.LINEAR_OWNER_ID;
+  return typeof id === 'string' && id.trim() !== '' ? id.trim() : null;
+}
 
 /**
  * Minimal Linear read client. Token resolution mirrors the linear-cli order
@@ -74,7 +87,7 @@ export async function linearRequest(query, variables) {
 }
 
 function ownerName() {
-  return process.env.LINEAR_OWNER_NAME || DEFAULT_OWNER_NAME;
+  return process.env.LINEAR_OWNER_NAME || '(display name not configured)';
 }
 
 function parseApprovalBlock(body) {
@@ -105,7 +118,7 @@ async function fetchApprovalComments(client) {
           nodes {
             body
             createdAt
-            user { name email active }
+            user { id name active }
           }
         }
       }
@@ -115,29 +128,42 @@ async function fetchApprovalComments(client) {
   return nodes;
 }
 
-/** Authoritative read: the Owner's freeze-approval comment on PRI-1001. */
+/** Authoritative read: the Owner's freeze-approval comment on PRI-1001.
+ * Author identity is bound to the STABLE Linear user id from trusted
+ * deployment configuration (LINEAR_OWNER_ID) — display names never decide
+ * authorization (owner review round 8). */
 export async function fetchOwnerApproval({ client } = {}) {
-  const c = client ?? createClient();
-  const nodes = await fetchApprovalComments(c);
-  const owner = ownerName();
+  const nodes = await fetchApprovalComments(client);
+  const expectedId = expectedOwnerId();
+  if (expectedId === null) {
+    // Fail-closed: without trusted deployment configuration identifying the
+    // Owner, NO signature can be accepted — regardless of its content.
+    return { verified: false, reason: 'expected Owner id is not configured (LINEAR_OWNER_ID) — no signature can be attributed to the Owner (fail-closed)' };
+  }
+  const diagnosticName = ownerName();
   const candidates = [];
   for (const node of nodes) {
-    const authorName = node?.user?.name ?? '';
+    const authorId = typeof node?.user?.id === 'string' ? node.user.id : null;
+    const authorName = node?.user?.name ?? '(no author)';
     const fields = parseApprovalBlock(node?.body);
     if (!fields) continue;
-    candidates.push({ authorName, createdAt: node.createdAt, active: node.user?.active !== false, fields });
+    candidates.push({ authorId, authorName, createdAt: node.createdAt, active: node.user?.active !== false, fields });
   }
   if (candidates.length === 0) {
     return { verified: false, reason: `no ${APPROVAL_MARKER} comment found on ${LINEAR_ISSUE}` };
   }
-  // The LATEST comment by the configured Owner identity wins. Sort by
+  // The LATEST comment authored by the configured Owner ID wins. Sort by
   // createdAt ourselves — never trust the transport's ordering.
-  const byOwner = candidates.filter((c) => c.authorName === owner)
+  const byOwner = candidates.filter((c) => c.active && c.authorId === expectedId)
     .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
   if (byOwner.length === 0) {
-    return { verified: false, reason: `approval-marker comments exist but none by the configured Owner ("${owner}"); authors seen: ${[...new Set(candidates.map((c) => c.authorName))].join(', ')}` };
+    const authorsSeen = [...new Set(candidates.map((c) => `${c.authorName}${c.authorId ? ` (id ${c.authorId.slice(0, 8)}…)` : ' (no id)'}`))].join(', ');
+    return {
+      verified: false,
+      reason: `approval-marker comments exist but none by the configured Owner id ${expectedId.slice(0, 8)}… (diagnostic display name: "${diagnosticName}"); authors seen: ${authorsSeen}`,
+    };
   }
-  const latest = byOwner[0]; // orderBy createdAtDesc
+  const latest = byOwner[0]; // newest first
   const fields = latest.fields;
   const missing = Object.entries(fields).filter(([, v]) => v === null).map(([k]) => k);
   if (fields.approved === null) missing.push('approved:yes');
@@ -148,6 +174,7 @@ export async function fetchOwnerApproval({ client } = {}) {
     verified: true,
     approved: true,
     attestedAt: latest.createdAt,
+    authorId: latest.authorId,
     author: latest.authorName,
     decisionRef: fields.decisionRef,
     approvedProtocolDigest: fields.protocolDigest,
@@ -171,7 +198,15 @@ export async function verify(req) {
   const clientOverride = typeof req.client === 'object' ? req.client : undefined; // test injection only
 
   if (req.kind === 'owner-decision') {
-    const approval = await fetchOwnerApproval(clientOverride ? { client: clientOverride } : {});
+    // Transport/parse failures are part of the fail-closed contract: they
+    // become a verified:false refusal with the reason — never an exception
+    // that a caller might mishandle into a default-allow.
+    let approval;
+    try {
+      approval = await fetchOwnerApproval(clientOverride ? { client: clientOverride } : {});
+    } catch (error) {
+      return { verified: false, reason: `authoritative identity lookup failed: ${error instanceof Error ? error.message : String(error)}` };
+    }
     if (!approval.verified) return { verified: false, reason: approval.reason };
 
     // Strict reconciliation against the runner's expectations — every field
@@ -197,7 +232,13 @@ export async function verify(req) {
   }
 
   if (req.kind === 'cost-basis') {
-    const approval = await fetchOwnerApproval(clientOverride ? { client: clientOverride } : {});
+    // Same fail-closed contract: lookup failures become verified:false.
+    let approval;
+    try {
+      approval = await fetchOwnerApproval(clientOverride ? { client: clientOverride } : {});
+    } catch (error) {
+      return { verified: false, reason: `authoritative identity lookup failed: ${error instanceof Error ? error.message : String(error)}` };
+    }
     if (!approval.verified) return { verified: false, reason: approval.reason };
     if (approval.costBasisRef !== req.reference) {
       return { verified: false, reason: `the Owner approval does not cover this pricing schedule (attested ${String(approval.costBasisRef)} vs requested ${String(req.reference)})` };
