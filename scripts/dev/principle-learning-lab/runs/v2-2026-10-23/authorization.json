@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "g2-real-run-authorization.v1",
+  "studyId": "PLE-PILOT-02-G",
+  "note": "v2 mechanism-validation authorization DRAFT (PENDING OWNER APPROVAL). Five conditions E0/G/EA/EB/EN x 3 seeds on the PLE-PILOT-02 dataset (fixtures-v2: G generic-context control + P3 affordance repair). Route identical to the completed rounds: external zai-coding-cn/glm-5.3-flash through createAuthorizedPiTransport + the P1-01 HTTP/USD ledger. Caps recomputed for 15 arm-runs (5 conditions x 3 seeds): study ceiling 3840 = 15 x 256 arm cap; USD ceilings $0.50/arm-run and $7.50/study are list-price shadow reservations (Coding Plan draws fixed quota, never reported as billing).",
+  "od1": {
+    "approved": false,
+    "decisionRef": "owner-decision.json",
+    "frozenFixtureHash": "04f732e9afdc1dd0f24824ace1b40287eff37b209750f7f664dbf72ed0b21c30",
+    "preregistrationHash": "7bc7388b1c109fb2afeabe99eadd5cd8a2d416003302915a9e92136ec849b74f"
+  },
+  "od2": {
+    "provider": "zai-coding-cn",
+    "model": "glm-5.3-flash",
+    "apiKeyEnv": "ZAI_CODING_CN_API_KEY",
+    "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
+    "credentialsAvailable": true,
+    "perRunCostCapUsd": 0.5,
+    "totalCostCapUsd": 7.5,
+    "costBasisRef": "cost-basis.json",
+    "costBasis": {
+      "provider": "zai-coding-cn",
+      "model": "glm-5.3-flash",
+      "currency": "USD",
+      "inputUsdPerMillionTokens": 0.15,
+      "outputUsdPerMillionTokens": 0.5,
+      "cacheReadUsdPerMillionTokens": 0.03,
+      "maxInputTokensPerRequest": 8192,
+      "maxOutputTokensPerRequest": 1024,
+      "effectiveDate": "2026-10-23"
+    },
+    "httpRequestsPerOpportunity": 48,
+    "httpRequestsPerArm": 256,
+    "httpRequestsPerStudy": 3840,
+    "stopCondition": "hierarchical ledger exhaustion (opportunity 48 / arm 256 / study 3840 requests; USD ceilings above) or preregistered study stop conditions (judge leak INVALID_PROTOCOL), whichever first; partial results reported as-is",
+    "costBillingSemantics": "Coding Plan fixed quota — plan draws recorded from provider usage fields; the USD ledger reserves list-price ceilings pre-send and never represents actual billing"
+  },
+  "od3": {
+    "seeds": 3,
+    "executionOrder": [
+      "E0",
+      "EA",
+      "EB",
+      "EN",
+      "G"
+    ],
+    "frozen": true,
+    "armOrderNote": "executionOrder lists the dataset history enumeration (gate contract). ARM plan order (formal-v2): E0 -> G -> EA -> EB -> EN, fixed paired order per seed; seeds repeat the same order in fully isolated sessions"
+  }
+}

@@ -32,6 +32,7 @@ import {
   allOpportunities,
   goldFor,
   loadDataset,
+  renderHistoryText,
   sha256,
 } from '../dev/principle-learning-lab/lib/fixture.mjs';
 import { ACTION_COSTS } from '../dev/principle-learning-lab/lib/oracle.mjs';
@@ -450,5 +451,198 @@ describe('real arm + real study (offline rehearsal, all four arms)', () => {
     expect(run.stopped?.atArm).toBe('EA:REAL_ACTOR_I0');
     expect(run.arms.map((a: any) => a.historyId)).toEqual(['E0', 'EA']); // EB never started
     expect(run.adjudications.some((r: any) => r.dataQualityFlag === 'INVALID_PROTOCOL')).toBe(true);
+  });
+});
+
+describe('C-A same-channel content conditions (policy | summary | raw | none)', () => {
+  // A deterministic "summarizer": answers the #history-summary call with a
+  // distinctive reference record, delegates everything else to the policy model.
+  const summaryMarker = '[EA-summary-marker] reference record: retry-limit incident, escaped consumer, 3h lost, lesson recorded.';
+  const summaryCapableModel = (req: any): { payload: any } => {
+    if (String(req.taskId).endsWith('#history-summary')) {
+      return { payload: { summaryText: summaryMarker } };
+    }
+    return offlinePolicyModel(req);
+  };
+
+  it('summary condition: one same-shape call ({summaryText}, 1024 tokens, free-form path), frozen verbatim, delivered same-channel', async () => {
+    const transport = createFakeActorTransport({ rounds: summaryCapableModel });
+    const { arm } = await runRealArm({ dataset, historyId: 'EA', transport, studyId: 'S', contentMode: 'summary' });
+    expect(arm.armId).toBe('EA:REAL_ACTOR_I0:summary');
+    expect(arm.frozenCandidate.sourceStage).toBe('model-summary');
+    expect(arm.frozenCandidate.deliveredRepresentation).toBe('model_summary_text');
+    expect(arm.frozenCandidate.policyText).toBe(summaryMarker);
+    expect(arm.frozenCandidate.contentHash).toBe(sha256(summaryMarker));
+    expect(arm.delivery.payloadText).toBe(summaryMarker); // delivered bytes == frozen bytes
+    expect(arm.generation).toMatchObject({ stage: 'model-summary', requests: 1, failure: null });
+
+    const summaryCalls = transport.calls().filter((c: any) => String(c.taskId).endsWith('#history-summary'));
+    const i0Calls = transport.calls().filter((c: any) => String(c.taskId).endsWith('#i0-reflection'));
+    expect(summaryCalls).toHaveLength(1);   // exactly ONE generation call
+    expect(i0Calls).toHaveLength(0);        // the summary condition never runs the policy prompt
+    expect(summaryCalls[0].maxTokens).toBe(1024);    // same budget as I0 (fairness)
+    expect(summaryCalls[0].outputSchemaRef).toBeNull(); // same free-form path as I0
+    // the summarizer saw the history text it was asked to summarize (a real EA fact)
+    expect(summaryCalls[0].userPrompt).toContain('PLAT-2214');
+  });
+
+  it('raw condition: ZERO generation calls — the frozen history bytes are the delivered content', async () => {
+    const transport = createFakeActorTransport({ rounds: offlinePolicyModel });
+    const { arm } = await runRealArm({ dataset, historyId: 'EA', transport, studyId: 'S', contentMode: 'raw' });
+    expect(arm.armId).toBe('EA:REAL_ACTOR_I0:raw');
+    expect(arm.frozenCandidate.sourceStage).toBe('raw-history');
+    expect(arm.frozenCandidate.deliveredRepresentation).toBe('raw_history_text');
+    const historyText = renderHistoryText(dataset.histories.EA);
+    expect(arm.frozenCandidate.policyText).toBe(historyText); // bytes identical, no rewriting
+    expect(arm.delivery.payloadText).toBe(historyText);
+    expect(arm.delivery.payloadText.length).toBeLessThanOrEqual(arm.delivery.budgetChars); // fits the shared channel budget
+    expect(arm.generation).toMatchObject({ stage: 'raw-history', requests: 0, failure: null });
+    // every transport call is an actor round — no generation call of any kind
+    const generationCalls = transport.calls().filter((c: any) => /#(i0-reflection|history-summary)$/.test(String(c.taskId)));
+    expect(generationCalls).toHaveLength(0);
+    // and the actor rounds DID receive the raw history through the channel
+    const roundCalls = transport.calls().filter((c: any) => /#P\d/.test(String(c.taskId)));
+    expect(roundCalls.length).toBeGreaterThan(0);
+    for (const call of roundCalls) expect(call.userPrompt).toContain('--- applied context ---');
+  });
+
+  it('none condition on a non-empty history: no generation call, empty payload, transparent sentinel freeze', async () => {
+    const transport = createFakeActorTransport({ rounds: offlinePolicyModel });
+    const { arm } = await runRealArm({ dataset, historyId: 'EA', transport, studyId: 'S', contentMode: 'none' });
+    expect(arm.armId).toBe('EA:REAL_ACTOR_I0:none');
+    expect(arm.delivery.payloadText).toBe('');
+    expect(arm.frozenCandidate.deliveredRepresentation).toBe('none');
+    expect(arm.frozenCandidate.policyText).toContain('[none-arm:');
+    expect(arm.generation).toMatchObject({ stage: 'none', requests: 0, failure: null });
+    const generationCalls = transport.calls().filter((c: any) => /#(i0-reflection|history-summary)$/.test(String(c.taskId)));
+    expect(generationCalls).toHaveLength(0);
+  });
+
+  it('runs the full four-way C-A contrast on EA end-to-end with a valid sidecar and per-condition isolation', async () => {
+    const transportsByArm = new Map<string, any>();
+    const run = await runRealStudy({
+      dataset,
+      studyId: 'PLE-PILOT-01-CA-REHEARSAL',
+      armSpecs: [
+        { historyId: 'EA', contentMode: 'policy' },
+        { historyId: 'EA', contentMode: 'summary' },
+        { historyId: 'EA', contentMode: 'raw' },
+        { historyId: 'EA', contentMode: 'none' },
+      ],
+      transportForArm: (historyId: string, _ledger: any, contentMode: string) => {
+        const t = createFakeActorTransport({ rounds: summaryCapableModel });
+        transportsByArm.set(`${historyId}:${contentMode}`, t);
+        return t;
+      },
+    });
+    expect(run.stopped).toBeNull();
+    expect(run.arms.map((a: any) => a.armId)).toEqual([
+      'EA:REAL_ACTOR_I0',
+      'EA:REAL_ACTOR_I0:summary',
+      'EA:REAL_ACTOR_I0:raw',
+      'EA:REAL_ACTOR_I0:none',
+    ]);
+    expect(run.adjudications).toHaveLength(4 * allOpportunities(dataset).length);
+
+    // Same-channel invariance: identical channel/position/budget — only content differs.
+    const deliveries = run.arms.map((a: any) => a.delivery);
+    for (const d of deliveries) {
+      expect(d.channel).toBe('research-same-channel-v1');
+      expect(d.position).toBe('after-task-text');
+      expect(d.budgetChars).toBe(2000);
+    }
+    const payloadTexts = new Set(deliveries.map((d: any) => d.payloadText));
+    expect(payloadTexts.size).toBe(4); // four distinct contents: policy marker, summary marker, raw history bytes, empty
+
+    // Per-condition isolation: each arm's actor rounds contain ONLY its own
+    // payload — every condition's distinctive marker appears in its own arm
+    // and in no other (the raw condition's marker is its history header).
+    const MARKERS: Record<string, string> = {
+      policy: '[EA-policy-marker]',
+      summary: summaryMarker,
+      raw: '## Learning history: EA',
+    };
+    for (const [key, transport] of transportsByArm) {
+      const mode = key.split(':')[1];
+      const roundCalls = transport.calls().filter((c: any) => !/#(i0-reflection|history-summary)$/.test(String(c.taskId)));
+      expect(roundCalls.length).toBeGreaterThan(0);
+      for (const call of roundCalls) {
+        const text = `${call.systemPrompt}\n${call.userPrompt}`;
+        if (mode !== 'none') expect(text).toContain(MARKERS[mode]);
+        for (const other of Object.keys(MARKERS)) {
+          if (other !== mode) expect(text).not.toContain(MARKERS[other]);
+        }
+      }
+    }
+
+    // The whole contrast study validates against the sidecar contract
+    // (coverage: 4 arms × 5 opportunities, no duplicates, canary-clean inputs).
+    const study = buildStudySidecar({
+      dataset,
+      studyId: 'PLE-PILOT-01-CA-REHEARSAL',
+      arms: run.arms,
+      claims: [
+        {
+          claimId: 'C-A',
+          contrastId: 'real-candidate-vs-summary-vs-raw-vs-none',
+          competingExplanations: ['fake-transport rehearsal cannot estimate anything about real agents'],
+          analysisUnit: 'paired probe',
+          status: 'NOT_ESTIMABLE',
+          interpretation: 'Offline wiring rehearsal with a deterministic fake transport — the four conditions are mechanically executable, but nothing here supports any abstraction-value claim.',
+        },
+      ],
+      assignment: { randomization: 'none — deterministic offline rehearsal', executionOrder: run.arms.map((a: any) => a.armId), repetitions: 1 },
+      runtime: {
+        host: 'offline-rehearsal',
+        model: 'fake-deterministic-policy-transport',
+        costModel: 'zero-offline-mock',
+        llmJudge: 'NOT_SUPPORTED (mechanical oracle only)',
+        pipelineReachabilityPolicy: 'real-actor rehearsal arms are NOT_REACHED — no PD activation exists or is claimed',
+      },
+    });
+    const problems = validateSidecar({
+      dataset,
+      study,
+      adjudications: run.adjudications,
+      actorInputs: run.actorInputs,
+      knownStrategyIds: new Set([REAL_ACTOR_STRATEGY_ID]),
+    });
+    expect(problems).toEqual([]);
+  });
+
+  it('summary generation failure is an honest arm outcome: sentinel freeze, empty delivery, visible data-quality reason, actor still scored', async () => {
+    const failingSummary = (req: any) => {
+      if (String(req.taskId).endsWith('#history-summary')) {
+        return { payload: { notTheField: true } }; // invalid shape → invalid_output
+      }
+      return offlinePolicyModel(req);
+    };
+    const { arm, adjudications } = await runRealArm({
+      dataset, historyId: 'EA', transport: createFakeActorTransport({ rounds: failingSummary }), studyId: 'S', contentMode: 'summary',
+    });
+    expect(arm.generation.failure?.kind).toBe('invalid_output');
+    expect(arm.delivery.payloadText).toBe(''); // empty-channel receipt, not fabricated content
+    expect(arm.frozenCandidate.policyText).toContain('[none-arm:');
+    expect(adjudications.length).toBe(allOpportunities(dataset).length); // every opportunity still scored
+    expect(adjudications.every((r: any) => r.dataQualityReasons.some((reason: string) => reason.startsWith('model-summary:')))).toBe(true);
+  });
+
+  it('runRealStudy rejects unknown conditions and duplicate (history, condition) pairings loudly', async () => {
+    const transportForArm = () => createFakeActorTransport({ rounds: offlinePolicyModel });
+    await expect(runRealStudy({
+      dataset, transportForArm, studyId: 'S',
+      armSpecs: [{ historyId: 'EA', contentMode: 'strawman' as any }],
+    })).rejects.toThrow(/unknown contentMode 'strawman'/);
+    await expect(runRealStudy({
+      dataset, transportForArm, studyId: 'S',
+      armSpecs: [{ historyId: 'EA', contentMode: 'policy' }, { historyId: 'EA', contentMode: 'policy' }],
+    })).rejects.toThrow(/duplicate arm EA:REAL_ACTOR_I0/);
+    await expect(runRealStudy({
+      dataset, transportForArm, studyId: 'S',
+      armSpecs: [{ historyId: 'EZ', contentMode: 'policy' }],
+    })).rejects.toThrow(/unknown historyId 'EZ'/);
+    await expect(runRealArm({
+      dataset, historyId: 'EA', transport: transportForArm(), studyId: 'S', contentMode: 'cherry-picked' as any,
+    })).rejects.toThrow(/unknown contentMode/);
   });
 });

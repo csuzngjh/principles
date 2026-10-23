@@ -9,7 +9,7 @@
 // byte-identical outputs, so run outputs are replayable.
 
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 export const DATASET_SCHEMA = 'pd-principles-dataset.v0.1';
@@ -61,8 +61,20 @@ const FILE_ORDER = [
   'splits.json',
 ];
 
+// Optional dataset extensions, appended AFTER the fixed core in this exact
+// order when present. A v1 dataset (no optional file) hashes over exactly
+// FILE_ORDER — byte-identical to the historical baseline; a v2 dataset
+// shipping `histories/G.json` (the generic-context control) gets its own
+// hash. Determinism contract unchanged: presence, not dir listing, decides.
+const OPTIONAL_ORDER = [
+  'histories/G.json',
+];
+
 export function computeFixtureHash(dataset) {
   const parts = FILE_ORDER.map((rel) => `${rel}:${canonicalJson(dataset.byFile[rel])}`);
+  for (const rel of OPTIONAL_ORDER) {
+    if (dataset.byFile[rel] !== undefined) parts.push(`${rel}:${canonicalJson(dataset.byFile[rel])}`);
+  }
   return sha256(parts.join('\n'));
 }
 
@@ -74,17 +86,25 @@ export function computeFixtureHash(dataset) {
 export function loadDataset(dir) {
   const byFile = {};
   for (const rel of FILE_ORDER) byFile[rel] = readJson(dir, rel);
+  for (const rel of OPTIONAL_ORDER) {
+    try {
+      byFile[rel] = readJson(dir, rel);
+    } catch (err) {
+      if (String(err.message).startsWith('cannot read dataset file')) continue; // absent optional file
+      throw err;
+    }
+  }
   const dataset = {
     dir,
     manifest: byFile['dataset-manifest.json'],
     worldManual: byFile['world-manual.json'],
     episode: byFile['episodes/PLE-PILOT-01.json'],
-    splits: byFile['splits.json'],
-    histories: {
+    splits: byFile['splits.json'],    histories: {
       E0: byFile['histories/E0.json'],
       EA: byFile['histories/EA.json'],
       EB: byFile['histories/EB.json'],
       EN: byFile['histories/EN.json'],
+      ...(byFile['histories/G.json'] !== undefined ? { G: byFile['histories/G.json'] } : {}),
     },
     probes: {
       P1: byFile['probes/P1.json'],
@@ -97,6 +117,17 @@ export function loadDataset(dir) {
     byFile,
   };
   dataset.fixtureHash = computeFixtureHash(dataset);
+  // The preregistration lives OUTSIDE the fixture hash (FILE_ORDER) by
+  // design — editing it must not silently re-baseline the dataset hash.
+  // Instead it gets its OWN hash, carried on the loaded dataset so the
+  // formal entry point can bind it into the authorization chain: any
+  // preregistration edit (hypotheses, conditions, order table) is a
+  // fail-closed drift even when the fixtureHash is unchanged.
+  const preregFile = path.join(dir, 'preregistration.json');
+  if (existsSync(preregFile)) {
+    dataset.preregistration = readJson(dir, 'preregistration.json');
+    dataset.preregistrationHash = sha256(canonicalJson(dataset.preregistration));
+  }
   return dataset;
 }
 
