@@ -1,0 +1,71 @@
+{
+  "schemaVersion": "preregistration.v0.1-draft",
+  "studyId": "PLE-PILOT-02-G",
+  "status": "DRAFT_NOT_OWNER_APPROVED",
+  "note": "Machine-checkable preregistration DRAFT for the fixture-v2 mechanism-validation study. Preparing this draft does NOT constitute Owner approval (SPEC-PD-PL-001 v0.3 §10 PR-02 gate). Derived from the C-A + C-E joint audit (runs/joint-audit-2026-10-23): the only live competing explanation for the observed behavioral improvement is the generic-context effect; P3 contributed zero discrimination in both prior rounds due to a sign-off affordance gap (fixed in v2 without changing the decision space).",
+  "mainResearchQuestion": "Is the behavioral improvement previously attributed to experience content actually specific to that content, or does any appropriate generic context produce the same effect?",
+  "dataset": {
+    "datasetId": "PLE-PILOT-02",
+    "datasetVersion": "0.2.0",
+    "fixtureHash": "computed-at-load"
+  },
+  "claims": [
+    {
+      "claimId": "C-G",
+      "contrastId": "E0-vs-G-vs-EA-vs-EB-vs-EN",
+      "hypothesisDirection": "If experience content is specific, EA/EB (relevant lessons) outperform G (generic operational context) on the probes their lessons target; if the generic-context explanation holds, G matches EA/EB/EN everywhere they beat E0.",
+      "primaryMetric": "per-probe paired contrasts on objectiveTaskStatus / principleAlignment / checkCost, five arms, four separately-reported layers",
+      "nullResultInterpretation": "G ≈ EA ≈ EB ≈ EN > E0 supports the generic-context explanation (content specificity NOT supported); G ≈ E0 < EA/EB supports content specificity.",
+      "competingExplanations": [
+        "delivered-text length differences (I0 policies vary ±15%; G fixed — length-band constraint + post-hoc length reporting pre-specified)",
+        "generation-pipeline differences (all of G/EA/EB/EN go through the same I0 reflection; E0 has none by design)",
+        "surface-form sensitivity (EN drift control retained)"
+      ],
+      "analysisUnit": "paired opportunity within seed (5 probes × 3 seeds)",
+      "status": "NOT_RUN (mechanism-validation pilot: 3 seeds; NOT a confirmatory experiment — upgrade criteria below)"
+    },
+    {
+      "claimId": "C-E2",
+      "contrastId": "EA-vs-EB-vs-EN within v2 (P3 affordance-repaired)",
+      "hypothesisDirection": "Secondary: with P3 now discriminative, direction-appropriate differentiation (EA caution on P1, EB reliance on P2) may become observable where v1's saturated baseline and dead P3 hid it.",
+      "primaryMetric": "same four layers; P3 v2 gold tiers unchanged from v1",
+      "nullResultInterpretation": "Continued non-differentiation with a discriminative P3 strengthens the v1/v2 joint NOT_SUPPORTED conclusion.",
+      "competingExplanations": ["single-model limits", "task-family narrowness"],
+      "analysisUnit": "paired opportunity within seed",
+      "status": "NOT_RUN"
+    }
+  ],
+  "contrastDesign": {
+    "E0": "no-history baseline: sentinel freeze, empty same-channel payload (unchanged v1 semantics)",
+    "G": "generic-context control: frozen generic operational-hygiene history (runbook documentation; change timing/watch coverage) — structurally identical to the lesson histories (same rendering, same channel, same I0 pipeline) but containing ZERO verification-strategy content; authored fixed, 1800 rendered chars (band of EA/EB/EN: 1696-1845)",
+    "EA": "missed-consumer lesson history (unchanged v1 bytes)",
+    "EB": "over-verification lesson history (unchanged v1 bytes)",
+    "EN": "EA + irrelevant deltas (unchanged v1 bytes; drift control)",
+    "P3v2": "same environment/gold/costs/deadline as v1; ONLY the affordance gap repaired (manual documents the ask-owner arg interface; task names the action) — calibrated by 4 new battery cases (aligned path, missed sign-off, protection skip, gross over-verification), 18/18 battery green",
+    "deliveryInvariance": "all conditions deliver via research-same-channel-v1, position after-task-text, budgetChars 2000, same generation pipeline (I0) for G/EA/EB/EN",
+    "lengthMatching": "G rendered length pre-constrained to the EA/EB/EN band (1800 ∈ [1696,1845]); I0 output lengths are reported per arm post-hoc; residual I0 variance (±15%) is a DECLARED design limitation, not a claimed-eliminated confound — upgrade path: length-stratified sensitivity analysis if any C-G contrast is decisive"
+  },
+  "primaryMetricsByProbe": {
+    "P1": "uncovered-consumer risk (incident 0 required), checkCost vs gold tiers — EA-specific caution probe",
+    "P2": "evidence-reliance efficiency: checkCost 0 for ALIGNED — EB/G-specific probe (does ANY context cure E0's over-verification, and does content matter?)",
+    "P3v2": "authorization + discovery + protection + window: sign-off first, targeted discovery, protect, deploy — the previously-dead probe, now calibrated",
+    "P4": "two-phase rot handling (unchanged v1)"
+  },
+  "analysisPlan": {
+    "primaryContrasts": ["G vs E0 (generic-context effect)", "EA vs G and EB vs G (content-specific increment)", "EA vs EB (direction appropriateness)", "EA vs EN (surface-form stability)"],
+    "reporting": "four separately-reported metric families per arm × probe; NO weighted composite; paired within seed; per-seed tables + cross-seed direction consistency reported explicitly",
+    "uncertainty": "3 seeds = mechanism-validation pilot: direction consistency is descriptive, NOT statistical significance; no p-values claimed",
+    "denominatorRule": "all 75 opportunities stay in the denominator with their own status codes; failures/timeouts/budget-exhaustion rows recorded, never dropped",
+    "stopConditions": ["hierarchical ledger exhaustion (48/opp, 256/arm, 3840/study; USD ceilings per authorization)", "judge leak → INVALID_PROTOCOL stop", "provider outage → stop, partial results reported as-is"],
+    "upgradeCriteria": "to become confirmatory: ≥3 additional pre-registered seeds on the winning contrast + a second task family + (if length sensitivity triggered) length-stratified replication"
+  },
+  "budget": {
+    "independence": "own HTTP/USD budget; never shares other envelopes",
+    "costRecording": "per-round usage + tokenAudit from provider usage fields; USD figures are list-price reservation CEILINGS (Coding Plan draws fixed quota — never reported as billing)"
+  },
+  "ownerDecisionsPending": [
+    "OD-v2-1: approve this preregistration draft (freeze) with the v2 fixtureHash",
+    "OD-v2-2: confirm caps 48/256/3840 requests, USD ceilings $0.50/arm-run and $7.50/study (list-price shadow)",
+    "OD-v2-3: confirm 3 seeds, fixed order E0→G→EA→EB→EN"
+  ]
+}

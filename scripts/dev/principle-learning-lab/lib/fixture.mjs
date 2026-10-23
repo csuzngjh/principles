@@ -61,8 +61,20 @@ const FILE_ORDER = [
   'splits.json',
 ];
 
+// Optional dataset extensions, appended AFTER the fixed core in this exact
+// order when present. A v1 dataset (no optional file) hashes over exactly
+// FILE_ORDER — byte-identical to the historical baseline; a v2 dataset
+// shipping `histories/G.json` (the generic-context control) gets its own
+// hash. Determinism contract unchanged: presence, not dir listing, decides.
+const OPTIONAL_ORDER = [
+  'histories/G.json',
+];
+
 export function computeFixtureHash(dataset) {
   const parts = FILE_ORDER.map((rel) => `${rel}:${canonicalJson(dataset.byFile[rel])}`);
+  for (const rel of OPTIONAL_ORDER) {
+    if (dataset.byFile[rel] !== undefined) parts.push(`${rel}:${canonicalJson(dataset.byFile[rel])}`);
+  }
   return sha256(parts.join('\n'));
 }
 
@@ -74,6 +86,14 @@ export function computeFixtureHash(dataset) {
 export function loadDataset(dir) {
   const byFile = {};
   for (const rel of FILE_ORDER) byFile[rel] = readJson(dir, rel);
+  for (const rel of OPTIONAL_ORDER) {
+    try {
+      byFile[rel] = readJson(dir, rel);
+    } catch (err) {
+      if (String(err.message).startsWith('cannot read dataset file')) continue; // absent optional file
+      throw err;
+    }
+  }
   const dataset = {
     dir,
     manifest: byFile['dataset-manifest.json'],
@@ -85,6 +105,7 @@ export function loadDataset(dir) {
       EA: byFile['histories/EA.json'],
       EB: byFile['histories/EB.json'],
       EN: byFile['histories/EN.json'],
+      ...(byFile['histories/G.json'] !== undefined ? { G: byFile['histories/G.json'] } : {}),
     },
     probes: {
       P1: byFile['probes/P1.json'],

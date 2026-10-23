@@ -40,12 +40,13 @@ const { verifyRealRunAuthorization } = await import(url(path.join(LIB, 'actor.mj
 const { createFileEvidenceVerifier, composeApprovedPreregView } = await import(url(path.join(LIB, 'evidence-verifier.mjs')));
 
 function parseArgs(argv) {
-  const args = { seedCount: 1, startSeed: 1, out: null, dryRun: false, authorization: null };
+  const args = { seedCount: 1, startSeed: 1, out: null, dryRun: false, authorization: null, dataset: null, arms: null };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--authorization') args.authorization = argv[++i];
     else if (a === '--seed-count') args.seedCount = Number(argv[++i]);
     else if (a === '--start-seed') args.startSeed = Number(argv[++i]);
+    else if (a === '--dataset') args.dataset = argv[++i];
     else if (a === '--arms') args.arms = argv[++i];
     else if (a === '--out') args.out = argv[++i];
     else if (a === '--dry-run') args.dryRun = true;
@@ -57,14 +58,13 @@ function parseArgs(argv) {
   return args;
 }
 
-// Both arm plans are the preregistration's OWN contrasts — nothing here
+// All arm plans are the preregistration's OWN contrasts — nothing here
 // redefines the experiment:
-//   formal-ca (contrastId real-candidate-vs-summary-vs-raw-vs-none): one
-//     history (EA), four same-channel content conditions, fixed paired order.
-//   formal-ce (contrastId E0-vs-EA-vs-EB-vs-EN): the four FROZEN histories,
-//     each through the same policy (I0-reflection) generation — E0's
-//     none-history semantics (no generation call, sentinel freeze, empty
-//     same-channel payload) are exactly the runner's built-in E0 flow.
+//   formal-ca (v1): EA x {policy, summary, raw, none} — the completed C-A round.
+//   formal-ce (v1): E0/EA/EB/EN x policy — the completed C-E round.
+//   formal-v2 (PLE-PILOT-02-G): the five-condition mechanism-validation plan —
+//     E0 baseline, G generic-context control (v2 optional history), EA/EB/EN
+//     lesson histories, every one through the same policy (I0) pipeline.
 const FORMAL_ARM_PLANS = {
   'formal-ca': [
     { historyId: 'EA', contentMode: 'policy' },
@@ -74,6 +74,13 @@ const FORMAL_ARM_PLANS = {
   ],
   'formal-ce': [
     { historyId: 'E0', contentMode: 'policy' },
+    { historyId: 'EA', contentMode: 'policy' },
+    { historyId: 'EB', contentMode: 'policy' },
+    { historyId: 'EN', contentMode: 'policy' },
+  ],
+  'formal-v2': [
+    { historyId: 'E0', contentMode: 'policy' },
+    { historyId: 'G', contentMode: 'policy' },
     { historyId: 'EA', contentMode: 'policy' },
     { historyId: 'EB', contentMode: 'policy' },
     { historyId: 'EN', contentMode: 'policy' },
@@ -113,7 +120,12 @@ async function main() {
   }
 
   // 1-3. frozen dataset + FRESH fixtureHash (never trusted from the record).
-  const dataset = loadDataset(path.join(SCRIPT_DIR, 'fixtures'));
+  // The dataset directory selects the research round: v1 `fixtures` (the
+  // frozen PLE-PILOT-01 world of the completed C-A/C-E rounds) or v2
+  // `fixtures-v2` (PLE-PILOT-02: adds the G control, repairs the P3
+  // affordance — its own independent hash).
+  const datasetDir = args.dataset ? path.resolve(args.dataset) : path.join(SCRIPT_DIR, 'fixtures');
+  const dataset = loadDataset(datasetDir);
   console.log(`[formal] dataset ${dataset.manifest.datasetId} fixtureHash=${dataset.fixtureHash.slice(0, 12)}… (freshly computed)`);
 
   // 4. evidence resolution + gate verification (throws BEFORE any transport).
@@ -129,7 +141,7 @@ async function main() {
     process.exit(1);
   }
   const costEvidence = evidenceVerifier({ kind: 'cost-basis', reference: authorization.od2.costBasisRef });
-  const preregDraft = JSON.parse(fs.readFileSync(path.join(SCRIPT_DIR, 'fixtures', 'preregistration.json'), 'utf8'));
+  const preregDraft = JSON.parse(fs.readFileSync(path.join(datasetDir, 'preregistration.json'), 'utf8'));
   const preregView = composeApprovedPreregView({
     prereg: preregDraft,
     decisionRecord: { approved: true, reference: decisionRef, decidedBy: decision.decidedBy, decidedAt: decision.decidedAt },
@@ -225,30 +237,52 @@ async function main() {
     });
 
     // sidecar + audit + report. The enrolled claim is the one this plan
-    // actually contrasts; the other stays honestly NOT_ESTIMABLE.
-    const enrolledCE = armPlanName === 'formal-ce';
-    const claims = [
-      {
-        claimId: 'C-E',
-        contrastId: 'E0-vs-EA-vs-EB-vs-EN',
-        competingExplanations: preregDraft.claims.find((c) => c.claimId === 'C-E').competingExplanations,
-        analysisUnit: 'episode',
-        status: enrolledCE ? 'PARTIALLY_OBSERVABLE' : 'NOT_ESTIMABLE',
-        interpretation: enrolledCE
-          ? 'Formal four-history contrast through the same policy generation. See comparison layers in the adjudications; EA-vs-EN equivalence is the stability requirement.'
-          : 'This run executed the C-A contrast only; the C-E history contrasts were not enrolled.',
-      },
-      {
-        claimId: 'C-A',
-        contrastId: 'real-candidate-vs-summary-vs-raw-vs-none',
-        competingExplanations: preregDraft.claims.find((c) => c.claimId === 'C-A').competingExplanations,
-        analysisUnit: 'paired probe within episode',
-        status: enrolledCE ? 'NOT_ESTIMABLE' : 'PARTIALLY_OBSERVABLE',
-        interpretation: enrolledCE
-          ? 'This run executed the C-E contrast only; the C-A content conditions were not enrolled (C-A three-seed evidence lives in runs/formal-2026-10-23).'
-          : 'Formal same-channel four-condition contrast on the EA history. See comparison-report.json for the four separately-reported metric families.',
-      },
-    ];
+    // actually contrasts; the others stay honestly NOT_ESTIMABLE.
+    const preregClaim = (id, fallbackCompeting) => {
+      const found = (preregDraft.claims ?? []).find((c) => c.claimId === id);
+      return { competingExplanations: found?.competingExplanations ?? fallbackCompeting };
+    };
+    const claims = armPlanName === 'formal-v2'
+      ? [
+          {
+            claimId: 'C-G',
+            contrastId: 'E0-vs-G-vs-EA-vs-EB-vs-EN',
+            competingExplanations: preregClaim('C-G', ['length differences', 'pipeline differences']).competingExplanations,
+            analysisUnit: 'paired opportunity within seed',
+            status: 'PARTIALLY_OBSERVABLE',
+            interpretation: 'Mechanism-validation pilot: generic-context control vs lesson histories vs empty baseline, same I0 pipeline. Four separately-reported layers in the adjudications; length-band constraint and post-hoc length reporting per the v2 prereg.',
+          },
+          {
+            claimId: 'C-E2',
+            contrastId: 'EA-vs-EB-vs-EN within v2 (P3 affordance-repaired)',
+            competingExplanations: preregClaim('C-E2', ['single-model limits']).competingExplanations,
+            analysisUnit: 'paired opportunity within seed',
+            status: 'NOT_ESTIMABLE',
+            interpretation: 'Secondary contrast; evaluated only in the v2 summary report, not claimed by the run itself.',
+          },
+        ]
+      : [
+          {
+            claimId: 'C-E',
+            contrastId: 'E0-vs-EA-vs-EB-vs-EN',
+            competingExplanations: preregDraft.claims.find((c) => c.claimId === 'C-E').competingExplanations,
+            analysisUnit: 'episode',
+            status: enrolledCE ? 'PARTIALLY_OBSERVABLE' : 'NOT_ESTIMABLE',
+            interpretation: enrolledCE
+              ? 'Formal four-history contrast through the same policy generation. See comparison layers in the adjudications; EA-vs-EN equivalence is the stability requirement.'
+              : 'This run executed the C-A contrast only; the C-E history contrasts were not enrolled.',
+          },
+          {
+            claimId: 'C-A',
+            contrastId: 'real-candidate-vs-summary-vs-raw-vs-none',
+            competingExplanations: preregDraft.claims.find((c) => c.claimId === 'C-A').competingExplanations,
+            analysisUnit: 'paired probe within episode',
+            status: enrolledCE ? 'NOT_ESTIMABLE' : 'PARTIALLY_OBSERVABLE',
+            interpretation: enrolledCE
+              ? 'This run executed the C-E contrast only; the C-A content conditions were not enrolled (C-A three-seed evidence lives in runs/formal-2026-10-23).'
+              : 'Formal same-channel four-condition contrast on the EA history. See comparison-report.json for the four separately-reported metric families.',
+          },
+        ];
     const study = buildStudySidecar({
       dataset,
       studyId,

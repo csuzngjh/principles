@@ -1,0 +1,9 @@
+{
+  "kind": "owner-decision",
+  "approved": false,
+  "decidedBy": null,
+  "decidedAt": null,
+  "fixtureHash": "04f732e9afdc1dd0f24824ace1b40287eff37b209750f7f664dbf72ed0b21c30",
+  "scope": "PLE-PILOT-02-G mechanism-validation study: five conditions (E0/G/EA/EB/EN, same I0 pipeline) x 3 seeds x 5 opportunities on zai-coding-cn/glm-5.3-flash, PLE-PILOT-02 dataset (v2: G control + P3 affordance repair). PENDING OWNER APPROVAL — this draft authorizes NOTHING until approved:true with decidedBy/decidedAt.",
+  "note": "DRAFT for the v2 round. The fixtureHash placeholder is replaced by the freshly computed v2 hash at freeze time; the formal entry point refuses any unsigned record (fail-closed)."
+}
