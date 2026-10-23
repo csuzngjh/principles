@@ -1,138 +1,136 @@
 /**
- * Regression tests for OpenClawHostInstaller.writeInstallRecord (PR #1300).
+ * Boundary regression tests for OpenClawHostInstaller (PRI-1021).
  *
- * Covers the nested-field validation added per CodeRabbit #3762804744:
- * when installs.json parses to a top-level object but its `installRecords`
- * field is null/array/string, writeInstallRecord MUST return without writing
- * (rc-3/rc-9), preserving the original file instead of overwriting it with
- * an empty installRecords object.
+ * `~/.openclaw/plugins/installs.json` is the OpenClaw host's own plugin
+ * install index. Since OpenClaw 2026.10.5, the mere presence of that legacy
+ * file makes `openclaw doctor --fix` refuse its state-migration chain, which
+ * in turn blocks gateway startup (exit code 78). PD wrote it on every install
+ * that updated `openclaw.json`, so PD installs were bricking OpenClaw
+ * upgrades.
+ *
+ * Contract after the fix: install() writes ONLY openclaw.json. It never
+ * creates the `plugins` directory, never writes installs.json, and plugin
+ * registration (allow list + entries + allowConversationAccess) still works.
+ *
+ * Real filesystem with os.homedir redirected to a temp dir (never touches
+ * the real ~/.openclaw).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
-import { OpenClawHostInstaller } from '../src/installers/openclaw-host-installer.js';
+import * as path from 'path';
+import * as os from 'os';
 
-// Mock fs (hoisted before imports).
-vi.mock('fs');
-// Mock mvp-config helpers used by writeInstallRecord.
-vi.mock('../src/mvp-config.js', () => ({
-  getOpenClawDir: vi.fn(() => '/home/user/.openclaw'),
-  getPluginExtDir: vi.fn(() => '/home/user/.openclaw/extensions/principles-disciple'),
-  isWindows: vi.fn(() => false),
-}));
+const state = vi.hoisted(() => ({ home: '' }));
 
-describe('OpenClawHostInstaller.writeInstallRecord — nested installRecords validation (rc-3/rc-9)', () => {
-  const mockExistsSync = vi.spyOn(fs, 'existsSync');
-  const mockReadFileSync = vi.spyOn(fs, 'readFileSync');
-  const mockWriteFileSync = vi.spyOn(fs, 'writeFileSync');
-  const mockMkdirSync = vi.spyOn(fs, 'mkdirSync');
-
-  // Access the private method via type narrowing. writeInstallRecord is
-  // private on the class but exercised here through a typed cast to keep
-  // the test focused on the data-integrity contract.
-  type OpenClawHostInstallerWithInternals = OpenClawHostInstaller & {
-    writeInstallRecord(configDir: string): void;
+vi.mock('os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('os')>();
+  return {
+    ...actual,
+    homedir: () => state.home,
   };
+});
 
-  beforeEach(() => {
-    vi.clearAllMocks();
-    // installs dir exists; package.json reads succeed with a version.
-    mockExistsSync.mockReturnValue(true);
-    mockMkdirSync.mockImplementation(() => undefined);
-    mockWriteFileSync.mockImplementation(() => undefined);
+import { OpenClawHostInstaller } from '../src/installers/openclaw-host-installer.js';
+import type { HostInstallContext, HostInstallResult } from '@principles/core/host';
+
+let tmpHome: string;
+
+function makeCtx(): HostInstallContext {
+  return {
+    workspaceDir: tmpHome,
+    pluginDir: path.join(tmpHome, 'pkg'),
+    language: 'zh',
+    mode: 'smart',
+  };
+}
+
+function openclawDir(): string {
+  return path.join(tmpHome, '.openclaw');
+}
+
+function configPath(): string {
+  return path.join(openclawDir(), 'openclaw.json');
+}
+
+function installsJsonPath(): string {
+  return path.join(openclawDir(), 'plugins', 'installs.json');
+}
+
+function writeConfig(config: unknown): void {
+  fs.writeFileSync(configPath(), JSON.stringify(config, null, 2));
+}
+
+function readConfig(): Record<string, unknown> {
+  return JSON.parse(fs.readFileSync(configPath(), 'utf-8')) as Record<string, unknown>;
+}
+
+/**
+ * Every case asserts this. `install()` also has a success:true /
+ * configAction:'skipped' result for an unreadable openclaw.json, so `success`
+ * alone would stay true if the os.homedir seam ever stopped applying — the
+ * negative assertions would then pass vacuously while the code wrote to the
+ * real ~/.openclaw.
+ */
+function expectRegisteredInSandbox(result: HostInstallResult): void {
+  expect(result.success).toBe(true);
+  expect(result.configAction).toBe('updated');
+  expect(result.configPath).toBe(configPath());
+}
+
+beforeEach(() => {
+  tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-installs-json-test-'));
+  state.home = tmpHome;
+  fs.mkdirSync(openclawDir(), { recursive: true });
+});
+
+afterEach(() => {
+  state.home = '';
+  if (tmpHome && fs.existsSync(tmpHome)) {
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  }
+});
+
+describe('OpenClawHostInstaller.install — host-owned install index boundary', () => {
+  it('does not create ~/.openclaw/plugins/installs.json', async () => {
+    writeConfig({ gateway: { port: 18789 }, plugins: { entries: {} } });
+
+    const result = await new OpenClawHostInstaller().install(makeCtx());
+
+    expectRegisteredInSandbox(result);
+    expect(fs.existsSync(installsJsonPath())).toBe(false);
+    expect(fs.existsSync(path.join(openclawDir(), 'plugins'))).toBe(false);
   });
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it('preserves installs.json when installRecords is null (CodeRabbit #3762804744)', () => {
-    // Top-level object, but installRecords is null — must NOT overwrite.
-    mockReadFileSync.mockImplementation((p: unknown) => {
-      const s = p.toString();
-      if (s.endsWith('installs.json')) {
-        return JSON.stringify({ version: 1, installRecords: null });
-      }
-      if (s.endsWith('package.json')) {
-        return JSON.stringify({ version: '1.0.0' });
-      }
-      throw new Error(`unexpected read: ${s}`);
+  it('still registers PD in openclaw.json', async () => {
+    writeConfig({
+      gateway: { port: 18789 },
+      plugins: { allow: ['feishu'], entries: { 'principles-disciple': { enabled: false } } },
     });
 
-    const installer = new OpenClawHostInstaller() as OpenClawHostInstallerWithInternals;
-    installer.writeInstallRecord('/home/user/.openclaw');
+    const result = await new OpenClawHostInstaller().install(makeCtx());
 
-    // No writeFileSync call targeting installs.json should occur.
-    const installsWrite = mockWriteFileSync.mock.calls.find(
-      (call) => typeof call[0] === 'string' && (call[0] as string).endsWith('installs.json'),
-    );
-    expect(installsWrite).toBeUndefined();
+    expectRegisteredInSandbox(result);
+    const plugins = readConfig().plugins as Record<string, unknown>;
+    expect(plugins.allow).toContain('principles-disciple');
+    const entries = plugins.entries as Record<string, Record<string, unknown>>;
+    expect(entries['principles-disciple'].enabled).toBe(true);
+    const hooks = entries['principles-disciple'].hooks as Record<string, unknown>;
+    expect(hooks.allowConversationAccess).toBe(true);
   });
 
-  it('preserves installs.json when installRecords is an array', () => {
-    mockReadFileSync.mockImplementation((p: unknown) => {
-      const s = p.toString();
-      if (s.endsWith('installs.json')) {
-        return JSON.stringify({ version: 1, installRecords: ['not', 'an', 'object'] });
-      }
-      if (s.endsWith('package.json')) {
-        return JSON.stringify({ version: '1.0.0' });
-      }
-      throw new Error(`unexpected read: ${s}`);
-    });
-
-    const installer = new OpenClawHostInstaller() as OpenClawHostInstallerWithInternals;
-    installer.writeInstallRecord('/home/user/.openclaw');
-
-    const installsWrite = mockWriteFileSync.mock.calls.find(
-      (call) => typeof call[0] === 'string' && (call[0] as string).endsWith('installs.json'),
+  it('leaves a pre-existing installs.json byte-identical', async () => {
+    writeConfig({ plugins: { entries: {} } });
+    fs.mkdirSync(path.dirname(installsJsonPath()), { recursive: true });
+    const original = JSON.stringify(
+      { version: 1, installRecords: { other: { source: 'path' } } },
+      null,
+      2,
     );
-    expect(installsWrite).toBeUndefined();
-  });
+    fs.writeFileSync(installsJsonPath(), original);
 
-  it('preserves installs.json when installRecords is a string', () => {
-    mockReadFileSync.mockImplementation((p: unknown) => {
-      const s = p.toString();
-      if (s.endsWith('installs.json')) {
-        return JSON.stringify({ version: 1, installRecords: 'bad' });
-      }
-      if (s.endsWith('package.json')) {
-        return JSON.stringify({ version: '1.0.0' });
-      }
-      throw new Error(`unexpected read: ${s}`);
-    });
+    const result = await new OpenClawHostInstaller().install(makeCtx());
 
-    const installer = new OpenClawHostInstaller() as OpenClawHostInstallerWithInternals;
-    installer.writeInstallRecord('/home/user/.openclaw');
-
-    const installsWrite = mockWriteFileSync.mock.calls.find(
-      (call) => typeof call[0] === 'string' && (call[0] as string).endsWith('installs.json'),
-    );
-    expect(installsWrite).toBeUndefined();
-  });
-
-  it('initializes installRecords to {} when field is missing (compatible format)', () => {
-    // No installRecords field at all — compatible, should proceed and write.
-    mockReadFileSync.mockImplementation((p: unknown) => {
-      const s = p.toString();
-      if (s.endsWith('installs.json')) {
-        return JSON.stringify({ version: 1 });
-      }
-      if (s.endsWith('package.json')) {
-        return JSON.stringify({ version: '1.0.0' });
-      }
-      throw new Error(`unexpected read: ${s}`);
-    });
-
-    const installer = new OpenClawHostInstaller() as OpenClawHostInstallerWithInternals;
-    installer.writeInstallRecord('/home/user/.openclaw');
-
-    const installsWrite = mockWriteFileSync.mock.calls.find(
-      (call) => typeof call[0] === 'string' && (call[0] as string).endsWith('installs.json'),
-    );
-    expect(installsWrite).toBeDefined();
-    // The written content should include an installRecords object with PD entry.
-    const written = JSON.parse(installsWrite![1] as string);
-    expect(written.installRecords).toBeDefined();
-    expect(written.installRecords['principles-disciple']).toBeDefined();
+    expectRegisteredInSandbox(result);
+    expect(fs.readFileSync(installsJsonPath(), 'utf-8')).toBe(original);
   });
 });
