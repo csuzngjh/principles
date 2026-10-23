@@ -50,7 +50,7 @@ describe("local Codex design-gate API", () => {
     expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe("/api/v1/governance/design-gate/declaration?projectWorkspacePath=D%3A%2Fproject+with+spaces&hostSessionId=session%2F%3F%231");
   });
 
-  it("uses the shared declaration guard and refuses malformed returned governance facts", async () => {
+  it("validates the declaration contract field-by-field and refuses malformed returned declarations", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(respond({ declaration })));
     const valid = await fetchDesignGateDeclaration("D:/project", "codex-session-1");
     expect(valid.success).toBe(true);

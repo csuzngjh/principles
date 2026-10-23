@@ -66,15 +66,22 @@ export function readDesignGateSpecSnapshot(projectWorkspacePath: string, specPat
   const projectRoot = fs.realpathSync.native(projectWorkspacePath);
   const realPath = fs.realpathSync.native(specPath);
   if (!inside(projectRoot, realPath)) throw new Error('spec_path_invalid');
-  const stat = fs.statSync(realPath);
-  if (!stat.isFile() || stat.size > MAX_SPEC_BYTES) throw new Error('spec_path_invalid');
-  const bytes = fs.readFileSync(realPath);
-  if (bytes.byteLength > MAX_SPEC_BYTES) throw new Error('spec_path_invalid');
-  return {
-    realPath,
-    digest: createHash('sha256').update(bytes).digest('hex'),
-    byteLength: bytes.byteLength,
-  };
+  // Open once and validate the descriptor: the checked and the read bytes are
+  // guaranteed to be the same file (no path-recheck race between stat and read).
+  const fd = fs.openSync(realPath, 'r');
+  try {
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile() || stat.size > MAX_SPEC_BYTES) throw new Error('spec_path_invalid');
+    const bytes = fs.readFileSync(fd);
+    if (bytes.byteLength > MAX_SPEC_BYTES) throw new Error('spec_path_invalid');
+    return {
+      realPath,
+      digest: createHash('sha256').update(bytes).digest('hex'),
+      byteLength: bytes.byteLength,
+    };
+  } finally {
+    fs.closeSync(fd);
+  }
 }
 
 function scopeReference(paths: readonly string[], actions: readonly DesignGateAction[]): string {
