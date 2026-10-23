@@ -35,7 +35,12 @@
   },
   "od3": {
     "seeds": 3,
-    "executionOrder": ["E0", "EA", "EB", "EN"],
+    "executionOrder": [
+      "E0",
+      "EA",
+      "EB",
+      "EN"
+    ],
     "frozen": true,
     "armOrderNote": "C-E arms (policy generation on each frozen history): E0 -> EA -> EB -> EN, fixed paired order per seed; seeds repeat the same order in fully isolated sessions"
   }

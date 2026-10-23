@@ -98,6 +98,10 @@ describe('P3 v2: affordance repair without loosening', () => {
   it('the ONLY task-text change is the policy note naming the action interface', () => {
     const v1Note = v1.probes.P3.taskInstructions.find((l: string) => l.startsWith('Policy note:'));
     const v2Note = v2.probes.P3.taskInstructions.find((l: string) => l.startsWith('Policy note:'));
+    // v1's affordance gap: the note never named the action or its args
+    expect(v1Note).not.toContain("ask-owner");
+    expect(v1Note).not.toContain("deployment-signoff");
+    // v2 names the interface (the repair) without changing the decision space
     expect(v2Note).toContain("ask-owner");
     expect(v2Note).toContain("deployment-signoff");
     // every other instruction line is byte-identical
@@ -148,7 +152,7 @@ describe('five-condition formal-v2 plan (gate sequence, zero network)', () => {
   it('with a signed record the plan previews the five conditions over seeds 1..3 with the pre-registered per-seed Latin rectangle', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pl-v2-signed-'));
     fs.writeFileSync(path.join(dir, 'owner-decision.json'), JSON.stringify({
-      approved: true, fixtureHash: v2.fixtureHash, decidedBy: 'Owner (test fixture)', decidedAt: '2026-10-23T00:00:00Z', scope: 'test',
+      approved: true, fixtureHash: v2.fixtureHash, preregistrationHash: v2.preregistrationHash, decidedBy: 'Owner (test fixture)', decidedAt: '2026-10-23T00:00:00Z', scope: 'test',
     }, null, 1), 'utf8');
     // mirror BOTH signing points the gate requires (decision record + od1)
     const auth = JSON.parse(fs.readFileSync(AUTH, 'utf8'));
@@ -187,7 +191,7 @@ describe('five-condition formal-v2 plan (gate sequence, zero network)', () => {
   it('the v2 plan refuses against the V1 dataset (G history absent there — fail-loud, no silent substitution)', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pl-v2-signed-'));
     fs.writeFileSync(path.join(dir, 'owner-decision.json'), JSON.stringify({
-      approved: true, fixtureHash: v2.fixtureHash, decidedBy: 'Owner (test fixture)', decidedAt: '2026-10-23T00:00:00Z', scope: 'test',
+      approved: true, fixtureHash: v2.fixtureHash, preregistrationHash: v2.preregistrationHash, decidedBy: 'Owner (test fixture)', decidedAt: '2026-10-23T00:00:00Z', scope: 'test',
     }, null, 1), 'utf8');
     const auth = JSON.parse(fs.readFileSync(AUTH, 'utf8'));
     auth.od1.approved = true;

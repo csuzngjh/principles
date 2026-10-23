@@ -9,7 +9,7 @@
 // byte-identical outputs, so run outputs are replayable.
 
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 export const DATASET_SCHEMA = 'pd-principles-dataset.v0.1';
@@ -99,8 +99,7 @@ export function loadDataset(dir) {
     manifest: byFile['dataset-manifest.json'],
     worldManual: byFile['world-manual.json'],
     episode: byFile['episodes/PLE-PILOT-01.json'],
-    splits: byFile['splits.json'],
-    histories: {
+    splits: byFile['splits.json'],    histories: {
       E0: byFile['histories/E0.json'],
       EA: byFile['histories/EA.json'],
       EB: byFile['histories/EB.json'],
@@ -118,6 +117,17 @@ export function loadDataset(dir) {
     byFile,
   };
   dataset.fixtureHash = computeFixtureHash(dataset);
+  // The preregistration lives OUTSIDE the fixture hash (FILE_ORDER) by
+  // design — editing it must not silently re-baseline the dataset hash.
+  // Instead it gets its OWN hash, carried on the loaded dataset so the
+  // formal entry point can bind it into the authorization chain: any
+  // preregistration edit (hypotheses, conditions, order table) is a
+  // fail-closed drift even when the fixtureHash is unchanged.
+  const preregFile = path.join(dir, 'preregistration.json');
+  if (existsSync(preregFile)) {
+    dataset.preregistration = readJson(dir, 'preregistration.json');
+    dataset.preregistrationHash = sha256(canonicalJson(dataset.preregistration));
+  }
   return dataset;
 }
 

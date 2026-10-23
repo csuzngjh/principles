@@ -27,7 +27,7 @@ export function createFileEvidenceVerifier({ baseDir } = {}) {
   if (typeof baseDir !== 'string' || baseDir.trim().length === 0) {
     throw new Error('createFileEvidenceVerifier: baseDir is required');
   }
-  return function verify({ kind, reference, expectedFixtureHash } = {}) {
+  return function verify({ kind, reference, expectedFixtureHash, expectedPreregistrationHash } = {}) {
     if (kind !== 'owner-decision' && kind !== 'cost-basis') {
       throw new Error(`evidenceVerifier: unsupported kind '${String(kind)}'`);
     }
@@ -69,6 +69,14 @@ export function createFileEvidenceVerifier({ baseDir } = {}) {
       if (expectedFixtureHash !== undefined && doc.fixtureHash !== expectedFixtureHash) {
         throw new Error(`evidenceVerifier(owner-decision): '${reference}' approves fixtureHash ${doc.fixtureHash.slice(0, 12)}… but the loaded dataset hashes to ${String(expectedFixtureHash).slice(0, 12)}… (drift = refusal)`);
       }
+      if (expectedPreregistrationHash !== undefined) {
+        if (typeof doc.preregistrationHash !== 'string' || doc.preregistrationHash.length === 0) {
+          throw new Error(`evidenceVerifier(owner-decision): '${reference}' must carry preregistrationHash (the approved research protocol is hash-bound, not prose)`);
+        }
+        if (doc.preregistrationHash !== expectedPreregistrationHash) {
+          throw new Error(`evidenceVerifier(owner-decision): '${reference}' approves preregistrationHash ${doc.preregistrationHash.slice(0, 12)}… but the loaded preregistration hashes to ${String(expectedPreregistrationHash).slice(0, 12)}… (research-protocol drift = refusal)`);
+        }
+      }
       if (typeof doc.decidedBy !== 'string' || doc.decidedBy.trim().length === 0) {
         throw new Error(`evidenceVerifier(owner-decision): '${reference}' must record decidedBy`);
       }
@@ -82,6 +90,8 @@ export function createFileEvidenceVerifier({ baseDir } = {}) {
         approved: true,
         fixtureHash: doc.fixtureHash,
         frozenFixtureHash: doc.fixtureHash,
+        preregistrationHash: doc.preregistrationHash ?? null,
+        frozenPreregistrationHash: doc.preregistrationHash ?? null,
         decidedBy: doc.decidedBy,
         decidedAt: doc.decidedAt,
         scope: typeof doc.scope === 'string' ? doc.scope : null,

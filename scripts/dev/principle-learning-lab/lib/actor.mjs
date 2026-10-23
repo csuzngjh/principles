@@ -67,7 +67,7 @@ export const PREREG_FROZEN_STATUS = 'OWNER_APPROVED';
  * plus consistency: the adapter config this gate will build MUST equal the
  * authorized values (any drift refuses before the first request).
  */
-export function verifyRealRunAuthorization({ authorization, prereg, dataset, adapterConfig, budgets, evidenceVerifier }) {
+export function verifyRealRunAuthorization({ authorization, prereg, dataset, adapterConfig, budgets, evidenceVerifier, expectedPreregistrationHash }) {
   const problems = [];
   const check = (ok, message) => { if (!ok) problems.push(message); };
 
@@ -103,6 +103,18 @@ export function verifyRealRunAuthorization({ authorization, prereg, dataset, ada
       }
       check(authorization.od1.frozenFixtureHash === dataset.fixtureHash,
         `OD-1: authorization.od1.frozenFixtureHash does not equal the loaded dataset fixtureHash (${dataset.fixtureHash.slice(0, 12)}…) — study would run on different data than approved`);
+      // The preregistration lives OUTSIDE the fixture hash: editing its
+      // hypotheses/conditions/order table leaves fixtureHash untouched, so
+      // the research protocol must be hash-bound SEPARATELY. When the caller
+      // supplies the loaded preregistration hash, a mismatch (or a missing
+      // binding in the authorization) is fail-closed. The formal entry
+      // always supplies it; legacy callers without it keep working.
+      if (expectedPreregistrationHash !== undefined) {
+        check(typeof authorization.od1.preregistrationHash === 'string' && authorization.od1.preregistrationHash.length > 0,
+          'OD-1: authorization.od1.preregistrationHash missing — the approved research protocol must be hash-bound, not prose');
+        check(authorization.od1.preregistrationHash === expectedPreregistrationHash,
+          `OD-1: authorization.od1.preregistrationHash does not match the loaded preregistration (${String(expectedPreregistrationHash).slice(0, 12)}…) — research-protocol drift (fail-closed)`);
+      }
     }
 
     // OD-2 — provider/model/credentials/cost+request budgets/stop thresholds.

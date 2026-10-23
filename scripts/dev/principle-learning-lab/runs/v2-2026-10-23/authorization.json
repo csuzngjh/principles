@@ -5,7 +5,8 @@
   "od1": {
     "approved": false,
     "decisionRef": "owner-decision.json",
-    "frozenFixtureHash": "04f732e9afdc1dd0f24824ace1b40287eff37b209750f7f664dbf72ed0b21c30"
+    "frozenFixtureHash": "04f732e9afdc1dd0f24824ace1b40287eff37b209750f7f664dbf72ed0b21c30",
+    "preregistrationHash": "7bc7388b1c109fb2afeabe99eadd5cd8a2d416003302915a9e92136ec849b74f"
   },
   "od2": {
     "provider": "zai-coding-cn",

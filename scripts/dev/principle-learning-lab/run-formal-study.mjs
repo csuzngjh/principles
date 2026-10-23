@@ -135,13 +135,34 @@ async function main() {
     console.error('[formal] REFUSED: authorization.od1.decisionRef missing');
     process.exit(1);
   }
-  const decision = evidenceVerifier({ kind: 'owner-decision', reference: decisionRef });
+  // Research-protocol binding FIRST: the preregistration lives outside the
+  // fixture hash, so it gets an INDEPENDENT hash that must match (a) the
+  // Owner decision record and (b) the authorization record — any prereg edit
+  // (hypotheses/conditions/order) fails closed even with an unchanged
+  // fixtureHash.
+  const expectedPreregistrationHash = dataset.preregistrationHash;
+  if (expectedPreregistrationHash === undefined) {
+    console.error('[formal] REFUSED: the dataset directory carries no preregistration.json — a formal run without a hash-bound research protocol is refused (fail-closed)');
+    process.exit(1);
+  }
+  const decision = evidenceVerifier({ kind: 'owner-decision', reference: decisionRef, expectedFixtureHash: dataset.fixtureHash, expectedPreregistrationHash });
   if (decision.fixtureHash !== dataset.fixtureHash) {
     console.error(`[formal] REFUSED: Owner decision approves fixtureHash ${decision.fixtureHash.slice(0, 12)}… but the loaded dataset hashes to ${dataset.fixtureHash.slice(0, 12)}… (drift = no run)`);
     process.exit(1);
   }
   const costEvidence = evidenceVerifier({ kind: 'cost-basis', reference: authorization.od2.costBasisRef });
   const preregDraft = JSON.parse(fs.readFileSync(path.join(datasetDir, 'preregistration.json'), 'utf8'));
+  // Order-scheme single source of truth: the preregistration's
+  // contrastDesign.armOrder. The built-in per-seed table must match it or
+  // the run refuses (no silent plan substitution).
+  if (armPlanName === 'formal-v2') {
+    const preregOrders = preregDraft.contrastDesign?.armOrder?.seedOrders;
+    const expectedOrders = { 1: ['E0', 'G', 'EA', 'EB', 'EN'], 2: ['EA', 'EB', 'EN', 'E0', 'G'], 3: ['EN', 'E0', 'G', 'EA', 'EB'] };
+    if (!preregOrders || JSON.stringify(preregOrders) !== JSON.stringify(expectedOrders)) {
+      console.error('[formal] REFUSED: the loaded preregistration armOrder does not match the pre-registered Latin-rectangle order table — research-protocol drift (fail-closed)');
+      process.exit(1);
+    }
+  }
   const preregView = composeApprovedPreregView({
     prereg: preregDraft,
     decisionRecord: { approved: true, reference: decisionRef, decidedBy: decision.decidedBy, decidedAt: decision.decidedAt },
@@ -170,6 +191,8 @@ async function main() {
     apiKeyEnv: authorization.od2.apiKeyEnv,
     baseUrl: authorization.od2.baseUrl,
   };
+  // Research-protocol binding is enforced ABOVE (decision resolution carries
+  // both expected hashes). The gate re-checks the authorization copy.
   verifyRealRunAuthorization({
     authorization,
     prereg: preregView,
@@ -177,6 +200,7 @@ async function main() {
     adapterConfig,
     budgets,
     evidenceVerifier,
+    expectedPreregistrationHash,
   });
   console.log(`[formal] authorization verified (decision: ${decision.decidedBy} @ ${decision.decidedAt}; cost basis effective ${costEvidence.effectiveDate}, officialPriceVerified=${costEvidence.officialPriceVerified})`);
   console.log(`[formal] plan-quota semantics: ${authorization.od2.costBillingSemantics ?? 'per-token list-price ceiling reserved; actual plan draw recorded from usage'}`);
