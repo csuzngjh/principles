@@ -506,6 +506,72 @@ git diff --check → OK；变更仅 prr-dataset.mjs + 测试 + 报告，生产�
 
 ---
 
+## 12. 真实 A/C 执行入口——第六轮阻断缺陷修复（2026-10-23，head `06e8e7a68` 审查意见）
+
+执行入口（§11）经审查发现五类阻断缺陷，逐项对照真实实现修复：
+
+### 12.1 PI 授权工厂参数与数据契约
+
+| 缺陷 | 修复 |
+|---|---|
+| `budgets` 参数缺失（OD-2 drift 检查必拒） | CLI 传入完整 `budgets = {httpRequestsPerOpportunity/PerArm/PerStudy, perRunCostCapUsd, totalCostCapUsd}`，与 od2 逐字段对账 |
+| `adapterConfig.apiKeyEnv` 不匹配（drift：此前传 `apiKey` 环境变量值） | 传 `apiKeyEnv: budget.apiKeyEnv`（与 od2 逐字对账；凭据仍只从环境变量读取） |
+| OD-3 执行顺序与 PRR 数据集不兼容（actor 读 `dataset.histories`，PRR 是 tasks） | runner 的精确执行顺序（A/C × tasks）以兼容视图 `histories` 暴露给 OD-3 校验——顺序即冻结的执行顺序，非伪造 |
+| 预算层级构造错误（`createHttpBudgetLedger` 无 study* 参数） | 正确两级链：study parent（`cap=httpRequestsPerStudy, costCapUsd=totalCostCapUsd`）→ arm child（`cap=httpRequestsPerArm, costCapUsd=perRunCostCapUsd, parent=study`）；`createAuthorizedPiTransport` 对 arm==per-run 与 study==total 的 cost/request 双层对账因此真实生效 |
+| 定价证据无独立验证（此前 cost-basis 请求返回 undefined，靠字段缺省放行的方向错误） | 受信 resolver 必须返回 `{verified, reference, provider, model, currency, input/outputUsdPerMillionTokens, max*TokensPerRequest, effectiveDate}`，与 od2.costBasis 全字段对账（OD-2 现有校验全部激活）；自报 `costBasisRef` 不再可能单独通过 |
+
+### 12.2 transport 注入接口
+
+`--transport pi` 的 `transportFor = () => ({ transport })` 不符合 runner 期望的 `{complete}` 对象——已修复为直接返回 transport。A/C 隔离语义明确化：Pi transport 为**无状态单轮 `complete()`**，A/C 隔离由投递内容隔离与无共享会话状态保证（预注册要求），已写入代码契约注释。
+
+### 12.3 Owner 授权信任根
+
+- 同一份调用方 JSON 的 `approvedBy:"owner"` 不再被当作独立证据：`--transport pi` **强制要求** `--evidence-resolver <module>`（独立受信模块，default-export `verify()`），缺失即拒绝（"the real execution path is NOT ready without it"）；mock 演练保留。
+- resolver 必须独立核验：批准状态、`approvedProtocolDigest`、`frozenCommitSha`、以及**官方定价证据**（cost-basis kind）——全部在 CLI 内与冻结值逐字段对账，自报字段不可能通过。
+- 工作区完整性：`git rev-parse HEAD` 之外增加 `git status --porcelain` 检查——**脏工作区拒绝 pi 运行**（运行代码无法证明与获批提交一致）；mock 需显式 `--allow-dirty-worktree-for-mock`。
+
+### 12.4 数据准入与 STOP 语义
+
+- 数据集语义校验（`healthCheckPrrDataset`）**前置到任何 transport 构造之前**；
+- C 组材料仅 `authorized_synthetic` 可投递——runner 内第二道断言（缺失/未知状态 throw，防线纵深）；
+- 全局预算（FZ-06 `httpRequestsPerStudy`）**调用前检查**：live 账本（`budgetTelemetry`，权威来源）或已累计任务计数达到上限 → 立即停止，剩余任务逐行进入 `notExecutedTasks`（`study_budget_exhausted`），保留已执行结果；
+- 未知请求计数**不再推断为 1**：`behaviorFromRoundPayload` 的 requests 保持 null；`denominators.requestCounterBasis` 显式标注 `budget_ledger`/`task_reported`/`UNKNOWN`。
+
+### 12.5 新增测试（`prr-real-pi.test.ts`，10 项；mock Pi adapter + 可信 resolver + 真实账本层级）
+
+| 测试 | 断言 |
+|---|---|
+| 全要素有效 → PI 工厂构造 runner 兼容 transport | `complete` 存在；构造后 fetch spy = 0（构造不发 HTTP）；单轮经 mock adapter 返回 payload |
+| budgets 缺失 | `budgets missing` 拒绝且 fetch=0 |
+| OD-3 错误执行顺序 | `executionOrder must exactly match` 拒绝且 fetch=0 |
+| 定价证据无效 | `costBasisRef was not verified` 拒绝且 fetch=0 |
+| 授权 budgets drift（perRunCostCapUsd 999） | `drift: budgets.perRunCostCapUsd` 拒绝且 fetch=0 |
+| 未批准决策记录 | PRR 门 `not BOTH verified and approved`，零构造 |
+| 全局 STOP（cap=2） | 调用恰 2 次即停；`notExecutedTasks` = 26−2−1（排除行单列）；分母如实 |
+| **账本权威计数**（账本已用 3/3） | **0 次调用即停**——task-reported usage 全 null 也不推断；`requestCounterBasis='budget_ledger'` |
+| 未知披露状态 | healthCheck 拒 + runner 内部 throw `non-authorized disclosure status`（门先 UNPROVEN 拒绝的场景由 FZ-11 断言另行覆盖） |
+| 未知成本字段 | requests 恒 null，不发明计数 |
+
+既有回归（runner 门链拒绝/mock 全链/CLI 三场景/89+9 项）全部保留并通过。
+
+### 12.6 验证证据
+
+```text
+cd scripts && npx vitest run __tests__/prr-real-pi.test.ts __tests__/prr-real-runner.test.ts → 16/16 PASS
+npm run test:scripts → 52 文件 / 999 tests 全绿
+npm run dev:prr-rehearsal → rehearsal gate PASS（studyHash 338a0772… 不变）
+npm run verify:merge → PASS（本地）
+npx eslint（prr/ + 新测试文件）→ 0 error；git diff --check → OK
+```
+
+### 12.7 第六轮剩余限制
+
+- 受信 resolver 的**生产实现**（对接真实 Owner 决策记录存储与官方定价源）仍属 O-05——本轮交付其契约与强制点：没有它，`--transport pi` 无法启动；
+- 脏工作区检查基于 `git status --porcelain`（未跟踪文件计入）；"运行代码与获批提交一致"的更强证明（构建产物哈希）留待 B1 冻结时定义；
+- 真实 M1～M5 仍 NOT_MEASURED；真实 A/C 仍 NOT_RUN；Gate B BLOCKED；Gate C NOT_GRANTED。
+
+---
+
 ## 11. 真实 A/C 执行入口交付（2026-10-23，#2115 合并后推进）
 
 PR #2115 合并（d2e88bbe0）后按 Owner 指令推进真实实验准备：

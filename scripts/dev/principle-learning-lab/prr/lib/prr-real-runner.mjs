@@ -47,6 +47,10 @@ export function classifyTransportFailure(error) {
  * Parse one model round payload into the adjudicator's expected behavior
  * shape. Unparseable/invalid payloads become INVALID_OUTPUT rows (rc-3):
  * they stay in the denominator, they never crash the run.
+ *
+ * Unknown usage fields stay null — the actual HTTP request count of a round
+ * is owned by the budget-ledger telemetry, never inferred (owner review
+ * round 6).
  */
 export function behaviorFromRoundPayload(payload, usage) {
   const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
@@ -62,8 +66,8 @@ export function behaviorFromRoundPayload(payload, usage) {
     status: 'OK',
     output: { decisionId, evidenceRefs, hedging: payload.hedging === true ? true : undefined },
     usage: {
-      requests: num(usage?.requests) ?? 1,
-      modelRounds: num(usage?.modelRounds) ?? 1,
+      requests: num(usage?.requests),
+      modelRounds: num(usage?.modelRounds),
       toolCalls: num(usage?.toolCalls) ?? 0,
       tokensIn: num(usage?.tokensIn),
       tokensOut: num(usage?.tokensOut),
@@ -76,9 +80,20 @@ export function behaviorFromRoundPayload(payload, usage) {
 
 /**
  * Run the frozen A/C study. `transportFor` is called once per (group, task)
- * as `transportFor({ group, taskId })` → `{ complete }` (per-arm isolation).
- * The caller owns transport construction; the REAL factory must be the
- * PRI-966 authorized chain. The runner itself never opens a socket.
+ * as `transportFor({ group, taskId })` → `{ complete }` — the transport
+ * OBJECT ITSELF (not wrapped), with a `complete()` method. Transports must
+ * be stateless per round (single-turn decisions): A/C isolation comes from
+ * the isolated delivery content and the absence of shared session state,
+ * which the preregistration requires.
+ *
+ * `studyRequestCap` — the frozen FZ-06 whole-study HTTP request ceiling.
+ * `budgetTelemetry` — optional `() => { levels: [{scope, cap, used}] }`
+ * (the live budget-ledger snapshot). When present it is the AUTHORITATIVE
+ * request counter for the AC-S4 global stop; task-reported usage numbers are
+ * never invented to fill it. When absent, only task-reported finite request
+ * counts accumulate. On a global stop, execution halts immediately and every
+ * remaining (group, task) is listed in `notExecutedTasks` with its own
+ * reason code — retained, never dropped, never adjudicated as if run.
  *
  * Returns a machine-readable result; the caller persists it.
  */
@@ -90,6 +105,8 @@ export async function runPrrRealAc({
   verifyOwnerApproval,
   runningCommitSha,
   transportFor,
+  studyRequestCap = null,
+  budgetTelemetry = null,
 }) {
   // ── Gate chain — zero problems or nothing runs ──
   const gate = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval, dataset, runningCommitSha });
@@ -100,6 +117,7 @@ export async function runPrrRealAc({
       executed: false,
       refusalReasons: gate.problems,
       adjudications: [],
+      notExecutedTasks: [],
       pairedReport: null,
     };
   }
@@ -110,11 +128,23 @@ export async function runPrrRealAc({
     'Every conclusion component must reference one of the citable evidence ids available to you.',
   ].join('\n');
 
+  const ledgerUsedRequests = () => {
+    if (typeof budgetTelemetry !== 'function') return null;
+    try {
+      const snap = budgetTelemetry();
+      const studyLevel = (snap?.levels ?? []).find((l) => typeof l?.scope === 'string' && l.scope.startsWith('study:'));
+      return studyLevel && Number.isFinite(studyLevel.used) ? studyLevel.used : null;
+    } catch {
+      return null;
+    }
+  };
+
   const adjudications = [];
+  const notExecutedTasks = [];
   const exclusions = [];
   const stopEvents = [];
-  const maxRequestsPerTask = Number.isSafeInteger(dataset.manifest.maxRequestsPerTask) ? dataset.manifest.maxRequestsPerTask : null;
-  const cBudget = dataset.manifest.cMaterialBudgetChars;
+  let executedRequests = 0; // authoritative only when a counter source says so
+  let globalStop = null;
 
   for (const task of dataset.tasks.tasks) {
     const principle = dataset.principlesById.get(task.principleId);
@@ -127,8 +157,34 @@ export async function runPrrRealAc({
         exclusions.push({ taskId: task.taskId, group, reasonCode: 'unauthorized_history_material', note: 'excluded before exposure (B0 §8.2)' });
         continue;
       }
+      // Defense-in-depth: C material may only be delivered with an explicitly
+      // legal disclosure status — missing/unknown states never reach a model
+      // (owner review round 6; healthCheckPrrDataset is the first gate).
+      if (group === 'C' && task.historyMaterial.disclosureStatus !== 'authorized_synthetic') {
+        throw new Error(`runPrrRealAc: task ${task.taskId} C material has non-authorized disclosure status '${task.historyMaterial.disclosureStatus}' — refusing to deliver`);
+      }
+      // AC-S4 pre-call check: the live ledger (authoritative) or accumulated
+      // task-reported counts at/above the study cap stop execution BEFORE the
+      // next model call — never after the budget is already blown.
+      const usedBeforeCall = ledgerUsedRequests() ?? executedRequests;
+      if (studyRequestCap !== null && usedBeforeCall >= studyRequestCap) {
+        globalStop = { reasonCode: 'study_budget_exhausted' };
+        stopEvents.push({
+          type: 'AC-S4_BUDGET_STOP',
+          group,
+          taskId: task.taskId,
+          requests: null,
+          studyRequestsUsed: usedBeforeCall,
+          counterBasis: ledgerUsedRequests() !== null ? 'budget_ledger' : 'task_reported',
+          cap: null,
+          studyCap: studyRequestCap,
+          action: 'pre-call stop; remaining tasks listed as notExecuted; partial results reported as-is',
+        });
+        notExecutedTasks.push({ group, taskId: task.taskId, taskType: task.taskType, reasonCode: globalStop.reasonCode });
+        continue;
+      }
       const { content, taskText } = composeGroupPrompt({ group, task, principleText: principle.text });
-      const delivery = deliverPayload({ armId, content, budgetChars: cBudget });
+      const delivery = deliverPayload({ armId, content, budgetChars: dataset.manifest.cMaterialBudgetChars });
       const userPrompt = composeActorPrompt({ taskText, delivery });
       const transport = transportFor({ group, taskId: task.taskId });
       if (!transport || typeof transport.complete !== 'function') {
@@ -147,13 +203,25 @@ export async function runPrrRealAc({
         behavior = behaviorFromRoundPayload(round?.payload, round?.usage);
       } catch (error) {
         const classified = classifyTransportFailure(error);
-        behavior = { status: classified.status, usage: { requests: 1 } };
+        behavior = { status: classified.status, usage: {} };
       }
-      const budgetExhausted = maxRequestsPerTask !== null
-        && Number.isFinite(behavior.usage?.requests)
-        && behavior.usage.requests > maxRequestsPerTask;
+      // Task-reported request counts accumulate ONLY when finite; the live
+      // ledger snapshot (when present) is the authoritative AC-S4 counter.
+      if (Number.isFinite(behavior.usage?.requests)) executedRequests += behavior.usage.requests;
+      const perTaskCap = Number.isSafeInteger(dataset.manifest.maxRequestsPerTask) ? dataset.manifest.maxRequestsPerTask : null;
+      const budgetExhausted = perTaskCap !== null && Number.isFinite(behavior.usage?.requests) && behavior.usage.requests > perTaskCap;
       if (budgetExhausted) {
-        stopEvents.push({ type: 'AC-S4_BUDGET_STOP', group, taskId: task.taskId, requests: behavior.usage.requests, cap: maxRequestsPerTask });
+        stopEvents.push({
+          type: 'AC-S4_BUDGET_STOP',
+          group,
+          taskId: task.taskId,
+          requests: Number.isFinite(behavior.usage?.requests) ? behavior.usage.requests : null,
+          studyRequestsUsed: ledgerUsedRequests() ?? executedRequests,
+          counterBasis: ledgerUsedRequests() !== null ? 'budget_ledger' : 'task_reported',
+          cap: perTaskCap,
+          studyCap: studyRequestCap,
+          action: 'row graded budget_exhausted; partial results reported as-is',
+        });
       }
       adjudications.push(adjudicatePrr({
         studyId,
@@ -168,7 +236,12 @@ export async function runPrrRealAc({
   }
 
   const taskTypeById = new Map(dataset.tasks.tasks.map((t) => [t.taskId, t.taskType]));
-  const pairedReport = buildPairedReport({ studyId, adjudications, exclusions, taskTypeById });
+  // A study fully stopped before its first model call has zero adjudication
+  // rows — the paired view needs at least one row, so it is simply absent and
+  // the explicit denominators/notExecuted lists carry the whole truth.
+  const pairedReport = adjudications.length > 0
+    ? buildPairedReport({ studyId, adjudications, exclusions, taskTypeById })
+    : null;
 
   return {
     schemaVersion: PRR_REAL_RUNNER_SCHEMA,
@@ -176,10 +249,18 @@ export async function runPrrRealAc({
     executed: true,
     freezeGate: { status: freeze.status, protocolDigestVerified: true, runningCommitSha },
     dataset: { datasetId: dataset.manifest.datasetId, fixtureHash: dataset.fixtureHash },
+    denominators: {
+      enrolledRows: dataset.tasks.tasks.length * 2,
+      executedAdjudications: adjudications.length,
+      notExecutedTasks: notExecutedTasks.length,
+      excludedUnauthorized: exclusions.length,
+      requestCounterBasis: ledgerUsedRequests() !== null ? 'budget_ledger' : (executedRequests > 0 ? 'task_reported' : 'UNKNOWN'),
+    },
     adjudications,
+    notExecutedTasks,
     exclusions,
     stopEvents,
     pairedReport,
-    note: 'Full denominators retained: failures, INCONCLUSIVE and NOT_APPLICABLE rows are listed, never dropped. This file is evidence of EXECUTION, not of value — the verdict is GO/STOP/UNPROVEN per the frozen FZ-09/10 criteria, decided by the Owner.',
+    note: 'Full denominators retained: failures, not-executed, INCONCLUSIVE and NOT_APPLICABLE rows are listed, never dropped. This file is evidence of EXECUTION, not of value — the verdict is GO/STOP/UNPROVEN per the frozen FZ-09/10 criteria, decided by the Owner.',
   };
 }
