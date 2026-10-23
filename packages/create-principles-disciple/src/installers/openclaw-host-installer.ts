@@ -5,9 +5,11 @@
  * as private functions in installer.ts and uninstaller.ts. Extracted into a
  * class so the CLI can route install/uninstall by --host (openclaw | codex).
  *
- * NO BEHAVIOR CHANGE: the logic is identical to the pre-refactor private
- * functions updateOpenClawConfig() / cleanupOpenClawConfig(). The existing
- * install() / uninstall() entry points delegate to this class.
+ * The config write/merge logic is otherwise the one extracted from the
+ * pre-refactor private functions updateOpenClawConfig() /
+ * cleanupOpenClawConfig(); install() / uninstall() delegate to this class.
+ * The one intentional divergence is PRI-1021: this class no longer writes
+ * ~/.openclaw/plugins/installs.json, which is owned by the OpenClaw host.
  *
  * Runtime Contract Rules:
  * - rc-1-treat-as-unknown: openclaw.json parsed as unknown, validated.

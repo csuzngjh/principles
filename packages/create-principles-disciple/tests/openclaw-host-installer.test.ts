@@ -4,8 +4,9 @@
  * `~/.openclaw/plugins/installs.json` is the OpenClaw host's own plugin
  * install index. Since OpenClaw 2026.10.5, the mere presence of that legacy
  * file makes `openclaw doctor --fix` refuse its state-migration chain, which
- * in turn blocks gateway startup (exit code 78). PD previously created it on
- * every install, so PD installs were bricking OpenClaw upgrades.
+ * in turn blocks gateway startup (exit code 78). PD wrote it on every install
+ * that updated `openclaw.json`, so PD installs were bricking OpenClaw
+ * upgrades.
  *
  * Contract after the fix: install() writes ONLY openclaw.json. It never
  * creates the `plugins` directory, never writes installs.json, and plugin
@@ -30,7 +31,7 @@ vi.mock('os', async (importOriginal) => {
 });
 
 import { OpenClawHostInstaller } from '../src/installers/openclaw-host-installer.js';
-import type { HostInstallContext } from '@principles/core/host';
+import type { HostInstallContext, HostInstallResult } from '@principles/core/host';
 
 let tmpHome: string;
 
@@ -45,6 +46,35 @@ function makeCtx(): HostInstallContext {
 
 function openclawDir(): string {
   return path.join(tmpHome, '.openclaw');
+}
+
+function configPath(): string {
+  return path.join(openclawDir(), 'openclaw.json');
+}
+
+function installsJsonPath(): string {
+  return path.join(openclawDir(), 'plugins', 'installs.json');
+}
+
+function writeConfig(config: unknown): void {
+  fs.writeFileSync(configPath(), JSON.stringify(config, null, 2));
+}
+
+function readConfig(): Record<string, unknown> {
+  return JSON.parse(fs.readFileSync(configPath(), 'utf-8')) as Record<string, unknown>;
+}
+
+/**
+ * Every case asserts this. `install()` also has a success:true /
+ * configAction:'skipped' result for an unreadable openclaw.json, so `success`
+ * alone would stay true if the os.homedir seam ever stopped applying — the
+ * negative assertions would then pass vacuously while the code wrote to the
+ * real ~/.openclaw.
+ */
+function expectRegisteredInSandbox(result: HostInstallResult): void {
+  expect(result.success).toBe(true);
+  expect(result.configAction).toBe('updated');
+  expect(result.configPath).toBe(configPath());
 }
 
 beforeEach(() => {
@@ -62,59 +92,45 @@ afterEach(() => {
 
 describe('OpenClawHostInstaller.install — host-owned install index boundary', () => {
   it('does not create ~/.openclaw/plugins/installs.json', async () => {
-    fs.writeFileSync(
-      path.join(openclawDir(), 'openclaw.json'),
-      JSON.stringify({ gateway: { port: 18789 }, plugins: { entries: {} } }, null, 2),
-    );
+    writeConfig({ gateway: { port: 18789 }, plugins: { entries: {} } });
 
     const result = await new OpenClawHostInstaller().install(makeCtx());
 
-    expect(result.success).toBe(true);
-    expect(fs.existsSync(path.join(openclawDir(), 'plugins', 'installs.json'))).toBe(false);
+    expectRegisteredInSandbox(result);
+    expect(fs.existsSync(installsJsonPath())).toBe(false);
     expect(fs.existsSync(path.join(openclawDir(), 'plugins'))).toBe(false);
   });
 
   it('still registers PD in openclaw.json', async () => {
-    const configPath = path.join(openclawDir(), 'openclaw.json');
-    fs.writeFileSync(
-      configPath,
-      JSON.stringify(
-        {
-          gateway: { port: 18789 },
-          plugins: { allow: ['feishu'], entries: { 'principles-disciple': { enabled: false } } },
-        },
-        null,
-        2,
-      ),
-    );
+    writeConfig({
+      gateway: { port: 18789 },
+      plugins: { allow: ['feishu'], entries: { 'principles-disciple': { enabled: false } } },
+    });
 
     const result = await new OpenClawHostInstaller().install(makeCtx());
 
-    expect(result.success).toBe(true);
-    expect(result.configAction).toBe('updated');
-    const written = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    expect(written.plugins.allow).toContain('principles-disciple');
-    expect(written.plugins.entries['principles-disciple'].enabled).toBe(true);
-    expect(written.plugins.entries['principles-disciple'].hooks.allowConversationAccess).toBe(true);
+    expectRegisteredInSandbox(result);
+    const plugins = readConfig().plugins as Record<string, unknown>;
+    expect(plugins.allow).toContain('principles-disciple');
+    const entries = plugins.entries as Record<string, Record<string, unknown>>;
+    expect(entries['principles-disciple'].enabled).toBe(true);
+    const hooks = entries['principles-disciple'].hooks as Record<string, unknown>;
+    expect(hooks.allowConversationAccess).toBe(true);
   });
 
   it('leaves a pre-existing installs.json byte-identical', async () => {
-    fs.writeFileSync(
-      path.join(openclawDir(), 'openclaw.json'),
-      JSON.stringify({ plugins: { entries: {} } }, null, 2),
-    );
-    const installsPath = path.join(openclawDir(), 'plugins', 'installs.json');
-    fs.mkdirSync(path.dirname(installsPath), { recursive: true });
+    writeConfig({ plugins: { entries: {} } });
+    fs.mkdirSync(path.dirname(installsJsonPath()), { recursive: true });
     const original = JSON.stringify(
       { version: 1, installRecords: { other: { source: 'path' } } },
       null,
       2,
     );
-    fs.writeFileSync(installsPath, original);
+    fs.writeFileSync(installsJsonPath(), original);
 
     const result = await new OpenClawHostInstaller().install(makeCtx());
 
-    expect(result.success).toBe(true);
-    expect(fs.readFileSync(installsPath, 'utf-8')).toBe(original);
+    expectRegisteredInSandbox(result);
+    expect(fs.readFileSync(installsJsonPath(), 'utf-8')).toBe(original);
   });
 });
