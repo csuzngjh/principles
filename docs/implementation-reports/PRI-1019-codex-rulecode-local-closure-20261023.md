@@ -51,7 +51,8 @@
 - codex-adapter：314 passed / 1 skipped。
 - 新 Console 三文件：16 passed；Console typecheck/build 已验证。
 - merge gate 在第一轮源码已 EXIT=0；最后质量修订后的最终 gate 以交付回执/CI 为准，不复用旧成功记录。
-- 首轮双轴子代理审查与根代理生产路径复核已完成；后续真实试验修订由根代理复核及回归锁定，未声称获得第二次独立子代理评审。unknown 依赖规则隔离缺口已修并记录 ERR-102 recurrence。
+- 首轮双轴子代理审查与根代理生产路径复核已完成。最终独立增量评审未发现可证实 P0/P1 或违反验收的 P2 阻断，另行执行 8 文件 50 项定向测试全部通过、无跳过；评审未覆盖完整原生 V2 live 矩阵与生产安装。unknown 依赖规则隔离缺口已修并记录 ERR-102 recurrence。
+- 最终类型核验发现新增测试直接读取 V1 类型未声明的 adversarialResult；已改用既有 isEvaluatorOutputV2 运行时校验，再断言确定性反例结果，未使用类型断言绕过。
 
 ## 原始候选与实际停点
 

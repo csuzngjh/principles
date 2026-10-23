@@ -25,7 +25,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { RuntimeStateManager } from '../../store/runtime-state-manager.js';
 import { EvaluatorRunner } from '../evaluator-runner.js';
-import { DefaultEvaluatorValidator } from '../evaluator-output.js';
+import { DefaultEvaluatorValidator, isEvaluatorOutputV2 } from '../evaluator-output.js';
 import { StoreEventEmitter } from '../../store/event-emitter.js';
 import { SqliteConnection } from '../../store/sqlite-connection.js';
 import { SqlitePIArtifactStore } from '../../store/artifact/sqlite-pi-artifact-store.js';
@@ -424,8 +424,9 @@ describe('PRI-861 — painReasonSummary echo into the production rule artifact',
     const code = `function evaluate(input) { var command=input.action.paramsSummary.command || ''; if(command.indexOf('git commit')>=0 && input.context.facts.designGate.resolution==='not_approved') return {decision:'block',matched:true,reason:'denied'}; return {decision:'allow',matched:false,reason:'not sample'}; }`;
     await world.store.upsertArtifact({ ...artifact, contentJson: JSON.stringify({ ...artificerV2Content(), implementationCode: code, affectedTools: ['Bash'], goldenTraceCases: [denied, allowed], ownerGoldenTraceCases: [denied, allowed] }) });
     const result = await world.evaluator.run(EVAL_ID);
-    expect(result.output?.adversarialResult?.passed).toBe(false);
-    expect(result.output?.adversarialResult?.failedCases).toContainEqual(expect.objectContaining({ caseId: 'design-scope:neg-1', expectedDecision: 'block', actualDecision: 'allow' }));
+    if (!isEvaluatorOutputV2(result.output)) throw new Error('expected validated V2 evaluator output');
+    expect(result.output.adversarialResult?.passed).toBe(false);
+    expect(result.output.adversarialResult?.failedCases).toContainEqual(expect.objectContaining({ caseId: 'design-scope:neg-1', expectedDecision: 'block', actualDecision: 'allow' }));
     expect((await world.store.listBySourceTaskId(EVAL_ID)).some((entry) => entry.artifactKind === 'rule')).toBe(false);
   }, 60_000);
 
