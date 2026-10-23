@@ -396,7 +396,11 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
           : '';
         console.log(`  LLM runtime profile ............ ${installOptions.runtimeProfile.provider} / ${installOptions.runtimeProfile.model ?? '(default)'} (key: $${installOptions.runtimeProfile.apiKeyEnv})${profileLocation}`);
       } else {
-        console.log(`  LLM runtime profile ............ not configured (configure via console: pd console open --workspace "${operatorWorkspaceDir}")`);
+        console.log(`  LLM runtime profile ............ NOT CONFIGURED — internal agents stay in needs_setup`);
+        console.log(`             evidence is still captured, but nothing is diagnosed and no principle is proposed`);
+        console.log(`             fix: set provider / model / apiKeyEnv on 'pd.default' in .pd/config.yaml, or`);
+        console.log(`                  re-run with --provider <name> --api-key-env <ENV_VAR_NAME>, or`);
+        console.log(`                  use the console: pd console open --workspace "${operatorWorkspaceDir}"`);
       }
       console.log();
       console.log(t('ready'));

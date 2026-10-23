@@ -1459,7 +1459,7 @@
       "configDisabled": "所有智能体已停用。",
       "configErrors": "配置错误",
       "internalAgents": "内部智能体",
-      "internalAgentsDescription": "每个 PD 内部智能体使用一个 OpenClaw 运行时配置。密钥留在 PD 之外。",
+      "internalAgentsDescription": "每个 PD 内部智能体都运行在您配置的运行时配置上——provider、model，以及存放 API Key 的环境变量名。密钥本身留在 PD 之外。",
       "defaultRuntime": "默认运行时",
       "defaultRuntimeDescription": "未设置显式覆盖的智能体使用的默认运行时配置。",
       "advancedDiagnostics": "高级诊断",

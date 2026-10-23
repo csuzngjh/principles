@@ -41,7 +41,12 @@ Humans are the operators, supervisors, and risk owners.
 
 ## ⚡ Start here
 
-**Prerequisites:** Node.js ≥ 22 | OpenClaw CLI installed
+**Prerequisites:** Node.js ≥ 22 | OpenClaw CLI installed | an LLM account you are willing to let PD call
+
+PD's internal agents — the ones that diagnose repeated mistakes and propose principles — make
+their LLM calls with **your** provider account. PD ships no keys, stores no key values, and bills
+nothing. Install with `--yes` and no `--provider` and PD still captures pain evidence, but nothing
+gets diagnosed and no principle is proposed.
 
 ### 🤖 I am an AI agent
 
@@ -51,6 +56,17 @@ Use the non-interactive installer:
 npx create-principles-disciple --yes
 openclaw gateway --force
 ```
+
+That command installs PD **without** an LLM runtime profile. To configure one in the same run, add
+two flags — the second is the *name* of the environment variable holding your key, never the key
+itself:
+
+```bash
+npx create-principles-disciple --yes --provider anthropic --api-key-env ANTHROPIC_API_KEY
+```
+
+Skip them and configure the same fields later in the console, or check what is still missing with
+`pd config doctor --workspace "<path>"` — it names the exact field.
 
 After installation, wake up through the workspace memory:
 

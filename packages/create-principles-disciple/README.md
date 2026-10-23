@@ -46,7 +46,22 @@ npx create-principles-disciple --yes --workspace "/path/to/workspace" --json
 --non-interactive       Skip prompts
 --workspace <path>      Workspace directory
 --json                  Output result as JSON (implies non-interactive)
+--provider <name>       LLM provider for the pd.default runtime profile (openai/anthropic/deepseek)
+--api-key-env <name>    NAME of the env var holding your LLM API key. Requires --provider
+--model <id>            LLM model id (optional; the per-provider default applies when omitted)
+--base-url <url>        OpenAI-compatible custom endpoint (optional; env: PD_BASE_URL)
 ```
+
+## LLM runtime profile — required before the internal agents can run
+
+PD's internal agents (diagnostician, dreamer, scribe, artificer, signal collector) call the LLM
+provider **you** configure. PD ships no keys, stores no key values, and `--api-key-env` names an
+environment variable rather than carrying a secret.
+
+`--yes` without `--provider` installs in evidence-only mode: pain signals are captured and kept,
+but diagnosis does not run and no principle is proposed. The post-install summary says so, and at any
+later time `pd config doctor --workspace "<path>"` names the missing field. Full operator walkthrough:
+[`docs/runbooks/USER_GUIDE.md`](../../docs/runbooks/USER_GUIDE.md) — “Before You Start: Give PD an LLM”.
 
 ## Post-Install Verification
 

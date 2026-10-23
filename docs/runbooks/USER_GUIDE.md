@@ -22,6 +22,34 @@ Principles go through four statuses:
 | `active` | Officially in effect |
 | `archived` | Kept for history, not active |
 
+## Before You Start: Give PD an LLM
+
+PD's internal agents — diagnostician, dreamer, scribe, artificer, signal collector — make their
+LLM calls with **your** provider account. PD ships no keys and stores no key values.
+
+Three fields on the `pd.default` profile in `<workspace>/.pd/config.yaml` decide whether they can run:
+
+```yaml
+runtimeProfiles:
+  pd.default:
+    type: pi-ai
+    provider: anthropic            # installer accepts openai | anthropic | deepseek
+    model: claude-3-5-haiku-latest
+    apiKeyEnv: ANTHROPIC_API_KEY   # NAME of the env var holding your key, not the key
+```
+
+Pick them at install time instead, if you prefer:
+
+```bash
+npx create-principles-disciple --yes --provider anthropic --api-key-env ANTHROPIC_API_KEY
+```
+
+Or set them in the console: `pd console open --workspace "<path>"` → Control Center → runtime profiles.
+
+**If you skip this**: pain evidence is still captured and kept, but diagnosis does not run and no
+principle is proposed. `pd config doctor --workspace "<path>"` reports `needs_setup` and names the
+missing field; Control Center marks the section `Needs Config`.
+
 ## Daily Commands
 
 ### `/pd-status`
@@ -206,6 +234,14 @@ That is enough for most day-to-day use.
 ### “Some features seem disabled or missing”
 
 Some subsystems (such as `correction_observer`) are **default OFF** by design (MVP-Quiet, ADR-0014). This is intentional — they are not broken. They will be enabled in a future release once seed-customer evidence justifies broader activation. You can verify which subsystems are enabled in your workspace's `.pd/config.yaml`.
+
+### "It captures pain but never proposes a principle"
+
+That is almost always the LLM runtime profile, not the pipeline. Diagnosing and proposing are LLM
+calls made with your own provider account; when `provider`, `model` or `apiKeyEnv` is missing the
+agents report `needs_setup` and stay off. Run `pd config doctor --workspace "<path>"` — it names the
+missing field — then see
+[Before You Start: Give PD an LLM](#before-you-start-give-pd-an-llm).
 
 ## Console
 
