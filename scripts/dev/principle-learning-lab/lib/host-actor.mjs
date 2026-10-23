@@ -212,6 +212,56 @@ export function opportunityIdFromTaskId(taskId) {
 }
 
 /**
+ * Normalize a TypeBox/JSON schema for OpenAI structured outputs
+ * (response_format json_schema). The API rejected the lab's registered
+ * action schema live: `Invalid schema for response_format
+ * 'codex_output_schema': 'schema.required' is required` — one object node
+ * (the optional `args` map) had no `required` key at all.
+ *
+ * MINIMAL, SEMANTICS-PRESERVING fix: every object node gets an explicit
+ * `required` ONLY when it had none (empty array — no property is forcibly
+ * made required, the action contract is untouched) and an explicit
+ * `additionalProperties: false` when absent. Whether OpenAI's strict mode
+ * additionally demands every property listed in `required` (its docs
+ * suggest so) can only be settled by a real call — if the API still
+ * refuses, its error names the next node and the Owner decides between
+ * strict-full (all properties required) and a record-typed args map.
+ *
+ * Pure function; returns a new schema tree, never mutates the input.
+ */
+export function normalizeSchemaForOpenAiStrict(schema) {
+  if (Array.isArray(schema)) {
+    return schema.map((item) => normalizeSchemaForOpenAiStrict(item));
+  }
+  if (schema === null || typeof schema !== 'object') {
+    return schema;
+  }
+  const out = {};
+  for (const [key, value] of Object.entries(schema)) {
+    if (key === 'properties' && value !== null && typeof value === 'object' && !Array.isArray(value)) {
+      out.properties = Object.fromEntries(
+        Object.entries(value).map(([name, sub]) => [name, normalizeSchemaForOpenAiStrict(sub)]),
+      );
+    } else if (['anyOf', 'oneOf', 'allOf'].includes(key) && Array.isArray(value)) {
+      out[key] = value.map((sub) => normalizeSchemaForOpenAiStrict(sub));
+    } else if (key === '$schema' || key === '$id') {
+      continue; // irrelevant (and sometimes unwelcome) to the API
+    } else {
+      out[key] = value;
+    }
+  }
+  if (out.type === 'object') {
+    if (out.required === undefined) {
+      out.required = [];
+    }
+    if (out.additionalProperties === undefined) {
+      out.additionalProperties = false;
+    }
+  }
+  return out;
+}
+
+/**
  * Create the Codex host transport. One instance serves ONE arm: rounds are
  * delivered per call; a change of opportunityId in request.taskId starts a
  * fresh host session (opportunity isolation). Implements the same

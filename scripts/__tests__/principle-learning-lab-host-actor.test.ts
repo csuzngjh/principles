@@ -14,6 +14,7 @@ import {
   HostBudgetExhaustedError,
   createCodexHostTransport,
   createHostProcessLedger,
+  normalizeSchemaForOpenAiStrict,
   opportunityIdFromTaskId,
 } from '../dev/principle-learning-lab/lib/host-actor.mjs';
 import { runRealActorOpportunity } from '../dev/principle-learning-lab/lib/actor.mjs';
@@ -432,5 +433,46 @@ describe('runner dispatch and isolation', () => {
     expect(calls).toHaveLength(2); // no hidden extra spawns
     expect(opportunityIdFromTaskId('EA:REAL_ACTOR_I0#P4:phase-a#turn3')).toBe('P4:phase-a');
     expect(opportunityIdFromTaskId('bad-format')).toBeNull();
+  });
+});
+
+describe('OpenAI strict schema normalization (found live: schema.required is required)', () => {
+  // shape mirrors learning-lab-actor-action-v1: root object with required,
+  // an anyOf-const action union, and an OPTIONAL args object node that had
+  // neither `required` nor `additionalProperties` — the exact node OpenAI
+  // rejected with 400 'schema.required' is required.
+  const labSchema = {
+    additionalProperties: false,
+    type: 'object',
+    required: ['type'],
+    properties: {
+      type: { anyOf: [{ const: 'proceed', type: 'string' }, { const: 'compat-shim', type: 'string' }] },
+      args: { type: 'object', properties: { key: { type: 'string' }, consumer: { type: 'string' } } },
+      narrative: { type: 'string' },
+    },
+  };
+
+  it('every object node carries an explicit required and additionalProperties:false; nothing else changes', () => {
+    const out = normalizeSchemaForOpenAiStrict(JSON.parse(JSON.stringify(labSchema)));
+    expect(out.required).toEqual(['type']); // root contract untouched
+    expect(out.additionalProperties).toBe(false);
+    // the node that broke the API call:
+    expect(out.properties.args.required).toEqual([]);
+    expect(out.properties.args.additionalProperties).toBe(false);
+    // no property was forcibly made required (semantics preserved)
+    expect(out.properties.args.required).not.toContain('key');
+    expect(out.properties.type.anyOf).toEqual(labSchema.properties.type.anyOf);
+  });
+
+  it('is pure and idempotent; nested anyOf branches are normalized too', () => {
+    const input = JSON.parse(JSON.stringify(labSchema));
+    const once = normalizeSchemaForOpenAiStrict(input);
+    const twice = normalizeSchemaForOpenAiStrict(once);
+    expect(twice).toEqual(once);
+    expect(input).toEqual(labSchema); // input tree never mutated
+    const nested = { type: 'object', anyOf: [{ type: 'object', properties: { x: { type: 'string' } } }] };
+    const fixed = normalizeSchemaForOpenAiStrict(nested);
+    expect(fixed.anyOf[0].required).toEqual([]);
+    expect(fixed.anyOf[0].additionalProperties).toBe(false);
   });
 });
