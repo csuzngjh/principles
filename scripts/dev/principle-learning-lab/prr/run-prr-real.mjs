@@ -1,14 +1,19 @@
 #!/usr/bin/env node
 // PRI-1002 — PRR real A/C entry point. OFF BY DEFAULT, FAIL-CLOSED.
 //
-// Without an Owner-frozen record + a verified protocol approval digest + a
-// trusted running commit + an INDEPENDENT trusted Owner-decision resolver,
-// this command refuses before any transport exists — zero model calls, zero
-// cost. `--transport pi` additionally REQUIRES an external trusted evidence
-// resolver module (--evidence-resolver) and a clean worktree: the same JSON
-// that carries the authorization can never vouch for itself (owner review
-// round 6). `--transport mock` exists for wired-path rehearsals and tests
-// and never touches a model.
+// Trust root (owner review round 7): approval evidence comes EXCLUSIVELY
+// from an INDEPENDENT trusted Owner-decision resolver (--evidence-resolver).
+// The resolver's attestation is strictly reconciled against the submitted
+// protocol — the computed protocolApprovalDigest, the frozen commit, the
+// dataset hash, the decision reference and the official pricing schedule —
+// and the reconciliation MUST pass before anything runs. The caller-supplied
+// authorization JSON is routing metadata only; it can never vouch for
+// itself. `--transport pi` additionally requires a clean worktree (the
+// running code must be provably the approved commit) and builds its
+// transport ONLY through the existing PRI-966 authorized chain
+// (createAuthorizedPiTransport: OD-1/2/3 + budgeted fetch). `--transport
+// mock` exists for wired-path rehearsals and tests and never touches a
+// model.
 //
 // Usage:
 //   node scripts/dev/principle-learning-lab/prr/run-prr-real.mjs \
@@ -16,16 +21,8 @@
 //     --authorization <auth.json> [--transport mock|pi] [--out <dir>] \
 //     [--evidence-resolver <module.mjs>] [--allow-dirty-worktree-for-mock]
 //
-// The evidence resolver module must default-export:
-//   async verify({ decisionRef, expectedProtocolDigest, expectedCommitSha,
-//                  expectedFixtureHash, expectedBudget }) ->
-//     { verified, approved, frozenCommitSha, approvedProtocolDigest,
-//       pricing: { verified, reference, provider, model, currency,
-//                  inputUsdPerMillionTokens, outputUsdPerMillionTokens,
-//                  maxInputTokensPerRequest, maxOutputTokensPerRequest,
-//                  effectiveDate } }
-// It must resolve the AUTHORITATIVE Owner decision record (and the official
-// pricing schedule) independently — never from caller-supplied files.
+// The evidence resolver module must default-export verify() resolving the
+// AUTHORITATIVE Owner decision record and the official pricing schedule.
 
 import fs from 'node:fs';
 import { execSync } from 'node:child_process';
@@ -33,7 +30,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { loadPrrDataset, healthCheckPrrDataset } from './lib/prr-dataset.mjs';
-import { validateFreezeForRealRun } from './lib/prr-freeze.mjs';
+import { protocolApprovalDigest, validateFreezeForRealRun } from './lib/prr-freeze.mjs';
 import { runPrrRealAc } from './lib/prr-real-runner.mjs';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -88,7 +85,7 @@ async function main() {
   // ── Data admission FIRST (before any transport construction) ──
   const freeze = readJsonFile(args.freeze, 'freeze');
   const preregBody = readJsonFile(args.prereg, 'prereg');
-  const authorization = readJsonFile(args.authorization, 'authorization');
+  readJsonFile(args.authorization, 'authorization'); // routing metadata; NOT approval evidence (round 7)
   const dataset = loadPrrDataset(args.dataset); // deep-frozen snapshot
   const healthProblems = healthCheckPrrDataset(dataset);
   if (healthProblems.length > 0) {
@@ -97,6 +94,10 @@ async function main() {
     process.exit(1);
   }
   const { commit: runningCommitSha, dirty: worktreeDirty } = runningCommitAndWorktreeState();
+  if (transportKind === 'pi' && !args.evidenceResolver) {
+    console.error('[prr-real] REFUSED — --transport pi requires --evidence-resolver <module>: an INDEPENDENT trusted Owner-decision resolver. The authorization file alone cannot vouch for itself, and the O-05 production resolver is not yet available — the real execution path is NOT ready without it.');
+    process.exit(1);
+  }
   if (transportKind === 'pi' && worktreeDirty) {
     // A dirty worktree means the executing code may differ from the approved
     // commit — a real run can never start from one.
@@ -104,17 +105,93 @@ async function main() {
     process.exit(1);
   }
 
-  const verifyOwnerApproval = ({ decisionRef }) => {
-    if (!authorization || typeof authorization !== 'object') return { verified: false, reason: 'authorization record missing' };
-    if (authorization.decisionRef !== decisionRef) return { verified: false, reason: 'decisionRef does not match the authorization record' };
-    if (authorization.approvedBy !== 'owner') return { verified: false, reason: 'authorization was not issued by the Owner' };
-    return {
-      verified: true,
-      approved: authorization.approved === true,
-      frozenCommitSha: typeof authorization.frozenCommitSha === 'string' ? authorization.frozenCommitSha : undefined,
-      approvedProtocolDigest: typeof authorization.approvedProtocolDigest === 'string' ? authorization.approvedProtocolDigest : undefined,
-    };
-  };
+  // ── Owner review round 7 (A): the approval evidence is bound to the
+  // COMPLETE protocol. The digest is COMPUTED here from the submitted freeze
+  // record + prereg body and handed to the resolver as the expectation; the
+  // resolver must return its own independently-saved attestation, and every
+  // field it returns is strictly reconciled below. Missing resolver + pi =
+  // refusal; the authorization JSON is routing metadata only.
+  const expectedDigest = protocolApprovalDigest({ freeze, preregBody });
+  const expectedCommitSha = freeze.ownerApproval?.frozenCommitSha;
+  const decisionRef = freeze.ownerApproval?.decisionRef;
+  const fz06 = freeze.items.find((i) => i.id === 'FZ-06');
+  const budget = fz06 && typeof fz06.value === 'object' && fz06.value !== null ? fz06.value : null;
+
+  let trustedEvidence = null;
+  if (args.evidenceResolver) {
+    let trusted;
+    try {
+      const resolverUrl = `file://${path.resolve(args.evidenceResolver)}`;
+      const module = await import(resolverUrl);
+      trusted = module.verify ?? module.default?.verify ?? module.default;
+      if (typeof trusted !== 'function') throw new Error('module must export verify()');
+    } catch (error) {
+      console.error(`[prr-real] REFUSED — cannot load the trusted evidence resolver: ${error.message}`);
+      process.exit(1);
+    }
+    try {
+      trustedEvidence = {
+        ownerDecision: await trusted({
+          kind: 'owner-decision',
+          decisionRef,
+          expectedProtocolDigest: expectedDigest,
+          expectedCommitSha,
+          expectedFixtureHash: dataset.fixtureHash,
+          expectedBudget: budget,
+        }),
+        pricing: budget?.costBasisRef
+          ? await trusted({ kind: 'cost-basis', reference: budget.costBasisRef, provider: budget.provider, model: budget.model })
+          : null,
+      };
+    } catch (error) {
+      console.error(`[prr-real] REFUSED — trusted resolver failure: ${error.message}`);
+      process.exit(1);
+    }
+    const od = trustedEvidence.ownerDecision;
+    const pricing = trustedEvidence.pricing;
+    const reconciliations = [
+      [!od || typeof od !== 'object', 'resolver returned no owner-decision evidence'],
+      [od && od.verified !== true, 'resolver did not verify the decision record'],
+      [od && od.approved !== true, 'resolver confirmed the decision record is not an approval'],
+      [od && od.decisionRef !== decisionRef, `resolver decisionRef (${String(od?.decisionRef)}) does not match the freeze record (${String(decisionRef)})`],
+      [od && od.approvedProtocolDigest !== expectedDigest, 'resolver protocol digest does not match the submitted protocol (a frozen value, the prereg body, or the studyId changed after approval)'],
+      [od && od.frozenCommitSha !== expectedCommitSha, 'resolver frozen commit does not match the freeze record'],
+      [od && od.frozenFixtureHash !== dataset.fixtureHash, 'resolver dataset hash does not match the loaded dataset'],
+      [!pricing || typeof pricing !== 'object', 'resolver returned no official pricing evidence (required by FZ-06)'],
+      [pricing && pricing.verified !== true, 'resolver did not verify the official pricing schedule'],
+      [pricing && pricing.reference !== budget?.costBasisRef, 'resolver pricing reference does not match the frozen costBasisRef'],
+    ];
+    const failed = reconciliations.filter(([bad]) => bad).map(([, message]) => message);
+    if (failed.length > 0) {
+      console.error(`[prr-real] REFUSED — trusted-evidence reconciliation FAILED (${failed.length}):`);
+      for (const message of failed) console.error(`  - ${message}`);
+      console.error('[prr-real] No transport was constructed; zero model calls, zero cost.');
+      process.exit(1);
+    }
+    console.log('[prr-real] Trusted evidence reconciled: approval, protocol digest, frozen commit, dataset hash and pricing all match the authoritative records.');
+  } else if (transportKind === 'pi') {
+    console.error('[prr-real] REFUSED — --transport pi requires --evidence-resolver <module>: an INDEPENDENT trusted Owner-decision resolver. The authorization file alone cannot vouch for itself, and the O-05 production resolver is not yet available — the real execution path is NOT ready without it.');
+    process.exit(1);
+  }
+
+  // The gate's evidence comes ONLY from the reconciled resolver attestation.
+  // Without a resolver there is no independent proof of approval and the
+  // gate refuses (fail-closed) — the authorization file alone is never
+  // enough, and nothing is filled in from local data.
+  const verifyOwnerApproval = trustedEvidence
+    ? ({ decisionRef: gateDecisionRef }) => {
+      const od = trustedEvidence.ownerDecision;
+      if (od.decisionRef !== gateDecisionRef) return { verified: false, reason: 'resolver decisionRef does not match the freeze record' };
+      return {
+        verified: od.verified === true,
+        approved: od.approved === true,
+        decisionRef: od.decisionRef,
+        frozenCommitSha: od.frozenCommitSha,
+        approvedProtocolDigest: od.approvedProtocolDigest,
+        frozenFixtureHash: od.frozenFixtureHash,
+      };
+    }
+    : () => ({ verified: false, reason: 'no trusted resolver provided — the authorization file is not independent evidence of approval' });
 
   // Pre-flight: surface the full refusal list BEFORE transport work.
   const preflight = validateFreezeForRealRun({ freeze, preregBody, verifyOwnerApproval, dataset, runningCommitSha });
@@ -127,8 +204,6 @@ async function main() {
 
   let transportFor = null;
   let budgetTelemetry = null;
-  const fz06 = freeze.items.find((i) => i.id === 'FZ-06');
-  const budget = fz06 && typeof fz06.value === 'object' && fz06.value !== null ? fz06.value : null;
 
   if (transportKind === 'mock') {
     if (worktreeDirty && !args.allowDirtyForMock) {
@@ -148,63 +223,10 @@ async function main() {
       },
     });
   } else if (transportKind === 'pi') {
-    // ── Owner review round 6: trust root & contract fixes ──
-    if (typeof args.evidenceResolver !== 'string' || args.evidenceResolver.trim() === '') {
-      console.error('[prr-real] REFUSED — --transport pi requires --evidence-resolver <module>: an INDEPENDENT trusted Owner-decision resolver. The authorization file alone cannot vouch for itself, and the O-05 production resolver is not yet available — the real execution path is NOT ready without it.');
-      process.exit(1);
-    }
     if (!budget || !budget.httpRequestsPerArm || !budget.httpRequestsPerStudy || !budget.perRunCostCapUsd || !budget.totalCostCapUsd
       || !budget.httpRequestsPerOpportunity) {
       console.error('[prr-real] REFUSED — FZ-06 must freeze the complete budget shape (httpRequestsPerOpportunity/PerArm/PerStudy, perRunCostCapUsd, totalCostCapUsd, provider, model, baseUrl, apiKeyEnv, credentialsAvailable, costBasisRef, costBasis) before a PI transport can be built.');
       process.exit(1);
-    }
-    let trusted;
-    try {
-      const resolverUrl = `file://${path.resolve(args.evidenceResolver)}`;
-      const module = await import(resolverUrl);
-      trusted = module.verify ?? module.default?.verify ?? module.default;
-      if (typeof trusted !== 'function') throw new Error('module must export verify()');
-    } catch (error) {
-      console.error(`[prr-real] REFUSED — cannot load the trusted evidence resolver: ${error.message}`);
-      process.exit(1);
-    }
-
-    // Independently verify Owner approval AND official pricing BEFORE any
-    // transport construction. Everything the resolver returns is checked
-    // against the frozen values here — self-reported fields never pass.
-    let ownerEvidence;
-    let pricingEvidence;
-    try {
-      ownerEvidence = await trusted({
-        kind: 'owner-decision',
-        decisionRef: authorization.decisionRef,
-        expectedProtocolDigest: freeze.prereg?.canonicalSha256 ? undefined : undefined,
-        expectedCommitSha: freeze.ownerApproval?.frozenCommitSha,
-        expectedFixtureHash: dataset.fixtureHash,
-        expectedBudget: budget,
-      });
-      pricingEvidence = await trusted({
-        kind: 'cost-basis',
-        reference: budget.costBasisRef,
-        provider: budget.provider,
-        model: budget.model,
-      });
-    } catch (error) {
-      console.error(`[prr-real] REFUSED — trusted resolver failure: ${error.message}`);
-      process.exit(1);
-    }
-    const od2Checks = [
-      [ownerEvidence?.verified !== true, 'Owner decision was not verified by the trusted resolver'],
-      [ownerEvidence?.approved !== true, 'verified Owner decision is not an approval'],
-      [ownerEvidence?.approvedProtocolDigest == null, 'resolver returned no approvedProtocolDigest'],
-      [pricingEvidence?.verified !== true, 'official pricing was not verified by the trusted resolver'],
-      [pricingEvidence?.provider !== budget.provider || pricingEvidence?.model !== budget.model, 'verified pricing provider/model mismatch'],
-    ];
-    for (const [bad, message] of od2Checks) {
-      if (bad) {
-        console.error(`[prr-real] REFUSED — ${message}.`);
-        process.exit(1);
-      }
     }
 
     console.log('[prr-real] PI transport requested — building through createAuthorizedPiTransport (P1-02 gate) with trusted evidence.');
@@ -241,7 +263,7 @@ async function main() {
       schemaVersion: 'g2-real-run-authorization.v1',
       od1: {
         approved: true,
-        decisionRef: authorization.decisionRef,
+        decisionRef, // freeze-derived; reconciled against the resolver above
         frozenFixtureHash: dataset.fixtureHash,
       },
       od2: {
@@ -269,27 +291,32 @@ async function main() {
       totalCostCapUsd: budget.totalCostCapUsd,
     };
 
-    const trustedEvidenceVerifier = ({ kind, reference, provider, model }) => {
+    // Round 7: PURE passthrough of the reconciled resolver attestation.
+    // Nothing is filled in from local data — a field the resolver did not
+    // attest stays undefined, and the factory's own OD checks then refuse.
+    const trustedEvidenceVerifier = ({ kind }) => {
+      const od = trustedEvidence.ownerDecision;
+      const pricing = trustedEvidence.pricing;
       if (kind === 'owner-decision') {
         return {
-          verified: ownerEvidence.verified === true,
-          approved: ownerEvidence.approved === true,
-          reference,
-          frozenFixtureHash: dataset.fixtureHash,
+          verified: od.verified === true,
+          approved: od.approved === true,
+          reference: od.decisionRef,
+          frozenFixtureHash: od.frozenFixtureHash,
         };
       }
       if (kind === 'cost-basis') {
         return {
-          verified: pricingEvidence.verified === true,
-          reference: pricingEvidence.reference ?? reference,
-          provider: pricingEvidence.provider,
-          model: pricingEvidence.model,
-          currency: pricingEvidence.currency,
-          inputUsdPerMillionTokens: pricingEvidence.inputUsdPerMillionTokens,
-          outputUsdPerMillionTokens: pricingEvidence.outputUsdPerMillionTokens,
-          maxInputTokensPerRequest: pricingEvidence.maxInputTokensPerRequest,
-          maxOutputTokensPerRequest: pricingEvidence.maxOutputTokensPerRequest,
-          effectiveDate: pricingEvidence.effectiveDate,
+          verified: pricing.verified === true,
+          reference: pricing.reference,
+          provider: pricing.provider,
+          model: pricing.model,
+          currency: pricing.currency,
+          inputUsdPerMillionTokens: pricing.inputUsdPerMillionTokens,
+          outputUsdPerMillionTokens: pricing.outputUsdPerMillionTokens,
+          maxInputTokensPerRequest: pricing.maxInputTokensPerRequest,
+          maxOutputTokensPerRequest: pricing.maxOutputTokensPerRequest,
+          effectiveDate: pricing.effectiveDate,
         };
       }
       return { verified: false, approved: false };
@@ -322,6 +349,7 @@ async function main() {
   }
 
   const studyRequestCap = Number.isSafeInteger(budget?.httpRequestsPerStudy) ? budget.httpRequestsPerStudy : null;
+  const armRequestCap = Number.isSafeInteger(budget?.httpRequestsPerArm) ? budget.httpRequestsPerArm : null;
   const result = await runPrrRealAc({
     studyId: freeze.studyId,
     freeze,
@@ -331,6 +359,7 @@ async function main() {
     runningCommitSha,
     transportFor,
     studyRequestCap,
+    armRequestCap,
     budgetTelemetry,
   });
 

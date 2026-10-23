@@ -86,7 +86,12 @@ export function behaviorFromRoundPayload(payload, usage) {
  * the isolated delivery content and the absence of shared session state,
  * which the preregistration requires.
  *
- * `studyRequestCap` — the frozen FZ-06 whole-study HTTP request ceiling.
+ * `studyRequestCap` / `armRequestCap` — the frozen FZ-06 whole-study and
+ * per-arm HTTP request ceilings. They are SEMANTICALLY DISTINCT: in the PRR
+ * ledger chain (study parent → arm child) every request reserves against the
+ * WHOLE chain, so a single arm's child ledger is never mistaken for an
+ * independent budget for "each arm" — the arm ceiling bounds the one real
+ * execution chain and the study ceiling bounds the whole experiment.
  * `budgetTelemetry` — optional `() => { levels: [{scope, cap, used}] }`
  * (the live budget-ledger snapshot). When present it is the AUTHORITATIVE
  * request counter for the AC-S4 global stop; task-reported usage numbers are
@@ -106,6 +111,7 @@ export async function runPrrRealAc({
   runningCommitSha,
   transportFor,
   studyRequestCap = null,
+  armRequestCap = null,
   budgetTelemetry = null,
 }) {
   // ── Gate chain — zero problems or nothing runs ──
@@ -128,16 +134,18 @@ export async function runPrrRealAc({
     'Every conclusion component must reference one of the citable evidence ids available to you.',
   ].join('\n');
 
-  const ledgerUsedRequests = () => {
+  const ledgerLevelUsed = (scopePrefix) => {
     if (typeof budgetTelemetry !== 'function') return null;
     try {
       const snap = budgetTelemetry();
-      const studyLevel = (snap?.levels ?? []).find((l) => typeof l?.scope === 'string' && l.scope.startsWith('study:'));
-      return studyLevel && Number.isFinite(studyLevel.used) ? studyLevel.used : null;
+      const level = (snap?.levels ?? []).find((l) => typeof l?.scope === 'string' && l.scope.startsWith(scopePrefix));
+      return level && Number.isFinite(level.used) ? level.used : null;
     } catch {
       return null;
     }
   };
+  const ledgerUsedRequests = () => ledgerLevelUsed('study:');
+  const ledgerArmUsedRequests = () => ledgerLevelUsed('arm:');
 
   const adjudications = [];
   const notExecutedTasks = [];
@@ -163,24 +171,31 @@ export async function runPrrRealAc({
       if (group === 'C' && task.historyMaterial.disclosureStatus !== 'authorized_synthetic') {
         throw new Error(`runPrrRealAc: task ${task.taskId} C material has non-authorized disclosure status '${task.historyMaterial.disclosureStatus}' — refusing to deliver`);
       }
-      // AC-S4 pre-call check: the live ledger (authoritative) or accumulated
-      // task-reported counts at/above the study cap stop execution BEFORE the
-      // next model call — never after the budget is already blown.
+      // AC-S4 pre-call check: BOTH budget scopes are consulted BEFORE the
+      // next model call — the arm ceiling (the single real execution chain)
+      // and the study ceiling (the whole experiment). The live ledger is the
+      // authoritative counter; accumulated task-reported counts are the
+      // fallback. Whichever scope trips first halts execution immediately.
       const usedBeforeCall = ledgerUsedRequests() ?? executedRequests;
-      if (studyRequestCap !== null && usedBeforeCall >= studyRequestCap) {
-        globalStop = { reasonCode: 'study_budget_exhausted' };
+      const armUsedBeforeCall = ledgerArmUsedRequests() ?? executedRequests;
+      let preCallStopReason = null;
+      if (studyRequestCap !== null && usedBeforeCall >= studyRequestCap) preCallStopReason = 'study_budget_exhausted';
+      if (armRequestCap !== null && armUsedBeforeCall >= armRequestCap) preCallStopReason = 'arm_budget_exhausted';
+      if (preCallStopReason !== null) {
+        globalStop = { reasonCode: preCallStopReason };
         stopEvents.push({
           type: 'AC-S4_BUDGET_STOP',
           group,
           taskId: task.taskId,
           requests: null,
+          armRequestsUsed: armUsedBeforeCall,
           studyRequestsUsed: usedBeforeCall,
-          counterBasis: ledgerUsedRequests() !== null ? 'budget_ledger' : 'task_reported',
-          cap: null,
+          counterBasis: ledgerUsedRequests() !== null || ledgerArmUsedRequests() !== null ? 'budget_ledger' : 'task_reported',
+          cap: armRequestCap,
           studyCap: studyRequestCap,
-          action: 'pre-call stop; remaining tasks listed as notExecuted; partial results reported as-is',
+          action: `pre-call stop (${preCallStopReason}); remaining tasks listed as notExecuted; partial results reported as-is`,
         });
-        notExecutedTasks.push({ group, taskId: task.taskId, taskType: task.taskType, reasonCode: globalStop.reasonCode });
+        notExecutedTasks.push({ group, taskId: task.taskId, taskType: task.taskType, reasonCode: preCallStopReason });
         continue;
       }
       const { content, taskText } = composeGroupPrompt({ group, task, principleText: principle.text });

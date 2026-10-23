@@ -605,3 +605,57 @@ CLI 实测：无参数 exit=1；文件缺失 exit=1；mock 全链 executed=true�
 - **已交付**：可被授权激活的执行入口 + Owner 决策清单（已按推荐值整理至 Linear PRI-1001：Codex/单一 workspace/结构化摘要与 ID/禁 Raw/外发 0/复用 g2 授权门；Owner 专属取值未代填）；
 - **仍阻断**：FZ-01~FZ-15 全部 Owner 决策未决——真实 A/C **NOT_RUN**、真实 M1~M5 **NOT_MEASURED**、Gate B **BLOCKED**、Gate C **NOT_GRANTED**；Owner 勾选并签发冻结记录后，`run-prr-real.mjs` 即为预注册实验的执行路径；
 - Gate B 正向结果前不开发 Recall 生产功能、不接 Tool/Skill、不扩宿主（指令第 7 条）。
+
+---
+
+## 13. 第七轮定向修复（2026-10-23，head `41feb12de` 审查意见；最后一轮）
+
+### 13.1 A：Owner 授权证据绑定（run-prr-real.mjs 重构）
+
+| 缺陷 | 修复 |
+|---|---|
+| `expectedProtocolDigest` 恒为 undefined（三元两臂均 undefined 的笔误） | CLI 现场计算 `protocolApprovalDigest({freeze, preregBody})`（完整协议摘要：studyId+正文哈希+全部冻结条目）并作为 `expectedProtocolDigest` 传给 resolver |
+| 传参不全 | resolver 现接收完整期望集：协议摘要、冻结提交 SHA、数据集哈希、预算（FZ-06 冻结值）、决策引用 |
+| 对账不严 | 十项严格对账：resolver 必须返回 verified、approved、decisionRef、approvedProtocolDigest、frozenCommitSha、frozenFixtureHash 与官方定价证据（verified + reference==costBasisRef）——任一缺失/不一致即 `trusted-evidence reconciliation FAILED` 拒绝 |
+| `trustedEvidenceVerifier` 补造字段（本地填 `frozenFixtureHash: dataset.fixtureHash`、pricing reference 回退到入参） | 改为**纯透传** reconciled attestation——resolver 未核验的字段保持 undefined，工厂自身 OD 校验随后拒绝 |
+| 调用方 JSON 当独立证明 | **架构重构**：`verifyOwnerApproval` 门闭包的证据改**只来自 resolver attestation**（reconcile 通过后）；无 resolver 时闭包恒 `verified:false`（"the authorization file is not independent evidence of approval"）——authorization JSON 降级为纯路由元数据；`pi` 无 resolver 在任何其他检查前拒绝 |
+| resolver 对账时机 | **前置**到 preflight 之前（门用的证据即已对账的证据），mock/pi 共用同一对账阶段 |
+
+### 13.2 B：预算 STOP 与分母（prr-real-runner.mjs + CLI）
+
+- **arm/study 语义分离**：文档与实现明确——PRR 账本链（study parent → arm child）中每次请求对整链预留，arm 子账本**不是**"每个 arm 各自的独立预算"，而是唯一执行链的上界；study 上界约束整个实验；
+- **双 scope pre-call 检查**：arm 与 study 两个上限均在**调用前**检查（live 账本权威计数优先，任务上报有限计数兜底），任一触顶 → 立即停止（reasonCode `arm_budget_exhausted`/`study_budget_exhausted`）；
+- 剩余任务完整进入 `notExecutedTasks`（保留原始分母与停止原因）；已执行行如实保留；
+- 未知请求量不推断（null）；测试未降低任何预算约束。
+
+### 13.3 C：新增测试（`prr-real-cli.test.ts` 8 项，真实 CLI spawn + 独立 resolver 模块；runner arm-STOP 1 项）
+
+| 测试 | 断言 |
+|---|---|
+| 有效 resolver + mock | exit 0 + "Trusted evidence reconciled" + executed=true（25 行分母） |
+| 协议摘要不匹配（freeze 篡改 FZ-11，resolver 持原摘要） | `trusted-evidence reconciliation FAILED` + `protocol digest does not match`，exit≠0，无 real-run-result 产出（拒绝先于 transport） |
+| 冻结提交不匹配（resolver 持不同 commit） | `frozen commit does not match`，exit≠0 |
+| 数据集哈希不匹配（resolver 持不同 fixtureHash） | `dataset hash does not match`，exit≠0 |
+| 决策引用不匹配 | `decisionRef … does not match`，exit≠0 |
+| 定价证据未验证/引用不同 | 双消息拒绝，exit≠0 |
+| pi 无 resolver | `NOT ready` 拒绝 |
+| arm 账本耗尽（arm level 40/40） | **0 次调用即停**，26−1 项全部 `arm_budget_exhausted` 保留，`counterBasis='budget_ledger'` |
+
+既有测试全部保留：real-path 16/16、PI 工厂 10/10、全量 52 文件全绿。
+
+### 13.4 第七轮验证证据
+
+```text
+cd scripts && npx vitest run（real-path 三套件）→ 24/24 PASS
+npm run test:scripts → 52 文件 / 全绿
+npm run dev:prr-rehearsal → rehearsal gate PASS
+npx eslint（prr/ + spawn helper）→ 0 error；git diff --check → OK
+npm run verify:merge → PASS（本地）
+```
+
+### 13.5 第七轮剩余限制
+
+- resolver 的生产实现（真实 Owner 决策记录存储 + 官方定价源）仍属 O-05——契约与强制点已交付；
+- 真实 M1～M5 NOT_MEASURED；真实 A/C NOT_RUN；Gate B BLOCKED；Gate C NOT_GRANTED。
+
+**第七轮状态收口：离线能力 GO；执行入口授权链完整（信任根=独立 resolver，缺即拒）；真实实验仍待 Owner 冻结授权。**
