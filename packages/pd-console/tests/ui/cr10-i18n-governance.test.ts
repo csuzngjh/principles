@@ -11,6 +11,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import en from '../../src/ui/i18n/en.json';
 import zhCN from '../../src/ui/i18n/zh-CN.json';
 
@@ -283,5 +286,57 @@ describe('no raw key leakage', () => {
   it('every leaf value in zh-CN.json is a string', () => {
     const nonString = findNonStringLeaves(zhCN);
     expect(nonString, `Non-string leaf values in zh-CN.json: ${nonString.join(', ')}`).toEqual([]);
+  });
+});
+
+describe('control-center readiness sentences are actually rendered', () => {
+  // PRI-1022: the five per-status `pages.controlCenter.config*` sentences were
+  // authored but never rendered anywhere, so Control Center told the Owner
+  // nothing about why internal agents were idle. vitest runs in 'node' (no
+  // jsdom), so this guards the source contract the same way the live-region
+  // test does.
+  const here = dirname(fileURLToPath(import.meta.url));
+  const source = readFileSync(
+    join(here, '..', '..', 'src', 'ui', 'pages', 'control-center', 'ControlCenterPage.tsx'),
+    'utf-8',
+  );
+  const controlCenter = getOwnRecord(getOwnRecord(en, 'pages'), 'controlCenter');
+  const configKeys = Object.keys(controlCenter ?? {}).filter(k => k.startsWith('config'));
+  const renderedKeys = [...source.matchAll(/"pages\.controlCenter\.(config[A-Za-z]+)"/g)].map(m => m[1]);
+
+  it('every sentence key rendered by the page exists in both locales', () => {
+    const zh = getOwnRecord(getOwnRecord(zhCN, 'pages'), 'controlCenter');
+    const missing: string[] = [];
+    for (const key of renderedKeys) {
+      if (getOwnString(controlCenter, key) === undefined) missing.push(`en:${key}`);
+      if (getOwnString(zh, key) === undefined) missing.push(`zh:${key}`);
+    }
+    expect(missing, `rendered key with no i18n value: ${missing.join(', ')}`).toEqual([]);
+  });
+
+  it('every pages.controlCenter.config* key is referenced by the page', () => {
+    const orphaned = configKeys.filter(k => !source.includes(`pages.controlCenter.${k}`));
+    expect(orphaned, `config* keys defined in i18n but never rendered: ${orphaned.join(', ')}`).toEqual([]);
+  });
+
+  it('maps all five readiness statuses to a sentence (no silent gap)', () => {
+    const block = /const CONFIG_READINESS_KEY: Record<ReadinessStatus, string> = \{([\s\S]*?)\};/.exec(source);
+    expect(block, 'CONFIG_READINESS_KEY map not found in ControlCenterPage.tsx').not.toBeNull();
+    const mapped = [...(block ? block[1] : '').matchAll(/(\w+):\s*"pages\.controlCenter\.(config\w+)"/g)];
+    expect(mapped.map(m => m[1]).sort()).toEqual(
+      ['disabled', 'needs_setup', 'not_ready', 'ready', 'unknown'],
+    );
+    expect(mapped.map(m => m[2]).sort()).toEqual(configKeys.filter(k => k !== 'configErrors').sort());
+    expect(source).toContain('CONFIG_READINESS_KEY[overallReadiness]');
+  });
+
+  it('does not describe the runtime profile as an OpenClaw profile', () => {
+    const description = getOwnString(controlCenter, 'internalAgentsDescription');
+    expect(description, 'en.pages.controlCenter.internalAgentsDescription must be a string').toBeTypeOf('string');
+    expect(description).not.toContain('OpenClaw');
+    const zh = getOwnRecord(getOwnRecord(zhCN, 'pages'), 'controlCenter');
+    const zhDescription = getOwnString(zh, 'internalAgentsDescription');
+    expect(zhDescription, 'zh.pages.controlCenter.internalAgentsDescription must be a string').toBeTypeOf('string');
+    expect(zhDescription).not.toContain('OpenClaw');
   });
 });

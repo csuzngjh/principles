@@ -54,6 +54,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// Overall readiness → the plain-language sentence shown under the internal-agents heading.
+const CONFIG_READINESS_KEY: Record<ReadinessStatus, string> = {
+  ready: "pages.controlCenter.configReady",
+  needs_setup: "pages.controlCenter.configNeedsSetup",
+  not_ready: "pages.controlCenter.configNotReady",
+  unknown: "pages.controlCenter.configUnknown",
+  disabled: "pages.controlCenter.configDisabled",
+};
+
 function validateReadinessStatus(raw: unknown): ReadinessStatus | null {
   if (typeof raw !== "string") return null;
   switch (raw) {
@@ -886,6 +895,15 @@ export function ControlCenterPage() {
         </SectionTitle>
         <p className="text-ink-3 text-[13px] leading-relaxed mb-3">
           {t("pages.controlCenter.internalAgentsDescription")}
+        </p>
+        <p
+          className={
+            overallReadiness === "ready"
+              ? "text-ink-4 text-[13px] leading-relaxed mb-3"
+              : "text-amber text-[13px] leading-relaxed mb-3"
+          }
+        >
+          {t(CONFIG_READINESS_KEY[overallReadiness])}
         </p>
         {(() => {
           const { groups, unknown } = groupAgentsByDependency(

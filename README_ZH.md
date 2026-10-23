@@ -41,7 +41,9 @@ Principles Disciple 是一个 OpenClaw 插件，用来帮助编程智能体捕�
 
 ## ⚡ 从这里开始 (Start here)
 
-**前置条件:** Node.js ≥ 22 | 已安装 OpenClaw CLI
+**前置条件:** Node.js ≥ 22 | 已安装 OpenClaw CLI | 一个您愿意授权 PD 调用的 LLM 账号
+
+PD 的内部智能体（负责诊断反复出现的错误、提出原则的那几个）用的是**您自己的** provider 账号发起 LLM 调用。PD 不带密钥、不保存密钥值、也不向您收费。用 `--yes` 安装却不带 `--provider`，PD 照常捕捉痛苦证据，但不会诊断，也不会提出任何原则。
 
 ### 🤖 我是 AI 智能体
 
@@ -51,6 +53,14 @@ Principles Disciple 是一个 OpenClaw 插件，用来帮助编程智能体捕�
 npx create-principles-disciple --yes
 openclaw gateway --force
 ```
+
+上面这条命令装出来的 PD **没有** LLM 运行时配置。要在同一次安装里配好，加两个参数——第二个参数是存放密钥的环境变量**名字**，不是密钥本身：
+
+```bash
+npx create-principles-disciple --yes --provider anthropic --api-key-env ANTHROPIC_API_KEY
+```
+
+现在跳过也行，之后在控制台里补上同样这几个字段；想知道还缺什么，跑 `pd config doctor --workspace "<路径>"`，它会点名将缺的字段。
 
 安装后，按照工作区记忆唤醒自己：
 
