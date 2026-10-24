@@ -280,6 +280,17 @@ export async function recallPains(workspaceDir: string, query: PainRecallQuery):
     let trajectoryDb: DatabaseLike;
     try {
       trajectoryDb = openTrajectoryDbReadonly(workspaceDir);
+      // SQLite defers the file-header check to the first statement (same as
+      // state.db above): probe pain_events NOW so a corrupt file or a
+      // schema-less database falls into the source_unreadable classification
+      // instead of escaping as a raw query error. Close before rethrowing so
+      // no handle leaks into the failure path.
+      try {
+        trajectoryDb.prepare('SELECT 1 FROM pain_events LIMIT 1').get();
+      } catch (probeErr: unknown) {
+        trajectoryDb.close();
+        throw probeErr;
+      }
     } catch {
       const missing = !fs.existsSync(path.join(workspaceDir, '.state', 'trajectory.db'));
       return emptyResult({
@@ -423,8 +434,11 @@ export async function recallPains(workspaceDir: string, query: PainRecallQuery):
         };
 
         let diagnoses: DiagnosisView[] = [];
-        let diagnosesAvailability: ItemAvailability = 'not_recorded';
+        // Every branch below assigns this before use (CodeQL useless-init).
+        let diagnosesAvailability: ItemAvailability;
         let correction: CorrectionEvidenceView | null = null;
+        // Initializer is meaningful: a successful read with no persisted
+        // correction evidence keeps this 'not_recorded'.
         let correctionAvailability: ItemAvailability = 'not_recorded';
         if (manager === null) {
           diagnosesAvailability = 'unreadable';

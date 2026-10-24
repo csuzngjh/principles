@@ -41,6 +41,18 @@ function fail(input: { message: string; reason: string; nextAction: string; json
   process.exit(1);
 }
 
+/**
+ * Strict --limit parser (SPEC §3.3): only a complete base-10 integer is
+ * accepted; anything else becomes NaN so the handler's integer/range check
+ * rejects it. Deliberately single-argument — Commander passes the previous
+ * option value as the parser's second argument, which `parseInt` would
+ * silently treat as a radix on repeated flags.
+ */
+export function parsePainRecallLimit(value: string): number {
+  const trimmed = value.trim();
+  return /^\d+$/.test(trimmed) ? Number(trimmed) : Number.NaN;
+}
+
 function printHuman(result: PainRecallResult): void {
   const p = result.principle;
   console.log(`Principle:     ${p.canonicalId ?? p.requestedId} (${p.identityStatus})`);
@@ -112,7 +124,22 @@ export async function handlePainRecall(opts: PainRecallOptions): Promise<void> {
     painId = trimmed;
   }
 
-  const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
+  let workspaceDir: string;
+  try {
+    workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
+  } catch (err: unknown) {
+    // resolveWorkspaceDir throws when no workspace can be determined (no
+    // --workspace, no PD_WORKSPACE_DIR, no config default, or an unparseable
+    // config) — surface it through the standard envelope instead of letting a
+    // raw exception escape --json mode (SPEC §4.4).
+    fail({
+      message: `workspace resolution failed: ${err instanceof Error ? err.message : String(err)}`,
+      reason: 'workspace_unresolved',
+      nextAction: 'Pass --workspace <path>, set PD_WORKSPACE_DIR, or add workspace.default to .pd/config.yaml.',
+      json,
+    });
+    return; // guard: test stubs of process.exit continue execution
+  }
 
   let result: PainRecallResult;
   try {

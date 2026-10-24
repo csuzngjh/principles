@@ -139,3 +139,26 @@ pd pain recall --principle-id <uuid> [--pain-id <id>] [--context <text>] [--limi
 - `ambiguous_principle` 状态在精确 ledger 键匹配下结构性不可达（键唯一）。合同中保留该枚举值以符合 SPEC §4.2；如未来引入别名解析需补测试。
 - **既有环境问题（非本功能引入）**：`pd-cli` 的 console-open 类测试在本机挂起（spawn 的 console server 不退出，单独运行 300s 超时可复现，exit 143）；`tests/e2e/**` 4 个重型集成文件未纳入本机全量运行。两者均不在本功能 diff 中，等价覆盖已由独立绿测承担（见 §7）。建议 Owner 另行立项排查本机全量套件的挂起问题。
 - 无阻塞上线事项。
+
+---
+
+## 11. 评审修复记录（PR #2128 第一轮复审，2026-10-24）
+
+Owner 复审 + CodeRabbit 共指出 5 项发现，逐项对照源码核实后**全部属实**，已全部修复：
+
+| # | 发现 | 核实结论 | 修复 |
+| --- | --- | --- | --- |
+| P1 | 损坏 `trajectory.db` 不会返回 `source_unreadable`，而是逸出成通用 `recall_failed` | 属实：`openTrajectoryDbReadonly` 只查存在性，SQLite 延迟到首条语句才校验文件头/表结构；原首个 `prepare` 位于无 catch 的 try/finally | 打开后立即只读探活 `SELECT 1 FROM pain_events LIMIT 1`（同时校验文件头与表存在性），失败先 `close()` 再抛入现有 catch → `source_unreadable` |
+| P2 | `resolveWorkspaceDir()` 在 try/catch 之外，抛出时 `--json` 得不到结构化 envelope | 属实：该函数在步骤 3（config 不可解析）与步骤 5（无工作区）显式 throw | 包入独立 try/catch → `fail({reason:'workspace_unresolved'})` |
+| P2 | `--limit` 用 `parseInt` 解析：`2.5→2`、`3abc→3` 静默通过；Commander 把前一选项值作 radix 传入 | 属实（commander `parseArg(value, previous)` 与 `parseInt` 组合的已知陷阱） | 新增导出 `parsePainRecallLimit`（单参数、`/^\d+$/` 全匹配，非法即 NaN 交由 handler 拒绝），index.ts 接线 |
+| CodeQL | `diagnosesAvailability` 初值死赋值 | 属实：所有分支必覆盖 | 去掉初始化器（TS 定赋值分析可证）；`correctionAvailability` 初值有真实语义（无纠错证据时保持 `not_recorded`），保留 |
+| CI | 缺 `.changeset/*.md`（Verify Merge Gate 红） | 属实 | 补 `.changeset/pain-recall-cli.md`（pd-cli minor + 三个技能载荷包 patch） |
+
+**回归测试**（Owner 要求三项全覆盖，新增 17 项，专项测试 44→61 全绿）：
+
+- `avail-9`：损坏 trajectory.db → `status=source_unreadable`、`sources.trajectoryDb=unreadable`，不再抛 `recall_failed`。
+- `avail-10`：合法 SQLite 但缺 `pain_events` 表 → `source_unreadable`（探活同时覆盖缺表场景）。
+- `cli-A5`：`resolveWorkspaceDir` 抛出 → `{status:'failed', reason:'workspace_unresolved'}` envelope + 退出 1。
+- `parsePainRecallLimit` 14 项：`2.5/3abc/abc/-1/空/空白/0x10/1e2/3,5/全角` → NaN；`3/带空格 10/007/1` → 正确整数。
+
+验证：`npx vitest run pain-recall`（专项 61/61）、`tsc --noEmit` 0 错误、eslint 触达文件 0 问题。

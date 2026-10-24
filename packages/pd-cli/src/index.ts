@@ -9,7 +9,7 @@
 import { Command, Option } from 'commander';
 import { handlePainRecord } from './commands/pain-record.js';
 import { registerPainRetryCommand } from './commands/pain-retry.js';
-import { handlePainRecall } from './commands/pain-recall.js';
+import { handlePainRecall, parsePainRecallLimit } from './commands/pain-recall.js';
 import { handlePainEvidence } from './commands/pain-evidence.js';
 import { handlePainList } from './commands/pain-list.js';
 import { handleSamplesList } from './commands/samples-list.js';
@@ -170,7 +170,11 @@ painCmd
   .option('--principle-id <id>', 'Canonical ledger principle id (required)')
   .option('--pain-id <id>', 'Filter to one pain within this principle\'s verified associations')
   .option('--context <text>', 'Current question — deterministic local re-ranking only, never creates associations')
-  .option('-l, --limit <n>', 'Max results (default 3, 1-10)', parseInt)
+  // Strict integer parser (SPEC §3.3): non-integers become NaN and are
+  // rejected by the handler; never `parseInt` — Commander passes the previous
+  // option value as the parser's second argument, which parseInt would treat
+  // as a radix on repeated flags.
+  .option('-l, --limit <n>', 'Max results (default 3, 1-10)', parsePainRecallLimit)
   .option('-w, --workspace <path>', 'Workspace directory')
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {

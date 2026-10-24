@@ -16,7 +16,12 @@ import * as os from 'os';
 import * as path from 'path';
 import Database from 'better-sqlite3';
 
-import { handlePainRecall } from '../../src/commands/pain-recall.js';
+vi.mock('../../src/resolve-workspace.js', () => ({
+  resolveWorkspaceDir: vi.fn().mockReturnValue('/fake/workspace'),
+}));
+
+import { handlePainRecall, parsePainRecallLimit } from '../../src/commands/pain-recall.js';
+import { resolveWorkspaceDir } from '../../src/resolve-workspace.js';
 import { recallPains, PAIN_RECALL_SCHEMA_VERSION } from '../../src/services/pain-recall.js';
 
 // ── Fixture builders ─────────────────────────────────────────────────────────
@@ -302,6 +307,51 @@ describe('handlePainRecall: parameter contract', () => {
     const out = JSON.parse(logSpy.mock.calls[0][0]);
     expect(out.reason).toBe('invalid_pain_id');
     expect(exitSpy).toHaveBeenCalledWith(1);
+  });
+
+  it('workspace resolution failure returns the structured envelope, not a raw throw (cli-A5)', async () => {
+    vi.mocked(resolveWorkspaceDir).mockImplementation(() => {
+      throw new Error('No workspace directory configured.');
+    });
+    try {
+      await handlePainRecall({ principleId: P1, json: true } as never);
+      const out = JSON.parse(logSpy.mock.calls[0][0]);
+      expect(out.status).toBe('failed');
+      expect(out.reason).toBe('workspace_unresolved');
+      expect(out.message).toContain('No workspace directory configured.');
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    } finally {
+      vi.mocked(resolveWorkspaceDir).mockReturnValue('/fake/workspace');
+    }
+  });
+});
+
+// ── Strict --limit parser (review regression: parseInt silently accepted
+//    '2.5'→2, '3abc'→3, and Commander's second parser argument as radix) ──────
+
+describe('parsePainRecallLimit: strict integer parsing', () => {
+  it.each([
+    ['2.5'],
+    ['3abc'],
+    ['abc'],
+    ['-1'],
+    [''],
+    ['   '],
+    ['0x10'], // parseInt would yield 16
+    ['1e2'], // Number() would yield 100
+    ['3,5'],
+    ['＋３'],
+  ])('rejects %s as NaN', (raw) => {
+    expect(parsePainRecallLimit(raw)).toBe(Number.NaN);
+  });
+
+  it.each([
+    ['3', 3],
+    [' 10 ', 10],
+    ['007', 7],
+    ['1', 1],
+  ])('accepts %s as %s', (raw, expected) => {
+    expect(parsePainRecallLimit(raw)).toBe(expected);
   });
 });
 
@@ -606,6 +656,29 @@ describe('recallPains: availability', () => {
     const result = await recallPains(ws, { requestedPrincipleId: P1, painId: 'pain-orphan-888', limit: 3 });
     expect(result.status).toBe('pain_not_found');
     expect(result.statusDetail).toBe('not_associated');
+  });
+
+  it('corrupt trajectory.db → source_unreadable, not a thrown recall_failed (avail-9)', async () => {
+    const ws = await makeWorkspace(standardSpec());
+    // Overwrite with garbage AFTER all fixture writes: SQLite defers the
+    // header check to the first statement, so only the probe can catch this.
+    fs.writeFileSync(path.join(ws, '.state', 'trajectory.db'), 'this is not a sqlite database');
+    const result = await recallPains(ws, { requestedPrincipleId: P1, limit: 3 });
+    expect(result.status).toBe('source_unreadable');
+    expect(result.sources.trajectoryDb).toBe('unreadable');
+    expect(result.results).toEqual([]);
+  });
+
+  it('trajectory.db without a pain_events table → source_unreadable (avail-10)', async () => {
+    const ws = await makeWorkspace(standardSpec());
+    // Valid SQLite file, wrong schema — the probe must classify it unreadable.
+    fs.rmSync(path.join(ws, '.state', 'trajectory.db'));
+    const db = new Database(path.join(ws, '.state', 'trajectory.db'));
+    db.prepare('CREATE TABLE other_table (id INTEGER PRIMARY KEY)').run();
+    db.close();
+    const result = await recallPains(ws, { requestedPrincipleId: P1, limit: 3 });
+    expect(result.status).toBe('source_unreadable');
+    expect(result.sources.trajectoryDb).toBe('unreadable');
   });
 });
 
