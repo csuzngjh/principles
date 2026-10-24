@@ -152,7 +152,7 @@ Owner 复审 + CodeRabbit 共指出 5 项发现，逐项对照源码核实后**�
 | P2 | `resolveWorkspaceDir()` 在 try/catch 之外，抛出时 `--json` 得不到结构化 envelope | 属实：该函数在步骤 3（config 不可解析）与步骤 5（无工作区）显式 throw | 包入独立 try/catch → `fail({reason:'workspace_unresolved'})` |
 | P2 | `--limit` 用 `parseInt` 解析：`2.5→2`、`3abc→3` 静默通过；Commander 把前一选项值作 radix 传入 | 属实（commander `parseArg(value, previous)` 与 `parseInt` 组合的已知陷阱） | 新增导出 `parsePainRecallLimit`（单参数、`/^\d+$/` 全匹配，非法即 NaN 交由 handler 拒绝），index.ts 接线 |
 | CodeQL | `diagnosesAvailability` 初值死赋值 | 属实：所有分支必覆盖 | 去掉初始化器（TS 定赋值分析可证）；`correctionAvailability` 初值有真实语义（无纠错证据时保持 `not_recorded`），保留 |
-| CI | 缺 `.changeset/*.md`（Verify Merge Gate 红） | 属实 | 补 `.changeset/pain-recall-cli.md`（pd-cli minor + 三个技能载荷包 patch） |
+| CI | 缺 `.changeset/*.md`（Verify Merge Gate 红） | 属实 | 补 `.changeset/pain-recall-cli.md`；guard 首跑再暴露 N-5/C4 规则（声明 `principles-disciple` 必须连带声明打包它的 `create-principles-disciple`），补齐后本地 `node scripts/release/check-pr-release-intent.mjs` PASS（pd-cli minor + principles-disciple/create-principles-disciple/workbuddy-adapter/codex-adapter patch） |
 
 **回归测试**（Owner 要求三项全覆盖，新增 17 项，专项测试 44→61 全绿）：
 

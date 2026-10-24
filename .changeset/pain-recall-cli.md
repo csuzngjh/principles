@@ -1,6 +1,7 @@
 ---
 '@principles/pd-cli': minor
 'principles-disciple': patch
+'create-principles-disciple': patch
 '@principles/workbuddy-adapter': patch
 '@principles/codex-adapter': patch
 ---
