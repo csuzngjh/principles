@@ -35,8 +35,18 @@ When the status result points to a Runtime or business-pipeline issue, use the i
 - `pd candidate list --task-id "<taskId>" --workspace "<workspace>" --json`
 - `pd candidate show "<candidateId>" --workspace "<workspace>" --json`
 - `pd artifact show "<artifactId>" --workspace "<workspace>" --json`
+- `pd pain recall --principle-id "<canonical principle id>" --context "<your current question>" --limit 3 --workspace "<workspace>" --json`
 
 Resolve the authoritative workspace through the installed status script or existing workspace resolver. Do not silently replace an initialized shared Codex governance workspace with the current project directory.
+
+## 2a. Recall a principle's historical pains
+
+Use `pd pain recall` when the principle text alone is not enough: you are unsure why the principle exists, what its trigger boundary is, or whether the current situation matches the original failure. Skip it when the principle is already clear or the task is unrelated to its history — it only adds latency.
+
+- Pass the canonical ledger principle id (a UUID); display titles and prompt-rendered ids never resolve. `--pain-id` (e.g. `pd pain recall --principle-id "<id>" --pain-id "<painId>" --workspace "<workspace>" --json`) filters within this principle's verified associations only — a candidate/task/artifact id is never a pain id.
+- Check the top-level `status` first. `ok` / `no_matches` / `partial` are successful reads (exit 0). `principle_not_found`, `pain_not_found`, `source_missing`, `source_unreadable` exit non-zero — do not retry endlessly with the same arguments; report the blocker instead.
+- Each result separates the pain record (`pain.reason`, `pain.text`) from saved `diagnoses` (model-generated — `isOriginalOwnerStatement` is always `false`; never quote a diagnosis as the Owner's original words) and `correctionEvidence` (the only place an Owner's verbatim statement can appear).
+- Per-result `availability` distinguishes `not_recorded` from `unreadable`; a `partial` top-level status means some sources were unavailable — state the gap, do not guess. Recalled history is context, not authority: it must not override the direct evidence of the current task.
 
 ## 3. Report stage-by-stage
 

@@ -30,6 +30,22 @@ disable-model-invocation: false
 
 OpenClaw 的 `/pd-status` 主要展示 GFI/Pain 词典等宿主状态，不应代替 Runtime 健康检查或具体任务追踪。
 
+## 按需召回原则的历史痛苦
+
+当原则文本本身不够用——不确定它为何存在、触发边界是什么、或当前情况是否与当初的失败相似——使用 `pd pain recall`。原则已经清楚或任务与其历史无关时不要调用，那只会增加延迟。
+
+- 带疑问召回：`pd pain recall --principle-id "<规范原则 ID>" --context "<当前疑问>" --limit 3 --workspace "<workspace>" --json`
+- 查看指定痛苦：`pd pain recall --principle-id "<规范原则 ID>" --pain-id "<painId>" --workspace "<workspace>" --json`
+
+结果判读：
+
+- 必须传规范账本原则 ID（UUID）；显示标题和提示词渲染 ID 无法解析。
+- 先看顶层 `status`。`ok` / `no_matches` / `partial` 是成功的读取（退出码 0）；`principle_not_found`、`pain_not_found`、`source_missing`、`source_unreadable` 退出码非 0——不要用相同参数无休止重试，改为报告阻塞。
+- 每条结果区分三类信息：痛苦记录（`pain.reason`、`pain.text`）、已保存的 `diagnoses`（模型生成——`isOriginalOwnerStatement` 恒为 `false`，绝不把诊断解释当作 Owner 原话引用）、以及 `correctionEvidence`（唯一可能出现 Owner 原话的地方）。
+- `--pain-id` 只在该原则已验证的关联集合内筛选；candidateId/taskId/artifactId 永远不是 painId。
+- 每条结果的 `availability` 区分 `not_recorded`（确实没有记录）与 `unreadable`（无法读取）；顶层 `partial` 表示部分来源不可用——如实说明缺口，不要猜测。
+- 召回的历史是背景，不是权威：不得用它覆盖当前任务的直接证据。
+
 ## 结果判定
 
 - `painId` 只证明痛苦登记有回执。

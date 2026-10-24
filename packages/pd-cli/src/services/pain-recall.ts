@@ -1,0 +1,588 @@
+/**
+ * Pain Recall read model — SPEC-PD-PAIN-RECALL-CLI-001.
+ *
+ * Resolves a canonical ledger principle to its verifiably-associated
+ * historical pains through the two authoritative edges only:
+ *
+ *   1. `Principle.reuseEvidence[]` — carries a REAL `painId` (validated at
+ *      the ledger write boundary, appendReuseEvidence);
+ *   2. `Principle.derivedFromPainIds[]` — stores CANDIDATE ids despite its
+ *      legacy pain-oriented name (see PainChainReadModel's linkage note);
+ *      the pain resolves through candidate → task → `tasks.input_ref`
+ *      (fallback: the `diagnosis_<painId>` task-id spelling).
+ *
+ * Anything not reachable through those edges is excluded and REPORTED
+ * (unresolvedAssociations) — never guessed from text similarity, never
+ * resolved through candidateId/taskId/artifactId masquerading as pain ids.
+ *
+ * Strictly read-only: the ledger through readLedgerFileState, trajectory.db
+ * through openTrajectoryDbReadonly, state.db through RuntimeStateManager with
+ * readonly:true + bootstrapIfMissing:false. Missing stays missing; unreadable
+ * stays unreadable; neither is ever reported as an empty result.
+ */
+import * as fs from 'fs';
+import * as path from 'path';
+import { readLedgerFileState } from '@principles/core/principle-tree-ledger';
+import { openTrajectoryDbReadonly } from '@principles/core/trajectory-store';
+import { RuntimeStateManager } from '@principles/core/runtime-v2';
+
+export const PAIN_RECALL_SCHEMA_VERSION = 'pd.pain-recall.v1';
+
+export const PAIN_RECALL_DEFAULT_LIMIT = 3;
+export const PAIN_RECALL_MIN_LIMIT = 1;
+export const PAIN_RECALL_MAX_LIMIT = 10;
+
+export type PainRecallStatus =
+  | 'ok'
+  | 'no_matches'
+  | 'principle_not_found'
+  | 'ambiguous_principle'
+  | 'pain_not_found'
+  | 'source_missing'
+  | 'source_unreadable'
+  | 'partial';
+
+export type SourceAvailability = 'ok' | 'missing' | 'unreadable' | 'not_checked';
+
+export type AssociationType = 'explicit_reuse' | 'derived_from' | 'multiple_paths';
+
+export interface RecallEvidenceRef {
+  kind: 'reuse_evidence' | 'candidate_lineage';
+  candidateId: string;
+  taskId?: string;
+  decidedAt?: string;
+  decisionId?: string;
+}
+
+export interface RecallAssociation {
+  type: AssociationType;
+  confidence: 'explicit' | 'lineage_verified';
+  evidenceRefs: RecallEvidenceRef[];
+}
+
+export interface PainEventView {
+  occurredAt: string | null;
+  source: string | null;
+  host: string;
+  score: number | null;
+  severity: string | null;
+  reason: string | null;
+  text: string | null;
+  /** A verbatim owner statement is only reported via correctionEvidence; the
+   * pain row itself never carries one, so this is structurally null. */
+  rawStatement: null;
+}
+
+export interface DiagnosisView {
+  diagnosisId: string;
+  taskId: string;
+  category: string;
+  rootCause: string;
+  supportingEvidence: readonly { sourceRef: string; note: string }[];
+  confidence: number | null;
+  isOriginalOwnerStatement: false;
+}
+
+export interface CorrectionEvidenceView {
+  text: string;
+  classification?: string;
+  channel?: string;
+  sessionId?: string;
+  occurredAt?: string;
+}
+
+export type ItemAvailability = 'available' | 'not_recorded' | 'unreadable';
+
+export interface RecallLineageHop {
+  from: string;
+  to: string;
+  relation: string;
+}
+
+export interface PainRecallEntry {
+  painId: string;
+  association: RecallAssociation;
+  pain: PainEventView;
+  diagnoses: DiagnosisView[];
+  correctionEvidence: CorrectionEvidenceView | null;
+  availability: { painEvent: 'available'; diagnoses: ItemAvailability; correctionEvidence: ItemAvailability };
+  lineage: RecallLineageHop[];
+}
+
+export interface PainRecallQuery {
+  requestedPrincipleId: string;
+  painId?: string;
+  context?: string;
+  /** Validated upstream: integer within [1, 10]. */
+  limit: number;
+}
+
+export interface UnresolvedAssociation {
+  painId?: string;
+  candidateId?: string;
+  reason: string;
+}
+
+export interface PainRecallResult {
+  schemaVersion: string;
+  status: PainRecallStatus;
+  /** Sub-reason for pain_not_found: not_associated | pain_event_not_found. */
+  statusDetail?: string;
+  principle: {
+    requestedId: string;
+    canonicalId: string | null;
+    identityStatus: 'resolved' | 'not_found' | 'ambiguous';
+    text?: string;
+  };
+  query: { limit: number; painId?: string; contextUsedForRanking: boolean; truncated: boolean };
+  results: PainRecallEntry[];
+  summary: { returned: number; availableCandidates: number; truncated: boolean };
+  sources: { ledger: SourceAvailability; trajectoryDb: SourceAvailability; stateDb: SourceAvailability };
+  unresolvedAssociations: UnresolvedAssociation[];
+}
+
+// ── Internal edge model ──────────────────────────────────────────────────────
+
+interface RawEdge {
+  painId: string;
+  explicit: boolean;
+  ref: RecallEvidenceRef;
+}
+
+interface MergedEdge {
+  painId: string;
+  refs: RecallEvidenceRef[];
+  explicit: boolean;
+}
+
+function emptyResult(input: {
+  query: PainRecallQuery;
+  status: PainRecallStatus;
+  sources: PainRecallResult['sources'];
+  overwrites?: Partial<PainRecallResult>;
+}): PainRecallResult {
+  const { query, status } = input;
+  return {
+    schemaVersion: PAIN_RECALL_SCHEMA_VERSION,
+    status,
+    principle: { requestedId: query.requestedPrincipleId, canonicalId: null, identityStatus: 'not_found' },
+    query: {
+      limit: query.limit,
+      ...(query.painId !== undefined ? { painId: query.painId } : {}),
+      contextUsedForRanking: false,
+      truncated: false,
+    },
+    results: [],
+    summary: { returned: 0, availableCandidates: 0, truncated: false },
+    sources: input.sources,
+    unresolvedAssociations: [],
+    ...input.overwrites,
+  };
+}
+
+// ── Deterministic local ranking (no model, no network) ───────────────────────
+
+/** Latin/digit runs plus individual Han characters — deterministic, locale-free. */
+function tokenize(text: string): string[] {
+  const tokens = text.toLowerCase().match(/[a-z0-9]+/g) ?? [];
+  const han = text.match(/\p{Script=Han}/gu) ?? [];
+  return [...tokens, ...han];
+}
+
+function contextOverlapScore(contextTokens: ReadonlySet<string>, doc: string): number {
+  if (contextTokens.size === 0) return 0;
+  const docTokens = new Set(tokenize(doc));
+  let score = 0;
+  for (const token of contextTokens) {
+    if (docTokens.has(token)) score += 1;
+  }
+  return score;
+}
+
+// ── Row guards (rc-1/rc-4: every DB/ledger value is guarded before use) ──────
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function ownString(row: Record<string, unknown>, key: string): string | null {
+  const value = row[key];
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function safeParseRecord(json: string): Record<string, unknown> | null {
+  try {
+    const parsed: unknown = JSON.parse(json);
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+// ── Main entry ───────────────────────────────────────────────────────────────
+
+export async function recallPains(workspaceDir: string, query: PainRecallQuery): Promise<PainRecallResult> {
+  // 1. Ledger — the identity authority. Missing/unreadable is a source-level
+  //    failure, never a silent empty ledger.
+  const ledgerState = readLedgerFileState(path.join(workspaceDir, '.state'));
+  const ledgerAvailability: SourceAvailability =
+    ledgerState.availability.status === 'ok'
+      ? 'ok'
+      : ledgerState.availability.status === 'empty'
+        ? 'missing'
+        : 'unreadable';
+  if (ledgerAvailability !== 'ok') {
+    return emptyResult({
+      query,
+      status: ledgerAvailability === 'missing' ? 'source_missing' : 'source_unreadable',
+      sources: { ledger: ledgerAvailability, trajectoryDb: 'not_checked', stateDb: 'not_checked' },
+    });
+  }
+
+  // 2. Canonical identity: exact ledger-key match only. Display titles and
+  //    draft ids never resolve (there is no title lookup at all).
+  const principleEntry = ledgerState.ledger.tree.principles[query.requestedPrincipleId];
+  if (!isRecord(principleEntry) || ownString(principleEntry, 'id') === null) {
+    return emptyResult({
+      query,
+      status: 'principle_not_found',
+      sources: { ledger: 'ok', trajectoryDb: 'not_checked', stateDb: 'not_checked' },
+    });
+  }
+  const canonicalId = query.requestedPrincipleId;
+  const principleText = ownString(principleEntry, 'text');
+
+  // 3. state.db — strict readonly, no bootstrap. Missing/unreadable keeps the
+  //    reuse-evidence edges alive and only degrades lineage + diagnoses.
+  const stateDbPath = path.join(workspaceDir, '.pd', 'state.db');
+  let stateDb: SourceAvailability = 'ok';
+  let manager: RuntimeStateManager | null = null;
+  if (!fs.existsSync(stateDbPath)) {
+    stateDb = 'missing';
+  } else {
+    try {
+      manager = new RuntimeStateManager({ workspaceDir, readonly: true, bootstrapIfMissing: false });
+      await manager.initialize();
+      // getDb() is lazy — force the readonly open NOW so a present-but-corrupt
+      // file is classified unreadable instead of surfacing per-query later.
+      // SQLite defers the header check to the first statement, hence the
+      // read-only liveness probe (SELECT 1 writes nothing).
+      manager.connection.getDb().prepare('SELECT 1 AS probe').get();
+    } catch {
+      manager = null;
+      stateDb = 'unreadable';
+    }
+  }
+
+  try {
+    // 4. trajectory.db — the pain-event authority. Missing/unreadable is a
+    //    source-level failure (recall's subject is the pain history itself).
+    let trajectoryDb: DatabaseLike;
+    try {
+      trajectoryDb = openTrajectoryDbReadonly(workspaceDir);
+      // SQLite defers the file-header check to the first statement (same as
+      // state.db above): probe pain_events NOW so a corrupt file or a
+      // schema-less database falls into the source_unreadable classification
+      // instead of escaping as a raw query error. Close before rethrowing so
+      // no handle leaks into the failure path.
+      try {
+        trajectoryDb.prepare('SELECT 1 FROM pain_events LIMIT 1').get();
+      } catch (probeErr: unknown) {
+        trajectoryDb.close();
+        throw probeErr;
+      }
+    } catch {
+      const missing = !fs.existsSync(path.join(workspaceDir, '.state', 'trajectory.db'));
+      return emptyResult({
+        query,
+        status: missing ? 'source_missing' : 'source_unreadable',
+        sources: { ledger: 'ok', trajectoryDb: missing ? 'missing' : 'unreadable', stateDb },
+      });
+    }
+
+    try {
+      // 5. Association edges from the two authoritative sources.
+      const unresolved: UnresolvedAssociation[] = [];
+      const edges: RawEdge[] = [];
+
+      const {reuseEvidence} = principleEntry;
+      if (Array.isArray(reuseEvidence)) {
+        for (const entry of reuseEvidence) {
+          if (!isRecord(entry)) continue;
+          const painId = ownString(entry, 'painId');
+          const candidateId = ownString(entry, 'candidateId');
+          if (painId === null || candidateId === null) continue; // malformed row: not a verifiable edge
+          edges.push({
+            painId,
+            explicit: true,
+            ref: {
+              kind: 'reuse_evidence',
+              candidateId,
+              ...(ownString(entry, 'decidedAt') !== null ? { decidedAt: ownString(entry, 'decidedAt') ?? undefined } : {}),
+              ...(ownString(entry, 'decisionId') !== null ? { decisionId: ownString(entry, 'decisionId') ?? undefined } : {}),
+            },
+          });
+        }
+      }
+
+      const derivedIds = principleEntry.derivedFromPainIds;
+      if (Array.isArray(derivedIds)) {
+        for (const value of derivedIds) {
+          if (typeof value !== 'string' || value.length === 0) continue;
+          const candidateId = value; // candidate id by production contract, despite the field name
+          if (manager === null) {
+            unresolved.push({ candidateId, reason: 'state_db_unavailable' });
+            continue;
+          }
+          let candidateTaskId: string | null = null;
+          try {
+            const candidate = await manager.getCandidate(candidateId);
+            candidateTaskId = candidate !== null && typeof candidate.taskId === 'string' && candidate.taskId.length > 0
+              ? candidate.taskId
+              : null;
+          } catch {
+            unresolved.push({ candidateId, reason: 'candidate_query_failed' });
+            continue;
+          }
+          if (candidateTaskId === null) {
+            unresolved.push({ candidateId, reason: 'candidate_not_found' });
+            continue;
+          }
+          let painId: string | null = null;
+          try {
+            const task = await manager.getTask(candidateTaskId);
+            const inputRef = task !== null && typeof task.inputRef === 'string' && task.inputRef.length > 0
+              ? task.inputRef
+              : null;
+            painId = inputRef;
+          } catch {
+            painId = null;
+          }
+          if (painId === null && candidateTaskId.startsWith('diagnosis_') && candidateTaskId.length > 'diagnosis_'.length) {
+            painId = candidateTaskId.slice('diagnosis_'.length); // authoritative task-id spelling fallback
+          }
+          if (painId === null) {
+            unresolved.push({ candidateId, reason: 'pain_unresolvable_from_candidate' });
+            continue;
+          }
+          edges.push({
+            painId,
+            explicit: false,
+            ref: { kind: 'candidate_lineage', candidateId, taskId: candidateTaskId },
+          });
+        }
+      }
+
+      // 6. Merge by real pain id — all evidence refs survive the merge.
+      const merged = new Map<string, MergedEdge>();
+      for (const edge of edges) {
+        const existing = merged.get(edge.painId);
+        if (existing) {
+          existing.refs.push(edge.ref);
+          existing.explicit = existing.explicit || edge.explicit;
+        } else {
+          merged.set(edge.painId, { painId: edge.painId, refs: [edge.ref], explicit: edge.explicit });
+        }
+      }
+
+      // 7. Pain events: an edge whose pain has no persisted event is reported,
+      //    not returned, and not silently dropped.
+      const painRows = new Map<string, Record<string, unknown>>();
+      const selectPain = trajectoryDb.prepare(
+        'SELECT id, source, score, severity, text, reason, canonical_pain_id, runtime_task_id, host_kind, created_at FROM pain_events WHERE canonical_pain_id = ? ORDER BY created_at DESC, id DESC LIMIT 1',
+      );
+      for (const painId of [...merged.keys()]) {
+        const row = selectPain.get(painId);
+        if (!isRecord(row)) {
+          unresolved.push({ painId, reason: 'pain_event_not_found' });
+          merged.delete(painId);
+        } else {
+          painRows.set(painId, row);
+        }
+      }
+
+      // 8. --pain-id: filters WITHIN the verified association set only.
+      if (query.painId !== undefined) {
+        if (!merged.has(query.painId)) {
+          const exists = isRecord(selectPain.get(query.painId) ?? null);
+          return emptyResult({
+            query,
+            status: 'pain_not_found',
+            sources: { ledger: 'ok', trajectoryDb: 'ok', stateDb },
+            overwrites: { statusDetail: exists ? 'not_associated' : 'pain_event_not_found' },
+          });
+        }
+        for (const painId of [...merged.keys()]) {
+          if (painId !== query.painId) merged.delete(painId);
+        }
+      }
+
+      // 9. Per-pain enrichment (diagnoses + persisted correction evidence).
+      const entries: PainRecallEntry[] = [];
+      for (const [painId, edge] of merged) {
+        const row = painRows.get(painId);
+        if (!isRecord(row)) continue; // step 7 guaranteed presence; guard anyway (rc-1)
+        const pain: PainEventView = {
+          occurredAt: ownString(row, 'created_at'),
+          source: ownString(row, 'source'),
+          host: ownString(row, 'host_kind') ?? 'unknown',
+          score: typeof row.score === 'number' ? row.score : null,
+          severity: ownString(row, 'severity'),
+          reason: ownString(row, 'reason'),
+          text: ownString(row, 'text'),
+          rawStatement: null,
+        };
+
+        let diagnoses: DiagnosisView[] = [];
+        // Every branch below assigns this before use (CodeQL useless-init).
+        let diagnosesAvailability: ItemAvailability;
+        let correction: CorrectionEvidenceView | null = null;
+        // Initializer is meaningful: a successful read with no persisted
+        // correction evidence keeps this 'not_recorded'.
+        let correctionAvailability: ItemAvailability = 'not_recorded';
+        if (manager === null) {
+          diagnosesAvailability = 'unreadable';
+          correctionAvailability = 'unreadable';
+        } else {
+          try {
+            const records = await manager.getDiagnosesByPainId(painId);
+            diagnoses = records.map((record) => ({
+              diagnosisId: record.diagnosisId,
+              taskId: record.taskId,
+              category: record.category,
+              rootCause: record.rootCause,
+              supportingEvidence: record.evidence.map((e) => ({ sourceRef: e.sourceRef, note: e.note })),
+              confidence: record.confidence,
+              isOriginalOwnerStatement: false as const,
+            }));
+            diagnosesAvailability = diagnoses.length > 0 ? 'available' : 'not_recorded';
+          } catch {
+            diagnosesAvailability = 'unreadable';
+          }
+          try {
+            const diagnosisTask = await manager.getTask(`diagnosis_${painId}`);
+            const payload = diagnosisTask !== null && typeof diagnosisTask.diagnosticJson === 'string'
+              ? safeParseRecord(diagnosisTask.diagnosticJson)
+              : null;
+            const persisted = payload !== null ? payload.correctionEvidence : undefined;
+            if (isRecord(persisted) && typeof persisted.text === 'string' && persisted.text.length > 0) {
+              correction = {
+                text: persisted.text,
+                ...(ownString(persisted, 'classification') !== null ? { classification: ownString(persisted, 'classification') ?? undefined } : {}),
+                ...(ownString(persisted, 'channel') !== null ? { channel: ownString(persisted, 'channel') ?? undefined } : {}),
+                ...(ownString(persisted, 'sessionId') !== null ? { sessionId: ownString(persisted, 'sessionId') ?? undefined } : {}),
+                ...(ownString(persisted, 'occurredAt') !== null ? { occurredAt: ownString(persisted, 'occurredAt') ?? undefined } : {}),
+              };
+              correctionAvailability = 'available';
+            }
+          } catch {
+            correctionAvailability = 'unreadable';
+          }
+        }
+
+        const type: AssociationType = edge.refs.length > 1
+          ? 'multiple_paths'
+          : edge.explicit
+            ? 'explicit_reuse'
+            : 'derived_from';
+        const lineage: RecallLineageHop[] = [];
+        for (const ref of edge.refs) {
+          if (ref.kind === 'candidate_lineage') {
+            lineage.push({ from: `principle:${canonicalId}`, to: ref.candidateId, relation: 'derived_from_pain_ids' });
+            lineage.push({ from: ref.candidateId, to: painId, relation: 'task_input_ref' });
+          } else {
+            lineage.push({ from: `principle:${canonicalId}`, to: painId, relation: 'reuse_evidence_pain_id' });
+          }
+        }
+
+        entries.push({
+          painId,
+          association: {
+            type,
+            confidence: edge.explicit ? 'explicit' : 'lineage_verified',
+            evidenceRefs: edge.refs,
+          },
+          pain,
+          diagnoses,
+          correctionEvidence: correction,
+          availability: { painEvent: 'available', diagnoses: diagnosesAvailability, correctionEvidence: correctionAvailability },
+          lineage,
+        });
+      }
+
+      // 10. Deterministic ranking. Default: explicit evidence first, then
+      //     newest pain first, then pain id. --context only re-orders this
+      //     list by local token overlap — it never adds associations.
+      const contextTokens = new Set(typeof query.context === 'string' ? tokenize(query.context) : []);
+      const contextUsed = contextTokens.size > 0;
+      const rankOf = (entry: PainRecallEntry): number => (entry.association.confidence === 'explicit' ? 0 : 1);
+      const scored = entries.map((entry) => ({
+        entry,
+        score: contextUsed
+          ? contextOverlapScore(
+              contextTokens,
+              [entry.pain.reason ?? '', entry.pain.text ?? '', ...entry.diagnoses.map((d) => d.rootCause)].join(' '),
+            )
+          : 0,
+      }));
+      scored.sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        const rankDelta = rankOf(a.entry) - rankOf(b.entry);
+        if (rankDelta !== 0) return rankDelta;
+        const aTime = a.entry.pain.occurredAt ?? '';
+        const bTime = b.entry.pain.occurredAt ?? '';
+        if (aTime !== bTime) return aTime < bTime ? 1 : -1; // newest first
+        return a.entry.painId < b.entry.painId ? -1 : 1;
+      });
+      const ranked = scored.map((s) => s.entry);
+
+      // 11. Limit + truncation.
+      const truncated = ranked.length > query.limit;
+      const results = ranked.slice(0, query.limit);
+
+      // 12. Top-level status: distinguish "nothing recorded" from "cannot read".
+      let status: PainRecallStatus;
+      if (results.length === 0) {
+        status = unresolved.length > 0 ? 'partial' : 'no_matches';
+      } else {
+        const degraded = results.some(
+          (r) => r.availability.diagnoses === 'unreadable' || r.availability.correctionEvidence === 'unreadable',
+        );
+        status = degraded ? 'partial' : 'ok';
+      }
+
+      return {
+        schemaVersion: PAIN_RECALL_SCHEMA_VERSION,
+        status,
+        principle: {
+          requestedId: query.requestedPrincipleId,
+          canonicalId,
+          identityStatus: 'resolved',
+          ...(principleText !== null ? { text: principleText } : {}),
+        },
+        query: {
+          limit: query.limit,
+          ...(query.painId !== undefined ? { painId: query.painId } : {}),
+          contextUsedForRanking: contextUsed,
+          truncated,
+        },
+        results,
+        summary: { returned: results.length, availableCandidates: ranked.length, truncated },
+        sources: { ledger: 'ok', trajectoryDb: 'ok', stateDb },
+        unresolvedAssociations: unresolved,
+      };
+    } finally {
+      trajectoryDb.close();
+    }
+  } finally {
+    if (manager !== null) {
+      await manager.close().catch(() => undefined);
+    }
+  }
+}
+
+/** Minimal structural type for the readonly trajectory connection. */
+interface DatabaseLike {
+  prepare(sql: string): { get(...params: unknown[]): unknown };
+  close(): void;
+}
