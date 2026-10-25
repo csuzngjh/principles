@@ -431,8 +431,20 @@ describe('review-round regressions (PR #1316 review)', () => {
     fs.mkdirSync(path.join(workspace, '.pd'), { recursive: true });
     fs.writeFileSync(path.join(workspace, '.pd', 'config.yaml'), JSON.stringify({ features: {} }), 'utf8');
     const dataDir = tempDir('pd-status-core-data-');
+    // Pins are release authority, not test constants: the ordinary maintenance
+    // PR rewrites runtime-version.json on every published cohort, so a frozen
+    // tuple here would fail the very PR that advances the pins (PRI-1040,
+    // see runtime-pin-guard.test.ts).
+    const pins = JSON.parse(fs.readFileSync(path.join(pluginDir, 'runtime-version.json'), 'utf8')) as {
+      codexAdapter: string; hostRuntime: string; core: string;
+    };
+    const [coreMajor = 0, coreMinor = 0, corePatch = 0] = pins.core.split('.').map(Number);
+    // Exactly one package is stale: adapter and host-runtime still match the
+    // pin while core is one patch ahead, so the degraded state can only come
+    // from the core comparison.
+    const installedCore = `${coreMajor}.${coreMinor}.${corePatch + 1}`;
     const runtimePackages = path.join(dataDir, 'runtime', 'node_modules', '@principles');
-    for (const [name, version] of [['codex-adapter', '0.5.13'], ['host-runtime', '0.13.0'], ['core', '1.295.0']]) {
+    for (const [name, version] of [['codex-adapter', pins.codexAdapter], ['host-runtime', pins.hostRuntime], ['core', installedCore]]) {
       const packageDir = path.join(runtimePackages, name);
       fs.mkdirSync(packageDir, { recursive: true });
       fs.writeFileSync(path.join(packageDir, 'package.json'), JSON.stringify({ name: `@principles/${name}`, version }), 'utf8');
@@ -443,8 +455,8 @@ describe('review-round regressions (PR #1316 review)', () => {
     const report = JSON.parse(result.stdout) as { checks: Array<{ name: string; state: string; detail?: string }> };
     const runtimeCheck = report.checks.find((check) => check.name === 'runtime');
     expect(runtimeCheck?.state).toBe('degraded');
-    expect(runtimeCheck?.detail).toContain('core@1.295.0');
-    expect(runtimeCheck?.detail).toContain('pinned 0.5.13+0.13.0+1.296.0');
+    expect(runtimeCheck?.detail).toContain(`core@${installedCore}`);
+    expect(runtimeCheck?.detail).toContain(`pinned ${pins.codexAdapter}+${pins.hostRuntime}+${pins.core}`);
   }, 60_000);
 });
 
