@@ -232,13 +232,12 @@ export function verifyFullLegalSpace({ mappingId, mappingHash, validate }) {
   const comboIds = [];
   for (const base of b0) {
     const facts = base.caseDef.facts;
-    const stakeCombos = [[]];
-    for (const f of facts) {
-      const next = [];
-      for (const s of stakeCombos) for (const v of ['high', 'normal', 'low']) next.push([...s, v]);
-      stakeCombos.length = 0;
-      stakeCombos.push(...next);
-    }
+    // 3 stake values per fact: cartesian growth expressed without a loop
+    // variable (the per-fact element itself is never inspected).
+    const stakeCombos = facts.reduce(
+      (combos) => combos.flatMap((s) => ['high', 'normal', 'low'].map((v) => [...s, v])),
+      [[]],
+    );
     for (let budget = 2; budget <= 12; budget++) {
       for (let deadline = 3; deadline <= 12; deadline++) {
         for (const sc of stakeCombos) {

@@ -21,16 +21,13 @@ import {
   coverageStats,
 } from '../dev/principle-learning-lab/lib/challenge-validator.mjs';
 import {
-  verifySkeletonGate,
   extractSkeleton,
-  skeletonCanonicalHash,
   VALUE_DOMAINS,
   VALUE_DOMAINS_VERSION,
   SKELETON_VERSION,
 } from '../dev/principle-learning-lab/lib/challenge-skeleton.mjs';
 import { buildClaimEnvironment, newClaimRunState, stepClaimEnvironment } from '../dev/principle-learning-lab/lib/claim-evidence-env.mjs';
 import { adjudicateClaimEvidence } from '../dev/principle-learning-lab/lib/claim-evidence-scorer.mjs';
-import { canonicalJson } from '../dev/principle-learning-lab/lib/challenge-freeze.mjs';
 
 const labRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../dev/principle-learning-lab');
 const studyDir = path.join(labRoot, 'challenge-studies', 'CEB-001');

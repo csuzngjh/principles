@@ -15,7 +15,6 @@
 // No prompt is changed by this module; it only INTERPRETS the shapes models
 // plausibly return (draft-level, top-level, or actorVisibleCase-level).
 
-import { canonicalJson } from './challenge-freeze.mjs';
 import { enumerateCandidates } from './challenge-enumerator.mjs';
 
 function pick(obj, keys) {

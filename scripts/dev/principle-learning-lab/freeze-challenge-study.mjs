@@ -21,7 +21,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { canonicalJson, sha256, hashOfCanonical, freezeMapping, CANONICALIZATION_RULE } from './lib/challenge-freeze.mjs';
+import { sha256, hashOfCanonical, freezeMapping, CANONICALIZATION_RULE } from './lib/challenge-freeze.mjs';
 import { validateChallengeDraft, compileCase, compileSuite } from './lib/challenge-compile.mjs';
 import { scoringContractHash } from './lib/claim-evidence-scorer.mjs';
 import { buildStudyArms, auditArmIsolation } from './lib/challenge-arms.mjs';

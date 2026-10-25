@@ -85,7 +85,6 @@ export function runControlledActorLoop({ env, runState, caseVisible, actor, link
     if (runState.step >= caps.maxSteps) {
       rec({ kind: 'termination', reason: 'step_cap', detail: `reached maxSteps=${caps.maxSteps} without a report` });
       trace.termination = { reason: 'step_cap', actorRunStatus: 'NO_RESPONSE' };
-      done = true;
       break;
     }
     const action = actor.nextAction(actorView(caseVisible, runState));
@@ -185,7 +184,6 @@ export function perfectPlayScript(caseDef) {
   }
 
   for (const required of caseDef.gold.requiredClaims) {
-    const fact = caseDef.facts.find((f) => f.factId === required.factId);
     const wanted = required.acceptableVerdicts.find((v) => v === 'verified_true' || v === 'verified_false');
     if (wanted) {
       const target = wanted === 'verified_true' ? 'true' : 'false';

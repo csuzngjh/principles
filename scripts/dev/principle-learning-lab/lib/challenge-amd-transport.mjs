@@ -70,14 +70,54 @@ export function resolveAmdApiKey({ env = process.env, keyFile = KEY_FILE } = {})
   throw err;
 }
 
-/** https-only; refuse localhost/loopback/private/reserved hosts (send-time guard). */
+/** IPv4 (canonical dotted-quad only) private/reserved range check. */
+function ipv4IsPrivateOrReserved(v4) {
+  const o = v4.split('.').map(Number);
+  if (o.some((n) => !Number.isInteger(n) || n > 255)) return true; // malformed → refuse
+  if (o[0] === 0 || o[0] === 10 || o[0] === 127) return true; // this-network / private / loopback
+  if (o[0] === 100 && o[1] >= 64 && o[1] <= 127) return true; // CGNAT 100.64/10
+  if (o[0] === 169 && o[1] === 254) return true; // link-local
+  if (o[0] === 172 && o[1] >= 16 && o[1] <= 31) return true; // private
+  if (o[0] === 192 && o[1] === 0 && (o[2] === 0 || o[2] === 2)) return true; // IETF assignments / TEST-NET-1
+  if (o[0] === 192 && o[1] === 168) return true; // private
+  if (o[0] === 198 && (o[1] === 18 || o[1] === 19 || (o[1] === 51 && o[2] === 100))) return true; // benchmarking / TEST-NET-2
+  if (o[0] === 203 && o[1] === 0 && o[2] === 113) return true; // TEST-NET-3
+  if (o[0] >= 224) return true; // multicast + reserved
+  return false;
+}
+
+/** True when the host must never be dispatched to: loopback/private/reserved,
+ *  in any spelling — names, canonical IPv4, evasive integer/hex IPv4, and
+ *  IPv6 (loopback / unspecified / unique-local / link-local / v4-mapped). */
+function isNonPublicHost(hostname) {
+  const h = hostname.toLowerCase().replace(/^\[/, '').replace(/\]$/, '');
+  const mapped = h.match(/^::ffff:(.+)$/);
+  const v4 = mapped ? mapped[1] : (/^\d{1,3}(\.\d{1,3}){3}$/.test(h) ? h : null);
+  if (v4) return ipv4IsPrivateOrReserved(v4);
+  if (h.includes(':')) { // remaining IPv6 literals
+    if (h === '::' || h === '::1') return true;
+    if (/^f[cd][0-9a-f]{0,3}:/.test(h)) return true; // fc00::/7 unique local
+    if (/^fe[89ab][0-9a-f]?:/.test(h)) return true; // fe80::/10 link local
+    return false;
+  }
+  // Evasive non-canonical IPv4 spellings (integer 2130706433, hex 0x7f000001,
+  // shortened 127.1, octal-ish 0177.0.0.1) are never accepted as public hosts.
+  if (/^(0x[0-9a-f]+|\d+)$/.test(h)) return true;
+  if (/^[0-9.]+$/.test(h)) return true; // digits+dots that failed the canonical quad above → non-canonical → refuse
+  return h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.internal');
+}
+
+/** https-only; explicit port refused (the poster connects to 443 only);
+ *  localhost/loopback/private/reserved hosts refused in any spelling.
+ *  Thrown errors carry beforeSend=true: refused BEFORE any dispatch —
+ *  callers settle these as clean refusals, never as RESULT_UNKNOWN. */
 export function assertPublicHttpsUrl(url) {
+  const refused = (message) => { const e = new Error(`AMD transport: ${message}`); e.beforeSend = true; return e; };
   let u;
-  try { u = new URL(url); } catch { throw new Error(`AMD transport: invalid base URL (not a URL): ${url}`); }
-  if (u.protocol !== 'https:') throw new Error(`AMD transport: base URL must be https, got ${u.protocol}//`);
-  const h = u.hostname.toLowerCase();
-  const bad = h === 'localhost' || h === '::1' || h.startsWith('127.') || h.startsWith('10.') || h.startsWith('192.168.') || h.startsWith('169.254.') || /^172\.(1[6-9]|2\d|3[01])\./.test(h) || h.endsWith('.localhost') || h.endsWith('.internal');
-  if (bad) throw new Error(`AMD transport: refusing non-public host '${h}'`);
+  try { u = new URL(url); } catch { throw refused(`invalid base URL (not a URL): ${url}`); }
+  if (u.protocol !== 'https:') throw refused(`base URL must be https, got ${u.protocol}//`);
+  if (u.port !== '') throw refused(`base URL must use the default https port (443), got explicit port ${u.port}`);
+  if (isNonPublicHost(u.hostname)) throw refused(`refusing non-public host '${u.hostname}'`);
   return u;
 }
 
@@ -120,12 +160,19 @@ export function buildAmdRequestBody({ constrainedInput, perRequestCandidateCap, 
  */
 export function createDefaultHttpsPoster({ connectTimeoutMs = AMD_TRANSPORT_TIMEOUTS.connectTimeoutMs, requestTimeoutMs = AMD_TRANSPORT_TIMEOUTS.requestTimeoutMs } = {}) {  return function httpsPoster(url, { headers, body }) {
     return new Promise((resolve, reject) => {
-      const u = new URL(url);
+      let u;
+      try {
+        u = assertPublicHttpsUrl(url); // sink guard: the dispatching function revalidates whatever it is handed
+      } catch (e) {
+        reject(e); // beforeSend-tagged by the guard — refused before any dispatch
+        return;
+      }
       let gotResponse = false;
       const fail = (message, ambiguous) => {
         const err = new Error(message);
         if (ambiguous) err.ambiguous = true; // dispatched but unresolved — caller must settle RESULT_UNKNOWN
         reject(err);
+        return err;
       };
       const req = https.request(
         { hostname: u.hostname, port: 443, path: u.pathname + u.search, method: 'POST', headers },
@@ -162,7 +209,7 @@ export function createAmdRadeonTransport({ posterImpl = null, baseUrl = AMD_BASE
     kind: 'amd-radeon-tokenfactory',
     deploymentStatus: AMD_DEPLOYMENT_STATUS,
     async respond(request) {
-      const base = assertPublicHttpsUrl(baseUrl);
+      assertPublicHttpsUrl(baseUrl); // transport-level gate (the poster revalidates at the sink)
       const cred = apiKeyProvider();
     const body = buildAmdRequestBody({
       constrainedInput: request.constrainedInput,
@@ -181,6 +228,7 @@ export function createAmdRadeonTransport({ posterImpl = null, baseUrl = AMD_BASE
           body: JSON.stringify(body),
         });
       } catch (e) {
+        if (e && e.beforeSend === true) throw e; // refused BEFORE any dispatch — clean refusal, never ambiguous
         throw new AmbiguousOutcomeError(`poster failed after dispatch: ${e.message}`); // possibly sent → RESULT_UNKNOWN
       }
       const retryAfter = res.headers ? res.headers.get('retry-after') : null;

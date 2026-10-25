@@ -9,7 +9,6 @@ import { canonicalJson } from './lib/challenge-freeze.mjs';
 const labRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '.');
 const STUDY = path.join(labRoot, 'challenge-studies', 'CEB-001');
 const refs = { mappingId: 'PMM-001-ASSERT-EVIDENCE-V1', mappingHash: '213090daecf0cbc9abfc51ca46641e4e3b835730ba9d9ec771118aaed9521290', templateId: 'T-CLAIM-EVIDENCE-BINDING-V1', templateVersion: '1.0.0' };
-const paramKey = (cd) => cd.constraints.budgetUnits + ',' + cd.constraints.deadlineUnits;
 
 // collect adopted envelopes from ALL execution rounds
 const eAll = [];

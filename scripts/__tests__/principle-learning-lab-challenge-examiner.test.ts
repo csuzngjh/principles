@@ -12,7 +12,6 @@ import { fileURLToPath } from 'node:url';
 import {
   EXAMINER_SPEC_SCHEMA,
   STAGE_G_AUTH_SCHEMA,
-  validateExaminerSpec,
   verifyStageGAuthorization,
   worstCaseRequestUsd,
   createGenerationLedger,
@@ -23,6 +22,7 @@ import {
 import { VALUE_DOMAINS } from '../dev/principle-learning-lab/lib/challenge-skeleton.mjs';
 import { enumerateCandidates } from '../dev/principle-learning-lab/lib/challenge-enumerator.mjs';
 import { SimulatedCrashError } from '../dev/principle-learning-lab/lib/challenge-actor.mjs';
+import { assertPublicHttpsUrl, createAmdRadeonTransport, createDefaultHttpsPoster } from '../dev/principle-learning-lab/lib/challenge-amd-transport.mjs';
 
 const labRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../dev/principle-learning-lab');
 const tmpRoot = path.join(labRoot, '..', '..', '..', '.tmp', 'examiner-tests');
@@ -526,18 +526,99 @@ describe('E. security boundary', () => {
     expect(worstCaseRequestUsd(makeSpec({ pricePerMillion: { input: 5, output: 15 } }))).toBeCloseTo((8000 * 5 + 32768 * 15) / 1_000_000);
   });
 
-  it('the frozen study authorization is the issued Stage G round-1 record (Owner-authorized; placeholder preserved as audit trail)', () => {
+  it('the frozen study authorization is the currently issued Owner record (round-10 Atria-Dawn; supersede chain intact; placeholder preserved as audit trail)', () => {
     const studyDir2 = path.join(labRoot, 'challenge-studies', 'CEB-001');
     const live = JSON.parse(fs.readFileSync(path.join(studyDir2, 'generation-authorization.json'), 'utf8'));
+    // Binds to the CURRENT issuance (Owner model-switch directive 2026-10-25, round-10 scope).
+    // A future re-issuance must update this test deliberately — the authorization file is never edited to fit a test.
     expect(live.schema).toBe('challenge-stage-g-authorization.v1');
     expect(live.status).toBe('APPROVED');
-    expect(live.requestedModelIdentity).toBe('intern-ai-discovery/deepseek-v4.1-flash-1017'); // round-5 formal model
+    expect(live.studyId).toBe('CEB-001');
+    expect(live.requestedModelIdentity).toBe('intern-ai-discovery/Atria-Dawn'); // round-10 model (Owner switch 2026-10-25)
     expect(live.requestCap).toBe(16);
-    expect(live.validFrom).toBeDefined();
-    expect(live.validUntil).toBeDefined();
     expect(live.revoked).toBe(false);
+    expect(live.halted).toBe(false);
+    expect(live.dataTransferPermit).toBe('APPROVED');
+    expect(live.desensitizationStatus).toBe('DONE');
+    // Validity window: present, parseable, correctly ordered — never bound to an ambient clock.
+    const from = Date.parse(live.validFrom);
+    const until = Date.parse(live.validUntil);
+    expect(Number.isFinite(from)).toBe(true);
+    expect(Number.isFinite(until)).toBe(true);
+    expect(until).toBeGreaterThan(from);
+    // Scope, authority basis and supersede chain.
+    expect(String(live.scope)).toContain('round10');
+    expect(String(live.authorityBasis)).toContain('Owner');
+    // supersededRecord names the superseded issuance (a filename, optionally with a free-text annotation after it).
+    const supersededFile = String(live.supersededRecord).split('（')[0].trim();
+    expect(supersededFile).toMatch(/^generation-authorization\..+\.json$/);
+    expect(fs.existsSync(path.join(studyDir2, supersededFile))).toBe(true);
+    // The live record satisfies the official fail-closed validator (now pinned inside the window).
+    const verdict = verifyStageGAuthorization({
+      authorizationRecord: live,
+      spec: {
+        studyId: live.studyId,
+        mappingHash: live.mappingHash,
+        inputManifestHash: live.inputManifestHash,
+        templateId: live.templateId,
+        templateVersion: live.templateVersion,
+        schemaVersion: live.schemaVersion,
+        valueDomainVersion: live.valueDomainVersion,
+        requestedModelIdentity: live.requestedModelIdentity,
+        requestCap: live.requestCap,
+        costCapUsd: live.costCapUsd,
+      },
+      now: from + 1000,
+    });
+    expect(verdict).toEqual({ ok: true, reasons: [] });
     expect(fs.existsSync(path.join(studyDir2, 'generation-authorization.initial-placeholder.json'))).toBe(true); // audit trail
     // Stage R remains unauthorized — never touched by Stage G
     expect(JSON.parse(fs.readFileSync(path.join(studyDir2, 'run-authorization.json'), 'utf8')).status).toBe('NOT_AUTHORIZED');
+  });
+
+  it('real transport URL guard: non-https / loopback / private / reserved / evasive targets are refused BEFORE any dispatch (zero sockets)', async () => {
+    // Sink guard (httpsPoster): refused before https.request — no network is ever attempted.
+    const poster = createDefaultHttpsPoster();
+    const badUrls = [
+      'http://developer.amd.com.cn/radeon/api/v1', // scheme downgrade
+      'https://localhost/v1', // loopback name
+      'https://host.internal/v1', // internal name
+      'https://127.0.0.1/v1', // IPv4 loopback
+      'https://10.0.0.8/v1', // RFC1918
+      'https://172.16.0.9/v1', // RFC1918
+      'https://192.168.1.10/v1', // RFC1918
+      'https://169.254.3.4/v1', // link-local
+      'https://0.0.0.0/v1', // this-network
+      'https://224.0.0.1/v1', // multicast
+      'https://100.64.0.1/v1', // CGNAT
+      'https://2130706433/v1', // integer-encoded IPv4 evasion
+      'https://0x7f000001/v1', // hex-encoded IPv4 evasion
+      'https://127.1/v1', // shortened IPv4 evasion
+      'https://[::1]/v1', // IPv6 loopback
+      'https://[::ffff:127.0.0.1]/v1', // IPv4-mapped loopback
+      'https://[fd00::1]/v1', // unique-local IPv6
+      'https://[fe80::1]/v1', // link-local IPv6
+      'https://developer.amd.com.cn:8443/v1', // explicit non-default port
+    ];
+    for (const bad of badUrls) {
+      await expect(poster(bad, { headers: {}, body: '{}' })).rejects.toMatchObject({ beforeSend: true });
+    }
+    // The two production base URLs pass the guard (pure validation — no request is built here).
+    expect(assertPublicHttpsUrl('https://developer.amd.com.cn/radeon/api/v1').protocol).toBe('https:');
+    expect(assertPublicHttpsUrl('https://discovery-api.intern-ai.org.cn/v1').hostname).toBe('discovery-api.intern-ai.org.cn');
+  });
+
+  it('real transport refuses a non-public baseUrl as a clean beforeSend failure — poster factory never invoked', async () => {
+    let posterCalls = 0;
+    const transport = createAmdRadeonTransport({
+      baseUrl: 'https://127.0.0.1/v1',
+      posterImpl: () => {
+        posterCalls += 1;
+        return Promise.resolve({ status: 200, headers: { get: () => null }, text: async () => '{}' });
+      },
+      apiKeyProvider: () => ({ source: 'test', key: 'test-key' }),
+    });
+    await expect(transport.respond({ constrainedInput: {} })).rejects.toMatchObject({ beforeSend: true });
+    expect(posterCalls).toBe(0); // refused at the transport gate — no dispatch, no RESULT_UNKNOWN downgrade
   });
 });
