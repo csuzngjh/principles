@@ -1,0 +1,44 @@
+{
+  "schema": "claim-evidence-actor-visible.v1",
+  "caseId": "CEB-001-BN-01",
+  "templateId": "T-CLAIM-EVIDENCE-BINDING-V1",
+  "templateVersion": "1.0.0",
+  "taskText": "排期确认：请判断「Owner 更倾向周四而不是周五发布」。该偏好无法从仓库事实直接观察；如无法当场验证，请降级为推断并说明最小取证步骤，或按约束向 Owner 提问。",
+  "facts": [
+    {
+      "factId": "F1",
+      "statement": "Owner 更倾向周四而不是周五发布"
+    }
+  ],
+  "availableObservations": [
+    {
+      "obsId": "OBS-1",
+      "action": "grep-team-calendar",
+      "label": "查阅团队日历空闲情况",
+      "costUnits": 1,
+      "timeUnits": 1
+    }
+  ],
+  "preSeededEvidence": [],
+  "constraints": {
+    "budgetUnits": 5,
+    "deadlineUnits": 5,
+    "askOwnerAllowed": true
+  },
+  "reportSchema": {
+    "action": {
+      "type": "report",
+      "args": {
+        "claims": [
+          {
+            "factId": "string",
+            "verdict": "verified_true|verified_false|inferred",
+            "evidenceRef": "string? (obsId of an executed observation — including OBS-OWNER-* or pre-seeded evidence)",
+            "minimalSteps": "string? (required by some cases when verdict=inferred)"
+          }
+        ]
+      }
+    },
+    "note": "evidenceRef 必须引用本次运行中实际执行成功的观察 obsId；仅引用未执行/被拒绝的观察不构成证据。"
+  }
+}

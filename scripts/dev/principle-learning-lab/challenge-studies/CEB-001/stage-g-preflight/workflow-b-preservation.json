@@ -1,0 +1,25 @@
+{
+  "schema": "stage-g-workflow-b-preservation.v1",
+  "at": "2026-10-25T08:23:46.255Z",
+  "round7Preserved": {
+    "validCandidates": 12,
+    "adoptedEnvelopes": "stage-g-execution/round7/examiner-draft-log.jsonl (12 rows with adoptedEnvelope)",
+    "ledger": "16/16 consumed (2 SUCCEEDED + 2 UNKNOWN + 12 429)"
+  },
+  "round8Preserved": {
+    "ledger": "stage-g-execution/round8/generation-ledger.jsonl (6 consumed / 10 preserved)",
+    "requests": "req-07..16 untouched",
+    "stopFired": "6 consecutive 429 (pre-registered)"
+  },
+  "authorization": {
+    "status": "APPROVED",
+    "requestedModelIdentity": "intern-ai-discovery/deepseek-v4.1-flash-1017",
+    "halted": false,
+    "revoked": false,
+    "window": "24h from 2026-10-25 issuance",
+    "remainingRequests": 10,
+    "continuationPath": "同一授权+新 round 目录（run-stage-g-round5.mjs 已参数化 round 字符串）——需 Owner 新续跑指令或窗口决定"
+  },
+  "nextWindowRule": "不得在已触发停止条件的窗口内循环重试；新窗口=Owner 指令后新 round 目录+沿用 r7 契约与统计",
+  "noPromptChange": "round7 生成契约（改写义务+字段映射）保持原样——不因 12 候选表达新颖而调整"
+}

@@ -1,0 +1,66 @@
+{
+  "schema": "stage-g-round-final-metrics.v1",
+  "studyId": "CEB-001",
+  "generatedAt": "2026-10-25T07:48:24.573Z",
+  "eRound": "round7 (deepseek-v4.1-flash-1017, 16/16 consumed)",
+  "requestAccounting": {
+    "total": 16,
+    "succeeded": 2,
+    "resultUnknown": 2,
+    "rateLimited429": 12
+  },
+  "pointsMetering": {
+    "nominal": "R1≈16+R9≈22 墨点（目录价），账面以平台为准",
+    "modelUsdCost": 0
+  },
+  "arms": {
+    "B0": {
+      "candidates": 36,
+      "validatorPass": "36/36",
+      "gridCoverage": "3/110",
+      "substantive": "3/3960",
+      "structuralDup": 12,
+      "role": "historical reference"
+    },
+    "B1v2": {
+      "candidates": 36,
+      "validatorPass": "36/36 skeleton_verified",
+      "gridCoverage": "36/110",
+      "substantive": "36/3960",
+      "structuralDup": 0,
+      "role": "primary comparator"
+    },
+    "E": {
+      "candidates": 12,
+      "validatorPass": "12/12 skeleton_verified",
+      "slotsFilled": "12/36",
+      "gridCoverage": "1/110（E 保留基线 6/6——参数权未行使，如实记录）",
+      "fullCombo": "12/31680",
+      "substantive": "12/3960（=12 个互异实质情境，B1 36 个）",
+      "structuralDup": "0/0/0",
+      "novelExpression": {
+        "uniqueTaskTexts": "12/12",
+        "taskTextsNovelVsB0": "12/12",
+        "factStatementsNovelVsB0": "12/12"
+      },
+      "modelPointsNominal": "≈38（两成功请求）",
+      "role": "experimental"
+    }
+  },
+  "interpretation": {
+    "established": "DeepSeek-V4.1-Flash-1017 在受约束契约（merge 采纳+澄清生成契约）下产出 12/12 通过全部机械门的表达层新颖候选（taskText/fact 全改写互异、Gold 零接触、结构重复 0）",
+    "notEstablished": [
+      "表达质量优劣（盲评 PENDING——评审者未指派）",
+      "优于 B1 v2（参数覆盖 6/110 < 36/110；实质情境 12 < 36——E 未行使参数变化权）",
+      "人工修订成本（评审未指派）",
+      "对任意确定性方法的普适优势"
+    ],
+    "failureAccounting": "16 请求：2 成功+2 RESULT_UNKNOWN（240s 超时）+12×429 FAILED_KNOWN；24 空槽原因=通道饱和+预算耗尽，全量保留"
+  },
+  "blindReview": {
+    "status": "PENDING",
+    "packageReady": true,
+    "reviewers": "待 Owner 指派（2+1）"
+  },
+  "frozenAssets": "四冻结哈希不变（freeze --verify OK）"
+}

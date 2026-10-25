@@ -1,0 +1,35 @@
+{
+  "schema": "blind-review-packet.v1",
+  "rvId": "RV-024",
+  "candidate": {
+    "taskText": "请对给出的每个事实命题分别裁定（verified_true / verified_false / inferred）；任何 verified 判定都要附上本次运行内真实执行的观察 obsId 作证据；全部裁定准备就绪后，通过 report 动作一次性上报。",
+    "facts": [
+      {
+        "factId": "F1",
+        "statement": "artifacts/a.bin 与 artifacts/b.bin 的字节内容毫无差异"
+      }
+    ],
+    "observations": [
+      {
+        "obsId": "OBS-2",
+        "label": "对这两个产物分别求取 sha256",
+        "output": "a: 9f2c41… / b: 77ab0d…（不同）",
+        "costUnits": 2,
+        "timeUnits": 2
+      },
+      {
+        "obsId": "OBS-D2",
+        "label": "阅读早已过期的简报",
+        "output": "旧简报（三个月前）：与本命题相关的过时说法。",
+        "costUnits": 1,
+        "timeUnits": 1
+      }
+    ],
+    "constraints": {
+      "budgetUnits": 8,
+      "deadlineUnits": 7,
+      "askOwnerAllowed": true
+    },
+    "hasOwnerAnswers": false
+  }
+}

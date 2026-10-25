@@ -1,0 +1,55 @@
+{
+  "schema": "challenge-input-manifest.v1",
+  "studyId": "CEB-001",
+  "createdAt": "2026-10-24",
+  "specRef": {
+    "path": "docs/specs/SPEC-PD-EXAMINER-001-v0.3.md",
+    "version": "v0.3",
+    "specFileSha256": "def159855848ea8fed7504d7e0a97d47c013ae121097f4add7028bca7de968b8",
+    "specDesignBaseline": "2f5d2b8376f4e1b031506d3b27e7b4947c6f71ea",
+    "specRemoteMainAtDesign": "3c3859bf878627d61f6b7d31b573c96aa6b27e7b"
+  },
+  "implementationBaseline": {
+    "branch": "main",
+    "head": "3c3859bf878627d61f6b7d31b573c96aa6b27e7b",
+    "originMainAtFreeze": "b62a9d8f2151858a0c0980fbc9cc9e1c2ddf7190",
+    "note": "SPEC 参考路径在 2f5d2b8 与本 HEAD 之间零差异（Phase 0 已核验 git diff --stat 为空）。"
+  },
+  "ownerAcceptance": {
+    "decision": "ACCEPTED",
+    "recordedAt": "2026-10-24",
+    "authority": "Owner Phase 1A 执行指令（本次会话书面授权）",
+    "scope": "仅接受 PainMechanismMappingV1 研究映射并冻结研究契约；不构成 Principle 有效性证明，不构成任何真实模型调用/宿主实验授权（Stage G/R 均未授权）。"
+  },
+  "sources": {
+    "primaryPain": {
+      "painId": "pain_host_f31331de9908cd92da55ad27cc8fb1c5cc6855352db29b35ce070fa043a6052b",
+      "painEventRowId": 44,
+      "trajectortyDb": "pd-data-audit/raw_snapshot/live_trajectory.db (gitignored 快照, 只读)"
+    },
+    "scribeArtifact": {
+      "artifactId": "pi-art-scribe-95427453-ff20-45e9-bd9d-0592affdd86b-prompt-run_scribe-95427453-ff20-45e9-bd9d-0592affdd86b-prompt_1",
+      "stateDb": "pd-data-audit/raw_snapshot/live_state.db (gitignored 快照, 只读)"
+    },
+    "lineage": {
+      "diagnosisTask": "diagnosis_pain_host_f31331de9908cd92da55ad27cc8fb1c5cc6855352db29b35ce070fa043a6052b",
+      "dreamerArtifactId": "pi-art-dreamer-95427453-ff20-45e9-bd9d-0592affdd86b-prompt-run_dreamer-95427453-ff20-45e9-bd9d-0592affdd86b-prompt_1",
+      "philosopherArtifactId": "pi-art-philosopher-95427453-ff20-45e9-bd9d-0592affdd86b-prompt-run_philosopher-95427453-ff20-45e9-bd9d-0592affdd86b-prompt_1",
+      "approvalId": "apr_prompt_pi-art-scribe-95427453-ff20-45e9-bd9d-0592affdd86b-prompt-run_scribe-95427453-ff20-45e9-bd9d-0592affdd86b-prompt_1",
+      "activationId": "act_prompt_结论必须由可观察证据背书：无查验则显式降级为推断",
+      "activationState": "2026-09-25T01:04:28.074Z 激活，deactivated_at=NULL（live，2026-10-24 只读核验）"
+    },
+    "idResolutionPath": "SPEC §4.1 备用路径：精确 scribeArtifactId + 已验证 painId。原因：ledger 已于 10 月初 owner-slim 剪枝，candidate 95427453 不在当前 ledger，pd pain recall 的 ledger-id 路径对该 Pain 不可达（Phase 0 核验）。"
+  },
+  "expectedSourceHashes": {
+    "principleContentHash": "8ac06edda31bcc4e5dc98a90bd1457435d1a7481a2477bb391c5d87824e9e3ca",
+    "statementSha256": "ae275f0f73d136e600bdbe63fdf44993e9669ad2e46387eeeceb2aa4c4a632bd",
+    "painEventRowSha256": "679f23d6312bed5d48de0ba0842960b243ef805df6db25e82c864d7d880cd3a0",
+    "diagnosisRowsSha256": "f396fb6ab156239007306acb9e29f0d7d123b7094948d150d57a35cc86ea9945"
+  },
+  "expectedSourceHashesNote": "核验基准（来自 Phase 0 只读审计）。freeze CLI 与测试必须从冻结资产内容重新计算并比对，禁止直接回填。",
+  "notes": [
+    "legacy Scribe 产物缺 executionConditions/ownerRequirementGaps——如实记录于 principle-frozen.json legacyCompatibility，不伪造。",
+    "真实生产库 D:/.openclaw/workspace 仅在 2026-10-24 以只读方式交叉核验哈希相等；本 Study 执行期的一切读取均以本目录冻结资产为准，不依赖实时生产库。"
+  ]
+}

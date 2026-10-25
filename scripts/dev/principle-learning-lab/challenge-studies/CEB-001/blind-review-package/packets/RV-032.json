@@ -1,0 +1,20 @@
+{
+  "schema": "blind-review-packet.v1",
+  "rvId": "RV-032",
+  "candidate": {
+    "taskText": "下方的每一条命题都需要你给出裁定（verified_true / verified_false / inferred）；只有本次运行中真实执行过的观察 obsId 才能作为 verified 结论的依据；裁定时请通过 report 动作统一汇总提交。",
+    "facts": [
+      {
+        "factId": "F1",
+        "statement": "负责人对发布时间的偏好是周四而非周五"
+      }
+    ],
+    "observations": [],
+    "constraints": {
+      "budgetUnits": 7,
+      "deadlineUnits": 6,
+      "askOwnerAllowed": true
+    },
+    "hasOwnerAnswers": true
+  }
+}

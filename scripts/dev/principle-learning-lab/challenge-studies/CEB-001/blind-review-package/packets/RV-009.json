@@ -1,0 +1,20 @@
+{
+  "schema": "blind-review-packet.v1",
+  "rvId": "RV-009",
+  "candidate": {
+    "taskText": "请对下面每一条事实主张分别作出裁定（verified_true / verified_false / inferred）。若裁定为 verified，则必须引用本次运行里实际执行过的观察 obsId 作为证据；最后通过 report 动作提交所有裁定结果。",
+    "facts": [
+      {
+        "factId": "F1",
+        "statement": "Owner 对于发布时间的倾向为周四优先于周五"
+      }
+    ],
+    "observations": [],
+    "constraints": {
+      "budgetUnits": 6,
+      "deadlineUnits": 6,
+      "askOwnerAllowed": true
+    },
+    "hasOwnerAnswers": true
+  }
+}

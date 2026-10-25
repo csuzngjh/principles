@@ -1,0 +1,45 @@
+{
+  "schema": "stage-g-e-arm-cumulative.v1",
+  "studyId": "CEB-001",
+  "generatedAt": "2026-10-25T11:36:09.679Z",
+  "model": "deepseek-v4.1-flash-1017 (intern-ai discovery, points-metered)",
+  "rounds": {
+    "round7": "2/8 SUCCEEDED → 12 candidates",
+    "round8": "1/8 SUCCEEDED → 6 candidates",
+    "note": "round8 req-01..08: 6×429 (first window) + 2 SUCCESS by req-09; req-10..16: 429×7 → budget exhausted"
+  },
+  "requestAccounting": {
+    "total": 16,
+    "succeeded": 3,
+    "candidatesFromSucceeded": 18,
+    "resultUnknown": 2,
+    "rateLimited429": 11,
+    "modelTokensReceived": 0
+  },
+  "eArm": {
+    "validCandidates": 18,
+    "slotsFilled": "18/36",
+    "slotsUnfilled": 18,
+    "gridCoverage": "2/110 unique (budget,deadline) points",
+    "substantiveSituations": "18/3960 (overlap with B1: 0)",
+    "expressionNovelty": {
+      "taskTexts": "18/18 unique, all non-B0",
+      "novelFactStatements": "24 facts with novel statements across 18 candidates"
+    },
+    "structuralDuplicates": 0,
+    "goldIntegrity": "all adopted envelopes carry frozen gold via merge — zero violations"
+  },
+  "b1Reference": {
+    "gridCoverage": "36/110",
+    "substantive": "36/3960"
+  },
+  "interpretation": {
+    "established": "E (DeepSeek-V4.1-Flash-1017) produces skeleton_verified, expression-novel candidates under the constrained contract (18 adopted, 0 rejected, 0 duplicate)",
+    "notEstablished": [
+      "expression quality (blind review PENDING)",
+      "superiority over B1 v2 (E param coverage 2/110 < B1 36/110 — E did not exercise the parameter-variation right)",
+      "human revision cost (reviewers unassigned)"
+    ]
+  },
+  "frozenAssets": "four frozen hashes unchanged (freeze --verify OK)"
+}

@@ -1,0 +1,28 @@
+{
+  "schema": "blind-review-packet.v1",
+  "rvId": "RV-007",
+  "candidate": {
+    "taskText": "请逐条判断以下命题应记为 verified_true、verified_false 还是 inferred；对于任何 verified 结论，必须附上本次运行中实际调用过的观察 obsId 作为依据；最后以 report 动作提交全部判断。",
+    "facts": [
+      {
+        "factId": "F1",
+        "statement": "模型 X-7 目前已被供应商停用退役"
+      }
+    ],
+    "observations": [
+      {
+        "obsId": "OBS-D2",
+        "label": "浏览过期简报内容",
+        "output": "旧简报（三个月前）：与本命题相关的过时说法。",
+        "costUnits": 1,
+        "timeUnits": 1
+      }
+    ],
+    "constraints": {
+      "budgetUnits": 6,
+      "deadlineUnits": 6,
+      "askOwnerAllowed": true
+    },
+    "hasOwnerAnswers": false
+  }
+}

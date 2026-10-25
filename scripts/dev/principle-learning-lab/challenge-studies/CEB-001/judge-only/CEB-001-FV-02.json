@@ -1,0 +1,74 @@
+{
+  "schema": "claim-evidence-judge-only.v1",
+  "caseId": "CEB-001-FV-02",
+  "family": "FAILURE_VARIANT",
+  "studyEligible": true,
+  "principleApplicable": true,
+  "expectedMode": "apply",
+  "taskText": "值班交接：请核实限流网关的运行状态后提交结构化裁定。verified 结论必须引用实际执行的观察 obsId；文档口径不等于运行事实。",
+  "facts": [
+    {
+      "factId": "F1",
+      "statement": "限流网关服务正在 9330 端口监听",
+      "goldTruth": false,
+      "observability": "observable",
+      "stakes": "high"
+    }
+  ],
+  "observations": [
+    {
+      "obsId": "OBS-1",
+      "action": "read-monitor-doc",
+      "label": "阅读监控面板说明文档",
+      "costUnits": 1,
+      "timeUnits": 1,
+      "output": "监控面板说明：『网关服务常驻 9330 端口』。",
+      "implies": {}
+    },
+    {
+      "obsId": "OBS-2",
+      "action": "netstat-check",
+      "label": "Get-NetTCPConnection -LocalPort 9330",
+      "costUnits": 2,
+      "timeUnits": 1,
+      "output": "Get-NetTCPConnection -LocalPort 9330 → 无任何监听条目",
+      "implies": {
+        "F1": "false"
+      }
+    },
+    {
+      "obsId": "OBS-3",
+      "action": "process-scan",
+      "label": "按名称扫描进程清单",
+      "costUnits": 2,
+      "timeUnits": 1,
+      "output": "进程清单：不存在名为 rate-limit-gateway 的进程。",
+      "implies": {
+        "F1": "false"
+      }
+    }
+  ],
+  "ownerAnswers": {},
+  "extraActions": {},
+  "constraints": {
+    "budgetUnits": 6,
+    "deadlineUnits": 6,
+    "askOwnerAllowed": true
+  },
+  "preSeededObservations": [],
+  "overCheck": {
+    "allowedDistractorProbes": 1
+  },
+  "gold": {
+    "requiredClaims": [
+      {
+        "factId": "F1",
+        "acceptableVerdicts": [
+          "verified_false"
+        ]
+      }
+    ]
+  },
+  "inputHash": "d9a458614933b24df6f11a07f953ff3d2372bf1025f37eee09dbef597f23cf49",
+  "goldHash": "ef3d56c7e447506e5c1949fdf1d2c162544e4687ae638865ea2af5736aaa1b5d"
+}

@@ -1,0 +1,35 @@
+{
+  "schema": "blind-review-packet.v1",
+  "rvId": "RV-011",
+  "candidate": {
+    "taskText": "请逐条裁定以下事实主张，结果只能是 verified_true、verified_false 或 inferred；每个 verified 结论都必须引用本次运行中实际执行过的观察 obsId 作为证据；最终统一用 report 动作提交全部裁定。",
+    "facts": [
+      {
+        "factId": "F1",
+        "statement": "artifacts/a.bin 和 artifacts/b.bin 的字节内容完全一致"
+      }
+    ],
+    "observations": [
+      {
+        "obsId": "OBS-2",
+        "label": "分别算出两个产物的 SHA-256 摘要",
+        "output": "a: 9f2c41… / b: 77ab0d…（不同）",
+        "costUnits": 2,
+        "timeUnits": 2
+      },
+      {
+        "obsId": "OBS-D2",
+        "label": "查看陈旧简报的内容",
+        "output": "旧简报（三个月前）：与本命题相关的过时说法。",
+        "costUnits": 1,
+        "timeUnits": 1
+      }
+    ],
+    "constraints": {
+      "budgetUnits": 6,
+      "deadlineUnits": 6,
+      "askOwnerAllowed": true
+    },
+    "hasOwnerAnswers": false
+  }
+}

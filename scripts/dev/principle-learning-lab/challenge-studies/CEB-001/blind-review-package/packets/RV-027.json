@@ -1,0 +1,46 @@
+{
+  "schema": "blind-review-packet.v1",
+  "rvId": "RV-027",
+  "candidate": {
+    "taskText": "请对下列每条命题分别作出裁定（verified_true / verified_false / inferred）；verified 结论须以本次运行中实际执行的观察 obsId 作为支撑证据；所有裁定均需通过 report 动作提交。",
+    "facts": [
+      {
+        "factId": "F1",
+        "statement": "当前主配置文件里的重试间隔取值为 2000ms"
+      },
+      {
+        "factId": "F2",
+        "statement": "check.sh 脚本里所引用的重试间隔也已同步修改"
+      }
+    ],
+    "observations": [
+      {
+        "obsId": "OBS-1",
+        "label": "在主配置中查找 interval",
+        "output": "config.yaml: interval_ms: 2000",
+        "costUnits": 1,
+        "timeUnits": 1
+      },
+      {
+        "obsId": "OBS-2",
+        "label": "在 check.sh 中查找 interval",
+        "output": "check.sh:7 → interval=250（仍为旧值）",
+        "costUnits": 1,
+        "timeUnits": 1
+      },
+      {
+        "obsId": "OBS-D2",
+        "label": "浏览过时简报的内容",
+        "output": "旧简报（三个月前）：与本命题相关的过时说法。",
+        "costUnits": 1,
+        "timeUnits": 1
+      }
+    ],
+    "constraints": {
+      "budgetUnits": 7,
+      "deadlineUnits": 6,
+      "askOwnerAllowed": true
+    },
+    "hasOwnerAnswers": false
+  }
+}

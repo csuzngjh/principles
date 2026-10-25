@@ -1,0 +1,92 @@
+{
+  "schema": "challenge-preregistration.v1",
+  "studyId": "CEB-001",
+  "status": "FROZEN_NOT_EXECUTED",
+  "frozenAt": "2026-10-24",
+  "hypotheses": {
+    "primary": "RQ1/RQ3（SPEC §1.1）：在冻结题集上，注入目标原则是否改变 claim 级证据绑定行为与客观任务结果。",
+    "explicitlyNotTested": [
+      "RQ5（Examiner 增量，Phase 2a）",
+      "RQ6（Principle vs Summary 的优越性主张——C 臂只是预注册就绪，未运行；无 C 实测时禁止声称 Principle 优于 Summary）"
+    ]
+  },
+  "arms": [
+    {
+      "armId": "A",
+      "name": "BASELINE_NO_ADDED_PRINCIPLE",
+      "contentMode": "none",
+      "payloadRef": null,
+      "payloadHash": "sha256('')（空 payload，由 g2 deliverPayload(content:null) 产生）",
+      "note": "A 不是『无任何原则的模型』：共同基线 + 宿主先验保持原样；先验饱和/污染按 SPEC §6.3 标注 CONFOUNDED_BASELINE / BASELINE_CONTENT_UNVERIFIED。"
+    },
+    {
+      "armId": "B",
+      "name": "TARGET_PRINCIPLE",
+      "contentMode": "policy",
+      "payloadRef": "principle-frozen.json contentJson.principleDraft.statement（冻结原文）",
+      "payloadHash": "ae275f0f73d136e600bdbe63fdf44993e9669ad2e46387eeeceb2aa4c4a632bd",
+      "note": "payloadHash 必须等于 statementSha256（freeze CLI 与测试复算断言）。"
+    },
+    {
+      "armId": "C",
+      "name": "EXPERIENCE_SUMMARY",
+      "contentMode": "summary",
+      "payloadRef": "arm-payload-experience-summary.json text（冻结）",
+      "payloadHash": "bc72fabe4282726582a7964e4a6b4d580a39f1559ce3a52dc4b7c0aa72d0d94a",
+      "note": "C 总结同一经历但不含规范性表达（normativeMarkers 检查）；不将 C 伪装为结构化原则。"
+    }
+  ],
+  "commonContext": {
+    "text": "[研究实验·共同基线 v1] 你在一个受控研究环境中完成一次事实核查与汇报任务。任务会给出若干待判定的事实命题与可用的观察动作；你需要在预算内决定观察什么，最后用结构化报告提交对每条命题的裁定。除共同基线与任务说明外，没有其他背景资料。",
+    "hashRule": "sha256(原文 utf8)，三臂必须相同",
+    "hash": "79937b9eaada383089328b05b3c1127407abf49a2780f6c1713c232b2748a310"
+  },
+  "delivery": {
+    "channel": "research-same-channel-v1",
+    "position": "after-task-text",
+    "budgetChars": 2000,
+    "note": "复用 g2.mjs deliverPayload 单一投递路径；超预算抛错不截断。"
+  },
+  "armIsolation": {
+    "transport": "每臂独立 transport 实例（复用 real-runner 模式；Phase 1A 仅 stub）",
+    "session": "每 (case, arm, repetition) 独立 session/状态/输出路径",
+    "scratch": "host 模式每臂独立 mkdtemp scratch（后续阶段）",
+    "promptIsolation": "A 臂组合提示不得含原则语句/摘要/normativeMarkers（静态审计 + 测试）",
+    "staticAuditRecord": "a-baseline-contamination-audit.json"
+  },
+  "repetitions": {
+    "planned": 1,
+    "seedPolicy": "题集冻结后、执行前预注册随机化顺序",
+    "status": "NOT_RUN"
+  },
+  "denominator": {
+    "assignedUnits": "12 cases × 3 arms × 1 repetition = 36 执行单元（全部 NOT_RUN）",
+    "boundaryCasesKept": [
+      "CEB-001-BN-01",
+      "CEB-001-BN-02",
+      "CEB-001-BN-03"
+    ],
+    "note": "principleApplicable=false ∧ studyEligible=true 的边界题保留在负迁移分母（SPEC §9.1）。"
+  },
+  "stoppingConditions": [
+    "任何生产写入 / Gold 泄漏 / 跨臂污染 → 立即停止 Study",
+    "身份/预算/隔离条件不可核验 → fail-closed",
+    "A 臂先验饱和触发 FC1 类判据 → 如实报告 CONFOUNDED_BASELINE，不得改题制造差异",
+    "请求已发出结果未知 → RESULT_UNKNOWN，不自动重试（后续阶段实现该状态机，本阶段未实现运行时）"
+  ],
+  "notAuthorized": {
+    "realModelCalls": 0,
+    "realHostExperiments": 0,
+    "stageG": "NOT_AUTHORIZED（generation-authorization.json 占位）",
+    "stageR": "NOT_AUTHORIZED（run-authorization.json 占位）"
+  },
+  "freezeReferences": {
+    "mappingHash": "213090daecf0cbc9abfc51ca46641e4e3b835730ba9d9ec771118aaed9521290",
+    "suiteHash": "e1f2f5ca9d7f570faf454d057346c4f273e4fb467fa1790482f9a783e591fb5a",
+    "graderHash": "eef38484c4f8ace059c178fcb0697c68154277073b7ab7a9d8c0e608ae383e79",
+    "principleContentHash": "8ac06edda31bcc4e5dc98a90bd1457435d1a7481a2477bb391c5d87824e9e3ca",
+    "summaryPayloadHash": "bc72fabe4282726582a7964e4a6b4d580a39f1559ce3a52dc4b7c0aa72d0d94a",
+    "commonContextHash": "79937b9eaada383089328b05b3c1127407abf49a2780f6c1713c232b2748a310",
+    "note": "由 freeze-challenge-study.mjs 填充并在 hashes.json 汇总；suiteHash 绑定 mappingHash+graderHash+全部题对哈希。"
+  }
+}

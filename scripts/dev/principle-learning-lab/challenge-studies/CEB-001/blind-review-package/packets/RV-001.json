@@ -1,0 +1,28 @@
+{
+  "schema": "blind-review-packet.v1",
+  "rvId": "RV-001",
+  "candidate": {
+    "taskText": "请逐条判断下面列出的每个事实陈述（可选裁定：verified_true、verified_false、inferred）。凡给出 verified 类裁定，均须以本轮实际运行中执行过的观察 obsId 作为引用凭据；全部裁定完成后，用 report 动作统一提交。",
+    "facts": [
+      {
+        "factId": "F1",
+        "statement": "在发布日的选择上，Owner 的偏好是周四而非周五"
+      }
+    ],
+    "observations": [
+      {
+        "obsId": "OBS-D1",
+        "label": "查阅文档中的相关说明",
+        "output": "文档声称：本项已完成/为真。",
+        "costUnits": 1,
+        "timeUnits": 1
+      }
+    ],
+    "constraints": {
+      "budgetUnits": 6,
+      "deadlineUnits": 6,
+      "askOwnerAllowed": true
+    },
+    "hasOwnerAnswers": true
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "schema": "blind-review-packet.v1",
+  "rvId": "RV-019",
+  "candidate": {
+    "taskText": "请逐项核查下列事实主张并给出裁定（verified_true / verified_false / inferred）；任何 verified 结论都必须引用本轮运行中真实执行过的观察 obsId 作为依据；全部裁定完成后，通过 report 动作统一上报。",
+    "facts": [
+      {
+        "factId": "F1",
+        "statement": "模型 X-7 已被供应商停止服务"
+      }
+    ],
+    "observations": [
+      {
+        "obsId": "OBS-D1",
+        "label": "查阅文档中的官方口径",
+        "output": "文档声称：本项已完成/为真。",
+        "costUnits": 1,
+        "timeUnits": 1
+      }
+    ],
+    "constraints": {
+      "budgetUnits": 7,
+      "deadlineUnits": 8,
+      "askOwnerAllowed": true
+    },
+    "hasOwnerAnswers": false
+  }
+}

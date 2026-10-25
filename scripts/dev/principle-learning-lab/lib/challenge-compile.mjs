@@ -1,0 +1,161 @@
+// SPEC-PD-EXAMINER-001 v0.3 — Phase 1A Compiler/Validator for challenge
+// studies. Accepts only the registered template (T-CLAIM-EVIDENCE-BINDING-V1),
+// known families, and structurally valid case definitions; splits each case
+// into actorVisible (no gold: no truth values, no implication maps, no
+// observation outputs, no gold/acceptable verdicts) and judgeOnly (full gold).
+// Hashes: inputHash over actorVisible; goldHash over judgeOnly minus its own
+// hash fields; suiteHash over the manifest core (mappingHash + graderHash +
+// per-case hashes + family counts).
+
+import { hashOfCanonical } from './challenge-freeze.mjs';
+import {
+  CLAIM_EVIDENCE_TEMPLATE_ID,
+  CLAIM_EVIDENCE_TEMPLATE_VERSION,
+  CLAIM_FAMILIES,
+  EXPECTED_MODES,
+  buildClaimEnvironment,
+} from './claim-evidence-env.mjs';
+import { CLAIM_VERDICTS } from './claim-evidence-env.mjs';
+
+export const ACTOR_VISIBLE_SCHEMA = 'claim-evidence-actor-visible.v1';
+export const JUDGE_ONLY_SCHEMA = 'claim-evidence-judge-only.v1';
+export const SUITE_MANIFEST_SCHEMA = 'challenge-suite-manifest.v1';
+export const CHALLENGE_DRAFT_SCHEMA = 'ChallengeDraftV1';
+
+const REPORT_SCHEMA_DOC = {
+  action: { type: 'report', args: { claims: [{ factId: 'string', verdict: `${CLAIM_VERDICTS.join('|')}`, evidenceRef: 'string? (obsId of an executed observation — including OBS-OWNER-* or pre-seeded evidence)', minimalSteps: 'string? (required by some cases when verdict=inferred)' }] } },
+  note: 'evidenceRef 必须引用本次运行中实际执行成功的观察 obsId；仅引用未执行/被拒绝的观察不构成证据。',
+};
+
+/** Validate one ChallengeDraftV1 record (SPEC §5.2). Throws on violation. */
+export function validateChallengeDraft(draft) {
+  const problems = [];
+  if (!draft || typeof draft !== 'object') throw new Error('draft must be an object');
+  if (draft.templateId !== CLAIM_EVIDENCE_TEMPLATE_ID) problems.push(`templateId must be ${CLAIM_EVIDENCE_TEMPLATE_ID}`);
+  if (draft.templateVersion !== CLAIM_EVIDENCE_TEMPLATE_VERSION) problems.push(`templateVersion must be ${CLAIM_EVIDENCE_TEMPLATE_VERSION}`);
+  if (!CLAIM_FAMILIES.includes(draft.family)) problems.push(`family must be one of ${CLAIM_FAMILIES.join('|')}`);
+  if (typeof draft.scenarioId !== 'string' || draft.scenarioId.length === 0) problems.push('scenarioId required');
+  if (typeof draft.sourceMechanismRef !== 'string' || draft.sourceMechanismRef.length === 0) problems.push('sourceMechanismRef required');
+  if (typeof draft.rationaleForDesigner !== 'string' || draft.rationaleForDesigner.length === 0) problems.push('rationaleForDesigner required');
+  if (problems.length > 0) throw new Error(`validateChallengeDraft(${draft.scenarioId || '?'}): ${problems.join('; ')}`);
+  return true;
+}
+
+/** Validate one case definition (structural gold sanity). Throws on violation. */
+export function validateCaseDef(caseDef) {
+  const problems = [];
+  if (!caseDef || typeof caseDef !== 'object') throw new Error('caseDef must be an object');
+  if (typeof caseDef.caseId !== 'string' || caseDef.caseId.length === 0) problems.push('caseId required');
+  if (!CLAIM_FAMILIES.includes(caseDef.family)) problems.push(`family must be one of ${CLAIM_FAMILIES.join('|')}`);
+  if (caseDef.studyEligible !== true) problems.push('studyEligible must be true for compiled cases');
+  if (typeof caseDef.principleApplicable !== 'boolean') problems.push('principleApplicable must be boolean');
+  if (!EXPECTED_MODES.includes(caseDef.expectedMode)) problems.push(`expectedMode must be one of ${EXPECTED_MODES.join('|')}`);
+  if (typeof caseDef.taskText !== 'string' || caseDef.taskText.length === 0) problems.push('taskText required');
+  try {
+    buildClaimEnvironment(caseDef);
+  } catch (e) {
+    problems.push(`environment invalid: ${e.message}`);
+  }
+  if (!caseDef.gold || !Array.isArray(caseDef.gold.requiredClaims) || caseDef.gold.requiredClaims.length === 0) {
+    problems.push('gold.requiredClaims must be a non-empty array');
+  } else {
+    const factIds = new Set((caseDef.facts || []).map((f) => f.factId));
+    for (const r of caseDef.gold.requiredClaims) {
+      if (!factIds.has(r.factId)) problems.push(`gold requiredClaim references unknown fact ${r.factId}`);
+      if (!Array.isArray(r.acceptableVerdicts) || r.acceptableVerdicts.length === 0 || r.acceptableVerdicts.some((v) => !CLAIM_VERDICTS.includes(v))) {
+        problems.push(`gold requiredClaim ${r.factId}: acceptableVerdicts must be non-empty subset of ${CLAIM_VERDICTS.join('|')}`);
+      }
+    }
+    // Boundary cases (principleApplicable=false) must keep the boundary claim
+    // in the denominator per SPEC §9.1 — requiredClaims non-empty enforces it.
+  }
+  if (problems.length > 0) throw new Error(`validateCaseDef(${caseDef.caseId || '?'}): ${problems.join('; ')}`);
+  return true;
+}
+
+/**
+ * Split a validated case into actorVisible / judgeOnly and hash both.
+ * Gold isolation: actorVisible contains NO gold truth, NO implication maps,
+ * NO observation outputs (except pre-seeded evidence explicitly embedded in
+ * the task context), NO gold/acceptable verdicts, NO family/expectedMode
+ * (family labels leak expectations).
+ */
+export function compileCase(caseDef) {
+  validateCaseDef(caseDef);
+  const env = buildClaimEnvironment(caseDef);
+
+  const preSeededEvidence = env.preSeeded.map((obsId) => ({ obsId, output: env.observations.get(obsId).output }));
+
+  const actorVisible = {
+    schema: ACTOR_VISIBLE_SCHEMA,
+    caseId: caseDef.caseId,
+    templateId: CLAIM_EVIDENCE_TEMPLATE_ID,
+    templateVersion: CLAIM_EVIDENCE_TEMPLATE_VERSION,
+    taskText: caseDef.taskText,
+    facts: caseDef.facts.map((f) => ({ factId: f.factId, statement: f.statement })),
+    availableObservations: [...env.observations.values()].map((o) => ({ obsId: o.obsId, action: o.action, label: o.label, costUnits: o.costUnits, timeUnits: o.timeUnits })),
+    preSeededEvidence,
+    constraints: {
+      budgetUnits: env.constraints.budgetUnits,
+      deadlineUnits: env.constraints.deadlineUnits,
+      askOwnerAllowed: env.constraints.askOwnerAllowed,
+      ...(env.extraActions.deploy ? { extraActions: ['deploy'] } : {}),
+    },
+    reportSchema: REPORT_SCHEMA_DOC,
+  };
+
+  const judgeOnly = {
+    schema: JUDGE_ONLY_SCHEMA,
+    caseId: caseDef.caseId,
+    family: caseDef.family,
+    studyEligible: caseDef.studyEligible,
+    principleApplicable: caseDef.principleApplicable,
+    expectedMode: caseDef.expectedMode,
+    taskText: caseDef.taskText,
+    facts: caseDef.facts.map((f) => ({ factId: f.factId, statement: f.statement, goldTruth: f.goldTruth, observability: f.observability || 'observable', stakes: f.stakes || 'normal' })),
+    observations: [...env.observations.values()],
+    ownerAnswers: caseDef.ownerAnswers || {},
+    extraActions: caseDef.extraActions || {},
+    constraints: caseDef.constraints,
+    preSeededObservations: caseDef.preSeededObservations || [],
+    overCheck: caseDef.overCheck || {},
+    gold: caseDef.gold,
+  };
+
+  const inputHash = hashOfCanonical(actorVisible);
+  const judgeOnlyForHash = { ...judgeOnly };
+  const goldHash = hashOfCanonical(judgeOnlyForHash);
+  judgeOnly.inputHash = inputHash;
+  judgeOnly.goldHash = goldHash;
+  return { actorVisible, judgeOnly, inputHash, goldHash };
+}
+
+/**
+ * Build the frozen suite manifest + suiteHash. suiteHash binds mappingHash,
+ * graderHash, template identity and every per-case input/gold hash — any
+ * post-freeze change to cases, gold, mapping or scoring contract breaks it.
+ */
+export function compileSuite({ studyId, mappingHash, graderHash, caseDefs }) {
+  const cases = [];
+  const familyCounts = {};
+  for (const cd of caseDefs) {
+    validateCaseDef(cd);
+    const compiled = compileCase(cd);
+    familyCounts[cd.family] = (familyCounts[cd.family] || 0) + 1;
+    cases.push({ caseId: cd.caseId, family: cd.family, expectedMode: cd.expectedMode, principleApplicable: cd.principleApplicable, studyEligible: cd.studyEligible, inputHash: compiled.inputHash, goldHash: compiled.goldHash });
+  }
+  const manifestCore = {
+    schema: SUITE_MANIFEST_SCHEMA,
+    studyId,
+    templateId: CLAIM_EVIDENCE_TEMPLATE_ID,
+    templateVersion: CLAIM_EVIDENCE_TEMPLATE_VERSION,
+    mappingHash,
+    graderHash,
+    familyCounts,
+    caseCount: caseDefs.length,
+    cases,
+  };
+  const suiteHash = hashOfCanonical(manifestCore);
+  const manifest = { ...manifestCore, suiteHash };
+  return { manifest, suiteHash };
+}

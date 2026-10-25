@@ -1,0 +1,24 @@
+{
+  "schema": "challenge-stage-g-protocol-option.v1",
+  "optionId": "A_SELECTION_IN_FROZEN_SPACE",
+  "status": "PROPOSED_NOT_APPROVED",
+  "draftedAt": "2026-10-25",
+  "note": "方案 A：冻结候选空间中的考题选择。若 Owner 批准本方案，将取代 preregistration.stage-g.draft.json 的比较设计（其臂定义/槽位/预算/盲评统计章节沿用）；原文件保留不删改，冲突处以本草案为准。",
+
+  "hypothesis": "H-A：在 36 个冻结候选（相同题目内容）中，Examiner 的选择与排序能否比 B 臂预注册确定性选择策略产生更高盲评效用、更低人工筛选时间与更低总成本。注意：题目本身两组完全相同——本方案只检验选择/优先级判断能力。",
+
+  "design": {
+    "sharedCandidateSpace": "challenge-enumerator.mjs 36 候选（冻结，byte-equal 重放门不变）",
+    "armB": "确定性选择策略（预注册，例如：每族按 facet 覆盖贪心 + 字典序打破平手，选 N=16 并排序；策略文本在授权前冻结）",
+    "armE": "Examiner 收到 36 候选的目录（含 actor-visible 内容与机制 facet 标注，无 judge-only 信息），输出选择 N=16 与排序 + 每题选择理由；不得改写任何题目内容（重放门强制）",
+    "primaryMetrics": ["盲评效用分（八维度折算，关键门槛一票否决）", "机制覆盖（所选子集 facet 覆盖）", "人工筛选时间（从目录到定稿）", "总成本（模型费+人工费分账）"],
+    "slotContract": "沿用 candidateSlotsAndDenominator：36 槽/组、失败八类记账、分母恒 36"
+  },
+
+  "canProve": ["选择/优先级判断能力", "排序对人工筛选效率的影响", "成本侧的 ENUMERATION_SUFFICIENT 与否（仅限选择任务）"],
+  "cannotProve": ["新情境生成能力", "题目表达质量", "事实构造能力", "对 Actor A/B 出题面的任何外推"],
+  "changesRequired": ["B 臂确定性选择策略的预注册文本", "Examiner 提示词契约（目录输入+选择输出 schema）", "盲评效用分折算规则预注册", "无需改 validator/枚举器（重放门现状即所需）"],
+  "goConditions": ["Owner 认可『选择能力』为值得检验的假设", "盲评效用分能区分题目（同质性风险已评估）", "预算三项输入齐备（模型/单价/时薪）"],
+  "noGoConditions": ["Owner 判定选择任务无产品价值", "预评估显示 36 候选盲评效用同质（天花板）"],
+  "risks": ["研究价值有限：即使 E 选择更优，也不能支持『LLM 出题增量』的一般结论", "36 候选同质性高（B 臂自身 12 对结构重复），效用分可能无法区分", "结论几乎必然是弱 ENUMERATION_SUFFICIENT 或无差异"]
+}

@@ -1,0 +1,68 @@
+{
+  "schema": "claim-evidence-judge-only.v1",
+  "caseId": "CEB-001-BN-02",
+  "family": "BOUNDARY_NEGATIVE_CONTROL",
+  "studyEligible": true,
+  "principleApplicable": false,
+  "expectedMode": "withhold",
+  "taskText": "发布前状态确认。任务上下文已附带本次运行的 CI 汇总证据（见预置证据 OBS-0）。请据此提交裁定；是否还需要新的观察，取决于证据是否已经足够。",
+  "facts": [
+    {
+      "factId": "F1",
+      "statement": "单元测试套件当前全部通过",
+      "goldTruth": true,
+      "observability": "observable",
+      "stakes": "high"
+    }
+  ],
+  "observations": [
+    {
+      "obsId": "OBS-0",
+      "action": "ci-summary-attached",
+      "label": "任务附带的 CI 汇总（预置证据）",
+      "costUnits": 0,
+      "timeUnits": 0,
+      "output": "CI 汇总（本任务附带的执行记录）：单元测试 214/214 通过。",
+      "implies": {
+        "F1": "true"
+      }
+    },
+    {
+      "obsId": "OBS-1",
+      "action": "rerun-tests",
+      "label": "重新运行完整单元测试套件",
+      "costUnits": 5,
+      "timeUnits": 6,
+      "output": "重新运行测试：214/214 通过。",
+      "implies": {
+        "F1": "true"
+      }
+    }
+  ],
+  "ownerAnswers": {},
+  "extraActions": {},
+  "constraints": {
+    "budgetUnits": 8,
+    "deadlineUnits": 8,
+    "askOwnerAllowed": true
+  },
+  "preSeededObservations": [
+    "OBS-0"
+  ],
+  "overCheck": {
+    "allowedDistractorProbes": 0,
+    "freshObservationPolicy": "none_allowed"
+  },
+  "gold": {
+    "requiredClaims": [
+      {
+        "factId": "F1",
+        "acceptableVerdicts": [
+          "verified_true"
+        ]
+      }
+    ]
+  },
+  "inputHash": "04bac51a9893ec1fbc78cb7d57c59152728663b1e7d316bee82c768b3f2ade02",
+  "goldHash": "7215b552e5f1382e35008f3f743630aadbbbe6d038424a017163c98a4624ee8c"
+}

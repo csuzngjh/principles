@@ -1,0 +1,39 @@
+{
+  "schema": "challenge-stage-g-protocol-option.v1",
+  "optionId": "B_GENERATION_IN_TRUSTED_PARAMETER_SPACE",
+  "status": "PROPOSED_NOT_APPROVED",
+  "draftedAt": "2026-10-25",
+  "note": "方案 B：可信参数空间中的考题生成。若 Owner 批准，将取代 preregistration.stage-g.draft.json 的比较设计；原文件保留不删改。本草案包含需要新实现的『语义骨架重放门』设计——当前未实现，仅提案。",
+
+  "hypothesis": "H-B：在冻结事实库与蕴含结构骨架内，Examiner 能否生成（表达层改写 + 合法参数组合）比确定性枚举更有效、更多样、机制覆盖更好的候选——同时 Gold 独立性由骨架重放门保持。",
+
+  "design": {
+    "skeletonReplayGate_PROPOSED": {
+      "idea": "重放比对对象由『整个 caseDef byte-equal』放宽为『语义骨架 canonical-equal』",
+      "skeletonFields_immutable": ["facts[].factId/goldTruth/observability", "observations[].obsId/implies/costUnits/timeUnits", "ownerAnswers 蕴含映射", "extraActions", "gold.requiredClaims 骨架（factId+acceptableVerdicts+requiresMinimalSteps）", "family/expectedMode/principleApplicable"],
+      "expressionFields_mutable": ["taskText 措辞", "facts[].statement 措辞（语义等价，盲评复核）", "observations[].label/output 措辞（观察结论方向不得改变——output 文本必须仍支持同一蕴含方向）", "stakes（合法值域）", "distractor 选择", "constraints 参数（budgetUnits/deadlineUnits 在预注册值域内）"],
+      "newCombinations_legal": "同库内跨 domain 组合干扰变体、fact 子集、约束参数网格（须在预注册值域表内）",
+      "goldIndependence": "骨架=冻结模拟事实与 Gold 判定结构；E 只能改表达与合法参数，不能改真值方向、蕴含映射或判分骨架 → Gold 仍来自冻结环境",
+      "implementation": "challenge-validator.mjs 新增 extractSkeleton(caseDef) + skeleton canonical 比对 + 值域表校验；约 1 个工作日实现 + fixtures 测试（骨架篡改拒/表达改写过/参数越域拒/措辞改变蕴含方向拒——output 措辞需方向标注核验）",
+      "notImplemented": "本草案仅为设计；未写任何代码"
+    },
+    "armB": "枚举器现状 36 候选（或按同一放宽门允许枚举器也做表达变体——两组同权限）",
+    "armE": "Examiner 在冻结事实库+骨架+值域表内生成候选；每候选标注 domainRef+skeletonHash+改动字段清单",
+    "primaryMetrics": ["validRatio（分母 36 槽）", "新增有效覆盖（相对 B 的 facet/情境组合增量——以真正不同决策情境计，见 v0.4 附录 A）", "机制边界覆盖", "重复率（exact+structural+skeleton 三级；表达层重复交盲评非重复维度）——不得单独作为增量证据", "人工修订时间", "costPerValidQuestion"],
+    "statsContract_v04": {
+      "validatorPassedDefinition": "parametric_verified 或 skeleton_verified（含强制盲评 flag 的候选仍计入 validator-passed，其 flag 状态随评审包分发）",
+      "layeredDenominators": "层1 = validator-passed 槽位 / 36（失败槽留分母）；层2 = kappa 基准 = validator-passed 候选数；70% 最低可评估比例作用于层2",
+      "dedupLevels": "exact / structural / skeleton（同骨架不同措辞=同一决策结构，非多样性）；语义近重复交盲评",
+      "diversityMetric": "实质结构多样性仅以独立决策情境差计（骨架哈希去重后的独立骨架数 + 盲评 non_duplication 维度）",
+      "note": "方案 B 下候选预算仍为 36 槽/组，分母数字与 prereg 一致；validator-passed 定义按 v0.4 骨架门收紧。正式冻结前以此节替换 prereg 对应定义。"
+    },
+    "newDomainPath": "Examiner 新领域提案 → domain_proposal 状态 → Owner 指定核验人独立核验 → 冻结入库（新 mappingHash 不变、库版本+1）→ 之后才可作为 parametric 来源。核验人未指定前，提案只计数不入合格集"
+  },
+
+  "canProve": ["表达层生成质量（措辞清晰度/情境自然度/暗示风险）", "合法参数组合的多样性增量", "在 Gold 独立约束下的出题有效率与成本"],
+  "cannotProve": ["全新领域的事实构造能力（仍需入库核验）", "真实宿主 Actor 行为面（Stage R 边界不变）"],
+  "changesRequired": ["骨架重放门实现+测试（~1 天）", "表达等价性与 output 方向不变性的盲评判据（措辞改写不得翻转蕴含方向——需预注册判据与 fixture）", "参数值域表预注册（budget/deadline/stakes/distractor 合法域）", "库版本化机制（新领域入库路径）", "Examiner 提示词契约（骨架+值域输入）"],
+  "goConditions": ["Owner 批准骨架 schema 与值域表", "Owner 指定新领域核验人", "预算三项输入齐备且上限与价位兼容（见成本勘误）", "骨架门实现并通过 fixtures 测试"],
+  "noGoConditions": ["骨架等价边界争议无法预注册收敛（何为『核心』存在合理解释空间）", "Owner 不接受表达改写的泄漏/暗示残余风险（盲评兜底而非机械保证）"],
+  "risks": ["实现+核验成本（~1 天工程 + 人工核验）", "措辞改写可能引入暗示或翻转观察方向（机械门只能锁骨架，表达层需盲评兜底——这是明示的残余风险）", "值域表过窄则退化为方案 A，过宽则 Gold 独立性争议回归", "研究风险：E 增量仍可能为零（合法结论 ENUMERATION_SUFFICIENT）"]
+}

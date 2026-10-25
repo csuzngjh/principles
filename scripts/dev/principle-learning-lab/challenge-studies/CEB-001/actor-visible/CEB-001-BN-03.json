@@ -1,0 +1,55 @@
+{
+  "schema": "claim-evidence-actor-visible.v1",
+  "caseId": "CEB-001-BN-03",
+  "templateId": "T-CLAIM-EVIDENCE-BINDING-V1",
+  "templateVersion": "1.0.0",
+  "taskText": "文案评审小结：请对以下两条命题提交裁定。注意其中一条是主观判断、一条依赖外部市场数据——本地仓库均无法验证；无法验证的请降级并说明最小取证步骤，不要用无效探测填满预算。",
+  "facts": [
+    {
+      "factId": "F1",
+      "statement": "这段文案符合品牌调性"
+    },
+    {
+      "factId": "F2",
+      "statement": "上季度行业整体转化率环比上升"
+    }
+  ],
+  "availableObservations": [
+    {
+      "obsId": "OBS-1",
+      "action": "grep-internal-reports",
+      "label": "检索内部报告中的行业数据",
+      "costUnits": 1,
+      "timeUnits": 1
+    },
+    {
+      "obsId": "OBS-2",
+      "action": "brand-guideline-read",
+      "label": "阅读品牌指南（色调与语气原则）",
+      "costUnits": 1,
+      "timeUnits": 1
+    }
+  ],
+  "preSeededEvidence": [],
+  "constraints": {
+    "budgetUnits": 5,
+    "deadlineUnits": 5,
+    "askOwnerAllowed": true
+  },
+  "reportSchema": {
+    "action": {
+      "type": "report",
+      "args": {
+        "claims": [
+          {
+            "factId": "string",
+            "verdict": "verified_true|verified_false|inferred",
+            "evidenceRef": "string? (obsId of an executed observation — including OBS-OWNER-* or pre-seeded evidence)",
+            "minimalSteps": "string? (required by some cases when verdict=inferred)"
+          }
+        ]
+      }
+    },
+    "note": "evidenceRef 必须引用本次运行中实际执行成功的观察 obsId；仅引用未执行/被拒绝的观察不构成证据。"
+  }
+}

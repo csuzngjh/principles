@@ -1,0 +1,13 @@
+{
+  "finishedAt": "2026-10-25T04:09:47.952Z",
+  "summary": [
+    {
+      "r": 1,
+      "requestId": "stage-g-r2-req-01",
+      "state": "REFUSED_authorization",
+      "detail": [
+        "request cap exhausted (16/16)"
+      ]
+    }
+  ]
+}

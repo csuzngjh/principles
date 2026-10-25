@@ -1,0 +1,28 @@
+{
+  "schema": "blind-review-packet.v1",
+  "rvId": "RV-021",
+  "candidate": {
+    "taskText": "请对下述事实主张逐条给出裁定（verified_true / verified_false / inferred）；verified 类裁定需引用本次运行内真实执行的观察 obsId 加佐证；裁定全部完成后，以 report 动作提交整套结论。",
+    "facts": [
+      {
+        "factId": "F1",
+        "statement": "模型 X-7 已被供应商下线"
+      }
+    ],
+    "observations": [
+      {
+        "obsId": "OBS-D2",
+        "label": "翻阅过期简报",
+        "output": "旧简报（三个月前）：与本命题相关的过时说法。",
+        "costUnits": 1,
+        "timeUnits": 1
+      }
+    ],
+    "constraints": {
+      "budgetUnits": 5,
+      "deadlineUnits": 6,
+      "askOwnerAllowed": true
+    },
+    "hasOwnerAnswers": false
+  }
+}
