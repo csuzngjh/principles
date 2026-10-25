@@ -8,6 +8,9 @@ import { TestDoubleRuntimeAdapter } from '../../adapter/test-double-runtime-adap
 import { StoreEventEmitter } from '../../store/event-emitter.js';
 import { ArtificerRunner } from '../artificer-runner.js';
 import { EvaluatorRunner } from '../evaluator-runner.js';
+import { ScribeRunner } from '../scribe-runner.js';
+import { DefaultScribeValidator } from '../scribe-output.js';
+import { createPITaskDiagnosticJson } from '../pitask-metadata.js';
 import { DefaultArtificerValidator } from '../artificer-output.js';
 import { DefaultEvaluatorValidator } from '../evaluator-output.js';
 import { verifyArtifactCandidateIdentity } from '../candidate-identity.js';
@@ -61,5 +64,51 @@ describe('candidate identity is verified before expensive model work', () => {
     await expect(artificer.invokeRuntime('artificer', { contextHash: 'test', scribeArtifact: '{}', sourceScribeArtifactId: 'scribe-source', scribeDependencyTaskIds: [], channel: 'code_tool_hook', adversarialFeedback: null, repairFeedback: null })).rejects.toThrow('binding_revoked');
     await expect(evaluator.invokeRuntime('evaluator', { contextHash: 'test', scribeArtifact: '{}', sourceScribeArtifactId: 'scribe-source', artificerArtifact: '{}', sourceArtificerArtifactId: 'artificer-source' })).rejects.toThrow('binding_revoked');
     expect(start).not.toHaveBeenCalled();
+  });
+  async function scribeScenario(changeDuringModel = false) {
+    for (const [taskId, taskKind, dependencies] of [['philosopher-task', 'philosopher', ['dreamer-task']], ['new-scribe', 'scribe', ['philosopher-task']]] satisfies [string, string, string[]][]) {
+      await handle.stateManager.createTask({ taskId, taskKind, status: taskKind === 'scribe' ? 'pending' : 'succeeded', attemptCount: 0, maxAttempts: 3, diagnosticJson: createPITaskDiagnosticJson({ dependencyTaskIds: dependencies, channel: 'code_tool_hook', timeoutMs: 1000, inputArtifactRefs: [], outputArtifactRefs: [] }) });
+    }
+    const store = handle.stateManager.piArtifactStore;
+    const common = { artifactKind: 'principle' as const, lineageArtifactIds: [], validationStatus: 'pending' as const, createdAt: identity.checkedAt, updatedAt: identity.checkedAt };
+    await store.upsertArtifact({ ...common, artifactId: 'pi-dreamer-source', sourceTaskId: 'dreamer-task', contentJson: '{}' });
+    await store.upsertArtifact({ ...common, artifactId: 'philosopher-source', sourceTaskId: 'philosopher-task', contentJson: JSON.stringify({ sourceDreamerArtifactId: 'pi-dreamer-source', principleCandidates: [] }) });
+    const runtimeAdapter = new TestDoubleRuntimeAdapter({ onFetchOutput: () => {
+      if (changeDuringModel) current = { ...identity, bindingRevision: 3, decisionId: 'new-decision' };
+      return { payload: {
+        taskId: 'new-scribe', sourcePhilosopherArtifactId: 'philosopher-source',
+        principleDraft: { title: 'Scope', statement: 'Protect the approved scope.', rationale: 'Avoid unscoped writes.', applicability: ['writes'], antiPatterns: ['unscoped writes'], confidence: 0.9 },
+        sourceTrace: { philosopherArtifactId: 'philosopher-source', dreamerArtifactId: 'pi-dreamer-source' }, risks: [], generatedAt: identity.checkedAt,
+        intentContract: { ownerIntent: 'Protect scope', targetBehavior: 'Check scope', forbiddenBehavior: 'Unscoped writes', evidenceSource: 'philosopher', validationExpectation: 'Block out-of-scope writes' }, executionConditions: { version: 1, requiredFacts: [] },
+        identityResolution: { ...identity, candidateId: 'model-forged', principleId: 'model-title' },
+      } };
+    } });
+    const start = vi.spyOn(runtimeAdapter, 'startRun');
+    const runner = new ScribeRunner({ stateManager: handle.stateManager, artifactStore: store, eventEmitter: new StoreEventEmitter(), runtimeAdapter, validator: new DefaultScribeValidator(), ledgerIdentity: { ...ledger(), listForCandidate: () => [] } }, { owner: 'test', runtimeKind: 'test-double', timeoutMs: 1000 });
+    return { runner, start, store };
+  }
+  it('Scribe defers an unbound rule without spending a model attempt', async () => {
+    current = { status: 'unresolved', reason: 'missing', nextAction: 'Owner must bind this candidate.' };
+    const { runner, start, store } = await scribeScenario();
+    expect(await runner.run('new-scribe')).toMatchObject({ status: 'failed', failureReason: 'awaiting_owner_binding:missing' });
+    expect(start).not.toHaveBeenCalled();
+    expect(await handle.stateManager.getTask('new-scribe')).toMatchObject({ status: 'needs_human_review', attemptCount: 0 });
+    expect(await store.listBySourceTaskId('new-scribe')).toEqual([]);
+  });
+  it('Scribe overwrites a model-forged identity with the system Ledger receipt', async () => {
+    const { runner, start, store } = await scribeScenario();
+    const result = await runner.run('new-scribe');
+    expect(result.status).toBe('succeeded');
+    expect(start).toHaveBeenCalledOnce();
+    const [artifact] = await store.listBySourceTaskId('new-scribe');
+    expect(artifact?.sourcePrincipleId).toBe(PID);
+    expect(artifact && JSON.parse(artifact.contentJson).identityResolution).toEqual({ candidateId: 'candidate', basis: 'owner_rule_binding', principleId: PID, bindingRevision: 1, decisionId: 'decision' });
+  });
+  it('a binding changed during Scribe generation cannot stamp the new target onto old model work', async () => {
+    const { runner, start, store } = await scribeScenario(true);
+    expect(await runner.run('new-scribe')).toMatchObject({ status: 'failed', failureReason: 'identity_changed_during_generation' });
+    expect(start).toHaveBeenCalledOnce();
+    expect(await handle.stateManager.getTask('new-scribe')).toMatchObject({ status: 'needs_human_review', attemptCount: 1 });
+    expect(await store.listBySourceTaskId('new-scribe')).toEqual([]);
   });
 });

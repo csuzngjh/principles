@@ -30,6 +30,8 @@
 
 ## 独立复核与错误经验
 
+首个远端 HEAD 的两项 CI 缺口已在后续测试提交中处理：浏览器回归种子原本只有 UUID、没有候选血缘，现补专属 principle 来源和 Dreamer 持久记录，保留非法 goldenTrace 及原断言；本机三个 API 场景通过，页面场景因缺 Chromium headless shell 留给原 CI 完整运行，没有下载浏览器或降低断言。Codecov 首次 patch 77.10%，新增前端 decoder/API 与 Scribe 零调用、模型伪造身份、调用期间改绑的实际边界测试；阈值不变。后续远端结果读取 PR checks，不以此历史快照代替权威。
+
 分别完成 Spec 与 Standards 只读复核。Standards 的实质 P1（损坏元数据默认 epoch 0 覆盖历史）已修复并复核闭合；真实 SQLite 负控证明拒绝后旧工件不变。Spec 复核撤回了“新绑定应无限续预算”的误读，同时指出普通历史修订不能等同于本次绑定预算已耗尽；已用任务执行回执区分并回归。
 
 两条可复用教训按官方 `error:record` 写入 P-ERR-002 / P-ERR-024 occurrences，未手工修改 ERR 权威。错误路由 plan 与真实 diff 两遍均执行。HIGH 项处理：EP-01 严格边界校验；EP-02 真消费者/最终血缘；EP-03 结构化拒绝；EP-04 认证与零写入；EP-05 当前轮次/执行回执；EP-06 原 CLI 输出契约；EP-09 真 SQLite schema/回放；EP-11 唯一 Ledger 锁及来源；EP-13 已批准 SPEC 与现有架构边界。未以新增子系统、flags 或通用 LLM 修复扩大范围。
