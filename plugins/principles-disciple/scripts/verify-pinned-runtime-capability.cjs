@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 /**
- * verify-pinned-runtime-capability.cjs — PRI-810 Owner-control capability probe.
+ * verify-pinned-runtime-capability.cjs — installed runtime cohort capability probe.
  *
- * Answers ONE question mechanically (AGENTS.md §19 spirit):
- *   "Does the pinned/installed Codex runtime actually honor Owner emergency
- *    control (global pause / safety isolation / retired-contract backstop)?"
+ * Verifies behavior of the installed packages: Owner emergency control,
+ * Codex RuleContextV2 suspension, and DesignGate fact validation.
  *
  * It runs against INSTALLED package bytes only — never monorepo source — by
  * resolving @principles/* from --runtime-dir/node_modules (the same layout
@@ -15,6 +14,9 @@
  *   S3 safety isolation    activation_control_states.enforcement='safety_isolated' → allow + reason
  *   S4 retired contract    RuleCode referencing removed symbols → skipped, never executed
  *   S5 control released    enforcement resumes (deny)
+ *   S6 Codex V2            unavailable context suspends a V2 rule
+ *   S7 DesignGate fact     valid fact accepted; mismatched task binding rejected
+ *   S8 DesignGate decision actionable not_approved fact is honored without history
  *
  * Usage (stdout is ALWAYS machine-readable JSON):
  *   node verify-pinned-runtime-capability.cjs --runtime-dir <dir> [--workspace <dir>]
@@ -136,14 +138,16 @@ async function verifyPinnedRuntimeCapability(options = {}) {
   // ── canonical workspace state bootstrap (INSTALLED core, not source) ──
   let SqliteConnection;
   let createProductionRuleHostGate;
+  let validateRuleContextV2;
   try {
     ({ SqliteConnection } = requireFromRuntime('@principles/core/runtime-v2'));
+    ({ validateRuleContextV2 } = requireFromRuntime('@principles/core/runtime-v2'));
     ({ createProductionRuleHostGate } = requireFromRuntime('@principles/host-runtime'));
   } catch (error) {
     fail('probe_import_failed:' + String(error && error.message).slice(0, 200), 'verify the installed runtime layout matches $pd-control setup output');
   }
-  if (typeof createProductionRuleHostGate !== 'function') {
-    fail('probe_gate_not_exported', 'installed @principles/host-runtime does not export createProductionRuleHostGate — packaging contract broken');
+  if (typeof createProductionRuleHostGate !== 'function' || typeof validateRuleContextV2 !== 'function') {
+    fail('probe_capability_not_exported', 'installed packages omit the production gate or RuleContextV2 validator required by this behavior probe');
   }
 
   const workspaceDir = options.workspace || fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pin-probe-ws-'));
@@ -165,8 +169,12 @@ async function verifyPinnedRuntimeCapability(options = {}) {
   // deliberately not exercised here: this probe verifies the GATE's honoring
   // of control states, not the store's writing of them.
   const now = () => new Date().toISOString();
-  function activate(contentCode) {
-    const contentJson = JSON.stringify({ implementationCode: contentCode, ruleId: 'R_PIN_PROBE', principleId: 'P_PIN_PROBE' });
+  function activate(contentCode, options = {}) {
+    const contentJson = JSON.stringify({
+      implementationCode: contentCode, ruleId: 'R_PIN_PROBE', principleId: 'P_PIN_PROBE',
+      ...(options.requiresContextVersion === 2 ? { requiresContextVersion: 2 } : {}),
+      ...(options.ruleHostInputContract ? { ruleHostInputContract: options.ruleHostInputContract } : {}),
+    });
     db.prepare(`INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)`)
       .run('art-pin-probe', 'rule', 'task-pin-probe', '[]', 'valid', contentJson, now(), now());
     db.prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at) VALUES (?,?,?,?,?,?,?)`)
@@ -202,6 +210,16 @@ async function verifyPinnedRuntimeCapability(options = {}) {
   var t = input.recentThinking;
   return { decision: 'block', matched: true, reason: 'retired:' + String(t) };
 }`;
+  const RULE_V2_BLOCK = `function evaluate(input, helpers) {
+  return { decision: 'block', matched: true, reason: 'V2_CONTEXT_REQUIRED' };
+}`;
+  const RULE_DESIGN_GATE_BLOCK = `function evaluate(input, helpers) {
+  var fact = input.context && input.context.facts && input.context.facts.designGate;
+  if (fact && fact.resolution === 'not_approved' && fact.taskRef === 'task-probe') {
+    return { decision: 'block', matched: true, reason: 'DESIGN_GATE_NOT_APPROVED' };
+  }
+  return { decision: 'allow', matched: false, reason: 'DESIGN_GATE_NOT_MATCHED' };
+}`;
 
   const gate = createProductionRuleHostGate();
   const dispatch = () => gate({
@@ -225,25 +243,31 @@ async function verifyPinnedRuntimeCapability(options = {}) {
       name: 'S2 Owner global pause is honored',
       setup: () => { activate(RULE_BLOCK); setPause('paused'); },
       expect: (s) => s.decision === 'allow' && s.warnings.some((w) => w.startsWith('global_rulecode_pause_active')),
-      nextAction: 'the pinned host-runtime ignores global_rulecode_pauses — re-pin to a host-runtime version at or above the Owner-control floor (see runtime-pin-guard.test.ts; PRI-810)',
+      nextAction: 'the installed host-runtime ignores global_rulecode_pauses — select a published package version that passes this behavior probe',
     },
     {
       name: 'S3 safety isolation is honored',
       setup: () => { activate(RULE_BLOCK); setEnforcement('safety_isolated'); },
       expect: (s) => s.decision === 'allow' && s.warnings.some((w) => w.startsWith('activation_safety_isolated')),
-      nextAction: 'the pinned host-runtime ignores activation_control_states — re-pin to a host-runtime version at or above the Owner-control floor (see runtime-pin-guard.test.ts; PRI-810)',
+      nextAction: 'the installed host-runtime ignores activation_control_states — select a published package version that passes this behavior probe',
     },
     {
       name: 'S4 retired-contract RuleCode is skipped',
       setup: () => activate(RULE_RETIRED),
       expect: (s) => s.decision === 'allow' && s.warnings.some((w) => w.startsWith('legacy_rule_contract_dependency')),
-      nextAction: 'the pinned host-runtime executes retired-contract RuleCode — re-pin to a host-runtime version at or above the Owner-control floor (see runtime-pin-guard.test.ts; PRI-810)',
+      nextAction: 'the installed host-runtime executes retired-contract RuleCode — select a published package version that passes this behavior probe',
     },
     {
       name: 'S5 enforcement resumes after control release',
       setup: () => activate(RULE_BLOCK),
       expect: (s) => s.decision === 'deny',
       nextAction: 'inspect the installed gate evaluation path',
+    },
+    {
+      name: 'S6 Codex V2 rule suspends when context is unavailable',
+      setup: () => activate(RULE_V2_BLOCK, { requiresContextVersion: 2 }),
+      expect: (s) => s.decision === 'allow' && s.warnings.some((w) => w.startsWith('rule_context_v2_unavailable')),
+      nextAction: 'the installed host-runtime must suspend a V2 rule when its RuleContextV2 provider is unavailable',
     },
   ];
 
@@ -263,14 +287,86 @@ async function verifyPinnedRuntimeCapability(options = {}) {
     results.push({ name: scenario.name, pass, outcome, nextActionOnFail: scenario.nextAction });
   }
 
+  const validDesignGateContext = {
+    version: 2,
+    history: { status: 'unavailable', unavailableReason: 'probe', truncated: false, calls: [] },
+    facts: {
+      priorReadOfTarget: 'unknown', readCount: null, writeCount: null,
+      uniqueWritePathCount: null, sameActionBlockCount: null,
+      designGate: {
+        version: 1, resolution: 'not_approved', sourceRef: 'probe://design', revision: 1, requiresApproval: true,
+        taskRef: 'task-probe', specDigest: 'sha256:probe', scopeRef: 'scope-probe',
+        decisionTaskRef: 'task-probe', decisionSpecDigest: 'sha256:probe', decisionScopeRef: 'scope-probe', revoked: false,
+      },
+    },
+  };
+  const badDesignGateContext = {
+    ...validDesignGateContext,
+    facts: { ...validDesignGateContext.facts, designGate: { ...validDesignGateContext.facts.designGate, decisionTaskRef: 'task-other' } },
+  };
+  const validFact = validateRuleContextV2(validDesignGateContext);
+  const badFact = validateRuleContextV2(badDesignGateContext);
+  let badFactGateOutcome;
+  try {
+    resetFixture();
+    activate(RULE_V2_BLOCK, { requiresContextVersion: 2 });
+    badFactGateOutcome = summarize(await createProductionRuleHostGate({ ruleContextProvider: () => badDesignGateContext })({
+      source: 'before_tool_call',
+      context: { workspaceDir, sessionId: 'pin-probe', toolName: 'edit' },
+      rawPayload: { toolInput: { toolName: 'edit', params: { filePath: '/etc/passwd', content: 'x' } } },
+    }));
+  } catch (error) {
+    badFactGateOutcome = { decision: 'probe_threw', warnings: [String(error && error.message).slice(0, 200)] };
+  }
+  const designGateResult = {
+    name: 'S7 DesignGate fact binding is validated and an unbound fact cannot execute a V2 rule',
+    pass: validFact.valid === true && badFact.valid === false
+      && badFact.errors.some((error) => error.includes('designGate'))
+      && badFactGateOutcome.decision === 'allow'
+      && badFactGateOutcome.warnings.some((warning) => warning.startsWith('rule_context_invalid:')),
+    outcome: { validFact, badFact, gate: badFactGateOutcome },
+    nextActionOnFail: 'install core/host-runtime versions that validate DesignGateFact bindings and reject unbound facts before RuleCode evaluation',
+  };
+  results.push(designGateResult);
+  if (!designGateResult.pass) failures++;
+
+  let actionableDesignGateOutcome;
+  try {
+    resetFixture();
+    activate(RULE_DESIGN_GATE_BLOCK, {
+      requiresContextVersion: 2,
+      ruleHostInputContract: { version: 1, contextVersion: 2, requiredFactKinds: ['design_approval'] },
+    });
+    const result = await createProductionRuleHostGate({ ruleContextProvider: () => validDesignGateContext })({
+      source: 'before_tool_call',
+      context: { workspaceDir, sessionId: 'pin-probe', toolName: 'edit' },
+      rawPayload: { toolInput: { toolName: 'edit', params: { filePath: '/etc/passwd', content: 'x' } } },
+    });
+    actionableDesignGateOutcome = {
+      decision: result.decision,
+      warnings: (result.warnings || []).map((warning) => String(warning).slice(0, 120)),
+      evaluatedLiveRules: result.metadata && result.metadata.evaluatedLiveRules,
+    };
+  } catch (error) {
+    actionableDesignGateOutcome = { decision: 'probe_threw', warnings: [String(error && error.message).slice(0, 200)] };
+  }
+  const actionableDesignGateResult = {
+    name: 'S8 DesignGate not_approved blocks without available history',
+    pass: actionableDesignGateOutcome.decision === 'deny' && actionableDesignGateOutcome.evaluatedLiveRules === 1,
+    outcome: actionableDesignGateOutcome,
+    nextActionOnFail: 'the installed host-runtime must enforce an actionable DesignGate decision even when trajectory history is unavailable',
+  };
+  results.push(actionableDesignGateResult);
+  if (!actionableDesignGateResult.pass) failures++;
+
   const payload = {
     ok: failures === 0,
     mode: useInstall ? 'install+probe' : 'probe',
     identities,
     scenarioResults: results,
     result: failures === 0
-      ? 'pinned runtime honors Owner emergency control (PRI-810 contract)'
-      : failures + ' scenario(s) FAILED — pinned runtime does NOT satisfy the Owner-control minimum contract',
+      ? 'installed runtime satisfies Owner-control, Codex V2, and DesignGate capability contracts'
+      : failures + ' scenario(s) FAILED — installed packages do not satisfy the pinned capability contract',
   };
   return payload;
 }

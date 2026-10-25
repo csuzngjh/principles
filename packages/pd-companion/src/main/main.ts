@@ -465,7 +465,7 @@ function spawnWorkspaceWorkerFor(workerCommand: 'codex' | 'workbuddy'): (canonic
       workerCommand, 'worker',
       '--workspace', canonicalWorkspaceDir,
       '--interval', String(WORKSPACE_WORKER_CYCLE_INTERVAL_MS),
-    ], { env: { ...process.env }, stdio: ['ignore', 'ignore', 'pipe'] });
+    ], { env: { ...process.env, PD_COMPANION_WORKER_IPC: '1' }, stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
     child.stderr?.on('data', (chunk: Buffer) => {
       // Bounded stderr tail into the companion log — the worker's own
       // human-readable cycle reports go to stdout (companion does not consume
@@ -483,12 +483,15 @@ function spawnWorkspaceWorker(canonicalWorkspaceDir: string): WorkerChild {
 function startWorkspaceWorkerSupervision(): void {
   workspaceWorkers = new WorkspaceWorkerRegistry({
     spawnWorker: spawnWorkspaceWorker,
+    readRelease: readActiveRecord,
     // The degraded fact already exists in the registry (PRI-624); PRI-715 only
     // connects it to the Owner-visible surfaces — one-shot notification on the
     // degradation transition plus the persistent tray section (rebuilt below).
     log: (event, fields) => {
       log(event, fields ?? {});
-      if (event === 'workspace_worker_degraded') {
+      if (event === 'workspace_worker_handover_degraded' || event === 'workspace_worker_handover_recovered') {
+        rebuildTrayMenu();
+      } else if (event === 'workspace_worker_degraded') {
         // rc-1/rc-2: log fields are untrusted runtime values — guard before use.
         const workspace = fields?.workspace;
         if (typeof workspace !== 'string' || workspace.length === 0) {
@@ -533,9 +536,12 @@ function startWorkspaceWorkerSupervision(): void {
   // flag semantics, so an unenabled governance workspace just reports paused.
   workbuddyWorkspaceWorkers = new WorkspaceWorkerRegistry({
     spawnWorker: spawnWorkspaceWorkerFor('workbuddy'),
+    readRelease: readActiveRecord,
     log: (event, fields) => {
       log(event, fields ?? {});
-      if (event === 'workspace_worker_degraded') {
+      if (event === 'workspace_worker_handover_degraded' || event === 'workspace_worker_handover_recovered') {
+        rebuildTrayMenu();
+      } else if (event === 'workspace_worker_degraded') {
         const workspace = fields?.workspace;
         if (typeof workspace !== 'string' || workspace.length === 0) {
           log('workspace_worker_degraded_notify_skipped', { reason: 'workspace_field_invalid' });
@@ -1309,6 +1315,15 @@ function rebuildTrayMenu(): void {
       workbuddyWorkspaceWorkers?.syncUnavailable(),
     ].filter((episode): episode is NonNullable<typeof episode> => episode !== undefined),
   );
+  const handoverIssues = [
+    ...(workspaceWorkers?.handoverIssues() ?? []),
+    ...(workbuddyWorkspaceWorkers?.handoverIssues() ?? []),
+  ];
+  const handoverLabels = handoverIssues.length === 0 ? [] : [
+    '⚠ 工作区更新交接未完成（现有任务未被强制中断）',
+    ...handoverIssues.map(issue => `・${issue.workspace}：${issue.reason}`),
+    '恢复：待当前任务结束后安全重启 Companion；先检查安装发布权威与 worker IPC。',
+  ];
   const supervisorLabel =
     s.kind === 'running'
       ? s.mode === 'managed' ? `控制台运行中（端口 ${s.port}）` : `控制台已连接·外部实例（端口 ${s.port}）`
@@ -1319,16 +1334,17 @@ function rebuildTrayMenu(): void {
         : s.kind === 'starting' || s.kind === 'restarting'
           ? '控制台启动中…'
           : '控制台未运行';
-  const statusLabel = supervisorLabel + degradedView.statusSuffix + syncUnavailableView.statusSuffix;
+  const statusLabel = supervisorLabel + degradedView.statusSuffix + syncUnavailableView.statusSuffix + (handoverIssues.length > 0 ? '；⚠ 工作区更新交接未完成' : '');
   tray.setToolTip(`PD Companion — ${statusLabel}`);
   const autoStart = app.getLoginItemSettings().openAtLogin;
   const degradedSection: MenuItemConstructorOptions[] = [
     ...degradedView.menuLabels,
     ...syncUnavailableView.menuLabels,
+    ...handoverLabels,
   ].length > 0
     ? [
         { type: 'separator' },
-        ...[...degradedView.menuLabels, ...syncUnavailableView.menuLabels].map((label) => ({ label, enabled: false })),
+        ...[...degradedView.menuLabels, ...syncUnavailableView.menuLabels, ...handoverLabels].map((label) => ({ label, enabled: false })),
       ]
     : [];
   const template: MenuItemConstructorOptions[] = [

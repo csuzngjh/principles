@@ -19,6 +19,7 @@
  * - cli-6: paused/degraded modes carry reason + nextAction.
  */
 import fs from 'node:fs';
+import { createWorkerDrain } from './worker-drain.js';
 import os from 'node:os';
 import path from 'node:path';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
@@ -179,14 +180,9 @@ export async function handleCodexWorker(options: CodexWorkerOptions): Promise<vo
   }
 
   const interval = typeof options.intervalMs === 'number' && options.intervalMs >= 1000 ? options.intervalMs : DEFAULT_INTERVAL_MS;
-  let stopped = false;
-  const onSignal = (): void => {
-    stopped = true;
-  };
-  process.on('SIGINT', onSignal);
-  process.on('SIGTERM', onSignal);
+  const drain = createWorkerDrain();
   try {
-    while (!stopped) {
+    while (!drain.stopped) {
       // PRI-655: one escaping cycle exception must not kill the daemon —
       // runCodexWorkspaceWorkerCycle reports component failures as degraded
       // results, but anything it still throws would propagate out of this
@@ -200,12 +196,11 @@ export async function handleCodexWorker(options: CodexWorkerOptions): Promise<vo
         console.error(`[PD:CodexWorker] cycle failed: ${message}`);
         console.error(`  continuing in ${interval}ms. Investigate: pd codex worker --status --workspace "${workspace}"`);
       }
-      if (stopped) break;
-      await new Promise((resolve) => setTimeout(resolve, interval));
+      if (drain.stopped) break;
+      await drain.wait(interval);
     }
   } finally {
-    process.off('SIGINT', onSignal);
-    process.off('SIGTERM', onSignal);
+    drain.dispose();
   }
 }
 

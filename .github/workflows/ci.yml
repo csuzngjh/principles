@@ -20,6 +20,26 @@ permissions:
   contents: read
 
 jobs:
+  codex-plugin-delivery:
+    name: Codex plugin delivery contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: '24'
+      - name: Check discoverable plugin metadata
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: node scripts/release/sync-codex-runtime-pins.mjs --check-base "$PR_BASE_SHA"
+      - name: Probe exact published runtime capability
+        run: npm run check:runtime-pin
+
   # CI Impact Resolver — SHADOW MODE (CI Governance SPEC §9).
   # Computes and REPORTS the predicted verification scopes for this PR but
   # does not gate or skip anything: every job below still runs exactly as
