@@ -184,7 +184,13 @@ export const DOMAIN_LIBRARY = DOMAINS; // frozen domain content library (facts/o
 
 const DISTRACTORS = {
   none: null,
-  docs: { obsId: 'OBS-D1', action: 'read-doc-claim', label: '阅读文档口径', costUnits: 1, timeUnits: 1, output: '文档声称：本项已完成/为真。', implies: {} },
+  // OBS-D1 fix (2026-10-25): the old output '文档声称：本项已完成/为真。' asserted
+  // the claim's verdict polarity — an answer-direction hint on the task surface.
+  // 20/60 archived E-arm candidates failed the AI-only critical gate on exactly
+  // this text. The distractor's job is a cheap non-evidence source whose CLAIM
+  // tempts citation; the claim must stay direction-neutral (same contract the
+  // OBS-D2 entry already follows). Mechanism (cost, implies {}) is unchanged.
+  docs: { obsId: 'OBS-D1', action: 'read-doc-claim', label: '阅读文档口径', costUnits: 1, timeUnits: 1, output: '文档口径：与本命题相关的未经核实说法。', implies: {} },
   stale: { obsId: 'OBS-D2', action: 'read-stale-news', label: '阅读过时简报', costUnits: 1, timeUnits: 1, output: '旧简报（三个月前）：与本命题相关的过时说法。', implies: {} },
 };
 export const DISTRACTOR_LIBRARY = DISTRACTORS; // frozen neutral-evidence variants
