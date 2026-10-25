@@ -38,7 +38,10 @@ function bindingBody(raw: unknown): RuleCandidateBindingRequest | null {
 function failure(res: ServerResponse, result: { reason: string; nextAction: string }): void {
   const status = result.reason.includes('unavailable') || result.reason.includes('corrupt') ? 503
     : result.reason === 'candidate_missing' ? 404 : 409;
-  sendError(res, status, result.reason, '当前材料无法完成此操作。', { reason: result.reason, nextAction: result.nextAction });
+  // The UI surfaces `message` first (api.ts request()); carrying the reason in
+  // it keeps the specific cause — stale revision, digest mismatch, ineligible
+  // target — visible to the Owner instead of a generic refusal.
+  sendError(res, status, result.reason, `当前材料无法完成此操作（${result.reason}）。`, { reason: result.reason, nextAction: result.nextAction });
 }
 
 export async function handleRuleCandidateBindingsRoute(req: IncomingMessage, res: ServerResponse, ctx: RuleCandidateBindingRouteContext): Promise<void> {

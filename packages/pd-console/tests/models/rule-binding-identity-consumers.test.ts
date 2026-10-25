@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -14,6 +14,7 @@ import {
 import { addPrincipleToLedger, appendReuseEvidence, loadLedger } from '@principles/core/principle-tree-ledger';
 import { OwnerDecisionConsoleModel } from '../../src/server/models/OwnerDecisionConsoleModel.js';
 import { ApprovalsGroupedConsoleModel } from '../../src/server/models/ApprovalsGroupedConsoleModel.js';
+import { RuleCandidateBindingConsoleModel } from '../../src/server/models/RuleCandidateBindingConsoleModel.js';
 import { createArtifactPrincipleResolutionDeps } from '../../src/server/models/artifact-principle-resolver.js';
 import { resolveLedgerPrincipleId } from '../../src/server/models/principle-id-resolution.js';
 
@@ -306,5 +307,34 @@ describe('rule-binding identity consumers follow canonical Ledger identity', () 
     expect(fixture.ledgerPrincipleCount()).toBe(principleCountBeforeRead);
     expect(fixture.handle.stateManager.connection.getDb().prepare('SELECT COUNT(*) AS count FROM activations').get())
       .toMatchObject({ count: 0 });
+  });
+
+  it('surfaces rule candidates from split diag_router provenance in the binding queue', async () => {
+    const directRule = (await fixture.handle.stateManager.getCandidatesByTaskId('diagnosis-task'))
+      .find((candidate) => candidate.rawRecommendationKind === 'rule');
+    if (!directRule) throw new Error('Fixture rule candidate missing.');
+    // Split provenance: the router sub-task commits its own run/artifact and is
+    // parented (inputRef) by the succeeded diagnostician above.
+    const db = fixture.handle.stateManager.connection.getDb();
+    db.prepare(`INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, diagnostic_json, input_ref)
+      VALUES ('router-task', 'diag_router', 'succeeded', ?, ?, 1, '{}', 'diagnosis-task')`).run(NOW, NOW);
+    db.prepare(`INSERT INTO runs (run_id, task_id, runtime_kind, execution_status, started_at, ended_at, attempt_number, output_payload, created_at, updated_at)
+      VALUES ('router-run', 'router-task', 'test-double', 'succeeded', ?, ?, 1, ?, ?, ?)`).run(NOW, NOW, JSON.stringify(diagnosis), NOW, NOW);
+    db.prepare(`INSERT INTO artifacts (artifact_id, run_id, task_id, artifact_kind, content_json, created_at)
+      VALUES ('router-artifact', 'router-run', 'router-task', 'diagnostician_output', ?, ?)`).run(JSON.stringify(diagnosis), NOW);
+    // getCandidatesByTaskId joins commits — the router's own commit row.
+    db.prepare(`INSERT INTO commits (commit_id, task_id, run_id, artifact_id, idempotency_key, status, created_at)
+      VALUES ('commit-router-rule', 'router-task', 'router-run', 'router-artifact', 'idem-commit-router', 'committed', ?)`).run(NOW);
+    db.prepare(`INSERT INTO principle_candidates (candidate_id, artifact_id, task_id, source_run_id, title, description,
+        confidence, source_recommendation_json, idempotency_key, status, created_at, consumed_at, recommendation_kind, abstracted_principle)
+      VALUES ('router-rule-candidate', 'router-artifact', 'router-task', 'router-run', 'Split rule', 'Reject out-of-scope writes from the routed diagnosis.',
+        0.9, ?, 'idem-router-rule', 'consumed', ?, ?, 'rule', NULL)`)
+      .run(JSON.stringify({ kind: 'rule', description: 'Reject out-of-scope writes from the routed diagnosis.' }), NOW, NOW);
+
+    const queue = await new RuleCandidateBindingConsoleModel(fixture.workspaceDir).list();
+    const ids = queue.items.map((item) => item.candidateId);
+    expect(ids).toContain(directRule.candidateId);
+    expect(ids).toContain('router-rule-candidate');
+    expect(queue.items.find((item) => item.candidateId === 'router-rule-candidate')).toMatchObject({ reason: 'missing' });
   });
 });

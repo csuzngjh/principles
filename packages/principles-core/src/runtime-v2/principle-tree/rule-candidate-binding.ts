@@ -46,13 +46,26 @@ export function parseRuleCandidateBindings(raw: unknown): Record<string, RuleCan
 export function computeRuleCandidateReviewDigest(value: unknown): string {
   const seen = new Set<object>();
   const canonical = (input: unknown): string => {
-    if (input === null || typeof input === 'boolean' || typeof input === 'string') return JSON.stringify(input);
-    if (typeof input === 'number' && Number.isFinite(input)) return JSON.stringify(input);
-    if (typeof input !== 'object' || input === null || seen.has(input)) throw new Error('Review snapshot is not finite JSON data.');
+    const kind = typeof input;
+    if (kind === 'boolean' || kind === 'string') return JSON.stringify(input);
+    if (kind === 'number') {
+      if (!Number.isFinite(input)) throw new Error('Review snapshot is not finite JSON data.');
+      return JSON.stringify(input);
+    }
+    if (kind !== 'object') throw new Error('Review snapshot is not finite JSON data.');
+    // null is the only falsy value whose typeof is 'object'; it serializes as "null".
+    if (!input) return JSON.stringify(input);
+    if (seen.has(input)) throw new Error('Review snapshot is not finite JSON data.');
     seen.add(input);
     let result: string;
-    if (Array.isArray(input)) result = '[' + input.map(canonical).join(',') + ']';
-    else result = '{' + Object.keys(input).sort().filter(key => record(input) && input[key] !== undefined).map(key => JSON.stringify(key) + ':' + canonical(record(input) ? input[key] : null)).join(',') + '}';
+    if (Array.isArray(input)) {
+      result = '[' + input.map(canonical).join(',') + ']';
+    } else if (record(input)) {
+      const obj: Record<string, unknown> = input;
+      result = '{' + Object.keys(obj).sort().filter(key => obj[key] !== undefined).map(key => JSON.stringify(key) + ':' + canonical(obj[key])).join(',') + '}';
+    } else {
+      throw new Error('Review snapshot is not finite JSON data.');
+    }
     seen.delete(input);
     return result;
   };

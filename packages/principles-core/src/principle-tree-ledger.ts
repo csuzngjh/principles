@@ -478,10 +478,26 @@ export function loadLedger(stateDir: string): HybridLedgerStore {
   return readLedgerFileState(stateDir).ledger;
 }
 
+/**
+ * Drop `ruleCandidateBindings` from a caller-provided tree snapshot.
+ *
+ * Binding history is append-only governance state whose ONLY writer is
+ * `mutateRuleCandidateBinding` (locked read-modify-write). Callers of
+ * saveLedger follow a load→modify→save pattern; their snapshot is stale by
+ * the time the write lock is held, and merging it back would silently delete
+ * any Owner bind/revoke appended in between (a lost revoke re-activates a
+ * withdrawn binding). The in-lock `current` value therefore always wins.
+ */
+function treeWithoutBindingAuthority(store: HybridLedgerStore): LedgerTreeStore {
+  if (!Object.hasOwn(store.tree, 'ruleCandidateBindings')) return store.tree;
+  const { ruleCandidateBindings: _staleSnapshot, ...rest } = store.tree;
+  return rest;
+}
+
 export function saveLedger(stateDir: string, store: HybridLedgerStore): void {
   mutateLedger(stateDir, (current) => {
     current.trainingStore = store.trainingStore;
-    current.tree = { ...current.tree, ...store.tree, ...(current.tree.ruleCandidateBindings && !Object.hasOwn(store.tree, 'ruleCandidateBindings') ? { ruleCandidateBindings: current.tree.ruleCandidateBindings } : {}) };
+    current.tree = { ...current.tree, ...treeWithoutBindingAuthority(store) };
   });
 }
 
@@ -935,7 +951,7 @@ export function findActiveImplementation(stateDir: string, ruleId: string): Impl
 export async function saveLedgerAsync(stateDir: string, store: HybridLedgerStore): Promise<void> {
   await mutateLedgerAsync(stateDir, async (current) => {
     current.trainingStore = store.trainingStore;
-    current.tree = { ...current.tree, ...store.tree, ...(current.tree.ruleCandidateBindings && !Object.hasOwn(store.tree, 'ruleCandidateBindings') ? { ruleCandidateBindings: current.tree.ruleCandidateBindings } : {}) };
+    current.tree = { ...current.tree, ...treeWithoutBindingAuthority(store) };
   });
 }
 
@@ -1009,6 +1025,10 @@ export async function mutateRuleCandidateBinding(
       const state = readLedgerFileState(stateDir);
       if (state.availability.status === 'unreadable') return bindingFailure(state.availability.corrupt ? 'ledger_corrupt' : 'ledger_unavailable');
       if (!isRecord(input) || typeof input.candidateId !== 'string' || !input.candidateId.trim()
+        // The candidateId becomes a computed object key in the persisted map;
+        // refuse prototype-shaped keys outright instead of relying on spread
+        // semantics to keep them inert.
+        || ['__proto__', 'constructor', 'prototype'].includes(input.candidateId)
         || !isRecord(input.owner) || typeof input.owner.actorId !== 'string' || !input.owner.actorId.trim() || input.owner.source !== 'authenticated_console'
         || !isRecord(input.request)) return bindingFailure('invalid_request');
       const {request} = input;

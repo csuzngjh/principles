@@ -108,7 +108,14 @@ export class SqlitePIArtifactStore implements PIArtifactStore {
     const diagnostic: unknown = source !== null && typeof source === 'object' ? Reflect.get(source, 'diagnostic_json') : null;
     const metadata = typeof diagnostic === 'string' ? parsePITaskMetadata(diagnostic) : null;
     if (typeof diagnostic === 'string' && !metadata) {
-      const parsed: unknown = JSON.parse(diagnostic);
+      // Unparseable diagnostic JSON must fail with the structured reason, not
+      // a raw SyntaxError (rc-3/rc-9).
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(diagnostic);
+      } catch {
+        throw new Error('artifact_revision_metadata_invalid');
+      }
       if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed) || Object.hasOwn(parsed, PI_METADATA_KEY)) {
         throw new Error('artifact_revision_metadata_invalid');
       }

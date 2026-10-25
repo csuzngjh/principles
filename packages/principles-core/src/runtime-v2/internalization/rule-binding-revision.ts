@@ -54,7 +54,12 @@ export async function reviseRuleBindingOnce(args: {
   if (pi.ruleBindingRevisionCauseId === cause || pi.revisionCauseId === cause) return { status: 'revision_already_started', scribeTaskId: task.taskId, taskRevisionEpoch: pi.revisionCount ?? 0 };
   if (args.expectedTaskRevisionEpoch !== undefined && target.taskRevisionEpoch !== args.expectedTaskRevisionEpoch) return refuse('task_revision_stale');
   if (task.status !== 'succeeded' && task.status !== 'needs_human_review') return refuse(`task_in_flight_${task.status}`);
-  if (task.leaseOwner || task.leaseExpiresAt) return refuse('task_lease_present');
+  // A lease blocks the reopen only while it is still live: a crashed worker's
+  // expired lease must not strand the Owner's bounded revision forever.
+  const leaseLive = task.leaseOwner !== null && task.leaseOwner !== undefined
+    ? (task.leaseExpiresAt ? new Date(task.leaseExpiresAt).getTime() > Date.now() : true)
+    : false;
+  if (leaseLive) return refuse('task_lease_present');
   // This repair cannot acquire a fresh budget through another binding revision.
   if (pi.ruleBindingRevisionCauseId || pi.revisionCauseId?.startsWith('rule-binding:')) return refuse('revision_budget_exhausted');
   const metadata = mergePITaskMetadata(pi, {
@@ -67,8 +72,11 @@ export async function reviseRuleBindingOnce(args: {
   });
   const reopened = await args.stateManager.updateTaskIfDiagnosticJsonUnchanged(task.taskId, task.diagnosticJson ?? null, {
     diagnosticJson: createPITaskDiagnosticJson(metadata), status: 'pending', attemptCount: 0,
+    // Clear an expired (non-live) lease left behind by a crashed worker; the
+    // CAS below pins the exact lease values this decision was based on.
+    ...(task.leaseOwner || task.leaseExpiresAt ? { leaseOwner: null, leaseExpiresAt: null } : {}),
   }, { expectedStatus: task.status, expectedAttemptCount: task.attemptCount, expectedMaxAttempts: task.maxAttempts,
-    expectedLeaseOwner: null, expectedLeaseExpiresAt: null });
+    expectedLeaseOwner: task.leaseOwner ?? null, expectedLeaseExpiresAt: task.leaseExpiresAt ?? null });
   if (!reopened) {
     const concurrent = await args.stateManager.getTask(task.taskId);
     if (concurrent && hydratePITaskRecord(concurrent)?.ruleBindingRevisionCauseId === cause) {

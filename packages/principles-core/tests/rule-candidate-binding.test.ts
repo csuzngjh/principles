@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { addPrincipleToLedger, appendReuseEvidence, loadLedger, updatePrinciple } from '../src/principle-tree-ledger.js';
+import { addPrincipleToLedger, appendReuseEvidence, loadLedger, saveLedger, saveLedgerAsync, updatePrinciple } from '../src/principle-tree-ledger.js';
 import { PrincipleTreeLedgerAdapter } from '../src/runtime-v2/adapter/principle-tree-ledger-adapter.js';
 import type { LedgerPrinciple } from '../src/runtime-v2/types/ledger-store.js';
 import type { RuleCandidateBindingRequest, RuleCandidateMaterial } from '../src/runtime-v2/types/rule-candidate-binding.js';
@@ -61,6 +61,27 @@ describe('Owner rule-candidate binding uses the real append-only Ledger', () => 
     expect(readFileSync(file(), 'utf8')).toBe(bytes);
     expect(await adapter.mutateRuleCandidateBinding({ candidateId: 'rule', request: { ...req, reason: 'different' }, owner })).toMatchObject({ ok: false, reason: 'idempotency_conflict' });
     expect(first.ok).toBe(true);
+  });
+  // Regression (PR review P1): a load→modify→save caller's stale snapshot must
+  // not delete binding revisions appended after the snapshot was taken — a
+  // lost revoke would silently re-activate a withdrawn binding.
+  it.each([
+    ['saveLedger', (store: ReturnType<typeof loadLedger>) => saveLedger(dir, store)],
+    ['saveLedgerAsync', async (store: ReturnType<typeof loadLedger>) => { await saveLedgerAsync(dir, store); }],
+  ])('a stale %s snapshot cannot overwrite a concurrently appended revoke', async (_name, save) => {
+    expect(await bind()).toMatchObject({ status: 'bound' });
+    // The caller's snapshot CARRIES the binding map (the clobbering shape).
+    const snapshot = loadLedger(dir);
+    expect(Object.hasOwn(snapshot.tree, 'ruleCandidateBindings')).toBe(true);
+    // The Owner revokes while the caller is still holding its snapshot.
+    const revoked = await adapter.mutateRuleCandidateBinding({ candidateId: 'rule', request: { action: 'revoke', expectedRevision: 1, reason: 'Withdraw before the stale save.', requestId: 'revoke-stale-save', resumeOnce: false }, owner });
+    expect(revoked).toMatchObject({ ok: true, status: 'revoked' });
+    snapshot.tree.principles[PID] = { ...snapshot.tree.principles[PID]!, text: 'Unrelated caller edit.' };
+    await save(snapshot);
+    const stored = loadLedger(dir);
+    expect(stored.tree.ruleCandidateBindings?.rule?.revisions).toHaveLength(2);
+    expect(stored.tree.ruleCandidateBindings?.rule?.revisions[1]?.action).toBe('revoke');
+    expect(stored.tree.principles[PID]?.text).toBe('Unrelated caller edit.');
   });
   it('arbitrates concurrent independent adapters with one append and one stale result', async () => {
     const req = await request();

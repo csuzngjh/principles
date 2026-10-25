@@ -200,9 +200,17 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
     if (this.ledgerIdentity?.resolveForCandidate) {
       const task = await this.stateManager.getTask(taskId);
       if (task && (task.status === 'pending' || task.status === 'retry_wait') && hydratePITaskRecord(task)?.channel === 'code_tool_hook') {
-        const context = await this.buildContext(taskId);
-        const identity = await this.resolveCurrentIdentity(context);
-        if (identity.status !== 'resolved') {
+        let identity: CandidatePrincipleIdentityResolution | undefined;
+        try {
+          // buildContext already resolves identityAtStart for this port;
+          // reusing it avoids a second artifact/task/ledger resolution pass.
+          identity = (await this.buildContext(taskId)).identityAtStart;
+        } catch {
+          // Context problems belong to the base runner's state machine, which
+          // owns lease acquisition and failure/retry transitions.
+          return super.run(taskId);
+        }
+        if (identity && identity.status !== 'resolved') {
           const reason = identity.reason === 'ledger_unavailable' ? 'identity_source_unavailable' : 'awaiting_owner_binding';
           const diagnostic: unknown = task.diagnosticJson ? JSON.parse(task.diagnosticJson) : {};
           const metadata = diagnostic !== null && typeof diagnostic === 'object' && !Array.isArray(diagnostic) ? diagnostic : {};
@@ -473,16 +481,21 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
     // boundary then refuses or resolves from lineage; never a guess.
     let stampedPrincipleId: string | null = null;
     const identity = this.ledgerIdentity?.resolveForCandidate ? await this.resolveCurrentIdentity(context) : null;
+    // These terminal identity refusals bypass the base runner's mark-failed
+    // path, so the attempt lease must be released here: a lingering lease
+    // would keep the Owner's bounded binding revision (reviseRuleBindingOnce)
+    // refused with task_lease_present forever.
+    const parkForOwnerIdentityAction = async (reason: string, nextAction: string): Promise<PeerRunnerResult<ScribeOutputV1>> => {
+      await this.stateManager.updateTask(taskId, { status: 'needs_human_review', leaseOwner: null, leaseExpiresAt: null });
+      this.emitEvent('identity_preflight_blocked', taskId, { reason, nextAction });
+      return { status: 'failed', taskId, errorCategory: 'input_invalid', failureReason: reason, attemptCount: task.attemptCount };
+    };
     if (identity?.status === 'resolved' && hydratePITaskRecord(task)?.channel === 'code_tool_hook'
       && !validateCandidateIdentityReceipt(context.identityAtStart, identity)) {
-      await this.stateManager.updateTask(taskId, { status: 'needs_human_review' });
-      this.emitEvent('identity_preflight_blocked', taskId, { reason: 'identity_changed_during_generation', nextAction: 'review_binding_and_preserve_the_current_revision_budget' });
-      return { status: 'failed', taskId, errorCategory: 'input_invalid', failureReason: 'identity_changed_during_generation', attemptCount: task.attemptCount };
+      return parkForOwnerIdentityAction('identity_changed_during_generation', 'review_binding_and_preserve_the_current_revision_budget');
     }
     if (identity && identity.status !== 'resolved' && hydratePITaskRecord(task)?.channel === 'code_tool_hook') {
-      await this.stateManager.updateTask(taskId, { status: 'needs_human_review' });
-      this.emitEvent('identity_preflight_blocked', taskId, { reason: identity.reason, nextAction: identity.nextAction });
-      return { status: 'failed', taskId, errorCategory: 'input_invalid', failureReason: identity.reason, attemptCount: task.attemptCount };
+      return parkForOwnerIdentityAction(identity.reason, identity.nextAction);
     }
     const receipt = identity?.status === 'resolved' ? {
       candidateId: identity.candidateId, basis: identity.basis, principleId: identity.principleId,

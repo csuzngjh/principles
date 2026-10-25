@@ -73,9 +73,9 @@ describe('candidate identity is verified before expensive model work', () => {
     const common = { artifactKind: 'principle' as const, lineageArtifactIds: [], validationStatus: 'pending' as const, createdAt: identity.checkedAt, updatedAt: identity.checkedAt };
     await store.upsertArtifact({ ...common, artifactId: 'pi-dreamer-source', sourceTaskId: 'dreamer-task', contentJson: '{}' });
     await store.upsertArtifact({ ...common, artifactId: 'philosopher-source', sourceTaskId: 'philosopher-task', contentJson: JSON.stringify({ sourceDreamerArtifactId: 'pi-dreamer-source', principleCandidates: [] }) });
-    const runtimeAdapter = new TestDoubleRuntimeAdapter({ onFetchOutput: () => {
+    const runtimeAdapter = new TestDoubleRuntimeAdapter({ onFetchOutput: (runId: string) => {
       if (changeDuringModel) current = { ...identity, bindingRevision: 3, decisionId: 'new-decision' };
-      return { payload: {
+      return { runId, payload: {
         taskId: 'new-scribe', sourcePhilosopherArtifactId: 'philosopher-source',
         principleDraft: { title: 'Scope', statement: 'Protect the approved scope.', rationale: 'Avoid unscoped writes.', applicability: ['writes'], antiPatterns: ['unscoped writes'], confidence: 0.9 },
         sourceTrace: { philosopherArtifactId: 'philosopher-source', dreamerArtifactId: 'pi-dreamer-source' }, risks: [], generatedAt: identity.checkedAt,

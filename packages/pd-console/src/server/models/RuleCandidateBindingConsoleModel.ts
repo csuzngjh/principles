@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { existsSync } from 'node:fs';
 import {
   createRuntimeStateHandle, PrincipleTreeLedgerAdapter, reviseRuleBindingOnce,
 } from '@principles/core/runtime-v2';
@@ -36,10 +37,19 @@ export class RuleCandidateBindingConsoleModel {
   }
 
   async list(): Promise<RuleBindingQueueView> {
+    // A fresh workspace with no state.db simply has no binding queue yet;
+    // any other storage problem still surfaces as an error (503 at the route).
+    if (!existsSync(path.join(this.workspaceDir, '.pd', 'state.db'))) return { items: [] };
     const handle = await createRuntimeStateHandle({ workspaceDir: this.workspaceDir, readonly: true, bootstrapIfMissing: false });
     try {
       const ledger = this.ledger(handle.stateManager);
-      const tasks = await handle.stateManager.listTasks({ taskKind: 'diagnostician' });
+      // Split diagnoses commit their rule candidates on diag_router sub-tasks;
+      // the queue must surface both provenance shapes, not only direct
+      // diagnostician commits.
+      const tasks = [
+        ...await handle.stateManager.listTasks({ taskKind: 'diagnostician' }),
+        ...await handle.stateManager.listTasks({ taskKind: 'diag_router' }),
+      ];
       const items: RuleBindingQueueView['items'] = [];
       for (const task of tasks) {
         for (const candidate of await handle.stateManager.getCandidatesByTaskId(task.taskId)) {

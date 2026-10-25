@@ -135,13 +135,28 @@ describe('reviseRuleBindingOnce uses one bounded SQLite task revision', () => {
   });
 
   it('refuses a leased Scribe without changing any task state', async () => {
+    // Far-future expiry: the refusal must depend on the lease being LIVE, not
+    // on wall-clock luck (an expiry in the past reads as a crashed worker).
     await handle.stateManager.updateTask(scribeTaskId, {
-      leaseOwner: 'active-worker', leaseExpiresAt: '2026-10-25T00:05:00.000Z',
+      leaseOwner: 'active-worker', leaseExpiresAt: '2999-01-01T00:00:00.000Z',
     });
     const before = await handle.stateManager.getTask(scribeTaskId);
 
     expect(await revise()).toMatchObject({ status: 'refused', reason: 'task_lease_present' });
     expect(await handle.stateManager.getTask(scribeTaskId)).toEqual(before);
+  });
+
+  it('starts the revision past a crashed worker\'s expired lease and clears it', async () => {
+    await handle.stateManager.updateTask(scribeTaskId, {
+      leaseOwner: 'crashed-worker', leaseExpiresAt: '2000-01-01T00:00:00.000Z',
+    });
+
+    expect(await revise()).toMatchObject({ status: 'revision_started', scribeTaskId, taskRevisionEpoch: 1 });
+    const task = await handle.stateManager.getTask(scribeTaskId);
+    expect(task).toMatchObject({ status: 'pending', attemptCount: 0 });
+    // Cleared lease columns read back as undefined/null depending on the row mapper.
+    expect(task?.leaseOwner ?? null).toBeNull();
+    expect(task?.leaseExpiresAt ?? null).toBeNull();
   });
 
   it('refuses a Scribe whose one-revision budget is already consumed without resetting attempts', async () => {
