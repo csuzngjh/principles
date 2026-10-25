@@ -18,7 +18,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'node:crypto';
 import { RuleCandidateBindingCorruptionError, computeRuleCandidateReviewDigest, isRuleCandidateMaterial, isCanonicalBindingPrincipleId, isBindingDigest } from './runtime-v2/principle-tree/rule-candidate-binding.js';
-import type { RuleCandidateBindingSources, RuleCandidateBindingMutation, RuleCandidateBindingMutationResult, RuleCandidateBindingReview, RuleCandidateBindingFailure } from './runtime-v2/types/rule-candidate-binding.js';
+import type { RuleCandidateBinding, RuleCandidateBindingSources, RuleCandidateBindingMutation, RuleCandidateBindingMutationResult, RuleCandidateBindingReview, RuleCandidateBindingFailure } from './runtime-v2/types/rule-candidate-binding.js';
 
 // PRI-443: Types and constants now live in the pure module
 import type {
@@ -1078,7 +1078,12 @@ export async function mutateRuleCandidateBinding(
       const revision = { revision: (current?.revision ?? 0) + 1, decisionId: randomUUID(), requestId: request.requestId,
         action: request.action, principleId, reason: request.reason, decidedAt: new Date().toISOString(),
         owner: { actorId: input.owner.actorId, source: 'authenticated_console' as const }, reviewedCandidateDigest, reviewedPrincipleDigest };
-      const nextBindings = { ...bindings, [input.candidateId]: { ...(history ?? {}), candidateId: input.candidateId, revisions: [...(history?.revisions ?? []), revision] } };
+      // The request-sourced candidateId must never become a computed property
+      // write (remote property injection); it is equality-checked against the
+      // persisted/server material above and prototype-shaped keys are refused
+      // at the boundary. fromEntries keeps the key as plain data.
+      const appended: RuleCandidateBinding = { ...(history ?? {}), candidateId: input.candidateId, revisions: [...(history?.revisions ?? []), revision] };
+      const nextBindings: Record<string, RuleCandidateBinding> = Object.fromEntries([...Object.entries(bindings), [input.candidateId, appended]]);
       state.ledger.tree.ruleCandidateBindings = nextBindings;
       const dir = path.dirname(filePath);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
