@@ -171,8 +171,23 @@ describe('B. Stage R gate: validity window and trusted clock', () => {
 
   it('window boundaries are inclusive: now == validFrom and now == validUntil both pass the gate', () => {
     const auth = validStageRAuth({ validFrom: '2026-10-26T12:00:00Z', validUntil: '2026-10-26T12:00:00Z' });
-    const verdict = verifyStageRAuthorization({ authorizationRecord: auth, bindings, plan, now: NOW });
+    const verdict = verifyStageRAuthorization({ authorizationRecord: auth, bindings, plan, maxAttemptsTotal: 10, now: NOW });
     expect(verdict).toMatchObject({ ok: true, executionMode: 'F1-direct-model' });
+  });
+
+  it('ambiguous timestamps refuse: timezone-less, impossible calendar dates/clocks and legacy formats are not ISO-8601-with-timezone', () => {
+    const ambiguous: any[] = [
+      { validFrom: '2026-10-26T00:00:00', validUntil: '2026-10-27T00:00:00Z' }, // no timezone — Date.parse silently uses LOCAL time (window shifts with host TZ)
+      { validFrom: '2026-02-30T00:00:00Z', validUntil: '2026-10-27T00:00:00Z' }, // impossible date — Date.parse silently normalizes to Mar 2
+      { validFrom: '2026-10-26T24:00:00Z', validUntil: '2026-10-27T00:00:00Z' }, // impossible clock — silently normalized to next day
+      { validFrom: 'October 26 2026', validUntil: '2026-10-27T00:00:00Z' }, // legacy non-ISO format accepted by Date.parse
+      { validFrom: '2026-10-26T00:00:00+99:00', validUntil: '2026-10-27T00:00:00Z' }, // out-of-range UTC offset
+    ];
+    for (const over of ambiguous) {
+      const verdict = verifyStageRAuthorization({ authorizationRecord: validStageRAuth(over), bindings, plan, maxAttemptsTotal: 10, now: NOW });
+      expect(verdict.ok).toBe(false);
+      expect(verdict.reasons.join(' ')).toContain('must be ISO-8601 WITH timezone');
+    }
   });
 });
 
@@ -215,13 +230,36 @@ describe('C. Stage R gate: bindings / plan / budget / F2 probe', () => {
     const notPassed = verifyStageRAuthorization({ authorizationRecord: f2WithProbe({ isolationAcceptance: { realHostProbe: { ticketId: 'PRI-1037', status: 'NOT_RUN', evidenceRef: 'x', suiteHash: FROZEN.suiteHash } } }), bindings, plan, now: NOW });
     expect(notPassed.ok).toBe(false);
     expect(notPassed.reasons.join(' ')).toContain('PRI-1037 blocks F2');
-    const foreignSuite = verifyStageRAuthorization({ authorizationRecord: f2WithProbe({ isolationAcceptance: { realHostProbe: { ticketId: 'PRI-1037', status: 'PASSED', evidenceRef: 'x', suiteHash: 'c'.repeat(64) } } }), bindings, plan, now: NOW });
+    const foreignSuite = verifyStageRAuthorization({ authorizationRecord: f2WithProbe({ isolationAcceptance: { realHostProbe: { ticketId: 'PRI-1037', status: 'PASSED', evidenceRef: 'x', suiteHash: 'c'.repeat(64) } } }), bindings, plan, maxAttemptsTotal: 10, now: NOW });
     expect(foreignSuite.ok).toBe(false);
     expect(foreignSuite.reasons.join(' ')).toContain('different frozen suite');
-    const f1 = verifyStageRAuthorization({ authorizationRecord: validStageRAuth(), bindings, plan, now: NOW });
+    const unbound = verifyStageRAuthorization({ authorizationRecord: f2WithProbe({ isolationAcceptance: { realHostProbe: { ticketId: 'PRI-1037', status: 'PASSED', evidenceRef: 'x' } } }), bindings, plan, maxAttemptsTotal: 10, now: NOW });
+    expect(unbound.ok).toBe(false); // a missing suiteHash binding is NOT "bound to the same suite"
+    expect(unbound.reasons.join(' ')).toContain('realHostProbe.suiteHash missing');
+    const f1 = verifyStageRAuthorization({ authorizationRecord: validStageRAuth(), bindings, plan, maxAttemptsTotal: 10, now: NOW });
     expect(f1.ok).toBe(true);
-    const f2 = verifyStageRAuthorization({ authorizationRecord: f2WithProbe(), bindings, plan, now: NOW });
+    const f2 = verifyStageRAuthorization({ authorizationRecord: f2WithProbe(), bindings, plan, maxAttemptsTotal: 10, now: NOW });
     expect(f2).toMatchObject({ ok: true, executionMode: 'F2-real-host' });
+  });
+
+  it('malformed arms/cases/repetitions refuse with structured reasons instead of throwing (a TypeError would crash the run without STAGE_R_REFUSED)', () => {
+    for (const over of [{ arms: undefined }, { cases: 'A,B' }, { repetitions: null }, { arms: [] }]) {
+      const run = () => verifyStageRAuthorization({ authorizationRecord: validStageRAuth(over), bindings, plan, maxAttemptsTotal: 10, now: NOW });
+      expect(run).not.toThrow();
+      const verdict = run();
+      expect(verdict.ok).toBe(false);
+    }
+    const missingArms = verifyStageRAuthorization({ authorizationRecord: validStageRAuth({ arms: undefined }), bindings, plan, maxAttemptsTotal: 10, now: NOW });
+    expect(missingArms.reasons.join(' ')).toContain('arms must be a non-empty string array');
+  });
+
+  it('a non-positive / non-finite / omitted runner maxAttemptsTotal refuses — Infinity or NaN must not silently disable the budget cap', () => {
+    for (const bad of [Infinity, NaN, 0, -3, undefined]) {
+      const verdict = verifyStageRAuthorization({ authorizationRecord: validStageRAuth({ attemptCap: 40 }), bindings, plan, maxAttemptsTotal: bad, now: NOW });
+      expect(verdict.ok).toBe(false);
+      expect(verdict.reasons.join(' ')).toContain('maxAttemptsTotal must be a positive safe integer');
+    }
+    expect(verifyStageRAuthorization({ authorizationRecord: validStageRAuth({ attemptCap: 40 }), bindings, plan, maxAttemptsTotal: 40, now: NOW }).ok).toBe(true);
   });
 });
 
@@ -372,6 +410,48 @@ describe('D. runner enforcement: unauthorized real actors are unreachable', () =
     expect(fresh.units[0].state).toBe('SUCCEEDED');
     expect(fs.existsSync(path.join(dir, 'runs', 'CEB-001-FV-01', 'A', 'r1', 'a1.json'))).toBe(false); // the crashed attempt left NO record (RESULT_UNKNOWN by absence, never fabricated)
     expect(readJson(dir, path.join('runs', 'CEB-001-FV-01', 'A', 'r1', 'a2.json')).mode).toBe('F1-direct-model');
+  });
+
+  it('a real-mode FAILED_KNOWN attempt record still carries the authorization linkage and observed host evidence (a failed real-host run must not poison the baseline as linkage-missing)', () => {
+    const dir = copyStudy('runner-real-failed');
+    const failingDouble = () => ({
+      kind: 'real-model-double(wiring-only)',
+      observedHostEvidence: { hostSessionId: 's-fail', observedModelIdentity: 'provider/model-x' },
+      nextAction: () => { throw new Error('boom: actor transport failed'); },
+    });
+    const summary = runChallengeStudy({
+      studyDir: dir,
+      plan: { arms: ['A'], cases: ['CEB-001-FV-01'], repetitions: [1] },
+      actorFactory: failingDouble,
+      execution: { authorizationRecord: f2WithProbe(), now: NOW },
+      maxAttemptsTotal: 10,
+      owner: 'stager-d8',
+    });
+    expect(summary.units[0].state).toBe('FAILED_KNOWN');
+    const attempt = readJson(dir, path.join('runs', 'CEB-001-FV-01', 'A', 'r1', 'a1.json'));
+    expect(attempt.mode).toBe('F2-real-host');
+    expect(attempt.authorization).toMatchObject({ schema: STAGE_R_AUTH_SCHEMA, studyId: 'CEB-001', executionMode: 'F2-real-host', isolationAcceptance: { realHostProbe: { status: 'PASSED' } } });
+    expect(attempt.observedHostEvidence).toEqual({ hostSessionId: 's-fail', observedModelIdentity: 'provider/model-x' });
+    expect(attempt.error).toContain('boom');
+    // complete evidence on a FAILED_KNOWN F2 attempt: unmeasured (no SUCCEEDED), NOT degraded to NOT_ESTIMABLE
+    expect(deriveRealHostBaseline({ attempts: [attempt] })).toMatchObject({ status: 'UNKNOWN' });
+  });
+
+  it('a stub FAILED_KNOWN attempt keeps the Phase 1B record shape (no authorization / observedHostEvidence fields)', () => {
+    const dir = copyStudy('runner-stub-failed');
+    const failingStub = () => ({ kind: 'stub-failing', nextAction: () => { throw new Error('stub boom'); } });
+    const summary = runChallengeStudy({
+      studyDir: dir,
+      plan: { arms: ['A'], cases: ['CEB-001-FV-01'], repetitions: [1] },
+      actorFactory: failingStub,
+      owner: 'stager-d9',
+    });
+    expect(summary.units[0].state).toBe('FAILED_KNOWN');
+    const attempt = readJson(dir, path.join('runs', 'CEB-001-FV-01', 'A', 'r1', 'a1.json'));
+    expect(attempt.mode).toBe('offline-stub');
+    expect(attempt.authorization).toBeUndefined();
+    expect(attempt.observedHostEvidence).toBeUndefined();
+    expect(attempt.error).toContain('stub boom');
   });
 });
 

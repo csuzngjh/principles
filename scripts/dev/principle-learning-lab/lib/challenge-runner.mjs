@@ -268,22 +268,26 @@ export function runChallengeStudy({
           };
           summary.studyId = frozen.studyId;
 
+          // Real-mode authorization linkage: echoed on EVERY attempt record
+          // (SUCCEEDED and FAILED_KNOWN alike) so the record itself proves
+          // which authorization produced it (probe evidence included for F2) —
+          // a failed real-host attempt is still real-host evidence and must not
+          // poison deriveRealHostBaseline as linkage-missing. Stub attempts
+          // stay byte-identical to the historical Phase 1B records — no extra
+          // fields.
+          const authorizationLinkage = executionMode ? {
+            schema: execution.authorizationRecord.schema,
+            studyId: execution.authorizationRecord.studyId,
+            suiteHash: execution.authorizationRecord.suiteHash,
+            executionMode,
+            issuedBy: execution.authorizationRecord.issuedBy,
+            isolationAcceptance: execution.authorizationRecord.isolationAcceptance || null,
+          } : null;
+
           try {
             const { trace } = runControlledActorLoop({ env, runState, caseVisible, actor, linkage });
             const adjudication = adjudicate({ caseDef, runState });
 
-            // Real-mode authorization linkage: echoed on the attempt so the
-            // record itself proves which authorization produced it (probe
-            // evidence included for F2). Stub attempts stay byte-identical to
-            // the historical Phase 1B records — no extra fields.
-            const authorizationLinkage = executionMode ? {
-              schema: execution.authorizationRecord.schema,
-              studyId: execution.authorizationRecord.studyId,
-              suiteHash: execution.authorizationRecord.suiteHash,
-              executionMode,
-              issuedBy: execution.authorizationRecord.issuedBy,
-              isolationAcceptance: execution.authorizationRecord.isolationAcceptance || null,
-            } : null;
             const attempt = {
               schema: 'challenge-attempt.v1',
               unit,
@@ -321,7 +325,14 @@ export function runChallengeStudy({
             ledger.markResult(unit, 'FAILED_KNOWN', failureDetail);
             const attemptDir = path.join(studyDir, 'runs', caseId, armId, `r${repetitionId}`);
             fs.mkdirSync(attemptDir, { recursive: true });
-            fs.writeFileSync(path.join(attemptDir, `${attemptId}.json`), `${JSON.stringify({ schema: 'challenge-attempt.v1', unit, mode: executionMode || 'offline-stub', result: 'FAILED_KNOWN', error: failureDetail }, null, 2)}\n`, 'utf8');
+            fs.writeFileSync(path.join(attemptDir, `${attemptId}.json`), `${JSON.stringify({
+              schema: 'challenge-attempt.v1',
+              unit,
+              mode: executionMode || 'offline-stub',
+              ...(executionMode ? { authorization: authorizationLinkage, observedHostEvidence: readObservedHostEvidence(actor) } : {}),
+              result: 'FAILED_KNOWN',
+              error: failureDetail,
+            }, null, 2)}\n`, 'utf8');
             ledger.appendEvent({ type: 'UNIT_FINISHED', unit, result: 'FAILED_KNOWN', detail: failureDetail });
             summary.units.push({ unit, state: 'FAILED_KNOWN', detail: failureDetail });
           }

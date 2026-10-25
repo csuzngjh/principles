@@ -79,8 +79,24 @@ export function isOfflineStubActor(actor) {
   return typeof actor.kind === 'string' && actor.kind.startsWith('stub');
 }
 
+// Strict ISO-8601 with a MANDATORY timezone (Z or ±HH:MM): a timezone-less
+// timestamp would be parsed as LOCAL time (the validity window silently
+// shifts with the host TZ), and Date.parse also accepts legacy formats
+// ("October 26 2026") and normalizes impossible dates/clocks (2026-02-30 →
+// Mar 2, 24:00 → next day). For an authorization validity window every one
+// of those is an ambiguous input and refuses fail-closed.
+const ISO_8601_TZ_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-](\d{2}):(\d{2}))$/;
+
 function parseIso(value) {
   if (typeof value !== 'string' || value.length === 0) return null;
+  const m = ISO_8601_TZ_RE.exec(value);
+  if (!m) return null;
+  const [y, mo, d, h, mi, s] = m.slice(1, 7).map(Number);
+  if (mo < 1 || mo > 12 || h > 23 || mi > 59 || s > 59) return null;
+  if (m[7] !== 'Z' && (Number(m[8]) > 23 || Number(m[9]) > 59)) return null;
+  const cal = new Date(0);
+  cal.setUTCFullYear(y, mo - 1, d);
+  if (cal.getUTCFullYear() !== y || cal.getUTCMonth() !== mo - 1 || cal.getUTCDate() !== d) return null; // impossible calendar dates (Feb 30…) must refuse, not normalize
   const t = Date.parse(value);
   return Number.isFinite(t) ? t : null;
 }
@@ -112,7 +128,7 @@ export function verifyStageRAuthorization({ authorizationRecord, bindings, plan,
 
   const validFrom = parseIso(auth.validFrom);
   const validUntil = parseIso(auth.validUntil);
-  if (validFrom === null || validUntil === null) reasons.push('authorization validity window missing or malformed (validFrom/validUntil must be ISO-8601)');
+  if (validFrom === null || validUntil === null) reasons.push('authorization validity window missing or malformed (validFrom/validUntil must be ISO-8601 WITH timezone, e.g. 2026-10-26T12:00:00Z — timezone-less values are ambiguous and refuse)');
   if (validFrom !== null && validUntil !== null && validUntil < validFrom) reasons.push('authorization validity window inverted (validUntil < validFrom)');
   if (now === null || now === undefined || !Number.isFinite(now)) {
     reasons.push('trusted clock unavailable (now not injected by the runner) — fail-closed');
@@ -143,16 +159,24 @@ export function verifyStageRAuthorization({ authorizationRecord, bindings, plan,
   if (!isNonEmptyStringArray(auth.cases)) reasons.push('authorization cases must be a non-empty string array');
   if (!isNonEmptyStringArray(auth.repetitions)) reasons.push('authorization repetitions must be a non-empty string array');
   if (plan && typeof plan === 'object') {
-    for (const armId of plan.arms || []) if (!auth.arms.includes(armId)) reasons.push(`plan arm '${armId}' is outside the authorized arms ${JSON.stringify(auth.arms)}`);
-    for (const caseId of plan.cases || []) if (!auth.cases.includes(caseId)) reasons.push(`plan case '${caseId}' is outside the authorized case list`);
-    for (const repetitionId of (plan.repetitions || []).map(String)) if (!auth.repetitions.map(String).includes(repetitionId)) reasons.push(`plan repetition '${repetitionId}' is outside the authorized repetitions`);
+    // Normalize before the containment checks: a malformed record already has
+    // its reason above — dereferencing the raw field here would turn the
+    // structured { ok:false, reasons } refusal into a TypeError.
+    const authArms = Array.isArray(auth.arms) ? auth.arms : [];
+    const authCases = Array.isArray(auth.cases) ? auth.cases : [];
+    const authRepetitions = Array.isArray(auth.repetitions) ? auth.repetitions.map(String) : [];
+    for (const armId of plan.arms || []) if (!authArms.includes(armId)) reasons.push(`plan arm '${armId}' is outside the authorized arms ${JSON.stringify(auth.arms)}`);
+    for (const caseId of plan.cases || []) if (!authCases.includes(caseId)) reasons.push(`plan case '${caseId}' is outside the authorized case list`);
+    for (const repetitionId of (plan.repetitions || []).map(String)) if (!authRepetitions.includes(repetitionId)) reasons.push(`plan repetition '${repetitionId}' is outside the authorized repetitions`);
   } else {
     reasons.push('run plan not provided to the gate — fail-closed');
   }
 
   if (!Number.isSafeInteger(auth.attemptCap) || auth.attemptCap < 1) {
     reasons.push('authorization attemptCap must be a positive safe integer');
-  } else if (Number.isFinite(maxAttemptsTotal) && maxAttemptsTotal > auth.attemptCap) {
+  } else if (!Number.isSafeInteger(maxAttemptsTotal) || maxAttemptsTotal < 1) {
+    reasons.push('runner maxAttemptsTotal must be a positive safe integer — omitted/Infinity/NaN would silently disable the budget cap (fail-closed)');
+  } else if (maxAttemptsTotal > auth.attemptCap) {
     reasons.push(`runner attempt cap ${maxAttemptsTotal} exceeds the authorized attemptCap ${auth.attemptCap} — widen via a new authorization, not the runner flag`);
   }
 
@@ -164,7 +188,9 @@ export function verifyStageRAuthorization({ authorizationRecord, bindings, plan,
       if (probe.status !== 'PASSED') reasons.push(`real-host isolation probe status '${probe.status}' is not PASSED — PRI-1037 blocks F2 until the probe passes in a real host`);
       if (typeof probe.ticketId !== 'string' || probe.ticketId.length === 0) reasons.push('realHostProbe.ticketId missing');
       if (typeof probe.evidenceRef !== 'string' || probe.evidenceRef.length === 0) reasons.push('realHostProbe.evidenceRef missing (the probe execution record)');
-      if (typeof probe.suiteHash === 'string' && typeof auth.suiteHash === 'string' && probe.suiteHash !== auth.suiteHash) {
+      if (typeof probe.suiteHash !== 'string' || probe.suiteHash.length === 0) {
+        reasons.push('realHostProbe.suiteHash missing — the probe must be bound to the frozen suite it validated');
+      } else if (probe.suiteHash !== auth.suiteHash) {
         reasons.push('realHostProbe.suiteHash is bound to a different frozen suite than the authorization');
       }
     }
