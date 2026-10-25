@@ -416,7 +416,22 @@ export function buildArtificerL2Tools(ctx: ArtificerL2ToolContext): AgentTool[] 
           const built = buildGoldenTraceFromArtificer({ cases: params.goldenTraceCases });
           if (!built.ok) throw new Error(`submission_trace_invalid:${built.reason}`);
           const gate = evaluateRefinerRuleHostGate({ code: params.implementationCode, goldenTrace: verificationTrace(built.trace) }, ctx.gateDeps);
-          if (gate.decision !== 'accepted_shadow') return { content: [{ type: 'text', text: `REJECTED: required fact contract replay failed: ${gate.sandboxResult.failedCases.map((entry) => `${entry.caseId}: ${entry.message}`).join('; ')}` }], details: undefined };
+          if (gate.decision !== 'accepted_shadow') {
+            // Surface every authoritative rejection signal — not only failed
+            // cases. Gate-level reasons (e.g. forbidden patterns, empty trace,
+            // runtime misconfiguration) previously vanished from the model's
+            // feedback and from telemetry.
+            const detail = [
+              ...gate.reasons,
+              ...gate.sandboxResult.failedCases.map((entry) => `${entry.caseId}: ${entry.errorType}: ${entry.message}`),
+              ...gate.sandboxResult.forbiddenPatternViolations.map((pattern) => `forbidden pattern: ${pattern}`),
+            ].join('; ');
+            ctx.onToolExecution?.({ toolName: 'submit_rulecode', ok: false, error: detail || `gate_decision:${gate.decision}` });
+            return {
+              content: [{ type: 'text', text: `REJECTED: required fact contract replay failed (${gate.decision})${detail.length > 0 ? `: ${detail}` : ''}` }],
+              details: undefined,
+            };
+          }
         }
 
         // Store the captured output. The adapter's shouldStopAfterTurn detects

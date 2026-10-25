@@ -463,6 +463,29 @@ describe('PRI-1041 L2 declared verification uses system context, not model cases
     expect(resultText(result)).toContain('REJECTED');
     expect(ctx.outputCapture.output).toBeNull();
   });
+  it('submit rejection surfaces gate reasons even when no case failed, and records telemetry', async () => {
+    const calls: { toolName: string; ok: boolean; error?: string }[] = [];
+    const ctx = makeContext({
+      gateDeps: {
+        evaluateInSandbox: () => ({ success: false, failedCases: [], executionTimeMs: 0, forbiddenPatternViolations: [] }),
+      },
+      verificationInput: { scribe: declaration, tools: [
+        { rawToolName: 'bash', canonicalKind: 'execute' }, { rawToolName: 'write_file', canonicalKind: 'write' },
+      ] },
+      onToolExecution: (info) => calls.push(info),
+    });
+    const result = await findTool(buildArtificerL2Tools(ctx), 'submit_rulecode').execute('submit', output());
+    const text = resultText(result);
+    expect(text).toContain('REJECTED');
+    // Gate-level reason must reach the model even though failedCases is empty.
+    expect(text).toContain('sandbox reported success=false');
+    expect(calls).toEqual([{
+      toolName: 'submit_rulecode',
+      ok: false,
+      error: expect.stringContaining('sandbox reported success=false'),
+    }]);
+    expect(ctx.outputCapture.output).toBeNull();
+  });
   it('model omission of the Owner action shape cannot remove its system-owned state-pair checks from submit', async () => {
     const ownerCases = output().goldenTraceCases.map((entry) => ({ ...entry,
       params: { command: entry.kind === 'negative' ? 'special-owner-shape' : 'ordinary-owner-shape' },
