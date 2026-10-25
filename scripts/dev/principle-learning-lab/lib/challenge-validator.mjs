@@ -53,6 +53,25 @@ export const VALIDATOR_LIMITS = {
   maxCandidatesPerBatch: 64,
 };
 
+// Verdict-polarity terms that must never appear in a neutral-evidence
+// distractor's output (OBS-D* namespace). Closed and polarity-SYMMETRIC: each
+// pair covers one answer direction ("claim holds" vs "claim fails"), so
+// rewording the leaked direction to its opposite is caught identically.
+// Root cause class (2026-10-25): the docs distractor's fixed output
+// '文档声称：本项已完成/为真。' asserted the claim's verdict polarity on the
+// task surface — 20/60 archived E-arm candidates failed the AI-only critical
+// gate (gold_independence + safety_leakage) on exactly this defect. The
+// mechanical gates had accepted those candidates because no check encoded
+// this invariant; this constant + the leak-group guard below close that gap
+// for all future candidates, without touching any archived study asset.
+export const DISTRACTOR_DIRECTION_TERMS = [
+  '已完成', '未完成',
+  '为真', '为假',
+  '已通过', '未通过',
+  '已批准', '已驳回',
+  '结论是', '应判定',
+];
+
 const CASE_DEF_KEYS = ['caseId', 'family', 'studyEligible', 'principleApplicable', 'expectedMode', 'taskText', 'facts', 'observations', 'constraints', 'ownerAnswers', 'extraActions', 'preSeededObservations', 'overCheck', 'gold'];
 const FACT_KEYS = ['factId', 'statement', 'goldTruth', 'observability', 'stakes'];
 const OBS_KEYS = ['obsId', 'action', 'label', 'costUnits', 'timeUnits', 'output', 'implies'];
@@ -188,6 +207,20 @@ export function validateStageGCandidate({ candidate, frozenRefs }) {
       if (!preSeeded.has(o.obsId) && o.output && serialized.includes(o.output)) groups.leak.push(`actor-visible leaks observation output of ${o.obsId}`);
     }
   } catch { /* executability already reported */ }
+
+  // --- leak: distractor direction guard (neutral-evidence invariants) ---
+  // OBS-D* observations are non-evidence by design (implies {}). Their output
+  // is actor-visible task surface and must not assert a verdict polarity about
+  // the adjudicated claim — doing so hands actor and reviewer the expected
+  // answer direction. Evidence observations and owner answers are outside this
+  // guard: stating an environment result is their job. New observation ids
+  // cannot smuggle polarity past the skeleton gate (expression fields only).
+  for (const o of caseDef.observations || []) {
+    if (!/^OBS-D/.test(String(o.obsId || ''))) continue;
+    const text = typeof o.output === 'string' ? o.output : '';
+    const term = DISTRACTOR_DIRECTION_TERMS.find((t) => text.includes(t));
+    if (term) groups.leak.push(`distractor observation ${o.obsId}: output asserts answer direction ('${term}') — neutral-evidence distractors must stay direction-neutral`);
+  }
 
   const ok = Object.values(groups).every((g) => g.length === 0);
   return {
