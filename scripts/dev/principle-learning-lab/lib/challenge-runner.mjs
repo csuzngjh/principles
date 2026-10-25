@@ -1,5 +1,5 @@
-// SPEC-PD-EXAMINER-001 v0.3 — Phase 1B serial research Runner for challenge
-// studies (OFFLINE STUB ONLY: no transport, no network, no DB, no clock).
+// SPEC-PD-EXAMINER-001 v0.3/v0.4 — Phase 1B serial research Runner for
+// challenge studies (offline stub execution has no transport/network/DB/clock).
 //
 // Golden path per SPEC §2.3: frozen suite → actor input → legal actions →
 // oracle observations → actor report → ActorTraceV1 → deterministic scoring →
@@ -13,6 +13,13 @@
 //   attemptId; recovery of that attempt is refused; only a NEW attemptId may
 //   be reserved. A simulated crash also leaves the study writer lock held —
 //   recovery requires explicit release by the same owner.
+//
+// Stage R boundary (v0.4 §7.2, Stage R readiness): an actor that does NOT
+// declare itself an offline stub must pass verifyStageRAuthorization BEFORE
+// the runner reserves any budget for its unit — a NOT_AUTHORIZED / expired /
+// revoked / probe-missing refusal consumes nothing, invokes no actor step and
+// leaves no attempt record. Stub execution keeps the historical Phase 1B
+// contract unchanged (no gate involved).
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -23,6 +30,7 @@ import { adjudicateClaimEvidence } from './claim-evidence-scorer.mjs';
 import { runControlledActorLoop, SimulatedCrashError, perfectPlayActor, createGreedyObserverStub, createNaiveStub } from './challenge-actor.mjs';
 import { acquireStudyWriteLock, releaseStudyWriteLock, createChallengeLedger } from './challenge-ledger.mjs';
 import { buildStudyArms, auditArmIsolation, composeArmPrompt } from './challenge-arms.mjs';
+import { verifyStageRAuthorization, isOfflineStubActor, readStudyPlanHash, readObservedHostEvidence } from './challenge-stage-r-gate.mjs';
 
 export class FrozenStudyDriftError extends Error {
   constructor(details) {
@@ -135,6 +143,7 @@ export function runChallengeStudy({
   maxAttemptsTotal = 999,
   owner = 'challenge-runner',
   deps = {},
+  execution = null,
 }) {
   const adjudicate = deps.adjudicate || adjudicateClaimEvidence;
   const ledger = createChallengeLedger(studyDir);
@@ -160,6 +169,60 @@ export function runChallengeStudy({
             summary.units.push({ unit, state: 'RESULT_UNKNOWN', refused: true });
             continue;
           }
+
+          // Stage R boundary (v0.4 §7.2): create and classify the actor
+          // BEFORE any budget mutation. A non-stub actor is refused with ZERO
+          // side effects (no reservation, no PREPARED, no actor step) unless
+          // a Stage R authorization bound to the freshly recomputed frozen
+          // study passes the gate.
+          let caseDef;
+          let caseVisible;
+          try {
+            caseDef = readJson(path.join(studyDir, 'judge-only', `${caseId}.json`));
+            caseVisible = readJson(path.join(studyDir, 'actor-visible', `${caseId}.json`));
+          } catch (e) {
+            ledger.appendEvent({ type: 'UNIT_REFUSED', unit, reason: 'unit_inputs_unreadable', detail: e.message });
+            summary.units.push({ unit, state: 'SUITE_DRIFT', refused: true, detail: e.message });
+            continue;
+          }
+          let actor;
+          try {
+            actor = actorFactory({ armId, caseId, caseDef, caseVisible });
+          } catch (e) {
+            ledger.appendEvent({ type: 'UNIT_REFUSED', unit, reason: 'actor_factory_error', detail: e.message });
+            summary.units.push({ unit, state: 'FAILED_KNOWN', refused: true, detail: `actor_factory_error: ${e.message}` });
+            continue;
+          }
+          let executionMode = null; // null = offline stub (Phase 1B contract, no gate)
+          if (!isOfflineStubActor(actor)) {
+            let gate;
+            if (!execution || !execution.authorizationRecord) {
+              gate = { ok: false, reasons: ['stage R execution config missing — a real (non-stub) actor requires execution.authorizationRecord (challenge-stage-authorization.v1, status APPROVED); run-authorization.json stays NOT_AUTHORIZED until the Owner issues one'] };
+            } else {
+              let frozenBindings = null;
+              try {
+                const frozenForGate = verifyFrozenStudy(studyDir);
+                frozenBindings = {
+                  studyId: frozenForGate.studyId,
+                  suiteHash: frozenForGate.suiteHash,
+                  mappingHash: frozenForGate.mappingHash,
+                  graderHash: frozenForGate.graderHash,
+                  studyPlanHash: readStudyPlanHash(studyDir),
+                };
+              } catch (e) {
+                gate = { ok: false, reasons: [`frozen_study_drift: ${e.message}`] };
+              }
+              if (frozenBindings) {
+                gate = verifyStageRAuthorization({ authorizationRecord: execution.authorizationRecord, bindings: frozenBindings, plan, maxAttemptsTotal, now: execution.now });
+              }
+            }
+            if (!gate.ok) {
+              ledger.appendEvent({ type: 'UNIT_REFUSED', unit, reason: 'stage_r_not_authorized', detail: gate.reasons });
+              summary.units.push({ unit, state: 'STAGE_R_REFUSED', refused: true, reasons: gate.reasons });
+              continue;
+            }
+            executionMode = gate.executionMode;
+          }
           // NOT_STARTED or RESERVED_NOT_PREPARED (idempotent reservation)
           const reserve = ledger.reserveAttempt({ unit, maxAttemptsTotal, reason: `unit ${caseId}/${armId}/r${repetitionId}` });
           if (!reserve.ok) {
@@ -183,8 +246,6 @@ export function runChallengeStudy({
           ledger.markPrepared(unit);
           ledger.appendEvent({ type: 'UNIT_PREPARED', unit, suiteHash: frozen.suiteHash });
 
-          const caseDef = readJson(path.join(studyDir, 'judge-only', `${caseId}.json`));
-          const caseVisible = readJson(path.join(studyDir, 'actor-visible', `${caseId}.json`));
           const env = buildClaimEnvironment(caseDef);
           const runState = newClaimRunState(env);
           const arm = armCheck.arms[armId];
@@ -208,14 +269,26 @@ export function runChallengeStudy({
           summary.studyId = frozen.studyId;
 
           try {
-            const actor = actorFactory({ armId, caseId, caseDef, caseVisible });
             const { trace } = runControlledActorLoop({ env, runState, caseVisible, actor, linkage });
             const adjudication = adjudicate({ caseDef, runState });
 
+            // Real-mode authorization linkage: echoed on the attempt so the
+            // record itself proves which authorization produced it (probe
+            // evidence included for F2). Stub attempts stay byte-identical to
+            // the historical Phase 1B records — no extra fields.
+            const authorizationLinkage = executionMode ? {
+              schema: execution.authorizationRecord.schema,
+              studyId: execution.authorizationRecord.studyId,
+              suiteHash: execution.authorizationRecord.suiteHash,
+              executionMode,
+              issuedBy: execution.authorizationRecord.issuedBy,
+              isolationAcceptance: execution.authorizationRecord.isolationAcceptance || null,
+            } : null;
             const attempt = {
               schema: 'challenge-attempt.v1',
               unit,
-              mode: 'offline-stub',
+              mode: executionMode || 'offline-stub',
+              ...(executionMode ? { authorization: authorizationLinkage, observedHostEvidence: readObservedHostEvidence(actor) } : {}),
               actorKind: trace.actorKind,
               frozenRefs: linkage,
               promptAudit: { armId, contentMode: arm.contentMode, payloadHash: arm.delivery.payloadHash, promptLength: prompt.length },
@@ -248,7 +321,7 @@ export function runChallengeStudy({
             ledger.markResult(unit, 'FAILED_KNOWN', failureDetail);
             const attemptDir = path.join(studyDir, 'runs', caseId, armId, `r${repetitionId}`);
             fs.mkdirSync(attemptDir, { recursive: true });
-            fs.writeFileSync(path.join(attemptDir, `${attemptId}.json`), `${JSON.stringify({ schema: 'challenge-attempt.v1', unit, mode: 'offline-stub', result: 'FAILED_KNOWN', error: failureDetail }, null, 2)}\n`, 'utf8');
+            fs.writeFileSync(path.join(attemptDir, `${attemptId}.json`), `${JSON.stringify({ schema: 'challenge-attempt.v1', unit, mode: executionMode || 'offline-stub', result: 'FAILED_KNOWN', error: failureDetail }, null, 2)}\n`, 'utf8');
             ledger.appendEvent({ type: 'UNIT_FINISHED', unit, result: 'FAILED_KNOWN', detail: failureDetail });
             summary.units.push({ unit, state: 'FAILED_KNOWN', detail: failureDetail });
           }

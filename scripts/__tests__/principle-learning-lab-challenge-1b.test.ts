@@ -292,14 +292,31 @@ describe('fault injection 7: scoring failure', () => {
 describe('fault injection 8: frozen asset drift mid-run', () => {
   it('tampering judge-only gold between units refuses the next unit fail-closed', () => {
     const dir = copyStudy('fi8');
+    // Injection point: the FIRST actor step of unit 1 (mid-execution). The
+    // Stage R readiness gate moved actor creation BEFORE the per-unit frozen
+    // verification (a non-stub actor must be classified before any budget
+    // mutation), so tampering inside the factory would now land before unit
+    // 1's own verification. Tampering on the first nextAction keeps the
+    // scenario's observable contract: drift introduced between unit 1's
+    // verification and unit 2's verification → unit 2 refuses fail-closed.
     const tamperAtFirstUnit = (ctx: any) => {
-      if (ctx.caseId === 'CEB-001-FV-01') {
-        const judgeFile = path.join(dir, 'judge-only', 'CEB-001-FV-02.json');
-        const j = JSON.parse(fs.readFileSync(judgeFile, 'utf8'));
-        j.facts[0].goldTruth = !j.facts[0].goldTruth; // silently flip the gold
-        fs.writeFileSync(judgeFile, `${JSON.stringify(j, null, 2)}\n`);
-      }
-      return perfectPlayActor(ctx.caseDef);
+      const inner = perfectPlayActor(ctx.caseDef);
+      let tampered = false;
+      return {
+        kind: 'stub-fi8-midrun-tamper',
+        nextAction(view: any) {
+          if (!tampered) {
+            tampered = true;
+            if (ctx.caseId === 'CEB-001-FV-01') {
+              const judgeFile = path.join(dir, 'judge-only', 'CEB-001-FV-02.json');
+              const j = JSON.parse(fs.readFileSync(judgeFile, 'utf8'));
+              j.facts[0].goldTruth = !j.facts[0].goldTruth; // silently flip the gold
+              fs.writeFileSync(judgeFile, `${JSON.stringify(j, null, 2)}\n`);
+            }
+          }
+          return inner.nextAction(view);
+        },
+      };
     };
     const summary = runChallengeStudy({
       studyDir: dir,
