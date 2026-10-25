@@ -425,6 +425,27 @@ describe('review-round regressions (PR #1316 review)', () => {
     expect(runtimeCheck?.detail).toContain('not installed');
     expect(runtimeCheck?.detail).not.toContain('pinned match');
   }, 60_000);
+
+  it('pd-status treats a core runtime pin mismatch as degraded', () => {
+    const workspace = tempDir('pd-status-core-ws-');
+    fs.mkdirSync(path.join(workspace, '.pd'), { recursive: true });
+    fs.writeFileSync(path.join(workspace, '.pd', 'config.yaml'), JSON.stringify({ features: {} }), 'utf8');
+    const dataDir = tempDir('pd-status-core-data-');
+    const runtimePackages = path.join(dataDir, 'runtime', 'node_modules', '@principles');
+    for (const [name, version] of [['codex-adapter', '0.5.13'], ['host-runtime', '0.13.0'], ['core', '1.295.0']]) {
+      const packageDir = path.join(runtimePackages, name);
+      fs.mkdirSync(packageDir, { recursive: true });
+      fs.writeFileSync(path.join(packageDir, 'package.json'), JSON.stringify({ name: `@principles/${name}`, version }), 'utf8');
+    }
+    const result = spawnSync(process.execPath, [path.join(pluginDir, 'scripts', 'pd-status.cjs'),
+      '--plugin-root', pluginDir, '--plugin-data', dataDir, '--workspace', workspace, '--json'],
+      { cwd: workspace, encoding: 'utf8', timeout: 30_000 });
+    const report = JSON.parse(result.stdout) as { checks: Array<{ name: string; state: string; detail?: string }> };
+    const runtimeCheck = report.checks.find((check) => check.name === 'runtime');
+    expect(runtimeCheck?.state).toBe('degraded');
+    expect(runtimeCheck?.detail).toContain('core@1.295.0');
+    expect(runtimeCheck?.detail).toContain('pinned 0.5.13+0.13.0+1.296.0');
+  }, 60_000);
 });
 
 describe('pd-cli discovery Windows fallback (pd-locate)', () => {

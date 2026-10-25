@@ -20,16 +20,21 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import type { ActiveReleaseRead, ReleaseIdentity } from './release-watch.js';
 
 /** Minimal child interface so the registry is unit-testable without Electron. */
 export interface WorkerChild {
   kill(): void;
+  on?(event: 'message', listener: (value: unknown) => void): void;
+  send?(message: { type: string }, callback: (error: Error | null) => void): boolean;
   once(event: 'exit', listener: (code: number | null) => void): void;
 }
 
 export interface WorkspaceWorkerRegistryDeps {
   /** Spawn one worker child for a canonical workspace path. */
   spawnWorker: (canonicalWorkspaceDir: string) => WorkerChild;
+  readRelease?: () => ActiveReleaseRead;
+  drainTimeoutMs?: number;
   log?: (event: string, detail?: Record<string, unknown>) => void;
   /** Restart ladder (ms) — defaults mirror supervisor.ts. */
   restartDelaysMs?: readonly number[];
@@ -38,6 +43,11 @@ export interface WorkspaceWorkerRegistryDeps {
 
 interface WorkerEntry {
   child: WorkerChild | null;
+  startedRelease: ReleaseIdentity | undefined;
+  drainSupported: boolean;
+  draining: boolean;
+  drainHandle: { clear(): void } | null;
+  handoverReason: string | undefined;
   restartAttempts: number;
   stopped: boolean;
   /** Set when the restart ladder is exhausted; the entry STAYS in the map so
@@ -93,11 +103,16 @@ export class WorkspaceWorkerRegistry {
   private readonly log: NonNullable<WorkspaceWorkerRegistryDeps['log']>;
   private readonly restartDelaysMs: readonly number[];
   private readonly schedule: NonNullable<WorkspaceWorkerRegistryDeps['schedule']>;
+  private readonly readRelease: (() => ActiveReleaseRead) | undefined;
+  private readonly drainTimeoutMs: number;
+  private manifestAvailable = true;
   private consecutiveUnavailableReads = 0;
   private lastUnavailableReason: string | undefined;
 
   constructor(deps: WorkspaceWorkerRegistryDeps) {
     this.spawnWorker = deps.spawnWorker;
+    this.readRelease = deps.readRelease;
+    this.drainTimeoutMs = deps.drainTimeoutMs ?? 600_000;
     this.log = deps.log ?? ((_event: string, _fields?: Record<string, unknown>) => undefined);
     this.restartDelaysMs = deps.restartDelaysMs ?? DEFAULT_RESTART_DELAYS_MS;
     this.schedule = deps.schedule ?? defaultSchedule;
@@ -108,8 +123,8 @@ export class WorkspaceWorkerRegistry {
     const desired = new Set(desiredWorkspaces.map(canonicalWorkspacePath));
     for (const [canonical, entry] of this.entries) {
       if (!desired.has(canonical)) {
-        this.log('workspace_worker_stopped', { workspace: canonical, reason: 'removed_from_manifest' });
         this.stopEntry(canonical, entry);
+        this.log('workspace_worker_stopped', { workspace: canonical, reason: 'removed_from_manifest' });
       }
     }
     for (const canonical of desired) {
@@ -130,6 +145,7 @@ export class WorkspaceWorkerRegistry {
    * successful read reconciles everything at once.
    */
   syncFromManifest(source: WorkspaceManifestSource): void {
+    this.manifestAvailable = source.kind === 'ok';
     if (source.kind === 'ok') {
       // RF-04 (review 2026-10-16): recovery is an observable transition. The
       // Companion rebuilds its tray from registry queries, which only happen
@@ -151,6 +167,7 @@ export class WorkspaceWorkerRegistry {
         });
       }
       this.sync(source.workspaces);
+      this.reconcileRelease();
       return;
     }
     this.consecutiveUnavailableReads += 1;
@@ -190,9 +207,85 @@ export class WorkspaceWorkerRegistry {
     return [...this.entries.entries()].filter(([, entry]) => entry.degraded).map(([canonical]) => canonical);
   }
 
+  /** Release handover is independent of Console health and never kills a child. */
+  reconcileRelease(): void {
+    if (this.readRelease === undefined) return;
+    const authority = this.readRelease();
+    for (const [canonical, entry] of this.entries) {
+      if (entry.stopped || entry.degraded) continue;
+      if (!authority.ok) {
+        this.handoverDegraded(canonical, entry, authority.reason);
+        continue;
+      }
+      if (!this.manifestAvailable) continue;
+      if (entry.draining) {
+        // Re-read authority after exit: rapid updates and rollback go directly
+        // to the latest valid installed release, with no overlap.
+        if (entry.child === null) this.spawnFor(canonical, entry);
+        continue;
+      }
+      if (entry.child === null) continue; // existing crash ladder owns this case
+      if (entry.startedRelease === undefined) {
+        if (entry.handoverReason !== 'startup_authority_changed') this.handoverDegraded(canonical, entry, 'release_baseline_unavailable');
+        continue;
+      }
+      if (entry.startedRelease.releaseId === authority.identity.releaseId
+        && entry.startedRelease.generation === authority.identity.generation) {
+        this.clearHandoverIssue(canonical, entry);
+        continue;
+      }
+      if (!entry.drainSupported || entry.child.send === undefined) {
+        this.handoverDegraded(canonical, entry, 'worker_drain_unsupported');
+        continue;
+      }
+      const drainingChild = entry.child;
+      entry.draining = true;
+      this.clearHandoverIssue(canonical, entry);
+      this.log('workspace_worker_drain_requested', {
+        workspace: canonical, from: entry.startedRelease.releaseId, to: authority.identity.releaseId,
+      });
+      entry.drainHandle = this.schedule(() => {
+        entry.drainHandle = null;
+        if (entry.child === drainingChild) this.handoverDegraded(canonical, entry, 'worker_drain_timeout');
+      }, this.drainTimeoutMs);
+      try {
+        drainingChild.send?.({ type: 'pd.worker.drain.v1' }, (error) => {
+          if (error !== null && entry.child === drainingChild) this.handoverDegraded(canonical, entry, 'worker_drain_ipc_failed');
+        });
+      } catch {
+        this.handoverDegraded(canonical, entry, 'worker_drain_ipc_failed');
+      }
+    }
+  }
+
+  handoverIssues(): { workspace: string; reason: string }[] {
+    return [...this.entries.entries()].flatMap(([workspace, entry]) =>
+      entry.handoverReason === undefined ? [] : [{ workspace, reason: entry.handoverReason }]);
+  }
+
+  private clearHandoverIssue(canonical: string, entry: WorkerEntry): void {
+    if (entry.handoverReason === undefined) return;
+    entry.handoverReason = undefined;
+    this.log('workspace_worker_handover_recovered', { workspace: canonical });
+  }
+
+  private handoverDegraded(canonical: string, entry: WorkerEntry, reason: string): void {
+    if (entry.handoverReason === reason) return;
+    entry.handoverReason = reason;
+    this.log('workspace_worker_handover_degraded', {
+      workspace: canonical, reason,
+      nextAction: '保留当前任务；待当前周期结束后安全重启 Companion，并检查安装发布权威与 worker IPC。',
+    });
+  }
+
   private startEntry(canonical: string): void {
     const entry: WorkerEntry = {
       child: null,
+      startedRelease: undefined,
+      drainSupported: false,
+      draining: false,
+      drainHandle: null,
+      handoverReason: undefined,
       restartAttempts: 0,
       stopped: false,
       degraded: false,
@@ -204,6 +297,11 @@ export class WorkspaceWorkerRegistry {
 
   private spawnFor(canonical: string, entry: WorkerEntry): void {
     if (entry.stopped) return;
+    const release = this.readRelease?.();
+    entry.startedRelease = release?.ok ? release.identity : undefined;
+    entry.drainSupported = false;
+    entry.draining = false;
+    this.clearHandoverIssue(canonical, entry);
     let child: WorkerChild;
     try {
       child = this.spawnWorker(canonical);
@@ -213,10 +311,39 @@ export class WorkspaceWorkerRegistry {
       return;
     }
     entry.child = child;
-    this.log('workspace_worker_started', { workspace: canonical });
+    this.log('workspace_worker_started', { workspace: canonical, launchAuthorityReleaseId: entry.startedRelease?.releaseId, launchAuthorityGeneration: entry.startedRelease?.generation, identityEvidence: 'parent_authority_at_spawn' });
+    child.on?.('message', (value: unknown) => {
+      if (entry.child !== child || entry.stopped) return;
+      if (value !== null && typeof value === 'object' && Object.hasOwn(value, 'type')
+        && Reflect.get(value, 'type') === 'pd.worker.drain-ready.v1') {
+        // Attribution is only a stable installation-authority observation,
+        // never proof of the bytes each module loaded. Refuse a launch race.
+        if (!entry.drainSupported) {
+          const readyAuthority = this.readRelease?.();
+          if (entry.startedRelease !== undefined && readyAuthority !== undefined && (!readyAuthority.ok
+            || readyAuthority.identity.releaseId !== entry.startedRelease?.releaseId
+            || readyAuthority.identity.generation !== entry.startedRelease?.generation)) {
+            entry.startedRelease = undefined;
+            this.handoverDegraded(canonical, entry, 'startup_authority_changed');
+          }
+        }
+        entry.drainSupported = true;
+        this.reconcileRelease();
+      }
+    });
     child.once('exit', (code) => {
       if (entry.stopped) return;
+      if (entry.child !== child) return;
+      entry.child = null;
+      entry.drainHandle?.clear();
+      entry.drainHandle = null;
       this.log('workspace_worker_exited', { workspace: canonical, code });
+      if (entry.draining && code === 0) {
+        this.log('workspace_worker_drained', { workspace: canonical, code });
+        this.reconcileRelease();
+        return;
+      }
+      entry.draining = false;
       this.scheduleRestart(canonical, entry);
     });
   }
@@ -241,6 +368,7 @@ export class WorkspaceWorkerRegistry {
 
   private stopEntry(canonical: string, entry: WorkerEntry): void {
     entry.stopped = true;
+    entry.drainHandle?.clear();
     entry.restartHandle?.clear();
     entry.restartHandle = null;
     if (entry.child !== null) {

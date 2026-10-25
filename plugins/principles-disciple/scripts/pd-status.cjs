@@ -169,14 +169,17 @@ function main() {
     }
     const adapter = readInstalledVersion(runtimeDir, '@principles/codex-adapter');
     const hostRuntime = readInstalledVersion(runtimeDir, '@principles/host-runtime');
+    const core = readInstalledVersion(runtimeDir, '@principles/core');
     if (adapter === 'not-installed') {
       push('runtime', 'degraded', 'runtime not installed in plugin data', 'Run the $pd-control setup skill to install the pinned runtime.');
-    } else if (pins === null || typeof pins.codexAdapter !== 'string' || typeof pins.hostRuntime !== 'string') {
-      push('runtime', 'ok', `adapter@${adapter} host-runtime@${hostRuntime} (pin unverified${root.ok ? '' : ' — plugin root not located'})`);
-    } else if (adapter !== pins.codexAdapter || hostRuntime !== pins.hostRuntime) {
-      push('runtime', 'degraded', `installed adapter@${adapter}+host-runtime@${hostRuntime} != pinned ${pins.codexAdapter}+${pins.hostRuntime}`, 'Re-run $pd-control setup to realign the runtime with the pinned versions.');
+    } else if (core === 'not-installed') {
+      push('runtime', 'degraded', 'core runtime not installed in plugin data', 'Re-run $pd-control setup to install the pinned runtime.');
+    } else if (pins === null || typeof pins.codexAdapter !== 'string' || typeof pins.hostRuntime !== 'string' || typeof pins.core !== 'string') {
+      push('runtime', 'ok', `adapter@${adapter} host-runtime@${hostRuntime} core@${core} (pin unverified${root.ok ? '' : ' — plugin root not located'})`);
+    } else if (adapter !== pins.codexAdapter || hostRuntime !== pins.hostRuntime || core !== pins.core) {
+      push('runtime', 'degraded', `installed adapter@${adapter}+host-runtime@${hostRuntime}+core@${core} != pinned ${pins.codexAdapter}+${pins.hostRuntime}+${pins.core}`, 'Re-run $pd-control setup to realign the runtime with the pinned versions.');
     } else {
-      push('runtime', 'ok', `adapter@${adapter} host-runtime@${hostRuntime} (pinned match)`);
+      push('runtime', 'ok', `adapter@${adapter} host-runtime@${hostRuntime} core@${core} (pinned match)`);
     }
   } else {
     push('runtime', 'degraded', data.reason, `${data.nextAction} Then run $pd-control setup.`);
