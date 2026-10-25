@@ -132,6 +132,21 @@ const GOOD_RULE_CODE = `function evaluate(input, helpers) {
   return { decision: 'allow', matched: false, reason: 'no risk signal' };
 }`;
 
+// This fixture implements only the declared DesignGateFact contract. Missing
+// or unknown approval evidence does not become a denial; only a bound,
+// explicit denial (including host-resolved revocation) blocks the action.
+const DESIGN_APPROVAL_RULE_CODE = `function evaluate(input) {
+  var gate = input.context && input.context.facts && input.context.facts.designGate;
+  if (!gate) return { decision: 'allow', matched: false, reason: 'no approval fact supplied' };
+  var bindingMatches = gate.taskRef === gate.decisionTaskRef
+    && gate.specDigest === gate.decisionSpecDigest
+    && gate.scopeRef === gate.decisionScopeRef;
+  if (bindingMatches && gate.requiresApproval && gate.resolution === 'not_approved') {
+    return { decision: 'block', matched: true, reason: 'approval is denied or invalidated' };
+  }
+  return { decision: 'allow', matched: false, reason: 'approval contract permits action' };
+}`;
+
 function artificerV2Content(forgeStamp = false, includeOwnerStamp = true): Record<string, unknown> {
   return {
     taskId: ART_ID,
@@ -397,8 +412,24 @@ describe('PRI-861 — painReasonSummary echo into the production rule artifact',
       },
       hostSemanticContext: { hostKinds: ['openclaw'], tools: [{ rawToolName: 'write_file', canonicalKind: 'write' }] },
     });
+    const artifact = await world.store.getArtifactById(ART_ART);
+    if (!artifact) throw new Error('seed artifact missing');
+    await world.store.upsertArtifact({
+      ...artifact,
+      contentJson: JSON.stringify({
+        ...artificerV2Content(true),
+        implementationCode: DESIGN_APPROVAL_RULE_CODE,
+      }),
+    });
     const result = await world.evaluator.run(EVAL_ID);
     expect(result.status).toBe('succeeded');
+    if (!isEvaluatorOutputV2(result.output)) throw new Error('expected validated V2 evaluator output');
+    expect(result.output.adversarialResult?.verificationCoverage).toEqual(expect.objectContaining({
+      required: ['design_approval'],
+      unavailable: [],
+      contractCoverage: expect.objectContaining({ required: expect.any(Number), executed: expect.any(Number), failed: 0, unavailable: 0 }),
+    }));
+    expect(result.output.adversarialResult?.verificationCoverage?.contractCoverage.executed).toBeGreaterThan(0);
     const ruleArtifact = (await world.store.listBySourceTaskId(EVAL_ID)).find((a) => a.artifactKind === 'rule');
     expect(ruleArtifact).toBeDefined();
     if (!ruleArtifact) return;
@@ -426,7 +457,14 @@ describe('PRI-861 — painReasonSummary echo into the production rule artifact',
     const result = await world.evaluator.run(EVAL_ID);
     if (!isEvaluatorOutputV2(result.output)) throw new Error('expected validated V2 evaluator output');
     expect(result.output.adversarialResult?.passed).toBe(false);
-    expect(result.output.adversarialResult?.failedCases).toContainEqual(expect.objectContaining({ caseId: 'design-scope:neg-1', expectedDecision: 'block', actualDecision: 'allow' }));
+    const leakedDifferentCommand = result.output.adversarialResult?.failedCases.find((entry) =>
+      entry.caseId.startsWith('system-contract:design_approval:')
+      && entry.expectedDecision === 'block'
+      && entry.actualDecision === 'allow'
+      && typeof entry.caseInput === 'string'
+      && entry.caseInput.includes('node -e')
+      && !entry.caseInput.includes('git commit -m test'));
+    expect(leakedDifferentCommand).toBeDefined();
     expect((await world.store.listBySourceTaskId(EVAL_ID)).some((entry) => entry.artifactKind === 'rule')).toBe(false);
   }, 60_000);
 

@@ -1,3 +1,5 @@
+import { createProductionGateDeps } from '../../activation/production-gate-deps.js';
+import { UNAVAILABLE_RULE_CONTEXT } from '../../internalization/rule-context-v2.js';
 /**
  * PRI-439 Phase 4 — artificer-l2-tool-contract unit tests.
  *
@@ -412,5 +414,104 @@ describe('PRI-484 RULECODE_SPEC_TEXT — v2 context section', () => {
     expect(text).toContain('input.context');
     expect(text).toContain('unavailable');
     expect(text).toContain('requiresContextVersion');
+  });
+});
+
+
+describe('PRI-1041 L2 declared verification uses system context, not model cases', () => {
+  const declaration = { executionConditions: { version: 1, requiredFacts: [{ factKind: 'design_approval', required: true, textualBasis: 'fixture scope approval' }] } };
+  const good = `function evaluate(input, helpers) {
+    var fact = input.context && input.context.facts.designGate;
+    if (fact && fact.requiresApproval && fact.resolution === 'not_approved') return { decision: 'block', matched: true, reason: 'denied' };
+    return { decision: 'allow', matched: false, reason: 'not explicitly denied' };
+  }`;
+  function context() {
+    return makeContext({ gateDeps: createProductionGateDeps(), verificationInput: { scribe: declaration, tools: [
+      { rawToolName: 'bash', canonicalKind: 'execute' }, { rawToolName: 'write_file', canonicalKind: 'write' },
+    ] } });
+  }
+  function output(code = good) {
+    return makeRuleOutput({ implementationCode: code, requiresContextVersion: 2, evidenceRefs: ['fixture:owner'], goldenTraceCases: [
+      { caseId: 'historic-block', kind: 'negative', toolName: 'bash', params: { command: 'git commit' }, expectedDecision: 'block', ruleContext: UNAVAILABLE_RULE_CONTEXT },
+      { caseId: 'historic-allow', kind: 'positive', toolName: 'bash', params: { command: 'ls' }, expectedDecision: 'allow', ruleContext: UNAVAILABLE_RULE_CONTEXT },
+    ] });
+  }
+  it('read_rulecode_spec includes the same system-declared fact contract and evidence-only semantics as generation', async () => {
+    const result = await findTool(buildArtificerL2Tools(context()), 'read_rulecode_spec').execute('spec', {});
+    expect(resultText(result)).toContain('input.context.facts.designGate');
+    expect(resultText(result)).toContain('decisionTaskRef/decisionSpecDigest/decisionScopeRef');
+    expect(resultText(result)).toContain('historical_evidence_only');
+    expect(resultText(result)).toContain('system_counterfactual');
+    expect(resultText(result)).not.toContain('match the CONTEXT shape above EXACTLY');
+  });
+  it('replay and submit accept a compliant rule while retaining conflicting historical evidence verbatim', async () => {
+    const ctx = context();
+    const tools = buildArtificerL2Tools(ctx);
+    const rule = output();
+    const replay = await findTool(tools, 'replay_rulecode').execute('replay', { code: rule.implementationCode, goldenTraceCases: rule.goldenTraceCases });
+    expect(resultText(replay)).toContain('PASSED');
+    const submitted = await findTool(tools, 'submit_rulecode').execute('submit', rule);
+    expect(resultText(submitted)).toContain('Output submitted');
+    expect(ctx.outputCapture.output).toEqual(rule);
+    expect(rule.goldenTraceCases[0]?.expectedDecision).toBe('block');
+    expect(rule.goldenTraceCases[0]?.ruleContext?.facts.designGate).toBeUndefined();
+  });
+  it('submit without an earlier replay still rejects an always-allow rule', async () => {
+    const ctx = context();
+    const tool = findTool(buildArtificerL2Tools(ctx), 'submit_rulecode');
+    const result = await tool.execute('submit', output(`function evaluate(input, helpers) { return { decision: 'allow', matched: false, reason: 'ignore scope' }; }`));
+    expect(resultText(result)).toContain('REJECTED');
+    expect(ctx.outputCapture.output).toBeNull();
+  });
+  it('submit rejection surfaces gate reasons even when no case failed, and records telemetry', async () => {
+    const calls: { toolName: string; ok: boolean; error?: string }[] = [];
+    const ctx = makeContext({
+      gateDeps: {
+        evaluateInSandbox: () => ({ success: false, failedCases: [], executionTimeMs: 0, forbiddenPatternViolations: [] }),
+      },
+      verificationInput: { scribe: declaration, tools: [
+        { rawToolName: 'bash', canonicalKind: 'execute' }, { rawToolName: 'write_file', canonicalKind: 'write' },
+      ] },
+      onToolExecution: (info) => calls.push(info),
+    });
+    const result = await findTool(buildArtificerL2Tools(ctx), 'submit_rulecode').execute('submit', output());
+    const text = resultText(result);
+    expect(text).toContain('REJECTED');
+    // Gate-level reason must reach the model even though failedCases is empty.
+    expect(text).toContain('sandbox reported success=false');
+    expect(calls).toEqual([{
+      toolName: 'submit_rulecode',
+      ok: false,
+      error: expect.stringContaining('sandbox reported success=false'),
+    }]);
+    expect(ctx.outputCapture.output).toBeNull();
+  });
+  it('model omission of the Owner action shape cannot remove its system-owned state-pair checks from submit', async () => {
+    const ownerCases = output().goldenTraceCases.map((entry) => ({ ...entry,
+      params: { command: entry.kind === 'negative' ? 'special-owner-shape' : 'ordinary-owner-shape' },
+    }));
+    const ctx = makeContext({ gateDeps: createProductionGateDeps(), verificationInput: {
+      scribe: declaration, tools: [{ rawToolName: 'bash', canonicalKind: 'execute' }], ownerCases,
+    } });
+    const bad = good.replace('var fact =', `if (input.action.paramsSummary.command === 'special-owner-shape') return { decision: 'block', matched: true, reason: 'memorized historical sample' }; var fact =`);
+    const result = await findTool(buildArtificerL2Tools(ctx), 'submit_rulecode').execute('submit', output(bad));
+    expect(resultText(result)).toContain('REJECTED');
+    expect(resultText(result)).toContain('system-contract:');
+    expect(ctx.outputCapture.output).toBeNull();
+    expect(ownerCases[0]?.params.command).toBe('special-owner-shape');
+  });
+  it('identifies malformed model case facts for correction instead of silently treating them as absent history', async () => {
+    const ctx = context();
+    const rule = output();
+    const malformed = JSON.parse(JSON.stringify(rule.goldenTraceCases));
+    malformed[0].ruleContext.facts.designGate = { resolution: 'approved' };
+    const result = await findTool(buildArtificerL2Tools(ctx), 'replay_rulecode').execute('replay', {
+      code: good, goldenTraceCases: malformed,
+    });
+    expect(resultText(result)).toContain('historical_fact_invalid');
+    expect(resultText(result)).toContain('historic-block');
+    expect(resultText(result)).toContain('field=ruleContext.facts.designGate');
+    expect(resultText(result)).toContain('never invent missing historical Owner facts');
+    expect(ctx.outputCapture.output).toBeNull();
   });
 });

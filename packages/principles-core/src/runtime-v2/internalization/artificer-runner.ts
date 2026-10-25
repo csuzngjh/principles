@@ -1052,7 +1052,14 @@ ${context.revisionFeedback}
       agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: 'v1' },
       taskRef: { taskId },
       inputPayload: finalMessage,
-      contextItems: [],
+      // Structured system context for L2's deterministic tools. This is the
+      // same validated declaration/projection used to build the prompt, not
+      // model-authored tool parameters or text scraped from that prompt.
+      contextItems: executionConditions.conditions !== null ? [{ role: 'system', content: JSON.stringify({
+        ruleCodeVerification: { version: 1, executionConditions: executionConditions.conditions, tools: this.hostSemanticContext?.tools ?? [],
+          ...(this.behaviorExamplePack !== undefined ? { ownerCases: [boundPackForPrompt(this.behaviorExamplePack).sourceNegativeCase, ...boundPackForPrompt(this.behaviorExamplePack).positiveCounterexamples] } : {}),
+        },
+      }) }] : [],
       outputSchemaRef: 'artificer-rule-output-v2',
       timeoutMs: this.resolvedOptions.timeoutMs,
       systemPrompt,

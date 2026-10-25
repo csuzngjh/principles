@@ -1,3 +1,7 @@
+import { deriveRuleCodeVerification } from '../internalization/rulecode-verification-obligations.js';
+import type { GoldenTrace } from '../golden-trace.js';
+import { buildIntentExecutionConditionsBlock } from '../internalization/artificer-prompt-builder.js';
+import { extractExecutionConditions } from '../internalization/intent-contract.js';
 /**
  * PRI-439 §Phase 4 — Artificer L2 agent tool contract (core, pure logic).
  *
@@ -45,6 +49,8 @@ export interface ArtificerL2OutputCapture {
 // ── Tool context ──────────────────────────────────────────────────────────────
 
 export interface ArtificerL2ToolContext {
+  /** System-produced declaration and host projection; never read from model tool arguments. */
+  readonly verificationInput?: { readonly scribe: unknown; readonly tools: readonly { readonly rawToolName: string; readonly canonicalKind: string }[]; readonly ownerCases?: readonly GoldenTrace['cases'][number][] };
   /** Sandbox replay deps (real or test double). */
   gateDeps: RefinerRuleHostGateDeps;
   /** Artificer output validator (used by submit_rulecode for runtime validation). */
@@ -147,7 +153,8 @@ export const RULECODE_SPEC_TEXT = [
   '    prompt, affectedTools and goldenTraceCases toolName MUST use those',
   '    host-real names — generic vocabulary (write_file, bash, ...) never fires.',
   '  - When input.context is undefined or context.history.status === "unavailable",',
-  '    the rule MUST allow (decision: "allow", matched: false).',
+  '    history-dependent behavior MUST allow; an independently supported declared fact',
+  '    such as facts.designGate remains readable and follows its own contract.',
   '    Unavailable context must never be interpreted as "no history" or "not done".',
   '  - Prefer context.facts (deterministic, host-computed) over raw context.history.calls.',
   '    Use canonicalKind from facts for kind-based logic; raw calls only when facts',
@@ -156,7 +163,8 @@ export const RULECODE_SPEC_TEXT = [
   '    history window means the host did not provide enough data, not that the',
   '    action did not happen.',
   '  - Rules declaring requiresContextVersion: 2 must handle context unavailability',
-  '    gracefully (return allow). v1 rules (no requiresContextVersion) must not',
+  '    gracefully for history-dependent checks; supported independent facts retain',
+  '    their declared contract. v1 rules (no requiresContextVersion) must not',
   '    read input.context and behave exactly as before.',
   '',
   'HELPERS (second argument):',
@@ -183,7 +191,8 @@ export const RULECODE_SPEC_TEXT = [
   '    submit validation — corrections are a runtime concern, never a golden-trace',
   '    expectation.',
   '  - ruleContext (REQUIRED on every case when requiresContextVersion: 2) must',
-  '    match the CONTEXT shape above EXACTLY: a plain object { version: 2, history',
+  '    match the CONTEXT base shape plus any declared supported fact fields:',
+  '    a plain object { version: 2, history',
 '    { status, truncated: boolean, calls: [...] }, facts { priorReadOfTarget,',
 '    readCount, writeCount, uniqueWritePathCount, sameActionBlockCount } }.',
 '    facts must be a plain object; counts must be non-negative numbers or null —',
@@ -219,6 +228,22 @@ export const RULECODE_SPEC_TEXT = [
  * only into the adapter-owned outputCapture).
  */
 export function buildArtificerL2Tools(ctx: ArtificerL2ToolContext): AgentTool[] {
+  const verificationTrace = (trace: GoldenTrace): GoldenTrace => {
+    if (ctx.verificationInput === undefined) return trace;
+    const ownerCases = ctx.verificationInput.ownerCases ?? [];
+    const cases = [...trace.cases.filter((entry) => !ownerCases.some((owner) => owner.caseId === entry.caseId)), ...ownerCases];
+    const material = deriveRuleCodeVerification(ctx.verificationInput.scribe, cases, ctx.verificationInput.tools);
+    if (material.unavailable.length > 0) {
+      const invalidCases = material.historical.filter((entry) => entry.qualification === 'invalid_input');
+      const correction = invalidCases.length === 0 ? '' : `; invalid model-supplied goldenTraceCases: ${invalidCases.map((entry) => entry.caseId).join(', ')}; field=ruleContext.facts.designGate; expected DesignGateFact/v1 with version, sourceRef, revision, requiresApproval, taskRef, specDigest, scopeRef, decisionTaskRef, decisionSpecDigest, decisionScopeRef, resolution, revoked. Non-unknown resolutions require consistent decision/task/spec/scope bindings. Correct synthetic model cases; never invent missing historical Owner facts. Historical cases without this fact remain evidence-only.`;
+      throw new Error(`required_fact_verification_unavailable:${material.unavailable.join(',')}${correction}`);
+    }
+    const synthetic = material.counterfactuals.map((entry): GoldenTrace['cases'][number] => ({
+      caseId: entry.caseId, kind: entry.expectedDecision === 'allow' ? 'positive' : 'negative', toolName: entry.toolName,
+      params: entry.params, expectedDecision: entry.expectedDecision, ruleContext: entry.ruleContext,
+    }));
+    return { ...trace, cases: [...material.replayCases, ...synthetic] };
+  };
   const readRulecodeSpecTool: AgentTool<typeof readRulecodeSpecSchema, undefined> = {
     label: 'Read RuleCode spec',
     name: 'read_rulecode_spec',
@@ -229,7 +254,10 @@ export function buildArtificerL2Tools(ctx: ArtificerL2ToolContext): AgentTool[] 
       try {
         ctx.onToolExecution?.({ toolName: 'read_rulecode_spec', ok: true });
         return {
-          content: [{ type: 'text', text: RULECODE_SPEC_TEXT }],
+          content: [{ type: 'text', text: RULECODE_SPEC_TEXT + (ctx.verificationInput === undefined ? '' : (() => {
+            const declaration = extractExecutionConditions(ctx.verificationInput.scribe);
+            return declaration.conditions === null ? '' : buildIntentExecutionConditionsBlock(declaration.conditions);
+          })()) }],
           details: undefined,
         };
       } catch (err) {
@@ -314,7 +342,7 @@ export function buildArtificerL2Tools(ctx: ArtificerL2ToolContext): AgentTool[] 
 
         // Run the sandbox replay via the injected gate deps.
         const gateResult = evaluateRefinerRuleHostGate(
-          { code, goldenTrace: traceResult.trace },
+          { code, goldenTrace: verificationTrace(traceResult.trace) },
           ctx.gateDeps,
         );
 
@@ -380,6 +408,30 @@ export function buildArtificerL2Tools(ctx: ArtificerL2ToolContext): AgentTool[] 
             }],
             details: undefined,
           };
+        }
+
+        // Submission independently enforces the system declaration even if the
+        // model skipped replay_rulecode or replayed different code previously.
+        if (ctx.verificationInput !== undefined) {
+          const built = buildGoldenTraceFromArtificer({ cases: params.goldenTraceCases });
+          if (!built.ok) throw new Error(`submission_trace_invalid:${built.reason}`);
+          const gate = evaluateRefinerRuleHostGate({ code: params.implementationCode, goldenTrace: verificationTrace(built.trace) }, ctx.gateDeps);
+          if (gate.decision !== 'accepted_shadow') {
+            // Surface every authoritative rejection signal — not only failed
+            // cases. Gate-level reasons (e.g. forbidden patterns, empty trace,
+            // runtime misconfiguration) previously vanished from the model's
+            // feedback and from telemetry.
+            const detail = [
+              ...gate.reasons,
+              ...gate.sandboxResult.failedCases.map((entry) => `${entry.caseId}: ${entry.errorType}: ${entry.message}`),
+              ...gate.sandboxResult.forbiddenPatternViolations.map((pattern) => `forbidden pattern: ${pattern}`),
+            ].join('; ');
+            ctx.onToolExecution?.({ toolName: 'submit_rulecode', ok: false, error: detail || `gate_decision:${gate.decision}` });
+            return {
+              content: [{ type: 'text', text: `REJECTED: required fact contract replay failed (${gate.decision})${detail.length > 0 ? `: ${detail}` : ''}` }],
+              details: undefined,
+            };
+          }
         }
 
         // Store the captured output. The adapter's shouldStopAfterTurn detects

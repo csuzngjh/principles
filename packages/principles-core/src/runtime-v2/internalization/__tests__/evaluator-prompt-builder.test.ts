@@ -38,7 +38,7 @@ describe('EvaluatorPromptBuilder', () => {
     expect(EVALUATOR_PROTOCOL_INSTRUCTION).toContain('sourceTrace.artificerArtifactId MUST be copied exactly from input.sourceArtificerArtifactId');
   });
 
-  it('promptContractVersion value is evaluator-output-v1.prompt.v11 (design-gate review fact)', () => {
+  it('promptContractVersion value is evaluator-output-v1.prompt.v12 (historical evidence prompt view)', () => {
     // v7 (2026-10-11 closeout) anchored the first kind-semantics clause but
     // asserted a FALSE mapping ("EVERY writeTools entry dispatches as
     // 'write'") — the real OpenClaw catalog's writeTools is a risk grouping
@@ -46,7 +46,7 @@ describe('EvaluatorPromptBuilder', () => {
     // agent-delegation tool dispatching 'agent'. v8 (review round) makes the
     // host's OWN tool-to-kind mapping the authority and keeps unknown when
     // no mapping is present.
-    expect(EVALUATOR_PROMPT_CONTRACT_VERSION).toBe('evaluator-output-v1.prompt.v11');
+    expect(EVALUATOR_PROMPT_CONTRACT_VERSION).toBe('evaluator-output-v1.prompt.v12');
   });
 
   it('explains the supported designGate fact and keeps its four states distinct', () => {

@@ -783,3 +783,29 @@ describe('PRI-795 ArtificerL2Adapter — abort ownership & timeout contract', ()
     expect(payload.requestTimeoutMs).toBe(60_000);
   });
 });
+
+// ── PRI-1041 verification context contract ───────────────────────────────────
+
+describe('PRI-1041 ArtificerL2Adapter — RuleCode verification context parsing', () => {
+  it('malformed verification context fails as input_invalid before any run is registered', async () => {
+    const adapter = makeAdapter();
+    const malformed = makeStartRun({
+      // Unsupported version: the system-owned declaration is malformed.
+      contextItems: [{
+        role: 'system',
+        content: JSON.stringify({ ruleCodeVerification: { version: 2 } }),
+      }],
+    });
+
+    const err: unknown = await adapter.startRun(malformed).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(PDRuntimeError);
+    if (!(err instanceof PDRuntimeError)) throw new Error('expected PDRuntimeError');
+    expect(err.category).toBe('input_invalid');
+    expect(err.details).toEqual(expect.objectContaining({ nextAction: expect.any(String) }));
+
+    // Rejected BEFORE run registration: no leaked failed run and no live
+    // budget timer (both are created after the context parse).
+    const { runs } = adapter as unknown as { runs: Map<string, unknown> };
+    expect(runs.size).toBe(0);
+  });
+});

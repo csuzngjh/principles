@@ -223,7 +223,7 @@ describe('PRI-843 — evaluator prompt contract (conditional formation injection
   };
 
   it('prompt contract version is v11', () => {
-    expect(EVALUATOR_PROMPT_CONTRACT_VERSION).toBe('evaluator-output-v1.prompt.v11');
+    expect(EVALUATOR_PROMPT_CONTRACT_VERSION).toBe('evaluator-output-v1.prompt.v12');
   });
 
   it('without formationContext the payload keeps the pre-PRI-843 shape (byte-identical) and the system prompt is unchanged', () => {
@@ -591,21 +591,19 @@ describe('PRI-843 — evaluator formation context golden replay (production path
     }
   });
 
-  it('degraded path: unreadable scribe contentJson (malformed JSON) keeps the legacy prompt shape and skips the resolver observably', async () => {
+  it('malformed Scribe content is rejected before any evaluator model request or repair', async () => {
     const broken = await makeWorld({ withDreamerLineage: true, scribeMalformedJson: true });
     try {
       const prompts: CapturedPrompt[] = [];
       const seeds: string[] = [];
-      await reviewEvaluator(broken, {
+      const result = await reviewEvaluator(broken, {
         payload: evaluatorOutput('needs_revision', ['gate too narrow'], ['Fix the gate']),
         prompts, seeds,
       }).run(EVAL_ID);
 
-      expect(JSON.parse(prompts[0]?.message ?? '{}').formationContext).toBeUndefined();
-      expect(prompts[0]?.systemPrompt).toBe(EVALUATOR_PROTOCOL_INSTRUCTION);
-      expect(broken.emitted.some((e) => e.eventType === 'evaluator_formation_context_skipped')).toBe(true);
-      // The evaluation itself proceeds on the degraded (no-formation) basis.
-      expect(seeds).toHaveLength(1);
+      expect(result.status).toBe('failed');
+      expect(prompts).toHaveLength(0);
+      expect(seeds).toHaveLength(0);
     } finally {
       closeWorld(broken);
     }

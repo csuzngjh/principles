@@ -1,3 +1,4 @@
+import { unsupportedRequiredRuleCodeFacts } from './rulecode-verification-obligations.js';
 /**
  * SPEC-RULECODE-QUALITY-001 A1 (PRI-995) — artificer intent-basis preflight.
  *
@@ -689,6 +690,15 @@ export function assessIntentBasis(input: {
     }
   }
 
+  const unsupportedKinds = unsupportedRequiredRuleCodeFacts(conditions);
+  if (unsupportedKinds.length > 0) {
+    return {
+      status: 'unsupported',
+      reasonCode: 'trusted_fact_provider_absent',
+      detail: `unsupported_required_fact:${unsupportedKinds.join(',')}; no supported runtime input schema and verification contract exists for these required kinds`,
+      nextAction: 'Restore a supported runtime fact contract before generation; a resolver approval alone cannot establish runtime capability.',
+    };
+  }
   const requiredFacts = effectiveFacts;
   if (requiredFacts.length > 0 && trustedFacts === undefined) {
     return {

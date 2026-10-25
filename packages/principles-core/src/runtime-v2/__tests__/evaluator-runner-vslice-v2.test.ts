@@ -1,3 +1,9 @@
+import { buildToolSemanticRegistry } from '../internalization/tool-semantic-registry.js';
+import { computeArtifactDigest, verifyPiArtifactRowDigest } from '../activation/promotion-evidence-snapshot.js';
+import { mapPiArtifactRow } from '../store/artifact/sqlite-pi-artifact-store.js';
+import { isEvaluatorOutputV2 } from '../internalization/evaluator-output.js';
+import { readFileSync } from 'node:fs';
+import { createProductionGateDeps } from '../activation/production-gate-deps.js';
 /**
  * EvaluatorRunner V2 vertical-slice tests — adversarial sandbox replay
  * (RuleHost MVP Activation, PRI-426, PRD Decision 11d).
@@ -1291,5 +1297,162 @@ describe('EvaluatorRunner — identity writer boundary (PRI-911A)', () => {
     // rule_assembly_failed stays reserved for structural degradation (no bearer
     // artifact / store failure), not for a refused guess.
     expect(telemetryOf(deps).some((e) => e.eventType === 'evaluator_rule_assembly_failed')).toBe(false);
+  });
+});
+
+
+describe('PRI-1041 declared fact verification through the real Runner and sandbox', () => {
+  const conditions = { version: 1, requiredFacts: [{ factKind: 'design_approval', required: true, textualBasis: 'Owner requires design approval for the scoped action' }] };
+  const hostSemanticContext = { hostKinds: ['codex'], tools: [
+    { rawToolName: 'bash', canonicalKind: 'execute' as const },
+    { rawToolName: 'write_file', canonicalKind: 'write' as const },
+    { rawToolName: 'read_file', canonicalKind: 'read' as const },
+  ] };
+  const good = `function evaluate(input, helpers) {
+    var fact = input.context && input.context.facts && input.context.facts.designGate;
+    if (fact && fact.requiresApproval && fact.resolution === 'not_approved') return { decision: 'block', matched: true, reason: 'scoped explicit rejection' };
+    return { decision: 'allow', matched: false, reason: 'no explicit scoped rejection' };
+  }`;
+  async function runCode(code: string, required = conditions, options: { complete?: boolean; family?: 'design' | 'prior-read' | 'path' | 'commit' } = {}) {
+    const { complete = false, family = 'design' } = options;
+    const store = new MemoryPIArtifactStore();
+    const scribe = makeScribeArtifact();
+    await store.upsertArtifact({ ...scribe, contentJson: JSON.stringify({ ...JSON.parse(scribe.contentJson), executionConditions: required }) });
+    const art = makeRuleContextV2ArtificerArtifact();
+    const content = JSON.parse(art.contentJson);
+    content.implementationCode = code;
+    if (family !== 'design') {
+      for (const entry of content.ownerGoldenTraceCases) {
+        entry.ruleContext = structuredClone(entry.ruleContext);
+        if (family === 'prior-read') entry.ruleContext.facts.priorReadOfTarget = entry.kind === 'positive' ? 'yes' : 'no';
+        else if (family === 'commit') {
+          entry.toolName = 'bash';
+          entry.params = { command: entry.kind === 'negative' ? 'git commit -m "fixture change"' : 'git status' };
+        } else entry.toolName = 'read_file';
+      }
+      content.affectedTools = family === 'path' ? ['read_file'] : family === 'commit' ? ['bash'] : ['write_file'];
+    }
+    if (complete) {
+      for (const entry of content.ownerGoldenTraceCases) {
+        entry.ruleContext = structuredClone(entry.ruleContext);
+        entry.ruleContext.facts.designGate = { version: 1, sourceRef: 'fixture:approval', revision: 1, requiresApproval: true,
+          taskRef: 'fixture-task', specDigest: 'fixture-spec', scopeRef: 'fixture-scope', decisionTaskRef: 'fixture-task', decisionSpecDigest: 'fixture-spec', decisionScopeRef: 'fixture-scope',
+          resolution: entry.kind === 'negative' ? 'not_approved' : 'approved', revoked: false };
+      }
+    }
+    await store.upsertArtifact({ ...art, contentJson: JSON.stringify(content) });
+    const deps = createMockDeps({ artifactStore: store, output: makeEvaluatorV2Output({ adversarialCases: [] }), ledgerIdentity: { isAvailable: () => true, hasPrinciple: () => true } });
+    const semantics = buildToolSemanticRegistry(hostSemanticContext.tools);
+    if (!semantics.ok) throw new Error('invalid fixture host semantic mapping');
+    const runner = new EvaluatorRunner(deps, { owner: 'test', runtimeKind: 'evaluator', pollIntervalMs: 5, timeoutMs: 1000, gateDeps: createProductionGateDeps({ toolSemantics: semantics.registry }), hostSemanticContext });
+    return { result: await runner.run(EVALUATOR_TASK_ID), store, deps };
+  }
+  it.each([false, true])('a correct rule can pass with full facts=%s without falsifying historical replay', async (complete) => {
+    const { result, store } = await runCode(good, conditions, { complete });
+    expect(result.status).toBe('succeeded');
+    if (!isEvaluatorOutputV2(result.output)) throw new Error('expected runtime replay output');
+    expect(result.output.adversarialResult?.passed, JSON.stringify(result.output.adversarialResult)).toBe(true);
+    const coverage = result.output?.adversarialResult?.verificationCoverage;
+    expect(coverage?.required).toEqual(['design_approval']);
+    expect(coverage?.executed).toBeGreaterThan(20);
+    expect(coverage?.failed).toBe(0);
+    expect(coverage?.historical.every((entry) => entry.qualification === (complete ? 'direct_replay' : 'historical_evidence_only'))).toBe(true);
+    const rules = await store.listBySourceTaskId(EVALUATOR_TASK_ID);
+    expect(rules.some((entry) => entry.artifactKind === 'rule' && entry.validationStatus === 'validated')).toBe(true);
+    const rule = rules.find((entry) => entry.artifactKind === 'rule');
+    if (rule === undefined) throw new Error('expected assembled rule');
+    const semantics = buildToolSemanticRegistry(hostSemanticContext.tools);
+    if (!semantics.ok) throw new Error('invalid fixture semantics');
+    const writer = new RuleHostWriter({ gateDeps: createProductionGateDeps({ toolSemantics: semantics.registry }),
+      toolSemantics: semantics.registry, featureFlagProbe: () => true });
+    expect(await writer.canActivate(toSnapshot(rule))).toEqual(expect.objectContaining({ ok: true }));
+    const stored: unknown = JSON.parse(rule.contentJson);
+    expect(stored).toEqual(expect.objectContaining({ goldenTraceCases: expect.any(Array), ownerGoldenTraceCases: expect.any(Array) }));
+    if (typeof stored !== 'object' || stored === null) throw new Error('invalid assembled content');
+    const history: unknown = Reflect.get(stored, 'ownerGoldenTraceCases');
+    const source = await store.getArtifactById(makeRuleContextV2ArtificerArtifact().artifactId);
+    expect(JSON.stringify(history)).toBe(JSON.stringify(JSON.parse(source?.contentJson ?? 'null').ownerGoldenTraceCases));
+    expect(Reflect.get(stored, 'goldenTraceCases')).toEqual(JSON.parse(source?.contentJson ?? 'null').goldenTraceCases);
+  });
+  it.each([
+    ['prior-read', `function evaluate(input, helpers) { if (input.action.canonicalKind === 'write' && input.context && input.context.facts.priorReadOfTarget === 'no') return { decision: 'block', matched: true, reason: 'read target before writing' }; return { decision: 'allow', matched: false, reason: 'read or unavailable' }; }`],
+    ['path', `function evaluate(input, helpers) { if (input.action.paramsSummary.path === '/etc/passwd') return { decision: 'block', matched: true, reason: 'explicit forbidden path including reads' }; return { decision: 'allow', matched: false, reason: 'ordinary path' }; }`],
+  ] as const)('requiredFacts=[] preserves %s family semantics', async (family, code) => {
+    const { result } = await runCode(code, { version: 1, requiredFacts: [] }, { family });
+    if (!isEvaluatorOutputV2(result.output)) throw new Error('expected runtime replay output');
+    expect(result.output.adversarialResult?.passed, JSON.stringify(result.output.adversarialResult)).toBe(true);
+    expect(result.output.adversarialResult?.verificationCoverage?.required).toEqual([]);
+    expect(result.output.adversarialResult?.verificationCoverage?.counterfactuals).toEqual([]);
+  });
+  const realBad: unknown = JSON.parse(readFileSync(new URL('../internalization/__tests__/fixtures/pri1041-regressed-generated-rule.json', import.meta.url), 'utf8'));
+  if (typeof realBad !== 'object' || realBad === null || !('implementationCode' in realBad) || typeof realBad.implementationCode !== 'string') throw new Error('invalid regression fixture');
+  it.each([
+    ['real unedited bad code', realBad.implementationCode],
+    ['always allow', `function evaluate(input, helpers) { return { decision: 'allow', matched: false, reason: 'always' }; }`],
+    ['always block', `function evaluate(input, helpers) { return { decision: 'block', matched: true, reason: 'always' }; }`],
+    ['sample matching', `function evaluate(input, helpers) { if (input.action.paramsSummary.path === '/etc/passwd') return { decision: 'block', matched: true, reason: 'sample' }; return { decision: 'allow', matched: false, reason: 'other' }; }`],
+  ])('LLM approved cannot validate %s', async (_name, code) => {
+    const { result, store } = await runCode(code);
+    if (!isEvaluatorOutputV2(result.output)) throw new Error('expected runtime replay output');
+    expect(result.output.adversarialResult?.passed).toBe(false);
+    expect(result.output?.adversarialResult?.verificationCoverage?.failed).toBeGreaterThan(0);
+    const rules = await store.listBySourceTaskId(EVALUATOR_TASK_ID);
+    expect(rules.some((entry) => entry.artifactKind === 'rule' && entry.validationStatus === 'validated')).toBe(false);
+  });
+  it('unknown required contracts stop before the evaluator model request', async () => {
+    const { result, deps } = await runCode(good, { version: 1, requiredFacts: [{ factKind: 'unimplemented_fact', required: true, textualBasis: 'fixture unknown fact' }] });
+    expect(result.status).toBe('failed');
+    expect(deps.runtimeAdapter.startRun).not.toHaveBeenCalled();
+  });
+  it('rejects the unedited real candidate that adds a sample-command veto for unknown facts despite model approval', async () => {
+    const candidate: unknown = JSON.parse(readFileSync(new URL('../internalization/__tests__/fixtures/pri1041-unknown-sample-command-regression.json', import.meta.url), 'utf8'));
+    if (typeof candidate !== 'object' || candidate === null || !Object.hasOwn(candidate, 'implementationCode')) throw new Error('invalid real regression fixture');
+    const code: unknown = Reflect.get(candidate, 'implementationCode');
+    if (typeof code !== 'string') throw new Error('invalid real regression code');
+    const { result, store } = await runCode(code, conditions, { family: 'commit' });
+    if (!isEvaluatorOutputV2(result.output)) throw new Error('expected runtime replay output');
+    expect(result.output.adversarialResult?.passed).toBe(false);
+    expect(result.output.adversarialResult?.failedCases.some((entry) => entry.caseId.startsWith('system-contract:') && entry.caseId.endsWith(':unknown'))).toBe(true);
+    expect((await store.listBySourceTaskId(EVALUATOR_TASK_ID)).some((entry) => entry.artifactKind === 'rule' && entry.validationStatus === 'validated')).toBe(false);
+  });
+  it('activation replay rejects all five bad code families against the actual assembled executable trace', async () => {
+    const generated: unknown = JSON.parse(readFileSync(new URL('../internalization/__tests__/fixtures/pri1041-unknown-sample-command-regression.json', import.meta.url), 'utf8'));
+    if (typeof generated !== 'object' || generated === null) throw new Error('invalid generated fixture');
+    const generatedCode: unknown = Reflect.get(generated, 'implementationCode');
+    if (typeof generatedCode !== 'string') throw new Error('invalid generated fixture code');
+    const { store } = await runCode(good, conditions, { family: 'commit' });
+    const rule = (await store.listBySourceTaskId(EVALUATOR_TASK_ID)).find((entry) => entry.artifactKind === 'rule');
+    if (rule === undefined) throw new Error('expected real assembled positive rule');
+    const semantics = buildToolSemanticRegistry(hostSemanticContext.tools);
+    if (!semantics.ok) throw new Error('invalid fixture semantics');
+    const writer = new RuleHostWriter({ gateDeps: createProductionGateDeps({ toolSemantics: semantics.registry }), toolSemantics: semantics.registry, featureFlagProbe: () => true });
+    for (const code of [realBad.implementationCode,
+      `function evaluate(input, helpers) { return { decision: 'allow', matched: false, reason: 'always' }; }`,
+      `function evaluate(input, helpers) { return { decision: 'block', matched: true, reason: 'always' }; }`,
+      `function evaluate(input, helpers) { if (input.action.paramsSummary.path === '/etc/passwd') return { decision: 'block', matched: true, reason: 'sample' }; return { decision: 'allow', matched: false, reason: 'other' }; }`,
+      generatedCode,
+    ]) {
+      const content = { ...JSON.parse(rule.contentJson), implementationCode: code };
+      expect((await writer.canActivate({ ...toSnapshot(rule), contentJson: JSON.stringify(content) })).ok).toBe(false);
+    }
+    const row = { artifact_id: rule.artifactId, artifact_kind: rule.artifactKind, source_task_id: rule.sourceTaskId,
+      source_principle_id: rule.sourcePrincipleId ?? null, source_rule_id: rule.sourceRuleId ?? null,
+      lineage_artifact_ids: JSON.stringify(rule.lineageArtifactIds), validation_status: rule.validationStatus,
+      content_json: rule.contentJson, created_at: rule.createdAt, updated_at: rule.updatedAt };
+    const digest = computeArtifactDigest(mapPiArtifactRow(row));
+    expect(verifyPiArtifactRowDigest(row, rule.contentJson, digest).outcome).toBe('verified');
+    const changed = JSON.parse(rule.contentJson);
+    changed.goldenTrace.cases.pop();
+    expect(verifyPiArtifactRowDigest(row, JSON.stringify(changed), digest).outcome).toBe('tampered');
+  });
+  it('a static forbidden-pattern rejection cannot claim execution or passed contract coverage', async () => {
+    const { result, store } = await runCode(`function evaluate(input, helpers) { var external = require('fs'); return { decision: 'allow', matched: false, reason: 'forbidden' }; }`);
+    if (!isEvaluatorOutputV2(result.output)) throw new Error('expected runtime replay output');
+    const coverage = result.output.adversarialResult?.verificationCoverage;
+    expect(coverage?.executed).toBe(0);
+    expect(coverage?.passed).toBe(0);
+    expect(coverage?.contractCoverage.executed).toBe(0);
+    expect(coverage?.contractCoverage.unavailable).toBeGreaterThan(0);
+    expect((await store.listBySourceTaskId(EVALUATOR_TASK_ID)).some((entry) => entry.artifactKind === 'rule' && entry.validationStatus === 'validated')).toBe(false);
   });
 });

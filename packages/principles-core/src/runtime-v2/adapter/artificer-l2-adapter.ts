@@ -1,3 +1,4 @@
+import { readRuleCodeVerificationContext } from '../internalization/rulecode-verification-obligations.js';
 /**
  * ArtificerL2Adapter (PRI-439 Phase 4 — tool-using L2 agent).
  *
@@ -345,6 +346,28 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
     }
 
     const taskId = input.taskRef?.taskId ?? runId;
+
+    /**
+     * PRI-1041: parse the system-owned RuleCode verification declaration BEFORE
+     * registering the run or starting the budget timer. A malformed declaration
+     * is an input-contract violation (permanent, non-retryable), not a
+     * transport/execution failure — and a throw after `runs.set` would leave a
+     * failed run entry plus a live timer behind.
+     */
+    let verificationInput: ReturnType<typeof readRuleCodeVerificationContext>;
+    try {
+      verificationInput = readRuleCodeVerificationContext(input.contextItems);
+    } catch (err) {
+      throw new PDRuntimeError(
+        'input_invalid',
+        `RuleCode verification context is invalid: ${err instanceof Error ? err.message : String(err)}`,
+        {
+          nextAction:
+            'Emit exactly one validated v1 ruleCodeVerification system context item with well-formed execution conditions, host tools and Owner cases.',
+        },
+      );
+    }
+
     const runState: ArtificerL2RunState = {
       runId,
       startedAt,
@@ -463,6 +486,7 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
       validator: this.validator,
       taskId,
       outputCapture,
+      verificationInput,
       onToolExecution: (info) => {
         toolsInvoked[info.toolName] = (toolsInvoked[info.toolName] ?? 0) + 1;
         this.eventEmitter.emitTelemetry({
