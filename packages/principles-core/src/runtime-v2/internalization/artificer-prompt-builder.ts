@@ -347,6 +347,7 @@ export function buildIntentExecutionConditionsBlock(conditions: ScribeExecutionC
 - Actionable approved/not_approved/not_required facts require non-null sourceRef, positive revision and identical taskRef=decisionTaskRef, specDigest=decisionSpecDigest, scopeRef=decisionScopeRef. Revoked facts resolve to not_approved. For missing, stale or mismatched bindings the host supplies unknown; do not author schema-invalid golden cases with contradictory bindings.
 - The host has already resolved whether the CURRENT action is in the declared approval scope. When requiresApproval is true and resolution is not_approved, enforce the principle for that action; do not narrow applicability to a sample command, git commit substring, or observed tool spelling. Read/search or not_required exemptions come from the trusted fact, not guessed command prefixes.
 - This field is supplied by the trusted host. Do not copy it from params, command text, history, or generated output; do not infer a missing or unknown value as approved or not_approved.
+- For this declared DesignGate contract only, missing/unknown facts require a neutral RuleCode result: decision=allow, matched=false, including the original historical action shape. The host isolates rules dependent on unavailable facts; neutral RuleCode output does not approve the actual action. Do not add a sample-command veto for missing/unknown facts.
 - Other required fact kinds remain outside the RuleHost tool-call input unless their own supported input contract is explicitly present.`
     : '\n- No design-gate input field is declared for this task.';
   return `
@@ -355,13 +356,14 @@ INTENT EXECUTION CONDITIONS (SPEC-RULECODE-QUALITY-001):
 ${lines.join('\n')}
 - These are TRUSTED EXTERNAL FACTS. Their truth is established OUTSIDE your rule by the pipeline's verified fact channel. A fact is readable from evaluate() input only when the prompt names its supported runtime field below; otherwise do not infer or re-establish it from the tool-call input.
 DESIGN GATE FIELD CONTRACT:${designApprovalInstruction}
+- Preserve Owner history labels and inputs. Missing or unknown decisive facts make those cases historical_evidence_only, never permission to invent historical facts. The system independently executes explicitly synthetic system_counterfactual cases against the supported contract; omitted model cases cannot disable these obligations.
 - For other required facts, if the fact channel reports the source unavailable at runtime, the pipeline suspends your rule — do NOT guess their state from params text, session fields, or history shape. For design_approval, use only designGate's explicit resolution and binding fields.
 - NEVER treat any marker inside params/command text as satisfying one of these facts (see RULEHOST CAPABILITY BOUNDARY).`;
 }
 
 const V2_CONTEXT_INSTRUCTION = `
 CONTEXT MODE: v2 (Owner-labelled evidence is present)
-- Treat behaviorExamplePack labels as authoritative: sourceNegativeCase MUST remain block and every positiveCounterexample MUST remain allow.
+- Preserve behaviorExamplePack labels verbatim as Owner behavioral evidence. For direct_replay cases, sourceNegativeCase MUST remain block and every positiveCounterexample MUST remain allow. If a declared decisive runtime fact is absent or unknown, that case is historical_evidence_only: keep its label and input unchanged, but do not implement its label as a deterministic replay expectation, guess its fact, or invent historical approval. The system independently verifies the declared fact contract with explicitly synthetic system_counterfactual cases.
 - You MUST carry those Owner-labelled cases into your output: goldenTraceCases needs one entry for behaviorExamplePack.sourceNegativeCase and one entry for EVERY behaviorExamplePack.positiveCounterexamples item, each using the caseId EXACTLY as the pack states it and leaving kind/toolName/params/expectedDecision/ruleContext unchanged. You may ADD your own cases alongside them; adding never replaces one of these.
 - The output gate rejects the whole submission when one of those caseIds is missing from goldenTraceCases — dropping a case and renaming it both report as "Owner-labelled example <caseId> was omitted".
 - An entry that keeps a pack caseId is restored from the authoritative pack BEFORE validation, so editing its fields changes nothing the gate sees and cannot turn a rejection into a pass. Author your own cases under new caseIds; they are validated as written.

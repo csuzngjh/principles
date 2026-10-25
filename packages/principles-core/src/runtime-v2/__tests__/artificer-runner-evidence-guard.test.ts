@@ -417,4 +417,20 @@ describe('ArtificerRunner defensive evidence guard (PRI-981 / SPEC-PD-IAER-001 F
     expect(harness.startRun).toHaveBeenCalledTimes(1);
     expect(harness.emittedEvents.some((e) => e.eventType === 'artificer_task_retried')).toBe(false);
   });
+  it('unsupported required fact remains a pre-model capability stop even when its resolver says approved', async () => {
+    const harness = await createHarness({ behaviorExamplePack: V2_TEST_PACK,
+      trustedFacts: { resolveRequiredFact: () => ({ resolution: 'approved' }) },
+    });
+    const artifact = makeScribeArtifact();
+    const content = JSON.parse(artifact.contentJson);
+    content.executionConditions = { version: 1, requiredFacts: [{ factKind: 'unimplemented_fact', required: true,
+      textualBasis: 'read the target file before writing it' }] };
+    await harness.deps.artifactStore.upsertArtifact({ ...artifact, contentJson: JSON.stringify(content) });
+    const result = await runArtificer(harness.deps);
+    expect(result.status).toBe('failed');
+    expect(harness.startRun).not.toHaveBeenCalled();
+    const artifacts = await harness.deps.artifactStore.listBySourceTaskId(ARTIFICER_TASK_ID);
+    expect(artifacts.some((entry) => entry.validationStatus === 'validated')).toBe(false);
+    expectNoRetryPath(harness);
+  });
 });

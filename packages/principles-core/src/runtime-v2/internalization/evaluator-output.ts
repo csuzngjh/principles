@@ -1,3 +1,5 @@
+import { isRuleCodeVerificationCoverage } from './rulecode-verification-obligations.js';
+import type { RuleCodeVerificationCoverage } from './rulecode-verification-obligations.js';
 import { Type, type Static } from '@sinclair/typebox';
 import type { GoldenTraceDecision } from '../golden-trace.js';
 import type { RuleContextV2 } from './rule-context-v2.js';
@@ -81,6 +83,7 @@ export interface EvaluatorCodeReview {
 }
 
 export interface EvaluatorAdversarialResult {
+  readonly verificationCoverage?: RuleCodeVerificationCoverage;
   readonly passed: boolean;
   readonly failedCases: readonly AdversarialFailedCase[];
   /**
@@ -375,6 +378,7 @@ function validateAdversarialResult(raw: unknown): string[] {
     errors.push('adversarialResult must be an object');
     return errors;
   }
+  if (Object.hasOwn(raw, 'verificationCoverage') && !isRuleCodeVerificationCoverage(raw.verificationCoverage)) errors.push('adversarialResult.verificationCoverage must be a valid system verification report');
   if (!Object.hasOwn(raw, 'passed') || typeof raw.passed !== 'boolean') {
     errors.push('adversarialResult.passed must be a boolean');
   }

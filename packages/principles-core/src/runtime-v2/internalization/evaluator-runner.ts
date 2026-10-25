@@ -75,6 +75,7 @@ import type { GoldenTrace, GoldenTraceCase } from '../golden-trace.js';
 // PRI-485 Phase 6: auto-generate 5 v2 adversarial cases (unavailable/truncation/
 // alias/path/combination) to defend against false-positive blocks.
 import { generateV2ContextAdversarialCases } from './v2-adversarial-cases.js';
+import { deriveRuleCodeVerification } from './rulecode-verification-obligations.js';
 import { canonicalizeToolKind } from './rule-context-v2.js';
 import type { ToolSemanticMappingV1 } from './tool-semantic-registry.js';
 
@@ -672,6 +673,16 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
   }
 
   async invokeRuntime(taskId: string, context: EvaluatorContext): Promise<RunHandle> {
+    if (context.scribeArtifact !== null) {
+      let scribe: unknown;
+      try { scribe = JSON.parse(context.scribeArtifact); } catch { throw new PDRuntimeError('input_invalid', 'scribe_artifact_unparseable'); }
+      const material = deriveRuleCodeVerification(scribe, [], this.hostSemanticContext?.tools ?? []);
+      if (material.unavailable.length > 0) {
+        this.emitEvent('adversarial_replay_skipped', taskId, { reason: 'required_fact_verification_unavailable', required: material.required,
+          executed: 0, passed: 0, failed: 0, unavailable: material.unavailable, nextAction: 'restore_supported_valid_fact_contract_before_model_request' });
+        throw new PDRuntimeError('input_invalid', `required_fact_verification_unavailable:${material.unavailable.join(',')}`);
+      }
+    }
     // Single-stage evaluation is the only path — the two-stage
     // progressive_evaluator branch was retired with PRI-819 R-06.
     const { message, systemPrompt } = await this.buildEvaluatorPrompt(taskId, context);
@@ -2491,13 +2502,18 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // PRI-705 / PRI-703 Phase 2: 混合场景 (非纯 out-of-scope) 下,归因与
     // out-of-scope case 清单随载荷流动 — 修复 LLM 明确知道哪些失败属于
     // 通道设计限制(不得尝试满足),哪些是真实 Rule 缺陷(必须修复)。
+    const systemReplayChanges = ctx.diagnosticReplayEvidence?.passed === false
+      && output.evaluation.requiredChanges.length === 0 && isEvaluatorOutputV2(output)
+      ? [`[system deterministic replay] Repair the RuleCode against the executed failure evidence without inventing Owner facts: ${(output.adversarialResult?.failedCases ?? []).slice(0, 8).map((failure) =>
+        `${failure.caseId}: expected=${failure.expectedDecision}, actual=${failure.actualDecision ?? 'no decision'}, error=${failure.errorType ?? 'unknown'}; ${(failure.message ?? failure.rationale).slice(0, 160)}`).join(' | ') || 'deterministic replay failed; inspect the referenced evaluator artifact for the execution failure and restore the supported contract.'}`]
+      : [];
     const repairPayload: RepairPayload = {
       requiredChanges: completionIntent?.transitionOverrideReason === 'owner_golden_trace_provenance_missing'
         ? [
             ...output.evaluation.requiredChanges,
             'Regenerate this RuleCode from the current validated Owner BehaviorExamplePack so the persisted artifact carries the system-owned ownerGoldenTraceCases; preserve the approved principle semantics.',
           ]
-        : [...output.evaluation.requiredChanges],
+        : [...output.evaluation.requiredChanges, ...systemReplayChanges],
       concerns: [...output.evaluation.concerns],
       previousScore: output.evaluation.score,
       repairIteration: priorRepairIteration + 1,
@@ -2789,6 +2805,26 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       // examples as its independent Owner acceptance baseline.
       positiveCases = this.extractPositiveCases(goldenTraceCases);
     }
+    let scribe: unknown = null;
+    try { scribe = context.scribeArtifact === null ? null : JSON.parse(context.scribeArtifact); } catch { /* the declaration extraction below fails closed on malformed content */ }
+    const verification = deriveRuleCodeVerification(scribe, [...positiveCases, ...ownerNegativeCases], this.hostSemanticContext?.tools ?? []);
+    if (context.scribeArtifact !== null && scribe === null) verification.unavailable.push('scribe_artifact_unparseable');
+    if (verification.unavailable.length > 0) {
+      this.emitEvent('adversarial_replay_skipped', taskId, { runId, reason: 'required_fact_verification_unavailable',
+        required: verification.required, unavailable: verification.unavailable, historical: verification.historical,
+        nextAction: 'restore_valid_declared_fact_contract_and_supported_host_projection_before_replay' });
+      return { updatedOutput: null, skipReason: `required_fact_verification_unavailable:${verification.unavailable.join(',')}` };
+    }
+    positiveCases = verification.replayCases.filter((entry) => entry.kind === 'positive');
+    ownerNegativeCases = verification.replayCases.filter((entry) => entry.kind === 'negative');
+    // Explicit system contract positives can establish replay eligibility;
+    // historical evidence-only labels are preserved but never counted as pass.
+    if (positiveCases.length === 0 && verification.counterfactuals.length > 0) {
+      positiveCases = verification.counterfactuals.filter((entry) => entry.expectedDecision === 'allow').map((entry) => ({
+        caseId: entry.caseId, kind: 'positive', toolName: entry.toolName, params: entry.params,
+        expectedDecision: 'allow', ruleContext: entry.ruleContext,
+      }));
+    }
     if (positiveCases.length === 0) {
       this.emitEvent('adversarial_replay_skipped', taskId, {
         runId,
@@ -2805,7 +2841,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // PRI-634 R1: V1-shaped outputs carry no adversarialCases — the merged
     // set below then relies entirely on the auto-generated v2 cases.
     const llmCases = isEvaluatorOutputV2(output) ? (output.adversarialCases ?? []) : [];
-    const v2Cases = this.generateV2CasesFromArtificer(affectedTools, positiveCases, taskId, runId);
+    const v2Cases = verification.required.length > 0 ? [] : this.generateV2CasesFromArtificer(affectedTools, positiveCases, taskId, runId);
     if (!Array.isArray(v2Cases)) {
       this.emitEvent('v2_adversarial_cases_skipped', taskId, { runId, ...v2Cases });
       this.emitEvent('adversarial_replay_skipped', taskId, { runId, ...v2Cases });
@@ -2814,7 +2850,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     // PRI-741: host-name parity case — the rule must reach the same decision
     // under the REAL host tool name as under the author's vocabulary.
     const hostAliasCase = this.generateHostAliasCase(
-      requiresContextVersion === 2 ? ownerGoldenTraceCases : goldenTraceCases,
+      verification.required.length > 0 ? verification.replayCases : requiresContextVersion === 2 ? ownerGoldenTraceCases : goldenTraceCases,
       taskId,
       runId,
     );
@@ -2827,33 +2863,12 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       rationale: 'System-restored Owner-labelled negative behavior example; expected decision comes from the validated BehaviorExamplePack.',
       ...(ownerCase.ruleContext !== undefined ? { ruleContext: ownerCase.ruleContext } : {}),
     }));
-    // A trusted design fact scopes the invocation already. Changing its command
-    // spelling must not bypass the same denied scope (counterfactual, not history).
-    const designScopeCases: AdversarialCase[] = [];
-    if (context.scribeArtifact !== null) {
-      let scribe: unknown;
-      try { scribe = JSON.parse(context.scribeArtifact); } catch { scribe = null; }
-      const conditions = extractExecutionConditions(scribe);
-      if (!conditions.corrupted && conditions.conditions?.requiredFacts.some((fact) => fact.required && fact.factKind === 'design_approval')) {
-        for (const ownerCase of ownerNegativeCases) {
-          const fact = ownerCase.ruleContext?.facts.designGate;
-          const semantic = this.hostSemanticContext?.tools.find((tool) => tool.rawToolName === ownerCase.toolName);
-          if (semantic?.canonicalKind !== 'execute' || fact?.resolution !== 'not_approved' || !fact.requiresApproval) continue;
-          designScopeCases.push({
-            caseId: `design-scope:${ownerCase.caseId}`, attackType: 'omission', toolName: ownerCase.toolName,
-            params: { command: 'node -e "process.stdout.write(123)"' }, expectedDecision: 'block',
-            rationale: 'System-derived counterfactual: the same trusted denied invocation scope cannot depend on command spelling; not a claim about historical behavior.',
-            ruleContext: ownerCase.ruleContext,
-          });
-        }
-      }
-    }
     const mergedAdversarialCases: AdversarialCase[] = [
       ...ownerNegativeAdversarial,
-      ...designScopeCases,
+      ...verification.counterfactuals.filter((entry) => !positiveCases.some((positive) => positive.caseId === entry.caseId)),
       ...v2Cases,
       ...(hostAliasCase !== null ? [hostAliasCase] : []),
-      ...llmCases,
+      ...llmCases.filter((entry) => verification.required.length === 0 || entry.ruleContext?.facts.designGate !== undefined),
     ];
 
     // (4) No adversarial cases (neither v2-generated nor LLM-supplied) →
@@ -2996,12 +3011,34 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     const accepted = gateResult.decision === 'accepted_shadow';
     const failedCases: AdversarialFailedCase[] = accepted
       ? []
-      : this.mapFailedCases(gateResult, mergedAdversarialCases);
+      : this.mapFailedCases(gateResult, mergedAdversarialCases, mergedTrace.cases);
 
+    const failedIds = new Set(gateResult.sandboxResult.failedCases.map((entry) => entry.caseId));
+    const runtimeUnavailable = gateResult.sandboxResult.forbiddenPatternViolations.length > 0
+      || (!gateResult.sandboxResult.success && gateResult.sandboxResult.failedCases.length === 0)
+      || gateResult.sandboxResult.failedCases.some((entry) => RESERVED_SYSTEM_CASE_ID.test(entry.caseId));
+    const historyExecuted = runtimeUnavailable ? 0 : verification.replayCases.length;
+    const historyFailed = verification.replayCases.filter((entry) => failedIds.has(entry.caseId) || failedIds.has(`owner:${entry.caseId}`)).length;
+    const contractExecuted = runtimeUnavailable ? 0 : verification.counterfactuals.length;
+    const contractFailed = verification.counterfactuals.filter((entry) => failedIds.has(entry.caseId)).length;
     const adversarialResult: EvaluatorAdversarialResult = {
       passed: accepted,
       failedCases,
       ...(gateResult.failure ? { failure: { layer: gateResult.failure.layer, reasonCode: gateResult.failure.reasonCode } } : {}),
+      verificationCoverage: {
+        required: verification.required,
+        executed: runtimeUnavailable ? 0 : mergedTrace.cases.length,
+        passed: runtimeUnavailable ? 0 : mergedTrace.cases.length - gateResult.sandboxResult.failedCases.length,
+        failed: runtimeUnavailable ? 0 : gateResult.sandboxResult.failedCases.length,
+        unavailable: runtimeUnavailable ? [...verification.unavailable, 'sandbox_execution_unavailable'] : verification.unavailable,
+        historicalCoverage: { executed: historyExecuted, passed: Math.max(0, historyExecuted - historyFailed), failed: historyFailed,
+          unavailable: verification.historical.length - historyExecuted },
+        contractCoverage: { required: verification.counterfactuals.length, executed: contractExecuted,
+          passed: Math.max(0, contractExecuted - contractFailed), failed: contractFailed,
+          unavailable: verification.counterfactuals.length - contractExecuted },
+        historical: verification.historical,
+        counterfactuals: verification.counterfactuals.map((entry) => ({ caseId: entry.caseId, source: 'system_counterfactual', contract: 'DesignGateFact/v1' })),
+      },
     };
 
     return {
@@ -3286,8 +3323,14 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       };
     },
     adversarialCases: readonly AdversarialCase[],
+    executedCases: readonly GoldenTraceCase[] = [],
   ): AdversarialFailedCase[] {
     const advById = new Map(adversarialCases.map((c) => [c.caseId, c]));
+    for (const entry of executedCases) {
+      if (!advById.has(entry.caseId)) advById.set(entry.caseId, { caseId: entry.caseId, attackType: 'boundary',
+        toolName: entry.toolName, params: entry.params, expectedDecision: entry.expectedDecision,
+        rationale: 'System-executed replay case; this input is execution evidence, not a reconstructed historical fact.', ruleContext: entry.ruleContext });
+    }
     // PRI-634 PR-A (SPEC §14): the sandbox failedCase is the authority for
     // expected/actual/errorType — it sees merged positive-case failures the
     // adversarial-case list cannot. actualDecision is copied ONLY when the
@@ -3359,7 +3402,11 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     const contextState = adv.ruleContext
       ? `history ${history?.status ?? 'unknown'}${history?.truncated ? ' (truncated)' : ''}`
       : 'none';
-    const identityAndContext = `tool=${adv.toolName} | context: ${contextState}, priorReadOfTarget=${facts?.priorReadOfTarget ?? 'unknown'}, readCount=${facts?.readCount ?? 'unknown'}`;
+    const gate = facts?.designGate;
+    const designContext = gate !== undefined
+      ? `designGate=${gate.resolution}, requiresApproval=${gate.requiresApproval}, binding=${gate.taskRef === gate.decisionTaskRef && gate.specDigest === gate.decisionSpecDigest && gate.scopeRef === gate.decisionScopeRef ? 'matched' : 'mismatched'}, revoked=${gate.revoked}; `
+      : adv.caseId.startsWith('system-contract:design_approval:') ? 'designGate=missing; ' : '';
+    const identityAndContext = `tool=${adv.toolName} | context: ${designContext}${contextState}, priorReadOfTarget=${facts?.priorReadOfTarget ?? 'unknown'}, readCount=${facts?.readCount ?? 'unknown'}`;
 
     let paramsDigest: string;
     try {
@@ -3681,6 +3728,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       && hostContext.tools.every((tool) => typeof tool.rawToolName === 'string' && tool.rawToolName.trim() !== ''
         && typeof tool.canonicalKind === 'string' && tool.canonicalKind.trim() !== '');
     let requiredFactKinds: string[] | undefined;
+    let executableTrace = traceBuild.trace;
     if (typeof bearerPrincipleContentJson === 'string') {
       let scribeArtifact: unknown;
       try {
@@ -3703,10 +3751,34 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         return null;
       }
       if (executionConditions.conditions !== null) {
-        const designApprovalRequired = executionConditions.conditions.requiredFacts.some(
-          (fact) => fact.required && fact.factKind === 'design_approval',
-        );
-        if (designApprovalRequired) requiredFactKinds = ['design_approval'];
+        requiredFactKinds = [...new Set(executionConditions.conditions.requiredFacts.filter((fact) => fact.required).map((fact) => fact.factKind))];
+        if (requiredFactKinds.some((kind) => kind !== 'design_approval')) {
+          this.emitEvent('rule_assembly_failed', taskId, { runId, reason: 'required_fact_contract_unsupported', requiredFactKinds,
+            nextAction: 'provide_a_supported_runtime_fact_contract_before_assembly' });
+          return null;
+        }
+        if (requiredFactKinds.length > 0) {
+          const ownerBuild = Array.isArray(artificerParsed.ownerGoldenTraceCases)
+            ? buildGoldenTraceFromArtificer({ cases: artificerParsed.ownerGoldenTraceCases })
+            : null;
+          if (ownerBuild === null || !ownerBuild.ok) {
+            this.emitEvent('rule_assembly_failed', taskId, { runId, reason: 'owner_verification_cases_unavailable',
+              nextAction: 'restore_the_system_owned_owner_cases_before_assembly' });
+            return null;
+          }
+          const material = deriveRuleCodeVerification(scribeArtifact, ownerBuild.trace.cases, hostContext?.tools ?? []);
+          if (material.unavailable.length > 0) {
+            this.emitEvent('rule_assembly_failed', taskId, { runId, reason: 'required_fact_verification_unavailable', unavailable: material.unavailable,
+              nextAction: 'restore_valid_supported_fact_material_before_assembly' });
+            return null;
+          }
+          // The activation consumer replays this trace. Evidence-only Owner
+          // labels remain verbatim alongside it, never synthetic history.
+          executableTrace = { ...traceBuild.trace, cases: [...material.replayCases, ...material.counterfactuals.map((entry): GoldenTraceCase => ({
+            caseId: entry.caseId, kind: entry.expectedDecision === 'allow' ? 'positive' : 'negative', toolName: entry.toolName,
+            params: entry.params, expectedDecision: entry.expectedDecision, ruleContext: entry.ruleContext,
+          }))] };
+        }
       }
     }
     if (requiresContextVersion === 2 && !hasHostInputContract) {
@@ -3719,8 +3791,9 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
 
     const ruleContent = {
       implementationCode,
-      goldenTrace: traceBuild.trace,
+      goldenTrace: executableTrace,
       goldenTraceCases,
+      ...(artificerParsed.ownerGoldenTraceCases !== undefined ? { ownerGoldenTraceCases: artificerParsed.ownerGoldenTraceCases } : {}),
       affectedTools: validatedAffectedTools,
       // adversarialResult.passed === true is the precondition for this method;
       // the gate decision is therefore accepted_shadow.

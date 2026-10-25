@@ -1,3 +1,4 @@
+import { readRuleCodeVerificationContext } from '../internalization/rulecode-verification-obligations.js';
 /**
  * ArtificerL2Adapter (PRI-439 Phase 4 — tool-using L2 agent).
  *
@@ -463,6 +464,7 @@ export class ArtificerL2Adapter implements PDRuntimeAdapter {
       validator: this.validator,
       taskId,
       outputCapture,
+      verificationInput: readRuleCodeVerificationContext(input.contextItems),
       onToolExecution: (info) => {
         toolsInvoked[info.toolName] = (toolsInvoked[info.toolName] ?? 0) + 1;
         this.eventEmitter.emitTelemetry({

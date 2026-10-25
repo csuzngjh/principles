@@ -36,7 +36,7 @@ import { DefaultArtificerValidator } from '../artificer-output.js';
 import { StoreEventEmitter } from '../../store/event-emitter.js';
 import { SqliteConnection } from '../../store/sqlite-connection.js';
 import { SqlitePIArtifactStore } from '../../store/artifact/sqlite-pi-artifact-store.js';
-import { createPITaskDiagnosticJson } from '../pitask-metadata.js';
+import { createPITaskDiagnosticJson, hydratePITaskRecord } from '../pitask-metadata.js';
 import { createProductionGateDeps } from '../../activation/production-gate-deps.js';
 import type { EffectivePdConfig } from '../../config/pd-config-types.js';
 import type { PDRuntimeAdapter } from '../../runtime-protocol.js';
@@ -212,7 +212,7 @@ afterEach(async () => {
 });
 
 describe('PRI-634 PR-A: FAIL → durable evidence → repair retrieval → PASS → pi-rule', () => {
-  it('closes the full self-healing loop through the REAL deterministic replay gate', async () => {
+  it.each(['approved', 'needs_revision'] as const)('closes the full self-healing loop after model %s through the REAL deterministic replay gate', async (decision) => {
     // ── lineage: scribe task + artifact ──
     await mkTask({ id: SCRIBE_ID, kind: 'scribe', deps: [] });
     await succeed(SCRIBE_ID);
@@ -251,7 +251,7 @@ describe('PRI-634 PR-A: FAIL → durable evidence → repair retrieval → PASS 
     const evaluator1 = new EvaluatorRunner(
       {
         stateManager,
-        runtimeAdapter: scriptedAdapter(evaluatorOutput(EVAL1_ID, art1Artifact.artifactId, 'needs_revision'), evalPrompts, 'run-eval-1'),
+        runtimeAdapter: scriptedAdapter(evaluatorOutput(EVAL1_ID, art1Artifact.artifactId, decision), evalPrompts, 'run-eval-1'),
         eventEmitter: emitter,
         artifactStore: store,
         validator: new DefaultEvaluatorValidator(),
@@ -288,7 +288,7 @@ describe('PRI-634 PR-A: FAIL → durable evidence → repair retrieval → PASS 
         failedCases?: Record<string, unknown>[];
       };
     };
-    expect(eval1Content.evaluation?.decision).toBe('needs_revision'); // verdict not overridden
+    expect(eval1Content.evaluation?.decision).toBe(decision); // semantic verdict not overwritten by system replay
     expect(eval1Content.adversarialResult?.passed).toBe(false);
     const failedCases = eval1Content.adversarialResult?.failedCases ?? [];
     expect(failedCases).toHaveLength(4); // Owner positive + Owner negative + 2 context-availability cases all crashed
@@ -324,6 +324,8 @@ describe('PRI-634 PR-A: FAIL → durable evidence → repair retrieval → PASS 
     expect(seededRepairPayload.sourceEvaluatorTaskId).toBe(EVAL1_ID);
     // RepairPayload must NOT carry full failedCases (SPEC §21/§24).
     expect(Object.hasOwn(seededRepairPayload, 'failedCases')).toBe(false);
+    const seededTask = await stateManager.getTask(REPAIR_ID);
+    expect(seededTask === null ? null : hydratePITaskRecord(seededTask)).not.toBeNull();
 
     // (3) Repair round: ArtificerRunner resolves the evidence BY REFERENCE and
     // the prompt contains the concrete case details — flags OFF.

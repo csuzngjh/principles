@@ -395,6 +395,19 @@ afterEach(async () => {
 });
 
 describe('preflightArtificerIntentBasis — stop points (Q01/Q20)', () => {
+  it('unknown required facts cannot gain runtime capability from a resolver returning approved', () => {
+    const assessment = assessIntentBasis({
+      taskId: TASK_ID,
+      scribeArtifact: { artifactId: 'unknown-kind', contentJson: conditionsScribeContent([
+        { factKind: 'unimplemented_fact', required: true, textualBasis: 'Files must be read before they are written' },
+      ]) },
+      upstreamMaterial: { normalisedText: PHILOSOPHER_ANALYSIS },
+      trustedFacts: { resolveRequiredFact: () => ({ resolution: 'approved' }) },
+    });
+    expect(assessment.status, JSON.stringify(assessment)).toBe('unsupported');
+    if (assessment.status === 'executable') throw new Error('unknown runtime schema must not reach generation');
+    expect(assessment.detail).toContain('unsupported_required_fact:unimplemented_fact');
+  });
   it('Q01 legacy scribe artifact (no executionConditions) stops at needs_human_review with zero generation', async () => {
     const workspaceDir = makeWorkspace();
     await seedArtificerTask(workspaceDir, legacyScribeContent());
@@ -496,7 +509,7 @@ describe('preflightArtificerIntentBasis — stop points (Q01/Q20)', () => {
         resolveRequiredFact: () => ({ resolution: 'approved' }),
       },
     });
-    expect(assessment.status).toBe('unsupported');
+    expect(assessment.status, JSON.stringify(assessment)).toBe('unsupported');
     if (assessment.status === 'executable') throw new Error('unreachable');
     expect(assessment.reasonCode).toBe('trusted_fact_provider_absent');
   });

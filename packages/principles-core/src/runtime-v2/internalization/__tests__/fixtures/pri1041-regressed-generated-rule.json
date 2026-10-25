@@ -1,0 +1,6 @@
+{
+  "sourceArtifactId": "pi-art-artificer-52d98a96-65b9-4952-82c5-51ba2d853c53-code_tool_hook-run_artificer-52d98a96-65b9-4952-82c5-51ba2d853c53-code_tool_hook_4",
+  "codeSha256": "e41eb3eb7eee24427afb9b1720885a248e5d97ecfedacacba5148f061b27f964",
+  "provenance": "Unedited real Artificer code; saved as a regression negative control, not an approved or active rule.",
+  "implementationCode": "function evaluate(input, helpers) {\n  var a = input.action || {};\n  var cmd = (a.paramsSummary && typeof a.paramsSummary.command === 'string') ? a.paramsSummary.command : '';\n  var isSubmission = a.canonicalKind === 'execute' && /(^|[;&|(\\s])git\\s+(commit|push)\\b/.test(cmd);\n  if (!isSubmission) {\n    return { decision: 'allow', matched: false, reason: '不在设计门禁范围内（非 git 提交/推送动作），放行' };\n  }\n  var facts = (input.context && input.context.facts) ? input.context.facts : {};\n  var gate = facts.designGate;\n  var resolution = (gate && typeof gate.resolution === 'string') ? gate.resolution : 'unknown';\n  if (resolution === 'approved' || resolution === 'not_required') {\n    return { decision: 'allow', matched: true, reason: '设计门禁事实为 ' + resolution + '，允许提交' };\n  }\n  return { decision: 'block', matched: true, reason: '非简单高成本变更缺少 Owner 设计批准（designGate resolution=' + resolution + '，未知/未批准均不视为已批准），阻止 git 提交；方向授权或测试通过不能替代设计批准' };\n}"
+}
