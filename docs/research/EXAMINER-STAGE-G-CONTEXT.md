@@ -59,3 +59,12 @@ NEXT_ACTION:             将 60 RV 匿名包转交 ChatGPT AI-only 盲评 → �
 - **测试**：`__tests__/principle-learning-lab-challenge-stager.test.ts` 30 项（活体占位拒真/过期撤销/零副作用[零 RESERVE/零 actor 步/零 attempt 文件]/无旁路[STUB_STRATEGIES 全 stub 钉死]/崩溃恢复状态机不自动重试/mock 永不升格 realHostBaseline/静态无网络证明/保护态断言）；13 个 learning-lab 套件（含新增 stager）374 项全绿；`freeze --verify` 四哈希不变。1B fi8 注入点随门时序移至首个 actor 步（可观察契约不变：单元间漂移→下一单元拒）。
 - **状态不变**：Stage R=NOT_AUTHORIZED、realHostBaseline=UNKNOWN、PRI-1037=NOT_RUN、真实宿主 0、真实模型请求 0、生产写入 0。
 - **进入真实宿主验证仍缺的硬条件**（全部在 Owner/真实环境侧）：① Owner 签发 Stage R 授权（challenge-stage-authorization.v1 APPROVED，闭键集，门按需显式演进）；② 真实 Actor 传输/宿主适配器实现（现为测试替身，含 observedHostEvidence 产出的接线）；③ PRI-1037 真实宿主隔离探针执行并通过（F2 硬前置）；④ Stage G 盲评与研究结论收口（属 Stage G 流程）。
+
+## 10. Stage R 真实 Actor transport + 宿主适配器（2026-10-26 增补，分支 ai/examiner-stage-r-transport，堆叠于 #2139）
+
+- **交付**：`lib/challenge-actor-transport.mjs`（SPEC §2.2 F1/F2）——F1 直连模型 responder（复用 challenge-amd-transport 的 poster/URL guard/密钥/超时栈，OpenAI chat + json_object，身份 suffix 裁定）与 F2 宿主适配器（复用 host-actor.mjs `createCodexHostTransport` 的 `complete()`/`hostSnapshot()`：`codex exec --json` 会话/身份权威）。两者皆声明非 stub kind → 先过 #2139 授权门再动预算。
+- **runner 演进**：`runChallengeStudy`/`runControlledActorLoop` 转 async（stub 透明兼容、trace 不变）；冻结校验+armPrompt 组合提前到 actor 创建之前（漂移零副作用），factory ctx 新增 `armPrompt`（SPEC §6.2 唯一注入通道，真实 actor 缺 arm 投递即拒）；新增 ambiguous→attempt 显式 `RESULT_UNKNOWN` 结算（同 attemptId 禁自动重试、新 attemptId 新预留、预留不返还）；真实模式 attempt 增记 `actorRounds`。
+- **结果分类纪律**：beforeSend=干净拒绝；发后失败/不可解析 body/宿主 timeout=`ambiguous`→RESULT_UNKNOWN；429/5xx/finish=length/身份不匹配/宿主 nonzero_exit/no_response=已知失败；模型输出协议违规=行为性 `invalid_response`（受 maxInvalidActions 约束）。宿主证据只认 transport 自身快照：identityStatus=VERIFIED 且有 sessionId 才填 `observedHostEvidence`；UNVERIFIED/MISMATCH/无会话→null（baseline 永不 PASS）。
+- **测试**：新套件 `challenge-actor-transport.test.ts` 27 项（全注入 poster/responder/host 替身，零真实网络/宿主/凭据解析）；14 套件 401/401 全绿；freeze --verify 四哈希不变；CLI 冒烟（study 副本 36 units）过；1b/stager await 化仅机械转换（断言零弱化）。
+- **状态不变**：Stage R=NOT_AUTHORIZED、realHostBaseline=UNKNOWN、PRI-1037=NOT_RUN、真实模型请求 0、真实宿主 0、生产写入 0。
+- **真实宿主执行剩余硬条件**：① Owner 签发 Stage R 授权（含 Actor 模型/预算绑定）；② PRI-1037 探针真实宿主执行并通过（F2 前置）；③ 真实宿主环境（Codex CLI 可用、scratch 目录、身份回读）与 Owner 指派的 Actor 模型决策；④ Stage G 盲评收口。协作边界如实声明：F2 测试替身可伪造宿主快照，机器防线是门+探针+baseline 规则，防误用不防蓄意。

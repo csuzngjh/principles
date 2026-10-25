@@ -63,12 +63,15 @@ function actorView(caseVisible, runState) {
  * Drive one case with an actor. Deterministic for stub actors: same env +
  * same actor behavior → same trace. Every action, observation, budget
  * refusal, invalid action and the termination reason are recorded with a
- * strict sequence. `reserveRequest` (real-mode runs only) reserves one
- * model-request ledger slot BEFORE each actor step; a refused reservation
- * terminates the loop WITHOUT invoking the actor — the request is never
- * sent. Stub runs pass no hook and are byte-identical to Phase 1B.
+ * strict sequence. The loop is ASYNC (real F1/F2 actors answer across real
+ * transports via challenge-actor-transport.mjs); offline stubs return
+ * synchronously and are awaited transparently — their traces are unchanged.
+ * `reserveRequest` (real-mode runs only) reserves one model-request ledger
+ * slot BEFORE each actor step; a refused reservation terminates the loop
+ * WITHOUT invoking the actor — the request is never sent. Stub runs pass no
+ * hook and are byte-identical to Phase 1B.
  */
-export function runControlledActorLoop({ env, runState, caseVisible, actor, linkage, caps = DEFAULT_CHALLENGE_ACTOR_CAPS, reserveRequest = null }) {
+export async function runControlledActorLoop({ env, runState, caseVisible, actor, linkage, caps = DEFAULT_CHALLENGE_ACTOR_CAPS, reserveRequest = null }) {
   if (!actor || typeof actor.nextAction !== 'function') throw new Error('runControlledActorLoop: actor.nextAction required');
   const trace = {
     schema: ACTOR_TRACE_SCHEMA,
@@ -99,7 +102,7 @@ export function runControlledActorLoop({ env, runState, caseVisible, actor, link
         break;
       }
     }
-    const action = actor.nextAction(actorView(caseVisible, runState));
+    const action = await actor.nextAction(actorView(caseVisible, runState));
     if (action && typeof action.narrative === 'string') rec({ kind: 'narrative_carried', text: action.narrative });
     rec({ kind: 'action', action: { type: action && action.type, args: action && action.args } });
     const result = stepClaimEnvironment(env, runState, action);
