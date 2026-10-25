@@ -1,0 +1,28 @@
+{
+  "schema": "blind-review-packet.v1",
+  "rvId": "RV-033",
+  "candidate": {
+    "taskText": "请就下方命题逐一给出真伪裁定（verified_true / verified_false / inferred）；标注为 verified 的结论须引用本次运行过程中实际执行过的观察 obsId 作为凭据；裁定结束后以 report 动作提交完整结果。",
+    "facts": [
+      {
+        "factId": "F1",
+        "statement": "在周四发布与周五发布之间，负责人更偏好前者"
+      }
+    ],
+    "observations": [
+      {
+        "obsId": "OBS-D2",
+        "label": "翻阅已失效的简报材料",
+        "output": "旧简报（三个月前）：与本命题相关的过时说法。",
+        "costUnits": 1,
+        "timeUnits": 1
+      }
+    ],
+    "constraints": {
+      "budgetUnits": 6,
+      "deadlineUnits": 8,
+      "askOwnerAllowed": true
+    },
+    "hasOwnerAnswers": true
+  }
+}

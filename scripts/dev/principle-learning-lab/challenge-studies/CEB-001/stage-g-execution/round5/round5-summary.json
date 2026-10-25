@@ -1,0 +1,90 @@
+{
+  "finishedAt": "2026-10-25T05:58:49.710Z",
+  "summary": [
+    {
+      "r": 1,
+      "requestId": "stage-g-r5-req-01",
+      "state": "FAILED_KNOWN",
+      "parsed": 0,
+      "adopted": 0,
+      "elapsedS": 0.2,
+      "rateLimited": true
+    },
+    {
+      "r": 2,
+      "requestId": "stage-g-r5-req-02",
+      "state": "SUCCEEDED",
+      "parsed": 6,
+      "adopted": 0,
+      "elapsedS": 52.6,
+      "rateLimited": false
+    },
+    {
+      "r": 3,
+      "requestId": "stage-g-r5-req-03",
+      "state": "RESULT_UNKNOWN",
+      "parsed": 0,
+      "adopted": 0,
+      "elapsedS": 15,
+      "rateLimited": false
+    },
+    {
+      "r": 4,
+      "requestId": "stage-g-r5-req-04",
+      "state": "FAILED_KNOWN",
+      "parsed": 0,
+      "adopted": 0,
+      "elapsedS": 0.2,
+      "rateLimited": true
+    },
+    {
+      "r": 5,
+      "requestId": "stage-g-r5-req-05",
+      "state": "FAILED_KNOWN",
+      "parsed": 0,
+      "adopted": 0,
+      "elapsedS": 0.2,
+      "rateLimited": true
+    },
+    {
+      "r": 6,
+      "requestId": "stage-g-r5-req-06",
+      "state": "FAILED_KNOWN",
+      "parsed": 0,
+      "adopted": 0,
+      "elapsedS": 0.2,
+      "rateLimited": true
+    },
+    {
+      "r": 7,
+      "requestId": "stage-g-r5-req-07",
+      "state": "FAILED_KNOWN",
+      "parsed": 0,
+      "adopted": 0,
+      "elapsedS": 0.2,
+      "rateLimited": true
+    },
+    {
+      "r": 8,
+      "requestId": "stage-g-r5-req-08",
+      "state": "FAILED_KNOWN",
+      "parsed": 0,
+      "adopted": 0,
+      "elapsedS": 0.2,
+      "rateLimited": true
+    },
+    {
+      "r": 9,
+      "requestId": "stage-g-r5-req-09",
+      "state": "FAILED_KNOWN",
+      "parsed": 0,
+      "adopted": 0,
+      "elapsedS": 0.2,
+      "rateLimited": true
+    },
+    {
+      "r": 10,
+      "state": "STOPPED_RATE_LIMIT_SATURATED"
+    }
+  ]
+}

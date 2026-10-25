@@ -1,0 +1,14 @@
+{
+  "schema": "challenge-stage-authorization.v1",
+  "stage": "R",
+  "purpose": "Actor 答题授权（SPEC §7.2；suiteHash 冻结后须机器重校验）",
+  "status": "NOT_AUTHORIZED",
+  "note": "Phase 1A 不实现 Stage G/R 运行时授权流程，本文件为 fail-closed 占位记录。A/B/C 任何真实模型执行在本占位被替换为经 Owner 批准的授权记录前必须被拒绝（且不得挪用既有 PL 实验授权）。",
+  "requiredBindingsWhenAuthorized": [
+    "suiteHash、mappingHash、graderHash、studyPlanHash",
+    "Examiner/Actor 模型要求与执行模式（F1/F2 分级）",
+    "A/B/C 臂、题目、重复次数与顺序",
+    "每题/每臂/全 Study 请求预算与停止条件",
+    "Profile/Memory/Tool 白名单与隔离验收要求（真实宿主 F2 另需 PRI-1037 探针通过）"
+  ]
+}

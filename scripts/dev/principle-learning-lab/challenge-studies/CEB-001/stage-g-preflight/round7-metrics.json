@@ -1,0 +1,45 @@
+{
+  "schema": "stage-g-round1-metrics.v1",
+  "studyId": "CEB-001",
+  "generatedAt": "2026-10-25T06:53:45.664Z",
+  "status": "FIRST_REAL_E_CANDIDATES_ADOPTED",
+  "round7": {
+    "model": "deepseek-v4.1-flash-1017 (intern-ai discovery, points-metered free tier)",
+    "requests": {
+      "consumed": 8,
+      "remaining": 8,
+      "succeeded": 1,
+      "resultUnknown": 2,
+      "rateLimited429": 5,
+      "note": "R1 succeeded; R2 ambiguous timeout; R3-R8 channel-saturated 429 → pre-registered stop at 6 consecutive; 8 requests preserved for a quieter window"
+    },
+    "candidates": {
+      "parsed": 6,
+      "adopted": 6,
+      "rejected": 0,
+      "slotsFilled": "6/36（部分预算轮，如实记录）"
+    },
+    "expressionNovelty": {
+      "uniqueTaskTexts": "6/6",
+      "novelFactStatements": "6/6 vs B0",
+      "observationOutputs": "kept baseline（模型未改写 output——合法但如实记录）",
+      "constraints": "kept 6/6（参数网格覆盖 1/110——E 未行使参数变化权，如实记录）"
+    },
+    "goldIntegrity": "6/6 adopted carry frozen gold (merge guarantee); 0 violations; declaredBaselineMismatch=0",
+    "usage": {
+      "R1": {
+        "inputTokens": 1727,
+        "outputTokens": 3570,
+        "elapsedS": 54.9
+      },
+      "pointsEstimate": "R1 ≈ 输入1727×1000/M+输出3575×4000/M ≈ 16 墨点（名义，账面以平台为准）"
+    }
+  },
+  "cumulative": {
+    "realHttpAttempts": "AMD 32 + intern-s2 ~75（round3 404×16、round4 超时/失败 16、round5 8、round6 429×6、round7 8+探针）",
+    "modelTokensReceived": "仅 round7 R1（1727/3570）",
+    "candidatesAdoptedTotal": 6
+  },
+  "interpretation": "第一批真实有效候选落袋：6/6 表达新颖（taskText/fact 全改写、互异），Gold 零接触，骨架门+validator 全过。参数选择广度=1/110（E 未行使）——如实记录。表达质量盲评 PENDING（评审者未指派）。",
+  "remainingBudget": "8 请求（R9-R16）+ 36 槽中 30 空槽——通道饱和预注册停止保留，待窗口恢复续跑"
+}

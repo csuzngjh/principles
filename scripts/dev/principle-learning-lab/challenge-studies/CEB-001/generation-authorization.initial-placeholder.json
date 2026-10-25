@@ -1,0 +1,16 @@
+{
+  "schema": "challenge-stage-authorization.v1",
+  "stage": "G",
+  "purpose": "Examiner 出题授权（SPEC §7.1）",
+  "status": "NOT_AUTHORIZED",
+  "note": "Phase 1A 不实现 Stage G/R 运行时授权流程，本文件为 fail-closed 占位记录。题集由确定性枚举生成（challenge-suite.draft.json generator.modelCalls=0）。任何真实 LLM 出题请求在本占位被替换为经 Owner 批准的授权记录前必须被拒绝。",
+  "requiredBindingsWhenAuthorized": [
+    "inputManifestHash",
+    "mappingHash",
+    "允许模板目录及版本",
+    "Examiner 模型要求（与 Actor 实际身份不同）",
+    "最大生成轮数/请求数/token 与费用预算",
+    "数据传输/脱敏许可",
+    "候选数量、拒绝/修订上限、停止条件"
+  ]
+}

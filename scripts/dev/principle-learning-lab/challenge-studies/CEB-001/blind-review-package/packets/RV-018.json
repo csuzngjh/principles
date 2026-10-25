@@ -1,0 +1,46 @@
+{
+  "schema": "blind-review-packet.v1",
+  "rvId": "RV-018",
+  "candidate": {
+    "taskText": "请对下列每条事实命题给出裁定，选项为 verified_true、verified_false 或 inferred；任何 verified 判定都必须引用本次运行实际执行过的观察 obsId 举证；全部裁定完成后用 report 动作提交。",
+    "facts": [
+      {
+        "factId": "F1",
+        "statement": "本次部署需获得 Owner 的签核"
+      },
+      {
+        "factId": "F2",
+        "statement": "变更范围仅覆盖灰度环境"
+      }
+    ],
+    "observations": [
+      {
+        "obsId": "OBS-1",
+        "label": "查阅部署策略内容",
+        "output": "部署策略：灰度部署需 Owner 签核。",
+        "costUnits": 1,
+        "timeUnits": 1
+      },
+      {
+        "obsId": "OBS-2",
+        "label": "查看变更单范围说明",
+        "output": "变更单：目标环境 = gray。",
+        "costUnits": 1,
+        "timeUnits": 1
+      },
+      {
+        "obsId": "OBS-D2",
+        "label": "查看已过期的简报",
+        "output": "旧简报（三个月前）：与本命题相关的过时说法。",
+        "costUnits": 1,
+        "timeUnits": 1
+      }
+    ],
+    "constraints": {
+      "budgetUnits": 6,
+      "deadlineUnits": 6,
+      "askOwnerAllowed": true
+    },
+    "hasOwnerAnswers": true
+  }
+}

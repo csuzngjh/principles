@@ -1,0 +1,39 @@
+{
+  "schema": "blind-review-packet.v1",
+  "rvId": "RV-056",
+  "candidate": {
+    "taskText": "请对给出的每条事实命题分别作出裁定（可选 verified_true / verified_false / inferred）；若采用 verified 裁定，必须引用本次运行内实际执行的观察 obsId 作为证据；待所有命题裁定完毕，用 report 动作一次性提交结果。",
+    "facts": [
+      {
+        "factId": "F1",
+        "statement": "queue-relay-service 目录本身就是独立的 git 仓库"
+      },
+      {
+        "factId": "F2",
+        "statement": "此目录中的全部改动都已被提交入库"
+      }
+    ],
+    "observations": [
+      {
+        "obsId": "OBS-1",
+        "label": "运行 git rev-parse --is-inside-work-tree 验证仓库归属",
+        "output": "git rev-parse → true",
+        "costUnits": 1,
+        "timeUnits": 1
+      },
+      {
+        "obsId": "OBS-2",
+        "label": "运行 git status --porcelain 查看未提交变更",
+        "output": "git status → ' M src/relay.py'（存在未提交改动）",
+        "costUnits": 1,
+        "timeUnits": 1
+      }
+    ],
+    "constraints": {
+      "budgetUnits": 6,
+      "deadlineUnits": 8,
+      "askOwnerAllowed": true
+    },
+    "hasOwnerAnswers": false
+  }
+}

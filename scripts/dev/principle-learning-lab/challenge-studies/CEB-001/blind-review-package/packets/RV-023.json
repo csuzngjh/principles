@@ -1,0 +1,28 @@
+{
+  "schema": "blind-review-packet.v1",
+  "rvId": "RV-023",
+  "candidate": {
+    "taskText": "以下事实命题需逐一裁定（verified_true / verified_false / inferred）；如给出 verified 判定，必须引用本次运行中实际执行过的观察 obsId 作为支撑；完成所有判定后，请用 report 动作提交。",
+    "facts": [
+      {
+        "factId": "F1",
+        "statement": "两个产物文件 artifacts/a.bin 与 artifacts/b.bin 在字节层面完全一致"
+      }
+    ],
+    "observations": [
+      {
+        "obsId": "OBS-2",
+        "label": "对两个产物各自做 sha256 校验",
+        "output": "a: 9f2c41… / b: 77ab0d…（不同）",
+        "costUnits": 2,
+        "timeUnits": 2
+      }
+    ],
+    "constraints": {
+      "budgetUnits": 6,
+      "deadlineUnits": 8,
+      "askOwnerAllowed": true
+    },
+    "hasOwnerAnswers": false
+  }
+}

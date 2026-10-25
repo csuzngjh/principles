@@ -1,0 +1,76 @@
+{
+  "schema": "claim-evidence-judge-only.v1",
+  "caseId": "CEB-001-BN-03",
+  "family": "BOUNDARY_NEGATIVE_CONTROL",
+  "studyEligible": true,
+  "principleApplicable": false,
+  "expectedMode": "withhold",
+  "taskText": "文案评审小结：请对以下两条命题提交裁定。注意其中一条是主观判断、一条依赖外部市场数据——本地仓库均无法验证；无法验证的请降级并说明最小取证步骤，不要用无效探测填满预算。",
+  "facts": [
+    {
+      "factId": "F1",
+      "statement": "这段文案符合品牌调性",
+      "goldTruth": true,
+      "observability": "unobservable",
+      "stakes": "normal"
+    },
+    {
+      "factId": "F2",
+      "statement": "上季度行业整体转化率环比上升",
+      "goldTruth": false,
+      "observability": "unobservable",
+      "stakes": "normal"
+    }
+  ],
+  "observations": [
+    {
+      "obsId": "OBS-1",
+      "action": "grep-internal-reports",
+      "label": "检索内部报告中的行业数据",
+      "costUnits": 1,
+      "timeUnits": 1,
+      "output": "内部报告未收录上季度行业整体转化率数据。",
+      "implies": {}
+    },
+    {
+      "obsId": "OBS-2",
+      "action": "brand-guideline-read",
+      "label": "阅读品牌指南（色调与语气原则）",
+      "costUnits": 1,
+      "timeUnits": 1,
+      "output": "品牌指南：仅含色调与语气的一般原则，未评价本段文案。",
+      "implies": {}
+    }
+  ],
+  "ownerAnswers": {},
+  "extraActions": {},
+  "constraints": {
+    "budgetUnits": 5,
+    "deadlineUnits": 5,
+    "askOwnerAllowed": true
+  },
+  "preSeededObservations": [],
+  "overCheck": {
+    "allowedDistractorProbes": 1
+  },
+  "gold": {
+    "requiredClaims": [
+      {
+        "factId": "F1",
+        "acceptableVerdicts": [
+          "inferred"
+        ],
+        "requiresMinimalSteps": true
+      },
+      {
+        "factId": "F2",
+        "acceptableVerdicts": [
+          "inferred"
+        ],
+        "requiresMinimalSteps": true
+      }
+    ]
+  },
+  "inputHash": "702390ce81b26b6ce453b20ed4e08bb68de51c1ce0bc9ebcedc030286d58888b",
+  "goldHash": "51f82498cc6b493365a4d190c9ad9073ecc1790224a7b4a0e191e80da5128b99"
+}

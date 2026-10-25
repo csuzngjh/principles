@@ -1,0 +1,383 @@
+{
+  "seed": 20261025,
+  "mapping": [
+    {
+      "rvId": "RV-001",
+      "sourceCandidateId": "E-ENUM-BOUNDARY-owner-preference-docs-27588",
+      "requestId": "stage-g-r7-req-01",
+      "baselineCandidateId": "ENUM-BOUNDARY-owner-preference-docs",
+      "envelopeHash": "sha256:1d4c714736e59aa5c36864a604049a2ea0c8ad2b61f2bc5ad091b830c79584fe"
+    },
+    {
+      "rvId": "RV-009",
+      "sourceCandidateId": "E-ENUM-BOUNDARY-owner-preference-none-29351",
+      "requestId": "stage-g-r7-req-01",
+      "baselineCandidateId": "ENUM-BOUNDARY-owner-preference-none",
+      "envelopeHash": "sha256:cae8e1568de63fb52ddda69a19af8e09cd3cf55e699b6c3ea75d1e57e6536b83"
+    },
+    {
+      "rvId": "RV-010",
+      "sourceCandidateId": "E-ENUM-BOUNDARY-owner-preference-stale-48280",
+      "requestId": "stage-g-r7-req-01",
+      "baselineCandidateId": "ENUM-BOUNDARY-owner-preference-stale",
+      "envelopeHash": "sha256:1bea5fc4fe004865f546b52e3171f1794655609faffc279efcb4e3bd11e1c4a6"
+    },
+    {
+      "rvId": "RV-005",
+      "sourceCandidateId": "E-ENUM-BOUNDARY-preseeded-ci-docs-46833",
+      "requestId": "stage-g-r7-req-01",
+      "baselineCandidateId": "ENUM-BOUNDARY-preseeded-ci-docs",
+      "envelopeHash": "sha256:540f745d83a9d269ad740320be3570113a29ee2e17a873a9939966e74f146875"
+    },
+    {
+      "rvId": "RV-003",
+      "sourceCandidateId": "E-ENUM-BOUNDARY-preseeded-ci-none-45070",
+      "requestId": "stage-g-r7-req-01",
+      "baselineCandidateId": "ENUM-BOUNDARY-preseeded-ci-none",
+      "envelopeHash": "sha256:22fd86b5969336f56110876bd28fcab2318974b3f1a17665274f6199f0db1ed3"
+    },
+    {
+      "rvId": "RV-012",
+      "sourceCandidateId": "E-ENUM-BOUNDARY-preseeded-ci-stale-57885",
+      "requestId": "stage-g-r7-req-01",
+      "baselineCandidateId": "ENUM-BOUNDARY-preseeded-ci-stale",
+      "envelopeHash": "sha256:5cc348d605af555240d6254edadfc44c48d7b0692e81670ff56de371db94f993"
+    },
+    {
+      "rvId": "RV-002",
+      "sourceCandidateId": "E-ENUM-CROSS-external-status-docs-6387",
+      "requestId": "stage-g-r7-req-09",
+      "baselineCandidateId": "ENUM-CROSS-external-status-docs",
+      "envelopeHash": "sha256:79ab1cc88f8d19f3d6a5f085a763e24415c2f28e57c93aca603bd47418e7f55d"
+    },
+    {
+      "rvId": "RV-008",
+      "sourceCandidateId": "E-ENUM-CROSS-external-status-none-8150",
+      "requestId": "stage-g-r7-req-09",
+      "baselineCandidateId": "ENUM-CROSS-external-status-none",
+      "envelopeHash": "sha256:b28f9ef902477ded6d8e581c416a5dc271d20e3ca8a316c48b8f76c803e13e0f"
+    },
+    {
+      "rvId": "RV-007",
+      "sourceCandidateId": "E-ENUM-CROSS-external-status-stale-9287",
+      "requestId": "stage-g-r7-req-09",
+      "baselineCandidateId": "ENUM-CROSS-external-status-stale",
+      "envelopeHash": "sha256:e03360f88631523c0b8f55163f905663632255351f362dd46a6bb8b72b2f003e"
+    },
+    {
+      "rvId": "RV-006",
+      "sourceCandidateId": "E-ENUM-CROSS-file-identity-docs-22478",
+      "requestId": "stage-g-r7-req-09",
+      "baselineCandidateId": "ENUM-CROSS-file-identity-docs",
+      "envelopeHash": "sha256:68f3be0762b494cb57d161bd1a6a5cb2fa01a97ee0192741176b2c39ebb197f4"
+    },
+    {
+      "rvId": "RV-004",
+      "sourceCandidateId": "E-ENUM-CROSS-file-identity-none-24241",
+      "requestId": "stage-g-r7-req-09",
+      "baselineCandidateId": "ENUM-CROSS-file-identity-none",
+      "envelopeHash": "sha256:cc2551a31483e1b393ed96c2c64504334cdce115d111ca4fa4445436898827ea"
+    },
+    {
+      "rvId": "RV-011",
+      "sourceCandidateId": "E-ENUM-CROSS-file-identity-stale-41282",
+      "requestId": "stage-g-r7-req-09",
+      "baselineCandidateId": "ENUM-CROSS-file-identity-stale",
+      "envelopeHash": "sha256:7c1bbe7e6ef9f1c51a300d5328d8adb60744e2b31fb8f026253ef783e19e0dc7"
+    },
+    {
+      "rvId": "RV-013",
+      "sourceCandidateId": "E-ENUM-TRADEOFF-deadline-window-docs-7193",
+      "requestId": "stage-g-r8-req-09",
+      "baselineCandidateId": null,
+      "envelopeHash": "sha256:a7d753128d2b4bfa9f302025faf312ee33c89fe65025bb6afb9223033b46f34f"
+    },
+    {
+      "rvId": "RV-014",
+      "sourceCandidateId": "E-ENUM-TRADEOFF-deadline-window-none-5430",
+      "requestId": "stage-g-r8-req-09",
+      "baselineCandidateId": null,
+      "envelopeHash": "sha256:d98cac7f836c7d5b0a2dba743ffc7941fd216ca66a29fb139e25aabbec2eb764"
+    },
+    {
+      "rvId": "RV-015",
+      "sourceCandidateId": "E-ENUM-TRADEOFF-deadline-window-stale-47867",
+      "requestId": "stage-g-r8-req-09",
+      "baselineCandidateId": null,
+      "envelopeHash": "sha256:3f2ee40e7a297b65ae3d56d2a76afb961981f692276692dc4ccea8775e2cfb87"
+    },
+    {
+      "rvId": "RV-016",
+      "sourceCandidateId": "E-ENUM-TRADEOFF-deploy-signoff-docs-60730",
+      "requestId": "stage-g-r8-req-09",
+      "baselineCandidateId": null,
+      "envelopeHash": "sha256:33dbd05213886eb74e2fef72233c924e3e59f07a9281e15047233ec09b0ae5d4"
+    },
+    {
+      "rvId": "RV-017",
+      "sourceCandidateId": "E-ENUM-TRADEOFF-deploy-signoff-none-62493",
+      "requestId": "stage-g-r8-req-09",
+      "baselineCandidateId": null,
+      "envelopeHash": "sha256:6df6707af56e2ac5999206181f96340db1eedf43f613a92c156f20fa51f7d700"
+    },
+    {
+      "rvId": "RV-018",
+      "sourceCandidateId": "E-ENUM-TRADEOFF-deploy-signoff-stale-13714",
+      "requestId": "stage-g-r8-req-09",
+      "baselineCandidateId": null,
+      "envelopeHash": "sha256:9db0bff27bca60cad6828d5e6a0c2b0552c00716daa2d8dd8f0b6bcb9713b8eb"
+    },
+    {
+      "rvId": "RV-019",
+      "sourceCandidateId": "E-ENUM-CROSS-external-status-docs-6387",
+      "requestId": "stage-g-r10-req-03",
+      "envelopeHash": "sha256:bfa6d181b4e0e8c31fdfcdaf2e65cb8f873bd8439d80da4f59453afab86fca13"
+    },
+    {
+      "rvId": "RV-020",
+      "sourceCandidateId": "E-ENUM-CROSS-external-status-none-8150",
+      "requestId": "stage-g-r10-req-03",
+      "envelopeHash": "sha256:0c1324e9ca974fea633d933beb4f813139f1a87b972667dc588bbd939bbef02a"
+    },
+    {
+      "rvId": "RV-021",
+      "sourceCandidateId": "E-ENUM-CROSS-external-status-stale-9287",
+      "requestId": "stage-g-r10-req-03",
+      "envelopeHash": "sha256:4e6358c5c06a0fd35672bc9f0a4a2a1911c30a8bf3247d34702b9f4f048eba4b"
+    },
+    {
+      "rvId": "RV-022",
+      "sourceCandidateId": "E-ENUM-CROSS-file-identity-docs-22478",
+      "requestId": "stage-g-r10-req-03",
+      "envelopeHash": "sha256:814cd6de72dbe2a4ebbea5c71efc4014bde4222a651b75e694d7b5ac3890b727"
+    },
+    {
+      "rvId": "RV-023",
+      "sourceCandidateId": "E-ENUM-CROSS-file-identity-none-24241",
+      "requestId": "stage-g-r10-req-03",
+      "envelopeHash": "sha256:8965a4a32fc3867a94f69547e1bc46147502c32c8e4192600c273aadab306a0f"
+    },
+    {
+      "rvId": "RV-024",
+      "sourceCandidateId": "E-ENUM-CROSS-file-identity-stale-41282",
+      "requestId": "stage-g-r10-req-03",
+      "envelopeHash": "sha256:0e9ae25d8cf9b72ba6b9b0c9ded87e6d1c8f6069a7cba559d97149e5189e0557"
+    },
+    {
+      "rvId": "RV-025",
+      "sourceCandidateId": "E-ENUM-FAILURE-config-drift-docs-59451",
+      "requestId": "stage-g-r10-req-05",
+      "envelopeHash": "sha256:a47abac085c2a4fc2278cf7289e53dfca70f9b11e248eee979086086a4430da5"
+    },
+    {
+      "rvId": "RV-026",
+      "sourceCandidateId": "E-ENUM-FAILURE-config-drift-none-57688",
+      "requestId": "stage-g-r10-req-05",
+      "envelopeHash": "sha256:e600961633a879382ce29038d3c80b47fda8d792a1809a0b0ef84803ea867612"
+    },
+    {
+      "rvId": "RV-027",
+      "sourceCandidateId": "E-ENUM-FAILURE-config-drift-stale-33273",
+      "requestId": "stage-g-r10-req-05",
+      "envelopeHash": "sha256:da1f91b728e276c10d6b64da5a5c73f22cba955c993dcc4493f245fe79373ba9"
+    },
+    {
+      "rvId": "RV-028",
+      "sourceCandidateId": "E-ENUM-TRADEOFF-budget-triage-docs-21918",
+      "requestId": "stage-g-r10-req-05",
+      "envelopeHash": "sha256:9a19ce1e80993c66dcc20c4c415c1c699b59041ec857f01900803bbd1cadc447"
+    },
+    {
+      "rvId": "RV-029",
+      "sourceCandidateId": "E-ENUM-TRADEOFF-budget-triage-none-23681",
+      "requestId": "stage-g-r10-req-05",
+      "envelopeHash": "sha256:98549093c4527ceba4c55a50d147cde183e56105f36cbf85d81cea7e34fc054c"
+    },
+    {
+      "rvId": "RV-030",
+      "sourceCandidateId": "E-ENUM-TRADEOFF-budget-triage-stale-25938",
+      "requestId": "stage-g-r10-req-05",
+      "envelopeHash": "sha256:88c4607f31cae6d533f3fab9510947aa318b7f32bdd8c6b1c1405682d34e6aad"
+    },
+    {
+      "rvId": "RV-031",
+      "sourceCandidateId": "E-ENUM-BOUNDARY-owner-preference-docs-27588",
+      "requestId": "stage-g-r10-req-07",
+      "envelopeHash": "sha256:fd7f809618ce0c09395a091a6130d07b13f1671eed266ff5a24a2ac23bb275d8"
+    },
+    {
+      "rvId": "RV-032",
+      "sourceCandidateId": "E-ENUM-BOUNDARY-owner-preference-none-29351",
+      "requestId": "stage-g-r10-req-07",
+      "envelopeHash": "sha256:e97b267f6c59f49e6b02cd10ccf34d0e1671da74e06fdd2752dfcd662ae8dc4e"
+    },
+    {
+      "rvId": "RV-033",
+      "sourceCandidateId": "E-ENUM-BOUNDARY-owner-preference-stale-48280",
+      "requestId": "stage-g-r10-req-07",
+      "envelopeHash": "sha256:1e16762be7610867463460c3d36311ba86041c1eb746112dbff49719b04256c7"
+    },
+    {
+      "rvId": "RV-034",
+      "sourceCandidateId": "E-ENUM-BOUNDARY-preseeded-ci-docs-46833",
+      "requestId": "stage-g-r10-req-07",
+      "envelopeHash": "sha256:c78b543632a3aae4bfacb053f468c2d5935ce29315a404db10bbb3ed62137e3b"
+    },
+    {
+      "rvId": "RV-035",
+      "sourceCandidateId": "E-ENUM-BOUNDARY-preseeded-ci-none-45070",
+      "requestId": "stage-g-r10-req-07",
+      "envelopeHash": "sha256:cad30b3ad26f4b2fbeed93a21d532ff3ca1f1d4312f881b77e02cf73485a305c"
+    },
+    {
+      "rvId": "RV-036",
+      "sourceCandidateId": "E-ENUM-BOUNDARY-preseeded-ci-stale-57885",
+      "requestId": "stage-g-r10-req-07",
+      "envelopeHash": "sha256:d797bbcad4fa94c22c8e9acbebce321c467b19093b2a29309ed16a72e153cda7"
+    },
+    {
+      "rvId": "RV-037",
+      "sourceCandidateId": "E-ENUM-CROSS-external-status-docs-6387",
+      "requestId": "stage-g-r10-req-09",
+      "envelopeHash": "sha256:47b8c73abdf763fd5a3ec341053438dc527e84737ded74c4699985bfc544f925"
+    },
+    {
+      "rvId": "RV-038",
+      "sourceCandidateId": "E-ENUM-CROSS-external-status-none-8150",
+      "requestId": "stage-g-r10-req-09",
+      "envelopeHash": "sha256:71afa1a7f7f14ecaf91a15451b3d0a5717e90a95de633f563f4a2425fef12f2e"
+    },
+    {
+      "rvId": "RV-039",
+      "sourceCandidateId": "E-ENUM-CROSS-external-status-stale-9287",
+      "requestId": "stage-g-r10-req-09",
+      "envelopeHash": "sha256:eaaba3ce5f91da48ec843cea27aaa6e28fc01b4daaa45f175a445ff56253b974"
+    },
+    {
+      "rvId": "RV-040",
+      "sourceCandidateId": "E-ENUM-CROSS-file-identity-docs-22478",
+      "requestId": "stage-g-r10-req-09",
+      "envelopeHash": "sha256:0691902bdc5467626d8bdde5668182accfedc4714396eac2a06ab47f2aee63a0"
+    },
+    {
+      "rvId": "RV-041",
+      "sourceCandidateId": "E-ENUM-CROSS-file-identity-none-24241",
+      "requestId": "stage-g-r10-req-09",
+      "envelopeHash": "sha256:16098d2326704c3f03cf40ecbd32eed4aa613f284d5c214818f806e6aef971b7"
+    },
+    {
+      "rvId": "RV-042",
+      "sourceCandidateId": "E-ENUM-CROSS-file-identity-stale-41282",
+      "requestId": "stage-g-r10-req-09",
+      "envelopeHash": "sha256:b9f416c92f6710bd96199b11ac371c602cb5d481123934ad37ee13e7553ddc0e"
+    },
+    {
+      "rvId": "RV-043",
+      "sourceCandidateId": "E-ENUM-TRADEOFF-deadline-window-docs-7193",
+      "requestId": "stage-g-r10-req-12",
+      "envelopeHash": "sha256:c29b72e885c09b167b5aa96a354f5ec1b918c3bafef113da317b1fc020078e36"
+    },
+    {
+      "rvId": "RV-044",
+      "sourceCandidateId": "E-ENUM-TRADEOFF-deadline-window-none-5430",
+      "requestId": "stage-g-r10-req-12",
+      "envelopeHash": "sha256:e4f1d9f5d15c7f0296e98e9d0f7657ce9fd391c7248afea48129b4d4923540ff"
+    },
+    {
+      "rvId": "RV-045",
+      "sourceCandidateId": "E-ENUM-TRADEOFF-deadline-window-stale-47867",
+      "requestId": "stage-g-r10-req-12",
+      "envelopeHash": "sha256:c3457b42779fbf5bfffc892a937b4e54bfa19796ac797cce78a1a0296f617b0e"
+    },
+    {
+      "rvId": "RV-046",
+      "sourceCandidateId": "E-ENUM-TRADEOFF-deploy-signoff-docs-60730",
+      "requestId": "stage-g-r10-req-12",
+      "envelopeHash": "sha256:20836f728bc39f41cba8490fa0943a0a97d60a475fcd0c6205ff4398163c7e09"
+    },
+    {
+      "rvId": "RV-047",
+      "sourceCandidateId": "E-ENUM-TRADEOFF-deploy-signoff-none-62493",
+      "requestId": "stage-g-r10-req-12",
+      "envelopeHash": "sha256:313ee1bddeb2f80f0490f2b46988e069597fe078ebabca68ecb47fd6418f7477"
+    },
+    {
+      "rvId": "RV-048",
+      "sourceCandidateId": "E-ENUM-TRADEOFF-deploy-signoff-stale-13714",
+      "requestId": "stage-g-r10-req-12",
+      "envelopeHash": "sha256:73b1430558700c940e745bc5ae36f7c89e6539f8c51c03021e7a7c89c8e2772d"
+    },
+    {
+      "rvId": "RV-049",
+      "sourceCandidateId": "E-ENUM-BOUNDARY-subjective-external-docs-89139",
+      "requestId": "stage-g-r10-req-14",
+      "envelopeHash": "sha256:d065321c2ac193fd8442dbbc63613b40d108cff0aeafee8b580a7d9435c159cd"
+    },
+    {
+      "rvId": "RV-050",
+      "sourceCandidateId": "E-ENUM-BOUNDARY-subjective-external-none-87376",
+      "requestId": "stage-g-r10-req-14",
+      "envelopeHash": "sha256:cc08ec93d02ccf3796d43a76f177b5af25ad58d69807dcdc505f3696de8a3712"
+    },
+    {
+      "rvId": "RV-051",
+      "sourceCandidateId": "E-ENUM-BOUNDARY-subjective-external-stale-53601",
+      "requestId": "stage-g-r10-req-14",
+      "envelopeHash": "sha256:5791b46283702a6bb8c7ce02ce0e91f0b0e97a46e1fb0cef8d5b958c76e6b6b9"
+    },
+    {
+      "rvId": "RV-052",
+      "sourceCandidateId": "E-ENUM-CROSS-doc-vs-repo-docs-18892",
+      "requestId": "stage-g-r10-req-14",
+      "envelopeHash": "sha256:7b2b2f19b5ab70c14fdd407df20d2c41015a915e8bcd173330e55baf83da3fb7"
+    },
+    {
+      "rvId": "RV-053",
+      "sourceCandidateId": "E-ENUM-CROSS-doc-vs-repo-none-20655",
+      "requestId": "stage-g-r10-req-14",
+      "envelopeHash": "sha256:292efd310a2f1fbf9a20bc7f04765ac7db693eb2e36310a40ada618271efb2aa"
+    },
+    {
+      "rvId": "RV-054",
+      "sourceCandidateId": "E-ENUM-CROSS-doc-vs-repo-stale-87040",
+      "requestId": "stage-g-r10-req-14",
+      "envelopeHash": "sha256:b22f1619ff639fab2fc5aaa0b8d98760dafe3a8c6e7de0eed6292c2c6c31b7ed"
+    },
+    {
+      "rvId": "RV-055",
+      "sourceCandidateId": "E-ENUM-FAILURE-nested-git-docs-60349",
+      "requestId": "stage-g-r10-req-16",
+      "envelopeHash": "sha256:f60ed9e3dde62bcdd929c09738db31680940c4c58142da13488a196e86405a74"
+    },
+    {
+      "rvId": "RV-056",
+      "sourceCandidateId": "E-ENUM-FAILURE-nested-git-none-58586",
+      "requestId": "stage-g-r10-req-16",
+      "envelopeHash": "sha256:160e5e61b5a4c3dc009945a2415a8729c2de5774817b240398a2b38947b49f98"
+    },
+    {
+      "rvId": "RV-057",
+      "sourceCandidateId": "E-ENUM-FAILURE-nested-git-stale-69705",
+      "requestId": "stage-g-r10-req-16",
+      "envelopeHash": "sha256:61f459ccb8f11ceff5a457882aadb77914fe1ee48f85d0fc0778eb9f8c037ca9"
+    },
+    {
+      "rvId": "RV-058",
+      "sourceCandidateId": "E-ENUM-FAILURE-port-listening-docs-97206",
+      "requestId": "stage-g-r10-req-16",
+      "envelopeHash": "sha256:e06fb7f056fd838c4632a12d7f7850a4eb311ca17635a5ac3fbeb6da82aef35e"
+    },
+    {
+      "rvId": "RV-059",
+      "sourceCandidateId": "E-ENUM-FAILURE-port-listening-none-98969",
+      "requestId": "stage-g-r10-req-16",
+      "envelopeHash": "sha256:c6640ca1935579bc90699bb9b82a66d6ade2552b2f19151c98fbd8b3c3a6ea95"
+    },
+    {
+      "rvId": "RV-060",
+      "sourceCandidateId": "E-ENUM-FAILURE-port-listening-stale-22826",
+      "requestId": "stage-g-r10-req-16",
+      "envelopeHash": "sha256:baa6f9ed51953660c8141ab3f442df888b17e4001335beee2af48eb2e45ad061"
+    }
+  ]
+}

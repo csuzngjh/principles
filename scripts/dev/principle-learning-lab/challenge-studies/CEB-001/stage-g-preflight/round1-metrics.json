@@ -1,0 +1,66 @@
+{
+  "schema": "stage-g-round1-metrics.v1",
+  "studyId": "CEB-001",
+  "generatedAt": "2026-10-25T05:11:42.469Z",
+  "status": "E_ARM_NOT_EVALUABLE_PROVIDER_BLOCKED",
+  "denominators": {
+    "slotsPerArm": 36,
+    "paramGrid": 110,
+    "fullLegalCombos": 31680,
+    "substantiveSituations": 3960
+  },
+  "arms": {
+    "B0": {
+      "role": "historical reference",
+      "candidates": 36,
+      "validatorPass": "36/36",
+      "uniqueParamPoints": 3,
+      "structuralDuplicates": 12,
+      "modelCost": 0
+    },
+    "B1v2": {
+      "role": "primary comparator",
+      "candidates": 36,
+      "validatorPass": "36/36 (skeleton_verified)",
+      "uniqueParamPoints": 36,
+      "structuralDuplicates": 0,
+      "modelCost": 0,
+      "strategy": "b1-deterministic-strategy.v2",
+      "fullSpaceVerified": "31,680/31,680"
+    },
+    "E": {
+      "role": "experimental",
+      "candidates": 0,
+      "validatorPass": "0/0 (no responses)",
+      "slotsFilled": "0/36",
+      "uniqueParamPoints": 0,
+      "structuralDuplicates": 0,
+      "modelCost": 0,
+      "attempts": {
+        "amdGateway403": 32,
+        "internS2_round3_404": 16,
+        "internS2_round4": {
+          "resultUnknown": 14,
+          "failedKnown": 2,
+          "recoveryRefused": 1
+        }
+      },
+      "totalRealHttpAttempts": 80,
+      "modelTokensReceived": 0,
+      "failureClasses": "AMD: gateway shape-sensitive 403; intern-s2: workload exceeds 240s timeout (thinking+generation) or silent drop; 2 instant connection failures"
+    }
+  },
+  "metrics": {
+    "validatorPassRate": "E 0/36 slots（失败全保留）",
+    "gridCoverage": "B0 3/110; B1 36/110; E 0/110",
+    "fullComboCoverage": "B0 ~3/31680; B1 36/31680; E 0/31680",
+    "substantiveDiversity": "B0 3; B1 36; E 0（/3960）",
+    "expressionBlindScore": "N/A — 无 E 候选",
+    "humanRevisionMinutes": "N/A",
+    "costPerValidCandidate": "N/A（0 合格候选）",
+    "goldViolations": "0（无候选可违规）",
+    "failureSlots": "36 全部记录（gateway_rejected/timeout/connection_error/recovery_refused）"
+  },
+  "interpretation": "E 组不可判定：两次供应商（AMD 网关 403 形态敏感；intern-s2 超时/静默丢弃）均无法在冻结参数（240s/8000 输入/32768 生成/6 候选每请求）内完成工作负载。零候选 → 无从比较表达质量/多样性/成本。B0/B1 对照基线完好可复用。",
+  "nextRequiresOwner": "供应商策略（等待窗口/付费层/更换端点/暂停 E 臂）——不自动切换、不自动重试、不扩量。"
+}

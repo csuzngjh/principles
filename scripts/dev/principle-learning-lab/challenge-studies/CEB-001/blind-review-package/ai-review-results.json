@@ -1,0 +1,355 @@
+{
+  "schema": "blind-review-ai-results.v1",
+  "studyId": "CEB-001",
+  "archivedAt": "2026-10-25T10:13:36.532Z",
+  "reviewerType": "AI_ONLY_CHATGPT",
+  "round": "round7+round8 merged batch (18 candidates)",
+  "dimOrder": [
+    "mf",
+    "tv",
+    "gi",
+    "eb",
+    "bc",
+    "nd",
+    "ex",
+    "sl"
+  ],
+  "dimNames": {
+    "mf": "mechanism_fidelity",
+    "tv": "task_validity",
+    "gi": "gold_independence",
+    "eb": "evidence_binding",
+    "bc": "boundary_coverage",
+    "nd": "non_duplication",
+    "ex": "executability",
+    "sl": "safety_leakage"
+  },
+  "CRITICAL": [
+    "mf",
+    "gi",
+    "sl"
+  ],
+  "criticalGateRule": "mechanism_fidelity / gold_independence / safety_leakage 任一 fail → 候选整体无效",
+  "scores": [
+    {
+      "rvId": "RV-001",
+      "dims": {
+        "mechanism_fidelity": "P",
+        "task_validity": "P",
+        "gold_independence": "F",
+        "evidence_binding": "P",
+        "boundary_coverage": "P",
+        "non_duplication": "F",
+        "executability": "P",
+        "safety_leakage": "F"
+      },
+      "criticalGatePass": false,
+      "overallValid": false,
+      "reviewer": "AI_ONLY_CHATGPT",
+      "timestamp": null
+    },
+    {
+      "rvId": "RV-002",
+      "dims": {
+        "mechanism_fidelity": "P",
+        "task_validity": "P",
+        "gold_independence": "F",
+        "evidence_binding": "F",
+        "boundary_coverage": "P",
+        "non_duplication": "F",
+        "executability": "P",
+        "safety_leakage": "F"
+      },
+      "criticalGatePass": false,
+      "overallValid": false,
+      "reviewer": "AI_ONLY_CHATGPT",
+      "timestamp": null
+    },
+    {
+      "rvId": "RV-003",
+      "dims": {
+        "mechanism_fidelity": "P",
+        "task_validity": "P",
+        "gold_independence": "P",
+        "evidence_binding": "P",
+        "boundary_coverage": "P",
+        "non_duplication": "F",
+        "executability": "P",
+        "safety_leakage": "P"
+      },
+      "criticalGatePass": true,
+      "overallValid": true,
+      "reviewer": "AI_ONLY_CHATGPT",
+      "timestamp": null
+    },
+    {
+      "rvId": "RV-004",
+      "dims": {
+        "mechanism_fidelity": "P",
+        "task_validity": "P",
+        "gold_independence": "F",
+        "evidence_binding": "F",
+        "boundary_coverage": "P",
+        "non_duplication": "P",
+        "executability": "P",
+        "safety_leakage": "F"
+      },
+      "criticalGatePass": false,
+      "overallValid": false,
+      "reviewer": "AI_ONLY_CHATGPT",
+      "timestamp": null
+    },
+    {
+      "rvId": "RV-005",
+      "dims": {
+        "mechanism_fidelity": "P",
+        "task_validity": "P",
+        "gold_independence": "F",
+        "evidence_binding": "P",
+        "boundary_coverage": "P",
+        "non_duplication": "F",
+        "executability": "P",
+        "safety_leakage": "F"
+      },
+      "criticalGatePass": false,
+      "overallValid": false,
+      "reviewer": "AI_ONLY_CHATGPT",
+      "timestamp": null
+    },
+    {
+      "rvId": "RV-006",
+      "dims": {
+        "mechanism_fidelity": "P",
+        "task_validity": "P",
+        "gold_independence": "P",
+        "evidence_binding": "P",
+        "boundary_coverage": "P",
+        "non_duplication": "F",
+        "executability": "P",
+        "safety_leakage": "P"
+      },
+      "criticalGatePass": true,
+      "overallValid": true,
+      "reviewer": "AI_ONLY_CHATGPT",
+      "timestamp": null
+    },
+    {
+      "rvId": "RV-007",
+      "dims": {
+        "mechanism_fidelity": "P",
+        "task_validity": "P",
+        "gold_independence": "F",
+        "evidence_binding": "F",
+        "boundary_coverage": "P",
+        "non_duplication": "F",
+        "executability": "P",
+        "safety_leakage": "F"
+      },
+      "criticalGatePass": false,
+      "overallValid": false,
+      "reviewer": "AI_ONLY_CHATGPT",
+      "timestamp": null
+    },
+    {
+      "rvId": "RV-008",
+      "dims": {
+        "mechanism_fidelity": "P",
+        "task_validity": "P",
+        "gold_independence": "P",
+        "evidence_binding": "P",
+        "boundary_coverage": "P",
+        "non_duplication": "P",
+        "executability": "P",
+        "safety_leakage": "P"
+      },
+      "criticalGatePass": true,
+      "overallValid": true,
+      "reviewer": "AI_ONLY_CHATGPT",
+      "timestamp": null
+    },
+    {
+      "rvId": "RV-009",
+      "dims": {
+        "mechanism_fidelity": "P",
+        "task_validity": "P",
+        "gold_independence": "P",
+        "evidence_binding": "P",
+        "boundary_coverage": "P",
+        "non_duplication": "P",
+        "executability": "P",
+        "safety_leakage": "P"
+      },
+      "criticalGatePass": true,
+      "overallValid": true,
+      "reviewer": "AI_ONLY_CHATGPT",
+      "timestamp": null
+    },
+    {
+      "rvId": "RV-010",
+      "dims": {
+        "mechanism_fidelity": "P",
+        "task_validity": "P",
+        "gold_independence": "F",
+        "evidence_binding": "P",
+        "boundary_coverage": "P",
+        "non_duplication": "F",
+        "executability": "P",
+        "safety_leakage": "F"
+      },
+      "criticalGatePass": false,
+      "overallValid": false,
+      "reviewer": "AI_ONLY_CHATGPT",
+      "timestamp": null
+    },
+    {
+      "rvId": "RV-011",
+      "dims": {
+        "mechanism_fidelity": "P",
+        "task_validity": "P",
+        "gold_independence": "P",
+        "evidence_binding": "P",
+        "boundary_coverage": "P",
+        "non_duplication": "F",
+        "executability": "P",
+        "safety_leakage": "P"
+      },
+      "criticalGatePass": true,
+      "overallValid": true,
+      "reviewer": "AI_ONLY_CHATGPT",
+      "timestamp": null
+    },
+    {
+      "rvId": "RV-012",
+      "dims": {
+        "mechanism_fidelity": "P",
+        "task_validity": "P",
+        "gold_independence": "F",
+        "evidence_binding": "P",
+        "boundary_coverage": "P",
+        "non_duplication": "F",
+        "executability": "P",
+        "safety_leakage": "F"
+      },
+      "criticalGatePass": false,
+      "overallValid": false,
+      "reviewer": "AI_ONLY_CHATGPT",
+      "timestamp": null
+    },
+    {
+      "rvId": "RV-013",
+      "dims": {
+        "mechanism_fidelity": "P",
+        "task_validity": "P",
+        "gold_independence": "P",
+        "evidence_binding": "P",
+        "boundary_coverage": "P",
+        "non_duplication": "F",
+        "executability": "P",
+        "safety_leakage": "P"
+      },
+      "criticalGatePass": true,
+      "overallValid": true,
+      "reviewer": "AI_ONLY_CHATGPT",
+      "timestamp": null
+    },
+    {
+      "rvId": "RV-014",
+      "dims": {
+        "mechanism_fidelity": "P",
+        "task_validity": "P",
+        "gold_independence": "P",
+        "evidence_binding": "P",
+        "boundary_coverage": "P",
+        "non_duplication": "F",
+        "executability": "P",
+        "safety_leakage": "P"
+      },
+      "criticalGatePass": true,
+      "overallValid": true,
+      "reviewer": "AI_ONLY_CHATGPT",
+      "timestamp": null
+    },
+    {
+      "rvId": "RV-015",
+      "dims": {
+        "mechanism_fidelity": "P",
+        "task_validity": "P",
+        "gold_independence": "P",
+        "evidence_binding": "P",
+        "boundary_coverage": "P",
+        "non_duplication": "F",
+        "executability": "P",
+        "safety_leakage": "P"
+      },
+      "criticalGatePass": true,
+      "overallValid": true,
+      "reviewer": "AI_ONLY_CHATGPT",
+      "timestamp": null
+    },
+    {
+      "rvId": "RV-016",
+      "dims": {
+        "mechanism_fidelity": "P",
+        "task_validity": "P",
+        "gold_independence": "F",
+        "evidence_binding": "P",
+        "boundary_coverage": "P",
+        "non_duplication": "F",
+        "executability": "P",
+        "safety_leakage": "F"
+      },
+      "criticalGatePass": false,
+      "overallValid": false,
+      "reviewer": "AI_ONLY_CHATGPT",
+      "timestamp": null
+    },
+    {
+      "rvId": "RV-017",
+      "dims": {
+        "mechanism_fidelity": "P",
+        "task_validity": "P",
+        "gold_independence": "P",
+        "evidence_binding": "P",
+        "boundary_coverage": "P",
+        "non_duplication": "F",
+        "executability": "P",
+        "safety_leakage": "P"
+      },
+      "criticalGatePass": true,
+      "overallValid": true,
+      "reviewer": "AI_ONLY_CHATGPT",
+      "timestamp": null
+    },
+    {
+      "rvId": "RV-018",
+      "dims": {
+        "mechanism_fidelity": "P",
+        "task_validity": "P",
+        "gold_independence": "P",
+        "evidence_binding": "P",
+        "boundary_coverage": "P",
+        "non_duplication": "F",
+        "executability": "P",
+        "safety_leakage": "P"
+      },
+      "criticalGatePass": true,
+      "overallValid": true,
+      "reviewer": "AI_ONLY_CHATGPT",
+      "timestamp": null
+    }
+  ],
+  "summary": {
+    "total": 18,
+    "criticalGateFailures": 8,
+    "allPass": 2,
+    "nonDuplicationFails": 15,
+    "executabilityFails": 0,
+    "overallValid": 10
+  },
+  "limitations": [
+    "AI_ONLY 评审——非人类双盲",
+    "kappa/仲裁/一致性统计：PENDING（评审者未指派）",
+    "本轮结果不冒充正式 kappa 或人类盲评"
+  ],
+  "status": "AI_REVIEW_ARCHIVED_HUMAN_REVIEW_PENDING"
+}

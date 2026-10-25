@@ -1,0 +1,20 @@
+{
+  "schema": "blind-review-packet.v1",
+  "rvId": "RV-020",
+  "candidate": {
+    "taskText": "针对下面列出的事实命题，请逐一作出裁定（verified_true / verified_false / inferred）；若裁定为 verified，须引用本次运行中已实际执行的观察 obsId 作为证据；最后用 report 动作交回所有裁定结果。",
+    "facts": [
+      {
+        "factId": "F1",
+        "statement": "厂商方面已经把模型 X-7 退役"
+      }
+    ],
+    "observations": [],
+    "constraints": {
+      "budgetUnits": 6,
+      "deadlineUnits": 7,
+      "askOwnerAllowed": true
+    },
+    "hasOwnerAnswers": false
+  }
+}

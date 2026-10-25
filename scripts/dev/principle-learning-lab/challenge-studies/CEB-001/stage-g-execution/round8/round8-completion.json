@@ -1,0 +1,21 @@
+{
+  "schema": "stage-g-round-completion.v1",
+  "studyId": "CEB-001",
+  "round": "round8 (continuation)",
+  "at": "2026-10-25T08:15:47.437Z",
+  "outcome": "WINDOW_STOPPED_RATE_LIMIT_SATURATED",
+  "requests": {
+    "consumed": 6,
+    "preserved": 10,
+    "all429": true,
+    "candidates": 0,
+    "modelTokens": 0
+  },
+  "stopFired": "6 consecutive rate_limited (pre-registered) — R7-R16 preserved",
+  "eArmCumulative": {
+    "validCandidates": 12,
+    "slotsFilled": "12/36",
+    "slotsRemaining": 24
+  },
+  "note": "通道饱和贯穿本窗口；未无限重试（遵守预注册停止）；未切换模型；round8 记录全保留。authorization 保持 APPROVED+live（10 请求未消耗），后续续跑由 Owner 决定。"
+}

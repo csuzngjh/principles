@@ -1,0 +1,33 @@
+{
+  "schema": "challenge-a-baseline-contamination-audit.v1",
+  "studyId": "CEB-001",
+  "auditedAt": "2026-10-24",
+  "scope": "SPEC §6.1/§6.3 A 臂污染静态审计（Phase 1A 离线范围）",
+  "checked": [
+    { "item": "共同基线文本（commonContext）", "method": "全文审读 + normativeMarkers 扫描", "result": "CLEAN——不含原则同义规范性内容" },
+    { "item": "A 臂组合提示（commonContext+taskText，无 payload）", "method": "静态拼接扫描（auditArmIsolation）+ 单测断言", "result": "CLEAN——不含原则语句/摘要文本/normativeMarkers" },
+    { "item": "离线 stub transport 基线", "method": "代码审读（challenge-arms.mjs 仅构建配置；不 transport、不记忆、不插件）", "result": "CLEAN——离线路径无配置/记忆/插件加载入口" },
+    { "item": "题面与观察输出（actor-visible）", "method": "gold 泄漏结构检查 + 单测", "result": "CLEAN——不含真值/implies/可接受裁定等判分要素" }
+  ],
+  "unverifiableInPhase1A": [
+    { "item": "真实宿主配置/环境变量/Profile", "status": "UNKNOWN" },
+    { "item": "真实宿主 Memory/插件/Hook 实际加载内容", "status": "UNKNOWN" },
+    { "item": "底层模型先验中是否已含同义『证据绑定』规范（PRI-904 C0 曾自发使用 PD 术语）", "status": "UNKNOWN——天花板/污染风险在案" }
+  ],
+  "conclusion": {
+    "offlineStubBaseline": "SCANNED_CLEAN",
+    "realHostBaseline": "UNKNOWN",
+    "blocksRealExperiments": true,
+    "note": "UNKNOWN 项阻断 Stage R 真实实验授权，直至 PRI-1037 隔离探针通过；不得以删除历史数据/改生产记忆的方式强行制造干净基线。未来真实运行若触发饱和判据，按 SPEC 标 CONFOUNDED_BASELINE 如实报告。"
+  },
+  "pri1037EvidenceRequired": [
+    "宿主配置/环境变量/Profile 白名单：实际加载内容留痕（非仅声明清单）",
+    "Memory/插件/Hook 实际加载清单与指纹（g2 buildMemoryManifest 机制可用于真实 profile）",
+    "Actor 进程无法读取 judge-only/、Gold、评分规则、Examiner 私有内容的负向探针（故意读取→必须拒绝）",
+    "工具白名单：非实验工具/未授权网络/原用户仓库/生产治理写接口不可达的拒绝测试",
+    "每次重复独立 Session/进程/scratch/Oracle state 的运行证据",
+    "结束后跨组泄漏、生产写入与外部副作用扫描",
+    "模型先验同义规范污染无法探针排除 → 实验期按 CONFOUNDED_BASELINE 报告而非宣称纯净 A 臂"
+  ],
+  "pri1037Status": "NOT_RUN — 需要真实宿主/模型参与的探针未获授权，保持阻断"
+}

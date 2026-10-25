@@ -1,0 +1,22 @@
+{
+  "schema": "stage-g-round-completion.v1",
+  "studyId": "CEB-001",
+  "round": "round9 (continuation)",
+  "at": "2026-10-25T10:24:35.059Z",
+  "outcome": "WINDOW_STOPPED_RATE_LIMIT_SATURATED",
+  "requests": {
+    "consumed": 6,
+    "preserved": 10,
+    "all429": true,
+    "candidates": 0,
+    "modelTokens": 0
+  },
+  "stopFired": "6 consecutive rate_limited (pre-registered) — R7-R16 preserved",
+  "eArmCumulative": {
+    "validCandidates": 12,
+    "slotsFilled": "12/36",
+    "slotsRemaining": 24
+  },
+  "diagnosis": "DeepSeek free-tier channel saturation persists across multiple time windows (round8 + round9 both hit 6 consecutive 429 within minutes). This is a platform-level contention issue, not a transient spike.",
+  "note": "授权 round9 保持存活（10 请求未消耗）；后续续跑由 Owner 决定。"
+}

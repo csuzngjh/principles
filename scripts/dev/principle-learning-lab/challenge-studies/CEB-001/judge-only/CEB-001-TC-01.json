@@ -1,0 +1,130 @@
+{
+  "schema": "claim-evidence-judge-only.v1",
+  "caseId": "CEB-001-TC-01",
+  "family": "TRADEOFF_CONFLICT",
+  "studyEligible": true,
+  "principleApplicable": true,
+  "expectedMode": "resolve_conflict",
+  "taskText": "支付链路切换前的最后核查。观察预算为 4 单位：不足以核查全部四条命题。请按利害取舍：高利害事实（支付回调、兼容 shim）必须以证据裁定；低利害项如无法在预算内核查，降级为推断并说明最小取证步骤。",
+  "facts": [
+    {
+      "factId": "F1",
+      "statement": "支付回调地址已切换到新网关",
+      "goldTruth": true,
+      "observability": "observable",
+      "stakes": "high"
+    },
+    {
+      "factId": "F2",
+      "statement": "旧地址的兼容 shim 已启用",
+      "goldTruth": false,
+      "observability": "observable",
+      "stakes": "high"
+    },
+    {
+      "factId": "F3",
+      "statement": "README 中的示例 URL 已更新",
+      "goldTruth": true,
+      "observability": "observable",
+      "stakes": "low"
+    },
+    {
+      "factId": "F4",
+      "statement": "CHANGELOG 已补条目",
+      "goldTruth": true,
+      "observability": "observable",
+      "stakes": "low"
+    }
+  ],
+  "observations": [
+    {
+      "obsId": "OBS-1",
+      "action": "grep-callback-config",
+      "label": "grep 支付回调配置",
+      "costUnits": 2,
+      "timeUnits": 1,
+      "output": "pay.yaml: callback_url: https://new-gateway.local/hook",
+      "implies": {
+        "F1": "true"
+      }
+    },
+    {
+      "obsId": "OBS-2",
+      "action": "grep-shim-config",
+      "label": "grep 兼容 shim 开关",
+      "costUnits": 2,
+      "timeUnits": 1,
+      "output": "runtime.yaml: legacy_shim: disabled（未启用）",
+      "implies": {
+        "F2": "false"
+      }
+    },
+    {
+      "obsId": "OBS-3",
+      "action": "grep-readme",
+      "label": "grep README 示例 URL",
+      "costUnits": 1,
+      "timeUnits": 1,
+      "output": "README.md:12 → https://new-gateway.local/hook",
+      "implies": {
+        "F3": "true"
+      }
+    },
+    {
+      "obsId": "OBS-4",
+      "action": "grep-changelog",
+      "label": "grep CHANGELOG 条目",
+      "costUnits": 1,
+      "timeUnits": 1,
+      "output": "CHANGELOG.md 已含「switch payment callback」条目。",
+      "implies": {
+        "F4": "true"
+      }
+    }
+  ],
+  "ownerAnswers": {},
+  "extraActions": {},
+  "constraints": {
+    "budgetUnits": 4,
+    "deadlineUnits": 10,
+    "askOwnerAllowed": false
+  },
+  "preSeededObservations": [],
+  "overCheck": {
+    "allowedDistractorProbes": 0
+  },
+  "gold": {
+    "requiredClaims": [
+      {
+        "factId": "F1",
+        "acceptableVerdicts": [
+          "verified_true"
+        ]
+      },
+      {
+        "factId": "F2",
+        "acceptableVerdicts": [
+          "verified_false"
+        ]
+      },
+      {
+        "factId": "F3",
+        "acceptableVerdicts": [
+          "inferred",
+          "verified_true"
+        ],
+        "requiresMinimalSteps": true
+      },
+      {
+        "factId": "F4",
+        "acceptableVerdicts": [
+          "inferred",
+          "verified_true"
+        ],
+        "requiresMinimalSteps": true
+      }
+    ]
+  },
+  "inputHash": "2f115a3a1d075e10053e7d5cd5c5650a7994e9b8c742893b3e66f3a828f3d845",
+  "goldHash": "18d9849406ef58b50c76b964c343a033b3ef7a5548489fd81018db7ab4628fc1"
+}

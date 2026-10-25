@@ -1,0 +1,62 @@
+{
+  "schema": "claim-evidence-actor-visible.v1",
+  "caseId": "CEB-001-FV-03",
+  "templateId": "T-CLAIM-EVIDENCE-BINDING-V1",
+  "templateVersion": "1.0.0",
+  "taskText": "一次批量修改后的收尾核查：请逐条裁定以下配置落位事实。verified 结论必须引用实际执行的观察 obsId。",
+  "facts": [
+    {
+      "factId": "F1",
+      "statement": "主配置文件中的重试间隔已是 2000ms"
+    },
+    {
+      "factId": "F2",
+      "statement": "脚本 check.sh 中的重试间隔引用也已同步更新"
+    }
+  ],
+  "availableObservations": [
+    {
+      "obsId": "OBS-1",
+      "action": "grep-main-config",
+      "label": "grep 主配置文件 interval",
+      "costUnits": 1,
+      "timeUnits": 1
+    },
+    {
+      "obsId": "OBS-2",
+      "action": "grep-check-sh",
+      "label": "grep check.sh 中的 interval",
+      "costUnits": 1,
+      "timeUnits": 1
+    },
+    {
+      "obsId": "OBS-3",
+      "action": "read-pr-description",
+      "label": "阅读 PR #512 描述",
+      "costUnits": 1,
+      "timeUnits": 1
+    }
+  ],
+  "preSeededEvidence": [],
+  "constraints": {
+    "budgetUnits": 6,
+    "deadlineUnits": 6,
+    "askOwnerAllowed": true
+  },
+  "reportSchema": {
+    "action": {
+      "type": "report",
+      "args": {
+        "claims": [
+          {
+            "factId": "string",
+            "verdict": "verified_true|verified_false|inferred",
+            "evidenceRef": "string? (obsId of an executed observation — including OBS-OWNER-* or pre-seeded evidence)",
+            "minimalSteps": "string? (required by some cases when verdict=inferred)"
+          }
+        ]
+      }
+    },
+    "note": "evidenceRef 必须引用本次运行中实际执行成功的观察 obsId；仅引用未执行/被拒绝的观察不构成证据。"
+  }
+}

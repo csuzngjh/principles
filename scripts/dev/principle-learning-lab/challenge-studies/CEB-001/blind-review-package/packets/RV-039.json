@@ -1,0 +1,28 @@
+{
+  "schema": "blind-review-packet.v1",
+  "rvId": "RV-039",
+  "candidate": {
+    "taskText": "请对下述每个事实命题作出裁定（verified_true / verified_false / inferred）；verified 类结论只能以本次运行中已执行的观察 obsId 作证据；最终用 report 动作提交全部裁定结果。",
+    "facts": [
+      {
+        "factId": "F1",
+        "statement": "模型 X-7 已由供应商完成退役"
+      }
+    ],
+    "observations": [
+      {
+        "obsId": "OBS-D2",
+        "label": "翻阅过时简报",
+        "output": "旧简报（三个月前）：与本命题相关的过时说法。",
+        "costUnits": 1,
+        "timeUnits": 1
+      }
+    ],
+    "constraints": {
+      "budgetUnits": 6,
+      "deadlineUnits": 9,
+      "askOwnerAllowed": true
+    },
+    "hasOwnerAnswers": false
+  }
+}

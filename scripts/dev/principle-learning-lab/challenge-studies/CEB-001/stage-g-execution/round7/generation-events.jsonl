@@ -1,0 +1,19 @@
+{"seq":1,"type":"REQUEST_PREPARED_EVENT","requestId":"stage-g-r7-req-01","payloadHash":"db5f3f1cde5eb1b0a2c60263748fa041df7bc0631d6de2edb7c5d574f27c9086"}
+{"seq":2,"type":"REQUEST_PREPARED_EVENT","requestId":"stage-g-r7-req-02","payloadHash":"42c4630bff3c6762e71ef9e13bb8192c4ec601719b6fdb246ff08938d31f9e3c"}
+{"seq":3,"type":"REQUEST_AMBIGUOUS","requestId":"stage-g-r7-req-02","detail":"ambiguous outcome (request possibly sent, no response): poster failed after dispatch: request timeout after 240000ms (total)"}
+{"seq":4,"type":"REQUEST_PREPARED_EVENT","requestId":"stage-g-r7-req-03","payloadHash":"86fcc8b618d7b8d9df41a5b1161af70953fd9ede76c4e60babc66d84e408c77f"}
+{"seq":5,"type":"REQUEST_PREPARED_EVENT","requestId":"stage-g-r7-req-04","payloadHash":"5362e1bec3bfe356df09e8148553cabb84fafef72da58d3cc58bc59d208541c5"}
+{"seq":6,"type":"REQUEST_PREPARED_EVENT","requestId":"stage-g-r7-req-05","payloadHash":"eba2f3da2f2bb4ee4ccdacefd9ea118ac7083685dbc80286733ffd31b7d577b7"}
+{"seq":7,"type":"REQUEST_PREPARED_EVENT","requestId":"stage-g-r7-req-06","payloadHash":"04626e235e8e17a4fd62c2b6ba3b980f8a722a83cd66473970098fe7f9509800"}
+{"seq":8,"type":"REQUEST_PREPARED_EVENT","requestId":"stage-g-r7-req-07","payloadHash":"db5f3f1cde5eb1b0a2c60263748fa041df7bc0631d6de2edb7c5d574f27c9086"}
+{"seq":9,"type":"REQUEST_PREPARED_EVENT","requestId":"stage-g-r7-req-08","payloadHash":"42c4630bff3c6762e71ef9e13bb8192c4ec601719b6fdb246ff08938d31f9e3c"}
+{"seq":10,"type":"REQUEST_REFUSED","requestId":"stage-g-r7-req-02","reason":"result_unknown_no_auto_retry"}
+{"seq":11,"type":"REQUEST_PREPARED_EVENT","requestId":"stage-g-r7-req-09","payloadHash":"86fcc8b618d7b8d9df41a5b1161af70953fd9ede76c4e60babc66d84e408c77f"}
+{"seq":12,"type":"REQUEST_PREPARED_EVENT","requestId":"stage-g-r7-req-10","payloadHash":"5362e1bec3bfe356df09e8148553cabb84fafef72da58d3cc58bc59d208541c5"}
+{"seq":13,"type":"REQUEST_AMBIGUOUS","requestId":"stage-g-r7-req-10","detail":"ambiguous outcome (request possibly sent, no response): poster failed after dispatch: request timeout after 240000ms (total)"}
+{"seq":14,"type":"REQUEST_PREPARED_EVENT","requestId":"stage-g-r7-req-11","payloadHash":"eba2f3da2f2bb4ee4ccdacefd9ea118ac7083685dbc80286733ffd31b7d577b7"}
+{"seq":15,"type":"REQUEST_PREPARED_EVENT","requestId":"stage-g-r7-req-12","payloadHash":"04626e235e8e17a4fd62c2b6ba3b980f8a722a83cd66473970098fe7f9509800"}
+{"seq":16,"type":"REQUEST_PREPARED_EVENT","requestId":"stage-g-r7-req-13","payloadHash":"db5f3f1cde5eb1b0a2c60263748fa041df7bc0631d6de2edb7c5d574f27c9086"}
+{"seq":17,"type":"REQUEST_PREPARED_EVENT","requestId":"stage-g-r7-req-14","payloadHash":"42c4630bff3c6762e71ef9e13bb8192c4ec601719b6fdb246ff08938d31f9e3c"}
+{"seq":18,"type":"REQUEST_PREPARED_EVENT","requestId":"stage-g-r7-req-15","payloadHash":"86fcc8b618d7b8d9df41a5b1161af70953fd9ede76c4e60babc66d84e408c77f"}
+{"seq":19,"type":"REQUEST_PREPARED_EVENT","requestId":"stage-g-r7-req-16","payloadHash":"5362e1bec3bfe356df09e8148553cabb84fafef72da58d3cc58bc59d208541c5"}
