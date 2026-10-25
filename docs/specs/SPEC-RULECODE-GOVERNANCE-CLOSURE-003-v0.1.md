@@ -1,11 +1,11 @@
 # SPEC-RULECODE-GOVERNANCE-CLOSURE-003 v0.1
 
-- 状态：完整设计草案，待 Owner 书面确认；不是实施或生产操作授权。
+- 状态：Owner 已于本会话 2026-10-25 回复“同意”，批准 A+B 工程实施；不构成生产规则审批或激活授权。
 - 日期：2026-10-25。
 - 工单：PRI-1042；关联复验 PRI-1043、PRI-1044；明确排除 PRI-1045。
 - 源码审计基线：28514160413e7e7bbeac2049703ea4acb86f8b7b（产品 2.3.12）。
-- 本文编写边界：只读源码调查和文档；未修改源码、安装、配置、生产状态或审批。
-- Owner 当前指令“用子代理完成剩余工作”已授权推进剩余工程。本文新增归属治理语义尚未经过具体设计确认；按 Owner 的设计确认原则先交审阅，获批后在既有工程授权内连续实现，不重复请求常规实施许可。
+- 设计形成时的证据边界：只读源码调查和文档；实施证据另记验收报告，不追溯改变历史证据。
+- Owner 已批准本文具体设计，连续实现、验证、提交推送；生产规则批准、shadow/live 决策仍独立执行。
 
 ## 1. 问题与成功标准
 
@@ -156,6 +156,12 @@ Artificer/Evaluator 调用前及最终发布前再次检查当前关系与版本
 
 ### 7.2 已生成的 null 身份链
 
+实施期真实 SQLite 复验更正：现有 `pi_artifacts` 的 `(source_task_id, artifact_kind)` 唯一键及 upsert 会替换旧 artifactId，单靠新 run ID 不能保存历史。为满足本节已批准的历史不变要求，现有表增加派生 `revision_epoch`（历史默认 0），唯一键改为 `(source_task_id, artifact_kind, revision_epoch)`；不增加第二份工件库。存储从原任务元数据确定 epoch，调用方不能自报；同 epoch 保留原幂等行为，跨 epoch 保留旧行。listBySourceTaskId 保持当前输出投影（只返回最新 epoch），旧工件通过 getArtifactById 及原审批引用继续可读；修订读取再按成功 resultRef 校验本轮工件，缺失时停止而非读旧版。绑定修订复用现有 reopen 状态语义，并用已有 task CAS 同时检查 metadata/status/lease/budget，关闭无条件写入的竞争窗口。
+
+此迁移由正常运行时 schema 初始化执行，代理不直接迁移生产库。开始保存多轮工件后，不承诺旧二进制仍可写入；回退须保留数据库并使用兼容此 schema 的构建，禁止为了恢复旧唯一键删历史。迁移验证必须包括旧格式升级、再次打开、双轮工件及原审批引用均可读。
+
+一次绑定修复预算由现有任务元数据中的 `ruleBindingRevisionCauseId` 保存执行回执；它不是关联权威。不能把既有普通 Owner 修订的 `revisionCount > 0` 直接当作绑定修复预算已耗尽。首次绑定修复递增原累计计数，保留既有 repair/rollout 预算；同 cause 幂等，已有绑定修复回执则不因撤回、重绑或后来普通修订而获得第二次预算。
+
 增加一个窄 orchestration 入口，不声称现有 owner-resolution service 已支持此动作。它验证 candidate→Dreamer→Philosopher→Scribe 的生产依赖、唯一目标、终态与最新 binding，禁止调用者任意传入其他链的 Scribe。
 
 使用现有 `reopenTaskForRevision`，causeId 为 `rule-binding:<candidateId>:<bindingRevision>`。每个 binding revision 最多启动一次受控修订；相同 cause 在任何任务状态下都是真 no-op。检查既有预算，且该修复每候选本轮最多一次新 revision；失败后显示人工处置，不循环授予自己新 revision。明确区分同 epoch 的执行/transport attempt 与新 epoch 的 revision 总预算：沿用 `reopenTaskForRevision` 的正常行为，在新 revision 中将 attemptCount 重置为 0（`revision-reopen.ts:118–125`）；这不是扩大 revision/repair 总预算。预算不足不重置 revisionCount/repair 总预算，不换 task ID 或 binding revision 给本轮修复续命。
@@ -220,7 +226,7 @@ ERR 路由：重点是 Pattern Index 的单一事实/lineage一致性、真实�
 | 项目 | 判断 | 说明 |
 |---|---|---|
 | New durable source of truth | NO（owner/存储权威）；新增事实种类 YES | 复用唯一 Ledger 单写者，不建平行 authority；Owner rule-candidate binding/revoke 是新增持久化治理事实语义，不能借同文件说“没有新事实” |
-| New persisted schema/state | YES | ruleCandidateBindings 和派生工件 receipt；现有 reuse/activation 语义不能合法容纳该关系；round-trip/兼容回退验证 |
+| New persisted schema/state | YES | ruleCandidateBindings、派生工件 receipt、原任务中的一次修订预算回执，以及原工件表 revision_epoch；现有关系和旧唯一键不能容纳关联事实/不可变历史；round-trip、旧 schema 升级和兼容回退验证 |
 | New subsystem/service/background process | NO | 现有 Ledger、Console、revision、消费者内的窄连接 |
 | New public abstraction/interface | YES | 候选身份 resolver、认证绑定/审阅/修订接口；隐藏多来源/并发/目标校验，禁止调用方手编事实 |
 | New runtime feature flag | NO | 回退入口/兼容构建及既有通道控制已足够 |

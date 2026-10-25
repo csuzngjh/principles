@@ -1,0 +1,50 @@
+import { afterEach, describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createRuntimeStateHandle, type RuntimeStateHandle } from '../../../runtime-state-handle.js';
+import { createPITaskDiagnosticJson } from '../../../internalization/pitask-metadata.js';
+
+describe('PI artifact revision migration preserves governance references', () => {
+  let dir: string;
+  let handle: RuntimeStateHandle | undefined;
+  afterEach(async () => { await handle?.close(); if (dir) rmSync(dir, { recursive: true, force: true }); });
+  it('upgrades the old two-column index, preserves the old artifact and approval, and survives reopening', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'pd-artifact-revisions-'));
+    handle = await createRuntimeStateHandle({ workspaceDir: dir });
+    const metadata = (revisionCount: number) => createPITaskDiagnosticJson({ dependencyTaskIds: [], channel: 'code_tool_hook', timeoutMs: 1000, inputArtifactRefs: [], outputArtifactRefs: [], revisionCount });
+    await handle.stateManager.createTask({ taskId: 'scribe', taskKind: 'scribe', status: 'succeeded', attemptCount: 1, maxAttempts: 3, diagnosticJson: metadata(0) });
+    const original = { artifactId: 'old-artifact', artifactKind: 'principle' as const, sourceTaskId: 'scribe', lineageArtifactIds: [], validationStatus: 'validated' as const, contentJson: '{"text":"original evidence"}', createdAt: '2026-10-20T00:00:00.000Z', updatedAt: '2026-10-20T00:00:00.000Z' };
+    await handle.stateManager.piArtifactStore.upsertArtifact(original);
+    const db = handle.stateManager.connection.getDb();
+    db.prepare("INSERT INTO approvals (approval_id,artifact_id,channel,risk_level,status,requested_at) VALUES ('prior-approval',?,'prompt','low','pending',?)").run(original.artifactId, original.createdAt);
+    // A real legacy on-disk index, not a mock of the migration implementation.
+    db.exec('DROP INDEX idx_pi_artifacts_idempotency; ALTER TABLE pi_artifacts DROP COLUMN revision_epoch; CREATE UNIQUE INDEX idx_pi_artifacts_idempotency ON pi_artifacts(source_task_id,artifact_kind)');
+    await handle.close();
+    handle = await createRuntimeStateHandle({ workspaceDir: dir, readonly: true, bootstrapIfMissing: false });
+    expect(await handle.stateManager.piArtifactStore.listBySourceTaskId('scribe')).toEqual([original]);
+    expect(handle.stateManager.connection.getDb().prepare('PRAGMA table_info(pi_artifacts)').all()).not.toContainEqual(expect.objectContaining({ name: 'revision_epoch' }));
+    await handle.close();
+    handle = await createRuntimeStateHandle({ workspaceDir: dir });
+    await handle.stateManager.updateTask('scribe', { diagnosticJson: metadata(1) });
+    const revised = { ...original, artifactId: 'new-artifact', contentJson: '{"text":"new revision"}' };
+    await handle.stateManager.piArtifactStore.upsertArtifact(revised);
+    expect(await handle.stateManager.piArtifactStore.getArtifactById(original.artifactId)).toEqual(original);
+    expect(await handle.stateManager.piArtifactStore.getArtifactById(revised.artifactId)).toEqual(revised);
+    expect(await handle.stateManager.piArtifactStore.listBySourceTaskId('scribe')).toEqual([revised]);
+    await handle.stateManager.piArtifactStore.upsertArtifact(revised);
+    expect(await handle.stateManager.piArtifactStore.listBySourceTaskId('scribe')).toEqual([revised]);
+    await handle.close();
+    handle = await createRuntimeStateHandle({ workspaceDir: dir });
+    expect(handle.stateManager.connection.getDb().prepare('SELECT artifact_id FROM approvals WHERE approval_id=?').get('prior-approval')).toEqual({ artifact_id: original.artifactId });
+    expect(await handle.stateManager.piArtifactStore.getArtifactById(original.artifactId)).toEqual(original);
+    expect(await handle.stateManager.piArtifactStore.listBySourceTaskId('scribe')).toEqual([revised]);
+    expect(handle.stateManager.connection.getDb().prepare('SELECT COUNT(*) AS count FROM pi_artifacts WHERE source_task_id=?').get('scribe')).toEqual({ count: 2 });
+    await handle.stateManager.updateTask('scribe', { diagnosticJson: '{"pi_metadata":{"revisionCount":2}}' });
+    await expect(handle.stateManager.piArtifactStore.upsertArtifact({ ...original, artifactId: 'corrupt-fallback' })).rejects.toThrow('artifact_revision_metadata_invalid');
+    expect(await handle.stateManager.piArtifactStore.getArtifactById(original.artifactId)).toEqual(original);
+    await handle.stateManager.updateTask('scribe', { diagnosticJson: '{}' });
+    await expect(handle.stateManager.piArtifactStore.upsertArtifact({ ...original, artifactId: 'missing-fallback' })).rejects.toThrow('artifact_revision_epoch_regressed');
+    expect(await handle.stateManager.piArtifactStore.getArtifactById(original.artifactId)).toEqual(original);
+  });
+});

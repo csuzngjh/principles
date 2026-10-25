@@ -880,6 +880,10 @@ export async function runInternalizationConsumerCycle(
             // identity on the live production chain. listForCandidate reads
             // the ledger from disk per call — no cross-cycle staleness.
             ledgerIdentity: {
+              resolveForCandidate: async (candidateId: string) => {
+                const candidate = await stateManager.getCandidate(candidateId);
+                return new PrincipleTreeLedgerAdapter({ stateDir: `${workspaceDir}/.state` }).resolveCandidatePrincipleIdentity(candidateId, candidate?.rawRecommendationKind);
+              },
               // PRI-915: availability first — an unreadable ledger must not
               // read as an unresolved chain.
               isAvailable: (): boolean =>
@@ -895,6 +899,10 @@ export async function runInternalizationConsumerCycle(
         runner = new ArtificerRunner(
           {
             stateManager, runtimeAdapter: adapter, eventEmitter: storeEmitter, artifactStore: stateManager.piArtifactStore, validator: new DefaultArtificerValidator(),
+            ledgerIdentity: { resolveForCandidate: async (candidateId: string) => {
+              const candidate = await stateManager.getCandidate(candidateId);
+              return new PrincipleTreeLedgerAdapter({ stateDir: `${workspaceDir}/.state` }).resolveCandidatePrincipleIdentity(candidateId, candidate?.rawRecommendationKind);
+            } },
             // PRI-982 (SPEC-PD-IAER-001 FR-02): the preflight-assembled Owner
             // evidence pack — present only when the authoritative channel is
             // code_tool_hook AND the readiness gate returned ready (same
@@ -939,6 +947,10 @@ export async function runInternalizationConsumerCycle(
             // PRI-915: availability first — an unreadable ledger must surface
             // as identity_source_unavailable, not as invalid_identity drift.
             ledgerIdentity: {
+              resolveForCandidate: async (candidateId: string) => {
+                const candidate = await stateManager.getCandidate(candidateId);
+                return new PrincipleTreeLedgerAdapter({ stateDir: `${workspaceDir}/.state` }).resolveCandidatePrincipleIdentity(candidateId, candidate?.rawRecommendationKind);
+              },
               isAvailable: (): boolean =>
                 new PrincipleTreeLedgerAdapter({ stateDir: `${workspaceDir}/.state` }).isAvailable(),
               hasPrinciple: (principleId: string) =>

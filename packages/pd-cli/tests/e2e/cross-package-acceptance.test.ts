@@ -1,3 +1,4 @@
+import { seedCandidateMaterial } from '../helpers/candidate-identity-fixture.js';
 /**
  * Cross-Package Acceptance Test — PRI-408 (P1/P2 fixes)
  *
@@ -248,6 +249,7 @@ function makeTmpDir(): string {
 }
 
 async function seedDreamerWithId(sm: RuntimeStateManager, taskId: string, painId: string, candidateId?: string): Promise<void> {
+  if (candidateId) await seedCandidateMaterial(sm, candidateId);
   const baseMetadata = JSON.parse(createPITaskDiagnosticJson({
     dependencyTaskIds: [], channel: 'code_tool_hook', timeoutMs: 1000, inputArtifactRefs: [], outputArtifactRefs: [],
   })) as Record<string, unknown>;

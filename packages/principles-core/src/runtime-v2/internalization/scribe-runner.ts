@@ -25,6 +25,8 @@
  * @see docs/adr/0003-peer-agent-state-machine-orchestration.md
  * @see BasePeerRunner in runner/base-peer-runner.ts
  */
+import type { CandidatePrincipleIdentityResolution } from '../adapter/principle-tree-ledger-adapter.js';
+import type { CandidateIdentityPort } from './candidate-identity.js';
 import type { RunHandle } from '../runtime-protocol.js';
 import type { ScribeOutputV1, ScribeValidator } from './scribe-output.js';
 import { normalizeStringEncodedIntentContract } from './scribe-output.js';
@@ -47,11 +49,13 @@ import type {
   PeerRunnerValidationResult,
 } from '../runner/peer-runner-types.js';
 import type { OutputLanguage } from '../language-directive.js';
+import { validateCandidateIdentityReceipt } from '../principle-tree/rule-candidate-binding.js';
 
 // ── Scribe-specific context ──────────────────────────────────────────────────
 
 /** Context built by ScribeRunner.buildContext() and consumed by invokeRuntime(). */
 interface ScribeContext {
+  readonly identityAtStart?: CandidatePrincipleIdentityResolution;
   readonly contextHash: string;
   readonly philosopherArtifact: string;
   readonly sourcePhilosopherArtifactId: string;
@@ -168,7 +172,7 @@ export interface ScribeRunnerDeps extends PeerRunnerDeps {
    * PRI-915: `isAvailable` separates an unreadable ledger (transient outage,
    * surfaced in the skip event reason) from a genuinely unresolved chain.
    */
-  readonly ledgerIdentity?: {
+  readonly ledgerIdentity?: Partial<CandidateIdentityPort> & {
     readonly isAvailable: () => boolean;
     readonly listForCandidate: (candidateId: string) => readonly { readonly id: string }[];
   };
@@ -189,6 +193,37 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
     });
     this.validator = deps.validator;
     this.ledgerIdentity = deps.ledgerIdentity;
+  }
+
+  /** Identity absence awaits Owner action and consumes no model attempt. */
+  override async run(taskId: string): Promise<PeerRunnerResult<ScribeOutputV1>> {
+    if (this.ledgerIdentity?.resolveForCandidate) {
+      const task = await this.stateManager.getTask(taskId);
+      if (task && (task.status === 'pending' || task.status === 'retry_wait') && hydratePITaskRecord(task)?.channel === 'code_tool_hook') {
+        const context = await this.buildContext(taskId);
+        const identity = await this.resolveCurrentIdentity(context);
+        if (identity.status !== 'resolved') {
+          const reason = identity.reason === 'ledger_unavailable' ? 'identity_source_unavailable' : 'awaiting_owner_binding';
+          const diagnostic: unknown = task.diagnosticJson ? JSON.parse(task.diagnosticJson) : {};
+          const metadata = diagnostic !== null && typeof diagnostic === 'object' && !Array.isArray(diagnostic) ? diagnostic : {};
+          await this.stateManager.updateTaskIfDiagnosticJsonUnchanged(taskId, task.diagnosticJson ?? null, {
+            status: 'needs_human_review',
+            diagnosticJson: JSON.stringify({ ...metadata, identityPreflight: { reason, detail: identity.reason, nextAction: identity.nextAction } }),
+          }, { expectedStatus: task.status, expectedLeaseOwner: null, expectedLeaseExpiresAt: null });
+          this.emitEvent('identity_preflight_blocked', taskId, { reason, detail: identity.reason, modelRequests: 0 });
+          return { status: 'failed', taskId, errorCategory: 'input_invalid', failureReason: `${reason}:${identity.reason}`, attemptCount: task.attemptCount };
+        }
+      }
+    }
+    return super.run(taskId);
+  }
+
+  private async resolveCurrentIdentity(context: ScribeContext): Promise<CandidatePrincipleIdentityResolution> {
+    const dreamer = context.sourceDreamerArtifactId ? await this.artifactStore.getArtifactById(context.sourceDreamerArtifactId) : null;
+    const task = dreamer?.sourceTaskId ? await this.stateManager.getTask(dreamer.sourceTaskId) : null;
+    const candidateId = candidateIdFromDreamerSeed(task?.diagnosticJson) ?? candidateIdFromDreamerTaskId(dreamer?.sourceTaskId);
+    if (!candidateId || !this.ledgerIdentity?.resolveForCandidate) return { status: 'unresolved', reason: 'candidate_missing', nextAction: 'Inspect the persisted dreamer lineage.' };
+    return this.ledgerIdentity.resolveForCandidate(candidateId);
   }
 
   // ── Abstract implementations ───────────────────────────────────────────────
@@ -264,13 +299,15 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
             : []),
         ];
 
-        return {
+        const context: ScribeContext = {
           contextHash: BasePeerRunner.hashContextRefs(contextRefs),
           philosopherArtifact: firstArtifact.contentJson,
           sourcePhilosopherArtifactId: firstArtifact.artifactId,
           sourceDreamerArtifactId,
           ...(formationContext !== undefined ? { formationContext } : {}),
         };
+        return this.ledgerIdentity?.resolveForCandidate
+          ? { ...context, identityAtStart: await this.resolveCurrentIdentity(context) } : context;
       }
     }
 
@@ -435,9 +472,26 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
     // write the artifact unstamped with an observable event — the activation
     // boundary then refuses or resolves from lineage; never a guess.
     let stampedPrincipleId: string | null = null;
+    const identity = this.ledgerIdentity?.resolveForCandidate ? await this.resolveCurrentIdentity(context) : null;
+    if (identity?.status === 'resolved' && hydratePITaskRecord(task)?.channel === 'code_tool_hook'
+      && !validateCandidateIdentityReceipt(context.identityAtStart, identity)) {
+      await this.stateManager.updateTask(taskId, { status: 'needs_human_review' });
+      this.emitEvent('identity_preflight_blocked', taskId, { reason: 'identity_changed_during_generation', nextAction: 'review_binding_and_preserve_the_current_revision_budget' });
+      return { status: 'failed', taskId, errorCategory: 'input_invalid', failureReason: 'identity_changed_during_generation', attemptCount: task.attemptCount };
+    }
+    if (identity && identity.status !== 'resolved' && hydratePITaskRecord(task)?.channel === 'code_tool_hook') {
+      await this.stateManager.updateTask(taskId, { status: 'needs_human_review' });
+      this.emitEvent('identity_preflight_blocked', taskId, { reason: identity.reason, nextAction: identity.nextAction });
+      return { status: 'failed', taskId, errorCategory: 'input_invalid', failureReason: identity.reason, attemptCount: task.attemptCount };
+    }
+    const receipt = identity?.status === 'resolved' ? {
+      candidateId: identity.candidateId, basis: identity.basis, principleId: identity.principleId,
+      ...(identity.bindingRevision !== undefined ? { bindingRevision: identity.bindingRevision } : {}),
+      ...(identity.decisionId !== undefined ? { decisionId: identity.decisionId } : {}),
+    } : undefined;
     if (this.ledgerIdentity) {
       try {
-        stampedPrincipleId = await this.resolveLedgerStampPrincipleId(context);
+        stampedPrincipleId = identity?.status === 'resolved' ? identity.principleId : await this.resolveLedgerStampPrincipleId(context);
       } catch (stampErr) {
         this.emitEvent('identity_stamp_failed', taskId, {
           runId,
@@ -469,7 +523,7 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
         lineageArtifactIds,
         validationStatus: 'pending',
         ...(stampedPrincipleId !== null ? { sourcePrincipleId: stampedPrincipleId } : {}),
-        contentJson: JSON.stringify(output),
+        contentJson: JSON.stringify({ ...output, ...(receipt ? { identityResolution: receipt } : {}) }),
         createdAt: now,
         updatedAt: now,
       });

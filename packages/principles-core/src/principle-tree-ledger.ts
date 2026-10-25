@@ -16,6 +16,9 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { randomUUID } from 'node:crypto';
+import { RuleCandidateBindingCorruptionError, computeRuleCandidateReviewDigest, isRuleCandidateMaterial, isCanonicalBindingPrincipleId, isBindingDigest } from './runtime-v2/principle-tree/rule-candidate-binding.js';
+import type { RuleCandidateBindingSources, RuleCandidateBindingMutation, RuleCandidateBindingMutationResult, RuleCandidateBindingReview, RuleCandidateBindingFailure } from './runtime-v2/types/rule-candidate-binding.js';
 
 // PRI-443: Types and constants now live in the pure module
 import type {
@@ -148,7 +151,7 @@ function getLedgerFilePath(stateDir: string): string {
 export type LedgerFileAvailability =
   | { status: 'ok' }
   | { status: 'empty' }
-  | { status: 'unreadable'; problem: string };
+  | { status: 'unreadable'; problem: string; corrupt?: boolean };
 
 export function readLedgerFileState(stateDir: string): {
   ledger: HybridLedgerStore;
@@ -168,7 +171,7 @@ export function readLedgerFileState(stateDir: string): {
   } catch (err: unknown) {
     return {
       ledger: { trainingStore: {}, tree: createEmptyTree() },
-      availability: { status: 'unreadable', problem: err instanceof Error ? err.message : String(err) },
+      availability: { status: 'unreadable', problem: err instanceof Error ? err.message : String(err), ...(err instanceof RuleCandidateBindingCorruptionError ? { corrupt: true } : {}) },
     };
   }
 }
@@ -416,10 +419,29 @@ async function withLockAsync<T>(filePath: string, fn: () => Promise<T>, options?
  * lock. Single source of truth since PRI-459: every mutation (sync + async)
  * acquires `<file>.lock`, eliminating the dual-writer lost-update class.
  */
+/**
+ * Thrown when the ledger file's content is not trustworthy for a read-modify-
+ * write: it parses to an empty principles tree while the file exists on disk
+ * (empty, corrupt, or truncated), or an entity's persisted reuseEvidence field
+ * has a malformed shape. Unlike a missing principle, writing over this state
+ * would DESTROY ledger content, so the write refuses instead of proceeding
+ * (rc-3).
+ */
+export class LedgerIntegrityError extends Error {
+  public readonly filePath: string;
+  constructor(message: string, filePath: string) {
+    super(message);
+    this.name = 'LedgerIntegrityError';
+    this.filePath = filePath;
+  }
+}
+
 function mutateLedger<T>(stateDir: string, mutate: (store: HybridLedgerStore) => T): T {
   const filePath = getLedgerFilePath(stateDir);
   return withLock(filePath, () => {
-    const store = readLedgerFileState(stateDir).ledger;
+    const state = readLedgerFileState(stateDir);
+    if (state.availability.status === 'unreadable') throw new LedgerIntegrityError(`ledger_unavailable (refusing empty principles tree fallback): ${state.availability.problem}`, filePath);
+    const store = state.ledger;
     const result = mutate(store);
     const dir = path.dirname(filePath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -437,7 +459,9 @@ async function mutateLedgerAsync<T>(
 ): Promise<T> {
   const filePath = getLedgerFilePath(stateDir);
   return withLockAsync(filePath, async () => {
-    const store = readLedgerFileState(stateDir).ledger;
+    const state = readLedgerFileState(stateDir);
+    if (state.availability.status === 'unreadable') throw new LedgerIntegrityError(`ledger_unavailable (refusing empty principles tree fallback): ${state.availability.problem}`, filePath);
+    const store = state.ledger;
     const result = await mutate(store);
     const dir = path.dirname(filePath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -457,7 +481,7 @@ export function loadLedger(stateDir: string): HybridLedgerStore {
 export function saveLedger(stateDir: string, store: HybridLedgerStore): void {
   mutateLedger(stateDir, (current) => {
     current.trainingStore = store.trainingStore;
-    current.tree = store.tree;
+    current.tree = { ...current.tree, ...store.tree, ...(current.tree.ruleCandidateBindings && !Object.hasOwn(store.tree, 'ruleCandidateBindings') ? { ruleCandidateBindings: current.tree.ruleCandidateBindings } : {}) };
   });
 }
 
@@ -492,22 +516,7 @@ export function updatePrinciple(stateDir: string, principleId: string, updates: 
 // PRI-917 PR3B: reuse evidence append (SPEC v0.2.1 §12)
 // ---------------------------------------------------------------------------
 
-/**
- * Thrown when the ledger file's content is not trustworthy for a read-modify-
- * write: it parses to an empty principles tree while the file exists on disk
- * (empty, corrupt, or truncated), or an entity's persisted reuseEvidence field
- * has a malformed shape. Unlike a missing principle, writing over this state
- * would DESTROY ledger content, so the write refuses instead of proceeding
- * (rc-3).
- */
-export class LedgerIntegrityError extends Error {
-  public readonly filePath: string;
-  constructor(message: string, filePath: string) {
-    super(message);
-    this.name = 'LedgerIntegrityError';
-    this.filePath = filePath;
-  }
-}
+
 
 const REUSE_EVIDENCE_KEYS: readonly string[] = [
   'painId',
@@ -525,13 +534,13 @@ const REUSE_EVIDENCE_KEYS: readonly string[] = [
  * writer re-validates at this boundary: any malformed or unexpected field
  * refuses the write — a half-valid evidence row must never land in the ledger.
  */
-function validateReuseEvidenceEntry(entry: ReuseEvidenceEntry): void {
+export function validateReuseEvidenceEntry(entry: unknown): asserts entry is ReuseEvidenceEntry {
   const refuse = (detail: string): never => {
     throw new Error(
       `appendReuseEvidence: malformed reuse evidence entry (${detail}) — refusing to write (fail closed).`,
     );
   };
-  if (!isRecord(entry)) refuse(`expected an object, got ${typeof entry}`);
+  if (!isRecord(entry)) return refuse(`expected an object, got ${typeof entry}`);
   for (const key of Object.keys(entry)) {
     if (!REUSE_EVIDENCE_KEYS.includes(key)) refuse(`unknown field "${key}"`);
   }
@@ -540,7 +549,7 @@ function validateReuseEvidenceEntry(entry: ReuseEvidenceEntry): void {
     refuse('candidateId must be a non-empty string');
   }
   if (entry.decision !== 'reuse') refuse('decision must be exactly "reuse"');
-  if (!isRecord(entry.actor)) refuse('actor must be an object');
+  if (!isRecord(entry.actor)) return refuse('actor must be an object');
   if (entry.actor.kind !== 'owner' && entry.actor.kind !== 'ai_owner') {
     refuse('actor.kind must be "owner" or "ai_owner"');
   }
@@ -926,7 +935,7 @@ export function findActiveImplementation(stateDir: string, ruleId: string): Impl
 export async function saveLedgerAsync(stateDir: string, store: HybridLedgerStore): Promise<void> {
   await mutateLedgerAsync(stateDir, async (current) => {
     current.trainingStore = store.trainingStore;
-    current.tree = store.tree;
+    current.tree = { ...current.tree, ...store.tree, ...(current.tree.ruleCandidateBindings && !Object.hasOwn(store.tree, 'ruleCandidateBindings') ? { ruleCandidateBindings: current.tree.ruleCandidateBindings } : {}) };
   });
 }
 
@@ -937,4 +946,124 @@ export function updateTrainingStore(
   mutateLedger(stateDir, (store) => {
     mutate(store.trainingStore);
   });
+}
+
+
+function bindingFailure(reason: string): RuleCandidateBindingFailure {
+  return { ok: false, reason, nextAction: 'Reload the binding review; preserve existing evidence and resolve the reported conflict before retrying.' };
+}
+
+async function eligibleBindingTarget(principle: LedgerPrinciple, sources: RuleCandidateBindingSources): Promise<boolean> {
+  if (!isCanonicalBindingPrincipleId(principle.id) || !['candidate', 'probation', 'active'].includes(principle.status)
+    || !Array.isArray(principle.derivedFromPainIds) || principle.derivedFromPainIds.length === 0) return false;
+  for (const candidateId of principle.derivedFromPainIds) {
+    const material = await sources.loadCandidateMaterial(candidateId);
+    if (!isRuleCandidateMaterial(material, candidateId, 'principle')) return false;
+  }
+  return true;
+}
+
+export async function createRuleCandidateBindingReview(
+  stateDir: string, candidateId: string,
+  options: { sources: RuleCandidateBindingSources; search?: string; limit?: number },
+): Promise<RuleCandidateBindingReview> {
+  const { sources } = options;
+  const state = readLedgerFileState(stateDir);
+  if (state.availability.status === 'unreadable') return bindingFailure(state.availability.corrupt ? 'ledger_corrupt' : 'ledger_unavailable');
+  const currentBinding = Object.hasOwn(state.ledger.tree.ruleCandidateBindings ?? {}, candidateId)
+    ? state.ledger.tree.ruleCandidateBindings?.[candidateId]?.revisions.at(-1) ?? null : null;
+  try {
+    // Review remains reachable for revocation even if historical source material disappeared.
+    let candidateMaterial;
+    try { candidateMaterial = await sources.loadCandidateMaterial(candidateId); }
+    catch (error) { if (currentBinding?.action !== 'bind') throw error; }
+    if (currentBinding?.action === 'bind' && !isRuleCandidateMaterial(candidateMaterial, candidateId, 'rule')) {
+      const unavailable = { candidate: null, task: null, run: null, artifact: null };
+      return { ok: true, candidateId, candidateMaterial: unavailable, reviewedCandidateDigest: currentBinding.reviewedCandidateDigest,
+        currentRevision: currentBinding.revision, currentBinding, eligibleTargets: [] };
+    }
+    if (!candidateMaterial) return bindingFailure('candidate_missing');
+    if (!isRuleCandidateMaterial(candidateMaterial, candidateId, 'rule')) return bindingFailure('candidate_ineligible');
+    if (currentBinding?.action === 'bind') {
+      return { ok: true, candidateId, candidateMaterial, reviewedCandidateDigest: currentBinding.reviewedCandidateDigest,
+        currentRevision: currentBinding.revision, currentBinding, eligibleTargets: [] };
+    }
+    const eligibleTargets: { principle: LedgerPrinciple; reviewedPrincipleDigest: string }[] = [];
+    const limit = Math.max(1, Math.min(20, Number.isInteger(options.limit) ? options.limit ?? 20 : 20));
+    const search = (options.search ?? '').trim().toLowerCase();
+    for (const principle of Object.values(state.ledger.tree.principles)) {
+      if (search && !principle.id.toLowerCase().includes(search) && !(typeof principle.text === 'string' && principle.text.toLowerCase().includes(search))) continue;
+      if (await eligibleBindingTarget(principle, sources)) eligibleTargets.push({ principle, reviewedPrincipleDigest: computeRuleCandidateReviewDigest(principle) });
+      if (eligibleTargets.length >= limit) break;
+    }
+    return { ok: true, candidateId, candidateMaterial, reviewedCandidateDigest: computeRuleCandidateReviewDigest(candidateMaterial), currentRevision: currentBinding?.revision ?? 0, currentBinding, eligibleTargets };
+  } catch { return bindingFailure('review_source_unavailable'); }
+}
+
+export async function mutateRuleCandidateBinding(
+  stateDir: string, input: RuleCandidateBindingMutation, sources: RuleCandidateBindingSources,
+): Promise<RuleCandidateBindingMutationResult> {
+  const filePath = getLedgerFilePath(stateDir);
+  try {
+    return await withLockAsync(filePath, async () => {
+      const state = readLedgerFileState(stateDir);
+      if (state.availability.status === 'unreadable') return bindingFailure(state.availability.corrupt ? 'ledger_corrupt' : 'ledger_unavailable');
+      if (!isRecord(input) || typeof input.candidateId !== 'string' || !input.candidateId.trim()
+        || !isRecord(input.owner) || typeof input.owner.actorId !== 'string' || !input.owner.actorId.trim() || input.owner.source !== 'authenticated_console'
+        || !isRecord(input.request)) return bindingFailure('invalid_request');
+      const {request} = input;
+      const allowed = request.action === 'bind'
+        ? ['action', 'principleId', 'expectedRevision', 'expectedCandidateDigest', 'expectedPrincipleDigest', 'reason', 'requestId', 'resumeOnce']
+        : ['action', 'expectedRevision', 'reason', 'requestId', 'resumeOnce'];
+      if (Object.keys(request).some(key => !allowed.includes(key)) || !['bind', 'revoke'].includes(request.action)
+        || !Number.isInteger(request.expectedRevision) || request.expectedRevision < 0
+        || typeof request.reason !== 'string' || !request.reason.trim() || request.reason.length > 2000
+        || typeof request.requestId !== 'string' || !request.requestId.trim() || request.requestId.length > 200
+        || (request.action === 'bind' && (request.resumeOnce !== true || !isCanonicalBindingPrincipleId(request.principleId) || !isBindingDigest(request.expectedCandidateDigest) || !isBindingDigest(request.expectedPrincipleDigest)))
+        || (request.action === 'revoke' && request.resumeOnce !== false)) return bindingFailure('invalid_request');
+      const bindings = state.ledger.tree.ruleCandidateBindings ?? {};
+      const history = Object.hasOwn(bindings, input.candidateId) ? bindings[input.candidateId] : undefined;
+      const current = history?.revisions.at(-1);
+      const success = (binding: NonNullable<typeof current>, status: 'bound' | 'already_bound' | 'revoked' | 'already_revoked'): RuleCandidateBindingMutationResult =>
+        ({ ok: true, status, binding, runtimeDeactivated: false, inFlightOperationsMayComplete: true });
+      // Workspace scoping is provided by this ledger file; actor/request keys are global within it.
+      for (const binding of Object.values(bindings)) for (const revision of binding.revisions) {
+        if (revision.owner.actorId !== input.owner.actorId || revision.requestId !== request.requestId) continue;
+        const same = binding.candidateId === input.candidateId && revision.action === request.action && revision.reason === request.reason
+          && revision.revision - 1 === request.expectedRevision && (request.action !== 'bind' || (revision.principleId === request.principleId
+            && revision.reviewedCandidateDigest === request.expectedCandidateDigest && revision.reviewedPrincipleDigest === request.expectedPrincipleDigest));
+        return same ? success(revision, revision.action === 'bind' ? 'already_bound' : 'already_revoked') : bindingFailure('idempotency_conflict');
+      }
+      if ((current?.revision ?? 0) !== request.expectedRevision) return bindingFailure('stale_revision');
+      let principleId: string;
+      let reviewedCandidateDigest: string;
+      let reviewedPrincipleDigest: string;
+      if (request.action === 'revoke') {
+        if (!current) return bindingFailure('binding_missing');
+        if (current.action === 'revoke') return success(current, 'already_revoked');
+        ({ principleId, reviewedCandidateDigest, reviewedPrincipleDigest } = current);
+      } else {
+        const candidateMaterial = await sources.loadCandidateMaterial(input.candidateId);
+        if (!candidateMaterial) return bindingFailure('candidate_missing');
+        if (!isRuleCandidateMaterial(candidateMaterial, input.candidateId, 'rule')) return bindingFailure('candidate_ineligible');
+        const principle = Object.hasOwn(state.ledger.tree.principles, request.principleId) ? state.ledger.tree.principles[request.principleId] : undefined;
+        if (!principle) return bindingFailure('target_missing');
+        if (!await eligibleBindingTarget(principle, sources)) return bindingFailure('target_ineligible');
+        reviewedCandidateDigest = computeRuleCandidateReviewDigest(candidateMaterial);
+        reviewedPrincipleDigest = computeRuleCandidateReviewDigest(principle);
+        if (request.expectedCandidateDigest !== reviewedCandidateDigest || request.expectedPrincipleDigest !== reviewedPrincipleDigest) return bindingFailure('stale_digest');
+        principleId = principle.id;
+        if (current?.action === 'bind') return current.principleId === principleId ? success(current, 'already_bound') : bindingFailure('binding_conflict');
+      }
+      const revision = { revision: (current?.revision ?? 0) + 1, decisionId: randomUUID(), requestId: request.requestId,
+        action: request.action, principleId, reason: request.reason, decidedAt: new Date().toISOString(),
+        owner: { actorId: input.owner.actorId, source: 'authenticated_console' as const }, reviewedCandidateDigest, reviewedPrincipleDigest };
+      const nextBindings = { ...bindings, [input.candidateId]: { ...(history ?? {}), candidateId: input.candidateId, revisions: [...(history?.revisions ?? []), revision] } };
+      state.ledger.tree.ruleCandidateBindings = nextBindings;
+      const dir = path.dirname(filePath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      atomicWriteFileSync(filePath, serializeLedger(state.ledger));
+      return success(revision, revision.action === 'bind' ? 'bound' : 'revoked');
+    });
+  } catch { return bindingFailure('binding_write_unavailable'); }
 }

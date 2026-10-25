@@ -108,7 +108,11 @@ export async function dispatchRolloutActivation(
     // used to mint the principle UUID); candidate lineage reuses the artifact
     // read model plus raw diagnostic_json reads.
     const ledgerIdentity = {
-      ledger: new PrincipleTreeLedgerAdapter({ stateDir: `${workspaceDir}/.state` }),
+      getCandidateKind: (candidateId: string): unknown => {
+      const row: unknown = connection.getDb().prepare('SELECT recommendation_kind FROM principle_candidates WHERE candidate_id = ?').get(candidateId);
+      return row !== null && typeof row === 'object' && Object.hasOwn(row, 'recommendation_kind') ? Reflect.get(row, 'recommendation_kind') : undefined;
+    },
+    ledger: new PrincipleTreeLedgerAdapter({ stateDir: `${workspaceDir}/.state` }),
       getArtifactById: artifactReadModel.getArtifactById,
       getTaskDiagnosticJson: (taskId: string): string | null => {
         try {

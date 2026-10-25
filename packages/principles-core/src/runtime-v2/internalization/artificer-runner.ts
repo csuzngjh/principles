@@ -49,7 +49,7 @@ import { projectDreamerProposals, summarizeCandidateDifferences } from './format
 // PRI-741: the host semantic projection DTO travels with the runner options,
 // so it is re-exported alongside them (barrel exports it from this module).
 export type { ArtificerHostSemanticContext };
-import { reconcileLineageEcho } from './peer-runner-contracts.js';
+import { reconcileLineageEcho, selectTaskRevisionArtifact } from './peer-runner-contracts.js';
 import type { PIArtifactStore } from './pi-artifact.js';
 import {
   resolveRepairReplayContext,
@@ -63,6 +63,7 @@ import type {
   PeerRunnerValidationResult,
 } from '../runner/peer-runner-types.js';
 import type { EffectivePdConfig } from '../config/pd-config-types.js';
+import { verifyArtifactCandidateIdentity, type CandidateIdentityPort } from './candidate-identity.js';
 
 // ── Artificer-specific context ──────────────────────────────────────────────
 
@@ -214,6 +215,7 @@ export function resolveArtificerRunnerOptions(options: ArtificerRunnerOptions): 
 // ── Dependencies (backward-compatible; extends PeerRunnerDeps) ───────────────
 
 export interface ArtificerRunnerDeps extends PeerRunnerDeps {
+  readonly ledgerIdentity?: CandidateIdentityPort;
   readonly validator: ArtificerValidator;
   /**
    * PRI-780: v2-only generation. The pack stays optional at the type level
@@ -583,6 +585,7 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
   /** SPEC-RULECODE-QUALITY-001 A1: defensive intent-basis guard's trusted-facts port. */
   private readonly trustedFacts: ArtificerTrustedFactsPort | undefined;
   private readonly hostSemanticContext: ArtificerHostSemanticContext | undefined;
+  private readonly ledgerIdentity: CandidateIdentityPort | undefined;
 
   constructor(deps: ArtificerRunnerDeps, options: ArtificerRunnerOptions) {
     super(deps, options, {
@@ -598,6 +601,7 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
     this.behaviorExamplePack = deps.behaviorExamplePack;
     this.trustedFacts = deps.trustedFacts;
     this.hostSemanticContext = options.hostSemanticContext;
+    this.ledgerIdentity = deps.ledgerIdentity;
   }
 
   /**
@@ -787,7 +791,7 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
 
       const artifacts = await this.artifactStore.listBySourceTaskId(depId);
       if (artifacts.length > 0) {
-        const [firstArtifact] = artifacts;
+        const firstArtifact = selectTaskRevisionArtifact(depTask, artifacts, hydratePITaskRecord(depTask)?.revisionCount ?? 0);
         if (!firstArtifact) continue;
         const artifactRef = firstArtifact.artifactId;
         this.emitEvent('scribe_dep_selected', taskId, {
@@ -840,6 +844,15 @@ export class ArtificerRunner extends BasePeerRunner<ArtificerContext, ArtificerR
   async invokeRuntime(taskId: string, context: ArtificerContext): Promise<RunHandle> {
     if (!context.scribeArtifact || !context.sourceScribeArtifactId) {
       throw new PDRuntimeError('input_invalid', 'Scribe dependency artifact not resolved');
+    }
+    if (context.channel !== 'prompt' && this.ledgerIdentity) {
+      const source = await this.artifactStore.getArtifactById(context.sourceScribeArtifactId);
+      if (!source) throw new PDRuntimeError('input_invalid', 'candidate_identity_unavailable:scribe_missing');
+      await verifyArtifactCandidateIdentity(source, {
+        ledger: this.ledgerIdentity,
+        getArtifactById: id => this.artifactStore.getArtifactById(id),
+        getTaskDiagnosticJson: async id => (await this.stateManager.getTask(id))?.diagnosticJson ?? null,
+      });
     }
 
     let scribeArtifactInput: unknown;
