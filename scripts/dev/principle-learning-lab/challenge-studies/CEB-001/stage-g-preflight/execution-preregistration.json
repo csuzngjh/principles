@@ -1,0 +1,120 @@
+{
+  "schema": "challenge-stage-g-execution-preregistration.v1",
+  "studyId": "CEB-001",
+  "status": "FROZEN_PRE_EXECUTION",
+  "frozenAt": "2026-10-25T02:49:21.488Z",
+  "frozenBeforeAnyEResult": true,
+  "basis": {
+    "spec": "SPEC-PD-EXAMINER-001 v0.4",
+    "comparisonDesign": "protocol-b0-b1-e-comparison.draft.json v2",
+    "ownerDirective": "Stage G 首轮真实实验执行指令（2026-10-25）"
+  },
+  "arms": {
+    "B0": "历史冻结 36（enumerateCandidates，不修改）",
+    "B1": "b1-deterministic-strategy.v2（enumerateCandidatesB1 全验后选择）",
+    "E": "amd-radeon-tokenfactory/GLM-5.3-Flash 受约束生成（本轮）"
+  },
+  "model": {
+    "provider": "amd-radeon-tokenfactory",
+    "modelId": "GLM-5.3-Flash",
+    "deploymentStatus": "experimental",
+    "baseUrl": "https://developer.amd.com.cn/radeon/api/v1",
+    "responseFormat": "json_object",
+    "reasoningEffort": "max（探针 C 已验证完整 JSON 返回）",
+    "maxTokens": 32768,
+    "inputTokenCap": 8000,
+    "requestTimeoutMs": 240000
+  },
+  "costModel": "AMD 免费层：模型费用记 0 美元；服务器名义 usage.cost 仅审计备注。美元与平台额度不混算。",
+  "requestPlan": {
+    "totalRequests": 16,
+    "retriesIncluded": true,
+    "resultUnknownRetry": false,
+    "slices": "预注册确定性分片：R1-R6 覆盖遍历（combinationSlice offset=(r-1)*6, limit=6，覆盖全部 36 骨架点各一次）；R7-R16 表达细化遍历（offset=((r-7)*6)%36, limit=6）——固定公式，不依结果调整",
+    "perRequestCandidateCap": 6,
+    "slots": "SLOT-E-001..036，采纳候选按到达顺序入槽（记账于 generation 账本）"
+  },
+  "metrics": [
+    "validatorPassRate(36槽含失败)",
+    "budgetDeadlineGridCoverage(唯一参数点/110)",
+    "fullLegalComboCoverage(唯一完整组合/31680)",
+    "substantiveDecisionDiversity(实质情境键/3960)",
+    "expressionQualityBlindScore(待盲评)",
+    "structuralDuplicateRate(三级去重)",
+    "humanRevisionMinutes(盲评阶段)",
+    "costPerValidCandidate(模型费0+人工分账)",
+    "goldIndependenceViolations&answerHints",
+    "failureSlots&RESULT_UNKNOWN"
+  ],
+  "denominatorRules": "失败槽/拒绝/RESULT_UNKNOWN 全量保留在 36 槽分母；评审缺失出 kappa 分母留层1分母；不得事后收缩",
+  "instabilityHandling": "网络层失败/不可解析→RESULT_UNKNOWN（不自动重试、额度消耗保留）；429→FAILED_KNOWN+Retry-After 记录；16 请求耗尽即止，不因不稳定扩量；不换供应商",
+  "stopConditions": [
+    "16 请求（含重试）耗尽",
+    "授权过期/撤销/halted",
+    "模型身份不匹配（transport 拒绝）",
+    "Owner 手动停止"
+  ],
+  "conclusionBoundaries": "结论仅相对预注册 B1 v2 基线；表达质量/参数选择/人工成本三面可判；盲评未落实前如实标记 PENDING，不冒充已完成",
+  "frozenRefsNote": "mappingHash/suiteHash/graderHash/preregistrationHash 见 hashes.json；本轮执行记录写入 stage-g-execution/round1/（不触碰任何冻结文件）",
+  "revisions": [
+    {
+      "revision": "r2-addendum-1",
+      "at": "2026-10-25T03:10:36.392Z",
+      "event": "round1 INVALIDATED_BY_INFRASTRUCTURE_DEFECT",
+      "detail": "round1 全部 16 请求在网关层 HTTP 403（Azure Application Gateway）被拒——未达模型、零 token 消耗、零候选。根因：undici/global fetch 对该网关协商 HTTP/2，大 body 挂死/被拒（curl HTTP/1.1 同期正常）。transport 网络层已重写为 node:https 强制 HTTP/1.1（createDefaultHttpsPoster，两段超时保留），离线套件 54/54 回归通过。",
+      "disposition": "round1 记录全量保留于 stage-g-execution/round1/；round2 以同一预注册计划与同一授权（窗口内）重跑，16 请求重新可用（round1 消耗为网关拒绝、零模型容量）。累计 HTTP 尝试如实报告（16+16）。"
+    },
+    {
+      "revision": "r3-addendum-2",
+      "at": "2026-10-25T03:57:40.552Z",
+      "event": "E-arm provider switch to preregistered fallback intern-s2 (Owner-confirmed via credential/catalog provision)",
+      "detail": "AMD 网关对工作负载形态阻塞（round1/2 共 32 次 403，零模型 token、零候选——冻结先行属性保持成立）。切换至书生·端砚 intern-s2（discovery-api.intern-ai.org.cn/v1，免费，256K，json_object 支持，reasoning_effort 422 拒绝故不发送，最终答案在 message.reasoning_content（finish=stop 下采纳）。一轮一次性替代，同 16 请求/36 槽/6 每请求计划；不与其他供应商混跑。",
+      "transportChanges": "createInternS2Transport（复用同一 respond 管线；reasoningEffort=null；treatReasoningContentAsOutput=true 仅在 finish=stop）",
+      "invariantsUnchanged": [
+        "16 请求含重试",
+        "36 槽",
+        "每请求≤6 候选",
+        "输入 8000",
+        "生成 32768",
+        "骨架门+validator",
+        "双口径指标",
+        "失败全保留"
+      ]
+    },
+    {
+      "revision": "r4-addendum-3",
+      "at": "2026-10-25T04:09:31.190Z",
+      "event": "round3 INVALIDATED_BY_URL_CONSTRUCTION_DEFECT — fixed, round4 re-run",
+      "detail": "round3 全部 16 请求 HTTP 404：new URL(absolutePath, base) 丢弃 base 的 /v1 版本前缀（请求打到 /chat/completions 而非 /v1/chat/completions）。修复=字符串拼接（去尾斜杠+/chat/completions），回归断言钉死 URL 以前缀结尾。round3 记录全保留（零模型 token）。round4 同计划同授权窗口重跑。"
+    },
+    {
+      "revision": "r5-addendum-4",
+      "at": "2026-10-25T05:40:50.690Z",
+      "event": "E-arm formal model switch to deepseek-v4.1-flash-1017 (Owner-selected, probe-verified)",
+      "detail": "Owner 选定书生平台 DeepSeek-V4.1-Flash-1017 为正式实验模型（墨点计费：输入 1000/输出 4000 每百万；账户余额 4,461 墨点，5h 窗 10M 剩余 100%）。探测验证：json_object 支持；content 标准 JSON 布局（reasoning 独立字段）；reasoning_effort 不发送（未核实，避免 422）；429=模型通道瞬时限流，90s 间隔后清零（实测）。预算：max_tokens 32768，最坏单请求 ≈133 墨点，16 请求最坏 ≈2,130 墨点（<余额 4,461）。预注册限流处理：429→FAILED_KNOWN+记录，下一请求前确定性等待 90s（依前次结果类型、非依候选质量，仍计入 16 上限）。",
+      "invariantsUnchanged": [
+        "16 请求含重试",
+        "36 槽",
+        "每请求≤6 候选",
+        "输入 8000",
+        "生成 32768",
+        "骨架门+validator",
+        "双口径指标",
+        "失败全保留",
+        "不自动换模型"
+      ]
+    },
+    {
+      "revision": "r6-addendum-5",
+      "at": "2026-10-25T06:05:41.012Z",
+      "event": "round5 INVALIDATED_BY_INPUT_CONTRACT_DEFECT — merge-based adoption implemented, round6 re-run",
+      "detail": "round5 R2 成功返回 6 个候选但全部被拒：模型镜像了输入组合结构（draft 层 taskText/facts、caseDef 层 parameters/actorVisibleCase）而非输出信封——根因=受约束输入按设计不含 judge-only 字段，因此模型无法知道完整 caseDef 形状（输入契约缺陷，非模型缺陷）。修复=新增 merge 式采纳（lib/challenge-adopt.mjs）：模型输出仅解释为表达层增量（taskText/fact 陈述/观察措辞/constraints/stakes），由管线机械合并到冻结基线骨架的不可变字段上——Gold 结构上不可注入（合并器不从模型输出读取不可变字段）；合并后候选过完整骨架门+validator（骨架漂移/泄漏/越域仍拒）。未修改提示词；round5 记录全保留。round6 同计划重跑。"
+    },
+    {
+      "revision": "r7-addendum-6",
+      "at": "2026-10-25T06:39:52.444Z",
+      "event": "round5 generation-contract clarification (echo defect) — round7",
+      "detail": "round5 R2 六候选为逐字回显（taskText=通用模板原文、facts/labels 逐字、constraints 全 6/6 与基线不符）——零表达新颖性。根因=输入指令「仅允许改写」未规定改写义务与输出字段映射，模型安全解读为回显。修订：受约束输入新增明确生成契约（改写义务+字段映射+回显即零新颖性声明）。**透明声明：此修订在观察到 round5 回显结果之后作出——修订仅澄清输出契约（任务说明与字段映射），不触碰研究假设/骨架门/评分规则/统计口径；round5 全记录保留。**round7 同计划（16 请求/36 槽/merge 采纳）。"
+    }
+  ]
+}

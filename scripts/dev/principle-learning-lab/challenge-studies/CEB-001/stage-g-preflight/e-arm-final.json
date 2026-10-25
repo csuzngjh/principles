@@ -1,0 +1,25 @@
+{
+  "schema": "stage-g-e-arm-final.v1",
+  "studyId": "CEB-001",
+  "generatedAt": "2026-10-25T11:37:11.224Z",
+  "model": "Atria-Dawn (intern-ai discovery, free tier)",
+  "totalAdopted": 54,
+  "slotsTarget": "36（超产 54→如实记录，不丢弃有效候选）",
+  "breakdown": {
+    "round7": 12,
+    "round10": 42
+  },
+  "expressionNovelty": {
+    "uniqueTaskTexts": "42/42 round10 candidates all unique & non-B0",
+    "factStatementsNonB0": "66/66 round10"
+  },
+  "paramCoverage": {
+    "uniqueParamPoints": "7 distinct (budget,deadline) combos observed",
+    "note": "E 行使了参数变化权（不同 slices 带来不同 constraints）"
+  },
+  "pending": [
+    "盲评者指派",
+    "表达质量人工盲评",
+    "kappa 统计"
+  ]
+}

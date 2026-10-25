@@ -1,0 +1,126 @@
+{
+  "schema": "challenge-suite-manifest.v1",
+  "studyId": "CEB-001",
+  "templateId": "T-CLAIM-EVIDENCE-BINDING-V1",
+  "templateVersion": "1.0.0",
+  "mappingHash": "213090daecf0cbc9abfc51ca46641e4e3b835730ba9d9ec771118aaed9521290",
+  "graderHash": "eef38484c4f8ace059c178fcb0697c68154277073b7ab7a9d8c0e608ae383e79",
+  "familyCounts": {
+    "FAILURE_VARIANT": 3,
+    "CROSS_CONTEXT_TRANSFER": 3,
+    "BOUNDARY_NEGATIVE_CONTROL": 3,
+    "TRADEOFF_CONFLICT": 3
+  },
+  "caseCount": 12,
+  "cases": [
+    {
+      "caseId": "CEB-001-FV-01",
+      "family": "FAILURE_VARIANT",
+      "expectedMode": "apply",
+      "principleApplicable": true,
+      "studyEligible": true,
+      "inputHash": "2c8bfe5f662d2222494ebc5035809d9876727703797c5c855a6d555e3c51a9ed",
+      "goldHash": "3277028a9cce70a0118280725a212722c4c12e68c9dfc0d3fb19c9828203fb85"
+    },
+    {
+      "caseId": "CEB-001-FV-02",
+      "family": "FAILURE_VARIANT",
+      "expectedMode": "apply",
+      "principleApplicable": true,
+      "studyEligible": true,
+      "inputHash": "d9a458614933b24df6f11a07f953ff3d2372bf1025f37eee09dbef597f23cf49",
+      "goldHash": "ef3d56c7e447506e5c1949fdf1d2c162544e4687ae638865ea2af5736aaa1b5d"
+    },
+    {
+      "caseId": "CEB-001-FV-03",
+      "family": "FAILURE_VARIANT",
+      "expectedMode": "apply",
+      "principleApplicable": true,
+      "studyEligible": true,
+      "inputHash": "43d9f9b53992065f2b6f56cc4de733de367cc7bed5cb1665fa611d2e896c2ae2",
+      "goldHash": "e751872c6b9102bf615c4ad0f66644dab60cd84c5c9c49b06e46fbca16f4dd22"
+    },
+    {
+      "caseId": "CEB-001-CT-01",
+      "family": "CROSS_CONTEXT_TRANSFER",
+      "expectedMode": "apply",
+      "principleApplicable": true,
+      "studyEligible": true,
+      "inputHash": "3675ae949e373989a1bfcb2a2d1d7777cd2ffc27a1d561dbdd0ee5d0124b0ad0",
+      "goldHash": "6dc80592ee724b7ff1ec0be7a23ab6ddc3c263f58cfc6d6aadd98ff34a58e602"
+    },
+    {
+      "caseId": "CEB-001-CT-02",
+      "family": "CROSS_CONTEXT_TRANSFER",
+      "expectedMode": "apply",
+      "principleApplicable": true,
+      "studyEligible": true,
+      "inputHash": "daafdba719f9cb6ca355acd4473653408dfbcaaf27e8cc5f0b1d4733af9ba878",
+      "goldHash": "63e7752c1a0f2480940c03d992db073bd9cb408b363a458a31393507f14771fb"
+    },
+    {
+      "caseId": "CEB-001-CT-03",
+      "family": "CROSS_CONTEXT_TRANSFER",
+      "expectedMode": "apply",
+      "principleApplicable": true,
+      "studyEligible": true,
+      "inputHash": "361c3883fa268c3cb91d06035b4bdcd00cb3013af56bbeb058317b3e3e4eb4c8",
+      "goldHash": "45363acccee5a7ebbf89289194186ba3110ca9ece0d96a7d2186e297b73edd11"
+    },
+    {
+      "caseId": "CEB-001-BN-01",
+      "family": "BOUNDARY_NEGATIVE_CONTROL",
+      "expectedMode": "withhold",
+      "principleApplicable": false,
+      "studyEligible": true,
+      "inputHash": "34ec48c89fa1160fa1932752fb946ac28a526abca4fd4df4121e8f5ced906fe0",
+      "goldHash": "89c31d7bfb477076030376e1a60511b6feb23c9128fb571e9a8373cf30ea3686"
+    },
+    {
+      "caseId": "CEB-001-BN-02",
+      "family": "BOUNDARY_NEGATIVE_CONTROL",
+      "expectedMode": "withhold",
+      "principleApplicable": false,
+      "studyEligible": true,
+      "inputHash": "04bac51a9893ec1fbc78cb7d57c59152728663b1e7d316bee82c768b3f2ade02",
+      "goldHash": "7215b552e5f1382e35008f3f743630aadbbbe6d038424a017163c98a4624ee8c"
+    },
+    {
+      "caseId": "CEB-001-BN-03",
+      "family": "BOUNDARY_NEGATIVE_CONTROL",
+      "expectedMode": "withhold",
+      "principleApplicable": false,
+      "studyEligible": true,
+      "inputHash": "702390ce81b26b6ce453b20ed4e08bb68de51c1ce0bc9ebcedc030286d58888b",
+      "goldHash": "51f82498cc6b493365a4d190c9ad9073ecc1790224a7b4a0e191e80da5128b99"
+    },
+    {
+      "caseId": "CEB-001-TC-01",
+      "family": "TRADEOFF_CONFLICT",
+      "expectedMode": "resolve_conflict",
+      "principleApplicable": true,
+      "studyEligible": true,
+      "inputHash": "2f115a3a1d075e10053e7d5cd5c5650a7994e9b8c742893b3e66f3a828f3d845",
+      "goldHash": "18d9849406ef58b50c76b964c343a033b3ef7a5548489fd81018db7ab4628fc1"
+    },
+    {
+      "caseId": "CEB-001-TC-02",
+      "family": "TRADEOFF_CONFLICT",
+      "expectedMode": "resolve_conflict",
+      "principleApplicable": true,
+      "studyEligible": true,
+      "inputHash": "08691c045660f5465d900aa7a1de14b2f0fbc82f1a2af410d182350af7ed88e4",
+      "goldHash": "0f9e9498fef8f24c04959548aafad33fca1f777267f54e0db3ea4195b9579261"
+    },
+    {
+      "caseId": "CEB-001-TC-03",
+      "family": "TRADEOFF_CONFLICT",
+      "expectedMode": "resolve_conflict",
+      "principleApplicable": true,
+      "studyEligible": true,
+      "inputHash": "e6af07f6e623de3636a7e58b7ee979910fb04f629d5aac6035e5c475b3738328",
+      "goldHash": "2a0b8d46f0762370f779555ae7d787a26168c91bb985191ebbda1457afa8cdfa"
+    }
+  ],
+  "suiteHash": "e1f2f5ca9d7f570faf454d057346c4f273e4fb467fa1790482f9a783e591fb5a"
+}

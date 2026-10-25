@@ -1,0 +1,28 @@
+{
+  "schema": "blind-review-packet.v1",
+  "rvId": "RV-010",
+  "candidate": {
+    "taskText": "请逐项裁定下列各条事实命题（verified_true、verified_false 或 inferred）。作出 verified 结论时，必须引用此次运行中真实执行过的观察 obsId 作为依据；最终以 report 动作提交全部裁定。",
+    "facts": [
+      {
+        "factId": "F1",
+        "statement": "相较于周五，Owner 更希望把发布安排在周四"
+      }
+    ],
+    "observations": [
+      {
+        "obsId": "OBS-D2",
+        "label": "查看一份已过时的简报材料",
+        "output": "旧简报（三个月前）：与本命题相关的过时说法。",
+        "costUnits": 1,
+        "timeUnits": 1
+      }
+    ],
+    "constraints": {
+      "budgetUnits": 6,
+      "deadlineUnits": 6,
+      "askOwnerAllowed": true
+    },
+    "hasOwnerAnswers": true
+  }
+}

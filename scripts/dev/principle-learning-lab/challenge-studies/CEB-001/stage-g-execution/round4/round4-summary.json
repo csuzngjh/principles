@@ -1,0 +1,131 @@
+{
+  "finishedAt": "2026-10-25T05:09:21.149Z",
+  "summary": [
+    {
+      "r": 1,
+      "requestId": "stage-g-r4-req-01",
+      "state": "REFUSED_recovery",
+      "detail": "RESULT_UNKNOWN — auto-retry forbidden; explicit new requestId required"
+    },
+    {
+      "r": 2,
+      "requestId": "stage-g-r4-req-02",
+      "state": "RESULT_UNKNOWN",
+      "parsed": 0,
+      "adopted": 0,
+      "elapsedS": 240.2
+    },
+    {
+      "r": 3,
+      "requestId": "stage-g-r4-req-03",
+      "state": "RESULT_UNKNOWN",
+      "parsed": 0,
+      "adopted": 0,
+      "elapsedS": 240.1
+    },
+    {
+      "r": 4,
+      "requestId": "stage-g-r4-req-04",
+      "state": "RESULT_UNKNOWN",
+      "parsed": 0,
+      "adopted": 0,
+      "elapsedS": 240.1
+    },
+    {
+      "r": 5,
+      "requestId": "stage-g-r4-req-05",
+      "state": "RESULT_UNKNOWN",
+      "parsed": 0,
+      "adopted": 0,
+      "elapsedS": 240.1
+    },
+    {
+      "r": 6,
+      "requestId": "stage-g-r4-req-06",
+      "state": "FAILED_KNOWN",
+      "parsed": 0,
+      "adopted": 0,
+      "elapsedS": 0.3
+    },
+    {
+      "r": 7,
+      "requestId": "stage-g-r4-req-07",
+      "state": "RESULT_UNKNOWN",
+      "parsed": 0,
+      "adopted": 0,
+      "elapsedS": 15
+    },
+    {
+      "r": 8,
+      "requestId": "stage-g-r4-req-08",
+      "state": "RESULT_UNKNOWN",
+      "parsed": 0,
+      "adopted": 0,
+      "elapsedS": 240.2
+    },
+    {
+      "r": 9,
+      "requestId": "stage-g-r4-req-09",
+      "state": "RESULT_UNKNOWN",
+      "parsed": 0,
+      "adopted": 0,
+      "elapsedS": 240.2
+    },
+    {
+      "r": 10,
+      "requestId": "stage-g-r4-req-10",
+      "state": "RESULT_UNKNOWN",
+      "parsed": 0,
+      "adopted": 0,
+      "elapsedS": 240.1
+    },
+    {
+      "r": 11,
+      "requestId": "stage-g-r4-req-11",
+      "state": "RESULT_UNKNOWN",
+      "parsed": 0,
+      "adopted": 0,
+      "elapsedS": 240.1
+    },
+    {
+      "r": 12,
+      "requestId": "stage-g-r4-req-12",
+      "state": "RESULT_UNKNOWN",
+      "parsed": 0,
+      "adopted": 0,
+      "elapsedS": 240.2
+    },
+    {
+      "r": 13,
+      "requestId": "stage-g-r4-req-13",
+      "state": "FAILED_KNOWN",
+      "parsed": 0,
+      "adopted": 0,
+      "elapsedS": 0.3
+    },
+    {
+      "r": 14,
+      "requestId": "stage-g-r4-req-14",
+      "state": "RESULT_UNKNOWN",
+      "parsed": 0,
+      "adopted": 0,
+      "elapsedS": 15
+    },
+    {
+      "r": 15,
+      "requestId": "stage-g-r4-req-15",
+      "state": "RESULT_UNKNOWN",
+      "parsed": 0,
+      "adopted": 0,
+      "elapsedS": 240.1
+    },
+    {
+      "r": 16,
+      "requestId": "stage-g-r4-req-16",
+      "state": "RESULT_UNKNOWN",
+      "parsed": 0,
+      "adopted": 0,
+      "elapsedS": 240.1
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "schema": "blind-review-packet.v1",
+  "rvId": "RV-031",
+  "candidate": {
+    "taskText": "请逐项判断下列命题的真伪状态（可选结论：verified_true / verified_false / inferred）；凡属 verified 的结论，必须以本次运行中确实执行过的观察 obsId 作为支撑证据；全部判断完成后，请用 report 动作一次性提交。",
+    "facts": [
+      {
+        "factId": "F1",
+        "statement": "相比周五，负责人更倾向于选择周四作为发布时间"
+      }
+    ],
+    "observations": [
+      {
+        "obsId": "OBS-D1",
+        "label": "查阅文档中的口径表述",
+        "output": "文档声称：本项已完成/为真。",
+        "costUnits": 1,
+        "timeUnits": 1
+      }
+    ],
+    "constraints": {
+      "budgetUnits": 6,
+      "deadlineUnits": 7,
+      "askOwnerAllowed": true
+    },
+    "hasOwnerAnswers": true
+  }
+}

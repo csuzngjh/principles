@@ -1,0 +1,46 @@
+{
+  "schema": "blind-review-packet.v1",
+  "rvId": "RV-054",
+  "candidate": {
+    "taskText": "请分别裁定以下各条命题，可选结论为 verified_true / verified_false / inferred；作出 verified 判定时，须引用本次运行过程中实际执行的观察 obsId 作为证据；最终以 report 动作提交所有裁定。",
+    "facts": [
+      {
+        "factId": "F1",
+        "statement": "当前分支上缺陷 #142 的修复已经完成"
+      },
+      {
+        "factId": "F2",
+        "statement": "项目文档里记录了「#142 已修复」这一表述"
+      }
+    ],
+    "observations": [
+      {
+        "obsId": "OBS-1",
+        "label": "查看 docs/fixes.md 的内容",
+        "output": "docs/fixes.md：『#142 已于本迭代修复』。",
+        "costUnits": 1,
+        "timeUnits": 1
+      },
+      {
+        "obsId": "OBS-2",
+        "label": "运行 git log --grep='#142' 查询提交记录",
+        "output": "git log --grep → 无匹配提交",
+        "costUnits": 2,
+        "timeUnits": 1
+      },
+      {
+        "obsId": "OBS-D2",
+        "label": "阅读内容已过时的简报",
+        "output": "旧简报（三个月前）：与本命题相关的过时说法。",
+        "costUnits": 1,
+        "timeUnits": 1
+      }
+    ],
+    "constraints": {
+      "budgetUnits": 9,
+      "deadlineUnits": 10,
+      "askOwnerAllowed": true
+    },
+    "hasOwnerAnswers": false
+  }
+}

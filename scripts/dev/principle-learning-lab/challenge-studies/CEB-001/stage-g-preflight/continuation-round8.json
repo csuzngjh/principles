@@ -1,0 +1,55 @@
+{
+  "schema": "challenge-stage-g-continuation.v1",
+  "studyId": "CEB-001",
+  "status": "FROZEN_PRE_EXECUTION",
+  "frozenAt": "2026-10-25T07:58:51.519Z",
+  "basis": "Owner 续跑指令（2026-10-25：立即推进、额度优先、不再等待低峰）",
+  "transparentNote": "本轮为已观察到 round7 结果（12/12 采纳）之后的续跑——如实标注，不宣称独立预注册重复实验。研究假设/骨架门/评分规则/统计口径全部沿用 r7 契约不变。",
+  "baseline": {
+    "adoptedCandidates": 12,
+    "slotsRemaining": 24,
+    "requestBudgetRemaining": "旧授权 16/16 耗尽——本轮新授权独立 16 次"
+  },
+  "model": {
+    "provider": "intern-ai-discovery",
+    "modelId": "deepseek-v4.1-flash-1017",
+    "baseUrl": "https://discovery-api.intern-ai.org.cn/v1",
+    "responseFormat": "json_object",
+    "reasoningEffort": "不发送（未核实支持）",
+    "maxTokens": 32768,
+    "inputTokenCap": 8000,
+    "requestTimeoutMs": 240000
+  },
+  "requestPlan": {
+    "totalRequests": 16,
+    "retriesIncluded": true,
+    "perRequestCandidateCap": 6,
+    "slots": "延续 SLOT-E 序列，新采纳候选从 SLOT-E-013 起按到达顺序入槽（累计 12+N/36）",
+    "rateLimitHandling": "429→FAILED_KNOWN+记录；连续 6 次 429→预注册停止本轮（保留剩余请求额度，可再续跑）；每次 429 后确定性等待 90s（沿用 r7）"
+  },
+  "resultUnknownHandling": "不自动重发；保留记账",
+  "candidateValidation": "merge 采纳管线（challenge-adopt.mjs）+骨架门+完整 validator——与 round7 完全一致，无修改",
+  "metricsAndBoundaries": "沿用 final-round-metrics.json 口径；表达新颖性/参数覆盖/实质情境/结构重复/墨点分账；结论边界不变（表达质量待盲评、不外推普适优势）",
+  "stopConditions": [
+    "16 请求耗尽",
+    "授权过期/撤销/halted",
+    "模型身份不匹配",
+    "连续 6 次 429（本轮窗口饱和）",
+    "Owner 手动停止"
+  ],
+  "invariants": "四冻结哈希不变；round1-7 记录全保留；不发送 Gold/judge-only；Stage R 不启动",
+  "revisions": [
+    {
+      "revision": "round9-addendum",
+      "at": "2026-10-25T10:14:05.068Z",
+      "event": "round9 continuation (Owner 指令：立即推进，不再等待低峰)",
+      "detail": "round8 6×429 通道饱和停止后，Owner 指令立即续跑。同模型/契约/验证/预算。基线=round7 12 + round8 0（新增 0，6 全 429）= 12 已有候选 + 本轮新增目标补齐至 36。"
+    },
+    {
+      "revision": "round10-addendum",
+      "at": "2026-10-25T10:53:47.902Z",
+      "event": "model switch to Atria-Dawn (Owner 指令：切换其他可用模型)",
+      "detail": "DeepSeek-V4.1-Flash-1017 免费通道持续饱和（round8+round9 共 12×429），Owner 指令切换至同平台免费模型 Atria-Dawn（512K ctx，json_object ✓，content 标准布局 ✓，18.2s 探针 ✓）。同 16 请求/36 槽/6 每请求/merge 采纳/骨架门/validator 全不变。reasoning_effort 不发送（未核实）。treatReasoningContentAsOutput=false（content 字段正常）。"
+    }
+  ]
+}

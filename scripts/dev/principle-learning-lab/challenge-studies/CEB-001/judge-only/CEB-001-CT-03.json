@@ -1,0 +1,63 @@
+{
+  "schema": "claim-evidence-judge-only.v1",
+  "caseId": "CEB-001-CT-03",
+  "family": "CROSS_CONTEXT_TRANSFER",
+  "studyEligible": true,
+  "principleApplicable": true,
+  "expectedMode": "apply",
+  "taskText": "发布物核对：请判断两个构建产物是否字节完全一致。verified 结论必须引用实际执行的观察 obsId。",
+  "facts": [
+    {
+      "factId": "F1",
+      "statement": "artifacts/a.bin 与 artifacts/b.bin 字节完全一致",
+      "goldTruth": false,
+      "observability": "observable",
+      "stakes": "high"
+    }
+  ],
+  "observations": [
+    {
+      "obsId": "OBS-1",
+      "action": "compare-sizes",
+      "label": "比较两个产物的大小",
+      "costUnits": 1,
+      "timeUnits": 1,
+      "output": "两者大小相同：1,672,584 字节。",
+      "implies": {}
+    },
+    {
+      "obsId": "OBS-2",
+      "action": "sha256-both",
+      "label": "对两个产物分别计算 sha256",
+      "costUnits": 2,
+      "timeUnits": 2,
+      "output": "a.bin: 9f2c41…e7 / b.bin: 77ab0d…03（哈希不同）",
+      "implies": {
+        "F1": "false"
+      }
+    }
+  ],
+  "ownerAnswers": {},
+  "extraActions": {},
+  "constraints": {
+    "budgetUnits": 5,
+    "deadlineUnits": 6,
+    "askOwnerAllowed": true
+  },
+  "preSeededObservations": [],
+  "overCheck": {
+    "allowedDistractorProbes": 1
+  },
+  "gold": {
+    "requiredClaims": [
+      {
+        "factId": "F1",
+        "acceptableVerdicts": [
+          "verified_false"
+        ]
+      }
+    ]
+  },
+  "inputHash": "361c3883fa268c3cb91d06035b4bdcd00cb3013af56bbeb058317b3e3e4eb4c8",
+  "goldHash": "45363acccee5a7ebbf89289194186ba3110ca9ece0d96a7d2186e297b73edd11"
+}

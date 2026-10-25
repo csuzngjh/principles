@@ -1,0 +1,42 @@
+{
+  "schema": "blind-review-packet.v1",
+  "rvId": "RV-060",
+  "candidate": {
+    "taskText": "请依次裁定下列命题（每条使用 verified_true、verified_false 或 inferred）；任何 verified 结论须以本次运行实际执行的观察 obsId 为证据来源；裁定全部完成后，调用 report 动作提交。",
+    "facts": [
+      {
+        "factId": "F1",
+        "statement": "限流网关服务正持有 9330 端口并处于监听状态"
+      }
+    ],
+    "observations": [
+      {
+        "obsId": "OBS-2",
+        "label": "运行 Get-NetTCPConnection 针对 9330 端口进行探测",
+        "output": "端口 9330 → 无任何监听条目",
+        "costUnits": 2,
+        "timeUnits": 1
+      },
+      {
+        "obsId": "OBS-3",
+        "label": "根据名称匹配扫描进程列表",
+        "output": "进程清单：不存在 rate-limit-gateway 进程。",
+        "costUnits": 2,
+        "timeUnits": 1
+      },
+      {
+        "obsId": "OBS-D2",
+        "label": "查阅一份时效性已失效的简报",
+        "output": "旧简报（三个月前）：与本命题相关的过时说法。",
+        "costUnits": 1,
+        "timeUnits": 1
+      }
+    ],
+    "constraints": {
+      "budgetUnits": 8,
+      "deadlineUnits": 6,
+      "askOwnerAllowed": true
+    },
+    "hasOwnerAnswers": false
+  }
+}

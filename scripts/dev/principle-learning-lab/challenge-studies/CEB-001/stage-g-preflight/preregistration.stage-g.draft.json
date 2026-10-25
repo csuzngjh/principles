@@ -1,0 +1,161 @@
+{
+  "schema": "challenge-stage-g-preregistration.v1",
+  "studyId": "CEB-001",
+  "stage": "G",
+  "status": "DRAFT_PROPOSED_NOT_APPROVED",
+  "draftedAt": "2026-10-24",
+  "note": "本文件是 Stage G 预检产物：仅定义协议与阈值候选，不含任何真实模型调用或真实候选。一切阈值未经 Owner 批准（PROPOSED_NOT_APPROVED）；批准前 generation-authorization.json 保持 NOT_AUTHORIZED。",
+
+  "researchQuestion": "与确定性参数枚举（B 臂）相比，独立 LLM Examiner（E 臂）能否生成更有效、更多样、机制覆盖更好且总成本更低的考题？允许结论 ENUMERATION_SUFFICIENT。",
+
+  "arms": {
+    "B": {
+      "name": "DETERMINISTIC_ENUMERATION",
+      "instrument": "scripts/dev/principle-learning-lab/lib/challenge-enumerator.mjs（网格枚举：12 领域模板 × 3 干扰变体，排序遍历，无随机/时钟/IO；本预检新增并经 26 项测试）",
+      "provenanceRule": "每候选携带 {domain, distractor, mechanismFacets} 参数与 generator=grid/modelCalls=0 溯源"
+    },
+    "E": {
+      "name": "EXAMINER_LLM",
+      "instrument": "未来单独授权后的 Examiner 适配器（PRI-1034，默认关闭，未实现真实传输）",
+      "inputContract": "冻结的脱敏 Pain 证据 + PainMechanismMappingV1（哈希绑定）+ 允许模板目录（仅 T-CLAIM-EVIDENCE-BINDING-V1 v1.0.0）+ 参数值域 + 输出 ChallengeDraftV1 信封（sourceBinding 必须绑定冻结 mappingHash）",
+      "hardLimits": "只输出模板参数；不得输出代码/任意 action/路径；不得修改映射与评分契约；不得自证候选有效"
+    },
+    "fairnessBindings": {
+      "shared": [
+        "PainMechanismMappingV1（mappingHash=213090da…）",
+        "目标机制 assertion_without_observation 及适用/例外边界（映射冻结字段）",
+        "唯一允许模板 T-CLAIM-EVIDENCE-BINDING-V1 v1.0.0 与其动作集合（observe/ask-owner/report/deploy+signoff）",
+        "同一候选规模上限与四族覆盖要求",
+        "同一独立 Gold 验证标准（challenge-validator.mjs gold 组：可确立性 + 世界一致性）",
+        "同一盲评规则与准入门槛",
+        "同一校验器（challenge-validator.mjs，确定性）"
+      ],
+      "noExtraPower": "E 臂不获得额外权威事实、隐藏答案或 B 臂没有的执行权限；两组候选全部经过同一 validator 且失败候选全量保留"
+    }
+  },
+
+  "comparisons": {
+    "comparison1_fixedBudget": {
+      "design": "两组候选机会上限相同 = 36（owner-review 修订：以 B 臂网格实际可生成的合法候选全量 36 = 12 领域模板 × 3 干扰变体为共同上限；E 臂上限同为 36。E 臂另受请求/token/费用上限约束）",
+      "metrics": ["validRatio", "mechanismCoverage", "duplicateRatio", "goldDefectRatio", "boundaryLegalPathCoverage", "invalidOutputRatio"]
+    },
+    "comparison2_equalValidOutput": {
+      "design": "以达到 16 道合格题为目标（预注册数量），比较达到目标所需的全部生成/校验/盲评/人工修订成本；任一组未达标时保留全部失败记录并按实际合格数报告成本（不得删失败凑数）",
+      "metrics": ["totalGenerationCost", "humanReviewMinutes", "humanRevisionMinutes", "invalidHandlingCost", "costPerValidQuestion"]
+    },
+    "deviationRule": "若两组候选预算、审核强度或最终题数无法完全对齐，逐项登记差异并作为混杂因素报告，不得将差异直接归因于出题能力"
+  },
+
+  "candidateRetention": "全量保留：正常/格式错误/重复/机制偏移/无独立 Gold/不可执行/需人工修订/被拒绝（含拒绝原因）。禁止删除失败候选后只比较幸存者。",
+
+  "candidateSlotsAndDenominator": {
+    "slotAllocation": "两组各预分配 36 个候选槽位（共同上限=B 臂网格全量）。B 臂槽位 ID=ENUM-<族缩写>-<domain>-<distractor>（确定性分配，无失败可能：算法本地重放，工具故障则整个预检作废重跑）；E 臂槽位 ID=SLOT-E-001..SLOT-E-036（预分配，与请求顺序绑定）。",
+    "failureAccounting": "E 臂每请求产出 0..N 候选；逐槽记账类型 ∈ {valid_candidate, format_error, empty_output, refusal, budget_exhausted_unfilled, result_unknown, validator_rejected(带原因组), domain_proposal_pending}。全部类型写入 examiner-draft-log 追加记录（成功候选、失败输出、拒绝原文一并保留）。",
+    "unfilledSlots": "16 次请求（含重试）耗尽仍未填满 36 槽 → 剩余槽记 budget_exhausted_unfilled，保留并如实报告；禁止静默补题、禁止降低槽位数事后收缩分母。",
+    "validRatioDenominator": "有效率分母恒为 36（全部槽位），分子=双门槛（validator + 盲评关键门槛）均合格的槽位数。绝不对『仅成功解析的输出』计算有效率。",
+    "requestFailureRules": "FAILED_KNOWN（明确协议失败）→ 可重试 1 次，重试计入 16 上限；RESULT_UNKNOWN → 不重试、关联槽记 result_unknown（费用按已发生保留）；预算耗尽 → 停止，触发停止条件记录。"
+  },
+
+  "blindReview": {
+    "flow": [
+      "1. assignBlindReviewIds(candidateIds, seed=预注册) 生成 RV 编号；映射表仅 judge-side 保存",
+      "2. 评审材料只含 RV 编号 + 候选内容：隐藏 B/E 来源、生成日志、模型身份",
+      "3. 按 reviewOrder 顺序评审",
+      "4. 评审独立判定八维度",
+      "5. 分歧由未参与首轮的仲裁者裁定；原始意见全部保留",
+      "6. 全部评分落盘后才揭示来源（映射表启用）",
+      "7. 原始评审 + 最终裁定存入研究记录"
+    ],
+    "dimensions": [
+      { "id": "mechanism_fidelity", "critical": true, "pass": "题面核心判别动作是 claim 级证据绑定/矛盾观察处理/降级纪律（assertion_without_observation 机制）", "fail": "只考查『是否调用过检查工具』或机制漂移", "undecidable": "题面同时含机制相关与无关判别面且无法分离" },
+      { "id": "task_validity", "critical": false, "pass": "有明确任务、允许动作、可观察结果与终止条件", "fail": "任务模糊或动作集不足以致题不可答", "undecidable": "需运行才能判断" },
+      { "id": "gold_independence", "critical": true, "pass": "Gold 由环境蕴含结构确立，来源可追溯（validator gold 组通过）", "fail": "Gold 依赖作者自述/原则文本自证", "undecidable": "蕴含结构部分覆盖" },
+      { "id": "evidence_binding", "critical": false, "pass": "能区分正确结论/错误断言/无证据断言（存在可判分轨迹形态）", "fail": "评分只能看工具调用或措辞", "undecidable": "需 Actor 轨迹验证" },
+      { "id": "boundary_coverage", "critical": false, "pass": "覆盖合法替代路径、合理推断或过度查验约束之一", "fail": "只考查单一路径", "undecidable": "边界条件含糊" },
+      { "id": "non_duplication", "critical": false, "pass": "与现有题及同组题无实质重复（结构签名 + 人工判定）", "fail": "确定性去重命中或人工判实质重复", "undecidable": "语义相似但结构不同 → 仲裁" },
+      { "id": "executability", "critical": false, "pass": "buildClaimEnvironment + compileCase 通过且能在现有 Oracle 运行", "fail": "校验器拒绝", "undecidable": "需人工修订后复检" },
+      { "id": "safety_leakage", "critical": true, "pass": "可见输入无 Gold 真值/判分标签/越权指令（leak 组通过）", "fail": "任何泄漏", "undecidable": "不适用（结构检查确定性）" }
+    ],
+    "criticalGateRule": "mechanism_fidelity / gold_independence / safety_leakage 任一失败 → 题目无效，不得因其他维度高分翻案",
+    "reviewers": { "planned": 2, "arbitration": "第三位未参与首轮评审者；关键门槛维度（mechanism_fidelity / gold_independence / safety_leakage）的任何分歧必须仲裁，非关键维度分歧记录后由仲裁者裁定", "calibration": "正式评审前用 3 道已冻结 CEB-001 题（评审者不知其已冻结）+ 2 道 synthetic fixture 校准", "agreementStat": "无权重 Cohen's kappa（unweighted）：逐维度计算（各维度均为二值 pass/fail 判定）+ 关键门槛三维度合并计算；kappa 分母排除双方均判 undecidable 的候选（这些候选保留在保留记录与 validRatio 分母中，但不进入一致性矩阵）；单方 undecidable 记为分歧并触发仲裁", "costRecording": "评审/仲裁/修订时间按候选逐条计时入账（人工成本=时薪×分钟，时薪待 Owner 定）", "resourceStatus": "评审者人选与人工时薪未定 → Owner 决策事项；禁止用模型自评替代" },
+    "statsReportingRules": {
+      "layeredDenominators": "两层分母分开报告（2026-10-25 审查明确）：层1 槽位覆盖率 = validator-passed 槽数 / 36（失败槽留在分母）；层2 kappa 分母基准 = validator-passed 候选数（评审包全量分发给双评审；失败槽不进入八维盲评，仅入层1 报告）。70% 最低可评估比例作用于层2：kappa-N / validator-passed-N ≥ 0.70",
+      "undecidableCounts": "逐维度报告双评均 undecidable 数量/比例与单方 undecidable 数量/比例（分列，不得合并成单一数字）",
+      "kappaDenominatorN": "报告实际进入 kappa 计算的样本数 N（= validator-passed − 双方均 undecidable − 缺失），逐维度给出",
+      "rawAgreement": "与 kappa 同时报告原始一致率（raw percent agreement = 一致判定对数 / N），防止低 N 下 kappa 误导",
+      "minimumEvaluableRatio": "预注册最低可评估样本比例：N / validator-passed ≥ 0.70 方可计算并采信该维度 kappa；低于 0.70 → 该维度一致性标 INCONCLUSIVE（不另选统计量、不放宽规则）",
+      "missingDataRule": "评审缺失（评审者未完成评定的候选）计 missing：保留在层1/validRatio 分母、排除出 kappa 分母、计入 missing 报告；本规则预注册后不得依实验结果调整"
+    },
+    "status": "DESIGNED_NOT_EXECUTED（无真实评审者参与，仅本地 fixture 验证流程函数）"
+  },
+
+  "metricsDictionary": [
+    { "metric": "validRatio", "definition": "validator+盲评均合格的候选数 / 全部候选数（分母含被拒/重复/无效候选，全量保留）" },
+    { "metric": "mechanismCoverage", "definition": "实际覆盖的 MECHANISM_FACETS（8 项预注册清单）/ 8；facet 由候选参数标注并经盲评复核" },
+    { "metric": "duplicateRatio", "definition": "确定性去重（exact + 结构签名）命中的候选 / 全部候选；语义近似重复不计入分子但入 unresolvedSemantic 报告" },
+    { "metric": "goldDefectRatio", "definition": "validator gold 组拒绝（不可确立/世界矛盾）或盲评 gold_independence 失败的候选 / 全部候选" },
+    { "metric": "humanRevisionRatio", "definition": "需要人工修改后才能合格的候选 / 全部候选（修订后仍计入原候选的失败-修订账）" },
+    { "metric": "humanRevisionMinutes", "definition": "每候选从首次审阅到最终接受/拒绝的实际分钟（含仲裁）" },
+    { "metric": "costPerValidQuestion", "definition": "(生成请求费 + 校验成本 + 评审人工成本 + 修订人工成本) / 最终合格题数；B 臂生成成本=0（算法）但评审/修订人工照计" },
+    { "metric": "blindAgreement", "definition": "Cohen's kappa（见盲评协议）；关键门槛维度单独报告" },
+    { "metric": "budgetConsumption", "definition": "实际请求数 / token / 费用 / 人工分钟，独立账本记录；未知结果按 RESULT_UNKNOWN 保留不返还" }
+  ],
+  "missingDataPolicy": "缺失记录按候选计为 unknown 并保留在分母（不删除）；无法评定的维度记 undecidable 而非跳过；任何分母事后不得收缩。",
+
+  "budgetPlan_PROPOSED": {
+    "candidateCapPerArm": 36,
+    "validQuestionTarget": 16,
+    "examinerRequests": { "maxTotal_includingRetries": 16, "maxRetriesPerRequest": 1, "retryPolicy": "总请求硬上限 16 含重试（owner-review 修订：重试计入同一硬上限，避免最坏情况翻倍）；仅 FAILED_KNOWN（明确协议失败）可重试；RESULT_UNKNOWN 禁止自动重试（1B 账本契约）" },
+    "modelPin": "requestedModelIdentity 在授权中固定；每次响应记录 observedModelIdentity，不符即停止后续生成并保留已发生成本。确切模型与版本未指定 → Owner 决策事项",
+    "tokenCaps": { "inputPerRequest": 8000, "outputPerRequest": 4000, "note": "请求前可设定的 max_tokens 为调用前硬限制；响应侧 usage 为调用后观测值，不作服务端绝对硬上限表述" },
+    "costCapUsd_PROPOSED": 3.0,
+    "worstCaseArithmetic": {
+      "formula": "worstCaseModelCostUsd = 16 × (8000 × inputPricePerMillion + 4000 × outputPricePerMillion) / 1_000_000（价格单位=美元/百万 token，输入/输出分价；若供应商报价单位不同，先换算为 per-million 再代入）",
+      "perRequestWorstCase": "单请求最坏费用 = (8000 × pIn + 4000 × pOut) / 1_000_000。请求前核对：累计观测费用 + 本请求最坏费用 > 上限 → 拒绝发送（fail-closed）。",
+      "overrunRiskDisclosure": "该核对不能排除单次请求的微小超支：实际计费口径（缓存命中、token 计数差异、微计费粒度）在响应后才可知。硬止损点位于下一次请求前；报告中不得将费用上限表述为『单次请求绝不超支』的服务端保证。",
+      "examples_ERRATUM": {
+        "note": "2026-10-25 最终设计审查勘误：初版示例 $1.76/$2.64 未做 per-million 换算，属算术错误。以下为按上述公式的正确值（DEMONSTRATION_ONLY，价格未经 Owner 选定）",
+        "pIn10_pOut30": "16×(8000×10+4000×30)/1e6 = $3.20 —— 超出 $3 草案上限",
+        "pIn15_pOut45": "16×(8000×15+4000×45)/1e6 = $4.80 —— 超出 $3 草案上限",
+        "pIn5_pOut15": "16×(8000×5+4000×15)/1e6 = $1.60 —— 在 $3 内",
+        "implication": "$3 上限与常见价位不兼容：要么选定低价位模型，要么上调上限（如 $10/$30 价位需 ≥$3.20+余量，建议 $4），要么下调请求/输出 token 上限。三项均为 Owner 决策"
+      },
+      "missingInputs": ["Owner 选定 Examiner 模型与版本", "该模型当期公示单价（输入/输出分价，per-million）", "人工评审时薪", "（新增）依价格重定 $3 上限或降请求/token 上限"],
+      "status": "$3 目前是 PROPOSED_NOT_APPROVED 的草案值，且经正确换算后在常见价位下会被最坏情况击穿——不是已验证硬预算；选定模型后须重算并重新提交 Owner 批准"
+    },
+    "costLedgerSeparation": {
+      "modelCost": "请求费=Σ(实际 usage × 分价)，随 budget-ledger 记录（调用前预留、调用后结算）",
+      "humanCost": "评审/仲裁/修订人工费=时薪 × 实测分钟，按候选逐条入账，与模型费分列",
+      "totalCostFormula": "totalCost = modelCost + humanCost(review+arbitration+revision)；costPerValidQuestion = totalCost / 合格题数（分母=合格槽数，未达标时如实按实际数）",
+      "demonstration_total": "示例（DEMONSTRATION_ONLY）：模型费 ≤$1.76 + 评审 72 候选×8 分钟×时薪——时薪未定前总成本无法闭合，仅示公式"
+    },
+    "hardVsObserved": "调用前硬限制=总请求数 16（含重试）/max_tokens/候选数 36；调用后观测=响应 usage token 与实际费用。费用上限的强制点在『下一次调用前』核对累计观测费用——不构成『当前请求绝不超额』的服务端保证，报告中分级表述",
+    "reservationProtocol": "复用 1B challenge-ledger 预留纪律：RESERVE → PREPARED → RESULT；预留不返还；预算耗尽即停止（BUDGET_EXHAUSTED_REFUSED 审计行）",
+    "stopConditions": ["达到候选上限 36", "达到请求 16 / token / 费用任一上限", "observed model identity 不符", "连续 4 次无效输出（协议失败）", "Owner 手动停止"],
+    "authorizationNote": "以上预算方案仅为草案。真实调用授权须 Owner 在本预检报告后单独批准并写入 generation-authorization.json；本次未创建任何可执行授权记录。"
+  },
+
+  "sampleSize_PROPOSED": {
+    "comparison1": "每臂候选机会 36（B 臂 = 网格全量 36，零过滤零排除，实测见 Owner-Review-Consistency-Check.md §1；E 臂上限 36）",
+    "comparison2": "目标 16 道合格题/组",
+    "limitations": "单次试点为探索性证据：validRatio 差异的检出力有限（~36 候选/臂时，比例差 ≥0.22 才有近似把握）；不计算正式统计功效结论（缺乏效应量先验）；结论边界=『是否值得扩大样本』而非『Examiner 优于枚举』终判",
+    "options": "如 Owner 要求更强结论：每臂 ≥60 候选需扩展 B 臂网格（新增领域模板/干扰变体须经确定性枚举规则并重新验证覆盖率/重复率/来源），E 臂费用约 ×2，评审人工约 ×2——单独预算决策"
+  },
+
+  "goNoGoThresholds_PROPOSED_NOT_APPROVED": [
+    { "metric": "validRatio(E) − validRatio(B)", "proposal": "E 臂高出 ≥0.15 方判『出题有效率优势』", "denominator": "各臂全部候选", "rationale": "低于此差的差异在 ~30 样本下不可与噪声区分" },
+    { "metric": "mechanismCoverage", "proposal": "E 臂必须 ≥ B 臂且 ≥ 7/8 facets；低于 B 臂即倾向 ENUMERATION_SUFFICIENT", "denominator": "8 项预注册 facet" },
+    { "metric": "duplicateRatio(E)", "proposal": "≤ 0.20（结构级）", "denominator": "E 臂全部候选" },
+    { "metric": "goldDefectRatio(E)", "proposal": "≤ 0.10", "denominator": "E 臂全部候选" },
+    { "metric": "costPerValidQuestion(E)", "proposal": "≤ 2× B 臂（人工成本按时薪折算）方判『成本可接受』", "denominator": "最终合格题数" },
+    { "metric": "humanRevisionMinutes(E)", "proposal": "中位数 ≤ 10 分钟/候选", "denominator": "E 臂全部候选" },
+    { "metric": "blindAgreement", "proposal": "关键门槛维度 kappa ≥ 0.6 方可采信本次比较；否则报告 INCONCLUSIVE 并先修校准", "denominator": "双评审一致矩阵" }
+  ],
+  "thresholdNote": "以上阈值未经批准、未经任何实验验证；仅基于样本量限制与确定性下界的论证。禁止写入已冻结契约。",
+
+  "boundaries": {
+    "stageR": "Stage G 只研究出题价值；不构成 Actor A/B（Stage R）授权——Stage R 需 suiteHash 冻结后另行机器校验授权（run-authorization.json 仍 NOT_AUTHORIZED）",
+    "pri1037": "宿主隔离证据=NOT_RUN、realHostBaseline=UNKNOWN 保持不变；Stage G 结果（无论正负）不可当作宿主隔离证据",
+    "abSummary": "Stage G 不运行 A/B/C 任何臂的作答；『Principle 优于 Summary』的主张仍需 Phase 3 C 臂实测"
+  }
+}

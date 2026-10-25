@@ -1,0 +1,49 @@
+{
+  "schema": "stage-g-round-halt.v1",
+  "studyId": "CEB-001",
+  "at": "2026-10-25T03:44:15.397Z",
+  "verdict": "E_ARM_BLOCKED_BY_PROVIDER_GATEWAY_INSTABILITY",
+  "rounds": {
+    "round1": {
+      "dir": "stage-g-execution/round1/",
+      "requests": 16,
+      "outcome": "ALL_FAILED_KNOWN http_403 (Azure Application Gateway) — zero model tokens, zero candidates",
+      "disposition": "INVALIDATED_BY_INFRASTRUCTURE_DEFECT (h2 negotiation)"
+    },
+    "round2": {
+      "dir": "stage-g-execution/round2/",
+      "requests": 16,
+      "outcome": "ALL_FAILED_KNOWN http_403 over node:https HTTP/1.1 + User-Agent — zero model tokens, zero candidates",
+      "disposition": "halted — provider-side workload-shape blocker"
+    }
+  },
+  "evidenceMatrix": [
+    "small benign body: 200 (h2 and 1.1)",
+    "5KB pure-ASCII body: 200 (1.1)",
+    "small shell-command Chinese body: 502 (1.1)",
+    "real 4.9KB constrained workload: h2 hang(300s) / 403 x32 / 1.1 timeout(230s)"
+  ],
+  "rootCauseClass": "provider gateway/upstream cannot reliably process moderate-size Chinese JSON chat payloads with embedded command strings (free-tier instability, Owner-preflight warning confirmed at gateway level)",
+  "eMetricsHonest": {
+    "slots": 36,
+    "filled": 0,
+    "validatorPassRate": "0/0 candidates generated",
+    "gatewayRejectedRequests": 32,
+    "modelTokensConsumed": 0,
+    "candidateCount": 0,
+    "blindReview": "N/A — no E candidates exist",
+    "researchConclusion": "E arm NOT_EVALUABLE on this provider currently; B0/B1 unaffected"
+  },
+  "notDone": [
+    "不切换供应商（intern-s2 备选待 Owner 决定）",
+    "不扩量重试",
+    "不改预注册统计口径",
+    "未运行盲评（无候选可评）"
+  ],
+  "ownerOptions": [
+    "向 AMD 反馈网关对该工作负载形态的 403/502/挂死",
+    "指定重试时间窗（免费层并发低谷）",
+    "授权预注册备选 intern-s2（一次性替代，需冻结前确认）",
+    "暂停 Stage G E 臂"
+  ]
+}

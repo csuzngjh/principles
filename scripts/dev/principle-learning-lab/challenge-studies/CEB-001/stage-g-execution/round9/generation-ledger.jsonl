@@ -1,0 +1,36 @@
+{"seq":1,"type":"REQUEST_RESERVE","requestId":"stage-g-r9-req-01","worstCaseUsd":null,"reason":"examiner generation request"}
+{"seq":2,"type":"REQUEST_PREPARED","requestId":"stage-g-r9-req-01","payloadHash":"db5f3f1cde5eb1b0a2c60263748fa041df7bc0631d6de2edb7c5d574f27c9086"}
+{"seq":3,"type":"REQUEST_RESULT","requestId":"stage-g-r9-req-01","result":"FAILED_KNOWN","usage":null,"detail":"response_error: rate_limited (HTTP 429); server Retry-After: unspecified — recorded, NOT auto-retried (explicit new request would consume the 16-request cap)"}
+{"seq":4,"type":"REQUEST_RESERVE","requestId":"stage-g-r9-req-02","worstCaseUsd":null,"reason":"examiner generation request"}
+{"seq":5,"type":"REQUEST_PREPARED","requestId":"stage-g-r9-req-02","payloadHash":"42c4630bff3c6762e71ef9e13bb8192c4ec601719b6fdb246ff08938d31f9e3c"}
+{"seq":6,"type":"REQUEST_RESULT","requestId":"stage-g-r9-req-02","result":"FAILED_KNOWN","usage":null,"detail":"response_error: rate_limited (HTTP 429); server Retry-After: unspecified — recorded, NOT auto-retried (explicit new request would consume the 16-request cap)"}
+{"seq":7,"type":"REQUEST_RESERVE","requestId":"stage-g-r9-req-03","worstCaseUsd":null,"reason":"examiner generation request"}
+{"seq":8,"type":"REQUEST_PREPARED","requestId":"stage-g-r9-req-03","payloadHash":"86fcc8b618d7b8d9df41a5b1161af70953fd9ede76c4e60babc66d84e408c77f"}
+{"seq":9,"type":"REQUEST_RESULT","requestId":"stage-g-r9-req-03","result":"FAILED_KNOWN","usage":null,"detail":"response_error: rate_limited (HTTP 429); server Retry-After: unspecified — recorded, NOT auto-retried (explicit new request would consume the 16-request cap)"}
+{"seq":10,"type":"REQUEST_RESERVE","requestId":"stage-g-r9-req-04","worstCaseUsd":null,"reason":"examiner generation request"}
+{"seq":11,"type":"REQUEST_PREPARED","requestId":"stage-g-r9-req-04","payloadHash":"5362e1bec3bfe356df09e8148553cabb84fafef72da58d3cc58bc59d208541c5"}
+{"seq":12,"type":"REQUEST_RESULT","requestId":"stage-g-r9-req-04","result":"FAILED_KNOWN","usage":null,"detail":"response_error: rate_limited (HTTP 429); server Retry-After: unspecified — recorded, NOT auto-retried (explicit new request would consume the 16-request cap)"}
+{"seq":13,"type":"REQUEST_RESERVE","requestId":"stage-g-r9-req-05","worstCaseUsd":null,"reason":"examiner generation request"}
+{"seq":14,"type":"REQUEST_PREPARED","requestId":"stage-g-r9-req-05","payloadHash":"eba2f3da2f2bb4ee4ccdacefd9ea118ac7083685dbc80286733ffd31b7d577b7"}
+{"seq":15,"type":"REQUEST_RESULT","requestId":"stage-g-r9-req-05","result":"FAILED_KNOWN","usage":null,"detail":"response_error: rate_limited (HTTP 429); server Retry-After: unspecified — recorded, NOT auto-retried (explicit new request would consume the 16-request cap)"}
+{"seq":16,"type":"REQUEST_RESERVE","requestId":"stage-g-r9-req-06","worstCaseUsd":null,"reason":"examiner generation request"}
+{"seq":17,"type":"REQUEST_PREPARED","requestId":"stage-g-r9-req-06","payloadHash":"04626e235e8e17a4fd62c2b6ba3b980f8a722a83cd66473970098fe7f9509800"}
+{"seq":18,"type":"REQUEST_RESULT","requestId":"stage-g-r9-req-06","result":"FAILED_KNOWN","usage":null,"detail":"response_error: rate_limited (HTTP 429); server Retry-After: unspecified — recorded, NOT auto-retried (explicit new request would consume the 16-request cap)"}
+{"seq":19,"type":"REQUEST_RESERVE","requestId":"stage-g-r9-req-07","worstCaseUsd":null,"reason":"examiner generation request"}
+{"seq":20,"type":"REQUEST_PREPARED","requestId":"stage-g-r9-req-07","payloadHash":"db5f3f1cde5eb1b0a2c60263748fa041df7bc0631d6de2edb7c5d574f27c9086"}
+{"seq":21,"type":"REQUEST_RESULT","requestId":"stage-g-r9-req-07","result":"FAILED_KNOWN","usage":null,"detail":"response_error: rate_limited (HTTP 429); server Retry-After: unspecified — recorded, NOT auto-retried (explicit new request would consume the 16-request cap)"}
+{"seq":22,"type":"REQUEST_RESERVE","requestId":"stage-g-r9-req-08","worstCaseUsd":null,"reason":"examiner generation request"}
+{"seq":23,"type":"REQUEST_PREPARED","requestId":"stage-g-r9-req-08","payloadHash":"42c4630bff3c6762e71ef9e13bb8192c4ec601719b6fdb246ff08938d31f9e3c"}
+{"seq":24,"type":"REQUEST_RESULT","requestId":"stage-g-r9-req-08","result":"FAILED_KNOWN","usage":null,"detail":"response_error: rate_limited (HTTP 429); server Retry-After: unspecified — recorded, NOT auto-retried (explicit new request would consume the 16-request cap)"}
+{"seq":25,"type":"REQUEST_RESERVE","requestId":"stage-g-r9-req-09","worstCaseUsd":null,"reason":"examiner generation request"}
+{"seq":26,"type":"REQUEST_PREPARED","requestId":"stage-g-r9-req-09","payloadHash":"86fcc8b618d7b8d9df41a5b1161af70953fd9ede76c4e60babc66d84e408c77f"}
+{"seq":27,"type":"REQUEST_RESULT","requestId":"stage-g-r9-req-09","result":"FAILED_KNOWN","usage":null,"detail":"response_error: rate_limited (HTTP 429); server Retry-After: unspecified — recorded, NOT auto-retried (explicit new request would consume the 16-request cap)"}
+{"seq":28,"type":"REQUEST_RESERVE","requestId":"stage-g-r9-req-10","worstCaseUsd":null,"reason":"examiner generation request"}
+{"seq":29,"type":"REQUEST_PREPARED","requestId":"stage-g-r9-req-10","payloadHash":"5362e1bec3bfe356df09e8148553cabb84fafef72da58d3cc58bc59d208541c5"}
+{"seq":30,"type":"REQUEST_RESULT","requestId":"stage-g-r9-req-10","result":"FAILED_KNOWN","usage":null,"detail":"response_error: rate_limited (HTTP 429); server Retry-After: unspecified — recorded, NOT auto-retried (explicit new request would consume the 16-request cap)"}
+{"seq":31,"type":"REQUEST_RESERVE","requestId":"stage-g-r9-req-11","worstCaseUsd":null,"reason":"examiner generation request"}
+{"seq":32,"type":"REQUEST_PREPARED","requestId":"stage-g-r9-req-11","payloadHash":"eba2f3da2f2bb4ee4ccdacefd9ea118ac7083685dbc80286733ffd31b7d577b7"}
+{"seq":33,"type":"REQUEST_RESULT","requestId":"stage-g-r9-req-11","result":"FAILED_KNOWN","usage":null,"detail":"response_error: rate_limited (HTTP 429); server Retry-After: unspecified — recorded, NOT auto-retried (explicit new request would consume the 16-request cap)"}
+{"seq":34,"type":"REQUEST_RESERVE","requestId":"stage-g-r9-req-12","worstCaseUsd":null,"reason":"examiner generation request"}
+{"seq":35,"type":"REQUEST_PREPARED","requestId":"stage-g-r9-req-12","payloadHash":"04626e235e8e17a4fd62c2b6ba3b980f8a722a83cd66473970098fe7f9509800"}
+{"seq":36,"type":"REQUEST_RESULT","requestId":"stage-g-r9-req-12","result":"FAILED_KNOWN","usage":null,"detail":"response_error: rate_limited (HTTP 429); server Retry-After: unspecified — recorded, NOT auto-retried (explicit new request would consume the 16-request cap)"}

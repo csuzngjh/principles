@@ -1,7 +1,7 @@
 # Principle Learning 项目状态（唯一权威）
 
 > 本文档是 Principle Learning 研究项目的唯一状态来源。后续任何 AI 执行前必须先读本文件。
-> 最后更新：2026-10-23；分支 `ai/PRI-966-ca-content-modes` HEAD `5c11c908b`（PR #2116）。
+> 最后更新：2026-10-25（新增 §10 Examiner 支线状态）；此前 2026-10-23；分支 `ai/PRI-966-ca-content-modes` HEAD `5c11c908b`（PR #2116）。
 > 维护规则：状态变化时更新本文件对应小节；禁止另建竞争性状态报告。
 
 ## 1. 研究协议
@@ -84,3 +84,22 @@
 **唯一主任务**：Owner 批准 OD-v2-1/2/3 后执行 `PLE-PILOT-02-G` 五条件三种子正式实验（约 255 请求/$0.44 当量），裁决一般上下文效应假设。
 
 **禁止**：真实模型调用（无授权时）；修改 C-A/C-E 已完成产物；修改冻结预注册或 v1 夹具；自动合并 PR；Luna 额度追加；生产 Runtime/Adapter/Hook 改动；新竞争状态文档。
+
+## 10. Examiner 支线（SPEC-PD-EXAMINER-001，2026-10-25 增补）
+
+- **SPEC**：`SPEC-PD-EXAMINER-001` 当前版本 **v0.4**（v0.3 增量修订，Owner 2026-10-25 采纳方案 B；v0.3 保留为 Phase 1A 冻结基线引用）。阶段恢复文档：`docs/research/EXAMINER-STAGE-G-CONTEXT.md`。
+- **研究状态**：Phase 0 GO、Phase 1A DONE（冻结契约+12 题四族+评分）、Phase 1B DONE（ActorTraceV1+串行 Runner+RESULT_UNKNOWN+故障注入 10 场景）、Stage G Preflight 完成（READY_FOR_OWNER_REVIEW）。研究支线资产：`scripts/dev/principle-learning-lab/challenge-studies/CEB-001/`（冻结四哈希 mappingHash `213090da…` / grader `eef38484…` / suite `e1f2f5ca…` / prereg `01ac054b…`，与 CEB-001 题集互不触碰）。
+- **方案 B（Owner 已批）**：冻结事实骨架下的受约束生成。本轮已离线实现：骨架门 `lib/challenge-skeleton.mjs`（tier：parametric/skeleton_verified/skeleton_mismatch/value_domain_violation/expression_leak/domain_proposal）、值域表 v1.0.0、validator 接线、三级+骨架去重、对抗测试 15 场景与 PAHF 启发离线夹具（澄清/证据冲突纠正）——skeleton+stageg 套件 56 项全绿，既有回归全绿。
+- **已知问题（设计审查入案）**：byte-equal 重放门曾锁死表达层（本轮骨架门解决）；B 臂 36 候选含 12 对 structural 重复（duplicateRatio 基线失真，不作组间优劣证据）；validRatio(B)=1.0 天花板；成本示例曾漏除 1e6（已勘误：$10/$30→$3.20 击穿 $3）。
+- **授权状态**：真实模型调用 0、真实宿主 0、生产写入 0；Stage G/R 均 NOT_AUTHORIZED；`realHostBaseline=UNKNOWN`、PRI-1037=NOT_RUN（真实宿主隔离独立阻断）。
+- **待 Owner**：模型/分价单价/时薪/$3 上限重定/盲评人员/骨架边界与表达风险接受/新领域核验人/PRI-1034 实现授权/Stage G 执行授权。相关 Linear：PRI-1024（总工单，15 子单）、PRI-1034/1035/1037。
+- **边界**：Examiner 支线结论不改变 §2/§3 的 C-A/C-E 主线判定；PAHF 仅作离线测试思路借鉴（不引入记忆架构/数据）。
+- **PRI-1034 状态细分（2026-10-25 第二次增补，六态区分）**：工程实现 **完成**（Examiner 适配器 Mock-first 离线闭环：`lib/challenge-examiner.mjs` + 五组 26 项测试全绿）；离线测试 **通过**（含授权九类拒绝路径零 transport 调用、RESULT_UNKNOWN 恢复语义）；协议预注册 **部分**（option-b 草案+statsContract_v04，正式冻结待批）；Owner 审批 **未完成**（模型/单价/时薪/$3/盲评人员/骨架边界待决）；真实实验获准 **未发生**（Stage G=NOT_AUTHORIZED）；真实实验执行 **未发生**（真实 transport 有意未实现，零网络代码）。SPEC v0.4 已增量 §2.7/§12.7。
+
+- **Stage G round7：第一批真实有效 E 候选（2026-10-25 第六次增补）**——Owner 切换书生平台 DeepSeek-V4.1-Flash-1017（墨点计费）。执行链：Atria-Dawn 连通验证✓ → round3 16×404（URL 拼接缺陷，修复+回归钉死）→ round4 16 请求（13 超时 UNKNOWN+2 失败+1 拒）→ round5 R2 首批 6 候选但逐字回显（输入契约缺陷）→ **merge 采纳管线落地**（challenge-adopt.mjs：E=表达层，管线机械合并冻结骨架不可变字段——Gold 结构性不可注入）→ 生成契约澄清（改写义务+字段映射+回显零新颖性）→ **round7 R1 成功：6/6 候选采纳（全部 skeleton_verified、taskText/fact 全改写互异、Gold 零接触、declaredBaselineMismatch=0）**。请求 8/16 消耗（1 成功+2 UNKNOWN+5×429），8 个保留待通道窗口。盲评 PENDING（评审者未指派，包已备）。指标：round7-metrics.json。
+- **Stage G 第二轮（DeepSeek 正式实验）完成（2026-10-25 第七次增补）：12/12 真实有效候选**——Owner 选定书生平台 deepseek-v4.1-flash-1017（墨点计费，余额 4,461）。Atria-Dawn 免费验证 ✓。执行链：round3 16×404（URL 拼接缺陷修复）→ round4 16（13 UNKNOWN+2 失败：240s 超时）→ round5 首批 6 候选逐字回显（输入契约缺陷）→ **merge 采纳管线+生成契约澄清**（透明预注册 r6/r7）→ **round7：2/16 请求成功产出 12/12 真实有效候选**（全部 skeleton_verified、taskText/fact 全改写互异、Gold 零接触、declaredBaselineMismatch=0、结构重复 0）；其余 14 请求=429×12+UNKNOWN×2，24 空槽全量保留。局限：E 未行使参数变化权（网格覆盖 6/110）；盲评 PENDING（评审者未指派）。指标：final-round-metrics.json。
+- **Stage G round8+round9 续跑（2026-10-25 第八次增补）：通道持续饱和，E 组维持 12/36**——round8 6×429 停止（10 请求保留）；round9 6×429 停止（10 请求保留）。DeepSeek 免费通道饱和跨越多个时间窗（间隔 >1h 仍 429），为平台级持续争用而非瞬态抖动。AI 盲评已归档（18 条，8 关键门槛失败，10 有效）。累计：round7 12 + round8 0 + round9 0 = 12/36 有效候选。
+- **Stage G 候选总账核验+盲评包扩展（2026-10-25 第九次增补）：60 adopted envelopes 全量入包**——round7 12 + round8 6 + round10 42 = 60 total；36 唯一 candidateId 锚点（部分基线多轮改写→多表达）；52 unique skeleton+param combos；60 unique taskTexts（0 重复）；17 unique param points。盲评包扩展至 60 RV（RV-001..060，泄漏自检 CLEAN）。**待 Owner：指派盲评者 2+1 → ChatGPT AI-only 盲评 → 表达质量数据 → 研究结论。**
+- **Stage G 首轮真实实验完成（2026-10-25 第五次增补）：E 组 NOT_EVALUABLE**——预注册冻结（E 前）→ 授权执行 → 四轮共 80 次真实 HTTP 尝试（AMD 32×网关 403 形态敏感；intern-s2 16×404 URL 缺陷作废 + 16 超时/连接失败 + 1 恢复拒绝），**零模型输出、零候选**。transport 沿革：h2→node:https 1.1→intern-s2 适配（reasoning_content 输出字段、无 reasoning_effort）；全部完整性门（截断/超候选/身份/预算）实测有效。授权 halted（预算耗尽）。**待 Owner：E 臂供应商策略**（等待窗/付费层/换端点/暂停）。B0/B1 资产与全部离线能力保留可复用。
+- **Stage G 首轮真实实验执行（2026-10-25 第四次增补）**：正式预注册冻结（E 前）→ 授权签发（Owner 指令为据，24h 窗，占位留痕）→ round1 16 请求全 403（undici h2 网关不兼容，判基础设施缺陷作废，transport 重写 node:https HTTP/1.1）→ round2 16 请求 HTTP/1.1 仍全 403。诊断矩阵定位：网关对「中等体积中文 JSON+内嵌命令串」请求形态敏感（良性/ASCII 200；真实负载 403/502/挂死）→ **E 臂 NOT_EVALUABLE，授权 halted（防盲耗）**。执行记录全保留（stage-g-execution/round1,2 + round-halt-record.json）。候选 0、模型 token 0、盲评 N/A。**待 Owner：网关处置 4 选项（AMD 反馈/重试窗/备选 intern-s2/暂停）**。
+- **B0/B1/E 对照设计（2026-10-25 第三次增补；同日收口轮升级）**：完整合法空间经**实际枚举逐一体全验**核实=31,680 组合/0 失败（~7s，指纹 8a46476e…测试钉死）；**stakes 为纯标注维度**（裁定逐字节相同）→ 实质决策情境=3,960。B1 升级 **v2=exhaustive-verify-then-select**（方案 B 采纳；v1 保留历史）。B0=历史参考（3 唯一参数点）；E=同空间同门实验组。双口径覆盖率+结论边界四问见 `protocol-b0-b1-e-comparison.draft.json` v2（PROPOSED，B1 v2 待 Owner 认可后冻结）。b1 套件 18 项全绿。

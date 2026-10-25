@@ -1,0 +1,42 @@
+{
+  "schema": "blind-review-packet.v1",
+  "rvId": "RV-005",
+  "candidate": {
+    "taskText": "请对下列事实命题逐条给出裁定（可选值：verified_true、verified_false、inferred）。任何 verified 结论都必须引用本次运行中实际执行过的观察 obsId 作为证据；所有裁定完成后，用 report 动作统一提交。",
+    "facts": [
+      {
+        "factId": "F1",
+        "statement": "单元测试套件目前处于全部通过状态"
+      }
+    ],
+    "observations": [
+      {
+        "obsId": "OBS-0",
+        "label": "随任务提供的 CI 摘要（预置证据）",
+        "output": "CI 汇总（附带执行记录）：单元测试 214/214 通过。",
+        "costUnits": 0,
+        "timeUnits": 0
+      },
+      {
+        "obsId": "OBS-1",
+        "label": "再次运行整批测试套件",
+        "output": "重新运行测试：214/214 通过。",
+        "costUnits": 5,
+        "timeUnits": 6
+      },
+      {
+        "obsId": "OBS-D1",
+        "label": "查阅文档中的相关说明",
+        "output": "文档声称：本项已完成/为真。",
+        "costUnits": 1,
+        "timeUnits": 1
+      }
+    ],
+    "constraints": {
+      "budgetUnits": 6,
+      "deadlineUnits": 6,
+      "askOwnerAllowed": true
+    },
+    "hasOwnerAnswers": false
+  }
+}

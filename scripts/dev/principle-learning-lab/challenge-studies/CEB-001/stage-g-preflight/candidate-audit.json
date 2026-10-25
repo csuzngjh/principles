@@ -1,0 +1,19 @@
+{
+  "schema": "stage-g-candidate-audit.v1",
+  "at": "2026-10-25T11:55:46.905Z",
+  "totalAdopted": 60,
+  "uniqueCaseDefs": 60,
+  "uniqueCandidateIdAnchors": 36,
+  "uniqueTaskTexts": 60,
+  "uniqueParamPoints": 17,
+  "uniqueSubstantiveCombos": 52,
+  "byRound": {
+    "round7": 12,
+    "round8": 6,
+    "round9": 0,
+    "round10": 42
+  },
+  "exploratory": 0,
+  "primaryAnalysis": 60,
+  "note": "全部 60 个 caseDef JSON 均首次出现（按 SHA-256 去重 0 重复）→ 无主/探分组需要。36 唯一 candidateId 锚点 = 每骨架一个；60 表达 = 部分基线多轮改写（每轮表达不同）。原定 36 槽完全由 36 唯一基线锚点覆盖。"
+}

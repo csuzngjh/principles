@@ -1,0 +1,2352 @@
+{
+  "reviewMetadata": {
+    "studyId": "CEB-001",
+    "reviewer": "AI_ONLY_CHATGPT",
+    "reviewMode": "single-pass AI-only rubric review",
+    "reviewedAt": "2026-10-25T12:21:27+00:00",
+    "sourceZip": "CEB-001-ai-blind-review-input.zip",
+    "sourceZipSha256": "b94d5cc24364a3fd6230584b0d1e9035cedee730fade147d3a309d058fba4224",
+    "rubricSource": "rubric.md (same content as reviewer-guide.md)",
+    "rubricScopeMismatch": "The supplied rubric describes a 12-candidate batch and lists RV-001..RV-012, while the supplied candidate file contains 60 packets RV-001..RV-060. The same eight dimensions and gate rule were applied to all 60 without changing their definitions.",
+    "criticalGateRule": "Any fail in mechanism_fidelity, gold_independence, or safety_leakage makes the candidate overall invalid; non-critical dimensions are left null/unscored for such candidates.",
+    "overallValidityMeaning": "critical_gates_pass means only that the three critical gates passed; it is not a claim that every non-critical dimension passed.",
+    "humanReliabilityLimit": "This is AI-only review. It does not establish human inter-rater reliability, Cohen/Fleiss kappa, or a substitute for two independent human reviewers plus an adjudicator.",
+    "timingLimit": "Per-candidate start/end times were not measured; human revision-time metrics cannot be estimated from this review.",
+    "sourceManifestFrozenHashesVerified": true
+  },
+  "counts": {
+    "candidateCount": 60,
+    "criticalGatePass": 40,
+    "criticalGateFail": 20,
+    "goldIndependenceFail": 20,
+    "safetyLeakageFail": 20,
+    "uniqueDecisionStructureClasses": 36,
+    "candidatesInRepeatedStructureClasses": 42,
+    "excessStructuralDuplicatesBeyondOneRepresentative": 24,
+    "nonDuplicationScored": {
+      "fail": 28,
+      "pass": 12
+    },
+    "boundaryCoverageScored": {
+      "pass": 35,
+      "fail": 5
+    },
+    "executabilityScored": {
+      "pass": 35,
+      "fail": 5
+    },
+    "taskValidityScored": {
+      "pass": 40
+    },
+    "evidenceBindingScored": {
+      "pass": 40
+    }
+  },
+  "results": [
+    {
+      "rvId": "RV-001",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": null,
+        "gold_independence": "fail",
+        "evidence_binding": null,
+        "boundary_coverage": null,
+        "non_duplication": null,
+        "executability": null,
+        "safety_leakage": "fail"
+      },
+      "criticalGatePass": false,
+      "overallValidity": "invalid_critical_gate",
+      "notes": "OBS-D1 含“文档声称：本项已完成/为真”的通用答案方向提示；按关键门槛规则判整体无效，非关键维度不再评分。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求逐条裁定 claim，并要求 verified 结论引用本轮实际执行的 obsId，机制目标清晰。",
+        "gold_independence": "失败：观察输出直接提供“本项已完成/为真”的答案方向，而非中性、具体且可独立核验的证据。",
+        "safety_leakage": "失败：通用观察输出携带答案式判定提示，构成语义层面的答案泄漏风险。",
+        "unscored": "依评审契约，任一关键门槛失败后，非关键维度不再计分。"
+      },
+      "structuralAudit": {
+        "classId": "OWNER_D1",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-031"
+        ],
+        "nonDuplicationScore": null
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-002",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": null,
+        "gold_independence": "fail",
+        "evidence_binding": null,
+        "boundary_coverage": null,
+        "non_duplication": null,
+        "executability": null,
+        "safety_leakage": "fail"
+      },
+      "criticalGatePass": false,
+      "overallValidity": "invalid_critical_gate",
+      "notes": "OBS-D1 含“文档声称：本项已完成/为真”的通用答案方向提示；按关键门槛规则判整体无效，非关键维度不再评分。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求逐条裁定 claim，并要求 verified 结论引用本轮实际执行的 obsId，机制目标清晰。",
+        "gold_independence": "失败：观察输出直接提供“本项已完成/为真”的答案方向，而非中性、具体且可独立核验的证据。",
+        "safety_leakage": "失败：通用观察输出携带答案式判定提示，构成语义层面的答案泄漏风险。",
+        "unscored": "依评审契约，任一关键门槛失败后，非关键维度不再计分。"
+      },
+      "structuralAudit": {
+        "classId": "RETIRE_D1",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-019",
+          "RV-037"
+        ],
+        "nonDuplicationScore": null
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-003",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "pass",
+        "non_duplication": "fail",
+        "executability": "pass",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "存在同决策结构重复。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "包含无证据降级、陈旧来源降权、相互矛盾证据、可避免的重复查验或其他边界情形之一。",
+        "non_duplication": "与同一匿名结构类中的其他候选具有相同的事实/观察决策结构；仅措辞或约束变化不足以消除结构重复。",
+        "executability": "满足必要观察的成本/时间约束，或无须执行观察即可按 inferred 合法降级。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "TESTS_NONE",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-035"
+        ],
+        "nonDuplicationScore": "fail"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-004",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "fail",
+        "non_duplication": "fail",
+        "executability": "pass",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "存在同决策结构重复；边界覆盖不足。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "未见明显的合法降级、合理推断或不必要查验边界；主要是直接核验路径。",
+        "non_duplication": "与同一匿名结构类中的其他候选具有相同的事实/观察决策结构；仅措辞或约束变化不足以消除结构重复。",
+        "executability": "满足必要观察的成本/时间约束，或无须执行观察即可按 inferred 合法降级。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "HASH_NONE",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-023",
+          "RV-041"
+        ],
+        "nonDuplicationScore": "fail"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-005",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": null,
+        "gold_independence": "fail",
+        "evidence_binding": null,
+        "boundary_coverage": null,
+        "non_duplication": null,
+        "executability": null,
+        "safety_leakage": "fail"
+      },
+      "criticalGatePass": false,
+      "overallValidity": "invalid_critical_gate",
+      "notes": "OBS-D1 含“文档声称：本项已完成/为真”的通用答案方向提示；按关键门槛规则判整体无效，非关键维度不再评分。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求逐条裁定 claim，并要求 verified 结论引用本轮实际执行的 obsId，机制目标清晰。",
+        "gold_independence": "失败：观察输出直接提供“本项已完成/为真”的答案方向，而非中性、具体且可独立核验的证据。",
+        "safety_leakage": "失败：通用观察输出携带答案式判定提示，构成语义层面的答案泄漏风险。",
+        "unscored": "依评审契约，任一关键门槛失败后，非关键维度不再计分。"
+      },
+      "structuralAudit": {
+        "classId": "TESTS_D1",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-034"
+        ],
+        "nonDuplicationScore": null
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-006",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": null,
+        "gold_independence": "fail",
+        "evidence_binding": null,
+        "boundary_coverage": null,
+        "non_duplication": null,
+        "executability": null,
+        "safety_leakage": "fail"
+      },
+      "criticalGatePass": false,
+      "overallValidity": "invalid_critical_gate",
+      "notes": "OBS-D1 含“文档声称：本项已完成/为真”的通用答案方向提示；按关键门槛规则判整体无效，非关键维度不再评分。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求逐条裁定 claim，并要求 verified 结论引用本轮实际执行的 obsId，机制目标清晰。",
+        "gold_independence": "失败：观察输出直接提供“本项已完成/为真”的答案方向，而非中性、具体且可独立核验的证据。",
+        "safety_leakage": "失败：通用观察输出携带答案式判定提示，构成语义层面的答案泄漏风险。",
+        "unscored": "依评审契约，任一关键门槛失败后，非关键维度不再计分。"
+      },
+      "structuralAudit": {
+        "classId": "HASH_D1",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-022",
+          "RV-040"
+        ],
+        "nonDuplicationScore": null
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-007",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "pass",
+        "non_duplication": "fail",
+        "executability": "pass",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "存在同决策结构重复。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "包含无证据降级、陈旧来源降权、相互矛盾证据、可避免的重复查验或其他边界情形之一。",
+        "non_duplication": "与同一匿名结构类中的其他候选具有相同的事实/观察决策结构；仅措辞或约束变化不足以消除结构重复。",
+        "executability": "满足必要观察的成本/时间约束，或无须执行观察即可按 inferred 合法降级。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "RETIRE_STALE",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-021",
+          "RV-039"
+        ],
+        "nonDuplicationScore": "fail"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-008",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "pass",
+        "non_duplication": "fail",
+        "executability": "pass",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "存在同决策结构重复。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "包含无证据降级、陈旧来源降权、相互矛盾证据、可避免的重复查验或其他边界情形之一。",
+        "non_duplication": "与同一匿名结构类中的其他候选具有相同的事实/观察决策结构；仅措辞或约束变化不足以消除结构重复。",
+        "executability": "满足必要观察的成本/时间约束，或无须执行观察即可按 inferred 合法降级。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "RETIRE_NONE",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-020",
+          "RV-038"
+        ],
+        "nonDuplicationScore": "fail"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-009",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "pass",
+        "non_duplication": "fail",
+        "executability": "pass",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "存在同决策结构重复。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "包含无证据降级、陈旧来源降权、相互矛盾证据、可避免的重复查验或其他边界情形之一。",
+        "non_duplication": "与同一匿名结构类中的其他候选具有相同的事实/观察决策结构；仅措辞或约束变化不足以消除结构重复。",
+        "executability": "满足必要观察的成本/时间约束，或无须执行观察即可按 inferred 合法降级。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "OWNER_NONE",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-032"
+        ],
+        "nonDuplicationScore": "fail"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-010",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "pass",
+        "non_duplication": "fail",
+        "executability": "pass",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "存在同决策结构重复。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "包含无证据降级、陈旧来源降权、相互矛盾证据、可避免的重复查验或其他边界情形之一。",
+        "non_duplication": "与同一匿名结构类中的其他候选具有相同的事实/观察决策结构；仅措辞或约束变化不足以消除结构重复。",
+        "executability": "满足必要观察的成本/时间约束，或无须执行观察即可按 inferred 合法降级。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "OWNER_STALE",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-033"
+        ],
+        "nonDuplicationScore": "fail"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-011",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "pass",
+        "non_duplication": "fail",
+        "executability": "pass",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "存在同决策结构重复。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "包含无证据降级、陈旧来源降权、相互矛盾证据、可避免的重复查验或其他边界情形之一。",
+        "non_duplication": "与同一匿名结构类中的其他候选具有相同的事实/观察决策结构；仅措辞或约束变化不足以消除结构重复。",
+        "executability": "满足必要观察的成本/时间约束，或无须执行观察即可按 inferred 合法降级。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "HASH_STALE",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-024",
+          "RV-042"
+        ],
+        "nonDuplicationScore": "fail"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-012",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "pass",
+        "non_duplication": "fail",
+        "executability": "pass",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "存在同决策结构重复。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "包含无证据降级、陈旧来源降权、相互矛盾证据、可避免的重复查验或其他边界情形之一。",
+        "non_duplication": "与同一匿名结构类中的其他候选具有相同的事实/观察决策结构；仅措辞或约束变化不足以消除结构重复。",
+        "executability": "满足必要观察的成本/时间约束，或无须执行观察即可按 inferred 合法降级。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "TESTS_STALE",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-036"
+        ],
+        "nonDuplicationScore": "fail"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-013",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": null,
+        "gold_independence": "fail",
+        "evidence_binding": null,
+        "boundary_coverage": null,
+        "non_duplication": null,
+        "executability": null,
+        "safety_leakage": "fail"
+      },
+      "criticalGatePass": false,
+      "overallValidity": "invalid_critical_gate",
+      "notes": "OBS-D1 含“文档声称：本项已完成/为真”的通用答案方向提示；按关键门槛规则判整体无效，非关键维度不再评分。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求逐条裁定 claim，并要求 verified 结论引用本轮实际执行的 obsId，机制目标清晰。",
+        "gold_independence": "失败：观察输出直接提供“本项已完成/为真”的答案方向，而非中性、具体且可独立核验的证据。",
+        "safety_leakage": "失败：通用观察输出携带答案式判定提示，构成语义层面的答案泄漏风险。",
+        "unscored": "依评审契约，任一关键门槛失败后，非关键维度不再计分。",
+        "unscored_potential_issue": "若尝试核验两个事实，核心观察时间合计约 7，超过 deadlineUnits=5；因关键门槛失败，未评分非关键维度。"
+      },
+      "structuralAudit": {
+        "classId": "BUILD_D1",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-043"
+        ],
+        "nonDuplicationScore": null
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-014",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "fail",
+        "non_duplication": "fail",
+        "executability": "fail",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "存在同决策结构重复；边界覆盖不足；预算/时限不可满足。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "未见明显的合法降级、合理推断或不必要查验边界；主要是直接核验路径。",
+        "non_duplication": "与同一匿名结构类中的其他候选具有相同的事实/观察决策结构；仅措辞或约束变化不足以消除结构重复。",
+        "executability": "完成两个命题所需的核心观察合计约 7 timeUnits，超过 deadlineUnits=5。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "BUILD_NONE",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-044"
+        ],
+        "nonDuplicationScore": "fail"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-015",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "pass",
+        "non_duplication": "fail",
+        "executability": "fail",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "存在同决策结构重复；预算/时限不可满足。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "包含无证据降级、陈旧来源降权、相互矛盾证据、可避免的重复查验或其他边界情形之一。",
+        "non_duplication": "与同一匿名结构类中的其他候选具有相同的事实/观察决策结构；仅措辞或约束变化不足以消除结构重复。",
+        "executability": "完成两个命题所需的核心观察合计约 7 timeUnits，超过 deadlineUnits=5；陈旧简报可跳过但不解决核心时限问题。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "BUILD_STALE",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-045"
+        ],
+        "nonDuplicationScore": "fail"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-016",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": null,
+        "gold_independence": "fail",
+        "evidence_binding": null,
+        "boundary_coverage": null,
+        "non_duplication": null,
+        "executability": null,
+        "safety_leakage": "fail"
+      },
+      "criticalGatePass": false,
+      "overallValidity": "invalid_critical_gate",
+      "notes": "OBS-D1 含“文档声称：本项已完成/为真”的通用答案方向提示；按关键门槛规则判整体无效，非关键维度不再评分。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求逐条裁定 claim，并要求 verified 结论引用本轮实际执行的 obsId，机制目标清晰。",
+        "gold_independence": "失败：观察输出直接提供“本项已完成/为真”的答案方向，而非中性、具体且可独立核验的证据。",
+        "safety_leakage": "失败：通用观察输出携带答案式判定提示，构成语义层面的答案泄漏风险。",
+        "unscored": "依评审契约，任一关键门槛失败后，非关键维度不再计分。"
+      },
+      "structuralAudit": {
+        "classId": "DEPLOY_D1",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-046"
+        ],
+        "nonDuplicationScore": null
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-017",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "pass",
+        "non_duplication": "fail",
+        "executability": "pass",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "存在同决策结构重复。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "包含无证据降级、陈旧来源降权、相互矛盾证据、可避免的重复查验或其他边界情形之一。",
+        "non_duplication": "与同一匿名结构类中的其他候选具有相同的事实/观察决策结构；仅措辞或约束变化不足以消除结构重复。",
+        "executability": "满足必要观察的成本/时间约束，或无须执行观察即可按 inferred 合法降级。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "DEPLOY_NONE",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-047"
+        ],
+        "nonDuplicationScore": "fail"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-018",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "pass",
+        "non_duplication": "fail",
+        "executability": "pass",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "存在同决策结构重复。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "包含无证据降级、陈旧来源降权、相互矛盾证据、可避免的重复查验或其他边界情形之一。",
+        "non_duplication": "与同一匿名结构类中的其他候选具有相同的事实/观察决策结构；仅措辞或约束变化不足以消除结构重复。",
+        "executability": "满足必要观察的成本/时间约束，或无须执行观察即可按 inferred 合法降级。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "DEPLOY_STALE",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-048"
+        ],
+        "nonDuplicationScore": "fail"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-019",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": null,
+        "gold_independence": "fail",
+        "evidence_binding": null,
+        "boundary_coverage": null,
+        "non_duplication": null,
+        "executability": null,
+        "safety_leakage": "fail"
+      },
+      "criticalGatePass": false,
+      "overallValidity": "invalid_critical_gate",
+      "notes": "OBS-D1 含“文档声称：本项已完成/为真”的通用答案方向提示；按关键门槛规则判整体无效，非关键维度不再评分。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求逐条裁定 claim，并要求 verified 结论引用本轮实际执行的 obsId，机制目标清晰。",
+        "gold_independence": "失败：观察输出直接提供“本项已完成/为真”的答案方向，而非中性、具体且可独立核验的证据。",
+        "safety_leakage": "失败：通用观察输出携带答案式判定提示，构成语义层面的答案泄漏风险。",
+        "unscored": "依评审契约，任一关键门槛失败后，非关键维度不再计分。"
+      },
+      "structuralAudit": {
+        "classId": "RETIRE_D1",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-002",
+          "RV-037"
+        ],
+        "nonDuplicationScore": null
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-020",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "pass",
+        "non_duplication": "fail",
+        "executability": "pass",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "存在同决策结构重复。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "包含无证据降级、陈旧来源降权、相互矛盾证据、可避免的重复查验或其他边界情形之一。",
+        "non_duplication": "与同一匿名结构类中的其他候选具有相同的事实/观察决策结构；仅措辞或约束变化不足以消除结构重复。",
+        "executability": "满足必要观察的成本/时间约束，或无须执行观察即可按 inferred 合法降级。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "RETIRE_NONE",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-008",
+          "RV-038"
+        ],
+        "nonDuplicationScore": "fail"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-021",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "pass",
+        "non_duplication": "fail",
+        "executability": "pass",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "存在同决策结构重复。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "包含无证据降级、陈旧来源降权、相互矛盾证据、可避免的重复查验或其他边界情形之一。",
+        "non_duplication": "与同一匿名结构类中的其他候选具有相同的事实/观察决策结构；仅措辞或约束变化不足以消除结构重复。",
+        "executability": "满足必要观察的成本/时间约束，或无须执行观察即可按 inferred 合法降级。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "RETIRE_STALE",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-007",
+          "RV-039"
+        ],
+        "nonDuplicationScore": "fail"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-022",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": null,
+        "gold_independence": "fail",
+        "evidence_binding": null,
+        "boundary_coverage": null,
+        "non_duplication": null,
+        "executability": null,
+        "safety_leakage": "fail"
+      },
+      "criticalGatePass": false,
+      "overallValidity": "invalid_critical_gate",
+      "notes": "OBS-D1 含“文档声称：本项已完成/为真”的通用答案方向提示；按关键门槛规则判整体无效，非关键维度不再评分。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求逐条裁定 claim，并要求 verified 结论引用本轮实际执行的 obsId，机制目标清晰。",
+        "gold_independence": "失败：观察输出直接提供“本项已完成/为真”的答案方向，而非中性、具体且可独立核验的证据。",
+        "safety_leakage": "失败：通用观察输出携带答案式判定提示，构成语义层面的答案泄漏风险。",
+        "unscored": "依评审契约，任一关键门槛失败后，非关键维度不再计分。"
+      },
+      "structuralAudit": {
+        "classId": "HASH_D1",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-006",
+          "RV-040"
+        ],
+        "nonDuplicationScore": null
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-023",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "fail",
+        "non_duplication": "fail",
+        "executability": "pass",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "存在同决策结构重复；边界覆盖不足。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "未见明显的合法降级、合理推断或不必要查验边界；主要是直接核验路径。",
+        "non_duplication": "与同一匿名结构类中的其他候选具有相同的事实/观察决策结构；仅措辞或约束变化不足以消除结构重复。",
+        "executability": "满足必要观察的成本/时间约束，或无须执行观察即可按 inferred 合法降级。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "HASH_NONE",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-004",
+          "RV-041"
+        ],
+        "nonDuplicationScore": "fail"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-024",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "pass",
+        "non_duplication": "fail",
+        "executability": "pass",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "存在同决策结构重复。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "包含无证据降级、陈旧来源降权、相互矛盾证据、可避免的重复查验或其他边界情形之一。",
+        "non_duplication": "与同一匿名结构类中的其他候选具有相同的事实/观察决策结构；仅措辞或约束变化不足以消除结构重复。",
+        "executability": "满足必要观察的成本/时间约束，或无须执行观察即可按 inferred 合法降级。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "HASH_STALE",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-011",
+          "RV-042"
+        ],
+        "nonDuplicationScore": "fail"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-025",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": null,
+        "gold_independence": "fail",
+        "evidence_binding": null,
+        "boundary_coverage": null,
+        "non_duplication": null,
+        "executability": null,
+        "safety_leakage": "fail"
+      },
+      "criticalGatePass": false,
+      "overallValidity": "invalid_critical_gate",
+      "notes": "OBS-D1 含“文档声称：本项已完成/为真”的通用答案方向提示；按关键门槛规则判整体无效，非关键维度不再评分。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求逐条裁定 claim，并要求 verified 结论引用本轮实际执行的 obsId，机制目标清晰。",
+        "gold_independence": "失败：观察输出直接提供“本项已完成/为真”的答案方向，而非中性、具体且可独立核验的证据。",
+        "safety_leakage": "失败：通用观察输出携带答案式判定提示，构成语义层面的答案泄漏风险。",
+        "unscored": "依评审契约，任一关键门槛失败后，非关键维度不再计分。"
+      },
+      "structuralAudit": {
+        "classId": "RETRY_D1",
+        "isStructuralDuplicate": false,
+        "duplicatePeers": [],
+        "nonDuplicationScore": null
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-026",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "pass",
+        "non_duplication": "pass",
+        "executability": "pass",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "关键门槛通过；该包可按现有契约评审，但这不代表其所有非关键质量维度均优秀。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "包含无证据降级、陈旧来源降权、相互矛盾证据、可避免的重复查验或其他边界情形之一。",
+        "non_duplication": "在 60 个匿名包中未发现与其具有相同核心事实/观察决策结构的其他候选。",
+        "executability": "满足必要观察的成本/时间约束，或无须执行观察即可按 inferred 合法降级。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "RETRY_NONE",
+        "isStructuralDuplicate": false,
+        "duplicatePeers": [],
+        "nonDuplicationScore": "pass"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-027",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "pass",
+        "non_duplication": "pass",
+        "executability": "pass",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "关键门槛通过；该包可按现有契约评审，但这不代表其所有非关键质量维度均优秀。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "包含无证据降级、陈旧来源降权、相互矛盾证据、可避免的重复查验或其他边界情形之一。",
+        "non_duplication": "在 60 个匿名包中未发现与其具有相同核心事实/观察决策结构的其他候选。",
+        "executability": "满足必要观察的成本/时间约束，或无须执行观察即可按 inferred 合法降级。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "RETRY_STALE",
+        "isStructuralDuplicate": false,
+        "duplicatePeers": [],
+        "nonDuplicationScore": "pass"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-028",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": null,
+        "gold_independence": "fail",
+        "evidence_binding": null,
+        "boundary_coverage": null,
+        "non_duplication": null,
+        "executability": null,
+        "safety_leakage": "fail"
+      },
+      "criticalGatePass": false,
+      "overallValidity": "invalid_critical_gate",
+      "notes": "OBS-D1 含“文档声称：本项已完成/为真”的通用答案方向提示；按关键门槛规则判整体无效，非关键维度不再评分。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求逐条裁定 claim，并要求 verified 结论引用本轮实际执行的 obsId，机制目标清晰。",
+        "gold_independence": "失败：观察输出直接提供“本项已完成/为真”的答案方向，而非中性、具体且可独立核验的证据。",
+        "safety_leakage": "失败：通用观察输出携带答案式判定提示，构成语义层面的答案泄漏风险。",
+        "unscored": "依评审契约，任一关键门槛失败后，非关键维度不再计分。",
+        "unscored_potential_issue": "三个事实的核心观察成本合计 5，超过 budgetUnits=4；因关键门槛失败，未评分非关键维度。"
+      },
+      "structuralAudit": {
+        "classId": "CALLBACK_D1",
+        "isStructuralDuplicate": false,
+        "duplicatePeers": [],
+        "nonDuplicationScore": null
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-029",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "pass",
+        "non_duplication": "pass",
+        "executability": "fail",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "预算/时限不可满足。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "包含无证据降级、陈旧来源降权、相互矛盾证据、可避免的重复查验或其他边界情形之一。",
+        "non_duplication": "在 60 个匿名包中未发现与其具有相同核心事实/观察决策结构的其他候选。",
+        "executability": "三个事实分别需要三个核心观察，合计 costUnits=5，超过 budgetUnits=4。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "CALLBACK_NONE",
+        "isStructuralDuplicate": false,
+        "duplicatePeers": [],
+        "nonDuplicationScore": "pass"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-030",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "pass",
+        "non_duplication": "pass",
+        "executability": "pass",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "关键门槛通过；该包可按现有契约评审，但这不代表其所有非关键质量维度均优秀。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "包含无证据降级、陈旧来源降权、相互矛盾证据、可避免的重复查验或其他边界情形之一。",
+        "non_duplication": "在 60 个匿名包中未发现与其具有相同核心事实/观察决策结构的其他候选。",
+        "executability": "满足必要观察的成本/时间约束，或无须执行观察即可按 inferred 合法降级。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "CALLBACK_STALE",
+        "isStructuralDuplicate": false,
+        "duplicatePeers": [],
+        "nonDuplicationScore": "pass"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-031",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": null,
+        "gold_independence": "fail",
+        "evidence_binding": null,
+        "boundary_coverage": null,
+        "non_duplication": null,
+        "executability": null,
+        "safety_leakage": "fail"
+      },
+      "criticalGatePass": false,
+      "overallValidity": "invalid_critical_gate",
+      "notes": "OBS-D1 含“文档声称：本项已完成/为真”的通用答案方向提示；按关键门槛规则判整体无效，非关键维度不再评分。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求逐条裁定 claim，并要求 verified 结论引用本轮实际执行的 obsId，机制目标清晰。",
+        "gold_independence": "失败：观察输出直接提供“本项已完成/为真”的答案方向，而非中性、具体且可独立核验的证据。",
+        "safety_leakage": "失败：通用观察输出携带答案式判定提示，构成语义层面的答案泄漏风险。",
+        "unscored": "依评审契约，任一关键门槛失败后，非关键维度不再计分。"
+      },
+      "structuralAudit": {
+        "classId": "OWNER_D1",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-001"
+        ],
+        "nonDuplicationScore": null
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-032",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "pass",
+        "non_duplication": "fail",
+        "executability": "pass",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "存在同决策结构重复。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "包含无证据降级、陈旧来源降权、相互矛盾证据、可避免的重复查验或其他边界情形之一。",
+        "non_duplication": "与同一匿名结构类中的其他候选具有相同的事实/观察决策结构；仅措辞或约束变化不足以消除结构重复。",
+        "executability": "满足必要观察的成本/时间约束，或无须执行观察即可按 inferred 合法降级。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "OWNER_NONE",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-009"
+        ],
+        "nonDuplicationScore": "fail"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-033",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "pass",
+        "non_duplication": "fail",
+        "executability": "pass",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "存在同决策结构重复。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "包含无证据降级、陈旧来源降权、相互矛盾证据、可避免的重复查验或其他边界情形之一。",
+        "non_duplication": "与同一匿名结构类中的其他候选具有相同的事实/观察决策结构；仅措辞或约束变化不足以消除结构重复。",
+        "executability": "满足必要观察的成本/时间约束，或无须执行观察即可按 inferred 合法降级。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "OWNER_STALE",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-010"
+        ],
+        "nonDuplicationScore": "fail"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-034",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": null,
+        "gold_independence": "fail",
+        "evidence_binding": null,
+        "boundary_coverage": null,
+        "non_duplication": null,
+        "executability": null,
+        "safety_leakage": "fail"
+      },
+      "criticalGatePass": false,
+      "overallValidity": "invalid_critical_gate",
+      "notes": "OBS-D1 含“文档声称：本项已完成/为真”的通用答案方向提示；按关键门槛规则判整体无效，非关键维度不再评分。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求逐条裁定 claim，并要求 verified 结论引用本轮实际执行的 obsId，机制目标清晰。",
+        "gold_independence": "失败：观察输出直接提供“本项已完成/为真”的答案方向，而非中性、具体且可独立核验的证据。",
+        "safety_leakage": "失败：通用观察输出携带答案式判定提示，构成语义层面的答案泄漏风险。",
+        "unscored": "依评审契约，任一关键门槛失败后，非关键维度不再计分。"
+      },
+      "structuralAudit": {
+        "classId": "TESTS_D1",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-005"
+        ],
+        "nonDuplicationScore": null
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-035",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "pass",
+        "non_duplication": "fail",
+        "executability": "pass",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "存在同决策结构重复。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "包含无证据降级、陈旧来源降权、相互矛盾证据、可避免的重复查验或其他边界情形之一。",
+        "non_duplication": "与同一匿名结构类中的其他候选具有相同的事实/观察决策结构；仅措辞或约束变化不足以消除结构重复。",
+        "executability": "满足必要观察的成本/时间约束，或无须执行观察即可按 inferred 合法降级。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "TESTS_NONE",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-003"
+        ],
+        "nonDuplicationScore": "fail"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-036",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "pass",
+        "non_duplication": "fail",
+        "executability": "pass",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "存在同决策结构重复。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "包含无证据降级、陈旧来源降权、相互矛盾证据、可避免的重复查验或其他边界情形之一。",
+        "non_duplication": "与同一匿名结构类中的其他候选具有相同的事实/观察决策结构；仅措辞或约束变化不足以消除结构重复。",
+        "executability": "满足必要观察的成本/时间约束，或无须执行观察即可按 inferred 合法降级。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "TESTS_STALE",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-012"
+        ],
+        "nonDuplicationScore": "fail"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-037",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": null,
+        "gold_independence": "fail",
+        "evidence_binding": null,
+        "boundary_coverage": null,
+        "non_duplication": null,
+        "executability": null,
+        "safety_leakage": "fail"
+      },
+      "criticalGatePass": false,
+      "overallValidity": "invalid_critical_gate",
+      "notes": "OBS-D1 含“文档声称：本项已完成/为真”的通用答案方向提示；按关键门槛规则判整体无效，非关键维度不再评分。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求逐条裁定 claim，并要求 verified 结论引用本轮实际执行的 obsId，机制目标清晰。",
+        "gold_independence": "失败：观察输出直接提供“本项已完成/为真”的答案方向，而非中性、具体且可独立核验的证据。",
+        "safety_leakage": "失败：通用观察输出携带答案式判定提示，构成语义层面的答案泄漏风险。",
+        "unscored": "依评审契约，任一关键门槛失败后，非关键维度不再计分。"
+      },
+      "structuralAudit": {
+        "classId": "RETIRE_D1",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-002",
+          "RV-019"
+        ],
+        "nonDuplicationScore": null
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-038",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "pass",
+        "non_duplication": "fail",
+        "executability": "pass",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "存在同决策结构重复。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "包含无证据降级、陈旧来源降权、相互矛盾证据、可避免的重复查验或其他边界情形之一。",
+        "non_duplication": "与同一匿名结构类中的其他候选具有相同的事实/观察决策结构；仅措辞或约束变化不足以消除结构重复。",
+        "executability": "满足必要观察的成本/时间约束，或无须执行观察即可按 inferred 合法降级。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "RETIRE_NONE",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-008",
+          "RV-020"
+        ],
+        "nonDuplicationScore": "fail"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-039",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "pass",
+        "non_duplication": "fail",
+        "executability": "pass",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "存在同决策结构重复。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "包含无证据降级、陈旧来源降权、相互矛盾证据、可避免的重复查验或其他边界情形之一。",
+        "non_duplication": "与同一匿名结构类中的其他候选具有相同的事实/观察决策结构；仅措辞或约束变化不足以消除结构重复。",
+        "executability": "满足必要观察的成本/时间约束，或无须执行观察即可按 inferred 合法降级。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "RETIRE_STALE",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-007",
+          "RV-021"
+        ],
+        "nonDuplicationScore": "fail"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-040",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": null,
+        "gold_independence": "fail",
+        "evidence_binding": null,
+        "boundary_coverage": null,
+        "non_duplication": null,
+        "executability": null,
+        "safety_leakage": "fail"
+      },
+      "criticalGatePass": false,
+      "overallValidity": "invalid_critical_gate",
+      "notes": "OBS-D1 含“文档声称：本项已完成/为真”的通用答案方向提示；按关键门槛规则判整体无效，非关键维度不再评分。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求逐条裁定 claim，并要求 verified 结论引用本轮实际执行的 obsId，机制目标清晰。",
+        "gold_independence": "失败：观察输出直接提供“本项已完成/为真”的答案方向，而非中性、具体且可独立核验的证据。",
+        "safety_leakage": "失败：通用观察输出携带答案式判定提示，构成语义层面的答案泄漏风险。",
+        "unscored": "依评审契约，任一关键门槛失败后，非关键维度不再计分。"
+      },
+      "structuralAudit": {
+        "classId": "HASH_D1",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-006",
+          "RV-022"
+        ],
+        "nonDuplicationScore": null
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-041",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "fail",
+        "non_duplication": "fail",
+        "executability": "pass",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "存在同决策结构重复；边界覆盖不足。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "未见明显的合法降级、合理推断或不必要查验边界；主要是直接核验路径。",
+        "non_duplication": "与同一匿名结构类中的其他候选具有相同的事实/观察决策结构；仅措辞或约束变化不足以消除结构重复。",
+        "executability": "满足必要观察的成本/时间约束，或无须执行观察即可按 inferred 合法降级。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "HASH_NONE",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-004",
+          "RV-023"
+        ],
+        "nonDuplicationScore": "fail"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-042",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "pass",
+        "non_duplication": "fail",
+        "executability": "pass",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "存在同决策结构重复。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "包含无证据降级、陈旧来源降权、相互矛盾证据、可避免的重复查验或其他边界情形之一。",
+        "non_duplication": "与同一匿名结构类中的其他候选具有相同的事实/观察决策结构；仅措辞或约束变化不足以消除结构重复。",
+        "executability": "满足必要观察的成本/时间约束，或无须执行观察即可按 inferred 合法降级。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "HASH_STALE",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-011",
+          "RV-024"
+        ],
+        "nonDuplicationScore": "fail"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-043",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": null,
+        "gold_independence": "fail",
+        "evidence_binding": null,
+        "boundary_coverage": null,
+        "non_duplication": null,
+        "executability": null,
+        "safety_leakage": "fail"
+      },
+      "criticalGatePass": false,
+      "overallValidity": "invalid_critical_gate",
+      "notes": "OBS-D1 含“文档声称：本项已完成/为真”的通用答案方向提示；按关键门槛规则判整体无效，非关键维度不再评分。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求逐条裁定 claim，并要求 verified 结论引用本轮实际执行的 obsId，机制目标清晰。",
+        "gold_independence": "失败：观察输出直接提供“本项已完成/为真”的答案方向，而非中性、具体且可独立核验的证据。",
+        "safety_leakage": "失败：通用观察输出携带答案式判定提示，构成语义层面的答案泄漏风险。",
+        "unscored": "依评审契约，任一关键门槛失败后，非关键维度不再计分。",
+        "unscored_potential_issue": "若尝试核验两个事实，核心观察时间合计约 7，超过 deadlineUnits=5；因关键门槛失败，未评分非关键维度。"
+      },
+      "structuralAudit": {
+        "classId": "BUILD_D1",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-013"
+        ],
+        "nonDuplicationScore": null
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-044",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "fail",
+        "non_duplication": "fail",
+        "executability": "fail",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "存在同决策结构重复；边界覆盖不足；预算/时限不可满足。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "未见明显的合法降级、合理推断或不必要查验边界；主要是直接核验路径。",
+        "non_duplication": "与同一匿名结构类中的其他候选具有相同的事实/观察决策结构；仅措辞或约束变化不足以消除结构重复。",
+        "executability": "完成两个命题所需的核心观察合计约 7 timeUnits，超过 deadlineUnits=5。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "BUILD_NONE",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-014"
+        ],
+        "nonDuplicationScore": "fail"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-045",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "pass",
+        "non_duplication": "fail",
+        "executability": "fail",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "存在同决策结构重复；预算/时限不可满足。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "包含无证据降级、陈旧来源降权、相互矛盾证据、可避免的重复查验或其他边界情形之一。",
+        "non_duplication": "与同一匿名结构类中的其他候选具有相同的事实/观察决策结构；仅措辞或约束变化不足以消除结构重复。",
+        "executability": "完成两个命题所需的核心观察合计约 7 timeUnits，超过 deadlineUnits=5；陈旧简报可跳过但不解决核心时限问题。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "BUILD_STALE",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-015"
+        ],
+        "nonDuplicationScore": "fail"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-046",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": null,
+        "gold_independence": "fail",
+        "evidence_binding": null,
+        "boundary_coverage": null,
+        "non_duplication": null,
+        "executability": null,
+        "safety_leakage": "fail"
+      },
+      "criticalGatePass": false,
+      "overallValidity": "invalid_critical_gate",
+      "notes": "OBS-D1 含“文档声称：本项已完成/为真”的通用答案方向提示；按关键门槛规则判整体无效，非关键维度不再评分。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求逐条裁定 claim，并要求 verified 结论引用本轮实际执行的 obsId，机制目标清晰。",
+        "gold_independence": "失败：观察输出直接提供“本项已完成/为真”的答案方向，而非中性、具体且可独立核验的证据。",
+        "safety_leakage": "失败：通用观察输出携带答案式判定提示，构成语义层面的答案泄漏风险。",
+        "unscored": "依评审契约，任一关键门槛失败后，非关键维度不再计分。"
+      },
+      "structuralAudit": {
+        "classId": "DEPLOY_D1",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-016"
+        ],
+        "nonDuplicationScore": null
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-047",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "pass",
+        "non_duplication": "fail",
+        "executability": "pass",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "存在同决策结构重复。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "包含无证据降级、陈旧来源降权、相互矛盾证据、可避免的重复查验或其他边界情形之一。",
+        "non_duplication": "与同一匿名结构类中的其他候选具有相同的事实/观察决策结构；仅措辞或约束变化不足以消除结构重复。",
+        "executability": "满足必要观察的成本/时间约束，或无须执行观察即可按 inferred 合法降级。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "DEPLOY_NONE",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-017"
+        ],
+        "nonDuplicationScore": "fail"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-048",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "pass",
+        "non_duplication": "fail",
+        "executability": "pass",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "存在同决策结构重复。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "包含无证据降级、陈旧来源降权、相互矛盾证据、可避免的重复查验或其他边界情形之一。",
+        "non_duplication": "与同一匿名结构类中的其他候选具有相同的事实/观察决策结构；仅措辞或约束变化不足以消除结构重复。",
+        "executability": "满足必要观察的成本/时间约束，或无须执行观察即可按 inferred 合法降级。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "DEPLOY_STALE",
+        "isStructuralDuplicate": true,
+        "duplicatePeers": [
+          "RV-018"
+        ],
+        "nonDuplicationScore": "fail"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-049",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": null,
+        "gold_independence": "fail",
+        "evidence_binding": null,
+        "boundary_coverage": null,
+        "non_duplication": null,
+        "executability": null,
+        "safety_leakage": "fail"
+      },
+      "criticalGatePass": false,
+      "overallValidity": "invalid_critical_gate",
+      "notes": "OBS-D1 含“文档声称：本项已完成/为真”的通用答案方向提示；按关键门槛规则判整体无效，非关键维度不再评分。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求逐条裁定 claim，并要求 verified 结论引用本轮实际执行的 obsId，机制目标清晰。",
+        "gold_independence": "失败：观察输出直接提供“本项已完成/为真”的答案方向，而非中性、具体且可独立核验的证据。",
+        "safety_leakage": "失败：通用观察输出携带答案式判定提示，构成语义层面的答案泄漏风险。",
+        "unscored": "依评审契约，任一关键门槛失败后，非关键维度不再计分。"
+      },
+      "structuralAudit": {
+        "classId": "BRAND_D1",
+        "isStructuralDuplicate": false,
+        "duplicatePeers": [],
+        "nonDuplicationScore": null
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-050",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "pass",
+        "non_duplication": "pass",
+        "executability": "pass",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "关键门槛通过；该包可按现有契约评审，但这不代表其所有非关键质量维度均优秀。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "包含无证据降级、陈旧来源降权、相互矛盾证据、可避免的重复查验或其他边界情形之一。",
+        "non_duplication": "在 60 个匿名包中未发现与其具有相同核心事实/观察决策结构的其他候选。",
+        "executability": "满足必要观察的成本/时间约束，或无须执行观察即可按 inferred 合法降级。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "BRAND_NONE",
+        "isStructuralDuplicate": false,
+        "duplicatePeers": [],
+        "nonDuplicationScore": "pass"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-051",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "pass",
+        "non_duplication": "pass",
+        "executability": "pass",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "关键门槛通过；该包可按现有契约评审，但这不代表其所有非关键质量维度均优秀。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "包含无证据降级、陈旧来源降权、相互矛盾证据、可避免的重复查验或其他边界情形之一。",
+        "non_duplication": "在 60 个匿名包中未发现与其具有相同核心事实/观察决策结构的其他候选。",
+        "executability": "满足必要观察的成本/时间约束，或无须执行观察即可按 inferred 合法降级。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "BRAND_STALE",
+        "isStructuralDuplicate": false,
+        "duplicatePeers": [],
+        "nonDuplicationScore": "pass"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-052",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": null,
+        "gold_independence": "fail",
+        "evidence_binding": null,
+        "boundary_coverage": null,
+        "non_duplication": null,
+        "executability": null,
+        "safety_leakage": "fail"
+      },
+      "criticalGatePass": false,
+      "overallValidity": "invalid_critical_gate",
+      "notes": "OBS-D1 含“文档声称：本项已完成/为真”的通用答案方向提示；按关键门槛规则判整体无效，非关键维度不再评分。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求逐条裁定 claim，并要求 verified 结论引用本轮实际执行的 obsId，机制目标清晰。",
+        "gold_independence": "失败：观察输出直接提供“本项已完成/为真”的答案方向，而非中性、具体且可独立核验的证据。",
+        "safety_leakage": "失败：通用观察输出携带答案式判定提示，构成语义层面的答案泄漏风险。",
+        "unscored": "依评审契约，任一关键门槛失败后，非关键维度不再计分。"
+      },
+      "structuralAudit": {
+        "classId": "BUG_D1",
+        "isStructuralDuplicate": false,
+        "duplicatePeers": [],
+        "nonDuplicationScore": null
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-053",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "pass",
+        "non_duplication": "pass",
+        "executability": "pass",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "关键门槛通过；该包可按现有契约评审，但这不代表其所有非关键质量维度均优秀。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "包含无证据降级、陈旧来源降权、相互矛盾证据、可避免的重复查验或其他边界情形之一。",
+        "non_duplication": "在 60 个匿名包中未发现与其具有相同核心事实/观察决策结构的其他候选。",
+        "executability": "满足必要观察的成本/时间约束，或无须执行观察即可按 inferred 合法降级。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "BUG_NONE",
+        "isStructuralDuplicate": false,
+        "duplicatePeers": [],
+        "nonDuplicationScore": "pass"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-054",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "pass",
+        "non_duplication": "pass",
+        "executability": "pass",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "关键门槛通过；该包可按现有契约评审，但这不代表其所有非关键质量维度均优秀。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "包含无证据降级、陈旧来源降权、相互矛盾证据、可避免的重复查验或其他边界情形之一。",
+        "non_duplication": "在 60 个匿名包中未发现与其具有相同核心事实/观察决策结构的其他候选。",
+        "executability": "满足必要观察的成本/时间约束，或无须执行观察即可按 inferred 合法降级。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "BUG_STALE",
+        "isStructuralDuplicate": false,
+        "duplicatePeers": [],
+        "nonDuplicationScore": "pass"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-055",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": null,
+        "gold_independence": "fail",
+        "evidence_binding": null,
+        "boundary_coverage": null,
+        "non_duplication": null,
+        "executability": null,
+        "safety_leakage": "fail"
+      },
+      "criticalGatePass": false,
+      "overallValidity": "invalid_critical_gate",
+      "notes": "OBS-D1 含“文档声称：本项已完成/为真”的通用答案方向提示；按关键门槛规则判整体无效，非关键维度不再评分。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求逐条裁定 claim，并要求 verified 结论引用本轮实际执行的 obsId，机制目标清晰。",
+        "gold_independence": "失败：观察输出直接提供“本项已完成/为真”的答案方向，而非中性、具体且可独立核验的证据。",
+        "safety_leakage": "失败：通用观察输出携带答案式判定提示，构成语义层面的答案泄漏风险。",
+        "unscored": "依评审契约，任一关键门槛失败后，非关键维度不再计分。"
+      },
+      "structuralAudit": {
+        "classId": "GIT_D1",
+        "isStructuralDuplicate": false,
+        "duplicatePeers": [],
+        "nonDuplicationScore": null
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-056",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "pass",
+        "non_duplication": "pass",
+        "executability": "pass",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "关键门槛通过；该包可按现有契约评审，但这不代表其所有非关键质量维度均优秀。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "包含无证据降级、陈旧来源降权、相互矛盾证据、可避免的重复查验或其他边界情形之一。",
+        "non_duplication": "在 60 个匿名包中未发现与其具有相同核心事实/观察决策结构的其他候选。",
+        "executability": "满足必要观察的成本/时间约束，或无须执行观察即可按 inferred 合法降级。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "GIT_NONE",
+        "isStructuralDuplicate": false,
+        "duplicatePeers": [],
+        "nonDuplicationScore": "pass"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-057",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "pass",
+        "non_duplication": "pass",
+        "executability": "pass",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "关键门槛通过；该包可按现有契约评审，但这不代表其所有非关键质量维度均优秀。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "包含无证据降级、陈旧来源降权、相互矛盾证据、可避免的重复查验或其他边界情形之一。",
+        "non_duplication": "在 60 个匿名包中未发现与其具有相同核心事实/观察决策结构的其他候选。",
+        "executability": "满足必要观察的成本/时间约束，或无须执行观察即可按 inferred 合法降级。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "GIT_STALE",
+        "isStructuralDuplicate": false,
+        "duplicatePeers": [],
+        "nonDuplicationScore": "pass"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-058",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": null,
+        "gold_independence": "fail",
+        "evidence_binding": null,
+        "boundary_coverage": null,
+        "non_duplication": null,
+        "executability": null,
+        "safety_leakage": "fail"
+      },
+      "criticalGatePass": false,
+      "overallValidity": "invalid_critical_gate",
+      "notes": "OBS-D1 含“文档声称：本项已完成/为真”的通用答案方向提示；按关键门槛规则判整体无效，非关键维度不再评分。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求逐条裁定 claim，并要求 verified 结论引用本轮实际执行的 obsId，机制目标清晰。",
+        "gold_independence": "失败：观察输出直接提供“本项已完成/为真”的答案方向，而非中性、具体且可独立核验的证据。",
+        "safety_leakage": "失败：通用观察输出携带答案式判定提示，构成语义层面的答案泄漏风险。",
+        "unscored": "依评审契约，任一关键门槛失败后，非关键维度不再计分。"
+      },
+      "structuralAudit": {
+        "classId": "PORT_D1",
+        "isStructuralDuplicate": false,
+        "duplicatePeers": [],
+        "nonDuplicationScore": null
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-059",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "pass",
+        "non_duplication": "pass",
+        "executability": "pass",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "关键门槛通过；该包可按现有契约评审，但这不代表其所有非关键质量维度均优秀。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "包含无证据降级、陈旧来源降权、相互矛盾证据、可避免的重复查验或其他边界情形之一。",
+        "non_duplication": "在 60 个匿名包中未发现与其具有相同核心事实/观察决策结构的其他候选。",
+        "executability": "满足必要观察的成本/时间约束，或无须执行观察即可按 inferred 合法降级。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "PORT_NONE",
+        "isStructuralDuplicate": false,
+        "duplicatePeers": [],
+        "nonDuplicationScore": "pass"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    },
+    {
+      "rvId": "RV-060",
+      "reviewer": "AI_ONLY_CHATGPT",
+      "dims": {
+        "mechanism_fidelity": "pass",
+        "task_validity": "pass",
+        "gold_independence": "pass",
+        "evidence_binding": "pass",
+        "boundary_coverage": "pass",
+        "non_duplication": "pass",
+        "executability": "pass",
+        "safety_leakage": "pass"
+      },
+      "criticalGatePass": true,
+      "overallValidity": "critical_gates_pass",
+      "notes": "关键门槛通过；该包可按现有契约评审，但这不代表其所有非关键质量维度均优秀。",
+      "dimensionNotes": {
+        "mechanism_fidelity": "任务要求 claim 级裁定，并将 verified 结论绑定到实际执行的 obsId；无证据时允许选择 inferred。",
+        "task_validity": "事实命题可逐条裁定；证据不足时可合法降级为 inferred。",
+        "gold_independence": "未见 Gold/judge-only 字段，也未见通用答案式输出提示。",
+        "evidence_binding": "观察与对应命题的关联可辨；无观察的包可通过 inferred 表达证据不足。",
+        "boundary_coverage": "包含无证据降级、陈旧来源降权、相互矛盾证据、可避免的重复查验或其他边界情形之一。",
+        "non_duplication": "在 60 个匿名包中未发现与其具有相同核心事实/观察决策结构的其他候选。",
+        "executability": "满足必要观察的成本/时间约束，或无须执行观察即可按 inferred 合法降级。",
+        "safety_leakage": "未发现隐藏答案、Gold 字段、来源标识或未经批准的执行指令。"
+      },
+      "structuralAudit": {
+        "classId": "PORT_STALE",
+        "isStructuralDuplicate": false,
+        "duplicatePeers": [],
+        "nonDuplicationScore": "pass"
+      },
+      "timing": {
+        "startedAt": null,
+        "endedAt": null,
+        "note": "AI-only 批量评审未可靠测量逐候选耗时；不伪造人工计时数据。"
+      }
+    }
+  ]
+}

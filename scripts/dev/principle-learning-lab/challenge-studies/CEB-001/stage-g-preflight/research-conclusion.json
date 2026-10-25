@@ -1,0 +1,40 @@
+{
+  "schema": "stage-g-research-conclusion.v1",
+  "studyId": "CEB-001",
+  "at": "2026-10-25T12:36:28.718Z",
+  "status": "STAGE_G_GENERATION_COMPLETE_ANALYSIS_DELIVERED",
+  "fourQuestions": {
+    "q1_expressionGeneration": {
+      "verdict": "YES",
+      "evidence": "60/60 taskText 互异、60/60 通过骨架门+validator、0 结构重复",
+      "confidence": "HIGH",
+      "limitation": "基于机械验证——表达质量优劣需人类盲评确认"
+    },
+    "q2_qualityDefects": {
+      "verdict": "20/60 关键门槛失败",
+      "rootCause": "enumerator distractor OBS-D1 含答案方向提示（设计缺陷非模型缺陷）",
+      "fixPath": "修改 enumerator 中 OBS-D1 的 output 文本，移除方向性暗示",
+      "confidence": "HIGH——因果链清晰可复现"
+    },
+    "q3_incrementsVsBaseline": {
+      "expressionNovelty": "E 明确优于 B1（60/60 unique vs B1 0 novel）",
+      "parameterCoverage": "E 17/110 < B1 36/110——B1 优",
+      "substantiveDiversity": "E 52 combos > B1 36 combos——E 优（但 24 条系同一基线多表达）",
+      "humanRevisionCost": "未测——评审者未指派",
+      "overallVerdict": "INCONCLUSIVE——各维度互有胜负，且表达质量未人类评审"
+    },
+    "q4_readinessForAgentDev": {
+      "pipelineReady": true,
+      "qualityGatesMustRetain": true,
+      "humanBlindReviewPending": true,
+      "verdict": "CONDITIONALLY_READY——管线工程可用但研究结论待人类盲评"
+    }
+  },
+  "notClaimable": [
+    "Examiner 优于 B1 v2（参数覆盖不足）",
+    "Examiner 候选质量合格（未人类盲评）",
+    "Stage G 研究完成（E 臂 12/36 未填满）",
+    "长期行为内化效果",
+    "跨模型/跨域泛化"
+  ]
+}
