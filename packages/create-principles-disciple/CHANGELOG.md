@@ -1,5 +1,12 @@
 # create-principles-disciple
 
+## 1.145.21
+
+### Patch Changes
+
+- 4922dda: PRI-1041：按上游声明确定 RuleCode 必需验证，区分历史证据与可回放事实，独立系统契约测试贯通 L2 自测/提交、Runner、Evaluator 与工件装配；缺少能力或必需覆盖时不再错误标记为验证通过。
+- e060c56: PRI-1040：为 Companion 托管的 Codex/WorkBuddy worker 接通合作式发布交接，当前周期完成后才替换，无法安全交接时明确显示原因。Codex 插件发布后维护已发布包固定版本、递增插件缓存版本，并由真实 npm 能力探针保护交付。
+
 ## 1.145.20
 
 ### Patch Changes
