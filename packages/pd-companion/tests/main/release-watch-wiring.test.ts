@@ -138,3 +138,17 @@ describe('PRI-1016 — the version watch decides on the installation authority',
     expectShape(stop, 'the release baseline is dropped', /serverStartedRelease\s*=\s*undefined/);
   });
 });
+
+
+describe('PRI-1040 worker release watch production wiring', () => {
+  it('both host registries receive authority and reconcile on timers independent of Console state', () => {
+    const section = topLevelFn(src(), 'startWorkspaceWorkerSupervision');
+    expect(countMatches(section, /readRelease:\s*readActiveRecord/g)).toBe(2);
+    expect(countMatches(section, /setInterval\(/g)).toBe(2);
+    expect(countMatches(section, /syncFromManifest\(/g)).toBe(4);
+    expect(section).not.toContain('supervisor.getState');
+    expect(countMatches(section, /workspace_worker_handover_degraded/g)).toBe(2);
+    expect(topLevelFn(src(), 'rebuildTrayMenu')).toContain('handoverIssues()');
+    expect(topLevelFn(src(), 'spawnWorkspaceWorkerFor')).toMatch(/stdio:\s*\['ignore', 'ignore', 'pipe', 'ipc'\]/);
+  });
+});

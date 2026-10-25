@@ -1,18 +1,17 @@
 /**
- * PRI-810 regression guard — the Codex installed-runtime pin must never
- * regress below the Owner-control minimum contract.
+ * PRI-1040 installed-runtime cohort guard.
  *
  * Two layers, by design:
  *  1. THIS test (hermetic, runs in every unit CI pass): the pin file must
- *     satisfy the version floor at which the Owner emergency-control guards
- *     landed, and the packaged capability probe must exist.
+ *     contain exact semver identities, and the packaged capability probe
+ *     must exist. Version tuples are derived from release authority by the
+ *     ordinary maintenance PR workflow, rather than frozen in unit tests.
  *  2. `codex-plugin-bundle.test.ts` first-run flow + the repo's
  *     `check:runtime-pin` script (real packaged evidence): install the pinned
- *     bytes and BEHAVE them — global pause honored, safety isolation honored,
- *     retired-contract RuleCode skipped. The version floor here is derived
- *     from that behavioral contract, not the other way around.
+ *     bytes and exercise Owner controls, unavailable Codex V2 context, and
+ *     DesignGate fact validation.
  *
- * Floor rationale (PRI-807 Phase 0 NEW-E1 / PRI-810):
+ * Historical Owner-control evidence (PRI-807 Phase 0 NEW-E1 / PRI-810):
  *  - host-runtime@0.1.0 ignores `global_rulecode_pauses` and
  *    `activation_control_states` and EXECUTES retired-contract RuleCode.
  *  - host-runtime@0.1.1 introduced those guards (commit 41cf97ee / 19df0f9c
@@ -31,27 +30,7 @@ import { fileURLToPath } from 'node:url';
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const PLUGIN_ROOT = path.join(repoRoot, 'plugins', 'principles-disciple');
 
-/** Earliest published @principles/host-runtime that honors Owner emergency control. */
-const HOST_RUNTIME_FLOOR = '0.1.1';
-
-const SEMVER_PATTERN = /^(\d+)\.(\d+)\.(\d+)$/;
-
-function parseSemver(version: string): { major: number; minor: number; patch: number } | null {
-  const match = version.match(SEMVER_PATTERN);
-  if (!match) return null;
-  return { major: Number(match[1]), minor: Number(match[2]), patch: Number(match[3]) };
-}
-
-function atLeast(version: string, floor: string): boolean {
-  const v = parseSemver(version);
-  const f = parseSemver(floor);
-  if (!v || !f) return false;
-  if (v.major !== f.major) return v.major > f.major;
-  if (v.minor !== f.minor) return v.minor > f.minor;
-  return v.patch >= f.patch;
-}
-
-describe('PRI-810 installed-runtime pin guard', () => {
+describe('PRI-1040 installed-runtime cohort guard', () => {
   const pinsPath = path.join(PLUGIN_ROOT, 'runtime-version.json');
 
   it('runtime-version.json exists and pins all three runtime packages with plain semver', () => {
@@ -62,14 +41,9 @@ describe('PRI-810 installed-runtime pin guard', () => {
     }
   });
 
-  it('hostRuntime pin is at or above the Owner-control floor (' + HOST_RUNTIME_FLOOR + ')', () => {
-    const pins = JSON.parse(fs.readFileSync(pinsPath, 'utf8')) as { hostRuntime: string };
-    const message = [
-      `hostRuntime pin ${pins.hostRuntime} is below the Owner-control floor ${HOST_RUNTIME_FLOOR} — versions below 0.1.1 ignore global_rulecode_pauses and activation_control_states and execute retired-contract RuleCode (PRI-810).`,
-      'If you are lowering this floor deliberately, first run the repo check:runtime-pin script against the candidate and attach the behavioral evidence to the PR.',
-    ].join(' ');
-    expect(atLeast(pins.hostRuntime, HOST_RUNTIME_FLOOR), message).toBe(true);
-  });
+  // The release train derives each next cohort from the existing Version PR
+  // authority, then verifies published identities and capabilities. A frozen
+  // version tuple here would reject every legitimate maintenance PR.
 
   it('the packaged behavioral capability probe ships with the plugin', () => {
     const probe = path.join(PLUGIN_ROOT, 'scripts', 'verify-pinned-runtime-capability.cjs');

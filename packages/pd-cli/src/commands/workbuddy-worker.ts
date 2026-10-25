@@ -20,6 +20,7 @@
  * - cli-6: paused/degraded modes carry reason + nextAction.
  */
 import fs from 'node:fs';
+import { createWorkerDrain } from './worker-drain.js';
 import os from 'node:os';
 import path from 'node:path';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
@@ -164,14 +165,9 @@ export async function handleWorkbuddyWorker(options: WorkbuddyWorkerOptions): Pr
   }
 
   const interval = typeof options.intervalMs === 'number' && options.intervalMs >= 1000 ? options.intervalMs : DEFAULT_INTERVAL_MS;
-  let stopped = false;
-  const onSignal = (): void => {
-    stopped = true;
-  };
-  process.on('SIGINT', onSignal);
-  process.on('SIGTERM', onSignal);
+  const drain = createWorkerDrain();
   try {
-    while (!stopped) {
+    while (!drain.stopped) {
       // One escaping cycle exception must not kill the daemon (same
       // PRI-655 discipline as the Codex worker): report, keep looping.
       try {
@@ -182,11 +178,10 @@ export async function handleWorkbuddyWorker(options: WorkbuddyWorkerOptions): Pr
         console.error(`[PD:WorkbuddyWorker] cycle failed: ${message}`);
         console.error(`  continuing in ${interval}ms. Investigate: pd workbuddy worker --status --workspace "${workspace}"`);
       }
-      if (stopped) break;
-      await new Promise((resolve) => setTimeout(resolve, interval));
+      if (drain.stopped) break;
+      await drain.wait(interval);
     }
   } finally {
-    process.off('SIGINT', onSignal);
-    process.off('SIGTERM', onSignal);
+    drain.dispose();
   }
 }

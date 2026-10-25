@@ -420,6 +420,82 @@ jobs:
           product_identity_version: ${{ steps.train-identity.outputs.version }}
           npm_token: ${{ secrets.NPM_TOKEN }}
 
+  codex-plugin-maintenance:
+    name: Reconcile Codex plugin runtime maintenance PR
+    needs: [resolve-cohort, publish-full-product]
+    if: >-
+      !cancelled() &&
+      needs.resolve-cohort.outputs.has_cohort == 'true' &&
+      needs.publish-full-product.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: codex-runtime-pins-maintenance
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # Ordinary PR against current main; Version PR payload remains untouched.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.PD_VERSION_PR_TOKEN || github.token }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: '24'
+      - name: Require maintenance PR token
+        env:
+          PR_TOKEN: ${{ secrets.PD_VERSION_PR_TOKEN }}
+        run: |
+          if [ -z "$PR_TOKEN" ]; then
+            echo '::error::PD_VERSION_PR_TOKEN is required for the ordinary Codex runtime-pins PR and its required CI. npm publication does not prove plugin delivery.'
+            exit 1
+          fi
+      - run: npm ci --ignore-scripts
+      - name: Resolve and verify exact published cohort
+        env:
+          COHORT_SHA: ${{ needs.resolve-cohort.outputs.cohort_sha }}
+        run: node scripts/release/sync-codex-runtime-pins.mjs --cohort "$COHORT_SHA"
+      - name: Probe proposed plugin runtime bytes
+        run: npm run check:runtime-pin
+      - name: Create or update ordinary maintenance PR
+        env:
+          GH_TOKEN: ${{ secrets.PD_VERSION_PR_TOKEN }}
+          COHORT_SHA: ${{ needs.resolve-cohort.outputs.cohort_sha }}
+        run: |
+          if git diff --quiet -- plugins/principles-disciple; then
+            echo 'Codex plugin already pins the published cohort; no maintenance update needed.'
+            exit 0
+          fi
+          BRANCH=codex/runtime-pins-maintenance
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          PUSH_NEEDED=true
+          REMOTE=$(git ls-remote --heads origin "$BRANCH")
+          if [ -n "$REMOTE" ]; then
+            git fetch origin "$BRANCH:refs/remotes/origin/$BRANCH"
+            if git diff --quiet "origin/$BRANCH" -- plugins/principles-disciple/runtime-version.json plugins/principles-disciple/.codex-plugin/plugin.json; then
+              echo 'Existing maintenance branch already contains this exact update; retain its checks and reconcile its PR.'
+              PUSH_NEEDED=false
+            fi
+          fi
+          if [ "$PUSH_NEEDED" = true ]; then
+            git checkout -B "$BRANCH"
+            git add plugins/principles-disciple/runtime-version.json plugins/principles-disciple/.codex-plugin/plugin.json
+            git commit -m 'chore(codex): refresh published runtime pins'
+            git push --force-with-lease origin "$BRANCH"
+          fi
+          mkdir -p .tmp/codex-runtime-pins
+          printf '将 Codex 插件精确 pins 更新到已验证发布 cohort `%s`，递增插件版本以供缓存发现。三个 npm 精确包身份与八项已安装能力探针均通过。\n\n这是普通维护 PR；不修改 Version PR allowlist，不自动合并。npm 发布、PR 合并、Codex 缓存更新与运行身份仍是独立证据。\n' "$COHORT_SHA" > .tmp/codex-runtime-pins/body.md
+          PR=$(gh pr list --head "$BRANCH" --base main --state open --json number --jq '.[0].number // empty')
+          if [ -n "$PR" ]; then
+            gh pr edit "$PR" --body-file .tmp/codex-runtime-pins/body.md
+          else
+            gh pr create --base main --head "$BRANCH" --title 'chore(codex): 更新已发布运行时 pins' --body-file .tmp/codex-runtime-pins/body.md
+          fi
+
   publish-finalize:
     name: Finalize release (tag, GitHub Release, ClawHub)
     needs: [resolve-cohort, publish-full-product]
