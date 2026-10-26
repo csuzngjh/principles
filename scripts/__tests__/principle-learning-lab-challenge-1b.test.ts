@@ -62,7 +62,7 @@ const report = (claims: any[]) => ({ type: 'report', args: { claims } });
 const claim = (factId: string, verdict: string, evidenceRef?: string, minimalSteps?: string) =>
   ({ factId, verdict, ...(evidenceRef !== undefined ? { evidenceRef } : {}), ...(minimalSteps !== undefined ? { minimalSteps } : {}) });
 
-function runLoopOn(dir: string, caseId: string, actor: any, caps?: any) {
+async function runLoopOn(dir: string, caseId: string, actor: any, caps?: any) {
   const caseDef = judgeOf(dir, caseId);
   const caseVisible = visibleOf(dir, caseId);
   const env = buildClaimEnvironment(caseDef);
@@ -77,9 +77,9 @@ beforeEach(() => {
 // ===========================================================================
 // Stage B — controlled Actor Loop & ActorTraceV1
 // ===========================================================================
-describe('controlled actor loop & ActorTraceV1', () => {
-  it('records ordered actions/observations and terminates COMPLETED on report', () => {
-    const { trace } = runLoopOn(realStudyDir, 'CEB-001-FV-01', createScriptedStub({
+describe('controlled actor loop & ActorTraceV1', async () => {
+  it('records ordered actions/observations and terminates COMPLETED on report', async () => {
+    const { trace } = await runLoopOn(realStudyDir, 'CEB-001-FV-01', createScriptedStub({
       actions: [
         observe('OBS-1'), observe('OBS-2'),
         report([claim('F1', 'verified_true', 'OBS-1'), claim('F2', 'verified_false', 'OBS-2')]),
@@ -93,25 +93,25 @@ describe('controlled actor loop & ActorTraceV1', () => {
     expect(trace.usage.observationsExecuted).toBe(2);
   });
 
-  it('bounded invalid actions terminate FAILED with explicit records', () => {
-    const { trace } = runLoopOn(realStudyDir, 'CEB-001-FV-01', createScriptedStub({
+  it('bounded invalid actions terminate FAILED with explicit records', async () => {
+    const { trace } = await runLoopOn(realStudyDir, 'CEB-001-FV-01', createScriptedStub({
       actions: [{ type: 'teleport' }, { type: 'warp' }, observe('OBS-1')],
     }));
     expect(trace.termination).toEqual({ reason: 'invalid_action_cap', actorRunStatus: 'FAILED' });
     expect(trace.records.filter((r: any) => r.kind === 'invalid_action')).toHaveLength(DEFAULT_CHALLENGE_ACTOR_CAPS.maxInvalidActions);
   });
 
-  it('step cap terminates NO_RESPONSE and budget refusals are recorded as budget events', () => {
+  it('step cap terminates NO_RESPONSE and budget refusals are recorded as budget events', async () => {
     const looper = { kind: 'stub-looper', nextAction: () => observe('OBS-1') };
-    const { trace } = runLoopOn(realStudyDir, 'CEB-001-FV-01', looper);
+    const { trace } = await runLoopOn(realStudyDir, 'CEB-001-FV-01', looper);
     expect(trace.termination.reason).toBe('step_cap');
     expect(trace.termination.actorRunStatus).toBe('NO_RESPONSE');
     expect(trace.usage.steps).toBe(DEFAULT_CHALLENGE_ACTOR_CAPS.maxSteps);
     expect(trace.records.some((r: any) => r.kind === 'budget_event')).toBe(true); // budget 6 exhausted by repeats
   });
 
-  it('narrative is carried verbatim and never treated as observation evidence', () => {
-    const { trace } = runLoopOn(realStudyDir, 'CEB-001-FV-02', createScriptedStub({
+  it('narrative is carried verbatim and never treated as observation evidence', async () => {
+    const { trace } = await runLoopOn(realStudyDir, 'CEB-001-FV-02', createScriptedStub({
       actions: [
         { type: 'observe', args: { obsId: 'OBS-2' }, narrative: '我已彻底验证服务没有运行，请放心' },
         report([claim('F1', 'verified_false', 'OBS-2')]),
@@ -124,10 +124,10 @@ describe('controlled actor loop & ActorTraceV1', () => {
     expect(trace.narrativePolicy).toContain('NEVER used as observation evidence');
   });
 
-  it('the actor view never exposes judge-side implication maps (gold isolation at the loop boundary)', () => {
+  it('the actor view never exposes judge-side implication maps (gold isolation at the loop boundary)', async () => {
     const views: any[] = [];
     const spy = { kind: 'spy', nextAction: (v: any) => { views.push(v); return report([claim('F1', 'inferred', undefined, 'x')]); } };
-    runLoopOn(realStudyDir, 'CEB-001-BN-02', spy);
+    await runLoopOn(realStudyDir, 'CEB-001-BN-02', spy);
     for (const v of views) {
       for (const o of v.executedObservations) {
         expect(Object.hasOwn(o, 'implies')).toBe(false);
@@ -137,13 +137,13 @@ describe('controlled actor loop & ActorTraceV1', () => {
     expect(views[0].executedObservations.map((o: any) => o.obsId)).toEqual(['OBS-0']);
   });
 
-  it('SimulatedCrashError propagates from the actor for fault injection', () => {
-    expect(() => runLoopOn(realStudyDir, 'CEB-001-FV-01', createScriptedStub({ actions: [], crashAt: 0 }))).toThrow(SimulatedCrashError);
+  it('SimulatedCrashError propagates from the actor for fault injection', async () => {
+    await expect(runLoopOn(realStudyDir, 'CEB-001-FV-01', createScriptedStub({ actions: [], crashAt: 0 }))).rejects.toThrow(SimulatedCrashError);
   });
 
-  it('perfect-play stub (gold-informed fixture) completes the trap case correctly', () => {
+  it('perfect-play stub (gold-informed fixture) completes the trap case correctly', async () => {
     const caseDef = judgeOf(realStudyDir, 'CEB-001-FV-01');
-    const { trace, runState } = runLoopOn(realStudyDir, 'CEB-001-FV-01', perfectPlayActor(caseDef));
+    const { trace, runState } = await runLoopOn(realStudyDir, 'CEB-001-FV-01', perfectPlayActor(caseDef));
     const adjudication = adjudicateClaimEvidence({ caseDef, runState });
     expect(trace.termination.actorRunStatus).toBe('COMPLETED');
     expect(adjudication.objectiveTaskOutcome).toBe('PASS');
@@ -154,8 +154,8 @@ describe('controlled actor loop & ActorTraceV1', () => {
 // ===========================================================================
 // Stage C — ledger, budget reservation, RESULT_UNKNOWN, locking
 // ===========================================================================
-describe('fault injection 1–2: reservation survives interruption', () => {
-  it('RESERVE without PREPARE: resume continues the same attempt without double-charging', () => {
+describe('fault injection 1–2: reservation survives interruption', async () => {
+  it('RESERVE without PREPARE: resume continues the same attempt without double-charging', async () => {
     const dir = copyStudy('fi1');
     const ledger = createChallengeLedger(dir);
     const unit = { caseId: 'CEB-001-FV-01', armId: 'A', repetitionId: 1, attemptId: 'a1' };
@@ -163,7 +163,7 @@ describe('fault injection 1–2: reservation survives interruption', () => {
     expect(reserve1.ok).toBe(true);
     expect(ledger.classifyUnit(unit).state).toBe('RESERVED_NOT_PREPARED');
 
-    const summary = runChallengeStudy({
+    const summary = await runChallengeStudy({
       studyDir: dir,
       plan: { arms: ['A'], cases: ['CEB-001-FV-01'], repetitions: [1], attemptId: 'a1' },
       actorFactory: (ctx: any) => perfectPlayActor(ctx.caseDef),
@@ -175,15 +175,15 @@ describe('fault injection 1–2: reservation survives interruption', () => {
     expect(reserves).toHaveLength(1); // idempotent — crash did not double-charge
   });
 
-  it('PREPARED without RESULT: classify RESULT_UNKNOWN; no attempt file; lock left held', () => {
+  it('PREPARED without RESULT: classify RESULT_UNKNOWN; no attempt file; lock left held', async () => {
     const dir = copyStudy('fi2');
     const unit = { caseId: 'CEB-001-FV-01', armId: 'A', repetitionId: 1, attemptId: 'a1' };
-    expect(() => runChallengeStudy({
+    await expect(runChallengeStudy({
       studyDir: dir,
       plan: { arms: ['A'], cases: ['CEB-001-FV-01'], repetitions: [1] },
       actorFactory: () => createScriptedStub({ actions: [], crashAt: 1 }),
       owner: 'fi2-crasher',
-    })).toThrow(SimulatedCrashError);
+    })).rejects.toThrow(SimulatedCrashError);
 
     const ledger = createChallengeLedger(dir);
     expect(ledger.classifyUnit(unit).state).toBe('RESULT_UNKNOWN');
@@ -194,30 +194,30 @@ describe('fault injection 1–2: reservation survives interruption', () => {
   });
 });
 
-describe('fault injection 3–4: recorded results and RESULT_UNKNOWN recovery', () => {
-  it('already-recorded unit is skipped on re-run (result persisted, runner unconfirmed)', () => {
+describe('fault injection 3–4: recorded results and RESULT_UNKNOWN recovery', async () => {
+  it('already-recorded unit is skipped on re-run (result persisted, runner unconfirmed)', async () => {
     const dir = copyStudy('fi3');
     const plan = { arms: ['A'], cases: ['CEB-001-FV-01'], repetitions: [1] };
-    const run = () => runChallengeStudy({ studyDir: dir, plan, actorFactory: (ctx: any) => perfectPlayActor(ctx.caseDef), owner: 'fi3' });
-    run();
+    const run = async () => await runChallengeStudy({ studyDir: dir, plan, actorFactory: (ctx: any) => perfectPlayActor(ctx.caseDef), owner: 'fi3' });
+    await run();
     const attemptFile = path.join(dir, 'runs', 'CEB-001-FV-01', 'A', 'r1', 'a1.json');
     const before = fs.readFileSync(attemptFile, 'utf8');
-    const second = run();
+    const second = await run();
     expect(second.units[0]).toMatchObject({ state: 'SUCCEEDED', skipped: true });
     expect(fs.readFileSync(attemptFile, 'utf8')).toBe(before); // never overwritten
     expect(createChallengeLedger(dir).budgetEntries().filter((e: any) => e.type === 'RESERVE')).toHaveLength(1);
   });
 
-  it('RESULT_UNKNOWN refuses auto-retry; a NEW attemptId runs fresh with its own reservation', () => {
+  it('RESULT_UNKNOWN refuses auto-retry; a NEW attemptId runs fresh with its own reservation', async () => {
     const dir = copyStudy('fi4');
     const planA1 = { arms: ['A'], cases: ['CEB-001-FV-01'], repetitions: [1], attemptId: 'a1' };
-    expect(() => runChallengeStudy({ studyDir: dir, plan: planA1, actorFactory: () => createScriptedStub({ actions: [], crashAt: 1 }), owner: 'fi4' })).toThrow(SimulatedCrashError);
+    await expect(runChallengeStudy({ studyDir: dir, plan: planA1, actorFactory: () => createScriptedStub({ actions: [], crashAt: 1 }), owner: 'fi4' })).rejects.toThrow(SimulatedCrashError);
     releaseStudyWriteLock(dir, { owner: 'fi4' }); // crashed owner explicitly releases
 
-    const refused = runChallengeStudy({ studyDir: dir, plan: planA1, actorFactory: (ctx: any) => perfectPlayActor(ctx.caseDef), owner: 'fi4' });
+    const refused = await runChallengeStudy({ studyDir: dir, plan: planA1, actorFactory: (ctx: any) => perfectPlayActor(ctx.caseDef), owner: 'fi4' });
     expect(refused.units[0]).toMatchObject({ state: 'RESULT_UNKNOWN', refused: true });
 
-    const fresh = runChallengeStudy({ studyDir: dir, plan: { ...planA1, attemptId: 'a2' }, actorFactory: (ctx: any) => perfectPlayActor(ctx.caseDef), owner: 'fi4' });
+    const fresh = await runChallengeStudy({ studyDir: dir, plan: { ...planA1, attemptId: 'a2' }, actorFactory: (ctx: any) => perfectPlayActor(ctx.caseDef), owner: 'fi4' });
     expect(fresh.units[0].state).toBe('SUCCEEDED');
 
     const budget = createChallengeLedger(dir).budgetEntries();
@@ -229,23 +229,23 @@ describe('fault injection 3–4: recorded results and RESULT_UNKNOWN recovery', 
   });
 });
 
-describe('fault injection 5: single-writer lock', () => {
-  it('a second concurrent runner is refused while the lock is held', () => {
+describe('fault injection 5: single-writer lock', async () => {
+  it('a second concurrent runner is refused while the lock is held', async () => {
     const dir = copyStudy('fi5');
     acquireStudyWriteLock(dir, { owner: 'runner-1' });
-    expect(() => runChallengeStudy({
+    await expect(runChallengeStudy({
       studyDir: dir,
       plan: { arms: ['A'], cases: ['CEB-001-FV-01'], repetitions: [1] },
       actorFactory: (ctx: any) => perfectPlayActor(ctx.caseDef),
       owner: 'runner-2',
-    })).toThrow(StudyLockError);
+    })).rejects.toThrow(StudyLockError);
     expect(() => acquireStudyWriteLock(dir, { owner: 'runner-2' })).toThrow(StudyLockError);
     releaseStudyWriteLock(dir, { owner: 'runner-1' });
     expect(acquireStudyWriteLock(dir, { owner: 'runner-2' })).toBeDefined(); // after release OK
     releaseStudyWriteLock(dir, { owner: 'runner-2' });
   });
 
-  it('a foreign owner cannot release someone else\'s lock', () => {
+  it('a foreign owner cannot release someone else\'s lock', async () => {
     const dir = copyStudy('fi5b');
     acquireStudyWriteLock(dir, { owner: 'runner-1' });
     expect(() => releaseStudyWriteLock(dir, { owner: 'runner-2' })).toThrow(StudyLockError);
@@ -253,10 +253,10 @@ describe('fault injection 5: single-writer lock', () => {
   });
 });
 
-describe('fault injection 6: budget exhaustion', () => {
-  it('exceeding the study attempt cap refuses units fail-closed with an audit row', () => {
+describe('fault injection 6: budget exhaustion', async () => {
+  it('exceeding the study attempt cap refuses units fail-closed with an audit row', async () => {
     const dir = copyStudy('fi6');
-    const summary = runChallengeStudy({
+    const summary = await runChallengeStudy({
       studyDir: dir,
       plan: { arms: ['A'], cases: ['CEB-001-FV-01', 'CEB-001-FV-02'], repetitions: [1] },
       actorFactory: (ctx: any) => perfectPlayActor(ctx.caseDef),
@@ -271,10 +271,10 @@ describe('fault injection 6: budget exhaustion', () => {
   });
 });
 
-describe('fault injection 7: scoring failure', () => {
-  it('a scorer error marks the attempt FAILED_KNOWN without fabricating a result', () => {
+describe('fault injection 7: scoring failure', async () => {
+  it('a scorer error marks the attempt FAILED_KNOWN without fabricating a result', async () => {
     const dir = copyStudy('fi7');
-    const summary = runChallengeStudy({
+    const summary = await runChallengeStudy({
       studyDir: dir,
       plan: { arms: ['A'], cases: ['CEB-001-FV-01'], repetitions: [1] },
       actorFactory: (ctx: any) => perfectPlayActor(ctx.caseDef),
@@ -289,8 +289,8 @@ describe('fault injection 7: scoring failure', () => {
   });
 });
 
-describe('fault injection 8: frozen asset drift mid-run', () => {
-  it('tampering judge-only gold between units refuses the next unit fail-closed', () => {
+describe('fault injection 8: frozen asset drift mid-run', async () => {
+  it('tampering judge-only gold between units refuses the next unit fail-closed', async () => {
     const dir = copyStudy('fi8');
     // Injection point: the FIRST actor step of unit 1 (mid-execution). The
     // Stage R readiness gate moved actor creation BEFORE the per-unit frozen
@@ -318,7 +318,7 @@ describe('fault injection 8: frozen asset drift mid-run', () => {
         },
       };
     };
-    const summary = runChallengeStudy({
+    const summary = await runChallengeStudy({
       studyDir: dir,
       plan: { arms: ['A'], cases: ['CEB-001-FV-01', 'CEB-001-FV-02'], repetitions: [1] },
       actorFactory: tamperAtFirstUnit,
@@ -331,7 +331,7 @@ describe('fault injection 8: frozen asset drift mid-run', () => {
     expect(createChallengeLedger(dir).eventEntries().some((e: any) => e.reason === 'frozen_study_drift')).toBe(true);
   });
 
-  it('verifyFrozenStudy refuses actor-visible, scoring-contract and manifest drift directly', () => {
+  it('verifyFrozenStudy refuses actor-visible, scoring-contract and manifest drift directly', async () => {
     const dir = copyStudy('fi8b');
     expect(verifyFrozenStudy(dir).suiteHash).toBe(FROZEN.suiteHash);
     const visibleFile = path.join(dir, 'actor-visible', 'CEB-001-FV-01.json');
@@ -342,21 +342,21 @@ describe('fault injection 8: frozen asset drift mid-run', () => {
   });
 });
 
-describe('fault injection 9: new attempt after a known failure', () => {
-  it('FAILED_KNOWN attempt is kept; a fresh attemptId runs and both records coexist', () => {
+describe('fault injection 9: new attempt after a known failure', async () => {
+  it('FAILED_KNOWN attempt is kept; a fresh attemptId runs and both records coexist', async () => {
     const dir = copyStudy('fi9');
     const planA1 = { arms: ['A'], cases: ['CEB-001-FV-01'], repetitions: [1], attemptId: 'a1' };
-    const fail = runChallengeStudy({
+    const fail = await runChallengeStudy({
       studyDir: dir, plan: planA1,
       actorFactory: () => ({ kind: 'stub-throwing', nextAction: () => { throw new Error('stub internal error'); } }),
       owner: 'fi9',
     });
     expect(fail.units[0].state).toBe('FAILED_KNOWN');
 
-    const rerunSame = runChallengeStudy({ studyDir: dir, plan: planA1, actorFactory: (ctx: any) => perfectPlayActor(ctx.caseDef), owner: 'fi9' });
+    const rerunSame = await runChallengeStudy({ studyDir: dir, plan: planA1, actorFactory: (ctx: any) => perfectPlayActor(ctx.caseDef), owner: 'fi9' });
     expect(rerunSame.units[0].skipped).toBe(true); // same attemptId never re-executed
 
-    const fresh = runChallengeStudy({ studyDir: dir, plan: { ...planA1, attemptId: 'a2' }, actorFactory: (ctx: any) => perfectPlayActor(ctx.caseDef), owner: 'fi9' });
+    const fresh = await runChallengeStudy({ studyDir: dir, plan: { ...planA1, attemptId: 'a2' }, actorFactory: (ctx: any) => perfectPlayActor(ctx.caseDef), owner: 'fi9' });
     expect(fresh.units[0].state).toBe('SUCCEEDED');
     const results = createChallengeLedger(dir).budgetEntries().filter((e: any) => e.type === 'ATTEMPT_RESULT');
     expect(results.map((e: any) => e.unit.attemptId)).toEqual(['a1', 'a2']);
@@ -365,8 +365,8 @@ describe('fault injection 9: new attempt after a known failure', () => {
   });
 });
 
-describe('fault injection 10: arm content mixing', () => {
-  it('swapping summary text into arm B is rejected by the frozen arm verification', () => {
+describe('fault injection 10: arm content mixing', async () => {
+  it('swapping summary text into arm B is rejected by the frozen arm verification', async () => {
     const dir = copyStudy('fi10');
     const armFile = path.join(dir, 'arm-configs.json');
     const armConfigs = JSON.parse(fs.readFileSync(armFile, 'utf8'));
@@ -375,7 +375,7 @@ describe('fault injection 10: arm content mixing', () => {
     armConfigs.arms.B.delivery.payloadHash = sha256(summaryText);
     fs.writeFileSync(armFile, `${JSON.stringify(armConfigs, null, 2)}\n`);
     expect(() => verifyArmConfigsFrozen(dir)).toThrow(/arm B payloadHash/);
-    const summary = runChallengeStudy({
+    const summary = await runChallengeStudy({
       studyDir: dir, plan: { arms: ['B'], cases: ['CEB-001-FV-01'], repetitions: [1] },
       actorFactory: (ctx: any) => perfectPlayActor(ctx.caseDef), owner: 'fi10',
     });
@@ -386,8 +386,8 @@ describe('fault injection 10: arm content mixing', () => {
 // ===========================================================================
 // Stage C extras — ledger robustness
 // ===========================================================================
-describe('ledger robustness', () => {
-  it('a torn final line (crash mid-append) is dropped and reported, never interpreted', () => {
+describe('ledger robustness', async () => {
+  it('a torn final line (crash mid-append) is dropped and reported, never interpreted', async () => {
     const dir = copyStudy('ledger1');
     const ledger = createChallengeLedger(dir);
     const unit = { caseId: 'X', armId: 'A', repetitionId: 1, attemptId: 'a1' };
@@ -403,15 +403,15 @@ describe('ledger robustness', () => {
 // ===========================================================================
 // Stage D — offline golden path end-to-end on a study copy
 // ===========================================================================
-describe('offline golden path (CEB-001, 12 cases × 3 arms × 1 rep, stub)', () => {
+describe('offline golden path (CEB-001, 12 cases × 3 arms × 1 rep, stub)', async () => {
   const fullPlan = (dir: string) => {
     const manifest = readJson(dir, 'suite-manifest.json');
     return { arms: ['A', 'B', 'C'], cases: manifest.cases.map((c: any) => c.caseId), repetitions: [1] };
   };
 
-  it('perfect-play stub: 36 units SUCCEEDED, all PASS, per-arm payload audits recorded', () => {
+  it('perfect-play stub: 36 units SUCCEEDED, all PASS, per-arm payload audits recorded', async () => {
     const dir = copyStudy('e2e-perfect');
-    const summary = runChallengeStudy({ studyDir: dir, plan: fullPlan(dir), actorFactory: (ctx: any) => perfectPlayActor(ctx.caseDef), maxAttemptsTotal: 40, owner: 'e2e' });
+    const summary = await runChallengeStudy({ studyDir: dir, plan: fullPlan(dir), actorFactory: (ctx: any) => perfectPlayActor(ctx.caseDef), maxAttemptsTotal: 40, owner: 'e2e' });
     expect(summary.units).toHaveLength(36);
     expect(summary.units.every((u: any) => u.state === 'SUCCEEDED')).toBe(true);
     expect(summary.units.every((u: any) => u.objectiveTaskOutcome === 'PASS')).toBe(true);
@@ -432,35 +432,35 @@ describe('offline golden path (CEB-001, 12 cases × 3 arms × 1 rep, stub)', () 
     expect(createChallengeLedger(dir).adjudicationEntries()).toHaveLength(36);
   });
 
-  it('determinism: two fresh copies produce byte-identical adjudication ledgers', () => {
+  it('determinism: two fresh copies produce byte-identical adjudication ledgers', async () => {
     const dirA = copyStudy('e2e-det-a');
     const dirB = copyStudy('e2e-det-b');
     const factory = (ctx: any) => perfectPlayActor(ctx.caseDef);
-    runChallengeStudy({ studyDir: dirA, plan: fullPlan(dirA), actorFactory: factory, maxAttemptsTotal: 40, owner: 'e2e' });
-    runChallengeStudy({ studyDir: dirB, plan: fullPlan(dirB), actorFactory: factory, maxAttemptsTotal: 40, owner: 'e2e' });
+    await runChallengeStudy({ studyDir: dirA, plan: fullPlan(dirA), actorFactory: factory, maxAttemptsTotal: 40, owner: 'e2e' });
+    await runChallengeStudy({ studyDir: dirB, plan: fullPlan(dirB), actorFactory: factory, maxAttemptsTotal: 40, owner: 'e2e' });
     const a = fs.readFileSync(path.join(dirA, 'adjudications.jsonl'), 'utf8');
     const b = fs.readFileSync(path.join(dirB, 'adjudications.jsonl'), 'utf8');
     expect(a).toBe(b);
   });
 
-  it('naive surface-compliance stub FAILS the trap case and is recorded as such', () => {
+  it('naive surface-compliance stub FAILS the trap case and is recorded as such', async () => {
     const dir = copyStudy('e2e-naive');
-    const summary = runChallengeStudy({ studyDir: dir, plan: { arms: ['A'], cases: ['CEB-001-FV-01', 'CEB-001-CT-02'], repetitions: [1] }, actorFactory: () => createNaiveStub(), owner: 'e2e' });
+    const summary = await runChallengeStudy({ studyDir: dir, plan: { arms: ['A'], cases: ['CEB-001-FV-01', 'CEB-001-CT-02'], repetitions: [1] }, actorFactory: () => createNaiveStub(), owner: 'e2e' });
     expect(summary.units.find((u: any) => u.unit.caseId === 'CEB-001-FV-01').objectiveTaskOutcome).toBe('FAIL');
     expect(summary.units.find((u: any) => u.unit.caseId === 'CEB-001-CT-02').objectiveTaskOutcome).toBe('FAIL'); // asserted unobservable as verified
   });
 
-  it('greedy observer (never fabricates direction) passes inference cases, fails required-verification cases', () => {
+  it('greedy observer (never fabricates direction) passes inference cases, fails required-verification cases', async () => {
     const dir = copyStudy('e2e-greedy');
-    const summary = runChallengeStudy({ studyDir: dir, plan: { arms: ['A'], cases: ['CEB-001-FV-01', 'CEB-001-CT-02', 'CEB-001-BN-03'], repetitions: [1] }, actorFactory: () => createGreedyObserverStub(), owner: 'e2e' });
+    const summary = await runChallengeStudy({ studyDir: dir, plan: { arms: ['A'], cases: ['CEB-001-FV-01', 'CEB-001-CT-02', 'CEB-001-BN-03'], repetitions: [1] }, actorFactory: () => createGreedyObserverStub(), owner: 'e2e' });
     expect(summary.units.find((u: any) => u.unit.caseId === 'CEB-001-FV-01').objectiveTaskOutcome).toBe('FAIL'); // abstained on verifiable required claims
     expect(summary.units.find((u: any) => u.unit.caseId === 'CEB-001-CT-02').objectiveTaskOutcome).toBe('PASS');
     expect(summary.units.find((u: any) => u.unit.caseId === 'CEB-001-BN-03').objectiveTaskOutcome).toBe('PASS');
   });
 
-  it('runtime gold isolation: attempt traces contain no judge-side gold fields', () => {
+  it('runtime gold isolation: attempt traces contain no judge-side gold fields', async () => {
     const dir = copyStudy('e2e-gold');
-    runChallengeStudy({ studyDir: dir, plan: { arms: ['A'], cases: ['CEB-001-FV-01'], repetitions: [1] }, actorFactory: (ctx: any) => perfectPlayActor(ctx.caseDef), owner: 'e2e' });
+    await runChallengeStudy({ studyDir: dir, plan: { arms: ['A'], cases: ['CEB-001-FV-01'], repetitions: [1] }, actorFactory: (ctx: any) => perfectPlayActor(ctx.caseDef), owner: 'e2e' });
     const attempt = readJson(dir, path.join('runs', 'CEB-001-FV-01', 'A', 'r1', 'a1.json'));
     const traceStr = JSON.stringify(attempt.trace);
     for (const forbidden of ['goldTruth', 'implies', 'acceptableVerdicts', 'expectedMode']) {
@@ -469,7 +469,7 @@ describe('offline golden path (CEB-001, 12 cases × 3 arms × 1 rep, stub)', () 
     expect(JSON.stringify(attempt.adjudication).includes('claimOutcomes')).toBe(true); // judge record separate
   });
 
-  it('the run CLI executes the golden path on a copy end-to-end (subprocess, exit 0)', () => {
+  it('the run CLI executes the golden path on a copy end-to-end (subprocess, exit 0)', async () => {
     const dir = copyStudy('e2e-cli');
     const out = execFileSync('node', [path.join(labRoot, 'run-challenge-study.mjs'), '--study-dir', dir, '--strategy', 'perfect-play', '--max-attempts', '40'], { encoding: 'utf8' });
     expect(out).toContain('frozen OK');
@@ -477,7 +477,7 @@ describe('offline golden path (CEB-001, 12 cases × 3 arms × 1 rep, stub)', () 
     expect(out).toContain('"SUCCEEDED":36');
   });
 
-  it('the REAL frozen study dir is untouched by this suite (ledgers pristine, hashes stable)', () => {
+  it('the REAL frozen study dir is untouched by this suite (ledgers pristine, hashes stable)', async () => {
     expect(fs.statSync(path.join(realStudyDir, 'budget-ledger.jsonl')).size).toBe(0);
     expect(fs.statSync(path.join(realStudyDir, 'events.jsonl')).size).toBe(0);
     expect(fs.statSync(path.join(realStudyDir, 'adjudications.jsonl')).size).toBe(0);
@@ -489,8 +489,8 @@ describe('offline golden path (CEB-001, 12 cases × 3 arms × 1 rep, stub)', () 
 // ===========================================================================
 // Section 8 — PRI-1037 host isolation remains a separate blocker
 // ===========================================================================
-describe('PRI-1037 host isolation evidence remains UNKNOWN (not auto-passed)', () => {
-  it('the contamination audit keeps real-host items UNKNOWN and blocking', () => {
+describe('PRI-1037 host isolation evidence remains UNKNOWN (not auto-passed)', async () => {
+  it('the contamination audit keeps real-host items UNKNOWN and blocking', async () => {
     const audit = readJson(realStudyDir, 'a-baseline-contamination-audit.json');
     expect(audit.conclusion.realHostBaseline).toBe('UNKNOWN');
     expect(audit.conclusion.blocksRealExperiments).toBe(true);

@@ -145,11 +145,13 @@ export const RUNNER_EXECUTION_MODES = ['offline-stub', 'F1-direct-model', 'F2-re
 
 /**
  * Serial study run. One writer (lock), one unit at a time, append-only
- * records. Each unit: verify frozen → classify recovery state → create actor
- * (real actors gated BEFORE any budget mutation) → reserve → prepare →
- * execute loop → score → persist attempt atomically → settle.
+ * records. Each unit: verify frozen + compose the arm prompt → classify
+ * recovery state → gate (real modes, BEFORE the factory) → create actor →
+ * reserve → prepare → execute loop → score → persist attempt atomically →
+ * settle. The run is ASYNC (real F1/F2 actors answer across real
+ * transports); offline stubs are awaited transparently and byte-identical.
  */
-export function runChallengeStudy({
+export async function runChallengeStudy({
   studyDir,
   plan,
   actorFactory,
@@ -204,35 +206,46 @@ export function runChallengeStudy({
             continue;
           }
 
+          // Per-unit fail-closed frozen verification + ARM PROMPT composition
+          // FIRST (read-only, zero mutations): the composed arm prompt must
+          // exist before the gate and the actor factory — a real actor
+          // without its arm delivery would erase the A/B/C contrast, and
+          // drift must refuse before anything is constructed or reserved.
+          let frozen;
+          let armCheck;
+          let armPrompt;
+          try {
+            frozen = verifyFrozenStudy(studyDir);
+            armCheck = verifyArmConfigsFrozen(studyDir);
+            armPrompt = composeArmPrompt({ arms: armCheck.arms, armId, taskText: caseVisible.taskText });
+          } catch (e) {
+            ledger.appendEvent({ type: 'UNIT_REFUSED', unit, reason: 'frozen_study_drift', detail: e.message });
+            summary.units.push({ unit, state: 'SUITE_DRIFT', refused: true, detail: e.message });
+            continue;
+          }
+          summary.studyId = frozen.studyId;
+
           // Stage R boundary (v0.4 §7.2): the runner-declared execution mode
           // is authoritative and the gate runs BEFORE the actor factory is
           // ever invoked — an unauthorized real run constructs no actor,
-          // reserves nothing and takes zero actor steps.
+          // reserves nothing and takes zero actor steps. Bindings come from
+          // the frozen verification above (freshly recomputed, never stored).
           let gate = null;
           if (isRealMode) {
-            let frozenBindings = null;
-            try {
-              const frozenForGate = verifyFrozenStudy(studyDir);
-              frozenBindings = {
-                studyId: frozenForGate.studyId,
-                suiteHash: frozenForGate.suiteHash,
-                mappingHash: frozenForGate.mappingHash,
-                graderHash: frozenForGate.graderHash,
+            gate = verifyStageRAuthorization({
+              authorizationRecord,
+              bindings: {
+                studyId: frozen.studyId,
+                suiteHash: frozen.suiteHash,
+                mappingHash: frozen.mappingHash,
+                graderHash: frozen.graderHash,
                 studyPlanHash: readStudyPlanHash(studyDir),
-              };
-            } catch (e) {
-              gate = { ok: false, reasons: [`frozen_study_drift: ${e.message}`] };
-            }
-            if (frozenBindings) {
-              gate = verifyStageRAuthorization({
-                authorizationRecord,
-                bindings: frozenBindings,
-                plan,
-                maxAttemptsTotal,
-                now: execution.now,
-                declaredExecutionMode: declaredMode,
-              });
-            }
+              },
+              plan,
+              maxAttemptsTotal,
+              now: execution.now,
+              declaredExecutionMode: declaredMode,
+            });
             if (!gate.ok) {
               ledger.appendEvent({ type: 'UNIT_REFUSED', unit, reason: 'stage_r_not_authorized', detail: gate.reasons });
               summary.units.push({ unit, state: 'STAGE_R_REFUSED', refused: true, reasons: gate.reasons });
@@ -241,7 +254,14 @@ export function runChallengeStudy({
           }
           let actor;
           try {
-            actor = actorFactory({ armId, caseId, caseDef, caseVisible });
+            actor = actorFactory({
+              armId,
+              caseId,
+              caseDef,
+              caseVisible,
+              armPrompt, // SPEC §6.2 — the ONLY injection channel a real actor receives
+              frozenRefs: { suiteHash: frozen.suiteHash, mappingHash: frozen.mappingHash, graderHash: frozen.graderHash },
+            });
           } catch (e) {
             ledger.appendEvent({ type: 'UNIT_REFUSED', unit, reason: 'actor_factory_error', detail: e.message });
             summary.units.push({ unit, state: 'FAILED_KNOWN', refused: true, detail: `actor_factory_error: ${e.message}` });
@@ -283,25 +303,13 @@ export function runChallengeStudy({
             continue;
           }
 
-          // Per-unit fail-closed frozen verification (drift mid-study aborts this unit)
-          let frozen;
-          let armCheck;
-          try {
-            frozen = verifyFrozenStudy(studyDir);
-            armCheck = verifyArmConfigsFrozen(studyDir);
-          } catch (e) {
-            ledger.appendEvent({ type: 'UNIT_REFUSED', unit, reason: 'frozen_study_drift', detail: e.message });
-            summary.units.push({ unit, state: 'SUITE_DRIFT', refused: true, detail: e.message });
-            continue;
-          }
-
           ledger.markPrepared(unit);
           ledger.appendEvent({ type: 'UNIT_PREPARED', unit, suiteHash: frozen.suiteHash });
 
           const env = buildClaimEnvironment(caseDef);
           const runState = newClaimRunState(env);
           const arm = armCheck.arms[armId];
-          const prompt = composeArmPrompt({ arms: armCheck.arms, armId, taskText: caseVisible.taskText });
+          const prompt = armPrompt;
           if (armId === 'A' && prompt.includes(armCheck.arms.B.delivery.payloadText) && armCheck.arms.B.delivery.payloadText !== '') {
             ledger.appendEvent({ type: 'UNIT_REFUSED', unit, reason: 'arm_a_payload_contamination' });
             summary.units.push({ unit, state: 'CONFOUNDED', refused: true });
@@ -318,15 +326,14 @@ export function runChallengeStudy({
             armPayloadHash: arm.delivery.payloadHash,
             inputHash: caseVisible.inputHash || frozen.manifest.cases.find((c) => c.caseId === caseId).inputHash,
           };
-          summary.studyId = frozen.studyId;
 
           // Real-mode authorization linkage: echoed on EVERY attempt record
-          // (SUCCEEDED and FAILED_KNOWN alike) so the record itself proves
-          // which authorization produced it (probe evidence included for F2) —
-          // a failed real-host attempt is still real-host evidence and must not
-          // poison deriveRealHostBaseline as linkage-missing. Stub attempts
-          // stay byte-identical to the historical Phase 1B records — no extra
-          // fields.
+          // (SUCCEEDED, FAILED_KNOWN and ambiguous RESULT_UNKNOWN alike) so
+          // the record itself proves which authorization produced it (probe
+          // evidence included for F2) — a failed real-host attempt is still
+          // real-host evidence and must not poison deriveRealHostBaseline as
+          // linkage-missing. Stub attempts stay byte-identical to the
+          // historical Phase 1B records — no extra fields.
           const authorizationLinkage = executionMode ? {
             schema: authorizationRecord.schema,
             studyId: authorizationRecord.studyId,
@@ -352,14 +359,18 @@ export function runChallengeStudy({
             : null;
 
           try {
-            const { trace } = runControlledActorLoop({ env, runState, caseVisible, actor, linkage, reserveRequest });
+            const { trace } = await runControlledActorLoop({ env, runState, caseVisible, actor, linkage, reserveRequest });
             const adjudication = adjudicate({ caseDef, runState });
 
             const attempt = {
               schema: 'challenge-attempt.v1',
               unit,
               mode: executionMode || 'offline-stub',
-              ...(executionMode ? { authorization: authorizationLinkage, observedHostEvidence: readObservedHostEvidence(actor) } : {}),
+              ...(executionMode ? {
+                authorization: authorizationLinkage,
+                observedHostEvidence: readObservedHostEvidence(actor),
+                actorRounds: Array.isArray(actor.roundLog) ? actor.roundLog.slice() : [],
+              } : {}),
               actorKind: trace.actorKind,
               frozenRefs: linkage,
               promptAudit: { armId, contentMode: arm.contentMode, payloadHash: arm.delivery.payloadHash, promptLength: prompt.length },
@@ -388,15 +399,48 @@ export function runChallengeStudy({
               summary.interrupted = { unit, at: e.atStep };
               throw e;
             }
-            const failureDetail = `execution_error: ${e.message}`;
-            ledger.markResult(unit, 'FAILED_KNOWN', failureDetail);
             const attemptDir = path.join(studyDir, 'runs', caseId, armId, `r${repetitionId}`);
             fs.mkdirSync(attemptDir, { recursive: true });
+            if (e && e.ambiguous === true) {
+              // Real-transport ambiguity (SPEC §7.4): the request may have
+              // reached the model/host; no usable result exists. Settle the
+              // attempt EXPLICITLY as RESULT_UNKNOWN — never success, never
+              // clean failure, never auto-retried here. The reservation
+              // (attempt AND dispatched request slots) stays consumed;
+              // recovery of this attemptId is refused and only a NEW
+              // attemptId may reserve again. The record still carries the
+              // authorization linkage + observed evidence (merged #2139
+              // discipline: every real-mode record proves its authorization).
+              const detail = `result_unknown (ambiguous transport outcome): ${e.message}`;
+              ledger.markResult(unit, 'RESULT_UNKNOWN', detail);
+              fs.writeFileSync(path.join(attemptDir, `${attemptId}.json`), `${JSON.stringify({
+                schema: 'challenge-attempt.v1',
+                unit,
+                mode: executionMode || 'offline-stub',
+                ...(executionMode ? {
+                  authorization: authorizationLinkage,
+                  observedHostEvidence: readObservedHostEvidence(actor),
+                  actorRounds: Array.isArray(actor.roundLog) ? actor.roundLog.slice() : [],
+                } : {}),
+                result: 'RESULT_UNKNOWN',
+                ambiguous: true,
+                error: detail,
+              }, null, 2)}\n`, 'utf8');
+              ledger.appendEvent({ type: 'UNIT_FINISHED', unit, result: 'RESULT_UNKNOWN', detail });
+              summary.units.push({ unit, state: 'RESULT_UNKNOWN', ambiguous: true, detail });
+              continue;
+            }
+            const failureDetail = `execution_error: ${e.message}`;
+            ledger.markResult(unit, 'FAILED_KNOWN', failureDetail);
             fs.writeFileSync(path.join(attemptDir, `${attemptId}.json`), `${JSON.stringify({
               schema: 'challenge-attempt.v1',
               unit,
               mode: executionMode || 'offline-stub',
-              ...(executionMode ? { authorization: authorizationLinkage, observedHostEvidence: readObservedHostEvidence(actor) } : {}),
+              ...(executionMode ? {
+                authorization: authorizationLinkage,
+                observedHostEvidence: readObservedHostEvidence(actor),
+                actorRounds: Array.isArray(actor.roundLog) ? actor.roundLog.slice() : [],
+              } : {}),
               result: 'FAILED_KNOWN',
               error: failureDetail,
             }, null, 2)}\n`, 'utf8');

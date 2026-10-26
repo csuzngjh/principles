@@ -36,12 +36,13 @@ const maxAttemptsTotal = Number(arg('--max-attempts', '40'));
 const owner = arg('--owner', 'challenge-runner-cli');
 
 const resolved = path.resolve(process.cwd(), studyDir);
+(async () => {
 try {
   const frozen = verifyFrozenStudy(resolved);
   const armCheck = verifyArmConfigsFrozen(resolved);
   console.log(`run-challenge-study: frozen OK — study=${frozen.studyId} suiteHash=${frozen.suiteHash.slice(0, 12)}… arms=A/B/C audited`);
 
-  const summary = runChallengeStudy({
+  const summary = await runChallengeStudy({
     studyDir: resolved,
     plan: { arms, cases: frozen.manifest.cases.map((c) => c.caseId), repetitions: [1] },
     actorFactory: (ctx) => STUB_STRATEGIES[strategy](ctx),
@@ -59,3 +60,4 @@ try {
   console.error(`run-challenge-study: FAIL — ${e.message}`);
   process.exit(1);
 }
+})();
