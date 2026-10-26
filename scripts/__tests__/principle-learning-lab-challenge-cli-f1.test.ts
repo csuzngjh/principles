@@ -173,18 +173,14 @@ describe('CLI Stage R F1 entry — dry-run and refusal paths (zero network by co
     expect(r5.out).toContain('--now is only honored for --dry-run');
   });
 
-  it('E3: an approved record whose requestedActorIdentity does not match the CLI responder model refuses at mode-consistency — zero network (构造无网络, gate 先于 responder 使用)', () => {
+  it('E3: an approved record whose requestedActorIdentity has NO registered transport wiring is refused at the CLI entry — before the runner, zero network, zero ledger rows', () => {
     const dir = copyStudy('wrong-identity');
     approveF1(dir, { requestedActorIdentity: 'other-provider/other-model' });
+    const before = ledgerFingerprint(dir);
     const r = runCli(['--execution-mode', 'F1-direct-model'], dir); // no --now: real runs judge with the actual clock
-    expect(r.status).toBe(0); // the run COMPLETES: every unit is refused inside the summary, nothing dispatches
-    expect(r.out).toContain('"STAGE_R_REFUSED":36');
-    // the refusal REASON lives in the audit ledger (the CLI prints counts only)
-    const events = fs.readFileSync(path.join(dir, 'events.jsonl'), 'utf8');
-    expect(events).toContain('stage_r_mode_mismatch');
-    expect(events).toContain('is not the authorization-bound requestedActorIdentity');
-    const budget = fs.readFileSync(path.join(dir, 'budget-ledger.jsonl'), 'utf8');
-    expect(budget.includes('REQUEST_RESERVE')).toBe(false); // no request was ever reserved → none dispatched
+    expect(r.status).toBe(1); // transport selection is authorization-bound: an unregistered identity never reaches any provider
+    expect(r.out).toContain('no F1 transport wiring is registered');
+    expect(ledgerFingerprint(dir)).toBe(before); // the runner never started — zero ledger rows at all
   });
 
   it('E4 (CLI level): an EXPIRED authorization refuses in dry-run with zero side effects', () => {
@@ -314,5 +310,37 @@ describe('C. dry-run positive path (synthetic APPROVED fixture)', () => {
     expect(fs.readFileSync(path.join(dir, 'run-authorization.json'), 'utf8')).not.toBe(liveBefore);
     expect(JSON.parse(liveBefore).status).toBe('NOT_AUTHORIZED'); // the live file stays unapproved
     expect(fs.readFileSync(path.join(realStudyDir, 'run-authorization.json'), 'utf8')).toBe(liveBefore);
+  });
+});
+
+
+// ===========================================================================
+// D. authorization-bound transport selection (AMD / Shuxi Atria-Dawn)
+// ===========================================================================
+describe('D. authorization-bound F1 transport selection', () => {
+  it('D1: an Atria-Dawn authorization selects the Shuxi wiring in dry-run (zero network, zero side effects)', () => {
+    const dir = copyStudy('atria-dry');
+    approveF1(dir, { requestedActorIdentity: 'Atria-Dawn' });
+    const before = ledgerFingerprint(dir);
+    const r = runCli(['--execution-mode', 'F1-direct-model', '--now', NOW, '--dry-run'], dir);
+    expect(r.status).toBe(0);
+    expect(r.out).toContain('authorizedModel=Atria-Dawn');
+    expect(r.out).toContain('transport = Shuxi intern-ai-discovery (Atria-Dawn, no reasoning_effort)');
+    expect(r.out).toContain('DRY-RUN OK');
+    expect(ledgerFingerprint(dir)).toBe(before);
+  });
+
+  it('D2: a GLM-5.3-Flash authorization keeps the AMD wiring; an UNREGISTERED identity refuses fail-closed', () => {
+    const dir = copyStudy('amd-dry');
+    approveF1(dir); // default identity GLM-5.3-Flash
+    const r1 = runCli(['--execution-mode', 'F1-direct-model', '--now', NOW, '--dry-run'], dir);
+    expect(r1.status).toBe(0);
+    expect(r1.out).toContain('transport = AMD radeon tokenfactory (GLM-5.3-Flash)');
+
+    const dir2 = copyStudy('unknown-identity');
+    approveF1(dir2, { requestedActorIdentity: 'gpt-9-nonexistent' });
+    const r2 = runCli(['--execution-mode', 'F1-direct-model', '--now', NOW, '--dry-run'], dir2);
+    expect(r2.status).toBe(1);
+    expect(r2.out).toContain('no F1 transport wiring is registered');
   });
 });
