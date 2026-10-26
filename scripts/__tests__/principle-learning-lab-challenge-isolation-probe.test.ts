@@ -286,7 +286,7 @@ describe('B. verifyF2ProbeEvidence', () => {
     expect(v2.reasons.join(' ')).toContain('codexHome not provided');
   });
 
-  it('B4: corrupt, missing, traversal-style, mismatched and partially-failed evidence all refuse (boundary guard: only the fixed in-study evidence path is ever read)', () => {
+  it('B4: corrupt, missing, null, wrong-schema, traversal-style, mismatched and partially-failed evidence all refuse (boundary guard: only the fixed in-study evidence path is ever read)', () => {
     const dir = copyStudy('verify-bad');
     const codexHome = path.join(tmpRoot, `codex-${++copyCounter}`);
     const expectRefused = (v: { ok: boolean; reasons: string[] }) => { expect(v.ok).toBe(false); expect(v.reasons.length).toBeGreaterThan(0); };
@@ -296,8 +296,20 @@ describe('B. verifyF2ProbeEvidence', () => {
     writeProbeEvidence(dir, codexHome);
     writeInside(dir, EVIDENCE_REL, '{ corrupt');
     expectRefused(verifyF2ProbeEvidence({ studyDir: dir, evidenceRef: EVIDENCE_REL, expected: { studyId: FROZEN.studyId, suiteHash: FROZEN.suiteHash }, codexHome }));
+    // null record — JSON.parse('null') is a legal JSON document and must be refused without crashing the verifier
+    saveProbeEvidence(dir, null);
+    const vNull = verifyF2ProbeEvidence({ studyDir: dir, evidenceRef: EVIDENCE_REL, expected: { studyId: FROZEN.studyId, suiteHash: FROZEN.suiteHash }, codexHome });
+    expectRefused(vNull);
+    expect(vNull.reasons.join(' ')).toContain('schema must be');
+    // wrong schema id — every other field real (and corroborated), still refused on the contract id
+    writeProbeEvidence(dir, codexHome, { schema: 'some-other-contract.v9' });
+    const vSchema = verifyF2ProbeEvidence({ studyDir: dir, evidenceRef: EVIDENCE_REL, expected: { studyId: FROZEN.studyId, suiteHash: FROZEN.suiteHash }, codexHome });
+    expectRefused(vSchema);
+    expect(vSchema.reasons.join(' ')).toContain('schema must be');
     // traversal-style ref — the module rejects it BEFORE any path resolution (its own boundary guard)
-    expectRefused(verifyF2ProbeEvidence({ studyDir: dir, evidenceRef: 'isolation-probes/' + '..'.repeat(3) + '/outside.json', expected: { studyId: FROZEN.studyId, suiteHash: FROZEN.suiteHash }, codexHome }));
+    const vTraversal = verifyF2ProbeEvidence({ studyDir: dir, evidenceRef: 'isolation-probes/../../outside.json', expected: { studyId: FROZEN.studyId, suiteHash: FROZEN.suiteHash }, codexHome });
+    expectRefused(vTraversal);
+    expect(vTraversal.reasons.join(' ')).toContain('must be a relative path inside the study directory');
     // suite mismatch
     writeProbeEvidence(dir, codexHome, { suiteHash: 'f'.repeat(64) });
     expectRefused(verifyF2ProbeEvidence({ studyDir: dir, evidenceRef: EVIDENCE_REL, expected: { studyId: FROZEN.studyId, suiteHash: FROZEN.suiteHash }, codexHome }));

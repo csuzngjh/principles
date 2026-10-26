@@ -294,13 +294,13 @@ export function verifyF2ProbeEvidence({ studyDir, evidenceRef, expected, codexHo
     reasons.push(`probe evidence schema must be ${ISOLATION_PROBE_SCHEMA}`);
   }
   if (record && record.probeId !== ISOLATION_PROBE_ID) {
-    reasons.push(`probe evidence probeId must be '${ISOLATION_PROBE_ID}' (got '${String(record && record.probeId)}')`);
+    reasons.push(`probe evidence probeId must be '${ISOLATION_PROBE_ID}' (got '${String(record.probeId)}')`);
   }
   if (record && record.executedIn !== 'real-host') {
-    reasons.push(`probe evidence executedIn='${String(record && record.executedIn)}' — offline-rehearsal evidence can NEVER authorize F2 (honest marker, machine-enforced)`);
+    reasons.push(`probe evidence executedIn='${String(record.executedIn)}' — offline-rehearsal evidence can NEVER authorize F2 (honest marker, machine-enforced)`);
   }
   if (record && record.status !== 'PASSED') {
-    reasons.push(`probe evidence overall status '${String(record && record.status)}' is not PASSED`);
+    reasons.push(`probe evidence overall status '${String(record.status)}' is not PASSED`);
   }
   if (record && Array.isArray(record.checks)) {
     const requiredPresent = ISOLATION_PROBE_CHECK_IDS.every((id) => record.checks.some((c) => c && c.id === id && c.status === 'PASSED'));
@@ -315,7 +315,7 @@ export function verifyF2ProbeEvidence({ studyDir, evidenceRef, expected, codexHo
     reasons.push(`probe evidence executedAt '${String(record && record.executedAt)}' is not a strict ISO-8601 timestamp with timezone`);
   }
   if (expected && typeof expected === 'object') {
-    if (record && String(record.studyId) !== String(expected.studyId)) reasons.push(`probe evidence studyId '${String(record && record.studyId)}' does not match this study '${expected.studyId}'`);
+    if (record && String(record.studyId) !== String(expected.studyId)) reasons.push(`probe evidence studyId '${String(record.studyId)}' does not match this study '${expected.studyId}'`);
     if (record && String(record.suiteHash) !== String(expected.suiteHash)) reasons.push(`probe evidence suiteHash is bound to a different frozen suite than this study`);
   }
   if (reasons.length > 0) return { ok: false, reasons };
