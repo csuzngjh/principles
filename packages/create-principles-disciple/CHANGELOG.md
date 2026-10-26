@@ -1,5 +1,15 @@
 # create-principles-disciple
 
+## 1.145.24
+
+### Patch Changes
+
+- f74524e: PRI-1046 收口：Codex 插件安装链上两条「看起来正常」的静默路径不再成立。① `$pd-control setup` 把「安装后字节与 pin 一致」作为唯一验收，npm 退出码只是过程信号：当字节不符（精确 pin 被静默丢掉、模块只留在嵌套目录）时，先清掉 `runtime/node_modules` 与锁文件、从干净树重装一次，仍不符才结构化失败并逐行列出不符的包——不再把「手工删除 node_modules」当作下一步交给用户；网络请求仍不重试（失败立刻暴露，单请求超时 60 秒），判定权归字节核对，重试不会掩盖一次丢掉 pin 的安装。② `pd-status` 新增 `snapshot` 检查：把已安装缓存快照的版本与该 marketplace 本地 source 里的 `plugin.json` 版本比较，落后即 degraded 并给出 `codex plugin remove/add` 命令——旧快照过去因为 pin 与脚本都取自它自己而永远自称 pinned match。无法比较时区分两类：「非本地 marketplace / 显式 --plugin-root」按设计不适用，其余（config.toml 不可读、source checkout 已删、marketplace 已移除）属 degraded 并给出修复动作。
+- 90473c3: chore(deps): bump js-yaml 5.4.3 -> 5.5.0（#2156，连带 argparse 2.0.1 -> 3.0.3；create-principles-disciple 的运行时 dependency，安装器读 YAML 配置随 installer 工件分发）。本 PR 只调和 `packages/create-principles-disciple/package-lock.json`，`package.json` 的 range `^5.4.3` 未变；各组件 staged release-lock 里的 js-yaml 已是 5.5.0，无需重新生成。
+- 02918c6: chore(deps): bump i18next 26.4.7 -> 26.5.6（#2159；@principles/pd-console 运行时 dependency，打进 console bundle 随 installer 工件分发）。Dependabot 只同步了 root workspace lock，`release-locks/console` 里仍钉 26.4.7，release staging 的 `npm ci --omit=dev` 会以 `Invalid: lock file's i18next@26.4.7 does not satisfy ^26.5.6` 失败（ERR-131/068 同族）；本 PR 把那条 staged lock 一起调和到 26.5.6。
+- 7f286e0: chore(deps): bump @inquirer/prompts 8.7.2 -> 8.7.4（#2160；create-principles-disciple 的运行时 dependency，安装器交互式提示随 installer 工件分发，Dependabot 也把它标在 `installer` 生态）。本 PR 只调和 `packages/create-principles-disciple/package-lock.json`，`package.json` 的 range 未变。
+- b6bdd9a: chore(deps): bump @radix-ui/react-select 2.3.7 -> 2.4.1（#2161；@principles/pd-console 运行时 dependency，打进 console bundle 随 installer 工件分发）。
+
 ## 1.145.23
 
 ### Patch Changes
