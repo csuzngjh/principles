@@ -562,7 +562,35 @@ describe('D. runner enforcement: unauthorized real actors are unreachable', () =
 
   it('a real-mode FAILED_KNOWN attempt record still carries the authorization linkage and observed host evidence (a failed real-host run must not poison the baseline as linkage-missing)', async () => {
     const dir = copyStudy('runner-real-failed');
-    approveStudy(dir, f2WithProbe());
+    // PRI-1037 wiring fixture (real-host-marked evidence + corroborating
+    // rollouts under a tmp codexHome — boundary-guarded, wiring proof only).
+    const appendInside = (rootDir: string, rel: string, content: string) => {
+      const root = path.resolve(rootDir);
+      const target = path.resolve(root, rel);
+      if (!target.startsWith(root + path.sep)) throw new Error(`test helper: path escapes root (${rel})`);
+      fs.appendFileSync(target, content, 'utf8');
+    };
+    const codexHome = path.join(tmpRoot, `codex-stager-f2-${++copyCounter}`);
+    fs.mkdirSync(codexHome, { recursive: true });
+    const probeSessions = ['probe-y1', 'probe-y2', 'probe-y3', 'probe-y4', 'probe-y5'];
+    const probeRecord = {
+      schema: 'challenge-isolation-probe.v1', probeId: 'PRI-1037', executedIn: 'real-host',
+      studyId: 'CEB-001', suiteHash: FROZEN.suiteHash, executedAt: new Date().toISOString(),
+      checks: ['hidden-gold-unreadable', 'scoring-rules-unreadable', 'cross-arm-isolation', 'non-experiment-tool-refusal', 'unauthorized-network-refusal', 'session-independence', 'host-identity-attested', 'effective-config-recorded', 'post-run-side-effect-scan'].map((id) => ({ id, status: 'PASSED' })),
+      sessions: probeSessions,
+      hostSnapshotAudit: { requestedModel: 'test-double/never-real', observedModel: 'test-double/never-real', identityStatus: 'VERIFIED', identityEvidenceSource: 'test-double' },
+      status: 'PASSED',
+    };
+    fs.mkdirSync(path.join(dir, 'isolation-probes'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'isolation-probes', 'PRI-1037.json'), `${JSON.stringify(probeRecord, null, 2)}\n`, 'utf8');
+    const dNow = new Date();
+    const dayRel = path.join('sessions', String(dNow.getUTCFullYear()), String(dNow.getUTCMonth() + 1).padStart(2, '0'), String(dNow.getUTCDate()).padStart(2, '0'));
+    fs.mkdirSync(path.join(codexHome, dayRel), { recursive: true });
+    for (const s of probeSessions) {
+      const safe = s.replace(/[^A-Za-z0-9_-]/g, '');
+      appendInside(codexHome, path.join(dayRel, `rollout-${safe}.jsonl`), `${JSON.stringify({ type: 'session_meta', payload: { session_id: s } })}\n${JSON.stringify({ type: 'event_msg', payload: { type: 'thread_settings_applied', thread_settings: { model: 'test-double/never-real' } } })}\n`);
+    }
+    approveStudy(dir, f2WithProbe({ isolationAcceptance: { realHostProbe: { ticketId: 'PRI-1037', status: 'PASSED', evidenceRef: 'isolation-probes/PRI-1037.json', suiteHash: FROZEN.suiteHash } } }));
     const failingDouble = () => ({
       kind: 'real-model-double(wiring-only)',
       executionMode: 'F2-real-host',
@@ -574,7 +602,7 @@ describe('D. runner enforcement: unauthorized real actors are unreachable', () =
       studyDir: dir,
       plan: { arms: ['A'], cases: ['CEB-001-FV-01'], repetitions: [1] },
       actorFactory: failingDouble,
-      execution: { mode: 'F2-real-host', now: NOW },
+      execution: { mode: 'F2-real-host', now: NOW, codexHome },
       maxAttemptsTotal: 10,
       owner: 'stager-d8',
     });

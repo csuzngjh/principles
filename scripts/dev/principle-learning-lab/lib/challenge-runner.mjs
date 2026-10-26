@@ -41,6 +41,7 @@ import { runControlledActorLoop, SimulatedCrashError, perfectPlayActor, createGr
 import { acquireStudyWriteLock, releaseStudyWriteLock, createChallengeLedger } from './challenge-ledger.mjs';
 import { buildStudyArms, auditArmIsolation, composeArmPrompt } from './challenge-arms.mjs';
 import { verifyStageRAuthorization, isOfflineStubActor, readStudyPlanHash, readObservedHostEvidence, readStageRAuthorization } from './challenge-stage-r-gate.mjs';
+import { verifyF2ProbeEvidence } from './challenge-isolation-probe.mjs';
 
 export class FrozenStudyDriftError extends Error {
   constructor(details) {
@@ -254,6 +255,28 @@ export async function runChallengeStudy({
               ledger.appendEvent({ type: 'UNIT_REFUSED', unit, reason: 'stage_r_not_authorized', detail: gate.reasons });
               summary.units.push({ unit, state: 'STAGE_R_REFUSED', refused: true, reasons: gate.reasons });
               continue;
+            }
+            // PRI-1037 deep evidence verification (F2 only, after the gate's
+            // structural probe check, BEFORE the factory): the authorization's
+            // realHostProbe.evidenceRef must resolve to a real-host-executed,
+            // all-checks-PASSED probe record bound to THIS frozen study, with
+            // every recorded session corroborated by the host's own rollouts
+            // (execution.codexHome). Offline-rehearsal evidence, missing,
+            // corrupt, mismatched or uncorroborated evidence refuses F2.
+            if (declaredMode === 'F2-real-host') {
+              const probeVerify = verifyF2ProbeEvidence({
+                studyDir,
+                evidenceRef: authorizationRecord && authorizationRecord.isolationAcceptance && authorizationRecord.isolationAcceptance.realHostProbe
+                  ? authorizationRecord.isolationAcceptance.realHostProbe.evidenceRef
+                  : null,
+                expected: { studyId: frozen.studyId, suiteHash: frozen.suiteHash },
+                codexHome: execution.codexHome ?? null,
+              });
+              if (!probeVerify.ok) {
+                ledger.appendEvent({ type: 'UNIT_REFUSED', unit, reason: 'stage_r_probe_evidence_invalid', detail: probeVerify.reasons });
+                summary.units.push({ unit, state: 'STAGE_R_REFUSED', refused: true, reasons: probeVerify.reasons });
+                continue;
+              }
             }
           }
           let actor;

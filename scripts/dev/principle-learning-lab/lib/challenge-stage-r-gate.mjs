@@ -106,7 +106,10 @@ export function isOfflineStubActor(actor) {
 // of those is an ambiguous input and refuses fail-closed.
 const ISO_8601_TZ_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-](\d{2}):(\d{2}))$/;
 
-function parseIso(value) {
+/** Strict ISO-8601-with-timezone parse (shared authority: the gate's
+ *  validity windows and the isolation-probe evidence timestamps judge time
+ *  with the SAME strictness — exported for the probe module). */
+export function parseIso(value) {
   if (typeof value !== 'string' || value.length === 0) return null;
   const m = ISO_8601_TZ_RE.exec(value);
   if (!m) return null;
