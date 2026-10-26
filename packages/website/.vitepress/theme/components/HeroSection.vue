@@ -40,7 +40,7 @@
         controls
         preload="metadata"
         playsinline
-        :aria-label="isZh ? 'PD Owner 治理行为变化演示视频' : 'PD Owner-governed behavior change demo'"
+        :aria-label="isZh ? 'PD 介绍：一次纠正如何变成行为原则（30 秒机制示意）' : 'PD intro: from one correction to a behavior principle (30s illustrated example)'"
       >
         <track
           kind="subtitles"

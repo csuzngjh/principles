@@ -119,13 +119,22 @@ test('homepage videos remain user-controlled and accessible', async () => {
   }
 })
 
-test('published videos contain synchronized narration and six-scene captions', async () => {
+test('published videos contain synchronized narration and scene-aligned captions', async () => {
   const voiceoverManifest = JSON.parse(await readFile(voiceoverManifestPath, 'utf8'))
+  // SPEC-PD-HOMEPAGE-VIDEO-002: 30s bilingual remake. The duration and the six
+  // scene boundaries are asserted from the SPEC, not copied from the manifest,
+  // so a manifest regression cannot silently redshift the published film.
+  const SPEC_DURATION = 30
+  const SPEC_SCENE_STARTS = [0, 4, 8, 13, 17, 25]
+  const vttSeconds = (stamp) => {
+    const [h, m, s] = stamp.split(':').map(Number)
+    return h * 3600 + m * 60 + s
+  }
 
   for (const locale of ['zh', 'en']) {
     const media = probeMedia(path.join(publicRoot, `homepage-demo-${locale}.mp4`))
     if (media) {
-      assert.ok(Math.abs(Number(media.format.duration) - 36) < 0.1, `unexpected duration: ${media.format.duration}`)
+      assert.ok(Math.abs(Number(media.format.duration) - SPEC_DURATION) < 0.1, `unexpected duration: ${media.format.duration}`)
       assert.deepEqual(media.streams.map((stream) => [stream.codec_type, stream.codec_name]), [
         ['video', 'h264'],
         ['audio', 'aac'],
@@ -138,12 +147,41 @@ test('published videos contain synchronized narration and six-scene captions', a
 
     const captions = await readFile(path.join(publicRoot, `homepage-demo-${locale}.vtt`), 'utf8')
     assert.match(captions, /^WEBVTT/)
-    assert.deepEqual(
-      [...captions.matchAll(/^(\d{2}:\d{2}:\d{2}\.\d{3}) -->/gm)].map((match) => match[1]),
-      ['00:00:00.000', '00:00:04.000', '00:00:10.000', '00:00:17.000', '00:00:24.000', '00:00:31.000'],
+    const cues = [...captions.matchAll(/^(\d{2}:\d{2}:\d{2}\.\d{3}) --> (\d{2}:\d{2}:\d{2}\.\d{3})$/gm)]
+    assert.ok(cues.length >= SPEC_SCENE_STARTS.length, `expected at least six cues, found ${cues.length}`)
+    let previousEnd = -1
+    for (const cue of cues) {
+      const start = vttSeconds(cue[1])
+      const end = vttSeconds(cue[2])
+      assert.ok(start < end, `cue ${cue[1]} has non-positive length`)
+      assert.ok(start >= previousEnd, `cue ${cue[1]} starts before the previous cue ends`)
+      assert.ok(end <= SPEC_DURATION, `cue ${cue[1]} ends past the video duration`)
+      previousEnd = end
+    }
+    const cueStarts = cues.map((cue) => vttSeconds(cue[1]))
+    // Each scene's first cue starts exactly at its SPEC boundary.
+    for (const [index, boundary] of SPEC_SCENE_STARTS.entries()) {
+      assert.ok(cueStarts.includes(boundary), `expected a cue starting at ${boundary}s (scene ${index + 1})`)
+    }
+    // Longer scenes may split into multiple cues; every cue text must be a
+    // piece of the narration manifest so captions cannot drift from speech.
+    const cueTexts = captions
+      .split('\n')
+      .filter((line) => line.trim() && !line.includes('-->') && !line.startsWith('WEBVTT'))
+    const narration = voiceoverManifest.locales[locale].scenes.flatMap((scene) =>
+      scene.cues ? scene.cues.map((cue) => cue.text) : [scene.text],
     )
+    for (const cueText of cueTexts) {
+      assert.ok(
+        narration.includes(cueText),
+        `caption text is not part of the narration manifest: ${cueText}`,
+      )
+    }
     for (const scene of voiceoverManifest.locales[locale].scenes) {
-      assert.match(captions, new RegExp(scene.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+      const pieces = scene.cues ? scene.cues.map((cue) => cue.text) : [scene.text]
+      for (const piece of pieces) {
+        assert.match(captions, new RegExp(piece.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+      }
     }
   }
 })

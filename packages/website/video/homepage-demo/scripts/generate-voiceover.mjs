@@ -7,8 +7,14 @@ const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 const websiteRoot = path.resolve(projectRoot, '..', '..')
 const manifestPath = path.join(projectRoot, 'voiceover', 'scenes.json')
 const generatedRoot = path.join(projectRoot, 'voiceover', 'generated')
-const publicRoot = path.join(websiteRoot, 'public')
+// --out <dir> redirects final MP4/VTT/poster output (preview builds under
+// renders/); without it the script publishes to the website public dir.
+const outFlag = process.argv.indexOf('--out')
+const publicRoot = outFlag !== -1 && process.argv[outFlag + 1]
+  ? path.resolve(process.argv[outFlag + 1])
+  : path.join(websiteRoot, 'public')
 const rendersRoot = path.join(projectRoot, 'renders')
+const posterFont = path.join(projectRoot, 'capture', 'assets', 'fonts', 'NotoSansSC-poster.ttf')
 
 function run(command, args) {
   return new Promise((resolve, reject) => {
@@ -61,6 +67,32 @@ async function duration(filePath) {
   return Number(output.trim())
 }
 
+const stripSpaces = (text) => text.replace(/\s+/g, '')
+
+function cuesFor(scene) {
+  if (!scene.cues) return [{ start: scene.start, end: scene.end, text: scene.text }]
+  return scene.cues
+}
+
+function validateCues(locale, config, totalDuration) {
+  let previousEnd = -1
+  for (const scene of config.scenes) {
+    const cues = cuesFor(scene)
+    for (const cue of cues) {
+      if (cue.start < scene.start || cue.end > scene.end) {
+        throw new Error(`${locale}/${scene.id}: cue [${cue.start}, ${cue.end}] escapes scene [${scene.start}, ${scene.end}]`)
+      }
+      if (cue.start >= cue.end) throw new Error(`${locale}/${scene.id}: cue has non-positive length`)
+      if (cue.start < previousEnd) throw new Error(`${locale}/${scene.id}: cue starts before the previous cue ends`)
+      if (cue.end > totalDuration) throw new Error(`${locale}/${scene.id}: cue ends past the video`)
+      previousEnd = cue.end
+    }
+    if (scene.cues && stripSpaces(scene.cues.map((cue) => cue.text).join('')) !== stripSpaces(scene.text)) {
+      throw new Error(`${locale}/${scene.id}: joined cue text does not match the narration text`)
+    }
+  }
+}
+
 async function synthesize(locale, config) {
   const localeDir = path.join(generatedRoot, locale)
   await mkdir(localeDir, { recursive: true })
@@ -78,9 +110,9 @@ async function synthesize(locale, config) {
     const fileStat = await stat(output)
     if (fileStat.size === 0) throw new Error(`${locale}/${scene.id}: Edge TTS returned an empty file`)
     const actualDuration = await duration(output)
-    const budget = scene.end - scene.start
+    const budget = scene.end - scene.start - 0.3
     if (actualDuration > budget) {
-      throw new Error(`${locale}/${scene.id}: narration ${actualDuration.toFixed(2)}s exceeds ${budget.toFixed(2)}s scene budget`)
+      throw new Error(`${locale}/${scene.id}: narration ${actualDuration.toFixed(2)}s exceeds ${budget.toFixed(2)}s budget (scene minus 0.3s tail margin)`)
     }
     console.log(`${locale}/${scene.id}: ${actualDuration.toFixed(2)}s / ${budget.toFixed(2)}s`)
     inputs.push(output)
@@ -88,7 +120,9 @@ async function synthesize(locale, config) {
 
   const vtt = ['WEBVTT', '']
   for (const scene of config.scenes) {
-    vtt.push(`${timestamp(scene.start)} --> ${timestamp(scene.end)}`, scene.text, '')
+    for (const cue of cuesFor(scene)) {
+      vtt.push(`${timestamp(cue.start)} --> ${timestamp(cue.end)}`, cue.text, '')
+    }
   }
   await writeFile(path.join(publicRoot, `homepage-demo-${locale}.vtt`), `${vtt.join('\n')}\n`, 'utf8')
   return inputs
@@ -119,8 +153,57 @@ async function mux(locale, inputs, totalDuration) {
   await publishFile(temporary, output)
 }
 
+// Poster: one frame of the final locale MP4 plus the localized tagline,
+// rendered by ffmpeg drawtext with the subset TTF (960x540 WebP, <=100 KiB).
+// The frame already carries the brand mark and the illustrative badge, so the
+// overlay adds only the tagline over a stepped bottom gradient kept clear of
+// the frame's own content (key content ends above ~0.75h).
+const escapeFilterPath = (value) => value.replaceAll('\\', '/').replaceAll(':', '\\:')
+
+async function generatePoster(locale, totalDuration) {
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+  const frameAt = Math.min(manifest.poster.frameAt, totalDuration - 0.1)
+  const tagline = manifest.poster.line[locale]
+  const source = path.join(publicRoot, `homepage-demo-${locale}.mp4`)
+  const output = path.join(publicRoot, 'images', `homepage-demo-poster-${locale}.webp`)
+  const temporary = path.join(publicRoot, 'images', `homepage-demo-poster-${locale}.poster.webp`)
+  const textFile = path.join(generatedRoot, `poster-tagline-${locale}.txt`)
+  await mkdir(path.dirname(textFile), { recursive: true })
+  await writeFile(textFile, tagline, 'utf8')
+
+  const overlay = [
+    'scale=960:540',
+    'drawbox=y=ih*0.72:color=black@0.30:width=iw:height=ih*0.10:t=fill',
+    'drawbox=y=ih*0.78:color=black@0.60:width=iw:height=ih*0.22:t=fill',
+    `drawtext=fontfile='${escapeFilterPath(posterFont)}':textfile='${escapeFilterPath(textFile)}':fontsize=40:fontcolor=0xFAFAF7:x=(w-text_w)/2:y=h*0.84`,
+  ].join(',')
+
+  let size = Infinity
+  for (const quality of [82, 72, 62, 52]) {
+    await run('ffmpeg', [
+      '-y', '-ss', String(frameAt), '-i', source,
+      '-frames:v', '1',
+      '-vf', overlay,
+      '-c:v', 'libwebp', '-quality', String(quality), temporary,
+    ])
+    size = (await stat(temporary)).size
+    if (size <= 100 * 1024) break
+  }
+  if (size > 100 * 1024) throw new Error(`${locale}: poster exceeds 100 KiB even at minimum quality (${size} bytes)`)
+  await publishFile(temporary, output)
+  console.log(`${locale}/poster: ${(size / 1024).toFixed(1)} KiB`)
+}
+
 const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+await mkdir(path.join(publicRoot, 'images'), { recursive: true })
+const posterOnly = process.argv.includes('--poster-only')
 for (const locale of ['zh', 'en']) {
+  validateCues(locale, manifest.locales[locale], manifest.duration)
+  if (posterOnly) {
+    await generatePoster(locale, manifest.duration)
+    continue
+  }
   const inputs = await synthesize(locale, manifest.locales[locale])
   await mux(locale, inputs, manifest.duration)
+  await generatePoster(locale, manifest.duration)
 }
