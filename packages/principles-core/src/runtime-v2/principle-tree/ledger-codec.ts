@@ -1,3 +1,4 @@
+import { parseRuleCandidateBindings } from './rule-candidate-binding.js';
 /**
  * Ledger codec — pure parse/serialize functions, zero I/O.
  *
@@ -142,6 +143,8 @@ export function createEmptyTree(): LedgerTreeStore {
 export function parseTree(raw: unknown): LedgerTreeStore {
   if (!isRecord(raw)) return createEmptyTree();
   return {
+    ...raw,
+    ...(Object.hasOwn(raw, 'ruleCandidateBindings') ? { ruleCandidateBindings: parseRuleCandidateBindings(raw.ruleCandidateBindings) } : {}),
     principles: parsePrinciples(raw.principles),
     rules: parseRules(raw.rules),
     implementations: parseImplementations(raw.implementations),

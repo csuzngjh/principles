@@ -11,10 +11,10 @@
 import * as path from 'node:path';
 import { PrincipleTreeLedgerAdapter } from '@principles/core/runtime-v2';
 import type { PIArtifactRecord, SqliteConnection } from '@principles/core/runtime-v2';
-import { resolveLedgerPrincipleId } from './principle-id-resolution.js';
+import { resolveLedgerPrincipleId, type LedgerResolutionDeps } from './principle-id-resolution.js';
 
 export interface ArtifactPrincipleResolutionDeps {
-  readonly ledger: PrincipleTreeLedgerAdapter;
+  readonly ledger: LedgerResolutionDeps['ledger'];
   readonly getArtifactById: (artifactId: string) => Promise<PIArtifactRecord | null>;
   /** Read one column from the tasks table (same workspace as the caller). */
   readonly getTaskDiagnosticJson: (taskId: string) => string | null;
@@ -34,8 +34,17 @@ export function createArtifactPrincipleResolutionDeps(
   artifactStore: { getArtifactById(artifactId: string): Promise<PIArtifactRecord | null> },
   workspaceDir: string,
 ): ArtifactPrincipleResolutionDeps {
+  const adapter = new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') });
   return {
-    ledger: new PrincipleTreeLedgerAdapter({ stateDir: path.join(workspaceDir, '.state') }),
+    ledger: {
+      isAvailable: () => adapter.isAvailable(),
+      hasPrinciple: (id) => adapter.hasPrinciple(id),
+      listForCandidate: (id) => adapter.listForCandidate(id),
+      resolveForCandidate: async (id) => {
+        const row: unknown = conn.getDb().prepare('SELECT recommendation_kind FROM principle_candidates WHERE candidate_id = ?').get(id);
+        return adapter.resolveCandidatePrincipleIdentity(id, isRecord(row) ? row.recommendation_kind : undefined);
+      },
+    },
     getArtifactById: (artifactId) => artifactStore.getArtifactById(artifactId),
     getTaskDiagnosticJson: (taskId) => {
       const row: unknown = conn

@@ -2,6 +2,9 @@ import type { ApiResponse } from "../types.js";
 import type { OwnerDecisionsData, OwnerResolutionResultData, OwnerDecisionInboxData, OwnerDecisionLibraryData } from "./utils/validators.js";
 import type { DesignGateAction, DesignGateDecision, DesignGateDeclaration, DesignGateScope } from "@principles/core/runtime-v2/internalization/design-gate-facts";
 import { clearStoredToken, loadStoredToken, storeToken } from "./utils/token-storage.js";
+import type { RuleBindingReviewView, RuleBindingQueueView } from '../shared/rule-candidate-binding-contract.js';
+import type { RuleCandidateBindingRequest } from '@principles/core/runtime-v2';
+import { validateBindingReview, validateBindingQueue, validateBindingMutation } from './utils/rule-binding-validators.js';
 import {
   validateErrorResponse,
   validateHeaders,
@@ -278,6 +281,16 @@ async function checkAuth(): Promise<boolean> {
 }
 
 // ── Workspaces ────────────────────────────────────────────────────────────────
+
+export function fetchRuleBindingQueue(): Promise<ApiResponse<RuleBindingQueueView>> {
+  return request('/api/v1/governance/rule-candidate-bindings', undefined, validateBindingQueue);
+}
+export function fetchRuleBindingReview(candidateId: string, search = ''): Promise<ApiResponse<RuleBindingReviewView>> {
+  return request(`/api/v1/governance/rule-candidate-bindings/${encodeURIComponent(candidateId)}/review?search=${encodeURIComponent(search)}`, undefined, validateBindingReview);
+}
+export function mutateRuleBinding(candidateId: string, body: RuleCandidateBindingRequest) {
+  return request(`/api/v1/governance/rule-candidate-bindings/${encodeURIComponent(candidateId)}`, { method: 'POST', body: JSON.stringify(body) }, validateBindingMutation);
+}
 
 async function fetchWorkspaces(): Promise<ApiResponse<WorkspaceEntryData[]>> {
   return request<WorkspaceEntryData[]>("/api/workspaces", undefined, validateWorkspaceList);

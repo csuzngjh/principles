@@ -766,3 +766,212 @@ describe('F. no-bypass, static boundaries, protected state', () => {
     expect(verifyFrozenStudy(realStudyDir).suiteHash).toBe(FROZEN.suiteHash);
   });
 });
+
+// ===========================================================================
+// H. automatic dispatch stop after consecutive RESULT_UNKNOWN settlements
+//    (run-scoped machine enforcement of the owner pause rule; zero network —
+//    every dispatch is an injected double)
+// ===========================================================================
+describe('H. automatic stop after consecutive RESULT_UNKNOWN settlements', () => {
+  /** A real-mode double whose transport explodes ambiguously (dispatched,
+   *  no usable result) — exactly the socket-hang-up class. */
+  const ambiguousDouble = () => ({
+    kind: 'real-model-double',
+    executionMode: 'F1-direct-model',
+    requestedModelIdentity: 'test-double/never-real',
+    nextAction: () => { throw Object.assign(new Error('socket hang up mid-flight'), { ambiguous: true }); },
+  });
+  /** A known, non-ambiguous transport failure (http_500 class). */
+  const knownFailDouble = () => ({
+    kind: 'real-model-double',
+    executionMode: 'F1-direct-model',
+    requestedModelIdentity: 'test-double/never-real',
+    nextAction: () => { throw new Error('http_500: upstream exploded'); },
+  });
+  const planN = (n: number) => ({ arms: ['A'], cases: ['CEB-001-FV-01'], repetitions: Array.from({ length: n }, (_, i) => i + 1) });
+  const authN = (n: number) => validStageRAuth({ repetitions: Array.from({ length: n }, (_, i) => String(i + 1)) });
+
+  it('H1: two consecutive RESULT_UNKNOWN do NOT trigger the stop; a definite settlement resets the streak', async () => {
+    const dir = copyStudy('streak-h1');
+    approveStudy(dir, authN(4));
+    let call = 0;
+    const script = [ambiguousDouble, ambiguousDouble, realModePlayDouble, realModePlayDouble]; // U, U, S, S
+    const summary = await runChallengeStudy({
+      studyDir: dir,
+      plan: planN(4),
+      actorFactory: (ctx: any) => script[call++](ctx),
+      execution: { mode: 'F1-direct-model', now: NOW },
+      maxAttemptsTotal: 10,
+      owner: 'streak-h1',
+    });
+    expect(summary.units.map((u: any) => u.state)).toEqual(['RESULT_UNKNOWN', 'RESULT_UNKNOWN', 'SUCCEEDED', 'SUCCEEDED']);
+    expect(summary.stoppedReason).toBeNull(); // never triggered at 2
+    expect((summary.units as any[]).every((u) => u.state !== 'UNKNOWN_STREAK_STOPPED')).toBe(true);
+  });
+
+  it('H2: the 3rd consecutive RESULT_UNKNOWN stops all further dispatch — zero transport calls afterwards, everything recorded is preserved', async () => {
+    const dir = copyStudy('streak-h2');
+    approveStudy(dir, authN(6));
+    let calls = 0;
+    const summary = await runChallengeStudy({
+      studyDir: dir,
+      plan: planN(6),
+      actorFactory: (ctx: any) => { calls += 1; return ambiguousDouble(); },
+      execution: { mode: 'F1-direct-model', now: NOW },
+      maxAttemptsTotal: 10,
+      owner: 'streak-h2',
+    });
+    const states = summary.units.map((u: any) => u.state);
+    expect(states).toEqual(['RESULT_UNKNOWN', 'RESULT_UNKNOWN', 'RESULT_UNKNOWN', 'UNKNOWN_STREAK_STOPPED', 'UNKNOWN_STREAK_STOPPED', 'UNKNOWN_STREAK_STOPPED']);
+    expect(summary.stoppedReason).toContain('stage_r_unknown_streak_stop');
+    expect(calls).toBe(3); // units 4-6 never even reached the factory → zero further transport calls
+    // reservations and request slots of the three settled units stay consumed and recorded
+    const budget = createChallengeLedger(dir).budgetEntries();
+    expect(budget.filter((e: any) => e.type === 'RESERVE')).toHaveLength(3);
+    expect(budget.filter((e: any) => e.type === 'REQUEST_RESERVE')).toHaveLength(3);
+    expect(budget.some((e: any) => e.type === 'REQUEST_REFUSED')).toBe(false); // the stop is not a budget refusal
+    for (const r of [1, 2, 3]) {
+      const attempt = readJson(dir, path.join('runs', 'CEB-001-FV-01', 'A', `r${r}`, 'a1.json'));
+      expect(attempt.result).toBe('RESULT_UNKNOWN'); // settled honestly, never disguised as a known failure
+      expect(attempt.ambiguous).toBe(true);
+    }
+    expect(fs.existsSync(path.join(dir, 'runs', 'CEB-001-FV-01', 'A', 'r4'))).toBe(false); // stopped units have nothing on disk
+    const stopRows = createChallengeLedger(dir).eventEntries().filter((e: any) => e.reason === 'stage_r_unknown_streak_stop');
+    expect(stopRows).toHaveLength(3); // one audit row per stopped unit
+  });
+
+  it('H3: a FAILED_KNOWN settlement breaks the streak exactly like SUCCEEDED (definite settlements reset; refused units count for nothing)', async () => {
+    const dir = copyStudy('streak-h3');
+    approveStudy(dir, authN(7));
+    let call = 0;
+    const script = [ambiguousDouble, ambiguousDouble, knownFailDouble, ambiguousDouble, ambiguousDouble, ambiguousDouble, realModePlayDouble]; // U,U,F(known),U,U,U,S
+    const summary = await runChallengeStudy({
+      studyDir: dir,
+      plan: planN(7),
+      actorFactory: (ctx: any) => script[call++](ctx),
+      execution: { mode: 'F1-direct-model', now: NOW },
+      maxAttemptsTotal: 10,
+      owner: 'streak-h3',
+    });
+    const states = summary.units.map((u: any) => u.state);
+    expect(states).toEqual(['RESULT_UNKNOWN', 'RESULT_UNKNOWN', 'FAILED_KNOWN', 'RESULT_UNKNOWN', 'RESULT_UNKNOWN', 'RESULT_UNKNOWN', 'UNKNOWN_STREAK_STOPPED']);
+    expect(summary.stoppedReason).toContain('stage_r_unknown_streak_stop'); // the known failure reset the streak; the NEXT three unknowns stopped the run
+  });
+
+  it('H4: recovery after a streak stop — settled RESULT_UNKNOWN units are still never re-dispatched; unsettled units run again under a fresh reservation', async () => {
+    const dir = copyStudy('streak-h4');
+    approveStudy(dir, authN(4));
+    const first = await runChallengeStudy({
+      studyDir: dir,
+      plan: planN(4),
+      actorFactory: () => ambiguousDouble(),
+      execution: { mode: 'F1-direct-model', now: NOW },
+      maxAttemptsTotal: 10,
+      owner: 'streak-h4',
+    });
+    expect(first.units[3].state).toBe('UNKNOWN_STREAK_STOPPED');
+    // second run: same attemptId — the three settled UNKNOWNs refuse recovery; r4 (never settled) executes normally
+    let factoryCalls = 0;
+    const second = await runChallengeStudy({
+      studyDir: dir,
+      plan: planN(4),
+      actorFactory: (ctx: any) => { factoryCalls += 1; return realModePlayDouble(ctx); },
+      execution: { mode: 'F1-direct-model', now: NOW },
+      maxAttemptsTotal: 10,
+      owner: 'streak-h4',
+    });
+    const states = second.units.map((u: any) => u.state);
+    expect(states).toEqual(['RESULT_UNKNOWN', 'RESULT_UNKNOWN', 'RESULT_UNKNOWN', 'SUCCEEDED']); // refusal ×3 (recovery), fresh execution
+    expect(factoryCalls).toBe(1); // only the unsettled unit ever built an actor — settled attempts are never re-dispatched
+    expect(second.stoppedReason).toBeNull(); // the streak restarts at zero on a new run; recovery refusals are not settlements
+  });
+});
+
+// ===========================================================================
+// I. capacity circuit breaker — consecutive PROVEN 429/5xx unit failures stop
+//    dispatch (distinct from the unknown streak; identity/contract failures
+//    never arm it). Zero network — responder doubles only.
+// ===========================================================================
+describe('I. capacity circuit breaker (consecutive provider-capacity failures)', () => {
+  /** A real-mode double whose responder fails with a fixed error message. */
+  const failingWith = (message: string) => () => ({
+    kind: 'real-model-double',
+    executionMode: 'F1-direct-model',
+    requestedModelIdentity: 'test-double/never-real',
+    nextAction: () => { throw new Error(message); },
+  });
+  const planN = (n: number) => ({ arms: ['A'], cases: ['CEB-001-FV-01'], repetitions: Array.from({ length: n }, (_, i) => i + 1) });
+  const authN = (n: number) => validStageRAuth({ repetitions: Array.from({ length: n }, (_, i) => String(i + 1)) });
+  const runWith = (dir: string, factories: Array<() => any>, owner: string, n = factories.length) => runChallengeStudy({
+    studyDir: dir,
+    plan: planN(n),
+    actorFactory: (() => { let i = 0; return (ctx: any) => (factories[i++] || realModePlayDouble)(ctx); })(),
+    execution: { mode: 'F1-direct-model', now: NOW },
+    maxAttemptsTotal: 10,
+    owner,
+  });
+
+  it('I1: two consecutive 429 failures do NOT trip the breaker; a SUCCESS resets it', async () => {
+    const dir = copyStudy('cap-i1');
+    approveStudy(dir, authN(4));
+    const summary = await runWith(dir, [failingWith('rate_limited (HTTP 429); Retry-After: unspecified — recorded, NOT auto-retried'), failingWith('rate_limited (HTTP 429); Retry-After: 77'), realModePlayDouble, realModePlayDouble], 'cap-i1');
+    expect(summary.units.map((u: any) => u.state)).toEqual(['FAILED_KNOWN', 'FAILED_KNOWN', 'SUCCEEDED', 'SUCCEEDED']);
+    expect(summary.stoppedReason).toBeNull();
+  });
+
+  it('I2: the 3rd consecutive 429 trips the breaker — remaining units CAPACITY_STREAK_STOPPED before any dispatch, all records kept', async () => {
+    const dir = copyStudy('cap-i2');
+    approveStudy(dir, authN(6));
+    let factoryCalls = 0;
+    const counting = () => { factoryCalls += 1; return failingWith('rate_limited (HTTP 429); Retry-After: unspecified')(); };
+    const summary = await runChallengeStudy({
+      studyDir: dir,
+      plan: planN(6),
+      actorFactory: counting,
+      execution: { mode: 'F1-direct-model', now: NOW },
+      maxAttemptsTotal: 10,
+      owner: 'cap-i2',
+    });
+    expect(summary.units.map((u: any) => u.state)).toEqual(['FAILED_KNOWN', 'FAILED_KNOWN', 'FAILED_KNOWN', 'CAPACITY_STREAK_STOPPED', 'CAPACITY_STREAK_STOPPED', 'CAPACITY_STREAK_STOPPED']);
+    expect(summary.stoppedReason).toContain('stage_r_capacity_streak_stop');
+    expect(factoryCalls).toBe(3); // units 4-6 never reached the factory → zero further requests
+    const ledger = createChallengeLedger(dir);
+    const budget = ledger.budgetEntries();
+    expect(budget.filter((e: any) => e.type === 'RESERVE')).toHaveLength(3); // reservations kept, never returned
+    expect(budget.filter((e: any) => e.type === 'ATTEMPT_RESULT')).toHaveLength(3); // the 429 units settled honestly as FAILED_KNOWN
+    expect(ledger.eventEntries().filter((e: any) => e.reason === 'stage_r_capacity_streak_stop')).toHaveLength(3); // one audit row per stopped unit
+    for (const r of [1, 2, 3]) {
+      const attempt = readJson(dir, path.join('runs', 'CEB-001-FV-01', 'A', `r${r}`, 'a1.json'));
+      expect(attempt.result).toBe('FAILED_KNOWN');
+      expect(attempt.error).toContain('rate_limited (HTTP 429)'); // original response evidence preserved
+    }
+  });
+
+  it('I3: an explicit 5xx is a capacity failure too; a NON-capacity known failure (identity mismatch) BREAKS the streak', async () => {
+    const dir = copyStudy('cap-i3');
+    approveStudy(dir, authN(7));
+    const summary = await runWith(dir, [
+      failingWith('http_503: upstream overloaded'),
+      failingWith('rate_limited (HTTP 429); Retry-After: 10'),
+      failingWith('model_identity_mismatch: requested \'GLM-5.3-Flash\', server reports \'other\''), // NOT capacity — hard failure
+      failingWith('http_500: boom'),
+      failingWith('http_500: boom'),
+      failingWith('http_500: boom'),
+      realModePlayDouble,
+    ], 'cap-i3');
+    expect(summary.units.map((u: any) => u.state)).toEqual(['FAILED_KNOWN', 'FAILED_KNOWN', 'FAILED_KNOWN', 'FAILED_KNOWN', 'FAILED_KNOWN', 'FAILED_KNOWN', 'CAPACITY_STREAK_STOPPED']);
+    expect(summary.stoppedReason).toContain('stage_r_capacity_streak_stop'); // the identity mismatch reset the streak; the NEXT three 5xx tripped it
+  });
+
+  it('I4: output-contract and authorization-class failures never arm the breaker (capped at 2 consecutive without a stop)', async () => {
+    const dir = copyStudy('cap-i4');
+    approveStudy(dir, authN(3));
+    const summary = await runWith(dir, [
+      failingWith('model_identity_unobserved: the server attested no model identity'),
+      failingWith('empty or missing message content (finish_reason=stop)'),
+      failingWith('http_429-not-the-prefix'),
+    ], 'cap-i4');
+    expect(summary.units.every((u: any) => u.state === 'FAILED_KNOWN')).toBe(true);
+    expect(summary.stoppedReason).toBeNull(); // 3 consecutive NON-capacity failures never trip the capacity breaker
+  });
+});

@@ -217,6 +217,7 @@ export const TelemetryEventType = Type.Union([
   // dropped) — a failed ledger read and an unresolvable/ambiguous chain.
   Type.Literal('scribe_identity_stamp_failed'),
   Type.Literal('scribe_identity_stamp_skipped'),
+  Type.Literal('scribe_identity_preflight_blocked'),
   // PRI-911A (I1+I3 writer boundary): EvaluatorRunner carries the bearer
   // principle's identity onto the RULE artifact. The carry is now a verified
   // stamp — success is recorded, and every refusal reports a SPEC §6.4 reason

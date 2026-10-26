@@ -1,3 +1,4 @@
+import { seedCandidateMaterial } from '../helpers/candidate-identity-fixture.js';
 /**
  * runRuleHostPipeline unit tests (PRI-429).
  *
@@ -19,8 +20,8 @@ import * as fs from 'node:fs';
 import { runRuleHostPipeline, backfillScribeIdentity, readScribeOwnerRequirementGaps } from '../../src/services/rulehost-pipeline-runner.js';
 import type { CodeRuleCapability } from '../../src/services/rulehost-pipeline-runner.js';
 import type { PDRuntimeAdapter, RunHandle, RunStatus, PIArtifactStore, RuntimeCapabilities, RuntimeHealth, RuntimeArtifactRef, ContextItem, StructuredRunOutput, StartRunInput } from '@principles/core/runtime-v2';
-import { RuntimeStateManager, createPITaskDiagnosticJson, SqliteApprovalQueueStore, MemoryPIArtifactStore } from '@principles/core/runtime-v2';
-import { addPrincipleToLedger, updatePrinciple } from '@principles/core/principle-tree-ledger';
+import { RuntimeStateManager, createPITaskDiagnosticJson, SqliteApprovalQueueStore, MemoryPIArtifactStore, PrincipleTreeLedgerAdapter, resolveLedgerActivationId } from '@principles/core/runtime-v2';
+import { addPrincipleToLedger, updatePrinciple, appendReuseEvidence } from '@principles/core/principle-tree-ledger';
 import { saveHostToolDeclaration } from '@principles/host-runtime';
 
 type StageFactory = (taskId: string, priorArtifactId?: string) => unknown;
@@ -272,6 +273,11 @@ async function seedDreamerWithId(
   channel: 'prompt' | 'code_tool_hook' | 'defer_archive' = 'code_tool_hook',
   candidateId?: string,
 ): Promise<void> {
+  const explicitCandidate = candidateId !== undefined;
+  if (!taskId.includes('text-noid')) {
+    candidateId ??= `candidate-${taskId}`;
+    await seedCandidateMaterial(sm, candidateId, !explicitCandidate || candidateId === 'cand-gaps' ? tmpDir : undefined);
+  }
   const baseMetadata = JSON.parse(createPITaskDiagnosticJson({
     dependencyTaskIds: [], channel, timeoutMs: 1000, inputArtifactRefs: [], outputArtifactRefs: [],
   })) as Record<string, unknown>;
@@ -335,6 +341,19 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
       expect(scribeArt?.sourcePrincipleId).toBe(LEDGER_PRINCIPLE_001);
       const ruleArt = await verify.piArtifactStore.getArtifactById(result.ruleArtifactId!);
       expect(ruleArt?.sourcePrincipleId).toBe(LEDGER_PRINCIPLE_001);
+      if (!ruleArt) throw new Error('Production evaluator rule artifact missing');
+      const deps = {
+        ledger: new PrincipleTreeLedgerAdapter({ stateDir: path.join(tmpDir, '.state') }),
+        getCandidateKind: async (id: string) => (await verify.getCandidate(id))?.rawRecommendationKind,
+        getArtifactById: (id: string) => verify.piArtifactStore.getArtifactById(id),
+        getTaskDiagnosticJson: async (id: string) => (await verify.getTask(id))?.diagnosticJson ?? null,
+      };
+      expect(await resolveLedgerActivationId(ruleArt, deps)).toMatchObject({ status: 'resolved', principleId: LEDGER_PRINCIPLE_001 });
+      const content: Record<string, unknown> = JSON.parse(ruleArt.contentJson);
+      delete content.sourceTrace;
+      // Retaining a receipt/UUID alone cannot replace the system lineage.
+      expect(await resolveLedgerActivationId({ ...ruleArt, contentJson: JSON.stringify(content), lineageArtifactIds: [] }, deps)).toMatchObject({ status: 'unresolved', reason: 'candidate_missing' });
+
     } finally {
       await verify.close();
     }
@@ -396,12 +415,7 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
     expect(artificerPrompts[1]).toContain('Prior adversarial replay failures');
     expect(result.decision, JSON.stringify(result)).toBe('candidate_ready_for_owner_review');
     expect(result.ruleArtifactId).toMatch(/^pi-rule-/);
-    // Owner Decision Experience v1 Phase A: this seed carries no candidateId and
-    // no ledger principle, so identity binding is unverified (candidate_unresolved)
-    // and the governance publication boundary refuses the approval enqueue — the
-    // two-round adversarial loop itself is unaffected.
-    expect(result.approvalId).toBeNull();
-    expect(result.degradationReason ?? '').toContain('identity_binding_unverified');
+    expect(result.approvalId).not.toBeNull();
   }, 60_000);
 
   // ── Test 2: Capability OFF (explicitly disabled) → text_principle_only ──
@@ -774,13 +788,8 @@ describe('runRuleHostPipeline (PRI-429) — atomic capability + exact pain match
     expect(dreamerCallCount).toBe(2);
     expect(dreamerStage?.status).toBe('succeeded');
     expect(result.decision).toBe('candidate_ready_for_owner_review');
-    // Owner Decision Experience v1 Phase A: this seed carries NO candidateId,
-    // so the chain cannot bind a ledger principle (candidate_unresolved). The
-    // rule artifact is produced and preserved, but the governance publication
-    // boundary REFUSES to create an Owner approval subject for it.
-    expect(result.approvalId).toBeNull();
-    expect(result.degradationReason ?? '').toContain('identity_binding_unverified');
-    expect(result.degradationReason ?? '').toContain('candidate_unresolved');
+    // The retry fixture now contains real committed candidate authority.
+    expect(result.approvalId).not.toBeNull();
     expect(result.ruleArtifactId).not.toBeNull();
   }, 60_000);
 
@@ -1016,7 +1025,54 @@ describe('runRuleHostPipeline — Phase A governance publication boundary (ident
     return Object.keys(parsed._tree?.principles ?? {}).length;
   }
 
-  it('ledger_missing: rule artifact preserved, but NO approval subject, NO activation, ledger untouched', async () => {
+  it('persisted rule with no Owner binding stops before Scribe without borrowing an unrelated Principle', async () => {
+    tmpDir = makeTmpDir();
+    const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await sm.initialize();
+    await seedCandidateMaterial(sm, 'direct-rule-candidate', undefined, undefined, 'rule');
+    await seedCandidateMaterial(sm, 'separate-principle-candidate', tmpDir);
+    await seedDreamerRaw(sm, 'dreamer-direct-rule', JSON.stringify({ ...JSON.parse(createPITaskDiagnosticJson({ dependencyTaskIds: [], channel: 'code_tool_hook', timeoutMs: 1000, inputArtifactRefs: [], outputArtifactRefs: [] })), candidateId: 'direct-rule-candidate', sourcePainId: 'pain-test-001' }));
+    await sm.close();
+    const adapter = makeAdapter();
+    const result = await runRuleHostPipeline({ workspaceDir: tmpDir, painId: 'pain-test-001', runtimeAdapter: adapter,
+      channel: 'code_tool_hook', pollIntervalMs: 5, timeoutMs: 1000, codeRuleCapability: { enabled: true, artificerAdapter: adapter }, behaviorExamplePack: PIPE_PACK,
+      onStoreReady: store => { adapter.artifactStore = store; } });
+    expect(result.degradationReason).toContain('awaiting_owner_binding:missing');
+    expect(adapter.startRunCalls.map(call => call.taskId).some(id => /scribe|artificer|evaluator/.test(id))).toBe(false);
+    expect(result.approvalId).toBeNull();
+    const verify = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await verify.initialize();
+    expect((await verify.getCandidate('direct-rule-candidate'))?.rawRecommendationKind).toBe('rule');
+    const scribe = (await verify.listTasks()).find(task => task.taskKind === 'scribe');
+    expect(scribe).toMatchObject({ status: 'needs_human_review', attemptCount: 0 });
+    await verify.close();
+  });
+
+  it('explicit principle reuse flows through the real Scribe, evaluator and CLI publication consumers', async () => {
+    tmpDir = makeTmpDir();
+    const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await sm.initialize();
+    await seedDreamerWithId(sm, 'dreamer-reused-candidate', 'pain-test-001', 'code_tool_hook', 'reused-candidate');
+    const targetId = await seedCandidateMaterial(sm, 'existing-principle-candidate', tmpDir);
+    await sm.close();
+    // Isolated fixture for an already-recorded Owner reuse; the pipeline does not create this decision.
+    appendReuseEvidence(path.join(tmpDir, '.state'), targetId, { candidateId: 'reused-candidate', painId: 'pain-test-001', decision: 'reuse', actor: { kind: 'owner', id: 'test-fixture-owner' }, reason: 'Isolated reuse fixture', decidedAt: new Date().toISOString() });
+    const adapter = makeAdapter();
+    const result = await runRuleHostPipeline({ workspaceDir: tmpDir, painId: 'pain-test-001', runtimeAdapter: adapter,
+      channel: 'code_tool_hook', pollIntervalMs: 5, timeoutMs: 1000, codeRuleCapability: { enabled: true, artificerAdapter: adapter }, behaviorExamplePack: PIPE_PACK,
+      onStoreReady: store => { adapter.artifactStore = store; } });
+    expect(result.approvalId, JSON.stringify(result)).not.toBeNull();
+    const verify = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await verify.initialize();
+    const rule = result.ruleArtifactId ? await verify.piArtifactStore.getArtifactById(result.ruleArtifactId) : null;
+    expect(rule?.sourcePrincipleId).toBe(targetId);
+    expect(JSON.parse(rule?.contentJson ?? '{}').identityResolution).toMatchObject({ candidateId: 'reused-candidate', basis: 'principle_reuse', principleId: targetId });
+    expect((await verify.getCandidate('reused-candidate'))?.rawRecommendationKind).toBe('principle');
+    expect(await ledgerPrincipleCount(tmpDir)).toBe(1);
+    await verify.close();
+  });
+
+  it('ledger_missing: Scribe stops before its first model request; no artifact, approval or activation', async () => {
     tmpDir = makeTmpDir();
     const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
     await sm.initialize();
@@ -1033,14 +1089,17 @@ describe('runRuleHostPipeline — Phase A governance publication boundary (ident
       onStoreReady: (store) => { adapter.artifactStore = store; },
     });
 
-    expect(result.decision, JSON.stringify(result)).toBe('candidate_ready_for_owner_review');
-    // The generation chain produced and PRESERVED its artifacts…
-    expect(result.ruleArtifactId).not.toBeNull();
-    // …but the publication boundary refused to create an Owner approval subject.
+    expect(result.decision).toBe('generation_rejected');
+    expect(result.ruleArtifactId).toBeNull();
     expect(result.approvalId).toBeNull();
-    expect(result.degradationReason ?? '').toContain('identity_binding_unverified');
-    expect(result.degradationReason ?? '').toContain('ledger_missing');
-    expect(await countApprovalsForArtifact(tmpDir, result.ruleArtifactId!)).toBe(0);
+    expect(result.degradationReason).toContain('awaiting_owner_binding:missing');
+    expect(adapter.startRunCalls.some(call => call.taskId.includes('scribe') || call.taskId.includes('artificer') || call.taskId.includes('evaluator'))).toBe(false);
+    const verify = new RuntimeStateManager({ workspaceDir: tmpDir });
+    await verify.initialize();
+    const scribe = (await verify.listTasks()).find(task => task.taskKind === 'scribe');
+    expect(scribe?.status).toBe('needs_human_review');
+    expect(scribe?.attemptCount).toBe(0);
+    await verify.close();
     expect(await countActivations(tmpDir)).toBe(0);
     expect(await ledgerPrincipleCount(tmpDir)).toBe(0);
   }, 60_000);
@@ -1063,11 +1122,10 @@ describe('runRuleHostPipeline — Phase A governance publication boundary (ident
       onStoreReady: (store) => { adapter.artifactStore = store; },
     });
 
-    expect(result.decision).toBe('candidate_ready_for_owner_review');
+    expect(result.decision).toBe('generation_rejected');
     expect(result.approvalId).toBeNull();
-    expect(result.degradationReason ?? '').toContain('ledger_ambiguous');
-    expect(await countApprovalsForArtifact(tmpDir, result.ruleArtifactId!)).toBe(0);
-    // The scribe artifact must NOT be silently bound to the first match.
+    expect(result.degradationReason).toContain('awaiting_owner_binding:ambiguous');
+    expect(adapter.startRunCalls.some(call => call.taskId.includes('scribe') || call.taskId.includes('artificer'))).toBe(false);
     const verify = new RuntimeStateManager({ workspaceDir: tmpDir });
     await verify.initialize();
     try {
@@ -1122,13 +1180,13 @@ describe('runRuleHostPipeline — Phase A governance publication boundary (ident
     }
   }, 60_000);
 
-  it('binding_write_failed / binding_readback_failed: store failures are structured, never silently accepted', async () => {
+  it('historical null identity is never backfilled; publication checks do not write artifacts', async () => {
     tmpDir = makeTmpDir();
     const sm = new RuntimeStateManager({ workspaceDir: tmpDir });
     await sm.initialize();
     await seedDreamerWithId(sm, 'dreamer-id-wf', 'pain-id-wf', 'code_tool_hook', 'cand-wf');
     await sm.close();
-    seedLedger(tmpDir, 'ledger-wf', 'cand-wf');
+    seedLedger(tmpDir, '10420000-0000-4000-8000-000000000901', 'cand-wf');
 
     // Run once through the real path so a REAL scribe artifact exists.
     const adapter = makeAdapter();
@@ -1148,47 +1206,22 @@ describe('runRuleHostPipeline — Phase A governance publication boundary (ident
         stateManager: verify, artifactStore: verify.piArtifactStore, scribeTaskId,
         dreamerTaskId: 'dreamer-id-wf', workspaceDir: tmpDir, now: new Date().toISOString(),
       });
-      expect(idempotent).toEqual({ status: 'already_bound', principleId: 'ledger-wf' });
+      expect(idempotent).toEqual({ status: 'already_bound', principleId: '10420000-0000-4000-8000-000000000901' });
 
-      // Write failure: upsert throws.
-      const throwingStore = new Proxy(verify.piArtifactStore, {
-        get(target, prop, receiver) {
-          if (prop === 'upsertArtifact') {
-            return async () => { throw new Error('sqlite locked (simulated)'); };
-          }
-          return Reflect.get(target, prop, receiver);
-        },
-      });
-      // For the write-failure slice we need an UNBOUND artifact: use a second,
-      // unbound scribe-shaped artifact created directly in the store.
       const taskId2 = 'scribe-unbound-task';
-      await verify.createTask({ taskId: taskId2, taskKind: 'scribe', status: 'succeeded', attemptCount: 0, maxAttempts: 3, diagnosticJson: JSON.stringify({ pi_metadata: { channel: 'prompt', dependencyTaskIds: [], timeoutMs: 1000 } }) });
+      await verify.createTask({ taskId: taskId2, taskKind: 'scribe', status: 'succeeded', attemptCount: 0, maxAttempts: 3, diagnosticJson: createPITaskDiagnosticJson({ channel: 'prompt', dependencyTaskIds: [], timeoutMs: 1000, inputArtifactRefs: [], outputArtifactRefs: [] }) });
+      const now = new Date().toISOString();
       await verify.piArtifactStore.createArtifact({
         artifactId: 'pi-art-unbound-1', artifactKind: 'principle', sourceTaskId: taskId2,
-        lineageArtifactIds: [], validationStatus: 'pending', contentJson: '{}',
-        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+        lineageArtifactIds: [], validationStatus: 'pending', contentJson: '{}', createdAt: now, updatedAt: now,
       });
-      const failed = await backfillScribeIdentity({
-        stateManager: verify, artifactStore: throwingStore, scribeTaskId: taskId2,
-        dreamerTaskId: 'dreamer-id-wf', workspaceDir: tmpDir, now: new Date().toISOString(),
-      });
-      expect(failed.status).toBe('binding_write_failed');
-
-      // Read-back failure: upsert "succeeds" but the store returns a row without
-      // the binding (write lost / wrong row).
-      const staleStore = new Proxy(verify.piArtifactStore, {
-        get(target, prop, receiver) {
-          if (prop === 'getArtifactById') {
-            return async () => null;
-          }
-          return Reflect.get(target, prop, receiver);
-        },
-      });
-      const stale = await backfillScribeIdentity({
-        stateManager: verify, artifactStore: staleStore, scribeTaskId: taskId2,
-        dreamerTaskId: 'dreamer-id-wf', workspaceDir: tmpDir, now: new Date().toISOString(),
-      });
-      expect(stale.status).toBe('binding_readback_failed');
+      const before = await verify.piArtifactStore.getArtifactById('pi-art-unbound-1');
+      const write = vi.spyOn(verify.piArtifactStore, 'upsertArtifact');
+      const refused = await backfillScribeIdentity({ stateManager: verify, artifactStore: verify.piArtifactStore,
+        scribeTaskId: taskId2, dreamerTaskId: 'dreamer-id-wf', workspaceDir: tmpDir, now });
+      expect(refused).toMatchObject({ status: 'identity_unresolved', reason: 'identity_receipt_missing' });
+      expect(write).not.toHaveBeenCalled();
+      expect(await verify.piArtifactStore.getArtifactById('pi-art-unbound-1')).toEqual(before);
     } finally {
       await verify.close();
     }
@@ -1244,7 +1277,7 @@ describe('runRuleHostPipeline — Phase A governance publication boundary (ident
 
     // Identity repair: the ledger entry for the candidate appears (e.g. intake
     // completed or the ledger was restored). Replay publishes.
-    seedLedger(tmpDir, 'ledger-repaired', 'cand-repair');
+    seedLedger(tmpDir, '10420000-0000-4000-8000-000000000902', 'cand-repair');
     const adapter2 = makeAdapter();
     // Run 2 RESUMES run 1's succeeded dreamer seed (no new dreamer startRun) —
     // pre-register that call so the scripted philosopher can resolve its

@@ -1,5 +1,6 @@
-import { extractPrincipleId } from '@principles/core/runtime-v2';
+import { resolveLedgerActivationId } from '@principles/core/runtime-v2';
 import type {
+  CandidatePrincipleIdentityResolution,
   PIArtifactRecord,
   PIArtifactSnapshot,
 } from '@principles/core/runtime-v2';
@@ -9,7 +10,7 @@ import type { PrincipleTreeLedgerAdapter } from '@principles/core/runtime-v2';
  * PRI-768 v5 follow-up (audit findings F3/F4): resolve the LEDGER principle id
  * behind an approval artifact.
  *
- * F4: `extractPrincipleId`'s last fallback returns `principleDraft.title`, and
+ * F4: `resolveLedgerActivationId`'s last fallback returns `principleDraft.title`, and
  * `ledger.activatePrinciple(<title>)` then always fails ("Cannot update missing
  * principle") because ledger keys are UUIDs, never titles. A candidate id must
  * be validated against the ledger before it is used as an update key.
@@ -34,7 +35,7 @@ export type LedgerPrincipleResolution =
   | { status: 'unresolved'; reason: string };
 
 export interface LedgerResolutionDeps {
-  ledger: PrincipleTreeLedgerAdapter;
+  ledger: Pick<PrincipleTreeLedgerAdapter, 'isAvailable' | 'hasPrinciple' | 'listForCandidate'> & { resolveForCandidate?: (candidateId: string) => Promise<CandidatePrincipleIdentityResolution> };
   getArtifactById: (artifactId: string) => Promise<PIArtifactRecord | null>;
   /** Read one column from the tasks table; null when the row is missing. */
   getTaskDiagnosticJson: (taskId: string) => string | null;
@@ -55,102 +56,15 @@ export function toResolutionSnapshot(record: PIArtifactRecord): PIArtifactSnapsh
   };
 }
 
-const DREAMER_TASK_PREFIX = 'dreamer-';
+export { candidateIdFromDreamerTaskId } from '@principles/core/runtime-v2';
 
-/** Candidate id embedded in a dreamer task id ("dreamer-<uuid>-<channel>"). */
-export function candidateIdFromDreamerTaskId(taskId: string | null | undefined): string | null {
-  if (!taskId || !taskId.startsWith(DREAMER_TASK_PREFIX)) return null;
-  const withoutPrefix = taskId.slice(DREAMER_TASK_PREFIX.length);
-  const lastDash = withoutPrefix.lastIndexOf('-');
-  if (lastDash <= 0) return null;
-  const candidateId = withoutPrefix.slice(0, lastDash);
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(candidateId)
-    ? candidateId
-    : null;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function readDreamerArtifactId(artifact: PIArtifactRecord): string | null {
-  try {
-    const parsed: unknown = JSON.parse(artifact.contentJson);
-    if (isRecord(parsed) && Object.hasOwn(parsed, 'sourceTrace')) {
-      const trace = parsed.sourceTrace;
-      if (isRecord(trace) && Object.hasOwn(trace, 'dreamerArtifactId')) {
-        const id = trace.dreamerArtifactId;
-        if (typeof id === 'string' && id.trim() !== '') return id;
-      }
-    }
-  } catch {
-    // contentJson is untrusted; lineage fallback below still applies.
-  }
-  const lineage = artifact.lineageArtifactIds ?? [];
-  const dreamer = lineage.find((id) => typeof id === 'string' && id.includes('-dreamer-'));
-  return dreamer ?? null;
-}
-
-/**
- * Resolve the ledger principle id for an approval artifact. Direct hits
- * (sourcePrincipleId column / contentJson ids) are validated against the
- * ledger before being trusted; otherwise the candidate lineage is walked and
- * the ledger must resolve that candidate to EXACTLY ONE principle (multiple
- * matches stay unresolved — ambiguity must not be silently collapsed).
- */
+/** All Console read models use the activation boundary's fail-closed identity semantics. */
 export async function resolveLedgerPrincipleId(
   artifact: PIArtifactRecord,
   deps: LedgerResolutionDeps,
 ): Promise<LedgerPrincipleResolution> {
-  const direct = extractPrincipleId(toResolutionSnapshot(artifact));
-  if (direct && deps.ledger.hasPrinciple(direct)) {
-    return { status: 'resolved', principleId: direct, how: 'direct' };
-  }
-
-  const dreamerArtifactId = readDreamerArtifactId(artifact);
-  if (!dreamerArtifactId) {
-    return {
-      status: 'unresolved',
-      reason: `no ledger principle for "${direct ?? 'no id'}" and artifact has no dreamer lineage`,
-    };
-  }
-
-  const dreamerArtifact = await deps.getArtifactById(dreamerArtifactId);
-  if (!dreamerArtifact) {
-    return { status: 'unresolved', reason: `dreamer artifact ${dreamerArtifactId} not found` };
-  }
-
-  // The dreamer TASK seed is the authoritative carrier of the candidate id;
-  // the task-id spelling is only a fallback.
-  let candidateId = candidateIdFromDreamerTaskId(dreamerArtifact.sourceTaskId);
-  if (dreamerArtifact.sourceTaskId) {
-    const diagnosticJson = deps.getTaskDiagnosticJson(dreamerArtifact.sourceTaskId);
-    if (diagnosticJson) {
-      try {
-        const parsed: unknown = JSON.parse(diagnosticJson);
-        if (isRecord(parsed) && Object.hasOwn(parsed, 'candidateId')) {
-          const value = parsed.candidateId;
-          if (typeof value === 'string' && value.trim() !== '') candidateId = value.trim();
-        }
-      } catch {
-        // Malformed seed JSON — fall back to the task-id derivation above.
-      }
-    }
-  }
-  if (!candidateId) {
-    return { status: 'unresolved', reason: 'dreamer lineage carries no candidate id' };
-  }
-
-  const matches = deps.ledger.listForCandidate(candidateId);
-  if (matches.length === 1) {
-    const [entry] = matches;
-    if (entry) return { status: 'resolved', principleId: entry.id, how: 'candidate_lineage' };
-  }
-  if (matches.length === 0) {
-    return { status: 'unresolved', reason: `ledger has no principle derived from candidate ${candidateId}` };
-  }
-  return {
-    status: 'unresolved',
-    reason: `candidate ${candidateId} maps to ${matches.length} ledger principles; refusing to guess`,
-  };
+  const result = await resolveLedgerActivationId(toResolutionSnapshot(artifact), deps);
+  return result.status === 'resolved'
+    ? { status: 'resolved', principleId: result.principleId, how: result.how === 'direct_validated' ? 'direct' : 'candidate_lineage' }
+    : result;
 }

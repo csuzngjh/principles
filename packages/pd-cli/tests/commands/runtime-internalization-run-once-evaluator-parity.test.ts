@@ -1,3 +1,4 @@
+import { seedScribeIdentityLineage } from '../helpers/candidate-identity-fixture.js';
 /**
  * PRI-661 — run-once evaluator runtime parity (E2E through the REAL CLI
  * handler).
@@ -134,9 +135,11 @@ async function seedEvaluatorTask(workspaceDir: string, implementationCode: strin
         dependencyTaskIds: deps, channel: 'prompt', timeoutMs: 300_000,
         inputArtifactRefs: [], outputArtifactRefs: [],
       });
-    await stateManager.createTask({ taskId: 'artificer-seed', taskKind: 'artificer', status: 'pending', attemptCount: 0, maxAttempts: 3, diagnosticJson: meta([]) });
+    await stateManager.createTask({ taskId: 'artificer-seed', taskKind: 'artificer', status: 'pending', attemptCount: 0, maxAttempts: 3, diagnosticJson: meta(['scribe-parity-source']) });
     await stateManager.acquireLease({ taskId: 'artificer-seed', owner: 'seed', runtimeKind: 'test-double' });
     await stateManager.markTaskSucceeded('artificer-seed');
+    await stateManager.createTask({ taskId: 'scribe-parity-source', taskKind: 'scribe', status: 'succeeded', attemptCount: 0, maxAttempts: 3, diagnosticJson: meta([]) });
+    await seedScribeIdentityLineage(stateManager, workspaceDir, 'candidate-evaluator-parity', '10420000-0000-4000-8000-000000000661', 'scribe-parity-source', 'pi-art-scribe-parity-source', { principleDraft: { title: 'Read before write', statement: 'Read before writing' } });
     await stateManager.createTask({ taskId: 'evaluator-under-test', taskKind: 'evaluator', status: 'pending', attemptCount: 0, maxAttempts: 3, diagnosticJson: meta(['artificer-seed']) });
     await stateManager.piArtifactStore.upsertArtifact({
       artifactId: 'pi-art-test-artificer',
@@ -144,7 +147,7 @@ async function seedEvaluatorTask(workspaceDir: string, implementationCode: strin
       sourceTaskId: 'artificer-seed',
       lineageArtifactIds: [],
       validationStatus: 'validated',
-      contentJson: codeBearingArtificerContent(implementationCode),
+      contentJson: JSON.stringify({ ...JSON.parse(codeBearingArtificerContent(implementationCode)), sourceTrace: { scribeArtifactId: 'pi-art-scribe-parity-source' } }),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
