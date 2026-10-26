@@ -1,0 +1,202 @@
+// SPEC-PD-EXAMINER-001 v0.4 — CLI Stage R F1 entry tests (run-challenge-study.mjs).
+//
+// SAFETY BOUNDARY: every case here is ZERO-NETWORK by construction. The CLI's
+// F1 path reaches the network ONLY through the Stage R gate; these tests
+// exercise the gate's REFUSAL paths and the --dry-run plan verification, never
+// an authorized run (an authorized F1 run would dispatch real model requests
+// and is covered by fully-injected suites at the runner/transport layer, not
+// here). Credentials are never read: createAmdActorResponder only resolves a
+// key inside respond(), which is unreachable while the gate refuses.
+
+import { describe, expect, it, beforeEach } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { readStudyPlanHash } from '../dev/principle-learning-lab/lib/challenge-stage-r-gate.mjs';
+
+const labRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../dev/principle-learning-lab');
+const realStudyDir = path.join(labRoot, 'challenge-studies', 'CEB-001');
+const cliPath = path.join(labRoot, 'run-challenge-study.mjs');
+const tmpRoot = path.join(labRoot, '..', '..', '..', '.tmp', 'cli-f1-tests');
+
+const FROZEN_SUITE_HASH = 'e1f2f5ca9d7f570faf454d057346c4f273e4fb467fa1790482f9a783e591fb5a';
+const NOW = '2026-10-26T12:00:00Z';
+
+let copyCounter = 0;
+function copyStudy(tag: string): string {
+  const dir = path.join(tmpRoot, `${tag}-${++copyCounter}`);
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(path.dirname(dir), { recursive: true });
+  fs.cpSync(realStudyDir, dir, { recursive: true });
+  return dir;
+}
+
+/** File-level side-effect audit: append-only ledgers byte-identical, no run
+ *  records, no attempt files. The strongest zero-side-effect evidence. */
+function ledgerFingerprint(dir: string): string {
+  const files = ['budget-ledger.jsonl', 'events.jsonl', 'adjudications.jsonl'];
+  return files.map((f) => {
+    const p = path.join(dir, f);
+    return `${f}:${fs.existsSync(p) ? fs.statSync(p).size : 'absent'}`;
+  }).join('|') + `|runs:${fs.existsSync(path.join(dir, 'runs'))}`;
+}
+
+/** An APPROVED F1 fixture written into the COPIED study's authoritative file
+ *  (the same injection path the production runner reads). Covers ALL 12
+ *  frozen cases so the CLI default plan (A/B/C × 12) is inside the grant. */
+function approveF1(dir: string, over: Record<string, any> = {}) {
+  const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'suite-manifest.json'), 'utf8'));
+  const record = {
+    schema: 'challenge-stage-authorization.v1',
+    stage: 'R',
+    status: 'APPROVED',
+    studyId: 'CEB-001',
+    suiteHash: FROZEN_SUITE_HASH,
+    mappingHash: '213090daecf0cbc9abfc51ca46641e4e3b835730ba9d9ec771118aaed9521290',
+    graderHash: 'eef38484c4f8ace059c178fcb0697c68154277073b7ab7a9d8c0e608ae383e79',
+    studyPlanHash: readStudyPlanHash(dir),
+    requestedActorIdentity: 'GLM-5.3-Flash',
+    executionMode: 'F1-direct-model',
+    arms: ['A', 'B', 'C'],
+    cases: manifest.cases.map((c: any) => c.caseId),
+    repetitions: ['1'],
+    attemptCap: 40,
+    requestCap: 80,
+    issuedBy: 'owner-test-fixture',
+    validFrom: '2026-10-26T00:00:00Z',
+    validUntil: '2026-10-27T00:00:00Z',
+    revoked: false,
+    halted: false,
+    ...over,
+  };
+  fs.writeFileSync(path.join(dir, 'run-authorization.json'), `${JSON.stringify(record, null, 2)}\n`, 'utf8');
+  return record;
+}
+
+function runCli(args: string[], studyDir: string): { status: number; out: string } {
+  try {
+    const out = execFileSync('node', [cliPath, '--study-dir', studyDir, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    return { status: 0, out };
+  } catch (e: any) {
+    return { status: e.status ?? 1, out: `${e.stdout ?? ''}${e.stderr ?? ''}` };
+  }
+}
+
+beforeEach(() => {
+  fs.mkdirSync(tmpRoot, { recursive: true });
+});
+
+describe('CLI Stage R F1 entry — dry-run and refusal paths (zero network by construction)', () => {
+  it('E1: --dry-run on the LIVE NOT_AUTHORIZED copy verifies the plan, refuses at the gate, and writes NOTHING', () => {
+    const dir = copyStudy('dry-unauth');
+    const before = ledgerFingerprint(dir);
+    const r = runCli(['--execution-mode', 'F1-direct-model', '--now', NOW, '--dry-run'], dir);
+    expect(r.status).toBe(1);
+    expect(r.out).toContain('STAGE R GATE REFUSED');
+    expect(r.out).toContain('NOT_AUTHORIZED');
+    expect(r.out).toContain('plan — study=CEB-001 units=36');
+    expect(r.out).not.toMatch(/sk-[A-Za-z0-9]|Bearer /); // no credential material ever
+    expect(ledgerFingerprint(dir)).toBe(before); // zero ledger/attempt side effects
+  });
+
+  it('E1: --dry-run on an APPROVED F1 copy passes the gate without any execution', () => {
+    const dir = copyStudy('dry-approved');
+    approveF1(dir);
+    const before = ledgerFingerprint(dir);
+    const r = runCli(['--execution-mode', 'F1-direct-model', '--now', NOW, '--dry-run'], dir);
+    expect(r.status).toBe(0);
+    expect(r.out).toContain('authorizedModel=GLM-5.3-Flash');
+    expect(r.out).toContain('attemptCap=40 (used 0) | requestCap=80 (used 0)');
+    expect(r.out).toContain('worst-case requests for THIS plan = 1440'); // 36 units × maxSteps=40 — the code-proven hard cap
+    expect(r.out).toContain('DRY-RUN OK');
+    expect(ledgerFingerprint(dir)).toBe(before);
+  });
+
+  it('E1: --dry-run stub path still works (Phase 1B plan verification, no gate)', () => {
+    const dir = copyStudy('dry-stub');
+    const before = ledgerFingerprint(dir);
+    const r = runCli(['--dry-run'], dir);
+    expect(r.status).toBe(0);
+    expect(r.out).toContain('mode=offline-stub');
+    expect(r.out).toContain('DRY-RUN OK');
+    expect(ledgerFingerprint(dir)).toBe(before);
+  });
+
+  it('E2: an UNAUTHORIZED F1 run (no --dry-run) is refused by the CLI pre-flight gate BEFORE the runner starts — zero ledger rows at all', () => {
+    const dir = copyStudy('run-unauth');
+    const before = ledgerFingerprint(dir);
+    const r = runCli(['--execution-mode', 'F1-direct-model', '--now', NOW], dir);
+    expect(r.status).toBe(1);
+    expect(r.out).toContain('STAGE R GATE REFUSED');
+    expect(r.out).toContain('NOT_AUTHORIZED');
+    // the CLI verifies the SAME gate function the runner enforces per-unit; a refused plan never enters the runner: zero ledger rows, zero network
+    expect(ledgerFingerprint(dir)).toBe(before);
+  });
+
+  it('E3: wrong execution mode (F1 declared, F2-approved record) refuses; F2 via CLI is refused outright; missing --now refuses', () => {
+    const dir = copyStudy('wrong-mode');
+    approveF1(dir, { executionMode: 'F2-real-host', isolationAcceptance: { realHostProbe: { ticketId: 'PRI-1037', status: 'PASSED', evidenceRef: 'probe.json', suiteHash: FROZEN_SUITE_HASH } } });
+    const r1 = runCli(['--execution-mode', 'F1-direct-model', '--now', NOW, '--dry-run'], dir);
+    expect(r1.status).toBe(1);
+    expect(r1.out).toContain('does not match the runner-declared');
+
+    const dir2 = copyStudy('f2-cli');
+    const r2 = runCli(['--execution-mode', 'F2-real-host', '--now', NOW], dir2);
+    expect(r2.status).toBe(1);
+    expect(r2.out).toContain('F2-real-host is not available through this CLI');
+
+    const dir3 = copyStudy('no-clock');
+    approveF1(dir3);
+    const r3 = runCli(['--execution-mode', 'F1-direct-model'], dir3);
+    expect(r3.status).toBe(1);
+    expect(r3.out).toContain('--now');
+
+    const dir4 = copyStudy('bad-clock');
+    const r4 = runCli(['--execution-mode', 'F1-direct-model', '--now', 'not-a-timestamp'], dir4);
+    expect(r4.status).toBe(1);
+    expect(r4.out).toContain('not a parseable timestamp');
+  });
+
+  it('E3: an approved record whose requestedActorIdentity does not match the CLI responder model refuses at mode-consistency — zero network (构造无网络, gate 先于 responder 使用)', () => {
+    const dir = copyStudy('wrong-identity');
+    approveF1(dir, { requestedActorIdentity: 'other-provider/other-model' });
+    const r = runCli(['--execution-mode', 'F1-direct-model', '--now', NOW], dir);
+    expect(r.status).toBe(0); // the run COMPLETES: every unit is refused inside the summary, nothing dispatches
+    expect(r.out).toContain('"STAGE_R_REFUSED":36');
+    // the refusal REASON lives in the audit ledger (the CLI prints counts only)
+    const events = fs.readFileSync(path.join(dir, 'events.jsonl'), 'utf8');
+    expect(events).toContain('stage_r_mode_mismatch');
+    expect(events).toContain('is not the authorization-bound requestedActorIdentity');
+    const budget = fs.readFileSync(path.join(dir, 'budget-ledger.jsonl'), 'utf8');
+    expect(budget.includes('REQUEST_RESERVE')).toBe(false); // no request was ever reserved → none dispatched
+  });
+
+  it('E4 (CLI level): an EXPIRED authorization refuses in dry-run with zero side effects', () => {
+    const dir = copyStudy('expired');
+    approveF1(dir, { validFrom: '2026-10-24T00:00:00Z', validUntil: '2026-10-25T00:00:00Z' });
+    const before = ledgerFingerprint(dir);
+    const r = runCli(['--execution-mode', 'F1-direct-model', '--now', NOW, '--dry-run'], dir);
+    expect(r.status).toBe(1);
+    expect(r.out).toContain('expired');
+    expect(ledgerFingerprint(dir)).toBe(before);
+  });
+
+  it('E7: the CLI end-to-end stub golden path still passes after the F1 extension (subprocess, exit 0)', () => {
+    const dir = copyStudy('stub-golden');
+    const r = runCli(['--strategy', 'perfect-play', '--max-attempts', '40'], dir);
+    expect(r.status).toBe(0);
+    expect(r.out).toContain('units=36');
+    expect(r.out).toContain('"SUCCEEDED":36');
+    expect(r.out).toContain('budget RESERVE rows: 36');
+  });
+
+  it('E7: the REAL frozen study dir remains pristine (ledgers empty, hashes stable, authorization NOT_AUTHORIZED)', () => {
+    expect(fs.statSync(path.join(realStudyDir, 'budget-ledger.jsonl')).size).toBe(0);
+    expect(fs.statSync(path.join(realStudyDir, 'events.jsonl')).size).toBe(0);
+    expect(JSON.parse(fs.readFileSync(path.join(realStudyDir, 'run-authorization.json'), 'utf8')).status).toBe('NOT_AUTHORIZED');
+    const hashes = JSON.parse(fs.readFileSync(path.join(realStudyDir, 'hashes.json'), 'utf8'));
+    expect(hashes.suiteHash.value).toBe(FROZEN_SUITE_HASH);
+  });
+});
