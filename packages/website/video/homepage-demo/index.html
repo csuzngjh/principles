@@ -244,7 +244,6 @@
                 <div class="s4-action" data-copy="s4Defer"></div>
               </div>
               <div class="s4-note" data-var-text="s4Note"></div>
-              <div class="s4-cursor" id="s4-cursor" data-layout-ignore></div>
             </div>
           </div>
         </div>
@@ -362,11 +361,11 @@
         .fromTo("#s4-decide", { opacity: 0, x: 50 }, { opacity: 1, x: 0, duration: .55, ease: "power3.out" }, 13.6)
         .fromTo(".s4-action", { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: .35, stagger: .25, ease: "back.out(1.2)" }, 13.9)
         .fromTo("#s4-decide .s4-note", { opacity: 0 }, { opacity: 1, duration: .45, ease: "sine.out" }, 14.8)
-        .fromTo("#s4-cursor", { opacity: 0, x: 170, y: 230 }, { opacity: 1, x: 0, y: 0, duration: .55, ease: "power2.inOut" }, 14.9)
+        .fromTo("#s4-cursor", { opacity: 0, x: 170, y: 230 }, { opacity: 1, x: 46, y: -26, duration: .55, ease: "power2.inOut" }, 14.9)
         .to("#s4-approve", { scale: .96, duration: .12, ease: "power2.in" }, 15.5)
         .to("#s4-approve", { scale: 1, duration: .25, ease: "back.out(2)" }, 15.62)
         .fromTo("#s4-approved", { opacity: 0, scale: .8 }, { opacity: 1, scale: 1, duration: .45, ease: "back.out(1.3)" }, 15.45)
-        .to("#s4-cursor", { opacity: 0, duration: .35, ease: "sine.in" }, 16.3)
+        .to("#s4-cursor", { opacity: 0, duration: .3, ease: "sine.in" }, 15.9)
         .to("#scene-4", { opacity: 0, duration: .5, ease: "sine.inOut" }, 16.9);
 
       // Scene 5 — a similar task: the approved principle shows up as a pause, not a veto.

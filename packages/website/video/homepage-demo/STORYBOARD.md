@@ -53,9 +53,10 @@ Persistent chrome (t=0–30): brand "Principles Disciple" top-left; source badge
 - 13.6 decision panel (right): 修改 / 批准 / 暂存 (Approve primary green);
   note 14.8 「可修改或暂存；未经批准不会生效。/ Edit or defer — nothing
   activates without you.」
-- 14.9–15.45 cursor flies into the Approve button; 15.5 click press; 15.45
-  green badge lands on the card: 「✓ 经你批准 / ✓ Approved by you」.
-- 16.3 cursor fades; 16.9–17.4 fade out under S5.
+- 14.9–15.45 cursor flies in and rests at the Approve button's upper-right
+  edge (never on the label glyphs); 15.5 click press; 15.45 green badge lands
+  on the card: 「✓ 经你批准 / ✓ Approved by you」; 15.9–16.2 cursor fades out.
+- 16.9–17.4 fade out under S5.
 
 ## S5 · 16.4–25.6s · 下一次，先说明再行动
 
