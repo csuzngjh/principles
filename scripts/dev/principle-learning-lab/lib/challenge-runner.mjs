@@ -149,6 +149,26 @@ export const RUNNER_EXECUTION_MODES = ['offline-stub', 'F1-direct-model', 'F2-re
  *  budget or plan. */
 export const STAGE_R_UNKNOWN_STREAK_LIMIT = 3;
 
+/** Capacity circuit breaker: after this many CONSECUTIVE unit settlements
+ *  whose failure is a PROVEN provider-capacity condition (HTTP 429 rate
+ *  limiting, or an explicit HTTP 5xx upstream-overload status), every
+ *  remaining unit is refused (CAPACITY_STREAK_STOPPED) before any dispatch.
+ *  Deliberately narrow: identity mismatches, output-contract violations,
+ *  authorization refusals and other known failures are NOT capacity errors
+ *  and do not arm this breaker. */
+export const STAGE_R_CAPACITY_STREAK_LIMIT = 3;
+
+/** Classify a FAILED_KNOWN detail string as a provider-capacity failure.
+ *  The detail is `execution_error: <responder message>`; only responder-
+ *  classified 429 (`rate_limited (HTTP 429)`) and explicit 5xx statuses
+ *  (`http_500:`…`http_599:`) count — both carry server-attested evidence,
+ *  never a guess. */
+export function isCapacityFailureDetail(detail) {
+  if (typeof detail !== 'string') return false;
+  const message = detail.startsWith('execution_error: ') ? detail.slice('execution_error: '.length) : detail;
+  return message.startsWith('rate_limited (HTTP 429)') || /^http_5\d\d\b/.test(message);
+}
+
 /**
  * Serial study run. One writer (lock), one unit at a time, append-only
  * records. Each unit: verify frozen + compose the arm prompt → classify
@@ -192,6 +212,12 @@ export async function runChallengeStudy({
   // authorization, never widens the budget, never changes the plan, and
   // keeps every existing ledger row and attempt record intact.
   let consecutiveUnknown = 0;
+  // Capacity circuit breaker (distinct from the unknown streak): counts only
+  // unit settlements whose failure detail is a PROVEN provider-capacity
+  // condition (429 / explicit 5xx). A SUCCEEDED settlement or a NON-capacity
+  // FAILED_KNOWN settlement breaks the streak; skips and refusals leave it
+  // unchanged. Same run-scoped discipline as the unknown streak.
+  let consecutiveCapacityFailures = 0;
   try {
     for (const armId of plan.arms) {
       for (const caseId of plan.cases) {
@@ -215,6 +241,15 @@ export async function runChallengeStudy({
             if (summary.stoppedReason === null) summary.stoppedReason = `stage_r_unknown_streak_stop: ${consecutiveUnknown} consecutive RESULT_UNKNOWN units — automatic dispatch stop`;
             ledger.appendEvent({ type: 'UNIT_REFUSED', unit, reason: 'stage_r_unknown_streak_stop', detail: `${consecutiveUnknown} consecutive RESULT_UNKNOWN units — no further dispatch this run (resume requires a new run; settled attempts are never retried)` });
             summary.units.push({ unit, state: 'UNKNOWN_STREAK_STOPPED', refused: true, reason: 'stage_r_unknown_streak_stop' });
+            continue;
+          }
+          if (consecutiveCapacityFailures >= STAGE_R_CAPACITY_STREAK_LIMIT) {
+            // capacity breaker: same pre-everything stop shape — no input
+            // read, no gate call, no factory, no reservation. Proven 429/5xx
+            // saturation means more dispatch would only burn budget.
+            if (summary.stoppedReason === null) summary.stoppedReason = `stage_r_capacity_streak_stop: ${consecutiveCapacityFailures} consecutive provider-capacity (429/5xx) failures — automatic dispatch stop`;
+            ledger.appendEvent({ type: 'UNIT_REFUSED', unit, reason: 'stage_r_capacity_streak_stop', detail: `${consecutiveCapacityFailures} consecutive provider-capacity (429/5xx) unit failures — no further dispatch this run (failover requires a NEW authorization bound to the alternate model; settled attempts and reservations are kept)` });
+            summary.units.push({ unit, state: 'CAPACITY_STREAK_STOPPED', refused: true, reason: 'stage_r_capacity_streak_stop' });
             continue;
           }
 
@@ -419,6 +454,7 @@ export async function runChallengeStudy({
             ledger.appendEvent({ type: 'UNIT_FINISHED', unit, result: 'SUCCEEDED', objectiveTaskOutcome: adjudication.objectiveTaskOutcome });
             summary.units.push({ unit, state: 'SUCCEEDED', objectiveTaskOutcome: adjudication.objectiveTaskOutcome });
             consecutiveUnknown = 0; // a definite execution settlement breaks the ambiguity streak
+            consecutiveCapacityFailures = 0; // and the capacity streak (the channel answered fine)
           } catch (e) {
             if (e instanceof SimulatedCrashError) {
               // Process-death simulation: no result row, no attempt file, lock
@@ -476,6 +512,15 @@ export async function runChallengeStudy({
             ledger.appendEvent({ type: 'UNIT_FINISHED', unit, result: 'FAILED_KNOWN', detail: failureDetail });
             summary.units.push({ unit, state: 'FAILED_KNOWN', detail: failureDetail });
             consecutiveUnknown = 0; // a definite execution settlement breaks the ambiguity streak
+            // capacity breaker: ONLY proven 429/5xx failures arm it; every
+            // other known failure (identity mismatch, output contract,
+            // authorization-class problems…) breaks the streak — they are
+            // NOT channel saturation and must surface as hard failures.
+            if (isCapacityFailureDetail(failureDetail)) {
+              consecutiveCapacityFailures += 1;
+            } else {
+              consecutiveCapacityFailures = 0;
+            }
           }
         }
       }
