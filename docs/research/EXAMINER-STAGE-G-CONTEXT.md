@@ -68,3 +68,11 @@ NEXT_ACTION:             将 60 RV 匿名包转交 ChatGPT AI-only 盲评 → �
 - **测试**：新套件 `challenge-actor-transport.test.ts` 27 项（全注入 poster/responder/host 替身，零真实网络/宿主/凭据解析）；14 套件 401/401 全绿；freeze --verify 四哈希不变；CLI 冒烟（study 副本 36 units）过；1b/stager await 化仅机械转换（断言零弱化）。
 - **状态不变**：Stage R=NOT_AUTHORIZED、realHostBaseline=UNKNOWN、PRI-1037=NOT_RUN、真实模型请求 0、真实宿主 0、生产写入 0。
 - **真实宿主执行剩余硬条件**：① Owner 签发 Stage R 授权（含 Actor 模型/预算绑定）；② PRI-1037 探针真实宿主执行并通过（F2 前置）；③ 真实宿主环境（Codex CLI 可用、scratch 目录、身份回读）与 Owner 指派的 Actor 模型决策；④ Stage G 盲评收口。协作边界如实声明：F2 测试替身可伪造宿主快照，机器防线是门+探针+baseline 规则，防误用不防蓄意。
+
+## 11. PRI-1037 隔离探针工程实现（2026-10-26 增补，分支 ai/PRI-1037-isolation-probe）
+
+- **交付**：`lib/challenge-isolation-probe.mjs`——SPEC §6.4/§12.4 + Linear PRI-1037「必须验证」清单的可执行形式：9 项检查闭集（隐藏 Gold/评分契约不可外泄〔内容锚定泄漏检测〕、跨臂投递不可获取、非实验工具拒绝、未授权网络拒绝、轮间会话独立、宿主身份自证〔VERIFIED 非回显〕、实载配置记录、事后副作用扫描〔缺扫描器即 fail-closed〕）；证据契约 `challenge-isolation-probe.v1` 带**诚实 `executedIn: offline-rehearsal | real-host` 标记**（离线排练证据被机器排除在 F2 授权外）；`verifyF2ProbeEvidence` 深验（研究内相对路径边界/防穿越、real-host、全检查 PASSED、studyId/suiteHash 绑定、严格 ISO executedAt、**每个会话经宿主自身 rollout 佐证**、缺 codexHome 即拒）。
+- **接线**：runner F2 路径在门结构检查之后、工厂之前执行证据深验（`stage_r_probe_evidence_invalid` 拒绝，零副作用）；F1 路径零影响（测试钉死）。
+- **诚实边界**：本实现不自动发起模型调用（PRI-1037 工票自身约束）——探针只驱动注入 transport；真实宿主执行轮待 Owner 另行授权；rollout 佐证是工件级协证非密码学（可写 CODEX_HOME 者仍可伪造，与 workspace lease 同类边界）。
+- **测试**：新套件 15 项（引擎 7：泄漏/执行声明/会话复用/身份未证/缺扫描器/传输爆炸/干净通过；验证 4：离线标记拒/无佐证拒/有佐证过+缺 codexHome 拒/六类坏证据拒；runner 集成 3：缺证据零工厂零预留/有证据执行/F1 不受影响+活体保护）。
+- **状态不变**：PRI-1037=NOT_RUN（工程验收完成≠真实宿主探针通过）、Stage R=NOT_AUTHORIZED、realHostBaseline=UNKNOWN、真实模型请求 0、真实宿主 0、生产写入 0。

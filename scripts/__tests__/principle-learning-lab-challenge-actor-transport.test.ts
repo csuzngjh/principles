@@ -123,6 +123,43 @@ function approveStudy(dir: string, record: unknown) {
   fs.writeFileSync(path.join(dir, 'run-authorization.json'), `${JSON.stringify(record, null, 2)}\n`, 'utf8');
 }
 
+/** PRI-1037 wiring fixture (transport suite): real-host-marked probe evidence
+ *  + corroborating fabricated rollouts under a tmp codexHome. Boundary-
+ *  guarded writes only; wiring proof, never real-host acceptance. */
+function writeF2ProbeEvidence(dir: string, codexHome: string) {
+  const appendInside = (rootDir: string, rel: string, content: string) => {
+    const root = path.resolve(rootDir);
+    const target = path.resolve(root, rel);
+    if (!target.startsWith(root + path.sep)) throw new Error(`test helper: path escapes root (${rel})`);
+    fs.appendFileSync(target, content, 'utf8');
+  };
+  fs.mkdirSync(codexHome, { recursive: true });
+  const sessions = ['probe-x1', 'probe-x2', 'probe-x3', 'probe-x4', 'probe-x5'];
+  const record = {
+    schema: 'challenge-isolation-probe.v1', probeId: 'PRI-1037', executedIn: 'real-host',
+    studyId: 'CEB-001', suiteHash: FROZEN.suiteHash, executedAt: new Date().toISOString(),
+    checks: ['hidden-gold-unreadable', 'scoring-rules-unreadable', 'cross-arm-isolation', 'non-experiment-tool-refusal', 'unauthorized-network-refusal', 'session-independence', 'host-identity-attested', 'effective-config-recorded', 'post-run-side-effect-scan'].map((id) => ({ id, status: 'PASSED' })),
+    sessions,
+    hostSnapshotAudit: { requestedModel: 'test-double/never-real', observedModel: 'test-double/never-real', identityStatus: 'VERIFIED', identityEvidenceSource: 'test-double' },
+    status: 'PASSED',
+  };
+  fs.mkdirSync(path.join(dir, 'isolation-probes'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'isolation-probes', 'PRI-1037.json'), `${JSON.stringify(record, null, 2)}\n`, 'utf8');
+  const d = new Date();
+  const dayRel = path.join('sessions', String(d.getUTCFullYear()), String(d.getUTCMonth() + 1).padStart(2, '0'), String(d.getUTCDate()).padStart(2, '0'));
+  fs.mkdirSync(path.join(codexHome, dayRel), { recursive: true });
+  for (const s of sessions) {
+    const safe = s.replace(/[^A-Za-z0-9_-]/g, '');
+    appendInside(codexHome, path.join(dayRel, `rollout-${safe}.jsonl`), `${JSON.stringify({ type: 'session_meta', payload: { session_id: s } })}\n${JSON.stringify({ type: 'event_msg', payload: { type: 'thread_settings_applied', thread_settings: { model: 'test-double/never-real' } } })}\n`);
+  }
+  return 'isolation-probes/PRI-1037.json';
+}
+/** an F2 grant citing the above evidence */
+const f2AuthWithEvidence = () => validStageRAuth({
+  executionMode: 'F2-real-host',
+  isolationAcceptance: { realHostProbe: { ticketId: 'PRI-1037', status: 'PASSED', evidenceRef: 'isolation-probes/PRI-1037.json', suiteHash: FROZEN.suiteHash } },
+});
+
 /** Capturing responder that plays perfect actions from judge gold — the TEST
  *  acts as the model; the adapter under test does the prompt/parse wiring.
  *  modelId binds the responder to the fixture's requestedActorIdentity. */
@@ -531,13 +568,15 @@ describe('D. F1 real-model actor via runChallengeStudy', () => {
 
   it('P1-5 (cross-mode): an F2 authorization refuses an F1 actor BEFORE any model request; an F1 authorization refuses an F2 adapter BEFORE any host round', async () => {
     const dirF2auth = copyStudy('crossmode-f2auth');
-    approveStudy(dirF2auth, f2Auth()); // F2 approved
+    const codexHome = path.join(tmpRoot, `codex-crossmode-${++copyCounter}`);
+    writeF2ProbeEvidence(dirF2auth, codexHome); // evidence valid → the ACTOR mode mismatch is what refuses
+    approveStudy(dirF2auth, f2AuthWithEvidence()); // F2 approved
     const responder = perfectPlayResponder();
     const cross1 = await runChallengeStudy({
       studyDir: dirF2auth,
       plan: { arms: ['A'], cases: [CASE_ID], repetitions: [1] },
       actorFactory: (ctx: any) => createRealModelActor({ ctx, responder }), // F1 actor under F2 authorization
-      execution: { mode: 'F2-real-host', now: NOW },
+      execution: { mode: 'F2-real-host', now: NOW, codexHome },
       maxAttemptsTotal: 10,
       owner: 'at-cross1',
     });
@@ -621,9 +660,14 @@ describe('E. F2 host actor adapter', () => {
     expect(action.args.reason).toContain("unknown action type 'fly'");
   });
 
-  it('full F2 unit through the runner (authorized + probe fixture): attempt carries mode F2, evidence and rounds', async () => {
+  it('full F2 unit through the runner (authorized + probe fixture + corroborated PRI-1037 evidence): attempt carries mode F2, evidence and rounds', async () => {
     const dir = copyStudy('f2-happy');
-    approveStudy(dir, f2Auth());
+    // PRI-1037 wiring fixture: real-host-marked probe evidence + fabricated
+    // rollouts under a tmp codexHome (cooperative boundary — wiring proof
+    // only, never real-host acceptance).
+    const codexHome = path.join(tmpRoot, `codex-f2-happy-${++copyCounter}`);
+    writeF2ProbeEvidence(dir, codexHome);
+    approveStudy(dir, f2AuthWithEvidence());
     const host = fakeHostTransport({ identityStatus: 'VERIFIED', observedModel: 'gpt-6-luna', sessionId: 'sess-f2-9' });
     const summary = await runChallengeStudy({
       studyDir: dir,
@@ -633,7 +677,7 @@ describe('E. F2 host actor adapter', () => {
         hostTransport: host,
         taskId: hostTaskIdForUnit({ studyId: 'CEB-001', caseId: unitCtx.caseId, armId: unitCtx.armId, repetitionId: 1 }),
       }),
-      execution: { mode: 'F2-real-host', now: NOW },
+      execution: { mode: 'F2-real-host', now: NOW, codexHome },
       maxAttemptsTotal: 10,
       owner: 'at-f2-happy',
     });
