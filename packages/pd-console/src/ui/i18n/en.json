@@ -57,6 +57,7 @@
         "groupPrefix": "From feedback:",
         "painUnrecorded": "Original words not recorded",
         "sourceUnreadable": "Records unreadable",
+        "sourceUnknown": "Source not recorded",
         "sourceManual": "Owner feedback",
         "sourceToolFailure": "Tool failure",
         "groupCount": "{{count}} rule candidates",

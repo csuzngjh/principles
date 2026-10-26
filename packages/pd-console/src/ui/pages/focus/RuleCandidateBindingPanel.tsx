@@ -118,8 +118,11 @@ const RULE_BINDING_CARD_STATE_BAR: Record<RuleBindingCardState, string> = {
   attention: 'bg-amber',
 };
 
-const PAIN_SOURCE_KEY: Record<string, string> = {
+/** Model-synthesized fallback sources must stay localized (CodeRabbit PRI-1048:
+ * `unknown` previously fell through to raw English in the zh-CN group header). */
+export const PAIN_SOURCE_KEY: Record<string, string> = {
   unreadable: 'pages.focus.ruleBinding.sourceUnreadable',
+  unknown: 'pages.focus.ruleBinding.sourceUnknown',
   manual: 'pages.focus.ruleBinding.sourceManual',
   tool_failure: 'pages.focus.ruleBinding.sourceToolFailure',
 };

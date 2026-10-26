@@ -642,7 +642,6 @@ const E2E_RULE_BINDING_LEDGER = {
   },
 };
 const E2E_RULE_BINDING_PRINCIPLE_DERIVED_FROM = parentPrincipleCandidate.candidateId;
-const E2E_REPLY_RULE_CANDIDATE_ID = replyRuleCandidate.candidateId;
 console.log('[e2e-seed] rule-binding queue fixtures: split parent+router, 52d-like bound chain, unlinked reply rule');
 
 stateConn.close();

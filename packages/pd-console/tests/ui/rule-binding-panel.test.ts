@@ -4,7 +4,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   deriveRuleBindingCardState, groupRuleBindingQueue, canOfferRuleBindingResume,
-  RULE_BINDING_CARD_STATE_KEY, RULE_BINDING_CARD_STATE_CLASS,
+  RULE_BINDING_CARD_STATE_KEY, RULE_BINDING_CARD_STATE_CLASS, PAIN_SOURCE_KEY,
   type RuleBindingCardState,
 } from '../../src/ui/pages/focus/RuleCandidateBindingPanel.js';
 import type { RuleBindingQueueItem } from '../../src/shared/rule-candidate-binding-contract.js';
@@ -80,6 +80,23 @@ describe('RuleCandidateBindingPanel pure display logic (PRI-1048)', () => {
       expect(resolve(zh, key), `zh missing ${key}`).toBeTypeOf('string');
       expect(resolve(en, key), `en missing ${key}`).toBeTypeOf('string');
       expect(RULE_BINDING_CARD_STATE_CLASS[state]).toMatch(/border-/);
+    }
+  });
+
+  it('localizes every pain-source label in BOTH locales, including the model-synthesized fallbacks (CodeRabbit PRI-1048)', () => {
+    const zh = parseJsonRecord(readFileSync(join(I18N_ROOT, 'zh-CN.json'), 'utf8'));
+    const en = parseJsonRecord(readFileSync(join(I18N_ROOT, 'en.json'), 'utf8'));
+    const resolve = (root: Record<string, unknown>, key: string): unknown =>
+      key.split('.').reduce<unknown>((acc, part) => (acc && typeof acc === 'object' && Object.hasOwn(acc as Record<string, unknown>, part) ? (acc as Record<string, unknown>)[part] : undefined), root);
+    // RuleCandidateBindingConsoleModel synthesizes these sources when the pain
+    // row is missing or the trajectory store is unreadable — each must map to a
+    // localized key, never fall through to raw English in the group header.
+    for (const code of ['unknown', 'unreadable'] as const) {
+      expect(PAIN_SOURCE_KEY[code], `synthesized source '${code}' must be mapped`).toBeTypeOf('string');
+    }
+    for (const key of Object.values(PAIN_SOURCE_KEY)) {
+      expect(resolve(zh, key), `zh missing ${key}`).toBeTypeOf('string');
+      expect(resolve(en, key), `en missing ${key}`).toBeTypeOf('string');
     }
   });
 

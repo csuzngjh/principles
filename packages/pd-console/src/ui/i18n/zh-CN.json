@@ -57,6 +57,7 @@
         "groupPrefix": "来自反馈：",
         "painUnrecorded": "原话未记录",
         "sourceUnreadable": "记录暂不可读",
+        "sourceUnknown": "来源未记录",
         "sourceManual": "拥有者反馈",
         "sourceToolFailure": "工具失败",
         "groupCount": "{{count}} 条规则候选",
