@@ -1003,3 +1003,39 @@ describe('I. capacity circuit breaker (consecutive provider-capacity failures)',
     expect(summary.stoppedReason).toBeNull(); // 3 consecutive NON-capacity failures never trip the capacity breaker
   });
 });
+
+// ===========================================================================
+// J. request-timeout authorization binding (gate level — the approved value
+//    is machine-binding, never a free CLI knob)
+// ===========================================================================
+describe('J. requestTimeoutMs authorization binding', () => {
+  const bindings = { ...FROZEN, studyPlanHash: STUDY_PLAN_HASH };
+  const plan = { arms: ['A'], cases: ['CEB-001-FV-01'], repetitions: [1] };
+  const call = (over: Record<string, any>, declared: number | undefined) =>
+    verifyStageRAuthorization({ authorizationRecord: validStageRAuth(over), bindings: { ...bindings, studyPlanHash: STUDY_PLAN_HASH }, plan, maxAttemptsTotal: 40, now: NOW, declaredExecutionMode: 'F1-direct-model', declaredRequestTimeoutMs: declared });
+
+  it('J1: an authorization WITHOUT requestTimeoutMs approves only the 240000 default — 480000 declaration refuses', () => {
+    expect(call({}, undefined).ok).toBe(true);
+    expect(call({}, 240_000).ok).toBe(true);
+    const r = call({}, 480_000);
+    expect(r.ok).toBe(false);
+    expect(r.reasons.join(' ')).toContain('the default 240000ms is the only approved value');
+  });
+
+  it('J2: an authorization BOUND to 480000 requires the exact declaration — matching ok, mismatched/missing refuse', () => {
+    const bound = { requestTimeoutMs: 480_000 };
+    expect(call(bound, 480_000).ok).toBe(true);
+    const mismatch = call(bound, 240_000);
+    expect(mismatch.ok).toBe(false);
+    expect(mismatch.reasons.join(' ')).toContain('does not match the runner-declared');
+    const missing = call(bound, undefined);
+    expect(missing.ok).toBe(false);
+    expect(missing.reasons.join(' ')).toContain('must be declared explicitly');
+  });
+
+  it('J3: a malformed bound value refuses regardless of declaration', () => {
+    const r = call({ requestTimeoutMs: '480000' as unknown as number }, 480_000);
+    expect(r.ok).toBe(false);
+    expect(r.reasons.join(' ')).toContain('must be a positive safe integer');
+  });
+});
