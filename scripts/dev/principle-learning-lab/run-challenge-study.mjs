@@ -12,15 +12,18 @@
 //
 //   # Stage R F1 real-model execution (requires an Owner-issued APPROVED
 //   # run-authorization.json INSIDE the study copy — the authoritative file;
-//   # every model request is reserved against auth.requestCap BEFORE dispatch):
+//   # every model request is reserved against auth.requestCap BEFORE dispatch;
+//   # validity is judged with the ACTUAL system clock, PER UNIT — no caller-
+//   # supplied clock is honored for real execution):
 //   node run-challenge-study.mjs --study-dir <copy> \
-//        --execution-mode F1-direct-model --now 2026-10-27T00:00:00Z
+//        --execution-mode F1-direct-model
 //
 //   # Plan verification ONLY (computes the plan, verifies the frozen suite
 //   # and the authorization gate, prints the budget accounting — ZERO runner
-//   # invocation, ZERO actor construction, ZERO network):
+//   # invocation, ZERO actor construction, ZERO network). --now is a clearly
+//   # labeled SIMULATED clock for this mode only:
 //   node run-challenge-study.mjs --study-dir <copy> \
-//        --execution-mode F1-direct-model --now ... --dry-run
+//        --execution-mode F1-direct-model --now 2026-10-27T00:00:00Z --dry-run
 //
 // F2-real-host is deliberately NOT exposed here: it needs a configured real
 // host environment and stays behind its own execution round (PRI-1037 must
@@ -59,18 +62,27 @@ const arms = (arg('--arms', 'A,B,C') || '').split(',').map((s) => s.trim()).filt
 const maxAttemptsTotal = Number(arg('--max-attempts', '40'));
 const owner = arg('--owner', 'challenge-runner-cli');
 
-// Trusted clock for the Stage R gate — REQUIRED for F1 (the gate refuses a
-// missing clock fail-closed; there is no ambient-clock fallback).
-let now = null;
+// Clock discipline (security): the authorization clock is NOT caller-chosen
+// for REAL execution. `--now` is a SIMULATED clock for --dry-run only (clearly
+// labeled); a real F1 run always judges validity with the ACTUAL system clock,
+// evaluated PER UNIT by the runner (() => Date.now()) — an expired or not-yet-
+// valid authorization can never be smuggled through with a past/future --now,
+// and an authorization expiring mid-run refuses every subsequent unit.
+let now = null; // simulated clock (dry-run only)
 if (executionMode !== 'offline-stub') {
   const nowArg = arg('--now');
-  if (!nowArg) {
-    console.error('run-challenge-study: --now <ISO-8601 with timezone> is required for F1-direct-model (injected trusted clock — the gate refuses without it)');
-    process.exit(1);
-  }
-  now = Date.parse(nowArg);
-  if (!Number.isFinite(now)) {
-    console.error(`run-challenge-study: --now '${nowArg}' is not a parseable timestamp`);
+  if (nowArg !== undefined) {
+    now = Date.parse(nowArg);
+    if (!Number.isFinite(now)) {
+      console.error(`run-challenge-study: --now '${nowArg}' is not a parseable timestamp`);
+      process.exit(1);
+    }
+    if (!dryRun) {
+      console.error('run-challenge-study: --now is only honored for --dry-run (SIMULATED clock); a real run uses the actual system clock — refusing the ambiguous combination');
+      process.exit(1);
+    }
+  } else if (dryRun) {
+    console.error('run-challenge-study: --dry-run needs a clock to judge with — pass --now <ISO-8601 with timezone> (SIMULATED); a real run needs no clock argument (it uses the actual system clock)');
     process.exit(1);
   }
 }
@@ -106,7 +118,11 @@ function verifyPlan(frozen, armCheck) {
     },
     plan,
     maxAttemptsTotal,
-    now,
+    // Clock semantics: dry-run judges with the SIMULATED --now (labeled as
+    // such in the output); a real run's pre-flight judges with the ACTUAL
+    // system clock — the runner then re-verifies PER UNIT with () => Date.now(),
+    // so the pre-flight value is never the last word either way.
+    now: dryRun ? now : Date.now(),
     declaredExecutionMode: executionMode,
   });
   return { plan, units, gate, auth };
@@ -144,6 +160,7 @@ try {
 
   if (dryRun) {
     console.log('run-challenge-study: DRY-RUN OK — plan and authorization verified; nothing was executed, no request was sent, no ledger row was written');
+    console.log(`run-challenge-study: NOTE — this verdict used the ${now !== null ? `SIMULATED clock (--now ${new Date(now).toISOString()})` : 'actual system clock'}; a real run re-verifies PER UNIT with the actual system clock`);
     return;
   }
 
@@ -157,7 +174,7 @@ try {
     actorFactory,
     maxAttemptsTotal,
     owner,
-    ...(executionMode === 'offline-stub' ? {} : { execution: { mode: executionMode, now } }),
+    ...(executionMode === 'offline-stub' ? {} : { execution: { mode: executionMode, now: () => Date.now() } }),
   });
 
   const counts = {};

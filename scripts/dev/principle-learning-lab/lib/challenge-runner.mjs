@@ -230,6 +230,10 @@ export async function runChallengeStudy({
           // ever invoked — an unauthorized real run constructs no actor,
           // reserves nothing and takes zero actor steps. Bindings come from
           // the frozen verification above (freshly recomputed, never stored).
+          // `execution.now` may be a NUMBER (fixed clock, deterministic tests)
+          // or a FUNCTION (evaluated PER UNIT — the production CLI passes
+          // () => Date.now() so an authorization that expires mid-run is
+          // refused for every subsequent unit, not just at startup).
           let gate = null;
           if (isRealMode) {
             gate = verifyStageRAuthorization({
@@ -243,7 +247,7 @@ export async function runChallengeStudy({
               },
               plan,
               maxAttemptsTotal,
-              now: execution.now,
+              now: typeof execution.now === 'function' ? execution.now() : execution.now,
               declaredExecutionMode: declaredMode,
             });
             if (!gate.ok) {

@@ -61,6 +61,16 @@ mode-consistency 检查要求 `createRealModelActor` 暴露的
 **requestCap = 1440**：恰好覆盖初跑理论最坏（硬上界，非估计）；不含重跑余量——
 RESULT_UNKNOWN 的处置见第四节（不自动重跑，重跑需 Owner 追加授权）。
 
+**预算契约（防误读）**：
+- `attemptCap=48` 是**总 attempt 记录上限**（研究级 RESERVE 行计数），**不代表
+  额外获得 12 × 40 = 480 次请求**——重跑的请求同样消耗 requestCap。
+- `requestCap=1440` 是**累计请求预留上限**：重跑与崩溃恢复的新 attempt 计入
+  同一总额，已派发未应答的槽位不返还。
+- 达到 requestCap 后，未完成单元按当时状态如实结算（`request_budget_exhausted`
+  终止 + 评分收口），**预算不自动扩大**。
+- RESULT_UNKNOWN 后需要重跑的，必须遵循既有授权与预算规则：新 attemptId、
+  重新预留，绝不复用已结算 attempt。
+
 ## 三、请求与 Token 预算
 
 - 单请求：输入 ≤ 8000 tokens（`spec.inputTokenCap`，计量口径）；生成总预算
