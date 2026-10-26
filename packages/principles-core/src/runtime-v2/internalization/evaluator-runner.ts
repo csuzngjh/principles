@@ -25,6 +25,9 @@
  * @see BasePeerRunner in runner/base-peer-runner.ts
  */
 import type { RunHandle } from '../runtime-protocol.js';
+import { selectTaskRevisionArtifact } from './peer-runner-contracts.js';
+import { verifyArtifactCandidateIdentity, type CandidateIdentityPort } from './candidate-identity.js';
+import type { CandidateIdentityReceipt } from '../types/rule-candidate-binding.js';
 import type {
   EvaluatorOutputV1,
   EvaluatorOutputV2,
@@ -439,6 +442,7 @@ export interface EvaluatorRunnerDeps extends PeerRunnerDeps {
   readonly ledgerIdentity?: {
     readonly isAvailable: () => boolean;
     readonly hasPrinciple: (principleId: string) => boolean;
+    readonly resolveForCandidate?: CandidateIdentityPort['resolveForCandidate'];
   };
 }
 
@@ -502,7 +506,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
   private readonly outputLanguage: OutputLanguage | undefined;
   /** PRI-911A: ledger membership authority for the rule-assembly identity stamp; null = shape gate only. */
   private readonly ledgerIdentity:
-    | { readonly isAvailable: () => boolean; readonly hasPrinciple: (principleId: string) => boolean }
+    | NonNullable<EvaluatorRunnerDeps['ledgerIdentity']>
     | null;
 
   constructor(deps: EvaluatorRunnerDeps, options: EvaluatorRunnerOptions) {
@@ -590,7 +594,7 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       const dependencyRepairPayload = depPi?.repairPayload;
       const artifacts = await this.artifactStore.listBySourceTaskId(depId);
       if (artifacts.length > 0) {
-        const [firstArtifact] = artifacts;
+        const firstArtifact = selectTaskRevisionArtifact(depTask, artifacts, depPi?.revisionCount ?? 0);
         if (!firstArtifact) continue;
         const artifactRef = firstArtifact.artifactId;
         this.emitEvent('artificer_dep_selected', taskId, {
@@ -673,6 +677,15 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
   }
 
   async invokeRuntime(taskId: string, context: EvaluatorContext): Promise<RunHandle> {
+    if (this.ledgerIdentity?.resolveForCandidate) {
+      const source = context.sourceScribeArtifactId ? await this.artifactStore.getArtifactById(context.sourceScribeArtifactId) : null;
+      if (!source) throw new PDRuntimeError('input_invalid', 'candidate_identity_unavailable:scribe_missing');
+      await verifyArtifactCandidateIdentity(source, {
+        ledger: { resolveForCandidate: this.ledgerIdentity.resolveForCandidate },
+        getArtifactById: id => this.artifactStore.getArtifactById(id),
+        getTaskDiagnosticJson: async id => (await this.stateManager.getTask(id))?.diagnosticJson ?? null,
+      });
+    }
     if (context.scribeArtifact !== null) {
       let scribe: unknown;
       try { scribe = JSON.parse(context.scribeArtifact); } catch { throw new PDRuntimeError('input_invalid', 'scribe_artifact_unparseable'); }
@@ -3614,11 +3627,28 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     let identityStampReason: IdentityStampFailureReason | null = null;
     let forwardedIntentContract: IntentContractV1 | undefined;
     let bearerPrincipleContentJson: string | undefined;
+    let forwardedIdentityReceipt: CandidateIdentityReceipt | undefined;
+    let forwardedDreamerArtifactId: string | undefined;
+    let forwardedScribeArtifactId: string | undefined;
     try {
       const principleBearerId = await this.resolvePrincipleBearerArtifact(output, taskId);
       if (principleBearerId) {
         const principleArtifact = await this.artifactStore.getArtifactById(principleBearerId);
         if (principleArtifact) {
+          forwardedDreamerArtifactId = readDreamerArtifactIdFromScribeArtifact(principleArtifact.contentJson) ?? undefined;
+          forwardedScribeArtifactId = principleArtifact.artifactId;
+          if (this.ledgerIdentity?.resolveForCandidate) {
+            const identity = await verifyArtifactCandidateIdentity(principleArtifact, {
+              ledger: { resolveForCandidate: this.ledgerIdentity.resolveForCandidate },
+              getArtifactById: id => this.artifactStore.getArtifactById(id),
+              getTaskDiagnosticJson: async id => (await this.stateManager.getTask(id))?.diagnosticJson ?? null,
+            });
+            forwardedIdentityReceipt = {
+              candidateId: identity.candidateId, basis: identity.basis, principleId: identity.principleId,
+              ...(identity.bindingRevision !== undefined ? { bindingRevision: identity.bindingRevision } : {}),
+              ...(identity.decisionId !== undefined ? { decisionId: identity.decisionId } : {}),
+            };
+          }
           bearerPrincipleContentJson = principleArtifact.contentJson;
           const stamp = this.resolveRuleSourcePrincipleId(principleArtifact);
           if (stamp.ok) {
@@ -3658,6 +3688,10 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       });
     }
 
+    if (this.ledgerIdentity?.resolveForCandidate && !forwardedIdentityReceipt) {
+      this.emitEvent('rule_assembly_failed', taskId, { runId, reason: 'candidate_identity_unavailable', nextAction: 'review_current_binding_and_revise_scribe' });
+      return null;
+    }
     if (identityStampReason !== null) {
       // I3 (SPEC §6.4): the bearer is there, but the identity it carries is not
       // a canonical ledger UUID. The writer refuses to GUESS — it writes the
@@ -3790,6 +3824,11 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     }
 
     const ruleContent = {
+      ...(forwardedIdentityReceipt ? { identityResolution: forwardedIdentityReceipt } : {}),
+      ...(forwardedScribeArtifactId ? { sourceTrace: {
+        scribeArtifactId: forwardedScribeArtifactId,
+        ...(forwardedDreamerArtifactId ? { dreamerArtifactId: forwardedDreamerArtifactId } : {}),
+      } } : {}),
       implementationCode,
       goldenTrace: executableTrace,
       goldenTraceCases,
@@ -3835,7 +3874,10 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
         sourceTaskId: taskId,
         sourcePrincipleId: resolvedSourcePrincipleId,
         sourceRuleId: ruleId,
-        lineageArtifactIds: [...lineageArtifactIds],
+        lineageArtifactIds: [...new Set([...lineageArtifactIds,
+          ...(forwardedScribeArtifactId ? [forwardedScribeArtifactId] : []),
+          ...(forwardedDreamerArtifactId ? [forwardedDreamerArtifactId] : []),
+        ])],
         validationStatus: 'pending',
         contentJson: JSON.stringify(ruleContent),
         createdAt: nowIso,

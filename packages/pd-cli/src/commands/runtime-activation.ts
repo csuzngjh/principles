@@ -44,6 +44,10 @@ function buildLedgerIdentityDeps(
   getArtifactById: (artifactId: string) => Promise<PIArtifactSnapshot | null>,
 ): LedgerIdentityLookupDeps {
   return {
+    getCandidateKind: (candidateId: string): unknown => {
+      const row: unknown = connection.getDb().prepare('SELECT recommendation_kind FROM principle_candidates WHERE candidate_id = ?').get(candidateId);
+      return row !== null && typeof row === 'object' && Object.hasOwn(row, 'recommendation_kind') ? Reflect.get(row, 'recommendation_kind') : undefined;
+    },
     ledger: new PrincipleTreeLedgerAdapter({ stateDir: `${workspaceDir}/.state` }),
     getArtifactById,
     getTaskDiagnosticJson: (taskId: string): string | null => {

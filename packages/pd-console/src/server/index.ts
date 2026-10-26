@@ -33,6 +33,7 @@ import { handleReceiptsRoute, disposeReceiptsModels } from './routes/receipts.js
 import { handleApprovalsGroupedRoute, disposeApprovalsGroupedModels } from './routes/approvals-grouped.js';
 import { handleGovernanceRoute, handleGovernanceExperienceRoute, resolveOwnerConfigSnapshot, disposeGovernanceModels } from './routes/governance.js';
 import { handleOwnerDecisionsRoute } from './routes/owner-decisions.js';
+import { handleRuleCandidateBindingsRoute } from './routes/rule-candidate-bindings.js';
 import { handleEvidenceOutcomesRoute } from './routes/evidence-outcomes.js';
 import { handleDesignGateRoute } from './routes/design-gate.js';
 import { handleOwnerDecisionInboxRoute, handleOwnerDecisionViewRoute, handleOwnerDecisionLibraryRoute, parseOwnerDecisionViewSubPath } from './routes/owner-decision.js';
@@ -568,6 +569,17 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
       // CR8: GET /api/v1/governance/queue
       if (urlPath === '/api/v1/governance/queue') {
         asyncHandler(() => handleGovernanceRoute(req, res, services.workspaceDir))(req, res);
+        return;
+      }
+
+      if (urlPath === '/api/v1/governance/rule-candidate-bindings' || urlPath.startsWith('/api/v1/governance/rule-candidate-bindings/')) {
+        const { ownerId, credentialId } = resolveOwnerIdentity(process.env, defaultOwnerIdentityHomeDir());
+        asyncHandler(() => handleRuleCandidateBindingsRoute(req, res, {
+          workspaceDir: services.workspaceDir,
+          subPath: urlPath.slice('/api/v1/governance/rule-candidate-bindings'.length),
+          ownerIdentity: services.authConfig.isEnabled() && ownerId !== null && credentialId !== null
+            ? { ownerId, credentialId } : null,
+        }))(req, res);
         return;
       }
 

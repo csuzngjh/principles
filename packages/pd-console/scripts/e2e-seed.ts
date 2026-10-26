@@ -52,6 +52,10 @@ const PRINCIPLE_IDS = {
   readability: 'e2e00000-0000-4000-8000-00000000000b',
 } as const;
 
+const BAD_TRACE_CANDIDATE_ID = 'e2e00000-0000-4000-8000-000000000105';
+const BAD_TRACE_DREAMER_TASK_ID = `dreamer-${BAD_TRACE_CANDIDATE_ID}-code_tool_hook`;
+const BAD_TRACE_DREAMER_ARTIFACT_ID = 'artifact-dreamer-bad-trace';
+
 /** Minimal ledger principle entry for a seeded UUID identity. */
 function seededLedgerPrinciple(id: string, text: string, derivedFromPainIds: string[] = ['pain-e2e-1']) {
   return {
@@ -180,10 +184,67 @@ insertPiArtifact.run(
 // `gate_decision_not_accepted_shadow:rejected_validation_failed` error.
 // After PR #1079, the canonical validateGoldenTrace() rejects it at
 // the schema layer with `golden_trace_schema_invalid: <detail>`.
+// This rule implements a principle recommendation. Give it its own committed
+// candidate and persisted Dreamer lineage so the identity gate succeeds before
+// the deliberately malformed trace reaches the schema gate. Shared diagnosis
+// fixtures cannot establish this one-to-one authority.
+const badTraceRecommendation = {
+  kind: 'principle',
+  description: 'goldenTrace 测试期望必须使用测试契约允许的决定值。',
+  abstractedPrinciple: '在执行规则测试前验证测试契约。',
+};
+const badTraceDiagnosis = JSON.stringify({
+  valid: true,
+  diagnosisId: 'diagnosis-bad-trace',
+  summary: '规则测试契约应在执行前验证',
+  rootCause: 'Design: 未验证 goldenTrace 的测试期望类型',
+  violatedPrinciples: [],
+  evidence: [{ sourceRef: 'pain-e2e-badtrace', note: '非法测试期望应在 schema 层被拒绝' }],
+  recommendations: [badTraceRecommendation],
+  confidence: 0.9,
+});
+stateDb.prepare(`
+  INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, diagnostic_json, input_ref)
+  VALUES (?, ?, 'succeeded', ?, ?, 1, ?, ?)
+`).run('task-diag-bad-trace', 'diagnostician', eightDaysAgo, eightDaysAgo, '{}', 'pain-e2e-badtrace');
+stateDb.prepare(`
+  INSERT INTO runs (run_id, task_id, runtime_kind, execution_status, started_at, ended_at, attempt_number, output_payload, created_at, updated_at)
+  VALUES (?, ?, 'test-double', 'succeeded', ?, ?, 1, ?, ?, ?)
+`).run('run-diag-bad-trace', 'task-diag-bad-trace', eightDaysAgo, eightDaysAgo, badTraceDiagnosis, eightDaysAgo, eightDaysAgo);
+stateDb.prepare(`
+  INSERT INTO artifacts (artifact_id, run_id, task_id, artifact_kind, content_json, created_at)
+  VALUES (?, ?, ?, 'diagnostician_output', ?, ?)
+`).run('artifact-diag-bad-trace', 'run-diag-bad-trace', 'task-diag-bad-trace', badTraceDiagnosis, eightDaysAgo);
+stateDb.prepare(`
+  INSERT INTO commits (commit_id, task_id, run_id, artifact_id, idempotency_key, status, created_at)
+  VALUES (?, ?, ?, ?, ?, 'committed', ?)
+`).run('commit-diag-bad-trace', 'task-diag-bad-trace', 'run-diag-bad-trace', 'artifact-diag-bad-trace', 'idem-commit-bad-trace', eightDaysAgo);
+stateDb.prepare(`
+  INSERT INTO principle_candidates (candidate_id, artifact_id, task_id, source_run_id, title, description,
+    confidence, source_recommendation_json, idempotency_key, status, created_at, consumed_at, recommendation_kind, abstracted_principle)
+  VALUES (?, ?, ?, ?, ?, ?, 0.9, ?, ?, 'consumed', ?, ?, 'principle', ?)
+`).run(BAD_TRACE_CANDIDATE_ID, 'artifact-diag-bad-trace', 'task-diag-bad-trace', 'run-diag-bad-trace',
+  'goldenTrace 回归验证原则', badTraceRecommendation.description, JSON.stringify(badTraceRecommendation),
+  'idem-candidate-bad-trace', eightDaysAgo, eightDaysAgo, badTraceRecommendation.abstractedPrinciple);
+stateDb.prepare(`
+  INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, diagnostic_json)
+  VALUES (?, 'dreamer', 'succeeded', ?, ?, 1, ?)
+`).run(BAD_TRACE_DREAMER_TASK_ID, eightDaysAgo, eightDaysAgo, JSON.stringify({
+  ...JSON.parse(createPITaskDiagnosticJson({
+    dependencyTaskIds: [], channel: 'code_tool_hook', timeoutMs: 30_000,
+    inputArtifactRefs: [], outputArtifactRefs: [{ artifactType: 'principle', ref: BAD_TRACE_DREAMER_ARTIFACT_ID }],
+  })),
+  candidateId: BAD_TRACE_CANDIDATE_ID,
+}));
+insertPiArtifact.run(
+  BAD_TRACE_DREAMER_ARTIFACT_ID, 'principle', BAD_TRACE_DREAMER_TASK_ID, PRINCIPLE_IDS.badTrace,
+  '[]', 'validated', JSON.stringify({ candidateId: BAD_TRACE_CANDIDATE_ID, title: 'goldenTrace 回归验证原则' }), eightDaysAgo, eightDaysAgo,
+);
 insertPiArtifact.run(
   'artifact-rule-bad-trace', 'rule', 'task-diag-1', PRINCIPLE_IDS.badTrace,
-  '[]', 'validated',
+  JSON.stringify([BAD_TRACE_DREAMER_ARTIFACT_ID]), 'validated',
   JSON.stringify({
+    sourceTrace: { dreamerArtifactId: BAD_TRACE_DREAMER_ARTIFACT_ID },
     implementationCode: 'function evaluate(input, helpers) { return { decision: "requireApproval", matched: true, reason: "test" }; }',
     goldenTrace: {
       traceId: 'gt-bad-trace-1',
@@ -589,7 +650,7 @@ const ledgerPrinciples: Record<string, ReturnType<typeof seededLedgerPrinciple>>
   [PRINCIPLE_IDS.promptBdd]: seededLedgerPrinciple(PRINCIPLE_IDS.promptBdd, 'BDD 审批隔离原则', ['pain-e2e-bdd']),
   [PRINCIPLE_IDS.experience]: seededLedgerPrinciple(PRINCIPLE_IDS.experience, '治理体验快照验证原则', ['pain-e2e-exp']),
   [PRINCIPLE_IDS.hookRootCause]: seededLedgerPrinciple(PRINCIPLE_IDS.hookRootCause, '错误后必须分析根因', ['pain-e2e-hook']),
-  [PRINCIPLE_IDS.badTrace]: seededLedgerPrinciple(PRINCIPLE_IDS.badTrace, 'goldenTrace 回归验证原则', ['pain-e2e-badtrace']),
+  [PRINCIPLE_IDS.badTrace]: seededLedgerPrinciple(PRINCIPLE_IDS.badTrace, 'goldenTrace 回归验证原则', [BAD_TRACE_CANDIDATE_ID]),
   [PRINCIPLE_IDS.rulecodeOwner]: seededLedgerPrinciple(PRINCIPLE_IDS.rulecodeOwner, 'RuleCode Owner 裁决原则', ['pain-e2e-ruleowner']),
   [PRINCIPLE_IDS.rulecodeReject]: seededLedgerPrinciple(PRINCIPLE_IDS.rulecodeReject, 'RuleCode 拒绝路径原则', ['pain-e2e-rulereject']),
   [PRINCIPLE_IDS.clickApprove]: seededLedgerPrinciple(PRINCIPLE_IDS.clickApprove, '点击批准测试原则', ['pain-e2e-click-approve']),

@@ -646,6 +646,10 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
               // ledger principle UUID (via dreamer lineage → candidateId →
               // ledger) at write time; fail-soft on unresolvable chains.
               ledgerIdentity: {
+              resolveForCandidate: async (candidateId: string) => {
+                const candidate = await stateManager.getCandidate(candidateId);
+                return new PrincipleTreeLedgerAdapter({ stateDir: `${workspaceDir}/.state` }).resolveCandidatePrincipleIdentity(candidateId, candidate?.rawRecommendationKind);
+              },
                 // PRI-915: availability first — an unreadable ledger must not
                 // read as an unresolved chain.
                 isAvailable: (): boolean =>
@@ -668,7 +672,12 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
             console.error(`[PD:run-once] artificer prompt without host tool semantics: ${hostSemantics.reason} — ${hostSemantics.nextAction}`);
           }
           const runner = new ArtificerRunner(
-            { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore },
+            { stateManager, runtimeAdapter, eventEmitter, validator, artifactStore,
+              ledgerIdentity: { resolveForCandidate: async (candidateId: string) => {
+                const candidate = await stateManager.getCandidate(candidateId);
+                return new PrincipleTreeLedgerAdapter({ stateDir: `${workspaceDir}/.state` }).resolveCandidatePrincipleIdentity(candidateId, candidate?.rawRecommendationKind);
+              } },
+            },
             {
               owner: OWNER,
               runtimeKind: runtimeAdapter.kind(),

@@ -17,6 +17,8 @@
  * Metrics remain ledger-specific shapes.
  */
 
+import type { RuleCandidateBinding } from './rule-candidate-binding.js';
+
 // Single source of truth for enums (principle-enums.ts) and the Principle
 // entity (principle-schema.ts). Principle is aligned with the rich schema
 // (PRI-459) because consumers read rich-only fields like compilationRetryCount.
@@ -113,6 +115,8 @@ export interface LedgerRule extends Rule {
 }
 
 export interface LedgerTreeStore {
+  ruleCandidateBindings?: Record<string, RuleCandidateBinding>;
+  [key: string]: unknown;
   principles: Record<string, LedgerPrinciple>;
   rules: Record<string, LedgerRule>;
   implementations: Record<string, Implementation>;

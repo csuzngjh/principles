@@ -29,6 +29,7 @@ function makeLedger(overrides: Partial<Record<'has' | 'ids', unknown>> = {}): Pr
   const has = overrides.has ?? new Set<string>();
   const idsByCandidate = overrides.ids ?? new Map<string, { id: string }[]>();
   return {
+    isAvailable: () => true,
     hasPrinciple: (id: string) => (has as Set<string>).has(id),
     listForCandidate: (candidateId: string) =>
       (idsByCandidate as Map<string, { id: string }[]>).get(candidateId) ?? [],

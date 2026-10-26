@@ -425,7 +425,6 @@ export class SqliteConnection {
       );
       CREATE INDEX IF NOT EXISTS idx_pi_artifacts_source_task_id ON pi_artifacts(source_task_id);
       CREATE INDEX IF NOT EXISTS idx_pi_artifacts_artifact_kind ON pi_artifacts(artifact_kind);
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_pi_artifacts_idempotency ON pi_artifacts(source_task_id, artifact_kind);
 
       CREATE TABLE IF NOT EXISTS approvals (
         approval_id TEXT PRIMARY KEY,
@@ -873,6 +872,21 @@ export class SqliteConnection {
 
   private migrateSchema(): void {
     const db = this.db as Database.Database;
+
+    // Preserve prior PI artifacts across bounded revisions; no governance rows are rewritten.
+    const artifactTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pi_artifacts'").get();
+    if (artifactTable) {
+      const artifactColumns: unknown[] = db.prepare('PRAGMA table_info(pi_artifacts)').all();
+      const epochPresent = artifactColumns.some(column => isRecord(column) && column.name === 'revision_epoch');
+      const indexColumns: unknown[] = db.prepare('PRAGMA index_info(idx_pi_artifacts_idempotency)').all();
+      if (!epochPresent || !indexColumns.some(column => isRecord(column) && column.name === 'revision_epoch')) {
+        db.transaction(() => {
+          if (!epochPresent) db.exec('ALTER TABLE pi_artifacts ADD COLUMN revision_epoch INTEGER NOT NULL DEFAULT 0 CHECK (revision_epoch >= 0)');
+          db.exec('DROP INDEX IF EXISTS idx_pi_artifacts_idempotency');
+          db.exec('CREATE UNIQUE INDEX idx_pi_artifacts_idempotency ON pi_artifacts(source_task_id, artifact_kind, revision_epoch)');
+        }).immediate();
+      }
+    }
 
     const tableExists = db.prepare(
       "SELECT name FROM sqlite_master WHERE type='table' AND name='principle_candidates'"

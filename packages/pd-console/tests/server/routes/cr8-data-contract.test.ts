@@ -112,7 +112,7 @@ function seedArtifact(
     ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
   ).run(
     artifactId,
-    'rule_implementation',
+    'principle', // Current PI schema; this fixture serves prompt approval read models.
     `task-${artifactId}`,
     sourcePrincipleId,
     null,
@@ -404,7 +404,7 @@ describe('CR8 Backend Data Contract Routes', () => {
 
   describe('GET /api/v1/approvals/grouped — structure', () => {
     it('returns groups with principleId, principleTitle, status, and records', async () => {
-      const principleId = 'cr8-grouped-principle';
+      const principleId = '6d2f3fe6-b465-4a77-ad6b-af10aac5fc7d';
       const artifactId1 = `artifact-grouped-1-${Date.now()}`;
       const artifactId2 = `artifact-grouped-2-${Date.now()}`;
 
