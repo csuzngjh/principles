@@ -143,6 +143,12 @@ export const STUB_STRATEGIES = {
 
 export const RUNNER_EXECUTION_MODES = ['offline-stub', 'F1-direct-model', 'F2-real-host'];
 
+/** Automatic dispatch stop: after this many CONSECUTIVE RESULT_UNKNOWN unit
+ *  settlements in one run, every remaining unit is refused (UNKNOWN_STREAK_
+ *  STOPPED) before any dispatch. Run-scoped; never mutates authorization,
+ *  budget or plan. */
+export const STAGE_R_UNKNOWN_STREAK_LIMIT = 3;
+
 /**
  * Serial study run. One writer (lock), one unit at a time, append-only
  * records. Each unit: verify frozen + compose the arm prompt → classify
@@ -175,8 +181,17 @@ export async function runChallengeStudy({
   const lock = acquireStudyWriteLock(studyDir, { owner });
   ledger.appendEvent({ type: 'RUN_STARTED', owner, plan });
 
-  const summary = { studyId: null, units: [], interrupted: null };
+  const summary = { studyId: null, units: [], interrupted: null, stoppedReason: null };
   const attemptId = plan.attemptId || 'a1';
+  // Automatic dispatch stop (SPEC §7.4 discipline, made machine-enforced):
+  // after N CONSECUTIVE units settle RESULT_UNKNOWN in THIS run, no further
+  // unit may dispatch anything. The streak counts only actual settlements:
+  // an ambiguous RESULT_UNKNOWN increments it; a SUCCEEDED or FAILED_KNOWN
+  // settlement resets it; recovery-classified units, skips and refusals
+  // leave it unchanged. The stop is run-scoped — it never touches the
+  // authorization, never widens the budget, never changes the plan, and
+  // keeps every existing ledger row and attempt record intact.
+  let consecutiveUnknown = 0;
   try {
     for (const armId of plan.arms) {
       for (const caseId of plan.cases) {
@@ -192,6 +207,14 @@ export async function runChallengeStudy({
           if (before.state === 'RESULT_UNKNOWN') {
             ledger.appendEvent({ type: 'UNIT_REFUSED', unit, reason: 'result_unknown_no_auto_retry' });
             summary.units.push({ unit, state: 'RESULT_UNKNOWN', refused: true });
+            continue;
+          }
+          if (consecutiveUnknown >= STAGE_R_UNKNOWN_STREAK_LIMIT) {
+            // streak stop: BEFORE any input read, gate call, factory
+            // invocation or reservation — nothing downstream can dispatch.
+            if (summary.stoppedReason === null) summary.stoppedReason = `stage_r_unknown_streak_stop: ${consecutiveUnknown} consecutive RESULT_UNKNOWN units — automatic dispatch stop`;
+            ledger.appendEvent({ type: 'UNIT_REFUSED', unit, reason: 'stage_r_unknown_streak_stop', detail: `${consecutiveUnknown} consecutive RESULT_UNKNOWN units — no further dispatch this run (resume requires a new run; settled attempts are never retried)` });
+            summary.units.push({ unit, state: 'UNKNOWN_STREAK_STOPPED', refused: true, reason: 'stage_r_unknown_streak_stop' });
             continue;
           }
 
@@ -395,6 +418,7 @@ export async function runChallengeStudy({
             ledger.appendAdjudication({ unit, suiteHash: frozen.suiteHash, objectiveTaskOutcome: adjudication.objectiveTaskOutcome, adjudication });
             ledger.appendEvent({ type: 'UNIT_FINISHED', unit, result: 'SUCCEEDED', objectiveTaskOutcome: adjudication.objectiveTaskOutcome });
             summary.units.push({ unit, state: 'SUCCEEDED', objectiveTaskOutcome: adjudication.objectiveTaskOutcome });
+            consecutiveUnknown = 0; // a definite execution settlement breaks the ambiguity streak
           } catch (e) {
             if (e instanceof SimulatedCrashError) {
               // Process-death simulation: no result row, no attempt file, lock
@@ -432,6 +456,7 @@ export async function runChallengeStudy({
               }, null, 2)}\n`, 'utf8');
               ledger.appendEvent({ type: 'UNIT_FINISHED', unit, result: 'RESULT_UNKNOWN', detail });
               summary.units.push({ unit, state: 'RESULT_UNKNOWN', ambiguous: true, detail });
+              consecutiveUnknown += 1; // an ambiguous settlement extends the streak (dispatch stop at the limit)
               continue;
             }
             const failureDetail = `execution_error: ${e.message}`;
@@ -450,6 +475,7 @@ export async function runChallengeStudy({
             }, null, 2)}\n`, 'utf8');
             ledger.appendEvent({ type: 'UNIT_FINISHED', unit, result: 'FAILED_KNOWN', detail: failureDetail });
             summary.units.push({ unit, state: 'FAILED_KNOWN', detail: failureDetail });
+            consecutiveUnknown = 0; // a definite execution settlement breaks the ambiguity streak
           }
         }
       }
