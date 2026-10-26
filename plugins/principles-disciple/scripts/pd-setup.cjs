@@ -30,7 +30,7 @@ const path = require('path');
 const os = require('os');
 const { pathToFileURL } = require('url');
 const readline = require('node:readline/promises');
-const { ensurePluginData, locatePluginRoot, locateWorkspace, pdCliCommand, requireFlagValue, verifyInstalledRuntime } = require('./pd-locate.cjs');
+const { ensurePluginData, locatePluginRoot, locateWorkspace, pdCliCommand, requireFlagValue, resetInstalledRuntime, verifyInstalledRuntime } = require('./pd-locate.cjs');
 
 function fail(reason, nextAction) {
   console.error(`[PD:setup] status=failed reason=${reason}`);
@@ -193,48 +193,77 @@ async function main() {
   // with the bytes forces a reinstall instead of being trusted.
   if (!installNeeded && !verifyInstalledRuntime(runtimeDir, desired).ok) installNeeded = true;
 
-  if (installNeeded) {
-    fs.mkdirSync(runtimeDir, { recursive: true });
+  fs.mkdirSync(runtimeDir, { recursive: true });
+  if (!fs.existsSync(path.join(runtimeDir, 'package.json'))) {
     fs.writeFileSync(path.join(runtimeDir, 'package.json'), JSON.stringify({ name: 'pd-plugin-runtime', private: true }, null, 2));
-    const install = runNpm(
-      [
-        'install', '--no-audit', '--no-fund', '--loglevel=error', '--omit=dev',
-        // PRI-1046: with a stale packument cache npm can drop an exact pin and
-        // still exit 0, so offline resolution must not win here. sync-plugin.mjs
-        // removed the same flag for the same reason.
-        '--fetch-retries=0', '--fetch-timeout=30000',
-        ...(args.adapterSource || args.hostRuntimeSource || args.coreSource ? ['--install-links'] : []),
-        args.adapterSource ? `file:${args.adapterSource}` : `@principles/codex-adapter@${desired.codexAdapter}`,
-        args.hostRuntimeSource ? `file:${args.hostRuntimeSource}` : `@principles/host-runtime@${desired.hostRuntime}`,
-        args.coreSource ? `file:${args.coreSource}` : `@principles/core@${desired.core}`,
-      ],
-      { cwd: runtimeDir, stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000 },
-    );
-    if (install.status !== 0) {
-      fail(
-        `runtime_install_failed:${String(install.stderr).slice(0, 300).replace(/\s+/g, ' ')}`,
-        'Check network/npm access. If the @principles packages are not yet published, wait for the release announcement, then re-run $pd-control setup.',
-      );
-      return;
-    }
+  }
+  // PRI-1046: existence is not identity, and neither is an npm exit code. npm
+  // can log `placeDep … REPLACE` + `REMOVE node_modules/…` and still exit 0, so
+  // the acceptance test is always the bytes on disk.
+  const adapterEntry = path.join(runtimeDir, 'node_modules', '@principles', 'codex-adapter', 'dist', 'pd-hook.js');
+  const attestRuntime = () => {
+    const verified = verifyInstalledRuntime(runtimeDir, desired);
+    const adapterEntryPresent = fs.existsSync(adapterEntry);
+    return { verified, adapterEntryPresent, ok: verified.ok && adapterEntryPresent };
+  };
+  const attestationDetail = (attestation) => {
+    const rows = attestation.verified.mismatched.map((row) => `${row.packageName}@${row.installed}!=${row.pinned}`);
+    if (!attestation.adapterEntryPresent) rows.push('codex-adapter/dist/pd-hook.js:missing');
+    return rows.join(',');
+  };
+  const installRuntime = () => runNpm(
+    [
+      'install', '--no-audit', '--no-fund', '--loglevel=error', '--omit=dev',
+      // PRI-1046: a stale packument cache used to let offline resolution win and
+      // drop the exact pin, which is why --prefer-offline is gone. Retries stay
+      // at 0 and the failure stays loud — the bytes below decide acceptance, so
+      // a retry could only lengthen a real network error, never mask a drop.
+      '--fetch-retries=0', '--fetch-timeout=60000',
+      ...(args.adapterSource || args.hostRuntimeSource || args.coreSource ? ['--install-links'] : []),
+      args.adapterSource ? `file:${args.adapterSource}` : `@principles/codex-adapter@${desired.codexAdapter}`,
+      args.hostRuntimeSource ? `file:${args.hostRuntimeSource}` : `@principles/host-runtime@${desired.hostRuntime}`,
+      args.coreSource ? `file:${args.coreSource}` : `@principles/core@${desired.core}`,
+    ],
+    { cwd: runtimeDir, stdio: ['ignore', 'pipe', 'pipe'], timeout: 600_000 },
+  );
+  const installFailed = (install) => fail(
+    `runtime_install_failed:${String(install.stderr).slice(0, 300).replace(/\s+/g, ' ')}`,
+    'Check network/npm access. If the @principles packages are not yet published, wait for the release announcement, then re-run $pd-control setup.',
+  );
+
+  if (installNeeded) {
+    const install = installRuntime();
+    if (install.status !== 0) { installFailed(install); return; }
     adapterSource = args.adapterSource;
   }
 
-  // Verify the runtime resolves from the installed location.
-  const adapterEntry = path.join(runtimeDir, 'node_modules', '@principles', 'codex-adapter', 'dist', 'pd-hook.js');
-  if (!fs.existsSync(adapterEntry)) {
-    fail('runtime_install_incomplete', 'The adapter entry is missing after install. Re-run $pd-control setup; if it repeats, remove the plugin data dir and retry.');
-    return;
+  let attested = attestRuntime();
+  let runtimeRepair;
+  if (!attested.ok) {
+    // The one silent-drop shape a clean retry can still fix: npm claimed
+    // success while leaving a tree the pins can never be satisfied from
+    // (nested-only copy, half-removed module). Discard node_modules + the
+    // lockfile and install once more instead of asking the Owner to hand-delete
+    // them. Still unattested afterwards is a loud failure with the rows.
+    const reset = resetInstalledRuntime(runtimeDir);
+    if (!reset.ok) {
+      fail(`runtime_cleanup_failed:${reset.reason}`, 'Close anything using the plugin data runtime dir (a running Codex session can hold it), then re-run $pd-control setup.');
+      return;
+    }
+    const retry = installRuntime();
+    if (retry.status !== 0) { installFailed(retry); return; }
+    runtimeRepair = { reason: 'bytes_not_attested_after_install', firstMismatch: attestationDetail(attested), removed: reset.removed };
+    console.error(`[PD:setup] note=runtime_reinstall_after_byte_mismatch firstMismatch=${runtimeRepair.firstMismatch} removed=${reset.removed.join(',')}`);
+    attested = attestRuntime();
   }
-  // PRI-1046: existence is not identity. npm can report a successful install
-  // while leaving a package out of the top-level tree, so the pin counts as
-  // satisfied only when the installed manifests carry the pinned versions.
-  const verified = verifyInstalledRuntime(runtimeDir, desired);
-  if (!verified.ok) {
-    fail(
-      `runtime_pin_mismatch:${verified.mismatched.map((row) => `${row.packageName}@${row.installed}!=${row.pinned}`).join(',')}`,
-      'npm reported success but the pinned runtime is not installed. Remove the plugin data runtime dir, then re-run $pd-control setup.',
-    );
+  if (!attested.ok) {
+    // rc-9: name the exact rows. A version mismatch outranks a missing entry
+    // because it explains the whole tree, not one file.
+    if (attested.verified.ok) {
+      fail('runtime_install_incomplete', `Runtime packages match the pins but codex-adapter/dist/pd-hook.js is missing after a clean reinstall. Re-run $pd-control setup; if it repeats, remove the plugin data runtime dir and retry.`);
+    } else {
+      fail(`runtime_pin_mismatch:${attestationDetail(attested)}`, 'npm reported success twice and the pinned runtime is still not on disk. Remove the plugin data runtime dir, then re-run $pd-control setup.');
+    }
     return;
   }
   // The marker is the short-circuit for every later run, so it may be written
@@ -290,7 +319,8 @@ async function main() {
     pluginData: data.pluginData,
     runtime: desired,
     runtimeSource: adapterSource ? 'local_adapter_build' : 'published_packages',
-    runtimeInstalled: !installNeeded ? 'already-present' : 'installed',
+    runtimeInstalled: installNeeded || runtimeRepair ? 'installed' : 'already-present',
+    ...(runtimeRepair ? { runtimeRepair } : {}),
     workspace: workspaceDir,
     workspaceConfig: fs.existsSync(configPath) ? 'present' : 'absent (run pd runtime init without --skip-init, or create .pd/config.yaml)',
     workspaceInit: initResult,
@@ -303,6 +333,7 @@ async function main() {
   else {
     console.log('[PD:setup] ok');
     console.log(`  runtime   : @principles/codex-adapter@${desired.codexAdapter} + host-runtime@${desired.hostRuntime} + core@${desired.core} (${report.runtimeInstalled})`);
+    if (runtimeRepair) console.log(`  repaired  : reinstalled from a clean tree after npm left unattested bytes (${runtimeRepair.firstMismatch})`);
     console.log(`  workspace : ${workspaceDir} — config ${report.workspaceConfig}`);
     console.log(`  ingestion : ${report.ingestionConsent}${consent.note ? ` (${consent.note})` : ''}`);
     console.log(`  worker    : ${workerRegistration.status} — ${workerRegistration.nextAction}`);
