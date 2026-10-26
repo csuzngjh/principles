@@ -1,5 +1,13 @@
 # @principles/host-runtime
 
+## 0.13.1
+
+### Patch Changes
+
+- 52d2c6a: Connect Owner-decided principle reuse to shared identity resolution, and add authenticated rule-candidate binding with one bounded revision. Preserve prior PI artifacts across revision epochs and reject stale or revoked binding receipts before generation and publication. The bundled Console exposes binding separately from rule approval and activation.
+- Updated dependencies [52d2c6a]
+  - @principles/core@1.296.2
+
 ## 0.13.0
 
 ### Minor Changes
