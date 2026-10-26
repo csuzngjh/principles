@@ -1,6 +1,5 @@
 ---
 "@principles/core": patch
-"@principles/pd-console": patch
 "create-principles-disciple": patch
 ---
 
