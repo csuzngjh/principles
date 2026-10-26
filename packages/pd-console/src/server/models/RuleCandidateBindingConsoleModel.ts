@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 import {
-  createRuntimeStateHandle, PrincipleTreeLedgerAdapter, reviseRuleBindingOnce,
+  createRuntimeStateHandle, PrincipleTreeLedgerAdapter, reviseRuleBindingOnce, reviseRuleSourceOnce,
 } from '@principles/core/runtime-v2';
 import type { RuntimeStateManager, RuleCandidateBindingRequest, RuleCandidateBindingMutationResult } from '@principles/core/runtime-v2';
 import type { RuleBindingReviewView, RuleBindingQueueView } from '../../shared/rule-candidate-binding-contract.js';
@@ -117,6 +117,32 @@ export class RuleCandidateBindingConsoleModel {
     try {
       const ledger = this.ledger(handle.stateManager);
       return await reviseRuleBindingOnce({ stateManager: handle.stateManager, ledger: { resolveForCandidate: async id => ledger.resolveCandidatePrincipleIdentity(id, 'rule') }, candidateId, ...input });
+    } finally { await handle.close(); }
+  }
+
+  /**
+   * SPEC-PRI-1047 修复 B: 认证入口的一次 Owner source-correction。区别于
+   * revise（binding 修订预算）：这是「修正上游材料」的独立一次预算，回执
+   * 绑定真实 Owner actor/request。调用侧（路由）负责 ownerIdentity 门。
+   */
+  async correctSource(candidateId: string, input: {
+    expectedBindingRevision: number;
+    expectedScribeTaskId: string;
+    expectedArtificerTaskId: string;
+    expectedScribeArtifactDigest: string;
+    reason: string;
+    requestId: string;
+  }, actorId: string) {
+    const handle = await createRuntimeStateHandle({ workspaceDir: this.workspaceDir });
+    try {
+      const ledger = this.ledger(handle.stateManager);
+      return await reviseRuleSourceOnce({
+        stateManager: handle.stateManager,
+        ledger: { resolveForCandidate: async id => ledger.resolveCandidatePrincipleIdentity(id, 'rule') },
+        candidateId,
+        ...input,
+        actor: actorId,
+      });
     } finally { await handle.close(); }
   }
 }

@@ -395,6 +395,14 @@ export interface PITaskMetadata {
   /** Execution budget receipt: one binding repair per candidate; not a relation authority. */
   ruleBindingRevisionCauseId?: string;
   /**
+   * SPEC-PRI-1047 修复 B: 一次 Owner source-correction 的消费标记
+   * （`rule-source-correction:<candidateId>:<bindingRevision>`）。与
+   * binding revision、runner attempt、Rule 审批是互不相同的预算。
+   */
+  sourceCorrectionCauseId?: string;
+  /** SPEC-PRI-1047 修复 B: 授权 + 消费回执（见 SourceCorrectionReceiptV1）。 */
+  sourceCorrectionReceipt?: SourceCorrectionReceiptV1;
+  /**
    * Rollout reviewer needs_revision 的修订路由载荷: 记录修订目标 stage、
    * 迭代号与来源,保证 revision budget 可判定 (MVP_CORE_LOOP_CONTRACT INV-07)。
    */
@@ -496,6 +504,61 @@ export interface IntentBasisVerificationRecordV1 {
 
 /** SPEC 7.2 four-state trusted-fact resolution (fixed field meanings). */
 export type TrustedFactResolutionKind = 'approved' | 'not_approved' | 'not_required' | 'unknown';
+
+/**
+ * SPEC-PRI-1047 修复 B: 一次 Owner source-correction 的授权 + 消费回执。
+ * 归既有任务元数据 owner（scribe 任务的 pi_metadata），不是平行数据库。
+ * 消费与 Scribe 重开是同一原子写：receipt 落库 = 该候选的一次源修订预算
+ * 已消费；失败路径零写入零消费。reopenOutcome 由 orchestrator 的定点
+ * CAS 续接分支在原 Artificer 重开完成后回填（undefined = 尚未处理）。
+ */
+export interface SourceCorrectionReceiptV1 {
+  readonly version: 1;
+  readonly candidateId: string;
+  readonly scribeTaskId: string;
+  readonly artificerTaskId: string;
+  /** 授权时点当前 scribe 工件（材料未变才允许重开——不空转调用模型）。 */
+  readonly sourceArtifactId: string;
+  readonly sourceArtifactDigest: string;
+  readonly bindingRevision: number;
+  readonly decisionId: string;
+  /** 授权核验过的 Artificer 停点 reasonCode（续接时必须仍然匹配）。 */
+  readonly expectedStopReasonCode: string;
+  readonly reason: string;
+  /** 真实 Owner actor 与请求 id（认证入口透传）。 */
+  readonly actor: string;
+  readonly requestId: string;
+  readonly consumedAt: string;
+  readonly status: 'consumed';
+  readonly reopenOutcome?: {
+    readonly kind: 'reopened' | 'reopened_earlier' | 'already_in_flight' | 'conflict' | 'task_missing';
+    readonly recordedAt: string;
+    readonly detail?: string;
+  };
+}
+
+/** rc-1/rc-4: receipt 是 untrusted runtime data（diagnosticJson 反序列化侧）。 */
+function isValidSourceCorrectionReceipt(value: unknown): value is SourceCorrectionReceiptV1 {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const r = value as Record<string, unknown>;
+  if (r.version !== 1) return false;
+  for (const key of ['candidateId', 'scribeTaskId', 'artificerTaskId', 'sourceArtifactId', 'decisionId', 'expectedStopReasonCode', 'reason', 'actor', 'requestId', 'consumedAt'] as const) {
+    if (typeof r[key] !== 'string' || r[key].trim() === '') return false;
+  }
+  if (!/^sha256:[0-9a-f]{64}$/.test(r.sourceArtifactDigest as string)) return false;
+  if (typeof r.bindingRevision !== 'number' || !Number.isSafeInteger(r.bindingRevision) || r.bindingRevision < 1) return false;
+  if (r.status !== 'consumed') return false;
+  if (Object.hasOwn(r, 'reopenOutcome') && r.reopenOutcome !== undefined) {
+    const outcome = r.reopenOutcome;
+    if (typeof outcome !== 'object' || outcome === null || Array.isArray(outcome)) return false;
+    const o = outcome as Record<string, unknown>;
+    if (!['reopened', 'reopened_earlier', 'already_in_flight', 'conflict', 'task_missing'].includes(String(o.kind))) return false;
+    if (typeof o.recordedAt !== 'string' || o.recordedAt.trim() === '') return false;
+    if (Object.hasOwn(o, 'detail') && o.detail !== undefined && typeof o.detail !== 'string') return false;
+  }
+  return true;
+}
+
 
 /** SPEC-RULECODE-QUALITY-001 §9: bounded source-fault retry state (see PITaskMetadata.sourceFaultBackoff). */
 export interface SourceFaultBackoffRecordV1 {
@@ -670,6 +733,8 @@ export function serializePITaskMetadata(metadata: PITaskMetadata): string {
       revisionFeedback: metadata.revisionFeedback,
       revisionCauseId: metadata.revisionCauseId,
       ruleBindingRevisionCauseId: metadata.ruleBindingRevisionCauseId,
+      sourceCorrectionCauseId: metadata.sourceCorrectionCauseId,
+      sourceCorrectionReceipt: metadata.sourceCorrectionReceipt,
       rolloutRevisionPayload: metadata.rolloutRevisionPayload,
       completionIntent: metadata.completionIntent,
       humanReviewContext: metadata.humanReviewContext,
@@ -712,6 +777,8 @@ export function mergePITaskMetadata(base: PITaskRecord, overrides: Partial<PITas
     revisionFeedback: base.revisionFeedback,
     revisionCauseId: base.revisionCauseId,
     ruleBindingRevisionCauseId: base.ruleBindingRevisionCauseId,
+    sourceCorrectionCauseId: base.sourceCorrectionCauseId,
+    sourceCorrectionReceipt: base.sourceCorrectionReceipt,
     rolloutRevisionPayload: base.rolloutRevisionPayload,
     completionIntent: base.completionIntent,
     humanReviewContext: base.humanReviewContext,
@@ -1050,6 +1117,14 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
   if (Object.hasOwn(m, 'ruleBindingRevisionCauseId') && m.ruleBindingRevisionCauseId !== undefined) {
     if (typeof m.ruleBindingRevisionCauseId !== 'string' || !m.ruleBindingRevisionCauseId.startsWith('rule-binding:') || m.ruleBindingRevisionCauseId.length > 512) return null;
   }
+  if (Object.hasOwn(m, 'sourceCorrectionCauseId') && m.sourceCorrectionCauseId !== undefined) {
+    if (typeof m.sourceCorrectionCauseId !== 'string' || !m.sourceCorrectionCauseId.startsWith('rule-source-correction:') || m.sourceCorrectionCauseId.length > 512) return null;
+  }
+  let sourceCorrectionReceipt: SourceCorrectionReceiptV1 | undefined;
+  if (Object.hasOwn(m, 'sourceCorrectionReceipt') && m.sourceCorrectionReceipt !== undefined) {
+    if (!isValidSourceCorrectionReceipt(m.sourceCorrectionReceipt)) return null;
+    ({ sourceCorrectionReceipt } = m);
+  }
 
   // rolloutRevisionPayload: optional, full validation (rc-1/rc-4).
   let rolloutRevisionPayload: RolloutRevisionPayload | undefined;
@@ -1201,6 +1276,8 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
     revisionFeedback: typeof m.revisionFeedback === 'string' ? m.revisionFeedback : undefined,
     revisionCauseId: typeof m.revisionCauseId === 'string' ? m.revisionCauseId : undefined,
     ruleBindingRevisionCauseId: typeof m.ruleBindingRevisionCauseId === 'string' ? m.ruleBindingRevisionCauseId : undefined,
+    sourceCorrectionCauseId: typeof m.sourceCorrectionCauseId === 'string' ? m.sourceCorrectionCauseId : undefined,
+    sourceCorrectionReceipt,
     rolloutRevisionPayload,
     completionIntent,
     humanReviewContext,
@@ -1263,6 +1340,8 @@ export function hydratePITaskRecord(task: TaskRecord): PITaskRecord | null {
     revisionFeedback: meta.revisionFeedback,
     revisionCauseId: meta.revisionCauseId,
     ruleBindingRevisionCauseId: meta.ruleBindingRevisionCauseId,
+    sourceCorrectionCauseId: meta.sourceCorrectionCauseId,
+    sourceCorrectionReceipt: meta.sourceCorrectionReceipt,
     rolloutRevisionPayload: meta.rolloutRevisionPayload,
     completionIntent: meta.completionIntent,
     humanReviewContext: meta.humanReviewContext,

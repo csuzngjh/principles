@@ -145,7 +145,7 @@ ${coreAxiomsBlock}OUTPUT FORMAT (pure JSON, no markdown):
   "executionConditions": {
     "version": 1,
     "requiredFacts": [
-      {"factKind": "<trusted external fact kind the principle's enforcement depends on, e.g. design_approval>", "required": true, "textualBasis": "<the Owner-attributed text this requirement was read from>"}
+      {"factKind": "<trusted external fact kind the principle's enforcement depends on, e.g. design_approval>", "required": true, "textualBasis": "<ONE CONTINUOUS original sentence copied verbatim from the Owner-attributed material — no label prefix, no added quotes, no ellipsis>"}
     ]
   },
   "generatedAt": "<ISO-8601 timestamp>"
@@ -166,7 +166,7 @@ OWNER-SOURCE GROUNDING (applies when formation evidence is present):
 
 EXECUTION CONDITIONS (required — SPEC-RULECODE-QUALITY-001 A1):
 - "executionConditions" declares WHICH trusted external facts the principle's enforcement depends on — facts a per-tool-call rule input can never establish by itself (an Owner approval, an external confirmation, a host-side decision). Rule generation is gated on these being resolvable through a trusted-facts source; the generator can never self-declare them satisfied.
-- Ground each entry in the SAME Owner-attributed statements as the contract: textualBasis quotes (or precisely cites) the text that states the requirement. NEVER invent a fact requirement that no Owner-attributed text states, and NEVER omit one that it does state.
+- Ground each entry in the SAME Owner-attributed statements as the contract (the diagnosis evidence notes, philosopher material, or intent-contract anchors carried in your input). VERBATIM CITATION CONTRACT: each "textualBasis" MUST be ONE CONTINUOUS original sentence copied from that material — a deterministic checker requires the whole basis (after normalizing case/whitespace/punctuation) to appear contiguously in the material. Do NOT prefix it with citation labels (e.g. "Owner原文：" / "Owner says:"), do NOT wrap your own quotes around it, do NOT bridge omissions with "…" or "..." or "……", and do NOT paraphrase or extend beyond the original wording — any of these fails validation and the draft is rejected. If the original sentence is long, quote a shorter CONTINUOUS span of it instead of abbreviating the middle. NEVER invent a fact requirement that no Owner-attributed text states, and NEVER omit one that it does state.
 - factKind vocabulary: use "design_approval" for requirements that an Owner/authority confirm a design BEFORE implementation. Use an empty requiredFacts array ("requiredFacts": []) when the principle is enforceable purely from the observable tool-call input and history window — that is a valid, common answer.
 - required: true = the fact MUST be resolvable for a faithful rule to exist. Entries with required:false may be omitted entirely.
 - executionConditions MUST be a nested JSON OBJECT with version exactly 1 — never a JSON-encoded string.
@@ -273,7 +273,19 @@ ${formationEvidenceBlock}${languageDirective}`;
  * additive; element validation is hand-rolled in DefaultScribeValidator
  * (present-but-malformed is a hard rejection).
  */
-export const SCRIBE_PROMPT_CONTRACT_VERSION = 'scribe-output-v1.prompt.v8';
+/**
+ * SPEC-PRI-1047 (2026-10-26): bumped v8 → v9. The EXECUTION CONDITIONS
+ * textualBasis contract is tightened to the SAME verbatim-contiguous rule the
+ * Scribe success boundary now enforces (textual-basis-anchor.ts) and the
+ * artificer intent preflight re-checks: one continuous original sentence,
+ * no citation labels, no quote wrapping, no ellipsis-bridged reconstruction.
+ * Production evidence (run4, 2026-10-26): the "quotes (or precisely cites)"
+ * wording let a labeled, ellipsis-omitted paraphrase pass the structural
+ * validator and die at the artificer preflight with no repair feedback path.
+ * Wire shape unchanged; a run on v9 emits exactly the v8 shape plus the new
+ * version string.
+ */
+export const SCRIBE_PROMPT_CONTRACT_VERSION = 'scribe-output-v1.prompt.v9';
 
 export class ScribePromptBuilder {
   private readonly coreGrounding: boolean;

@@ -555,7 +555,11 @@ describe('resumeOwnerEvidenceTask (T05)', () => {
       runtimeKind: 'pi-ai',
     }));
     expect(leased.taskId).toBe(TASK_ID);
-    expect(leased.attemptCount).toBe(3); // history preserved: max(1,2) + 1
+    // SPEC-PRI-1047: the resume reset attemptCount to 0 (a new execution epoch),
+    // so the lease consumes EPOCH attempt 1 — not the global run ordinal. The
+    // run row itself keeps the deterministic global spelling run_<taskId>_3
+    // (max(1,2)+1), which is what execution events' persistentRunId resolves to.
+    expect(leased.attemptCount).toBe(1);
 
     const { runs } = await fixture.withHandle(async (sm) => sm.getValidRunsByTaskTolerant(TASK_ID));
     expect(runs.map((r) => r.runId)).toEqual([

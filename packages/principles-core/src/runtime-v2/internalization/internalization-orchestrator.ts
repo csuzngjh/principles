@@ -18,9 +18,10 @@ import type { TaskRecord, PDTaskStatus } from '../task-status.js';
 import type { RuntimeStateManager } from '../store/runtime-state-manager.js';
 import type { RunnerKind } from './peer-runner-contracts.js';
 import type { DependencyGateResult, NextTaskProposal } from './internalization-state-machine.js';
-import { hydratePITaskRecord, createPITaskDiagnosticJson } from './pitask-metadata.js';
+import { hydratePITaskRecord, createPITaskDiagnosticJson, mergePITaskMetadata } from './pitask-metadata.js';
 import { reopenTaskForRevision, buildRepairRevisionCauseId } from './revision-reopen.js';
-import type { PITaskMetadata } from './pitask-metadata.js';
+import type { PITaskMetadata, SourceCorrectionReceiptV1 } from './pitask-metadata.js';
+import type { PITaskRecord } from './peer-runner-contracts.js';
 import { isPeerRunnerKind, isDiagnosticianStageKind, isRunnerKind } from './peer-runner-contracts.js';
 import {
   validateInternalizationTaskReady,
@@ -154,6 +155,14 @@ export type CommitNextTaskResult =
   | { decision: 'successor_reopened'; sourceTaskId: string; reopenedTaskId: string; successorKind: RunnerKind }
   /** A/B: 同 causeId 重放的 no-op reopen — 已 materialized,不计数为恢复 */
   | { decision: 'revision_reopen_noop'; sourceTaskId: string; reopenedTaskId: string; reason: string }
+  /** SPEC-PRI-1047: source-correction 新 Scribe 成功 → 原 NHR Artificer 被定点 CAS 续接 */
+  | { decision: 'source_correction_reopened'; sourceTaskId: string; reopenedTaskId: string; reason: string }
+  /** SPEC-PRI-1047: 定点续接 no-op（崩溃重放已在途/已续接）— receipt outcome 已回填 */
+  | { decision: 'source_correction_reopen_noop'; sourceTaskId: string; reopenedTaskId: string; reason: string }
+  /** SPEC-PRI-1047: 定点续接冲突（停点漂移/状态不符）— 可观测，不落入通用级联 */
+  | { decision: 'source_correction_reopen_conflict'; sourceTaskId: string; reopenedTaskId: string; reason: string }
+  /** SPEC-PRI-1047: 定点续接失败（目标缺失等）— 可观测，receipt outcome 记 task_missing */
+  | { decision: 'source_correction_reopen_failed'; sourceTaskId: string; reopenedTaskId: string; reason: string }
   /** P0-3: 决策型任务缺少 durable + legacy verdict — fail-closed, 不 seed 任何后继 */
   | { decision: 'blocked_missing_verdict'; taskId: string; reason: string };
 
@@ -541,6 +550,28 @@ export class InternalizationOrchestrator {
 
     if (piTask.status !== 'succeeded') {
       return { decision: 'source_not_succeeded', taskId, status: piTask.status };
+    }
+
+    // ── SPEC-PRI-1047 修复 B: source-correction 定点续接分支 ──
+    // 本次完成的 scribe 携带 source-correction receipt 时，本 transition 由
+    // source-correction 独占（无论 outcome 是否已回填）：定点 CAS 重开
+    // receipt 指向的原 Artificer（核对它确因该源材料而停、保留原 taskId/
+    // 依赖、经 MAX(revision_epoch) 视图消费新工件）。outcome 已记录
+    // （reopened/reopened_earlier/already_in_flight）→ 幂等 no-op；
+    // conflict/task_missing → 终态可观测，**不落入** findExistingSuccessor /
+    // 通用级联——否则周期性 reconciliation 重放会把刚被拒绝重开的
+    // Artificer 经通用级联重开，绕过停点核验（评审 P2 #3）。分支位于
+    // proposeNextTask 之前：receipt 未处理时不依赖 job graph 可解（评审 P3 #8）。
+    if (rawTask.taskKind === 'scribe' && piTask.sourceCorrectionReceipt !== undefined) {
+      if (piTask.sourceCorrectionReceipt.reopenOutcome !== undefined) {
+        return {
+          decision: 'source_correction_reopen_noop',
+          sourceTaskId: taskId,
+          reopenedTaskId: piTask.sourceCorrectionReceipt.artificerTaskId,
+          reason: `source_correction_outcome_recorded:${piTask.sourceCorrectionReceipt.reopenOutcome.kind}`,
+        };
+      }
+      return this.reopenArtificerForSourceCorrection(taskId, piTask);
     }
 
     const proposalResult = await this.proposeNextTask(taskId);
@@ -934,6 +965,133 @@ export class InternalizationOrchestrator {
     // orchestrator 方法保留为兼容委托。
     return reopenTaskForRevision(this.stateManager, taskId, options);
   }
+
+  // ── SPEC-PRI-1047 修复 B: source-correction 定点续接 ──────────────────────
+
+  /**
+   * source-correction 新 Scribe 成功后的下游定点 CAS 续接（commitNextTaskProposal
+   * 独占分支调用）。与通用级联的差异：
+   *   - 只处理 receipt 指定的原 Artificer（不泛化重开所有 NHR）；
+   *   - 核对它确因该源材料而停（reasonCode === receipt.expectedStopReasonCode）；
+   *   - CAS（updateTaskIfDiagnosticJsonUnchanged + expectedStatus）而非无条件写；
+   *   - 保留原 taskId 与依赖关系——Artificer 依赖仍是原 scribe 任务，经
+   *     pi-artifact-store 的 MAX(revision_epoch) 当前视图自然消费新工件；
+   *   - 结果回填 receipt.reopenOutcome（崩溃重放经 artificer revisionCauseId
+   *     幂等识别）。Scribe 失败/NHR 时本方法不可达（commitNextTaskProposal
+   *     早退）——下游零重开。
+   */
+  private async reopenArtificerForSourceCorrection(
+    scribeTaskId: string,
+    scribePi: PITaskRecord,
+  ): Promise<CommitNextTaskResult> {
+    const receipt: SourceCorrectionReceiptV1 | undefined = scribePi.sourceCorrectionReceipt;
+    // 调用点已保证存在；防御性回退（rc-3 fail loud 而非静默）。
+    if (receipt === undefined) {
+      return { decision: 'invalid_task_metadata', taskId: scribeTaskId, reason: 'source_correction_receipt_missing' };
+    }
+    const causeId = scribePi.sourceCorrectionCauseId
+      ?? `rule-source-correction:${receipt.candidateId}:${receipt.bindingRevision}`;
+    const { artificerTaskId } = receipt;
+    const artificerTask = await this.stateManager.getTask(artificerTaskId);
+    if (!artificerTask) {
+      await this.recordSourceCorrectionOutcome(scribeTaskId, { kind: 'task_missing', recordedAt: new Date().toISOString() });
+      return { decision: 'source_correction_reopen_failed', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: 'artificer_task_missing' };
+    }
+    const artificerPi = hydratePITaskRecord(artificerTask);
+    if (!artificerPi) {
+      await this.recordSourceCorrectionOutcome(scribeTaskId, { kind: 'conflict', recordedAt: new Date().toISOString(), detail: 'artificer_metadata_invalid' });
+      return { decision: 'source_correction_reopen_conflict', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: 'artificer_metadata_invalid' };
+    }
+    // 崩溃重放：Artificer 已带本 cause（上次续接已 materialize）→ 幂等 no-op。
+    if (artificerPi.revisionCauseId === causeId) {
+      await this.recordSourceCorrectionOutcome(scribeTaskId, { kind: 'reopened_earlier', recordedAt: new Date().toISOString() });
+      return { decision: 'source_correction_reopen_noop', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: 'source_correction_cause_already_materialized' };
+    }
+    // 他因在途（如 Owner 已用 retry 恢复）→ 不抢写；在途任务经 MAX(revision_epoch)
+    // 视图消费新工件，链路自然续接。
+    if (artificerTask.status === 'pending' || artificerTask.status === 'retry_wait') {
+      await this.recordSourceCorrectionOutcome(scribeTaskId, { kind: 'already_in_flight', recordedAt: new Date().toISOString() });
+      return { decision: 'source_correction_reopen_noop', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: `artificer_in_flight_${artificerTask.status}` };
+    }
+    if (artificerTask.status !== 'needs_human_review') {
+      const detail = `artificer_status_${artificerTask.status}`;
+      await this.recordSourceCorrectionOutcome(scribeTaskId, { kind: 'conflict', recordedAt: new Date().toISOString(), detail });
+      return { decision: 'source_correction_reopen_conflict', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: detail };
+    }
+    const stopReasonCode = artificerPi.humanReviewContext?.reasonCode ?? '';
+    if (stopReasonCode !== receipt.expectedStopReasonCode) {
+      const detail = `stop_reason_drifted:${stopReasonCode || 'none'}!=${receipt.expectedStopReasonCode}`;
+      await this.recordSourceCorrectionOutcome(scribeTaskId, { kind: 'conflict', recordedAt: new Date().toISOString(), detail });
+      return { decision: 'source_correction_reopen_conflict', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: detail };
+    }
+    const merged = mergePITaskMetadata(artificerPi, {
+      runnerDecision: undefined,
+      completionIntent: undefined,
+      revisionCount: (artificerPi.revisionCount ?? 0) + 1,
+      revisionCauseId: causeId,
+    });
+    const updated = await this.stateManager.updateTaskIfDiagnosticJsonUnchanged(
+      artificerTaskId,
+      artificerTask.diagnosticJson ?? null,
+      {
+        diagnosticJson: createPITaskDiagnosticJson(merged),
+        status: 'pending',
+        attemptCount: 0,
+        ...(artificerTask.leaseOwner || artificerTask.leaseExpiresAt ? { leaseOwner: null, leaseExpiresAt: null } : {}),
+      },
+      {
+        expectedStatus: 'needs_human_review',
+        expectedAttemptCount: artificerTask.attemptCount,
+        expectedMaxAttempts: artificerTask.maxAttempts,
+        expectedLeaseOwner: artificerTask.leaseOwner ?? null,
+        expectedLeaseExpiresAt: artificerTask.leaseExpiresAt ?? null,
+      },
+    );
+    if (!updated) {
+      const current = await this.stateManager.getTask(artificerTaskId);
+      const currentPi = current ? hydratePITaskRecord(current) : null;
+      if (currentPi && currentPi.revisionCauseId === causeId) {
+        await this.recordSourceCorrectionOutcome(scribeTaskId, { kind: 'reopened_earlier', recordedAt: new Date().toISOString() });
+        return { decision: 'source_correction_reopen_noop', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: 'concurrent_writer_materialized_same_cause' };
+      }
+      const detail = 'cas_lost_to_concurrent_writer';
+      await this.recordSourceCorrectionOutcome(scribeTaskId, { kind: 'conflict', recordedAt: new Date().toISOString(), detail });
+      return { decision: 'source_correction_reopen_conflict', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: detail };
+    }
+    await this.recordSourceCorrectionOutcome(scribeTaskId, { kind: 'reopened', recordedAt: new Date().toISOString() });
+    return { decision: 'source_correction_reopened', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: 'original_artificer_reopened_on_new_scribe_epoch' };
+  }
+
+  /**
+   * 回填 receipt.reopenOutcome（scribe 任务元数据，CAS）。回填失败不回滚
+   * 已发生的 Artificer 续接——重放经 artificer revisionCauseId === cause 幂等
+   * 识别为 reopened_earlier（rc-7：重放读取当前状态而非本调用旧快照）。
+   */
+  private async recordSourceCorrectionOutcome(
+    scribeTaskId: string,
+    outcome: NonNullable<SourceCorrectionReceiptV1['reopenOutcome']>,
+  ): Promise<void> {
+    // 单次重试的 CAS 回填：每次都重读当前行（rc-7），CAS 失败（并发写者）
+    // 再试一次；仍失败则返回 false——调用方返回值/后续 reconciliation 重放
+    // 经 artificer revisionCauseId === cause 幂等兜底，且回填缺失可由
+    // outcome_recorded 判定路径观测（rc-9：不静默吞掉）。
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const current = await this.stateManager.getTask(scribeTaskId);
+      const currentPi = current ? hydratePITaskRecord(current) : null;
+      if (!current || !currentPi || currentPi.sourceCorrectionReceipt === undefined) return;
+      if (currentPi.sourceCorrectionReceipt.reopenOutcome !== undefined) return; // 已回填（并发重放）
+      const merged = mergePITaskMetadata(currentPi, {
+        sourceCorrectionReceipt: { ...currentPi.sourceCorrectionReceipt, reopenOutcome: outcome },
+      });
+      const updated = await this.stateManager.updateTaskIfDiagnosticJsonUnchanged(
+        scribeTaskId,
+        current.diagnosticJson ?? null,
+        { diagnosticJson: createPITaskDiagnosticJson(merged) },
+      );
+      if (updated) return;
+    }
+  }
+
   /**
    * Find an existing successor task matching parentTaskId + successorKind + channel.
    * Scans pending tasks and hydrates to check PI metadata.
