@@ -542,7 +542,7 @@ console.log('[e2e-seed] principle_applications seeded: 4 receipt states for R1 v
 // 真实 SqliteDiagnosticianCommitter 提交（material 校验全链可过），保证
 // review/bind 路径在 e2e 中走的是与生产一致的候选血缘。
 const RULE_BINDING_PRINCIPLE_ID = 'e2e00000-0000-4000-8000-0000000000c1';
-const designGateOutput = {
+const designGateOutput: DiagnosticianOutputV1 = {
   valid: true,
   diagnosisId: 'e2e-rule-binding-design-gate',
   summary: 'The design change shipped without confirmation.',
@@ -554,8 +554,8 @@ const designGateOutput = {
     { kind: 'principle', description: '非简单行为变更必须先获得确认的设计。' },
     { kind: 'rule', description: '要求先交付经确认的设计，再进行非简单行为变更。' },
   ],
-} as const;
-const replyOutput = {
+};
+const replyOutput: DiagnosticianOutputV1 = {
   valid: true,
   diagnosisId: 'e2e-rule-binding-reply',
   summary: 'The conclusion was buried.',
@@ -566,7 +566,7 @@ const replyOutput = {
   recommendations: [
     { kind: 'rule', description: '面向拥有者的回复必须以一句可独立成立的结论开头。' },
   ],
-} as const;
+};
 const insertDiagnosisTask = stateDb.prepare(`
   INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, diagnostic_json, input_ref)
   VALUES (?, ?, 'succeeded', ?, ?, 1, '{}', ?)`);
@@ -579,13 +579,13 @@ const insertChainTask = stateDb.prepare(`
 const committer = new SqliteDiagnosticianCommitter(stateConn);
 insertDiagnosisTask.run('diagnosis-design-gate', 'diagnostician', threeDaysAgo, threeDaysAgo, 'pain-e2e-design-gate');
 insertDiagnosisRun.run('run-design-gate', 'diagnosis-design-gate', threeDaysAgo, threeDaysAgo, JSON.stringify(designGateOutput), threeDaysAgo, threeDaysAgo);
-await committer.commit({ taskId: 'diagnosis-design-gate', runId: 'run-design-gate', output: designGateOutput as unknown as DiagnosticianOutputV1, idempotencyKey: 'e2e-rule-binding-parent-commit' });
+await committer.commit({ taskId: 'diagnosis-design-gate', runId: 'run-design-gate', output: designGateOutput, idempotencyKey: 'e2e-rule-binding-parent-commit' });
 insertDiagnosisTask.run('diag_router-diagnosis-design-gate', 'diag_router', threeDaysAgo, threeDaysAgo, 'diagnosis-design-gate');
 insertDiagnosisRun.run('run-router-design-gate', 'diag_router-diagnosis-design-gate', threeDaysAgo, threeDaysAgo, JSON.stringify(designGateOutput), threeDaysAgo, threeDaysAgo);
-await committer.commit({ taskId: 'diag_router-diagnosis-design-gate', runId: 'run-router-design-gate', output: designGateOutput as unknown as DiagnosticianOutputV1, idempotencyKey: 'e2e-rule-binding-router-commit' });
+await committer.commit({ taskId: 'diag_router-diagnosis-design-gate', runId: 'run-router-design-gate', output: designGateOutput, idempotencyKey: 'e2e-rule-binding-router-commit' });
 insertDiagnosisTask.run('diagnosis-reply-frontload', 'diagnostician', threeDaysAgo, threeDaysAgo, 'pain-e2e-reply');
 insertDiagnosisRun.run('run-reply-frontload', 'diagnosis-reply-frontload', threeDaysAgo, threeDaysAgo, JSON.stringify(replyOutput), threeDaysAgo, threeDaysAgo);
-await committer.commit({ taskId: 'diagnosis-reply-frontload', runId: 'run-reply-frontload', output: replyOutput as unknown as DiagnosticianOutputV1, idempotencyKey: 'e2e-rule-binding-reply-commit' });
+await committer.commit({ taskId: 'diagnosis-reply-frontload', runId: 'run-reply-frontload', output: replyOutput, idempotencyKey: 'e2e-rule-binding-reply-commit' });
 const seededRuleCandidates = stateDb.prepare(`
   SELECT candidate_id AS candidateId, task_id AS taskId, recommendation_kind AS kind
   FROM principle_candidates
