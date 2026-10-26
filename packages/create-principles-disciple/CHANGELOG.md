@@ -1,5 +1,16 @@
 # create-principles-disciple
 
+## 1.145.25
+
+### Patch Changes
+
+- 0c4cbda: chore(deps): 升级 tuf-js 3.1.0 → 6.0.0。
+  
+  tuf-js 是安装器信任根供给链路的直接运行时依赖，随 create-principles-disciple 工件分发，所以记 installer patch。
+  
+  同时同步 `release-locks/release-manager/package-lock.json`：tuf-js 6 不再经由 make-fetch-happen 取元数据，其整棵传递依赖子树被剪掉，staging 的 `npm ci` 会因 lock 与源码 package.json 不一致而 EUSAGE 失败。
+- b50ea82: chore(deps): bump react 19.3.0 -> 19.3.1（#2163；@principles/pd-console 运行时 dependency，打进 console bundle 随 installer 工件分发）。同时把 lock 里 react-dom 一并解析到 19.3.1 并删掉 Dependabot 留下的 `packages/pd-console/node_modules/react` 嵌套副本——否则工作区里会同时存在两份 React（app 用 19.3.1、react-dom 的 peer 用 19.3.0），Console 会以 `Cannot read properties of null (reading 'useMemo')` 白屏。
+
 ## 1.145.24
 
 ### Patch Changes
