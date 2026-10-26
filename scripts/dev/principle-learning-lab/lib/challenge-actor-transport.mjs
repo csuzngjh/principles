@@ -50,6 +50,7 @@ import {
   createDefaultHttpsPoster,
   resolveAmdApiKey,
 } from './challenge-amd-transport.mjs';
+import { DEFAULT_REQUEST_TIMEOUT_MS } from './challenge-stage-r-gate.mjs';
 
 export const ACTOR_ACTION_TYPES = ['observe', 'ask-owner', 'report', 'deploy'];
 
@@ -198,12 +199,14 @@ export function createAmdActorResponder({
   apiKeyProvider = resolveAmdApiKey,
   maxTokens = AMD_GENERATION_BUDGET.maxTokensDefault,
   reasoningEffort = 'medium',
+  requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, // socket-inactivity timeout; MUST match the authorization's requestTimeoutMs when that field is bound
 } = {}) {
-  const poster = posterImpl || createDefaultHttpsPoster();
+  const poster = posterImpl || createDefaultHttpsPoster({ requestTimeoutMs });
   assertPublicHttpsUrl(baseUrl); // refuse at construction — no responder is ever built for a non-public target
   return {
     kind: 'amd-radeon-tokenfactory/actor-step',
     modelId, // exposed so the actor (and the runner's mode/identity check) can bind the requested identity
+    requestTimeoutMs, // exposed for the audit trail: the timeout this wiring will use
     async respond({ systemPrompt, userPrompt }) {
       const cred = apiKeyProvider(); // throws beforeSend=true when no credential — nothing dispatched
       const body = buildActorRequestBody({ systemPrompt, userPrompt, modelId, maxTokens, reasoningEffort });
