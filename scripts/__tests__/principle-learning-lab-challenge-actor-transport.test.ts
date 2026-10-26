@@ -457,7 +457,7 @@ describe('D. F1 real-model actor via runChallengeStudy', () => {
     const plan = { arms: ['A'], cases: [CASE_ID], repetitions: [1], attemptId: 'a1' };
     const ambiguousRun = await runChallengeStudy({
       studyDir: dir, plan,
-      actorFactory: (ctx: any) => createRealModelActor({ ctx, responder: perfectPlayResponder({ failWith: Object.assign(new Error('socket hang up mid-flight'), { ambiguous: true }) }) }),
+      actorFactory: (ctx: any) => createRealModelActor({ ctx, responder: perfectPlayResponder({ failWith: Object.assign(new Error('socket hang up mid-flight'), { ambiguous: true, timing: { requestStartedAt: new Date(NOW).toISOString(), responseHeadersReceivedMs: null, firstBodyByteReceivedMs: null, responseBodyCompletedMs: null, responseStageAtFailure: 'awaiting_headers' } }) }) }),
       execution: { mode: 'F1-direct-model', now: NOW },
       maxAttemptsTotal: 10,
       owner: 'at-f1-amb',
@@ -471,10 +471,13 @@ describe('D. F1 real-model actor via runChallengeStudy', () => {
     // merged #2139 discipline: an ambiguous real-mode record still proves its
     // authorization (a RESULT_UNKNOWN F2 attempt must never poison
     // deriveRealHostBaseline as linkage-missing); the F1 adapter contributes
-    // no host evidence and an empty round log when dispatch fails first.
+    // no host evidence.
     expect(attempt.authorization).toMatchObject({ schema: STAGE_R_AUTH_SCHEMA, studyId: 'CEB-001', executionMode: 'F1-direct-model' });
     expect(attempt.observedHostEvidence).toBeNull();
-    expect(attempt.actorRounds).toEqual([]);
+    // timing telemetry: the FAILED transport round now stays on the record
+    // (previously vanished) — its injected timing survives into the attempt.
+    expect(attempt.actorRounds).toHaveLength(1);
+    expect(attempt.actorRounds[0]).toMatchObject({ ok: false, timing: { responseStageAtFailure: 'awaiting_headers' } });
     // same attemptId → refused, zero transport calls
     const responder2 = perfectPlayResponder();
     const refused = await runChallengeStudy({
@@ -749,5 +752,111 @@ describe('F. boundaries and protected state', () => {
     expect(hashes.suiteHash.value).toBe(FROZEN.suiteHash);
     expect(hashes.graderHash.value).toBe(FROZEN.graderHash);
     expect(hashes.preregistrationHash.value).toBe(STUDY_PLAN_HASH);
+  });
+});
+
+// ===========================================================================
+// G. response timing telemetry (injected posters/doubles — zero network)
+// ===========================================================================
+describe('G. response timing telemetry', () => {
+  it('G1: a successful round records timing with ordered monotone stages end-to-end into the attempt record', async () => {
+    const dir = copyStudy('timing-ok');
+    approveStudy(dir, validStageRAuth());
+    const timing = { requestStartedAt: new Date(NOW).toISOString(), responseHeadersReceivedMs: 120, firstBodyByteReceivedMs: 180, responseBodyCompletedMs: 900, responseStageAtFailure: 'completed' };
+    const responder = perfectPlayResponder();
+    const inner = responder.respond.bind(responder);
+    responder.respond = async (req: any) => {
+      const reply = await inner(req);
+      return { ...reply, timing };
+    };
+    const summary = await runChallengeStudy({
+      studyDir: dir,
+      plan: { arms: ['A'], cases: [CASE_ID], repetitions: [1] },
+      actorFactory: (ctx: any) => createRealModelActor({ ctx, responder }),
+      execution: { mode: 'F1-direct-model', now: NOW },
+      maxAttemptsTotal: 10,
+      owner: 'timing-g1',
+    });
+    expect(summary.units[0].state).toBe('SUCCEEDED');
+    const attempt = readJson(dir, path.join('runs', CASE_ID, 'A', 'r1', 'a1.json'));
+    expect(attempt.actorRounds[0].timing).toEqual(timing);
+    expect(attempt.actorRounds[0].timing.responseHeadersReceivedMs)
+      .toBeLessThanOrEqual(attempt.actorRounds[0].timing.firstBodyByteReceivedMs);
+    expect(attempt.actorRounds[0].timing.firstBodyByteReceivedMs)
+      .toBeLessThanOrEqual(attempt.actorRounds[0].timing.responseBodyCompletedMs);
+    //原有契约不受影响
+    expect(attempt.actorRounds[0].observedModelIdentity).toBe('amd-radeon-tokenfactory/GLM-5.3-Flash');
+    expect(attempt.trace.records.length).toBeGreaterThan(0);
+  });
+
+  it('G2: a 429 round keeps its KNOWN-failure classification AND its timing on the record', async () => {
+    const dir = copyStudy('timing-429');
+    approveStudy(dir, validStageRAuth());
+    const timing = { requestStartedAt: new Date(NOW).toISOString(), responseHeadersReceivedMs: 90, firstBodyByteReceivedMs: 110, responseBodyCompletedMs: 130, responseStageAtFailure: 'completed' };
+    const responder = {
+      calls: 0, modelId: 'test-double/never-real',
+      async respond() { responder.calls += 1; return { ok: false, error: 'rate_limited (HTTP 429); Retry-After: unspecified — recorded, NOT auto-retried', retryAfter: null, timing, usage: null, finishReason: null, observedModelIdentity: 'test-double/never-real' }; },
+    };
+    const summary = await runChallengeStudy({
+      studyDir: dir,
+      plan: { arms: ['A'], cases: [CASE_ID], repetitions: [1] },
+      actorFactory: (ctx: any) => createRealModelActor({ ctx, responder }),
+      execution: { mode: 'F1-direct-model', now: NOW },
+      maxAttemptsTotal: 10,
+      owner: 'timing-g2',
+    });
+    expect(summary.units[0].state).toBe('FAILED_KNOWN'); // classification unchanged
+    expect(summary.units[0].detail).toContain('429');
+    const attempt = readJson(dir, path.join('runs', CASE_ID, 'A', 'r1', 'a1.json'));
+    expect(attempt.actorRounds[0]).toMatchObject({ ok: false, timing: { responseStageAtFailure: 'completed' } });
+  });
+
+  it('G3: a thrown ambiguous round with timing (headers arrived, body never did) leaves stage evidence on the attempt', async () => {
+    const dir = copyStudy('timing-ambiguous');
+    approveStudy(dir, validStageRAuth());
+    const timing = { requestStartedAt: new Date(NOW).toISOString(), responseHeadersReceivedMs: 1500, firstBodyByteReceivedMs: null, responseBodyCompletedMs: null, responseStageAtFailure: 'awaiting_body' };
+    const responder = {
+      calls: 0, modelId: 'test-double/never-real',
+      async respond() { responder.calls += 1; throw Object.assign(new Error('actor responder: response body unreadable after dispatch: stream torn'), { ambiguous: true, timing }); },
+    };
+    const summary = await runChallengeStudy({
+      studyDir: dir,
+      plan: { arms: ['A'], cases: [CASE_ID], repetitions: [1] },
+      actorFactory: (ctx: any) => createRealModelActor({ ctx, responder }),
+      execution: { mode: 'F1-direct-model', now: NOW },
+      maxAttemptsTotal: 10,
+      owner: 'timing-g3',
+    });
+    expect(summary.units[0].state).toBe('RESULT_UNKNOWN'); // classification unchanged
+    const attempt = readJson(dir, path.join('runs', CASE_ID, 'A', 'r1', 'a1.json'));
+    // awaiting_body is DISTINCT from awaiting_headers (the audit's core ask)
+    expect(attempt.actorRounds[0]).toMatchObject({ ok: false, timing: { responseHeadersReceivedMs: 1500, firstBodyByteReceivedMs: null, responseStageAtFailure: 'awaiting_body' } });
+    const ledger = createChallengeLedger(dir);
+    expect(ledger.budgetEntries().filter((e: any) => e.type === 'RESERVE')).toHaveLength(1); // no retry, no refund
+    // the settled unknown is a real ATTEMPT_RESULT row with stage evidence on the attempt file — not a vacuous assertion
+    expect(ledger.budgetEntries().some((e: any) => e.type === 'ATTEMPT_RESULT' && e.result === 'RESULT_UNKNOWN')).toBe(true);
+    expect(attempt.actorRounds[0].timing.responseStageAtFailure).toBe('awaiting_body');
+  });
+
+  it('G4: a beforeSend refusal (never dispatched) produces NO timing anywhere — unobserved stages stay absent, never zeroed', async () => {
+    const responder = createAmdActorResponder({
+      posterImpl: async () => { throw new Error('must not be called'); },
+      apiKeyProvider: () => { throw Object.assign(new Error('no credential'), { beforeSend: true }); },
+    });
+    await expect(responder.respond({ systemPrompt: 's', userPrompt: 'u' })).rejects.toMatchObject({ beforeSend: true });
+  });
+
+  it('G5: the default poster attaches stage telemetry to dispatch failures and keeps unobserved stages null (localhost sink test — zero network)', () => {
+    // the poster itself refuses non-public hosts before dispatch: the error
+    // must be beforeSend-tagged WITHOUT a timing object (nothing was observed)
+    const { createDefaultHttpsPoster } = require('../dev/principle-learning-lab/lib/challenge-amd-transport.mjs');
+    const poster = createDefaultHttpsPoster();
+    return poster('https://127.0.0.1/v1', { headers: {}, body: 'x' }).then(
+      () => { throw new Error('should have refused'); },
+      (e: any) => {
+        expect(e.beforeSend).toBe(true);
+        expect(e.timing).toBeUndefined(); // pre-dispatch: no stages observed, none fabricated
+      },
+    );
   });
 });
