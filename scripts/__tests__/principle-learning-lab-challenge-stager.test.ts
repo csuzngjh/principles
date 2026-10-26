@@ -766,3 +766,123 @@ describe('F. no-bypass, static boundaries, protected state', () => {
     expect(verifyFrozenStudy(realStudyDir).suiteHash).toBe(FROZEN.suiteHash);
   });
 });
+
+// ===========================================================================
+// H. automatic dispatch stop after consecutive RESULT_UNKNOWN settlements
+//    (run-scoped machine enforcement of the owner pause rule; zero network —
+//    every dispatch is an injected double)
+// ===========================================================================
+describe('H. automatic stop after consecutive RESULT_UNKNOWN settlements', () => {
+  /** A real-mode double whose transport explodes ambiguously (dispatched,
+   *  no usable result) — exactly the socket-hang-up class. */
+  const ambiguousDouble = () => ({
+    kind: 'real-model-double',
+    executionMode: 'F1-direct-model',
+    requestedModelIdentity: 'test-double/never-real',
+    nextAction: () => { throw Object.assign(new Error('socket hang up mid-flight'), { ambiguous: true }); },
+  });
+  /** A known, non-ambiguous transport failure (http_500 class). */
+  const knownFailDouble = () => ({
+    kind: 'real-model-double',
+    executionMode: 'F1-direct-model',
+    requestedModelIdentity: 'test-double/never-real',
+    nextAction: () => { throw new Error('http_500: upstream exploded'); },
+  });
+  const planN = (n: number) => ({ arms: ['A'], cases: ['CEB-001-FV-01'], repetitions: Array.from({ length: n }, (_, i) => i + 1) });
+  const authN = (n: number) => validStageRAuth({ repetitions: Array.from({ length: n }, (_, i) => String(i + 1)) });
+
+  it('H1: two consecutive RESULT_UNKNOWN do NOT trigger the stop; a definite settlement resets the streak', async () => {
+    const dir = copyStudy('streak-h1');
+    approveStudy(dir, authN(4));
+    let call = 0;
+    const script = [ambiguousDouble, ambiguousDouble, realModePlayDouble, realModePlayDouble]; // U, U, S, S
+    const summary = await runChallengeStudy({
+      studyDir: dir,
+      plan: planN(4),
+      actorFactory: (ctx: any) => script[call++](ctx),
+      execution: { mode: 'F1-direct-model', now: NOW },
+      maxAttemptsTotal: 10,
+      owner: 'streak-h1',
+    });
+    expect(summary.units.map((u: any) => u.state)).toEqual(['RESULT_UNKNOWN', 'RESULT_UNKNOWN', 'SUCCEEDED', 'SUCCEEDED']);
+    expect(summary.stoppedReason).toBeNull(); // never triggered at 2
+    expect((summary.units as any[]).every((u) => u.state !== 'UNKNOWN_STREAK_STOPPED')).toBe(true);
+  });
+
+  it('H2: the 3rd consecutive RESULT_UNKNOWN stops all further dispatch — zero transport calls afterwards, everything recorded is preserved', async () => {
+    const dir = copyStudy('streak-h2');
+    approveStudy(dir, authN(6));
+    let calls = 0;
+    const summary = await runChallengeStudy({
+      studyDir: dir,
+      plan: planN(6),
+      actorFactory: (ctx: any) => { calls += 1; return ambiguousDouble(); },
+      execution: { mode: 'F1-direct-model', now: NOW },
+      maxAttemptsTotal: 10,
+      owner: 'streak-h2',
+    });
+    const states = summary.units.map((u: any) => u.state);
+    expect(states).toEqual(['RESULT_UNKNOWN', 'RESULT_UNKNOWN', 'RESULT_UNKNOWN', 'UNKNOWN_STREAK_STOPPED', 'UNKNOWN_STREAK_STOPPED', 'UNKNOWN_STREAK_STOPPED']);
+    expect(summary.stoppedReason).toContain('stage_r_unknown_streak_stop');
+    expect(calls).toBe(3); // units 4-6 never even reached the factory → zero further transport calls
+    // reservations and request slots of the three settled units stay consumed and recorded
+    const budget = createChallengeLedger(dir).budgetEntries();
+    expect(budget.filter((e: any) => e.type === 'RESERVE')).toHaveLength(3);
+    expect(budget.filter((e: any) => e.type === 'REQUEST_RESERVE')).toHaveLength(3);
+    expect(budget.some((e: any) => e.type === 'REQUEST_REFUSED')).toBe(false); // the stop is not a budget refusal
+    for (const r of [1, 2, 3]) {
+      const attempt = readJson(dir, path.join('runs', 'CEB-001-FV-01', 'A', `r${r}`, 'a1.json'));
+      expect(attempt.result).toBe('RESULT_UNKNOWN'); // settled honestly, never disguised as a known failure
+      expect(attempt.ambiguous).toBe(true);
+    }
+    expect(fs.existsSync(path.join(dir, 'runs', 'CEB-001-FV-01', 'A', 'r4'))).toBe(false); // stopped units have nothing on disk
+    const stopRows = createChallengeLedger(dir).eventEntries().filter((e: any) => e.reason === 'stage_r_unknown_streak_stop');
+    expect(stopRows).toHaveLength(3); // one audit row per stopped unit
+  });
+
+  it('H3: a FAILED_KNOWN settlement breaks the streak exactly like SUCCEEDED (definite settlements reset; refused units count for nothing)', async () => {
+    const dir = copyStudy('streak-h3');
+    approveStudy(dir, authN(7));
+    let call = 0;
+    const script = [ambiguousDouble, ambiguousDouble, knownFailDouble, ambiguousDouble, ambiguousDouble, ambiguousDouble, realModePlayDouble]; // U,U,F(known),U,U,U,S
+    const summary = await runChallengeStudy({
+      studyDir: dir,
+      plan: planN(7),
+      actorFactory: (ctx: any) => script[call++](ctx),
+      execution: { mode: 'F1-direct-model', now: NOW },
+      maxAttemptsTotal: 10,
+      owner: 'streak-h3',
+    });
+    const states = summary.units.map((u: any) => u.state);
+    expect(states).toEqual(['RESULT_UNKNOWN', 'RESULT_UNKNOWN', 'FAILED_KNOWN', 'RESULT_UNKNOWN', 'RESULT_UNKNOWN', 'RESULT_UNKNOWN', 'UNKNOWN_STREAK_STOPPED']);
+    expect(summary.stoppedReason).toContain('stage_r_unknown_streak_stop'); // the known failure reset the streak; the NEXT three unknowns stopped the run
+  });
+
+  it('H4: recovery after a streak stop — settled RESULT_UNKNOWN units are still never re-dispatched; unsettled units run again under a fresh reservation', async () => {
+    const dir = copyStudy('streak-h4');
+    approveStudy(dir, authN(4));
+    const first = await runChallengeStudy({
+      studyDir: dir,
+      plan: planN(4),
+      actorFactory: () => ambiguousDouble(),
+      execution: { mode: 'F1-direct-model', now: NOW },
+      maxAttemptsTotal: 10,
+      owner: 'streak-h4',
+    });
+    expect(first.units[3].state).toBe('UNKNOWN_STREAK_STOPPED');
+    // second run: same attemptId — the three settled UNKNOWNs refuse recovery; r4 (never settled) executes normally
+    let factoryCalls = 0;
+    const second = await runChallengeStudy({
+      studyDir: dir,
+      plan: planN(4),
+      actorFactory: (ctx: any) => { factoryCalls += 1; return realModePlayDouble(ctx); },
+      execution: { mode: 'F1-direct-model', now: NOW },
+      maxAttemptsTotal: 10,
+      owner: 'streak-h4',
+    });
+    const states = second.units.map((u: any) => u.state);
+    expect(states).toEqual(['RESULT_UNKNOWN', 'RESULT_UNKNOWN', 'RESULT_UNKNOWN', 'SUCCEEDED']); // refusal ×3 (recovery), fresh execution
+    expect(factoryCalls).toBe(1); // only the unsettled unit ever built an actor — settled attempts are never re-dispatched
+    expect(second.stoppedReason).toBeNull(); // the streak restarts at zero on a new run; recovery refusals are not settlements
+  });
+});
