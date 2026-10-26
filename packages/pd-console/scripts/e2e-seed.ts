@@ -9,7 +9,7 @@
  * - principle-detail-flow: principles ledger JSON + approvals + pi_artifacts
  * - pain-intent-flow: trajectory.db pain_events + state.db tasks + candidates
  */
-import { SqliteConnection, createPITaskDiagnosticJson } from '@principles/core/runtime-v2';
+import { SqliteConnection, createPITaskDiagnosticJson, SqliteDiagnosticianCommitter, type DiagnosticianOutputV1 } from '@principles/core/runtime-v2';
 import { saveHostToolDeclaration } from '@principles/host-runtime';
 import Database from 'better-sqlite3';
 import * as fs from 'node:fs';
@@ -60,6 +60,7 @@ const BAD_TRACE_DREAMER_ARTIFACT_ID = 'artifact-dreamer-bad-trace';
 function seededLedgerPrinciple(id: string, text: string, derivedFromPainIds: string[] = ['pain-e2e-1']) {
   return {
     id,
+    version: 1,
     status: 'candidate',
     text,
     triggerPattern: 'on-seeded-e2e',
@@ -537,6 +538,113 @@ insertReceipt.run(PRINCIPLE_IDS.clickReject, null, null, receiptChannel, 'effect
 insertReceipt.run(PRINCIPLE_IDS.clickApprove, null, null, receiptChannel, 'effect', 'auto_correct_applied', 'session-e2e-r1-f', null, null, 'approve auto-correct effect (no presence rows)', threeDaysAgo);
 console.log('[e2e-seed] principle_applications seeded: 4 receipt states for R1 verification');
 
+// ── 8a. PRI-1048 规则归属队列：split 重复 + 52d-like 已关联受阻 + 待决定 ─────
+// 真实 SqliteDiagnosticianCommitter 提交（material 校验全链可过），保证
+// review/bind 路径在 e2e 中走的是与生产一致的候选血缘。
+const RULE_BINDING_PRINCIPLE_ID = 'e2e00000-0000-4000-8000-0000000000c1';
+const designGateOutput = {
+  valid: true,
+  diagnosisId: 'e2e-rule-binding-design-gate',
+  summary: 'The design change shipped without confirmation.',
+  rootCause: 'Design: direction approval was treated as design confirmation.',
+  violatedPrinciples: [],
+  evidence: [],
+  confidence: 0.9,
+  recommendations: [
+    { kind: 'principle', description: '非简单行为变更必须先获得确认的设计。' },
+    { kind: 'rule', description: '要求先交付经确认的设计，再进行非简单行为变更。' },
+  ],
+} as const;
+const replyOutput = {
+  valid: true,
+  diagnosisId: 'e2e-rule-binding-reply',
+  summary: 'The conclusion was buried.',
+  rootCause: 'Delivery: conclusion was not front-loaded.',
+  violatedPrinciples: [],
+  evidence: [],
+  confidence: 0.85,
+  recommendations: [
+    { kind: 'rule', description: '面向拥有者的回复必须以一句可独立成立的结论开头。' },
+  ],
+} as const;
+const insertDiagnosisTask = stateDb.prepare(`
+  INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, diagnostic_json, input_ref)
+  VALUES (?, ?, 'succeeded', ?, ?, 1, '{}', ?)`);
+const insertDiagnosisRun = stateDb.prepare(`
+  INSERT INTO runs (run_id, task_id, runtime_kind, execution_status, started_at, ended_at, attempt_number, output_payload, created_at, updated_at)
+  VALUES (?, ?, 'test-double', 'succeeded', ?, ?, 1, ?, ?, ?)`);
+const insertChainTask = stateDb.prepare(`
+  INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, diagnostic_json)
+  VALUES (?, ?, ?, ?, ?, 1, ?)`);
+const committer = new SqliteDiagnosticianCommitter(stateConn);
+insertDiagnosisTask.run('diagnosis-design-gate', 'diagnostician', threeDaysAgo, threeDaysAgo, 'pain-e2e-design-gate');
+insertDiagnosisRun.run('run-design-gate', 'diagnosis-design-gate', threeDaysAgo, threeDaysAgo, JSON.stringify(designGateOutput), threeDaysAgo, threeDaysAgo);
+await committer.commit({ taskId: 'diagnosis-design-gate', runId: 'run-design-gate', output: designGateOutput as unknown as DiagnosticianOutputV1, idempotencyKey: 'e2e-rule-binding-parent-commit' });
+insertDiagnosisTask.run('diag_router-diagnosis-design-gate', 'diag_router', threeDaysAgo, threeDaysAgo, 'diagnosis-design-gate');
+insertDiagnosisRun.run('run-router-design-gate', 'diag_router-diagnosis-design-gate', threeDaysAgo, threeDaysAgo, JSON.stringify(designGateOutput), threeDaysAgo, threeDaysAgo);
+await committer.commit({ taskId: 'diag_router-diagnosis-design-gate', runId: 'run-router-design-gate', output: designGateOutput as unknown as DiagnosticianOutputV1, idempotencyKey: 'e2e-rule-binding-router-commit' });
+insertDiagnosisTask.run('diagnosis-reply-frontload', 'diagnostician', threeDaysAgo, threeDaysAgo, 'pain-e2e-reply');
+insertDiagnosisRun.run('run-reply-frontload', 'diagnosis-reply-frontload', threeDaysAgo, threeDaysAgo, JSON.stringify(replyOutput), threeDaysAgo, threeDaysAgo);
+await committer.commit({ taskId: 'diagnosis-reply-frontload', runId: 'run-reply-frontload', output: replyOutput as unknown as DiagnosticianOutputV1, idempotencyKey: 'e2e-rule-binding-reply-commit' });
+const seededRuleCandidates = stateDb.prepare(`
+  SELECT candidate_id AS candidateId, task_id AS taskId, recommendation_kind AS kind
+  FROM principle_candidates
+  WHERE task_id IN ('diagnosis-design-gate', 'diag_router-diagnosis-design-gate', 'diagnosis-reply-frontload')`).all() as Array<{ candidateId: string; taskId: string; kind: string }>;
+const routerRuleCandidate = seededRuleCandidates.find(row => row.taskId === 'diag_router-diagnosis-design-gate' && row.kind === 'rule');
+const parentPrincipleCandidate = seededRuleCandidates.find(row => row.taskId === 'diagnosis-design-gate' && row.kind === 'principle');
+const replyRuleCandidate = seededRuleCandidates.find(row => row.taskId === 'diagnosis-reply-frontload' && row.kind === 'rule');
+if (!routerRuleCandidate || !parentPrincipleCandidate || !replyRuleCandidate) {
+  throw new Error('[e2e-seed] rule-binding candidates missing after real committer run');
+}
+// 52d-like chain: scribe spent its binding revision budget; artificer stopped
+// before the model call with textual_basis_unanchored.
+const chainBase = createPITaskDiagnosticJson({
+  dependencyTaskIds: [], channel: 'code_tool_hook', timeoutMs: 1000,
+  inputArtifactRefs: [], outputArtifactRefs: [], pipelineMode: 'standard',
+});
+const chainDreamerSeed = JSON.stringify({ ...JSON.parse(chainBase), candidateId: routerRuleCandidate.candidateId });
+insertChainTask.run(`dreamer-${routerRuleCandidate.candidateId}`, 'dreamer', 'succeeded', threeDaysAgo, threeDaysAgo, chainDreamerSeed);
+insertChainTask.run(`philosopher-${routerRuleCandidate.candidateId}`, 'philosopher', 'succeeded', threeDaysAgo, threeDaysAgo, createPITaskDiagnosticJson({
+  dependencyTaskIds: [`dreamer-${routerRuleCandidate.candidateId}`], channel: 'code_tool_hook', timeoutMs: 1000,
+  inputArtifactRefs: [], outputArtifactRefs: [], pipelineMode: 'standard',
+}));
+insertChainTask.run(`scribe-${routerRuleCandidate.candidateId}`, 'scribe', 'succeeded', threeDaysAgo, threeDaysAgo, createPITaskDiagnosticJson({
+  dependencyTaskIds: [`philosopher-${routerRuleCandidate.candidateId}`], channel: 'code_tool_hook', timeoutMs: 1000,
+  inputArtifactRefs: [], outputArtifactRefs: [], pipelineMode: 'standard',
+  revisionCount: 1, ruleBindingRevisionCauseId: `rule-binding:${routerRuleCandidate.candidateId}:1`,
+}));
+insertChainTask.run(`artificer-${routerRuleCandidate.candidateId}`, 'artificer', 'needs_human_review', threeDaysAgo, threeDaysAgo, createPITaskDiagnosticJson({
+  dependencyTaskIds: [`scribe-${routerRuleCandidate.candidateId}`], channel: 'code_tool_hook', timeoutMs: 1000,
+  inputArtifactRefs: [], outputArtifactRefs: [], pipelineMode: 'standard',
+  humanReviewContext: {
+    reasonCode: 'textual_basis_unanchored', sourceRunId: 'intent-preflight', revisionEpoch: 1,
+    detail: "required fact 'design_approval' textualBasis cannot be anchored in the intent material",
+    createdAt: threeDaysAgo,
+  },
+}));
+// The ledger binding for the router rule candidate (real structure the core
+// parser accepts; digests are opaque CAS tokens for identity resolution).
+const E2E_RULE_BINDING_LEDGER = {
+  [routerRuleCandidate.candidateId]: {
+    candidateId: routerRuleCandidate.candidateId,
+    revisions: [{
+      revision: 1,
+      decisionId: 'e2e00000-0000-4000-8000-0000000000d1',
+      requestId: 'e2e-seed-binding-request',
+      action: 'bind',
+      principleId: RULE_BINDING_PRINCIPLE_ID,
+      reason: 'e2e seeded attribution for the design-gate rule candidate',
+      decidedAt: threeDaysAgo,
+      owner: { actorId: 'e2e-owner', source: 'authenticated_console' },
+      reviewedCandidateDigest: `sha256:${'1'.repeat(64)}`,
+      reviewedPrincipleDigest: `sha256:${'2'.repeat(64)}`,
+    }],
+  },
+};
+const E2E_RULE_BINDING_PRINCIPLE_DERIVED_FROM = parentPrincipleCandidate.candidateId;
+const E2E_REPLY_RULE_CANDIDATE_ID = replyRuleCandidate.candidateId;
+console.log('[e2e-seed] rule-binding queue fixtures: split parent+router, 52d-like bound chain, unlinked reply rule');
+
 stateConn.close();
 console.log('[e2e-seed] state.db seeded with approvals plus shadow/live RuleCode Owner review fixtures');
 
@@ -616,6 +724,23 @@ trajDb.prepare(`
   0.85, 'Agent 在未经 Owner 确认的情况下修改了数据库配置', eightDaysAgo,
   'pain-e2e-1', 'task-diag-1',
 );
+// PRI-1048 规则归属队列的来源反馈（真实的拥有者原话样例）。
+const insertPainEvent = trajDb.prepare(`
+  INSERT INTO pain_events (
+    session_id, source, score, reason, severity, origin, confidence,
+    text, created_at, canonical_pain_id, runtime_task_id
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`);
+insertPainEvent.run(
+  'session-e2e-rule-binding-a', 'manual', 0.9, '设计未确认就实现', 'severe', 'gate',
+  0.9, '你新增LLM调用层时没先给我可审阅的SPEC和技术方案就直接实现了，方向认可不等于设计确认。', threeDaysAgo,
+  'pain-e2e-design-gate', 'diagnosis-design-gate',
+);
+insertPainEvent.run(
+  'session-e2e-rule-binding-b', 'manual', 0.8, '结论不前置', 'severe', 'gate',
+  0.85, '你发过来的分析我看不懂，结论不知道在哪，以后先说结论。', threeDaysAgo,
+  'pain-e2e-reply', 'diagnosis-reply-frontload',
+);
 
 trajDb.close();
 console.log('[e2e-seed] trajectory.db seeded: 1 pain_event');
@@ -657,11 +782,16 @@ const ledgerPrinciples: Record<string, ReturnType<typeof seededLedgerPrinciple>>
   [PRINCIPLE_IDS.clickReject]: seededLedgerPrinciple(PRINCIPLE_IDS.clickReject, '点击拒绝测试原则', ['pain-e2e-click-reject']),
   [PRINCIPLE_IDS.clickEdit]: seededLedgerPrinciple(PRINCIPLE_IDS.clickEdit, '点击编辑测试原则', ['pain-e2e-click-edit']),
   [PRINCIPLE_IDS.readability]: seededLedgerPrinciple(PRINCIPLE_IDS.readability, readabilityLongStatement, ['pain-e2e-readability']),
+  // PRI-1048: the bound target of the seeded rule-binding queue fixture. Its
+  // derivedFromPainIds points at the REAL parent-committed principle candidate
+  // so eligibleBindingTarget material validation passes for the bind flow.
+  [RULE_BINDING_PRINCIPLE_ID]: seededLedgerPrinciple(RULE_BINDING_PRINCIPLE_ID, '设计确认门禁：非简单行为变更先交付SPEC并获批准后编码。', [E2E_RULE_BINDING_PRINCIPLE_DERIVED_FROM]),
 };
 const ledger = {
   _tree: {
     principles: ledgerPrinciples,
     rules: {},
+    ruleCandidateBindings: E2E_RULE_BINDING_LEDGER,
   },
   'p-001': {
     principleId: 'p-001',

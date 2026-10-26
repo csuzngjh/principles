@@ -2387,4 +2387,4 @@ export { SqliteDesignGateStore, DesignGateStoreError } from './store/design-gate
 
 // Owner-governed rule candidate identity; the Ledger remains the only relation authority.
 export type { CandidatePrincipleIdentityResolution, RuleCandidateBindingRequest, RuleCandidateBindingMutationResult } from './types/rule-candidate-binding.js';
-export { reviseRuleBindingOnce } from './internalization/rule-binding-revision.js';
+export { reviseRuleBindingOnce, resolveRuleBindingRevisionTarget } from './internalization/rule-binding-revision.js';

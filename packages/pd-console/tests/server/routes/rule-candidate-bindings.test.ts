@@ -56,6 +56,29 @@ describe('authenticated binding route, real Ledger + real SQLite revision', () =
     return { action: 'bind', principleId: PID, expectedRevision: review.currentRevision, expectedCandidateDigest: review.candidateDigest, expectedPrincipleDigest: review.eligibleTargets[0].reviewedPrincipleDigest ?? review.eligibleTargets[0].digest, reason: 'This rule implements the selected principle.', requestId: 'binding-request', resumeOnce: true };
   }
   async function post(body: unknown) { return fetch(base, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); }
+  it('GET queue returns the grouped projection contract: one row per candidate, counts, pain, stage, eligibility (PRI-1048)', async () => {
+    const collection = base.replace(/\/[^/]*$/, '');
+    const beforeBind = data(await (await fetch(collection)).json());
+    expect(beforeBind.items.map((item: { candidateId: string }) => item.candidateId)).toEqual([candidateId]);
+    expect(beforeBind.summary).toEqual({ painGroups: 1, candidates: 1, bound: 0, unlinked: 1, blocked: 0 });
+    expect(beforeBind.truncated).toBe(false);
+    const unlinked = beforeBind.items[0];
+    expect(unlinked.binding).toEqual({ status: 'unlinked' });
+    expect(unlinked.pain).toMatchObject({ painId: 'pain-original', text: null, source: 'unknown' });
+    expect(unlinked.generation).toBeNull();
+    expect(unlinked.resume).toBeNull();
+    expect(unlinked.diagnosisStatus).toBe('succeeded');
+
+    const result = await post(await bindBody());
+    expect(result.status).toBe(200);
+    const afterBind = data(await (await fetch(collection)).json());
+    const bound = afterBind.items[0];
+    expect(bound.binding).toMatchObject({ status: 'bound', principle: { principleId: PID, version: 1, revision: 1 } });
+    expect(bound.generation).toMatchObject({ stage: 'in_progress', stageKind: 'scribe' });
+    // The bind consumed the one bounded revision: eligibility must read refused.
+    expect(bound.resume).toMatchObject({ status: 'refused', reason: 'revision_budget_exhausted', scribeTaskId: 'scribe' });
+    expect(afterBind.summary).toEqual({ painGroups: 1, candidates: 1, bound: 1, unlinked: 0, blocked: 0 });
+  });
   it('one bind request durably records authenticated identity and starts exactly one revision; replay cannot replenish budget', async () => {
     const body = await bindBody();
     const result = await post(body);

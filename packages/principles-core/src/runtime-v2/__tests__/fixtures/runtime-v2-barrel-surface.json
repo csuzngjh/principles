@@ -1,6 +1,6 @@
 {
   "barrel": "src/runtime-v2/index.ts",
-  "count": 1977,
+  "count": 1978,
   "names": [
     "ADMISSION_CONFIDENCE_THRESHOLD",
     "ADMISSION_POLICY_VERSION",
@@ -1903,6 +1903,7 @@
     "resolvePromptBudget",
     "resolveRolloutReviewerRunnerOptions",
     "resolveRolloutRevisionTarget",
+    "resolveRuleBindingRevisionTarget",
     "resolveRuntimeConfig",
     "resolveRuntimeConfigForAgent",
     "resolveRuntimeConfigForProfile",
