@@ -3,11 +3,15 @@
 // authorization copy in a study directory. READ-ONLY over the study; output
 // goes wherever the caller points it (CLI: --out, tests: buffer).
 //
-// This is the §三 P1 core-delivery item: the round-1 data exists (11
-// SUCCEEDED / 22 RESULT_UNKNOWN / 3 FAILED_KNOWN) but there was no tool that
-// recomputes the research report from evidence — every number so far came
-// from ad-hoc scripts. This module is that tool, and its test asserts the
-// recomputed numbers against the audited round-1 baseline.
+// Evidence sources actually consumed:
+//   - runs/**/*.json attempt files   → per-unit settlement, rounds, tokens
+//   - budget-ledger.jsonl            → RESERVE/REQUEST_RESERVE accounting
+//   - adjudications.jsonl            → cross-checked against SUCCEEDED
+//     attempt files (a SUCCEEDED record without its append-only adjudication
+//     row — or vice versa — is an integrity finding, never a silent pass)
+//   - events.jsonl                   → UNIT_FINISHED rows cross-checked
+//     against the attempt-file settlement of the same unit+result
+//   - suite-manifest.json / run-authorization.json → plan grid + auth snapshot
 //
 // Zero network, zero credentials, zero mutation of the study directory.
 
@@ -105,6 +109,42 @@ export function buildStageRF1Report(studyDir) {
   for (const c of manifest.cases) {
     const arms = ARMS.map(a => units.get(planKey({ caseId: c.caseId, armId: a, repetitionId: 1, attemptId: 'a1' })));
     if (arms.every(u => u.status === 'SUCCEEDED' && u.objective === 'PASS')) completePairs.push(c.caseId);
+  }
+
+  // ledger↔file cross-checks (the two append-only ledgers this report's
+  // integrity claim depends on — see header). Mismatches become findings;
+  // they never change any statistic above.
+  const settledRows = [...units.values()].filter(u => u.status !== 'NOT_SETTLED');
+  const settledKey = (u) => `${u.caseId}|${u.armId}|${u.repetitionId}|${u.attemptId}`;
+  const adjudicationKeys = new Set(adjudications.map(a => a && a.unit ? planKey(a.unit) : null).filter(Boolean));
+  for (const row of settledRows.filter(u => u.status === 'SUCCEEDED')) {
+    if (row.adjudicationPresent && !adjudicationKeys.has(settledKey(row))) {
+      findings.push(`${row.caseId}/${row.armId}: SUCCEEDED record has no adjudications.jsonl row`);
+    }
+  }
+  for (const key of adjudicationKeys) {
+    const row = units.get(key);
+    if (!row || row.status !== 'SUCCEEDED' || !row.adjudicationPresent) {
+      findings.push(`adjudications.jsonl row ${key.replaceAll('|', '/')} has no matching SUCCEEDED attempt file`);
+    }
+  }
+  const finishedByKey = new Map();
+  for (const e of events.filter(e => e && e.type === 'UNIT_FINISHED' && e.unit)) {
+    finishedByKey.set(planKey(e.unit), e.result);
+  }
+  for (const row of settledRows) {
+    const finishedResult = finishedByKey.get(settledKey(row));
+    if (finishedResult === undefined) {
+      findings.push(`${row.caseId}/${row.armId}: settled ${row.status} in attempt file but no UNIT_FINISHED event`);
+    } else if (finishedResult !== row.status) {
+      findings.push(`${row.caseId}/${row.armId}: UNIT_FINISHED says ${finishedResult}, attempt file says ${row.status}`);
+    }
+  }
+  for (const [key, result] of finishedByKey) {
+    const row = units.get(key);
+    if (row && row.status === 'NOT_SETTLED') {
+      findings.push(`UNIT_FINISHED ${result} for ${key.replaceAll('|', '/')} but the unit has no settled attempt file`);
+    }
   }
 
   // authorization snapshot (from the copy — the study's own authority)
