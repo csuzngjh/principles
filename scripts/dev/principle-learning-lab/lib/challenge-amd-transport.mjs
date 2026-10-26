@@ -348,3 +348,33 @@ export function createInternS2Transport({ posterImpl = null, baseUrl = INTERN_S2
     treatReasoningContentAsOutput: true, // intern-s2 delivers the final answer in reasoning_content under finish=stop
   });
 }
+
+// ————————————————————————————————————————————————————————————————————————————
+// Zhipu bigmodel Coding Plan (OpenAI Chat Completion protocol) — PAID plan,
+// Owner-provided credential. Stage R F1 failover channel #4.
+//   Docs: docs.bigmodel.cn/cn/coding-plan/quick-start (base) +
+//         docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash (model)
+// Identity discipline unchanged: the model id is the API's own GET /v4/models
+// entry (re-verified at failover time), and the P1-6 responder adjudication
+// accepts only server-attested fields.
+// ————————————————————————————————————————————————————————————————————————————
+
+export const BIGMODEL_CODING_PROVIDER_ID = 'bigmodel-coding';
+export const BIGMODEL_CODING_BASE_URL = 'https://open.bigmodel.cn/api/coding/paas/v4';
+export const BIGMODEL_CODING_MODEL_ID = 'glm-5.3-flash';
+export const BIGMODEL_CODING_DEPLOYMENT_STATUS = 'paid-plan';
+export const BIGMODEL_CODING_CATALOG = { protocols: ['OpenAI Chat (paas/v4)', 'Anthropic Messages', 'OpenAI Responses'], reasoningEffortSupport: 'UNVERIFIED — parameter never sent (same discipline as intern-ai)' };
+
+const BIGMODEL_CODING_KEY_FILE = path.join(os.homedir(), '.bigmodel_coding_api_key');
+
+export function resolveBigmodelCodingApiKey({ env = process.env, keyFile = BIGMODEL_CODING_KEY_FILE } = {}) {
+  const fromEnv = env.BIGMODEL_CODING_API_KEY;
+  if (typeof fromEnv === 'string' && fromEnv.length > 0) return { source: 'env:BIGMODEL_CODING_API_KEY', key: fromEnv };
+  try {
+    const fromFile = fs.readFileSync(keyFile, 'utf8').trim();
+    if (fromFile.length > 0) return { source: `file:${keyFile}`, key: fromFile };
+  } catch { /* absent → refusal below */ }
+  const err = new Error('bigmodel coding credential source unavailable: set BIGMODEL_CODING_API_KEY or create ~/.bigmodel_coding_api_key (mode 600). Refusing BEFORE any network action — no fallback provider.');
+  err.beforeSend = true;
+  throw err;
+}

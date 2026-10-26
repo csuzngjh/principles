@@ -359,3 +359,17 @@ describe('D3: deepseek-v4.1-flash-1017 authorization selects the round7-verified
     expect(ledgerFingerprint(dir)).toBe(before);
   });
 });
+
+describe('D4: glm-5.3-flash (Zhipu bigmodel coding) authorization selects the paid-plan wiring (dry-run, zero network)', () => {
+  it('selects the bigmodel transport and verifies the plan', () => {
+    const dir = copyStudy('bigmodel-dry');
+    approveF1(dir, { requestedActorIdentity: 'glm-5.3-flash' });
+    const before = ledgerFingerprint(dir);
+    const r = runCli(['--execution-mode', 'F1-direct-model', '--now', NOW, '--dry-run'], dir);
+    expect(r.status).toBe(0);
+    expect(r.out).toContain('authorizedModel=glm-5.3-flash');
+    expect(r.out).toContain('transport = Zhipu bigmodel coding (glm-5.3-flash, no reasoning_effort)');
+    expect(r.out).toContain('DRY-RUN OK');
+    expect(ledgerFingerprint(dir)).toBe(before);
+  });
+});
