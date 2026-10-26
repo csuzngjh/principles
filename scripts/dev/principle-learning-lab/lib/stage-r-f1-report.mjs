@@ -1,0 +1,144 @@
+// SPEC-PD-EXAMINER-001 v0.4 §12.4 — "报告可从轨迹重算" for Stage R F1:
+// rebuilds the study report from RAW attempt files + ledgers + the
+// authorization copy in a study directory. READ-ONLY over the study; output
+// goes wherever the caller points it (CLI: --out, tests: buffer).
+//
+// This is the §三 P1 core-delivery item: the round-1 data exists (11
+// SUCCEEDED / 22 RESULT_UNKNOWN / 3 FAILED_KNOWN) but there was no tool that
+// recomputes the research report from evidence — every number so far came
+// from ad-hoc scripts. This module is that tool, and its test asserts the
+// recomputed numbers against the audited round-1 baseline.
+//
+// Zero network, zero credentials, zero mutation of the study directory.
+
+import fs from 'node:fs';
+import path from 'node:path';
+
+const readJson = (p) => JSON.parse(fs.readFileSync(p, 'utf8'));
+const readJsonl = (p) => fs.readFileSync(p, 'utf8').split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
+
+const ARMS = ['A', 'B', 'C'];
+
+/** Recompute the Stage R F1 study report from a study directory.
+ *  Never throws on data problems — data faults become findings. */
+export function buildStageRF1Report(studyDir) {
+  const findings = [];
+  const manifest = readJson(path.join(studyDir, 'suite-manifest.json'));
+  const auth = readJson(path.join(studyDir, 'run-authorization.json'));
+  const budget = readJsonl(path.join(studyDir, 'budget-ledger.jsonl'));
+  const events = readJsonl(path.join(studyDir, 'events.jsonl'));
+  const adjudications = readJsonl(path.join(studyDir, 'adjudications.jsonl'));
+
+  // plan grid
+  const planned = [];
+  for (const c of manifest.cases) for (const arm of ARMS) planned.push({ caseId: c.caseId, armId: arm, repetitionId: 1, attemptId: 'a1' });
+  const planKey = (u) => `${u.caseId}|${u.armId}|${u.repetitionId}|${u.attemptId}`;
+
+  // attempts from raw files
+  const files = [];
+  (function walk(d) {
+    if (!fs.existsSync(d)) return;
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.name.endsWith('.json')) files.push(p);
+    }
+  })(path.join(studyDir, 'runs'));
+
+  const units = new Map(planned.map(u => [planKey(u), {
+    ...u, status: 'NOT_SETTLED', rounds: 0, okRounds: 0, modelRequests: 0,
+    identities: [], promptTokens: 0, completionTokens: 0,
+    tracePresent: false, adjudicationPresent: false, objective: null, errorHead: null,
+  }]));
+  let duplicates = 0; const unplanned = [];
+  for (const f of files) {
+    const a = readJson(f);
+    const key = planKey(a.unit);
+    const row = units.get(key);
+    if (!row) { unplanned.push(path.relative(path.join(studyDir, 'runs'), f)); continue; }
+    if (row.status !== 'NOT_SETTLED') duplicates += 1; // second settlement of the same unit
+    row.status = a.result;
+    row.errorHead = a.error ? a.error.slice(0, 160) : null;
+    row.tracePresent = !!a.trace && Array.isArray(a.trace.records);
+    row.adjudicationPresent = !!a.adjudication;
+    row.objective = a.adjudication ? a.adjudication.objectiveTaskOutcome : null;
+    for (const r of a.actorRounds || []) {
+      row.rounds += 1;
+      if (r.ok === true) {
+        row.okRounds += 1;
+        if (r.observedModelIdentity) row.identities.push(r.observedModelIdentity);
+        row.promptTokens += r.usage?.prompt_tokens ?? 0;
+        row.completionTokens += r.usage?.completion_tokens ?? 0;
+      }
+    }
+  }
+  const reqRes = budget.filter(e => e.type === 'REQUEST_RESERVE');
+  for (const e of reqRes) {
+    const row = units.get(planKey(e.unit));
+    if (row) row.modelRequests += 1; else unplanned.push(`REQUEST_RESERVE:${JSON.stringify(e.unit)}`);
+  }
+
+  // per-arm rollup (both denominators kept explicit)
+  const byArm = {};
+  for (const arm of ARMS) byArm[arm] = { planned: 0, SUCCEEDED: 0, RESULT_UNKNOWN: 0, FAILED_KNOWN: 0, NOT_SETTLED: 0, pass: 0, rounds: 0, okRounds: 0, modelRequests: 0, promptTokens: 0, completionTokens: 0 };
+  const identities = new Set();
+  let totalRounds = 0, totalOkRounds = 0, pTok = 0, cTok = 0;
+  const statusCounts = {};
+  for (const row of units.values()) {
+    byArm[row.armId].planned += 1;
+    byArm[row.armId][row.status] = (byArm[row.armId][row.status] || 0) + 1;
+    if (row.status === 'SUCCEEDED' && row.objective === 'PASS') byArm[row.armId].pass += 1;
+    byArm[row.armId].rounds += row.rounds; byArm[row.armId].okRounds += row.okRounds;
+    byArm[row.armId].modelRequests += row.modelRequests;
+    byArm[row.armId].promptTokens += row.promptTokens; byArm[row.armId].completionTokens += row.completionTokens;
+    statusCounts[row.status] = (statusCounts[row.status] || 0) + 1;
+    totalRounds += row.rounds; totalOkRounds += row.okRounds;
+    pTok += row.promptTokens; cTok += row.completionTokens;
+    for (const i of row.identities) identities.add(i);
+    // data-integrity findings
+    if (row.status === 'SUCCEEDED' && !(row.tracePresent && row.adjudicationPresent)) findings.push(`${row.caseId}/${row.armId}: SUCCEEDED without trace+adjudication`);
+    if (row.status === 'RESULT_UNKNOWN' && row.errorHead && !row.errorHead.includes('request timeout after')) findings.push(`${row.caseId}/${row.armId}: RESULT_UNKNOWN with non-timeout error head`);
+  }
+
+  // pairing completeness: which case families have ALL THREE arms SUCCEEDED
+  const completePairs = [];
+  for (const c of manifest.cases) {
+    const arms = ARMS.map(a => units.get(planKey({ caseId: c.caseId, armId: a, repetitionId: 1, attemptId: 'a1' })));
+    if (arms.every(u => u.status === 'SUCCEEDED' && u.objective === 'PASS')) completePairs.push(c.caseId);
+  }
+
+  // authorization snapshot (from the copy — the study's own authority)
+  const authorized = {
+    status: auth.status, identity: auth.requestedActorIdentity, executionMode: auth.executionMode,
+    attemptCap: auth.attemptCap, requestCap: auth.requestCap, requestTimeoutMs: auth.requestTimeoutMs ?? null,
+    validFrom: auth.validFrom, validUntil: auth.validUntil, issuedBy: auth.issuedBy,
+  };
+
+  const attemptsUsed = budget.filter(e => e.type === 'RESERVE').length;
+  const requestsUsed = reqRes.length;
+  return {
+    schema: 'stage-r-f1-report.v1',
+    generatedAt: new Date().toISOString(),
+    studyId: manifest.studyId,
+    authorization: authorized,
+    budget: { attemptsUsed, attemptsRemaining: (auth.attemptCap ?? 0) - attemptsUsed, requestsUsed, requestsRemaining: (auth.requestCap ?? 0) - requestsUsed },
+    plan: { plannedUnits: planned.length, arms: Object.fromEntries(ARMS.map(a => [a, planned.filter(u => u.armId === a).length])) },
+    statusCounts,
+    denominators: {
+      allPlanned: planned.length,
+      successfullyScored: statusCounts.SUCCEEDED || 0,
+      unknown: statusCounts.RESULT_UNKNOWN || 0,
+      failedKnown: statusCounts.FAILED_KNOWN || 0,
+    },
+    totals: { rounds: totalRounds, okRounds: totalOkRounds, promptTokens: pTok, completionTokens: cTok, identities: [...identities] },
+    byArm,
+    completeTripleArmPairs: completePairs,
+    integrity: { duplicates, unplanned, findings },
+    units: [...units.values()].map(u => ({
+      caseId: u.caseId, armId: u.armId, status: u.status, objective: u.objective,
+      rounds: u.rounds, okRounds: u.okRounds, modelRequests: u.modelRequests,
+      identities: [...new Set(u.identities)], promptTokens: u.promptTokens, completionTokens: u.completionTokens,
+      errorHead: u.errorHead,
+    })),
+  };
+}
