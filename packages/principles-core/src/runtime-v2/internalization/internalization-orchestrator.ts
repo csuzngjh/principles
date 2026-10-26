@@ -897,10 +897,12 @@ export class InternalizationOrchestrator {
       try {
         const result = await this.commitNextTaskProposal(task.taskId);
         outcomes.push({ taskId: task.taskId, decision: result.decision });
-        if (result.decision === 'successor_created' || result.decision === 'revision_reopened' || result.decision === 'successor_reopened') {
+        if (result.decision === 'successor_created' || result.decision === 'revision_reopened' || result.decision === 'successor_reopened'
+          || result.decision === 'source_correction_reopened') {
           recovered += 1;
           options?.logger?.info?.(`[PD:Reconcile] recovered missing transition for ${task.taskId} (${result.decision})`);
-        } else if (result.decision === 'successor_exists' || result.decision === 'revision_reopen_noop') {
+        } else if (result.decision === 'successor_exists' || result.decision === 'revision_reopen_noop'
+          || result.decision === 'source_correction_reopen_noop') {
           alreadyMaterialized += 1;
         } else {
           // blocked_by_revision / blocked_by_rejection / blocked_missing_verdict /
