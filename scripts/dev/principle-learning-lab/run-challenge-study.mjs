@@ -60,8 +60,29 @@ if (executionMode === 'F2-real-host') {
 }
 const dryRun = process.argv.includes('--dry-run');
 const arms = (arg('--arms', 'A,B,C') || '').split(',').map((s) => s.trim()).filter(Boolean);
+// Optional case subset — same contract as --arms: the value list (and its
+// ORDER) defines the run plan; the gate still enforces plan ⊆ authorization.
+const casesArg = arg('--cases');
+const casesFilter = casesArg !== undefined ? (casesArg || '').split(',').map((s) => s.trim()).filter(Boolean) : null;
 const maxAttemptsTotal = Number(arg('--max-attempts', '40'));
 const owner = arg('--owner', 'challenge-runner-cli');
+
+// Request-timeout discipline (security): `--request-timeout-ms` is NOT a free
+// knob. The value is declared to the Stage R gate, which enforces the
+// authorization binding — an authorization that binds requestTimeoutMs must
+// see the exact same value, and an authorization WITHOUT the field only ever
+// approves the 240000ms default. Invalid values refuse before anything runs.
+let requestTimeoutMs; // undefined = default 240000
+{
+  const t = arg('--request-timeout-ms');
+  if (t !== undefined) {
+    requestTimeoutMs = Number(t);
+    if (!Number.isSafeInteger(requestTimeoutMs) || requestTimeoutMs < 60_000 || requestTimeoutMs > 600_000) {
+      console.error(`run-challenge-study: --request-timeout-ms '${t}' must be an integer within [60000, 600000] (socket-inactivity semantics — see AMD_TRANSPORT_TIMEOUTS)`);
+      process.exit(1);
+    }
+  }
+}
 
 // Clock discipline (security): the authorization clock is NOT caller-chosen
 // for REAL execution. `--now` is a SIMULATED clock for --dry-run only (clearly
@@ -101,7 +122,16 @@ const resolved = path.resolve(process.cwd(), studyDir);
  *  Stage R authorization gate. READ-ONLY — no ledger writes, no actor, no
  *  network. Returns the verified plan descriptor or exits non-stop. */
 function verifyPlan(frozen, armCheck) {
-  const cases = frozen.manifest.cases.map((c) => c.caseId);
+  const manifestCaseIds = frozen.manifest.cases.map((c) => c.caseId);
+  let cases = manifestCaseIds;
+  if (casesFilter !== null) {
+    const unknown = casesFilter.filter((c) => !manifestCaseIds.includes(c));
+    if (unknown.length > 0) {
+      console.error(`run-challenge-study: --cases contains non-frozen case(s): ${unknown.join(', ')} (frozen: ${manifestCaseIds.join(', ')})`);
+      process.exit(1);
+    }
+    cases = casesFilter; // caller order is the loop order (e.g. deepest-context unit first)
+  }
   const plan = { arms, cases, repetitions: [1] };
   const units = arms.length * cases.length;
   if (executionMode === 'offline-stub') {
@@ -125,6 +155,7 @@ function verifyPlan(frozen, armCheck) {
     // so the pre-flight value is never the last word either way.
     now: dryRun ? now : Date.now(),
     declaredExecutionMode: executionMode,
+    declaredRequestTimeoutMs: requestTimeoutMs, // undefined = default 240000; the gate enforces the authorization binding
   });
   return { plan, units, gate, auth };
 }
@@ -167,12 +198,13 @@ try {
   if (executionMode !== 'offline-stub') {
     const identity = verified.auth && typeof verified.auth.requestedActorIdentity === 'string' ? verified.auth.requestedActorIdentity : null;
     if (identity === 'GLM-5.3-Flash') {
-      responderFactory = () => createAmdActorResponder();
+      responderFactory = () => createAmdActorResponder({ requestTimeoutMs: requestTimeoutMs !== undefined ? requestTimeoutMs : 240_000 });
       console.log('run-challenge-study: transport = AMD radeon tokenfactory (GLM-5.3-Flash)');
     } else if (identity === 'Atria-Dawn') {
       // Shuxi intern-ai-discovery, Stage G round10-verified wiring: standard
       // content layout, NO reasoning_effort (unverified parameter — never sent).
       responderFactory = () => createAmdActorResponder({
+        requestTimeoutMs: requestTimeoutMs !== undefined ? requestTimeoutMs : 240_000,
         baseUrl: INTERN_S2_BASE_URL,
         modelId: 'Atria-Dawn',
         apiKeyProvider: resolveInternS2ApiKey,
@@ -183,6 +215,7 @@ try {
       // Shuxi intern-ai-discovery, Stage G round7-verified wiring (12/12 valid
       // candidates): standard content layout, NO reasoning_effort.
       responderFactory = () => createAmdActorResponder({
+        requestTimeoutMs: requestTimeoutMs !== undefined ? requestTimeoutMs : 240_000,
         baseUrl: INTERN_S2_BASE_URL,
         modelId: 'deepseek-v4.1-flash-1017',
         apiKeyProvider: resolveInternS2ApiKey,
@@ -194,6 +227,7 @@ try {
       // API's own /v4/models entry, OpenAI Chat protocol. reasoning_effort is
       // UNVERIFIED on this endpoint → never sent (provider discipline).
       responderFactory = () => createAmdActorResponder({
+        requestTimeoutMs: requestTimeoutMs !== undefined ? requestTimeoutMs : 240_000,
         baseUrl: BIGMODEL_CODING_BASE_URL,
         modelId: BIGMODEL_CODING_MODEL_ID,
         apiKeyProvider: resolveBigmodelCodingApiKey,
@@ -222,7 +256,7 @@ try {
     actorFactory,
     maxAttemptsTotal,
     owner,
-    ...(executionMode === 'offline-stub' ? {} : { execution: { mode: executionMode, now: () => Date.now() } }),
+    ...(executionMode === 'offline-stub' ? {} : { execution: { mode: executionMode, now: () => Date.now(), requestTimeoutMs } }),
   });
 
   const counts = {};
