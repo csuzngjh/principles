@@ -146,6 +146,51 @@ function ensurePluginData(explicit, pluginRoot) {
   return locatePluginData(undefined);
 }
 
+/** Read the version each pinned runtime package ACTUALLY installed under
+ *  `<runtimeDir>/node_modules`, or 'not-installed' when it is absent.
+ *
+ *  PRI-1046: the pin file and the install exit code are both claims, not
+ *  evidence — npm can log `placeDep … REPLACE` + `REMOVE node_modules/…` and
+ *  still exit 0, leaving a nested copy that satisfies a caret range but not the
+ *  exact pin. Any script that reports a pin as satisfied must read these bytes.
+ */
+const RUNTIME_PACKAGE_NAMES = {
+  codexAdapter: '@principles/codex-adapter',
+  hostRuntime: '@principles/host-runtime',
+  core: '@principles/core',
+};
+
+function readInstalledRuntimeVersions(runtimeDir) {
+  const read = (packageName) => {
+    let pkg;
+    try {
+      pkg = JSON.parse(fs.readFileSync(path.join(runtimeDir, 'node_modules', packageName, 'package.json'), 'utf8'));
+    } catch {
+      return 'not-installed';
+    }
+    // rc-1/rc-3: a manifest without a string version is reported as unreadable,
+    // never coerced into looking like a satisfied pin.
+    return typeof pkg?.version === 'string' ? pkg.version : 'unknown';
+  };
+  return {
+    codexAdapter: read(RUNTIME_PACKAGE_NAMES.codexAdapter),
+    hostRuntime: read(RUNTIME_PACKAGE_NAMES.hostRuntime),
+    core: read(RUNTIME_PACKAGE_NAMES.core),
+  };
+}
+
+/** Compare the installed runtime manifests against the plugin pins.
+ *  Returns { ok, installed, mismatched } — `mismatched` carries one row per
+ *  package whose installed version is not exactly the pinned one (an
+ *  unreadable pin counts as a mismatch, never as agreement). */
+function verifyInstalledRuntime(runtimeDir, pins) {
+  const installed = readInstalledRuntimeVersions(runtimeDir);
+  const mismatched = Object.entries(RUNTIME_PACKAGE_NAMES)
+    .map(([key, packageName]) => ({ packageName, pinned: pins?.[key], installed: installed[key] }))
+    .filter((row) => typeof row.pinned !== 'string' || row.pinned.length === 0 || row.installed !== row.pinned);
+  return { ok: mismatched.length === 0, installed, mismatched };
+}
+
 /** An initialized user workspace takes precedence; otherwise use the nearest project. */
 function locateWorkspace(startDir) {
   const userWorkspace = path.join(codexDir(), 'pd-workspace');
@@ -259,7 +304,9 @@ module.exports = {
   pdEntryFromGlobalRoot,
   pdEntryFromPath,
   pdEntryFromShimLines,
+  readInstalledRuntimeVersions,
   requireFlagValue,
+  verifyInstalledRuntime,
 };
 
 // CLI entry: the single authoritative way for skills to run a shipped script.

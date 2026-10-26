@@ -9,7 +9,7 @@ const repo = fileURLToPath(new URL('../../../', import.meta.url));
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
 
-function fixture() {
+function fixture(extraEnv: Record<string, string> = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-setup-worker-'));
   roots.push(home);
   const workspace = path.join(home, '.codex', 'pd-workspace');
@@ -27,13 +27,21 @@ function fixture() {
   const adapter = path.join(runtime, 'node_modules', '@principles', 'codex-adapter', 'dist');
   fs.mkdirSync(adapter, { recursive: true });
   fs.writeFileSync(path.join(adapter, 'pd-hook.js'), '');
-  const pins = JSON.parse(fs.readFileSync(path.join(repo, 'plugins', 'principles-disciple', 'runtime-version.json'), 'utf8'));
+  const pins = JSON.parse(fs.readFileSync(path.join(repo, 'plugins', 'principles-disciple', 'runtime-version.json'), 'utf8')) as { codexAdapter: string; hostRuntime: string; core: string };
+  // PRI-1046: setup verifies the installed manifests, not only the adapter entry,
+  // so the fixture must fabricate the bytes a genuinely satisfied pin leaves
+  // behind. The marker alone is no longer enough to short-circuit the install.
+  for (const [name, version] of [['codex-adapter', pins.codexAdapter], ['host-runtime', pins.hostRuntime], ['core', pins.core]] as const) {
+    const packageDir = path.join(runtime, 'node_modules', '@principles', name);
+    fs.mkdirSync(packageDir, { recursive: true });
+    fs.writeFileSync(path.join(packageDir, 'package.json'), JSON.stringify({ name: `@principles/${name}`, version }));
+  }
   fs.writeFileSync(path.join(runtime, '.pd-runtime.json'), JSON.stringify(pins));
   const run = () => spawnSync(process.execPath, [path.join(repo, 'plugins', 'principles-disciple', 'scripts', 'pd-setup.cjs'), '--plugin-root', path.join(repo, 'plugins', 'principles-disciple'), '--plugin-data', pluginData, '--workspace', workspace, '--skip-init', '--ingest', 'skip', '--json'], {
     encoding: 'utf8', timeout: 30_000,
-    env: { ...process.env, HOME: home, USERPROFILE: home, CODEX_HOME: path.join(home, '.codex') },
+    env: { ...process.env, HOME: home, USERPROFILE: home, CODEX_HOME: path.join(home, '.codex'), ...extraEnv },
   });
-  return { home, workspace, manifest, previous, run };
+  return { home, workspace, manifest, previous, pins, runtime, run };
 }
 
 describe('real plugin setup connects the existing Companion worker', () => {
@@ -114,5 +122,39 @@ describe('real plugin setup connects the existing Companion worker', () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('worker_registration_failed');
     expect(result.stderr).toContain('workspace_config_invalid');
+  });
+});
+
+// PRI-1046: npm can report a successful install while leaving a pinned package
+// out of the top-level tree, and the marker used to be written from the desired
+// pins without reading the bytes. These two cases pin both halves of the fix:
+// the short-circuit still works when the bytes agree, and a marker that
+// disagrees with them no longer buys a pass.
+describe('pd-setup attests the installed runtime bytes', () => {
+  // Port 9 (discard) refuses TCP connections, so any reinstall attempt fails
+  // fast and deterministically instead of depending on the real registry.
+  const unreachableRegistry = { npm_config_registry: 'http://127.0.0.1:9/' };
+
+  it('short-circuits the reinstall only while the installed bytes match the pins', () => {
+    const { run } = fixture(unreachableRegistry);
+    const result = run();
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout).runtimeInstalled).toBe('already-present');
+  });
+
+  it('refuses a marker whose claim the installed bytes contradict', () => {
+    const { runtime, run } = fixture(unreachableRegistry);
+    // The npm silent-drop shape: the marker claims the core pin while the
+    // top-level tree has no core at all (a nested copy can satisfy a caret
+    // range, never the exact pin).
+    fs.rmSync(path.join(runtime, 'node_modules', '@principles', 'core'), { recursive: true, force: true });
+    const result = run();
+    expect(result.status, result.stdout).toBe(1);
+    expect(result.stdout).not.toContain('"ok": true');
+    // The reason names the reinstall attempt, not the post-install mismatch:
+    // removing the marker gate makes this assert runtime_pin_mismatch instead,
+    // because the lying marker short-circuits the repair away.
+    expect(result.stderr).toContain('runtime_install_failed');
+    expect(fs.readFileSync(path.join(runtime, '.pd-runtime.json'), 'utf8')).not.toContain('installedAt');
   });
 });

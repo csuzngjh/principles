@@ -497,6 +497,64 @@ describe('pd-cli discovery Windows fallback (pd-locate)', () => {
   }, 60_000);
 });
 
+describe('installed runtime bytes against the pins (pd-locate, PRI-1046)', () => {
+  type Pins = { codexAdapter: string; hostRuntime: string; core: string };
+  async function loadLocate() {
+    const { createRequire } = await import('node:module');
+    const req = createRequire(import.meta.url);
+    return req(path.join(pluginDir, 'scripts', 'pd-locate.cjs')) as {
+      readInstalledRuntimeVersions: (runtimeDir: string) => Pins;
+      verifyInstalledRuntime: (runtimeDir: string, pins: Pins) => { ok: boolean; installed: Pins; mismatched: { packageName: string; pinned: string; installed: string }[] };
+    };
+  }
+
+  function fabricate(versions: Partial<Record<keyof Pins, string | null | undefined>>): { runtimeDir: string; pins: Pins } {
+    const pins: Pins = { codexAdapter: '0.5.13', hostRuntime: '0.13.1', core: '1.296.2' };
+    const runtimeDir = tempDir('pd-runtime-bytes-');
+    for (const [key, packageName] of [['codexAdapter', 'codex-adapter'], ['hostRuntime', 'host-runtime'], ['core', 'core']] as const) {
+      // rc-5: hasOwn distinguishes "not asked about" from "explicitly broken".
+      const requested = Object.hasOwn(versions, key);
+      const version = requested ? versions[key] : pins[key];
+      if (version === null) continue;
+      const packageDir = path.join(runtimeDir, 'node_modules', '@principles', packageName);
+      fs.mkdirSync(packageDir, { recursive: true });
+      fs.writeFileSync(path.join(packageDir, 'package.json'), JSON.stringify(version === undefined
+        ? { name: `@principles/${packageName}` }
+        : { name: `@principles/${packageName}`, version }), 'utf8');
+    }
+    return { runtimeDir, pins };
+  }
+
+  it('agrees only when every installed manifest carries exactly its pinned version', async () => {
+    const locate = await loadLocate();
+    const { runtimeDir, pins } = fabricate({});
+    expect(locate.verifyInstalledRuntime(runtimeDir, pins)).toMatchObject({ ok: true, installed: pins, mismatched: [] });
+  }, 60_000);
+
+  it('names the disagreeing package instead of waving the whole tuple through', async () => {
+    const locate = await loadLocate();
+    const { runtimeDir, pins } = fabricate({ core: '1.296.1' });
+    const report = locate.verifyInstalledRuntime(runtimeDir, pins);
+    expect(report.ok).toBe(false);
+    expect(report.mismatched).toEqual([{ packageName: '@principles/core', pinned: pins.core, installed: '1.296.1' }]);
+  }, 60_000);
+
+  it('treats an absent package, a versionless manifest and an unreadable pin as mismatch, never as agreement (rc-1/rc-3)', async () => {
+    const locate = await loadLocate();
+    const absent = fabricate({ core: null });
+    expect(locate.verifyInstalledRuntime(absent.runtimeDir, absent.pins).mismatched)
+      .toEqual([{ packageName: '@principles/core', pinned: absent.pins.core, installed: 'not-installed' }]);
+    const unreadable = fabricate({ core: undefined });
+    expect(locate.verifyInstalledRuntime(unreadable.runtimeDir, unreadable.pins).mismatched)
+      .toEqual([{ packageName: '@principles/core', pinned: unreadable.pins.core, installed: 'unknown' }]);
+    const agreed = fabricate({});
+    const brokenPins = { ...agreed.pins, core: '' };
+    expect(locate.verifyInstalledRuntime(agreed.runtimeDir, brokenPins).ok).toBe(false);
+    // An empty runtime dir cannot satisfy any pin.
+    expect(locate.verifyInstalledRuntime(tempDir('pd-runtime-empty-'), agreed.pins).mismatched).toHaveLength(3);
+  }, 60_000);
+});
+
 describe('first-run $pd-control setup (real user flow)', () => {
   it('creates the plugin data dir Codex never creates, and npm-installs the pinned runtime', async () => {
     // Codex 0.147 SETS PLUGIN_DATA for hooks but does NOT create the dir —
@@ -545,6 +603,25 @@ describe('first-run $pd-control setup (real user flow)', () => {
     expect(runtime.codexAdapter).toBe(pins.codexAdapter);
     expect(runtime.hostRuntime).toBe(pins.hostRuntime);
     expect(runtime.core).toBe(pins.core);
+
+    // PRI-1046: the report mirrors the pins the script ASKED for. The honest
+    // assertion is the bytes npm actually left under runtime/node_modules —
+    // npm can exit 0 while dropping one of them from the top-level tree.
+    const { createRequire: requireForBytes } = await import('node:module');
+    const locateForBytes = requireForBytes(import.meta.url)(path.join(cachePlugin, 'scripts', 'pd-locate.cjs')) as {
+      readInstalledRuntimeVersions: (runtimeDir: string) => { codexAdapter: string; hostRuntime: string; core: string };
+    };
+    expect(locateForBytes.readInstalledRuntimeVersions(path.join(pluginData, 'runtime'))).toEqual({
+      codexAdapter: pins.codexAdapter,
+      hostRuntime: pins.hostRuntime,
+      core: pins.core,
+    });
+    // The marker that short-circuits every later run must attest those bytes.
+    expect(JSON.parse(fs.readFileSync(path.join(pluginData, 'runtime', '.pd-runtime.json'), 'utf8'))).toMatchObject({
+      codexAdapter: pins.codexAdapter,
+      hostRuntime: pins.hostRuntime,
+      core: pins.core,
+    });
 
     // PRI-810 regression guard: the freshly installed runtime must satisfy the
     // Owner emergency-control capability contract (global pause / safety
