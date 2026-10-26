@@ -1,28 +1,63 @@
 {
-  "duration": 36,
+  "duration": 30,
+  "poster": {
+    "frameAt": 2.9,
+    "line": {
+      "zh": "30 秒，看一次纠正如何用于下一次任务",
+      "en": "30 seconds: from correction to the next task"
+    }
+  },
   "locales": {
     "zh": {
       "voice": "zh-CN-YunyangNeural",
       "label": "中文",
       "scenes": [
-        { "id": "scene-1", "start": 0, "end": 4, "rate": "+0%", "pitch": "-6Hz", "text": "同样的行为，又要纠正一次。" },
-        { "id": "scene-2", "start": 4, "end": 10, "rate": "+0%", "pitch": "-5Hz", "text": "三次相似纠正，被收束为一个可追溯的行为模式。" },
-        { "id": "scene-3", "start": 10, "end": 17, "rate": "+8%", "pitch": "-4Hz", "text": "系统提出原则：扩大任务范围前，先说明影响、风险和验证方式。" },
-        { "id": "scene-4", "start": 17, "end": 24, "rate": "+5%", "pitch": "-5Hz", "text": "但建议不会自动生效。修改、批准或暂存，始终由 Owner 决定。" },
-        { "id": "scene-5", "start": 24, "end": 31, "rate": "+8%", "pitch": "-4Hz", "text": "下一次相似任务，Agent 先说明范围、风险和验证计划，再等待确认。" },
-        { "id": "scene-6", "start": 31, "end": 36, "rate": "+22%", "pitch": "-5Hz", "text": "让纠正变成 Agent 的下一次行为。燃烧痛苦，协同进化。" }
+        { "id": "scene-1", "start": 0, "end": 4, "rate": "+0%", "pitch": "-6Hz", "text": "只让它修按钮，却又改了整页。" },
+        { "id": "scene-2", "start": 4, "end": 8, "rate": "+0%", "pitch": "-5Hz", "text": "你反复提醒：超出范围，先问我。" },
+        { "id": "scene-3", "start": 8, "end": 13, "rate": "+0%", "pitch": "-4Hz", "text": "PD 将相关纠正整理成原则建议。" },
+        { "id": "scene-4", "start": 13, "end": 17, "rate": "+0%", "pitch": "-5Hz", "text": "你审查、修改，再决定是否采用。" },
+        {
+          "id": "scene-5", "start": 17, "end": 25, "rate": "+0%", "pitch": "-4Hz",
+          "text": "下一次遇到类似情况，原则用于指导行为；是否改善，仍看实际表现。",
+          "cues": [
+            { "start": 17, "end": 21.4, "text": "下一次遇到类似情况，原则用于指导行为；" },
+            { "start": 21.4, "end": 25, "text": "是否改善，仍看实际表现。" }
+          ]
+        },
+        {
+          "id": "scene-6", "start": 25, "end": 30, "rate": "+5%", "pitch": "-5Hz",
+          "text": "少一点重复纠正。决定权在你，随时可撤回。",
+          "cues": [
+            { "start": 25, "end": 27.2, "text": "少一点重复纠正。" },
+            { "start": 27.2, "end": 30, "text": "决定权在你，随时可撤回。" }
+          ]
+        }
       ]
     },
     "en": {
       "voice": "en-US-AndrewNeural",
       "label": "English",
       "scenes": [
-        { "id": "scene-1", "start": 0, "end": 4, "rate": "+0%", "pitch": "-6Hz", "text": "The same behavior. Another correction." },
-        { "id": "scene-2", "start": 4, "end": 10, "rate": "+0%", "pitch": "-5Hz", "text": "Three related corrections converge into one traceable behavior pattern." },
-        { "id": "scene-3", "start": 10, "end": 17, "rate": "+8%", "pitch": "-4Hz", "text": "The system proposes a principle: explain impact, risks, and verification before expanding scope." },
-        { "id": "scene-4", "start": 17, "end": 24, "rate": "+0%", "pitch": "-5Hz", "text": "But nothing activates on its own. The Owner edits, approves, or defers." },
-        { "id": "scene-5", "start": 24, "end": 31, "rate": "+8%", "pitch": "-4Hz", "text": "Next time, the Agent presents scope, risks, and a verification plan, then waits." },
-        { "id": "scene-6", "start": 31, "end": 36, "rate": "+8%", "pitch": "-5Hz", "text": "Turn corrections into the Agent's next behavior. Burn pain. Co-evolve." }
+        { "id": "scene-1", "start": 0, "end": 4, "rate": "+0%", "pitch": "-6Hz", "text": "You asked for a button fix. It rewrote the page." },
+        { "id": "scene-2", "start": 4, "end": 8, "rate": "+0%", "pitch": "-5Hz", "text": "You keep saying: ask before expanding scope." },
+        { "id": "scene-3", "start": 8, "end": 13, "rate": "+0%", "pitch": "-4Hz", "text": "PD turns related corrections into a proposed principle." },
+        { "id": "scene-4", "start": 13, "end": 17, "rate": "+0%", "pitch": "-5Hz", "text": "You review, edit, and decide whether to adopt it." },
+        {
+          "id": "scene-5", "start": 17, "end": 25, "rate": "+0%", "pitch": "-4Hz",
+          "text": "In a similar task, the principle guides behavior. Check what actually changes.",
+          "cues": [
+            { "start": 17, "end": 21.2, "text": "In a similar task, the principle guides behavior." },
+            { "start": 21.2, "end": 25, "text": "Check what actually changes." }
+          ]
+        },
+        {
+          "id": "scene-6", "start": 25, "end": 30, "rate": "+8%", "pitch": "-5Hz",
+          "text": "Fewer repeated corrections. You stay in control — withdraw anytime.",
+          "cues": [
+            { "start": 25, "end": 27.2, "text": "Fewer repeated corrections." },
+            { "start": 27.2, "end": 30, "text": "You stay in control — withdraw anytime." }
+          ]
+        }
       ]
     }
   }

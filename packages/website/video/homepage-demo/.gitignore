@@ -1,2 +1,6 @@
 renders/
 snapshots*/
+.hyperframes/artifacts/
+.hyperframes/history-id
+.hyperframes/render-outputs.json
+.hyperframes/video-state.json
