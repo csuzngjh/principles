@@ -3,10 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "npx --yes hyperframes@0.7.24 preview",
-    "check": "npx --yes hyperframes@0.7.24 lint && npx --yes hyperframes@0.7.24 validate && npx --yes hyperframes@0.7.24 inspect",
-    "render": "npx --yes hyperframes@0.7.24 render",
+    "dev": "npx --yes hyperframes@0.8.200 preview",
+    "check": "npx --yes hyperframes@0.8.200 check",
+    "render": "npx --yes hyperframes@0.8.200 render",
     "voiceover": "node scripts/generate-voiceover.mjs",
-    "publish": "npx --yes hyperframes@0.7.24 publish"
+    "publish": "npx --yes hyperframes@0.8.200 publish"
   }
 }

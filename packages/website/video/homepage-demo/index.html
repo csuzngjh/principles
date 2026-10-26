@@ -3,32 +3,36 @@
   lang="en"
   data-composition-variables='[
     {"id":"locale","type":"enum","label":"Locale","default":"en","options":[{"value":"zh","label":"Chinese"},{"value":"en","label":"English"}]},
-    {"id":"s1Title","type":"string","label":"Scene 1 title","default":"The same behavior. Another correction."},
-    {"id":"s1Sub","type":"string","label":"Scene 1 subtitle","default":"By the third time, it should not start from zero."},
-    {"id":"settling","type":"string","label":"Settling line","default":"Corrections do not evaporate. They settle."},
-    {"id":"evidenceLabel","type":"string","label":"Evidence label","default":"RELATED CORRECTIONS"},
-    {"id":"evidenceItems","type":"string","label":"Evidence items","default":"Expanded scope without explaining impact|Acted before naming the risks|Started without confirmation"},
-    {"id":"patternTitle","type":"string","label":"Pattern title","default":"This is not an isolated mistake"},
-    {"id":"patternBody","type":"string","label":"Pattern body","default":"The system found 3 pieces of related behavior evidence"},
-    {"id":"proposalLabel","type":"string","label":"Proposal label","default":"PRINCIPLE PROPOSAL · REVIEW REQUIRED"},
-    {"id":"proposalText","type":"string","label":"Proposal text","default":"Before expanding task scope, explain the impact, risks, and verification plan."},
-    {"id":"ownerTitle","type":"string","label":"Owner title","default":"The system can propose. The Owner decides."},
-    {"id":"modify","type":"string","label":"Modify action","default":"Modify"},
-    {"id":"approve","type":"string","label":"Approve action","default":"Approve"},
-    {"id":"defer","type":"string","label":"Defer action","default":"Defer"},
-    {"id":"locked","type":"string","label":"Locked state","default":"Nothing changes without approval"},
-    {"id":"laterTitle","type":"string","label":"Later title","default":"The next similar task"},
-    {"id":"laterItems","type":"string","label":"Later items","default":"Explains the scope|Names the main risks|Presents a verification plan"},
-    {"id":"observed","type":"string","label":"Observed state","default":"Behavior change observed"},
-    {"id":"rollback","type":"string","label":"Rollback state","default":"Rollback remains available"},
-    {"id":"closing","type":"string","label":"Closing line","default":"Turn corrections into how the Agent acts next."},
-    {"id":"trust","type":"string","label":"Trust line","default":"Owner-governed · Observable · Reversible"}
+    {"id":"s1Title","type":"string","label":"Scene 1 title","default":"A button fix became a page rewrite?"},
+    {"id":"s1Request","type":"string","label":"Scene 1 request","default":"Please fix this one button."},
+    {"id":"s1ChangeOk","type":"string","label":"Scene 1 expected change","default":"Button styling"},
+    {"id":"s1Change1","type":"string","label":"Scene 1 overreach 1","default":"Page layout rebuilt"},
+    {"id":"s1Change2","type":"string","label":"Scene 1 overreach 2","default":"Navigation restructured"},
+    {"id":"s1Change3","type":"string","label":"Scene 1 overreach 3","default":"Global styles rewritten"},
+    {"id":"s2Title","type":"string","label":"Scene 2 title","default":"You keep saying:"},
+    {"id":"s2Quote","type":"string","label":"Scene 2 correction quote","default":"\u201cAsk before expanding scope.\u201d"},
+    {"id":"s2Grouped","type":"string","label":"Scene 2 grouped card","default":"Related corrections \u00b7 grouped"},
+    {"id":"s3Title","type":"string","label":"Scene 3 title","default":"PD drafts a principle"},
+    {"id":"s3PrincipleL1","type":"string","label":"Scene 3 principle line 1","default":"Explain the impact and ask"},
+    {"id":"s3PrincipleL2","type":"string","label":"Scene 3 principle line 2","default":"before expanding scope."},
+    {"id":"s4Title","type":"string","label":"Scene 4 title","default":"You review. You decide."},
+    {"id":"s4Note","type":"string","label":"Scene 4 note","default":"Edit or defer \u2014 nothing activates without you."},
+    {"id":"s5Title","type":"string","label":"Scene 5 title","default":"Next time: explain before acting"},
+    {"id":"s5Task","type":"string","label":"Scene 5 task","default":"Upgrade search on the same page."},
+    {"id":"s5Chip","type":"string","label":"Scene 5 approved chip","default":"Explain impact, then ask before expanding scope"},
+    {"id":"s5Reply1","type":"string","label":"Scene 5 agent reply 1","default":"This also affects two other modules."},
+    {"id":"s5Reply2a","type":"string","label":"Scene 5 agent reply 2 line 1","default":"I\u2019ll explain the impact and"},
+    {"id":"s5Reply2b","type":"string","label":"Scene 5 agent reply 2 line 2","default":"wait before expanding the change."},
+    {"id":"s6Title1","type":"string","label":"Scene 6 title line 1","default":"Fewer repeated corrections."},
+    {"id":"s6Title2","type":"string","label":"Scene 6 title line 2","default":"You stay in control."},
+    {"id":"s6Sub","type":"string","label":"Scene 6 sub line","default":"Any principle can be withdrawn at any time."},
+    {"id":"s6Cta","type":"string","label":"Scene 6 CTA","default":"Choose \u201cGet started\u201d on this page"}
   ]'
 >
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=1920, height=1080" />
-    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <script src="capture/assets/gsap.min.js"></script>
     <style>
       @font-face { font-family: "Inter"; src: url("capture/assets/fonts/Inter-400.woff2") format("woff2"); font-weight: 400; }
       @font-face { font-family: "Inter"; src: url("capture/assets/fonts/Inter-700.woff2") format("woff2"); font-weight: 700; }
@@ -37,177 +41,357 @@
       * { box-sizing: border-box; }
       html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: #111827; }
       body { font-family: "Inter", "Noto Sans SC", sans-serif; color: #FAFAF7; }
-      .mono { font-family: "JetBrains Mono", monospace; letter-spacing: .12em; text-transform: uppercase; }
+      .mono { font-family: "JetBrains Mono", "Noto Sans SC", monospace; letter-spacing: .1em; text-transform: uppercase; }
       #root { position: relative; width: 1920px; height: 1080px; overflow: hidden; background: #111827; }
-      .scene { position: absolute; inset: 0; width: 100%; height: 100%; overflow: hidden; background-color: #111827; }
-      .scene::before { content: ""; position: absolute; inset: 0; background-image: linear-gradient(rgba(126,184,218,.07) 2px, rgba(126,184,218,0) 2px), linear-gradient(90deg, rgba(126,184,218,.07) 2px, rgba(126,184,218,0) 2px); background-size: 64px 64px; opacity: .35; }
-      .scene-content { position: relative; z-index: 2; width: 100%; height: 100%; padding: 110px 140px; display: flex; flex-direction: column; justify-content: center; gap: 34px; }
-      .orb { position: absolute; z-index: 1; width: 620px; height: 620px; border-radius: 50%; background: radial-gradient(circle, rgba(126,184,218,.2) 0%, rgba(126,184,218,0) 70%); }
-      .rule { height: 3px; width: 170px; background: #7EB8DA; transform-origin: left center; }
-      .eyebrow { color: #7EB8DA; font-size: 24px; font-weight: 500; }
       h1, h2, p { margin: 0; }
-      h1 { max-width: 1260px; font-size: 92px; line-height: 1.08; letter-spacing: -.045em; font-weight: 700; }
-      h2 { font-size: 66px; line-height: 1.14; letter-spacing: -.035em; font-weight: 700; }
-      .sub { max-width: 1050px; color: #CBD5E1; font-size: 34px; line-height: 1.45; font-weight: 400; }
-      .meta { color: #94A3B8; font-size: 21px; }
-      .panel { background: #1F2937; border: 2px solid rgba(126,184,218,.34); border-radius: 18px; }
-      .status { display: inline-flex; align-items: center; gap: 14px; color: #CBD5E1; font-size: 24px; }
+      .tag { color: #7EB8DA; font-size: 30px; font-weight: 500; letter-spacing: .06em; }
+      .status { display: inline-flex; align-items: center; gap: 14px; color: #CBD5E1; font-size: 32px; }
       .status-dot { width: 14px; height: 14px; border-radius: 50%; background: #7EB8DA; }
 
-      #scene-1 .scene-content { align-items: flex-start; padding-right: 680px; }
-      #scene-1 .orb { right: 80px; top: 120px; }
-      .settling-ripples { position: absolute; right: 120px; top: 150px; z-index: 3; width: 620px; height: 620px; display: grid; place-items: center; }
-      .settling-ring { position: absolute; border: 2px solid rgba(126,184,218,.22); border-radius: 50%; }
-      .settling-ring:nth-child(1) { width: 210px; height: 210px; }
-      .settling-ring:nth-child(2) { width: 390px; height: 390px; }
-      .settling-ring:nth-child(3) { width: 570px; height: 570px; }
-      .settling-center { position: relative; width: 300px; color: #FAFAF7; text-align: center; font-size: 29px; line-height: 1.55; letter-spacing: .02em; }
-      .settling-center::before { content: "03 · PRINCIPLE"; display: block; margin-bottom: 18px; color: #7EB8DA; font: 18px/1.2 "JetBrains Mono", monospace; letter-spacing: .12em; }
+      /* Persistent chrome: brand (left) + illustrative-source badge (right). */
+      .chrome-brand { position: absolute; left: 96px; top: 58px; z-index: 40; display: flex; align-items: center; gap: 16px; font-size: 30px; font-weight: 700; letter-spacing: .02em; color: #FAFAF7; }
+      .chrome-brand .status-dot { background: #7EB8DA; }
+      .chrome-badge { position: absolute; right: 96px; top: 54px; z-index: 40; padding: 10px 24px; border: 2px solid rgba(148,163,184,.5); border-radius: 10px; color: #B6C2D4; font-size: 30px; background: rgba(31,41,55,.55); }
+      .chrome-badge::before { content: ""; display: inline-block; width: 12px; height: 12px; margin-right: 14px; border-radius: 50%; background: #94A3B8; }
 
-      #scene-2 .orb { left: 640px; top: 180px; }
-      .split { display: grid; grid-template-columns: 1.15fr .85fr; gap: 90px; align-items: center; }
-      .evidence-list { display: flex; flex-direction: column; gap: 22px; }
-      .evidence-card { min-height: 128px; padding: 26px 34px; display: flex; align-items: center; gap: 24px; color: #CBD5E1; font-size: 28px; }
-      .evidence-card .index { flex: 0 0 auto; color: #7EB8DA; font-size: 21px; }
-      .pattern-panel { min-height: 430px; padding: 58px; display: flex; flex-direction: column; justify-content: center; gap: 28px; border-color: #7EB8DA; }
-      .pattern-count { color: #7EB8DA; font-size: 82px; font-weight: 700; }
+      .scene { position: absolute; inset: 0; width: 100%; height: 100%; overflow: hidden; background-color: #111827; }
+      /* Scenes 2-6 enter via a fade-in tween; scene 1 is visible from frame 0. */
+      #scene-2 { opacity: 0; }
+      #scene-3 { opacity: 0; }
+      #scene-4 { opacity: 0; }
+      #scene-5 { opacity: 0; }
+      #scene-6 { opacity: 0; }
+      .scene::before { content: ""; position: absolute; inset: 0; background-image: linear-gradient(rgba(126,184,218,.06) 2px, rgba(126,184,218,0) 2px), linear-gradient(90deg, rgba(126,184,218,.06) 2px, rgba(126,184,218,0) 2px); background-size: 64px 64px; opacity: .3; }
+      .scene-content { position: relative; z-index: 2; width: 100%; height: 100%; padding: 150px 96px 194px; display: flex; flex-direction: column; gap: 30px; }
+      .orb { position: absolute; z-index: 1; width: 620px; height: 620px; border-radius: 50%; background: radial-gradient(circle, rgba(126,184,218,.16) 0%, rgba(126,184,218,0) 70%); }
+      .rule { height: 3px; width: 170px; background: #7EB8DA; transform-origin: left center; }
+      h1 { font-size: 104px; line-height: 1.08; letter-spacing: -.04em; font-weight: 700; }
+      h2 { font-size: 92px; line-height: 1.1; letter-spacing: -.035em; font-weight: 700; }
 
-      #scene-3 .orb { right: 180px; bottom: -80px; }
-      .proposal-wrap { display: grid; grid-template-columns: 330px 1fr; gap: 70px; align-items: stretch; }
-      .proposal-source { padding: 42px; display: flex; flex-direction: column; justify-content: space-between; }
-      .proposal-source .big { color: #7EB8DA; font-size: 88px; font-weight: 700; }
-      .proposal-card { padding: 54px 62px; min-height: 470px; display: flex; flex-direction: column; justify-content: center; gap: 40px; border-color: #7EB8DA; }
-      .proposal-text { max-width: 1080px; font-size: 53px; line-height: 1.35; letter-spacing: -.025em; }
+      /* Scene 1 — the concrete annoyance: one request, an oversized rewrite. */
+      #scene-1 .s1-body { display: flex; align-items: center; gap: 56px; margin-top: 26px; }
+      .bubble { position: relative; background: #1F2937; border: 2px solid rgba(126,184,218,.55); border-radius: 18px; }
+      .s1-request { flex: 0 0 640px; padding: 34px 40px 38px; }
+      .s1-request .who { margin-bottom: 16px; }
+      .s1-request .text { font-size: 46px; line-height: 1.4; font-weight: 400; color: #FAFAF7; }
+      .s1-flow { flex: 0 0 120px; height: 4px; background: rgba(126,184,218,.75); transform-origin: left center; border-radius: 2px; }
+      .s1-panel { flex: 1; min-width: 0; background: #1F2937; border: 2px solid rgba(148,163,184,.35); border-radius: 18px; padding: 30px 38px 34px; }
+      .s1-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 22px; }
+      .s1-overreach-tag { padding: 8px 20px; border-radius: 9px; background: rgba(183,121,31,.2); border: 2px solid rgba(214,162,60,.75); color: #D6A23C; font-size: 30px; font-weight: 500; }
+      .s1-rows { display: flex; flex-direction: column; gap: 14px; }
+      .s1-row { display: flex; align-items: center; gap: 22px; padding: 18px 26px; border-radius: 12px; border: 2px solid rgba(148,163,184,.24); color: #CBD5E1; font-size: 38px; }
+      .s1-row .mark { flex: 0 0 auto; font-size: 34px; }
+      .s1-row.ok { border-color: rgba(126,184,218,.5); }
+      .s1-row.ok .mark { color: #7EB8DA; }
+      .s1-row.wide { border-color: rgba(214,162,60,.55); background: rgba(183,121,31,.1); }
+      .s1-row.wide .mark { color: #D6A23C; }
 
-      #scene-4 .orb { left: 80px; bottom: -100px; }
-      .owner-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 78px; align-items: center; }
-      .owner-proposal { padding: 46px; min-height: 410px; display: flex; flex-direction: column; justify-content: center; gap: 30px; }
-      .owner-proposal p { font-size: 38px; line-height: 1.45; }
-      .decision-panel { min-height: 410px; padding: 46px; display: flex; flex-direction: column; justify-content: center; gap: 34px; border-color: #7EB8DA; }
-      .actions { display: flex; gap: 20px; }
-      .action { flex: 1; padding: 22px 24px; border: 2px solid rgba(148,163,184,.45); border-radius: 12px; color: #CBD5E1; font-size: 27px; text-align: center; }
-      .action.approve { color: #FAFAF7; background: #2F855A; border-color: #2F855A; }
-      .locked { padding-top: 28px; border-top: 2px solid rgba(148,163,184,.22); color: #CBD5E1; font-size: 25px; }
+      /* Scene 2 — the repeated correction, in the user's own words. */
+      #scene-2 .scene-content { align-items: center; justify-content: flex-start; gap: 44px; }
+      .s2-stage { position: relative; width: 1500px; height: 460px; display: grid; place-items: center; }
+      .s2-echo { position: absolute; width: 900px; padding: 22px 34px; text-align: center; color: #94A3B8; font-size: 40px; background: rgba(31,41,55,.6); border: 2px solid rgba(148,163,184,.35); border-radius: 16px; }
+      .s2-quote { position: relative; z-index: 2; max-width: 1400px; padding: 46px 64px; text-align: center; font-size: 88px; line-height: 1.25; font-weight: 700; letter-spacing: -.02em; color: #FAFAF7; border-color: #7EB8DA; }
+      .s2-grouped { display: flex; align-items: center; gap: 26px; padding: 26px 40px; background: #1F2937; border: 2px solid rgba(126,184,218,.5); border-radius: 16px; }
+      .s2-stack { position: relative; width: 74px; height: 58px; }
+      .s2-stack span { position: absolute; left: 0; width: 62px; height: 44px; border: 2px solid rgba(126,184,218,.7); border-radius: 8px; background: rgba(17,24,39,.7); }
+      .s2-stack span:nth-child(1) { top: 0; left: 10px; opacity: .55; }
+      .s2-stack span:nth-child(2) { top: 7px; left: 5px; opacity: .75; }
+      .s2-stack span:nth-child(3) { top: 14px; border-color: #7EB8DA; }
+      .s2-grouped .label { font-size: 40px; font-weight: 500; color: #FAFAF7; }
+      .s2-grouped .kept { color: #94A3B8; font-size: 32px; }
 
-      #scene-5 .orb { right: 260px; top: 40px; }
-      .later-panel { width: 100%; padding: 50px 58px; display: grid; grid-template-columns: .75fr 1.25fr; gap: 70px; align-items: center; }
-      .later-context { display: flex; flex-direction: column; gap: 24px; }
-      .later-checks { display: flex; flex-direction: column; gap: 20px; }
-      .check-row { padding: 24px 30px; display: flex; align-items: center; gap: 24px; background: rgba(47,133,90,.16); border: 2px solid rgba(47,133,90,.7); border-radius: 12px; color: #FAFAF7; font-size: 30px; }
-      .check { color: #2F855A; font-size: 34px; font-weight: 700; }
-      .later-states { display: flex; gap: 28px; }
+      /* Scene 3 — PD drafts one principle from the grouped corrections. */
+      #scene-3 .s3-body { display: flex; align-items: center; gap: 0; margin-top: 34px; }
+      .s3-source { flex: 0 0 470px; padding: 40px 38px; background: #1F2937; border: 2px solid rgba(148,163,184,.35); border-radius: 16px; display: flex; flex-direction: column; gap: 24px; }
+      .s3-source .stack { width: 96px; }
+      .s3-source .name { font-size: 38px; font-weight: 500; color: #FAFAF7; }
+      .s3-connector { flex: 0 0 150px; height: 4px; background: rgba(126,184,218,.75); transform-origin: left center; }
+      .s3-connector.v { width: 4px; height: 90px; transform-origin: top center; }
+      .s3-node { flex: 0 0 150px; height: 150px; border-radius: 50%; border: 3px solid #7EB8DA; display: grid; place-items: center; color: #7EB8DA; font-size: 44px; font-weight: 700; background: rgba(31,41,55,.85); }
+      .s3-card { flex: 1; min-width: 0; margin-left: 0; padding: 56px 62px; background: #1F2937; border: 2px solid #7EB8DA; border-radius: 18px; display: flex; flex-direction: column; gap: 34px; }
+      .s3-card .lines { display: flex; flex-direction: column; gap: 10px; }
+      .s3-card .line { font-size: 74px; line-height: 1.3; font-weight: 700; letter-spacing: -.02em; color: #FAFAF7; }
 
-      #scene-6 .scene-content { align-items: flex-start; padding-right: 300px; }
-      #scene-6 .orb { right: 80px; top: 220px; }
-      .closing { font-size: 86px; max-width: 1450px; }
-      .trust { color: #7EB8DA; font-size: 27px; }
-      .brand-mark { position: absolute; right: 190px; bottom: 150px; z-index: 3; width: 180px; height: 180px; border: 3px solid rgba(126,184,218,.65); border-radius: 50%; display: grid; place-items: center; color: #7EB8DA; font-family: "JetBrains Mono", monospace; font-size: 34px; }
+      /* Scene 4 — the Owner approves; nothing activates by itself. */
+      #scene-4 .s4-body { display: flex; gap: 56px; align-items: stretch; margin-top: 30px; }
+      .s4-card { flex: 1; min-width: 0; padding: 46px 50px; background: #1F2937; border: 2px solid rgba(126,184,218,.6); border-radius: 18px; display: flex; flex-direction: column; gap: 26px; }
+      .s4-card .line { font-size: 54px; line-height: 1.4; font-weight: 700; color: #FAFAF7; }
+      .s4-source { color: #94A3B8; font-size: 32px; }
+      .s4-approved { display: inline-flex; align-items: center; gap: 16px; align-self: flex-start; padding: 14px 28px; border-radius: 10px; background: rgba(47,133,90,.25); border: 2px solid #5FC492; color: #5FC492; font-size: 38px; font-weight: 700; }
+      .s4-decide { flex: 0 0 700px; padding: 44px 48px; background: #1F2937; border: 2px solid rgba(148,163,184,.35); border-radius: 18px; display: flex; flex-direction: column; gap: 30px; position: relative; }
+      .s4-actions { display: flex; gap: 20px; }
+      .s4-action { flex: 1; padding: 24px 18px; border: 2px solid rgba(148,163,184,.45); border-radius: 12px; color: #CBD5E1; font-size: 36px; text-align: center; }
+      .s4-action.approve { color: #FAFAF7; background: #2F855A; border-color: #2F855A; font-weight: 700; position: relative; }
+      .s4-note { color: #94A3B8; font-size: 34px; line-height: 1.45; }
+      .s4-cursor { position: absolute; left: 50%; top: 50%; width: 26px; height: 26px; margin: -13px 0 0 -13px; border-radius: 50%; background: rgba(250,250,247,.92); box-shadow: 0 0 0 3px rgba(250,250,247,.35); }
+
+      /* Scene 5 — the next similar task: explain first, then wait. */
+      #scene-5 .scene-content { gap: 26px; }
+      .s5-task { display: flex; align-items: center; gap: 24px; }
+      .s5-task .tag { padding: 8px 20px; border: 2px solid rgba(126,184,218,.55); border-radius: 9px; }
+      .s5-task .text { font-size: 40px; color: #CBD5E1; }
+      .s5-chip { display: inline-flex; align-items: center; gap: 18px; align-self: flex-start; padding: 18px 30px; background: #1F2937; border: 2px solid rgba(95,196,146,.6); border-radius: 14px; font-size: 36px; color: #FAFAF7; }
+      .s5-chip .ok { color: #5FC492; font-weight: 700; }
+      .s5-link { align-self: flex-start; margin-left: 60px; width: 4px; height: 84px; background: rgba(126,184,218,.7); transform-origin: top center; border-radius: 2px; }
+      .s5-thread { display: flex; flex-direction: column; gap: 22px; }
+      .s5-agent { color: #94A3B8; font-size: 32px; }
+      .s5-reply { max-width: 1500px; padding: 30px 42px; background: #1F2937; border: 2px solid rgba(148,163,184,.35); border-left: 8px solid #7EB8DA; border-radius: 14px; font-size: 52px; line-height: 1.4; color: #FAFAF7; }
+      .s5-wait { display: inline-flex; align-items: center; gap: 18px; color: #94A3B8; font-size: 34px; }
+      .s5-wait .dot { width: 12px; height: 12px; border-radius: 50%; background: #7EB8DA; }
+
+      /* Scene 6 — closing card; holds intact to the last frame. */
+      #scene-6 .scene-content { align-items: center; justify-content: center; gap: 40px; padding-top: 120px; }
+      .s6-titles { display: flex; flex-direction: column; gap: 12px; text-align: center; }
+      .s6-t1 { font-size: 104px; font-weight: 700; letter-spacing: -.04em; line-height: 1.14; color: #FAFAF7; }
+      .s6-t2 { font-size: 104px; font-weight: 700; letter-spacing: -.04em; line-height: 1.14; color: #7EB8DA; }
+      .s6-sub { font-size: 42px; color: #CBD5E1; }
+      .s6-divider { width: 640px; height: 2px; background: rgba(148,163,184,.35); }
+      .s6-brand { display: flex; align-items: center; gap: 26px; }
+      .s6-mark { width: 96px; height: 96px; border: 3px solid rgba(126,184,218,.65); border-radius: 50%; display: grid; place-items: center; color: #7EB8DA; font-size: 36px; font-weight: 700; }
+      .s6-name { font-size: 46px; font-weight: 700; color: #FAFAF7; }
+      .s6-cta { font-size: 38px; color: #7EB8DA; font-weight: 500; }
     </style>
   </head>
   <body>
-    <div id="root" data-composition-id="main" data-start="0" data-duration="36" data-width="1920" data-height="1080">
-      <section id="scene-1" class="clip scene" data-start="0" data-duration="4" data-track-index="1" style="z-index:1">
-        <div class="orb"></div><div class="scene-content"><div class="rule"></div><div class="eyebrow mono" data-copy="repeatedCorrection"></div><h1 id="s1-title"></h1><p id="s1-sub" class="sub"></p></div>
-        <div class="settling-ripples"><div class="settling-ring"></div><div class="settling-ring"></div><div class="settling-ring"></div><div id="settling" class="settling-center"></div></div>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="30" data-width="1920" data-height="1080">
+      <div id="chrome-brand" class="clip chrome-brand" data-start="0" data-duration="30" data-track-index="1"><span class="status-dot"></span><span>Principles Disciple</span></div>
+      <div id="chrome-badge" class="clip chrome-badge" data-start="0" data-duration="30" data-track-index="2" data-copy="illustrative"></div>
+
+      <section id="scene-1" class="clip scene" data-start="0" data-duration="4.6" data-track-index="3" style="z-index:3">
+        <div class="orb" data-layout-ignore style="right: 60px; top: 120px;"></div>
+        <div class="scene-content">
+          <h1 id="s1-title" data-var-text="s1Title"></h1>
+          <div class="s1-body">
+            <div class="s1-request bubble" id="s1-request">
+              <div class="who tag" data-copy="s1RequestTag"></div>
+              <div class="text" data-var-text="s1Request"></div>
+            </div>
+            <div class="s1-flow" id="s1-flow"></div>
+            <div class="s1-panel" id="s1-panel">
+              <div class="s1-panel-head">
+                <div class="tag" data-copy="s1AgentTag"></div>
+                <div class="s1-overreach-tag" id="s1-overreach-tag" data-copy="s1Overreach"></div>
+              </div>
+              <div class="s1-rows">
+                <div class="s1-row ok"><span class="mark mono">&#10003;</span><span data-var-text="s1ChangeOk"></span></div>
+                <div class="s1-row wide"><span class="mark mono">&#10007;</span><span data-var-text="s1Change1"></span></div>
+                <div class="s1-row wide"><span class="mark mono">&#10007;</span><span data-var-text="s1Change2"></span></div>
+                <div class="s1-row wide"><span class="mark mono">&#10007;</span><span data-var-text="s1Change3"></span></div>
+              </div>
+            </div>
+          </div>
+        </div>
       </section>
-      <section id="scene-2" class="clip scene" data-start="3.4" data-duration="6.6" data-track-index="2" data-layout-allow-overlap style="z-index:2">
-        <div class="orb"></div><div class="scene-content"><div id="evidence-label" class="eyebrow mono"></div><div class="split"><div id="evidence-list" class="evidence-list"></div><div class="pattern-panel panel"><div class="pattern-count">3×</div><h2 id="pattern-title"></h2><p id="pattern-body" class="sub"></p></div></div></div>
+
+      <section id="scene-2" class="clip scene" data-start="3.4" data-duration="5.2" data-track-index="4" style="z-index:4">
+        <div class="orb" data-layout-ignore style="left: 700px; top: 60px;"></div>
+        <div class="scene-content">
+          <h2 id="s2-title" data-var-text="s2Title"></h2>
+          <div class="s2-stage" id="s2-stage">
+            <div class="s2-echo" id="s2-echo2" data-copy="s2QuoteEcho" data-layout-ignore></div>
+            <div class="s2-echo" id="s2-echo1" data-copy="s2QuoteEcho" data-layout-ignore></div>
+            <div class="s2-quote bubble" id="s2-quote" data-var-text="s2Quote"></div>
+          </div>
+          <div class="s2-grouped" id="s2-grouped">
+            <div class="s2-stack"><span></span><span></span><span></span></div>
+            <div class="label" data-var-text="s2Grouped"></div>
+            <div class="kept" data-copy="s2Original"></div>
+          </div>
+        </div>
       </section>
-      <section id="scene-3" class="clip scene" data-start="9.4" data-duration="7.6" data-track-index="3" data-layout-allow-overlap style="z-index:3">
-        <div class="orb" data-layout-allow-overflow></div><div class="scene-content"><div id="proposal-label" class="eyebrow mono"></div><div class="proposal-wrap"><div class="proposal-source panel"><div><div class="meta mono" data-copy="evidence"></div><div class="big">3×</div></div><div class="status"><span class="status-dot"></span><span data-copy="traceableSource"></span></div></div><div class="proposal-card panel"><div class="meta mono" data-copy="suggestedPrinciple"></div><p id="proposal-text" class="proposal-text"></p><div class="status"><span class="status-dot"></span><span data-copy="ownerReviewRequired"></span></div></div></div></div>
+
+      <section id="scene-3" class="clip scene" data-start="7.4" data-duration="6.2" data-track-index="5" style="z-index:5">
+        <div class="orb" data-layout-ignore style="right: 120px; bottom: -60px;"></div>
+        <div class="scene-content">
+          <h2 id="s3-title" data-var-text="s3Title"></h2>
+          <div class="s3-body">
+            <div class="s3-source" id="s3-source">
+              <div class="s2-stack stack"><span></span><span></span><span></span></div>
+              <div class="name" data-copy="s3SourceTag"></div>
+              <div class="status"><span class="status-dot"></span><span data-copy="s3Traceable"></span></div>
+            </div>
+            <div class="s3-connector" id="s3-c1"></div>
+            <div class="s3-node" id="s3-node">PD</div>
+            <div class="s3-connector" id="s3-c2"></div>
+            <div class="s3-card" id="s3-card">
+              <div class="tag" data-copy="s3ProposalTag"></div>
+              <div class="lines">
+                <div class="line" id="s3-line1" data-var-text="s3PrincipleL1"></div>
+                <div class="line" id="s3-line2" data-var-text="s3PrincipleL2"></div>
+              </div>
+              <div class="status"><span class="status-dot" style="background:#D6A23C"></span><span data-copy="s3Awaiting"></span></div>
+            </div>
+          </div>
+        </div>
       </section>
-      <section id="scene-4" class="clip scene" data-start="16.4" data-duration="7.6" data-track-index="4" style="z-index:4">
-        <div class="orb" data-layout-allow-overflow></div><div class="scene-content"><div class="eyebrow mono" data-copy="ownerGate"></div><h2 id="owner-title"></h2><div class="owner-grid"><div class="owner-proposal panel"><div class="meta mono" data-copy="principleProposal"></div><p id="owner-proposal-text"></p><div class="status"><span class="status-dot"></span><span data-copy="activationLocked"></span></div></div><div class="decision-panel panel"><div class="actions"><div id="action-modify" class="action"></div><div id="action-approve" class="action approve"></div><div id="action-defer" class="action"></div></div><div id="locked" class="locked"></div><div class="meta mono" data-copy="rollbackAvailable"></div></div></div></div>
+
+      <section id="scene-4" class="clip scene" data-start="12.4" data-duration="5.2" data-track-index="6" style="z-index:6">
+        <div class="orb" data-layout-ignore style="left: 60px; bottom: -80px;"></div>
+        <div class="scene-content">
+          <h2 id="s4-title" data-var-text="s4Title"></h2>
+          <div class="s4-body">
+            <div class="s4-card" id="s4-card">
+              <div class="tag" data-copy="s3ProposalTag"></div>
+              <div class="line" data-var-text="s3PrincipleL1"></div>
+              <div class="line" data-var-text="s3PrincipleL2"></div>
+              <div class="s4-source" data-copy="s4SourceLine"></div>
+              <div class="s4-approved" id="s4-approved"><span class="mono">&#10003;</span><span data-copy="s4Approved"></span></div>
+            </div>
+            <div class="s4-decide" id="s4-decide">
+              <div class="s4-actions">
+                <div class="s4-action" data-copy="s4Modify"></div>
+                <div class="s4-action approve" id="s4-approve"><span id="s4-cursor" class="s4-cursor" data-layout-ignore></span><span data-copy="s4Approve"></span></div>
+                <div class="s4-action" data-copy="s4Defer"></div>
+              </div>
+              <div class="s4-note" data-var-text="s4Note"></div>
+            </div>
+          </div>
+        </div>
       </section>
-      <section id="scene-5" class="clip scene" data-start="23.4" data-duration="7.6" data-track-index="5" style="z-index:5">
-        <div class="orb"></div><div class="scene-content"><div class="eyebrow mono" data-copy="observableChange"></div><div class="later-panel panel"><div class="later-context"><div class="meta mono" data-copy="laterSituation"></div><h2 id="later-title"></h2><div class="later-states"><div class="status"><span class="status-dot" style="background:#2F855A"></span><span id="observed"></span></div><div class="status"><span class="status-dot"></span><span id="rollback"></span></div></div></div><div id="later-checks" class="later-checks"></div></div></div>
+
+      <section id="scene-5" class="clip scene" data-start="16.4" data-duration="9.2" data-track-index="7" style="z-index:7">
+        <div class="orb" data-layout-ignore style="right: 220px; top: 20px;"></div>
+        <div class="scene-content">
+          <h2 id="s5-title" data-var-text="s5Title"></h2>
+          <div class="s5-task" id="s5-task">
+            <div class="tag" data-copy="s5NewTask"></div>
+            <div class="text" data-var-text="s5Task"></div>
+          </div>
+          <div class="s5-chip" id="s5-chip">
+            <span class="ok mono">&#10003;</span>
+            <span data-var-text="s5Chip"></span>
+          </div>
+          <div class="s5-link" id="s5-link" data-layout-ignore></div>
+          <div class="s5-thread">
+            <div class="s5-agent" id="s5-agent" data-copy="s5AgentTag"></div>
+            <div class="s5-reply" id="s5-reply1" data-var-text="s5Reply1"></div>
+            <div class="s5-reply" id="s5-reply2">
+              <div data-var-text="s5Reply2a"></div>
+              <div data-var-text="s5Reply2b"></div>
+            </div>
+            <div class="s5-wait" id="s5-wait">
+              <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+              <span data-copy="s5Waiting"></span>
+            </div>
+          </div>
+        </div>
       </section>
-      <section id="scene-6" class="clip scene" data-start="30.4" data-duration="5.6" data-track-index="6" style="z-index:6">
-        <div class="orb"></div><div class="scene-content"><div class="rule"></div><div class="eyebrow mono">Principles Disciple</div><h1 id="closing" class="closing"></h1><p id="trust" class="trust mono"></p></div><div class="brand-mark">PD</div>
+
+      <section id="scene-6" class="clip scene" data-start="24.4" data-duration="5.6" data-track-index="8" style="z-index:8">
+        <div class="orb" data-layout-ignore style="left: 650px; bottom: -120px;"></div>
+        <div class="scene-content">
+          <div class="rule" id="s6-rule"></div>
+          <div class="s6-titles">
+            <div class="s6-t1" id="s6-t1" data-var-text="s6Title1"></div>
+            <div class="s6-t2" id="s6-t2" data-var-text="s6Title2"></div>
+          </div>
+          <div class="s6-sub" id="s6-sub" data-var-text="s6Sub"></div>
+          <div class="s6-divider" id="s6-divider"></div>
+          <div class="s6-brand" id="s6-brand">
+            <div class="s6-mark">PD</div>
+            <div class="s6-name">Principles Disciple</div>
+          </div>
+          <div class="s6-cta" id="s6-cta" data-var-text="s6Cta"></div>
+        </div>
       </section>
     </div>
     <script>
       const vars = window.__hyperframes.getVariables();
       document.documentElement.lang = vars.locale === "zh" ? "zh-CN" : "en";
       const copy = vars.locale === "zh" ? {
-        repeatedCorrection: "重复纠正", recurrence: "再次发生", evidence: "行为证据", traceableSource: "来源可追溯",
-        suggestedPrinciple: "原则建议", ownerReviewRequired: "等待 Owner 审查", ownerGate: "Owner 决策点",
-        principleProposal: "原则提案", activationLocked: "证据已附 · 激活仍锁定", rollbackAvailable: "回滚路径始终保留",
-        observableChange: "可观察的变化", laterSituation: "下一次相似任务"
+        illustrative: "机制示意",
+        s1RequestTag: "你的请求", s1AgentTag: "Agent 实际改动", s1Overreach: "超出请求",
+        s2QuoteEcho: "“超出范围，先问我。”", s2Original: "原话保留",
+        s3SourceTag: "你的相关纠正", s3Traceable: "来源可追溯", s3ProposalTag: "原则建议", s3Awaiting: "等待你的审查",
+        s4SourceLine: "来源：你的相关纠正", s4Modify: "修改", s4Approve: "批准", s4Defer: "暂存", s4Approved: "经你批准",
+        s5NewTask: "新任务", s5AgentTag: "Agent · 依据你的原则", s5Waiting: "等待你的确认"
       } : {
-        repeatedCorrection: "Repeated correction", recurrence: "recurrence", evidence: "Evidence", traceableSource: "Traceable source",
-        suggestedPrinciple: "Suggested principle", ownerReviewRequired: "Owner review required", ownerGate: "Owner gate",
-        principleProposal: "Principle proposal", activationLocked: "Evidence attached · Activation locked", rollbackAvailable: "Rollback path remains available",
-        observableChange: "Observable change", laterSituation: "Comparable later situation"
+        illustrative: "Illustrative example",
+        s1RequestTag: "YOUR REQUEST", s1AgentTag: "WHAT THE AGENT CHANGED", s1Overreach: "Beyond the request",
+        s2QuoteEcho: "“Ask before expanding scope.”", s2Original: "original words kept",
+        s3SourceTag: "Your related corrections", s3Traceable: "Traceable source", s3ProposalTag: "PRINCIPLE PROPOSAL", s3Awaiting: "Awaiting your review",
+        s4SourceLine: "From your related corrections", s4Modify: "Modify", s4Approve: "Approve", s4Defer: "Defer", s4Approved: "Approved by you",
+        s5NewTask: "NEW TASK", s5AgentTag: "Agent · guided by your principle", s5Waiting: "Waiting for your confirmation"
       };
       document.querySelectorAll("[data-copy]").forEach((element) => { element.textContent = copy[element.dataset.copy]; });
-      const put = (id, value) => { document.getElementById(id).textContent = value; };
-      put("s1-title", vars.s1Title); put("s1-sub", vars.s1Sub); put("settling", vars.settling); put("evidence-label", vars.evidenceLabel);
-      put("pattern-title", vars.patternTitle); put("pattern-body", vars.patternBody); put("proposal-label", vars.proposalLabel);
-      put("proposal-text", vars.proposalText); put("owner-title", vars.ownerTitle); put("owner-proposal-text", vars.proposalText);
-      put("action-modify", vars.modify); put("action-approve", vars.approve); put("action-defer", vars.defer); put("locked", vars.locked);
-      put("later-title", vars.laterTitle); put("observed", vars.observed); put("rollback", vars.rollback); put("closing", vars.closing); put("trust", vars.trust);
-      vars.evidenceItems.split("|").forEach((item, index) => {
-        const row = document.createElement("div"); row.className = "evidence-card panel";
-        const label = document.createElement("span"); label.className = "index mono"; label.textContent = `0${index + 1}`;
-        const text = document.createElement("span"); text.textContent = item; row.append(label, text); document.getElementById("evidence-list").append(row);
-      });
-      vars.laterItems.split("|").forEach((item) => {
-        const row = document.createElement("div"); row.className = "check-row";
-        const mark = document.createElement("span"); mark.className = "check"; mark.textContent = "✓";
-        const text = document.createElement("span"); text.textContent = item; row.append(mark, text); document.getElementById("later-checks").append(row);
-      });
 
       window.__timelines = window.__timelines || {};
       const tl = gsap.timeline({ paused: true });
-      const enterScene = (scene, start) => tl.fromTo(scene, { opacity: 0, filter: "blur(20px)" }, { opacity: 1, filter: "blur(0px)", duration: .6, ease: "sine.inOut" }, start);
-      enterScene("#scene-1", .1);
-      tl.fromTo("#scene-1 .rule", { scaleX: 0 }, { scaleX: 1, duration: .7, ease: "power2.out" }, .25)
-        .fromTo("#scene-1 .eyebrow", { opacity: 0, x: -24 }, { opacity: 1, x: 0, duration: .5, ease: "expo.out" }, .45)
-        .fromTo("#s1-title", { opacity: 0, y: 50 }, { opacity: 1, y: 0, duration: .75, ease: "power3.out" }, .6)
-        .fromTo("#s1-sub", { opacity: 0, y: 28 }, { opacity: 1, y: 0, duration: .55, ease: "power2.out" }, .95)
-        .fromTo("#scene-1 .settling-ring", { opacity: 0, scale: .55 }, { opacity: 1, scale: 1, duration: 1.1, stagger: .18, ease: "sine.out" }, .55)
-        .fromTo("#scene-1 .settling-center", { opacity: 0, scale: .96 }, { opacity: 1, scale: 1, duration: .7, ease: "sine.out" }, 1.05)
-        .to("#scene-1 .orb", { scale: 1.08, yoyo: true, repeat: 2, duration: 1.2, ease: "sine.inOut" }, .3);
 
-      enterScene("#scene-2", 3.4);
-      tl.fromTo("#scene-2 .eyebrow", { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: .5, ease: "power2.out" }, 3.75)
-        .fromTo("#scene-2 .evidence-card", { opacity: 0, x: -54 }, { opacity: 1, x: 0, duration: .55, stagger: .28, ease: "power3.out" }, 4.05)
-        .fromTo("#scene-2 .pattern-panel", { opacity: 0, x: 64, scale: .98 }, { opacity: 1, x: 0, scale: 1, duration: .75, ease: "expo.out" }, 5.05)
-        .fromTo("#scene-2 .pattern-count", { opacity: 0, scale: .72 }, { opacity: 1, scale: 1, duration: .5, ease: "back.out(1.4)" }, 5.45)
-        .to("#scene-2 .orb", { x: 90, yoyo: true, repeat: 2, duration: 1.6, ease: "sine.inOut" }, 3.7);
+      // Scene 1 — frame 0 already carries the request; the rewrite unfolds on it.
+      tl.fromTo("#s1-title", { opacity: 0, filter: "blur(14px)" }, { opacity: 1, filter: "blur(0px)", duration: .6, ease: "power2.out" }, .25)
+        .fromTo("#s1-flow", { scaleX: 0 }, { scaleX: 1, duration: .4, ease: "power2.inOut" }, .7)
+        .fromTo("#s1-panel", { opacity: 0, y: 26 }, { opacity: 1, y: 0, duration: .5, ease: "power3.out" }, .9)
+        .fromTo(".s1-row", { opacity: 0, x: -34 }, { opacity: 1, x: 0, duration: .4, stagger: .3, ease: "power2.out" }, 1.15)
+        .fromTo("#s1-overreach-tag", { opacity: 0, scale: .9 }, { opacity: 1, scale: 1, duration: .4, ease: "back.out(1.2)" }, 2.3)
+        .to("#scene-1", { opacity: 0, duration: .5, ease: "sine.inOut" }, 3.9);
 
-      enterScene("#scene-3", 9.4);
-      tl.fromTo("#scene-3 .eyebrow", { opacity: 0, x: -34 }, { opacity: 1, x: 0, duration: .5, ease: "power2.out" }, 9.8)
-        .fromTo("#scene-3 .proposal-source", { opacity: 0, y: 44 }, { opacity: 1, y: 0, duration: .65, ease: "power3.out" }, 10.1)
-        .fromTo("#scene-3 .proposal-card", { opacity: 0, x: 80 }, { opacity: 1, x: 0, duration: .8, ease: "expo.out" }, 10.25)
-        .fromTo("#scene-3 .proposal-text", { opacity: 0, y: 28 }, { opacity: 1, y: 0, duration: .6, ease: "back.out(1.15)" }, 10.9)
-        .to("#scene-3 .orb", { scale: 1.12, yoyo: true, repeat: 3, duration: 1.25, ease: "sine.inOut" }, 9.7);
+      // Scene 2 — the same correction, again and again, then grouped as-is.
+      gsap.set("#scene-2", { opacity: 0, filter: "blur(18px)" });
+      tl.to("#scene-2", { opacity: 1, filter: "blur(0px)", duration: .6, ease: "sine.inOut" }, 3.4)
+        .fromTo("#s2-title", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: .5, ease: "power3.out" }, 3.7)
+        .fromTo("#s2-quote", { opacity: 0, scale: .94, filter: "blur(10px)" }, { opacity: 1, scale: 1, filter: "blur(0px)", duration: .55, ease: "power3.out" }, 4.0)
+        .fromTo("#s2-echo1", { opacity: 0, y: -26 }, { opacity: .9, y: 0, duration: .45, ease: "power2.out" }, 5.6)
+        .fromTo("#s2-echo2", { opacity: 0, y: -34 }, { opacity: .8, y: 0, duration: .45, ease: "power2.out" }, 6.05)
+        .to("#s2-stage", { scale: .82, y: 120, duration: .55, ease: "power2.inOut" }, 6.9)
+        .to("#s2-echo1", { opacity: .3, duration: .45, ease: "sine.inOut" }, 6.9)
+        .to("#s2-echo2", { opacity: .3, duration: .45, ease: "sine.inOut" }, 6.9)
+        .fromTo("#s2-grouped", { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: .5, ease: "power3.out" }, 7.05)
+        .to("#scene-2", { opacity: 0, duration: .5, ease: "sine.inOut" }, 7.9);
 
-      enterScene("#scene-4", 16.4);
-      tl.fromTo("#scene-4 .eyebrow", { opacity: 0, y: -20 }, { opacity: 1, y: 0, duration: .45, ease: "power2.out" }, 16.75)
-        .fromTo("#owner-title", { opacity: 0, x: -44 }, { opacity: 1, x: 0, duration: .7, ease: "expo.out" }, 17.0)
-        .fromTo("#scene-4 .owner-proposal", { opacity: 0, x: -72 }, { opacity: 1, x: 0, duration: .75, ease: "power3.out" }, 17.45)
-        .fromTo("#scene-4 .decision-panel", { opacity: 0, x: 72 }, { opacity: 1, x: 0, duration: .75, ease: "power3.out" }, 17.45)
-        .fromTo("#scene-4 .action", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: .45, stagger: .25, ease: "back.out(1.25)" }, 18.2)
-        .fromTo("#scene-4 .locked", { opacity: 0 }, { opacity: 1, duration: .55, ease: "sine.out" }, 19.1)
-        .to("#scene-4 .orb", { x: 100, yoyo: true, repeat: 2, duration: 1.5, ease: "sine.inOut" }, 16.7);
+      // Scene 3 — grouped corrections flow through PD into one proposal.
+      tl.fromTo("#scene-3", { opacity: 0, filter: "blur(18px)" }, { opacity: 1, filter: "blur(0px)", duration: .6, ease: "sine.inOut" }, 7.4)
+        .fromTo("#s3-title", { opacity: 0, x: -30 }, { opacity: 1, x: 0, duration: .5, ease: "power3.out" }, 7.7)
+        .fromTo("#s3-source", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: .5, ease: "power3.out" }, 8.1)
+        .fromTo("#s3-c1", { scaleX: 0 }, { scaleX: 1, duration: .45, ease: "power2.inOut" }, 8.6)
+        .fromTo("#s3-node", { opacity: 0, scale: .6 }, { opacity: 1, scale: 1, duration: .45, ease: "back.out(1.3)" }, 8.9)
+        .fromTo("#s3-c2", { scaleX: 0 }, { scaleX: 1, duration: .45, ease: "power2.inOut" }, 9.2)
+        .fromTo("#s3-card", { opacity: 0, x: 70, filter: "blur(10px)" }, { opacity: 1, x: 0, filter: "blur(0px)", duration: .7, ease: "expo.out" }, 9.5)
+        .fromTo("#s3-card .tag", { opacity: 0 }, { opacity: 1, duration: .4, ease: "sine.out" }, 9.85)
+        .fromTo("#s3-line1", { opacity: 0, y: 26 }, { opacity: 1, y: 0, duration: .5, ease: "power3.out" }, 10.1)
+        .fromTo("#s3-line2", { opacity: 0, y: 26 }, { opacity: 1, y: 0, duration: .5, ease: "power3.out" }, 10.45)
+        .fromTo("#s3-card .status", { opacity: 0 }, { opacity: 1, duration: .45, ease: "sine.out" }, 11.3)
+        .to("#scene-3", { opacity: 0, duration: .5, ease: "sine.inOut" }, 12.9);
 
-      enterScene("#scene-5", 23.4);
-      tl.fromTo("#scene-5 .eyebrow", { opacity: 0, x: -28 }, { opacity: 1, x: 0, duration: .45, ease: "power2.out" }, 23.75)
-        .fromTo("#scene-5 .later-panel", { opacity: 0, y: 54 }, { opacity: 1, y: 0, duration: .7, ease: "power3.out" }, 24.0)
-        .fromTo("#scene-5 .later-context", { opacity: 0, x: -40 }, { opacity: 1, x: 0, duration: .6, ease: "expo.out" }, 24.45)
-        .fromTo("#scene-5 .check-row", { opacity: 0, x: 52 }, { opacity: 1, x: 0, duration: .5, stagger: .42, ease: "back.out(1.2)" }, 24.8)
-        .to("#scene-5 .orb", { scale: 1.1, yoyo: true, repeat: 3, duration: 1.15, ease: "sine.inOut" }, 23.7);
+      // Scene 4 — the Owner reads, then clicks Approve; the card records it.
+      tl.fromTo("#scene-4", { opacity: 0, filter: "blur(18px)" }, { opacity: 1, filter: "blur(0px)", duration: .6, ease: "sine.inOut" }, 12.4)
+        .fromTo("#s4-title", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: .5, ease: "power3.out" }, 12.7)
+        .fromTo("#s4-card", { opacity: 0, x: -50 }, { opacity: 1, x: 0, duration: .55, ease: "power3.out" }, 13.1)
+        .fromTo("#s4-card .s4-source", { opacity: 0 }, { opacity: 1, duration: .4, ease: "sine.out" }, 13.5)
+        .fromTo("#s4-decide", { opacity: 0, x: 50 }, { opacity: 1, x: 0, duration: .55, ease: "power3.out" }, 13.6)
+        .fromTo(".s4-action", { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: .35, stagger: .25, ease: "back.out(1.2)" }, 13.9)
+        .fromTo("#s4-decide .s4-note", { opacity: 0 }, { opacity: 1, duration: .45, ease: "sine.out" }, 14.8)
+        .fromTo("#s4-cursor", { opacity: 0, x: 170, y: 230 }, { opacity: 1, x: 46, y: -26, duration: .55, ease: "power2.inOut" }, 14.9)
+        .to("#s4-approve", { scale: .96, duration: .12, ease: "power2.in" }, 15.5)
+        .to("#s4-approve", { scale: 1, duration: .25, ease: "back.out(2)" }, 15.62)
+        .fromTo("#s4-approved", { opacity: 0, scale: .8 }, { opacity: 1, scale: 1, duration: .45, ease: "back.out(1.3)" }, 15.45)
+        .to("#s4-cursor", { opacity: 0, duration: .3, ease: "sine.in" }, 15.9)
+        .to("#scene-4", { opacity: 0, duration: .5, ease: "sine.inOut" }, 16.9);
 
-      enterScene("#scene-6", 30.4);
-      tl.fromTo("#scene-6 .rule", { scaleX: 0 }, { scaleX: 1, duration: .7, ease: "power2.out" }, 30.8)
-        .fromTo("#scene-6 .eyebrow", { opacity: 0, x: -28 }, { opacity: 1, x: 0, duration: .5, ease: "expo.out" }, 31.0)
-        .fromTo("#closing", { opacity: 0, y: 54 }, { opacity: 1, y: 0, duration: .8, ease: "power3.out" }, 31.2)
-        .fromTo("#trust", { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: .55, ease: "back.out(1.15)" }, 31.85)
-        .fromTo("#scene-6 .brand-mark", { opacity: 0, scale: .72 }, { opacity: 1, scale: 1, duration: .65, ease: "power2.out" }, 32.05)
-        .to("#scene-6 .orb", { scale: 1.1, yoyo: true, repeat: 2, duration: 1.15, ease: "sine.inOut" }, 30.8)
-        .to("#scene-6", { opacity: 0, duration: .45, ease: "sine.in" }, 35.5);
+      // Scene 5 — a similar task: the approved principle shows up as a pause, not a veto.
+      tl.fromTo("#scene-5", { opacity: 0, filter: "blur(18px)" }, { opacity: 1, filter: "blur(0px)", duration: .6, ease: "sine.inOut" }, 16.4)
+        .fromTo("#s5-title", { opacity: 0, x: -30 }, { opacity: 1, x: 0, duration: .5, ease: "power3.out" }, 16.7)
+        .fromTo("#s5-task .tag", { opacity: 0 }, { opacity: 1, duration: .4, ease: "sine.out" }, 17.1)
+        .fromTo("#s5-task .text", { opacity: 0, y: 18 }, { opacity: 1, y: 0, duration: .45, ease: "power2.out" }, 17.3)
+        .fromTo("#s5-chip", { opacity: 0, y: 26 }, { opacity: 1, y: 0, duration: .55, ease: "power3.out" }, 18.1)
+        .fromTo("#s5-link", { scaleY: 0 }, { scaleY: 1, duration: .5, ease: "power2.inOut" }, 19.0)
+        .fromTo("#s5-agent", { opacity: 0 }, { opacity: 1, duration: .4, ease: "sine.out" }, 19.6)
+        .fromTo("#s5-reply1", { opacity: 0, y: 26 }, { opacity: 1, y: 0, duration: .5, ease: "power3.out" }, 20.3)
+        .fromTo("#s5-reply2", { opacity: 0, y: 26 }, { opacity: 1, y: 0, duration: .5, ease: "power3.out" }, 22.2)
+        .fromTo("#s5-wait", { opacity: 0 }, { opacity: 1, duration: .4, ease: "sine.out" }, 23.6)
+        .fromTo("#s5-wait .dot", { opacity: .25 }, { opacity: 1, duration: .3, stagger: .35, ease: "sine.inOut" }, 23.75)
+        .to("#scene-5", { opacity: 0, duration: .5, ease: "sine.inOut" }, 24.9);
+
+      // Scene 6 — closing card; everything lands by ~27s and holds to the last frame.
+      tl.fromTo("#scene-6", { opacity: 0, filter: "blur(18px)" }, { opacity: 1, filter: "blur(0px)", duration: .6, ease: "sine.inOut" }, 24.4)
+        .fromTo("#s6-rule", { scaleX: 0 }, { scaleX: 1, duration: .55, ease: "power2.out" }, 24.7)
+        .fromTo("#s6-t1", { opacity: 0, filter: "blur(12px)" }, { opacity: 1, filter: "blur(0px)", duration: .55, ease: "power3.out" }, 24.95)
+        .fromTo("#s6-t2", { opacity: 0, filter: "blur(12px)" }, { opacity: 1, filter: "blur(0px)", duration: .55, ease: "power3.out" }, 25.35)
+        .fromTo("#s6-sub", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: .5, ease: "power2.out" }, 25.95)
+        .fromTo("#s6-divider", { scaleX: 0 }, { scaleX: 1, duration: .45, ease: "power2.inOut" }, 26.2)
+        .fromTo("#s6-brand", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: .5, ease: "power3.out" }, 26.35)
+        .fromTo("#s6-cta", { opacity: 0 }, { opacity: 1, duration: .45, ease: "sine.out" }, 26.6);
+
       window.__timelines.main = tl;
     </script>
   </body>
