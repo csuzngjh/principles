@@ -914,3 +914,92 @@ describe('H. automatic stop after consecutive RESULT_UNKNOWN settlements', () =>
     expect(second.stoppedReason).toBeNull(); // the streak restarts at zero on a new run; recovery refusals are not settlements
   });
 });
+
+// ===========================================================================
+// I. capacity circuit breaker — consecutive PROVEN 429/5xx unit failures stop
+//    dispatch (distinct from the unknown streak; identity/contract failures
+//    never arm it). Zero network — responder doubles only.
+// ===========================================================================
+describe('I. capacity circuit breaker (consecutive provider-capacity failures)', () => {
+  /** A real-mode double whose responder fails with a fixed error message. */
+  const failingWith = (message: string) => () => ({
+    kind: 'real-model-double',
+    executionMode: 'F1-direct-model',
+    requestedModelIdentity: 'test-double/never-real',
+    nextAction: () => { throw new Error(message); },
+  });
+  const planN = (n: number) => ({ arms: ['A'], cases: ['CEB-001-FV-01'], repetitions: Array.from({ length: n }, (_, i) => i + 1) });
+  const authN = (n: number) => validStageRAuth({ repetitions: Array.from({ length: n }, (_, i) => String(i + 1)) });
+  const runWith = (dir: string, factories: Array<() => any>, owner: string, n = factories.length) => runChallengeStudy({
+    studyDir: dir,
+    plan: planN(n),
+    actorFactory: (() => { let i = 0; return (ctx: any) => (factories[i++] || realModePlayDouble)(ctx); })(),
+    execution: { mode: 'F1-direct-model', now: NOW },
+    maxAttemptsTotal: 10,
+    owner,
+  });
+
+  it('I1: two consecutive 429 failures do NOT trip the breaker; a SUCCESS resets it', async () => {
+    const dir = copyStudy('cap-i1');
+    approveStudy(dir, authN(4));
+    const summary = await runWith(dir, [failingWith('rate_limited (HTTP 429); Retry-After: unspecified — recorded, NOT auto-retried'), failingWith('rate_limited (HTTP 429); Retry-After: 77'), realModePlayDouble, realModePlayDouble], 'cap-i1');
+    expect(summary.units.map((u: any) => u.state)).toEqual(['FAILED_KNOWN', 'FAILED_KNOWN', 'SUCCEEDED', 'SUCCEEDED']);
+    expect(summary.stoppedReason).toBeNull();
+  });
+
+  it('I2: the 3rd consecutive 429 trips the breaker — remaining units CAPACITY_STREAK_STOPPED before any dispatch, all records kept', async () => {
+    const dir = copyStudy('cap-i2');
+    approveStudy(dir, authN(6));
+    let factoryCalls = 0;
+    const counting = () => { factoryCalls += 1; return failingWith('rate_limited (HTTP 429); Retry-After: unspecified')(); };
+    const summary = await runChallengeStudy({
+      studyDir: dir,
+      plan: planN(6),
+      actorFactory: counting,
+      execution: { mode: 'F1-direct-model', now: NOW },
+      maxAttemptsTotal: 10,
+      owner: 'cap-i2',
+    });
+    expect(summary.units.map((u: any) => u.state)).toEqual(['FAILED_KNOWN', 'FAILED_KNOWN', 'FAILED_KNOWN', 'CAPACITY_STREAK_STOPPED', 'CAPACITY_STREAK_STOPPED', 'CAPACITY_STREAK_STOPPED']);
+    expect(summary.stoppedReason).toContain('stage_r_capacity_streak_stop');
+    expect(factoryCalls).toBe(3); // units 4-6 never reached the factory → zero further requests
+    const ledger = createChallengeLedger(dir);
+    const budget = ledger.budgetEntries();
+    expect(budget.filter((e: any) => e.type === 'RESERVE')).toHaveLength(3); // reservations kept, never returned
+    expect(budget.filter((e: any) => e.type === 'ATTEMPT_RESULT')).toHaveLength(3); // the 429 units settled honestly as FAILED_KNOWN
+    expect(ledger.eventEntries().filter((e: any) => e.reason === 'stage_r_capacity_streak_stop')).toHaveLength(3); // one audit row per stopped unit
+    for (const r of [1, 2, 3]) {
+      const attempt = readJson(dir, path.join('runs', 'CEB-001-FV-01', 'A', `r${r}`, 'a1.json'));
+      expect(attempt.result).toBe('FAILED_KNOWN');
+      expect(attempt.error).toContain('rate_limited (HTTP 429)'); // original response evidence preserved
+    }
+  });
+
+  it('I3: an explicit 5xx is a capacity failure too; a NON-capacity known failure (identity mismatch) BREAKS the streak', async () => {
+    const dir = copyStudy('cap-i3');
+    approveStudy(dir, authN(7));
+    const summary = await runWith(dir, [
+      failingWith('http_503: upstream overloaded'),
+      failingWith('rate_limited (HTTP 429); Retry-After: 10'),
+      failingWith('model_identity_mismatch: requested \'GLM-5.3-Flash\', server reports \'other\''), // NOT capacity — hard failure
+      failingWith('http_500: boom'),
+      failingWith('http_500: boom'),
+      failingWith('http_500: boom'),
+      realModePlayDouble,
+    ], 'cap-i3');
+    expect(summary.units.map((u: any) => u.state)).toEqual(['FAILED_KNOWN', 'FAILED_KNOWN', 'FAILED_KNOWN', 'FAILED_KNOWN', 'FAILED_KNOWN', 'FAILED_KNOWN', 'CAPACITY_STREAK_STOPPED']);
+    expect(summary.stoppedReason).toContain('stage_r_capacity_streak_stop'); // the identity mismatch reset the streak; the NEXT three 5xx tripped it
+  });
+
+  it('I4: output-contract and authorization-class failures never arm the breaker (capped at 2 consecutive without a stop)', async () => {
+    const dir = copyStudy('cap-i4');
+    approveStudy(dir, authN(3));
+    const summary = await runWith(dir, [
+      failingWith('model_identity_unobserved: the server attested no model identity'),
+      failingWith('empty or missing message content (finish_reason=stop)'),
+      failingWith('http_429-not-the-prefix'),
+    ], 'cap-i4');
+    expect(summary.units.every((u: any) => u.state === 'FAILED_KNOWN')).toBe(true);
+    expect(summary.stoppedReason).toBeNull(); // 3 consecutive NON-capacity failures never trip the capacity breaker
+  });
+});
