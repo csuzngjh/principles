@@ -26,9 +26,11 @@ import {
   isOfflineStubActor,
   readStudyPlanHash,
   readObservedHostEvidence,
+  readStageRAuthorization,
   deriveRealHostBaseline,
   STAGE_R_AUTH_SCHEMA,
 } from '../dev/principle-learning-lab/lib/challenge-stage-r-gate.mjs';
+import { deriveRealHostBaselineFromStudy } from '../dev/principle-learning-lab/lib/challenge-baseline.mjs';
 import { runChallengeStudy, verifyFrozenStudy, STUB_STRATEGIES } from '../dev/principle-learning-lab/lib/challenge-runner.mjs';
 import { createChallengeLedger, releaseStudyWriteLock } from '../dev/principle-learning-lab/lib/challenge-ledger.mjs';
 import { perfectPlayActor, SimulatedCrashError } from '../dev/principle-learning-lab/lib/challenge-actor.mjs';
@@ -57,7 +59,7 @@ function copyStudy(tag: string): string {
 const readJson = (dir: string, rel: string): any => JSON.parse(fs.readFileSync(path.join(dir, rel), 'utf8'));
 
 /** A schema-valid APPROVED Stage R record bound to the REAL frozen study.
- *  Test fixture only — never written into any study directory. */
+ *  Test fixture only — never written into the live study directory. */
 function validStageRAuth(over: Record<string, any> = {}) {
   return {
     schema: STAGE_R_AUTH_SCHEMA,
@@ -74,6 +76,7 @@ function validStageRAuth(over: Record<string, any> = {}) {
     cases: ['CEB-001-FV-01', 'CEB-001-FV-02'],
     repetitions: ['1'],
     attemptCap: 40,
+    requestCap: 200,
     issuedBy: 'owner-test-fixture',
     validFrom: '2026-10-26T00:00:00Z',
     validUntil: '2026-10-27T00:00:00Z',
@@ -90,12 +93,25 @@ const f2WithProbe = (over: Record<string, any> = {}) => validStageRAuth({
   ...over,
 });
 
+/** Test-side authorization injection (P1-2): fixtures are written into the
+ *  COPIED study directory's own run-authorization.json — the same file the
+ *  production runner reads. There is no in-memory authorization override. */
+function approveStudy(dir: string, record: unknown) {
+  fs.writeFileSync(path.join(dir, 'run-authorization.json'), `${JSON.stringify(record, null, 2)}\n`, 'utf8');
+}
+
 /** A real-mode test double: plays the perfect script but does NOT declare
- *  itself an offline stub (kind is not stub-rooted, no offlineStub flag) —
- *  exactly the shape a future real actor would present to the runner seam. */
-function realModePlayDouble(ctx: any) {
+ *  itself an offline stub (kind is not stub-rooted, no offlineStub flag) and
+ *  carries the runner-required real-actor identity fields — exactly the shape
+ *  a real transport actor presents to the runner seam. */
+function realModePlayDouble(ctx: any, mode = 'F1-direct-model') {
   const inner = perfectPlayActor(ctx.caseDef);
-  return { kind: 'real-model-double(wiring-only)', nextAction: (view: any) => inner.nextAction(view) };
+  return {
+    kind: 'real-model-double(wiring-only)',
+    executionMode: mode,
+    requestedModelIdentity: 'test-double/never-real',
+    nextAction: (view: any) => inner.nextAction(view),
+  };
 }
 
 beforeEach(() => {
@@ -261,18 +277,38 @@ describe('C. Stage R gate: bindings / plan / budget / F2 probe', () => {
     }
     expect(verifyStageRAuthorization({ authorizationRecord: validStageRAuth({ attemptCap: 40 }), bindings, plan, maxAttemptsTotal: 40, now: NOW }).ok).toBe(true);
   });
+
+  it('P1-5 (gate): a declaredExecutionMode that contradicts the approved executionMode refuses', () => {
+    const cross = verifyStageRAuthorization({ authorizationRecord: validStageRAuth(), bindings, plan, maxAttemptsTotal: 10, now: NOW, declaredExecutionMode: 'F2-real-host' });
+    expect(cross.ok).toBe(false);
+    expect(cross.reasons.join(' ')).toContain('does not match the runner-declared execution mode');
+    const aligned = verifyStageRAuthorization({ authorizationRecord: validStageRAuth(), bindings, plan, maxAttemptsTotal: 10, now: NOW, declaredExecutionMode: 'F1-direct-model' });
+    expect(aligned.ok).toBe(true);
+    const alignedF2 = verifyStageRAuthorization({ authorizationRecord: f2WithProbe(), bindings, plan, maxAttemptsTotal: 10, now: NOW, declaredExecutionMode: 'F2-real-host' });
+    expect(alignedF2.ok).toBe(true);
+  });
+
+  it('P1-7 (gate): requestCap must be a positive safe integer — an attempt cap is not a model-request budget', () => {
+    for (const bad of [undefined, 0, -1, 2.5, Infinity, NaN, '40']) {
+      const verdict = verifyStageRAuthorization({ authorizationRecord: validStageRAuth({ requestCap: bad }), bindings, plan, maxAttemptsTotal: 10, now: NOW });
+      expect(verdict.ok).toBe(false);
+      expect(verdict.reasons.join(' ')).toContain('requestCap must be a positive safe integer');
+    }
+    const good = verifyStageRAuthorization({ authorizationRecord: validStageRAuth({ requestCap: 7 }), bindings, plan, maxAttemptsTotal: 10, now: NOW });
+    expect(good).toMatchObject({ ok: true, requestCap: 7 });
+  });
 });
 
 // ===========================================================================
 // D. Runner-level enforcement — the actorFactory seam refuses BEFORE side effects
 // ===========================================================================
 describe('D. runner enforcement: unauthorized real actors are unreachable', () => {
-  it('a non-stub actor with NO execution config is refused with ZERO side effects (no reservation, no PREPARED row, zero actor steps, no attempt file)', () => {
+  it('P1-1: a NON-stub actor under a stub declaration is refused with ZERO side effects — self-declaration can never select a real execution mode', () => {
     const dir = copyStudy('runner-noconfig');
     let steps = 0;
     const double = (ctx: any) => {
       const inner = realModePlayDouble(ctx);
-      return { kind: 'real-model-double', nextAction: (v: any) => { steps += 1; return inner.nextAction(v); } };
+      return { ...inner, kind: 'real-model-double', nextAction: (v: any) => { steps += 1; return inner.nextAction(v); } };
     };
     const summary = runChallengeStudy({
       studyDir: dir,
@@ -281,7 +317,7 @@ describe('D. runner enforcement: unauthorized real actors are unreachable', () =
       owner: 'stager-d1',
     });
     expect(summary.units[0]).toMatchObject({ state: 'STAGE_R_REFUSED', refused: true });
-    expect(summary.units[0].reasons.join(' ')).toContain('execution config missing');
+    expect(summary.units[0].reasons.join(' ')).toContain('NON-stub actor');
     expect(steps).toBe(0); // not a single actor step ran
     const ledger = createChallengeLedger(dir);
     expect(ledger.budgetEntries().filter((e: any) => e.type === 'RESERVE')).toHaveLength(0);
@@ -290,21 +326,37 @@ describe('D. runner enforcement: unauthorized real actors are unreachable', () =
     expect(fs.existsSync(path.join(dir, 'runs', 'CEB-001-FV-01', 'A', 'r1', 'a1.json'))).toBe(false);
   });
 
-  it('a non-stub actor with the LIVE NOT_AUTHORIZED record is refused with zero side effects', () => {
+  it('P1-2: a declared F1 run against the LIVE NOT_AUTHORIZED authority file refuses BEFORE the actor factory is ever invoked', () => {
     const dir = copyStudy('runner-liveauth');
-    const live = readJson(realStudyDir, 'run-authorization.json');
+    let factoryCalls = 0;
+    const counting = (ctx: any) => { factoryCalls += 1; return realModePlayDouble(ctx); };
     const summary = runChallengeStudy({
       studyDir: dir,
       plan: { arms: ['A'], cases: ['CEB-001-FV-01'], repetitions: [1] },
-      actorFactory: realModePlayDouble,
-      execution: { authorizationRecord: live, now: NOW },
+      actorFactory: counting,
+      execution: { mode: 'F1-direct-model', now: NOW },
       owner: 'stager-d2',
     });
     expect(summary.units[0]).toMatchObject({ state: 'STAGE_R_REFUSED', refused: true });
     expect(summary.units[0].reasons.join(' ')).toContain('NOT_AUTHORIZED');
+    expect(factoryCalls).toBe(0); // the gate runs BEFORE the factory — nothing was constructed
     const ledger = createChallengeLedger(dir);
     expect(ledger.budgetEntries().filter((e: any) => e.type === 'RESERVE')).toHaveLength(0);
     expect(fs.existsSync(path.join(dir, 'runs', 'CEB-001-FV-01', 'A', 'r1', 'a1.json'))).toBe(false);
+  });
+
+  it('P1-2: an unreadable/corrupt authority file refuses fail-closed (missing authority ≠ approval)', () => {
+    const dir = copyStudy('runner-corruptauth');
+    fs.writeFileSync(path.join(dir, 'run-authorization.json'), '{ not json', 'utf8');
+    const summary = runChallengeStudy({
+      studyDir: dir,
+      plan: { arms: ['A'], cases: ['CEB-001-FV-01'], repetitions: [1] },
+      actorFactory: realModePlayDouble,
+      execution: { mode: 'F1-direct-model', now: NOW },
+      owner: 'stager-d2b',
+    });
+    expect(summary.units[0]).toMatchObject({ state: 'STAGE_R_REFUSED', refused: true });
+    expect(summary.units[0].reasons.join(' ')).toContain('missing or unreadable');
   });
 
   it('an EXPIRED otherwise-valid authorization refuses before execution (zero actor steps)', () => {
@@ -312,14 +364,14 @@ describe('D. runner enforcement: unauthorized real actors are unreachable', () =
     let steps = 0;
     const counting = (ctx: any) => {
       const inner = realModePlayDouble(ctx);
-      return { kind: 'real-model-double', nextAction: (v: any) => { steps += 1; return inner.nextAction(v); } };
+      return { ...inner, kind: 'real-model-double', nextAction: (v: any) => { steps += 1; return inner.nextAction(v); } };
     };
-    const expired = validStageRAuth({ validFrom: '2026-10-24T00:00:00Z', validUntil: '2026-10-25T00:00:00Z' });
+    approveStudy(dir, validStageRAuth({ validFrom: '2026-10-24T00:00:00Z', validUntil: '2026-10-25T00:00:00Z' }));
     const summary = runChallengeStudy({
       studyDir: dir,
       plan: { arms: ['A'], cases: ['CEB-001-FV-01'], repetitions: [1] },
       actorFactory: counting,
-      execution: { authorizationRecord: expired, now: NOW },
+      execution: { mode: 'F1-direct-model', now: NOW },
       owner: 'stager-d3',
     });
     expect(summary.units[0]).toMatchObject({ state: 'STAGE_R_REFUSED', refused: true });
@@ -329,16 +381,110 @@ describe('D. runner enforcement: unauthorized real actors are unreachable', () =
 
   it('F2 without a PASSED probe is refused at runner level too (PRI-1037 is the independent F2 blocker)', () => {
     const dir = copyStudy('runner-f2-noprobe');
+    approveStudy(dir, validStageRAuth({ executionMode: 'F2-real-host' }));
     const summary = runChallengeStudy({
       studyDir: dir,
       plan: { arms: ['A'], cases: ['CEB-001-FV-01'], repetitions: [1] },
-      actorFactory: realModePlayDouble,
-      execution: { authorizationRecord: validStageRAuth({ executionMode: 'F2-real-host' }), now: NOW },
+      actorFactory: (ctx: any) => realModePlayDouble(ctx, 'F2-real-host'),
+      execution: { mode: 'F2-real-host', now: NOW },
       owner: 'stager-d4',
     });
     expect(summary.units[0]).toMatchObject({ state: 'STAGE_R_REFUSED', refused: true });
     expect(summary.units[0].reasons.join(' ')).toContain('realHostProbe');
     expect(createChallengeLedger(dir).budgetEntries().filter((e: any) => e.type === 'RESERVE')).toHaveLength(0);
+  });
+
+  it('P1-5: a declared mode that does not match the approved executionMode refuses before the factory (an F1 authorization cannot bless an F2 run and vice versa)', () => {
+    const dir = copyStudy('runner-modecross');
+    let factoryCalls = 0;
+    const counting = (ctx: any) => { factoryCalls += 1; return realModePlayDouble(ctx, 'F2-real-host'); };
+    approveStudy(dir, validStageRAuth()); // approved F1
+    const summary = runChallengeStudy({
+      studyDir: dir,
+      plan: { arms: ['A'], cases: ['CEB-001-FV-01'], repetitions: [1] },
+      actorFactory: counting,
+      execution: { mode: 'F2-real-host', now: NOW }, // declared F2
+      maxAttemptsTotal: 10,
+      owner: 'stager-d4b',
+    });
+    expect(summary.units[0]).toMatchObject({ state: 'STAGE_R_REFUSED', refused: true });
+    expect(summary.units[0].reasons.join(' ')).toContain('does not match the runner-declared execution mode');
+    expect(factoryCalls).toBe(0);
+  });
+
+  it('P1-5: an actor whose executionMode contradicts the declared+approved mode refuses with zero side effects', () => {
+    const dir = copyStudy('runner-actormode');
+    approveStudy(dir, validStageRAuth()); // approved + declared F1
+    let steps = 0;
+    const summary = runChallengeStudy({
+      studyDir: dir,
+      plan: { arms: ['A'], cases: ['CEB-001-FV-01'], repetitions: [1] },
+      actorFactory: () => ({ kind: 'real-model-double', executionMode: 'F2-real-host', requestedModelIdentity: 'test-double/never-real', nextAction: () => { steps += 1; throw new Error('must not run'); } }),
+      execution: { mode: 'F1-direct-model', now: NOW },
+      maxAttemptsTotal: 10,
+      owner: 'stager-d4c',
+    });
+    expect(summary.units[0]).toMatchObject({ state: 'STAGE_R_REFUSED', refused: true });
+    expect(summary.units[0].reasons.join(' ')).toContain("does not match the runner-declared 'F1-direct-model'");
+    expect(steps).toBe(0);
+    expect(createChallengeLedger(dir).budgetEntries().filter((e: any) => e.type === 'RESERVE')).toHaveLength(0);
+  });
+
+  it('P1-6/P1-5: an actor whose requested model identity is not the authorization-bound actor identity refuses (identity binding is machine-checked, not prose)', () => {
+    const dir = copyStudy('runner-identitybind');
+    approveStudy(dir, validStageRAuth());
+    const summary = runChallengeStudy({
+      studyDir: dir,
+      plan: { arms: ['A'], cases: ['CEB-001-FV-01'], repetitions: [1] },
+      actorFactory: () => ({ kind: 'real-model-double', executionMode: 'F1-direct-model', requestedModelIdentity: 'other-provider/other-model', nextAction: () => { throw new Error('must not run'); } }),
+      execution: { mode: 'F1-direct-model', now: NOW },
+      maxAttemptsTotal: 10,
+      owner: 'stager-d4d',
+    });
+    expect(summary.units[0]).toMatchObject({ state: 'STAGE_R_REFUSED', refused: true });
+    expect(summary.units[0].reasons.join(' ')).toContain('is not the authorization-bound requestedActorIdentity');
+  });
+
+  it('P1-1: a stub-declaring actor under a REAL execution declaration refuses (a real run can never be downgraded to stub)', () => {
+    const dir = copyStudy('runner-stubunderreal');
+    approveStudy(dir, validStageRAuth());
+    const summary = runChallengeStudy({
+      studyDir: dir,
+      plan: { arms: ['A'], cases: ['CEB-001-FV-01'], repetitions: [1] },
+      actorFactory: (ctx: any) => perfectPlayActor(ctx.caseDef), // declares stub kind
+      execution: { mode: 'F1-direct-model', now: NOW },
+      maxAttemptsTotal: 10,
+      owner: 'stager-d4e',
+    });
+    expect(summary.units[0]).toMatchObject({ state: 'STAGE_R_REFUSED', refused: true });
+    expect(summary.units[0].reasons.join(' ')).toContain('offline stub under a real');
+  });
+
+  it('P1-7: the model-request budget is enforced per REQUEST — cap 1 means exactly one dispatched request, the next reservation refuses BEFORE dispatch', () => {
+    const dir = copyStudy('runner-requestbudget');
+    approveStudy(dir, validStageRAuth({ requestCap: 1 }));
+    let requests = 0;
+    const neverValid = () => ({
+      kind: 'real-model-double',
+      executionMode: 'F1-direct-model',
+      requestedModelIdentity: 'test-double/never-real',
+      nextAction: () => { requests += 1; return { type: 'observe', args: { obsId: 'no-such-obs' } }; }, // every answer is behavioral garbage — but each WAS a model request
+    });
+    const summary = runChallengeStudy({
+      studyDir: dir,
+      plan: { arms: ['A'], cases: ['CEB-001-FV-01'], repetitions: [1] },
+      actorFactory: neverValid,
+      execution: { mode: 'F1-direct-model', now: NOW },
+      maxAttemptsTotal: 10,
+      owner: 'stager-d4f',
+    });
+    expect(summary.units[0].state).toBe('SUCCEEDED'); // the attempt settled with a graded (failed) outcome
+    const attempt = readJson(dir, path.join('runs', 'CEB-001-FV-01', 'A', 'r1', 'a1.json'));
+    expect(attempt.trace.termination.reason).toBe('request_budget_exhausted');
+    expect(requests).toBe(1); // the second reservation refused BEFORE dispatch — no second model request
+    const budget = createChallengeLedger(dir).budgetEntries();
+    expect(budget.filter((e: any) => e.type === 'REQUEST_RESERVE')).toHaveLength(1);
+    expect(budget.some((e: any) => e.type === 'REQUEST_REFUSED')).toBe(true);
   });
 
   it('stub execution keeps the Phase 1B contract: runs without any gate, records mode offline-stub and NO authorization field', () => {
@@ -358,11 +504,12 @@ describe('D. runner enforcement: unauthorized real actors are unreachable', () =
 
   it('a gate-passing F1 authorization lets a real-mode double execute, but the record proves it is wiring-only: observedHostEvidence null, baseline stays UNKNOWN', () => {
     const dir = copyStudy('runner-f1-wiring');
+    approveStudy(dir, validStageRAuth());
     const summary = runChallengeStudy({
       studyDir: dir,
       plan: { arms: ['A'], cases: ['CEB-001-FV-01'], repetitions: [1] },
       actorFactory: realModePlayDouble,
-      execution: { authorizationRecord: validStageRAuth(), now: NOW },
+      execution: { mode: 'F1-direct-model', now: NOW },
       maxAttemptsTotal: 10,
       owner: 'stager-d6',
     });
@@ -378,12 +525,13 @@ describe('D. runner enforcement: unauthorized real actors are unreachable', () =
 
   it('real-mode crash keeps the state machine honest: RESULT_UNKNOWN, no auto-retry of the same attemptId, new attemptId reserves freshly', () => {
     const dir = copyStudy('runner-real-crash');
-    const crashDouble = () => ({ kind: 'real-crash-double', nextAction: () => { throw new SimulatedCrashError(1); } });
+    const crashDouble = () => ({ kind: 'real-crash-double', executionMode: 'F1-direct-model', requestedModelIdentity: 'test-double/never-real', nextAction: () => { throw new SimulatedCrashError(1); } });
+    approveStudy(dir, validStageRAuth());
     const plan = { arms: ['A'], cases: ['CEB-001-FV-01'], repetitions: [1], attemptId: 'a1' };
     expect(() => runChallengeStudy({
       studyDir: dir, plan,
       actorFactory: crashDouble,
-      execution: { authorizationRecord: validStageRAuth(), now: NOW },
+      execution: { mode: 'F1-direct-model', now: NOW },
       maxAttemptsTotal: 10,
       owner: 'stager-d7',
     })).toThrow(SimulatedCrashError);
@@ -394,7 +542,7 @@ describe('D. runner enforcement: unauthorized real actors are unreachable', () =
     const refused = runChallengeStudy({
       studyDir: dir, plan,
       actorFactory: realModePlayDouble,
-      execution: { authorizationRecord: validStageRAuth(), now: NOW },
+      execution: { mode: 'F1-direct-model', now: NOW },
       maxAttemptsTotal: 10,
       owner: 'stager-d7',
     });
@@ -403,7 +551,7 @@ describe('D. runner enforcement: unauthorized real actors are unreachable', () =
     const fresh = runChallengeStudy({
       studyDir: dir, plan: { ...plan, attemptId: 'a2' },
       actorFactory: realModePlayDouble,
-      execution: { authorizationRecord: validStageRAuth(), now: NOW },
+      execution: { mode: 'F1-direct-model', now: NOW },
       maxAttemptsTotal: 10,
       owner: 'stager-d7',
     });
@@ -414,16 +562,19 @@ describe('D. runner enforcement: unauthorized real actors are unreachable', () =
 
   it('a real-mode FAILED_KNOWN attempt record still carries the authorization linkage and observed host evidence (a failed real-host run must not poison the baseline as linkage-missing)', () => {
     const dir = copyStudy('runner-real-failed');
+    approveStudy(dir, f2WithProbe());
     const failingDouble = () => ({
       kind: 'real-model-double(wiring-only)',
-      observedHostEvidence: { hostSessionId: 's-fail', observedModelIdentity: 'provider/model-x' },
+      executionMode: 'F2-real-host',
+      requestedModelIdentity: 'test-double/never-real',
+      observedHostEvidence: { hostSessionId: 's-fail', observedModelIdentity: 'test-double/never-real' },
       nextAction: () => { throw new Error('boom: actor transport failed'); },
     });
     const summary = runChallengeStudy({
       studyDir: dir,
       plan: { arms: ['A'], cases: ['CEB-001-FV-01'], repetitions: [1] },
       actorFactory: failingDouble,
-      execution: { authorizationRecord: f2WithProbe(), now: NOW },
+      execution: { mode: 'F2-real-host', now: NOW },
       maxAttemptsTotal: 10,
       owner: 'stager-d8',
     });
@@ -431,7 +582,7 @@ describe('D. runner enforcement: unauthorized real actors are unreachable', () =
     const attempt = readJson(dir, path.join('runs', 'CEB-001-FV-01', 'A', 'r1', 'a1.json'));
     expect(attempt.mode).toBe('F2-real-host');
     expect(attempt.authorization).toMatchObject({ schema: STAGE_R_AUTH_SCHEMA, studyId: 'CEB-001', executionMode: 'F2-real-host', isolationAcceptance: { realHostProbe: { status: 'PASSED' } } });
-    expect(attempt.observedHostEvidence).toEqual({ hostSessionId: 's-fail', observedModelIdentity: 'provider/model-x' });
+    expect(attempt.observedHostEvidence).toEqual({ hostSessionId: 's-fail', observedModelIdentity: 'test-double/never-real' });
     expect(attempt.error).toContain('boom');
     // complete evidence on a FAILED_KNOWN F2 attempt: unmeasured (no SUCCEEDED), NOT degraded to NOT_ESTIMABLE
     expect(deriveRealHostBaseline({ attempts: [attempt] })).toMatchObject({ status: 'UNKNOWN' });
@@ -452,6 +603,68 @@ describe('D. runner enforcement: unauthorized real actors are unreachable', () =
     expect(attempt.authorization).toBeUndefined();
     expect(attempt.observedHostEvidence).toBeUndefined();
     expect(attempt.error).toContain('stub boom');
+  });
+});
+
+// ===========================================================================
+// G. FORMAL realHostBaseline (challenge-baseline.mjs) — record fields alone
+//    never establish real-host acceptance; the host's own rollouts must
+//    corroborate every session.
+// ===========================================================================
+describe('G. formal realHostBaseline from study files', () => {
+  const fakeF2Attempt = (over: Record<string, any> = {}) => ({
+    schema: 'challenge-attempt.v1',
+    unit: { caseId: 'CEB-001-FV-01', armId: 'A', repetitionId: 1, attemptId: 'a1' },
+    mode: 'F2-real-host',
+    authorization: { schema: STAGE_R_AUTH_SCHEMA, studyId: 'CEB-001', executionMode: 'F2-real-host', isolationAcceptance: { realHostProbe: { status: 'PASSED' } } },
+    observedHostEvidence: { hostSessionId: 'forged-session-001', observedModelIdentity: 'test-double/never-real' },
+    frozenRefs: { suiteHash: FROZEN.suiteHash },
+    result: 'SUCCEEDED',
+    ...over,
+  });
+
+  it('P1-8: a fully-forged attempt record (fake session, fake VERIFIED identity) cannot produce a formal PASS — rollout corroboration fails it', () => {
+    const dir = copyStudy('baseline-forgery');
+    approveStudy(dir, f2WithProbe());
+    const attemptDir = path.join(dir, 'runs', 'CEB-001-FV-01', 'A', 'r1');
+    fs.mkdirSync(attemptDir, { recursive: true });
+    fs.writeFileSync(path.join(attemptDir, 'a1.json'), `${JSON.stringify(fakeF2Attempt(), null, 2)}\n`, 'utf8');
+    const codexHome = path.join(tmpRoot, `codexhome-empty-${++copyCounter}`);
+    fs.mkdirSync(codexHome, { recursive: true });
+    const verdict = deriveRealHostBaselineFromStudy(dir, { codexHome });
+    expect(verdict.status).toBe('NOT_ESTIMABLE');
+    expect(verdict.reasons.join(' ')).toContain('not corroborated');
+  });
+
+  it('P1-8: without an APPROVED F2 authority file there is no formal baseline, whatever the attempt files claim', () => {
+    const dir = copyStudy('baseline-noauth'); // live file stays NOT_AUTHORIZED
+    const attemptDir = path.join(dir, 'runs', 'CEB-001-FV-01', 'A', 'r1');
+    fs.mkdirSync(attemptDir, { recursive: true });
+    fs.writeFileSync(path.join(attemptDir, 'a1.json'), `${JSON.stringify(fakeF2Attempt(), null, 2)}\n`, 'utf8');
+    const verdict = deriveRealHostBaselineFromStudy(dir, { codexHome: path.join(tmpRoot, 'unused') });
+    expect(verdict.status).toBe('NOT_ESTIMABLE');
+    expect(verdict.reasons.join(' ')).toContain('no APPROVED F2-real-host authorization');
+  });
+
+  it('P1-8: missing codexHome refuses fail-closed — corroboration that cannot run cannot claim PASS', () => {
+    const dir = copyStudy('baseline-nocodexhome');
+    approveStudy(dir, f2WithProbe());
+    const attemptDir = path.join(dir, 'runs', 'CEB-001-FV-01', 'A', 'r1');
+    fs.mkdirSync(attemptDir, { recursive: true });
+    fs.writeFileSync(path.join(attemptDir, 'a1.json'), `${JSON.stringify(fakeF2Attempt(), null, 2)}\n`, 'utf8');
+    const verdict = deriveRealHostBaselineFromStudy(dir);
+    expect(verdict.status).toBe('NOT_ESTIMABLE');
+    expect(verdict.reasons.join(' ')).toContain('codexHome not provided');
+  });
+
+  it('P1-8 (classifier): lineage-conflicting evidence is NOT_ESTIMABLE — a foreign suiteHash or a non-authorized identity never becomes acceptance evidence', () => {
+    const good = { mode: 'F2-real-host', result: 'SUCCEEDED', frozenRefs: { suiteHash: FROZEN.suiteHash }, authorization: { isolationAcceptance: { realHostProbe: { status: 'PASSED' } } }, observedHostEvidence: { hostSessionId: 's1', observedModelIdentity: 'authorized/model-x' } };
+    const expected = { suiteHash: FROZEN.suiteHash, requestedActorIdentity: 'model-x' };
+    expect(deriveRealHostBaseline({ attempts: [good], expected }).status).toBe('PASS');
+    const foreignSuite = { ...good, frozenRefs: { suiteHash: 'f'.repeat(64) } };
+    expect(deriveRealHostBaseline({ attempts: [foreignSuite], expected }).status).toBe('NOT_ESTIMABLE');
+    const foreignIdentity = { ...good, observedHostEvidence: { hostSessionId: 's1', observedModelIdentity: 'someone/else' } };
+    expect(deriveRealHostBaseline({ attempts: [foreignIdentity], expected }).status).toBe('NOT_ESTIMABLE');
   });
 });
 
@@ -544,6 +757,7 @@ describe('F. no-bypass, static boundaries, protected state', () => {
 
   it('protected state: live run-authorization.json stays NOT_AUTHORIZED, frozen hashes unchanged, verifyFrozenStudy still passes on the pristine study', () => {
     expect(readJson(realStudyDir, 'run-authorization.json').status).toBe('NOT_AUTHORIZED');
+    expect(readStageRAuthorization(realStudyDir).status).toBe('NOT_AUTHORIZED'); // the authoritative reader sees the same file the gate enforces
     const hashes = readJson(realStudyDir, 'hashes.json');
     expect(hashes.mappingHash.value).toBe(FROZEN.mappingHash);
     expect(hashes.suiteHash.value).toBe(FROZEN.suiteHash);

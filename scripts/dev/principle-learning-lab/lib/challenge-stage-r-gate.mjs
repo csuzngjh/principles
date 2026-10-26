@@ -53,9 +53,28 @@ export const STAGE_R_AUTH_KEYS = [
   'schema', 'stage', 'status', 'purpose', 'note', 'requiredBindingsWhenAuthorized',
   'studyId', 'suiteHash', 'mappingHash', 'graderHash', 'studyPlanHash',
   'requestedActorIdentity', 'executionMode', 'arms', 'cases', 'repetitions',
-  'attemptCap', 'isolationAcceptance', 'issuedBy', 'validFrom', 'validUntil',
+  'attemptCap', 'requestCap', 'isolationAcceptance', 'issuedBy', 'validFrom', 'validUntil',
   'revoked', 'halted',
 ];
+
+/** Read the AUTHORITATIVE Stage R authorization record for a study: the
+ *  Owner-controlled run-authorization.json inside the study directory (the
+ *  same file whose NOT_AUTHORIZED placeholder this gate enforces). Real
+ *  execution must go through THIS reader — the runner never trusts an
+ *  authorization object passed in memory by a caller (test fixtures are
+ *  injected by writing this file inside a COPIED study directory, so the
+ *  production entry and the test wiring share one fail-closed path).
+ *  Returns null on any read/parse failure — a missing or corrupt authority
+ *  file refuses, never silently degrades to empty. */
+export function readStageRAuthorization(studyDir) {
+  try {
+    const raw = fs.readFileSync(path.join(studyDir, 'run-authorization.json'), 'utf8');
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Recompute the study-plan binding hash from preregistration.json (never
  *  trusts the stored hashes.json value — same discipline as verifyFrozenStudy). */
@@ -108,12 +127,20 @@ function isNonEmptyStringArray(value) {
 /**
  * Stage R authorization gate — fail-closed check (bindings + plan + budget +
  * validity window + revocation + F2 isolation probe). Runs BEFORE any budget
- * reservation or actor step. Boundary semantics: validFrom inclusive,
- * validUntil inclusive (Stage G parity). `now` is INJECTED by the trusted
- * runner; a null now refuses as clock-unavailable. No ambient clock is read
- * anywhere in this module.
+ * reservation, actor construction or actor step. Boundary semantics:
+ * validFrom inclusive, validUntil inclusive (Stage G parity). `now` is
+ * INJECTED by the trusted runner; a null now refuses as clock-unavailable.
+ * No ambient clock is read anywhere in this module.
+ *
+ * `declaredExecutionMode` is the RUNNER-CONTROLLED mode (P1-1/P1-5: the
+ * execution mode comes from the runner's execution config, never from actor
+ * self-report). The gate refuses when the authorization's executionMode does
+ * not match it — an F1 authorization can never bless an F2 run and vice
+ * versa. `requestCap` is the study-wide REAL MODEL REQUEST budget (an
+ * attempt may span many model requests; the attempt cap is not a request
+ * budget) — required, positive safe integer, fail-closed when absent.
  */
-export function verifyStageRAuthorization({ authorizationRecord, bindings, plan, maxAttemptsTotal, now = null }) {
+export function verifyStageRAuthorization({ authorizationRecord, bindings, plan, maxAttemptsTotal, now = null, declaredExecutionMode = null }) {
   const reasons = [];
   const auth = authorizationRecord;
   if (!auth || typeof auth !== 'object') return { ok: false, reasons: ['authorization record missing or unreadable'] };
@@ -126,6 +153,13 @@ export function verifyStageRAuthorization({ authorizationRecord, bindings, plan,
   if (auth.halted === true) reasons.push('authorization halted by owner — stop condition triggered');
   if (auth.revoked === true) reasons.push('authorization revoked by owner');
 
+  if (!STAGE_R_EXECUTION_MODES.includes(auth.executionMode)) {
+    reasons.push(`executionMode must be one of ${STAGE_R_EXECUTION_MODES.join(' | ')} (got '${auth.executionMode}')`);
+  }
+  if (declaredExecutionMode !== null && auth.executionMode !== declaredExecutionMode) {
+    reasons.push(`authorization executionMode '${auth.executionMode}' does not match the runner-declared execution mode '${declaredExecutionMode}' — an F1 authorization cannot bless an F2 run and vice versa`);
+  }
+
   const validFrom = parseIso(auth.validFrom);
   const validUntil = parseIso(auth.validUntil);
   if (validFrom === null || validUntil === null) reasons.push('authorization validity window missing or malformed (validFrom/validUntil must be ISO-8601 WITH timezone, e.g. 2026-10-26T12:00:00Z — timezone-less values are ambiguous and refuse)');
@@ -137,9 +171,6 @@ export function verifyStageRAuthorization({ authorizationRecord, bindings, plan,
     if (now > validUntil) reasons.push(`authorization expired (now ${new Date(now).toISOString()} > validUntil ${auth.validUntil})`);
   }
 
-  if (!STAGE_R_EXECUTION_MODES.includes(auth.executionMode)) {
-    reasons.push(`executionMode must be one of ${STAGE_R_EXECUTION_MODES.join(' | ')} (got '${auth.executionMode}')`);
-  }
   if (typeof auth.requestedActorIdentity !== 'string' || auth.requestedActorIdentity.length === 0) {
     reasons.push('requestedActorIdentity missing (SPEC §7.2 Examiner/Actor model requirement binding)');
   }
@@ -180,6 +211,10 @@ export function verifyStageRAuthorization({ authorizationRecord, bindings, plan,
     reasons.push(`runner attempt cap ${maxAttemptsTotal} exceeds the authorized attemptCap ${auth.attemptCap} — widen via a new authorization, not the runner flag`);
   }
 
+  if (!Number.isSafeInteger(auth.requestCap) || auth.requestCap < 1) {
+    reasons.push('authorization requestCap must be a positive safe integer — real execution needs a study-wide model-REQUEST budget distinct from the attempt cap (fail-closed when absent)');
+  }
+
   if (auth.executionMode === 'F2-real-host') {
     const probe = auth.isolationAcceptance && auth.isolationAcceptance.realHostProbe;
     if (!probe || typeof probe !== 'object') {
@@ -196,7 +231,7 @@ export function verifyStageRAuthorization({ authorizationRecord, bindings, plan,
     }
   }
 
-  return { ok: reasons.length === 0, reasons, executionMode: auth.executionMode || null };
+  return { ok: reasons.length === 0, reasons, executionMode: auth.executionMode || null, requestCap: Number.isSafeInteger(auth.requestCap) ? auth.requestCap : null };
 }
 
 /** Extract observed host evidence from a real-mode actor. Only the real host
@@ -219,12 +254,22 @@ export function readObservedHostEvidence(actor) {
  *   PASS           — every attempt is F2-real-host with authorization linkage
  *                    (probe PASSED), observed host evidence, and ≥1 SUCCEEDED.
  *   NOT_ESTIMABLE  — real-host attempts exist but authorization/isolation
- *                    evidence is missing or the input mixes non-F2 attempts:
- *                    mock/offline evidence can never establish the baseline.
+ *                    evidence is missing, lineage conflicts with `expected`,
+ *                    or the input mixes non-F2 attempts: mock/offline
+ *                    evidence can never establish the baseline.
  *   UNKNOWN        — no real-host evidence at all (wiring-only doubles, no
  *                    successful attempt, or no attempts): baseline unmeasured.
+ *
+ * `expected` ({ suiteHash, requestedActorIdentity }) tightens the classifier
+ * from "well-shaped strings" to lineage-consistent evidence (rc-6): an
+ * attempt whose frozenRefs.suiteHash does not match THIS frozen study, or
+ * whose observed host identity does not match the authorization's bound
+ * actor identity, is NOT_ESTIMABLE — record fields alone never establish
+ * real-host acceptance. The FORMAL study-level entry
+ * (challenge-baseline.mjs deriveRealHostBaselineFromStudy) additionally
+ * corroborates every hostSessionId against the host's own rollout files.
  */
-export function deriveRealHostBaseline({ attempts } = {}) {
+export function deriveRealHostBaseline({ attempts, expected = null } = {}) {
   if (!Array.isArray(attempts) || attempts.length === 0) {
     return { status: 'UNKNOWN', reasons: ['no attempts recorded — realHostBaseline stays UNKNOWN'] };
   }
@@ -253,6 +298,22 @@ export function deriveRealHostBaseline({ attempts } = {}) {
       status: 'UNKNOWN',
       reasons: [`${missingEvidence.length}/${attempts.length} F2 attempt(s) carry no observed host session/identity — wiring-only evidence (an offline test double cannot provide it), never real-host acceptance`],
     };
+  }
+  if (expected && typeof expected === 'object') {
+    const lineageMismatches = attempts.filter((a) => {
+      const refs = a.frozenRefs || {};
+      const suiteOk = !expected.suiteHash || refs.suiteHash === expected.suiteHash;
+      const identityOk = !expected.requestedActorIdentity
+        || a.observedHostEvidence.observedModelIdentity === expected.requestedActorIdentity
+        || a.observedHostEvidence.observedModelIdentity.endsWith(`/${expected.requestedActorIdentity}`);
+      return !suiteOk || !identityOk;
+    });
+    if (lineageMismatches.length > 0) {
+      return {
+        status: 'NOT_ESTIMABLE',
+        reasons: [`${lineageMismatches.length}/${attempts.length} F2 attempt(s) carry evidence whose lineage does not match this frozen study / authorized actor identity — conflicting evidence is not acceptance evidence`],
+      };
+    }
   }
   if (!attempts.some((a) => a.result === 'SUCCEEDED')) {
     return { status: 'UNKNOWN', reasons: ['no successful F2-real-host attempt — baseline unmeasured'] };
