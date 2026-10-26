@@ -34,6 +34,7 @@ import { fileURLToPath } from 'node:url';
 import { verifyFrozenStudy, verifyArmConfigsFrozen, runChallengeStudy, STUB_STRATEGIES, RUNNER_EXECUTION_MODES } from './lib/challenge-runner.mjs';
 import { readStageRAuthorization, verifyStageRAuthorization, readStudyPlanHash } from './lib/challenge-stage-r-gate.mjs';
 import { createRealModelActor, createAmdActorResponder } from './lib/challenge-actor-transport.mjs';
+import { INTERN_S2_BASE_URL, resolveInternS2ApiKey } from './lib/challenge-amd-transport.mjs';
 import { createChallengeLedger } from './lib/challenge-ledger.mjs';
 
 const labRoot = path.dirname(fileURLToPath(import.meta.url));
@@ -158,6 +159,32 @@ try {
   const verified = verifyPlan(frozen, armCheck);
   printPlan(frozen, verified);
 
+  // Transport selection is AUTHORIZATION-BOUND: the approved record's
+  // requestedActorIdentity picks the responder wiring — a run can never reach
+  // a provider its authorization does not name (and a failover authorization
+  // names the alternate model explicitly, per the owner runbook).
+  let responderFactory = null;
+  if (executionMode !== 'offline-stub') {
+    const identity = verified.auth && typeof verified.auth.requestedActorIdentity === 'string' ? verified.auth.requestedActorIdentity : null;
+    if (identity === 'GLM-5.3-Flash') {
+      responderFactory = () => createAmdActorResponder();
+      console.log('run-challenge-study: transport = AMD radeon tokenfactory (GLM-5.3-Flash)');
+    } else if (identity === 'Atria-Dawn') {
+      // Shuxi intern-ai-discovery, Stage G round10-verified wiring: standard
+      // content layout, NO reasoning_effort (unverified parameter — never sent).
+      responderFactory = () => createAmdActorResponder({
+        baseUrl: INTERN_S2_BASE_URL,
+        modelId: 'Atria-Dawn',
+        apiKeyProvider: resolveInternS2ApiKey,
+        reasoningEffort: null,
+      });
+      console.log('run-challenge-study: transport = Shuxi intern-ai-discovery (Atria-Dawn, no reasoning_effort)');
+    } else {
+      console.error(`run-challenge-study: no F1 transport wiring is registered for requestedActorIdentity '${String(identity)}' — refusing (fail-closed; never guess a provider)`);
+      process.exit(1);
+    }
+  }
+
   if (dryRun) {
     console.log('run-challenge-study: DRY-RUN OK — plan and authorization verified; nothing was executed, no request was sent, no ledger row was written');
     console.log(`run-challenge-study: NOTE — this verdict used the ${now !== null ? `SIMULATED clock (--now ${new Date(now).toISOString()})` : 'actual system clock'}; a real run re-verifies PER UNIT with the actual system clock`);
@@ -166,7 +193,7 @@ try {
 
   const actorFactory = executionMode === 'offline-stub'
     ? (ctx) => STUB_STRATEGIES[strategy](ctx)
-    : (ctx) => createRealModelActor({ ctx, responder: createAmdActorResponder() });
+    : (ctx) => createRealModelActor({ ctx, responder: responderFactory() });
 
   const summary = await runChallengeStudy({
     studyDir: resolved,
