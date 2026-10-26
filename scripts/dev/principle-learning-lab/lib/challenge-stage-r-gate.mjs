@@ -53,9 +53,14 @@ export const STAGE_R_AUTH_KEYS = [
   'schema', 'stage', 'status', 'purpose', 'note', 'requiredBindingsWhenAuthorized',
   'studyId', 'suiteHash', 'mappingHash', 'graderHash', 'studyPlanHash',
   'requestedActorIdentity', 'executionMode', 'arms', 'cases', 'repetitions',
-  'attemptCap', 'requestCap', 'isolationAcceptance', 'issuedBy', 'validFrom', 'validUntil',
+  'attemptCap', 'requestCap', 'requestTimeoutMs', 'isolationAcceptance', 'issuedBy', 'validFrom', 'validUntil',
   'revoked', 'halted',
 ];
+
+/** Default model-request timeout when the authorization does not bind one.
+ *  Semantics: node:https req.setTimeout is a SOCKET INACTIVITY timeout (it
+ *  arms only while no data flows) — NOT a strict wall-clock total deadline. */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 240_000;
 
 /** Read the AUTHORITATIVE Stage R authorization record for a study: the
  *  Owner-controlled run-authorization.json inside the study directory (the
@@ -143,7 +148,7 @@ function isNonEmptyStringArray(value) {
  * attempt may span many model requests; the attempt cap is not a request
  * budget) — required, positive safe integer, fail-closed when absent.
  */
-export function verifyStageRAuthorization({ authorizationRecord, bindings, plan, maxAttemptsTotal, now = null, declaredExecutionMode = null }) {
+export function verifyStageRAuthorization({ authorizationRecord, bindings, plan, maxAttemptsTotal, now = null, declaredExecutionMode = null, declaredRequestTimeoutMs = undefined }) {
   const reasons = [];
   const auth = authorizationRecord;
   if (!auth || typeof auth !== 'object') return { ok: false, reasons: ['authorization record missing or unreadable'] };
@@ -161,6 +166,28 @@ export function verifyStageRAuthorization({ authorizationRecord, bindings, plan,
   }
   if (declaredExecutionMode !== null && auth.executionMode !== declaredExecutionMode) {
     reasons.push(`authorization executionMode '${auth.executionMode}' does not match the runner-declared execution mode '${declaredExecutionMode}' — an F1 authorization cannot bless an F2 run and vice versa`);
+  }
+
+  // Request-timeout binding (optional field — schema evolution alongside
+  // requestCap): when the authorization binds a requestTimeoutMs, the
+  // runner-declared value MUST equal it; when it does not, the default
+  // 240000ms is the only approved value and any non-default declaration
+  // refuses. This keeps an approved timeout machine-verifiable instead of
+  // a free CLI knob.
+  const declaredTimeoutProvided = declaredRequestTimeoutMs !== undefined && declaredRequestTimeoutMs !== null;
+  if (auth.requestTimeoutMs !== undefined) {
+    if (!Number.isSafeInteger(auth.requestTimeoutMs) || auth.requestTimeoutMs < 1) {
+      reasons.push('authorization requestTimeoutMs must be a positive safe integer when present');
+    } else if (!declaredTimeoutProvided) {
+      reasons.push(`authorization binds requestTimeoutMs '${auth.requestTimeoutMs}' but the runner declared no timeout — the approved value is binding and must be declared explicitly`);
+    } else if (auth.requestTimeoutMs !== declaredRequestTimeoutMs) {
+      reasons.push(`authorization requestTimeoutMs '${auth.requestTimeoutMs}' does not match the runner-declared '${declaredRequestTimeoutMs}' — the approved timeout is binding; widen it via a new authorization, not a CLI flag`);
+    }
+    if (declaredTimeoutProvided && (declaredRequestTimeoutMs < 60_000 || declaredRequestTimeoutMs > 600_000)) {
+      reasons.push(`runner-declared requestTimeoutMs '${declaredRequestTimeoutMs}' is outside the supported range [60000, 600000]`);
+    }
+  } else if (declaredTimeoutProvided && declaredRequestTimeoutMs !== DEFAULT_REQUEST_TIMEOUT_MS) {
+    reasons.push(`authorization does not bind a requestTimeoutMs — the default ${DEFAULT_REQUEST_TIMEOUT_MS}ms is the only approved value for this authorization; widen it via a new authorization, not a CLI flag`);
   }
 
   const validFrom = parseIso(auth.validFrom);

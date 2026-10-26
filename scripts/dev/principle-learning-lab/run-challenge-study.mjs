@@ -63,6 +63,23 @@ const arms = (arg('--arms', 'A,B,C') || '').split(',').map((s) => s.trim()).filt
 const maxAttemptsTotal = Number(arg('--max-attempts', '40'));
 const owner = arg('--owner', 'challenge-runner-cli');
 
+// Request-timeout discipline (security): `--request-timeout-ms` is NOT a free
+// knob. The value is declared to the Stage R gate, which enforces the
+// authorization binding — an authorization that binds requestTimeoutMs must
+// see the exact same value, and an authorization WITHOUT the field only ever
+// approves the 240000ms default. Invalid values refuse before anything runs.
+let requestTimeoutMs; // undefined = default 240000
+{
+  const t = arg('--request-timeout-ms');
+  if (t !== undefined) {
+    requestTimeoutMs = Number(t);
+    if (!Number.isSafeInteger(requestTimeoutMs) || requestTimeoutMs < 60_000 || requestTimeoutMs > 600_000) {
+      console.error(`run-challenge-study: --request-timeout-ms '${t}' must be an integer within [60000, 600000] (socket-inactivity semantics — see AMD_TRANSPORT_TIMEOUTS)`);
+      process.exit(1);
+    }
+  }
+}
+
 // Clock discipline (security): the authorization clock is NOT caller-chosen
 // for REAL execution. `--now` is a SIMULATED clock for --dry-run only (clearly
 // labeled); a real F1 run always judges validity with the ACTUAL system clock,
@@ -125,6 +142,7 @@ function verifyPlan(frozen, armCheck) {
     // so the pre-flight value is never the last word either way.
     now: dryRun ? now : Date.now(),
     declaredExecutionMode: executionMode,
+    declaredRequestTimeoutMs: requestTimeoutMs, // undefined = default 240000; the gate enforces the authorization binding
   });
   return { plan, units, gate, auth };
 }
@@ -167,12 +185,13 @@ try {
   if (executionMode !== 'offline-stub') {
     const identity = verified.auth && typeof verified.auth.requestedActorIdentity === 'string' ? verified.auth.requestedActorIdentity : null;
     if (identity === 'GLM-5.3-Flash') {
-      responderFactory = () => createAmdActorResponder();
+      responderFactory = () => createAmdActorResponder({ requestTimeoutMs: requestTimeoutMs !== undefined ? requestTimeoutMs : 240_000 });
       console.log('run-challenge-study: transport = AMD radeon tokenfactory (GLM-5.3-Flash)');
     } else if (identity === 'Atria-Dawn') {
       // Shuxi intern-ai-discovery, Stage G round10-verified wiring: standard
       // content layout, NO reasoning_effort (unverified parameter — never sent).
       responderFactory = () => createAmdActorResponder({
+        requestTimeoutMs: requestTimeoutMs !== undefined ? requestTimeoutMs : 240_000,
         baseUrl: INTERN_S2_BASE_URL,
         modelId: 'Atria-Dawn',
         apiKeyProvider: resolveInternS2ApiKey,
@@ -183,6 +202,7 @@ try {
       // Shuxi intern-ai-discovery, Stage G round7-verified wiring (12/12 valid
       // candidates): standard content layout, NO reasoning_effort.
       responderFactory = () => createAmdActorResponder({
+        requestTimeoutMs: requestTimeoutMs !== undefined ? requestTimeoutMs : 240_000,
         baseUrl: INTERN_S2_BASE_URL,
         modelId: 'deepseek-v4.1-flash-1017',
         apiKeyProvider: resolveInternS2ApiKey,
@@ -194,6 +214,7 @@ try {
       // API's own /v4/models entry, OpenAI Chat protocol. reasoning_effort is
       // UNVERIFIED on this endpoint → never sent (provider discipline).
       responderFactory = () => createAmdActorResponder({
+        requestTimeoutMs: requestTimeoutMs !== undefined ? requestTimeoutMs : 240_000,
         baseUrl: BIGMODEL_CODING_BASE_URL,
         modelId: BIGMODEL_CODING_MODEL_ID,
         apiKeyProvider: resolveBigmodelCodingApiKey,
