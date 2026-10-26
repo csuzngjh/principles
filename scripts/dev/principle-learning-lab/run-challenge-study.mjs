@@ -34,7 +34,7 @@ import { fileURLToPath } from 'node:url';
 import { verifyFrozenStudy, verifyArmConfigsFrozen, runChallengeStudy, STUB_STRATEGIES, RUNNER_EXECUTION_MODES } from './lib/challenge-runner.mjs';
 import { readStageRAuthorization, verifyStageRAuthorization, readStudyPlanHash } from './lib/challenge-stage-r-gate.mjs';
 import { createRealModelActor, createAmdActorResponder } from './lib/challenge-actor-transport.mjs';
-import { INTERN_S2_BASE_URL, resolveInternS2ApiKey } from './lib/challenge-amd-transport.mjs';
+import { INTERN_S2_BASE_URL, resolveInternS2ApiKey, BIGMODEL_CODING_BASE_URL, BIGMODEL_CODING_MODEL_ID, resolveBigmodelCodingApiKey } from './lib/challenge-amd-transport.mjs';
 import { createChallengeLedger } from './lib/challenge-ledger.mjs';
 
 const labRoot = path.dirname(fileURLToPath(import.meta.url));
@@ -189,6 +189,17 @@ try {
         reasoningEffort: null,
       });
       console.log('run-challenge-study: transport = Shuxi intern-ai-discovery (deepseek-v4.1-flash-1017, no reasoning_effort)');
+    } else if (identity === 'glm-5.3-flash') {
+      // Zhipu bigmodel Coding Plan (PAID, Owner-provided credential) — the
+      // API's own /v4/models entry, OpenAI Chat protocol. reasoning_effort is
+      // UNVERIFIED on this endpoint → never sent (provider discipline).
+      responderFactory = () => createAmdActorResponder({
+        baseUrl: BIGMODEL_CODING_BASE_URL,
+        modelId: BIGMODEL_CODING_MODEL_ID,
+        apiKeyProvider: resolveBigmodelCodingApiKey,
+        reasoningEffort: null,
+      });
+      console.log('run-challenge-study: transport = Zhipu bigmodel coding (glm-5.3-flash, no reasoning_effort)');
     } else {
       console.error(`run-challenge-study: no F1 transport wiring is registered for requestedActorIdentity '${String(identity)}' — refusing (fail-closed; never guess a provider)`);
       process.exit(1);
