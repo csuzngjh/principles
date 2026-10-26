@@ -20,6 +20,8 @@
  * `resolveLedgerPrincipleId` (pd-console), which until now only ran AFTER the
  * activation commit as a non-fatal ledger upgrade.
  */
+import { resolveArtifactCandidateIdentity, readCandidateIdentityReceipt } from '../internalization/candidate-identity.js';
+import { validateCandidateIdentityReceipt, type CandidatePrincipleIdentityResolution } from '../adapter/principle-tree-ledger-adapter.js';
 import type { PIArtifactSnapshot } from './activation-types.js';
 import { resolveActivationPrincipleId } from './low-risk-writers.js';
 
@@ -30,6 +32,8 @@ export interface LedgerIdentityChecker {
    * `false`, the membership answers below collapse to an empty ledger, so a
    * `false`/`[]` result means "cannot read" — never data drift.
    */
+  resolveForCandidate?: (candidateId: string) => Promise<CandidatePrincipleIdentityResolution>;
+  resolveCandidatePrincipleIdentity?: (candidateId: string, candidateKind: unknown) => CandidatePrincipleIdentityResolution;
   isAvailable(): boolean;
   hasPrinciple(principleId: string): boolean;
   listForCandidate(candidateId: string): { id: string }[];
@@ -37,6 +41,7 @@ export interface LedgerIdentityChecker {
 
 export interface LedgerIdentityLookupDeps {
   ledger: LedgerIdentityChecker;
+  getCandidateKind?: (candidateId: string) => unknown | Promise<unknown>;
   getArtifactById: (artifactId: string) => Promise<PIArtifactSnapshot | null>;
   /**
    * Read one task's diagnostic_json. May be sync or async (hosts back it with
@@ -123,6 +128,33 @@ export async function resolveLedgerActivationId(
   deps: LedgerIdentityLookupDeps,
 ): Promise<LedgerActivationResolution> {
   const direct = resolveActivationPrincipleId(artifact);
+  const { resolveCandidatePrincipleIdentity } = deps.ledger;
+  const { getCandidateKind } = deps;
+  const resolveForCandidate = deps.ledger.resolveForCandidate ?? (resolveCandidatePrincipleIdentity && getCandidateKind
+    ? async (id: string) => resolveCandidatePrincipleIdentity.call(deps.ledger, id, await getCandidateKind(id))
+    : undefined);
+  if (resolveForCandidate) {
+    if (!deps.ledger.isAvailable()) return { status: 'unresolved', reason: 'ledger_unavailable' };
+    if (direct && !deps.ledger.hasPrinciple(direct)) return { status: 'unresolved', reason: `principle_not_in_ledger: ${direct}` };
+    const current = await resolveArtifactCandidateIdentity(artifact, {
+      ...deps, ledger: { resolveForCandidate },
+    });
+    const receipt = readCandidateIdentityReceipt(artifact.contentJson);
+    // Pre-receipt prompt artifacts may have only their system-written Ledger column.
+    // Keep that established authority; rule artifacts and binding receipts never use it.
+    if (current.status === 'unresolved' && current.reason === 'candidate_missing'
+      && artifact.artifactKind === 'principle' && direct && receipt === undefined) {
+      return { status: 'resolved', principleId: direct, how: 'direct_validated' };
+    }
+    if (current.status !== 'resolved') return current;
+    if (direct && direct !== current.principleId) return { status: 'unresolved', reason: 'conflicting_authorities' };
+    if ((receipt !== undefined || current.basis === 'owner_rule_binding')
+      && !validateCandidateIdentityReceipt(receipt, current)) {
+      return { status: 'unresolved', reason: 'identity_receipt_stale_or_missing' };
+    }
+    return { status: 'resolved', principleId: current.principleId, how: direct ? 'direct_validated' : 'candidate_lineage' };
+  }
+
   if (direct) {
     if (!deps.ledger.isAvailable()) {
       return {

@@ -29,6 +29,7 @@ import type { PromptInjectionBudgetStatus } from "../../utils/validators.js";
 import { selectApprovalGroupDisplayTitle, showsUnlinkedCandidateNote, validateApprovalsGroupedData } from "./focus-validation.js";
 import { splitReadingTitleBody } from "../../utils/reading-layout.js";
 import { OwnerDecisionCard } from "./OwnerDecisionCard.js";
+import { RuleCandidateBindingPanel } from './RuleCandidateBindingPanel.js';
 import { localizeApprovalWarning, splitApprovalWarnings } from "../../utils/approval-warning-localization.js";
 
 /** PRI-908: how long the decided card stays visible before the pending list refresh removes it. */
@@ -1594,6 +1595,8 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
           {t("pages.focus.conclusion.countsNote")}
         </p>
       </section>
+
+      <RuleCandidateBindingPanel />
 
       {/* PRI-629: 需要你决定 — 统一 Owner Inbox。两种治理摘要模式下都渲染;
           N = 真实可执行决策数 (INV-01),不是 lifecycle/NHR/failed 计数。 */}

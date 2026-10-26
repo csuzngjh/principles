@@ -15,8 +15,21 @@
  */
 
 import type { TaskRecord } from '../task-status.js';
+import type { PIArtifactRecord } from './pi-artifact.js';
+import { PDRuntimeError } from '../error-categories.js';
 import type { RepairPayload, RunnerDecision, RolloutRevisionPayload, RunnerCompletionIntent, HumanReviewContext, OwnerResolutionRecord, FailedTaskRecoveryAuditRecord, IntentBasisVerificationRecordV1, SourceFaultBackoffRecordV1 } from './pitask-metadata.js';
 import type { OwnerEvidenceSelection } from './evidence-readiness.js';
+
+/** A revision consumes its successful run, never an earlier artifact kept for audit. */
+export function selectTaskRevisionArtifact(task: TaskRecord, artifacts: readonly PIArtifactRecord[], revisionCount: number): PIArtifactRecord | undefined {
+  if (revisionCount === 0) return artifacts[0];
+  const prefix = `${task.taskKind}://`;
+  const runId = task.resultRef?.startsWith(prefix) ? task.resultRef.slice(prefix.length) : null;
+  const artifactId = runId ? `pi-art-${task.taskId}-${runId}` : null;
+  const current = artifactId ? artifacts.find(artifact => artifact.artifactId === artifactId && artifact.sourceTaskId === task.taskId) : undefined;
+  if (!current) throw new PDRuntimeError('input_invalid', 'current_revision_artifact_unavailable', { reasonCode: 'current_revision_artifact_unavailable', nextAction: 'restore_the_artifact_from_the_latest_successful_source_run' });
+  return current;
+}
 
 // ── Internalization Channel Types ─────────────────────────────────────────────
 
@@ -168,6 +181,7 @@ export interface PITaskRecord extends TaskRecord {
   revisionFeedback?: string;
   /** P0-4 stable revision identity — same-cause reopen replays are no-ops. */
   revisionCauseId?: string;
+  ruleBindingRevisionCauseId?: string;
   /** Rollout needs_revision routing payload; present on rollout_reviewer tasks that routed a revision. */
   rolloutRevisionPayload?: RolloutRevisionPayload;
   /**

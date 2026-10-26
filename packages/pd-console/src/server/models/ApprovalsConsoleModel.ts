@@ -28,6 +28,7 @@ import {
 } from '@principles/core/runtime-v2';
 import type { ApprovalWithContext, ActivationDecision, PIArtifactSnapshot } from '@principles/core/runtime-v2';
 import { resolveLedgerPrincipleId } from './principle-id-resolution.js';
+import { createArtifactPrincipleResolutionDeps } from './artifact-principle-resolver.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
 import {
   resolveWorkspaceHostToolSemantics,
@@ -568,17 +569,7 @@ export class ApprovalsConsoleModel {
       // ids against the ledger and otherwise walks the candidate lineage
       // (scribe → dreamer seed → candidateId → derivedFromPainIds).
       const ledger = new PrincipleTreeLedgerAdapter({ stateDir });
-      const resolution = await resolveLedgerPrincipleId(artifact, {
-        ledger,
-        getArtifactById: (id) => piArtifactStore.getArtifactById(id),
-        getTaskDiagnosticJson: (taskId) => {
-          const row = connection
-            .getDb()
-            .prepare('SELECT diagnostic_json FROM tasks WHERE task_id = ?')
-            .get(taskId) as { diagnostic_json: string | null } | undefined;
-          return row?.diagnostic_json ?? null;
-        },
-      });
+      const resolution = await resolveLedgerPrincipleId(artifact, createArtifactPrincipleResolutionDeps(connection, piArtifactStore, this.workspaceDir));
       if (resolution.status === 'unresolved') {
         return `ledger_activate_skipped: artifact ${artifactId} — ${resolution.reason}`;
       }
@@ -768,6 +759,10 @@ export class ApprovalsConsoleModel {
           // warn later. The dispatcher gate now blocks both, and the existing
           // post-commit upgrade below keeps its role unchanged.
           ledgerIdentity: {
+            getCandidateKind: (candidateId: string): unknown => {
+              const row: unknown = connection.getDb().prepare('SELECT recommendation_kind FROM principle_candidates WHERE candidate_id = ?').get(candidateId);
+              return row !== null && typeof row === 'object' && Object.hasOwn(row, 'recommendation_kind') ? Reflect.get(row, 'recommendation_kind') : undefined;
+            },
             ledger: new PrincipleTreeLedgerAdapter({ stateDir: `${this.workspaceDir}/.state` }),
             getArtifactById: artifactReadModel.getArtifactById,
             getTaskDiagnosticJson: (taskId: string): string | null => {
@@ -1045,6 +1040,10 @@ export class ApprovalsConsoleModel {
           writers: [new PromptWriter()],
           approvalQueueStore: queueStore,
           ledgerIdentity: {
+            getCandidateKind: (candidateId: string): unknown => {
+              const row: unknown = connection.getDb().prepare('SELECT recommendation_kind FROM principle_candidates WHERE candidate_id = ?').get(candidateId);
+              return row !== null && typeof row === 'object' && Object.hasOwn(row, 'recommendation_kind') ? Reflect.get(row, 'recommendation_kind') : undefined;
+            },
             ledger: new PrincipleTreeLedgerAdapter({ stateDir: `${this.workspaceDir}/.state` }),
             getArtifactById: async (id: string) => {
               const rec = await artifactStore.getArtifactById(id);

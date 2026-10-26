@@ -7,11 +7,16 @@
 
 import {
   addPrincipleToLedger,
+  createRuleCandidateBindingReview,
+  mutateRuleCandidateBinding,
   appendReuseEvidence as appendReuseEvidenceToLedger,
   loadLedger,
   readLedgerFileState,
   updatePrinciple,
+  validateReuseEvidenceEntry,
 } from '../../principle-tree-ledger.js';
+import { isCanonicalBindingPrincipleId } from '../principle-tree/rule-candidate-binding.js';
+import type { CandidatePrincipleIdentityResolution, RuleCandidateBindingSources, RuleCandidateBindingReview, RuleCandidateBindingMutation, RuleCandidateBindingMutationResult } from '../types/rule-candidate-binding.js';
 import { isRecord } from '../principle-tree/ledger-codec.js';
 import type { LedgerAdapter, LedgerPrincipleEntry } from '../candidate-intake.js';
 import type { ReuseEvidenceEntry } from '../types/principle-schema.js';
@@ -61,10 +66,60 @@ function expandToLedgerPrincipleStatic(entry: LedgerPrincipleEntry, candidateId:
  */
 export class PrincipleTreeLedgerAdapter implements LedgerAdapter {
   readonly #stateDir: string;
+  readonly #reviewSources?: RuleCandidateBindingSources;
   readonly #entryMap = new Map<string, LedgerPrincipleEntry>();
 
-  constructor(opts: { stateDir: string }) {
+  constructor(opts: { stateDir: string; reviewSources?: RuleCandidateBindingSources }) {
     this.#stateDir = opts.stateDir;
+    this.#reviewSources = opts.reviewSources;
+  }
+
+  /** One file snapshot; never combine availability and identity from separate reads. */
+  resolveCandidatePrincipleIdentity(candidateId: string, candidateKind: unknown): CandidatePrincipleIdentityResolution {
+    const unresolved = (reason: Extract<CandidatePrincipleIdentityResolution, { status: 'unresolved' }>['reason']): CandidatePrincipleIdentityResolution =>
+      ({ status: 'unresolved', reason, nextAction: 'Review the candidate identity and current ledger evidence in the Owner Console.' });
+    const state = readLedgerFileState(this.#stateDir);
+    if (state.availability.status === 'unreadable') return unresolved(state.availability.corrupt ? 'ledger_corrupt' : 'ledger_unavailable');
+    if (!candidateId.trim()) return unresolved('candidate_missing');
+    if (candidateKind !== 'principle' && candidateKind !== 'rule') return unresolved('candidate_kind_invalid');
+    const {tree} = state.ledger;
+    const checkedAt = new Date().toISOString();
+    if (candidateKind === 'rule') {
+      const binding = Object.hasOwn(tree.ruleCandidateBindings ?? {}, candidateId) ? tree.ruleCandidateBindings?.[candidateId]?.revisions.at(-1) : undefined;
+      if (!binding) return unresolved('missing');
+      if (binding.action === 'revoke') return unresolved('binding_revoked');
+      const target = Object.hasOwn(tree.principles, binding.principleId) ? tree.principles[binding.principleId] : undefined;
+      if (!target) return unresolved('target_missing');
+      if (!['candidate', 'probation', 'active'].includes(target.status)) return unresolved('target_ineligible');
+      return { status: 'resolved', candidateId, principleId: binding.principleId, basis: 'owner_rule_binding', bindingRevision: binding.revision, decisionId: binding.decisionId, checkedAt };
+    }
+    const derived = new Set<string>();
+    const reused = new Set<string>();
+    for (const principle of Object.values(tree.principles)) {
+      if (principle.derivedFromPainIds.includes(candidateId)) derived.add(principle.id);
+      if (principle.reuseEvidence !== undefined && !Array.isArray(principle.reuseEvidence)) return unresolved('ledger_corrupt');
+      for (const evidence of principle.reuseEvidence ?? []) {
+        try { validateReuseEvidenceEntry(evidence); }
+        catch { return unresolved('ledger_corrupt'); }
+        if (evidence.candidateId === candidateId) reused.add(principle.id);
+      }
+    }
+    const all = new Set([...derived, ...reused]);
+    if (!all.size) return unresolved('missing');
+    if (all.size > 1) return unresolved(derived.size && reused.size ? 'conflicting_authorities' : 'ambiguous');
+    const [principleId] = all;
+    if (!isCanonicalBindingPrincipleId(principleId)) return unresolved('target_ineligible');
+    return { status: 'resolved', candidateId, principleId, basis: derived.size ? 'derived_candidate' : 'principle_reuse', checkedAt };
+  }
+
+  async createRuleCandidateBindingReview(candidateId: string, options: { search?: string; limit?: number } = {}): Promise<RuleCandidateBindingReview> {
+    if (!this.#reviewSources) return { ok: false, reason: 'review_source_unavailable', nextAction: 'Connect the persisted candidate review sources.' };
+    return createRuleCandidateBindingReview(this.#stateDir, candidateId, { ...options, sources: this.#reviewSources });
+  }
+
+  async mutateRuleCandidateBinding(input: RuleCandidateBindingMutation): Promise<RuleCandidateBindingMutationResult> {
+    // Revocation intentionally never calls candidate sources, even after source deletion.
+    return mutateRuleCandidateBinding(this.#stateDir, input, this.#reviewSources ?? { loadCandidateMaterial: async () => null });
   }
 
   writeProbationEntry(entry: LedgerPrincipleEntry): LedgerPrincipleEntry {
@@ -198,3 +253,5 @@ export class PrincipleTreeLedgerAdapter implements LedgerAdapter {
     }
   }
 }
+export type { CandidatePrincipleIdentityResolution, CandidateIdentityReceipt } from '../types/rule-candidate-binding.js';
+export { validateCandidateIdentityReceipt } from '../principle-tree/rule-candidate-binding.js';

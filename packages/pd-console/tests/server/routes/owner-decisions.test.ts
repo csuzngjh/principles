@@ -587,7 +587,7 @@ describe('POST /api/v1/governance/owner-decisions/:taskId/resolve', () => {
 // 校验失败时不带该字段（UI 回退审查列表链接）。
 
 const LINKED_ARTIFACT_ID = 'pi-art-approval-linked';
-const LINKED_PRINCIPLE_ID = 'p-linked-1';
+const LINKED_PRINCIPLE_ID = '6d2f3fe6-b465-4a77-ad6b-af10aac5fc7d';
 const UNLINKED_ARTIFACT_ID = 'pi-art-approval-unlinked';
 
 function setupApprovalDb(): SqliteConnection {

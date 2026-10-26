@@ -1,3 +1,4 @@
+import { seedScribeIdentityLineage } from '../helpers/candidate-identity-fixture.js';
 /**
  * PRI-708 — run-once rollout revision routing: cross entry point equivalence.
  *
@@ -189,6 +190,7 @@ async function seedWorkspace(workspaceDir: string): Promise<RuntimeStateManager>
       await sm.markTaskSucceeded(id);
     }
   }
+  await seedScribeIdentityLineage(sm, workspaceDir, PARITY_CANDIDATE_ID, SCRIBE_PRINCIPLE_ID, SCRIBE_ID, SCRIBE_ART, { principleDraft: { title: 'parity-p', statement: 'parity principle text' } });
   return sm;
 }
 

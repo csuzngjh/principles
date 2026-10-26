@@ -1,5 +1,6 @@
 import type { SqliteConnection } from '../sqlite-connection.js';
 import type { PIArtifactRecord, PIArtifactStore } from '../../internalization/pi-artifact.js';
+import { parsePITaskMetadata, PI_METADATA_KEY } from '../../internalization/pitask-metadata.js';
 
 export interface PiArtifactRow {
   artifact_id: string;
@@ -36,6 +37,26 @@ export function mapPiArtifactRow(row: PiArtifactRow): PIArtifactRecord {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function isPiArtifactRow(value: unknown): value is PiArtifactRow {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const fields = ['artifact_id', 'artifact_kind', 'source_task_id', 'lineage_artifact_ids', 'validation_status', 'content_json', 'created_at', 'updated_at'];
+  if (!fields.every(key => typeof Reflect.get(value, key) === 'string')) return false;
+  if (!['source_principle_id', 'source_rule_id'].every(key => Reflect.get(value, key) === null || typeof Reflect.get(value, key) === 'string')) return false;
+  const raw: unknown = Reflect.get(value, 'lineage_artifact_ids');
+  if (typeof raw !== 'string') return false;
+  try {
+    const lineage: unknown = JSON.parse(raw);
+    return Array.isArray(lineage) && lineage.every(id => typeof id === 'string');
+  } catch { return false; }
+}
+
+function mapValidatedPiArtifactRows(rows: unknown[]): PIArtifactRecord[] {
+  return rows.map(row => {
+    if (!isPiArtifactRow(row)) throw new Error('pi_artifact_row_invalid');
+    return mapPiArtifactRow(row);
+  });
 }
 
 export class SqlitePIArtifactStore implements PIArtifactStore {
@@ -83,11 +104,32 @@ export class SqlitePIArtifactStore implements PIArtifactStore {
 
   async upsertArtifact(record: PIArtifactRecord): Promise<PIArtifactRecord> {
     const db = this.connection.getDb();
+    const source: unknown = db.prepare('SELECT diagnostic_json FROM tasks WHERE task_id = ?').get(record.sourceTaskId);
+    const diagnostic: unknown = source !== null && typeof source === 'object' ? Reflect.get(source, 'diagnostic_json') : null;
+    const metadata = typeof diagnostic === 'string' ? parsePITaskMetadata(diagnostic) : null;
+    if (typeof diagnostic === 'string' && !metadata) {
+      // Unparseable diagnostic JSON must fail with the structured reason, not
+      // a raw SyntaxError (rc-3/rc-9).
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(diagnostic);
+      } catch {
+        throw new Error('artifact_revision_metadata_invalid');
+      }
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed) || Object.hasOwn(parsed, PI_METADATA_KEY)) {
+        throw new Error('artifact_revision_metadata_invalid');
+      }
+    }
+    const revisionEpoch = metadata?.revisionCount ?? 0;
+    if (!Number.isSafeInteger(revisionEpoch) || revisionEpoch < 0) throw new Error('invalid_artifact_revision_epoch');
+    const latest: unknown = db.prepare('SELECT MAX(revision_epoch) AS epoch FROM pi_artifacts WHERE source_task_id = ?').get(record.sourceTaskId);
+    const latestEpoch: unknown = latest !== null && typeof latest === 'object' ? Reflect.get(latest, 'epoch') : null;
+    if (typeof latestEpoch === 'number' && latestEpoch > revisionEpoch) throw new Error('artifact_revision_epoch_regressed');
     const lineageJson = JSON.stringify(record.lineageArtifactIds);
     db.prepare(`
-      INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(source_task_id, artifact_kind) DO UPDATE SET
+      INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_principle_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at, revision_epoch)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(source_task_id, artifact_kind, revision_epoch) DO UPDATE SET
         artifact_id = excluded.artifact_id,
         source_principle_id = excluded.source_principle_id,
         source_rule_id = excluded.source_rule_id,
@@ -106,6 +148,7 @@ export class SqlitePIArtifactStore implements PIArtifactStore {
       record.contentJson,
       record.createdAt,
       record.updatedAt,
+      revisionEpoch,
     );
     return record;
   }
@@ -122,12 +165,25 @@ export class SqlitePIArtifactStore implements PIArtifactStore {
 
   async listBySourceTaskId(sourceTaskId: string): Promise<PIArtifactRecord[]> {
     const db = this.connection.getDb();
+    const columns: unknown[] = db.prepare('PRAGMA table_info(pi_artifacts)').all();
+    const hasEpoch = columns.some(column => column !== null && typeof column === 'object' && Reflect.get(column, 'name') === 'revision_epoch');
+    // Readonly inspection must work before a normal writer upgrades an older database.
+    if (!hasEpoch) {
+      const legacy = db.prepare(`
+        SELECT artifact_id, artifact_kind, source_task_id, source_principle_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at
+        FROM pi_artifacts WHERE source_task_id = ? ORDER BY created_at ASC
+      `).all(sourceTaskId);
+      return mapValidatedPiArtifactRows(legacy);
+    }
+    // Preserve the established current-output view; historical approval/lineage refs
+    // continue to resolve by artifactId without mixing epochs into current prompts.
     const rows = db.prepare(`
       SELECT artifact_id, artifact_kind, source_task_id, source_principle_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at
       FROM pi_artifacts WHERE source_task_id = ?
+        AND revision_epoch = (SELECT MAX(revision_epoch) FROM pi_artifacts WHERE source_task_id = ?)
       ORDER BY created_at ASC
-    `).all(sourceTaskId) as PiArtifactRow[];
-    return rows.map(mapPiArtifactRow);
+    `).all(sourceTaskId, sourceTaskId);
+    return mapValidatedPiArtifactRows(rows);
   }
 
   async listLineage(artifactId: string): Promise<PIArtifactRecord[]> {

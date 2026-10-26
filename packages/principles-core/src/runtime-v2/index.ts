@@ -2384,3 +2384,7 @@ export { boundCorrectionEvidenceText } from './pain-signal-bridge.js';
 export { DESIGN_GATE_FACT_SCHEMA_VERSION, isDesignGateFact, isDesignGateDeclaration } from './internalization/design-gate-facts.js';
 export type { DesignGateFact, DesignGateDeclaration, DesignGateActor, DesignGateScope, DesignGateAction, DesignGateDecision, DesignGateInvalidationReason } from './internalization/design-gate-facts.js';
 export { SqliteDesignGateStore, DesignGateStoreError } from './store/design-gate/sqlite-design-gate-store.js';
+
+// Owner-governed rule candidate identity; the Ledger remains the only relation authority.
+export type { CandidatePrincipleIdentityResolution, RuleCandidateBindingRequest, RuleCandidateBindingMutationResult } from './types/rule-candidate-binding.js';
+export { reviseRuleBindingOnce } from './internalization/rule-binding-revision.js';

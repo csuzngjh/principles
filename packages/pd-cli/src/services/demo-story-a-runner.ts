@@ -1,5 +1,6 @@
 import {
   RuntimeStateManager,
+  SqliteDiagnosticianCommitter,
   ActivationDispatcher,
   PromptWriter,
   DeferArchiveWriter,
@@ -80,8 +81,13 @@ function makeArtifactReadModel(ctx: DispatchContext) {
  */
 function makeLedgerIdentityDeps(ctx: DispatchContext, getArtifactById: (id: string) => Promise<PIArtifactSnapshot | null>) {
   return {
+    getCandidateKind: (candidateId: string): unknown => {
+      const row: unknown = ctx.stateManager.connection.getDb().prepare('SELECT recommendation_kind FROM principle_candidates WHERE candidate_id = ?').get(candidateId);
+      return row !== null && typeof row === 'object' && Object.hasOwn(row, 'recommendation_kind') ? Reflect.get(row, 'recommendation_kind') : undefined;
+    },
     ledger: new PrincipleTreeLedgerAdapter({ stateDir: `${ctx.workspaceDir}/.state` }),
     getArtifactById,
+    getTaskDiagnosticJson: async (taskId: string) => (await ctx.stateManager.getTask(taskId))?.diagnosticJson ?? null,
   };
 }
 
@@ -343,7 +349,24 @@ export async function runStoryADemo(opts: DemoStoryARunnerOptions): Promise<Stor
     // artifacts. A synthetic `demo-principle-<runId>` string is refused at the
     // dispatcher — exactly the defect this demo is meant to surface, not bypass.
     const ledger = new PrincipleTreeLedgerAdapter({ stateDir: `${opts.workspaceDir}/.state` });
-    const demoCandidateId = `demo-${runId}`;
+    // Explicit demo fixture: a principle recommendation committed through the real
+    // diagnosis store. This is simulated evidence, never an Owner binding decision.
+    const diagnosisTaskId = `diagnosis-demo-${runId}`;
+    await stateManager.createTask({ taskId: diagnosisTaskId, taskKind: 'diagnostician', status: 'pending', attemptCount: 0, maxAttempts: 1,
+      diagnosticJson: JSON.stringify({ sourcePainId: `demo-pain-${runId}`, simulated: true }) });
+    await stateManager.acquireLease({ taskId: diagnosisTaskId, owner: 'demo-fixture', runtimeKind: 'test-double' });
+    const [diagnosisRun] = await stateManager.getRunsByTask(diagnosisTaskId);
+    if (!diagnosisRun) throw new Error('Demo diagnosis fixture run missing');
+    await new SqliteDiagnosticianCommitter(stateManager.connection).commit({ taskId: diagnosisTaskId, runId: diagnosisRun.runId,
+      idempotencyKey: `demo-${runId}`, output: { valid: true, diagnosisId: `demo-diagnosis-${runId}`,
+        summary: 'Simulated demo diagnosis', rootCause: 'People: simulated unsafe system write', violatedPrinciples: [],
+        evidence: [{ sourceRef: `demo-fixture://${runId}`, note: 'Simulated demonstration; no real Owner evidence or binding approval' }],
+        recommendations: [{ kind: 'principle', description: 'Prevent writing to system-critical directories' }], confidence: 1,
+      } });
+    await stateManager.markTaskSucceeded(diagnosisTaskId);
+    const [demoCandidate] = await stateManager.getCandidatesByTaskId(diagnosisTaskId);
+    if (!demoCandidate) throw new Error('Demo principle candidate fixture missing');
+    const demoCandidateId = demoCandidate.candidateId;
     const principleUuid = randomUUID();
     ledger.writeProbationEntry({
       id: principleUuid,
@@ -361,7 +384,22 @@ export async function runStoryADemo(opts: DemoStoryARunnerOptions): Promise<Stor
 
     // Persist artifacts to real workspace DB
     const principleRecord = makePrincipleArtifactRecord(runId, principleUuid);
+    const dreamerTaskId = `dreamer-${demoCandidateId}-prompt`;
+    const dreamerArtifactId = `pi-art-dreamer-demo-${runId}`;
+    await stateManager.createTask({ taskId: dreamerTaskId, taskKind: 'dreamer', status: 'succeeded', attemptCount: 0, maxAttempts: 1,
+      diagnosticJson: JSON.stringify({ candidateId: demoCandidateId, simulated: true }) });
+    await stateManager.piArtifactStore.createArtifact({ artifactId: dreamerArtifactId, artifactKind: 'principle', sourceTaskId: dreamerTaskId,
+      lineageArtifactIds: [], validationStatus: 'validated', contentJson: JSON.stringify({ origin: 'demo', simulated: true }), createdAt: principleRecord.createdAt, updatedAt: principleRecord.updatedAt });
+    const identityResolution = { candidateId: demoCandidateId, basis: 'derived_candidate', principleId: principleUuid };
+    const principleContent: unknown = JSON.parse(principleRecord.contentJson);
+    if (principleContent === null || typeof principleContent !== 'object' || Array.isArray(principleContent)) throw new Error('Invalid demo principle fixture');
+    principleRecord.lineageArtifactIds = [dreamerArtifactId];
+    principleRecord.contentJson = JSON.stringify({ ...principleContent, sourceTrace: { dreamerArtifactId }, identityResolution });
     const ruleRecord = makeRuleArtifactRecord(runId, principleRecord);
+    const ruleContent: unknown = JSON.parse(ruleRecord.contentJson);
+    if (ruleContent === null || typeof ruleContent !== 'object' || Array.isArray(ruleContent)) throw new Error('Invalid demo rule fixture');
+    ruleRecord.lineageArtifactIds.push(dreamerArtifactId);
+    ruleRecord.contentJson = JSON.stringify({ ...ruleContent, sourceTrace: { dreamerArtifactId, scribeArtifactId: principleRecord.artifactId }, identityResolution });
     // P1-3: Seed parent task record for FK validation. Both demo artifacts share
     // sourceTaskId = `task-demo-${runId}`; createArtifact rejects it unless the
     // task exists in the tasks table (ERR-009/ERR-010/ERR-002).
