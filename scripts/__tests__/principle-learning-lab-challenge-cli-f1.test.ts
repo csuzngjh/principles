@@ -344,3 +344,18 @@ describe('D. authorization-bound F1 transport selection', () => {
     expect(r2.out).toContain('no F1 transport wiring is registered');
   });
 });
+
+
+describe('D3: deepseek-v4.1-flash-1017 authorization selects the round7-verified Shuxi wiring (dry-run, zero network)', () => {
+  it('selects the deepseek transport and verifies the plan', () => {
+    const dir = copyStudy('deepseek-dry');
+    approveF1(dir, { requestedActorIdentity: 'deepseek-v4.1-flash-1017' });
+    const before = ledgerFingerprint(dir);
+    const r = runCli(['--execution-mode', 'F1-direct-model', '--now', NOW, '--dry-run'], dir);
+    expect(r.status).toBe(0);
+    expect(r.out).toContain('authorizedModel=deepseek-v4.1-flash-1017');
+    expect(r.out).toContain('transport = Shuxi intern-ai-discovery (deepseek-v4.1-flash-1017, no reasoning_effort)');
+    expect(r.out).toContain('DRY-RUN OK');
+    expect(ledgerFingerprint(dir)).toBe(before);
+  });
+});

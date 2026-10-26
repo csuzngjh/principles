@@ -179,6 +179,16 @@ try {
         reasoningEffort: null,
       });
       console.log('run-challenge-study: transport = Shuxi intern-ai-discovery (Atria-Dawn, no reasoning_effort)');
+    } else if (identity === 'deepseek-v4.1-flash-1017') {
+      // Shuxi intern-ai-discovery, Stage G round7-verified wiring (12/12 valid
+      // candidates): standard content layout, NO reasoning_effort.
+      responderFactory = () => createAmdActorResponder({
+        baseUrl: INTERN_S2_BASE_URL,
+        modelId: 'deepseek-v4.1-flash-1017',
+        apiKeyProvider: resolveInternS2ApiKey,
+        reasoningEffort: null,
+      });
+      console.log('run-challenge-study: transport = Shuxi intern-ai-discovery (deepseek-v4.1-flash-1017, no reasoning_effort)');
     } else {
       console.error(`run-challenge-study: no F1 transport wiring is registered for requestedActorIdentity '${String(identity)}' — refusing (fail-closed; never guess a provider)`);
       process.exit(1);
