@@ -27,6 +27,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import https from 'node:https';
+import { performance } from 'node:perf_hooks';
 
 export const AMD_PROVIDER_ID = 'amd-radeon-tokenfactory';
 export const AMD_BASE_URL = 'https://developer.amd.com.cn/radeon/api/v1';
@@ -47,7 +48,7 @@ export const AMD_GENERATION_BUDGET = {
 export const AMD_TRANSPORT_TIMEOUTS = {
   requestTimeoutMs: 240_000,
   connectTimeoutMs: 15_000,
-  note: 'node:https 强制 HTTP/1.1（2026-10-25 根因修复：undici 全局 fetch 对该网关协商 HTTP/2，5KB body 挂死 300s headers-timeout/偶发 403——round1 全轮因此作废）。connectTimeoutMs 以 socket 早段近似（中止标记 connect_or_early，仍按 ambiguous→RESULT_UNKNOWN 处理）；requestTimeoutMs 覆盖整体。免费层慢响应实测样本 104.6~106.9s，240s 提供余量。',
+  note: 'node:https 强制 HTTP/1.1（2026-10-25 根因修复：undici 全局 fetch 对该网关协商 HTTP/2，5KB body 挂死 300s headers-timeout/偶发 403——round1 全轮因此作废）。connectTimeoutMs 以 socket 早段近似（中止标记 connect_or_early，仍按 ambiguous→RESULT_UNKNOWN 处理）。**requestTimeoutMs 的真实语义是 SOCKET INACTIVITY 超时（req.setTimeout：无数据流动才计时），不是严格的墙钟总历时 deadline——慢速持续流动的响应可以合法超过该值**（timing 遥测提供各阶段实测时长弥补此模糊性）。免费层慢响应实测样本 104.6~106.9s，240s 提供余量。',
 };
 /** Catalog-declared parameters (2026-10-25): temperature, max_tokens, top_p,
  *  stream, response_format, tools, tool_choice — reasoning_effort is NOT
@@ -158,6 +159,13 @@ export function buildAmdRequestBody({ constrainedInput, perRequestCandidateCap, 
  * Two-phase timeouts: connect/early (socket idle before response) and total.
  * Returns { status, headers:{get}, text }.
  */
+/** Response-stage telemetry (PRI-1037-adjacent observability, timing PR):
+ *  distinguishes "no response headers yet" from "headers but no body bytes"
+ *  from "body streaming/completed" — the 240s total timeouts observed in the
+ *  F1 round-1 run were indistinguishable under the old two-phase poster.
+ *  Durations use the MONOTONIC clock (performance.now deltas — immune to
+ *  wall-clock changes); requestStartedAt is UTC wall time ONLY for
+ *  cross-run correlation. Stages never observed stay null — never zeroed. */
 export function createDefaultHttpsPoster({ connectTimeoutMs = AMD_TRANSPORT_TIMEOUTS.connectTimeoutMs, requestTimeoutMs = AMD_TRANSPORT_TIMEOUTS.requestTimeoutMs } = {}) {  return function httpsPoster(url, { headers, body }) {
     return new Promise((resolve, reject) => {
       let u;
@@ -167,10 +175,19 @@ export function createDefaultHttpsPoster({ connectTimeoutMs = AMD_TRANSPORT_TIME
         reject(e); // beforeSend-tagged by the guard — refused before any dispatch
         return;
       }
-      let gotResponse = false;
+      const startedMono = performance.now();
+      let gotResponse = false; // connect-watchdog disarm flag (headers arrived)
+      const timing = {
+        requestStartedAt: new Date().toISOString(), // wall clock — correlation only
+        responseHeadersReceivedMs: null,
+        firstBodyByteReceivedMs: null,
+        responseBodyCompletedMs: null,
+        responseStageAtFailure: 'awaiting_headers', // pre-dispatch failures are classified at reject time below
+      };
       const fail = (message, ambiguous) => {
         const err = new Error(message);
         if (ambiguous) err.ambiguous = true; // dispatched but unresolved — caller must settle RESULT_UNKNOWN
+        err.timing = { ...timing, responseStageAtFailure: timing.responseStageAtFailure };
         reject(err);
         return err;
       };
@@ -178,20 +195,43 @@ export function createDefaultHttpsPoster({ connectTimeoutMs = AMD_TRANSPORT_TIME
         { hostname: u.hostname, port: 443, path: u.pathname + u.search, method: 'POST', headers },
         (res) => {
           gotResponse = true;
+          timing.responseHeadersReceivedMs = Math.round(performance.now() - startedMono);
+          timing.responseStageAtFailure = 'awaiting_body';
           let data = '';
           res.setEncoding('utf8');
-          res.on('data', (d) => { data += d; });
-          res.on('end', () => resolve({ status: res.statusCode, headers: { get: (n) => res.headers[String(n).toLowerCase()] ?? null }, text: async () => data }));
+          res.on('data', (d) => {
+            if (timing.firstBodyByteReceivedMs === null) {
+              timing.firstBodyByteReceivedMs = Math.round(performance.now() - startedMono);
+              timing.responseStageAtFailure = 'body_read';
+            }
+            data += d;
+          });
+          res.on('end', () => {
+            timing.responseBodyCompletedMs = Math.round(performance.now() - startedMono);
+            timing.responseStageAtFailure = 'completed';
+            resolve({
+              status: res.statusCode,
+              headers: { get: (n) => res.headers[String(n).toLowerCase()] ?? null },
+              text: async () => data,
+              timing: { ...timing },
+            });
+          });
         },
       );
-      req.setTimeout(requestTimeoutMs, () => req.destroy(fail(`request timeout after ${requestTimeoutMs}ms (total)`, true)));
+      req.setTimeout(requestTimeoutMs, () => req.destroy(fail(`request timeout after ${requestTimeoutMs}ms (socket inactivity — no data flow)`, true)));
       req.on('socket', (s) => {
         s.setTimeout(connectTimeoutMs, () => {
           if (!gotResponse) req.destroy(fail(`connect/early timeout after ${connectTimeoutMs}ms`, true));
           s.setTimeout(0);
         });
       });
-      req.on('error', (e) => reject(e));
+      req.on('error', (e) => {
+        // socket-level error mid-flight: keep whatever stages were observed
+        const err = new Error(e?.message ?? String(e));
+        err.ambiguous = true; // dispatched — outcome unknowable
+        err.timing = { ...timing };
+        reject(err);
+      });
       req.write(body);
       req.end();
     });

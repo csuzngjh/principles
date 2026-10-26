@@ -191,6 +191,106 @@ function verifyInstalledRuntime(runtimeDir, pins) {
   return { ok: mismatched.length === 0, installed, mismatched };
 }
 
+/** Discard the installed runtime TREE so a retried install starts from a clean
+ *  slate, keeping the runtime `package.json` npm needs. PRI-1046 follow-up:
+ *  npm 11 can log `placeDep … REPLACE` + `REMOVE node_modules/…` and still exit
+ *  0, and the only recovery offered before was hand-deleting node_modules.
+ *  Returns { ok, removed } or { ok: false, reason, removed }. */
+function resetInstalledRuntime(runtimeDir) {
+  const removed = [];
+  for (const name of ['node_modules', 'package-lock.json']) {
+    const target = path.join(runtimeDir, name);
+    if (!fs.existsSync(target)) continue;
+    try {
+      // Windows can hold a just-exited npm's handles for a moment; retries are
+      // cheap and the alternative is an unexplained EBUSY.
+      fs.rmSync(target, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 });
+    } catch (error) {
+      return { ok: false, reason: `${name}:${error?.code ?? error?.message ?? 'unknown'}`, removed };
+    }
+    removed.push(name);
+  }
+  return { ok: true, removed };
+}
+
+/** One TOML string value, or undefined when the bytes are not one. Codex
+ *  writes local sources as literal (single-quoted) strings so Windows
+ *  backslashes stay literal. rc-1: the file is user-edited, so an unparsable
+ *  value is reported as unknown instead of being guessed at. */
+function parseTomlString(raw) {
+  const literal = /^'([^']*)'\s*(?:#.*)?$/.exec(raw.trim());
+  if (literal) return literal[1];
+  const basic = /^"((?:[^"\\]|\\.)*)"\s*(?:#.*)?$/.exec(raw.trim());
+  if (!basic) return undefined;
+  try { return JSON.parse(`"${basic[1]}"`); } catch { return undefined; }
+}
+
+/** `[marketplaces.<name>]` tables from Codex's config.toml, keyed by name, as
+ *  { sourceType, source }. Hand-rolled: the plugin ships zero dependencies and
+ *  only these two keys are needed. Returns undefined when the file is
+ *  unreadable so callers can report "unverifiable" rather than "absent". */
+function readMarketplaceSources(configPath) {
+  let raw;
+  try { raw = fs.readFileSync(configPath, 'utf8'); } catch { return undefined; }
+  const out = new Map();
+  let current;
+  for (const line of raw.split(/\r?\n/)) {
+    const header = /^\s*\[\s*marketplaces\.(?:"([^"]+)"|'([^']+)'|([A-Za-z0-9_-]+))\s*\]\s*(?:#.*)?$/.exec(line);
+    if (header) {
+      current = { sourceType: undefined, source: undefined };
+      out.set(header[1] ?? header[2] ?? header[3], current);
+      continue;
+    }
+    if (/^\s*\[/.test(line)) { current = undefined; continue; }
+    if (!current) continue;
+    const entry = /^\s*"?\s*(source_type|source)\s*"?\s*=\s*(.*)$/.exec(line);
+    if (!entry) continue;
+    const value = parseTomlString(entry[2]);
+    if (value === undefined) continue;
+    if (entry[1] === 'source_type') current.sourceType = value;
+    else current.source = value;
+  }
+  return out;
+}
+
+/** Compare an installed plugin cache root against the marketplace source that
+ *  Codex is configured to install from.
+ *
+ *  Why: the pins and scripts that `pd-setup`/`pd-status` read come from the
+ *  LOCATED cache root, so an old snapshot is self-consistent — it reports
+ *  "pinned match" forever while the source already ships a newer plugin. That
+ *  is how a stale snapshot survived a whole release cycle on-device.
+ *
+ *  Returns { ok: true, marketplace, source, sourceType, installedVersion,
+ *  sourceVersion } or { ok: false, reason } — `ok: false` means UNVERIFIABLE
+ *  (remote/absent marketplace source, cache root supplied explicitly, ...),
+ *  never "stale" (rc-9: the caller reports the reason, it does not guess). */
+function resolvePluginSourceSnapshot(pluginRoot) {
+  const segments = path.relative(path.join(codexDir(), 'plugins', 'cache'), pluginRoot).split(/[\\/]/);
+  if (segments.length !== 3 || segments[0] === '..' || path.isAbsolute(segments[0]) || segments[1] !== 'principles-disciple') {
+    return { ok: false, reason: 'plugin_root_outside_cache' };
+  }
+  const [marketplaceName, , installedVersion] = segments;
+  const marketplaces = readMarketplaceSources(path.join(codexDir(), 'config.toml'));
+  if (!marketplaces) return { ok: false, reason: 'codex_config_unreadable' };
+  const marketplace = marketplaces.get(marketplaceName);
+  if (!marketplace) return { ok: false, reason: `marketplace_not_configured:${marketplaceName}` };
+  // A local marketplace with no source path is broken state, not "not
+  // applicable": collapsing the two let a damaged config.toml read as healthy.
+  if (marketplace.sourceType !== 'local') {
+    return { ok: false, reason: `marketplace_source_not_local:${marketplace.sourceType ?? 'unknown'}` };
+  }
+  if (!marketplace.source) return { ok: false, reason: 'marketplace_source_missing' };
+  let sourcePlugin;
+  try { sourcePlugin = JSON.parse(fs.readFileSync(path.join(marketplace.source, '.codex-plugin', 'plugin.json'), 'utf8')); }
+  catch { return { ok: false, reason: 'source_plugin_json_unreadable' }; }
+  if (typeof sourcePlugin?.version !== 'string') return { ok: false, reason: 'source_plugin_version_invalid' };
+  return {
+    ok: true, marketplace: marketplaceName, source: marketplace.source, sourceType: 'local',
+    installedVersion, sourceVersion: sourcePlugin.version,
+  };
+}
+
 /** An initialized user workspace takes precedence; otherwise use the nearest project. */
 function locateWorkspace(startDir) {
   const userWorkspace = path.join(codexDir(), 'pd-workspace');
@@ -305,7 +405,10 @@ module.exports = {
   pdEntryFromPath,
   pdEntryFromShimLines,
   readInstalledRuntimeVersions,
+  readMarketplaceSources,
   requireFlagValue,
+  resetInstalledRuntime,
+  resolvePluginSourceSnapshot,
   verifyInstalledRuntime,
 };
 
