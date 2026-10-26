@@ -48,7 +48,7 @@ export const AMD_GENERATION_BUDGET = {
 export const AMD_TRANSPORT_TIMEOUTS = {
   requestTimeoutMs: 240_000,
   connectTimeoutMs: 15_000,
-  note: 'node:https 强制 HTTP/1.1（2026-10-25 根因修复：undici 全局 fetch 对该网关协商 HTTP/2，5KB body 挂死 300s headers-timeout/偶发 403——round1 全轮因此作废）。connectTimeoutMs 以 socket 早段近似（中止标记 connect_or_early，仍按 ambiguous→RESULT_UNKNOWN 处理）；requestTimeoutMs 覆盖整体。免费层慢响应实测样本 104.6~106.9s，240s 提供余量。',
+  note: 'node:https 强制 HTTP/1.1（2026-10-25 根因修复：undici 全局 fetch 对该网关协商 HTTP/2，5KB body 挂死 300s headers-timeout/偶发 403——round1 全轮因此作废）。connectTimeoutMs 以 socket 早段近似（中止标记 connect_or_early，仍按 ambiguous→RESULT_UNKNOWN 处理）。**requestTimeoutMs 的真实语义是 SOCKET INACTIVITY 超时（req.setTimeout：无数据流动才计时），不是严格的墙钟总历时 deadline——慢速持续流动的响应可以合法超过该值**（timing 遥测提供各阶段实测时长弥补此模糊性）。免费层慢响应实测样本 104.6~106.9s，240s 提供余量。',
 };
 /** Catalog-declared parameters (2026-10-25): temperature, max_tokens, top_p,
  *  stream, response_format, tools, tool_choice — reasoning_effort is NOT
@@ -218,7 +218,7 @@ export function createDefaultHttpsPoster({ connectTimeoutMs = AMD_TRANSPORT_TIME
           });
         },
       );
-      req.setTimeout(requestTimeoutMs, () => req.destroy(fail(`request timeout after ${requestTimeoutMs}ms (total)`, true)));
+      req.setTimeout(requestTimeoutMs, () => req.destroy(fail(`request timeout after ${requestTimeoutMs}ms (socket inactivity — no data flow)`, true)));
       req.on('socket', (s) => {
         s.setTimeout(connectTimeoutMs, () => {
           if (!gotResponse) req.destroy(fail(`connect/early timeout after ${connectTimeoutMs}ms`, true));

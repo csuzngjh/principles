@@ -759,9 +759,6 @@ describe('F. boundaries and protected state', () => {
 // G. response timing telemetry (injected posters/doubles — zero network)
 // ===========================================================================
 describe('G. response timing telemetry', () => {
-  /** A fake poster whose reply carries realistic stage telemetry. */
-  const timingPoster = (timing: any, status = 200, body = '{}') => async () => ({ status, headers: { get: () => null }, text: async () => body, timing });
-
   it('G1: a successful round records timing with ordered monotone stages end-to-end into the attempt record', async () => {
     const dir = copyStudy('timing-ok');
     approveStudy(dir, validStageRAuth());
@@ -836,11 +833,12 @@ describe('G. response timing telemetry', () => {
     expect(attempt.actorRounds[0]).toMatchObject({ ok: false, timing: { responseHeadersReceivedMs: 1500, firstBodyByteReceivedMs: null, responseStageAtFailure: 'awaiting_body' } });
     const ledger = createChallengeLedger(dir);
     expect(ledger.budgetEntries().filter((e: any) => e.type === 'RESERVE')).toHaveLength(1); // no retry, no refund
-    expect(ledger.eventEntries().some((e: any) => e.reason === 'result_unknown_no_auto_retry') || true).toBe(true);
+    // the settled unknown is a real ATTEMPT_RESULT row with stage evidence on the attempt file — not a vacuous assertion
+    expect(ledger.budgetEntries().some((e: any) => e.type === 'ATTEMPT_RESULT' && e.result === 'RESULT_UNKNOWN')).toBe(true);
+    expect(attempt.actorRounds[0].timing.responseStageAtFailure).toBe('awaiting_body');
   });
 
   it('G4: a beforeSend refusal (never dispatched) produces NO timing anywhere — unobserved stages stay absent, never zeroed', async () => {
-    const dir = copyStudy('timing-beforesend');
     const responder = createAmdActorResponder({
       posterImpl: async () => { throw new Error('must not be called'); },
       apiKeyProvider: () => { throw Object.assign(new Error('no credential'), { beforeSend: true }); },
