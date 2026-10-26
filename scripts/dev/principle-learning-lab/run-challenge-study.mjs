@@ -60,6 +60,10 @@ if (executionMode === 'F2-real-host') {
 }
 const dryRun = process.argv.includes('--dry-run');
 const arms = (arg('--arms', 'A,B,C') || '').split(',').map((s) => s.trim()).filter(Boolean);
+// Optional case subset — same contract as --arms: the value list (and its
+// ORDER) defines the run plan; the gate still enforces plan ⊆ authorization.
+const casesArg = arg('--cases');
+const casesFilter = casesArg !== undefined ? (casesArg || '').split(',').map((s) => s.trim()).filter(Boolean) : null;
 const maxAttemptsTotal = Number(arg('--max-attempts', '40'));
 const owner = arg('--owner', 'challenge-runner-cli');
 
@@ -118,7 +122,16 @@ const resolved = path.resolve(process.cwd(), studyDir);
  *  Stage R authorization gate. READ-ONLY — no ledger writes, no actor, no
  *  network. Returns the verified plan descriptor or exits non-stop. */
 function verifyPlan(frozen, armCheck) {
-  const cases = frozen.manifest.cases.map((c) => c.caseId);
+  const manifestCaseIds = frozen.manifest.cases.map((c) => c.caseId);
+  let cases = manifestCaseIds;
+  if (casesFilter !== null) {
+    const unknown = casesFilter.filter((c) => !manifestCaseIds.includes(c));
+    if (unknown.length > 0) {
+      console.error(`run-challenge-study: --cases contains non-frozen case(s): ${unknown.join(', ')} (frozen: ${manifestCaseIds.join(', ')})`);
+      process.exit(1);
+    }
+    cases = casesFilter; // caller order is the loop order (e.g. deepest-context unit first)
+  }
   const plan = { arms, cases, repetitions: [1] };
   const units = arms.length * cases.length;
   if (executionMode === 'offline-stub') {
@@ -243,7 +256,7 @@ try {
     actorFactory,
     maxAttemptsTotal,
     owner,
-    ...(executionMode === 'offline-stub' ? {} : { execution: { mode: executionMode, now: () => Date.now() } }),
+    ...(executionMode === 'offline-stub' ? {} : { execution: { mode: executionMode, now: () => Date.now(), requestTimeoutMs } }),
   });
 
   const counts = {};
