@@ -308,6 +308,7 @@ export async function runChallengeStudy({
               maxAttemptsTotal,
               now: typeof execution.now === 'function' ? execution.now() : execution.now,
               declaredExecutionMode: declaredMode,
+              declaredRequestTimeoutMs: execution.requestTimeoutMs, // undefined = default 240000 (the gate enforces the authorization binding)
             });
             if (!gate.ok) {
               ledger.appendEvent({ type: 'UNIT_REFUSED', unit, reason: 'stage_r_not_authorized', detail: gate.reasons });
