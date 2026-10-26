@@ -555,6 +555,159 @@ describe('installed runtime bytes against the pins (pd-locate, PRI-1046)', () =>
   }, 60_000);
 });
 
+describe('installed snapshot freshness and runtime reset (pd-locate/pd-status, PRI-1046 follow-up)', () => {
+  type Pins = { codexAdapter: string; hostRuntime: string; core: string };
+
+  async function loadLocate() {
+    const { createRequire } = await import('node:module');
+    const req = createRequire(import.meta.url);
+    return req(path.join(pluginDir, 'scripts', 'pd-locate.cjs')) as {
+      resetInstalledRuntime: (runtimeDir: string) => { ok: boolean; removed: string[]; reason?: string };
+      resolvePluginSourceSnapshot: (pluginRoot: string) => {
+        ok: boolean; reason?: string; marketplace?: string; source?: string;
+        installedVersion?: string; sourceVersion?: string;
+      };
+    };
+  }
+
+  /** Real Codex install layout + a `[marketplaces.<name>]` table, exactly as
+   * Codex writes it: a literal (single-quoted) local path, or a basic
+   * (double-quoted) string whose backslashes are escaped. */
+  function seedMarketplace(options: { installed: string; source?: string; sourceType?: string; quote?: 'literal' | 'basic'; omitSource?: boolean }) {
+    const home = tempDir('pd-marketplace-');
+    const codexHome = path.join(home, '.codex');
+    const root = path.join(codexHome, 'plugins', 'cache', 'principles', 'principles-disciple', options.installed);
+    fs.mkdirSync(path.join(root, '.codex-plugin'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.codex-plugin', 'plugin.json'), JSON.stringify({ name: 'principles-disciple', version: options.installed }), 'utf8');
+    // The pins ship with the snapshot, which is exactly why a stale snapshot is
+    // self-consistent: it must be caught by comparing with the SOURCE.
+    fs.copyFileSync(path.join(pluginDir, 'runtime-version.json'), path.join(root, 'runtime-version.json'));
+    const sourceDir = path.join(home, 'marketplace-source');
+    fs.mkdirSync(path.join(sourceDir, '.codex-plugin'), { recursive: true });
+    if (options.source !== undefined) {
+      fs.writeFileSync(path.join(sourceDir, '.codex-plugin', 'plugin.json'), JSON.stringify({ name: 'principles-disciple', version: options.source }), 'utf8');
+    }
+    fs.mkdirSync(codexHome, { recursive: true });
+    fs.writeFileSync(path.join(codexHome, 'config.toml'), [
+      '[features]',
+      'hooks = true',
+      '',
+      '[marketplaces.principles]',
+      `source_type = "${options.sourceType ?? 'local'}"`,
+      ...(options.omitSource ? [] : [options.quote === 'basic' ? `source = ${JSON.stringify(sourceDir)}` : `source = '${sourceDir}'`]),
+      '',
+    ].join('\n'), 'utf8');
+    return { home, codexHome, root, sourceDir };
+  }
+
+  function seedPinnedRuntime(dataDir: string) {
+    const pins = JSON.parse(fs.readFileSync(path.join(pluginDir, 'runtime-version.json'), 'utf8')) as Pins;
+    for (const [name, version] of [['codex-adapter', pins.codexAdapter], ['host-runtime', pins.hostRuntime], ['core', pins.core]] as const) {
+      const packageDir = path.join(dataDir, 'runtime', 'node_modules', '@principles', name);
+      fs.mkdirSync(packageDir, { recursive: true });
+      fs.writeFileSync(path.join(packageDir, 'package.json'), JSON.stringify({ name: `@principles/${name}`, version }), 'utf8');
+    }
+  }
+
+  function statusReport(seeded: ReturnType<typeof seedMarketplace>) {
+    const workspace = tempDir('pd-marketplace-ws-');
+    fs.mkdirSync(path.join(workspace, '.pd'), { recursive: true });
+    fs.writeFileSync(path.join(workspace, '.pd', 'config.yaml'), JSON.stringify({ features: {} }), 'utf8');
+    const dataDir = tempDir('pd-marketplace-data-');
+    seedPinnedRuntime(dataDir);
+    const result = spawnSync(process.execPath, [path.join(pluginDir, 'scripts', 'pd-status.cjs'),
+      '--plugin-root', seeded.root, '--plugin-data', dataDir, '--workspace', workspace, '--json'],
+      {
+        cwd: workspace, encoding: 'utf8', timeout: 30_000,
+        env: { ...process.env, CODEX_HOME: seeded.codexHome, HOME: seeded.home, USERPROFILE: seeded.home },
+      });
+    const report = JSON.parse(result.stdout) as {
+      ok: boolean; checks: Array<{ name: string; state: string; detail?: string; nextAction?: string }>;
+    };
+    return { result, report, snapshot: report.checks.find((check) => check.name === 'snapshot') };
+  }
+
+  it('degrades when the installed snapshot is older than its marketplace source (numeric, not lexical, order)', async () => {
+    const stale = statusReport(seedMarketplace({ installed: '0.9.0', source: '0.10.0' }));
+    expect(stale.snapshot?.state).toBe('degraded');
+    expect(stale.snapshot?.detail).toContain('installed plugin 0.9.0 is older than its marketplace source 0.10.0');
+    expect(stale.snapshot?.nextAction).toContain('codex plugin remove principles-disciple@principles');
+    expect(stale.report.ok).toBe(false);
+    expect(stale.result.status).toBe(1);
+  }, 60_000);
+
+  it('stays healthy when the snapshot matches the source, or is newer than a source checkout that moved back', () => {
+    const fresh = statusReport(seedMarketplace({ installed: '0.2.5', source: '0.2.5', quote: 'basic' }));
+    expect(fresh.snapshot?.state).toBe('ok');
+    expect(fresh.snapshot?.detail).toContain('matches marketplace source');
+    expect(fresh.report.ok).toBe(true);
+    expect(fresh.result.status).toBe(0);
+
+    const ahead = statusReport(seedMarketplace({ installed: '0.2.6', source: '0.2.5' }));
+    expect(ahead.snapshot?.state).toBe('ok');
+    expect(ahead.snapshot?.detail).toContain('is newer than its marketplace source');
+  }, 90_000);
+
+  it('separates "nothing to compare" from "comparison blocked by broken state" (rc-9)', () => {
+    // A non-local marketplace has no checkout to diff against: not applicable.
+    const remote = statusReport(seedMarketplace({ installed: '0.2.1', source: '9.9.9', sourceType: 'git' }));
+    expect(remote.snapshot?.state).toBe('ok');
+    expect(remote.snapshot?.detail).toContain('not verifiable (marketplace_source_not_local:git)');
+
+    // A source checkout that was deleted freezes the cache with no other
+    // signal — the same "looks healthy while wrong" shape as a stale snapshot.
+    const brokenSource = statusReport(seedMarketplace({ installed: '0.2.1' }));
+    expect(brokenSource.snapshot?.state).toBe('degraded');
+    expect(brokenSource.snapshot?.detail).toContain('not verifiable (source_plugin_json_unreadable)');
+    expect(brokenSource.snapshot?.nextAction).toContain('Restore the marketplace source checkout');
+    expect(brokenSource.report.ok).toBe(false);
+
+    // A local marketplace entry with no source path is damaged config, never
+    // silently downgraded to "not applicable".
+    const sourceMissing = statusReport(seedMarketplace({ installed: '0.2.1', omitSource: true }));
+    expect(sourceMissing.snapshot?.state).toBe('degraded');
+    expect(sourceMissing.snapshot?.detail).toContain('not verifiable (marketplace_source_missing)');
+    expect(sourceMissing.snapshot?.nextAction).toContain('has no source path');
+  }, 120_000);
+
+  it('only compares cache roots and marketplace tables it can actually resolve', async () => {
+    const locate = await loadLocate();
+    expect(locate.resolvePluginSourceSnapshot(tempDir('pd-not-a-cache-'))).toEqual({ ok: false, reason: 'plugin_root_outside_cache' });
+
+    const seeded = seedMarketplace({ installed: '0.2.1', source: '0.2.5' });
+    const previous = process.env.CODEX_HOME;
+    vi.stubEnv('CODEX_HOME', seeded.codexHome);
+    try {
+      expect(locate.resolvePluginSourceSnapshot(seeded.root)).toMatchObject({
+        ok: true, marketplace: 'principles', source: seeded.sourceDir, installedVersion: '0.2.1', sourceVersion: '0.2.5',
+      });
+      // A marketplace the config never declared cannot be judged.
+      const unknown = path.join(seeded.codexHome, 'plugins', 'cache', 'elsewhere', 'principles-disciple', '0.2.1');
+      fs.mkdirSync(unknown, { recursive: true });
+      expect(locate.resolvePluginSourceSnapshot(unknown)).toEqual({ ok: false, reason: 'marketplace_not_configured:elsewhere' });
+    } finally {
+      if (previous === undefined) vi.stubEnv('CODEX_HOME', '');
+      else vi.stubEnv('CODEX_HOME', previous);
+    }
+  }, 60_000);
+
+  it('resets the installed tree but keeps the runtime package.json and marker', async () => {
+    const locate = await loadLocate();
+    const runtimeDir = tempDir('pd-runtime-reset-');
+    fs.mkdirSync(path.join(runtimeDir, 'node_modules', '@principles', 'core'), { recursive: true });
+    fs.writeFileSync(path.join(runtimeDir, 'package-lock.json'), '{}', 'utf8');
+    fs.writeFileSync(path.join(runtimeDir, 'package.json'), '{"name":"pd-plugin-runtime"}', 'utf8');
+    fs.writeFileSync(path.join(runtimeDir, '.pd-runtime.json'), '{}', 'utf8');
+    expect(locate.resetInstalledRuntime(runtimeDir)).toEqual({ ok: true, removed: ['node_modules', 'package-lock.json'] });
+    expect(fs.existsSync(path.join(runtimeDir, 'node_modules'))).toBe(false);
+    expect(fs.existsSync(path.join(runtimeDir, 'package-lock.json'))).toBe(false);
+    expect(fs.existsSync(path.join(runtimeDir, 'package.json'))).toBe(true);
+    expect(fs.existsSync(path.join(runtimeDir, '.pd-runtime.json'))).toBe(true);
+    // Idempotent: a second clean retry has nothing to remove.
+    expect(locate.resetInstalledRuntime(runtimeDir)).toEqual({ ok: true, removed: [] });
+  }, 60_000);
+});
+
 describe('first-run $pd-control setup (real user flow)', () => {
   it('creates the plugin data dir Codex never creates, and npm-installs the pinned runtime', async () => {
     // Codex 0.147 SETS PLUGIN_DATA for hooks but does NOT create the dir —

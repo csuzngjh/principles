@@ -373,3 +373,54 @@ describe('D4: glm-5.3-flash (Zhipu bigmodel coding) authorization selects the pa
     expect(ledgerFingerprint(dir)).toBe(before);
   });
 });
+
+// ===========================================================================
+// E. request-timeout authorization binding (--request-timeout-ms is NOT a
+//    free knob: the approved value lives in the authorization record)
+// ===========================================================================
+describe('E. request-timeout authorization binding', () => {
+  it('E1: default (no flag) keeps the 240000ms semantics — an authorization without requestTimeoutMs passes unchanged', () => {
+    const dir = copyStudy('timeout-default');
+    approveF1(dir); // no requestTimeoutMs field → default 240000 is the approved value
+    const before = ledgerFingerprint(dir);
+    const r = runCli(['--execution-mode', 'F1-direct-model', '--now', NOW, '--dry-run'], dir);
+    expect(r.status).toBe(0);
+    expect(r.out).toContain('DRY-RUN OK');
+    expect(ledgerFingerprint(dir)).toBe(before);
+  });
+
+  it('E2: an authorization that BINDS requestTimeoutMs=480000 accepts --request-timeout-ms 480000 (the 480s diagnostic path)', () => {
+    const dir = copyStudy('timeout-480');
+    approveF1(dir, { requestTimeoutMs: 480_000 });
+    const r = runCli(['--execution-mode', 'F1-direct-model', '--now', NOW, '--dry-run', '--request-timeout-ms', '480000'], dir);
+    expect(r.status).toBe(0);
+    expect(r.out).toContain('DRY-RUN OK');
+  });
+
+  it('E3: a bound authorization REFUSES a non-matching timeout declaration — approved value is machine-binding', () => {
+    const dir = copyStudy('timeout-mismatch');
+    approveF1(dir, { requestTimeoutMs: 480_000 });
+    const before = ledgerFingerprint(dir);
+    const r = runCli(['--execution-mode', 'F1-direct-model', '--now', NOW, '--dry-run', '--request-timeout-ms', '240000'], dir);
+    expect(r.status).toBe(1);
+    expect(r.out).toContain('does not match the runner-declared');
+    expect(ledgerFingerprint(dir)).toBe(before); // refused before any ledger write
+  });
+
+  it('E3: a NON-bound authorization refuses any non-default timeout declaration — the default is the only approved value', () => {
+    const dir = copyStudy('timeout-unbound');
+    approveF1(dir); // no requestTimeoutMs field
+    const r = runCli(['--execution-mode', 'F1-direct-model', '--now', NOW, '--dry-run', '--request-timeout-ms', '480000'], dir);
+    expect(r.status).toBe(1);
+    expect(r.out).toContain('the default 240000ms is the only approved value');
+  });
+
+  it('E3: invalid timeout values (non-integer, out-of-range) refuse at CLI argument validation', () => {
+    const dir = copyStudy('timeout-invalid');
+    for (const bad of ['abc', '59999', '600001', '240.5']) {
+      const r = runCli(['--execution-mode', 'F1-direct-model', '--now', NOW, '--dry-run', '--request-timeout-ms', bad], dir);
+      expect(r.status).toBe(1);
+      expect(r.out).toContain('must be an integer within [60000, 600000]');
+    }
+  });
+});

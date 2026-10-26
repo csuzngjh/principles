@@ -2,9 +2,10 @@
 /**
  * $pd-cli-operator — calm, actionable workspace + plugin health snapshot.
  *
- * Combines: plugin install, runtime install + pinned version match, Node
- * version, workspace resolution (nearest .pd/config.yaml), host.codex flag
- * state, Codex hook-trust detectability, and (when available) the existing
+ * Combines: plugin install + installed-snapshot freshness against its
+ * marketplace source, runtime install + pinned version match, Node version,
+ * workspace resolution (nearest .pd/config.yaml), host.codex flag state, Codex
+ * hook-trust detectability, and (when available) the existing
  * `pd health --host codex --json` output. Read-only: never mutates state
  * (cli-5). Every degraded field carries a reason + nextAction (cli-6).
  */
@@ -13,7 +14,7 @@
 const { spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { codexDir, locatePluginData, locatePluginRoot, locateWorkspace, pdCliCommand, readInstalledRuntimeVersions, requireFlagValue } = require('./pd-locate.cjs');
+const { codexDir, compareVersionDirs, locatePluginData, locatePluginRoot, locateWorkspace, pdCliCommand, readInstalledRuntimeVersions, requireFlagValue, resolvePluginSourceSnapshot } = require('./pd-locate.cjs');
 
 function parseArgs(argv) {
   const out = { pluginRoot: undefined, pluginData: undefined, workspace: undefined, json: false, pdHealth: false };
@@ -131,6 +132,18 @@ function detectHookTrust() {
   }
 }
 
+// Freshness comparison is possible only for a cache install backed by a local
+// marketplace source. These reasons mean "nothing to compare", not "unknown".
+const SNAPSHOT_NOT_APPLICABLE = /^(plugin_root_outside_cache|marketplace_source_not_local:)/;
+
+function snapshotRecovery(reason) {
+  if (reason === 'codex_config_unreadable') return 'Make ~/.codex/config.toml readable so the marketplace source can be compared, then re-run $pd-cli-operator.';
+  if (reason.startsWith('marketplace_not_configured:')) return 'The cache holds a plugin whose marketplace is no longer configured: re-add that marketplace, or remove the stale cache directory.';
+  if (reason === 'marketplace_source_missing') return 'Repair the local marketplace entry in ~/.codex/config.toml (it has no source path), then re-run $pd-cli-operator.';
+  if (reason === 'source_plugin_json_unreadable' || reason === 'source_plugin_version_invalid') return 'Restore the marketplace source checkout (~/.codex/config.toml points at one that no longer carries a readable .codex-plugin/plugin.json); reinstalling from it cannot work until then.';
+  return 'Reinstall the plugin from its marketplace source, then re-run $pd-cli-operator.';
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.error) { console.error(`[PD:status] reason=invalid_arguments detail=${args.error} nextAction=Supported: --plugin-root --plugin-data --workspace --json --pd-health`); process.exitCode = 1; return; }
@@ -149,6 +162,33 @@ function main() {
     push('plugin', 'ok', `principles-disciple@${version} at ${root.pluginRoot}`);
   } else {
     push('plugin', 'degraded', root.reason, root.nextAction);
+  }
+
+  // Every value below (pins, scripts) comes from the LOCATED cache root, so an
+  // old snapshot is self-consistent: it reports a healthy pinned match while
+  // the marketplace source already ships a newer plugin. Compare the two.
+  // Only two reasons are "not applicable" by design (an explicit --plugin-root,
+  // or a non-local marketplace); every other reason means unreadable state
+  // blocked the comparison, which is degraded — a deleted source checkout or
+  // a removed marketplace leaves the cache frozen with no other signal (rc-9).
+  if (root.ok) {
+    const snapshot = resolvePluginSourceSnapshot(root.pluginRoot);
+    const drift = snapshot.ok ? compareVersionDirs(snapshot.installedVersion, snapshot.sourceVersion) : 0;
+    if (!snapshot.ok) {
+      const detail = `installed snapshot freshness not verifiable (${snapshot.reason})`;
+      if (SNAPSHOT_NOT_APPLICABLE.test(snapshot.reason)) push('snapshot', 'ok', detail);
+      else push('snapshot', 'degraded', detail, snapshotRecovery(snapshot.reason));
+    } else if (drift < 0) {
+      push('snapshot', 'degraded',
+        `installed plugin ${snapshot.installedVersion} is older than its marketplace source ${snapshot.sourceVersion} (${snapshot.source})`,
+        `Reinstall from the source: codex plugin remove principles-disciple@${snapshot.marketplace} && codex plugin add principles-disciple@${snapshot.marketplace}`);
+    } else if (drift > 0) {
+      push('snapshot', 'ok', `plugin ${snapshot.installedVersion} is newer than its marketplace source ${snapshot.sourceVersion} (source checkout may be behind)`);
+    } else {
+      push('snapshot', 'ok', `plugin ${snapshot.installedVersion} matches marketplace source ${snapshot.source}`);
+    }
+  } else {
+    push('snapshot', 'ok', 'installed snapshot freshness not verifiable (plugin_root_not_located)');
   }
 
   const data = locatePluginData(args.pluginData);
