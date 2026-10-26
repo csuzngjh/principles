@@ -51,3 +51,11 @@ NEXT_ACTION:             将 60 RV 匿名包转交 ChatGPT AI-only 盲评 → �
 ## 8. 保护区（不得违反）
 
 冻结 CEB-001 题集/Gold/评分契约/冻结预注册与四哈希链；`generation/run-authorization.json` 保持 NOT_AUTHORIZED（fail-closed）；`realHostBaseline=UNKNOWN` 不得改 PASS；生产 DAG/RuleHost/激活/治理与生产数据库；PAHF 借鉴仅限离线测试思路；相关 Linear：PRI-1024（总）、PRI-1034/1035/1037；不建竞争性状态文档。
+
+## 9. Stage R 离线工程收口（2026-10-25 第四次增补，分支 ai/examiner-stage-r-readiness）
+
+- **交付**：`lib/challenge-stage-r-gate.mjs` + runner 接线。挑战研究的唯一 Actor 执行入口 `runChallengeStudy` 现在对**未声明为离线 stub 的 actor**（`isOfflineStubActor`：`offlineStub:true` 或 `kind` 以 `stub` 开头）在任何预算预留/PREPARED/actor 步骤**之前**强制过 `verifyStageRAuthorization`：绑定新复算的四哈希（studyId/suiteHash/mappingHash/graderHash/studyPlanHash）、计划包含于授权（臂/题/重复子集）、attemptCap、有效窗+撤销+halt（注入式可信时钟，now 缺失即拒）、F2-real-host 另需 PRI-1037 探针 PASSED 且 suiteHash 一致。此前 `run-authorization.json` 的 fail-closed 承诺仅为文字、无代码读取该文件（Stage G 侧早有 `verifyStageGAuthorization` 对应物）。
+- **记录语义**：真实模式 attempt 记 `mode: F1-direct-model | F2-real-host` + 授权链路（含 isolationAcceptance）+ `observedHostEvidence`（宿主自身事件流的会话/身份证据；测试替身恒 null）；stub 记录与 Phase 1B 逐字节同形。`deriveRealHostBaseline` 为唯一机器判定：PASS 仅出自 F2+探针 PASSED+宿主证据+≥1 SUCCEEDED；offline-stub/F1/纯接线证据永不 PASS。
+- **测试**：`__tests__/principle-learning-lab-challenge-stager.test.ts` 30 项（活体占位拒真/过期撤销/零副作用[零 RESERVE/零 actor 步/零 attempt 文件]/无旁路[STUB_STRATEGIES 全 stub 钉死]/崩溃恢复状态机不自动重试/mock 永不升格 realHostBaseline/静态无网络证明/保护态断言）；13 个 learning-lab 套件（含新增 stager）374 项全绿；`freeze --verify` 四哈希不变。1B fi8 注入点随门时序移至首个 actor 步（可观察契约不变：单元间漂移→下一单元拒）。
+- **状态不变**：Stage R=NOT_AUTHORIZED、realHostBaseline=UNKNOWN、PRI-1037=NOT_RUN、真实宿主 0、真实模型请求 0、生产写入 0。
+- **进入真实宿主验证仍缺的硬条件**（全部在 Owner/真实环境侧）：① Owner 签发 Stage R 授权（challenge-stage-authorization.v1 APPROVED，闭键集，门按需显式演进）；② 真实 Actor 传输/宿主适配器实现（现为测试替身，含 observedHostEvidence 产出的接线）；③ PRI-1037 真实宿主隔离探针执行并通过（F2 硬前置）；④ Stage G 盲评与研究结论收口（属 Stage G 流程）。

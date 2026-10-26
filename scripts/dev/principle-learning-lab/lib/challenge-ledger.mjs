@@ -144,6 +144,29 @@ export function createChallengeLedger(studyDir) {
       return { ok: true, alreadyReserved: false, seq, used: used + 1 };
     },
 
+    /** Reserve ONE real model request (real-mode actors may answer over many
+     *  requests per attempt — the attempt cap is NOT a request budget). Same
+     *  ledger, same file, same discipline as reserveAttempt: idempotent by
+     *  the caller's deterministic key (a re-reserve of the same step never
+     *  double-charges), refusal appends a REQUEST_REFUSED audit row and
+     *  commits nothing, and reservations are never returned (a request that
+     *  was dispatched but never answered keeps its slot — RESULT_UNKNOWN
+     *  semantics, no auto-retry). */
+    reserveModelRequest({ key, unit, maxRequestsTotal, reason }) {
+      if (typeof key !== 'string' || key.length === 0) throw new Error('reserveModelRequest: key required (deterministic per attempt+step)');
+      const { entries } = readBudget();
+      const existing = entries.filter((e) => e.type === 'REQUEST_RESERVE' && e.key === key);
+      const used = entries.filter((e) => e.type === 'REQUEST_RESERVE').length;
+      if (existing.length > 0) return { ok: true, alreadyReserved: true, seq: existing[0].seq, used };
+      if (used + 1 > maxRequestsTotal) {
+        append(paths.budget, { seq: entries.length + 1, type: 'REQUEST_REFUSED', key, unit, used, cap: maxRequestsTotal, reason });
+        return { ok: false, code: 'request_budget_exhausted', used, cap: maxRequestsTotal, reason: 'model-request budget exhausted before dispatch — the request was NOT sent' };
+      }
+      const seq = entries.length + 1;
+      append(paths.budget, { seq, type: 'REQUEST_RESERVE', key, unit, amount: 1, reason });
+      return { ok: true, alreadyReserved: false, seq, used: used + 1 };
+    },
+
     markPrepared(unit) {
       const { entries } = readBudget();
       if (!entries.some((e) => e.type === 'ATTEMPT_PREPARED' && sameUnit(e.unit, unit))) {

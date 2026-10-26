@@ -1,5 +1,5 @@
-// SPEC-PD-EXAMINER-001 v0.3 — Phase 1B serial research Runner for challenge
-// studies (OFFLINE STUB ONLY: no transport, no network, no DB, no clock).
+// SPEC-PD-EXAMINER-001 v0.3/v0.4 — Phase 1B serial research Runner for
+// challenge studies (offline stub execution has no transport/network/DB/clock).
 //
 // Golden path per SPEC §2.3: frozen suite → actor input → legal actions →
 // oracle observations → actor report → ActorTraceV1 → deterministic scoring →
@@ -13,6 +13,23 @@
 //   attemptId; recovery of that attempt is refused; only a NEW attemptId may
 //   be reserved. A simulated crash also leaves the study writer lock held —
 //   recovery requires explicit release by the same owner.
+//
+// Stage R boundary (v0.4 §7.2, Stage R readiness): the execution mode is
+// RUNNER-CONTROLLED — declared once via `execution.mode` (one of
+// 'offline-stub' | 'F1-direct-model' | 'F2-real-host'), never derived from
+// actor self-report. An actor's own `offlineStub`/`kind` declaration is only
+// a SECONDARY consistency check: under a stub declaration a non-stub actor
+// refuses, and under a real declaration the actor must carry the matching
+// executionMode + the authorization-bound model identity. Real modes read
+// the AUTHORITATIVE authorization from the study's own
+// run-authorization.json (readStageRAuthorization — no caller-passed
+// in-memory authorization object exists on this path), and the gate runs
+// BEFORE the actor factory is ever invoked: a NOT_AUTHORIZED / expired /
+// revoked / probe-missing / mode-mismatched refusal constructs nothing,
+// reserves nothing and invokes no actor step. Real execution additionally
+// reserves ONE ledger slot per model REQUEST (auth.requestCap — an attempt
+// may span many requests; the attempt cap is not a request budget). Stub
+// execution keeps the historical Phase 1B contract unchanged.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -23,6 +40,7 @@ import { adjudicateClaimEvidence } from './claim-evidence-scorer.mjs';
 import { runControlledActorLoop, SimulatedCrashError, perfectPlayActor, createGreedyObserverStub, createNaiveStub } from './challenge-actor.mjs';
 import { acquireStudyWriteLock, releaseStudyWriteLock, createChallengeLedger } from './challenge-ledger.mjs';
 import { buildStudyArms, auditArmIsolation, composeArmPrompt } from './challenge-arms.mjs';
+import { verifyStageRAuthorization, isOfflineStubActor, readStudyPlanHash, readObservedHostEvidence, readStageRAuthorization } from './challenge-stage-r-gate.mjs';
 
 export class FrozenStudyDriftError extends Error {
   constructor(details) {
@@ -123,10 +141,13 @@ export const STUB_STRATEGIES = {
   naive: () => createNaiveStub(),
 };
 
+export const RUNNER_EXECUTION_MODES = ['offline-stub', 'F1-direct-model', 'F2-real-host'];
+
 /**
  * Serial study run. One writer (lock), one unit at a time, append-only
- * records. Each unit: verify frozen → classify recovery state → reserve →
- * prepare → execute loop → score → persist attempt atomically → settle.
+ * records. Each unit: verify frozen → classify recovery state → create actor
+ * (real actors gated BEFORE any budget mutation) → reserve → prepare →
+ * execute loop → score → persist attempt atomically → settle.
  */
 export function runChallengeStudy({
   studyDir,
@@ -135,7 +156,18 @@ export function runChallengeStudy({
   maxAttemptsTotal = 999,
   owner = 'challenge-runner',
   deps = {},
+  execution = null,
 }) {
+  const declaredMode = execution && execution.mode !== undefined ? execution.mode : 'offline-stub';
+  if (!RUNNER_EXECUTION_MODES.includes(declaredMode)) {
+    throw new Error(`runChallengeStudy: execution.mode must be one of ${RUNNER_EXECUTION_MODES.join(' | ')} (got '${String(declaredMode)}') — the runner, not the actor, declares the execution mode`);
+  }
+  const isRealMode = declaredMode !== 'offline-stub';
+  // P1-2: real execution reads the AUTHORITATIVE record from the study
+  // directory — the same run-authorization.json whose NOT_AUTHORIZED
+  // placeholder the gate enforces. Tests inject fixtures by writing this
+  // file inside a COPIED study dir; there is no in-memory override path.
+  const authorizationRecord = isRealMode ? readStageRAuthorization(studyDir) : null;
   const adjudicate = deps.adjudicate || adjudicateClaimEvidence;
   const ledger = createChallengeLedger(studyDir);
   const lock = acquireStudyWriteLock(studyDir, { owner });
@@ -160,6 +192,89 @@ export function runChallengeStudy({
             summary.units.push({ unit, state: 'RESULT_UNKNOWN', refused: true });
             continue;
           }
+
+          let caseDef;
+          let caseVisible;
+          try {
+            caseDef = readJson(path.join(studyDir, 'judge-only', `${caseId}.json`));
+            caseVisible = readJson(path.join(studyDir, 'actor-visible', `${caseId}.json`));
+          } catch (e) {
+            ledger.appendEvent({ type: 'UNIT_REFUSED', unit, reason: 'unit_inputs_unreadable', detail: e.message });
+            summary.units.push({ unit, state: 'SUITE_DRIFT', refused: true, detail: e.message });
+            continue;
+          }
+
+          // Stage R boundary (v0.4 §7.2): the runner-declared execution mode
+          // is authoritative and the gate runs BEFORE the actor factory is
+          // ever invoked — an unauthorized real run constructs no actor,
+          // reserves nothing and takes zero actor steps.
+          let gate = null;
+          if (isRealMode) {
+            let frozenBindings = null;
+            try {
+              const frozenForGate = verifyFrozenStudy(studyDir);
+              frozenBindings = {
+                studyId: frozenForGate.studyId,
+                suiteHash: frozenForGate.suiteHash,
+                mappingHash: frozenForGate.mappingHash,
+                graderHash: frozenForGate.graderHash,
+                studyPlanHash: readStudyPlanHash(studyDir),
+              };
+            } catch (e) {
+              gate = { ok: false, reasons: [`frozen_study_drift: ${e.message}`] };
+            }
+            if (frozenBindings) {
+              gate = verifyStageRAuthorization({
+                authorizationRecord,
+                bindings: frozenBindings,
+                plan,
+                maxAttemptsTotal,
+                now: execution.now,
+                declaredExecutionMode: declaredMode,
+              });
+            }
+            if (!gate.ok) {
+              ledger.appendEvent({ type: 'UNIT_REFUSED', unit, reason: 'stage_r_not_authorized', detail: gate.reasons });
+              summary.units.push({ unit, state: 'STAGE_R_REFUSED', refused: true, reasons: gate.reasons });
+              continue;
+            }
+          }
+          let actor;
+          try {
+            actor = actorFactory({ armId, caseId, caseDef, caseVisible });
+          } catch (e) {
+            ledger.appendEvent({ type: 'UNIT_REFUSED', unit, reason: 'actor_factory_error', detail: e.message });
+            summary.units.push({ unit, state: 'FAILED_KNOWN', refused: true, detail: `actor_factory_error: ${e.message}` });
+            continue;
+          }
+          // Mode consistency (P1-1/P1-5): the declared mode is the authority;
+          // the produced actor must agree. A real declaration refuses stub
+          // actors, executionMode mismatches and wiring whose requested model
+          // identity is not the authorization-bound actor identity; a stub
+          // declaration refuses anything that is not a declared stub. Actor
+          // self-declaration alone can never select the execution mode.
+          if (isRealMode) {
+            const modeReasons = [];
+            if (isOfflineStubActor(actor)) modeReasons.push('actor declares itself an offline stub under a real (F1/F2) execution declaration');
+            if (actor.executionMode !== declaredMode) modeReasons.push(`actor executionMode '${actor.executionMode ?? null}' does not match the runner-declared '${declaredMode}'`);
+            if (typeof actor.requestedModelIdentity !== 'string' || actor.requestedModelIdentity.length === 0) {
+              modeReasons.push('real actor must expose requestedModelIdentity (the model identity its wiring requests)');
+            } else if (actor.requestedModelIdentity !== authorizationRecord.requestedActorIdentity
+              && !actor.requestedModelIdentity.endsWith(`/${authorizationRecord.requestedActorIdentity}`)) {
+              modeReasons.push(`actor requestedModelIdentity '${actor.requestedModelIdentity}' is not the authorization-bound requestedActorIdentity '${authorizationRecord.requestedActorIdentity}'`);
+            }
+            if (modeReasons.length > 0) {
+              ledger.appendEvent({ type: 'UNIT_REFUSED', unit, reason: 'stage_r_mode_mismatch', detail: modeReasons });
+              summary.units.push({ unit, state: 'STAGE_R_REFUSED', refused: true, reasons: modeReasons });
+              continue;
+            }
+          } else if (!isOfflineStubActor(actor)) {
+            const reasons = ['runner declared offline-stub execution but the actorFactory produced a NON-stub actor — real execution requires execution.mode (F1-direct-model | F2-real-host) and an APPROVED run-authorization.json in the study directory'];
+            ledger.appendEvent({ type: 'UNIT_REFUSED', unit, reason: 'stage_r_not_authorized', detail: reasons });
+            summary.units.push({ unit, state: 'STAGE_R_REFUSED', refused: true, reasons });
+            continue;
+          }
+          const executionMode = isRealMode ? declaredMode : null;
           // NOT_STARTED or RESERVED_NOT_PREPARED (idempotent reservation)
           const reserve = ledger.reserveAttempt({ unit, maxAttemptsTotal, reason: `unit ${caseId}/${armId}/r${repetitionId}` });
           if (!reserve.ok) {
@@ -183,8 +298,6 @@ export function runChallengeStudy({
           ledger.markPrepared(unit);
           ledger.appendEvent({ type: 'UNIT_PREPARED', unit, suiteHash: frozen.suiteHash });
 
-          const caseDef = readJson(path.join(studyDir, 'judge-only', `${caseId}.json`));
-          const caseVisible = readJson(path.join(studyDir, 'actor-visible', `${caseId}.json`));
           const env = buildClaimEnvironment(caseDef);
           const runState = newClaimRunState(env);
           const arm = armCheck.arms[armId];
@@ -207,15 +320,46 @@ export function runChallengeStudy({
           };
           summary.studyId = frozen.studyId;
 
+          // Real-mode authorization linkage: echoed on EVERY attempt record
+          // (SUCCEEDED and FAILED_KNOWN alike) so the record itself proves
+          // which authorization produced it (probe evidence included for F2) —
+          // a failed real-host attempt is still real-host evidence and must not
+          // poison deriveRealHostBaseline as linkage-missing. Stub attempts
+          // stay byte-identical to the historical Phase 1B records — no extra
+          // fields.
+          const authorizationLinkage = executionMode ? {
+            schema: authorizationRecord.schema,
+            studyId: authorizationRecord.studyId,
+            suiteHash: authorizationRecord.suiteHash,
+            executionMode,
+            issuedBy: authorizationRecord.issuedBy,
+            isolationAcceptance: authorizationRecord.isolationAcceptance || null,
+          } : null;
+
+          // P1-7 request-level budget: real actors may answer over MANY model
+          // requests per attempt; each request reserves one ledger slot
+          // (auth.requestCap) BEFORE dispatch via the loop hook. A refusal
+          // never reaches the actor (the request is not sent), and dispatched
+          // but unanswered requests keep their slot (RESULT_UNKNOWN, no
+          // auto-retry). Stub runs pass no hook — zero behavioral change.
+          const reserveRequest = isRealMode
+            ? (step) => ledger.reserveModelRequest({
+              key: `${attemptId}:${caseId}/${armId}/r${repetitionId}:step${step}`,
+              unit,
+              maxRequestsTotal: gate.requestCap,
+              reason: `model request (unit ${caseId}/${armId}/r${repetitionId} step ${step})`,
+            })
+            : null;
+
           try {
-            const actor = actorFactory({ armId, caseId, caseDef, caseVisible });
-            const { trace } = runControlledActorLoop({ env, runState, caseVisible, actor, linkage });
+            const { trace } = runControlledActorLoop({ env, runState, caseVisible, actor, linkage, reserveRequest });
             const adjudication = adjudicate({ caseDef, runState });
 
             const attempt = {
               schema: 'challenge-attempt.v1',
               unit,
-              mode: 'offline-stub',
+              mode: executionMode || 'offline-stub',
+              ...(executionMode ? { authorization: authorizationLinkage, observedHostEvidence: readObservedHostEvidence(actor) } : {}),
               actorKind: trace.actorKind,
               frozenRefs: linkage,
               promptAudit: { armId, contentMode: arm.contentMode, payloadHash: arm.delivery.payloadHash, promptLength: prompt.length },
@@ -248,7 +392,14 @@ export function runChallengeStudy({
             ledger.markResult(unit, 'FAILED_KNOWN', failureDetail);
             const attemptDir = path.join(studyDir, 'runs', caseId, armId, `r${repetitionId}`);
             fs.mkdirSync(attemptDir, { recursive: true });
-            fs.writeFileSync(path.join(attemptDir, `${attemptId}.json`), `${JSON.stringify({ schema: 'challenge-attempt.v1', unit, mode: 'offline-stub', result: 'FAILED_KNOWN', error: failureDetail }, null, 2)}\n`, 'utf8');
+            fs.writeFileSync(path.join(attemptDir, `${attemptId}.json`), `${JSON.stringify({
+              schema: 'challenge-attempt.v1',
+              unit,
+              mode: executionMode || 'offline-stub',
+              ...(executionMode ? { authorization: authorizationLinkage, observedHostEvidence: readObservedHostEvidence(actor) } : {}),
+              result: 'FAILED_KNOWN',
+              error: failureDetail,
+            }, null, 2)}\n`, 'utf8');
             ledger.appendEvent({ type: 'UNIT_FINISHED', unit, result: 'FAILED_KNOWN', detail: failureDetail });
             summary.units.push({ unit, state: 'FAILED_KNOWN', detail: failureDetail });
           }
