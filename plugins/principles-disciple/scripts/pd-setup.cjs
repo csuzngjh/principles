@@ -30,7 +30,7 @@ const path = require('path');
 const os = require('os');
 const { pathToFileURL } = require('url');
 const readline = require('node:readline/promises');
-const { ensurePluginData, locatePluginRoot, locateWorkspace, pdCliCommand, requireFlagValue } = require('./pd-locate.cjs');
+const { ensurePluginData, locatePluginRoot, locateWorkspace, pdCliCommand, requireFlagValue, verifyInstalledRuntime } = require('./pd-locate.cjs');
 
 function fail(reason, nextAction) {
   console.error(`[PD:setup] status=failed reason=${reason}`);
@@ -187,6 +187,11 @@ async function main() {
       && marker.hostRuntime === desired.hostRuntime
       && marker.core === desired.core && !args.adapterSource && !args.hostRuntimeSource && !args.coreSource) installNeeded = false;
   } catch { /* no/broken marker → install */ }
+  // PRI-1046: a marker is a claim, not evidence. It used to be written from the
+  // desired pins without ever reading the installed bytes, so a silently
+  // incomplete install stayed short-circuited forever. A marker that disagrees
+  // with the bytes forces a reinstall instead of being trusted.
+  if (!installNeeded && !verifyInstalledRuntime(runtimeDir, desired).ok) installNeeded = true;
 
   if (installNeeded) {
     fs.mkdirSync(runtimeDir, { recursive: true });
@@ -194,7 +199,10 @@ async function main() {
     const install = runNpm(
       [
         'install', '--no-audit', '--no-fund', '--loglevel=error', '--omit=dev',
-        '--prefer-offline', '--fetch-retries=0', '--fetch-timeout=30000',
+        // PRI-1046: with a stale packument cache npm can drop an exact pin and
+        // still exit 0, so offline resolution must not win here. sync-plugin.mjs
+        // removed the same flag for the same reason.
+        '--fetch-retries=0', '--fetch-timeout=30000',
         ...(args.adapterSource || args.hostRuntimeSource || args.coreSource ? ['--install-links'] : []),
         args.adapterSource ? `file:${args.adapterSource}` : `@principles/codex-adapter@${desired.codexAdapter}`,
         args.hostRuntimeSource ? `file:${args.hostRuntimeSource}` : `@principles/host-runtime@${desired.hostRuntime}`,
@@ -209,7 +217,6 @@ async function main() {
       );
       return;
     }
-    fs.writeFileSync(markerPath, JSON.stringify({ ...desired, ...(args.adapterSource ? { adapterSource: args.adapterSource } : {}), ...(args.hostRuntimeSource ? { hostRuntimeSource: args.hostRuntimeSource } : {}), ...(args.coreSource ? { coreSource: args.coreSource } : {}), installedAt: new Date().toISOString() }, null, 2));
     adapterSource = args.adapterSource;
   }
 
@@ -218,6 +225,22 @@ async function main() {
   if (!fs.existsSync(adapterEntry)) {
     fail('runtime_install_incomplete', 'The adapter entry is missing after install. Re-run $pd-control setup; if it repeats, remove the plugin data dir and retry.');
     return;
+  }
+  // PRI-1046: existence is not identity. npm can report a successful install
+  // while leaving a package out of the top-level tree, so the pin counts as
+  // satisfied only when the installed manifests carry the pinned versions.
+  const verified = verifyInstalledRuntime(runtimeDir, desired);
+  if (!verified.ok) {
+    fail(
+      `runtime_pin_mismatch:${verified.mismatched.map((row) => `${row.packageName}@${row.installed}!=${row.pinned}`).join(',')}`,
+      'npm reported success but the pinned runtime is not installed. Remove the plugin data runtime dir, then re-run $pd-control setup.',
+    );
+    return;
+  }
+  // The marker is the short-circuit for every later run, so it may be written
+  // only after the bytes it claims were read and agreed (PRI-1046).
+  if (installNeeded) {
+    fs.writeFileSync(markerPath, JSON.stringify({ ...desired, ...(args.adapterSource ? { adapterSource: args.adapterSource } : {}), ...(args.hostRuntimeSource ? { hostRuntimeSource: args.hostRuntimeSource } : {}), ...(args.coreSource ? { coreSource: args.coreSource } : {}), installedAt: new Date().toISOString() }, null, 2));
   }
 
   // 3. Workspace init through the existing production command.

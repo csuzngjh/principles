@@ -13,7 +13,7 @@
 const { spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { codexDir, locatePluginData, locatePluginRoot, locateWorkspace, pdCliCommand, requireFlagValue } = require('./pd-locate.cjs');
+const { codexDir, locatePluginData, locatePluginRoot, locateWorkspace, pdCliCommand, readInstalledRuntimeVersions, requireFlagValue } = require('./pd-locate.cjs');
 
 function parseArgs(argv) {
   const out = { pluginRoot: undefined, pluginData: undefined, workspace: undefined, json: false, pdHealth: false };
@@ -35,15 +35,6 @@ function parseArgs(argv) {
     else return { error: `unknown_argument:${argv[i]}` };
   }
   return out;
-}
-
-function readInstalledVersion(runtimeDir, packageName) {
-  try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(runtimeDir, 'node_modules', packageName, 'package.json'), 'utf8'));
-    return typeof pkg.version === 'string' ? pkg.version : 'unknown';
-  } catch {
-    return 'not-installed';
-  }
 }
 
 /** Read host.codex.enabled from the workspace config. PD tooling writes both
@@ -167,9 +158,10 @@ function main() {
     if (root.ok) {
       try { pins = JSON.parse(fs.readFileSync(path.join(root.pluginRoot, 'runtime-version.json'), 'utf8')); } catch { /* pin check reported as unverified */ }
     }
-    const adapter = readInstalledVersion(runtimeDir, '@principles/codex-adapter');
-    const hostRuntime = readInstalledVersion(runtimeDir, '@principles/host-runtime');
-    const core = readInstalledVersion(runtimeDir, '@principles/core');
+    const installed = readInstalledRuntimeVersions(runtimeDir);
+    const adapter = installed.codexAdapter;
+    const hostRuntime = installed.hostRuntime;
+    const core = installed.core;
     if (adapter === 'not-installed') {
       push('runtime', 'degraded', 'runtime not installed in plugin data', 'Run the $pd-control setup skill to install the pinned runtime.');
     } else if (core === 'not-installed') {
