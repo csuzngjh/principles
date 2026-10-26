@@ -18,7 +18,7 @@ PowerShell:
     $pdCodexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE ".codex" }
     node (Get-ChildItem "$pdCodexHome\plugins\cache\*\principles-disciple\*\scripts\pd-locate.cjs" | Sort-Object { [version]$_.Directory.Parent.Name } | Select-Object -Last 1).FullName --exec scripts/pd-status.cjs -- --json
 
-This checks plugin/runtime installation, pinned runtime version, `host.codex`, Hook trust, and workspace resolution. The shipped locator resolves the plugin root once (newest installed version), reports marketplace ambiguity instead of guessing, and refuses to fall back to an older version when the newest install does not ship the target script. If the script cannot be found, report an installation problem; do not choose an arbitrary stale cache path.
+This checks plugin/runtime installation, installed-snapshot freshness against the marketplace source, pinned runtime version, `host.codex`, Hook trust, and workspace resolution. The shipped locator resolves the plugin root once (newest installed version), reports marketplace ambiguity instead of guessing, and refuses to fall back to an older version when the newest install does not ship the target script. If the script cannot be found, report an installation problem; do not choose an arbitrary stale cache path.
 
 ## 2. Query only the state needed
 

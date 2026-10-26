@@ -158,3 +158,64 @@ describe('pd-setup attests the installed runtime bytes', () => {
     expect(fs.readFileSync(path.join(runtime, '.pd-runtime.json'), 'utf8')).not.toContain('installedAt');
   });
 });
+
+// PRI-1046 follow-up: when npm exits 0 but leaves a tree the pins can never be
+// satisfied from, setup must repair once from a clean tree instead of handing
+// the Owner a nextAction that says "hand-delete node_modules".
+describe('pd-setup repairs a runtime tree npm claimed to install', () => {
+  type Pins = { codexAdapter: string; hostRuntime: string; core: string };
+
+  /** The three local packages `--*-source` accepts, at the pinned versions. */
+  function buildSources(pins: Pins) {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-setup-sources-'));
+    roots.push(base);
+    const make = (dir: string, name: string, version: string, entries: string[]) => {
+      for (const entry of entries) {
+        fs.mkdirSync(path.dirname(path.join(dir, entry)), { recursive: true });
+        fs.writeFileSync(path.join(dir, entry), '');
+      }
+      fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name, version }));
+      return dir;
+    };
+    return {
+      adapter: make(path.join(base, 'codex-adapter'), '@principles/codex-adapter', pins.codexAdapter, ['dist/pd-hook.js']),
+      hostRuntime: make(path.join(base, 'host-runtime'), '@principles/host-runtime', pins.hostRuntime, ['dist/index.js']),
+      core: make(path.join(base, 'core'), '@principles/core', pins.core, ['dist/runtime-v2/index.js']),
+    };
+  }
+
+  it('reinstalls once from a clean tree, then still fails loud when no bytes arrive', () => {
+    const { home, workspace, runtime, pins } = fixture();
+    const sources = buildSources(pins);
+    // `package-lock-only` makes the real npm resolve the three local packages,
+    // write a lockfile and exit 0 without populating node_modules — the exact
+    // "success without bytes" shape, produced offline and deterministically.
+    fs.rmSync(path.join(runtime, 'node_modules', '@principles', 'core'), { recursive: true, force: true });
+    const result = spawnSync(process.execPath, [
+      path.join(repo, 'plugins', 'principles-disciple', 'scripts', 'pd-setup.cjs'),
+      '--plugin-root', path.join(repo, 'plugins', 'principles-disciple'),
+      '--plugin-data', path.dirname(runtime), '--workspace', workspace, '--skip-init', '--ingest', 'skip',
+      '--adapter-source', sources.adapter, '--host-runtime-source', sources.hostRuntime, '--core-source', sources.core,
+      '--json',
+    ], {
+      encoding: 'utf8', timeout: 240_000,
+      env: {
+        ...process.env, HOME: home, USERPROFILE: home, CODEX_HOME: path.join(home, '.codex'),
+        npm_config_package_lock_only: 'true',
+      },
+    });
+    expect(result.status, result.stdout).toBe(1);
+    // Removing the retry would drop this note; the final reason would still name
+    // a mismatch, so only the note proves the repair actually ran.
+    expect(result.stderr).toContain('note=runtime_reinstall_after_byte_mismatch');
+    expect(result.stderr).toContain('runtime_pin_mismatch:');
+    expect(result.stderr).toContain(`@principles/core@not-installed!=${pins.core}`);
+    // The clean reset discarded the whole tree (the seeded adapter and
+    // host-runtime copies included), and the marker was never rewritten by a
+    // failed run.
+    expect(fs.existsSync(path.join(runtime, 'node_modules'))).toBe(false);
+    expect(fs.readFileSync(path.join(runtime, '.pd-runtime.json'), 'utf8')).not.toContain('installedAt');
+    // npm genuinely ran again after the reset: the retry rewrote the lockfile.
+    expect(fs.existsSync(path.join(runtime, 'package-lock.json'))).toBe(true);
+  }, 300_000);
+});
