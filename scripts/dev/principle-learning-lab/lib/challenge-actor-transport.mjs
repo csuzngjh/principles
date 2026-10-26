@@ -50,6 +50,7 @@ import {
   createDefaultHttpsPoster,
   resolveAmdApiKey,
 } from './challenge-amd-transport.mjs';
+import { DEFAULT_REQUEST_TIMEOUT_MS } from './challenge-stage-r-gate.mjs';
 
 export const ACTOR_ACTION_TYPES = ['observe', 'ask-owner', 'report', 'deploy'];
 
@@ -198,33 +199,41 @@ export function createAmdActorResponder({
   apiKeyProvider = resolveAmdApiKey,
   maxTokens = AMD_GENERATION_BUDGET.maxTokensDefault,
   reasoningEffort = 'medium',
+  requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, // socket-inactivity timeout; MUST match the authorization's requestTimeoutMs when that field is bound
 } = {}) {
-  const poster = posterImpl || createDefaultHttpsPoster();
+  const poster = posterImpl || createDefaultHttpsPoster({ requestTimeoutMs });
   assertPublicHttpsUrl(baseUrl); // refuse at construction — no responder is ever built for a non-public target
   return {
     kind: 'amd-radeon-tokenfactory/actor-step',
     modelId, // exposed so the actor (and the runner's mode/identity check) can bind the requested identity
+    requestTimeoutMs, // exposed for the audit trail: the timeout this wiring will use
     async respond({ systemPrompt, userPrompt }) {
       const cred = apiKeyProvider(); // throws beforeSend=true when no credential — nothing dispatched
       const body = buildActorRequestBody({ systemPrompt, userPrompt, modelId, maxTokens, reasoningEffort });
       let res;
+      let posterTiming = null; // response-stage telemetry from the poster (null when never dispatched)
       try {
         res = await poster(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${cred.key}`, 'Content-Type': 'application/json', 'User-Agent': 'pd-stage-r-research/1.0', 'Content-Length': Buffer.byteLength(JSON.stringify(body), 'utf8') },
           body: JSON.stringify(body),
         });
+        posterTiming = res.timing || null;
       } catch (e) {
-        if (e && e.beforeSend === true) throw e; // clean refusal, never ambiguous
-        throw Object.assign(new Error(`actor responder: poster failed after dispatch: ${e.message}`), { ambiguous: true });
+        if (e && e.beforeSend === true) throw e; // clean refusal, never ambiguous (no timing — never dispatched)
+        throw Object.assign(new Error(`actor responder: poster failed after dispatch: ${e.message}`), {
+          ambiguous: true,
+          timing: e && e.timing ? e.timing : null, // response-stage telemetry at failure
+        });
       }
+      const timing = () => (posterTiming ? { ...posterTiming } : null);
       const retryAfter = res.headers ? res.headers.get('retry-after') : null;
       if (res.status === 429) {
-        return { ok: false, error: `rate_limited (HTTP 429); Retry-After: ${retryAfter || 'unspecified'} — recorded, NOT auto-retried`, retryAfter };
+        return { ok: false, error: `rate_limited (HTTP 429); Retry-After: ${retryAfter || 'unspecified'} — recorded, NOT auto-retried`, retryAfter, timing: timing() };
       }
       if (res.status !== 200) {
         const text = await res.text().catch(() => '');
-        return { ok: false, error: `http_${res.status}: ${String(text).slice(0, 300)}` };
+        return { ok: false, error: `http_${res.status}: ${String(text).slice(0, 300)}`, timing: timing() };
       }
       let rawText;
       try {
@@ -232,13 +241,13 @@ export function createAmdActorResponder({
       } catch (e) {
         // dispatched + headers received, but the body cannot be read — the
         // request DID happen and the outcome is unknowable → ambiguous
-        throw Object.assign(new Error(`actor responder: response body unreadable after dispatch: ${e.message}`), { ambiguous: true });
+        throw Object.assign(new Error(`actor responder: response body unreadable after dispatch: ${e.message}`), { ambiguous: true, timing: timing() });
       }
       let json;
       try {
         json = JSON.parse(rawText);
       } catch (e) {
-        throw Object.assign(new Error(`actor responder: response unparseable as JSON: ${e.message}`), { ambiguous: true });
+        throw Object.assign(new Error(`actor responder: response unparseable as JSON: ${e.message}`), { ambiguous: true, timing: timing() });
       }
       // P1-6 identity adjudication: ONLY server-attested fields prove what
       // ran — metadata.used_model and the raw model field. requested_model is
@@ -253,25 +262,25 @@ export function createAmdActorResponder({
       const identityAudit = { requestedModel: modelId, requestedModelEcho, usedModel, rawModel };
       const sameModel = (a, b) => a === b || (typeof a === 'string' && typeof b === 'string' && (a.endsWith(`/${b}`) || b.endsWith(`/${a}`)));
       if (usedModel && rawModel && !sameModel(usedModel, rawModel)) {
-        return { ok: false, error: `model_identity_conflict: server reports used_model '${usedModel}' but raw model '${rawModel}' — refusing to guess which one ran`, identity: identityAudit, usage: json.usage || null };
+        return { ok: false, error: `model_identity_conflict: server reports used_model '${usedModel}' but raw model '${rawModel}' — refusing to guess which one ran`, identity: identityAudit, usage: json.usage || null, timing: timing() };
       }
       const observedModelIdentity = usedModel || rawModel;
       if (!observedModelIdentity) {
-        return { ok: false, error: `model_identity_unobserved: the server attested no model identity (no metadata.used_model, no model field — a requested_model echo is not proof of what ran) — a formal experiment result requires an observed identity`, identity: identityAudit, usage: json.usage || null };
+        return { ok: false, error: `model_identity_unobserved: the server attested no model identity (no metadata.used_model, no model field — a requested_model echo is not proof of what ran) — a formal experiment result requires an observed identity`, identity: identityAudit, usage: json.usage || null, timing: timing() };
       }
       if (!sameModel(observedModelIdentity, modelId)) {
-        return { ok: false, error: `model_identity_mismatch: requested '${modelId}', server reports '${observedModelIdentity}'`, observedModelIdentity, identity: identityAudit, usage: json.usage || null };
+        return { ok: false, error: `model_identity_mismatch: requested '${modelId}', server reports '${observedModelIdentity}'`, observedModelIdentity, identity: identityAudit, usage: json.usage || null, timing: timing() };
       }
       const choice = json.choices && json.choices[0] ? json.choices[0] : null;
       const content = choice && choice.message && choice.message.content;
       const finishReason = choice ? choice.finish_reason || null : null;
       if (finishReason === 'length') {
-        return { ok: false, error: `output_budget_exhausted (finish_reason=length, max_tokens=${body.max_tokens}) — truncated output never accepted`, observedModelIdentity, identity: identityAudit, finishReason, usage: json.usage || null };
+        return { ok: false, error: `output_budget_exhausted (finish_reason=length, max_tokens=${body.max_tokens}) — truncated output never accepted`, observedModelIdentity, identity: identityAudit, finishReason, usage: json.usage || null, timing: timing() };
       }
       if (typeof content !== 'string' || content.length === 0) {
-        return { ok: false, error: `empty or missing message content (finish_reason=${finishReason})`, observedModelIdentity, identity: identityAudit, finishReason, usage: json.usage || null };
+        return { ok: false, error: `empty or missing message content (finish_reason=${finishReason})`, observedModelIdentity, identity: identityAudit, finishReason, usage: json.usage || null, timing: timing() };
       }
-      return { ok: true, content, observedModelIdentity, identity: { ...identityAudit, verification: 'suffix-match' }, finishReason, usage: json.usage || null };
+      return { ok: true, content, observedModelIdentity, identity: { ...identityAudit, verification: 'suffix-match' }, finishReason, usage: json.usage || null, timing: timing() };
     },
   };
 }
@@ -316,6 +325,7 @@ export function createRealModelActor({ ctx, responder }) {
               identity: (reply && reply.identity) ?? null,
               usage: (reply && reply.usage) ?? null,
               finishReason: (reply && reply.finishReason) ?? null,
+              timing: (reply && reply.timing) ?? null, // response-stage telemetry (null when never dispatched)
             });
             if (!reply || reply.ok !== true) {
               throw new Error((reply && reply.error) || 'actor responder: empty reply');
@@ -325,6 +335,19 @@ export function createRealModelActor({ ctx, responder }) {
             return parsed.action;
           },
           (e) => {
+            // FAILED round bookkeeping: a thrown transport round (ambiguous /
+            // network) must still leave its response-stage telemetry on the
+            // record — previously these rounds vanished from roundLog entirely.
+            roundLog.push({
+              step: view.step,
+              ok: false,
+              observedModelIdentity: null,
+              identity: null,
+              usage: null,
+              finishReason: null,
+              timing: (e && e.timing) ?? null,
+              errorHead: String(e?.message ?? e).slice(0, 200),
+            });
             if (e && (e.ambiguous === true || e.beforeSend === true)) throw e; // classified upstream — flags preserved
             throw new Error(`actor responder failure: ${e?.message ?? String(e)}`);
           },
