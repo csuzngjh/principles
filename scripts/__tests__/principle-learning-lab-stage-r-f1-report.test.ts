@@ -235,3 +235,67 @@ describe('Stage R F1 report recomputation (SPEC §12.4 — always-executed synth
       }
     });
 });
+
+/** Derive a mutated copy of the synthetic study and rebuild the report. */
+async function reportFromMutatedStudy(mutate: (dir: string) => void): Promise<any> {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-r-f1-report-neg3-'));
+  try {
+    buildSyntheticStudy(dir);
+    mutate(dir);
+    return buildStageRF1Report(dir);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const readLines = (p: string): any[] => fs.readFileSync(p, 'utf8').split('\n').filter((l: string) => l.trim()).map((l: string) => JSON.parse(l));
+const writeLines = (p: string, lines: any[]) => fs.writeFileSync(p, lines.map((e) => JSON.stringify(e)).join('\n') + '\n');
+const eventsPath = (dir: string) => path.join(dir, 'events.jsonl');
+const adjudicationsPath = (dir: string) => path.join(dir, 'adjudications.jsonl');
+
+describe('Stage R F1 report cross-check anomaly paths (duplicate / orphan / conflicting ledger rows)', () => {
+  it('detects DUPLICATE adjudication rows for one SUCCEEDED unit (never folded by a Set)', async () => {
+    const report = await reportFromMutatedStudy((dir) => {
+      const adj = readLines(adjudicationsPath(dir));
+      const victim = adj.find((a: any) => a.unit.caseId === 'CEB-001-BN-02' && a.unit.armId === 'A');
+      adj.push(JSON.parse(JSON.stringify(victim))); // exact duplicate row
+      writeLines(adjudicationsPath(dir), adj);
+    });
+    const finding = report.integrity.findings.find((f: string) => f.includes('CEB-001-BN-02/A: 2 duplicate adjudications.jsonl rows'));
+    expect(finding).toBeDefined();
+    // the statistics stay untouched by cross-check findings
+    expect(report.statusCounts).toEqual({ SUCCEEDED: 11, RESULT_UNKNOWN: 22, FAILED_KNOWN: 3 });
+  });
+
+  it('detects two UNIT_FINISHED events with the SAME result for one unit', async () => {
+    const report = await reportFromMutatedStudy((dir) => {
+      const ev = readLines(eventsPath(dir));
+      const victim = ev.find((e: any) => e.type === 'UNIT_FINISHED' && e.unit.caseId === 'CEB-001-FV-03' && e.unit.armId === 'A');
+      ev.push({ ...victim, seq: 9999 }); // identical result, second event
+      writeLines(eventsPath(dir), ev);
+    });
+    expect(report.integrity.findings.some((f: string) => f.includes('CEB-001-FV-03/A: 2 duplicate UNIT_FINISHED events (same result'))).toBe(true);
+  });
+
+  it('detects two UNIT_FINISHED events with CONFLICTING results for one unit', async () => {
+    const report = await reportFromMutatedStudy((dir) => {
+      const ev = readLines(eventsPath(dir));
+      const victim = ev.find((e: any) => e.type === 'UNIT_FINISHED' && e.unit.caseId === 'CEB-001-FV-03' && e.unit.armId === 'A');
+      ev.push({ ...victim, seq: 9999, result: 'FAILED_KNOWN' }); // contradicts the SUCCEEDED file
+      writeLines(eventsPath(dir), ev);
+    });
+    const finding = report.integrity.findings.find((f: string) => f.includes('CEB-001-FV-03/A: 2 duplicate UNIT_FINISHED events (conflicting results'));
+    expect(finding).toBeDefined();
+    // the conflicting duplicate must NOT be silently resolved to either side's truth
+    expect(report.integrity.findings.some((f: string) => f.includes('CEB-001-FV-03/A: UNIT_FINISHED says'))).toBe(false);
+  });
+
+  it('detects a UNIT_FINISHED event for a unit outside the frozen plan grid', async () => {
+    const report = await reportFromMutatedStudy((dir) => {
+      const ev = readLines(eventsPath(dir));
+      ev.push({ seq: 9999, type: 'UNIT_FINISHED', unit: { caseId: 'CEB-001-ZZ-99', armId: 'A', repetitionId: 1, attemptId: 'a1' }, result: 'SUCCEEDED' });
+      writeLines(eventsPath(dir), ev);
+    });
+    expect(report.integrity.findings.some((f: string) => f.includes('UNIT_FINISHED event for unplanned unit CEB-001-ZZ-99/A/1/a1 (SUCCEEDED)'))).toBe(true);
+  });
+});

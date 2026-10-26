@@ -113,37 +113,56 @@ export function buildStageRF1Report(studyDir) {
 
   // ledger↔file cross-checks (the two append-only ledgers this report's
   // integrity claim depends on — see header). Mismatches become findings;
-  // they never change any statistic above.
+  // they never change any statistic above. Counts are grouped per unit key —
+  // duplicates are NEVER folded away by a Set/Map: a repeated adjudication
+  // row or UNIT_FINISHED event is itself an integrity finding whether or not
+  // the copies agree, and no side of the comparison silently wins.
   const settledRows = [...units.values()].filter(u => u.status !== 'NOT_SETTLED');
   const settledKey = (u) => `${u.caseId}|${u.armId}|${u.repetitionId}|${u.attemptId}`;
-  const adjudicationKeys = new Set(adjudications.map(a => a && a.unit ? planKey(a.unit) : null).filter(Boolean));
-  for (const row of settledRows.filter(u => u.status === 'SUCCEEDED')) {
-    if (row.adjudicationPresent && !adjudicationKeys.has(settledKey(row))) {
-      findings.push(`${row.caseId}/${row.armId}: SUCCEEDED record has no adjudications.jsonl row`);
-    }
+  const adjudicationCounts = new Map();
+  for (const a of adjudications) {
+    if (!a || !a.unit) continue;
+    const key = planKey(a.unit);
+    adjudicationCounts.set(key, (adjudicationCounts.get(key) || 0) + 1);
   }
-  for (const key of adjudicationKeys) {
+  // every SUCCEEDED attempt file with adjudication data must have EXACTLY ONE ledger row
+  for (const row of settledRows.filter(u => u.status === 'SUCCEEDED' && u.adjudicationPresent)) {
+    const count = adjudicationCounts.get(settledKey(row)) || 0;
+    if (count === 0) findings.push(`${row.caseId}/${row.armId}: SUCCEEDED record has no adjudications.jsonl row`);
+    else if (count > 1) findings.push(`${row.caseId}/${row.armId}: ${count} duplicate adjudications.jsonl rows for one SUCCEEDED record`);
+  }
+  // every adjudication row must map to an in-plan SUCCEEDED attempt file that carries adjudication data
+  for (const [key] of adjudicationCounts) {
     const row = units.get(key);
     if (!row || row.status !== 'SUCCEEDED' || !row.adjudicationPresent) {
       findings.push(`adjudications.jsonl row ${key.replaceAll('|', '/')} has no matching SUCCEEDED attempt file`);
     }
   }
-  const finishedByKey = new Map();
+  const finishedGroups = new Map();
   for (const e of events.filter(e => e && e.type === 'UNIT_FINISHED' && e.unit)) {
-    finishedByKey.set(planKey(e.unit), e.result);
+    const key = planKey(e.unit);
+    if (!finishedGroups.has(key)) finishedGroups.set(key, []);
+    finishedGroups.get(key).push(e.result);
   }
+  // every settled attempt must have EXACTLY ONE matching event, same result
   for (const row of settledRows) {
-    const finishedResult = finishedByKey.get(settledKey(row));
-    if (finishedResult === undefined) {
+    const group = finishedGroups.get(settledKey(row));
+    if (group === undefined) {
       findings.push(`${row.caseId}/${row.armId}: settled ${row.status} in attempt file but no UNIT_FINISHED event`);
-    } else if (finishedResult !== row.status) {
-      findings.push(`${row.caseId}/${row.armId}: UNIT_FINISHED says ${finishedResult}, attempt file says ${row.status}`);
+    } else if (group.length > 1) {
+      const agree = group.every((r) => r === group[0]);
+      findings.push(`${row.caseId}/${row.armId}: ${group.length} duplicate UNIT_FINISHED events (${agree ? 'same result' : 'conflicting results'}: ${group.join(', ')})`);
+    } else if (group[0] !== row.status) {
+      findings.push(`${row.caseId}/${row.armId}: UNIT_FINISHED says ${group[0]}, attempt file says ${row.status}`);
     }
   }
-  for (const [key, result] of finishedByKey) {
+  // every event must point at an in-plan unit that actually settled (orphan events included)
+  for (const [key, group] of finishedGroups) {
     const row = units.get(key);
-    if (row && row.status === 'NOT_SETTLED') {
-      findings.push(`UNIT_FINISHED ${result} for ${key.replaceAll('|', '/')} but the unit has no settled attempt file`);
+    if (row === undefined) {
+      findings.push(`UNIT_FINISHED event for unplanned unit ${key.replaceAll('|', '/')} (${group.join(', ')})`);
+    } else if (row.status === 'NOT_SETTLED') {
+      findings.push(`UNIT_FINISHED ${group[0]} for ${key.replaceAll('|', '/')} but the unit has no settled attempt file`);
     }
   }
 
