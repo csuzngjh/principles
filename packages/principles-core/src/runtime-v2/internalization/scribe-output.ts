@@ -12,6 +12,7 @@
 import { Type, type Static } from '@sinclair/typebox';
 import type { IntentContractV1, ScribeExecutionConditionsV1 } from './intent-contract.js';
 import { isValidIntentContractV1, isValidScribeExecutionConditionsV1 } from './intent-contract.js';
+import { collectScribeIntentMaterial, isTextualBasisAnchored, findUndeclaredApprovalDependency } from './textual-basis-anchor.js';
 
 export interface ScribePrincipleDraft {
   readonly title: string;
@@ -128,6 +129,17 @@ export interface ScribeValidationResult {
   readonly errorCategory?: string;
 }
 
+/**
+ * SPEC-PRI-1047 修复 A: Scribe 成功边界的锚定材料入参。可选——缺省时
+ * DefaultScribeValidator 跳过锚定检查（与上游材料不可解析时的降级语义
+ * 一致：该缺口由 artificer intent preflight 的既有停点兜底）。提供时必须
+ * 是与 preflight 同口径（collectUpstreamNormalisedText）计算出的上游材料
+ * 归一化文本，ScribeRunner 负责传入，validator 自身不做 I/O。
+ */
+export interface ScribeAnchoringOptions {
+  readonly upstreamAnchorMaterial?: { readonly normalisedText: string } | null;
+}
+
 export interface ScribeValidator {
   /**
    * Validate untrusted LLM/runtime output.
@@ -139,6 +151,7 @@ export interface ScribeValidator {
     output: unknown,
     taskId: string,
     expectedSourcePhilosopherArtifactId?: string,
+    anchoring?: ScribeAnchoringOptions,
   ): Promise<ScribeValidationResult>;
 }
 
@@ -154,10 +167,12 @@ export class DefaultScribeValidator implements ScribeValidator {
     this.requireRuleCodeContracts = options.requireRuleCodeContracts ?? false;
   }
 
+  // eslint-disable-next-line @typescript-eslint/max-params -- the 4th param is the optional anchoring material (SPEC-PRI-1047); folding it into an options object would break the established 3-param ScribeValidator call sites
   async validate(
     output: unknown,
     taskId: string,
     expectedSourcePhilosopherArtifactId?: string,
+    anchoring?: ScribeAnchoringOptions,
   ): Promise<ScribeValidationResult> {
     const errors: string[] = [];
 
@@ -250,9 +265,64 @@ export class DefaultScribeValidator implements ScribeValidator {
     if (this.requireRuleCodeContracts && !hasExecutionConditions) {
       errors.push('executionConditions is required for new RuleCode generation');
     }
+    let executionConditionsValid = false;
     if (hasExecutionConditions) {
-      if (!isValidScribeExecutionConditionsV1(output.executionConditions)) {
+      executionConditionsValid = isValidScribeExecutionConditionsV1(output.executionConditions);
+      if (!executionConditionsValid) {
         errors.push('executionConditions must be { version: 1, requiredFacts: [{ factKind: non-empty string, required: boolean, textualBasis: non-empty string }] }');
+      }
+    }
+
+    // SPEC-PRI-1047 修复 A: Scribe 成功边界锚定检查——与 artificer intent
+    // preflight 完全同一判定（textual-basis-anchor.ts）。仅在结构校验通过
+    // 且调用方提供了上游锚定材料时执行：整条归一化 textualBasis 必须作为
+    // 连续片段出现在「Scribe 意图材料 ∪ 上游材料」内。标签前缀、省略号
+    // 跨接、转述与后段编造在此失败（output_invalid → lastValidatorErrors
+    // 回喂下一次 attempt），错误引用不再可能先被标记成功。材料未提供 =
+    // 上游不可解析/降级，该缺口由 preflight 的既有停点兜底，不是输出缺陷。
+    if (this.requireRuleCodeContracts && executionConditionsValid
+      && anchoring?.upstreamAnchorMaterial != null
+      && anchoring.upstreamAnchorMaterial.normalisedText.length > 0
+      && isRecord(output.executionConditions)
+      && Array.isArray(output.executionConditions.requiredFacts)) {
+      const combinedPool = collectScribeIntentMaterial(output).normalisedText
+        + ' ' + anchoring.upstreamAnchorMaterial.normalisedText;
+      for (const [index, fact] of output.executionConditions.requiredFacts.entries()) {
+        if (!isRecord(fact)) continue;
+        if (fact.required !== true) continue;
+        if (typeof fact.textualBasis !== 'string' || typeof fact.factKind !== 'string') continue;
+        if (!isTextualBasisAnchored(fact.textualBasis, combinedPool)) {
+          errors.push(
+            `executionConditions.requiredFacts[${index}] (factKind '${fact.factKind}') textualBasis ("${fact.textualBasis.replace(/\s+/g, ' ').slice(0, 120)}") is not a continuous verbatim span of the Owner-attributed material — rewrite it as one continuous original sentence copied from the source (no citation labels, no ellipsis-omitted reconstruction)`,
+          );
+        }
+      }
+    }
+
+    // PRI-1047 Owner review R6 #2: 批准依赖声明审计——与 preflight 同一谓词
+    // （findUndeclaredApprovalDependency）。修复前 requiredFacts 空数组/
+    // required:false 的草案在本边界通过、持久化后在 preflight 死于
+    // approval_dependency_undeclared（「Scribe 成功、下一站拒绝」断路复发）。
+    // 在此失败可经 lastValidatorErrors 回喂修复。上游材料为空/不可解析时
+    // 仍审计 scribe 意图材料池（本边界始终可得）；两池均不可得 = 降级，
+    // 由 preflight 停点兜底。
+    if (this.requireRuleCodeContracts && executionConditionsValid
+      && anchoring != null
+      && isRecord(output.executionConditions)
+      && Array.isArray(output.executionConditions.requiredFacts)) {
+      const declaredFacts = output.executionConditions.requiredFacts.flatMap((fact) => {
+        if (!isRecord(fact) || typeof fact.factKind !== 'string' || typeof fact.required !== 'boolean') return [];
+        return [{ factKind: fact.factKind, required: fact.required }];
+      });
+      const undeclared = findUndeclaredApprovalDependency({
+        scribeMaterial: collectScribeIntentMaterial(output),
+        upstreamNormalisedText: anchoring.upstreamAnchorMaterial?.normalisedText ?? '',
+        requiredFacts: declaredFacts,
+      });
+      if (undeclared !== null) {
+        errors.push(
+          `executionConditions: ${undeclared.pool} material carries approval semantics (${undeclared.fields.join(', ')}) but no REQUIRED approval-kind fact is declared — declare the approval dependency (factKind e.g. 'design_approval', required: true) with its textual basis, or correct the draft text if it overstates the requirement`,
+        );
       }
     }
 

@@ -148,6 +148,38 @@ function mapCommitDecisionToAction(
         reason: `blocked_missing_verdict: ${commitResult.reason}; durable runnerDecision and legacy runs verdict both absent (fail-closed)`,
         nextAction: 'Re-run the stage runner (writes durable verdict) or reconcile via the pending-artifacts report',
       };
+    case 'source_correction_reopened':
+      return {
+        taskId: commitResult.sourceTaskId,
+        taskKind: '',
+        decision: 'successor_created',
+        successorKind: 'artificer',
+        successorTaskId: commitResult.reopenedTaskId,
+      };
+    case 'source_correction_reopen_noop':
+      return {
+        taskId: commitResult.sourceTaskId,
+        taskKind: '',
+        decision: 'skipped',
+        reason: `source_correction_reopen_noop: ${commitResult.reason}; the source-correction transition already materialized`,
+        nextAction: 'No action — idempotent replay',
+      };
+    case 'source_correction_reopen_conflict':
+      return {
+        taskId: commitResult.sourceTaskId,
+        taskKind: '',
+        decision: 'skipped',
+        reason: `source_correction_reopen_conflict: ${commitResult.reason}; the recorded outcome is terminal and the generic cascade stays suppressed`,
+        nextAction: 'Inspect the artificer stop point in Console; a conflict outcome is only resolved by an explicit Owner decision',
+      };
+    case 'source_correction_reopen_failed':
+      return {
+        taskId: commitResult.sourceTaskId,
+        taskKind: '',
+        decision: 'skipped',
+        reason: `source_correction_reopen_failed: ${commitResult.reason}`,
+        nextAction: 'Inspect the receipt artificerTaskId lineage; the scribe epoch stays consumable',
+      };
   }
 }
 

@@ -4,7 +4,7 @@ import type { DesignGateAction, DesignGateDecision, DesignGateDeclaration, Desig
 import { clearStoredToken, loadStoredToken, storeToken } from "./utils/token-storage.js";
 import type { RuleBindingReviewView, RuleBindingQueueView } from '../shared/rule-candidate-binding-contract.js';
 import type { RuleCandidateBindingRequest } from '@principles/core/runtime-v2';
-import { validateBindingReview, validateBindingQueue, validateBindingMutation } from './utils/rule-binding-validators.js';
+import { validateBindingReview, validateBindingQueue, validateBindingMutation, validateBindingRevise } from './utils/rule-binding-validators.js';
 import {
   validateErrorResponse,
   validateHeaders,
@@ -290,6 +290,22 @@ export function fetchRuleBindingReview(candidateId: string, search = ''): Promis
 }
 export function mutateRuleBinding(candidateId: string, body: RuleCandidateBindingRequest) {
   return request(`/api/v1/governance/rule-candidate-bindings/${encodeURIComponent(candidateId)}`, { method: 'POST', body: JSON.stringify(body) }, validateBindingMutation);
+}
+/** PRI-1048: consume the REAL backend revision capability (revise-once route);
+ * eligibility was resolved server-side from the production resolver. */
+export function reviseRuleBindingOnce(candidateId: string, body: { expectedBindingRevision: number; expectedScribeTaskId: string; expectedTaskRevisionEpoch: number; requestId: string }) {
+  return request(`/api/v1/governance/rule-candidate-bindings/${encodeURIComponent(candidateId)}/revise-once`, { method: 'POST', body: JSON.stringify(body) }, validateBindingRevise);
+}
+
+/** PRI-1048 R6 #4: the bounded one-shot SOURCE correction (PRI-1047) — the
+ * capability that applies when the binding revision budget is spent and the
+ * Artificer stopped for a source-material defect. CAS inputs come from the
+ * server-computed sourceCorrection preview; the server re-validates all of it. */
+export function correctRuleSource(candidateId: string, body: {
+  expectedBindingRevision: number; expectedScribeTaskId: string; expectedArtificerTaskId: string;
+  expectedScribeArtifactDigest: string; reason: string; requestId: string;
+}) {
+  return request(`/api/v1/governance/rule-candidate-bindings/${encodeURIComponent(candidateId)}/source-correct-once`, { method: 'POST', body: JSON.stringify(body) }, validateBindingRevise);
 }
 
 async function fetchWorkspaces(): Promise<ApiResponse<WorkspaceEntryData[]>> {

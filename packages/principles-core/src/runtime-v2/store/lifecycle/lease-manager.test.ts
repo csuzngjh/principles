@@ -11,6 +11,7 @@ import { SqliteConnection } from '../sqlite-connection.js';
 import { SqliteTaskStore } from '../task/sqlite-task-store.js';
 import { SqliteRunStore } from '../run/sqlite-run-store.js';
 import { DefaultLeaseManager } from './lease-manager.js';
+import { DefaultRetryPolicy } from './retry-policy.js';
 import type { TaskRecord } from '../../task-status.js';
 
 function makeTaskInput(taskId: string, overrides: Partial<Omit<TaskRecord, 'createdAt' | 'updatedAt'>> = {}): Omit<TaskRecord, 'createdAt' | 'updatedAt'> {
@@ -254,6 +255,32 @@ describe('DefaultLeaseManager', () => {
         leaseExpiresAt: new Date(Date.now() - 1000).toISOString(),
       }) as TaskRecord;
       expect(leaseManager.isLeaseExpired(task)).toBe(true);
+    });
+  });
+
+  describe('SPEC-PRI-1047 epoch-local attempt counting', () => {
+    it('a reopened epoch keeps GLOBAL run ordinals but EPOCH-LOCAL attempt_count — the original maxAttempts stays available', async () => {
+      await taskStore.createTask(makeTaskInput('epoch-task-1', { maxAttempts: 3 }));
+      // Simulate a completed first epoch: 4 historical runs (attempt_number 1..4).
+      for (let n = 1; n <= 4; n += 1) {
+        await runStore.createRun({
+          runId: `run_epoch-task-1_${n}`, taskId: 'epoch-task-1', runtimeKind: 'openclaw',
+          startedAt: '2026-10-26T00:00:00.000Z', attemptNumber: n, executionStatus: 'succeeded',
+        });
+      }
+      // Reopen resets attempt_count to 0 (revision/binding/source-correction reopen shape).
+      await taskStore.updateTask('epoch-task-1', { status: 'pending', attemptCount: 0 });
+      const leased = await leaseManager.acquireLease({
+        taskId: 'epoch-task-1', owner: 'epoch-agent', durationMs: 60_000, runtimeKind: 'openclaw',
+      });
+      expect(leased.attemptCount).toBe(1);                    // epoch-local, NOT the global run ordinal 5
+      const runs = await runStore.listRunsByTask('epoch-task-1');
+      const newest = runs[runs.length - 1];
+      expect(newest?.attemptNumber).toBe(5);                  // run ordinal stays globally sequential (run-id uniqueness)
+      expect(newest?.runId).toBe('run_epoch-task-1_5');
+      // shouldRetry compares the EPOCH counter against the original cap:
+      const policy = new DefaultRetryPolicy();
+      expect(policy.shouldRetry(leased)).toBe(true);          // attempt 1 < 3 — retries remain in this epoch
     });
   });
 

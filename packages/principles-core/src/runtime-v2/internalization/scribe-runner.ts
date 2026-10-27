@@ -32,10 +32,11 @@ import type { ScribeOutputV1, ScribeValidator } from './scribe-output.js';
 import { normalizeStringEncodedIntentContract } from './scribe-output.js';
 import type { TaskRecord } from '../task-status.js';
 import { PDRuntimeError, type PDErrorCategory, isPDErrorCategory } from '../error-categories.js';
-import { hydratePITaskRecord } from './pitask-metadata.js';
+import { hydratePITaskRecord, isFreshForNextAttempt, parseLastValidatorErrors, parseSeedSourcePainId, type LastValidatorErrors } from './pitask-metadata.js';
 import { ScribePromptBuilder } from './scribe-prompt-builder.js';
 import { resolveFormationContext } from './formation-context.js';
 import type { FormationContext, FormationTaskView } from './formation-context.js';
+import { collectUpstreamNormalisedText } from './artificer-intent-preflight.js';
 import { reconcileLineageEcho } from './peer-runner-contracts.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
 import {
@@ -74,6 +75,17 @@ interface ScribeContext {
    * shape exactly (legacy / degraded compatibility).
    */
   readonly formationContext?: FormationContext;
+  /**
+   * PRI-1047 修复 A: 上一次 attempt 的 validator 拒绝全文（读取侧已做信任
+   * 边界验证 + 限界）。仅在新鲜度判定通过（sourceAttemptCount === 当前
+   * attempt-1，isFreshForNextAttempt）时由 buildContext 携带——修复 attempt
+   * 的 prompt 不再与首轮零差异重试。Ephemeral，不回写。
+   */
+  readonly priorValidatorErrors?: LastValidatorErrors;
+  /** SPEC-PRI-1047: 已解析的 philosopher 依赖任务 id（validateOutput 复用 preflight 同口径上游材料走查）。 */
+  readonly philosopherTaskId?: string;
+  /** SPEC-PRI-1047: 任务的权威通道（intake bridge 写入；validateOutput 只对 code_tool_hook 施加锚定）。 */
+  readonly channel?: string | null;
 }
 
 /**
@@ -307,12 +319,18 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
             : []),
         ];
 
+        // PRI-1047 修复 A: 携带新鲜的上一轮 validator 拒绝（镜像
+        // ArtificerRunner 的 priorValidatorErrors 消费模式）。
+        const priorValidatorErrors = this.readFreshPriorValidatorErrors(taskId, task);
         const context: ScribeContext = {
           contextHash: BasePeerRunner.hashContextRefs(contextRefs),
           philosopherArtifact: firstArtifact.contentJson,
           sourcePhilosopherArtifactId: firstArtifact.artifactId,
           sourceDreamerArtifactId,
           ...(formationContext !== undefined ? { formationContext } : {}),
+          philosopherTaskId: depId,
+          channel: piTask?.channel ?? null,
+          ...(priorValidatorErrors !== undefined ? { priorValidatorErrors } : {}),
         };
         return this.ledgerIdentity?.resolveForCandidate
           ? { ...context, identityAtStart: await this.resolveCurrentIdentity(context) } : context;
@@ -337,6 +355,82 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
       status: task.status,
       dependencyTaskIds: hydratePITaskRecord(task)?.dependencyTaskIds ?? [],
     };
+  }
+
+  /**
+   * PRI-1047 修复 A: 读取上一 attempt 的 lastValidatorErrors 并做新鲜度
+   * 判定（isFreshForNextAttempt，sourceAttemptCount === 当前 leased attempt-1）。
+   * 陈旧/缺 lease 时不回喂，仅发一个 suppression 事件（rc-9）——跨 epoch
+   * （reopen 后 attemptCount 归零）旧错误永不混入新轮（rc-7）。
+   */
+  private readFreshPriorValidatorErrors(taskId: string, task: TaskRecord): LastValidatorErrors | undefined {
+    const record = parseLastValidatorErrors(task.diagnosticJson);
+    if (record === null) return undefined;
+    if (!isFreshForNextAttempt(record, this.currentLeasedAttempt)) {
+      this.emitEvent('prior_validator_errors_suppressed', taskId, {
+        recordedAt: record.recordedAt,
+        errorCount: record.errors.length,
+        sourceAttemptCount: record.sourceAttemptCount,
+        currentAttempt: this.currentLeasedAttempt,
+        reason: this.currentLeasedAttempt === undefined
+          ? 'no_lease_context'
+          : 'stale_for_current_attempt',
+      });
+      return undefined;
+    }
+    return record;
+  }
+
+  /**
+   * SPEC-PRI-1047 修复 A: 与 artificer intent preflight 完全同口径的上游
+   * 材料解析（collectUpstreamNormalisedText：philosopher 意图字段 + PRI-1018
+   * formation 诊断 evidence notes，含 philosopher↔scribe dreamer 血缘与
+   * pain lineage 校验）。读取失败/不可解析 → 返回 undefined 并发事件
+   * （rc-9），锚定检查降级由 preflight 既有停点兜底。
+   */
+  private async resolveUpstreamAnchorMaterial(taskId: string, context: ScribeContext, candidateOutput: unknown): Promise<{ normalisedText: string } | null | undefined> {
+    if (context.philosopherTaskId === undefined) return undefined;
+    let material: { normalisedText: string } | null;
+    try {
+      material = await collectUpstreamNormalisedText(
+        async (depId: string) => this.stateManager.getTask(depId),
+        (sourceTaskId: string) => this.artifactStore.listBySourceTaskId(sourceTaskId),
+        {
+          scribeDependencyTaskIds: [context.philosopherTaskId],
+          formationSource: {
+            scribeContentJson: JSON.stringify(candidateOutput),
+            artifactStore: this.artifactStore,
+            lookupTask: async (formationTaskId) => {
+              const task = await this.stateManager.getTask(formationTaskId);
+              if (!task) return null;
+              const hydrated = hydratePITaskRecord(task);
+              return {
+                taskKind: task.taskKind,
+                status: task.status,
+                dependencyTaskIds: hydrated?.dependencyTaskIds ?? [],
+                canonicalSourcePainId: parseSeedSourcePainId(task.diagnosticJson),
+              };
+            },
+            taskId,
+          },
+        },
+      );
+    } catch (error: unknown) {
+      this.emitEvent('anchor_material_unavailable', taskId, {
+        reason: 'upstream_material_read_failed',
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+      return undefined;
+    }
+    // rc-9（SPEC §3.2）：collectUpstreamNormalisedText 返回 null 的每一种
+    // 不可解析形态（philosopher 工件损坏 / dreamer 血缘错配 / pain 血缘
+    // 错配 / 空材料池）同样发事件——锚定降级必须可观测，不能只在抛错时可见。
+    if (material === null) {
+      this.emitEvent('anchor_material_unavailable', taskId, {
+        reason: 'upstream_material_unresolvable',
+      });
+    }
+    return material;
   }
 
   async invokeRuntime(taskId: string, context: ScribeContext): Promise<RunHandle> {
@@ -369,9 +463,14 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
     // Rollout needs_revision 修订轮反馈 (P0-E): 任务元数据带 revisionFeedback 时
     // 注入 prompt,让 scribe 针对性修订而非盲目重写。缺失 = 首轮,行为不变。
     const revisionFeedback = await this.resolveRevisionFeedback(taskId);
+    // PRI-1047 修复 A: 新鲜的上一轮 validator 拒绝全文回喂（字段级锚定/
+    // 结构错误），修复 attempt 不再与首轮零差异重试（EP-05）。
+    const priorErrorsBlock = context.priorValidatorErrors !== undefined
+      ? `\n\n<previous_validation_errors>\nYour previous attempt was REJECTED by the deterministic validator with these exact errors (fix every one of them; the same material is re-checked):\n${context.priorValidatorErrors.errors.map((error) => `- ${error}`).join('\n')}\n</previous_validation_errors>`
+      : '';
     const finalMessage = revisionFeedback
-      ? `${message}\n\n<revision_feedback>\n${revisionFeedback}\n</revision_feedback>`
-      : message;
+      ? `${message}\n\n<revision_feedback>\n${revisionFeedback}\n</revision_feedback>${priorErrorsBlock}`
+      : `${message}${priorErrorsBlock}`;
 
     return this.runtimeAdapter.startRun({
       agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: 'v1' },
@@ -398,7 +497,15 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
   }
 
   async validateOutput(output: unknown, taskId: string, context: ScribeContext): Promise<PeerRunnerValidationResult> {
-    const result = await this.validator.validate(output, taskId, context.sourcePhilosopherArtifactId);
+    // SPEC-PRI-1047 修复 A: code_tool_hook 渠道在成功边界前用与 preflight
+    // 同口径的上游材料执行锚定检查——错误引用不能先被标成功。上游材料
+    // 不可解析时降级跳过（事件可观测），preflight 既有停点兜底。
+    let anchoring: { upstreamAnchorMaterial?: { normalisedText: string } | null } | undefined;
+    if (context.channel === 'code_tool_hook') {
+      const upstream = await this.resolveUpstreamAnchorMaterial(taskId, context, output);
+      anchoring = { upstreamAnchorMaterial: upstream ?? null };
+    }
+    const result = await this.validator.validate(output, taskId, context.sourcePhilosopherArtifactId, anchoring);
 
     // Trust-boundary: validator is an injected dependency returning `string | undefined`
     // for errorCategory. We must not `as`-cast; validate at runtime (ERR-001, ERR-005).
@@ -424,6 +531,35 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
     };
   }
 
+  /**
+   * PRI-1047 修复 A: 成功后的清理——任务成功时定点删除 diagnosticJson 顶层
+   * lastValidatorErrors 键（不再把上一轮拒绝留在已成功任务上；新鲜度判定
+   * 本已屏蔽，这是显式清理要求）。CAS 失败仅发事件、不阻断成功（rc-9；
+   * 读取侧 sourceAttemptCount 新鲜度仍是正确性兜底）。
+   */
+  private async clearLastValidatorErrorsOnSuccess(taskId: string, task: TaskRecord): Promise<void> {
+    if (task.diagnosticJson === null || task.diagnosticJson === undefined) return;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(task.diagnosticJson);
+    } catch {
+      return;
+    }
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return;
+    if (!Object.hasOwn(parsed, 'lastValidatorErrors')) return;
+    Reflect.deleteProperty(parsed, 'lastValidatorErrors');
+    const updated = await this.stateManager.updateTaskIfDiagnosticJsonUnchanged(
+      taskId,
+      task.diagnosticJson,
+      { diagnosticJson: JSON.stringify(parsed) },
+    );
+    if (!updated) {
+      this.emitEvent('last_validator_errors_cleanup_conflict', taskId, {
+        reason: 'cas_lost_to_concurrent_writer',
+      });
+    }
+  }
+
   // eslint-disable-next-line @typescript-eslint/max-params
   async succeedTask(
     taskId: string,
@@ -440,6 +576,9 @@ export class ScribeRunner extends BasePeerRunner<ScribeContext, ScribeOutputV1> 
         `sourcePhilosopherArtifactId mismatch: expected ${context.sourcePhilosopherArtifactId}, got ${output.sourcePhilosopherArtifactId}`,
       );
     }
+
+    // PRI-1047 修复 A: 成功后清理上一轮 validator 拒绝记录。
+    await this.clearLastValidatorErrorsOnSuccess(taskId, task);
 
     // Store output before marking succeeded
     try {

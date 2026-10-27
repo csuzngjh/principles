@@ -54,4 +54,53 @@ describe('system-owned RuleCode verification declaration', () => {
     expect(result.counterfactuals.some((entry) => entry.toolName === 'host.read' && entry.expectedDecision === 'block')).toBe(false);
     expect(JSON.stringify(cases)).toBe(snapshot);
   });
+
+  it('PRI-1047 R8: execute tools carry the hardcoded command-family probe counterfactuals', () => {
+    const result = deriveRuleCodeVerification({ executionConditions }, [], tools);
+    const probes = result.counterfactuals.filter((entry) => entry.caseId.includes(':probe:'));
+    const ids = probes.map((entry) => entry.caseId.split(':probe:')[1]);
+    // Every family required by the R8 owner review is present, with its
+    // HARDCODED expectation (never computed from the classifier).
+    expect(ids).toEqual([
+      'readonly-status', 'readonly-log-format', 'readonly-show-path', 'readonly-grep-keyword',
+      'readonly-cat', 'readonly-globalopt-query', 'mutate-remote-add', 'mutate-stash',
+      'mutate-globalopt-commit', 'mutate-output-file', 'pipe-into-script', 'pipe-into-mutation',
+      'inline-code-exec', 'sort-output-option', 'uniq-output-operand', 'rg-pre-exec', 'git-hash-object-write',
+      'git-reflog-delete', 'git-branch-unset-upstream', 'newline-hidden-mutation', 'quoted-backtick-substitution',
+      'variable-expansion', 'environment-assignment-wrapper', 'sudo-wrapper', 'substitution-output-into-find',
+      'reflog-output-file', 'printf-n-write', 'read-write-redirection', 'fd-read-write-redirection',
+      'brace-expansion-find-action', 'brace-expansion-rg-pre', 'git-config-pager', 'git-paginate',
+      'git-diff-ext-diff', 'git-stash-ext-diff', 'git-reflog-ext-diff', 'git-reflog-output',
+      'find-quoted-operator-action', 'rg-substitution-pre', 'readonly-quoted-operators', 'readonly-multiline-queries',
+    ]);
+    expect(probes.find((e) => e.caseId.endsWith('readonly-status'))?.expectedDecision).toBe('allow');
+    expect(probes.find((e) => e.caseId.endsWith('readonly-log-format'))?.expectedDecision).toBe('allow');
+    expect(probes.find((e) => e.caseId.endsWith('mutate-remote-add'))?.expectedDecision).toBe('block');
+    expect(probes.find((e) => e.caseId.endsWith('mutate-output-file'))?.expectedDecision).toBe('block');
+    expect(probes.find((e) => e.caseId.endsWith('pipe-into-script'))?.expectedDecision).toBe('block');
+    expect(probes.find((e) => e.caseId.endsWith('inline-code-exec'))?.expectedDecision).toBe('block');
+    for (const id of ['sort-output-option', 'uniq-output-operand', 'rg-pre-exec', 'git-hash-object-write',
+      'git-reflog-delete', 'git-branch-unset-upstream', 'newline-hidden-mutation', 'quoted-backtick-substitution',
+      'variable-expansion', 'environment-assignment-wrapper', 'sudo-wrapper', 'substitution-output-into-find',
+      'reflog-output-file', 'printf-n-write', 'read-write-redirection', 'fd-read-write-redirection',
+      'brace-expansion-find-action', 'brace-expansion-rg-pre', 'git-config-pager', 'git-paginate',
+      'git-diff-ext-diff', 'git-stash-ext-diff', 'git-reflog-ext-diff', 'git-reflog-output',
+      'find-quoted-operator-action', 'rg-substitution-pre']) {
+      expect(probes.find((e) => e.caseId.endsWith(id))?.expectedDecision, id).toBe('block');
+    }
+    for (const id of ['readonly-quoted-operators', 'readonly-multiline-queries']) {
+      expect(probes.find((e) => e.caseId.endsWith(id))?.expectedDecision, id).toBe('allow');
+    }
+    for (const probe of probes) {
+      if (probe.ruleContext === undefined) throw new Error('fixture: probe ruleContext missing');
+      expect(probe.ruleContext.facts.designGate).toMatchObject({ resolution: 'not_approved', requiresApproval: true });
+    }
+    // Representative probes are ALSO crossed with approved (gate face passes).
+    const approved = result.counterfactuals.filter((entry) => entry.caseId.includes(':probe-approved:'));
+    expect(approved.map((e) => e.caseId.split(':probe-approved:')[1]).sort()).toEqual(['mutate-remote-add', 'pipe-into-script', 'readonly-status']);
+    expect(approved.every((e) => e.expectedDecision === 'allow')).toBe(true);
+    // read/search tools do NOT get the execute-kind probes.
+    const withRead = deriveRuleCodeVerification({ executionConditions }, [], [...tools, { rawToolName: 'host.read', canonicalKind: 'read' }]);
+    expect(withRead.counterfactuals.some((entry) => entry.caseId.includes('host.read') && entry.caseId.includes(':probe:'))).toBe(false);
+  });
 });
