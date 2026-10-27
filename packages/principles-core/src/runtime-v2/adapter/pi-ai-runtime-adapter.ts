@@ -730,8 +730,7 @@ export class PiAiRuntimeAdapter implements PDRuntimeAdapter {
       const schema = resolveOutputSchema(schemaRef);
       // rc-3-fail-loud-missing: a non-empty outputSchemaRef that cannot be
       // resolved is a bug (typo or unregistered schema). Fail loud instead of
-      // silently skipping schema-gated validation paths. Consistent with
-      // the retired openclaw-cli adapter's fetchOutput.
+      // silently skipping schema-gated validation paths.
       if (schemaRef && !schema) {
         throw new PDRuntimeError(
           'output_invalid',
