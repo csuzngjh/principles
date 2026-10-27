@@ -155,9 +155,10 @@ describe('PRI-1041 immutable historical evidence prompt view', () => {
     expect(historical.originalCase).toMatchObject({ caseId: 'negative-1', expectedDecision: 'block',
       sourceRefs: { artifactId: 'immutable-owner-pack' }, ruleContext: { facts: UNAVAILABLE_RULE_CONTEXT.facts } });
     expect(historical).toMatchObject({ qualification: 'historical_evidence_only', missingFacts: ['design_approval'] });
-    expect(historical.qualificationBasis).toContain('system-owned ownerGoldenTraceCases');
+    expect(view.evaluatorHistoricalProvenance.qualificationBasis).toContain('system-owned ownerGoldenTraceCases');
+    expect(view.evaluatorHistoricalProvenance[historical.sourceField]).toContain('system-owned Owner historical evidence');
     expect(systemPrompt).toContain('must not create requiredChanges to relabel');
-    expect(promptInput.promptContractVersion).toBe('evaluator-output-v1.prompt.v12');
+    expect(promptInput.promptContractVersion).toBe('evaluator-output-v1.prompt.v13');
     expect(JSON.stringify(input.artificerArtifact)).toBe(original);
     expect(ownerCases.every((entry) => validateGoldenTraceCase(entry).valid)).toBe(true);
     expect(ownerCases[0]?.ruleContext.facts).not.toHaveProperty('designGate');

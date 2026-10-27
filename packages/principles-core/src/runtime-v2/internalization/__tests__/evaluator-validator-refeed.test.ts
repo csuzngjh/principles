@@ -468,7 +468,7 @@ describe('PRI-644 — golden replay: validator rejection re-feeds attempt N+1 (p
     expect(prompts[1]?.systemPrompt).toContain('PRIOR OUTPUT-CONTRACT REJECTIONS');
     // feedback is ephemeral prompt context, NOT cache identity:
     expect(p2.contextHash).toBe(p1.contextHash);
-    expect(p2.promptContractVersion).toBe('evaluator-output-v1.prompt.v12');
+    expect(p2.promptContractVersion).toBe('evaluator-output-v1.prompt.v13');
   });
 });
 

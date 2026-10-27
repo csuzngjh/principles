@@ -21,6 +21,7 @@ import {
   type GovernanceHostKind,
 } from '@principles/core/runtime-v2';
 import { isSensitiveSystemPath } from '@principles/core/runtime-v2/internalization/rule-host-input-builder';
+import { classifyBashRisk } from '@principles/core/runtime-v2/internalization/bash-risk';
 import { scanRetiredContractSymbols } from './legacy-rule-contract-symbols.js';
 import { recordDegradedEnforcement } from './degraded-enforcement-marker.js';
 import type { HostEvent, HostEventResult } from '@principles/core/host';
@@ -169,7 +170,16 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
      * telemetry instead of merging into one opaque 'unavailable'.
      */
     let contextFault: 'provider_absent' | 'provider_returned_undefined' | 'provider_invalid' | 'provider_failed' | undefined;
-    let enrichment: RuleInputEnrichment = { currentGfi: 0, epTier: 0, bashRisk: 'unknown' };
+    // PRI-1047 Owner review R6 #1: the default bashRisk is the deterministic
+    // shared classifier (NOT 'unknown') — hosts that wire no enrichment
+    // provider (the Codex path) previously fed every rule bashRisk='unknown',
+    // so no approval-gate rule could ever exempt read-only investigation.
+    // A wired provider remains the host truth and overrides the default.
+    let enrichment: RuleInputEnrichment = {
+      currentGfi: 0,
+      epTier: 0,
+      bashRisk: classifyBashRisk(canonicalKind === 'execute', input.params),
+    };
     const request: ProductionRuleContextRequest = {
       workspaceDir: event.context.workspaceDir, sessionId: event.context.sessionId,
       targetPath: action.normalizedPath, toolName: input.toolName, rawPayload: event.rawPayload,

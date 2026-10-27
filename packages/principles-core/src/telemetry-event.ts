@@ -202,6 +202,11 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('scribe_cancel_run_failed'),
   Type.Literal('scribe_mark_succeeded_failed'),
   Type.Literal('scribe_update_output_failed'),
+  // SPEC-PRI-1047: scribe consumed (or suppressed) the previous attempt's
+  // validator rejections; anchoring material unavailable; success cleanup CAS.
+  Type.Literal('scribe_prior_validator_errors_suppressed'),
+  Type.Literal('scribe_anchor_material_unavailable'),
+  Type.Literal('scribe_last_validator_errors_cleanup_conflict'),
   Type.Literal('scribe_dependency_not_succeeded'),
   Type.Literal('scribe_lineage_resolve_failed'),
   Type.Literal('scribe_lineage_partial'),

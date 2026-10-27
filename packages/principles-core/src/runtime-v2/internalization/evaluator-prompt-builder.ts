@@ -8,7 +8,8 @@ import type { OutputLanguage } from '../language-directive.js';
 import { buildLanguageDirective } from '../language-directive.js';
 import { buildGoldenTraceFromArtificer, validateGoldenTraceCase, type GoldenTraceCase } from '../golden-trace.js';
 import { validateRuleContextV2 } from './rule-context-v2.js';
-import { deriveRuleCodeVerification } from './rulecode-verification-obligations.js';
+import { deriveRuleCodeVerification, type RuleCodeVerificationCoverage } from './rulecode-verification-obligations.js';
+import type { RuleContextV2 } from './rule-context-v2.js';
 
 export interface EvaluatorPromptBuilderInput {
   taskId: string;
@@ -182,7 +183,26 @@ export interface EvaluatorPromptInput {
   formationContext?: FormationContext;
   /** Present only when the prior attempt was rejected by the validator (PRI-644). */
   priorValidatorErrors?: LastValidatorErrors;
+  /** System-derived planned obligations, never a model-authored execution report. */
+  ruleCodeVerification?: EvaluatorRuleCodeVerificationPlan;
   promptContractVersion: string;
+}
+
+interface EvaluatorRuleCodeVerificationPlan {
+  readonly executionStatus: 'not_executed';
+  readonly source: 'system_counterfactual';
+  readonly contract: 'DesignGateFact/v1';
+  readonly sourceArtificerArtifactId: string;
+  readonly contextHash: string;
+  /** The case inventory is below; do not duplicate its IDs in this display summary. */
+  readonly verificationCoverage: Omit<RuleCodeVerificationCoverage, 'counterfactuals'>;
+  readonly ruleContextBase: Readonly<Record<string, unknown>>;
+  readonly designGateBase: Readonly<Record<string, unknown>>;
+  readonly ruleContexts: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+  readonly actions: Readonly<Record<string, { readonly toolName: string; readonly params: Readonly<Record<string, unknown>> }>>;
+  readonly caseIdPrefix: string;
+  readonly counterfactualColumns: readonly ['caseIdSuffix', 'actionRef', 'ruleContextRef', 'expectedDecision'];
+  readonly counterfactuals: readonly (readonly [caseId: string, actionRef: string, ruleContextRef: string, expectedDecision: string])[];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -238,6 +258,84 @@ export function projectRepeatedGoldenHistoriesForEvaluator(artifact: unknown): u
   return changed ? projected : artifact;
 }
 
+/** Lossless prompt-only marker: a shell call's synthetic normalizedPath is
+ * byte-identical to paramsSummary.command — carrying both doubles every
+ * command. Replacing the copy with normalizedPathSameAsCommand: true keeps
+ * the exact original reconstructible (PRI-1047 R9: the real repair artifact
+ * exceeded the 50000-char prompt limit with both copies present). */
+function markNormalizedPathSameAsCommand(call: Record<string, unknown>): Record<string, unknown> {
+  const params = call.paramsSummary;
+  if (typeof call.normalizedPath !== 'string' || call.normalizedPath === ''
+    || !isRecord(params) || typeof params.command !== 'string'
+    || call.normalizedPath !== params.command) return call;
+  const marked: Record<string, unknown> = { ...call };
+  delete marked.normalizedPath;
+  marked.normalizedPathSameAsCommand = true;
+  return marked;
+}
+
+/** Lossless prompt-only sharing across histories that overlap but are not identical. */
+function projectRepeatedHistoryCallsForEvaluator(artifact: unknown): unknown {
+  if (!isRecord(artifact)) return artifact;
+  const keys = new Map<unknown, string>();
+  let sourceCallChars = 0;
+  const visit = (entry: unknown): void => {
+    if (!isRecord(entry) || !isRecord(entry.ruleContext) || !isRecord(entry.ruleContext.history)
+      || !Array.isArray(entry.ruleContext.history.calls)) return;
+    for (const call of entry.ruleContext.history.calls) {
+      if (!isRecord(call) || typeof call.toJSON === 'function' || Object.values(call).some((value) =>
+        value === undefined || typeof value === 'function' || typeof value === 'symbol')) continue;
+      let key: string | undefined;
+      try { key = JSON.stringify(call); } catch { continue; }
+      if (key === undefined) continue;
+      keys.set(call, key);
+      sourceCallChars += key.length;
+    }
+  };
+  for (const field of ['goldenTraceCases', 'ownerGoldenTraceCases']) {
+    if (Array.isArray(artifact[field])) artifact[field].forEach(visit);
+  }
+  if (Array.isArray(artifact.historicalEvidenceOnlyCases)) artifact.historicalEvidenceOnlyCases.forEach((entry: unknown) => {
+    if (isRecord(entry)) visit(entry.originalCase);
+  });
+  const refs = new Map<string, string>();
+  const calls: Record<string, readonly unknown[]> = {};
+  const columns: Record<string, readonly string[]> = {};
+  const shapeRefs = new Map<string, string>();
+  let referenceChars = 0;
+  const project = (entry: unknown): unknown => {
+    if (!isRecord(entry) || !isRecord(entry.ruleContext) || !isRecord(entry.ruleContext.history)
+      || !Array.isArray(entry.ruleContext.history.calls)) return entry;
+    const projectedCalls = entry.ruleContext.history.calls.map((call: unknown) => {
+      const key = keys.get(call);
+      if (key === undefined || !isRecord(call)) return isRecord(call) ? markNormalizedPathSameAsCommand(call) : call;
+      let ref = refs.get(key);
+      if (ref === undefined) {
+        ref = `h${refs.size + 1}`; refs.set(key, ref);
+        const marked = markNormalizedPathSameAsCommand(call);
+        const fields = Object.keys(marked);
+        const shapeKey = JSON.stringify(fields);
+        let shape = shapeRefs.get(shapeKey);
+        if (shape === undefined) { shape = `s${shapeRefs.size + 1}`; shapeRefs.set(shapeKey, shape); columns[shape] = fields; }
+        calls[ref] = [shape, ...fields.map((field) => marked[field])];
+      }
+      const reference = { evaluatorHistoryCallRef: ref };
+      referenceChars += JSON.stringify(reference).length;
+      return reference;
+    });
+    return { ...entry, ruleContext: { ...entry.ruleContext, history: { ...entry.ruleContext.history, calls: projectedCalls } } };
+  };
+  const projected = { ...artifact };
+  for (const field of ['goldenTraceCases', 'ownerGoldenTraceCases']) {
+    if (Array.isArray(artifact[field])) projected[field] = artifact[field].map(project);
+  }
+  if (Array.isArray(artifact.historicalEvidenceOnlyCases)) projected.historicalEvidenceOnlyCases = artifact.historicalEvidenceOnlyCases.map((entry: unknown) =>
+    isRecord(entry) ? { ...entry, originalCase: project(entry.originalCase) } : entry);
+  const tables = { evaluatorHistoryCalls: calls, evaluatorHistoryCallColumns: columns };
+  return refs.size === 0 || JSON.stringify(tables).length + referenceChars >= sourceCallChars
+    ? artifact : { ...projected, ...tables };
+}
+
 function artifactHasDesignGate(artifact: unknown): boolean {
   if (!isRecord(artifact) || !Array.isArray(artifact.goldenTraceCases)) return false;
   return artifact.goldenTraceCases.some((entry) => {
@@ -246,20 +344,22 @@ function artifactHasDesignGate(artifact: unknown): boolean {
   });
 }
 
-/** Display only: qualification comes from the system-owned Owner stamp, never model facts. */
-function projectHistoricalEvidenceForEvaluator(input: EvaluatorPromptBuilderInput): unknown {
+function deriveVerificationForEvaluator(input: EvaluatorPromptBuilderInput): ReturnType<typeof deriveRuleCodeVerification> | undefined {
   const artifact = input.artificerArtifact;
-  if (!isRecord(artifact)) return artifact;
+  if (!isRecord(artifact)) return undefined;
   const conditions = extractExecutionConditions(input.scribeArtifact);
-  if (conditions.corrupted || !conditions.conditions?.requiredFacts.some((fact) => fact.required)) return artifact;
+  if (conditions.corrupted || !conditions.conditions?.requiredFacts.some((fact) => fact.required)) return undefined;
   const ownerCases = artifact.ownerGoldenTraceCases;
   if (!Array.isArray(ownerCases) || !ownerCases.every((entry: unknown): entry is GoldenTraceCase =>
     validateGoldenTraceCase(entry).valid && isRecord(entry)
-      && (!Object.hasOwn(entry, 'ruleContext') || validateRuleContextV2(entry.ruleContext).valid))) return artifact;
+      && (!Object.hasOwn(entry, 'ruleContext') || validateRuleContextV2(entry.ruleContext).valid))) return undefined;
   const ownerBuild = buildGoldenTraceFromArtificer({ cases: ownerCases });
-  if (!ownerBuild.ok) return artifact;
-  const verification = deriveRuleCodeVerification(input.scribeArtifact, ownerBuild.trace.cases, input.hostToolKinds ?? []);
-  if (!verification.historical.some((entry) => entry.qualification === 'historical_evidence_only')) return artifact;
+  return ownerBuild.ok ? deriveRuleCodeVerification(input.scribeArtifact, ownerBuild.trace.cases, input.hostToolKinds ?? []) : undefined;
+}
+
+/** Display only: qualification comes from the system-owned Owner stamp, never model facts. */
+function projectHistoricalEvidenceForEvaluator(artifact: unknown, verification: ReturnType<typeof deriveRuleCodeVerification> | undefined): unknown {
+  if (!isRecord(artifact) || !verification?.historical.some((entry) => entry.qualification === 'historical_evidence_only')) return artifact;
   const qualificationById = new Map(verification.historical.map((entry) => [entry.caseId, entry]));
   const historicalEvidenceOnlyCases: unknown[] = [];
   const projected: Record<string, unknown> = { ...artifact };
@@ -270,15 +370,78 @@ function projectHistoricalEvidenceForEvaluator(input: EvaluatorPromptBuilderInpu
       const qualification = isRecord(entry) && typeof entry.caseId === 'string'
         ? qualificationById.get(entry.caseId) : undefined;
       if (qualification?.qualification !== 'historical_evidence_only') return true;
-      historicalEvidenceOnlyCases.push({ sourceField: field, originalCase: entry, ...qualification,
-        provenanceNote: field === 'ownerGoldenTraceCases' ? 'Authoritative system-owned Owner historical evidence.' : 'Model-authored mirror; not authority for Owner labels or facts. Qualification is inherited by caseId from the Owner stamp.',
-        qualificationBasis: 'System-derived from the real Scribe executionConditions and system-owned ownerGoldenTraceCases stamp. The original label and missing facts are immutable historical evidence, not executable expectations. Do not change labels or invent historical facts to make replay pass.' });
+      historicalEvidenceOnlyCases.push({ sourceField: field, originalCase: entry, ...qualification });
       return false;
     });
   }
   return { ...projected, historicalEvidenceOnlyCases,
     evaluatorHistoricalQualifications: verification.historical,
+    evaluatorHistoricalProvenance: {
+      ownerGoldenTraceCases: 'Authoritative system-owned Owner historical evidence.',
+      goldenTraceCases: 'Model-authored mirror; not authority for Owner labels or facts. Qualification is inherited by caseId from the Owner stamp.',
+      qualificationBasis: 'System-derived from the real Scribe executionConditions and system-owned ownerGoldenTraceCases stamp. The original label and missing facts are immutable historical evidence, not executable expectations. Do not change labels or invent historical facts to make replay pass.',
+    },
     evaluatorHistoricalQualificationNote: 'Prompt-only projection. historical_evidence_only cases were moved out of executable golden lists; invalid_input remains a validation stop, never a pass. Historical gaps remain unresolved even when independent system_counterfactual checks pass. Stored artifacts, Owner evidence, hashes and sandbox inputs are unchanged.' };
+}
+
+function sharedPromptFields(objects: readonly object[]): Record<string, unknown> {
+  const [first] = objects;
+  if (first === undefined) return {};
+  return Object.fromEntries(Object.entries(first).filter(([key, value]) => objects.every((entry) =>
+    Object.hasOwn(entry, key) && JSON.stringify(Reflect.get(entry, key)) === JSON.stringify(value))));
+}
+
+function withoutSharedPromptFields(value: object, shared: Readonly<Record<string, unknown>>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !Object.hasOwn(shared, key)));
+}
+
+/** Share identical synthetic contexts in the prompt only, preserving every concrete case. */
+function projectVerificationPlan(input: EvaluatorPromptBuilderInput, verification: ReturnType<typeof deriveRuleCodeVerification>): EvaluatorRuleCodeVerificationPlan {
+  const ruleContexts: Record<string, RuleContextV2> = {};
+  const contextRefs = new Map<string, string>();
+  const actions: Record<string, { toolName: string; params: Readonly<Record<string, unknown>> }> = {};
+  const actionRefs = new Map<string, string>();
+  const prefix = 'system-contract:design_approval:';
+  const caseIdPrefix = verification.counterfactuals.every((entry) => entry.caseId.startsWith(prefix)) ? prefix : '';
+  const counterfactuals = verification.counterfactuals.map(({ caseId, toolName, params, expectedDecision, ruleContext }) => {
+    if (ruleContext === undefined) throw new Error('system_counterfactual_context_missing');
+    const key = JSON.stringify(ruleContext);
+    let ruleContextRef = contextRefs.get(key);
+    if (ruleContextRef === undefined) {
+      ruleContextRef = `c${contextRefs.size + 1}`;
+      contextRefs.set(key, ruleContextRef);
+      ruleContexts[ruleContextRef] = ruleContext;
+    }
+    const actionKey = JSON.stringify({ toolName, params });
+    let actionRef = actionRefs.get(actionKey);
+    if (actionRef === undefined) {
+      actionRef = `a${actionRefs.size + 1}`;
+      actionRefs.set(actionKey, actionRef);
+      actions[actionRef] = { toolName, params };
+    }
+    return [caseId.slice(caseIdPrefix.length), actionRef, ruleContextRef, expectedDecision] as const;
+  });
+  const contexts = Object.values(ruleContexts);
+  const sharedContext = sharedPromptFields(contexts);
+  const sharedFacts = sharedPromptFields(contexts.map((entry) => entry.facts));
+  const designGateBase = sharedPromptFields(contexts.flatMap((entry) => entry.facts.designGate === undefined ? [] : [entry.facts.designGate]));
+  const contextOverrides = Object.fromEntries(Object.entries(ruleContexts).map(([ref, context]) => {
+    const facts = withoutSharedPromptFields(context.facts, sharedFacts);
+    if (Object.hasOwn(facts, 'designGate') && context.facts.designGate !== undefined) {
+      facts.designGate = withoutSharedPromptFields(context.facts.designGate, designGateBase);
+    }
+    return [ref, { ...withoutSharedPromptFields(context, sharedContext), facts }];
+  }));
+  return {
+    executionStatus: 'not_executed', source: 'system_counterfactual', contract: 'DesignGateFact/v1',
+    sourceArtificerArtifactId: input.sourceArtificerArtifactId, contextHash: input.contextHash,
+    verificationCoverage: { required: verification.required, executed: 0, passed: 0, failed: 0,
+      unavailable: verification.unavailable, historical: verification.historical,
+      historicalCoverage: { executed: 0, passed: 0, failed: 0, unavailable: verification.historical.length },
+      contractCoverage: { required: counterfactuals.length, executed: 0, passed: 0, failed: 0, unavailable: counterfactuals.length } },
+    ruleContextBase: { ...sharedContext, facts: sharedFacts }, designGateBase, ruleContexts: contextOverrides,
+    actions, caseIdPrefix, counterfactualColumns: ['caseIdSuffix', 'actionRef', 'ruleContextRef', 'expectedDecision'], counterfactuals,
+  };
 }
 
 export interface EvaluatorPromptBuildResult {
@@ -514,13 +677,17 @@ PRIOR OUTPUT-CONTRACT REJECTIONS (when \`priorValidatorErrors\` is present):
 //    defeating one is situation (c) → mismatchFindings → Owner.
 // Additive: mismatchFindings is optional on the wire; a run without formation
 // evidence sees only the new CONSTRAINTS clause and the version string.
-export const EVALUATOR_PROMPT_CONTRACT_VERSION = 'evaluator-output-v1.prompt.v12';
+// PRI-1047: v13 connects the existing system verification plan before judgment.
+export const EVALUATOR_PROMPT_CONTRACT_VERSION = 'evaluator-output-v1.prompt.v13';
 
 export const EVALUATOR_DESIGN_GATE_ADDENDUM = `
 
 DESIGN GATE FACT (when present in an artificer goldenTraceCase ruleContext.facts):
 PROMPT VIEW QUALIFICATION: historicalEvidenceOnlyCases contains immutable historical evidence moved out of goldenTraceCases/ownerGoldenTraceCases. evaluatorHistoricalQualifications gives the system-derived qualification and missingFacts for each Owner caseId. These cases are not executable golden expectations and must not create requiredChanges to relabel them, add invented facts, or make the rule reproduce their labels. Evaluate actual code against the declared contract and executable cases; report historical gaps separately. Invalid input remains a validation stop.
+SYSTEM VERIFICATION PLAN: input.ruleCodeVerification is derived by the system from the current Scribe executionConditions, system-owned Owner cases, and hostToolKinds. Its concrete counterfactuals are existing executable obligations, not execution results: executionStatus=not_executed and zero executed/passed/failed mean the deterministic gate has not run yet. Each counterfactual row follows counterfactualColumns [caseIdSuffix, actionRef, ruleContextRef, expectedDecision]; its full caseId is caseIdPrefix + caseIdSuffix. Resolve its actionRef in actions for its exact toolName/params, and ruleContextRef in ruleContexts for its context overrides. Reconstruct the exact runtime context by overlaying the overrides on ruleContextBase and merging their facts objects; when the overrides.facts has its own designGate, merge that gate over designGateBase. If it has no designGate, do not add one beyond any already present in ruleContextBase.facts. These defaults contain only fields exactly identical across the corresponding source contexts or gates. References share only byte-identical values; every case keeps its own expectedDecision. All these facts are explicitly synthetic; sourceArtificerArtifactId/contextHash bind the plan to this request, never to historical approval. For traceCoverage, assess model golden cases together with this system plan; do not demand duplicate model-authored golden cases when the system cases already cover the obligation, or demand the Artificer fabricate historical facts. RequiredChanges may still identify concrete code defects or genuinely uncovered contract obligations. Unavailable obligations and historical evidence-only gaps remain visible and unresolved; no planned case establishes a pass. Only the later deterministic replay report can establish execution results, and real failures still block approval.
 Historical cases missing the declared decisive fact are historical_evidence_only: preserve their labels as evidence, never require their block/allow labels as direct replay expectations or invent historical approvals. Independent system_counterfactual cases verify the declared runtime contract; their success does not mean historical replay success.\nThe runtime input path is \`input.context.facts.designGate\`. It is a host-supplied DesignGateFact v1 with resolution \`approved\`, \`not_approved\`, \`not_required\`, or \`unknown\`, plus sourceRef/revision, task/spec/scope binding refs, and revoked state. Read the actual case value and binding; never infer approval from params, command text, history, or a missing field. \`unknown\` is neither approval nor explicit rejection.
+
+EVALUATOR HISTORY CALL TABLE: a history.calls entry with evaluatorHistoryCallRef refers to a row in artificerArtifact.evaluatorHistoryCalls at that key. Each row is [shapeRef, ...fieldValues]; artificerArtifact.evaluatorHistoryCallColumns[shapeRef] gives the field names in the same order. Reconstruct the exact full call object by pairing those names and values, then apply the normalizedPathSameAsCommand marker: a call carrying normalizedPathSameAsCommand: true had normalizedPath exactly equal to its paramsSummary.command string — restore that string as normalizedPath. Expand each reference in place and keep array order; no call, field or fact was removed. This lossless prompt-only sharing leaves stored artifacts and deterministic replay unchanged.
 
 EVALUATOR DISPLAY NOTE: when a case carries evaluatorDisplayNote, its exact repeated history is abbreviated in this prompt only. Treat it as the same history named by the note; the stored artifact and deterministic replay retain the full original.`;
 
@@ -530,11 +697,13 @@ export class EvaluatorPromptBuilder {
     // PRI-714: language directive for review fields (empty string when
     // outputLanguage is undefined — instruction stays byte-identical).
     const languageDirective = buildLanguageDirective(input.outputLanguage, 'review');
+    const verification = deriveVerificationForEvaluator(input);
     const promptInput: EvaluatorPromptInput = {
       taskId: input.taskId,
       contextHash: input.contextHash,
       sourceArtificerArtifactId: input.sourceArtificerArtifactId,
-      artificerArtifact: projectRepeatedGoldenHistoriesForEvaluator(projectHistoricalEvidenceForEvaluator(input)),
+      artificerArtifact: projectRepeatedHistoryCallsForEvaluator(projectRepeatedGoldenHistoriesForEvaluator(projectHistoricalEvidenceForEvaluator(input.artificerArtifact, verification))),
+      ...(verification !== undefined ? { ruleCodeVerification: projectVerificationPlan(input, verification) } : {}),
       scribeArtifact: input.scribeArtifact,
       previousEvaluation: input.previousEvaluation,
       hostToolCatalog: input.hostToolCatalog,

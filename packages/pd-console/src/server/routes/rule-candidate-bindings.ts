@@ -51,7 +51,7 @@ export async function handleRuleCandidateBindingsRoute(req: IncomingMessage, res
     return;
   }
   const model = new RuleCandidateBindingConsoleModel(ctx.workspaceDir);
-  const match = /^\/([^/]+)(?:\/(review|revise-once))?$/.exec(ctx.subPath);
+  const match = /^\/([^/]+)(?:\/(review|revise-once|source-correct-once))?$/.exec(ctx.subPath);
   const url = new URL(req.url ?? '/', 'http://localhost');
   try {
     if ((ctx.subPath === '' || ctx.subPath === '/') && req.method === 'GET') {
@@ -70,6 +70,27 @@ export async function handleRuleCandidateBindingsRoute(req: IncomingMessage, res
     if (req.method !== 'POST') { sendMethodNotAllowed(res); return; }
     let raw: unknown;
     try { raw = JSON.parse(await readBody(req)); } catch { sendBadRequest(res, '请求必须是有效的 JSON。'); return; }
+    if (match[2] === 'source-correct-once') {
+      // SPEC-PRI-1047: one bounded Owner source-correction per candidate. Closed
+      // field set: chain identity + digest precondition + reason/requestId —
+      // never identity-fabrication or approval fields.
+      if (!closed(raw, ['expectedBindingRevision', 'expectedScribeTaskId', 'expectedArtificerTaskId', 'expectedScribeArtifactDigest', 'reason', 'requestId'])
+        || !revision(raw.expectedBindingRevision) || raw.expectedBindingRevision < 1
+        || !text(raw.expectedScribeTaskId, 512) || !text(raw.expectedArtificerTaskId, 512)
+        || !digest(raw.expectedScribeArtifactDigest) || !text(raw.reason, 2000) || !text(raw.requestId, 200)) {
+        sendBadRequest(res, '请提交当前关联、原候选链任务与工件摘要；不接受身份或批准字段。'); return;
+      }
+      const result = await model.correctSource(candidateId, {
+        expectedBindingRevision: raw.expectedBindingRevision,
+        expectedScribeTaskId: raw.expectedScribeTaskId,
+        expectedArtificerTaskId: raw.expectedArtificerTaskId,
+        expectedScribeArtifactDigest: raw.expectedScribeArtifactDigest,
+        reason: raw.reason,
+        requestId: raw.requestId,
+      }, ctx.ownerIdentity.ownerId);
+      if (result.status === 'refused') failure(res, result); else sendSuccess(res, result);
+      return;
+    }
     if (match[2] === 'revise-once') {
       if (!closed(raw, ['expectedBindingRevision', 'expectedScribeTaskId', 'expectedTaskRevisionEpoch', 'requestId'])
         || !revision(raw.expectedBindingRevision) || raw.expectedBindingRevision < 1

@@ -191,7 +191,13 @@ function spySplitPipelineSuccess(ws: WorkerWorkspace): { calls: string[] } {
     const self = this as unknown as { stateManager: RuntimeStateManager };
     try {
       const leased = await self.stateManager.acquireLease({ taskId, owner: 'split-diagnostician-orchestrator', runtimeKind: 'pi-ai' });
-      const runId = `run_${taskId}_${leased.attemptCount}`;
+      // The lease manager owns run-id assignment (attempt_number stays globally
+      // sequential per task while attempt_count is epoch-local — SPEC-PRI-1047),
+      // so read the run row this lease actually created instead of reconstructing
+      // the id from the task counter.
+      const runs = await self.stateManager.getRunsByTask(taskId);
+      const leasedRun = [...runs].reverse().find((run) => run.executionStatus === 'running');
+      const runId = leasedRun?.runId ?? `run_${taskId}_${leased.attemptCount}`;
       const connection = new SqliteConnection(ws.root);
       try {
         // Match DiagRouterRunner's persisted contract: updateRunOutput marks

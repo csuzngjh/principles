@@ -59,6 +59,12 @@ import {
   type FormationTaskView,
 } from './formation-context.js';
 import {
+  collectScribeIntentMaterial,
+  findUndeclaredApprovalDependency,
+  isTextualBasisAnchored,
+  normaliseForAnchor,
+} from './textual-basis-anchor.js';
+import {
   createPITaskDiagnosticJson,
   hydratePITaskRecord,
   mergePITaskMetadata,
@@ -486,84 +492,6 @@ interface IntentAssessmentExecutable {
 type IntentAssessment = IntentAssessmentExecutable | IntentAssessmentStop;
 
 /**
- * Normalise text for anchoring: lowercase, collapse whitespace, strip
- * punctuation to a comparable spine. Deliberately language-mixed (the scribe
- * contract can carry zh-CN or en material).
- */
-function normaliseForAnchor(text: string): string {
-  return text.toLowerCase().replace(/[\s`'"“”‘’、，。：；！？（）\]{}()【】,.;:!?\-—_/\\*#]+/gu, '');
-}
-
-interface IntentMaterial {
-  /** Normalised concatenation of the intent-distillation surfaces. */
-  readonly normalisedText: string;
-  /** Which audited fields carry approval semantics (for the audit detail). */
-  readonly approvalSignalFields: readonly string[];
-  readonly hasApprovalSignal: boolean;
-}
-
-/** Approval-semantics signal vocabulary (substring, EN+ZH). */
-const APPROVAL_SIGNAL_WORDS = ['confirm', 'approv', '批准', '确认'] as const;
-
-/** Which vocabulary words appear in a raw text (for upstream audit detail). */
-function approvalSignalsInText(text: string): readonly string[] {
-  if (typeof text !== 'string' || text.length === 0) return [];
-  const lower = text.toLowerCase();
-  return APPROVAL_SIGNAL_WORDS.filter((word) => lower.includes(word));
-}
-
-/**
- * Collect the intent-distillation material from the parsed scribe artifact:
- * the four Owner-intent contract fields plus the principle draft statement —
- * exactly the surfaces the scribe instructions require to be grounded in
- * Owner-attributed text. Absent/ill-typed fields are skipped (the
- * intentContract presence itself is already a precondition upstream).
- */
-function collectIntentMaterial(parsed: unknown): IntentMaterial {
-  const fields: { name: string; text: string }[] = [];
-  const push = (name: string, value: unknown): void => {
-    if (typeof value === 'string' && value.trim() !== '') fields.push({ name, text: value });
-  };
-  if (typeof parsed === 'object' && parsed !== null) {
-    const record = parsed as Record<string, unknown>;
-    const draft = typeof record.principleDraft === 'object' && record.principleDraft !== null
-      ? (record.principleDraft as Record<string, unknown>)
-      : {};
-    push('principleDraft.statement', draft.statement);
-    if (typeof record.intentContract === 'object' && record.intentContract !== null) {
-      const contract = record.intentContract as Record<string, unknown>;
-      push('intentContract.ownerIntent', contract.ownerIntent);
-      push('intentContract.targetBehavior', contract.targetBehavior);
-      push('intentContract.forbiddenBehavior', contract.forbiddenBehavior);
-      push('intentContract.validationExpectation', contract.validationExpectation);
-    }
-  }
-  const normalisedText = normaliseForAnchor(fields.map((field) => field.text).join(' '));
-  const approvalSignalFields = fields
-    .filter((field) => APPROVAL_SIGNAL_WORDS.some((word) => field.text.toLowerCase().includes(word)))
-    .map((field) => field.name);
-  return {
-    normalisedText,
-    approvalSignalFields,
-    hasApprovalSignal: approvalSignalFields.length > 0,
-  };
-}
-
-/**
- * A declared basis is anchored when a bounded normalised prefix of it appears
- * in the normalised intent material (quote-or-precise-cite contract). Very
- * short bases (<8 normalised chars) must appear in full — too little text to
- * trust a partial anchor.
- */
-function isTextualBasisAnchored(textualBasis: string, normalisedMaterial: string): boolean {
-  const normalisedBasis = normaliseForAnchor(textualBasis);
-  if (normalisedBasis.length < 4) return false;
-  if (normalisedMaterial.length === 0) return false;
-  const anchor = normalisedBasis.length >= 8 ? normalisedBasis.slice(0, 12) : normalisedBasis;
-  return normalisedMaterial.includes(anchor);
-}
-
-/**
  * The pure decision core (no I/O): assess the intent basis from the resolved
  * scribe artifact. Deterministic — no LLM, no keyword approval detection; the
  * condition basis is the scribe's structured declaration, never prose parsed
@@ -647,45 +575,44 @@ export function assessIntentBasis(input: {
 
   // SPEC-RULECODE-QUALITY-001 A1 (Owner review R2/R3) — two-direction audit
   // of the declaration against BOTH material pools (scribe + upstream).
+  // PRI-1047 Owner review R6 #2: the judgment now lives in ONE shared
+  // predicate (textual-basis-anchor.ts findUndeclaredApprovalDependency) that
+  // the Scribe success boundary enforces identically — an under-reported
+  // approval dependency must die at the producer, not survive to this gate.
   // 口径 (R3 exact-bypass fix): only required:true declarations count as
-  // claimed — a required:false entry is semantically unclaimed (downstream
-  // filters it out), so design_approval + required:false must NOT satisfy
-  // the name check and then filter to an empty dependency set.
-  // The keyword sweep is a SECONDARY, stop-only layer; the PRIMARY guarantee
-  // is the upstream binding above. Known disclosed boundary (NOT closed):
-  // synonym phrasings absent from the small vocabulary can evade the sweep
-  // when BOTH layers use them — the structural answers are the upstream
-  // binding and the structured declaration, not vocabulary growth.
-  const scribeMaterial = collectIntentMaterial(parsed);
+  // claimed — a required:false entry is semantically unclaimed.
+  const scribeMaterial = collectScribeIntentMaterial(parsed);
   const effectiveFacts = conditions.requiredFacts.filter((fact) => fact.required);
-  const effectiveFactKinds = effectiveFacts.map((fact) => fact.factKind.toLowerCase()).join(' ');
-  const upstreamSignalFields = approvalSignalsInText(upstreamMaterial.normalisedText);
-  const pools: { label: string; hasSignal: boolean; fields: readonly string[] }[] = [
-    { label: 'scribe', hasSignal: scribeMaterial.hasApprovalSignal, fields: scribeMaterial.approvalSignalFields },
-    { label: 'upstream', hasSignal: upstreamSignalFields.length > 0, fields: upstreamSignalFields },
-  ];
-  for (const pool of pools) {
-    if (pool.hasSignal && !/approv/.test(effectiveFactKinds)) {
-      return {
-        status: 'intent_unverified',
-        reasonCode: 'approval_dependency_undeclared',
-        detail: `${pool.label} material carries approval semantics (signal in: ${pool.fields.join(', ')}) but executionConditions declare no REQUIRED approval-kind fact — an under-reported approval dependency must not reach generation`,
-        nextAction: 'Re-run the scribe stage: declare the approval dependency in executionConditions (factKind e.g. design_approval with required: true) with its textual basis, or correct the material if it overstates the requirement.',
-      };
-    }
+  const undeclared = findUndeclaredApprovalDependency({
+    scribeMaterial,
+    upstreamNormalisedText: upstreamMaterial.normalisedText,
+    requiredFacts: conditions.requiredFacts,
+  });
+  if (undeclared !== null) {
+    return {
+      status: 'intent_unverified',
+      reasonCode: 'approval_dependency_undeclared',
+      detail: `${undeclared.pool} material carries approval semantics (signal in: ${undeclared.fields.join(', ')}) but executionConditions declare no REQUIRED approval-kind fact — an under-reported approval dependency must not reach generation`,
+      nextAction: 'Re-run the scribe stage: declare the approval dependency in executionConditions (factKind e.g. design_approval with required: true) with its textual basis, or correct the material if it overstates the requirement.',
+    };
   }
 
   // textualBasis anchoring — same required:true口径; the anchor pool is the
   // UNION of the scribe intent material and the upstream material, so a fact
   // requirement can be bound to the upstream intent it was distilled from.
+  // PRI-1047: the shared check (textual-basis-anchor.ts) requires the WHOLE
+  // normalised basis to appear as a CONTIGUOUS span — citation labels,
+  // ellipsis-bridged reconstructions and fabricated tails all fail here, and
+  // the Scribe success boundary enforces the identical rule before the
+  // artifact can ever be persisted.
   const combinedPool = scribeMaterial.normalisedText + ' ' + upstreamMaterial.normalisedText;
   for (const fact of effectiveFacts) {
     if (!isTextualBasisAnchored(fact.textualBasis, combinedPool)) {
       return {
         status: 'intent_unverified',
         reasonCode: 'textual_basis_unanchored',
-        detail: `required fact '${fact.factKind}' textualBasis ("${fact.textualBasis.replace(/\s+/g, ' ').slice(0, 120)}") cannot be anchored in the intent material (scribe intentContract + statement + upstream philosopher material)`,
-        nextAction: 'Re-run the scribe stage: quote or precisely cite the Owner-attributed text the fact requirement was read from.',
+        detail: `required fact '${fact.factKind}' textualBasis ("${fact.textualBasis.replace(/\s+/g, ' ').slice(0, 120)}") is not a continuous verbatim span of the intent material (scribe intentContract + statement + upstream philosopher material); citation labels, ellipsis-omitted reconstructions and paraphrases cannot anchor a fact requirement`,
+        nextAction: 'Re-run the scribe stage with the anchoring feedback: copy a CONTINUOUS original sentence from the Owner-attributed text the fact requirement was read from (labels/quotes/ellipsis outside the sentence are stripped by you, not by the checker).',
       };
     }
   }

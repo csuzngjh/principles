@@ -181,12 +181,17 @@ describe('RuntimeStateManager task/run truth alignment', () => {
     let task = await mgr.getTask('task-retry-preserve');
     if (!task) return;
     expect(task.status).toBe('retry_wait');
-    expect(task.attemptCount).toBe(1);
+    // SPEC-PRI-1047 epoch-local counting: the seeded counter (1) + the consumed
+    // lease attempt = 2; the sweep must preserve THAT, not reset or re-derive it.
+    expect(task.attemptCount).toBe(2);
 
     await mgr.acquireLease({ taskId: 'task-retry-preserve', owner: 'agent-2', runtimeKind: 'openclaw' });
     task = await mgr.getTask('task-retry-preserve');
     if (!task) return;
-    expect(task.attemptCount).toBe(2);
+    // SPEC-PRI-1047: attempt_count is the task's own (epoch-local) budget counter —
+    // each lease consumes one attempt ON TOP of it (never overwritten by the
+    // global run ordinal). Seeded 1 + lease + re-lease = 3.
+    expect(task.attemptCount).toBe(3);
     expect(task.status).toBe('leased');
   });
 
