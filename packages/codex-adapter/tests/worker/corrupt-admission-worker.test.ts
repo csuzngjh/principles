@@ -90,6 +90,13 @@ function writeConfig(root: string): void {
   // Ingestion off ⇒ catch-up is a zero-I/O skip; nothing reaches a provider.
   config.features.codex_conversation_ingestion.enabled = false;
   config.features.internalization_auto_consumer.enabled = true;
+  // ADR-0029: the shipped default pi-ai profile is deliberately needs_setup; the
+  // worker must advance the healthy candidate, so declare a ready profile.
+  (config.runtimeProfiles as Record<string, unknown>)['pd.default'] = {
+    type: 'pi-ai', provider: 'test-provider', model: 'test-model',
+    apiKeyEnv: 'PD_CORRUPT_WORKER_TEST_KEY', baseUrl: 'http://127.0.0.1:8080/v1',
+  };
+  process.env.PD_CORRUPT_WORKER_TEST_KEY = 'test-key';
   fs.writeFileSync(path.join(root, '.pd', 'config.yaml'), JSON.stringify(config));
 }
 

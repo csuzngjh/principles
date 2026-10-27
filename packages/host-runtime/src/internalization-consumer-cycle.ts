@@ -40,7 +40,6 @@ import {
   L2AgentLoopAdapter,
   ArtificerL2Adapter,
   buildL2PrincipleReaderFromLedger,
-  OpenClawCliRuntimeAdapter,
   storeEmitter,
   createProductionGateDeps,
   resolveRuntimeConfigFromPdConfig,
@@ -811,12 +810,10 @@ export async function runInternalizationConsumerCycle(
           ...(taskRuntimeConfig.systemPrompt ? { systemPrompt: taskRuntimeConfig.systemPrompt } : {}),
         });
       }
-    } else if (taskRuntimeKind === 'openclaw-cli') {
-      adapter = new OpenClawCliRuntimeAdapter({
-        runtimeMode: taskRuntimeConfig.openclawMode ?? 'default',
-        workspaceDir: workspaceDir,
-      });
     } else {
+      // ADR-0029 retired every backend except pi-ai; the resolver can only hand
+      // back 'pi-ai', so anything else (including legacy 'openclaw-cli') means
+      // the readiness invariant broke.
       throw new Error(`Unsupported runtime kind resolved for auto-consumer: ${taskRuntimeKind}`);
     }
 

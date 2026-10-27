@@ -138,10 +138,6 @@ function collectEmittedNames(sources, runnerNames) {
   for (const runner of runnerNames) {
     for (const suffix of summarySuffixes) note(`${runner}_${suffix}`, ARTIFACT_SUMMARY_FILE, 0);
   }
-  // Dynamic site 2: openclaw-cli-runtime-adapter mapCliResultToTelemetry
-  // returns exactly these two literals (:590-610).
-  note('runtime_invocation_failed', 'openclaw-cli-runtime-adapter.ts (closed map)', 0);
-  note('runtime_invocation_succeeded', 'openclaw-cli-runtime-adapter.ts (closed map)', 0);
   // Dynamic site 3 (PRI-846 review round): resolveFormationContext forwards
   // its closed emitEvent vocabulary through the CONSUMER's callback, which
   // base-peer-runner composes as `${runnerName}_${suffix}` — the literal

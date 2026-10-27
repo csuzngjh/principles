@@ -41,7 +41,13 @@ function makeWorkspace(): string {
   const config = getDefaultPdConfig();
   config.features.internalization_auto_consumer.enabled = true;
   config.features.internalization_full_chain.enabled = true;
-  config.internalAgents.defaultRuntime = config.internalAgents.defaultRuntime || 'pd.default';
+  // ADR-0029: the shipped default is a pi-ai profile with empty placeholders,
+  // which is deliberately `needs_setup`. This test is about ordering, not
+  // setup, so declare the ready profile the same way the sibling cycle tests do.
+  (config.runtimeProfiles as Record<string, unknown>)['pd.default'] = {
+    type: 'pi-ai', provider: 'base-prov', model: 'base-model', apiKeyEnv: 'BASE_KEY',
+  };
+  config.internalAgents.defaultRuntime = 'pd.default';
   fs.writeFileSync(path.join(root, '.pd', 'config.yaml'), JSON.stringify(config));
   return root;
 }

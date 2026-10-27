@@ -203,12 +203,16 @@ describe('buildProfileLabel', () => {
 });
 
 describe('resolveRuntimeFromPdConfig', () => {
-  it('returns resolved runtime config from valid openclaw config.yaml', () => {
+  it('fails closed for a config bound to a retired openclaw profile (ADR-0029)', () => {
     const tmp = mkTmpDir();
     writeConfig(tmp, makeValidOpenClawConfigYaml(tmp));
     try {
       const result = resolveRuntimeFromPdConfig(tmp);
-      expect(isRuntimeConfigError(result.result)).toBe(false);
+      expect(isRuntimeConfigError(result.result)).toBe(true);
+      if (!isRuntimeConfigError(result.result)) throw new Error('Expected RuntimeConfigError');
+      expect(result.result.reason).toBe('needs_setup');
+      expect(result.result.message).toMatch(/retired|ADR-0029/i);
+      expect(result.result.nextAction).toMatch(/pi-ai/);
       expect(result.configSource).toBe('.pd/config.yaml');
       expect(result.legacyWarnings).toEqual([]);
     } finally { rmTmpDir(tmp); }
@@ -262,15 +266,18 @@ describe('resolveRuntimeFromPdConfig', () => {
     } finally { rmTmpDir(tmp); }
   });
 
-  it('returns defaults and profile info when config.yaml is missing', () => {
+  it('fails closed on the seeded default when config.yaml is missing (ADR-0029 §5)', () => {
     const tmp = mkTmpDir();
     try {
       const result = resolveRuntimeFromPdConfig(tmp);
-      // Default profile is openclaw.default (MVP default runtime) → resolves
-      // successfully without env var.
-      expect(isRuntimeConfigError(result.result)).toBe(false);
+      // The seeded default is the pi-ai profile with empty placeholders, so a
+      // workspace with no config resolves fail-closed to needs_setup rather
+      // than borrowing a host CLI session it may not even have.
+      expect(isRuntimeConfigError(result.result)).toBe(true);
+      if (!isRuntimeConfigError(result.result)) throw new Error('Expected RuntimeConfigError');
+      expect(result.result.reason).toBe('needs_setup');
       expect(result.configSource).toBe('.pd/config.yaml');
-      expect(result.runtimeProfileId).toBe('openclaw.default');
+      expect(result.runtimeProfileId).toBe('pd.default');
       expect(typeof result.runtimeProfileLabel).toBe('string');
     } finally { rmTmpDir(tmp); }
   });

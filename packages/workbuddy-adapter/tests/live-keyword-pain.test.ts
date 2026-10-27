@@ -9,7 +9,7 @@ afterAll(cleanupTempDirs);
 
 function setup(auto = true, host = true) {
   const home = makeHome();
-  const workspace = makeGovernance(home, { workbuddyFlag: host });
+  const workspace = makeGovernance(home, { workbuddyFlag: host, readyRuntime: true });
   const configPath = path.join(workspace, '.pd', 'config.yaml');
   const config = JSON.parse(fs.readFileSync(configPath, 'utf8')) as {
     features: Record<string, { enabled: boolean; category: string }>;

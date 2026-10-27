@@ -155,18 +155,6 @@ vi.mock('@principles/core/runtime-v2', () => ({
       fetchArtifacts: vi.fn().mockResolvedValue([]),
     };
   }),
-  OpenClawCliRuntimeAdapter: vi.fn().mockImplementation(function () {
-    return {
-      kind: vi.fn().mockReturnValue('openclaw-cli'),
-      getCapabilities: vi.fn(),
-      healthCheck: vi.fn(),
-      startRun: vi.fn().mockResolvedValue({ runId: 'run-oc-001', runtimeKind: 'openclaw-cli', startedAt: new Date().toISOString() }),
-      pollRun: vi.fn().mockResolvedValue({ runId: 'run-oc-001', status: 'succeeded' }),
-      cancelRun: vi.fn().mockResolvedValue(undefined),
-      fetchOutput: vi.fn().mockResolvedValue({ runId: 'run-oc-001', payload: {} }),
-      fetchArtifacts: vi.fn().mockResolvedValue([]),
-    };
-  }),
   DefaultDreamerValidator: vi.fn().mockImplementation(function () {
     return { validate: vi.fn().mockResolvedValue({ valid: true, errors: [] }) };
   }),

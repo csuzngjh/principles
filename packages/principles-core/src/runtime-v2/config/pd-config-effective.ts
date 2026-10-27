@@ -140,7 +140,10 @@ export function computeEffectivePdConfig(userConfig: PdConfig | null | undefined
     runtimeProfiles[profileId] = { ...profile };
   }
 
-  // Ensure default profile exists
+  // Ensure default profile exists — the pi-ai default (ADR-0029: pi-ai is the
+  // only internal-agent runtime backend). A legacy `type: 'openclaw'` profile
+  // already present in the user's config is carried through untouched: it stays
+  // readable, and its agents resolve to needs_setup at the readiness check.
   if (!Object.hasOwn(runtimeProfiles, DEFAULT_RUNTIME_PROFILE_ID)) {
     runtimeProfiles[DEFAULT_RUNTIME_PROFILE_ID] = { ...DEFAULT_RUNTIME_PROFILE };
     warnings.push(`runtime profile '${DEFAULT_RUNTIME_PROFILE_ID}' not found in config, using default`);

@@ -73,11 +73,10 @@ function buildProfileLabel(id: string, profile: RuntimeProfile): string {
 
 function assessProfileReadiness(profile: RuntimeProfile): RedactedRuntimeProfileSummary['readiness'] {
   if (profile.type === 'openclaw') {
-    const oc = profile;
-    // OpenClaw profile with source=default is always "ready" (delegated to OpenClaw)
-    if (oc.source === 'default') return 'ready';
-    // OpenClaw profile with provider+model may be ready
-    if (oc.provider && oc.model) return 'ready';
+    // ADR-0029: the openclaw backend is retired, so nothing that runs on it can
+    // be ready. This must stay in step with checkOpenClawReadiness — the source
+    // it used to duplicate ("source: default is always ready") delegated
+    // readiness to the host and is no longer true.
     return 'needs_setup';
   }
   // pi-ai: static redaction cannot access env vars, so we cannot confirm

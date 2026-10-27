@@ -1308,8 +1308,7 @@ describe('PiAiRuntimeAdapter', () => {
     it('unknown outputSchemaRef fails loud with output_invalid (rc-3, was silent skip)', async () => {
       // CodeRabbit PR #1259: previously an unknown non-empty outputSchemaRef
       // resolved to undefined and silently skipped schema-gated validation.
-      // That is an rc-9/rc-3 silent-fallback. Now it fails loud, consistent
-      // with OpenClawCliRuntimeAdapter.fetchOutput.
+      // That is an rc-9/rc-3 silent-fallback. Now it fails loud.
       // NOTE: no mockComplete setup — resolution fails BEFORE any LLM call.
       const adapter = makeAdapter();
       await expect(adapter.startRun(makeStartRunInput({
@@ -1545,9 +1544,8 @@ describe('PiAiRuntimeAdapter', () => {
     it('10. unknown schemaRef fails loud (rc-3; was backward-compatible silent skip)', async () => {
       // CodeRabbit PR #1259: previously an unknown non-empty outputSchemaRef
       // silently skipped schema validation (the "backward-compatible behavior").
-      // That silent skip is an rc-9/rc-3 defect — now it fails loud, matching
-      // OpenClawCliRuntimeAdapter. NOTE: no mockComplete setup because schema
-      // resolution fails before any LLM call.
+      // That silent skip is an rc-9/rc-3 defect — now it fails loud. NOTE: no
+      // mockComplete setup because schema resolution fails before any LLM call.
       resetMock();
       const adapter = makeAdapter();
       await expect(adapter.startRun(makeStartRunInput({

@@ -171,7 +171,6 @@ runtime-v2/
 │   ├── runner-phase.ts
 │   └── runner-result.ts
 ├── adapter/                         ← Runtime Adapter 实现
-│   ├── openclaw-cli-runtime-adapter.ts
 │   ├── pi-ai-runtime-adapter.ts
 │   ├── test-double-runtime-adapter.ts
 │   └── principle-tree-ledger-adapter.ts
