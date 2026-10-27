@@ -1180,7 +1180,7 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
     const stateManager = new RuntimeStateManager({ workspaceDir });
     try {
       await stateManager.initialize();
-      const existing = await stateManager.getTask(taskId);
+      let existing = await stateManager.getTask(taskId);
       if (existing === null) {
         const stateDir = path.join(workspaceDir, '.state');
         const config = loadPdConfigForPlugin(workspaceDir);
@@ -1221,7 +1221,16 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
         // worker, so release it immediately (hook processes exit anyway).
         await disposePainSignalBridgesForWorkspace(workspaceDir).catch(() => undefined);
         if (result.status === 'failed') {
-          return { ok: false, reason: `task_submit_failed:${(result.message ?? result.failureCategory ?? 'unknown').slice(0, 160)}`, nextAction: 'inspect the diagnostician runtime profile; reconciliation retries task creation without losing the admitted pain' };
+          // Concurrent-ensure race (hook redelivery × worker reconcile): both
+          // callers passed the getTask probe before either committed, and the
+          // DETERMINISTIC task id makes the loser's insert hit the store PK.
+          // The task existing now is the idempotency contract winning, not a
+          // failure — converge on it (Case-B repair semantics) instead of
+          // reporting a task_submit_failed that contradicts the durable state.
+          existing = await stateManager.getTask(taskId);
+          if (existing === null) {
+            return { ok: false, reason: `task_submit_failed:${(result.message ?? result.failureCategory ?? 'unknown').slice(0, 160)}`, nextAction: 'inspect the diagnostician runtime profile; reconciliation retries task creation without losing the admitted pain' };
+          }
         }
       }
       db.prepare('UPDATE governance_signal_admissions SET diagnostician_task_id = ?, updated_at = ? WHERE logical_observation_key = ?')
