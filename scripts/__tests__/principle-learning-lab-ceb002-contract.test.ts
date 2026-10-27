@@ -123,12 +123,41 @@ describe('CEB-002 preregistration contract consistency (post-merge gate)', () =>
     expect(pr.freezeRequirement).toContain('Owner approval');
   });
 
-  it('10. builder determinism: rebuilding the suite reproduces the identical contract', { timeout: 30000 }, () => {
-    const before = fs.readFileSync(path.join(study, 'preregistration.draft.json'), 'utf8');
+  it('8a. stopping rules: every field value-matched including the four halt-immediately triggers', () => {
+    const sr = pr.stoppingRules;
+    expect(sr.consecutiveUnknown).toBe(2);
+    expect(sr.batchUnknownRateNotEvaluable).toBe(0.4);
+    expect(sr.identityAnomaly).toBe('halt immediately');
+    expect(sr.hashDrift).toBe('halt immediately');
+    expect(sr.ledgerInconsistency).toBe('halt immediately');
+    expect(sr.budgetBreach).toBe('halt immediately');
+    expect(sr.missingData).toContain('retained in denominator');
+    expect(sr.missingData).toContain('never attributed to behavior');
+  });
+
+  it('10. builder determinism: ISOLATED rebuild reproduces the identical contract — the REAL CEB-002 directory is never touched', { timeout: 30000 }, () => {
     const { execFileSync } = require('node:child_process');
-    // rebuild in-place (the builder writes to the CEB-002 directory)
-    execFileSync('node', [path.join(labRoot, 'build-ceb002-suite.mjs')], { encoding: 'utf8', stdio: 'pipe' });
-    const after = fs.readFileSync(path.join(study, 'preregistration.draft.json'), 'utf8');
-    expect(after).toBe(before); // byte-identical: the builder IS the contract authority
+    const os = require('node:os');
+    // snapshot the real study's prereg + three append-only ledgers BEFORE
+    const preregBefore = fs.readFileSync(path.join(study, 'preregistration.draft.json'), 'utf8');
+    const ledgersBefore = ['budget-ledger.jsonl', 'events.jsonl', 'adjudications.jsonl'].map(
+      (f) => fs.readFileSync(path.join(study, f), 'utf8'),
+    );
+    // rebuild into an isolated temp directory via --output-dir
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ceb002-determinism-'));
+    try {
+      execFileSync('node', [path.join(labRoot, 'build-ceb002-suite.mjs'), '--output-dir', tmp], { encoding: 'utf8', stdio: 'pipe' });
+      const isolated = fs.readFileSync(path.join(tmp, 'preregistration.draft.json'), 'utf8');
+      expect(isolated).toBe(preregBefore); // byte-identical contract
+      // anti-regression: the REAL CEB-002 directory is completely untouched
+      const preregAfter = fs.readFileSync(path.join(study, 'preregistration.draft.json'), 'utf8');
+      expect(preregAfter).toBe(preregBefore);
+      const ledgersAfter = ['budget-ledger.jsonl', 'events.jsonl', 'adjudications.jsonl'].map(
+        (f) => fs.readFileSync(path.join(study, f), 'utf8'),
+      );
+      ledgersAfter.forEach((content, i) => expect(content).toBe(ledgersBefore[i]));
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });

@@ -38,7 +38,12 @@ import { sha256 } from './lib/challenge-freeze.mjs';
 
 const labRoot = path.dirname(fileURLToPath(import.meta.url));
 const src = path.join(labRoot, 'challenge-studies', 'CEB-001');
-const out = path.join(labRoot, 'challenge-studies', 'CEB-002');
+// --output-dir overrides the destination (for isolated determinism tests);
+// the default remains the real CEB-002 study directory (normal build flow).
+const outIdx = process.argv.indexOf('--output-dir');
+const out = outIdx >= 0 && process.argv[outIdx + 1]
+  ? path.resolve(process.argv[outIdx + 1])
+  : path.join(labRoot, 'challenge-studies', 'CEB-002');
 const STUDY = 'CEB-002';
 const MAPPING_ID = 'CEB-002-draft';
 
