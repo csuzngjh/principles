@@ -355,34 +355,26 @@ function resolveRuntimeConfigForProfileImpl(args: {
     };
   }
 
-  // Convert profile to adapter config
+  // Convert profile to adapter config. Only a pi-ai profile can reach here:
+  // readiness answers needs_setup for the retired 'openclaw' type (ADR-0029)
+  // and createAdapterConfigFromProfile throws for anything but pi-ai.
   const adapterConfig = createAdapterConfigFromProfile(profile, '');
 
-  if (adapterConfig.runtimeKind === 'pi-ai') {
-    return {
-      runtimeKind: 'pi-ai',
-      provider: adapterConfig.provider,
-      model: adapterConfig.model,
-      apiKeyEnv: adapterConfig.apiKeyEnv,
-      baseUrl: adapterConfig.baseUrl,
-      timeoutMs: adapterConfig.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-      maxRetries: adapterConfig.maxRetries,
-      maxTokens: adapterConfig.maxTokens,
-      agentId: 'main',
-      // PRI-719: profile identity for run evidence (declared == executed).
-      runtimeProfileId: profileId,
-      ...(adapterConfig.reasoning !== undefined ? { reasoning: adapterConfig.reasoning } : {}),
-      ...(adapterConfig.systemPrompt ? { systemPrompt: adapterConfig.systemPrompt } : {}),
-    };
-  }
-
-  // Unreachable through the readiness gate: checkAgentRuntimeReadiness answers
-  // needs_setup for the retired 'openclaw' type (ADR-0029), so only a pi-ai
-  // profile gets this far. Fail loud if that invariant ever breaks.
-  throw new Error(
-    `[PainSignalRuntimeFactory] runtime profile '${profileId}' resolved to the non-executable ` +
-    `adapter kind '${String((adapterConfig as { runtimeKind?: string }).runtimeKind)}' (ADR-0029 retired every backend except pi-ai).`,
-  );
+  return {
+    runtimeKind: 'pi-ai',
+    provider: adapterConfig.provider,
+    model: adapterConfig.model,
+    apiKeyEnv: adapterConfig.apiKeyEnv,
+    baseUrl: adapterConfig.baseUrl,
+    timeoutMs: adapterConfig.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    maxRetries: adapterConfig.maxRetries,
+    maxTokens: adapterConfig.maxTokens,
+    agentId: 'main',
+    // PRI-719: profile identity for run evidence (declared == executed).
+    runtimeProfileId: profileId,
+    ...(adapterConfig.reasoning !== undefined ? { reasoning: adapterConfig.reasoning } : {}),
+    ...(adapterConfig.systemPrompt ? { systemPrompt: adapterConfig.systemPrompt } : {}),
+  };
 }
 
 export function resolveRuntimeConfigForAgent(

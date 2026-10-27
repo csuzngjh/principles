@@ -59,7 +59,8 @@ interface ProfileFormState {
 
 const EMPTY_FORM: ProfileFormState = {
   id: "",
-  type: "openclaw",
+  // ADR-0029: 'openclaw' is read-only legacy — new profiles are always pi-ai.
+  type: "pi-ai",
   provider: "",
   model: "",
   apiKeyEnv: "",
@@ -356,9 +357,14 @@ export function RuntimeProfileManager({
                 disabled={mode === "edit" || submitting}
                 className={inputClass}
               >
-                <option value="openclaw">
-                  {t("pages.controlCenter.profiles.typeOpenclaw")}
-                </option>
+                {/* ADR-0029: 'openclaw' is not offered for new profiles; a
+                    legacy profile being edited still shows its own type. */}
+                {form.type === "openclaw" && (
+                  <option value="openclaw">
+                    {t("pages.controlCenter.profiles.typeOpenclaw")} (
+                    {t("pages.controlCenter.profiles.retiredBadge")})
+                  </option>
+                )}
                 <option value="pi-ai">
                   {t("pages.controlCenter.profiles.typePiAi")}
                 </option>
@@ -603,8 +609,13 @@ export function RuntimeProfileManager({
                     )}
                   </div>
                   {/* type */}
-                  <span className="font-mono text-[11.5px] text-ink-3">
+                  <span className="font-mono text-[11.5px] text-ink-3 flex items-center gap-[5px]">
                     {p.type}
+                    {p.type === "openclaw" && (
+                      <span className="text-[9.5px] font-mono px-[5px] py-[1px] rounded-[2px] bg-amber/10 text-amber border border-amber/22 tracking-[0.02em]">
+                        {t("pages.controlCenter.profiles.retiredBadge")}
+                      </span>
+                    )}
                   </span>
                   {/* provider */}
                   <span className="text-ink-3 truncate">

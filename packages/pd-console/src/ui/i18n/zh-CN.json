@@ -1588,6 +1588,7 @@
         "fieldSourcePlaceholder": "default",
         "typeOpenclaw": "openclaw",
         "typePiAi": "pi-ai",
+        "retiredBadge": "已退役",
         "validationIdRequired": "Profile ID 不能为空",
         "validationProviderRequired": "pi-ai profile 必须填写 provider",
         "validationModelRequired": "pi-ai profile 必须填写 model",

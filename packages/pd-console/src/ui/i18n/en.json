@@ -1588,6 +1588,7 @@
         "fieldSourcePlaceholder": "default",
         "typeOpenclaw": "openclaw",
         "typePiAi": "pi-ai",
+        "retiredBadge": "retired",
         "validationIdRequired": "Profile ID is required",
         "validationProviderRequired": "pi-ai profile requires provider",
         "validationModelRequired": "pi-ai profile requires model",

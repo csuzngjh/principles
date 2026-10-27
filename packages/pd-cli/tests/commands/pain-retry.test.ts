@@ -250,7 +250,7 @@ vi.mock('../../src/services/resolve-runtime-from-pd-config.js', () => ({
   resolveRuntimeFromPdConfig: mockResolveRuntimeFromPdConfig,
 }));
 
-import { handlePainRetry } from '../../src/commands/pain-retry.js';
+import { handlePainRetry, registerPainRetryCommand } from '../../src/commands/pain-retry.js';
 
 // ── Test Data ──────────────────────────────────────────────────────────────────
 
@@ -1060,31 +1060,16 @@ describe('pd pain retry — human-readable output', () => {
 });
 
 describe('Commander wiring for pd pain retry', () => {
+  // Real registration (cli-7): options come from the production wiring, so a
+  // removed flag shows up as an unknown option instead of passing vacuously.
   function createPainRetryProgram(): { program: Command; capturedOpts: Record<string, unknown> } {
     const program = new Command();
     program.exitOverride();
     const capturedOpts: Record<string, unknown> = {};
 
-    program
-      .command('pain')
-      .command('retry')
-      .requiredOption('-p, --pain-id <painId>', 'Pain ID')
-      .option('-w, --workspace <path>', 'Workspace directory')
-      .option('-r, --runtime <kind>', 'Runtime kind')
-      .option('--openclaw-local', 'Use local OpenClaw')
-      .option('--openclaw-gateway', 'Use gateway OpenClaw')
-      .option('-a, --agent <agentId>', 'Agent ID')
-      .option('--provider <name>', 'LLM provider')
-      .option('--model <id>', 'Model ID')
-      .option('--apiKeyEnv <name>', 'API key env var')
-      .option('--baseUrl <url>', 'Custom base URL')
-      .option('--maxRetries <n>', 'Max retries', parseInt)
-      .option('--timeoutMs <ms>', 'Timeout ms', parseInt)
-      .option('--force', 'Force retry of succeeded task')
-      .option('--json', 'Output raw JSON')
-      .action(async (opts) => {
-        Object.assign(capturedOpts, opts);
-      });
+    registerPainRetryCommand(program.command('pain'), async (opts) => {
+      Object.assign(capturedOpts, opts);
+    });
 
     return { program, capturedOpts };
   }
@@ -1169,22 +1154,25 @@ describe('Commander wiring for pd pain retry', () => {
     expect(capturedOpts.apiKeyEnv).toBe('OPENROUTER_KEY');
   });
 
-  it('CMD-14: -a (--agent) sets opts.agent', async () => {
-    const { program, capturedOpts } = createPainRetryProgram();
-    await program.parseAsync(['node', 'pd', 'pain', 'retry', '--pain-id', 'abc', '-a', 'main']);
-    expect(capturedOpts.agent).toBe('main');
+  it('CMD-14: retired -a (--agent) flag is not registered (ADR-0029)', async () => {
+    const { program } = createPainRetryProgram();
+    await expect(
+      program.parseAsync(['node', 'pd', 'pain', 'retry', '--pain-id', 'abc', '-a', 'main'])
+    ).rejects.toThrow(/unknown option '-a'/);
   });
 
-  it('CMD-15: --openclaw-local sets opts.openclawLocal === true', async () => {
-    const { program, capturedOpts } = createPainRetryProgram();
-    await program.parseAsync(['node', 'pd', 'pain', 'retry', '--pain-id', 'abc', '--openclaw-local']);
-    expect(capturedOpts.openclawLocal).toBe(true);
+  it('CMD-15: retired --openclaw-local flag is not registered (ADR-0029)', async () => {
+    const { program } = createPainRetryProgram();
+    await expect(
+      program.parseAsync(['node', 'pd', 'pain', 'retry', '--pain-id', 'abc', '--openclaw-local'])
+    ).rejects.toThrow(/unknown option '--openclaw-local'/);
   });
 
-  it('CMD-16: --openclaw-gateway sets opts.openclawGateway === true', async () => {
-    const { program, capturedOpts } = createPainRetryProgram();
-    await program.parseAsync(['node', 'pd', 'pain', 'retry', '--pain-id', 'abc', '--openclaw-gateway']);
-    expect(capturedOpts.openclawGateway).toBe(true);
+  it('CMD-16: retired --openclaw-gateway flag is not registered (ADR-0029)', async () => {
+    const { program } = createPainRetryProgram();
+    await expect(
+      program.parseAsync(['node', 'pd', 'pain', 'retry', '--pain-id', 'abc', '--openclaw-gateway'])
+    ).rejects.toThrow(/unknown option '--openclaw-gateway'/);
   });
 });
 

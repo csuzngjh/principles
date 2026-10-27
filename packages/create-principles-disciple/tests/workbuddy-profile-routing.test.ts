@@ -621,13 +621,20 @@ describe('round-4 S1: fresh install binds the whole learning chain to the instal
 
     // Resolution-level truth of the report: those agents STILL resolve to
     // openclaw.default (their Owner/init choice), not to the install runtime.
+    // That profile is read-only legacy since ADR-0029: it stays bound and stays
+    // visible, but readiness never reports 'ready' and building an adapter
+    // config fails loud instead of silently delegating to a host CLI session.
     const loaded = loadPdConfigForPlugin(lab.governanceDir);
     expect(loaded.ok).toBe(true);
     const dreamer = resolveAgentRuntimeBinding(loaded.effective, 'dreamer');
     expect(dreamer.ok).toBe(true);
     if (dreamer.ok) {
       expect(dreamer.profileId).toBe('openclaw.default');
-      expect(createAdapterConfigFromProfile(dreamer.profile, lab.governanceDir).runtimeKind).toBe('openclaw-cli');
+      const readiness = checkAgentRuntimeReadiness(dreamer.profile, sentinelEnv);
+      expect(readiness.readiness).toBe('needs_setup');
+      expect(readiness.reason).toMatch(/retired \(ADR-0029\)/);
+      expect(readiness.nextAction).toContain('pi-ai');
+      expect(() => createAdapterConfigFromProfile(dreamer.profile, lab.governanceDir)).toThrow(/retired \(ADR-0029\)/);
     }
   });
 

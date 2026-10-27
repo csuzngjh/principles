@@ -1397,6 +1397,18 @@ export function createRuntimeProfile(
     return { ok: false, statusCode: 400, error: structResult.error, message: structResult.message };
   }
 
+  // ADR-0029: the 'openclaw' profile type is read-only legacy. Existing legacy
+  // profiles keep parsing and stay listed, but PD must never write a new one.
+  if (structResult.type === 'openclaw') {
+    return {
+      ok: false,
+      statusCode: 400,
+      error: 'retired_profile_type',
+      message: `Runtime profile type 'openclaw' is retired (ADR-0029) and cannot be created.`,
+      nextAction: 'Create a pi-ai profile instead (provider + model + apiKeyEnv).',
+    };
+  }
+
   // 3. Load existing config — refuse to write on malformed (rc-9)
   const loadResult = loadPdConfig(workspaceDir);
   if (!loadResult.ok) {

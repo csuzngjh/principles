@@ -5,7 +5,7 @@ import * as os from 'os';
 import * as yaml from 'js-yaml';
 import Database from 'better-sqlite3';
 import { runConsumerCycle } from '../src/service/internalization-auto-consumer-service.js';
-import { DreamerRunner, PhilosopherRunner, PiAiRuntimeAdapter, RuntimeStateManager, InternalizationOrchestrator } from '@principles/core/runtime-v2';
+import { DreamerRunner, PhilosopherRunner, RuntimeStateManager, InternalizationOrchestrator } from '@principles/core/runtime-v2';
 import { SystemLogger } from '../src/core/system-logger.js';
 
 // We mock the dictionary service to prevent unwanted DB lookups

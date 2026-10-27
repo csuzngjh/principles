@@ -1643,7 +1643,7 @@ describe('PATCH /api/v1/config/features/:featureName', () => {
 // ===========================================================================
 
 describe('POST /api/v1/config/profiles', () => {
-  it('creates a new openclaw profile and persists to config.yaml', async () => {
+  it('rejects creating a retired openclaw profile (ADR-0029: read-only legacy)', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('POST', {
       url: '/api/v1/config/profiles',
@@ -1655,19 +1655,17 @@ describe('POST /api/v1/config/profiles', () => {
     const res = createMockResponse();
     await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles' });
 
-    expect(res.statusCode).toBe(201);
-    const data = okEnvelope<{ profileId: string; profile: { type: string; provider?: string } }>(res);
-    expect(data.profileId).toBe('new-openclaw');
-    expect(data.profile.type).toBe('openclaw');
-    expect(data.profile.provider).toBe('ollama');
+    expect(res.statusCode).toBe(400);
+    const err = errorEnvelope(res);
+    expect(err.error).toBe('retired_profile_type');
+    expect(err.message).toContain('retired (ADR-0029)');
 
-    // Verify persisted to disk
+    // Nothing was written: PD never creates an openclaw profile.
     const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
     const raw = fs.readFileSync(configPath, 'utf8');
     const parsed = yaml.load(raw) as Record<string, unknown>;
     const profiles = parsed.runtimeProfiles as Record<string, Record<string, unknown>>;
-    expect(Object.hasOwn(profiles, 'new-openclaw')).toBe(true);
-    expect(profiles['new-openclaw'].provider).toBe('ollama');
+    expect(Object.hasOwn(profiles, 'new-openclaw')).toBe(false);
   });
 
   it('creates a new pi-ai profile', async () => {
@@ -1699,7 +1697,12 @@ describe('POST /api/v1/config/profiles', () => {
       url: '/api/v1/config/profiles',
       body: {
         id: 'lmstudio-local',
-        profile: { type: 'openclaw', provider: 'lmstudio', model: 'qwen3' },
+        profile: {
+          type: 'pi-ai',
+          provider: 'lmstudio',
+          model: 'qwen3',
+          apiKeyEnv: 'LMSTUDIO_API_KEY',
+        },
       },
     });
     const res = createMockResponse();
@@ -1796,7 +1799,12 @@ describe('POST /api/v1/config/profiles', () => {
       url: '/api/v1/config/profiles',
       body: {
         id: 'new-profile',
-        profile: { type: 'openclaw', source: 'default' },
+        profile: {
+          type: 'pi-ai',
+          provider: 'openai',
+          model: 'gpt-4o',
+          apiKeyEnv: 'OPENAI_API_KEY',
+        },
       },
     });
     const res = createMockResponse();
