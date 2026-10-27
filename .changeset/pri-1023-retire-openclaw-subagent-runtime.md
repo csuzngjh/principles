@@ -2,6 +2,7 @@
 '@principles/core': minor
 '@principles/pd-cli': minor
 '@principles/host-runtime': patch
+'principles-disciple': patch
 'create-principles-disciple': patch
 ---
 
