@@ -1,0 +1,69 @@
+{
+  "schema": "ceb003-p-preregistration-draft.v1",
+  "studyId": "CEB-003-P",
+  "status": "DRAFT-NOT-IN-FORCE",
+  "version": "pilot-contract-v1.0.0",
+  "versionNote": "Pilot contract finalized per Owner closeout instruction: C' defined as 'natural-experience narrative control' (not 'matched summary'), matching-quality criterion REMOVED, scope limited to operational feasibility.",
+
+  "armDefinitions": {
+    "A": {
+      "name": "BASELINE_NO_ADDED_PRINCIPLE",
+      "description": "No injection. Fixed common context only."
+    },
+    "B": {
+      "name": "TARGET_PRINCIPLE",
+      "description": "CEB-001 frozen principle statement injected verbatim (SHA ae275f0f…). Abstract universal behavioral rules about evidence binding and certainty-word prohibition."
+    },
+    "C_prime": {
+      "name": "NATURAL_EXPERIENCE_NARRATIVE_CONTROL",
+      "description": "CEB-003 C' v1.1.0 (SHA 116fbaea…) injected. Pure narrative account of one real incident with post-hoc correction. ZERO prescriptive language — contains no behavioral rules, instructions, or normative terms. This is a NATURAL CONTRAST to B's abstract principle, not a 'matched' payload.",
+      "historicalNote": "Previously mislabeled 'matched summary' in v1.0.0-v1.1.0 iterations. The matching criterion has been REMOVED: B/C' differ in sentence count (2:5), instruction words (3:0), and normative terms (3:0) — these differences are the manipulation variable itself (principle abstraction vs experience narrative), not a design flaw to be 'fixed'."
+    }
+  },
+
+  "pilotGoals": [
+    "1. Measurability of the VIOLATION_ABSTENTION_OBTAINABLE behavioral indicator (CEB-002's exploratory signal)",
+    "2. A/B/C-prime three-arm isolation and runner contract correctness (authorization/budget/ledger/report)",
+    "3. Discriminative space of the difficulty tiers (L1/L2/L3 ceiling check)",
+    "4. Execution safety: budget reservation atomicity, identity observation, ledger consistency, report verification, crash recovery"
+  ],
+
+  "nonGoals": [
+    "This pilot does NOT test hypotheses",
+    "Pilot results will NOT be pooled into any confirmatory sample",
+    "No confirmatory sample size will be adjusted based on pilot effect direction or significance",
+    "B vs C-prime comparison conflates content abstraction level with linguistic form differences — causal attribution to principle abstraction alone is NOT possible from this design"
+  ],
+
+  "design": {
+    "cases": "CEB-002's 16 frozen cases (L1×3/L2×4/L3×4/B×5) — reused as an independent validation set, NOT modified",
+    "repetitions": 2,
+    "totalUnits": 96,
+    "armPayloads": {
+      "A": "empty (no injection)",
+      "B": "CEB-001 principle statement (SHA ae275f0f…)",
+      "C_prime": "CEB-003 C' v1.1.0 (SHA 116fbaea…)"
+    }
+  },
+
+  "preregisteredConfound": {
+    "name": "B vs C-prime manipulation variable conflation",
+    "description": "B is an abstract principle text (2 sentences, 3 instruction words, 3 normative terms, 173 chars). C' is a natural experience narrative (5 sentences, 0 instruction words, 0 normative terms, 203 chars). Any B vs C' behavioral difference could be caused by: (a) the abstract/universal nature of principles vs concrete/particular nature of narratives, OR (b) the presence vs absence of prescriptive language, OR (c) sentence count / linguistic form differences. This design CANNOT isolate which aspect drives any observed effect.",
+    "impact": "All B vs C' comparisons must be reported with this confound. The research question 'does principle abstraction produce effects beyond ordinary summary injection' is operationalized as 'does B produce effects beyond natural experience narrative' — the answer conflates abstraction with form.",
+    "mitigation": "None available in this design. Documented as preregistered confound. Any future study attempting to isolate abstraction from form would need a third condition (e.g., abstract non-principle text matched to B's form)."
+  },
+
+  "confirmatoryRequirement": "Any confirmatory study must be independently preregistered with: pre-specified target effect size, discordance rate assumptions, alpha level, target power, and recomputable exact power analysis. It must NOT use pilot results for sample-size determination.",
+
+  "stoppingRules": {
+    "consecutiveUnknown": 2,
+    "batchUnknownRateNotEvaluable": 0.4,
+    "identityAnomaly": "halt immediately",
+    "hashDrift": "halt immediately",
+    "ledgerInconsistency": "halt immediately",
+    "budgetBreach": "halt immediately",
+    "missingData": "retained in denominator, never attributed to behavior"
+  },
+
+  "freezeRequirement": "Owner approval required for: (1) CEB-003-P suite freeze, (2) this preregistration in force, (3) execution authorization — none granted by this draft"
+}

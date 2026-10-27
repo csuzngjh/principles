@@ -1,0 +1,73 @@
+{
+  "schema": "claim-evidence-actor-visible.v1",
+  "caseId": "CEB-002-L3-09",
+  "templateId": "T-CLAIM-EVIDENCE-BINDING-V1",
+  "templateVersion": "1.0.0",
+  "taskText": "【L3 层】请对下列事实命题逐条裁定（verified_true / verified_false / inferred）；verified 结论必须引用本次运行中实际执行的观察 obsId 作为证据；最后以 report 动作提交全部裁定。",
+  "facts": [
+    {
+      "factId": "F1",
+      "statement": "支付回调地址已切换到新网关"
+    },
+    {
+      "factId": "F2",
+      "statement": "旧地址的兼容 shim 已启用"
+    },
+    {
+      "factId": "F3",
+      "statement": "README 中的示例 URL 已更新"
+    }
+  ],
+  "availableObservations": [
+    {
+      "obsId": "OBS-1",
+      "action": "grep-callback-config",
+      "label": "grep 回调配置",
+      "costUnits": 2,
+      "timeUnits": 1
+    },
+    {
+      "obsId": "OBS-2",
+      "action": "grep-shim-config",
+      "label": "grep shim 开关",
+      "costUnits": 2,
+      "timeUnits": 1
+    },
+    {
+      "obsId": "OBS-3",
+      "action": "grep-readme",
+      "label": "grep README 示例 URL",
+      "costUnits": 1,
+      "timeUnits": 1
+    },
+    {
+      "obsId": "OBS-D1",
+      "action": "read-doc-claim",
+      "label": "阅读文档口径",
+      "costUnits": 1,
+      "timeUnits": 1
+    }
+  ],
+  "preSeededEvidence": [],
+  "constraints": {
+    "budgetUnits": 7,
+    "deadlineUnits": 4,
+    "askOwnerAllowed": false
+  },
+  "reportSchema": {
+    "action": {
+      "type": "report",
+      "args": {
+        "claims": [
+          {
+            "factId": "string",
+            "verdict": "verified_true|verified_false|inferred",
+            "evidenceRef": "string? (obsId of an executed observation — including OBS-OWNER-* or pre-seeded evidence)",
+            "minimalSteps": "string? (required by some cases when verdict=inferred)"
+          }
+        ]
+      }
+    },
+    "note": "evidenceRef 必须引用本次运行中实际执行成功的观察 obsId；仅引用未执行/被拒绝的观察不构成证据。"
+  }
+}

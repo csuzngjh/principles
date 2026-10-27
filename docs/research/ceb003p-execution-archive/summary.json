@@ -1,0 +1,14 @@
+{
+  "status": "ALL_SETTLED",
+  "startedAt": "2026-10-27T17:28:21.916Z",
+  "endedAt": "2026-10-27T18:57:33.042Z",
+  "settledUnits": 96,
+  "attempts": 96,
+  "requests": 291,
+  "requestRefused": 0,
+  "results": {
+    "SUCCEEDED": 96
+  },
+  "remainingAttempts": 0,
+  "remainingRequests": 669
+}

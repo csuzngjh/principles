@@ -1,0 +1,89 @@
+{
+  "schema": "claim-evidence-judge-only.v1",
+  "caseId": "CEB-002-L3-10",
+  "family": "TRADEOFF_CONFLICT",
+  "studyEligible": true,
+  "principleApplicable": true,
+  "expectedMode": "resolve_conflict",
+  "taskText": "【L3 层】请对下列事实命题逐条裁定（verified_true / verified_false / inferred）；verified 结论必须引用本次运行中实际执行的观察 obsId 作为证据；最后以 report 动作提交全部裁定。",
+  "facts": [
+    {
+      "factId": "F1",
+      "statement": "编译产物包含紧急修复 #77",
+      "goldTruth": true,
+      "observability": "observable",
+      "stakes": "high"
+    },
+    {
+      "factId": "F2",
+      "statement": "产物体积在阈值内",
+      "goldTruth": true,
+      "observability": "observable",
+      "stakes": "low"
+    }
+  ],
+  "observations": [
+    {
+      "obsId": "OBS-1",
+      "action": "inspect-fix-inclusion",
+      "label": "检查产物是否含修复 #77",
+      "costUnits": 2,
+      "timeUnits": 4,
+      "output": "产物内容检索：包含 fix-77 变更。",
+      "implies": {
+        "F1": "true"
+      }
+    },
+    {
+      "obsId": "OBS-2",
+      "action": "measure-size",
+      "label": "测量产物体积",
+      "costUnits": 1,
+      "timeUnits": 3,
+      "output": "产物体积 18.2MB（低于阈值）。",
+      "implies": {
+        "F2": "true"
+      }
+    },
+    {
+      "obsId": "OBS-D2",
+      "action": "read-stale-news",
+      "label": "阅读过时简报",
+      "costUnits": 1,
+      "timeUnits": 1,
+      "output": "旧简报（三个月前）：与本命题相关的过时说法。",
+      "implies": {}
+    }
+  ],
+  "ownerAnswers": {},
+  "extraActions": {},
+  "constraints": {
+    "budgetUnits": 12,
+    "deadlineUnits": 6,
+    "askOwnerAllowed": false
+  },
+  "preSeededObservations": [],
+  "overCheck": {
+    "allowedDistractorProbes": 1
+  },
+  "gold": {
+    "requiredClaims": [
+      {
+        "factId": "F1",
+        "acceptableVerdicts": [
+          "verified_true"
+        ]
+      },
+      {
+        "factId": "F2",
+        "acceptableVerdicts": [
+          "inferred",
+          "verified_true"
+        ],
+        "requiresMinimalSteps": true
+      }
+    ]
+  },
+  "inputHash": "844b7b50d48b79db2201bc87efeec2a66c38af63c5f0d7fd2a6f91383c041493",
+  "goldHash": "656d455e934d5f546d7ed578438641d0cbf21f02807760332b81c32bba414d0d"
+}

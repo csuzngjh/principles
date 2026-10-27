@@ -1,0 +1,29 @@
+{
+  "schema": "ceb003-payload-audit-result.v1",
+  "studyId": "CEB-003",
+  "auditedAt": "2026-10-27T16:00:00Z",
+  "cPrimeVersion": "c-prime-v1.0.0",
+  "cPrimeSha256": "596ef77ab7c2408608b5697fff0fefabd0c34ad2a14385bb12c9d71f752996b8",
+  "results": {
+    "charMatch": { "B": 173, "C_prime": 205, "ratio": 1.18, "verdict": "PASS (≤1.20)" },
+    "sentenceMatch": { "B": 2, "C_prime": 2, "ratio": 1.00, "verdict": "PASS (perfect match)" },
+    "instructionMatch": { "B": 3, "C_prime": 4, "ratio": 1.33, "verdict": "PASS (≤1.50)" },
+    "normativeTerms": { "B": 3, "C_prime": 1, "ratio": 0.33, "verdict": "RESIDUAL CONFOUND (see below)" },
+    "noRuleLeak": { "verdict": "PASS", "detail": "B's abstract universal rules NOT found in C'" },
+    "narrativePreserved": { "verdict": "PASS", "detail": "C' retains narrative structure, is not a rule list" },
+    "armIsolation": { "verdict": "PASS", "detail": "A empty, B delivers principle, C' delivers matched summary, auditArmIsolation ok" }
+  },
+  "residualConfound": {
+    "dimension": "normative term density (1 vs 3)",
+    "cause": "B is an explicitly rule-based principle text (3 instances of 必须/禁止/原则). C' is a narrative experience summary with instructional framing (1 必须). This density difference is the definitional contrast between 'principle abstraction' and 'experience summary' — it cannot be eliminated without destroying the manipulation variable.",
+    "impact": "If B-arm behavioral differences are caused by normative-language density rather than principle content, the study cannot distinguish these. This risk is acknowledged and reported with every B vs C' comparison.",
+    "mitigation": "None available without destroying the research question. Documented as preregistered confound."
+  },
+  "improvementFromOriginal": {
+    "sentenceRatio_originalC": 2.50,
+    "sentenceRatio_cPrime": 1.00,
+    "instructionWords_originalC": 0,
+    "instructionWords_cPrime": 4,
+    "improvement": "Sentence ratio improved from 2:5 to 2:2 (perfect). Instruction words from 0 to 4 (now exceeding B's 3)."
+  }
+}

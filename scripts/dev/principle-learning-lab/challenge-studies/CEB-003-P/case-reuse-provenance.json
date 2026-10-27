@@ -1,0 +1,106 @@
+{
+  "schema": "ceb003p-case-reuse-provenance.v1",
+  "studyId": "CEB-003-P",
+  "sourceStudy": "CEB-002 (frozen suite, executed 2026-10-27)",
+  "sourceSuiteHash": "02cbc15cfd9cf8a8b9e986950fdf722fcda6632604f4e62d4bd50ea0950d04f5",
+  "buildInput": "CEB-002 DRAFT judge-only caseDefs committed on main — the exact input prepare-ceb002-freeze.mjs compiled into the CEB-002 frozen suite",
+  "identityRule": "compileCase(caseDef).inputHash/goldHash must equal the CEB-002 frozen suite-manifest values (asserted by prepare-ceb003p-freeze.mjs before any write)",
+  "cases": [
+    {
+      "caseId": "CEB-002-L1-01",
+      "sourceCaseId": "CEB-002-L1-01",
+      "inputHash": "3bf21e5d3b82898e1fcbcdd3640fe990dd88549dd8250f6f5a122add6d0c5ada",
+      "goldHash": "e5bc7ca302c3694fc2781ec18a86694107c0e6d25c6ea7d22c46a83b027307d5"
+    },
+    {
+      "caseId": "CEB-002-L1-02",
+      "sourceCaseId": "CEB-002-L1-02",
+      "inputHash": "202cb34861145f5c4b7f297a5066ccb58e781bbc930994cfd8d423cb4f7ec427",
+      "goldHash": "183a0a59274f98ab8093cbcfa7a22f9abde9dd887c4549f19dae365d1f65c501"
+    },
+    {
+      "caseId": "CEB-002-L1-03",
+      "sourceCaseId": "CEB-002-L1-03",
+      "inputHash": "d80ab30b5cdd5c7480f01b91027f5334bada8c397db8c2245aeed1c8625f7bc9",
+      "goldHash": "fea6c80c3e252a0083ddf366cd98dc4f96bbfc12afe607b75ed8f4385c880245"
+    },
+    {
+      "caseId": "CEB-002-L2-04",
+      "sourceCaseId": "CEB-002-L2-04",
+      "inputHash": "024bb3b1a3d8eab197fb90ee1b2f3aa259b103d870cb19c4a37b873a491cf347",
+      "goldHash": "661900af792b9775bde90e0eb065d55d5caff8c31c0d011c3b1e46d0cd6a94ae"
+    },
+    {
+      "caseId": "CEB-002-L2-05",
+      "sourceCaseId": "CEB-002-L2-05",
+      "inputHash": "53cb67d8b716119606521f93f0a8de55568815df3eac1f31e981a40772e8280c",
+      "goldHash": "ca0ed5cf2f2b8cec23e217878f59dd49f7a6a61b973f9a8b28228f2b6aac927f"
+    },
+    {
+      "caseId": "CEB-002-L2-06",
+      "sourceCaseId": "CEB-002-L2-06",
+      "inputHash": "a88b3733531c02021c3366ea7f755d8a98cb3f6211524319b547257d3b4ca04a",
+      "goldHash": "8c84bff851be8528543e4e9e13d7219dda632a59d26723bbbd2d3928248b9753"
+    },
+    {
+      "caseId": "CEB-002-L2-07",
+      "sourceCaseId": "CEB-002-L2-07",
+      "inputHash": "8ab9e564cbb497fb7a572faaae2d62fc2ddcdba10b3a08aec021b92538bdc644",
+      "goldHash": "bfbd05d8ca8cb4bce1fd688f249f25f2918f167710617f5271db3d414ccfc6f3"
+    },
+    {
+      "caseId": "CEB-002-L3-08",
+      "sourceCaseId": "CEB-002-L3-08",
+      "inputHash": "ff97c90b90a2bd0a83477f391ccbf5ec940ee100f606a8173de07065ad09eb32",
+      "goldHash": "d39ac2cdc4df72240156fafa13efe8a6fc6543c302d5c7af89566aaf41c73ab3"
+    },
+    {
+      "caseId": "CEB-002-L3-09",
+      "sourceCaseId": "CEB-002-L3-09",
+      "inputHash": "d9e12c57c5f4a13f94bc50f7a2fc31d885d767c9fdd3f0b1543ec1caf4f07799",
+      "goldHash": "514477f4fb33236ef1d6b042b5df4b7f818dd0b8d4d2148898b840b636d7be16"
+    },
+    {
+      "caseId": "CEB-002-L3-10",
+      "sourceCaseId": "CEB-002-L3-10",
+      "inputHash": "844b7b50d48b79db2201bc87efeec2a66c38af63c5f0d7fd2a6f91383c041493",
+      "goldHash": "656d455e934d5f546d7ed578438641d0cbf21f02807760332b81c32bba414d0d"
+    },
+    {
+      "caseId": "CEB-002-L3-11",
+      "sourceCaseId": "CEB-002-L3-11",
+      "inputHash": "a834692ad908d8243cf63e591aed7818cd3213cdacb08a96b73376307bb2cd0f",
+      "goldHash": "c20cfded5900dad0eb9dba6c68fef35080e08052573f7232fc23bd4b5dfdf718"
+    },
+    {
+      "caseId": "CEB-002-B1-12",
+      "sourceCaseId": "CEB-002-B1-12",
+      "inputHash": "d0def51531d8baff6c3b594e13bca398e23fef18623254149a651b72bebe50a7",
+      "goldHash": "f6c17f8a21423e8ac69080e89abf35ed9ecb628a8f10b56f7d5f8a356166fcf0"
+    },
+    {
+      "caseId": "CEB-002-B2-13",
+      "sourceCaseId": "CEB-002-B2-13",
+      "inputHash": "54ee254e83e446e6a1cc02302a15162b1b42494f1126f913b99ce2b66c80c625",
+      "goldHash": "ba18316673b379419c60404b92b10d30dfc936c8386d89e2f32eedcb74b7cde2"
+    },
+    {
+      "caseId": "CEB-002-B3-14",
+      "sourceCaseId": "CEB-002-B3-14",
+      "inputHash": "e5d34170ba5d99ebb8cf8fae2be85a5c2682b9dfbc1a7d6e0374b8eddcfdc076",
+      "goldHash": "4e7dc206391cb73119b54dc977ff830a12b853c5ff689625697ef61b98a44e45"
+    },
+    {
+      "caseId": "CEB-002-B4-15",
+      "sourceCaseId": "CEB-002-B4-15",
+      "inputHash": "796def93c5010bc604af3dcb1ae0a96cb80669ae89daee0a62060d1d60f51113",
+      "goldHash": "9f0b62ab05fa1163ac0ef6c7356e9c9f3780261cb509bad2ccee7c8092cdb8ee"
+    },
+    {
+      "caseId": "CEB-002-B5-16",
+      "sourceCaseId": "CEB-002-B5-16",
+      "inputHash": "81f1caa013dc66f347bed6052e0af2af92cd20382a3cb889ab7454b3bc0d384f",
+      "goldHash": "a66ae247e949629fbe3bd2536aa830268e7a7efa7ebda1c31f0accc016a82831"
+    }
+  ]
+}

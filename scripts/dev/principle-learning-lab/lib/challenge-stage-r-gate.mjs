@@ -53,9 +53,15 @@ export const STAGE_R_AUTH_KEYS = [
   'schema', 'stage', 'status', 'purpose', 'note', 'requiredBindingsWhenAuthorized',
   'studyId', 'suiteHash', 'mappingHash', 'graderHash', 'studyPlanHash',
   'requestedActorIdentity', 'executionMode', 'arms', 'cases', 'repetitions',
-  'attemptCap', 'requestCap', 'requestTimeoutMs', 'isolationAcceptance', 'issuedBy', 'validFrom', 'validUntil',
+  'attemptCap', 'requestCap', 'requestTimeoutMs', 'maxRequestsPerAttempt', 'isolationAcceptance', 'issuedBy', 'validFrom', 'validUntil',
   'revoked', 'halted',
 ];
+
+/** Hard ceiling for a per-attempt model-request cap binding: the actor loop's
+ *  step ceiling (DEFAULT_CHALLENGE_ACTOR_CAPS.maxSteps = 40 in
+ *  challenge-actor.mjs). A bound value above this is meaningless (the loop
+ *  terminates earlier) and therefore ambiguous input — refused fail-closed. */
+export const MAX_REQUESTS_PER_ATTEMPT_CEILING = 40;
 
 /** Default model-request timeout when the authorization does not bind one.
  *  Semantics: node:https req.setTimeout is a SOCKET INACTIVITY timeout (it
@@ -148,7 +154,7 @@ function isNonEmptyStringArray(value) {
  * attempt may span many model requests; the attempt cap is not a request
  * budget) — required, positive safe integer, fail-closed when absent.
  */
-export function verifyStageRAuthorization({ authorizationRecord, bindings, plan, maxAttemptsTotal, now = null, declaredExecutionMode = null, declaredRequestTimeoutMs = undefined }) {
+export function verifyStageRAuthorization({ authorizationRecord, bindings, plan, maxAttemptsTotal, now = null, declaredExecutionMode = null, declaredRequestTimeoutMs = undefined, declaredMaxRequestsPerAttempt = undefined }) {
   const reasons = [];
   const auth = authorizationRecord;
   if (!auth || typeof auth !== 'object') return { ok: false, reasons: ['authorization record missing or unreadable'] };
@@ -188,6 +194,30 @@ export function verifyStageRAuthorization({ authorizationRecord, bindings, plan,
     }
   } else if (declaredTimeoutProvided && declaredRequestTimeoutMs !== DEFAULT_REQUEST_TIMEOUT_MS) {
     reasons.push(`authorization does not bind a requestTimeoutMs — the default ${DEFAULT_REQUEST_TIMEOUT_MS}ms is the only approved value for this authorization; widen it via a new authorization, not a CLI flag`);
+  }
+
+  // Per-attempt model-request cap binding (optional field — schema evolution
+  // alongside requestCap, CEB-003-P): when the authorization binds
+  // maxRequestsPerAttempt, the runner-declared value MUST equal it and the
+  // runner enforces it per attempt (a refused reservation terminates the
+  // loop BEFORE the request is sent). When the authorization does not bind
+  // one, NO per-attempt cap is approved — declaring any value refuses —
+  // because a silent CLI-side cap change would alter study conditions
+  // (tighten or loosen) without an Owner-approved record.
+  const declaredPerAttemptCapProvided = declaredMaxRequestsPerAttempt !== undefined && declaredMaxRequestsPerAttempt !== null;
+  if (auth.maxRequestsPerAttempt !== undefined) {
+    if (!Number.isSafeInteger(auth.maxRequestsPerAttempt) || auth.maxRequestsPerAttempt < 1 || auth.maxRequestsPerAttempt > MAX_REQUESTS_PER_ATTEMPT_CEILING) {
+      reasons.push(`authorization maxRequestsPerAttempt must be a safe integer in [1, ${MAX_REQUESTS_PER_ATTEMPT_CEILING}] when present (the actor-loop step ceiling)`);
+    } else if (!declaredPerAttemptCapProvided) {
+      reasons.push(`authorization binds maxRequestsPerAttempt '${auth.maxRequestsPerAttempt}' but the runner declared none — the approved per-attempt request cap is binding and must be declared explicitly`);
+    } else if (auth.maxRequestsPerAttempt !== declaredMaxRequestsPerAttempt) {
+      reasons.push(`authorization maxRequestsPerAttempt '${auth.maxRequestsPerAttempt}' does not match the runner-declared '${declaredMaxRequestsPerAttempt}' — the approved per-attempt request cap is binding; widen it via a new authorization, not a CLI flag`);
+    }
+  } else if (declaredPerAttemptCapProvided) {
+    reasons.push('authorization does not bind a maxRequestsPerAttempt — no per-attempt request cap is approved for this authorization; bind one via a new authorization, not a CLI flag');
+  }
+  if (declaredPerAttemptCapProvided && (!Number.isSafeInteger(declaredMaxRequestsPerAttempt) || declaredMaxRequestsPerAttempt < 1 || declaredMaxRequestsPerAttempt > MAX_REQUESTS_PER_ATTEMPT_CEILING)) {
+    reasons.push(`runner-declared maxRequestsPerAttempt '${String(declaredMaxRequestsPerAttempt)}' is outside the supported range [1, ${MAX_REQUESTS_PER_ATTEMPT_CEILING}]`);
   }
 
   const validFrom = parseIso(auth.validFrom);
