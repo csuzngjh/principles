@@ -166,6 +166,27 @@ export function buildAmdRequestBody({ constrainedInput, perRequestCandidateCap, 
  *  Durations use the MONOTONIC clock (performance.now deltas — immune to
  *  wall-clock changes); requestStartedAt is UTC wall time ONLY for
  *  cross-run correlation. Stages never observed stay null — never zeroed. */
+
+/** Stale keep-alive defect (2026-10-27 channel investigation, Batch 01):
+ *  WITHOUT an explicit agent, https.request uses https.globalAgent, whose
+ *  default is keepAlive=true on Node >= 19 — the SECOND request to the same
+ *  host reuses the pooled connection from the first. When the server closes
+ *  that idle connection, the next request is written onto the dead socket
+ *  and hangs with zero data flow until the socket-inactivity timeout —
+ *  exactly the observed pattern (BN-01/A, BN-01/B, BN-03/A: first request
+ *  completes with observed identity, second request dies at
+ *  awaiting_headers). This dedicated non-keep-alive agent gives every
+ *  request a fresh connection, removing the entire stale-reuse failure
+ *  class. No retry, no timeout change, no semantics change — the request
+ *  itself is identical on the wire. */
+const POSTER_HTTPS_AGENT = new https.Agent({ keepAlive: false });
+
+/** Test seam: exposes the agent the poster binds (config-guard test asserts
+ *  keepAlive === false — the property the stale-reuse fix depends on). */
+export function resolvePosterHttpsAgent() {
+  return POSTER_HTTPS_AGENT;
+}
+
 export function createDefaultHttpsPoster({ connectTimeoutMs = AMD_TRANSPORT_TIMEOUTS.connectTimeoutMs, requestTimeoutMs = AMD_TRANSPORT_TIMEOUTS.requestTimeoutMs } = {}) {  return function httpsPoster(url, { headers, body }) {
     return new Promise((resolve, reject) => {
       let u;
@@ -192,7 +213,7 @@ export function createDefaultHttpsPoster({ connectTimeoutMs = AMD_TRANSPORT_TIME
         return err;
       };
       const req = https.request(
-        { hostname: u.hostname, port: 443, path: u.pathname + u.search, method: 'POST', headers },
+        { hostname: u.hostname, port: 443, path: u.pathname + u.search, method: 'POST', headers, agent: POSTER_HTTPS_AGENT },
         (res) => {
           gotResponse = true;
           timing.responseHeadersReceivedMs = Math.round(performance.now() - startedMono);
