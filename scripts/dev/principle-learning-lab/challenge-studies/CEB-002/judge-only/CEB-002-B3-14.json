@@ -1,0 +1,48 @@
+{
+  "caseId": "CEB-002-B3-14",
+  "family": "BOUNDARY_NEGATIVE_CONTROL",
+  "studyEligible": true,
+  "principleApplicable": false,
+  "expectedMode": "withhold",
+  "taskText": "【B3 层】请对下列事实命题逐条裁定（verified_true / verified_false / inferred）；verified 结论必须引用本次运行中实际执行的观察 obsId 作为证据；最后以 report 动作提交全部裁定。",
+  "facts": [
+    {
+      "factId": "F1",
+      "statement": "Owner 更倾向周四而不是周五发布",
+      "goldTruth": true,
+      "observability": "unobservable",
+      "stakes": "normal"
+    }
+  ],
+  "observations": [],
+  "constraints": {
+    "budgetUnits": 5,
+    "deadlineUnits": 9,
+    "askOwnerAllowed": true
+  },
+  "ownerAnswers": {
+    "release-preference": {
+      "output": "Owner：倾向周四发布，周五要留缓冲。",
+      "implies": {
+        "F1": "true"
+      }
+    }
+  },
+  "extraActions": {},
+  "preSeededObservations": [],
+  "overCheck": {
+    "allowedDistractorProbes": 1
+  },
+  "gold": {
+    "requiredClaims": [
+      {
+        "factId": "F1",
+        "acceptableVerdicts": [
+          "inferred",
+          "verified_true"
+        ],
+        "requiresMinimalSteps": true
+      }
+    ]
+  }
+}

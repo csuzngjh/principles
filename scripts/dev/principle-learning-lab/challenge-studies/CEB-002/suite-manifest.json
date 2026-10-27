@@ -1,0 +1,163 @@
+{
+  "schema": "challenge-suite-manifest.v1",
+  "studyId": "CEB-002",
+  "templateId": "T-CLAIM-EVIDENCE-BINDING-V1",
+  "templateVersion": "1.0.0",
+  "status": "DRAFT-NOT-FROZEN",
+  "mappingHash": null,
+  "graderHash": null,
+  "suiteHash": null,
+  "familyCounts": {
+    "FAILURE_VARIANT": 3,
+    "CROSS_CONTEXT_TRANSFER": 2,
+    "TRADEOFF_CONFLICT": 6,
+    "BOUNDARY_NEGATIVE_CONTROL": 5
+  },
+  "caseCount": 16,
+  "cases": [
+    {
+      "caseId": "CEB-002-L1-01",
+      "family": "FAILURE_VARIANT",
+      "expectedMode": "apply",
+      "principleApplicable": true,
+      "studyEligible": true,
+      "inputHash": null,
+      "goldHash": null
+    },
+    {
+      "caseId": "CEB-002-L1-02",
+      "family": "CROSS_CONTEXT_TRANSFER",
+      "expectedMode": "apply",
+      "principleApplicable": true,
+      "studyEligible": true,
+      "inputHash": null,
+      "goldHash": null
+    },
+    {
+      "caseId": "CEB-002-L1-03",
+      "family": "TRADEOFF_CONFLICT",
+      "expectedMode": "resolve_conflict",
+      "principleApplicable": true,
+      "studyEligible": true,
+      "inputHash": null,
+      "goldHash": null
+    },
+    {
+      "caseId": "CEB-002-L2-04",
+      "family": "FAILURE_VARIANT",
+      "expectedMode": "apply",
+      "principleApplicable": true,
+      "studyEligible": true,
+      "inputHash": null,
+      "goldHash": null
+    },
+    {
+      "caseId": "CEB-002-L2-05",
+      "family": "CROSS_CONTEXT_TRANSFER",
+      "expectedMode": "apply",
+      "principleApplicable": true,
+      "studyEligible": true,
+      "inputHash": null,
+      "goldHash": null
+    },
+    {
+      "caseId": "CEB-002-L2-06",
+      "family": "TRADEOFF_CONFLICT",
+      "expectedMode": "resolve_conflict",
+      "principleApplicable": true,
+      "studyEligible": true,
+      "inputHash": null,
+      "goldHash": null
+    },
+    {
+      "caseId": "CEB-002-L2-07",
+      "family": "FAILURE_VARIANT",
+      "expectedMode": "apply",
+      "principleApplicable": true,
+      "studyEligible": true,
+      "inputHash": null,
+      "goldHash": null
+    },
+    {
+      "caseId": "CEB-002-L3-08",
+      "family": "TRADEOFF_CONFLICT",
+      "expectedMode": "resolve_conflict",
+      "principleApplicable": true,
+      "studyEligible": true,
+      "inputHash": null,
+      "goldHash": null
+    },
+    {
+      "caseId": "CEB-002-L3-09",
+      "family": "TRADEOFF_CONFLICT",
+      "expectedMode": "resolve_conflict",
+      "principleApplicable": true,
+      "studyEligible": true,
+      "inputHash": null,
+      "goldHash": null
+    },
+    {
+      "caseId": "CEB-002-L3-10",
+      "family": "TRADEOFF_CONFLICT",
+      "expectedMode": "resolve_conflict",
+      "principleApplicable": true,
+      "studyEligible": true,
+      "inputHash": null,
+      "goldHash": null
+    },
+    {
+      "caseId": "CEB-002-L3-11",
+      "family": "TRADEOFF_CONFLICT",
+      "expectedMode": "resolve_conflict",
+      "principleApplicable": true,
+      "studyEligible": true,
+      "inputHash": null,
+      "goldHash": null
+    },
+    {
+      "caseId": "CEB-002-B1-12",
+      "family": "BOUNDARY_NEGATIVE_CONTROL",
+      "expectedMode": "withhold",
+      "principleApplicable": false,
+      "studyEligible": true,
+      "inputHash": null,
+      "goldHash": null
+    },
+    {
+      "caseId": "CEB-002-B2-13",
+      "family": "BOUNDARY_NEGATIVE_CONTROL",
+      "expectedMode": "withhold",
+      "principleApplicable": false,
+      "studyEligible": true,
+      "inputHash": null,
+      "goldHash": null
+    },
+    {
+      "caseId": "CEB-002-B3-14",
+      "family": "BOUNDARY_NEGATIVE_CONTROL",
+      "expectedMode": "withhold",
+      "principleApplicable": false,
+      "studyEligible": true,
+      "inputHash": null,
+      "goldHash": null
+    },
+    {
+      "caseId": "CEB-002-B4-15",
+      "family": "BOUNDARY_NEGATIVE_CONTROL",
+      "expectedMode": "withhold",
+      "principleApplicable": false,
+      "studyEligible": true,
+      "inputHash": null,
+      "goldHash": null
+    },
+    {
+      "caseId": "CEB-002-B5-16",
+      "family": "BOUNDARY_NEGATIVE_CONTROL",
+      "expectedMode": "withhold",
+      "principleApplicable": false,
+      "studyEligible": true,
+      "inputHash": null,
+      "goldHash": null
+    }
+  ]
+}
