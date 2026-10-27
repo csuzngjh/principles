@@ -15,7 +15,11 @@ describe('Real CLI JSON product-path regression test (PRI-376)', () => {
     const pdDir = path.join(tmpDir, '.pd');
     fs.mkdirSync(pdDir, { recursive: true });
 
-    // Write a config to enable async mode
+    // Write a config to enable async mode. ADR-0029: pi-ai is the only
+    // internal-agent runtime backend, so the product path is pinned on a
+    // ready pi-ai profile — the sentinel env var is a name-presence stub, not
+    // a credential, and async mode defers the actual LLM call to
+    // `pd diagnose run` (the nextAction asserted below).
     const configContent = `
 version: 1
 features:
@@ -23,15 +27,17 @@ features:
     category: quiet
     enabled: true
 runtimeProfiles:
-  openclaw.default:
-    type: openclaw
-    source: default
+  pd.default:
+    type: pi-ai
+    provider: openai
+    model: gpt-4o-mini
+    apiKeyEnv: PD_REGRESSION_TEST_KEY
 internalAgents:
-  defaultRuntime: openclaw.default
+  defaultRuntime: pd.default
   agents:
     diagnostician:
       enabled: true
-      runtimeProfile: openclaw.default
+      runtimeProfile: pd.default
 ui:
   diagnostics:
     mode: simple
@@ -44,6 +50,7 @@ ui:
     // argv entries, so shell metacharacters in them cannot be interpreted as
     // commands (CWE-78 mitigation).
     let stdoutStr: string;
+    process.env.PD_REGRESSION_TEST_KEY = 'stub-sentinel-not-a-credential';
     try {
       stdoutStr = execFileSync(
         process.execPath,
@@ -51,6 +58,7 @@ ui:
         { encoding: 'utf8', stdio: ['pipe', 'pipe', 'inherit'], windowsHide: true },
       );
     } finally {
+      delete process.env.PD_REGRESSION_TEST_KEY;
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
 

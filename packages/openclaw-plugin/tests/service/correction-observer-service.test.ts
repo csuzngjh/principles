@@ -555,6 +555,43 @@ describe('resolveCorrectionObserver — Configuration Resolution (PRI-307)', () 
     }
   });
 
+  it('returns null and warns for a non-pi-ai runtime profile (ADR-0029 fail-closed)', async () => {
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-corr-retired-'));
+    const stateDir = path.join(workspaceDir, '.state');
+    fs.mkdirSync(stateDir, { recursive: true });
+
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+
+    // Defends the service-level guard even if the loader ever reports a retired
+    // profile as ready/not_ready instead of needs_setup.
+    const { resolveObserverConfig } = await import('../../src/core/pd-config-loader.js');
+    vi.mocked(resolveObserverConfig).mockReturnValueOnce({
+      enabled: true,
+      readiness: 'not_ready',
+      source: 'defaults',
+      reason: 'legacy openclaw profile',
+      nextAction: 'none',
+      runtimeProfileId: 'openclaw.default',
+      runtimeProfileType: 'openclaw',
+      apiKeyEnv: 'ANTHROPIC_API_KEY',
+      apiKeyPresent: true,
+      provider: 'lmstudio',
+      model: 'qwen3',
+      timeoutMs: null,
+      baseUrl: null,
+    });
+
+    try {
+      const wctx = WorkspaceContext.fromHookContext({ workspaceDir });
+      const result = resolveCorrectionObserver(wctx, logger as any);
+
+      expect(result).toBeNull();
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('ADR-0029'));
+    } finally {
+      safeRmDir(workspaceDir);
+    }
+  });
+
   it('returns null when observer needs setup (no API key)', async () => {
     const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-corr-needs-setup-'));
     const stateDir = path.join(workspaceDir, '.state');

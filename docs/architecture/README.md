@@ -146,11 +146,13 @@
 | [ADR-0026](../adr/0026-cnb-token-injection-boundary.md) | Proposed | CNB_TOKEN 注入边界不可由 imports 配置消除（P0-01 归因修正）|
 | [ADR-0013](../adr/0013-attribution-pipeline-and-decision-observability.md) | Superseded by ADR-0014 / Deferred | 原 attribution 提案；ADR-0027 接受后替代旧设计路径 |
 | [ADR-0014](../adr/0014-mvp-first-strategy-and-product-pivot.md) | Accepted；新增修订 Proposed | MVP-first 与有限 Evidence Foundation 范围 |
+| [ADR-0016](../adr/0016-pd-owned-user-config.md) | Accepted；§2.3/§2.4 被 ADR-0029 取代 | PD-owned 用户配置与内置 agent 运行时绑定 |
 | [ADR-0017](../adr/0017-principle-ledger-single-implementation.md) | Accepted | 单一 ledger 实现保留 |
 | [ADR-0020](../adr/0020-codex-cli-host-adapter.md) | Accepted；新增引用 Proposed | 双宿主边界与能力差异 |
 | [ADR-0022](../adr/0022-owner-identity-registration.md) | Accepted | 复用 Owner 身份解析，不重建身份体系 |
 | [ADR-0027](../adr/0027-principle-intervention-evidence-and-delivery-contract.md) | Proposed | Intervention Evidence 与 Delivery Contract |
 | [ADR-0028](../adr/0028-owner-principle-assets-and-evolution.md) | Proposed | Owner Principle Assets 与版本演进 |
+| [ADR-0029](../adr/0029-openclaw-subagent-runtime-retired.md) | Accepted（Owner 2026-10-23） | OpenClaw 子代理运行时后端退役；pi-ai 为内置代理唯一后端（取代 ADR-0016 §2.3） |
 
 > 本次登记 PD v2 所需相关 ADR，其他历史遗漏未在本次批量修复。状态与 Amendment 以对应 ADR 原文为准。
 

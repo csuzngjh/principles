@@ -2151,8 +2151,8 @@ describe('PRI-111 ArtificerRunner boundary', () => {
   it('SCHEMA_REGISTRY: shared output-schema-registry registers unified artificer-rule-output-v2 schema', async () => {
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
-    // The registry was extracted to adapter/output-schema-registry.ts (single
-    // source of truth shared by pi-ai and openclaw-cli adapters). Assert there.
+    // The registry lives in adapter/output-schema-registry.ts (single source of
+    // truth for schema-gated output). Assert there.
     const src = readFileSync(resolve(__dirname, '..', 'adapter', 'output-schema-registry.ts'), 'utf-8');
     expect(src).toContain('artificer-rule-output-v2');
     expect(src).not.toContain('artificer-rule-output-v1');

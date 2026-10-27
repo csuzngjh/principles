@@ -1,6 +1,7 @@
 # ADR-0016: PD-Owned User Config and Internal Agent Runtime Bindings
 
 > **Status**: Accepted
+> **Partially superseded by**: [ADR-0029](0029-openclaw-subagent-runtime-retired.md) — §2.3's `openclaw` profile type and §2.4's OpenClaw binding example (2026-10-23). The rest of this ADR, including §2.2 and the PD-owned config authority, remains current.
 > **Date**: 2026-06-03
 > **Drives**: PRI-301 / PRI-303 configuration and Control Center work
 > **Context**: MVP-First, seed-customer readiness
@@ -57,6 +58,11 @@ PD may display that a credential appears configured, but must not display, copy,
 
 ### 2.3 Runtime Profiles
 
+> ⚠️ **Superseded by [ADR-0029](0029-openclaw-subagent-runtime-retired.md)**: the `openclaw`
+> profile type below is retained only as *read-only legacy* (existing configs still parse,
+> nothing new may select it). `pi-ai` is the only runtime backend for PD internal agents.
+> The historical text is preserved per AGENTS.md §3.1 and is not rewritten.
+
 A Runtime Profile is a selectable model runtime reference for a PD internal agent.
 
 Supported MVP profile types:
@@ -72,7 +78,7 @@ PD internal agents use a global default runtime profile and may override it per 
 
 Examples:
 
-- Diagnostician uses `openclaw.model.lmstudio.qwen3.6-27b-mtp`
+- Diagnostician uses `openclaw.model.lmstudio.qwen3.6-27b-mtp` (superseded by ADR-0029: internal agents bind pi-ai profiles now)
 - CorrectionObserver is disabled or uses a cheaper model
 - EmpathyObserver is disabled during MVP validation
 

@@ -44,12 +44,12 @@ function makeValidConfigYaml(): string {
       gfi: { category: 'quiet', enabled: false },
     },
     runtimeProfiles: {
-      // Include pd.default (the M9 default) to avoid "profile not found" warnings
+      // The seeded PD default (pi-ai) — a warning-free config, so the flags
+      // contract below is tested without retirement noise.
       'pd.default': { type: 'pi-ai', provider: 'anthropic', model: 'claude-3-5-sonnet', apiKeyEnv: 'ANTHROPIC_API_KEY' },
-      'openclaw.default': { type: 'openclaw', source: 'default' },
     },
     internalAgents: {
-      defaultRuntime: 'openclaw.default',
+      defaultRuntime: 'pd.default',
       agents: {
         diagnostician: { enabled: true },
         dreamer: { enabled: true },
@@ -136,6 +136,28 @@ describe('Valid config → effective flags', () => {
       expect(output.status).toBe('ok');
       expect(output.source).toBe('user_config');
       expect(output.enabledMvpChannels).toContain('prompt');
+    } finally { rmTmpDir(tmp); }
+  });
+
+  it('legacy openclaw profile keeps the config valid but reports status=degraded with the retirement warning (ADR-0029)', () => {
+    const tmp = mkTmpDir();
+    writeConfig(tmp, yaml.dump({
+      version: 1,
+      features: { prompt: { category: 'core', enabled: true } },
+      runtimeProfiles: {
+        'openclaw.default': { type: 'openclaw', source: 'default' },
+      },
+      internalAgents: { defaultRuntime: 'openclaw.default', agents: {} },
+      ui: { diagnostics: { mode: 'simple' } },
+    }));
+    try {
+      const output = buildRuntimeFeaturesStatus(tmp);
+      // Rejecting the file would brick installed workspaces; reporting it
+      // silently would hide a backend that no longer runs (rc-9).
+      expect(output.status).toBe('degraded');
+      expect(output.source).toBe('user_config');
+      expect(output.warnings.some((w) => /retired/i.test(w)), JSON.stringify(output.warnings)).toBe(true);
+      expect(output.nextAction).toBeTruthy();
     } finally { rmTmpDir(tmp); }
   });
 

@@ -7,7 +7,8 @@
  *   - createAdapterConfigFromProfile() — profile → adapter config transform
  *
  * Acceptance criteria coverage:
- *   AC1: Diagnostician runtime can be configured to use an OpenClaw model reference
+ *   AC1: a retired OpenClaw binding still resolves (read-only legacy, ADR-0029)
+ *        but is reported as needs_setup and cannot produce an adapter config
  *   AC2: Diagnostician runtime can be configured to use a PD-local profile with apiKeyEnv
  *   AC3: Per-agent override beats default runtime
  *   AC4: Missing env var for PD-local profile fails loud with reason + nextAction
@@ -100,7 +101,9 @@ describe('resolveAgentRuntimeBinding', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.profileId).toBe(DEFAULT_RUNTIME_PROFILE_ID);
-    expect(result.profile.type).toBe('openclaw');
+    // ADR-0029: the default profile is pi-ai — PD no longer seeds or selects an
+    // openclaw profile.
+    expect(result.profile.type).toBe('pi-ai');
     expect(result.source).toBe('default_runtime');
   });
 
@@ -303,30 +306,33 @@ describe('resolveAgentRuntimeBinding', () => {
 // ── checkAgentRuntimeReadiness ───────────────────────────────────────────────
 
 describe('checkAgentRuntimeReadiness', () => {
-  it('returns ready for openclaw profile with source=default', () => {
-    const result = checkAgentRuntimeReadiness(
-      { type: 'openclaw', source: 'default' },
-      () => undefined,
-    );
-    expect(result.readiness).toBe('ready');
-  });
+  // ADR-0029: the 'openclaw' profile type is retired read-only legacy. Every
+  // shape of it — including the two that used to report 'ready' because
+  // readiness was delegated to the host — must now report needs_setup with a
+  // reason and a pi-ai nextAction. A retired backend can never look ready.
+  const legacyOpenClawProfiles = [
+    { label: 'source=default', profile: { type: 'openclaw', source: 'default' } },
+    { label: 'provider+model', profile: { type: 'openclaw', provider: 'lmstudio', model: 'qwen3.6-27b-mtp' } },
+    { label: 'no fields', profile: { type: 'openclaw' } },
+  ] as const;
 
-  it('returns ready for openclaw profile with provider+model', () => {
+  for (const { label, profile } of legacyOpenClawProfiles) {
+    it(`returns needs_setup for a retired openclaw profile (${label})`, () => {
+      const result = checkAgentRuntimeReadiness(profile, () => undefined);
+      expect(result.readiness).toBe('needs_setup');
+      expect(result.reason).toBeTruthy();
+      expect(result.nextAction).toBeTruthy();
+      expect(result.reason).toContain('retired');
+      expect(result.nextAction).toContain('pi-ai');
+    });
+  }
+
+  it('names the host model a retired openclaw profile referenced', () => {
     const result = checkAgentRuntimeReadiness(
       { type: 'openclaw', provider: 'lmstudio', model: 'qwen3.6-27b-mtp' },
       () => undefined,
     );
-    expect(result.readiness).toBe('ready');
-  });
-
-  it('returns needs_setup for openclaw profile without provider or model', () => {
-    const result = checkAgentRuntimeReadiness(
-      { type: 'openclaw' },
-      () => undefined,
-    );
-    expect(result.readiness).toBe('needs_setup');
-    expect(result.reason).toBeTruthy();
-    expect(result.nextAction).toBeTruthy();
+    expect(result.reason).toContain('lmstudio/qwen3.6-27b-mtp');
   });
 
   it('AC4: returns not_ready for pi-ai profile when apiKeyEnv is missing from env', () => {
@@ -537,36 +543,31 @@ describe('createAdapterConfigFromProfile', () => {
     expect(result.workspace).toBe('/workspace/test');
   });
 
-  it('creates OpenClawCliRuntimeAdapter config from openclaw profile', () => {
-    const result = createAdapterConfigFromProfile(
-      {
-        type: 'openclaw',
-        provider: 'lmstudio',
-        model: 'qwen3.6-27b-mtp',
-      },
-      '/workspace/test',
-    );
-
-    expect(result.runtimeKind).toBe('openclaw-cli');
-    if (result.runtimeKind !== 'openclaw-cli') return;
-    expect(result.workspaceDir).toBe('/workspace/test');
-    // Explicit provider+model → openclawMode='local' (not delegated)
-    expect(result.openclawMode).toBe('local');
+  it('fails loud for a retired openclaw profile with provider+model (ADR-0029)', () => {
+    // Readiness answers needs_setup for type:'openclaw', so reaching this
+    // transform with one means a caller bypassed the gate — rc-3.
+    expect(() =>
+      createAdapterConfigFromProfile(
+        {
+          type: 'openclaw',
+          provider: 'lmstudio',
+          model: 'qwen3.6-27b-mtp',
+        },
+        '/workspace/test',
+      ),
+    ).toThrow(/Runtime profile type 'openclaw' is retired \(ADR-0029\)/);
   });
 
-  it('creates openclaw config with source=default (delegated mode)', () => {
-    const result = createAdapterConfigFromProfile(
-      {
-        type: 'openclaw',
-        source: 'default',
-      },
-      '/workspace/test',
-    );
-
-    expect(result.runtimeKind).toBe('openclaw-cli');
-    if (result.runtimeKind !== 'openclaw-cli') return;
-    // source='default' → openclawMode='default' (delegate to OpenClaw's own mode resolution)
-    expect(result.openclawMode).toBe('default');
+  it('fails loud for a retired openclaw profile with source=default, naming the nextAction', () => {
+    expect(() =>
+      createAdapterConfigFromProfile(
+        {
+          type: 'openclaw',
+          source: 'default',
+        },
+        '/workspace/test',
+      ),
+    ).toThrow(/nextAction: replace this profile with a pi-ai profile/);
   });
 
   it('pi-ai profile without baseUrl still produces valid config', () => {
@@ -637,72 +638,20 @@ describe('createAdapterConfigFromProfile', () => {
     expect(result.timeoutMs).toBeUndefined();
   });
 
-  it('openclaw profile with explicit provider+model uses local mode', () => {
-    // Regression test: explicit provider+model → openclawMode='local' (not 'default')
-    const result = createAdapterConfigFromProfile(
-      {
-        type: 'openclaw',
-        provider: 'lmstudio',
-        model: 'qwen3.6-27b-mtp',
-      },
-      '/workspace/test',
-    );
-
-    expect(result.runtimeKind).toBe('openclaw-cli');
-    if (result.runtimeKind !== 'openclaw-cli') return;
-    expect(result.openclawMode).toBe('local');
-    expect(result.workspaceDir).toBe('/workspace/test');
+  it('fails loud for an incomplete retired openclaw profile', () => {
+    // ADR-0029 removed the mode-selection matrix entirely: no shape of a
+    // type:'openclaw' profile produces an adapter config any more.
+    expect(() =>
+      createAdapterConfigFromProfile(
+        {
+          type: 'openclaw',
+        },
+        '/workspace/test',
+      ),
+    ).toThrow(/is retired/);
   });
 
-  it('openclaw profile with source=default uses default mode', () => {
-    // Regression test: source='default' → openclawMode='default' (delegate to OpenClaw)
-    const result = createAdapterConfigFromProfile(
-      {
-        type: 'openclaw',
-        source: 'default',
-      },
-      '/workspace/test',
-    );
-
-    expect(result.runtimeKind).toBe('openclaw-cli');
-    if (result.runtimeKind !== 'openclaw-cli') return;
-    expect(result.openclawMode).toBe('default');
-  });
-
-  it('openclaw profile without source or provider+model uses local mode', () => {
-    // Edge case: incomplete openclaw profile defaults to 'local' mode
-    const result = createAdapterConfigFromProfile(
-      {
-        type: 'openclaw',
-      },
-      '/workspace/test',
-    );
-
-    expect(result.runtimeKind).toBe('openclaw-cli');
-    if (result.runtimeKind !== 'openclaw-cli') return;
-    // No source='default', so defaults to 'local'
-    expect(result.openclawMode).toBe('local');
-  });
-
-  it('openclaw profile with source=default ignores provider+model for mode', () => {
-    // Edge case: source='default' wins over provider+model for mode selection
-    const result = createAdapterConfigFromProfile(
-      {
-        type: 'openclaw',
-        source: 'default',
-        provider: 'lmstudio',
-        model: 'qwen3',
-      },
-      '/workspace/test',
-    );
-
-    expect(result.runtimeKind).toBe('openclaw-cli');
-    if (result.runtimeKind !== 'openclaw-cli') return;
-    // source='default' → openclawMode='default' regardless of provider+model
-    expect(result.openclawMode).toBe('default');
-  });
-
-  it('preserves workspace directory in all adapter configs', () => {
+  it('preserves the workspace directory in the adapter config', () => {
     const piAiResult = createAdapterConfigFromProfile(
       {
         type: 'pi-ai',
@@ -716,18 +665,6 @@ describe('createAdapterConfigFromProfile', () => {
     expect(piAiResult.runtimeKind).toBe('pi-ai');
     if (piAiResult.runtimeKind !== 'pi-ai') return;
     expect(piAiResult.workspace).toBe('/custom/workspace/path');
-
-    const openclawResult = createAdapterConfigFromProfile(
-      {
-        type: 'openclaw',
-        source: 'default',
-      },
-      '/another/workspace/path',
-    );
-
-    expect(openclawResult.runtimeKind).toBe('openclaw-cli');
-    if (openclawResult.runtimeKind !== 'openclaw-cli') return;
-    expect(openclawResult.workspaceDir).toBe('/another/workspace/path');
   });
 
   // ── pi-ai.lmstudio profile resolution ─────────────────────────────────────

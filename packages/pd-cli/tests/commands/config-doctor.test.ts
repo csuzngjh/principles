@@ -82,7 +82,7 @@ describe('Internal agent runtime binding readiness', () => {
     } finally { rmTmpDir(tmp); }
   });
 
-  it('enabled agent with openclaw profile shows readiness=ready', async () => {
+  it('enabled agent on a retired openclaw profile shows readiness=needs_setup (ADR-0029)', async () => {
     const tmp = mkTmpDir();
     writeConfig(tmp, makeValidConfigYaml());
     try {
@@ -90,7 +90,11 @@ describe('Internal agent runtime binding readiness', () => {
       const diagnostician = output.internalAgents.find(a => a.name === 'diagnostician');
       expect(diagnostician).toBeDefined();
       expect(diagnostician!.enabled).toBe(true);
-      expect(diagnostician!.readiness).toBe('ready');
+      // Doctor is the migration surface: it must name the retired backend and
+      // say what to configure, never report a host-delegated agent as ready.
+      expect(diagnostician!.readiness).toBe('needs_setup');
+      expect(diagnostician!.reason).toMatch(/retired|ADR-0029/i);
+      expect(diagnostician!.nextAction).toMatch(/pi-ai/);
     } finally { rmTmpDir(tmp); }
   });
 

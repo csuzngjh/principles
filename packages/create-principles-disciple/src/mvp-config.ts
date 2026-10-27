@@ -389,10 +389,14 @@ export function generateConfigYamlContent(
     // non-default value for any entry added here.
     features: {},
     runtimeProfiles: {
-      // M9 default: pi-ai profile. Fix-4: when the installer collected
-      // provider/model/apiKeyEnv from the user, pre-fill them here so
-      // LLM-dependent features work on first run. Otherwise leave empty
-      // (user must configure via web console).
+      // ADR-0029: pi-ai is the only runtime backend for PD internal agents, so
+      // a fresh install seeds exactly one profile. Fix-4: when the installer
+      // collected provider/model/apiKeyEnv from the user, pre-fill them here so
+      // LLM-dependent features work on first run. Otherwise leave empty — the
+      // agents then report needs_setup with a nextAction (rc-9), and the Owner
+      // configures provider/model/apiKeyEnv via the console or `pd config doctor`.
+      // No `openclaw.default` fallback is written any more; a legacy profile an
+      // Owner already has in their config is preserved untouched (PRI-308).
       'pd.default': {
         type: 'pi-ai',
         provider: runtimeProfile?.provider ?? '',
@@ -401,12 +405,6 @@ export function generateConfigYamlContent(
         // Custom endpoint only when collected — an empty baseUrl must not be
         // written (the resolver treats presence as "skip catalog validation").
         ...(runtimeProfile?.baseUrl ? { baseUrl: runtimeProfile.baseUrl } : {}),
-      },
-      // Fallback: openclaw.default delegates LLM calls to the OpenClaw main
-      // agent. Users can switch back via web console if pi-ai is unavailable.
-      'openclaw.default': {
-        type: 'openclaw',
-        source: 'default',
       },
     },
     internalAgents: {
