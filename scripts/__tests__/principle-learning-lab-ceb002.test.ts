@@ -57,22 +57,7 @@ function naiveOverProber(caseDef: any) {
   return createScriptedStub({ actions });
 }
 
-/** McNemar exact test: paired binary outcomes, b = B-fail/C-pass, c = B-pass/C-fail.
- *  Exact two-sided binomial p on the discordant pairs. */
-function mcnemarExact(b: number, c: number): number {
-  const n = b + c;
-  if (n === 0) return 1;
-  const logChoose = (n: number, k: number) => {
-    let s = 0;
-    for (let i = 1; i <= k; i++) s += Math.log((n - i + 1) / i);
-    return s;
-  };
-  const k = Math.min(b, c);
-  let p = 0;
-  for (let i = 0; i <= k; i++) p += Math.exp(logChoose(n, i));
-  const tail = p / 2 ** n; // one-sided probability of ≤ k successes
-  return Math.min(1, 2 * tail);
-}
+import { mcnemarExactPValue as mcnemarExact, mcnemarExactPower, reduceCaseLevel } from '../dev/principle-learning-lab/lib/ceb002-stats.mjs';
 
 describe('CEB-002 offline validation (Owner stage-transition instruction §四)', () => {
   it('1+2. every case re-validates through the full Stage-G validator at an eligible tier; actor-visible leaks no judge keys; payloads are CEB-001 verbatim', () => {
@@ -144,6 +129,23 @@ describe('CEB-002 offline validation (Owner stage-transition instruction §四)'
     expect(mcnemarExact(8, 0)).toBeCloseTo(2 / 256, 9);
     expect(mcnemarExact(7, 1)).toBeCloseTo(18 / 256, 9); // 2*(C(8,0)+C(8,1))/256
     expect(mcnemarExact(5, 5)).toBe(1); // perfectly balanced discordance
+  });
+
+  it('5b. exact power enumeration — independent recomputation anchors for the preregistration table (16 and 32 pairs)', () => {
+    // sanity: perfect effect -> power 1; null effect -> exact-test conservative size (<< nominal alpha)
+    expect(mcnemarExactPower({ pairs: 16, p10: 1, p01: 0 })).toBeCloseTo(1, 9);
+    const size = mcnemarExactPower({ pairs: 16, p10: 0.1, p01: 0.1 });
+    expect(size).toBeGreaterThan(0);
+    expect(size).toBeLessThanOrEqual(0.05); // conservative exact test — actual size below nominal
+    // power-table anchors (values re-derived independently by the enumeration; these pins catch regressions)
+    expect(mcnemarExactPower({ pairs: 16, p10: 0.3, p01: 0.0 })).toBeCloseTo(0.340, 2);
+    expect(mcnemarExactPower({ pairs: 16, p10: 0.4, p01: 0.0 })).toBeCloseTo(0.671, 2);
+    expect(mcnemarExactPower({ pairs: 32, p10: 0.2, p01: 0.0 })).toBeCloseTo(0.640, 2);
+    expect(mcnemarExactPower({ pairs: 32, p10: 0.3, p01: 0.0 })).toBeCloseTo(0.949, 2);
+    // case-level clustering reduction: repeated measurements of one case reduce to a single unit
+    expect(reduceCaseLevel([{ bFail: true, cFail: false }, { bFail: false, cFail: false }])).toEqual({ bWorse: true, cWorse: false });
+    expect(reduceCaseLevel([{ bFail: true, cFail: false }, { bFail: false, cFail: true }])).toEqual({ bWorse: false, cWorse: false }); // mixed -> concordant for this view
+    expect(reduceCaseLevel([{ bFail: false, cFail: true }, { bFail: false, cFail: true }])).toEqual({ bWorse: false, cWorse: true });
   });
 
   it('6. UNKNOWN/capacity/report-recompute simulation — stub run on a CEB-001 COPY produces REPORT_READY behavior-report + verify round-trip', async () => {
