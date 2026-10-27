@@ -149,8 +149,10 @@ function verifyPlan(frozen, armCheck) {
     }
     cases = casesFilter; // caller order is the loop order (e.g. deepest-context unit first)
   }
-  const plan = { arms, cases, repetitions: [1] };
-  const units = arms.length * cases.length;
+  const repsArg = arg('--repetitions');
+  const repetitions = repsArg ? repsArg.split(',').map((s) => s.trim()).filter(Boolean).map(Number) : [1];
+  const plan = { arms, cases, repetitions };
+  const units = arms.length * cases.length * repetitions.length;
   if (executionMode === 'offline-stub') {
     return { plan, units, gate: null, auth: null };
   }
@@ -180,7 +182,7 @@ function verifyPlan(frozen, armCheck) {
 
 function printPlan(frozen, verified) {
   const { plan, units, gate, auth } = verified;
-  console.log(`run-challenge-study: plan — study=${frozen.studyId} units=${units} (${plan.arms.join('/')} × ${plan.cases.length} cases × 1 repetition)`);
+  console.log(`run-challenge-study: plan — study=${frozen.studyId} units=${units} (${plan.arms.join('/')} × ${plan.cases.length} cases × ${plan.repetitions.length} repetition(s))`);
   if (executionMode === 'offline-stub') {
     console.log('run-challenge-study: mode=offline-stub (deterministic stub, no transport, no network)');
     return;
