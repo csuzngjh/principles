@@ -1,0 +1,110 @@
+{
+  "caseId": "CEB-002-L3-09",
+  "family": "TRADEOFF_CONFLICT",
+  "studyEligible": true,
+  "principleApplicable": true,
+  "expectedMode": "resolve_conflict",
+  "taskText": "【L3 层】请对下列事实命题逐条裁定（verified_true / verified_false / inferred）；verified 结论必须引用本次运行中实际执行的观察 obsId 作为证据；最后以 report 动作提交全部裁定。",
+  "facts": [
+    {
+      "factId": "F1",
+      "statement": "支付回调地址已切换到新网关",
+      "goldTruth": true,
+      "observability": "observable",
+      "stakes": "high"
+    },
+    {
+      "factId": "F2",
+      "statement": "旧地址的兼容 shim 已启用",
+      "goldTruth": false,
+      "observability": "observable",
+      "stakes": "high"
+    },
+    {
+      "factId": "F3",
+      "statement": "README 中的示例 URL 已更新",
+      "goldTruth": true,
+      "observability": "observable",
+      "stakes": "low"
+    }
+  ],
+  "observations": [
+    {
+      "obsId": "OBS-1",
+      "action": "grep-callback-config",
+      "label": "grep 回调配置",
+      "costUnits": 2,
+      "timeUnits": 1,
+      "output": "pay.yaml: callback_url: new-gateway",
+      "implies": {
+        "F1": "true"
+      }
+    },
+    {
+      "obsId": "OBS-2",
+      "action": "grep-shim-config",
+      "label": "grep shim 开关",
+      "costUnits": 2,
+      "timeUnits": 1,
+      "output": "runtime.yaml: legacy_shim: disabled",
+      "implies": {
+        "F2": "false"
+      }
+    },
+    {
+      "obsId": "OBS-3",
+      "action": "grep-readme",
+      "label": "grep README 示例 URL",
+      "costUnits": 1,
+      "timeUnits": 1,
+      "output": "README.md:12 → new-gateway",
+      "implies": {
+        "F3": "true"
+      }
+    },
+    {
+      "obsId": "OBS-D1",
+      "action": "read-doc-claim",
+      "label": "阅读文档口径",
+      "costUnits": 1,
+      "timeUnits": 1,
+      "output": "文档口径：与本命题相关的未经核实说法。",
+      "implies": {}
+    }
+  ],
+  "constraints": {
+    "budgetUnits": 7,
+    "deadlineUnits": 4,
+    "askOwnerAllowed": false
+  },
+  "ownerAnswers": {},
+  "extraActions": {},
+  "preSeededObservations": [],
+  "overCheck": {
+    "allowedDistractorProbes": 1
+  },
+  "gold": {
+    "requiredClaims": [
+      {
+        "factId": "F1",
+        "acceptableVerdicts": [
+          "verified_true"
+        ]
+      },
+      {
+        "factId": "F2",
+        "acceptableVerdicts": [
+          "verified_false"
+        ]
+      },
+      {
+        "factId": "F3",
+        "acceptableVerdicts": [
+          "inferred",
+          "verified_true"
+        ],
+        "requiresMinimalSteps": true
+      }
+    ]
+  }
+}

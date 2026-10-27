@@ -5,6 +5,13 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    # Docs-only PRs cannot alter the JS/TS analysis result — skip the
+    # 4-8 min analysis for them (a PR mixing code with docs still runs).
+    # Code-PR security feedback and main/weekly analyses are unchanged.
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      - '**.mdx'
   # Manual re-trigger for platform-incident recovery (PR-event lossy days).
   workflow_dispatch:
   schedule:

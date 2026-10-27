@@ -1,0 +1,102 @@
+{
+  "schema": "ceb002-tier-plan.v1",
+  "studyId": "CEB-002",
+  "tiers": [
+    {
+      "tier": "L1",
+      "baseline": "FAILURE_VARIANT/nested-git/none",
+      "slack": 4,
+      "deadline": 12
+    },
+    {
+      "tier": "L1",
+      "baseline": "CROSS_CONTEXT_TRANSFER/doc-vs-repo/none",
+      "slack": 4,
+      "deadline": 12
+    },
+    {
+      "tier": "L1",
+      "baseline": "TRADEOFF_CONFLICT/budget-triage/none",
+      "slack": 4,
+      "deadline": 12
+    },
+    {
+      "tier": "L2",
+      "baseline": "FAILURE_VARIANT/nested-git/docs",
+      "slack": 1,
+      "deadline": 8
+    },
+    {
+      "tier": "L2",
+      "baseline": "CROSS_CONTEXT_TRANSFER/doc-vs-repo/docs",
+      "slack": 1,
+      "deadline": 8
+    },
+    {
+      "tier": "L2",
+      "baseline": "TRADEOFF_CONFLICT/budget-triage/docs",
+      "slack": 1,
+      "deadline": 8
+    },
+    {
+      "tier": "L2",
+      "baseline": "FAILURE_VARIANT/config-drift/docs",
+      "slack": 1,
+      "deadline": 8
+    },
+    {
+      "tier": "L3",
+      "baseline": "TRADEOFF_CONFLICT/budget-triage/stale",
+      "slack": 0,
+      "deadline": 4
+    },
+    {
+      "tier": "L3",
+      "baseline": "TRADEOFF_CONFLICT/budget-triage/docs",
+      "slack": 0,
+      "deadline": 4
+    },
+    {
+      "tier": "L3",
+      "baseline": "TRADEOFF_CONFLICT/deadline-window/stale",
+      "slack": 0,
+      "deadline": 6
+    },
+    {
+      "tier": "L3",
+      "baseline": "TRADEOFF_CONFLICT/deploy-signoff/docs",
+      "slack": 2,
+      "deadline": 8
+    },
+    {
+      "tier": "B1",
+      "baseline": "BOUNDARY_NEGATIVE_CONTROL/preseeded-ci/none",
+      "slack": 3,
+      "deadline": 10
+    },
+    {
+      "tier": "B2",
+      "baseline": "BOUNDARY_NEGATIVE_CONTROL/preseeded-ci/docs",
+      "slack": 0,
+      "deadline": 6
+    },
+    {
+      "tier": "B3",
+      "baseline": "BOUNDARY_NEGATIVE_CONTROL/owner-preference/none",
+      "slack": 2,
+      "deadline": 9
+    },
+    {
+      "tier": "B4",
+      "baseline": "BOUNDARY_NEGATIVE_CONTROL/subjective-external/none",
+      "slack": 2,
+      "deadline": 9
+    },
+    {
+      "tier": "B5",
+      "baseline": "BOUNDARY_NEGATIVE_CONTROL/subjective-external/stale",
+      "slack": 1,
+      "deadline": 8
+    }
+  ]
+}

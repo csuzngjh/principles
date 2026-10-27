@@ -1,9 +1,11 @@
 // CI Impact Resolver — semantic authority CANDIDATE for "what does this
-// change affect?" (CI Governance SPEC §7). SHADOW MODE: it computes and
-// reports only; no CI job conditions consume it yet. It becomes the single
-// source of truth only when the existing per-workflow path filters
-// (pd-console-e2e.yml, release-reproducibility.yml, publish-npm detect)
-// migrate to consume it.
+// change affect?" (CI Governance SPEC §7). Shadow period 2026-09-22 →
+// 2026-10-27 collected predictions as artifacts; since 2026-10-27 the ci.yml
+// per-package jobs consume the scopes through needs.impact conditions
+// (fail-open: if THIS script or its job fails, every gated job runs).
+// Per-workflow path filters (pd-console-e2e.yml, release-reproducibility.yml,
+// publish-npm detect) still filter independently — migrating them here is a
+// later, separate step.
 //
 // Inputs : --base <sha> --head <sha>   (or IMPACT_BASE / IMPACT_HEAD env)
 //          --repo <path>               (default: cwd)
@@ -65,6 +67,12 @@ const ALL_PACKAGE_SCOPES = [
 // Root-level changes that legitimately affect only the docs surface.
 const DOCS_FILE = /^docs\//;
 const DOCS_SUFFIX = /\.(md|mdx|png|jpg|svg)$/;
+
+// BDD feature files are NOT docs-surface: they are executable-spec inputs
+// consumed by package test suites (openclaw-plugin / pd-console steps run
+// scenarios from docs/specs/features/**). A feature-file-only change must
+// therefore BROADEN (all scopes run), never classify as docs-only.
+const BDD_FEATURE_FILE = /^docs\/specs\/features\//;
 
 // Release-construction surfaces beyond the installer package itself.
 const RELEASE_PATHS = [
@@ -185,6 +193,7 @@ function classifyFile(file, changedDirs) {
   }
   // Remaining files are root-level; docs-surface files are narrow, everything
   // else broadens (conservative default — unknown never means "no impact").
+  if (BDD_FEATURE_FILE.test(file)) return 'broad';
   return (DOCS_FILE.test(file) || DOCS_SUFFIX.test(file)) ? 'docs' : 'broad';
 }
 
@@ -216,6 +225,9 @@ export async function computeImpact({ base, head, repo }) {
     const scope = SCOPE_BY_DIR[dir];
     if (scope) scopes[scope] = true;
   }
+  // Derived flag consumed by the lint job's gate: eslint runs across every
+  // package, so any package scope (direct or transitive) means lint runs.
+  scopes.anyPackage = ALL_PACKAGE_SCOPES.some((scope) => scopes[scope]);
 
   const reasons = {};
   for (const dir of changedDirs) {
@@ -278,9 +290,10 @@ function renderMarkdown(impact) {
   const lines = [];
   lines.push('# CI Impact — SHADOW REPORT');
   lines.push('');
-  lines.push('> **SHADOW ONLY** — this prediction currently skips nothing. Every CI job');
-  lines.push('> still runs exactly as before. This report exists to collect evidence');
-  lines.push('> until the resolver is proven to have zero false negatives.');
+  lines.push('> Scope gates are LIVE in ci.yml since 2026-10-27: per-package jobs');
+  lines.push('> run only when their scope is predicted. The resolver fails OPEN —');
+  lines.push('> any error here means every gated job runs. Predictions are still');
+  lines.push('> uploaded as artifacts for false-negative hunting.');
   lines.push('');
   lines.push('Base: `' + impact.base + '`');
   lines.push('Head: `' + impact.head + '`');
