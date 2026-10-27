@@ -1,0 +1,7 @@
+{
+  "schema": "challenge-stage-authorization.v1",
+  "stage": "R",
+  "studyId": "CEB-003-P",
+  "status": "NOT_AUTHORIZED",
+  "note": "CEB-003-P is a DRAFT study — not frozen, not preregistered in force, not authorized. Real execution requires the Owner-issued APPROVED record bound to this study's frozen hashes."
+}

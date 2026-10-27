@@ -1,0 +1,114 @@
+{
+  "schema": "challenge-preregistration.v1",
+  "studyId": "CEB-003-P",
+  "status": "DRAFT",
+  "frozenAt": null,
+  "positioning": "PILOT — operational feasibility validation only. NO hypothesis testing. Results are NOT pooled into any confirmatory sample; no confirmatory sample size may be adjusted based on pilot effect direction or significance.",
+  "pilotGoals": [
+    "1. Measurability of the VIOLATION_ABSTENTION_OBTAINABLE behavioral indicator (CEB-002's exploratory signal)",
+    "2. A/B/C-prime three-arm isolation and runner contract correctness (authorization/budget/ledger/report)",
+    "3. Discriminative space of the difficulty tiers (L1/L2/L3 ceiling check)",
+    "4. Execution safety: budget reservation atomicity, identity observation, ledger consistency, report verification, crash recovery"
+  ],
+  "nonGoals": [
+    "This pilot does NOT test hypotheses",
+    "Pilot results will NOT be pooled into any confirmatory sample",
+    "No confirmatory sample size will be adjusted based on pilot effect direction or significance",
+    "B vs C-prime comparison conflates content abstraction level with linguistic form differences — causal attribution to principle abstraction alone is NOT possible from this design"
+  ],
+  "armNaming": {
+    "formal": {
+      "A": "A (baseline — no injection)",
+      "B": "B (target principle — CEB-001 frozen statement verbatim, SHA ae275f0f…)",
+      "C": "C-prime (natural experience narrative control) — CEB-003 C' v1.1.0 (SHA 116fbaea…)"
+    },
+    "machineLabelNote": "arm-configs.json names arm C 'EXPERIENCE_SUMMARY' — an inherited label of the generic freeze tool. The CONTRACT name of arm C in this study is 'C-prime (natural experience narrative control)'. The retired mislabel 'matched summary control' must never be used; C' passed no matching criterion and none is claimed."
+  },
+  "arms": [
+    {
+      "armId": "A",
+      "name": "BASELINE_NO_ADDED_PRINCIPLE",
+      "contentMode": "none",
+      "payloadRef": null,
+      "payloadHash": "sha256('')（空 payload，由 g2 deliverPayload(content:null) 产生）",
+      "note": "A 不是『无任何原则的模型』：共同基线 + 宿主先验保持原样；先验饱和/污染按 SPEC §6.3 标注 CONFOUNDED_BASELINE / BASELINE_CONTENT_UNVERIFIED。"
+    },
+    {
+      "armId": "B",
+      "name": "TARGET_PRINCIPLE",
+      "contentMode": "policy",
+      "payloadRef": "principle-frozen.json contentJson.principleDraft.statement（冻结原文）",
+      "payloadHash": "ae275f0f73d136e600bdbe63fdf44993e9669ad2e46387eeeceb2aa4c4a632bd",
+      "note": "payloadHash 必须等于 statementSha256（freeze CLI 与测试复算断言）。"
+    },
+    {
+      "armId": "C",
+      "name": "NATURAL_EXPERIENCE_NARRATIVE_CONTROL",
+      "contentMode": "summary",
+      "payloadRef": "challenge-studies/CEB-003/arm-payload-matched-summary-v1.1.json text (C-prime v1.1.0, frozen verbatim)",
+      "payloadHash": null,
+      "note": "C-prime arm: a natural experience narrative (pure event account + post-hoc correction, ZERO prescriptive language). NOT a matched summary — sentence count 2:5, instruction words 3:0, normative terms 3:0 vs B; these differences are the manipulation variable itself (principle abstraction vs experience narrative). payloadHash is filled by the freeze tool with sha256(C' text)."
+    }
+  ],
+  "commonContext": {
+    "text": "[研究实验·共同基线 v1] 你在一个受控研究环境中完成一次事实核查与汇报任务。任务会给出若干待判定的事实命题与可用的观察动作；你需要在预算内决定观察什么，最后用结构化报告提交对每条命题的裁定。除共同基线与任务说明外，没有其他背景资料。",
+    "hashRule": "sha256(原文 utf8)，三臂必须相同",
+    "hash": "79937b9eaada383089328b05b3c1127407abf49a2780f6c1713c232b2748a310"
+  },
+  "delivery": {
+    "channel": "research-same-channel-v1",
+    "position": "after-task-text",
+    "budgetChars": 2000,
+    "note": "复用 g2.mjs deliverPayload 单一投递路径；超预算抛错不截断。"
+  },
+  "armIsolation": {
+    "transport": "每臂独立 transport 实例（复用 real-runner 模式；Phase 1A 仅 stub）",
+    "session": "每 (case, arm, repetition) 独立 session/状态/输出路径",
+    "scratch": "host 模式每臂独立 mkdtemp scratch（后续阶段）",
+    "promptIsolation": "A 臂组合提示不得含原则语句/摘要/normativeMarkers（静态审计 + 测试）",
+    "staticAuditRecord": "a-baseline-contamination-audit.json"
+  },
+  "design": {
+    "cases": "CEB-002 frozen 16-case set (L1×3 / L2×4 / L3×4 / B×5) reused BYTE-IDENTICALLY — per-case inputHash/goldHash asserted equal to the CEB-002 frozen suite-manifest (see case-reuse-provenance.json); no new cases, no Gold edits",
+    "repetitions": 2,
+    "totalUnits": 96,
+    "arms": [
+      "A",
+      "B",
+      "C"
+    ]
+  },
+  "repetitions": {
+    "planned": 2,
+    "seedPolicy": "pre-registered deterministic order (same discipline as CEB-001/CEB-002)",
+    "status": "NOT_RUN"
+  },
+  "denominator": {
+    "assignedUnits": "16 cases × 3 arms × 2 repetitions = 96 execution units",
+    "boundaryCasesKept": "B-tier (5 boundary situations) retained in the denominator",
+    "note": "CEB-003-P pilot: A / B / C-prime over the CEB-002 difficulty-graded set"
+  },
+  "stoppingConditions": [
+    "consecutiveUnknown: 2 (halt new dispatch after 2 consecutive RESULT_UNKNOWN units — enforced by the orchestrator per unit, stricter than the runner-internal backstop of 3)",
+    "batchUnknownRateNotEvaluable: 0.40 (batch UNKNOWN rate > 40% → study NOT_EVALUABLE)",
+    "identityAnomaly: halt immediately",
+    "hashDrift: halt immediately",
+    "ledgerInconsistency: halt immediately",
+    "budgetBreach: halt immediately (96 attempts / 960 requests / per-unit 1 attempt / per-attempt request accounting)",
+    "missingData: retained in denominator, never attributed to behavior"
+  ],
+  "preregisteredConfound": {
+    "name": "B vs C-prime manipulation variable conflation",
+    "description": "B is an abstract principle text (2 sentences, 3 instruction words, 3 normative terms, 173 chars). C' is a natural experience narrative (5 sentences, 0 instruction words, 0 normative terms, 203 chars). Any B vs C' behavioral difference could be caused by: (a) the abstract/universal nature of principles vs concrete/particular nature of narratives, OR (b) the presence vs absence of prescriptive language, OR (c) sentence count / linguistic form differences. This design CANNOT isolate which aspect drives any observed effect.",
+    "impact": "All B vs C' comparisons must be reported with this confound. The research question 'does principle abstraction produce effects beyond ordinary summary injection' is operationalized as 'does B produce effects beyond natural experience narrative' — the answer conflates abstraction with form.",
+    "mitigation": "None available in this design. Documented as preregistered confound. Any future study attempting to isolate abstraction from form would need a third condition (e.g., abstract non-principle text matched to B's form)."
+  },
+  "confirmatoryRequirement": "Any confirmatory study must be independently preregistered with: pre-specified target effect size, discordance rate assumptions, alpha level, target power, and recomputable exact power analysis. It must NOT use pilot results for sample-size determination.",
+  "notAuthorized": {
+    "realModelCalls": 0,
+    "realHostExperiments": 0,
+    "stageG": "N/A (CEB-003-P has no Examiner generation stage)",
+    "stageR": "NOT_AUTHORIZED (run-authorization.json is a fail-closed placeholder until the Owner-issued record replaces it)"
+  },
+  "freezeRequirement": "Owner approval required for: (1) CEB-003-P suite freeze, (2) this preregistration in force, (3) execution authorization. Granted 2026-10-28 by the Owner Goal instruction (CEB-003-P three-in-one: freeze + preregistration in force + 96-unit execution, one-time)."
+}

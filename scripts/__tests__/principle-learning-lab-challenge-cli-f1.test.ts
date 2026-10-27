@@ -424,3 +424,63 @@ describe('E. request-timeout authorization binding', () => {
     }
   });
 });
+
+// ===========================================================================
+// F. per-attempt request-cap authorization binding (--max-requests-per-attempt
+//    is NOT a free knob: the approved cap lives in the authorization record;
+//    CEB-003-P requires ≤10 model requests per attempt)
+// ===========================================================================
+describe('F. per-attempt request-cap authorization binding', () => {
+  it('F1: an authorization that BINDS maxRequestsPerAttempt=10 accepts --max-requests-per-attempt 10', () => {
+    const dir = copyStudy('perattempt-10');
+    approveF1(dir, { maxRequestsPerAttempt: 10 });
+    const before = ledgerFingerprint(dir);
+    const r = runCli(['--execution-mode', 'F1-direct-model', '--now', NOW, '--dry-run', '--max-requests-per-attempt', '10'], dir);
+    expect(r.status).toBe(0);
+    expect(r.out).toContain('DRY-RUN OK');
+    expect(ledgerFingerprint(dir)).toBe(before);
+  });
+
+  it('F2: a bound authorization REFUSES a non-matching per-attempt cap declaration — approved value is machine-binding', () => {
+    const dir = copyStudy('perattempt-mismatch');
+    approveF1(dir, { maxRequestsPerAttempt: 10 });
+    const before = ledgerFingerprint(dir);
+    const r = runCli(['--execution-mode', 'F1-direct-model', '--now', NOW, '--dry-run', '--max-requests-per-attempt', '20'], dir);
+    expect(r.status).toBe(1);
+    expect(r.out).toContain("authorization maxRequestsPerAttempt '10' does not match the runner-declared '20'");
+    expect(ledgerFingerprint(dir)).toBe(before);
+  });
+
+  it('F3: a bound authorization REFUSES a run that declares NO per-attempt cap — the approved cap must be declared explicitly', () => {
+    const dir = copyStudy('perattempt-undeclared');
+    approveF1(dir, { maxRequestsPerAttempt: 10 });
+    const r = runCli(['--execution-mode', 'F1-direct-model', '--now', NOW, '--dry-run'], dir);
+    expect(r.status).toBe(1);
+    expect(r.out).toContain("binds maxRequestsPerAttempt '10' but the runner declared none");
+  });
+
+  it('F4: a NON-bound authorization refuses ANY per-attempt cap declaration — no cap is approved without a binding', () => {
+    const dir = copyStudy('perattempt-unbound');
+    approveF1(dir); // no maxRequestsPerAttempt field
+    const r = runCli(['--execution-mode', 'F1-direct-model', '--now', NOW, '--dry-run', '--max-requests-per-attempt', '10'], dir);
+    expect(r.status).toBe(1);
+    expect(r.out).toContain('no per-attempt request cap is approved for this authorization');
+  });
+
+  it('F5: invalid per-attempt cap values refuse at CLI argument validation', () => {
+    const dir = copyStudy('perattempt-invalid');
+    for (const bad of ['abc', '0', '41', '10.5']) {
+      const r = runCli(['--execution-mode', 'F1-direct-model', '--now', NOW, '--dry-run', '--max-requests-per-attempt', bad], dir);
+      expect(r.status).toBe(1);
+      expect(r.out).toContain('must be an integer within [1, 40]');
+    }
+  });
+
+  it('F6: an out-of-ceiling bound value in the authorization itself is refused (ambiguity fails closed; the CLI value 40 is valid so the refusal comes from the GATE)', () => {
+    const dir = copyStudy('perattempt-bad-auth');
+    approveF1(dir, { maxRequestsPerAttempt: 99 });
+    const r = runCli(['--execution-mode', 'F1-direct-model', '--now', NOW, '--dry-run', '--max-requests-per-attempt', '40'], dir);
+    expect(r.status).toBe(1);
+    expect(r.out).toContain('maxRequestsPerAttempt must be a safe integer in [1, 40]');
+  });
+});

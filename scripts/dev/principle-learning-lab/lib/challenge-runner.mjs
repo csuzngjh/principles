@@ -309,6 +309,7 @@ export async function runChallengeStudy({
               now: typeof execution.now === 'function' ? execution.now() : execution.now,
               declaredExecutionMode: declaredMode,
               declaredRequestTimeoutMs: execution.requestTimeoutMs, // undefined = default 240000 (the gate enforces the authorization binding)
+              declaredMaxRequestsPerAttempt: execution.maxRequestsPerAttempt, // undefined = no per-attempt cap approved (the gate enforces the authorization binding)
             });
             if (!gate.ok) {
               ledger.appendEvent({ type: 'UNIT_REFUSED', unit, reason: 'stage_r_not_authorized', detail: gate.reasons });
@@ -435,13 +436,24 @@ export async function runChallengeStudy({
           // never reaches the actor (the request is not sent), and dispatched
           // but unanswered requests keep their slot (RESULT_UNKNOWN, no
           // auto-retry). Stub runs pass no hook — zero behavioral change.
+          // Per-attempt cap (authorization-bound, gate-checked): when
+          // execution.maxRequestsPerAttempt is declared and approved, a step
+          // at/above the cap refuses its reservation — the loop terminates
+          // (request_budget_exhausted) BEFORE the request is sent, so one
+          // attempt can never exceed the approved per-attempt request budget.
+          const perAttemptCap = isRealMode && execution.maxRequestsPerAttempt !== undefined ? execution.maxRequestsPerAttempt : null;
           const reserveRequest = isRealMode
-            ? (step) => ledger.reserveModelRequest({
-              key: `${attemptId}:${caseId}/${armId}/r${repetitionId}:step${step}`,
-              unit,
-              maxRequestsTotal: gate.requestCap,
-              reason: `model request (unit ${caseId}/${armId}/r${repetitionId} step ${step})`,
-            })
+            ? (step) => {
+              if (perAttemptCap !== null && step >= perAttemptCap) {
+                return { ok: false, reason: `per_attempt_request_cap: step ${step} reached the approved per-attempt request cap ${perAttemptCap} — request NOT sent; the attempt settles bounded` };
+              }
+              return ledger.reserveModelRequest({
+                key: `${attemptId}:${caseId}/${armId}/r${repetitionId}:step${step}`,
+                unit,
+                maxRequestsTotal: gate.requestCap,
+                reason: `model request (unit ${caseId}/${armId}/r${repetitionId} step ${step})`,
+              });
+            }
             : null;
 
           try {
