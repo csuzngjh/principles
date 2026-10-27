@@ -190,3 +190,65 @@ export async function reviseRuleSourceOnce(args: ReviseRuleSourceOnceArgs): Prom
     causeId,
   };
 }
+
+/**
+ * PRI-1048（Owner 评审 R6 #4）：source-correct-once 的只读资格预览。
+ *
+ * 预览复用 reviseRuleSourceOnce 的同一批前置判定（链解析、绑定身份、
+ * 一次额度、Artificer 停点属源材料缺陷、当前工件摘要），但不做租约/
+ * 竞争态检查、绝不写库——点击时 reviseRuleSourceOnce 仍权威复核
+ * （与 deriveResume→reviseRuleBindingOnce 相同的「预览=只读、点击=实判」
+ * 契约）。Console 用它决定何时展示「修正源材料」入口并取 CAS 输入。
+ */
+export type RuleSourceCorrectionPreview =
+  | {
+    readonly status: 'ready';
+    readonly scribeTaskId: string;
+    readonly artificerTaskId: string;
+    readonly scribeArtifactDigest: string;
+    readonly expectedBindingRevision: number;
+    readonly expectedStopReasonCode: string;
+  }
+  | { readonly status: 'unavailable'; readonly reason: string };
+
+export async function previewRuleSourceCorrection(args: {
+  readonly stateManager: RuntimeStateManager;
+  readonly ledger: CandidateIdentityPort;
+  readonly candidateId: string;
+  readonly expectedBindingRevision: number;
+}): Promise<RuleSourceCorrectionPreview> {
+  const target = await resolveRuleSourceCorrectionTarget(args.stateManager, args.candidateId);
+  if (target.status !== 'ready') return { status: 'unavailable', reason: target.reason };
+  const identity = await args.ledger.resolveForCandidate(args.candidateId);
+  if (identity.status !== 'resolved') return { status: 'unavailable', reason: identity.reason };
+  if (identity.basis !== 'owner_rule_binding' || identity.bindingRevision !== args.expectedBindingRevision) {
+    return { status: 'unavailable', reason: 'binding_revision_stale' };
+  }
+  const scribeTask = await args.stateManager.getTask(target.scribeTaskId);
+  const scribePi = scribeTask ? hydratePITaskRecord(scribeTask) : null;
+  if (!scribeTask || !scribePi) return { status: 'unavailable', reason: 'scribe_missing' };
+  if (scribePi.sourceCorrectionCauseId !== undefined) {
+    return { status: 'unavailable', reason: 'source_correction_budget_exhausted' };
+  }
+  const artificerTask = await args.stateManager.getTask(target.artificerTaskId);
+  const artificerPi = artificerTask ? hydratePITaskRecord(artificerTask) : null;
+  if (!artificerTask || !artificerPi) return { status: 'unavailable', reason: 'artificer_missing' };
+  if (artificerTask.status !== 'needs_human_review') {
+    return { status: 'unavailable', reason: `artificer_not_in_review_${artificerTask.status}` };
+  }
+  const stopReasonCode = artificerPi.humanReviewContext?.reasonCode ?? '';
+  if (!SOURCE_CORRECTION_STOP_REASON_CODES.includes(stopReasonCode)) {
+    return { status: 'unavailable', reason: `stop_reason_not_source_material:${stopReasonCode || 'none'}` };
+  }
+  const artifacts = await args.stateManager.piArtifactStore.listBySourceTaskId(target.scribeTaskId);
+  const [currentArtifact] = artifacts;
+  if (!currentArtifact) return { status: 'unavailable', reason: 'scribe_artifact_missing' };
+  return {
+    status: 'ready',
+    scribeTaskId: target.scribeTaskId,
+    artificerTaskId: target.artificerTaskId,
+    scribeArtifactDigest: sha256Hex(currentArtifact.contentJson),
+    expectedBindingRevision: args.expectedBindingRevision,
+    expectedStopReasonCode: stopReasonCode,
+  };
+}

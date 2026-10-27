@@ -13,6 +13,7 @@ const queueItem = {
   binding: { status: 'unlinked' },
   generation: null,
   resume: null,
+  sourceCorrection: null,
 };
 const validQueue = {
   items: [queueItem, { ...queueItem, candidateId: 'candidate-two', text: 'Keep evidence linked.' }],
@@ -30,6 +31,7 @@ const validReview = {
   boundPrinciple: null,
   generation: { stage: 'blocked', stageKind: 'artificer', reasonCode: 'textual_basis_unanchored', detail: 'anchor missing' },
   resume: { status: 'refused', reason: 'revision_budget_exhausted', scribeTaskId: 'scribe-1', taskRevisionEpoch: 1 },
+  sourceCorrection: { status: 'unavailable', reason: 'source_correction_budget_exhausted', scribeTaskId: null, artificerTaskId: null, scribeArtifactDigest: null, expectedBindingRevision: null },
   eligibleTargets: [
     { principleId: '11111111-2222-4222-8222-222222222222', text: 'Keep writes scoped.', status: 'active', version: 3, digest },
   ],
@@ -96,6 +98,35 @@ describe('RuleCode binding UI decoders', () => {
     expect(validateBindingQueue({ ...validQueue, items: [{ ...queueItem, resume: { status: 'ready', reason: null, scribeTaskId: 's', taskRevisionEpoch: -1 } }] })).toBeNull();
     // null fields are legal for unlinked rows and refused resumes without epochs.
     expect(validateBindingQueue({ ...validQueue, items: [{ ...queueItem, resume: { status: 'refused', reason: 'dreamer_missing', scribeTaskId: null, taskRevisionEpoch: null } }] })).not.toBeNull();
+  });
+
+  it('validates the source-correction preview: ready MUST carry the full CAS input set (PRI-1048 R6 #4)', () => {
+    const ready = {
+      status: 'ready', reason: null,
+      scribeTaskId: 'scribe-52d', artificerTaskId: 'artificer-52d',
+      scribeArtifactDigest: digest, expectedBindingRevision: 1,
+    };
+    const blocked = {
+      ...queueItem,
+      binding: { status: 'bound', principle: { principleId: '11111111-2222-4222-8222-222222222222', text: 'Keep writes scoped.', status: 'candidate', version: 1, revision: 1, decidedAt: '2026-10-26T00:00:00.000Z' } },
+      generation: { stage: 'blocked', stageKind: 'artificer', reasonCode: 'textual_basis_unanchored', detail: null },
+      resume: { status: 'refused', reason: 'revision_budget_exhausted', scribeTaskId: null, taskRevisionEpoch: null },
+      sourceCorrection: ready,
+    };
+    expect(validateBindingQueue({ ...validQueue, items: [blocked], summary: { painGroups: 1, candidates: 1, bound: 1, unlinked: 0, blocked: 1 } }))
+      .toMatchObject({ items: [{ ...blocked, sourceCorrection: ready }] });
+    // unavailable keeps fields null and stays readable.
+    expect(validateBindingQueue({ ...validQueue, items: [{ ...blocked, sourceCorrection: { status: 'unavailable', reason: 'scribe_missing', scribeTaskId: null, artificerTaskId: null, scribeArtifactDigest: null, expectedBindingRevision: null } }] })).not.toBeNull();
+    // a half-filled ready preview would render a CTA that can never fire — reject.
+    for (const key of ['scribeTaskId', 'artificerTaskId', 'scribeArtifactDigest', 'expectedBindingRevision'] as const) {
+      const broken = { ...ready, [key]: null };
+      expect(validateBindingQueue({ ...validQueue, items: [{ ...blocked, sourceCorrection: broken }] }), `ready with ${key}=null`).toBeNull();
+    }
+    expect(validateBindingQueue({ ...validQueue, items: [{ ...blocked, sourceCorrection: { status: 'nope', reason: null, scribeTaskId: null, artificerTaskId: null, scribeArtifactDigest: null, expectedBindingRevision: null } }] })).toBeNull();
+    // absent key = malformed row (rc-3), never silently treated as not-applicable.
+    const absent = { ...blocked } as Record<string, unknown>;
+    delete absent.sourceCorrection;
+    expect(validateBindingQueue({ ...validQueue, items: [absent] })).toBeNull();
   });
 
   it('requires every review authority field and every eligible-target field before review can be acted on', () => {

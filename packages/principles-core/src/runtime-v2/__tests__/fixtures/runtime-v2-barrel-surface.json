@@ -1,6 +1,6 @@
 {
   "barrel": "src/runtime-v2/index.ts",
-  "count": 1982,
+  "count": 1984,
   "names": [
     "ADMISSION_CONFIDENCE_THRESHOLD",
     "ADMISSION_POLICY_VERSION",
@@ -1254,6 +1254,7 @@
     "RuleReliabilityValidationResult",
     "RuleReplayEvidence",
     "RuleSchema",
+    "RuleSourceCorrectionPreview",
     "RuleStatus",
     "RuleStatusSchema",
     "RuleToolCallRecord",
@@ -1865,6 +1866,7 @@
     "planOwnerVerdictOverrideResume",
     "preflightArtificerIntentBasis",
     "preflightArtificerOwnerEvidence",
+    "previewRuleSourceCorrection",
     "probeRuntime",
     "promptBudgetCharsForContextWindow",
     "proposalNeedsDecision",

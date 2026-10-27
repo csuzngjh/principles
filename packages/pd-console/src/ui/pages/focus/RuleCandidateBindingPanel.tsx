@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
-import { fetchRuleBindingQueue, fetchRuleBindingReview, mutateRuleBinding, reviseRuleBindingOnce } from '../../api.js';
+import { fetchRuleBindingQueue, fetchRuleBindingReview, mutateRuleBinding, reviseRuleBindingOnce, correctRuleSource } from '../../api.js';
 import type { RuleBindingQueueView, RuleBindingQueueItem, RuleBindingReviewView } from '../../../shared/rule-candidate-binding-contract.js';
 import { splitReadingTitleBody } from '../../utils/reading-layout.js';
 
@@ -93,6 +93,19 @@ export function canOfferRuleBindingResume(item: RuleBindingQueueItem): boolean {
     && item.resume?.status === 'ready'
     && item.generation?.stage !== 'in_progress'
     && item.generation?.stage !== 'ambiguous';
+}
+
+/**
+ * PRI-1048 R6 #4: the source-correction entry applies when the bounded
+ * source-correction budget is available on a bound+blocked chain — the shape
+ * where the binding revision budget is typically already spent (the 52d
+ * production candidate). Real eligibility is resolved server-side
+ * (previewRuleSourceCorrection); click-time authority is reviseRuleSourceOnce.
+ */
+export function canOfferSourceCorrection(item: Pick<RuleBindingQueueItem, 'binding' | 'generation' | 'sourceCorrection'>): boolean {
+  return item.binding.status === 'bound'
+    && item.generation?.stage === 'blocked'
+    && item.sourceCorrection?.status === 'ready';
 }
 
 /** ERR-106: next-step copy and the left bar also use exhaustive maps. */
@@ -224,6 +237,32 @@ export function RuleCandidateBindingPanel() {
     setBusy(false);
   }
 
+  /** PRI-1048 R6 #4: only reachable when the server preview said ready
+   * (canOfferSourceCorrection); the server re-validates every CAS input. */
+  async function correctSource() {
+    const preview = review?.sourceCorrection;
+    if (!review || !preview || preview.status !== 'ready'
+      || preview.scribeTaskId === null || preview.artificerTaskId === null
+      || preview.scribeArtifactDigest === null || preview.expectedBindingRevision === null) return;
+    setBusy(true); setError(''); setMessage('');
+    const result = await correctRuleSource(review.candidateId, {
+      expectedBindingRevision: preview.expectedBindingRevision,
+      expectedScribeTaskId: preview.scribeTaskId,
+      expectedArtificerTaskId: preview.artificerTaskId,
+      expectedScribeArtifactDigest: preview.scribeArtifactDigest,
+      reason,
+      requestId: crypto.randomUUID(),
+    });
+    if (result.success) {
+      setMessage(result.data.status === 'revision_already_started'
+        ? t('pages.focus.ruleBinding.sourceCorrectionAlreadyStarted')
+        : t('pages.focus.ruleBinding.sourceCorrectionStarted'));
+      await load(review.candidateId, search);
+      await refreshQueue();
+    } else setError([result.error, result.nextAction].filter(Boolean).join(' ') || t('pages.focus.ruleBinding.unavailable'));
+    setBusy(false);
+  }
+
   if ((queue === null || queue.items.length === 0) && !error) return null;
   const groups = groupRuleBindingQueue(queue?.items ?? []);
   const visibleGroups = showAllGroups ? groups : groups.slice(0, COLLAPSED_GROUP_LIMIT);
@@ -324,8 +363,14 @@ export function RuleCandidateBindingPanel() {
               {canOfferRuleBindingResume({ ...item, resume: review.resume }) && <button type="button" className="mt-3 rounded border border-gov bg-gov text-paper px-3 py-2 text-sm disabled:opacity-50" disabled={busy} onClick={() => void revise()}>
                 {t('pages.focus.ruleBinding.reviseCta')}
               </button>}
+              {canOfferSourceCorrection({ ...item, sourceCorrection: review.sourceCorrection }) && <button type="button" className="mt-3 ml-2 rounded border border-gov bg-gov text-paper px-3 py-2 text-sm disabled:opacity-50" disabled={busy || !reason.trim()} data-testid="rule-binding-source-correct-cta" onClick={() => void correctSource()}>
+                {t('pages.focus.ruleBinding.sourceCorrectionCta')}
+              </button>}
               {review.resume?.status === 'refused' && <p className="mt-3 text-[12.5px] text-ink-3 leading-relaxed">
                 {t('pages.focus.ruleBinding.resumeUnavailable', { reason: codeText(t, 'pages.focus.ruleBinding.resumeReason', review.resume.reason) })}
+              </p>}
+              {review.generation?.stage === 'blocked' && review.sourceCorrection?.status === 'unavailable' && <p className="mt-2 text-[12.5px] text-ink-4 leading-relaxed">
+                {t('pages.focus.ruleBinding.sourceCorrectionUnavailable', { reason: review.sourceCorrection.reason ?? '' })}
               </p>}
               {review.generation?.stage === 'in_progress' && <p className="mt-3 text-[12.5px] text-ink-3">{t('pages.focus.ruleBinding.nextBoundGenerating')}</p>}
             </>}

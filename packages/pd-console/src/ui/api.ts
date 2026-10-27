@@ -297,6 +297,17 @@ export function reviseRuleBindingOnce(candidateId: string, body: { expectedBindi
   return request(`/api/v1/governance/rule-candidate-bindings/${encodeURIComponent(candidateId)}/revise-once`, { method: 'POST', body: JSON.stringify(body) }, validateBindingRevise);
 }
 
+/** PRI-1048 R6 #4: the bounded one-shot SOURCE correction (PRI-1047) — the
+ * capability that applies when the binding revision budget is spent and the
+ * Artificer stopped for a source-material defect. CAS inputs come from the
+ * server-computed sourceCorrection preview; the server re-validates all of it. */
+export function correctRuleSource(candidateId: string, body: {
+  expectedBindingRevision: number; expectedScribeTaskId: string; expectedArtificerTaskId: string;
+  expectedScribeArtifactDigest: string; reason: string; requestId: string;
+}) {
+  return request(`/api/v1/governance/rule-candidate-bindings/${encodeURIComponent(candidateId)}/source-correct-once`, { method: 'POST', body: JSON.stringify(body) }, validateBindingRevise);
+}
+
 async function fetchWorkspaces(): Promise<ApiResponse<WorkspaceEntryData[]>> {
   return request<WorkspaceEntryData[]>("/api/workspaces", undefined, validateWorkspaceList);
 }

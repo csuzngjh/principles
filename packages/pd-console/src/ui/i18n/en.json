@@ -107,6 +107,10 @@
         "reviseStarted": "One controlled revision was requested; generation and validation continue under the existing configuration.",
         "reviseAlreadyStarted": "This revision is already in progress; no repeat request needed.",
         "resumeUnavailable": "Automatic revision is unavailable now ({{reason}}); a generic retry is not a source revision.",
+        "sourceCorrectionCta": "Correct source material and continue",
+        "sourceCorrectionStarted": "One source-material correction was authorized: the Scribe reopens for one round on the corrected material and the original Artificer resumes on the new artifact, under the existing configuration and budgets.",
+        "sourceCorrectionAlreadyStarted": "This source correction is already in progress (idempotent replay); no repeat request needed.",
+        "sourceCorrectionUnavailable": "The source-correction entry is unavailable now ({{reason}}).",
         "resumeReason": {
           "revision_budget_exhausted": "the revision budget of this link is spent",
           "dreamer_lineage_not_unique": "dreamer task lineage is not unique",

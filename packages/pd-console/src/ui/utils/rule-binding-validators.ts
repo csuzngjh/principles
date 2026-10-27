@@ -1,4 +1,4 @@
-import type { RuleBindingReviewView, RuleBindingQueueView, RuleBindingQueueItem, RuleBindingBoundPrincipleView } from '../../shared/rule-candidate-binding-contract.js';
+import type { RuleBindingReviewView, RuleBindingQueueView, RuleBindingQueueItem, RuleBindingBoundPrincipleView, RuleBindingSourceCorrectionView } from '../../shared/rule-candidate-binding-contract.js';
 function record(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null && !Array.isArray(value); }
 function integer(value: unknown): value is number { return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0; }
 function stringOrNull(value: unknown): value is string | null { return value === null || typeof value === 'string'; }
@@ -31,6 +31,24 @@ function validateResume(value: unknown): RuleBindingQueueItem['resume'] | 'inval
     || !stringOrNull(value.reason) || !stringOrNull(value.scribeTaskId)
     || !(value.taskRevisionEpoch === null || integer(value.taskRevisionEpoch))) return 'invalid';
   return { status: value.status, reason: value.reason, scribeTaskId: value.scribeTaskId, taskRevisionEpoch: value.taskRevisionEpoch };
+}
+
+/** PRI-1048 R6 #4: source-correct-once eligibility preview (null = not applicable). */
+function validateSourceCorrection(value: unknown): RuleBindingSourceCorrectionView | null | 'invalid' {
+  if (value === null) return null;
+  if (!record(value) || (value.status !== 'ready' && value.status !== 'unavailable')
+    || !stringOrNull(value.reason) || !stringOrNull(value.scribeTaskId)
+    || !stringOrNull(value.artificerTaskId) || !stringOrNull(value.scribeArtifactDigest)
+    || !(value.expectedBindingRevision === null || integer(value.expectedBindingRevision))) return 'invalid';
+  // ready MUST carry the full CAS input set — a half-filled preview would render
+  // a CTA that can never fire.
+  if (value.status === 'ready' && (value.scribeTaskId === null || value.artificerTaskId === null
+    || value.scribeArtifactDigest === null || value.expectedBindingRevision === null)) return 'invalid';
+  return {
+    status: value.status, reason: value.reason, scribeTaskId: value.scribeTaskId,
+    artificerTaskId: value.artificerTaskId, scribeArtifactDigest: value.scribeArtifactDigest,
+    expectedBindingRevision: value.expectedBindingRevision,
+  };
 }
 
 function validateBinding(value: unknown): RuleBindingQueueItem['binding'] | null {
@@ -69,13 +87,15 @@ export function validateBindingQueue(value: unknown): RuleBindingQueueView | nul
     // generation/resume is a malformed row, not an unlinked row.
     const generation = validateGeneration(item.generation);
     const resume = validateResume(item.resume);
-    if (!pain || !binding || generation === 'invalid' || resume === 'invalid'
-      || !Object.hasOwn(item, 'generation') || !Object.hasOwn(item, 'resume')) return null;
+    const sourceCorrection = validateSourceCorrection(item.sourceCorrection);
+    if (!pain || !binding || generation === 'invalid' || resume === 'invalid' || sourceCorrection === 'invalid'
+      || !Object.hasOwn(item, 'generation') || !Object.hasOwn(item, 'resume') || !Object.hasOwn(item, 'sourceCorrection')) return null;
     items.push({
       candidateId: item.candidateId, text: item.text, pain,
       diagnosisStatus: item.diagnosisStatus, binding,
       generation,
       resume,
+      sourceCorrection,
     });
   }
   return {
@@ -117,16 +137,18 @@ export function validateBindingReview(value: unknown): RuleBindingReviewView | n
     if (!record(p) || typeof p.principleId !== 'string' || typeof p.text !== 'string' || typeof p.status !== 'string' || !integer(p.version) || typeof p.digest !== 'string') return null;
     eligibleTargets.push({ principleId: p.principleId, text: p.text, status: p.status, version: p.version, digest: p.digest });
   }
-  if (!Object.hasOwn(value, 'generation') || !Object.hasOwn(value, 'resume')) return null;
+  if (!Object.hasOwn(value, 'generation') || !Object.hasOwn(value, 'resume') || !Object.hasOwn(value, 'sourceCorrection')) return null;
   const generation = validateGeneration(value.generation);
   const resume = validateResume(value.resume);
-  if (generation === 'invalid' || resume === 'invalid') return null;
+  const sourceCorrection = validateSourceCorrection(value.sourceCorrection);
+  if (generation === 'invalid' || resume === 'invalid' || sourceCorrection === 'invalid') return null;
   return {
     candidateId: value.candidateId, candidateText: value.candidateText, sourcePain,
     evidence: value.evidence, candidateDigest: value.candidateDigest, currentRevision: value.currentRevision,
     currentBinding, boundPrinciple, eligibleTargets,
     generation,
     resume,
+    sourceCorrection,
     resumeNotice: value.resumeNotice,
   };
 }

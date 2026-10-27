@@ -175,6 +175,13 @@ describe('rule binding queue projection (PRI-1048)', () => {
       { taskId: 'scribe-1', taskKind: 'scribe', deps: ['philosopher-1'], status: 'succeeded', budgetCause: true },
       { taskId: 'artificer-1', taskKind: 'artificer', deps: ['scribe-1'], status: 'needs_human_review', blocked: { reasonCode: 'textual_basis_unanchored', detail: "required fact 'design_approval' textualBasis cannot be anchored" } },
     ]);
+    // The bounded source-correction preview anchors to the CURRENT scribe artifact.
+    await fixture.handle.stateManager.piArtifactStore.upsertArtifact({
+      artifactId: 'pi-art-scribe-1-run-1', artifactKind: 'principle', sourceTaskId: 'scribe-1',
+      lineageArtifactIds: [], validationStatus: 'validated',
+      contentJson: JSON.stringify({ taskId: 'scribe-1', principleDraft: { statement: '设计确认门禁。' } }),
+      createdAt: NOW, updatedAt: NOW,
+    });
 
     const queue = await new RuleCandidateBindingConsoleModel(fixture.workspaceDir).list();
     const item = queue.items.find(entry => entry.candidateId === fixture.ruleCandidateId);
@@ -192,11 +199,18 @@ describe('rule binding queue projection (PRI-1048)', () => {
     expect(item.binding.principle.decidedAt).not.toBe('');
     expect(item.generation).toMatchObject({ stage: 'blocked', stageKind: 'artificer', reasonCode: 'textual_basis_unanchored' });
     expect(item.resume).toEqual({ status: 'refused', reason: 'revision_budget_exhausted', scribeTaskId: 'scribe-1', taskRevisionEpoch: 1 });
+    // PRI-1048 R6 #4: with the binding budget spent but the source-material stop
+    // in scope, the bounded source-correction entry is READY with the full CAS set.
+    expect(item.sourceCorrection).toMatchObject({
+      status: 'ready', reason: null, scribeTaskId: 'scribe-1', artificerTaskId: 'artificer-1', expectedBindingRevision: 1,
+    });
+    expect(item.sourceCorrection?.scribeArtifactDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
 
     const twin = queue.items.find(entry => entry.candidateId === fixture.twinCandidateId);
     expect(twin?.binding).toEqual({ status: 'unlinked' });
     expect(twin?.generation).toBeNull();
     expect(twin?.resume).toBeNull();
+    expect(twin?.sourceCorrection).toBeNull();
     expect(twin?.pain).toMatchObject({ painId: 'pain-unlinked' });
 
     // The split diagnosis contributes TWO distinct rule candidates (the

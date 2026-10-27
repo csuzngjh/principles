@@ -43,6 +43,21 @@ export interface RuleBindingResumeView {
   taskRevisionEpoch: number | null;
 }
 
+/** PRI-1048 (Owner review R6 #4): read-only eligibility preview for the
+ * source-correct-once capability (PRI-1047) — the bounded one-shot source
+ * revision that applies when the Artificer stopped for a SOURCE-material
+ * defect and the binding revision budget is spent. Click-time authority
+ * stays with reviseRuleSourceOnce on the server. */
+export interface RuleBindingSourceCorrectionView {
+  status: 'ready' | 'unavailable';
+  reason: string | null;
+  /** CAS inputs for the source-correct-once request (ready only). */
+  scribeTaskId: string | null;
+  artificerTaskId: string | null;
+  scribeArtifactDigest: string | null;
+  expectedBindingRevision: number | null;
+}
+
 export type RuleBindingQueueBindingView =
   | { status: 'unlinked' }
   | { status: 'bound'; principle: RuleBindingBoundPrincipleView }
@@ -57,6 +72,8 @@ export interface RuleBindingQueueItem {
   binding: RuleBindingQueueBindingView;
   generation: RuleBindingGenerationView | null;
   resume: RuleBindingResumeView | null;
+  /** PRI-1048 R6 #4: non-null only when bound (null = the capability does not apply). */
+  sourceCorrection: RuleBindingSourceCorrectionView | null;
 }
 
 export interface RuleBindingQueueSummary {
@@ -92,5 +109,6 @@ export interface RuleBindingReviewView {
   eligibleTargets: RuleBindingTargetView[];
   generation: RuleBindingGenerationView | null;
   resume: RuleBindingResumeView | null;
+  sourceCorrection: RuleBindingSourceCorrectionView | null;
   resumeNotice: string;
 }

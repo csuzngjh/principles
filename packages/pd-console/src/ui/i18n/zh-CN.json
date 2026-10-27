@@ -107,6 +107,10 @@
         "reviseStarted": "已请求一次受控修订；生成与验证将按现有配置继续。",
         "reviseAlreadyStarted": "该修订已在进行中；无需重复请求。",
         "resumeUnavailable": "当前不可自动修订（{{reason}}）；不要把通用重试当作源修订。",
+        "sourceCorrectionCta": "修正源材料并继续",
+        "sourceCorrectionStarted": "已授权一次源材料修订：Scribe 将以修正后的材料重开一轮，原 Artificer 在新工件上定点续接；沿用原配置与预算。",
+        "sourceCorrectionAlreadyStarted": "该源材料修订已在进行中（幂等重放）；无需重复请求。",
+        "sourceCorrectionUnavailable": "源材料修订入口当前不可用（{{reason}}）。",
         "resumeReason": {
           "revision_budget_exhausted": "本次关联的修订预算已用完",
           "dreamer_lineage_not_unique": "构思任务血缘不唯一",

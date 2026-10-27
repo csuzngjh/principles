@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  deriveRuleBindingCardState, groupRuleBindingQueue, canOfferRuleBindingResume,
+  deriveRuleBindingCardState, groupRuleBindingQueue, canOfferRuleBindingResume, canOfferSourceCorrection,
   RULE_BINDING_CARD_STATE_KEY, RULE_BINDING_CARD_STATE_CLASS, PAIN_SOURCE_KEY,
   type RuleBindingCardState,
 } from '../../src/ui/pages/focus/RuleCandidateBindingPanel.js';
@@ -22,6 +22,7 @@ function makeItem(overrides: Partial<RuleBindingQueueItem> = {}): RuleBindingQue
     binding: { status: 'unlinked' },
     generation: null,
     resume: null,
+    sourceCorrection: null,
     ...overrides,
   };
 }
@@ -67,6 +68,18 @@ describe('RuleCandidateBindingPanel pure display logic (PRI-1048)', () => {
     expect(canOfferRuleBindingResume(bound({ stage: 'ambiguous', stageKind: null, reasonCode: null, detail: null }, ready))).toBe(false);
     expect(canOfferRuleBindingResume(bound({ stage: 'blocked', stageKind: 'artificer', reasonCode: 'x', detail: null }, { status: 'refused', reason: 'revision_budget_exhausted', scribeTaskId: 's-1', taskRevisionEpoch: 1 }))).toBe(false);
     expect(canOfferRuleBindingResume(makeItem({ resume: ready }))).toBe(false);
+  });
+
+  it('offers the source-correction entry only on a bound+blocked chain with a server-ready preview (R6 #4)', () => {
+    const ready = { status: 'ready' as const, reason: null, scribeTaskId: 's-1', artificerTaskId: 'a-1', scribeArtifactDigest: `sha256:${'a'.repeat(64)}`, expectedBindingRevision: 1 };
+    const blockedBound = bound({ stage: 'blocked', stageKind: 'artificer', reasonCode: 'textual_basis_unanchored', detail: null }, null);
+    expect(canOfferSourceCorrection({ ...blockedBound, sourceCorrection: ready })).toBe(true);
+    // unavailable preview (e.g. budget already spent) → no entry.
+    expect(canOfferSourceCorrection({ ...blockedBound, sourceCorrection: { status: 'unavailable', reason: 'source_correction_budget_exhausted', scribeTaskId: null, artificerTaskId: null, scribeArtifactDigest: null, expectedBindingRevision: null } })).toBe(false);
+    // not blocked / not bound / no preview → never.
+    expect(canOfferSourceCorrection({ ...bound({ stage: 'advanced', stageKind: 'scribe', reasonCode: null, detail: null }, null), sourceCorrection: ready })).toBe(false);
+    expect(canOfferSourceCorrection({ ...blockedBound, sourceCorrection: null })).toBe(false);
+    expect(canOfferSourceCorrection({ ...makeItem({ sourceCorrection: ready }) })).toBe(false);
   });
 
   it('maps every card state to an i18n key present in BOTH locales (EP-11/ERR-106)', () => {

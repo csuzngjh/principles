@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import Database from 'better-sqlite3';
 import {
   createRuntimeStateHandle, PrincipleTreeLedgerAdapter, reviseRuleBindingOnce, resolveRuleBindingRevisionTarget,
-  reviseRuleSourceOnce,
+  reviseRuleSourceOnce, previewRuleSourceCorrection,
   hydratePITaskRecord, candidateIdFromDreamerSeed,
 } from '@principles/core/runtime-v2';
 import { readLedgerFileState } from '@principles/core/principle-tree-ledger';
@@ -11,6 +11,7 @@ import type { RuntimeStateManager, RuleCandidateBindingRequest, RuleCandidateBin
 import type {
   RuleBindingReviewView, RuleBindingQueueView, RuleBindingQueueItem, RuleBindingPainSourceView,
   RuleBindingGenerationView, RuleBindingResumeView, RuleBindingQueueBindingView, RuleBindingBoundPrincipleView,
+  RuleBindingSourceCorrectionView,
 } from '../../shared/rule-candidate-binding-contract.js';
 import { ActivationsConsoleModel } from './ActivationsConsoleModel.js';
 
@@ -193,19 +194,41 @@ export class RuleCandidateBindingConsoleModel {
   }
 
   /** Identity stays with the ledger adapter (the identity authority); the
-   * principle entry / decidedAt come from the caller's single file snapshot. */
-  private queueBinding(stateManager: RuntimeStateManager, ledgerState: ReturnType<typeof readLedgerFileState>, candidateId: string): RuleBindingQueueBindingView {
+   * principle entry / decidedAt come from the caller's single file snapshot.
+   * bindingRevision rides along so the source-correction preview can anchor
+   * its eligibility to the CURRENT binding (PRI-1048 R6 #4). */
+  private queueBinding(stateManager: RuntimeStateManager, ledgerState: ReturnType<typeof readLedgerFileState>, candidateId: string): { view: RuleBindingQueueBindingView; bindingRevision: number | null } {
     const identity = this.ledger(stateManager).resolveCandidatePrincipleIdentity(candidateId, 'rule');
     if (identity.status === 'resolved') {
       const view = boundPrincipleView(ledgerState, { candidateId, principleId: identity.principleId, revision: identity.bindingRevision ?? 0 });
-      if (view) return { status: 'bound', principle: view };
+      if (view) return { view: { status: 'bound', principle: view }, bindingRevision: identity.bindingRevision ?? null };
       // Bound in the ledger but the principle entry itself is unreadable or
       // gone — surface as attention, never silently unlinked.
-      return { status: 'attention', reason: 'bound_principle_unreadable' };
+      return { view: { status: 'attention', reason: 'bound_principle_unreadable' }, bindingRevision: identity.bindingRevision ?? null };
     }
-    if (identity.reason === 'missing') return { status: 'unlinked' };
-    if (identity.reason === 'binding_revoked') return { status: 'binding_revoked' };
-    return { status: 'attention', reason: identity.reason };
+    if (identity.reason === 'missing') return { view: { status: 'unlinked' }, bindingRevision: null };
+    if (identity.reason === 'binding_revoked') return { view: { status: 'binding_revoked' }, bindingRevision: null };
+    return { view: { status: 'attention', reason: identity.reason }, bindingRevision: null };
+  }
+
+  /** PRI-1048 R6 #4: read-only eligibility preview for source-correct-once.
+   * Only the bound+blocked shape can offer it; the click-time authority
+   * (reviseRuleSourceOnce) re-checks everything server-side. */
+  private async sourceCorrectionPreview(stateManager: RuntimeStateManager, candidateId: string, bindingRevision: number): Promise<RuleBindingSourceCorrectionView> {
+    const ledger = this.ledger(stateManager);
+    const preview = await previewRuleSourceCorrection({
+      stateManager,
+      ledger: { resolveForCandidate: async id => ledger.resolveCandidatePrincipleIdentity(id, 'rule') },
+      candidateId,
+      expectedBindingRevision: bindingRevision,
+    });
+    return preview.status === 'ready'
+      ? {
+        status: 'ready', reason: null,
+        scribeTaskId: preview.scribeTaskId, artificerTaskId: preview.artificerTaskId,
+        scribeArtifactDigest: preview.scribeArtifactDigest, expectedBindingRevision: preview.expectedBindingRevision,
+      }
+      : { status: 'unavailable', reason: preview.reason, scribeTaskId: null, artificerTaskId: null, scribeArtifactDigest: null, expectedBindingRevision: null };
   }
 
   async list(): Promise<RuleBindingQueueView> {
@@ -252,9 +275,14 @@ export class RuleCandidateBindingConsoleModel {
       const items: RuleBindingQueueItem[] = [];
       for (const entry of entries) {
         const diagnosisTask = chainContext.byId.get(entry.diagnosisTaskId) ?? null;
-        const binding = this.queueBinding(stateManager, ledgerState, entry.candidateId);
+        const { view: binding, bindingRevision } = this.queueBinding(stateManager, ledgerState, entry.candidateId);
         const generation = binding.status === 'unlinked' ? null : deriveGeneration(entry.candidateId, chainContext);
         const resume = binding.status === 'bound' ? await deriveResume(stateManager, entry.candidateId) : null;
+        // PRI-1048 R6 #4: the source-correction entry applies to the bound+blocked
+        // shape only (the binding revision budget is typically already spent there).
+        const sourceCorrection = binding.status === 'bound' && generation?.stage === 'blocked' && bindingRevision !== null
+          ? await this.sourceCorrectionPreview(stateManager, entry.candidateId, bindingRevision)
+          : null;
         items.push({
           candidateId: entry.candidateId,
           text: entry.text,
@@ -267,6 +295,7 @@ export class RuleCandidateBindingConsoleModel {
           binding,
           generation,
           resume,
+          sourceCorrection,
         });
       }
       return {
@@ -306,6 +335,9 @@ export class RuleCandidateBindingConsoleModel {
       const chainContext = buildChainContext(await stateManager.listTasks());
       const generation = isBound ? deriveGeneration(candidateId, chainContext) : null;
       const resume = isBound ? await deriveResume(stateManager, candidateId) : null;
+      const sourceCorrection = isBound && generation?.stage === 'blocked' && currentBinding
+        ? await this.sourceCorrectionPreview(stateManager, candidateId, currentBinding.revision)
+        : null;
       return { ok: true, review: {
         candidateId, candidateText: stringField(material.candidate, 'description') || stringField(material.candidate, 'title'),
         sourcePain: pain,
@@ -319,6 +351,7 @@ export class RuleCandidateBindingConsoleModel {
         })),
         generation,
         resume,
+        sourceCorrection,
         resumeNotice: '关联后自动启动一次现有配置的正文修订与代码生成、验证；沿用现有调用预算和超时。失败会保留关联与旧工件，不会自动循环，也不会批准或启用规则。',
       } };
     } finally { await handle.close(); }
