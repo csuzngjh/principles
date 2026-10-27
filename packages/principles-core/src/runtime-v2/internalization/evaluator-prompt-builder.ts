@@ -258,20 +258,38 @@ export function projectRepeatedGoldenHistoriesForEvaluator(artifact: unknown): u
   return changed ? projected : artifact;
 }
 
+/** Lossless prompt-only marker: a shell call's synthetic normalizedPath is
+ * byte-identical to paramsSummary.command — carrying both doubles every
+ * command. Replacing the copy with normalizedPathSameAsCommand: true keeps
+ * the exact original reconstructible (PRI-1047 R9: the real repair artifact
+ * exceeded the 50000-char prompt limit with both copies present). */
+function markNormalizedPathSameAsCommand(call: Record<string, unknown>): Record<string, unknown> {
+  const params = call.paramsSummary;
+  if (typeof call.normalizedPath !== 'string' || call.normalizedPath === ''
+    || !isRecord(params) || typeof params.command !== 'string'
+    || call.normalizedPath !== params.command) return call;
+  const marked: Record<string, unknown> = { ...call };
+  delete marked.normalizedPath;
+  marked.normalizedPathSameAsCommand = true;
+  return marked;
+}
+
 /** Lossless prompt-only sharing across histories that overlap but are not identical. */
 function projectRepeatedHistoryCallsForEvaluator(artifact: unknown): unknown {
   if (!isRecord(artifact)) return artifact;
   const keys = new Map<unknown, string>();
-  const counts = new Map<string, number>();
+  let sourceCallChars = 0;
   const visit = (entry: unknown): void => {
     if (!isRecord(entry) || !isRecord(entry.ruleContext) || !isRecord(entry.ruleContext.history)
       || !Array.isArray(entry.ruleContext.history.calls)) return;
     for (const call of entry.ruleContext.history.calls) {
+      if (!isRecord(call) || typeof call.toJSON === 'function' || Object.values(call).some((value) =>
+        value === undefined || typeof value === 'function' || typeof value === 'symbol')) continue;
       let key: string | undefined;
       try { key = JSON.stringify(call); } catch { continue; }
-      if (key === undefined || key.length < 200) continue;
+      if (key === undefined) continue;
       keys.set(call, key);
-      counts.set(key, (counts.get(key) ?? 0) + 1);
+      sourceCallChars += key.length;
     }
   };
   for (const field of ['goldenTraceCases', 'ownerGoldenTraceCases']) {
@@ -281,16 +299,29 @@ function projectRepeatedHistoryCallsForEvaluator(artifact: unknown): unknown {
     if (isRecord(entry)) visit(entry.originalCase);
   });
   const refs = new Map<string, string>();
-  const calls: Record<string, unknown> = {};
+  const calls: Record<string, readonly unknown[]> = {};
+  const columns: Record<string, readonly string[]> = {};
+  const shapeRefs = new Map<string, string>();
+  let referenceChars = 0;
   const project = (entry: unknown): unknown => {
     if (!isRecord(entry) || !isRecord(entry.ruleContext) || !isRecord(entry.ruleContext.history)
       || !Array.isArray(entry.ruleContext.history.calls)) return entry;
     const projectedCalls = entry.ruleContext.history.calls.map((call: unknown) => {
       const key = keys.get(call);
-      if (key === undefined || (counts.get(key) ?? 0) < 2) return call;
+      if (key === undefined || !isRecord(call)) return isRecord(call) ? markNormalizedPathSameAsCommand(call) : call;
       let ref = refs.get(key);
-      if (ref === undefined) { ref = `h${refs.size + 1}`; refs.set(key, ref); calls[ref] = call; }
-      return { evaluatorHistoryCallRef: ref };
+      if (ref === undefined) {
+        ref = `h${refs.size + 1}`; refs.set(key, ref);
+        const marked = markNormalizedPathSameAsCommand(call);
+        const fields = Object.keys(marked);
+        const shapeKey = JSON.stringify(fields);
+        let shape = shapeRefs.get(shapeKey);
+        if (shape === undefined) { shape = `s${shapeRefs.size + 1}`; shapeRefs.set(shapeKey, shape); columns[shape] = fields; }
+        calls[ref] = [shape, ...fields.map((field) => marked[field])];
+      }
+      const reference = { evaluatorHistoryCallRef: ref };
+      referenceChars += JSON.stringify(reference).length;
+      return reference;
     });
     return { ...entry, ruleContext: { ...entry.ruleContext, history: { ...entry.ruleContext.history, calls: projectedCalls } } };
   };
@@ -300,7 +331,9 @@ function projectRepeatedHistoryCallsForEvaluator(artifact: unknown): unknown {
   }
   if (Array.isArray(artifact.historicalEvidenceOnlyCases)) projected.historicalEvidenceOnlyCases = artifact.historicalEvidenceOnlyCases.map((entry: unknown) =>
     isRecord(entry) ? { ...entry, originalCase: project(entry.originalCase) } : entry);
-  return refs.size === 0 ? artifact : { ...projected, evaluatorHistoryCalls: calls };
+  const tables = { evaluatorHistoryCalls: calls, evaluatorHistoryCallColumns: columns };
+  return refs.size === 0 || JSON.stringify(tables).length + referenceChars >= sourceCallChars
+    ? artifact : { ...projected, ...tables };
 }
 
 function artifactHasDesignGate(artifact: unknown): boolean {
@@ -654,7 +687,7 @@ PROMPT VIEW QUALIFICATION: historicalEvidenceOnlyCases contains immutable histor
 SYSTEM VERIFICATION PLAN: input.ruleCodeVerification is derived by the system from the current Scribe executionConditions, system-owned Owner cases, and hostToolKinds. Its concrete counterfactuals are existing executable obligations, not execution results: executionStatus=not_executed and zero executed/passed/failed mean the deterministic gate has not run yet. Each counterfactual row follows counterfactualColumns [caseIdSuffix, actionRef, ruleContextRef, expectedDecision]; its full caseId is caseIdPrefix + caseIdSuffix. Resolve its actionRef in actions for its exact toolName/params, and ruleContextRef in ruleContexts for its context overrides. Reconstruct the exact runtime context by overlaying the overrides on ruleContextBase and merging their facts objects; when the overrides.facts has its own designGate, merge that gate over designGateBase. If it has no designGate, do not add one beyond any already present in ruleContextBase.facts. These defaults contain only fields exactly identical across the corresponding source contexts or gates. References share only byte-identical values; every case keeps its own expectedDecision. All these facts are explicitly synthetic; sourceArtificerArtifactId/contextHash bind the plan to this request, never to historical approval. For traceCoverage, assess model golden cases together with this system plan; do not demand duplicate model-authored golden cases when the system cases already cover the obligation, or demand the Artificer fabricate historical facts. RequiredChanges may still identify concrete code defects or genuinely uncovered contract obligations. Unavailable obligations and historical evidence-only gaps remain visible and unresolved; no planned case establishes a pass. Only the later deterministic replay report can establish execution results, and real failures still block approval.
 Historical cases missing the declared decisive fact are historical_evidence_only: preserve their labels as evidence, never require their block/allow labels as direct replay expectations or invent historical approvals. Independent system_counterfactual cases verify the declared runtime contract; their success does not mean historical replay success.\nThe runtime input path is \`input.context.facts.designGate\`. It is a host-supplied DesignGateFact v1 with resolution \`approved\`, \`not_approved\`, \`not_required\`, or \`unknown\`, plus sourceRef/revision, task/spec/scope binding refs, and revoked state. Read the actual case value and binding; never infer approval from params, command text, history, or a missing field. \`unknown\` is neither approval nor explicit rejection.
 
-EVALUATOR HISTORY CALL TABLE: a history.calls entry with evaluatorHistoryCallRef means the exact full call in artificerArtifact.evaluatorHistoryCalls at that key. Expand each reference in place and keep array order; no call, field or fact was removed. This lossless prompt-only sharing leaves stored artifacts and deterministic replay unchanged.
+EVALUATOR HISTORY CALL TABLE: a history.calls entry with evaluatorHistoryCallRef refers to a row in artificerArtifact.evaluatorHistoryCalls at that key. Each row is [shapeRef, ...fieldValues]; artificerArtifact.evaluatorHistoryCallColumns[shapeRef] gives the field names in the same order. Reconstruct the exact full call object by pairing those names and values, then apply the normalizedPathSameAsCommand marker: a call carrying normalizedPathSameAsCommand: true had normalizedPath exactly equal to its paramsSummary.command string — restore that string as normalizedPath. Expand each reference in place and keep array order; no call, field or fact was removed. This lossless prompt-only sharing leaves stored artifacts and deterministic replay unchanged.
 
 EVALUATOR DISPLAY NOTE: when a case carries evaluatorDisplayNote, its exact repeated history is abbreviated in this prompt only. Treat it as the same history named by the note; the stored artifact and deterministic replay retain the full original.`;
 

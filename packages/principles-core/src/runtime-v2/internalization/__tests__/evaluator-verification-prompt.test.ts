@@ -35,6 +35,18 @@ function expandRuleContext(plan: {
   return { ...plan.ruleContextBase, ...overrides, facts };
 }
 
+function expandHistoryCall(view: {
+  evaluatorHistoryCalls: Record<string, readonly unknown[]>;
+  evaluatorHistoryCallColumns: Record<string, readonly string[]>;
+}, call: { evaluatorHistoryCallRef?: string }) {
+  if (call.evaluatorHistoryCallRef === undefined) return call;
+  const row = view.evaluatorHistoryCalls[call.evaluatorHistoryCallRef];
+  if (row === undefined) throw new Error('missing historical call');
+  const [shape, ...values] = row;
+  if (typeof shape !== 'string' || view.evaluatorHistoryCallColumns[shape] === undefined) throw new Error('missing historical call columns');
+  return Object.fromEntries(view.evaluatorHistoryCallColumns[shape].map((field, index) => [field, values[index]]));
+}
+
 describe('Evaluator receives the existing system verification obligations before judgment', () => {
   it('exposes every concrete system counterfactual even when all Owner cases are evidence-only, without claiming execution', () => {
     const original = JSON.stringify(artifact);
@@ -91,11 +103,54 @@ describe('Evaluator receives the existing system verification obligations before
     for (const entry of prompt.artificerArtifact.historicalEvidenceOnlyCases.filter((row: { sourceField: string }) => row.sourceField === 'goldenTraceCases')) {
       const expected = cases.find(row => row.caseId === entry.caseId);
       expect(entry.originalCase.ruleContext.history.calls.map((call: { evaluatorHistoryCallRef?: string }) =>
-        call.evaluatorHistoryCallRef ? prompt.artificerArtifact.evaluatorHistoryCalls[call.evaluatorHistoryCallRef] : call)).toEqual(expected?.ruleContext.history.calls);
+        expandHistoryCall(prompt.artificerArtifact, call))).toEqual(expected?.ruleContext.history.calls);
       expect(entry.originalCase.ruleContext.history.truncated).toBe(false);
     }
     expect(result.message.length).toBeLessThan(50000);
     expect(result.systemPrompt).toContain('Expand each reference in place and keep array order');
+    expect(JSON.stringify(cases)).toBe(original);
+  });
+
+  it('marks normalizedPath identical to paramsSummary.command losslessly (R9: real repair artifact exceeded the cap)', () => {
+    const command = 'git diff --check; git add apps/web/src/app/result apps/web/src/app/store && npm test -- apps/web';
+    // Distinct histories per case (sequenceId varies) so the whole-history
+    // dedup stage keeps every case's calls — this test isolates the marker.
+    const cases = ownerCases.map((entry, index) => {
+      const duplicated = { sequenceId: index * 2 + 1, toolName: 'Bash', canonicalKind: 'execute',
+        normalizedPath: command, paramsSummary: { command }, outcome: 'success' };
+      const distinct = { sequenceId: index * 2 + 2, toolName: 'Read', canonicalKind: 'read',
+        normalizedPath: '/different/path', paramsSummary: { command }, outcome: 'success' };
+      return { ...entry, ruleContext: { ...entry.ruleContext,
+        history: { status: 'available', truncated: false, calls: [duplicated, distinct] } } };
+    });
+    const original = JSON.stringify(cases);
+    const result = new EvaluatorPromptBuilder().buildPrompt({ ...input,
+      artificerArtifact: { ...artifact, goldenTraceCases: cases, ownerGoldenTraceCases: cases } });
+    const prompt = JSON.parse(result.message);
+    const expandMarked = (call: Record<string, unknown>): Record<string, unknown> => {
+      const expanded: Record<string, unknown> = 'evaluatorHistoryCallRef' in call
+        ? expandHistoryCall(prompt.artificerArtifact, call)
+        : call;
+      if (expanded.normalizedPathSameAsCommand === true) {
+        const restored = { ...expanded };
+        delete restored.normalizedPathSameAsCommand;
+        const params = restored.paramsSummary as { command: string };
+        restored.normalizedPath = params.command;
+        return restored;
+      }
+      return expanded;
+    };
+    expect(result.systemPrompt).toContain('normalizedPathSameAsCommand');
+    for (const entry of prompt.artificerArtifact.historicalEvidenceOnlyCases.filter((row: { sourceField: string }) => row.sourceField === 'goldenTraceCases')) {
+      const expected = cases.find(row => row.caseId === entry.caseId);
+      expect(entry.originalCase.ruleContext.history.calls.map(expandMarked)).toEqual(expected?.ruleContext.history.calls);
+    }
+    // Each row carries the command at most once — the marker removed the
+    // normalizedPath copy (without it, bash rows contain the string twice).
+    const escaped = command.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const rowStrings = Object.values(prompt.artificerArtifact.evaluatorHistoryCalls as Record<string, unknown[]>)
+      .map((row) => JSON.stringify(row));
+    expect(rowStrings.every((row) => (row.match(new RegExp(escaped, 'g')) ?? []).length <= 1)).toBe(true);
     expect(JSON.stringify(cases)).toBe(original);
   });
 });
