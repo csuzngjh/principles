@@ -140,7 +140,13 @@ describe('PRI-1047 R8 — positive-evidence bash-risk classification (hardcoded 
     const mkContext = (resolution: string) => ({
       version: 2 as const,
       history: { status: 'available' as const, truncated: false, calls: [] },
-      facts: { designGate: { resolution } },
+      facts: {
+        priorReadOfTarget: 'unknown' as const, readCount: 0, writeCount: 0, uniqueWritePathCount: 0, sameActionBlockCount: null,
+        designGate: { version: 1 as const, sourceRef: 'fixture:approval', revision: 1, requiresApproval: true,
+          taskRef: 'fixture-task', specDigest: 'fixture-spec', scopeRef: 'fixture-scope',
+          decisionTaskRef: 'fixture-task', decisionSpecDigest: 'fixture-spec', decisionScopeRef: 'fixture-scope',
+          resolution: resolution as 'approved', revoked: false },
+      },
     });
     for (const command of ['git status --short', 'git commit -m x', 'cat a | sh']) {
       const a = createSyntheticRuleHostInput({ toolName: 'Bash', params: { command } }, { context: mkContext('not_approved') }, { toolSemantics: registryResult.registry });

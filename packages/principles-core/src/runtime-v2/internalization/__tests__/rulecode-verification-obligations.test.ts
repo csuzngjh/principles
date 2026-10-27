@@ -74,6 +74,7 @@ describe('system-owned RuleCode verification declaration', () => {
     expect(probes.find((e) => e.caseId.endsWith('pipe-into-script'))?.expectedDecision).toBe('block');
     expect(probes.find((e) => e.caseId.endsWith('inline-code-exec'))?.expectedDecision).toBe('block');
     for (const probe of probes) {
+      if (probe.ruleContext === undefined) throw new Error('fixture: probe ruleContext missing');
       expect(probe.ruleContext.facts.designGate).toMatchObject({ resolution: 'not_approved', requiresApproval: true });
     }
     // Representative probes are ALSO crossed with approved (gate face passes).
