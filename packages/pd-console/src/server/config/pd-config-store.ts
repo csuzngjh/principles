@@ -1484,6 +1484,7 @@ export function createRuntimeProfile(
  * Update an existing runtime profile in .pd/config.yaml.
  *
  * - Rejects non-existent profile (404 not_found)
+ * - Rejects retired legacy profiles (400 retired_profile_type — read-only per ADR-0029)
  * - Rejects type changes (400 bad_request — type change = delete + create)
  * - Merges patch into existing profile, only known fields are persisted
  * - Persists atomically, preserving unknown config sections
@@ -1537,7 +1538,18 @@ export function updateRuntimeProfile(
       nextAction: 'This is a bug in PD config resolution. Please report it.' };
   }
 
-  // 5. Reject type change (type change = delete + create)
+  // 5. Reject retired legacy profiles — ADR-0029: accepted on read, never written by PD
+  if (existingProfile.type === 'openclaw') {
+    return {
+      ok: false,
+      statusCode: 400,
+      error: 'retired_profile_type',
+      message: `Runtime profile type 'openclaw' is retired (ADR-0029) and cannot be updated. The profile stays readable for legacy compatibility only.`,
+      nextAction: `DELETE /api/v1/config/profiles/${encodeURIComponent(profileId)} and create a pi-ai profile instead (provider + model + apiKeyEnv)`,
+    };
+  }
+
+  // 6. Reject type change (type change = delete + create)
   if (Object.hasOwn(patch, 'type')) {
     const patchType = patch.type;
     if (typeof patchType !== 'string' || patchType !== existingProfile.type) {
@@ -1551,11 +1563,11 @@ export function updateRuntimeProfile(
     }
   }
 
-  // 6. Merge patch into existing profile, then extract only known fields
+  // 7. Merge patch into existing profile, then extract only known fields
   const mergedSource: Record<string, unknown> = { ...existingProfile, ...patch };
   const mergedRecord = extractProfileFields(mergedSource, existingProfile.type);
 
-  // 7. Read raw config to preserve unknown sections, update the profile
+  // 8. Read raw config to preserve unknown sections, update the profile
   const configPath = getPdConfigPath(workspaceDir);
   const rawConfig = readRawConfig(configPath);
   const profilesMap = isRecord(rawConfig.runtimeProfiles)
@@ -1564,7 +1576,7 @@ export function updateRuntimeProfile(
   profilesMap[profileId] = mergedRecord;
   rawConfig.runtimeProfiles = profilesMap;
 
-  // 8. Validate the full updated config
+  // 9. Validate the full updated config
   const validation = validatePdConfig(rawConfig);
   if (!validation.ok) {
     return {
@@ -1576,7 +1588,7 @@ export function updateRuntimeProfile(
     };
   }
 
-  // 9. Atomic write
+  // 10. Atomic write
   try {
     writeConfigAtomic(configPath, rawConfig);
   } catch (err) {
@@ -1584,7 +1596,7 @@ export function updateRuntimeProfile(
     return { ok: false, statusCode: 500, error: 'write_error', message: `Failed to write config: ${message}`, nextAction: 'Check disk space and file permissions for .pd/config.yaml' };
   }
 
-  // 10. Return the validated updated profile
+  // 11. Return the validated updated profile
   // Defensive guard: Object.hasOwn() doesn't narrow TS type.
   const updatedProfile = validation.value.runtimeProfiles[profileId];
   if (!updatedProfile) {

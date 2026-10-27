@@ -85,7 +85,7 @@ export function resolveObserverConfig(
     return { enabled: true, readiness: 'needs_setup', ...base(result), ...emptyRuntime(), runtimeProfileId, reason: `Runtime profile '${runtimeProfileId}' not found in .pd/config.yaml`, nextAction: `Add runtime profile '${runtimeProfileId}' to .pd/config.yaml runtimeProfiles` };
   }
   if (profile.type !== 'pi-ai') {
-    return { enabled: true, readiness: 'needs_setup', ...base(result), ...emptyRuntime(), runtimeProfileId, runtimeProfileType: profile.type, provider: profile.provider ?? null, model: profile.model ?? null, reason: `OpenClaw profile '${runtimeProfileId}' is not supported for observer runtime. Observers require a pi-ai profile with an API key.`, nextAction: `Configure a pi-ai runtime profile for ${observerAgentName} in .pd/config.yaml (e.g., add a pi-ai profile with provider, model, and apiKeyEnv)` };
+    return { enabled: true, readiness: 'needs_setup', ...base(result), ...emptyRuntime(), runtimeProfileId, runtimeProfileType: profile.type, provider: profile.provider ?? null, model: profile.model ?? null, reason: `Runtime profile '${runtimeProfileId}' has retired type '${profile.type}' (ADR-0029: pi-ai only). Observers require a pi-ai profile with an API key.`, nextAction: `Configure a pi-ai runtime profile for ${observerAgentName} in .pd/config.yaml (e.g., add a pi-ai profile with provider, model, and apiKeyEnv)` };
   }
   const apiKeyEnv = profile.apiKeyEnv ?? null;
   if (!apiKeyEnv) {

@@ -221,9 +221,8 @@ Non-managed hooks (user/project/plugin) **must be reviewed and trusted** before 
 │  tasks (diagnostician, dreamer, evaluator, etc.)                    │
 │                                                                     │
 │  Contract: PDRuntimeAdapter (ALREADY EXISTS in runtime-protocol.ts) │
-│  Implementations: OpenClawCliRuntimeAdapter, PiAiRuntimeAdapter,    │
-│                  TestDoubleRuntimeAdapter, CodexCliRuntimeAdapter    │
-│                  (PRI-279)                                          │
+│  Implementations: PiAiRuntimeAdapter, TestDoubleRuntimeAdapter,     │
+│                  CodexCliRuntimeAdapter (PRI-279)                   │
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐

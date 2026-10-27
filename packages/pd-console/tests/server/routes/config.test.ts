@@ -1656,9 +1656,11 @@ describe('POST /api/v1/config/profiles', () => {
     await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles' });
 
     expect(res.statusCode).toBe(400);
-    const err = errorEnvelope(res);
+    const err = parseResponseBody<{ success: false; error: string; message: string; nextAction: string }>(res);
+    expect(err.success).toBe(false);
     expect(err.error).toBe('retired_profile_type');
     expect(err.message).toContain('retired (ADR-0029)');
+    expect(err.nextAction).toMatch(/pi-ai/);
 
     // Nothing was written: PD never creates an openclaw profile.
     const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
@@ -1910,8 +1912,11 @@ describe('PATCH /api/v1/config/profiles/:profileId', () => {
     expect(fs.readFileSync(configPath, 'utf8')).toBe(before);
   });
 
-  it('updates an existing openclaw profile', async () => {
+  it('rejects updating a retired openclaw profile (ADR-0029: never written by PD)', async () => {
     writeConfig(VALID_CONFIG);
+    const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
+    const before = fs.readFileSync(configPath, 'utf8');
+
     const req = createMockRequest('PATCH', {
       url: '/api/v1/config/profiles/lmstudio-local',
       body: { model: 'qwen3-new-model' },
@@ -1919,19 +1924,16 @@ describe('PATCH /api/v1/config/profiles/:profileId', () => {
     const res = createMockResponse();
     await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/lmstudio-local' });
 
-    expect(res.statusCode).toBe(200);
-    const data = okEnvelope<{ profileId: string; profile: { model: string } }>(res);
-    expect(data.profileId).toBe('lmstudio-local');
-    expect(data.profile.model).toBe('qwen3-new-model');
+    expect(res.statusCode).toBe(400);
+    const err = parseResponseBody<{ success: false; error: string; message: string; nextAction: string }>(res);
+    expect(err.success).toBe(false);
+    expect(err.error).toBe('retired_profile_type');
+    expect(err.message).toContain('retired (ADR-0029)');
+    expect(err.nextAction).toMatch(/DELETE .*profiles\/lmstudio-local/);
+    expect(err.nextAction).toMatch(/pi-ai/);
 
-    // Verify persisted
-    const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
-    const raw = fs.readFileSync(configPath, 'utf8');
-    const parsed = yaml.load(raw) as Record<string, unknown>;
-    const profiles = parsed.runtimeProfiles as Record<string, Record<string, unknown>>;
-    expect(profiles['lmstudio-local'].model).toBe('qwen3-new-model');
-    // provider should be preserved
-    expect(profiles['lmstudio-local'].provider).toBe('lmstudio');
+    // Nothing was written: the legacy profile stays byte-identical.
+    expect(fs.readFileSync(configPath, 'utf8')).toBe(before);
   });
 
   it('updates a pi-ai profile adding optional fields', async () => {
@@ -1966,11 +1968,11 @@ describe('PATCH /api/v1/config/profiles/:profileId', () => {
   it('rejects type change with 400', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/profiles/lmstudio-local',
-      body: { type: 'pi-ai' },
+      url: '/api/v1/config/profiles/anthropic-cloud',
+      body: { type: 'openclaw' },
     });
     const res = createMockResponse();
-    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/lmstudio-local' });
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/anthropic-cloud' });
 
     expect(res.statusCode).toBe(400);
     const err = errorEnvelope(res);
@@ -1980,11 +1982,11 @@ describe('PATCH /api/v1/config/profiles/:profileId', () => {
   it('allows patch with same type (no-op type field)', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/profiles/lmstudio-local',
-      body: { type: 'openclaw', model: 'updated-model' },
+      url: '/api/v1/config/profiles/anthropic-cloud',
+      body: { type: 'pi-ai', model: 'updated-model' },
     });
     const res = createMockResponse();
-    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/lmstudio-local' });
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/anthropic-cloud' });
 
     expect(res.statusCode).toBe(200);
     const data = okEnvelope<{ profile: { model: string } }>(res);
@@ -2009,11 +2011,11 @@ describe('PATCH /api/v1/config/profiles/:profileId', () => {
       customSection: { note: 'preserve-me' },
     });
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/profiles/lmstudio-local',
+      url: '/api/v1/config/profiles/anthropic-cloud',
       body: { model: 'newmodel' },
     });
     const res = createMockResponse();
-    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/lmstudio-local' });
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/anthropic-cloud' });
 
     expect(res.statusCode).toBe(200);
     const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
