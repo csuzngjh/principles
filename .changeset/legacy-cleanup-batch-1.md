@@ -2,6 +2,7 @@
 '@principles/core': patch
 '@principles/host-runtime': patch
 'principles-disciple': patch
+'create-principles-disciple': patch
 ---
 
 Legacy cleanup batch 1: remove retired code that had zero production consumers.
