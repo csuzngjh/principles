@@ -34,9 +34,9 @@ describe('Evaluator receives the existing system verification obligations before
       verificationCoverage: { required: ['design_approval'], executed: 0, passed: 0, failed: 0,
         historicalCoverage: { executed: 0, passed: 0, failed: 0, unavailable: 2 } } });
     const derived = deriveRuleCodeVerification(scribe, ownerCases, tools);
-    expect(plan.counterfactualColumns).toEqual(['caseId', 'actionRef', 'ruleContextRef', 'expectedDecision']);
-    expect(plan.counterfactuals.map(([caseId, actionRef, ruleContextRef, expectedDecision]: [string, string, string, string]) =>
-      ({ caseId, ...plan.actions[actionRef], expectedDecision, ruleContext: plan.ruleContexts[ruleContextRef] })))
+    expect(plan.counterfactualColumns).toEqual(['caseIdSuffix', 'actionRef', 'ruleContextRef', 'expectedDecision']);
+    expect(plan.counterfactuals.map(([suffix, actionRef, ruleContextRef, expectedDecision]: [string, string, string, string]) =>
+      ({ caseId: plan.caseIdPrefix + suffix, ...plan.actions[actionRef], expectedDecision, ruleContext: plan.ruleContexts[ruleContextRef] })))
       .toEqual(derived.counterfactuals.map(({ caseId, toolName, params, expectedDecision, ruleContext }) =>
       ({ caseId, toolName, params, expectedDecision, ruleContext })));
     expect(plan.verificationCoverage.contractCoverage).toEqual({ required: derived.counterfactuals.length,
@@ -60,6 +60,27 @@ describe('Evaluator receives the existing system verification obligations before
     const result = new EvaluatorPromptBuilder().buildPrompt({ ...input,
       artificerArtifact: { ...artifact, ruleCodeVerification: { executionStatus: 'passed', passed: 999 } } });
     expect(JSON.parse(result.message).ruleCodeVerification).toMatchObject({ executionStatus: 'not_executed', verificationCoverage: { passed: 0 } });
+  });
+
+  it('losslessly shares overlapping historical calls while retaining full formation and repair context under the cap', () => {
+    const shared = { sequenceId: 1, toolName: 'Read', canonicalKind: 'read', normalizedPath: '/source',
+      paramsSummary: { content: 'x'.repeat(22000) }, outcome: 'success' };
+    const cases = ownerCases.map((entry, index) => ({ ...entry, ruleContext: { ...entry.ruleContext,
+      history: { status: 'available', truncated: false, calls: [shared, { ...shared, sequenceId: 2, normalizedPath: `/unique-${index}`, paramsSummary: {} }] } } }));
+    const original = JSON.stringify(cases);
+    const result = new EvaluatorPromptBuilder().buildPrompt({ ...input, artificerArtifact: { ...artifact, goldenTraceCases: cases, ownerGoldenTraceCases: cases },
+      previousEvaluation: { decision: 'needs_revision', score: 0.8, concerns: ['x'.repeat(4300)],
+        requirements: [{ id: 'req-1', statement: 'x'.repeat(1350) }], repairIteration: 1 } });
+    const prompt = JSON.parse(result.message);
+    for (const entry of prompt.artificerArtifact.historicalEvidenceOnlyCases.filter((row: { sourceField: string }) => row.sourceField === 'goldenTraceCases')) {
+      const expected = cases.find(row => row.caseId === entry.caseId);
+      expect(entry.originalCase.ruleContext.history.calls.map((call: { evaluatorHistoryCallRef?: string }) =>
+        call.evaluatorHistoryCallRef ? prompt.artificerArtifact.evaluatorHistoryCalls[call.evaluatorHistoryCallRef] : call)).toEqual(expected?.ruleContext.history.calls);
+      expect(entry.originalCase.ruleContext.history.truncated).toBe(false);
+    }
+    expect(result.message.length).toBeLessThan(50000);
+    expect(result.systemPrompt).toContain('Expand each reference in place and keep array order');
+    expect(JSON.stringify(cases)).toBe(original);
   });
 });
 
