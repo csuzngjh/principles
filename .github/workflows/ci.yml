@@ -22,6 +22,8 @@ permissions:
 jobs:
   codex-plugin-delivery:
     name: Codex plugin delivery contract
+    needs: impact
+    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.plugin) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -40,16 +42,28 @@ jobs:
       - name: Probe exact published runtime capability
         run: npm run check:runtime-pin
 
-  # CI Impact Resolver — SHADOW MODE (CI Governance SPEC §9).
-  # Computes and REPORTS the predicted verification scopes for this PR but
-  # does not gate or skip anything: every job below still runs exactly as
-  # before. The prediction lands in the Step Summary and as an artifact so
-  # shadow evaluation can later compare predictions against real outcomes
-  # (false-negative hunting) before any enforcement PR exists.
+  # CI Impact Resolver — SCOPE GATE (shadow 2026-09-22 → 2026-10-27, live
+  # since then). Computes the affected verification scopes from the real
+  # workspace dependency graph and exposes them as the `impact` output;
+  # per-package jobs below consume them through
+  #   !cancelled() && (needs.impact.result != 'success' || fromJSON(...).scopes.<scope>)
+  # conditions. The explicit !cancelled() status function is REQUIRED:
+  # GitHub implicitly prepends success() to any `if` without a status
+  # function, which would make a failed impact job SKIP every gated job
+  # instead of running them (review catch 2026-10-27). With the guard, the
+  # gate FAILS OPEN: if this resolver job fails, every gated job runs (a
+  # resolver outage can never silently skip tests). Pinned by
+  # scripts/__tests__/ci-impact-gate-contract.test.ts. Unknown/root-level
+  # changes broaden to every scope inside the resolver (scripts/ci/impact.mjs).
+  # The prediction still lands in the Step Summary and as an artifact for
+  # false-negative hunting. Always-running jobs: this one, verify-merge (the
+  # required check), and the advisory telemetry-guard.
   impact:
-    name: CI Impact (Shadow)
+    name: CI Impact Gate
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      impact: ${{ steps.compute.outputs.impact }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
@@ -62,7 +76,8 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Compute CI impact (SHADOW — nothing is skipped)
+      - name: Compute CI impact
+        id: compute
         run: |
           BASE="${{ github.event.pull_request.base.sha }}"
           HEAD="${{ github.event.pull_request.head.sha }}"
@@ -75,8 +90,10 @@ jobs:
           echo "base=$BASE head=$HEAD"
           node scripts/ci/impact.mjs --base "$BASE" --head "$HEAD" --format json > impact.json
           node scripts/ci/impact.mjs --base "$BASE" --head "$HEAD" --format markdown >> "$GITHUB_STEP_SUMMARY"
+          # Compact single-line JSON for job outputs (fromJSON consumers).
+          echo "impact=$(jq -c . impact.json)" >> "$GITHUB_OUTPUT"
 
-      - name: Upload impact prediction (shadow evidence)
+      - name: Upload impact prediction (gate evidence)
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4.0.1
         with:
           name: ci-impact-${{ github.sha }}
@@ -148,6 +165,8 @@ jobs:
 
   release-parity:
     name: Release Build Parity
+    needs: impact
+    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.plugin) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -182,6 +201,9 @@ jobs:
 
   lint:
     name: Lint
+    needs: impact
+    # eslint runs across every package — any package scope (incl. transitive) gates it.
+    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.anyPackage) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -212,6 +234,8 @@ jobs:
 
   test-principles-core:
     name: Test principles-core
+    needs: impact
+    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.core) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -249,6 +273,8 @@ jobs:
 
   test-pd-cli:
     name: Test pd-cli
+    needs: impact
+    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.cli) }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -292,6 +318,8 @@ jobs:
 
   test-pd-console:
     name: Test pd-console
+    needs: impact
+    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.console) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -334,6 +362,8 @@ jobs:
   # the dependency build is duplicated, never the artifact under test.
   test-create-principles-disciple:
     name: Test create-principles-disciple
+    needs: impact
+    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.installer) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -372,6 +402,8 @@ jobs:
 
   smoke-packaged-install:
     name: Test packaged install smoke
+    needs: impact
+    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.release) }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -410,6 +442,8 @@ jobs:
 
   smoke-release-asset:
     name: Test release asset smoke
+    needs: impact
+    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.release) }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -453,6 +487,10 @@ jobs:
   # runner; every suite and command is unchanged.
   test-shared-runtime:
     name: Test shared runtime & adapters
+    needs: impact
+    # Any of the five consolidated suites' scopes (parity needs plugin; the
+    # scripts suite is covered by broad — root scripts/ changes broaden).
+    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.hostRuntime || fromJSON(needs.impact.outputs.impact).scopes.installLayout || fromJSON(needs.impact.outputs.impact).scopes.codexAdapter || fromJSON(needs.impact.outputs.impact).scopes.plugin || fromJSON(needs.impact.outputs.impact).scopes.companion) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -515,6 +553,8 @@ jobs:
 
   build-openclaw-plugin:
     name: Build OpenClaw Plugin
+    needs: impact
+    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.plugin) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -544,6 +584,8 @@ jobs:
 
   typecheck-pd-console:
     name: TypeScript Check (pd-console)
+    needs: impact
+    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.console) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -574,6 +616,8 @@ jobs:
   # The two redundant jobs were removed; coverage + Codecov upload unchanged.
   test-openclaw-plugin-coverage:
     name: Test OpenClaw Plugin (unit+integration+coverage)
+    needs: impact
+    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.plugin) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

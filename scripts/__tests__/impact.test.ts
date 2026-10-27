@@ -362,12 +362,45 @@ describe('impact resolver — CLI contract', () => {
     expect(r.stderr).toContain('git command failed');
   }, 60_000);
 
-  it('markdown output contains the SHADOW ONLY banner and a scope table', async () => {
+  it('markdown output contains the gate banner and a scope table', async () => {
     const head = await commit({ 'packages/pd-cli/src/md.ts': 'export {};\n' }, 'md');
     const r = await sh(process.execPath, [IMPACT_SCRIPT, '--base', 'HEAD~1', '--head', head, '--format', 'markdown', '--repo', repo], repo);
     expect(r.code).toBe(0);
-    expect(r.stdout).toContain('SHADOW ONLY');
+    expect(r.stdout).toContain('Scope gates are LIVE in ci.yml');
     expect(r.stdout).toContain('| Scope | Predicted |');
     expect(r.stdout).toContain('Docs-only change');
+  }, 60_000);
+});
+
+describe('impact resolver — ci.yml gate semantics (since 2026-10-27)', () => {
+  // Negative control: against the pre-2026-10-27 resolver a feature-file-only
+  // change classified as docs-only (empty scopes) — exactly the false
+  // negative this test pins down.
+  it('BDD feature file change BROADENS — executable specs feed package suites', async () => {
+    const head = await commit({ 'docs/specs/features/story-a/owner-approve-prompt.feature': 'Feature: gate\n' }, 'feature');
+    const out = await impact('HEAD~1', head);
+    expect(out.docsOnly).toBe(false);
+    expect(out.scopes.repo).toBe(true);
+    expect(out.scopes.core).toBe(true);
+    expect(out.scopes.plugin).toBe(true);
+    expect(out.scopes.console).toBe(true);
+    expect(out.scopes.anyPackage).toBe(true);
+  }, 60_000);
+
+  it('docs-only change stays fully off, including anyPackage', async () => {
+    const head = await commit({ 'docs/process/some-report.md': '# report\n' }, 'docs2');
+    const out = await impact('HEAD~1', head);
+    expect(out.docsOnly).toBe(true);
+    expect(out.scopes.anyPackage).toBe(false);
+    expect(out.scopes.repo).toBe(false);
+    expect(out.scopes.release).toBe(false);
+  }, 60_000);
+
+  it('single-package change sets anyPackage but not repo', async () => {
+    const head = await commit({ 'packages/pd-companion/src/x.ts': 'export {};\n' }, 'companion');
+    const out = await impact('HEAD~1', head);
+    expect(out.scopes.companion).toBe(true);
+    expect(out.scopes.anyPackage).toBe(true);
+    expect(out.scopes.repo).toBe(false);
   }, 60_000);
 });
