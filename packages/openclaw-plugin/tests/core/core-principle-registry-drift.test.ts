@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { parseThinkingOsMd } from '../../src/core/thinking-os-parser.js';
-import type { ThinkingOsDirective } from '../../src/core/thinking-os-parser.js';
+import { parseThinkingOsMd } from '../helpers/thinking-os-parser.js';
+import type { ThinkingOsDirective } from '../helpers/thinking-os-parser.js';
 import {
   CORE_PRINCIPLES,
   CORE_PRINCIPLE_IDS,

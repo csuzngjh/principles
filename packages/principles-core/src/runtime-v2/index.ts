@@ -450,7 +450,7 @@ export type {
   PainIngressV1ParseResult,
 } from './pain-ingress-payload.js';
 // PRI-642 SPEC §8: THE shared ingress semantic evaluator — one authority
-// for every adapter (OpenClaw funnel, pd-cli; host-runtime re-exports it).
+// for every adapter (OpenClaw funnel, pd-cli, Codex).
 export {
   evaluatePainIngress,
   parsePainIngressReport,
@@ -2169,26 +2169,6 @@ export {
   serializeAdmissionEvent,
   validateEventPrivacy,
 } from './evidence-triage/index.js';
-
-// Pain diagnostic gate — PRI-446 (pure decision logic migrated from plugin)
-export type {
-  PainDiagnosticSource,
-  PainDiagnosticGateReason,
-  PainDiagnosticGateInput,
-  PainDiagnosticGateDecision,
-  CooldownCheckInput,
-} from './pain-gate/index.js';
-export {
-  DEFAULT_COOLDOWN_MS,
-  DEFAULT_PAIN_TRIGGER,
-  DEFAULT_HIGH_SEVERITY,
-  DEFAULT_REPEATED_FAILURE,
-  DEFAULT_SEMANTIC_PAIN_FLOOR,
-  normalizedSource,
-  buildEpisodeKey,
-  evaluatePainDiagnosticGateDecision,
-  isCooldownActive,
-} from './pain-gate/index.js';
 
 // Detection funnel — PRI-446 (pure logic migrated from plugin)
 export type {

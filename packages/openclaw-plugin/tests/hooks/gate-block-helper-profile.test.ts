@@ -16,7 +16,6 @@ import * as os from 'os';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 import { EventLogService } from '../../src/core/event-log.js';
 import { clearSession } from '../../src/core/session-tracker.js';
-import { resetPainDiagnosticGateForTest } from '../../src/core/pain-diagnostic-gate.js';
 
 vi.mock('fs');
 vi.mock('../../src/utils/io.js', () => ({
@@ -75,7 +74,6 @@ describe('Gate Block Helper — PROFILE Resilience', () => {
     vi.spyOn(WorkspaceContext, 'fromHookContext').mockReturnValue(makeTestWctx() as any);
     vi.spyOn(EventLogService, 'get').mockReturnValue({} as any);
     clearSession(sessionId);
-    resetPainDiagnosticGateForTest();
   });
 
   afterEach(() => {
@@ -214,7 +212,6 @@ describe('PRI-651-B1: Gate B is the only admission gate', () => {
     vi.spyOn(WorkspaceContext, 'fromHookContext').mockReturnValue(makeTestWctx() as any);
     vi.spyOn(EventLogService, 'get').mockReturnValue({} as any);
     clearSession(sessionId);
-    resetPainDiagnosticGateForTest();
   });
 
   afterEach(() => {

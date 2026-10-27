@@ -3,31 +3,24 @@
  *
  * One test per row of SPEC §8.2, plus the rc-6 mixed-lineage and the
  * Codex-incomplete-lineage rows. These are contract tests for the shared
- * ingress in @principles/host-runtime: they define the normative decision
+ * ingress in @principles/core/runtime-v2: they define the normative decision
  * for every origin × correlation × evidence combination BEFORE any LLM,
  * task, or candidate mutation.
  *
  * Naming follows SPEC §8.1; the semantic shape is normative.
+ *
+ * Moved here from host-runtime on 2026-10-27 — the host-runtime module was a
+ * zero-logic re-export of this same authority; the matrix belongs next to it.
  */
 import { describe, it, expect } from 'vitest';
 import {
   evaluatePainIngress,
   parsePainIngressReport,
-} from '../src/pain-evidence-ingress.js';
-import { evaluatePainIngress as evaluatePainIngressFromCore } from '@principles/core/runtime-v2';
-import type { PainIngressReport } from '../src/pain-evidence-ingress.js';
-
-// Review blocker 1: host-runtime is a THIN RE-EXPORT — the semantic
-// authority is core's evaluatePainIngress, the same function pd-cli uses.
-// Identity (not deep-equality) proves there is exactly one implementation.
-describe('single semantic authority (review blocker 1)', () => {
-  it('host-runtime evaluatePainIngress IS core evaluatePainIngress', () => {
-    expect(evaluatePainIngress).toBe(evaluatePainIngressFromCore);
-  });
-});
+} from '../pain-ingress.js';
+import type { IngressEvidenceEntry, PainIngressReport } from '../pain-ingress.js';
 
 const OPENCLAW_SESSION = 'sess-openclaw-1';
-const EVIDENCE_ENTRIES = [
+const EVIDENCE_ENTRIES: [IngressEvidenceEntry, ...IngressEvidenceEntry[]] = [
   { kind: 'behavior_trace' as const, sourceRef: 'owner_message:2026-09-01T10:00:00Z', note: 'Please fix the subtitle size' },
   { kind: 'behavior_trace' as const, sourceRef: 'tool_call_failure:2026-09-01T10:01:00Z', note: 'Tool write_file failed' },
 ];
@@ -69,8 +62,9 @@ describe('Pain Evidence Ingress — SPEC §8.2 valid-combination matrix', () => 
     expect(decision.nextAction).toBeTruthy();
     // The bound submit is still allowed, but with honest EMPTY evidence.
     expect(decision.legacy).toBeDefined();
-    expect(decision.legacy!.evidence).toEqual([]);
-    expect(decision.legacy!.sessionId).toBe(OPENCLAW_SESSION);
+    if (!decision.legacy) return;
+    expect(decision.legacy.evidence).toEqual([]);
+    expect(decision.legacy.sessionId).toBe(OPENCLAW_SESSION);
   });
 
   it('row 3: owner manual / CLI explicit session + matching bound + available → submit', () => {
