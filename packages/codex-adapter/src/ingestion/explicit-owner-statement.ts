@@ -62,6 +62,12 @@ export async function recordExplicitOwnerStatement(args: {
   workspaceDir: string;
   statementText: string;
   env?: { CODEX_HOME?: string | undefined };
+  /**
+   * Audit provenance: omitted = the native hook-read `PD记录痛苦：` prefix
+   * entry; 'codex_explicit_agent' = the agent-assisted no-prefix bridge
+   * (turn-context.ts). Admission semantics are identical either way.
+   */
+  explicitChannel?: 'codex_explicit_agent';
 }): Promise<RecordOwnerStatementResult> {
   const fields = extractFields(args.rawPayload);
   if (fields === null || fields.sessionId.length === 0 || fields.turnId === null) {
@@ -89,6 +95,7 @@ export async function recordExplicitOwnerStatement(args: {
     text: args.statementText,
     observedAt: new Date().toISOString(),
     explicitOwnerStatement: true,
+    ...(args.explicitChannel !== undefined ? { explicitChannel: args.explicitChannel } : {}),
   };
 
   const admitted = admitGovernanceSignals({ workspaceDir: args.workspaceDir, candidates: [candidate] });

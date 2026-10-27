@@ -154,6 +154,7 @@ export const PainCorrectionEvidenceSchema = Type.Object({
   channel: Type.Optional(Type.Union([
     Type.Literal('cli_owner_statement'),
     Type.Literal('codex_explicit_prefix'),
+    Type.Literal('codex_explicit_agent'),
     Type.Literal('workbuddy_explicit_prefix'),
     Type.Literal('openclaw_manual_pain'),
   ])),
