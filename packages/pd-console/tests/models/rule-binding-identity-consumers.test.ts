@@ -335,6 +335,11 @@ describe('rule-binding identity consumers follow canonical Ledger identity', () 
     const ids = queue.items.map((item) => item.candidateId);
     expect(ids).toContain(directRule.candidateId);
     expect(ids).toContain('router-rule-candidate');
-    expect(queue.items.find((item) => item.candidateId === 'router-rule-candidate')).toMatchObject({ reason: 'missing' });
+    // PRI-1048: the router-committed candidate is already surfaced through the
+    // parent traversal — it must appear exactly once, never twice.
+    expect(ids.filter((id) => id === 'router-rule-candidate')).toHaveLength(1);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(queue.items.find((item) => item.candidateId === 'router-rule-candidate')?.binding)
+      .toMatchObject({ status: 'unlinked' });
   });
 });
