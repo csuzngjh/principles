@@ -78,6 +78,19 @@ export function deriveRuleCodeVerification(scribe: unknown, cases: readonly Gold
             ruleContext: { ...UNAVAILABLE_RULE_CONTEXT, facts: { ...UNAVAILABLE_RULE_CONTEXT.facts, ...(variant.fact ? { designGate: variant.fact } : {}) } } });
         }
       }
+      // PRI-1047 Owner review R6 #1: the one combination the variant table never
+      // covered — not_approved × a host-classified READ-ONLY command on an
+      // execute-kind tool must ALLOW. Read-only investigation (git status/rg/cat,
+      // bashRisk "safe" under the shared classifier) is never a violation of a
+      // pending approval; the gate face is mutating actions only. The R04
+      // production artifact blocked exactly this shape and passed every
+      // existing counterfactual because none of them asked it.
+      if (tool.canonicalKind === 'execute') {
+        counterfactuals.push({ caseId: `system-contract:design_approval:${index}:readonly:denied-readonly`, attackType: 'boundary', toolName: tool.rawToolName,
+          params: { command: 'git status --short' }, expectedDecision: 'allow',
+          rationale: `system_counterfactual; contract=DesignGateFact/v1; read-only investigation (host-safe bashRisk) under not_approved must stay allowed — the approval gate face is MUTATING actions only (PRI-1047 Owner review R6 #1).`,
+          ruleContext: { ...UNAVAILABLE_RULE_CONTEXT, facts: { ...UNAVAILABLE_RULE_CONTEXT.facts, designGate: base } } });
+      }
     }
   }
   return { required, unavailable, historical, replayCases, counterfactuals };

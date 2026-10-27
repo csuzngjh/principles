@@ -1,16 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { classifyBashRisk, classifyCommandRisk } from '../bash-risk.js';
 import { createSyntheticRuleHostInput } from '../../golden-trace.js';
-import { validateApprovalGateCaseCoverage } from '../artificer-output.js';
 import { buildToolSemanticRegistry } from '../tool-semantic-registry.js';
 
 /**
  * PRI-1047 Owner review R6 #1: the read-only investigation exemption for
  * approval-gate rules must rest on ONE shared classifier — replay, the
- * host-runtime production gate and the OpenClaw enrichment all consume it,
- * and submit-time validation requires the golden cases to DECLARE the
- * not_approved × read-only / not_approved × mutating combinations the R04
- * production artifact never declared.
+ * host-runtime production gate and the OpenClaw enrichment all consume it.
+ * (The not_approved × read-only / not_approved × mutating verification lives in
+ * the SYSTEM-generated approval-gate counterfactuals — see
+ * rulecode-verification-obligations.test.ts; model-declared cases stay
+ * historical and never invent designGate facts.)
  */
 describe('Owner review R6 #1 — shared bash-risk classification + approval-gate case coverage', () => {
   it('classifies read-only investigation as safe and mutations as normal/dangerous', () => {
@@ -62,48 +62,5 @@ describe('Owner review R6 #1 — shared bash-risk classification + approval-gate
     expect(overridden.derived.bashRisk).toBe('dangerous');
     const legacy = createSyntheticRuleHostInput({ toolName: 'bash', params: { command: 'git status' } }, {}, {});
     expect(legacy.derived.bashRisk).toBe('unknown');
-  });
-
-  it('approval-gate case coverage: rejects the R04 shape, accepts both declared combinations', () => {
-    const resolve = (toolName: string) => (toolName === 'bash' ? 'execute' : toolName === 'apply_patch' ? 'write' : undefined);
-    const notApproved = { version: 2 as const, history: { status: 'unavailable' as const, truncated: false, calls: [] }, facts: {} };
-    const gate = (resolution: string) => ({
-      ...notApproved,
-      facts: { designGate: { resolution } },
-    });
-
-    // The R04 production shape: positives carried a missing/unknown fact only —
-    // BOTH required combinations absent → two coverage errors.
-    const r04Shape = {
-      goldenTraceCases: [
-        { caseId: 'n1', kind: 'negative', toolName: 'bash', params: { command: 'git commit -m "x"' }, expectedDecision: 'block', ruleContext: gate('unknown') },
-        { caseId: 'p1', kind: 'positive', toolName: 'bash', params: { command: 'git status' }, expectedDecision: 'allow', ruleContext: gate('unknown') },
-      ],
-    };
-    const rejected = validateApprovalGateCaseCoverage(r04Shape, resolve);
-    expect(rejected).toHaveLength(2);
-    expect(rejected.join(' ')).toContain('NEGATIVE case');
-    expect(rejected.join(' ')).toContain('POSITIVE case');
-
-    // Both combinations declared → accepted.
-    const complete = {
-      goldenTraceCases: [
-        { caseId: 'n1', kind: 'negative', toolName: 'bash', params: { command: 'git commit -m "x"' }, expectedDecision: 'block', ruleContext: gate('not_approved') },
-        { caseId: 'p1', kind: 'positive', toolName: 'bash', params: { command: 'rg --files src' }, expectedDecision: 'allow', ruleContext: gate('not_approved') },
-      ],
-    };
-    expect(validateApprovalGateCaseCoverage(complete, resolve)).toEqual([]);
-
-    // A "positive" that only passes because the gate fact is approved does NOT
-    // satisfy the read-only requirement.
-    const approvedOnlyPositive = {
-      goldenTraceCases: [
-        { caseId: 'n1', kind: 'negative', toolName: 'bash', params: { command: 'git commit -m "x"' }, expectedDecision: 'block', ruleContext: gate('not_approved') },
-        { caseId: 'p1', kind: 'positive', toolName: 'bash', params: { command: 'git status' }, expectedDecision: 'allow', ruleContext: gate('approved') },
-      ],
-    };
-    const missing = validateApprovalGateCaseCoverage(approvedOnlyPositive, resolve);
-    expect(missing).toHaveLength(1);
-    expect(missing[0]).toContain('POSITIVE case');
   });
 });
