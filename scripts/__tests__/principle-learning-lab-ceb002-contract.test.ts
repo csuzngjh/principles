@@ -16,6 +16,14 @@ import { resolveOutputDir } from '../dev/principle-learning-lab/build-ceb002-sui
 
 const labRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../dev/principle-learning-lab');
 const study = path.join(labRoot, 'challenge-studies', 'CEB-002');
+/** Containment guard: resolves rel under root and refuses escape (Mimosa path-traversal compliance). */
+function inside(root: string, ...segments: string[]): string {
+  const abs = path.resolve(root, ...segments);
+  const base = path.resolve(root);
+  if (abs !== base && !abs.startsWith(base + path.sep)) throw new Error(`test helper: path escapes root (${segments.join('/')})`);
+  return abs;
+}
+
 const readJson = (p: string): any => JSON.parse(fs.readFileSync(p, 'utf8'));
 
 describe('CEB-002 preregistration contract consistency (post-merge gate)', () => {
