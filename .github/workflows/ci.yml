@@ -23,7 +23,7 @@ jobs:
   codex-plugin-delivery:
     name: Codex plugin delivery contract
     needs: impact
-    if: needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.plugin
+    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.plugin) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -46,14 +46,18 @@ jobs:
   # since then). Computes the affected verification scopes from the real
   # workspace dependency graph and exposes them as the `impact` output;
   # per-package jobs below consume them through
-  #   needs.impact.result != 'success' || fromJSON(...).scopes.<scope>
-  # conditions. The != 'success' prefix makes the gate FAIL OPEN: if this
-  # resolver job itself fails, every gated job runs (a resolver outage can
-  # never silently skip tests). Unknown/root-level changes broaden to every
-  # scope inside the resolver (scripts/ci/impact.mjs). The prediction still
-  # lands in the Step Summary and as an artifact for false-negative hunting.
-  # Always-running jobs: this one, verify-merge (the required check), and the
-  # advisory telemetry-guard.
+  #   !cancelled() && (needs.impact.result != 'success' || fromJSON(...).scopes.<scope>)
+  # conditions. The explicit !cancelled() status function is REQUIRED:
+  # GitHub implicitly prepends success() to any `if` without a status
+  # function, which would make a failed impact job SKIP every gated job
+  # instead of running them (review catch 2026-10-27). With the guard, the
+  # gate FAILS OPEN: if this resolver job fails, every gated job runs (a
+  # resolver outage can never silently skip tests). Pinned by
+  # scripts/__tests__/ci-impact-gate-contract.test.ts. Unknown/root-level
+  # changes broaden to every scope inside the resolver (scripts/ci/impact.mjs).
+  # The prediction still lands in the Step Summary and as an artifact for
+  # false-negative hunting. Always-running jobs: this one, verify-merge (the
+  # required check), and the advisory telemetry-guard.
   impact:
     name: CI Impact Gate
     runs-on: ubuntu-latest
@@ -162,7 +166,7 @@ jobs:
   release-parity:
     name: Release Build Parity
     needs: impact
-    if: needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.plugin
+    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.plugin) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -199,7 +203,7 @@ jobs:
     name: Lint
     needs: impact
     # eslint runs across every package — any package scope (incl. transitive) gates it.
-    if: needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.anyPackage
+    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.anyPackage) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -231,7 +235,7 @@ jobs:
   test-principles-core:
     name: Test principles-core
     needs: impact
-    if: needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.core
+    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.core) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -270,7 +274,7 @@ jobs:
   test-pd-cli:
     name: Test pd-cli
     needs: impact
-    if: needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.cli
+    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.cli) }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -315,7 +319,7 @@ jobs:
   test-pd-console:
     name: Test pd-console
     needs: impact
-    if: needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.console
+    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.console) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -359,7 +363,7 @@ jobs:
   test-create-principles-disciple:
     name: Test create-principles-disciple
     needs: impact
-    if: needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.installer
+    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.installer) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -399,7 +403,7 @@ jobs:
   smoke-packaged-install:
     name: Test packaged install smoke
     needs: impact
-    if: needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.release
+    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.release) }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -439,7 +443,7 @@ jobs:
   smoke-release-asset:
     name: Test release asset smoke
     needs: impact
-    if: needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.release
+    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.release) }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -486,7 +490,7 @@ jobs:
     needs: impact
     # Any of the five consolidated suites' scopes (parity needs plugin; the
     # scripts suite is covered by broad — root scripts/ changes broaden).
-    if: needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.hostRuntime || fromJSON(needs.impact.outputs.impact).scopes.installLayout || fromJSON(needs.impact.outputs.impact).scopes.codexAdapter || fromJSON(needs.impact.outputs.impact).scopes.plugin || fromJSON(needs.impact.outputs.impact).scopes.companion
+    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.hostRuntime || fromJSON(needs.impact.outputs.impact).scopes.installLayout || fromJSON(needs.impact.outputs.impact).scopes.codexAdapter || fromJSON(needs.impact.outputs.impact).scopes.plugin || fromJSON(needs.impact.outputs.impact).scopes.companion) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -550,7 +554,7 @@ jobs:
   build-openclaw-plugin:
     name: Build OpenClaw Plugin
     needs: impact
-    if: needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.plugin
+    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.plugin) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -581,7 +585,7 @@ jobs:
   typecheck-pd-console:
     name: TypeScript Check (pd-console)
     needs: impact
-    if: needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.console
+    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.console) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -613,7 +617,7 @@ jobs:
   test-openclaw-plugin-coverage:
     name: Test OpenClaw Plugin (unit+integration+coverage)
     needs: impact
-    if: needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.plugin
+    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.plugin) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
