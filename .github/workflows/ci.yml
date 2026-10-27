@@ -213,7 +213,6 @@ jobs:
   test-principles-core:
     name: Test principles-core
     runs-on: ubuntu-latest
-    needs: lint
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
@@ -251,7 +250,6 @@ jobs:
   test-pd-cli:
     name: Test pd-cli
     runs-on: ubuntu-latest
-    needs: lint
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
@@ -292,38 +290,9 @@ jobs:
         working-directory: packages/pd-cli
         run: npm run build && npm test
 
-  test-pd-companion:
-    name: Test pd-companion
-    runs-on: ubuntu-latest
-    needs: lint
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
-        with:
-          persist-credentials: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      # --ignore-scripts matches sibling jobs; companion unit tests exercise
-      # the pure lib layer only — the electron binary is not needed on Linux.
-      - name: Install dependencies
-        run: npm ci --ignore-scripts
-
-      - name: Build install layout dependency
-        run: npm run build --workspace=@principles/install-layout
-
-      - name: Build and test
-        working-directory: packages/pd-companion
-        run: npm run build && npm test
-
   test-pd-console:
     name: Test pd-console
     runs-on: ubuntu-latest
-    needs: lint
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
@@ -366,7 +335,6 @@ jobs:
   test-create-principles-disciple:
     name: Test create-principles-disciple
     runs-on: ubuntu-latest
-    needs: lint
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
@@ -478,46 +446,15 @@ jobs:
         working-directory: packages/create-principles-disciple
         run: npm run build && npm run test:smoke:release-asset
 
-  test-scripts:
-    name: Test scripts
+  # Consolidated 2026-10-27 (CI slimming): scripts, host-runtime, host
+  # runtime parity, codex-adapter and pd-companion were five separate jobs —
+  # five npm ci installs plus five dependency builds for ~4 min of combined
+  # test time, queued as a second wave behind `lint`. They now share one
+  # runner; every suite and command is unchanged.
+  test-shared-runtime:
+    name: Test shared runtime & adapters
     runs-on: ubuntu-latest
-    needs: lint
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
-        with:
-          persist-credentials: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci --ignore-scripts
-
-      # PRI-819: the telemetry smoke config regression test validates the
-      # generated YAML through the real @principles/core/runtime-v2
-      # validatePdConfig (production parser path), which resolves the built
-      # package exports — build core before running the scripts suite.
-      - name: Build @principles/core
-        run: npm run build --workspace=@principles/core
-
-      - name: Test scripts
-        run: npm run test:scripts
-
-      # PRI-868: the legacy-installer deactivation contract lives in the root
-      # tests/ directory, which no other CI job collects. Run it from the repo
-      # root here so a future guard deletion fails CI instead of staying green.
-      - name: Test root guard contracts
-        run: npm run test:guard-contracts
-
-  test-host-runtime:
-    name: Test host-runtime
-    runs-on: ubuntu-latest
-    needs: lint
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
@@ -536,80 +473,45 @@ jobs:
         run: npm rebuild better-sqlite3
 
       - name: Build dependencies
-        run: |
-          npm run build --workspace=@principles/core
-          npm run build --workspace=@principles/install-layout
-
-      - name: Build and test
-        run: npm run build --workspace=@principles/host-runtime && npm test --workspace=@principles/host-runtime
-
-  test-host-runtime-parity:
-    name: Test host runtime parity
-    runs-on: ubuntu-latest
-    needs: lint
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
-        with:
-          persist-credentials: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci --ignore-scripts
-
-      - name: Rebuild native modules (better-sqlite3)
-        run: npm rebuild better-sqlite3
-
-      - name: Build runtime dependencies and OpenClaw plugin
+        # Superset of the five former jobs' dependency sets: core +
+        # install-layout + host-runtime + plugin (parity needs the plugin).
         run: |
           npm run build --workspace=@principles/core
           npm run build --workspace=@principles/install-layout
           npm run build --workspace=@principles/host-runtime
           npm run build --workspace=principles-disciple
 
+      # PRI-819: the telemetry smoke config regression test validates the
+      # generated YAML through the real @principles/core/runtime-v2
+      # validatePdConfig (production parser path), which resolves the built
+      # package exports — core is already built above.
+      - name: Test scripts
+        run: npm run test:scripts
+
+      # PRI-868: the legacy-installer deactivation contract lives in the root
+      # tests/ directory, which no other CI job collects. Run it from the repo
+      # root here so a future guard deletion fails CI instead of staying green.
+      - name: Test root guard contracts
+        run: npm run test:guard-contracts
+
+      - name: Test host-runtime
+        run: npm run build --workspace=@principles/host-runtime && npm test --workspace=@principles/host-runtime
+
       - name: Verify real OpenClaw host parity and published bundle
         # The published-bundle suite decides its own skip during the changesets
         # pending-publish window (see
-        # tests/package/published-host-runtime-bundle.test.ts), so the workflow
+        # tests/package/published-host-runtime-bundle.test.ts), so this step
         # runs the full parity command unconditionally on every branch.
-        run: npm run test:host-runtime-parity --workspace=principles-disciple
         working-directory: packages/openclaw-plugin
+        run: npm run test:host-runtime-parity --workspace=principles-disciple
 
-  test-codex-adapter:
-    name: Test codex-adapter
-    runs-on: ubuntu-latest
-    needs: lint
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
-        with:
-          persist-credentials: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci --ignore-scripts
-
-      - name: Rebuild native modules (better-sqlite3)
-        run: npm rebuild better-sqlite3
-
-      - name: Build runtime dependencies
-        run: |
-          npm run build --workspace=@principles/core
-          npm run build --workspace=@principles/install-layout
-          npm run build --workspace=@principles/host-runtime
-
-      - name: Build and test adapter
+      - name: Test codex-adapter
         run: npm test --workspace=@principles/codex-adapter
+
+      # Companion unit tests exercise the pure lib layer only — the electron
+      # binary is not needed on Linux.
+      - name: Build and test pd-companion
+        run: npm run build --workspace=@principles/pd-companion && npm test --workspace=@principles/pd-companion
 
   build-openclaw-plugin:
     name: Build OpenClaw Plugin
@@ -643,7 +545,6 @@ jobs:
   typecheck-pd-console:
     name: TypeScript Check (pd-console)
     runs-on: ubuntu-latest
-    needs: lint
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
@@ -666,69 +567,14 @@ jobs:
         working-directory: packages/pd-console
         run: npx tsc --noEmit
 
-  test-openclaw-plugin-unit:
-    name: Test OpenClaw Plugin (unit)
-    runs-on: ubuntu-latest
-    needs: build-openclaw-plugin
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
-        with:
-          persist-credentials: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      - name: Install dependencies
-        # Root-level install (same as build-openclaw-plugin): the "Build
-        # dependencies" step runs the root build script, whose package set is
-        # a superset of the plugin's dependency closure (PRI-672 added
-        # create-principles-disciple). A plugin-directory npm ci installs only
-        # the plugin closure and the root build then fails on missing
-        # devDependencies outside it.
-        run: npm ci --ignore-scripts
-
-      - name: Build dependencies
-        run: npm run build
-
-      - name: Run unit tests
-        working-directory: packages/openclaw-plugin
-        run: npm run test:unit
-
-  test-openclaw-plugin-integration:
-    name: Test OpenClaw Plugin (integration)
-    runs-on: ubuntu-latest
-    needs: build-openclaw-plugin
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
-        with:
-          persist-credentials: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      - name: Install dependencies
-        # Root-level install — see the note in test-openclaw-plugin-unit.
-        run: npm ci --ignore-scripts
-
-      - name: Build dependencies
-        run: npm run build
-
-      - name: Run integration tests
-        working-directory: packages/openclaw-plugin
-        run: npm run test:integration
-
+  # Consolidated 2026-10-27 (CI slimming): the former separate (unit) and
+  # (integration) jobs each ran a SUBSET of this job's default vitest
+  # collection — `npx vitest run --coverage` already executes every test
+  # file (see vitest.config.ts layering: unit globs + integration globs).
+  # The two redundant jobs were removed; coverage + Codecov upload unchanged.
   test-openclaw-plugin-coverage:
-    name: Test OpenClaw Plugin (coverage)
+    name: Test OpenClaw Plugin (unit+integration+coverage)
     runs-on: ubuntu-latest
-    needs: build-openclaw-plugin
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
