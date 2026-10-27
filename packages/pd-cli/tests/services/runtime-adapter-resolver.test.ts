@@ -62,7 +62,7 @@ describe('resolveRuntimeAdapterFromConfig — runtimeProfileId (capability path)
         workspaceDir,
         runtimeProfileId: 'openclaw.default',
       }),
-    ).toThrowError(/retired|needs_setup|openclaw/i);
+    ).toThrowError(/retired \(ADR-0029\)/);
   });
 
   it('refuses a concrete legacy openclaw profile too — provider+model no longer make it ready', () => {
@@ -79,7 +79,21 @@ describe('resolveRuntimeAdapterFromConfig — runtimeProfileId (capability path)
         workspaceDir,
         runtimeProfileId: 'openclaw.local',
       }),
-    ).toThrowError(/retired|needs_setup|openclaw/i);
+    ).toThrowError(/retired \(ADR-0029\)/);
+  });
+
+  it('names the retirement, not invalid-config, when a retired runtime kind meets a bad config', () => {
+    // The workspace config resolves to needs_setup (legacy openclaw default);
+    // naming the retired backend must still be reported as retired (cli-6).
+    writeConfig(baseConfig());
+
+    expect(() =>
+      resolveRuntimeAdapterFromConfig({
+        runtimeKind: 'openclaw-cli',
+        workspaceDir,
+        runtimeProfileId: 'openclaw.default',
+      }),
+    ).toThrowError(/retired \(ADR-0029\)/);
   });
 
   it('resolves a pi-ai capability profile (the only supported backend)', () => {

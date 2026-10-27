@@ -847,7 +847,9 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
         decision: isConfigError ? 'config_error' : 'runtime_error',
         reason: message,
         nextAction: isConfigError
-          ? 'Fix the .pd/config.yaml runtime profile, or use --runtime pi-ai with explicit provider/model/apiKeyEnv flags'
+          ? (err instanceof ConfigResolutionError && err.nextAction
+              ? err.nextAction
+              : 'Point the .pd/config.yaml runtime profile at a pi-ai profile (provider + model + apiKeyEnv)')
           : 'Check runner logs and workspace state; re-run with --runtime test-double to isolate',
       }, null, 2));
     } else {

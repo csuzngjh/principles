@@ -184,6 +184,22 @@ export function resolveRuntimeAdapterFromConfig(opts: ResolveAdapterOptions): PD
   // PRI-431 Step 1d: invoke onConfigResolved callback (for telemetry, legacyWarnings, etc.)
   opts.onConfigResolved?.(resolved);
 
+  // ── Retired backend (ADR-0029) ──────────────────────────────────────────
+  // Checked BEFORE the config-error branch: naming the retired backend is a
+  // refused request, and a needs_setup/invalid-config result must not mask the
+  // retirement reason behind a generic config error (cli-6).
+  if (opts.runtimeKind === 'openclaw-cli') {
+    throw new ConfigResolutionError(
+      "Runtime kind 'openclaw-cli' is retired (ADR-0029): PD runs internal agents " +
+      "only on its own pi-ai runtime, never through a host CLI agent session.",
+      'unsupported-runtime',
+      {
+        nextAction:
+          'Use --runtime pi-ai, or point the .pd/config.yaml runtime profile at a pi-ai profile (provider + model + apiKeyEnv).',
+      },
+    );
+  }
+
   if (isRuntimeConfigError(configResult)) {
     if (!opts.configOptional) {
       throw new ConfigResolutionError(
@@ -310,24 +326,6 @@ export function resolveRuntimeAdapterFromConfig(opts: ResolveAdapterOptions): PD
       ...(configFields.reasoning !== undefined ? { reasoning: configFields.reasoning } : {}),
       ...(configFields.systemPrompt ? { systemPrompt: configFields.systemPrompt } : {}),
     });
-  }
-
-  // ── Retired backend (ADR-0029) ──────────────────────────────────────────
-  // 'openclaw-cli' used to spawn a host CLI agent session. The backend is
-  // retired, so naming it is a refused request — not a missing field the
-  // operator can fill in. Reachable only by an explicit --runtime
-  // openclaw-cli: a config-driven resolution already fails at the readiness
-  // gate (a legacy type:'openclaw' profile answers needs_setup).
-  if (opts.runtimeKind === 'openclaw-cli') {
-    throw new ConfigResolutionError(
-      "Runtime kind 'openclaw-cli' is retired (ADR-0029): PD runs internal agents " +
-      "only on its own pi-ai runtime, never through a host CLI agent session.",
-      'unsupported-runtime',
-      {
-        nextAction:
-          'Use --runtime pi-ai, or point the .pd/config.yaml runtime profile at a pi-ai profile (provider + model + apiKeyEnv).',
-      },
-    );
   }
 
   // ── Unsupported runtime ────────────────────────────────────────────────
