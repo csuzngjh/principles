@@ -99,20 +99,29 @@ Tests run automatically via GitHub Actions (`.github/workflows/ci.yml`):
 - Node.js version pinned per job (mostly 22; codex-plugin-delivery uses 24). The former Node 20/22 `test` matrix job was a no-op at the workspace root and was removed 2026-08-27.
 
 **CI Jobs (16 total, current as of 2026-10-27):**
-1. `verify-merge` - Canonical merge gate (`npm run verify:merge`)
-2. `release-parity` - npm pack dry-run validation
-3. `lint` - ESLint validation (per-package scheduling)
-4. `codex-plugin-delivery` - Published runtime pin probe
-5. `impact` / `telemetry-guard` - CI impact shadow prediction + telemetry union advisory
-6. `test-principles-core` - Core tests with coverage
-7. `test-pd-cli` - CLI tests
-8. `test-pd-console` - Console tests with coverage
-9. `test-create-principles-disciple` - Installer fast suite
-10. `smoke-packaged-install` / `smoke-release-asset` - Installer smoke suites (2 parallel jobs)
-11. `test-shared-runtime` - scripts + root guard contracts + host-runtime + host parity + codex-adapter + pd-companion (consolidated 2026-10-27 from five separate jobs)
-12. `build-openclaw-plugin` - Build + TypeScript check + production build
-13. `typecheck-pd-console` - TypeScript check
-14. `test-openclaw-plugin-coverage` - Plugin unit + integration tests with coverage in ONE job (the default vitest collection runs the full suite; the former separate unit/integration jobs were subsets of it and were removed 2026-10-27)
+
+Scope gating (since 2026-10-27): the `impact` job (CI Impact Gate) computes affected
+scopes from the real workspace dependency graph (`scripts/ci/impact.mjs`); every
+per-package job below carries an `if: needs.impact.result != 'success' || …scopes.X`
+condition, so it runs only when its scope is affected. The gate fails OPEN — if the
+resolver job fails, every gated job runs; unknown/root-level changes broaden to all
+scopes. `verify-merge` (the required branch-protection check), `impact` and the
+advisory `telemetry-guard` always run, so docs-only PRs execute just those three.
+
+1. `verify-merge` - Canonical merge gate (`npm run verify:merge`) — always runs
+2. `release-parity` - npm pack dry-run validation (gated: plugin)
+3. `lint` - ESLint validation (per-package scheduling; gated: any package scope)
+4. `codex-plugin-delivery` - Published runtime pin probe (gated: plugin)
+5. `impact` / `telemetry-guard` - CI impact gate (always) + telemetry union advisory (always)
+6. `test-principles-core` - Core tests with coverage (gated: core)
+7. `test-pd-cli` - CLI tests (gated: cli)
+8. `test-pd-console` - Console tests with coverage (gated: console)
+9. `test-create-principles-disciple` - Installer fast suite (gated: installer)
+10. `smoke-packaged-install` / `smoke-release-asset` - Installer smoke suites (gated: release)
+11. `test-shared-runtime` - scripts + root guard contracts + host-runtime + host parity + codex-adapter + pd-companion (gated: hostRuntime/installLayout/codexAdapter/plugin/companion; root `scripts/**` changes broaden to all)
+12. `build-openclaw-plugin` - Build + TypeScript check + production build (gated: plugin)
+13. `typecheck-pd-console` - TypeScript check (gated: console)
+14. `test-openclaw-plugin-coverage` - Plugin unit + integration tests with coverage in ONE job (gated: plugin; the default vitest collection runs the full suite — the former separate unit/integration jobs were subsets of it and were removed 2026-10-27)
 
 ## Quality Infrastructure
 
