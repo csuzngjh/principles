@@ -181,6 +181,10 @@ export interface InternalizationOrchestratorDeps {
   readonly stateManager: RuntimeStateManager;
 }
 
+/** PRI-1047 Owner review R6 #3: source-correction 定点续接「读取→守卫→CAS」
+ * 的有界重试上限——瞬时并发写者（只改无关信息）重试而非误记终态冲突。 */
+const SOURCE_CORRECTION_REOPEN_CAS_ATTEMPTS = 3;
+
 // ── InternalizationOrchestrator ───────────────────────────────────────────────
 
 export class InternalizationOrchestrator {
@@ -553,16 +557,25 @@ export class InternalizationOrchestrator {
     }
 
     // ── SPEC-PRI-1047 修复 B: source-correction 定点续接分支 ──
-    // 本次完成的 scribe 携带 source-correction receipt 时，本 transition 由
-    // source-correction 独占（无论 outcome 是否已回填）：定点 CAS 重开
-    // receipt 指向的原 Artificer（核对它确因该源材料而停、保留原 taskId/
-    // 依赖、经 MAX(revision_epoch) 视图消费新工件）。outcome 已记录
-    // （reopened/reopened_earlier/already_in_flight）→ 幂等 no-op；
-    // conflict/task_missing → 终态可观测，**不落入** findExistingSuccessor /
-    // 通用级联——否则周期性 reconciliation 重放会把刚被拒绝重开的
-    // Artificer 经通用级联重开，绕过停点核验（评审 P2 #3）。分支位于
-    // proposeNextTask 之前：receipt 未处理时不依赖 job graph 可解（评审 P3 #8）。
-    if (rawTask.taskKind === 'scribe' && piTask.sourceCorrectionReceipt !== undefined) {
+    // 本次完成的 scribe 携带 source-correction receipt 且**当前修订轮就是该
+    // source-correction 轮**（revisionCauseId === sourceCorrectionCauseId——
+    // 重开时两者被同一原子写入）时，本 transition 由 source-correction 独占
+    // （无论 outcome 是否已回填）：定点 CAS 重开 receipt 指向的原 Artificer
+    // （核对它确因该源材料而停、保留原 taskId/依赖、经 MAX(revision_epoch)
+    // 视图消费新工件）。outcome 已记录（reopened/reopened_earlier/
+    // already_in_flight）→ 幂等 no-op；conflict/task_missing → 终态可观测，
+    // **不落入** findExistingSuccessor / 通用级联——否则周期性 reconciliation
+    // 重放会把刚被拒绝重开的 Artificer 经通用级联重开，绕过停点核验
+    // （评审 P2 #3）。分支位于 proposeNextTask 之前：receipt 未处理时不依赖
+    // job graph 可解（评审 P3 #8）。
+    // PRI-1047 Owner review R6 #5: 轮次限定是必须的——receipt 在
+    // mergePITaskMetadata 中跨轮存活，而后续一次合法 binding revision 会把
+    // revisionCauseId 覆写为 rule-binding:…；若只看 receipt 存在性，那一轮的
+    // 成功 transition 会被旧回执捕获成 no-op，正常后继推进（级联重开下游）
+    // 永远不再发生。cause 不匹配 = 非 source-correction 轮 → 走通用流程。
+    if (rawTask.taskKind === 'scribe' && piTask.sourceCorrectionReceipt !== undefined
+      && piTask.sourceCorrectionCauseId !== undefined
+      && piTask.revisionCauseId === piTask.sourceCorrectionCauseId) {
       if (piTask.sourceCorrectionReceipt.reopenOutcome !== undefined) {
         return {
           decision: 'source_correction_reopen_noop',
@@ -994,74 +1007,90 @@ export class InternalizationOrchestrator {
     const causeId = scribePi.sourceCorrectionCauseId
       ?? `rule-source-correction:${receipt.candidateId}:${receipt.bindingRevision}`;
     const { artificerTaskId } = receipt;
-    const artificerTask = await this.stateManager.getTask(artificerTaskId);
-    if (!artificerTask) {
-      await this.recordSourceCorrectionOutcome(scribeTaskId, { kind: 'task_missing', recordedAt: new Date().toISOString() });
-      return { decision: 'source_correction_reopen_failed', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: 'artificer_task_missing' };
-    }
-    const artificerPi = hydratePITaskRecord(artificerTask);
-    if (!artificerPi) {
-      await this.recordSourceCorrectionOutcome(scribeTaskId, { kind: 'conflict', recordedAt: new Date().toISOString(), detail: 'artificer_metadata_invalid' });
-      return { decision: 'source_correction_reopen_conflict', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: 'artificer_metadata_invalid' };
-    }
-    // 崩溃重放：Artificer 已带本 cause（上次续接已 materialize）→ 幂等 no-op。
-    if (artificerPi.revisionCauseId === causeId) {
-      await this.recordSourceCorrectionOutcome(scribeTaskId, { kind: 'reopened_earlier', recordedAt: new Date().toISOString() });
-      return { decision: 'source_correction_reopen_noop', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: 'source_correction_cause_already_materialized' };
-    }
-    // 他因在途（如 Owner 已用 retry 恢复）→ 不抢写；在途任务经 MAX(revision_epoch)
-    // 视图消费新工件，链路自然续接。
-    if (artificerTask.status === 'pending' || artificerTask.status === 'retry_wait') {
-      await this.recordSourceCorrectionOutcome(scribeTaskId, { kind: 'already_in_flight', recordedAt: new Date().toISOString() });
-      return { decision: 'source_correction_reopen_noop', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: `artificer_in_flight_${artificerTask.status}` };
-    }
-    if (artificerTask.status !== 'needs_human_review') {
-      const detail = `artificer_status_${artificerTask.status}`;
-      await this.recordSourceCorrectionOutcome(scribeTaskId, { kind: 'conflict', recordedAt: new Date().toISOString(), detail });
-      return { decision: 'source_correction_reopen_conflict', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: detail };
-    }
-    const stopReasonCode = artificerPi.humanReviewContext?.reasonCode ?? '';
-    if (stopReasonCode !== receipt.expectedStopReasonCode) {
-      const detail = `stop_reason_drifted:${stopReasonCode || 'none'}!=${receipt.expectedStopReasonCode}`;
-      await this.recordSourceCorrectionOutcome(scribeTaskId, { kind: 'conflict', recordedAt: new Date().toISOString(), detail });
-      return { decision: 'source_correction_reopen_conflict', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: detail };
-    }
-    const merged = mergePITaskMetadata(artificerPi, {
-      runnerDecision: undefined,
-      completionIntent: undefined,
-      revisionCount: (artificerPi.revisionCount ?? 0) + 1,
-      revisionCauseId: causeId,
-    });
-    const updated = await this.stateManager.updateTaskIfDiagnosticJsonUnchanged(
-      artificerTaskId,
-      artificerTask.diagnosticJson ?? null,
-      {
-        diagnosticJson: createPITaskDiagnosticJson(merged),
-        status: 'pending',
-        attemptCount: 0,
-        ...(artificerTask.leaseOwner || artificerTask.leaseExpiresAt ? { leaseOwner: null, leaseExpiresAt: null } : {}),
-      },
-      {
-        expectedStatus: 'needs_human_review',
-        expectedAttemptCount: artificerTask.attemptCount,
-        expectedMaxAttempts: artificerTask.maxAttempts,
-        expectedLeaseOwner: artificerTask.leaseOwner ?? null,
-        expectedLeaseExpiresAt: artificerTask.leaseExpiresAt ?? null,
-      },
-    );
-    if (!updated) {
+
+    // PRI-1047 Owner review R6 #3: CAS 丢失 ≠ 终态冲突。并发写者可能只改了
+    // 无关信息（diagnosticJson 任意字段、账本/遥测无关写）；守卫（cause/
+    // 在途/状态/停点）在丢失后的最新行上全部成立时，重试整个「读取→守卫→
+    // CAS」序列。只有守卫真的漂移（被下方守卫分类为具体 conflict/in-flight/
+    // earlier）或重试用尽仍持续丢失（持续竞争，罕见）才记录终态 outcome——
+    // 否则一次普通并发更新就会把恢复永久记为 conflict，重放一律跳过，
+    // 原 Artificer 永远暂停。每次迭代从头重读当前行（rc-7），不携带旧
+    // 迭代的错误与结果。
+    for (let attempt = 0; attempt < SOURCE_CORRECTION_REOPEN_CAS_ATTEMPTS; attempt += 1) {
+      const artificerTask = await this.stateManager.getTask(artificerTaskId);
+      if (!artificerTask) {
+        await this.recordSourceCorrectionOutcome(scribeTaskId, { kind: 'task_missing', recordedAt: new Date().toISOString() });
+        return { decision: 'source_correction_reopen_failed', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: 'artificer_task_missing' };
+      }
+      const artificerPi = hydratePITaskRecord(artificerTask);
+      if (!artificerPi) {
+        await this.recordSourceCorrectionOutcome(scribeTaskId, { kind: 'conflict', recordedAt: new Date().toISOString(), detail: 'artificer_metadata_invalid' });
+        return { decision: 'source_correction_reopen_conflict', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: 'artificer_metadata_invalid' };
+      }
+      // 崩溃重放：Artificer 已带本 cause（上次续接已 materialize）→ 幂等 no-op。
+      if (artificerPi.revisionCauseId === causeId) {
+        await this.recordSourceCorrectionOutcome(scribeTaskId, { kind: 'reopened_earlier', recordedAt: new Date().toISOString() });
+        return { decision: 'source_correction_reopen_noop', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: 'source_correction_cause_already_materialized' };
+      }
+      // 他因在途（如 Owner 已用 retry 恢复）→ 不抢写；在途任务经 MAX(revision_epoch)
+      // 视图消费新工件，链路自然续接。
+      if (artificerTask.status === 'pending' || artificerTask.status === 'retry_wait') {
+        await this.recordSourceCorrectionOutcome(scribeTaskId, { kind: 'already_in_flight', recordedAt: new Date().toISOString() });
+        return { decision: 'source_correction_reopen_noop', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: `artificer_in_flight_${artificerTask.status}` };
+      }
+      if (artificerTask.status !== 'needs_human_review') {
+        const detail = `artificer_status_${artificerTask.status}`;
+        await this.recordSourceCorrectionOutcome(scribeTaskId, { kind: 'conflict', recordedAt: new Date().toISOString(), detail });
+        return { decision: 'source_correction_reopen_conflict', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: detail };
+      }
+      const stopReasonCode = artificerPi.humanReviewContext?.reasonCode ?? '';
+      if (stopReasonCode !== receipt.expectedStopReasonCode) {
+        const detail = `stop_reason_drifted:${stopReasonCode || 'none'}!=${receipt.expectedStopReasonCode}`;
+        await this.recordSourceCorrectionOutcome(scribeTaskId, { kind: 'conflict', recordedAt: new Date().toISOString(), detail });
+        return { decision: 'source_correction_reopen_conflict', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: detail };
+      }
+      const merged = mergePITaskMetadata(artificerPi, {
+        runnerDecision: undefined,
+        completionIntent: undefined,
+        revisionCount: (artificerPi.revisionCount ?? 0) + 1,
+        revisionCauseId: causeId,
+      });
+      const updated = await this.stateManager.updateTaskIfDiagnosticJsonUnchanged(
+        artificerTaskId,
+        artificerTask.diagnosticJson ?? null,
+        {
+          diagnosticJson: createPITaskDiagnosticJson(merged),
+          status: 'pending',
+          attemptCount: 0,
+          ...(artificerTask.leaseOwner || artificerTask.leaseExpiresAt ? { leaseOwner: null, leaseExpiresAt: null } : {}),
+        },
+        {
+          expectedStatus: 'needs_human_review',
+          expectedAttemptCount: artificerTask.attemptCount,
+          expectedMaxAttempts: artificerTask.maxAttempts,
+          expectedLeaseOwner: artificerTask.leaseOwner ?? null,
+          expectedLeaseExpiresAt: artificerTask.leaseExpiresAt ?? null,
+        },
+      );
+      if (updated) {
+        await this.recordSourceCorrectionOutcome(scribeTaskId, { kind: 'reopened', recordedAt: new Date().toISOString() });
+        return { decision: 'source_correction_reopened', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: 'original_artificer_reopened_on_new_scribe_epoch' };
+      }
+      // CAS 丢失：并发写者竞得。若其恰好 materialize 了同一 cause → 幂等
+      // no-op；否则回到循环头对最新行重跑全部守卫——瞬时竞争自然重试，
+      // 真实漂移被守卫重新分类，不再误记终态 conflict。
       const current = await this.stateManager.getTask(artificerTaskId);
       const currentPi = current ? hydratePITaskRecord(current) : null;
       if (currentPi && currentPi.revisionCauseId === causeId) {
         await this.recordSourceCorrectionOutcome(scribeTaskId, { kind: 'reopened_earlier', recordedAt: new Date().toISOString() });
         return { decision: 'source_correction_reopen_noop', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: 'concurrent_writer_materialized_same_cause' };
       }
-      const detail = 'cas_lost_to_concurrent_writer';
-      await this.recordSourceCorrectionOutcome(scribeTaskId, { kind: 'conflict', recordedAt: new Date().toISOString(), detail });
-      return { decision: 'source_correction_reopen_conflict', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: detail };
     }
-    await this.recordSourceCorrectionOutcome(scribeTaskId, { kind: 'reopened', recordedAt: new Date().toISOString() });
-    return { decision: 'source_correction_reopened', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: 'original_artificer_reopened_on_new_scribe_epoch' };
+    // 重试用尽而守卫始终成立 = 持续并发写者（罕见）。终态可观测；下次
+    // reconciliation 重放经 cause 已 materialize 判定幂等，不会二次消费。
+    const detail = `cas_retry_exhausted:${SOURCE_CORRECTION_REOPEN_CAS_ATTEMPTS}`;
+    await this.recordSourceCorrectionOutcome(scribeTaskId, { kind: 'conflict', recordedAt: new Date().toISOString(), detail });
+    return { decision: 'source_correction_reopen_conflict', sourceTaskId: scribeTaskId, reopenedTaskId: artificerTaskId, reason: detail };
   }
 
   /**

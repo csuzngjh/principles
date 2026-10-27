@@ -13,6 +13,7 @@ import { WorkspaceContext } from '../core/workspace-context.js';
 import { persistGateBlock, recordGateBlockAndReturn } from './gate-block-helper.js';
 import type { RuleHostInput, RuleContextV2, RuleHostEvaluatedEventData } from '@principles/core/runtime-v2';
 import { buildRuleHostAction, validateCorrectionProposal, validateProposedPathBounds, computeFeatureFlagsFromConfig, UNAVAILABLE_RULE_CONTEXT, isRuleHostEvaluatedEventData } from '@principles/core/runtime-v2';
+import { classifyBashRisk } from '@principles/core/runtime-v2/internalization/bash-risk';
 import type { PluginHookBeforeToolCallEvent, PluginHookToolContext, PluginHookBeforeToolCallResult, PluginLogger } from '../openclaw-sdk.js';
 import { AGENT_TOOLS, BASH_TOOLS_SET, WRITE_TOOLS } from '../constants/tools.js';
 import { OPENCLAW_TOOL_SEMANTICS } from '../constants/tool-semantics.js';
@@ -567,16 +568,11 @@ function _getEpTier(): number {
 
 function _getBashRisk(event: PluginHookBeforeToolCallEvent): 'safe' | 'normal' | 'dangerous' | 'unknown' {
   if (!BASH_TOOLS_SET.has(event.toolName)) return 'unknown';
-  try {
-    const command = String(event.params?.command || event.params?.args || '');
-    const isDangerous = /\brm\s+-rf\b|\bchmod\b|\bchown\b|>\s*\/dev\//.test(command);
-    if (isDangerous) return 'dangerous';
-    const isMutation = /(?:>|>>|sed|rm|mv|mkdir|touch|cp|npm|yarn|pnpm|pip|cargo)/.test(command);
-    if (isMutation) return 'normal';
-    return 'safe';
-  } catch {
-    return 'unknown';
-  }
+  // PRI-1047 Owner review R6 #1: delegate to the shared classifier so replay,
+  // the host-runtime gate and this enrichment agree on ONE judgment (and the
+  // git-mutation gap — `git commit` previously classified 'safe' — is fixed
+  // everywhere at once).
+  return classifyBashRisk(true, event.params);
 }
 
 export function buildOpenClawRuleInputEnrichment(

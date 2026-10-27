@@ -91,3 +91,42 @@ export function approvalSignalsInText(text: string): readonly string[] {
   const lower = text.toLowerCase();
   return APPROVAL_SIGNAL_WORDS.filter((word) => lower.includes(word));
 }
+
+/**
+ * PRI-1047 Owner review R6 #2: 「材料含批准语义 ⇒ 必须声明 required 批准事实」
+ * 的单一判定（P4）。修复前只有 Artificer preflight 执行该审计，Scribe 成功
+ * 边界漏检——把 requiredFacts 置空数组或 required:false 的草案能通过 Scribe
+ * 校验、持久化为工件，再在 preflight 死于 approval_dependency_undeclared，
+ * 「Scribe 成功、下一站拒绝」断路复发。producer（Scribe validator）与
+ * consumer（preflight）必须用同一实现。
+ *
+ * 口径与 preflight 既有语义逐字对齐：仅 required:true 声明计为已声明；
+ * factKind 小写拼接后含 "approv" 即视为已声明批准类事实；scribe 材料池
+ * 优先于 upstream 池报告。
+ */
+export interface UndeclaredApprovalDependencyFinding {
+  /** 哪个材料池携带批准语义（审计 detail 用）。 */
+  readonly pool: 'scribe' | 'upstream';
+  /** 携带信号的字段/信号词（审计 detail 用）。 */
+  readonly fields: readonly string[];
+}
+
+export function findUndeclaredApprovalDependency(input: {
+  readonly scribeMaterial: ScribeIntentMaterial;
+  readonly upstreamNormalisedText: string;
+  readonly requiredFacts: readonly { readonly factKind: string; readonly required: boolean }[];
+}): UndeclaredApprovalDependencyFinding | null {
+  const effectiveFactKinds = input.requiredFacts
+    .filter((fact) => fact.required)
+    .map((fact) => fact.factKind.toLowerCase())
+    .join(' ');
+  if (/approv/.test(effectiveFactKinds)) return null;
+  if (input.scribeMaterial.hasApprovalSignal) {
+    return { pool: 'scribe', fields: input.scribeMaterial.approvalSignalFields };
+  }
+  const upstreamSignals = approvalSignalsInText(input.upstreamNormalisedText);
+  if (upstreamSignals.length > 0) {
+    return { pool: 'upstream', fields: upstreamSignals };
+  }
+  return null;
+}

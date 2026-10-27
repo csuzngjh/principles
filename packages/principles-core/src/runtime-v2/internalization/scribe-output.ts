@@ -12,7 +12,7 @@
 import { Type, type Static } from '@sinclair/typebox';
 import type { IntentContractV1, ScribeExecutionConditionsV1 } from './intent-contract.js';
 import { isValidIntentContractV1, isValidScribeExecutionConditionsV1 } from './intent-contract.js';
-import { collectScribeIntentMaterial, isTextualBasisAnchored } from './textual-basis-anchor.js';
+import { collectScribeIntentMaterial, isTextualBasisAnchored, findUndeclaredApprovalDependency } from './textual-basis-anchor.js';
 
 export interface ScribePrincipleDraft {
   readonly title: string;
@@ -296,6 +296,33 @@ export class DefaultScribeValidator implements ScribeValidator {
             `executionConditions.requiredFacts[${index}] (factKind '${fact.factKind}') textualBasis ("${fact.textualBasis.replace(/\s+/g, ' ').slice(0, 120)}") is not a continuous verbatim span of the Owner-attributed material — rewrite it as one continuous original sentence copied from the source (no citation labels, no ellipsis-omitted reconstruction)`,
           );
         }
+      }
+    }
+
+    // PRI-1047 Owner review R6 #2: 批准依赖声明审计——与 preflight 同一谓词
+    // （findUndeclaredApprovalDependency）。修复前 requiredFacts 空数组/
+    // required:false 的草案在本边界通过、持久化后在 preflight 死于
+    // approval_dependency_undeclared（「Scribe 成功、下一站拒绝」断路复发）。
+    // 在此失败可经 lastValidatorErrors 回喂修复。上游材料为空/不可解析时
+    // 仍审计 scribe 意图材料池（本边界始终可得）；两池均不可得 = 降级，
+    // 由 preflight 停点兜底。
+    if (this.requireRuleCodeContracts && executionConditionsValid
+      && anchoring != null
+      && isRecord(output.executionConditions)
+      && Array.isArray(output.executionConditions.requiredFacts)) {
+      const declaredFacts = output.executionConditions.requiredFacts.flatMap((fact) => {
+        if (!isRecord(fact) || typeof fact.factKind !== 'string' || typeof fact.required !== 'boolean') return [];
+        return [{ factKind: fact.factKind, required: fact.required }];
+      });
+      const undeclared = findUndeclaredApprovalDependency({
+        scribeMaterial: collectScribeIntentMaterial(output),
+        upstreamNormalisedText: anchoring.upstreamAnchorMaterial?.normalisedText ?? '',
+        requiredFacts: declaredFacts,
+      });
+      if (undeclared !== null) {
+        errors.push(
+          `executionConditions: ${undeclared.pool} material carries approval semantics (${undeclared.fields.join(', ')}) but no REQUIRED approval-kind fact is declared — declare the approval dependency (factKind e.g. 'design_approval', required: true) with its textual basis, or correct the draft text if it overstates the requirement`,
+        );
       }
     }
 

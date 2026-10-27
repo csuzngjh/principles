@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { createPITaskDiagnosticJson, hydratePITaskRecord, mergePITaskMetadata } from '../pitask-metadata.js';
+import { createPITaskDiagnosticJson, hydratePITaskRecord, mergePITaskMetadata, parsePITaskMetadata } from '../pitask-metadata.js';
 import { reviseRuleSourceOnce, SOURCE_CORRECTION_STOP_REASON_CODES } from '../rule-source-correction.js';
 import { InternalizationOrchestrator } from '../internalization-orchestrator.js';
 import { createRuntimeStateHandle, type RuntimeStateHandle } from '../../runtime-state-handle.js';
@@ -472,5 +472,95 @@ describe('SPEC-PRI-1047 R03 — one bounded source-correction recovery through t
     await handle.stateManager.updateTask(SCRIBE_TASK_ID, { status: 'succeeded' });
     const generic = await orchestrator().commitNextTaskProposal(SCRIBE_TASK_ID);
     expect(['successor_reopened', 'revision_reopen_noop']).toContain(generic.decision);
+  });
+
+  it('Owner review R6 #5: a stale receipt never captures a LATER legitimate revision epoch', async () => {
+    // Complete one full source-correction round (receipt outcome recorded).
+    await authorize();
+    await simulateScribeEpochSuccess();
+    const first = await orchestrator().commitNextTaskProposal(SCRIBE_TASK_ID);
+    expect(first.decision).toBe('source_correction_reopened');
+    // The reopened artificer runs to success; then the Owner performs ANOTHER
+    // binding revision on the scribe (a different budget, a new epoch).
+    await handle.stateManager.updateTask(ARTIFICER_TASK_ID, { status: 'succeeded', resultRef: 'artificer://run-2' });
+    const scribeMid = hydratePITaskRecord(requireTask(await handle.stateManager.getTask(SCRIBE_TASK_ID)));
+    await handle.stateManager.updateTask(SCRIBE_TASK_ID, {
+      diagnosticJson: createPITaskDiagnosticJson(mergePITaskMetadata(requireTask(scribeMid), {
+        revisionCount: (scribeMid?.revisionCount ?? 0) + 1,
+        revisionCauseId: `rule-binding:${candidateId}:2`,
+      })),
+      status: 'pending', attemptCount: 0,
+    });
+    // The later epoch completes — the OLD receipt must NOT hijack this
+    // transition into source_correction_reopen_noop; the generic successor
+    // flow (revision-wave cascade) owns it.
+    await handle.stateManager.updateTask(SCRIBE_TASK_ID, { status: 'succeeded', resultRef: 'scribe://run-6' });
+    await handle.stateManager.piArtifactStore.upsertArtifact({
+      artifactId: `pi-art-${SCRIBE_TASK_ID}-run-6`, artifactKind: 'principle', sourceTaskId: SCRIBE_TASK_ID,
+      lineageArtifactIds: [], validationStatus: 'pending',
+      contentJson: scribeArtifactJson(SCRIBE_TASK_ID, OWNER_SENTENCE),
+      createdAt: NOW, updatedAt: NOW,
+    });
+    const commit = await orchestrator().commitNextTaskProposal(SCRIBE_TASK_ID);
+    expect(commit.decision).not.toBe('source_correction_reopen_noop');
+    expect(commit.decision).not.toBe('source_correction_reopened');
+    expect(['successor_reopened', 'revision_reopened']).toContain(commit.decision);
+    // The recorded outcome is untouched — no second consumption, no re-record.
+    const scribePi = hydratePITaskRecord(requireTask(await handle.stateManager.getTask(SCRIBE_TASK_ID)));
+    expect(scribePi?.sourceCorrectionReceipt?.reopenOutcome?.kind).toBe('reopened');
+  });
+
+  it('Owner review R6 #3: a transient concurrent write on UNRELATED metadata retries the CAS instead of recording a terminal conflict', async () => {
+    await authorize();
+    await simulateScribeEpochSuccess();
+    const realUpdate = handle.stateManager.updateTaskIfDiagnosticJsonUnchanged.bind(handle.stateManager);
+    let casCalls = 0;
+    // The first CAS attempt loses to a concurrent writer that only touched an
+    // unrelated diagnosticJson field — every guard still holds on the fresh row.
+    (handle.stateManager as unknown as Record<string, unknown>).updateTaskIfDiagnosticJsonUnchanged =
+      async (...args: Parameters<typeof realUpdate>) => {
+        const [taskId] = args;
+        if (taskId === ARTIFICER_TASK_ID) casCalls += 1;
+        if (casCalls === 1 && taskId === ARTIFICER_TASK_ID) {
+          const current = await handle.stateManager.getTask(taskId);
+          const currentPi = current ? hydratePITaskRecord(current) : null;
+          if (current && currentPi) {
+            await handle.stateManager.updateTask(taskId, {
+              diagnosticJson: createPITaskDiagnosticJson(mergePITaskMetadata(currentPi, {
+                adversarialFeedback: 'unrelated concurrent writer note',
+              })),
+            });
+          }
+          return false;
+        }
+        return realUpdate(...args);
+      };
+    const commit = await orchestrator().commitNextTaskProposal(SCRIBE_TASK_ID);
+    // Transient contention retried: reopened on the second CAS attempt, and the
+    // recorded outcome is 'reopened' — NOT a terminal conflict that would make
+    // every future replay skip the paused artificer forever.
+    expect(commit.decision).toBe('source_correction_reopened');
+    expect(casCalls).toBe(2);
+    const scribePi = hydratePITaskRecord(requireTask(await handle.stateManager.getTask(SCRIBE_TASK_ID)));
+    expect(scribePi?.sourceCorrectionReceipt?.reopenOutcome?.kind).toBe('reopened');
+    const artificer = await handle.stateManager.getTask(ARTIFICER_TASK_ID);
+    expect(artificer?.status).toBe('pending');
+  });
+
+  it('Owner review R6 #6: receipt parse rejects coercion-shaped poison (array digest / array outcome kind)', async () => {
+    await authorize();
+    const scribe = requireTask(await handle.stateManager.getTask(SCRIBE_TASK_ID));
+    const diagnosticJson = scribe.diagnosticJson ?? '';
+    // Control: the real serialized receipt row parses.
+    expect(parsePITaskMetadata(diagnosticJson)).not.toBeNull();
+    // An ARRAY wrapping a valid digest string previously passed the regex via
+    // String coercion — must now be rejected (whole metadata null = fail loud).
+    const poisonedDigest = JSON.parse(diagnosticJson) as { pi_metadata: { sourceCorrectionReceipt: Record<string, unknown> } };
+    poisonedDigest.pi_metadata.sourceCorrectionReceipt.sourceArtifactDigest = [`sha256:${'a'.repeat(64)}`];
+    expect(parsePITaskMetadata(JSON.stringify(poisonedDigest))).toBeNull();
+    // An ARRAY-wrapped outcome kind previously passed includes(String(kind)).
+    const poisonedKind = JSON.parse(diagnosticJson) as { pi_metadata: { sourceCorrectionReceipt: Record<string, unknown> } };
+    poisonedKind.pi_metadata.sourceCorrectionReceipt.reopenOutcome = { kind: ['reopened'], recordedAt: NOW };
+    expect(parsePITaskMetadata(JSON.stringify(poisonedKind))).toBeNull();
   });
 });

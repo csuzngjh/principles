@@ -6,6 +6,7 @@ import { ScribeRunner } from '../internalization/scribe-runner.js';
 import { DefaultScribeValidator, type ScribeOutputV1 } from '../internalization/scribe-output.js';
 import { assessIntentBasis, collectUpstreamNormalisedText } from '../internalization/artificer-intent-preflight.js';
 import { createPITaskDiagnosticJson, parseLastValidatorErrors } from '../internalization/pitask-metadata.js';
+import { normaliseForAnchor } from '../internalization/textual-basis-anchor.js';
 import { createRuntimeStateHandle, type RuntimeStateHandle } from '../runtime-state-handle.js';
 import type { PDRuntimeAdapter } from '../runtime-protocol.js';
 
@@ -228,5 +229,32 @@ describe('SPEC-PRI-1047 R01 - scribe source-anchoring success boundary + validat
     expect(result.status).toBe('succeeded');
     expect(adapter.startRunInputs[0]).not.toContain('STALE-ERROR-must-not-reenter');
     expect(adapter.startRunInputs[0]).not.toContain('<previous_validation_errors>');
+  });
+
+  it('Owner review R6 #2: approval-semantics material with NO declared approval fact fails the Scribe success boundary', async () => {
+    const validator = new DefaultScribeValidator({ requireRuleCodeContracts: true });
+    // Same upstream pool derivation the runner uses for this fixture (the
+    // philosopher artifact carries the Owner material note).
+    const upstreamMaterial = { normalisedText: normaliseForAnchor(OWNER_MATERIAL_NOTE) };
+    const anchoring = { upstreamAnchorMaterial: upstreamMaterial };
+
+    // (a) empty requiredFacts — previously PASS at the boundary, then the
+    // artificer preflight stopped with approval_dependency_undeclared.
+    const empty = await validator.validate(makeScribeOutput(null), SCRIBE_TASK_ID, PHILOSOPHER_ARTIFACT_ID, anchoring);
+    expect(empty.valid).toBe(false);
+    expect(empty.errors.join(' ')).toContain('no REQUIRED approval-kind fact');
+
+    // (b) required:false — semantically unclaimed, same breaker shape.
+    const unclaimedOutput: ScribeOutputV1 = {
+      ...makeScribeOutput(OWNER_SENTENCE),
+      executionConditions: { version: 1 as const, requiredFacts: [{ factKind: 'design_approval', required: false, textualBasis: OWNER_SENTENCE }] },
+    };
+    const claimed = await validator.validate(unclaimedOutput, SCRIBE_TASK_ID, PHILOSOPHER_ARTIFACT_ID, anchoring);
+    expect(claimed.valid).toBe(false);
+    expect(claimed.errors.join(' ')).toContain('no REQUIRED approval-kind fact');
+
+    // (c) control: the same draft WITH the required declaration passes.
+    const control = await validator.validate(makeScribeOutput(OWNER_SENTENCE), SCRIBE_TASK_ID, PHILOSOPHER_ARTIFACT_ID, anchoring);
+    expect(control.valid).toBe(true);
   });
 });

@@ -538,6 +538,9 @@ export interface SourceCorrectionReceiptV1 {
 }
 
 /** rc-1/rc-4: receipt 是 untrusted runtime data（diagnosticJson 反序列化侧）。 */
+const SOURCE_CORRECTION_REOPEN_OUTCOME_KINDS: readonly string[] = [
+  'reopened', 'reopened_earlier', 'already_in_flight', 'conflict', 'task_missing',
+];
 function isValidSourceCorrectionReceipt(value: unknown): value is SourceCorrectionReceiptV1 {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const r = value as Record<string, unknown>;
@@ -545,14 +548,20 @@ function isValidSourceCorrectionReceipt(value: unknown): value is SourceCorrecti
   for (const key of ['candidateId', 'scribeTaskId', 'artificerTaskId', 'sourceArtifactId', 'decisionId', 'expectedStopReasonCode', 'reason', 'actor', 'requestId', 'consumedAt'] as const) {
     if (typeof r[key] !== 'string' || r[key].trim() === '') return false;
   }
-  if (!/^sha256:[0-9a-f]{64}$/.test(r.sourceArtifactDigest as string)) return false;
+  // PRI-1047 Owner review R6 #6: NO implicit coercion — an ARRAY wrapping a
+  // valid digest string previously passed `/regex/.test(array)` (String
+  // coercion) and an array-wrapped kind passed `includes(String(kind))`.
+  // Strict typeof gates first (rc-2: an `as` must never replace runtime
+  // validation, including the regex/`includes` argument itself).
+  if (typeof r.sourceArtifactDigest !== 'string') return false;
+  if (!/^sha256:[0-9a-f]{64}$/.test(r.sourceArtifactDigest)) return false;
   if (typeof r.bindingRevision !== 'number' || !Number.isSafeInteger(r.bindingRevision) || r.bindingRevision < 1) return false;
   if (r.status !== 'consumed') return false;
   if (Object.hasOwn(r, 'reopenOutcome') && r.reopenOutcome !== undefined) {
     const outcome = r.reopenOutcome;
     if (typeof outcome !== 'object' || outcome === null || Array.isArray(outcome)) return false;
     const o = outcome as Record<string, unknown>;
-    if (!['reopened', 'reopened_earlier', 'already_in_flight', 'conflict', 'task_missing'].includes(String(o.kind))) return false;
+    if (typeof o.kind !== 'string' || !SOURCE_CORRECTION_REOPEN_OUTCOME_KINDS.includes(o.kind)) return false;
     if (typeof o.recordedAt !== 'string' || o.recordedAt.trim() === '') return false;
     if (Object.hasOwn(o, 'detail') && o.detail !== undefined && typeof o.detail !== 'string') return false;
   }

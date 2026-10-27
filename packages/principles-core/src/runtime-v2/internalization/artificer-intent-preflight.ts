@@ -60,7 +60,7 @@ import {
 } from './formation-context.js';
 import {
   collectScribeIntentMaterial,
-  approvalSignalsInText,
+  findUndeclaredApprovalDependency,
   isTextualBasisAnchored,
   normaliseForAnchor,
 } from './textual-basis-anchor.js';
@@ -575,32 +575,26 @@ export function assessIntentBasis(input: {
 
   // SPEC-RULECODE-QUALITY-001 A1 (Owner review R2/R3) — two-direction audit
   // of the declaration against BOTH material pools (scribe + upstream).
+  // PRI-1047 Owner review R6 #2: the judgment now lives in ONE shared
+  // predicate (textual-basis-anchor.ts findUndeclaredApprovalDependency) that
+  // the Scribe success boundary enforces identically — an under-reported
+  // approval dependency must die at the producer, not survive to this gate.
   // 口径 (R3 exact-bypass fix): only required:true declarations count as
-  // claimed — a required:false entry is semantically unclaimed (downstream
-  // filters it out), so design_approval + required:false must NOT satisfy
-  // the name check and then filter to an empty dependency set.
-  // The keyword sweep is a SECONDARY, stop-only layer; the PRIMARY guarantee
-  // is the upstream binding above. Known disclosed boundary (NOT closed):
-  // synonym phrasings absent from the small vocabulary can evade the sweep
-  // when BOTH layers use them — the structural answers are the upstream
-  // binding and the structured declaration, not vocabulary growth.
+  // claimed — a required:false entry is semantically unclaimed.
   const scribeMaterial = collectScribeIntentMaterial(parsed);
   const effectiveFacts = conditions.requiredFacts.filter((fact) => fact.required);
-  const effectiveFactKinds = effectiveFacts.map((fact) => fact.factKind.toLowerCase()).join(' ');
-  const upstreamSignalFields = approvalSignalsInText(upstreamMaterial.normalisedText);
-  const pools: { label: string; hasSignal: boolean; fields: readonly string[] }[] = [
-    { label: 'scribe', hasSignal: scribeMaterial.hasApprovalSignal, fields: scribeMaterial.approvalSignalFields },
-    { label: 'upstream', hasSignal: upstreamSignalFields.length > 0, fields: upstreamSignalFields },
-  ];
-  for (const pool of pools) {
-    if (pool.hasSignal && !/approv/.test(effectiveFactKinds)) {
-      return {
-        status: 'intent_unverified',
-        reasonCode: 'approval_dependency_undeclared',
-        detail: `${pool.label} material carries approval semantics (signal in: ${pool.fields.join(', ')}) but executionConditions declare no REQUIRED approval-kind fact — an under-reported approval dependency must not reach generation`,
-        nextAction: 'Re-run the scribe stage: declare the approval dependency in executionConditions (factKind e.g. design_approval with required: true) with its textual basis, or correct the material if it overstates the requirement.',
-      };
-    }
+  const undeclared = findUndeclaredApprovalDependency({
+    scribeMaterial,
+    upstreamNormalisedText: upstreamMaterial.normalisedText,
+    requiredFacts: conditions.requiredFacts,
+  });
+  if (undeclared !== null) {
+    return {
+      status: 'intent_unverified',
+      reasonCode: 'approval_dependency_undeclared',
+      detail: `${undeclared.pool} material carries approval semantics (signal in: ${undeclared.fields.join(', ')}) but executionConditions declare no REQUIRED approval-kind fact — an under-reported approval dependency must not reach generation`,
+      nextAction: 'Re-run the scribe stage: declare the approval dependency in executionConditions (factKind e.g. design_approval with required: true) with its textual basis, or correct the material if it overstates the requirement.',
+    };
   }
 
   // textualBasis anchoring — same required:true口径; the anchor pool is the

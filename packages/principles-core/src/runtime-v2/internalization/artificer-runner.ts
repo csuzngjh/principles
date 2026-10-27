@@ -34,6 +34,7 @@
  */
 import type { RunHandle } from '../runtime-protocol.js';
 import type { ArtificerRuleOutput, ArtificerValidator, GoldenTraceCaseInput } from './artificer-output.js';
+import { validateApprovalGateCaseCoverage, type CanonicalKindResolver } from './artificer-output.js';
 import type { BehaviorExamplePack } from './behavior-example-pack.js';
 import { validateBehaviorExamplePack } from './behavior-example-pack.js';
 import type { TaskRecord } from '../task-status.js';
@@ -42,6 +43,7 @@ import { computeFeatureFlagsFromConfig, isFeatureEnabled } from '../config/pd-co
 import { hydratePITaskRecord, type RepairPayload, type LastValidatorErrors, parseLastValidatorErrors, parseSeedSourcePainId, isFreshForNextAttempt } from './pitask-metadata.js';
 import { extractIntentContract } from './intent-contract.js';
 import { extractExecutionConditions } from './intent-contract.js';
+import { buildToolSemanticRegistry } from './tool-semantic-registry.js';
 import { assessIntentBasis, collectUpstreamNormalisedText, type ArtificerTrustedFactsPort } from './artificer-intent-preflight.js';
 import { ArtificerPromptBuilder, boundPackForPrompt, type ArtificerDreamerContext, type ArtificerHostSemanticContext } from './artificer-prompt-builder.js';
 import { projectDreamerProposals, summarizeCandidateDifferences } from './formation-context.js';
@@ -1119,6 +1121,29 @@ ${context.revisionFeedback}
 
   async validateOutput(output: unknown, taskId: string, context: ArtificerContext): Promise<PeerRunnerValidationResult> {
     const result = await this.validator.validate(output, taskId, context.sourceScribeArtifactId ?? undefined);
+    // PRI-1047 Owner review R6 #1 (系统验证): when the scribe artifact declares
+    // a REQUIRED design_approval fact, the declared golden cases must cover
+    // BOTH not_approved × mutating → block AND not_approved × read-only →
+    // allow. Canonical-kind resolution prefers the host semantic projection
+    // (PRI-741 authority) and falls back to the core baseline registry.
+    let approvalGateErrors: string[] = [];
+    if (context.scribeArtifact !== null) {
+      let parsedScribe: unknown;
+      try {
+        parsedScribe = JSON.parse(context.scribeArtifact);
+      } catch {
+        parsedScribe = context.scribeArtifact;
+      }
+      const {conditions} = extractExecutionConditions(parsedScribe);
+      if (conditions !== null && conditions.requiredFacts.some((fact) => fact.required && fact.factKind === 'design_approval')) {
+        const hostTools = this.hostSemanticContext?.tools ?? [];
+        const baselineRegistryResult = buildToolSemanticRegistry();
+        const baselineResolve = baselineRegistryResult.ok ? baselineRegistryResult.registry.resolve : undefined;
+        const resolveCanonicalKind: CanonicalKindResolver = (toolName) =>
+          hostTools.find((tool) => tool.rawToolName === toolName)?.canonicalKind ?? baselineResolve?.(toolName);
+        approvalGateErrors = validateApprovalGateCaseCoverage(output, resolveCanonicalKind);
+      }
+    }
     // EP002-R4: the echo contract must compare against the SAME bounded
     // projection the prompt presented (the model can only copy what it
     // saw); validating against the raw pack would reject every honest
@@ -1155,14 +1180,14 @@ ${context.revisionFeedback}
     }
 
     return {
-      errors: [...result.errors, ...modeErrors],
-      valid: result.valid && modeErrors.length === 0,
+      errors: [...result.errors, ...modeErrors, ...approvalGateErrors],
+      valid: result.valid && modeErrors.length === 0 && approvalGateErrors.length === 0,
       // CodeRabbit PR2 outside-diff comment: when the base validator passes but
       // the v2-only output contract validation fails, errorCategory is still
       // undefined. Since modeErrors are structural contract violations
       // (permanent, not retriable), classify them as 'output_invalid' to match
       // permanentErrorCategories.
-      errorCategory: errorCategory ?? (modeErrors.length > 0 ? 'output_invalid' : undefined),
+      errorCategory: errorCategory ?? ((modeErrors.length > 0 || approvalGateErrors.length > 0) ? 'output_invalid' : undefined),
     };
   }
 
