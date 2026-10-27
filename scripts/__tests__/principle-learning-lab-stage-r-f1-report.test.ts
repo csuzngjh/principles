@@ -298,4 +298,41 @@ describe('Stage R F1 report cross-check anomaly paths (duplicate / orphan / conf
     });
     expect(report.integrity.findings.some((f: string) => f.includes('UNIT_FINISHED event for unplanned unit CEB-001-ZZ-99/A/1/a1 (SUCCEEDED)'))).toBe(true);
   });
+
+  it('flags adjudication records without a unit field (missing and null variants) at their source line', async () => {
+    const report = await reportFromMutatedStudy((dir) => {
+      const adj = readLines(adjudicationsPath(dir));
+      adj.push({ objectiveTaskOutcome: 'PASS' }); // parses fine, no unit at all
+      adj.push({ unit: null, objectiveTaskOutcome: 'PASS' }); // explicit null variant
+      writeLines(adjudicationsPath(dir), adj);
+    });
+    const findings = report.integrity.findings.join('\n');
+    // both records are located by file + 1-based source line, never silently skipped
+    expect(findings).toMatch(/adjudications\.jsonl line \d+: record without a unit field — cannot participate in unit matching/);
+    expect(findings.match(/record without a unit field/g)?.length).toBe(2);
+    // the unit-less records were NOT matched to any study unit: no unit gained a second row
+    expect(findings).not.toContain('duplicate adjudications.jsonl rows');
+    // statistics are untouched by the cross-check findings
+    expect(report.statusCounts).toEqual({ SUCCEEDED: 11, RESULT_UNKNOWN: 22, FAILED_KNOWN: 3 });
+    expect(report.denominators).toMatchObject({ allPlanned: 36, successfullyScored: 11 });
+    expect(report.completeTripleArmPairs.sort()).toEqual(['CEB-001-BN-02', 'CEB-001-CT-03', 'CEB-001-FV-03']);
+  });
+
+  it('flags UNIT_FINISHED events without a unit field (missing and null variants) at their source line', async () => {
+    const report = await reportFromMutatedStudy((dir) => {
+      const ev = readLines(eventsPath(dir));
+      ev.push({ seq: 9998, type: 'UNIT_FINISHED', result: 'SUCCEEDED' }); // no unit at all
+      ev.push({ seq: 9999, type: 'UNIT_FINISHED', unit: null, result: 'FAILED_KNOWN' }); // null variant
+      writeLines(eventsPath(dir), ev);
+    });
+    const findings = report.integrity.findings.join('\n');
+    expect(findings).toMatch(/events\.jsonl line \d+: UNIT_FINISHED event without a unit field — cannot participate in unit matching/);
+    expect(findings.match(/UNIT_FINISHED event without a unit field/g)?.length).toBe(2);
+    // neither event was matched to any planned unit: no duplicate-event finding appeared
+    expect(findings).not.toContain('duplicate UNIT_FINISHED events');
+    // statistics are untouched by the cross-check findings
+    expect(report.statusCounts).toEqual({ SUCCEEDED: 11, RESULT_UNKNOWN: 22, FAILED_KNOWN: 3 });
+    expect(report.denominators).toMatchObject({ allPlanned: 36, successfullyScored: 11 });
+    expect(report.completeTripleArmPairs.sort()).toEqual(['CEB-001-BN-02', 'CEB-001-CT-03', 'CEB-001-FV-03']);
+  });
 });

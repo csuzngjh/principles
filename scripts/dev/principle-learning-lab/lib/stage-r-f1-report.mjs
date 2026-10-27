@@ -21,6 +21,21 @@ import path from 'node:path';
 const readJson = (p) => JSON.parse(fs.readFileSync(p, 'utf8'));
 const readJsonl = (p) => fs.readFileSync(p, 'utf8').split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
 
+/** 1-based file line of the Nth non-blank line (readJsonl index → source line),
+ *  so a malformed record can be located in the raw evidence. Never throws. */
+const nonBlankLineOf = (file, nonBlankIndex) => {
+  try {
+    const lines = fs.readFileSync(file, 'utf8').split('\n');
+    let seen = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].trim() === '') continue;
+      seen += 1;
+      if (seen === nonBlankIndex) return i + 1;
+    }
+  } catch { /* unreadable file: position unavailable */ }
+  return '?';
+};
+
 const ARMS = ['A', 'B', 'C'];
 
 /** Recompute the Stage R F1 study report from a study directory.
@@ -116,15 +131,21 @@ export function buildStageRF1Report(studyDir) {
   // they never change any statistic above. Counts are grouped per unit key —
   // duplicates are NEVER folded away by a Set/Map: a repeated adjudication
   // row or UNIT_FINISHED event is itself an integrity finding whether or not
-  // the copies agree, and no side of the comparison silently wins.
+  // the copies agree, and no side of the comparison silently wins. Records
+  // that parse but carry NO unit identity are flagged with their source line
+  // — never silently skipped, never matched to any study unit.
   const settledRows = [...units.values()].filter(u => u.status !== 'NOT_SETTLED');
   const settledKey = (u) => `${u.caseId}|${u.armId}|${u.repetitionId}|${u.attemptId}`;
   const adjudicationCounts = new Map();
-  for (const a of adjudications) {
-    if (!a || !a.unit) continue;
+  const adjudicationsFile = path.join(studyDir, 'adjudications.jsonl');
+  adjudications.forEach((a, index) => {
+    if (!a || !a.unit) {
+      findings.push(`adjudications.jsonl line ${nonBlankLineOf(adjudicationsFile, index)}: record without a unit field — cannot participate in unit matching`);
+      return;
+    }
     const key = planKey(a.unit);
     adjudicationCounts.set(key, (adjudicationCounts.get(key) || 0) + 1);
-  }
+  });
   // every SUCCEEDED attempt file with adjudication data must have EXACTLY ONE ledger row
   for (const row of settledRows.filter(u => u.status === 'SUCCEEDED' && u.adjudicationPresent)) {
     const count = adjudicationCounts.get(settledKey(row)) || 0;
@@ -139,11 +160,17 @@ export function buildStageRF1Report(studyDir) {
     }
   }
   const finishedGroups = new Map();
-  for (const e of events.filter(e => e && e.type === 'UNIT_FINISHED' && e.unit)) {
+  const eventsFile = path.join(studyDir, 'events.jsonl');
+  events.forEach((e, index) => {
+    if (!e || e.type !== 'UNIT_FINISHED') return;
+    if (!e.unit) {
+      findings.push(`events.jsonl line ${nonBlankLineOf(eventsFile, index)}: UNIT_FINISHED event without a unit field — cannot participate in unit matching`);
+      return;
+    }
     const key = planKey(e.unit);
     if (!finishedGroups.has(key)) finishedGroups.set(key, []);
     finishedGroups.get(key).push(e.result);
-  }
+  });
   // every settled attempt must have EXACTLY ONE matching event, same result
   for (const row of settledRows) {
     const group = finishedGroups.get(settledKey(row));
