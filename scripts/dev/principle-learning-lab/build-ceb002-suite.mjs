@@ -148,7 +148,56 @@ fs.writeFileSync(path.join(out, 'info-balance-audit.json'), `${JSON.stringify(in
 fs.writeFileSync(path.join(out, 'difficulty-tier-plan.json'), `${JSON.stringify({ schema: 'ceb002-tier-plan.v1', studyId: STUDY, tiers: PLAN.map((p) => ({ tier: p.tier, baseline: p.combo.join('/'), slack: p.slack, deadline: p.deadline })) }, null, 2)}\n`);
 for (const f of ['budget-ledger.jsonl', 'events.jsonl', 'adjudications.jsonl']) fs.writeFileSync(path.join(out, f), '');
 fs.writeFileSync(path.join(out, 'run-authorization.json'), `${JSON.stringify({ schema: 'challenge-stage-authorization.v1', stage: 'R', studyId: STUDY, status: 'NOT_AUTHORIZED', note: 'CEB-002 is a DRAFT study — not frozen, not preregistered, not authorized. Any real execution requires Owner approval and a fresh authorization chain.' }, null, 2)}\n`);
-fs.writeFileSync(path.join(out, 'preregistration.draft.json'), `${JSON.stringify({ schema: 'challenge-preregistration.v1', studyId: STUDY, status: 'DRAFT-NOT-IN-FORCE', note: 'See docs/specs/CEB-002-PREREGISTRATION.md; freezing requires Owner approval. CEB-001 remains untouched.', plannedRepetitions: 2, arms: ['A', 'B', 'C'] }, null, 2)}\n`);
+
+// The preregistration contract below is the AUTHORITATIVE machine-readable
+// statement of the CEB-002 analysis plan. It lives INSIDE this builder (the
+// single deterministic generator) so it can never drift from a hand-edited
+// copy: rebuilding always reproduces the exact same contract. Every field
+// is asserted by principle-learning-lab-ceb002.test.ts — if you change the
+// research design, you change it here AND in the contract test together.
+fs.writeFileSync(path.join(out, 'preregistration.draft.json'), `${JSON.stringify({
+  schema: 'challenge-preregistration.v1',
+  studyId: STUDY,
+  status: 'DRAFT-NOT-IN-FORCE',
+  authority: 'docs/specs/CEB-002-DELIVERY-PACK.md §2 (preregistration section) — the sole specification document',
+  design: {
+    positioning: 'EXPLORATORY',
+    repetitions: 2,
+    plannedUnits: 96,
+    cases: 16,
+    arms: ['A', 'B', 'C'],
+    tierPlan: 'L1×3 anchor / L2×4 / L3×4 discriminative / B×5 boundary — difficulty-tier-plan.json',
+  },
+  primaryAnalysis: {
+    scope: 'discriminative tier (L2+L3), 8 cases',
+    independentUnits: 8,
+    independence: 'one case = one paired unit; the 2 repetitions per case are repeated measurements of the SAME unit, never independent samples',
+    reductionRule: 'reduceCaseLevel (lib/ceb002-stats.mjs, test-anchored): a case counts B-worse iff B failed >=1 rep AND C passed BOTH reps; symmetric for C-worse; every mixed outcome is concordant and never enters the discordant count — rule FIXED BEFORE any results',
+    test: { method: 'exact McNemar (two-sided, alpha=0.05)', implementation: 'lib/ceb002-stats.mjs mcnemarExactPValue — exact binomial enumeration, no asymptotic approximation' },
+    role: 'extreme-effect veto gate ONLY — the primary statistical output is descriptive effect estimation (per-case pair detail, discordance rate, direction)',
+    powerLimitation: 'n=8 exact McNemar rejects only on (8,0)/(0,8): max power 0.145 (pd=0.5, delta=0.5); at delta=0.25/pd=0.5 power is 0.024; conservative size ~0. CONFIRMATORY TESTING IS INFEASIBLE at this round\'s sample size',
+  },
+  referenceViews: [
+    { view: 'all-16 case-level pairs', status: 'reference only — heterogeneous tier mix (L1 anchor + boundary + discriminative)', independence: '16 independent case-level units but not the primary analysis object' },
+    { view: 'repetition-level 32 pairs', status: 'reference only — NON-INDEPENDENT (repetitions of the same case are correlated)', forbiddenUse: 'must never be presented as independent samples or used to inflate the independent n' },
+  ],
+  escalation: { automatic: false, rule: 'NONE — fixed 2 repetitions; no result-driven sample-size adjustment; any confirmatory study requires a SEPARATE preregistration and fresh Owner authorization' },
+  confounds: [{ name: 'B/C sentence-count ratio 2:5', preregistered: true, note: 'payloads are CEB-001 frozen texts reused verbatim; this material imbalance is reported with every B-vs-C comparison' }],
+  claimBoundary: {
+    supports: ['exploratory comparison of these two specific payloads (B principle text vs C summary text)', 'descriptive effect estimation with per-case detail', 'boundary-tier negative-transfer observation across five situations', 'difficulty-gradient ceiling check (L1 anchor vs L2/L3)'],
+    doesNotSupport: ['causal attribution to the principle-abstraction mechanism (confound + exploratory sample)', 'inference to any broader task population (the 16 frozen cases are the study object)', 'confirmatory conclusions (n=8 power ceiling is a mathematical fact)'],
+  },
+  stoppingRules: {
+    consecutiveUnknown: 2,
+    batchUnknownRateNotEvaluable: 0.4,
+    identityAnomaly: 'halt immediately',
+    hashDrift: 'halt immediately',
+    ledgerInconsistency: 'halt immediately',
+    budgetBreach: 'halt immediately',
+    missingData: 'retained in denominator, never attributed to behavior',
+  },
+  freezeRequirement: 'Owner approval required for: (1) suite freeze, (2) preregistration in force, (3) execution authorization — none granted by this draft',
+}, null, 2)}\n`);
 
 console.log(`CEB-002 DRAFT suite built: ${built.length} cases (all parametric_verified)`);
 console.log('tiers:', JSON.stringify(PLAN.reduce((a, p) => { a[p.tier] = (a[p.tier] || 0) + 1; return a; }, {})));
