@@ -121,7 +121,6 @@ function getUpgradeNextAction(sourceKind: SourceKind, decision: TriageDecision, 
  * Evaluate triage policy for incoming evidence.
  *
  * This is the pure policy function. It does not:
- * - Call PainDiagnosticGate
  * - Write to event log or trajectory
  * - Create diagnostic tasks
  * - Import anything from the plugin layer

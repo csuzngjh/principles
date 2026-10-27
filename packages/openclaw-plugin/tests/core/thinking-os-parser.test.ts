@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   parseThinkingOsMd,
   type ThinkingOsDirective,
-} from '../../src/core/thinking-os-parser.js';
+} from '../helpers/thinking-os-parser.js';
 
 describe('parseThinkingOsMd', () => {
   it('returns empty array for empty input', () => {

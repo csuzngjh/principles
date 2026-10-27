@@ -9,7 +9,9 @@
  * - Knows about OpenClaw hook conventions (sessionId, toolName, etc.)
  *
  * PRI-651-B1: hooks are Gate B only — this adapter feeds TriggerController.
- * Gate A (evaluatePainDiagnosticGate) retired from runtime; remains archived.
+ * Gate A (evaluatePainDiagnosticGate) was retired from runtime; its archived
+ * plugin adapter and core policy were removed on 2026-10-27. Gate B
+ * (TriggerController) is the only admission authority.
  * Core only sees SourceKind and TriageResult.
  *
  * ERR checklist:

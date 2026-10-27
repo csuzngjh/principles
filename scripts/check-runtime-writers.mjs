@@ -46,10 +46,6 @@ export const ALLOWED_RUNTIME_WRITERS = [
     reason: 'Removes orphaned workspace-scoped export locks beside the workspace state file — never the canonical runtime tree.',
   },
   {
-    file: 'packages/openclaw-plugin/scripts/sync-plugin.mjs',
-    reason: 'Legacy dev-sync entry, deactivated: refuses unconditionally (PRI-868); refusal contract pinned by tests/sync-plugin-installation-truth.test.js.',
-  },
-  {
     file: 'packages/pd-companion/scripts/verify-package.mjs',
     reason: 'CI package verifier: rmSync target is its own mkdtemp extraction dir; install.json is read-only.',
   },
@@ -72,10 +68,6 @@ export const ALLOWED_RUNTIME_WRITERS = [
   {
     file: 'scripts/dev/workbuddy-probe/e2e-installed-full-learning.mjs',
     reason: 'WorkBuddy installed-product E2E driver: every write lands in its timestamped wb-probe-lab sandbox (isolated fake HOME — lab dirs, mock replies, models.json, synthetic transcript); the canonical runtime tree is only read (existsSync/readFileSync of the installed adapter and pd-cli entries).',
-  },
-  {
-    file: 'scripts/install.mjs',
-    reason: 'Legacy dev installer, deactivated: refuses unconditionally (PRI-868); refusal pinned by guard-contract tests.',
   },
   {
     file: 'scripts/telemetry-production-smoke.mjs',
