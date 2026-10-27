@@ -24,10 +24,20 @@
 
 export type BashRiskLevel = 'safe' | 'normal' | 'dangerous' | 'unknown';
 
+const LITERAL_OPERATOR_MARKER = '\u0001';
+const SHELL_OPERATORS = '|;&<>()';
+function literalShellChar(ch: string): string {
+  return SHELL_OPERATORS.includes(ch) ? `${LITERAL_OPERATOR_MARKER}${ch}` : ch;
+}
+function restoreLiteralShellChars(token: string): string {
+  return token.replaceAll(LITERAL_OPERATOR_MARKER, '');
+}
+
 // ── 结构层 tokenizer ─────────────────────────────────────────────────────────
 
 /** 引号感知的 tokenizer；无法解析（引号未闭合等）返回 null。 */
 function tokenize(input: string): string[] | null {
+  if (input.includes(LITERAL_OPERATOR_MARKER)) return null;
   const tokens: string[] = [];
   let current = '';
   let hasCurrent = false;
@@ -39,17 +49,17 @@ function tokenize(input: string): string[] | null {
     if (ch === undefined) break;
     if (state === 'single') {
       if (ch === "'") state = 'plain';
-      else current += ch;
+      else current += literalShellChar(ch);
       i += 1;
       continue;
     }
     if (state === 'double') {
       if (ch === '"') state = 'plain';
       else if (ch === '\\' && i + 1 < n && '"\\$`'.includes(input[i + 1] ?? '')) {
-        current += input[i + 1] ?? '';
+        current += literalShellChar(input[i + 1] ?? '');
         i += 2;
         continue;
-      } else current += ch;
+      } else current += literalShellChar(ch);
       i += 1;
       continue;
     }
@@ -66,12 +76,24 @@ function tokenize(input: string): string[] | null {
       continue;
     }
     if (ch === '\\' && i + 1 < n) {
-      current += input[i + 1] ?? '';
+      current += literalShellChar(input[i + 1] ?? '');
       hasCurrent = true;
       i += 2;
       continue;
     }
-    if (' \t\r\n'.includes(ch)) {
+    if (ch === '\r' || ch === '\n') {
+      if (hasCurrent || current) {
+        tokens.push(current);
+        current = '';
+        hasCurrent = false;
+      }
+      // A physical newline terminates a simple command, unlike horizontal space.
+      if (ch === '\r' && input[i + 1] === '\n') i += 1;
+      tokens.push('\n');
+      i += 1;
+      continue;
+    }
+    if (' \t'.includes(ch)) {
       if (hasCurrent || current) {
         tokens.push(current);
         current = '';
@@ -89,7 +111,8 @@ function tokenize(input: string): string[] | null {
       }
       let op: string = ch;
       const next = input[i + 1];
-      if ((ch === '|' || ch === '&' || ch === '>' || ch === '<') && next === ch) op += next;
+      if (ch === '<' && next === '>') op = '<>';
+      else if ((ch === '|' || ch === '&' || ch === '>' || ch === '<') && next === ch) op += next;
       if ((ch === '>' || ch === '<') && next === '(') op += next; // process substitution marker
       tokens.push(op);
       i += op.length;
@@ -119,7 +142,7 @@ interface Segment {
   readonly substitutions: readonly string[];
 }
 
-const REDIRECT_OUT_OPS = new Set(['>', '>>', '&>', '&>>', '2>', '2>>']);
+const REDIRECT_OUT_OPS = new Set(['>', '>>', '<>', '&>', '&>>', '2>', '2>>']);
 
 /**
  * 把 token 流切成段。遇到 `|`、`;`、`&&`、`||` 结束当前段；重定向算子吞掉
@@ -132,20 +155,17 @@ function splitSegments(tokens: readonly string[]): Segment[] | null {
   let hasOut = false;
   let hasIn = false;
   let unsupported = false;
-  const flush = () => {
-    // 剥离前缀环境赋值（FOO=bar cmd）与 sudo 包装。
-    const cleaned: string[] = [];
-    for (const token of args) {
-      if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(token)) continue;
-      if (token === 'sudo' && cleaned.length === 0) continue;
-      cleaned.push(token);
+  const flush = (allowEmpty = false) => {
+    if (args.length === 0 && !hasOut && !hasIn && !unsupported) {
+      if (allowEmpty) unsupported = true;
+      else return;
     }
     segments.push({
-      command: cleaned[0] ?? null,
+      command: args[0] === undefined ? null : restoreLiteralShellChars(args[0]),
       hasOutputRedirect: hasOut,
       hasInputRedirect: hasIn,
       unsupported,
-      args: cleaned.slice(1),
+      args: args.slice(1).map(restoreLiteralShellChars),
       substitutions: [],
     });
     args = [];
@@ -155,8 +175,12 @@ function splitSegments(tokens: readonly string[]): Segment[] | null {
   };
   for (let i = 0; i < tokens.length; i += 1) {
     const token = tokens[i] as string;
-    if (token === '|' || token === ';' || token === '&&' || token === '||') {
+    if (token === '\n') {
       flush();
+      continue;
+    }
+    if (token === '|' || token === ';' || token === '&&' || token === '||') {
+      flush(true);
       continue;
     }
     if (REDIRECT_OUT_OPS.has(token)) {
@@ -186,36 +210,29 @@ function splitSegments(tokens: readonly string[]): Segment[] | null {
 
 // ── 命令级白名单/已知集合 ────────────────────────────────────────────────────
 
-/** 只读命令：任何参数形状都不写文件/不改状态（输出到 stdout/stderr）。 */
-const READONLY_ANY_ARGS = new Set([
-  'cat', 'ls', 'pwd', 'echo', 'printf', 'head', 'tail', 'wc', 'file', 'stat', 'which', 'whoami', 'hostname',
-  'date', 'printenv', 'id', 'uname', 'du', 'df', 'ps', 'grep', 'egrep', 'fgrep', 'rg', 'sort', 'uniq', 'cut',
-  'tr', 'true', 'false', 'test', '[', '[[', 'tty', 'groups', 'basename', 'dirname', 'realpath', 'readlink',
-  'seq', 'column', 'diff', 'cmp', 'md5sum', 'sha1sum', 'sha256sum', 'sha256sum.exe', 'history', 'type',
-  'help', 'lscpu', 'lsblk', 'free', 'w', 'git--askpass', // (last entry defensive)
-]);
-READONLY_ANY_ARGS.delete('git--askpass');
+/** Commands whose stdout-only forms have a bounded option grammar below. */
+const STDOUT_QUERY_COMMANDS = new Set(['cat', 'ls', 'printf', 'head', 'tail', 'grep', 'rg', 'echo', 'wc']);
 
 /** git 显式全局选项集（带参 vs 布尔）。 */
-const GIT_GLOBAL_WITH_VALUE = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path', '--super-prefix']);
+const GIT_GLOBAL_WITH_VALUE = new Set(['-C', '--git-dir', '--work-tree']);
 const GIT_GLOBAL_BOOLEAN = new Set([
-  '--no-pager', '-P', '--paginate', '-p', '--no-replace-objects', '--bare', '--literal-pathspecs',
+  '--no-pager', '-P', '--no-replace-objects', '--bare', '--literal-pathspecs',
   '--glob-pathspecs', '--noglob-pathspecs', '--icase-pathspecs', '--no-optional-locks', '--no-lazy-fetch',
   '--no-advice',
 ]);
 
 /** git 查询子命令（需再核写文件选项）。 */
-const GIT_READONLY_SUBCOMMANDS = new Set([
-  'status', 'log', 'show', 'diff', 'blame', 'shortlog', 'describe', 'rev-parse', 'ls-files', 'ls-tree',
-  'cat-file', 'ls-remote', 'show-ref', 'for-each-ref', 'check-ignore', 'check-attr', 'check-ref-format',
-  'merge-base', 'name-rev', 'cherry', 'diff-tree', 'whatchanged', 'reflog', 'grep', 'count-objects',
-  'verify-commit', 'verify-tag', 'hash-object', 'var', 'help', 'version', 'annotate', 'fsck',
+const GIT_READONLY_SUBCOMMANDS = new Set(['status', 'log', 'show', 'diff', 'grep']);
+const GIT_MUTATING_SUBCOMMANDS = new Set([
+  'add', 'am', 'apply', 'bisect', 'checkout', 'cherry-pick', 'clean', 'clone', 'commit', 'fetch', 'gc',
+  'init', 'merge', 'mv', 'pull', 'push', 'rebase', 'reset', 'restore', 'revert', 'rm', 'sparse-checkout',
+  'submodule', 'switch', 'worktree', 'update-index', 'hash-object',
 ]);
 /** git 查询子命令中的写文件选项（--output=FILE / --output FILE / -o FILE）。 */
 function gitArgsHaveWriteOption(args: readonly string[]): boolean {
   for (let i = 0; i < args.length; i += 1) {
     const a = args[i] as string;
-    if (a === '--output' || a === '-o') return true;
+    if (a === '--output' || a === '-o' || a.startsWith('-o') && a.length > 2) return true;
     if (a.startsWith('--output=')) return true;
   }
   return false;
@@ -225,8 +242,13 @@ function isReadonlyGitListShape(sub: string, args: readonly string[]): boolean |
   const positional = args.filter((a) => !a.startsWith('-'));
   const flags = args.filter((a) => a.startsWith('-'));
   if (sub === 'branch' || sub === 'tag') {
-    // 列表/查询：无位置参数（branch <name> 创建、tag <name> 创建）。
-    if (positional.length === 0) return !gitArgsHaveWriteOption(args);
+    const writes = ['-d', '-D', '-m', '-M', '-c', '-C', '--delete', '--move', '--copy', '--unset-upstream', '--set-upstream-to', '--set-upstream'];
+    if (flags.some((f) => writes.some((w) => f === w || f.startsWith(`${w}=`)))) return false;
+    const allowed = sub === 'branch'
+      ? new Set(['-a', '-r', '-v', '-vv', '--all', '--remotes', '--verbose', '--no-abbrev', '--no-color', '--color', '--contains', '--no-contains', '--merged', '--no-merged', '--list'])
+      : new Set(['-l', '--list', '-n', '--contains', '--no-contains', '--merged', '--no-merged', '--sort', '--format', '--column', '--no-column', '--points-at', '--format']) ;
+    if (flags.some((f) => !allowed.has(f) && ![...allowed].some((w) => f.startsWith(`${w}=`)))) return 'unknown';
+    if (positional.length === 0 || flags.includes('--list') || flags.includes('-l')) return true;
     return false;
   }
   if (sub === 'remote') {
@@ -234,21 +256,118 @@ function isReadonlyGitListShape(sub: string, args: readonly string[]): boolean |
     return false; // add/rename/remove/set-url/prune/rm → 变更
   }
   if (sub === 'stash') {
-    // stash list / stash show → 查询；裸 stash / push / pop / drop / clear → 变更。
-    if (positional.length === 0 && flags.every((f) => f === 'list' || f === 'show')) return true;
-    if (positional.includes('list') || positional.includes('show')) return !gitArgsHaveWriteOption(args);
+    // stash list / stash show are queries; other verbs mutate or are unsupported.
+    if (args.length === 0 || positional[0] === 'push' || positional[0] === 'pop' || positional[0] === 'drop' || positional[0] === 'clear') return false;
+    if (positional[0] === 'list' || positional[0] === 'show') return flags.length === 0 ? true : 'unknown';
     return false;
   }
   if (sub === 'config') {
     // 仅查询形状：--list/-l/--get*/--get-regexp + 可选 pattern。
     const queryFlags = ['--list', '-l', '--get', '--get-all', '--get-regexp', '--get-urlmatch'];
     const hasQuery = flags.some((f) => queryFlags.includes(f));
-    const writing = flags.some((f) => f === '--unset' || f === '--add' || f === '--replace-all' || f === '--edit' || f === '-e' || f === '--remove-section' || f === '--rename-section');
-    if (writing) return false;
+    if (flags.some((f) => !queryFlags.includes(f))) return 'unknown';
     if (hasQuery && !positional.some((p) => p.includes('='))) return true;
     return 'unknown';
   }
   return 'unknown';
+}
+
+function isReadonlyGitQueryShape(sub: string, args: readonly string[]): boolean | 'unknown' {
+  const allowed: Readonly<Record<string, readonly string[]>> = {
+    status: ['--short', '--branch', '--porcelain', '--untracked-files', '--ignore-submodules', '-s', '-b'],
+    log: ['--oneline', '--stat', '--format', '--pretty', '--max-count', '-n'],
+    show: ['--stat', '--format', '--pretty', '--no-ext-diff', '--no-textconv'],
+    diff: ['--stat', '--name-only', '--name-status', '--check', '--cached', '--staged', '--patch', '-p', '--no-ext-diff', '--no-textconv'],
+    grep: ['--no-index', '--cached', '--untracked', '--ignore-case', '--line-number', '--regexp', '-n', '-i', '-e'],
+  };
+  const withValue: Readonly<Record<string, readonly string[]>> = {
+    status: ['--porcelain', '--untracked-files', '--ignore-submodules'],
+    log: ['--format', '--pretty', '--max-count', '-n'],
+    show: ['--format', '--pretty'],
+    diff: [],
+    grep: ['--regexp', '-e'],
+  };
+  if (allowed[sub] === undefined) return 'unknown';
+  let positionalOnly = false;
+  for (let i = 0; i < args.length; i += 1) {
+    const token = args[i] as string;
+    if (token === '--') { positionalOnly = true; continue; }
+    if (positionalOnly || token === '-' || !token.startsWith('-')) continue;
+    if (sub === 'log' && /^-\d+$/.test(token)) continue;
+    const name = token.startsWith('--') && token.includes('=') ? token.slice(0, token.indexOf('=')) : token;
+    if (!allowed[sub]?.includes(name)) return 'unknown';
+    if (withValue[sub]?.includes(name) && !token.includes('=')) {
+      if (args[i + 1] === undefined) return 'unknown';
+      i += 1;
+    }
+  }
+  return true;
+}
+
+function isReadonlyStdoutShape(command: string, args: readonly string[]): boolean | 'unknown' {
+  const noValue: Readonly<Record<string, { long: readonly string[]; short: string }>> = {
+    cat: { long: ['--number', '--show-ends', '--show-tabs', '--show-nonprinting'], short: 'nvet' },
+    ls: { long: ['--all', '--almost-all', '--directory', '--long', '--human-readable'], short: '1adhlrt' },
+    head: { long: ['--quiet', '--silent', '--verbose'], short: 'qv' },
+    tail: { long: ['--follow', '--quiet', '--silent', '--verbose'], short: 'fqv' },
+    grep: { long: ['--line-number', '--ignore-case', '--word-regexp', '--invert-match', '--recursive', '--files-with-matches', '--count', '--extended-regexp', '--fixed-strings'], short: 'EinwvrclF' },
+    rg: { long: ['--line-number', '--hidden', '--column', '--fixed-strings', '--ignore-case', '--smart-case', '--invert-match', '--word-regexp', '--files', '--count', '--only-matching'], short: 'nchFivw' },
+    printf: { long: [], short: '' },
+    echo: { long: [], short: '' },
+    wc: { long: [], short: 'lwmLc' },
+  };
+  const withValue: Readonly<Record<string, { long: readonly string[]; short: string }>> = {
+    cat: { long: [], short: '' },
+    ls: { long: ['--color', '--sort', '--width'], short: 'w' },
+    head: { long: ['--lines', '--bytes'], short: 'nc' },
+    tail: { long: ['--lines', '--bytes'], short: 'nc' },
+    grep: { long: ['--regexp', '--file', '--max-count', '--after-context', '--before-context', '--context', '--include', '--exclude', '--exclude-dir'], short: 'efABmC' },
+    rg: { long: ['--glob', '--type', '--regexp', '--max-count', '--max-depth', '--after-context', '--before-context', '--context'], short: 'egmC' },
+    printf: { long: [], short: '' },
+    echo: { long: [], short: '' },
+    wc: { long: [], short: '' },
+  };
+  const allowed = noValue[command];
+  const values = withValue[command];
+  if (allowed === undefined || values === undefined) return 'unknown';
+  if (command === 'printf' || command === 'echo') {
+    if (command === 'echo') return true;
+    const format = args[0] === '--' ? args[1] : args[0];
+    const unverifiedOption = args[0] !== '--' && args[0]?.startsWith('-');
+    return unverifiedOption || /%[^%]*n/.test(format ?? '') ? 'unknown' : true;
+  }
+  let positionalOnly = false;
+  for (let i = 0; i < args.length; i += 1) {
+    const token = args[i] as string;
+    if (positionalOnly || token === '-' || !token.startsWith('-')) continue;
+    if (token === '--') { positionalOnly = true; continue; }
+    if (token.startsWith('--')) {
+      const equal = token.indexOf('=');
+      const name = equal === -1 ? token : token.slice(0, equal);
+      if (allowed.long.includes(name)) continue;
+      if (!values.long.includes(name)) return 'unknown';
+      if (equal === -1) {
+        if (args[i + 1] === undefined) return 'unknown';
+        i += 1;
+      }
+      continue;
+    }
+    const letters = token.slice(1);
+    if ((command === 'head' || command === 'tail') && /^\d+$/.test(letters)) continue;
+    for (let j = 0; j < letters.length; j += 1) {
+      const letter = letters[j] as string;
+      if (values.short.includes(letter)) {
+        if (j + 1 === letters.length) {
+          if (args[i + 1] === undefined) return 'unknown';
+          i += 1;
+        }
+        break;
+      }
+      if (!allowed.short.includes(letter)) return 'unknown';
+    }
+  }
+  if (command === 'uniq' && args.filter((a) => !a.startsWith('-')).length > 1) return false;
+  return true;
 }
 
 function isReadonlyGit(args: readonly string[]): boolean | 'unknown' {
@@ -260,7 +379,7 @@ function isReadonlyGit(args: readonly string[]): boolean | 'unknown' {
       i += 2;
       continue;
     }
-    if (a.startsWith('--git-dir=') || a.startsWith('--work-tree=') || a.startsWith('--namespace=') || a.startsWith('--exec-path=') || a.startsWith('--super-prefix=')) {
+    if (a.startsWith('--git-dir=') || a.startsWith('--work-tree=')) {
       i += 1;
       continue;
     }
@@ -274,33 +393,47 @@ function isReadonlyGit(args: readonly string[]): boolean | 'unknown' {
   if (sub === undefined) return 'unknown'; // `git` bare prints help — but conservative: unknown
   const rest = args.slice(i + 1);
   if (GIT_READONLY_SUBCOMMANDS.has(sub)) {
-    return !gitArgsHaveWriteOption(rest);
+    if (gitArgsHaveWriteOption(rest)) return false;
+    return isReadonlyGitQueryShape(sub, rest);
   }
   if (['branch', 'tag', 'remote', 'stash', 'config'].includes(sub)) {
     return isReadonlyGitListShape(sub, rest);
   }
   if (sub.startsWith('-')) return 'unknown'; // unrecognized global option → cannot confirm
-  return false; // any other git subcommand = confirmed mutating (add/commit/push/…)
+  if (GIT_MUTATING_SUBCOMMANDS.has(sub)) return false;
+  if (sub === 'reflog') {
+    if (rest[0] === 'delete' || rest[0] === 'expire' || rest[0] === 'drop') return false;
+    return rest.length === 0 || rest.length === 1 && rest[0] === 'show' ? true : 'unknown';
+  }
+  return 'unknown';
 }
 
 /** 只读命令 + 参数形状约束；未识别命令 → 'unknown'（不默认 safe 也不默认变更）。 */
 function isReadonlyWithArgShape(command: string, args: readonly string[]): boolean | 'unknown' {
-  // find：不带写动作 flag 才只读。
+  // find supports only simple predicates and stdout listing; actions stay unknown.
   if (command === 'find') {
-    const writeFlags = ['-delete', '-exec', '-execdir', '-ok', '-okdir', '-fls', '-fprint', '-fprint0', '-fprintf', '-fwrite'];
-    if (args.some((a) => writeFlags.some((f) => a === f || a.startsWith(`${f} `) || a.startsWith(`${f}0`) || a.startsWith(`${f}=`)))) return false;
+    const takesValue = new Set(['-name', '-iname', '-type', '-maxdepth', '-mindepth']);
+    for (let i = 0; i < args.length; i += 1) {
+      const token = args[i] as string;
+      if (!token.startsWith('-')) continue;
+      if (!takesValue.has(token) && token !== '-print') return 'unknown';
+      if (takesValue.has(token)) {
+        if (args[i + 1] === undefined) return 'unknown';
+        i += 1;
+      }
+    }
     return true;
   }
   // env：裸 env / 仅赋值与 flag → 打印环境（只读）；带命令 → 不可确认。
-  if (command === 'env') {
-    const nonFlag = args.filter((a) => !a.startsWith('-') && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(a));
-    if (nonFlag.length === 0) return true;
-    return 'unknown';
-  }
+  if (command === 'env') return args.length === 0 ? true : 'unknown';
   // git：全局选项核验 + 子命令白名单。
   if (command === 'git') return isReadonlyGit(args);
-  // 正面白名单之外：未识别 → 无法确认（既不是 safe 也不是确认变更）。
-  if (READONLY_ANY_ARGS.has(command)) return true;
+  // sort/uniq are excluded from the read-only subset because their output
+  // operand/options can name a file; classify their explicit write form only.
+  if (command === 'sort') return args.some((a) => a === '-o' || a === '--output' || a.startsWith('--output=') || a.startsWith('-o')) ? false : 'unknown';
+  if (command === 'uniq') return args.filter((a) => !a.startsWith('-')).length > 1 ? false : 'unknown';
+  if (STDOUT_QUERY_COMMANDS.has(command)) return isReadonlyStdoutShape(command, args);
+  // Positive evidence is limited to the audited command families above.
   return 'unknown';
 }
 
@@ -365,9 +498,10 @@ function findDoubleEnd(input: string, start: number): number {
   return -1;
 }
 
-function extractSubstitutions(input: string): { text: string; subs: string[] } | null {
+function extractSubstitutions(input: string): { text: string; subs: string[]; unknownExpansion: boolean } | null {
   const subs: string[] = [];
   let out = '';
+  let unknownExpansion = false;
   let i = 0;
   const n = input.length;
   let depth = 0;
@@ -383,6 +517,11 @@ function extractSubstitutions(input: string): { text: string; subs: string[] } |
     }
     if (mode === 'double') {
       if (ch === '"') { mode = 'none'; out += ch; i += 1; continue; }
+      if (ch === '\\' && i + 1 < n && '"\\$`'.includes(input[i + 1] ?? '')) {
+        out += ch + (input[i + 1] ?? '');
+        i += 2;
+        continue;
+      }
       if (ch === '$' && input[i + 1] === '(') {
         // command substitution inside double quotes
         const sub = extractBalanced(input, i + 2, ')');
@@ -392,6 +531,20 @@ function extractSubstitutions(input: string): { text: string; subs: string[] } |
         i = sub.end;
         continue;
       }
+      if (ch === '`') {
+        let end = i + 1;
+        while (end < n) {
+          if (input[end] === '\\') { end += 2; continue; }
+          if (input[end] === '`') break;
+          end += 1;
+        }
+        if (end >= n) return null;
+        subs.push(input.slice(i + 1, end));
+        out += '"SUB"';
+        i = end + 1;
+        continue;
+      }
+      if (ch === '$') unknownExpansion = true;
       out += ch;
       i += 1;
       continue;
@@ -412,6 +565,7 @@ function extractSubstitutions(input: string): { text: string; subs: string[] } |
       continue;
     }
     if (mode === 'backtick') {
+      if (ch === '\\' && i + 1 < n) { current += ch + (input[i + 1] ?? ''); i += 2; continue; }
       if (ch === '`') { mode = 'none'; subs.push(current); out += 'SUB'; i += 1; continue; }
       current += ch;
       i += 1;
@@ -419,6 +573,12 @@ function extractSubstitutions(input: string): { text: string; subs: string[] } |
     }
     if (ch === "'" && depth === 0) { mode = 'single'; out += ch; i += 1; continue; }
     if (ch === '"') { mode = 'double'; out += ch; i += 1; continue; }
+    if (ch === '\\') {
+      if (i + 1 >= n || input[i + 1] === '\n' || input[i + 1] === '\r') return null;
+      out += ch + (input[i + 1] ?? '');
+      i += 2;
+      continue;
+    }
     if (ch === '$' && input[i + 1] === '(') {
       mode = 'paren';
       depth = 1;
@@ -426,6 +586,7 @@ function extractSubstitutions(input: string): { text: string; subs: string[] } |
       i += 2;
       continue;
     }
+    if (ch === '$' || ch === '*' || ch === '?' || ch === '[' || ch === '{' || ch === '}') unknownExpansion = true;
     if (ch === '`') {
       mode = 'backtick';
       current = '';
@@ -439,7 +600,7 @@ function extractSubstitutions(input: string): { text: string; subs: string[] } |
   }
   if (mode !== 'none' && mode !== 'double' && mode !== 'single') return null;
   if (mode === 'double' || mode === 'single') return null; // unterminated quote
-  return { text: out, subs };
+  return { text: out, subs, unknownExpansion };
 }
 
 function classifySegment(segment: Segment, subLevels: readonly BashRiskLevel[]): BashRiskLevel {
@@ -478,6 +639,7 @@ function classifyCommandChain(input: string, depth: number): BashRiskLevel {
     const segLevel = classifySegment(segment, subLevels);
     level = worstLevel(level, segLevel);
   }
+  if (extracted.unknownExpansion || extracted.subs.length > 0) level = worstLevel(level, 'unknown');
   return level;
 }
 

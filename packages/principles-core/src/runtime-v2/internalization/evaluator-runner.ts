@@ -79,7 +79,7 @@ import type { GoldenTrace, GoldenTraceCase } from '../golden-trace.js';
 // alias/path/combination) to defend against false-positive blocks.
 import { generateV2ContextAdversarialCases } from './v2-adversarial-cases.js';
 import { deriveRuleCodeVerification } from './rulecode-verification-obligations.js';
-import { canonicalizeToolKind } from './rule-context-v2.js';
+import { canonicalizeToolKind, validateRuleContextV2 } from './rule-context-v2.js';
 import type { ToolSemanticMappingV1 } from './tool-semantic-registry.js';
 
 /** PRI-741: length of the shared case-insensitive prefix of two tool names. */
@@ -689,7 +689,16 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
     if (context.scribeArtifact !== null) {
       let scribe: unknown;
       try { scribe = JSON.parse(context.scribeArtifact); } catch { throw new PDRuntimeError('input_invalid', 'scribe_artifact_unparseable'); }
-      const material = deriveRuleCodeVerification(scribe, [], this.hostSemanticContext?.tools ?? []);
+      let material = deriveRuleCodeVerification(scribe, [], this.hostSemanticContext?.tools ?? []);
+      if (material.required.length > 0 && material.unavailable.length === 0) {
+        const ownerCases = context.artificerArtifact === null ? undefined
+          : this.parseArtificerArtifact(context.artificerArtifact)?.ownerGoldenTraceCases;
+        const ownerBuild = Array.isArray(ownerCases) ? buildGoldenTraceFromArtificer({ cases: ownerCases }) : undefined;
+        if (!ownerBuild?.ok) material.unavailable.push('owner_verification_cases_unavailable');
+        else if (ownerBuild.trace.cases.some((entry) => entry.ruleContext !== undefined && !validateRuleContextV2(entry.ruleContext).valid)) {
+          material.unavailable.push('historical_fact_invalid');
+        } else material = deriveRuleCodeVerification(scribe, ownerBuild.trace.cases, this.hostSemanticContext?.tools ?? []);
+      }
       if (material.unavailable.length > 0) {
         this.emitEvent('adversarial_replay_skipped', taskId, { reason: 'required_fact_verification_unavailable', required: material.required,
           executed: 0, passed: 0, failed: 0, unavailable: material.unavailable, nextAction: 'restore_supported_valid_fact_contract_before_model_request' });

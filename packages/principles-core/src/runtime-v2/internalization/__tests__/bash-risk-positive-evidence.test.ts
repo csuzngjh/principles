@@ -36,15 +36,63 @@ const EXPECTED: readonly [command: string, expected: 'safe' | 'normal' | 'danger
   ['git config --list', 'safe'],
   ['git stash list', 'safe'],
   ['cat README.md', 'safe'],
+  ["printf '%s' hello", 'safe'],
+  ['head -n 5 README.md', 'safe'],
+  ['tail -n 5 README.md', 'safe'],
+  ['grep -n pattern README.md', 'safe'],
+  ['ls -la src/', 'safe'],
   ['rg pattern src/', 'safe'],
   ['ls src/format', 'safe'],
   ['echo hello', 'safe'],
   ['find src -name "*.ts"', 'safe'],
   ['git show --stat HEAD', 'safe'],
   ['git status | cat', 'safe'],
-  ['echo $(git log -1)', 'safe'],
+  ['echo $(git log -1)', 'unknown'],
+  ["find . $(printf '%s' '-delete')", 'unknown'],
+  ["find . \"$(printf '%s' '-delete')\"", 'unknown'],
+  ["echo '$(touch marker.txt)'", 'safe'],
+  ["rg $(printf '%s' '--pre=./rewrite.sh') pattern .", 'unknown'],
+  ['find . {-delete,-print}', 'unknown'],
+  ['rg {--pre=./rewrite.sh,pattern} .', 'unknown'],
+  ['git reflog show --output=/tmp/pd-probe', 'unknown'],
+  ["printf '%n' marker", 'unknown'],
+  ["printf -- '%n' marker", 'unknown'],
+  ["printf -- '%s' marker", 'safe'],
   ['wc -l < input.txt', 'safe'],
   ['git log -5; git status', 'safe'],
+  // ── Regressions: argument shapes and shell structure ──
+  ['sort -o out.txt input.txt', 'normal'],
+  ['uniq input.txt out.txt', 'normal'],
+  ['rg --pre=./rewrite.sh pattern .', 'unknown'],
+  ['git hash-object -w input.txt', 'normal'],
+  ['git reflog delete HEAD@{0}', 'normal'],
+  ['git branch --unset-upstream', 'normal'],
+  ['git status --sh\u0001ort', 'unknown'],
+  ['git -c core.pager=./rewrite.sh log', 'unknown'],
+  ['git --paginate log', 'unknown'],
+  ['git diff --ext-diff HEAD', 'unknown'],
+  ['git stash show --ext-diff', 'unknown'],
+  ['git reflog show --ext-diff', 'unknown'],
+  ["find . -name '<' -exec touch /tmp/pd-probe ';'", 'unknown'],
+  ['cat README.md\ngit commit -m change', 'normal'],
+  ['git status\nrm -rf src', 'dangerous'],
+  ['echo "$(touch marker.txt)"', 'normal'],
+  ['echo "`touch marker.txt`"', 'normal'],
+  ['cat "$INPUT_FILE"', 'unknown'],
+  ['PATH=/tmp/tools cat README.md', 'unknown'],
+  ['sudo cat README.md', 'unknown'],
+  ['echo "git commit\nrm -rf src"', 'safe'],
+  ['cat README.md\r\ngit status', 'safe'],
+  ['cat README.md\r\ngit commit -m change', 'normal'],
+  ['cat "a|rm -rf src"', 'safe'],
+  // Explicitly supported stdout-only command families reject unknown/write options.
+  ['cat --output=out.txt README.md', 'unknown'],
+  ['ls --file=out.txt', 'unknown'],
+  ['printf -v result value', 'unknown'],
+  ['head -o out.txt input.txt', 'unknown'],
+  ['tail -o out.txt input.txt', 'unknown'],
+  ['grep --output=out.txt pattern input.txt', 'unknown'],
+  ['rg --files -g "*.ts" src/', 'safe'],
   // ── Config / file / repo-state mutations ──
   ['git config user.email x@example.com', 'unknown'], // config write shape unverifiable → cannot confirm readonly
   ['git stash push', 'normal'],
@@ -73,6 +121,8 @@ const EXPECTED: readonly [command: string, expected: 'safe' | 'normal' | 'danger
   // ── Pipes / composition / unsupported syntax ──
   ['echo hi > out.txt', 'normal'],
   ['echo hi >> out.txt', 'normal'],
+  ['cat <> /tmp/pd-probe', 'normal'],
+  ['cat 3<>/tmp/pd-probe', 'normal'],
   ['git status 2> err.txt', 'normal'],
   ['git status; git commit -m x', 'normal'],
   ['git status && git commit -m x', 'normal'],
@@ -153,5 +203,15 @@ describe('PRI-1047 R8 — positive-evidence bash-risk classification (hardcoded 
       const b = createSyntheticRuleHostInput({ toolName: 'Bash', params: { command } }, { context: mkContext('approved') }, { toolSemantics: registryResult.registry });
       expect(a.derived.bashRisk, `${command}`).toBe(b.derived.bashRisk);
     }
+  });
+});
+
+describe('PRI-1047 R8 — safe command families reject unverified options', () => {
+  it('only treats explicitly supported stdout query shapes as safe', () => {
+    for (const command of [
+      'sort -o out.txt input.txt', 'uniq input.txt out.txt', 'rg --pre=./rewrite.sh pattern .',
+      'cat --output=out.txt README.md', 'ls --file=out.txt', 'printf -v result value',
+      'head -o out.txt input.txt', 'tail -o out.txt input.txt', 'grep --output=out.txt pattern input.txt',
+    ]) expect(classifyCommandRisk(command), command).not.toBe('safe');
   });
 });
