@@ -88,7 +88,7 @@ runtimeProfiles:
     apiKeyEnv: ANTHROPIC_API_KEY
     timeoutMs: 300000
 internalAgents:
-  defaultRuntime: openclaw.default
+  defaultRuntime: pd.anthropic-sonnet
   agents:
     dreamer:    { enabled: true, runtimeProfile: pd.anthropic-sonnet }
     philosopher: { enabled: true, runtimeProfile: pd.anthropic-sonnet }

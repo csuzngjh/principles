@@ -148,8 +148,7 @@ Internalization Pipeline 中的执行单元。**所有 Runner 都是对等的**�
 `PDRuntimeAdapter` 接口的具体实现，**封装一个 LLM 调用后端**。
 
 已实现：
-- `OpenClawCliRuntimeAdapter`
-- `PiAiRuntimeAdapter`（直接 API）
+- `PiAiRuntimeAdapter`（直接 API；ADR-0029 后唯一的内部代理后端）
 - `TestDoubleRuntimeAdapter`（测试替身）
 
 未来：Codex CLI、Gemini CLI

@@ -205,9 +205,16 @@ describe('GET /api/v1/config/summary', () => {
       agents: { name: string; runtimeProfileId: string; runtimeProfileLabel: string }[];
     }>(res);
     expect(data.source).toBe('user_config');
-    // 3 user profiles; openclaw.default is already in VALID_CONFIG, so the MVP
-    // default profile is not merged again by computeEffectivePdConfig.
-    expect(data.runtimeProfiles).toHaveLength(3);
+    // 3 user profiles, plus the pi-ai default that computeEffectivePdConfig
+    // auto-injects under ADR-0029 (the seeded default id is 'pd.default', not
+    // the legacy 'openclaw.default' these fixtures still carry). A legacy
+    // openclaw profile is read-only tolerated, never dropped.
+    expect(data.runtimeProfiles.map((p) => p.id).sort()).toEqual([
+      'anthropic-cloud',
+      'lmstudio-local',
+      'openclaw.default',
+      'pd.default',
+    ]);
     expect(data.agents).toHaveLength(9); // all internal agents (empathyObserver retired in PRI-819)
   });
 
@@ -488,7 +495,7 @@ describe('PATCH /api/v1/config/agents/:agentName/binding', () => {
     // No config file exists
     const req = createMockRequest('PATCH', {
       url: '/api/v1/config/agents/diagnostician/binding',
-      body: { runtimeProfile: 'openclaw.default', enabled: true },
+      body: { runtimeProfile: 'pd.default', enabled: true },
     });
     const res = createMockResponse();
     await handleConfigRoute(req, res, {
@@ -560,7 +567,7 @@ describe('PATCH /api/v1/config/agents/:agentName/binding', () => {
 // ===========================================================================
 
 describe('GET /api/v1/config/readiness/:agentName', () => {
-  it('returns ready for openclaw default profile', async () => {
+  it('returns needs_setup for an agent on a retired openclaw profile (ADR-0029)', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('GET', {
       url: '/api/v1/config/readiness/dreamer',
@@ -580,10 +587,17 @@ describe('GET /api/v1/config/readiness/:agentName', () => {
       nextAction?: string;
     }>(res);
     expect(data.agent).toBe('dreamer');
-    expect(data.readiness).toBe('ready');
+    // The old contract was "ready out of the box" because the call was
+    // delegated to a host CLI agent session. ADR-0029 retires that backend,
+    // so a legacy openclaw profile is never ready — it must tell the Owner
+    // what to configure instead of silently borrowing the host's model.
+    expect(data.readiness).toBe('needs_setup');
+    expect(data.profileId).toBe('openclaw.default');
+    expect(data.reason).toMatch(/retired|ADR-0029/i);
+    expect(data.nextAction).toMatch(/pi-ai/);
   });
 
-  it('returns ready for openclaw profile with provider+model', async () => {
+  it('returns needs_setup for a retired openclaw profile even with provider+model', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('GET', {
       url: '/api/v1/config/readiness/diagnostician',
@@ -595,10 +609,12 @@ describe('GET /api/v1/config/readiness/:agentName', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    const data = okEnvelope<{ agent: string; readiness: string; profileId: string }>(res);
+    const data = okEnvelope<{ agent: string; readiness: string; profileId: string; reason?: string }>(res);
     expect(data.agent).toBe('diagnostician');
-    expect(data.readiness).toBe('ready');
+    expect(data.readiness).toBe('needs_setup');
     expect(data.profileId).toBe('lmstudio-local');
+    // The legacy host-model reference is named so the Owner can re-point it.
+    expect(data.reason).toMatch(/lmstudio/);
   });
 
   it('returns disabled for disabled agent', async () => {
@@ -706,11 +722,15 @@ describe('GET /api/v1/config/readiness/:agentName', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    const data = okEnvelope<{ agent: string; readiness: string }>(res);
+    const data = okEnvelope<{ agent: string; readiness: string; profileId: string; reason?: string; nextAction?: string }>(res);
     expect(data.agent).toBe('diagnostician');
-    // Default profile is openclaw.default (MVP default runtime) → ready
-    // out of the box, no env var or user setup required.
-    expect(data.readiness).toBe('ready');
+    // ADR-0029: the seeded default is PD's own pi-ai profile with provider/
+    // model/apiKeyEnv empty, so a brand-new workspace reports needs_setup with
+    // an actionable next step — the LLM configuration requirement is surfaced,
+    // not hidden behind delegation to a host the user may not even have.
+    expect(data.readiness).toBe('needs_setup');
+    expect(data.profileId).toBe('pd.default');
+    expect(data.nextAction).toMatch(/pi-ai|config\.yaml|Control Center/i);
   });
 
   it('returns unknown readiness when config is malformed', async () => {
@@ -1623,7 +1643,7 @@ describe('PATCH /api/v1/config/features/:featureName', () => {
 // ===========================================================================
 
 describe('POST /api/v1/config/profiles', () => {
-  it('creates a new openclaw profile and persists to config.yaml', async () => {
+  it('rejects creating a retired openclaw profile (ADR-0029: read-only legacy)', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('POST', {
       url: '/api/v1/config/profiles',
@@ -1635,19 +1655,19 @@ describe('POST /api/v1/config/profiles', () => {
     const res = createMockResponse();
     await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles' });
 
-    expect(res.statusCode).toBe(201);
-    const data = okEnvelope<{ profileId: string; profile: { type: string; provider?: string } }>(res);
-    expect(data.profileId).toBe('new-openclaw');
-    expect(data.profile.type).toBe('openclaw');
-    expect(data.profile.provider).toBe('ollama');
+    expect(res.statusCode).toBe(400);
+    const err = parseResponseBody<{ success: false; error: string; message: string; nextAction: string }>(res);
+    expect(err.success).toBe(false);
+    expect(err.error).toBe('retired_profile_type');
+    expect(err.message).toContain('retired (ADR-0029)');
+    expect(err.nextAction).toMatch(/pi-ai/);
 
-    // Verify persisted to disk
+    // Nothing was written: PD never creates an openclaw profile.
     const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
     const raw = fs.readFileSync(configPath, 'utf8');
     const parsed = yaml.load(raw) as Record<string, unknown>;
     const profiles = parsed.runtimeProfiles as Record<string, Record<string, unknown>>;
-    expect(Object.hasOwn(profiles, 'new-openclaw')).toBe(true);
-    expect(profiles['new-openclaw'].provider).toBe('ollama');
+    expect(Object.hasOwn(profiles, 'new-openclaw')).toBe(false);
   });
 
   it('creates a new pi-ai profile', async () => {
@@ -1679,7 +1699,12 @@ describe('POST /api/v1/config/profiles', () => {
       url: '/api/v1/config/profiles',
       body: {
         id: 'lmstudio-local',
-        profile: { type: 'openclaw', provider: 'lmstudio', model: 'qwen3' },
+        profile: {
+          type: 'pi-ai',
+          provider: 'lmstudio',
+          model: 'qwen3',
+          apiKeyEnv: 'LMSTUDIO_API_KEY',
+        },
       },
     });
     const res = createMockResponse();
@@ -1776,7 +1801,12 @@ describe('POST /api/v1/config/profiles', () => {
       url: '/api/v1/config/profiles',
       body: {
         id: 'new-profile',
-        profile: { type: 'openclaw', source: 'default' },
+        profile: {
+          type: 'pi-ai',
+          provider: 'openai',
+          model: 'gpt-4o',
+          apiKeyEnv: 'OPENAI_API_KEY',
+        },
       },
     });
     const res = createMockResponse();
@@ -1882,8 +1912,11 @@ describe('PATCH /api/v1/config/profiles/:profileId', () => {
     expect(fs.readFileSync(configPath, 'utf8')).toBe(before);
   });
 
-  it('updates an existing openclaw profile', async () => {
+  it('rejects updating a retired openclaw profile (ADR-0029: never written by PD)', async () => {
     writeConfig(VALID_CONFIG);
+    const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
+    const before = fs.readFileSync(configPath, 'utf8');
+
     const req = createMockRequest('PATCH', {
       url: '/api/v1/config/profiles/lmstudio-local',
       body: { model: 'qwen3-new-model' },
@@ -1891,19 +1924,16 @@ describe('PATCH /api/v1/config/profiles/:profileId', () => {
     const res = createMockResponse();
     await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/lmstudio-local' });
 
-    expect(res.statusCode).toBe(200);
-    const data = okEnvelope<{ profileId: string; profile: { model: string } }>(res);
-    expect(data.profileId).toBe('lmstudio-local');
-    expect(data.profile.model).toBe('qwen3-new-model');
+    expect(res.statusCode).toBe(400);
+    const err = parseResponseBody<{ success: false; error: string; message: string; nextAction: string }>(res);
+    expect(err.success).toBe(false);
+    expect(err.error).toBe('retired_profile_type');
+    expect(err.message).toContain('retired (ADR-0029)');
+    expect(err.nextAction).toMatch(/DELETE .*profiles\/lmstudio-local/);
+    expect(err.nextAction).toMatch(/pi-ai/);
 
-    // Verify persisted
-    const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
-    const raw = fs.readFileSync(configPath, 'utf8');
-    const parsed = yaml.load(raw) as Record<string, unknown>;
-    const profiles = parsed.runtimeProfiles as Record<string, Record<string, unknown>>;
-    expect(profiles['lmstudio-local'].model).toBe('qwen3-new-model');
-    // provider should be preserved
-    expect(profiles['lmstudio-local'].provider).toBe('lmstudio');
+    // Nothing was written: the legacy profile stays byte-identical.
+    expect(fs.readFileSync(configPath, 'utf8')).toBe(before);
   });
 
   it('updates a pi-ai profile adding optional fields', async () => {
@@ -1938,11 +1968,11 @@ describe('PATCH /api/v1/config/profiles/:profileId', () => {
   it('rejects type change with 400', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/profiles/lmstudio-local',
-      body: { type: 'pi-ai' },
+      url: '/api/v1/config/profiles/anthropic-cloud',
+      body: { type: 'openclaw' },
     });
     const res = createMockResponse();
-    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/lmstudio-local' });
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/anthropic-cloud' });
 
     expect(res.statusCode).toBe(400);
     const err = errorEnvelope(res);
@@ -1952,11 +1982,11 @@ describe('PATCH /api/v1/config/profiles/:profileId', () => {
   it('allows patch with same type (no-op type field)', async () => {
     writeConfig(VALID_CONFIG);
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/profiles/lmstudio-local',
-      body: { type: 'openclaw', model: 'updated-model' },
+      url: '/api/v1/config/profiles/anthropic-cloud',
+      body: { type: 'pi-ai', model: 'updated-model' },
     });
     const res = createMockResponse();
-    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/lmstudio-local' });
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/anthropic-cloud' });
 
     expect(res.statusCode).toBe(200);
     const data = okEnvelope<{ profile: { model: string } }>(res);
@@ -1981,11 +2011,11 @@ describe('PATCH /api/v1/config/profiles/:profileId', () => {
       customSection: { note: 'preserve-me' },
     });
     const req = createMockRequest('PATCH', {
-      url: '/api/v1/config/profiles/lmstudio-local',
+      url: '/api/v1/config/profiles/anthropic-cloud',
       body: { model: 'newmodel' },
     });
     const res = createMockResponse();
-    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/lmstudio-local' });
+    await handleConfigRoute(req, res, { workspaceDir, subPath: '/profiles/anthropic-cloud' });
 
     expect(res.statusCode).toBe(200);
     const configPath = path.join(workspaceDir, '.pd', 'config.yaml');
@@ -2358,7 +2388,7 @@ describe('PRI-645: Console writers on a sparse fresh workspace', () => {
     // (registry defaults are resolved at read time, never written back).
     const req = createMockRequest('PATCH', {
       url: '/api/v1/config/agents/diagnostician/binding',
-      body: { runtimeProfile: 'openclaw.default', enabled: true },
+      body: { runtimeProfile: 'pd.default', enabled: true },
     });
     const res = createMockResponse();
     await handleConfigRoute(req, res, {
@@ -2373,7 +2403,7 @@ describe('PRI-645: Console writers on a sparse fresh workspace', () => {
   it('updateDefaultRuntime on a config-less workspace creates a sparse features section, not a registry snapshot', async () => {
     const req = createMockRequest('PATCH', {
       url: '/api/v1/config/default-runtime',
-      body: { defaultRuntime: 'openclaw.default' },
+      body: { defaultRuntime: 'pd.default' },
     });
     const res = createMockResponse();
     await handleConfigRoute(req, res, {

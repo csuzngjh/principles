@@ -69,17 +69,21 @@ describe('PRI-818 R-08: createPainSignalBridge wiring passes effectiveConfig to 
   it('router runner options include effectiveConfig (same object as handed to the factory)', async () => {
     const { workspaceDir, stateDir } = makeWorkspace();
     try {
-      // Minimal Owner config: diagnostician enabled, bound to an openclaw
-      // local profile (resolves to a runtime config that passes
-      // validateRuntimeConfig without any external service).
+      // Minimal Owner config: diagnostician enabled, bound to a configured
+      // pi-ai profile — the only runtime backend PD runs internal agents on
+      // (ADR-0029). The env accessor is injected, so no credential exists here.
       const effectiveConfig = computeEffectivePdConfig({
         features: {},
         runtimeProfiles: {
-          'openclaw.default': { type: 'openclaw', source: 'default' },
-          'diag-profile': { type: 'openclaw', provider: 'lmstudio', model: 'qwen3.6-27b-mtp' },
+          'diag-profile': {
+            type: 'pi-ai',
+            provider: 'anthropic',
+            model: 'claude-3-5-sonnet',
+            apiKeyEnv: 'PRI818_WIRING_TEST_KEY',
+          },
         },
         internalAgents: {
-          defaultRuntime: 'openclaw.default',
+          defaultRuntime: 'diag-profile',
           agents: {
             diagnostician: { enabled: true, runtimeProfile: 'diag-profile' },
           },
@@ -94,6 +98,7 @@ describe('PRI-818 R-08: createPainSignalBridge wiring passes effectiveConfig to 
         ledgerAdapter: {} as never,
         owner: OWNER,
         effectiveConfig,
+        getEnvVar: (name: string) => (name === 'PRI818_WIRING_TEST_KEY' ? 'test-sentinel-not-a-credential' : undefined),
       });
 
       const routerCaptures = ctorCaptures.filter((c) => c.name === 'router');

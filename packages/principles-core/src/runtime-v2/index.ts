@@ -367,10 +367,6 @@ export {
 export { TestDoubleRuntimeAdapter } from './adapter/index.js';
 export type { TestDoubleBehaviorOverrides } from './adapter/index.js';
 
-// OpenClawCliRuntimeAdapter (M6)
-export { OpenClawCliRuntimeAdapter } from './adapter/index.js';
-export type { OpenClawCliRuntimeAdapterOptions } from './adapter/openclaw-cli-runtime-adapter.js';
-
 // PiAiRuntimeAdapter (M9)
 export { PiAiRuntimeAdapter } from './adapter/index.js';
 export type { PiAiRuntimeAdapterConfig } from './adapter/pi-ai-runtime-adapter.js';
@@ -2077,8 +2073,6 @@ export type {
   AgentRuntimeBindingResult,
   AgentRuntimeReadinessResult,
   PiAiAdapterConfigResult,
-  OpenClawAdapterConfigResult,
-  AdapterConfigResult,
 } from './config/index.js';
 
 export type {

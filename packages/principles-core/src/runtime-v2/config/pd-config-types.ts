@@ -55,11 +55,20 @@ export interface FeatureFlagEntry {
 }
 
 // ── Runtime Profile Types ───────────────────────────────────────────────────
-
+//
+// 'pi-ai' is the only runtime backend PD selects or writes (ADR-0029).
+// 'openclaw' remains in this list as READ-ONLY LEGACY so that an existing
+// `.pd/config.yaml` keeps validating instead of being rejected wholesale; a
+// profile of this type still parses and still gets redacted, but its agents
+// resolve to needs_setup and no PD writer produces new ones.
 export const VALID_PROFILE_TYPES = ['openclaw', 'pi-ai'] as const;
 export type RuntimeProfileType = (typeof VALID_PROFILE_TYPES)[number];
 
-/** OpenClaw profile: references only, no secrets */
+/**
+ * OpenClaw profile: references only, no secrets.
+ * READ-ONLY LEGACY (ADR-0029) — retained so persisted configs parse; PD no
+ * longer selects, seeds, or runs this profile type.
+ */
 export interface OpenClawRuntimeProfile {
   type: 'openclaw';
   /** Optional provider label (e.g. "lmstudio") */

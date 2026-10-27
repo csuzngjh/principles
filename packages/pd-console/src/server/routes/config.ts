@@ -73,6 +73,20 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** Runtime-profile CRUD errors carry an operator next action — never drop it (rc-9). */
+function sendProfileCrudError(
+  res: ServerResponse,
+  result: { statusCode: number; error: string; message: string; nextAction?: string },
+): void {
+  sendError(
+    res,
+    result.statusCode,
+    result.error,
+    result.message,
+    result.nextAction ? { nextAction: result.nextAction } : undefined,
+  );
+}
+
 // ── Route Handler ────────────────────────────────────────────────────────────
 
 export async function handleConfigRoute(
@@ -331,7 +345,7 @@ export async function handleConfigRoute(
     }
     const result = createRuntimeProfile(workspaceDir, body.id, body.profile);
     if (!result.ok) {
-      sendError(res, result.statusCode, result.error, result.message);
+      sendProfileCrudError(res, result);
       return;
     }
     // 201 Created for new resource
@@ -365,7 +379,7 @@ export async function handleConfigRoute(
       }
       const result = updateRuntimeProfile(workspaceDir, profileId, body);
       if (!result.ok) {
-        sendError(res, result.statusCode, result.error, result.message);
+        sendProfileCrudError(res, result);
         return;
       }
       sendSuccess(res, { profileId: result.profileId, profile: result.profile });
@@ -375,7 +389,7 @@ export async function handleConfigRoute(
     if (method === 'DELETE') {
       const result = deleteRuntimeProfile(workspaceDir, profileId);
       if (!result.ok) {
-        sendError(res, result.statusCode, result.error, result.message);
+        sendProfileCrudError(res, result);
         return;
       }
       sendSuccess(res, { profileId: result.profileId, profile: result.profile });

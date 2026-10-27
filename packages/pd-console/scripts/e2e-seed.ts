@@ -704,12 +704,15 @@ const minimalConfig = {
     governance_experience_v1: { category: 'quiet', enabled: true },
   },
   runtimeProfiles: {
-    'openclaw.default': { type: 'openclaw', source: 'default' },
+    // ADR-0029: pi-ai is the only internal-agent runtime backend, and an
+    // unconfigured pi-ai profile is exactly what a fresh install ships — the
+    // e2e workspace therefore exercises the real needs_setup path.
+    'pd.default': { type: 'pi-ai', provider: '', model: '', apiKeyEnv: '' },
   },
   internalAgents: {
-    defaultRuntime: 'openclaw.default',
+    defaultRuntime: 'pd.default',
     agents: {
-      diagnostician: { enabled: true, runtimeProfile: 'openclaw.default' },
+      diagnostician: { enabled: true, runtimeProfile: 'pd.default' },
       dreamer: { enabled: true },
       scribe: { enabled: true },
     },

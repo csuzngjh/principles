@@ -54,7 +54,19 @@ export interface GovernanceOptions {
   ruleContextV2Flag?: boolean;
   /** Write INVALID config yaml (degraded-config tests). */
   malformed?: boolean;
+  /**
+   * ADR-0029: the shipped default pi-ai profile carries empty placeholders and is
+   * deliberately `needs_setup`, so nothing could be *persisted* on it. Hook tests
+   * that assert evidence/task durability are governance-path tests, not LLM
+   * tests, so they pass this flag to write the evidence on a ready profile —
+   * the same thing an install-configured workspace has.
+   */
+  readyRuntime?: boolean;
 }
+
+/** Profile id and env var used by `readyRuntime` workspaces. */
+export const WB_READY_PROFILE_ID = 'pd.default';
+export const WB_READY_API_KEY_ENV = 'PD_WB_TEST_API_KEY';
 
 export function makeGovernance(home: string, options: GovernanceOptions = {}): string {
   const governance = getWorkbuddyWorkspaceDir(home);
@@ -67,6 +79,15 @@ export function makeGovernance(home: string, options: GovernanceOptions = {}): s
   if (config.features['host.workbuddy']) config.features['host.workbuddy'].enabled = options.workbuddyFlag ?? false;
   if (config.features['principle_receipt_ledger']) config.features['principle_receipt_ledger'].enabled = options.receiptLedgerFlag ?? false;
   if (options.ruleContextV2Flag !== undefined && config.features['rulecode_context_v2']) config.features['rulecode_context_v2'].enabled = options.ruleContextV2Flag;
+  if (options.readyRuntime) {
+    (config.runtimeProfiles as Record<string, unknown>)[WB_READY_PROFILE_ID] = {
+      type: 'pi-ai', provider: 'test-provider', model: 'test-model',
+      apiKeyEnv: WB_READY_API_KEY_ENV, baseUrl: 'http://127.0.0.1:8080/v1',
+    };
+    config.internalAgents.defaultRuntime = WB_READY_PROFILE_ID;
+    // Hook paths run in child processes that inherit this env.
+    process.env[WB_READY_API_KEY_ENV] = 'test-key';
+  }
   fs.writeFileSync(path.join(governance, '.pd', 'config.yaml'), JSON.stringify(config));
   return governance;
 }

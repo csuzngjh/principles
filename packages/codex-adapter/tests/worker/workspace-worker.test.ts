@@ -66,12 +66,20 @@ function writeConfig(ws: WorkerWorkspace, overrides: { ingestion?: boolean; cons
   config.features.codex_conversation_ingestion.enabled = overrides.ingestion ?? true;
   config.features.internalization_auto_consumer.enabled = overrides.consumer ?? true;
   // PRI-638 P1-C: canonical Diagnostician capability switch.
-  config.internalAgents = config.internalAgents ?? { defaultRuntime: 'openclaw.default', agents: {} };
+  config.internalAgents = config.internalAgents ?? { defaultRuntime: 'pd.default', agents: {} };
   config.internalAgents.agents = config.internalAgents.agents ?? {};
   config.internalAgents.agents.diagnostician = {
     enabled: overrides.diagnostician ?? true,
     runtimeProfile: config.internalAgents.defaultRuntime,
   };
+  // ADR-0029: the shipped default pi-ai profile carries empty placeholders and is
+  // deliberately needs_setup. These worker tests lease and run stages, so the
+  // workspace declares a ready profile — what an install-configured workspace has.
+  (config.runtimeProfiles as Record<string, unknown>)['pd.default'] = {
+    type: 'pi-ai', provider: 'test-provider', model: 'test-model',
+    apiKeyEnv: 'PD_WORKER_TEST_KEY', baseUrl: 'http://127.0.0.1:8080/v1',
+  };
+  process.env.PD_WORKER_TEST_KEY = 'test-key';
   fs.writeFileSync(path.join(ws.root, '.pd', 'config.yaml'), JSON.stringify(config));
 }
 
@@ -986,7 +994,7 @@ describe('worker cycle — PRI-638 P1-C Diagnostician capability disabled', () =
     };
     raw.internalAgents ??= { agents: {} };
     raw.internalAgents.agents ??= {};
-    raw.internalAgents.agents.diagnostician = { enabled, runtimeProfile: 'openclaw.default' };
+    raw.internalAgents.agents.diagnostician = { enabled, runtimeProfile: 'pd.default' };
     fs.writeFileSync(path.join(ws.root, '.pd', 'config.yaml'), JSON.stringify(raw));
   }
 

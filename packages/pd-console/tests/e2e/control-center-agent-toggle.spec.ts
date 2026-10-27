@@ -57,7 +57,7 @@ async function getAgentEnabled(agentName: string): Promise<boolean> {
 /** 通过 API 设置 agent 的 enabled 状态（用于测试 setup/teardown） */
 async function setAgentEnabled(agentName: string, enabled: boolean): Promise<void> {
   const resp = await apiPatch(`/api/v1/config/agents/${agentName}/binding`, {
-    runtimeProfile: 'openclaw.default',
+    runtimeProfile: 'pd.default',
     enabled,
   });
   expect(resp.status).toBe(200);

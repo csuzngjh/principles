@@ -43,7 +43,7 @@ interface WorkerOverrides {
 
 function makeWorkerWorkspace(overrides: WorkerOverrides = {}): string {
   const home = makeHome();
-  const governance = makeGovernance(home, { workbuddyFlag: overrides.workbuddy ?? true, malformed: overrides.malformed });
+  const governance = makeGovernance(home, { workbuddyFlag: overrides.workbuddy ?? true, malformed: overrides.malformed, readyRuntime: true });
   if (!overrides.malformed) {
     const configPath = path.join(governance, '.pd', 'config.yaml');
     const config = JSON.parse(fs.readFileSync(configPath, 'utf8')) as { features: Record<string, { enabled: boolean } | undefined> };

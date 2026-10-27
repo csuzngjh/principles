@@ -132,12 +132,13 @@ describe('Missing config → defaults', () => {
     } finally { rmTmpDir(tmp); }
   });
 
-  it('defaults include openclaw.default runtime profile', () => {
+  it('defaults seed the pi-ai profile only — no openclaw fact (ADR-0029)', () => {
     const tmp = mkTmpDir();
     try {
       const result = loadPdConfig(tmp);
       if (!result.ok) throw new Error('Expected ok');
-      expect(Object.hasOwn(result.effective.config.runtimeProfiles, 'openclaw.default')).toBe(true);
+      expect(Object.hasOwn(result.effective.config.runtimeProfiles, 'pd.default')).toBe(true);
+      expect(Object.hasOwn(result.effective.config.runtimeProfiles, 'openclaw.default')).toBe(false);
     } finally { rmTmpDir(tmp); }
   });
 });

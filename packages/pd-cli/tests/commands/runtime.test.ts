@@ -33,7 +33,7 @@ vi.mock('../../src/services/resolve-runtime-from-pd-config.js', () => ({
 
 vi.mock('@principles/core/runtime-v2', () => ({
   probeRuntime: vi.fn().mockResolvedValue({
-    runtimeKind: 'openclaw-cli',
+    runtimeKind: 'pi-ai',
     health: {
       healthy: true,
       degraded: false,
@@ -75,8 +75,8 @@ describe('pd runtime probe', () => {
     vi.clearAllMocks();
   });
 
-  it('HG-01: --runtime openclaw-cli --openclaw-local outputs health + capabilities table', async () => {
-    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  it('HG-01 (ADR-0029): --runtime openclaw-cli is refused as retired — no host-CLI probe exists', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
 
     await handleRuntimeProbe({
@@ -85,18 +85,16 @@ describe('pd runtime probe', () => {
       json: false,
     } as RuntimeProbeOptions);
 
-    // Should output health section
-    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Runtime:'));
-    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('healthy:'));
-    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Capabilities:'));
-    expect(exitSpy).not.toHaveBeenCalledWith(1);
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('retired (ADR-0029)'));
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('nextAction: Use --runtime pi-ai'));
+    expect(exitSpy).toHaveBeenCalledWith(1);
 
-    consoleSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
     exitSpy.mockRestore();
   });
 
-  it('HG-01: --runtime openclaw-cli --openclaw-gateway outputs health + capabilities table', async () => {
-    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  it('HG-01 (ADR-0029): --runtime openclaw-cli with legacy --openclaw-gateway flag is likewise refused', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
 
     await handleRuntimeProbe({
@@ -105,10 +103,10 @@ describe('pd runtime probe', () => {
       json: false,
     } as RuntimeProbeOptions);
 
-    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Runtime:'));
-    expect(exitSpy).not.toHaveBeenCalledWith(1);
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('retired (ADR-0029)'));
+    expect(exitSpy).toHaveBeenCalledWith(1);
 
-    consoleSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
     exitSpy.mockRestore();
   });
 
@@ -116,9 +114,10 @@ describe('pd runtime probe', () => {
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
 
+    process.env.TEST_API_KEY = 'test-value';
     await handleRuntimeProbe({
-      runtime: 'openclaw-cli',
-      openclawLocal: true,
+      runtime: 'pi-ai',
+      workspace: '/tmp/fake-ws',
       json: true,
     } as RuntimeProbeOptions);
 
@@ -131,13 +130,14 @@ describe('pd runtime probe', () => {
     expect(jsonOutput).toBeDefined();
     const parsed = JSON.parse((jsonOutput as [string])[0]);
     expect(parsed.status).toBe('succeeded');
-    expect(parsed.runtimeKind).toBe('openclaw-cli');
+    expect(parsed.runtimeKind).toBe('pi-ai');
     expect(parsed.health).toBeDefined();
     expect(parsed.capabilities).toBeDefined();
     expect(exitSpy).not.toHaveBeenCalledWith(1);
 
     consoleSpy.mockRestore();
     exitSpy.mockRestore();
+    delete process.env.TEST_API_KEY;
   });
 
   it('CLI-03: --json with healthy=false outputs status=failed and exits 1', async () => {
@@ -146,11 +146,11 @@ describe('pd runtime probe', () => {
 
     const { probeRuntime } = await import('@principles/core/runtime-v2');
     vi.mocked(probeRuntime).mockResolvedValueOnce({
-      runtimeKind: 'openclaw-cli',
+      runtimeKind: 'pi-ai',
       health: {
         healthy: false,
         degraded: false,
-        warnings: ['openclaw binary not found'],
+        warnings: ['provider credential missing'],
         lastCheckedAt: '2026-04-24T00:00:00.000Z',
       },
       capabilities: {
@@ -164,11 +164,12 @@ describe('pd runtime probe', () => {
         supportsConcurrentRuns: false,
         supportsStreaming: false,
       },
-    });
+    } as never);
 
+    process.env.TEST_API_KEY = 'test-value';
     await handleRuntimeProbe({
-      runtime: 'openclaw-cli',
-      openclawLocal: true,
+      runtime: 'pi-ai',
+      workspace: '/tmp/fake-ws',
       json: true,
     } as RuntimeProbeOptions);
 
@@ -185,6 +186,7 @@ describe('pd runtime probe', () => {
 
     consoleSpy.mockRestore();
     exitSpy.mockRestore();
+    delete process.env.TEST_API_KEY;
   });
 
   it('CLI-03: --json with healthy=true degraded=true outputs status=degraded', async () => {
@@ -193,11 +195,11 @@ describe('pd runtime probe', () => {
 
     const { probeRuntime } = await import('@principles/core/runtime-v2');
     vi.mocked(probeRuntime).mockResolvedValueOnce({
-      runtimeKind: 'openclaw-cli',
+      runtimeKind: 'pi-ai',
       health: {
         healthy: true,
         degraded: true,
-        warnings: ['openclaw version is outdated'],
+        warnings: ['provider version is outdated'],
         lastCheckedAt: '2026-04-24T00:00:00.000Z',
       },
       capabilities: {
@@ -211,11 +213,12 @@ describe('pd runtime probe', () => {
         supportsConcurrentRuns: false,
         supportsStreaming: false,
       },
-    });
+    } as never);
 
+    process.env.TEST_API_KEY = 'test-value';
     await handleRuntimeProbe({
-      runtime: 'openclaw-cli',
-      openclawLocal: true,
+      runtime: 'pi-ai',
+      workspace: '/tmp/fake-ws',
       json: true,
     } as RuntimeProbeOptions);
 
@@ -232,9 +235,10 @@ describe('pd runtime probe', () => {
 
     consoleSpy.mockRestore();
     exitSpy.mockRestore();
+    delete process.env.TEST_API_KEY;
   });
 
-  it('HG-03: --runtime openclaw-cli without mode flag exits with error', async () => {
+  it('HG-03 (ADR-0029): --runtime openclaw-cli without mode flag is refused as retired', async () => {
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
 
@@ -243,16 +247,14 @@ describe('pd runtime probe', () => {
       json: false,
     } as RuntimeProbeOptions);
 
-    expect(consoleErrorSpy).toHaveBeenCalledWith(
-      'error: --openclaw-local or --openclaw-gateway is required for --runtime openclaw-cli'
-    );
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('retired (ADR-0029)'));
     expect(exitSpy).toHaveBeenCalledWith(1);
 
     consoleErrorSpy.mockRestore();
     exitSpy.mockRestore();
   });
 
-  it('HG-03: both --openclaw-local and --openclaw-gateway exits with error', async () => {
+  it('HG-03 (ADR-0029): openclaw-cli with both legacy mode flags is refused as retired', async () => {
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
 
@@ -263,9 +265,7 @@ describe('pd runtime probe', () => {
       json: false,
     } as RuntimeProbeOptions);
 
-    expect(consoleErrorSpy).toHaveBeenCalledWith(
-      'error: --openclaw-local and --openclaw-gateway are mutually exclusive'
-    );
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('retired (ADR-0029)'));
     expect(exitSpy).toHaveBeenCalledWith(1);
 
     consoleErrorSpy.mockRestore();
@@ -388,5 +388,6 @@ describe('pd runtime probe', () => {
 
     consoleSpy.mockRestore();
     exitSpy.mockRestore();
+    delete process.env.TEST_API_KEY;
   });
 });

@@ -45,26 +45,21 @@ interface RuntimeProfileManagerProps {
 
 type FormMode = "closed" | "create" | "edit";
 
-type ProfileType = "openclaw" | "pi-ai";
-
+// ADR-0029: pi-ai is the only creatable and editable runtime profile type.
 interface ProfileFormState {
   id: string;
-  type: ProfileType;
   provider: string;
   model: string;
   apiKeyEnv: string;
   baseUrl: string;
-  source: string;
 }
 
 const EMPTY_FORM: ProfileFormState = {
   id: "",
-  type: "openclaw",
   provider: "",
   model: "",
   apiKeyEnv: "",
   baseUrl: "",
-  source: "",
 };
 
 /** 状态点样式：与 AgentCard 一致 (ready=green, needs_setup/not_ready/unknown=amber, disabled=ink-4) */
@@ -86,59 +81,43 @@ function readinessDotClasses(readiness: ReadinessStatus): string {
 
 /**
  * Build the profile object for a create request.
- * Only includes fields relevant to the chosen type; omits empty optionals.
+ * Always pi-ai (ADR-0029); empty optional fields are omitted.
  */
 function buildCreateProfile(form: ProfileFormState): Record<string, unknown> {
-  const profile: Record<string, unknown> = { type: form.type };
-  if (form.type === "pi-ai") {
-    profile.provider = form.provider.trim();
-    profile.model = form.model.trim();
-    profile.apiKeyEnv = form.apiKeyEnv.trim();
-    if (form.baseUrl.trim() !== "") {
-      profile.baseUrl = form.baseUrl.trim();
-    }
-  } else {
-    if (form.source.trim() !== "") profile.source = form.source.trim();
-    if (form.provider.trim() !== "") profile.provider = form.provider.trim();
-    if (form.model.trim() !== "") profile.model = form.model.trim();
+  const profile: Record<string, unknown> = {
+    type: "pi-ai",
+    provider: form.provider.trim(),
+    model: form.model.trim(),
+    apiKeyEnv: form.apiKeyEnv.trim(),
+  };
+  if (form.baseUrl.trim() !== "") {
+    profile.baseUrl = form.baseUrl.trim();
   }
   return profile;
 }
 
 /**
  * Build the patch object for an update request.
- * Sends `type` (server allows same-type no-op, rejects type change) plus all
- * non-empty type-relevant fields. Empty optionals are omitted so existing
- * values are preserved (merge-patch semantics on the server).
+ * Sends only pi-ai fields. Empty optionals are omitted so existing values are
+ * preserved (merge-patch semantics on the server).
  */
 function buildUpdatePatch(form: ProfileFormState): Record<string, unknown> {
-  const patch: Record<string, unknown> = { type: form.type };
-  if (form.type === "pi-ai") {
-    if (form.provider.trim() !== "") patch.provider = form.provider.trim();
-    if (form.model.trim() !== "") patch.model = form.model.trim();
-    if (form.apiKeyEnv.trim() !== "") patch.apiKeyEnv = form.apiKeyEnv.trim();
-    if (form.baseUrl.trim() !== "") patch.baseUrl = form.baseUrl.trim();
-  } else {
-    if (form.source.trim() !== "") patch.source = form.source.trim();
-    if (form.provider.trim() !== "") patch.provider = form.provider.trim();
-    if (form.model.trim() !== "") patch.model = form.model.trim();
-  }
+  const patch: Record<string, unknown> = {};
+  if (form.provider.trim() !== "") patch.provider = form.provider.trim();
+  if (form.model.trim() !== "") patch.model = form.model.trim();
+  if (form.apiKeyEnv.trim() !== "") patch.apiKeyEnv = form.apiKeyEnv.trim();
+  if (form.baseUrl.trim() !== "") patch.baseUrl = form.baseUrl.trim();
   return patch;
 }
 
-/** Pre-fill form from an existing profile summary (edit mode). */
+/** Pre-fill form from an existing pi-ai profile summary (edit mode). */
 function formFromProfile(p: RedactedRuntimeProfileSummary): ProfileFormState {
-  // type is validated to be a known ProfileType by the caller before invoking;
-  // here we guard defensively without `as`.
-  const type: ProfileType = p.type === "pi-ai" ? "pi-ai" : "openclaw";
   return {
     id: p.id,
-    type,
     provider: p.provider ?? "",
     model: p.model ?? "",
     apiKeyEnv: p.apiKeyEnv ?? "",
     baseUrl: "",
-    source: "",
   };
 }
 
@@ -187,16 +166,14 @@ export function RuntimeProfileManager({
     if (mode === "create" && form.id.trim() === "") {
       return t("pages.controlCenter.profiles.validationIdRequired");
     }
-    if (form.type === "pi-ai") {
-      if (form.provider.trim() === "") {
-        return t("pages.controlCenter.profiles.validationProviderRequired");
-      }
-      if (form.model.trim() === "") {
-        return t("pages.controlCenter.profiles.validationModelRequired");
-      }
-      if (form.apiKeyEnv.trim() === "") {
-        return t("pages.controlCenter.profiles.validationApiKeyEnvRequired");
-      }
+    if (form.provider.trim() === "") {
+      return t("pages.controlCenter.profiles.validationProviderRequired");
+    }
+    if (form.model.trim() === "") {
+      return t("pages.controlCenter.profiles.validationModelRequired");
+    }
+    if (form.apiKeyEnv.trim() === "") {
+      return t("pages.controlCenter.profiles.validationApiKeyEnvRequired");
     }
     return null;
   }
@@ -337,189 +314,89 @@ export function RuntimeProfileManager({
               </p>
             </div>
 
-            {/* Type */}
+            {/* pi-ai fields */}
             <div>
-              <label className={labelClass} htmlFor="rpf-type">
-                {t("pages.controlCenter.profiles.fieldType")}
+              <label className={labelClass} htmlFor="rpf-provider">
+                {t("pages.controlCenter.profiles.fieldProvider")}
               </label>
-              <select
-                id="rpf-type"
-                value={form.type}
-                onChange={(e) => {
-                  // rc-2: no `as` bypass — narrow via runtime check.
-                  // The select only emits "openclaw" | "pi-ai", but we guard
-                  // defensively so the value is provably ProfileType.
-                  const v = e.target.value;
-                  const typed: ProfileType = v === "pi-ai" ? "pi-ai" : "openclaw";
-                  handleFieldChange("type", typed);
-                }}
-                disabled={mode === "edit" || submitting}
+              <input
+                id="rpf-provider"
+                type="text"
+                value={form.provider}
+                onChange={(e) =>
+                  handleFieldChange("provider", e.target.value)
+                }
+                disabled={submitting}
+                placeholder={t(
+                  "pages.controlCenter.profiles.fieldProviderPlaceholder",
+                )}
                 className={inputClass}
-              >
-                <option value="openclaw">
-                  {t("pages.controlCenter.profiles.typeOpenclaw")}
-                </option>
-                <option value="pi-ai">
-                  {t("pages.controlCenter.profiles.typePiAi")}
-                </option>
-              </select>
-              {mode === "edit" && (
-                <p className={hintClass}>
-                  {t("pages.controlCenter.profiles.fieldIdHint")}
-                </p>
-              )}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </div>
+            <div>
+              <label className={labelClass} htmlFor="rpf-model">
+                {t("pages.controlCenter.profiles.fieldModel")}
+              </label>
+              <input
+                id="rpf-model"
+                type="text"
+                value={form.model}
+                onChange={(e) => handleFieldChange("model", e.target.value)}
+                disabled={submitting}
+                placeholder={t(
+                  "pages.controlCenter.profiles.fieldModelPlaceholder",
+                )}
+                className={inputClass}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </div>
+            <div>
+              <label className={labelClass} htmlFor="rpf-apikeyenv">
+                {t("pages.controlCenter.profiles.fieldApiKeyEnv")}
+              </label>
+              <input
+                id="rpf-apikeyenv"
+                type="text"
+                value={form.apiKeyEnv}
+                onChange={(e) =>
+                  handleFieldChange("apiKeyEnv", e.target.value)
+                }
+                disabled={submitting}
+                placeholder={t(
+                  "pages.controlCenter.profiles.fieldApiKeyEnvPlaceholder",
+                )}
+                className={cn(inputClass, "font-mono")}
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <p className={hintClass}>
+                {t("pages.controlCenter.profiles.fieldApiKeyEnvHint")}
+              </p>
+            </div>
+            <div>
+              <label className={labelClass} htmlFor="rpf-baseurl">
+                {t("pages.controlCenter.profiles.fieldBaseUrl")}
+              </label>
+              <input
+                id="rpf-baseurl"
+                type="text"
+                value={form.baseUrl}
+                onChange={(e) =>
+                  handleFieldChange("baseUrl", e.target.value)
+                }
+                disabled={submitting}
+                placeholder={t(
+                  "pages.controlCenter.profiles.fieldBaseUrlPlaceholder",
+                )}
+                className={inputClass}
+                autoComplete="off"
+                spellCheck={false}
+              />
             </div>
 
-            {/* pi-ai fields */}
-            {form.type === "pi-ai" && (
-              <>
-                <div>
-                  <label className={labelClass} htmlFor="rpf-provider">
-                    {t("pages.controlCenter.profiles.fieldProvider")}
-                  </label>
-                  <input
-                    id="rpf-provider"
-                    type="text"
-                    value={form.provider}
-                    onChange={(e) =>
-                      handleFieldChange("provider", e.target.value)
-                    }
-                    disabled={submitting}
-                    placeholder={t(
-                      "pages.controlCenter.profiles.fieldProviderPlaceholder",
-                    )}
-                    className={inputClass}
-                    autoComplete="off"
-                    spellCheck={false}
-                  />
-                </div>
-                <div>
-                  <label className={labelClass} htmlFor="rpf-model">
-                    {t("pages.controlCenter.profiles.fieldModel")}
-                  </label>
-                  <input
-                    id="rpf-model"
-                    type="text"
-                    value={form.model}
-                    onChange={(e) => handleFieldChange("model", e.target.value)}
-                    disabled={submitting}
-                    placeholder={t(
-                      "pages.controlCenter.profiles.fieldModelPlaceholder",
-                    )}
-                    className={inputClass}
-                    autoComplete="off"
-                    spellCheck={false}
-                  />
-                </div>
-                <div>
-                  <label className={labelClass} htmlFor="rpf-apikeyenv">
-                    {t("pages.controlCenter.profiles.fieldApiKeyEnv")}
-                  </label>
-                  <input
-                    id="rpf-apikeyenv"
-                    type="text"
-                    value={form.apiKeyEnv}
-                    onChange={(e) =>
-                      handleFieldChange("apiKeyEnv", e.target.value)
-                    }
-                    disabled={submitting}
-                    placeholder={t(
-                      "pages.controlCenter.profiles.fieldApiKeyEnvPlaceholder",
-                    )}
-                    className={cn(inputClass, "font-mono")}
-                    autoComplete="off"
-                    spellCheck={false}
-                  />
-                  <p className={hintClass}>
-                    {t("pages.controlCenter.profiles.fieldApiKeyEnvHint")}
-                  </p>
-                </div>
-                <div>
-                  <label className={labelClass} htmlFor="rpf-baseurl">
-                    {t("pages.controlCenter.profiles.fieldBaseUrl")}
-                  </label>
-                  <input
-                    id="rpf-baseurl"
-                    type="text"
-                    value={form.baseUrl}
-                    onChange={(e) =>
-                      handleFieldChange("baseUrl", e.target.value)
-                    }
-                    disabled={submitting}
-                    placeholder={t(
-                      "pages.controlCenter.profiles.fieldBaseUrlPlaceholder",
-                    )}
-                    className={inputClass}
-                    autoComplete="off"
-                    spellCheck={false}
-                  />
-                </div>
-              </>
-            )}
-
-            {/* openclaw fields */}
-            {form.type === "openclaw" && (
-              <>
-                <div>
-                  <label className={labelClass} htmlFor="rpf-source">
-                    {t("pages.controlCenter.profiles.fieldSource")}
-                  </label>
-                  <input
-                    id="rpf-source"
-                    type="text"
-                    value={form.source}
-                    onChange={(e) =>
-                      handleFieldChange("source", e.target.value)
-                    }
-                    disabled={submitting}
-                    placeholder={t(
-                      "pages.controlCenter.profiles.fieldSourcePlaceholder",
-                    )}
-                    className={inputClass}
-                    autoComplete="off"
-                    spellCheck={false}
-                  />
-                </div>
-                <div>
-                  <label className={labelClass} htmlFor="rpf-provider-oc">
-                    {t("pages.controlCenter.profiles.fieldProvider")}
-                  </label>
-                  <input
-                    id="rpf-provider-oc"
-                    type="text"
-                    value={form.provider}
-                    onChange={(e) =>
-                      handleFieldChange("provider", e.target.value)
-                    }
-                    disabled={submitting}
-                    placeholder={t(
-                      "pages.controlCenter.profiles.fieldProviderPlaceholder",
-                    )}
-                    className={inputClass}
-                    autoComplete="off"
-                    spellCheck={false}
-                  />
-                </div>
-                <div>
-                  <label className={labelClass} htmlFor="rpf-model-oc">
-                    {t("pages.controlCenter.profiles.fieldModel")}
-                  </label>
-                  <input
-                    id="rpf-model-oc"
-                    type="text"
-                    value={form.model}
-                    onChange={(e) => handleFieldChange("model", e.target.value)}
-                    disabled={submitting}
-                    placeholder={t(
-                      "pages.controlCenter.profiles.fieldModelPlaceholder",
-                    )}
-                    className={inputClass}
-                    autoComplete="off"
-                    spellCheck={false}
-                  />
-                </div>
-              </>
-            )}
           </div>
 
           {/* Inline validation / server error — danger token (SPEC-PD-UIUX-001 R5:
@@ -603,8 +480,13 @@ export function RuntimeProfileManager({
                     )}
                   </div>
                   {/* type */}
-                  <span className="font-mono text-[11.5px] text-ink-3">
+                  <span className="font-mono text-[11.5px] text-ink-3 flex items-center gap-[5px]">
                     {p.type}
+                    {p.type === "openclaw" && (
+                      <span className="text-[9.5px] font-mono px-[5px] py-[1px] rounded-[2px] bg-amber/10 text-amber border border-amber/22 tracking-[0.02em]">
+                        {t("pages.controlCenter.profiles.retiredBadge")}
+                      </span>
+                    )}
                   </span>
                   {/* provider */}
                   <span className="text-ink-3 truncate">
@@ -620,14 +502,18 @@ export function RuntimeProfileManager({
                   </span>
                   {/* actions */}
                   <div className="flex items-center justify-end gap-[6px]">
-                    <button
-                      type="button"
-                      onClick={() => openEdit(p)}
-                      disabled={mode !== "closed" || deleting}
-                      className="text-[11.5px] px-[10px] py-[4px] rounded-[3px] border border-line bg-surface text-ink-3 hover:border-line-2 hover:text-ink transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      {t("pages.controlCenter.profiles.editButton")}
-                    </button>
+                    {/* ADR-0029: legacy openclaw profiles are read-only — no Edit,
+                        only Delete (so the Owner can migrate to pi-ai). */}
+                    {p.type !== "openclaw" && (
+                      <button
+                        type="button"
+                        onClick={() => openEdit(p)}
+                        disabled={mode !== "closed" || deleting}
+                        className="text-[11.5px] px-[10px] py-[4px] rounded-[3px] border border-line bg-surface text-ink-3 hover:border-line-2 hover:text-ink transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {t("pages.controlCenter.profiles.editButton")}
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => {

@@ -53,6 +53,13 @@ function makeWorkspace(): Workspace {
   const config = getDefaultPdConfig();
   config.features['host.codex'].enabled = true;
   config.features['codex_conversation_ingestion'].enabled = true;
+  // ADR-0029: the shipped default pi-ai profile is deliberately needs_setup; this
+  // owner loop must reach the Diagnostician, so declare a ready profile.
+  (config.runtimeProfiles as Record<string, unknown>)['pd.default'] = {
+    type: 'pi-ai', provider: 'test-provider', model: 'test-model',
+    apiKeyEnv: 'PD_OWNER_LOOP_TEST_KEY', baseUrl: 'http://127.0.0.1:8080/v1',
+  };
+  process.env.PD_OWNER_LOOP_TEST_KEY = 'test-key';
   fs.writeFileSync(path.join(root, '.pd', 'config.yaml'), JSON.stringify(config));
   const trajectory = new Database(path.join(root, '.state', 'trajectory.db'));
   for (const statement of BASELINE_DDL) trajectory.prepare(statement).run();

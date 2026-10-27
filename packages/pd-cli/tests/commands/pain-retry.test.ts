@@ -199,7 +199,6 @@ vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
     DefaultDiagDistillerValidator: vi.fn().mockImplementation(function () { return {}; }),
     DisabledDiagnosticianRunner: vi.fn().mockImplementation(function () { return {}; }),
     TestDoubleRuntimeAdapter: vi.fn().mockImplementation(function () { return {}; }),
-    OpenClawCliRuntimeAdapter: vi.fn().mockImplementation(function () { return {}; }),
     PiAiRuntimeAdapter: vi.fn().mockImplementation(function () { return {}; }),
     SPLIT_PIPELINE_TOTAL_TIMEOUT_MS: 300000,
     // PRI-638: capability gate — available by default; disabled cases override this.
@@ -251,7 +250,7 @@ vi.mock('../../src/services/resolve-runtime-from-pd-config.js', () => ({
   resolveRuntimeFromPdConfig: mockResolveRuntimeFromPdConfig,
 }));
 
-import { handlePainRetry } from '../../src/commands/pain-retry.js';
+import { handlePainRetry, registerPainRetryCommand } from '../../src/commands/pain-retry.js';
 
 // ── Test Data ──────────────────────────────────────────────────────────────────
 
@@ -544,7 +543,7 @@ describe('pd pain retry — validation and error paths', () => {
     exitSpy.mockRestore();
   });
 
-  it('RETRY-05b: conflicting flags --openclaw-local + --openclaw-gateway — JSON output', async () => {
+  it('RETRY-05b (ADR-0029): openclaw-cli with legacy flags is refused as retired — JSON output', async () => {
     mockGetTask.mockResolvedValue(RETRY_WAIT_TASK);
 
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -565,7 +564,8 @@ describe('pd pain retry — validation and error paths', () => {
     expect(jsonCall).toBeDefined();
     const output = JSON.parse(jsonCall![0] as string);
     expect(output.status).toBe('refused');
-    expect(output.reason).toContain('conflicting_flags');
+    expect(output.reason).toBe('retired_runtime_kind');
+    expect(output.message).toContain('ADR-0029');
     expect(output.nextAction).toBeDefined();
     expect(exitSpy).toHaveBeenCalledWith(1);
 
@@ -617,7 +617,7 @@ describe('pd pain retry — validation and error paths', () => {
     exitSpy.mockRestore();
   });
 
-  it('DPB-09: openclaw-cli flag overrides file config mode (config=gateway, flag=local → runtimeMode=local)', async () => {
+  it('DPB-09 (ADR-0029): openclaw-cli legacy flag override attempt is refused (config=gateway, flag=local)', async () => {
     mockGetTask.mockResolvedValue(RETRY_WAIT_TASK);
     mockResolveRuntimeFromPdConfig.mockReturnValueOnce({
       result: {
@@ -642,20 +642,20 @@ describe('pd pain retry — validation and error paths', () => {
       json: true,
     });
 
-    // Flag override: config says gateway, flag says local → adapter gets local
-    const OpenClawCliMock = vi.mocked(
-      await import('@principles/core/runtime-v2').then(m => m.OpenClawCliRuntimeAdapter),
-    );
-    expect(OpenClawCliMock).toHaveBeenCalledWith(
-      expect.objectContaining({ runtimeMode: 'local' }),
-    );
-    expect(exitSpy).not.toHaveBeenCalledWith(1);
+    const jsonCall = logSpy.mock.calls.find((call) => {
+      try { JSON.parse(call[0] as string); return true; } catch { return false; }
+    });
+    expect(jsonCall).toBeDefined();
+    const output = JSON.parse(jsonCall![0] as string);
+    expect(output.status).toBe('refused');
+    expect(output.reason).toBe('retired_runtime_kind');
+    expect(exitSpy).toHaveBeenCalledWith(1);
 
     logSpy.mockRestore();
     exitSpy.mockRestore();
   });
 
-  it('DPB-09: openclaw-cli flag overrides file config mode (config=local, flag=gateway → runtimeMode=gateway)', async () => {
+  it('DPB-09 (ADR-0029): openclaw-cli legacy flag override attempt is refused (config=local, flag=gateway)', async () => {
     mockGetTask.mockResolvedValue(RETRY_WAIT_TASK);
     mockResolveRuntimeFromPdConfig.mockReturnValueOnce({
       result: {
@@ -680,13 +680,14 @@ describe('pd pain retry — validation and error paths', () => {
       json: true,
     });
 
-    const OpenClawCliMock = vi.mocked(
-      await import('@principles/core/runtime-v2').then(m => m.OpenClawCliRuntimeAdapter),
-    );
-    expect(OpenClawCliMock).toHaveBeenCalledWith(
-      expect.objectContaining({ runtimeMode: 'gateway' }),
-    );
-    expect(exitSpy).not.toHaveBeenCalledWith(1);
+    const jsonCall = logSpy.mock.calls.find((call) => {
+      try { JSON.parse(call[0] as string); return true; } catch { return false; }
+    });
+    expect(jsonCall).toBeDefined();
+    const output = JSON.parse(jsonCall![0] as string);
+    expect(output.status).toBe('refused');
+    expect(output.reason).toBe('retired_runtime_kind');
+    expect(exitSpy).toHaveBeenCalledWith(1);
 
     logSpy.mockRestore();
     exitSpy.mockRestore();
@@ -1059,31 +1060,16 @@ describe('pd pain retry — human-readable output', () => {
 });
 
 describe('Commander wiring for pd pain retry', () => {
+  // Real registration (cli-7): options come from the production wiring, so a
+  // removed flag shows up as an unknown option instead of passing vacuously.
   function createPainRetryProgram(): { program: Command; capturedOpts: Record<string, unknown> } {
     const program = new Command();
     program.exitOverride();
     const capturedOpts: Record<string, unknown> = {};
 
-    program
-      .command('pain')
-      .command('retry')
-      .requiredOption('-p, --pain-id <painId>', 'Pain ID')
-      .option('-w, --workspace <path>', 'Workspace directory')
-      .option('-r, --runtime <kind>', 'Runtime kind')
-      .option('--openclaw-local', 'Use local OpenClaw')
-      .option('--openclaw-gateway', 'Use gateway OpenClaw')
-      .option('-a, --agent <agentId>', 'Agent ID')
-      .option('--provider <name>', 'LLM provider')
-      .option('--model <id>', 'Model ID')
-      .option('--apiKeyEnv <name>', 'API key env var')
-      .option('--baseUrl <url>', 'Custom base URL')
-      .option('--maxRetries <n>', 'Max retries', parseInt)
-      .option('--timeoutMs <ms>', 'Timeout ms', parseInt)
-      .option('--force', 'Force retry of succeeded task')
-      .option('--json', 'Output raw JSON')
-      .action(async (opts) => {
-        Object.assign(capturedOpts, opts);
-      });
+    registerPainRetryCommand(program.command('pain'), async (opts) => {
+      Object.assign(capturedOpts, opts);
+    });
 
     return { program, capturedOpts };
   }
@@ -1168,22 +1154,25 @@ describe('Commander wiring for pd pain retry', () => {
     expect(capturedOpts.apiKeyEnv).toBe('OPENROUTER_KEY');
   });
 
-  it('CMD-14: -a (--agent) sets opts.agent', async () => {
-    const { program, capturedOpts } = createPainRetryProgram();
-    await program.parseAsync(['node', 'pd', 'pain', 'retry', '--pain-id', 'abc', '-a', 'main']);
-    expect(capturedOpts.agent).toBe('main');
+  it('CMD-14: retired -a (--agent) flag is not registered (ADR-0029)', async () => {
+    const { program } = createPainRetryProgram();
+    await expect(
+      program.parseAsync(['node', 'pd', 'pain', 'retry', '--pain-id', 'abc', '-a', 'main'])
+    ).rejects.toThrow(/unknown option '-a'/);
   });
 
-  it('CMD-15: --openclaw-local sets opts.openclawLocal === true', async () => {
-    const { program, capturedOpts } = createPainRetryProgram();
-    await program.parseAsync(['node', 'pd', 'pain', 'retry', '--pain-id', 'abc', '--openclaw-local']);
-    expect(capturedOpts.openclawLocal).toBe(true);
+  it('CMD-15: retired --openclaw-local flag is not registered (ADR-0029)', async () => {
+    const { program } = createPainRetryProgram();
+    await expect(
+      program.parseAsync(['node', 'pd', 'pain', 'retry', '--pain-id', 'abc', '--openclaw-local'])
+    ).rejects.toThrow(/unknown option '--openclaw-local'/);
   });
 
-  it('CMD-16: --openclaw-gateway sets opts.openclawGateway === true', async () => {
-    const { program, capturedOpts } = createPainRetryProgram();
-    await program.parseAsync(['node', 'pd', 'pain', 'retry', '--pain-id', 'abc', '--openclaw-gateway']);
-    expect(capturedOpts.openclawGateway).toBe(true);
+  it('CMD-16: retired --openclaw-gateway flag is not registered (ADR-0029)', async () => {
+    const { program } = createPainRetryProgram();
+    await expect(
+      program.parseAsync(['node', 'pd', 'pain', 'retry', '--pain-id', 'abc', '--openclaw-gateway'])
+    ).rejects.toThrow(/unknown option '--openclaw-gateway'/);
   });
 });
 

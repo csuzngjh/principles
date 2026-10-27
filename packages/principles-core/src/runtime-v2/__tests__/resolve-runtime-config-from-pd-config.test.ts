@@ -77,14 +77,16 @@ const envWithoutKey = (_name: string) => undefined;
 // ── resolveRuntimeConfigFromPdConfig ─────────────────────────────────────────
 
 describe('resolveRuntimeConfigFromPdConfig', () => {
-  it('AC1: resolves OpenClaw model reference for diagnostician', () => {
+  it('AC1: a legacy openclaw profile fails closed with the retirement reason (ADR-0029)', () => {
     const config = makeConfigWithOpenClawProfile();
     const effective = computeEffectivePdConfig(config);
     const result = resolveRuntimeConfigFromPdConfig(effective, envWithoutKey);
 
-    expect(isRuntimeConfigError(result)).toBe(false);
-    if (isRuntimeConfigError(result)) return;
-    expect(result.runtimeKind).toBe('openclaw-cli');
+    expect(isRuntimeConfigError(result)).toBe(true);
+    if (!isRuntimeConfigError(result)) return;
+    expect(result.reason).toBe('needs_setup');
+    expect(result.message).toContain('retired');
+    expect(result.nextAction).toContain('pi-ai');
   });
 
   it('AC2: resolves PD-local profile with apiKeyEnv for diagnostician', () => {
@@ -110,12 +112,13 @@ describe('resolveRuntimeConfigFromPdConfig', () => {
     if (isRuntimeConfigError(diagResult)) return;
     expect(diagResult.runtimeKind).toBe('pi-ai');
 
-    // default (no override) → openclaw.default (MVP default runtime), resolves successfully
+    // default (no override) → the seeded pi-ai profile, which ships unconfigured,
+    // so the factory fails closed with needs_setup instead of running anything.
     const defaultEffective = computeEffectivePdConfig(null);
     const defaultResult = resolveRuntimeConfigFromPdConfig(defaultEffective, envWithoutKey);
-    expect(isRuntimeConfigError(defaultResult)).toBe(false);
-    if (isRuntimeConfigError(defaultResult)) return;
-    expect(defaultResult.runtimeKind).toBe('openclaw-cli');
+    expect(isRuntimeConfigError(defaultResult)).toBe(true);
+    if (!isRuntimeConfigError(defaultResult)) return;
+    expect(defaultResult.reason).toBe('needs_setup');
   });
 
   it('AC4: missing env var fails loud with reason + nextAction', () => {
@@ -130,13 +133,17 @@ describe('resolveRuntimeConfigFromPdConfig', () => {
     expect(result.nextAction).toBeTruthy();
   });
 
-  it('AC5: null config defaults to openclaw runtime, resolves successfully without env var', () => {
+  it('AC5: null config defaults to an UNCONFIGURED pi-ai profile and fails closed (ADR-0029)', () => {
     const effective = computeEffectivePdConfig(null);
     const result = resolveRuntimeConfigFromPdConfig(effective, envWithoutKey);
 
-    expect(isRuntimeConfigError(result)).toBe(false);
-    if (isRuntimeConfigError(result)) return;
-    expect(result.runtimeKind).toBe('openclaw-cli');
+    // There is no host-delegated "always ready" default any more: a workspace
+    // with no LLM config must say so instead of silently running on a host.
+    expect(isRuntimeConfigError(result)).toBe(true);
+    if (!isRuntimeConfigError(result)) return;
+    expect(result.reason).toBe('needs_setup');
+    expect(result.message).toContain('provider');
+    expect(result.nextAction).toBeTruthy();
   });
 
   it('returns error for disabled agent', () => {
@@ -275,16 +282,16 @@ describe('resolveRuntimeConfigForAgent (PRI-719 per-agent binding)', () => {
 
   it('agent without an explicit binding falls back to defaultRuntime', () => {
     const base = getDefaultPdConfig();
-    // Point defaultRuntime at an env-free openclaw profile; evaluator has no
+    // Point defaultRuntime at a configured pi-ai profile; evaluator has no
     // per-agent override → resolves the DEFAULT binding.
     const config: PdConfig = {
       ...base,
       runtimeProfiles: {
         ...base.runtimeProfiles,
-        'env-free-openclaw': { type: 'openclaw', provider: 'x', model: 'y' },
+        'default-target': { type: 'pi-ai', provider: 'x', model: 'y', apiKeyEnv: 'FALLBACK_TEST_KEY' },
       },
       internalAgents: {
-        defaultRuntime: 'env-free-openclaw',
+        defaultRuntime: 'default-target',
         agents: {
           ...base.internalAgents.agents,
           // The default config ships evaluator disabled — enable it so the
@@ -294,11 +301,13 @@ describe('resolveRuntimeConfigForAgent (PRI-719 per-agent binding)', () => {
       },
     };
     const effective = computeEffectivePdConfig(config);
-    const result = resolveRuntimeConfigForAgent(effective, 'evaluator', { getEnvVar: envWithoutKey });
+    const result = resolveRuntimeConfigForAgent(effective, 'evaluator', {
+      getEnvVar: (name) => (name === 'FALLBACK_TEST_KEY' ? 'test-sentinel-not-a-credential' : undefined),
+    });
     expect(isRuntimeConfigError(result)).toBe(false);
     if (isRuntimeConfigError(result)) return;
-    expect(result.runtimeKind).toBe('openclaw-cli');
-    expect(result.runtimeProfileId).toBe('env-free-openclaw');
+    expect(result.runtimeKind).toBe('pi-ai');
+    expect(result.runtimeProfileId).toBe('default-target');
   });
 
   it('per-agent readiness failure is observable and does not leak other agents', () => {
@@ -324,11 +333,11 @@ describe('resolveRuntimeConfigForAgent (PRI-719 per-agent binding)', () => {
   });
 
   it('AGENT_NAME_FOR_TASK_KIND maps the consumer runner kinds (incl. camelCase rolloutReviewer)', () => {
-    expect(AGENT_NAME_FOR_TASK_KIND['dreamer']).toBe('dreamer');
-    expect(AGENT_NAME_FOR_TASK_KIND['scribe']).toBe('scribe');
-    expect(AGENT_NAME_FOR_TASK_KIND['rollout_reviewer']).toBe('rolloutReviewer');
+    expect(AGENT_NAME_FOR_TASK_KIND.dreamer).toBe('dreamer');
+    expect(AGENT_NAME_FOR_TASK_KIND.scribe).toBe('scribe');
+    expect(AGENT_NAME_FOR_TASK_KIND.rollout_reviewer).toBe('rolloutReviewer');
     // Diagnostic stages are owned by the pain-signal bridge, not the map.
-    expect(AGENT_NAME_FOR_TASK_KIND['diag_router']).toBeUndefined();
-    expect(AGENT_NAME_FOR_TASK_KIND['diagnostician']).toBeUndefined();
+    expect(AGENT_NAME_FOR_TASK_KIND.diag_router).toBeUndefined();
+    expect(AGENT_NAME_FOR_TASK_KIND.diagnostician).toBeUndefined();
   });
 });

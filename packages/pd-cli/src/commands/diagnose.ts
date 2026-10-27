@@ -78,9 +78,6 @@ interface DiagnoseRunOptions {
   workspace?: string;
   json?: boolean;
   runtime?: string;
-  openclawLocal?: boolean;
-  openclawGateway?: boolean;
-  agent?: string;
   provider?: string;
   model?: string;
   apiKeyEnv?: string;
@@ -206,13 +203,6 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
   // PRI-720: resolve the full-chain override once per invocation.
   const seedPipelineMode = resolvePromptFullPipelineSeedMode(workspaceDir);
 
-  // Validate mutually exclusive flags (HG-03)
-  if (opts.openclawLocal && opts.openclawGateway) {
-    console.error('error: --openclaw-local and --openclaw-gateway are mutually exclusive');
-    process.exit(1);
-    return;
-  }
-
   // PRI-638: this is the CLI's ONLY capability disable check. It reads the
   // canonical authority (internalAgents.agents.diagnostician.enabled) through
   // the same resolver the runtime factory uses, so `pd diagnose` can never
@@ -296,7 +286,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
     // PRI-431: migrated to shared resolveRuntimeAdapterFromConfig
     let runtimeAdapter: PDRuntimeAdapter;
     // Capture config info for telemetry (resolver consumes config internally)
-    let telemetryConfig: { provider?: string; model?: string; openclawMode?: string } = {};
+    let telemetryConfig: { provider?: string; model?: string } = {};
     try {
       if (runtimeKind === 'test-double') {
         runtimeAdapter = resolveRuntimeAdapterFromConfig({
@@ -306,36 +296,22 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
           testDoublePayloadBuilder: () => buildDiagnosticianTestDouble(opts.taskId),
         });
       } else if (runtimeKind === 'openclaw-cli') {
-        const flagMode: 'local' | 'gateway' | undefined = opts.openclawLocal
-          ? 'local'
-          : opts.openclawGateway
-            ? 'gateway'
-            : undefined;
-        runtimeAdapter = resolveRuntimeAdapterFromConfig({
-          runtimeKind,
-          workspaceDir,
-          openclawMode: flagMode,
-          agentId: opts.agent ?? 'main',
-          onConfigResolved: (resolved) => {
-            if (!isRuntimeConfigError(resolved.result)) {
-              telemetryConfig.openclawMode = flagMode ?? resolved.result.openclawMode;
-            } else {
-              telemetryConfig.openclawMode = flagMode;
-            }
-          },
-        });
-        // TELE-01: runtime_adapter_selected — user explicitly chose openclaw-cli runtime
-        diagnoseTelemetry.emitTelemetry({
-          eventType: 'runtime_adapter_selected',
-          traceId: opts.taskId,
-          timestamp: new Date().toISOString(),
-          sessionId: 'pd-cli-diagnose',
-          agentId: 'openclaw-cli-adapter',
-          payload: {
-            runtimeKind: 'openclaw-cli',
-            runtimeMode: telemetryConfig.openclawMode ?? 'local',
-          },
-        });
+        // ADR-0029: this backend spawned a host CLI agent session; it is retired.
+        // Refuse the request instead of falling back onto pi-ai (rc-9, cli-5).
+        const retiredResult = {
+          ok: false,
+          reason: 'retired_runtime_kind',
+          message: "The 'openclaw-cli' runtime backend is retired (ADR-0029): PD runs internal agents only on its own pi-ai runtime.",
+          nextAction: 'Use --runtime pi-ai, or omit --runtime to resolve a pi-ai profile from .pd/config.yaml',
+        };
+        if (opts.json) {
+          console.log(JSON.stringify(retiredResult, null, 2));
+        } else {
+          console.error(`error: ${retiredResult.message}`);
+          console.error(`nextAction: ${retiredResult.nextAction}`);
+        }
+        process.exit(1);
+        return;
       } else if (runtimeKind === 'pi-ai') {
         runtimeAdapter = resolveRuntimeAdapterFromConfig({
           runtimeKind,
@@ -375,12 +351,12 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
         const unsupportedResult = {
           ok: false,
           reason: `unsupported_runtime_kind: ${runtimeKind}`,
-          nextAction: 'Use one of: openclaw-cli, test-double, pi-ai',
+          nextAction: 'Use one of: pi-ai, test-double',
         };
         if (opts.json) {
           console.log(JSON.stringify(unsupportedResult, null, 2));
         } else {
-          console.error(`error: unknown runtime kind '${runtimeKind}' (supported: openclaw-cli, test-double, pi-ai)`);
+          console.error(`error: unknown runtime kind '${runtimeKind}' (supported: pi-ai, test-double)`);
           console.error(`Next action: ${unsupportedResult.nextAction}`);
         }
         process.exit(1);
@@ -388,23 +364,7 @@ export async function handleDiagnoseRun(opts: DiagnoseRunOptions): Promise<void>
       }
     } catch (err) {
       if (err instanceof ConfigResolutionError) {
-        // Preserve original error format for openclaw-cli missing mode (backward compat)
-        if (err.kind === 'missing-fields' && err.missing?.includes('openclawMode')) {
-          if (opts.json) {
-            console.log(JSON.stringify({
-              ok: false,
-              reason: 'missing_openclaw_mode',
-              message: 'runtimeKind is openclaw-cli but no mode resolved',
-              nextAction: 'Provide --openclaw-local or --openclaw-gateway, or set openclawMode in .pd/config.yaml',
-            }));
-          } else {
-            console.error('error: runtimeKind is openclaw-cli but no mode resolved');
-            console.error('nextAction: Provide --openclaw-local or --openclaw-gateway, or set openclawMode in .pd/config.yaml');
-          }
-          process.exit(1);
-          return;
-        }
-        // Default error formatting for other config resolution errors
+        // Default error formatting for config resolution errors
         if (opts.json) {
           console.log(JSON.stringify({ ok: false, reason: err.kind, message: err.message, missing: err.missing, nextAction: err.nextAction ?? 'Check .pd/config.yaml and retry' }));
         } else {

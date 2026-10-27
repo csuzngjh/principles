@@ -6,14 +6,11 @@
  * resolves its adapter from an explicit profile id. These tests pin the
  * contract that the review surface depends on:
  *
- *   - a profile with `source: 'default'` resolves to an OpenClawCliRuntimeAdapter
- *     in DELEGATED mode ('default') — identical to how
- *     pain-signal-runtime-factory's validateRuntimeConfig treats the same
- *     profile (`openclawMode may be undefined when source = default`). The
- *     resolver previously threw "requires openclawMode" here, which made the
- *     capability permanently unavailable under the DEFAULT configuration
- *     (P1 review finding on PR #1902);
- *   - an explicit local/gateway profile still resolves concretely;
+ *   - a pi-ai profile resolves to a PiAiRuntimeAdapter (ADR-0029 makes pi-ai
+ *     the only internal-agent runtime backend, so this is the green path);
+ *   - a legacy `type: 'openclaw'` profile fails closed with needs_setup —
+ *     including `source: 'default'`, which used to resolve to a delegated
+ *     host CLI session (the behavior ADR-0029 retires);
  *   - an unknown profile id fails closed (profile_not_found).
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -22,7 +19,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'js-yaml';
 import { resolveRuntimeAdapterFromConfig } from '../../src/services/runtime-adapter-resolver.js';
-import { OpenClawCliRuntimeAdapter } from '@principles/core/runtime-v2';
+import { PiAiRuntimeAdapter } from '@principles/core/runtime-v2';
 
 let workspaceDir: string;
 
@@ -56,19 +53,19 @@ function baseConfig(overrides: Record<string, unknown> = {}): Record<string, unk
 }
 
 describe('resolveRuntimeAdapterFromConfig — runtimeProfileId (capability path)', () => {
-  it('resolves a source=default OpenClaw profile in DELEGATED mode (no openclawMode required)', () => {
+  it('refuses a retired openclaw profile: fail-closed, never a delegated host session (ADR-0029)', () => {
     writeConfig(baseConfig());
 
-    const adapter = resolveRuntimeAdapterFromConfig({
-      runtimeKind: 'config',
-      workspaceDir,
-      runtimeProfileId: 'openclaw.default',
-    });
-
-    expect(adapter).toBeInstanceOf(OpenClawCliRuntimeAdapter);
+    expect(() =>
+      resolveRuntimeAdapterFromConfig({
+        runtimeKind: 'config',
+        workspaceDir,
+        runtimeProfileId: 'openclaw.default',
+      }),
+    ).toThrowError(/retired \(ADR-0029\)/);
   });
 
-  it('resolves a concrete local profile without delegation', () => {
+  it('refuses a concrete legacy openclaw profile too — provider+model no longer make it ready', () => {
     writeConfig(baseConfig({
       runtimeProfiles: {
         'openclaw.default': { type: 'openclaw', source: 'default' },
@@ -76,13 +73,46 @@ describe('resolveRuntimeAdapterFromConfig — runtimeProfileId (capability path)
       },
     }));
 
-    const adapter = resolveRuntimeAdapterFromConfig({
-      runtimeKind: 'config',
-      workspaceDir,
-      runtimeProfileId: 'openclaw.local',
-    });
+    expect(() =>
+      resolveRuntimeAdapterFromConfig({
+        runtimeKind: 'config',
+        workspaceDir,
+        runtimeProfileId: 'openclaw.local',
+      }),
+    ).toThrowError(/retired \(ADR-0029\)/);
+  });
 
-    expect(adapter).toBeDefined();
+  it('names the retirement, not invalid-config, when a retired runtime kind meets a bad config', () => {
+    // The workspace config resolves to needs_setup (legacy openclaw default);
+    // naming the retired backend must still be reported as retired (cli-6).
+    writeConfig(baseConfig());
+
+    expect(() =>
+      resolveRuntimeAdapterFromConfig({
+        runtimeKind: 'openclaw-cli',
+        workspaceDir,
+        runtimeProfileId: 'openclaw.default',
+      }),
+    ).toThrowError(/retired \(ADR-0029\)/);
+  });
+
+  it('resolves a pi-ai capability profile (the only supported backend)', () => {
+    writeConfig(baseConfig({
+      runtimeProfiles: {
+        'pd.anthropic': { type: 'pi-ai', provider: 'anthropic', model: 'claude-3-5-sonnet', apiKeyEnv: 'PD_RESOLVER_TEST_KEY' },
+      },
+    }));
+    process.env.PD_RESOLVER_TEST_KEY = 'stub-sentinel-not-a-credential';
+    try {
+      const adapter = resolveRuntimeAdapterFromConfig({
+        runtimeKind: 'config',
+        workspaceDir,
+        runtimeProfileId: 'pd.anthropic',
+      });
+      expect(adapter).toBeInstanceOf(PiAiRuntimeAdapter);
+    } finally {
+      delete process.env.PD_RESOLVER_TEST_KEY;
+    }
   });
 
   it('fails closed on an unknown profile id', () => {

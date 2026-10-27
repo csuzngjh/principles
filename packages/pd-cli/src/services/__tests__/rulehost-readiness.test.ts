@@ -99,7 +99,9 @@ function writeConfig(workspaceDir: string, opts: ConfigOptions = {}): void {
 
 /**
  * Write the default installed config pattern from create-principles-disciple.
- * This uses openclaw profiles and has philosopher/evaluator disabled.
+ * Since ADR-0029 the installer seeds ONLY the pi-ai default profile, with
+ * provider/model/apiKeyEnv left empty until the Owner configures an LLM;
+ * philosopher/evaluator stay disabled.
  */
 function writeDefaultInstalledConfig(workspaceDir: string): void {
   const configDir = path.join(workspaceDir, '.pd');
@@ -114,19 +116,19 @@ function writeDefaultInstalledConfig(workspaceDir: string): void {
       code_rule_capability: { category: 'core', enabled: true },
     },
     runtimeProfiles: {
-      'openclaw.default': { type: 'openclaw', source: 'default' },
+      'pd.default': { type: 'pi-ai', provider: '', model: '', apiKeyEnv: '' },
     },
     internalAgents: {
-      defaultRuntime: 'openclaw.default',
+      defaultRuntime: 'pd.default',
       agents: {
-        diagnostician: { enabled: true, runtimeProfile: 'openclaw.default' },
-        dreamer: { enabled: true, runtimeProfile: 'openclaw.default' },
-        philosopher: { enabled: false, runtimeProfile: 'openclaw.default' },
-        scribe: { enabled: true, runtimeProfile: 'openclaw.default' },
-        artificer: { enabled: true, runtimeProfile: 'openclaw.default' },
-        evaluator: { enabled: false, runtimeProfile: 'openclaw.default' },
-        rolloutReviewer: { enabled: false, runtimeProfile: 'openclaw.default' },
-        correctionObserver: { enabled: false, runtimeProfile: 'openclaw.default' },
+        diagnostician: { enabled: true, runtimeProfile: 'pd.default' },
+        dreamer: { enabled: true, runtimeProfile: 'pd.default' },
+        philosopher: { enabled: false, runtimeProfile: 'pd.default' },
+        scribe: { enabled: true, runtimeProfile: 'pd.default' },
+        artificer: { enabled: true, runtimeProfile: 'pd.default' },
+        evaluator: { enabled: false, runtimeProfile: 'pd.default' },
+        rolloutReviewer: { enabled: false, runtimeProfile: 'pd.default' },
+        correctionObserver: { enabled: false, runtimeProfile: 'pd.default' },
       },
     },
     ui: { diagnostics: { mode: 'simple' } },
@@ -301,11 +303,12 @@ describe('resolveRuleHostReadiness', () => {
 
   // ── default installed config (EP-09) ────────────────────────────────────
 
-  it('returns refused for the default installed config (openclaw profiles, philosopher/evaluator disabled)', () => {
+  it('returns refused for the default installed config (unconfigured pi-ai profile, philosopher/evaluator disabled)', () => {
     writeDefaultInstalledConfig(workspaceDir);
     const result = resolveRuleHostReadiness(workspaceDir, envLookup({}));
-    // Default config uses openclaw profiles — dreamer/scribe can't get pi-ai adapters.
-    // Philosopher is also disabled. So the status is refused.
+    // ADR-0029: the seeded default is a pi-ai profile with empty provider/
+    // model/apiKeyEnv, so no agent is ready until the Owner configures an
+    // LLM. Philosopher is also disabled. Either way the status is refused.
     expect(result.status).toBe('refused');
     expect(result.reason).toBeDefined();
     expect(result.reason.length).toBeGreaterThan(0);
