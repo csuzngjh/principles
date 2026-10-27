@@ -141,18 +141,8 @@ vi.mock('@principles/core/runtime-v2', () => ({
       fetchArtifacts: vi.fn().mockResolvedValue([]),
     };
   }),
-  OpenClawCliRuntimeAdapter: vi.fn().mockImplementation(function () {
-    return {
-      kind: vi.fn().mockReturnValue('openclaw-cli'),
-      getCapabilities: vi.fn(),
-      healthCheck: vi.fn(),
-      startRun: vi.fn().mockResolvedValue({ runId: 'run-oc-001', runtimeKind: 'openclaw-cli', startedAt: new Date().toISOString() }),
-      pollRun: vi.fn().mockResolvedValue({ runId: 'run-oc-001', status: 'succeeded' }),
-      cancelRun: vi.fn().mockResolvedValue(undefined),
-      fetchOutput: vi.fn().mockResolvedValue({ runId: 'run-oc-001', payload: {} }),
-      fetchArtifacts: vi.fn().mockResolvedValue([]),
-    };
-  }),
+  // ADR-0029 retired the openclaw-cli backend: the barrel no longer exports
+  // OpenClawCliRuntimeAdapter, so the factory mock dies with it.
   resolveRuntimeConfig: vi.fn().mockReturnValue({
     runtimeKind: 'pi-ai',
     timeoutMs: 300_000,
@@ -473,7 +463,7 @@ describe('handleRuntimeInternalizationRunOnce', () => {
     expect(PiAiMock).toHaveBeenCalled();
   });
 
-  it('--runtime openclaw-cli resolves OpenClawCliRuntimeAdapter', async () => {
+  it('--runtime openclaw-cli is refused as retired (ADR-0029) with a config_error decision', async () => {
     mockResolveRuntimeFromPdConfig.mockReturnValueOnce({
       result: {
         runtimeKind: 'openclaw-cli',
@@ -492,21 +482,22 @@ describe('handleRuntimeInternalizationRunOnce', () => {
       taskKind: 'dreamer',
     });
 
-    mockRun.mockResolvedValue({
-      status: 'succeeded',
-      taskId: 'task-dreamer-007',
-      runId: 'run-007',
-      artifactId: 'pi-art-task-dreamer-007-run-007',
-      resultRef: 'dreamer://run-007',
-      attemptCount: 1,
-    });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
 
     await handleRuntimeInternalizationRunOnce({ workspace: WS, runtime: 'openclaw-cli', json: true });
 
-    const OpenClawMock = vi.mocked(
-      await import('@principles/core/runtime-v2').then(m => m.OpenClawCliRuntimeAdapter),
-    );
-    expect(OpenClawMock).toHaveBeenCalled();
+    const jsonCall = logSpy.mock.calls.find((call) => {
+      try { JSON.parse(call[0] as string); return true; } catch { return false; }
+    });
+    expect(jsonCall).toBeDefined();
+    const output = JSON.parse(jsonCall![0] as string);
+    expect(output.decision).toBe('config_error');
+    expect(output.reason).toContain('retired (ADR-0029)');
+    expect(output.nextAction).toContain('--runtime pi-ai');
+
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
   });
 
   it('--runtime config resolves adapter from .pd/config.yaml with workspace path (PRI-393)', async () => {

@@ -1,6 +1,6 @@
 {
   "barrel": "src/runtime-v2/index.ts",
-  "count": 1977,
+  "count": 1973,
   "names": [
     "ADMISSION_CONFIDENCE_THRESHOLD",
     "ADMISSION_POLICY_VERSION",
@@ -34,7 +34,6 @@
     "ActivationStatusRecord",
     "ActivationSummary",
     "ActivationSummarySchema",
-    "AdapterConfigResult",
     "AdmissionDecision",
     "AdmissionDecisionEvent",
     "AdmissionEvaluationRecord",
@@ -782,9 +781,6 @@
     "OWNER_EVIDENCE_SCOPE_ERROR_NAME",
     "OWNER_IDENTITY_FILE_NAME",
     "OWNER_IDENTITY_SCHEMA_VERSION",
-    "OpenClawAdapterConfigResult",
-    "OpenClawCliRuntimeAdapter",
-    "OpenClawCliRuntimeAdapterOptions",
     "OpenClawRuntimeProfile",
     "OperatorHealthReadModel",
     "OperatorHealthReadModelOptions",

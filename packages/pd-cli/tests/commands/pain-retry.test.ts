@@ -199,7 +199,6 @@ vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
     DefaultDiagDistillerValidator: vi.fn().mockImplementation(function () { return {}; }),
     DisabledDiagnosticianRunner: vi.fn().mockImplementation(function () { return {}; }),
     TestDoubleRuntimeAdapter: vi.fn().mockImplementation(function () { return {}; }),
-    OpenClawCliRuntimeAdapter: vi.fn().mockImplementation(function () { return {}; }),
     PiAiRuntimeAdapter: vi.fn().mockImplementation(function () { return {}; }),
     SPLIT_PIPELINE_TOTAL_TIMEOUT_MS: 300000,
     // PRI-638: capability gate — available by default; disabled cases override this.
@@ -544,7 +543,7 @@ describe('pd pain retry — validation and error paths', () => {
     exitSpy.mockRestore();
   });
 
-  it('RETRY-05b: conflicting flags --openclaw-local + --openclaw-gateway — JSON output', async () => {
+  it('RETRY-05b (ADR-0029): openclaw-cli with legacy flags is refused as retired — JSON output', async () => {
     mockGetTask.mockResolvedValue(RETRY_WAIT_TASK);
 
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -565,7 +564,8 @@ describe('pd pain retry — validation and error paths', () => {
     expect(jsonCall).toBeDefined();
     const output = JSON.parse(jsonCall![0] as string);
     expect(output.status).toBe('refused');
-    expect(output.reason).toContain('conflicting_flags');
+    expect(output.reason).toBe('retired_runtime_kind');
+    expect(output.message).toContain('ADR-0029');
     expect(output.nextAction).toBeDefined();
     expect(exitSpy).toHaveBeenCalledWith(1);
 
@@ -617,7 +617,7 @@ describe('pd pain retry — validation and error paths', () => {
     exitSpy.mockRestore();
   });
 
-  it('DPB-09: openclaw-cli flag overrides file config mode (config=gateway, flag=local → runtimeMode=local)', async () => {
+  it('DPB-09 (ADR-0029): openclaw-cli legacy flag override attempt is refused (config=gateway, flag=local)', async () => {
     mockGetTask.mockResolvedValue(RETRY_WAIT_TASK);
     mockResolveRuntimeFromPdConfig.mockReturnValueOnce({
       result: {
@@ -642,20 +642,20 @@ describe('pd pain retry — validation and error paths', () => {
       json: true,
     });
 
-    // Flag override: config says gateway, flag says local → adapter gets local
-    const OpenClawCliMock = vi.mocked(
-      await import('@principles/core/runtime-v2').then(m => m.OpenClawCliRuntimeAdapter),
-    );
-    expect(OpenClawCliMock).toHaveBeenCalledWith(
-      expect.objectContaining({ runtimeMode: 'local' }),
-    );
-    expect(exitSpy).not.toHaveBeenCalledWith(1);
+    const jsonCall = logSpy.mock.calls.find((call) => {
+      try { JSON.parse(call[0] as string); return true; } catch { return false; }
+    });
+    expect(jsonCall).toBeDefined();
+    const output = JSON.parse(jsonCall![0] as string);
+    expect(output.status).toBe('refused');
+    expect(output.reason).toBe('retired_runtime_kind');
+    expect(exitSpy).toHaveBeenCalledWith(1);
 
     logSpy.mockRestore();
     exitSpy.mockRestore();
   });
 
-  it('DPB-09: openclaw-cli flag overrides file config mode (config=local, flag=gateway → runtimeMode=gateway)', async () => {
+  it('DPB-09 (ADR-0029): openclaw-cli legacy flag override attempt is refused (config=local, flag=gateway)', async () => {
     mockGetTask.mockResolvedValue(RETRY_WAIT_TASK);
     mockResolveRuntimeFromPdConfig.mockReturnValueOnce({
       result: {
@@ -680,13 +680,14 @@ describe('pd pain retry — validation and error paths', () => {
       json: true,
     });
 
-    const OpenClawCliMock = vi.mocked(
-      await import('@principles/core/runtime-v2').then(m => m.OpenClawCliRuntimeAdapter),
-    );
-    expect(OpenClawCliMock).toHaveBeenCalledWith(
-      expect.objectContaining({ runtimeMode: 'gateway' }),
-    );
-    expect(exitSpy).not.toHaveBeenCalledWith(1);
+    const jsonCall = logSpy.mock.calls.find((call) => {
+      try { JSON.parse(call[0] as string); return true; } catch { return false; }
+    });
+    expect(jsonCall).toBeDefined();
+    const output = JSON.parse(jsonCall![0] as string);
+    expect(output.status).toBe('refused');
+    expect(output.reason).toBe('retired_runtime_kind');
+    expect(exitSpy).toHaveBeenCalledWith(1);
 
     logSpy.mockRestore();
     exitSpy.mockRestore();

@@ -2,8 +2,11 @@
  * pd runtime probe command — Runtime health and capabilities inspection.
  *
  * Usage:
- *   pd runtime probe --runtime openclaw-cli [--openclaw-local|--openclaw-gateway] [--json]
  *   pd runtime probe --runtime pi-ai --provider <name> --model <id> --apiKeyEnv <name> [--baseUrl <url>] [--json]
+ *   pd runtime probe --runtime config -w <workspace> [--json]
+ *
+ * ADR-0029 retired the 'openclaw-cli' backend: a probe is a health/capability
+ * check of PD's own pi-ai runtime and never attaches to a host CLI agent session.
  *
  * HG-01 HARD GATE: This command must deliver.
  */
@@ -14,9 +17,6 @@ import { resolveRuntimeFromPdConfig, resolveRuntimeWithOverrides } from '../serv
 
 interface RuntimeProbeOptions {
   runtime: string;
-  openclawLocal?: boolean;
-  openclawGateway?: boolean;
-  agent?: string;
   provider?: string;
   model?: string;
   apiKeyEnv?: string;
@@ -40,94 +40,23 @@ function formatCapabilitiesTable(capabilities: Record<string, unknown>): string 
 }
 
 /**
- * openclaw-cli probe branch (existing behavior, unchanged).
+ * ADR-0029 fail-loud reporter for a request that names the retired backend.
+ * `--runtime openclaw-cli` and a legacy config-resolved openclaw profile both
+ * land here: the probe must not silently fall back onto pi-ai (rc-9).
  */
-async function handleOpenClawProbe(opts: RuntimeProbeOptions): Promise<void> {
-  // Validate mutually exclusive flags (HG-03)
-  if (opts.openclawLocal && opts.openclawGateway) {
-    console.error('error: --openclaw-local and --openclaw-gateway are mutually exclusive');
-    process.exit(1);
+function reportRetiredRuntime(json?: boolean): void {
+  const message =
+    "The 'openclaw-cli' runtime backend is retired (ADR-0029): PD runs internal agents " +
+    "only on its own pi-ai runtime, never through a host CLI agent session.";
+  const nextAction =
+    "Use --runtime pi-ai, or --runtime config -w <workspace> with a pi-ai profile in .pd/config.yaml.";
+  if (json) {
+    console.log(JSON.stringify({ ok: false, status: 'failed', reason: 'retired_runtime_kind', message, nextAction }, null, 2));
+  } else {
+    console.error(`error: ${message}`);
+    console.error(`nextAction: ${nextAction}`);
   }
-
-  // Require explicit runtime mode (HG-03, DPB-09)
-  if (!opts.openclawLocal && !opts.openclawGateway) {
-    console.error('error: --openclaw-local or --openclaw-gateway is required for --runtime openclaw-cli');
-    process.exit(1);
-  }
-
-  const runtimeMode = opts.openclawLocal ? 'local' : 'gateway';
-
-  try {
-    const result = await probeRuntime({
-      runtimeKind: 'openclaw-cli',
-      runtimeMode,
-      agentId: opts.agent,
-    });
-
-    // Per finding #2: status must reflect actual health
-    // healthy=false → status=failed, exit 1
-    // healthy=true + degraded=true → status=degraded
-    // healthy=true + degraded=false → status=succeeded
-    let exitCode = 0;
-    const status = !result.health.healthy ? 'failed'
-      : result.health.degraded ? 'degraded'
-      : 'succeeded';
-    if (!result.health.healthy) exitCode = 1;
-
-    if (opts.json) {
-      console.log(JSON.stringify({
-        status,
-        runtimeKind: result.runtimeKind,
-        health: result.health,
-        capabilities: result.capabilities,
-      }, null, 2));
-      if (exitCode !== 0) {
-        process.exit(exitCode);
-      }
-      return;
-    }
-
-    // Human-readable output
-    console.log(`\nRuntime: ${result.runtimeKind}`);
-    console.log(`Mode:    ${runtimeMode}`);
-    console.log(`Status:  ${status}`);
-    console.log('');
-    console.log('Health:');
-    console.log(`  healthy:       ${result.health.healthy ? 'yes' : 'no'}`);
-    console.log(`  degraded:      ${result.health.degraded ? 'yes' : 'no'}`);
-    if (result.health.warnings.length > 0) {
-      console.log(`  warnings:`);
-      for (const w of result.health.warnings) {
-        console.log(`    - ${w}`);
-      }
-    }
-    console.log(`  lastCheckedAt: ${result.health.lastCheckedAt}`);
-    console.log('');
-    console.log('Capabilities:');
-    console.log(formatCapabilitiesTable(result.capabilities));
-    console.log('');
-
-    if (exitCode !== 0) {
-      process.exit(exitCode);
-    }
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    let errorCategory = 'execution_failed';
-    if (error instanceof PDRuntimeError) {
-      errorCategory = error.category;
-    }
-    if (opts.json) {
-      console.log(JSON.stringify({
-        status: 'failed',
-        errorCategory,
-        message,
-        runtimeKind: 'openclaw-cli',
-      }, null, 2));
-    } else {
-      console.error(`error: ${message} (${errorCategory})`);
-    }
-    process.exit(1);
-  }
+  process.exit(1);
 }
 
 /**
@@ -358,7 +287,7 @@ async function handlePiAiProbe(opts: RuntimeProbeOptions): Promise<void> {
 
 /**
  * --runtime config probe branch — PRI-393
- * Resolves runtime from .pd/config.yaml, then dispatches to pi-ai or openclaw-cli probe.
+ * Resolves runtime from .pd/config.yaml, then dispatches to the pi-ai probe.
  */
 async function handleConfigProbe(opts: RuntimeProbeOptions): Promise<void> {
   const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : undefined;
@@ -414,11 +343,8 @@ async function handleConfigProbe(opts: RuntimeProbeOptions): Promise<void> {
   }
 
   if (config.runtimeKind === 'openclaw-cli') {
-    return handleOpenClawProbe({
-      ...opts,
-      openclawLocal: config.openclawMode === 'local' ? true : opts.openclawLocal,
-      openclawGateway: config.openclawMode === 'gateway' ? true : opts.openclawGateway,
-    });
+    reportRetiredRuntime(opts.json);
+    return;
   }
 
   console.error(`error: unsupported runtimeKind '${config.runtimeKind}' from .pd/config.yaml`);
@@ -427,11 +353,12 @@ async function handleConfigProbe(opts: RuntimeProbeOptions): Promise<void> {
 }
 
 /**
- * pd runtime probe — dispatches to openclaw-cli, pi-ai, or config branch.
+ * pd runtime probe — dispatches to the pi-ai or config branch.
  */
 export async function handleRuntimeProbe(opts: RuntimeProbeOptions): Promise<void> {
   if (opts.runtime === 'openclaw-cli') {
-    return handleOpenClawProbe(opts);
+    reportRetiredRuntime(opts.json);
+    return;
   }
 
   if (opts.runtime === 'pi-ai') {
@@ -442,7 +369,7 @@ export async function handleRuntimeProbe(opts: RuntimeProbeOptions): Promise<voi
     return handleConfigProbe(opts);
   }
 
-  console.error(`error: unsupported --runtime '${opts.runtime}' (supported: openclaw-cli, pi-ai, config)`);
+  console.error(`error: unsupported --runtime '${opts.runtime}' (supported: pi-ai, config)`);
   process.exit(1);
   return;
 }
@@ -455,10 +382,7 @@ export function registerRuntimeProbeCommand(runtimeCmd: Command): Command {
   return runtimeCmd
     .command('probe', { hidden: true })
     .description('Probe runtime health and capabilities (HG-01 HARD GATE)')
-    .requiredOption('-r, --runtime <kind>', "Runtime kind: 'openclaw-cli', 'pi-ai', or 'config'")
-    .option('--openclaw-local', 'Use local OpenClaw (mutually exclusive with --openclaw-gateway)')
-    .option('--openclaw-gateway', 'Use gateway OpenClaw (mutually exclusive with --openclaw-local)')
-    .option('-a, --agent <agentId>', 'Agent ID to probe')
+    .requiredOption('-r, --runtime <kind>', "Runtime kind: 'pi-ai' or 'config' ('openclaw-cli' is retired, ADR-0029)")
     .option('--provider <name>', 'LLM provider (e.g., openrouter) \u2014 for pi-ai, falls back to .pd/config.yaml')
     .option('--model <id>', 'Model ID (e.g., anthropic/claude-sonnet-4) \u2014 for pi-ai, falls back to .pd/config.yaml')
     .option('--apiKeyEnv <name>', 'Env var name for API key (e.g., OPENROUTER_API_KEY) \u2014 for pi-ai, falls back to .pd/config.yaml')

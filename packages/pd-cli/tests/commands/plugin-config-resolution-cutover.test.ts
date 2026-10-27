@@ -51,24 +51,24 @@ describe('PRI-228: PD-owned config resolution cutover', () => {
       }
     });
 
-    it('resolveRuntimeConfig with openclaw-cli requires explicit openclawMode', () => {
+    it('resolveRuntimeConfig refuses openclaw-cli as retired (ADR-0029)', () => {
       const result = resolveRuntimeConfig(stateDir, { requestedRuntimeKind: 'openclaw-cli' });
       expect(isRuntimeConfigError(result)).toBe(true);
       if (isRuntimeConfigError(result)) {
-        expect(result.reason).toBe('missing_openclaw_mode');
+        expect(result.reason).toBe('retired_runtime_kind');
         expect(result.nextAction).toBeTruthy();
       }
     });
 
-    it('resolveRuntimeConfig with openclaw-cli + openclawLocal resolves correctly', () => {
+    it('resolveRuntimeConfig refuses openclaw-cli even with legacy openclawLocal (ADR-0029)', () => {
       const result = resolveRuntimeConfig(stateDir, {
         requestedRuntimeKind: 'openclaw-cli',
         openclawLocal: true,
       });
-      expect(isRuntimeConfigError(result)).toBe(false);
-      if (!isRuntimeConfigError(result)) {
-        expect(result.runtimeKind).toBe('openclaw-cli');
-        expect(result.openclawMode).toBe('local');
+      expect(isRuntimeConfigError(result)).toBe(true);
+      if (isRuntimeConfigError(result)) {
+        expect(result.reason).toBe('retired_runtime_kind');
+        expect(result.nextAction).toBeTruthy();
       }
     });
 
@@ -119,7 +119,7 @@ describe('PRI-228: PD-owned config resolution cutover', () => {
       }
     });
 
-    it('conflicting openclaw mode returns error with nextAction', () => {
+    it('conflicting legacy openclaw flags are refused as retired (ADR-0029 outranks flag validation)', () => {
       const result = resolveRuntimeConfig(stateDir, {
         requestedRuntimeKind: 'openclaw-cli',
         openclawLocal: true,
@@ -127,18 +127,19 @@ describe('PRI-228: PD-owned config resolution cutover', () => {
       });
       expect(isRuntimeConfigError(result)).toBe(true);
       if (isRuntimeConfigError(result)) {
-        expect(result.reason).toBe('conflicting_openclaw_mode');
+        expect(result.reason).toBe('retired_runtime_kind');
         expect(result.nextAction).toBeTruthy();
       }
     });
 
-    it('validateRuntimeConfig throws for openclaw-cli without mode', () => {
+    it('validateRuntimeConfig throws for openclaw-cli — the retired kind is never executable (ADR-0029)', () => {
       const config = {
         runtimeKind: 'openclaw-cli' as const,
+        openclawMode: 'local' as const,
         timeoutMs: 300_000,
         agentId: 'main',
       };
-      expect(() => validateRuntimeConfig(config)).not.toThrow();
+      expect(() => validateRuntimeConfig(config)).toThrow(/ADR-0029/);
     });
   });
 

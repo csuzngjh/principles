@@ -473,7 +473,7 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
   if (runtimeKind === 'test-double' && !opts.allowTestDouble) {
     console.error('Error: test-double runtime mutates real queue state (leases tasks, marks them succeeded with empty output).');
     console.error('Use --runtime test-double --allow-test-double to acknowledge this risk.');
-    console.error('For production use, use --runtime config (reads from .pd/config.yaml) or --runtime pi-ai / openclaw-cli.');
+    console.error('For production use, use --runtime config (reads from .pd/config.yaml) or --runtime pi-ai.');
     process.exitCode = 1;
     return;
   }
@@ -847,7 +847,7 @@ export async function handleRuntimeInternalizationRunOnce(opts: RunOnceOptions):
         decision: isConfigError ? 'config_error' : 'runtime_error',
         reason: message,
         nextAction: isConfigError
-          ? 'Fix the .pd/config.yaml runtime profile, or use --runtime pi-ai / openclaw-cli with explicit flags'
+          ? 'Fix the .pd/config.yaml runtime profile, or use --runtime pi-ai with explicit provider/model/apiKeyEnv flags'
           : 'Check runner logs and workspace state; re-run with --runtime test-double to isolate',
       }, null, 2));
     } else {

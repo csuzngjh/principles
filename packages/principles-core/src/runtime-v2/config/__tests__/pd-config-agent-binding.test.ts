@@ -7,7 +7,8 @@
  *   - createAdapterConfigFromProfile() — profile → adapter config transform
  *
  * Acceptance criteria coverage:
- *   AC1: Diagnostician runtime can be configured to use an OpenClaw model reference
+ *   AC1: a retired OpenClaw binding still resolves (read-only legacy, ADR-0029)
+ *        but is reported as needs_setup and cannot produce an adapter config
  *   AC2: Diagnostician runtime can be configured to use a PD-local profile with apiKeyEnv
  *   AC3: Per-agent override beats default runtime
  *   AC4: Missing env var for PD-local profile fails loud with reason + nextAction
@@ -542,36 +543,31 @@ describe('createAdapterConfigFromProfile', () => {
     expect(result.workspace).toBe('/workspace/test');
   });
 
-  it('creates OpenClawCliRuntimeAdapter config from openclaw profile', () => {
-    const result = createAdapterConfigFromProfile(
-      {
-        type: 'openclaw',
-        provider: 'lmstudio',
-        model: 'qwen3.6-27b-mtp',
-      },
-      '/workspace/test',
-    );
-
-    expect(result.runtimeKind).toBe('openclaw-cli');
-    if (result.runtimeKind !== 'openclaw-cli') return;
-    expect(result.workspaceDir).toBe('/workspace/test');
-    // Explicit provider+model → openclawMode='local' (not delegated)
-    expect(result.openclawMode).toBe('local');
+  it('fails loud for a retired openclaw profile with provider+model (ADR-0029)', () => {
+    // Readiness answers needs_setup for type:'openclaw', so reaching this
+    // transform with one means a caller bypassed the gate — rc-3.
+    expect(() =>
+      createAdapterConfigFromProfile(
+        {
+          type: 'openclaw',
+          provider: 'lmstudio',
+          model: 'qwen3.6-27b-mtp',
+        },
+        '/workspace/test',
+      ),
+    ).toThrow(/Runtime profile type 'openclaw' is retired \(ADR-0029\)/);
   });
 
-  it('creates openclaw config with source=default (delegated mode)', () => {
-    const result = createAdapterConfigFromProfile(
-      {
-        type: 'openclaw',
-        source: 'default',
-      },
-      '/workspace/test',
-    );
-
-    expect(result.runtimeKind).toBe('openclaw-cli');
-    if (result.runtimeKind !== 'openclaw-cli') return;
-    // source='default' → openclawMode='default' (delegate to OpenClaw's own mode resolution)
-    expect(result.openclawMode).toBe('default');
+  it('fails loud for a retired openclaw profile with source=default, naming the nextAction', () => {
+    expect(() =>
+      createAdapterConfigFromProfile(
+        {
+          type: 'openclaw',
+          source: 'default',
+        },
+        '/workspace/test',
+      ),
+    ).toThrow(/nextAction: replace this profile with a pi-ai profile/);
   });
 
   it('pi-ai profile without baseUrl still produces valid config', () => {
@@ -642,72 +638,20 @@ describe('createAdapterConfigFromProfile', () => {
     expect(result.timeoutMs).toBeUndefined();
   });
 
-  it('openclaw profile with explicit provider+model uses local mode', () => {
-    // Regression test: explicit provider+model → openclawMode='local' (not 'default')
-    const result = createAdapterConfigFromProfile(
-      {
-        type: 'openclaw',
-        provider: 'lmstudio',
-        model: 'qwen3.6-27b-mtp',
-      },
-      '/workspace/test',
-    );
-
-    expect(result.runtimeKind).toBe('openclaw-cli');
-    if (result.runtimeKind !== 'openclaw-cli') return;
-    expect(result.openclawMode).toBe('local');
-    expect(result.workspaceDir).toBe('/workspace/test');
+  it('fails loud for an incomplete retired openclaw profile', () => {
+    // ADR-0029 removed the mode-selection matrix entirely: no shape of a
+    // type:'openclaw' profile produces an adapter config any more.
+    expect(() =>
+      createAdapterConfigFromProfile(
+        {
+          type: 'openclaw',
+        },
+        '/workspace/test',
+      ),
+    ).toThrow(/is retired/);
   });
 
-  it('openclaw profile with source=default uses default mode', () => {
-    // Regression test: source='default' → openclawMode='default' (delegate to OpenClaw)
-    const result = createAdapterConfigFromProfile(
-      {
-        type: 'openclaw',
-        source: 'default',
-      },
-      '/workspace/test',
-    );
-
-    expect(result.runtimeKind).toBe('openclaw-cli');
-    if (result.runtimeKind !== 'openclaw-cli') return;
-    expect(result.openclawMode).toBe('default');
-  });
-
-  it('openclaw profile without source or provider+model uses local mode', () => {
-    // Edge case: incomplete openclaw profile defaults to 'local' mode
-    const result = createAdapterConfigFromProfile(
-      {
-        type: 'openclaw',
-      },
-      '/workspace/test',
-    );
-
-    expect(result.runtimeKind).toBe('openclaw-cli');
-    if (result.runtimeKind !== 'openclaw-cli') return;
-    // No source='default', so defaults to 'local'
-    expect(result.openclawMode).toBe('local');
-  });
-
-  it('openclaw profile with source=default ignores provider+model for mode', () => {
-    // Edge case: source='default' wins over provider+model for mode selection
-    const result = createAdapterConfigFromProfile(
-      {
-        type: 'openclaw',
-        source: 'default',
-        provider: 'lmstudio',
-        model: 'qwen3',
-      },
-      '/workspace/test',
-    );
-
-    expect(result.runtimeKind).toBe('openclaw-cli');
-    if (result.runtimeKind !== 'openclaw-cli') return;
-    // source='default' → openclawMode='default' regardless of provider+model
-    expect(result.openclawMode).toBe('default');
-  });
-
-  it('preserves workspace directory in all adapter configs', () => {
+  it('preserves the workspace directory in the adapter config', () => {
     const piAiResult = createAdapterConfigFromProfile(
       {
         type: 'pi-ai',
@@ -721,18 +665,6 @@ describe('createAdapterConfigFromProfile', () => {
     expect(piAiResult.runtimeKind).toBe('pi-ai');
     if (piAiResult.runtimeKind !== 'pi-ai') return;
     expect(piAiResult.workspace).toBe('/custom/workspace/path');
-
-    const openclawResult = createAdapterConfigFromProfile(
-      {
-        type: 'openclaw',
-        source: 'default',
-      },
-      '/another/workspace/path',
-    );
-
-    expect(openclawResult.runtimeKind).toBe('openclaw-cli');
-    if (openclawResult.runtimeKind !== 'openclaw-cli') return;
-    expect(openclawResult.workspaceDir).toBe('/another/workspace/path');
   });
 
   // ── pi-ai.lmstudio profile resolution ─────────────────────────────────────

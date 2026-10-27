@@ -26,7 +26,6 @@
 import {
   TestDoubleRuntimeAdapter,
   PiAiRuntimeAdapter,
-  OpenClawCliRuntimeAdapter,
   L2AgentLoopAdapter,
   buildL2PrincipleReaderFromLedger,
   isRuntimeConfigError,
@@ -74,7 +73,7 @@ export class ConfigResolutionError extends Error {
 // ── Options interface ──────────────────────────────────────────────────────
 
 export interface ResolveAdapterOptions {
-  /** Runtime kind: 'test-double' | 'pi-ai' | 'openclaw-cli' | 'config' */
+  /** Runtime kind: 'test-double' | 'pi-ai' | 'config' ('openclaw-cli' is retired, ADR-0029) */
   runtimeKind: string;
   /** Workspace directory (for config resolution + feature flags) */
   workspaceDir: string;
@@ -124,17 +123,10 @@ export interface ResolveAdapterOptions {
     maxRetries?: number;
     maxTokens?: number;
   };
-  /**
-   * CLI override for openclaw mode (from --openclaw-local / --openclaw-gateway flags).
-   * When provided, takes precedence over config openclawMode.
-   */
-  openclawMode?: 'local' | 'gateway';
   /** PRI-419: L2 artifact reader (only used when l2_dreamer is on). */
   l2ArtifactReader?: PdL2ArtifactReader;
   /** PRI-419: workspace stateDir for L2 principle reader (only used when l2_dreamer is on). */
   l2StateDir?: string;
-  /** PRI-431 Step 1d: CLI agentId override for openclaw-cli (from --agent flag). Default: 'main'. */
-  agentId?: string;
   /**
    * PRI-431 Step 1d: Whether config resolution errors are tolerated (proceed with CLI overrides alone).
    * When true, pi-ai branch skips validateRuntimeConfig and uses manual missing-field check.
@@ -181,7 +173,7 @@ export function resolveRuntimeAdapterFromConfig(opts: ResolveAdapterOptions): PD
     return opts.testDoublePayloadBuilder(opts);
   }
 
-  // ── Resolve config from .pd/config.yaml (for pi-ai, openclaw-cli, config) ──
+  // ── Resolve config from .pd/config.yaml (for pi-ai and config) ──────────
   const resolved = resolveRuntimeFromPdConfig(opts.workspaceDir, {
     agentName: opts.agentName,
     ...(opts.runtimeProfileId !== undefined ? { runtimeProfileId: opts.runtimeProfileId } : {}),
@@ -320,57 +312,27 @@ export function resolveRuntimeAdapterFromConfig(opts: ResolveAdapterOptions): PD
     });
   }
 
-  // ── openclaw-cli branch ─────────────────────────────────────────────────
-  const isOpenClawCli =
-    opts.runtimeKind === 'openclaw-cli' ||
-    (opts.runtimeKind === 'config' &&
-      !isRuntimeConfigError(configResult) &&
-      configResult.runtimeKind === 'openclaw-cli');
-  if (isOpenClawCli) {
-    // PRI-431 Step 1d: handle configOptional — when config failed, configFields is empty
-    const openclawConfigFields: Partial<RuntimeConfig> = isRuntimeConfigError(configResult)
-      ? {}
-      : configResult;
-    // CLI override takes precedence over config. PRI-917 review (P1): a
-    // source='default' OpenClaw profile DELEGATES mode resolution to OpenClaw
-    // (createAdapterConfigFromProfile -> openclawMode 'default'; the factory
-    // omits it from RuntimeConfig, and validateRuntimeConfig accepts exactly
-    // that). Construct the adapter in delegated mode instead of throwing, so
-    // the two resolution paths agree on the same profile.
-    const delegatedDefault =
-      resolved.runtimeProfileSource === 'default' && opts.openclawMode === undefined;
-    const openclawMode = opts.openclawMode
-      ?? openclawConfigFields.openclawMode
-      ?? (delegatedDefault ? 'default' : undefined);
-    if (!openclawMode) {
-      throw new ConfigResolutionError(
-        "runtimeKind 'openclaw-cli' requires openclawMode.",
-        'missing-fields',
-        {
-          missing: ['openclawMode'],
-          nextAction:
-            'Add openclawMode: local|gateway to your .pd/config.yaml runtime profile or use --openclaw-local/--openclaw-gateway flags.',
-        },
-      );
-    }
-    // PRI-431 Step 1d: only pass agentId when explicitly provided (backward compat with run-once.ts)
-    const openclawAdapterOpts: {
-      runtimeMode: 'local' | 'gateway' | 'default';
-      workspaceDir: string;
-      agentId?: string;
-    } = {
-      runtimeMode: openclawMode,
-      workspaceDir: opts.workspaceDir,
-    };
-    if (opts.agentId !== undefined) {
-      openclawAdapterOpts.agentId = opts.agentId;
-    }
-    return new OpenClawCliRuntimeAdapter(openclawAdapterOpts);
+  // ── Retired backend (ADR-0029) ──────────────────────────────────────────
+  // 'openclaw-cli' used to spawn a host CLI agent session. The backend is
+  // retired, so naming it is a refused request — not a missing field the
+  // operator can fill in. Reachable only by an explicit --runtime
+  // openclaw-cli: a config-driven resolution already fails at the readiness
+  // gate (a legacy type:'openclaw' profile answers needs_setup).
+  if (opts.runtimeKind === 'openclaw-cli') {
+    throw new ConfigResolutionError(
+      "Runtime kind 'openclaw-cli' is retired (ADR-0029): PD runs internal agents " +
+      "only on its own pi-ai runtime, never through a host CLI agent session.",
+      'unsupported-runtime',
+      {
+        nextAction:
+          'Use --runtime pi-ai, or point the .pd/config.yaml runtime profile at a pi-ai profile (provider + model + apiKeyEnv).',
+      },
+    );
   }
 
   // ── Unsupported runtime ────────────────────────────────────────────────
   throw new Error(
-    `Unsupported runtime kind: ${opts.runtimeKind}. Supported: test-double, pi-ai, openclaw-cli, config`,
+    `Unsupported runtime kind: ${opts.runtimeKind}. Supported: test-double, pi-ai, config`,
   );
 }
 

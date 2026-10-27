@@ -69,15 +69,8 @@ export interface PiAiAdapterConfigResult {
   workspace: string;
 }
 
-export interface OpenClawAdapterConfigResult {
-  runtimeKind: 'openclaw-cli';
-  workspaceDir: string;
-  /** 'default' = delegate to OpenClaw's own mode resolution (CLI flags, workflows.yaml).
-   *  'local' | 'gateway' = explicit mode from profile config. */
-  openclawMode: 'local' | 'gateway' | 'default';
-}
-
-export type AdapterConfigResult = PiAiAdapterConfigResult | OpenClawAdapterConfigResult;
+// ADR-0029 retired the 'openclaw' profile type, so pi-ai is the only adapter
+// PD can build a config for — there is no second member to union with.
 
 // ── Private helpers (defined before public functions to satisfy no-use-before-define) ──
 
@@ -247,15 +240,17 @@ export function checkAgentRuntimeReadiness(
  * For pi-ai profiles: produces PiAiAdapterConfigResult with all fields needed
  * to construct a PiAiRuntimeAdapter.
  *
- * For openclaw profiles: produces OpenClawAdapterConfigResult.
- * OpenClaw profiles do NOT copy secrets — they only reference provider/model.
+ * For a legacy openclaw profile: throws. The type still parses and still gets
+ * reported (read-only legacy, ADR-0029), but readiness already answers
+ * needs_setup, so reaching this function with one means a caller bypassed the
+ * readiness gate — failing loud is the only honest outcome (rc-3).
  *
  * This is a pure data transform. No I/O, no env access.
  */
 export function createAdapterConfigFromProfile(
   profile: RuntimeProfile,
   workspaceDir: string,
-): AdapterConfigResult {
+): PiAiAdapterConfigResult {
   if (profile.type === 'pi-ai') {
     const result: PiAiAdapterConfigResult = {
       runtimeKind: 'pi-ai',
@@ -285,14 +280,11 @@ export function createAdapterConfigFromProfile(
     return result;
   }
 
-  // openclaw profile — preserve delegated/default semantics
-  // source='default' → openclawMode='default' (let downstream resolve via CLI flags/workflows.yaml)
-  // explicit provider+model → openclawMode='local' (explicit profile, default to local mode)
-  const openclawMode: 'local' | 'gateway' | 'default' =
-    profile.source === 'default' ? 'default' : 'local';
-  return {
-    runtimeKind: 'openclaw-cli',
-    workspaceDir,
-    openclawMode,
-  };
+  // ADR-0029: the 'openclaw' backend is retired. Nothing constructs a host CLI
+  // agent session any more, so there is no adapter config to return.
+  throw new Error(
+    `[createAdapterConfigFromProfile] Runtime profile type 'openclaw' is retired (ADR-0029) and cannot ` +
+    `produce an adapter config; only 'pi-ai' profiles are executable. ` +
+    `nextAction: replace this profile with a pi-ai profile (provider + model + apiKeyEnv) in .pd/config.yaml runtimeProfiles.`,
+  );
 }

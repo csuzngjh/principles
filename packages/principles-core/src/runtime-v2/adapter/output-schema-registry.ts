@@ -2,9 +2,9 @@
  * Output Schema Registry — shared mapping from `outputSchemaRef` string to the
  * TypeBox schema that validates a runtime adapter's parsed output.
  *
- * Single source of truth for both PiAiRuntimeAdapter and OpenClawCliRuntimeAdapter
- * (and any future PDRuntimeAdapter). Extracted from pi-ai-runtime-adapter.ts so
- * the OpenClaw adapter can validate Stage A/B outputs against the correct schema
+ * Single source of truth for PiAiRuntimeAdapter (and any future
+ * PDRuntimeAdapter). Extracted from pi-ai-runtime-adapter.ts so every caller
+ * validates Stage A/B outputs against the correct schema
  * instead of hardcoding DiagnosticianOutputV1Schema.
  *
  * Why this matters: the split diagnostician pipeline runs three stages, each
