@@ -12,6 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { mcnemarExactPValue, mcnemarExactPower, reduceCaseLevel } from '../dev/principle-learning-lab/lib/ceb002-stats.mjs';
+import { resolveOutputDir } from '../dev/principle-learning-lab/build-ceb002-suite.mjs';
 
 const labRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../dev/principle-learning-lab');
 const study = path.join(labRoot, 'challenge-studies', 'CEB-002');
@@ -133,6 +134,38 @@ describe('CEB-002 preregistration contract consistency (post-merge gate)', () =>
     expect(sr.budgetBreach).toBe('halt immediately');
     expect(sr.missingData).toContain('retained in denominator');
     expect(sr.missingData).toContain('never attributed to behavior');
+  });
+
+  it('11. resolveOutputDir: fail-closed pure function — every illegal form throws, never silently falls back', () => {
+    const def = '/default/CEB-002';
+    // no flag → default (normal build flow, unchanged)
+    expect(resolveOutputDir([], def)).toBe(def);
+    expect(resolveOutputDir(['--foo', 'bar'], def)).toBe(def);
+    // valid: exactly one --output-dir with a real path
+    expect(resolveOutputDir(['--output-dir', '/tmp/x'], def)).toBe(path.resolve('/tmp/x'));
+    expect(resolveOutputDir(['--other', '1', '--output-dir', 'rel/dir'], def)).toBe(path.resolve('rel/dir'));
+    // ILLEGAL: missing path after flag
+    expect(() => resolveOutputDir(['--output-dir'], def)).toThrow(/non-empty path/);
+    // ILLEGAL: empty-string path
+    expect(() => resolveOutputDir(['--output-dir', ''], def)).toThrow(/non-empty path/);
+    // ILLEGAL: whitespace-only path
+    expect(() => resolveOutputDir(['--output-dir', '   '], def)).toThrow(/non-empty path/);
+    // ILLEGAL: next arg is another option
+    expect(() => resolveOutputDir(['--output-dir', '--flag'], def)).toThrow(/not another option/);
+    // ILLEGAL: --output-dir given twice
+    expect(() => resolveOutputDir(['--output-dir', '/a', '--output-dir', '/b'], def)).toThrow(/exactly one/);
+    // FAIL-CLOSED: none of the illegal cases ever return the default
+    const cases = [
+      () => resolveOutputDir(['--output-dir'], def),
+      () => resolveOutputDir(['--output-dir', ''], def),
+      () => resolveOutputDir(['--output-dir', '--flag'], def),
+      () => resolveOutputDir(['--output-dir', '/a', '--output-dir', '/b'], def),
+    ];
+    for (const fn of cases) {
+      try { fn(); expect.fail('should have thrown'); } catch (e) {
+        if (e.constructor.name === 'Error') expect(e.message).not.toContain('fallback');
+      }
+    }
   });
 
   it('10. builder determinism: ISOLATED rebuild reproduces the identical contract — the REAL CEB-002 directory is never touched', { timeout: 30000 }, () => {

@@ -38,12 +38,37 @@ import { sha256 } from './lib/challenge-freeze.mjs';
 
 const labRoot = path.dirname(fileURLToPath(import.meta.url));
 const src = path.join(labRoot, 'challenge-studies', 'CEB-001');
-// --output-dir overrides the destination (for isolated determinism tests);
-// the default remains the real CEB-002 study directory (normal build flow).
-const outIdx = process.argv.indexOf('--output-dir');
-const out = outIdx >= 0 && process.argv[outIdx + 1]
-  ? path.resolve(process.argv[outIdx + 1])
-  : path.join(labRoot, 'challenge-studies', 'CEB-002');
+
+/**
+ * FAIL-CLOSED output-directory resolution (Owner safety instruction).
+ * Returns an absolute path. Rules:
+ *   - No `--output-dir` in argv → returns defaultDir (normal build flow).
+ *   - `--output-dir <path>` present exactly once with a non-empty, non-flag
+ *     path → returns path.resolve(path).
+ *   - `--output-dir` missing its path argument, given an empty string,
+ *     followed by another option, or appearing more than once → THROWS
+ *     (process exits BEFORE any directory creation, file write, or ledger
+ *     truncation — never silently falls back to the real study directory).
+ */
+export function resolveOutputDir(argv, defaultDir) {
+  if (!Array.isArray(argv)) throw new Error('resolveOutputDir: argv must be an array');
+  const indices = [];
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--output-dir') indices.push(i);
+  }
+  if (indices.length === 0) return defaultDir;
+  if (indices.length > 1) throw new Error(`resolveOutputDir: --output-dir given ${indices.length} times — exactly one is required; refusing to guess (no files written)`);
+  const value = argv[indices[0] + 1];
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new Error('resolveOutputDir: --output-dir requires a non-empty path argument — refusing to fall back to the default study directory (no files written)');
+  }
+  if (value.startsWith('--')) {
+    throw new Error(`resolveOutputDir: --output-dir must be followed by a path, not another option ('${value}') — no files written`);
+  }
+  return path.resolve(value);
+}
+
+const out = resolveOutputDir(process.argv.slice(2), path.join(labRoot, 'challenge-studies', 'CEB-002'));
 const STUDY = 'CEB-002';
 const MAPPING_ID = 'CEB-002-draft';
 
