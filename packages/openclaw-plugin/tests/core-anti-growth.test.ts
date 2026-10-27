@@ -56,7 +56,6 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     'bootstrap-rules.ts',
     'rule-host.ts',
     'principle-training-state.ts',
-    'pain-diagnostic-gate.ts',
     'hygiene/tracker.ts',
     'paths.ts',
     'workspace-dir-validation.ts',

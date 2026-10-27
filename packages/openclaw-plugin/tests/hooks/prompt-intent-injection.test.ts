@@ -121,10 +121,6 @@ vi.mock('../../src/core/focus-history.js', () => ({
   safeReadCurrentFocus: vi.fn().mockReturnValue({ content: '', recovered: false, validationErrors: [] }),
 }));
 
-vi.mock('../../src/core/pain-diagnostic-gate.js', () => ({
-  evaluatePainDiagnosticGate: vi.fn().mockReturnValue({ allowed: false, reason: 'not_applicable' }),
-}));
-
 vi.mock('../../src/hooks/pain.js', () => ({
   emitPainDetectedEvent: vi.fn(),
   buildTrajectoryEvidence: vi.fn().mockReturnValue([]),
