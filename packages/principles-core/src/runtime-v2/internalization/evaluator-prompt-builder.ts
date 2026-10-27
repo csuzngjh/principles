@@ -196,7 +196,9 @@ interface EvaluatorRuleCodeVerificationPlan {
   readonly contextHash: string;
   /** The case inventory is below; do not duplicate its IDs in this display summary. */
   readonly verificationCoverage: Omit<RuleCodeVerificationCoverage, 'counterfactuals'>;
-  readonly ruleContexts: Readonly<Record<string, RuleContextV2>>;
+  readonly ruleContextBase: Readonly<Record<string, unknown>>;
+  readonly designGateBase: Readonly<Record<string, unknown>>;
+  readonly ruleContexts: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
   readonly actions: Readonly<Record<string, { readonly toolName: string; readonly params: Readonly<Record<string, unknown>> }>>;
   readonly caseIdPrefix: string;
   readonly counterfactualColumns: readonly ['caseIdSuffix', 'actionRef', 'ruleContextRef', 'expectedDecision'];
@@ -349,6 +351,17 @@ function projectHistoricalEvidenceForEvaluator(artifact: unknown, verification: 
     evaluatorHistoricalQualificationNote: 'Prompt-only projection. historical_evidence_only cases were moved out of executable golden lists; invalid_input remains a validation stop, never a pass. Historical gaps remain unresolved even when independent system_counterfactual checks pass. Stored artifacts, Owner evidence, hashes and sandbox inputs are unchanged.' };
 }
 
+function sharedPromptFields(objects: readonly object[]): Record<string, unknown> {
+  const [first] = objects;
+  if (first === undefined) return {};
+  return Object.fromEntries(Object.entries(first).filter(([key, value]) => objects.every((entry) =>
+    Object.hasOwn(entry, key) && JSON.stringify(Reflect.get(entry, key)) === JSON.stringify(value))));
+}
+
+function withoutSharedPromptFields(value: object, shared: Readonly<Record<string, unknown>>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !Object.hasOwn(shared, key)));
+}
+
 /** Share identical synthetic contexts in the prompt only, preserving every concrete case. */
 function projectVerificationPlan(input: EvaluatorPromptBuilderInput, verification: ReturnType<typeof deriveRuleCodeVerification>): EvaluatorRuleCodeVerificationPlan {
   const ruleContexts: Record<string, RuleContextV2> = {};
@@ -375,6 +388,17 @@ function projectVerificationPlan(input: EvaluatorPromptBuilderInput, verificatio
     }
     return [caseId.slice(caseIdPrefix.length), actionRef, ruleContextRef, expectedDecision] as const;
   });
+  const contexts = Object.values(ruleContexts);
+  const sharedContext = sharedPromptFields(contexts);
+  const sharedFacts = sharedPromptFields(contexts.map((entry) => entry.facts));
+  const designGateBase = sharedPromptFields(contexts.flatMap((entry) => entry.facts.designGate === undefined ? [] : [entry.facts.designGate]));
+  const contextOverrides = Object.fromEntries(Object.entries(ruleContexts).map(([ref, context]) => {
+    const facts = withoutSharedPromptFields(context.facts, sharedFacts);
+    if (Object.hasOwn(facts, 'designGate') && context.facts.designGate !== undefined) {
+      facts.designGate = withoutSharedPromptFields(context.facts.designGate, designGateBase);
+    }
+    return [ref, { ...withoutSharedPromptFields(context, sharedContext), facts }];
+  }));
   return {
     executionStatus: 'not_executed', source: 'system_counterfactual', contract: 'DesignGateFact/v1',
     sourceArtificerArtifactId: input.sourceArtificerArtifactId, contextHash: input.contextHash,
@@ -382,7 +406,8 @@ function projectVerificationPlan(input: EvaluatorPromptBuilderInput, verificatio
       unavailable: verification.unavailable, historical: verification.historical,
       historicalCoverage: { executed: 0, passed: 0, failed: 0, unavailable: verification.historical.length },
       contractCoverage: { required: counterfactuals.length, executed: 0, passed: 0, failed: 0, unavailable: counterfactuals.length } },
-    ruleContexts, actions, caseIdPrefix, counterfactualColumns: ['caseIdSuffix', 'actionRef', 'ruleContextRef', 'expectedDecision'], counterfactuals,
+    ruleContextBase: { ...sharedContext, facts: sharedFacts }, designGateBase, ruleContexts: contextOverrides,
+    actions, caseIdPrefix, counterfactualColumns: ['caseIdSuffix', 'actionRef', 'ruleContextRef', 'expectedDecision'], counterfactuals,
   };
 }
 
@@ -626,7 +651,7 @@ export const EVALUATOR_DESIGN_GATE_ADDENDUM = `
 
 DESIGN GATE FACT (when present in an artificer goldenTraceCase ruleContext.facts):
 PROMPT VIEW QUALIFICATION: historicalEvidenceOnlyCases contains immutable historical evidence moved out of goldenTraceCases/ownerGoldenTraceCases. evaluatorHistoricalQualifications gives the system-derived qualification and missingFacts for each Owner caseId. These cases are not executable golden expectations and must not create requiredChanges to relabel them, add invented facts, or make the rule reproduce their labels. Evaluate actual code against the declared contract and executable cases; report historical gaps separately. Invalid input remains a validation stop.
-SYSTEM VERIFICATION PLAN: input.ruleCodeVerification is derived by the system from the current Scribe executionConditions, system-owned Owner cases, and hostToolKinds. Its concrete counterfactuals are existing executable obligations, not execution results: executionStatus=not_executed and zero executed/passed/failed mean the deterministic gate has not run yet. Each counterfactual row follows counterfactualColumns [caseIdSuffix, actionRef, ruleContextRef, expectedDecision]; its full caseId is caseIdPrefix + caseIdSuffix. Resolve its actionRef in actions for its exact toolName/params, and ruleContextRef in ruleContexts for its exact runtime context. References share only byte-identical values; every case keeps its own expectedDecision. All these facts are explicitly synthetic; sourceArtificerArtifactId/contextHash bind the plan to this request, never to historical approval. For traceCoverage, assess model golden cases together with this system plan; do not demand duplicate model-authored golden cases when the system cases already cover the obligation, or demand the Artificer fabricate historical facts. RequiredChanges may still identify concrete code defects or genuinely uncovered contract obligations. Unavailable obligations and historical evidence-only gaps remain visible and unresolved; no planned case establishes a pass. Only the later deterministic replay report can establish execution results, and real failures still block approval.
+SYSTEM VERIFICATION PLAN: input.ruleCodeVerification is derived by the system from the current Scribe executionConditions, system-owned Owner cases, and hostToolKinds. Its concrete counterfactuals are existing executable obligations, not execution results: executionStatus=not_executed and zero executed/passed/failed mean the deterministic gate has not run yet. Each counterfactual row follows counterfactualColumns [caseIdSuffix, actionRef, ruleContextRef, expectedDecision]; its full caseId is caseIdPrefix + caseIdSuffix. Resolve its actionRef in actions for its exact toolName/params, and ruleContextRef in ruleContexts for its context overrides. Reconstruct the exact runtime context by overlaying the overrides on ruleContextBase and merging their facts objects; when the overrides.facts has its own designGate, merge that gate over designGateBase. If it has no designGate, do not add one beyond any already present in ruleContextBase.facts. These defaults contain only fields exactly identical across the corresponding source contexts or gates. References share only byte-identical values; every case keeps its own expectedDecision. All these facts are explicitly synthetic; sourceArtificerArtifactId/contextHash bind the plan to this request, never to historical approval. For traceCoverage, assess model golden cases together with this system plan; do not demand duplicate model-authored golden cases when the system cases already cover the obligation, or demand the Artificer fabricate historical facts. RequiredChanges may still identify concrete code defects or genuinely uncovered contract obligations. Unavailable obligations and historical evidence-only gaps remain visible and unresolved; no planned case establishes a pass. Only the later deterministic replay report can establish execution results, and real failures still block approval.
 Historical cases missing the declared decisive fact are historical_evidence_only: preserve their labels as evidence, never require their block/allow labels as direct replay expectations or invent historical approvals. Independent system_counterfactual cases verify the declared runtime contract; their success does not mean historical replay success.\nThe runtime input path is \`input.context.facts.designGate\`. It is a host-supplied DesignGateFact v1 with resolution \`approved\`, \`not_approved\`, \`not_required\`, or \`unknown\`, plus sourceRef/revision, task/spec/scope binding refs, and revoked state. Read the actual case value and binding; never infer approval from params, command text, history, or a missing field. \`unknown\` is neither approval nor explicit rejection.
 
 EVALUATOR HISTORY CALL TABLE: a history.calls entry with evaluatorHistoryCallRef means the exact full call in artificerArtifact.evaluatorHistoryCalls at that key. Expand each reference in place and keep array order; no call, field or fact was removed. This lossless prompt-only sharing leaves stored artifacts and deterministic replay unchanged.

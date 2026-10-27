@@ -19,6 +19,22 @@ const artifact = { implementationCode: 'function evaluate() { return {decision:"
 const input = { taskId: 'evaluate-1047', contextHash: 'current-context', sourceArtificerArtifactId: 'current-artificer',
   artificerArtifact: artifact, scribeArtifact: scribe, hostToolKinds: tools };
 
+function expandRuleContext(plan: {
+  ruleContextBase: { facts: Record<string, unknown> };
+  designGateBase: Record<string, unknown>;
+  ruleContexts: Record<string, { facts: Record<string, unknown> }>;
+}, ref: string) {
+  const overrides = plan.ruleContexts[ref];
+  if (overrides === undefined) throw new Error('missing context reference');
+  const facts = { ...plan.ruleContextBase.facts, ...overrides.facts };
+  if (Object.hasOwn(overrides.facts, 'designGate')) {
+    const gate = overrides.facts.designGate;
+    if (typeof gate !== 'object' || gate === null) throw new Error('invalid gate overrides');
+    facts.designGate = { ...plan.designGateBase, ...gate };
+  }
+  return { ...plan.ruleContextBase, ...overrides, facts };
+}
+
 describe('Evaluator receives the existing system verification obligations before judgment', () => {
   it('exposes every concrete system counterfactual even when all Owner cases are evidence-only, without claiming execution', () => {
     const original = JSON.stringify(artifact);
@@ -36,7 +52,7 @@ describe('Evaluator receives the existing system verification obligations before
     const derived = deriveRuleCodeVerification(scribe, ownerCases, tools);
     expect(plan.counterfactualColumns).toEqual(['caseIdSuffix', 'actionRef', 'ruleContextRef', 'expectedDecision']);
     expect(plan.counterfactuals.map(([suffix, actionRef, ruleContextRef, expectedDecision]: [string, string, string, string]) =>
-      ({ caseId: plan.caseIdPrefix + suffix, ...plan.actions[actionRef], expectedDecision, ruleContext: plan.ruleContexts[ruleContextRef] })))
+      ({ caseId: plan.caseIdPrefix + suffix, ...plan.actions[actionRef], expectedDecision, ruleContext: expandRuleContext(plan, ruleContextRef) })))
       .toEqual(derived.counterfactuals.map(({ caseId, toolName, params, expectedDecision, ruleContext }) =>
       ({ caseId, toolName, params, expectedDecision, ruleContext })));
     expect(plan.verificationCoverage.contractCoverage).toEqual({ required: derived.counterfactuals.length,
