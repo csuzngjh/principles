@@ -25,13 +25,16 @@ const BASE_MUTATION_RE = /(?:>|>>|sed|rm|mv|mkdir|touch|cp|npm|yarn|pnpm|pip|car
 /** 新增变更词（词边界精确匹配）：git 变更子命令 + 常见写入工具。 */
 const GIT_MUTATION_RE = /\bgit\s+(?:add|commit|push|pull|fetch|merge|rebase|reset|restore|checkout|switch|clean|apply|am|cherry-pick|revert|tag|stash|branch|worktree|rm|mv|init|clone|submodule)\b/;
 const EXTRA_MUTATION_RE = /\b(?:tee|truncate|shred|patch|ln|kill|pkill|killall|gem|brew|apt|apt-get|choco|winget)\b/;
+/** 任意代码执行（node -e / python -c 等）不是只读调查——具备变更能力。
+ * 系统反事实恰以这两类命令验证 denied→block（R6 修复轮实测暴露）。 */
+const ARBITRARY_CODE_EXEC_RE = /\b(?:node|deno|bun)\s+(?:-e|--eval)\b|\b(?:python|python3)\s+(?:-c|--command)\b|\b(?:ruby|perl)\s+(?:-e|--eval)\b/;
 
 export type BashRiskLevel = 'safe' | 'normal' | 'dangerous' | 'unknown';
 
 /** 纯命令文本分类；空串/异常交由调用方判 unknown。 */
 export function classifyCommandRisk(command: string): 'safe' | 'normal' | 'dangerous' {
   if (DANGEROUS_RE.test(command)) return 'dangerous';
-  if (BASE_MUTATION_RE.test(command) || GIT_MUTATION_RE.test(command) || EXTRA_MUTATION_RE.test(command)) return 'normal';
+  if (BASE_MUTATION_RE.test(command) || GIT_MUTATION_RE.test(command) || EXTRA_MUTATION_RE.test(command) || ARBITRARY_CODE_EXEC_RE.test(command)) return 'normal';
   return 'safe';
 }
 

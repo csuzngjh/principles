@@ -1309,6 +1309,14 @@ describe('PRI-1041 declared fact verification through the real Runner and sandbo
     { rawToolName: 'read_file', canonicalKind: 'read' as const },
   ] };
   const good = `function evaluate(input, helpers) {
+    // PRI-1047 Owner review R6 #1: the "correct rule" contract now REQUIRES
+    // read-only investigation to stay allowed under not_approved — the system
+    // counterfactual denied-readonly (bash git status) enforces it.
+    var kind = input.action && input.action.canonicalKind;
+    if (kind === 'read' || kind === 'search') return { decision: 'allow', matched: false, reason: 'read-only outside the gate face' };
+    if (kind === 'execute' && helpers && typeof helpers.getBashRisk === 'function' && helpers.getBashRisk() === 'safe') {
+      return { decision: 'allow', matched: false, reason: 'host-classified read-only command outside the gate face' };
+    }
     var fact = input.context && input.context.facts && input.context.facts.designGate;
     if (fact && fact.requiresApproval && fact.resolution === 'not_approved') return { decision: 'block', matched: true, reason: 'scoped explicit rejection' };
     return { decision: 'allow', matched: false, reason: 'no explicit scoped rejection' };

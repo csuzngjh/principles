@@ -1,5 +1,6 @@
 import { createProductionGateDeps } from '../../activation/production-gate-deps.js';
 import { UNAVAILABLE_RULE_CONTEXT } from '../../internalization/rule-context-v2.js';
+import { buildToolSemanticRegistry } from '../../internalization/tool-semantic-registry.js';
 /**
  * PRI-439 Phase 4 — artificer-l2-tool-contract unit tests.
  *
@@ -421,12 +422,27 @@ describe('PRI-484 RULECODE_SPEC_TEXT — v2 context section', () => {
 describe('PRI-1041 L2 declared verification uses system context, not model cases', () => {
   const declaration = { executionConditions: { version: 1, requiredFacts: [{ factKind: 'design_approval', required: true, textualBasis: 'fixture scope approval' }] } };
   const good = `function evaluate(input, helpers) {
+    // PRI-1047 Owner review R6 #1: a compliant approval-gate rule allows
+    // read-only investigation under not_approved (system counterfactual
+    // denied-readonly enforces it).
+    var kind = input.action && input.action.canonicalKind;
+    if (kind === 'read' || kind === 'search') return { decision: 'allow', matched: false, reason: 'read-only outside the gate face' };
+    if (kind === 'execute' && helpers && typeof helpers.getBashRisk === 'function' && helpers.getBashRisk() === 'safe') {
+      return { decision: 'allow', matched: false, reason: 'host-classified read-only command outside the gate face' };
+    }
     var fact = input.context && input.context.facts.designGate;
     if (fact && fact.requiresApproval && fact.resolution === 'not_approved') return { decision: 'block', matched: true, reason: 'denied' };
     return { decision: 'allow', matched: false, reason: 'not explicitly denied' };
   }`;
   function context() {
-    return makeContext({ gateDeps: createProductionGateDeps(), verificationInput: { scribe: declaration, tools: [
+    // PRI-758 / R6: the production consumer cycle always wires the host tool
+    // semantics into the replay gate — without them the denied-readonly
+    // counterfactual cannot classify `git status` and a compliant rule fails.
+    const semantics = buildToolSemanticRegistry([
+      { rawToolName: 'bash', canonicalKind: 'execute' }, { rawToolName: 'write_file', canonicalKind: 'write' },
+    ]);
+    if (!semantics.ok) throw new Error('fixture semantics');
+    return makeContext({ gateDeps: createProductionGateDeps({ toolSemantics: semantics.registry }), verificationInput: { scribe: declaration, tools: [
       { rawToolName: 'bash', canonicalKind: 'execute' }, { rawToolName: 'write_file', canonicalKind: 'write' },
     ] } });
   }

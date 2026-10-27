@@ -29,6 +29,11 @@ describe('Owner review R6 #1 — shared bash-risk classification + approval-gate
     expect(classifyCommandRisk('sed -i s/a/b/ file')).toBe('normal');
     expect(classifyCommandRisk('rm -rf node_modules')).toBe('dangerous');
     expect(classifyCommandRisk('chmod +x run.sh')).toBe('dangerous');
+    // Arbitrary code execution is NOT read-only (the system counterfactual
+    // verifies denied × node -e / python -c → block; exposed by the R6 round).
+    expect(classifyCommandRisk('node -e "process.stdout.write(123)"')).toBe('normal');
+    expect(classifyCommandRisk('python -c "print(456)"')).toBe('normal');
+    expect(classifyCommandRisk('node --version')).toBe('safe');
   });
 
   it('classifyBashRisk: non-execute kinds and unreadable commands stay unknown', () => {
