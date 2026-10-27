@@ -142,6 +142,11 @@ describe('CEB-002 offline validation (Owner stage-transition instruction §四)'
     expect(mcnemarExactPower({ pairs: 16, p10: 0.4, p01: 0.0 })).toBeCloseTo(0.671, 2);
     expect(mcnemarExactPower({ pairs: 32, p10: 0.2, p01: 0.0 })).toBeCloseTo(0.640, 2);
     expect(mcnemarExactPower({ pairs: 32, p10: 0.3, p01: 0.0 })).toBeCloseTo(0.949, 2);
+    // n=8 (discriminative-tier case-level PRIMARY analysis) anchors — the exact
+    // test at n=8 can only reject on the two extreme outcomes, so power caps at 0.145
+    expect(mcnemarExactPower({ pairs: 8, p10: 0.5, p01: 0.0 })).toBeCloseTo(0.145, 2);
+    expect(mcnemarExactPower({ pairs: 8, p10: 0.375, p01: 0.125 })).toBeCloseTo(0.024, 2);
+    expect(mcnemarExactPower({ pairs: 8, p10: 0.1, p01: 0.1 })).toBeLessThan(0.01); // conservative size ~ 0
     // case-level clustering reduction: repeated measurements of one case reduce to a single unit
     expect(reduceCaseLevel([{ bFail: true, cFail: false }, { bFail: false, cFail: false }])).toEqual({ bWorse: true, cWorse: false });
     expect(reduceCaseLevel([{ bFail: true, cFail: false }, { bFail: false, cFail: true }])).toEqual({ bWorse: false, cWorse: false }); // mixed -> concordant for this view
