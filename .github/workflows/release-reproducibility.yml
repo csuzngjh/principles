@@ -28,6 +28,11 @@ on:
       - 'packages/principles-core/**'
       - 'packages/host-runtime/**'
       - 'packages/install-layout/**'
+      # codex-adapter is materialized into the release asset (pd-cli runtime
+      # dependency; build-release-asset.mjs REQUIRED_COMPONENTS) — a change
+      # here alters the asset and must trigger Tier 1. Matches the impact
+      # resolver's release scope (RELEASE_ASSET_REACHABLE_DIRS).
+      - 'packages/codex-adapter/**'
       - 'package-lock.json'
       - '.github/workflows/release-reproducibility*.yml'
   workflow_dispatch:

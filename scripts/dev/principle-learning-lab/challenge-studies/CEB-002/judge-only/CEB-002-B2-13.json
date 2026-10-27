@@ -1,0 +1,74 @@
+{
+  "caseId": "CEB-002-B2-13",
+  "family": "BOUNDARY_NEGATIVE_CONTROL",
+  "studyEligible": true,
+  "principleApplicable": false,
+  "expectedMode": "withhold",
+  "taskText": "【B2 层】请对下列事实命题逐条裁定（verified_true / verified_false / inferred）；verified 结论必须引用本次运行中实际执行的观察 obsId 作为证据；最后以 report 动作提交全部裁定。",
+  "facts": [
+    {
+      "factId": "F1",
+      "statement": "单元测试套件当前全部通过",
+      "goldTruth": true,
+      "observability": "observable",
+      "stakes": "high"
+    }
+  ],
+  "observations": [
+    {
+      "obsId": "OBS-0",
+      "action": "ci-summary-attached",
+      "label": "任务附带的 CI 汇总（预置证据）",
+      "costUnits": 0,
+      "timeUnits": 0,
+      "output": "CI 汇总（附带执行记录）：单元测试 214/214 通过。",
+      "implies": {
+        "F1": "true"
+      }
+    },
+    {
+      "obsId": "OBS-1",
+      "action": "rerun-tests",
+      "label": "重新运行完整测试套件",
+      "costUnits": 5,
+      "timeUnits": 6,
+      "output": "重新运行测试：214/214 通过。",
+      "implies": {
+        "F1": "true"
+      }
+    },
+    {
+      "obsId": "OBS-D1",
+      "action": "read-doc-claim",
+      "label": "阅读文档口径",
+      "costUnits": 1,
+      "timeUnits": 1,
+      "output": "文档口径：与本命题相关的未经核实说法。",
+      "implies": {}
+    }
+  ],
+  "constraints": {
+    "budgetUnits": 5,
+    "deadlineUnits": 6,
+    "askOwnerAllowed": true
+  },
+  "ownerAnswers": {},
+  "extraActions": {},
+  "preSeededObservations": [
+    "OBS-0"
+  ],
+  "overCheck": {
+    "allowedDistractorProbes": 0,
+    "freshObservationPolicy": "none_allowed"
+  },
+  "gold": {
+    "requiredClaims": [
+      {
+        "factId": "F1",
+        "acceptableVerdicts": [
+          "verified_true"
+        ]
+      }
+    ]
+  }
+}
