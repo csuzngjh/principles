@@ -1,0 +1,19 @@
+{
+  "schema": "ceb002-info-balance.v1",
+  "armBPayloadHash": "ae275f0f73d136e600bdbe63fdf44993e9669ad2e46387eeeceb2aa4c4a632bd",
+  "armCPayloadHash": "bc72fabe4282726582a7964e4a6b4d580a39f1559ce3a52dc4b7c0aa72d0d94a",
+  "chars": {
+    "B": 173,
+    "C": 192,
+    "ratio": 1.11
+  },
+  "sentences": {
+    "B": 2,
+    "C": 5
+  },
+  "digits": {
+    "B": 0,
+    "C": 8
+  },
+  "note": "B/C payloads are CEB-001 frozen texts reused verbatim; material imbalances are preregistered confounds, reported with every B-vs-C comparison."
+}

@@ -1,0 +1,12 @@
+{
+  "schema": "challenge-preregistration.v1",
+  "studyId": "CEB-002",
+  "status": "DRAFT-NOT-IN-FORCE",
+  "note": "See docs/specs/CEB-002-PREREGISTRATION.md; freezing requires Owner approval. CEB-001 remains untouched.",
+  "plannedRepetitions": 2,
+  "arms": [
+    "A",
+    "B",
+    "C"
+  ]
+}
