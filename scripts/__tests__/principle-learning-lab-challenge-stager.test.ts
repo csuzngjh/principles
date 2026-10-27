@@ -571,6 +571,11 @@ describe('D. runner enforcement: unauthorized real actors are unreachable', () =
       fs.appendFileSync(target, content, 'utf8');
     };
     const codexHome = path.join(tmpRoot, `codex-stager-f2-${++copyCounter}`);
+    // the sequence counter repeats across test runs — a leftover codexHome from
+    // a previous UTC day would keep BOTH days' rollouts and make the
+    // two-day corroboration window report the session as AMBIGUOUS
+    // (fail-closed). Start clean, exactly like copyStudy does.
+    fs.rmSync(codexHome, { recursive: true, force: true });
     fs.mkdirSync(codexHome, { recursive: true });
     const probeSessions = ['probe-y1', 'probe-y2', 'probe-y3', 'probe-y4', 'probe-y5'];
     const probeRecord = {
@@ -658,6 +663,7 @@ describe('G. formal realHostBaseline from study files', () => {
     fs.mkdirSync(attemptDir, { recursive: true });
     fs.writeFileSync(path.join(attemptDir, 'a1.json'), `${JSON.stringify(fakeF2Attempt(), null, 2)}\n`, 'utf8');
     const codexHome = path.join(tmpRoot, `codexhome-empty-${++copyCounter}`);
+    fs.rmSync(codexHome, { recursive: true, force: true }); // counter repeats across runs — never reuse a stale fixture home
     fs.mkdirSync(codexHome, { recursive: true });
     const verdict = deriveRealHostBaselineFromStudy(dir, { codexHome });
     expect(verdict.status).toBe('NOT_ESTIMABLE');
