@@ -292,7 +292,7 @@ describe('C. dry-run positive path (synthetic APPROVED fixture)', () => {
       env: { ...process.env, AMD_RADEON_API_KEY: '', HOME: dir, USERPROFILE: dir },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-    expect(isolated).toContain('plan — study=CEB-001 units=36 (A/B/C × 12 cases × 1 repetition)');
+    expect(isolated).toContain('plan — study=CEB-001 units=36 (A/B/C × 12 cases × 1 repetition(s))');
     expect(isolated).toContain('authorizedModel=GLM-5.3-Flash');
     expect(isolated).toContain('attemptCap=40 (used 0) | requestCap=80 (used 0)');
     expect(isolated).toContain('worst-case requests for THIS plan = 1440');

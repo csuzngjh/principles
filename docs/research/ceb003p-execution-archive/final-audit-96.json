@@ -1,0 +1,436 @@
+{
+  "generatedAt": "2026-10-27T18:59:29.036Z",
+  "study": "CEB-003-P",
+  "settledUnits": 96,
+  "attempts": 96,
+  "requests": 291,
+  "requestRefused": 0,
+  "unobservedIdentityRounds": 0,
+  "byArm": {
+    "A": {
+      "total": 32,
+      "succeeded": 32,
+      "unknown": 0,
+      "failed": 0,
+      "objectivePass": 30,
+      "objectiveFail": 2,
+      "violationKinds": [
+        "VIOLATION_ABSTENTION_OBTAINABLE",
+        "unknown_claim",
+        "required_claim_missing"
+      ]
+    },
+    "B": {
+      "total": 32,
+      "succeeded": 32,
+      "unknown": 0,
+      "failed": 0,
+      "objectivePass": 26,
+      "objectiveFail": 6,
+      "violationKinds": [
+        "no_report",
+        "VIOLATION_ABSTENTION_OBTAINABLE"
+      ]
+    },
+    "C": {
+      "total": 32,
+      "succeeded": 32,
+      "unknown": 0,
+      "failed": 0,
+      "objectivePass": 25,
+      "objectiveFail": 7,
+      "violationKinds": [
+        "no_report",
+        "VIOLATION_ABSTENTION_OBTAINABLE"
+      ]
+    }
+  },
+  "results": [
+    {
+      "unit": "CEB-002-L1-01/A/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L1-01/A/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L1-02/A/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L1-02/A/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L1-03/A/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L1-03/A/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L2-04/A/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L2-04/A/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L2-05/A/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L2-05/A/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L2-06/A/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L2-06/A/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L2-07/A/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L2-07/A/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L3-08/A/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L3-08/A/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L3-09/A/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L3-09/A/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L3-10/A/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L3-10/A/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L3-11/A/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L3-11/A/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-B1-12/A/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-B1-12/A/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-B2-13/A/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-B2-13/A/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-B3-14/A/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-B3-14/A/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-B4-15/A/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-B4-15/A/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-B5-16/A/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-B5-16/A/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L1-01/B/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L1-01/B/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L1-02/B/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L1-02/B/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L1-03/B/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L1-03/B/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L2-04/B/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L2-04/B/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L2-05/B/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L2-05/B/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L2-06/B/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L2-06/B/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L2-07/B/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L2-07/B/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L3-08/B/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L3-08/B/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L3-09/B/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L3-09/B/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L3-10/B/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L3-10/B/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L3-11/B/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L3-11/B/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-B1-12/B/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-B1-12/B/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-B2-13/B/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-B2-13/B/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-B3-14/B/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-B3-14/B/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-B4-15/B/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-B4-15/B/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-B5-16/B/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-B5-16/B/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L1-01/C/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L1-01/C/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L1-02/C/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L1-02/C/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L1-03/C/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L1-03/C/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L2-04/C/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L2-04/C/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L2-05/C/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L2-05/C/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L2-06/C/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L2-06/C/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L2-07/C/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L2-07/C/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L3-08/C/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L3-08/C/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L3-09/C/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L3-09/C/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L3-10/C/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L3-10/C/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L3-11/C/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-L3-11/C/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-B1-12/C/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-B1-12/C/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-B2-13/C/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-B2-13/C/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-B3-14/C/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-B3-14/C/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-B4-15/C/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-B4-15/C/r2",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-B5-16/C/r1",
+      "result": "SUCCEEDED"
+    },
+    {
+      "unit": "CEB-002-B5-16/C/r2",
+      "result": "SUCCEEDED"
+    }
+  ],
+  "problems": [],
+  "ok": true
+}
