@@ -97,3 +97,31 @@ EP-03（失败不得变成功）：Scribe 不合格输出不落工件/不 succee
 - **P3#7 outcome 回填 CAS**：改为单次重试 + 重读当前行（rc-7），失败由 outcome_recorded 判定路径与重放幂等兜底。
 - **P3#9 新鲜度碰撞窗**：继承自 pitask-metadata 评审 P1 的既有已档限制，SPEC §3.3 补注（仅提示质量影响，validator 全量重检）。
 - **P3#10 leaseIsLive 重复**：评审裁定镜像可接受，保留。
+
+## Owner 评审 R6 修复轮（2026-10-27，六项全处置）
+
+Owner 复核（2 P1 Spec + 2 P2 Spec + 1 P1 Standards + 1 P2 Standards）六项全部核实**属实**并修复；核心 8774→8790 测试零失败。
+
+### 六项处置明细
+
+**#1 [P1] 新规则误拦只读调查（Spec）** — 属实，且比表面更深。三层根因+一层诊断发现：
+1. **宿主动作分类未统一**：`derived.bashRisk` 仅 OpenClaw enrichment 计算（且把 `git commit` 误判 safe）；Codex 宿主无 provider 恒 unknown；golden-trace 回放硬编码 unknown——not_approved×只读组合在任何系统验证面都不可能出现。修复：新增共享分类器 `bash-risk.ts`（含 git 变更子命令补全），host-runtime 生产 gate 无 provider 时确定性默认、OpenClaw 委托、回放推导三方共用。
+2. **系统验证缺该组合**：`deriveRuleCodeVerification` 反事实变体表从未包含 execute 类×not_approved×只读命令→allow。修复：新增系统反事实 `system-contract:design_approval:*:readonly:denied-readonly`（replay_rulecode 与 evaluator 自动携带）。已验证该反事实对 R04 旧规则判 FAIL（确定性执法生效）。
+3. **生成约束缺失**：RULECODE_SPEC_TEXT 增补 APPROVAL-GATE READ-ONLY SEMANTICS（bashRisk safe×not_approved 必须放行；门禁面=变更动作；系统反事实自动验证；模型用例保持历史形状）。
+4. **诊断发现（初版修复的死锁）**：首版曾要求模型申报 not_approved 用例（提交侧覆盖验证）——与 replay 工具的 historical-fact 契约死锁（模型自造 designGate 事实被拒 historical_fact_invalid，10轮空转 no_submit 耗尽 6 次预算；transcript 取证见 .tmp/pri1047-iso-r6diag）。已撤销并转向系统反事实通道（架构正位：事实态合成是系统职责）。
+
+**重生成验证（R7，隔离副本 .tmp/pri1047-iso-r7，真实 GLM）**：首轮即过；7 探针全 PASS（not_approved×git status/rg/cat→allow；not_approved×git commit/apply_patch→block；unknown→中性放行；approved→allow）；自带金样 4/4；evaluator approved（"只放行只读调查…对 write 与非只读 execute 读取受信事实"）；rollout 至待审批边界。方法论自证：同一探针组打 R04 旧工件复现 3 项只读误拦。**注意：R05 节"只读不误拦"声明作废**——其夹具只走事实缺失路径，被本轮证伪。真实 Codex 宿主内拦截/放行证据仍 NOT RUN（生产恢复待 Owner）。
+
+**#2 [P1] Scribe 成功边界漏批依赖声明审计** — 属实（复现：空 requiredFacts/required:false 均过校验、preflight 停 approval_dependency_undeclared）。修复：共享谓词 `findUndeclaredApprovalDependency`（textual-basis-anchor.ts）同时接入 DefaultScribeValidator 与 preflight（P4 单一判定）；空数组/required:false 现死于生产者边界并经 lastValidatorErrors 回喂。
+
+**#5 [P1] 旧回执劫持后续修订轮** — 属实。修复：续接分支限定 `revisionCauseId === sourceCorrectionCauseId`（重开时同轮原子写入）；binding revision 覆写后正常后继流接管，receipt outcome 不被覆写。
+
+**#3 [P2] 普通并发写入致永久冲突** — 属实。修复：定点续接重构为有界「读取→守卫→CAS」重试（3次），CAS 丢失重评全部守卫——瞬时竞争重试（测试：无关字段并发写后第二次 CAS 成功、outcome=reopened）、真实漂移按守卫分类、仅持续竞争记终态 cas_retry_exhausted。
+
+**#4 [P2] 界面未接通 source-correct-once** — 属实（52d 候选 binding 预算耗尽后卡片无路可走）。修复（PR#2170 侧，含 #2169 分支合并）：core 新增只读 `previewRuleSourceCorrection`（与 reviseRuleSourceOnce 同批前置判定，点击时权威复核）；契约/校验器（ready 必带全套 CAS 输入，半空即整包拒收）；模型 bound+blocked 项派生；`correctRuleSource` API + 面板「修正源材料并继续」CTA + unavailable 可观测行 + 双语四键。pd-console 2983 测试绿。
+
+**#6 [P2] 回执解析隐式转换** — 属实（复现：数组包装 digest/kind 经 String/regex 强转通过）。修复：严格 typeof 前置；数组毒化样例回归锁定。
+
+### 验证汇总
+- core 8774+16 回归测试零失败；host-runtime 41 绿；openclaw gate 72 绿；pd-cli tsc 过；pd-console 2983 绿。
+- 旧 R04 工件探针复现（方法论）/新系统反事实抓旧规则（执法生效）/R7 真实重生成全探针 PASS（端到端）。

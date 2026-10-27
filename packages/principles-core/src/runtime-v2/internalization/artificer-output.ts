@@ -2,7 +2,6 @@ import { Type, type Static } from '@sinclair/typebox';
 import type { GoldenTraceDecision } from '../golden-trace.js';
 import type { RuleContextV2 } from './rule-context-v2.js';
 import { validateRuleContextV2 } from './rule-context-v2.js';
-import { classifyCommandRisk } from './bash-risk.js';
 
 /**
  * Artificer source trace — lineage back to upstream peer artifacts.
@@ -203,77 +202,6 @@ function validateGoldenTraceCasesInput(raw: unknown): string[] {
     if (!hasNegative) errors.push('goldenTraceCases must include at least one negative case');
   }
 
-  return errors;
-}
-
-/** Resolves a raw host tool name to its canonical kind ('write'|'execute'|…). */
-export type CanonicalKindResolver = (toolName: string) => string | undefined;
-
-function caseGateResolutionNotApproved(entry: Record<string, unknown>): boolean {
-  const {ruleContext} = entry;
-  if (!isRecord(ruleContext) || !isRecord(ruleContext.facts)) return false;
-  const gate = ruleContext.facts.designGate;
-  return isRecord(gate) && gate.resolution === 'not_approved';
-}
-
-function caseCommandText(entry: Record<string, unknown>): string {
-  const params = isRecord(entry.params) ? entry.params : {};
-  return typeof params.command === 'string' ? params.command : typeof params.args === 'string' ? params.args : '';
-}
-
-/** Mutating for an approval gate: write/agent kinds, or execute with a non-safe command. */
-function caseIsMutating(entry: Record<string, unknown>, resolveCanonicalKind: CanonicalKindResolver): boolean {
-  const toolName = typeof entry.toolName === 'string' ? entry.toolName : '';
-  const kind = resolveCanonicalKind(toolName);
-  if (kind === 'write' || kind === 'agent') return true;
-  if (kind === 'execute') return classifyCommandRisk(caseCommandText(entry)) !== 'safe';
-  return false;
-}
-
-/**
- * PRI-1047 Owner review R6 #1 (系统验证): when the scribe artifact declares a
- * REQUIRED design_approval fact, the declared golden cases MUST cover BOTH
- * (a) negative: designGate not_approved × MUTATING tool call → block, and
- * (b) positive: designGate not_approved × READ-ONLY command → allow.
- *
- * Read-only determination uses the SAME shared classifier (bash-risk.ts) that
- * golden-trace replay and the production host gate use, so a case accepted
- * here is exactly what the host will replay. The R04 production artifact
- * passed its own golden cases only because every read-only case carried a
- * missing/unknown fact — the not_approved × read-only combination was never
- * declared, and the generated rule blocked `git status`/`rg`/`cat` in replay.
- */
-export function validateApprovalGateCaseCoverage(
-  output: unknown,
-  resolveCanonicalKind: CanonicalKindResolver,
-): string[] {
-  if (!isRecord(output) || !Array.isArray(output.goldenTraceCases)) {
-    // Structural validation of goldenTraceCases already reported the defect.
-    return [];
-  }
-  let hasNotApprovedMutatingBlock = false;
-  let hasNotApprovedReadOnlyAllow = false;
-  for (const entry of output.goldenTraceCases) {
-    if (!isRecord(entry)) continue;
-    if (!caseGateResolutionNotApproved(entry)) continue;
-    const mutating = caseIsMutating(entry, resolveCanonicalKind);
-    if (mutating && entry.kind === 'negative' && entry.expectedDecision === 'block') hasNotApprovedMutatingBlock = true;
-    if (!mutating && entry.kind === 'positive' && entry.expectedDecision === 'allow') hasNotApprovedReadOnlyAllow = true;
-  }
-  const errors: string[] = [];
-  if (!hasNotApprovedMutatingBlock) {
-    errors.push(
-      'approvalGate golden-case coverage: missing a NEGATIVE case with ruleContext.facts.designGate.resolution "not_approved" × MUTATING tool call '
-      + '(write/agent kind, or execute with non-safe bashRisk) expecting "block" — an approval gate must demonstrate its blocking face',
-    );
-  }
-  if (!hasNotApprovedReadOnlyAllow) {
-    errors.push(
-      'approvalGate golden-case coverage: missing a POSITIVE case with ruleContext.facts.designGate.resolution "not_approved" × READ-ONLY command '
-      + '(execute with host-safe bashRisk, e.g. Bash "git status" / "rg …" / "cat <file>", or a read/search kind) expecting "allow" — '
-      + 'read-only investigation must stay allowed while approval is pending (PRI-1047 Owner review)',
-    );
-  }
   return errors;
 }
 
