@@ -2,6 +2,13 @@
 
 > 发布前必须人工执行并签字。任何一项未勾选即 No-Go。
 > 签字记录：在 PR 描述或 Linear issue 中注明执行人、日期、结果。
+>
+> **注记（2026-10-27）：本文件是种子客户发布时的签字执行记录，下方勾选项与
+> CI job 名称（如 `test-openclaw-plugin-unit` / `test-openclaw-plugin-integration`）
+> 反映当时的 CI 结构，作为历史证据保留不改写。现行 CI 自 2026-10-27 起 plugin
+> 测试合并为单一 `test-openclaw-plugin-coverage` job（见
+> `docs/process/TESTING.md` 与 `.github/workflows/ci.yml`）；复用本清单做新发布
+> 核对时请按当前 job 名对号。**
 
 ## 自动化门禁（CI 必须全绿）
 

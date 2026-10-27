@@ -96,20 +96,23 @@ Tests run automatically via GitHub Actions (`.github/workflows/ci.yml`):
 - Pull requests to `main`
 
 **Test Job Matrix:**
-- Node.js versions: 20, 22
+- Node.js version pinned per job (mostly 22; codex-plugin-delivery uses 24). The former Node 20/22 `test` matrix job was a no-op at the workspace root and was removed 2026-08-27.
 
-**CI Jobs (11 total):**
+**CI Jobs (16 total, current as of 2026-10-27):**
 1. `verify-merge` - Canonical merge gate (`npm run verify:merge`)
 2. `release-parity` - npm pack dry-run validation
-3. `lint` - ESLint validation
-4. `test` - Matrix test (Node 20/22)
-5. `test-principles-core` - Core tests with coverage
-6. `test-pd-cli` - CLI tests
-7. `test-pd-console` - Console tests with coverage
-8. `test-create-principles-disciple` - Installer tests
-9. `build-openclaw-plugin` - Build + TypeScript check
-10. `typecheck-pd-console` - TypeScript check
-11. `test-openclaw-plugin-unit/integration/coverage` - Plugin tests (3 jobs)
+3. `lint` - ESLint validation (per-package scheduling)
+4. `codex-plugin-delivery` - Published runtime pin probe
+5. `impact` / `telemetry-guard` - CI impact shadow prediction + telemetry union advisory
+6. `test-principles-core` - Core tests with coverage
+7. `test-pd-cli` - CLI tests
+8. `test-pd-console` - Console tests with coverage
+9. `test-create-principles-disciple` - Installer fast suite
+10. `smoke-packaged-install` / `smoke-release-asset` - Installer smoke suites (2 parallel jobs)
+11. `test-shared-runtime` - scripts + root guard contracts + host-runtime + host parity + codex-adapter + pd-companion (consolidated 2026-10-27 from five separate jobs)
+12. `build-openclaw-plugin` - Build + TypeScript check + production build
+13. `typecheck-pd-console` - TypeScript check
+14. `test-openclaw-plugin-coverage` - Plugin unit + integration tests with coverage in ONE job (the default vitest collection runs the full suite; the former separate unit/integration jobs were subsets of it and were removed 2026-10-27)
 
 ## Quality Infrastructure
 
