@@ -146,18 +146,27 @@ export class DefaultLeaseManager implements LeaseManager {
       const nowIso = new Date().toISOString();
       const expiresAt = new Date(Date.now() + durationMs).toISOString();
 
-      // Determine next attempt number from existing runs (most reliable)
+      // Determine next attempt number from existing runs (most reliable).
+      // SPEC-PRI-1047: the RUN attempt_number stays globally sequential per task
+      // (run-id uniqueness after crashes), but the TASK's attempt_count is now
+      // EPOCH-LOCAL — incremented from the task's own counter instead of being
+      // overwritten with the global run ordinal. The old overwrite made a
+      // reopened epoch (attempt_count reset to 0, historical runs 1..N) start
+      // at attempt_count = N+1, so shouldRetry (attempt_count < maxAttempts)
+      // failed its FIRST validation loss against the original cap — the epoch
+      // never actually received the maxAttempts retries it was reopened with.
       const lastRun = db.prepare(
         'SELECT attempt_number FROM runs WHERE task_id = ? ORDER BY attempt_number DESC LIMIT 1',
       ).get(taskId) as { attempt_number: number } | undefined;
       const lastAttemptNumber = lastRun?.attempt_number ?? 0;
       const attemptNumber = lastAttemptNumber + 1;
+      const epochAttemptCount = Number(row.attempt_count ?? 0) + 1;
 
       db.prepare(`
         UPDATE tasks
         SET status = 'leased', lease_owner = ?, lease_expires_at = ?, updated_at = ?, attempt_count = ?
         WHERE task_id = ?
-      `).run(owner, expiresAt, nowIso, attemptNumber, taskId);
+      `).run(owner, expiresAt, nowIso, epochAttemptCount, taskId);
 
       const runId = `run_${taskId}_${attemptNumber}`;
       db.prepare(`

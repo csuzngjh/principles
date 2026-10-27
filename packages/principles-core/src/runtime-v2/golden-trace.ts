@@ -4,6 +4,7 @@ import type { RuleHostInput } from './internalization/rule-host-contracts.js';
 import type { RuleContextV2 } from './internalization/rule-context-v2.js';
 import type { GoldenTraceCaseInput } from './internalization/artificer-output.js';
 import { buildRuleHostAction } from './internalization/rule-host-input-builder.js';
+import { classifyBashRisk } from './internalization/bash-risk.js';
 import type { ToolSemanticRegistry } from './internalization/tool-semantic-registry.js';
 
 const UnknownRecordSchema = Type.Record(Type.String(), Type.Unknown());
@@ -224,7 +225,13 @@ export function createSyntheticRuleHostInput(
     },
     derived: {
       estimatedLineChanges: 0,
-      bashRisk: 'unknown',
+      // PRI-1047 Owner review R6 #1: replay must classify bash risk with the
+      // SAME production classifier (not hard-coded 'unknown'), or a
+      // not_approved × read-only-command golden case can never be verified.
+      // Legacy parity: without a registry (no canonicalKind) the kind is
+      // unknown and bashRisk stays 'unknown'; an explicit override always wins.
+      bashRisk: overrides.derived?.bashRisk
+        ?? (canonicalKind === 'execute' ? classifyBashRisk(true, snapshot.params) : 'unknown'),
       ...overrides.derived,
     },
     ...(overrides.context !== undefined ? { context: overrides.context } : {}),

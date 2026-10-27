@@ -1,6 +1,6 @@
 {
   "barrel": "src/runtime-v2/index.ts",
-  "count": 1978,
+  "count": 1982,
   "names": [
     "ADMISSION_CONFIDENCE_THRESHOLD",
     "ADMISSION_POLICY_VERSION",
@@ -1173,6 +1173,8 @@
     "ReuseRecommendationOutcome",
     "ReviewEvidenceCompleteness",
     "ReviewKeyFacts",
+    "ReviseRuleSourceOnceArgs",
+    "ReviseRuleSourceOnceResult",
     "RevisionIdentity",
     "RevisionIdentitySchema",
     "RiskSummary",
@@ -1296,6 +1298,7 @@
     "RuntimeV2SchemaVersionSchema",
     "SENTINEL_SESSION_IDS",
     "SIGNAL_CLASSIFIER_SYSTEM_PROMPT",
+    "SOURCE_CORRECTION_STOP_REASON_CODES",
     "SOURCE_DESCRIPTORS",
     "SOURCE_FAULT_MAX_CONSECUTIVE_FAILURES",
     "SOURCE_FAULT_PERSISTENT_REASON_CODE",
@@ -1914,6 +1917,7 @@
     "resumeOwnerEvidenceTask",
     "reviewStoreFromStateManager",
     "reviseRuleBindingOnce",
+    "reviseRuleSourceOnce",
     "revisionDigest",
     "run",
     "runAdversarialLoop",

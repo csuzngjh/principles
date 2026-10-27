@@ -143,6 +143,63 @@ describe('authenticated binding route, real Ledger + real SQLite revision', () =
     expect(context.scribeArtifact).toContain('NEW LINKED TEXT');
     expect(context.scribeArtifact).not.toContain('OLD UNLINKED TEXT');
   });
+  it('SPEC-PRI-1047: authenticated source-correct-once consumes the one budget through the route; replay and unauthenticated calls refuse', async () => {
+    // Post-run4 production shape: binding revision 1 consumed by a completed
+    // scribe epoch; artificer parked at the textual_basis_unanchored NHR.
+    const common = { artifactKind: 'principle' as const, lineageArtifactIds: [], validationStatus: 'validated' as const, createdAt: NOW, updatedAt: NOW };
+    const store = handle.stateManager.piArtifactStore;
+    await store.upsertArtifact({ ...common, artifactId: 'pi-art-dreamer-old', sourceTaskId: 'dreamer', contentJson: '{}' });
+    await store.upsertArtifact({ ...common, artifactId: 'pi-art-philosopher-old', sourceTaskId: 'philosopher', contentJson: JSON.stringify({ sourceDreamerArtifactId: 'pi-art-dreamer-old', principleCandidates: [] }) });
+    const body = await bindBody();
+    expect((await post(body)).status).toBe(200); // real authenticated bind -> scribe revision epoch 1
+    const scribeAfterBind = await handle.stateManager.getTask('scribe');
+    const scribePi = hydratePITaskRecord(scribeAfterBind!);
+    await store.upsertArtifact({ ...common, artifactId: 'pi-art-scribe-run4', sourceTaskId: 'scribe', validationStatus: 'pending' as never, contentJson: JSON.stringify({
+      taskId: 'scribe', sourcePhilosopherArtifactId: 'pi-art-philosopher-old',
+      principleDraft: { title: 't', statement: 'NEW LINKED TEXT', rationale: 'r', applicability: ['a'], antiPatterns: ['b'], confidence: 0.9 },
+      sourceTrace: { philosopherArtifactId: 'pi-art-philosopher-old', dreamerArtifactId: 'pi-art-dreamer-old' }, risks: [], generatedAt: NOW,
+      intentContract: { ownerIntent: 'o', targetBehavior: 't', forbiddenBehavior: 'f', evidenceSource: 'e', validationExpectation: 'v' },
+      executionConditions: { version: 1, requiredFacts: [{ factKind: 'design_approval', required: true, textualBasis: 'Owner原文：‘……’' }] },
+    }) });
+    await handle.stateManager.updateTask('scribe', { status: 'succeeded', diagnosticJson: createPITaskDiagnosticJson({ ...scribePi!, revisionCount: 1 }) });
+    await handle.stateManager.createTask({
+      taskId: 'artificer', taskKind: 'artificer', status: 'needs_human_review', attemptCount: 0, maxAttempts: 6,
+      diagnosticJson: (() => {
+        const meta = JSON.parse(createPITaskDiagnosticJson({ dependencyTaskIds: ['scribe'], channel: 'code_tool_hook', timeoutMs: 1000, inputArtifactRefs: [], outputArtifactRefs: [] })) as { pi_metadata: Record<string, unknown> };
+        meta.pi_metadata.humanReviewContext = { reasonCode: 'textual_basis_unanchored', sourceRunId: 'intent-preflight', revisionEpoch: 0, detail: 'unanchored textualBasis', createdAt: NOW };
+        return JSON.stringify(meta);
+      })(),
+    });
+    const [current] = await store.listBySourceTaskId('scribe');
+    if (!current) throw new Error('current scribe artifact missing');
+    const { createHash } = await import('node:crypto');
+    const digest = 'sha256:' + createHash('sha256').update(current.contentJson, 'utf8').digest('hex');
+    const request = { expectedBindingRevision: 1, expectedScribeTaskId: 'scribe', expectedArtificerTaskId: 'artificer', expectedScribeArtifactDigest: digest, reason: 'Owner source correction for the unanchored citation.', requestId: 'sc-req-1' };
+
+    // Unauthenticated calls never mutate.
+    const before = await handle.stateManager.getTask('scribe');
+    authorized = false;
+    expect((await fetch(`${base}/source-correct-once`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(request) })).status).toBe(403);
+    const after403 = await handle.stateManager.getTask('scribe');
+    expect(after403?.status).toBe(before?.status);
+    expect(after403?.diagnosticJson).toBe(before?.diagnosticJson); // zero mutation
+    authorized = true;
+    // Injected authority fields are refused.
+    expect((await fetch(`${base}/source-correct-once`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...request, approved: true }) })).status).toBe(400);
+
+    const first = await fetch(`${base}/source-correct-once`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(request) });
+    expect(first.status).toBe(200);
+    expect(data(await first.json())).toMatchObject({ status: 'revision_started', scribeTaskId: 'scribe', artificerTaskId: 'artificer' });
+    const reopened = await handle.stateManager.getTask('scribe');
+    const reopenedPi = hydratePITaskRecord(reopened!);
+    expect(reopened).toMatchObject({ status: 'pending', attemptCount: 0, maxAttempts: 3 });
+    expect(reopenedPi?.sourceCorrectionReceipt).toMatchObject({ actor: 'server-owner', requestId: 'sc-req-1', status: 'consumed', bindingRevision: 1 });
+    expect(reopenedPi?.revisionCount).toBe(2);
+    // Replay with a different requestId is idempotent — never a second budget.
+    const replay = await fetch(`${base}/source-correct-once`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...request, requestId: 'sc-req-2' }) });
+    expect(data(await replay.json())).toMatchObject({ status: 'revision_already_started' });
+    expect(hydratePITaskRecord((await handle.stateManager.getTask('scribe'))!)?.revisionCount).toBe(2);
+  });
   it('an unbound rule stops before the first model request and consumes no execution attempt', async () => {
     const common = { artifactKind: 'principle' as const, lineageArtifactIds: [], validationStatus: 'validated' as const, createdAt: NOW, updatedAt: NOW };
     const store = handle.stateManager.piArtifactStore;
