@@ -119,3 +119,39 @@ EXECUTION CONDITIONS 指令改为与校验同一口径：textualBasis 必须是�
 ## 7. 回滚
 
 代码回滚 = revert PR；安装回滚 = 官方版本通道降级。所有治理数据、绑定、历史工件保留；无 schema 破坏性回滚（新 metadata 字段为可选加法）。receipt/cause 残留对旧版本不可见（hydrate 忽略未知字段）。
+
+## 8. R8 修订（Owner 评审 2026-10-27 第二轮）：动作分类正面证据契约
+
+### 8.1 问题与契约
+
+前一轮（§R6）的 bash-risk 分类器是「变更关键词黑名单，未命中即 safe」——两个方向都错：漏判（`git remote add`、`git show --output`、`cat x | sh`、`cat msg | git -C . commit -F -` 均 safe）与误判（`format`/`form.ts`/`grep touch` 中的子串触发变更）。生成的 R7 规则又自带一份 git/cat 前缀白名单，形成第二份不可靠分类；系统独立验证只有 git status 一条特例，仍批准了 7/9 偏离 Owner 真值的规则。
+
+修订契约：
+
+1. **safe = 正面证据**。只有显式只读白名单 + 参数形状核验 + 结构核验（管道/组合/换行/重定向/命令替换逐段确认）全部通过才返回 safe。未识别命令、未识别 git 全局选项、不支持的结构（进程替换、解释器执行不可分析输入）→ `unknown`。确认变更 → `normal`；确认高破坏 → `dangerous`。**未命中黑名单不再等于 safe。**
+2. **动作性质与审批事实是两个概念**：动作 unknown 不获只读豁免；审批事实 missing/unknown 维持既有中性降级（allow + matched=false + reason 明示），不因本轮改为阻止。approved/not_required 放行语义不变。
+3. **单一权威**：host-runtime 生产 gate（无 provider 默认）、OpenClaw enrichment、golden-trace 回放共用同一 `classifyCommandRisk`；生成端 spec 明文禁止规则自带命令/前缀/关键词白名单（`helpers.getBashRisk()` 是唯一分类来源）。
+4. **能力边界如实声明**：POSIX 风格 tokenizer（引号/结构算子/重定向/$()/`` ）；不做变量展开与 glob 语义；进程替换不支持（→unknown）；命令替换递归深度 ≤3；git 全局选项为显式集合，未识别即 unknown；`sed`/`awk`/解释器流式形态不可确认（unknown），`-i`/`-e`/`-c` 等确认变更/任意代码形态为 normal。
+
+### 8.2 系统独立验证扩充
+
+`deriveRuleCodeVerification` 的 execute 类反事实由单一 git status 特例扩充为 13 条命令族探针（期望硬编码，绝不经被测分类器推导）：
+
+| 族 | 探针（not_approved 下期望） |
+| --- | --- |
+| 确认只读查询 | `git status --short`、`git log --format=oneline`、`git show HEAD:src/form.ts`、`git grep touch`、`cat README.md`、`git -C . status` → allow |
+| 配置/仓库状态变更 | `git remote add …`、`git stash push` → block |
+| git 全局选项 | `git -C . commit -m change` → block |
+| 输出文件选项 | `git show --output=review.txt HEAD` → block |
+| 参数/路径含变更词 | （只读族中 --format / form.ts / touch 即是）→ allow |
+| 管道/组合/不支持语法 | `cat instructions.txt \| sh` → block（unknown 不豁免）、`cat message.txt \| git -C . commit -F -` → block |
+| 脚本/任意代码 | `node -e "…"` → block |
+
+代表探针（readonly-status / mutate-remote-add / pipe-into-script）额外交叉 approved（期望 allow，防止"一律拦"规则）。既有变体表继续覆盖 mutating 动作 × 全部事实态（approved/not_required/unknown/missing/revoked/binding-mismatch）。
+
+### 8.3 验证要求（映射）
+
+- **红证据锁定**：修复前源码 + R7 原始工件（SHA 3b783f93…）在沙箱内复现 9 条 Owner 矩阵（7/9 偏离）。
+- **分类一致性**：独立硬编码期望矩阵（bash-risk-positive-evidence.test.ts，70+ 条）覆盖全族 + 负面性质断言（白名单外永不 safe）+ 回放派生一致 + 分类与审批事实独立性。
+- **拒坏规则**：R7 原始工件、全拦 execute、全放 execute 三类规则都必须被扩充后的系统反事实拒绝（真实派生通道实测，非仅用例存在）。
+- **真实重生成（R8）**：新隔离副本沿正式 source-correction 链生成，验收 = 9 条 Owner 矩阵 + 未进入生成反馈的额外变体 + 全部事实态 + 既有规则类型回归；如实记录模型尝试次数与失败分母。

@@ -55,17 +55,33 @@ describe('system-owned RuleCode verification declaration', () => {
     expect(JSON.stringify(cases)).toBe(snapshot);
   });
 
-  it('PRI-1047 Owner review R6 #1: execute tools carry a not_approved × READ-ONLY command → allow counterfactual', () => {
+  it('PRI-1047 R8: execute tools carry the hardcoded command-family probe counterfactuals', () => {
     const result = deriveRuleCodeVerification({ executionConditions }, [], tools);
-    const readonly = result.counterfactuals.find((entry) => entry.caseId === 'system-contract:design_approval:0:readonly:denied-readonly');
-    if (!readonly || readonly.ruleContext === undefined) throw new Error('fixture: readonly counterfactual missing');
-    expect(readonly.toolName).toBe('host.exec');
-    expect(readonly.params).toEqual({ command: 'git status --short' });
-    expect(readonly.expectedDecision).toBe('allow');
-    expect(readonly.ruleContext.facts.designGate).toMatchObject({ resolution: 'not_approved', requiresApproval: true });
-    // read/search tools do NOT get the execute-kind readonly case (their whole
-    // variant table already expects allow under every fact state).
+    const probes = result.counterfactuals.filter((entry) => entry.caseId.includes(':probe:'));
+    const ids = probes.map((entry) => entry.caseId.split(':probe:')[1]);
+    // Every family required by the R8 owner review is present, with its
+    // HARDCODED expectation (never computed from the classifier).
+    expect(ids).toEqual([
+      'readonly-status', 'readonly-log-format', 'readonly-show-path', 'readonly-grep-keyword',
+      'readonly-cat', 'readonly-globalopt-query', 'mutate-remote-add', 'mutate-stash',
+      'mutate-globalopt-commit', 'mutate-output-file', 'pipe-into-script', 'pipe-into-mutation',
+      'inline-code-exec',
+    ]);
+    expect(probes.find((e) => e.caseId.endsWith('readonly-status'))?.expectedDecision).toBe('allow');
+    expect(probes.find((e) => e.caseId.endsWith('readonly-log-format'))?.expectedDecision).toBe('allow');
+    expect(probes.find((e) => e.caseId.endsWith('mutate-remote-add'))?.expectedDecision).toBe('block');
+    expect(probes.find((e) => e.caseId.endsWith('mutate-output-file'))?.expectedDecision).toBe('block');
+    expect(probes.find((e) => e.caseId.endsWith('pipe-into-script'))?.expectedDecision).toBe('block');
+    expect(probes.find((e) => e.caseId.endsWith('inline-code-exec'))?.expectedDecision).toBe('block');
+    for (const probe of probes) {
+      expect(probe.ruleContext.facts.designGate).toMatchObject({ resolution: 'not_approved', requiresApproval: true });
+    }
+    // Representative probes are ALSO crossed with approved (gate face passes).
+    const approved = result.counterfactuals.filter((entry) => entry.caseId.includes(':probe-approved:'));
+    expect(approved.map((e) => e.caseId.split(':probe-approved:')[1]).sort()).toEqual(['mutate-remote-add', 'pipe-into-script', 'readonly-status']);
+    expect(approved.every((e) => e.expectedDecision === 'allow')).toBe(true);
+    // read/search tools do NOT get the execute-kind probes.
     const withRead = deriveRuleCodeVerification({ executionConditions }, [], [...tools, { rawToolName: 'host.read', canonicalKind: 'read' }]);
-    expect(withRead.counterfactuals.some((entry) => entry.caseId.includes('host.read') && entry.caseId.includes(':readonly:'))).toBe(false);
+    expect(withRead.counterfactuals.some((entry) => entry.caseId.includes('host.read') && entry.caseId.includes(':probe:'))).toBe(false);
   });
 });

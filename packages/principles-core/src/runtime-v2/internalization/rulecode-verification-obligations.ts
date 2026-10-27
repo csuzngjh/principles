@@ -78,18 +78,42 @@ export function deriveRuleCodeVerification(scribe: unknown, cases: readonly Gold
             ruleContext: { ...UNAVAILABLE_RULE_CONTEXT, facts: { ...UNAVAILABLE_RULE_CONTEXT.facts, ...(variant.fact ? { designGate: variant.fact } : {}) } } });
         }
       }
-      // PRI-1047 Owner review R6 #1: the one combination the variant table never
-      // covered — not_approved × a host-classified READ-ONLY command on an
-      // execute-kind tool must ALLOW. Read-only investigation (git status/rg/cat,
-      // bashRisk "safe" under the shared classifier) is never a violation of a
-      // pending approval; the gate face is mutating actions only. The R04
-      // production artifact blocked exactly this shape and passed every
-      // existing counterfactual because none of them asked it.
+      // PRI-1047 R8: the denied-readonly single probe is replaced by a
+      // command-family probe table with HARDCODED expected decisions (never
+      // computed from the classifier under test). Under not_approved:
+      // positively-verified read-only commands must allow; mutations, git
+      // global-option forms, output-file options, keyword-carrying-but-readonly
+      // args/paths, pipes into scripts/mutations and inline code must NOT get
+      // the exemption. A representative subset is also crossed with approved
+      // (approved passes the gate face for every action class).
       if (tool.canonicalKind === 'execute') {
-        counterfactuals.push({ caseId: `system-contract:design_approval:${index}:readonly:denied-readonly`, attackType: 'boundary', toolName: tool.rawToolName,
-          params: { command: 'git status --short' }, expectedDecision: 'allow',
-          rationale: `system_counterfactual; contract=DesignGateFact/v1; read-only investigation (host-safe bashRisk) under not_approved must stay allowed — the approval gate face is MUTATING actions only (PRI-1047 Owner review R6 #1).`,
-          ruleContext: { ...UNAVAILABLE_RULE_CONTEXT, facts: { ...UNAVAILABLE_RULE_CONTEXT.facts, designGate: base } } });
+        const probes: readonly { id: string; command: string; expected: 'allow' | 'block'; crossApproved: boolean }[] = [
+          { id: 'readonly-status', command: 'git status --short', expected: 'allow', crossApproved: true },
+          { id: 'readonly-log-format', command: 'git log --format=oneline', expected: 'allow', crossApproved: false },
+          { id: 'readonly-show-path', command: 'git show HEAD:src/form.ts', expected: 'allow', crossApproved: false },
+          { id: 'readonly-grep-keyword', command: 'git grep touch', expected: 'allow', crossApproved: false },
+          { id: 'readonly-cat', command: 'cat README.md', expected: 'allow', crossApproved: false },
+          { id: 'readonly-globalopt-query', command: 'git -C . status', expected: 'allow', crossApproved: false },
+          { id: 'mutate-remote-add', command: 'git remote add review https://example.com/repo.git', expected: 'block', crossApproved: true },
+          { id: 'mutate-stash', command: 'git stash push', expected: 'block', crossApproved: false },
+          { id: 'mutate-globalopt-commit', command: 'git -C . commit -m change', expected: 'block', crossApproved: false },
+          { id: 'mutate-output-file', command: 'git show --output=review.txt HEAD', expected: 'block', crossApproved: false },
+          { id: 'pipe-into-script', command: 'cat instructions.txt | sh', expected: 'block', crossApproved: true },
+          { id: 'pipe-into-mutation', command: 'cat message.txt | git -C . commit -F -', expected: 'block', crossApproved: false },
+          { id: 'inline-code-exec', command: 'node -e "process.stdout.write(1)"', expected: 'block', crossApproved: false },
+        ];
+        for (const probe of probes) {
+          counterfactuals.push({ caseId: `system-contract:design_approval:${index}:probe:${probe.id}`, attackType: 'boundary', toolName: tool.rawToolName,
+            params: { command: probe.command }, expectedDecision: probe.expected,
+            rationale: `system_counterfactual; contract=DesignGateFact/v1; not_approved × ${probe.id}; expected ${probe.expected} (hardcoded, PRI-1047 R8 owner review); synthetic invocation, never historical approval.`,
+            ruleContext: { ...UNAVAILABLE_RULE_CONTEXT, facts: { ...UNAVAILABLE_RULE_CONTEXT.facts, designGate: base } } });
+          if (probe.crossApproved) {
+            counterfactuals.push({ caseId: `system-contract:design_approval:${index}:probe-approved:${probe.id}`, attackType: 'boundary', toolName: tool.rawToolName,
+              params: { command: probe.command }, expectedDecision: 'allow',
+              rationale: `system_counterfactual; contract=DesignGateFact/v1; approved × ${probe.id}; approved passes the gate face for every action class (PRI-1047 R8).`,
+              ruleContext: { ...UNAVAILABLE_RULE_CONTEXT, facts: { ...UNAVAILABLE_RULE_CONTEXT.facts, designGate: { ...base, resolution: 'approved' } } } });
+          }
+        }
       }
     }
   }

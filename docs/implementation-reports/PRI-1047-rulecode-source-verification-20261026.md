@@ -125,3 +125,36 @@ Owner 复核（2 P1 Spec + 2 P2 Spec + 1 P1 Standards + 1 P2 Standards）六项�
 ### 验证汇总
 - core 8774+16 回归测试零失败；host-runtime 41 绿；openclaw gate 72 绿；pd-cli tsc 过；pd-console 2983 绿。
 - 旧 R04 工件探针复现（方法论）/新系统反事实抓旧规则（执法生效）/R7 真实重生成全探针 PASS（端到端）。
+
+## Owner 评审 R8 修复轮（2026-10-27 第二轮，共同根因四项全修）
+
+### 根因与修复（SPEC §8 修订已落档）
+
+R7 轮的四个共同根因全部修复：
+1. **黑名单未命中即 safe** → 分类器重写为正面证据契约：显式只读白名单（含参数形状核验：find 写 flag / env 命令形状 / git 全局选项+子命令 / git 写文件选项 / branch-tag-remote-stash-config 列表形状）+ 结构核验（引号感知 tokenizer、管道/组合/换行分段、输出重定向确认写、命令替换递归≤3、进程替换不支持→unknown）。未识别→unknown；确认变更→normal；rm -rf/chmod/chown→dangerous。
+2. **关键词不分词元**（format/form.ts/grep touch 误触发）→ 结构化解析后仅对命令位与显式选项判定；参数/路径中的普通文本不再参与。
+3. **生成端第二份白名单** → 生成规范明文禁止规则自带命令/前缀/关键词白名单；宿主分类器为唯一分类来源。R8 生成物实测零自带白名单（代码 1672 字符，纯分类消费）。
+4. **独立验证仅 git status 特例** → 13 条命令族探针表（只读查询 6 / 配置仓库变更 2 / 全局选项 1 / 输出文件 1 / 管道脚本与管道变更 2 / 内联代码 1），期望硬编码；3 条代表探针交叉 approved；与既有变体表（mutating×全事实态）互补。
+
+### 红证据与拒绝证明（沙箱内判定，未执行任何真实命令）
+
+- **红证据**：修复前源码 + R7 原始工件（SHA 3b783f93…）复现 Owner 九条矩阵 → **7/9 偏离**（4 漏拦 + 3 误拦），逐条一致。
+- **分类一致性**：独立硬编码期望矩阵 70+ 条（期望与分类器完全解耦）全绿；负面性质断言（白名单外永不 safe）；回放派生与分类器逐条一致；分类与审批事实独立性锁定。
+- **拒坏规则**（真实派生通道，13 探针逐条执行）：R7 原始工件 2/13 失败（自带白名单盲区：git grep / git -C . status）→ 拒绝 ✓；全拦 execute 规则 6/13 → 拒绝 ✓；全放 execute 规则 7/13 → 拒绝 ✓。
+
+### R8 真实重生成（新隔离副本 .tmp/pri1047-iso-r8）
+
+- 沿既有正式链（source-correct-once → scribe 新 epoch → artificer），沿用原 profile（zai/glm-5.3-flash / 32000 / 600000ms / maxAttempts 6）。**模型尝试 1/1 首轮即过**（run_5 succeeded；对比 R6 死锁轮 6 次耗尽）。
+- **新工件 SHA256 = 80230780167f23cddf4011f1eb0ee9ad64729daf102c7a1834ed7543a22c5fed**（1672 字符）。四分支：approved/not_required→allow；not_approved × read/search 或 execute+bashRisk=safe→allow；not_approved × 其余（含 unknown）→block（理由复述 Owner 原话要点）；事实缺失/unknown→中性 allow+matched=false。零自带命令白名单。
+- **独立验收 ALL PASS**（生产沙箱，零失败）：9 条 Owner 矩阵全对；**18 条未进入生成反馈的独立变体**全对（含 git log --grep=commit、head、tail -f、git stash show、printf、wc -c < file、bash -c "git status"、python3 -c 删文件、curl>file、rm、mv、git checkout -b、push --force-with-lease、echo&&git add 等）；4 事实态 × 3 代表命令中性契约全对；分类一致性逐条全对。验收脚本区分力证明：同一脚本对 R7 旧工件 6 项 FAIL。
+
+### R8 链路终态与审批记录（如实）
+
+- evaluator（run_3，对 R8 新工件）：**needs_revision**（score 0.78）。其 strengths 五条全部认可规则四分支符合契约（含"只读豁免依赖宿主正向校验而非自建白名单"）；needs_revision 的唯一 requiredChange 是"补可执行金样覆盖四分支"——该覆盖**实际已由系统反事实通道执行**（13 探针 + 变体表全交叉 + 独立验收全过），evaluator 的 traceCoverage 口径未把 system_counterfactual 计入可执行覆盖，属判定器与 R6/R8 架构的已知错位（记录在案，不在本轮扩大修复）。修订机制按既有语义种下 artificer-repair-evaluator 任务（retry_wait attempt 1）。
+- rollout_reviewer run_2（approve_rollout + rollout_dispatch_refused）输入的是**旧评估工件**（run_2=历史链），非本轮新工件。
+- **52d 候选审批记录 = 0 条**：本轮新工件未走到审批环节（止于 evaluator needs_revision）。
+- **报告勘误**：R7 轮报告"rollout 至待审批边界"表述错误——R7 副本实查 rollout_reviewer 一直 pending attempt 0（从未运行）、审批记录 0 条。R04 轮的"待审批边界"指当时旧链 rollout 的 dispatch_refused 停点，非 R7 新工件状态。
+
+### 结论
+
+工程修复完成（生成 1/1 + 独立质量验收全过 + 三类坏规则被拒 + 全量回归 8714 零失败），可进入合并审阅。安装后真实 Codex 拦/放验收（PRI-1044）仍单独 NOT RUN。

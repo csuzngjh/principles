@@ -16,15 +16,7 @@ import {
   resolveRuntimeConfig,
   isRuntimeConfigError,
   validateRuntimeConfig,
-  invalidatePainSignalBridge,
-  createPainSignalBridge,
 } from '@principles/core/runtime-v2';
-
-const stubLedger = {
-  readPrincipleSubtree: () => undefined,
-  writePrinciple: () => ({ id: 'test' }) as never,
-  updatePrincipleValueMetrics: () => ({ principleId: 'test' }) as never,
-};
 
 describe('PRI-228: PD-owned config resolution cutover', () => {
   describe('PD-owned config consumed by runtime entrypoint', () => {
@@ -143,65 +135,9 @@ describe('PRI-228: PD-owned config resolution cutover', () => {
     });
   });
 
-  describe('Cache isolation between runtime modes', () => {
-    const testWsDir = '/test-pri228-cache-isolation';
-    const testStateDir = path.join(testWsDir, '.state');
-
-    beforeEach(() => {
-      invalidatePainSignalBridge(testWsDir);
-    });
-
-    afterEach(() => {
-      invalidatePainSignalBridge(testWsDir);
-    });
-
-    it.skip('pi-ai and openclaw-cli produce different bridge instances', async () => {
-      const piAiConfig = resolveRuntimeConfig(testStateDir);
-      if (isRuntimeConfigError(piAiConfig)) {
-        expect.unreachable('pi-ai config should resolve');
-        return;
-      }
-      const bridge1 = await createPainSignalBridge({
-        workspaceDir: testWsDir,
-        stateDir: testStateDir,
-        ledgerAdapter: stubLedger,
-      });
-      expect(bridge1).toBeDefined();
-
-      const openclawConfig = resolveRuntimeConfig(testStateDir, {
-        requestedRuntimeKind: 'openclaw-cli',
-        openclawLocal: true,
-      });
-      if (isRuntimeConfigError(openclawConfig)) {
-        expect.unreachable('openclaw-cli config should resolve');
-        return;
-      }
-      const bridge2 = await createPainSignalBridge({
-        workspaceDir: testWsDir,
-        stateDir: testStateDir,
-        ledgerAdapter: stubLedger,
-      });
-      expect(bridge2).toBeDefined();
-      expect(bridge1).not.toBe(bridge2);
-    });
-
-    it.skip('invalidatePainSignalBridge with workspace-only clears all modes', async () => {
-      const piAiConfig = resolveRuntimeConfig(testStateDir);
-      if (isRuntimeConfigError(piAiConfig)) return;
-      await createPainSignalBridge({
-        workspaceDir: testWsDir,
-        stateDir: testStateDir,
-        ledgerAdapter: stubLedger,
-      });
-      invalidatePainSignalBridge(testWsDir);
-      const bridgeAfter = await createPainSignalBridge({
-        workspaceDir: testWsDir,
-        stateDir: testStateDir,
-        ledgerAdapter: stubLedger,
-      });
-      expect(bridgeAfter).toBeDefined();
-    });
-  });
+  // 'Cache isolation between runtime modes' (two it.skip blocks) removed
+  // 2026-10-27: it exercised the openclaw-cli runtime kind, retired by
+  // ADR-0029 — the skipped tests could never run again.
 
   describe('CLI resolveWorkspaceDir gate', () => {
     it('resolveWorkspaceDir throws when no workspace provided', async () => {
