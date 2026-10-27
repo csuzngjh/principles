@@ -158,3 +158,24 @@ R7 轮的四个共同根因全部修复：
 ### 结论
 
 工程修复完成（生成 1/1 + 独立质量验收全过 + 三类坏规则被拒 + 全量回归 8714 零失败），可进入合并审阅。安装后真实 Codex 拦/放验收（PRI-1044）仍单独 NOT RUN。
+
+## Owner 评审 R9 修复轮（2026-10-27 第三轮：换行/写入参数/评审证据接线 → 链路至审批入口）
+
+### Owner 确认的三处与处置
+
+1. **[P1] 换行后的变更命令被当查询参数**（`cat README.md\ngit commit`）与双引号内反引号替换漏判 → 前一会话（codex）重写 tokenizer：换行/管道/组合为结构边界逐段判定；命令替换（含双引号内 `$()`/`` ` ``）递归核验且**展开文本不可确认时整体 unknown**（其输出可能成为外层命令的变更参数）；写入参数形状核验扩展到 `sort -o`/`uniq file2`/`git hash-object -w`/`git reflog expire` 等白名单命令（R9 Owner 五条新反例全过）。独立对抗子代理另找 27 个不安全输入（含 printf 选项绕过）全部不再获豁免；25 个受支持只读输入保持放行。
+2. **[Spec] Evaluator 看不到系统验证覆盖** → `ruleCodeVerification`（79 条系统反事实用例 + 预期 + 来源 + coverage，标注 not_executed——期望非执行结果，判定后由真实回放裁定）接入评审提示词，先于判断呈现；明示"不要为此要求模型补写金样"。
+3. **运行限制：真实工件 + 验证证据超 50000 字符**（evaluator 跑4失败）→ 两轮无损压缩（不提上限、不删样本）：(a) 历史调用行/列形状共享；(b) `normalizedPathSameAsCommand` 标记（bash 调用的合成 normalizedPath 与 paramsSummary.command 逐字节相同时以布尔标记替代副本，重建契约写入提示词文本）。真实工件只读探针实测 **52,530 → 49,798 < 50,000**（含 formation + 79 系统用例完整可重建）。
+
+### 链路终态（原预算内，无手工重开/刷新额度；失败全保留在分母）
+
+- **repair artificer：1/3 成功**（跑1、跑2 no_submit 12轮未提交——失败样本保留；跑3 提交新规则）。
+- **evaluator：跑4 因 50k 超限失败 →（压缩修复后）跑5 succeeded，判定 approved**——摘要明确认可"严格信任宿主 designGate 事实并校验绑定，not_approved 时按 kind 分派：read/search 与 bashRisk=safe 的 execute 放行，write 及非 safe execute 拦截"，且此次判定**基于可见的系统验证证据**（R9 接线生效）。
+- **rollout_reviewer：新链 succeeded（att=1）**。
+- **审批记录 1 条：`apr_code_tool_hook_…run_evaluator_…_5`，status=pending，risk_level=high（Rule activation request）——链路首次真正到达审批入口**。
+- 独立验收（生产沙箱，对 repair 新工件）：Owner 9 矩阵 + **R9 五条新反例** + 25 条独立变体 + 4 事实态 × 3 代表 + 分类一致性逐条——初版 2 项失败（`git log --grep`/`git branch --show-current` 被 R9 按子命令 flag 正面清单保守判 unknown），补齐两个真实只读形状后 **ALL PASS**（全量 8724 测试零失败）。
+
+### 剩余如实声明
+
+- `node -e`/`python -c` 等任意代码执行仍按"确认变更能力"处理（normal→拦）；宿主分类器能力边界在模块头声明（POSIX 风格子集，未识别即 unknown 不豁免）。
+- 安装/发版/生产恢复/规则批准（该 pending 审批记录在隔离副本中，非生产）全部未执行；**安装后真实 Codex 拦/放验收（PRI-1044）单独 NOT RUN**。
