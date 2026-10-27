@@ -204,8 +204,6 @@ const REQUIRED_SOURCE_FILES = [
   'build-l2-principle-reader.ts',
   // PRI-446: pure logic migrated from openclaw-plugin into core
   'evidence-triage/observation-resolver.ts',
-  'pain-gate/pain-diagnostic-gate-policy.ts',
-  'pain-gate/index.ts',
   'detection/detection-funnel-policy.ts',
   'detection/index.ts',
   // PRI-470: IntentDecisionRecord durable store + types (SPEC §21.7)
@@ -268,10 +266,6 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   'schema/migration-runner.ts',
   'rule-host.ts',
   'principle-training-state.ts',
-  // PRI-446: now a thin adapter delegating pure decision logic to
-  // runtime-v2/pain-gate/pain-diagnostic-gate-policy.ts. Kept here because it
-  // owns the cooldown Map + SystemLogger + Date.now side effects.
-  'pain-diagnostic-gate.ts',
   'hygiene/tracker.ts',
   'schema/migrations/002-init-central.ts',
   'workspace-dir-service.ts',
@@ -330,9 +324,7 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   'code-implementation-storage.ts',
   'observability.ts',
   'file-storage-adapter.ts',
-  'workflow-funnel-loader.ts',
   'dictionary.ts',
-  'thinking-os-parser.ts',
   'system-logger.ts',
   // Anonymous Product Telemetry v1 (PRI-595~603, ADR-0021): one-time-init
   // trigger shell — wires the host-neutral telemetry service (all logic in
@@ -440,7 +432,7 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     }
   });
 
-  it('known baseline count is self-consistent (96 files)', async () => {
+  it('known baseline count is self-consistent (95 files)', async () => {
     // Sanity check: if the baseline grows, update this number.
     // Prevents accidental baseline bloat from going unnoticed.
     // See docs/archive/reviews/plugin-core-inventory-2026-05.md §7
@@ -500,7 +492,11 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // plugin I/O boundary for ~/.pd/enforcement-health/ degraded-enforcement
     // markers (LOCKSTEP twin of the host-runtime gate's marker module).
     // PD v2 Phase 1: +1 intervention-evidence-recorder.ts (98) — plugin I/O source adapter for the shared evidence ingress.
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(98);
+    // 2026-10-27 legacy cleanup: Removed pain-diagnostic-gate.ts (retired Gate A),
+    // workflow-funnel-loader.ts (stale duplicate of the core loader) and
+    // thinking-os-parser.ts (moved to a test helper) — all three had zero
+    // production importers (98 → 95).
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(95);
   });
 });
 
@@ -754,20 +750,6 @@ describe('PRI-42 internalization boundary', () => {
     const files = readdirSync(triageDir).filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'));
     for (const file of files) {
       const src = readFileSync(join(triageDir, file), 'utf-8');
-      expect(src).not.toContain('openclaw-plugin');
-      expect(src).not.toContain('../../../openclaw-plugin');
-    }
-  });
-
-  it('PRI-446: pain-gate has zero openclaw-plugin imports', async () => {
-    const { existsSync, readdirSync, readFileSync } = await import('node:fs');
-    const { resolve, join } = await import('node:path');
-    const dir = resolve(__dirname, '..', 'pain-gate');
-    expect(existsSync(dir)).toBe(true);
-
-    const files = readdirSync(dir).filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'));
-    for (const file of files) {
-      const src = readFileSync(join(dir, file), 'utf-8');
       expect(src).not.toContain('openclaw-plugin');
       expect(src).not.toContain('../../../openclaw-plugin');
     }

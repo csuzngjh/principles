@@ -237,10 +237,9 @@ describe('isHighConfidenceUnsafeAction', () => {
 // ── Evidence-Only Cooldown Contract ──────────────────────────────────────────
 //
 // Core contract: when triage returns evidence_only/owner_confirm/health_only,
-// the caller (hook) MUST NOT proceed to evaluatePainDiagnosticGate, which writes
-// cooldown. These tests verify the adapter-level guarantee: non-admit decisions
-// are surfaced clearly with the right nextAction, so the caller can distinguish
-// evidence-only from admit.
+// the caller (hook) MUST NOT admit or write Gate A cooldown. These tests verify
+// the adapter-level guarantee: non-admit decisions are surfaced clearly with the
+// right nextAction, so the caller can distinguish evidence-only from admit.
 
 describe('evidence-only cooldown contract', () => {
   it('tool_failure returns evidence_only — no admit, caller must skip gate', () => {

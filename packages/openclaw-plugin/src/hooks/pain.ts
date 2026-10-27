@@ -533,7 +533,7 @@ export function handleSharedPainEvidenceResult(
  * This path is separate because:
  * - It always records pain at score 100
  * - It uses a different GFI track (manual_pain)
- * - It has its own cooldown via PainDiagnosticGate
+ * - It has its own cooldown
  * - It does NOT go through evidence triage
  */
 function handleManualPain(

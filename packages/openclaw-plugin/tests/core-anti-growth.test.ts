@@ -56,7 +56,6 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     'bootstrap-rules.ts',
     'rule-host.ts',
     'principle-training-state.ts',
-    'pain-diagnostic-gate.ts',
     'hygiene/tracker.ts',
     'paths.ts',
     'workspace-dir-validation.ts',
@@ -84,9 +83,7 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     'pain.ts',
     'config.ts',
     'code-implementation-storage.ts',
-    'workflow-funnel-loader.ts',
     'dictionary.ts',
-    'thinking-os-parser.ts',
     'system-logger.ts',
     'detection-funnel.ts',
     // Anonymous Product Telemetry v1 (PRI-595~603, ADR-0021): one-time-init
