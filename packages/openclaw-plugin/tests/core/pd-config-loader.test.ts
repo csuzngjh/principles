@@ -243,7 +243,7 @@ describe('Observer ready', () => {
     }
   });
 
-  it('returns readiness=needs_setup for OpenClaw profile (not supported for observers)', () => {
+  it('returns readiness=needs_setup for a retired openclaw profile (ADR-0029)', () => {
     const tmp = mkTmpDir();
     const config = yaml.dump({
       version: 1,
@@ -277,7 +277,8 @@ describe('Observer ready', () => {
       expect(result.enabled).toBe(true);
       expect(result.readiness).toBe('needs_setup');
       expect(result.runtimeProfileType).toBe('openclaw');
-      expect(result.reason).toContain('not supported');
+      expect(result.reason).toContain('retired');
+      expect(result.reason).toContain('ADR-0029');
       expect(result.nextAction).toContain('pi-ai');
     } finally { rmTmpDir(tmp); }
   });

@@ -164,7 +164,7 @@ const state: Partial<BddState> = {};
 
 function freshGovernance(options: { workbuddyFlag?: boolean } = {}): void {
   state.home = makeHome();
-  state.governance = makeGovernance(state.home, { workbuddyFlag: options.workbuddyFlag ?? true, receiptLedgerFlag: true });
+  state.governance = makeGovernance(state.home, { workbuddyFlag: options.workbuddyFlag ?? true, receiptLedgerFlag: true, readyRuntime: true });
   makeTrajectory(state.governance);
   state.project = makeProjectDir(state.home, 'bdd');
   fs.writeFileSync(path.join(state.project, 'normal-bdd.txt'), 'scratch\n');

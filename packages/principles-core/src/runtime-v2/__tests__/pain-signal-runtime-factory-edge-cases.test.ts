@@ -43,50 +43,28 @@ describe('DisabledDiagnosticianRunner', () => {
 });
 
 describe('validateRuntimeConfig', () => {
-  it('accepts valid openclaw-cli config with local mode', () => {
+  it('rejects the retired openclaw-cli kind (ADR-0029)', () => {
     const config: RuntimeConfig = {
       runtimeKind: 'openclaw-cli',
-      openclawMode: 'local',
       timeoutMs: 300000,
       agentId: 'main',
     };
 
-    // Should not throw
-    expect(() => validateRuntimeConfig(config)).not.toThrow();
-  });
-
-  it('accepts valid openclaw-cli config with gateway mode', () => {
-    const config: RuntimeConfig = {
-      runtimeKind: 'openclaw-cli',
-      openclawMode: 'gateway',
-      timeoutMs: 300000,
-      agentId: 'main',
-    };
-
-    expect(() => validateRuntimeConfig(config)).not.toThrow();
-  });
-
-  it('accepts openclaw-cli with undefined openclawMode (delegated mode)', () => {
-    const config: RuntimeConfig = {
-      runtimeKind: 'openclaw-cli',
-      openclawMode: undefined,
-      timeoutMs: 300000,
-      agentId: 'main',
-    };
-
-    expect(() => validateRuntimeConfig(config)).not.toThrow();
-  });
-
-  it('rejects invalid openclawMode value', () => {
-    const config: RuntimeConfig = {
-      runtimeKind: 'openclaw-cli',
-      openclawMode: 'invalid-mode' as 'local' | 'gateway',
-      timeoutMs: 300000,
-      agentId: 'main',
-    };
-
-    expect(() => validateRuntimeConfig(config)).toThrow(/Invalid openclawMode/);
+    expect(() => validateRuntimeConfig(config)).toThrow(/is not executable by PD/);
+    expect(() => validateRuntimeConfig(config)).toThrow(/ADR-0029/);
     expect(() => validateRuntimeConfig(config)).toThrow(/nextAction/);
+  });
+
+  it('rejects a historical enum member that never had a PD adapter', () => {
+    // RuntimeKindSchema keeps these literals ONLY so persisted run/task rows
+    // still parse; none of them is executable (read-only legacy, ADR-0029).
+    const config: RuntimeConfig = {
+      runtimeKind: 'claude-cli',
+      timeoutMs: 300000,
+      agentId: 'main',
+    };
+
+    expect(() => validateRuntimeConfig(config)).toThrow(/runtimeKind 'claude-cli' is not executable/);
   });
 
   it('accepts valid pi-ai config with all required fields', () => {
@@ -195,14 +173,14 @@ describe('isRuntimeConfigError', () => {
     expect(isRuntimeConfigError(config)).toBe(false);
   });
 
-  it('returns false for openclaw-cli config', () => {
+  it('returns false for a retired openclaw-cli config — the shape parses, execution is refused elsewhere', () => {
     const config: RuntimeConfig = {
       runtimeKind: 'openclaw-cli',
-      openclawMode: 'local',
       timeoutMs: 300000,
       agentId: 'main',
     };
 
     expect(isRuntimeConfigError(config)).toBe(false);
+    expect(() => validateRuntimeConfig(config)).toThrow(/is not executable by PD/);
   });
 });

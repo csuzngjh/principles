@@ -12,14 +12,20 @@ import { PDErrorCategorySchema } from './error-categories.js';
 
 // ── Runtime Kind ──
 
+// ADR-0029 retired the OpenClaw sub-agent backend, and no PD runtime has ever
+// been built for the other host-CLI members. These literals stay ONLY because
+// historical rows (state.db runtime_kind, trajectory imports, evidence
+// artifacts) still carry them: they are READ-ONLY legacy. Nothing may
+// construct an adapter for them — 'pi-ai' and 'test-double' are the only
+// executable kinds, and validateRuntimeConfig refuses everything else.
 export const RuntimeKindSchema = Type.Union([
-  Type.Literal('openclaw'),
-  Type.Literal('openclaw-cli'),
-  Type.Literal('openclaw-history'), // compatibility import from OpenClaw trajectory.db
-  Type.Literal('claude-cli'),
-  Type.Literal('codex-cli'),
-  Type.Literal('gemini-cli'),
-  Type.Literal('local-worker'),
+  Type.Literal('openclaw'), // read-only legacy (ADR-0029)
+  Type.Literal('openclaw-cli'), // read-only legacy (ADR-0029)
+  Type.Literal('openclaw-history'), // read-only legacy: trajectory.db import
+  Type.Literal('claude-cli'), // read-only legacy: never constructible
+  Type.Literal('codex-cli'), // read-only legacy: never constructible
+  Type.Literal('gemini-cli'), // read-only legacy: never constructible
+  Type.Literal('local-worker'), // read-only legacy: never constructible
   Type.Literal('test-double'),
   Type.Literal('pi-ai'), // M9: direct LLM completion via @earendil-works/pi-ai
   Type.Literal('pi-ai-l2'), // PRI-419: multi-turn agent loop via pi-agent-core (L2)
@@ -158,9 +164,8 @@ export const StartRunInputSchema = Type.Object({
    * Cross-adapter contract (P2): PiAiRuntimeAdapter applies it on every
    * completeSimple path (tool-call / json_schema / free-form / repair / retry
    * ladder); the L2 agent-loop adapters apply it to every loop turn and the
-   * L1 fallback; OpenClawCliRuntimeAdapter CANNOT honor it (the host CLI owns
-   * its model calls) and FAILS LOUD on input.maxTokens !== undefined —
-   * silently ignoring the cap is forbidden (rc-9).
+   * L1 fallback. An adapter that cannot honor it must FAIL LOUD on
+   * input.maxTokens !== undefined — silently ignoring the cap is forbidden (rc-9).
    */
   maxTokens: Type.Optional(Type.Number({ minimum: 1 })),
   idempotencyKey: Type.Optional(Type.String()),

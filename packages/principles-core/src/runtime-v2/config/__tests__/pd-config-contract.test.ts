@@ -22,6 +22,7 @@ import {
   isFeatureEnabled,
   getDefaultPdConfig,
   DEFAULT_RUNTIME_PROFILE_ID,
+  checkAgentRuntimeReadiness,
   PD_CONFIG_VERSION,
   INTERNAL_AGENT_NAMES,
   resolveAgentRuntimeBinding,
@@ -110,15 +111,39 @@ describe('Scenario 1: Missing config → deterministic defaults', () => {
     expect(nn(effective.config.features.idle_trigger).category).toBe('gone');
   });
 
-  it('defaults use openclaw.default while retaining pd.default as an explicit pi-ai option', () => {
+  it('defaults seed ONLY the pi-ai profile — no openclaw profile is produced (ADR-0029)', () => {
     const effective = computeEffectivePdConfig(null);
-    // The active MVP default works through the host OpenClaw runtime.
     expect(Object.hasOwn(effective.config.runtimeProfiles, DEFAULT_RUNTIME_PROFILE_ID)).toBe(true);
-    expect(nn(effective.config.runtimeProfiles[DEFAULT_RUNTIME_PROFILE_ID]).type).toBe('openclaw');
-    expect(Object.hasOwn(effective.config.runtimeProfiles, 'openclaw.default')).toBe(true);
+    expect(nn(effective.config.runtimeProfiles[DEFAULT_RUNTIME_PROFILE_ID]).type).toBe('pi-ai');
+    expect(DEFAULT_RUNTIME_PROFILE_ID).toBe('pd.default');
+    // Nothing in the default chain may emit a retired profile type.
+    for (const [id, profile] of Object.entries(effective.config.runtimeProfiles)) {
+      expect(nn(profile).type, id).not.toBe('openclaw');
+    }
+    expect(effective.config.internalAgents.defaultRuntime).toBe('pd.default');
+  });
+
+  it('a legacy openclaw profile still parses, warns, and is never silently ready', () => {
+    // PRI-1023 compatibility contract (ADR-0029 §4): an installed
+    // `.pd/config.yaml` written before the retirement MUST keep validating —
+    // rejecting it would brick the workspace — but the retirement MUST be
+    // observable (rc-9): one warning plus needs_setup for the bound agent.
+    const raw = makeValidConfig();
+    raw.internalAgents.defaultRuntime = 'openclaw.default';
+    const result = validatePdConfig(raw);
+    if (!result.ok) throw new Error(`Expected legacy config to stay valid: ${JSON.stringify(result.errors)}`);
+    expect(result.warnings.filter(w => w.includes('retired'))).toHaveLength(2);
+    expect(nn(result.warnings.find(w => w.includes('retired')))).toContain('openclaw.default');
+
+    const effective = computeEffectivePdConfig(result.value);
     expect(nn(effective.config.runtimeProfiles['openclaw.default']).type).toBe('openclaw');
-    // Direct pi-ai remains available only after the Owner explicitly configures it.
-    expect(nn(effective.config.runtimeProfiles['pd.default']).type).toBe('pi-ai');
+
+    const binding = resolveAgentRuntimeBinding(effective, 'diagnostician');
+    expect(binding.ok).toBe(true);
+    if (!binding.ok) return;
+    const readiness = checkAgentRuntimeReadiness(binding.profile, () => undefined);
+    expect(readiness.readiness).toBe('needs_setup');
+    expect(readiness.nextAction).toContain('pi-ai');
   });
 
   it('defaults include all internal agents', () => {
@@ -684,7 +709,7 @@ describe('Scenario 9: fresh defaults carry no explicit per-agent runtimeProfile 
     expect(config.internalAgents.defaultRuntime).toBe(DEFAULT_RUNTIME_PROFILE_ID);
   });
 
-  it('vanilla defaults still resolve every ENABLED agent to openclaw.default via defaultRuntime (openclaw/codex host behavior unchanged)', () => {
+  it('vanilla defaults resolve every ENABLED agent to the pi-ai default via defaultRuntime (ADR-0029)', () => {
     const effective = computeEffectivePdConfig(null);
     for (const name of INTERNAL_AGENT_NAMES) {
       const binding = resolveAgentRuntimeBinding(effective, name);
@@ -695,7 +720,8 @@ describe('Scenario 9: fresh defaults carry no explicit per-agent runtimeProfile 
       }
       expect(binding.ok, `${name}: ${binding.ok ? '' : binding.reason}`).toBe(true);
       if (!binding.ok) continue;
-      expect(binding.profileId, name).toBe('openclaw.default');
+      expect(binding.profileId, name).toBe('pd.default');
+      expect(nn(binding.profile, name).type, name).toBe('pi-ai');
       expect(binding.source, name).toBe('default_runtime');
     }
   });
@@ -866,14 +892,14 @@ describe('Edge cases', () => {
     expect(effective.warnings.some(w => w.includes('not found'))).toBe(true);
   });
 
-  it('openclaw profile with only source=default is ready', () => {
+  it('legacy openclaw profile is summarized as needs_setup, never ready (ADR-0029)', () => {
     const raw = makeValidConfig();
     const result = validatePdConfig(raw);
     if (!result.ok) throw new Error('Expected ok');
     const effective = computeEffectivePdConfig(result.value);
     const summary = redactPdConfig(effective);
     const defaultProfile = summary.runtimeProfiles.find(p => p.id === 'openclaw.default');
-    expect(nn(defaultProfile).readiness).toBe('ready');
+    expect(nn(defaultProfile).readiness).toBe('needs_setup');
   });
 
   it('disabled agent has readiness=disabled', () => {

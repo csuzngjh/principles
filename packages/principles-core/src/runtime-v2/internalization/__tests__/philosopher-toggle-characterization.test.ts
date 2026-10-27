@@ -150,7 +150,7 @@ function readCoreSource(relativePath: string): string {
 
 describe('philosopher toggle — config layer (characterization)', () => {
   it('philosopher defaults to disabled while dreamer and scribe default to enabled', () => {
-    const agents = getDefaultInternalAgents().agents;
+    const {agents} = getDefaultInternalAgents();
 
     expect(agents.philosopher.enabled).toBe(false);
     // Positive discrimination (ERR-088): the default table is not uniformly false.
@@ -192,8 +192,10 @@ describe('philosopher toggle — config layer (characterization)', () => {
     expect(dreamer.ok).toBe(true);
     expect(scribe.ok).toBe(true);
     if (!dreamer.ok || !scribe.ok) throw new Error('expected dreamer and scribe bindings to resolve');
-    expect(dreamer.profileId).toBe('openclaw.default');
-    expect(scribe.profileId).toBe('openclaw.default');
+    // Binding resolution is not readiness: the pi-ai default (ADR-0029) seeds an
+    // unconfigured profile, so it binds fine and only later reports needs_setup.
+    expect(dreamer.profileId).toBe('pd.default');
+    expect(scribe.profileId).toBe('pd.default');
   });
 });
 

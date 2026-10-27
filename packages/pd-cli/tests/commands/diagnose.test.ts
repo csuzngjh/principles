@@ -166,7 +166,6 @@ vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
     DefaultDiagDistillerValidator: vi.fn().mockImplementation(function () { return {}; }),
     DisabledDiagnosticianRunner: vi.fn().mockImplementation(function () { return {}; }),
     TestDoubleRuntimeAdapter: vi.fn().mockImplementation(function () { return {}; }),
-    OpenClawCliRuntimeAdapter: vi.fn().mockImplementation(function () { return {}; }),
     PiAiRuntimeAdapter: vi.fn().mockImplementation(function () { return {}; }),
     SPLIT_PIPELINE_TOTAL_TIMEOUT_MS: 300000,
     // PRI-638: capability gate — available by default; disabled cases override this.
@@ -351,19 +350,7 @@ describe('pd diagnose run --runtime routing', () => {
     exitSpy.mockRestore();
   });
 
-  it('HG-03: --runtime openclaw-cli without mode (no file config) fails via resolveRuntimeFromPdConfig', async () => {
-    mockResolveRuntimeFromPdConfig.mockReturnValueOnce({
-      result: {
-        ok: false,
-        reason: 'missing_openclaw_mode',
-        message: 'runtimeKind is openclaw-cli but no mode specified',
-        nextAction: 'Provide exactly one mode',
-      },
-      legacyWarnings: [],
-      configSource: '.pd/config.yaml',
-      configLoadResult: { ok: true, effective: {}, defaults: {}, legacyFilesDetected: [] },
-    });
-
+  it('HG-03 (ADR-0029): --runtime openclaw-cli is refused as retired, exit 1', async () => {
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
 
@@ -374,14 +361,18 @@ describe('pd diagnose run --runtime routing', () => {
       json: false,
     } as DiagnoseRunOptions);
 
-    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('no mode resolved'));
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('retired (ADR-0029)'));
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('nextAction: Use --runtime pi-ai'));
     expect(exitSpy).toHaveBeenCalledWith(1);
 
     consoleErrorSpy.mockRestore();
     exitSpy.mockRestore();
   });
 
-  it('HG-03: both --openclaw-local and --openclaw-gateway exits with error (mutually exclusive)', async () => {
+  it('HG-03 (ADR-0029): retired refusal applies even when both legacy mode flags are passed', async () => {
+    // --openclaw-local/--openclaw-gateway no longer exist on the command; the
+    // handler must still refuse the retired kind instead of trusting stale
+    // option fields.
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
 
@@ -394,16 +385,14 @@ describe('pd diagnose run --runtime routing', () => {
       json: false,
     } as DiagnoseRunOptions);
 
-    expect(consoleErrorSpy).toHaveBeenCalledWith(
-      'error: --openclaw-local and --openclaw-gateway are mutually exclusive'
-    );
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('retired (ADR-0029)'));
     expect(exitSpy).toHaveBeenCalledWith(1);
 
     consoleErrorSpy.mockRestore();
     exitSpy.mockRestore();
   });
 
-  it('DPB-09: openclaw-cli with file config openclawMode succeeds without CLI flag', async () => {
+  it('DPB-09 (ADR-0029): openclaw-cli with file config openclawMode is refused — read-side legacy never executes', async () => {
     mockResolveRuntimeFromPdConfig.mockReturnValueOnce({
       result: {
         runtimeKind: 'openclaw-cli',
@@ -416,7 +405,6 @@ describe('pd diagnose run --runtime routing', () => {
       configLoadResult: { ok: true, effective: {}, defaults: {}, legacyFilesDetected: [] },
     });
 
-    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
 
     await handleDiagnoseRun({
@@ -426,13 +414,12 @@ describe('pd diagnose run --runtime routing', () => {
       json: false,
     } as DiagnoseRunOptions);
 
-    expect(exitSpy).not.toHaveBeenCalledWith(1);
+    expect(exitSpy).toHaveBeenCalledWith(1);
 
-    consoleSpy.mockRestore();
     exitSpy.mockRestore();
   });
 
-  it('DPB-09: openclaw-cli flag overrides file config mode (config=gateway, flag=local → runtimeMode=local)', async () => {
+  it('DPB-09 (ADR-0029): openclaw-cli legacy flag override attempt is refused (config=gateway, flag=local)', async () => {
     mockResolveRuntimeFromPdConfig.mockReturnValueOnce({
       result: {
         runtimeKind: 'openclaw-cli',
@@ -445,7 +432,6 @@ describe('pd diagnose run --runtime routing', () => {
       configLoadResult: { ok: true, effective: {}, defaults: {}, legacyFilesDetected: [] },
     });
 
-    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
 
     await handleDiagnoseRun({
@@ -456,20 +442,12 @@ describe('pd diagnose run --runtime routing', () => {
       json: false,
     } as DiagnoseRunOptions);
 
-    // Flag override: config says gateway, flag says local → adapter gets local
-    const OpenClawCliMock = vi.mocked(
-      await import('@principles/core/runtime-v2').then(m => m.OpenClawCliRuntimeAdapter),
-    );
-    expect(OpenClawCliMock).toHaveBeenCalledWith(
-      expect.objectContaining({ runtimeMode: 'local' }),
-    );
-    expect(exitSpy).not.toHaveBeenCalledWith(1);
+    expect(exitSpy).toHaveBeenCalledWith(1);
 
-    consoleSpy.mockRestore();
     exitSpy.mockRestore();
   });
 
-  it('DPB-09: openclaw-cli missing mode (--json) outputs JSON error', async () => {
+  it('DPB-09 (ADR-0029): openclaw-cli --json outputs structured retired_runtime_kind error', async () => {
     mockResolveRuntimeFromPdConfig.mockReturnValueOnce({
       result: {
         runtimeKind: 'openclaw-cli',
@@ -494,7 +472,9 @@ describe('pd diagnose run --runtime routing', () => {
 
     const jsonOutput = JSON.parse(logSpy.mock.calls[0][0]);
     expect(jsonOutput.ok).toBe(false);
-    expect(jsonOutput.reason).toBe('missing_openclaw_mode');
+    expect(jsonOutput.reason).toBe('retired_runtime_kind');
+    expect(jsonOutput.message).toContain('ADR-0029');
+    expect(jsonOutput.nextAction).toContain('--runtime pi-ai');
     expect(exitSpy).toHaveBeenCalledWith(1);
 
     logSpy.mockRestore();
@@ -516,7 +496,7 @@ describe('pd diagnose run --runtime routing', () => {
     const jsonOutput = JSON.parse(consoleLogSpy.mock.calls[0][0] as string);
     expect(jsonOutput.ok).toBe(false);
     expect(jsonOutput.reason).toBe('unsupported_runtime_kind: invalid-runtime');
-    expect(jsonOutput.nextAction).toContain('openclaw-cli');
+    expect(jsonOutput.nextAction).toContain('pi-ai');
     expect(exitSpy).toHaveBeenCalledWith(1);
 
     consoleLogSpy.mockRestore();
@@ -560,11 +540,10 @@ describe('pd diagnose run --runtime routing', () => {
     exitSpy.mockRestore();
   });
 
-  it('P1: missing --runtime resolves kind from .pd/config.yaml (honors config, no test-double default)', async () => {
-    // When --runtime is absent but .pd/config.yaml binds openclaw-cli, the
-    // resolved kind must come from config — proving test-double is no longer
-    // the default. Mirrors DPB-09 but omits --runtime to exercise the new
-    // config-resolution path.
+  it('P1 (ADR-0029): missing --runtime with openclaw config binding refuses as retired (config still consulted)', async () => {
+    // When --runtime is absent but .pd/config.yaml carries an openclaw-cli
+    // binding, the resolved kind still comes from config (never a test-double
+    // default) — and the retired kind is then refused, not executed.
     mockResolveRuntimeFromPdConfig.mockReturnValueOnce({
       result: {
         runtimeKind: 'openclaw-cli',
@@ -577,44 +556,28 @@ describe('pd diagnose run --runtime routing', () => {
       configLoadResult: { ok: true, effective: {}, defaults: {}, legacyFilesDetected: [] } as never,
     });
 
-    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
 
     await handleDiagnoseRun({
       taskId: 'test-task-1',
       workspace: '/tmp/fake-workspace',
       // runtime intentionally omitted — must be resolved from config
-      openclawGateway: true,
-      json: false,
+      json: true,
     } as DiagnoseRunOptions);
 
     expect(mockResolveRuntimeFromPdConfig).toHaveBeenCalledWith('/tmp/fake-workspace');
-    const OpenClawCliMock = vi.mocked(
-      await import('@principles/core/runtime-v2').then(m => m.OpenClawCliRuntimeAdapter),
-    );
-    expect(OpenClawCliMock).toHaveBeenCalledWith(
-      expect.objectContaining({ runtimeMode: 'gateway' }),
-    );
-    expect(exitSpy).not.toHaveBeenCalledWith(1);
+    const jsonOutput = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+    expect(jsonOutput.ok).toBe(false);
+    expect(jsonOutput.reason).toBe('retired_runtime_kind');
+    expect(exitSpy).toHaveBeenCalledWith(1);
 
-    consoleSpy.mockRestore();
+    consoleLogSpy.mockRestore();
     exitSpy.mockRestore();
   });
 
-  it('DPB-09: openclaw-cli --openclaw-gateway constructs adapter with runtimeMode=gateway', async () => {
-    mockResolveRuntimeFromPdConfig.mockReturnValueOnce({
-      result: {
-        runtimeKind: 'openclaw-cli',
-        openclawMode: 'gateway',
-        timeoutMs: 300000,
-        agentId: 'main',
-      },
-      legacyWarnings: [],
-      configSource: '.pd/config.yaml',
-      configLoadResult: { ok: true, effective: {}, defaults: {}, legacyFilesDetected: [] },
-    });
-
-    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  it('DPB-09 (ADR-0029): --runtime openclaw-cli with legacy --openclaw-gateway flag is refused', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
 
     await handleDiagnoseRun({
@@ -625,32 +588,15 @@ describe('pd diagnose run --runtime routing', () => {
       json: false,
     } as DiagnoseRunOptions);
 
-    const OpenClawCliMock = vi.mocked(
-      await import('@principles/core/runtime-v2').then(m => m.OpenClawCliRuntimeAdapter),
-    );
-    expect(OpenClawCliMock).toHaveBeenCalledWith(
-      expect.objectContaining({ runtimeMode: 'gateway' }),
-    );
-    expect(exitSpy).not.toHaveBeenCalledWith(1);
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('retired (ADR-0029)'));
+    expect(exitSpy).toHaveBeenCalledWith(1);
 
-    consoleSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
     exitSpy.mockRestore();
   });
 
-  it('DPB-09: openclaw-cli --openclaw-local constructs adapter with runtimeMode=local', async () => {
-    mockResolveRuntimeFromPdConfig.mockReturnValueOnce({
-      result: {
-        runtimeKind: 'openclaw-cli',
-        openclawMode: 'local',
-        timeoutMs: 300000,
-        agentId: 'main',
-      },
-      legacyWarnings: [],
-      configSource: '.pd/config.yaml',
-      configLoadResult: { ok: true, effective: {}, defaults: {}, legacyFilesDetected: [] },
-    });
-
-    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  it('DPB-09 (ADR-0029): --runtime openclaw-cli with legacy --openclaw-local flag is refused', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as () => never);
 
     await handleDiagnoseRun({
@@ -661,15 +607,10 @@ describe('pd diagnose run --runtime routing', () => {
       json: false,
     } as DiagnoseRunOptions);
 
-    const OpenClawCliMock = vi.mocked(
-      await import('@principles/core/runtime-v2').then(m => m.OpenClawCliRuntimeAdapter),
-    );
-    expect(OpenClawCliMock).toHaveBeenCalledWith(
-      expect.objectContaining({ runtimeMode: 'local' }),
-    );
-    expect(exitSpy).not.toHaveBeenCalledWith(1);
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('retired (ADR-0029)'));
+    expect(exitSpy).toHaveBeenCalledWith(1);
 
-    consoleSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
     exitSpy.mockRestore();
   });
 });

@@ -221,9 +221,8 @@ Non-managed hooks (user/project/plugin) **must be reviewed and trusted** before 
 │  tasks (diagnostician, dreamer, evaluator, etc.)                    │
 │                                                                     │
 │  Contract: PDRuntimeAdapter (ALREADY EXISTS in runtime-protocol.ts) │
-│  Implementations: OpenClawCliRuntimeAdapter, PiAiRuntimeAdapter,    │
-│                  TestDoubleRuntimeAdapter, CodexCliRuntimeAdapter    │
-│                  (PRI-279)                                          │
+│  Implementations: PiAiRuntimeAdapter, TestDoubleRuntimeAdapter,     │
+│                  CodexCliRuntimeAdapter (PRI-279)                   │
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -797,7 +796,7 @@ Phase 4 (Flag flip):
 
 **v4 scope reductions** (based on external review P1-1/P1-2):
 - **OpenClaw shadow mode → deferred to Post-MVP**: OpenClaw path stays unchanged in MVP. `HostAdapter` interface defined but only `codex-adapter` implements it. This eliminates the largest regression risk.
-- **PRI-279 (CodexCliRuntimeAdapter) → deferred to Post-MVP**: The three MVP-Core activation paths (prompt, code_tool_hook, defer_archive) are all **inbound** (Codex calls PD). The outbound direction (PD calls LLM for internalization) already has OpenClaw/pi-ai runners. PRI-279 does not pass `mvp-q-1-what-if-skip`.
+- **PRI-279 (CodexCliRuntimeAdapter) → deferred to Post-MVP**: The three MVP-Core activation paths (prompt, code_tool_hook, defer_archive) are all **inbound** (Codex calls PD). The outbound direction (PD calls LLM for internalization) already has a pi-ai runner (ADR-0029 retired the OpenClaw CLI backend). PRI-279 does not pass `mvp-q-1-what-if-skip`.
 
 ### 6.2 BDD scenarios (corrected from v1)
 
@@ -907,7 +906,7 @@ Feature: Codex CLI adapter
 4. Register `host.codex` feature flag (MVP-Quiet, default OFF, since 2026-08-11). The `abstraction_layer_v1` flag is **not registered** in MVP — OpenClaw shadow-mode refactor is deferred per ADR-0014.
 5. Defer `PermissionRequest`, compact, subagent, stop hooks.
 6. **Use single matcher group** `matcher: "Bash|apply_patch"` for PreToolUse (v4 — aliases `Write`/`Edit` work in ALL matcher-aware events, no quirk exists).
-7. **Defer PRI-279 (Outbound CodexCliRuntimeAdapter) to Post-MVP**: The three MVP-Core activation paths (`prompt`, `code_tool_hook`, `defer_archive`) are all inbound (Codex calls PD). Outbound internalization already has OpenClaw/pi-ai runners. PRI-279 does not pass `mvp-q-1-what-if-skip`.
+7. **Defer PRI-279 (Outbound CodexCliRuntimeAdapter) to Post-MVP**: The three MVP-Core activation paths (`prompt`, `code_tool_hook`, `defer_archive`) are all inbound (Codex calls PD). Outbound internalization already has a pi-ai runner (ADR-0029 retired the OpenClaw CLI backend). PRI-279 does not pass `mvp-q-1-what-if-skip`.
 8. **Multi-host installer/uninstaller** (v4.1 NEW): Introduce `HostInstaller` abstraction in `create-principles-disciple` with `HostTarget = 'openclaw' | 'codex'`. Each host gets a concrete installer (`OpenClawHostInstaller`, `CodexHostInstaller`). Installer prompts owner to choose which hosts to install for; uninstaller detects and cleans each host's artifacts independently. See ADR-0020 §2.3 for the interface contract.
 
 **Consequences**:

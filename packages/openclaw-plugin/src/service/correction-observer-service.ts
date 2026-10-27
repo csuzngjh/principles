@@ -183,24 +183,25 @@ export function resolveCorrectionObserver(wctx: WorkspaceContext, logger?: Pick<
             return null;
         }
 
-        // ready or not_ready — create the observer
-        if (observerConfig.runtimeProfileType === 'pi-ai') {
-            const adapter = new PiAiRuntimeAdapter({
-                provider: observerConfig.provider ?? 'anthropic',
-                model: observerConfig.model ?? 'anthropic/claude-3-5-sonnet',
-                apiKeyEnv: observerConfig.apiKeyEnv ?? 'ANTHROPIC_API_KEY',
-                timeoutMs: observerConfig.timeoutMs ?? undefined,
-                // PRI-788 G3: profile 的 maxTokens 透传（思考型本地模型小 token 预算会返回空）
-                maxTokens: observerConfig.maxTokens ?? undefined,
-                baseUrl: observerConfig.baseUrl ?? undefined,
-                workspace: wctx.workspaceDir,
-            });
-            return new CorrectionObserver({ runtimeAdapter: adapter }, { timeoutMs: observerConfig.timeoutMs ?? undefined });
+        // ADR-0029: pi-ai is the only internal-agent backend. The loader already
+        // reports needs_setup for a retired profile; fail closed here too so no
+        // future loader change can silently route an observer through anything else.
+        if (observerConfig.runtimeProfileType !== 'pi-ai') {
+            logger?.warn?.(`[PD:CorrectionObserver] Runtime profile type '${String(observerConfig.runtimeProfileType)}' is not supported (ADR-0029: pi-ai only). Skipping.`);
+            return null;
         }
 
-        // OpenClaw profile — not yet supported for observer runtime
-        logger?.info?.(`[PD:CorrectionObserver] OpenClaw runtime profile not yet supported for correction observer. Skipping.`);
-        return null;
+        const adapter = new PiAiRuntimeAdapter({
+            provider: observerConfig.provider ?? 'anthropic',
+            model: observerConfig.model ?? 'anthropic/claude-3-5-sonnet',
+            apiKeyEnv: observerConfig.apiKeyEnv ?? 'ANTHROPIC_API_KEY',
+            timeoutMs: observerConfig.timeoutMs ?? undefined,
+            // PRI-788 G3: profile 的 maxTokens 透传（思考型本地模型小 token 预算会返回空）
+            maxTokens: observerConfig.maxTokens ?? undefined,
+            baseUrl: observerConfig.baseUrl ?? undefined,
+            workspace: wctx.workspaceDir,
+        });
+        return new CorrectionObserver({ runtimeAdapter: adapter }, { timeoutMs: observerConfig.timeoutMs ?? undefined });
     } catch (err) {
         logger?.warn?.(`[PD:CorrectionObserver] Failed to resolve CorrectionObserver: ${String(err)}`);
         return null;

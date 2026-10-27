@@ -406,35 +406,22 @@ function diagnoseInternalAgent(
     };
   }
 
-  // OpenClaw profile
-  if (profile.readiness === 'needs_setup') {
-    return {
-      name: agent.name,
-      enabled: true,
-      runtimeProfileId: agent.runtimeProfileId,
-      runtimeProfileLabel: agent.runtimeProfileLabel,
-      readiness: 'needs_setup',
-      provider: null,
-      model: null,
-      apiKeyEnv: null,
-      apiKeyPresent: false,
-      reason: `OpenClaw profile '${profile.id}' needs setup (missing provider/model)`,
-      nextAction: `Configure provider and model in runtime profile '${profile.id}' in .pd/config.yaml`,
-    };
-  }
-
+  // Retired openclaw profile (ADR-0029): PD no longer runs internal agents
+  // through a host CLI agent session, so nothing bound here can be ready —
+  // the doctor names the backend and points at the replacement instead of
+  // reporting "configured and ready".
   return {
     name: agent.name,
     enabled: true,
     runtimeProfileId: agent.runtimeProfileId,
     runtimeProfileLabel: agent.runtimeProfileLabel,
-    readiness: 'ready',
-    provider: null,
-    model: null,
+    readiness: 'needs_setup',
+    provider: profile.provider ?? null,
+    model: profile.model ?? null,
     apiKeyEnv: null,
     apiKeyPresent: false,
-    reason: `OpenClaw profile '${profile.id}' is configured and ready`,
-    nextAction: 'No action required',
+    reason: `Runtime profile '${profile.id}' uses the retired 'openclaw' backend (ADR-0029)`,
+    nextAction: `Define a pi-ai profile (provider + model + apiKeyEnv) in .pd/config.yaml runtimeProfiles and point this agent's runtimeProfile at it, or configure it in the PD console Control Center`,
   };
 }
 

@@ -130,7 +130,6 @@ vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
     DefaultDiagDistillerValidator: vi.fn().mockImplementation(function () { return {}; }),
     DisabledDiagnosticianRunner: vi.fn().mockImplementation(function () { return {}; }),
     TestDoubleRuntimeAdapter: vi.fn().mockImplementation(function () { return {}; }),
-    OpenClawCliRuntimeAdapter: vi.fn().mockImplementation(function () { return {}; }),
     PiAiRuntimeAdapter: vi.fn().mockImplementation(function () { return {}; }),
     SPLIT_PIPELINE_TOTAL_TIMEOUT_MS: 300000,
     // PRI-638: capability gate — available by default so the BDD scenarios

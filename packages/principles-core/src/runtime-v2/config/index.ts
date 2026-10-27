@@ -125,8 +125,6 @@ export type {
   AgentRuntimeBindingResult,
   AgentRuntimeReadinessResult,
   PiAiAdapterConfigResult,
-  OpenClawAdapterConfigResult,
-  AdapterConfigResult,
 } from './pd-config-agent-binding.js';
 
 export {

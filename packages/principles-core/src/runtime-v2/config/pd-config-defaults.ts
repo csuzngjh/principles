@@ -8,7 +8,6 @@
 import {
   type PdConfig,
   type FeatureFlagEntry,
-  type OpenClawRuntimeProfile,
   type PdLocalRuntimeProfile,
   type InternalAgentBinding,
   type InternalAgentName,
@@ -33,9 +32,12 @@ for (const flag of CONTRACT_DEFAULTS) {
 
 // ── Default Runtime Profile ─────────────────────────────────────────────────
 //
-// MVP installs must work with the OpenClaw runtime the plugin is already
-// running inside. The optional pi-ai profile remains available for explicit
-// configuration, but its empty placeholders must never be the active default.
+// pi-ai is the only runtime backend for PD internal agents (ADR-0029), so the
+// default profile is a pi-ai profile. It ships with empty placeholders on
+// purpose: an unconfigured pi-ai profile resolves to `needs_setup` with a
+// reason and a next action instead of silently running against some other
+// model. A legacy `type: 'openclaw'` profile in a user's config still parses
+// (read-only legacy) but is never seeded here.
 
 export const PI_AI_DEFAULT_PROFILE_ID = 'pd.default';
 
@@ -46,32 +48,25 @@ export const PI_AI_DEFAULT_PROFILE: PdLocalRuntimeProfile = {
   apiKeyEnv: '',
 };
 
-export const OPENCLAW_DEFAULT_PROFILE_ID = 'openclaw.default';
+export const DEFAULT_RUNTIME_PROFILE_ID = PI_AI_DEFAULT_PROFILE_ID;
 
-export const OPENCLAW_DEFAULT_PROFILE: OpenClawRuntimeProfile = {
-  type: 'openclaw',
-  source: 'default',
-};
-
-export const DEFAULT_RUNTIME_PROFILE_ID = OPENCLAW_DEFAULT_PROFILE_ID;
-
-export const DEFAULT_RUNTIME_PROFILE: OpenClawRuntimeProfile = OPENCLAW_DEFAULT_PROFILE;
+export const DEFAULT_RUNTIME_PROFILE: PdLocalRuntimeProfile = PI_AI_DEFAULT_PROFILE;
 
 // ── Default Internal Agents ─────────────────────────────────────────────────
 //
 // Round-4 S1 (WorkBuddy install remediation, 2026-10-14): fresh defaults
 // intentionally carry NO explicit per-agent `runtimeProfile` row. A per-agent
 // row outranks `internalAgents.defaultRuntime` in resolveAgentRuntimeBinding,
-// so seeding one used to pin every learning agent to openclaw.default even
-// after an installer flipped `defaultRuntime` to the install-configured
-// profile — the diagnostician rode the new runtime while
+// so seeding one used to pin every learning agent to one profile even after an
+// installer flipped `defaultRuntime` to the install-configured profile — the
+// diagnostician rode the new runtime while
 // dreamer→philosopher→scribe→artificer→evaluator→rolloutReviewer and
-// signalCollector stayed on the host runtime. With no per-agent row, every
-// agent inherits `defaultRuntime`:
-//   - vanilla default (openclaw/codex hosts): defaultRuntime stays
-//     'openclaw.default' → identical effective behavior as before;
-//   - install-configured workspace: defaultRuntime → 'pd.default' → the whole
-//     learning chain rides the install runtime.
+// signalCollector stayed behind. With no per-agent row, every agent inherits
+// `defaultRuntime`:
+//   - vanilla default: defaultRuntime → 'pd.default' (pi-ai) → needs_setup
+//     until the Owner configures provider/model/apiKeyEnv (ADR-0029 §5);
+//   - install-configured workspace: defaultRuntime → the install profile → the
+//     whole learning chain rides it.
 // Owner-written explicit rows are untouched by this authority and keep
 // outranking defaultRuntime (P4: Owner choice is not silently overridden).
 
@@ -133,7 +128,6 @@ export function getDefaultPdConfig(): PdConfig {
     features: { ...DEFAULT_FEATURE_FLAGS },
     runtimeProfiles: {
       [PI_AI_DEFAULT_PROFILE_ID]: { ...PI_AI_DEFAULT_PROFILE },
-      [OPENCLAW_DEFAULT_PROFILE_ID]: { ...OPENCLAW_DEFAULT_PROFILE },
     },
     internalAgents: getDefaultInternalAgents(),
     ui: { ...DEFAULT_UI },

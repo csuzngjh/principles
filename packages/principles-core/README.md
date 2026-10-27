@@ -29,7 +29,6 @@ Three automated layers prevent I/O from leaking into core:
 | `ledger-tree` | `principle-tree-ledger.ts` | File-based principle ledger SSOT; pd-cli reads/writes without importing openclaw-plugin |
 | `sdk-store` | `evolution-store.ts`, `trajectory-store.ts`, `workflow-funnel-loader.ts` | Standalone SDK store primitives exposed as package subpaths |
 | `sqlite-state-store` | `runtime-v2/store/sqlite-connection.ts`, `runtime-v2/store/runtime-state-manager.ts` | runtime-v2 state.db connection + manager |
-| `cli-runtime-adapter` | `runtime-v2/adapter/openclaw-cli-runtime-adapter.ts` | Spawns openclaw CLI process |
 | `read-model` | 5 `*read-model*.ts` files | Read-only composite models querying state.db + ledger |
 | `audit-observability` | `candidate-audit.ts`, `pain-signal-observability.ts` | Audit + pain signal observability writers |
 | `remediation-review` | `internalization-integrity-remediation.ts`, `pruning-review-log.ts` | Integrity remediation + pruning review log |

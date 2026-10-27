@@ -2,43 +2,47 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   validateRuntimeConfig,
   isRuntimeConfigError,
-  invalidatePainSignalBridge,
   resolveRuntimeConfig,
 } from '../pain-signal-runtime-factory.js';
 import type { RuntimeConfig } from '../pain-signal-runtime-factory.js';
+import { RuntimeKindSchema } from '../runtime-protocol.js';
+import { Value } from '@sinclair/typebox/value';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-describe('Runtime Config Boundary (PRI-162)', () => {
+// PRI-162 established the fail-loud boundary; ADR-0029 narrowed it to one
+// executable backend. These tests pin that boundary: pi-ai is accepted, every
+// other RuntimeKind literal is a read-only legacy fact that must never execute.
+describe('Runtime Config Boundary (PRI-162, pi-ai-only per ADR-0029)', () => {
   describe('validateRuntimeConfig', () => {
-    it('passes when openclaw-cli has no openclawMode (delegated/default)', () => {
+    it('rejects the retired openclaw-cli kind with ADR-0029 and a nextAction', () => {
       const config: RuntimeConfig = {
         runtimeKind: 'openclaw-cli',
         timeoutMs: 300_000,
         agentId: 'main',
       };
-      expect(() => validateRuntimeConfig(config)).not.toThrow();
+      try {
+        validateRuntimeConfig(config);
+        expect.unreachable('Should have thrown');
+      } catch (err) {
+        expect(err instanceof Error).toBe(true);
+        if (err instanceof Error) {
+          expect(err.message).toContain('is not executable by PD');
+          expect(err.message).toContain('ADR-0029');
+          expect(err.message).toContain('nextAction');
+        }
+      }
     });
 
-    it('passes when openclaw-cli has openclawMode local', () => {
-      const config: RuntimeConfig = {
-        runtimeKind: 'openclaw-cli',
-        openclawMode: 'local',
-        timeoutMs: 300_000,
-        agentId: 'main',
-      };
-      expect(() => validateRuntimeConfig(config)).not.toThrow();
-    });
-
-    it('passes when openclaw-cli has openclawMode gateway', () => {
-      const config: RuntimeConfig = {
-        runtimeKind: 'openclaw-cli',
-        openclawMode: 'gateway',
-        timeoutMs: 300_000,
-        agentId: 'main',
-      };
-      expect(() => validateRuntimeConfig(config)).not.toThrow();
+    it('rejects every historical enum member, not just openclaw', () => {
+      // RuntimeKindSchema keeps these so persisted rows still parse; none of
+      // them has (or had) a PD-side adapter reachable through this function.
+      const historicalKinds = ['openclaw', 'openclaw-history', 'claude-cli', 'codex-cli', 'gemini-cli', 'local-worker'] as const;
+      for (const runtimeKind of historicalKinds) {
+        const config: RuntimeConfig = { runtimeKind, timeoutMs: 300_000, agentId: 'main' };
+        expect(() => validateRuntimeConfig(config), runtimeKind).toThrow(/is not executable by PD/);
+      }
     });
 
     it('throws when pi-ai is missing required fields', () => {
@@ -62,22 +66,22 @@ describe('Runtime Config Boundary (PRI-162)', () => {
       expect(() => validateRuntimeConfig(config)).not.toThrow();
     });
 
-    it('throws with nextAction when openclaw-cli has invalid openclawMode', () => {
+    it('names .pd/config.yaml runtimeProfiles as the fix, never a host CLI backend', () => {
       const config: RuntimeConfig = {
-        runtimeKind: 'openclaw-cli',
-        openclawMode: 'invalid' as 'local',
+        runtimeKind: 'pi-ai',
         timeoutMs: 300_000,
         agentId: 'main',
+        provider: 'openrouter',
       };
       try {
         validateRuntimeConfig(config);
         expect.unreachable('Should have thrown');
       } catch (err) {
-        expect(err instanceof Error).toBe(true);
-        if (err instanceof Error) {
-          expect(err.message).toContain('nextAction');
-          expect(err.message).toContain('Invalid openclawMode');
-        }
+        expect(err).toBeInstanceOf(Error);
+        const {message} = (err as Error);
+        expect(message).toContain('nextAction');
+        expect(message).toContain('runtimeProfiles');
+        expect(message).not.toContain('openclaw');
       }
     });
   });
@@ -98,29 +102,60 @@ describe('Runtime Config Boundary (PRI-162)', () => {
     });
   });
 
+  describe('RuntimeKindSchema read-only legacy (ADR-0029)', () => {
+    // The retired literals stay in the union for ONE reason: rows already
+    // written to state.db (runs.runtime_kind, leases, remediation reads) carry
+    // them, and Value.Check is the read boundary for those rows. Dropping a
+    // literal would make historical data unreadable — a data migration the
+    // Owner explicitly ruled out. Keeping it must not make it executable,
+    // which is the half the validateRuntimeConfig tests above pin.
+    const historicalKinds = [
+      'openclaw',
+      'openclaw-cli',
+      'openclaw-history',
+      'claude-cli',
+      'codex-cli',
+      'gemini-cli',
+      'local-worker',
+    ];
+
+    it.each(historicalKinds)('still parses the persisted legacy kind %s', (kind) => {
+      expect(Value.Check(RuntimeKindSchema, kind)).toBe(true);
+    });
+
+    it('accepts the executable kinds', () => {
+      expect(Value.Check(RuntimeKindSchema, 'pi-ai')).toBe(true);
+      expect(Value.Check(RuntimeKindSchema, 'pi-ai-l2')).toBe(true);
+      expect(Value.Check(RuntimeKindSchema, 'test-double')).toBe(true);
+    });
+
+    it('rejects a kind that was never part of the contract', () => {
+      expect(Value.Check(RuntimeKindSchema, 'openclaw-cli-x')).toBe(false);
+    });
+  });
+
   describe('JSON failure output contract', () => {
     it('error result serializes to single parseable JSON with nextAction', () => {
-      const error = { ok: false as const, reason: 'missing_openclaw_mode', message: 'no mode specified', nextAction: 'Provide --openclaw-local or --openclaw-gateway' };
+      const error = { ok: false as const, reason: 'retired_runtime_kind', message: 'backend retired by ADR-0029', nextAction: 'Configure a pi-ai runtime profile' };
       const json = JSON.stringify(error);
       const parsed = JSON.parse(json);
       expect(parsed.ok).toBe(false);
-      expect(parsed.reason).toBe('missing_openclaw_mode');
+      expect(parsed.reason).toBe('retired_runtime_kind');
       expect(parsed.message).toBeTruthy();
       expect(parsed.nextAction).toBeTruthy();
     });
 
-    it('conflicting mode error result is parseable', () => {
-      const error = { ok: false as const, reason: 'conflicting_openclaw_mode', message: 'CLI flag conflicts with file config', nextAction: 'Remove one conflicting mode' };
-      const json = JSON.stringify(error);
-      const parsed = JSON.parse(json);
-      expect(parsed.ok).toBe(false);
-      expect(parsed.reason).toBe('conflicting_openclaw_mode');
+    it('the retired-backend resolution error is itself a parseable machine result', () => {
+      const result = resolveRuntimeConfig('/nonexistent-state-dir', { requestedRuntimeKind: 'openclaw-cli' });
+      expect(isRuntimeConfigError(result)).toBe(true);
+      const parsed = JSON.parse(JSON.stringify(result));
+      expect(parsed.reason).toBe('retired_runtime_kind');
       expect(parsed.nextAction).toBeTruthy();
     });
   });
 
   describe('RuntimeConfig type contract', () => {
-    it('openclawMode is optional for pi-ai runtimeKind', () => {
+    it('carries no openclawMode field — the retired backend had the only reader', () => {
       const config: RuntimeConfig = {
         runtimeKind: 'pi-ai',
         timeoutMs: 300_000,
@@ -129,75 +164,8 @@ describe('Runtime Config Boundary (PRI-162)', () => {
         model: 'claude-sonnet-4',
         apiKeyEnv: 'TEST_KEY',
       };
-      expect(config.openclawMode).toBeUndefined();
+      expect(Object.hasOwn(config, 'openclawMode')).toBe(false);
       expect(() => validateRuntimeConfig(config)).not.toThrow();
-    });
-
-    it('openclawMode local is a valid value', () => {
-      const config: RuntimeConfig = {
-        runtimeKind: 'openclaw-cli',
-        openclawMode: 'local',
-        timeoutMs: 300_000,
-        agentId: 'main',
-      };
-      expect(config.openclawMode).toBe('local');
-    });
-
-    it('openclawMode gateway is a valid value', () => {
-      const config: RuntimeConfig = {
-        runtimeKind: 'openclaw-cli',
-        openclawMode: 'gateway',
-        timeoutMs: 300_000,
-        agentId: 'main',
-      };
-      expect(config.openclawMode).toBe('gateway');
-    });
-  });
-
-  describe('Bridge cache key includes openclawMode (D-03)', () => {
-    beforeEach(() => {
-      invalidatePainSignalBridge('/test-ws', 'openclaw-cli');
-      invalidatePainSignalBridge('/test-ws', 'pi-ai');
-    });
-
-    it('local and gateway produce different cache keys', () => {
-      const localConfig: RuntimeConfig = {
-        runtimeKind: 'openclaw-cli',
-        openclawMode: 'local',
-        timeoutMs: 300_000,
-        agentId: 'main',
-      };
-      const gatewayConfig: RuntimeConfig = {
-        runtimeKind: 'openclaw-cli',
-        openclawMode: 'gateway',
-        timeoutMs: 300_000,
-        agentId: 'main',
-      };
-      const localKey = `${'/test-ws'}:${localConfig.runtimeKind}:${localConfig.openclawMode ?? ''}`;
-      const gatewayKey = `${'/test-ws'}:${gatewayConfig.runtimeKind}:${gatewayConfig.openclawMode ?? ''}`;
-      expect(localKey).not.toBe(gatewayKey);
-    });
-
-    it('pi-ai config without openclawMode uses empty string in key', () => {
-      const piAiConfig: RuntimeConfig = {
-        runtimeKind: 'pi-ai',
-        timeoutMs: 300_000,
-        agentId: 'main',
-        provider: 'openrouter',
-        model: 'test',
-        apiKeyEnv: 'TEST_KEY',
-      };
-      const key = `${'/test-ws'}:${piAiConfig.runtimeKind}:${piAiConfig.openclawMode ?? ''}`;
-      expect(key).toBe('/test-ws:pi-ai:');
-    });
-
-    it('invalidatePainSignalBridge clears all mode variants', () => {
-      const localKey = '/test-ws:openclaw-cli:local';
-      const gatewayKey = '/test-ws:openclaw-cli:gateway';
-      const emptyKey = '/test-ws:openclaw-cli:';
-      expect(localKey).not.toBe(gatewayKey);
-      expect(localKey).not.toBe(emptyKey);
-      expect(gatewayKey).not.toBe(emptyKey);
     });
   });
 
@@ -212,30 +180,13 @@ describe('Runtime Config Boundary (PRI-162)', () => {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     });
 
-    it('requestedRuntimeKind=openclaw-cli without flags returns missing_openclaw_mode error', () => {
+    it('requestedRuntimeKind=openclaw-cli returns retired_runtime_kind', () => {
       const result = resolveRuntimeConfig(tmpDir, { requestedRuntimeKind: 'openclaw-cli' });
       expect(isRuntimeConfigError(result)).toBe(true);
       if (isRuntimeConfigError(result)) {
-        expect(result.reason).toBe('missing_openclaw_mode');
+        expect(result.reason).toBe('retired_runtime_kind');
+        expect(result.message).toContain('ADR-0029');
         expect(result.nextAction).toBeTruthy();
-      }
-    });
-
-    it('requestedRuntimeKind=openclaw-cli with openclawGateway returns gateway mode', () => {
-      const result = resolveRuntimeConfig(tmpDir, { requestedRuntimeKind: 'openclaw-cli', openclawGateway: true });
-      expect(isRuntimeConfigError(result)).toBe(false);
-      if (!isRuntimeConfigError(result)) {
-        expect(result.runtimeKind).toBe('openclaw-cli');
-        expect(result.openclawMode).toBe('gateway');
-      }
-    });
-
-    it('requestedRuntimeKind=openclaw-cli with openclawLocal returns local mode', () => {
-      const result = resolveRuntimeConfig(tmpDir, { requestedRuntimeKind: 'openclaw-cli', openclawLocal: true });
-      expect(isRuntimeConfigError(result)).toBe(false);
-      if (!isRuntimeConfigError(result)) {
-        expect(result.runtimeKind).toBe('openclaw-cli');
-        expect(result.openclawMode).toBe('local');
       }
     });
 
@@ -256,18 +207,8 @@ describe('Runtime Config Boundary (PRI-162)', () => {
       }
     });
 
-    it('openclawLocal && openclawGateway both true returns conflicting_openclaw_mode error', () => {
-      const result = resolveRuntimeConfig(tmpDir, { requestedRuntimeKind: 'openclaw-cli', openclawLocal: true, openclawGateway: true });
-      expect(isRuntimeConfigError(result)).toBe(true);
-      if (isRuntimeConfigError(result)) {
-        expect(result.reason).toBe('conflicting_openclaw_mode');
-        expect(result.nextAction).toBeTruthy();
-      }
-    });
-
-    it('openclawLocal && openclawGateway both true without requestedRuntimeKind still returns conflicting_openclaw_mode', () => {
-      const wsDir = path.join(tmpDir, 'conflict-ws');
-      fs.mkdirSync(wsDir, { recursive: true });
+    it('a legacy workflows.yaml policy that names openclaw-cli is refused, not migrated', () => {
+      const wsDir = path.join(tmpDir, 'legacy-policy-ws');
       const stateDir = path.join(wsDir, '.state');
       fs.mkdirSync(stateDir, { recursive: true });
       const workflowsYaml = `version: '1'
@@ -279,10 +220,36 @@ funnels:
       openclawMode: local
 `;
       fs.writeFileSync(path.join(stateDir, 'workflows.yaml'), workflowsYaml);
-      const result = resolveRuntimeConfig(stateDir, { openclawLocal: true, openclawGateway: true });
+
+      const result = resolveRuntimeConfig(stateDir);
       expect(isRuntimeConfigError(result)).toBe(true);
       if (isRuntimeConfigError(result)) {
-        expect(result.reason).toBe('conflicting_openclaw_mode');
+        expect(result.reason).toBe('retired_runtime_kind');
+        expect(result.message).toContain('workflows.yaml');
+      }
+    });
+
+    it('a pi-ai workflows.yaml policy still resolves', () => {
+      const wsDir = path.join(tmpDir, 'pi-ai-policy-ws');
+      const stateDir = path.join(wsDir, '.state');
+      fs.mkdirSync(stateDir, { recursive: true });
+      const workflowsYaml = `version: '1'
+funnels:
+  - workflowId: pd-runtime-v2-diagnosis
+    stages: []
+    policy:
+      runtimeKind: pi-ai
+      provider: openrouter
+      model: anthropic/claude-sonnet-4
+      apiKeyEnv: OPENROUTER_API_KEY
+`;
+      fs.writeFileSync(path.join(stateDir, 'workflows.yaml'), workflowsYaml);
+
+      const result = resolveRuntimeConfig(stateDir);
+      expect(isRuntimeConfigError(result)).toBe(false);
+      if (!isRuntimeConfigError(result)) {
+        expect(result.runtimeKind).toBe('pi-ai');
+        expect(result.provider).toBe('openrouter');
       }
     });
   });

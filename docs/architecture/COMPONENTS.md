@@ -207,7 +207,6 @@ PD 系统有 5 类组件：
 | 组件 | 类型 | 包 | 文件 | 状态 |
 |------|-----|----|----|------|
 | `PDRuntimeAdapter` interface | 📋 Schema | core | `runtime-v2/runtime-protocol.ts` | ✅ |
-| `OpenClawCliRuntimeAdapter` | 🔴 Adapter | core | `runtime-v2/adapter/openclaw-cli-runtime-adapter.ts` | ✅ |
 | `PiAiRuntimeAdapter` | 🔴 Adapter | core | `runtime-v2/adapter/pi-ai-runtime-adapter.ts` | ✅ |
 | `TestDoubleRuntimeAdapter` | 🔴 Adapter | core | `runtime-v2/adapter/test-double-runtime-adapter.ts` | ✅ |
 | `PrincipleTreeLedgerAdapter` | 🔴 Adapter | core | `runtime-v2/adapter/principle-tree-ledger-adapter.ts` | ✅ |
@@ -560,7 +559,6 @@ Owner 标记规则：
 `LedgerArchiveWriter` §3.3 ✅（`DeferArchiveWriter`）
 `LedgerPromptWriter` §3.3 ✅（`PromptWriter`）
 `LedgerStore` §2.2 ✅
-`OpenClawCliRuntimeAdapter` §3.5 ✅
 `PainSignalBridge` §3.1 ✅
 `PainToPrincipleService` §3.1 ✅
 `PDRuntimeAdapter` §3.5 ✅

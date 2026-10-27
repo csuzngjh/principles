@@ -26,7 +26,6 @@ import {
   DefaultDiagDistillerValidator,
   type DiagnosticianRunnerLike,
   TestDoubleRuntimeAdapter,
-  OpenClawCliRuntimeAdapter,
   PiAiRuntimeAdapter,
   PDRuntimeError,
   isRuntimeConfigError,
@@ -73,9 +72,6 @@ interface PainRetryOptions {
   /** CR-06: explicit confirmation for the mutating statement-based recovery. */
   confirm?: boolean;
   runtime?: string;
-  openclawLocal?: boolean;
-  openclawGateway?: boolean;
-  agent?: string;
   provider?: string;
   model?: string;
   apiKeyEnv?: string;
@@ -442,17 +438,6 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     }
 
     // Step 3: Resolve runtime kind
-    // P1 fix: --openclaw-local and --openclaw-gateway are mutually exclusive.
-    // Must output JSON when --json is set (CLI operator gate).
-    if (opts.openclawLocal && opts.openclawGateway) {
-      return refuseExit(opts, {
-        painId: opts.painId,
-        taskId,
-        reason: 'conflicting_flags',
-        message: '--openclaw-local and --openclaw-gateway are mutually exclusive',
-        nextAction: 'Provide exactly one of --openclaw-local or --openclaw-gateway, not both.',
-      });
-    }
 
     // P1 fix: pd pain retry must NOT default to test-double.
     // This command is for real workspace pain fixes — test-double would generate
@@ -480,29 +465,14 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
     let runtimeAdapter: PDRuntimeAdapter;
 
     if (runtimeKind === 'openclaw-cli') {
-      const resolved = resolveRuntimeFromPdConfig(workspaceDir);
-      const configResult = resolved.result;
-      if (isRuntimeConfigError(configResult)) {
-        return refuseExit(opts, { painId: opts.painId, taskId, reason: configResult.reason, message: configResult.message, nextAction: configResult.nextAction });
-      }
-      const { openclawMode } = configResult;
-      // CLI flags override config (PRI-393)
-      const flagMode = opts.openclawLocal ? 'local' as const : opts.openclawGateway ? 'gateway' as const : undefined;
-      const effectiveMode = flagMode ?? openclawMode;
-      if (!effectiveMode) {
-        return refuseExit(opts, {
-          painId: opts.painId,
-          taskId,
-          reason: 'missing_openclaw_mode',
-          message: 'runtimeKind is openclaw-cli but no mode resolved',
-          nextAction: 'Provide --openclaw-local or --openclaw-gateway',
-        });
-      }
-
-      runtimeAdapter = new OpenClawCliRuntimeAdapter({
-        runtimeMode: effectiveMode,
-        workspaceDir,
-        agentId: opts.agent ?? 'main',
+      // ADR-0029: the backend that spawned a host CLI agent session is retired.
+      // Refuse rather than silently substituting pi-ai (rc-9, cli-5).
+      return refuseExit(opts, {
+        painId: opts.painId,
+        taskId,
+        reason: 'retired_runtime_kind',
+        message: "The 'openclaw-cli' runtime backend is retired (ADR-0029): PD runs internal agents only on its own pi-ai runtime.",
+        nextAction: 'Use --runtime pi-ai --provider <provider> --model <model> --apiKeyEnv <ENV>, or omit --runtime to resolve a pi-ai profile from .pd/config.yaml',
       });
     } else if (runtimeKind === 'test-double') {
       runtimeAdapter = new TestDoubleRuntimeAdapter({
@@ -628,7 +598,7 @@ export async function handlePainRetry(opts: PainRetryOptions): Promise<void> {
         taskId,
         reason: `unknown_runtime: '${runtimeKind}'`,
         message: `Unknown runtime kind '${runtimeKind}'`,
-        nextAction: 'Supported runtimes: openclaw-cli, test-double, pi-ai',
+        nextAction: 'Supported runtimes: pi-ai, test-double',
       });
     }
 
@@ -1317,10 +1287,7 @@ export function registerPainRetryCommand(
     .description('Retry a failed diagnosis by pain ID')
     .requiredOption('-p, --pain-id <painId>', 'Pain ID to retry diagnosis for')
     .option('-w, --workspace <path>', 'Workspace directory')
-    .option('-r, --runtime <kind>', "Runtime kind: 'openclaw-cli', 'test-double', 'pi-ai'")
-    .option('--openclaw-local', 'Use local OpenClaw (mutually exclusive with --openclaw-gateway)')
-    .option('--openclaw-gateway', 'Use gateway OpenClaw (mutually exclusive with --openclaw-local)')
-    .option('-a, --agent <agentId>', 'Agent ID to invoke')
+    .option('-r, --runtime <kind>', "Runtime kind: 'pi-ai', 'test-double' ('openclaw-cli' is retired, ADR-0029)")
     .option('--provider <name>', 'LLM provider (e.g., openrouter) — for pi-ai, falls back to policy')
     .option('--model <id>', 'Model ID (e.g., anthropic/claude-sonnet-4) — for pi-ai, falls back to policy')
     .option('--apiKeyEnv <name>', 'Env var name for API key — for pi-ai, falls back to policy')

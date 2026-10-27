@@ -22,7 +22,6 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 // Track constructor calls so we can assert which adapter was constructed.
 const mockTestDoubleCtor = vi.fn();
 const mockPiAiCtor = vi.fn();
-const mockOpenClawCliCtor = vi.fn();
 const mockL2AgentLoopCtor = vi.fn();
 const mockValidateRuntimeConfig = vi.fn();
 const mockIsRuntimeConfigError = vi.fn();
@@ -39,10 +38,6 @@ vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
     PiAiRuntimeAdapter: vi.fn(function (opts: unknown) {
       mockPiAiCtor(opts);
       return { __type: 'PiAiRuntimeAdapter', opts };
-    }),
-    OpenClawCliRuntimeAdapter: vi.fn(function (opts: unknown) {
-      mockOpenClawCliCtor(opts);
-      return { __type: 'OpenClawCliRuntimeAdapter', opts };
     }),
     L2AgentLoopAdapter: vi.fn(function (opts: unknown, deps: unknown) {
       mockL2AgentLoopCtor(opts, deps);
@@ -375,30 +370,11 @@ describe('resolveRuntimeAdapterFromConfig (PRI-431)', () => {
     });
   });
 
-  // ── openclaw-cli branch ──────────────────────────────────────────────────
+  // ── retired openclaw-cli backend (ADR-0029) ──────────────────────────────
 
-  describe('openclaw-cli branch', () => {
-    it('returns OpenClawCliRuntimeAdapter when openclawMode is provided in config', () => {
-      const config = makeValidOpenClawConfig({ openclawMode: 'local' });
-      mockResolveRuntimeFromPdConfig.mockReturnValue(makeResolvedConfig(config));
-
-      const result = resolveRuntimeAdapterFromConfig({
-        runtimeKind: 'openclaw-cli',
-        workspaceDir: '/ws',
-      });
-
-      expect(result).toHaveProperty('__type', 'OpenClawCliRuntimeAdapter');
-      expect(mockOpenClawCliCtor).toHaveBeenCalledWith(
-        expect.objectContaining({
-          runtimeMode: 'local',
-          workspaceDir: '/ws',
-        }),
-      );
-    });
-
-    it('throws ConfigResolutionError when openclawMode is missing from config', () => {
-      const config = makeValidOpenClawConfig({ openclawMode: undefined });
-      mockResolveRuntimeFromPdConfig.mockReturnValue(makeResolvedConfig(config));
+  describe('retired openclaw-cli backend (ADR-0029)', () => {
+    it('refuses an explicit openclaw-cli runtime kind with ConfigResolutionError', () => {
+      mockResolveRuntimeFromPdConfig.mockReturnValue(makeResolvedConfig(makeValidOpenClawConfig()));
 
       expect(() => {
         resolveRuntimeAdapterFromConfig({
@@ -406,6 +382,26 @@ describe('resolveRuntimeAdapterFromConfig (PRI-431)', () => {
           workspaceDir: '/ws',
         });
       }).toThrow(ConfigResolutionError);
+    });
+
+    it('the refusal names ADR-0029 and points at pi-ai (rc-9: no silent fallback)', () => {
+      mockResolveRuntimeFromPdConfig.mockReturnValue(makeResolvedConfig(makeValidOpenClawConfig()));
+
+      let caught: unknown = null;
+      try {
+        resolveRuntimeAdapterFromConfig({
+          runtimeKind: 'openclaw-cli',
+          workspaceDir: '/ws',
+        });
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(ConfigResolutionError);
+      expect(caught).toBeInstanceOf(Error);
+      if (caught instanceof Error) {
+        expect(caught.message).toContain('retired (ADR-0029)');
+        expect(caught.message).toContain('pi-ai');
+      }
     });
   });
 
@@ -428,16 +424,16 @@ describe('resolveRuntimeAdapterFromConfig (PRI-431)', () => {
       expect(mockResolveRuntimeFromPdConfig).toHaveBeenCalledWith('/ws', { agentName: undefined, ignoreAgentEnabled: undefined });
     });
 
-    it('delegates to openclaw-cli when config resolves to openclaw-cli', () => {
+    it('refuses (unsupported) when config resolves to openclaw-cli (ADR-0029 read-only legacy)', () => {
       const config = makeValidOpenClawConfig();
       mockResolveRuntimeFromPdConfig.mockReturnValue(makeResolvedConfig(config));
 
-      const result = resolveRuntimeAdapterFromConfig({
-        runtimeKind: 'config',
-        workspaceDir: '/ws',
-      });
-
-      expect(result).toHaveProperty('__type', 'OpenClawCliRuntimeAdapter');
+      expect(() => {
+        resolveRuntimeAdapterFromConfig({
+          runtimeKind: 'config',
+          workspaceDir: '/ws',
+        });
+      }).toThrow(/Unsupported runtime kind/);
     });
 
     it('throws ConfigResolutionError when resolveRuntimeFromPdConfig returns error', () => {
@@ -483,44 +479,9 @@ describe('resolveRuntimeAdapterFromConfig (PRI-431)', () => {
 
   // ── PRI-431 Step 1d: New options for diagnose.ts migration ───────────────
 
-  describe('agentId option (openclaw-cli branch)', () => {
-    it('passes agentId to OpenClawCliRuntimeAdapter when provided', () => {
-      const config = makeValidOpenClawConfig({ openclawMode: 'local' });
-      mockResolveRuntimeFromPdConfig.mockReturnValue(makeResolvedConfig(config));
-
-      resolveRuntimeAdapterFromConfig({
-        runtimeKind: 'openclaw-cli',
-        workspaceDir: '/ws',
-        agentId: 'diagnostician',
-      });
-
-      expect(mockOpenClawCliCtor).toHaveBeenCalledWith(
-        expect.objectContaining({
-          agentId: 'diagnostician',
-          runtimeMode: 'local',
-          workspaceDir: '/ws',
-        }),
-      );
-    });
-
-    it('does not pass agentId when omitted (backward compat)', () => {
-      const config = makeValidOpenClawConfig({ openclawMode: 'local' });
-      mockResolveRuntimeFromPdConfig.mockReturnValue(makeResolvedConfig(config));
-
-      resolveRuntimeAdapterFromConfig({
-        runtimeKind: 'openclaw-cli',
-        workspaceDir: '/ws',
-      });
-
-      const [firstCall] = mockOpenClawCliCtor.mock.calls;
-      expect(firstCall).toBeDefined();
-      if (!firstCall) throw new Error('expected OpenClawCliRuntimeAdapter constructor call');
-      const [callArgs] = firstCall;
-      expect(callArgs).toBeDefined();
-      if (!callArgs) throw new Error('expected first constructor argument');
-      expect(callArgs).not.toHaveProperty('agentId');
-    });
-  });
+  // The openclaw-cli agentId option died with its branch (ADR-0029): no
+  // adapter is constructed for the retired kind, so there is nothing to
+  // thread agentId into.
 
   describe('configOptional option (pi-ai branch)', () => {
     it('does NOT throw when config returns error and configOptional is true', () => {

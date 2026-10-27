@@ -18,7 +18,7 @@ import {
 } from '../src/governance-signal-admission.js';
 import { ingestGovernanceObservations } from '../src/governance-observation-store.js';
 import { createProductionPainEvidenceHandler, deriveProductionCorrectionPainIdentity } from '../src/production-pain-evidence.js';
-import { invalidatePainSignalBridge } from '@principles/core/runtime-v2';
+import { getDefaultPdConfig, invalidatePainSignalBridge } from '@principles/core/runtime-v2';
 
 /**
  * Slice B admission matrix (SPEC §18/§19, PRI-623): detector semantics,
@@ -43,9 +43,24 @@ beforeEach(() => {
   const sqlite = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
   for (const statement of BASELINE_DDL) sqlite.prepare(statement).run();
   sqlite.close();
+  // ADR-0029: admitting a signal creates the Diagnostician continuation through
+  // the shared runtime resolver, so the workspace needs a READY profile. The
+  // shipped default is a pi-ai profile with empty placeholders (needs_setup),
+  // so declare the profile these admission tests run against.
+  const config = getDefaultPdConfig();
+  (config.runtimeProfiles as Record<string, unknown>)['pd.default'] = {
+    type: 'pi-ai', provider: 'gov-prov', model: 'gov-model',
+    apiKeyEnv: 'GOV_ADMISSION_KEY', baseUrl: 'http://127.0.0.1:8080/v1',
+  };
+  config.internalAgents.defaultRuntime = 'pd.default';
+  fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
+  // JSON is valid YAML — same trick the sibling cycle tests use.
+  fs.writeFileSync(path.join(workspaceDir, '.pd', 'config.yaml'), JSON.stringify(config));
+  process.env.GOV_ADMISSION_KEY = 'test-key';
 });
 
 afterEach(async () => {
+  delete process.env.GOV_ADMISSION_KEY;
   // PainToPrincipleService caches its bridge (with an open state.db handle)
   // per workspace; drop it so the temp workspace can be removed on Windows.
   invalidatePainSignalBridge(workspaceDir);
