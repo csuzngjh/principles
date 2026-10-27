@@ -13,14 +13,19 @@
 // The exact two-sided McNemar test conditions on the observed number of
 // discordant pairs n_d = b + c and evaluates b ~ Binom(n_d, 0.5) under H0.
 //
-// INDEPENDENCE CAVEAT (preregistered, not hidden): the 2 repetitions of the
-// same case are NOT independent tasks — they are repeated measurements of the
-// same unit. The primary analysis therefore treats the CASE as the clustering
-// unit: per case, a pair-outcome is reduced to a summary (e.g. "B worse in ≥1
-// rep and C-worse in 0"), and exact tests run at the case level (n = 16
-// cases). Repetition-level McNemar (n = 32 pairs) is reported as a secondary,
-// clearly-labeled non-independent view. No broader task-population inference
-// is claimed: the 16 frozen cases ARE the study object this round.
+// ANALYSIS STRUCTURE (CEB-002, preregistered):
+//   PRIMARY: discriminative tier (L2+L3) — n=8 INDEPENDENT case-level paired
+//   units; each case's 2 repetitions are repeated measurements of ONE unit,
+//   reduced by reduceCaseLevel. The exact McNemar at n=8 rejects when >=6
+//   discordant units all point the same way ((6,0)/(7,0)/(8,0) + symmetric).
+//   REFERENCE VIEW 1: all 16 cases (heterogeneous tier mix — L1 anchor +
+//   boundary + discriminative) as case-level pairs — NOT the primary object.
+//   REFERENCE VIEW 2: 32 repetition-level pairs — NON-INDEPENDENT (same-case
+//   repetitions are correlated); must never inflate the independent n.
+//
+// mcnemarExactPower accepts any  value as a GENERAL statistical tool;
+// passing pairs=16 or pairs=32 computes power for those views but does NOT
+// upgrade them to primary-analysis status. The primary analysis is n=8.
 //
 // Zero network, zero clock, deterministic.
 
