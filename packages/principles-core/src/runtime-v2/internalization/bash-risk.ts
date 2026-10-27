@@ -332,7 +332,9 @@ function isReadonlyStdoutShape(command: string, args: readonly string[]): boolea
   if (allowed === undefined || values === undefined) return 'unknown';
   if (command === 'printf' || command === 'echo') {
     if (command === 'echo') return true;
-    return args[0] === '-v' || args[0]?.startsWith('-v') || /%[^%]*n/.test(args[0] ?? '') ? 'unknown' : true;
+    const format = args[0] === '--' ? args[1] : args[0];
+    const unverifiedOption = args[0] !== '--' && args[0]?.startsWith('-');
+    return unverifiedOption || /%[^%]*n/.test(format ?? '') ? 'unknown' : true;
   }
   let positionalOnly = false;
   for (let i = 0; i < args.length; i += 1) {

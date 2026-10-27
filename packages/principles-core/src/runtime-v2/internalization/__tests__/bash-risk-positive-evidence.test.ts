@@ -56,6 +56,8 @@ const EXPECTED: readonly [command: string, expected: 'safe' | 'normal' | 'danger
   ['rg {--pre=./rewrite.sh,pattern} .', 'unknown'],
   ['git reflog show --output=/tmp/pd-probe', 'unknown'],
   ["printf '%n' marker", 'unknown'],
+  ["printf -- '%n' marker", 'unknown'],
+  ["printf -- '%s' marker", 'safe'],
   ['wc -l < input.txt', 'safe'],
   ['git log -5; git status', 'safe'],
   // ── Regressions: argument shapes and shell structure ──
