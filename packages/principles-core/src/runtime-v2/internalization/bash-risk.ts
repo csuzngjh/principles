@@ -245,7 +245,7 @@ function isReadonlyGitListShape(sub: string, args: readonly string[]): boolean |
     const writes = ['-d', '-D', '-m', '-M', '-c', '-C', '--delete', '--move', '--copy', '--unset-upstream', '--set-upstream-to', '--set-upstream'];
     if (flags.some((f) => writes.some((w) => f === w || f.startsWith(`${w}=`)))) return false;
     const allowed = sub === 'branch'
-      ? new Set(['-a', '-r', '-v', '-vv', '--all', '--remotes', '--verbose', '--no-abbrev', '--no-color', '--color', '--contains', '--no-contains', '--merged', '--no-merged', '--list'])
+      ? new Set(['-a', '-r', '-v', '-vv', '--all', '--remotes', '--verbose', '--no-abbrev', '--no-color', '--color', '--contains', '--no-contains', '--merged', '--no-merged', '--list', '--show-current'])
       : new Set(['-l', '--list', '-n', '--contains', '--no-contains', '--merged', '--no-merged', '--sort', '--format', '--column', '--no-column', '--points-at', '--format']) ;
     if (flags.some((f) => !allowed.has(f) && ![...allowed].some((w) => f.startsWith(`${w}=`)))) return 'unknown';
     if (positional.length === 0 || flags.includes('--list') || flags.includes('-l')) return true;
@@ -275,14 +275,14 @@ function isReadonlyGitListShape(sub: string, args: readonly string[]): boolean |
 function isReadonlyGitQueryShape(sub: string, args: readonly string[]): boolean | 'unknown' {
   const allowed: Readonly<Record<string, readonly string[]>> = {
     status: ['--short', '--branch', '--porcelain', '--untracked-files', '--ignore-submodules', '-s', '-b'],
-    log: ['--oneline', '--stat', '--format', '--pretty', '--max-count', '-n'],
+    log: ['--oneline', '--stat', '--format', '--pretty', '--max-count', '-n', '--grep', '--author', '--since', '--until', '--date', '--graph', '--decorate', '--no-decorate', '--abbrev-commit', '--reverse', '--name-only', '--name-status'],
     show: ['--stat', '--format', '--pretty', '--no-ext-diff', '--no-textconv'],
     diff: ['--stat', '--name-only', '--name-status', '--check', '--cached', '--staged', '--patch', '-p', '--no-ext-diff', '--no-textconv'],
     grep: ['--no-index', '--cached', '--untracked', '--ignore-case', '--line-number', '--regexp', '-n', '-i', '-e'],
   };
   const withValue: Readonly<Record<string, readonly string[]>> = {
     status: ['--porcelain', '--untracked-files', '--ignore-submodules'],
-    log: ['--format', '--pretty', '--max-count', '-n'],
+    log: ['--format', '--pretty', '--max-count', '-n', '--grep', '--author', '--since', '--until', '--date'],
     show: ['--format', '--pretty'],
     diff: [],
     grep: ['--regexp', '-e'],

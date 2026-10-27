@@ -26,6 +26,9 @@ const EXPECTED: readonly [command: string, expected: 'safe' | 'normal' | 'danger
   ['git grep touch', 'safe'],
   // ── Confirmed read-only queries ──
   ['git log --oneline -5', 'safe'],
+  ['git log --grep=commit -3', 'safe'],
+  ['git log --author=owner --since=2026-01-01', 'safe'],
+  ['git branch --show-current', 'safe'],
   ['git diff HEAD~1', 'safe'],
   ['git --no-pager status', 'safe'],
   ['git -C . status', 'safe'],
