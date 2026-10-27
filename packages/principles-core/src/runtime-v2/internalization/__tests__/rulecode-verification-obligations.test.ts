@@ -58,11 +58,11 @@ describe('system-owned RuleCode verification declaration', () => {
   it('PRI-1047 Owner review R6 #1: execute tools carry a not_approved × READ-ONLY command → allow counterfactual', () => {
     const result = deriveRuleCodeVerification({ executionConditions }, [], tools);
     const readonly = result.counterfactuals.find((entry) => entry.caseId === 'system-contract:design_approval:0:readonly:denied-readonly');
-    expect(readonly).toBeDefined();
-    expect(readonly?.toolName).toBe('host.exec');
-    expect(readonly?.params).toEqual({ command: 'git status --short' });
-    expect(readonly?.expectedDecision).toBe('allow');
-    expect(readonly?.ruleContext.facts.designGate).toMatchObject({ resolution: 'not_approved', requiresApproval: true });
+    if (!readonly || readonly.ruleContext === undefined) throw new Error('fixture: readonly counterfactual missing');
+    expect(readonly.toolName).toBe('host.exec');
+    expect(readonly.params).toEqual({ command: 'git status --short' });
+    expect(readonly.expectedDecision).toBe('allow');
+    expect(readonly.ruleContext.facts.designGate).toMatchObject({ resolution: 'not_approved', requiresApproval: true });
     // read/search tools do NOT get the execute-kind readonly case (their whole
     // variant table already expects allow under every fact state).
     const withRead = deriveRuleCodeVerification({ executionConditions }, [], [...tools, { rawToolName: 'host.read', canonicalKind: 'read' }]);
