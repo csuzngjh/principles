@@ -175,7 +175,7 @@ fs.writeFileSync(path.join(out, 'preregistration.draft.json'), `${JSON.stringify
     reductionRule: 'reduceCaseLevel (lib/ceb002-stats.mjs, test-anchored): a case counts B-worse iff B failed >=1 rep AND C passed BOTH reps; symmetric for C-worse; every mixed outcome is concordant and never enters the discordant count — rule FIXED BEFORE any results',
     test: { method: 'exact McNemar (two-sided, alpha=0.05)', implementation: 'lib/ceb002-stats.mjs mcnemarExactPValue — exact binomial enumeration, no asymptotic approximation' },
     role: 'extreme-effect veto gate ONLY — the primary statistical output is descriptive effect estimation (per-case pair detail, discordance rate, direction)',
-    powerLimitation: 'n=8 exact McNemar rejects only on (8,0)/(0,8): max power 0.145 (pd=0.5, delta=0.5); at delta=0.25/pd=0.5 power is 0.024; conservative size ~0. CONFIRMATORY TESTING IS INFEASIBLE at this round\'s sample size',
+    powerLimitation: 'n=8 exact McNemar (two-sided alpha=0.05) rejects when >=6 discordant case-level units ALL point in the same direction with the rest concordant — i.e. (6,0) p=0.03125, (7,0) p=0.01563, (8,0) p=0.00781 or the symmetric reverse; (5,0) p=0.0625 does NOT reject. Max power 0.1445 (=37/256, reached at pd=0.5 delta=0.5); at delta=0.25/pd=0.5 power is 0.024; conservative null size ~0.00004. CONFIRMATORY TESTING IS INFEASIBLE at this round\'s sample size — the exact test serves as an extreme-effect veto gate only',
   },
   referenceViews: [
     { view: 'all-16 case-level pairs', status: 'reference only — heterogeneous tier mix (L1 anchor + boundary + discriminative)', independence: '16 independent case-level units but not the primary analysis object' },
