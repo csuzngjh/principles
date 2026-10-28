@@ -1,8 +1,9 @@
 # CEB-002 证据归档 SHA-256 清单
 
-> 生成 2026-10-28T00:14:52.157Z · 入库 153 个文件 · 归档 worktree adhoc-20261028-ceb002-archive-9f1959-evidence-archive（基点 origin/main fa80623d38…）
+> 生成 2026-10-28T01:15:55.651Z（评审修复轮重生成）· 入库 153 个文件 · 归档 worktree adhoc-20261028-ceb002-archive-9f1959-evidence-archive（基点 origin/main fa80623d38…）
 > 源：worktree adhoc-20261027-ceb002-consistency-4c9c71 @ detached 208293951（研究目录 146 文件已逐一验证字节一致后复制；历史文档保留原始 mtime）
 > 方法：sha256 逐文件；核验=freeze --verify 双侧 + 审计重算 + 1:1:1:1 单元对应 + 报告再生复验 + 门禁 dry-run（详见 ceb002-execution-archive/ARCHIVE-README.md）
+> 评审发现（Owner P1×2，2026-10-28）与处置见 ARCHIVE-README §6：授权自然过期合并门（时间门测试）+ 预注册元数据冲突记录
 
 ## 入库文件
 
@@ -153,7 +154,7 @@ bbc4440f266ee61748ab91718d28cd48318a12dc40b1d7f7035cd4c1a39dfd05  scripts/dev/pr
 4e8b6ad4d1d4021f844434f914991cdefbe32641a76c4aace364ee82ef04a8f6  scripts/dev/principle-learning-lab/challenge-studies/CEB-002/scoring-contract.json
 9b60c0f5982ba007921551e153dd2f201283988e563f35afb84fc8c634943b5d  scripts/dev/principle-learning-lab/challenge-studies/CEB-002/suite-manifest.json
 3894122694d4c382d7ebb65c83386eeac83a8a9d91d099542b2f0fdb18fe4b3b  scripts/dev/principle-learning-lab/prepare-ceb002-freeze.mjs
-1aeb29bd7761f6b5da27b3728842a82b8684f7159d4e1e7b3fead9fada8c03f0  docs/research/ceb002-execution-archive/ARCHIVE-README.md
+fa13c0e15e9e8ed719a73551c479d6a421dc26539806c0db70afe5079090ef6a  docs/research/ceb002-execution-archive/ARCHIVE-README.md
 b7102c11c22490b09826573acd7d36ea81f7df125b4d36046b2d785654a17456  docs/research/ceb002-execution-archive/FINAL-REPORT.md
 794c975f05e95860ed3c8b55faa69be33a449b23b6c58ae784492c1e07495936  docs/research/ceb002-execution-archive/RESEARCH-DECISION-REPORT.md
 b716b73bf17a449a43aa25ead2c72d10bc903e8dc1efd3d0fb943e7b7d381f78  docs/research/ceb002-execution-archive/behavior-report.json

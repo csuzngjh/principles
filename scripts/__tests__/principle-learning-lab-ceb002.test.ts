@@ -184,19 +184,22 @@ describe('CEB-002 offline validation (Owner stage-transition instruction §四)'
     }
   });
 
-  it('7. isolation — CEB-001 frozen hashes verify unchanged; CEB-002 is the FROZEN+EXECUTED archive (hash pinned, historical authorization expired)', () => {
+  it('7. isolation — CEB-001 frozen hashes verify unchanged; CEB-002 is the FROZEN+EXECUTED archive (hash pinned, authorization window byte-pinned)', () => {
     const { execFileSync } = require('node:child_process');
     const out = execFileSync('node', [path.join(labRoot, 'freeze-challenge-study.mjs'), '--study', 'CEB-001', '--verify'], { encoding: 'utf8' });
     expect(out).toContain('VERIFY OK');
     // CEB-002 frozen+executed (2026-10-27) and evidence-archived (2026-10-28):
-    // the frozen suite hash is pinned and the historical APPROVED authorization
-    // can never bless a new run (its validity window has expired).
+    // the frozen suite hash is pinned and the historical authorization's
+    // window is byte-pinned. Live-clock expiry (the natural-expiry MERGE GATE
+    // from the Owner P1-1 finding — budget exhaustion alone is NOT a
+    // revocation) is enforced in
+    // principle-learning-lab-archived-authorization-gate.test.ts.
     const manifestNow = readJson(path.join(study, 'suite-manifest.json'));
     const authNow = readJson(path.join(study, 'run-authorization.json'));
     expect(manifestNow.suiteHash).toBe('02cbc15cfd9cf8a8b9e986950fdf722fcda6632604f4e62d4bd50ea0950d04f5');
     expect(authNow.status).toBe('APPROVED');
-    // pinned byte-exact historical window (NOT clock-dependent): any tampering
-    // breaks the pin; new execution is budget-impossible regardless (96/96).
+    // pinned byte-exact historical window (NOT clock-dependent here): any tampering
+    // breaks the pin
     expect(authNow.validFrom).toBe('2026-10-27T12:22:47.763Z');
     expect(authNow.validUntil).toBe('2026-10-28T12:22:47.763Z');
     expect(readJson(path.join(study, 'preregistration.draft.json')).status).toBe('DRAFT');

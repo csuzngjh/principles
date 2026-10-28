@@ -156,9 +156,13 @@ describe('CEB-002 preregistration contract consistency', () => {
     ]);
   });
 
-  it('9. FROZEN+EXECUTED states (evidence archive): frozen hash pinned, historical authorization expired, in-force twin present', () => {
+  it('9. FROZEN+EXECUTED states (evidence archive): frozen hash pinned, authorization window byte-pinned, in-force twin present', () => {
     // CEB-002 was frozen, authorized and executed 2026-10-27, and its evidence
     // archived 2026-10-28 (previously these protected the DRAFT placeholders).
+    // The live-clock expiry of the historical authorization is enforced
+    // SEPARATELY in principle-learning-lab-archived-authorization-gate.test.ts
+    // (RED until 2026-10-28T12:22:47.763Z — the natural-expiry merge gate from
+    // the Owner P1-1 review finding; this test only pins the record BYTES).
     const FROZEN_SUITE = '02cbc15cfd9cf8a8b9e986950fdf722fcda6632604f4e62d4bd50ea0950d04f5';
     const hashes = readJson(inside(study, 'hashes.json'));
     expect(manifest.suiteHash).toBe(FROZEN_SUITE);
@@ -167,9 +171,11 @@ describe('CEB-002 preregistration contract consistency', () => {
     expect(auth.suiteHash).toBe(FROZEN_SUITE);
     expect(auth.studyPlanHash).toBe(hashes.preregistrationHash.value);
     // the historical authorization record is pinned byte-exact (any tampering
-    // with its window breaks the pin). NOTE: its 24h window extended into
-    // 2026-10-28 — clock-validity alone cannot authorize anything because the
-    // attempt budget is exhausted (96/96 RESERVE — see the evidence archive).
+    // with its window breaks the pin). Its 24h window extended into
+    // 2026-10-28T12:22:47.763Z; the original study's budget exhaustion
+    // (96/96) does NOT revoke it — the gate and the per-directory ledger are
+    // different checks, so the natural-expiry merge gate lives in
+    // principle-learning-lab-archived-authorization-gate.test.ts (Owner P1-1).
     expect(auth.validFrom).toBe('2026-10-27T12:22:47.763Z');
     expect(auth.validUntil).toBe('2026-10-28T12:22:47.763Z');
     expect(auth.halted).toBe(false);
