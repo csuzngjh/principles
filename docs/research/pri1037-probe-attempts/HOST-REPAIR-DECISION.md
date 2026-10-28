@@ -31,3 +31,14 @@
 2. 若宿主版本变为 2026.10.8：先对新版本跑一遍 adapter 契约核验（exec --help 选项面 + 一次 dry-run）。
 3. 签发全新授权（APPROVED，5 轮 × 600s，6h 窗）→ `run-isolation-probe.mjs --study CEB-001 --openclaw-bin <node+openclaw.mjs>` → `verifyF2ProbeEvidence` 深验 → 归档。
 4. 深验通过 → F2 独立授权 → 真实实验 → 裁定 → PRI-1024 终局收口。
+
+
+## 修复执行记录（Owner 批准后，2026-10-28）
+
+1. `openclaw gateway stop --force`：Gateway 已停（PID 74856 释放）。
+2. `openclaw update repair`（重跑，~40 分钟）：preflight/config 校验/snapshot 完成；doctor 在 **plugin-install-index** 迁移处拒绝，后续迁移（config-machine-state/agent-migration-targets/media-persistence/session-entry-state）全部 blocked-by-prior-refusal。
+3. `openclaw doctor --fix`：同一拒绝链 + **vendor 根因落地**——`plugins/installs.json` **早于 2026 年 7 月升级支持窗口**，doctor 拒绝修改（fail-closed 保留数据）；官方修复前置 = **回退 OpenClaw 2026.9.5、带 pre-update backup 执行 doctor --fix 后再升级**（docs.openclaw.ai/install/upgrading#upgrading-very-old-versions）。另有 EPERM symlink 失败（feishu 插件捕获）与 state DB read admission closed 记录在案。
+4. 修复后实测：`openclaw --version` 仍 2026.10.5；`agent exec` 仍以 `copy path changed during operation` 失败（模型调用未发生）。
+5. Gateway 已按修复规程手动重启：`openclaw gateway start` → Connectivity check ok，127.0.0.1:18789（PD 代理服务恢复在线）。
+
+**结论**：vendor 修复路径要求**生产宿主降级+备份+重升级**——触及自主执行停止条件「重大数据风险」（PD 插件/真实工作区/认证资料所在宿主）。降级版本选择、备份范围、执行时机（须避开其他 Agent 活动）均为 Owner 决策。探针授权周期 1 保持 REVOKED。
