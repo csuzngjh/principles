@@ -8,6 +8,7 @@
 
 import { Command, Option } from 'commander';
 import { handlePainRecord } from './commands/pain-record.js';
+import { handlePainExplicit } from './commands/pain-explicit.js';
 import { registerPainRetryCommand } from './commands/pain-retry.js';
 import { handlePainRecall, parsePainRecallLimit } from './commands/pain-recall.js';
 import { handlePainEvidence } from './commands/pain-evidence.js';
@@ -135,6 +136,16 @@ painCmd
   .option('--json', 'Output raw JSON')
   .action(async (opts) => {
     await handlePainRecord(opts);
+  });
+
+painCmd
+  .command('explicit')
+  .description('Register an explicit Owner pain statement from the live Codex turn context (agent-assisted, no prefix; same admission chain as PD记录痛苦： — takes no lineage flags)')
+  .option('--statement <text>', 'Owner verbatim statement (1-500 chars, required; rejected when longer — never truncated)')
+  .option('-w, --workspace <path>', 'Workspace directory')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts) => {
+    await handlePainExplicit(opts);
   });
 
 registerPainRetryCommand(painCmd);
