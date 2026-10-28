@@ -133,8 +133,15 @@ function detectHookTrust() {
 }
 
 // Freshness comparison is possible only for a cache install backed by a local
-// marketplace source. These reasons mean "nothing to compare", not "unknown".
-const SNAPSHOT_NOT_APPLICABLE = /^(plugin_root_outside_cache|marketplace_source_not_local:)/;
+// marketplace source whose plugin entry this script can locate. These reasons
+// mean the comparison is NOT AVAILABLE — either by design (no local source) or
+// because the source uses a layout we do not model — never proof that the
+// source is damaged. None of them fails the report or asks anyone to repair the
+// checkout: assuming "source == plugin root" made the repo-root marketplace
+// layout fail permanently and sent the Owner to fix a healthy checkout
+// (PRI-1052). A resolved plugin dir with an unreadable manifest is deliberately
+// absent from this list — that source really is broken and stays degraded.
+const SNAPSHOT_NOT_COMPARABLE = /^(plugin_root_outside_cache|marketplace_source_not_local:|marketplace_manifest_unreadable|marketplace_manifest_invalid|marketplace_plugin_not_listed:|marketplace_plugin_source_missing|marketplace_plugin_source_not_local:|marketplace_plugin_source_outside_root|marketplace_plugin_source_path_missing|marketplace_plugin_source_not_directory)/;
 
 function snapshotRecovery(reason) {
   if (reason === 'codex_config_unreadable') return 'Make ~/.codex/config.toml readable so the marketplace source can be compared, then re-run $pd-cli-operator.';
@@ -167,16 +174,17 @@ function main() {
   // Every value below (pins, scripts) comes from the LOCATED cache root, so an
   // old snapshot is self-consistent: it reports a healthy pinned match while
   // the marketplace source already ships a newer plugin. Compare the two.
-  // Only two reasons are "not applicable" by design (an explicit --plugin-root,
-  // or a non-local marketplace); every other reason means unreadable state
-  // blocked the comparison, which is degraded — a deleted source checkout or
-  // a removed marketplace leaves the cache frozen with no other signal (rc-9).
+  // Reasons in SNAPSHOT_NOT_COMPARABLE mean the comparison is unavailable (no
+  // local source, or a source layout this script cannot resolve); every other
+  // reason means a source we DID resolve is unusable, which is degraded — a
+  // deleted source checkout or a removed marketplace leaves the cache frozen
+  // with no other signal (rc-9).
   if (root.ok) {
     const snapshot = resolvePluginSourceSnapshot(root.pluginRoot);
     const drift = snapshot.ok ? compareVersionDirs(snapshot.installedVersion, snapshot.sourceVersion) : 0;
     if (!snapshot.ok) {
       const detail = `installed snapshot freshness not verifiable (${snapshot.reason})`;
-      if (SNAPSHOT_NOT_APPLICABLE.test(snapshot.reason)) push('snapshot', 'ok', detail);
+      if (SNAPSHOT_NOT_COMPARABLE.test(snapshot.reason)) push('snapshot', 'ok', detail);
       else push('snapshot', 'degraded', detail, snapshotRecovery(snapshot.reason));
     } else if (drift < 0) {
       push('snapshot', 'degraded',

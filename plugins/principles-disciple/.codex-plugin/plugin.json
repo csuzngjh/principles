@@ -1,6 +1,6 @@
 {
   "name": "principles-disciple",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "description": "Owner-governed behavior internalization for Codex: injects approved principles into prompts, gates risky tool calls with owner-approved rules, and records pain evidence — all reviewable and reversible.",
   "author": {
     "name": "Principles Disciple",

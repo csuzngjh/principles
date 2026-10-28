@@ -253,6 +253,58 @@ function readMarketplaceSources(configPath) {
   return out;
 }
 
+/**
+ * Locate the plugin directory behind a local marketplace source root.
+ *
+ *  Codex local marketplaces come in two layouts and both must resolve:
+ *    - the source IS the plugin root      <source>/.codex-plugin/plugin.json
+ *    - the source IS a marketplace root   <source>/.agents/plugins/marketplace.json
+ *                                          -> plugins[].source.path (relative)
+ *
+ *  The second layout is the PD repo itself: `config.toml` points at the
+ *  checkout and the plugin lives in ./plugins/principles-disciple. Assuming
+ *  only the first turned every freshness check on that layout into a
+ *  permanent "source plugin.json unreadable" (PRI-1052).
+ *
+ *  Returns { ok: true, pluginDir } or { ok: false, reason }. `ok: false` means
+ *  the LAYOUT could not be resolved — unknown, not proof of a damaged source —
+ *  so callers must not send anyone to repair the checkout on these reasons.
+ */
+function resolveMarketplacePluginDir(sourceRoot, pluginName) {
+  try {
+    if (fs.statSync(path.join(sourceRoot, '.codex-plugin')).isDirectory()) {
+      return { ok: true, pluginDir: sourceRoot };
+    }
+  } catch { /* not the plugin-root layout — try the marketplace manifest */ }
+  const manifestPath = path.join(sourceRoot, '.agents', 'plugins', 'marketplace.json');
+  let manifest;
+  try { manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')); }
+  catch { return { ok: false, reason: 'marketplace_manifest_unreadable' }; }
+  const entries = manifest && typeof manifest === 'object' ? manifest.plugins : undefined;
+  if (!Array.isArray(entries)) return { ok: false, reason: 'marketplace_manifest_invalid' };
+  const entry = entries.find((candidate) => candidate && typeof candidate === 'object' && candidate.name === pluginName);
+  if (!entry) return { ok: false, reason: `marketplace_plugin_not_listed:${pluginName}` };
+  const source = entry.source;
+  if (!source || typeof source !== 'object' || typeof source.path !== 'string' || source.path.length === 0) {
+    return { ok: false, reason: 'marketplace_plugin_source_missing' };
+  }
+  if (source.source !== undefined && source.source !== 'local') {
+    return { ok: false, reason: `marketplace_plugin_source_not_local:${typeof source.source === 'string' ? source.source : 'unknown'}` };
+  }
+  const pluginDir = path.resolve(sourceRoot, source.path);
+  const relative = path.relative(sourceRoot, pluginDir);
+  // Segment boundary, not a prefix: a sibling named "..checkout" stays inside.
+  if (relative === '' || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    return { ok: false, reason: 'marketplace_plugin_source_outside_root' };
+  }
+  try {
+    if (!fs.statSync(pluginDir).isDirectory()) return { ok: false, reason: 'marketplace_plugin_source_not_directory' };
+  } catch {
+    return { ok: false, reason: 'marketplace_plugin_source_path_missing' };
+  }
+  return { ok: true, pluginDir };
+}
+
 /** Compare an installed plugin cache root against the marketplace source that
  *  Codex is configured to install from.
  *
@@ -270,7 +322,7 @@ function resolvePluginSourceSnapshot(pluginRoot) {
   if (segments.length !== 3 || segments[0] === '..' || path.isAbsolute(segments[0]) || segments[1] !== 'principles-disciple') {
     return { ok: false, reason: 'plugin_root_outside_cache' };
   }
-  const [marketplaceName, , installedVersion] = segments;
+  const [marketplaceName, pluginName, installedVersion] = segments;
   const marketplaces = readMarketplaceSources(path.join(codexDir(), 'config.toml'));
   if (!marketplaces) return { ok: false, reason: 'codex_config_unreadable' };
   const marketplace = marketplaces.get(marketplaceName);
@@ -281,13 +333,15 @@ function resolvePluginSourceSnapshot(pluginRoot) {
     return { ok: false, reason: `marketplace_source_not_local:${marketplace.sourceType ?? 'unknown'}` };
   }
   if (!marketplace.source) return { ok: false, reason: 'marketplace_source_missing' };
+  const resolved = resolveMarketplacePluginDir(marketplace.source, pluginName);
+  if (!resolved.ok) return { ok: false, reason: resolved.reason };
   let sourcePlugin;
-  try { sourcePlugin = JSON.parse(fs.readFileSync(path.join(marketplace.source, '.codex-plugin', 'plugin.json'), 'utf8')); }
+  try { sourcePlugin = JSON.parse(fs.readFileSync(path.join(resolved.pluginDir, '.codex-plugin', 'plugin.json'), 'utf8')); }
   catch { return { ok: false, reason: 'source_plugin_json_unreadable' }; }
   if (typeof sourcePlugin?.version !== 'string') return { ok: false, reason: 'source_plugin_version_invalid' };
   return {
     ok: true, marketplace: marketplaceName, source: marketplace.source, sourceType: 'local',
-    installedVersion, sourceVersion: sourcePlugin.version,
+    pluginDir: resolved.pluginDir, installedVersion, sourceVersion: sourcePlugin.version,
   };
 }
 
