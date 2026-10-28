@@ -235,9 +235,14 @@ describe('CR-07 promotion ordering, recovery, and version honesty', () => {
     ]);
     expect(a.exitCode).toBe(0);
     expect(b.exitCode).toBe(0);
-    // Both receipts are consistent (received, no contradictory degradation):
-    // the admission marker's unique logical key makes the second delivery an
-    // already_admitted replay, never a second pain or a failed registration.
+    // Both receipts are consistent (received, no contradictory degradation)
+    // and the durable state stays exactly-once. Scope note: better-sqlite3 is
+    // synchronous, so in-process invocations interleave only at await points —
+    // this pins the idempotent replay (pre-transaction marker probe →
+    // already_admitted) and the task-ensure race; the cross-PROCESS
+    // marker-INSERT race is pinned deterministically at the factory seam in
+    // governance-signal-admission.test.ts ("loser of a concurrent
+    // marker-INSERT race converges").
     for (const result of [a, b]) {
       const receivedLine = result.stderr.find((line) => line.includes('owner_statement_received:'));
       expect(receivedLine).toBeDefined();

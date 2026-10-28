@@ -325,6 +325,95 @@ describe('correction admission → one canonical pain (SPEC §10/§12)', () => {
     expect(withTrajectory((db) => db.prepare('SELECT COUNT(*) AS n FROM pain_events').get())).toEqual({ n: 1 });
   });
 
+  it('the loser of a concurrent marker-INSERT race converges instead of contradicting the durable state', () => {
+    const first = admit([correction()]);
+    expect(first.outcomes?.[0]).toMatchObject({ disposition: 'admitted', duplicate: false });
+    const winner = first.outcomes?.[0];
+    if (!winner || !('canonicalPainId' in winner)) throw new Error('expected admitted outcome');
+
+    // Two hook PROCESSES admitting the same delivery can both pass the
+    // pre-transaction marker probe before either commits; better-sqlite3 is
+    // synchronous, so the interleaving is simulated deterministically at the
+    // factory seam: hide the winner's marker from the pre-probe only, make the
+    // loser's marker INSERT hit the winner's UNIQUE constraint, and let the
+    // post-rollback convergence probe re-read the store fresh (rc-7).
+    const real = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+    try {
+      let markerProbes = 0;
+      const loserDb = new Proxy(real, {
+        get(target, prop) {
+          const value = Reflect.get(target, prop, target);
+          if (typeof value !== 'function') return value;
+          if (prop === 'prepare') {
+            return (sql: string) => {
+              const statement = target.prepare(sql);
+              if (sql.includes('SELECT * FROM governance_signal_admissions WHERE logical_observation_key = ?')) {
+                markerProbes += 1;
+                if (markerProbes === 1) return { get: () => undefined } as unknown as typeof statement;
+                return statement;
+              }
+              if (sql.includes('INSERT INTO governance_signal_admissions')) {
+                return { run: () => { throw new Error('UNIQUE constraint failed: governance_signal_admissions.logical_observation_key'); } } as unknown as typeof statement;
+              }
+              return statement;
+            };
+          }
+          return value.bind(target);
+        },
+      }) as unknown as Database.Database;
+      const loser = admitGovernanceSignals({
+        workspaceDir,
+        candidates: [correction()],
+        now: NOW,
+        keywordStore: buildSharedSeedKeywordStore(),
+        databaseFactory: () => loserDb,
+      });
+      expect(loser.ok).toBe(true);
+      expect(loser.outcomes?.[0]).toMatchObject({ disposition: 'already_admitted', canonicalPainId: winner.canonicalPainId, diagnosticianTaskId: null });
+      // The loser's rolled-back attempt left the durable state untouched.
+      expect(withTrajectory((db) => db.prepare('SELECT COUNT(*) AS n FROM pain_events').get())).toEqual({ n: 1 });
+      expect(withTrajectory((db) => db.prepare('SELECT COUNT(*) AS n FROM governance_signal_admissions').get())).toEqual({ n: 1 });
+    } finally {
+      real.close();
+    }
+
+    // Negative control: a marker-INSERT failure with NO durable marker to
+    // converge on still propagates fail-loud (rc-3), not a fake convergence.
+    const realNoMarker = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+    try {
+      const blindDb = new Proxy(realNoMarker, {
+        get(target, prop) {
+          const value = Reflect.get(target, prop, target);
+          if (typeof value !== 'function') return value;
+          if (prop === 'prepare') {
+            return (sql: string) => {
+              const statement = target.prepare(sql);
+              if (sql.includes('FROM governance_signal_admissions WHERE logical_observation_key = ?')) {
+                return { get: () => undefined } as unknown as typeof statement;
+              }
+              if (sql.includes('INSERT INTO governance_signal_admissions')) {
+                return { run: () => { throw new Error('UNIQUE constraint failed: governance_signal_admissions.logical_observation_key'); } } as unknown as typeof statement;
+              }
+              return statement;
+            };
+          }
+          return value.bind(target);
+        },
+      }) as unknown as Database.Database;
+      const blind = admitGovernanceSignals({
+        workspaceDir,
+        candidates: [correction()],
+        now: NOW,
+        keywordStore: buildSharedSeedKeywordStore(),
+        databaseFactory: () => blindDb,
+      });
+      expect(blind.ok).toBe(false);
+      expect(blind.ok === false && blind.reason.startsWith('governance_admission_failed:')).toBe(true);
+    } finally {
+      realNoMarker.close();
+    }
+  });
+
   it('duplicate delivery after a lost marker still converges on the same pain (crash replay)', () => {
     admit([correction()]);
     // Simulate the crash window: the marker write was lost.

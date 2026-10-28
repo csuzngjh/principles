@@ -686,6 +686,33 @@ function insertAdmissionMarker({ db, identity, canonicalPainId, ruleVersion, rea
       ruleVersion, reason.slice(0, MAX_REASON_BOUND) || null, payloadJson, nowIso, nowIso);
 }
 
+/**
+ * Convergence probe for the concurrent-redelivery race: two admission
+ * processes passed the pre-transaction marker probe before either committed,
+ * so the loser's marker INSERT hits the store UNIQUE constraint and its whole
+ * transaction rolls back. A marker AND its canonical pain now existing means
+ * the idempotency contract already WON — converge on the winner's state (the
+ * same semantics as the task-ensure race in ensureGovernanceDiagnosticianTask)
+ * instead of surfacing a governance_admission_failed that contradicts the
+ * durable state. The probe re-reads the store fresh (rc-7); when the durable
+ * facts do NOT exist it returns null and the original error propagates.
+ */
+function convergeOnAdmittedMarker(args: { db: Database.Database; logicalObservationKey: string; kind: GovernanceSignalKind }): GovernanceAdmissionOutcome | null {
+  const marker = args.db.prepare('SELECT * FROM governance_signal_admissions WHERE logical_observation_key = ?').get(args.logicalObservationKey);
+  if (!isRecord(marker)) return null;
+  const canonicalPainId = rowField(marker, 'canonical_pain_id');
+  const taskId = rowField(marker, 'diagnostician_task_id');
+  if (typeof canonicalPainId !== 'string') return null;
+  if (args.db.prepare('SELECT 1 FROM pain_events WHERE canonical_pain_id = ?').get(canonicalPainId) === undefined) return null;
+  return {
+    disposition: 'already_admitted',
+    kind: args.kind,
+    logicalObservationKey: args.logicalObservationKey,
+    canonicalPainId,
+    diagnosticianTaskId: typeof taskId === 'string' ? taskId : null,
+  };
+}
+
 // ─── Per-kind admission (inside one transaction each) ───────────────────────
 
 interface AdmitCorrectionArgs {
@@ -910,10 +937,21 @@ function admitOne({ db, candidate, workspaceDir, now, nowIso, keywordStore, onDe
     };
   }
 
-  if (candidate.kind === 'user_correction') {
-    return admitCorrection({ db, candidate, workspaceDir, now, nowIso, ...(keywordStore ? { keywordStore } : {}), ...(onDegradation ? { onDegradation } : {}) });
+  try {
+    if (candidate.kind === 'user_correction') {
+      return admitCorrection({ db, candidate, workspaceDir, now, nowIso, ...(keywordStore ? { keywordStore } : {}), ...(onDegradation ? { onDegradation } : {}) });
+    }
+    return admitToolFailure({ db, candidate, workspaceDir, nowIso });
+  } catch (error) {
+    // RateLimitedSignal never reaches here — admitCorrection converts it to a
+    // rate_limited outcome internally. A store-level failure (e.g. the loser
+    // of a concurrent redelivery hitting the marker UNIQUE constraint) first
+    // gets a fresh convergence probe; only a failure with NO durable
+    // idempotency facts propagates as governance_admission_failed.
+    const converged = convergeOnAdmittedMarker({ db, logicalObservationKey: candidate.logicalObservationKey, kind: candidate.kind });
+    if (converged !== null) return converged;
+    throw error;
   }
-  return admitToolFailure({ db, candidate, workspaceDir, nowIso });
 }
 
 // ─── Admission entrypoint ───────────────────────────────────────────────────
