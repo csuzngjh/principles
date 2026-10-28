@@ -1,7 +1,12 @@
 # Pruning Pipeline
 
-> **Status**: Active
-> **最后更新**: 2026-05-31
+> **Status**: Partially retired
+> **最后更新**: 2026-10-28
+>
+> **2026-10-28 退役范围**：审查日志（`pruning-review-log.ts`）、注入掩码（`pruning-mask.ts`）
+> 以及 `pd runtime pruning review` / `pd runtime pruning rollback` 两条命令已删除。它们唯一的消费者是
+> legacy `<evolution_principles>` 注入块，该块在同日的 legacy 注入清理中一并移除。本文其余关于
+> PruningSignal 只读检测、L1 hard cap 与孤儿引用的描述仍然有效；涉及 review/mask 的段落保留为历史设计记录。
 > **关联**: `PD_ARCHITECTURE_OVERVIEW.md` §4.5, `DATA_ARCHITECTURE.md` §5.5, `INTERNALIZATION_PIPELINE.md` §6, ADR-0012
 
 本文档描述 PD 的修剪（Pruning）流水线：如何检测应被清理的原则、如何记录人工审查决策、以及未来如何执行实际修剪操作。
@@ -149,8 +154,6 @@ flowchart TD
 |------|------|---------|
 | `pd runtime pruning report` | 健康报告（watch/review 信号总览） | 无 |
 | `pd runtime pruning explain --principle-id <id>` | 单个原则的详细信号解释 | 无 |
-| `pd runtime pruning review --principle-id <id> --decision <decision>` | 记录人工审查决策 | `pruning_reviews.jsonl` |
-| `pd runtime pruning rollback --principle-id <id>` | 撤销 archive-candidate 标记 | `pruning_reviews.jsonl` |
 | `pd runtime pruning orphans` | 检测并可选清理孤儿引用 | 默认 dry-run；`--confirm` 时修改 ledger.json |
 
 ### 4.3 L1 Hard Cap

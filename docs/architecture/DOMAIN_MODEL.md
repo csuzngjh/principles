@@ -246,7 +246,7 @@ PD 鼓励**渐进式内化**：原则先以 prompt 起步，经过验证后逐�
 | **Internalization** | 将 Principle 通过 5 通道转化为更稳定行为约束的过程。|
 | **Activation** | 把 validated PIArtifact 通过 ActivationDispatcher 实际生效（ADR-0006）。|
 | **Pruning Signal** | 系统发现某个 Principle 可降级、隐藏、归档的**只读**信号。|
-| **Pruning Review** | 人类对 Pruning Signal 的审计记录，写入 `.state/pruning_reviews.jsonl`（append-only）。|
+| **Pruning Review** | 人类对 Pruning Signal 的审计记录，写入 `.state/pruning_reviews.jsonl`（append-only）。**已退役（2026-10-28）**：该记录只被 legacy 注入掩码消费，掩码随注入块一起删除。|
 | **Pruning Action** | 真正改变 Principle 生命周期的**写**动作。**当前未实现**，需独立 issue 推进。|
 | **Approval** | 高风险通道激活的人工审批操作（ADR-0006）。|
 | **RejectionFeedback** | 拒绝 Approval 后的结构化反馈，触发 Internalization Pipeline 优化（ADR-0006）。|
@@ -386,7 +386,7 @@ disabled（自动 deactivate）
 | Routing Policy | `packages/principles-core/src/runtime-v2/internalization/routing-policy.ts` | - | ✅ Done（PRI-43）|
 | Template Generator | `packages/principles-core/src/runtime-v2/internalization/template-generator.ts` | - | ✅ Done |
 | Pruning Signal | `packages/principles-core/src/runtime-v2/pruning-read-model.ts` | - | ✅ Done |
-| Pruning Review | `packages/principles-core/src/runtime-v2/pruning-review-log.ts` | - | ✅ Done |
+| Pruning Review | — （已删除）| - | ⚠️ 已退役（2026-10-28）|
 | Diagnostician Recommendation | `packages/principles-core/src/runtime-v2/diagnostician-output.ts` | - | ✅ Done |
 | **PIArtifact** | `packages/principles-core/src/runtime-v2/internalization/pi-artifact.ts` | - | ✅ Done（ADR-0003）|
 | **7 Peer Runners** | `packages/principles-core/src/runtime-v2/internalization/*-runner.ts` | - | ✅ Done |

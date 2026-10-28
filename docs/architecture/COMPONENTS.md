@@ -198,8 +198,8 @@ PD 系统有 5 类组件：
 | 组件 | 类型 | 包 | 文件 | 输入 | 输出 | 状态 |
 |------|-----|----|----|----|----|------|
 | `PruningReadModel` | 🟣 ReadModel | core | `runtime-v2/pruning-read-model.ts` | n/a | PruningSignal[] | ✅ |
-| `PruningReviewLog` | 🟡 Store | core | `runtime-v2/pruning-review-log.ts` | review record | append-only | ✅ |
-| `PruningMask` | 🔧 Util | core | `runtime-v2/pruning-mask.ts` | ledger + reviews | maskedSet | ✅ |
+| `PruningReviewLog` | 🟡 Store | core | — | review record | append-only | ⚠️ 已退役（2026-10-28，随 legacy 注入块删除）|
+| `PruningMask` | 🔧 Util | core | — | ledger + reviews | maskedSet | ⚠️ 已退役（2026-10-28，掩码唯一消费者是 legacy 注入块）|
 | `PruningAction`（未来） | 🔵 Service | core | TBD | review approved | ledger mutation | ❌ 未规划 |
 
 ### 3.5 Runtime Adapters

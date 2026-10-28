@@ -85,7 +85,7 @@ PD Runtime V2 的权威数据存储分为**两个物理事实源**：
 
 | 物理路径 | 格式 | 写入特性 |
 |---------|------|---------|
-| `{workspace}/.state/pruning_reviews.jsonl` | JSONL | append-only |
+| `{workspace}/.state/pruning_reviews.jsonl` | JSONL | append-only（2026-10-28 起写入链已删除，历史文件保留为静态数据）|
 
 > **注**：仓库当前没有 `audit-log.jsonl` / `AuditLogger` 实现（代码零命中）。
 
@@ -590,10 +590,6 @@ interface LedgerAdapter {
    ├─► ledger.json（读）
    ├─► state.db: 各表（读）
    └─► 输出 PruningSignal[]（不持久化）
-
-[人工 review]
-   │
-   └─► .state/pruning_reviews.jsonl（append）
 
 [PruningAction]（未来 — 暂未实现）
    │

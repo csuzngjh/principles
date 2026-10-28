@@ -359,7 +359,6 @@ LLM 调用是 PD 的最大成本中心，必须严格预算。
 |---------|--------|------|
 | 静态文件读取（PRINCIPLES.md 等）| TTL 60s + mtime 检查 | `prompt.ts` 已实现 |
 | Empathy keyword store | TTL + module-level | `prompt.ts` 已实现 |
-| Pruning mask | 依赖 review log mtime | `pruning-mask.ts` 已实现 |
 | Active principles 列表 | Ledger 写入即失效 | `LedgerReadModel`（待建优化）|
 
 ### 9.2 批处理
