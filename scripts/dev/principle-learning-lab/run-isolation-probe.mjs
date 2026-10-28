@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { verifyProbeAuthorization, readProbeAuthorization } from './lib/challenge-probe-authorization.mjs';
 import { runIsolationProbe, saveProbeEvidence, verifyF2ProbeEvidence } from './lib/challenge-isolation-probe.mjs';
 import { createCodexHostTransport } from './lib/host-actor.mjs';
+import { createProbeSideEffectScanner } from './lib/challenge-probe-side-effect-scanner.mjs'; // ROUND_DIR_ALLOWLIST is managed inside the scanner module (S5.2.1: unused-import cleanup, CodeQL)
 import { ZHIPU_CODING_PROVIDER, buildZhipuCodexOverrides, ensureZhipuProviderReady } from './lib/challenge-zhipu-host-provider.mjs';
 
 const labRoot = path.dirname(fileURLToPath(import.meta.url));
@@ -75,36 +76,18 @@ const scanForGold = (root) => {
 // fails the side-effect scan (the runtime may also write host-internal state
 // under openclawHome — that is evidence territory, audited separately, never
 // cleaned).
-const ROUND_DIR_ALLOWLIST = new Set(['AGENTS.md', 'probe-message.txt']);
-const scanner = () => {
-  let crossGroupLeakage = 0;
-  let productionWrites = 0;
-  let externalSideEffects = 0;
-  let unauthorizedExtraWrites = 0;
-  const extraSamples = [];
-  crossGroupLeakage += scanForGold(scratchRoot);
-  crossGroupLeakage += scanForGold(roundsRoot); // S5 P1-3: probe-round dirs are controlled paths — scanned, not exempt
-  if (fs.existsSync(roundsRoot)) {
-    for (const round of fs.readdirSync(roundsRoot, { withFileTypes: true })) {
-      if (!round.isDirectory()) continue;
-      const roundDir = path.join(roundsRoot, round.name);
-      for (const f of fs.readdirSync(roundDir)) {
-        if (!ROUND_DIR_ALLOWLIST.has(f)) {
-          unauthorizedExtraWrites += 1;
-          if (extraSamples.length < 5) extraSamples.push(path.join(round.name, f));
-        }
-      }
-    }
-  }
-  const walk = (dir, fn) => { for (const f of fs.readdirSync(dir, { withFileTypes: true })) { const p = path.join(dir, f.name); if (f.isDirectory()) walk(p, fn); else fn(p); } };
-  for (const pdRoot of [path.join(os.homedir(), '.pd'), path.join(labRoot, '..', '..', '..', '..', '.pd')]) {
-    if (!fs.existsSync(pdRoot)) continue;
-    walk(pdRoot, (p) => { const st = fs.statSync(p); if (st.mtimeMs >= windowStart) productionWrites += 1; });
-  }
-  walk(workRoot, (p) => { const st = fs.statSync(p); if (st.mtimeMs >= windowStart && !p.startsWith(scratchRoot) && !p.startsWith(copyDir) && !p.startsWith(roundsRoot)) externalSideEffects += 1; });
-  const clean = unauthorizedExtraWrites === 0;
-  return { crossGroupLeakage, productionWrites, externalSideEffects, unauthorizedExtraWrites, extraSamples, controlledPathsScanned: [scratchRoot, roundsRoot], roundDirAllowlist: [...ROUND_DIR_ALLOWLIST].sort(), scopeNote: 'scratch+rounds gold-hex scan + round-dir allowlist + PD roots mtime window + workdir non-controlled writes; not a whole-disk claim', ...(clean ? {} : { nonCleanReason: 'files outside the round-dir allowlist appeared during the probe window' }) };
-};
+// S5.2 §五: 'state' is the per-round OpenClaw state dir (session store +
+// trajectory evidence). It is allowlisted as a DIRECTORY only — its contents
+// are NOT exempt: gold-hex scanning recurses through it (scanForGold over
+// roundsRoot) and the file count is reported for audit. Unexpected TOP-LEVEL
+// entries in a round dir still fail the scan.
+const scanner = createProbeSideEffectScanner({
+  scratchRoot, roundsRoot, copyDir, workRoot, windowStart,
+  goldHexRuns,
+  productionRoots: [path.join(os.homedir(), '.pd'), path.join(labRoot, '..', '..', '..', '..', '.pd')],
+});
+
+
 
 // ---- host dispatch (Owner S4): the authorization's targetHost.kind selects
 // the adapter; both paths share the { complete, hostSnapshot } contract the
@@ -133,6 +116,7 @@ if (record.targetHost.kind === 'openclaw') {
     openclawTrustedRoot: sessionsDir,
     openclawExpectedProvider: expectedProvider,
     openclawExpectedModel: record.targetHost.requestedModelIdentity, // S5.1 §四: deep verification binds the AUTHORIZED model
+    openclawControlledRoot: roundsRoot, // S5.2 §四: mapped session dirs must live inside the controlled rounds root
     readOpenClawTrajectory: readOpenClawTrajectoryEvidence,
   };
 } else {

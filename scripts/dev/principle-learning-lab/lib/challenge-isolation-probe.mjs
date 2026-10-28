@@ -215,6 +215,16 @@ export async function runIsolationProbe({ studyDir, hostTransport, mode = 'offli
   try {
     snap = hostTransport.hostSnapshot();
   } catch { snap = null; }
+  // S5.2 §四: per-session runtime evidence map — where the host's OWN state
+  // store persisted each session's trajectory (inside the runner-controlled
+  // roundsRoot). The deep verifier uses this map INSTEAD of a single global
+  // sessions dir and re-checks containment against the controlled root, so a
+  // self-reported path can never escape.
+  record.sessionEvidence = snap && typeof snap === 'object' && Array.isArray(snap.sessionDetails)
+    ? snap.sessionDetails
+        .filter((d) => d && typeof d.sessionId === 'string' && typeof d.sessionsDir === 'string')
+        .map((d) => ({ sessionId: d.sessionId, sessionsDir: d.sessionsDir }))
+    : undefined;
   record.hostSnapshotAudit = snap && typeof snap === 'object' ? {
     requestedModel: snap.requestedModel ?? null,
     observedModel: snap.observedModel ?? null,
@@ -283,7 +293,7 @@ const sameModel = (a, b) => a === b || (typeof a === 'string' && typeof b === 's
  * 'openclaw' reads the OpenClaw runtime trajectory (pointer → runtimeFile)
  * under openclawSessionsDir. The two evidence structures are never mixed.
  */
-export function verifyF2ProbeEvidence({ studyDir, evidenceRef, expected, codexHome = null, hostKind = 'codex-cli', openclawSessionsDir = null, openclawTrustedRoot = null, openclawExpectedProvider = null, openclawExpectedModel = null, readOpenClawTrajectory = null }) {
+export function verifyF2ProbeEvidence({ studyDir, evidenceRef, expected, codexHome = null, hostKind = 'codex-cli', openclawSessionsDir = null, openclawTrustedRoot = null, openclawExpectedProvider = null, openclawExpectedModel = null, openclawControlledRoot = null, readOpenClawTrajectory = null }) {
   const reasons = [];
   if (typeof evidenceRef !== 'string' || evidenceRef.length === 0) {
     return { ok: false, reasons: ['F2 authorization realHostProbe.evidenceRef missing'] };
@@ -357,8 +367,47 @@ export function verifyF2ProbeEvidence({ studyDir, evidenceRef, expected, codexHo
         reasons.push(`observed model '${observedModel}' is not the authorized model '${openclawExpectedModel}' (S5.1: envelope/trajectory mutual agreement on an unapproved model still refuses)`);
       }
     }
+    // S5.2 §四: locate each session through the runtime evidence map recorded
+    // at execution time. When the map exists, a session WITHOUT a map entry is
+    // refused (no silent fallback to the global dir — that would let an
+    // untracked session slip through), and every mapped sessionsDir must
+    // realpath-resolve INSIDE the runner-controlled root.
+    const evidenceMap = Array.isArray(record.sessionEvidence) ? record.sessionEvidence : null;
+    if (evidenceMap !== null && typeof openclawControlledRoot !== 'string') {
+      return { ok: false, reasons: ['sessionEvidence present but openclawControlledRoot not provided — self-reported paths cannot be containment-checked (S5.2, fail-closed)'] };
+    }
+    let controlledReal = null;
+    if (evidenceMap !== null) {
+      try {
+        controlledReal = fs.realpathSync(openclawControlledRoot);
+      } catch (e) {
+        return { ok: false, reasons: [`openclawControlledRoot unresolvable: ${e.message}`] };
+      }
+    }
     for (const sessionId of new Set(sessions)) {
-      const evidence = readOpenClawTrajectory({ sessionsDir: openclawSessionsDir, sessionId, trustedRoot: openclawTrustedRoot });
+      let sessionDir = openclawSessionsDir;
+      let sessionTrustedRoot = openclawTrustedRoot;
+      if (evidenceMap !== null) {
+        const mapped = evidenceMap.find((e) => e && e.sessionId === sessionId);
+        if (!mapped || typeof mapped.sessionsDir !== 'string') {
+          reasons.push(`probe session '${sessionId}' has no runtime evidence mapping — sessions without a recorded state location cannot be corroborated (S5.2, fail-closed)`);
+          continue;
+        }
+        let mappedReal = null;
+        try {
+          mappedReal = fs.realpathSync(mapped.sessionsDir);
+        } catch (e) {
+          reasons.push(`probe session '${sessionId}' mapped sessionsDir unresolvable: ${e.message}`);
+          continue;
+        }
+        if (!(mappedReal === controlledReal || mappedReal.startsWith(controlledReal + path.sep))) {
+          reasons.push(`probe session '${sessionId}' mapped sessionsDir '${mapped.sessionsDir}' escapes the controlled root '${openclawControlledRoot}' — self-reported paths are never trusted (S5.2)`);
+          continue;
+        }
+        sessionDir = mapped.sessionsDir;
+        sessionTrustedRoot = mapped.sessionsDir;
+      }
+      const evidence = readOpenClawTrajectory({ sessionsDir: sessionDir, sessionId, trustedRoot: sessionTrustedRoot });
       if (!evidence || evidence.found !== true || evidence.ambiguous) {
         const detail = evidence && typeof evidence.reason === 'string' ? ` (${evidence.reason})` : '';
         reasons.push(`probe session '${sessionId}' is not corroborated by a runtime trajectory under openclawSessionsDir — record fields alone are never authorization evidence${detail}`);

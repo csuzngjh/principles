@@ -125,9 +125,19 @@ export function createOpenClawHostTransport({
     const agentsFile = path.join(roundDir, 'AGENTS.md');
     fs.writeFileSync(messageFile, userPrompt, 'utf8');
     fs.writeFileSync(agentsFile, OPENCLAW_PROBE_AGENTS_HEADER + systemPrompt + '\n', 'utf8');
+    // S5.2 §四: a per-round, caller-owned state dir. Without --state-dir the
+    // CLI creates an mkdtemp state under os.tmpdir() and DELETES it on exit
+    // (agent-exec.ts: temporaryStateDir) — the session trajectory would vanish
+    // with it. With --state-dir the session store, trajectory JSONL and
+    // pointer persist inside our controlled round dir. Config/provider
+    // resolution happens BEFORE the state-dir repoint (agent-exec.ts), so the
+    // approved zai channel and credentials are unaffected.
+    const stateDir = path.join(roundDir, 'state');
+    const sessionsDir = path.join(stateDir, 'agents', agent, 'sessions');
     const args = [
       'agent', 'exec',
       '--isolated',                       // fresh explicit session per exec — probe rounds must not share state
+      '--state-dir', stateDir,            // S5.2: persist the trajectory evidence inside the controlled round dir
       '--model', model,
       '--agent', agent,
       '--cwd', roundDir,                  // S5 P1-3: the round dir IS the workspace for this round
@@ -194,7 +204,7 @@ export function createOpenClawHostTransport({
     if (roundIdentityStatus !== 'VERIFIED') {
       throw new Error(`openclaw exec round ${rounds} identity not VERIFIED (status=${roundIdentityStatus}, envelope model=${JSON.stringify(envelope.model ?? null)}, provider=${JSON.stringify(envelope.provider ?? null)}, expected provider=${JSON.stringify(expectedProvider)}) — refusing (S5 P1-2: provider mismatch is a hard refusal, never normalized)`);
     }
-    sessionRecords.push({ taskId, sessionId: envelope.sessionId, rounds: 1, elapsedMs, model: envelope.model ?? null, provider: envelope.provider ?? null, roundDir, systemPromptChannel: OPENCLAW_SYSTEM_PROMPT_CHANNEL });
+    sessionRecords.push({ taskId, sessionId: envelope.sessionId, rounds: 1, elapsedMs, model: envelope.model ?? null, provider: envelope.provider ?? null, roundDir, stateDir, sessionsDir, systemPromptChannel: OPENCLAW_SYSTEM_PROMPT_CHANNEL });
 
     const payloadText = typeof envelope.final === 'string' && envelope.final.length > 0
       ? envelope.final
@@ -216,6 +226,7 @@ export function createOpenClawHostTransport({
       systemPromptChannel: OPENCLAW_SYSTEM_PROMPT_CHANNEL,
       roundsRoot,
       sessions: sessionRecords.map((s) => s.sessionId),
+      sessionDetails: sessionRecords.map((s) => ({ sessionId: s.sessionId, stateDir: s.stateDir, sessionsDir: s.sessionsDir })),
     };
   }
 
