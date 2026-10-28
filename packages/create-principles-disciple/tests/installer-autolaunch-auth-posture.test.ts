@@ -58,7 +58,6 @@ vi.mock('../src/update/transaction-journal.js', async (importOriginal) => {
 });
 
 const TOKEN = 'tok-pri-1054';
-const BASE_PORT = 3100;
 
 const baseInstallOptions: InstallOptions = {
   language: 'en',
@@ -290,8 +289,9 @@ describe('install() — console auto-launch inherits the authentication posture 
     // The token is inherited from the environment, exactly as `pd console open`
     // resolves it — the installer never passes it as a flag.
     expect(consoleOpenArgs).not.toContain('--token');
-    // Readiness only succeeded because the header was sent.
-    expect(result.consoleUrl).toBe(`http://127.0.0.1:${BASE_PORT}/#/welcome`);
+    // Readiness only succeeded because the header was sent. The port comes from
+    // the console's own range authority, so pin the shape, not a copy of it.
+    expect(result.consoleUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/#\/welcome$/);
     expect(authorizationHeaderCalls(httpModule)).toContain(`Bearer ${TOKEN}`);
   });
 
@@ -319,6 +319,6 @@ describe('install() — console auto-launch inherits the authentication posture 
     expect(result.success).toBe(true);
     expect(consoleOpenArgs).toContain('--no-auth');
     expect(authorizationHeaderCalls(httpModule)).toEqual([]);
-    expect(result.consoleUrl).toBe(`http://127.0.0.1:${BASE_PORT}/#/welcome`);
+    expect(result.consoleUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/#\/welcome$/);
   });
 });
