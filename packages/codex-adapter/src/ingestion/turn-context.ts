@@ -22,6 +22,8 @@
 import fs from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
+import { computeFeatureFlagsFromConfig } from '@principles/core/runtime-v2';
+import { loadPdConfigForPlugin } from '@principles/host-runtime';
 import { resolveCodexHome } from './codex-home.js';
 import { extractFields, isRecord } from './ingestion-fields.js';
 import { recordExplicitOwnerStatement, MAX_OWNER_STATEMENT_CHARS, type RecordOwnerStatementResult } from './explicit-owner-statement.js';
@@ -199,7 +201,7 @@ export type RegisterCurrentTurnResult =
   | RecordOwnerStatementResult
   | {
     status: 'rejected';
-    reason: 'turn_context_missing' | 'turn_context_invalid' | 'turn_context_stale' | 'turn_context_workspace_mismatch' | 'turn_context_session_mismatch' | 'caller_session_missing' | 'caller_session_conflict';
+    reason: 'turn_context_missing' | 'turn_context_invalid' | 'turn_context_stale' | 'turn_context_workspace_mismatch' | 'turn_context_session_mismatch' | 'caller_session_missing' | 'caller_session_conflict' | 'conversation_ingestion_config_invalid';
     nextAction: string;
   };
 
@@ -300,6 +302,15 @@ export async function registerCurrentTurnOwnerStatement(args: {
   if (statement.length > MAX_OWNER_STATEMENT_CHARS) {
     return { status: 'rejected', reason: 'statement_too_long', nextAction: `The Owner statement exceeds ${MAX_OWNER_STATEMENT_CHARS} characters; nothing was recorded. Ask the Owner to condense THEIR words — do not summarize on their behalf.` };
   }
+  const config = loadPdConfigForPlugin(args.workspaceDir);
+  if (!config.ok) {
+    return {
+      status: 'rejected',
+      reason: 'conversation_ingestion_config_invalid',
+      nextAction: 'The workspace .pd/config.yaml could not be validated, so conversation-ingestion consent could not be determined; nothing was recorded. Repair the workspace configuration and retry.',
+    };
+  }
+  const conversationIngestionEnabled = computeFeatureFlagsFromConfig(config.effective).flags.codex_conversation_ingestion?.enabled === true;
   return recordExplicitOwnerStatement({
     rawPayload: {
       session_id: context.sessionId,
@@ -310,5 +321,6 @@ export async function registerCurrentTurnOwnerStatement(args: {
     statementText: statement,
     env: { CODEX_HOME: context.codexHome },
     explicitChannel: 'codex_explicit_agent',
+    conversationIngestionEnabled,
   });
 }

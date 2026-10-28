@@ -169,6 +169,7 @@ export async function runGovernanceAdmission(args: {
       workspaceDir,
       logicalObservationKey: outcome.logicalObservationKey,
       canonicalPainId: outcome.canonicalPainId,
+      conversationIngestionEnabled: true,
     });
     if (!cont.ok) {
       push(cont.reason, cont.nextAction);

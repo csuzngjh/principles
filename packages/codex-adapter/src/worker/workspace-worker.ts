@@ -285,7 +285,10 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
   });
 
   // Step 3 — Slice B idempotent reconciliation (always runs; creates no LLM work).
-  const reconcile = await reconcileGovernanceContinuation({ workspaceDir });
+  const reconcile = await reconcileGovernanceContinuation({
+    workspaceDir,
+    conversationIngestionEnabled: flags.codex_conversation_ingestion?.enabled === true,
+  });
 
   // Steps 4–6 — execution authority: internalization_auto_consumer.
   let diagnostician: CodexWorkerCycleStepReport['diagnostician'] = null;

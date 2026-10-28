@@ -53,14 +53,27 @@ export type RecordOwnerStatementResult =
 
 /**
  * Persist one explicit Owner statement. The consent-gated conversation
- * ingestion flag does NOT gate this path (no conversation tables or transcript
- * CONTENT are read — only the path is validated for the rollout identity),
- * mirroring SPEC §6.4 rule 3.
+ * ingestion flag does NOT gate the REGISTRATION (no conversation tables or
+ * transcript CONTENT are read — only the path is validated for the rollout
+ * identity), mirroring SPEC §6.4 rule 3. It DOES gate evidence promotion:
+ *
+ *   - `conversationIngestionEnabled: true` — the caller MUST have run the
+ *     live observation ingestion for this same hook payload BEFORE calling
+ *     this function: promotion requires the trigger observation
+ *     (`codex|<rollout>|<turn>|user`) to already be persisted, otherwise the
+ *     FIRST submission of a rollout degrades with rollout_not_found /
+ *     trigger_not_found (the observation used to be written only by the
+ *     ingestion pass that ran after the explicit registration).
+ *   - `conversationIngestionEnabled: false` — no session observation exists
+ *     and none may be written (privacy boundary), so promotion is SKIPPED
+ *     and disclosed as `conversation_ingestion_disabled` instead of
+ *     attempting it and misreporting a missing substrate.
  */
 export async function recordExplicitOwnerStatement(args: {
   rawPayload: unknown;
   workspaceDir: string;
   statementText: string;
+  conversationIngestionEnabled: boolean;
   env?: { CODEX_HOME?: string | undefined };
   /**
    * Audit provenance: omitted = the native hook-read `PD记录痛苦：` prefix
@@ -113,9 +126,33 @@ export async function recordExplicitOwnerStatement(args: {
     return { status: 'rejected', reason: 'rate_limited', nextAction: 'The per-root-session correction quota (5/hour) is exhausted; resubmit later — the statement was NOT recorded.' };
   }
 
-  // Task ensure is the receipt's hard guarantee; evidence promotion is
-  // best-effort (SPEC §6.4.5 — a degraded promotion is disclosed, never a
-  // failed receipt: the pain + task are durably recorded).
+  // Promotion runs BEFORE the task enqueue (deliberate): the durable task is
+  // the receipt's hard guarantee, and promoting first closes the window in
+  // which the background worker could start the first diagnosis before the
+  // already-available evidence window is promoted. Both steps are
+  // independently idempotent and recovered by reconcileGovernanceContinuation
+  // (Case A: task missing → created later; Case C: promotion missing →
+  // retried once the trigger observation arrives).
+  let promotionDegraded: string | undefined;
+  if (args.conversationIngestionEnabled) {
+    const promoted = promoteAdmittedGovernanceEvidence({
+      workspaceDir: args.workspaceDir,
+      rolloutIdentity: validated.rolloutIdentity,
+      triggerLogicalKey: candidate.logicalObservationKey,
+      canonicalPainId: outcome.canonicalPainId,
+    });
+    if (!promoted.ok) {
+      promotionDegraded = `${promoted.reason}`.slice(0, 160);
+    }
+  } else {
+    // Ingestion is consent-gated OFF: no session observation was (or may be)
+    // written, so promotion is skipped by design, never attempted-and-failed.
+    promotionDegraded = 'conversation_ingestion_disabled';
+  }
+
+  // Task ensure is the receipt's hard guarantee (SPEC §6.4.5 — a degraded
+  // promotion is disclosed, never a failed receipt: the pain + task are
+  // durably recorded).
   const ensured = await ensureGovernanceDiagnosticianTask({
     workspaceDir: args.workspaceDir,
     logicalObservationKey: candidate.logicalObservationKey,
@@ -123,16 +160,6 @@ export async function recordExplicitOwnerStatement(args: {
   });
   if (!ensured.ok) {
     return { status: 'rejected', reason: 'continuation_failed', nextAction: `${ensured.reason}: ${ensured.nextAction}`.slice(0, 400) };
-  }
-  let promotionDegraded: string | undefined;
-  const promoted = promoteAdmittedGovernanceEvidence({
-    workspaceDir: args.workspaceDir,
-    rolloutIdentity: validated.rolloutIdentity,
-    triggerLogicalKey: candidate.logicalObservationKey,
-    canonicalPainId: outcome.canonicalPainId,
-  });
-  if (!promoted.ok) {
-    promotionDegraded = `${promoted.reason}`.slice(0, 160);
   }
 
   return {
