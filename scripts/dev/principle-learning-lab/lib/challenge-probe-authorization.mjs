@@ -41,6 +41,8 @@ export const PROBE_AUTH_KEYS = [
   'stopConditions',
   'issuedBy', 'issuedAt',
   'blockage',               // structured record while NOT_ISSUED (reason / pending decision / unblockCondition)
+  'revokedAt',              // S7 §七: strict-ISO instant when the authorization was revoked (empty while active)
+  'revokedReason',          // S7 §七: why the authorization was revoked (empty while active)
 ];
 
 function readJson(file) {
@@ -62,6 +64,14 @@ export function verifyProbeAuthorization({ record, studyDir, now, transportFacto
   }
   if (record.probeId !== PROBE_AUTH_PROBE_ID) reasons.push(`probeId must be '${PROBE_AUTH_PROBE_ID}'`);
   if (!PROBE_AUTH_STATUSES.includes(record.status)) reasons.push(`status must be one of ${PROBE_AUTH_STATUSES.join('|')}`);
+  // S7 §七: a revoked/halted authorization must carry its revocation facts;
+  // an active one must not claim them (empty strings while active).
+  if (record.status === 'REVOKED' || record.status === 'HALTED') {
+    if (typeof record.revokedAt !== 'string' || parseIso(record.revokedAt) === null) reasons.push('revokedAt must be a strict ISO-8601 timestamp when REVOKED/HALTED');
+    if (typeof record.revokedReason !== 'string' || record.revokedReason.length === 0) reasons.push('revokedReason must be non-empty when REVOKED/HALTED');
+  } else if (typeof record.revokedAt === 'string' && record.revokedAt.length > 0) {
+    reasons.push('revokedAt must stay empty unless the authorization is REVOKED/HALTED');
+  }
   if (reasons.length > 0) return { ok: false, reasons };
   if (record.status !== 'APPROVED') {
     const why = record.blockage && typeof record.blockage.reason === 'string' ? ` — ${record.blockage.reason}` : '';

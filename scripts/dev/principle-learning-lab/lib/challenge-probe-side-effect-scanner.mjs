@@ -53,12 +53,13 @@ export function createProbeSideEffectScanner({ scratchRoot, roundsRoot, copyDir,
       }
     }
     const walk = (dir, fn) => { for (const f of fs.readdirSync(dir, { withFileTypes: true })) { const p = path.join(dir, f.name); if (f.isDirectory()) walk(p, fn); else fn(p); } };
+    const productionWriteSamples = [];
     for (const pdRoot of productionRoots) {
       if (!fs.existsSync(pdRoot)) continue;
-      walk(pdRoot, (p) => { const st = fs.statSync(p); if (st.mtimeMs >= windowStart) productionWrites += 1; });
+      walk(pdRoot, (p) => { const st = fs.statSync(p); if (st.mtimeMs >= windowStart) { productionWrites += 1; if (productionWriteSamples.length < 8) productionWriteSamples.push({ path: p, mtime: new Date(st.mtimeMs).toISOString() }); } });
     }
     walk(workRoot, (p) => { const st = fs.statSync(p); if (st.mtimeMs >= windowStart && !p.startsWith(scratchRoot) && !p.startsWith(copyDir) && !p.startsWith(roundsRoot)) externalSideEffects += 1; });
     const clean = unauthorizedExtraWrites === 0 && crossGroupLeakage === 0 && productionWrites === 0 && externalSideEffects === 0;
-    return { clean, crossGroupLeakage, productionWrites, externalSideEffects, unauthorizedExtraWrites, runtimeStateFiles, extraSamples, controlledPathsScanned: [scratchRoot, roundsRoot], roundDirAllowlist: [...ROUND_DIR_ALLOWLIST].sort(), scopeNote: 'scratch+rounds(incl. state) gold-hex scan + round-dir allowlist + state file audit count + PD roots mtime window + workdir non-controlled writes; not a whole-disk claim', ...(clean ? {} : { nonCleanReason: 'a side effect could not be proven zero during the probe window' }) };
+    return { clean, crossGroupLeakage, productionWrites, productionWriteSamples, externalSideEffects, unauthorizedExtraWrites, runtimeStateFiles, extraSamples, controlledPathsScanned: [scratchRoot, roundsRoot], roundDirAllowlist: [...ROUND_DIR_ALLOWLIST].sort(), scopeNote: 'scratch+rounds(incl. state) gold-hex scan + round-dir allowlist + state file audit count + PD roots mtime window + workdir non-controlled writes; not a whole-disk claim', ...(clean ? {} : { nonCleanReason: 'a side effect could not be proven zero during the probe window' }) };
   };
 }
