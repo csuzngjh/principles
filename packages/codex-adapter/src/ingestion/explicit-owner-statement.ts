@@ -73,8 +73,8 @@ export async function recordExplicitOwnerStatement(args: {
   rawPayload: unknown;
   workspaceDir: string;
   statementText: string;
-  conversationIngestionEnabled: boolean;
   env?: { CODEX_HOME?: string | undefined };
+  conversationIngestionEnabled: boolean;
   /**
    * Audit provenance: omitted = the native hook-read `PD记录痛苦：` prefix
    * entry; 'codex_explicit_agent' = the agent-assisted no-prefix bridge
