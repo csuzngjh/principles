@@ -10,9 +10,11 @@
     "graderHash": "eef38484c4f8ace059c178fcb0697c68154277073b7ab7a9d8c0e608ae383e79"
   },
   "targetHost": {
-    "kind": "codex-cli",
-    "codexHome": "C:/Users/Administrator/.codex",
-    "requestedModelIdentity": "PENDING-OWNER-DECISION"
+    "kind": "openclaw",
+    "openclawHome": "C:/Users/Administrator/.openclaw",
+    "openclawAgent": "main",
+    "openclawWorkspace": "D:/.openclaw/workspace",
+    "requestedModelIdentity": "zai/glm-5.3-flash"
   },
   "caps": { "probeRounds": 5, "timeoutMsPerCall": 180000 },
   "validFrom": "2026-10-28T00:00:00Z",
@@ -23,11 +25,11 @@
     "副作用扫描任一项非零",
     "授权窗口关闭/撤销/停止"
   ],
-  "issuedBy": "owner-s2-d3",
-  "issuedAt": "2026-10-28T02:20:00Z",
+  "issuedBy": "owner-s4",
+  "issuedAt": "2026-10-28T03:30:00Z",
   "blockage": {
-    "reason": "目标宿主（本机 Codex CLI 0.165.0，host-actor.mjs 权威适配器）当前仅配置 OpenAI provider（config.toml model=gpt-6-astra；rollout 佐证 model_provider=openai；无任何 bigmodel/智谱 profile）。Owner S2-D1 明令：禁止 OpenAI 模型或未经批准的付费通道；若宿主不支持已批准配置（智谱 GLM-5.3-Flash / AMD TokenFactory）不得擅自换供应商，应报告阻塞。故真实探针轮在本记录 NOT_ISSUED 期间被 fail-closed 拒绝执行。",
-    "pendingDecision": "Owner 需在以下选项中裁定其一：A）为本 Codex CLI 配置智谱 bigmodel provider（换供应商=Owner 决策）并声明 requestedModelIdentity；B）指定其他已批准通道可用的真实宿主；C）明确豁免本探针轮的模型限制（不建议，违反 S2-D1 原意）。",
-    "unblockCondition": "Owner 裁定后：更新本记录 targetHost.requestedModelIdentity 与状态为 APPROVED（附有效窗口），由 run-isolation-probe.mjs 执行真实轮；探针证据经 verifyF2ProbeEvidence 深验后方可签发独立 F2 授权（PRI-1038）。"
+    "reason": "S4 宿主切换（Owner 2026-10-28 指令）：首选真实宿主由 Codex CLI 调整为 OpenClaw（2026.10.5，本机已装；zai provider 已配置 glm-5.3-flash=bigmodel coding paas/v4 与 F1 已验证通道同一；owner 已确认配置）。兼容性核验完成：`openclaw agent exec --isolated --json` 每次执行新建显式会话（CLI 自生成 sessionId），JSON envelope 自报 model/provider，运行时轨迹（openclaw-trajectory-pointer→jsonl，逐行 provider/modelId）为佐证源。当前 NOT_ISSUED 的剩余前置=S4-E「新代码通过必需评审和 CI」（宿主迁移 PR：OpenClaw 适配器+授权 kind 扩展+证据分派）。",
+    "pendingDecision": "Owner 对宿主迁移 PR 的评审通过即满足 S4-E 前置；随后本记录由 Owner 或经 Owner 指示翻为 APPROVED（附有效窗口）。",
+    "unblockCondition": "①宿主迁移 PR 评审通过并入 main；②本记录翻 APPROVED+有效窗口；③`run-isolation-probe.mjs --study CEB-001` 执行真实探针轮（openclaw 路径）；④verifyF2ProbeEvidence 深验（openclaw trajectory 佐证）通过；⑤独立 F2 授权签发（PRI-1038）。Codex 路线（S3 #2204）保留为备选，不在本记录范围。"
   }
 }

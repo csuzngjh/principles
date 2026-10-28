@@ -17,7 +17,16 @@ import { parseIso, readStudyPlanHash } from './challenge-stage-r-gate.mjs';
 export const PROBE_AUTH_SCHEMA = 'challenge-isolation-probe-authorization.v1';
 export const PROBE_AUTH_PROBE_ID = 'PRI-1037';
 export const PROBE_AUTH_STATUSES = ['NOT_ISSUED', 'APPROVED', 'HALTED', 'REVOKED'];
-export const PROBE_AUTH_TARGET_KINDS = ['codex-cli'];
+export const PROBE_AUTH_TARGET_KINDS = ['codex-cli', 'openclaw'];
+// The ONE Owner-approved model channel per host kind (Owner S3/S4, 2026-10-28):
+// codex-cli → per-spawn Zhipu override (S3 route A, PR #2204); openclaw → the
+// zai provider already configured in the owner's OpenClaw runtime (bigmodel
+// coding endpoint, same F1-proven channel). OpenAI models are forbidden.
+export const PROBE_AUTH_ALLOWED_MODELS = {
+  'codex-cli': ['glm-5.3-flash'],
+  openclaw: ['zai/glm-5.3-flash'],
+};
+export const PROBE_AUTH_HOME_FIELD = { 'codex-cli': 'codexHome', openclaw: 'openclawHome' };
 export const PROBE_AUTH_KEYS = [
   'schema', 'probeId', 'status', 'studyId',
   'frozenHashes',           // { suiteHash, studyPlanHash, mappingHash, graderHash } — must equal the study on disk
@@ -77,11 +86,19 @@ export function verifyProbeAuthorization({ record, studyDir, now, transportFacto
   if (planHash !== null && String(hashes.studyPlanHash) !== String(planHash)) reasons.push(`studyPlanHash binding mismatch (record '${String(hashes.studyPlanHash)}' vs study '${String(planHash)}')`);
   if (reasons.length > 0) return { ok: false, reasons };
 
-  // host/model identity + caps sanity
+  // host/model identity + caps sanity (kind-specific channel + home field)
   const host = record.targetHost || {};
   if (!PROBE_AUTH_TARGET_KINDS.includes(host.kind)) reasons.push(`targetHost.kind must be one of ${PROBE_AUTH_TARGET_KINDS.join('|')}`);
-  if (typeof host.codexHome !== 'string' || host.codexHome.length === 0) reasons.push('targetHost.codexHome must be a non-empty path (rollout corroboration requires it)');
-  if (typeof host.requestedModelIdentity !== 'string' || host.requestedModelIdentity.length === 0) reasons.push('targetHost.requestedModelIdentity must be declared (host identity is verified, not assumed)');
+  const allowed = PROBE_AUTH_ALLOWED_MODELS[host.kind];
+  if (allowed && host.requestedModelIdentity !== allowed[0]) {
+    reasons.push(`targetHost.requestedModelIdentity must be '${allowed[0]}' for kind '${host.kind}' (the single Owner-approved channel; any other identity requires a new Owner decision)`);
+  } else if (!allowed && (typeof host.requestedModelIdentity !== 'string' || host.requestedModelIdentity.length === 0)) {
+    reasons.push('targetHost.requestedModelIdentity must be declared (host identity is verified, not assumed)');
+  }
+  const homeField = PROBE_AUTH_HOME_FIELD[host.kind];
+  if (homeField && (typeof host[homeField] !== 'string' || host[homeField].length === 0)) {
+    reasons.push(`targetHost.${homeField} must be a non-empty path (evidence corroboration requires it)`);
+  }
   const caps = record.caps || {};
   if (!Number.isInteger(caps.probeRounds) || caps.probeRounds < 1 || caps.probeRounds > 12) reasons.push('caps.probeRounds must be an integer in [1,12] (the adversarial round set is 5)');
   if (!Number.isFinite(caps.timeoutMsPerCall) || caps.timeoutMsPerCall < 15_000 || caps.timeoutMsPerCall > 600_000) reasons.push('caps.timeoutMsPerCall must be in [15000,600000] ms');

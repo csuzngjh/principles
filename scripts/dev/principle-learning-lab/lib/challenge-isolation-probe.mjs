@@ -273,10 +273,15 @@ const sameModel = (a, b) => a === b || (typeof a === 'string' && typeof b === 's
  * Fail-closed on every dimension: missing file, unreadable/corrupt JSON,
  * wrong schema/probe id, OFFLINE-REHEARSAL marker (can never authorize F2),
  * non-PASSED overall or any non-PASSED check, study/suite binding mismatch,
- * malformed executedAt, missing codexHome, or any recorded session not
- * corroborated by the host's own rollout files. Returns { ok, reasons }.
+ * malformed executedAt, missing host home, or any recorded session not
+ * corroborated by the host's own evidence files. Returns { ok, reasons }.
+ *
+ * Host dispatch (Owner S4): `hostKind` selects the evidence reader —
+ * 'codex-cli' (default) reads codex rollouts under codexHome;
+ * 'openclaw' reads the OpenClaw runtime trajectory (pointer → runtimeFile)
+ * under openclawSessionsDir. The two evidence structures are never mixed.
  */
-export function verifyF2ProbeEvidence({ studyDir, evidenceRef, expected, codexHome = null }) {
+export function verifyF2ProbeEvidence({ studyDir, evidenceRef, expected, codexHome = null, hostKind = 'codex-cli', openclawSessionsDir = null, readOpenClawTrajectory = null }) {
   const reasons = [];
   if (typeof evidenceRef !== 'string' || evidenceRef.length === 0) {
     return { ok: false, reasons: ['F2 authorization realHostProbe.evidenceRef missing'] };
@@ -320,14 +325,38 @@ export function verifyF2ProbeEvidence({ studyDir, evidenceRef, expected, codexHo
   }
   if (reasons.length > 0) return { ok: false, reasons };
 
-  if (typeof codexHome !== 'string' || codexHome.length === 0) {
-    return { ok: false, reasons: ['codexHome not provided — probe sessions cannot be corroborated against the host\'s own rollouts, so F2 stays refused (fail-closed)'] };
-  }
   const sessions = Array.isArray(record.sessions) ? record.sessions.filter((s) => typeof s === 'string' && s.length > 0) : [];
   if (sessions.length === 0) {
     return { ok: false, reasons: ['probe evidence records no host sessions — corroboration impossible'] };
   }
   const observed = record.hostSnapshotAudit && record.hostSnapshotAudit.observedModel;
+  if (hostKind === 'openclaw') {
+    if (typeof openclawSessionsDir !== 'string' || openclawSessionsDir.length === 0) {
+      return { ok: false, reasons: ['openclawSessionsDir not provided — probe sessions cannot be corroborated against the runtime trajectory, so F2 stays refused (fail-closed)'] };
+    }
+    if (typeof readOpenClawTrajectory !== 'function') {
+      return { ok: false, reasons: ['no OpenClaw trajectory reader injected — corroboration impossible (fail-closed)'] };
+    }
+    for (const sessionId of new Set(sessions)) {
+      const evidence = readOpenClawTrajectory({ sessionsDir: openclawSessionsDir, sessionId });
+      if (!evidence || evidence.found !== true || evidence.ambiguous) {
+        reasons.push(`probe session '${sessionId}' is not corroborated by a runtime trajectory under openclawSessionsDir — record fields alone are never authorization evidence`);
+        continue;
+      }
+      if (typeof evidence.model !== 'string' || evidence.model.length === 0) {
+        reasons.push(`trajectory for probe session '${sessionId}' carries no model identity — cannot corroborate`);
+      } else if (typeof observed === 'string' && observed.length > 0 && !sameModel(evidence.model, observed)) {
+        reasons.push(`trajectory for probe session '${sessionId}' reports model '${evidence.model}' which conflicts with the probe's observed identity '${observed}'`);
+      }
+    }
+    return { ok: reasons.length === 0, reasons };
+  }
+  if (hostKind !== 'codex-cli') {
+    return { ok: false, reasons: [`unknown hostKind '${String(hostKind)}' — evidence dispatch is closed (codex-cli | openclaw)`] };
+  }
+  if (typeof codexHome !== 'string' || codexHome.length === 0) {
+    return { ok: false, reasons: ['codexHome not provided — probe sessions cannot be corroborated against the host\'s own rollouts, so F2 stays refused (fail-closed)'] };
+  }
   for (const sessionId of new Set(sessions)) {
     const evidence = readRolloutEvidenceForSession({ codexHome, sessionId });
     if (!evidence || evidence.found !== true || evidence.ambiguous) {

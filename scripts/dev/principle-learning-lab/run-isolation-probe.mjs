@@ -70,18 +70,56 @@ const scanner = () => {
   return { crossGroupLeakage, productionWrites, externalSideEffects, scopeNote: 'scratch-root hex scan + PD roots mtime window + workdir non-scratch writes; not a whole-disk claim' };
 };
 
-const transport = createCodexHostTransport({
-  model: record.targetHost.requestedModelIdentity,
-  scratchRoot,
-  codexHome: record.targetHost.codexHome,
-  timeoutMsPerCall: record.caps.timeoutMsPerCall,
-  threadSource: 'pri-1037-probe',
-  rolloutReadback: true,
-});
+// ---- host dispatch (Owner S4): the authorization's targetHost.kind selects
+// the adapter; both paths share the { complete, hostSnapshot } contract the
+// probe engine consumes, and both evidence readers enforce runtime-corroboration.
+let transport = null;
+let evidenceDispatch = null;
+if (record.targetHost.kind === 'openclaw') {
+  const { createOpenClawHostTransport, readOpenClawTrajectoryEvidence } = await import('./lib/challenge-openclaw-host.mjs');
+  const workspaceDir = record.targetHost.openclawWorkspace || path.join(record.targetHost.openclawHome, 'workspace');
+  transport = createOpenClawHostTransport({
+    model: record.targetHost.requestedModelIdentity,
+    workspaceDir,
+    timeoutMsPerCall: record.caps.timeoutMsPerCall,
+  });
+  const sessionsDir = path.join(record.targetHost.openclawHome, 'agents', record.targetHost.openclawAgent || 'main', 'sessions');
+  evidenceDispatch = { hostKind: 'openclaw', openclawSessionsDir: sessionsDir, readOpenClawTrajectory: readOpenClawTrajectoryEvidence };
+} else {
+  // codex-cli route: the Zhipu per-spawn adapter lives on the RESERVED #2204
+  // branch (S4-C: kept, not merged). If absent here, refuse loudly — never a
+  // silent fallback to the OpenAI-default host model.
+  let zhipu = null;
+  try {
+    zhipu = await import('./lib/challenge-zhipu-host-provider.mjs');
+  } catch {
+    zhipu = null;
+  }
+  if (!zhipu || record.targetHost.provider !== 'zhipu-coding') {
+    console.log(JSON.stringify({ ok: false, stage: 'provider', reasons: [`kind 'codex-cli' requires the Zhipu per-spawn adapter (reserved branch #2204) and provider 'zhipu-coding'; got '${String(record.targetHost.provider)}'`] }, null, 2));
+    process.exit(1);
+  }
+  const providerReady = zhipu.ensureZhipuProviderReady();
+  if (!providerReady.ready) {
+    console.log(JSON.stringify({ ok: false, stage: 'provider-credential', reasons: [providerReady.reason], transportFactoryCalls }, null, 2));
+    process.exit(1);
+  }
+  console.log(JSON.stringify({ stage: 'provider', provider: 'zhipu-coding', credentialSource: providerReady.source }, null, 2));
+  transport = createCodexHostTransport({
+    model: record.targetHost.requestedModelIdentity,
+    scratchRoot,
+    codexHome: record.targetHost.codexHome,
+    timeoutMsPerCall: record.caps.timeoutMsPerCall,
+    threadSource: 'pri-1037-probe',
+    rolloutReadback: true,
+    extraArgs: zhipu.buildZhipuCodexOverrides(),
+  });
+  evidenceDispatch = { hostKind: 'codex-cli', codexHome: record.targetHost.codexHome };
+}
 transportFactoryCalls += 1;
 
 const probeRecord = await runIsolationProbe({ studyDir: copyDir, hostTransport: transport, mode: 'real-host', now: Date.now(), sideEffectScanner: scanner });
 const evidenceRef = saveProbeEvidence(copyDir, probeRecord);
-const deep = verifyF2ProbeEvidence({ studyDir: copyDir, evidenceRef, expected: { studyId, suiteHash: record.frozenHashes.suiteHash }, codexHome: record.targetHost.codexHome });
+const deep = verifyF2ProbeEvidence({ studyDir: copyDir, evidenceRef, expected: { studyId, suiteHash: record.frozenHashes.suiteHash }, ...evidenceDispatch });
 console.log(JSON.stringify({ ok: deep.ok && probeRecord.status === 'PASSED', probeStatus: probeRecord.status, evidenceRef, deepVerification: deep, workRoot }, null, 2));
 process.exit(deep.ok && probeRecord.status === 'PASSED' ? 0 : 1);

@@ -13,7 +13,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { verifyProbeAuthorization, PROBE_AUTH_KEYS } from '../dev/principle-learning-lab/lib/challenge-probe-authorization.mjs';
+import { verifyProbeAuthorization, PROBE_AUTH_KEYS, PROBE_AUTH_TARGET_KINDS, PROBE_AUTH_ALLOWED_MODELS } from '../dev/principle-learning-lab/lib/challenge-probe-authorization.mjs';
+import { createOpenClawHostTransport, readOpenClawTrajectoryEvidence } from '../dev/principle-learning-lab/lib/challenge-openclaw-host.mjs';
+import { verifyF2ProbeEvidence } from '../dev/principle-learning-lab/lib/challenge-isolation-probe.mjs';
 
 const labRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../dev/principle-learning-lab');
 const ceb001 = path.join(labRoot, 'challenge-studies', 'CEB-001');
@@ -23,7 +25,7 @@ const T0 = Date.parse('2026-10-28T03:00:00Z');
 const approvedOver = (over = {}) => JSON.parse(JSON.stringify({
   ...committed,
   status: 'APPROVED',
-  targetHost: { ...committed.targetHost, requestedModelIdentity: 'zhipu/glm-5.3-flash' },
+  targetHost: { ...committed.targetHost, requestedModelIdentity: PROBE_AUTH_ALLOWED_MODELS[over.kind ?? committed.targetHost.kind]?.[0] ?? committed.targetHost.requestedModelIdentity },
   validFrom: '2026-10-28T00:00:00Z',
   validUntil: '2026-10-29T00:00:00Z',
   blockage: undefined,
@@ -40,11 +42,11 @@ function withExactKeys(rec) {
 }
 
 describe('probe authorization gate (fail-closed, PRI-1037 / S2-D3)', () => {
-  it('refuses the committed NOT_ISSUED record and carries the host-provider blockage verbatim', () => {
+  it('refuses the committed NOT_ISSUED record and carries the host-switch blockage verbatim', () => {
     const v = verifyProbeAuthorization({ record: committed, studyDir: ceb001, now: T0, transportFactoryCalls: 0 });
     expect(v.ok).toBe(false);
     expect(v.reasons.some((r) => r.includes("status is 'NOT_ISSUED'"))).toBe(true);
-    expect(v.reasons.some((r) => r.includes('OpenAI'))).toBe(true); // the recorded blockage reason must surface
+    expect(v.reasons.some((r) => r.includes('OpenClaw'))).toBe(true); // the recorded blockage reason must surface
   });
 
   it('accepts an APPROVED record only with exact closed key set, live window, and recomputed frozen binding', () => {
@@ -85,14 +87,174 @@ describe('probe authorization gate (fail-closed, PRI-1037 / S2-D3)', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it('PIN: the committed record stays NOT_ISSUED with a structured blockage until the Owner decision lands', () => {
+  it('PIN: the committed record stays NOT_ISSUED with a structured blockage until the Owner review lands', () => {
     expect(committed.status).toBe('NOT_ISSUED');
     expect(committed.blockage.pendingDecision).toContain('Owner');
-    expect(committed.targetHost.requestedModelIdentity).toBe('PENDING-OWNER-DECISION');
+    expect(committed.targetHost.kind).toBe('openclaw'); // S4 host switch, pinned
+    expect(committed.targetHost.requestedModelIdentity).toBe('zai/glm-5.3-flash');
     // the frozen binding it will enforce must equal the live study
     const manifest = JSON.parse(fs.readFileSync(path.join(ceb001, 'suite-manifest.json'), 'utf8'));
     expect(committed.frozenHashes.suiteHash).toBe(manifest.suiteHash);
     expect(committed.frozenHashes.mappingHash).toBe(manifest.mappingHash);
     expect(committed.frozenHashes.graderHash).toBe(manifest.graderHash);
+  });
+
+  it('gate: kind is a closed enum and each kind allows exactly one Owner-approved model channel', () => {
+    expect(PROBE_AUTH_TARGET_KINDS).toEqual(['codex-cli', 'openclaw']);
+    expect(PROBE_AUTH_ALLOWED_MODELS.openclaw).toEqual(['zai/glm-5.3-flash']);
+    expect(PROBE_AUTH_ALLOWED_MODELS['codex-cli']).toEqual(['glm-5.3-flash']);
+    // wrong-model refusals, per kind
+    const badOpenclawModel = withExactKeys(approvedOver({ targetHost: { ...committed.targetHost, requestedModelIdentity: 'openai/gpt-5.6-sol' } }));
+    const v1 = verifyProbeAuthorization({ record: badOpenclawModel, studyDir: ceb001, now: T0 });
+    expect(v1.ok).toBe(false);
+    expect(v1.reasons.some((r) => r.includes('requestedModelIdentity must be'))).toBe(true);
+    const badCodex = withExactKeys(approvedOver({ kind: 'codex-cli', targetHost: { kind: 'codex-cli', codexHome: 'C:/x', provider: 'zhipu-coding', requestedModelIdentity: 'openai/gpt-5.6-sol' } }));
+    const v2 = verifyProbeAuthorization({ record: badCodex, studyDir: ceb001, now: T0 });
+    expect(v2.ok).toBe(false);
+    // unknown kind refused outright
+    const unknownKind = withExactKeys(approvedOver({ targetHost: { ...committed.targetHost, kind: 'workbuddy' } }));
+    const v3 = verifyProbeAuthorization({ record: unknownKind, studyDir: ceb001, now: T0 });
+    expect(v3.ok).toBe(false);
+    expect(v3.reasons.some((r) => r.includes('targetHost.kind must be one of'))).toBe(true);
+  });
+
+  it('gate: the kind-specific home path is mandatory (openclawHome / codexHome)', () => {
+    const noHome = withExactKeys(approvedOver({ targetHost: { ...committed.targetHost, openclawHome: '' } }));
+    const v = verifyProbeAuthorization({ record: noHome, studyDir: ceb001, now: T0 });
+    expect(v.ok).toBe(false);
+    expect(v.reasons.some((r) => r.includes('targetHost.openclawHome must be a non-empty path'))).toBe(true);
+  });
+});
+
+describe('OpenClaw host adapter contract (offline; injected spawn, zero real calls)', () => {
+  const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-host-'));
+  const envelopeFor = (sessionId: string, model: string) => JSON.stringify({ ok: true, status: 'ok', final: '{"executed":false,"refusalReason":"probe must refuse"}', payloads: [], usage: { totalTokens: 10 }, costUsd: 0, model, provider: 'zai', sessionId });
+
+  function fakeSpawn(stdout: string, code = 0) {
+    return ((bin: string, args: string[]) => {
+      const { EventEmitter } = require('node:events');
+      const child: any = new EventEmitter();
+      child.stdout = new EventEmitter(); child.stderr = new EventEmitter();
+      (child as any).kill = () => true;
+      process.nextTick(() => {
+        child.stdout.emit('data', Buffer.from(stdout));
+        child.emit('close', code);
+      });
+      return child;
+    }) as any;
+  }
+
+  it('refuses transport creation when the openclaw binary is missing (fail-closed local probe)', () => {
+    expect(() => createOpenClawHostTransport({ model: 'zai/glm-5.3-flash', workspaceDir: os.tmpdir(), versionProbe: () => ({ error: new Error('enoent'), status: null }) })).toThrow(/openclaw CLI probe failed/);
+  });
+
+  it('drives `agent exec --isolated --json --message-file`, extracts the fresh sessionId, and verifies identity from the envelope', async () => {
+    const dir = tmp();
+    let capturedArgs: string[] | null = null;
+    const transport = createOpenClawHostTransport({
+      model: 'zai/glm-5.3-flash', workspaceDir: dir,
+      versionProbe: () => ({ stdout: 'OpenClaw 2026.10.5 (1b58cb9)', status: 0 }),
+      spawnProcess: (bin: string, args: string[]) => { capturedArgs = args; return fakeSpawn(envelopeFor('sess-1', 'glm-5.3-flash'))(bin, args); },
+    });
+    const r = await transport.complete({ taskId: 't1', systemPrompt: 'S', userPrompt: 'U' });
+    expect(capturedArgs!.slice(0, 3)).toEqual(['agent', 'exec', '--isolated']);
+    expect(capturedArgs).toContain('--json');
+    expect(capturedArgs).toContain('zai/glm-5.3-flash');
+    expect(r.hostRound.sessionId).toBe('sess-1');
+    expect(JSON.parse(r.payload).executed).toBe(false);
+    const snap = transport.hostSnapshot();
+    expect(snap.identityStatus).toBe('VERIFIED');
+    expect(snap.observedModel).toBe('glm-5.3-flash'); // suffix-matched against the requested id
+    expect(snap.hostKind).toBe('openclaw');
+  });
+
+  it('marks MODEL_IDENTITY_MISMATCH (not papered over) and refuses envelopes without a sessionId', async () => {
+    const dir = tmp();
+    const transport = createOpenClawHostTransport({
+      model: 'zai/glm-5.3-flash', workspaceDir: dir,
+      versionProbe: () => ({ stdout: 'v', status: 0 }),
+      spawnProcess: fakeSpawn(envelopeFor('sess-2', 'gpt-6-luna')),
+    });
+    await transport.complete({ taskId: 't2', systemPrompt: 'S', userPrompt: 'U' });
+    expect(transport.hostSnapshot().identityStatus).toBe('MODEL_IDENTITY_MISMATCH');
+
+    const noSession = createOpenClawHostTransport({
+      model: 'zai/glm-5.3-flash', workspaceDir: dir,
+      versionProbe: () => ({ stdout: 'v', status: 0 }),
+      spawnProcess: fakeSpawn(JSON.stringify({ ok: true, status: 'ok', final: 'x', payloads: [], model: 'glm-5.3-flash', provider: 'zai', sessionId: '' })),
+    });
+    await expect(noSession.complete({ taskId: 't3', systemPrompt: 'S', userPrompt: 'U' })).rejects.toThrow(/carries no sessionId/);
+  });
+
+  it('evidence reader: corroborates via trajectory-pointer → runtime file; refuses missing/unschemaed pointers', () => {
+    const dir = tmp();
+    const sessionsDir = path.join(dir, 'sessions');
+    fs.mkdirSync(sessionsDir, { recursive: true });
+    const traj = path.join(dir, 'runtime.trajectory.jsonl');
+    fs.writeFileSync(traj, JSON.stringify({ traceSchema: 'openclaw-trajectory', type: 'session.started', sessionId: 'sess-9', provider: 'zai', modelId: 'glm-5.3-flash', workspaceDir: dir, ts: '2026-10-28T03:00:00.000Z' }) + '\n');
+    fs.writeFileSync(path.join(sessionsDir, 'sess-9.trajectory-path.json'), JSON.stringify({ traceSchema: 'openclaw-trajectory-pointer', schemaVersion: 1, sessionId: 'sess-9', runtimeFile: traj }));
+    const ev = readOpenClawTrajectoryEvidence({ sessionsDir, sessionId: 'sess-9' });
+    expect(ev.found).toBe(true);
+    expect(ev.model).toBe('glm-5.3-flash');
+    expect(ev.provider).toBe('zai');
+    expect(readOpenClawTrajectoryEvidence({ sessionsDir, sessionId: 'sess-404' }).found).toBe(false);
+    // wrong session inside the pointer → refused (id-exact resolution)
+    fs.writeFileSync(path.join(sessionsDir, 'sess-8.trajectory-path.json'), JSON.stringify({ traceSchema: 'openclaw-trajectory-pointer', schemaVersion: 1, sessionId: 'sess-OTHER', runtimeFile: traj }));
+    expect(readOpenClawTrajectoryEvidence({ sessionsDir, sessionId: 'sess-8' }).found).toBe(false);
+  });
+});
+
+describe('verifyF2ProbeEvidence openclaw dispatch (S4-B3 evidence contract)', () => {
+  const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'f2-probe-ev-'));
+
+  function buildStudy(dir: string, sessionIds: string[], observed: string) {
+    fs.cpSync(ceb001, dir, { recursive: true });
+    const record = {
+      schema: 'challenge-isolation-probe.v1', probeId: 'PRI-1037', executedIn: 'real-host',
+      studyId: 'CEB-001', suiteHash: JSON.parse(fs.readFileSync(path.join(ceb001, 'suite-manifest.json'), 'utf8')).suiteHash,
+      executedAt: '2026-10-28T03:00:00.000Z',
+      checks: ['hidden-gold-unreadable','scoring-rules-unreadable','cross-arm-isolation','non-experiment-tool-refusal','unauthorized-network-refusal','session-independence','host-identity-attested','effective-config-recorded','post-run-side-effect-scan'].map((id) => ({ id, status: 'PASSED' })),
+      sessions: sessionIds,
+      hostSnapshotAudit: { requestedModel: 'zai/glm-5.3-flash', observedModel: observed, identityStatus: 'VERIFIED', identityEvidenceSource: 'test' },
+      status: 'PASSED',
+    };
+    fs.mkdirSync(path.join(dir, 'isolation-probes'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'isolation-probes', 'PRI-1037.json'), JSON.stringify(record, null, 2));
+    return 'isolation-probes/PRI-1037.json';
+  }
+
+  it('corroborates sessions via the runtime trajectory (openclaw flavor, structures never mixed)', () => {
+    const dir = tmp();
+    const sessionsDir = path.join(dir, 'oc-sessions');
+    fs.mkdirSync(sessionsDir, { recursive: true });
+    const traj = path.join(dir, 't.jsonl');
+    fs.writeFileSync(traj, JSON.stringify({ traceSchema: 'openclaw-trajectory', type: 'session.started', sessionId: 's1', provider: 'zai', modelId: 'glm-5.3-flash' }) + '\n');
+    fs.writeFileSync(path.join(sessionsDir, 's1.trajectory-path.json'), JSON.stringify({ traceSchema: 'openclaw-trajectory-pointer', schemaVersion: 1, sessionId: 's1', runtimeFile: traj }));
+    const ref = buildStudy(dir, ['s1'], 'glm-5.3-flash');
+    const v = verifyF2ProbeEvidence({ studyDir: dir, evidenceRef: ref, expected: { studyId: 'CEB-001', suiteHash: JSON.parse(fs.readFileSync(path.join(ceb001, 'suite-manifest.json'), 'utf8')).suiteHash }, hostKind: 'openclaw', openclawSessionsDir: sessionsDir, readOpenClawTrajectory: readOpenClawTrajectoryEvidence });
+    expect(v.ok).toBe(true);
+  });
+
+  it('refuses when the trajectory model conflicts with the observed identity, the session is missing, the home is absent, or the kind is unknown', () => {
+    const dir = tmp();
+    const sessionsDir = path.join(dir, 'oc-sessions');
+    fs.mkdirSync(sessionsDir, { recursive: true });
+    const traj = path.join(dir, 't.jsonl');
+    fs.writeFileSync(traj, JSON.stringify({ traceSchema: 'openclaw-trajectory', type: 'session.started', sessionId: 's1', provider: 'zai', modelId: 'gpt-6-luna' }) + '\n');
+    fs.writeFileSync(path.join(sessionsDir, 's1.trajectory-path.json'), JSON.stringify({ traceSchema: 'openclaw-trajectory-pointer', schemaVersion: 1, sessionId: 's1', runtimeFile: traj }));
+    const ref = buildStudy(dir, ['s1'], 'glm-5.3-flash');
+    const v1 = verifyF2ProbeEvidence({ studyDir: dir, evidenceRef: ref, expected: { studyId: 'CEB-001', suiteHash: JSON.parse(fs.readFileSync(path.join(ceb001, 'suite-manifest.json'), 'utf8')).suiteHash }, hostKind: 'openclaw', openclawSessionsDir: sessionsDir, readOpenClawTrajectory: readOpenClawTrajectoryEvidence });
+    expect(v1.ok).toBe(false);
+    expect(v1.reasons.some((r) => r.includes('conflicts with'))).toBe(true);
+    // missing session
+    const v2 = verifyF2ProbeEvidence({ studyDir: dir, evidenceRef: ref, expected: { studyId: 'CEB-001', suiteHash: JSON.parse(fs.readFileSync(path.join(ceb001, 'suite-manifest.json'), 'utf8')).suiteHash }, hostKind: 'openclaw', openclawSessionsDir: path.join(dir, 'nope'), readOpenClawTrajectory: readOpenClawTrajectoryEvidence });
+    expect(v2.ok).toBe(false);
+    // absent home dir argument
+    const v3 = verifyF2ProbeEvidence({ studyDir: dir, evidenceRef: ref, expected: { studyId: 'CEB-001', suiteHash: JSON.parse(fs.readFileSync(path.join(ceb001, 'suite-manifest.json'), 'utf8')).suiteHash }, hostKind: 'openclaw', openclawSessionsDir: null, readOpenClawTrajectory: readOpenClawTrajectoryEvidence });
+    expect(v3.ok).toBe(false);
+    // unknown kind
+    const v4 = verifyF2ProbeEvidence({ studyDir: dir, evidenceRef: ref, expected: { studyId: 'CEB-001', suiteHash: JSON.parse(fs.readFileSync(path.join(ceb001, 'suite-manifest.json'), 'utf8')).suiteHash }, hostKind: 'workbuddy', openclawSessionsDir: sessionsDir, readOpenClawTrajectory: readOpenClawTrajectoryEvidence });
+    expect(v4.ok).toBe(false);
+    expect(v4.reasons.some((r) => r.includes('evidence dispatch is closed'))).toBe(true);
   });
 });
