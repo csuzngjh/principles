@@ -1,6 +1,8 @@
 ---
 '@principles/codex-adapter': patch
 '@principles/host-runtime': patch
+'@principles/pd-cli': patch
+'@principles/workbuddy-adapter': patch
 ---
 
 Codex explicit pain statement: fix evidence-promotion ordering.
