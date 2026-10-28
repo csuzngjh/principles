@@ -27,6 +27,7 @@ function arg(name, fallback = undefined) {
 }
 const studyId = arg('study', 'CEB-001');
 const dryRun = process.argv.includes('--dry-run');
+const openclawBin = arg('openclaw-bin', 'openclaw'); // S5.2 env fix: e.g. "node <npm>/node_modules/openclaw/openclaw.mjs" is a single spawnable unit via process.execPath? No — openclawBin is the PROGRAM; pass --openclaw-bin with the absolute .mjs and we spawn it via node when it ends with .mjs
 const studyDir = path.join(labRoot, 'challenge-studies', studyId);
 const authFile = path.join(studyDir, 'probe-authorization.json');
 
@@ -103,10 +104,20 @@ if (record.targetHost.kind === 'openclaw') {
     console.log(JSON.stringify({ ok: false, stage: 'provider', reasons: ["authorization targetHost.provider missing — the approved provider must be declared (S5 P1-2)"] }, null, 2));
     process.exit(1);
   }
+  // S5.2 env fix: on Windows the npm shim (openclaw / openclaw.cmd) is not
+  // directly spawnable (ENOENT / Node EINVAL). When --openclaw-bin points at
+  // the package's openclaw.mjs we spawn `<node> <openclaw.mjs> ...`; the
+  // version probe inside the adapter handles the same rule.
+  const openclawSpawn = openclawBin.endsWith('.mjs')
+    ? { bin: process.execPath, prefixArgs: [openclawBin] }
+    : { bin: openclawBin, prefixArgs: [] };
   transport = createOpenClawHostTransport({
     model: record.targetHost.requestedModelIdentity,
     expectedProvider,
     roundsRoot,
+    openclawBin: openclawSpawn.bin,
+    openclawPrefixArgs: openclawSpawn.prefixArgs,
+    configPath: path.join(record.targetHost.openclawHome, 'openclaw.json'), // pin the owner's config (zai provider + credentials)
     timeoutMsPerCall: record.caps.timeoutMsPerCall,
   });
   const sessionsDir = path.join(record.targetHost.openclawHome, 'agents', record.targetHost.openclawAgent || 'main', 'sessions');

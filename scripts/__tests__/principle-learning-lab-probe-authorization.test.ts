@@ -43,11 +43,15 @@ function withExactKeys(rec) {
 }
 
 describe('probe authorization gate (fail-closed, PRI-1037 / S2-D3)', () => {
-  it('refuses the committed NOT_ISSUED record and carries the host-switch blockage verbatim', () => {
-    const v = verifyProbeAuthorization({ record: committed, studyDir: ceb001, now: T0, transportFactoryCalls: 0 });
+  it('accepts the Owner-ISSUED APPROVED record inside its window (S6: real probe authorized)', () => {
+    const v = verifyProbeAuthorization({ record: committed, studyDir: ceb001, now: Date.now(), transportFactoryCalls: 0 });
+    expect(v.ok).toBe(true);
+  });
+
+  it('still refuses outside the issued window (the clock is the revocation backstop)', () => {
+    const v = verifyProbeAuthorization({ record: committed, studyDir: ceb001, now: Date.parse('2030-01-01T00:00:00Z'), transportFactoryCalls: 0 });
     expect(v.ok).toBe(false);
-    expect(v.reasons.some((r) => r.includes("status is 'NOT_ISSUED'"))).toBe(true);
-    expect(v.reasons.some((r) => r.includes('OpenClaw'))).toBe(true); // the recorded blockage reason must surface
+    expect(v.reasons.some((r) => r.includes('authorization window closed'))).toBe(true);
   });
 
   it('accepts an APPROVED record only with exact closed key set, live window, and recomputed frozen binding', () => {
@@ -88,10 +92,13 @@ describe('probe authorization gate (fail-closed, PRI-1037 / S2-D3)', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it('PIN: the committed record stays NOT_ISSUED with a structured blockage until the Owner review lands', () => {
-    expect(committed.status).toBe('NOT_ISSUED');
-    expect(committed.blockage.pendingDecision).toContain('Owner');
+  it('PIN: the committed record carries the Owner-issued APPROVED status, the 6h window and the approved channel (S6)', () => {
+    expect(committed.status).toBe('APPROVED'); // Owner 2026-10-28 probe approval
+    expect(committed.issuedBy).toBe('owner-20261028-probe-approval');
+    expect(committed.validFrom).toBe('2026-10-28T10:10:00Z');
+    expect(committed.validUntil).toBe('2026-10-28T16:10:00Z'); // 6h window per the Owner approval
     expect(committed.targetHost.kind).toBe('openclaw'); // S4 host switch, pinned
+    expect(committed.targetHost.provider).toBe('zai');
     expect(committed.targetHost.requestedModelIdentity).toBe('zai/glm-5.3-flash');
     // the frozen binding it will enforce must equal the live study
     const manifest = JSON.parse(fs.readFileSync(path.join(ceb001, 'suite-manifest.json'), 'utf8'));
@@ -144,14 +151,24 @@ describe('OpenClaw host adapter contract (offline; injected spawn, zero real cal
       return child;
     }) as any;
   }
-  const makeTransport = (dir: string, spawnProcess: any, expectedProvider: string | null = 'zai') => createOpenClawHostTransport({
-    model: 'zai/glm-5.3-flash', expectedProvider, roundsRoot: dir,
-    versionProbe: () => ({ stdout: 'OpenClaw 2026.10.5 (1b58cb9)', status: 0 }),
-    spawnProcess,
-  });
+  const makeTransport = (dir: string, spawnProcess: any, expectedProvider: string | null = 'zai') => {
+    const cfg = path.join(dir, 'openclaw.json');
+    fs.writeFileSync(cfg, '{}'); // stub pinned config (S5.2.1: --config is mandatory)
+    return createOpenClawHostTransport({
+      model: 'zai/glm-5.3-flash', expectedProvider, roundsRoot: dir, configPath: cfg,
+      versionProbe: () => ({ stdout: 'OpenClaw 2026.10.5 (1b58cb9)', status: 0 }),
+      spawnProcess,
+    });
+  };
 
   it('refuses transport creation when the openclaw binary is missing (fail-closed local probe)', () => {
-    expect(() => createOpenClawHostTransport({ model: 'zai/glm-5.3-flash', roundsRoot: os.tmpdir(), versionProbe: () => ({ error: new Error('enoent'), status: null }) })).toThrow(/openclaw CLI probe failed/);
+    const cfgDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-cfg-'));
+    const existingCfg = path.join(cfgDir, 'openclaw.json');
+    fs.writeFileSync(existingCfg, '{}'); // config exists — the version probe is what must fail
+    expect(() => createOpenClawHostTransport({ model: 'zai/glm-5.3-flash', roundsRoot: os.tmpdir(), configPath: existingCfg, versionProbe: () => ({ error: new Error('enoent'), status: null }) })).toThrow(/openclaw CLI probe failed/);
+    fs.rmSync(cfgDir, { recursive: true, force: true });
+    // S5.2.1: a missing pinned config refuses BEFORE any round
+    expect(() => createOpenClawHostTransport({ model: 'zai/glm-5.3-flash', roundsRoot: os.tmpdir(), configPath: path.join(os.tmpdir(), 'no-such-config.json'), versionProbe: () => ({ stdout: 'v', status: 0 }) })).toThrow(/pinned config not found/);
   });
 
   it('S5 P1-1: drives `agent exec --isolated --json --message-file` per round dir; the system prompt travels via AGENTS.md (the host OFFICIAL workspace-instruction channel) and the user input via the message file — neither replaces the other', async () => {
@@ -170,7 +187,12 @@ describe('OpenClaw host adapter contract (offline; injected spawn, zero real cal
     const messageFile = capturedArgs![capturedArgs!.indexOf('--message-file') + 1];
     expect(fs.readFileSync(messageFile, 'utf8')).toBe('USER-INPUT-MARKER');
     expect(messageFile).toContain(roundDir);
-    expect(capturedArgs!.slice(0, 3)).toEqual(['agent', 'exec', '--isolated']);
+    expect(capturedArgs!.slice(0, 2)).toEqual(['agent', 'exec']);
+    expect(capturedArgs).not.toContain('--isolated'); // S5.2.1: --isolated reads NO config — the zai provider would vanish
+    expect(capturedArgs).not.toContain('--agent'); // not a real exec option (2026.10.5 help)
+    const cfgIdx = capturedArgs!.indexOf('--config');
+    expect(cfgIdx).toBeGreaterThan(0);
+    expect(fs.existsSync(capturedArgs![cfgIdx + 1])).toBe(true); // the pinned config exists on disk
     expect(capturedArgs).toContain('--json');
     expect(capturedArgs).toContain('zai/glm-5.3-flash');
     expect(r.hostRound.sessionId).toBe('sess-1');

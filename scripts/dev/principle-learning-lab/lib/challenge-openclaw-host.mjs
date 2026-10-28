@@ -58,12 +58,12 @@ export const OPENCLAW_PROBE_AGENTS_HEADER = '<!-- PRI-1037 isolation-probe syste
 /** Fail-closed local probe: no openclaw binary ⇒ refuse transport creation
  *  before any round could ever be attempted. (--version is a local process,
  *  not a model call; result doubles as the recorded cliVersion.) */
-function probeOpenclawVersion(openclawBin, versionProbe) {
+function probeOpenclawVersion(openclawBin, openclawPrefixArgs, versionProbe) {
   const probe = versionProbe
-    ? versionProbe(openclawBin)
+    ? versionProbe(openclawBin, openclawPrefixArgs)
     : (() => {
         try {
-          return spawnSync(openclawBin, ['--version'], { encoding: 'utf8', timeout: 20_000 });
+          return spawnSync(openclawBin, [...openclawPrefixArgs, '--version'], { encoding: 'utf8', timeout: 20_000 });
         } catch (err) {
           return { error: err, status: null };
         }
@@ -84,6 +84,8 @@ export function createOpenClawHostTransport({
   expectedProvider = null, // S5 P1-2: the approved provider id (e.g. 'zai'); envelope.provider must match EXACTLY
   agent = 'main',
   openclawBin = 'openclaw',
+  openclawPrefixArgs = [], // S5.2 env fix: e.g. [<node>, <openclaw.mjs>] when the npm shim is not directly spawnable on Windows
+  configPath, // S5.2.1: the config file pinned via --config (owner's openclaw.json — zai provider + credentials)
   roundsRoot, // S5 P1-3: controlled root for per-round directories (inside the runner's workRoot)
   timeoutMsPerCall = 180_000,
   spawnProcess = spawn,
@@ -96,10 +98,16 @@ export function createOpenClawHostTransport({
   if (typeof roundsRoot !== 'string' || roundsRoot.trim().length === 0) {
     throw new Error('createOpenClawHostTransport: roundsRoot (controlled root for per-round dirs, S5 P1-3) is required');
   }
+  if (typeof configPath !== 'string' || configPath.trim().length === 0) {
+    throw new Error('createOpenClawHostTransport: configPath (--config pin, S5.2.1 — the approved provider lives in the owner config) is required');
+  }
+  if (!fs.existsSync(configPath)) {
+    throw new Error(`createOpenClawHostTransport: pinned config not found: ${configPath} (fail-closed)`);
+  }
   if (!Number.isFinite(timeoutMsPerCall) || timeoutMsPerCall <= 0) {
     throw new Error('createOpenClawHostTransport: timeoutMsPerCall must be a positive finite number');
   }
-  const cliVersion = probeOpenclawVersion(openclawBin, versionProbe);
+  const cliVersion = probeOpenclawVersion(openclawBin, openclawPrefixArgs, versionProbe);
   fs.mkdirSync(roundsRoot, { recursive: true });
 
   const identity = {
@@ -132,14 +140,24 @@ export function createOpenClawHostTransport({
     // pointer persist inside our controlled round dir. Config/provider
     // resolution happens BEFORE the state-dir repoint (agent-exec.ts), so the
     // approved zai channel and credentials are unaffected.
+    //
+    // S5.2.1 probe-round fix (real-execution evidence): the CLI option surface
+    // is `agent exec --help` (2026.10.5) — there is NO --agent flag (the agent
+    // resolves from config), and --isolated means "read NO config" (skips all
+    // authored config and its credential surfaces), which would make the
+    // approved zai provider unavailable. The probe therefore pins the OWNER'S
+    // config file via --config (read-only reference, reproducible, credentials
+    // loaded) and gets state/workspace isolation from --state-dir + --cwd —
+    // which are orthogonal to config resolution. Session isolation comes from
+    // exec itself (fresh explicit session per invocation).
     const stateDir = path.join(roundDir, 'state');
+    fs.mkdirSync(stateDir, { recursive: true }); // S5.2.1 probe-round fix: --state-dir requires an EXISTING dir (real-execution evidence: ENOENT otherwise)
     const sessionsDir = path.join(stateDir, 'agents', agent, 'sessions');
     const args = [
       'agent', 'exec',
-      '--isolated',                       // fresh explicit session per exec — probe rounds must not share state
       '--state-dir', stateDir,            // S5.2: persist the trajectory evidence inside the controlled round dir
+      '--config', configPath,             // pin the owner's config (zai provider + credentials); never the ambient runtime snapshot
       '--model', model,
-      '--agent', agent,
       '--cwd', roundDir,                  // S5 P1-3: the round dir IS the workspace for this round
       '--timeout', String(Math.ceil(timeoutMsPerCall / 1000)),
       '--json',
@@ -147,7 +165,7 @@ export function createOpenClawHostTransport({
     ];
     const t0 = now();
     const stdout = await new Promise((resolve, reject) => {
-      const child = spawnProcess(openclawBin, args, { cwd: roundDir, stdio: ['pipe', 'pipe', 'pipe'] });
+      const child = spawnProcess(openclawBin, [...openclawPrefixArgs, ...args], { cwd: roundDir, stdio: ['pipe', 'pipe', 'pipe'] });
       let out = '';
       let err = '';
       const timer = setTimeout(() => {

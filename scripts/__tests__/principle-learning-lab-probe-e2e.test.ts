@@ -48,10 +48,13 @@ function writeRuntimeTrajectory(sessionsDir: string, sessionId: string, modelId:
 function makeStubTransport(roundsRoot: string, envelopeOverrides: (round: number) => Record<string, unknown> = () => ({})) {
   const spawnSessions: string[] = [];
   const stateDirs: string[] = [];
+  const pinnedConfig = path.join(roundsRoot, 'stub-openclaw.json');
+  fs.writeFileSync(pinnedConfig, '{}'); // stub pinned config (S5.2.1: --config is mandatory)
   const transport = createOpenClawHostTransport({
     model: APPROVED_MODEL,
     expectedProvider: APPROVED_PROVIDER,
     roundsRoot,
+    configPath: pinnedConfig,
     versionProbe: () => ({ stdout: 'OpenClaw 2026.10.5 (1b58cb9)', status: 0 }),
     spawnProcess: (bin: string, args: string[]) => {
       const round = spawnSessions.length + 1;
