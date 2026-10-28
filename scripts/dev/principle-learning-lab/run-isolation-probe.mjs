@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { verifyProbeAuthorization, readProbeAuthorization } from './lib/challenge-probe-authorization.mjs';
 import { runIsolationProbe, saveProbeEvidence, verifyF2ProbeEvidence } from './lib/challenge-isolation-probe.mjs';
 import { createCodexHostTransport } from './lib/host-actor.mjs';
+import { ZHIPU_CODING_PROVIDER, buildZhipuCodexOverrides, ensureZhipuProviderReady } from './lib/challenge-zhipu-host-provider.mjs';
 
 const labRoot = path.dirname(fileURLToPath(import.meta.url));
 
@@ -113,17 +114,12 @@ if (record.targetHost.kind === 'openclaw') {
     readOpenClawTrajectory: readOpenClawTrajectoryEvidence,
   };
 } else {
-  // codex-cli route: the Zhipu per-spawn adapter lives on the RESERVED #2204
-  // branch (S4-C: kept, not merged). If absent here, refuse loudly — never a
+  // codex-cli route: the Zhipu per-spawn adapter (merged to main via #2204).
+  // The provider binding still comes from the authorization record — never a
   // silent fallback to the OpenAI-default host model.
-  let zhipu = null;
-  try {
-    zhipu = await import('./lib/challenge-zhipu-host-provider.mjs');
-  } catch {
-    zhipu = null;
-  }
-  if (!zhipu || record.targetHost.provider !== 'zhipu-coding') {
-    console.log(JSON.stringify({ ok: false, stage: 'provider', reasons: [`kind 'codex-cli' requires the Zhipu per-spawn adapter (reserved branch #2204) and provider 'zhipu-coding'; got '${String(record.targetHost.provider)}'`] }, null, 2));
+  const zhipu = await import('./lib/challenge-zhipu-host-provider.mjs');
+  if (record.targetHost.provider !== 'zhipu-coding') {
+    console.log(JSON.stringify({ ok: false, stage: 'provider', reasons: [`kind 'codex-cli' requires provider 'zhipu-coding' (the approved Zhipu channel); got '${String(record.targetHost.provider)}'`] }, null, 2));
     process.exit(1);
   }
   const providerReady = zhipu.ensureZhipuProviderReady();
