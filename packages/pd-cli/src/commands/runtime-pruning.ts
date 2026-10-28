@@ -8,8 +8,8 @@
 
 import * as path from 'path';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
-import { PruningReadModel, appendPruningReview, listPruningReviews, buildMaskedPrincipleSet, removeOrphanReferencesFromLedger } from '@principles/core/runtime-v2';
-import type { PruningReviewDecision, OrphanDerivedCandidate, OrphanDetectionResult } from '@principles/core/runtime-v2';
+import { PruningReadModel, removeOrphanReferencesFromLedger } from '@principles/core/runtime-v2';
+import type { OrphanDerivedCandidate, OrphanDetectionResult } from '@principles/core/runtime-v2';
 import { createRemediationResult, remediationAction } from './remediation-output.js';
 import type { RemediationResult } from './remediation-output.js';
 
@@ -93,83 +93,6 @@ export interface PruningExplainOptions {
   json?: boolean;
 }
 
-export interface PruningReviewOptions {
-  principleId: string;
-  decision: PruningReviewDecision;
-  note?: string;
-  reviewer?: string;
-  workspace?: string;
-  json?: boolean;
-}
-
-export function handlePruningReview(opts: PruningReviewOptions): void {
-  const workspaceDir = opts.workspace
-    ? path.resolve(opts.workspace)
-    : resolveWorkspaceDir();
-
-  const model = new PruningReadModel({ workspaceDir });
-  const signals = model.getPrincipleSignals();
-
-  const signal = signals.find((s) => s.principleId === opts.principleId);
-
-  if (!signal) {
-    if (opts.json) {
-      console.log(JSON.stringify({ error: `Principle not found: '${opts.principleId}'` }));
-    } else {
-      console.error(`Error: Principle not found: '${opts.principleId}'`);
-    }
-    process.exit(1);
-    return; // satisfies TypeScript control flow (process.exit is [noreturn] in tests)
-  }
-
-  if (opts.decision !== 'keep' && opts.decision !== 'defer' && opts.decision !== 'archive-candidate') {
-    if (opts.json) {
-      console.log(JSON.stringify({ error: `Invalid decision: '${opts.decision}'. Must be one of: keep, defer, archive-candidate` }));
-    } else {
-      console.error(`Error: Invalid decision: '${opts.decision}'. Must be one of: keep, defer, archive-candidate`);
-    }
-    process.exit(1);
-    return;
-  }
-
-  if (opts.decision === 'archive-candidate' && !opts.note) {
-    if (opts.json) {
-      console.log(JSON.stringify({ error: 'archive-candidate decision requires --note' }));
-    } else {
-      console.error('Error: archive-candidate decision requires --note');
-    }
-    process.exit(1);
-    return;
-  }
-
-  const record = appendPruningReview(workspaceDir, {
-    principleId: signal.principleId,
-    decision: opts.decision,
-    note: opts.note ?? '',
-    reviewer: opts.reviewer,
-    signalSnapshot: signal,
-  });
-
-  if (opts.json) {
-    console.log(JSON.stringify({
-      reviewId: record.reviewId,
-      principleId: record.principleId,
-      decision: record.decision,
-      reviewer: record.reviewer,
-      reviewedAt: record.reviewedAt,
-    }));
-    return;
-  }
-
-  console.log(`reviewId: ${record.reviewId}`);
-  console.log(`principleId: ${record.principleId}`);
-  console.log(`decision: ${record.decision}`);
-  console.log(`reviewer: ${record.reviewer}`);
-  console.log(`reviewedAt: ${record.reviewedAt}`);
-  console.log('');
-  console.log('NOTE: This audit record does not modify the principle.');
-}
-
 export function handlePruningExplain(opts: PruningExplainOptions): void {
   const workspaceDir = opts.workspace
     ? path.resolve(opts.workspace)
@@ -209,75 +132,6 @@ export function handlePruningExplain(opts: PruningExplainOptions): void {
   }
   console.log('');
   console.log('NOTE: This report is read-only. No principles are modified or deleted.');
-}
-
-// ── Pruning rollback ──────────────────────────────────────────────────────────
-
-export interface PruningRollbackOptions {
-  principleId: string;
-  note?: string;
-  reviewer?: string;
-  workspace?: string;
-  json?: boolean;
-}
-
-export function handlePruningRollback(opts: PruningRollbackOptions): void {
-  const workspaceDir = opts.workspace
-    ? path.resolve(opts.workspace)
-    : resolveWorkspaceDir();
-
-  const reviews = listPruningReviews(workspaceDir, { principleId: opts.principleId });
-  if (reviews.length === 0) {
-    if (opts.json) {
-      console.log(JSON.stringify({ error: `No reviews found for principle: '${opts.principleId}'` }));
-    } else {
-      console.error(`Error: No reviews found for principle: '${opts.principleId}'`);
-    }
-    process.exit(1);
-    return;
-  }
-
-  const maskedIds = buildMaskedPrincipleSet(reviews);
-  if (!maskedIds.has(opts.principleId)) {
-    if (opts.json) {
-      console.log(JSON.stringify({ error: `Principle '${opts.principleId}' is not currently masked (latest decision is not archive-candidate)` }));
-    } else {
-      console.error(`Error: Principle '${opts.principleId}' is not currently masked (latest decision is not archive-candidate)`);
-    }
-    process.exit(1);
-    return;
-  }
-
-  const model = new PruningReadModel({ workspaceDir });
-  const signals = model.getPrincipleSignals();
-  const signal = signals.find((s) => s.principleId === opts.principleId) ?? undefined;
-
-  const record = appendPruningReview(workspaceDir, {
-    principleId: opts.principleId,
-    decision: 'keep',
-    note: opts.note ?? 'Rollback: restore principle injection',
-    reviewer: opts.reviewer,
-    signalSnapshot: signal,
-  });
-
-  if (opts.json) {
-    console.log(JSON.stringify({
-      reviewId: record.reviewId,
-      principleId: record.principleId,
-      decision: record.decision,
-      reviewer: record.reviewer,
-      reviewedAt: record.reviewedAt,
-    }));
-    return;
-  }
-
-  console.log(`reviewId: ${record.reviewId}`);
-  console.log(`principleId: ${record.principleId}`);
-  console.log(`decision: ${record.decision}`);
-  console.log(`reviewer: ${record.reviewer}`);
-  console.log(`reviewedAt: ${record.reviewedAt}`);
-  console.log('');
-  console.log('Principle has been restored to injection.');
 }
 
 // ── Pruning orphans ───────────────────────────────────────────────────────────

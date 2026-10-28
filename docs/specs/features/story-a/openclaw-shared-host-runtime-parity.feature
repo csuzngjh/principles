@@ -12,11 +12,6 @@ Feature: OpenClaw shared host runtime preserves MVP behavior
     When OpenClaw builds the next prompt
     Then the returned system context contains that activated principle
 
-  Scenario: A masked legacy overlap remains available through Runtime V2
-    Given an overlapping prompt principle is masked from legacy injection
-    When OpenClaw builds the next prompt
-    Then the Runtime V2 directive contains that masked overlap exactly once
-
   Scenario: A legacy-budget overlap remains available through Runtime V2
     Given an overlapping prompt principle is omitted by the legacy prompt budget
     When OpenClaw builds the next prompt

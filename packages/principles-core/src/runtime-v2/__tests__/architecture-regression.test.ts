@@ -17,7 +17,6 @@ const REQUIRED_SOURCE_FILES = [
   'pain-signal-runtime-factory.ts',
   'pain-signal-observability.ts',
   'pruning-read-model.ts',
-  'pruning-review-log.ts',
   // PRI-28
   'operator-health-read-model.ts',
   'candidate-audit.ts',
@@ -506,7 +505,6 @@ const REQUIRED_TEST_FILES = [
   'pain-to-principle-service.test.ts',
   'pain-chain-read-model.test.ts',
   'pruning-read-model.test.ts',
-  'pruning-review-log.test.ts',
   // PRI-28
   'operator-health-read-model.test.ts',
   'candidate-audit.test.ts',

@@ -54,11 +54,13 @@ describe('CLI command tree structure', () => {
     expect(output).not.toMatch(/uat\s/);
   });
 
-  it('pruning subcommand list does NOT include uat (pd runtime pruning --help)', () => {
+  it('pruning subcommand list is read-only: report/explain/orphans, no review/rollback (2026-10-28 legacy pruning removal)', () => {
     const output = runPdHelp(['runtime', 'pruning', '--help']);
     expect(output).toContain('report');
     expect(output).toContain('explain');
-    expect(output).toContain('review');
+    expect(output).toContain('orphans');
+    expect(output).not.toMatch(/^\s+review\s/m);
+    expect(output).not.toMatch(/^\s+rollback\s/m);
     expect(output).not.toMatch(/uat\s/);
   });
 
