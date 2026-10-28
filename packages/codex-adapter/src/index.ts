@@ -12,7 +12,7 @@ export * from './codec/index.js';
 export { resolveCodexHome, canonicalizePath } from './ingestion/codex-home.js';
 export { recordExplicitOwnerStatement } from './ingestion/explicit-owner-statement.js';
 export type { RecordOwnerStatementResult } from './ingestion/explicit-owner-statement.js';
-export { writeCurrentTurnContext, clearCurrentTurnContext, registerCurrentTurnOwnerStatement, TURN_CONTEXT_FILENAME, TURN_CONTEXT_SCHEMA_VERSION } from './ingestion/turn-context.js';
+export { writeCurrentTurnContext, clearCurrentTurnContext, registerCurrentTurnOwnerStatement, TURN_CONTEXT_FILENAME_PREFIX, TURN_CONTEXT_SCHEMA_VERSION } from './ingestion/turn-context.js';
 export type { CodexTurnContext, TurnContextWriteResult, RegisterCurrentTurnResult } from './ingestion/turn-context.js';
 export { validateCodexTranscriptPath } from './ingestion/transcript-path.js';
 export type { TranscriptPathValidation, TranscriptFileIdentity } from './ingestion/transcript-path.js';

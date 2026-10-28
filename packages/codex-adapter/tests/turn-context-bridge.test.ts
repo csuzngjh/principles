@@ -19,22 +19,27 @@
  * - the turn context carries ids/paths only — never prompt text;
  * - Stop/SessionStart withdraw the context (fail-closed after the turn).
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { getDefaultPdConfig } from '@principles/core/runtime-v2';
 import { processHookInvocation } from '../src/pd-hook.js';
-import { registerCurrentTurnOwnerStatement, TURN_CONTEXT_FILENAME, TURN_CONTEXT_MAX_AGE_MS } from '../src/ingestion/turn-context.js';
+import { registerCurrentTurnOwnerStatement, writeCurrentTurnContext, TURN_CONTEXT_FILENAME_PREFIX, TURN_CONTEXT_MAX_AGE_MS } from '../src/ingestion/turn-context.js';
 import { MAX_OWNER_STATEMENT_CHARS } from '../src/ingestion/explicit-owner-statement.js';
 
 const FIXTURES = new URL('./fixtures/g1-contract/', import.meta.url);
 const ROOT_SESSION = '01a048ae-b2a5-71a1-9faf-0226980f98ff';
 const ROOT_ROLLOUT = '01a048ae-b2a5-71a1-9faf-0226980f98ff';
 const TURN_1 = '01a048ae-b344-7eb2-804b-a2fa34302fb3';
+const SESSION_B = '01b048ae-b2a5-71a1-9faf-0226980f98ff';
+const TURN_B = '01b048ae-b344-7eb2-804b-a2fa34302fb3';
 
 const dirs: string[] = [];
+const originalCallerSessionId = process.env.CODEX_SESSION_ID;
+const originalCallerThreadId = process.env.CODEX_THREAD_ID;
 
 interface Workspace { root: string; codexHome: string; transcriptPath: string }
 
@@ -67,9 +72,9 @@ function makeWorkspace(ingestionEnabled: boolean): Workspace {
   return { root, codexHome, transcriptPath };
 }
 
-function promptPayload(ws: Workspace, prompt: string, turnId = TURN_1): string {
+function promptPayload(ws: Workspace, prompt: string, turnId = TURN_1, sessionId = ROOT_SESSION): string {
   return JSON.stringify({
-    session_id: ROOT_SESSION,
+    session_id: sessionId,
     turn_id: turnId,
     transcript_path: ws.transcriptPath,
     cwd: ws.root,
@@ -80,9 +85,9 @@ function promptPayload(ws: Workspace, prompt: string, turnId = TURN_1): string {
   });
 }
 
-function stopPayload(ws: Workspace, turnId = TURN_1): string {
+function stopPayload(ws: Workspace, turnId = TURN_1, sessionId = ROOT_SESSION): string {
   return JSON.stringify({
-    session_id: ROOT_SESSION,
+    session_id: sessionId,
     turn_id: turnId,
     transcript_path: ws.transcriptPath,
     cwd: ws.root,
@@ -105,10 +110,28 @@ function sessionStartPayload(ws: Workspace): string {
   });
 }
 
-afterEach(() => { for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true }); });
+beforeEach(() => {
+  process.env.CODEX_SESSION_ID = ROOT_SESSION;
+  process.env.CODEX_THREAD_ID = ROOT_SESSION;
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  if (originalCallerSessionId === undefined) delete process.env.CODEX_SESSION_ID;
+  else process.env.CODEX_SESSION_ID = originalCallerSessionId;
+  if (originalCallerThreadId === undefined) delete process.env.CODEX_THREAD_ID;
+  else process.env.CODEX_THREAD_ID = originalCallerThreadId;
+  for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+});
 
 function turnContextFile(root: string): string {
-  return path.join(root, '.state', TURN_CONTEXT_FILENAME);
+  const sessionKey = createHash('sha256').update(ROOT_SESSION, 'utf8').digest('hex');
+  return path.join(root, '.state', `${TURN_CONTEXT_FILENAME_PREFIX}${sessionKey}.json`);
+}
+
+function sessionTurnContextFile(root: string, sessionId: string): string {
+  const sessionKey = createHash('sha256').update(sessionId, 'utf8').digest('hex');
+  return path.join(root, '.state', `${TURN_CONTEXT_FILENAME_PREFIX}${sessionKey}.json`);
 }
 
 function trajectoryOf(root: string): Database.Database {
@@ -165,6 +188,34 @@ describe('hook publishes the live turn context', () => {
     expect(fs.existsSync(turnContextFile(ws.root))).toBe(true);
     await processHookInvocation(sessionStartPayload(ws), { CODEX_HOME: ws.codexHome }, ws.root);
     expect(fs.existsSync(turnContextFile(ws.root))).toBe(false);
+  });
+
+  it('a delayed Stop for an older turn preserves the same session newer context', async () => {
+    const ws = makeWorkspace(false);
+    await processHookInvocation(promptPayload(ws, 'old turn'), { CODEX_HOME: ws.codexHome }, ws.root);
+    await processHookInvocation(promptPayload(ws, 'new turn', TURN_B), { CODEX_HOME: ws.codexHome }, ws.root);
+    await processHookInvocation(stopPayload(ws, TURN_1), { CODEX_HOME: ws.codexHome }, ws.root);
+    const context = JSON.parse(fs.readFileSync(turnContextFile(ws.root), 'utf8')) as Record<string, unknown>;
+    expect(context.turnId).toBe(TURN_B);
+  });
+
+  it('a failed context replacement withdraws the prior context before CLI can bind it', async () => {
+    const ws = makeWorkspace(true);
+    await processHookInvocation(promptPayload(ws, 'first turn'), { CODEX_HOME: ws.codexHome }, ws.root);
+    const rename = vi.spyOn(fs, 'renameSync').mockImplementation(() => { throw new Error('simulated rename failure'); });
+    const failed = writeCurrentTurnContext({
+      rawPayload: { session_id: ROOT_SESSION, turn_id: TURN_B, transcript_path: ws.transcriptPath },
+      workspaceDir: ws.root,
+      env: { CODEX_HOME: ws.codexHome },
+    });
+    rename.mockRestore();
+    expect(failed).toMatchObject({ ok: false, reason: expect.stringContaining('write_failed:') });
+    expect(fs.existsSync(turnContextFile(ws.root))).toBe(false);
+    const receipt = await registerCurrentTurnOwnerStatement({ workspaceDir: ws.root, statementText: OWNER_WORDS });
+    expect(receipt).toMatchObject({ status: 'rejected', reason: 'turn_context_missing' });
+    const db = trajectoryOf(ws.root);
+    expect((db.prepare('SELECT COUNT(*) AS n FROM pain_events').get() as { n: number }).n).toBe(0);
+    db.close();
   });
 });
 

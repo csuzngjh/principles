@@ -259,7 +259,11 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
     // agent-assisted explicit entry must fail closed (turn_context_missing)
     // instead of binding an Owner statement to a finished turn. A withdrawal
     // failure is surfaced as ONE bounded diagnostic (rc-9) — never silent.
-    const cleared = clearCurrentTurnContext({ workspaceDir: resolution.workspaceDir });
+    const cleared = clearCurrentTurnContext({
+      workspaceDir: resolution.workspaceDir,
+      sessionId: event.context.sessionId,
+      ...(event.context.turnId !== undefined ? { turnId: event.context.turnId } : {}),
+    });
     const clearDiagnostics = cleared.ok
       ? []
       : [diagnostic(`turn_context_${cleared.reason}`, 'The turn context could not be withdrawn; the agent-assisted explicit entry stays fail-closed only via its staleness bound. Inspect the workspace .state directory.')];
@@ -280,7 +284,7 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
     if (event.kind === 'session_start') {
       // Belt for turn_complete: a fresh session must never inherit the
       // previous session's turn context. Withdrawal failure → diagnostic.
-      const cleared = clearCurrentTurnContext({ workspaceDir: resolution.workspaceDir });
+      const cleared = clearCurrentTurnContext({ workspaceDir: resolution.workspaceDir, sessionId: event.context.sessionId });
       const clearDiagnostics = cleared.ok
         ? []
         : [diagnostic(`turn_context_${cleared.reason}`, 'The turn context could not be withdrawn; the agent-assisted explicit entry stays fail-closed only via its staleness bound. Inspect the workspace .state directory.')];
