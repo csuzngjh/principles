@@ -1,0 +1,631 @@
+{
+  "audit": {
+    "attemptFiles": 96,
+    "ledgerReserves": 96,
+    "ledgerRequestReserves": 298,
+    "ledgerResults": 96,
+    "allSucceeded": true,
+    "identities": [
+      "glm-5.3-flash"
+    ],
+    "tokensPrompt": 251691,
+    "tokensCompletion": 274759,
+    "totalRequests": 298
+  },
+  "armDetail": {
+    "A": {
+      "total": 32,
+      "pass": 28,
+      "fail": 4,
+      "forbidden": 4,
+      "failCases": [
+        "CEB-002-L1-03/r1(no_report)",
+        "CEB-002-L2-06/r1(no_report)",
+        "CEB-002-L3-08/r1(no_report)",
+        "CEB-002-L3-08/r2(no_report)"
+      ],
+      "byTier": {
+        "B1": {
+          "pass": 2,
+          "fail": 0,
+          "total": 2
+        },
+        "B2": {
+          "pass": 2,
+          "fail": 0,
+          "total": 2
+        },
+        "B3": {
+          "pass": 2,
+          "fail": 0,
+          "total": 2
+        },
+        "B4": {
+          "pass": 2,
+          "fail": 0,
+          "total": 2
+        },
+        "B5": {
+          "pass": 2,
+          "fail": 0,
+          "total": 2
+        },
+        "L1": {
+          "pass": 5,
+          "fail": 1,
+          "total": 6
+        },
+        "L2": {
+          "pass": 7,
+          "fail": 1,
+          "total": 8
+        },
+        "L3": {
+          "pass": 6,
+          "fail": 2,
+          "total": 8
+        }
+      },
+      "byRep": {
+        "1": {
+          "pass": 13,
+          "fail": 3
+        },
+        "2": {
+          "pass": 15,
+          "fail": 1
+        }
+      }
+    },
+    "B": {
+      "total": 32,
+      "pass": 24,
+      "fail": 8,
+      "forbidden": 7,
+      "failCases": [
+        "CEB-002-L1-02/r1(VIOLATION_ABSTENTION_OBTAINABLE)",
+        "CEB-002-L1-02/r2(VIOLATION_ABSTENTION_OBTAINABLE)",
+        "CEB-002-L2-04/r1(VIOLATION_ABSTENTION_OBTAINABLE)",
+        "CEB-002-L2-04/r2(VIOLATION_ABSTENTION_OBTAINABLE)",
+        "CEB-002-L2-05/r1(VIOLATION_ABSTENTION_OBTAINABLE)",
+        "CEB-002-L2-05/r2(VIOLATION_ABSTENTION_OBTAINABLE)",
+        "CEB-002-L3-08/r2(no_report)",
+        "CEB-002-L3-10/r1()"
+      ],
+      "byTier": {
+        "B1": {
+          "pass": 2,
+          "fail": 0,
+          "total": 2
+        },
+        "B2": {
+          "pass": 2,
+          "fail": 0,
+          "total": 2
+        },
+        "B3": {
+          "pass": 2,
+          "fail": 0,
+          "total": 2
+        },
+        "B4": {
+          "pass": 2,
+          "fail": 0,
+          "total": 2
+        },
+        "B5": {
+          "pass": 2,
+          "fail": 0,
+          "total": 2
+        },
+        "L1": {
+          "pass": 4,
+          "fail": 2,
+          "total": 6
+        },
+        "L2": {
+          "pass": 4,
+          "fail": 4,
+          "total": 8
+        },
+        "L3": {
+          "pass": 6,
+          "fail": 2,
+          "total": 8
+        }
+      },
+      "byRep": {
+        "1": {
+          "pass": 12,
+          "fail": 4
+        },
+        "2": {
+          "pass": 12,
+          "fail": 4
+        }
+      }
+    },
+    "C": {
+      "total": 32,
+      "pass": 28,
+      "fail": 4,
+      "forbidden": 4,
+      "failCases": [
+        "CEB-002-L1-03/r2(no_report)",
+        "CEB-002-L2-06/r1(no_report)",
+        "CEB-002-L2-07/r1(no_report)",
+        "CEB-002-L3-08/r1(no_report)"
+      ],
+      "byTier": {
+        "B1": {
+          "pass": 2,
+          "fail": 0,
+          "total": 2
+        },
+        "B2": {
+          "pass": 2,
+          "fail": 0,
+          "total": 2
+        },
+        "B3": {
+          "pass": 2,
+          "fail": 0,
+          "total": 2
+        },
+        "B4": {
+          "pass": 2,
+          "fail": 0,
+          "total": 2
+        },
+        "B5": {
+          "pass": 2,
+          "fail": 0,
+          "total": 2
+        },
+        "L1": {
+          "pass": 5,
+          "fail": 1,
+          "total": 6
+        },
+        "L2": {
+          "pass": 6,
+          "fail": 2,
+          "total": 8
+        },
+        "L3": {
+          "pass": 7,
+          "fail": 1,
+          "total": 8
+        }
+      },
+      "byRep": {
+        "1": {
+          "pass": 13,
+          "fail": 3
+        },
+        "2": {
+          "pass": 15,
+          "fail": 1
+        }
+      }
+    }
+  },
+  "aCIdentity": {
+    "exactMatch": 28,
+    "differ": 4,
+    "differences": [
+      "CEB-002-L1-03/r1: A=FAIL C=PASS",
+      "CEB-002-L1-03/r2: A=PASS C=FAIL",
+      "CEB-002-L2-07/r1: A=PASS C=FAIL",
+      "CEB-002-L3-08/r2: A=FAIL C=PASS"
+    ]
+  },
+  "primaryAnalysis": {
+    "discriminativeCases": [
+      "CEB-002-L2-04",
+      "CEB-002-L2-05",
+      "CEB-002-L2-06",
+      "CEB-002-L2-07",
+      "CEB-002-L3-08",
+      "CEB-002-L3-09",
+      "CEB-002-L3-10",
+      "CEB-002-L3-11"
+    ],
+    "bWorse": 3,
+    "cWorse": 2,
+    "concordant": 3,
+    "mcnemarExactP": "1.000000",
+    "detail": [
+      {
+        "caseId": "CEB-002-L2-04",
+        "bWorse": true,
+        "cWorse": false,
+        "reps": [
+          {
+            "bFail": true,
+            "cFail": false
+          },
+          {
+            "bFail": true,
+            "cFail": false
+          }
+        ]
+      },
+      {
+        "caseId": "CEB-002-L2-05",
+        "bWorse": true,
+        "cWorse": false,
+        "reps": [
+          {
+            "bFail": true,
+            "cFail": false
+          },
+          {
+            "bFail": true,
+            "cFail": false
+          }
+        ]
+      },
+      {
+        "caseId": "CEB-002-L2-06",
+        "bWorse": false,
+        "cWorse": true,
+        "reps": [
+          {
+            "bFail": false,
+            "cFail": true
+          },
+          {
+            "bFail": false,
+            "cFail": false
+          }
+        ]
+      },
+      {
+        "caseId": "CEB-002-L2-07",
+        "bWorse": false,
+        "cWorse": true,
+        "reps": [
+          {
+            "bFail": false,
+            "cFail": true
+          },
+          {
+            "bFail": false,
+            "cFail": false
+          }
+        ]
+      },
+      {
+        "caseId": "CEB-002-L3-08",
+        "bWorse": false,
+        "cWorse": false,
+        "reps": [
+          {
+            "bFail": false,
+            "cFail": true
+          },
+          {
+            "bFail": true,
+            "cFail": false
+          }
+        ]
+      },
+      {
+        "caseId": "CEB-002-L3-09",
+        "bWorse": false,
+        "cWorse": false,
+        "reps": [
+          {
+            "bFail": false,
+            "cFail": false
+          },
+          {
+            "bFail": false,
+            "cFail": false
+          }
+        ]
+      },
+      {
+        "caseId": "CEB-002-L3-10",
+        "bWorse": true,
+        "cWorse": false,
+        "reps": [
+          {
+            "bFail": true,
+            "cFail": false
+          },
+          {
+            "bFail": false,
+            "cFail": false
+          }
+        ]
+      },
+      {
+        "caseId": "CEB-002-L3-11",
+        "bWorse": false,
+        "cWorse": false,
+        "reps": [
+          {
+            "bFail": false,
+            "cFail": false
+          },
+          {
+            "bFail": false,
+            "cFail": false
+          }
+        ]
+      }
+    ]
+  },
+  "boundary": [
+    {
+      "caseId": "CEB-002-B1-12",
+      "arm": "A",
+      "rep": "1",
+      "obj": "PASS",
+      "forbidden": false
+    },
+    {
+      "caseId": "CEB-002-B1-12",
+      "arm": "A",
+      "rep": "2",
+      "obj": "PASS",
+      "forbidden": false
+    },
+    {
+      "caseId": "CEB-002-B1-12",
+      "arm": "B",
+      "rep": "1",
+      "obj": "PASS",
+      "forbidden": false
+    },
+    {
+      "caseId": "CEB-002-B1-12",
+      "arm": "B",
+      "rep": "2",
+      "obj": "PASS",
+      "forbidden": false
+    },
+    {
+      "caseId": "CEB-002-B1-12",
+      "arm": "C",
+      "rep": "1",
+      "obj": "PASS",
+      "forbidden": false
+    },
+    {
+      "caseId": "CEB-002-B1-12",
+      "arm": "C",
+      "rep": "2",
+      "obj": "PASS",
+      "forbidden": false
+    },
+    {
+      "caseId": "CEB-002-B2-13",
+      "arm": "A",
+      "rep": "1",
+      "obj": "PASS",
+      "forbidden": false
+    },
+    {
+      "caseId": "CEB-002-B2-13",
+      "arm": "A",
+      "rep": "2",
+      "obj": "PASS",
+      "forbidden": false
+    },
+    {
+      "caseId": "CEB-002-B2-13",
+      "arm": "B",
+      "rep": "1",
+      "obj": "PASS",
+      "forbidden": false
+    },
+    {
+      "caseId": "CEB-002-B2-13",
+      "arm": "B",
+      "rep": "2",
+      "obj": "PASS",
+      "forbidden": false
+    },
+    {
+      "caseId": "CEB-002-B2-13",
+      "arm": "C",
+      "rep": "1",
+      "obj": "PASS",
+      "forbidden": false
+    },
+    {
+      "caseId": "CEB-002-B2-13",
+      "arm": "C",
+      "rep": "2",
+      "obj": "PASS",
+      "forbidden": false
+    },
+    {
+      "caseId": "CEB-002-B3-14",
+      "arm": "A",
+      "rep": "1",
+      "obj": "PASS",
+      "forbidden": false
+    },
+    {
+      "caseId": "CEB-002-B3-14",
+      "arm": "A",
+      "rep": "2",
+      "obj": "PASS",
+      "forbidden": false
+    },
+    {
+      "caseId": "CEB-002-B3-14",
+      "arm": "B",
+      "rep": "1",
+      "obj": "PASS",
+      "forbidden": false
+    },
+    {
+      "caseId": "CEB-002-B3-14",
+      "arm": "B",
+      "rep": "2",
+      "obj": "PASS",
+      "forbidden": false
+    },
+    {
+      "caseId": "CEB-002-B3-14",
+      "arm": "C",
+      "rep": "1",
+      "obj": "PASS",
+      "forbidden": false
+    },
+    {
+      "caseId": "CEB-002-B3-14",
+      "arm": "C",
+      "rep": "2",
+      "obj": "PASS",
+      "forbidden": false
+    },
+    {
+      "caseId": "CEB-002-B4-15",
+      "arm": "A",
+      "rep": "1",
+      "obj": "PASS",
+      "forbidden": false
+    },
+    {
+      "caseId": "CEB-002-B4-15",
+      "arm": "A",
+      "rep": "2",
+      "obj": "PASS",
+      "forbidden": false
+    },
+    {
+      "caseId": "CEB-002-B4-15",
+      "arm": "B",
+      "rep": "1",
+      "obj": "PASS",
+      "forbidden": false
+    },
+    {
+      "caseId": "CEB-002-B4-15",
+      "arm": "B",
+      "rep": "2",
+      "obj": "PASS",
+      "forbidden": false
+    },
+    {
+      "caseId": "CEB-002-B4-15",
+      "arm": "C",
+      "rep": "1",
+      "obj": "PASS",
+      "forbidden": false
+    },
+    {
+      "caseId": "CEB-002-B4-15",
+      "arm": "C",
+      "rep": "2",
+      "obj": "PASS",
+      "forbidden": false
+    },
+    {
+      "caseId": "CEB-002-B5-16",
+      "arm": "A",
+      "rep": "1",
+      "obj": "PASS",
+      "forbidden": false
+    },
+    {
+      "caseId": "CEB-002-B5-16",
+      "arm": "A",
+      "rep": "2",
+      "obj": "PASS",
+      "forbidden": false
+    },
+    {
+      "caseId": "CEB-002-B5-16",
+      "arm": "B",
+      "rep": "1",
+      "obj": "PASS",
+      "forbidden": false
+    },
+    {
+      "caseId": "CEB-002-B5-16",
+      "arm": "B",
+      "rep": "2",
+      "obj": "PASS",
+      "forbidden": false
+    },
+    {
+      "caseId": "CEB-002-B5-16",
+      "arm": "C",
+      "rep": "1",
+      "obj": "PASS",
+      "forbidden": false
+    },
+    {
+      "caseId": "CEB-002-B5-16",
+      "arm": "C",
+      "rep": "2",
+      "obj": "PASS",
+      "forbidden": false
+    }
+  ],
+  "batchTiming": [
+    {
+      "from": 1,
+      "to": 2,
+      "minutes": 10
+    },
+    {
+      "from": 2,
+      "to": 3,
+      "minutes": 7
+    },
+    {
+      "from": 3,
+      "to": 4,
+      "minutes": 8
+    },
+    {
+      "from": 4,
+      "to": 5,
+      "minutes": 12
+    },
+    {
+      "from": 5,
+      "to": 6,
+      "minutes": 12
+    },
+    {
+      "from": 6,
+      "to": 7,
+      "minutes": 9
+    },
+    {
+      "from": 7,
+      "to": 8,
+      "minutes": 11
+    },
+    {
+      "from": 8,
+      "to": 9,
+      "minutes": 12
+    },
+    {
+      "from": 9,
+      "to": 10,
+      "minutes": 9
+    },
+    {
+      "from": 10,
+      "to": 11,
+      "minutes": 10
+    },
+    {
+      "from": 11,
+      "to": 12,
+      "minutes": 11
+    }
+  ],
+  "totalWallClockMinutes": 130
+}

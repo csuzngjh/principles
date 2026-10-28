@@ -483,4 +483,17 @@ describe('F. per-attempt request-cap authorization binding', () => {
     expect(r.status).toBe(1);
     expect(r.out).toContain('maxRequestsPerAttempt must be a safe integer in [1, 40]');
   });
+
+  it('F7: invalid --repetitions values refuse at CLI argument validation (NaN / decimal / zero / negative / empty list)', () => {
+    const dir = copyStudy('reps-invalid');
+    approveF1(dir);
+    for (const bad of ['abc', '1.5', '0', '-1', ',', ',,']) {
+      const r = runCli(['--execution-mode', 'F1-direct-model', '--now', NOW, '--dry-run', '--repetitions', bad], dir);
+      expect(r.status).toBe(1);
+      expect(r.out).toContain('must be a comma-separated list of integers >= 1');
+    }
+    // A well-formed list equal to the frozen plan ([1]) still passes the gate.
+    const ok = runCli(['--execution-mode', 'F1-direct-model', '--now', NOW, '--dry-run', '--repetitions', '1'], dir);
+    expect(ok.status).toBe(0);
+  });
 });

@@ -40,7 +40,7 @@ import { adjudicateClaimEvidence } from './claim-evidence-scorer.mjs';
 import { runControlledActorLoop, SimulatedCrashError, perfectPlayActor, createGreedyObserverStub, createNaiveStub } from './challenge-actor.mjs';
 import { acquireStudyWriteLock, releaseStudyWriteLock, createChallengeLedger } from './challenge-ledger.mjs';
 import { buildStudyArms, auditArmIsolation, composeArmPrompt } from './challenge-arms.mjs';
-import { verifyStageRAuthorization, isOfflineStubActor, readStudyPlanHash, readObservedHostEvidence, readStageRAuthorization } from './challenge-stage-r-gate.mjs';
+import { verifyStageRAuthorization, isOfflineStubActor, readStudyPlanHash, readObservedHostEvidence, readStageRAuthorization, readAuthorizationRevocations } from './challenge-stage-r-gate.mjs';
 import { verifyF2ProbeEvidence } from './challenge-isolation-probe.mjs';
 
 export class FrozenStudyDriftError extends Error {
@@ -297,6 +297,7 @@ export async function runChallengeStudy({
           if (isRealMode) {
             gate = verifyStageRAuthorization({
               authorizationRecord,
+              retiredAuthorizations: readAuthorizationRevocations(), // archived-evidence records refused at ANY clock, any study copy (Owner P1-1 isolation scheme)
               bindings: {
                 studyId: frozen.studyId,
                 suiteHash: frozen.suiteHash,
