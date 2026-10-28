@@ -32,7 +32,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { verifyFrozenStudy, verifyArmConfigsFrozen, runChallengeStudy, STUB_STRATEGIES, RUNNER_EXECUTION_MODES } from './lib/challenge-runner.mjs';
-import { readStageRAuthorization, verifyStageRAuthorization, readStudyPlanHash } from './lib/challenge-stage-r-gate.mjs';
+import { readStageRAuthorization, verifyStageRAuthorization, readStudyPlanHash, readAuthorizationRevocations } from './lib/challenge-stage-r-gate.mjs';
 import { createRealModelActor, createAmdActorResponder } from './lib/challenge-actor-transport.mjs';
 import { INTERN_S2_BASE_URL, resolveInternS2ApiKey, BIGMODEL_CODING_BASE_URL, BIGMODEL_CODING_MODEL_ID, resolveBigmodelCodingApiKey } from './lib/challenge-amd-transport.mjs';
 import { createChallengeLedger } from './lib/challenge-ledger.mjs';
@@ -159,6 +159,7 @@ function verifyPlan(frozen, armCheck) {
   const auth = readStageRAuthorization(resolved);
   const gate = verifyStageRAuthorization({
     authorizationRecord: auth,
+    retiredAuthorizations: readAuthorizationRevocations(), // archived-evidence records refused at ANY clock (Owner P1-1 isolation scheme)
     bindings: {
       studyId: frozen.studyId,
       suiteHash: frozen.suiteHash,
