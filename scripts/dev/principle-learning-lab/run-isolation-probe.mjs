@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { verifyProbeAuthorization, readProbeAuthorization } from './lib/challenge-probe-authorization.mjs';
 import { runIsolationProbe, saveProbeEvidence, verifyF2ProbeEvidence } from './lib/challenge-isolation-probe.mjs';
 import { createCodexHostTransport } from './lib/host-actor.mjs';
-import { createProbeSideEffectScanner, ROUND_DIR_ALLOWLIST } from './lib/challenge-probe-side-effect-scanner.mjs';
+import { createProbeSideEffectScanner } from './lib/challenge-probe-side-effect-scanner.mjs'; // ROUND_DIR_ALLOWLIST is managed inside the scanner module (S5.2.1: unused-import cleanup, CodeQL)
 import { ZHIPU_CODING_PROVIDER, buildZhipuCodexOverrides, ensureZhipuProviderReady } from './lib/challenge-zhipu-host-provider.mjs';
 
 const labRoot = path.dirname(fileURLToPath(import.meta.url));
