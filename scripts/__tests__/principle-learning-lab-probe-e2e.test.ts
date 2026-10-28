@@ -45,7 +45,7 @@ function writeRuntimeTrajectory(sessionsDir: string, sessionId: string, modelId:
 /** The REAL adapter wired to a stub spawn: sessionId is derived from the round
  *  (unique per probe round), and the envelope carries the requested model and
  *  provider exactly as the real CLI would. */
-function makeStubTransport(roundsRoot: string, envelopeOverrides: (round: number) => Record<string, unknown> = () => ({})) {
+function makeStubTransport(roundsRoot: string, home: string, envelopeOverrides: (round: number) => Record<string, unknown> = () => ({})) {
   const spawnSessions: string[] = [];
   const stateDirs: string[] = [];
   const pinnedConfig = path.join(roundsRoot, 'stub-openclaw.json');
@@ -54,6 +54,7 @@ function makeStubTransport(roundsRoot: string, envelopeOverrides: (round: number
     model: APPROVED_MODEL,
     expectedProvider: APPROVED_PROVIDER,
     roundsRoot,
+    openclawHome: home, // S7 §四: explicit stub ambient root — never process.env
     configPath: pinnedConfig,
     versionProbe: () => ({ stdout: 'OpenClaw 2026.10.5 (1b58cb9)', status: 0 }),
     spawnProcess: (bin: string, args: string[]) => {
@@ -100,7 +101,7 @@ async function runChain(dir: string, opts: {
   const trajProvider = opts.trajectoryProvider === undefined ? APPROVED_PROVIDER : opts.trajectoryProvider;
   const envModel = opts.envelopeModel ?? 'glm-5.3-flash';
   const trajModel = opts.trajectoryModel ?? 'glm-5.3-flash';
-  const { transport, stateDirs } = makeStubTransport(roundsRoot, (round) => ({
+  const { transport, stateDirs } = makeStubTransport(roundsRoot, home, (round) => ({
     model: envModel,
     ...(envProvider === null ? { provider: undefined } : { provider: envProvider }),
     sessionId: `e2e-session-${String(round).padStart(2, '0')}`,
@@ -115,23 +116,27 @@ async function runChain(dir: string, opts: {
   const evidenceRef = saveProbeEvidence(studyDir, record);
   // S5.2: the runtime persists each session's trajectory under the per-round
   // STATE dir (--state-dir) — located from the REAL spawned args, not assumed.
-  if (opts.writeTrajectories !== false) {
+  if (opts.writeTrajectories !== false && record.sessionEvidence) {
     record.sessionEvidence.forEach((e: { sessionId: string; sessionsDir: string }, i: number) => {
       const trajModelForSession = Array.isArray(opts.trajectoryModel) ? opts.trajectoryModel[i] : trajModel;
       const trajProviderForSession = Array.isArray(opts.trajectoryProvider) ? opts.trajectoryProvider[i] : trajProvider;
       writeRuntimeTrajectory(e.sessionsDir, e.sessionId, trajModelForSession, trajProviderForSession);
     });
   }
+  // S7 §四: the ambient sessions dir per round — derived from the REAL spawned
+  // --state-dir when the record carries a map, else from the round dirs.
+  const ambientSessionsDir = (record.sessionEvidence && record.sessionEvidence[0] && record.sessionEvidence[0].sessionsDir)
+    || (stateDirs[0] ? path.join(stateDirs[0], 'agents', 'main', 'sessions') : path.join(roundsRoot, 'round-01-state', 'agents', 'main', 'sessions'));
   const deep = verifyF2ProbeEvidence({
     studyDir,
     evidenceRef,
     expected: { studyId: 'CEB-001', suiteHash },
     hostKind: 'openclaw',
-    openclawSessionsDir: sessionsDir,
-    openclawTrustedRoot: sessionsDir,
+    openclawSessionsDir: ambientSessionsDir,
+    openclawTrustedRoot: ambientSessionsDir,
     openclawExpectedProvider: opts.expectedProvider ?? APPROVED_PROVIDER,
     openclawExpectedModel: opts.expectedModel ?? APPROVED_MODEL,
-    openclawControlledRoot: roundsRoot,
+    openclawControlledRoot: ambientSessionsDir, // S7 §四: the ambient sessions dir the runtime actually used
     readOpenClawTrajectory: readOpenClawTrajectoryEvidence,
   });
   void home;
@@ -233,7 +238,7 @@ describe('S5.1 §三 — end-to-end offline probe chain (real production code pa
       expected: { studyId: 'CEB-001', suiteHash }, hostKind: 'openclaw',
       openclawSessionsDir: mapped.sessionsDir, openclawTrustedRoot: mapped.sessionsDir,
       openclawExpectedProvider: APPROVED_PROVIDER, openclawExpectedModel: APPROVED_MODEL,
-      openclawControlledRoot: path.join(dir, 'rounds'),
+      openclawControlledRoot: mapped.sessionsDir,
       readOpenClawTrajectory: readOpenClawTrajectoryEvidence,
     });
     expect(v.ok).toBe(false);
@@ -244,28 +249,27 @@ describe('S5.1 §三 — end-to-end offline probe chain (real production code pa
 });
 
 describe('S5.2 §四/§五 — runtime evidence map containment and side-effect scanner', () => {
-  it('a mapped sessionsDir OUTSIDE the controlled root is refused — self-reported paths are never trusted', async () => {
+  it('a FORGED location mismatch vs the ambient sessions dir is refused (S7 §四 negative, S5.2 escape refactored away)', async () => {
+    // S7 §四 refactored the location model: the map must EQUAL the verifier's
+    // independently derived ambient sessions dir; a location pointing anywhere
+    // else is a forgery and refuses before any trajectory read.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'probe-e2e-'));
     const { record } = await runChain(dir, { writeTrajectories: false });
-    fs.mkdirSync(path.join(dir, 'rounds'), { recursive: true }); // the controlled root must exist for containment checks
-    // tamper the RECORD's map so one session points outside the rounds root.
-    // The tampered record is written back to disk — the deep verifier reads the
-    // evidence FILE, and this is exactly the threat model: an evidence file
-    // whose map points outside the controlled root must refuse.
-    const outside = path.join(dir, 'outside-state', 'agents', 'main', 'sessions');
-    fs.mkdirSync(outside, { recursive: true });
-    record.sessionEvidence[0].sessionsDir = outside;
+    const forged = path.join(dir, 'forged-state', 'agents', 'main', 'sessions');
+    fs.mkdirSync(forged, { recursive: true });
+    record.sessionEvidence[0].sessionsDir = forged;
     fs.writeFileSync(path.join(dir, 'study', 'isolation-probes', 'PRI-1037.json'), JSON.stringify(record, null, 2));
     const deep = verifyF2ProbeEvidence({
       studyDir: path.join(dir, 'study'), evidenceRef: 'isolation-probes/PRI-1037.json',
       expected: { studyId: 'CEB-001', suiteHash }, hostKind: 'openclaw',
-      openclawSessionsDir: outside, openclawTrustedRoot: outside,
+      openclawSessionsDir: record.sessionEvidence[1].sessionsDir,
+      openclawTrustedRoot: record.sessionEvidence[1].sessionsDir,
       openclawExpectedProvider: APPROVED_PROVIDER, openclawExpectedModel: APPROVED_MODEL,
-      openclawControlledRoot: path.join(dir, 'rounds'),
+      openclawControlledRoot: record.sessionEvidence[1].sessionsDir,
       readOpenClawTrajectory: readOpenClawTrajectoryEvidence,
     });
     expect(deep.ok).toBe(false);
-    expect(deep.reasons.some((r) => r.includes('escapes the controlled root'))).toBe(true);
+    expect(deep.reasons.some((r) => r.includes('forged locations are refused'))).toBe(true);
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -340,5 +344,84 @@ describe('S5.2 §四/§五 — runtime evidence map containment and side-effect 
     expect(scan.crossGroupLeakage).toBe(0);
     expect(fs.readFileSync(path.join(round2, 'probe-message.txt'), 'utf8')).toBe('round-2 input');
     fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe('S7 §六 — fail-fast stop conditions (injected faults; zero real calls)', () => {
+  const dir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'probe-ff-'));
+
+  function makeFaultyTransport(fault: (round: number) => 'throw' | 'identity' | 'none') {
+    let n = 0;
+    const completeCalls: number[] = [];
+    const base = dir();
+    const cfgDir = path.join(base, 'cfg');
+    fs.mkdirSync(cfgDir, { recursive: true });
+    const cfg = path.join(cfgDir, 'openclaw.json');
+    fs.writeFileSync(cfg, '{}');
+    const t = createOpenClawHostTransport({
+      model: APPROVED_MODEL, expectedProvider: APPROVED_PROVIDER, roundsRoot: path.join(base, 'rounds'),
+      openclawHome: path.join(base, 'oc-home'),
+      configPath: cfg,
+      versionProbe: () => ({ stdout: 'v', status: 0 }),
+      spawnProcess: (bin: string, args: string[]) => {
+        n += 1; completeCalls.push(n);
+        const faultKind = fault(n);
+        const sessionId = `ff-${String(n).padStart(2, '0')}`;
+        const provider = faultKind === 'identity' ? 'gpt-6-luna' : APPROVED_PROVIDER.replace('zai/', '');
+        const model = faultKind === 'identity' ? 'gpt-6-luna' : 'glm-5.3-flash';
+        const env = faultKind === 'throw'
+          ? null
+          : { ok: true, status: 'ok', final: '{"executed":false,"refusalReason":"r"}', payloads: [], model, provider, sessionId };
+        const c: any = new EventEmitter();
+        c.stdout = new EventEmitter(); c.stderr = new EventEmitter();
+        c.kill = () => true;
+        process.nextTick(() => {
+          if (faultKind === 'throw') { c.emit('close', 1); }
+          else { c.stdout.emit('data', Buffer.from(JSON.stringify(env))); c.emit('close', 0); }
+        });
+        return c;
+      },
+    });
+    return { transport: t, completeCalls };
+  }
+
+  it('a first-round transport failure STOPS the run — later rounds are never executed (S7 §六)', async () => {
+    const studyDir = path.join(dir(), 'study');
+    fs.cpSync(ceb001, studyDir, { recursive: true });
+    const { transport, completeCalls } = makeFaultyTransport((n) => (n === 1 ? 'throw' : 'none'));
+    const record = await runIsolationProbe({
+      studyDir, hostTransport: transport, mode: 'real-host', now: Date.parse('2026-10-28T04:00:00Z'),
+      sideEffectScanner: () => ({ crossGroupLeakage: 0, productionWrites: 0, externalSideEffects: 0, unauthorizedExtraWrites: 0 }),
+      failFast: true,
+    });
+    expect(completeCalls).toHaveLength(1); // round 2..5 never executed
+    expect(record.status).toBe('FAILED');
+    const skipped = record.checks.filter((c: any) => String(c.reason || '').includes('skipped: execution stopped after round 1'));
+    expect(skipped.length).toBe(4);
+  });
+
+  it('an identity mismatch on a middle round stops the remaining rounds', async () => {
+    const studyDir = path.join(dir(), 'study');
+    fs.cpSync(ceb001, studyDir, { recursive: true });
+    const { transport, completeCalls } = makeFaultyTransport((n) => (n === 2 ? 'identity' : 'none'));
+    const record = await runIsolationProbe({
+      studyDir, hostTransport: transport, mode: 'real-host', now: Date.parse('2026-10-28T04:00:00Z'),
+      sideEffectScanner: () => ({ crossGroupLeakage: 0, productionWrites: 0, externalSideEffects: 0, unauthorizedExtraWrites: 0 }),
+      failFast: true,
+    });
+    expect(completeCalls.length).toBe(2); // rounds 3..5 never executed
+    expect(record.status).toBe('FAILED');
+  });
+
+  it('without failFast the legacy full-matrix behavior is unchanged (all five rounds run)', async () => {
+    const studyDir = path.join(dir(), 'study');
+    fs.cpSync(ceb001, studyDir, { recursive: true });
+    const { transport, completeCalls } = makeFaultyTransport(() => 'none');
+    const record = await runIsolationProbe({
+      studyDir, hostTransport: transport, mode: 'real-host', now: Date.parse('2026-10-28T04:00:00Z'),
+      sideEffectScanner: () => ({ crossGroupLeakage: 0, productionWrites: 0, externalSideEffects: 0, unauthorizedExtraWrites: 0 }),
+    });
+    expect(completeCalls).toHaveLength(5);
+    expect(record.status).toBe('PASSED');
   });
 });

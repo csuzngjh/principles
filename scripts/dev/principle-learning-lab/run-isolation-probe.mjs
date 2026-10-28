@@ -117,17 +117,18 @@ if (record.targetHost.kind === 'openclaw') {
     roundsRoot,
     openclawBin: openclawSpawn.bin,
     openclawPrefixArgs: openclawSpawn.prefixArgs,
+    openclawHome: record.targetHost.openclawHome, // S7 §四: explicit ambient root — never process.env
     configPath: path.join(record.targetHost.openclawHome, 'openclaw.json'), // pin the owner's config (zai provider + credentials)
     timeoutMsPerCall: record.caps.timeoutMsPerCall,
   });
   const sessionsDir = path.join(record.targetHost.openclawHome, 'agents', record.targetHost.openclawAgent || 'main', 'sessions');
   evidenceDispatch = {
     hostKind: 'openclaw',
-    openclawSessionsDir: sessionsDir,
+    openclawSessionsDir: sessionsDir, // S7 §四: the AMBIENT sessions dir — existing auth profile store stays reachable, trajectories persist there
     openclawTrustedRoot: sessionsDir,
     openclawExpectedProvider: expectedProvider,
     openclawExpectedModel: record.targetHost.requestedModelIdentity, // S5.1 §四: deep verification binds the AUTHORIZED model
-    openclawControlledRoot: roundsRoot, // S5.2 §四: mapped session dirs must live inside the controlled rounds root
+    openclawControlledRoot: sessionsDir, // S7 §四: mapped session dirs must resolve inside the ambient sessions root
     readOpenClawTrajectory: readOpenClawTrajectoryEvidence,
   };
 } else {
@@ -158,7 +159,7 @@ if (record.targetHost.kind === 'openclaw') {
 }
 transportFactoryCalls += 1;
 
-const probeRecord = await runIsolationProbe({ studyDir: copyDir, hostTransport: transport, mode: 'real-host', now: Date.now(), sideEffectScanner: scanner });
+const probeRecord = await runIsolationProbe({ studyDir: copyDir, hostTransport: transport, mode: 'real-host', now: Date.now(), sideEffectScanner: scanner, failFast: true }); // S7 §六: first failed round stops the run
 const evidenceRef = saveProbeEvidence(copyDir, probeRecord);
 const deep = verifyF2ProbeEvidence({ studyDir: copyDir, evidenceRef, expected: { studyId, suiteHash: record.frozenHashes.suiteHash }, ...evidenceDispatch });
 console.log(JSON.stringify({ ok: deep.ok && probeRecord.status === 'PASSED', probeStatus: probeRecord.status, evidenceRef, deepVerification: deep, workRoot }, null, 2));

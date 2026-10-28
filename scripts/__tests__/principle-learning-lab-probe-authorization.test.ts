@@ -26,6 +26,8 @@ const T0 = Date.parse('2026-10-28T03:00:00Z');
 const approvedOver = (over = {}) => JSON.parse(JSON.stringify({
   ...committed,
   status: 'APPROVED',
+  revokedAt: '', // S7 §七: empty while active
+  revokedReason: '',
   targetHost: { ...committed.targetHost, requestedModelIdentity: PROBE_AUTH_ALLOWED_MODELS[over.kind ?? committed.targetHost.kind]?.[0] ?? committed.targetHost.requestedModelIdentity },
   validFrom: '2026-10-28T00:00:00Z',
   validUntil: '2026-10-29T00:00:00Z',
@@ -39,19 +41,22 @@ function withExactKeys(rec) {
   if (r.blockage === undefined || r.blockage === null) {
     r.blockage = { reason: 'n/a (issued)' };
   }
+  if (r.revokedAt === undefined) r.revokedAt = ''; // S7 §七: empty while active
+  if (r.revokedReason === undefined) r.revokedReason = '';
   return r;
 }
 
 describe('probe authorization gate (fail-closed, PRI-1037 / S2-D3)', () => {
-  it('accepts the Owner-ISSUED APPROVED record inside its window (S6: real probe authorized)', () => {
+  it('refuses the REVOKED authorization (S7 §七: revocation takes effect immediately)', () => {
     const v = verifyProbeAuthorization({ record: committed, studyDir: ceb001, now: Date.now(), transportFactoryCalls: 0 });
-    expect(v.ok).toBe(true);
+    expect(v.ok).toBe(false);
+    expect(v.reasons.some((r) => r.includes("status is 'REVOKED'"))).toBe(true);
   });
 
-  it('still refuses outside the issued window (the clock is the revocation backstop)', () => {
-    const v = verifyProbeAuthorization({ record: committed, studyDir: ceb001, now: Date.parse('2030-01-01T00:00:00Z'), transportFactoryCalls: 0 });
-    expect(v.ok).toBe(false);
-    expect(v.reasons.some((r) => r.includes('authorization window closed'))).toBe(true);
+  it('would have accepted the APPROVED record inside its window — proven by un-revoking a copy (the clock is not what stopped it)', () => {
+    const unRevoked = withExactKeys({ ...committed, status: 'APPROVED', revokedAt: '', revokedReason: '' });
+    const v = verifyProbeAuthorization({ record: unRevoked, studyDir: ceb001, now: Date.parse('2026-10-28T11:00:00Z'), transportFactoryCalls: 0 });
+    expect(v.ok).toBe(true); // inside 10:10Z..16:10Z, hash-bound, keys exact
   });
 
   it('accepts an APPROVED record only with exact closed key set, live window, and recomputed frozen binding', () => {
@@ -76,7 +81,7 @@ describe('probe authorization gate (fail-closed, PRI-1037 / S2-D3)', () => {
     expect(verifyProbeAuthorization({ record: extra, studyDir: ceb001, now: T0 }).ok).toBe(false);
     const missing = withExactKeys(approvedOver()); delete missing.stopConditions;
     expect(verifyProbeAuthorization({ record: missing, studyDir: ceb001, now: T0 }).ok).toBe(false);
-    expect(PROBE_AUTH_KEYS).toHaveLength(13);
+    expect(PROBE_AUTH_KEYS).toHaveLength(15);
   });
 
   it('gate-order invariant: any transport factory call without a valid authorization is itself a refusal', () => {
@@ -92,8 +97,10 @@ describe('probe authorization gate (fail-closed, PRI-1037 / S2-D3)', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it('PIN: the committed record carries the Owner-issued APPROVED status, the 6h window and the approved channel (S6)', () => {
-    expect(committed.status).toBe('APPROVED'); // Owner 2026-10-28 probe approval
+  it('PIN: the committed record is REVOKED with revocation facts, the original window and the approved channel (S7 §七)', () => {
+    expect(committed.status).toBe('REVOKED'); // S7 §七: closed after the stop condition triggered
+    expect(committed.revokedAt).toBe('2026-10-28T11:20:00Z');
+    expect(committed.revokedReason).toContain('NEW authorization');
     expect(committed.issuedBy).toBe('owner-20261028-probe-approval');
     expect(committed.validFrom).toBe('2026-10-28T10:10:00Z');
     expect(committed.validUntil).toBe('2026-10-28T16:10:00Z'); // 6h window per the Owner approval
@@ -156,6 +163,7 @@ describe('OpenClaw host adapter contract (offline; injected spawn, zero real cal
     fs.writeFileSync(cfg, '{}'); // stub pinned config (S5.2.1: --config is mandatory)
     return createOpenClawHostTransport({
       model: 'zai/glm-5.3-flash', expectedProvider, roundsRoot: dir, configPath: cfg,
+      openclawHome: path.join(dir, 'stub-openclaw-home'), // S7 §四: explicit ambient root
       versionProbe: () => ({ stdout: 'OpenClaw 2026.10.5 (1b58cb9)', status: 0 }),
       spawnProcess,
     });

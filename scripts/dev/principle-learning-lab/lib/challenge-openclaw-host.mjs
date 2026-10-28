@@ -53,6 +53,19 @@ import path from 'node:path';
 export const OPENCLAW_TRAJECTORY_POINTER_SCHEMA = 'openclaw-trajectory-pointer';
 export const OPENCLAW_TRAJECTORY_SCHEMA = 'openclaw-trajectory';
 export const OPENCLAW_SYSTEM_PROMPT_CHANNEL = 'workspace-agents-md';
+/** S7 §四: the AMBIENT OpenClaw state root — where the shared auth store
+ *  (existing zai credentials) and the agents' persisted sessions live. The
+ *  probe deliberately does NOT repoint this (no --state-dir): repointing
+ *  yields an empty auth store (attempt-3 could never authenticate) and an
+ *  environment that no real user session resembles. */
+export function resolveAmbientStateRoot(env = process.env) {
+  const explicit = typeof env.OPENCLAW_STATE_DIR === 'string' && env.OPENCLAW_STATE_DIR.trim().length > 0 ? env.OPENCLAW_STATE_DIR.trim() : null;
+  const home = env.OPENCLAW_HOME || env.USERPROFILE || env.HOME;
+  if (explicit) return explicit;
+  if (home) return path.join(home, '.openclaw');
+  throw new Error('resolveAmbientStateRoot: cannot resolve the ambient OpenClaw state root (no OPENCLAW_STATE_DIR / OPENCLAW_HOME / USERPROFILE / HOME)');
+}
+
 export const OPENCLAW_PROBE_AGENTS_HEADER = '<!-- PRI-1037 isolation-probe system instructions (loaded by the OpenClaw runtime as workspace instruction context; NOT a provider-level system role message) -->\n\n';
 
 /** Fail-closed local probe: no openclaw binary ⇒ refuse transport creation
@@ -85,6 +98,7 @@ export function createOpenClawHostTransport({
   agent = 'main',
   openclawBin = 'openclaw',
   openclawPrefixArgs = [], // S5.2 env fix: e.g. [<node>, <openclaw.mjs>] when the npm shim is not directly spawnable on Windows
+  openclawHome, // S7 §四: the ambient OpenClaw state root (explicit — never process.env)
   configPath, // S5.2.1: the config file pinned via --config (owner's openclaw.json — zai provider + credentials)
   roundsRoot, // S5 P1-3: controlled root for per-round directories (inside the runner's workRoot)
   timeoutMsPerCall = 180_000,
@@ -108,6 +122,12 @@ export function createOpenClawHostTransport({
     throw new Error('createOpenClawHostTransport: timeoutMsPerCall must be a positive finite number');
   }
   const cliVersion = probeOpenclawVersion(openclawBin, openclawPrefixArgs, versionProbe);
+  // S7 §四: the ambient sessions dir is FIXED at construction, derived from
+  // the EXPLICIT openclawHome (runner/authorization supplied) — a library
+  // must never fall back to process.env here: in a test process that would
+  // resolve to the REAL user's OpenClaw sessions dir and stub writes would
+  // contaminate it (enforced by construction after the S5.2.1 leak).
+  const ambientSessionsDir = path.join(openclawHome, 'agents', agent, 'sessions');
   fs.mkdirSync(roundsRoot, { recursive: true });
 
   const identity = {
@@ -133,29 +153,25 @@ export function createOpenClawHostTransport({
     const agentsFile = path.join(roundDir, 'AGENTS.md');
     fs.writeFileSync(messageFile, userPrompt, 'utf8');
     fs.writeFileSync(agentsFile, OPENCLAW_PROBE_AGENTS_HEADER + systemPrompt + '\n', 'utf8');
-    // S5.2 §四: a per-round, caller-owned state dir. Without --state-dir the
-    // CLI creates an mkdtemp state under os.tmpdir() and DELETES it on exit
-    // (agent-exec.ts: temporaryStateDir) — the session trajectory would vanish
-    // with it. With --state-dir the session store, trajectory JSONL and
-    // pointer persist inside our controlled round dir. Config/provider
-    // resolution happens BEFORE the state-dir repoint (agent-exec.ts), so the
-    // approved zai channel and credentials are unaffected.
+    // S7 §四 (auth-path evidence): WITHOUT --state-dir the exec process keeps
+    // the ambient state root, where the SHARED AUTH STORE already holds the
+    // zai credentials (auth-profiles/path-resolve.ts: the store resolves from
+    // OPENCLAW_STATE_DIR + config machine state — a repointed state dir is an
+    // EMPTY store, which is why attempt-3 could never authenticate). The
+    // ambient state also has the plugins pre-installed (attempt-3's per-round
+    // state dirs show plugin installation consuming the entire 180s budget).
+    // Session isolation does NOT depend on --state-dir: every exec creates a
+    // fresh explicit session (own sessionId); workspace isolation comes from
+    // the per-round --cwd. Trajectories persist under the ambient
+    // agents/<agent>/sessions and are located there by the evidence map.
     //
     // S5.2.1 probe-round fix (real-execution evidence): the CLI option surface
-    // is `agent exec --help` (2026.10.5) — there is NO --agent flag (the agent
-    // resolves from config), and --isolated means "read NO config" (skips all
-    // authored config and its credential surfaces), which would make the
-    // approved zai provider unavailable. The probe therefore pins the OWNER'S
-    // config file via --config (read-only reference, reproducible, credentials
-    // loaded) and gets state/workspace isolation from --state-dir + --cwd —
-    // which are orthogonal to config resolution. Session isolation comes from
-    // exec itself (fresh explicit session per invocation).
-    const stateDir = path.join(roundDir, 'state');
-    fs.mkdirSync(stateDir, { recursive: true }); // S5.2.1 probe-round fix: --state-dir requires an EXISTING dir (real-execution evidence: ENOENT otherwise)
-    const sessionsDir = path.join(stateDir, 'agents', agent, 'sessions');
+    // is `agent exec --help` (2026.10.5) — there is NO --agent flag, and
+    // --isolated means "read NO config". The owner's config file is pinned via
+    // --config (read-only reference; reproducible; credentials loaded).
+    const sessionsDir = ambientSessionsDir;
     const args = [
       'agent', 'exec',
-      '--state-dir', stateDir,            // S5.2: persist the trajectory evidence inside the controlled round dir
       '--config', configPath,             // pin the owner's config (zai provider + credentials); never the ambient runtime snapshot
       '--model', model,
       '--cwd', roundDir,                  // S5 P1-3: the round dir IS the workspace for this round
@@ -222,7 +238,7 @@ export function createOpenClawHostTransport({
     if (roundIdentityStatus !== 'VERIFIED') {
       throw new Error(`openclaw exec round ${rounds} identity not VERIFIED (status=${roundIdentityStatus}, envelope model=${JSON.stringify(envelope.model ?? null)}, provider=${JSON.stringify(envelope.provider ?? null)}, expected provider=${JSON.stringify(expectedProvider)}) — refusing (S5 P1-2: provider mismatch is a hard refusal, never normalized)`);
     }
-    sessionRecords.push({ taskId, sessionId: envelope.sessionId, rounds: 1, elapsedMs, model: envelope.model ?? null, provider: envelope.provider ?? null, roundDir, stateDir, sessionsDir, systemPromptChannel: OPENCLAW_SYSTEM_PROMPT_CHANNEL });
+    sessionRecords.push({ taskId, sessionId: envelope.sessionId, rounds: 1, elapsedMs, model: envelope.model ?? null, provider: envelope.provider ?? null, roundDir, sessionsDir, stateDir: null /* ambient state root (S7 §四) */, systemPromptChannel: OPENCLAW_SYSTEM_PROMPT_CHANNEL });
 
     const payloadText = typeof envelope.final === 'string' && envelope.final.length > 0
       ? envelope.final

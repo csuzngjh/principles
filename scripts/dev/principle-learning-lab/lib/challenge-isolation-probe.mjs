@@ -135,7 +135,7 @@ function adversarialRounds({ studyDir, manifest }) {
  * repository's tests only ever use 'offline-rehearsal'. `now` is an INJECTED
  * clock (strict ISO record timestamp; no ambient clock is read).
  */
-export async function runIsolationProbe({ studyDir, hostTransport, mode = 'offline-rehearsal', now = null, sideEffectScanner = null }) {
+export async function runIsolationProbe({ studyDir, hostTransport, mode = 'offline-rehearsal', now = null, sideEffectScanner = null, failFast = false }) {
   const checks = [];
   const sessions = [];
   const record = {
@@ -180,7 +180,18 @@ export async function runIsolationProbe({ studyDir, hostTransport, mode = 'offli
   }
 
   // — adversarial rounds (each in its own opportunity → fresh session) —
+  // S7 §六 fail-fast: on a transport failure or an identity-non-VERIFIED
+  // round, the remaining rounds are NOT executed (each would burn real budget
+  // after the run is already doomed); they are recorded as FAILED with an
+  // explicit skipped-after-stop reason so the evidence stays complete.
+  let stoppedAfterRound = null;
+  let roundIndex = 0;
   for (const round of adversarialRounds({ studyDir, manifest })) {
+    roundIndex += 1;
+    if (stoppedAfterRound !== null) {
+      addResult(round.id, { ok: false, reason: `skipped: execution stopped after round ${stoppedAfterRound} (fail-fast, S7 §六)` }, null);
+      continue;
+    }
     let payload = null;
     let text = '';
     try {
@@ -192,9 +203,19 @@ export async function runIsolationProbe({ studyDir, hostTransport, mode = 'offli
     } catch (e) {
       sessions.push(null);
       addResult(round.id, { ok: false, reason: `probe round transport failure: ${e.message}` }, head(String(e.message || e)));
+      if (failFast) stoppedAfterRound = roundIndex;
       continue;
     }
-    addResult(round.id, round.classify(payload, text), head(text));
+    const verdict = round.classify(payload, text);
+    addResult(round.id, verdict, head(text));
+    if (failFast && !verdict.ok) {
+      stoppedAfterRound = roundIndex;
+      continue;
+    }
+    if (failFast && hostTransport.hostSnapshot && hostTransport.hostSnapshot().identityStatus !== 'VERIFIED') {
+      // identity regressed/never verified on a classify-passing round — stop
+      stoppedAfterRound = roundIndex;
+    }
   }
 
   // — session independence: every adversarial round reported a DISTINCT
@@ -367,21 +388,22 @@ export function verifyF2ProbeEvidence({ studyDir, evidenceRef, expected, codexHo
         reasons.push(`observed model '${observedModel}' is not the authorized model '${openclawExpectedModel}' (S5.1: envelope/trajectory mutual agreement on an unapproved model still refuses)`);
       }
     }
-    // S5.2 §四: locate each session through the runtime evidence map recorded
-    // at execution time. When the map exists, a session WITHOUT a map entry is
-    // refused (no silent fallback to the global dir — that would let an
-    // untracked session slip through), and every mapped sessionsDir must
-    // realpath-resolve INSIDE the runner-controlled root.
+    // S5.2 §四 + S7 §四: locate each session through the runtime evidence map
+    // recorded at execution time. When the map exists, a session WITHOUT a map
+    // entry is refused (no silent fallback), and every mapped sessionsDir must
+    // EQUAL the verifier-independently-derived ambient sessions dir — a map
+    // that points anywhere else is a forged location (self-reported paths are
+    // never trusted; the reader still applies its own realpath containment).
     const evidenceMap = Array.isArray(record.sessionEvidence) ? record.sessionEvidence : null;
-    if (evidenceMap !== null && typeof openclawControlledRoot !== 'string') {
-      return { ok: false, reasons: ['sessionEvidence present but openclawControlledRoot not provided — self-reported paths cannot be containment-checked (S5.2, fail-closed)'] };
+    if (evidenceMap !== null && typeof openclawSessionsDir !== 'string') {
+      return { ok: false, reasons: ['sessionEvidence present but openclawSessionsDir not provided — mapped locations cannot be cross-checked (S7, fail-closed)'] };
     }
-    let controlledReal = null;
-    if (evidenceMap !== null) {
+    let sessionsDirReal = null;
+    if (evidenceMap !== null && typeof openclawSessionsDir === 'string') {
       try {
-        controlledReal = fs.realpathSync(openclawControlledRoot);
-      } catch (e) {
-        return { ok: false, reasons: [`openclawControlledRoot unresolvable: ${e.message}`] };
+        sessionsDirReal = fs.realpathSync(openclawSessionsDir);
+      } catch {
+        sessionsDirReal = null; // the ambient sessions dir may not exist yet — mapped dirs that resolve are still checked against the un-resolved value
       }
     }
     for (const sessionId of new Set(sessions)) {
@@ -393,16 +415,22 @@ export function verifyF2ProbeEvidence({ studyDir, evidenceRef, expected, codexHo
           reasons.push(`probe session '${sessionId}' has no runtime evidence mapping — sessions without a recorded state location cannot be corroborated (S5.2, fail-closed)`);
           continue;
         }
-        let mappedReal = null;
-        try {
-          mappedReal = fs.realpathSync(mapped.sessionsDir);
-        } catch (e) {
-          reasons.push(`probe session '${sessionId}' mapped sessionsDir unresolvable: ${e.message}`);
+        if (mapped.sessionsDir !== openclawSessionsDir) {
+          reasons.push(`probe session '${sessionId}' mapped sessionsDir '${mapped.sessionsDir}' does not match the independently derived ambient sessions dir '${openclawSessionsDir}' — forged locations are refused (S7 §四)`);
           continue;
         }
-        if (!(mappedReal === controlledReal || mappedReal.startsWith(controlledReal + path.sep))) {
-          reasons.push(`probe session '${sessionId}' mapped sessionsDir '${mapped.sessionsDir}' escapes the controlled root '${openclawControlledRoot}' — self-reported paths are never trusted (S5.2)`);
-          continue;
+        if (sessionsDirReal !== null) {
+          let mappedReal = null;
+          try {
+            mappedReal = fs.realpathSync(mapped.sessionsDir);
+          } catch (e) {
+            reasons.push(`probe session '${sessionId}' mapped sessionsDir unresolvable: ${e.message}`);
+            continue;
+          }
+          if (sessionsDirReal === null || !(mappedReal === sessionsDirReal || mappedReal.startsWith(sessionsDirReal + path.sep))) {
+            reasons.push(`probe session '${sessionId}' mapped sessionsDir escapes the ambient sessions root — self-reported paths are never trusted (S7 §四)`);
+            continue;
+          }
         }
         sessionDir = mapped.sessionsDir;
         sessionTrustedRoot = mapped.sessionsDir;
