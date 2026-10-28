@@ -70,10 +70,11 @@ describe('credential sourcing (before any network action)', () => {
 
   it('reads from env or the key file (secure sources only)', () => {
     expect(resolveAmdApiKey({ env: { AMD_RADEON_API_KEY: 'k' } }).source).toBe('env:AMD_RADEON_API_KEY');
-    const f = path.join(os.tmpdir(), `amdkey-${Date.now()}`);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'amdkey-'));
+    const f = path.join(dir, 'key');
     fs.writeFileSync(f, 'filekey\n');
     expect(resolveAmdApiKey({ env: {}, keyFile: f })).toMatchObject({ source: `file:${f}`, key: 'filekey' });
-    fs.unlinkSync(f);
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 });
 
