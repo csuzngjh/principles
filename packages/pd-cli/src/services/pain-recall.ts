@@ -19,8 +19,23 @@
  * through openTrajectoryDbReadonly, state.db through RuntimeStateManager with
  * readonly:true + bootstrapIfMissing:false. Missing stays missing; unreadable
  * stays unreadable; neither is ever reported as an empty result.
+ *
+ * WAL safety (SPEC §6.1/§9.2; SPEC-PD-AGENT-CAPABILITY-API-001 v0.3 §10.3.1):
+ * both production databases are persisted in WAL journal mode. On a WAL
+ * database whose `-wal` sidecar is absent/empty, a plain readonly open
+ * CREATES `-wal`/`-shm` sidecars (independently reproduced 2026-10-28 on
+ * better-sqlite3 13.0.3, which cannot open `file:` URIs, so SQLite's
+ * immutable=1 zero-side-effect mode is unavailable). For that quiet-WAL case
+ * recall reads a staged temp copy of the main file — complete and current
+ * exactly because no non-empty `-wal` exists (all committed frames are
+ * checkpointed into the main file). If `-wal` activity appears during
+ * staging the source is reported unreadable instead of returning stale data
+ * or touching the workspace. WAL databases WITH a non-empty `-wal` (active
+ * or crashed writer) and non-WAL databases keep the direct readonly open,
+ * which creates nothing.
  */
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { readLedgerFileState } from '@principles/core/principle-tree-ledger';
 import { openTrajectoryDbReadonly } from '@principles/core/trajectory-store';
@@ -219,6 +234,90 @@ function safeParseRecord(json: string): Record<string, unknown> | null {
   }
 }
 
+// ── WAL-aware readonly open planning (strict read-only contract) ────────────
+
+type ReadonlyOpenPlan = 'direct' | 'stage-copy' | 'unverifiable';
+
+/** True when the db has no non-empty `-wal`: every committed transaction is
+ * already checkpointed into the main file, so the main file alone is a
+ * complete, current snapshot. */
+function walSidecarIsQuiet(dbPath: string): boolean {
+  try {
+    return fs.statSync(`${dbPath}-wal`).size === 0;
+  } catch {
+    return true; // no -wal sidecar at all
+  }
+}
+
+/**
+ * Decide how a database may be opened without violating the strict read-only
+ * contract. Classification is a plain 100-byte file-header read plus a stat
+ * of the `-wal` sidecar — no SQLite involvement, no side effects. A file
+ * whose header cannot be read, or that is WAL-mode with an unreadable
+ * header state, is 'unverifiable' so callers fail closed rather than risk an
+ * open that could create sidecars.
+ */
+function planReadonlyOpen(dbPath: string): ReadonlyOpenPlan {
+  let header: Buffer;
+  try {
+    const fd = fs.openSync(dbPath, 'r');
+    try {
+      header = Buffer.alloc(100);
+      if (fs.readSync(fd, header, 0, 100, 0) < 100) return 'unverifiable';
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return 'unverifiable';
+  }
+  if (header.subarray(0, 16).toString('latin1') !== 'SQLite format 3\u0000') {
+    return 'direct'; // not a SQLite file: let the real open fail exactly as before
+  }
+  // Header bytes 18/19 (file format write/read version): 2 = WAL, 1 = rollback journal.
+  const walMode = header[18] === 2 || header[19] === 2;
+  if (!walMode) return 'direct';
+  return walSidecarIsQuiet(dbPath) ? 'stage-copy' : 'direct';
+}
+
+interface StagedDbCopy {
+  stagingRoot: string;
+  dbPath: string;
+}
+
+function removeStagingRoot(root: string): void {
+  try {
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  } catch {
+    // Best effort only: a leftover temp dir never affects correctness.
+  }
+}
+
+/**
+ * Stage a quiet-WAL database for reading: copy the main file under a private
+ * temp root so the readonly open (and its unavoidable WAL/SHM machinery)
+ * happens beside the COPY, never beside the workspace database. The copy is
+ * verified fresh-or-fail: if the source grows a non-empty `-wal` while the
+ * copy runs, a writer became active and the copy can no longer be proven
+ * current, so staging fails and the caller reports the source unreadable.
+ * Returns null on any failure (the temp root is cleaned best-effort).
+ */
+function stageQuietWalCopy(sourceDbPath: string, relSegments: readonly string[]): StagedDbCopy | null {
+  const stagingRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pain-recall-stage-'));
+  let staged: StagedDbCopy | null = null;
+  try {
+    const stagedPath = path.join(stagingRoot, ...relSegments);
+    fs.mkdirSync(path.dirname(stagedPath), { recursive: true });
+    fs.copyFileSync(sourceDbPath, stagedPath);
+    if (!walSidecarIsQuiet(sourceDbPath)) return null; // writer raced in: refuse stale
+    staged = { stagingRoot, dbPath: stagedPath };
+    return staged;
+  } catch {
+    return null;
+  } finally {
+    if (staged === null) removeStagingRoot(stagingRoot);
+  }
+}
+
 // ── Main entry ───────────────────────────────────────────────────────────────
 
 export async function recallPains(workspaceDir: string, query: PainRecallQuery): Promise<PainRecallResult> {
@@ -254,32 +353,68 @@ export async function recallPains(workspaceDir: string, query: PainRecallQuery):
 
   // 3. state.db — strict readonly, no bootstrap. Missing/unreadable keeps the
   //    reuse-evidence edges alive and only degrades lineage + diagnoses.
+  //    Quiet-WAL databases are read through a staged temp copy so the open
+  //    cannot create -wal/-shm sidecars in the workspace (see WAL safety note
+  //    atop this module).
+  const stagedRoots: string[] = [];
   const stateDbPath = path.join(workspaceDir, '.pd', 'state.db');
   let stateDb: SourceAvailability = 'ok';
   let manager: RuntimeStateManager | null = null;
   if (!fs.existsSync(stateDbPath)) {
     stateDb = 'missing';
   } else {
-    try {
-      manager = new RuntimeStateManager({ workspaceDir, readonly: true, bootstrapIfMissing: false });
-      await manager.initialize();
-      // getDb() is lazy — force the readonly open NOW so a present-but-corrupt
-      // file is classified unreadable instead of surfacing per-query later.
-      // SQLite defers the header check to the first statement, hence the
-      // read-only liveness probe (SELECT 1 writes nothing).
-      manager.connection.getDb().prepare('SELECT 1 AS probe').get();
-    } catch {
-      manager = null;
+    const plan = planReadonlyOpen(stateDbPath);
+    let stateDbAccessRoot = workspaceDir;
+    if (plan === 'unverifiable') {
       stateDb = 'unreadable';
+    } else if (plan === 'stage-copy') {
+      const staged = stageQuietWalCopy(stateDbPath, ['.pd', 'state.db']);
+      if (staged === null) {
+        stateDb = 'unreadable';
+      } else {
+        stagedRoots.push(staged.stagingRoot);
+        stateDbAccessRoot = staged.stagingRoot;
+      }
+    }
+    if (stateDb === 'ok') {
+      try {
+        manager = new RuntimeStateManager({ workspaceDir: stateDbAccessRoot, readonly: true, bootstrapIfMissing: false });
+        await manager.initialize();
+        // getDb() is lazy — force the readonly open NOW so a present-but-corrupt
+        // file is classified unreadable instead of surfacing per-query later.
+        // SQLite defers the header check to the first statement, hence the
+        // read-only liveness probe (SELECT 1 writes nothing).
+        manager.connection.getDb().prepare('SELECT 1 AS probe').get();
+      } catch {
+        manager = null;
+        stateDb = 'unreadable';
+      }
     }
   }
 
   try {
     // 4. trajectory.db — the pain-event authority. Missing/unreadable is a
     //    source-level failure (recall's subject is the pain history itself).
+    //    Same quiet-WAL staging rule as state.db.
     let trajectoryDb: DatabaseLike;
     try {
-      trajectoryDb = openTrajectoryDbReadonly(workspaceDir);
+      const trajectoryDbPath = path.join(workspaceDir, '.state', 'trajectory.db');
+      let trajectoryAccessRoot = workspaceDir;
+      if (fs.existsSync(trajectoryDbPath)) {
+        const plan = planReadonlyOpen(trajectoryDbPath);
+        if (plan === 'unverifiable') {
+          throw new Error('readonly_precondition_failed: trajectory.db header/wal state unverifiable');
+        }
+        if (plan === 'stage-copy') {
+          const staged = stageQuietWalCopy(trajectoryDbPath, ['.state', 'trajectory.db']);
+          if (staged === null) {
+            throw new Error('readonly_precondition_failed: wal became active while staging trajectory.db');
+          }
+          stagedRoots.push(staged.stagingRoot);
+          trajectoryAccessRoot = staged.stagingRoot;
+        }
+      }
+      trajectoryDb = openTrajectoryDbReadonly(trajectoryAccessRoot);
       // SQLite defers the file-header check to the first statement (same as
       // state.db above): probe pain_events NOW so a corrupt file or a
       // schema-less database falls into the source_unreadable classification
@@ -577,6 +712,9 @@ export async function recallPains(workspaceDir: string, query: PainRecallQuery):
   } finally {
     if (manager !== null) {
       await manager.close().catch(() => undefined);
+    }
+    for (const root of stagedRoots) {
+      removeStagingRoot(root);
     }
   }
 }
