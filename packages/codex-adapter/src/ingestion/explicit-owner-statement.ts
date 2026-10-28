@@ -70,17 +70,17 @@ export type RecordOwnerStatementResult =
  *     attempting it and misreporting a missing substrate.
  */
 export async function recordExplicitOwnerStatement(args: {
-  rawPayload: unknown;
-  workspaceDir: string;
-  statementText: string;
-  env?: { CODEX_HOME?: string | undefined };
-  conversationIngestionEnabled: boolean;
   /**
    * Audit provenance: omitted = the native hook-read `PD记录痛苦：` prefix
    * entry; 'codex_explicit_agent' = the agent-assisted no-prefix bridge
    * (turn-context.ts). Admission semantics are identical either way.
    */
   explicitChannel?: 'codex_explicit_agent';
+  rawPayload: unknown;
+  workspaceDir: string;
+  statementText: string;
+  env?: { CODEX_HOME?: string | undefined };
+  conversationIngestionEnabled: boolean;
 }): Promise<RecordOwnerStatementResult> {
   const fields = extractFields(args.rawPayload);
   if (fields === null || fields.sessionId.length === 0 || fields.turnId === null) {
