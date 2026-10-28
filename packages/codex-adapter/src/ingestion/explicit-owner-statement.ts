@@ -70,6 +70,12 @@ export type RecordOwnerStatementResult =
  *     attempting it and misreporting a missing substrate.
  */
 export async function recordExplicitOwnerStatement(args: {
+  /**
+   * Audit provenance: omitted = the native hook-read `PD记录痛苦：` prefix
+   * entry; 'codex_explicit_agent' = the agent-assisted no-prefix bridge
+   * (turn-context.ts). Admission semantics are identical either way.
+   */
+  explicitChannel?: 'codex_explicit_agent';
   rawPayload: unknown;
   workspaceDir: string;
   statementText: string;
@@ -102,6 +108,7 @@ export async function recordExplicitOwnerStatement(args: {
     text: args.statementText,
     observedAt: new Date().toISOString(),
     explicitOwnerStatement: true,
+    ...(args.explicitChannel !== undefined ? { explicitChannel: args.explicitChannel } : {}),
   };
 
   const admitted = admitGovernanceSignals({ workspaceDir: args.workspaceDir, candidates: [candidate] });

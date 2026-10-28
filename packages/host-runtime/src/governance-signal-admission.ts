@@ -452,6 +452,14 @@ export interface GovernanceCorrectionCandidate {
    * dedup still apply unchanged.
    */
   readonly explicitOwnerStatement?: boolean;
+  /**
+   * Provenance distinction for explicit Codex statements: the native
+   * `PD记录痛苦：` prefix (hook-read Owner text, the default) vs the
+   * agent-assisted no-prefix entry (`pd pain explicit`, model-transcribed
+   * Owner words bound to the host-written live turn context). Audit-only:
+   * admission, rate limit and idempotency are identical either way.
+   */
+  readonly explicitChannel?: 'codex_explicit_prefix' | 'codex_explicit_agent';
 }
 
 export interface GovernanceToolFailureCandidate {
@@ -550,7 +558,9 @@ interface CorrectionPainArgs {
 
 function insertCorrectionPain({ db, candidate, workspaceDir, painId, detection, nowIso }: CorrectionPainArgs): string {
   const reason = candidate.explicitOwnerStatement === true
-    ? `${candidate.hostKind === 'workbuddy' ? 'WorkBuddy' : 'Codex'} explicit owner statement (PD记录痛苦 prefix)`
+    ? candidate.explicitChannel === 'codex_explicit_agent'
+      ? 'Codex explicit owner statement (agent-assisted, no prefix)'
+      : `${candidate.hostKind === 'workbuddy' ? 'WorkBuddy' : 'Codex'} explicit owner statement (PD记录痛苦 prefix)`
     : detection !== undefined && detection.matchedTerms.length > 0
       ? `User correction detected: ${detection.matchedTerms.join(', ')}`
       : 'User correction detected';
@@ -582,7 +592,7 @@ interface GovernanceTaskSubmissionPayload {
    * correction evidence (verbatim, classified) — never inside evidence[]
    * pseudo-trace entries and never summarized by an AI.
    */
-  readonly correctionEvidence?: { text: string; classification: 'owner_statement'; channel: 'codex_explicit_prefix' | 'workbuddy_explicit_prefix' };
+  readonly correctionEvidence?: { text: string; classification: 'owner_statement'; channel: 'codex_explicit_prefix' | 'codex_explicit_agent' | 'workbuddy_explicit_prefix' };
 }
 
 /**
@@ -643,7 +653,7 @@ function taskSubmissionPayload(candidate: GovernanceSignalCandidate, workspaceDi
       ...(candidate.explicitOwnerStatement === true
         ? { correctionEvidence: candidate.hostKind === 'workbuddy'
           ? { text: boundCorrectionEvidenceText({ text: candidate.text, classification: 'owner_statement', channel: 'workbuddy_explicit_prefix' }, workspaceDir).text, classification: 'owner_statement' as const, channel: 'workbuddy_explicit_prefix' as const }
-          : { text: sanitizeString(candidate.text, workspaceDir), classification: 'owner_statement' as const, channel: 'codex_explicit_prefix' as const } }
+          : { text: sanitizeString(candidate.text, workspaceDir), classification: 'owner_statement' as const, channel: candidate.explicitChannel === 'codex_explicit_agent' ? 'codex_explicit_agent' as const : 'codex_explicit_prefix' as const } }
         : {}),
     };
     return JSON.stringify(payload);
@@ -1138,7 +1148,7 @@ function isGovernanceTaskPayload(value: unknown): value is GovernanceTaskSubmiss
   const correctionEvidence = own(value, 'correctionEvidence');
   const hasOwnerStatement = isRecord(correctionEvidence)
     && own(correctionEvidence, 'classification') === 'owner_statement'
-    && (own(correctionEvidence, 'channel') === 'codex_explicit_prefix' && hostKind === 'codex'
+    && ((own(correctionEvidence, 'channel') === 'codex_explicit_prefix' || own(correctionEvidence, 'channel') === 'codex_explicit_agent') && hostKind === 'codex'
       || own(correctionEvidence, 'channel') === 'workbuddy_explicit_prefix' && hostKind === 'workbuddy')
     && typeof own(correctionEvidence, 'text') === 'string'
     && (own(correctionEvidence, 'text') as string).length > 0;

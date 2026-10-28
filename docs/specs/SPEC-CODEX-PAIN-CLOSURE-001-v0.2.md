@@ -170,6 +170,8 @@ Owner 提交反馈
 
 缺失或矛盾宿主 lineage 时在变更前拒绝并明确原因，不临时转成另一个宿主或 unbound。若当前 Codex 版本不支持声明的 Hook，必须解决兼容交付或停止发布正常工作的结论；不得将 unsupported 当主入口验收通过。
 
+无前缀 `pd pain explicit` bridge 的当前 turn 上下文按 Hook payload 的 `session_id` 分区保存，文件名只含该 session id 的 SHA-256 摘要。Hook 写入/清理以该事件 payload 的 session 身份为准；Stop 只清理 session 与 turn 均匹配的上下文，SessionStart 只清理自身 session。CLI 回读必须以宿主提供的 `CODEX_SESSION_ID` 选择分区；环境缺失，或同时提供的 `CODEX_THREAD_ID` 与之冲突时拒绝，不能读“最近文件”或接受模型传入的 lineage。CLI 还必须从当前 Workspace 的有效配置读取 `codex_conversation_ingestion`，并把真实开关传给现有登记链；配置无效时拒绝登记，不猜测开关状态。写新上下文失败时必须尝试撤回本 session 旧上下文并披露撤回失败。文件仍只含 lineage 与路径，不保存 prompt 或 transcript 内容。
+
 ## 7. 准入统一及持久化（CR-03）
 
 ### 7.1 权威与数据

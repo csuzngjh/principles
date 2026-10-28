@@ -14,6 +14,7 @@ import { CodexDecoderError, CodexEncoderError } from './codec/index.js';
 import { ingestCodexConversation } from './ingestion/ingestion.js';
 import { runGovernanceAdmission } from './ingestion/admission.js';
 import { parseOwnerStatementPrefix, recordExplicitOwnerStatement } from './ingestion/explicit-owner-statement.js';
+import { writeCurrentTurnContext, clearCurrentTurnContext } from './ingestion/turn-context.js';
 import { recordCodexPromptDeliveryEvidence, recordCodexDenyEvidence } from './codex-evidence-recorder.js';
 
 type EnvMap = Record<string, string | undefined>;
@@ -254,6 +255,18 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
   const ingestionEnabled = flags.codex_conversation_ingestion?.enabled === true;
 
   if (event.kind === 'turn_complete') {
+    // Withdraw the live turn context: once the turn completes, the
+    // agent-assisted explicit entry must fail closed (turn_context_missing)
+    // instead of binding an Owner statement to a finished turn. A withdrawal
+    // failure is surfaced as ONE bounded diagnostic (rc-9) — never silent.
+    const cleared = clearCurrentTurnContext({
+      workspaceDir: resolution.workspaceDir,
+      sessionId: event.context.sessionId,
+      ...(event.context.turnId !== undefined ? { turnId: event.context.turnId } : {}),
+    });
+    const clearDiagnostics = cleared.ok
+      ? []
+      : [diagnostic(`turn_context_${cleared.reason}`, 'The turn context could not be withdrawn; the agent-assisted explicit entry stays fail-closed only via its staleness bound. Inspect the workspace .state directory.')];
     // Stop is the turn-complete ingestion trigger (G1 §2): no dispatch route,
     // and Codex's Stop output schema has no hookSpecificOutput — the neutral
     // result is exactly `{}` on stdout (runtime contract: "PD emits empty
@@ -262,16 +275,22 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
     // turn on stderr — never stdout, and never on the per-tool events (that
     // would be per-event noise).
     const stderr = ingestionEnabled
-      ? await runConversationIngestion({ rawPayload: parsed, kind: event.kind, workspaceDir: resolution.workspaceDir, env: _env })
-      : [diagnostic('feature_disabled', 'Set features.codex_conversation_ingestion.enabled=true in the selected Workspace .pd/config.yaml to enable bounded conversation ingestion.')];
+      ? [...clearDiagnostics, ...await runConversationIngestion({ rawPayload: parsed, kind: event.kind, workspaceDir: resolution.workspaceDir, env: _env })]
+      : [...clearDiagnostics, diagnostic('feature_disabled', 'Set features.codex_conversation_ingestion.enabled=true in the selected Workspace .pd/config.yaml to enable bounded conversation ingestion.')];
     return { stdout: {}, exitCode: 0, stderr };
   }
 
   try {
     if (event.kind === 'session_start') {
+      // Belt for turn_complete: a fresh session must never inherit the
+      // previous session's turn context. Withdrawal failure → diagnostic.
+      const cleared = clearCurrentTurnContext({ workspaceDir: resolution.workspaceDir, sessionId: event.context.sessionId });
+      const clearDiagnostics = cleared.ok
+        ? []
+        : [diagnostic(`turn_context_${cleared.reason}`, 'The turn context could not be withdrawn; the agent-assisted explicit entry stays fail-closed only via its staleness bound. Inspect the workspace .state directory.')];
       const health = await createProductionHostRuntime({ hostKind: 'codex' }).health(resolution.workspaceDir);
-      if (!health.ok) return { stdout: {}, exitCode: 0, stderr: [diagnostic(health.reason ?? 'runtime_unhealthy', health.nextAction ?? 'Inspect the Workspace runtime.')] };
-      return { stdout: adapter.encodeOutput({ decision: 'allow', source: event.source }, 'session_start'), exitCode: 0, stderr: [] };
+      if (!health.ok) return { stdout: {}, exitCode: 0, stderr: [...clearDiagnostics, diagnostic(health.reason ?? 'runtime_unhealthy', health.nextAction ?? 'Inspect the Workspace runtime.')] };
+      return { stdout: adapter.encodeOutput({ decision: 'allow', source: event.source }, 'session_start'), exitCode: 0, stderr: clearDiagnostics };
     }
 
     // SPEC-CODEX-PAIN-CLOSURE-001 CR-07: the explicit Owner statement entry
@@ -295,6 +314,17 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
     let explicitStatementText: string | null = null;
     let explicitRejectReason: 'statement_empty' | 'statement_too_long' | undefined;
     if (event.kind === 'before_prompt_build') {
+      // Agent-assisted explicit registration bridge: publish THIS turn's
+      // host-verified identity (ids and paths only — never prompt text) so
+      // `pd pain explicit` can register the Owner's verbatim words through
+      // the same admission chain as the prefix entry, with the model never
+      // seeing or guessing lineage ids. Not gated by the ingestion flag; a
+      // write failure degrades only that entry (the prefix entry never
+      // needed this file).
+      const turnContext = writeCurrentTurnContext({ rawPayload: parsed, workspaceDir: resolution.workspaceDir, env: _env });
+      if (!turnContext.ok) {
+        explicitDiagnostics.push(diagnostic(`turn_context_${turnContext.reason}`, turnContext.nextAction));
+      }
       const rawRecord = parsed as Record<string, unknown>;
       const prefixParse = parseOwnerStatementPrefix(typeof rawRecord?.prompt === 'string' ? rawRecord.prompt : undefined);
       explicitPrefixMatched = prefixParse.matched;
