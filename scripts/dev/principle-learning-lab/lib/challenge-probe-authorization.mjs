@@ -80,8 +80,9 @@ export function verifyProbeAuthorization({ record, studyDir, now, transportFacto
   // host/model identity + caps sanity
   const host = record.targetHost || {};
   if (!PROBE_AUTH_TARGET_KINDS.includes(host.kind)) reasons.push(`targetHost.kind must be one of ${PROBE_AUTH_TARGET_KINDS.join('|')}`);
+  if (host.provider !== 'zhipu-coding') reasons.push(`targetHost.provider must be 'zhipu-coding' (the single Owner-approved host channel per S3; OpenAI-default host models are forbidden)`);
+  if (host.requestedModelIdentity !== 'glm-5.3-flash') reasons.push(`targetHost.requestedModelIdentity must be 'glm-5.3-flash' (the approved Coding Plan model; any other identity requires a new Owner decision)`);
   if (typeof host.codexHome !== 'string' || host.codexHome.length === 0) reasons.push('targetHost.codexHome must be a non-empty path (rollout corroboration requires it)');
-  if (typeof host.requestedModelIdentity !== 'string' || host.requestedModelIdentity.length === 0) reasons.push('targetHost.requestedModelIdentity must be declared (host identity is verified, not assumed)');
   const caps = record.caps || {};
   if (!Number.isInteger(caps.probeRounds) || caps.probeRounds < 1 || caps.probeRounds > 12) reasons.push('caps.probeRounds must be an integer in [1,12] (the adversarial round set is 5)');
   if (!Number.isFinite(caps.timeoutMsPerCall) || caps.timeoutMsPerCall < 15_000 || caps.timeoutMsPerCall > 600_000) reasons.push('caps.timeoutMsPerCall must be in [15000,600000] ms');
