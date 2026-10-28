@@ -29,7 +29,6 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     'evolution-types.ts',
     'empathy-types.ts',
     'correction-types.ts',
-    'principle-injection.ts',
     'principle-compiler/template-generator.ts',
   ] as const;
 

@@ -1,10 +1,15 @@
 # Pruning Pipeline
 
-> **Status**: Active
-> **最后更新**: 2026-05-31
+> **Status**: Partially retired
+> **最后更新**: 2026-10-28
+>
+> **2026-10-28 退役范围**：审查日志（`pruning-review-log.ts`）、注入掩码（`pruning-mask.ts`）
+> 以及 `pd runtime pruning review` / `pd runtime pruning rollback` 两条命令已删除。它们唯一的消费者是
+> legacy `<evolution_principles>` 注入块，该块在同日的 legacy 注入清理中一并移除。本文其余关于
+> PruningSignal 只读检测、L1 hard cap 与孤儿引用的描述仍然有效；涉及 review/mask 的段落保留为历史设计记录。
 > **关联**: `PD_ARCHITECTURE_OVERVIEW.md` §4.5, `DATA_ARCHITECTURE.md` §5.5, `INTERNALIZATION_PIPELINE.md` §6, ADR-0012
 
-本文档描述 PD 的修剪（Pruning）流水线：如何检测应被清理的原则、如何记录人工审查决策、以及未来如何执行实际修剪操作。
+本文档描述 PD 的修剪（Pruning）流水线：如何检测应被清理的原则、以及未来如何执行实际修剪操作。人工审查决策的记录机制（审查日志 + 注入掩码 + 两条 CLI 命令）已于 2026-10-28 退役，下文相关段落保留为历史设计记录。
 
 ---
 
@@ -61,7 +66,7 @@ Pruning Pipeline 的职责是**控制 Prompt 上下文压力**，确保活跃原
 | `recentCandidateCount > 0 && derivedPainCount === 0` | `stale:` |
 | `status === 'deprecated' \|\| status === 'archived'` | `status:` |
 
-### 2.2 Pruning Review
+### 2.2 Pruning Review（已退役 2026-10-28）
 
 人工审查决策，记录到 append-only JSONL 审计日志。决策类型：
 
@@ -71,7 +76,7 @@ Pruning Pipeline 的职责是**控制 Prompt 上下文压力**，确保活跃原
 | `defer` | 推迟决策，下次再审查 | 否 |
 | `archive-candidate` | 标记为候选归档，从 Prompt 注入中屏蔽 | 否 |
 
-**重要**：`archive-candidate` 不会修改 Ledger 中的原则状态。它仅将原则 ID 加入 Pruning Mask，在 Prompt 注入时跳过该原则。这是一个**可逆的软操作**，通过 `rollback` 命令即可恢复。
+**重要（历史设计，2026-10-28 已退役）**：`archive-candidate` 从不修改 Ledger 中的原则状态，只把原则 ID 加入 Pruning Mask，让 Prompt 注入跳过该原则；恢复靠 `rollback` 追加一条 `keep` 记录（LWW 语义）。`review` 命令 → mask 读取 → `rollback` 这三个环节已于 2026-10-28 整体删除，本节只保留当时的设计记录，**没有可用命令**。
 
 ### 2.3 Pruning Action
 
@@ -82,7 +87,7 @@ Pruning Pipeline 的职责是**控制 Prompt 上下文压力**，确保活跃原
 - 人工确认
 - 回滚计划
 
-### 2.4 Archive Candidate
+### 2.4 Archive Candidate（已退役 2026-10-28）
 
 当 operator 对某个原则做出 `archive-candidate` 审查决策后，该原则被称为 "Archive Candidate"。此状态**仅存在于 `pruning_reviews.jsonl`** 中，不反映在 Ledger 上。
 
@@ -104,12 +109,12 @@ flowchart TD
         PRM --> Orphans[OrphanDetectionResult]
     end
 
-    subgraph Review["Review and Audit - Append-Only"]
+    subgraph Review["Review and Audit - RETIRED 2026-10-28"]
         Signals --> Operator[Operator / pd-cli / pd-console]
         Operator --> |keep / defer / archive-candidate| ReviewLog[pruning_reviews.jsonl]
     end
 
-    subgraph Masking["Injection Masking"]
+    subgraph Masking["Injection Masking - RETIRED 2026-10-28"]
         ReviewLog --> Mask[buildMaskedPrincipleSet]
         Mask --> |TTL 60s cache| Prompt[Prompt Injection]
     end
@@ -126,8 +131,8 @@ flowchart TD
 **数据流说明**：
 
 1. **Signal Detection**：`PruningReadModel` 读取 Ledger 和 state.db，产出信号。纯只读，无副作用。
-2. **Review and Audit**：Operator 查看信号后做出审查决策，写入 append-only JSONL。
-3. **Injection Masking**：`buildMaskedPrincipleSet` 基于审查日志构建屏蔽集合，在 Prompt 注入时跳过被标记的原则。
+2. **Review and Audit**（已退役 2026-10-28）：Operator 查看信号后做出审查决策，写入 append-only JSONL。审查日志与写入它的 CLI 命令已删除。
+3. **Injection Masking**（已退役 2026-10-28）：`buildMaskedPrincipleSet` 曾基于审查日志构建屏蔽集合。它唯一的消费者是 legacy `<evolution_principles>` 注入块，已随该块一并删除。
 4. **Pruning Action**：实际修改 Ledger 的操作。**未实现**，需要独立 issue 推进。
 
 ---
@@ -139,8 +144,8 @@ flowchart TD
 | 文件 | 职责 | I/O |
 |------|------|-----|
 | `pruning-read-model.ts` | 信号检测、健康摘要、孤儿检测 | 只读：`.state/principle_training_state.json` + `.pd/state.db` |
-| `pruning-review-log.ts` | 审查决策的 append-only JSONL 日志 | 写入：`.state/pruning_reviews.jsonl` |
-| `pruning-mask.ts` | 基于审查日志构建屏蔽集合 + TTL 缓存 | 读：pruning_reviews.jsonl |
+| ~~`pruning-review-log.ts`~~ | 已删除（2026-10-28）：审查决策日志 | 遗留 `.state/pruning_reviews.jsonl` 已无读者 |
+| ~~`pruning-mask.ts`~~ | 已删除（2026-10-28）：注入掩码 + TTL 缓存 | 无 |
 | `l1-hard-cap.ts` | L1 活跃原则数硬上限（默认 12）+ LRU 淘汰计算 | 纯计算，无 I/O |
 
 ### 4.2 CLI 命令（`@principles/pd-cli`）
@@ -149,8 +154,6 @@ flowchart TD
 |------|------|---------|
 | `pd runtime pruning report` | 健康报告（watch/review 信号总览） | 无 |
 | `pd runtime pruning explain --principle-id <id>` | 单个原则的详细信号解释 | 无 |
-| `pd runtime pruning review --principle-id <id> --decision <decision>` | 记录人工审查决策 | `pruning_reviews.jsonl` |
-| `pd runtime pruning rollback --principle-id <id>` | 撤销 archive-candidate 标记 | `pruning_reviews.jsonl` |
 | `pd runtime pruning orphans` | 检测并可选清理孤儿引用 | 默认 dry-run；`--confirm` 时修改 ledger.json |
 
 ### 4.3 L1 Hard Cap
@@ -178,7 +181,7 @@ flowchart TD
 | 自动修剪触发 | 定期自动扫描并建议修剪 | PruningAction 实现后 |
 | pd-console Pruning UI | 可视化修剪仪表盘 | PruningAction 实现后 |
 | 批量修剪操作 | 一次审查多个原则 | 需要批量确认机制 |
-| 修剪历史报告 | 基于 pruning_reviews.jsonl 的趋势分析 | 需要聚合查询 |
+| ~~修剪历史报告~~ | 原拟基于 pruning_reviews.jsonl 的趋势分析 | 前提已失效（2026-10-28：写入方已删除，遗留文件无读者）|
 | 与 Activation Pipeline 联动 | 修剪后自动调整活跃原则集 | PruningAction 实现后 |
 | 修剪策略配置 | 可配置的 watch/review 阈值 | 当前硬编码 30/90 天 |
 
@@ -186,7 +189,7 @@ flowchart TD
 
 ## 6. Data Model and Stores
 
-### 6.1 Pruning Reviews JSONL
+### 6.1 Pruning Reviews JSONL（遗留数据，已无读者）
 
 **路径**：`{workspace}/.state/pruning_reviews.jsonl`
 
@@ -237,7 +240,7 @@ flowchart TD
 - 交叉验证 `derivedFromPainIds` 中的候选是否存在
 - 获取候选创建时间（用于计算 recent 候选数）
 
-### 6.4 Pruning Mask（内存缓存）
+### 6.4 Pruning Mask（已退役 2026-10-28）
 
 `pruning-mask.ts` 提供 `getCachedMaskedPrincipleSet()`：
 
@@ -263,9 +266,10 @@ pd runtime pruning explain --principle-id P_001
 pd runtime pruning report --json
 ```
 
-### 7.2 审查决策流程
+### 7.2 审查决策流程（已退役 2026-10-28）
 
 ```bash
+# 以下 review 命令已于 2026-10-28 删除，本节仅为历史流程记录
 # 第 1 步：查看 report，找到 watch/review 标记的原则
 pd runtime pruning report
 
@@ -278,9 +282,10 @@ pd runtime pruning review --principle-id P_043 --decision keep
 pd runtime pruning review --principle-id P_044 --decision defer
 ```
 
-### 7.3 撤销审查决策
+### 7.3 撤销审查决策（已退役 2026-10-28）
 
 ```bash
+# 以下 rollback 命令已于 2026-10-28 删除，本节仅为历史流程记录
 # 如果 archive-candidate 是误判，可以恢复
 pd runtime pruning rollback --principle-id P_042 --note "Restored: false positive"
 ```
@@ -318,11 +323,11 @@ pd runtime pruning orphans --confirm
 
 所有信号检测方法（`getPrincipleSignals`、`getHealthSummary`、`getOrphanDerivedCandidates`）均为纯只读。
 
-### 8.2 Append-Only Audit
+### 8.2 Append-Only Audit（已退役 2026-10-28）
 
 `PruningReviewLog` 是 append-only 的 JSONL 文件。审查决策不会覆盖或删除历史记录。LWW 语义在读取时通过 `buildMaskedPrincipleSet` 计算，不在写入时覆盖。
 
-### 8.3 Archive-Candidate Is Not Mutation
+### 8.3 Archive-Candidate Is Not Mutation（已退役 2026-10-28）
 
 `archive-candidate` 决策的效果**仅限于 Prompt 注入屏蔽**：
 
@@ -370,7 +375,7 @@ Pruning 和 Internalization 是互补的：
 Pruning 依赖 Ledger 作为主要数据源：
 
 - 读取原则的 `status`、`derivedFromPainIds`、`createdAt`
-- `archive-candidate` 审查决策不修改 Ledger（仅写入 pruning_reviews.jsonl）
+- ~~`archive-candidate` 审查决策不修改 Ledger（仅写入 pruning_reviews.jsonl）~~（2026-10-28 该决策已无写入方）
 - Orphan cleanup 是唯一修改 Ledger 的操作（清理 `derivedFromPainIds` 中的无效引用）
 
 ### 9.3 Activation Pipeline / Approval Queue

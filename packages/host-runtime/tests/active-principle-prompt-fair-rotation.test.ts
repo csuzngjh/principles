@@ -140,13 +140,14 @@ describe('buildActivePrinciplePromptContext — PRI-904 fair rotation (shared ro
     expect(result.truncated).toBe(false);
   });
 
-  it('all candidates excluded + roundKey: degrades to legacy without a NaN rotation start (CodeRabbit finding)', async () => {
+  it('empty candidate set + roundKey: degrades to legacy without a NaN rotation start (CodeRabbit finding)', async () => {
     const workspaceDir = tempWorkspace();
-    await seedPromptActivations(workspaceDir, [{ principleId: 'SH_X', text: 'excluded everywhere' }]);
+    // Real state.db with zero prompt activations, but a round key is supplied —
+    // the selector must still report legacy policy and omit the start index.
+    await seedPromptActivations(workspaceDir, []);
     const result = await buildActivePrinciplePromptContext({
       workspaceDir,
       roundKey: 12345,
-      excludePrincipleIds: new Set(['SH_X']),
     });
     expect(result.selectionPolicy).toBe('legacy_fifo_prefix_v1');
     expect(result.rotationStartIndex).toBeUndefined(); // not NaN — schema violation if serialized

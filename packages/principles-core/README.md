@@ -31,7 +31,7 @@ Three automated layers prevent I/O from leaking into core:
 | `sqlite-state-store` | `runtime-v2/store/sqlite-connection.ts`, `runtime-v2/store/runtime-state-manager.ts` | runtime-v2 state.db connection + manager |
 | `read-model` | 5 `*read-model*.ts` files | Read-only composite models querying state.db + ledger |
 | `audit-observability` | `candidate-audit.ts`, `pain-signal-observability.ts` | Audit + pain signal observability writers |
-| `remediation-review` | `internalization-integrity-remediation.ts`, `pruning-review-log.ts` | Integrity remediation + pruning review log |
+| `remediation-review` | `internalization-integrity-remediation.ts`, `recovery-actions-log.ts` | Integrity remediation + owner-action audit log |
 
 ### Adding a new I/O file (rare — prefer plugin)
 

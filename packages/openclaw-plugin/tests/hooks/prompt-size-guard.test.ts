@@ -66,24 +66,12 @@ vi.mock('../../src/core/session-tracker.js', () => ({
   getSession: vi.fn().mockReturnValue({ currentGfi: 20 }),
   resetFriction: vi.fn(),
   trackFriction: vi.fn(),
-  setInjectedProbationIds: vi.fn(),
-  clearInjectedProbationIds: vi.fn(),
   decayGfi: vi.fn(),
   getGfiDecayElapsed: vi.fn().mockReturnValue(0),
 }));
 
 vi.mock('../../src/core/path-resolver.js', () => ({
   PathResolver: { getExtensionRoot: vi.fn().mockReturnValue('/fake/extension') },
-}));
-
-vi.mock('../../src/core/principle-injection.js', () => ({
-  selectPrinciplesForInjection: vi.fn().mockReturnValue({
-    selected: [],
-    wasTruncated: false,
-    breakdown: { p0: 0, p1: 0, p2: 0 },
-    totalChars: 0,
-  }),
-  DEFAULT_PRINCIPLE_BUDGET: 3000,
 }));
 
 vi.mock('../../src/core/empathy-keyword-matcher.js', () => ({
@@ -172,7 +160,7 @@ describe('Size guard: fail-closed', () => {
     expect(totalSize).toBeLessThanOrEqual(9000);
   });
 
-  it('strips project_context and strips thinking_os/evolution_principles when inDiagMode and over limit', async () => {
+  it('strips project_context and thinking_os when inDiagMode and over limit', async () => {
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
 
     // A long reason string in the task so prependContext itself is large

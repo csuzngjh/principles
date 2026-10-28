@@ -21,7 +21,6 @@ import {
     type LedgerPrinciple,
     type PrincipleValueMetrics,
 } from './principle-tree-ledger.js';
-import type { Principle as ActivePrinciple } from './evolution-types.js';
 import { RuleHost } from './rule-host.js';
 import type { RuleHostLogger } from './rule-host.js';
 
@@ -191,21 +190,6 @@ export class WorkspaceContext {
             this._principleLifecycle = new PrincipleLifecycleService(this.workspaceDir, this.stateDir);
         }
         return this._principleLifecycle;
-    }
-
-    /**
-     * Retrieve active Principle -> Rule -> Implementation subtrees without bypassing reducer authority.
-     */
-    getActivePrincipleSubtrees(): { principle: ActivePrinciple; subtree: PrincipleSubtree }[] {
-        return this.evolutionReducer
-            .getActivePrinciples()
-            .map((principle) => {
-                const subtree = this.principleTreeLedger.getPrincipleSubtree(principle.id);
-                return subtree ? { principle, subtree } : null;
-            })
-            .filter(
-                (entry): entry is { principle: ActivePrinciple; subtree: PrincipleSubtree } => entry !== null,
-            );
     }
 
     private getTrajectoryOptions(): Omit<TrajectoryDatabaseOptions, 'workspaceDir'> {

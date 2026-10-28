@@ -1,7 +1,12 @@
 # Principle Lifecycle Review Workflow
 
-> Status: Active
+> Status: Historical (retired 2026-10-28)
 > Date: 2026-05-03
+>
+> The pruning review log, its injection mask and the `pd runtime pruning review` /
+> `rollback` commands described below were deleted on 2026-10-28 together with the
+> legacy `<evolution_principles>` injection block they served. Kept as the design record
+> of a retired workflow; do not treat the commands as available.
 > Related: PRI-23, PRI-24, PRI-25, PRI-26
 
 ## Overview

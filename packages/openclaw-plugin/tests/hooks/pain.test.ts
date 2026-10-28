@@ -6,7 +6,7 @@ import * as os from 'os';
 import * as ioUtils from '../../src/utils/io.js';
 import { WorkspaceContext } from '../../src/core/workspace-context.js';
 import { EventLogService } from '../../src/core/event-log.js';
-import { setInjectedProbationIds, clearSession } from '../../src/core/session-tracker.js';
+import { clearSession } from '../../src/core/session-tracker.js';
 import { resetTriggerCooldownForTest } from '../../src/hooks/after-tool-call-helpers.js';
 import { buildToolFailureObservation, resolveSourceKind } from '../../src/hooks/raw-observation-adapter.js';
 import { loadFeatureFlagFromConfig } from '../../src/core/pd-config-loader.js';
@@ -22,7 +22,6 @@ vi.mock('../../src/utils/trace-id.js', () => ({
 }));
 
 const mockEmitSync = vi.fn();
-const mockRecordProbationFeedback = vi.fn();
 const mockUpdatePrincipleValueMetrics = vi.fn();
 
 // PRI-360 S1: classifyToolFailureSource tests migrated to resolveSourceKind + buildToolFailureObservation
@@ -137,7 +136,6 @@ describe('Post-Write Checks & Pain Hook', () => {
     },
     evolutionReducer: {
       emitSync: mockEmitSync,
-      recordProbationFeedback: mockRecordProbationFeedback,
       getPrincipleById: vi.fn().mockImplementation((id: string) => id === 'p-match' ? ({ contextTags: ['write'], trigger: 'write' }) : ({ contextTags: ['bash'], trigger: 'bash' })),
     },
     resolve: vi.fn().mockImplementation((key) => {
@@ -149,7 +147,6 @@ describe('Post-Write Checks & Pain Hook', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockEmitSync.mockReset();
-    mockRecordProbationFeedback.mockReset();
     mockUpdatePrincipleValueMetrics.mockReset();
     vi.spyOn(WorkspaceContext, 'fromHookContextExplicit').mockReturnValue(mockWctx as any);
     vi.spyOn(EventLogService, 'get').mockReturnValue(mockEventLog as any);
@@ -258,23 +255,6 @@ describe('Post-Write Checks & Pain Hook', () => {
     }));
   });
 
-
-  it('should only attribute success feedback to matching probation principles', () => {
-    const mockCtx = { workspaceDir, sessionId: 's-success', api: { logger: {} } };
-    const mockEvent = {
-      toolName: 'write',
-      params: { file_path: 'src/main.ts' },
-      result: { exitCode: 0 },
-      error: undefined,
-    };
-
-    setInjectedProbationIds('s-success', ['p-match', 'p-other'], workspaceDir);
-
-    handleAfterToolCall(mockEvent as any, mockCtx as any);
-
-    expect(mockRecordProbationFeedback).toHaveBeenCalledWith('p-match', true);
-    expect(mockRecordProbationFeedback).not.toHaveBeenCalledWith('p-other', true);
-  });
 
   it('should emit evolution pain event for manual pain command', () => {
     const mockCtx = { workspaceDir, sessionId: 's2', api: { logger: {} } };
@@ -569,7 +549,6 @@ describe('Post-Write Checks & Pain Hook', () => {
 import {
   classifyToolCallOutcome,
   buildToolCallObservation,
-  handleProbationFeedback,
   evaluatePainAdmissionForToolCall,
 } from '../../src/hooks/after-tool-call-helpers.js';
 import type { ToolCallOutcome, ToolCallObservation } from '../../src/hooks/after-tool-call-types.js';

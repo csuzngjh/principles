@@ -8,8 +8,6 @@ import {
   getDefaultPdConfig,
   SqliteActivationStateStore,
   SqliteConnection,
-  appendPruningReview,
-  clearPruningMaskCache,
 } from '@principles/core/runtime-v2';
 import plugin from '../../src/index.js';
 import type { OpenClawPluginApi } from '../../src/openclaw-sdk.js';
@@ -29,7 +27,6 @@ vi.mock('../../src/core/config-health.js', async (importOriginal) => {
 });
 
 const PRINCIPLE_TEXT = 'When shared runtime correction, then follow the owner-approved shared runtime principle.';
-const MASKED_TEXT = 'When masked shared overlap, then preserve it through Runtime V2.';
 const BUDGET_TEXT = 'When budget omitted shared overlap, then preserve it through Runtime V2.';
 const RULE_REASON = 'SHARED_RUNTIME_DENY_523';
 const RULE_CODE = `
@@ -106,7 +103,6 @@ afterEach(() => {
   connection = undefined;
   WorkspaceContext.clearCache();
   EventLogService.disposeAll();
-  clearPruningMaskCache();
   if (workspaceDir) {
     try { fs.rmSync(workspaceDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }); } catch { /* Windows may retain native SQLite handles briefly */ }
   }
@@ -169,16 +165,6 @@ function seedLegacyProbation(input: { id: string; trigger: string; action: strin
     data: { principleId: input.id, from: 'candidate', to: 'probation', reason: 'bdd fixture', successCount: 0 },
   });
 }
-registry.given('an overlapping prompt principle is masked from legacy injection', async () => {
-  seedLegacyProbation({ id: 'P_MASKED_523', trigger: 'masked shared overlap', action: 'preserve it through Runtime V2', timestamp: new Date().toISOString() });
-  appendPruningReview(workspaceDir, { principleId: 'P_MASKED_523', decision: 'archive-candidate', note: 'BDD selected-only dedup' });
-  clearPruningMaskCache();
-  insertArtifact({ id: 'art-masked-523', kind: 'principle', principleId: 'P_MASKED_523', content: { principleId: 'P_MASKED_523', text: MASKED_TEXT } });
-  await activate({ id: 'art-masked-523', channel: 'prompt', action: 'prompt_activate', target: 'ledger://P_MASKED_523' });
-});
-registry.then('the Runtime V2 directive contains that masked overlap exactly once', () => {
-  expectPromptDirectiveExactlyOnce('P_MASKED_523', MASKED_TEXT);
-});
 registry.given('an overlapping prompt principle is omitted by the legacy prompt budget', async () => {
   const base = Date.now();
   for (let index = 0; index < 4; index += 1) {
@@ -210,7 +196,9 @@ registry.then('the returned system context contains that activated principle', (
   const append = Object.getOwnPropertyDescriptor(result, 'appendSystemContext')?.value;
   if (typeof prepend !== 'string' || typeof append !== 'string') throw new Error('Expected prompt context strings');
   expect(`${prepend}\n${append}`.split(PRINCIPLE_TEXT)).toHaveLength(2);
-  expect(prepend).not.toContain(`<directive id="P_SHARED_523"`);
+  // Runtime V2 is the single injection authority: the directive is rendered in
+  // prependSystemContext even though the legacy reducer also knows the principle.
+  expect(prepend).toContain(`<directive id="P_SHARED_523"`);
 
   EventLogService.disposeAll();
   const logsDir = path.join(workspaceDir, '.state', 'logs');
@@ -221,9 +209,8 @@ registry.then('the returned system context contains that activated principle', (
   if (typeof injection !== 'object' || injection === null) throw new Error('Expected Runtime V2 injection metadata');
   const data = Object.getOwnPropertyDescriptor(injection, 'data')?.value;
   expect(data).toEqual(expect.objectContaining({
-    injectedCount: 0,
-    skipReason: 'all_deduped_against_legacy',
-    nextAction: 'legacy evolution reducer already contains these principle IDs',
+    injectedCount: 1,
+    principleIds: ['P_SHARED_523'],
   }));
 });
 registry.given('an approved live RuleHost rule is active', async () => {

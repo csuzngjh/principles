@@ -233,7 +233,6 @@ export function createProductionHostRuntime(
   options: Partial<Pick<HostRuntimeOptions, 'afterToolCall'>> & {
     beforeToolCall?: HostRuntimePort;
     beforePromptBuild?: (event: HostEvent, prompt: Awaited<ReturnType<typeof buildActivePrinciplePromptContext>>) => HostEventResult | Promise<HostEventResult>;
-    promptExcludePrincipleIds?: (event: HostEvent) => ReadonlySet<string>;
     ruleContextProvider?: RuleContextProvider;
     ruleInputEnrichmentProvider?: RuleInputEnrichmentProvider;
     ruleImplementationRuntime?: RuleImplementationRuntime;
@@ -299,7 +298,6 @@ export function createProductionHostRuntime(
         : operatorDeclaredContextWindow(loadPdConfigForPlugin(event.context.workspaceDir).effective.config.promptBudget, promptBudgetHostKind);
       const prompt = await buildActivePrinciplePromptContext({
         workspaceDir: event.context.workspaceDir,
-        excludePrincipleIds: options.promptExcludePrincipleIds?.(event),
         promptBudget: resolvePromptBudget({
           // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: resolve ONCE per request
           // from the host's own hook facts (OpenClaw effective window /

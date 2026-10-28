@@ -519,10 +519,6 @@ export type { PainChainTrace, PainChainTraceLatencyMs, PainChainReadModelOptions
 export { PruningReadModel, removeOrphanReferencesFromLedger } from './pruning-read-model.js';
 export type { PrinciplePruningSignal, PruningHealthSummary, PruningReadModelOptions, PruningRiskLevel, OrphanDerivedCandidate, OrphanDetectionResult, RemovedOrphanReference } from './pruning-read-model.js';
 
-// Pruning review audit log (PRI-24)
-export { appendPruningReview, listPruningReviews } from './pruning-review-log.js';
-export type { PruningReviewDecision, PruningReviewRecord, AppendPruningReviewInput } from './pruning-review-log.js';
-
 // Recovery actions audit log (Governance Recovery Actions v1)
 export { appendRecoveryAction, listRecoveryActions } from './recovery-actions-log.js';
 export type {
@@ -826,9 +822,6 @@ export { generateFromTemplate } from './internalization/template-generator.js';
 export type { ValidationResult } from './internalization/rule-code-validator.js';
 export { checkForbiddenPatterns, checkReturnStatementsMissingFields, checkMatchedFalseDecisions } from './internalization/rule-code-validator.js';
 export type { CompileResult } from './internalization/compile-result.js';
-
-// Pruning mask — builds masked principle set from review log (PRI-48)
-export { buildMaskedPrincipleSet, getCachedMaskedPrincipleSet, clearPruningMaskCache } from './pruning-mask.js';
 
 // L1 Hard Cap & LRU Eviction (PRI-139)
 export { enforceL1HardCap, validateL1CapConfig, DEFAULT_L1_HARD_CAP, MAX_L1_HARD_CAP } from './l1-hard-cap.js';

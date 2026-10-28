@@ -72,8 +72,7 @@
     "test:all": "vitest run",
     "lint": "eslint \"src/**/*.ts\"",
     "bootstrap-rules": "node scripts/bootstrap-rules.mjs",
-    "compile-principles": "node scripts/compile-principles.mjs",
-    "sync-plugin": "node scripts/sync-plugin.mjs"
+    "compile-principles": "node scripts/compile-principles.mjs"
   },
   "devDependencies": {
     "@principles/host-runtime": "^0.14.0",
