@@ -32,19 +32,29 @@
  * readonly open, which creates nothing. The snapshot copies the main file
  * plus a non-empty `-wal` (the pair SQLite needs to recover un-checkpointed
  * commits; `-shm` is an index cache and is deliberately never copied — the
- * staged open regenerates it beside the copy). Consistency proof (see
- * stageWalSnapshot): the source (main, wal) pair is fingerprinted —
- * existence, size, SHA-256 — before the copy, the staged copies must match
- * those fingerprints, and the source pair must match them again after; any
- * drift means a writer raced the snapshot and the source is reported
- * `unreadable` instead of returning stale or torn data. SQLite's own
- * checksum-chained WAL recovery then provides frame-level consistency for
- * whatever quiescent-or-crashed state the verified pair captured. Not proven:
- * a writer whose entire commit cycle (write → checkpoint → wal delete) fits
- * entirely inside the fingerprint window leaves both endpoint fingerprints
- * equal to a *previous* state only if no byte changed; an ABA rewrite that
- * restores identical bytes is indistinguishable and out of threat scope for
- * a local single-owner workspace.
+ * staged open regenerates it beside the copy).
+ *
+ * Snapshot acceptance contract (proved in stageWalSnapshot): accept only when
+ * the staged copies byte-equal the source pair fingerprinted at T0 AND the
+ * source pair re-fingerprinted at T1 still byte-equals it — i.e. the staged
+ * bytes ARE the endpoint (T1) sample of the source. An ABA rewrite (writer
+ * commits, checkpoints, deletes the WAL, and the main file's bytes end up
+ * equal to T0) therefore cannot produce a stale acceptance: either a real
+ * SQLite commit survived to the endpoint — in which case the file change
+ * counter (header offset 24, monotonic under SQLite's own write path) and
+ * the checkpointed pages force the endpoint bytes to differ from T0 and the
+ * snapshot is rejected — or the bytes genuinely end at the T0 state, in
+ * which case the staged copy IS the current database state and returning it
+ * is fresh and correct, not stale. Remaining bounds are inherent to
+ * uncoordinated cross-file reads, not to this protocol: (a) each (main, wal)
+ * sample is two non-atomic reads, so a writer interleaving state-segment
+ * switches across both sampling rounds could in principle pair bytes from
+ * different moments (a surviving commit moves the main bytes, so such an
+ * interleaving must recur across T0 and T1); (b) writes landing after the
+ * T1 re-check are not reflected — an "always latest" contract requires
+ * writer coordination, which no available mechanism provides honestly (see
+ * the implementation report's option analysis for rejected alternatives A-C).
+ * Both bounds are disclosed rather than silently assumed away.
  */
 import * as fs from 'fs';
 import * as crypto from 'crypto';
@@ -386,7 +396,7 @@ type StagedSnapshotOutcome = { ok: true; root: string } | { ok: false };
  * copies under a private temp root laid out like the workspace (the caller's
  * readonly entry points then read `<root>/<relSegments>`).
  *
- * Consistency proof per snapshot:
+ * Consistency contract per snapshot:
  *   1. fingerprint (main, wal) at T0 — existence, size, SHA-256;
  *   2. copy main, plus the `-wal` when it is present and non-empty (the pair
  *      SQLite needs to recover un-checkpointed commits; `-shm` is never
@@ -395,12 +405,17 @@ type StagedSnapshotOutcome = { ok: true; root: string } | { ok: false };
  *   4. re-fingerprint the source pair at T1 — any drift (file changed,
  *      WAL created/deleted, sizes moved) rejects the snapshot.
  *
- * A verified pair equals the source pair at both endpoints; SQLite's
- * checksum-chained WAL recovery makes that quiescent-or-crashed state
- * consistent at frame granularity. Failure modes — mkdtemp failure, copy
- * failure, fingerprint drift, undecidable file states — all return
- * `{ ok: false }`; the caller reports the source `unreadable`. No sleep, no
- * timing assumptions: tests inject deterministic races through
+ * Acceptance ⇒ staged bytes == the endpoint (T1) sample of the source: the
+ * re-check reads the source AT T1, so a matching fingerprint makes the copy
+ * byte-identical to the current state, never older. An ABA sequence (commit
+ * → checkpoint → wal delete → endpoint bytes back at T0) resolves safely on
+ * both branches: a commit that survived to the endpoint moved the main bytes
+ * (monotonic file change counter + checkpointed pages) and is rejected; a
+ * sequence whose bytes genuinely end at T0 leaves the copy equal to the
+ * current state, so returning it is correct. Failure modes — mkdtemp
+ * failure, copy failure, fingerprint drift, undecidable file states — all
+ * return `{ ok: false }`; the caller reports the source `unreadable`. No
+ * sleep, no timing assumptions: tests inject deterministic races through
  * `painRecallSnapshotTestHooks`.
  */
 function stageWalSnapshot(sourceDbPath: string, relSegments: readonly string[]): StagedSnapshotOutcome {

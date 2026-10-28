@@ -620,4 +620,122 @@ describe('recallPains: deterministic snapshot-race and failure injection', () =>
       expect(fs.existsSync(root)).toBe(false); // cleanup ran on every failure path
     }
   });
+
+  // ── ABA / endpoint-equivalence contract (directive round 3) ──────────────
+  // Acceptance means: staged bytes == the endpoint (T1) sample of the source.
+  // These tests turn each branch of that contract into executable evidence.
+
+  it('real SQLite ABA full cycle mid-snapshot (commit→checkpoint→wal delete) is rejected (aba-1)', async () => {
+    const dir = makeWalWorkspace();
+    const tdbPath = path.join(dir, '.state', 'trajectory.db');
+    injectAfterCopyOn(tdbPath, (source) => {
+      // A real writer completes the ENTIRE commit cycle inside the fingerprint
+      // window: insert → commit → checkpoint → close (wal removed).
+      const writer = new Database(source);
+      writer.prepare(`INSERT INTO pain_events
+          (session_id, source, score, reason, severity, origin, confidence, text, canonical_pain_id, runtime_task_id, host_kind, created_at)
+        VALUES ('aba', 'manual', 20, 'aba commit', 'moderate', 'user_manual', NULL, NULL, 'pain-aba-100', NULL, NULL, '2026-10-08T10:00:00.000Z')`).run();
+      writer.pragma('wal_checkpoint(TRUNCATE)');
+      writer.close();
+    });
+    const result = await recallPains(dir, { requestedPrincipleId: P1, limit: 10 });
+    // The commit survived to the endpoint: the file change counter and the
+    // checkpointed pages force the main bytes away from T0, so the endpoint
+    // re-check MUST reject instead of returning a pre-commit view.
+    expect(result.status).toBe('source_unreadable');
+    expect(result.sources.trajectoryDb).toBe('unreadable');
+    expect(fs.existsSync(`${tdbPath}-wal`)).toBe(false); // cycle really completed
+  });
+
+  it('uncommitted writer rollback mid-snapshot: acceptance is correct and the rolled-back row is absent (aba-2)', async () => {
+    const dir = makeWalWorkspace();
+    const tdbPath = path.join(dir, '.state', 'trajectory.db');
+    const mainBefore = sha256(tdbPath);
+    injectAfterCopyOn(tdbPath, (source) => {
+      // Writer writes into the -wal but NEVER commits; close rolls back and
+      // removes the wal. The main file never changes.
+      const writer = new Database(source);
+      writer.exec('BEGIN');
+      writer.prepare(`INSERT INTO pain_events
+          (session_id, source, score, reason, severity, origin, confidence, text, canonical_pain_id, runtime_task_id, host_kind, created_at)
+        VALUES ('aba', 'manual', 20, 'never committed', 'moderate', 'user_manual', NULL, NULL, 'pain-aba-rolled', NULL, NULL, '2026-10-08T11:00:00.000Z')`).run();
+      writer.close(); // rolls the open transaction back
+    });
+    const result = await recallPains(dir, { requestedPrincipleId: P1, limit: 10 });
+    // The endpoint state genuinely is the T0 state (rollback left no trace),
+    // so acceptance is the correct, fresh answer — and the uncommitted row
+    // must not appear.
+    expect(result.status).toBe('ok');
+    expect(result.summary.returned).toBe(2);
+    expect(result.results.map((r) => r.painId)).not.toContain('pain-aba-rolled');
+    expect(sha256(tdbPath)).toBe(mainBefore);
+    expect(fs.existsSync(`${tdbPath}-wal`)).toBe(false);
+  });
+
+  it('byte-restoring ABA mid-snapshot: acceptance equals the restored endpoint state (aba-3)', async () => {
+    const dir = makeWalWorkspace();
+    const tdbPath = path.join(dir, '.state', 'trajectory.db');
+    const mainBefore = sha256(tdbPath);
+    const m0 = fs.readFileSync(tdbPath);
+    injectAfterCopyOn(tdbPath, (source) => {
+      // Real commit → checkpoint → close, THEN a non-SQLite byte-level
+      // restore of the T0 main image (the directive's endpoint-equal case).
+      const writer = new Database(source);
+      writer.prepare(`INSERT INTO pain_events
+          (session_id, source, score, reason, severity, origin, confidence, text, canonical_pain_id, runtime_task_id, host_kind, created_at)
+        VALUES ('aba', 'manual', 20, 'restored away', 'moderate', 'user_manual', NULL, NULL, 'pain-aba-restore', NULL, NULL, '2026-10-08T12:00:00.000Z')`).run();
+      writer.pragma('wal_checkpoint(TRUNCATE)');
+      writer.close();
+      fs.writeFileSync(source, m0);
+    });
+    const result = await recallPains(dir, { requestedPrincipleId: P1, limit: 10 });
+    // After the byte restore the CURRENT database state is M0 — the staged
+    // copy equals it, so returning it is fresh (never a stale view), and the
+    // restored-away row is not part of that state.
+    expect(result.status).toBe('ok');
+    expect(result.summary.returned).toBe(2);
+    expect(result.results.map((r) => r.painId)).not.toContain('pain-aba-restore');
+    expect(sha256(tdbPath)).toBe(mainBefore); // endpoint == T0 image
+    expect(fs.existsSync(`${tdbPath}-wal`)).toBe(false);
+  });
+
+  it('source main file disappears mid-snapshot: rejected and staging cleaned (aba-4)', async () => {
+    const dir = makeWalWorkspace();
+    const tdbPath = path.join(dir, '.state', 'trajectory.db');
+    const realMkdtemp = fs.mkdtempSync.bind(fs);
+    const createdRoots: string[] = [];
+    painRecallSnapshotTestHooks.mkdtempSync = (prefix: string) => {
+      const created = realMkdtemp(prefix);
+      createdRoots.push(created);
+      return created;
+    };
+    injectAfterCopyOn(tdbPath, (source) => {
+      fs.rmSync(source); // source vanishes after the copy
+    });
+    const result = await recallPains(dir, { requestedPrincipleId: P1, limit: 10 });
+    // The snapshot staging rejected (T1 re-check: present → absent), and the
+    // post-failure classification reports the file as it now IS — missing —
+    // per the "missing stays missing" contract. Either way: no ok, no
+    // no_matches, and the failed staging is cleaned.
+    expect(result.status).toBe('source_missing');
+    expect(result.sources.trajectoryDb).toBe('missing');
+    for (const root of createdRoots) {
+      expect(fs.existsSync(root)).toBe(false); // failed staging is cleaned
+    }
+  });
+
+  it('state.db changed mid-snapshot: state degrades unreadable while verifiable results survive (aba-5)', async () => {
+    const dir = makeWalWorkspace();
+    const sdbPath = path.join(dir, '.pd', 'state.db');
+    injectAfterCopyOn(sdbPath, (source) => {
+      fs.appendFileSync(source, 'writer-race-byte'); // state.db raced mid-snapshot
+    });
+    const result = await recallPains(dir, { requestedPrincipleId: P1, limit: 3 });
+    // trajectory.db (the pain authority) still reads; state.db degrades per
+    // its optional-source contract while the reuse-evidence rows survive.
+    expect(result.sources.trajectoryDb).toBe('ok');
+    expect(result.sources.stateDb).toBe('unreadable');
+    expect(result.status).toBe('partial');
+    expect(result.summary.returned).toBe(2);
+  });
 });

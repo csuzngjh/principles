@@ -140,3 +140,69 @@ Owner 评审对 round-1 修复指出 4 项缺陷；本节记录根因、修复�
 
 - 修复前（round-1）：`planReadonlyOpen`（journal→direct；WAL 安静→stage-copy 单文件；WAL 非空→**direct attach 工作区原库**）。
 - 修复后（round-2）：`planReadonlyOpen`（header 不可读→unverifiable；非 SQLite→direct；**journal→direct；任何 WAL→stage**）→ `stageWalSnapshot`（指纹 main+wal → 复制 main[+非空 wal] → 副本指纹校验 → 源配对复检 → 失败即拒绝并清理）→ 既有只读入口指向暂存根。CLI 参数/JSON/退出码/关联逻辑零变化。
+
+---
+
+## 10. Round 3：ABA 竞态的机制裁决与契约闭合（最终指令轮）
+
+Owner 指令要求机制性处理"字节还原式 ABA"（§三.3：主库/sidecar 最终字节可能恢复到初始指纹）。本轮先做严格推理与方案比较，再实施——结论是**契约表述错误修正 + 测试证明闭合**，而非叠加检查（伪修复禁令）。
+
+### 10.1 根因：round-2 报告把一个已闭合的洞表述为未闭合
+
+round-1 报告 §1.8"可能读到较旧一致状态（无检测）"是 **round-1 copy-then-check**（无终点复检）的真实性质；round-2 加入 T1 复检后，该洞已在机制上闭合，但表述被原样继承进 round-2 的"未证明边界"，造成"协议可能接受陈旧副本"的错误信号。严格重述 round-2 协议的接受条件：
+
+1. 副本校验通过 ⇒ 暂存字节 == T0 采样时刻的源字节；
+2. T1 复检通过 ⇒ **T1 采样时刻**的源字节 == T0 字节（复检读的就是终点时刻的字节）；
+3. ⇒ **接受 ⇔ 暂存副本 == 终点（T1）采样时刻的源**。
+
+推论：**"接受比终点陈旧的副本"在逻辑上不可能**——这正是"新鲜度契约"的正确形式化（线性化点 = T1 复检完成）。绝对最新语义（含 T1 之后、返回之前的写入）在无协调机制下对任何文件快照方案都不可满足，属机制下界而非本协议缺陷。
+
+### 10.2 ABA 三分支的机制归宿（每支都有测试证明）
+
+| 分支 | 终点字节 | 机制结果 | 测试 |
+|---|---|---|---|
+| 真实提交存活到终点（insert→commit→checkpoint→wal 删） | main 必变：file change counter（头部 offset 24，SQLite 写路径下单调）+ checkpoint 写回的数据页 | T1 复检失败 → **拒绝** | aba-1（真实 better-sqlite3 全周期注入 → source_unreadable） |
+| 未提交回滚（BEGIN→INSERT→close） | main 从未变；wal 随 close 消失 | (M0,∅)==T0 → **接受**；回滚行从未进入数据库状态，返回不含它 | aba-2（ok/returned 2/无回滚行/零副作用） |
+| 旁路字节还原（非 SQLite 写回 T0 镜像） | 终点状态就是 M0 | 副本 == 当前状态 → **接受是新鲜且正确**，被还原的行不在状态中 | aba-3（ok/returned 2/无还原行/终点==T0 镜像） |
+
+三分支均无"错误接受"。"counter 单调"不是概率论证：它是 SQLite 内核写路径的确定性协议（每次成功写事务递增 change counter），其失效形态（uint32 回绕、旁路覆写）分别属于 2^32 次事务量级与"任意文件破坏"威胁模型，与任何方案共同。
+
+### 10.3 方案比较（指令 §三 要求）
+
+| 方案 | 能保证 | 不能保证 | 触碰工作区 | 未 checkpoint 帧 | 与全部 writer 协调 | 失败语义 | 裁决 |
+|---|---|---|---|---|---|---|---|
+| **A 协调式快照**（writer 侧锁） | 参与者间绝对互斥 | **无法核实全覆盖**：旧版本进程、外部 sqlite3 CLI、任何旁路工具不参与；PD writer 唯一入口（core SqliteConnection 写模式）改造属跨包生产行为变更，console/plugin/hook 路径延迟敏感（keep-alive 事故前科）；锁超时/崩溃恢复需新契约 | 锁文件本身即新副作用 | 可 | 名义上，实际不可验证 | 锁失败需新增拒绝分类 | **不选**：指令明示"不能仅凭增加一个锁文件就宣称安全" |
+| **B SQLite 原生**（backup API / VACUUM INTO；better-sqlite3 13.0.3 均具 API） | 连接视角的一致视图（含 WAL 帧） | **必须先在源库建立连接**——只读打开 WAL 库本身即产生本轮要消除的 -wal/-shm 副作用，机制上循环依赖 | **是（打开即副作用）** | 可 | 不需要 | SQLite 错误路径 | **不可用**：与零副作用前提自相矛盾 |
+| **C OS 级快照**（VSS / 硬链接 / 普通锁） | VSS：卷级时点（前提成立时） | VSS 需管理员+卷影服务（本机/CI 部署前提不成立）；NTFS 硬链接非 CoW——writer 经句柄写 main 直达"副本"数据；普通文件锁无原子性 | VSS 否；硬链接是 | VSS 可；硬链接跟随写入 | 无关 | 平台特定 | **不可用** |
+| **D 现行指纹协议 + 终点等价契约（本轮裁决）** | 接受⇔副本==终点采样源（§10.1 证明）；真实提交必拒（§10.2） | 杂交窗口（配对两次非原子采样，见 10.4）；T1 后写入 | 否（全部在暂存区） | 可（配对恢复，ro-8/ro-10/ro-11 实证） | 不需要（写入方无感知） | 既有 unreadable/missing 分类，零新增 | **选**：唯一同时满足契约六不变量且可证明的方案 |
+
+### 10.4 残余边界（机制下界，如实披露，非本协议可消除）
+
+1. **配对非原子采样（杂交窗口）**：T0 与 T1 的 (main, wal) 各为两次独立读取。构造"源从未处于的接受配对"需要源状态段在这两轮共四次采样上呈现交错（例如 T0 读 main 在 checkpoint 前、读 wal 在 checkpoint 后，且 T1 复检同样交错）——由于存活提交必移 main 字节（change counter），该交错必须在两轮间重复出现。消除它需要 A（协调层，10.3 已裁不可用）或单文件存储格式——SQLite 官方对多文件一致读的答案（经由打开的连接）恰被零副作用契约禁止。
+2. **线性化点后写入**：T1 复检之后、结果返回之前的提交不反映。同属"绝对最新需协调"的下界。
+3. **架构前置条件（若 Owner 要求更强语义）**：绝对最新/绝对原子读取需要 writer 参与的协调层——应另立写入侧 SPEC（改 core SqliteConnection 写路径 + 全部 writer 升级 + 共存策略），不由本只读 PR 承载。
+
+### 10.5 Round-3 变更与测试
+
+**代码**：逻辑零变更（伪修复禁令禁止叠加冗余检查制造"已修复"假象）；修正模块注释与 `stageWalSnapshot` docstring 中的契约表述（终点等价语义 + ABA 两分支论证 + 残余边界），替换 round-2 的错误"未证明"段落。
+
+**新增测试**（全走 `recallPains()` 真实路径、真实 SQLite 写、注入缝确定性触发）：
+
+| 测试 | 场景 → 断言 |
+|---|---|
+| aba-1 | 真实全周期 ABA（insert→commit→checkpoint(TRUNCATE)→close，wal 删除）→ `source_unreadable` + wal 确已消失（证明存活提交必被拒） |
+| aba-2 | 未提交回滚（BEGIN→INSERT→close 回滚）→ `ok`/returned 2/**无回滚行**/main 哈希不变（未提交数据不污染接受） |
+| aba-3 | 字节还原式 ABA（真实提交后旁路写回 T0 镜像）→ `ok`/returned 2/**无还原行**/终点==T0 镜像（接受==当前状态，非陈旧） |
+| aba-4 | 复制后源 main 消失 → 拒绝（按"missing stays missing"契约分类 `source_missing`）+ 全部暂存 root 清理 |
+| aba-5 | state.db 复制期间被改 → `stateDb=unreadable`、`trajectoryDb=ok`、`partial`、2 行保留（state 侧可选源降级契约，与 trajectory 权威源拒绝语义分开验证） |
+
+### 10.6 Round-3 验证
+
+| 命令 | 结果 |
+|---|---|
+| `npx vitest run tests/commands/pain-recall-readonly.test.ts` | **23/23 PASS**（ro-1..11 + race-1..4 + inj-* + aba-1..5） |
+| `npx vitest run tests/commands/pain-recall.test.ts tests/commands/cli-command-tree.test.ts tests/commands/cli-help-snapshot.test.ts` | 110/110 PASS |
+| `npx tsc --noEmit` / `npx eslint src/services/pain-recall.ts` | PASS / PASS |
+| pd-cli 全量 | 见提交记录（round-3 全量结果随 CI 与提交附注） |
+| `npm run verify:merge`（本地，指令要求） | 结果见提交附注与最终交付报告（Windows 已知环境项以 CI Verify Merge Gate 为准绳并附对照证据） |
+| CI（新 head） | 以 GitHub Actions 实际收敛结果为准（最终报告引用） |
