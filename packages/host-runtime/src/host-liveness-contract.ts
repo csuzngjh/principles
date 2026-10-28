@@ -318,7 +318,7 @@ export function resolvePromotionHostLiveness(workspaceDir: string): PromotionHos
     );
   }
 
-  const governingKind = nonOpenClawKinds[0];
+  const [governingKind] = nonOpenClawKinds;
   if (governingKind !== 'codex' && governingKind !== 'workbuddy') {
     return promotionHostFailure(
       'promotion_host_unsupported',

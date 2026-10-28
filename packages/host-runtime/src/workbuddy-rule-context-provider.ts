@@ -66,8 +66,6 @@ export function createWorkbuddyRuleContextProvider(options: WorkbuddyRuleContext
   const projectDir = options.projectDir !== undefined ? path.resolve(options.projectDir) : undefined;
 
   return (request: ProductionRuleContextRequest): unknown => {
-    const canonicalKind = options.toolSemantics.resolve(request.toolName);
-    const targetKind = canonicalKind === 'agent' ? 'other' : canonicalKind;
     if (typeof request.sessionId !== 'string' || request.sessionId.trim().length === 0) {
       return unavailable('session_id_invalid');
     }
