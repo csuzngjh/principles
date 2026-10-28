@@ -92,3 +92,51 @@
 - 搜索"pain recall WAL sidecar readonly"等：**无既有工单描述本违约**（不适用规则 9 的链接义务；本次为 adhoc 修复）。
 - 相关未决工单：PRI-1004（[PRR/C1] 最小共享只读查询，Backlog——Gate C 语义，本修复是其只读前提之一）、PRI-1007（[PRR/D0] 三宿主及 Raw/MCP 扩展 Owner 裁决，Backlog——即决策卡 D-A/D-C 的正式裁决位）。
 - 本 SPEC 无对应 Linear 工单（SPEC 文档本身在另一任务工作区在途）。
+
+---
+
+## 9. Round 2：PR #2214 评审修复（P1-1/P1-2/P2-1/P2-2）
+
+Owner 评审对 round-1 修复指出 4 项缺陷；本节记录根因、修复与验证。评审发现全部是**对未合并修复 PR 的评审发现（caughtBy=pr-review），无生产逃逸**，根因分类：P1-1/P1-2 = 副作用契约爆炸半径不完整（ERR-172 教训的延伸——sidecar 契约不只"不创建"，还包括"不重写既有 -shm"与"复制窗口竞态"）；P2-1 = 错误吞并（EP-03：无条件 catch 把不可判定当安全）；P2-2 = 错误处理边界错位（EP-03）。均为既有模式实例，不另立新 ERR 记录。
+
+### P1-1 非空 WAL 路径仍有工作区副作用
+
+**根因**：round-1 对"非空 `-wal`（活跃 writer/崩溃残留）"保留直接 attach，依据是 R5/R6 实证"不创建新文件"。遗漏：① `-wal` 存在但 `-shm` 缺失时只读打开可能在工作区物化 `-shm`；② 既有 `-shm` 可能被 WAL-index 恢复重写。两者都是契约违约。
+**修复**：`pain-recall.ts` `planReadonlyOpen()` 重构（:351）——任何 WAL 模式头（bytes 18/19=2）一律返回 `'stage'`；工作区原库只在 rollback-journal 模式被直接打开。`stageWalSnapshot()`（:406）按四态分类（`classifyWalSidecar` :333）：absent/quiet → 只复制主库；active → **复制 (main, -wal) 配对**到临时区（`-shm` 刻意不复制——它只是索引缓存，暂存打开时由 SQLite 在副本旁重建）。配对副本经既有只读入口读取，SQLite 校验和链式 WAL 恢复给出帧级一致的未 checkpoint 提交。
+**测试**：ro-6 扩展（活跃 writer 的 -wal/-shm 哈希前后不变）；ro-8 扩展（崩溃残留 main+wal+shm 全部哈希不变）；新增 ro-10（非空 wal 无 shm：新鲜读取 + 工作区零新文件）；新增 ro-11（state.db 活跃 writer：未 checkpoint 诊断经配对快照新鲜可见 + 三文件哈希不变）。
+
+### P1-2 临时副本一致性/新鲜度竞态
+
+**根因**：round-1 `stageQuietWalCopy()` 的"复制→再查 wal 静默"两步无法证明副本与源在任一时间点一致，也无法探测复制期间主库变化。
+**修复**：`stageWalSnapshot()` 四段指纹协议（:410-439）：① T0 对 (main, wal) 指纹化（存在性+大小+SHA-256 流式哈希 `hashFileStreaming` :284，128KiB 分块）；② 复制（main + 非空 wal）；③ 暂存副本必须与 T0 指纹逐字节吻合（撕裂/篡改副本被拒）；④ T1 对源配对重新指纹化——任何漂移（文件变化/wal 出现或消失/大小移动）拒绝该副本。已验证配对 = 两端点一致的源配对；SQLite 校验和链对 quiescent-or-crashed 状态做帧级恢复。**未证明边界（如实陈述）**：若 writer 的完整写入周期（改 main → checkpoint → 删 wal）在指纹窗口内完成且净效果为"字节回到窗口起点状态"（ABA），指纹无法区分——本地单 Owner 工作线下此形态需要一次故意构造的往返重写，不在威胁模型内；此外配对在两端点间一致由"期间零字节变化"保证，这依赖 fs 级观察，不构成对所有并发交错的形式化证明。
+**确定性测试**（经 `painRecallSnapshotTestHooks.afterCopyFile` 注入，零时序依赖）：race-1（复制后改源主库 → 拒绝）、race-2（安静快照期间出现 wal → 拒绝）、race-3（快照中 wal 被删+主库重写：**endpoint wal 消失不等于接受旧副本**，拒绝而非返回含已删帧的 ok）、race-4（暂存副本被篡改 → 拒绝且工作区零变化）。
+
+### P2-1 WAL 状态检查错误吞并
+
+**根因**：`walSidecarIsQuiet()` 用无条件 `catch { return true }` 把 EACCES/EIO 等"无法判定"当"安静"——把未知当安全。
+**修复**：三态+失败关闭结构 `FileFingerprint`（absent/present(size,hash)/unverifiable，:277-317）与 `classifyWalSidecar()` 四值（absent/quiet/active/unverifiable，:333）；`fingerprintFile` 用 `isEnoent()`（Object.hasOwn 判定，符合 rc-5）区分 ENOENT 与其他错误；unverifiable 一律 `{ok:false}` → 来源 `unreadable`，不得返回 ok/no_matches。
+**测试**：四个状态各有行为级覆盖——absent（ro-5 安静路径）、size 0（ro-7）、非零（ro-6/ro-8/ro-10 配对路径）、stat 非 ENOENT（inj-stat：EACCES 注入 → source_unreadable + 工作区零变化）。
+
+### P2-2 mkdtempSync 在错误边界外
+
+**根因**：`stageQuietWalCopy()` 的 `mkdtempSync` 位于 try 外，临时目录不可创建时未处理异常直接逃逸（违反 rc-3/9 的分类失败语义）。
+**修复**：`stageWalSnapshot()` 中 mkdtemp 在 try 内（:418-419），任何失败走既有 `{ok:false}` 路径；state.db 按契约降级 `unreadable` 并保留仍可验证的 reuse-evidence 结果，trajectory.db 按权威源语义报 `source_unreadable`；`finally` 中失败路径清理已创建 root（:446），清理失败不掩盖主结果。
+**测试**：inj-mkdtemp-throw（注入失败：不抛、stateDb=unreadable、trajectoryDb=unreadable、工作区不变）；inj-mkdtemp-cleanup（mkdtemp 成功后复制失败：记录每个已创建 root，断言全部被清理）。
+
+### Round-2 验证记录
+
+| 命令 | 结果 |
+|---|---|
+| `npx vitest run tests/commands/pain-recall-readonly.test.ts` | **18/18 PASS**（ro-1..ro-11 + race-1..4 + inj-stat/inj-mkdtemp-throw/inj-mkdtemp-cleanup） |
+| `npx vitest run tests/commands/pain-recall.test.ts tests/commands/cli-command-tree.test.ts tests/commands/cli-help-snapshot.test.ts` | 110/110 PASS |
+| `npx tsc --noEmit`（pd-cli） | PASS |
+| `npx eslint packages/pd-cli/src/services/pain-recall.ts` | PASS（rc-5 警告已通过 Object.hasOwn 消除） |
+| `node .tmp/wal-repro/cli-smoke.mjs`（重建 dist 后真实 CLI 子进程，双场景） | **S1 quiet-WAL PASS**（ok/returned 1/零 sidecar/主库指纹不变）；**S2 active-WAL PASS**（ok/未 checkpoint 行新鲜可见/wal+shm+main 指纹全部不变/exit 0） |
+| pd-cli 全量 sanity | 见 round-2 提交信息与 CI；本机负载 flake 类与 round-1 相同（失败用例互不相同、隔离全绿） |
+
+**工作区 sidecar 前后指纹对比**：S1（安静）sidecar 数 0→0、主库哈希不变；S2（活跃）-wal/-shm/main 三者 SHA-256 前后一致；ro-6/ro-8/ro-10/ro-11/race-4 在测试级断言同一性质。
+
+### 修复前后调用路径
+
+- 修复前（round-1）：`planReadonlyOpen`（journal→direct；WAL 安静→stage-copy 单文件；WAL 非空→**direct attach 工作区原库**）。
+- 修复后（round-2）：`planReadonlyOpen`（header 不可读→unverifiable；非 SQLite→direct；**journal→direct；任何 WAL→stage**）→ `stageWalSnapshot`（指纹 main+wal → 复制 main[+非空 wal] → 副本指纹校验 → 源配对复检 → 失败即拒绝并清理）→ 既有只读入口指向暂存根。CLI 参数/JSON/退出码/关联逻辑零变化。

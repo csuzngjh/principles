@@ -19,7 +19,7 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import Database from 'better-sqlite3';
 
-import { recallPains } from '../../src/services/pain-recall.js';
+import { recallPains, painRecallSnapshotTestHooks } from '../../src/services/pain-recall.js';
 
 const P1 = '11111111-1111-4111-8111-111111111111';
 const PAIN_1 = 'pain-readonly-001';
@@ -269,6 +269,8 @@ describe('recallPains: WAL-mode strict read-only (production journal mode)', () 
     fs.writeFileSync(ledgerPath, JSON.stringify(parsed));
     const stateBefore = fs.readdirSync(path.join(dir, '.state')).sort();
     const pdBefore = fs.readdirSync(path.join(dir, '.pd')).sort();
+    const walBefore = sha256(`${tdbPath}-wal`);
+    const shmBefore = sha256(`${tdbPath}-shm`);
     try {
       const walBytes = fs.readFileSync(`${tdbPath}-wal`).length;
       expect(walBytes).toBeGreaterThan(0); // precondition: un-checkpointed frames exist
@@ -278,6 +280,10 @@ describe('recallPains: WAL-mode strict read-only (production journal mode)', () 
       // No NEW files in either directory (sidecars may pre-exist from the writer).
       expect(fs.readdirSync(path.join(dir, '.state')).sort()).toEqual(stateBefore);
       expect(fs.readdirSync(path.join(dir, '.pd')).sort()).toEqual(pdBefore);
+      // P1-1: the live writer's WAL and SHM must be untouched by the staged
+      // pair snapshot — not created, not deleted, not rewritten.
+      expect(sha256(`${tdbPath}-wal`)).toBe(walBefore);
+      expect(sha256(`${tdbPath}-shm`)).toBe(shmBefore);
     } finally {
       writer.close();
     }
@@ -337,6 +343,8 @@ describe('recallPains: WAL-mode strict read-only (production journal mode)', () 
     const crashTdb = path.join(crashDir, '.state', 'trajectory.db');
     const filesBefore = fs.readdirSync(path.join(crashDir, '.state')).sort();
     const mainBefore = sha256(crashTdb);
+    const walBefore = sha256(`${crashTdb}-wal`);
+    const shmBefore = sha256(`${crashTdb}-shm`);
 
     const result = await recallPains(crashDir, { requestedPrincipleId: P1, limit: 3 });
 
@@ -346,9 +354,87 @@ describe('recallPains: WAL-mode strict read-only (production journal mode)', () 
     expect(result.status).toBe('ok');
     expect(result.summary.returned).toBe(3);
     expect(result.results.map((r) => r.painId).sort()).toEqual([PAIN_1, PAIN_2, 'pain-readonly-004'].sort());
-    // No new files; the main db file is untouched (readers cannot checkpoint).
+    // P1-1: crash residue stays byte-identical — main AND both sidecars; the
+    // query may not rewrite the -shm via WAL-index recovery or remove anything.
     expect(fs.readdirSync(path.join(crashDir, '.state')).sort()).toEqual(filesBefore);
     expect(sha256(crashTdb)).toBe(mainBefore);
+    expect(sha256(`${crashTdb}-wal`)).toBe(walBefore);
+    expect(sha256(`${crashTdb}-shm`)).toBe(shmBefore);
+  });
+
+  it('non-empty WAL without any -shm reads fresh and creates no sidecar in the workspace (ro-10)', async () => {
+    // Crash-residue variant: db + non-empty wal, no shm at all. A direct
+    // readonly open would have to materialize a -shm beside the workspace db;
+    // the staged snapshot must read fresh without any workspace change.
+    const dir = makeWalWorkspace();
+    const tdbPath = path.join(dir, '.state', 'trajectory.db');
+    const writer = new Database(tdbPath);
+    writer.prepare(`INSERT INTO pain_events
+        (session_id, source, score, reason, severity, origin, confidence, text, canonical_pain_id, runtime_task_id, host_kind, created_at)
+      VALUES ('s5', 'manual', 40, 'no-shm crash', 'moderate', 'user_manual', NULL, NULL, ?, NULL, NULL, '2026-10-05T10:00:00.000Z')`).run('pain-readonly-005');
+    const crashDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pain-recall-crash-'));
+    tempDirs.push(crashDir);
+    fs.mkdirSync(path.join(crashDir, '.state'), { recursive: true });
+    fs.mkdirSync(path.join(crashDir, '.pd'), { recursive: true });
+    fs.copyFileSync(tdbPath, path.join(crashDir, '.state', 'trajectory.db'));
+    fs.copyFileSync(`${tdbPath}-wal`, path.join(crashDir, '.state', 'trajectory.db-wal'));
+    // deliberately NO -shm copy
+    fs.copyFileSync(path.join(dir, '.state', 'principle_training_state.json'), path.join(crashDir, '.state', 'principle_training_state.json'));
+    fs.copyFileSync(path.join(dir, '.pd', 'state.db'), path.join(crashDir, '.pd', 'state.db'));
+    writer.close();
+    const crashLedger = path.join(crashDir, '.state', 'principle_training_state.json');
+    const crashParsed = JSON.parse(fs.readFileSync(crashLedger, 'utf8')) as {
+      _tree: { principles: Record<string, { reuseEvidence?: unknown[] }> };
+    };
+    const evidence = (crashParsed._tree.principles[P1]!.reuseEvidence ?? []) as Record<string, unknown>[];
+    evidence.push({ painId: 'pain-readonly-005', candidateId: 'cand-5', decidedAt: '2026-01-05T00:00:00.000Z' });
+    crashParsed._tree.principles[P1]!.reuseEvidence = evidence;
+    fs.writeFileSync(crashLedger, JSON.stringify(crashParsed));
+
+    const crashTdb = path.join(crashDir, '.state', 'trajectory.db');
+    const filesBefore = fs.readdirSync(path.join(crashDir, '.state')).sort();
+    const mainBefore = sha256(crashTdb);
+    const walBefore = sha256(`${crashTdb}-wal`);
+
+    const result = await recallPains(crashDir, { requestedPrincipleId: P1, limit: 10 });
+
+    // Fresh: pain-readonly-005 exists only inside the -wal.
+    expect(result.status).toBe('ok');
+    expect(result.summary.returned).toBe(3);
+    expect(result.results.map((r) => r.painId)).toContain('pain-readonly-005');
+    // Strict: no -shm materialized, no existing file touched.
+    expect(fs.readdirSync(path.join(crashDir, '.state')).sort()).toEqual(filesBefore);
+    expect(fs.existsSync(`${crashTdb}-shm`)).toBe(false);
+    expect(sha256(crashTdb)).toBe(mainBefore);
+    expect(sha256(`${crashTdb}-wal`)).toBe(walBefore);
+  });
+
+  it('state.db live writer: committed diagnosis is read fresh from the -wal, workspace untouched (ro-11)', async () => {
+    const dir = makeWalWorkspace();
+    const sdbPath = path.join(dir, '.pd', 'state.db');
+    const writer = new Database(sdbPath);
+    writer.prepare(`INSERT INTO pain_diagnoses (id, pain_id, task_id, diagnosis_id, category, root_cause, evidence_json, confidence, artifact_id, created_at)
+      VALUES ('diag-live-1', ?, 'task-live', 'diagnosis-live', 'Tooling', 'un-checkpointed live root cause', '[]', 0.9, NULL, '2026-10-06T10:00:00.000Z')`).run(PAIN_1);
+    const filesBefore = fs.readdirSync(path.join(dir, '.pd')).sort();
+    const mainBefore = sha256(sdbPath);
+    const walBefore = sha256(`${sdbPath}-wal`);
+    const shmBefore = sha256(`${sdbPath}-shm`);
+    try {
+      const result = await recallPains(dir, { requestedPrincipleId: P1, limit: 3 });
+      expect(result.status).toBe('ok');
+      // Freshness through the staged pair: the diagnosis lives only in the
+      // un-checkpointed -wal of the live writer.
+      const diag = result.results.find((r) => r.painId === PAIN_1)?.diagnoses ?? [];
+      expect(diag.map((d) => d.rootCause)).toContain('un-checkpointed live root cause');
+      expect(result.sources.stateDb).toBe('ok');
+      // Workspace state.db trio untouched.
+      expect(fs.readdirSync(path.join(dir, '.pd')).sort()).toEqual(filesBefore);
+      expect(sha256(sdbPath)).toBe(mainBefore);
+      expect(sha256(`${sdbPath}-wal`)).toBe(walBefore);
+      expect(sha256(`${sdbPath}-shm`)).toBe(shmBefore);
+    } finally {
+      writer.close();
+    }
   });
 
   it('mixed modes: journal trajectory + quiet-WAL state.db stay side-effect free (ro-9)', async () => {
@@ -369,5 +455,169 @@ describe('recallPains: WAL-mode strict read-only (production journal mode)', () 
     expect(sidecarFiles(sdbPath)).toEqual([]);
     expect(sha256(tdbPath)).toBe(before.t);
     expect(sha256(sdbPath)).toBe(before.s);
+  });
+});
+
+describe('recallPains: deterministic snapshot-race and failure injection', () => {
+  afterEach(() => {
+    delete painRecallSnapshotTestHooks.statSync;
+    delete painRecallSnapshotTestHooks.mkdtempSync;
+    delete painRecallSnapshotTestHooks.afterCopyFile;
+  });
+
+  function injectAfterCopyOn(target: string, mutate: (source: string, staged: string) => void): void {
+    painRecallSnapshotTestHooks.afterCopyFile = (source: string, staged: string) => {
+      if (source === target) mutate(source, staged);
+    };
+  }
+
+  it('writer modifies the main file mid-snapshot: fingerprint drift rejects the copy (race-1)', async () => {
+    const dir = makeWalWorkspace();
+    const tdbPath = path.join(dir, '.state', 'trajectory.db');
+    injectAfterCopyOn(tdbPath, (source) => {
+      fs.appendFileSync(source, 'writer-race-byte'); // simulate a writer committing into the main file
+    });
+    const result = await recallPains(dir, { requestedPrincipleId: P1, limit: 3 });
+    // The post-copy source fingerprint no longer matches → trajectory is
+    // unreadable, never a possibly-stale ok/no_matches.
+    expect(result.status).toBe('source_unreadable');
+    expect(result.sources.trajectoryDb).toBe('unreadable');
+  });
+
+  it('writer commits a -wal transaction mid-snapshot: wal appearance rejects the copy (race-2)', async () => {
+    const dir = makeWalWorkspace(); // quiet: no -wal at snapshot start
+    const tdbPath = path.join(dir, '.state', 'trajectory.db');
+    expect(fs.existsSync(`${tdbPath}-wal`)).toBe(false);
+    injectAfterCopyOn(tdbPath, () => {
+      fs.writeFileSync(`${tdbPath}-wal`, Buffer.from('simulated-wal-commit')); // wal appears mid-snapshot
+    });
+    const result = await recallPains(dir, { requestedPrincipleId: P1, limit: 3 });
+    expect(result.status).toBe('source_unreadable');
+    expect(result.sources.trajectoryDb).toBe('unreadable');
+  });
+
+  it('writer completes checkpoint and deletes the -wal mid-snapshot: absence at the endpoint is not acceptance (race-3)', async () => {
+    // Crash-residue workspace: main WITHOUT the committed row + non-empty -wal
+    // WITH it (built by a real writer, copied open, writer then closed).
+    const sourceDir = makeWalWorkspace();
+    const sourceTdb = path.join(sourceDir, '.state', 'trajectory.db');
+    const writer = new Database(sourceTdb);
+    writer.prepare(`INSERT INTO pain_events
+        (session_id, source, score, reason, severity, origin, confidence, text, canonical_pain_id, runtime_task_id, host_kind, created_at)
+      VALUES ('s6', 'manual', 30, 'checkpoint race', 'moderate', 'user_manual', NULL, NULL, 'pain-race-006', NULL, NULL, '2026-10-07T10:00:00.000Z')`).run();
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pain-recall-race-'));
+    tempDirs.push(dir);
+    fs.mkdirSync(path.join(dir, '.state'), { recursive: true });
+    fs.mkdirSync(path.join(dir, '.pd'), { recursive: true });
+    fs.copyFileSync(sourceTdb, path.join(dir, '.state', 'trajectory.db'));
+    fs.copyFileSync(`${sourceTdb}-wal`, path.join(dir, '.state', 'trajectory.db-wal'));
+    fs.copyFileSync(path.join(sourceDir, '.state', 'principle_training_state.json'), path.join(dir, '.state', 'principle_training_state.json'));
+    fs.copyFileSync(path.join(sourceDir, '.pd', 'state.db'), path.join(dir, '.pd', 'state.db'));
+    writer.close();
+    // A stale-ok WOULD return pain-race-006 (it is in the copied -wal) — give
+    // it a ledger edge so "accepted the old copy" is maximally distinguishable
+    // from "rejected".
+    const ledgerPath = path.join(dir, '.state', 'principle_training_state.json');
+    const ledger = JSON.parse(fs.readFileSync(ledgerPath, 'utf8')) as {
+      _tree: { principles: Record<string, { reuseEvidence?: unknown[] }> };
+    };
+    const evidence = (ledger._tree.principles[P1]!.reuseEvidence ?? []) as Record<string, unknown>[];
+    evidence.push({ painId: 'pain-race-006', candidateId: 'cand-race', decidedAt: '2026-01-06T00:00:00.000Z' });
+    ledger._tree.principles[P1]!.reuseEvidence = evidence;
+    fs.writeFileSync(ledgerPath, JSON.stringify(ledger));
+
+    const tdbPath = path.join(dir, '.state', 'trajectory.db');
+    const mainBefore = sha256(tdbPath);
+    injectAfterCopyOn(`${tdbPath}-wal`, (source) => {
+      // Simulate checkpoint completion + wal removal mid-snapshot: the main
+      // file is rewritten and the -wal disappears at the endpoint.
+      fs.rmSync(source);
+      fs.appendFileSync(tdbPath, 'checkpoint-rewrote-main');
+    });
+
+    const result = await recallPains(dir, { requestedPrincipleId: P1, limit: 10 });
+
+    // Accepting the already-copied pair would return ok with pain-race-006
+    // from the deleted wal; the drifted endpoint fingerprints must reject it.
+    expect(result.status).toBe('source_unreadable');
+    expect(result.sources.trajectoryDb).toBe('unreadable');
+    expect(fs.existsSync(`${tdbPath}-wal`)).toBe(false);
+    expect(sha256(tdbPath)).not.toBe(mainBefore);
+  });
+
+  it('staged copy does not match the fingerprinted source: no ok is ever returned (race-4)', async () => {
+    const dir = makeWalWorkspace();
+    const tdbPath = path.join(dir, '.state', 'trajectory.db');
+    const stateDbPath = path.join(dir, '.pd', 'state.db');
+    const before = { t: sha256(tdbPath), s: sha256(stateDbPath) };
+    injectAfterCopyOn(tdbPath, (_source, staged) => {
+      fs.writeFileSync(staged, Buffer.from('tampered-copy-bytes')); // torn/corrupted copy
+    });
+    const result = await recallPains(dir, { requestedPrincipleId: P1, limit: 3 });
+    expect(result.status).toBe('source_unreadable');
+    expect(result.sources.trajectoryDb).toBe('unreadable');
+    // The workspace itself was never touched by the failed staging.
+    expect(sha256(tdbPath)).toBe(before.t);
+    expect(sha256(stateDbPath)).toBe(before.s);
+  });
+
+  it('-wal stat failure (non-ENOENT) fails closed as unreadable, never as quiet (inj-stat)', async () => {
+    const dir = makeWalWorkspace();
+    const tdbPath = path.join(dir, '.state', 'trajectory.db');
+    const stateDbPath = path.join(dir, '.pd', 'state.db');
+    const before = { t: sha256(tdbPath), s: sha256(stateDbPath), dirState: fs.readdirSync(path.join(dir, '.state')).sort() };
+    const realStat = fs.statSync.bind(fs);
+    painRecallSnapshotTestHooks.statSync = (p: string) => {
+      if (p.endsWith('-wal')) {
+        const err = new Error('EACCES: permission denied, stat (simulated)') as NodeJS.ErrnoException;
+        err.code = 'EACCES';
+        throw err;
+      }
+      return realStat(p);
+    };
+    const result = await recallPains(dir, { requestedPrincipleId: P1, limit: 3 });
+    // P2-1: an undecidable -wal state is unverifiable → source unreadable.
+    expect(result.status).toBe('source_unreadable');
+    expect(result.sources.trajectoryDb).toBe('unreadable');
+    expect(result.sources.stateDb).toBe('unreadable');
+    expect(sha256(tdbPath)).toBe(before.t);
+    expect(sha256(stateDbPath)).toBe(before.s);
+    expect(fs.readdirSync(path.join(dir, '.state')).sort()).toEqual(before.dirState);
+  });
+
+  it('mkdtemp failure: no throw, sources degrade per contract, nothing to leak (inj-mkdtemp-throw)', async () => {
+    const dir = makeWalWorkspace();
+    const stateDirFiles = fs.readdirSync(path.join(dir, '.state')).sort();
+    painRecallSnapshotTestHooks.mkdtempSync = () => {
+      throw new Error('simulated mkdtemp failure (EACCES)');
+    };
+    const result = await recallPains(dir, { requestedPrincipleId: P1, limit: 3 });
+    // P2-2: mkdtemp is inside the staging error boundary — the query returns
+    // a classified result instead of throwing; state.db degrades while
+    // trajectory.db (the pain authority) fails as source_unreadable.
+    expect(result.status).toBe('source_unreadable');
+    expect(result.sources.trajectoryDb).toBe('unreadable');
+    expect(result.sources.stateDb).toBe('unreadable');
+    expect(fs.readdirSync(path.join(dir, '.state')).sort()).toEqual(stateDirFiles);
+  });
+
+  it('staging root created then copy fails: root is removed on the failure path (inj-mkdtemp-cleanup)', async () => {
+    const dir = makeWalWorkspace();
+    const realMkdtemp = fs.mkdtempSync.bind(fs);
+    const createdRoots: string[] = [];
+    painRecallSnapshotTestHooks.mkdtempSync = (prefix: string) => {
+      const created = realMkdtemp(prefix);
+      createdRoots.push(created);
+      return created;
+    };
+    painRecallSnapshotTestHooks.afterCopyFile = () => {
+      throw new Error('simulated copy failure after staging');
+    };
+    const result = await recallPains(dir, { requestedPrincipleId: P1, limit: 3 });
+    expect(result.status).toBe('source_unreadable');
+    expect(createdRoots.length).toBeGreaterThanOrEqual(2); // state.db + trajectory.db both staged
+    for (const root of createdRoots) {
+      expect(fs.existsSync(root)).toBe(false); // cleanup ran on every failure path
+    }
   });
 });

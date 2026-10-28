@@ -21,20 +21,33 @@
  * stays unreadable; neither is ever reported as an empty result.
  *
  * WAL safety (SPEC §6.1/§9.2; SPEC-PD-AGENT-CAPABILITY-API-001 v0.3 §10.3.1):
- * both production databases are persisted in WAL journal mode. On a WAL
- * database whose `-wal` sidecar is absent/empty, a plain readonly open
- * CREATES `-wal`/`-shm` sidecars (independently reproduced 2026-10-28 on
+ * both production databases are persisted in WAL journal mode. Any readonly
+ * open of a WAL database can touch workspace files — a quiet WAL gains
+ * `-wal`/`-shm` sidecars, a missing `-shm` gets created, and an existing
+ * `-shm` can be rewritten by WAL-index recovery (all reproduced 2026-10-28 on
  * better-sqlite3 13.0.3, which cannot open `file:` URIs, so SQLite's
- * immutable=1 zero-side-effect mode is unavailable). For that quiet-WAL case
- * recall reads a staged temp copy of the main file — complete and current
- * exactly because no non-empty `-wal` exists (all committed frames are
- * checkpointed into the main file). If `-wal` activity appears during
- * staging the source is reported unreadable instead of returning stale data
- * or touching the workspace. WAL databases WITH a non-empty `-wal` (active
- * or crashed writer) and non-WAL databases keep the direct readonly open,
- * which creates nothing.
+ * immutable=1 zero-side-effect mode is unavailable). Therefore EVERY WAL-mode
+ * database is read through a staged, fingerprint-verified snapshot in a
+ * private temp directory; only rollback-journal databases keep the direct
+ * readonly open, which creates nothing. The snapshot copies the main file
+ * plus a non-empty `-wal` (the pair SQLite needs to recover un-checkpointed
+ * commits; `-shm` is an index cache and is deliberately never copied — the
+ * staged open regenerates it beside the copy). Consistency proof (see
+ * stageWalSnapshot): the source (main, wal) pair is fingerprinted —
+ * existence, size, SHA-256 — before the copy, the staged copies must match
+ * those fingerprints, and the source pair must match them again after; any
+ * drift means a writer raced the snapshot and the source is reported
+ * `unreadable` instead of returning stale or torn data. SQLite's own
+ * checksum-chained WAL recovery then provides frame-level consistency for
+ * whatever quiescent-or-crashed state the verified pair captured. Not proven:
+ * a writer whose entire commit cycle (write → checkpoint → wal delete) fits
+ * entirely inside the fingerprint window leaves both endpoint fingerprints
+ * equal to a *previous* state only if no byte changed; an ABA rewrite that
+ * restores identical bytes is indistinguishable and out of threat scope for
+ * a local single-owner workspace.
  */
 import * as fs from 'fs';
+import * as crypto from 'crypto';
 import * as os from 'os';
 import * as path from 'path';
 import { readLedgerFileState } from '@principles/core/principle-tree-ledger';
@@ -236,26 +249,104 @@ function safeParseRecord(json: string): Record<string, unknown> | null {
 
 // ── WAL-aware readonly open planning (strict read-only contract) ────────────
 
-type ReadonlyOpenPlan = 'direct' | 'stage-copy' | 'unverifiable';
+type ReadonlyOpenPlan = 'direct' | 'stage' | 'unverifiable';
 
-/** True when the db has no non-empty `-wal`: every committed transaction is
- * already checkpointed into the main file, so the main file alone is a
- * complete, current snapshot. */
-function walSidecarIsQuiet(dbPath: string): boolean {
+/**
+ * Deterministic fault-injection seam for snapshot-race tests — the same
+ * pattern as the runtime's databaseFactory seam (PR #2192). Every field is
+ * undefined in production; tests assign, then clear in a finally block.
+ */
+export const painRecallSnapshotTestHooks: {
+  /** Replaces statSync for fingerprinting/classification (throw to simulate EACCES/EIO). */
+  statSync?: (path: string) => fs.Stats;
+  /** Replaces mkdtempSync for staging-root creation (throw to simulate failure). */
+  mkdtempSync?: (prefix: string) => string;
+  /** Called after each source→staging copyFileSync with (source, staged). */
+  afterCopyFile?: (source: string, stagedPath: string) => void;
+} = {};
+
+function isEnoent(err: unknown): boolean {
+  if (!isRecord(err)) return false;
+  return Object.hasOwn(err, 'code') && err.code === 'ENOENT';
+}
+
+/**
+ * Three-state sidecar classification for one file: absent (ENOENT), present
+ * (with size + content hash for fingerprinting), or unverifiable (any other
+ * stat/hash failure — EACCES, EIO, …). Unverifiable is NEVER interpreted as
+ * absent: an undecidable file state fails closed at the caller.
+ */
+type FileFingerprint =
+  | { state: 'absent' }
+  | { state: 'present'; size: number; hash: string }
+  | { state: 'unverifiable' };
+
+function hashFileStreaming(filePath: string): string | null {
+  let fd: number;
   try {
-    return fs.statSync(`${dbPath}-wal`).size === 0;
+    fd = fs.openSync(filePath, 'r');
   } catch {
-    return true; // no -wal sidecar at all
+    return null;
+  }
+  try {
+    const hash = crypto.createHash('sha256');
+    const chunk = Buffer.alloc(128 * 1024);
+    for (;;) {
+      const read = fs.readSync(fd, chunk, 0, chunk.length, null);
+      if (read === 0) break;
+      hash.update(read === chunk.length ? chunk : chunk.subarray(0, read));
+    }
+    return hash.digest('hex');
+  } catch {
+    return null;
+  } finally {
+    try { fs.closeSync(fd); } catch { /* fd already closed */ }
+  }
+}
+
+function fingerprintFile(filePath: string): FileFingerprint {
+  let stats: fs.Stats;
+  try {
+    stats = (painRecallSnapshotTestHooks.statSync ?? fs.statSync)(filePath);
+  } catch (err: unknown) {
+    return isEnoent(err) ? { state: 'absent' } : { state: 'unverifiable' };
+  }
+  if (!stats.isFile()) return { state: 'unverifiable' };
+  const hash = hashFileStreaming(filePath);
+  return hash === null ? { state: 'unverifiable' } : { state: 'present', size: stats.size, hash };
+}
+
+function fingerprintsMatch(a: FileFingerprint, b: FileFingerprint): boolean {
+  if (a.state !== b.state) return false;
+  if (a.state === 'present' && b.state === 'present') {
+    return a.size === b.size && a.hash === b.hash;
+  }
+  return true; // same non-present state (both absent, or both unverifiable)
+}
+
+/** Four-valued WAL sidecar classification (P2-1): absent / quiet (size 0) /
+ * active (non-empty — live writer or crash residue) / unverifiable (any
+ * stat/hash failure). Unverifiable is never silently "quiet"; the snapshot
+ * fails closed on it. */
+type WalSidecarState = 'absent' | 'quiet' | 'active' | 'unverifiable';
+
+function classifyWalSidecar(walFingerprint: FileFingerprint): WalSidecarState {
+  switch (walFingerprint.state) {
+    case 'absent': return 'absent';
+    case 'unverifiable': return 'unverifiable';
+    case 'present': return walFingerprint.size === 0 ? 'quiet' : 'active';
   }
 }
 
 /**
  * Decide how a database may be opened without violating the strict read-only
- * contract. Classification is a plain 100-byte file-header read plus a stat
- * of the `-wal` sidecar — no SQLite involvement, no side effects. A file
- * whose header cannot be read, or that is WAL-mode with an unreadable
- * header state, is 'unverifiable' so callers fail closed rather than risk an
- * open that could create sidecars.
+ * contract. Classification is a plain 100-byte file-header read — no SQLite
+ * involvement, no side effects. Any WAL-mode header routes to 'stage': a
+ * readonly open of a WAL database can create or rewrite workspace sidecars
+ * (missing `-shm`, quiet `-wal`, WAL-index recovery), so the workspace
+ * original is never opened directly. A file whose header cannot be read is
+ * 'unverifiable' (fail closed); a non-SQLite file is 'direct' so the real
+ * open fails exactly as before.
  */
 function planReadonlyOpen(dbPath: string): ReadonlyOpenPlan {
   let header: Buffer;
@@ -275,46 +366,84 @@ function planReadonlyOpen(dbPath: string): ReadonlyOpenPlan {
   }
   // Header bytes 18/19 (file format write/read version): 2 = WAL, 1 = rollback journal.
   const walMode = header[18] === 2 || header[19] === 2;
-  if (!walMode) return 'direct';
-  return walSidecarIsQuiet(dbPath) ? 'stage-copy' : 'direct';
-}
-
-interface StagedDbCopy {
-  stagingRoot: string;
-  dbPath: string;
+  return walMode ? 'stage' : 'direct';
 }
 
 function removeStagingRoot(root: string): void {
   try {
     fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   } catch {
-    // Best effort only: a leftover temp dir never affects correctness.
+    // Best effort only: a leftover temp dir never affects correctness, and a
+    // cleanup failure must not mask the outcome already decided here.
   }
 }
 
+type StagedSnapshotOutcome = { ok: true; root: string } | { ok: false };
+
 /**
- * Stage a quiet-WAL database for reading: copy the main file under a private
- * temp root so the readonly open (and its unavoidable WAL/SHM machinery)
- * happens beside the COPY, never beside the workspace database. The copy is
- * verified fresh-or-fail: if the source grows a non-empty `-wal` while the
- * copy runs, a writer became active and the copy can no longer be proven
- * current, so staging fails and the caller reports the source unreadable.
- * Returns null on any failure (the temp root is cleaned best-effort).
+ * Stage a fingerprint-verified point-in-time snapshot of a WAL-mode database
+ * for reading. The workspace original is never opened: everything happens on
+ * copies under a private temp root laid out like the workspace (the caller's
+ * readonly entry points then read `<root>/<relSegments>`).
+ *
+ * Consistency proof per snapshot:
+ *   1. fingerprint (main, wal) at T0 — existence, size, SHA-256;
+ *   2. copy main, plus the `-wal` when it is present and non-empty (the pair
+ *      SQLite needs to recover un-checkpointed commits; `-shm` is never
+ *      copied — the staged open regenerates it beside the copy);
+ *   3. verify the staged copies hash-match the T0 fingerprints;
+ *   4. re-fingerprint the source pair at T1 — any drift (file changed,
+ *      WAL created/deleted, sizes moved) rejects the snapshot.
+ *
+ * A verified pair equals the source pair at both endpoints; SQLite's
+ * checksum-chained WAL recovery makes that quiescent-or-crashed state
+ * consistent at frame granularity. Failure modes — mkdtemp failure, copy
+ * failure, fingerprint drift, undecidable file states — all return
+ * `{ ok: false }`; the caller reports the source `unreadable`. No sleep, no
+ * timing assumptions: tests inject deterministic races through
+ * `painRecallSnapshotTestHooks`.
  */
-function stageQuietWalCopy(sourceDbPath: string, relSegments: readonly string[]): StagedDbCopy | null {
-  const stagingRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-pain-recall-stage-'));
-  let staged: StagedDbCopy | null = null;
+function stageWalSnapshot(sourceDbPath: string, relSegments: readonly string[]): StagedSnapshotOutcome {
+  let root: string | null = null;
+  let verified = false;
   try {
-    const stagedPath = path.join(stagingRoot, ...relSegments);
-    fs.mkdirSync(path.dirname(stagedPath), { recursive: true });
-    fs.copyFileSync(sourceDbPath, stagedPath);
-    if (!walSidecarIsQuiet(sourceDbPath)) return null; // writer raced in: refuse stale
-    staged = { stagingRoot, dbPath: stagedPath };
-    return staged;
+    const mainFingerprint = fingerprintFile(sourceDbPath);
+    const walPath = `${sourceDbPath}-wal`;
+    const walFingerprint = fingerprintFile(walPath);
+    const walState = classifyWalSidecar(walFingerprint);
+    if (mainFingerprint.state !== 'present') return { ok: false }; // missing/unreadable main
+    if (walState === 'unverifiable') return { ok: false }; // undecidable wal state (P2-1: fail closed)
+    const copyWal = walState === 'active'; // quiet/absent: main alone is complete
+
+    const mkdtemp = painRecallSnapshotTestHooks.mkdtempSync ?? fs.mkdtempSync;
+    root = mkdtemp(path.join(os.tmpdir(), 'pd-pain-recall-stage-'));
+    const stagedMain = path.join(root, ...relSegments);
+    fs.mkdirSync(path.dirname(stagedMain), { recursive: true });
+    fs.copyFileSync(sourceDbPath, stagedMain);
+    painRecallSnapshotTestHooks.afterCopyFile?.(sourceDbPath, stagedMain);
+    if (copyWal) {
+      fs.copyFileSync(walPath, `${stagedMain}-wal`);
+      painRecallSnapshotTestHooks.afterCopyFile?.(walPath, `${stagedMain}-wal`);
+    }
+
+    // The staged bytes must equal what we fingerprinted — a torn or tampered
+    // copy is rejected before it can look like a successful read.
+    if (!fingerprintsMatch(fingerprintFile(stagedMain), mainFingerprint)) return { ok: false };
+    if (copyWal && !fingerprintsMatch(fingerprintFile(`${stagedMain}-wal`), walFingerprint)) {
+      return { ok: false };
+    }
+
+    // The source pair must still be the fingerprinted pair — a writer that
+    // raced the snapshot invalidates it (rc-7: no stale state reuse).
+    if (!fingerprintsMatch(fingerprintFile(sourceDbPath), mainFingerprint)) return { ok: false };
+    if (!fingerprintsMatch(fingerprintFile(walPath), walFingerprint)) return { ok: false };
+
+    verified = true;
+    return { ok: true, root };
   } catch {
-    return null;
+    return { ok: false };
   } finally {
-    if (staged === null) removeStagingRoot(stagingRoot);
+    if (root !== null && !verified) removeStagingRoot(root);
   }
 }
 
@@ -353,9 +482,9 @@ export async function recallPains(workspaceDir: string, query: PainRecallQuery):
 
   // 3. state.db — strict readonly, no bootstrap. Missing/unreadable keeps the
   //    reuse-evidence edges alive and only degrades lineage + diagnoses.
-  //    Quiet-WAL databases are read through a staged temp copy so the open
-  //    cannot create -wal/-shm sidecars in the workspace (see WAL safety note
-  //    atop this module).
+  //    WAL-mode databases are read through a fingerprint-verified staged
+  //    snapshot so nothing in the workspace is opened, created, or modified
+  //    (see WAL safety note atop this module).
   const stagedRoots: string[] = [];
   const stateDbPath = path.join(workspaceDir, '.pd', 'state.db');
   let stateDb: SourceAvailability = 'ok';
@@ -367,13 +496,13 @@ export async function recallPains(workspaceDir: string, query: PainRecallQuery):
     let stateDbAccessRoot = workspaceDir;
     if (plan === 'unverifiable') {
       stateDb = 'unreadable';
-    } else if (plan === 'stage-copy') {
-      const staged = stageQuietWalCopy(stateDbPath, ['.pd', 'state.db']);
-      if (staged === null) {
+    } else if (plan === 'stage') {
+      const staged = stageWalSnapshot(stateDbPath, ['.pd', 'state.db']);
+      if (!staged.ok) {
         stateDb = 'unreadable';
       } else {
-        stagedRoots.push(staged.stagingRoot);
-        stateDbAccessRoot = staged.stagingRoot;
+        stagedRoots.push(staged.root);
+        stateDbAccessRoot = staged.root;
       }
     }
     if (stateDb === 'ok') {
@@ -395,7 +524,9 @@ export async function recallPains(workspaceDir: string, query: PainRecallQuery):
   try {
     // 4. trajectory.db — the pain-event authority. Missing/unreadable is a
     //    source-level failure (recall's subject is the pain history itself).
-    //    Same quiet-WAL staging rule as state.db.
+    //    Same WAL staging rule as state.db: the workspace original is opened
+    //    directly only in rollback-journal mode; any snapshot failure fails
+    //    the source as unreadable — never an empty result.
     let trajectoryDb: DatabaseLike;
     try {
       const trajectoryDbPath = path.join(workspaceDir, '.state', 'trajectory.db');
@@ -403,15 +534,15 @@ export async function recallPains(workspaceDir: string, query: PainRecallQuery):
       if (fs.existsSync(trajectoryDbPath)) {
         const plan = planReadonlyOpen(trajectoryDbPath);
         if (plan === 'unverifiable') {
-          throw new Error('readonly_precondition_failed: trajectory.db header/wal state unverifiable');
+          throw new Error('readonly_precondition_failed: trajectory.db header state unverifiable');
         }
-        if (plan === 'stage-copy') {
-          const staged = stageQuietWalCopy(trajectoryDbPath, ['.state', 'trajectory.db']);
-          if (staged === null) {
-            throw new Error('readonly_precondition_failed: wal became active while staging trajectory.db');
+        if (plan === 'stage') {
+          const staged = stageWalSnapshot(trajectoryDbPath, ['.state', 'trajectory.db']);
+          if (!staged.ok) {
+            throw new Error('readonly_precondition_failed: trajectory.db snapshot could not be verified');
           }
-          stagedRoots.push(staged.stagingRoot);
-          trajectoryAccessRoot = staged.stagingRoot;
+          stagedRoots.push(staged.root);
+          trajectoryAccessRoot = staged.root;
         }
       }
       trajectoryDb = openTrajectoryDbReadonly(trajectoryAccessRoot);
