@@ -158,6 +158,8 @@ Owner 提交反馈
 1. Codex adapter 只对当前 prompt 开头的准确前缀进行确定性解析，提取非空反馈；普通纠错、引用中的前缀、工具输出或模型自述不触发明确提交。
 2. 使用本次 Hook 已验证的 session_id、turn_id；rollout identity 来自同一 raw payload 的 transcript_path 经现有 validateCodexTranscriptPath/CODEX_HOME 边界校验，不读取其对话内容。transcript_path=null 或校验失败时拒绝，不搜索其他文件。通过现有共享 PainToPrincipleService.recordPain(asyncMode=true) → createPainSignalBridge → PainSignalBridge.submitPainSignal 持久入队并产生回执；这些API确已存在，但明确Hook入口连接与去重需要本次实现。不让模型猜 ID或选择“最新”文件。
 3. 当前文本按 §6.1/6.2 保存为明确 Owner 陈述；这是该消息的显式授权渠道，与默认全对话 ingestion 分开。ingestion flag 关闭时仍不读取对话表或 transcript，不以关闭它作为拒绝这次明确提交的理由。
+
+   执行顺序增补（2026-10-28 时序修复，随实现落地）：前缀解析与单写者抑制决策先于一切摄入与准入；ingestion 开启时，本消息的合法观察（live user_turn）必须先于显式登记落库，证据提升（≤12 前轮+触发消息+后续完整回答的有界窗口，不得扩大为全会话采集）随后执行、并先于诊断任务入队——首次登记不得因观察尚未写入而降级。ingestion 关闭时跳过提升（不读 transcript、不新增会话观察、不默认提升旧会话上下文），回执以准确原因 `conversation_ingestion_disabled` 披露"摄取关闭/上下文提升已跳过"，不得误报 rollout/trigger 缺失。Worker 与手动 reconcile 必须读取当前 Workspace 的同一 ingestion flag；flag 关闭时仍可补建任务/修复链接，但不得读取或提升先前摄取的会话观察。开启时的重放/恢复也先尝试证据提升，再使诊断任务可运行；提升失败仍补建任务并如实返回降级。
 4. 同一宿主观察键 `codex|<rolloutIdentity>|<hostTurnId>|user` 必须映射同一 canonical pain；Hook 重放、模型随后调用 CLI、通用纠正检测和重启均不得把同一明确报告创建成两条痛苦。复用既有 governance_signal_admissions 的唯一 observation-key→canonical_pain_id 登记及任务续接责任，由 host-runtime 原子认领登记并保留可重放的已校验提交材料；CLI回读/复用登记ID，不无条件生成第二个随机manual ID。明确入口须在通用纠正检测前识别，同一事件不同时经过两位pain写者。
 
    登记在trajectory.db、诊断任务在state.db，不假设跨库单事务；复用既有 ensure/reconcile continuation：登记成功但task尚未创建时，worker按登记材料幂等补建；task已创建但登记链接未写时，按同一canonical pain/task key补链接。回执必须区分登记、任务持久化和后台执行，禁止凭任一写成功假称全步骤已完成。用于重放的提交快照是输入事实的不可变副本，不是第二个可变Owner陈述权威。
