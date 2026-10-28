@@ -263,7 +263,6 @@ pd activation promote --activation-id <id> --confirm
 | 命令 | 用途 | 说明 |
 |---|---|---|
 | `pd activation deactivate --activation-id <id>` | 停用 code_tool_hook 激活 | **RuleHost 回滚的首选方式**；停用后 RuleHost 重新加载，warn 复现 |
-| `pd pruning rollback --principle-id <id>` | 恢复被 mask 的 principle 注入 | 仅 `prompt` 通道相关，不影响 RuleHost |
 
 ---
 

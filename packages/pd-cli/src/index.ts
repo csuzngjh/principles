@@ -31,7 +31,7 @@ import { handleDiagnoseStatus, handleDiagnoseRun } from './commands/diagnose.js'
 import { registerRuntimeProbeCommand } from './commands/runtime.js';
 import { handleFlowShow } from './commands/flow.js';
 import { handleTraceShow } from './commands/trace.js';
-import { handlePruningReport, handlePruningExplain, handlePruningReview, handlePruningRollback, handlePruningOrphans } from './commands/runtime-pruning.js';
+import { handlePruningReport, handlePruningExplain, handlePruningOrphans } from './commands/runtime-pruning.js';
 import { handleRuntimeHealthSnapshot } from './commands/runtime-health-snapshot.js';
 import { handleRuntimeGfiSnapshot } from './commands/runtime-gfi-snapshot.js';
 import { handleRuntimeUat } from './commands/runtime-uat.js';
@@ -1032,44 +1032,6 @@ pruningCmd
   .option('--json', 'Output raw JSON')
   .action((opts) => {
     handlePruningExplain({ principleId: opts.principleId, workspace: opts.workspace, json: opts.json });
-  });
-
-pruningCmd
-  .command('review')
-  .description('Record a human pruning decision for a flagged principle')
-  .requiredOption('--principle-id <id>', 'Principle ID to review')
-  .requiredOption('--decision <decision>', "Decision: keep, defer, or archive-candidate")
-  .option('--note <text>', 'Review note (required for archive-candidate)')
-  .option('--reviewer <name>', 'Reviewer name', 'operator')
-  .option('-w, --workspace <path>', 'Workspace directory')
-  .option('--json', 'Output raw JSON')
-  .action((opts) => {
-    handlePruningReview({
-      principleId: opts.principleId,
-      decision: opts.decision,
-      note: opts.note,
-      reviewer: opts.reviewer,
-      workspace: opts.workspace,
-      json: opts.json,
-    });
-  });
-
-pruningCmd
-  .command('rollback')
-  .description('Restore a masked principle to injection by overriding archive-candidate')
-  .requiredOption('--principle-id <id>', 'Principle ID to restore')
-  .option('--note <text>', 'Reason for rollback')
-  .option('--reviewer <name>', 'Reviewer name', 'operator')
-  .option('-w, --workspace <path>', 'Workspace directory')
-  .option('--json', 'Output raw JSON')
-  .action((opts) => {
-    handlePruningRollback({
-      principleId: opts.principleId,
-      note: opts.note,
-      reviewer: opts.reviewer,
-      workspace: opts.workspace,
-      json: opts.json,
-    });
   });
 
 pruningCmd

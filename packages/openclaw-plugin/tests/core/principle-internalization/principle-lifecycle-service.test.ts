@@ -173,7 +173,6 @@ describe('principle-lifecycle-service', () => {
 
     expect(context.principleLifecycle).toBeInstanceOf(PrincipleLifecycleService);
     expect(context.principleLifecycle.listAssessments()).toHaveLength(1);
-    expect(context.getActivePrincipleSubtrees()).toEqual([]);
   });
 
   it('keeps replay classifications behavioral-only', () => {

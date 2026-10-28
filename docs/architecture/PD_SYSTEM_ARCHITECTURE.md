@@ -152,8 +152,6 @@ runtime-v2/
 ├── pain-chain-read-model.ts         ← ReadModel
 ├── pain-to-principle-service.ts     ← Service
 ├── pruning-read-model.ts            ← ReadModel
-├── pruning-mask.ts                  ← Util
-├── pruning-review-log.ts            ← Store
 ├── operator-health-read-model.ts    ← ReadModel
 ├── candidate-audit.ts               ← Util
 ├── control-plane-triage.ts          ← Util
@@ -605,7 +603,7 @@ correction_audit_events           ★ ADR-0004
 ```
 {workspace}/.state/                 ← OpenClaw 兼容性目录
 ├── principle_training_state.json   ← Ledger
-├── pruning_reviews.jsonl           ← Pruning 审计
+├── pruning_reviews.jsonl           ← 遗留 Pruning 审计数据（2026-10-28 起无写入者/读取者）
 ├── trajectory.db                   ← 旧轨迹数据
 ├── sessions/
 ├── event-log.jsonl

@@ -3,9 +3,8 @@
  * governance recovery actions (Governance Recovery Actions v1, SPEC §10).
  *
  * Storage: <workspace>/.state/recovery_actions.jsonl
- * Each line is one complete JSON record (mirrors pruning-review-log.ts — the
- * established append-only audit pattern; no new DB tables, SPEC §10 "优先复用
- * 现有 persistence").
+ * Each line is one complete JSON record (the established append-only audit
+ * pattern; no new DB tables, SPEC §10 "优先复用现有 persistence").
  *
  * Non-goals:
  * - Does not modify state.db (the recovery itself is done by
