@@ -2,10 +2,9 @@
 '@principles/core': patch
 '@principles/host-runtime': patch
 '@principles/workbuddy-adapter': patch
-'@principles/pd-console': patch
 '@principles/pd-cli': patch
 'principles-disciple': patch
-'@principles/create-principles-disciple': patch
+'create-principles-disciple': patch
 ---
 
 RuleCode host promotion loop (SPEC-RULECODE-HOST-PROMOTION-001 v0.1, A→B→C):
@@ -32,4 +31,5 @@ RuleCode host promotion loop (SPEC-RULECODE-HOST-PROMOTION-001 v0.1, A→B→C):
   point exists there) and unavailable history degrades through the shared
   suspension contract with precise reasons. The V2 qualification gate now
   applies symmetrically: a Codex-stamped artifact never auto-executes on
-  WorkBuddy and vice versa (SPEC §11.3/H13).
+  WorkBuddy and vice versa (SPEC §11.3/H13). pd-console rides inside the
+  create-principles-disciple artifact.
