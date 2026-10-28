@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { CODEX_INGESTION_VERIFIED_VERSION, CODEX_INGESTION_MIN_VERSION } from '@principles/codex-adapter';
-import { assessCodexInstall, selectMarketplaceCacheVersionDir } from '../../src/commands/health-codex-install.js';
+import { assessCodexInstall } from '../../src/commands/health-codex-install.js';
+import { selectMarketplaceCacheVersionDir } from '../../src/services/codex-plugin-install.js';
 
 /**
  * PRI-953 R1 merge-readiness (A1–A4): install-mode classification, fail-open

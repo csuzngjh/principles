@@ -577,7 +577,7 @@ describe('installed snapshot freshness and runtime reset (pd-locate/pd-status, P
     return req(path.join(pluginDir, 'scripts', 'pd-locate.cjs')) as {
       resetInstalledRuntime: (runtimeDir: string) => { ok: boolean; removed: string[]; reason?: string };
       resolvePluginSourceSnapshot: (pluginRoot: string) => {
-        ok: boolean; reason?: string; marketplace?: string; source?: string;
+        ok: boolean; reason?: string; marketplace?: string; source?: string; pluginDir?: string;
         installedVersion?: string; sourceVersion?: string;
       };
     };
@@ -640,6 +640,78 @@ describe('installed snapshot freshness and runtime reset (pd-locate/pd-status, P
     return { result, report, snapshot: report.checks.find((check) => check.name === 'snapshot') };
   }
 
+  /** The PD repo layout: config.toml points at a MARKETPLACE root (a checkout)
+   *  whose .agents/plugins/marketplace.json points at the plugin subdirectory.
+   *  This is the layout on the Owner's machine, and the one the check used to
+   *  report as permanently unreadable (PRI-1052). */
+  function seedRepoMarketplace(options: {
+    installed: string;
+    source: string;
+    manifest?:
+      | 'ok'
+      | 'missing'
+      | 'entry-without-path'
+      | 'path-to-nowhere'
+      | 'escaping-path'
+      | 'sibling-prefix-path'
+      | 'not-listed'
+      | 'path-to-file';
+  }) {
+    const home = tempDir('pd-repo-marketplace-');
+    const codexHome = path.join(home, '.codex');
+    const root = path.join(codexHome, 'plugins', 'cache', 'principles', 'principles-disciple', options.installed);
+    fs.mkdirSync(path.join(root, '.codex-plugin'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.codex-plugin', 'plugin.json'), JSON.stringify({ name: 'principles-disciple', version: options.installed }), 'utf8');
+    fs.copyFileSync(path.join(pluginDir, 'runtime-version.json'), path.join(root, 'runtime-version.json'));
+    const marketplaceRoot = path.join(home, 'repo-checkout');
+    const pluginRoot = path.join(marketplaceRoot, 'plugins', 'principles-disciple');
+    fs.mkdirSync(path.join(pluginRoot, '.codex-plugin'), { recursive: true });
+    fs.writeFileSync(path.join(pluginRoot, '.codex-plugin', 'plugin.json'), JSON.stringify({ name: 'principles-disciple', version: options.source }), 'utf8');
+    const flavour = options.manifest ?? 'ok';
+    if (flavour !== 'missing') {
+      const entryPath = {
+        ok: './plugins/principles-disciple',
+        'entry-without-path': undefined,
+        'path-to-nowhere': './plugins/does-not-exist',
+        'escaping-path': '../outside-checkout',
+        // A directory whose NAME starts with ".." is still inside the root: a
+        // prefix check would reject it, a segment-boundary check must not.
+        'sibling-prefix-path': './..checkout',
+        // A marketplace entry pointing at a file, not a plugin directory.
+        'path-to-file': './plugins/principles-disciple-file',
+        // The marketplace resolves, but it does not list this plugin at all.
+        'not-listed': './plugins/principles-disciple',
+      }[flavour];
+      if (flavour === 'sibling-prefix-path') {
+        fs.mkdirSync(path.join(marketplaceRoot, '..checkout', '.codex-plugin'), { recursive: true });
+        fs.writeFileSync(path.join(marketplaceRoot, '..checkout', '.codex-plugin', 'plugin.json'),
+          JSON.stringify({ name: 'principles-disciple', version: options.source }), 'utf8');
+      }
+      if (flavour === 'path-to-file') {
+        fs.mkdirSync(path.join(marketplaceRoot, 'plugins'), { recursive: true });
+        fs.writeFileSync(path.join(marketplaceRoot, 'plugins', 'principles-disciple-file'), '{}', 'utf8');
+      }
+      const entry = {
+        name: flavour === 'not-listed' ? 'some-other-plugin' : 'principles-disciple',
+        source: entryPath === undefined ? { source: 'local' } : { source: 'local', path: entryPath },
+      };
+      fs.mkdirSync(path.join(marketplaceRoot, '.agents', 'plugins'), { recursive: true });
+      fs.writeFileSync(path.join(marketplaceRoot, '.agents', 'plugins', 'marketplace.json'),
+        JSON.stringify({ name: 'principles', plugins: [entry] }), 'utf8');
+    }
+    fs.mkdirSync(codexHome, { recursive: true });
+    fs.writeFileSync(path.join(codexHome, 'config.toml'), [
+      '[features]',
+      'hooks = true',
+      '',
+      '[marketplaces.principles]',
+      'source_type = "local"',
+      `source = '${marketplaceRoot}'`,
+      '',
+    ].join('\n'), 'utf8');
+    return { home, codexHome, root, sourceDir: marketplaceRoot };
+  }
+
   it('degrades when the installed snapshot is older than its marketplace source (numeric, not lexical, order)', async () => {
     const stale = statusReport(seedMarketplace({ installed: '0.9.0', source: '0.10.0' }));
     expect(stale.snapshot?.state).toBe('degraded');
@@ -682,6 +754,96 @@ describe('installed snapshot freshness and runtime reset (pd-locate/pd-status, P
     expect(sourceMissing.snapshot?.detail).toContain('not verifiable (marketplace_source_missing)');
     expect(sourceMissing.snapshot?.nextAction).toContain('has no source path');
   }, 120_000);
+
+  it('compares against the repo-root marketplace layout instead of failing every check (PRI-1052)', () => {
+    const current = statusReport(seedRepoMarketplace({ installed: '0.2.5', source: '0.2.5' }));
+    expect(current.snapshot?.state).toBe('ok');
+    expect(current.snapshot?.detail).toContain('matches marketplace source');
+    // The false alarm is what made the Owner distrust this check: a healthy
+    // install must end at exit 0 with nothing to repair.
+    expect(current.snapshot?.nextAction).toBeUndefined();
+    expect(current.report.ok).toBe(true);
+    expect(current.result.status).toBe(0);
+  }, 90_000);
+
+  it('still catches a stale snapshot behind a repo-root marketplace (the alarm this check exists for)', () => {
+    const stale = statusReport(seedRepoMarketplace({ installed: '0.2.1', source: '0.2.5' }));
+    expect(stale.snapshot?.state).toBe('degraded');
+    expect(stale.snapshot?.detail).toContain('installed plugin 0.2.1 is older than its marketplace source 0.2.5');
+    expect(stale.snapshot?.nextAction).toContain('codex plugin remove principles-disciple@principles');
+    expect(stale.report.ok).toBe(false);
+    expect(stale.result.status).toBe(1);
+  }, 90_000);
+
+  it('accepts a sibling directory whose name starts with ".." as still inside the marketplace root', () => {
+    const sibling = statusReport(seedRepoMarketplace({ installed: '0.2.5', source: '0.2.5', manifest: 'sibling-prefix-path' }));
+    expect(sibling.snapshot?.state).toBe('ok');
+    expect(sibling.snapshot?.detail).toContain('matches marketplace source');
+    expect(sibling.result.status).toBe(0);
+  }, 90_000);
+
+  it('treats an unmodelled marketplace layout as unknown, never "repair the checkout" (PRI-1052)', () => {
+    const cases = [
+      ['missing', 'marketplace_manifest_unreadable'],
+      ['escaping-path', 'marketplace_plugin_source_outside_root'],
+    ] as const;
+    for (const [flavour, reason] of cases) {
+      const seeded = statusReport(seedRepoMarketplace({ installed: '0.2.1', source: '0.2.5', manifest: flavour }));
+      expect(seeded.snapshot?.state, flavour).toBe('ok');
+      expect(seeded.snapshot?.detail, flavour).toContain(`not verifiable (${reason})`);
+      // The layout is unknown, not proven damaged: no repair order.
+      expect(seeded.snapshot?.nextAction, flavour).toBeUndefined();
+      expect(seeded.result.status, flavour).toBe(0);
+    }
+  }, 120_000);
+
+  /**
+   * PRI-1052 review fix: these reasons are decided AFTER the marketplace
+   * manifest for THIS plugin was read. A stale cache can hide behind a renamed
+   * or deleted plugin directory, so "not comparable" would have been a silent
+   * 0-exit regression of the very alarm this check exists for (rc-9).
+   */
+  it('stays degraded when the marketplace entry names a plugin that is gone (PRI-1052 review fix)', () => {
+    const cases = [
+      ['not-listed', 'marketplace_plugin_not_listed:principles-disciple', 'does not list principles-disciple'],
+      ['entry-without-path', 'marketplace_plugin_source_missing', 'carries no source.path'],
+      ['path-to-nowhere', 'marketplace_plugin_source_path_missing', 'does not exist'],
+      ['path-to-file', 'marketplace_plugin_source_not_directory', 'points at a file'],
+    ] as const;
+    for (const [flavour, reason, recoveryFragment] of cases) {
+      const seeded = statusReport(seedRepoMarketplace({ installed: '0.2.1', source: '0.2.5', manifest: flavour }));
+      expect(seeded.snapshot?.state, flavour).toBe('degraded');
+      expect(seeded.snapshot?.detail, flavour).toContain(`not verifiable (${reason})`);
+      expect(seeded.snapshot?.nextAction, flavour).toContain(recoveryFragment);
+      // The old blanket message sent the Owner to fix a healthy checkout.
+      expect(seeded.snapshot?.nextAction, flavour).not.toContain('Restore the marketplace source checkout');
+      expect(seeded.report.ok, flavour).toBe(false);
+      expect(seeded.result.status, flavour).toBe(1);
+    }
+  }, 180_000);
+
+  it('resolves the plugin dir from the marketplace entry and refuses paths that escape the root', async () => {
+    const locate = await loadLocate();
+    const previous = process.env.CODEX_HOME;
+    const repoLayout = seedRepoMarketplace({ installed: '0.2.1', source: '0.2.5' });
+    try {
+      vi.stubEnv('CODEX_HOME', repoLayout.codexHome);
+      expect(locate.resolvePluginSourceSnapshot(repoLayout.root)).toMatchObject({
+        ok: true,
+        marketplace: 'principles',
+        installedVersion: '0.2.1',
+        sourceVersion: '0.2.5',
+        pluginDir: path.join(repoLayout.sourceDir, 'plugins', 'principles-disciple'),
+      });
+      const escaping = seedRepoMarketplace({ installed: '0.2.1', source: '0.2.5', manifest: 'escaping-path' });
+      vi.stubEnv('CODEX_HOME', escaping.codexHome);
+      expect(locate.resolvePluginSourceSnapshot(escaping.root))
+        .toEqual({ ok: false, reason: 'marketplace_plugin_source_outside_root' });
+    } finally {
+      if (previous === undefined) vi.stubEnv('CODEX_HOME', '');
+      else vi.stubEnv('CODEX_HOME', previous);
+    }
+  }, 60_000);
 
   it('only compares cache roots and marketplace tables it can actually resolve', async () => {
     const locate = await loadLocate();
