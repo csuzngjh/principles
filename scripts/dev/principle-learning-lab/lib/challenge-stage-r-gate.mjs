@@ -35,6 +35,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { hashOfCanonical } from './challenge-freeze.mjs';
 
 export const STAGE_R_AUTH_SCHEMA = 'challenge-stage-authorization.v1';
@@ -92,6 +93,54 @@ export function readStageRAuthorization(studyDir) {
 export function readStudyPlanHash(studyDir) {
   const prereg = JSON.parse(fs.readFileSync(path.join(studyDir, 'preregistration.json'), 'utf8'));
   return hashOfCanonical(prereg);
+}
+
+// ── Authorization retirement registry (Owner P1-1 isolation scheme, 2026-10-28) ──
+//
+// Archived evidence studies preserve their HISTORICAL execution authorizations
+// byte-exact (run-authorization.json stays APPROVED with its original window).
+// Study-directory budget exhaustion does NOT revoke such a record: the Stage R
+// gate and the per-directory ledger are different checks, so a fresh-ledger
+// study copy could pass the gate while the window is still open. The registry
+// retires those records at the GATE level: a matching record is refused at ANY
+// clock time, against ANY study copy — the registry lives with the lab CODE
+// (module-relative), so copying/truncating study DATA cannot shed it. Deleting
+// registry entries requires editing the repository itself (git-protected),
+// the same trust boundary as the gate code. This does not modify any archived
+// record; retirement is enforced here and only ADDS refusals.
+export const AUTHORIZATION_REVOCATIONS_SCHEMA = 'challenge-authorization-revocations.v1';
+const RETIRED_ENTRY_KEYS = ['studyId', 'suiteHash', 'validFrom', 'validUntil', 'retiredAt', 'reason'];
+
+/** Load the retirement registry from the lab's challenge-studies area.
+ *  A missing file means no retirements (fresh labs); a MALFORMED file throws —
+ *  a corrupt registry must refuse loudly, never silently ignore retirements. */
+export function readAuthorizationRevocations({ registryPath } = {}) {
+  const file = registryPath || path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'challenge-studies', 'authorization-revocations.json');
+  let raw;
+  try {
+    raw = fs.readFileSync(file, 'utf8');
+  } catch {
+    return []; // no registry = nothing retired
+  }
+  const parsed = JSON.parse(raw);
+  if (!parsed || typeof parsed !== 'object' || parsed.schema !== AUTHORIZATION_REVOCATIONS_SCHEMA || !Array.isArray(parsed.entries)) {
+    throw new Error(`readAuthorizationRevocations: malformed registry (${file}) — expected ${AUTHORIZATION_REVOCATIONS_SCHEMA} with entries[]; refusing loudly`);
+  }
+  for (const e of parsed.entries) {
+    if (!e || typeof e !== 'object') throw new Error('readAuthorizationRevocations: malformed entry (not an object)');
+    for (const k of RETIRED_ENTRY_KEYS) {
+      if (typeof e[k] !== 'string' || e[k].length === 0) throw new Error(`readAuthorizationRevocations: entry missing non-empty '${k}'`);
+    }
+  }
+  return parsed.entries;
+}
+
+/** A registry entry matches an authorization record iff the full retirement
+ *  tuple is identical (study + frozen suite + exact window). A near-miss does
+ *  NOT retire — the record is then judged on its own merits (window, caps…). */
+export function isRetiredAuthorization(auth, retiredAuthorizations) {
+  if (!Array.isArray(retiredAuthorizations) || !auth || typeof auth !== 'object') return false;
+  return retiredAuthorizations.some((e) => e.studyId === auth.studyId && e.suiteHash === auth.suiteHash && e.validFrom === auth.validFrom && e.validUntil === auth.validUntil);
 }
 
 /**
@@ -154,7 +203,7 @@ function isNonEmptyStringArray(value) {
  * attempt may span many model requests; the attempt cap is not a request
  * budget) — required, positive safe integer, fail-closed when absent.
  */
-export function verifyStageRAuthorization({ authorizationRecord, bindings, plan, maxAttemptsTotal, now = null, declaredExecutionMode = null, declaredRequestTimeoutMs = undefined, declaredMaxRequestsPerAttempt = undefined }) {
+export function verifyStageRAuthorization({ authorizationRecord, bindings, plan, maxAttemptsTotal, now = null, declaredExecutionMode = null, declaredRequestTimeoutMs = undefined, declaredMaxRequestsPerAttempt = undefined, retiredAuthorizations = null }) {
   const reasons = [];
   const auth = authorizationRecord;
   if (!auth || typeof auth !== 'object') return { ok: false, reasons: ['authorization record missing or unreadable'] };
@@ -166,6 +215,16 @@ export function verifyStageRAuthorization({ authorizationRecord, bindings, plan,
   for (const k of Object.keys(auth)) if (!STAGE_R_AUTH_KEYS.includes(k)) reasons.push(`unknown authorization field: ${k}`);
   if (auth.halted === true) reasons.push('authorization halted by owner — stop condition triggered');
   if (auth.revoked === true) reasons.push('authorization revoked by owner');
+
+  // Retirement registry (Owner P1-1 isolation scheme): an archived historical
+  // record that matches a registry entry is refused at ANY clock time and
+  // against ANY study copy — fresh-ledger copies included, because the registry
+  // travels with the lab code rather than the study data. This never modifies
+  // the archived record; it only adds a refusal ground.
+  if (isRetiredAuthorization(auth, retiredAuthorizations)) {
+    const entry = retiredAuthorizations.find((e) => e.studyId === auth.studyId && e.suiteHash === auth.suiteHash && e.validFrom === auth.validFrom && e.validUntil === auth.validUntil);
+    reasons.push(`authorization retired: this historical record (study ${auth.studyId}, window ${auth.validFrom} → ${auth.validUntil}) is registered as retired evidence and must never authorize new execution — see challenge-studies/authorization-revocations.json (${entry.reason})`);
+  }
 
   if (!STAGE_R_EXECUTION_MODES.includes(auth.executionMode)) {
     reasons.push(`executionMode must be one of ${STAGE_R_EXECUTION_MODES.join(' | ')} (got '${auth.executionMode}')`);

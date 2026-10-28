@@ -1,4 +1,5 @@
 {
+  "schema": "claim-evidence-judge-only.v1",
   "caseId": "CEB-002-L3-11",
   "family": "TRADEOFF_CONFLICT",
   "studyEligible": true,
@@ -54,11 +55,6 @@
       "implies": {}
     }
   ],
-  "constraints": {
-    "budgetUnits": 4,
-    "deadlineUnits": 8,
-    "askOwnerAllowed": true
-  },
   "ownerAnswers": {
     "deployment-signoff": {
       "output": "Owner：签核通过。",
@@ -69,6 +65,11 @@
     "deploy": {
       "requiresSignoff": true
     }
+  },
+  "constraints": {
+    "budgetUnits": 4,
+    "deadlineUnits": 8,
+    "askOwnerAllowed": true
   },
   "preSeededObservations": [],
   "overCheck": {
@@ -89,5 +90,7 @@
         ]
       }
     ]
-  }
+  },
+  "inputHash": "a834692ad908d8243cf63e591aed7818cd3213cdacb08a96b73376307bb2cd0f",
+  "goldHash": "c20cfded5900dad0eb9dba6c68fef35080e08052573f7232fc23bd4b5dfdf718"
 }

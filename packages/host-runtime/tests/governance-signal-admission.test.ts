@@ -325,6 +325,95 @@ describe('correction admission → one canonical pain (SPEC §10/§12)', () => {
     expect(withTrajectory((db) => db.prepare('SELECT COUNT(*) AS n FROM pain_events').get())).toEqual({ n: 1 });
   });
 
+  it('the loser of a concurrent marker-INSERT race converges instead of contradicting the durable state', () => {
+    const first = admit([correction()]);
+    expect(first.outcomes?.[0]).toMatchObject({ disposition: 'admitted', duplicate: false });
+    const winner = first.outcomes?.[0];
+    if (!winner || !('canonicalPainId' in winner)) throw new Error('expected admitted outcome');
+
+    // Two hook PROCESSES admitting the same delivery can both pass the
+    // pre-transaction marker probe before either commits; better-sqlite3 is
+    // synchronous, so the interleaving is simulated deterministically at the
+    // factory seam: hide the winner's marker from the pre-probe only, make the
+    // loser's marker INSERT hit the winner's UNIQUE constraint, and let the
+    // post-rollback convergence probe re-read the store fresh (rc-7).
+    const real = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+    try {
+      let markerProbes = 0;
+      const loserDb = new Proxy(real, {
+        get(target, prop) {
+          const value = Reflect.get(target, prop, target);
+          if (typeof value !== 'function') return value;
+          if (prop === 'prepare') {
+            return (sql: string) => {
+              const statement = target.prepare(sql);
+              if (sql.includes('SELECT * FROM governance_signal_admissions WHERE logical_observation_key = ?')) {
+                markerProbes += 1;
+                if (markerProbes === 1) return { get: () => undefined } as unknown as typeof statement;
+                return statement;
+              }
+              if (sql.includes('INSERT INTO governance_signal_admissions')) {
+                return { run: () => { throw new Error('UNIQUE constraint failed: governance_signal_admissions.logical_observation_key'); } } as unknown as typeof statement;
+              }
+              return statement;
+            };
+          }
+          return value.bind(target);
+        },
+      }) as unknown as Database.Database;
+      const loser = admitGovernanceSignals({
+        workspaceDir,
+        candidates: [correction()],
+        now: NOW,
+        keywordStore: buildSharedSeedKeywordStore(),
+        databaseFactory: () => loserDb,
+      });
+      expect(loser.ok).toBe(true);
+      expect(loser.outcomes?.[0]).toMatchObject({ disposition: 'already_admitted', canonicalPainId: winner.canonicalPainId, diagnosticianTaskId: null });
+      // The loser's rolled-back attempt left the durable state untouched.
+      expect(withTrajectory((db) => db.prepare('SELECT COUNT(*) AS n FROM pain_events').get())).toEqual({ n: 1 });
+      expect(withTrajectory((db) => db.prepare('SELECT COUNT(*) AS n FROM governance_signal_admissions').get())).toEqual({ n: 1 });
+    } finally {
+      real.close();
+    }
+
+    // Negative control: a marker-INSERT failure with NO durable marker to
+    // converge on still propagates fail-loud (rc-3), not a fake convergence.
+    const realNoMarker = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+    try {
+      const blindDb = new Proxy(realNoMarker, {
+        get(target, prop) {
+          const value = Reflect.get(target, prop, target);
+          if (typeof value !== 'function') return value;
+          if (prop === 'prepare') {
+            return (sql: string) => {
+              const statement = target.prepare(sql);
+              if (sql.includes('FROM governance_signal_admissions WHERE logical_observation_key = ?')) {
+                return { get: () => undefined } as unknown as typeof statement;
+              }
+              if (sql.includes('INSERT INTO governance_signal_admissions')) {
+                return { run: () => { throw new Error('UNIQUE constraint failed: governance_signal_admissions.logical_observation_key'); } } as unknown as typeof statement;
+              }
+              return statement;
+            };
+          }
+          return value.bind(target);
+        },
+      }) as unknown as Database.Database;
+      const blind = admitGovernanceSignals({
+        workspaceDir,
+        candidates: [correction()],
+        now: NOW,
+        keywordStore: buildSharedSeedKeywordStore(),
+        databaseFactory: () => blindDb,
+      });
+      expect(blind.ok).toBe(false);
+      expect(blind.ok === false && blind.reason.startsWith('governance_admission_failed:')).toBe(true);
+    } finally {
+      realNoMarker.close();
+    }
+  });
+
   it('duplicate delivery after a lost marker still converges on the same pain (crash replay)', () => {
     admit([correction()]);
     // Simulate the crash window: the marker write was lost.
@@ -636,12 +725,37 @@ describe('diagnostician continuation (SPEC §13)', () => {
 });
 
 describe('reconciliation pass (SPEC §13 cross-store crash gaps)', () => {
+  it('flag-off reconciliation repairs the task but never promotes previously ingested session evidence', async () => {
+    // This rollout was ingested while consent was on. Turning consent off
+    // must stop reconciliation from promoting its old observations later.
+    ingestRollout('turn-1');
+    admit([correction()]);
+
+    const reconciled = await reconcileGovernanceContinuation({ workspaceDir, conversationIngestionEnabled: false });
+    expect(reconciled.ok).toBe(true);
+    expect(reconciled.tasksEnsured).toBe(1);
+    expect(reconciled.pendingTails).toBe(0);
+    const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+    try {
+      expect(db.prepare('SELECT COUNT(*) AS n FROM governance_observations WHERE promotion_ref IS NOT NULL').get()).toEqual({ n: 0 });
+      expect(db.prepare('SELECT COUNT(*) AS n FROM governance_signal_admissions WHERE diagnostician_task_id IS NOT NULL').get()).toEqual({ n: 1 });
+    } finally {
+      db.close();
+    }
+    // The no-promotion marker must leave the task recovery set without
+    // repeatedly consuming the bounded reconciliation batch.
+    const again = await reconcileGovernanceContinuation({ workspaceDir, conversationIngestionEnabled: false });
+    expect(again.ok).toBe(true);
+    expect(again.tasksEnsured).toBe(0);
+    expect(again.degradations).toEqual([]);
+  });
+
   it('Case A: pain admitted, crash before task → reconcile creates the missing task', async () => {
     admit([correction()]);
     // Promotion substrate: ingest the rollout + triggering observation so the
     // reconcile pass can promote the admitted evidence (SPEC §13 Case A).
     ingestRollout('turn-1');
-    const reconciled = await reconcileGovernanceContinuation({ workspaceDir });
+    const reconciled = await reconcileGovernanceContinuation({ workspaceDir, conversationIngestionEnabled: true });
     expect(reconciled.ok).toBe(true);
     expect(reconciled.tasksEnsured).toBe(1);
     const state = new Database(path.join(workspaceDir, '.pd', 'state.db'), { readonly: true });
@@ -655,7 +769,7 @@ describe('reconciliation pass (SPEC §13 cross-store crash gaps)', () => {
     // Second pass is idempotent AND advances past the now-healthy marker:
     // task linked + promotion started → excluded from the recovery predicate
     // → no fake actions counted (review round 3 P1-2/P2).
-    const again = await reconcileGovernanceContinuation({ workspaceDir });
+    const again = await reconcileGovernanceContinuation({ workspaceDir, conversationIngestionEnabled: true });
     expect(again.ok).toBe(true);
     expect(again.tasksEnsured).toBe(0);
     expect(again.linksRepaired).toBe(0);
@@ -679,7 +793,7 @@ describe('reconciliation pass (SPEC §13 cross-store crash gaps)', () => {
     } finally {
       wdb.close();
     }
-    const reconciled = await reconcileGovernanceContinuation({ workspaceDir });
+    const reconciled = await reconcileGovernanceContinuation({ workspaceDir, conversationIngestionEnabled: true });
     // New linksRepaired semantics: the continuation found the existing task
     // (taskCreated=false) → the marker link was repaired (linkRepaired=true),
     // no second task created → tasksEnsured stays 0 (review round 3 P2).
@@ -698,7 +812,7 @@ describe('reconciliation pass (SPEC §13 cross-store crash gaps)', () => {
   it('degrades observably when the trajectory database is missing', async () => {
     const other = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-gov-admission-empty-'));
     try {
-      const reconciled = await reconcileGovernanceContinuation({ workspaceDir: other });
+      const reconciled = await reconcileGovernanceContinuation({ workspaceDir: other, conversationIngestionEnabled: false });
       expect(reconciled.ok).toBe(false);
       expect(reconciled.reason).toContain('trajectory_db_not_found');
     } finally {
@@ -827,6 +941,22 @@ describe('P1-1 privacy: raw correction secrets sanitized before persistence (SPE
 });
 
 describe('P1-2 continuation crash recovery (SPEC §13)', () => {
+  it('promotion failure remains visible but does not block task recovery', async () => {
+    admit([correction()]);
+    const first = await reconcileGovernanceContinuation({ workspaceDir, conversationIngestionEnabled: true });
+    expect(first.ok).toBe(false);
+    expect(first.degradations.some((entry) => entry.includes('rollout_not_found'))).toBe(true);
+    expect(first.tasksEnsured).toBe(1);
+    expect(withTrajectory((db) => db.prepare('SELECT diagnostician_task_id FROM governance_signal_admissions').get()))
+      .not.toEqual({ diagnostician_task_id: null });
+
+    ingestRollout('turn-1');
+    const recovered = await reconcileGovernanceContinuation({ workspaceDir, conversationIngestionEnabled: true });
+    expect(recovered.ok).toBe(true);
+    expect(recovered.tasksEnsured).toBe(0);
+    expect(recovered.pendingTails).toBe(1);
+  });
+
   it('Case C: pain+task admitted but promotion never started → reconcile heals', async () => {
     ingestRollout('turn-1');
     // Admit and ensure task only (simulate crash before promotion)
@@ -834,7 +964,7 @@ describe('P1-2 continuation crash recovery (SPEC §13)', () => {
     const painId = (result.outcomes?.[0] as { canonicalPainId?: string }).canonicalPainId ?? '';
     await ensureGovernanceDiagnosticianTask({ workspaceDir, logicalObservationKey: 'codex|rollout-1|turn-1|user', canonicalPainId: painId });
     // Simulate: promotion never ran
-    const reconciled = await reconcileGovernanceContinuation({ workspaceDir });
+    const reconciled = await reconcileGovernanceContinuation({ workspaceDir, conversationIngestionEnabled: true });
     expect(reconciled.ok).toBe(true);
     // Task already existed (taskCreated=false) → tasksEnsured=0; only
     // promotion was missing and is now started (review round 3 P2).
@@ -863,6 +993,7 @@ describe('P1-2 continuation crash recovery (SPEC §13)', () => {
       workspaceDir,
       logicalObservationKey: 'codex|rollout-1|turn-selfheal-1|user',
       canonicalPainId: painId,
+      conversationIngestionEnabled: true,
     });
     expect(cont.ok).toBe(true);
     if (!cont.ok) throw new Error(`expected continuation to succeed, got: ${cont.reason}`);
@@ -882,7 +1013,7 @@ describe('P1-2 continuation crash recovery (SPEC §13)', () => {
     const result = admit([correction({ logicalObservationKey: 'codex|rollout-1|turn-idem-1|user', hostTurnId: 'turn-idem-1' })]);
     void result;
     for (let i = 0; i < 3; i += 1) {
-      const reconciled = await reconcileGovernanceContinuation({ workspaceDir });
+      const reconciled = await reconcileGovernanceContinuation({ workspaceDir, conversationIngestionEnabled: true });
       expect(reconciled.ok).toBe(true);
     }
     const wdb = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
@@ -909,7 +1040,7 @@ describe('P1-2 continuation crash recovery (SPEC §13)', () => {
     // the already-healed 1-50. The old predicate (`decision='admitted'
     // ORDER BY id LIMIT 50`) always re-selected 1-50 → 51-60 starved forever.
     // Bootstrap both governance schemas (no markers yet).
-    const boot = await reconcileGovernanceContinuation({ workspaceDir });
+    const boot = await reconcileGovernanceContinuation({ workspaceDir, conversationIngestionEnabled: true });
     expect(boot.ok).toBe(true);
     const nowIso = NOW.toISOString();
 
@@ -937,13 +1068,13 @@ describe('P1-2 continuation crash recovery (SPEC §13)', () => {
 
     // Pass 1 (limit=50): every marker matches the recovery predicate, so the
     // first 50 (lowest ids) are healed — promotion starts for each.
-    const first = await reconcileGovernanceContinuation({ workspaceDir, limit: 50 });
+    const first = await reconcileGovernanceContinuation({ workspaceDir, conversationIngestionEnabled: true, limit: 50 });
     expect(first.ok).toBe(true);
     expect(first.pendingTails).toBe(50);
 
     // Pass 2 (limit=50): markers 1-50 now carry promotion_ref (left the
     // working set) → the pass selects ONLY the remaining 10 (markers 51-60).
-    const second = await reconcileGovernanceContinuation({ workspaceDir, limit: 50 });
+    const second = await reconcileGovernanceContinuation({ workspaceDir, conversationIngestionEnabled: true, limit: 50 });
     expect(second.ok).toBe(true);
     expect(second.pendingTails).toBe(10);
 
@@ -957,7 +1088,7 @@ describe('P1-2 continuation crash recovery (SPEC §13)', () => {
     } finally {
       wdb.close();
     }
-    const third = await reconcileGovernanceContinuation({ workspaceDir, limit: 50 });
+    const third = await reconcileGovernanceContinuation({ workspaceDir, conversationIngestionEnabled: true, limit: 50 });
     expect(third.tasksEnsured).toBe(0);
     expect(third.linksRepaired).toBe(0);
     expect(third.pendingTails).toBe(0);
@@ -1202,7 +1333,7 @@ describe('bare WorkBuddy pain admission (R2/P1)', () => {
     // rollout_not_found for it.
     seedBarePain();
     await admitBareHostPains({ workspaceDir, hostKind: 'workbuddy', now: NOW });
-    const reconciled = await reconcileGovernanceContinuation({ workspaceDir });
+    const reconciled = await reconcileGovernanceContinuation({ workspaceDir, conversationIngestionEnabled: false });
     expect(reconciled.ok).toBe(true);
     expect(reconciled.degradations).toEqual([]);
     expect(reconciled.tasksEnsured).toBe(0);
@@ -1218,7 +1349,7 @@ describe('bare WorkBuddy pain admission (R2/P1)', () => {
     } finally {
       wdb.close();
     }
-    const reconciled = await reconcileGovernanceContinuation({ workspaceDir });
+    const reconciled = await reconcileGovernanceContinuation({ workspaceDir, conversationIngestionEnabled: false });
     expect(reconciled.ok).toBe(true);
     expect(reconciled.linksRepaired).toBe(1);
     expect(reconciled.tasksEnsured).toBe(0);

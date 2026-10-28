@@ -32,7 +32,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { verifyFrozenStudy, verifyArmConfigsFrozen, runChallengeStudy, STUB_STRATEGIES, RUNNER_EXECUTION_MODES } from './lib/challenge-runner.mjs';
-import { readStageRAuthorization, verifyStageRAuthorization, readStudyPlanHash } from './lib/challenge-stage-r-gate.mjs';
+import { readStageRAuthorization, verifyStageRAuthorization, readStudyPlanHash, readAuthorizationRevocations, MAX_REQUESTS_PER_ATTEMPT_CEILING } from './lib/challenge-stage-r-gate.mjs';
 import { createRealModelActor, createAmdActorResponder } from './lib/challenge-actor-transport.mjs';
 import { INTERN_S2_BASE_URL, resolveInternS2ApiKey, BIGMODEL_CODING_BASE_URL, BIGMODEL_CODING_MODEL_ID, resolveBigmodelCodingApiKey } from './lib/challenge-amd-transport.mjs';
 import { createChallengeLedger } from './lib/challenge-ledger.mjs';
@@ -94,8 +94,8 @@ let maxRequestsPerAttempt; // undefined = no per-attempt cap
   const c = arg('--max-requests-per-attempt');
   if (c !== undefined) {
     maxRequestsPerAttempt = Number(c);
-    if (!Number.isSafeInteger(maxRequestsPerAttempt) || maxRequestsPerAttempt < 1 || maxRequestsPerAttempt > 40) {
-      console.error(`run-challenge-study: --max-requests-per-attempt '${c}' must be an integer within [1, 40] (40 = the actor-loop step ceiling)`);
+    if (!Number.isSafeInteger(maxRequestsPerAttempt) || maxRequestsPerAttempt < 1 || maxRequestsPerAttempt > MAX_REQUESTS_PER_ATTEMPT_CEILING) {
+      console.error(`run-challenge-study: --max-requests-per-attempt '${c}' must be an integer within [1, ${MAX_REQUESTS_PER_ATTEMPT_CEILING}] (${MAX_REQUESTS_PER_ATTEMPT_CEILING} = the actor-loop step ceiling)`);
       process.exit(1);
     }
   }
@@ -151,6 +151,14 @@ function verifyPlan(frozen, armCheck) {
   }
   const repsArg = arg('--repetitions');
   const repetitions = repsArg ? repsArg.split(',').map((s) => s.trim()).filter(Boolean).map(Number) : [1];
+  // Same argument-validation discipline as --max-requests-per-attempt: NaN,
+  // decimals, zero/negative counts, and an empty list (',' / ',,') refuse
+  // before anything runs — the offline-stub path has no gate containment to
+  // catch them, and would otherwise fabricate units like `rNaN`.
+  if (repetitions.length === 0 || repetitions.some((r) => !Number.isSafeInteger(r) || r < 1)) {
+    console.error(`run-challenge-study: --repetitions '${repsArg}' must be a comma-separated list of integers >= 1 (e.g. 1,2)`);
+    process.exit(1);
+  }
   const plan = { arms, cases, repetitions };
   const units = arms.length * cases.length * repetitions.length;
   if (executionMode === 'offline-stub') {
@@ -159,6 +167,7 @@ function verifyPlan(frozen, armCheck) {
   const auth = readStageRAuthorization(resolved);
   const gate = verifyStageRAuthorization({
     authorizationRecord: auth,
+    retiredAuthorizations: readAuthorizationRevocations(), // archived-evidence records refused at ANY clock (Owner P1-1 isolation scheme)
     bindings: {
       studyId: frozen.studyId,
       suiteHash: frozen.suiteHash,
