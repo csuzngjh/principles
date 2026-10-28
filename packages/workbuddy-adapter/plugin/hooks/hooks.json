@@ -42,7 +42,7 @@
           {
             "type": "command",
             "command": "node \"${CODEBUDDY_PLUGIN_ROOT}/scripts/wrapper.cjs\" UserPromptSubmit",
-            "timeout": 30
+            "timeout": 15
           }
         ]
       }
