@@ -14,6 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { verifyProbeAuthorization, PROBE_AUTH_KEYS, PROBE_AUTH_TARGET_KINDS, PROBE_AUTH_ALLOWED_MODELS } from '../dev/principle-learning-lab/lib/challenge-probe-authorization.mjs';
+import { ZHIPU_CODING_PROVIDER, buildZhipuCodexOverrides, ensureZhipuProviderReady } from '../dev/principle-learning-lab/lib/challenge-zhipu-host-provider.mjs';
 import { createOpenClawHostTransport, readOpenClawTrajectoryEvidence } from '../dev/principle-learning-lab/lib/challenge-openclaw-host.mjs';
 import { verifyF2ProbeEvidence } from '../dev/principle-learning-lab/lib/challenge-isolation-probe.mjs';
 
@@ -335,5 +336,39 @@ describe('verifyF2ProbeEvidence openclaw dispatch (S4-B3 + S5 P1-2/P1-4 evidence
     const v5 = verifyF2ProbeEvidence({ ...base, openclawSessionsDir: badModel, openclawTrustedRoot: badModel });
     expect(v5.ok).toBe(false);
     expect(v5.reasons.some((r) => r.includes('conflicts with the probe'))).toBe(true);
+  });
+});
+
+describe('zhipu host-provider adapter (offline; zero spawns, zero model calls; codex-cli route — merged via #2204)', () => {
+  it('maps the single approved channel in one frozen place — same endpoint/model/key source the F1 transport proved', () => {
+    expect(ZHIPU_CODING_PROVIDER.baseUrl).toBe('https://open.bigmodel.cn/api/coding/paas/v4');
+    expect(ZHIPU_CODING_PROVIDER.modelId).toBe('glm-5.3-flash');
+    expect(ZHIPU_CODING_PROVIDER.envKey).toBe('BIGMODEL_CODING_API_KEY');
+    expect(ZHIPU_CODING_PROVIDER.wireApi).toBe('chat');
+  });
+
+  it('builds order-stable per-spawn -c overrides (owner config.toml untouched)', () => {
+    const args = buildZhipuCodexOverrides();
+    expect(args).toEqual([
+      '-c', 'model_provider=zhipu-coding',
+      '-c', 'model_providers.zhipu-coding.name=Zhipu BigModel Coding Plan',
+      '-c', `model_providers.zhipu-coding.base_url=${ZHIPU_CODING_PROVIDER.baseUrl}`,
+      '-c', 'model_providers.zhipu-coding.env_key=BIGMODEL_CODING_API_KEY',
+      '-c', 'model_providers.zhipu-coding.wire_api=chat',
+    ]);
+  });
+
+  it('is fail-closed on missing credentials and never surfaces the key value', () => {
+    const v = ensureZhipuProviderReady({ env: {}, keyFile: path.join(os.tmpdir(), 'no-such-zhipu-key-file') });
+    expect(v.ready).toBe(false);
+    expect(v.reason).toContain('fail-closed');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zhipu-prov-'));
+    const kf = path.join(dir, 'key');
+    fs.writeFileSync(kf, 'test-key-value\n');
+    const ok = ensureZhipuProviderReady({ env: {}, keyFile: kf });
+    expect(ok.ready).toBe(true);
+    expect(ok.source).toBe(`file:${kf}`);
+    expect(JSON.stringify(ok)).not.toContain('test-key-value'); // value never carried in the result
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 });

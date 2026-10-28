@@ -283,6 +283,12 @@ export function readOpenClawTrajectoryEvidence({ sessionsDir, sessionId, trusted
   } catch (e) {
     return { found: false, ambiguous: false, reason: `runtime trajectory corrupt (unparseable line): ${e.message}` };
   }
+  // S5.1 §五: every event line must declare the openclaw-trajectory schema —
+  // a file that merely CONTAINS a similar line is not host evidence.
+  const badSchema = lines.findIndex((l) => !l || l.traceSchema !== OPENCLAW_TRAJECTORY_SCHEMA);
+  if (badSchema >= 0) {
+    return { found: false, ambiguous: false, reason: `runtime trajectory line ${badSchema + 1} does not declare traceSchema '${OPENCLAW_TRAJECTORY_SCHEMA}' — not host evidence (S5.1)` };
+  }
   const starteds = lines.filter((l) => l && l.type === 'session.started' && l.sessionId === sessionId);
   if (starteds.length === 0) {
     return { found: false, ambiguous: false, reason: `trajectory carries no session.started for ${sessionId}` };
