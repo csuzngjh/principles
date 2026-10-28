@@ -210,7 +210,10 @@ describe('CEB-002 preregistration contract consistency', () => {
     expectSnapshotsIdentical(before, snapshotDir(study), 'import-side-effect check');
   });
 
-  it('10b. ISOLATED CLI rebuild: deterministic (two rebuilds byte-identical), builder authority-reference intact; real CEB-002 directory FULLY unchanged', { timeout: 30000 }, () => {
+  it('10b. ISOLATED CLI rebuild: deterministic (two rebuilds byte-identical), builder authority-reference intact; real CEB-002 directory FULLY unchanged', { timeout: 90_000 }, () => {
+    // Two full isolated rebuilds (each runs the B1 enumeration over the whole
+    // pool) — ~13s locally but >30s on a loaded CI runner (real timeout
+    // observed 2026-10-28); 90s gives headroom without weakening the check.
     // The real directory now holds the FROZEN+EXECUTED archive (its draft is
     // prepare-ceb002-freeze's merged lineage), so the byte comparison target
     // moved from "real dir" to "a second isolated rebuild" (determinism), and
