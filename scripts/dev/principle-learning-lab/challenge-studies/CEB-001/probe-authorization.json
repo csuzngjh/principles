@@ -1,7 +1,7 @@
 {
   "schema": "challenge-isolation-probe-authorization.v1",
   "probeId": "PRI-1037",
-  "status": "NOT_ISSUED",
+  "status": "REVOKED",
   "studyId": "CEB-001",
   "frozenHashes": {
     "suiteHash": "e1f2f5ca9d7f570faf454d057346c4f273e4fb467fa1790482f9a783e591fb5a",
@@ -21,19 +21,21 @@
     "probeRounds": 5,
     "timeoutMsPerCall": 180000
   },
-  "validFrom": "2026-10-28T00:00:00Z",
-  "validUntil": "1970-01-01T00:00:00Z",
+  "validFrom": "2026-10-28T10:10:00Z",
+  "validUntil": "2026-10-28T16:10:00Z",
   "stopConditions": [
     "任一探针轮次 transport 失败或会话缺失",
     "宿主身份核验非 VERIFIED 或与授权声明不符",
     "副作用扫描任一项非零",
     "授权窗口关闭/撤销/停止"
   ],
-  "issuedBy": "owner-s4",
-  "issuedAt": "2026-10-28T03:30:00Z",
+  "issuedBy": "owner-20261028-probe-approval",
+  "issuedAt": "2026-10-28T10:09:17Z",
   "blockage": {
-    "reason": "S4 宿主切换（Owner 2026-10-28 指令）：首选真实宿主由 Codex CLI 调整为 OpenClaw（2026.10.5，本机已装；zai provider 已配置 glm-5.3-flash=bigmodel coding paas/v4 与 F1 已验证通道同一；owner 已确认配置）。兼容性核验完成：`openclaw agent exec --isolated --json` 每次执行新建显式会话（CLI 自生成 sessionId），JSON envelope 自报 model/provider，运行时轨迹（openclaw-trajectory-pointer→jsonl，逐行 provider/modelId）为佐证源。当前 NOT_ISSUED 的剩余前置=S4-E「新代码通过必需评审和 CI」（宿主迁移 PR：OpenClaw 适配器+授权 kind 扩展+证据分派）。",
-    "pendingDecision": "Owner 对宿主迁移 PR 的评审通过即满足 S4-E 前置；随后本记录由 Owner 或经 Owner 指示翻为 APPROVED（附有效窗口）。",
-    "unblockCondition": "①宿主迁移 PR 评审通过并入 main；②本记录翻 APPROVED+有效窗口；③`run-isolation-probe.mjs --study CEB-001` 执行真实探针轮（openclaw 路径）；④verifyF2ProbeEvidence 深验（openclaw trajectory 佐证）通过；⑤独立 F2 授权签发（PRI-1038）。Codex 路线（S3 #2204）保留为备选，不在本记录范围。"
-  }
+    "reason": "Owner 2026-10-28 批准五轮真实探针（消息原文：批准 PRI-1037 五轮真实探针，使用现有智谱 Coding Plan 订阅通道，授权窗口六小时；仅允许 OpenClaw 使用 zai/glm-5.3-flash，不授权 F2，任何异常立即停止并保留证据）。窗口 6 小时（10:10Z–16:10Z）；通道=现有智谱 Coding Plan 订阅（zai）；模型限 zai/glm-5.3-flash；F2 未授权（PRI-1038 需独立授权）。",
+    "pendingDecision": "",
+    "unblockCondition": "探针完成并深验通过后：证据归档入库 → Owner 审阅 → 独立签发 F2 授权（PRI-1038，不在本授权范围）。"
+  },
+  "revokedAt": "2026-10-28T11:20:00Z",
+  "revokedReason": "S7 §七: the approval triggered its stop condition (three FAILED attempts; attempt-3 timed out all five rounds). Revoked per the existing schema/revocation mechanism; history and attempt records preserved. A NEW authorization is required for any retry."
 }
