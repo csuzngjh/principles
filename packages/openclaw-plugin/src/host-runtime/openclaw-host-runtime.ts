@@ -23,7 +23,6 @@ type NativeResult =
 
 export interface OpenClawHostRuntimeOptions {
   beforePromptBuild(event: PluginHookBeforePromptBuildEvent, context: PluginHookAgentContext, prompt: ActivePrinciplePromptResult): Promise<PluginHookBeforePromptBuildResult | void>;
-  promptExcludePrincipleIds?(event: PluginHookBeforePromptBuildEvent, context: PluginHookAgentContext): ReadonlySet<string>;
   ruleContextProvider?(event: PluginHookBeforeToolCallEvent, context: PluginHookToolContext, request: ProductionRuleContextRequest): unknown | Promise<unknown>;
   ruleInputEnrichmentProvider?(event: PluginHookBeforeToolCallEvent, context: PluginHookToolContext, request: ProductionRuleContextRequest): unknown | Promise<unknown>;
   onBeforeToolResult?(event: PluginHookBeforeToolCallEvent, context: PluginHookToolContext, result: HostEventResult): PluginHookBeforeToolCallResult | void;
@@ -117,11 +116,6 @@ export function createOpenClawHostRuntime(options: OpenClawHostRuntimeOptions): 
       const payload = payloads.get(token);
       if (!payload || payload.kind !== 'before_tool_call') throw new Error('OpenClaw rule enrichment request has a mismatched native payload');
       return options.ruleInputEnrichmentProvider?.(payload.event, payload.context, request);
-    },
-    promptExcludePrincipleIds(event) {
-      const payload = payloadFor(event);
-      if (payload.kind !== 'before_prompt_build') throw new Error('OpenClaw prompt exclusion payload mismatch');
-      return options.promptExcludePrincipleIds?.(payload.event, payload.context) ?? new Set();
     },
     async beforePromptBuild(event, prompt) {
       const payload = payloadFor(event);

@@ -11,7 +11,7 @@
  *
  * SCENARIOS:
  * 1. Default (empty state, no principles, no focus) — heartbeat trigger
- * 2. With legacy evolution principles (active + probation)
+ * 2. Legacy evolution principles are not injected (Runtime V2 is the single authority)
  * 3. Minimal heartbeat (no project context)
  * 4. With project context + thinking OS
  * 5. Section ordering verification
@@ -61,8 +61,6 @@ vi.mock('../../src/core/session-tracker.js', () => ({
   getSession: vi.fn().mockImplementation(() => ({ currentGfi: sessionGfiValue })),
   resetFriction: vi.fn(),
   trackFriction: vi.fn(),
-  setInjectedProbationIds: vi.fn(),
-  clearInjectedProbationIds: vi.fn(),
   decayGfi: vi.fn(),
   getGfiDecayElapsed: vi.fn().mockReturnValue(0),
 }));
@@ -97,16 +95,6 @@ vi.mock('../../src/core/workspace-context.js', () => {
     },
   };
 });
-
-vi.mock('../../src/core/principle-injection.js', () => ({
-  selectPrinciplesForInjection: vi.fn().mockImplementation((principles: unknown[]) => ({
-    selected: principles,
-    wasTruncated: false,
-    breakdown: { p0: 0, p1: 0, p2: 0 },
-    totalChars: 0,
-  })),
-  DEFAULT_PRINCIPLE_BUDGET: 3000,
-}));
 
 vi.mock('../../src/core/empathy-keyword-matcher.js', () => ({
   matchEmpathyKeywords: vi.fn().mockReturnValue({ score: 0, matched: null, severity: 'none', matchedTerms: [] }),
@@ -273,7 +261,7 @@ describe('Golden fixture: prompt output', () => {
     }
   });
 
-  it('2. With legacy evolution principles (active + probation)', async () => {
+  it('2. Legacy evolution principles are NOT injected (Runtime V2 is the single authority)', async () => {
     const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
     const mockWctx = {
       workspaceDir: '/fake/workspace',
@@ -298,26 +286,15 @@ describe('Golden fixture: prompt output', () => {
     (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValueOnce(mockWctx);
 
     const result = await getPromptOutput({ trigger: 'user' });
-    const output = formatResult(result as Record<string, string>);
 
-    if (UPDATE_GOLDEN) {
-      writeFixture('prompt-with-legacy-principles.txt', output);
-    }
-
-    // Verify structural elements
+    // The legacy evolution ledger no longer reaches the prompt: only the
+    // registry-backed core_principles block is rendered.
     expect(result.prependSystemContext).toContain('## 【PD GOVERNANCE CONTEXT】');
-    expect(result.appendSystemContext).toContain('<evolution_principles>');
-    expect(result.appendSystemContext).toContain('Active principles:');
-    expect(result.appendSystemContext).toContain('[P-001]');
-    expect(result.appendSystemContext).toContain('[P-002]');
-    expect(result.appendSystemContext).toContain('Probation principles');
-    expect(result.appendSystemContext).toContain('status="probation"');
+    expect(result.appendSystemContext).not.toContain('<evolution_principles>');
+    expect(result.appendSystemContext).not.toContain('Probation principles');
+    expect(result.appendSystemContext).not.toContain('[P-001]');
+    expect(result.appendSystemContext).not.toContain('[PB-001]');
     expect(result.appendSystemContext).toContain('<core_principles>');
-    expect(result.appendSystemContext).toContain('[P-001]');
-
-    if (!UPDATE_GOLDEN && fs.existsSync(fixturePath('prompt-with-legacy-principles.txt'))) {
-      expect(output).toBe(readFixture('prompt-with-legacy-principles.txt'));
-    }
   });
 
   it('3. Minimal heartbeat (no project context)', async () => {
@@ -430,10 +407,11 @@ describe('Golden fixture: prompt output', () => {
     expect(result.appendSystemContext).toContain('<thinking_os>');
     expect(result.appendSystemContext).toContain('Think step by step before acting.');
     expect(result.appendSystemContext).toContain('<core_principles>');
-    expect(result.appendSystemContext).toContain('[P-001] Always validate input');
+    // Legacy evolution principles from the reducer are no longer injected.
+    expect(result.appendSystemContext).not.toContain('[P-001]');
   });
 
-  it('5. Section ordering: behavioral_constraints → project_context → thinking_os → evolution_principles → core_principles', async () => {
+  it('5. Section ordering: behavioral_constraints → project_context → thinking_os → core_principles', async () => {
     const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
     const { safeReadCurrentFocus } = await import('../../src/core/focus-history.js');
     const { workingMemoryToInjection } = await import('../../src/core/focus-history.js');
@@ -502,16 +480,14 @@ describe('Golden fixture: prompt output', () => {
     const pcPos = assembled.indexOf('<project_context>');
     const wmPos = assembled.indexOf('<working_memory preserved="true">');
     const toPos = assembled.indexOf('<thinking_os>');
-    const epPos = assembled.indexOf('<evolution_principles>');
     const cpPos = assembled.indexOf('<core_principles>\n');
 
     expect(bcPos).toBeGreaterThan(-1);
     expect(pcPos).toBeGreaterThan(-1);
     expect(toPos).toBeGreaterThan(-1);
-    expect(epPos).toBeGreaterThan(-1);
     expect(cpPos).toBeGreaterThan(-1);
 
-    // Order: behavioral_constraints < project_context < thinking_os < evolution_principles < core_principles.
+    // Order: behavioral_constraints < project_context < thinking_os < core_principles.
     // Working memory ordering is covered by prompt-helpers.test.ts because the full
     // hook path depends on compacted focus parser state.
     expect(bcPos).toBeLessThan(pcPos);
@@ -521,8 +497,7 @@ describe('Golden fixture: prompt output', () => {
     } else {
       expect(pcPos).toBeLessThan(toPos);
     }
-    expect(toPos).toBeLessThan(epPos);
-    expect(epPos).toBeLessThan(cpPos);
+    expect(toPos).toBeLessThan(cpPos);
   });
 
   it('6. Idempotency: PD GOVERNANCE CONTEXT not duplicated on repeated calls', async () => {

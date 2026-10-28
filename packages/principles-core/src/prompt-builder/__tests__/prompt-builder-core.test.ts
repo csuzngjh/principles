@@ -179,10 +179,6 @@ describe('truncateInjectionToBudget', () => {
   const withThinkingOs = (content: string) =>
     `<thinking_os>\n${content}\n</thinking_os>`;
 
-  // Helper to create appendSystemContext with evolution_principles
-  const withEvolutionPrinciples = (content: string) =>
-    `<evolution_principles>\n${content}\n</evolution_principles>`;
-
   // Helper to create prependContext with long reason: line
   const withLongReason = (reason: string) =>
     `task: diagnose\nreason: ${reason}\nscore: 75`;
@@ -238,33 +234,19 @@ describe('truncateInjectionToBudget', () => {
     expect(result.truncationLog).toContain('thinking_os');
   });
 
-  it('diagnosticianMode strips evolution_principles when over budget', () => {
+  it('diagnosticianMode exits before stripping reflection_log once the prompt is safe', () => {
     const ps = '<system>identity</system>';
     const pc = 'directive';
-    // Same logic - need remaining content after project_context strip to be > 9000
+    // After stripping project_context the prompt is still over budget, so
+    // thinking_os is stripped too; that brings it back under budget, so the
+    // guard exits and leaves the low-cost reflection_log untouched.
     const ac =
-      withEvolutionPrinciples('z'.repeat(9100)) +
-      '\n' +
-      withProjectContext('x'.repeat(9100));
-    const result = truncateInjectionToBudget(ps, pc, ac, { diagnosticianMode: true });
-    expect(result.appendSystemContext).toContain('[stripped: evolution_principles]');
-    expect(result.truncationLog).toContain('evolution_principles');
-  });
-
-  it('diagnosticianMode strips reflection_log when over budget', () => {
-    const ps = '<system>identity</system>';
-    const pc = 'directive';
-    // Once the larger project_context, thinking_os, and evolution_principles
-    // sections are stripped, the prompt is back under budget; reflection_log is
-    // preserved because the guard exits as soon as the prompt is safe.
-    const ac =
-      withThinkingOs('y'.repeat(9100)) +
-      '\n' +
-      withEvolutionPrinciples('z'.repeat(9100)) +
+      withThinkingOs('y'.repeat(8900)) +
       '\n' +
       '<reflection_log>\nreflections here\n</reflection_log>\n' +
       withProjectContext('x'.repeat(9100));
     const result = truncateInjectionToBudget(ps, pc, ac, { diagnosticianMode: true });
+    expect(result.truncationLog).toContain('thinking_os');
     expect(result.truncationLog).not.toContain('reflection_log');
     expect(result.appendSystemContext).toContain('reflections here');
   });
@@ -281,8 +263,6 @@ describe('truncateInjectionToBudget', () => {
     const bigPc = pc + '\n' + 'x'.repeat(9000);
     const ac =
       withThinkingOs('y'.repeat(9100)) +
-      '\n' +
-      withEvolutionPrinciples('z'.repeat(9100)) +
       '\n' +
       '<reflection_log>\nreflections here\n</reflection_log>\n' +
       withProjectContext('x'.repeat(9100));
@@ -314,8 +294,6 @@ describe('truncateInjectionToBudget', () => {
     const ac =
       withThinkingOs('x'.repeat(3000)) +
       '\n' +
-      withEvolutionPrinciples('x'.repeat(3000)) +
-      '\n' +
       '<reflection_log>\n' + 'x'.repeat(100) + '\n</reflection_log>\n' +
       withProjectContext('x'.repeat(3000));
     const result = truncateInjectionToBudget(ps, pc, ac, { diagnosticianMode: true });
@@ -335,7 +313,7 @@ describe('truncateInjectionToBudget', () => {
     expect(result.truncated).toBe(true);
   });
 
-  it('normal mode does NOT strip thinking_os/evolution_principles', () => {
+  it('normal mode does NOT strip thinking_os', () => {
     const ps = '<system>id</system>';
     const pc = 'dir';
     // 9000 - 11 - 5 = 8984 minimum, use 9100

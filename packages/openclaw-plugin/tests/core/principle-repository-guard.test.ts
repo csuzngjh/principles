@@ -99,10 +99,12 @@ describe('AC-04/05: principle templates (B/C)', () => {
 });
 
 describe('AC-06: runtime prompt injection does not depend on core PRINCIPLES.md', () => {
-  it('prompt.ts injects from the structured reducer, not the markdown template', () => {
+  it('prompt.ts injects from Runtime V2 activations, not the legacy reducer or markdown template', () => {
     const promptSrc = fs.readFileSync(path.join(PACKAGE_ROOT, 'src', 'hooks', 'prompt.ts'), 'utf8');
-    // Must source active principles from the structured store.
-    expect(promptSrc).toContain('getActivePrinciples');
+    // Runtime V2 activations are the single injection authority.
+    expect(promptSrc).toContain('readActivatedPrinciples');
+    // The legacy evolution reducer is no longer an injection source.
+    expect(promptSrc).not.toContain('getActivePrinciples');
     // Must not read the shipped core template as runtime source of truth.
     expect(promptSrc).not.toContain("'PRINCIPLES.md'");
     expect(promptSrc).not.toContain('"PRINCIPLES.md"');

@@ -50,11 +50,6 @@ export interface CorePrincipleEntry {
   text: string;
 }
 
-/** Input for formatting evolution principles (active + probation). */
-export interface EvolutionPrincipleEntry extends CorePrincipleEntry {
-  // Inherits id + text; probation entries are tagged separately by the formatter.
-}
-
 /** Parts assembled into appendSystemContext. Order = priority (low → high). */
 export interface AppendSystemContextParts {
   behavioralConstraints?: string;
@@ -69,7 +64,6 @@ export interface AppendSystemContextParts {
   intentBlock?: string;
   workingMemory?: string;
   thinkingOs?: string;
-  evolutionPrinciples?: string;
   corePrinciples?: string;
 }
 

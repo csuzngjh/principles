@@ -16,7 +16,7 @@
 import { isRisky, normalizePath } from '../utils/io.js';
 import { normalizeProfile } from '../core/profile.js';
 import { computePainScore, trackPrincipleValue } from '../core/pain.js';
-import { getSession, trackFriction, resetFriction, getInjectedProbationIds, clearInjectedProbationIds, type SessionState } from '../core/session-tracker.js';
+import { getSession, trackFriction, resetFriction, type SessionState } from '../core/session-tracker.js';
 import { denoiseError, computeHash } from '../utils/hashing.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
@@ -379,36 +379,6 @@ export function recordHygieneTracking(
       contentLength: observation.params.text?.length ?? 0,
     });
   }
-}
-
-// ── Stage 5: Probation Feedback ─────────────────────────────────────────────
-
-function shouldAttributePrincipleToTool(principle: { contextTags: string[]; trigger: string; }, toolName: string): boolean {
-  return principle.contextTags.includes(toolName) || principle.trigger.includes(toolName);
-}
-
-/**
- * Record probation feedback for injected probation IDs.
- *
- * On success: positive feedback for matching principles.
- * On failure: negative feedback for matching principles.
- */
-export function handleProbationFeedback(
-  sessionId: string,
-  toolName: string,
-  workspaceDir: string,
-  wctx: WorkspaceContext,
-  isSuccess: boolean,
-): void {
-  const injectedProbationIds = getInjectedProbationIds(sessionId, workspaceDir);
-  for (const id of injectedProbationIds) {
-    const principle = wctx.evolutionReducer.getPrincipleById(id);
-    const shouldAttribute = !!principle && shouldAttributePrincipleToTool(principle, toolName);
-    if (shouldAttribute) {
-      wctx.evolutionReducer.recordProbationFeedback(id, isSuccess);
-    }
-  }
-  clearInjectedProbationIds(sessionId, workspaceDir);
 }
 
 // ── Stage 6: Pain Admission ─────────────────────────────────────────────────

@@ -42,6 +42,10 @@ export default defineConfig({
     // Use forks pool to avoid threads pool issues
     pool: 'forks',
     teardownTimeout: 30000,
+    // Matches codex-adapter/workbuddy-adapter: the first scenario in a suite
+    // pays the transform of a large module graph, which exceeds the 5s default
+    // when many forks run in parallel on Windows.
+    testTimeout: 30000,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'lcov', 'html'],

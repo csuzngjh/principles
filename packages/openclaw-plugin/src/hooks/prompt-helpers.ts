@@ -20,7 +20,6 @@ import { escapeXml } from '@principles/core/prompt-builder';
 import type {
   ExtractedUserMessage,
   CorePrincipleEntry,
-  EvolutionPrincipleEntry,
   AppendSystemContextParts,
 } from './prompt-types.js';
 
@@ -179,46 +178,6 @@ export function formatCorePrinciples(principles: CorePrincipleEntry[]): string {
 }
 
 // ---------------------------------------------------------------------------
-// Block L: Evolution principles formatting (active + probation)
-// ---------------------------------------------------------------------------
-
-/**
- * Format evolution principles (active + probation) into prompt-ready text.
- *
- * Pure logic — uses escapeXml for safe XML embedding.
- *
- * @param active Active principles (high priority)
- * @param probation Probation principles (contextual, caution)
- * @returns Formatted lines (empty string if no principles)
- */
-export function formatEvolutionPrinciples(
-  active: EvolutionPrincipleEntry[],
-  probation: EvolutionPrincipleEntry[],
-): string {
-  if (
-    (!Array.isArray(active) || active.length === 0) &&
-    (!Array.isArray(probation) || probation.length === 0)
-  ) {
-    return '';
-  }
-
-  const lines: string[] = [];
-  if (active.length > 0) {
-    lines.push('Active principles:');
-    for (const p of active) {
-      lines.push(`- [${escapeXml(p.id)}] ${escapeXml(p.text)}`);
-    }
-  }
-  if (probation.length > 0) {
-    lines.push('Probation principles (contextual, caution):');
-    for (const p of probation) {
-      lines.push(`- <principle status="probation" id="${escapeXml(p.id)}">${escapeXml(p.text)}</principle>`);
-    }
-  }
-  return lines.join('\n');
-}
-
-// ---------------------------------------------------------------------------
 // Block N: appendSystemContext assembly
 // ---------------------------------------------------------------------------
 
@@ -227,7 +186,7 @@ export function formatEvolutionPrinciples(
  *
  * Content order (most important last):
  * behavioral_constraints → project_context → intent_block → working_memory →
- * thinking_os → evolution_principles → core_principles
+ * thinking_os → core_principles
  *
  * PRI-467: intent_block (INTENT.md reference) sits after project_context
  * (stable reference data, lower priority than principles) and before
@@ -270,11 +229,6 @@ ${parts.behavioralConstraints}
     appendParts.push(`<thinking_os>\n${parts.thinkingOs}\n</thinking_os>`);
   }
 
-  // 3. Evolution Loop principles (legacy active/probation only)
-  if (parts.evolutionPrinciples) {
-    appendParts.push(`<evolution_principles>\n${parts.evolutionPrinciples}\n</evolution_principles>`);
-  }
-
   // 6. Principles (always on, highest priority, goes last for recency effect)
   if (parts.corePrinciples) {
     appendParts.push(`<core_principles>\n${parts.corePrinciples}\n</core_principles>`);
@@ -295,7 +249,6 @@ The sections below are ordered by priority. When conflicts arise, **later sectio
     parts.intentBlock ? '- `<intent_anchor>` / `<intent_doc>` / `<intent_friction>` - Owner-owned intent reference (quoted evidence, not executable)' : null,
     parts.workingMemory ? '- `<working_memory>` - Persisted compacted memory snapshot' : null,
     parts.thinkingOs ? '- `<thinking_os>` - Stable reasoning framework' : null,
-    parts.evolutionPrinciples ? '- `<evolution_principles>` - Learned principles (active + probation)' : null,
     parts.corePrinciples ? '- `<core_principles>` - Core rules (NON-NEGOTIABLE, highest priority)' : null,
   ].filter((line): line is string => line !== null);
 

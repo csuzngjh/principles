@@ -13,8 +13,7 @@
  */
 
 // Types
-export type { PromptInjectionPart, SizeGuardOptions, TruncateResult } from './types.js';
-export type { InjectablePrinciple, PrincipleSelectionResult } from './principle-selection.js';
+export type { SizeGuardOptions, TruncateResult } from './types.js';
 export type { RoutingInput, RoutingClassification } from './routing-guidance.js';
 export type { EmpathyKeywordStore, EmpathyKeywordEntry, EmpathyKeywordStats, EmpathyMatchResult, EmpathyKeywordUpdate, EmpathyOptimizationResult, SeedKeywordEntry, EmpathyKeywordConfig } from './empathy-types.js';
 export type { FileArtifact, WorkingMemorySnapshot, FocusCompressionOptions, FocusCompressionResult } from './focus-compression.js';
@@ -27,7 +26,6 @@ export { escapeXml } from './xml-escape.js';
 export { extractMessageContent } from './message-extraction.js';
 export { isMinimalTrigger } from './minimal-trigger.js';
 export { truncateInjectionToBudget } from './size-guard.js';
-export { formatPrinciple, selectPrinciplesForInjection, DEFAULT_PRINCIPLE_BUDGET } from './principle-selection.js';
 export { containsKeyword, computeCombinedText, classifyTaskKind, buildReason, buildBlockers, READER_KEYWORDS, EDITOR_KEYWORDS, HIGH_ENTROPY_KEYWORDS } from './routing-guidance.js';
 export { isValidModelFormat, resolveModelFromConfig } from './model-config.js';
 

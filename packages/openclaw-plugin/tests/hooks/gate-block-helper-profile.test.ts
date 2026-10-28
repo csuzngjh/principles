@@ -30,7 +30,6 @@ vi.mock('../../src/core/pd-config-loader.js', () => ({
 }));
 
 const mockEmitSync = vi.fn();
-const mockRecordProbationFeedback = vi.fn();
 const mockUpdatePrincipleValueMetrics = vi.fn();
 
 function makeTestWctx(overrides: Record<string, unknown> = {}) {
@@ -52,7 +51,6 @@ function makeTestWctx(overrides: Record<string, unknown> = {}) {
     },
     evolutionReducer: {
       emitSync: mockEmitSync,
-      recordProbationFeedback: mockRecordProbationFeedback,
       getPrincipleById: vi.fn(),
     },
     resolve: vi.fn().mockImplementation((key: string) => {
@@ -69,7 +67,6 @@ describe('Gate Block Helper — PROFILE Resilience', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockEmitSync.mockReset();
-    mockRecordProbationFeedback.mockReset();
     mockUpdatePrincipleValueMetrics.mockReset();
     vi.spyOn(WorkspaceContext, 'fromHookContext').mockReturnValue(makeTestWctx() as any);
     vi.spyOn(EventLogService, 'get').mockReturnValue({} as any);
@@ -207,7 +204,6 @@ describe('PRI-651-B1: Gate B is the only admission gate', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockEmitSync.mockReset();
-    mockRecordProbationFeedback.mockReset();
     mockUpdatePrincipleValueMetrics.mockReset();
     vi.spyOn(WorkspaceContext, 'fromHookContext').mockReturnValue(makeTestWctx() as any);
     vi.spyOn(EventLogService, 'get').mockReturnValue({} as any);

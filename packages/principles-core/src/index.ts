@@ -23,7 +23,7 @@ export {
   isValidModelFormat,
   resolveModelFromConfig,
 } from './prompt-builder/index.js';
-export type { PromptInjectionPart, SizeGuardOptions, CoreLogger, ModelConfigObject } from './prompt-builder/index.js';
+export type { SizeGuardOptions, CoreLogger, ModelConfigObject } from './prompt-builder/index.js';
 
 // Prompt builder — empathy keyword matching (PRI-81 Phase A)
 export {

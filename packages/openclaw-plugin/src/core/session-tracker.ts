@@ -79,9 +79,6 @@ export interface SessionState {
     dailyGfiPeak: number;
     
 
-    // Evolution loop feedback attribution
-    injectedProbationIds?: string[];
-
     // PRI-534: per-session receipt summary surfaced by /pd-context status.
     injectedPrincipleIds?: string[];
     // PRI-899: activation id per entry of injectedPrincipleIds (same index).
@@ -254,7 +251,6 @@ function getOrCreateSession(sessionId: string, workspaceDir?: string, sessionKey
             dailyToolFailures: 0,
             dailyPainSignals: 0,
             dailyGfiPeak: 0,
-            injectedProbationIds: [],
             injectedPrincipleIds: [],
             receiptAutoCorrects: 0,
         };
@@ -427,14 +423,6 @@ export function trackBlock(sessionId: string): SessionState {
 }
 
 
-export function setInjectedProbationIds(sessionId: string, ids: string[], workspaceDir?: string): SessionState {
-    const state = getOrCreateSession(sessionId, workspaceDir);
-    state.injectedProbationIds = [...ids];
-    touchActivity(state, 'control');
-    schedulePersistence(state);
-    return state;
-}
-
 /**
  * PRI-534: record the principle ids injected into this session's prompt context.
  * PRI-755 (review fix): call this on EVERY prompt build with the CURRENT set —
@@ -472,11 +460,6 @@ export function trackReceiptAutoCorrect(sessionId: string | undefined, workspace
     schedulePersistence(state);
 }
 
-export function getInjectedProbationIds(sessionId: string, workspaceDir?: string): string[] {
-    const state = getOrCreateSession(sessionId, workspaceDir);
-    return [...(state.injectedProbationIds || [])];
-}
-
 /**
  * PRI-755: read-only view of the principle ids injected into this session's
  * prompt context. Tri-state: an array (possibly empty) means the injection set
@@ -503,10 +486,6 @@ export function getInjectedActivationIds(sessionId: string): readonly string[] |
     return state?.injectedActivationIds ? [...state.injectedActivationIds] : undefined;
 }
 
-export function clearInjectedProbationIds(sessionId: string, workspaceDir?: string): SessionState {
-    return setInjectedProbationIds(sessionId, [], workspaceDir);
-}
-
 export function getSession(sessionId: string): SessionState | undefined {
     return sessions.get(sessionId);
 }
@@ -518,7 +497,6 @@ export function listSessions(workspaceDir?: string): SessionState[] {
             ...state,
             toolReadsByFile: { ...state.toolReadsByFile },
             gfiBySource: state.gfiBySource ? { ...state.gfiBySource } : undefined,
-            injectedProbationIds: state.injectedProbationIds ? [...state.injectedProbationIds] : undefined,
             // PRI-899: the two paired arrays are cloned TOGETHER or not at all.
             // Pairing is by index, so handing out a live alias of one while
             // cloning the other lets a caller reorder the principle ids and

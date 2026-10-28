@@ -365,11 +365,6 @@ function isDiagnosticCapHit(ids: readonly string[]): boolean {
  * `resolveLivePromptInjectionProjection`, which binds the route to real host
  * facts and refuses to guess).
  *
- * Known conservative gap: the plugin's legacy route additionally dedups
- * candidates against the legacy evolution ledger before trimming; the
- * console cannot replay that reducer read-only, so this projection may
- * forecast slightly MORE consumption than the real injection (never less).
- *
  * PR-1894 — round-key alignment. The plugin derives its fair-rotation round
  * key from the CURRENT session's turn ordinal (`nextSessionTurnOrdinal`),
  * which the console has no access to. Passing no key therefore does NOT make
@@ -381,7 +376,6 @@ function isDiagnosticCapHit(ids: readonly string[]): boolean {
  */
 export async function buildLivePromptInjectionProjection(input: {
   workspaceDir: string;
-  excludePrincipleIds?: ReadonlySet<string>;
   /**
    * PR-1894: the fair-rotation round key the production route is using this
    * turn. Callers that hold one (the plugin) pass it; callers that do not
@@ -546,7 +540,6 @@ export type LivePromptInjectionProjectionResolution =
 export async function resolveLivePromptInjectionProjection(input: {
   workspaceDir: string;
   targetHost?: PromptInjectionTargetHost;
-  excludePrincipleIds?: ReadonlySet<string>;
   roundKey?: number;
   /**
    * SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §6.1 / PRI-1017: budget resolution

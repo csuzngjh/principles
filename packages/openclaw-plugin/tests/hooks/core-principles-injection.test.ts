@@ -65,8 +65,6 @@ vi.mock('../../src/core/session-tracker.js', () => ({
   getSession: vi.fn().mockImplementation(() => ({ currentGfi: sessionGfiValue })),
   resetFriction: vi.fn(),
   trackFriction: vi.fn(),
-  setInjectedProbationIds: vi.fn(),
-  clearInjectedProbationIds: vi.fn(),
   decayGfi: vi.fn(),
   getGfiDecayElapsed: vi.fn().mockReturnValue(0),
 }));
@@ -120,16 +118,6 @@ vi.mock('../../src/core/workspace-context.js', () => {
     },
   };
 });
-
-vi.mock('../../src/core/principle-injection.js', () => ({
-  selectPrinciplesForInjection: vi.fn().mockImplementation((principles: unknown[]) => ({
-    selected: principles,
-    wasTruncated: false,
-    breakdown: { p0: 0, p1: 0, p2: 0 },
-    totalChars: 0,
-  })),
-  DEFAULT_PRINCIPLE_BUDGET: 3000,
-}));
 
 vi.mock('../../src/core/empathy-keyword-matcher.js', () => ({
   matchEmpathyKeywords: vi.fn().mockReturnValue({ score: 0, matched: null, severity: 'none', matchedTerms: [] }),
@@ -310,7 +298,7 @@ describe('PRI-606: core principles injection (production path, empty reducer)', 
     expect(append).toContain('<core_principles>');
   });
 
-  it('learned principles flow to <evolution_principles> and never pollute <core_principles>', async () => {
+  it('legacy reducer principles reach no prompt block and never pollute <core_principles>', async () => {
     const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
     (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValueOnce({
       workspaceDir: '/fake/workspace',
@@ -331,8 +319,10 @@ describe('PRI-606: core principles injection (production path, empty reducer)', 
       },
     });
     const append = await runHook();
-    expect(append).toContain('<evolution_principles>');
-    expect(append).toContain('Owner learned principle X');
+    // Runtime V2 activations are the single injection authority: reducer-backed
+    // legacy principles are not rendered anywhere in the prompt.
+    expect(append).not.toContain('<evolution_principles>');
+    expect(append).not.toContain('Owner learned principle X');
     const block = coreBlock(append);
     expect(block, 'learned principle leaked into <core_principles>').not.toContain('Owner learned principle X');
     expect(block, 'learned id leaked into <core_principles>').not.toContain('P-9001');

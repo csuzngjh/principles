@@ -210,7 +210,9 @@ registry.then('the returned system context contains that activated principle', (
   const append = Object.getOwnPropertyDescriptor(result, 'appendSystemContext')?.value;
   if (typeof prepend !== 'string' || typeof append !== 'string') throw new Error('Expected prompt context strings');
   expect(`${prepend}\n${append}`.split(PRINCIPLE_TEXT)).toHaveLength(2);
-  expect(prepend).not.toContain(`<directive id="P_SHARED_523"`);
+  // Runtime V2 is the single injection authority: the directive is rendered in
+  // prependSystemContext even though the legacy reducer also knows the principle.
+  expect(prepend).toContain(`<directive id="P_SHARED_523"`);
 
   EventLogService.disposeAll();
   const logsDir = path.join(workspaceDir, '.state', 'logs');
@@ -221,9 +223,8 @@ registry.then('the returned system context contains that activated principle', (
   if (typeof injection !== 'object' || injection === null) throw new Error('Expected Runtime V2 injection metadata');
   const data = Object.getOwnPropertyDescriptor(injection, 'data')?.value;
   expect(data).toEqual(expect.objectContaining({
-    injectedCount: 0,
-    skipReason: 'all_deduped_against_legacy',
-    nextAction: 'legacy evolution reducer already contains these principle IDs',
+    injectedCount: 1,
+    principleIds: ['P_SHARED_523'],
   }));
 });
 registry.given('an approved live RuleHost rule is active', async () => {

@@ -21,7 +21,7 @@ export { checkConversationAccessConfig, getPluginEntry, ensureConversationAccess
 export type { ConversationAccessCheckResult } from './core/config-health.js';
 import { getCommandDescription } from './i18n/commands.js';
 import { WorkspaceContext } from './core/workspace-context.js';
-import { handleBeforePromptBuild, selectLegacyPrinciplesForPrompt, type LegacyPrinciplePromptSelection } from './hooks/prompt.js';
+import { handleBeforePromptBuild } from './hooks/prompt.js';
 import { buildOpenClawRuleInputEnrichment, buildRuleContextIfEnabled, handleBeforeToolCall, handleSharedRuleHostResult } from './hooks/gate.js';
 import { handleAfterToolCall, handleSharedPainEvidenceResult, prepareOrdinaryAfterToolCallForSharedRuntime } from './hooks/pain.js';
 import { handleBeforeReset, handleBeforeCompaction, handleAfterCompaction } from './hooks/lifecycle.js';
@@ -252,27 +252,12 @@ const plugin = {
     // ("zh") — an 'en' fallback silently served English templates/prompts to
     // every install that never set plugin config language (ERR-075 family).
     const language = (api.pluginConfig?.language as string) || 'zh';
-    const preparedLegacyPromptSelections = new WeakMap<PluginHookBeforePromptBuildEvent, LegacyPrinciplePromptSelection>();
     const sharedHostRuntime = createOpenClawHostRuntime({
-      promptExcludePrincipleIds: (event, context) => {
-        try {
-          const reducer = WorkspaceContext.fromHookContext({ ...context, workspaceDir: context.workspaceDir }).evolutionReducer;
-          const selection = selectLegacyPrinciplesForPrompt(context.workspaceDir ?? '', reducer, api.logger);
-          preparedLegacyPromptSelections.set(event, selection);
-          return selection.selectedIds;
-        } catch (error) {
-          api.logger.info(`[PD:RuntimeV2] Legacy principle dedup unavailable; continuing with shared active principles: ${String(error)}`);
-          return new Set<string>();
-        }
-      },
-      beforePromptBuild: async (event, context, activePrinciplePrompt) => {
-        const prepared = preparedLegacyPromptSelections.get(event);
-        preparedLegacyPromptSelections.delete(event);
-        return handleBeforePromptBuild(event, {
+      beforePromptBuild: async (event, context, activePrinciplePrompt) =>
+        handleBeforePromptBuild(event, {
           ...context,
           api: api as Parameters<typeof handleBeforePromptBuild>[1]['api'],
-        }, activePrinciplePrompt, prepared);
-      },
+        }, activePrinciplePrompt),
       ruleContextProvider: (_event, context, request) => buildRuleContextIfEnabled(
         WorkspaceContext.fromHookContext({ ...context, workspaceDir: context.workspaceDir }),
         request.targetPath,
