@@ -32,6 +32,12 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { classifyCodexVersion } from '@principles/codex-adapter';
+import {
+  findNewestRolloutFile,
+  readInstalledCodexRuntime,
+  resolveCodexHome,
+  selectMarketplaceCacheVersionDir,
+} from '../services/codex-plugin-install.js';
 
 export type CodexInstallMode =
   | 'INSTALLED_AND_MATCHED'
@@ -74,52 +80,6 @@ export const CODEX_INSTALL_NEXT_ACTIONS = {
     'The Codex CLI is newer than the verified ingestion contract of this PD release. Update PD (the release whose adapter verifies this Codex version); conversation ingestion stays off until then. Hook enforcement surfaces are separate and unaffected.',
 } as const;
 
-interface SemverParts { major: number; minor: number; patch: number }
-
-function parseSemverLoose(value: string): SemverParts | null {
-  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(value.trim());
-  if (!match) return null;
-  const major = Number.parseInt(match[1] ?? '', 10);
-  const minor = Number.parseInt(match[2] ?? '', 10);
-  const patch = Number.parseInt(match[3] ?? '', 10);
-  if (![major, minor, patch].every((n) => Number.isFinite(n))) return null;
-  return { major, minor, patch };
-}
-
-function compareSemverLoose(a: SemverParts, b: SemverParts): number {
-  if (a.major !== b.major) return a.major - b.major;
-  if (a.minor !== b.minor) return a.minor - b.minor;
-  return a.patch - b.patch;
-}
-
-/** A3: pick the plugin cache version Codex would use. Codex keeps plugin
- *  versions in semver-named directories (observed: `0.1.0`); when several
- *  exist, the highest semver is the live candidate; non-semver directories
- *  are ignored rather than guessed. Returns null when nothing usable exists. */
-export function selectMarketplaceCacheVersionDir(codexHome: string, fsMod: Pick<typeof fs, 'existsSync' | 'readdirSync' | 'readFileSync'> = fs): { dirName: string; pin: { codexAdapter?: string; hostRuntime?: string; core?: string } } | null {
-  const cachePluginRoot = path.join(codexHome, 'plugins', 'cache', 'principles', 'principles-disciple');
-  let candidates: { dirName: string; semver: SemverParts; pin: { codexAdapter?: string; hostRuntime?: string; core?: string } }[] = [];
-  try {
-    for (const dirName of fsMod.readdirSync(cachePluginRoot)) {
-      const pinPath = path.join(cachePluginRoot, dirName, 'runtime-version.json');
-      if (!fsMod.existsSync(pinPath)) continue;
-      const semver = parseSemverLoose(dirName);
-      if (!semver) continue; // A3: ignore non-semver directory names instead of guessing
-      try {
-        const pin = JSON.parse(fsMod.readFileSync(pinPath, 'utf8'));
-        candidates.push({ dirName, semver, pin });
-      } catch { /* unreadable pin — skip this candidate */ }
-    }
-  } catch {
-    return null; // cache root absent/unreadable
-  }
-  if (candidates.length === 0) return null;
-  candidates.sort((a, b) => compareSemverLoose(b.semver, a.semver));
-  const best = candidates.shift();
-  if (!best) return null;
-  return { dirName: best.dirName, pin: best.pin };
-}
-
 /** A4: CURRENT CLI version probe placeholder. A direct `codex --version`
  *  spawn is prohibited by the security write-gate in this file (spawnSync +
  *  shell flag pattern-matches as command injection). Until a safe
@@ -132,19 +92,14 @@ export function assessCodexInstall(env: { CODEX_HOME?: string }, homeDir: string
   probeCli?: () => string | null;
 } = {}): CodexInstallHealth {
   const fsMod = deps.fsMod ?? fs;
-  const codexHome = env.CODEX_HOME ? path.resolve(env.CODEX_HOME) : path.join(homeDir, '.codex');
+  const codexHome = resolveCodexHome(env, homeDir);
   if (!fsMod.existsSync(codexHome)) {
     return { ok: false, reason: 'codex_home_missing', nextAction: 'Codex has never run on this machine (CODEX_HOME not found); nothing to assess.' };
   }
-  // Installed runtime (hooks execute this).
-  const installedPkg = path.join(codexHome, 'plugins', 'data', 'principles-disciple-principles', 'runtime', 'node_modules', '@principles', 'codex-adapter', 'package.json');
-  let pluginDataAdapterVersion: string | null = null;
-  let pluginDataPresent = false;
-  try {
-    const parsed = JSON.parse(fsMod.readFileSync(installedPkg, 'utf8'));
-    pluginDataPresent = true;
-    pluginDataAdapterVersion = typeof parsed.version === 'string' && parsed.version.length > 0 ? parsed.version : null;
-  } catch { /* not installed → null */ }
+  // Installed runtime (hooks execute this) — shared reader, see services/codex-plugin-install.ts.
+  const installedRuntime = readInstalledCodexRuntime(codexHome, fsMod);
+  const pluginDataPresent = installedRuntime.present;
+  const pluginDataAdapterVersion = installedRuntime.codexAdapter;
   // Marketplace cache pin (what a $pd-control setup re-run would install) — A3.
   const cacheSelection = selectMarketplaceCacheVersionDir(codexHome, fsMod);
   const marketplacePinAdapterVersion = cacheSelection
@@ -161,35 +116,18 @@ export function assessCodexInstall(env: { CODEX_HOME?: string }, homeDir: string
   // Canonical runtime (~/.pd/runtime) as the "an update exists" signal.
   let canonicalAdapterVersion: string | null = null;
   try {
-    canonicalAdapterVersion = JSON.parse(fsMod.readFileSync(path.join(os.homedir(), '.pd', 'runtime', 'codex-adapter', 'package.json'), 'utf8')).version ?? null;
+    canonicalAdapterVersion = JSON.parse(fsMod.readFileSync(path.join(homeDir, '.pd', 'runtime', 'codex-adapter', 'package.json'), 'utf8')).version ?? null;
   } catch { /* canonical runtime absent → null */ }
   // Newest rollout's declared CLI version (first line only) — HISTORICAL signal.
   let lastRolloutCliVersion: string | null = null;
   {
-    const sessionsRoot = path.join(codexHome, 'sessions');
-    let newest: { file: string; mtimeMs: number } | null = null;
-    const walk = (dir: string, depth: number): void => {
-      if (depth > 4) return;
-      let entries: fs.Dirent[];
-      try { entries = fsMod.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-      for (const entry of entries) {
-        const full = path.join(dir, entry.name);
-        if (entry.isDirectory()) walk(full, depth + 1);
-        else if (entry.isFile() && entry.name.startsWith('rollout-') && entry.name.endsWith('.jsonl')) {
-          try {
-            const { mtimeMs } = fsMod.statSync(full);
-            if (!newest || mtimeMs > newest.mtimeMs) newest = { file: full, mtimeMs };
-          } catch { /* stat race — skip */ }
-        }
-      }
-    };
-    walk(sessionsRoot, 0);
+    const newest = findNewestRolloutFile(codexHome, fsMod);
     if (newest) {
       try {
         // Real session_meta lines carry the host system prompt and can reach
         // tens of KB — read bounded-but-generous head (256KB) and cut at the
         // first newline; never the whole file.
-        const fd = fsMod.openSync((newest as { file: string }).file, 'r');
+        const fd = fsMod.openSync(newest.file, 'r');
         const buf = Buffer.alloc(256 * 1024);
         const read = fsMod.readSync(fd, buf, 0, buf.length, 0);
         fsMod.closeSync(fd);
