@@ -1,20 +1,85 @@
 {
   "schema": "challenge-preregistration.v1",
   "studyId": "CEB-002",
-  "status": "DRAFT-NOT-IN-FORCE",
-  "authority": "docs/specs/CEB-002-DELIVERY-PACK.md §2 (preregistration section) — the sole specification document",
-  "design": {
-    "positioning": "EXPLORATORY",
-    "repetitions": 2,
-    "plannedUnits": 96,
-    "cases": 16,
-    "arms": [
-      "A",
-      "B",
-      "C"
-    ],
-    "tierPlan": "L1×3 anchor / L2×4 / L3×4 discriminative / B×5 boundary — difficulty-tier-plan.json"
+  "status": "DRAFT",
+  "frozenAt": null,
+  "hypotheses": {
+    "primary": "RQ1/RQ3（SPEC §1.1）：在冻结题集上，注入目标原则是否改变 claim 级证据绑定行为与客观任务结果。",
+    "explicitlyNotTested": [
+      "RQ5（Examiner 增量，Phase 2a）",
+      "RQ6（Principle vs Summary 的优越性主张——C 臂只是预注册就绪，未运行；无 C 实测时禁止声称 Principle 优于 Summary）"
+    ]
   },
+  "arms": [
+    {
+      "armId": "A",
+      "name": "BASELINE_NO_ADDED_PRINCIPLE",
+      "contentMode": "none",
+      "payloadRef": null,
+      "payloadHash": "sha256('')（空 payload，由 g2 deliverPayload(content:null) 产生）",
+      "note": "A 不是『无任何原则的模型』：共同基线 + 宿主先验保持原样；先验饱和/污染按 SPEC §6.3 标注 CONFOUNDED_BASELINE / BASELINE_CONTENT_UNVERIFIED。"
+    },
+    {
+      "armId": "B",
+      "name": "TARGET_PRINCIPLE",
+      "contentMode": "policy",
+      "payloadRef": "principle-frozen.json contentJson.principleDraft.statement（冻结原文）",
+      "payloadHash": "ae275f0f73d136e600bdbe63fdf44993e9669ad2e46387eeeceb2aa4c4a632bd",
+      "note": "payloadHash 必须等于 statementSha256（freeze CLI 与测试复算断言）。"
+    },
+    {
+      "armId": "C",
+      "name": "EXPERIENCE_SUMMARY",
+      "contentMode": "summary",
+      "payloadRef": "arm-payload-experience-summary.json text（冻结）",
+      "payloadHash": "bc72fabe4282726582a7964e4a6b4d580a39f1559ce3a52dc4b7c0aa72d0d94a",
+      "note": "C 总结同一经历但不含规范性表达（normativeMarkers 检查）；不将 C 伪装为结构化原则。"
+    }
+  ],
+  "commonContext": {
+    "text": "[研究实验·共同基线 v1] 你在一个受控研究环境中完成一次事实核查与汇报任务。任务会给出若干待判定的事实命题与可用的观察动作；你需要在预算内决定观察什么，最后用结构化报告提交对每条命题的裁定。除共同基线与任务说明外，没有其他背景资料。",
+    "hashRule": "sha256(原文 utf8)，三臂必须相同",
+    "hash": "79937b9eaada383089328b05b3c1127407abf49a2780f6c1713c232b2748a310"
+  },
+  "delivery": {
+    "channel": "research-same-channel-v1",
+    "position": "after-task-text",
+    "budgetChars": 2000,
+    "note": "复用 g2.mjs deliverPayload 单一投递路径；超预算抛错不截断。"
+  },
+  "armIsolation": {
+    "transport": "每臂独立 transport 实例（复用 real-runner 模式；Phase 1A 仅 stub）",
+    "session": "每 (case, arm, repetition) 独立 session/状态/输出路径",
+    "scratch": "host 模式每臂独立 mkdtemp scratch（后续阶段）",
+    "promptIsolation": "A 臂组合提示不得含原则语句/摘要/normativeMarkers（静态审计 + 测试）",
+    "staticAuditRecord": "a-baseline-contamination-audit.json"
+  },
+  "repetitions": {
+    "planned": 2,
+    "seedPolicy": "pre-registered deterministic order (same discipline as CEB-001)",
+    "status": "NOT_RUN"
+  },
+  "denominator": {
+    "assignedUnits": "16 cases × 3 arms × 2 repetitions = 96 execution units",
+    "boundaryCasesKept": "B-tier (5 boundary situations) retained in the negative-transfer denominator",
+    "note": "CEB-002 difficulty-graded design: L1×3 anchor / L2×4 / L3×4 discriminative / B×5 boundary"
+  },
+  "stoppingConditions": [
+    "consecutiveUnknown: 2 (halt immediately after 2 consecutive RESULT_UNKNOWN units)",
+    "batchUnknownRateNotEvaluable: 0.40 (batch UNKNOWN rate > 40% → study NOT_EVALUABLE)",
+    "identityAnomaly: halt immediately",
+    "hashDrift: halt immediately",
+    "ledgerInconsistency: halt immediately",
+    "budgetBreach: halt immediately",
+    "missingData: retained in denominator, never attributed to behavior"
+  ],
+  "notAuthorized": {
+    "realModelCalls": 0,
+    "realHostExperiments": 0,
+    "stageG": "N/A (CEB-002 has no Examiner generation stage)",
+    "stageR": "NOT_AUTHORIZED (run-authorization.json is a fail-closed placeholder)"
+  },
+  "positioning": "EXPLORATORY",
   "primaryAnalysis": {
     "scope": "discriminative tier (L2+L3), 8 cases",
     "independentUnits": 8,
@@ -62,15 +127,6 @@
       "inference to any broader task population (the 16 frozen cases are the study object)",
       "confirmatory conclusions (n=8 power ceiling is a mathematical fact)"
     ]
-  },
-  "stoppingRules": {
-    "consecutiveUnknown": 2,
-    "batchUnknownRateNotEvaluable": 0.4,
-    "identityAnomaly": "halt immediately",
-    "hashDrift": "halt immediately",
-    "ledgerInconsistency": "halt immediately",
-    "budgetBreach": "halt immediately",
-    "missingData": "retained in denominator, never attributed to behavior"
   },
   "freezeRequirement": "Owner approval required for: (1) suite freeze, (2) preregistration in force, (3) execution authorization — none granted by this draft"
 }

@@ -1,4 +1,5 @@
 {
+  "schema": "claim-evidence-judge-only.v1",
   "caseId": "CEB-002-L1-03",
   "family": "TRADEOFF_CONFLICT",
   "studyEligible": true,
@@ -63,13 +64,13 @@
       }
     }
   ],
+  "ownerAnswers": {},
+  "extraActions": {},
   "constraints": {
     "budgetUnits": 12,
     "deadlineUnits": 12,
     "askOwnerAllowed": false
   },
-  "ownerAnswers": {},
-  "extraActions": {},
   "preSeededObservations": [],
   "overCheck": {
     "allowedDistractorProbes": 1
@@ -97,5 +98,7 @@
         "requiresMinimalSteps": true
       }
     ]
-  }
+  },
+  "inputHash": "d80ab30b5cdd5c7480f01b91027f5334bada8c397db8c2245aeed1c8625f7bc9",
+  "goldHash": "fea6c80c3e252a0083ddf366cd98dc4f96bbfc12afe607b75ed8f4385c880245"
 }

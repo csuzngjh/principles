@@ -1,0 +1,62 @@
+{
+  "schema": "challenge-study-hashes.v1",
+  "studyId": "CEB-002",
+  "algorithm": "sha256",
+  "canonicalization": "fixture.mjs canonicalJson: UTF-8, object keys sorted lexicographically, no whitespace, arrays keep order; sha256 over the canonical string encoded utf8",
+  "hashInputNote": "所有哈希基于解析后的对象图（canonical JSON），与文件排版无关；同一内容重复计算必得同一哈希。",
+  "mappingHash": {
+    "value": "213090daecf0cbc9abfc51ca46641e4e3b835730ba9d9ec771118aaed9521290",
+    "rule": "sha256(canonicalJson(pain-mechanism-mapping.json 内容, 去除 mappingHash 字段))"
+  },
+  "principleContentHash": {
+    "value": "8ac06edda31bcc4e5dc98a90bd1457435d1a7481a2477bb391c5d87824e9e3ca",
+    "rule": "sha256(canonicalJson(principle-frozen.json contentJson))；与 input-manifest.expectedSourceHashes 一致（复算断言）"
+  },
+  "statementSha256": {
+    "value": "ae275f0f73d136e600bdbe63fdf44993e9669ad2e46387eeeceb2aa4c4a632bd",
+    "rule": "sha256(statement 原文 utf8)；同时是 B 臂 payloadHash"
+  },
+  "painEventRowSha256": {
+    "value": "679f23d6312bed5d48de0ba0842960b243ef805df6db25e82c864d7d880cd3a0",
+    "rule": "VERIFIED BASELINE——源行在 gitignored 快照 DB，Phase 0 与 2026-10-24 双库只读复算相等；仓内不可复算，修改冻结资产不会触及该值"
+  },
+  "diagnosisRowsSha256": {
+    "value": "f396fb6ab156239007306acb9e29f0d7d123b7094948d150d57a35cc86ea9945",
+    "rule": "同上（pain_diagnoses 行集）"
+  },
+  "graderHash": {
+    "value": "eef38484c4f8ace059c178fcb0697c68154277073b7ab7a9d8c0e608ae383e79",
+    "rule": "sha256(canonicalJson(scoring-contract.json 内容))——评分语义契约整体指纹"
+  },
+  "suiteHash": {
+    "value": "02cbc15cfd9cf8a8b9e986950fdf722fcda6632604f4e62d4bd50ea0950d04f5",
+    "rule": "sha256(canonicalJson(suite-manifest 核心, 去除 suiteHash 字段))；绑定 mappingHash+graderHash+templateId/Version+每题 inputHash/goldHash+familyCounts"
+  },
+  "summaryPayloadHash": {
+    "value": "bc72fabe4282726582a7964e4a6b4d580a39f1559ce3a52dc4b7c0aa72d0d94a",
+    "rule": "sha256(C 臂摘要原文 utf8)"
+  },
+  "commonContextHash": {
+    "value": "79937b9eaada383089328b05b3c1127407abf49a2780f6c1713c232b2748a310",
+    "rule": "sha256(共同基线原文 utf8)；三臂必须一致"
+  },
+  "inputManifestHash": {
+    "value": "a74c035e585bb57d758c095b1fd7e2d6d0bcfdcc80d0f28a299d9d00b99a386d",
+    "rule": "sha256(canonicalJson(input-manifest.json 内容))"
+  },
+  "preregistrationHash": {
+    "value": "bd0a84085d2aefa0aa3203b547e4dc53fc0c4375e8ecaf2a0ba980913dcc4f47",
+    "rule": "sha256(canonicalJson(preregistration.json 内容))"
+  },
+  "verification": {
+    "sourceHashesMatchExpected": true,
+    "armBIsExactFrozenStatement": true,
+    "armIsolationAuditOk": true
+  },
+  "referenceChain": {
+    "suiteHash → mappingHash + graderHash + cases[]": "题集冻结后任何对题面/Gold/映射/评分契约的改动都会破坏 suiteHash",
+    "armB.payloadHash == statementSha256 == principleContentHash 所指产物的 statement 字段": "B 臂注入的正是冻结原则原文",
+    "preregistration.freezeReferences": "预注册引用上述全部哈希",
+    "goldHash per case": "每题 judge-only 内容（含 Gold 真值）独立指纹，写入 suite-manifest cases[]"
+  }
+}

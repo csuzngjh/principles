@@ -1,6 +1,14 @@
 {
   "schema": "challenge-arm-configs.v1",
   "studyId": "CEB-002",
+  "commonContextText": "[研究实验·共同基线 v1] 你在一个受控研究环境中完成一次事实核查与汇报任务。任务会给出若干待判定的事实命题与可用的观察动作；你需要在预算内决定观察什么，最后用结构化报告提交对每条命题的裁定。除共同基线与任务说明外，没有其他背景资料。",
+  "commonContextHash": "79937b9eaada383089328b05b3c1127407abf49a2780f6c1713c232b2748a310",
+  "delivery": {
+    "channel": "research-same-channel-v1",
+    "position": "after-task-text",
+    "budgetChars": 2000,
+    "note": "复用 g2.mjs deliverPayload 单一投递路径；超预算抛错不截断。"
+  },
   "arms": {
     "A": {
       "armId": "A",
@@ -65,5 +73,17 @@
         "principleIdStatus": "UNKNOWN"
       }
     }
-  }
+  },
+  "isolationAudit": {
+    "ok": true,
+    "problems": [],
+    "evidence": {
+      "aPayloadEmpty": true,
+      "bPayloadHash": "ae275f0f73d136e600bdbe63fdf44993e9669ad2e46387eeeceb2aa4c4a632bd",
+      "cPayloadHash": "bc72fabe4282726582a7964e4a6b4d580a39f1559ce3a52dc4b7c0aa72d0d94a",
+      "promptALength": 147,
+      "markersChecked": 4
+    }
+  },
+  "executionStatus": "NOT_RUN"
 }
