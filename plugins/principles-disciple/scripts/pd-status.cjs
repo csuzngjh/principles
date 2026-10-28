@@ -133,20 +133,29 @@ function detectHookTrust() {
 }
 
 // Freshness comparison is possible only for a cache install backed by a local
-// marketplace source whose plugin entry this script can locate. These reasons
-// mean the comparison is NOT AVAILABLE — either by design (no local source) or
-// because the source uses a layout we do not model — never proof that the
-// source is damaged. None of them fails the report or asks anyone to repair the
-// checkout: assuming "source == plugin root" made the repo-root marketplace
+// marketplace source whose plugin entry this script can locate. The reasons
+// below mean the comparison is NOT AVAILABLE — by design (no local source) or
+// because the source uses a layout we do not model. None of them fails the
+// report: assuming "source == plugin root" made the repo-root marketplace
 // layout fail permanently and sent the Owner to fix a healthy checkout
-// (PRI-1052). A resolved plugin dir with an unreadable manifest is deliberately
-// absent from this list — that source really is broken and stays degraded.
-const SNAPSHOT_NOT_COMPARABLE = /^(plugin_root_outside_cache|marketplace_source_not_local:|marketplace_manifest_unreadable|marketplace_manifest_invalid|marketplace_plugin_not_listed:|marketplace_plugin_source_missing|marketplace_plugin_source_not_local:|marketplace_plugin_source_outside_root|marketplace_plugin_source_path_missing|marketplace_plugin_source_not_directory)/;
+// (PRI-1052).
+//
+// Deliberately ABSENT: every reason that is decided AFTER the marketplace
+// manifest for THIS plugin was read (entry missing, entry without a path,
+// entry pointing at a missing path or a file). Those are not "unknown layout",
+// they are a source that no longer carries the plugin — the same class the
+// freshness check exists to catch, so they stay degraded with an accurate
+// diagnosis instead of becoming a silent 0-exit "ok".
+const SNAPSHOT_NOT_COMPARABLE = /^(plugin_root_outside_cache|marketplace_source_not_local:|marketplace_manifest_unreadable|marketplace_manifest_invalid|marketplace_plugin_source_not_local:|marketplace_plugin_source_outside_root)/;
 
 function snapshotRecovery(reason) {
   if (reason === 'codex_config_unreadable') return 'Make ~/.codex/config.toml readable so the marketplace source can be compared, then re-run $pd-cli-operator.';
   if (reason.startsWith('marketplace_not_configured:')) return 'The cache holds a plugin whose marketplace is no longer configured: re-add that marketplace, or remove the stale cache directory.';
   if (reason === 'marketplace_source_missing') return 'Repair the local marketplace entry in ~/.codex/config.toml (it has no source path), then re-run $pd-cli-operator.';
+  if (reason.startsWith('marketplace_plugin_not_listed:')) return 'The marketplace source does not list principles-disciple in .agents/plugins/marketplace.json: restore that entry (or reinstall from a marketplace that does), then re-run $pd-cli-operator.';
+  if (reason === 'marketplace_plugin_source_missing') return 'The marketplace entry for principles-disciple carries no source.path: restore the entry in .agents/plugins/marketplace.json, then re-run $pd-cli-operator.';
+  if (reason === 'marketplace_plugin_source_path_missing') return 'The marketplace entry points at a plugin directory that does not exist: restore that directory (or fix source.path) in .agents/plugins/marketplace.json, then re-run $pd-cli-operator.';
+  if (reason === 'marketplace_plugin_source_not_directory') return 'The marketplace entry points at a file, not a plugin directory: fix source.path in .agents/plugins/marketplace.json, then re-run $pd-cli-operator.';
   if (reason === 'source_plugin_json_unreadable' || reason === 'source_plugin_version_invalid') return 'Restore the marketplace source checkout (~/.codex/config.toml points at one that no longer carries a readable .codex-plugin/plugin.json); reinstalling from it cannot work until then.';
   return 'Reinstall the plugin from its marketplace source, then re-run $pd-cli-operator.';
 }

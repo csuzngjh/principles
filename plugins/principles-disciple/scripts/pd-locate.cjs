@@ -266,9 +266,15 @@ function readMarketplaceSources(configPath) {
  *  only the first turned every freshness check on that layout into a
  *  permanent "source plugin.json unreadable" (PRI-1052).
  *
- *  Returns { ok: true, pluginDir } or { ok: false, reason }. `ok: false` means
- *  the LAYOUT could not be resolved — unknown, not proof of a damaged source —
- *  so callers must not send anyone to repair the checkout on these reasons.
+ *  Returns { ok: true, pluginDir } or { ok: false, reason }. `ok: false` has
+ *  two distinct meanings and callers must classify them, not collapse them:
+ *    - LAYOUT UNKNOWN (`marketplace_manifest_*`, `*_not_local:`,
+ *      `marketplace_plugin_source_outside_root`): we could not model where the
+ *      plugin lives — report "not verifiable", never "repair the checkout".
+ *    - SOURCE INCOMPLETE (`marketplace_plugin_not_listed:`,
+ *      `marketplace_plugin_source_missing` / `_path_missing` /
+ *      `_not_directory`): the manifest for THIS plugin was read, and it names a
+ *      plugin that is gone — that is a real defect and stays degraded.
  */
 function resolveMarketplacePluginDir(sourceRoot, pluginName) {
   try {

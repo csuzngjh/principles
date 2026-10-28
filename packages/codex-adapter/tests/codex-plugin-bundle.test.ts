@@ -654,6 +654,7 @@ describe('installed snapshot freshness and runtime reset (pd-locate/pd-status, P
       | 'path-to-nowhere'
       | 'escaping-path'
       | 'sibling-prefix-path'
+      | 'not-listed'
       | 'path-to-file';
   }) {
     const home = tempDir('pd-repo-marketplace-');
@@ -678,6 +679,8 @@ describe('installed snapshot freshness and runtime reset (pd-locate/pd-status, P
         'sibling-prefix-path': './..checkout',
         // A marketplace entry pointing at a file, not a plugin directory.
         'path-to-file': './plugins/principles-disciple-file',
+        // The marketplace resolves, but it does not list this plugin at all.
+        'not-listed': './plugins/principles-disciple',
       }[flavour];
       if (flavour === 'sibling-prefix-path') {
         fs.mkdirSync(path.join(marketplaceRoot, '..checkout', '.codex-plugin'), { recursive: true });
@@ -689,7 +692,7 @@ describe('installed snapshot freshness and runtime reset (pd-locate/pd-status, P
         fs.writeFileSync(path.join(marketplaceRoot, 'plugins', 'principles-disciple-file'), '{}', 'utf8');
       }
       const entry = {
-        name: 'principles-disciple',
+        name: flavour === 'not-listed' ? 'some-other-plugin' : 'principles-disciple',
         source: entryPath === undefined ? { source: 'local' } : { source: 'local', path: entryPath },
       };
       fs.mkdirSync(path.join(marketplaceRoot, '.agents', 'plugins'), { recursive: true });
@@ -779,23 +782,43 @@ describe('installed snapshot freshness and runtime reset (pd-locate/pd-status, P
     expect(sibling.result.status).toBe(0);
   }, 90_000);
 
-  it('reports an unresolvable marketplace plugin entry as unknown, never "repair the checkout" (PRI-1052)', () => {
+  it('treats an unmodelled marketplace layout as unknown, never "repair the checkout" (PRI-1052)', () => {
     const cases = [
       ['missing', 'marketplace_manifest_unreadable'],
-      ['entry-without-path', 'marketplace_plugin_source_missing'],
-      ['path-to-nowhere', 'marketplace_plugin_source_path_missing'],
       ['escaping-path', 'marketplace_plugin_source_outside_root'],
-      ['path-to-file', 'marketplace_plugin_source_not_directory'],
     ] as const;
     for (const [flavour, reason] of cases) {
       const seeded = statusReport(seedRepoMarketplace({ installed: '0.2.1', source: '0.2.5', manifest: flavour }));
       expect(seeded.snapshot?.state, flavour).toBe('ok');
       expect(seeded.snapshot?.detail, flavour).toContain(`not verifiable (${reason})`);
-      // Nor may it ask anyone to touch the checkout: the layout is unknown,
-      // not proven damaged. (The resolved-but-unreadable case keeps its
-      // degraded verdict — see the plugin-root layout test above.)
+      // The layout is unknown, not proven damaged: no repair order.
       expect(seeded.snapshot?.nextAction, flavour).toBeUndefined();
       expect(seeded.result.status, flavour).toBe(0);
+    }
+  }, 120_000);
+
+  /**
+   * PRI-1052 review fix: these reasons are decided AFTER the marketplace
+   * manifest for THIS plugin was read. A stale cache can hide behind a renamed
+   * or deleted plugin directory, so "not comparable" would have been a silent
+   * 0-exit regression of the very alarm this check exists for (rc-9).
+   */
+  it('stays degraded when the marketplace entry names a plugin that is gone (PRI-1052 review fix)', () => {
+    const cases = [
+      ['not-listed', 'marketplace_plugin_not_listed:principles-disciple', 'does not list principles-disciple'],
+      ['entry-without-path', 'marketplace_plugin_source_missing', 'carries no source.path'],
+      ['path-to-nowhere', 'marketplace_plugin_source_path_missing', 'does not exist'],
+      ['path-to-file', 'marketplace_plugin_source_not_directory', 'points at a file'],
+    ] as const;
+    for (const [flavour, reason, recoveryFragment] of cases) {
+      const seeded = statusReport(seedRepoMarketplace({ installed: '0.2.1', source: '0.2.5', manifest: flavour }));
+      expect(seeded.snapshot?.state, flavour).toBe('degraded');
+      expect(seeded.snapshot?.detail, flavour).toContain(`not verifiable (${reason})`);
+      expect(seeded.snapshot?.nextAction, flavour).toContain(recoveryFragment);
+      // The old blanket message sent the Owner to fix a healthy checkout.
+      expect(seeded.snapshot?.nextAction, flavour).not.toContain('Restore the marketplace source checkout');
+      expect(seeded.report.ok, flavour).toBe(false);
+      expect(seeded.result.status, flavour).toBe(1);
     }
   }, 180_000);
 
