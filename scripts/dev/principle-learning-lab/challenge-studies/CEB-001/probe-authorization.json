@@ -1,0 +1,33 @@
+{
+  "schema": "challenge-isolation-probe-authorization.v1",
+  "probeId": "PRI-1037",
+  "status": "NOT_ISSUED",
+  "studyId": "CEB-001",
+  "frozenHashes": {
+    "suiteHash": "e1f2f5ca9d7f570faf454d057346c4f273e4fb467fa1790482f9a783e591fb5a",
+    "studyPlanHash": "01ac054b2aee6e84d4a1f36ae7f1ecb770567dd155da7e3a6afc88fe92c798d3",
+    "mappingHash": "213090daecf0cbc9abfc51ca46641e4e3b835730ba9d9ec771118aaed9521290",
+    "graderHash": "eef38484c4f8ace059c178fcb0697c68154277073b7ab7a9d8c0e608ae383e79"
+  },
+  "targetHost": {
+    "kind": "codex-cli",
+    "codexHome": "C:/Users/Administrator/.codex",
+    "requestedModelIdentity": "PENDING-OWNER-DECISION"
+  },
+  "caps": { "probeRounds": 5, "timeoutMsPerCall": 180000 },
+  "validFrom": "2026-10-28T00:00:00Z",
+  "validUntil": "1970-01-01T00:00:00Z",
+  "stopConditions": [
+    "任一探针轮次 transport 失败或会话缺失",
+    "宿主身份核验非 VERIFIED 或与授权声明不符",
+    "副作用扫描任一项非零",
+    "授权窗口关闭/撤销/停止"
+  ],
+  "issuedBy": "owner-s2-d3",
+  "issuedAt": "2026-10-28T02:20:00Z",
+  "blockage": {
+    "reason": "目标宿主（本机 Codex CLI 0.165.0，host-actor.mjs 权威适配器）当前仅配置 OpenAI provider（config.toml model=gpt-6-astra；rollout 佐证 model_provider=openai；无任何 bigmodel/智谱 profile）。Owner S2-D1 明令：禁止 OpenAI 模型或未经批准的付费通道；若宿主不支持已批准配置（智谱 GLM-5.3-Flash / AMD TokenFactory）不得擅自换供应商，应报告阻塞。故真实探针轮在本记录 NOT_ISSUED 期间被 fail-closed 拒绝执行。",
+    "pendingDecision": "Owner 需在以下选项中裁定其一：A）为本 Codex CLI 配置智谱 bigmodel provider（换供应商=Owner 决策）并声明 requestedModelIdentity；B）指定其他已批准通道可用的真实宿主；C）明确豁免本探针轮的模型限制（不建议，违反 S2-D1 原意）。",
+    "unblockCondition": "Owner 裁定后：更新本记录 targetHost.requestedModelIdentity 与状态为 APPROVED（附有效窗口），由 run-isolation-probe.mjs 执行真实轮；探针证据经 verifyF2ProbeEvidence 深验后方可签发独立 F2 授权（PRI-1038）。"
+  }
+}
