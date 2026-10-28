@@ -47,10 +47,12 @@ CEB-002 为探索性研究（主分析精确 McNemar p=1.0 NOT_SIGNIFICANT，n=8
 
 归档的 `run-authorization.json` 原文：`status: APPROVED`、`validUntil: 2026-10-28T12:22:47.763Z`、`revoked: false`、`halted: false`、`attemptCap: 96`、`requestCap: 960`。**归档与评审时点该授权在时钟上仍然有效**。原研究目录账本确实已耗尽（96 RESERVE / 96 ATTEMPT_RESULT / 298 REQUEST_RESERVE），但 Stage R 授权校验与目录预算账本是**不同检查**：以截断账本的新副本执行时，仍处有效期内的授权记录可以通过门禁。先前 PR 描述中"预算耗尽即阻断新执行"的论断**不成立，予以撤回**。
 
-处置（按 Owner 指示"先让授权自然过期，再处理合并"）：
+处置（Owner 指示的两条路径之一：**提前合并须有经过验证的隔离方案**——已实施）：
 - 历史授权字节零修改（不置 revoked/halted——修改历史证据=禁止）；
-- **自然过期合并门**：`scripts/__tests__/principle-learning-lab-archived-authorization-gate.test.ts` 以真实时钟断言两个归档研究的授权均已过期——**过期前该测试必红，即本 PR 在 2026-10-28T12:22:47.763Z（CEB-002）之前不可合并**；
-- **攻击路径证伪**：同文件以评审所述攻击路径（复制研究目录+截断三层账本+真实时钟）实测——过期后门禁以 `authorization expired` 拒绝，窗口永久关闭。
+- **授权退役注册表**（`challenge-studies/authorization-revocations.json` + Stage R 门禁退役拒绝，2026-10-28 实施）：与归档记录精确元组（studyId+suiteHash+确切窗口）匹配的记录在**任意时钟、任意研究副本**（含截断账本的新副本）下被门禁以 `authorization retired` 拒绝；注册表随 **lab 代码**（模块相对路径）而非研究数据加载——复制/截断研究数据无法摆脱它；删除条目须改仓库本体（git 保护，与门禁代码同一信任边界）；注册表畸形文件**响亮失败**（绝不静默忽略退役）；近失配（窗口差 1ms/suiteHash 不同/研究不同）不退役，按记录自身条件裁定；
+- 机器验证（`principle-learning-lab-archived-authorization-gate.test.ts`，9 项）：注册表良构+精确元组匹配器+畸形响亮失败+两研究的字节钉定与退役登记+**窗口内模拟时钟下归档目录本体即拒**+**评审攻击路径（副本+截断三层账本+窗口内时钟）即拒**（且拒绝理由为退役而非过期——证明时钟无关）；
+- 自然过期仍是独立后备（记录保留原窗口，时钟最终也会关闭它们）；
+- 语义变化提示：退役实施后，本 README §4 中"授权链门禁 dry-run OK"的复验命令将拒绝并显示 `authorization retired`——这正是隔离生效的表现（该验证在退役前完成并记录于案）。
 
 ### 6.2 预注册元数据冲突（P1-2）
 
@@ -68,4 +70,4 @@ CEB-002 为探索性研究（主分析精确 McNemar p=1.0 NOT_SIGNIFICANT，n=8
 
 - 其归档授权（`challenge-studies/CEB-003-P/run-authorization.json`）同样 `APPROVED/revoked:false/halted:false`，**窗口至 2026-10-28T17:13:04.371Z**——评审发现的暴露类别对已合并的 CEB-003-P 同样成立；
 - 其预注册状态字段同为本节 6.2 的工具缺口形态（status DRAFT 等）；其批准链证据同构：studyPlanHash=413673be… 绑定、96/96 linkage、首请求 17:20:10.661Z 晚于签发 17:13:04.371Z、全部 291 请求在窗口内；
-- 对称修复已随本 PR 加入（同门禁测试覆盖两研究）——**本 PR 的 CI 在 2026-10-28T17:13:04.371Z 之前不会全绿**（较晚的窗口决定），绿后合并即代表全部归档授权窗口均已自然关闭并经机器验证。
+- 对称修复已随本 PR 加入（同一退役注册表覆盖两研究，保护即刻生效、时钟无关）——归档授权（含已在 main 的 CEB-003-P）自注册表入库起即不可授权任何新执行，无需等待窗口自然过期。
