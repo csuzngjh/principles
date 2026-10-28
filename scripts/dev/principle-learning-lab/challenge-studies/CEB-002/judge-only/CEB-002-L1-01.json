@@ -1,4 +1,5 @@
 {
+  "schema": "claim-evidence-judge-only.v1",
   "caseId": "CEB-002-L1-01",
   "family": "FAILURE_VARIANT",
   "studyEligible": true,
@@ -45,13 +46,13 @@
       }
     }
   ],
+  "ownerAnswers": {},
+  "extraActions": {},
   "constraints": {
     "budgetUnits": 6,
     "deadlineUnits": 12,
     "askOwnerAllowed": true
   },
-  "ownerAnswers": {},
-  "extraActions": {},
   "preSeededObservations": [],
   "overCheck": {
     "allowedDistractorProbes": 1
@@ -71,5 +72,7 @@
         ]
       }
     ]
-  }
+  },
+  "inputHash": "3bf21e5d3b82898e1fcbcdd3640fe990dd88549dd8250f6f5a122add6d0c5ada",
+  "goldHash": "e5bc7ca302c3694fc2781ec18a86694107c0e6d25c6ea7d22c46a83b027307d5"
 }

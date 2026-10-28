@@ -1,0 +1,141 @@
+{
+  "schema": "challenge-preregistration.v1",
+  "studyId": "CEB-002",
+  "status": "DRAFT",
+  "frozenAt": null,
+  "hypotheses": {
+    "primary": "RQ1/RQ3（SPEC §1.1）：在冻结题集上，注入目标原则是否改变 claim 级证据绑定行为与客观任务结果。",
+    "explicitlyNotTested": [
+      "RQ5（Examiner 增量，Phase 2a）",
+      "RQ6（Principle vs Summary 的优越性主张——C 臂只是预注册就绪，未运行；无 C 实测时禁止声称 Principle 优于 Summary）"
+    ]
+  },
+  "arms": [
+    {
+      "armId": "A",
+      "name": "BASELINE_NO_ADDED_PRINCIPLE",
+      "contentMode": "none",
+      "payloadRef": null,
+      "payloadHash": "sha256('')（空 payload，由 g2 deliverPayload(content:null) 产生）",
+      "note": "A 不是『无任何原则的模型』：共同基线 + 宿主先验保持原样；先验饱和/污染按 SPEC §6.3 标注 CONFOUNDED_BASELINE / BASELINE_CONTENT_UNVERIFIED。"
+    },
+    {
+      "armId": "B",
+      "name": "TARGET_PRINCIPLE",
+      "contentMode": "policy",
+      "payloadRef": "principle-frozen.json contentJson.principleDraft.statement（冻结原文）",
+      "payloadHash": "ae275f0f73d136e600bdbe63fdf44993e9669ad2e46387eeeceb2aa4c4a632bd",
+      "note": "payloadHash 必须等于 statementSha256（freeze CLI 与测试复算断言）。"
+    },
+    {
+      "armId": "C",
+      "name": "EXPERIENCE_SUMMARY",
+      "contentMode": "summary",
+      "payloadRef": "arm-payload-experience-summary.json text（冻结）",
+      "payloadHash": "bc72fabe4282726582a7964e4a6b4d580a39f1559ce3a52dc4b7c0aa72d0d94a",
+      "note": "C 总结同一经历但不含规范性表达（normativeMarkers 检查）；不将 C 伪装为结构化原则。"
+    }
+  ],
+  "commonContext": {
+    "text": "[研究实验·共同基线 v1] 你在一个受控研究环境中完成一次事实核查与汇报任务。任务会给出若干待判定的事实命题与可用的观察动作；你需要在预算内决定观察什么，最后用结构化报告提交对每条命题的裁定。除共同基线与任务说明外，没有其他背景资料。",
+    "hashRule": "sha256(原文 utf8)，三臂必须相同",
+    "hash": "79937b9eaada383089328b05b3c1127407abf49a2780f6c1713c232b2748a310"
+  },
+  "delivery": {
+    "channel": "research-same-channel-v1",
+    "position": "after-task-text",
+    "budgetChars": 2000,
+    "note": "复用 g2.mjs deliverPayload 单一投递路径；超预算抛错不截断。"
+  },
+  "armIsolation": {
+    "transport": "每臂独立 transport 实例（复用 real-runner 模式；Phase 1A 仅 stub）",
+    "session": "每 (case, arm, repetition) 独立 session/状态/输出路径",
+    "scratch": "host 模式每臂独立 mkdtemp scratch（后续阶段）",
+    "promptIsolation": "A 臂组合提示不得含原则语句/摘要/normativeMarkers（静态审计 + 测试）",
+    "staticAuditRecord": "a-baseline-contamination-audit.json"
+  },
+  "repetitions": {
+    "planned": 2,
+    "seedPolicy": "pre-registered deterministic order (same discipline as CEB-001)",
+    "status": "NOT_RUN"
+  },
+  "denominator": {
+    "assignedUnits": "16 cases × 3 arms × 2 repetitions = 96 execution units",
+    "boundaryCasesKept": "B-tier (5 boundary situations) retained in the negative-transfer denominator",
+    "note": "CEB-002 difficulty-graded design: L1×3 anchor / L2×4 / L3×4 discriminative / B×5 boundary"
+  },
+  "stoppingConditions": [
+    "consecutiveUnknown: 2 (halt immediately after 2 consecutive RESULT_UNKNOWN units)",
+    "batchUnknownRateNotEvaluable: 0.40 (batch UNKNOWN rate > 40% → study NOT_EVALUABLE)",
+    "identityAnomaly: halt immediately",
+    "hashDrift: halt immediately",
+    "ledgerInconsistency: halt immediately",
+    "budgetBreach: halt immediately",
+    "missingData: retained in denominator, never attributed to behavior"
+  ],
+  "notAuthorized": {
+    "realModelCalls": 0,
+    "realHostExperiments": 0,
+    "stageG": "N/A (CEB-002 has no Examiner generation stage)",
+    "stageR": "NOT_AUTHORIZED (run-authorization.json is a fail-closed placeholder)"
+  },
+  "positioning": "EXPLORATORY",
+  "primaryAnalysis": {
+    "scope": "discriminative tier (L2+L3), 8 cases",
+    "independentUnits": 8,
+    "independence": "one case = one paired unit; the 2 repetitions per case are repeated measurements of the SAME unit, never independent samples",
+    "reductionRule": "reduceCaseLevel (lib/ceb002-stats.mjs, test-anchored): a case counts B-worse iff B failed >=1 rep AND C passed BOTH reps; symmetric for C-worse; every mixed outcome is concordant and never enters the discordant count — rule FIXED BEFORE any results",
+    "test": {
+      "method": "exact McNemar (two-sided, alpha=0.05)",
+      "implementation": "lib/ceb002-stats.mjs mcnemarExactPValue — exact binomial enumeration, no asymptotic approximation"
+    },
+    "role": "extreme-effect veto gate ONLY — the primary statistical output is descriptive effect estimation (per-case pair detail, discordance rate, direction)",
+    "powerLimitation": "n=8 exact McNemar (two-sided alpha=0.05) rejects when >=6 discordant case-level units ALL point in the same direction with the rest concordant — i.e. (6,0) p=0.03125, (7,0) p=0.01563, (8,0) p=0.00781 or the symmetric reverse; (5,0) p=0.0625 does NOT reject. Max power 0.1445 (=37/256, reached at pd=0.5 delta=0.5); at delta=0.25/pd=0.5 power is 0.024; conservative null size ~0.00004. CONFIRMATORY TESTING IS INFEASIBLE at this round's sample size — the exact test serves as an extreme-effect veto gate only"
+  },
+  "referenceViews": [
+    {
+      "view": "all-16 case-level pairs",
+      "status": "reference only — heterogeneous tier mix (L1 anchor + boundary + discriminative)",
+      "independence": "16 independent case-level units but not the primary analysis object"
+    },
+    {
+      "view": "repetition-level 32 pairs",
+      "status": "reference only — NON-INDEPENDENT (repetitions of the same case are correlated)",
+      "forbiddenUse": "must never be presented as independent samples or used to inflate the independent n"
+    }
+  ],
+  "escalation": {
+    "automatic": false,
+    "rule": "NONE — fixed 2 repetitions; no result-driven sample-size adjustment; any confirmatory study requires a SEPARATE preregistration and fresh Owner authorization"
+  },
+  "confounds": [
+    {
+      "name": "B/C sentence-count ratio 2:5",
+      "preregistered": true,
+      "note": "payloads are CEB-001 frozen texts reused verbatim; this material imbalance is reported with every B-vs-C comparison"
+    }
+  ],
+  "claimBoundary": {
+    "supports": [
+      "exploratory comparison of these two specific payloads (B principle text vs C summary text)",
+      "descriptive effect estimation with per-case detail",
+      "boundary-tier negative-transfer observation across five situations",
+      "difficulty-gradient ceiling check (L1 anchor vs L2/L3)"
+    ],
+    "doesNotSupport": [
+      "causal attribution to the principle-abstraction mechanism (confound + exploratory sample)",
+      "inference to any broader task population (the 16 frozen cases are the study object)",
+      "confirmatory conclusions (n=8 power ceiling is a mathematical fact)"
+    ]
+  },
+  "freezeRequirement": "Owner approval required for: (1) suite freeze, (2) preregistration in force, (3) execution authorization — none granted by this draft",
+  "freezeReferences": {
+    "mappingHash": "213090daecf0cbc9abfc51ca46641e4e3b835730ba9d9ec771118aaed9521290",
+    "suiteHash": "02cbc15cfd9cf8a8b9e986950fdf722fcda6632604f4e62d4bd50ea0950d04f5",
+    "graderHash": "eef38484c4f8ace059c178fcb0697c68154277073b7ab7a9d8c0e608ae383e79",
+    "principleContentHash": "8ac06edda31bcc4e5dc98a90bd1457435d1a7481a2477bb391c5d87824e9e3ca",
+    "summaryPayloadHash": "bc72fabe4282726582a7964e4a6b4d580a39f1559ce3a52dc4b7c0aa72d0d94a",
+    "commonContextHash": "79937b9eaada383089328b05b3c1127407abf49a2780f6c1713c232b2748a310",
+    "note": "由 freeze-challenge-study.mjs 填充并在 hashes.json 汇总；suiteHash 绑定 mappingHash+graderHash+全部题对哈希。"
+  }
+}

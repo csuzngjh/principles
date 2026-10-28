@@ -166,7 +166,7 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
   const diagnosticianDisabled = !capability.available;
 
   // Step 2 — Idempotent reconciliation (always runs; creates no LLM work).
-  const reconcile = await reconcileGovernanceContinuation({ workspaceDir });
+  const reconcile = await reconcileGovernanceContinuation({ workspaceDir, conversationIngestionEnabled: false });
 
   // Step 2b — Bare-pain admission (review R2/P1): the hook leaves bare
   // workbuddy failure pains that no inline admission exists for. Without this
