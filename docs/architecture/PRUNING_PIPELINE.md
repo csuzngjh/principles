@@ -76,7 +76,7 @@ Pruning Pipeline 的职责是**控制 Prompt 上下文压力**，确保活跃原
 | `defer` | 推迟决策，下次再审查 | 否 |
 | `archive-candidate` | 标记为候选归档，从 Prompt 注入中屏蔽 | 否 |
 
-**重要**：`archive-candidate` 不会修改 Ledger 中的原则状态。它仅将原则 ID 加入 Pruning Mask，在 Prompt 注入时跳过该原则。这是一个**可逆的软操作**，通过 `rollback` 命令即可恢复。（该 `review → mask → rollback` 闭环已于 2026-10-28 整体删除，三个环节均不存在。）
+**重要（历史设计，2026-10-28 已退役）**：`archive-candidate` 从不修改 Ledger 中的原则状态，只把原则 ID 加入 Pruning Mask，让 Prompt 注入跳过该原则；恢复靠 `rollback` 追加一条 `keep` 记录（LWW 语义）。`review` 命令 → mask 读取 → `rollback` 这三个环节已于 2026-10-28 整体删除，本节只保留当时的设计记录，**没有可用命令**。
 
 ### 2.3 Pruning Action
 

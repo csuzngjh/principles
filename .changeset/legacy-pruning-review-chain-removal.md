@@ -1,6 +1,6 @@
 ---
 '@principles/core': patch
-'@principles/pd-cli': patch
+'@principles/pd-cli': minor
 'principles-disciple': patch
 'create-principles-disciple': patch
 ---
@@ -8,6 +8,13 @@
 Legacy pruning-review chain removal (follow-up to the legacy principle-injection
 removal): the pruning audit log, its injection mask and the operator commands
 that wrote it are deleted, together with the dead legacy subtree reader.
+
+`pd-cli` takes a minor bump rather than a patch because two operator-visible
+subcommands disappear from the CLI surface. `pd runtime pruning report`,
+`explain` and `orphans` keep their contract; `pd runtime pruning review` and
+`pd runtime pruning rollback` are removed, so any script or habit that calls
+them must stop (they wrote a log that nothing reads any more, which made
+`archive-candidate` look like a governance decision that changed nothing).
 
 - Core: delete `runtime-v2/pruning-review-log.ts` (`appendPruningReview`,
   `listPruningReviews`, `PruningReviewDecision`, `PruningReviewRecord`,
