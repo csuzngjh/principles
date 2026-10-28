@@ -14,7 +14,7 @@
 | 本版目标 | 将现有能力抽象、MCP 边界、首个候选工具、安全契约、Gate 与验收条件落为仓库内可评审的正式草案 |
 | 明确非目标 | 不实现 MCP Server、不添加 MCP SDK、不抽取应用包、不修改 Hook/RuleHost、不授权历史敏感文本披露、不授权任何写入工具 |
 
-> 本文中的“当前事实”指调查基线内可定位的代码或文档；“要求/建议”是待 Owner 审阅的目标契约，不代表已经实现或获批。当前工作只授权形成和评审 SPEC 草案，不代表 Gate 0/1 已批准，更不代表生产 MCP Pilot 已获准。
+> 本文中的“当前事实”指调查基线内可定位的代码或文档；“要求/建议”是待 Owner 审阅的目标契约，不代表已经实现或获批。Owner 于 2026-10-28 批准按建议默认方案继续收口 Gate 0/1：Codex CLI 作为候选宿主、按需查询原则关联 Pain、本地 stdio、单一可信工作区、只读工具白名单、默认不披露敏感原文，以及 Gate 2 价值证明前不在仓库引入 MCP SDK 或新应用包。该批准只冻结设计方向，不代表 Gate 0/1 已通过，不授权 Gate 2 真实数据实验、生产代码、宿主安装或 MCP Pilot。
 
 ### 版本沿革与证据边界
 
@@ -22,6 +22,25 @@
 - 2026-10-28 的 PR #2214 实施报告引用了一个外部工作区的 v0.3-draft 快照（SHA256：16f827f60610c2387f70cf3d5c4adec03d2679ef36804f6ecbef4f29f79f94f5），但该完整 v0.3 文件此前没有进入仓库主干。
 - 因此 v0.4 是将可取得的 v0.2 设计与 v0.3 报告中可验证的决策、代码事实和未决项进行显式整合；不声称逐行继承了未入库的 v0.3 原文。后续若找回 v0.3 原件，应对差异做一次明确对账，而不是静默覆盖历史。
 - PR #2214 已修复 pain recall 的 WAL 只读副作用，并合入本版调查基线。该修复是只读安全前置，不是 MCP 实现，也不自动批准 MCP 数据披露或生产接入。
+
+### Owner decision record（2026-10-28）
+
+Owner 已批准继续采用以下设计默认值：
+
+- 候选宿主为 Codex CLI；这是目标工作流的验证候选，不等于已批准生产宿主或已验证 MCP Client 版本。
+- 候选工作流为 Agent 在任务中按需查询与指定规范原则有真实来源关联的历史 Pain。
+- 如果未来进入 Pilot，传输限制为本地 stdio、单一可信工作区、只读工具白名单。
+- 历史 Pain 原文、Owner 原话、correctionEvidence、诊断根因和支持证据正文默认禁止披露。
+- Gate 2 证明 MCP 有净增量前，不在仓库添加 MCP SDK 依赖、不创建独立应用包、不移动生产业务代码。
+
+本次批准**未**冻结以下事项：
+
+- 对外精确字段白名单，尤其 painId、occurredAt、source/host、证据引用 ID、原则正文或任何脱敏摘要是否可披露。
+- MCP SDK / Codex Client 的精确版本与真实安装兼容性。
+- Gate 2 数值阈值与允许成本。
+- 访问真实历史数据、运行 PRR v1.3 Gate B 实验或实施生产 MCP 的授权。
+
+**与 PRR v1.3 的边界：** `docs/specs/SPEC-PD-PRR-001-principle-pain-recall-v1.3.md` 明确将首版 MCP 与 Raw 列为范围外。本 SPEC 是一个独立、后续的应用能力适配器提案，不修改 PRR v1.3，不替代其 Gate B，不授予 Raw 访问权限。MCP Gate 2 只评估集成效用，使用合成夹具；它不是 PRR 的行为收益实验。
 
 ---
 
@@ -83,6 +102,7 @@ MCP 只覆盖第二条集成面。它不会自动接入 Hook、获得真实宿�
 | Recall 关联有明确权威边 | principle.reuseEvidence 中的真实 painId；以及 derivedFromPainIds 经 candidate → task → tasks.input_ref 的可验证链路。禁止文本相似度猜测关联，禁止将 candidateId/taskId/artifactId 冒充 painId。 |
 | Recall 当前响应包含敏感自由文本 | PainRecallEntry 可包含 pain.text、diagnosis.rootCause、supportingEvidence.note、correctionEvidence.text，原则响应也可能包含文本。MCP 不得直接透传整个 PainRecallResult；必须先经过字段白名单投影。 |
 | PR #2214 已合并 | 修复了 WAL 数据库只读打开导致的工作区 sidecar 副作用；对 WAL 库使用暂存快照，并以 main → wal → main 复检建立可说明的时点一致性边界。它不承诺“返回瞬间绝对最新”；后者需要 writer 协调层和独立设计。 |
+| PRR v1.3 的范围边界 | `docs/specs/SPEC-PD-PRR-001-principle-pain-recall-v1.3.md` 明确把首版 MCP 与 Raw 列为范围外。本 SPEC 是独立的后续适配器提案，不修改 PRR v1.3，也不替代其 Gate B 或授权 Raw。 |
 | 只读风险不能泛化为“所有查询已安全” | PR #2214 的修复范围是 pd pain recall；其他读模型、连接路径必须按各自契约单独验证，不能因为 Recall 已修复就默认全部安全。 |
 | CLI 已有 Pain 显式登记路径 | Codex 的 pd pain explicit 依赖受信任的 live-turn context 和现有准入链；它是宿主绑定的写入路径，不自动变成 MCP 写工具。 |
 | Hook 与 MCP 边界已有架构约束 | docs/adr/0020-codex-cli-host-adapter.md 和 docs/architecture/CODEX_CLI_ADAPTER_SPEC.md 将 Codex Hook 与 MCP 工具访问视为不同扩展面；MCP 不得取代 Hook。 |
@@ -221,14 +241,14 @@ packages/pd-application 仅是备选，不是默认方案。Gate 2 通过后，�
 
 MCP Adapter 不得直接返回完整 PainRecallResult。内部响应包含自由文本并不代表 Agent 有权读取这些字段。
 
-默认允许的候选字段仅限：
+以下仅是用于合成 Gate 2 原型的**候选元数据投影**，不是已批准的生产 allowlist：
 
-- 原则身份：requestedId、canonicalId、identityStatus；原则正文默认不返回。
-- 每条关联：painId（是否对外披露需 Gate 1 确认）、occurredAt、source/host 的受限枚举、association.type、association.confidence。
-- 数据可用性：painEvent、diagnoses、correctionEvidence 的可用性状态；不返回其正文。
-- 结果摘要：returned、availableCandidates、truncated。
-- 来源状态：ledger、trajectoryDb、stateDb 的状态枚举，不含绝对路径。
-- warnings：结构化原因码和不含敏感信息的说明。
+- 原则解析状态，不回显或额外暴露内部原则标识；
+- 关联类型与置信度，不返回关联证据 ID；
+- Pain / diagnosis / correctionEvidence 的可用性状态，不返回正文；
+- 结果计数、截断状态、来源状态码和不含敏感信息的 warnings。
+
+在 Owner 明确冻结逐字段 allowlist 前，生产 MCP 不得注册此工具。以下字段即使不属于原始正文，也不得默认输出：painId、occurredAt、source/host、evidenceRefs、canonicalId、原则标题/正文及脱敏摘要。若目标工作流无法在此元数据投影下完成，Gate 2 必须记录为能力不足并停止/请求字段裁决，不能由实现者自动扩大披露范围。
 
 默认禁止披露的字段：
 
@@ -390,14 +410,24 @@ Gate 2 之前，以上映射只用于契约设计与 Reality Audit；不移动�
 - 更新 Host Capability Matrix，分开记录源码存在、生产接线、安装状态、真实宿主验证和 Agent 可调用性。
 - 把现有 Skill + CLI 纳入基线，至少评估目标相关的 pd pain recall 与 pd pain explicit 路径。
 - 冻结一个目标工作流：使用者、触发时机、输入、期望结果、失败代价、现有替代方案。
-- 记录目标宿主与版本；候选 Codex，但未经 Owner 裁决不得当作最终选择。
+- 记录目标宿主与版本；Owner 已批准 Codex CLI 作为验证候选，但目标宿主版本、MCP Client 版本和实际安装兼容性仍未核实，不得声称生产兼容。
 - 明确历史 Pain/Owner 原话的分类和字段披露状态。
 - 对照 Pain Recall CLI SPEC、PRR v1.3、ADR-0020 和 Codex Adapter SPEC。
 - 明确诉求是业务工具访问还是 Hook/lifecycle 接入；不得混为一谈。
 
-通过条件：关键结论有当前源码/测试证据；事实、推断、建议分开；目标场景明确；Owner 批准进入 Gate 1。
+#### Reality Audit 快照（基线 3a2de95c）
 
-当前状态：PARTIAL。已完成部分源码和 Recall/WAL 审计；目标场景、宿主与披露裁决仍待 Owner 确认。
+| 面向 | 当前可支持的结论 | 对 Gate 的影响 |
+|---|---|---|
+| CLI Pain Recall | `packages/pd-cli/src/services/pain-recall.ts` 提供 `recallPains()` 与 `pd.pain-recall.v1`；`pain-recall-readonly.test.ts` 覆盖缺失源、回滚日志/WAL、sidecar、竞态和失败注入。PR #2214 已合并。 | 可作为业务语义与只读证据基线；不等于 MCP 字段披露已获准。 |
+| PRR v1.3 | 明确将首版 MCP、Raw 列为范围外；其 Gate B 仍有独立授权要求。 | MCP 适配器必须保持独立；不得宣称 PRR 已批准 MCP 或真实历史读取。 |
+| Codex Host Lifecycle | 仓库已有 Codex Adapter SPEC / ADR 与相关现实审计；它们描述 Hook/lifecycle 接入，不等于 MCP 工具客户端兼容性。 | 不将 Hook 覆盖当作 MCP 的增量价值，也不让 MCP 替代 Hook/RuleHost。 |
+| MCP Server / Client | 本轮定向检索和已审查报告未找到已交付的 PD MCP Server；没有验证具体 Client/SDK 版本或真实宿主安装。 | 标记为 NOT_VERIFIED / NOT_IMPLEMENTED；实施前必须做完整源码与真实宿主核查。 |
+| 共享应用服务包 | 当前 Recall 服务位于 `packages/pd-cli`；尚未证明必须创建独立 `packages/pd-application`。 | Gate 2 前不抽包、不迁移、不引入 SDK。 |
+
+通过条件：关键结论有当前源码/测试证据；事实、推断、建议分开；目标场景明确；Owner 批准进入 Gate 1。完整宿主/Client 兼容性核查仍须在任何 Pilot 前完成。
+
+当前状态：**PARTIAL — 默认工作流与架构约束已获 Owner 批准；Gate 0 未通过**。原因：完整 Host Capability Matrix、真实 Client 版本/安装兼容性以及对外字段白名单仍未核实/冻结。
 
 ### Gate 1 — Application Capability Contract（纯设计阶段）
 
@@ -414,26 +444,52 @@ Gate 2 之前，以上映射只用于契约设计与 Reality Audit；不移动�
 
 通过条件：契约独立于 CLI 参数和 MCP SDK；空结果、部分可用、未确认、拒绝和失败无歧义；Owner 审阅候选工具及字段白名单。
 
-当前状态：DRAFTED_NOT_APPROVED。本文件提供待审草案，不代表 Gate 1 已通过。
+当前状态：**PARTIAL — 默认架构约束已获 Owner 批准；Gate 1 未通过**。候选业务信封、状态映射和只读边界已成文；精确字段 allowlist（尤其 painId、occurredAt、source/host）、输出上限与 Gate 2 预注册阈值仍未冻结。
 
 ### Gate 2 — MCP 必要性与增量价值证明
 
-目标：证明 MCP 对一个具体场景有净增量。
+目标：判断 MCP 对一个具体 Agent 工作流是否带来可重复的净增量。此 Gate 是集成效用测试，不是 PRR v1.3 Gate B 的行为收益实验。
 
-必须提供：
+#### 2.1 对照协议（拟议执行方案；尚未获执行授权）
 
-- 一个可复现的目标宿主任务。
-- 现有 Skill + CLI / 宿主原生工具无法可靠完成任务的具体证据。
-- 现有路径与一次性、非生产 MCP 技术验证的对照：成功率、错误率、调用轮次、结果字节、配置步骤、恢复方式、维护成本。
-- 仅使用合成 fixture 或已明确授权的数据；不得读取未授权的真实历史样本。
-- 目标宿主的 MCP Client 支持、安装、权限和卸载证据。
-- 如果 MCP 只能通过启动 CLI 子进程、复制业务逻辑或放宽权限实现，将其记录为成本或失败证据，不把该实现直接带入生产。
+- **Arm A — 现有路径：** 目标宿主按现有 Skill / 文档使用 `pd pain recall --principle-id <id> --json`。若没有可确认的 Skill，必须如实记录为 CLI + 当前指导文本，不得假称 Skill 已安装。
+- **Arm B — 一次性 MCP 原型：** 仅注册 `pd_recall_principle_pains` 候选工具；使用本 SPEC 的合成元数据投影，不返回真实 Pain 内容、Owner 原话或未经批准的 ID/时间/来源字段。
+- 两臂使用同一 Owner 批准的非 OpenAI 模型、相同模型版本/推理设置/任务提示、同一目标宿主版本、同一合成工作区和等价任务指令；随机化运行顺序并保留逐次结果。
+- 使用 **12 个固定合成场景，每臂每场景重复 3 次**（每臂 36 次、合计 72 次）。建议场景分布：4 个有效关联；2 个真实无匹配；2 个必需来源缺失/不可读；2 个可选来源部分可用；1 个原则身份歧义；1 个非法输入/不允许字段请求。
+- 场景、正确答案、状态映射和评分规则必须先冻结，再执行；不得根据中途结果改题或改门槛。
+- 只使用合成 fixture。不得读取真实 Owner 历史、生产 Pain 文本、真实 correctionEvidence，不调用外部模型服务以外的任何服务（模型是否外部调用仍须单独遵循已批准预算/政策）；本 Gate 本身不授予真实数据访问权。
 
-通过条件：现有路径的不足可复现且不能通过小幅修复合理解决；MCP 的净收益超过依赖、配置、安全和维护成本；Owner 明确批准生产 Pilot。
+#### 2.2 不引入生产依赖的原型规则
 
-若 Skill + CLI 已足够，或宿主无法安全支持 MCP，Gate 2 可判定 STOP；不建设生产 MCP 是有效结论。
+- Gate 2 前不得在仓库 package.json / lockfile 中添加 MCP SDK，不创建应用包，不移动生产业务代码。
+- 若要验证真实 stdio 工具发现/调用，可在隔离临时目录创建可丢弃原型，依赖只安装在临时目录，运行后销毁；不得提交该依赖、配置或原型代码。
+- 若证明 MCP 价值必须先把 SDK 或新包写入生产仓库，则停止并返回 Owner 决策，不得以“实验需要”为由绕过 Gate。
+- MCP 原型不得通过启动 CLI 子进程、解析 stdout 或复制 Recall 关联逻辑来模拟共享应用服务。Gate 2 允许用最小实验 harness 比较调用体验，但必须把“协议可用性”和“共享业务服务尚未抽取”分别记录，不得宣称 Gate 3 已完成。
 
-当前状态：NOT_RUN。
+#### 2.3 指标与停止规则
+
+每次运行记录：任务是否完成、结果/状态是否正确、工具调用数、Agent 交互轮次、返回字节数、p50/p95 延迟、安装配置耗时、错误与恢复路径。对安全属性逐次断言：无未批准字段、无文件/数据库/sidecar 变化、无路径越界、无 CLI 子进程调用、无 false-success 状态映射。
+
+以下数值仅为**待 Owner 冻结的阈值提案**，不是已批准门槛：
+
+- 安全硬门：敏感字段泄露、任何工作区副作用、权限绕过或 false-success 发生次数必须为 **0**；出现一次即 STOP。
+- 效用门：MCP 必须满足以下至少一项：任务成功率绝对提升不少于 **10 个百分点**；或在成功率不低于 CLI 基线 **5 个百分点以上**的前提下，中位 Agent 交互轮次/工具调用减少至少 **25%**。
+- 操作门：在文档化前置条件已满足的环境中，新增 MCP 配置步骤目标不超过 **5 分钟**；p95 延迟不超过 CLI 基线的 **2 倍**。超出时必须证明有足够大的效用收益并由 Owner 另行接受。
+- 若 CLI 基线任务成功率已达到 **95%**，而 MCP 未达到上述效率/配置收益，则建议 STOP，不为协议统一而继续投资。
+- 若元数据投影不足以完成已冻结的真实目标任务，不得私自加入 painId、时间、来源或原文；应记录能力缺口，回到 Owner 字段裁决。未获字段授权前不做真实历史数据试验。
+
+#### 2.4 Gate 2 的准入与结论
+
+准入前必须由 Owner 冻结：① 12 个合成场景与评分答案；② 本次原型可输出的合成字段投影；③ 上述数值阈值或替代阈值；④ 目标 Codex / MCP Client 的精确版本；⑤ 原型隔离与清理方式。上述任何一项未冻结，Gate 2 保持 NOT_RUN。
+
+退出结论只能是：
+- **GO_TO_GATE_3_PROPOSAL**：安全硬门全过且效用门通过，提交证据供 Owner 决定是否进入共享服务抽取；
+- **STOP**：CLI 已足够、MCP 无净增量、元数据投影无法满足任务，或任何安全硬门失败；
+- **UNPROVEN**：结果不稳定、环境不等价或证据不足；不得按 GO 处理。
+
+Gate 2 的成功不自动授权生产 MCP、真实历史数据读取或 PRR Gate B。Gate 3、Gate 4 仍需独立批准。
+
+当前状态：**NOT_RUN — 方案已草拟；数值阈值、字段投影与 Client 版本未冻结，且无执行授权**。
 
 ### Gate 3 — 最小共享应用用例抽取
 
@@ -570,19 +626,19 @@ Gate 2 之前，以上映射只用于契约设计与 Reality Audit；不移动�
 
 ## 14. Owner 决策卡
 
-以下问题必须由 Owner 明确裁决；本 SPEC 不将建议伪装成既定决策。
+以下记录区分 Owner 已批准的设计默认值与仍待裁决事项。本次 Owner 批准仅限继续收口 Gate 0/1，不代表 Gate 已通过或授权实现。
 
 | ID | 决策问题 | 建议 | 当前状态 |
 |---|---|---|---|
-| D-01 | 是否批准本 SPEC 进入 Gate 0/1 设计收口？ | 允许继续文档与只读源码核查；不等于批准代码实施 | OWNER_DECISION_REQUIRED |
-| D-02 | 首个目标宿主与真实工作流是什么？ | 候选 Codex + 按需 Pain Recall；先证明现有 Skill + CLI 不足 | OWNER_DECISION_REQUIRED |
-| D-03 | 哪些 Recall 字段允许 Agent 读取？ | 默认仅元数据/关联类型/可用性；所有自由文本默认禁止 | OWNER_DECISION_REQUIRED |
-| D-04 | 是否允许披露历史 Pain 原始文本、correctionEvidence 或 Owner 原话？ | 默认不授权；如需开放，另行列出字段、目的、宿主和审计要求 | OWNER_DECISION_REQUIRED |
-| D-05 | 若 MCP 通过价值验证，是否限定本地 stdio、单工作区、只读？ | 是；远程/公网与写入工具另立 SPEC | OWNER_DECISION_REQUIRED |
-| D-06 | 是否需要独立 packages/pd-application？ | Gate 2 通过后依赖审计再决定，不预先建包 | OWNER_DECISION_REQUIRED |
-| D-07 | 协议/SDK/宿主版本矩阵 | 实施前复核并锁定精确版本；SDK 只进入独立 Adapter | OWNER_DECISION_REQUIRED |
-| D-08 | MCP 的净增量指标和允许成本 | 预先冻结任务集、成功率、错误率、调用轮次、配置成本和停止条件 | OWNER_DECISION_REQUIRED |
-| D-09 | 是否批准生产 MCP Pilot？ | 仅在 Gate 0–3 完成后另行批准 | NOT_REQUESTED_YET |
+| D-01 | 是否继续收口 Gate 0/1 设计？ | 继续文档与只读源码核查，不等于批准代码实施 | **OWNER_APPROVED_DESIGN_ONLY (2026-10-28)** |
+| D-02 | 首个目标宿主与工作流 | Codex CLI 候选 + 按需查询原则关联 Pain；不是最终生产宿主批准 | **OWNER_APPROVED_AS_CANDIDATE** |
+| D-03 | 精确 Recall 对外字段 allowlist（含 painId、occurredAt、source/host、evidenceRefs、原则文本/摘要） | 未逐字段批准前，生产 MCP 不注册工具；Gate 2 只用合成元数据投影 | **OWNER_DECISION_REQUIRED** |
+| D-04 | 是否披露历史 Pain 原文、correctionEvidence、诊断根因、支持证据或 Owner 原话 | 默认禁止；如需开放，另行明确字段、目的、宿主与审计要求 | **APPROVED_DEFAULT_DENY** |
+| D-05 | 若未来进入 Pilot，传输/工作区/权限约束 | 本地 stdio、单一可信工作区、只读白名单；不开放远程/公网与写入工具 | **OWNER_APPROVED_DESIGN_CONSTRAINT** |
+| D-06 | 是否创建 packages/pd-application 或在仓库引入 MCP SDK | Gate 2 证明净增量前不建包、不加 SDK、不迁移生产代码 | **OWNER_APPROVED_DEFER_UNTIL_GATE_2** |
+| D-07 | MCP SDK / Codex Client 精确版本及真实安装兼容性 | Gate 2 前核验目标候选 Client；SDK 版本在获准实施前复核并锁定 | **NOT_VERIFIED** |
+| D-08 | Gate 2 的任务集、数值阈值与允许成本 | 12 个合成场景×每臂 3 次；安全门 0 泄露/副作用；效用门与操作门见 §10.2–10.4，数值仍待 Owner 冻结 | **PROPOSAL_NOT_APPROVED** |
+| D-09 | 是否批准真实数据实验、PRR Gate B 或生产 MCP Pilot | 各自按 PRR 与本 SPEC 对应 Gate 独立授权；本次批准不包含这些事项 | **NOT_AUTHORIZED** |
 
 ---
 
@@ -590,24 +646,24 @@ Gate 2 之前，以上映射只用于契约设计与 Reality Audit；不移动�
 
 当前状态：
 
-- Gate 0：PARTIAL；Recall/WAL 与部分代码事实已核实，目标工作流、宿主、披露授权仍待 Owner 决策。
-- Gate 1：DRAFTED_NOT_APPROVED；本文件提供契约草案，尚未由 Owner 冻结。
-- Gate 2：NOT_RUN；没有 MCP 净增量对照证据。
-- Gate 3：BLOCKED_BY_GATE_2；不抽取服务、不新建包。
-- Gate 4：BLOCKED_BY_GATE_3_AND_OWNER_APPROVAL；没有 MCP Server、SDK 或宿主安装改动。
-- Gate 5：BLOCKED_BY_GATE_4。
+- Gate 0：**PARTIAL**；Owner 已批准候选工作流和设计约束，Recall/WAL 证据已核实；完整 Host Capability Matrix、Client 版本/安装兼容性仍待核实。
+- Gate 1：**PARTIAL**；架构边界、候选工具、只读/失败语义已成文；精确对外字段 allowlist 与 Gate 2 预注册阈值未冻结。
+- Gate 2：**NOT_RUN**；对照方案已草拟，阈值/字段投影/Client 版本未冻结，无执行授权。
+- Gate 3：**BLOCKED_BY_GATE_2**；不抽取服务、不新建包。
+- Gate 4：**BLOCKED_BY_GATE_3_AND_SEPARATE_OWNER_APPROVAL**；没有 MCP Server、SDK 或宿主安装改动。
+- Gate 5：**BLOCKED_BY_GATE_4**。
 
-Gate 0/1 的文档阶段验收条件：
+Gate 0/1 的收口检查：
 
-- [ ] 最新主干和相关源码证据已复核。
-- [ ] Host Capability Matrix 已更新，并区分代码存在、生产接线、安装和真实宿主验证。
-- [ ] CLI / MCP / Application Capabilities 的边界已由 Owner 审阅。
-- [ ] 首个真实工作流与现有替代方案已明确。
-- [ ] Recall 的业务结果到 MCP 输出投影已冻结。
-- [ ] 历史文本披露字段逐项裁决。
-- [ ] 只读、来源、状态、错误和输出限制无歧义。
-- [ ] MCP 必要性 Gate 2 的任务集、指标和停止条件已冻结。
-- [ ] Owner 明确批准下一阶段。
+- [x] Owner 已批准候选宿主/工作流方向，以及本地 stdio、单工作区、只读白名单和默认不披露敏感原文（2026-10-28）。
+- [x] 已核实 PR #2214 合并后的 Recall/WAL 只读修复与相关测试。
+- [x] 已记录 PRR v1.3 将首版 MCP/Raw 列为范围外；本 SPEC 不修改 PRR Gate B。
+- [x] 已明确 CLI / MCP / Host Lifecycle / RuleHost 的边界。
+- [x] 已将 Gate 2 对照协议与停止规则写入 SPEC 草案。
+- [ ] 完整 Host Capability Matrix、真实 Codex/MCP Client 版本与安装兼容性验证。
+- [ ] 对外字段 allowlist 逐项冻结，尤其 painId、occurredAt、source/host 和脱敏摘要。
+- [ ] Gate 2 数值阈值与允许成本由 Owner 预注册。
+- [ ] Owner 单独授权启动 Gate 2；不包含真实数据访问或 PRR Gate B。
 
 即使 Gate 0/1 通过，仍不自动批准 Gate 2 的真实实验、Gate 3 的代码抽取或 Gate 4 的生产 MCP。每一阶段均需其自身证据与授权。
 
@@ -626,7 +682,9 @@ Gate 0/1 的文档阶段验收条件：
 7. Codex Adapter SPEC：[CODEX_CLI_ADAPTER_SPEC.md](https://github.com/csuzngjh/principles/blob/3a2de95c84047e720317cc66c9568d5da37843c5/docs/architecture/CODEX_CLI_ADAPTER_SPEC.md)
 8. ADR-0020：[Codex CLI Host Adapter](https://github.com/csuzngjh/principles/blob/3a2de95c84047e720317cc66c9568d5da37843c5/docs/adr/0020-codex-cli-host-adapter.md)
 9. 包职责导航：[CONTEXT-MAP.md](https://github.com/csuzngjh/principles/blob/3a2de95c84047e720317cc66c9568d5da37843c5/CONTEXT-MAP.md)
-10. v0.3 外部工作区快照的哈希与未决决策记录：见上述 PR #2214 的实施报告；完整 v0.3 原文件在本版编写前未找到主干副本。
+10. PRR v1.3 的范围边界与独立 Gate：[SPEC-PD-PRR-001-principle-pain-recall-v1.3.md](https://github.com/csuzngjh/principles/blob/3a2de95c84047e720317cc66c9568d5da37843c5/docs/specs/SPEC-PD-PRR-001-principle-pain-recall-v1.3.md)
+11. Codex 现实审计：[PRI-813-CODEX-REALITY-AUDIT.md](https://github.com/csuzngjh/principles/blob/3a2de95c84047e720317cc66c9568d5da37843c5/docs/audit/PRI-813-CODEX-REALITY-AUDIT.md)
+12. v0.3 外部工作区快照的哈希与未决决策记录：见上述 PR #2214 的实施报告；完整 v0.3 原文件在本版编写前未找到主干副本。
 
 ---
 
@@ -634,4 +692,4 @@ Gate 0/1 的文档阶段验收条件：
 
 PD 的 MCP 方向应是：**一套权威业务逻辑、多个独立入口、严格的数据与权限边界；MCP 是可选的业务能力访问适配器，不是新的治理核心。**
 
-本版已把架构边界、首个候选工具、数据披露默认值、只读不变量、失败语义和实施 Gate 汇总为可评审的仓库内 SPEC。接下来应优先完成 Owner 对目标工作流与字段披露的裁决，再冻结 Gate 1；不应继续让 Recall 的独立修复 PR 代替 MCP 项目的真实进展，也不应在 Gate 2 之前写生产 MCP Server。
+Owner 已批准继续采用候选宿主/工作流与本地只读设计约束；Gate 0/1 仍为 PARTIAL，而不是虚报通过。下一步先完成对外字段 allowlist、真实 Client 兼容性核查与 Gate 2 阈值预注册，再由 Owner 单独授权合成数据对照实验。PRR v1.3、Hook、RuleHost 和既有 CLI 契约均保持不变；在 Gate 2 证明净增量之前，不加生产 SDK、不抽包、不写 MCP Server。
