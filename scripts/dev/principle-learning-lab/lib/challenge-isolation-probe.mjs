@@ -218,6 +218,7 @@ export async function runIsolationProbe({ studyDir, hostTransport, mode = 'offli
   record.hostSnapshotAudit = snap && typeof snap === 'object' ? {
     requestedModel: snap.requestedModel ?? null,
     observedModel: snap.observedModel ?? null,
+    observedModelProviderId: snap.observedModelProviderId ?? null, // S5.1 P1: the envelope-observed provider travels with the evidence (deep verification requires it)
     identityStatus: snap.identityStatus ?? 'MODEL_IDENTITY_UNVERIFIED',
     identityEvidenceSource: snap.identityEvidenceSource ?? null,
   } : null;
@@ -244,7 +245,8 @@ export async function runIsolationProbe({ studyDir, hostTransport, mode = 'offli
       scan = { error: String(e.message || e) };
     }
     const clean = scan && typeof scan === 'object'
-      && scan.crossGroupLeakage === 0 && scan.productionWrites === 0 && scan.externalSideEffects === 0;
+      && scan.crossGroupLeakage === 0 && scan.productionWrites === 0 && scan.externalSideEffects === 0
+      && (scan.unauthorizedExtraWrites === undefined || scan.unauthorizedExtraWrites === 0); // S5.1 §五: extra round-dir writes fail the scan
     addResult('post-run-side-effect-scan', clean ? { ok: true } : { ok: false, reason: `side-effect scan not clean: ${JSON.stringify(scan)}` }, JSON.stringify(scan));
   }
 
@@ -273,10 +275,15 @@ const sameModel = (a, b) => a === b || (typeof a === 'string' && typeof b === 's
  * Fail-closed on every dimension: missing file, unreadable/corrupt JSON,
  * wrong schema/probe id, OFFLINE-REHEARSAL marker (can never authorize F2),
  * non-PASSED overall or any non-PASSED check, study/suite binding mismatch,
- * malformed executedAt, missing codexHome, or any recorded session not
- * corroborated by the host's own rollout files. Returns { ok, reasons }.
+ * malformed executedAt, missing host home, or any recorded session not
+ * corroborated by the host's own evidence files. Returns { ok, reasons }.
+ *
+ * Host dispatch (Owner S4): `hostKind` selects the evidence reader —
+ * 'codex-cli' (default) reads codex rollouts under codexHome;
+ * 'openclaw' reads the OpenClaw runtime trajectory (pointer → runtimeFile)
+ * under openclawSessionsDir. The two evidence structures are never mixed.
  */
-export function verifyF2ProbeEvidence({ studyDir, evidenceRef, expected, codexHome = null }) {
+export function verifyF2ProbeEvidence({ studyDir, evidenceRef, expected, codexHome = null, hostKind = 'codex-cli', openclawSessionsDir = null, openclawTrustedRoot = null, openclawExpectedProvider = null, openclawExpectedModel = null, readOpenClawTrajectory = null }) {
   const reasons = [];
   if (typeof evidenceRef !== 'string' || evidenceRef.length === 0) {
     return { ok: false, reasons: ['F2 authorization realHostProbe.evidenceRef missing'] };
@@ -320,14 +327,71 @@ export function verifyF2ProbeEvidence({ studyDir, evidenceRef, expected, codexHo
   }
   if (reasons.length > 0) return { ok: false, reasons };
 
-  if (typeof codexHome !== 'string' || codexHome.length === 0) {
-    return { ok: false, reasons: ['codexHome not provided — probe sessions cannot be corroborated against the host\'s own rollouts, so F2 stays refused (fail-closed)'] };
-  }
   const sessions = Array.isArray(record.sessions) ? record.sessions.filter((s) => typeof s === 'string' && s.length > 0) : [];
   if (sessions.length === 0) {
     return { ok: false, reasons: ['probe evidence records no host sessions — corroboration impossible'] };
   }
   const observed = record.hostSnapshotAudit && record.hostSnapshotAudit.observedModel;
+  if (hostKind === 'openclaw') {
+    if (typeof openclawSessionsDir !== 'string' || openclawSessionsDir.length === 0) {
+      return { ok: false, reasons: ['openclawSessionsDir not provided — probe sessions cannot be corroborated against the runtime trajectory, so F2 stays refused (fail-closed)'] };
+    }
+    if (typeof readOpenClawTrajectory !== 'function') {
+      return { ok: false, reasons: ['no OpenClaw trajectory reader injected — corroboration impossible (fail-closed)'] };
+    }
+    // S5 P1-2: provider must be part of the verdict — the observed envelope
+    // provider and the approved channel provider are both enforced per session.
+    const observedProvider = record.hostSnapshotAudit && record.hostSnapshotAudit.observedModelProviderId;
+    if (typeof observedProvider !== 'string' || observedProvider.length === 0) {
+      reasons.push('probe evidence carries no observed provider identity — provider corroboration impossible (S5 P1-2, fail-closed)');
+    } else if (typeof openclawExpectedProvider === 'string' && openclawExpectedProvider.length > 0 && observedProvider !== openclawExpectedProvider) {
+      // S5.1 §四: the OBSERVED provider must equal the AUTHORIZED provider —
+      // envelope and trajectory agreeing on an unapproved provider still refuses.
+      reasons.push(`observed provider '${observedProvider}' is not the authorized channel '${openclawExpectedProvider}' (S5.1, fail-closed)`);
+    }
+    const observedModel = record.hostSnapshotAudit && record.hostSnapshotAudit.observedModel;
+    if (typeof openclawExpectedModel === 'string' && openclawExpectedModel.length > 0) {
+      if (typeof observedModel !== 'string' || observedModel.length === 0) {
+        reasons.push('probe evidence carries no observed model — authorized-model binding unverifiable (S5.1, fail-closed)');
+      } else if (!sameModel(observedModel, openclawExpectedModel)) {
+        reasons.push(`observed model '${observedModel}' is not the authorized model '${openclawExpectedModel}' (S5.1: envelope/trajectory mutual agreement on an unapproved model still refuses)`);
+      }
+    }
+    for (const sessionId of new Set(sessions)) {
+      const evidence = readOpenClawTrajectory({ sessionsDir: openclawSessionsDir, sessionId, trustedRoot: openclawTrustedRoot });
+      if (!evidence || evidence.found !== true || evidence.ambiguous) {
+        const detail = evidence && typeof evidence.reason === 'string' ? ` (${evidence.reason})` : '';
+        reasons.push(`probe session '${sessionId}' is not corroborated by a runtime trajectory under openclawSessionsDir — record fields alone are never authorization evidence${detail}`);
+        continue;
+      }
+      if (typeof evidence.model !== 'string' || evidence.model.length === 0) {
+        reasons.push(`trajectory for probe session '${sessionId}' carries no model identity — cannot corroborate`);
+      } else {
+        if (typeof observed === 'string' && observed.length > 0 && !sameModel(evidence.model, observed)) {
+          reasons.push(`trajectory for probe session '${sessionId}' reports model '${evidence.model}' which conflicts with the probe's observed identity '${observed}'`);
+        }
+        if (typeof openclawExpectedModel === 'string' && openclawExpectedModel.length > 0 && !sameModel(evidence.model, openclawExpectedModel)) {
+          reasons.push(`trajectory for probe session '${sessionId}' reports model '${evidence.model}' outside the authorized model '${openclawExpectedModel}' (S5.1, fail-closed)`);
+        }
+      }
+      // S5 P1-2: provider conflicts and missing provider fields refuse — a
+      // model-name match alone is never sufficient.
+      if (typeof evidence.provider !== 'string' || evidence.provider.length === 0) {
+        reasons.push(`trajectory for probe session '${sessionId}' carries no provider identity — cannot corroborate (S5 P1-2)`);
+      } else if (typeof observedProvider === 'string' && observedProvider.length > 0 && evidence.provider !== observedProvider) {
+        reasons.push(`trajectory for probe session '${sessionId}' reports provider '${evidence.provider}' which conflicts with the envelope-observed provider '${observedProvider}' (S5 P1-2)`);
+      } else if (typeof openclawExpectedProvider === 'string' && openclawExpectedProvider.length > 0 && evidence.provider !== null && evidence.provider !== openclawExpectedProvider) {
+        reasons.push(`trajectory for probe session '${sessionId}' reports provider '${evidence.provider}' outside the approved channel '${openclawExpectedProvider}' (S5 P1-2)`);
+      }
+    }
+    return { ok: reasons.length === 0, reasons };
+  }
+  if (hostKind !== 'codex-cli') {
+    return { ok: false, reasons: [`unknown hostKind '${String(hostKind)}' — evidence dispatch is closed (codex-cli | openclaw)`] };
+  }
+  if (typeof codexHome !== 'string' || codexHome.length === 0) {
+    return { ok: false, reasons: ['codexHome not provided — probe sessions cannot be corroborated against the host\'s own rollouts, so F2 stays refused (fail-closed)'] };
+  }
   for (const sessionId of new Set(sessions)) {
     const evidence = readRolloutEvidenceForSession({ codexHome, sessionId });
     if (!evidence || evidence.found !== true || evidence.ambiguous) {
