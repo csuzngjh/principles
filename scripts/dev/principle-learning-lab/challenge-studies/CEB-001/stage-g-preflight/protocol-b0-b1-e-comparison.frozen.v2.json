@@ -1,0 +1,92 @@
+{
+  "schema": "challenge-stage-g-comparison.v2",
+  "status": "FROZEN_APPROVED",
+  "draftedAt": "2026-10-25",
+  "frozenAt": "2026-10-28",
+  "revisionNote": "v2（最终收口轮）：①完整合法空间经实际枚举全验核实（31,680 组合逐一体 validator 通过、0 失败、指纹 8a46476e…，非乘法推算）；②B1 升级为 v2=exhaustive-verify-then-select（方案 B 采纳），v1 保留为历史/次级基线；③公平契约区分『共享合法值域』与『各组实际搜索/采样空间』；④覆盖率指标拆双口径；⑤结论边界四问。正式冻结前须 Owner 批准（含 B1 v2 策略认可）。【2026-10-28 冻结】Owner 批准冻结（决策记录 OWNER-DECISION-2026-10-28-PHASE2A.md），随附三条件见 frozen.conditions。",
+
+  "frozen": {
+    "decisionRecord": "stage-g-preflight/OWNER-DECISION-2026-10-28-PHASE2A.md",
+    "approvedBy": "Owner（2026-10-28 Goal 决策消息，经 PR #2195 提交）",
+    "sourceDraft": {
+      "path": "stage-g-preflight/protocol-b0-b1-e-comparison.draft.json",
+      "sha256": "78a50342a652bc08f333348bb901b040dcc3b105548d2a3c0641f0457e3b5d17"
+    },
+    "conditions": [
+      "冻结的是协议与可复现基线，不是宣布 B1 v2 在所有未来场景中都是最优方案。",
+      "冻结后任何修改都必须有明确的变更理由、版本记录和可比较的验证结果。",
+      "禁止在看到结果后反复调整基线（results-driven baseline adjustment）。"
+    ],
+    "delta": "与源草案的差异仅限：status 字段（PROPOSED_NOT_APPROVED → FROZEN_APPROVED）、顶层新增 frozenAt、revisionNote 追加冻结说明、新增本 frozen 块；其余全部字段与源草案逐字节一致，以 sourceDraft.sha256 绑定。"
+  },
+
+  "verifiedLegalSpace": {
+    "definition": "36 冻结骨架点 × budget∈[2,12](11) × deadline∈[3,12](10) × stakes∈{high,normal,low}^facts",
+    "verifiedByActualEnumeration": { "total": 31680, "validatorPass": 31680, "failed": 0, "measuredSeconds": 6.5, "method": "逐组合构造 caseDef 并跑完整 validateStageGCandidate（含骨架门），非乘法推算" },
+    "substantiveDecisionSituations": 3960,
+    "stakesNote": "stakes 为纯标注维度：env 与 scorer 均不读取，不同 stakes 产出逐字节相同的裁定（已测）——不构成实质决策情境差异",
+    "rejectionSurface": "budget/deadline 越界、stakes 越域、未知 distractor → 一律 value_domain_violation（已测）",
+    "fingerprint": "sha256(sorted combo ids) = 8a46476ed3520973cd4b75a03ccaa6f5…（测试钉死，空间任何变更即红）"
+  },
+
+  "arms": {
+    "B0": {
+      "name": "HISTORICAL_FROZEN_36",
+      "instrument": "enumerateCandidates（原网格，未改动）",
+      "SEARCHED_space": "36 个固定网格点（每 domain 冻结 constraints）",
+      "auditedFacts": "36/36 validator-pass；仅 3 唯一 constraints 集（2.7% 参数点覆盖）；12 对 docs/stale structural 重复",
+      "role": "历史参考，不参与主要增量判定；不修改"
+    },
+    "B1": {
+      "name": "EXTENDED_DETERMINISTIC_ENUMERATOR_V2",
+      "instrument": "enumerateCandidatesB1（b1-deterministic-strategy.v2 = EXHAUSTIVE_VERIFY_THEN_SELECT）",
+      "SEARCHED_space": "完整合法空间 31,680 组合全部枚举并逐一体全验（离线 ~7s）→ 按 v1 公式确定性选择 36 个两两互异参数点",
+      "v1_retained": "b1-deterministic-strategy.v1（公式直生成、无全量证明）保留为可复现历史/次级基线",
+      "auditedFacts": "36/36 skeleton_verified；36 唯一 (budget,deadline) 点；内部与跨 B0 三级去重零重复；每候选携带 fullSpaceVerified 溯源",
+      "role": "主要对照组。策略在 E 运行前冻结，禁止依 E 结果调参，禁止故意降低质量。**不代表最强可能确定性基线**——它代表『全验空间上的预注册确定性选择』；任何『LLM 优于确定性方法』的结论只相对本基线成立",
+      "cost": "生成成本 0 模型费；~7s 离线计算/次"
+    },
+    "E": {
+      "name": "CONSTRAINED_EXAMINER_LLM",
+      "instrument": "challenge-examiner.mjs（Mock 闭环已验收；真实 transport 未实现）",
+      "SEARCHED_space": "模型在共享值域内自主提议（采样空间=其 16 请求的实际输出，按槽位记账）；可访问空间与 B1 相同（同骨架库+值域+表达字段）",
+      "slotAndRequestContract": { "slots": 36, "slotIds": "SLOT-E-001..036 预分配", "requestCap": 16, "retries": "计入 16 上限；仅 FAILED_KNOWN 可重试 1 次；RESULT_UNKNOWN 禁自动重试", "perRequestCandidateCap": "1-6（spec 必填整数；超限响应=协议失败 FAILED_KNOWN，零采纳）", "tokenCaps": "每请求输入 ≤8000 / 输出 ≤4000（调用前 max_tokens 硬限制）" },
+      "role": "实验组。所有输出过同一骨架门+validator+盲评"
+    }
+  },
+
+  "fairnessContract": {
+    "shared": ["同一冻结事实骨架库（DOMAIN_LIBRARY/DISTRACTOR_LIBRARY）", "同一骨架 schema（skeleton v1.0.0）与值域（VALUE_DOMAINS v1.0.0）", "同一 Gold 独立性约束（骨架门 fail-closed）", "同一 validator", "同一候选输出上限（36 槽）", "同一机制覆盖要求（8 facets）", "同一盲评规则（八维+三关键门槛+分层分母）", "同一失败记录与审计要求"],
+    "explicitlyDistinct": "『共享合法值域』≠『实际搜索策略相同』：B0 搜固定 36 点、B1 搜全空间后确定性选 36 点、E 由模型自主采样——搜索/采样空间的三组差异如上 SEARCHED_space 字段所述，禁止混写",
+    "counts": { "B0": "36 候选/0 模型费", "B1": "36 候选/0 模型费/~7s 计算", "E": "≤36 候选/≤16 请求（含重试）/预算见成本节" }
+  },
+
+  "metrics": [
+    { "metric": "validatorPassRate", "denominator": "36 槽（失败槽留分母）", "ceilingNote": "对 B0/B1 结构必然=1.0——天花板指标，不得用于宣称 E 优劣" },
+    { "metric": "budgetDeadlineGridCoverage", "definition": "组内唯一 (budget,deadline) 参数点数 / 110", "b0": "3/110", "b1": "36/110（预注册事实）" },
+    { "metric": "fullLegalComboCoverage", "definition": "组内唯一完整组合数（含 stakes 键）/ 31,680（经实际枚举全验核实的总数）", "note": "36 槽上限下任一组 ≤36/31,680≈0.11%——如实报告覆盖边界" },
+    { "metric": "substantiveDecisionDiversity", "definition": "组内唯一实质决策情境数（骨架×constraints 键；stakes 纯标注不计）/ 3,960 + 盲评 non_duplication 维度" },
+    { "metric": "expressionQualityBlindScore", "definition": "盲评表达相关维度折算（关键门槛一票否决）——E 的主要可检验质量面" },
+    { "metric": "structuralDuplicateRate", "definition": "三级去重命中候选/36；**不得单独用作 E 生成增量证据**（删重复≠生成能力）" },
+    { "metric": "humanRevisionMinutes", "definition": "首审到终判实测分钟（含仲裁）" },
+    { "metric": "costPerValidCandidate", "definition": "(模型费+人工费)/合格槽数；B0/B1 模型费=0，人工费照计；分账报告" },
+    { "metric": "goldIndependenceViolations & answerHints", "definition": "骨架门 mismatch/violation/leak 计数 + 盲评 safety_leakage/gold_independence 失败数" },
+    { "metric": "failureSlots & RESULT_UNKNOWN", "definition": "八类槽位记账全量保留；E 组独有维度（B0/B1 无请求失败面，如实记 0）" }
+  ],
+  "failureHandling": "失败槽/拒绝候选/RESULT_UNKNOWN 全量保留在各自分母；评审缺失计 missing（层1 分母、出 kappa 分母）；任何分母不得事后收缩",
+
+  "conclusionBoundaries": {
+    "canAdjudicate": [
+      "Q1 表达质量：E 的盲评表达分是否优于 B1（同门同题库）",
+      "Q2 有限预算下的选择：E 的 36 槽参数/情境选择是否优于 B1 的预注册确定性选择（按两口径覆盖率与实质多样性）",
+      "Q3 人工修订成本：E 是否降低每候选人工分钟",
+      "Q4 相对基线优劣：以上三项合成判断 E 是否优于『本预注册 B1 v2』"
+    ],
+    "cannotAdjudicate": [
+      "『LLM 优于所有/任意确定性方法』——B1 v2 不代表最强可能确定性基线，结论只相对本基线",
+      "新事实/新领域生成能力（骨架门外，需另行入库核验研究）",
+      "真实宿主 Actor 行为面（Stage R 边界）与 Principle vs Summary（Phase 3）",
+      "长期行为内化（PAHF 边界）"
+    ]
+  }
+}
