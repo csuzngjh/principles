@@ -29,6 +29,16 @@ import { recordExplicitOwnerStatement, MAX_OWNER_STATEMENT_CHARS, type RecordOwn
 export const TURN_CONTEXT_FILENAME = 'pd_current_turn_context.json';
 export const TURN_CONTEXT_SCHEMA_VERSION = 1;
 
+/**
+ * Staleness bound for the turn context. Stop/SessionStart withdraw the file,
+ * but any early exit on those paths (decode/config failure, host.codex flag
+ * flip, crash) leaves residue behind; a context older than this bound is
+ * treated as ended and fails closed instead of binding a finished turn. 4h
+ * mirrors the workspace-lease TTL default and sits far above the longest
+ * legitimate in-turn registration latency.
+ */
+export const TURN_CONTEXT_MAX_AGE_MS = 4 * 60 * 60 * 1000;
+
 /** Host-written identity of the CURRENT Codex turn. Ids and paths only. */
 export interface CodexTurnContext {
   readonly schemaVersion: number;
@@ -41,23 +51,33 @@ export interface CodexTurnContext {
 }
 
 export type TurnContextWriteResult = { ok: true } | { ok: false; reason: string; nextAction: string };
+export type TurnContextClearResult = { ok: true } | { ok: false; reason: string };
 
 function turnContextPath(workspaceDir: string): string {
   return path.join(workspaceDir, '.state', TURN_CONTEXT_FILENAME);
 }
 
 /**
- * Withdraw the current turn context (Stop / SessionStart). Best-effort: the
- * next UserPromptSubmit overwrites the file anyway, and a failure here never
- * blocks the hook.
+ * Withdraw the current turn context (Stop / SessionStart). Only ENOENT is
+ * ignored (nothing to withdraw); any other unlink failure is surfaced so the
+ * caller can emit a diagnostic — swallowing it would leave the old context
+ * bindable and silently break the fail-closed guarantee (rc-9). A failure
+ * here never blocks the hook.
  */
-export function clearCurrentTurnContext(args: { workspaceDir: string }): void {
+export function clearCurrentTurnContext(args: { workspaceDir: string }): TurnContextClearResult {
   try {
     fs.unlinkSync(turnContextPath(args.workspaceDir));
-  } catch {
-    /* ENOENT or already-gone: nothing to withdraw */
+    return { ok: true };
+  } catch (error) {
+    if (error instanceof Error && Object.hasOwn(error, 'code') && Reflect.get(error, 'code') === 'ENOENT') {
+      return { ok: true };
+    }
+    const detail = error instanceof Error ? error.message : String(error);
+    return { ok: false, reason: `clear_failed:${detail.slice(0, 160)}` };
   }
 }
+
+const CLEAR_FAILURE_NEXT_ACTION = 'The previous turn context could not be withdrawn; the agent-assisted explicit entry stays fail-closed only via its staleness bound. Inspect the workspace .state directory.';
 
 /**
  * Publish (or withdraw) the current turn context. Called from the
@@ -74,12 +94,14 @@ export function writeCurrentTurnContext(args: {
 }): TurnContextWriteResult {
   const fields = extractFields(args.rawPayload);
   if (fields === null || fields.sessionId.length === 0 || fields.turnId === null || fields.transcriptPath === null) {
-    clearCurrentTurnContext({ workspaceDir: args.workspaceDir });
+    const cleared = clearCurrentTurnContext({ workspaceDir: args.workspaceDir });
+    if (!cleared.ok) return { ok: false, reason: cleared.reason, nextAction: CLEAR_FAILURE_NEXT_ACTION };
     return { ok: true };
   }
   const home = resolveCodexHome(args.env);
   if (!home.ok) {
-    clearCurrentTurnContext({ workspaceDir: args.workspaceDir });
+    const cleared = clearCurrentTurnContext({ workspaceDir: args.workspaceDir });
+    if (!cleared.ok) return { ok: false, reason: cleared.reason, nextAction: CLEAR_FAILURE_NEXT_ACTION };
     return { ok: false, reason: `codex_home:${home.reason}`, nextAction: home.nextAction };
   }
   const context: CodexTurnContext = {
@@ -109,7 +131,7 @@ export type RegisterCurrentTurnResult =
   | RecordOwnerStatementResult
   | {
     status: 'rejected';
-    reason: 'turn_context_missing' | 'turn_context_invalid' | 'turn_context_workspace_mismatch';
+    reason: 'turn_context_missing' | 'turn_context_invalid' | 'turn_context_stale' | 'turn_context_workspace_mismatch';
     nextAction: string;
   };
 
@@ -118,7 +140,7 @@ function requireStringField(record: Record<string, unknown>, key: string): strin
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
-function readTurnContext(workspaceDir: string): CodexTurnContext | { error: 'turn_context_missing' | 'turn_context_invalid' } {
+function readTurnContext(workspaceDir: string): CodexTurnContext | { error: 'turn_context_missing' | 'turn_context_invalid' | 'turn_context_stale' } {
   let raw: string;
   try {
     raw = fs.readFileSync(turnContextPath(workspaceDir), 'utf8');
@@ -141,6 +163,9 @@ function readTurnContext(workspaceDir: string): CodexTurnContext | { error: 'tur
   if (writtenAt === null || sessionId === null || turnId === null || transcriptPath === null || codexHome === null || contextWorkspaceDir === null) {
     return { error: 'turn_context_invalid' };
   }
+  const writtenAtMs = Date.parse(writtenAt);
+  if (Number.isNaN(writtenAtMs)) return { error: 'turn_context_invalid' };
+  if (Date.now() - writtenAtMs > TURN_CONTEXT_MAX_AGE_MS) return { error: 'turn_context_stale' };
   return {
     schemaVersion: TURN_CONTEXT_SCHEMA_VERSION,
     writtenAt,
@@ -165,12 +190,15 @@ export async function registerCurrentTurnOwnerStatement(args: {
 }): Promise<RegisterCurrentTurnResult> {
   const context = readTurnContext(args.workspaceDir);
   if ('error' in context) {
+    const nextAction = context.error === 'turn_context_missing'
+      ? 'No live Codex turn context: the turn already completed, the session restarted, or the PD hook did not run. The native prefix entry (PD记录痛苦：<原文>) remains available in a NEW Owner message.'
+      : context.error === 'turn_context_stale'
+        ? `The live turn context is stale (older than ${TURN_CONTEXT_MAX_AGE_MS / 3_600_000} hours); treat the turn as ended. Nothing was recorded — use the native prefix entry (PD记录痛苦：<原文>) in a NEW Owner message.`
+        : 'The Codex turn context file is malformed or an unsupported schema version; nothing was recorded. Retry in a new turn or use the native prefix entry (PD记录痛苦：<原文>).';
     return {
       status: 'rejected',
       reason: context.error,
-      nextAction: context.error === 'turn_context_missing'
-        ? 'No live Codex turn context: the turn already completed, the session restarted, or the PD hook did not run. The native prefix entry (PD记录痛苦：<原文>) remains available in a NEW Owner message.'
-        : 'The Codex turn context file is malformed or an unsupported schema version; nothing was recorded. Retry in a new turn or use the native prefix entry (PD记录痛苦：<原文>).',
+      nextAction,
     };
   }
   if (path.resolve(context.workspaceDir) !== path.resolve(args.workspaceDir)) {

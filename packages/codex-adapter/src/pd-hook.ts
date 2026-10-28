@@ -257,8 +257,12 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
   if (event.kind === 'turn_complete') {
     // Withdraw the live turn context: once the turn completes, the
     // agent-assisted explicit entry must fail closed (turn_context_missing)
-    // instead of binding an Owner statement to a finished turn.
-    clearCurrentTurnContext({ workspaceDir: resolution.workspaceDir });
+    // instead of binding an Owner statement to a finished turn. A withdrawal
+    // failure is surfaced as ONE bounded diagnostic (rc-9) — never silent.
+    const cleared = clearCurrentTurnContext({ workspaceDir: resolution.workspaceDir });
+    const clearDiagnostics = cleared.ok
+      ? []
+      : [diagnostic(`turn_context_${cleared.reason}`, 'The turn context could not be withdrawn; the agent-assisted explicit entry stays fail-closed only via its staleness bound. Inspect the workspace .state directory.')];
     // Stop is the turn-complete ingestion trigger (G1 §2): no dispatch route,
     // and Codex's Stop output schema has no hookSpecificOutput — the neutral
     // result is exactly `{}` on stdout (runtime contract: "PD emits empty
@@ -267,19 +271,22 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
     // turn on stderr — never stdout, and never on the per-tool events (that
     // would be per-event noise).
     const stderr = ingestionEnabled
-      ? await runConversationIngestion({ rawPayload: parsed, kind: event.kind, workspaceDir: resolution.workspaceDir, env: _env })
-      : [diagnostic('feature_disabled', 'Set features.codex_conversation_ingestion.enabled=true in the selected Workspace .pd/config.yaml to enable bounded conversation ingestion.')];
+      ? [...clearDiagnostics, ...await runConversationIngestion({ rawPayload: parsed, kind: event.kind, workspaceDir: resolution.workspaceDir, env: _env })]
+      : [...clearDiagnostics, diagnostic('feature_disabled', 'Set features.codex_conversation_ingestion.enabled=true in the selected Workspace .pd/config.yaml to enable bounded conversation ingestion.')];
     return { stdout: {}, exitCode: 0, stderr };
   }
 
   try {
     if (event.kind === 'session_start') {
       // Belt for turn_complete: a fresh session must never inherit the
-      // previous session's turn context.
-      clearCurrentTurnContext({ workspaceDir: resolution.workspaceDir });
+      // previous session's turn context. Withdrawal failure → diagnostic.
+      const cleared = clearCurrentTurnContext({ workspaceDir: resolution.workspaceDir });
+      const clearDiagnostics = cleared.ok
+        ? []
+        : [diagnostic(`turn_context_${cleared.reason}`, 'The turn context could not be withdrawn; the agent-assisted explicit entry stays fail-closed only via its staleness bound. Inspect the workspace .state directory.')];
       const health = await createProductionHostRuntime({ hostKind: 'codex' }).health(resolution.workspaceDir);
-      if (!health.ok) return { stdout: {}, exitCode: 0, stderr: [diagnostic(health.reason ?? 'runtime_unhealthy', health.nextAction ?? 'Inspect the Workspace runtime.')] };
-      return { stdout: adapter.encodeOutput({ decision: 'allow', source: event.source }, 'session_start'), exitCode: 0, stderr: [] };
+      if (!health.ok) return { stdout: {}, exitCode: 0, stderr: [...clearDiagnostics, diagnostic(health.reason ?? 'runtime_unhealthy', health.nextAction ?? 'Inspect the Workspace runtime.')] };
+      return { stdout: adapter.encodeOutput({ decision: 'allow', source: event.source }, 'session_start'), exitCode: 0, stderr: clearDiagnostics };
     }
 
     // SPEC-CODEX-PAIN-CLOSURE-001 CR-07: the explicit Owner statement entry

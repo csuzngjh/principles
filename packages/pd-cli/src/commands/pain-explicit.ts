@@ -18,6 +18,7 @@
  * agent-assisted counterpart of the prefix entry.
  */
 import { registerCurrentTurnOwnerStatement, type RegisterCurrentTurnResult } from '@principles/codex-adapter';
+import { MAX_OWNER_STATEMENT_CHARS } from '@principles/host-runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
 interface ExplicitOptions {
@@ -28,8 +29,9 @@ interface ExplicitOptions {
 
 const FAILURE_MESSAGES: Record<string, string> = {
   statement_empty: 'The Owner statement is empty; nothing was recorded.',
-  statement_too_long: 'The Owner statement exceeds 500 characters; nothing was recorded (never truncated).',
+  statement_too_long: `The Owner statement exceeds ${MAX_OWNER_STATEMENT_CHARS} characters; nothing was recorded (never truncated).`,
   turn_context_missing: 'No live Codex turn context: the turn already completed, the session restarted, or the PD hook did not run.',
+  turn_context_stale: 'The live Codex turn context is stale — the turn is treated as ended; nothing was recorded.',
   turn_context_invalid: 'The Codex turn context file is malformed or unsupported; nothing was recorded.',
   turn_context_workspace_mismatch: 'The live turn context belongs to a different PD workspace; nothing was recorded.',
   transcript_unavailable: 'The Codex transcript for the live turn is unavailable; nothing was recorded.',

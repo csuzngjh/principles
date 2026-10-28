@@ -26,7 +26,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { getDefaultPdConfig } from '@principles/core/runtime-v2';
 import { processHookInvocation } from '../src/pd-hook.js';
-import { registerCurrentTurnOwnerStatement, TURN_CONTEXT_FILENAME } from '../src/ingestion/turn-context.js';
+import { registerCurrentTurnOwnerStatement, TURN_CONTEXT_FILENAME, TURN_CONTEXT_MAX_AGE_MS } from '../src/ingestion/turn-context.js';
 import { MAX_OWNER_STATEMENT_CHARS } from '../src/ingestion/explicit-owner-statement.js';
 
 const FIXTURES = new URL('./fixtures/g1-contract/', import.meta.url);
@@ -283,6 +283,55 @@ describe('lineage integrity — the context file is the only lineage source', ()
     const db = trajectoryOf(ws.root);
     expect((db.prepare('SELECT COUNT(*) AS n FROM pain_events').get() as { n: number }).n).toBe(0);
     db.close();
+  });
+
+  it('a stale context (writtenAt beyond the TTL) fails closed with zero writes', async () => {
+    const ws = makeWorkspace(true);
+    await processHookInvocation(promptPayload(ws, '当前轮'), { CODEX_HOME: ws.codexHome }, ws.root);
+    const context = JSON.parse(fs.readFileSync(turnContextFile(ws.root), 'utf8')) as Record<string, unknown>;
+    context.writtenAt = new Date(Date.now() - TURN_CONTEXT_MAX_AGE_MS - 60_000).toISOString();
+    fs.writeFileSync(turnContextFile(ws.root), JSON.stringify(context));
+    const receipt = await registerCurrentTurnOwnerStatement({ workspaceDir: ws.root, statementText: OWNER_WORDS });
+    expect(receipt).toMatchObject({ status: 'rejected', reason: 'turn_context_stale' });
+    const db = trajectoryOf(ws.root);
+    expect((db.prepare('SELECT COUNT(*) AS n FROM pain_events').get() as { n: number }).n).toBe(0);
+    db.close();
+  });
+
+  it('a context whose writtenAt is not a timestamp is rejected as invalid', async () => {
+    const ws = makeWorkspace(true);
+    await processHookInvocation(promptPayload(ws, '当前轮'), { CODEX_HOME: ws.codexHome }, ws.root);
+    const context = JSON.parse(fs.readFileSync(turnContextFile(ws.root), 'utf8')) as Record<string, unknown>;
+    context.writtenAt = 'not-a-timestamp';
+    fs.writeFileSync(turnContextFile(ws.root), JSON.stringify(context));
+    const receipt = await registerCurrentTurnOwnerStatement({ workspaceDir: ws.root, statementText: OWNER_WORDS });
+    expect(receipt).toMatchObject({ status: 'rejected', reason: 'turn_context_invalid' });
+    const db = trajectoryOf(ws.root);
+    expect((db.prepare('SELECT COUNT(*) AS n FROM pain_events').get() as { n: number }).n).toBe(0);
+    db.close();
+  });
+
+  it('a withdrawal failure is surfaced as a diagnostic, never silently swallowed (rc-9)', async () => {
+    const ws = makeWorkspace(false);
+    await processHookInvocation(promptPayload(ws, '当前轮'), { CODEX_HOME: ws.codexHome }, ws.root);
+    // Make withdrawal impossible: occupy the context path with a directory.
+    fs.rmSync(turnContextFile(ws.root));
+    fs.mkdirSync(turnContextFile(ws.root));
+    const noLineagePayload = JSON.stringify({
+      session_id: ROOT_SESSION,
+      turn_id: TURN_1,
+      transcript_path: null,
+      cwd: ws.root,
+      model: 'gpt-5.6-sol',
+      permission_mode: 'bypassPermissions',
+      hook_event_name: 'UserPromptSubmit',
+      prompt: 'x',
+    });
+    const promptResult = await processHookInvocation(noLineagePayload, { CODEX_HOME: ws.codexHome }, ws.root);
+    expect(promptResult.stderr.join('\n')).toMatch(/turn_context_clear_failed/);
+    const stopResult = await processHookInvocation(stopPayload(ws), { CODEX_HOME: ws.codexHome }, ws.root);
+    expect(stopResult.exitCode).toBe(0);
+    expect(stopResult.stderr.join('\n')).toMatch(/turn_context_clear_failed/);
   });
 
   it('a tampered transcript path is re-validated at registration time (zero writes)', async () => {

@@ -34,7 +34,7 @@ When the Owner's CURRENT message explicitly asks to create/register a pain signa
    If `pd` is not on PATH, run the runtime entry directly: `node ~/.pd/runtime/pd-cli/dist/index.js pain explicit …`. The command takes NO session/rollout/turn ids — lineage comes from the live turn context the host hook wrote; never guess or fabricate ids.
 5. Report the receipt truthfully: repeat only the identifiers and status the command returned (painId, taskId, disposition, degradation). Registration means enqueue, not diagnosis, approval, or activation.
 
-On failure, report the command's actual reason and nextAction (e.g. `turn_context_missing` after the turn ended, `rate_limited`). Asking the Owner to resend the prefix is NOT the default solution — only a fallback when the bridge is genuinely unavailable, stated with the reason it failed.
+On failure, report the command's actual reason and nextAction (e.g. `turn_context_missing` after the turn ended, `turn_context_stale` when the turn context exceeds its 4-hour freshness bound, `rate_limited`). Asking the Owner to resend the prefix is NOT the default solution — only a fallback when the bridge is genuinely unavailable, stated with the reason it failed.
 
 Do NOT use Entry 2 when:
 

@@ -3,6 +3,7 @@
 '@principles/host-runtime': minor
 '@principles/codex-adapter': minor
 '@principles/pd-cli': minor
+'create-principles-disciple': patch
 ---
 
 Codex agent-assisted explicit pain registration (no prefix).

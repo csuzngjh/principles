@@ -74,6 +74,10 @@ function runCli(args: string[]): CliRun {
   }
 }
 
+function turnContextFile(root: string): string {
+  return path.join(root, '.state', TURN_CONTEXT_FILENAME);
+}
+
 function publishTurnContext(ws: Workspace): void {
   const write = writeCurrentTurnContext({
     rawPayload: { session_id: ROOT_SESSION, turn_id: TURN_1, transcript_path: ws.transcriptPath },
@@ -81,7 +85,7 @@ function publishTurnContext(ws: Workspace): void {
     env: { CODEX_HOME: ws.codexHome },
   });
   expect(write.ok).toBe(true);
-  expect(fs.existsSync(path.join(ws.root, '.state', TURN_CONTEXT_FILENAME))).toBe(true);
+  expect(fs.existsSync(turnContextFile(ws.root))).toBe(true);
 }
 
 describe('pd pain explicit (command wiring, cli-7)', () => {
@@ -124,6 +128,24 @@ describe('pd pain explicit (json output contract, cli-1/cli-2)', () => {
     const result = JSON.parse(run.stdout) as { status: string; reason: string; message: string; nextAction: string };
     expect(result.status).toBe('failed');
     expect(result.reason).toBe('turn_context_missing');
+    expect(result.nextAction.length).toBeGreaterThan(0);
+    const trajectory = new Database(path.join(ws.root, '.state', 'trajectory.db'), { readonly: true });
+    expect((trajectory.prepare('SELECT COUNT(*) AS n FROM pain_events').get() as { n: number }).n).toBe(0);
+    trajectory.close();
+  });
+
+  it('fails closed with turn_context_stale when the published context exceeds its freshness bound', () => {
+    const ws = makeWorkspace();
+    publishTurnContext(ws);
+    const context = JSON.parse(fs.readFileSync(turnContextFile(ws.root), 'utf8')) as Record<string, unknown>;
+    // 5h — beyond TURN_CONTEXT_MAX_AGE_MS (4h) enforced by the bridge.
+    context.writtenAt = new Date(Date.now() - 5 * 3_600_000).toISOString();
+    fs.writeFileSync(turnContextFile(ws.root), JSON.stringify(context));
+    const run = runCli(['pain', 'explicit', '--statement', OWNER_WORDS, '--workspace', ws.root, '--json']);
+    expect(run.code).toBe(1);
+    const result = JSON.parse(run.stdout) as { status: string; reason: string; nextAction: string };
+    expect(result.status).toBe('failed');
+    expect(result.reason).toBe('turn_context_stale');
     expect(result.nextAction.length).toBeGreaterThan(0);
     const trajectory = new Database(path.join(ws.root, '.state', 'trajectory.db'), { readonly: true });
     expect((trajectory.prepare('SELECT COUNT(*) AS n FROM pain_events').get() as { n: number }).n).toBe(0);
