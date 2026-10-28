@@ -49,25 +49,39 @@ for (const entry of fs.readdirSync(studyDir)) {
 }
 const scratchRoot = path.join(workRoot, 'scratch');
 fs.mkdirSync(scratchRoot, { recursive: true });
+const roundsRoot = path.join(workRoot, 'rounds');
+fs.mkdirSync(roundsRoot, { recursive: true });
 const windowStart = Date.now();
 
 // Side-effect scanner (filesystem-level, honest scope): gold hex runs under the
-// scratch root (cross-group leakage proxy), writes into production PD roots,
-// and new files inside the repo working tree during the probe window.
+// scratch root AND the per-round dirs (S5 P1-3: every controlled path this run
+// creates is scanned), writes into production PD roots, and new files inside
+// the repo working tree during the probe window. Cleanup policy: workRoot
+// lives under the gitignored .tmp tree and is the caller's own artifact —
+// removable after evidence acceptance; runtime trajectories under openclawHome
+// / codex rollouts are RESEARCH EVIDENCE and are never touched by cleanup.
 const judgeOnlyFile = path.join(copyDir, 'judge-only', `${JSON.parse(fs.readFileSync(path.join(copyDir, 'suite-manifest.json'), 'utf8')).cases[0].caseId}.json`);
 const goldHexRuns = (JSON.parse(fs.readFileSync(judgeOnlyFile, 'utf8')).toString().match(/[0-9a-f]{32,}/g) || []);
+const scanForGold = (root) => {
+  let hits = 0;
+  if (!fs.existsSync(root)) return hits;
+  const walk = (dir, fn) => { for (const f of fs.readdirSync(dir, { withFileTypes: true })) { const p = path.join(dir, f.name); if (f.isDirectory()) walk(p, fn); else fn(p); } };
+  walk(root, (p) => { try { const t = fs.readFileSync(p, 'utf8'); if (goldHexRuns.some((run) => t.includes(run))) hits += 1; } catch { /* binary/unreadable — not a leak signal */ } });
+  return hits;
+};
 const scanner = () => {
   let crossGroupLeakage = 0;
   let productionWrites = 0;
   let externalSideEffects = 0;
+  crossGroupLeakage += scanForGold(scratchRoot);
+  crossGroupLeakage += scanForGold(roundsRoot); // S5 P1-3: probe-round dirs are controlled paths — scanned, not exempt
   const walk = (dir, fn) => { for (const f of fs.readdirSync(dir, { withFileTypes: true })) { const p = path.join(dir, f.name); if (f.isDirectory()) walk(p, fn); else fn(p); } };
-  walk(scratchRoot, (p) => { try { const t = fs.readFileSync(p, 'utf8'); if (goldHexRuns.some((run) => t.includes(run))) crossGroupLeakage += 1; } catch { /* binary/unreadable — not a leak signal */ } });
   for (const pdRoot of [path.join(os.homedir(), '.pd'), path.join(labRoot, '..', '..', '..', '..', '.pd')]) {
     if (!fs.existsSync(pdRoot)) continue;
     walk(pdRoot, (p) => { const st = fs.statSync(p); if (st.mtimeMs >= windowStart) productionWrites += 1; });
   }
-  walk(workRoot, (p) => { const st = fs.statSync(p); if (st.mtimeMs >= windowStart && !p.startsWith(scratchRoot) && !p.startsWith(copyDir)) externalSideEffects += 1; });
-  return { crossGroupLeakage, productionWrites, externalSideEffects, scopeNote: 'scratch-root hex scan + PD roots mtime window + workdir non-scratch writes; not a whole-disk claim' };
+  walk(workRoot, (p) => { const st = fs.statSync(p); if (st.mtimeMs >= windowStart && !p.startsWith(scratchRoot) && !p.startsWith(copyDir) && !p.startsWith(roundsRoot)) externalSideEffects += 1; });
+  return { crossGroupLeakage, productionWrites, externalSideEffects, controlledPathsScanned: [scratchRoot, roundsRoot], scopeNote: 'scratch+rounds gold-hex scan + PD roots mtime window + workdir non-controlled writes; not a whole-disk claim' };
 };
 
 // ---- host dispatch (Owner S4): the authorization's targetHost.kind selects
@@ -77,14 +91,27 @@ let transport = null;
 let evidenceDispatch = null;
 if (record.targetHost.kind === 'openclaw') {
   const { createOpenClawHostTransport, readOpenClawTrajectoryEvidence } = await import('./lib/challenge-openclaw-host.mjs');
-  const workspaceDir = record.targetHost.openclawWorkspace || path.join(record.targetHost.openclawHome, 'workspace');
+  // S5 P1-2: the approved provider comes from the authorization record (NOT
+  // inferred from the model id string) and is enforced on every round.
+  const expectedProvider = record.targetHost.provider;
+  if (typeof expectedProvider !== 'string' || expectedProvider.length === 0) {
+    console.log(JSON.stringify({ ok: false, stage: 'provider', reasons: ["authorization targetHost.provider missing — the approved provider must be declared (S5 P1-2)"] }, null, 2));
+    process.exit(1);
+  }
   transport = createOpenClawHostTransport({
     model: record.targetHost.requestedModelIdentity,
-    workspaceDir,
+    expectedProvider,
+    roundsRoot,
     timeoutMsPerCall: record.caps.timeoutMsPerCall,
   });
   const sessionsDir = path.join(record.targetHost.openclawHome, 'agents', record.targetHost.openclawAgent || 'main', 'sessions');
-  evidenceDispatch = { hostKind: 'openclaw', openclawSessionsDir: sessionsDir, readOpenClawTrajectory: readOpenClawTrajectoryEvidence };
+  evidenceDispatch = {
+    hostKind: 'openclaw',
+    openclawSessionsDir: sessionsDir,
+    openclawTrustedRoot: sessionsDir,
+    openclawExpectedProvider: expectedProvider,
+    readOpenClawTrajectory: readOpenClawTrajectoryEvidence,
+  };
 } else {
   // codex-cli route: the Zhipu per-spawn adapter lives on the RESERVED #2204
   // branch (S4-C: kept, not merged). If absent here, refuse loudly — never a

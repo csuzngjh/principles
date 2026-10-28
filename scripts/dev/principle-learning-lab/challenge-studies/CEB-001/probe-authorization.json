@@ -14,9 +14,13 @@
     "openclawHome": "C:/Users/Administrator/.openclaw",
     "openclawAgent": "main",
     "openclawWorkspace": "D:/.openclaw/workspace",
-    "requestedModelIdentity": "zai/glm-5.3-flash"
+    "requestedModelIdentity": "zai/glm-5.3-flash",
+    "provider": "zai"
   },
-  "caps": { "probeRounds": 5, "timeoutMsPerCall": 180000 },
+  "caps": {
+    "probeRounds": 5,
+    "timeoutMsPerCall": 180000
+  },
   "validFrom": "2026-10-28T00:00:00Z",
   "validUntil": "1970-01-01T00:00:00Z",
   "stopConditions": [

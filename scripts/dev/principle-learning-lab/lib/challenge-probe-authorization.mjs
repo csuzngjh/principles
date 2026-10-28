@@ -26,6 +26,11 @@ export const PROBE_AUTH_ALLOWED_MODELS = {
   'codex-cli': ['glm-5.3-flash'],
   openclaw: ['zai/glm-5.3-flash'],
 };
+// S5 P1-2: the approved provider per kind — model AND provider are both bound.
+export const PROBE_AUTH_ALLOWED_PROVIDERS = {
+  'codex-cli': 'zhipu-coding',
+  openclaw: 'zai',
+};
 export const PROBE_AUTH_HOME_FIELD = { 'codex-cli': 'codexHome', openclaw: 'openclawHome' };
 export const PROBE_AUTH_KEYS = [
   'schema', 'probeId', 'status', 'studyId',
@@ -94,6 +99,11 @@ export function verifyProbeAuthorization({ record, studyDir, now, transportFacto
     reasons.push(`targetHost.requestedModelIdentity must be '${allowed[0]}' for kind '${host.kind}' (the single Owner-approved channel; any other identity requires a new Owner decision)`);
   } else if (!allowed && (typeof host.requestedModelIdentity !== 'string' || host.requestedModelIdentity.length === 0)) {
     reasons.push('targetHost.requestedModelIdentity must be declared (host identity is verified, not assumed)');
+  }
+  // S5 P1-2: the approved PROVIDER is part of the authorization binding.
+  const allowedProvider = PROBE_AUTH_ALLOWED_PROVIDERS[host.kind];
+  if (allowedProvider && host.provider !== allowedProvider) {
+    reasons.push(`targetHost.provider must be '${allowedProvider}' for kind '${host.kind}' (S5 P1-2: the approved channel is provider+model, not a model name alone)`);
   }
   const homeField = PROBE_AUTH_HOME_FIELD[host.kind];
   if (homeField && (typeof host[homeField] !== 'string' || host[homeField].length === 0)) {
