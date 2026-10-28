@@ -72,12 +72,15 @@ describe('CEB-002 preregistration contract consistency', () => {
   const auth = readJson(inside(study, 'run-authorization.json'));
 
   it('1. design: EXPLORATORY, fixed 2 reps, 16 cases, 3 arms, 96 units', () => {
-    expect(pr.design.positioning).toBe('EXPLORATORY');
-    expect(pr.design.repetitions).toBe(2);
-    expect(pr.design.cases).toBe(16);
-    expect(pr.design.arms).toEqual(['A', 'B', 'C']);
-    expect(pr.design.plannedUnits).toBe(96);
-    expect(manifest.caseCount).toBe(pr.design.cases);
+    // The archived (frozen-lineage) draft carries the statistical contract at
+    // top level (prepare-ceb002-freeze merged shape) instead of the builder's
+    // nested `design` object — same contract, authoritative frozen shape.
+    expect(pr.positioning).toBe('EXPLORATORY');
+    expect(pr.repetitions.planned).toBe(2);
+    expect(pr.arms.map((a: any) => a.armId)).toEqual(['A', 'B', 'C']);
+    expect(manifest.caseCount).toBe(16);
+    expect(pr.denominator.assignedUnits).toContain('96 execution units');
+    expect(pr.repetitions.planned * pr.arms.length * manifest.caseCount).toBe(96);
   });
 
   it('2. primary analysis: L2+L3 discriminative tier, n=8 independent case-level units', () => {
@@ -139,24 +142,41 @@ describe('CEB-002 preregistration contract consistency', () => {
     expect(pr.claimBoundary.supports.some((s: string) => s.includes('exploratory comparison'))).toBe(true);
   });
 
-  it('8a. stopping rules: every field value-matched', () => {
-    const sr = pr.stoppingRules;
-    expect(sr.consecutiveUnknown).toBe(2);
-    expect(sr.batchUnknownRateNotEvaluable).toBe(0.4);
-    expect(sr.identityAnomaly).toBe('halt immediately');
-    expect(sr.hashDrift).toBe('halt immediately');
-    expect(sr.ledgerInconsistency).toBe('halt immediately');
-    expect(sr.budgetBreach).toBe('halt immediately');
-    expect(sr.missingData).toContain('retained in denominator');
-    expect(sr.missingData).toContain('never attributed to behavior');
+  it('8a. stopping rules: every field value-matched (frozen stoppingConditions array, exact match)', () => {
+    // Exact-match the archived frozen contract's stoppingConditions — stronger
+    // than the previous per-field reads of the builder's stoppingRules object.
+    expect(pr.stoppingConditions).toEqual([
+      'consecutiveUnknown: 2 (halt immediately after 2 consecutive RESULT_UNKNOWN units)',
+      'batchUnknownRateNotEvaluable: 0.40 (batch UNKNOWN rate > 40% → study NOT_EVALUABLE)',
+      'identityAnomaly: halt immediately',
+      'hashDrift: halt immediately',
+      'ledgerInconsistency: halt immediately',
+      'budgetBreach: halt immediately',
+      'missingData: retained in denominator, never attributed to behavior',
+    ]);
   });
 
-  it('9. three DRAFT states and authority reference', () => {
-    expect(pr.status).toBe('DRAFT-NOT-IN-FORCE');
-    expect(auth.status).toBe('NOT_AUTHORIZED');
-    expect(manifest.status).toBe('DRAFT-NOT-FROZEN');
-    expect(pr.authority).toContain('CEB-002-DELIVERY-PACK.md');
-    expect(pr.authority).not.toContain('CEB-002-PREREGISTRATION.md');
+  it('9. FROZEN+EXECUTED states (evidence archive): frozen hash pinned, historical authorization expired, in-force twin present', () => {
+    // CEB-002 was frozen, authorized and executed 2026-10-27, and its evidence
+    // archived 2026-10-28 (previously these protected the DRAFT placeholders).
+    const FROZEN_SUITE = '02cbc15cfd9cf8a8b9e986950fdf722fcda6632604f4e62d4bd50ea0950d04f5';
+    const hashes = readJson(inside(study, 'hashes.json'));
+    expect(manifest.suiteHash).toBe(FROZEN_SUITE);
+    expect(hashes.suiteHash.value).toBe(FROZEN_SUITE);
+    expect(auth.status).toBe('APPROVED');
+    expect(auth.suiteHash).toBe(FROZEN_SUITE);
+    expect(auth.studyPlanHash).toBe(hashes.preregistrationHash.value);
+    // the historical authorization record is pinned byte-exact (any tampering
+    // with its window breaks the pin). NOTE: its 24h window extended into
+    // 2026-10-28 — clock-validity alone cannot authorize anything because the
+    // attempt budget is exhausted (96/96 RESERVE — see the evidence archive).
+    expect(auth.validFrom).toBe('2026-10-27T12:22:47.763Z');
+    expect(auth.validUntil).toBe('2026-10-28T12:22:47.763Z');
+    expect(auth.halted).toBe(false);
+    expect(auth.revoked).toBe(false);
+    // frozen-lineage draft + the in-force twin the authorization binds
+    expect(pr.status).toBe('DRAFT');
+    expect(fs.existsSync(inside(study, 'preregistration.json'))).toBe(true);
     expect(pr.freezeRequirement).toContain('Owner approval');
   });
 
@@ -184,16 +204,28 @@ describe('CEB-002 preregistration contract consistency', () => {
     expectSnapshotsIdentical(before, snapshotDir(study), 'import-side-effect check');
   });
 
-  it('10b. ISOLATED CLI rebuild: contract byte-identical; real CEB-002 directory FULLY unchanged', { timeout: 30000 }, () => {
+  it('10b. ISOLATED CLI rebuild: deterministic (two rebuilds byte-identical), builder authority-reference intact; real CEB-002 directory FULLY unchanged', { timeout: 30000 }, () => {
+    // The real directory now holds the FROZEN+EXECUTED archive (its draft is
+    // prepare-ceb002-freeze's merged lineage), so the byte comparison target
+    // moved from "real dir" to "a second isolated rebuild" (determinism), and
+    // the builder-side authority-reference protection (#2184) is asserted on
+    // the isolated rebuild itself.
     const before = snapshotDir(study);
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ceb002-determinism-'));
+    const tmp2 = fs.mkdtempSync(path.join(os.tmpdir(), 'ceb002-determinism-'));
     try {
       execFileSync('node', [path.join(labRoot, 'build-ceb002-suite.mjs'), '--output-dir', tmp], { encoding: 'utf8', stdio: 'pipe' });
+      execFileSync('node', [path.join(labRoot, 'build-ceb002-suite.mjs'), '--output-dir', tmp2], { encoding: 'utf8', stdio: 'pipe' });
       const isolated = fs.readFileSync(inside(tmp, 'preregistration.draft.json'), 'utf8');
-      expect(isolated).toBe(fs.readFileSync(inside(study, 'preregistration.draft.json'), 'utf8'));
+      expect(isolated).toBe(fs.readFileSync(inside(tmp2, 'preregistration.draft.json'), 'utf8'));
+      const isolatedPr = JSON.parse(isolated);
+      expect(isolatedPr.status).toBe('DRAFT-NOT-IN-FORCE');
+      expect(isolatedPr.authority).toContain('CEB-002-DELIVERY-PACK.md');
+      expect(isolatedPr.authority).not.toContain('CEB-002-PREREGISTRATION.md');
       expectSnapshotsIdentical(before, snapshotDir(study), 'isolated-build protection');
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
+      fs.rmSync(tmp2, { recursive: true, force: true });
     }
   });
 

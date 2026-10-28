@@ -1,0 +1,63 @@
+{
+  "schema": "challenge-principle-frozen.v1",
+  "artifactId": "pi-art-scribe-95427453-ff20-45e9-bd9d-0592affdd86b-prompt-run_scribe-95427453-ff20-45e9-bd9d-0592affdd86b-prompt_1",
+  "artifactIdNote": "完整精确 ID，2026-10-24 自 pd-data-audit/raw_snapshot/live_state.db pi_artifacts 表唯一匹配重取（LIKE 'pi-art-scribe-95427453%' 恰一行）；禁止任何省略或拼接。",
+  "channel": "prompt",
+  "candidateId": "95427453-ff20-45e9-bd9d-0592affdd86b",
+  "snapshotSource": {
+    "stateDb": "pd-data-audit/raw_snapshot/live_state.db (gitignored 冻结快照, 2026-09-22/23, 只读)",
+    "liveCrossCheck": "D:/.openclaw/workspace/.pd/state.db (只读, 2026-10-24 contentJsonCanonicalSha256 与快照逐字节相等)"
+  },
+  "contentJson": {
+    "generatedAt": "2026-09-21T18:28:58.673Z",
+    "intentContract": {
+      "evidenceSource": "Owner 逐字纠正（owner_correction，sessionId=0d2e48c5-2a40-4fe8-b27f-b390d2fd2695，2026-09-21T17:29:50.607Z）：同时确认两条未查验结论、git 状态本可一次命令确认、以及「没查过的就明说没查」的长期要求；INTENT.md 各节为空模板，说明该底线此前无任何持久化承载。",
+      "forbiddenBehavior": "在未执行任何可观察验证动作的情况下断言事实或宣称成功（如「未纳入 git 跟踪」「验证通过」「没有问题」）；用确定性措辞填补证据空缺；把「完成叙述」当作「验证完成」。",
+      "ownerIntent": "Owner 要求汇报中的每一条事实性结论和成功/状态宣称都必须来自实际查验过的可观察证据，没查过的必须明确说没查，而不是想当然下结论。",
+      "targetBehavior": "每条事实/成功类结论都绑定一次可复现观察动作（命令、输出、文件位置、运行结果）作为引用来源；无法当场验证的结论被显式降级为「未查验，属于推断」并附最小取证步骤；汇报输出前逐项自检证据绑定情况。",
+      "validationExpectation": "评估者应要求：结论旁存在可复现的观察动作引用；触发词类断言（验证通过、已完成、运行正常、未纳入跟踪等）均有对应执行痕迹或已显式降级为推断；未查验项被显式声明；若规则被修改为允许无证据的确定性断言，则视为违背该意图。"
+    },
+    "principleDraft": {
+      "antiPatterns": [
+        "未执行任何检查就断言事实（如「未纳入 git 跟踪」）",
+        "没有运行服务/测试/接口却宣称「验证通过」「没有问题」「已完成」",
+        "用「已确认」「一定」「肯定」等确定性措辞替代缺失的证据",
+        "不区分「已查验」与「未查验」，把推断与事实混写在同一语气中",
+        "把汇报文本写完误当作验证已完成，未观察实际结果并与预期比对"
+      ],
+      "applicability": [
+        "所有包含事实性断言或状态/成功宣称的汇报、总结与结论输出",
+        "版本控制状态、服务运行状态、测试结果等低成本可验证的关键断言",
+        "结论进入对外交付（呈给 Owner 或下游）前强制适用",
+        "汇报、诊断报告、代码评审等事实性结论场景"
+      ],
+      "confidence": 0.87,
+      "rationale": "本次痛点的两处事实错误（git 状态断言、「验证通过」宣称）的共同根因是结论脱离可观察证据：git 状态一条命令即可确认，「验证通过」本应产生可引用输出。要求结论绑定证据可将汇报从「叙述完整」转为「结论可追溯」，避免虚假确定性摧毁信任边界；显式降级机制则满足 Owner「没查过的就明说没查」的长期要求。",
+      "statement": "在任何对外汇报、总结或结论输出中，每一条事实性结论与成功/状态宣称（如「验证通过」「已完成」「未纳入跟踪」「运行正常」）必须绑定到一次可复现的观察动作及其结果引用（命令及输出、代码/文件位置、运行记录）；无法当场验证的事实必须显式标注证据等级并降级为「未查验，属于推断」，附上获取证据的最小步骤，禁止用「已确认」「肯定」等确定性措辞填补证据空缺。",
+      "title": "结论必须由可观察证据背书：无查验则显式降级为推断"
+    },
+    "risks": [
+      "过度执行可能导致大量结论被降级为「未查验」，汇报信息量下降、沟通成本上升；应按验证成本分级，仅对低成本可验证的关键断言强制取证",
+      "该原则是对 T-03、T-07 在对外汇报场景的具体化，与核心公理存在重叠；落地时应作为其汇报层补充而非独立新公理，避免体系重复",
+      "证据绑定依赖执行者自检，若无结构化关口或持久化条款（如写入 Non-negotiables），同类错误仍需 Owner 逐次人工纠正"
+    ],
+    "sourcePhilosopherArtifactId": "pi-art-philosopher-95427453-ff20-45e9-bd9d-0592affdd86b-prompt-run_philosopher-95427453-ff20-45e9-bd9d-0592affdd86b-prompt_1",
+    "sourceTrace": {
+      "dreamerArtifactId": "pi-art-dreamer-95427453-ff20-45e9-bd9d-0592affdd86b-prompt-run_dreamer-95427453-ff20-45e9-bd9d-0592affdd86b-prompt_1",
+      "philosopherArtifactId": "pi-art-philosopher-95427453-ff20-45e9-bd9d-0592affdd86b-prompt-run_philosopher-95427453-ff20-45e9-bd9d-0592affdd86b-prompt_1"
+    },
+    "taskId": "scribe-95427453-ff20-45e9-bd9d-0592affdd86b-prompt"
+  },
+  "computedHashes": {
+    "contentJsonCanonicalSha256": "8ac06edda31bcc4e5dc98a90bd1457435d1a7481a2477bb391c5d87824e9e3ca",
+    "statementSha256": "ae275f0f73d136e600bdbe63fdf44993e9669ad2e46387eeeceb2aa4c4a632bd"
+  },
+  "hashRule": "sha256(fixture.mjs canonicalJson(contentJson)) / sha256(statement 原文 utf8)；与 Phase 0 审计及 input-manifest.expectedSourceHashes 一致，由 freeze-challenge-study.mjs --verify 复算。",
+  "legacyCompatibility": {
+    "missingFields": [
+      "executionConditions",
+      "ownerRequirementGaps"
+    ],
+    "note": "该 2026-09-21 的 legacy Scribe 产物不含 executionConditions/ownerRequirementGaps（当时 schema 尚未要求）。按 SPEC §4.3 如实记录，不伪造历史字段。Owner grounding 由 pain_events#44 逐字纠正与 pain_diagnoses root_cause（独立于产物）承担，故不构成 INSUFFICIENT_OWNER_GROUND_TRUTH。"
+  }
+}

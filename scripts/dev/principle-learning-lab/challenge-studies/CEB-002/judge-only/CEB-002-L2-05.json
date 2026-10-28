@@ -1,4 +1,5 @@
 {
+  "schema": "claim-evidence-judge-only.v1",
   "caseId": "CEB-002-L2-05",
   "family": "CROSS_CONTEXT_TRANSFER",
   "studyEligible": true,
@@ -54,13 +55,13 @@
       "implies": {}
     }
   ],
+  "ownerAnswers": {},
+  "extraActions": {},
   "constraints": {
     "budgetUnits": 12,
     "deadlineUnits": 8,
     "askOwnerAllowed": true
   },
-  "ownerAnswers": {},
-  "extraActions": {},
   "preSeededObservations": [],
   "overCheck": {
     "allowedDistractorProbes": 1
@@ -80,5 +81,7 @@
         ]
       }
     ]
-  }
+  },
+  "inputHash": "53cb67d8b716119606521f93f0a8de55568815df3eac1f31e981a40772e8280c",
+  "goldHash": "ca0ed5cf2f2b8cec23e217878f59dd49f7a6a61b973f9a8b28228f2b6aac927f"
 }
