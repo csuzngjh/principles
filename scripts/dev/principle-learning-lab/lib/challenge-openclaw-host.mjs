@@ -98,7 +98,8 @@ export function createOpenClawHostTransport({
   agent = 'main',
   openclawBin = 'openclaw',
   openclawPrefixArgs = [], // S5.2 env fix: e.g. [<node>, <openclaw.mjs>] when the npm shim is not directly spawnable on Windows
-  openclawHome, // S7 §四: the ambient OpenClaw state root (explicit — never process.env)
+  openclawHome, // S7 §四: the ambient OpenClaw state root (explicit — never silently derived from process.env)
+  env = process.env, // S7.1 §3: injectable environment — the ACTUAL state root is derived from THIS, then checked against openclawHome
   configPath, // S5.2.1: the config file pinned via --config (owner's openclaw.json — zai provider + credentials)
   roundsRoot, // S5 P1-3: controlled root for per-round directories (inside the runner's workRoot)
   timeoutMsPerCall = 180_000,
@@ -122,11 +123,21 @@ export function createOpenClawHostTransport({
     throw new Error('createOpenClawHostTransport: timeoutMsPerCall must be a positive finite number');
   }
   const cliVersion = probeOpenclawVersion(openclawBin, openclawPrefixArgs, versionProbe);
+  // S7.1 §3 — ambient state root contract: the sessions evidence dir is
+  // derived from the DECLARED openclawHome, and the ACTUAL state root (from
+  // the injected env: OPENCLAW_STATE_DIR, else the home directory) must be
+  // the same directory. A declared root that disagrees with the environment
+  // (e.g. OPENCLAW_STATE_DIR redirected elsewhere) is refused BEFORE any
+  // spawn — the openclawHome string alone is never treated as evidence that
+  // the runtime will actually use it. Comparison is normalized-resolved and
+  // case-insensitive (Windows drive casing).
+  const actualStateRoot = resolveAmbientStateRoot(env);
+  const norm = (p) => path.resolve(String(p)).replace(/[\\/]+$/, '').toLowerCase();
+  if (norm(actualStateRoot) !== norm(openclawHome)) {
+    throw new Error(`createOpenClawHostTransport: ambient state root mismatch — the environment resolves to '${actualStateRoot}' but the authorization declares '${openclawHome}'. Refusing before any spawn (S7.1 §3: a declared openclawHome is not evidence of the actual runtime root).`);
+  }
   // S7 §四: the ambient sessions dir is FIXED at construction, derived from
-  // the EXPLICIT openclawHome (runner/authorization supplied) — a library
-  // must never fall back to process.env here: in a test process that would
-  // resolve to the REAL user's OpenClaw sessions dir and stub writes would
-  // contaminate it (enforced by construction after the S5.2.1 leak).
+  // the verified openclawHome.
   const ambientSessionsDir = path.join(openclawHome, 'agents', agent, 'sessions');
   fs.mkdirSync(roundsRoot, { recursive: true });
 

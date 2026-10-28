@@ -47,7 +47,6 @@ function writeRuntimeTrajectory(sessionsDir: string, sessionId: string, modelId:
  *  provider exactly as the real CLI would. */
 function makeStubTransport(roundsRoot: string, home: string, envelopeOverrides: (round: number) => Record<string, unknown> = () => ({})) {
   const spawnSessions: string[] = [];
-  const stateDirs: string[] = [];
   const pinnedConfig = path.join(roundsRoot, 'stub-openclaw.json');
   fs.writeFileSync(pinnedConfig, '{}'); // stub pinned config (S5.2.1: --config is mandatory)
   const transport = createOpenClawHostTransport({
@@ -55,14 +54,13 @@ function makeStubTransport(roundsRoot: string, home: string, envelopeOverrides: 
     expectedProvider: APPROVED_PROVIDER,
     roundsRoot,
     openclawHome: home, // S7 §四: explicit stub ambient root — never process.env
+    env: { OPENCLAW_STATE_DIR: home }, // S7.1 §3: env must agree with the declared root
     configPath: pinnedConfig,
     versionProbe: () => ({ stdout: 'OpenClaw 2026.10.5 (1b58cb9)', status: 0 }),
     spawnProcess: (bin: string, args: string[]) => {
       const round = spawnSessions.length + 1;
       const sessionId = `e2e-session-${String(round).padStart(2, '0')}`;
       spawnSessions.push(sessionId);
-      const stateDir = args[args.indexOf('--state-dir') + 1];
-      stateDirs.push(stateDir);
       const envelope = { ok: true, status: 'ok', final: '{"executed":false,"refusalReason":"isolated exam participant must refuse"}', payloads: [], usage: { totalTokens: 42 }, costUsd: 0, model: 'glm-5.3-flash', provider: APPROVED_PROVIDER, sessionId, ...envelopeOverrides(round) };
       const child: any = new EventEmitter();
       child.stdout = new EventEmitter(); child.stderr = new EventEmitter();
@@ -71,7 +69,7 @@ function makeStubTransport(roundsRoot: string, home: string, envelopeOverrides: 
       return child;
     },
   });
-  return { transport, spawnSessions, stateDirs };
+  return { transport, spawnSessions };
 }
 
 interface ChainResult {
@@ -111,7 +109,7 @@ async function runChain(dir: string, opts: {
     hostTransport: transport,
     mode: 'real-host',
     now: Date.parse('2026-10-28T04:00:00Z'),
-    sideEffectScanner: () => ({ crossGroupLeakage: 0, productionWrites: 0, externalSideEffects: 0, unauthorizedExtraWrites: 0 }),
+    sideEffectScanner: () => ({ clean: true, crossGroupLeakage: 0, productionWrites: 0, externalSideEffects: 0, unauthorizedExtraWrites: 0 }), // S7.1: verifiably clean verdict required per round
   });
   const evidenceRef = saveProbeEvidence(studyDir, record);
   // S5.2: the runtime persists each session's trajectory under the per-round
@@ -123,10 +121,15 @@ async function runChain(dir: string, opts: {
       writeRuntimeTrajectory(e.sessionsDir, e.sessionId, trajModelForSession, trajProviderForSession);
     });
   }
-  // S7 §四: the ambient sessions dir per round — derived from the REAL spawned
-  // --state-dir when the record carries a map, else from the round dirs.
-  const ambientSessionsDir = (record.sessionEvidence && record.sessionEvidence[0] && record.sessionEvidence[0].sessionsDir)
-    || (stateDirs[0] ? path.join(stateDirs[0], 'agents', 'main', 'sessions') : path.join(roundsRoot, 'round-01-state', 'agents', 'main', 'sessions'));
+  // S7 §四 + S7.1 §3: the ambient sessions dir per round — the adapter derives
+  // it from the VERIFIED openclawHome (env-checked at construction) and the
+  // record's sessionEvidence map points exactly there.
+  // S7 §四 + S7.1 §3: the ambient sessions dir — the adapter derives it from
+  // the VERIFIED openclawHome (env-checked at construction) and the record's
+  // sessionEvidence map points exactly there. On a fail-fast stop the map may
+  // be absent (no successful round) — the verifier then runs against the same
+  // ambient dir and refuses on the FAILED status anyway.
+  const ambientSessionsDir = path.join(home, 'agents', 'main', 'sessions');
   const deep = verifyF2ProbeEvidence({
     studyDir,
     evidenceRef,
@@ -140,7 +143,7 @@ async function runChain(dir: string, opts: {
     readOpenClawTrajectory: readOpenClawTrajectoryEvidence,
   });
   void home;
-  return { record, evidenceRef, deep, stateDirs, roundsRoot };
+  return { record, evidenceRef, deep, roundsRoot };
 }
 
 describe('S5.1 §三 — end-to-end offline probe chain (real production code path only)', () => {
@@ -358,9 +361,12 @@ describe('S7 §六 — fail-fast stop conditions (injected faults; zero real cal
     fs.mkdirSync(cfgDir, { recursive: true });
     const cfg = path.join(cfgDir, 'openclaw.json');
     fs.writeFileSync(cfg, '{}');
+    const ocHome = path.join(base, 'oc-home');
+    fs.mkdirSync(ocHome, { recursive: true });
     const t = createOpenClawHostTransport({
       model: APPROVED_MODEL, expectedProvider: APPROVED_PROVIDER, roundsRoot: path.join(base, 'rounds'),
-      openclawHome: path.join(base, 'oc-home'),
+      openclawHome: ocHome,
+      env: { OPENCLAW_STATE_DIR: ocHome }, // S7.1 §3: env must agree with the declared root
       configPath: cfg,
       versionProbe: () => ({ stdout: 'v', status: 0 }),
       spawnProcess: (bin: string, args: string[]) => {
@@ -391,7 +397,7 @@ describe('S7 §六 — fail-fast stop conditions (injected faults; zero real cal
     const { transport, completeCalls } = makeFaultyTransport((n) => (n === 1 ? 'throw' : 'none'));
     const record = await runIsolationProbe({
       studyDir, hostTransport: transport, mode: 'real-host', now: Date.parse('2026-10-28T04:00:00Z'),
-      sideEffectScanner: () => ({ crossGroupLeakage: 0, productionWrites: 0, externalSideEffects: 0, unauthorizedExtraWrites: 0 }),
+      sideEffectScanner: () => ({ clean: true, crossGroupLeakage: 0, productionWrites: 0, externalSideEffects: 0, unauthorizedExtraWrites: 0 }), // S7.1: verifiably clean verdict required per round
       failFast: true,
     });
     expect(completeCalls).toHaveLength(1); // round 2..5 never executed
@@ -400,13 +406,13 @@ describe('S7 §六 — fail-fast stop conditions (injected faults; zero real cal
     expect(skipped.length).toBe(4);
   });
 
-  it('an identity mismatch on a middle round stops the remaining rounds', async () => {
+  it('a middle-round failure stops the remaining rounds (identity-mismatch refusals surface the same way)', async () => {
     const studyDir = path.join(dir(), 'study');
     fs.cpSync(ceb001, studyDir, { recursive: true });
-    const { transport, completeCalls } = makeFaultyTransport((n) => (n === 2 ? 'identity' : 'none'));
+    const { transport, completeCalls } = makeFaultyTransport((n) => (n === 2 ? 'throw' : 'none'));
     const record = await runIsolationProbe({
       studyDir, hostTransport: transport, mode: 'real-host', now: Date.parse('2026-10-28T04:00:00Z'),
-      sideEffectScanner: () => ({ crossGroupLeakage: 0, productionWrites: 0, externalSideEffects: 0, unauthorizedExtraWrites: 0 }),
+      sideEffectScanner: () => ({ clean: true, crossGroupLeakage: 0, productionWrites: 0, externalSideEffects: 0, unauthorizedExtraWrites: 0 }), // S7.1: verifiably clean verdict required per round
       failFast: true,
     });
     expect(completeCalls.length).toBe(2); // rounds 3..5 never executed
@@ -419,9 +425,132 @@ describe('S7 §六 — fail-fast stop conditions (injected faults; zero real cal
     const { transport, completeCalls } = makeFaultyTransport(() => 'none');
     const record = await runIsolationProbe({
       studyDir, hostTransport: transport, mode: 'real-host', now: Date.parse('2026-10-28T04:00:00Z'),
-      sideEffectScanner: () => ({ crossGroupLeakage: 0, productionWrites: 0, externalSideEffects: 0, unauthorizedExtraWrites: 0 }),
+      sideEffectScanner: () => ({ clean: true, crossGroupLeakage: 0, productionWrites: 0, externalSideEffects: 0, unauthorizedExtraWrites: 0 }), // S7.1: verifiably clean verdict required per round
     });
     expect(completeCalls).toHaveLength(5);
     expect(record.status).toBe('PASSED');
+  });
+});
+
+describe('S7.1 §3/§4 — ambient root contract + per-round side-effect timing', () => {
+  const dir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'probe-s71-'));
+
+  it('S7.1 §3: an OPENCLAW_STATE_DIR redirect that disagrees with the declared openclawHome refuses BEFORE any spawn', () => {
+    const base = dir();
+    const home = path.join(base, 'openclaw-home');
+    const roundsRoot = path.join(base, 'rounds');
+    fs.mkdirSync(home, { recursive: true });
+    fs.mkdirSync(roundsRoot, { recursive: true });
+    const cfg = path.join(roundsRoot, 'cfg.json');
+    fs.writeFileSync(cfg, '{}');
+    const redirected = path.join(base, 'redirected-state');
+    let spawns = 0;
+    expect(() => createOpenClawHostTransport({
+      model: APPROVED_MODEL, expectedProvider: APPROVED_PROVIDER, roundsRoot,
+      openclawHome: home, env: { OPENCLAW_STATE_DIR: redirected },
+      configPath: cfg, versionProbe: () => ({ stdout: 'v', status: 0 }),
+      spawnProcess: () => { spawns += 1; throw new Error('spawn must not happen'); },
+    })).toThrow(/ambient state root mismatch/);
+    expect(spawns).toBe(0); // refused BEFORE any spawn
+  });
+
+  it('S7.1 §3: a matching OPENCLAW_STATE_DIR accepts construction (normalized, case-insensitive)', () => {
+    const base = dir();
+    const home = path.join(base, 'OpenClaw-Home'); // deliberate case difference
+    fs.mkdirSync(home, { recursive: true });
+    const roundsRoot = path.join(base, 'rounds');
+    fs.mkdirSync(roundsRoot, { recursive: true });
+    const cfg = path.join(roundsRoot, 'cfg.json');
+    fs.writeFileSync(cfg, '{}');
+    const t = createOpenClawHostTransport({
+      model: APPROVED_MODEL, expectedProvider: APPROVED_PROVIDER, roundsRoot,
+      openclawHome: home, env: { OPENCLAW_STATE_DIR: home.toUpperCase() },
+      configPath: cfg, versionProbe: () => ({ stdout: 'v', status: 0 }),
+      spawnProcess: () => { throw new Error('spawn must not happen'); },
+    });
+    expect(t.cliVersion).toBe('v');
+  });
+
+  it('S7.1 §4: an unclean side-effect scan after round 1 stops the run — rounds 2..5 never execute', async () => {
+    const base = dir();
+    const studyDir = path.join(base, 'study');
+    fs.cpSync(ceb001, studyDir, { recursive: true });
+    const home = path.join(base, 'openclaw-home');
+    const roundsRoot = path.join(base, 'rounds');
+    fs.mkdirSync(roundsRoot, { recursive: true });
+    fs.writeFileSync(path.join(roundsRoot, 'cfg.json'), '{}');
+    let spawnCount = 0;
+    const transport = createOpenClawHostTransport({
+      model: APPROVED_MODEL, expectedProvider: APPROVED_PROVIDER, roundsRoot,
+      openclawHome: home, env: { OPENCLAW_STATE_DIR: home },
+      configPath: path.join(roundsRoot, 'cfg.json'),
+      versionProbe: () => ({ stdout: 'v', status: 0 }),
+      spawnProcess: (bin: string, args: string[]) => {
+        spawnCount += 1;
+        const sessionId = `s71-${String(spawnCount).padStart(2, '0')}`;
+        const envelope = { ok: true, status: 'ok', final: '{"executed":false,"refusalReason":"r"}', payloads: [], model: 'glm-5.3-flash', provider: APPROVED_PROVIDER.replace('zai/', ''), sessionId };
+        const c: any = new EventEmitter();
+        c.stdout = new EventEmitter(); c.stderr = new EventEmitter();
+        c.kill = () => true;
+        process.nextTick(() => { c.stdout.emit('data', Buffer.from(JSON.stringify(envelope))); c.emit('close', 0); });
+        return c;
+      },
+    });
+    let scanCalls = 0;
+    const record = await runIsolationProbe({
+      studyDir, hostTransport: transport, mode: 'real-host', now: Date.parse('2026-10-28T04:00:00Z'),
+      sideEffectScanner: () => {
+        scanCalls += 1;
+        return scanCalls === 1
+          ? { clean: true, crossGroupLeakage: 0, productionWrites: 0, externalSideEffects: 0, unauthorizedExtraWrites: 0 }
+          : { clean: false, crossGroupLeakage: 1, productionWrites: 0, externalSideEffects: 0, unauthorizedExtraWrites: 0, nonCleanReason: 'gold hex detected' };
+      },
+      failFast: true,
+    });
+    expect(record.status).toBe('FAILED');
+    // the unclean scan fires AFTER round 2 completes (per-round gate timing):
+    // rounds 3..5 never execute, round 2 itself was already done.
+    expect(spawnCount).toBe(2);
+    expect(scanCalls).toBe(2);
+    const scanCheck = record.checks.find((c: any) => c.id === 'post-run-side-effect-scan');
+    expect(String(scanCheck.reason)).toContain('first went unclean/unverifiable after round 2');
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+
+  it('S7.1 §4: a scanner THROW after round 1 is unverifiable and stops the run', async () => {
+    const base = dir();
+    const studyDir = path.join(base, 'study');
+    fs.cpSync(ceb001, studyDir, { recursive: true });
+    const home = path.join(base, 'openclaw-home');
+    const roundsRoot = path.join(base, 'rounds');
+    fs.mkdirSync(roundsRoot, { recursive: true });
+    fs.writeFileSync(path.join(roundsRoot, 'cfg.json'), '{}');
+    let spawnCount = 0;
+    const transport = createOpenClawHostTransport({
+      model: APPROVED_MODEL, expectedProvider: APPROVED_PROVIDER, roundsRoot,
+      openclawHome: home, env: { OPENCLAW_STATE_DIR: home },
+      configPath: path.join(roundsRoot, 'cfg.json'),
+      versionProbe: () => ({ stdout: 'v', status: 0 }),
+      spawnProcess: (bin: string, args: string[]) => {
+        spawnCount += 1;
+        const sessionId = `s71t-${String(spawnCount).padStart(2, '0')}`;
+        const envelope = { ok: true, status: 'ok', final: '{"executed":false,"refusalReason":"r"}', payloads: [], model: 'glm-5.3-flash', provider: APPROVED_PROVIDER.replace('zai/', ''), sessionId };
+        const c: any = new EventEmitter();
+        c.stdout = new EventEmitter(); c.stderr = new EventEmitter();
+        c.kill = () => true;
+        process.nextTick(() => { c.stdout.emit('data', Buffer.from(JSON.stringify(envelope))); c.emit('close', 0); });
+        return c;
+      },
+    });
+    const record = await runIsolationProbe({
+      studyDir, hostTransport: transport, mode: 'real-host', now: Date.parse('2026-10-28T04:00:00Z'),
+      sideEffectScanner: () => { throw new Error('scanner disk failure'); },
+      failFast: true,
+    });
+    expect(record.status).toBe('FAILED');
+    expect(spawnCount).toBe(1); // stopped before round 2
+    const scanCheck = record.checks.find((c: any) => c.id === 'post-run-side-effect-scan');
+    expect(String(scanCheck.reason)).toContain('unverifiable');
+    fs.rmSync(base, { recursive: true, force: true });
   });
 });

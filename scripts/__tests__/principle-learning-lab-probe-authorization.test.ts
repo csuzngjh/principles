@@ -161,9 +161,12 @@ describe('OpenClaw host adapter contract (offline; injected spawn, zero real cal
   const makeTransport = (dir: string, spawnProcess: any, expectedProvider: string | null = 'zai') => {
     const cfg = path.join(dir, 'openclaw.json');
     fs.writeFileSync(cfg, '{}'); // stub pinned config (S5.2.1: --config is mandatory)
+    const stubHome = path.join(dir, 'stub-openclaw-home');
+    fs.mkdirSync(stubHome, { recursive: true }); // S7.1 §3: env must agree with the declared root
     return createOpenClawHostTransport({
       model: 'zai/glm-5.3-flash', expectedProvider, roundsRoot: dir, configPath: cfg,
-      openclawHome: path.join(dir, 'stub-openclaw-home'), // S7 §四: explicit ambient root
+      openclawHome: stubHome, // S7 §四: explicit ambient root
+      env: { OPENCLAW_STATE_DIR: stubHome }, // S7.1 §3: env agrees with the declared root
       versionProbe: () => ({ stdout: 'OpenClaw 2026.10.5 (1b58cb9)', status: 0 }),
       spawnProcess,
     });

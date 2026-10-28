@@ -17,7 +17,6 @@ import { verifyProbeAuthorization, readProbeAuthorization } from './lib/challeng
 import { runIsolationProbe, saveProbeEvidence, verifyF2ProbeEvidence } from './lib/challenge-isolation-probe.mjs';
 import { createCodexHostTransport } from './lib/host-actor.mjs';
 import { createProbeSideEffectScanner } from './lib/challenge-probe-side-effect-scanner.mjs'; // ROUND_DIR_ALLOWLIST is managed inside the scanner module (S5.2.1: unused-import cleanup, CodeQL)
-import { ZHIPU_CODING_PROVIDER, buildZhipuCodexOverrides, ensureZhipuProviderReady } from './lib/challenge-zhipu-host-provider.mjs';
 
 const labRoot = path.dirname(fileURLToPath(import.meta.url));
 
@@ -65,13 +64,6 @@ const windowStart = Date.now();
 // / codex rollouts are RESEARCH EVIDENCE and are never touched by cleanup.
 const judgeOnlyFile = path.join(copyDir, 'judge-only', `${JSON.parse(fs.readFileSync(path.join(copyDir, 'suite-manifest.json'), 'utf8')).cases[0].caseId}.json`);
 const goldHexRuns = (JSON.parse(fs.readFileSync(judgeOnlyFile, 'utf8')).toString().match(/[0-9a-f]{32,}/g) || []);
-const scanForGold = (root) => {
-  let hits = 0;
-  if (!fs.existsSync(root)) return hits;
-  const walk = (dir, fn) => { for (const f of fs.readdirSync(dir, { withFileTypes: true })) { const p = path.join(dir, f.name); if (f.isDirectory()) walk(p, fn); else fn(p); } };
-  walk(root, (p) => { try { const t = fs.readFileSync(p, 'utf8'); if (goldHexRuns.some((run) => t.includes(run))) hits += 1; } catch { /* binary/unreadable — not a leak signal */ } });
-  return hits;
-};
 // S5.1 §五: the ONLY files the probe itself creates in a round dir. Anything
 // else appearing there during the window is an unauthorized extra write and
 // fails the side-effect scan (the runtime may also write host-internal state

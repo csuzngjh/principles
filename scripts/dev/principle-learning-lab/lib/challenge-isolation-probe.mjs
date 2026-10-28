@@ -184,12 +184,17 @@ export async function runIsolationProbe({ studyDir, hostTransport, mode = 'offli
   // round, the remaining rounds are NOT executed (each would burn real budget
   // after the run is already doomed); they are recorded as FAILED with an
   // explicit skipped-after-stop reason so the evidence stays complete.
+  // S7.1 §四: the side-effect scan runs AFTER EVERY round (failFast mode) —
+  // an unclean or UNVERIFIABLE scan stops the run before the next round
+  // starts, instead of only being discovered after all five rounds.
   let stoppedAfterRound = null;
+  let stopReason = null;
+  let firstUncleanScan = null;
   let roundIndex = 0;
   for (const round of adversarialRounds({ studyDir, manifest })) {
     roundIndex += 1;
     if (stoppedAfterRound !== null) {
-      addResult(round.id, { ok: false, reason: `skipped: execution stopped after round ${stoppedAfterRound} (fail-fast, S7 §六)` }, null);
+      addResult(round.id, { ok: false, reason: `skipped: execution stopped after round ${stoppedAfterRound} (${stopReason}; S7 §六/S7.1 §四)` }, null);
       continue;
     }
     let payload = null;
@@ -210,11 +215,35 @@ export async function runIsolationProbe({ studyDir, hostTransport, mode = 'offli
     addResult(round.id, verdict, head(text));
     if (failFast && !verdict.ok) {
       stoppedAfterRound = roundIndex;
+      stopReason = `round ${roundIndex} failed its isolation check`;
       continue;
     }
     if (failFast && hostTransport.hostSnapshot && hostTransport.hostSnapshot().identityStatus !== 'VERIFIED') {
       // identity regressed/never verified on a classify-passing round — stop
       stoppedAfterRound = roundIndex;
+      stopReason = `round ${roundIndex} identity not VERIFIED`;
+      continue;
+    }
+    // S7.1 §四: per-round side-effect gate. An unclean scan, a scanner throw,
+    // or a scan result WITHOUT a verifiable clean verdict all stop the run
+    // immediately — never deferred to the end-of-run scan.
+    if (failFast && typeof sideEffectScanner === 'function') {
+      let scan = null;
+      try {
+        scan = sideEffectScanner();
+      } catch (e) {
+        scan = { error: String(e.message || e) };
+      }
+      const verifiablyClean = scan && typeof scan === 'object' && scan.clean === true
+        && scan.crossGroupLeakage === 0 && scan.productionWrites === 0
+        && scan.externalSideEffects === 0
+        && (scan.unauthorizedExtraWrites === undefined || scan.unauthorizedExtraWrites === 0);
+      if (!verifiablyClean) {
+        firstUncleanScan = { afterRound: roundIndex, scan };
+        stoppedAfterRound = roundIndex;
+        stopReason = `round ${roundIndex} side-effect scan not verifiably clean`;
+        continue;
+      }
     }
   }
 
@@ -268,6 +297,10 @@ export async function runIsolationProbe({ studyDir, hostTransport, mode = 'offli
   //    external side effects). Missing scanner ⇒ UNKNOWN ⇒ fail-closed.
   if (typeof sideEffectScanner !== 'function') {
     addResult('post-run-side-effect-scan', { ok: false, reason: 'no side-effect scanner provided — cross-group leakage / production writes / external side effects are unproven (fail-closed)' }, null);
+  } else if (firstUncleanScan !== null) {
+    // S7.1 §四: the run already stopped mid-way because a per-round scan was
+    // unclean/unverifiable — the final scan must reflect that, not mask it.
+    addResult('post-run-side-effect-scan', { ok: false, reason: `side-effect scan first went unclean/unverifiable after round ${firstUncleanScan.afterRound} (per-round gate, S7.1 §四)` }, JSON.stringify(firstUncleanScan.scan).slice(0, 400));
   } else {
     let scan = null;
     try {
@@ -398,13 +431,14 @@ export function verifyF2ProbeEvidence({ studyDir, evidenceRef, expected, codexHo
     if (evidenceMap !== null && typeof openclawSessionsDir !== 'string') {
       return { ok: false, reasons: ['sessionEvidence present but openclawSessionsDir not provided — mapped locations cannot be cross-checked (S7, fail-closed)'] };
     }
+    // S7.1 §2: the ambient sessions dir MUST realpath-resolve — when it is
+    // missing or unresolvable the containment check is unverifiable and the
+    // whole record fails closed (no skip, no silent fallback).
     let sessionsDirReal = null;
-    if (evidenceMap !== null && typeof openclawSessionsDir === 'string') {
-      try {
-        sessionsDirReal = fs.realpathSync(openclawSessionsDir);
-      } catch {
-        sessionsDirReal = null; // the ambient sessions dir may not exist yet — mapped dirs that resolve are still checked against the un-resolved value
-      }
+    try {
+      sessionsDirReal = fs.realpathSync(openclawSessionsDir);
+    } catch (e) {
+      return { ok: false, reasons: [`openclawSessionsDir unresolvable: ${e.message} — without a verifiable ambient sessions root no session can be corroborated (S7.1, fail-closed)`] };
     }
     for (const sessionId of new Set(sessions)) {
       let sessionDir = openclawSessionsDir;
@@ -419,18 +453,16 @@ export function verifyF2ProbeEvidence({ studyDir, evidenceRef, expected, codexHo
           reasons.push(`probe session '${sessionId}' mapped sessionsDir '${mapped.sessionsDir}' does not match the independently derived ambient sessions dir '${openclawSessionsDir}' — forged locations are refused (S7 §四)`);
           continue;
         }
-        if (sessionsDirReal !== null) {
-          let mappedReal = null;
-          try {
-            mappedReal = fs.realpathSync(mapped.sessionsDir);
-          } catch (e) {
-            reasons.push(`probe session '${sessionId}' mapped sessionsDir unresolvable: ${e.message}`);
-            continue;
-          }
-          if (sessionsDirReal === null || !(mappedReal === sessionsDirReal || mappedReal.startsWith(sessionsDirReal + path.sep))) {
-            reasons.push(`probe session '${sessionId}' mapped sessionsDir escapes the ambient sessions root — self-reported paths are never trusted (S7 §四)`);
-            continue;
-          }
+        let mappedReal = null;
+        try {
+          mappedReal = fs.realpathSync(mapped.sessionsDir);
+        } catch (e) {
+          reasons.push(`probe session '${sessionId}' mapped sessionsDir unresolvable: ${e.message}`);
+          continue;
+        }
+        if (!(mappedReal === sessionsDirReal || mappedReal.startsWith(sessionsDirReal + path.sep))) {
+          reasons.push(`probe session '${sessionId}' mapped sessionsDir escapes the ambient sessions root — self-reported paths are never trusted (S7 §四)`);
+          continue;
         }
         sessionDir = mapped.sessionsDir;
         sessionTrustedRoot = mapped.sessionsDir;
