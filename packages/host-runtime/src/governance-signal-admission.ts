@@ -1329,19 +1329,22 @@ export interface EnsureGovernanceContinuationInput {
   readonly workspaceDir: string;
   readonly logicalObservationKey: string;
   readonly canonicalPainId: string;
+  /** Current Owner consent for Codex conversation evidence. Required to prevent reconciliation from promoting old observations after opt-out. */
+  readonly conversationIngestionEnabled: boolean;
   readonly databaseFactory?: ObservationDatabaseFactory;
 }
 
 export type EnsureGovernanceContinuationResult =
-  | { ok: true; taskId: string; taskCreated: boolean; linkRepaired: boolean; promoted: number; tailState: 'completed' | 'pending' }
-  | { ok: false; reason: string; nextAction: string };
+  | { ok: true; taskId: string; taskCreated: boolean; linkRepaired: boolean; promoted: number; tailState: 'completed' | 'pending' | 'skipped' }
+  | { ok: false; reason: string; nextAction: string; taskId?: string; taskCreated?: boolean; linkRepaired?: boolean };
 
 /**
- * Given an admitted canonical pain (identified by its marker), ensure both
- * the Diagnostician task AND the evidence promotion exist idempotently.
+ * Given an admitted canonical pain (identified by its marker), ensure the
+ * Diagnostician task and, only with current conversation-ingestion consent,
+ * the evidence promotion exist idempotently.
  * Single ensure path for both fresh admits and crash recovery (already_admitted
- * redelivery). The marker row carries rollout_identity so the function is
- * self-contained (caller only needs workspaceDir, logicalObservationKey, painId).
+ * redelivery). The marker row carries rollout_identity; callers must also
+ * provide the current conversation-ingestion consent.
  */
 export async function ensureGovernanceContinuation(input: EnsureGovernanceContinuationInput): Promise<EnsureGovernanceContinuationResult> {
   const workspaceDir = path.resolve(input.workspaceDir);
@@ -1357,23 +1360,26 @@ export async function ensureGovernanceContinuation(input: EnsureGovernanceContin
     if (typeof rolloutIdentity !== 'string' || rolloutIdentity.length === 0) {
       return { ok: false, reason: 'marker_missing_rollout_identity', nextAction: 're-admit the signal' };
     }
-    // 1. Ensure task (idempotent)
+    // Promote before making a runnable task visible, so a worker racing this
+    // continuation cannot begin diagnosis before the eligible evidence window
+    // has been promoted. A promotion failure is retained as a degradation,
+    // but never prevents the task from being durably ensured.
+    const promoted = input.conversationIngestionEnabled
+      ? promoteAdmittedGovernanceEvidence({
+        workspaceDir,
+        rolloutIdentity,
+        triggerLogicalKey: input.logicalObservationKey,
+        canonicalPainId: input.canonicalPainId,
+      })
+      : undefined;
     const ensured = await ensureGovernanceDiagnosticianTask({ workspaceDir, logicalObservationKey: input.logicalObservationKey, canonicalPainId: input.canonicalPainId });
     if (!ensured.ok) {
       return { ok: false, reason: ensured.reason, nextAction: ensured.nextAction };
     }
-    // 2. Ensure promotion (idempotent substrate — already promoted = no-op,
-    //    pending tail = re-complete, never started = start now).
-    const promoted = promoteAdmittedGovernanceEvidence({
-      workspaceDir,
-      rolloutIdentity,
-      triggerLogicalKey: input.logicalObservationKey,
-      canonicalPainId: input.canonicalPainId,
-    });
-    if (!promoted.ok) {
-      return { ok: false, reason: promoted.reason, nextAction: promoted.nextAction };
+    if (promoted !== undefined && !promoted.ok) {
+      return { ok: false, reason: promoted.reason, nextAction: promoted.nextAction, taskId: ensured.taskId, taskCreated: ensured.created, linkRepaired: ensured.linkRepaired };
     }
-    return { ok: true, taskId: ensured.taskId, taskCreated: ensured.created, linkRepaired: ensured.linkRepaired, promoted: promoted.promoted, tailState: promoted.tailState };
+    return { ok: true, taskId: ensured.taskId, taskCreated: ensured.created, linkRepaired: ensured.linkRepaired, promoted: promoted?.promoted ?? 0, tailState: promoted?.tailState ?? 'skipped' };
   } finally {
     close();
   }
@@ -1537,6 +1543,8 @@ export async function admitBareHostPains(input: AdmitBareHostPainsInput): Promis
 
 export interface ReconcileGovernanceContinuationInput {
   readonly workspaceDir: string;
+  /** Current Owner consent; false means reconcile may ensure tasks/links but must not read or promote Codex session evidence. */
+  readonly conversationIngestionEnabled: boolean;
   /** Bounded work per pass (default 50 admitted pains). */
   readonly limit?: number;
   readonly databaseFactory?: ObservationDatabaseFactory;
@@ -1557,10 +1565,13 @@ export interface ReconcileGovernanceContinuationResult {
 /**
  * Narrow idempotent reconciliation between the trajectory admission markers
  * and the Runtime V2 task store (separate SQLite databases — no cross-store
- * transaction exists, SPEC §13). Recovers:
+ * transaction exists, SPEC §13). Current conversation-ingestion consent is
+ * mandatory because it controls whether Codex observations may be read and
+ * promoted; task/link recovery remains available when consent is off. Recovers:
  *  - Case A: pain admitted, crash before task creation → create the task now;
  *  - Case B: task exists, crash before the link write → repair the link;
- *  - Case C: pain+task, crash before promotion → promote evidence now;
+ *  - Case C: pain+task, crash before promotion → promote evidence now only
+ *    while conversation-ingestion consent is enabled;
  *  - Case D: promotion started → pending tail → retry completion once; stale
  *    tails are reported (never silently dropped).
  * Not a background worker — Slice C's Companion worker and the CLI call this.
@@ -1588,7 +1599,8 @@ export async function reconcileGovernanceContinuation(input: ReconcileGovernance
     //
     // Recovery needed:
     //   Case A/B: task link missing (crash before task, or before the link write)
-    //   Case C:   promotion never started (no observation carries this painRef)
+    //   Case C:   promotion never started (no observation carries this painRef),
+    //             but only while current conversation-ingestion consent is on.
     //
     // Case C/D (promotion recovery) is scoped to the hosts whose evidence
     // substrate it exists for: the promotion rows come from transcript
@@ -1605,14 +1617,17 @@ export async function reconcileGovernanceContinuation(input: ReconcileGovernance
     // not retry pending tails, so pending-tail markers do not block later
     // markers. Stale tails are NOT auto-recoverable (substrate refuses to
     // re-arm them): they are counted separately below and reported.
+    const promotionRecoveryClause = input.conversationIngestionEnabled
+      ? `OR (a.host_kind = 'codex'
+              AND NOT EXISTS (SELECT 1 FROM governance_observations o
+                  WHERE o.promotion_ref = a.canonical_pain_id))`
+      : '';
     const markers = db.prepare(`SELECT a.logical_observation_key, a.canonical_pain_id, a.host_kind
       FROM governance_signal_admissions a
       WHERE a.decision = 'admitted'
         AND (
           a.diagnostician_task_id IS NULL
-          OR (a.host_kind = 'codex'
-              AND NOT EXISTS (SELECT 1 FROM governance_observations o
-                  WHERE o.promotion_ref = a.canonical_pain_id))
+          ${promotionRecoveryClause}
         )
       ORDER BY a.id LIMIT ?`).all(limit);
     for (const row of markers) {
@@ -1633,7 +1648,7 @@ export async function reconcileGovernanceContinuation(input: ReconcileGovernance
         }
         continue;
       }
-      const cont = await ensureGovernanceContinuation({ workspaceDir, logicalObservationKey: key, canonicalPainId: painId });
+      const cont = await ensureGovernanceContinuation({ workspaceDir, logicalObservationKey: key, canonicalPainId: painId, conversationIngestionEnabled: input.conversationIngestionEnabled });
       if (cont.ok) {
         // Only count REAL actions: a task actually created, a link actually
         // repaired (task existed but the marker link was missing). Healthy
@@ -1644,13 +1659,17 @@ export async function reconcileGovernanceContinuation(input: ReconcileGovernance
         if (cont.tailState === 'pending') pendingTails += 1;
         else if (cont.tailState === 'completed') completedTails += 1;
       } else {
+        if (cont.taskCreated) tasksEnsured += 1;
+        if (cont.linkRepaired) linksRepaired += 1;
         degradations.push(`${key}:${cont.reason}`);
       }
     }
     // Also report stale tails scoped to governance admissions.
-    const stale = db.prepare(`SELECT COUNT(*) AS n FROM governance_pending_promotion_tails t
-      WHERE t.state = 'stale'
-        AND EXISTS (SELECT 1 FROM governance_signal_admissions a WHERE a.canonical_pain_id = t.pain_ref)`).get();
+    const stale = input.conversationIngestionEnabled
+      ? db.prepare(`SELECT COUNT(*) AS n FROM governance_pending_promotion_tails t
+          WHERE t.state = 'stale'
+            AND EXISTS (SELECT 1 FROM governance_signal_admissions a WHERE a.canonical_pain_id = t.pain_ref)`).get()
+      : { n: 0 };
     const staleTails = typeof rowField(stale, 'n') === 'number' ? (rowField(stale, 'n') as number) : 0;
     return {
       ok: degradations.length === 0,

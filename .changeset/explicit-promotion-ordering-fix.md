@@ -16,6 +16,9 @@ Codex explicit pain statement: fix evidence-promotion ordering.
 - With codex_conversation_ingestion disabled, skip promotion and disclose
   `conversation_ingestion_disabled` in the receipt (no transcript read, no
   session observation, no misleading missing-substrate reason).
+- Reconciliation now requires the current ingestion consent explicitly:
+  flag-off recovers tasks and links without reading or promoting old session
+  observations; enabled reconciliation promotes before making tasks runnable.
 - ensureGovernanceDiagnosticianTask: a concurrent ensure racing on the same
   deterministic task id now converges on the existing task instead of
   reporting task_submit_failed:UNIQUE while the task actually exists.
