@@ -100,6 +100,18 @@ function judgeCanonicalRuntime(report: VersionReport): DeliverySurface {
       nextAction: 'Run the official installer recovery, or re-run the official installer to repair the installation record.',
     };
   }
+  // health === 'degraded' means the release manifest for the active generation
+  // is unreadable, so the bytes on disk cannot be tied to a release. Returning
+  // ok here printed "Delivery: complete" with exit 0 while `pd version` called
+  // the same install degraded — the opposite of "never a silent ok".
+  if (report.health === 'degraded') {
+    return {
+      ...base,
+      status: 'unknown',
+      reason: 'canonical_health_degraded',
+      nextAction: 'Run the official installer (npx create-principles-disciple) to restore the release metadata, then re-run this check.',
+    };
+  }
   if (report.componentsSource !== 'runtime') {
     return {
       ...base,
@@ -197,6 +209,11 @@ function judgeOpenClawExtension(report: VersionReport, layout: InstallLayoutPath
  * Host-start verdict, kept pure so the unreadable paths are testable without
  * faking filesystem timestamps: a host that started before the plugin bytes
  * landed is still executing the previous ones.
+ *
+ * Heuristic limit (accepted, documented): the caller feeds the newest rollout
+ * file BY MTIME, so a resumed long-lived session can carry an old birth time
+ * with a fresh mtime. That misreads as "needs restart" (the safe direction) and
+ * never as a false ok.
  */
 export function judgeHostRestart(
   installedAtMs: number | null,
@@ -311,7 +328,8 @@ function judgeCodexPlugin(
       detail: withDetail('the executed runtime does not match the pin'),
     };
   }
-  const host = judgeHostRestart(installed.installedAtMs, findNewestRolloutFile(codexHome));
+  const newestRollout = findNewestRolloutFile(codexHome);
+  const host = judgeHostRestart(installed.installedAtMs, newestRollout);
   if (host.status === 'ok') {
     return { ...base, status: 'ok', required: true, actual, detail: withDetail('host started after the runtime landed') };
   }
@@ -323,6 +341,21 @@ function judgeCodexPlugin(
       actual,
       reason: host.reason,
       nextAction: 'Quit and relaunch Codex — the plugin runtime is loaded at host start.',
+    };
+  }
+  // No session transcript at all is not "cannot prove": it is a Codex install
+  // that has never loaded the runtime (fresh install, or pruned sessions). The
+  // action is the same as a restart — start the host once — so say that
+  // instead of leaving an anonymous unknown that reads like a defect forever.
+  if (newestRollout === null) {
+    return {
+      ...base,
+      status: 'ready_needs_host_restart',
+      required: true,
+      actual,
+      reason: 'host_not_started_since_install',
+      nextAction: 'Launch Codex once — the plugin runtime is loaded at host start — then re-run this check.',
+      detail: withDetail('no Codex session transcript under ~/.codex/sessions, so the runtime has not been loaded yet'),
     };
   }
   return {

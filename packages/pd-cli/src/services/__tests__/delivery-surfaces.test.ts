@@ -44,6 +44,8 @@ interface FixtureOptions {
   readonly components?: Readonly<Record<string, string>>;
   /** Omit the live ~/.pd/runtime directory (release cache only). */
   readonly runtimeDirMissing?: boolean;
+  /** Omit ~/.pd/releases/<id>/metadata.json so canonical health is 'degraded'. */
+  readonly omitReleaseMetadata?: boolean;
   /** Write the OpenClaw extension shell; null omits it. */
   readonly openclawPluginVersion?: string | null;
   /** Create ~/.openclaw so the machine counts as an OpenClaw install. */
@@ -127,11 +129,13 @@ function writeFixtureHome(home: string, options: FixtureOptions = {}): void {
     productVersion: PRODUCT_VERSION,
   });
   writeJson(path.join(pdHome, 'install.json'), { channel: 'stable', autoCheck: true });
-  writeJson(path.join(pdHome, 'releases', RELEASE_ID, 'metadata.json'), {
-    productVersion: PRODUCT_VERSION,
-    releaseId: RELEASE_ID,
-    metadataDigest: RELEASE_DIGEST,
-  });
+  if (options.omitReleaseMetadata !== true) {
+    writeJson(path.join(pdHome, 'releases', RELEASE_ID, 'metadata.json'), {
+      productVersion: PRODUCT_VERSION,
+      releaseId: RELEASE_ID,
+      metadataDigest: RELEASE_DIGEST,
+    });
+  }
   const components = { ...CANONICAL_VERSIONS, ...options.components };
   for (const [component, version] of Object.entries(components)) {
     const dir = options.runtimeDirMissing
@@ -215,13 +219,30 @@ describe('delivery surfaces (PRI-1051)', () => {
     expect(report.ok).toBe(false);
   });
 
-  it('stays unknown instead of guessing ok when no session start time is readable', () => {
+  it('reports ready_needs_host_restart when Codex never loaded the runtime', () => {
     const home = tempHome();
     writeFixtureHome(home, { codex: { sessionStarted: 'none' } });
     const codex = surfaceOf(buildDeliveryReport(home, {}), 'codex-plugin');
-    expect(codex.status).toBe('unknown');
-    expect(codex.reason).toBe('host_start_time_unavailable');
-    expect(codex.nextAction).toBeTruthy();
+    // No transcript is evidence of "never started", not an unprovable state:
+    // an anonymous unknown here reads as a permanent defect on a fresh install.
+    expect(codex.status).toBe('ready_needs_host_restart');
+    expect(codex.reason).toBe('host_not_started_since_install');
+    expect(codex.nextAction).toMatch(/Launch Codex/);
+    expect(codex.detail).toContain('no Codex session transcript');
+  });
+
+  it('reports a degraded canonical install as unknown instead of a complete delivery', () => {
+    const home = tempHome();
+    writeFixtureHome(home, { omitReleaseMetadata: true });
+    const report = buildDeliveryReport(home, {});
+    const canonical = surfaceOf(report, 'canonical-runtime');
+    // `pd version` calls the same install degraded; claiming 'ok' here would
+    // print "Delivery: complete" with exit 0 over an unreadable release record.
+    expect(canonical.actual.health).toBe('degraded');
+    expect(canonical.status).toBe('unknown');
+    expect(canonical.reason).toBe('canonical_health_degraded');
+    expect(report.ok).toBe(false);
+    expect(formatDeliveryReport(report)).toContain('Delivery: incomplete');
   });
 
   it('reports a missing plugin runtime as stale even when the pin is current', () => {

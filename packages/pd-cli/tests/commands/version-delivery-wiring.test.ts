@@ -28,17 +28,28 @@ function writePackageVersion(filePath: string, version: string): void {
   fs.writeFileSync(filePath, JSON.stringify({ name: '@principles/fixture', version }));
 }
 
-/** Minimal canonical install: active.json + live runtime manifests only. */
+const RELEASE_ID = 'b'.repeat(64);
+const RELEASE_DIGEST = '2'.repeat(64);
+
+/** Minimal canonical install: active.json + release metadata + live runtime manifests. */
 function writeCanonicalHome(home: string): void {
   const pdHome = path.join(home, '.pd');
   fs.mkdirSync(pdHome, { recursive: true });
   fs.writeFileSync(path.join(pdHome, 'active.json'), JSON.stringify({
     schemaVersion: 1,
     generation: 53,
-    releaseId: 'b'.repeat(64),
-    releaseMetadataDigest: '2'.repeat(64),
+    releaseId: RELEASE_ID,
+    releaseMetadataDigest: RELEASE_DIGEST,
     transactionId: 'update-fixture',
     productVersion: '2.3.14',
+  }));
+  // Without this the canonical install is `health: 'degraded'` (release record
+  // unreadable) and a "complete" delivery verdict would be a lie.
+  fs.mkdirSync(path.join(pdHome, 'releases', RELEASE_ID), { recursive: true });
+  fs.writeFileSync(path.join(pdHome, 'releases', RELEASE_ID, 'metadata.json'), JSON.stringify({
+    productVersion: '2.3.14',
+    releaseId: RELEASE_ID,
+    metadataDigest: RELEASE_DIGEST,
   }));
   for (const [component, version] of Object.entries({ core: '1.297.2', plugin: '2.2.4', 'pd-cli': '1.160.1' })) {
     writePackageVersion(path.join(pdHome, 'runtime', component, 'package.json'), version);
