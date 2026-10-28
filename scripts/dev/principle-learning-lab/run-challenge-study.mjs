@@ -84,6 +84,23 @@ let requestTimeoutMs; // undefined = default 240000
   }
 }
 
+// Per-attempt request-cap discipline (security, same pattern as the timeout):
+// `--max-requests-per-attempt` is NOT a free knob. An authorization that binds
+// maxRequestsPerAttempt must see the exact same declared value; an authorization
+// WITHOUT the field approves NO per-attempt cap (the actor-loop step ceiling
+// stays the only bound). Invalid values refuse before anything runs.
+let maxRequestsPerAttempt; // undefined = no per-attempt cap
+{
+  const c = arg('--max-requests-per-attempt');
+  if (c !== undefined) {
+    maxRequestsPerAttempt = Number(c);
+    if (!Number.isSafeInteger(maxRequestsPerAttempt) || maxRequestsPerAttempt < 1 || maxRequestsPerAttempt > 40) {
+      console.error(`run-challenge-study: --max-requests-per-attempt '${c}' must be an integer within [1, 40] (40 = the actor-loop step ceiling)`);
+      process.exit(1);
+    }
+  }
+}
+
 // Clock discipline (security): the authorization clock is NOT caller-chosen
 // for REAL execution. `--now` is a SIMULATED clock for --dry-run only (clearly
 // labeled); a real F1 run always judges validity with the ACTUAL system clock,
@@ -132,8 +149,10 @@ function verifyPlan(frozen, armCheck) {
     }
     cases = casesFilter; // caller order is the loop order (e.g. deepest-context unit first)
   }
-  const plan = { arms, cases, repetitions: [1] };
-  const units = arms.length * cases.length;
+  const repsArg = arg('--repetitions');
+  const repetitions = repsArg ? repsArg.split(',').map((s) => s.trim()).filter(Boolean).map(Number) : [1];
+  const plan = { arms, cases, repetitions };
+  const units = arms.length * cases.length * repetitions.length;
   if (executionMode === 'offline-stub') {
     return { plan, units, gate: null, auth: null };
   }
@@ -156,13 +175,14 @@ function verifyPlan(frozen, armCheck) {
     now: dryRun ? now : Date.now(),
     declaredExecutionMode: executionMode,
     declaredRequestTimeoutMs: requestTimeoutMs, // undefined = default 240000; the gate enforces the authorization binding
+    declaredMaxRequestsPerAttempt: maxRequestsPerAttempt, // undefined = no per-attempt cap; the gate enforces the authorization binding
   });
   return { plan, units, gate, auth };
 }
 
 function printPlan(frozen, verified) {
   const { plan, units, gate, auth } = verified;
-  console.log(`run-challenge-study: plan — study=${frozen.studyId} units=${units} (${plan.arms.join('/')} × ${plan.cases.length} cases × 1 repetition)`);
+  console.log(`run-challenge-study: plan — study=${frozen.studyId} units=${units} (${plan.arms.join('/')} × ${plan.cases.length} cases × ${plan.repetitions.length} repetition(s))`);
   if (executionMode === 'offline-stub') {
     console.log('run-challenge-study: mode=offline-stub (deterministic stub, no transport, no network)');
     return;
@@ -256,7 +276,7 @@ try {
     actorFactory,
     maxAttemptsTotal,
     owner,
-    ...(executionMode === 'offline-stub' ? {} : { execution: { mode: executionMode, now: () => Date.now(), requestTimeoutMs } }),
+    ...(executionMode === 'offline-stub' ? {} : { execution: { mode: executionMode, now: () => Date.now(), requestTimeoutMs, maxRequestsPerAttempt } }),
   });
 
   const counts = {};
