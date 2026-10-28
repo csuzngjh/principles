@@ -14,6 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { verifyProbeAuthorization, PROBE_AUTH_KEYS } from '../dev/principle-learning-lab/lib/challenge-probe-authorization.mjs';
+import { ZHIPU_CODING_PROVIDER, buildZhipuCodexOverrides, ensureZhipuProviderReady } from '../dev/principle-learning-lab/lib/challenge-zhipu-host-provider.mjs';
 
 const labRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../dev/principle-learning-lab');
 const ceb001 = path.join(labRoot, 'challenge-studies', 'CEB-001');
@@ -23,7 +24,7 @@ const T0 = Date.parse('2026-10-28T03:00:00Z');
 const approvedOver = (over = {}) => JSON.parse(JSON.stringify({
   ...committed,
   status: 'APPROVED',
-  targetHost: { ...committed.targetHost, requestedModelIdentity: 'zhipu/glm-5.3-flash' },
+  targetHost: { ...committed.targetHost, requestedModelIdentity: 'glm-5.3-flash' },
   validFrom: '2026-10-28T00:00:00Z',
   validUntil: '2026-10-29T00:00:00Z',
   blockage: undefined,
@@ -85,14 +86,60 @@ describe('probe authorization gate (fail-closed, PRI-1037 / S2-D3)', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it('PIN: the committed record stays NOT_ISSUED with a structured blockage until the Owner decision lands', () => {
+  it('PIN: the committed record stays NOT_ISSUED with a structured blockage until the Owner review lands', () => {
     expect(committed.status).toBe('NOT_ISSUED');
     expect(committed.blockage.pendingDecision).toContain('Owner');
-    expect(committed.targetHost.requestedModelIdentity).toBe('PENDING-OWNER-DECISION');
+    expect(committed.targetHost.provider).toBe('zhipu-coding'); // S3 route A, pinned
+    expect(committed.targetHost.requestedModelIdentity).toBe('glm-5.3-flash');
     // the frozen binding it will enforce must equal the live study
     const manifest = JSON.parse(fs.readFileSync(path.join(ceb001, 'suite-manifest.json'), 'utf8'));
     expect(committed.frozenHashes.suiteHash).toBe(manifest.suiteHash);
     expect(committed.frozenHashes.mappingHash).toBe(manifest.mappingHash);
     expect(committed.frozenHashes.graderHash).toBe(manifest.graderHash);
+  });
+
+  it('gate: APPROVED records must name the single approved provider and model — OpenAI-default host models are refused', () => {
+    const openaiHost = approvedOver({ targetHost: { ...committed.targetHost, provider: 'openai-default', requestedModelIdentity: 'gpt-6-astra' } });
+    const v1 = verifyProbeAuthorization({ record: withExactKeys(openaiHost), studyDir: ceb001, now: T0 });
+    expect(v1.ok).toBe(false);
+    expect(v1.reasons.some((r) => r.includes("provider must be 'zhipu-coding'"))).toBe(true);
+    const wrongModel = approvedOver({ targetHost: { ...committed.targetHost, requestedModelIdentity: 'glm-4.7' } });
+    const v2 = verifyProbeAuthorization({ record: withExactKeys(wrongModel), studyDir: ceb001, now: T0 });
+    expect(v2.ok).toBe(false);
+    expect(v2.reasons.some((r) => r.includes('requestedModelIdentity must be'))).toBe(true);
+  });
+});
+
+describe('zhipu host-provider adapter (offline; zero spawns, zero model calls)', () => {
+  it('maps the single approved channel in one frozen place — same endpoint/model/key source the F1 transport proved', () => {
+    expect(ZHIPU_CODING_PROVIDER.baseUrl).toBe('https://open.bigmodel.cn/api/coding/paas/v4');
+    expect(ZHIPU_CODING_PROVIDER.modelId).toBe('glm-5.3-flash');
+    expect(ZHIPU_CODING_PROVIDER.envKey).toBe('BIGMODEL_CODING_API_KEY');
+    expect(ZHIPU_CODING_PROVIDER.wireApi).toBe('chat');
+  });
+
+  it('builds order-stable per-spawn -c overrides (owner config.toml untouched)', () => {
+    const args = buildZhipuCodexOverrides();
+    expect(args).toEqual([
+      '-c', 'model_provider=zhipu-coding',
+      '-c', 'model_providers.zhipu-coding.name=Zhipu BigModel Coding Plan',
+      '-c', `model_providers.zhipu-coding.base_url=${ZHIPU_CODING_PROVIDER.baseUrl}`,
+      '-c', 'model_providers.zhipu-coding.env_key=BIGMODEL_CODING_API_KEY',
+      '-c', 'model_providers.zhipu-coding.wire_api=chat',
+    ]);
+  });
+
+  it('is fail-closed on missing credentials and never surfaces the key value', () => {
+    const v = ensureZhipuProviderReady({ env: {}, keyFile: path.join(os.tmpdir(), 'no-such-zhipu-key-file') });
+    expect(v.ready).toBe(false);
+    expect(v.reason).toContain('fail-closed');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zhipu-prov-'));
+    const kf = path.join(dir, 'key');
+    fs.writeFileSync(kf, 'test-key-value\n');
+    const ok = ensureZhipuProviderReady({ env: {}, keyFile: kf });
+    expect(ok.ready).toBe(true);
+    expect(ok.source).toBe(`file:${kf}`);
+    expect(JSON.stringify(ok)).not.toContain('test-key-value'); // value never carried in the result
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 });

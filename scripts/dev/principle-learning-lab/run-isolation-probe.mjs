@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { verifyProbeAuthorization, readProbeAuthorization } from './lib/challenge-probe-authorization.mjs';
 import { runIsolationProbe, saveProbeEvidence, verifyF2ProbeEvidence } from './lib/challenge-isolation-probe.mjs';
 import { createCodexHostTransport } from './lib/host-actor.mjs';
+import { ZHIPU_CODING_PROVIDER, buildZhipuCodexOverrides, ensureZhipuProviderReady } from './lib/challenge-zhipu-host-provider.mjs';
 
 const labRoot = path.dirname(fileURLToPath(import.meta.url));
 
@@ -70,13 +71,28 @@ const scanner = () => {
   return { crossGroupLeakage, productionWrites, externalSideEffects, scopeNote: 'scratch-root hex scan + PD roots mtime window + workdir non-scratch writes; not a whole-disk claim' };
 };
 
+// ---- zhipu provider gate: fail-closed BEFORE transport construction ----
+// (key resolved from the approved F1 source; value never printed. The codex
+//  child inherits process.env and resolves env_key itself.)
+if (record.targetHost.provider !== ZHIPU_CODING_PROVIDER.id) {
+  console.log(JSON.stringify({ ok: false, stage: 'provider', reasons: [`targetHost.provider '${String(record.targetHost.provider)}' has no adapter — only '${ZHIPU_CODING_PROVIDER.id}' is approved`] }, null, 2));
+  process.exit(1);
+}
+const providerReady = ensureZhipuProviderReady();
+if (!providerReady.ready) {
+  console.log(JSON.stringify({ ok: false, stage: 'provider-credential', reasons: [providerReady.reason], transportFactoryCalls }, null, 2));
+  process.exit(1);
+}
+console.log(JSON.stringify({ stage: 'provider', provider: ZHIPU_CODING_PROVIDER.id, model: ZHIPU_CODING_PROVIDER.modelId, credentialSource: providerReady.source }, null, 2));
+
 const transport = createCodexHostTransport({
-  model: record.targetHost.requestedModelIdentity,
+  model: ZHIPU_CODING_PROVIDER.modelId,
   scratchRoot,
   codexHome: record.targetHost.codexHome,
   timeoutMsPerCall: record.caps.timeoutMsPerCall,
   threadSource: 'pri-1037-probe',
   rolloutReadback: true,
+  extraArgs: buildZhipuCodexOverrides(),
 });
 transportFactoryCalls += 1;
 
