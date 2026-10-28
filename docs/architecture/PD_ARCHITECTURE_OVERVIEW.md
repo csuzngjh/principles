@@ -365,7 +365,7 @@ PruningSignal: 候选修剪集
 [人工审查]
       │
       ▼
-PruningReviewLog (append-only)  ◄── 仅审计意图，不改 Ledger
+PruningReviewLog（已退役 2026-10-28）◄── 曾仅记录审计意图，不改 Ledger
       │
       ▼  （独立 issue 触发）
 PruningAction（高风险，必须人工 approve + dry-run）
@@ -376,7 +376,7 @@ LedgerWriter.deprecate() / archive()
 
 **关键不变量**（现状已落地）：
 - `PruningReadModel` 不得修改 Ledger
-- `PruningReviewLog` 是 append-only 审计日志
+- ~~`PruningReviewLog` 是 append-only 审计日志~~（2026-10-28 退役：写入方与唯一读取方随 legacy 注入块一起删除，遗留 `pruning_reviews.jsonl` 已无读者）
 - `PruningAction` 至今**未实现**，等待独立 issue 推进
 - 任何对 active 原则的状态变更必须可回滚
 

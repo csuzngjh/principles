@@ -298,15 +298,17 @@ active ──pruning（未来）──→ deprecated
 - 终态：Task 是 `succeeded` / `failed`；`retry_wait` **不是终态**
 - 数据库 `principle_candidates.status` 的 `pending / consumed` 是 intake 阶段，**不是** Principle 生命周期状态
 
-### 5.3 Pruning Review 状态
+### 5.3 Pruning Review 状态（已退役 2026-10-28）
 
-Pruning Review 是 append-only audit log，**不改变实体生命周期**。合法 decision：
+Pruning Review 曾是 append-only audit log，**不改变实体生命周期**。合法 decision：
 
 - `keep`
 - `defer`
 - `archive-candidate`
 
 这些是审计意图，**不是**实体状态。
+
+> 2026-10-28：该审计日志的写入方（`pd runtime pruning review`）与唯一读取方（legacy 注入掩码）已删除，遗留 `pruning_reviews.jsonl` 无读者。真正的原则生命周期治理见 §5.4 Approval 与 Runtime V2 activation。
 
 ### 5.4 Approval 状态（新增 — ADR-0006）
 

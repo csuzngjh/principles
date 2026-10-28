@@ -76,7 +76,7 @@ Pruning Pipeline 的职责是**控制 Prompt 上下文压力**，确保活跃原
 | `defer` | 推迟决策，下次再审查 | 否 |
 | `archive-candidate` | 标记为候选归档，从 Prompt 注入中屏蔽 | 否 |
 
-**重要**：`archive-candidate` 不会修改 Ledger 中的原则状态。它仅将原则 ID 加入 Pruning Mask，在 Prompt 注入时跳过该原则。这是一个**可逆的软操作**，通过 `rollback` 命令即可恢复。
+**重要**：`archive-candidate` 不会修改 Ledger 中的原则状态。它仅将原则 ID 加入 Pruning Mask，在 Prompt 注入时跳过该原则。这是一个**可逆的软操作**，通过 `rollback` 命令即可恢复。（该 `review → mask → rollback` 闭环已于 2026-10-28 整体删除，三个环节均不存在。）
 
 ### 2.3 Pruning Action
 
@@ -87,7 +87,7 @@ Pruning Pipeline 的职责是**控制 Prompt 上下文压力**，确保活跃原
 - 人工确认
 - 回滚计划
 
-### 2.4 Archive Candidate
+### 2.4 Archive Candidate（已退役 2026-10-28）
 
 当 operator 对某个原则做出 `archive-candidate` 审查决策后，该原则被称为 "Archive Candidate"。此状态**仅存在于 `pruning_reviews.jsonl`** 中，不反映在 Ledger 上。
 
@@ -181,7 +181,7 @@ flowchart TD
 | 自动修剪触发 | 定期自动扫描并建议修剪 | PruningAction 实现后 |
 | pd-console Pruning UI | 可视化修剪仪表盘 | PruningAction 实现后 |
 | 批量修剪操作 | 一次审查多个原则 | 需要批量确认机制 |
-| 修剪历史报告 | 基于 pruning_reviews.jsonl 的趋势分析 | 需要聚合查询 |
+| ~~修剪历史报告~~ | 原拟基于 pruning_reviews.jsonl 的趋势分析 | 前提已失效（2026-10-28：写入方已删除，遗留文件无读者）|
 | 与 Activation Pipeline 联动 | 修剪后自动调整活跃原则集 | PruningAction 实现后 |
 | 修剪策略配置 | 可配置的 watch/review 阈值 | 当前硬编码 30/90 天 |
 
@@ -375,7 +375,7 @@ Pruning 和 Internalization 是互补的：
 Pruning 依赖 Ledger 作为主要数据源：
 
 - 读取原则的 `status`、`derivedFromPainIds`、`createdAt`
-- `archive-candidate` 审查决策不修改 Ledger（仅写入 pruning_reviews.jsonl）
+- ~~`archive-candidate` 审查决策不修改 Ledger（仅写入 pruning_reviews.jsonl）~~（2026-10-28 该决策已无写入方）
 - Orphan cleanup 是唯一修改 Ledger 的操作（清理 `derivedFromPainIds` 中的无效引用）
 
 ### 9.3 Activation Pipeline / Approval Queue
