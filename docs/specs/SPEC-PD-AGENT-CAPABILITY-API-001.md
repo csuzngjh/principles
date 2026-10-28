@@ -457,7 +457,7 @@ Gate 2 之前，以上映射只用于契约设计与 Reality Audit；不移动�
 - 两臂使用同一 Owner 批准的非 OpenAI 模型、相同模型版本/推理设置/任务提示、同一目标宿主版本、同一合成工作区和等价任务指令；随机化运行顺序并保留逐次结果。
 - 使用 **12 个固定合成场景，每臂每场景重复 3 次**（每臂 36 次、合计 72 次）。建议场景分布：4 个有效关联；2 个真实无匹配；2 个必需来源缺失/不可读；2 个可选来源部分可用；1 个原则身份歧义；1 个非法输入/不允许字段请求。
 - 场景、正确答案、状态映射和评分规则必须先冻结，再执行；不得根据中途结果改题或改门槛。
-- 只使用合成 fixture。不得读取真实 Owner 历史、生产 Pain 文本、真实 correctionEvidence，不调用外部模型服务以外的任何服务（模型是否外部调用仍须单独遵循已批准预算/政策）；本 Gate 本身不授予真实数据访问权。
+- 只使用合成 fixture。不得读取真实 Owner 历史、生产 Pain 文本或真实 correctionEvidence。若任务评估需要模型调用，只能使用 Owner 已批准的非 OpenAI 模型与预算；不得为 Gate 2 新增未经批准的付费调用或其他外部服务。本 Gate 本身不授予真实数据访问权。
 
 #### 2.2 不引入生产依赖的原型规则
 
@@ -637,7 +637,7 @@ Gate 2 的成功不自动授权生产 MCP、真实历史数据读取或 PRR Gate
 | D-05 | 若未来进入 Pilot，传输/工作区/权限约束 | 本地 stdio、单一可信工作区、只读白名单；不开放远程/公网与写入工具 | **OWNER_APPROVED_DESIGN_CONSTRAINT** |
 | D-06 | 是否创建 packages/pd-application 或在仓库引入 MCP SDK | Gate 2 证明净增量前不建包、不加 SDK、不迁移生产代码 | **OWNER_APPROVED_DEFER_UNTIL_GATE_2** |
 | D-07 | MCP SDK / Codex Client 精确版本及真实安装兼容性 | Gate 2 前核验目标候选 Client；SDK 版本在获准实施前复核并锁定 | **NOT_VERIFIED** |
-| D-08 | Gate 2 的任务集、数值阈值与允许成本 | 12 个合成场景×每臂 3 次；安全门 0 泄露/副作用；效用门与操作门见 §10.2–10.4，数值仍待 Owner 冻结 | **PROPOSAL_NOT_APPROVED** |
+| D-08 | Gate 2 的任务集、数值阈值与允许成本 | 12 个合成场景×每臂 3 次；安全门 0 泄露/副作用；效用门与操作门见 Gate 2「指标与停止规则」，数值仍待 Owner 冻结 | **PROPOSAL_NOT_APPROVED** |
 | D-09 | 是否批准真实数据实验、PRR Gate B 或生产 MCP Pilot | 各自按 PRR 与本 SPEC 对应 Gate 独立授权；本次批准不包含这些事项 | **NOT_AUTHORIZED** |
 
 ---
