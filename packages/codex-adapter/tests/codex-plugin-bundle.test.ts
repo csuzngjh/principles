@@ -239,6 +239,19 @@ describe('repo marketplace entry (.agents/plugins/marketplace.json)', () => {
       expect(raw).toMatch(/^description:\s*\S/m);
     }
   });
+
+  it('pd-pain-signal ships the agent-assisted entry and no longer demands a prefix resend', () => {
+    const raw = fs.readFileSync(path.join(pluginDir, 'skills', 'pd-pain-signal', 'SKILL.md'), 'utf8');
+    // The native prefix entry stays the first-class path...
+    expect(raw).toContain('PD记录痛苦：');
+    // ...and the agent-assisted bridge is the answer to an explicit no-prefix
+    // request, wired to the real registration command.
+    expect(raw).toContain('pd pain explicit');
+    // The retired absolute rule: a missing prefix must not push the resend
+    // burden back onto the Owner as the default solution.
+    expect(raw).not.toContain('ask the Owner to submit it');
+    expect(raw).not.toContain('provide the exact message format');
+  });
 });
 
 describe('wrapper (hooks/pd-hook.cjs) runtime resolution', () => {

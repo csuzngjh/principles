@@ -14,6 +14,7 @@ import { CodexDecoderError, CodexEncoderError } from './codec/index.js';
 import { ingestCodexConversation } from './ingestion/ingestion.js';
 import { runGovernanceAdmission } from './ingestion/admission.js';
 import { parseOwnerStatementPrefix, recordExplicitOwnerStatement } from './ingestion/explicit-owner-statement.js';
+import { writeCurrentTurnContext, clearCurrentTurnContext } from './ingestion/turn-context.js';
 import { recordCodexPromptDeliveryEvidence, recordCodexDenyEvidence } from './codex-evidence-recorder.js';
 
 type EnvMap = Record<string, string | undefined>;
@@ -254,6 +255,18 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
   const ingestionEnabled = flags.codex_conversation_ingestion?.enabled === true;
 
   if (event.kind === 'turn_complete') {
+    // Withdraw the live turn context: once the turn completes, the
+    // agent-assisted explicit entry must fail closed (turn_context_missing)
+    // instead of binding an Owner statement to a finished turn. A withdrawal
+    // failure is surfaced as ONE bounded diagnostic (rc-9) — never silent.
+    const cleared = clearCurrentTurnContext({
+      workspaceDir: resolution.workspaceDir,
+      sessionId: event.context.sessionId,
+      ...(event.context.turnId !== undefined ? { turnId: event.context.turnId } : {}),
+    });
+    const clearDiagnostics = cleared.ok
+      ? []
+      : [diagnostic(`turn_context_${cleared.reason}`, 'The turn context could not be withdrawn; the agent-assisted explicit entry stays fail-closed only via its staleness bound. Inspect the workspace .state directory.')];
     // Stop is the turn-complete ingestion trigger (G1 §2): no dispatch route,
     // and Codex's Stop output schema has no hookSpecificOutput — the neutral
     // result is exactly `{}` on stdout (runtime contract: "PD emits empty
@@ -262,59 +275,62 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
     // turn on stderr — never stdout, and never on the per-tool events (that
     // would be per-event noise).
     const stderr = ingestionEnabled
-      ? await runConversationIngestion({ rawPayload: parsed, kind: event.kind, workspaceDir: resolution.workspaceDir, env: _env })
-      : [diagnostic('feature_disabled', 'Set features.codex_conversation_ingestion.enabled=true in the selected Workspace .pd/config.yaml to enable bounded conversation ingestion.')];
+      ? [...clearDiagnostics, ...await runConversationIngestion({ rawPayload: parsed, kind: event.kind, workspaceDir: resolution.workspaceDir, env: _env })]
+      : [...clearDiagnostics, diagnostic('feature_disabled', 'Set features.codex_conversation_ingestion.enabled=true in the selected Workspace .pd/config.yaml to enable bounded conversation ingestion.')];
     return { stdout: {}, exitCode: 0, stderr };
   }
 
   try {
     if (event.kind === 'session_start') {
+      // Belt for turn_complete: a fresh session must never inherit the
+      // previous session's turn context. Withdrawal failure → diagnostic.
+      const cleared = clearCurrentTurnContext({ workspaceDir: resolution.workspaceDir, sessionId: event.context.sessionId });
+      const clearDiagnostics = cleared.ok
+        ? []
+        : [diagnostic(`turn_context_${cleared.reason}`, 'The turn context could not be withdrawn; the agent-assisted explicit entry stays fail-closed only via its staleness bound. Inspect the workspace .state directory.')];
       const health = await createProductionHostRuntime({ hostKind: 'codex' }).health(resolution.workspaceDir);
-      if (!health.ok) return { stdout: {}, exitCode: 0, stderr: [diagnostic(health.reason ?? 'runtime_unhealthy', health.nextAction ?? 'Inspect the Workspace runtime.')] };
-      return { stdout: adapter.encodeOutput({ decision: 'allow', source: event.source }, 'session_start'), exitCode: 0, stderr: [] };
+      if (!health.ok) return { stdout: {}, exitCode: 0, stderr: [...clearDiagnostics, diagnostic(health.reason ?? 'runtime_unhealthy', health.nextAction ?? 'Inspect the Workspace runtime.')] };
+      return { stdout: adapter.encodeOutput({ decision: 'allow', source: event.source }, 'session_start'), exitCode: 0, stderr: clearDiagnostics };
     }
 
     // SPEC-CODEX-PAIN-CLOSURE-001 CR-07: the explicit Owner statement entry
-    // runs FIRST for the current user prompt — before the generic correction
-    // detection, so the same turn can never pass through two pain writers
-    // (the shared unique observation key dedups any replay). Works regardless
-    // of the codex_conversation_ingestion flag: only the transcript PATH is
-    // validated (rollout identity), never conversation content.
+    // owns the current user prompt. The prefix parse runs FIRST (pure, zero
+    // I/O) so the single-writer suppression strategy is decided BEFORE any
+    // ingestion or admission runs — then, when the prefix matched, the live
+    // observation ingestion for this SAME payload runs BEFORE the explicit
+    // registration, because the registration's evidence promotion requires
+    // the trigger observation to already be persisted. Registering first and
+    // ingesting afterwards made every FIRST submission of a rollout degrade
+    // with rollout_not_found/trigger_not_found (the trigger row only appeared
+    // in the later ingestion pass). Works regardless of the
+    // codex_conversation_ingestion flag: flag-off skips the ingestion call
+    // entirely, and the registration discloses promotion as skipped
+    // (conversation_ingestion_disabled) instead of misreporting a missing
+    // substrate; only the transcript PATH is ever validated (rollout
+    // identity), never conversation content.
     let explicitReceiptContext: string | undefined;
-    let explicitSuppressedGeneric = false;
     const explicitDiagnostics: string[] = [];
+    let explicitPrefixMatched = false;
+    let explicitStatementText: string | null = null;
+    let explicitRejectReason: 'statement_empty' | 'statement_too_long' | undefined;
     if (event.kind === 'before_prompt_build') {
+      // Agent-assisted explicit registration bridge: publish THIS turn's
+      // host-verified identity (ids and paths only — never prompt text) so
+      // `pd pain explicit` can register the Owner's verbatim words through
+      // the same admission chain as the prefix entry, with the model never
+      // seeing or guessing lineage ids. Not gated by the ingestion flag; a
+      // write failure degrades only that entry (the prefix entry never
+      // needed this file).
+      const turnContext = writeCurrentTurnContext({ rawPayload: parsed, workspaceDir: resolution.workspaceDir, env: _env });
+      if (!turnContext.ok) {
+        explicitDiagnostics.push(diagnostic(`turn_context_${turnContext.reason}`, turnContext.nextAction));
+      }
       const rawRecord = parsed as Record<string, unknown>;
       const prefixParse = parseOwnerStatementPrefix(typeof rawRecord?.prompt === 'string' ? rawRecord.prompt : undefined);
+      explicitPrefixMatched = prefixParse.matched;
       if (prefixParse.matched) {
-        explicitSuppressedGeneric = true;
-        if (prefixParse.text === null) {
-          explicitDiagnostics.push(diagnostic(
-            `owner_statement_${prefixParse.reason ?? 'rejected'}`,
-            prefixParse.reason === 'statement_too_long'
-              ? `The statement exceeds 500 characters; nothing was recorded. Resubmit within the limit.`
-              : 'The prefix carried no statement text; nothing was recorded. Resubmit as PD记录痛苦：<反馈原文>.',
-          ));
-        } else {
-          const receipt = await recordExplicitOwnerStatement({
-            rawPayload: parsed,
-            workspaceDir: resolution.workspaceDir,
-            statementText: prefixParse.text,
-            env: _env,
-          });
-          if (receipt.status === 'received') {
-            explicitReceiptContext = `[PD] 已收到痛苦反馈（painId=${receipt.painId}, taskId=${receipt.taskId}${receipt.disposition === 'already_admitted' ? ', 重复提交已合并为同一信号' : ''}）。后台将自动诊断；请在回复中如实转述本回执，不要声称仍在等待用户输入，也不要虚构诊断结论。${receipt.promotionDegraded !== undefined ? `（注意：会话证据提升暂不可用：${receipt.promotionDegraded}；诊断仍会基于你提交的陈述进行。）` : ''}`;
-            explicitDiagnostics.push(diagnostic(
-              `owner_statement_received:${receipt.painId}:${receipt.taskId}${receipt.promotionDegraded !== undefined ? `:promotion_degraded:${receipt.promotionDegraded}` : ''}`,
-              'Durable enqueue complete; the workspace worker continues diagnosis in the background.',
-            ));
-          } else {
-            explicitDiagnostics.push(diagnostic(
-              `owner_statement_${receipt.reason}`,
-              receipt.nextAction,
-            ));
-          }
-        }
+        explicitStatementText = prefixParse.text;
+        explicitRejectReason = prefixParse.reason;
       }
     }
 
@@ -325,12 +341,48 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
         workspaceDir: resolution.workspaceDir,
         projectDir: requestedCwd,
         env: _env,
-        // CR-07: the explicit path already handled this turn's user prompt —
-        // suppress the generic correction candidate so exactly one writer
-        // processed the observation (A17).
-        ...(explicitSuppressedGeneric && event.kind === 'before_prompt_build' ? { suppressCorrectionCandidate: true } : {}),
+        // CR-07: the prefix parse above already decided this turn's user
+        // prompt belongs to the explicit path — suppress the generic
+        // correction candidate so exactly one writer processes the
+        // observation (A17), and the trigger observation is in place before
+        // the explicit registration promotes evidence around it.
+        ...(explicitPrefixMatched ? { suppressCorrectionCandidate: true } : {}),
       })
       : [];
+
+    if (explicitPrefixMatched) {
+      if (explicitStatementText === null) {
+        explicitDiagnostics.push(diagnostic(
+          `owner_statement_${explicitRejectReason ?? 'rejected'}`,
+          explicitRejectReason === 'statement_too_long'
+            ? `The statement exceeds 500 characters; nothing was recorded. Resubmit within the limit.`
+            : 'The prefix carried no statement text; nothing was recorded. Resubmit as PD记录痛苦：<反馈原文>.',
+        ));
+      } else {
+        const receipt = await recordExplicitOwnerStatement({
+          rawPayload: parsed,
+          workspaceDir: resolution.workspaceDir,
+          statementText: explicitStatementText,
+          env: _env,
+          conversationIngestionEnabled: ingestionEnabled,
+        });
+        if (receipt.status === 'received') {
+          const promotionNotice = receipt.promotionDegraded === 'conversation_ingestion_disabled'
+            ? '会话证据提升已跳过：会话摄取未启用（按隐私边界未读取会话内容，也未写入会话观察）'
+            : `会话证据提升暂不可用：${receipt.promotionDegraded}`;
+          explicitReceiptContext = `[PD] 已收到痛苦反馈（painId=${receipt.painId}, taskId=${receipt.taskId}${receipt.disposition === 'already_admitted' ? ', 重复提交已合并为同一信号' : ''}）。后台将自动诊断；请在回复中如实转述本回执，不要声称仍在等待用户输入，也不要虚构诊断结论。${receipt.promotionDegraded !== undefined ? `（注意：${promotionNotice}；诊断仍会基于你提交的陈述进行。）` : ''}`;
+          explicitDiagnostics.push(diagnostic(
+            `owner_statement_received:${receipt.painId}:${receipt.taskId}${receipt.promotionDegraded !== undefined ? `:promotion_degraded:${receipt.promotionDegraded}` : ''}`,
+            'Durable enqueue complete; the workspace worker continues diagnosis in the background.',
+          ));
+        } else {
+          explicitDiagnostics.push(diagnostic(
+            `owner_statement_${receipt.reason}`,
+            receipt.nextAction,
+          ));
+        }
+      }
+    }
     // PD v2 Phase 1: evidence context for this subprocess invocation. The
     // ledger flag follows the OpenClaw convention (principle_receipt_ledger
     // gates normalized evidence writes).
@@ -425,7 +477,7 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
         evidenceDiagnostics.push(diagnostic(`codex_evidence_deny_failed:${errorMessage(error)}`, 'The deny decision was already encoded; evidence replay from the durable source is safe.'));
       }
     }
-    const stderr = [...(result.warnings ?? []).slice(0, 16).map((warning) => diagnostic(warning, 'Inspect PD Workspace state and retry; the hook failed open.')), ...evaluationDiagnostics, ...evidenceDiagnostics, ...explicitDiagnostics, ...ingestionDiagnostics];
+    const stderr = [...(result.warnings ?? []).slice(0, 16).map((warning) => diagnostic(warning, 'Inspect PD Workspace state and retry; the hook failed open.')), ...evaluationDiagnostics, ...evidenceDiagnostics, ...ingestionDiagnostics, ...explicitDiagnostics];
     return { stdout: encoded, exitCode: 0, stderr };
   } catch (error) {
     const reason = error instanceof CodexEncoderError ? error.reason : `runtime_failed:${errorMessage(error)}`;

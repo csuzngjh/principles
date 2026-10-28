@@ -15,7 +15,8 @@
  * - cli-6: degraded results include reason + nextAction.
  */
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
-import { reconcileGovernanceContinuation } from '@principles/host-runtime';
+import { loadPdConfigForPlugin, reconcileGovernanceContinuation } from '@principles/host-runtime';
+import { computeFeatureFlagsFromConfig } from '@principles/core/runtime-v2';
 
 interface CodexReconcileOptions {
   workspace?: string;
@@ -41,9 +42,35 @@ export interface CodexReconcileReport {
 export async function handleCodexReconcile(options: CodexReconcileOptions): Promise<void> {
   const generatedAt = new Date().toISOString();
   const workspace = resolveWorkspaceDir(options.workspace);
+  const config = loadPdConfigForPlugin(workspace);
+  if (!config.ok) {
+    const [first] = config.errors;
+    const reason = `pd_config_invalid:${first?.reason ?? 'unknown'}`;
+    const nextAction = first?.nextAction ?? 'Repair the Workspace .pd/config.yaml before reconciling; the conversation-ingestion consent could not be verified.';
+    const report: CodexReconcileReport = {
+      generatedAt,
+      host: 'codex',
+      workspace,
+      ok: false,
+      reason,
+      nextAction,
+      tasksEnsured: 0,
+      linksRepaired: 0,
+      pendingTails: 0,
+      completedTails: 0,
+      staleTails: 0,
+      degradations: [reason],
+    };
+    if (options.json) console.log(JSON.stringify(report));
+    else console.log([`Codex governance reconciliation (${workspace})`, `  reason: ${reason}`, `  next action: ${nextAction}`].join('\n'));
+    process.exitCode = 1;
+    return;
+  }
+  const conversationIngestionEnabled = computeFeatureFlagsFromConfig(config.effective).flags.codex_conversation_ingestion?.enabled === true;
 
   const result = await reconcileGovernanceContinuation({
     workspaceDir: workspace,
+    conversationIngestionEnabled,
     ...(typeof options.limit === 'number' ? { limit: options.limit } : {}),
   });
 

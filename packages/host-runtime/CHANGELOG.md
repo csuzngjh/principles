@@ -1,5 +1,66 @@
 # @principles/host-runtime
 
+## 0.14.0
+
+### Minor Changes
+
+- 44a9d3d: Codex agent-assisted explicit pain registration (no prefix).
+  
+  When the Owner's current message explicitly asks to create a pain signal and provides the feedback, the agent can now complete the registration itself instead of demanding a `PD记录痛苦：` resend:
+  
+  - The Codex hook publishes the CURRENT turn's host-verified identity (ids/paths only, never prompt text) to a session-hash-partitioned file under `<workspace>/.state/` on every UserPromptSubmit and withdraws only that session's matching turn on Stop (or that session on SessionStart). `pd pain explicit` selects the file using the host-bound `CODEX_SESSION_ID` and rejects conflicting `CODEX_THREAD_ID`; missing identity fails closed.
+  - New `pd pain explicit --statement "<Owner 原文>" [--workspace] [--json]` registers through the SAME admission chain as the prefix entry (governance admission marker, explicit 5/hour bucket, diagnostician task ensure, idempotent same-turn convergence). The command takes no lineage flags — lineage comes exclusively from the host-written turn context and is re-validated at registration time.
+  - Provenance is auditable: agent-assisted registrations carry `channel: codex_explicit_agent` and an "agent-assisted, no prefix" pain reason, distinct from the hook-read `codex_explicit_prefix` channel (additive literal in the shared PainCorrectionEvidence schema; prefix behavior byte-identical).
+  - The `pd-pain-signal` skill now mandates agent-assisted registration for explicit no-prefix requests (verbatim Owner words only, receipt-idempotency check first, honest failure reporting); the "ask the Owner to resubmit" absolute rule is retired, and `pd pain record` remains the post-hoc operator recovery path.
+
+### Patch Changes
+
+- cd773b5: Codex explicit pain statement: fix evidence-promotion ordering.
+  
+  - Run the live observation ingestion BEFORE the explicit registration in
+    pd-hook, so the FIRST `PD记录痛苦：` submission of a rollout promotes its
+    evidence window instead of degrading with rollout_not_found /
+    trigger_not_found (the trigger observation used to be written only by the
+    ingestion pass that ran after the registration).
+  - Promote evidence BEFORE enqueuing the Diagnostician task, closing the
+    window where a fast worker could start the first diagnosis before the
+    available evidence window was promoted.
+  - With codex_conversation_ingestion disabled, skip promotion and disclose
+    `conversation_ingestion_disabled` in the receipt (no transcript read, no
+    session observation, no misleading missing-substrate reason).
+  - Reconciliation now requires the current ingestion consent explicitly:
+    flag-off recovers tasks and links without reading or promoting old session
+    observations; enabled reconciliation promotes before making tasks runnable.
+  - ensureGovernanceDiagnosticianTask: a concurrent ensure racing on the same
+    deterministic task id now converges on the existing task instead of
+    reporting task_submit_failed:UNIQUE while the task actually exists.
+- Updated dependencies [44a9d3d]
+  - @principles/core@1.297.3
+
+## 0.13.5
+
+### Patch Changes
+
+- 4fefb36: Codex explicit pain statement: fix evidence-promotion ordering.
+  
+  - Run the live observation ingestion BEFORE the explicit registration in
+    pd-hook, so the FIRST `PD记录痛苦：` submission of a rollout promotes its
+    evidence window instead of degrading with rollout_not_found /
+    trigger_not_found (the trigger observation used to be written only by the
+    ingestion pass that ran after the registration).
+  - Promote evidence BEFORE enqueuing the Diagnostician task, closing the
+    window where a fast worker could start the first diagnosis before the
+    available evidence window was promoted.
+  - With codex_conversation_ingestion disabled, skip promotion and disclose
+    `conversation_ingestion_disabled` in the receipt (no transcript read, no
+    session observation, no misleading missing-substrate reason).
+  - Reconciliation now requires the current ingestion consent explicitly:
+    flag-off recovers tasks and links without reading or promoting old session
+    observations; enabled reconciliation promotes before making tasks runnable.
+  - ensureGovernanceDiagnosticianTask: a concurrent ensure racing on the same
+    deterministic task id now converges on the existing task instead of
+    reporting task_submit_failed:UNIQUE while the task actually exists.
+
 ## 0.13.4
 
 ### Patch Changes

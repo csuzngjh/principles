@@ -1,0 +1,1114 @@
+{"seq":1,"type":"RESERVE","unit":{"caseId":"CEB-002-L1-01","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L1-01/A/r1"}
+{"seq":2,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L1-01","armId":"A","repetitionId":1,"attemptId":"a1"}}
+{"seq":3,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-01/A/r1:step0","unit":{"caseId":"CEB-002-L1-01","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-01/A/r1 step 0)"}
+{"seq":4,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-01/A/r1:step1","unit":{"caseId":"CEB-002-L1-01","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-01/A/r1 step 1)"}
+{"seq":5,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-01/A/r1:step2","unit":{"caseId":"CEB-002-L1-01","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-01/A/r1 step 2)"}
+{"seq":6,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L1-01","armId":"A","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":7,"type":"RESERVE","unit":{"caseId":"CEB-002-L1-01","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L1-01/A/r2"}
+{"seq":8,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L1-01","armId":"A","repetitionId":2,"attemptId":"a1"}}
+{"seq":9,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-01/A/r2:step0","unit":{"caseId":"CEB-002-L1-01","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-01/A/r2 step 0)"}
+{"seq":10,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-01/A/r2:step1","unit":{"caseId":"CEB-002-L1-01","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-01/A/r2 step 1)"}
+{"seq":11,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-01/A/r2:step2","unit":{"caseId":"CEB-002-L1-01","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-01/A/r2 step 2)"}
+{"seq":12,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-01/A/r2:step3","unit":{"caseId":"CEB-002-L1-01","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-01/A/r2 step 3)"}
+{"seq":13,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L1-01","armId":"A","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":14,"type":"RESERVE","unit":{"caseId":"CEB-002-L1-02","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L1-02/A/r1"}
+{"seq":15,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L1-02","armId":"A","repetitionId":1,"attemptId":"a1"}}
+{"seq":16,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-02/A/r1:step0","unit":{"caseId":"CEB-002-L1-02","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-02/A/r1 step 0)"}
+{"seq":17,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-02/A/r1:step1","unit":{"caseId":"CEB-002-L1-02","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-02/A/r1 step 1)"}
+{"seq":18,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-02/A/r1:step2","unit":{"caseId":"CEB-002-L1-02","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-02/A/r1 step 2)"}
+{"seq":19,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L1-02","armId":"A","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":20,"type":"RESERVE","unit":{"caseId":"CEB-002-L1-02","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L1-02/A/r2"}
+{"seq":21,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L1-02","armId":"A","repetitionId":2,"attemptId":"a1"}}
+{"seq":22,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-02/A/r2:step0","unit":{"caseId":"CEB-002-L1-02","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-02/A/r2 step 0)"}
+{"seq":23,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-02/A/r2:step1","unit":{"caseId":"CEB-002-L1-02","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-02/A/r2 step 1)"}
+{"seq":24,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-02/A/r2:step2","unit":{"caseId":"CEB-002-L1-02","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-02/A/r2 step 2)"}
+{"seq":25,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-02/A/r2:step3","unit":{"caseId":"CEB-002-L1-02","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-02/A/r2 step 3)"}
+{"seq":26,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L1-02","armId":"A","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":27,"type":"RESERVE","unit":{"caseId":"CEB-002-L1-03","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L1-03/A/r1"}
+{"seq":28,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L1-03","armId":"A","repetitionId":1,"attemptId":"a1"}}
+{"seq":29,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-03/A/r1:step0","unit":{"caseId":"CEB-002-L1-03","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-03/A/r1 step 0)"}
+{"seq":30,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-03/A/r1:step1","unit":{"caseId":"CEB-002-L1-03","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-03/A/r1 step 1)"}
+{"seq":31,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-03/A/r1:step2","unit":{"caseId":"CEB-002-L1-03","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-03/A/r1 step 2)"}
+{"seq":32,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-03/A/r1:step3","unit":{"caseId":"CEB-002-L1-03","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-03/A/r1 step 3)"}
+{"seq":33,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-03/A/r1:step4","unit":{"caseId":"CEB-002-L1-03","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-03/A/r1 step 4)"}
+{"seq":34,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L1-03","armId":"A","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"FAIL"}
+{"seq":35,"type":"RESERVE","unit":{"caseId":"CEB-002-L1-03","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L1-03/A/r2"}
+{"seq":36,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L1-03","armId":"A","repetitionId":2,"attemptId":"a1"}}
+{"seq":37,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-03/A/r2:step0","unit":{"caseId":"CEB-002-L1-03","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-03/A/r2 step 0)"}
+{"seq":38,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-03/A/r2:step1","unit":{"caseId":"CEB-002-L1-03","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-03/A/r2 step 1)"}
+{"seq":39,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-03/A/r2:step2","unit":{"caseId":"CEB-002-L1-03","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-03/A/r2 step 2)"}
+{"seq":40,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-03/A/r2:step3","unit":{"caseId":"CEB-002-L1-03","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-03/A/r2 step 3)"}
+{"seq":41,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-03/A/r2:step4","unit":{"caseId":"CEB-002-L1-03","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-03/A/r2 step 4)"}
+{"seq":42,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L1-03","armId":"A","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":43,"type":"RESERVE","unit":{"caseId":"CEB-002-L2-04","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L2-04/A/r1"}
+{"seq":44,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L2-04","armId":"A","repetitionId":1,"attemptId":"a1"}}
+{"seq":45,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-04/A/r1:step0","unit":{"caseId":"CEB-002-L2-04","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-04/A/r1 step 0)"}
+{"seq":46,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-04/A/r1:step1","unit":{"caseId":"CEB-002-L2-04","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-04/A/r1 step 1)"}
+{"seq":47,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-04/A/r1:step2","unit":{"caseId":"CEB-002-L2-04","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-04/A/r1 step 2)"}
+{"seq":48,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L2-04","armId":"A","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":49,"type":"RESERVE","unit":{"caseId":"CEB-002-L2-04","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L2-04/A/r2"}
+{"seq":50,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L2-04","armId":"A","repetitionId":2,"attemptId":"a1"}}
+{"seq":51,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-04/A/r2:step0","unit":{"caseId":"CEB-002-L2-04","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-04/A/r2 step 0)"}
+{"seq":52,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-04/A/r2:step1","unit":{"caseId":"CEB-002-L2-04","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-04/A/r2 step 1)"}
+{"seq":53,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-04/A/r2:step2","unit":{"caseId":"CEB-002-L2-04","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-04/A/r2 step 2)"}
+{"seq":54,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L2-04","armId":"A","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":55,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-05","armId":"A","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L2-05/A/r1"}
+{"seq":56,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-05","armId":"A","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L2-05/A/r2"}
+{"seq":57,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-06","armId":"A","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L2-06/A/r1"}
+{"seq":58,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-06","armId":"A","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L2-06/A/r2"}
+{"seq":59,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-07","armId":"A","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L2-07/A/r1"}
+{"seq":60,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-07","armId":"A","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L2-07/A/r2"}
+{"seq":61,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-08","armId":"A","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L3-08/A/r1"}
+{"seq":62,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-08","armId":"A","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L3-08/A/r2"}
+{"seq":63,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"A","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L3-09/A/r1"}
+{"seq":64,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"A","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L3-09/A/r2"}
+{"seq":65,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"A","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L3-10/A/r1"}
+{"seq":66,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"A","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L3-10/A/r2"}
+{"seq":67,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"A","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L3-11/A/r1"}
+{"seq":68,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"A","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L3-11/A/r2"}
+{"seq":69,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"A","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-B1-12/A/r1"}
+{"seq":70,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"A","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-B1-12/A/r2"}
+{"seq":71,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"A","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-B2-13/A/r1"}
+{"seq":72,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"A","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-B2-13/A/r2"}
+{"seq":73,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"A","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-B3-14/A/r1"}
+{"seq":74,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"A","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-B3-14/A/r2"}
+{"seq":75,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"A","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-B4-15/A/r1"}
+{"seq":76,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"A","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-B4-15/A/r2"}
+{"seq":77,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"A","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-B5-16/A/r1"}
+{"seq":78,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"A","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-B5-16/A/r2"}
+{"seq":79,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-01","armId":"B","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L1-01/B/r1"}
+{"seq":80,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-01","armId":"B","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L1-01/B/r2"}
+{"seq":81,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-02","armId":"B","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L1-02/B/r1"}
+{"seq":82,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-02","armId":"B","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L1-02/B/r2"}
+{"seq":83,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-03","armId":"B","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L1-03/B/r1"}
+{"seq":84,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-03","armId":"B","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L1-03/B/r2"}
+{"seq":85,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-04","armId":"B","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L2-04/B/r1"}
+{"seq":86,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-04","armId":"B","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L2-04/B/r2"}
+{"seq":87,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-05","armId":"B","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L2-05/B/r1"}
+{"seq":88,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-05","armId":"B","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L2-05/B/r2"}
+{"seq":89,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-06","armId":"B","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L2-06/B/r1"}
+{"seq":90,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-06","armId":"B","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L2-06/B/r2"}
+{"seq":91,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-07","armId":"B","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L2-07/B/r1"}
+{"seq":92,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-07","armId":"B","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L2-07/B/r2"}
+{"seq":93,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-08","armId":"B","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L3-08/B/r1"}
+{"seq":94,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-08","armId":"B","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L3-08/B/r2"}
+{"seq":95,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"B","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L3-09/B/r1"}
+{"seq":96,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"B","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L3-09/B/r2"}
+{"seq":97,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"B","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L3-10/B/r1"}
+{"seq":98,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"B","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L3-10/B/r2"}
+{"seq":99,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"B","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L3-11/B/r1"}
+{"seq":100,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"B","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L3-11/B/r2"}
+{"seq":101,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"B","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-B1-12/B/r1"}
+{"seq":102,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"B","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-B1-12/B/r2"}
+{"seq":103,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"B","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-B2-13/B/r1"}
+{"seq":104,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"B","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-B2-13/B/r2"}
+{"seq":105,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"B","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-B3-14/B/r1"}
+{"seq":106,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"B","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-B3-14/B/r2"}
+{"seq":107,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"B","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-B4-15/B/r1"}
+{"seq":108,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"B","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-B4-15/B/r2"}
+{"seq":109,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"B","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-B5-16/B/r1"}
+{"seq":110,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"B","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-B5-16/B/r2"}
+{"seq":111,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-01","armId":"C","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L1-01/C/r1"}
+{"seq":112,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-01","armId":"C","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L1-01/C/r2"}
+{"seq":113,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-02","armId":"C","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L1-02/C/r1"}
+{"seq":114,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-02","armId":"C","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L1-02/C/r2"}
+{"seq":115,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-03","armId":"C","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L1-03/C/r1"}
+{"seq":116,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-03","armId":"C","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L1-03/C/r2"}
+{"seq":117,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-04","armId":"C","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L2-04/C/r1"}
+{"seq":118,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-04","armId":"C","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L2-04/C/r2"}
+{"seq":119,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-05","armId":"C","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L2-05/C/r1"}
+{"seq":120,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-05","armId":"C","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L2-05/C/r2"}
+{"seq":121,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-06","armId":"C","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L2-06/C/r1"}
+{"seq":122,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-06","armId":"C","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L2-06/C/r2"}
+{"seq":123,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-07","armId":"C","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L2-07/C/r1"}
+{"seq":124,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-07","armId":"C","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L2-07/C/r2"}
+{"seq":125,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-08","armId":"C","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L3-08/C/r1"}
+{"seq":126,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-08","armId":"C","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L3-08/C/r2"}
+{"seq":127,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"C","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L3-09/C/r1"}
+{"seq":128,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"C","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L3-09/C/r2"}
+{"seq":129,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"C","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L3-10/C/r1"}
+{"seq":130,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"C","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L3-10/C/r2"}
+{"seq":131,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"C","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L3-11/C/r1"}
+{"seq":132,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"C","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-L3-11/C/r2"}
+{"seq":133,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"C","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-B1-12/C/r1"}
+{"seq":134,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"C","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-B1-12/C/r2"}
+{"seq":135,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"C","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-B2-13/C/r1"}
+{"seq":136,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"C","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-B2-13/C/r2"}
+{"seq":137,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"C","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-B3-14/C/r1"}
+{"seq":138,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"C","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-B3-14/C/r2"}
+{"seq":139,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"C","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-B4-15/C/r1"}
+{"seq":140,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"C","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-B4-15/C/r2"}
+{"seq":141,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"C","repetitionId":1,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-B5-16/C/r1"}
+{"seq":142,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"C","repetitionId":2,"attemptId":"a1"},"used":8,"cap":8,"reason":"unit CEB-002-B5-16/C/r2"}
+{"seq":143,"type":"RESERVE","unit":{"caseId":"CEB-002-L2-05","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L2-05/A/r1"}
+{"seq":144,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L2-05","armId":"A","repetitionId":1,"attemptId":"a1"}}
+{"seq":145,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-05/A/r1:step0","unit":{"caseId":"CEB-002-L2-05","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-05/A/r1 step 0)"}
+{"seq":146,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-05/A/r1:step1","unit":{"caseId":"CEB-002-L2-05","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-05/A/r1 step 1)"}
+{"seq":147,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-05/A/r1:step2","unit":{"caseId":"CEB-002-L2-05","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-05/A/r1 step 2)"}
+{"seq":148,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L2-05","armId":"A","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":149,"type":"RESERVE","unit":{"caseId":"CEB-002-L2-05","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L2-05/A/r2"}
+{"seq":150,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L2-05","armId":"A","repetitionId":2,"attemptId":"a1"}}
+{"seq":151,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-05/A/r2:step0","unit":{"caseId":"CEB-002-L2-05","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-05/A/r2 step 0)"}
+{"seq":152,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-05/A/r2:step1","unit":{"caseId":"CEB-002-L2-05","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-05/A/r2 step 1)"}
+{"seq":153,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-05/A/r2:step2","unit":{"caseId":"CEB-002-L2-05","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-05/A/r2 step 2)"}
+{"seq":154,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-05/A/r2:step3","unit":{"caseId":"CEB-002-L2-05","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-05/A/r2 step 3)"}
+{"seq":155,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L2-05","armId":"A","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":156,"type":"RESERVE","unit":{"caseId":"CEB-002-L2-06","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L2-06/A/r1"}
+{"seq":157,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L2-06","armId":"A","repetitionId":1,"attemptId":"a1"}}
+{"seq":158,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-06/A/r1:step0","unit":{"caseId":"CEB-002-L2-06","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-06/A/r1 step 0)"}
+{"seq":159,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-06/A/r1:step1","unit":{"caseId":"CEB-002-L2-06","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-06/A/r1 step 1)"}
+{"seq":160,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-06/A/r1:step2","unit":{"caseId":"CEB-002-L2-06","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-06/A/r1 step 2)"}
+{"seq":161,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-06/A/r1:step3","unit":{"caseId":"CEB-002-L2-06","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-06/A/r1 step 3)"}
+{"seq":162,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-06/A/r1:step4","unit":{"caseId":"CEB-002-L2-06","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-06/A/r1 step 4)"}
+{"seq":163,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L2-06","armId":"A","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"FAIL"}
+{"seq":164,"type":"RESERVE","unit":{"caseId":"CEB-002-L2-06","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L2-06/A/r2"}
+{"seq":165,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L2-06","armId":"A","repetitionId":2,"attemptId":"a1"}}
+{"seq":166,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-06/A/r2:step0","unit":{"caseId":"CEB-002-L2-06","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-06/A/r2 step 0)"}
+{"seq":167,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-06/A/r2:step1","unit":{"caseId":"CEB-002-L2-06","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-06/A/r2 step 1)"}
+{"seq":168,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-06/A/r2:step2","unit":{"caseId":"CEB-002-L2-06","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-06/A/r2 step 2)"}
+{"seq":169,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-06/A/r2:step3","unit":{"caseId":"CEB-002-L2-06","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-06/A/r2 step 3)"}
+{"seq":170,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L2-06","armId":"A","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":171,"type":"RESERVE","unit":{"caseId":"CEB-002-L2-07","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L2-07/A/r1"}
+{"seq":172,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L2-07","armId":"A","repetitionId":1,"attemptId":"a1"}}
+{"seq":173,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-07/A/r1:step0","unit":{"caseId":"CEB-002-L2-07","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-07/A/r1 step 0)"}
+{"seq":174,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-07/A/r1:step1","unit":{"caseId":"CEB-002-L2-07","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-07/A/r1 step 1)"}
+{"seq":175,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-07/A/r1:step2","unit":{"caseId":"CEB-002-L2-07","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-07/A/r1 step 2)"}
+{"seq":176,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L2-07","armId":"A","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":177,"type":"RESERVE","unit":{"caseId":"CEB-002-L2-07","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L2-07/A/r2"}
+{"seq":178,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L2-07","armId":"A","repetitionId":2,"attemptId":"a1"}}
+{"seq":179,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-07/A/r2:step0","unit":{"caseId":"CEB-002-L2-07","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-07/A/r2 step 0)"}
+{"seq":180,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-07/A/r2:step1","unit":{"caseId":"CEB-002-L2-07","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-07/A/r2 step 1)"}
+{"seq":181,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-07/A/r2:step2","unit":{"caseId":"CEB-002-L2-07","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-07/A/r2 step 2)"}
+{"seq":182,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L2-07","armId":"A","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":183,"type":"RESERVE","unit":{"caseId":"CEB-002-L3-08","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L3-08/A/r1"}
+{"seq":184,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L3-08","armId":"A","repetitionId":1,"attemptId":"a1"}}
+{"seq":185,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-08/A/r1:step0","unit":{"caseId":"CEB-002-L3-08","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-08/A/r1 step 0)"}
+{"seq":186,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-08/A/r1:step1","unit":{"caseId":"CEB-002-L3-08","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-08/A/r1 step 1)"}
+{"seq":187,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-08/A/r1:step2","unit":{"caseId":"CEB-002-L3-08","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-08/A/r1 step 2)"}
+{"seq":188,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-08/A/r1:step3","unit":{"caseId":"CEB-002-L3-08","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-08/A/r1 step 3)"}
+{"seq":189,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-08/A/r1:step4","unit":{"caseId":"CEB-002-L3-08","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-08/A/r1 step 4)"}
+{"seq":190,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L3-08","armId":"A","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"FAIL"}
+{"seq":191,"type":"RESERVE","unit":{"caseId":"CEB-002-L3-08","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L3-08/A/r2"}
+{"seq":192,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L3-08","armId":"A","repetitionId":2,"attemptId":"a1"}}
+{"seq":193,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-08/A/r2:step0","unit":{"caseId":"CEB-002-L3-08","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-08/A/r2 step 0)"}
+{"seq":194,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-08/A/r2:step1","unit":{"caseId":"CEB-002-L3-08","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-08/A/r2 step 1)"}
+{"seq":195,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-08/A/r2:step2","unit":{"caseId":"CEB-002-L3-08","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-08/A/r2 step 2)"}
+{"seq":196,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-08/A/r2:step3","unit":{"caseId":"CEB-002-L3-08","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-08/A/r2 step 3)"}
+{"seq":197,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-08/A/r2:step4","unit":{"caseId":"CEB-002-L3-08","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-08/A/r2 step 4)"}
+{"seq":198,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L3-08","armId":"A","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"FAIL"}
+{"seq":199,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"A","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L3-09/A/r1"}
+{"seq":200,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"A","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L3-09/A/r2"}
+{"seq":201,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"A","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L3-10/A/r1"}
+{"seq":202,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"A","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L3-10/A/r2"}
+{"seq":203,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"A","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L3-11/A/r1"}
+{"seq":204,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"A","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L3-11/A/r2"}
+{"seq":205,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"A","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-B1-12/A/r1"}
+{"seq":206,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"A","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-B1-12/A/r2"}
+{"seq":207,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"A","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-B2-13/A/r1"}
+{"seq":208,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"A","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-B2-13/A/r2"}
+{"seq":209,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"A","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-B3-14/A/r1"}
+{"seq":210,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"A","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-B3-14/A/r2"}
+{"seq":211,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"A","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-B4-15/A/r1"}
+{"seq":212,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"A","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-B4-15/A/r2"}
+{"seq":213,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"A","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-B5-16/A/r1"}
+{"seq":214,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"A","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-B5-16/A/r2"}
+{"seq":215,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-01","armId":"B","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L1-01/B/r1"}
+{"seq":216,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-01","armId":"B","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L1-01/B/r2"}
+{"seq":217,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-02","armId":"B","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L1-02/B/r1"}
+{"seq":218,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-02","armId":"B","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L1-02/B/r2"}
+{"seq":219,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-03","armId":"B","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L1-03/B/r1"}
+{"seq":220,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-03","armId":"B","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L1-03/B/r2"}
+{"seq":221,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-04","armId":"B","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L2-04/B/r1"}
+{"seq":222,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-04","armId":"B","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L2-04/B/r2"}
+{"seq":223,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-05","armId":"B","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L2-05/B/r1"}
+{"seq":224,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-05","armId":"B","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L2-05/B/r2"}
+{"seq":225,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-06","armId":"B","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L2-06/B/r1"}
+{"seq":226,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-06","armId":"B","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L2-06/B/r2"}
+{"seq":227,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-07","armId":"B","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L2-07/B/r1"}
+{"seq":228,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-07","armId":"B","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L2-07/B/r2"}
+{"seq":229,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-08","armId":"B","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L3-08/B/r1"}
+{"seq":230,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-08","armId":"B","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L3-08/B/r2"}
+{"seq":231,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"B","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L3-09/B/r1"}
+{"seq":232,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"B","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L3-09/B/r2"}
+{"seq":233,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"B","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L3-10/B/r1"}
+{"seq":234,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"B","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L3-10/B/r2"}
+{"seq":235,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"B","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L3-11/B/r1"}
+{"seq":236,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"B","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L3-11/B/r2"}
+{"seq":237,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"B","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-B1-12/B/r1"}
+{"seq":238,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"B","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-B1-12/B/r2"}
+{"seq":239,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"B","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-B2-13/B/r1"}
+{"seq":240,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"B","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-B2-13/B/r2"}
+{"seq":241,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"B","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-B3-14/B/r1"}
+{"seq":242,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"B","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-B3-14/B/r2"}
+{"seq":243,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"B","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-B4-15/B/r1"}
+{"seq":244,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"B","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-B4-15/B/r2"}
+{"seq":245,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"B","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-B5-16/B/r1"}
+{"seq":246,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"B","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-B5-16/B/r2"}
+{"seq":247,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-01","armId":"C","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L1-01/C/r1"}
+{"seq":248,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-01","armId":"C","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L1-01/C/r2"}
+{"seq":249,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-02","armId":"C","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L1-02/C/r1"}
+{"seq":250,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-02","armId":"C","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L1-02/C/r2"}
+{"seq":251,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-03","armId":"C","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L1-03/C/r1"}
+{"seq":252,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-03","armId":"C","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L1-03/C/r2"}
+{"seq":253,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-04","armId":"C","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L2-04/C/r1"}
+{"seq":254,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-04","armId":"C","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L2-04/C/r2"}
+{"seq":255,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-05","armId":"C","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L2-05/C/r1"}
+{"seq":256,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-05","armId":"C","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L2-05/C/r2"}
+{"seq":257,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-06","armId":"C","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L2-06/C/r1"}
+{"seq":258,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-06","armId":"C","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L2-06/C/r2"}
+{"seq":259,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-07","armId":"C","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L2-07/C/r1"}
+{"seq":260,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-07","armId":"C","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L2-07/C/r2"}
+{"seq":261,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-08","armId":"C","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L3-08/C/r1"}
+{"seq":262,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-08","armId":"C","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L3-08/C/r2"}
+{"seq":263,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"C","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L3-09/C/r1"}
+{"seq":264,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"C","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L3-09/C/r2"}
+{"seq":265,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"C","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L3-10/C/r1"}
+{"seq":266,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"C","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L3-10/C/r2"}
+{"seq":267,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"C","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L3-11/C/r1"}
+{"seq":268,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"C","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-L3-11/C/r2"}
+{"seq":269,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"C","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-B1-12/C/r1"}
+{"seq":270,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"C","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-B1-12/C/r2"}
+{"seq":271,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"C","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-B2-13/C/r1"}
+{"seq":272,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"C","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-B2-13/C/r2"}
+{"seq":273,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"C","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-B3-14/C/r1"}
+{"seq":274,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"C","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-B3-14/C/r2"}
+{"seq":275,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"C","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-B4-15/C/r1"}
+{"seq":276,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"C","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-B4-15/C/r2"}
+{"seq":277,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"C","repetitionId":1,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-B5-16/C/r1"}
+{"seq":278,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"C","repetitionId":2,"attemptId":"a1"},"used":16,"cap":16,"reason":"unit CEB-002-B5-16/C/r2"}
+{"seq":279,"type":"RESERVE","unit":{"caseId":"CEB-002-L3-09","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L3-09/A/r1"}
+{"seq":280,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L3-09","armId":"A","repetitionId":1,"attemptId":"a1"}}
+{"seq":281,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-09/A/r1:step0","unit":{"caseId":"CEB-002-L3-09","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-09/A/r1 step 0)"}
+{"seq":282,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-09/A/r1:step1","unit":{"caseId":"CEB-002-L3-09","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-09/A/r1 step 1)"}
+{"seq":283,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-09/A/r1:step2","unit":{"caseId":"CEB-002-L3-09","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-09/A/r1 step 2)"}
+{"seq":284,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-09/A/r1:step3","unit":{"caseId":"CEB-002-L3-09","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-09/A/r1 step 3)"}
+{"seq":285,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L3-09","armId":"A","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":286,"type":"RESERVE","unit":{"caseId":"CEB-002-L3-09","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L3-09/A/r2"}
+{"seq":287,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L3-09","armId":"A","repetitionId":2,"attemptId":"a1"}}
+{"seq":288,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-09/A/r2:step0","unit":{"caseId":"CEB-002-L3-09","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-09/A/r2 step 0)"}
+{"seq":289,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-09/A/r2:step1","unit":{"caseId":"CEB-002-L3-09","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-09/A/r2 step 1)"}
+{"seq":290,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-09/A/r2:step2","unit":{"caseId":"CEB-002-L3-09","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-09/A/r2 step 2)"}
+{"seq":291,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-09/A/r2:step3","unit":{"caseId":"CEB-002-L3-09","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-09/A/r2 step 3)"}
+{"seq":292,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L3-09","armId":"A","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":293,"type":"RESERVE","unit":{"caseId":"CEB-002-L3-10","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L3-10/A/r1"}
+{"seq":294,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L3-10","armId":"A","repetitionId":1,"attemptId":"a1"}}
+{"seq":295,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-10/A/r1:step0","unit":{"caseId":"CEB-002-L3-10","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-10/A/r1 step 0)"}
+{"seq":296,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-10/A/r1:step1","unit":{"caseId":"CEB-002-L3-10","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-10/A/r1 step 1)"}
+{"seq":297,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L3-10","armId":"A","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":298,"type":"RESERVE","unit":{"caseId":"CEB-002-L3-10","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L3-10/A/r2"}
+{"seq":299,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L3-10","armId":"A","repetitionId":2,"attemptId":"a1"}}
+{"seq":300,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-10/A/r2:step0","unit":{"caseId":"CEB-002-L3-10","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-10/A/r2 step 0)"}
+{"seq":301,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-10/A/r2:step1","unit":{"caseId":"CEB-002-L3-10","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-10/A/r2 step 1)"}
+{"seq":302,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L3-10","armId":"A","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":303,"type":"RESERVE","unit":{"caseId":"CEB-002-L3-11","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L3-11/A/r1"}
+{"seq":304,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L3-11","armId":"A","repetitionId":1,"attemptId":"a1"}}
+{"seq":305,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-11/A/r1:step0","unit":{"caseId":"CEB-002-L3-11","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-11/A/r1 step 0)"}
+{"seq":306,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-11/A/r1:step1","unit":{"caseId":"CEB-002-L3-11","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-11/A/r1 step 1)"}
+{"seq":307,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-11/A/r1:step2","unit":{"caseId":"CEB-002-L3-11","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-11/A/r1 step 2)"}
+{"seq":308,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L3-11","armId":"A","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":309,"type":"RESERVE","unit":{"caseId":"CEB-002-L3-11","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L3-11/A/r2"}
+{"seq":310,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L3-11","armId":"A","repetitionId":2,"attemptId":"a1"}}
+{"seq":311,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-11/A/r2:step0","unit":{"caseId":"CEB-002-L3-11","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-11/A/r2 step 0)"}
+{"seq":312,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-11/A/r2:step1","unit":{"caseId":"CEB-002-L3-11","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-11/A/r2 step 1)"}
+{"seq":313,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-11/A/r2:step2","unit":{"caseId":"CEB-002-L3-11","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-11/A/r2 step 2)"}
+{"seq":314,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L3-11","armId":"A","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":315,"type":"RESERVE","unit":{"caseId":"CEB-002-B1-12","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-B1-12/A/r1"}
+{"seq":316,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-B1-12","armId":"A","repetitionId":1,"attemptId":"a1"}}
+{"seq":317,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B1-12/A/r1:step0","unit":{"caseId":"CEB-002-B1-12","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B1-12/A/r1 step 0)"}
+{"seq":318,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-B1-12","armId":"A","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":319,"type":"RESERVE","unit":{"caseId":"CEB-002-B1-12","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-B1-12/A/r2"}
+{"seq":320,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-B1-12","armId":"A","repetitionId":2,"attemptId":"a1"}}
+{"seq":321,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B1-12/A/r2:step0","unit":{"caseId":"CEB-002-B1-12","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B1-12/A/r2 step 0)"}
+{"seq":322,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B1-12/A/r2:step1","unit":{"caseId":"CEB-002-B1-12","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B1-12/A/r2 step 1)"}
+{"seq":323,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-B1-12","armId":"A","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":324,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"A","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-B2-13/A/r1"}
+{"seq":325,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"A","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-B2-13/A/r2"}
+{"seq":326,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"A","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-B3-14/A/r1"}
+{"seq":327,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"A","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-B3-14/A/r2"}
+{"seq":328,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"A","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-B4-15/A/r1"}
+{"seq":329,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"A","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-B4-15/A/r2"}
+{"seq":330,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"A","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-B5-16/A/r1"}
+{"seq":331,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"A","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-B5-16/A/r2"}
+{"seq":332,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-01","armId":"B","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L1-01/B/r1"}
+{"seq":333,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-01","armId":"B","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L1-01/B/r2"}
+{"seq":334,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-02","armId":"B","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L1-02/B/r1"}
+{"seq":335,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-02","armId":"B","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L1-02/B/r2"}
+{"seq":336,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-03","armId":"B","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L1-03/B/r1"}
+{"seq":337,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-03","armId":"B","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L1-03/B/r2"}
+{"seq":338,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-04","armId":"B","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L2-04/B/r1"}
+{"seq":339,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-04","armId":"B","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L2-04/B/r2"}
+{"seq":340,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-05","armId":"B","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L2-05/B/r1"}
+{"seq":341,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-05","armId":"B","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L2-05/B/r2"}
+{"seq":342,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-06","armId":"B","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L2-06/B/r1"}
+{"seq":343,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-06","armId":"B","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L2-06/B/r2"}
+{"seq":344,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-07","armId":"B","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L2-07/B/r1"}
+{"seq":345,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-07","armId":"B","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L2-07/B/r2"}
+{"seq":346,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-08","armId":"B","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L3-08/B/r1"}
+{"seq":347,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-08","armId":"B","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L3-08/B/r2"}
+{"seq":348,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"B","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L3-09/B/r1"}
+{"seq":349,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"B","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L3-09/B/r2"}
+{"seq":350,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"B","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L3-10/B/r1"}
+{"seq":351,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"B","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L3-10/B/r2"}
+{"seq":352,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"B","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L3-11/B/r1"}
+{"seq":353,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"B","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L3-11/B/r2"}
+{"seq":354,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"B","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-B1-12/B/r1"}
+{"seq":355,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"B","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-B1-12/B/r2"}
+{"seq":356,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"B","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-B2-13/B/r1"}
+{"seq":357,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"B","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-B2-13/B/r2"}
+{"seq":358,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"B","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-B3-14/B/r1"}
+{"seq":359,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"B","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-B3-14/B/r2"}
+{"seq":360,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"B","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-B4-15/B/r1"}
+{"seq":361,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"B","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-B4-15/B/r2"}
+{"seq":362,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"B","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-B5-16/B/r1"}
+{"seq":363,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"B","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-B5-16/B/r2"}
+{"seq":364,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-01","armId":"C","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L1-01/C/r1"}
+{"seq":365,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-01","armId":"C","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L1-01/C/r2"}
+{"seq":366,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-02","armId":"C","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L1-02/C/r1"}
+{"seq":367,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-02","armId":"C","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L1-02/C/r2"}
+{"seq":368,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-03","armId":"C","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L1-03/C/r1"}
+{"seq":369,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-03","armId":"C","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L1-03/C/r2"}
+{"seq":370,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-04","armId":"C","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L2-04/C/r1"}
+{"seq":371,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-04","armId":"C","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L2-04/C/r2"}
+{"seq":372,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-05","armId":"C","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L2-05/C/r1"}
+{"seq":373,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-05","armId":"C","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L2-05/C/r2"}
+{"seq":374,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-06","armId":"C","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L2-06/C/r1"}
+{"seq":375,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-06","armId":"C","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L2-06/C/r2"}
+{"seq":376,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-07","armId":"C","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L2-07/C/r1"}
+{"seq":377,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-07","armId":"C","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L2-07/C/r2"}
+{"seq":378,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-08","armId":"C","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L3-08/C/r1"}
+{"seq":379,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-08","armId":"C","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L3-08/C/r2"}
+{"seq":380,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"C","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L3-09/C/r1"}
+{"seq":381,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"C","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L3-09/C/r2"}
+{"seq":382,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"C","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L3-10/C/r1"}
+{"seq":383,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"C","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L3-10/C/r2"}
+{"seq":384,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"C","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L3-11/C/r1"}
+{"seq":385,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"C","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-L3-11/C/r2"}
+{"seq":386,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"C","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-B1-12/C/r1"}
+{"seq":387,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"C","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-B1-12/C/r2"}
+{"seq":388,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"C","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-B2-13/C/r1"}
+{"seq":389,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"C","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-B2-13/C/r2"}
+{"seq":390,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"C","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-B3-14/C/r1"}
+{"seq":391,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"C","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-B3-14/C/r2"}
+{"seq":392,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"C","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-B4-15/C/r1"}
+{"seq":393,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"C","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-B4-15/C/r2"}
+{"seq":394,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"C","repetitionId":1,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-B5-16/C/r1"}
+{"seq":395,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"C","repetitionId":2,"attemptId":"a1"},"used":24,"cap":24,"reason":"unit CEB-002-B5-16/C/r2"}
+{"seq":396,"type":"RESERVE","unit":{"caseId":"CEB-002-B2-13","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-B2-13/A/r1"}
+{"seq":397,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-B2-13","armId":"A","repetitionId":1,"attemptId":"a1"}}
+{"seq":398,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B2-13/A/r1:step0","unit":{"caseId":"CEB-002-B2-13","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B2-13/A/r1 step 0)"}
+{"seq":399,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-B2-13","armId":"A","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":400,"type":"RESERVE","unit":{"caseId":"CEB-002-B2-13","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-B2-13/A/r2"}
+{"seq":401,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-B2-13","armId":"A","repetitionId":2,"attemptId":"a1"}}
+{"seq":402,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B2-13/A/r2:step0","unit":{"caseId":"CEB-002-B2-13","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B2-13/A/r2 step 0)"}
+{"seq":403,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-B2-13","armId":"A","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":404,"type":"RESERVE","unit":{"caseId":"CEB-002-B3-14","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-B3-14/A/r1"}
+{"seq":405,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-B3-14","armId":"A","repetitionId":1,"attemptId":"a1"}}
+{"seq":406,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B3-14/A/r1:step0","unit":{"caseId":"CEB-002-B3-14","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B3-14/A/r1 step 0)"}
+{"seq":407,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B3-14/A/r1:step1","unit":{"caseId":"CEB-002-B3-14","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B3-14/A/r1 step 1)"}
+{"seq":408,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-B3-14","armId":"A","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":409,"type":"RESERVE","unit":{"caseId":"CEB-002-B3-14","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-B3-14/A/r2"}
+{"seq":410,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-B3-14","armId":"A","repetitionId":2,"attemptId":"a1"}}
+{"seq":411,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B3-14/A/r2:step0","unit":{"caseId":"CEB-002-B3-14","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B3-14/A/r2 step 0)"}
+{"seq":412,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B3-14/A/r2:step1","unit":{"caseId":"CEB-002-B3-14","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B3-14/A/r2 step 1)"}
+{"seq":413,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-B3-14","armId":"A","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":414,"type":"RESERVE","unit":{"caseId":"CEB-002-B4-15","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-B4-15/A/r1"}
+{"seq":415,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-B4-15","armId":"A","repetitionId":1,"attemptId":"a1"}}
+{"seq":416,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B4-15/A/r1:step0","unit":{"caseId":"CEB-002-B4-15","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B4-15/A/r1 step 0)"}
+{"seq":417,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B4-15/A/r1:step1","unit":{"caseId":"CEB-002-B4-15","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B4-15/A/r1 step 1)"}
+{"seq":418,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-B4-15","armId":"A","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":419,"type":"RESERVE","unit":{"caseId":"CEB-002-B4-15","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-B4-15/A/r2"}
+{"seq":420,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-B4-15","armId":"A","repetitionId":2,"attemptId":"a1"}}
+{"seq":421,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B4-15/A/r2:step0","unit":{"caseId":"CEB-002-B4-15","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B4-15/A/r2 step 0)"}
+{"seq":422,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B4-15/A/r2:step1","unit":{"caseId":"CEB-002-B4-15","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B4-15/A/r2 step 1)"}
+{"seq":423,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-B4-15","armId":"A","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":424,"type":"RESERVE","unit":{"caseId":"CEB-002-B5-16","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-B5-16/A/r1"}
+{"seq":425,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-B5-16","armId":"A","repetitionId":1,"attemptId":"a1"}}
+{"seq":426,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B5-16/A/r1:step0","unit":{"caseId":"CEB-002-B5-16","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B5-16/A/r1 step 0)"}
+{"seq":427,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B5-16/A/r1:step1","unit":{"caseId":"CEB-002-B5-16","armId":"A","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B5-16/A/r1 step 1)"}
+{"seq":428,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-B5-16","armId":"A","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":429,"type":"RESERVE","unit":{"caseId":"CEB-002-B5-16","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-B5-16/A/r2"}
+{"seq":430,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-B5-16","armId":"A","repetitionId":2,"attemptId":"a1"}}
+{"seq":431,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B5-16/A/r2:step0","unit":{"caseId":"CEB-002-B5-16","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B5-16/A/r2 step 0)"}
+{"seq":432,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B5-16/A/r2:step1","unit":{"caseId":"CEB-002-B5-16","armId":"A","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B5-16/A/r2 step 1)"}
+{"seq":433,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-B5-16","armId":"A","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":434,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-01","armId":"B","repetitionId":1,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L1-01/B/r1"}
+{"seq":435,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-01","armId":"B","repetitionId":2,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L1-01/B/r2"}
+{"seq":436,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-02","armId":"B","repetitionId":1,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L1-02/B/r1"}
+{"seq":437,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-02","armId":"B","repetitionId":2,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L1-02/B/r2"}
+{"seq":438,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-03","armId":"B","repetitionId":1,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L1-03/B/r1"}
+{"seq":439,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-03","armId":"B","repetitionId":2,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L1-03/B/r2"}
+{"seq":440,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-04","armId":"B","repetitionId":1,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L2-04/B/r1"}
+{"seq":441,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-04","armId":"B","repetitionId":2,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L2-04/B/r2"}
+{"seq":442,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-05","armId":"B","repetitionId":1,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L2-05/B/r1"}
+{"seq":443,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-05","armId":"B","repetitionId":2,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L2-05/B/r2"}
+{"seq":444,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-06","armId":"B","repetitionId":1,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L2-06/B/r1"}
+{"seq":445,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-06","armId":"B","repetitionId":2,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L2-06/B/r2"}
+{"seq":446,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-07","armId":"B","repetitionId":1,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L2-07/B/r1"}
+{"seq":447,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-07","armId":"B","repetitionId":2,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L2-07/B/r2"}
+{"seq":448,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-08","armId":"B","repetitionId":1,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L3-08/B/r1"}
+{"seq":449,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-08","armId":"B","repetitionId":2,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L3-08/B/r2"}
+{"seq":450,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"B","repetitionId":1,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L3-09/B/r1"}
+{"seq":451,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"B","repetitionId":2,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L3-09/B/r2"}
+{"seq":452,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"B","repetitionId":1,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L3-10/B/r1"}
+{"seq":453,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"B","repetitionId":2,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L3-10/B/r2"}
+{"seq":454,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"B","repetitionId":1,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L3-11/B/r1"}
+{"seq":455,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"B","repetitionId":2,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L3-11/B/r2"}
+{"seq":456,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"B","repetitionId":1,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-B1-12/B/r1"}
+{"seq":457,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"B","repetitionId":2,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-B1-12/B/r2"}
+{"seq":458,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"B","repetitionId":1,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-B2-13/B/r1"}
+{"seq":459,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"B","repetitionId":2,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-B2-13/B/r2"}
+{"seq":460,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"B","repetitionId":1,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-B3-14/B/r1"}
+{"seq":461,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"B","repetitionId":2,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-B3-14/B/r2"}
+{"seq":462,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"B","repetitionId":1,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-B4-15/B/r1"}
+{"seq":463,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"B","repetitionId":2,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-B4-15/B/r2"}
+{"seq":464,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"B","repetitionId":1,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-B5-16/B/r1"}
+{"seq":465,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"B","repetitionId":2,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-B5-16/B/r2"}
+{"seq":466,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-01","armId":"C","repetitionId":1,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L1-01/C/r1"}
+{"seq":467,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-01","armId":"C","repetitionId":2,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L1-01/C/r2"}
+{"seq":468,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-02","armId":"C","repetitionId":1,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L1-02/C/r1"}
+{"seq":469,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-02","armId":"C","repetitionId":2,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L1-02/C/r2"}
+{"seq":470,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-03","armId":"C","repetitionId":1,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L1-03/C/r1"}
+{"seq":471,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-03","armId":"C","repetitionId":2,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L1-03/C/r2"}
+{"seq":472,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-04","armId":"C","repetitionId":1,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L2-04/C/r1"}
+{"seq":473,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-04","armId":"C","repetitionId":2,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L2-04/C/r2"}
+{"seq":474,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-05","armId":"C","repetitionId":1,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L2-05/C/r1"}
+{"seq":475,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-05","armId":"C","repetitionId":2,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L2-05/C/r2"}
+{"seq":476,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-06","armId":"C","repetitionId":1,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L2-06/C/r1"}
+{"seq":477,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-06","armId":"C","repetitionId":2,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L2-06/C/r2"}
+{"seq":478,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-07","armId":"C","repetitionId":1,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L2-07/C/r1"}
+{"seq":479,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-07","armId":"C","repetitionId":2,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L2-07/C/r2"}
+{"seq":480,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-08","armId":"C","repetitionId":1,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L3-08/C/r1"}
+{"seq":481,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-08","armId":"C","repetitionId":2,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L3-08/C/r2"}
+{"seq":482,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"C","repetitionId":1,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L3-09/C/r1"}
+{"seq":483,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"C","repetitionId":2,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L3-09/C/r2"}
+{"seq":484,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"C","repetitionId":1,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L3-10/C/r1"}
+{"seq":485,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"C","repetitionId":2,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L3-10/C/r2"}
+{"seq":486,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"C","repetitionId":1,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L3-11/C/r1"}
+{"seq":487,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"C","repetitionId":2,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-L3-11/C/r2"}
+{"seq":488,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"C","repetitionId":1,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-B1-12/C/r1"}
+{"seq":489,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"C","repetitionId":2,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-B1-12/C/r2"}
+{"seq":490,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"C","repetitionId":1,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-B2-13/C/r1"}
+{"seq":491,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"C","repetitionId":2,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-B2-13/C/r2"}
+{"seq":492,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"C","repetitionId":1,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-B3-14/C/r1"}
+{"seq":493,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"C","repetitionId":2,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-B3-14/C/r2"}
+{"seq":494,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"C","repetitionId":1,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-B4-15/C/r1"}
+{"seq":495,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"C","repetitionId":2,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-B4-15/C/r2"}
+{"seq":496,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"C","repetitionId":1,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-B5-16/C/r1"}
+{"seq":497,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"C","repetitionId":2,"attemptId":"a1"},"used":32,"cap":32,"reason":"unit CEB-002-B5-16/C/r2"}
+{"seq":498,"type":"RESERVE","unit":{"caseId":"CEB-002-L1-01","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L1-01/B/r1"}
+{"seq":499,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L1-01","armId":"B","repetitionId":1,"attemptId":"a1"}}
+{"seq":500,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-01/B/r1:step0","unit":{"caseId":"CEB-002-L1-01","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-01/B/r1 step 0)"}
+{"seq":501,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-01/B/r1:step1","unit":{"caseId":"CEB-002-L1-01","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-01/B/r1 step 1)"}
+{"seq":502,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-01/B/r1:step2","unit":{"caseId":"CEB-002-L1-01","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-01/B/r1 step 2)"}
+{"seq":503,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L1-01","armId":"B","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":504,"type":"RESERVE","unit":{"caseId":"CEB-002-L1-01","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L1-01/B/r2"}
+{"seq":505,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L1-01","armId":"B","repetitionId":2,"attemptId":"a1"}}
+{"seq":506,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-01/B/r2:step0","unit":{"caseId":"CEB-002-L1-01","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-01/B/r2 step 0)"}
+{"seq":507,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-01/B/r2:step1","unit":{"caseId":"CEB-002-L1-01","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-01/B/r2 step 1)"}
+{"seq":508,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-01/B/r2:step2","unit":{"caseId":"CEB-002-L1-01","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-01/B/r2 step 2)"}
+{"seq":509,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-01/B/r2:step3","unit":{"caseId":"CEB-002-L1-01","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-01/B/r2 step 3)"}
+{"seq":510,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L1-01","armId":"B","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":511,"type":"RESERVE","unit":{"caseId":"CEB-002-L1-02","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L1-02/B/r1"}
+{"seq":512,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L1-02","armId":"B","repetitionId":1,"attemptId":"a1"}}
+{"seq":513,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-02/B/r1:step0","unit":{"caseId":"CEB-002-L1-02","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-02/B/r1 step 0)"}
+{"seq":514,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-02/B/r1:step1","unit":{"caseId":"CEB-002-L1-02","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-02/B/r1 step 1)"}
+{"seq":515,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-02/B/r1:step2","unit":{"caseId":"CEB-002-L1-02","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-02/B/r1 step 2)"}
+{"seq":516,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L1-02","armId":"B","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"FAIL"}
+{"seq":517,"type":"RESERVE","unit":{"caseId":"CEB-002-L1-02","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L1-02/B/r2"}
+{"seq":518,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L1-02","armId":"B","repetitionId":2,"attemptId":"a1"}}
+{"seq":519,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-02/B/r2:step0","unit":{"caseId":"CEB-002-L1-02","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-02/B/r2 step 0)"}
+{"seq":520,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-02/B/r2:step1","unit":{"caseId":"CEB-002-L1-02","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-02/B/r2 step 1)"}
+{"seq":521,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-02/B/r2:step2","unit":{"caseId":"CEB-002-L1-02","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-02/B/r2 step 2)"}
+{"seq":522,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L1-02","armId":"B","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"FAIL"}
+{"seq":523,"type":"RESERVE","unit":{"caseId":"CEB-002-L1-03","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L1-03/B/r1"}
+{"seq":524,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L1-03","armId":"B","repetitionId":1,"attemptId":"a1"}}
+{"seq":525,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-03/B/r1:step0","unit":{"caseId":"CEB-002-L1-03","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-03/B/r1 step 0)"}
+{"seq":526,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-03/B/r1:step1","unit":{"caseId":"CEB-002-L1-03","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-03/B/r1 step 1)"}
+{"seq":527,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-03/B/r1:step2","unit":{"caseId":"CEB-002-L1-03","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-03/B/r1 step 2)"}
+{"seq":528,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-03/B/r1:step3","unit":{"caseId":"CEB-002-L1-03","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-03/B/r1 step 3)"}
+{"seq":529,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L1-03","armId":"B","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":530,"type":"RESERVE","unit":{"caseId":"CEB-002-L1-03","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L1-03/B/r2"}
+{"seq":531,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L1-03","armId":"B","repetitionId":2,"attemptId":"a1"}}
+{"seq":532,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-03/B/r2:step0","unit":{"caseId":"CEB-002-L1-03","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-03/B/r2 step 0)"}
+{"seq":533,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-03/B/r2:step1","unit":{"caseId":"CEB-002-L1-03","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-03/B/r2 step 1)"}
+{"seq":534,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-03/B/r2:step2","unit":{"caseId":"CEB-002-L1-03","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-03/B/r2 step 2)"}
+{"seq":535,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-03/B/r2:step3","unit":{"caseId":"CEB-002-L1-03","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-03/B/r2 step 3)"}
+{"seq":536,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-03/B/r2:step4","unit":{"caseId":"CEB-002-L1-03","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-03/B/r2 step 4)"}
+{"seq":537,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L1-03","armId":"B","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":538,"type":"RESERVE","unit":{"caseId":"CEB-002-L2-04","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L2-04/B/r1"}
+{"seq":539,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L2-04","armId":"B","repetitionId":1,"attemptId":"a1"}}
+{"seq":540,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-04/B/r1:step0","unit":{"caseId":"CEB-002-L2-04","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-04/B/r1 step 0)"}
+{"seq":541,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-04/B/r1:step1","unit":{"caseId":"CEB-002-L2-04","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-04/B/r1 step 1)"}
+{"seq":542,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-04/B/r1:step2","unit":{"caseId":"CEB-002-L2-04","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-04/B/r1 step 2)"}
+{"seq":543,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-04/B/r1:step3","unit":{"caseId":"CEB-002-L2-04","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-04/B/r1 step 3)"}
+{"seq":544,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L2-04","armId":"B","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"FAIL"}
+{"seq":545,"type":"RESERVE","unit":{"caseId":"CEB-002-L2-04","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L2-04/B/r2"}
+{"seq":546,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L2-04","armId":"B","repetitionId":2,"attemptId":"a1"}}
+{"seq":547,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-04/B/r2:step0","unit":{"caseId":"CEB-002-L2-04","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-04/B/r2 step 0)"}
+{"seq":548,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-04/B/r2:step1","unit":{"caseId":"CEB-002-L2-04","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-04/B/r2 step 1)"}
+{"seq":549,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-04/B/r2:step2","unit":{"caseId":"CEB-002-L2-04","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-04/B/r2 step 2)"}
+{"seq":550,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L2-04","armId":"B","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"FAIL"}
+{"seq":551,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-05","armId":"B","repetitionId":1,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L2-05/B/r1"}
+{"seq":552,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-05","armId":"B","repetitionId":2,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L2-05/B/r2"}
+{"seq":553,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-06","armId":"B","repetitionId":1,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L2-06/B/r1"}
+{"seq":554,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-06","armId":"B","repetitionId":2,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L2-06/B/r2"}
+{"seq":555,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-07","armId":"B","repetitionId":1,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L2-07/B/r1"}
+{"seq":556,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-07","armId":"B","repetitionId":2,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L2-07/B/r2"}
+{"seq":557,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-08","armId":"B","repetitionId":1,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L3-08/B/r1"}
+{"seq":558,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-08","armId":"B","repetitionId":2,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L3-08/B/r2"}
+{"seq":559,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"B","repetitionId":1,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L3-09/B/r1"}
+{"seq":560,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"B","repetitionId":2,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L3-09/B/r2"}
+{"seq":561,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"B","repetitionId":1,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L3-10/B/r1"}
+{"seq":562,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"B","repetitionId":2,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L3-10/B/r2"}
+{"seq":563,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"B","repetitionId":1,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L3-11/B/r1"}
+{"seq":564,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"B","repetitionId":2,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L3-11/B/r2"}
+{"seq":565,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"B","repetitionId":1,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-B1-12/B/r1"}
+{"seq":566,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"B","repetitionId":2,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-B1-12/B/r2"}
+{"seq":567,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"B","repetitionId":1,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-B2-13/B/r1"}
+{"seq":568,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"B","repetitionId":2,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-B2-13/B/r2"}
+{"seq":569,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"B","repetitionId":1,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-B3-14/B/r1"}
+{"seq":570,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"B","repetitionId":2,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-B3-14/B/r2"}
+{"seq":571,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"B","repetitionId":1,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-B4-15/B/r1"}
+{"seq":572,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"B","repetitionId":2,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-B4-15/B/r2"}
+{"seq":573,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"B","repetitionId":1,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-B5-16/B/r1"}
+{"seq":574,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"B","repetitionId":2,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-B5-16/B/r2"}
+{"seq":575,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-01","armId":"C","repetitionId":1,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L1-01/C/r1"}
+{"seq":576,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-01","armId":"C","repetitionId":2,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L1-01/C/r2"}
+{"seq":577,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-02","armId":"C","repetitionId":1,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L1-02/C/r1"}
+{"seq":578,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-02","armId":"C","repetitionId":2,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L1-02/C/r2"}
+{"seq":579,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-03","armId":"C","repetitionId":1,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L1-03/C/r1"}
+{"seq":580,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-03","armId":"C","repetitionId":2,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L1-03/C/r2"}
+{"seq":581,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-04","armId":"C","repetitionId":1,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L2-04/C/r1"}
+{"seq":582,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-04","armId":"C","repetitionId":2,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L2-04/C/r2"}
+{"seq":583,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-05","armId":"C","repetitionId":1,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L2-05/C/r1"}
+{"seq":584,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-05","armId":"C","repetitionId":2,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L2-05/C/r2"}
+{"seq":585,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-06","armId":"C","repetitionId":1,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L2-06/C/r1"}
+{"seq":586,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-06","armId":"C","repetitionId":2,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L2-06/C/r2"}
+{"seq":587,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-07","armId":"C","repetitionId":1,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L2-07/C/r1"}
+{"seq":588,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-07","armId":"C","repetitionId":2,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L2-07/C/r2"}
+{"seq":589,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-08","armId":"C","repetitionId":1,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L3-08/C/r1"}
+{"seq":590,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-08","armId":"C","repetitionId":2,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L3-08/C/r2"}
+{"seq":591,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"C","repetitionId":1,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L3-09/C/r1"}
+{"seq":592,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"C","repetitionId":2,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L3-09/C/r2"}
+{"seq":593,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"C","repetitionId":1,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L3-10/C/r1"}
+{"seq":594,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"C","repetitionId":2,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L3-10/C/r2"}
+{"seq":595,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"C","repetitionId":1,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L3-11/C/r1"}
+{"seq":596,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"C","repetitionId":2,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-L3-11/C/r2"}
+{"seq":597,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"C","repetitionId":1,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-B1-12/C/r1"}
+{"seq":598,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"C","repetitionId":2,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-B1-12/C/r2"}
+{"seq":599,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"C","repetitionId":1,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-B2-13/C/r1"}
+{"seq":600,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"C","repetitionId":2,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-B2-13/C/r2"}
+{"seq":601,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"C","repetitionId":1,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-B3-14/C/r1"}
+{"seq":602,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"C","repetitionId":2,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-B3-14/C/r2"}
+{"seq":603,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"C","repetitionId":1,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-B4-15/C/r1"}
+{"seq":604,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"C","repetitionId":2,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-B4-15/C/r2"}
+{"seq":605,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"C","repetitionId":1,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-B5-16/C/r1"}
+{"seq":606,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"C","repetitionId":2,"attemptId":"a1"},"used":40,"cap":40,"reason":"unit CEB-002-B5-16/C/r2"}
+{"seq":607,"type":"RESERVE","unit":{"caseId":"CEB-002-L2-05","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L2-05/B/r1"}
+{"seq":608,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L2-05","armId":"B","repetitionId":1,"attemptId":"a1"}}
+{"seq":609,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-05/B/r1:step0","unit":{"caseId":"CEB-002-L2-05","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-05/B/r1 step 0)"}
+{"seq":610,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-05/B/r1:step1","unit":{"caseId":"CEB-002-L2-05","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-05/B/r1 step 1)"}
+{"seq":611,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-05/B/r1:step2","unit":{"caseId":"CEB-002-L2-05","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-05/B/r1 step 2)"}
+{"seq":612,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L2-05","armId":"B","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"FAIL"}
+{"seq":613,"type":"RESERVE","unit":{"caseId":"CEB-002-L2-05","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L2-05/B/r2"}
+{"seq":614,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L2-05","armId":"B","repetitionId":2,"attemptId":"a1"}}
+{"seq":615,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-05/B/r2:step0","unit":{"caseId":"CEB-002-L2-05","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-05/B/r2 step 0)"}
+{"seq":616,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-05/B/r2:step1","unit":{"caseId":"CEB-002-L2-05","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-05/B/r2 step 1)"}
+{"seq":617,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-05/B/r2:step2","unit":{"caseId":"CEB-002-L2-05","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-05/B/r2 step 2)"}
+{"seq":618,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L2-05","armId":"B","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"FAIL"}
+{"seq":619,"type":"RESERVE","unit":{"caseId":"CEB-002-L2-06","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L2-06/B/r1"}
+{"seq":620,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L2-06","armId":"B","repetitionId":1,"attemptId":"a1"}}
+{"seq":621,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-06/B/r1:step0","unit":{"caseId":"CEB-002-L2-06","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-06/B/r1 step 0)"}
+{"seq":622,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-06/B/r1:step1","unit":{"caseId":"CEB-002-L2-06","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-06/B/r1 step 1)"}
+{"seq":623,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-06/B/r1:step2","unit":{"caseId":"CEB-002-L2-06","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-06/B/r1 step 2)"}
+{"seq":624,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-06/B/r1:step3","unit":{"caseId":"CEB-002-L2-06","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-06/B/r1 step 3)"}
+{"seq":625,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-06/B/r1:step4","unit":{"caseId":"CEB-002-L2-06","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-06/B/r1 step 4)"}
+{"seq":626,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L2-06","armId":"B","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":627,"type":"RESERVE","unit":{"caseId":"CEB-002-L2-06","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L2-06/B/r2"}
+{"seq":628,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L2-06","armId":"B","repetitionId":2,"attemptId":"a1"}}
+{"seq":629,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-06/B/r2:step0","unit":{"caseId":"CEB-002-L2-06","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-06/B/r2 step 0)"}
+{"seq":630,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-06/B/r2:step1","unit":{"caseId":"CEB-002-L2-06","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-06/B/r2 step 1)"}
+{"seq":631,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-06/B/r2:step2","unit":{"caseId":"CEB-002-L2-06","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-06/B/r2 step 2)"}
+{"seq":632,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-06/B/r2:step3","unit":{"caseId":"CEB-002-L2-06","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-06/B/r2 step 3)"}
+{"seq":633,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L2-06","armId":"B","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":634,"type":"RESERVE","unit":{"caseId":"CEB-002-L2-07","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L2-07/B/r1"}
+{"seq":635,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L2-07","armId":"B","repetitionId":1,"attemptId":"a1"}}
+{"seq":636,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-07/B/r1:step0","unit":{"caseId":"CEB-002-L2-07","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-07/B/r1 step 0)"}
+{"seq":637,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-07/B/r1:step1","unit":{"caseId":"CEB-002-L2-07","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-07/B/r1 step 1)"}
+{"seq":638,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-07/B/r1:step2","unit":{"caseId":"CEB-002-L2-07","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-07/B/r1 step 2)"}
+{"seq":639,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L2-07","armId":"B","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":640,"type":"RESERVE","unit":{"caseId":"CEB-002-L2-07","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L2-07/B/r2"}
+{"seq":641,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L2-07","armId":"B","repetitionId":2,"attemptId":"a1"}}
+{"seq":642,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-07/B/r2:step0","unit":{"caseId":"CEB-002-L2-07","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-07/B/r2 step 0)"}
+{"seq":643,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-07/B/r2:step1","unit":{"caseId":"CEB-002-L2-07","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-07/B/r2 step 1)"}
+{"seq":644,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-07/B/r2:step2","unit":{"caseId":"CEB-002-L2-07","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-07/B/r2 step 2)"}
+{"seq":645,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L2-07","armId":"B","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":646,"type":"RESERVE","unit":{"caseId":"CEB-002-L3-08","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L3-08/B/r1"}
+{"seq":647,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L3-08","armId":"B","repetitionId":1,"attemptId":"a1"}}
+{"seq":648,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-08/B/r1:step0","unit":{"caseId":"CEB-002-L3-08","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-08/B/r1 step 0)"}
+{"seq":649,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-08/B/r1:step1","unit":{"caseId":"CEB-002-L3-08","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-08/B/r1 step 1)"}
+{"seq":650,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-08/B/r1:step2","unit":{"caseId":"CEB-002-L3-08","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-08/B/r1 step 2)"}
+{"seq":651,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-08/B/r1:step3","unit":{"caseId":"CEB-002-L3-08","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-08/B/r1 step 3)"}
+{"seq":652,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L3-08","armId":"B","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":653,"type":"RESERVE","unit":{"caseId":"CEB-002-L3-08","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L3-08/B/r2"}
+{"seq":654,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L3-08","armId":"B","repetitionId":2,"attemptId":"a1"}}
+{"seq":655,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-08/B/r2:step0","unit":{"caseId":"CEB-002-L3-08","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-08/B/r2 step 0)"}
+{"seq":656,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-08/B/r2:step1","unit":{"caseId":"CEB-002-L3-08","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-08/B/r2 step 1)"}
+{"seq":657,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-08/B/r2:step2","unit":{"caseId":"CEB-002-L3-08","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-08/B/r2 step 2)"}
+{"seq":658,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-08/B/r2:step3","unit":{"caseId":"CEB-002-L3-08","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-08/B/r2 step 3)"}
+{"seq":659,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-08/B/r2:step4","unit":{"caseId":"CEB-002-L3-08","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-08/B/r2 step 4)"}
+{"seq":660,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L3-08","armId":"B","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"FAIL"}
+{"seq":661,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"B","repetitionId":1,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-L3-09/B/r1"}
+{"seq":662,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"B","repetitionId":2,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-L3-09/B/r2"}
+{"seq":663,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"B","repetitionId":1,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-L3-10/B/r1"}
+{"seq":664,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"B","repetitionId":2,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-L3-10/B/r2"}
+{"seq":665,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"B","repetitionId":1,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-L3-11/B/r1"}
+{"seq":666,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"B","repetitionId":2,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-L3-11/B/r2"}
+{"seq":667,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"B","repetitionId":1,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-B1-12/B/r1"}
+{"seq":668,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"B","repetitionId":2,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-B1-12/B/r2"}
+{"seq":669,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"B","repetitionId":1,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-B2-13/B/r1"}
+{"seq":670,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"B","repetitionId":2,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-B2-13/B/r2"}
+{"seq":671,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"B","repetitionId":1,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-B3-14/B/r1"}
+{"seq":672,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"B","repetitionId":2,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-B3-14/B/r2"}
+{"seq":673,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"B","repetitionId":1,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-B4-15/B/r1"}
+{"seq":674,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"B","repetitionId":2,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-B4-15/B/r2"}
+{"seq":675,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"B","repetitionId":1,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-B5-16/B/r1"}
+{"seq":676,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"B","repetitionId":2,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-B5-16/B/r2"}
+{"seq":677,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-01","armId":"C","repetitionId":1,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-L1-01/C/r1"}
+{"seq":678,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-01","armId":"C","repetitionId":2,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-L1-01/C/r2"}
+{"seq":679,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-02","armId":"C","repetitionId":1,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-L1-02/C/r1"}
+{"seq":680,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-02","armId":"C","repetitionId":2,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-L1-02/C/r2"}
+{"seq":681,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-03","armId":"C","repetitionId":1,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-L1-03/C/r1"}
+{"seq":682,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-03","armId":"C","repetitionId":2,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-L1-03/C/r2"}
+{"seq":683,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-04","armId":"C","repetitionId":1,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-L2-04/C/r1"}
+{"seq":684,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-04","armId":"C","repetitionId":2,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-L2-04/C/r2"}
+{"seq":685,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-05","armId":"C","repetitionId":1,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-L2-05/C/r1"}
+{"seq":686,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-05","armId":"C","repetitionId":2,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-L2-05/C/r2"}
+{"seq":687,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-06","armId":"C","repetitionId":1,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-L2-06/C/r1"}
+{"seq":688,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-06","armId":"C","repetitionId":2,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-L2-06/C/r2"}
+{"seq":689,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-07","armId":"C","repetitionId":1,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-L2-07/C/r1"}
+{"seq":690,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-07","armId":"C","repetitionId":2,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-L2-07/C/r2"}
+{"seq":691,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-08","armId":"C","repetitionId":1,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-L3-08/C/r1"}
+{"seq":692,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-08","armId":"C","repetitionId":2,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-L3-08/C/r2"}
+{"seq":693,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"C","repetitionId":1,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-L3-09/C/r1"}
+{"seq":694,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"C","repetitionId":2,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-L3-09/C/r2"}
+{"seq":695,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"C","repetitionId":1,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-L3-10/C/r1"}
+{"seq":696,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"C","repetitionId":2,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-L3-10/C/r2"}
+{"seq":697,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"C","repetitionId":1,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-L3-11/C/r1"}
+{"seq":698,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"C","repetitionId":2,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-L3-11/C/r2"}
+{"seq":699,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"C","repetitionId":1,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-B1-12/C/r1"}
+{"seq":700,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"C","repetitionId":2,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-B1-12/C/r2"}
+{"seq":701,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"C","repetitionId":1,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-B2-13/C/r1"}
+{"seq":702,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"C","repetitionId":2,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-B2-13/C/r2"}
+{"seq":703,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"C","repetitionId":1,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-B3-14/C/r1"}
+{"seq":704,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"C","repetitionId":2,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-B3-14/C/r2"}
+{"seq":705,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"C","repetitionId":1,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-B4-15/C/r1"}
+{"seq":706,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"C","repetitionId":2,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-B4-15/C/r2"}
+{"seq":707,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"C","repetitionId":1,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-B5-16/C/r1"}
+{"seq":708,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"C","repetitionId":2,"attemptId":"a1"},"used":48,"cap":48,"reason":"unit CEB-002-B5-16/C/r2"}
+{"seq":709,"type":"RESERVE","unit":{"caseId":"CEB-002-L3-09","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L3-09/B/r1"}
+{"seq":710,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L3-09","armId":"B","repetitionId":1,"attemptId":"a1"}}
+{"seq":711,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-09/B/r1:step0","unit":{"caseId":"CEB-002-L3-09","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-09/B/r1 step 0)"}
+{"seq":712,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-09/B/r1:step1","unit":{"caseId":"CEB-002-L3-09","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-09/B/r1 step 1)"}
+{"seq":713,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-09/B/r1:step2","unit":{"caseId":"CEB-002-L3-09","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-09/B/r1 step 2)"}
+{"seq":714,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-09/B/r1:step3","unit":{"caseId":"CEB-002-L3-09","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-09/B/r1 step 3)"}
+{"seq":715,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-09/B/r1:step4","unit":{"caseId":"CEB-002-L3-09","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-09/B/r1 step 4)"}
+{"seq":716,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L3-09","armId":"B","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":717,"type":"RESERVE","unit":{"caseId":"CEB-002-L3-09","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L3-09/B/r2"}
+{"seq":718,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L3-09","armId":"B","repetitionId":2,"attemptId":"a1"}}
+{"seq":719,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-09/B/r2:step0","unit":{"caseId":"CEB-002-L3-09","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-09/B/r2 step 0)"}
+{"seq":720,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-09/B/r2:step1","unit":{"caseId":"CEB-002-L3-09","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-09/B/r2 step 1)"}
+{"seq":721,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-09/B/r2:step2","unit":{"caseId":"CEB-002-L3-09","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-09/B/r2 step 2)"}
+{"seq":722,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-09/B/r2:step3","unit":{"caseId":"CEB-002-L3-09","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-09/B/r2 step 3)"}
+{"seq":723,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L3-09","armId":"B","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":724,"type":"RESERVE","unit":{"caseId":"CEB-002-L3-10","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L3-10/B/r1"}
+{"seq":725,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L3-10","armId":"B","repetitionId":1,"attemptId":"a1"}}
+{"seq":726,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-10/B/r1:step0","unit":{"caseId":"CEB-002-L3-10","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-10/B/r1 step 0)"}
+{"seq":727,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-10/B/r1:step1","unit":{"caseId":"CEB-002-L3-10","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-10/B/r1 step 1)"}
+{"seq":728,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-10/B/r1:step2","unit":{"caseId":"CEB-002-L3-10","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-10/B/r1 step 2)"}
+{"seq":729,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L3-10","armId":"B","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"FAIL"}
+{"seq":730,"type":"RESERVE","unit":{"caseId":"CEB-002-L3-10","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L3-10/B/r2"}
+{"seq":731,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L3-10","armId":"B","repetitionId":2,"attemptId":"a1"}}
+{"seq":732,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-10/B/r2:step0","unit":{"caseId":"CEB-002-L3-10","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-10/B/r2 step 0)"}
+{"seq":733,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-10/B/r2:step1","unit":{"caseId":"CEB-002-L3-10","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-10/B/r2 step 1)"}
+{"seq":734,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L3-10","armId":"B","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":735,"type":"RESERVE","unit":{"caseId":"CEB-002-L3-11","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L3-11/B/r1"}
+{"seq":736,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L3-11","armId":"B","repetitionId":1,"attemptId":"a1"}}
+{"seq":737,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-11/B/r1:step0","unit":{"caseId":"CEB-002-L3-11","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-11/B/r1 step 0)"}
+{"seq":738,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-11/B/r1:step1","unit":{"caseId":"CEB-002-L3-11","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-11/B/r1 step 1)"}
+{"seq":739,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-11/B/r1:step2","unit":{"caseId":"CEB-002-L3-11","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-11/B/r1 step 2)"}
+{"seq":740,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L3-11","armId":"B","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":741,"type":"RESERVE","unit":{"caseId":"CEB-002-L3-11","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L3-11/B/r2"}
+{"seq":742,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L3-11","armId":"B","repetitionId":2,"attemptId":"a1"}}
+{"seq":743,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-11/B/r2:step0","unit":{"caseId":"CEB-002-L3-11","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-11/B/r2 step 0)"}
+{"seq":744,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-11/B/r2:step1","unit":{"caseId":"CEB-002-L3-11","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-11/B/r2 step 1)"}
+{"seq":745,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-11/B/r2:step2","unit":{"caseId":"CEB-002-L3-11","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-11/B/r2 step 2)"}
+{"seq":746,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L3-11","armId":"B","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":747,"type":"RESERVE","unit":{"caseId":"CEB-002-B1-12","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-B1-12/B/r1"}
+{"seq":748,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-B1-12","armId":"B","repetitionId":1,"attemptId":"a1"}}
+{"seq":749,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B1-12/B/r1:step0","unit":{"caseId":"CEB-002-B1-12","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B1-12/B/r1 step 0)"}
+{"seq":750,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B1-12/B/r1:step1","unit":{"caseId":"CEB-002-B1-12","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B1-12/B/r1 step 1)"}
+{"seq":751,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-B1-12","armId":"B","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":752,"type":"RESERVE","unit":{"caseId":"CEB-002-B1-12","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-B1-12/B/r2"}
+{"seq":753,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-B1-12","armId":"B","repetitionId":2,"attemptId":"a1"}}
+{"seq":754,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B1-12/B/r2:step0","unit":{"caseId":"CEB-002-B1-12","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B1-12/B/r2 step 0)"}
+{"seq":755,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B1-12/B/r2:step1","unit":{"caseId":"CEB-002-B1-12","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B1-12/B/r2 step 1)"}
+{"seq":756,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-B1-12","armId":"B","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":757,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"B","repetitionId":1,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-B2-13/B/r1"}
+{"seq":758,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"B","repetitionId":2,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-B2-13/B/r2"}
+{"seq":759,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"B","repetitionId":1,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-B3-14/B/r1"}
+{"seq":760,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"B","repetitionId":2,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-B3-14/B/r2"}
+{"seq":761,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"B","repetitionId":1,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-B4-15/B/r1"}
+{"seq":762,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"B","repetitionId":2,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-B4-15/B/r2"}
+{"seq":763,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"B","repetitionId":1,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-B5-16/B/r1"}
+{"seq":764,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"B","repetitionId":2,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-B5-16/B/r2"}
+{"seq":765,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-01","armId":"C","repetitionId":1,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-L1-01/C/r1"}
+{"seq":766,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-01","armId":"C","repetitionId":2,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-L1-01/C/r2"}
+{"seq":767,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-02","armId":"C","repetitionId":1,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-L1-02/C/r1"}
+{"seq":768,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-02","armId":"C","repetitionId":2,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-L1-02/C/r2"}
+{"seq":769,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-03","armId":"C","repetitionId":1,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-L1-03/C/r1"}
+{"seq":770,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-03","armId":"C","repetitionId":2,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-L1-03/C/r2"}
+{"seq":771,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-04","armId":"C","repetitionId":1,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-L2-04/C/r1"}
+{"seq":772,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-04","armId":"C","repetitionId":2,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-L2-04/C/r2"}
+{"seq":773,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-05","armId":"C","repetitionId":1,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-L2-05/C/r1"}
+{"seq":774,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-05","armId":"C","repetitionId":2,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-L2-05/C/r2"}
+{"seq":775,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-06","armId":"C","repetitionId":1,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-L2-06/C/r1"}
+{"seq":776,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-06","armId":"C","repetitionId":2,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-L2-06/C/r2"}
+{"seq":777,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-07","armId":"C","repetitionId":1,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-L2-07/C/r1"}
+{"seq":778,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-07","armId":"C","repetitionId":2,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-L2-07/C/r2"}
+{"seq":779,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-08","armId":"C","repetitionId":1,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-L3-08/C/r1"}
+{"seq":780,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-08","armId":"C","repetitionId":2,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-L3-08/C/r2"}
+{"seq":781,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"C","repetitionId":1,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-L3-09/C/r1"}
+{"seq":782,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"C","repetitionId":2,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-L3-09/C/r2"}
+{"seq":783,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"C","repetitionId":1,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-L3-10/C/r1"}
+{"seq":784,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"C","repetitionId":2,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-L3-10/C/r2"}
+{"seq":785,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"C","repetitionId":1,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-L3-11/C/r1"}
+{"seq":786,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"C","repetitionId":2,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-L3-11/C/r2"}
+{"seq":787,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"C","repetitionId":1,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-B1-12/C/r1"}
+{"seq":788,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"C","repetitionId":2,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-B1-12/C/r2"}
+{"seq":789,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"C","repetitionId":1,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-B2-13/C/r1"}
+{"seq":790,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"C","repetitionId":2,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-B2-13/C/r2"}
+{"seq":791,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"C","repetitionId":1,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-B3-14/C/r1"}
+{"seq":792,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"C","repetitionId":2,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-B3-14/C/r2"}
+{"seq":793,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"C","repetitionId":1,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-B4-15/C/r1"}
+{"seq":794,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"C","repetitionId":2,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-B4-15/C/r2"}
+{"seq":795,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"C","repetitionId":1,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-B5-16/C/r1"}
+{"seq":796,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"C","repetitionId":2,"attemptId":"a1"},"used":56,"cap":56,"reason":"unit CEB-002-B5-16/C/r2"}
+{"seq":797,"type":"RESERVE","unit":{"caseId":"CEB-002-B2-13","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-B2-13/B/r1"}
+{"seq":798,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-B2-13","armId":"B","repetitionId":1,"attemptId":"a1"}}
+{"seq":799,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B2-13/B/r1:step0","unit":{"caseId":"CEB-002-B2-13","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B2-13/B/r1 step 0)"}
+{"seq":800,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-B2-13","armId":"B","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":801,"type":"RESERVE","unit":{"caseId":"CEB-002-B2-13","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-B2-13/B/r2"}
+{"seq":802,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-B2-13","armId":"B","repetitionId":2,"attemptId":"a1"}}
+{"seq":803,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B2-13/B/r2:step0","unit":{"caseId":"CEB-002-B2-13","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B2-13/B/r2 step 0)"}
+{"seq":804,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B2-13/B/r2:step1","unit":{"caseId":"CEB-002-B2-13","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B2-13/B/r2 step 1)"}
+{"seq":805,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-B2-13","armId":"B","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":806,"type":"RESERVE","unit":{"caseId":"CEB-002-B3-14","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-B3-14/B/r1"}
+{"seq":807,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-B3-14","armId":"B","repetitionId":1,"attemptId":"a1"}}
+{"seq":808,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B3-14/B/r1:step0","unit":{"caseId":"CEB-002-B3-14","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B3-14/B/r1 step 0)"}
+{"seq":809,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B3-14/B/r1:step1","unit":{"caseId":"CEB-002-B3-14","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B3-14/B/r1 step 1)"}
+{"seq":810,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-B3-14","armId":"B","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":811,"type":"RESERVE","unit":{"caseId":"CEB-002-B3-14","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-B3-14/B/r2"}
+{"seq":812,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-B3-14","armId":"B","repetitionId":2,"attemptId":"a1"}}
+{"seq":813,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B3-14/B/r2:step0","unit":{"caseId":"CEB-002-B3-14","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B3-14/B/r2 step 0)"}
+{"seq":814,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B3-14/B/r2:step1","unit":{"caseId":"CEB-002-B3-14","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B3-14/B/r2 step 1)"}
+{"seq":815,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B3-14/B/r2:step2","unit":{"caseId":"CEB-002-B3-14","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B3-14/B/r2 step 2)"}
+{"seq":816,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-B3-14","armId":"B","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":817,"type":"RESERVE","unit":{"caseId":"CEB-002-B4-15","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-B4-15/B/r1"}
+{"seq":818,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-B4-15","armId":"B","repetitionId":1,"attemptId":"a1"}}
+{"seq":819,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B4-15/B/r1:step0","unit":{"caseId":"CEB-002-B4-15","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B4-15/B/r1 step 0)"}
+{"seq":820,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B4-15/B/r1:step1","unit":{"caseId":"CEB-002-B4-15","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B4-15/B/r1 step 1)"}
+{"seq":821,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B4-15/B/r1:step2","unit":{"caseId":"CEB-002-B4-15","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B4-15/B/r1 step 2)"}
+{"seq":822,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-B4-15","armId":"B","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":823,"type":"RESERVE","unit":{"caseId":"CEB-002-B4-15","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-B4-15/B/r2"}
+{"seq":824,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-B4-15","armId":"B","repetitionId":2,"attemptId":"a1"}}
+{"seq":825,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B4-15/B/r2:step0","unit":{"caseId":"CEB-002-B4-15","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B4-15/B/r2 step 0)"}
+{"seq":826,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B4-15/B/r2:step1","unit":{"caseId":"CEB-002-B4-15","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B4-15/B/r2 step 1)"}
+{"seq":827,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-B4-15","armId":"B","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":828,"type":"RESERVE","unit":{"caseId":"CEB-002-B5-16","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-B5-16/B/r1"}
+{"seq":829,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-B5-16","armId":"B","repetitionId":1,"attemptId":"a1"}}
+{"seq":830,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B5-16/B/r1:step0","unit":{"caseId":"CEB-002-B5-16","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B5-16/B/r1 step 0)"}
+{"seq":831,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B5-16/B/r1:step1","unit":{"caseId":"CEB-002-B5-16","armId":"B","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B5-16/B/r1 step 1)"}
+{"seq":832,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-B5-16","armId":"B","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":833,"type":"RESERVE","unit":{"caseId":"CEB-002-B5-16","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-B5-16/B/r2"}
+{"seq":834,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-B5-16","armId":"B","repetitionId":2,"attemptId":"a1"}}
+{"seq":835,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B5-16/B/r2:step0","unit":{"caseId":"CEB-002-B5-16","armId":"B","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B5-16/B/r2 step 0)"}
+{"seq":836,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-B5-16","armId":"B","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":837,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-01","armId":"C","repetitionId":1,"attemptId":"a1"},"used":64,"cap":64,"reason":"unit CEB-002-L1-01/C/r1"}
+{"seq":838,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-01","armId":"C","repetitionId":2,"attemptId":"a1"},"used":64,"cap":64,"reason":"unit CEB-002-L1-01/C/r2"}
+{"seq":839,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-02","armId":"C","repetitionId":1,"attemptId":"a1"},"used":64,"cap":64,"reason":"unit CEB-002-L1-02/C/r1"}
+{"seq":840,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-02","armId":"C","repetitionId":2,"attemptId":"a1"},"used":64,"cap":64,"reason":"unit CEB-002-L1-02/C/r2"}
+{"seq":841,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-03","armId":"C","repetitionId":1,"attemptId":"a1"},"used":64,"cap":64,"reason":"unit CEB-002-L1-03/C/r1"}
+{"seq":842,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L1-03","armId":"C","repetitionId":2,"attemptId":"a1"},"used":64,"cap":64,"reason":"unit CEB-002-L1-03/C/r2"}
+{"seq":843,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-04","armId":"C","repetitionId":1,"attemptId":"a1"},"used":64,"cap":64,"reason":"unit CEB-002-L2-04/C/r1"}
+{"seq":844,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-04","armId":"C","repetitionId":2,"attemptId":"a1"},"used":64,"cap":64,"reason":"unit CEB-002-L2-04/C/r2"}
+{"seq":845,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-05","armId":"C","repetitionId":1,"attemptId":"a1"},"used":64,"cap":64,"reason":"unit CEB-002-L2-05/C/r1"}
+{"seq":846,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-05","armId":"C","repetitionId":2,"attemptId":"a1"},"used":64,"cap":64,"reason":"unit CEB-002-L2-05/C/r2"}
+{"seq":847,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-06","armId":"C","repetitionId":1,"attemptId":"a1"},"used":64,"cap":64,"reason":"unit CEB-002-L2-06/C/r1"}
+{"seq":848,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-06","armId":"C","repetitionId":2,"attemptId":"a1"},"used":64,"cap":64,"reason":"unit CEB-002-L2-06/C/r2"}
+{"seq":849,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-07","armId":"C","repetitionId":1,"attemptId":"a1"},"used":64,"cap":64,"reason":"unit CEB-002-L2-07/C/r1"}
+{"seq":850,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-07","armId":"C","repetitionId":2,"attemptId":"a1"},"used":64,"cap":64,"reason":"unit CEB-002-L2-07/C/r2"}
+{"seq":851,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-08","armId":"C","repetitionId":1,"attemptId":"a1"},"used":64,"cap":64,"reason":"unit CEB-002-L3-08/C/r1"}
+{"seq":852,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-08","armId":"C","repetitionId":2,"attemptId":"a1"},"used":64,"cap":64,"reason":"unit CEB-002-L3-08/C/r2"}
+{"seq":853,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"C","repetitionId":1,"attemptId":"a1"},"used":64,"cap":64,"reason":"unit CEB-002-L3-09/C/r1"}
+{"seq":854,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"C","repetitionId":2,"attemptId":"a1"},"used":64,"cap":64,"reason":"unit CEB-002-L3-09/C/r2"}
+{"seq":855,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"C","repetitionId":1,"attemptId":"a1"},"used":64,"cap":64,"reason":"unit CEB-002-L3-10/C/r1"}
+{"seq":856,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"C","repetitionId":2,"attemptId":"a1"},"used":64,"cap":64,"reason":"unit CEB-002-L3-10/C/r2"}
+{"seq":857,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"C","repetitionId":1,"attemptId":"a1"},"used":64,"cap":64,"reason":"unit CEB-002-L3-11/C/r1"}
+{"seq":858,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"C","repetitionId":2,"attemptId":"a1"},"used":64,"cap":64,"reason":"unit CEB-002-L3-11/C/r2"}
+{"seq":859,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"C","repetitionId":1,"attemptId":"a1"},"used":64,"cap":64,"reason":"unit CEB-002-B1-12/C/r1"}
+{"seq":860,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"C","repetitionId":2,"attemptId":"a1"},"used":64,"cap":64,"reason":"unit CEB-002-B1-12/C/r2"}
+{"seq":861,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"C","repetitionId":1,"attemptId":"a1"},"used":64,"cap":64,"reason":"unit CEB-002-B2-13/C/r1"}
+{"seq":862,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"C","repetitionId":2,"attemptId":"a1"},"used":64,"cap":64,"reason":"unit CEB-002-B2-13/C/r2"}
+{"seq":863,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"C","repetitionId":1,"attemptId":"a1"},"used":64,"cap":64,"reason":"unit CEB-002-B3-14/C/r1"}
+{"seq":864,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"C","repetitionId":2,"attemptId":"a1"},"used":64,"cap":64,"reason":"unit CEB-002-B3-14/C/r2"}
+{"seq":865,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"C","repetitionId":1,"attemptId":"a1"},"used":64,"cap":64,"reason":"unit CEB-002-B4-15/C/r1"}
+{"seq":866,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"C","repetitionId":2,"attemptId":"a1"},"used":64,"cap":64,"reason":"unit CEB-002-B4-15/C/r2"}
+{"seq":867,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"C","repetitionId":1,"attemptId":"a1"},"used":64,"cap":64,"reason":"unit CEB-002-B5-16/C/r1"}
+{"seq":868,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"C","repetitionId":2,"attemptId":"a1"},"used":64,"cap":64,"reason":"unit CEB-002-B5-16/C/r2"}
+{"seq":869,"type":"RESERVE","unit":{"caseId":"CEB-002-L1-01","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L1-01/C/r1"}
+{"seq":870,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L1-01","armId":"C","repetitionId":1,"attemptId":"a1"}}
+{"seq":871,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-01/C/r1:step0","unit":{"caseId":"CEB-002-L1-01","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-01/C/r1 step 0)"}
+{"seq":872,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-01/C/r1:step1","unit":{"caseId":"CEB-002-L1-01","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-01/C/r1 step 1)"}
+{"seq":873,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-01/C/r1:step2","unit":{"caseId":"CEB-002-L1-01","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-01/C/r1 step 2)"}
+{"seq":874,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L1-01","armId":"C","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":875,"type":"RESERVE","unit":{"caseId":"CEB-002-L1-01","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L1-01/C/r2"}
+{"seq":876,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L1-01","armId":"C","repetitionId":2,"attemptId":"a1"}}
+{"seq":877,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-01/C/r2:step0","unit":{"caseId":"CEB-002-L1-01","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-01/C/r2 step 0)"}
+{"seq":878,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-01/C/r2:step1","unit":{"caseId":"CEB-002-L1-01","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-01/C/r2 step 1)"}
+{"seq":879,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-01/C/r2:step2","unit":{"caseId":"CEB-002-L1-01","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-01/C/r2 step 2)"}
+{"seq":880,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L1-01","armId":"C","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":881,"type":"RESERVE","unit":{"caseId":"CEB-002-L1-02","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L1-02/C/r1"}
+{"seq":882,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L1-02","armId":"C","repetitionId":1,"attemptId":"a1"}}
+{"seq":883,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-02/C/r1:step0","unit":{"caseId":"CEB-002-L1-02","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-02/C/r1 step 0)"}
+{"seq":884,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-02/C/r1:step1","unit":{"caseId":"CEB-002-L1-02","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-02/C/r1 step 1)"}
+{"seq":885,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-02/C/r1:step2","unit":{"caseId":"CEB-002-L1-02","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-02/C/r1 step 2)"}
+{"seq":886,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L1-02","armId":"C","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":887,"type":"RESERVE","unit":{"caseId":"CEB-002-L1-02","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L1-02/C/r2"}
+{"seq":888,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L1-02","armId":"C","repetitionId":2,"attemptId":"a1"}}
+{"seq":889,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-02/C/r2:step0","unit":{"caseId":"CEB-002-L1-02","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-02/C/r2 step 0)"}
+{"seq":890,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-02/C/r2:step1","unit":{"caseId":"CEB-002-L1-02","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-02/C/r2 step 1)"}
+{"seq":891,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-02/C/r2:step2","unit":{"caseId":"CEB-002-L1-02","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-02/C/r2 step 2)"}
+{"seq":892,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L1-02","armId":"C","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":893,"type":"RESERVE","unit":{"caseId":"CEB-002-L1-03","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L1-03/C/r1"}
+{"seq":894,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L1-03","armId":"C","repetitionId":1,"attemptId":"a1"}}
+{"seq":895,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-03/C/r1:step0","unit":{"caseId":"CEB-002-L1-03","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-03/C/r1 step 0)"}
+{"seq":896,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-03/C/r1:step1","unit":{"caseId":"CEB-002-L1-03","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-03/C/r1 step 1)"}
+{"seq":897,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-03/C/r1:step2","unit":{"caseId":"CEB-002-L1-03","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-03/C/r1 step 2)"}
+{"seq":898,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-03/C/r1:step3","unit":{"caseId":"CEB-002-L1-03","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-03/C/r1 step 3)"}
+{"seq":899,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L1-03","armId":"C","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":900,"type":"RESERVE","unit":{"caseId":"CEB-002-L1-03","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L1-03/C/r2"}
+{"seq":901,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L1-03","armId":"C","repetitionId":2,"attemptId":"a1"}}
+{"seq":902,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-03/C/r2:step0","unit":{"caseId":"CEB-002-L1-03","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-03/C/r2 step 0)"}
+{"seq":903,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-03/C/r2:step1","unit":{"caseId":"CEB-002-L1-03","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-03/C/r2 step 1)"}
+{"seq":904,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-03/C/r2:step2","unit":{"caseId":"CEB-002-L1-03","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-03/C/r2 step 2)"}
+{"seq":905,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-03/C/r2:step3","unit":{"caseId":"CEB-002-L1-03","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-03/C/r2 step 3)"}
+{"seq":906,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L1-03/C/r2:step4","unit":{"caseId":"CEB-002-L1-03","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L1-03/C/r2 step 4)"}
+{"seq":907,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L1-03","armId":"C","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"FAIL"}
+{"seq":908,"type":"RESERVE","unit":{"caseId":"CEB-002-L2-04","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L2-04/C/r1"}
+{"seq":909,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L2-04","armId":"C","repetitionId":1,"attemptId":"a1"}}
+{"seq":910,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-04/C/r1:step0","unit":{"caseId":"CEB-002-L2-04","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-04/C/r1 step 0)"}
+{"seq":911,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-04/C/r1:step1","unit":{"caseId":"CEB-002-L2-04","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-04/C/r1 step 1)"}
+{"seq":912,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-04/C/r1:step2","unit":{"caseId":"CEB-002-L2-04","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-04/C/r1 step 2)"}
+{"seq":913,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-04/C/r1:step3","unit":{"caseId":"CEB-002-L2-04","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-04/C/r1 step 3)"}
+{"seq":914,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L2-04","armId":"C","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":915,"type":"RESERVE","unit":{"caseId":"CEB-002-L2-04","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L2-04/C/r2"}
+{"seq":916,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L2-04","armId":"C","repetitionId":2,"attemptId":"a1"}}
+{"seq":917,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-04/C/r2:step0","unit":{"caseId":"CEB-002-L2-04","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-04/C/r2 step 0)"}
+{"seq":918,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-04/C/r2:step1","unit":{"caseId":"CEB-002-L2-04","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-04/C/r2 step 1)"}
+{"seq":919,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-04/C/r2:step2","unit":{"caseId":"CEB-002-L2-04","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-04/C/r2 step 2)"}
+{"seq":920,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L2-04","armId":"C","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":921,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-05","armId":"C","repetitionId":1,"attemptId":"a1"},"used":72,"cap":72,"reason":"unit CEB-002-L2-05/C/r1"}
+{"seq":922,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-05","armId":"C","repetitionId":2,"attemptId":"a1"},"used":72,"cap":72,"reason":"unit CEB-002-L2-05/C/r2"}
+{"seq":923,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-06","armId":"C","repetitionId":1,"attemptId":"a1"},"used":72,"cap":72,"reason":"unit CEB-002-L2-06/C/r1"}
+{"seq":924,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-06","armId":"C","repetitionId":2,"attemptId":"a1"},"used":72,"cap":72,"reason":"unit CEB-002-L2-06/C/r2"}
+{"seq":925,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-07","armId":"C","repetitionId":1,"attemptId":"a1"},"used":72,"cap":72,"reason":"unit CEB-002-L2-07/C/r1"}
+{"seq":926,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L2-07","armId":"C","repetitionId":2,"attemptId":"a1"},"used":72,"cap":72,"reason":"unit CEB-002-L2-07/C/r2"}
+{"seq":927,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-08","armId":"C","repetitionId":1,"attemptId":"a1"},"used":72,"cap":72,"reason":"unit CEB-002-L3-08/C/r1"}
+{"seq":928,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-08","armId":"C","repetitionId":2,"attemptId":"a1"},"used":72,"cap":72,"reason":"unit CEB-002-L3-08/C/r2"}
+{"seq":929,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"C","repetitionId":1,"attemptId":"a1"},"used":72,"cap":72,"reason":"unit CEB-002-L3-09/C/r1"}
+{"seq":930,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"C","repetitionId":2,"attemptId":"a1"},"used":72,"cap":72,"reason":"unit CEB-002-L3-09/C/r2"}
+{"seq":931,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"C","repetitionId":1,"attemptId":"a1"},"used":72,"cap":72,"reason":"unit CEB-002-L3-10/C/r1"}
+{"seq":932,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"C","repetitionId":2,"attemptId":"a1"},"used":72,"cap":72,"reason":"unit CEB-002-L3-10/C/r2"}
+{"seq":933,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"C","repetitionId":1,"attemptId":"a1"},"used":72,"cap":72,"reason":"unit CEB-002-L3-11/C/r1"}
+{"seq":934,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"C","repetitionId":2,"attemptId":"a1"},"used":72,"cap":72,"reason":"unit CEB-002-L3-11/C/r2"}
+{"seq":935,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"C","repetitionId":1,"attemptId":"a1"},"used":72,"cap":72,"reason":"unit CEB-002-B1-12/C/r1"}
+{"seq":936,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"C","repetitionId":2,"attemptId":"a1"},"used":72,"cap":72,"reason":"unit CEB-002-B1-12/C/r2"}
+{"seq":937,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"C","repetitionId":1,"attemptId":"a1"},"used":72,"cap":72,"reason":"unit CEB-002-B2-13/C/r1"}
+{"seq":938,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"C","repetitionId":2,"attemptId":"a1"},"used":72,"cap":72,"reason":"unit CEB-002-B2-13/C/r2"}
+{"seq":939,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"C","repetitionId":1,"attemptId":"a1"},"used":72,"cap":72,"reason":"unit CEB-002-B3-14/C/r1"}
+{"seq":940,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"C","repetitionId":2,"attemptId":"a1"},"used":72,"cap":72,"reason":"unit CEB-002-B3-14/C/r2"}
+{"seq":941,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"C","repetitionId":1,"attemptId":"a1"},"used":72,"cap":72,"reason":"unit CEB-002-B4-15/C/r1"}
+{"seq":942,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"C","repetitionId":2,"attemptId":"a1"},"used":72,"cap":72,"reason":"unit CEB-002-B4-15/C/r2"}
+{"seq":943,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"C","repetitionId":1,"attemptId":"a1"},"used":72,"cap":72,"reason":"unit CEB-002-B5-16/C/r1"}
+{"seq":944,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"C","repetitionId":2,"attemptId":"a1"},"used":72,"cap":72,"reason":"unit CEB-002-B5-16/C/r2"}
+{"seq":945,"type":"RESERVE","unit":{"caseId":"CEB-002-L2-05","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L2-05/C/r1"}
+{"seq":946,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L2-05","armId":"C","repetitionId":1,"attemptId":"a1"}}
+{"seq":947,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-05/C/r1:step0","unit":{"caseId":"CEB-002-L2-05","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-05/C/r1 step 0)"}
+{"seq":948,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-05/C/r1:step1","unit":{"caseId":"CEB-002-L2-05","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-05/C/r1 step 1)"}
+{"seq":949,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-05/C/r1:step2","unit":{"caseId":"CEB-002-L2-05","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-05/C/r1 step 2)"}
+{"seq":950,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L2-05","armId":"C","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":951,"type":"RESERVE","unit":{"caseId":"CEB-002-L2-05","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L2-05/C/r2"}
+{"seq":952,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L2-05","armId":"C","repetitionId":2,"attemptId":"a1"}}
+{"seq":953,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-05/C/r2:step0","unit":{"caseId":"CEB-002-L2-05","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-05/C/r2 step 0)"}
+{"seq":954,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-05/C/r2:step1","unit":{"caseId":"CEB-002-L2-05","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-05/C/r2 step 1)"}
+{"seq":955,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-05/C/r2:step2","unit":{"caseId":"CEB-002-L2-05","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-05/C/r2 step 2)"}
+{"seq":956,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L2-05","armId":"C","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":957,"type":"RESERVE","unit":{"caseId":"CEB-002-L2-06","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L2-06/C/r1"}
+{"seq":958,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L2-06","armId":"C","repetitionId":1,"attemptId":"a1"}}
+{"seq":959,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-06/C/r1:step0","unit":{"caseId":"CEB-002-L2-06","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-06/C/r1 step 0)"}
+{"seq":960,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-06/C/r1:step1","unit":{"caseId":"CEB-002-L2-06","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-06/C/r1 step 1)"}
+{"seq":961,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-06/C/r1:step2","unit":{"caseId":"CEB-002-L2-06","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-06/C/r1 step 2)"}
+{"seq":962,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-06/C/r1:step3","unit":{"caseId":"CEB-002-L2-06","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-06/C/r1 step 3)"}
+{"seq":963,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-06/C/r1:step4","unit":{"caseId":"CEB-002-L2-06","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-06/C/r1 step 4)"}
+{"seq":964,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L2-06","armId":"C","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"FAIL"}
+{"seq":965,"type":"RESERVE","unit":{"caseId":"CEB-002-L2-06","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L2-06/C/r2"}
+{"seq":966,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L2-06","armId":"C","repetitionId":2,"attemptId":"a1"}}
+{"seq":967,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-06/C/r2:step0","unit":{"caseId":"CEB-002-L2-06","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-06/C/r2 step 0)"}
+{"seq":968,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-06/C/r2:step1","unit":{"caseId":"CEB-002-L2-06","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-06/C/r2 step 1)"}
+{"seq":969,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-06/C/r2:step2","unit":{"caseId":"CEB-002-L2-06","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-06/C/r2 step 2)"}
+{"seq":970,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-06/C/r2:step3","unit":{"caseId":"CEB-002-L2-06","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-06/C/r2 step 3)"}
+{"seq":971,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-06/C/r2:step4","unit":{"caseId":"CEB-002-L2-06","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-06/C/r2 step 4)"}
+{"seq":972,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L2-06","armId":"C","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":973,"type":"RESERVE","unit":{"caseId":"CEB-002-L2-07","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L2-07/C/r1"}
+{"seq":974,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L2-07","armId":"C","repetitionId":1,"attemptId":"a1"}}
+{"seq":975,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-07/C/r1:step0","unit":{"caseId":"CEB-002-L2-07","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-07/C/r1 step 0)"}
+{"seq":976,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-07/C/r1:step1","unit":{"caseId":"CEB-002-L2-07","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-07/C/r1 step 1)"}
+{"seq":977,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-07/C/r1:step2","unit":{"caseId":"CEB-002-L2-07","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-07/C/r1 step 2)"}
+{"seq":978,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-07/C/r1:step3","unit":{"caseId":"CEB-002-L2-07","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-07/C/r1 step 3)"}
+{"seq":979,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L2-07","armId":"C","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"FAIL"}
+{"seq":980,"type":"RESERVE","unit":{"caseId":"CEB-002-L2-07","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L2-07/C/r2"}
+{"seq":981,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L2-07","armId":"C","repetitionId":2,"attemptId":"a1"}}
+{"seq":982,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-07/C/r2:step0","unit":{"caseId":"CEB-002-L2-07","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-07/C/r2 step 0)"}
+{"seq":983,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-07/C/r2:step1","unit":{"caseId":"CEB-002-L2-07","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-07/C/r2 step 1)"}
+{"seq":984,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L2-07/C/r2:step2","unit":{"caseId":"CEB-002-L2-07","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L2-07/C/r2 step 2)"}
+{"seq":985,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L2-07","armId":"C","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":986,"type":"RESERVE","unit":{"caseId":"CEB-002-L3-08","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L3-08/C/r1"}
+{"seq":987,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L3-08","armId":"C","repetitionId":1,"attemptId":"a1"}}
+{"seq":988,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-08/C/r1:step0","unit":{"caseId":"CEB-002-L3-08","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-08/C/r1 step 0)"}
+{"seq":989,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-08/C/r1:step1","unit":{"caseId":"CEB-002-L3-08","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-08/C/r1 step 1)"}
+{"seq":990,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-08/C/r1:step2","unit":{"caseId":"CEB-002-L3-08","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-08/C/r1 step 2)"}
+{"seq":991,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-08/C/r1:step3","unit":{"caseId":"CEB-002-L3-08","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-08/C/r1 step 3)"}
+{"seq":992,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-08/C/r1:step4","unit":{"caseId":"CEB-002-L3-08","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-08/C/r1 step 4)"}
+{"seq":993,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L3-08","armId":"C","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"FAIL"}
+{"seq":994,"type":"RESERVE","unit":{"caseId":"CEB-002-L3-08","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L3-08/C/r2"}
+{"seq":995,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L3-08","armId":"C","repetitionId":2,"attemptId":"a1"}}
+{"seq":996,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-08/C/r2:step0","unit":{"caseId":"CEB-002-L3-08","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-08/C/r2 step 0)"}
+{"seq":997,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-08/C/r2:step1","unit":{"caseId":"CEB-002-L3-08","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-08/C/r2 step 1)"}
+{"seq":998,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-08/C/r2:step2","unit":{"caseId":"CEB-002-L3-08","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-08/C/r2 step 2)"}
+{"seq":999,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-08/C/r2:step3","unit":{"caseId":"CEB-002-L3-08","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-08/C/r2 step 3)"}
+{"seq":1000,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-08/C/r2:step4","unit":{"caseId":"CEB-002-L3-08","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-08/C/r2 step 4)"}
+{"seq":1001,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L3-08","armId":"C","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":1002,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"C","repetitionId":1,"attemptId":"a1"},"used":80,"cap":80,"reason":"unit CEB-002-L3-09/C/r1"}
+{"seq":1003,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-09","armId":"C","repetitionId":2,"attemptId":"a1"},"used":80,"cap":80,"reason":"unit CEB-002-L3-09/C/r2"}
+{"seq":1004,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"C","repetitionId":1,"attemptId":"a1"},"used":80,"cap":80,"reason":"unit CEB-002-L3-10/C/r1"}
+{"seq":1005,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-10","armId":"C","repetitionId":2,"attemptId":"a1"},"used":80,"cap":80,"reason":"unit CEB-002-L3-10/C/r2"}
+{"seq":1006,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"C","repetitionId":1,"attemptId":"a1"},"used":80,"cap":80,"reason":"unit CEB-002-L3-11/C/r1"}
+{"seq":1007,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-L3-11","armId":"C","repetitionId":2,"attemptId":"a1"},"used":80,"cap":80,"reason":"unit CEB-002-L3-11/C/r2"}
+{"seq":1008,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"C","repetitionId":1,"attemptId":"a1"},"used":80,"cap":80,"reason":"unit CEB-002-B1-12/C/r1"}
+{"seq":1009,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B1-12","armId":"C","repetitionId":2,"attemptId":"a1"},"used":80,"cap":80,"reason":"unit CEB-002-B1-12/C/r2"}
+{"seq":1010,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"C","repetitionId":1,"attemptId":"a1"},"used":80,"cap":80,"reason":"unit CEB-002-B2-13/C/r1"}
+{"seq":1011,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"C","repetitionId":2,"attemptId":"a1"},"used":80,"cap":80,"reason":"unit CEB-002-B2-13/C/r2"}
+{"seq":1012,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"C","repetitionId":1,"attemptId":"a1"},"used":80,"cap":80,"reason":"unit CEB-002-B3-14/C/r1"}
+{"seq":1013,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"C","repetitionId":2,"attemptId":"a1"},"used":80,"cap":80,"reason":"unit CEB-002-B3-14/C/r2"}
+{"seq":1014,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"C","repetitionId":1,"attemptId":"a1"},"used":80,"cap":80,"reason":"unit CEB-002-B4-15/C/r1"}
+{"seq":1015,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"C","repetitionId":2,"attemptId":"a1"},"used":80,"cap":80,"reason":"unit CEB-002-B4-15/C/r2"}
+{"seq":1016,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"C","repetitionId":1,"attemptId":"a1"},"used":80,"cap":80,"reason":"unit CEB-002-B5-16/C/r1"}
+{"seq":1017,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"C","repetitionId":2,"attemptId":"a1"},"used":80,"cap":80,"reason":"unit CEB-002-B5-16/C/r2"}
+{"seq":1018,"type":"RESERVE","unit":{"caseId":"CEB-002-L3-09","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L3-09/C/r1"}
+{"seq":1019,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L3-09","armId":"C","repetitionId":1,"attemptId":"a1"}}
+{"seq":1020,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-09/C/r1:step0","unit":{"caseId":"CEB-002-L3-09","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-09/C/r1 step 0)"}
+{"seq":1021,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-09/C/r1:step1","unit":{"caseId":"CEB-002-L3-09","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-09/C/r1 step 1)"}
+{"seq":1022,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-09/C/r1:step2","unit":{"caseId":"CEB-002-L3-09","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-09/C/r1 step 2)"}
+{"seq":1023,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-09/C/r1:step3","unit":{"caseId":"CEB-002-L3-09","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-09/C/r1 step 3)"}
+{"seq":1024,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L3-09","armId":"C","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":1025,"type":"RESERVE","unit":{"caseId":"CEB-002-L3-09","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L3-09/C/r2"}
+{"seq":1026,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L3-09","armId":"C","repetitionId":2,"attemptId":"a1"}}
+{"seq":1027,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-09/C/r2:step0","unit":{"caseId":"CEB-002-L3-09","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-09/C/r2 step 0)"}
+{"seq":1028,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-09/C/r2:step1","unit":{"caseId":"CEB-002-L3-09","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-09/C/r2 step 1)"}
+{"seq":1029,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-09/C/r2:step2","unit":{"caseId":"CEB-002-L3-09","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-09/C/r2 step 2)"}
+{"seq":1030,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-09/C/r2:step3","unit":{"caseId":"CEB-002-L3-09","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-09/C/r2 step 3)"}
+{"seq":1031,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-09/C/r2:step4","unit":{"caseId":"CEB-002-L3-09","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-09/C/r2 step 4)"}
+{"seq":1032,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L3-09","armId":"C","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":1033,"type":"RESERVE","unit":{"caseId":"CEB-002-L3-10","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L3-10/C/r1"}
+{"seq":1034,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L3-10","armId":"C","repetitionId":1,"attemptId":"a1"}}
+{"seq":1035,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-10/C/r1:step0","unit":{"caseId":"CEB-002-L3-10","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-10/C/r1 step 0)"}
+{"seq":1036,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-10/C/r1:step1","unit":{"caseId":"CEB-002-L3-10","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-10/C/r1 step 1)"}
+{"seq":1037,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L3-10","armId":"C","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":1038,"type":"RESERVE","unit":{"caseId":"CEB-002-L3-10","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L3-10/C/r2"}
+{"seq":1039,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L3-10","armId":"C","repetitionId":2,"attemptId":"a1"}}
+{"seq":1040,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-10/C/r2:step0","unit":{"caseId":"CEB-002-L3-10","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-10/C/r2 step 0)"}
+{"seq":1041,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-10/C/r2:step1","unit":{"caseId":"CEB-002-L3-10","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-10/C/r2 step 1)"}
+{"seq":1042,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L3-10","armId":"C","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":1043,"type":"RESERVE","unit":{"caseId":"CEB-002-L3-11","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L3-11/C/r1"}
+{"seq":1044,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L3-11","armId":"C","repetitionId":1,"attemptId":"a1"}}
+{"seq":1045,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-11/C/r1:step0","unit":{"caseId":"CEB-002-L3-11","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-11/C/r1 step 0)"}
+{"seq":1046,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-11/C/r1:step1","unit":{"caseId":"CEB-002-L3-11","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-11/C/r1 step 1)"}
+{"seq":1047,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-11/C/r1:step2","unit":{"caseId":"CEB-002-L3-11","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-11/C/r1 step 2)"}
+{"seq":1048,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-11/C/r1:step3","unit":{"caseId":"CEB-002-L3-11","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-11/C/r1 step 3)"}
+{"seq":1049,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L3-11","armId":"C","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":1050,"type":"RESERVE","unit":{"caseId":"CEB-002-L3-11","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-L3-11/C/r2"}
+{"seq":1051,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-L3-11","armId":"C","repetitionId":2,"attemptId":"a1"}}
+{"seq":1052,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-11/C/r2:step0","unit":{"caseId":"CEB-002-L3-11","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-11/C/r2 step 0)"}
+{"seq":1053,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-11/C/r2:step1","unit":{"caseId":"CEB-002-L3-11","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-11/C/r2 step 1)"}
+{"seq":1054,"type":"REQUEST_RESERVE","key":"a1:CEB-002-L3-11/C/r2:step2","unit":{"caseId":"CEB-002-L3-11","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-L3-11/C/r2 step 2)"}
+{"seq":1055,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-L3-11","armId":"C","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":1056,"type":"RESERVE","unit":{"caseId":"CEB-002-B1-12","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-B1-12/C/r1"}
+{"seq":1057,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-B1-12","armId":"C","repetitionId":1,"attemptId":"a1"}}
+{"seq":1058,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B1-12/C/r1:step0","unit":{"caseId":"CEB-002-B1-12","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B1-12/C/r1 step 0)"}
+{"seq":1059,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-B1-12","armId":"C","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":1060,"type":"RESERVE","unit":{"caseId":"CEB-002-B1-12","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-B1-12/C/r2"}
+{"seq":1061,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-B1-12","armId":"C","repetitionId":2,"attemptId":"a1"}}
+{"seq":1062,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B1-12/C/r2:step0","unit":{"caseId":"CEB-002-B1-12","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B1-12/C/r2 step 0)"}
+{"seq":1063,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B1-12/C/r2:step1","unit":{"caseId":"CEB-002-B1-12","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B1-12/C/r2 step 1)"}
+{"seq":1064,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-B1-12","armId":"C","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":1065,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"C","repetitionId":1,"attemptId":"a1"},"used":88,"cap":88,"reason":"unit CEB-002-B2-13/C/r1"}
+{"seq":1066,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B2-13","armId":"C","repetitionId":2,"attemptId":"a1"},"used":88,"cap":88,"reason":"unit CEB-002-B2-13/C/r2"}
+{"seq":1067,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"C","repetitionId":1,"attemptId":"a1"},"used":88,"cap":88,"reason":"unit CEB-002-B3-14/C/r1"}
+{"seq":1068,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B3-14","armId":"C","repetitionId":2,"attemptId":"a1"},"used":88,"cap":88,"reason":"unit CEB-002-B3-14/C/r2"}
+{"seq":1069,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"C","repetitionId":1,"attemptId":"a1"},"used":88,"cap":88,"reason":"unit CEB-002-B4-15/C/r1"}
+{"seq":1070,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B4-15","armId":"C","repetitionId":2,"attemptId":"a1"},"used":88,"cap":88,"reason":"unit CEB-002-B4-15/C/r2"}
+{"seq":1071,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"C","repetitionId":1,"attemptId":"a1"},"used":88,"cap":88,"reason":"unit CEB-002-B5-16/C/r1"}
+{"seq":1072,"type":"BUDGET_REFUSED","unit":{"caseId":"CEB-002-B5-16","armId":"C","repetitionId":2,"attemptId":"a1"},"used":88,"cap":88,"reason":"unit CEB-002-B5-16/C/r2"}
+{"seq":1073,"type":"RESERVE","unit":{"caseId":"CEB-002-B2-13","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-B2-13/C/r1"}
+{"seq":1074,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-B2-13","armId":"C","repetitionId":1,"attemptId":"a1"}}
+{"seq":1075,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B2-13/C/r1:step0","unit":{"caseId":"CEB-002-B2-13","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B2-13/C/r1 step 0)"}
+{"seq":1076,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-B2-13","armId":"C","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":1077,"type":"RESERVE","unit":{"caseId":"CEB-002-B2-13","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-B2-13/C/r2"}
+{"seq":1078,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-B2-13","armId":"C","repetitionId":2,"attemptId":"a1"}}
+{"seq":1079,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B2-13/C/r2:step0","unit":{"caseId":"CEB-002-B2-13","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B2-13/C/r2 step 0)"}
+{"seq":1080,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B2-13/C/r2:step1","unit":{"caseId":"CEB-002-B2-13","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B2-13/C/r2 step 1)"}
+{"seq":1081,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-B2-13","armId":"C","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":1082,"type":"RESERVE","unit":{"caseId":"CEB-002-B3-14","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-B3-14/C/r1"}
+{"seq":1083,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-B3-14","armId":"C","repetitionId":1,"attemptId":"a1"}}
+{"seq":1084,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B3-14/C/r1:step0","unit":{"caseId":"CEB-002-B3-14","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B3-14/C/r1 step 0)"}
+{"seq":1085,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B3-14/C/r1:step1","unit":{"caseId":"CEB-002-B3-14","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B3-14/C/r1 step 1)"}
+{"seq":1086,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-B3-14","armId":"C","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":1087,"type":"RESERVE","unit":{"caseId":"CEB-002-B3-14","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-B3-14/C/r2"}
+{"seq":1088,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-B3-14","armId":"C","repetitionId":2,"attemptId":"a1"}}
+{"seq":1089,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B3-14/C/r2:step0","unit":{"caseId":"CEB-002-B3-14","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B3-14/C/r2 step 0)"}
+{"seq":1090,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B3-14/C/r2:step1","unit":{"caseId":"CEB-002-B3-14","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B3-14/C/r2 step 1)"}
+{"seq":1091,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-B3-14","armId":"C","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":1092,"type":"RESERVE","unit":{"caseId":"CEB-002-B4-15","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-B4-15/C/r1"}
+{"seq":1093,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-B4-15","armId":"C","repetitionId":1,"attemptId":"a1"}}
+{"seq":1094,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B4-15/C/r1:step0","unit":{"caseId":"CEB-002-B4-15","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B4-15/C/r1 step 0)"}
+{"seq":1095,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B4-15/C/r1:step1","unit":{"caseId":"CEB-002-B4-15","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B4-15/C/r1 step 1)"}
+{"seq":1096,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B4-15/C/r1:step2","unit":{"caseId":"CEB-002-B4-15","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B4-15/C/r1 step 2)"}
+{"seq":1097,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-B4-15","armId":"C","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":1098,"type":"RESERVE","unit":{"caseId":"CEB-002-B4-15","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-B4-15/C/r2"}
+{"seq":1099,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-B4-15","armId":"C","repetitionId":2,"attemptId":"a1"}}
+{"seq":1100,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B4-15/C/r2:step0","unit":{"caseId":"CEB-002-B4-15","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B4-15/C/r2 step 0)"}
+{"seq":1101,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B4-15/C/r2:step1","unit":{"caseId":"CEB-002-B4-15","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B4-15/C/r2 step 1)"}
+{"seq":1102,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-B4-15","armId":"C","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":1103,"type":"RESERVE","unit":{"caseId":"CEB-002-B5-16","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-B5-16/C/r1"}
+{"seq":1104,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-B5-16","armId":"C","repetitionId":1,"attemptId":"a1"}}
+{"seq":1105,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B5-16/C/r1:step0","unit":{"caseId":"CEB-002-B5-16","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B5-16/C/r1 step 0)"}
+{"seq":1106,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B5-16/C/r1:step1","unit":{"caseId":"CEB-002-B5-16","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B5-16/C/r1 step 1)"}
+{"seq":1107,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B5-16/C/r1:step2","unit":{"caseId":"CEB-002-B5-16","armId":"C","repetitionId":1,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B5-16/C/r1 step 2)"}
+{"seq":1108,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-B5-16","armId":"C","repetitionId":1,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
+{"seq":1109,"type":"RESERVE","unit":{"caseId":"CEB-002-B5-16","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"unit CEB-002-B5-16/C/r2"}
+{"seq":1110,"type":"ATTEMPT_PREPARED","unit":{"caseId":"CEB-002-B5-16","armId":"C","repetitionId":2,"attemptId":"a1"}}
+{"seq":1111,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B5-16/C/r2:step0","unit":{"caseId":"CEB-002-B5-16","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B5-16/C/r2 step 0)"}
+{"seq":1112,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B5-16/C/r2:step1","unit":{"caseId":"CEB-002-B5-16","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B5-16/C/r2 step 1)"}
+{"seq":1113,"type":"REQUEST_RESERVE","key":"a1:CEB-002-B5-16/C/r2:step2","unit":{"caseId":"CEB-002-B5-16","armId":"C","repetitionId":2,"attemptId":"a1"},"amount":1,"reason":"model request (unit CEB-002-B5-16/C/r2 step 2)"}
+{"seq":1114,"type":"ATTEMPT_RESULT","unit":{"caseId":"CEB-002-B5-16","armId":"C","repetitionId":2,"attemptId":"a1"},"result":"SUCCEEDED","detail":"PASS"}
