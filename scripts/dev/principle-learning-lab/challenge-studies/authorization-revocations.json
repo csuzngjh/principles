@@ -1,0 +1,22 @@
+{
+  "schema": "challenge-authorization-revocations.v1",
+  "note": "Retirement registry for historical/archived execution authorizations (Owner P1-1 isolation scheme, 2026-10-28). A record matching an entry (studyId + suiteHash + exact window) is refused by the Stage R gate at ANY clock time and against ANY study copy — including fresh-ledger copies — because this registry travels with the lab CODE (module-relative), not with the study data. Entries never modify the archived records; retirement only adds a refusal ground. Removing an entry requires editing this repository (git-protected) — the same trust boundary as the gate code itself. Natural window expiry remains as an independent backstop.",
+  "entries": [
+    {
+      "studyId": "CEB-002",
+      "suiteHash": "02cbc15cfd9cf8a8b9e986950fdf722fcda6632604f4e62d4bd50ea0950d04f5",
+      "validFrom": "2026-10-27T12:22:47.763Z",
+      "validUntil": "2026-10-28T12:22:47.763Z",
+      "retiredAt": "2026-10-28T01:45:00Z",
+      "reason": "archived evidence record — CEB-002 executed to completion 2026-10-27 (96/96, 298 requests); the historical authorization must never authorize new execution (Owner P1-1 review finding: budget exhaustion is per-ledger, not a revocation)"
+    },
+    {
+      "studyId": "CEB-003-P",
+      "suiteHash": "dec7ba6385a3cc0ced1670a3a5f851cd90f1b720b1256829891efcc1ad748977",
+      "validFrom": "2026-10-27T17:13:04.371Z",
+      "validUntil": "2026-10-28T17:13:04.371Z",
+      "retiredAt": "2026-10-28T01:45:00Z",
+      "reason": "archived evidence record — CEB-003-P executed to completion 2026-10-27 (96/96, 291 requests); already merged to main via #2193 with its window open until 2026-10-28T17:13:04.371Z (same Owner P1-1 exposure class, symmetric retirement)"
+    }
+  ]
+}

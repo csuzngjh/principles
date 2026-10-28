@@ -1,4 +1,5 @@
 {
+  "schema": "claim-evidence-judge-only.v1",
   "caseId": "CEB-002-B3-14",
   "family": "BOUNDARY_NEGATIVE_CONTROL",
   "studyEligible": true,
@@ -15,11 +16,6 @@
     }
   ],
   "observations": [],
-  "constraints": {
-    "budgetUnits": 5,
-    "deadlineUnits": 9,
-    "askOwnerAllowed": true
-  },
   "ownerAnswers": {
     "release-preference": {
       "output": "Owner：倾向周四发布，周五要留缓冲。",
@@ -29,6 +25,11 @@
     }
   },
   "extraActions": {},
+  "constraints": {
+    "budgetUnits": 5,
+    "deadlineUnits": 9,
+    "askOwnerAllowed": true
+  },
   "preSeededObservations": [],
   "overCheck": {
     "allowedDistractorProbes": 1
@@ -44,5 +45,7 @@
         "requiresMinimalSteps": true
       }
     ]
-  }
+  },
+  "inputHash": "e5d34170ba5d99ebb8cf8fae2be85a5c2682b9dfbc1a7d6e0374b8eddcfdc076",
+  "goldHash": "4e7dc206391cb73119b54dc977ff830a12b853c5ff689625697ef61b98a44e45"
 }
