@@ -36,7 +36,12 @@
  *   every other channel 25000ms < 30s.
  * PD_WORKBUDDY_HOOK_SELF_TIMEOUT_MS overrides the table (integer ms > 0, all
  * events) for tests and field diagnostics; invalid values fall back to the
- * table.
+ * table, and a valid one is CLAMPED strictly below the host budget so the
+ * override can never re-create the bug this deadline exists to fix.
+ *
+ * A killed child gets no chance to clean up (SIGTERM is TerminateProcess on
+ * Windows), so the deadline path deliberately does NOT promise adapter-side
+ * flush of evidence / SQLite locks — see SPEC §4.4.
  */
 const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
@@ -44,14 +49,28 @@ const path = require('node:path');
 
 const eventName = process.argv[2];
 
+// hooks.json host budgets in ms. Kept here ONLY so the override below can be
+// clamped and so the guard test can prove the two tables agree with
+// hooks.json; the host remains the authority for actually killing us.
+const HOST_TIMEOUT_MS = { UserPromptSubmit: 15000, default: 30000 };
+// Margin for this process's own startup plus the degradation write, so our
+// timer always fires before the host's.
+const SELF_DEADLINE_MARGIN_MS = 3000;
 // Must stay strictly below the matching hooks.json timeout (seconds) — the
 // guard test in tests/plugin-skeleton.test.ts locks every pair.
 const SELF_TIMEOUT_MS = { UserPromptSubmit: 12000, default: 25000 };
 
+function hostBudgetMs(event) {
+  return HOST_TIMEOUT_MS[event] ?? HOST_TIMEOUT_MS.default;
+}
+
 function resolveSelfDeadlineMs(event) {
+  const budget = SELF_TIMEOUT_MS[event] ?? SELF_TIMEOUT_MS.default;
   const override = Number.parseInt(process.env.PD_WORKBUDDY_HOOK_SELF_TIMEOUT_MS ?? '', 10);
-  if (Number.isInteger(override) && override > 0) return override;
-  return SELF_TIMEOUT_MS[event] ?? SELF_TIMEOUT_MS.default;
+  if (!Number.isInteger(override) || override <= 0) return budget;
+  // Clamp, never trust: a diagnostic setting of 60000 would otherwise leave
+  // the outcome to the host's undefined timeout semantics again.
+  return Math.max(1, Math.min(override, hostBudgetMs(event) - SELF_DEADLINE_MARGIN_MS));
 }
 
 function fail(message, nextAction = 'Reinstall PD (npx create-principles-disciple) or set PD_WORKBUDDY_ADAPTER_ENTRY to the built adapter entry.') {

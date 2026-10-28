@@ -108,7 +108,7 @@ generation_id 仅在宿主确实给出时映射 turnId；工具调用 ID 以 P03
 | PostToolUse 错误 | 工具已运行，只能报告证据降级，不能说已阻止执行 |
 | SessionStart 错误 | 状态提示，不声称阻断会话 |
 | UserPromptSubmit 错误 | 推荐中性输出 + degraded，避免 exit 2 清除用户 prompt；若需阻断必须另获 Owner 同意并实测 |
-| 宿主 hooks.json 超时将杀掉 wrapper（adapter 自身的 fail-open 退出码来不及执行） | wrapper 在宿主预算内自设 deadline 主动 kill 子进程 + exit 1 + bounded stderr（P02 非阻塞）；deadline 严格小于 hooks.json 逐事件 timeout（UserPromptSubmit 12s < 15s，其余 25s < 30s，守卫测试锁定配对），UserPromptSubmit 的输入保护因此不再依赖宿主未定义的超时处置。UserPromptSubmit 的宿主预算本身收窄为 15s（2026-10-28，其余事件维持 30s）。wrapper 自身被杀或从未启动仍属下行宿主边界 |
+| 宿主 hooks.json 超时将杀掉 wrapper（adapter 自身的 fail-open 退出码来不及执行） | wrapper 在宿主预算内自设 deadline 主动 kill 子进程 + exit 1 + bounded stderr（P02 非阻塞）；deadline 严格小于 hooks.json 逐事件 timeout（UserPromptSubmit 12s < 15s，其余 25s < 30s，守卫测试锁定配对），UserPromptSubmit 的输入保护因此不再依赖宿主未定义的超时处置。UserPromptSubmit 的宿主预算本身收窄为 15s（2026-10-28，其余事件维持 30s）。deadline 路径**不承诺 adapter 侧清理**：Windows 上 SIGTERM 等价于 TerminateProcess，被 kill 的子进程没有 flush 机会，半写的证据文件与仍持有的 SQLite 锁由下一次 hook 承担。诊断用 `PD_WORKBUDDY_HOOK_SELF_TIMEOUT_MS` 会被 clamp 到宿主预算减去 3s 余量之下，不允许用它把缺陷调回来。wrapper 自身被杀或从未启动仍属下行宿主边界 |
 | node/依赖缺失、启动失败、超时/被杀、非法 JSON 无法可信识别事件 | 明确宿主边界 Unknown/降级；不声称脚本必能输出 JSON 或自行阻断；安装前检验、故障探针及恢复指引覆盖 |
 
 如果 Owner 要求共享 runtime 内所有治理故障也必须阻断，这是额外行为契约变更：需结构化结果分类、区分安全暂停和故障、单独评审及跨宿主回归。不得在本适配器用脆弱 warning 文本匹配暗中实现。

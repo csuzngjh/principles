@@ -123,11 +123,11 @@ describe('wrapper canonical entry resolution is locked to install-layout', () =>
 describe('wrapper self-deadline (SPEC §4.4 timeout row)', () => {
   const WRAPPER = path.join(PLUGIN_ROOT, 'scripts', 'wrapper.cjs');
 
-  /** Parse the SELF_TIMEOUT_MS table out of the wrapper source (drift guard input). */
-  function readSelfTimeoutTable(): Record<string, number> {
+  /** Parse a literal `<name> = { event: ms }` table out of the wrapper source (drift guard input). */
+  function readMsTable(name: 'SELF_TIMEOUT_MS' | 'HOST_TIMEOUT_MS'): Record<string, number> {
     const source = fs.readFileSync(WRAPPER, 'utf8');
-    const block = source.match(/const SELF_TIMEOUT_MS = \{([^}]*)\}/)?.[1];
-    expect(block, 'wrapper.cjs declares a literal SELF_TIMEOUT_MS table').toBeDefined();
+    const block = source.match(new RegExp(`const ${name} = \\{([^}]*)\\}`))?.[1];
+    expect(block, `wrapper.cjs declares a literal ${name} table`).toBeDefined();
     const table: Record<string, number> = {};
     for (const match of block?.matchAll(/([A-Za-z]+):\s*(\d+)/g) ?? []) {
       const [, key, value] = match;
@@ -138,7 +138,7 @@ describe('wrapper self-deadline (SPEC §4.4 timeout row)', () => {
   }
 
   it('every wrapper self-deadline stays strictly below the hooks.json host timeout (the wrapper timer must fire first)', () => {
-    const table = readSelfTimeoutTable();
+    const table = readMsTable('SELF_TIMEOUT_MS');
     expect(table['default'], 'default budget present').toBeDefined();
     expect(table['UserPromptSubmit'], 'UserPromptSubmit budget present').toBeDefined();
     for (const [event, entries] of Object.entries(HOOKS.hooks)) {
@@ -149,6 +149,20 @@ describe('wrapper self-deadline (SPEC §4.4 timeout row)', () => {
         expect(budgetMs, `${event} budget must exceed a realistic cold start (5s floor)`).toBeGreaterThanOrEqual(5000);
         expect(budgetMs, `${event} wrapper budget (${budgetMs}ms) must be < host timeout (${hook.timeout}s) — otherwise the host kills the wrapper before the fail-open exit can run`)
           .toBeLessThan(hook.timeout * 1000);
+      }
+    }
+  });
+
+  it('the wrapper HOST_TIMEOUT_MS mirror agrees with hooks.json (it bounds the diagnostic override)', () => {
+    const hostTable = readMsTable('HOST_TIMEOUT_MS');
+    expect(hostTable['default'], 'default host budget present').toBeDefined();
+    for (const [event, entries] of Object.entries(HOOKS.hooks)) {
+      for (const entry of entries) {
+        const hook = entry.hooks[0];
+        if (!hook) throw new Error(`missing hook for ${event}`);
+        const hostMs = hostTable[event] ?? hostTable['default'];
+        expect(hostMs, `${event} wrapper host mirror (${hostMs}ms) must equal hooks.json (${hook.timeout}s)`)
+          .toBe(hook.timeout * 1000);
       }
     }
   });
@@ -184,4 +198,34 @@ describe('wrapper self-deadline (SPEC §4.4 timeout row)', () => {
       fs.rmSync(home, { recursive: true, force: true });
     }
   });
+
+  it('clamps the diagnostic override below the host budget instead of trusting it', () => {
+    const home = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'pd-wb-deadline-clamp-')));
+    try {
+      const adapterDir = getInstallLayoutPaths(home).workbuddyAdapterDir;
+      fs.mkdirSync(path.dirname(path.join(adapterDir, 'dist', 'pd-hook.js')), { recursive: true });
+      fs.writeFileSync(path.join(adapterDir, 'dist', 'pd-hook.js'), 'setTimeout(() => { process.exitCode = 7; }, 60000);');
+      const startedAt = Date.now();
+      const result = spawnSync(process.execPath, [WRAPPER, 'UserPromptSubmit'], {
+        input: '{}',
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          USERPROFILE: home,
+          HOME: home,
+          // Above the 15s host budget: an escape hatch must not be able to
+          // re-create the exact defect the self-deadline fixes.
+          PD_WORKBUDDY_HOOK_SELF_TIMEOUT_MS: '60000',
+        },
+        windowsHide: true,
+        timeout: 25_000,
+      });
+      const elapsedMs = Date.now() - startedAt;
+      expect(result.status, 'wrapper still degrades non-blocking').toBe(1);
+      expect(String(result.stderr), 'clamped to 15000ms host budget - 3000ms margin').toContain('budget_12000ms');
+      expect(elapsedMs, 'the wrapper must still fire before the 15s host timeout').toBeLessThan(14_500);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  }, 60_000);
 });
