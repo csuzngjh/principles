@@ -738,4 +738,93 @@ describe('recallPains: deterministic snapshot-race and failure injection', () =>
     expect(result.status).toBe('partial');
     expect(result.summary.returned).toBe(2);
   });
+
+  // ── T1 non-atomic pair sampling (round-4 directive) ──────────────────────
+  // A writer whose full commit→checkpoint→close cycle fits between the T1
+  // main fingerprint read and the T1 wal fingerprint read leaves BOTH reads
+  // matching their T0 values (stale main M0 read pre-cycle, wal absent again
+  // post-cycle) — the pre-fix two-read re-check accepted the stale snapshot.
+
+  afterEach(() => {
+    delete painRecallSnapshotTestHooks.afterT1MainFingerprint;
+  });
+
+  function injectMidRecheckCycle(targetSuffix: string, insertSql: string): void {
+    painRecallSnapshotTestHooks.afterT1MainFingerprint = (sourceDbPath: string) => {
+      if (!sourceDbPath.endsWith(targetSuffix)) return; // only the targeted database
+      const writer = new Database(sourceDbPath);
+      writer.exec(insertSql);
+      writer.pragma('wal_checkpoint(TRUNCATE)');
+      writer.close(); // commits, checkpoints, and deletes the wal
+    };
+  }
+
+  it('writer completes commit+checkpoint+wal-delete between the two T1 reads: stale snapshot must be rejected (interleave-1)', async () => {
+    const dir = makeWalWorkspace();
+    const tdbPath = path.join(dir, '.state', 'trajectory.db');
+    // Give the mid-window row a ledger edge so a stale-ok would return 2 rows
+    // while the database has 3 committed — the staleness is observable.
+    const ledgerPath = path.join(dir, '.state', 'principle_training_state.json');
+    const ledger = JSON.parse(fs.readFileSync(ledgerPath, 'utf8')) as {
+      _tree: { principles: Record<string, { reuseEvidence?: unknown[] }> };
+    };
+    const evidence = (ledger._tree.principles[P1]!.reuseEvidence ?? []) as Record<string, unknown>[];
+    evidence.push({ painId: 'pain-interleave-1', candidateId: 'cand-il1', decidedAt: '2026-01-07T00:00:00.000Z' });
+    ledger._tree.principles[P1]!.reuseEvidence = evidence;
+    fs.writeFileSync(ledgerPath, JSON.stringify(ledger));
+
+    const mainBefore = sha256(tdbPath);
+    injectMidRecheckCycle('trajectory.db', `INSERT INTO pain_events
+        (session_id, source, score, reason, severity, origin, confidence, text, canonical_pain_id, runtime_task_id, host_kind, created_at)
+      VALUES ('il1', 'manual', 10, 'mid-recheck commit', 'moderate', 'user_manual', NULL, NULL, 'pain-interleave-1', NULL, NULL, '2026-10-09T10:00:00.000Z')`);
+
+    const result = await recallPains(dir, { requestedPrincipleId: P1, limit: 10 });
+
+    // Precondition proofs: the injected cycle really committed + checkpointed
+    // + deleted the wal, and the endpoint main is no longer M0.
+    expect(fs.existsSync(`${tdbPath}-wal`)).toBe(false);
+    expect(sha256(tdbPath)).not.toBe(mainBefore);
+    // The contract: a snapshot that predates a commit completed BEFORE the
+    // protocol's last observation may not be returned as ok/no_matches.
+    expect(result.status).toBe('source_unreadable');
+    expect(result.sources.trajectoryDb).toBe('unreadable');
+    expect(result.results).toEqual([]);
+    // Reader-side zero side effects (asserted BEFORE the verification probe
+    // below — a readonly open of a WAL database is itself a shm-creating
+    // operation, the exact behavior this suite pins down): recall created no
+    // coordination sidecars next to the writer's outcome.
+    expect(fs.existsSync(`${tdbPath}-shm`)).toBe(false);
+    expect(fs.existsSync(`${tdbPath}-journal`)).toBe(false);
+    // Post-hoc verification probe: the committed row really is in the
+    // database (its own -shm is a probe artifact, removed on close).
+    const probe = new Database(tdbPath, { readonly: true });
+    expect(probe.prepare("SELECT COUNT(*) c FROM pain_events WHERE canonical_pain_id = 'pain-interleave-1'").get())
+      .toEqual({ c: 1 });
+    probe.close();
+    for (const probeSidecar of [`${tdbPath}-shm`, `${tdbPath}-wal`]) {
+      try { fs.rmSync(probeSidecar, { force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* best effort */ }
+    }
+  });
+
+  it('state.db mid-recheck cycle: optional source degrades unreadable, verifiable rows survive (interleave-2)', async () => {
+    const dir = makeWalWorkspace();
+    const sdbPath = path.join(dir, '.pd', 'state.db');
+    const filesBefore = fs.readdirSync(path.join(dir, '.pd')).sort();
+    injectMidRecheckCycle('state.db', `INSERT INTO pain_diagnoses
+        (id, pain_id, task_id, diagnosis_id, category, root_cause, evidence_json, confidence, artifact_id, created_at)
+      VALUES ('diag-il2', '${PAIN_1}', 'task-il2', 'diagnosis-il2', 'Tooling', 'mid-recheck diagnosis', '[]', 0.9, NULL, '2026-10-09T11:00:00.000Z')`);
+
+    const result = await recallPains(dir, { requestedPrincipleId: P1, limit: 3 });
+
+    expect(fs.existsSync(`${sdbPath}-wal`)).toBe(false); // cycle completed
+    // state.db is an optional source: it degrades unreadable while the
+    // trajectory-verified rows survive — distinct from interleave-1's
+    // authority-source rejection.
+    expect(result.status).toBe('partial');
+    expect(result.sources.stateDb).toBe('unreadable');
+    expect(result.sources.trajectoryDb).toBe('ok');
+    expect(result.summary.returned).toBe(2);
+    expect(fs.readdirSync(path.join(dir, '.pd')).sort()).toEqual(filesBefore);
+    expect(fs.existsSync(`${sdbPath}-shm`)).toBe(false);
+  });
 });

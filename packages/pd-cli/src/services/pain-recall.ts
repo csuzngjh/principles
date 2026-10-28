@@ -34,27 +34,27 @@
  * commits; `-shm` is an index cache and is deliberately never copied — the
  * staged open regenerates it beside the copy).
  *
- * Snapshot acceptance contract (proved in stageWalSnapshot): accept only when
- * the staged copies byte-equal the source pair fingerprinted at T0 AND the
- * source pair re-fingerprinted at T1 still byte-equals it — i.e. the staged
- * bytes ARE the endpoint (T1) sample of the source. An ABA rewrite (writer
- * commits, checkpoints, deletes the WAL, and the main file's bytes end up
- * equal to T0) therefore cannot produce a stale acceptance: either a real
- * SQLite commit survived to the endpoint — in which case the file change
- * counter (header offset 24, monotonic under SQLite's own write path) and
- * the checkpointed pages force the endpoint bytes to differ from T0 and the
- * snapshot is rejected — or the bytes genuinely end at the T0 state, in
- * which case the staged copy IS the current database state and returning it
- * is fresh and correct, not stale. Remaining bounds are inherent to
- * uncoordinated cross-file reads, not to this protocol: (a) each (main, wal)
- * sample is two non-atomic reads, so a writer interleaving state-segment
- * switches across both sampling rounds could in principle pair bytes from
- * different moments (a surviving commit moves the main bytes, so such an
- * interleaving must recur across T0 and T1); (b) writes landing after the
- * T1 re-check are not reflected — an "always latest" contract requires
- * writer coordination, which no available mechanism provides honestly (see
- * the implementation report's option analysis for rejected alternatives A-C).
- * Both bounds are disclosed rather than silently assumed away.
+ * Snapshot acceptance contract (proved in stageWalSnapshot): the T1 re-check
+ * is ordered main → wal → main, making the WAL fingerprint read the single
+ * LINEARIZATION POINT. Acceptance means the staged bytes equal the real
+ * database state at that instant: the wal read observes the wal directly,
+ * and the bracketing main reads (equal to each other and to T0) pin the main
+ * bytes across the whole window — under SQLite-only writes the main file's
+ * byte-image cannot return to a previous value (monotonic change counter),
+ * so a bracketed main equal on both ends was unchanged in between. Any write
+ * completing before the linearization point is therefore caught (a commit
+ * changes the wal; a checkpoint changes main and is visible at one of the
+ * bracketing reads), and the trailing main re-read additionally rejects a
+ * checkpoint landing between the wal read and the protocol's end. An ABA
+ * rewrite (commit → checkpoint → wal delete → main bytes back at T0) cannot
+ * produce a stale acceptance: a commit surviving to the linearization point
+ * moved the main bytes and is rejected; bytes genuinely ending at the T0
+ * state mean the staged copy IS the current state, so returning it is
+ * correct. Writes after the linearization point (an un-checkpointed commit
+ * landing in the trailing window) are post-linearization events — a correct
+ * point-in-time read, not staleness. "Always latest at return time" would
+ * require writer coordination, which no available mechanism provides
+ * honestly (see the implementation report's option analysis A–D).
  */
 import * as fs from 'fs';
 import * as crypto from 'crypto';
@@ -273,6 +273,13 @@ export const painRecallSnapshotTestHooks: {
   mkdtempSync?: (prefix: string) => string;
   /** Called after each source→staging copyFileSync with (source, staged). */
   afterCopyFile?: (source: string, stagedPath: string) => void;
+  /**
+   * Called between the T1 main fingerprint read and the T1 wal fingerprint
+   * read — the exact window a concurrent writer can hide in when the pair is
+   * sampled non-atomically. Tests use it to inject a deterministic
+   * commit→checkpoint→close cycle inside the re-check.
+   */
+  afterT1MainFingerprint?: (sourceDbPath: string) => void;
 } = {};
 
 function isEnoent(err: unknown): boolean {
@@ -402,20 +409,24 @@ type StagedSnapshotOutcome = { ok: true; root: string } | { ok: false };
  *      SQLite needs to recover un-checkpointed commits; `-shm` is never
  *      copied — the staged open regenerates it beside the copy);
  *   3. verify the staged copies hash-match the T0 fingerprints;
- *   4. re-fingerprint the source pair at T1 — any drift (file changed,
- *      WAL created/deleted, sizes moved) rejects the snapshot.
+ *   4. T1 re-check ordered main → wal → main (see the ordering comment at
+ *      the re-check itself): the wal read is the linearization point, the
+ *      trailing main re-read is a checkpoint detector for the trailing
+ *      window. Any drift at any of the three reads rejects the snapshot.
  *
- * Acceptance ⇒ staged bytes == the endpoint (T1) sample of the source: the
- * re-check reads the source AT T1, so a matching fingerprint makes the copy
- * byte-identical to the current state, never older. An ABA sequence (commit
- * → checkpoint → wal delete → endpoint bytes back at T0) resolves safely on
- * both branches: a commit that survived to the endpoint moved the main bytes
- * (monotonic file change counter + checkpointed pages) and is rejected; a
- * sequence whose bytes genuinely end at T0 leaves the copy equal to the
- * current state, so returning it is correct. Failure modes — mkdtemp
- * failure, copy failure, fingerprint drift, undecidable file states — all
- * return `{ ok: false }`; the caller reports the source `unreadable`. No
- * sleep, no timing assumptions: tests inject deterministic races through
+ * Acceptance ⇒ staged bytes == the real database state at the linearization
+ * point (the T1 WAL read): the wal is observed directly there, and the main
+ * is pinned across the window by the two equal bracketing reads (main's
+ * byte-image cannot return to a previous value under SQLite-only writes —
+ * monotonic change counter). Writes completing before that instant are
+ * always caught; writes after it are post-linearization (a correct
+ * point-in-time read). An ABA sequence (commit → checkpoint → wal delete →
+ * bytes back at T0) resolves safely: a surviving commit moved main and is
+ * rejected; bytes truly back at T0 make the copy the current state, so
+ * returning it is correct. Failure modes — mkdtemp failure, copy failure,
+ * fingerprint drift, undecidable file states — all return `{ ok: false }`;
+ * the caller reports the source `unreadable`. No sleep, no timing
+ * assumptions: tests inject deterministic races through
  * `painRecallSnapshotTestHooks`.
  */
 function stageWalSnapshot(sourceDbPath: string, relSegments: readonly string[]): StagedSnapshotOutcome {
@@ -448,10 +459,22 @@ function stageWalSnapshot(sourceDbPath: string, relSegments: readonly string[]):
       return { ok: false };
     }
 
-    // The source pair must still be the fingerprinted pair — a writer that
-    // raced the snapshot invalidates it (rc-7: no stale state reuse).
+    // T1 re-check — ordered as main → wal → main so the pair sampling has a
+    // single provable linearization point (the WAL read) and the trailing
+    // main re-read acts as a checkpoint detector for the trailing window:
+    //   r1 main — must still equal T0's main
+    //   r2 wal  — the LINEARIZATION POINT; must still equal T0's wal
+    //   r3 main — trailing detector; a checkpoint in (r2, r3] changes main
+    //            and conservatively rejects the whole snapshot
+    // Any write COMPLETING before r2 is caught: a commit changes the wal
+    // (visible at r2); a checkpoint changes main (visible at r1 or r3). A
+    // commit landing AFTER r2 is post-linearization — the accepted snapshot
+    // is the real database state at r2, which is a correct point-in-time
+    // read, not a stale one. (rc-7: no stale state reuse.)
     if (!fingerprintsMatch(fingerprintFile(sourceDbPath), mainFingerprint)) return { ok: false };
+    painRecallSnapshotTestHooks.afterT1MainFingerprint?.(sourceDbPath);
     if (!fingerprintsMatch(fingerprintFile(walPath), walFingerprint)) return { ok: false };
+    if (!fingerprintsMatch(fingerprintFile(sourceDbPath), mainFingerprint)) return { ok: false };
 
     verified = true;
     return { ok: true, root };

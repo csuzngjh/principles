@@ -206,3 +206,67 @@ round-1 报告 §1.8"可能读到较旧一致状态（无检测）"是 **round-1
 | pd-cli 全量 | 见提交记录（round-3 全量结果随 CI 与提交附注） |
 | `npm run verify:merge`（本地，指令要求） | 结果见提交附注与最终交付报告（Windows 已知环境项以 CI Verify Merge Gate 为准绳并附对照证据） |
 | CI（新 head） | 以 GitHub Actions 实际收敛结果为准（最终报告引用） |
+
+---
+
+## 11. Round 4：T1 非原子配对采样的机制闭合（最终指令轮 2）
+
+Owner 指令指出 round-3 披露的"配对非原子采样"边界的具体可击穿形态：T1 复检的两条读（先 main 后 wal）之间可容纳一个完整 writer 周期（commit→checkpoint→close，wal 删除），使 main 读到周期前的 M0（陈旧）、wal 读到周期后的 ∅（与 T0 相同）——两项均"匹配"，旧序**接受陈旧快照**。round-3 注释声称"接受⇔副本==T1 终点采样"中"终点采样"对非原子配对无定义，该表述错误。
+
+### 11.1 红色证据（先击穿，后修复）
+
+先在旧两读序上仅加入注入点 `afterT1MainFingerprint`（使窗口可注入、逻辑不变），新增 interleave-1/interleave-2：
+
+- interleave-1（trajectory）：`expected 'source_unreadable' received 'ok'` —— 旧序接受陈旧快照，返回 2 行（数据库已提交 3 行）；
+- interleave-2（state.db）：`expected 'partial' received 'ok'` —— 旧序同样未察觉 state.db 的中途周期。
+
+两份断言输出即击穿证据（指令 §三"先在旧实现上运行该测试，记录失败证据"）。
+
+### 11.2 修复机制：三读复检 + 单一线性化点
+
+T1 复检改为 **main → wal → main**：
+
+```text
+r1 main（须==T0.main）
+   └─ 注入点（测试在此注入完整 writer 周期）
+r2 wal（须==T0.wal）★线性化点
+r3 main（须==T0.main）＝尾部 checkpoint 探测器
+```
+
+**证明**（接受 ⇒ 副本==r2 时刻的真实数据库状态）：
+- r2 直接观察 wal；r1、r3 以相等字节夹住 r2，且 SQLite 自身写路径下 main 字节像不可回到先前值（change counter 单调）⇒ r2 时刻 main==T0.main；
+- 故接受时副本==(T0.main, T0.wal)==r2 时刻真实状态；
+- **线性化点之前完成的写入必被捕获**：commit → wal 变（r2 可见）；checkpoint → main 变（r1 或 r3 可见，含指令场景的 (r1,r2) 与 (r2,r3) 两个窗口）；
+- 线性化点之后的 commit（如 (r2,r3] 落入 WAL 的未 checkpoint 提交）属后线性化事件——正确的时点语义而非陈旧；(r2,r3] 的 checkpoint 被 r3 保守拒绝（fail-closed 合法）。
+
+代价：每次 WAL 快照多一次 main 流式哈希（与既有两次同级，on-demand CLI 查询可承受）。
+
+### 11.3 方案比较（指令 §四，全部实证/枚举）
+
+| 方案 | 结论 | 证据 |
+|---|---|---|
+| A SQLite 原生（backup/VACUUM INTO） | **实证否决** | 实验（`.tmp/wal-repro/option-experiments.mjs`）：对安静 WAL 库 readonly 打开 + `backup()` 成功但 **workspace sidecars 0→2**——打开源库本身即产生本契约要消除的副作用，机制循环依赖；VACUUM INTO 在 readonly 连接上不可用 |
+| B Writer 协调 | **枚举否决** | 写入口分布：state.db 写模式 `SqliteConnection` 消费方横跨 host-runtime 8+ 文件、openclaw-plugin hooks、console models、pd-cli 命令；trajectory 写方在 host-runtime stores + plugin core；另有不可枚举的外部 sqlite3 CLI/进程——参与覆盖不可证明；core 写路径协调=跨包生产改造，违反本轮不变量 6 |
+| C OS/存储层快照 | **实证否决** | 硬链接实验：链接读到 1 行而原库已提交 2 行——WAL 按文件名寻址（链接永远看不到原库 `-wal`）且共享 inode 不隔离 main 写，"快照"不连贯；VSS 需管理员+卷影服务，部署前提不成立 |
+| D 全面失败关闭 | **影响否决** | 生产两库恒为 WAL ⇒ recall 在三宿主永久 `source_unreadable`（Codex per-hook、OpenClaw on-demand 全灭）；保留为单快照级失败行为（现行做法） |
+| **E 三读复检（选定）** | 接受⇔副本==线性化点（r2）真实状态；11.2 证明；零新依赖、零工作区触碰、CLI 契约零变化 | interleave-1/2 红→绿 + 全套回归 |
+
+"返回时绝对最新"语义在无协调机制下不可满足（任何有限读序列均存在最后读盲区——w 尾漏 checkpoint-in-quiet、m 尾漏 commit-only），该语义需方案 B 的架构前置（另立写入侧 SPEC），本 PR 交付的是**可证明的时点一致性**。
+
+### 11.4 Round-4 变更与测试
+
+- `pain-recall.ts`：T1 复检加尾部 main 复读 + 新注入点 `afterT1MainFingerprint`；模块头/docstring 契约改写（线性化点=r2、尾部探测器=r3、round-3 错误表述纠正）。逻辑增量一行读。
+- 测试：interleave-1（trajectory：中途完整周期→拒绝 + 前置条件自证[wal 已删/main≠M0/行已提交] + 读取方零副作用断言在探针前执行并自清探针产物）；interleave-2（state.db：可选源降级 `unreadable`+`partial`+2 行存活——与 interleave-1 的权威源拒绝语义分开验证）。
+- 回归：ro-1..11、race-1..4、inj-*、aba-1..5 全保留全绿（**25/25**）。
+
+### 11.5 Round-4 验证
+
+| 项 | 结果 |
+|---|---|
+| `pain-recall-readonly.test.ts` | **25/25 PASS** |
+| `pain-recall` + `cli-command-tree` + `cli-help-snapshot` | 110/110 PASS |
+| `tsc --noEmit` / `eslint` | PASS / PASS |
+| pd-cli 全量×2 | 首跑 3 失败（candidate-intake e2e / scribe dispatch / demo help 快照，全部 `timed out in 5000ms`，隔离全绿 59/59+37/37，三用例均不触及 pain-recall 路径）；**复跑 2129/2129 全绿**——负载 flake，失败集未复现 |
+| `npm run verify:merge`（串行单独跑） | 见提交附注与最终报告（website 字幕测试=main 既有失败已在 round-3 记录基线复现证据） |
+| CLI 子进程冒烟（重建 dist） | 双场景（quiet/active WAL）见最终报告 |
+| CI（新 head） | 以 GitHub Actions 收敛结果为准 |
