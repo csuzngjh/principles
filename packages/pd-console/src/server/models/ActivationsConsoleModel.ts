@@ -232,7 +232,8 @@ export function collectRuleCodeEventEntries(workspaceDir: string): CollectedRule
   return { entries, sourceDirsFound };
 }
 
-function readRuleCodeTelemetry(workspaceDir: string, activationId: string, decisions: readonly ActivationDecisionRecord[], promotionHostKind?: string): { shadowSummary: PromotionEvidenceSnapshot['shadowSummary']; metrics: RuleCodeTelemetryMetrics } {
+function readRuleCodeTelemetry(workspaceDir: string, activationId: string, options: { decisions: readonly ActivationDecisionRecord[]; promotionHostKind?: string }): { shadowSummary: PromotionEvidenceSnapshot['shadowSummary']; metrics: RuleCodeTelemetryMetrics } {
+  const { decisions } = options;
   const countCircuitTrips = (minimumTime: number) => decisions.filter(decision => decision.decision === 'safety_isolate' && Date.parse(decision.decidedAt) >= minimumTime).length;
   const now = Date.now();
   const unavailableWindow = (minimumTime: number): RuleCodeTelemetryWindow => ({ eligible: null, matched: null, blocked: null, unhealthy: null, circuitTrips: countCircuitTrips(minimumTime), toolDistribution: null });
@@ -261,7 +262,7 @@ function readRuleCodeTelemetry(workspaceDir: string, activationId: string, decis
   // only samples attributed to the workspace's resolved promotion host —
   // another host's samples (and pre-attribution legacy rows) can never
   // satisfy this host's readiness threshold.
-  return { shadowSummary: summarizeRuleCodeShadowEvents(entries, activationId, promotionHostKind), metrics: { last24Hours: summarizeWindow(now - 24 * 60 * 60 * 1000), last7Days: summarizeWindow(now - 7 * 24 * 60 * 60 * 1000), representativeSamples } };
+  return { shadowSummary: summarizeRuleCodeShadowEvents(entries, activationId, options.promotionHostKind), metrics: { last24Hours: summarizeWindow(now - 24 * 60 * 60 * 1000), last7Days: summarizeWindow(now - 7 * 24 * 60 * 60 * 1000), representativeSamples } };
 }
 
 export class ActivationsConsoleModel {
@@ -568,7 +569,7 @@ export class ActivationsConsoleModel {
       // to the SAME host the readiness checks will run against
       // (SPEC-RULECODE-HOST-PROMOTION-001 B3).
       const promotionHost = resolvePromotionHostLiveness(this.workspaceDir);
-      const telemetry = readRuleCodeTelemetry(this.workspaceDir, activationId, decisions, promotionHost.ok ? promotionHost.hostKind : undefined);
+      const telemetry = readRuleCodeTelemetry(this.workspaceDir, activationId, { decisions, promotionHostKind: promotionHost.ok ? promotionHost.hostKind : undefined });
       const flags = computeFlagsFromLoadResult(loadPdConfig(this.workspaceDir));
       // PRI-634-F R3 (SPEC P1-1): promotion readiness evaluates through the
       // SAME workspace host-declaration resolver as CLI/Approvals — the bare
