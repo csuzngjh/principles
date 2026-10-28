@@ -1,7 +1,47 @@
 {
   "schema": "challenge-stage-authorization.v1",
   "stage": "R",
+  "status": "APPROVED",
   "studyId": "CEB-002",
-  "status": "NOT_AUTHORIZED",
-  "note": "CEB-002 is a DRAFT study — not frozen, not preregistered, not authorized. Any real execution requires Owner approval and a fresh authorization chain."
+  "suiteHash": "02cbc15cfd9cf8a8b9e986950fdf722fcda6632604f4e62d4bd50ea0950d04f5",
+  "mappingHash": "213090daecf0cbc9abfc51ca46641e4e3b835730ba9d9ec771118aaed9521290",
+  "graderHash": "eef38484c4f8ace059c178fcb0697c68154277073b7ab7a9d8c0e608ae383e79",
+  "studyPlanHash": "bd0a84085d2aefa0aa3203b547e4dc53fc0c4375e8ecaf2a0ba980913dcc4f47",
+  "requestedActorIdentity": "glm-5.3-flash",
+  "executionMode": "F1-direct-model",
+  "arms": [
+    "A",
+    "B",
+    "C"
+  ],
+  "cases": [
+    "CEB-002-L1-01",
+    "CEB-002-L1-02",
+    "CEB-002-L1-03",
+    "CEB-002-L2-04",
+    "CEB-002-L2-05",
+    "CEB-002-L2-06",
+    "CEB-002-L2-07",
+    "CEB-002-L3-08",
+    "CEB-002-L3-09",
+    "CEB-002-L3-10",
+    "CEB-002-L3-11",
+    "CEB-002-B1-12",
+    "CEB-002-B2-13",
+    "CEB-002-B3-14",
+    "CEB-002-B4-15",
+    "CEB-002-B5-16"
+  ],
+  "repetitions": [
+    "1",
+    "2"
+  ],
+  "attemptCap": 96,
+  "requestCap": 960,
+  "requestTimeoutMs": 480000,
+  "issuedBy": "Owner（2026-10-27 CEB-002 三合一启动指令：冻结+预注册生效+96 单元真实执行一次批准。16 题×3 臂×2 rep=96 attempts/960 requests 上限、每单元 1 attempt/10 requests 机器强制、480000ms socket-inactivity、bigmodel Coding Plan 订阅通道、服务端身份须观测 glm-5.3-flash、并发 3 批 8 批间闸门、停止条件=连续两单元 UNKNOWN/批 UNKNOWN>40% NOT_EVALUABLE/身份异常/哈希漂移/账本不一致/预算越界/未授权执行；执行基线=main 208293951；由执行代理按 Owner 指令落为机器可校验记录，签发 2026-10-27T12:22:47.763Z）",
+  "validFrom": "2026-10-27T12:22:47.763Z",
+  "validUntil": "2026-10-28T12:22:47.763Z",
+  "revoked": false,
+  "halted": false
 }

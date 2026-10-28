@@ -1,4 +1,5 @@
 {
+  "schema": "claim-evidence-judge-only.v1",
   "caseId": "CEB-002-B5-16",
   "family": "BOUNDARY_NEGATIVE_CONTROL",
   "studyEligible": true,
@@ -32,13 +33,13 @@
       "implies": {}
     }
   ],
+  "ownerAnswers": {},
+  "extraActions": {},
   "constraints": {
     "budgetUnits": 11,
     "deadlineUnits": 8,
     "askOwnerAllowed": true
   },
-  "ownerAnswers": {},
-  "extraActions": {},
   "preSeededObservations": [],
   "overCheck": {
     "allowedDistractorProbes": 1
@@ -60,5 +61,7 @@
         "requiresMinimalSteps": true
       }
     ]
-  }
+  },
+  "inputHash": "81f1caa013dc66f347bed6052e0af2af92cd20382a3cb889ab7454b3bc0d384f",
+  "goldHash": "a66ae247e949629fbe3bd2536aa830268e7a7efa7ebda1c31f0accc016a82831"
 }

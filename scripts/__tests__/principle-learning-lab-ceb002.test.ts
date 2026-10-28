@@ -62,8 +62,17 @@ import { mcnemarExactPValue as mcnemarExact, mcnemarExactPower, reduceCaseLevel 
 describe('CEB-002 offline validation (Owner stage-transition instruction §四)', () => {
   it('1+2. every case re-validates through the full Stage-G validator at an eligible tier; actor-visible leaks no judge keys; payloads are CEB-001 verbatim', () => {
     expect(manifest.caseCount).toBe(16);
+    // The archived study is FROZEN: judge-only/actor-visible hold the COMPILED
+    // projection, so the Stage-G revalidation consumes the frozen build input
+    // (challenge-suite.draft.json — the exact caseDefs prepare-ceb002-freeze
+    // compiled), and the compiled per-case hashes are pinned to the manifest.
+    const draftDoc = readJson(path.join(study, 'challenge-suite.draft.json'));
+    const caseDefById = new Map(draftDoc.cases.map((cd: any) => [cd.caseId, cd]));
     for (const c of manifest.cases) {
-      const caseDef = readJson(path.join(study, 'judge-only', `${c.caseId}.json`));
+      const caseDef = caseDefById.get(c.caseId);
+      const compiledJudge = readJson(path.join(study, 'judge-only', `${c.caseId}.json`));
+      expect(compiledJudge.inputHash).toBe(c.inputHash);
+      expect(compiledJudge.goldHash).toBe(c.goldHash);
       const plan = readJson(path.join(study, 'difficulty-tier-plan.json'));
       const seq = Number(c.caseId.split('-')[3]); // plan.tiers is ordered — index by case sequence
       const tierEntry = plan.tiers[seq - 1];
@@ -175,13 +184,25 @@ describe('CEB-002 offline validation (Owner stage-transition instruction §四)'
     }
   });
 
-  it('7. isolation — CEB-001 frozen hashes verify unchanged after the whole CEB-002 build', () => {
+  it('7. isolation — CEB-001 frozen hashes verify unchanged; CEB-002 is the FROZEN+EXECUTED archive (hash pinned, authorization window byte-pinned)', () => {
     const { execFileSync } = require('node:child_process');
     const out = execFileSync('node', [path.join(labRoot, 'freeze-challenge-study.mjs'), '--study', 'CEB-001', '--verify'], { encoding: 'utf8' });
     expect(out).toContain('VERIFY OK');
-    // CEB-002 stays DRAFT: no freeze artifacts, fail-closed authorization
-    expect(readJson(path.join(study, 'suite-manifest.json')).status).toBe('DRAFT-NOT-FROZEN');
-    expect(readJson(path.join(study, 'run-authorization.json')).status).toBe('NOT_AUTHORIZED');
-    expect(readJson(path.join(study, 'preregistration.draft.json')).status).toBe('DRAFT-NOT-IN-FORCE');
+    // CEB-002 frozen+executed (2026-10-27) and evidence-archived (2026-10-28):
+    // the frozen suite hash is pinned and the historical authorization's
+    // window is byte-pinned. Live-clock expiry (the natural-expiry MERGE GATE
+    // from the Owner P1-1 finding — budget exhaustion alone is NOT a
+    // revocation) is enforced in
+    // principle-learning-lab-archived-authorization-gate.test.ts.
+    const manifestNow = readJson(path.join(study, 'suite-manifest.json'));
+    const authNow = readJson(path.join(study, 'run-authorization.json'));
+    expect(manifestNow.suiteHash).toBe('02cbc15cfd9cf8a8b9e986950fdf722fcda6632604f4e62d4bd50ea0950d04f5');
+    expect(authNow.status).toBe('APPROVED');
+    // pinned byte-exact historical window (NOT clock-dependent here): any tampering
+    // breaks the pin
+    expect(authNow.validFrom).toBe('2026-10-27T12:22:47.763Z');
+    expect(authNow.validUntil).toBe('2026-10-28T12:22:47.763Z');
+    expect(readJson(path.join(study, 'preregistration.draft.json')).status).toBe('DRAFT');
+    expect(fs.existsSync(path.join(study, 'preregistration.json'))).toBe(true);
   });
 });
