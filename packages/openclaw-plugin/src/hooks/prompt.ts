@@ -3,15 +3,14 @@
 import * as fs from 'fs';
 import { randomUUID } from 'node:crypto';
 import type { PluginHookBeforePromptBuildEvent, PluginHookAgentContext, PluginHookBeforePromptBuildResult, PluginLogger } from '../openclaw-sdk.js';
-import { clearInjectedProbationIds, getSession, resetFriction, setInjectedProbationIds, decayGfi, getGfiDecayElapsed } from '../core/session-tracker.js';
+import { getSession, resetFriction, decayGfi, getGfiDecayElapsed } from '../core/session-tracker.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import type { ContextInjectionConfig } from '../types.js';
 // local-worker-routing module and its routing helpers removed entirely per PRI-448.
 // Routing guidance is no longer injected into prompts.
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
 import { PathResolver } from '../core/path-resolver.js';
-import { selectPrinciplesForInjection, DEFAULT_PRINCIPLE_BUDGET } from '../core/principle-injection.js';
-import { getCachedMaskedPrincipleSet, RUNTIME_V2_PRINCIPLE_BUDGET, getPromptModelCatalog, operatorDeclaredContextWindow, resolvePromptBudget, trimToBudget, renderPrinciplesToDirectives, formatCorePrinciplesList, resolveOutputLanguage, DEFAULT_OUTPUT_LANGUAGE } from '@principles/core/runtime-v2';
+import { RUNTIME_V2_PRINCIPLE_BUDGET, getPromptModelCatalog, operatorDeclaredContextWindow, resolvePromptBudget, trimToBudget, renderPrinciplesToDirectives, formatCorePrinciplesList, resolveOutputLanguage, DEFAULT_OUTPUT_LANGUAGE } from '@principles/core/runtime-v2';
 import type { PromptBudgetResolution, ResolvedOutputLanguage, PromptSelectionPolicy } from '@principles/core/runtime-v2';
 import { nextSessionTurnOrdinal } from '@principles/core/trajectory-store';
 import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
@@ -33,54 +32,12 @@ import {
   buildEmpathySilenceConstraint,
   extractUserMessageFromPrompt,
   assembleHeartbeatChecklist,
-  formatEvolutionPrinciples,
   assembleAppendSystemContext,
 } from './prompt-helpers.js';
 import { SignalCollectorHost, createSignalLlmClassifierFromConfig, isUserInteractionTrigger } from '../core/signal-collector-host.js';
 import { createLiveSignalKeywordStore } from '../core/signal-keyword-store.js';
 import { CorrectionCueLearner } from '../core/correction-cue-learner.js';
 import type { CachedFile, PromptHookApi } from './prompt-types.js';
-import type { InjectablePrinciple } from '../core/principle-injection.js';
-
-export interface LegacyPrinciplePromptSelection {
-  active: InjectablePrinciple[];
-  probation: InjectablePrinciple[];
-  content: string;
-  selectedIds: ReadonlySet<string>;
-  /** PRI-562 Phase 0: either budget-bounded selection dropped candidates. */
-  wasTruncated: boolean;
-}
-
-export function selectLegacyPrinciplesForPrompt(
-  workspaceDir: string,
-  reducer: Pick<WorkspaceContext['evolutionReducer'], 'getActivePrinciples' | 'getProbationPrinciples'>,
-  logger?: PluginLogger,
-): LegacyPrinciplePromptSelection {
-  const allActive = reducer.getActivePrinciples();
-  const allProbation = reducer.getProbationPrinciples();
-  let maskedIds = new Set<string>();
-  try {
-    maskedIds = getCachedMaskedPrincipleSet(workspaceDir);
-  } catch (error) {
-    const message = `[PD:Pruning] Failed to read review log — all principles injected: ${error instanceof Error ? error.message : String(error)}`;
-    if (logger?.info) logger.info(message);
-    else console.error(message);
-  }
-  const activeSelection = selectPrinciplesForInjection(allActive.filter((principle) => !maskedIds.has(principle.id)), DEFAULT_PRINCIPLE_BUDGET);
-  const probationSelection = selectPrinciplesForInjection(allProbation.filter((principle) => !maskedIds.has(principle.id)), 1000);
-  if (activeSelection.wasTruncated || probationSelection.wasTruncated) {
-    logger?.info?.(`[PD:Prompt] Principles truncated: active=${activeSelection.selected.length}/${allActive.length} (${activeSelection.totalChars}c), probation=${probationSelection.selected.length}/${allProbation.length} (${probationSelection.totalChars}c)`);
-  }
-  const active = activeSelection.selected;
-  const probation = probationSelection.selected;
-  return {
-    active,
-    probation,
-    content: active.length > 0 || probation.length > 0 ? formatEvolutionPrinciples(active, probation) : '',
-    selectedIds: new Set([...active, ...probation].map((principle) => principle.id)),
-    wasTruncated: activeSelection.wasTruncated || probationSelection.wasTruncated,
-  };
-}
 
 // ---------------------------------------------------------------------------
 // Static file cache — avoids re-reading rarely-changing files every message
@@ -313,7 +270,6 @@ export async function handleBeforePromptBuild(
   event: PluginHookBeforePromptBuildEvent,
   ctx: PluginHookAgentContext & { api?: PromptHookApi },
   sharedActivePrinciplePrompt?: ActivePrinciplePromptResult,
-  preparedLegacyPrinciples?: LegacyPrinciplePromptSelection,
 ): Promise<PluginHookBeforePromptBuildResult | void> {
   const {workspaceDir} = ctx;
   const logger = ctx.api?.logger;
@@ -467,8 +423,8 @@ export async function handleBeforePromptBuild(
   // All these go into System Prompt (WebUI-hidden, Prompt Cacheable)
 
   // Core principles: ALWAYS inject the canonical foundational axioms directly
-  // from the @principles/core registry (PRI-606). These are built-in axioms,
-  // NOT owner-approved learned principles — those flow via <evolution_principles>.
+  // from the @principles/core registry (PRI-606). Learned principles reach the
+  // agent through Runtime V2 activations (prependSystemContext), not here.
   // PRI-606/PRI-607: only the foundational layer is injected here (the
   // NON-NEGOTIABLE highest-priority block); operating principles reach the
   // agent via THINKING_OS directives.
@@ -565,39 +521,6 @@ export async function handleBeforePromptBuild(
   }
 
 
-  // PRI-562 Phase 0: legacy-block observability, hoisted so the injection
-  // event below can carry it. Populated best-effort inside the try; stays
-  // zero/absent when legacy assembly fails (rc-9: absence is observable via
-  // the block's own warn log).
-  let legacyInjectedIds: string[] = [];
-  let legacyTotalChars = 0;
-  let legacyTruncated = false;
-
-  // Evolution principles injection — budget-aware selection (SDK-QUAL-04)
-  let evolutionPrinciplesContent = '';
-  try {
-    const reducer = wctx.evolutionReducer;
-    const selection = preparedLegacyPrinciples ?? selectLegacyPrinciplesForPrompt(wctx.workspaceDir, reducer, logger);
-    const { probation } = selection;
-    legacyInjectedIds = [...selection.selectedIds];
-    legacyTotalChars = selection.content.length;
-    legacyTruncated = selection.wasTruncated;
-
-    if (ctx.sessionId) {
-      if (probation.length > 0) {
-        setInjectedProbationIds(ctx.sessionId, probation.map((p) => p.id), workspaceDir);
-      } else {
-        clearInjectedProbationIds(ctx.sessionId, workspaceDir);
-      }
-    }
-    evolutionPrinciplesContent = selection.content;
-  } catch (e) {
-    if (ctx.sessionId) {
-      clearInjectedProbationIds(ctx.sessionId, workspaceDir);
-    }
-    logger?.warn?.(`[PD:Prompt] Failed to load evolution principles: ${String(e)}`);
-  }
-
   let runtimeV2PrinciplesContent = '';
   const runtimeV2PrincipleIds = new Set<string>();
   let v2Truncated: boolean | undefined;
@@ -611,7 +534,9 @@ export async function handleBeforePromptBuild(
   let v2RoundOrdinal: number | undefined;
   let v2DroppedActivationIds: string[] | undefined;
   let v2OversizedActivationIds: string[] | undefined;
-  // Hoisted so the owner_approved_behavior_directives section can access them
+  // Owner-approved Runtime V2 principles are the single prompt-injection
+  // authority. Hoisted so the owner_approved_behavior_directives section can
+  // access them.
   let dedupedV2: Array<{ principleId: string; text: string; artifactId: string; activationId: string }> = [];
   // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: the plugin-local route's budget
   // resolution (resolved lazily below from THIS hook's model facts). The
@@ -629,32 +554,7 @@ export async function handleBeforePromptBuild(
       logger?.info?.(`[PD:RuntimeV2] Activation read warnings: ${v2Result.warnings.join('; ')}`);
     }
 
-    const legacyActiveIds = new Set<string>();
-    try {
-      const legacyActive = wctx.evolutionReducer.getActivePrinciples();
-      for (const p of legacyActive) {
-        legacyActiveIds.add(p.id);
-      }
-      const legacyProbation = wctx.evolutionReducer.getProbationPrinciples();
-      for (const p of legacyProbation) {
-        legacyActiveIds.add(p.id);
-      }
-    } catch {
-      // best-effort dedup
-    }
-
-    // PRI-562 Phase 0: cross-block duplication PRESSURE — v2 candidates
-    // suppressed because the legacy evolution block already carries them.
-    // Both injection paths exclude this overlap before injection (the dedup
-    // below on the plugin-local path; promptExcludePrincipleIds inside the
-    // host on the shared path), so these ids are NOT double-injected; they
-    // measure how often both channels would have carried the same principle.
-    // Always [] on the shared host-runtime path, where v2Result arrives empty
-    // and exclusion happens inside the host.
-    const crossBlockDuplicateIds = v2Result.principles
-      .filter((p) => legacyActiveIds.has(p.principleId))
-      .map((p) => p.principleId);
-    dedupedV2 = v2Result.principles.filter((p) => !legacyActiveIds.has(p.principleId));
+    dedupedV2 = v2Result.principles;
 
     if (sharedActivePrinciplePrompt) {
       runtimeV2PrinciplesContent = sharedActivePrinciplePrompt.additionalContext;
@@ -745,12 +645,10 @@ export async function handleBeforePromptBuild(
     // ── Emit structured observability event ──
     try {
       const eventLog = wctx.eventLog;
-      const allSharedPrinciplesExcluded = sharedActivePrinciplePrompt !== undefined
-        && sharedActivePrinciplePrompt.allValidatedPrinciplesExcluded;
       // PRI-537: pair the source arrays with the INJECTED subset — dedupedV2
-      // is the full post-dedup candidate list, so raw .map() mispairs under
-      // budget truncation (rc-6-adjacent). All three arrays derive from the
-      // same aligned list so index alignment cannot drift between them.
+      // is the full candidate list, so raw .map() mispairs under budget
+      // truncation (rc-6-adjacent). All three arrays derive from the same
+      // aligned list so index alignment cannot drift between them.
       const alignedPrinciples = alignInjectedPrinciples(dedupedV2, runtimeV2PrincipleIds);
       // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: the budget THIS injection ran
       // under — the shared route's own resolution (host-runtime resolved from
@@ -775,11 +673,7 @@ export async function handleBeforePromptBuild(
         skippedWarnings: v2Result.warnings,
         injectedCharCount: runtimeV2PrinciplesContent.length,
         budget: v2EventBudget,
-        legacySelectedCount: legacyInjectedIds.length,
-        legacyTotalChars,
-        legacyTruncated,
         ...(v2Truncated !== undefined ? { v2Truncated } : {}),
-        crossBlockDuplicateIds,
         // PRI-904: fair-rotation observability (bounded, optional — old
         // readers ignore; SPEC §10/§INV-O01 make truncation explainable).
         ...(v2SelectionPolicy !== undefined ? { selectionPolicy: v2SelectionPolicy } : {}),
@@ -801,18 +695,8 @@ export async function handleBeforePromptBuild(
         ...(sharedActivePrinciplePrompt?.budgetFallbackReason !== undefined ? { budgetFallbackReason: sharedActivePrinciplePrompt.budgetFallbackReason } : v2PromptBudget?.fallbackReason !== undefined ? { budgetFallbackReason: v2PromptBudget.fallbackReason } : {}),
         ...(runtimeV2PrincipleIds.size === 0
           ? {
-              skipReason: sharedActivePrinciplePrompt
-                ? allSharedPrinciplesExcluded
-                  ? 'all_deduped_against_legacy'
-                  : 'no_validated_activations'
-                : v2Result.principles.length === 0
-                ? 'no_validated_activations'
-                : 'all_deduped_against_legacy',
-              nextAction: allSharedPrinciplesExcluded
-                ? 'legacy evolution reducer already contains these principle IDs'
-                : v2Result.principles.length === 0
-                  ? 'check activations table for prompt channel rows with validated artifacts'
-                  : 'legacy evolution reducer already contains these principle IDs',
+              skipReason: 'no_validated_activations',
+              nextAction: 'check activations table for prompt channel rows with validated artifacts',
             }
           : {}),
       });
@@ -933,7 +817,6 @@ export async function handleBeforePromptBuild(
     intentBlock: intentBlockContent,
     workingMemory: workingMemoryContent || undefined,
     thinkingOs: thinkingOsContent || undefined,
-    evolutionPrinciples: evolutionPrinciplesContent || undefined,
     corePrinciples: principlesContent || undefined,
   });
 
@@ -957,7 +840,7 @@ export async function handleBeforePromptBuild(
   // ──── 8. SIZE GUARD ────
   // Delegates to @principles/core/prompt-builder/truncateInjectionToBudget
   // which handles priority stripping: project_context → intent_block →
-  // thinking_os → evolution_principles → reflection_log → reason: truncation → fallback.
+  // thinking_os → reflection_log → reason: truncation → fallback.
   // PRI-467: intentBlockContent is passed so the guard can strip INTENT by
   // exact match before falling back to the nuclear option.
   const result = truncateInjectionToBudget(
@@ -965,7 +848,7 @@ export async function handleBeforePromptBuild(
     prependContext,
     appendSystemContext,
     {
-      blocks: { projectContextContent, intentBlockContent, thinkingOsContent, evolutionPrinciplesContent },
+      blocks: { projectContextContent, intentBlockContent, thinkingOsContent },
     }
   );
 

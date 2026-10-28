@@ -135,16 +135,8 @@ describe('shared production active-principle prompt kernel', () => {
       source: 'test:production-prompt',
       additionalContext: expect.stringContaining('UNIQUE_SHARED_PRODUCTION_PROMPT_TEXT'),
     });
-    await expect(buildActivePrinciplePromptContext({
-      workspaceDir,
-      excludePrincipleIds: new Set(['P_SHARED_PROMPT']),
-    })).resolves.toMatchObject({
-      additionalContext: '',
-      principleIds: [],
-      excludedPrincipleIds: ['P_SHARED_PROMPT'],
-      excludedCount: 1,
-      exclusionReason: 'host_principle_overlap',
-      allValidatedPrinciplesExcluded: true,
+    await expect(buildActivePrinciplePromptContext({ workspaceDir })).resolves.toMatchObject({
+      principleIds: ['P_SHARED_PROMPT'],
     });
   });
 

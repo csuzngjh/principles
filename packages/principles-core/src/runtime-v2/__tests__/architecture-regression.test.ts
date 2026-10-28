@@ -237,7 +237,6 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   'telemetry-event.ts',
   'empathy-types.ts',
   'correction-types.ts',
-  'principle-injection.ts',
   'principle-compiler/template-generator.ts',
 
   // ── Thin Adapter Candidates — plugin I/O boundary wrappers ──────────────
@@ -432,7 +431,7 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     }
   });
 
-  it('known baseline count is self-consistent (95 files)', async () => {
+  it('known baseline count is self-consistent (94 files)', async () => {
     // Sanity check: if the baseline grows, update this number.
     // Prevents accidental baseline bloat from going unnoticed.
     // See docs/archive/reviews/plugin-core-inventory-2026-05.md §7
@@ -496,7 +495,10 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // workflow-funnel-loader.ts (stale duplicate of the core loader) and
     // thinking-os-parser.ts (moved to a test helper) — all three had zero
     // production importers (98 → 95).
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(95);
+    // 2026-10-28 legacy principle-injection removal: Removed
+    // principle-injection.ts (re-export shim of the legacy evolution-block
+    // selector, now unused) (95 → 94).
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(94);
   });
 });
 
@@ -1841,7 +1843,6 @@ describe('PRI-75/PRI-74/PRI-81 prompt-builder core boundary', () => {
     'prompt-builder/minimal-trigger.ts',
     'prompt-builder/size-guard.ts',
     'prompt-builder/types.ts',
-    'prompt-builder/principle-selection.ts',
     // PRI-74
     'prompt-builder/routing-guidance.ts',
     // PRI-81 Phase A
@@ -1873,10 +1874,6 @@ describe('PRI-75/PRI-74/PRI-81 prompt-builder core boundary', () => {
     expect(src).toContain('extractMessageContent');
     expect(src).toContain('isMinimalTrigger');
     expect(src).toContain('truncateInjectionToBudget');
-    // Phase 2
-    expect(src).toContain('formatPrinciple');
-    expect(src).toContain('selectPrinciplesForInjection');
-    expect(src).toContain('DEFAULT_PRINCIPLE_BUDGET');
     // PRI-74 routing guidance
     expect(src).toContain('classifyTaskKind');
     expect(src).toContain('buildReason');
@@ -1907,24 +1904,15 @@ describe('PRI-75/PRI-74/PRI-81 prompt-builder core boundary', () => {
     expect(src).toContain('DEFAULT_FOCUS_COMPRESSION_OPTIONS');
   });
 
-  it('principle-selection.ts does not import EvolutionReducer or WorkspaceContext', async () => {
-    const { readFileSync } = await import('node:fs');
+  it('plugin has no legacy principle-injection selection shim', async () => {
+    const { existsSync } = await import('node:fs');
     const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(__dirname, '../..', 'prompt-builder/principle-selection.ts'), 'utf-8');
-    expect(src).not.toContain('EvolutionReducer');
-    expect(src).not.toContain('WorkspaceContext');
-  });
-
-  it('plugin principle-injection.ts is a thin re-export of core', async () => {
-    const { readFileSync } = await import('node:fs');
-    const { resolve } = await import('node:path');
-    const src = readFileSync(resolve(__dirname, '../../../../openclaw-plugin/src/core/principle-injection.ts'), 'utf-8');
-    // Must re-export from core
-    expect(src).toContain('@principles/core/prompt-builder');
-    // Must NOT contain inline selectPrinciplesForInjection implementation
-    expect(src).not.toMatch(/function selectPrinciplesForInjection/i);
-    // Must NOT contain priority sorting logic
-    expect(src).not.toMatch(/PRIORITY_ORDER/i);
+    // The legacy evolution-block selector (plugin shim + core
+    // prompt-builder/principle-selection.ts) was removed with the legacy
+    // prompt-injection path. Runtime V2 activations are the single injection
+    // authority; re-introducing the shim would resurrect a second selector.
+    expect(existsSync(resolve(__dirname, '../../../../openclaw-plugin/src/core/principle-injection.ts'))).toBe(false);
+    expect(existsSync(resolve(__dirname, '../..', 'prompt-builder/principle-selection.ts'))).toBe(false);
   });
 
   it('plugin prompt.ts imports from @principles/core/prompt-builder', async () => {
@@ -3467,11 +3455,6 @@ describe('PRI-416: type single-ownership guards', () => {
     scan(coreSrcDir);
     return hits;
   }
-
-  it('InjectablePrinciple is defined exactly once in core/src/', () => {
-    const hits = findDefinitions(/export\s+interface\s+InjectablePrinciple\s*\{/);
-    expect(hits).toEqual(['prompt-builder/principle-selection.ts']);
-  });
 
   it('HybridLedgerStore is defined exactly once in core/src/', () => {
     const hits = findDefinitions(/export\s+interface\s+HybridLedgerStore\s*\{/);

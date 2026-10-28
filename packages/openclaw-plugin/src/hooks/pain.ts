@@ -7,9 +7,8 @@
  *   1. classifyToolCallOutcome    — determine failure/success + source
  *   2. buildToolCallObservation   — normalize event into observation
  *   3. handleFrictionTracking     — GFI, event log, trajectory recording
- *   4. handleProbationFeedback    — probation attribution + cleanup
- *   5. evaluatePainAdmission      — triage + gate evaluation
- *   6. emitPainIfAdmitted         — pain signal emission
+ *   4. evaluatePainAdmission      — triage + gate evaluation
+ *   5. emitPainIfAdmitted         — pain signal emission
  *
  * The manual pain path (toolName === 'pain') remains inline because it
  * has a different control flow (early return, no triage, no gate on cooldown).
@@ -42,7 +41,6 @@ import {
   handleFrictionTrackingForFailure,
   handleFrictionTrackingForSuccess,
   recordHygieneTracking,
-  handleProbationFeedback,
   evaluatePainAdmissionForToolCall,
   emitPainIfAdmitted,
 } from './after-tool-call-helpers.js';
@@ -399,23 +397,17 @@ export function handleAfterToolCall(
     latestFailureState = handleFrictionTrackingForFailure(
       sessionId, event, outcome, observation, gfiBefore, effectiveWorkspaceDir, config, wctx
     );
-
-    // ── Stage 4: Probation Feedback (Failure) ──
-    handleProbationFeedback(sessionId, event.toolName, effectiveWorkspaceDir, wctx, false);
   } else {
     // ── Stage 3b: Friction + Recording (Success) ──
     handleFrictionTrackingForSuccess(
       sessionId, event, outcome, observation, gfiBefore, effectiveWorkspaceDir, wctx
     );
 
-    // ── Stage 4: Probation Feedback (Success) ──
-    handleProbationFeedback(sessionId, event.toolName, effectiveWorkspaceDir, wctx, true);
-
-    // ── Stage 5b: Hygiene Tracking (Success only) ──
+    // ── Stage 4b: Hygiene Tracking (Success only) ──
     recordHygieneTracking(event, observation, wctx);
   }
 
-  // ── Stage 6: Pain Admission ──
+  // ── Stage 5: Pain Admission ──
   const admission = evaluatePainAdmissionForToolCall(
     event, observation, outcome, latestFailureState, sessionState, sessionId, effectiveWorkspaceDir, config
   );
@@ -424,7 +416,7 @@ export function handleAfterToolCall(
     return;
   }
 
-  // ── Stage 7: Emit Pain (only if admitted) ──
+  // ── Stage 6: Emit Pain (only if admitted) ──
   emitPainIfAdmitted(
     wctx, event, observation, outcome, admission, sessionId, ctx.agentId, effectiveWorkspaceDir, emitPainDetectedEvent
   );
@@ -432,7 +424,7 @@ export function handleAfterToolCall(
 
 /**
  * OpenClaw-owned enrichment for the shared ordinary after-tool kernel.
- * Session/GFI, event-log, probation, PROFILE and hygiene behavior stays here;
+ * Session/GFI, event-log, PROFILE and hygiene behavior stays here;
  * the shared runtime owns classification/admission and the atomic trajectory write.
  */
 export function prepareOrdinaryAfterToolCallForSharedRuntime(
@@ -462,10 +454,8 @@ export function prepareOrdinaryAfterToolCallForSharedRuntime(
   let latestFailureState: SessionState | undefined;
   if (outcome.isFailure) {
     latestFailureState = handleFrictionTrackingForFailure(sessionId, event, outcome, observation, gfiBefore, ctx.workspaceDir, wctx.config, wctx, { recordTrajectory: false });
-    handleProbationFeedback(sessionId, event.toolName, ctx.workspaceDir, wctx, false);
   } else {
     handleFrictionTrackingForSuccess(sessionId, event, outcome, observation, gfiBefore, ctx.workspaceDir, wctx, { recordTrajectory: false });
-    handleProbationFeedback(sessionId, event.toolName, ctx.workspaceDir, wctx, true);
     recordHygieneTracking(event, observation, wctx);
   }
   return {

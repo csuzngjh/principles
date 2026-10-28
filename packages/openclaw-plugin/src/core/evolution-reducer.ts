@@ -42,7 +42,6 @@ export interface EvolutionReducer {
 
   rollbackPrinciple(_principleId: string, _reason: string): void;
 
-  recordProbationFeedback(_principleId: string, _success: boolean): void;
   /**
    * Creates a new principle with generalized trigger/action from diagnostician.
    * Called after diagnostician analysis to create principle directly.
@@ -75,7 +74,6 @@ export interface EvolutionReducer {
 }
  
 
-const PROBATION_SUCCESS_THRESHOLD = 3;
 const CIRCUIT_BREAKER_THRESHOLD = 3;
 const PROBATION_MAX_AGE_DAYS = 30;
 
@@ -209,25 +207,6 @@ export class EvolutionReducerImpl implements EvolutionReducer {
         relatedPainId: p.source.painId,
       },
     });
-  }
-
-  recordProbationFeedback(principleId: string, success: boolean): void {
-    const p = this.principles.get(principleId);
-    if (!p || p.status !== 'probation') return;
-
-    if (success) {
-      p.validation.successCount += 1;
-      p.feedbackScore += 10;
-      if (p.validation.successCount >= PROBATION_SUCCESS_THRESHOLD) {
-        this.promote(principleId, 'auto_threshold');
-      }
-      return;
-    }
-
-    p.validation.conflictCount += 1;
-    if (p.validation.conflictCount >= 1) {
-      this.deprecate(principleId, 'conflict_detected');
-    }
   }
 
   /**

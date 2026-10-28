@@ -13,7 +13,6 @@ import {
   buildEmpathySilenceConstraint,
   assembleHeartbeatChecklist,
   formatCorePrinciples,
-  formatEvolutionPrinciples,
   assembleAppendSystemContext,
 } from '../../src/hooks/prompt-helpers.js';
 
@@ -197,47 +196,6 @@ describe('formatCorePrinciples', () => {
   });
 });
 
-// ─── formatEvolutionPrinciples ──────────────────────────────────────────────
-
-describe('formatEvolutionPrinciples', () => {
-  it('formats active principles with header', () => {
-    const active = [{ id: 'A1', text: 'Active rule' }];
-    const result = formatEvolutionPrinciples(active, []);
-    expect(result).toContain('Active principles:');
-    expect(result).toContain('- [A1] Active rule');
-    expect(result).not.toContain('Probation');
-  });
-
-  it('formats probation principles with status tag', () => {
-    const probation = [{ id: 'PB1', text: 'Probationary rule' }];
-    const result = formatEvolutionPrinciples([], probation);
-    expect(result).toContain('Probation principles (contextual, caution):');
-    expect(result).toContain('<principle status="probation" id="PB1">Probationary rule</principle>');
-  });
-
-  it('formats both active and probation', () => {
-    const active = [{ id: 'A1', text: 'Active' }];
-    const probation = [{ id: 'PB1', text: 'Probation' }];
-    const result = formatEvolutionPrinciples(active, probation);
-    expect(result).toContain('Active principles:');
-    expect(result).toContain('Probation principles');
-    expect(result).toContain('- [A1] Active');
-    expect(result).toContain('<principle status="probation" id="PB1">Probation</principle>');
-  });
-
-  it('returns empty string for both empty', () => {
-    expect(formatEvolutionPrinciples([], [])).toBe('');
-  });
-
-  it('escapes XML in principle content', () => {
-    const active = [{ id: 'A<&>', text: 'Use <tags>' }];
-    const result = formatEvolutionPrinciples(active, []);
-    expect(result).toContain('&lt;');
-    expect(result).toContain('&gt;');
-    expect(result).toContain('&amp;');
-  });
-});
-
 // ─── assembleAppendSystemContext ────────────────────────────────────────────
 
 describe('assembleAppendSystemContext', () => {
@@ -251,21 +209,18 @@ describe('assembleAppendSystemContext', () => {
       projectContext: 'PC_CONTENT',
       workingMemory: 'WM_CONTENT',
       thinkingOs: 'TO_CONTENT',
-      evolutionPrinciples: 'EP_CONTENT',
       corePrinciples: 'CP_CONTENT',
     });
-    // Order: behavioral_constraints → project_context → working_memory → thinking_os → evolution_principles → core_principles
+    // Order: behavioral_constraints → project_context → working_memory → thinking_os → core_principles
     const bcPos = result.indexOf('BC_CONTENT');
     const pcPos = result.indexOf('PC_CONTENT');
     const wmPos = result.indexOf('WM_CONTENT');
     const toPos = result.indexOf('TO_CONTENT');
-    const epPos = result.indexOf('EP_CONTENT');
     const cpPos = result.indexOf('CP_CONTENT');
     expect(bcPos).toBeLessThan(pcPos);
     expect(pcPos).toBeLessThan(wmPos);
     expect(wmPos).toBeLessThan(toPos);
-    expect(toPos).toBeLessThan(epPos);
-    expect(epPos).toBeLessThan(cpPos);
+    expect(toPos).toBeLessThan(cpPos);
   });
 
   it('wraps sections in XML tags', () => {
@@ -273,13 +228,11 @@ describe('assembleAppendSystemContext', () => {
       projectContext: 'PC',
       workingMemory: 'WM',
       thinkingOs: 'TO',
-      evolutionPrinciples: 'EP',
       corePrinciples: 'CP',
     });
     expect(result).toContain('<project_context>\nPC\n</project_context>');
     expect(result).toContain('WM');
     expect(result).toContain('<thinking_os>\nTO\n</thinking_os>');
-    expect(result).toContain('<evolution_principles>\nEP\n</evolution_principles>');
     expect(result).toContain('<core_principles>\nCP\n</core_principles>');
     expect(result).toContain('`<working_memory>`');
     expect(result).toContain('`<thinking_os>`');

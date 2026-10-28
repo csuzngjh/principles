@@ -114,8 +114,6 @@ vi.mock('../../src/core/session-tracker.js', () => ({
   getSession: vi.fn().mockImplementation(() => ({ currentGfi: sessionGfiValue })),
   resetFriction: vi.fn(),
   trackFriction: vi.fn(),
-  setInjectedProbationIds: vi.fn(),
-  clearInjectedProbationIds: vi.fn(),
   decayGfi: vi.fn(),
   getGfiDecayElapsed: vi.fn().mockReturnValue(0),
 }));
@@ -126,16 +124,6 @@ function setSessionGfi(gfi: number) {
 
 vi.mock('../../src/core/path-resolver.js', () => ({
   PathResolver: { getExtensionRoot: vi.fn().mockReturnValue('/fake/extension') },
-}));
-
-vi.mock('../../src/core/principle-injection.js', () => ({
-  selectPrinciplesForInjection: vi.fn().mockReturnValue({
-    selected: [],
-    wasTruncated: false,
-    breakdown: { p0: 0, p1: 0, p2: 0 },
-    totalChars: 0,
-  }),
-  DEFAULT_PRINCIPLE_BUDGET: 3000,
 }));
 
 vi.mock('../../src/core/empathy-keyword-matcher.js', () => ({

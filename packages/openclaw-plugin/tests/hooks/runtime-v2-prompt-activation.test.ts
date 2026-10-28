@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import * as principleInjection from '../../src/core/principle-injection.js';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -61,9 +60,9 @@ vi.mock('../../src/core/event-log.js', () => ({
 }));
 
 /**
- * PRI-562: mutable legacy-principle fixtures. The workspace-context mock's
- * evolutionReducer reads these arrays so individual tests can simulate a
- * principle existing in BOTH the legacy ledger and a v2 activation.
+ * Legacy reducer surface. Kept as a live fixture so tests can prove that
+ * reducer-reported principles are NOT injected (Runtime V2 activations are the
+ * single injection authority).
  */
 const { legacyTestState } = vi.hoisted(() => ({
   legacyTestState: {
@@ -109,24 +108,12 @@ vi.mock('../../src/core/session-tracker.js', () => ({
   getSession: vi.fn().mockReturnValue({ currentGfi: 20 }),
   resetFriction: vi.fn(),
   trackFriction: vi.fn(),
-  setInjectedProbationIds: vi.fn(),
-  clearInjectedProbationIds: vi.fn(),
   decayGfi: vi.fn(),
   getGfiDecayElapsed: vi.fn().mockReturnValue(0),
 }));
 
 vi.mock('../../src/core/path-resolver.js', () => ({
   PathResolver: { getExtensionRoot: vi.fn().mockReturnValue('/fake/extension') },
-}));
-
-vi.mock('../../src/core/principle-injection.js', () => ({
-  selectPrinciplesForInjection: vi.fn().mockReturnValue({
-    selected: [],
-    wasTruncated: false,
-    breakdown: { p0: 0, p1: 0, p2: 0 },
-    totalChars: 0,
-  }),
-  DEFAULT_PRINCIPLE_BUDGET: 3000,
 }));
 
 vi.mock('../../src/core/empathy-keyword-matcher.js', () => ({
@@ -816,7 +803,7 @@ describe('Runtime V2 prompt activation observability events', () => {
     expect(payload.nextAction).toContain('activations table');
   });
 
-  it('PRI-562: records cross-block duplication pressure when the legacy block already carries an activated principle', async () => {
+  it('legacy reducer principles never suppress or duplicate the v2 injection', async () => {
     const artifactId = 'art-v2-obs-dup-001';
     const principleId = 'princ-v2-obs-dup-001';
     insertValidatedPrincipleArtifact({ artifactId, principleId });
@@ -835,32 +822,19 @@ describe('Runtime V2 prompt activation observability events', () => {
       spy.mockClear();
 
       const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
-      // This file mocks selectPrinciplesForInjection to an empty selection for
-      // other scenarios; the legacy-observability assertions below need the
-      // REAL selector, so un-mock it for exactly this invocation.
-      const actual = await vi.importActual<typeof import('../../src/core/principle-injection.js')>(
-        '../../src/core/principle-injection.js',
-      );
-      vi.mocked(principleInjection.selectPrinciplesForInjection).mockImplementationOnce(
-        actual.selectPrinciplesForInjection,
-      );
-      await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
+      const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
 
       expect(spy).toHaveBeenCalled();
       const payload = spy.mock.calls[0][0];
-      // v2 injection is suppressed by dedup; the suppression is recorded as
-      // cross-block duplication PRESSURE instead of a double injection.
-      expect(payload.principleIds).not.toContain(principleId);
-      expect(payload.injectedCount).toBe(0);
-      expect(payload.skipReason).toBe('all_deduped_against_legacy');
-      expect(payload.crossBlockDuplicateIds).toEqual([principleId]);
-      // Legacy observability fields come from the reducer-backed selection.
-      expect(payload.legacySelectedCount).toBe(1);
-      expect(payload.legacyTotalChars).toBeGreaterThan(0);
-      expect(payload.legacyTruncated).toBe(false);
-      // Nothing was rendered from the v2 side this build, so the truncation
-      // flag is intentionally absent (optional field).
-      expect(payload.v2Truncated).toBeUndefined();
+      // The v2 activation is injected exactly once; the reducer's legacy copy is
+      // not rendered anywhere, so no cross-block duplication exists.
+      expect(payload.principleIds).toEqual([principleId]);
+      expect(payload.injectedCount).toBe(1);
+      expect(payload.skipReason).toBeUndefined();
+      expect(payload.crossBlockDuplicateIds).toBeUndefined();
+      expect(payload.legacySelectedCount).toBeUndefined();
+      expect(result?.prependSystemContext).toContain(TEST_PRINCIPLE_TEXT);
+      expect(result?.appendSystemContext ?? '').not.toContain('legacy duplicate of the same principle');
     } finally {
       legacyTestState.active.length = 0;
       legacyTestState.probation.length = 0;
@@ -1055,12 +1029,12 @@ describe('Runtime V2 owner-approved behavior directives section', () => {
     expect(prependCtx).not.toContain('ACTIVE BEHAVIOR DIRECTIVES');
   });
 
-  it('existing evolution_principles behavior for legacy principles remains intact', async () => {
+  it('legacy evolution_principles block is no longer rendered', async () => {
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
     const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
 
     expect(result).toBeDefined();
-    expect(result?.appendSystemContext).toBeDefined();
+    expect(result?.appendSystemContext ?? '').not.toContain('<evolution_principles>');
   });
 
   it('feature flag disabled path still skips Runtime V2 directives with structured reason', async () => {

@@ -72,27 +72,12 @@ vi.mock('../../src/core/session-tracker.js', () => ({
   getSession: vi.fn().mockImplementation(() => ({ currentGfi: sessionGfiValue })),
   resetFriction: vi.fn(),
   trackFriction: vi.fn(),
-  setInjectedProbationIds: vi.fn(),
-  clearInjectedProbationIds: vi.fn(),
   decayGfi: vi.fn(),
   getGfiDecayElapsed: vi.fn().mockReturnValue(0),
 }));
 
 vi.mock('../../src/core/path-resolver.js', () => ({
   PathResolver: { getExtensionRoot: vi.fn().mockReturnValue('/fake/extension') },
-}));
-
-vi.mock('../../src/core/principle-injection.js', () => ({
-  // PRI-606: pass-through so reducer-sourced active/probation principles reach
-  // the <evolution_principles> block (previously they squatted in
-  // <core_principles> via the broken injection path this fix removes).
-  selectPrinciplesForInjection: vi.fn().mockImplementation((principles: unknown[]) => ({
-    selected: principles,
-    wasTruncated: false,
-    breakdown: { p0: 0, p1: 0, p2: 0 },
-    totalChars: 0,
-  })),
-  DEFAULT_PRINCIPLE_BUDGET: 3000,
 }));
 
 vi.mock('../../src/core/empathy-keyword-matcher.js', () => ({
@@ -225,7 +210,7 @@ describe('PRI-291 Prompt Diet: MVP sections preserved', () => {
     expect(prepend).toContain('PD GOVERNANCE CONTEXT');
   });
 
-  it('active principles can still be injected when present', async () => {
+  it('reducer-reported active principles are not injected (Runtime V2 is the single authority)', async () => {
     const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
     (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValueOnce({
       workspaceDir: '/fake/workspace',
@@ -246,30 +231,15 @@ describe('PRI-291 Prompt Diet: MVP sections preserved', () => {
     const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
 
     expect(result?.appendSystemContext).toContain('<core_principles>');
-    expect(result?.appendSystemContext).toContain('Evolution principle still works');
+    expect(result?.appendSystemContext).not.toContain('Evolution principle still works');
   });
 
-  it('core principles can still be injected', async () => {
-    const { WorkspaceContext } = await import('../../src/core/workspace-context.js');
-    (WorkspaceContext.fromHookContext as ReturnType<typeof vi.fn>).mockReturnValueOnce({
-      workspaceDir: '/fake/workspace',
-      stateDir: '/fake/state',
-      resolve: (key: string) => `/fake/${key}`,
-      trajectory: { recordSession: vi.fn(), recordUserTurn: vi.fn() },
-      config: { get: vi.fn() },
-      eventLog: { recordRuntimeV2ActivationsInjected: vi.fn() },
-      evolutionReducer: {
-        getActivePrinciples: vi.fn().mockReturnValue([
-          { id: 'CP1', text: 'Core principle preserved' },
-        ]),
-        getProbationPrinciples: vi.fn().mockReturnValue([]),
-      },
-    });
-
+  it('core axioms are still injected', async () => {
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
     const result = await handleBeforePromptBuild(makeMinimalEvent(), makeCtx());
 
     expect(result?.appendSystemContext).toContain('<core_principles>');
+    expect(result?.appendSystemContext).toContain('T-01');
   });
 
 

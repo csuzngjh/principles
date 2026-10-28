@@ -10,10 +10,9 @@
  *   1. project_context (always stripped first when over limit)
  *   1.5. intent_block (PRI-467: always stripped, sits between project_context and thinking_os)
  *   2. thinking_os (only in diag mode)
- *   3. evolution_principles (only in diag mode)
- *   4. reflection_log (only in diag mode)
- *   5. reason: line truncation (only in diag mode, when reason: line > 129 chars)
- *   6. fallback: only replaces appendSystemContext — prependSystemContext and
+ *   3. reflection_log (only in diag mode)
+ *   4. reason: line truncation (only in diag mode, when reason: line > 129 chars)
+ *   5. fallback: only replaces appendSystemContext — prependSystemContext and
  *      prependContext are ALWAYS preserved (matching plugin behavior)
  *
  * Phase: PRI-75 Prompt Injection SDK Migration Phase 1
@@ -100,7 +99,7 @@ export function truncateInjectionToBudget(
     return { prependSystemContext: ps, prependContext: pc, appendSystemContext: ac, truncated: true, truncationLog };
   }
 
-  // Steps 2-4: only in diagnostician priority mode
+  // Steps 2-3: only in diagnostician priority mode
   if (inDiagMode) {
     // Step 2 — strip thinking_os
     if (blocks?.thinkingOsContent && ac.includes('<thinking_os>')) {
@@ -120,25 +119,7 @@ export function truncateInjectionToBudget(
       return { prependSystemContext: ps, prependContext: pc, appendSystemContext: ac, truncated: true, truncationLog };
     }
 
-    // Step 3 — strip evolution_principles
-    if (blocks?.evolutionPrinciplesContent && ac.includes('<evolution_principles>')) {
-      const marker = `<evolution_principles>\n${blocks.evolutionPrinciplesContent}\n</evolution_principles>`;
-      if (ac.includes(marker)) {
-        ac = ac.replace(marker, '<evolution_principles>\n[stripped: evolution_principles]\n</evolution_principles>');
-        truncationLog.push('evolution_principles');
-        totalSize = ps.length + pc.length + ac.length;
-      }
-    } else if (ac.includes('<evolution_principles>')) {
-      ac = ac.replace(/<evolution_principles>[\s\S]*?<\/evolution_principles>/, '<evolution_principles>\n[stripped: evolution_principles]\n</evolution_principles>');
-      truncationLog.push('evolution_principles');
-      totalSize = ps.length + pc.length + ac.length;
-    }
-
-    if (totalSize <= budget) {
-      return { prependSystemContext: ps, prependContext: pc, appendSystemContext: ac, truncated: true, truncationLog };
-    }
-
-    // Step 4 — strip reflection_log
+    // Step 3 — strip reflection_log
     if (ac.includes('<reflection_log>')) {
       ac = ac.replace(/<reflection_log>[\s\S]*?<\/reflection_log>/, '<reflection_log>\n[stripped: reflection_log]\n</reflection_log>');
       truncationLog.push('reflection_log');
@@ -149,7 +130,7 @@ export function truncateInjectionToBudget(
       return { prependSystemContext: ps, prependContext: pc, appendSystemContext: ac, truncated: true, truncationLog };
     }
 
-    // Step 5 — truncate reason: lines to 129 chars (only in diag mode)
+    // Step 4 — truncate reason: lines to 129 chars (only in diag mode)
     if (totalSize > budget) {
       const lines = pc.split('\n');
       const truncatedLines = lines.map((line) => {
@@ -167,7 +148,7 @@ export function truncateInjectionToBudget(
     }
   }
 
-  // Step 6 — FAIL-CLOSED: if still over budget, replace only appendSystemContext.
+  // Step 5 — FAIL-CLOSED: if still over budget, replace only appendSystemContext.
   // prependSystemContext and prependContext are ALWAYS preserved (matching plugin behavior).
   if (totalSize > budget) {
     const fallbackContext = `

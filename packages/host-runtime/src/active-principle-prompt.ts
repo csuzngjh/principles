@@ -27,10 +27,6 @@ export interface ActivePrinciplePromptResult {
   warnings: string[];
   budget: number;
   truncated: boolean;
-  excludedPrincipleIds: string[];
-  excludedCount: number;
-  exclusionReason?: 'host_principle_overlap';
-  allValidatedPrinciplesExcluded: boolean;
   /** PRI-904: budget-packing policy that produced this selection. */
   selectionPolicy?: PromptSelectionPolicy;
   /** PRI-904: candidates that reached the budget selector. */
@@ -59,7 +55,6 @@ export interface ActivePrinciplePromptResult {
 
 export interface PromptActivationCandidates {
   principles: ActivatedPrinciple[];
-  excludedPrincipleIds: string[];
   warnings: string[];
   /** true = prompt flag off or state.db missing — candidates are necessarily empty */
   aborted: boolean;
@@ -70,16 +65,13 @@ export interface PromptActivationCandidates {
 /**
  * PR #1844 follow-up: the activation READ half of buildActivePrinciplePromptContext,
  * exported so the console budget projection can share the exact same input
- * selection (FIFO activations → artifact resolve → exclude partition) without
- * duplicating logic.
+ * selection (FIFO activations → artifact resolve) without duplicating logic.
  */
 export async function readPromptActivationCandidates(input: {
   workspaceDir: string;
-  excludePrincipleIds?: ReadonlySet<string>;
 }): Promise<PromptActivationCandidates> {
   const warnings: string[] = [];
   const principles: ActivatedPrinciple[] = [];
-  const excludedPrincipleIds: string[] = [];
   const config = loadPdConfigForPlugin(input.workspaceDir);
   if (!config.ok) {
     warnings.push(...config.errors.map((error) => `config_invalid: ${error.reason}; nextAction=${error.nextAction}`));
@@ -89,7 +81,7 @@ export async function readPromptActivationCandidates(input: {
   const abstractionLayerEnabled = flags.abstraction_layer_v1?.enabled === true;
   if (!promptFlag?.enabled) {
     warnings.push('prompt_feature_disabled; nextAction=set features.prompt.enabled=true in .pd/config.yaml');
-    return { principles, excludedPrincipleIds, warnings, aborted: true, selfReportEnabled: false, abstractionLayerEnabled };
+    return { principles, warnings, aborted: true, selfReportEnabled: false, abstractionLayerEnabled };
   }
   // PRI-532: agent self-report instruction rides the directive template when
   // the flag is on (flag-off keeps the template byte-identical).
@@ -99,7 +91,7 @@ export async function readPromptActivationCandidates(input: {
   const stateDbPath = path.join(input.workspaceDir, '.pd', 'state.db');
   if (!fs.existsSync(stateDbPath)) {
     warnings.push('activation_db_not_found; nextAction=initialize_workspace_runtime_state');
-    return { principles, excludedPrincipleIds, warnings, aborted: true, selfReportEnabled, abstractionLayerEnabled };
+    return { principles, warnings, aborted: true, selfReportEnabled, abstractionLayerEnabled };
   }
   try {
     connection = new SqliteConnection({ workspaceDir: input.workspaceDir, readonly: true, bootstrapIfMissing: false });
@@ -128,11 +120,7 @@ export async function readPromptActivationCandidates(input: {
         warnings.push(resolved.warning);
         continue;
       }
-      if (input.excludePrincipleIds?.has(resolved.principle.principleId)) {
-        excludedPrincipleIds.push(resolved.principle.principleId);
-      } else {
-        principles.push(resolved.principle);
-      }
+      principles.push(resolved.principle);
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -140,12 +128,11 @@ export async function readPromptActivationCandidates(input: {
   } finally {
     connection?.close();
   }
-  return { principles, excludedPrincipleIds, warnings, aborted: false, selfReportEnabled, abstractionLayerEnabled };
+  return { principles, warnings, aborted: false, selfReportEnabled, abstractionLayerEnabled };
 }
 
 export async function buildActivePrinciplePromptContext(input: {
   workspaceDir: string;
-  excludePrincipleIds?: ReadonlySet<string>;
   /**
    * PRI-904 fair-rotation round key (derive via roundKeyFromRunIdentity from
    * the host run/turn id). Absent → legacy FIFO prefix policy (rollback /
@@ -165,13 +152,12 @@ export async function buildActivePrinciplePromptContext(input: {
   // or the fixed-fallback default — never a per-line constant read.
   const promptBudget = input.promptBudget ?? resolvePromptBudget();
   const { budgetChars } = promptBudget;
-  const { principles, excludedPrincipleIds, warnings, aborted, selfReportEnabled } =
+  const { principles, warnings, aborted, selfReportEnabled } =
     await readPromptActivationCandidates(input);
   if (aborted) {
     return {
       additionalContext: '', principleIds: [], activationIds: [], artifactIds: [], warnings,
-      budget: budgetChars, truncated: false, excludedPrincipleIds,
-      excludedCount: excludedPrincipleIds.length, allValidatedPrinciplesExcluded: false,
+      budget: budgetChars, truncated: false,
       selectionPolicy: 'legacy_fifo_prefix_v1', eligibleCount: 0,
       budgetCapacitySource: promptBudget.capacitySource,
       budgetCapacityStatus: promptBudget.capacityStatus,
@@ -193,9 +179,9 @@ export async function buildActivePrinciplePromptContext(input: {
   const selectionPolicy: PromptSelectionPolicy =
     roundKey === undefined || principles.length === 0 ? 'legacy_fifo_prefix_v1' : 'fair_rotation_v1';
   const n = principles.length;
-  // Guard on the policy, not just the key: an all-excluded candidate list has
-  // n === 0 and must not emit a NaN start (core trimToBudget omits the field
-  // for empty input — parity requires the same here).
+  // Guard on the policy, not just the key: an empty candidate list has n === 0
+  // and must not emit a NaN start (core trimToBudget omits the field for empty
+  // input — parity requires the same here).
   const rotationStartIndex = selectionPolicy === 'fair_rotation_v1' && roundKey !== undefined
     ? ((roundKey % n) + n) % n
     : undefined;
@@ -243,10 +229,6 @@ export async function buildActivePrinciplePromptContext(input: {
     warnings,
     budget: budgetChars,
     truncated,
-    excludedPrincipleIds,
-    excludedCount: excludedPrincipleIds.length,
-    allValidatedPrinciplesExcluded: excludedPrincipleIds.length > 0 && principles.length === 0,
-    ...(excludedPrincipleIds.length > 0 ? { exclusionReason: 'host_principle_overlap' as const } : {}),
     selectionPolicy,
     eligibleCount: principles.length,
     ...(rotationStartIndex !== undefined ? { rotationStartIndex } : {}),

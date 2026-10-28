@@ -1,6 +1,6 @@
 {
  "barrel": "src/index.ts",
- "count": 197,
+ "count": 196,
  "names": [
   "AGENT_IDS",
   "AcquireLeaseOptions",
@@ -94,7 +94,6 @@
   "PDTaskStatusSchema",
   "PD_ERROR_CATEGORIES",
   "ProjectFocusMode",
-  "PromptInjectionPart",
   "RUNTIME_V2_SCHEMA_VERSION",
   "RecommendationKind",
   "RecommendationKindSchema",
