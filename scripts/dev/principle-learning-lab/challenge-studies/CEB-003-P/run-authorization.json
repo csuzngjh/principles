@@ -1,0 +1,48 @@
+{
+  "schema": "challenge-stage-authorization.v1",
+  "stage": "R",
+  "status": "APPROVED",
+  "studyId": "CEB-003-P",
+  "suiteHash": "dec7ba6385a3cc0ced1670a3a5f851cd90f1b720b1256829891efcc1ad748977",
+  "mappingHash": "213090daecf0cbc9abfc51ca46641e4e3b835730ba9d9ec771118aaed9521290",
+  "graderHash": "eef38484c4f8ace059c178fcb0697c68154277073b7ab7a9d8c0e608ae383e79",
+  "studyPlanHash": "413673beb360981cb680b58ab4edd659ab9543d9da1bd0383aaaf937ad7eb3a1",
+  "requestedActorIdentity": "glm-5.3-flash",
+  "executionMode": "F1-direct-model",
+  "arms": [
+    "A",
+    "B",
+    "C"
+  ],
+  "cases": [
+    "CEB-002-L1-01",
+    "CEB-002-L1-02",
+    "CEB-002-L1-03",
+    "CEB-002-L2-04",
+    "CEB-002-L2-05",
+    "CEB-002-L2-06",
+    "CEB-002-L2-07",
+    "CEB-002-L3-08",
+    "CEB-002-L3-09",
+    "CEB-002-L3-10",
+    "CEB-002-L3-11",
+    "CEB-002-B1-12",
+    "CEB-002-B2-13",
+    "CEB-002-B3-14",
+    "CEB-002-B4-15",
+    "CEB-002-B5-16"
+  ],
+  "repetitions": [
+    "1",
+    "2"
+  ],
+  "attemptCap": 96,
+  "requestCap": 960,
+  "requestTimeoutMs": 480000,
+  "maxRequestsPerAttempt": 10,
+  "issuedBy": "Owner（2026-10-28 CEB-003-P 三合一启动 Goal 指令：冻结+预注册生效+96 单元真实执行一次批准。16 题=CEB-002 冻结题集逐字节复用；三臂=A 无注入 / B CEB-001 冻结原则原文 / C-prime 自然经验叙事对照 v1.1.0（SHA 116fbaea…，非匹配摘要、无匹配标准宣称）；96 attempts/960 requests 上限、每单元 1 attempt、每 attempt ≤10 requests 机器强制（maxRequestsPerAttempt 门禁绑定）、480000ms socket-inactivity、bigmodel Coding Plan 订阅通道、服务端身份须观测 glm-5.3-flash、并发 1 串行逐单元调度、每批 8 单元批间七项核验、停止条件=连续两单元 UNKNOWN/批 UNKNOWN>40% NOT_EVALUABLE/身份异常/哈希漂移/账本不一致/预算越界/未授权执行；预注册混杂=B vs C-prime 内容抽象×语言形式不可分离；执行基线=ai/adhoc-20261028-ceb003p-pilot-ab383c-research-pilot @ aec88b320a；由执行代理按 Owner Goal 指令落为机器可校验记录，签发 2026-10-27T17:13:04.371Z）",
+  "validFrom": "2026-10-27T17:13:04.371Z",
+  "validUntil": "2026-10-28T17:13:04.371Z",
+  "revoked": false,
+  "halted": false
+}
