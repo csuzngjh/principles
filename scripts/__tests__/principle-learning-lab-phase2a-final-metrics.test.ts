@@ -10,7 +10,9 @@
 //   - determinism: two invocations differ only in generatedAt
 
 import { describe, expect, it } from 'vitest';
+import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { computePhase2aFinalMetrics } from '../dev/principle-learning-lab/stage-g-phase2a-final-metrics.mjs';
 
@@ -71,5 +73,31 @@ describe('phase 2a final metrics recomputation', () => {
     const a = computePhase2aFinalMetrics({ studyDir, now: () => t0 });
     const b = computePhase2aFinalMetrics({ studyDir, now: () => t0 });
     expect(JSON.stringify(a)).toBe(JSON.stringify(b));
+  });
+});
+
+describe('phase 2a protocol v2 freeze invariants (OWNER-DECISION-2026-10-28-PHASE2A)', () => {
+  it('frozen protocol is sha256-bound to the untouched draft and carries the three Owner freeze conditions', () => {
+    const preflight = path.join(studyDir, 'stage-g-preflight');
+    const draftBytes = fs.readFileSync(path.join(preflight, 'protocol-b0-b1-e-comparison.draft.json'));
+    const draft = JSON.parse(draftBytes.toString('utf8'));
+    const frozen = JSON.parse(fs.readFileSync(path.join(preflight, 'protocol-b0-b1-e-comparison.frozen.v2.json'), 'utf8'));
+    // pre-freeze record stays untouched as history
+    expect(draft.status).toBe('PROPOSED_NOT_APPROVED');
+    expect(frozen.status).toBe('FROZEN_APPROVED');
+    // byte binding: the draft the frozen file claims must be the draft on disk
+    expect(frozen.frozen.sourceDraft.sha256).toBe(createHash('sha256').update(draftBytes).digest('hex'));
+    // Owner's three freeze conditions carried verbatim-count
+    expect(frozen.frozen.conditions).toHaveLength(3);
+    // frozen content equals draft except the declared delta fields (status/frozenAt/revisionNote/frozen)
+    expect(frozen.conclusionBoundaries).toEqual(draft.conclusionBoundaries);
+    expect(frozen.arms).toEqual(draft.arms);
+    expect(frozen.metrics).toEqual(draft.metrics);
+    expect(frozen.fairnessContract).toEqual(draft.fairnessContract);
+    expect(frozen.verifiedLegalSpace).toEqual(draft.verifiedLegalSpace);
+    // decision record exists and adjudicates A1
+    const decision = fs.readFileSync(path.join(preflight, 'OWNER-DECISION-2026-10-28-PHASE2A.md'), 'utf8');
+    expect(decision).toContain('ENUMERATION_SUFFICIENT');
+    expect(decision).toContain('NOT_AUTHORIZED');
   });
 });

@@ -2,7 +2,7 @@
 
 > **文档性质**：PRI-1035（[PE2a.2] Phase 2a：执行 Examiner vs 确定性枚举质量/成本试点）的可复核终局裁定依据。
 > **SPEC 契约**：`SPEC-PD-EXAMINER-001` v0.4 §5.3/§5.3A（B0/B1/E 三组对照）、§12.3（Examiner 增量验收）、§12.5.17（Examiner 不优于枚举 → `ENUMERATION_SUFFICIENT`）、Phase 2a DoD（对照可复核；报告质量、人工成本与失败；可得 `ENUMERATION_SUFFICIENT`）。
-> **状态**：`OWNER_DECISION_REQUIRED`——本报告形成可审计裁定依据；`ENUMERATION_SUFFICIENT` 与否的最终裁定权在 Owner（依据 `OWNER-DECISION-2026-10-27.md` §3 的明确保留）。本报告不将 PRI-1035 或 PRI-1024 置 Done。
+> **状态**：`ADJUDICATED — ENUMERATION_SUFFICIENT（Owner 2026-10-28 裁定，A1 采纳）+ 对照协议 v2 冻结（附条件）`——决策记录见 `stage-g-preflight/OWNER-DECISION-2026-10-28-PHASE2A.md` 与本文 §10；冻结协议文件 `protocol-b0-b1-e-comparison.frozen.v2.json`。
 > **授权边界**：E 臂真实生成已按 PR #2174 决策记录暂停；Stage G 当前 NOT_AUTHORIZED。本报告全部内容为离线复算，零新增真实模型请求。
 
 ---
@@ -92,3 +92,10 @@
 - 新增复算测试 `principle-learning-lab-phase2a-final-metrics.test.ts`（含确定性双跑断言）。
 - 入库孤儿资产：B1 公平性套件（18 项）、AMD transport 套件（15 项）、round1/round3 执行驱动与 round1 指标脚本（PR #2136 时代遗留未跟踪文件，数据记录此前已在库）。
 - 零生产代码改动；CEB-001 四冻结哈希不变（`freeze --verify` 在验证清单中）；零网络。
+
+## 10. 决策收口（2026-10-28，Owner 裁定）
+
+- **决策 1（§7 待裁事项 A）**：**A1 `ENUMERATION_SUFFICIENT` 采纳**——确定性枚举（B1 v2）为当前阶段出题路径；不恢复当前 E 臂；Stage G 真实生成授权维持 NOT_AUTHORIZED。Owner 理由全文记录于 `stage-g-preflight/OWNER-DECISION-2026-10-28-PHASE2A.md`。
+- **决策 2（§7 待裁事项 B）**：**对照协议 v2 批准冻结（附条件）**——冻结文件 `protocol-b0-b1-e-comparison.frozen.v2.json`（源草案 sha256 `78a50342…` 绑定、原样保留）；冻结三条件（非最优宣称/修改须理由+版本+可比较验证/禁 results-driven 调基线）随冻结文件生效。
+- **未决**：PRI-1039 延期认可（PR #2197）与 PRI-1038 F2 授权不在本次裁定范围。
+- PRI-1035 验收三条件（可复核报告+明确推荐+全量成本记账）随本 PR 与决策记录齐备；工单收口随 PR 合并完成。
