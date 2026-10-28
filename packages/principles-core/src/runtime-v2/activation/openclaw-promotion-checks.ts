@@ -22,6 +22,15 @@ interface OpenClawPromotionCheckInput {
   ownerIdentityConfigured: boolean;
   safetyControlsEnabled: boolean;
   hostContract: unknown;
+  /**
+   * SPEC-RULECODE-HOST-PROMOTION-001 B: the contract version the workspace
+   * host resolver handed out for THIS promotion target. The shape validator
+   * only accepts a contract whose version matches — a Codex (or WorkBuddy)
+   * workspace can no longer present the OpenClaw legacy contract (or vice
+   * versa) as its capability authority. Defaults to the OpenClaw legacy
+   * version so pre-existing callers keep their exact behavior.
+   */
+  expectedHostContractVersion?: string;
   existingLiveArtifacts: readonly PIArtifactSnapshot[];
   validateProductionArtifact(artifact: PIArtifactSnapshot): Promise<{ ok: boolean }>;
 }
@@ -34,12 +43,14 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
-function validateHostContract(value: unknown): HostLivenessContract | null {
+const DEFAULT_HOST_CONTRACT_VERSION = 'openclaw-legacy@1';
+
+function validateHostContract(value: unknown, expectedVersion: string): HostLivenessContract | null {
   if (!isRecord(value)) return null;
   const {outOfBandControls} = value;
   const {protectedCapabilities} = value;
   const {neutralProbes} = value;
-  if (value.version !== 'openclaw-legacy@1'
+  if (value.version !== expectedVersion
     || value.supportsShadowEvidence !== true
     || !Array.isArray(outOfBandControls)
     || !Array.isArray(protectedCapabilities)
@@ -76,7 +87,7 @@ function validateHostContract(value: unknown): HostLivenessContract | null {
     probe => probe.capabilityId === capability,
   ))) return null;
   return {
-    version: 'openclaw-legacy@1',
+    version: expectedVersion,
     supportsShadowEvidence: true,
     outOfBandControls: requiredControls,
     protectedCapabilities: protectedCapabilityList,
@@ -131,7 +142,10 @@ export async function collectOpenClawPromotionChecks(
   ]);
   const scopeAvoidsProtectedCapabilities = bounded
     && affectedTools.every(value => !protectedCapabilityIds.has(value));
-  const contract = validateHostContract(input.hostContract);
+  const contract = validateHostContract(
+    input.hostContract,
+    input.expectedHostContractVersion ?? DEFAULT_HOST_CONTRACT_VERSION,
+  );
 
   let probesPassed = false;
   if (contract && scopeAvoidsProtectedCapabilities) {

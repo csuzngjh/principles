@@ -19,8 +19,8 @@ import * as path from 'path';
 import * as os from 'os';
 import { ActivationsConsoleModel } from '../../src/server/models/ActivationsConsoleModel.js';
 import { updateFeatureFlag } from '../../src/server/config/pd-config-store.js';
-import { SqliteConnection } from '@principles/core/runtime-v2';
-import { saveHostToolDeclaration } from '@principles/host-runtime';
+import { SqliteConnection, collectOpenClawPromotionChecks } from '@principles/core/runtime-v2';
+import { saveHostToolDeclaration, OPENCLAW_HOST_LIVENESS_CONTRACT } from '@principles/host-runtime';
 import type { GovernanceAuditWriter } from 'principles-disciple/governance-audit';
 
 // ── Test Setup ───────────────────────────────────────────────────────────────
@@ -438,10 +438,14 @@ describe('ActivationsConsoleModel — Owner review', () => {
     expect(review.readiness.status).not.toBe('ready');
   });
 
-  it('PRI-813 (Test F): a Codex-declared workspace no longer inherits the OpenClaw capability claim — readiness and runtimeCapability report the truth', async () => {
-    // Before PRI-813 this exact fixture reported runtime_compatibility /
+  it('SPEC-HOST-PROMOTION B: a Codex-declared workspace resolves its OWN evidence-backed contract — never the OpenClaw claim; wrong-host contracts still fail runtime_compatibility', async () => {
+    // Before PRI-813 this fixture reported runtime_compatibility /
     // runtime_shadow_evidence as PASSED (the OpenClaw contract was passed
-    // unconditionally), and only the sample-count gate ever refused.
+    // unconditionally). SPEC-RULECODE-HOST-PROMOTION-001 B then gave Codex
+    // its OWN contract, so the truth this test locks in moves: the Codex
+    // workspace now reports codex-v2@1 (NOT openclaw-legacy@1), and the
+    // shape validator bound to the resolver's version rejects a wrong-host
+    // contract (the false-claim guard the original Test F existed for).
     const conn = new SqliteConnection({ workspaceDir, readonly: false });
     const db = conn.getDb();
     const now = '2026-09-16T06:00:00.000Z';
@@ -463,16 +467,27 @@ describe('ActivationsConsoleModel — Owner review', () => {
     const review = await model.getOwnerReview('act-codex-813');
 
     expect(review.readiness.status).not.toBe('ready');
-    // The overall result short-circuits to 'unavailable' while shadow
-    // telemetry is absent; the check-level capability truth rides in the
-    // evidence snapshot's safety gate results.
-    const failedIds = review.readiness.evidenceSnapshot.safetyGateResults
-      .filter(check => check.status === 'failed')
-      .map(check => check.checkId);
-    expect(failedIds).toContain('runtime_compatibility');
-    expect(failedIds).toContain('runtime_shadow_evidence');
-    expect(failedIds).toContain('emergency_controls');
-    expect(review.runtimeCapability).toEqual({ hostRuntimeVersion: 'promotion_host_unsupported', shadowEvidence: false });
+    // The Codex contract is real now: the capability surface reports the
+    // Codex runtime version and shadow support from Codex's own contract,
+    // never from the OpenClaw legacy claim.
+    expect(review.runtimeCapability).toEqual({ hostRuntimeVersion: 'codex-v2@1', shadowEvidence: true });
+    const byId = new Map(review.readiness.evidenceSnapshot.safetyGateResults.map(check => [check.checkId, check.status]));
+    expect(byId.get('runtime_compatibility')).toBe('passed');
+    // The false-claim guard survives as a version-binding check: presenting
+    // the OpenClaw legacy contract for this Codex workspace must fail
+    // runtime_compatibility (wrong-host capability authority).
+    const wrongHostChecks = await collectOpenClawPromotionChecks(
+      { artifactId: 'artifact-codex-813', artifactKind: 'rule', sourceTaskId: 'task-codex-813', sourcePrincipleId: null, sourceRuleId: 'rule-codex-813', lineageArtifactIds: ['parent-1'], validationStatus: 'validated', contentJson: JSON.stringify({ implementationCode: 'export function evaluate(){ return { decision: "allow", matched: false, reason: "neutral" }; }', affectedTools: ['write'] }), createdAt: now, updatedAt: now },
+      {
+        ownerIdentityConfigured: true,
+        safetyControlsEnabled: true,
+        hostContract: OPENCLAW_HOST_LIVENESS_CONTRACT,
+        expectedHostContractVersion: 'codex-v2@1',
+        existingLiveArtifacts: [],
+        validateProductionArtifact: async () => ({ ok: true }),
+      },
+    );
+    expect(wrongHostChecks.find(check => check.checkId === 'runtime_compatibility')?.status).toBe('failed');
   });
 
   it('PRI-813 (Test G positive): an OpenClaw-declared workspace keeps the truthful OpenClaw capability — host checks stay passed', async () => {

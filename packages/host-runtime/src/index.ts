@@ -389,6 +389,7 @@ export function createProductionHostRuntime(
 export * from './behavior-example-pack-assembler.js';
 export * from './behavior-history.js';
 export * from './codex-rule-context-provider.js';
+export * from './workbuddy-rule-context-provider.js';
 export { createWorkspaceBehaviorEvidencePort } from './workspace-behavior-evidence.js';
 
 export * from './explicit-owner-statement-prefix.js';

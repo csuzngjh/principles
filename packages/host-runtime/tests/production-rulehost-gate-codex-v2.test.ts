@@ -290,6 +290,30 @@ describe('production RuleHost gate — Codex V2 artifact qualification', () => {
     }
   });
 
+  it('SPEC §11.3: the SAME qualification gates WorkBuddy — a Codex-stamped artifact never auto-executes on the WorkBuddy host (symmetric cross-host refusal)', async () => {
+    const workspaceDir = tempWorkspace();
+    const connection = await seedCodexRule(workspaceDir, {
+      action: 'code_tool_hook_shadow_activate',
+      contract: { version: 1, contextVersion: 2, hostKinds: ['codex'] },
+      approved: true,
+    });
+    try {
+      const calls: { ruleCount: number; input: unknown }[] = [];
+      const workbuddyGate = createProductionRuleHostGate({
+        hostKind: 'workbuddy',
+        projectDir: 'C:/pd-workbuddy-workspace',
+        ruleContextProvider: () => AVAILABLE_CONTEXT,
+        implementationRuntime: trackingRuntime(calls),
+      });
+      const result = await workbuddyGate(gateEvent(workspaceDir, '/etc/shadow'));
+      expect(result.decision).toBe('allow');
+      expect(result.warnings?.join('\n')).toContain('workbuddy_rule_context_v2_unqualified');
+      expect(calls).toEqual([]);
+    } finally {
+      connection.close();
+    }
+  });
+
   it('runs qualified shadow V2 for observation while a block result cannot deny the host action', async () => {
     const workspaceDir = tempWorkspace();
     const connection = await seedCodexRule(workspaceDir, {
@@ -305,6 +329,9 @@ describe('production RuleHost gate — Codex V2 artifact qualification', () => {
       expect(calls.some((call) => call.ruleCount === 1)).toBe(true);
       expect(JSON.stringify(result.metadata?.evaluations)).toContain('"decision":"block"');
       expect(JSON.stringify(result.metadata?.evaluations)).toContain('"activationMode":"shadow"');
+      // SPEC-RULECODE-HOST-PROMOTION-001 B3: every evaluation entry carries
+      // its producing host's attribution for per-host shadow accounting.
+      expect(JSON.stringify(result.metadata?.evaluations)).toContain('"hostKind":"codex"');
     } finally {
       connection.close();
     }

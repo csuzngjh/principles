@@ -20,6 +20,13 @@ import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import Database from 'better-sqlite3';
 import { admitBareHostPains } from '@principles/host-runtime';
+import {
+  SqliteActivationSafetyStore,
+  SqliteApprovalQueueStore,
+  SqliteConnection,
+  computeArtifactDigest,
+  mapPiArtifactRow,
+} from '@principles/core/runtime-v2';
 import { runEntry } from './helpers/hook-runner.js';
 import {
   activationArtifact,
@@ -298,7 +305,7 @@ describe('degraded / unsupported never masquerade as healthy', () => {
     expect(fs.existsSync(path.join(project, '.pd'))).toBe(false);
   });
 
-  it('v2 rules stay suspended with the structured workbuddy-unsupported warning (PRI-780 boundary)', async () => {
+  it('SPEC §11.3/H13: a v2 artifact NOT stamped for WorkBuddy stays suspended with the structured qualification warning (cross-host artifact refusal)', async () => {
     const home = makeHome();
     const governance = makeGovernance(home, { workbuddyFlag: true, ruleContextV2Flag: true });
     const v2Code = liveRuleCode.replace(/601/g, '606').replace('wb-protected-601', 'wb-v2ctx-606');
@@ -309,11 +316,86 @@ describe('degraded / unsupported never masquerade as healthy', () => {
     });
     const project = makeProjectDir(home, 'v2');
     const result = runEntry(home, JSON.stringify(fixturePayload('pre-tool-use-write.json', { cwd: project, tool_input: { file_path: path.join(project, 'wb-v2ctx-606.txt'), content: 'x' } })), 'PreToolUse');
-    // The v2 rule would DENY if loaded; allow + both warnings proves suspension.
+    // The v2 rule would DENY if loaded; allow + the precise qualification
+    // warning proves the WorkBuddy gate refuses to auto-execute a historical
+    // V2 artifact that was never issued for this host (SPEC §11.3) — the
+    // pre-SPEC behavior (context suspension) masked the sharper reason.
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('workbuddy_rule_context_v2_unqualified: activation=act-art-v2-606');
+  });
+
+  it('SPEC §6/H08: a WorkBuddy-stamped, Owner-approved v2 artifact with no session history suspends via the provider unavailable context — never context-blind', async () => {
+    const home = makeHome();
+    const governance = makeGovernance(home, { workbuddyFlag: true, ruleContextV2Flag: true });
+    makeTrajectory(governance);
+    const v2Code = liveRuleCode.replace(/601/g, '607').replace('wb-protected-601', 'wb-v2ctx-607');
+    const artifactId = 'art-v2-607';
+    await activationArtifact(governance, {
+      id: artifactId, kind: 'rule', principleId: 'P_WB_V2_607', ruleId: 'R_WB_V2_607',
+      content: {
+        principleId: 'P_WB_V2_607', ruleId: 'R_WB_V2_607', requiresContextVersion: 2,
+        implementationCode: v2Code,
+        ruleHostInputContract: { version: 1, contextVersion: 2, hostKinds: ['workbuddy'] },
+      },
+      channel: 'code_tool_hook', action: 'code_tool_hook_shadow_activate', target: 'impl://R_WB_V2_607',
+    });
+    // Same-artifact Owner approval + digest-bound promotion — the same
+    // qualification inputs the Codex V2 gate requires (P4: one gate, no
+    // WorkBuddy-specific trust rule).
+    const connection = new SqliteConnection(governance);
+    try {
+      const approvals = new SqliteApprovalQueueStore(connection);
+      const approval = await approvals.enqueue({ artifactId, channel: 'code_tool_hook', riskLevel: 'high' }, new Date().toISOString());
+      const decision = await approvals.approve(approval.approvalId, 'owner-test', 'WorkBuddy v2 qualification fixture');
+      if (!decision.ok) throw new Error(`test approval fixture failed: ${decision.error}`);
+      const artifactRow: unknown = connection.getDb().prepare('SELECT artifact_id, artifact_kind, source_task_id, source_principle_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at FROM pi_artifacts WHERE artifact_id = ?').get(artifactId);
+      if (typeof artifactRow !== 'object' || artifactRow === null) throw new Error('fixture artifact row missing');
+      // P4: reuse the production digest helpers (same authority the gate
+      // verifies against) instead of hand-building the digest (rc-2).
+      const digest = computeArtifactDigest(mapPiArtifactRow(artifactRow));
+      await new SqliteActivationSafetyStore(connection).commitPromotion({
+        decision: {
+          decisionId: 'decision-art-v2-607',
+          subject: { kind: 'activation', activationId: `act-${artifactId}`, artifactId, artifactDigest: digest },
+          decision: 'promote_live',
+          principal: { kind: 'configured_owner', ownerId: 'owner-test' },
+          authentication: { method: 'console_token', credentialId: 'credential-test' },
+          reasonCode: 'workbuddy_v2_test_promotion',
+          note: 'Test fixture for a digest-bound live activation.',
+          evidenceSnapshotId: 'snapshot-wb-v2-607',
+          decidedAt: new Date().toISOString(),
+        },
+        evidenceSnapshot: {
+          snapshotId: 'snapshot-wb-v2-607', snapshotDigest: 'sha256:snapshot-wb-v2-607', artifactDigest: digest,
+          lineageRefs: [`task-${artifactId}`], hostRuntimeVersion: 'host-runtime-test',
+          safetyGateResults: [{ checkId: 'wb-v2-test', status: 'passed' }],
+          shadowSummary: {
+            observed: 2, matched: 1, wouldBlock: 1, wouldAllow: 1, requireApproval: 0,
+            autoCorrect: 0, errors: 0, neutralControl: 0,
+            firstObservedAt: new Date().toISOString(), lastObservedAt: new Date().toISOString(),
+          },
+          configurationVersion: 'test-config-v1', redaction: { version: 'test-redaction-v1', rawParametersStored: false },
+          createdAt: new Date().toISOString(),
+        },
+        readinessEvaluationId: 'readiness-wb-v2-607',
+        evidenceSnapshotDigest: 'sha256:snapshot-wb-v2-607',
+        expectedControlVersion: 1,
+        idempotencyKey: 'promotion-wb-v2-607',
+      });
+    } finally {
+      connection.close();
+    }
+    const project = makeProjectDir(home, 'v2h');
+    const result = runEntry(home, JSON.stringify(fixturePayload('pre-tool-use-write.json', { cwd: project, tool_input: { file_path: path.join(project, 'wb-v2ctx-607.txt'), content: 'x' } })), 'PreToolUse');
+    // Qualified artifact, but the provider honestly reports no prior session
+    // history → the shared gate suspends the rule with the structured
+    // unavailable warning; the WorkBuddy boundary note annotates it. The v2
+    // rule would DENY if executed context-blind; allow proves suspension.
     expect(result.status).toBe(0);
     expect(result.stdout).toBe('');
     expect(result.stderr).toContain('rule_context_v2_unavailable');
-    expect(result.stderr).toContain('workbuddy_runtime_context_unsupported');
+    expect(result.stderr).toContain('workbuddy_runtime_context_limited');
   });
 
   it('an undeliverable deny (stdout serialization failure) escalates to blocking exit 2 — never silent {} + exit 0 (SPEC §4.4)', async () => {

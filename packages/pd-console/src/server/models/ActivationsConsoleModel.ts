@@ -232,7 +232,7 @@ export function collectRuleCodeEventEntries(workspaceDir: string): CollectedRule
   return { entries, sourceDirsFound };
 }
 
-function readRuleCodeTelemetry(workspaceDir: string, activationId: string, decisions: readonly ActivationDecisionRecord[]): { shadowSummary: PromotionEvidenceSnapshot['shadowSummary']; metrics: RuleCodeTelemetryMetrics } {
+function readRuleCodeTelemetry(workspaceDir: string, activationId: string, decisions: readonly ActivationDecisionRecord[], promotionHostKind?: string): { shadowSummary: PromotionEvidenceSnapshot['shadowSummary']; metrics: RuleCodeTelemetryMetrics } {
   const countCircuitTrips = (minimumTime: number) => decisions.filter(decision => decision.decision === 'safety_isolate' && Date.parse(decision.decidedAt) >= minimumTime).length;
   const now = Date.now();
   const unavailableWindow = (minimumTime: number): RuleCodeTelemetryWindow => ({ eligible: null, matched: null, blocked: null, unhealthy: null, circuitTrips: countCircuitTrips(minimumTime), toolDistribution: null });
@@ -257,7 +257,11 @@ function readRuleCodeTelemetry(workspaceDir: string, activationId: string, decis
     const filePath = typeof entry.data.filePath === 'string' ? entry.data.filePath : '';
     representativeSamples.push({ toolName: entry.data.toolName, decision: entry.data.decision, pathCategory: path.extname(filePath) || (filePath ? 'workspace_path' : 'no_path') });
   }
-  return { shadowSummary: summarizeRuleCodeShadowEvents(entries, activationId), metrics: { last24Hours: summarizeWindow(now - 24 * 60 * 60 * 1000), last7Days: summarizeWindow(now - 7 * 24 * 60 * 60 * 1000), representativeSamples } };
+  // SPEC-RULECODE-HOST-PROMOTION-001 B3: the promotion shadow summary counts
+  // only samples attributed to the workspace's resolved promotion host —
+  // another host's samples (and pre-attribution legacy rows) can never
+  // satisfy this host's readiness threshold.
+  return { shadowSummary: summarizeRuleCodeShadowEvents(entries, activationId, promotionHostKind), metrics: { last24Hours: summarizeWindow(now - 24 * 60 * 60 * 1000), last7Days: summarizeWindow(now - 7 * 24 * 60 * 60 * 1000), representativeSamples } };
 }
 
 export class ActivationsConsoleModel {
@@ -557,7 +561,14 @@ export class ActivationsConsoleModel {
       if (!artifact) throw new Error(`Artifact not found for activation: ${activation.artifactId}`);
       const digest = `sha256:${createHash('sha256').update(JSON.stringify(artifact), 'utf8').digest('hex')}`;
       const decisions = await safetyStore.listDecisions(activationId);
-      const telemetry = readRuleCodeTelemetry(this.workspaceDir, activationId, decisions);
+      // PRI-813: the promotion host contract follows the workspace's REAL
+      // host declarations — a Codex (or multi-host) workspace no longer
+      // inherits the OpenClaw capability claim (fail closed, null contract).
+      // Resolved BEFORE telemetry so the shadow summary can attribute samples
+      // to the SAME host the readiness checks will run against
+      // (SPEC-RULECODE-HOST-PROMOTION-001 B3).
+      const promotionHost = resolvePromotionHostLiveness(this.workspaceDir);
+      const telemetry = readRuleCodeTelemetry(this.workspaceDir, activationId, decisions, promotionHost.ok ? promotionHost.hostKind : undefined);
       const flags = computeFlagsFromLoadResult(loadPdConfig(this.workspaceDir));
       // PRI-634-F R3 (SPEC P1-1): promotion readiness evaluates through the
       // SAME workspace host-declaration resolver as CLI/Approvals — the bare
@@ -565,10 +576,6 @@ export class ActivationsConsoleModel {
       // provenance degrades to the legacy readiness behavior (read-model
       // probe, not a mutation), consistent with the CLI readiness writer.
       const toolSemantics = resolveWorkspaceHostToolSemantics(this.workspaceDir);
-      // PRI-813: the promotion host contract follows the workspace's REAL
-      // host declarations — a Codex (or multi-host) workspace no longer
-      // inherits the OpenClaw capability claim (fail closed, null contract).
-      const promotionHost = resolvePromotionHostLiveness(this.workspaceDir);
       const writer = new RuleHostWriter({
         gateDeps: createProductionGateDeps({
           projectDir: this.workspaceDir,
@@ -594,6 +601,10 @@ export class ActivationsConsoleModel {
             ownerIdentityConfigured,
             safetyControlsEnabled: isFeatureEnabled(flags, 'rulecode_safety_controls'),
             hostContract: promotionHost.ok ? promotionHost.hostContract : null,
+            // SPEC-RULECODE-HOST-PROMOTION-001 B: the contract version the
+            // resolver handed out — a shape-valid contract of the WRONG host
+            // version must fail runtime_compatibility, not pass as-is.
+            ...(promotionHost.ok ? { expectedHostContractVersion: promotionHost.hostRuntimeVersion } : {}),
             existingLiveArtifacts: liveArtifacts,
             validateProductionArtifact: candidate => writer.canActivate(candidate),
           });

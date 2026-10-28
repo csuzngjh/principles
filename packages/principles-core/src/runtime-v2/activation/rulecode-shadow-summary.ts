@@ -12,7 +12,23 @@ export interface RuleCodeShadowSummary {
 }
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null && !Array.isArray(value); }
 
-export function summarizeRuleCodeShadowEvents(entries: readonly unknown[], activationId: string): RuleCodeShadowSummary {
+/**
+ * Aggregate the shadow evidence for one activation.
+ *
+ * SPEC-RULECODE-HOST-PROMOTION-001 B3: promotion shadow thresholds are
+ * PER-HOST. When `targetHostKind` is supplied, only events whose
+ * `data.hostKind` equals it are counted — a sample produced by another host
+ * (e.g. OpenClaw rows in a workspace later governed by Codex) can never
+ * satisfy this host's threshold, and rows persisted before the attribution
+ * field existed count toward NO host (unattributed ≠ this host). Callers
+ * that pass no target keep the historical unfiltered aggregate (exact
+ * pre-SPEC behavior for surfaces that have not resolved a promotion host).
+ */
+export function summarizeRuleCodeShadowEvents(
+  entries: readonly unknown[],
+  activationId: string,
+  targetHostKind?: string,
+): RuleCodeShadowSummary {
   let observed = 0;
   let matched = 0;
   let wouldBlock = 0;
@@ -30,6 +46,7 @@ export function summarizeRuleCodeShadowEvents(entries: readonly unknown[], activ
       continue;
     }
     if (entry.type !== 'rulehost_evaluated' || entry.data.activationMode !== 'shadow') continue;
+    if (targetHostKind !== undefined && entry.data.hostKind !== targetHostKind) continue;
     observed += 1;
     if (entry.data.matched === true) matched += 1;
     if (entry.data.decision === 'block') wouldBlock += 1;

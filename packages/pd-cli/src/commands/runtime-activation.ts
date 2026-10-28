@@ -152,10 +152,13 @@ export function collectRuleCodeEventEntries(workspaceDir: string): CollectedRule
 }
 
 /** Exported for PRI-577 regression tests and reuse by promote evidence assembly. */
-export function readShadowSummaryForActivation(workspaceDir: string, activationId: string): PromotionEvidenceSnapshot['shadowSummary'] {
+export function readShadowSummaryForActivation(workspaceDir: string, activationId: string, targetHostKind?: string): PromotionEvidenceSnapshot['shadowSummary'] {
   const { entries, sourceDirsFound } = collectRuleCodeEventEntries(workspaceDir);
   if (sourceDirsFound === 0) return unavailableShadowSummary();
-  return summarizeRuleCodeShadowEvents(entries, activationId);
+  // SPEC-RULECODE-HOST-PROMOTION-001 B3: per-host attribution — with a
+  // resolved promotion host, only that host's samples count toward the
+  // threshold (legacy unattributed rows count toward none).
+  return summarizeRuleCodeShadowEvents(entries, activationId, targetHostKind);
 }
 
 interface ActivationDispatchOptions {
@@ -649,6 +652,10 @@ export async function handleRuntimeActivationPromote(opts: ActivationPromoteOpti
                 && actor.authentication.method === 'cli_owner_credential',
               safetyControlsEnabled: isFeatureEnabled(flags, 'rulecode_safety_controls'),
               hostContract: promotionHost.ok ? promotionHost.hostContract : null,
+              // SPEC-RULECODE-HOST-PROMOTION-001 B: bind the check to the
+              // resolver's contract version — a wrong-host contract fails
+              // runtime_compatibility instead of passing as-is.
+              ...(promotionHost.ok ? { expectedHostContractVersion: promotionHost.hostRuntimeVersion } : {}),
               existingLiveArtifacts: liveArtifacts,
               validateProductionArtifact: value => writer.canActivate(value),
             });
@@ -662,7 +669,7 @@ export async function handleRuntimeActivationPromote(opts: ActivationPromoteOpti
               expectedArtifactDigest: request.expectedArtifactDigest,
               ownerIdentity: actor,
               hostRuntimeVersion: promotionHost.ok ? promotionHost.hostRuntimeVersion : promotionHost.reason,
-              shadowSummary: readShadowSummaryForActivation(workspaceDir, activationId),
+              shadowSummary: readShadowSummaryForActivation(workspaceDir, activationId, promotionHost.ok ? promotionHost.hostKind : undefined),
             });
           },
           newEvaluationId: () => `readiness-${randomUUID()}`,

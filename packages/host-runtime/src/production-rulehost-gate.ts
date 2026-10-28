@@ -410,21 +410,26 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
               // evaluator replay; merely wiring history must not revive old
               // activations. Live execution additionally needs the existing
               // promotion decision's binding to this exact artifact snapshot.
-              if (options.hostKind === 'codex') {
+              // SPEC-RULECODE-HOST-PROMOTION-001 §11.3: the SAME qualification
+              // gates every host with a V2 context path — WorkBuddy must not
+              // auto-execute historical V2 artifacts stamped for another host
+              // (the hostKinds binding below rejects them by the exact same
+              // includes() check Codex uses).
+              if (options.hostKind === 'codex' || options.hostKind === 'workbuddy') {
                 const contract = content.ruleHostInputContract;
                 const hosts = isRecord(contract) ? contract.hostKinds : undefined;
                 let contentBindingVerified = digestCheck.outcome === 'verified';
                 if (activationMode === 'shadow' && row.owner_approved === 1) {
                   // Old databases remain readable without writing a migration
                   // from this enforcement reader. A legacy approval without a
-                  // content digest cannot grant Codex V2 execution eligibility.
+                  // content digest cannot grant V2 execution eligibility.
                   const approvalColumns: unknown[] = connection.getDb().prepare('PRAGMA table_info(approvals)').all();
                   if (approvalColumns.some((column) => isRecord(column) && column.name === 'artifact_digest')) {
                     const approval: unknown = connection.getDb().prepare(`
                       SELECT artifact_digest FROM approvals
                       WHERE artifact_id = ? AND channel = 'code_tool_hook' AND status = 'approved'
                       ORDER BY decided_at DESC LIMIT 1
-                    `).get(artifactId);
+                      `).get(artifactId);
                     const approvalDigest = isRecord(approval) && typeof approval.artifact_digest === 'string'
                       ? approval.artifact_digest : null;
                     contentBindingVerified = verifyPiArtifactRowDigest(contentRow, contentJson, approvalDigest).outcome === 'verified';
@@ -434,10 +439,10 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
                 }
                 if (!isRecord(contract) || contract.version !== 1 || contract.contextVersion !== 2
                   || !Array.isArray(hosts) || !hosts.every((host: unknown) => typeof host === 'string')
-                  || !hosts.includes('codex') || row.owner_approved !== 1
+                  || !hosts.includes(options.hostKind) || row.owner_approved !== 1
                   || !contentBindingVerified) {
-                  addWarning(warnings, `codex_rule_context_v2_unqualified: activation=${activationId}`,
-                    'regenerate and replay this artifact for Codex, approve it for shadow observation, and use the existing Owner promotion flow for live execution');
+                  addWarning(warnings, `${options.hostKind}_rule_context_v2_unqualified: activation=${activationId}`,
+                    `regenerate and replay this artifact for ${options.hostKind}, approve it for shadow observation, and use the existing Owner promotion flow for live execution`);
                   continue;
                 }
               }
@@ -618,6 +623,7 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
                 ruleId: candidate.ruleId,
                 activationId: candidate.implId,
                 activationMode: 'shadow',
+                ...(options.hostKind !== undefined ? { hostKind: options.hostKind } : {}),
               });
             }
           }
@@ -676,6 +682,7 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
           ...(result?.ruleId !== undefined ? { ruleId: result.ruleId } : {}),
           ...(liveActivationId !== undefined ? { activationId: liveActivationId } : {}),
           activationMode: 'live',
+          ...(options.hostKind !== undefined ? { hostKind: options.hostKind } : {}),
         },
         ...shadowEvaluations,
       ];
