@@ -28,6 +28,21 @@ prompt injection authority.
   reports legacy counters only for turns recorded before this change.
 
 `<core_principles>` (static T-01..T-10 axioms) and Runtime V2
-`<directive>` injection are unchanged. A workspace whose legacy reducer still
-holds active principles renders exactly the same prompt as before, minus the
-legacy block that was already empty on this installation.
+`<directive>` injection are unchanged.
+
+Behaviour difference to know about before upgrading: a principle that lived
+ONLY in the legacy reducer (active/probation, no Runtime V2 activation) used to
+reach the prompt through the deleted block and no longer does. On the Owner's
+machine that set is empty — 0 of the 847 scanned prompt events ever carried a
+non-zero `legacySelectedCount`, so no turn ever showed a legacy-only principle.
+That census proves "no legacy-only injection happened here", not "every
+workspace is empty": if another workspace still holds active principles with no
+V2 activation, review them with `pd principles stats` and activate them through
+the Owner path before upgrading.
+
+Legacy probation therefore ends with this change: with no probation block there
+is no per-tool feedback attribution, so `recordProbationFeedback` (the only
+path that could promote probation → active at `PROBATION_SUCCESS_THRESHOLD`) is
+deleted too. Existing probation entries keep expiring
+(`probation_expired`) instead of graduating; promotion is Owner-driven through
+Runtime V2 activations.
