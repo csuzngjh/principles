@@ -34,7 +34,6 @@ const FIXTURES = new URL('./fixtures/g1-contract/', import.meta.url);
 const ROOT_SESSION = '01a048ae-b2a5-71a1-9faf-0226980f98ff';
 const ROOT_ROLLOUT = '01a048ae-b2a5-71a1-9faf-0226980f98ff';
 const TURN_1 = '01a048ae-b344-7eb2-804b-a2fa34302fb3';
-const SESSION_B = '01b048ae-b2a5-71a1-9faf-0226980f98ff';
 const TURN_B = '01b048ae-b344-7eb2-804b-a2fa34302fb3';
 
 const dirs: string[] = [];
@@ -126,11 +125,6 @@ afterEach(() => {
 
 function turnContextFile(root: string): string {
   const sessionKey = createHash('sha256').update(ROOT_SESSION, 'utf8').digest('hex');
-  return path.join(root, '.state', `${TURN_CONTEXT_FILENAME_PREFIX}${sessionKey}.json`);
-}
-
-function sessionTurnContextFile(root: string, sessionId: string): string {
-  const sessionKey = createHash('sha256').update(sessionId, 'utf8').digest('hex');
   return path.join(root, '.state', `${TURN_CONTEXT_FILENAME_PREFIX}${sessionKey}.json`);
 }
 
