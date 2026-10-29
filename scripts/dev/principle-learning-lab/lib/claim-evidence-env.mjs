@@ -16,6 +16,10 @@
 //
 // report is the terminal action. verdict ∈ CLAIM_VERDICTS.
 
+import { hashOfCanonical } from './challenge-freeze.mjs';
+
+export const CLAIM_EVIDENCE_V2 = 'claim-evidence-judge-only.v2';
+
 export const CLAIM_EVIDENCE_TEMPLATE_ID = 'T-CLAIM-EVIDENCE-BINDING-V1';
 export const CLAIM_EVIDENCE_TEMPLATE_VERSION = '1.0.0';
 
@@ -43,6 +47,12 @@ function err(message) {
  * Throws on structural defects — compiler and runtime share this gate.
  */
 export function buildClaimEnvironment(caseDef) {
+  if (caseDef?.schema === CLAIM_EVIDENCE_V2) return buildClaimEnvironmentV2(caseDef);
+  if (caseDef?.schema && caseDef.schema !== 'claim-evidence-judge-only.v1') throw new Error('unknown claim-evidence schema');
+  return buildClaimEnvironmentV1(caseDef);
+}
+
+function buildClaimEnvironmentV1(caseDef) {
   const problems = [];
   if (!caseDef || typeof caseDef !== 'object') throw new Error('buildClaimEnvironment: caseDef required');
   if (!Array.isArray(caseDef.facts) || caseDef.facts.length === 0) problems.push('facts must be a non-empty array');
@@ -131,7 +141,12 @@ export function newClaimRunState(env) {
   let seq = 0;
   for (const obsId of env.preSeeded) {
     const o = env.observations.get(obsId);
-    state.executedObservations.push({ obsId, seq: seq++, status: 'ok', source: 'pre-seeded-task-context', output: o.output, implies: o.implies, costUnits: 0, timeUnits: 0 });
+    const record = { obsId, seq: seq++, status: 'ok', source: 'pre-seeded-task-context', output: o.output, implies: o.implies, costUnits: 0, timeUnits: 0 };
+    if (env.contractVersion === 2) {
+      const definition = env.caseDef.observations.find((observation) => observation.obsId === obsId);
+      Object.assign(record, { subjectId: definition.subjectId, sourceRef: definition.sourceRef, revision: env.sources.get(definition.sourceRef).revision, definitionRef: obsId });
+    }
+    state.executedObservations.push(record);
   }
   return state;
 }
@@ -142,6 +157,11 @@ export function newClaimRunState(env) {
  * citing a refused observation can never count as evidence.
  */
 export function stepClaimEnvironment(env, state, action) {
+  if (env.contractVersion === 2) return stepClaimEnvironmentV2(env, state, action);
+  return stepClaimEnvironmentV1(env, state, action);
+}
+
+function stepClaimEnvironmentV1(env, state, action) {
   if (state.done) return err('environment: run already terminated by report');
   if (state.step >= STEP_CAP) {
     state.done = true;
@@ -218,4 +238,138 @@ export function stepClaimEnvironment(env, state, action) {
   }
 
   return err(`environment: unknown action type ${action.type}`);
+}
+
+// V2 keeps source assertions and the reviewed support predicate distinct. A
+// content hash proves byte integrity, never independent human review; the
+// external Gold-review gate owns that separate decision.
+function requireV2(condition, message) {
+  if (!condition) throw new Error(`claim-evidence-v2: ${message}`);
+}
+function recordV2(value, allowed, name) {
+  requireV2(value !== null && typeof value === 'object' && !Array.isArray(value), `${name} must be an object`);
+  requireV2(Object.keys(value).every((key) => allowed.includes(key)), `${name} contains unknown fields`);
+}
+function textV2(value) { return typeof value === 'string' && value.trim().length > 0; }
+
+function buildClaimEnvironmentV2(caseDef) {
+  recordV2(caseDef, ['schema', 'caseId', 'family', 'studyEligible', 'principleApplicable', 'expectedMode', 'taskText', 'facts', 'observations', 'constraints', 'ownerAnswers', 'extraActions', 'preSeededObservations', 'overCheck', 'gold', 'inputHash', 'goldHash'], 'case');
+  requireV2(Array.isArray(caseDef.facts) && caseDef.facts.length > 0, 'facts required');
+  for (const fact of caseDef.facts) {
+    recordV2(fact, ['factId', 'statement', 'goldTruth', 'observability', 'stakes'], 'fact');
+    requireV2(textV2(fact.factId) && textV2(fact.statement), 'fact id/statement required');
+    requireV2(typeof fact.goldTruth === 'boolean' || fact.goldTruth === 'UNKNOWN', 'truth must be boolean or UNKNOWN');
+  }
+  recordV2(caseDef.constraints, ['budgetUnits', 'deadlineUnits', 'askOwnerAllowed'], 'constraints');
+  requireV2(Number.isFinite(caseDef.constraints.budgetUnits) && caseDef.constraints.budgetUnits >= 0 && Number.isFinite(caseDef.constraints.deadlineUnits) && caseDef.constraints.deadlineUnits >= 0 && typeof caseDef.constraints.askOwnerAllowed === 'boolean', 'explicit finite constraints required');
+  recordV2(caseDef.overCheck || {}, ['allowedDistractorProbes', 'freshObservationPolicy'], 'overCheck');
+  if (caseDef.overCheck?.allowedDistractorProbes !== undefined) requireV2(Number.isInteger(caseDef.overCheck.allowedDistractorProbes) && caseDef.overCheck.allowedDistractorProbes >= 0, 'overCheck allowance invalid');
+  if (caseDef.overCheck?.freshObservationPolicy !== undefined) requireV2(['none_allowed', 'useful_allowed'].includes(caseDef.overCheck.freshObservationPolicy), 'overCheck policy invalid');
+  recordV2(caseDef.extraActions || {}, ['deploy'], 'extraActions');
+  if (caseDef.extraActions?.deploy) {
+    recordV2(caseDef.extraActions.deploy, ['requiresSignoff'], 'deploy');
+    requireV2(caseDef.extraActions.deploy.requiresSignoff === true, 'deployment must require signoff');
+  }
+  recordV2(caseDef.gold, ['requiredClaims', 'sources', 'supportRules', 'taskObjective'], 'gold');
+  requireV2(Array.isArray(caseDef.gold.sources) && Array.isArray(caseDef.gold.supportRules), 'Gold sources/supportRules required');
+  const sources = new Map();
+  for (const source of caseDef.gold.sources) {
+    recordV2(source, ['sourceId', 'role', 'subjectId', 'revision', 'content', 'contentHash'], 'Gold source');
+    requireV2(textV2(source.sourceId) && !sources.has(source.sourceId), 'unique sourceId required');
+    requireV2(['FIXTURE', 'INDEPENDENT_ARTIFACT'].includes(source.role), 'Gold cannot come from Examiner or Principle');
+    requireV2(textV2(source.subjectId) && Number.isInteger(source.revision) && source.revision >= 0, 'source subject/revision required');
+    recordV2(source.content, ['output', 'implies'], 'source content');
+    requireV2(textV2(source.content.output), 'source output required');
+    recordV2(source.content.implies, caseDef.facts.map((fact) => fact.factId), 'source implications');
+    requireV2(Object.values(source.content.implies).every((value) => value === 'true' || value === 'false'), 'source implication direction invalid');
+    requireV2(source.contentHash === hashOfCanonical(source.content), 'source content hash mismatch');
+    sources.set(source.sourceId, source);
+  }
+  requireV2(Array.isArray(caseDef.observations), 'observations required');
+  const observations = new Map();
+  for (const observation of caseDef.observations) {
+    recordV2(observation, ['obsId', 'action', 'label', 'costUnits', 'timeUnits', 'output', 'implies', 'subjectId', 'sourceRef'], 'observation');
+    requireV2(textV2(observation.obsId) && !observations.has(observation.obsId), 'unique obsId required');
+    const source = sources.get(observation.sourceRef);
+    requireV2(source && source.subjectId === observation.subjectId, 'observation source/subject mismatch');
+    requireV2(hashOfCanonical({ output: observation.output, implies: observation.implies }) === source.contentHash, 'observation differs from trusted source');
+    requireV2(Number.isFinite(observation.costUnits) && observation.costUnits >= 0 && Number.isFinite(observation.timeUnits) && observation.timeUnits >= 0, 'observation cost/time invalid');
+    observations.set(observation.obsId, observation);
+  }
+  // Owner-answer sources follow the same byte/subject discipline, while the
+  // legal request types are exposed by compileCase to make the path reachable.
+  recordV2(caseDef.ownerAnswers || {}, Object.keys(caseDef.ownerAnswers || {}), 'ownerAnswers');
+  for (const answer of Object.values(caseDef.ownerAnswers || {})) {
+    recordV2(answer, ['output', 'implies', 'subjectId', 'sourceRef'], 'owner answer');
+    const source = sources.get(answer.sourceRef);
+    requireV2(source && source.subjectId === answer.subjectId && source.contentHash === hashOfCanonical({ output: answer.output, implies: answer.implies }), 'owner answer source mismatch');
+  }
+  const facts = new Map(caseDef.facts.map((fact) => [fact.factId, fact]));
+  requireV2(Array.isArray(caseDef.gold.requiredClaims) && caseDef.gold.requiredClaims.length > 0, 'requiredClaims required');
+  const requiredIds = new Set();
+  for (const claim of caseDef.gold.requiredClaims) {
+    recordV2(claim, ['factId', 'acceptableVerdicts', 'requiresMinimalSteps'], 'required claim');
+    requireV2(facts.has(claim.factId) && !requiredIds.has(claim.factId), 'required claim unknown or duplicate');
+    requiredIds.add(claim.factId);
+    if (claim.requiresMinimalSteps !== undefined) requireV2(typeof claim.requiresMinimalSteps === 'boolean', 'requiresMinimalSteps must be boolean');
+    requireV2(Array.isArray(claim.acceptableVerdicts) && claim.acceptableVerdicts.length > 0 && claim.acceptableVerdicts.every((value) => [...CLAIM_VERDICTS, 'unknown'].includes(value)), 'acceptable verdict invalid');
+    if (facts.get(claim.factId).goldTruth === 'UNKNOWN') requireV2(claim.acceptableVerdicts.every((value) => value === 'inferred' || value === 'unknown'), 'UNKNOWN cannot accept verified assertions');
+  }
+  for (const rule of caseDef.gold.supportRules) {
+    recordV2(rule, ['factId', 'subjectId', 'verdict', 'alternatives'], 'support rule');
+    const fact = facts.get(rule.factId);
+    requireV2(fact && textV2(rule.subjectId), 'support rule fact/subject invalid');
+    requireV2(['verified_true', 'verified_false'].includes(rule.verdict) && fact.goldTruth !== 'UNKNOWN' && (rule.verdict === 'verified_true') === fact.goldTruth, 'support rule contradicts Gold truth');
+    requireV2(Array.isArray(rule.alternatives) && rule.alternatives.length > 0, 'support alternatives required');
+    for (const alternative of rule.alternatives) {
+      requireV2(Array.isArray(alternative) && alternative.length > 0 && alternative.every((ref) => typeof ref === 'string' && (observations.has(ref) || (ref.startsWith('owner:') && Object.hasOwn(caseDef.ownerAnswers || {}, ref.slice(6))))), 'support alternative references unavailable evidence');
+      for (const ref of alternative) {
+        const observation = ref.startsWith('owner:') ? caseDef.ownerAnswers[ref.slice(6)] : observations.get(ref);
+        requireV2(observation.subjectId === rule.subjectId, 'support rule wrong subject');
+      }
+    }
+  }
+  for (const claim of caseDef.gold.requiredClaims) {
+    for (const verdict of claim.acceptableVerdicts.filter((value) => value.startsWith('verified_'))) requireV2(caseDef.gold.supportRules.some((rule) => rule.factId === claim.factId && rule.verdict === verdict), 'verified claim lacks support rule');
+  }
+  recordV2(caseDef.gold.taskObjective, ['kind'], 'task objective');
+  requireV2(['REPORT_FACTS', 'DEPLOY'].includes(caseDef.gold.taskObjective.kind), 'unknown task objective');
+  if (caseDef.gold.taskObjective.kind === 'DEPLOY') requireV2(caseDef.extraActions?.deploy?.requiresSignoff === true, 'DEPLOY objective requires signoff action');
+  const legacy = structuredClone(caseDef);
+  legacy.facts = legacy.facts.map((fact) => ({ ...fact, goldTruth: fact.goldTruth === true }));
+  const env = buildClaimEnvironmentV1(legacy);
+  return { ...env, contractVersion: 2, caseDef: structuredClone(caseDef), sources };
+}
+
+function stepClaimEnvironmentV2(env, state, action) {
+  if (!action || typeof action !== 'object' || Array.isArray(action)) return err('v2 action must be an object');
+  if (Object.keys(action).some((key) => !['type', 'args', 'narrative'].includes(key))) return err('v2 unknown action field');
+  const argKeys = { observe: ['obsId'], 'ask-owner': ['requestType', 'question'], report: ['claims'], deploy: [] };
+  if (!Object.hasOwn(argKeys, action.type)) return err('v2 unknown action');
+  if (action.args !== undefined && (!action.args || typeof action.args !== 'object' || Array.isArray(action.args) || Object.keys(action.args).some((key) => !argKeys[action.type].includes(key)))) return err('v2 unknown action args');
+  if (action.type === 'report') {
+    if (state.done || state.step >= STEP_CAP) return err('environment: run terminated or step cap exceeded');
+    const claims = action.args?.claims;
+    if (!Array.isArray(claims) || claims.length === 0) return err('v2 report requires claims');
+    for (const claim of claims) {
+      if (!claim || typeof claim !== 'object' || Array.isArray(claim) || Object.keys(claim).some((key) => !['factId', 'verdict', 'evidenceRef', 'evidenceRefs', 'minimalSteps'].includes(key))) return err('v2 unknown claim field');
+      if (!textV2(claim.factId) || ![...CLAIM_VERDICTS, 'unknown'].includes(claim.verdict)) return err('v2 invalid claim');
+      if (claim.evidenceRef !== undefined && claim.evidenceRefs !== undefined) return err('v2 evidenceRef and evidenceRefs are mutually exclusive');
+      if (claim.evidenceRef !== undefined && !textV2(claim.evidenceRef)) return err('v2 invalid evidenceRef');
+      if (claim.evidenceRefs !== undefined && (!Array.isArray(claim.evidenceRefs) || !claim.evidenceRefs.every(textV2) || new Set(claim.evidenceRefs).size !== claim.evidenceRefs.length)) return err('v2 invalid evidenceRefs');
+      if (claim.minimalSteps !== undefined && !textV2(claim.minimalSteps)) return err('v2 invalid minimalSteps');
+    }
+    if (new Set(claims.map((claim) => claim.factId)).size !== claims.length) return err('v2 duplicate claims');
+    state.step += 1;
+    state.report = { claims: structuredClone(claims) };
+    state.done = true;
+    return { ok: true, output: 'report 已提交。', done: true };
+  }
+  if (action.type === 'ask-owner' && !Object.hasOwn(env.caseDef.ownerAnswers || {}, action.args?.requestType)) return err('v2 unknown owner request type');
+  const result = stepClaimEnvironmentV1(env, state, action);
+  if (result.record?.obsId && result.record.status === 'ok') {
+    const definition = action.type === 'ask-owner' ? env.caseDef.ownerAnswers?.[action.args.requestType] : env.caseDef.observations.find((observation) => observation.obsId === action.args.obsId);
+    if (definition) Object.assign(result.record, { subjectId: definition.subjectId, sourceRef: definition.sourceRef, revision: env.sources.get(definition.sourceRef).revision, definitionRef: action.type === 'ask-owner' ? `owner:${action.args.requestType}` : definition.obsId });
+  }
+  return result;
 }
