@@ -40,7 +40,7 @@ export function readRouterContextReceipt(
 export function verifyRouterContextReceipt(
   envelope: unknown,
   expected: {
-    taskId: string; runId: string; message: string; systemPrompt: string;
+    taskId: string; runId: string; contextHash: string; message: string; systemPrompt: string;
     predecessors: { artifactId: string; content: unknown }[];
   },
 ): ReturnType<typeof readRouterContextReceipt> {
@@ -48,7 +48,8 @@ export function verifyRouterContextReceipt(
   if (result.status !== 'available') return result;
   const hash = (text: string) => createHash('sha256').update(text).digest('hex');
   const mismatch = () => ({ status: 'unavailable' as const, reason: 'context_receipt_source_mismatch', nextAction: 'Reload the original system input and predecessor artifacts; keep canonical association unavailable.' });
-  if (result.receipt.messageDigest !== hash(expected.message)
+  if (result.receipt.contextHash !== expected.contextHash
+    || result.receipt.messageDigest !== hash(expected.message)
     || result.receipt.systemPromptDigest !== hash(expected.systemPrompt)
     || expected.predecessors.length !== result.receipt.predecessorDigests.length) return mismatch();
   const ids = new Set(expected.predecessors.map((source) => source.artifactId));

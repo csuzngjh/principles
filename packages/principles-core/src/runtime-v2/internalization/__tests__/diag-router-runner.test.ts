@@ -68,8 +68,10 @@ describe('DiagRouterRunner V-slice', () => {
       if (!sourceArtifact) throw new Error('missing source artifact');
       predecessors.push({ artifactId: source.artifactId, content: JSON.parse(sourceArtifact.contentJson) });
     }
-    const expected = { taskId: ROUTER_TASK_ID, runId: ROUTER_RUN_ID, message, systemPrompt, predecessors };
+    const expected = { taskId: ROUTER_TASK_ID, runId: ROUTER_RUN_ID, contextHash: restored.receipt.contextHash, message, systemPrompt, predecessors };
     expect(verifyRouterContextReceipt(JSON.parse(JSON.stringify(envelope)), expected).status).toBe('available');
+    expect(verifyRouterContextReceipt(envelope, { ...expected, contextHash: 'foreign-context' })).toMatchObject({ status: 'unavailable', reason: 'context_receipt_source_mismatch' });
+    expect(verifyRouterContextReceipt({ trustedContextReceipt: { ...restored.receipt, contextHash: 'tampered' } }, expected)).toMatchObject({ status: 'unavailable', reason: 'context_receipt_source_mismatch' });
     expect(verifyRouterContextReceipt(envelope, { ...expected, message: message + ' changed' })).toMatchObject({ status: 'unavailable', reason: 'context_receipt_source_mismatch' });
     expect(verifyRouterContextReceipt(envelope, { ...expected, predecessors: predecessors.map(source => ({ ...source, content: {} })) })).toMatchObject({ status: 'unavailable', reason: 'context_receipt_source_mismatch' });
     expect(readRouterContextReceipt(envelope, { taskId: 'foreign', runId: ROUTER_RUN_ID })).toMatchObject({ status: 'unavailable', reason: 'context_receipt_lineage_mismatch' });

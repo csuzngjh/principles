@@ -335,7 +335,7 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
     // Check the persisted shape at the real write boundary.
     const persistedEnvelope: unknown = JSON.parse(routerContentJson);
     const receiptCheck = verifyRouterContextReceipt(persistedEnvelope, {
-      taskId, runId, message: evidence.message, systemPrompt: evidence.systemPrompt,
+      taskId, runId, contextHash, message: evidence.message, systemPrompt: evidence.systemPrompt,
       predecessors: [
         { artifactId: context.rootCauseArtifactId, content: context.rootCauseOutput },
         { artifactId: context.distillerArtifactId, content: context.distillerOutput },
