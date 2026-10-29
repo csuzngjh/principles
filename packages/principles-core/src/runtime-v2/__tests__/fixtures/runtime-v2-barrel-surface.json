@@ -1,6 +1,6 @@
 {
   "barrel": "src/runtime-v2/index.ts",
-  "count": 1969,
+  "count": 1972,
   "names": [
     "ADMISSION_CONFIDENCE_THRESHOLD",
     "ADMISSION_POLICY_VERSION",
@@ -1091,6 +1091,8 @@
     "RecoveryActionKind",
     "RecoveryActionRecord",
     "RecoveryActionResult",
+    "RecoveryCapabilityCoverage",
+    "RecoveryCapabilityEvidence",
     "RecoveryCompositionArtifact",
     "RecoveryCompositionInput",
     "RecoveryCompositionProbe",
@@ -1956,6 +1958,7 @@
     "validateProposedParams",
     "validateProposedPathBounds",
     "validateRecommendation",
+    "validateRecoveryCapabilityCoverage",
     "validateRecoveryControlSurfaces",
     "validateReuseEvaluationOutput",
     "validateRuleBehaviorFacts",

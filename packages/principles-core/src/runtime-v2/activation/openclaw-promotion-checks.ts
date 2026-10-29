@@ -61,12 +61,86 @@ interface OpenClawPromotionCheckInput {
 }
 
 export interface RecoveryReachabilityEvidence {
-  source: 'cli-status-probe' | 'console-store-probe';
+  source: 'cli-status-probe' | 'console-store-probe' | 'console-route-served';
   ok: boolean;
   /** The probe was observed to target the workspace this readiness run governs. */
   workspaceMatched: boolean;
   /** Bounded, structured detail for the failed case (rc-9). */
   detail?: string;
+  /**
+   * Review R4/P1: PER-CAPABILITY evidence. One aggregate probe can never
+   * certify the whole recovery surface — a successful status query says
+   * nothing about the deactivate entry, and a readable pause store says
+   * nothing about the pause ROUTE. emergency_controls requires one valid,
+   * current, workspace-matched entry for EVERY capability in the
+   * recovery-control registry: missing, duplicate, unknown, channel-mismatched,
+   * or failed entries fail the check (fail closed).
+   */
+  capabilities?: readonly RecoveryCapabilityEvidence[];
+}
+
+export interface RecoveryCapabilityEvidence {
+  capabilityId: string;
+  channel: 'cli' | 'console';
+  ok: boolean;
+  workspaceMatched: boolean;
+  /** Bounded reason when ok/workspaceMatched is false (rc-9). */
+  detail?: string;
+}
+
+export type RecoveryCapabilityCoverage =
+  | { ok: true }
+  | { ok: false; reason: 'recovery_capability_evidence_incomplete' | 'recovery_reachability_unverified'; detail: string };
+
+/**
+ * Review R4/P1: validate the per-capability evidence matrix against the
+ * recovery-control registry. Required: every registry capability present
+ * EXACTLY once, channel matching the registry, ok AND workspace-matched.
+ * Duplicates, unknown ids, missing entries, or channel mismatches are
+ * coverage failures; entries that ran but failed (or targeted another
+ * workspace) are reachability failures. Never cached — the caller produces
+ * this evidence fresh for every readiness evaluation.
+ */
+export function validateRecoveryCapabilityCoverage(
+  capabilities: readonly RecoveryCapabilityEvidence[] | undefined,
+): RecoveryCapabilityCoverage {
+  if (capabilities === undefined || capabilities.length === 0) {
+    return { ok: false, reason: 'recovery_capability_evidence_incomplete', detail: 'no per-capability reachability evidence supplied' };
+  }
+  const byId = new Map<string, RecoveryCapabilityEvidence>();
+  for (const entry of capabilities) {
+    if (byId.has(entry.capabilityId)) {
+      return { ok: false, reason: 'recovery_capability_evidence_incomplete', detail: `duplicate evidence for ${entry.capabilityId}` };
+    }
+    byId.set(entry.capabilityId, entry);
+  }
+  const problems: string[] = [];
+  for (const surface of RECOVERY_CONTROL_SURFACES) {
+    const entry = byId.get(surface.capabilityId);
+    if (entry === undefined) {
+      problems.push(`${surface.capabilityId}: no evidence`);
+      continue;
+    }
+    if (entry.channel !== surface.channel) {
+      problems.push(`${surface.capabilityId}: evidence channel ${entry.channel} does not match the registry channel ${surface.channel}`);
+      continue;
+    }
+    if (!entry.ok) {
+      problems.push(`${surface.capabilityId}: not reachable${entry.detail !== undefined ? ` (${entry.detail})` : ''}`);
+    } else if (!entry.workspaceMatched) {
+      problems.push(`${surface.capabilityId}: evidence does not target the governed workspace${entry.detail !== undefined ? ` (${entry.detail})` : ''}`);
+    }
+  }
+  for (const [capabilityId] of byId) {
+    if (!RECOVERY_CONTROL_SURFACES.some(surface => surface.capabilityId === capabilityId)) {
+      problems.push(`${capabilityId}: evidence for an unknown capability (not in the recovery-control registry)`);
+    }
+  }
+  if (problems.length > 0) {
+    const incomplete = problems.some(problem => problem.includes('no evidence') || problem.includes('unknown capability') || problem.includes('does not match the registry channel'));
+    return { ok: false, reason: incomplete ? 'recovery_capability_evidence_incomplete' : 'recovery_reachability_unverified', detail: problems.join('; ') };
+  }
+  return { ok: true };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -204,6 +278,13 @@ export async function collectOpenClawPromotionChecks(
   // independence (they never pass through the RuleHost gate; isolated-env
   // route tests prove the pause path and its effect on the gate).
   const reachability = input.recoveryReachability;
+  // Review R4/P1: PER-CAPABILITY coverage — the aggregate verdict alone is
+  // never accepted. Every registry capability needs its own current,
+  // workspace-matched evidence entry (no evidence reuse across capabilities,
+  // no caching across evaluations).
+  const capabilityCoverage: RecoveryCapabilityCoverage = contract !== null
+    ? validateRecoveryCapabilityCoverage(reachability?.capabilities)
+    : { ok: true };
   const emergencyControlsHealthy = contract !== null
     && input.safetyControlsEnabled
     && recoverySurfaces !== null
@@ -211,6 +292,7 @@ export async function collectOpenClawPromotionChecks(
     && reachability !== undefined
     && reachability.ok
     && reachability.workspaceMatched
+    && capabilityCoverage.ok
     && composition.ok;
   const emergencyReason = contract === null
     ? 'out_of_band_controls_unavailable'
@@ -220,7 +302,9 @@ export async function collectOpenClawPromotionChecks(
         ? recoverySurfaces.reason
         : reachability === undefined || !reachability.ok || !reachability.workspaceMatched
           ? 'recovery_reachability_unverified'
-          : 'control_probe_composition_failed';
+          : !capabilityCoverage.ok
+            ? capabilityCoverage.reason
+            : 'control_probe_composition_failed';
   return [
     { checkId: 'bounded_scope', status: bounded ? 'passed' : 'failed', ...(!bounded ? { reasonCode: 'explicit_affected_tools_required' } : {}) },
     { checkId: 'runtime_compatibility', status: contract ? 'passed' : 'failed', ...(!contract ? { reasonCode: 'host_liveness_contract_missing_invalid_or_unsupported' } : {}) },

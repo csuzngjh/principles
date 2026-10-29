@@ -220,7 +220,15 @@ describe('collectOpenClawPromotionChecks — host-contract version binding (SPEC
 // ── Review finding 1 (P1): capability declarations ≠ real recovery checks ──
 
 describe('emergency_controls binds to the REAL recovery surface registry (SPEC R1)', () => {
-  const reachabilityOk = { source: 'cli-status-probe' as const, ok: true, workspaceMatched: true };
+  // R4/P1: a valid aggregate now REQUIRES per-capability entries for every
+  // registry capability, all ok and workspace-matched.
+  const allOkCapabilities = [
+    { capabilityId: 'pd_status', channel: 'cli' as const, ok: true, workspaceMatched: true },
+    { capabilityId: 'rulecode_deactivate', channel: 'cli' as const, ok: true, workspaceMatched: true },
+    { capabilityId: 'rulecode_global_pause', channel: 'console' as const, ok: true, workspaceMatched: true },
+    { capabilityId: 'owner_review_access', channel: 'console' as const, ok: true, workspaceMatched: true },
+  ];
+  const reachabilityOk = { source: 'cli-status-probe' as const, ok: true, workspaceMatched: true, capabilities: allOkCapabilities };
 
   it('passes only with a registry-verified contract, the safety flag, passing control-probe composition, AND target-environment reachability evidence', async () => {
     const checks = await collectOpenClawPromotionChecks(neutralArtifact(), {
@@ -273,6 +281,189 @@ describe('emergency_controls binds to the REAL recovery surface registry (SPEC R
     expect(checks.find(check => check.checkId === 'emergency_controls')).toMatchObject({
       status: 'failed',
       reasonCode: 'recovery_reachability_unverified',
+    });
+  });
+
+  it('R4-red→green: CLI status succeeds but the deactivate entry is NOT verified → emergency FAILS (one capability never stands in for another)', async () => {
+    const checks = await collectOpenClawPromotionChecks(neutralArtifact(), {
+      ownerIdentityConfigured: true,
+      safetyControlsEnabled: true,
+      hostContract: BASE_CONTRACT,
+      expectedHostContractVersion: 'codex-v2@1',
+      existingLiveArtifacts: [],
+      projectDir: '/workspace/probe-root',
+      recoveryReachability: {
+        source: 'cli-status-probe',
+        ok: false,
+        workspaceMatched: true,
+        capabilities: [
+          { capabilityId: 'pd_status', channel: 'cli', ok: true, workspaceMatched: true },
+          { capabilityId: 'rulecode_deactivate', channel: 'cli', ok: false, workspaceMatched: false, detail: 'pd activation deactivate --dry-run: exited with code 1' },
+          { capabilityId: 'rulecode_global_pause', channel: 'console', ok: true, workspaceMatched: true },
+          { capabilityId: 'owner_review_access', channel: 'console', ok: true, workspaceMatched: true },
+        ],
+      },
+      validateProductionArtifact: async () => ({ ok: true }),
+    });
+    expect(checks.find(check => check.checkId === 'emergency_controls')).toMatchObject({
+      status: 'failed',
+      reasonCode: 'recovery_reachability_unverified',
+    });
+  });
+
+  it('R4-red→green: pause substrate readable but the global-pause capability not evidenced → emergency FAILS', async () => {
+    const checks = await collectOpenClawPromotionChecks(neutralArtifact(), {
+      ownerIdentityConfigured: true,
+      safetyControlsEnabled: true,
+      hostContract: BASE_CONTRACT,
+      expectedHostContractVersion: 'codex-v2@1',
+      existingLiveArtifacts: [],
+      projectDir: '/workspace/probe-root',
+      recoveryReachability: {
+        source: 'console-route-served',
+        ok: false,
+        workspaceMatched: true,
+        capabilities: [
+          { capabilityId: 'pd_status', channel: 'cli', ok: true, workspaceMatched: true },
+          { capabilityId: 'rulecode_deactivate', channel: 'cli', ok: true, workspaceMatched: true },
+          { capabilityId: 'rulecode_global_pause', channel: 'console', ok: false, workspaceMatched: true, detail: 'pause substrate probe failed: db locked' },
+          { capabilityId: 'owner_review_access', channel: 'console', ok: true, workspaceMatched: true },
+        ],
+      },
+      validateProductionArtifact: async () => ({ ok: true }),
+    });
+    expect(checks.find(check => check.checkId === 'emergency_controls')).toMatchObject({
+      status: 'failed',
+      reasonCode: 'recovery_reachability_unverified',
+    });
+  });
+
+  it('R4: Owner Review entry not evidenced (direct model call without route service) → emergency FAILS', async () => {
+    const checks = await collectOpenClawPromotionChecks(neutralArtifact(), {
+      ownerIdentityConfigured: true,
+      safetyControlsEnabled: true,
+      hostContract: BASE_CONTRACT,
+      expectedHostContractVersion: 'codex-v2@1',
+      existingLiveArtifacts: [],
+      projectDir: '/workspace/probe-root',
+      recoveryReachability: {
+        source: 'console-route-served',
+        ok: false,
+        workspaceMatched: true,
+        capabilities: [
+          { capabilityId: 'pd_status', channel: 'cli', ok: true, workspaceMatched: true },
+          { capabilityId: 'rulecode_deactivate', channel: 'cli', ok: true, workspaceMatched: true },
+          { capabilityId: 'rulecode_global_pause', channel: 'console', ok: true, workspaceMatched: true },
+          { capabilityId: 'owner_review_access', channel: 'console', ok: false, workspaceMatched: false, detail: 'not served through an authenticated Console route' },
+        ],
+      },
+      validateProductionArtifact: async () => ({ ok: true }),
+    });
+    expect(checks.find(check => check.checkId === 'emergency_controls')).toMatchObject({
+      status: 'failed',
+      reasonCode: 'recovery_reachability_unverified',
+    });
+  });
+
+  it('R4: evidence for the WRONG workspace on any capability → emergency FAILS', async () => {
+    const capabilities = allOkCapabilities.map(capability =>
+      capability.capabilityId === 'rulecode_global_pause'
+        ? { ...capability, workspaceMatched: false, detail: 'probe targeted another workspace' }
+        : capability);
+    const checks = await collectOpenClawPromotionChecks(neutralArtifact(), {
+      ownerIdentityConfigured: true,
+      safetyControlsEnabled: true,
+      hostContract: BASE_CONTRACT,
+      expectedHostContractVersion: 'codex-v2@1',
+      existingLiveArtifacts: [],
+      projectDir: '/workspace/probe-root',
+      recoveryReachability: { source: 'console-route-served', ok: false, workspaceMatched: true, capabilities },
+      validateProductionArtifact: async () => ({ ok: true }),
+    });
+    expect(checks.find(check => check.checkId === 'emergency_controls')).toMatchObject({
+      status: 'failed',
+      reasonCode: 'recovery_reachability_unverified',
+    });
+  });
+
+  it('R4: a MISSING capability entry → recovery_capability_evidence_incomplete', async () => {
+    const checks = await collectOpenClawPromotionChecks(neutralArtifact(), {
+      ownerIdentityConfigured: true,
+      safetyControlsEnabled: true,
+      hostContract: BASE_CONTRACT,
+      expectedHostContractVersion: 'codex-v2@1',
+      existingLiveArtifacts: [],
+      projectDir: '/workspace/probe-root',
+      recoveryReachability: {
+        source: 'cli-status-probe', ok: true, workspaceMatched: true,
+        capabilities: allOkCapabilities.filter(capability => capability.capabilityId !== 'owner_review_access'),
+      },
+      validateProductionArtifact: async () => ({ ok: true }),
+    });
+    expect(checks.find(check => check.checkId === 'emergency_controls')).toMatchObject({
+      status: 'failed',
+      reasonCode: 'recovery_capability_evidence_incomplete',
+    });
+  });
+
+  it('R4: a DUPLICATE capability entry → recovery_capability_evidence_incomplete', async () => {
+    const checks = await collectOpenClawPromotionChecks(neutralArtifact(), {
+      ownerIdentityConfigured: true,
+      safetyControlsEnabled: true,
+      hostContract: BASE_CONTRACT,
+      expectedHostContractVersion: 'codex-v2@1',
+      existingLiveArtifacts: [],
+      projectDir: '/workspace/probe-root',
+      recoveryReachability: {
+        source: 'cli-status-probe', ok: true, workspaceMatched: true,
+        capabilities: [...allOkCapabilities, allOkCapabilities[0]],
+      },
+      validateProductionArtifact: async () => ({ ok: true }),
+    });
+    expect(checks.find(check => check.checkId === 'emergency_controls')).toMatchObject({
+      status: 'failed',
+      reasonCode: 'recovery_capability_evidence_incomplete',
+    });
+  });
+
+  it('R4: evidence for an UNKNOWN capability → recovery_capability_evidence_incomplete', async () => {
+    const checks = await collectOpenClawPromotionChecks(neutralArtifact(), {
+      ownerIdentityConfigured: true,
+      safetyControlsEnabled: true,
+      hostContract: BASE_CONTRACT,
+      expectedHostContractVersion: 'codex-v2@1',
+      existingLiveArtifacts: [],
+      projectDir: '/workspace/probe-root',
+      recoveryReachability: {
+        source: 'cli-status-probe', ok: true, workspaceMatched: true,
+        capabilities: [...allOkCapabilities, { capabilityId: 'mystery_control', channel: 'cli', ok: true, workspaceMatched: true }],
+      },
+      validateProductionArtifact: async () => ({ ok: true }),
+    });
+    expect(checks.find(check => check.checkId === 'emergency_controls')).toMatchObject({
+      status: 'failed',
+      reasonCode: 'recovery_capability_evidence_incomplete',
+    });
+  });
+
+  it('R4: a CHANNEL MISMATCH (e.g. pause evidence claiming the cli channel) → recovery_capability_evidence_incomplete', async () => {
+    const capabilities = allOkCapabilities.map(capability =>
+      capability.capabilityId === 'rulecode_global_pause'
+        ? { ...capability, channel: 'cli' as const }
+        : capability);
+    const checks = await collectOpenClawPromotionChecks(neutralArtifact(), {
+      ownerIdentityConfigured: true,
+      safetyControlsEnabled: true,
+      hostContract: BASE_CONTRACT,
+      expectedHostContractVersion: 'codex-v2@1',
+      existingLiveArtifacts: [],
+      projectDir: '/workspace/probe-root',
+      recoveryReachability: { source: 'cli-status-probe', ok: true, workspaceMatched: true, capabilities },
+      validateProductionArtifact: async () => ({ ok: true }),
+    });
+    expect(checks.find(check => check.checkId === 'emergency_controls')).toMatchObject({
+      status: 'failed',
+      reasonCode: 'recovery_capability_evidence_incomplete',
     });
   });
 

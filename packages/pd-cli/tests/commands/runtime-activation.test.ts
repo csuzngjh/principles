@@ -1035,7 +1035,7 @@ describe('handleRuntimeActivationPromote', () => {
     expect(process.exitCode).toBe(1);
   });
 
-  it('P0-3: commit store failure emits structured refusal JSON and exit code 1', async () => {
+  it('P0-3 (R4): CLI promote refuses at emergency_controls when console-channel recovery evidence is unavailable from the CLI process (fail closed; commit-failure semantics covered at the service level)', async () => {
     mockFeatureFlags.flags.rulecode_owner_live_decision.enabled = true;
     vi.stubEnv('PD_CONSOLE_TOKEN', 'configured-secret');
     vi.stubEnv('PD_OWNER_ID', 'owner-1');
@@ -1063,10 +1063,11 @@ describe('handleRuntimeActivationPromote', () => {
     // shadow telemetry source, so seed a real events file before promoting.
     const wsDir = mkdtempSync(path.join(tmpdir(), 'pd-cli-p03-'));
     mkdirSync(path.join(wsDir, '.pd', 'logs'), { recursive: true });
-    // SPEC R3/P1: readiness now probes the REAL CLI status entry against the
-    // target workspace — seed a real state.db listing this activation so the
-    // probe certifies the workspace (the commit-failure under test is the
-    // next stage after a fully passing readiness).
+    // SPEC R3/P1+R4/P1: readiness probes the REAL CLI entries against the
+    // target workspace — seed a real state.db so the two CLI-channel probes
+    // are exercised for real (the console-channel entries still come back
+    // not-verified from a CLI process, which is exactly what this test now
+    // asserts).
     {
       const { SqliteConnection } = await import('@principles/core/runtime-v2');
       const conn = new SqliteConnection({ workspaceDir: wsDir, readonly: false });
@@ -1098,12 +1099,18 @@ describe('handleRuntimeActivationPromote', () => {
 
       const output = JSON.parse(consoleLogSpy.mock.calls[0][0]) as {
         ok: boolean; decision: string; reasonCode: string; summary?: string; nextAction?: string;
+        failedChecks?: { checkId: string; reasonCode: string }[];
       };
+      // SPEC R4/P1: the CLI process can only evidence the two CLI-channel
+      // capabilities (real subprocesses); the console-channel recovery
+      // entries are reported NOT verified, so emergency_controls fails and
+      // promotion is refused BEFORE any commit attempt — fail closed.
       expect(output.ok).toBe(false);
       expect(output.decision).toBe('refused');
-      expect(output.reasonCode).toBe('promotion_commit_failed');
-      expect(output.summary).toContain('durable safety store');
-      expect(output.nextAction).toContain('retry');
+      expect(output.reasonCode).toBe('promotion_safety_gate_blocked');
+      const emergency = (output.failedChecks ?? []).find(check => check.checkId === 'emergency_controls');
+      expect(emergency).toBeDefined();
+      expect(['recovery_capability_evidence_incomplete', 'recovery_reachability_unverified']).toContain(emergency?.reasonCode);
       expect(process.exitCode).toBe(1);
       expect(mockPromoteActivation).not.toHaveBeenCalled();
     } finally {

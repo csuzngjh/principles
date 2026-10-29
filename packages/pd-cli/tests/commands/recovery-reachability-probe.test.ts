@@ -1,18 +1,22 @@
 /**
- * SPEC-RULECODE-HOST-PROMOTION-001 review round 3 (P1): the CLI-channel
- * reachability probe executes the REAL built `pd activation list --json`
- * subprocess against the TARGET workspace. These tests run the real probe
- * (built dist required) and pin its evidence semantics:
- *  - a governed workspace listing the expected activation → ok + matched;
- *  - an expected activation the listing does NOT carry → workspaceMatched
- *    false (a probe of the wrong workspace can never certify this one).
+ * SPEC-RULECODE-HOST-PROMOTION-001 review round 4 (P1): the CLI-channel
+ * reachability probe executes the REAL built `pd activation list --json` and
+ * the REAL `pd activation deactivate --dry-run` subprocesses against the
+ * TARGET workspace, and reports per-capability evidence:
+ *  - a governed workspace listing the expected activation → both CLI
+ *    capabilities ok + matched (dry-run targets a nonexistent probe id, so
+ *    nothing is deactivated and no governance audit record is written);
+ *  - an expected activation the listing does NOT carry → pd_status unverified;
+ *  - console-channel capabilities are ALWAYS reported not-verified from a CLI
+ *    subprocess (fail closed — never fabricated as ok).
  */
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import Database from 'better-sqlite3';
 import { SqliteConnection } from '@principles/core/runtime-v2';
-import { probeCliRecoveryReachability } from '../../src/commands/recovery-reachability-probe.js';
+import { probeCliRecoveryReachability, DEACTIVATE_DRY_RUN_PROBE_ACTIVATION_ID } from '../../src/commands/recovery-reachability-probe.js';
 
 let tempDir: string;
 
@@ -36,24 +40,54 @@ function seedActivation(activationId: string): void {
   conn.close();
 }
 
-describe('probeCliRecoveryReachability — real subprocess evidence (SPEC R3/P1)', () => {
+function auditLogCount(): number {
+  const logDir = path.join(tempDir, '.pd', 'logs');
+  if (!fs.existsSync(logDir)) return 0;
+  return fs.readdirSync(logDir).filter(name => name.endsWith('.jsonl')).reduce((total, name) => {
+    const lines = fs.readFileSync(path.join(logDir, name), 'utf8').split('\n').filter(Boolean);
+    return total + lines.length;
+  }, 0);
+}
+
+describe('probeCliRecoveryReachability — real subprocess, per-capability evidence (SPEC R4/P1)', () => {
   beforeAll(() => {
-    // The probe spawns the BUILT entry; fail loud here if the build is absent
+    // The probes spawn the BUILT entry; fail loud here if the build is absent
     // so the suite never silently degrades into "unreachable" assertions.
     expect(fs.existsSync(path.resolve(process.cwd(), 'dist', 'index.js'))).toBe(true);
   });
 
-  it('a governed workspace whose listing carries the expected activation → ok + workspaceMatched', async () => {
+  it('a governed workspace listing the expected activation → both CLI capabilities ok + matched; console capabilities explicitly NOT verified', { timeout: 120_000 }, async () => {
     seedActivation('act-probe-target');
-    const evidence = await probeCliRecoveryReachability(tempDir, 'act-probe-target');
-    expect(evidence).toEqual({ source: 'cli-status-probe', ok: true, workspaceMatched: true });
+    const capabilities = await probeCliRecoveryReachability(tempDir, 'act-probe-target', { timeoutMs: 60_000 });
+    const byId = new Map(capabilities.map(capability => [capability.capabilityId, capability]));
+    expect(byId.get('pd_status')).toMatchObject({ ok: true, workspaceMatched: true, channel: 'cli' });
+    expect(byId.get('rulecode_deactivate')).toMatchObject({ ok: true, workspaceMatched: true, channel: 'cli' });
+    expect(byId.get('rulecode_global_pause')).toMatchObject({ ok: false, channel: 'console' });
+    expect(byId.get('owner_review_access')).toMatchObject({ ok: false, channel: 'console' });
   });
 
-  it('an expected activation ABSENT from the listing (wrong workspace / stale probe) → failure with precise detail', async () => {
+  it('the deactivate probe runs the REAL dry-run path: no activation is touched and NO governance audit record is written', { timeout: 120_000 }, async () => {
+    seedActivation('act-probe-dry');
+    const before = auditLogCount();
+    await probeCliRecoveryReachability(tempDir, 'act-probe-dry', { timeoutMs: 60_000 });
+    const after = auditLogCount();
+    expect(after).toBe(before);
+    // The probe id activation must not exist and nothing may have created it.
+    const db = new Database(path.join(tempDir, '.pd', 'state.db'), { readonly: true });
+    try {
+      const row = db.prepare('SELECT 1 FROM activations WHERE activation_id = ?').get(DEACTIVATE_DRY_RUN_PROBE_ACTIVATION_ID);
+      expect(row).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
+  it('an expected activation ABSENT from the listing (wrong workspace / stale probe) → pd_status unverified with precise detail', { timeout: 120_000 }, async () => {
     seedActivation('act-probe-other');
-    const evidence = await probeCliRecoveryReachability(tempDir, 'act-probe-target');
-    expect(evidence.ok).toBe(false);
-    expect(evidence.workspaceMatched).toBe(false);
-    expect(evidence.detail).toContain('act-probe-target');
+    const capabilities = await probeCliRecoveryReachability(tempDir, 'act-probe-target', { timeoutMs: 60_000 });
+    const status = capabilities.find(capability => capability.capabilityId === 'pd_status');
+    expect(status?.ok).toBe(false);
+    expect(status?.workspaceMatched).toBe(false);
+    expect(status?.detail).toContain('act-probe-target');
   });
 });

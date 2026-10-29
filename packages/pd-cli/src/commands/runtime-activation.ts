@@ -413,6 +413,15 @@ interface ActivationDeactivateOptions {
   activationId?: string;
   reasonCode?: string;
   json?: boolean;
+  /**
+   * SPEC-RULECODE-HOST-PROMOTION-001 R4/P1: non-destructive validation path
+   * for the recovery reachability probe. Runs the REAL entry through real
+   * parsing, workspace binding, and target-resolution preconditions, then
+   * returns BEFORE the governance audit write and BEFORE any store mutation.
+   * Mutually exclusive with an actual deactivation by construction: the
+   * dry-run branch never reaches the deactivate call.
+   */
+  dryRun?: boolean;
 }
 
 export interface DeactivateResult {
@@ -442,6 +451,50 @@ export async function handleRuntimeActivationDeactivate(opts: ActivationDeactiva
   }
 
   const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
+  // SPEC R4/P1: the dry-run branch initializes the workspace READ-ONLY and
+  // returns before the governance audit write and before any store mutation —
+  // a reachability probe must leave zero governance traces.
+  if (opts.dryRun === true) {
+    const stateManagerDryRun = new RuntimeStateManager({ workspaceDir, readonly: true });
+    let dryRunResult: DeactivateResult;
+    try {
+      await stateManagerDryRun.initialize();
+      const targetExists = stateManagerDryRun.connection.getDb()
+        .prepare('SELECT 1 FROM activations WHERE activation_id = ? LIMIT 1')
+        .get(opts.activationId) !== undefined;
+      dryRunResult = {
+        ok: true,
+        activationId: opts.activationId,
+        reason: 'dry_run_ok',
+        nextAction: targetExists
+          ? 'Dry run only — nothing was deactivated. Re-run without --dry-run to deactivate.'
+          : 'Dry run only — nothing was deactivated. The activation id does not exist in this workspace (expected for a reachability probe).',
+      };
+      if (opts.json) {
+        console.log(JSON.stringify({ ...dryRunResult, dryRun: true, workspaceDir, targetExists }, null, 2));
+      } else {
+        console.log(`Dry run: validation ok — ${opts.activationId}`);
+        console.log(`  reason: ${dryRunResult.reason}`);
+        console.log(`  nextAction: ${dryRunResult.nextAction}`);
+      }
+    } catch (err: unknown) {
+      dryRunResult = {
+        ok: false,
+        activationId: opts.activationId,
+        reason: `dry_run_failed: ${err instanceof Error ? err.message : String(err)}`,
+        nextAction: 'Check workspace directory and DB integrity. Try `pd runtime diagnostics`.',
+      };
+      if (opts.json) console.log(JSON.stringify(dryRunResult, null, 2));
+      else {
+        console.error(`Error: ${dryRunResult.reason}`);
+        console.error(`Next action: ${dryRunResult.nextAction}`);
+      }
+    } finally {
+      await stateManagerDryRun.close();
+    }
+    if (!dryRunResult.ok) process.exitCode = 1;
+    return;
+  }
   const stateManager = new RuntimeStateManager({ workspaceDir });
 
   try {
@@ -658,13 +711,25 @@ export async function handleRuntimeActivationPromote(opts: ActivationPromoteOpti
               // runtime_compatibility instead of passing as-is.
               ...(promotionHost.ok ? { expectedHostContractVersion: promotionHost.hostRuntimeVersion } : {}),
               existingLiveArtifacts: liveArtifacts,
-              // Review R3/P1: composition through the production boundary +
-              // per-evaluation target-environment reachability (real
-              // read-only status subprocess against THIS workspace; the
-              // expected activation must be visible in its listing).
+              // Review R3/P1 + R4/P1: composition through the production
+              // boundary + per-evaluation PER-CAPABILITY reachability. The
+              // CLI process proves the two CLI-channel capabilities with real
+              // subprocesses (status listing; deactivate --dry-run) and
+              // reports the console-channel capabilities as explicitly NOT
+              // verified — promoting through the CLI therefore fails
+              // emergency_controls (fail closed) until the Owner Console
+              // process supplies its own channel evidence.
               projectDir: workspaceDir,
               ...(workspaceToolSemantics ? { toolSemantics: workspaceToolSemantics } : {}),
-              recoveryReachability: await probeCliRecoveryReachability(workspaceDir, activationId),
+              recoveryReachability: await (async () => {
+                const capabilities = await probeCliRecoveryReachability(workspaceDir, activationId);
+                return {
+                  source: 'cli-status-probe' as const,
+                  ok: capabilities.every(capability => capability.ok),
+                  workspaceMatched: capabilities.every(capability => capability.workspaceMatched),
+                  capabilities,
+                };
+              })(),
               validateProductionArtifact: value => writer.canActivate(value),
             });
           },
@@ -1746,9 +1811,11 @@ export function registerRuntimeActivationDeactivateCommand(parent: Command): Com
     .option('--reason-code <code>', 'Structured governance reason code (default: cli_deactivate_requested)')
     .option('-w, --workspace <path>', 'Workspace directory')
     .option('--json', 'Output raw JSON')
+    .option('--dry-run', 'Validate the deactivation entry without deactivating (recovery reachability probe; no audit write, no mutation)')
     .action(async (opts) => {
       await handleRuntimeActivationDeactivate({
         activationId: opts.activationId,
+        dryRun: opts.dryRun,
         workspace: opts.workspace,
         reasonCode: opts.reasonCode,
         json: opts.json,

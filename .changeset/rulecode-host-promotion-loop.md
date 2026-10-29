@@ -78,3 +78,28 @@ RuleCode host promotion loop (SPEC-RULECODE-HOST-PROMOTION-001 v0.1, A→B→C):
     swallowing), a legacy NULL row is never implicitly claimed (a new
     attributed row lands beside it), same-host re-delivery stays
     idempotent, and unknown→final upgrades only same-host rows.
+
+  Review fixes (round 4, findings 1-2):
+  - R4/P1: recovery reachability is PER-CAPABILITY. The evidence type gains
+    a capabilities matrix; emergency_controls requires every registry
+    capability (pd_status, rulecode_deactivate, rulecode_global_pause,
+    owner_review_access) to carry its own current, channel-matched,
+    workspace-matched entry — missing, duplicate, unknown, channel-mismatched
+    or failed entries fail closed with stable reason codes. The shared
+    host-runtime probe module executes the REAL pd CLI subprocesses: the
+    status listing (pd_status) and a new non-destructive
+    `pd activation deactivate --dry-run` validation path (rulecode_deactivate
+    — real parsing, workspace binding, and target resolution, returning
+    BEFORE any governance audit write or store mutation). Console readiness
+    assembles its own evidence: the same CLI subprocess probes, a
+    transaction-rollback write probe for the pause substrate (table asserted
+    unchanged after rollback), and a route-served signal for owner_review
+    (real authenticated Console HTTP entry observed in the same evaluation).
+    CLI-process promotion honestly reports console-channel entries as NOT
+    verified and refuses (fail closed); commit-failure semantics stay
+    covered at the service level.
+  - R4/P2: real-SQLite dedup coverage extended beyond one helper: the
+    production pain-evidence handler (both dedup routes), the governance
+    admission entry (both dedup queries), and the Codex ingestion chain each
+    get cross-host collision, legacy-NULL, same-host idempotency, and
+    terminal-protection regressions against real production entries.

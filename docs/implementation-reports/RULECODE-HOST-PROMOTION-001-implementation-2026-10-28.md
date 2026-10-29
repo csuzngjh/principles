@@ -184,3 +184,61 @@ core runtime-v2 7838 绿（+barrel 快照更新）；host-runtime 593 绿（+R2 
 ## Round 3 测试总量
 
 core runtime-v2 7848（21 归属/注册表/组合/可达性矩阵）；host-runtime 600（+7 去重归属）；codex-adapter 357（upgrade 双契约 5/5）；pd-cli 2114（+CLI 真子进程探针 2；P0-3 fixture 补真实 DB 种子+真实 registry mock）；pd-console 2991（+隔离恢复效果 3）；openclaw-plugin 环境失败集与既有相同（4 例；两个 perf 测试在全量并行时抖动、隔离复跑全绿）；owner e2e 6/6。
+
+---
+
+# Round 4 — 评审发现修复（2026-10-29，P1 逐能力可达性 + P2 全写入路径归属闭环）
+
+评审基线 `ac1d751ee`（执行前核实 == PR head，工作区干净）。
+
+## P1：恢复能力逐项真实可达性证明
+
+**已确认缺口**：R3 的单个 `recoveryReachability.ok/workspaceMatched` 聚合可被一个探针代表整组能力——CLI 状态查询成功≠撤销入口可用，Console 存储可读≠暂停路由可达；且"组合验证"调用点的逐工件回放描述与生产组合语义的边界不够清晰。
+
+**修复（复用既有注册表/生产 evaluator/路由/存储/readiness 设施，零新表零开关）**：
+
+1. **逐能力证据矩阵（core）**：`RecoveryCapabilityEvidence`（capabilityId/channel/ok/workspaceMatched/detail）挂入 `RecoveryReachabilityEvidence.capabilities`；`validateRecoveryCapabilityCoverage` 以注册表为权威——每必需能力恰好一条、通道匹配、ok 且工作区匹配；缺失/重复/未知能力/通道不匹配 → `recovery_capability_evidence_incomplete`；已运行但失败/指错工作区 → `recovery_reachability_unverified`。emergency_controls 终判 = 全部能力有效证据 AND 工作区匹配 AND 生产组合验证 AND 合同+开关——任何子条件不可替代整体。每次 readiness 现取证据，零缓存。
+2. **CLI 通道两项分别验证（host-runtime 共享探针模块，pd-cli/console 复用同一实现）**：
+   - `pd_status`：真实子进程 `pd activation list --json --workspace <目标>`（既有有界执行/超时/1MiB 上限/JSON 校验保留；可要求目标 activation 出现在列表）。
+   - `rulecode_deactivate`：deactivate 命令新增 **`--dry-run` 非破坏验证路径**（真实解析→真实工作区绑定（readonly init）→真实目标解析与前置校验，**在治理审计写入与存储变更之前返回**）；探针用不存在的 probe id——前置条件的诚实结果。parser 测试（cli-7）+ 真实子进程审计证据测试（探针前后 `.pd/logs` 记录数不变、无 probe 激活行产生）。禁止对真实激活 ID 执行 deactivate——未违反。
+   - console 通道两能力在 CLI 进程中如实输出 NOT-VERIFIED（精确 detail）→ CLI promote **fail-closed 拒绝**（P0-3 改为断言该诚实拒绝，commit-failure 语义由 core service 同名测试继续覆盖）。
+3. **Console 通道两项分别验证（ActivationsConsoleModel 逐能力组装）**：
+   - `rulecode_global_pause`：事务回滚写探针——`BEGIN IMMEDIATE` 插入 probe pause 行→事务内可见性验证→`ROLLBACK`→**前后行数一致且无 probe 残留**的断言；detail 明确只主张"底座可写"，不宣称浏览器→HTTP 路径（§2.4.6 遵守）。
+   - `owner_review_access`：路由信号——真实认证 Console HTTP 路由（owner-review GET / promote POST）在服务本次评估时传入 `servedThroughAuthenticatedConsoleRoute`；直接模型调用无信号 → 该能力不 evidenced → emergency 失败（负例测试锁定）。
+   - pd_status/deactivate：Console 进程以同一共享探针真实子进程执行（安装/仓库双布局 entry 解析，缺失则如实 not-verified）。
+4. **组合验证独立性保持**：`recovery-composition.ts` 未动——生产 evaluator/输入构造器/mergeDecisions、block 与 requireApproval 均判败、引用恒等定位阻断工件；可达性证据与组合证据分开计算、在 emergency_controls 汇合。R3 对虚拟探针与逐工件近似的修复未回退（console 通道仍无规则回放探针——注册表仍拒绝）。
+5. **错误码契约**：新增 `recovery_capability_evidence_incomplete`（覆盖性）与既有 `recovery_reachability_unverified`（可达性）语义稳定、可测试；其余既有码未动。
+
+**红→绿证据**（core 29 用例矩阵，覆盖任务书 §3 全部 12 行）：全证据+工作区匹配+组合通过 → PASS；缺任一能力/重复/未知/通道不匹配 → `recovery_capability_evidence_incomplete`；CLI 状态 ok 但 deactivate 未验证 → FAIL；Console 存储可读但 pause 能力失败 → FAIL；Owner Review 无路由信号 → FAIL；任一能力指错工作区 → FAIL；探针失败 detail 透传 → FAIL；组合阻断/requireApproval 升级 → FAIL（定位工件）；全能力逐项通过 → PASS。CLI 真实子进程：3 用例（正确工作区两项 ok、dry-run 零审计零变更、目标缺失精确 detail）。Console 集成：路由服务 → emergency PASS（Test G 更新传路由信号）；直呼无信号 → emergency FAIL（新负例）。
+
+## P2：宿主归属去重的真实 SQLite 回归闭环
+
+在 R3 的 `recordVerifiedToolOutcomes` 专项（7 用例）之上补齐其余生产写入路径，全部走真实生产入口 + 临时真实 SQLite（`applyTrajectorySchemaBase` 真实 schema），零手写 SQL 断言替代生产逻辑：
+
+1. **production pain-evidence handler**（`createProductionPainEvidenceHandler` 真实 handler，`pain-evidence-host-dedup.test.ts` 6 用例）：跨宿主同 session+toolCallId 独立落库；同内容形状跨宿主不吞（内容去重路径）；同宿主重复投递幂等；同宿主同 callId 不同内容按既有 canonical identity 契约单行不覆盖；legacy NULL 行不被认领（并列落库）；已知宿主每行盖章。红→绿：首轮 2 红（跨宿主吞并/NULL 认领场景在 handler 层面验证了 R3 修复的真实效果）+ fixture 语义修正后 6/6。
+2. **governance admission**（`admitGovernanceSignals` 真实入口，`admission-host-dedup.test.ts` 7 用例）：真实候选（写工具+危险路径跨强信号门槛）准入并盖章；同宿主重复投递 already_admitted 幂等；跨宿主碰撞（种子 WorkBuddy 行+Codex 候选）不吞不认领、独立记录；NULL 旧行并列落库；内容形状回退去重宿主辖域；终态保护（已有同宿主终态行 → `not_admitted(duplicate_tool_call_without_admitted_pain)`，无新行无覆盖——真实生产语义）；unknown→终态升级属 verified-outcome 路径，admission 不改写未知行（语义边界测试锁定）。
+3. **Codex ingestion**（真实 orchestrator，`verified-outcome-upgrade.test.ts` 增至 6 用例）：新增 WorkBuddy 盖章行同标识不被 Codex 认领/升级、双记录独立的跨宿主用例；既有同宿主升级/NULL 不认领用例保留通过。既有 Codex 历史读取行为未改（对称过滤仍为已记录 follow-up，未声称完成）。
+
+## 兼容与安全回归核对
+
+PRI-1019 例外（gate L467-472）未动；缺失事实 fail-closed/暂停语义未动；emergency-pause 仅暂停（dry-run 探针在审计写入前返回，不可能触发暂停/释放）；释放仍走 Owner 决策+expectedVersion；无自动恢复/激活；无历史回填；无 hostKind 调用者 match-any 兼容契约不变（测试锁定）；阈值/评审门禁未降。
+
+## 测试执行记录（实际命令与结果）
+
+| 范围 | 命令 | 结果 |
+| --- | --- | --- |
+| core 逐能力矩阵+组合 | vitest run src/runtime-v2/activation/__tests__/host-promotion-attribution.test.ts | 29/29 |
+| core 全量 | vitest run src/runtime-v2 | 7850 passed |
+| host-runtime 全量（含 P2 三套件 20 用例） | vitest run | 613 passed |
+| pd-cli 全量 | vitest run | 2113 passed / 2 failed（见下） |
+| pd-console 全量 | vitest run | 2991 passed + 1 expected-fail |
+| codex-adapter 全量 | vitest run | 357 passed |
+| openclaw-plugin 全量 | vitest run | 2296 passed / 4 env（既有集合） |
+| owner e2e | playwright test --config playwright.owner.config.ts | promote/reject 全链 6 passed + focus-click 负载抖动（隔离复跑 passed） |
+| 门禁 | check:runtime-contract / pre-push-fast / git diff --check | 0 violations / PASS / clean |
+
+**既有负载抖动（与本 diff 无关的基线证明）**：pd-cli 全量中 `cli-help-snapshot`（demo alias）与 `candidate-intake-e2e`（Test 5）偶发失败——将本 PR 新增探针测试**排除后重跑全量仍复现同样 2 例**（负载画像基线），且两文件隔离/组合运行稳定通过；不修改其断言，如实记录。
+
+## 剩余限制
+
+native（真实客户端带外恢复、真实安装环境四能力验证）仍 NOT RUN；CLI 进程无法验证 console 通道属架构事实（fail-closed 是设计行为，非缺陷）；Codex 历史读取侧对称过滤为已记录 follow-up。

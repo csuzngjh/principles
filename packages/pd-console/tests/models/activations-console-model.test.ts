@@ -530,13 +530,58 @@ describe('ActivationsConsoleModel — Owner review', () => {
       declaredAt: now,
     }).ok).toBe(true);
 
-    const review = await model.getOwnerReview('act-openclaw-813');
+    // SPEC R4/P1: the owner_review_access capability is evidenced by the
+    // REAL authenticated Console route serving this evaluation — the test
+    // passes the same route signal the GET/promote routes pass in production.
+    const review = await model.getOwnerReview('act-openclaw-813', false, { routeContext: { servedThroughAuthenticatedConsoleRoute: true } });
 
     const hostChecks = review.readiness.evidenceSnapshot.safetyGateResults
       .filter(check => ['runtime_compatibility', 'runtime_shadow_evidence', 'emergency_controls'].includes(check.checkId));
     expect(hostChecks).toHaveLength(3);
     expect(hostChecks.every(check => check.status === 'passed')).toBe(true);
     expect(review.runtimeCapability).toEqual({ hostRuntimeVersion: 'openclaw-legacy@1', shadowEvidence: true });
+  });
+
+  it('SPEC R4/P1: WITHOUT the route-served signal, owner_review_access is not evidenced and emergency_controls fails (direct model calls never self-certify the HTTP entry)', async () => {
+    // Same workspace shape as Test G but WITHOUT the route signal: the
+    // owner-review entry must stay unverified — a direct model call cannot
+    // self-certify the browser→HTTP path.
+    const conn = new SqliteConnection({ workspaceDir, readonly: false });
+    const db = conn.getDb();
+    const now = '2026-09-16T07:30:00.000Z';
+    db.prepare("INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES ('task-noroute', 'diagnosis', 'pending', ?, ?)").run(now, now);
+    db.prepare(`INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+      VALUES ('artifact-noroute', 'rule', 'task-noroute', 'rule-noroute', '["parent-1"]', 'validated', ?, ?, ?)`)
+      .run(JSON.stringify({
+        implementationCode: 'function evaluate(input) { const risky = input.action.toolName === "exec" && String(input.action.paramsSummary.command ?? "").includes("/etc/passwd"); return { decision: risky ? "block" : "allow", matched: risky, reason: risky ? "risk path" : "neutral" }; }',
+        goldenTrace: {
+          traceId: 'trace-noroute', sourcePainId: 'pain-noroute',
+          cases: [
+            { caseId: 'negative', kind: 'negative', toolName: 'exec', params: { command: 'echo x > /etc/passwd' }, expectedDecision: 'block' },
+            { caseId: 'positive', kind: 'positive', toolName: 'exec', params: { command: 'echo ok' }, expectedDecision: 'allow' },
+          ],
+          createdAt: now, version: 1,
+        },
+        affectedTools: ['exec'], ruleHostGateDecision: 'accepted_shadow',
+      }), now, now);
+    db.prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at)
+      VALUES ('act-noroute', 'idem-noroute', 'artifact-noroute', 'code_tool_hook', 'code_tool_hook_shadow_activate', 'impl://rule-noroute', ?, NULL)`).run(now);
+    db.prepare(`INSERT INTO activation_control_states (activation_id, enforcement, version, updated_at) VALUES ('act-noroute', 'eligible', 1, ?)`).run(now);
+    conn.close();
+    expect(saveHostToolDeclaration(workspaceDir, {
+      version: 1,
+      hostKind: 'openclaw',
+      mappings: [{ rawToolName: 'exec', canonicalKind: 'execute' }],
+      declaredAt: now,
+    }).ok).toBe(true);
+
+    const review = await model.getOwnerReview('act-noroute');
+
+    const emergency = review.readiness.evidenceSnapshot.safetyGateResults.find(check => check.checkId === 'emergency_controls');
+    expect(emergency?.status).toBe('failed');
+    expect(['recovery_capability_evidence_incomplete', 'recovery_reachability_unverified']).toContain(emergency?.reasonCode);
+    // The overall readiness must never be promotable without the evidence.
+    expect(review.readiness.status).not.toBe('ready');
   });
 });
 

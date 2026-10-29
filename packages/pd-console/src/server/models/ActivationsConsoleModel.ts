@@ -15,7 +15,7 @@ import {
   buildPromotionEvidenceSnapshot,
 } from '@principles/core/runtime-v2';
 import type { ActivationStatusRecord, PIArtifactRecord, PIArtifactSnapshot, PromotionReadinessResult, PromotionEvidenceSnapshot, ActivationControlState, ActivationDecisionRecord, GlobalRuleCodePause, OwnerPromotionActor, OwnerPromotionResult } from '@principles/core/runtime-v2';
-import type { RecoveryReachabilityEvidence } from '@principles/core/runtime-v2';
+import type { RecoveryCapabilityEvidence, RecoveryReachabilityEvidence } from '@principles/core/runtime-v2';
 import { resolvePromotionHostLiveness, resolveWorkspaceHostToolSemantics, readPromptActivationInjectionStatuses, operatorDeclaredBudgetResolution, runtimeBudgetObservationToResolution, selectConsoleRuntimeBudgetFacts, RUNTIME_BUDGET_OBSERVATION_STALE_REASON, RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS, type PromptInjectionTargetHost } from '@principles/host-runtime';
 import { PROMPT_BUDGET_HOST_KINDS } from '@principles/core/runtime-v2';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
@@ -548,7 +548,7 @@ export class ActivationsConsoleModel {
     }
   }
 
-  async getOwnerReview(activationId: string, ownerIdentityConfigured = false, ownerActor?: OwnerPromotionActor): Promise<RuleCodeOwnerReview> {
+  async getOwnerReview(activationId: string, ownerIdentityConfigured = false, options?: { ownerActor?: OwnerPromotionActor; routeContext?: { servedThroughAuthenticatedConsoleRoute: boolean } }): Promise<RuleCodeOwnerReview> {
     const conn = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: true });
     try {
       const activationStore = new SqliteActivationStateStore(conn);
@@ -570,17 +570,62 @@ export class ActivationsConsoleModel {
       // to the SAME host the readiness checks will run against
       // (SPEC-RULECODE-HOST-PROMOTION-001 B3).
       const promotionHost = resolvePromotionHostLiveness(this.workspaceDir);
-      // Review R3/P1: non-destructive console reachability probe (see the
-      // collectHostChecks comment for the exact evidence boundary). Reading
-      // the active global pause through the SAME safety store the emergency
-      // pause route writes proves the substrate is live for this workspace.
-      let recoveryStoreProbe: RecoveryReachabilityEvidence;
+      // Review R4/P1: PER-CAPABILITY target-environment evidence, produced
+      // fresh for THIS evaluation (never cached). Each entry states exactly
+      // what it proved — no evidence is reused across capabilities:
+      // - pd_status / rulecode_deactivate: the REAL pd CLI subprocess probes
+      //   (shared host-runtime implementation; the status listing must
+      //   contain this activation; deactivate runs its real --dry-run
+      //   validation path — no audit write, no mutation);
+      // - rulecode_global_pause: the durable pause substrate of THIS
+      //   workspace is writable — a transaction-rollback probe inserts a
+      //   probe pause row, verifies it, rolls back, and asserts the table is
+      //   unchanged afterwards. Substrate evidence only; the browser-to-HTTP
+      //   entry path remains e2e/isolated-route-test evidence and is NOT
+      //   claimed here;
+      // - owner_review_access: THIS readiness evaluation is being served
+      //   through a real authenticated Console HTTP route (the owner-review
+      //   GET or the promote POST passed the signal down) — the entry exists,
+      //   dispatches, authenticates, and binds to this workspace, observed
+      //   right now.
+      const recoveryCapabilities: RecoveryCapabilityEvidence[] = [];
       try {
-        await safetyStore.getActiveGlobalPause();
-        recoveryStoreProbe = { source: 'console-store-probe', ok: true, workspaceMatched: true };
+        const { resolveCliRecoveryEntry, probeCliActivationStatus, probeCliDeactivateDryRun } = await import('@principles/host-runtime');
+        const cliEntry = resolveCliRecoveryEntry();
+        if (cliEntry === null) {
+          recoveryCapabilities.push(
+            { capabilityId: 'pd_status', channel: 'cli', ok: false, workspaceMatched: false, detail: 'pd CLI entry not found in this environment' },
+            { capabilityId: 'rulecode_deactivate', channel: 'cli', ok: false, workspaceMatched: false, detail: 'pd CLI entry not found in this environment' },
+          );
+        } else {
+          recoveryCapabilities.push(
+            await probeCliActivationStatus({ cliEntry, workspaceDir: this.workspaceDir, expectedActivationId: activationId }),
+            await probeCliDeactivateDryRun({ cliEntry, workspaceDir: this.workspaceDir }),
+          );
+        }
       } catch (error: unknown) {
-        recoveryStoreProbe = { source: 'console-store-probe', ok: false, workspaceMatched: false, detail: error instanceof Error ? error.message : String(error) };
+        const detail = error instanceof Error ? error.message : String(error);
+        recoveryCapabilities.push(
+          { capabilityId: 'pd_status', channel: 'cli', ok: false, workspaceMatched: false, detail: `cli probe failed: ${detail}` },
+          { capabilityId: 'rulecode_deactivate', channel: 'cli', ok: false, workspaceMatched: false, detail: `cli probe failed: ${detail}` },
+        );
       }
+      recoveryCapabilities.push(this.probePauseSubstrate());
+      recoveryCapabilities.push({
+        capabilityId: 'owner_review_access',
+        channel: 'console',
+        ok: options?.routeContext?.servedThroughAuthenticatedConsoleRoute === true,
+        workspaceMatched: options?.routeContext?.servedThroughAuthenticatedConsoleRoute === true,
+        detail: options?.routeContext?.servedThroughAuthenticatedConsoleRoute === true
+          ? undefined
+          : 'this readiness evaluation was not served through an authenticated Console HTTP route (direct model call); the owner-review entry is therefore not evidenced',
+      });
+      const recoveryStoreProbe: RecoveryReachabilityEvidence = {
+        source: 'console-route-served',
+        ok: recoveryCapabilities.every(capability => capability.ok),
+        workspaceMatched: recoveryCapabilities.every(capability => capability.workspaceMatched),
+        capabilities: recoveryCapabilities,
+      };
       const telemetry = readRuleCodeTelemetry(this.workspaceDir, activationId, { decisions, promotionHostKind: promotionHost.ok ? promotionHost.hostKind : undefined });
       const flags = computeFlagsFromLoadResult(loadPdConfig(this.workspaceDir));
       // PRI-634-F R3 (SPEC P1-1): promotion readiness evaluates through the
@@ -643,7 +688,7 @@ export class ActivationsConsoleModel {
             expectedArtifactDigest: digest,
             // Bind the real authenticated actor; null (not a placeholder) when
             // the review is read without an Owner session.
-            ownerIdentity: ownerActor ?? null,
+            ownerIdentity: options?.ownerActor ?? null,
             hostRuntimeVersion: promotionHost.ok ? promotionHost.hostRuntimeVersion : promotionHost.reason,
             shadowSummary: telemetry.shadowSummary,
           });
@@ -769,8 +814,8 @@ export class ActivationsConsoleModel {
     } finally { try { conn.close(); } catch { /* best effort */ } }
   }
 
-  async promoteRuleCode(activationId: string, expected: { artifactId: string; artifactDigest: string; controlVersion: number; confirmed: boolean }, input: OwnerMutationInput): Promise<OwnerPromotionResult> {
-    const review = await this.getOwnerReview(activationId, input.actor.principal.kind === 'configured_owner' && input.actor.authentication.method === 'console_token', input.actor);
+  async promoteRuleCode(activationId: string, expected: { artifactId: string; artifactDigest: string; controlVersion: number; confirmed: boolean }, input: OwnerMutationInput & { routeContext?: { servedThroughAuthenticatedConsoleRoute: boolean } }): Promise<OwnerPromotionResult> {
+    const review = await this.getOwnerReview(activationId, input.actor.principal.kind === 'configured_owner' && input.actor.authentication.method === 'console_token', { ownerActor: input.actor, routeContext: input.routeContext });
     const flags = computeFlagsFromLoadResult(loadPdConfig(this.workspaceDir));
     const conn = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: false });
     try {
@@ -802,6 +847,41 @@ export class ActivationsConsoleModel {
 
       return result;
     } finally { try { conn.close(); } catch { /* best effort */ } }
+  }
+
+  /**
+   * SPEC R4/P1: non-destructive write-capability probe for the global-pause
+   * substrate. Inserts a probe pause row inside an explicit transaction,
+   * verifies it, ROLLS BACK, then asserts the table is unchanged (no probe
+   * row, same row count). Pure substrate evidence for THIS workspace — the
+   * browser-to-HTTP entry path is deliberately not claimed.
+   */
+  private probePauseSubstrate(): RecoveryCapabilityEvidence {
+    const conn = new SqliteConnection({ workspaceDir: this.workspaceDir, readonly: false });
+    try {
+      const db = conn.getDb();
+      const probeId = `recovery-probe-${randomUUID()}`;
+      const before = db.prepare('SELECT COUNT(*) AS n FROM global_rulecode_pauses').get() as { n: number };
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        db.prepare("INSERT INTO global_rulecode_pauses (pause_id, status, incident_decision_id, release_decision_id, affected_activation_ids, paused_at, released_at, version) VALUES (?, 'paused', ?, NULL, '[]', ?, NULL, 1)")
+          .run(probeId, `probe-${probeId}`, new Date().toISOString());
+        const inserted = db.prepare('SELECT pause_id FROM global_rulecode_pauses WHERE pause_id = ?').get(probeId);
+        if (inserted === undefined) throw new Error('probe pause row not visible inside the transaction');
+      } finally {
+        db.exec('ROLLBACK');
+      }
+      const after = db.prepare('SELECT COUNT(*) AS n FROM global_rulecode_pauses').get() as { n: number };
+      const probeLeftover = db.prepare('SELECT pause_id FROM global_rulecode_pauses WHERE pause_id = ?').get(probeId);
+      if (probeLeftover !== undefined || before.n !== after.n) {
+        return { capabilityId: 'rulecode_global_pause', channel: 'console', ok: false, workspaceMatched: true, detail: 'rollback probe left state behind — substrate evidence rejected' };
+      }
+      return { capabilityId: 'rulecode_global_pause', channel: 'console', ok: true, workspaceMatched: true };
+    } catch (error: unknown) {
+      return { capabilityId: 'rulecode_global_pause', channel: 'console', ok: false, workspaceMatched: true, detail: `pause substrate probe failed: ${error instanceof Error ? error.message : String(error)}` };
+    } finally {
+      try { conn.close(); } catch { /* best effort */ }
+    }
   }
 
   private async withMutableRuleCode<T>(activationId: string, action: (store: SqliteActivationSafetyStore, activation: ActivationStatusRecord, artifactDigest: string) => Promise<T>): Promise<T> {
