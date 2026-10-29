@@ -222,8 +222,9 @@ describe('collectOpenClawPromotionChecks — host-contract version binding (SPEC
 describe('emergency_controls binds to the REAL recovery surface registry (SPEC R1)', () => {
   // R4/P1: a valid aggregate now REQUIRES per-capability entries for every
   // registry capability, all ok and workspace-matched.
+  const pdStatusCapability = { capabilityId: 'pd_status', channel: 'cli' as const, ok: true, workspaceMatched: true };
   const allOkCapabilities = [
-    { capabilityId: 'pd_status', channel: 'cli' as const, ok: true, workspaceMatched: true },
+    pdStatusCapability,
     { capabilityId: 'rulecode_deactivate', channel: 'cli' as const, ok: true, workspaceMatched: true },
     { capabilityId: 'rulecode_global_pause', channel: 'console' as const, ok: true, workspaceMatched: true },
     { capabilityId: 'owner_review_access', channel: 'console' as const, ok: true, workspaceMatched: true },
@@ -416,7 +417,7 @@ describe('emergency_controls binds to the REAL recovery surface registry (SPEC R
       projectDir: '/workspace/probe-root',
       recoveryReachability: {
         source: 'cli-status-probe', ok: true, workspaceMatched: true,
-        capabilities: [...allOkCapabilities, allOkCapabilities[0]],
+        capabilities: [...allOkCapabilities, pdStatusCapability],
       },
       validateProductionArtifact: async () => ({ ok: true }),
     });
