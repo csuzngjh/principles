@@ -1,0 +1,219 @@
+
+> principles-disciple-monorepo@2.4.0 error:context
+> node scripts/error-context.mjs --base origin/main
+
+Error Context
+
+Basis: diff origin/main...HEAD (committed + staged + unstaged)
+
+Triggered patterns:
+
+EP-10 — HIGH (score 124)
+Matched:
+- path: scripts/dev/principle-learning-lab/lib/challenge-compile.mjs ← scripts/dev
+- path: scripts/dev/principle-learning-lab/lib/claim-evidence-env.mjs ← scripts/dev
+- path: scripts/dev/principle-learning-lab/lib/claim-evidence-scorer.mjs ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v3/blind-review/README.md ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v3/blind-review/cases.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v3/blind-review/observed-traces.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v3/blind-review/review-form.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v3/expected-replay.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v3/gold-review.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v3/inputs.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v3/package-manifest.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v3/real-source/assistant_turns.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v3/real-source/dreamer.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v3/real-source/pain44.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v3/real-source/pain_diagnoses.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v3/real-source/philosopher.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v3/real-source/scribe.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v3/real-source/tool_calls.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v3/real-source/user_turns.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v3/review-history.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v3/revision.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v3/source-verification.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/blind-review/README.md ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/blind-review/cases.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/blind-review/mapping.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/blind-review/observed-traces.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/blind-review/receipts.template.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/blind-review/review-form.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/expected-replay.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/gold-review.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/inputs.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/package-manifest.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/real-source/assistant_turns.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/real-source/dreamer.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/real-source/pain44.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/real-source/pain_diagnoses.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/real-source/philosopher.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/real-source/scribe.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/real-source/tool_calls.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/real-source/user_turns.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/review-subject.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/revision.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/source-audit.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v4/source-verification.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001/expected-replay.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001/gold-review-package.md ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001/gold-review.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001/inputs.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001/package-manifest.json ← scripts/dev
+- path: scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001/revision.json ← scripts/dev
+Required evidence:
+1. Any 'pre-existing on main' CI-failure claim is reproduced on origin/main or proven unreachable from changed files.
+2. Deletion-capable cleanup commands over junction/symlink trees are junction-safe (git worktree remove / reparse-point check).
+3. PR diff scope matches the stated task; commit list inspected before cherry-pick.
+
+EP-09 — HIGH (score 38)
+Matched:
+- path: scripts/__tests__/fixtures/examiner-v2.mjs ← __tests__
+- path: scripts/__tests__/fixtures/examiner-v2.mjs ← fixtures
+- path: scripts/__tests__/principle-learning-lab-challenge-v2.test.ts ← __tests__
+- path: scripts/__tests__/fixtures/examiner-productization-fixture.mjs ← __tests__
+- path: scripts/__tests__/fixtures/examiner-productization-fixture.mjs ← fixtures
+- path: scripts/__tests__/fixtures/examiner-v4.mjs ← __tests__
+- path: scripts/__tests__/fixtures/examiner-v4.mjs ← fixtures
+- path: scripts/__tests__/principle-learning-lab-challenge-actor-transport.test.ts ← __tests__
+- path: scripts/__tests__/principle-learning-lab-challenge-isolation-probe.test.ts ← __tests__
+- path: scripts/__tests__/principle-learning-lab-examiner-productization-entry.test.ts ← __tests__
+- path: scripts/__tests__/principle-learning-lab-frozen-package.test.ts ← __tests__
+- path: scripts/__tests__/principle-learning-lab-gold-review-regression.test.ts ← __tests__
+- path: scripts/__tests__/principle-learning-lab-human-review-intake.test.ts ← __tests__
+- path: scripts/__tests__/principle-learning-lab-human-review-signature.test.ts ← __tests__
+- path: scripts/__tests__/principle-learning-lab-negative-transfer.test.ts ← __tests__
+- path: scripts/__tests__/principle-learning-lab-productization-integration.test.ts ← __tests__
+- path: scripts/__tests__/principle-learning-lab-v4-contract.test.ts ← __tests__
+- diff: toContain(
+- diff: readFileSync
+- diff: not.toThrow
+- diff: skip
+Required evidence:
+1. A positive assertion uniquely identifies the intended execution path; indirect signals (undefined return, absence of error, zero count) are not the only proof.
+2. Regression tests for a fix include the negative control that fails against the pre-fix state.
+3. Tests exercise the production boundary (real parser/registration/route), not source-string scans.
+4. Every completeness claim in a deletion/cleanup/audit PR cites the FULL untruncated output of a re-runnable command; the owning lifecycle doc's state machine is followed as binding removal semantics; every DoD command was executed once with its real output in the PR (ERR-127).
+5. A test asserting a declared bound (cap/budget/limit) drives the input to the boundary — maximal every contributing field — and asserts the bound on the FINAL returned value; a fixture that cannot approach the bound is not a guard (ERR-134).
+6. A validation guard's enforced rule is pinned to its authority: every identifier in a hand-written field list is proven to EXIST by round-tripping it through the owning validator (dropping any one entry must make that validator reject), and every predicate whose message asserts a format/unit/bound ships a negative case that the weaker reading would accept (non-existent calendar date, non-ISO format, boundary equality) (ERR-146).
+
+EP-03 — HIGH (score 6)
+Matched:
+- diff: restart
+- diff: catch
+- diff: nextAction
+- diff: reason
+- diff: persist
+- diff: return true
+Required evidence:
+1. Persistence/failure cannot become success: every refusal or degradation carries a structured reason + nextAction (rc-9).
+2. No empty catch blocks and no assertions hidden behind truthy conditionals.
+3. Failed stages do not report success or partial results as complete.
+4. A package-manager/installer exit code is never the evidence that the build needs are present — between `npm ci` and the first exec of a platform-specific tool, prove runnability by executing it (ERR-150).
+
+EP-14 — HIGH (score 6)
+Matched:
+- diff: cpSync
+- diff: files
+- diff: include
+- diff: exclude
+- diff: __tests__
+- diff: .test.
+Required evidence:
+1. Compiled/published/installed output (dist, npm tarball, installer payload) is asserted free of non-production content (compiled tests, snapshots, fixtures, stale orphan outputs) by a mechanized check that fails the build - not by inspection or audit.
+2. When the production build excludes tests from compilation, test-file typechecking is carried by an explicit gate (e.g. tsc --noEmit wired into verify:merge) so gate strength does not silently drop.
+3. Production-owned modules whose names resemble test assets (e.g. golden-dogfood-fixtures.ts imported by a production barrel) are explicitly distinguished from test artifacts in the assertion patterns.
+
+EP-02 — HIGH (score 5)
+Matched:
+- diff: export 
+- diff: new 
+- diff: resolve
+- diff: symlink
+- diff: link
+Required evidence:
+1. Prove the real production/public entry point consumes the changed mechanism (production-path integration or smoke evidence).
+2. If a shared contract changed, inspect and exercise the relevant cross-package consumers.
+3. Do not use isolated helper tests as the only production-wiring evidence.
+4. When retiring/renaming a registry-published value or deleting an operator-facing artifact, ALL read/display sites of the changed value plus every doc/test/inventory reference were enumerated before claiming synced/retired; audit-deferred surfaces stayed out of delete scope (ERR-024).
+5. When deleting a migration/backfill/compat layer, the HISTORICAL PERSISTED STATES it normalized were enumerated (oldest supported state gets a fixture test) before removal, so readers keep serving pre-existing rows (ERR-024).
+6. When a whole-object load→modify→save API coexists with a locked single-writer mutator for a sub-section, the generic save path strips that sub-section (lock-time current value wins) and the regression exercises the REAL load-modify-save caller path, not a hand-edited file (ERR-168).
+
+EP-05 — HIGH (score 5)
+Matched:
+- path: scripts/dev/principle-learning-lab/lib/challenge-runner.mjs ← runner
+- diff: attempt
+- diff: retry
+- diff: for (
+Required evidence:
+1. Each iteration reads fresh errors/current state, not a stale prior-iteration result (rc-7).
+2. Records are written with current-iteration data; next-attempt state is not stored as current evidence.
+3. Tests cover two distinct failing attempts with per-attempt assertions.
+
+EP-01 — HIGH (score 4)
+Matched:
+- path: scripts/dev/principle-learning-lab/lib/challenge-validator.mjs ← validator
+- diff: JSON.parse
+- diff: Object.hasOwn
+Required evidence:
+1. Untrusted values stay unknown until a runtime guard validates them (rc-1/rc-2).
+2. Required fields fail loud when missing or malformed (rc-3).
+3. Every output-emitting path (happy/degraded/fallback/exhausted) emits only validated objects.
+
+EP-04 — MEDIUM (score 3)
+Matched:
+- diff: --json
+- diff: process.exit
+- diff: exitCode
+Required evidence:
+1. Parser-level tests exercise the real Commander program (cli-7), not only handlers.
+2. Failed validation stops execution and does not mutate state (cli-2/cli-5).
+3. --json stdout emits exactly one parseable machine result (cli-1).
+4. A subprocess entry point whose contract is "never block the host" is proven fail-open from a spawned process — asserted exit code, plus exact stdout shape only in the writable-stdout cases — with stream failure forced both synchronously and as an async 'error' event, because lexical try/catch cannot reach the latter (ERR-156).
+
+EP-06 — MEDIUM (score 3)
+Matched:
+- diff: process.exit
+- diff: port
+- diff: import { validate
+Required evidence:
+1. The source of truth was edited and the generator/artifact rebuilt, not the generated copy patched.
+2. The lockfile CI consumes is the one updated; smoke installs run from packed output.
+3. Dependency-bump PRs state which package test/typecheck jobs CI path-filters skip and attach local evidence covering them: targeted vitest/tsc in consumer packages, default-import scan, npm ls single-copy check (ERR-131).
+4. New/changed entry points exist in ALL build paths (tsc, esbuild) that reference them.
+5. Before adding a NEW import of a shared utility (formatting/validation/logging/hashing), sibling implementations of the same purpose were searched (rg) and the one whose contract documents the needed guardrails was reused — two live implementations are a retirement signal, not a third-consumer license (ERR-126).
+6. Serving or executing from a repo build artifact proves freshness first — rebuild immediately before launch or use the canonical installed runtime path; servable packages stay covered by the root build authority so repo-wide builds refresh them (ERR-166).
+
+EP-07 — MEDIUM (score 2)
+Matched:
+- diff: let last
+- diff: deadline
+Required evidence:
+1. Returned state is read from the canonical source after writes; lineage fields come from one authority (rc-6).
+2. Module-level caches keyed by input use Map<string, T>, not single-valued slots.
+3. A configured deadline is proven to be the tightest timer on the actual wire path.
+4. Index-correlated collections cross every boundary (getters, `list*`, caches, serialization) on the SAME terms — if one member of a pair is cloned, all are, and the mutation test mutates each member as handed out and asserts the consequence at the persisted record (ERR-147).
+
+EP-12 — MEDIUM (score 2)
+Matched:
+- diff: manifest
+- diff: commands
+Required evidence:
+1. Every write into host-managed paths/keys cites the host rule that interprets it (discovery scan, publication uniqueness, allowlist gate).
+2. PD-owned data lives outside discovery roots; shared host collections stay append-only.
+
+EP-08 — LOW (score 1)
+Matched:
+- diff: startsWith
+Required evidence:
+1. Enforcement operates on the raw/canonical input (post-transform output for bounds; canonical paths for containment).
+2. Shell args pass as argv, not interpolated strings; SQL binds values.
+3. Path containment canonicalizes BOTH sides before comparison.
+4. When content moves out of a bounded artifact, the bound keeps a numeric-bound assertion on what remains (not just warning emission).
+
+EP-11 — LOW (score 1)
+Matched:
+- diff: t('
+Required evidence:
+1. Every new user-facing string in an i18n-enabled component routes through t() with a key present in all locale files.
+
+Router supplements semantic selection; it does not replace ERROR_PATTERN_INDEX.md.

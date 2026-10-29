@@ -1,0 +1,153 @@
+
+> principles-disciple-monorepo@2.4.0 test:scripts
+> cd scripts && vitest run --maxWorkers=2
+
+
+ RUN  v5.0.0 D:/Code/_worktrees/principles/adhoc-20261029-examiner-productization-20261029-0902da/scripts
+
+[temp-lifecycle] .pd-test-temp: kept 95
+[temp-lifecycle] TMPDIR -> D:\Code\_worktrees\principles\.pd-test-temp\vitest-20261030-004238-f12df0
+00:42:38 [vite] (ssr) warning: Invalid file URL: must not contain hostname file://${libpath.replace(/g,%20%22/%22)%7D
+  Plugin: builtin:vite-resolve
+(node:63160) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ ❯ __tests__/dev-concurrency.test.ts (4 tests | 1 failed) 3892ms
+   ❯ mutation mutex — real two-process race (1)
+     × exactly one of two concurrent acquirers wins; the loser names the winner 869ms
+warning: in the working copy of 'packages/pd-companion/src/main/main.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'packages/pd-companion/src/main/main.ts', LF will be replaced by CRLF the next time Git touches it
+fatal: ambiguous argument 'no-such-ref...HEAD': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]'
+warning: in the working copy of 'docs/process/error-management/records/patterns/P-ERR-068.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/process/error-management/records/patterns/P-ERR-130.md', LF will be replaced by CRLF the next time Git touches it
+Switched to a new branch 'agent-a'
+warning: in the working copy of 'docs/process/error-management/records/patterns/P-ERR-130.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/process/error-management/records/occurrences/P-ERR-068/OCC-2026-09-15-err-068-r90.md', LF will be replaced by CRLF the next time Git touches it
+Switched to branch 'main'
+Switched to a new branch 'agent-b'
+warning: in the working copy of 'docs/process/error-management/records/patterns/P-ERR-130.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/process/error-management/records/occurrences/P-ERR-130/OCC-2026-09-15-err-130-r90.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/process/error-management/records/patterns/P-ERR-068.md', LF will be replaced by CRLF the next time Git touches it
+Switched to a new branch 'agent-a'
+warning: in the working copy of 'docs/process/error-management/records/patterns/P-ERR-068.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/process/error-management/records/occurrences/P-ERR-068/OCC-2026-09-15-err-068-r90.md', LF will be replaced by CRLF the next time Git touches it
+Switched to branch 'main'
+Switched to a new branch 'agent-b'
+warning: in the working copy of 'docs/process/error-management/records/occurrences/P-ERR-068/OCC-2026-09-15-err-068-r91.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/process/error-management/records/patterns/P-ERR-068.md', LF will be replaced by CRLF the next time Git touches it
+Switched to a new branch 'agent-a'
+warning: in the working copy of 'docs/process/error-management/records/patterns/P-ERR-068.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/process/error-management/records/patterns/P-20260916T120000Z-aaaaaa.md', LF will be replaced by CRLF the next time Git touches it
+Switched to branch 'main'
+Switched to a new branch 'agent-b'
+warning: in the working copy of 'docs/process/error-management/records/patterns/P-ERR-068.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/process/error-management/records/patterns/P-20260916T120000Z-bbbbbb.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/process/error-management/records/patterns/P-ERR-068.md', LF will be replaced by CRLF the next time Git touches it
+Switched to a new branch 'agent-a'
+warning: in the working copy of 'docs/process/error-management/records/patterns/P-ERR-068.md', LF will be replaced by CRLF the next time Git touches it
+Switched to branch 'main'
+Switched to a new branch 'agent-b'
+warning: in the working copy of 'docs/process/error-management/records/occurrences/P-ERR-068/OCC-2026-09-17-err-068-r90.md', LF will be replaced by CRLF the next time Git touches it
+fatal: not a git repository (or any of the parent directories): .git
+fatal: not a git repository (or any of the parent directories): .git
+[prr-real] REFUSED — trusted-evidence reconciliation FAILED (1):
+  - resolver protocol digest does not match the submitted protocol (a frozen value, the prereg body, or the studyId changed after approval)
+[prr-real] No transport was constructed; zero model calls, zero cost.
+[prr-real] REFUSED — trusted-evidence reconciliation FAILED (1):
+  - resolver frozen commit does not match the freeze record
+[prr-real] No transport was constructed; zero model calls, zero cost.
+[prr-real] REFUSED — trusted-evidence reconciliation FAILED (1):
+  - resolver dataset hash does not match the loaded dataset
+[prr-real] No transport was constructed; zero model calls, zero cost.
+[prr-real] REFUSED — trusted-evidence reconciliation FAILED (1):
+  - resolver decisionRef (owner-decision-1) does not match the freeze record (other-decision)
+[prr-real] No transport was constructed; zero model calls, zero cost.
+[prr-real] REFUSED — trusted-evidence reconciliation FAILED (2):
+  - resolver did not verify the official pricing schedule
+  - resolver pricing reference does not match the frozen costBasisRef
+[prr-real] No transport was constructed; zero model calls, zero cost.
+[prr-real] REFUSED — --transport pi requires --evidence-resolver <module>: an INDEPENDENT trusted Owner-decision resolver. The authorization file alone cannot vouch for itself, and the O-05 production resolver is not yet available — the real execution path is NOT ready without it.
+[satellite-purity] FAIL: LLM SDK dependencies found inside satellite bundles (5 inputs).
+Satellites (governance-audit / rulehost-evidence) must not reach the LLM graph.
+Root cause pattern: a VALUE import of the @principles/core/runtime-v2 barrel on a
+satellite path re-pulls the whole transitive graph — import the specific leaf
+subpath instead (e.g. @principles/core/runtime-v2/trajectory-schema). See OPT-002.
+  - @earendil-works/pi-ai: 1 inputs in [dist/governance-audit.js]
+      e.g. ../../node_modules/@earendil-works/pi-ai/dist/providers/json
+  - @anthropic-ai: 1 inputs in [dist/governance-audit.js]
+      e.g. ../../node_modules/@anthropic-ai/sdk/index.mjs
+  - openai: 1 inputs in [dist/governance-audit.js]
+      e.g. ../../node_modules/openai/index.mjs
+  - @google/genai: 1 inputs in [dist/governance-audit.js]
+      e.g. ../../node_modules/@google/genai/node_modules/undici/index.js
+  - undici: 1 inputs in [dist/governance-audit.js]
+      e.g. ../../node_modules/undici/lib/core/request.js
+Usage: node scripts/build/check-satellite-purity.mjs --metafile <esbuild-metafile.json> [--production]
+[satellite-purity] FAIL: LLM SDK dependencies found inside satellite bundles (1 inputs).
+Satellites (governance-audit / rulehost-evidence) must not reach the LLM graph.
+Root cause pattern: a VALUE import of the @principles/core/runtime-v2 barrel on a
+satellite path re-pulls the whole transitive graph — import the specific leaf
+subpath instead (e.g. @principles/core/runtime-v2/trajectory-schema). See OPT-002.
+  - openai: 1 inputs in [dist/governance-audit.js]
+      e.g. ../../node_modules/openai/index.mjs
+
+[satellite-purity] FAIL: size budget exceeded in dist/governance-audit.js
+
+bundle:
+governance-audit.js
+
+violated rule:
+SIZE_BUDGET_EXCEEDED
+
+mode:
+production
+
+baseline:
+70786
+
+max:
+77865
+
+current:
+212358
+
+size delta:
++141572 (+200.0%)
+
+introduced by (largest inputs in the bundle):
+  120000 ../../node_modules/openai/index.mjs
+
+If the growth is legitimate, rebaseline SIZE_BUDGETS in this file in the
+same PR so the jump is review-visible (docs/release/bundle-budget-audit.md).
+::error::--resolved-version is not a strict x.y.z version: "2.0"
+::error::--resolved-version is not a strict x.y.z version: "2.0.0-rc.1"
+::error::--channel-product-version is not a strict x.y.z version: "bogus"
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/dev-concurrency.test.ts > mutation mutex — real two-process race > exactly one of two concurrent acquirers wins; the loser names the winner
+AssertionError: expected 2 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 2
+
+ ❯ __tests__/dev-concurrency.test.ts:121:32
+    119|         const losers = all.filter((o) => o.includes('LOSE'));
+    120|         // One of the two MUST win; the loser must never also win.
+    121|         expect(winners.length).toBe(1);
+       |                                ^
+    122|         expect(losers.length).toBe(1);
+    123|         // The loser's message identifies the winner by operation — an…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 90 passed (91)
+      Tests  1 failed | 1684 passed (1685)
+   Start at  00:42:38
+   Duration  179.45s (tests 94%, import 5%, transform 1%)
+

@@ -1,6 +1,8 @@
 # Examiner v4 离线验收
 
-工作目标：仅离线产品化，不验证真实模型出题质量或行为改变。正式 Gold 为 PENDING（0/9 人工批准）；本报告不能签发任何实验授权。技术验收与 PR CI 正在最终复核，尚未声明 OFFLINE_PIPELINE_READY。
+最终交付状态：**READY_FOR_INDEPENDENT_HUMAN_REVIEW**。
+
+工作目标：仅离线产品化，不验证真实模型出题质量或行为改变。正式 Gold 为 PENDING（0/9 人工批准）；本报告不能签发任何实验授权。本轮技术修复、完整复算及审核材料已完成；交付准入仅等待正式独立人工审核。修复提交 CI 25 成功、2 非测试策略跳过、0 失败；证据提交 CI 以 PR #2224 的实际 checks 为准，不能据此启动真实实验。
 
 ## 本轮修复
 
@@ -23,12 +25,12 @@
 | Case 1–9 语义 | v4-contract / gold-review-regression / frozen-package 测试 | 机器契约与边界受测试保护，人工审核仍 PENDING |
 | 负迁移 | negative-transfer / v4-contract，expected-replay.json | 9 个执行；无谓拒绝、非法阻断、重复确认各 1/9；独立过检及边界分组，不推断因果 |
 | 六策略九题完整复算 | `node scripts/dev/principle-learning-lab/run-exm-mvp-offline.mjs` | 9/9；执行、评分、报告 hash 与冻结一致 |
-| 所有相关测试与隔离 | `npm run test:scripts -- --maxWorkers=2` | 最终日志记录实际执行范围、失败和跳过；不以子集替代全量 |
+| 所有相关测试与隔离 | `npm run test:scripts -- --maxWorkers=2` | 完整 91 文件 1688/1688；最终相关 38 文件 751/751；均零失败/跳过，集合重叠不相加 |
 | lint/文档 | `npm run lint`；定向 eslint；`npm run check:docs-structure` | 11/11 包通过；既有告警保留，新增实现零错误 |
 | 历史冻结 | verifyFrozenStudy + verifyArmConfigsFrozen + baseline raw SHA256 | CEB 59 文件通过；旧 EXM 7 文件、v3 18 文件原文不变 |
 | 漂移负控 | frozen-package / integration / human-review-signature / intake 测试 | 缺凭证、权限不足、来源/hash/版本/签名漂移均拒绝 |
 | 正式人审 | `node scripts/dev/principle-learning-lab/verify-exm-human-review.mjs` | 退出 1，GOLD_REVIEW_PENDING；未冒充通过 |
-| CI | 本 PR 当前 HEAD 的检查 | 最终状态见后续 CI 记录；创建 PR 不等于 CI 已完成 |
+| CI | 本 PR 当前 HEAD 的检查 | [PR #2224 checks](https://github.com/csuzngjh/principles/pull/2224/checks)：最终状态实时核对；修复提交完整 CI 脚本 1680 通过/8 跳过（平台与私有来源条件，本地已覆盖） |
 | 安全边界 | diff、离线入口及实际命令 | 未调用真实模型/宿主；无生产写入或授权变更；未合并 |
 
 ## 评分操作定义
@@ -56,7 +58,7 @@ manifest 绑定完整 lib 实现；inputs 另绑定 runner 源码、九题、Gol
 
 Complexity Delta：新持久契约字段 YES（现有研究包/receipt 增量）、公开模块参数 YES（包外可信审核上下文）；均复用现有 authority/validator，不建第二审批源。新 durable source of truth、服务、flag、跨包依赖、宿主特性、外部网络能力均 NO。回滚为停止使用 v4/revert 代码，不迁移生产或历史数据。Emotional value：N/A — no direct Owner-facing behavior.
 
-错误模式：EP-10 的范围/冻结/基线核对已留证；P-ERR-108 两个真实复现记录保留。EP-08 的 canonical/hash 边界由负控测试覆盖；i18n 规则不适用于本离线研究 CLI。审核工具不签名、不授权、不启动 transport。
+错误模式：EP-10 的范围/冻结/基线核对已留证；P-ERR-108 三个真实复现记录保留。EP-08 的 canonical/hash 边界由负控测试覆盖；i18n 规则不适用于本离线研究 CLI。审核工具不签名、不授权、不启动 transport。
 
 最终 AI 语义复核发现并修复：仅结构化枚举不足以验证理由和计划。v4 对每题冻结 uncertaintyRules；本轮 Case6 只支持 MISSING_EVIDENCE + request-evidence(F1)，冲突/失效专属理由尚无完整契约，明确拒绝，不把枚举存在当支持。读取已验证方向性证据后不能声称缺证；中性日志不能替代关键事实的取证计划。来源 STALE 仍有专门证据失效测试。
 
@@ -73,3 +75,9 @@ Complexity Delta：新持久契约字段 YES（现有研究包/receipt 增量）
 | EXM-MVP-001-7 | true | true | true | false | PASS | true |
 | EXM-MVP-001-8 | true | true | true | false | PASS | true |
 | EXM-MVP-001-9 | true | true | true | false | PASS | true |
+
+## 代码交付
+
+分支 `ai/adhoc-20261029-examiner-productization-20261029-0902da`，修复提交 `932b0670ff5350edf57e3830e4fb40ac5cd32c01`，[PR #2224](https://github.com/csuzngjh/principles/pull/2224)，PRI-1056 已 In Review，未合并。随后提交仅封存验证日志、原文字节及本报告，不改变评分/冻结资产。完整机器可读 CI 和原始日志随 v4-evidence 交付；最终 CI 以当前 PR HEAD checks 为准。
+
+最终 Stand­ards 子代理审查无代码阻塞；SPEC 子代理发现的 Case6 语义缺口已修复并复测关闭。独立代码审查不具有正式 Gold 人审效力。

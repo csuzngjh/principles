@@ -1,0 +1,15 @@
+
+> principles-disciple-monorepo@2.4.0 test:scripts
+> cd scripts && vitest run principle-learning-lab-human-review-intake
+
+
+ RUN  v5.0.0 D:/Code/_worktrees/principles/adhoc-20261029-examiner-productization-20261029-0902da/scripts
+
+[temp-lifecycle] .pd-test-temp: kept 95
+[temp-lifecycle] TMPDIR -> D:\Code\_worktrees\principles\.pd-test-temp\vitest-20261030-003714-467ed8
+
+ Test Files  1 passed (1)
+      Tests  5 passed (5)
+   Start at  00:37:14
+   Duration  544ms (tests 61%, transform 28%, import 11%, worker 1%)
+

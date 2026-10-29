@@ -1,0 +1,366 @@
+
+> principles-disciple-monorepo@2.4.0 test:scripts
+> cd scripts && vitest run
+
+
+ RUN  v5.0.0 D:/Code/_worktrees/principles/adhoc-20261029-examiner-productization-20261029-0902da/scripts
+
+[temp-lifecycle] .pd-test-temp: kept 95
+[temp-lifecycle] TMPDIR -> D:\Code\_worktrees\principles\.pd-test-temp\vitest-20261030-003738-788279
+00:37:38 [vite] (ssr) warning: Invalid file URL: must not contain hostname file://${libpath.replace(/g,%20%22/%22)%7D
+  Plugin: builtin:vite-resolve
+[satellite-purity] FAIL: LLM SDK dependencies found inside satellite bundles (5 inputs).
+Satellites (governance-audit / rulehost-evidence) must not reach the LLM graph.
+Root cause pattern: a VALUE import of the @principles/core/runtime-v2 barrel on a
+satellite path re-pulls the whole transitive graph — import the specific leaf
+subpath instead (e.g. @principles/core/runtime-v2/trajectory-schema). See OPT-002.
+  - @earendil-works/pi-ai: 1 inputs in [dist/governance-audit.js]
+      e.g. ../../node_modules/@earendil-works/pi-ai/dist/providers/json
+  - @anthropic-ai: 1 inputs in [dist/governance-audit.js]
+      e.g. ../../node_modules/@anthropic-ai/sdk/index.mjs
+  - openai: 1 inputs in [dist/governance-audit.js]
+      e.g. ../../node_modules/openai/index.mjs
+  - @google/genai: 1 inputs in [dist/governance-audit.js]
+      e.g. ../../node_modules/@google/genai/node_modules/undici/index.js
+  - undici: 1 inputs in [dist/governance-audit.js]
+      e.g. ../../node_modules/undici/lib/core/request.js
+Usage: node scripts/build/check-satellite-purity.mjs --metafile <esbuild-metafile.json> [--production]
+warning: in the working copy of 'docs/process/error-management/records/patterns/P-ERR-068.md', LF will be replaced by CRLF the next time Git touches it
+[satellite-purity] FAIL: LLM SDK dependencies found inside satellite bundles (1 inputs).
+Satellites (governance-audit / rulehost-evidence) must not reach the LLM graph.
+Root cause pattern: a VALUE import of the @principles/core/runtime-v2 barrel on a
+satellite path re-pulls the whole transitive graph — import the specific leaf
+subpath instead (e.g. @principles/core/runtime-v2/trajectory-schema). See OPT-002.
+  - openai: 1 inputs in [dist/governance-audit.js]
+      e.g. ../../node_modules/openai/index.mjs
+
+[satellite-purity] FAIL: size budget exceeded in dist/governance-audit.js
+
+bundle:
+governance-audit.js
+
+violated rule:
+SIZE_BUDGET_EXCEEDED
+
+mode:
+production
+
+baseline:
+70786
+
+max:
+77865
+
+current:
+212358
+
+size delta:
++141572 (+200.0%)
+
+introduced by (largest inputs in the bundle):
+  120000 ../../node_modules/openai/index.mjs
+
+If the growth is legitimate, rebaseline SIZE_BUDGETS in this file in the
+same PR so the jump is review-visible (docs/release/bundle-budget-audit.md).
+warning: in the working copy of 'docs/process/error-management/records/patterns/P-ERR-068.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/process/error-management/records/patterns/P-ERR-130.md', LF will be replaced by CRLF the next time Git touches it
+Switched to a new branch 'agent-a'
+ ❯ __tests__/prr-freeze-readonly.test.ts (0 test)
+ ❯ __tests__/principle-learning-lab-actor.test.ts (0 test)
+ ❯ __tests__/principle-learning-lab-budget-auth.test.ts (28 tests | 1 failed) 1679ms
+   ❯ P1-02: real-model transport authorization gate (zero HTTP on refusal) (8)
+     × createAuthorizedPiTransport refuses fetch/eventEmitter injection (no bypass path) and builds a budget-wired adapter when valid 1615ms
+warning: in the working copy of 'docs/process/error-management/records/patterns/P-ERR-130.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/process/error-management/records/occurrences/P-ERR-068/OCC-2026-09-15-err-068-r90.md', LF will be replaced by CRLF the next time Git touches it
+Switched to branch 'main'
+ ❯ __tests__/prr-linear-resolver.test.ts (18 tests | 1 failed) 553ms
+   ❯ linear-owner-resolver (stable-id identity binding, round 8) (18)
+     × every authoritative status is usable and statuses keep deriving from the schema 533ms
+ ❯ __tests__/prr-ac-lab.test.ts (36 tests | 5 failed) 2685ms
+   ❯ CLI end-to-end rehearsal (5)
+     × exits 0 with gate PASS and a machine-readable result 2119ms
+     × ledger availability classification holds and is never a silent nor a proven zero 1ms
+     × ambiguous attribution is detected explicitly (M4), never last-write-wins 1ms
+     × byte-identical determinism across two runs (no timestamps, no randomness) 303ms
+     × leaves the git working tree clean of rehearsal artifacts 1ms
+Switched to a new branch 'agent-b'
+warning: in the working copy of 'docs/process/error-management/records/occurrences/P-ERR-130/OCC-2026-09-15-err-130-r90.md', LF will be replaced by CRLF the next time Git touches it
+[prr-real] REFUSED — trusted-evidence reconciliation FAILED (1):
+  - resolver protocol digest does not match the submitted protocol (a frozen value, the prereg body, or the studyId changed after approval)
+[prr-real] No transport was constructed; zero model calls, zero cost.
+fatal: not a git repository (or any of the parent directories): .git
+warning: in the working copy of 'docs/process/error-management/records/patterns/P-ERR-068.md', LF will be replaced by CRLF the next time Git touches it
+Switched to a new branch 'agent-a'
+[prr-real] REFUSED — trusted-evidence reconciliation FAILED (1):
+  - resolver frozen commit does not match the freeze record
+[prr-real] No transport was constructed; zero model calls, zero cost.
+warning: in the working copy of 'docs/process/error-management/records/patterns/P-ERR-068.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/process/error-management/records/occurrences/P-ERR-068/OCC-2026-09-15-err-068-r90.md', LF will be replaced by CRLF the next time Git touches it
+Switched to branch 'main'
+[prr-real] REFUSED — trusted-evidence reconciliation FAILED (1):
+  - resolver dataset hash does not match the loaded dataset
+[prr-real] No transport was constructed; zero model calls, zero cost.
+Switched to a new branch 'agent-b'
+warning: in the working copy of 'packages/pd-companion/src/main/main.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/process/error-management/records/occurrences/P-ERR-068/OCC-2026-09-15-err-068-r91.md', LF will be replaced by CRLF the next time Git touches it
+[prr-real] REFUSED — trusted-evidence reconciliation FAILED (1):
+  - resolver decisionRef (owner-decision-1) does not match the freeze record (other-decision)
+[prr-real] No transport was constructed; zero model calls, zero cost.
+[prr-real] REFUSED — trusted-evidence reconciliation FAILED (2):
+  - resolver did not verify the official pricing schedule
+  - resolver pricing reference does not match the frozen costBasisRef
+[prr-real] No transport was constructed; zero model calls, zero cost.
+[prr-real] REFUSED — --transport pi requires --evidence-resolver <module>: an INDEPENDENT trusted Owner-decision resolver. The authorization file alone cannot vouch for itself, and the O-05 production resolver is not yet available — the real execution path is NOT ready without it.
+warning: in the working copy of 'docs/process/error-management/records/patterns/P-ERR-068.md', LF will be replaced by CRLF the next time Git touches it
+Switched to a new branch 'agent-a'
+warning: in the working copy of 'packages/pd-companion/src/main/main.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/process/error-management/records/patterns/P-ERR-068.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/process/error-management/records/patterns/P-20260916T120000Z-aaaaaa.md', LF will be replaced by CRLF the next time Git touches it
+Switched to branch 'main'
+Switched to a new branch 'agent-b'
+warning: in the working copy of 'docs/process/error-management/records/patterns/P-20260916T120000Z-bbbbbb.md', LF will be replaced by CRLF the next time Git touches it
+::error::--resolved-version is not a strict x.y.z version: "2.0"
+::error::--resolved-version is not a strict x.y.z version: "2.0.0-rc.1"
+::error::--channel-product-version is not a strict x.y.z version: "bogus"
+warning: in the working copy of 'docs/process/error-management/records/patterns/P-ERR-068.md', LF will be replaced by CRLF the next time Git touches it
+Switched to a new branch 'agent-a'
+warning: in the working copy of 'docs/process/error-management/records/patterns/P-ERR-068.md', LF will be replaced by CRLF the next time Git touches it
+fatal: ambiguous argument 'no-such-ref...HEAD': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]'
+Switched to branch 'main'
+Switched to a new branch 'agent-b'
+warning: in the working copy of 'docs/process/error-management/records/occurrences/P-ERR-068/OCC-2026-09-17-err-068-r90.md', LF will be replaced by CRLF the next time Git touches it
+fatal: not a git repository (or any of the parent directories): .git
+ ❯ __tests__/principle-learning-lab-challenge-1b.test.ts (28 tests | 1 failed) 18970ms
+   ❯ offline golden path (CEB-001, 12 cases × 3 arms × 1 rep, stub) (7)
+     × determinism: two fresh copies produce byte-identical adjudication ledgers 5546ms
+(node:18600) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+ ❯ __tests__/workspace-lifecycle.test.ts (26 tests | 5 failed) 37446ms
+   ❯ workspace-cleanup (integration) (6)
+     × dry-run lists evidence-backed candidates and mutates nothing 5016ms
+     × apply removes the worktree and the task branch, then prunes 5008ms
+     × default grace period keeps a freshly merged worktree alive 5006ms
+     × refuses a dirty worktree at apply time and preserves the unknown work 5012ms
+     × skips a clean but unmerged worktree (no completion evidence) 574ms
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/principle-learning-lab-actor.test.ts [ __tests__/principle-learning-lab-actor.test.ts ]
+Error: Cannot find module '../diagnostician/diag-rootcause-output.js' imported from D:/Code/_worktrees/principles/adhoc-20261029-examiner-productization-20261029-0902da/packages/principles-core/dist/runtime-v2/internalization/diag-distiller-runner.js
+ ❯ ../packages/principles-core/src/runtime-v2/internalization/diag-distiller-runner.ts:29:1
+ ❯ ../packages/principles-core/src/runtime-v2/pain-signal-runtime-factory.ts:20:1
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/15]⎯
+
+ FAIL  __tests__/prr-freeze-readonly.test.ts [ __tests__/prr-freeze-readonly.test.ts ]
+Error: prr-readonly: cannot resolve the Core authoritative principle-status contract (PRINCIPLE_STATUSES): Cannot find module '../diagnostician/diag-rootcause-output.js' imported from D:/Code/_worktrees/principles/adhoc-20261029-examiner-productization-20261029-0902da/packages/principles-core/dist/runtime-v2/internalization/diag-distiller-runner.js
+ ❯ dev/principle-learning-lab/prr/lib/prr-readonly.mjs:44:11
+     42|     return new Set(statuses);
+     43|   } catch (error) {
+     44|     throw new Error(`prr-readonly: cannot resolve the Core authoritati…
+       |           ^
+     45|   }
+     46| })();
+ ❯ dev/principle-learning-lab/prr/lib/prr-readonly.mjs:35:33
+ ❯ __tests__/prr-freeze-readonly.test.ts:24:1
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/15]⎯
+
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 13 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/principle-learning-lab-budget-auth.test.ts > P1-02: real-model transport authorization gate (zero HTTP on refusal) > createAuthorizedPiTransport refuses fetch/eventEmitter injection (no bypass path) and builds a budget-wired adapter when valid
+Error: Cannot find module '../diagnostician/diag-rootcause-output.js' imported from D:/Code/_worktrees/principles/adhoc-20261029-examiner-productization-20261029-0902da/packages/principles-core/dist/runtime-v2/internalization/diag-distiller-runner.js
+ ❯ ../packages/principles-core/src/runtime-v2/internalization/diag-distiller-runner.ts:29:1
+ ❯ ../packages/principles-core/src/runtime-v2/pain-signal-runtime-factory.ts:20:1
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/15]⎯
+
+ FAIL  __tests__/principle-learning-lab-challenge-1b.test.ts > offline golden path (CEB-001, 12 cases × 3 arms × 1 rep, stub) > determinism: two fresh copies produce byte-identical adjudication ledgers
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ __tests__/principle-learning-lab-challenge-1b.test.ts:435:3
+    433|   });
+    434|
+    435|   it('determinism: two fresh copies produce byte-identical adjudicatio…
+       |   ^
+    436|     const dirA = copyStudy('e2e-det-a');
+    437|     const dirB = copyStudy('e2e-det-b');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/15]⎯
+
+ FAIL  __tests__/prr-ac-lab.test.ts > CLI end-to-end rehearsal > exits 0 with gate PASS and a machine-readable result
+AssertionError: expected 1 to be +0 // Object.is equality
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ __tests__/prr-ac-lab.test.ts:320:24
+    318|   it('exits 0 with gate PASS and a machine-readable result', () => {
+    319|     const res = runCli(run1);
+    320|     expect(res.status).toBe(0);
+       |                        ^
+    321|     const result = JSON.parse(fs.readFileSync(path.join(run1, 'rehears…
+    322|     expect(result.gate.pass).toBe(true);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/15]⎯
+
+ FAIL  __tests__/prr-ac-lab.test.ts > CLI end-to-end rehearsal > ledger availability classification holds and is never a silent nor a proven zero
+Error: ENOENT: no such file or directory, open 'D:\Code\_worktrees\principles\.pd-test-temp\vitest-20261030-003738-788279\pd-prr-ac-lab-o607P5\run1\rehearsal-result.json'
+ ❯ __tests__/prr-ac-lab.test.ts:333:34
+    331|
+    332|   it('ledger availability classification holds and is never a silent n…
+    333|     const result = JSON.parse(fs.readFileSync(path.join(run1, 'rehears…
+       |                                  ^
+    334|     const classes = Object.fromEntries(result.readonly.ledgerCases.map…
+    335|     expect(classes['ledger-ok-nonempty']).toBe('ok');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/15]⎯
+
+ FAIL  __tests__/prr-ac-lab.test.ts > CLI end-to-end rehearsal > ambiguous attribution is detected explicitly (M4), never last-write-wins
+Error: ENOENT: no such file or directory, open 'D:\Code\_worktrees\principles\.pd-test-temp\vitest-20261030-003738-788279\pd-prr-ac-lab-o607P5\run1\rehearsal-result.json'
+ ❯ __tests__/prr-ac-lab.test.ts:362:34
+    360|
+    361|   it('ambiguous attribution is detected explicitly (M4), never last-wr…
+    362|     const result = JSON.parse(fs.readFileSync(path.join(run1, 'rehears…
+       |                                  ^
+    363|     const ambiguous = result.readonly.ledgerCases.find((c: any) => c.c…
+    364|     expect(ambiguous.measure.m4.count).toBe(1);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/15]⎯
+
+ FAIL  __tests__/prr-ac-lab.test.ts > CLI end-to-end rehearsal > byte-identical determinism across two runs (no timestamps, no randomness)
+AssertionError: expected 1 to be +0 // Object.is equality
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ __tests__/prr-ac-lab.test.ts:371:26
+    369|     const first = runCli(run1);
+    370|     const second = runCli(run2);
+    371|     expect(first.status).toBe(0);
+       |                          ^
+    372|     expect(second.status).toBe(0);
+    373|     const a = fs.readFileSync(path.join(run1, 'rehearsal-result.json')…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/15]⎯
+
+ FAIL  __tests__/prr-ac-lab.test.ts > CLI end-to-end rehearsal > leaves the git working tree clean of rehearsal artifacts
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ __tests__/prr-ac-lab.test.ts:380:103
+    378|   it('leaves the git working tree clean of rehearsal artifacts', () =>…
+    379|     // The rehearsal wrote only into the caller-supplied temp dirs.
+    380|     expect(fs.existsSync(path.join(run1, 'readonly', 'case-existing-db…
+       |                                                                                                       ^
+    381|     expect(fs.readdirSync(run1).sort()).toEqual(['paired-report.json',…
+    382|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/15]⎯
+
+ FAIL  __tests__/prr-linear-resolver.test.ts > linear-owner-resolver (stable-id identity binding, round 8) > every authoritative status is usable and statuses keep deriving from the schema
+Error: prr-readonly: cannot resolve the Core authoritative principle-status contract (PRINCIPLE_STATUSES): Cannot find module '../diagnostician/diag-rootcause-output.js' imported from D:/Code/_worktrees/principles/adhoc-20261029-examiner-productization-20261029-0902da/packages/principles-core/dist/runtime-v2/internalization/diag-distiller-runner.js
+ ❯ dev/principle-learning-lab/prr/lib/prr-readonly.mjs:44:11
+     42|     return new Set(statuses);
+     43|   } catch (error) {
+     44|     throw new Error(`prr-readonly: cannot resolve the Core authoritati…
+       |           ^
+     45|   }
+     46| })();
+ ❯ dev/principle-learning-lab/prr/lib/prr-readonly.mjs:35:33
+ ❯ __tests__/prr-linear-resolver.test.ts:297:48
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/15]⎯
+
+ FAIL  __tests__/workspace-lifecycle.test.ts > workspace-cleanup (integration) > dry-run lists evidence-backed candidates and mutates nothing
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ __tests__/workspace-lifecycle.test.ts:318:3
+    316|   afterAll(() => removeFixture(fixture.root));
+    317|
+    318|   it('dry-run lists evidence-backed candidates and mutates nothing', a…
+       |   ^
+    319|     const { wt, branch } = await makeTask(fixture.primary, 'dryrun');
+    320|     await mergeIntoMain(fixture.primary, branch);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/15]⎯
+
+ FAIL  __tests__/workspace-lifecycle.test.ts > workspace-cleanup (integration) > apply removes the worktree and the task branch, then prunes
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ __tests__/workspace-lifecycle.test.ts:334:3
+    332|   });
+    333|
+    334|   it('apply removes the worktree and the task branch, then prunes', as…
+       |   ^
+    335|     const { wt, branch } = await makeTask(fixture.primary, 'apply');
+    336|     await mergeIntoMain(fixture.primary, branch);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/15]⎯
+
+ FAIL  __tests__/workspace-lifecycle.test.ts > workspace-cleanup (integration) > default grace period keeps a freshly merged worktree alive
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ __tests__/workspace-lifecycle.test.ts:347:3
+    345|   });
+    346|
+    347|   it('default grace period keeps a freshly merged worktree alive', asy…
+       |   ^
+    348|     const { wt, branch } = await makeTask(fixture.primary, 'grace');
+    349|     await mergeIntoMain(fixture.primary, branch);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/15]⎯
+
+ FAIL  __tests__/workspace-lifecycle.test.ts > workspace-cleanup (integration) > refuses a dirty worktree at apply time and preserves the unknown work
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ __tests__/workspace-lifecycle.test.ts:363:3
+    361|   });
+    362|
+    363|   it('refuses a dirty worktree at apply time and preserves the unknown…
+       |   ^
+    364|     const { wt, branch } = await makeTask(fixture.primary, 'dirty');
+    365|     await mergeIntoMain(fixture.primary, branch);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/15]⎯
+
+ FAIL  __tests__/workspace-lifecycle.test.ts > workspace-cleanup (integration) > skips a clean but unmerged worktree (no completion evidence)
+AssertionError: expected 1 to be +0 // Object.is equality
+
+- Expected
++ Received
+
+- 0
++ 1
+
+ ❯ makeTask __tests__/workspace-lifecycle.test.ts:191:18
+    189|   // coverage. Without it create reports CREATED_NOT_READY and exits n…
+    190|   const r = await runDevScript('create-task-worktree.mjs', ['PRI-800',…
+    191|   expect(r.code).toBe(0);
+       |                  ^
+    192|   const out = JSON.parse(r.stdout) as { worktree: string; branch: stri…
+    193|   await commitFile(out.worktree, slug + '.txt', 'x\n', 'task commit ' …
+ ❯ __tests__/workspace-lifecycle.test.ts:380:28
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/15]⎯
+
+
+ Test Files  7 failed | 84 passed (91)
+      Tests  13 failed | 1593 passed (1606)
+   Start at  00:37:38
+   Duration  64.77s (tests 92%, import 5%, transform 3%)
+

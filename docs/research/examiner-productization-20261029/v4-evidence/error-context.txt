@@ -1,0 +1,20 @@
+
+> principles-disciple-monorepo@2.4.0 error:context
+> node scripts/error-context.mjs --paths scripts/dev/principle-learning-lab/lib/claim-evidence-scorer.mjs,scripts/dev/principle-learning-lab/lib/challenge-freeze.mjs --signals evidence,authority,negative-transfer
+
+Error Context
+
+Basis: plan inputs (paths: 2, signals: 3)
+
+Triggered patterns:
+
+EP-10 — HIGH (score 4)
+Matched:
+- path: scripts/dev/principle-learning-lab/lib/claim-evidence-scorer.mjs ← scripts/dev
+- path: scripts/dev/principle-learning-lab/lib/challenge-freeze.mjs ← scripts/dev
+Required evidence:
+1. Any 'pre-existing on main' CI-failure claim is reproduced on origin/main or proven unreachable from changed files.
+2. Deletion-capable cleanup commands over junction/symlink trees are junction-safe (git worktree remove / reparse-point check).
+3. PR diff scope matches the stated task; commit list inspected before cherry-pick.
+
+Router supplements semantic selection; it does not replace ERROR_PATTERN_INDEX.md.
