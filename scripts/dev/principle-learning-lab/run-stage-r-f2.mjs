@@ -59,7 +59,7 @@ if (!fs.existsSync(probeControlledRoot)) {
   process.exit(1);
 }
 
-// 1. Authorization sanity (read-only): the ARCHIVED Owner record must be
+// Authorization sanity (read-only): the ARCHIVED Owner record must be
 // APPROVED F2 bound to the frozen suite; the canonical study directory keeps
 // its NOT_AUTHORIZED placeholder untouched (execution state lives in the
 // copy). The full gate re-verifies inside the runner.
@@ -69,19 +69,33 @@ if (auth.status !== 'APPROVED' || auth.executionMode !== 'F2-real-host') {
   process.exit(1);
 }
 
-// 2. Fresh study copy (refuse to reuse: append-only ledgers must start clean)
-// with the Owner F2 authorization and the archived PASSED probe record
-// injected — the authoritative files INSIDE the copy the gate reads.
-const runRoot = path.resolve(labRoot, '..', '..', '..', '.tmp', 'pri1038-f2', String(Date.now()));
-const studyCopy = path.join(runRoot, 'study');
-if (fs.existsSync(runRoot)) {
-  console.error(`run-stage-r-f2: run root already exists: ${runRoot} — refusing to reuse`);
-  process.exit(1);
+// Resume support: --resume <studyCopy> continues an existing copy (the
+// runner skips already-settled units by the ledger; reservations and
+// records stay intact). Fresh copies are prepared otherwise.
+const resumeCopy = arg('--resume');
+let studyCopy;
+let runRoot;
+if (resumeCopy !== undefined) {
+  studyCopy = path.resolve(process.cwd(), resumeCopy);
+  runRoot = path.dirname(studyCopy);
+  if (!fs.existsSync(path.join(studyCopy, 'suite-manifest.json'))) {
+    console.error(`run-stage-r-f2: --resume copy is not a study directory: ${studyCopy}`);
+    process.exit(1);
+  }
+  console.log(`run-stage-r-f2: resuming existing study copy — ${studyCopy}`);
+} else {
+  runRoot = path.resolve(labRoot, '..', '..', '..', '.tmp', 'pri1038-f2', String(Date.now()));
+  studyCopy = path.join(runRoot, 'study');
+  if (fs.existsSync(runRoot)) {
+    console.error(`run-stage-r-f2: run root already exists: ${runRoot} — refusing to reuse`);
+    process.exit(1);
+  }
+  fs.cpSync(canonical, studyCopy, { recursive: true });
+  fs.copyFileSync(f2AuthorizationSource, path.join(studyCopy, 'run-authorization.json'));
+  fs.mkdirSync(path.join(studyCopy, 'isolation-probes'), { recursive: true });
+  fs.copyFileSync(probeRecordSource, path.join(studyCopy, 'isolation-probes', 'PRI-1037.json'));
+  console.log(`run-stage-r-f2: study copy ready — ${studyCopy}`);
 }
-fs.cpSync(canonical, studyCopy, { recursive: true });
-fs.copyFileSync(f2AuthorizationSource, path.join(studyCopy, 'run-authorization.json'));
-fs.mkdirSync(path.join(studyCopy, 'isolation-probes'), { recursive: true });
-fs.copyFileSync(probeRecordSource, path.join(studyCopy, 'isolation-probes', 'PRI-1037.json'));
 console.log(`run-stage-r-f2: study copy ready — ${studyCopy}`);
 console.log(`run-stage-r-f2: probe record copied — isolation-probes/PRI-1037.json (PASSED, ${auth.isolationAcceptance.realHostProbe.executedAt})`);
 
