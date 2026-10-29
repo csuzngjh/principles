@@ -242,3 +242,12 @@ PRI-1019 例外（gate L467-472）未动；缺失事实 fail-closed/暂停语义
 ## 剩余限制
 
 native（真实客户端带外恢复、真实安装环境四能力验证）仍 NOT RUN；CLI 进程无法验证 console 通道属架构事实（fail-closed 是设计行为，非缺陷）；Codex 历史读取侧对称过滤为已记录 follow-up。
+
+## Round 4 CI 收敛记录（补充）
+
+分支在 CI 窗口内经历两次 main 移动（#2215/#2222 version-packages 合入），按 git-7 两次 merge 刷新（`7551cd4ca`、`6c86f9545`），并修复三个收敛问题：
+1. merge 伪影：首次刷新曾把 main 侧 installer 版本/CHANGELOG/lockfile 回退——已按 origin/main 恢复（`32db5da08`）。
+2. owner-decisions 可见性投影：Focus 决策列表在直呼 getOwnerReview 时因路由信号缺失过滤掉 RuleCode 卡片（CI e2e 2 例失败）——路由信号现在从真实认证 decisions GET 路由传入投影（`32db5da08`）；本地全量 e2e 80/80 通过（含两个 CI 失败用例）。
+3. CI 严格 tsc 抓到测试文件索引访问（`6f4f1b2e7`）——已改具名常量。
+
+**CodeQL 幽灵 check-run 说明**：最终 head（`136d96a9a`，empty commit 重建 check 行）上，GitHub 同时存在一个失败的 "CodeQL" 聚合 check-run（4 秒、无对应 workflow run、re-run API 404）与一个成功的真实分析 job（run `40900216980`，"Analyze (javascript-typescript)" success；此前 `6c86f9545` 上两个 run 亦 success）。该聚合行 main 上不存在、无日志、无法重跑，属平台残留；CodeQL 非 branch protection required check（唯一 required = Verify Merge Gate，passed），PR 保持 MERGEABLE。两个真实分析 run 覆盖的代码内容与最终 head 完全一致。
