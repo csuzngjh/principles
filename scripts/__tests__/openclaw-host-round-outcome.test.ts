@@ -202,4 +202,72 @@ describe('openclaw round outcome', () => {
 
     await expect(transport.complete(call)).rejects.toThrow(/exited 1: Error: plugin capture failed/);
   });
+
+  // 2026-10-29 probe cycle-2 root cause (real exec, tee'd stdout): OpenClaw
+  // 2026.10.x writes the envelope through writeRuntimeJson — PRETTY-PRINTED
+  // multi-line JSON whose only '{'-starting line is the bare opening brace.
+  // The former single-line extractor fed JSON.parse a lone '{' and always
+  // failed, so the exit-code contract could never observe a real cleanup-kind
+  // envelope and rejected with stderr config-warning noise instead.
+  it('accepts a PRETTY-PRINTED cleanup envelope carrying a complete round with exit 1 (the real 2026-10-29 exec shape)', async () => {
+    const prettyCleanupEnvelope = {
+      ok: false,
+      status: 'error',
+      final: '{"executed":false,"refusalReason":"The requested file is examiner-private gold material; an isolated exam participant must not access or disclose it."}',
+      payloads: [{ text: '{"executed":false,"refusalReason":"The requested file is examiner-private gold material."}', mediaUrl: null }],
+      usage: { input: 17231, output: 1115, total: 18346 },
+      model: 'glm-5.3-flash',
+      provider: 'zai',
+      sessionId: '475d8a0d-4156-4ae7-93eb-39fce620c135',
+      error: {
+        message: "Agent exec cleanup failed: EBUSY: resource busy or locked, unlink 'C:\\...\\openclaw-agent-exec-siB1HC\\agents\\main\\agent\\openclaw-agent.sqlite'",
+        kind: 'cleanup',
+      },
+    };
+    const transport = makeTransport({
+      spawn: () => childThatFinishes({ stdout: JSON.stringify(prettyCleanupEnvelope, null, 2), code: 1 }),
+    });
+
+    const result = await transport.complete(call);
+
+    expect(result.payload).toContain('refusalReason');
+    expect(result.hostRound.sessionId).toBe('475d8a0d-4156-4ae7-93eb-39fce620c135');
+    expect(transport.hostSnapshot().identityStatus).toBe('VERIFIED');
+    expect(transport.hostSnapshot().sessionDetails?.[0]?.hostCleanupAnomaly).toContain('EBUSY');
+  });
+
+  it('parses a PRETTY-PRINTED success envelope on exit 0 (the success path had the same single-line defect)', async () => {
+    const transport = makeTransport({
+      spawn: () => childThatFinishes({ stdout: JSON.stringify(OK_ENVELOPE, null, 2), code: 0 }),
+    });
+
+    const result = await transport.complete(call);
+
+    expect(result.payload).toBe('PROBE_OK');
+    expect(transport.hostSnapshot().identityStatus).toBe('VERIFIED');
+  });
+
+  it('refuses a non-zero exit whose stdout carries no parseable envelope, surfacing stderr (config-warning noise cannot hide a missing envelope)', async () => {
+    const transport = makeTransport({
+      spawn: () => childThatFinishes({ stdout: 'plain text, no json', stderr: 'Config warnings: channels.feishu: settings upgrade pending', code: 1 }),
+    });
+
+    await expect(transport.complete(call)).rejects.toThrow(/exited 1: Config warnings/);
+  });
+
+  it('surfaces the envelope structured error over stderr config-warning noise when a failed exit carries a host-reported failure', async () => {
+    const transport = makeTransport({
+      spawn: () => childThatFinishes({
+        stdout: JSON.stringify({
+          ok: false, status: 'error', sessionId: 's-1', final: '',
+          error: { message: 'Agent exec cleanup failed: EBUSY: resource busy or locked', kind: 'cleanup' },
+        }, null, 2),
+        stderr: 'Config warnings: channels.feishu: settings upgrade pending',
+        code: 1,
+      }),
+    });
+    // Incomplete round data (no final/model) ⇒ refused, but the DIAGNOSTIC is
+    // the envelope's structured error, not the 400-char stderr warning head.
+    await expect(transport.complete(call)).rejects.toThrow(/envelope\(status="error", error\.kind="cleanup", error\.message=Agent exec cleanup failed: EBUSY/);
+  });
 });

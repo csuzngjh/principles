@@ -13,9 +13,10 @@ import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { runIsolationProbe, saveProbeEvidence, verifyF2ProbeEvidence } from '../dev/principle-learning-lab/lib/challenge-isolation-probe.mjs';
-import { createOpenClawHostTransport, readOpenClawTrajectoryEvidence } from '../dev/principle-learning-lab/lib/challenge-openclaw-host.mjs';
+import { createOpenClawHostTransport, readOpenClawExecStateTrajectory } from '../dev/principle-learning-lab/lib/challenge-openclaw-host.mjs';
 import { createProbeSideEffectScanner } from '../dev/principle-learning-lab/lib/challenge-probe-side-effect-scanner.mjs';
 
 const labRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../dev/principle-learning-lab');
@@ -26,20 +27,30 @@ const APPROVED_MODEL = 'zai/glm-5.3-flash';
 
 function stubOpenclawHome(dir: string) {
   const home = path.join(dir, 'openclaw-home');
-  const sessionsDir = path.join(home, 'agents', 'main', 'sessions');
-  fs.mkdirSync(sessionsDir, { recursive: true });
-  return { home, sessionsDir };
+  fs.mkdirSync(path.join(home, 'agents', 'main'), { recursive: true });
+  return { home };
 }
 
 /** Write the runtime trajectory the OpenClaw runtime WOULD have written for a
- *  session (openclaw-trajectory schema, session.started with identity). */
-function writeRuntimeTrajectory(sessionsDir: string, sessionId: string, modelId: string, provider: string | null) {
-  fs.mkdirSync(sessionsDir, { recursive: true }); // the real runtime creates this while persisting the session
-  const line: Record<string, unknown> = { traceSchema: 'openclaw-trajectory', type: 'session.started', sessionId, modelId, modelApi: 'openai-completions', ts: '2026-10-28T04:00:00.000Z', seq: 1 };
-  if (provider !== null) line.provider = provider;
-  const traj = path.join(sessionsDir, `${sessionId}.runtime.jsonl`);
-  fs.writeFileSync(traj, JSON.stringify(line) + '\n');
-  fs.writeFileSync(path.join(sessionsDir, `${sessionId}.trajectory-path.json`), JSON.stringify({ traceSchema: 'openclaw-trajectory-pointer', schemaVersion: 1, sessionId, runtimeFile: traj }));
+ *  session into the exec state database (S9 cycle-2: exec sessions persist
+ *  trajectory_runtime_events rows in <stateDir>/agents/<agent>/agent/
+ *  openclaw-agent.sqlite — they never write the gateway-era sessions/*.jsonl
+ *  pointer files). */
+function writeRuntimeStateTrajectory(stateAgentDb: string, sessionId: string, modelId: string, provider: string | null) {
+  const Database = createRequire(import.meta.url)('better-sqlite3');
+  fs.mkdirSync(path.dirname(stateAgentDb), { recursive: true }); // the real runtime creates this while persisting the session
+  const db = new Database(stateAgentDb);
+  try {
+    db.exec('CREATE TABLE IF NOT EXISTS trajectory_runtime_events (session_id TEXT NOT NULL, seq INTEGER NOT NULL, run_id TEXT, event_json TEXT NOT NULL)');
+    const started: Record<string, unknown> = { traceSchema: 'openclaw-trajectory', schemaVersion: 1, traceId: sessionId, source: 'runtime', type: 'session.started', ts: '2026-10-28T04:00:00.000Z', seq: 1, sourceSeq: 1, sessionId, modelId, modelApi: 'openai-completions' };
+    if (provider !== null) started.provider = provider;
+    const ended = { traceSchema: 'openclaw-trajectory', schemaVersion: 1, traceId: sessionId, source: 'runtime', type: 'session.ended', ts: '2026-10-28T04:00:05.000Z', seq: 7, sourceSeq: 7, sessionId };
+    const insert = db.prepare('INSERT INTO trajectory_runtime_events (session_id, seq, run_id, event_json) VALUES (?, ?, ?, ?)');
+    insert.run(sessionId, 1, sessionId, JSON.stringify(started));
+    insert.run(sessionId, 7, sessionId, JSON.stringify(ended));
+  } finally {
+    db.close();
+  }
 }
 
 /** The REAL adapter wired to a stub spawn: sessionId is derived from the round
@@ -94,12 +105,12 @@ async function runChain(dir: string, opts: {
   fs.cpSync(ceb001, studyDir, { recursive: true });
   const roundsRoot = path.join(dir, 'rounds');
   fs.mkdirSync(roundsRoot, { recursive: true });
-  const { home, sessionsDir } = stubOpenclawHome(dir);
+  const { home } = stubOpenclawHome(dir);
   const envProvider = opts.envelopeProvider === undefined ? APPROVED_PROVIDER : opts.envelopeProvider;
   const trajProvider = opts.trajectoryProvider === undefined ? APPROVED_PROVIDER : opts.trajectoryProvider;
   const envModel = opts.envelopeModel ?? 'glm-5.3-flash';
   const trajModel = opts.trajectoryModel ?? 'glm-5.3-flash';
-  const { transport, stateDirs } = makeStubTransport(roundsRoot, home, (round) => ({
+  const { transport } = makeStubTransport(roundsRoot, home, (round) => ({
     model: envModel,
     ...(envProvider === null ? { provider: undefined } : { provider: envProvider }),
     sessionId: `e2e-session-${String(round).padStart(2, '0')}`,
@@ -112,35 +123,30 @@ async function runChain(dir: string, opts: {
     sideEffectScanner: () => ({ clean: true, crossGroupLeakage: 0, productionWrites: 0, externalSideEffects: 0, unauthorizedExtraWrites: 0 }), // S7.1: verifiably clean verdict required per round
   });
   const evidenceRef = saveProbeEvidence(studyDir, record);
-  // S5.2: the runtime persists each session's trajectory under the per-round
-  // STATE dir (--state-dir) — located from the REAL spawned args, not assumed.
+  // S9 cycle-2: the runtime persists each session's trajectory in the ROUND's
+  // own exec state database — located from the REAL recorded evidence map
+  // (roundDir/stateDir/stateAgentDb produced by the adapter), not assumed.
   if (opts.writeTrajectories !== false && record.sessionEvidence) {
-    record.sessionEvidence.forEach((e: { sessionId: string; sessionsDir: string }, i: number) => {
+    record.sessionEvidence.forEach((e: { sessionId: string; stateAgentDb: string }, i: number) => {
       const trajModelForSession = Array.isArray(opts.trajectoryModel) ? opts.trajectoryModel[i] : trajModel;
       const trajProviderForSession = Array.isArray(opts.trajectoryProvider) ? opts.trajectoryProvider[i] : trajProvider;
-      writeRuntimeTrajectory(e.sessionsDir, e.sessionId, trajModelForSession, trajProviderForSession);
+      writeRuntimeStateTrajectory(e.stateAgentDb, e.sessionId, trajModelForSession, trajProviderForSession);
     });
   }
-  // S7 §四 + S7.1 §3: the ambient sessions dir per round — the adapter derives
-  // it from the VERIFIED openclawHome (env-checked at construction) and the
-  // record's sessionEvidence map points exactly there.
-  // S7 §四 + S7.1 §3: the ambient sessions dir — the adapter derives it from
-  // the VERIFIED openclawHome (env-checked at construction) and the record's
-  // sessionEvidence map points exactly there. On a fail-fast stop the map may
-  // be absent (no successful round) — the verifier then runs against the same
-  // ambient dir and refuses on the FAILED status anyway.
-  const ambientSessionsDir = path.join(home, 'agents', 'main', 'sessions');
+  // S9 cycle-2: deep verification runs against the runner-controlled rounds
+  // root — each mapped roundDir must live inside it and each stateDir must be
+  // that round's own state dir (derived structurally). On a fail-fast stop the
+  // map may be absent (no successful round) — the verifier refuses on the
+  // missing map regardless of status.
   const deep = verifyF2ProbeEvidence({
     studyDir,
     evidenceRef,
     expected: { studyId: 'CEB-001', suiteHash },
     hostKind: 'openclaw',
-    openclawSessionsDir: ambientSessionsDir,
-    openclawTrustedRoot: ambientSessionsDir,
     openclawExpectedProvider: opts.expectedProvider ?? APPROVED_PROVIDER,
     openclawExpectedModel: opts.expectedModel ?? APPROVED_MODEL,
-    openclawControlledRoot: ambientSessionsDir, // S7 §四: the ambient sessions dir the runtime actually used
-    readOpenClawTrajectory: readOpenClawTrajectoryEvidence,
+    openclawControlledRoot: roundsRoot,
+    readOpenClawTrajectory: readOpenClawExecStateTrajectory,
   });
   void home;
   return { record, evidenceRef, deep, roundsRoot };
@@ -223,26 +229,30 @@ describe('S5.1 §三 — end-to-end offline probe chain (real production code pa
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it('trajectory model/schema tampering → refused (schema line + identity gap)', async () => {
+  it('trajectory model/schema tampering → refused (schema event + identity gap)', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'probe-e2e-'));
     const { record, deep } = await runChain(dir, { writeTrajectories: false });
-    // hand-tamper ONE trajectory into a schema-less file that merely contains
-    // a similar session.started line — must refuse (S5.1 §五). The tampered
-    // file is placed at the session's RECORDED state location (the evidence
-    // map), exercising the map-based location path.
+    // hand-tamper ONE exec state database into a schema-less trajectory that
+    // merely contains a similar session.started event — must refuse (S5.1 §五).
+    // The tampered db is placed at the session's RECORDED state location (the
+    // evidence map), exercising the map-based location path.
     const mapped = record.sessionEvidence[0];
-    fs.mkdirSync(mapped.sessionsDir, { recursive: true });
-    const sessionId = mapped.sessionId;
-    const traj = path.join(mapped.sessionsDir, `${sessionId}.runtime.jsonl`);
-    fs.writeFileSync(traj, JSON.stringify({ type: 'session.started', sessionId, modelId: 'glm-5.3-flash', provider: 'zai' }) + '\n');
-    fs.writeFileSync(path.join(mapped.sessionsDir, `${sessionId}.trajectory-path.json`), JSON.stringify({ traceSchema: 'openclaw-trajectory-pointer', schemaVersion: 1, sessionId, runtimeFile: traj }));
+    const Database = createRequire(import.meta.url)('better-sqlite3');
+    fs.mkdirSync(path.dirname(mapped.stateAgentDb), { recursive: true });
+    const db = new Database(mapped.stateAgentDb);
+    try {
+      db.exec('CREATE TABLE trajectory_runtime_events (session_id TEXT NOT NULL, seq INTEGER NOT NULL, run_id TEXT, event_json TEXT NOT NULL)');
+      db.prepare('INSERT INTO trajectory_runtime_events (session_id, seq, run_id, event_json) VALUES (?, ?, ?, ?)')
+        .run(mapped.sessionId, 1, mapped.sessionId, JSON.stringify({ type: 'session.started', sessionId: mapped.sessionId, modelId: 'glm-5.3-flash', provider: 'zai' }));
+    } finally {
+      db.close();
+    }
     const v = verifyF2ProbeEvidence({
       studyDir: path.join(dir, 'study'), evidenceRef: 'isolation-probes/PRI-1037.json',
       expected: { studyId: 'CEB-001', suiteHash }, hostKind: 'openclaw',
-      openclawSessionsDir: mapped.sessionsDir, openclawTrustedRoot: mapped.sessionsDir,
       openclawExpectedProvider: APPROVED_PROVIDER, openclawExpectedModel: APPROVED_MODEL,
-      openclawControlledRoot: mapped.sessionsDir,
-      readOpenClawTrajectory: readOpenClawTrajectoryEvidence,
+      openclawControlledRoot: path.join(dir, 'rounds'),
+      readOpenClawTrajectory: readOpenClawExecStateTrajectory,
     });
     expect(v.ok).toBe(false);
     expect(v.reasons.some((r) => r.includes('does not declare traceSchema'))).toBe(true);
@@ -252,27 +262,45 @@ describe('S5.1 §三 — end-to-end offline probe chain (real production code pa
 });
 
 describe('S5.2 §四/§五 — runtime evidence map containment and side-effect scanner', () => {
-  it('a FORGED location mismatch vs the ambient sessions dir is refused (S7 §四 negative, S5.2 escape refactored away)', async () => {
-    // S7 §四 refactored the location model: the map must EQUAL the verifier's
-    // independently derived ambient sessions dir; a location pointing anywhere
-    // else is a forgery and refuses before any trajectory read.
+  it('a FORGED stateDir that is not the round\'s own state dir is refused (S9 cycle-2 negative)', async () => {
+    // S9 cycle-2 location model: the mapped stateDir must be exactly
+    // <roundDir>/state — derived by the verifier from the mapped round dir; a
+    // location pointing anywhere else is a forgery and refuses before any
+    // trajectory read.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'probe-e2e-'));
     const { record } = await runChain(dir, { writeTrajectories: false });
-    const forged = path.join(dir, 'forged-state', 'agents', 'main', 'sessions');
+    const forged = path.join(dir, 'forged-state');
     fs.mkdirSync(forged, { recursive: true });
-    record.sessionEvidence[0].sessionsDir = forged;
+    record.sessionEvidence[0].stateDir = forged;
     fs.writeFileSync(path.join(dir, 'study', 'isolation-probes', 'PRI-1037.json'), JSON.stringify(record, null, 2));
     const deep = verifyF2ProbeEvidence({
       studyDir: path.join(dir, 'study'), evidenceRef: 'isolation-probes/PRI-1037.json',
       expected: { studyId: 'CEB-001', suiteHash }, hostKind: 'openclaw',
-      openclawSessionsDir: record.sessionEvidence[1].sessionsDir,
-      openclawTrustedRoot: record.sessionEvidence[1].sessionsDir,
       openclawExpectedProvider: APPROVED_PROVIDER, openclawExpectedModel: APPROVED_MODEL,
-      openclawControlledRoot: record.sessionEvidence[1].sessionsDir,
-      readOpenClawTrajectory: readOpenClawTrajectoryEvidence,
+      openclawControlledRoot: path.join(dir, 'rounds'),
+      readOpenClawTrajectory: readOpenClawExecStateTrajectory,
     });
     expect(deep.ok).toBe(false);
     expect(deep.reasons.some((r) => r.includes('forged locations are refused'))).toBe(true);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('a FORGED roundDir outside the controlled rounds root is refused (S9 cycle-2 negative)', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'probe-e2e-'));
+    const { record } = await runChain(dir, { writeTrajectories: false });
+    const outside = path.join(dir, 'outside-round');
+    fs.mkdirSync(outside, { recursive: true }); // resolvable but OUTSIDE the controlled rounds root
+    record.sessionEvidence[0].roundDir = outside;
+    fs.writeFileSync(path.join(dir, 'study', 'isolation-probes', 'PRI-1037.json'), JSON.stringify(record, null, 2));
+    const deep = verifyF2ProbeEvidence({
+      studyDir: path.join(dir, 'study'), evidenceRef: 'isolation-probes/PRI-1037.json',
+      expected: { studyId: 'CEB-001', suiteHash }, hostKind: 'openclaw',
+      openclawExpectedProvider: APPROVED_PROVIDER, openclawExpectedModel: APPROVED_MODEL,
+      openclawControlledRoot: path.join(dir, 'rounds'),
+      readOpenClawTrajectory: readOpenClawExecStateTrajectory,
+    });
+    expect(deep.ok).toBe(false);
+    expect(deep.reasons.some((r) => r.includes('escapes the controlled rounds root'))).toBe(true);
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -287,14 +315,12 @@ describe('S5.2 §四/§五 — runtime evidence map containment and side-effect 
     const deep = verifyF2ProbeEvidence({
       studyDir: path.join(dir, 'study'), evidenceRef: 'isolation-probes/PRI-1037.json',
       expected: { studyId: 'CEB-001', suiteHash }, hostKind: 'openclaw',
-      openclawSessionsDir: path.join(dir, 'openclaw-home', 'agents', 'main', 'sessions'),
-      openclawTrustedRoot: path.join(dir, 'rounds'),
       openclawExpectedProvider: APPROVED_PROVIDER, openclawExpectedModel: APPROVED_MODEL,
       openclawControlledRoot: path.join(dir, 'rounds'),
-      readOpenClawTrajectory: readOpenClawTrajectoryEvidence,
+      readOpenClawTrajectory: readOpenClawExecStateTrajectory,
     });
     expect(deep.ok).toBe(false);
-    expect(deep.reasons.some((r) => r.includes('no runtime evidence mapping'))).toBe(true);
+    expect(deep.reasons.some((r) => r.includes('no complete runtime evidence mapping'))).toBe(true);
     fs.rmSync(dir, { recursive: true, force: true });
   });
 

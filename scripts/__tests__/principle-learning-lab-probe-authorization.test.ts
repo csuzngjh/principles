@@ -12,10 +12,11 @@ import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { verifyProbeAuthorization, PROBE_AUTH_KEYS, PROBE_AUTH_TARGET_KINDS, PROBE_AUTH_ALLOWED_MODELS } from '../dev/principle-learning-lab/lib/challenge-probe-authorization.mjs';
 import { ZHIPU_CODING_PROVIDER, buildZhipuCodexOverrides, ensureZhipuProviderReady } from '../dev/principle-learning-lab/lib/challenge-zhipu-host-provider.mjs';
-import { createOpenClawHostTransport, readOpenClawTrajectoryEvidence } from '../dev/principle-learning-lab/lib/challenge-openclaw-host.mjs';
+import { createOpenClawHostTransport, readOpenClawExecStateTrajectory, readOpenClawTrajectoryEvidence } from '../dev/principle-learning-lab/lib/challenge-openclaw-host.mjs';
 import { verifyF2ProbeEvidence } from '../dev/principle-learning-lab/lib/challenge-isolation-probe.mjs';
 
 const labRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../dev/principle-learning-lab');
@@ -47,16 +48,20 @@ function withExactKeys(rec) {
 }
 
 describe('probe authorization gate (fail-closed, PRI-1037 / S2-D3)', () => {
-  it('refuses the REVOKED authorization (S7 §七: revocation takes effect immediately)', () => {
-    const v = verifyProbeAuthorization({ record: committed, studyDir: ceb001, now: Date.now(), transportFactoryCalls: 0 });
-    expect(v.ok).toBe(false);
-    expect(v.reasons.some((r) => r.includes("status is 'REVOKED'"))).toBe(true);
+  it('the committed cycle-2 APPROVED authorization verifies inside its window and refuses outside it (the window is the live gate)', () => {
+    expect(committed.status).toBe('APPROVED'); // Owner goal 2026-10-30: cycle 2 issued (cycle 1 history preserved in git)
+    expect(committed.revokedAt).toBe('');
+    const inside = verifyProbeAuthorization({ record: committed, studyDir: ceb001, now: Date.parse('2026-10-29T20:00:00Z'), transportFactoryCalls: 0 });
+    expect(inside.ok).toBe(true); // inside 19:30Z..01:30Z, hash-bound, keys exact
+    expect(verifyProbeAuthorization({ record: committed, studyDir: ceb001, now: Date.parse('2026-10-29T19:00:00Z'), transportFactoryCalls: 0 }).ok).toBe(false);
+    expect(verifyProbeAuthorization({ record: committed, studyDir: ceb001, now: Date.parse('2026-10-30T02:00:00Z'), transportFactoryCalls: 0 }).ok).toBe(false);
   });
 
-  it('would have accepted the APPROVED record inside its window — proven by un-revoking a copy (the clock is not what stopped it)', () => {
-    const unRevoked = withExactKeys({ ...committed, status: 'APPROVED', revokedAt: '', revokedReason: '' });
-    const v = verifyProbeAuthorization({ record: unRevoked, studyDir: ceb001, now: Date.parse('2026-10-28T11:00:00Z'), transportFactoryCalls: 0 });
-    expect(v.ok).toBe(true); // inside 10:10Z..16:10Z, hash-bound, keys exact
+  it('revocation takes effect immediately: a REVOKED copy of the live record refuses inside the window (S7 §七 retained)', () => {
+    const revoked = withExactKeys({ ...committed, status: 'REVOKED', revokedAt: '2026-10-29T21:00:00Z', revokedReason: 'stop condition triggered' });
+    const v = verifyProbeAuthorization({ record: revoked, studyDir: ceb001, now: Date.parse('2026-10-29T21:30:00Z'), transportFactoryCalls: 0 });
+    expect(v.ok).toBe(false);
+    expect(v.reasons.some((r) => r.includes("status is 'REVOKED'"))).toBe(true);
   });
 
   it('accepts an APPROVED record only with exact closed key set, live window, and recomputed frozen binding', () => {
@@ -85,8 +90,12 @@ describe('probe authorization gate (fail-closed, PRI-1037 / S2-D3)', () => {
   });
 
   it('gate-order invariant: any transport factory call without a valid authorization is itself a refusal', () => {
-    const v = verifyProbeAuthorization({ record: committed, studyDir: ceb001, now: T0, transportFactoryCalls: 1 });
+    // isolated from the window: an inside-window copy still refuses on the
+    // gate-order invariant alone
+    const inside = withExactKeys(approvedOver());
+    const v = verifyProbeAuthorization({ record: inside, studyDir: ceb001, now: T0, transportFactoryCalls: 1 });
     expect(v.ok).toBe(false);
+    expect(v.reasons.some((r) => r.includes('gate-order violation'))).toBe(true);
   });
 
   it('binds to a real frozen study copy: a synthesized copy of CEB-001 accepts the same binding (no hash recomputation shortcuts)', () => {
@@ -97,16 +106,16 @@ describe('probe authorization gate (fail-closed, PRI-1037 / S2-D3)', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it('PIN: the committed record is REVOKED with revocation facts, the original window and the approved channel (S7 §七)', () => {
-    expect(committed.status).toBe('REVOKED'); // S7 §七: closed after the stop condition triggered
-    expect(committed.revokedAt).toBe('2026-10-28T11:20:00Z');
-    expect(committed.revokedReason).toContain('NEW authorization');
-    expect(committed.issuedBy).toBe('owner-20261028-probe-approval');
-    expect(committed.validFrom).toBe('2026-10-28T10:10:00Z');
-    expect(committed.validUntil).toBe('2026-10-28T16:10:00Z'); // 6h window per the Owner approval
+  it('PIN: the committed record is the Owner-issued cycle-2 authorization with its window, caps and the approved channel (S9 cycle-2)', () => {
+    expect(committed.status).toBe('APPROVED'); // cycle 2, issued by the Owner goal (cycle 1 REVOKED history in git)
+    expect(committed.issuedBy).toBe('owner-goal-20261030-final');
+    expect(committed.validFrom).toBe('2026-10-29T19:30:00Z');
+    expect(committed.validUntil).toBe('2026-10-30T01:30:00Z'); // 6h window per the Owner authorization
+    expect(committed.caps).toEqual({ probeRounds: 5, timeoutMsPerCall: 600000 });
     expect(committed.targetHost.kind).toBe('openclaw'); // S4 host switch, pinned
     expect(committed.targetHost.provider).toBe('zai');
     expect(committed.targetHost.requestedModelIdentity).toBe('zai/glm-5.3-flash');
+    expect(committed.targetHost.openclawHome).toBe('C:/Users/Administrator/.openclaw');
     // the frozen binding it will enforce must equal the live study
     const manifest = JSON.parse(fs.readFileSync(path.join(ceb001, 'suite-manifest.json'), 'utf8'));
     expect(committed.frozenHashes.suiteHash).toBe(manifest.suiteHash);
@@ -312,61 +321,102 @@ describe('verifyF2ProbeEvidence openclaw dispatch (S4-B3 + S5 P1-2/P1-4 evidence
   }
 
   // Test-only helper. sessionId is whitelist-validated to a bare safe id
-  // (Mimosa path-traversal guidance); the pointer filename is derived by
-  // suffix, never by concatenating caller-controlled path segments.
-  function writeTrajectory(sessionsDir: string, sessionId: string, modelId: string, provider: string | null) {
+  // (Mimosa path-traversal guidance); the exec state database path is fixed by
+  // the adapter contract (<roundDir>/state/agents/<agent>/agent/...), never
+  // derived from caller-controlled path segments.
+  function writeExecStateTrajectory(roundsRoot: string, sessionId: string, modelId: string, provider: string | null) {
     if (!/^[A-Za-z0-9_-]+$/.test(sessionId)) throw new Error('test session ids must be bare safe ids');
-    fs.mkdirSync(sessionsDir, { recursive: true });
-    const traj = path.join(sessionsDir, `${sessionId}.runtime.jsonl`);
-    const line: Record<string, unknown> = { traceSchema: 'openclaw-trajectory', type: 'session.started', sessionId, modelId };
-    if (provider !== null) line.provider = provider;
-    fs.writeFileSync(traj, JSON.stringify(line) + '\n');
-    fs.writeFileSync(path.join(sessionsDir, `${sessionId}.trajectory-path.json`), JSON.stringify({ traceSchema: 'openclaw-trajectory-pointer', schemaVersion: 1, sessionId, runtimeFile: traj }));
-    return sessionsDir;
+    const Database = createRequire(import.meta.url)('better-sqlite3');
+    const roundDir = path.join(roundsRoot, `round-${sessionId}`);
+    const stateDir = path.join(roundDir, 'state');
+    const stateAgentDb = path.join(stateDir, 'agents', 'main', 'agent', 'openclaw-agent.sqlite');
+    fs.mkdirSync(path.dirname(stateAgentDb), { recursive: true });
+    const db = new Database(stateAgentDb);
+    try {
+      db.exec('CREATE TABLE IF NOT EXISTS trajectory_runtime_events (session_id TEXT NOT NULL, seq INTEGER NOT NULL, run_id TEXT, event_json TEXT NOT NULL)');
+      const started: Record<string, unknown> = { traceSchema: 'openclaw-trajectory', type: 'session.started', sessionId, modelId, modelApi: 'openai-completions' };
+      if (provider !== null) started.provider = provider;
+      db.prepare('INSERT INTO trajectory_runtime_events (session_id, seq, run_id, event_json) VALUES (?, ?, ?, ?)').run(sessionId, 1, sessionId, JSON.stringify(started));
+    } finally {
+      db.close();
+    }
+    return { roundDir, stateDir, stateAgentDb };
   }
 
-  it('corroborates sessions via the runtime trajectory with provider agreement (structures never mixed)', () => {
+  function withEvidenceMap(studyDir: string, ref: string, entries: Array<{ sessionId: string; roundDir: string; stateDir: string; stateAgentDb: string }>) {
+    // Same guard verifyF2ProbeEvidence applies to evidenceRef: bare relative
+    // path, then resolved-path containment inside the study dir.
+    if (path.isAbsolute(ref) || ref.split(/[\\/]/).includes('..')) throw new Error('test evidenceRef must be a bare relative path');
+    const studyRoot = path.resolve(studyDir);
+    const resolved = path.resolve(studyDir, ref);
+    if (resolved !== studyRoot && !resolved.startsWith(studyRoot + path.sep)) throw new Error('evidence path escapes the study dir');
+    const record = JSON.parse(fs.readFileSync(resolved, 'utf8'));
+    record.sessionEvidence = entries;
+    fs.writeFileSync(resolved, JSON.stringify(record, null, 2));
+  }
+
+  it('corroborates sessions via the round exec state trajectory with provider agreement (structures never mixed)', () => {
     const dir = tmp();
-    const sessionsDir = writeTrajectory(path.join(dir, 'oc-sessions'), 's1', 'glm-5.3-flash', 'zai');
+    const roundsRoot = path.join(dir, 'rounds');
+    fs.mkdirSync(roundsRoot, { recursive: true });
+    const loc = writeExecStateTrajectory(roundsRoot, 's1', 'glm-5.3-flash', 'zai');
     const ref = buildStudy(dir, ['s1'], 'glm-5.3-flash', 'zai');
-    const v = verifyF2ProbeEvidence({ studyDir: dir, evidenceRef: ref, expected: { studyId: 'CEB-001', suiteHash }, hostKind: 'openclaw', openclawSessionsDir: sessionsDir, openclawTrustedRoot: sessionsDir, openclawExpectedProvider: 'zai', readOpenClawTrajectory: readOpenClawTrajectoryEvidence });
+    withEvidenceMap(dir, ref, [{ sessionId: 's1', ...loc }]);
+    const v = verifyF2ProbeEvidence({ studyDir: dir, evidenceRef: ref, expected: { studyId: 'CEB-001', suiteHash }, hostKind: 'openclaw', openclawExpectedProvider: 'zai', openclawControlledRoot: roundsRoot, readOpenClawTrajectory: readOpenClawExecStateTrajectory });
     expect(v.ok).toBe(true);
   });
 
-  it('S5 P1-2 negatives: record provider missing, trajectory provider conflict, provider outside the approved channel, absent trustedRoot, unknown kind, and model conflict all refuse', () => {
+  it('S5 P1-2 negatives: record provider missing, trajectory provider conflict, provider outside the approved channel, absent controlled root, unknown kind, forged stateDir, and model conflict all refuse', () => {
     const dir = tmp();
-    const sessionsDir = writeTrajectory(path.join(dir, 'oc-sessions'), 's1', 'glm-5.3-flash', 'zai');
+    const roundsRoot = path.join(dir, 'rounds');
+    fs.mkdirSync(roundsRoot, { recursive: true });
+    const loc = writeExecStateTrajectory(roundsRoot, 's1', 'glm-5.3-flash', 'zai');
     const ref = buildStudy(dir, ['s1'], 'glm-5.3-flash', 'zai');
-    const base = { studyDir: dir, evidenceRef: ref, expected: { studyId: 'CEB-001', suiteHash }, hostKind: 'openclaw', openclawSessionsDir: sessionsDir, openclawTrustedRoot: sessionsDir, readOpenClawTrajectory: readOpenClawTrajectoryEvidence };
+    withEvidenceMap(dir, ref, [{ sessionId: 's1', ...loc }]);
+    const base = { studyDir: dir, evidenceRef: ref, expected: { studyId: 'CEB-001', suiteHash }, hostKind: 'openclaw', openclawControlledRoot: roundsRoot, readOpenClawTrajectory: readOpenClawExecStateTrajectory };
     // observed provider missing from the record
     const recDir = tmp();
     const recRef = buildStudy(recDir, ['s1'], 'glm-5.3-flash', null);
+    withEvidenceMap(recDir, recRef, [{ sessionId: 's1', ...loc }]);
     const v0 = verifyF2ProbeEvidence({ ...base, studyDir: recDir, evidenceRef: recRef });
     expect(v0.ok).toBe(false);
     expect(v0.reasons.some((r) => r.includes('no observed provider identity'))).toBe(true);
     // trajectory provider conflicts with the envelope-observed provider
-    const conflict = writeTrajectory(path.join(dir, 'conf'), 's1', 'glm-5.3-flash', 'minimax');
-    const v1 = verifyF2ProbeEvidence({ ...base, openclawSessionsDir: conflict, openclawTrustedRoot: conflict });
+    const conflictLoc = writeExecStateTrajectory(roundsRoot, 's2', 'glm-5.3-flash', 'minimax');
+    const refConflict = buildStudy(dir, ['s2'], 'glm-5.3-flash', 'zai');
+    withEvidenceMap(dir, refConflict, [{ sessionId: 's2', ...conflictLoc }]);
+    const v1 = verifyF2ProbeEvidence({ ...base, evidenceRef: refConflict });
     expect(v1.ok).toBe(false);
     expect(v1.reasons.some((r) => r.includes('conflicts with the envelope-observed provider'))).toBe(true);
     // trajectory provider outside the approved channel (record agrees with the trajectory —
     // still refused: the approved channel is a binding, not a consistency check)
-    const outside = writeTrajectory(path.join(dir, 'outsidetrj'), 's1', 'glm-5.3-flash', 'minimax');
+    const outsideLoc = writeExecStateTrajectory(roundsRoot, 's3', 'glm-5.3-flash', 'minimax');
     const recDir2 = tmp();
-    const recRef2 = buildStudy(recDir2, ['s1'], 'glm-5.3-flash', 'minimax');
-    const v2 = verifyF2ProbeEvidence({ ...base, studyDir: recDir2, evidenceRef: recRef2, openclawSessionsDir: outside, openclawTrustedRoot: outside, openclawExpectedProvider: 'zai' });
+    const recRef2 = buildStudy(recDir2, ['s3'], 'glm-5.3-flash', 'minimax');
+    withEvidenceMap(recDir2, recRef2, [{ sessionId: 's3', ...outsideLoc }]);
+    const v2 = verifyF2ProbeEvidence({ ...base, studyDir: recDir2, evidenceRef: recRef2, openclawExpectedProvider: 'zai' });
     expect(v2.ok).toBe(false);
     expect(v2.reasons.some((r) => r.includes("outside the approved channel 'zai'"))).toBe(true);
-    // trusted root absent → fail-closed
-    const v3 = verifyF2ProbeEvidence({ ...base, openclawTrustedRoot: null });
+    // controlled root absent → fail-closed
+    const v3 = verifyF2ProbeEvidence({ ...base, openclawControlledRoot: null });
     expect(v3.ok).toBe(false);
     // unknown kind
     const v4 = verifyF2ProbeEvidence({ ...base, hostKind: 'workbuddy' });
     expect(v4.ok).toBe(false);
     expect(v4.reasons.some((r) => r.includes('evidence dispatch is closed'))).toBe(true);
+    // a mapped stateDir that is NOT the round's own state dir is a forgery
+    const forgedLoc = writeExecStateTrajectory(roundsRoot, 's4', 'glm-5.3-flash', 'zai');
+    const refForged = buildStudy(dir, ['s4'], 'glm-5.3-flash', 'zai');
+    fs.mkdirSync(path.join(dir, 'forged-state'), { recursive: true }); // the forged location exists — it is still not the round's own state dir
+    withEvidenceMap(dir, refForged, [{ sessionId: 's4', ...forgedLoc, stateDir: path.join(dir, 'forged-state') }]);
+    const v4b = verifyF2ProbeEvidence({ ...base, evidenceRef: refForged });
+    expect(v4b.ok).toBe(false);
+    expect(v4b.reasons.some((r) => r.includes('forged locations are refused'))).toBe(true);
     // model conflict (S4 negative retained through the new signature)
-    const badModel = writeTrajectory(path.join(dir, 'badmodel'), 's1', 'gpt-6-luna', 'zai');
-    const v5 = verifyF2ProbeEvidence({ ...base, openclawSessionsDir: badModel, openclawTrustedRoot: badModel });
+    const badModelLoc = writeExecStateTrajectory(roundsRoot, 's5', 'gpt-6-luna', 'zai');
+    const refBad = buildStudy(dir, ['s5'], 'glm-5.3-flash', 'zai');
+    withEvidenceMap(dir, refBad, [{ sessionId: 's5', ...badModelLoc }]);
+    const v5 = verifyF2ProbeEvidence({ ...base, evidenceRef: refBad });
     expect(v5.ok).toBe(false);
     expect(v5.reasons.some((r) => r.includes('conflicts with the probe'))).toBe(true);
   });
