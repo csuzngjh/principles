@@ -1,5 +1,6 @@
 import { Value } from '@sinclair/typebox/value';
 import { Type } from '@sinclair/typebox';
+import { isCanonicalBindingPrincipleId } from './principle-tree/rule-candidate-binding.js';
 import { DiagnosticianOutputV2Schema } from './diagnostician-output.js';
 
 const AssociationContextSchema = Type.Object({
@@ -43,7 +44,7 @@ export function validateDiagnosticianAssociations(output: unknown, context: unkn
       const target = refs.get(association.target.recommendationRef);
       reason = target?.kind === 'principle' ? 'references_valid' : 'recommendation_target_invalid';
     } else {
-      reason = principles.has(association.target.principleId) && violated.has(association.target.principleId)
+      reason = isCanonicalBindingPrincipleId(association.target.principleId) && principles.has(association.target.principleId) && violated.has(association.target.principleId)
         ? 'references_valid' : 'principle_not_in_context';
     }
     checks.push({ recommendationRef: item.recommendationRef, status: reason === 'references_valid' ? 'linked' : 'unresolved', reason });

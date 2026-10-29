@@ -6,7 +6,7 @@ import { validateDiagnosticianAssociations } from '../diagnostician-association-
 function output(target: unknown = { type: 'recommendation_ref', recommendationRef: 'p' }) {
   return {
     schemaVersion: 'diagnostician-output-v2', valid: true, diagnosisId: 'd', summary: 's', rootCause: 'Design: s',
-    violatedPrinciples: [{ principleId: 'known', rationale: 'r' }], evidence: [{ sourceRef: 'e', note: 'n' }], confidence: 1,
+    violatedPrinciples: [{ principleId: '11111111-1111-4111-8111-111111111111', rationale: 'r' }], evidence: [{ sourceRef: 'e', note: 'n' }], confidence: 1,
     recommendations: [
       { kind: 'principle', recommendationRef: 'p', description: 'Principle', abstractedPrinciple: 'Keep scope bounded' },
       { kind: 'rule', recommendationRef: 'r', description: 'Rule', triggerPattern: 'write', action: 'check',
@@ -14,7 +14,7 @@ function output(target: unknown = { type: 'recommendation_ref', recommendationRe
     ],
   };
 }
-const context = { principleIds: ['known'], evidenceRefs: ['e'] };
+const context = { principleIds: ['11111111-1111-4111-8111-111111111111'], evidenceRefs: ['e'] };
 
 describe('opt-in V2 association reference checks', () => {
   it('keeps V1 readable while requiring explicit V2 opt-in', () => {
@@ -29,7 +29,7 @@ describe('opt-in V2 association reference checks', () => {
       checks: [{ recommendationRef: 'r', status: 'linked', reason: 'references_valid' }] });
   });
   it('requires a canonical ID both in trusted context and violatedPrinciples', () => {
-    const canonical = output({ type: 'canonical_principle', principleId: 'known' });
+    const canonical = output({ type: 'canonical_principle', principleId: '11111111-1111-4111-8111-111111111111' });
     expect(validateDiagnosticianAssociations(canonical, context)).toMatchObject({ ok: true, checks: [{ status: 'linked' }] });
     expect(validateDiagnosticianAssociations(canonical, { ...context, principleIds: ['newly-added'] })).toMatchObject({ checks: [{ reason: 'principle_not_in_context' }] });
     canonical.violatedPrinciples = [];
@@ -49,6 +49,11 @@ describe('opt-in V2 association reference checks', () => {
   it('does not use confidence to rescue evidence outside the input', () => {
     expect(validateDiagnosticianAssociations(output(), { ...context, evidenceRefs: ['other'] }))
       .toMatchObject({ checks: [{ status: 'unresolved', reason: 'evidence_not_in_context' }] });
+  });
+  it('rejects fabricated noncanonical IDs even when both model and allowlist agree', () => {
+    const value = output({ type: 'canonical_principle', principleId: 'fake' });
+    value.violatedPrinciples = [{ principleId: 'fake', rationale: 'r' }];
+    expect(validateDiagnosticianAssociations(value, { ...context, principleIds: ['fake'] })).toMatchObject({ checks: [{ status: 'unresolved' }] });
   });
   it('accepts unresolved as valid diagnosis data', () => {
     const value: unknown = { ...output(), recommendations: [{ kind: 'rule', recommendationRef: 'r', description: 'r', triggerPattern: 't', action: 'a',
