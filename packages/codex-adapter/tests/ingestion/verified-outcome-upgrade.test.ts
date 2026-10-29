@@ -89,8 +89,51 @@ describe('CR-01 transcript verified-outcome upgrade (production orchestrator)', 
     expect(rows[0]).toEqual({ tool_name: 'Bash', outcome: 'failure', exit_code: 1, tool_use_id: TOOL_USE_ID });
   });
 
-  it('upgrades a pre-existing unknown live row instead of duplicating it', () => {
-    // Live PostToolUse observation of the same call: text-only → unknown.
+  it('upgrades a pre-existing SAME-HOST unknown live row instead of duplicating it', () => {
+    // Live PostToolUse observation of the same call: text-only → unknown,
+    // stamped with the producing host (today's live writer always stamps).
+    const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+    db.exec('CREATE TABLE IF NOT EXISTS sessions (session_id TEXT PRIMARY KEY, started_at TEXT NOT NULL, updated_at TEXT NOT NULL)');
+    db.exec('CREATE TABLE IF NOT EXISTS tool_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, tool_name TEXT NOT NULL, outcome TEXT NOT NULL, duration_ms INTEGER, exit_code INTEGER, error_type TEXT, error_message TEXT, gfi_before REAL, gfi_after REAL, params_json TEXT NOT NULL, result_preview TEXT, created_at TEXT NOT NULL, tool_use_id TEXT, host_kind TEXT)');
+    db.prepare('INSERT INTO tool_calls (session_id, tool_name, outcome, exit_code, params_json, result_preview, created_at, tool_use_id, host_kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(ROOT_SESSION, 'Bash', 'unknown', null, '{"invocation":"probe"}', 'probe raw text', new Date().toISOString(), TOOL_USE_ID, 'codex');
+    db.close();
+
+    fs.writeFileSync(transcriptPath, failingTranscript());
+    const result = ingestCodexConversation(stopPayload(), 'turn_complete', { workspaceDir, env: { CODEX_HOME: codexHome } });
+    expect(result.status).toBe('ok');
+    const rows = toolCallsRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toEqual({ tool_name: 'Bash', outcome: 'failure', exit_code: 1, tool_use_id: TOOL_USE_ID });
+  });
+
+  it('R4/P2: a WorkBuddy-stamped row with the same identity is NOT matched by the Codex upgrade — both records stay independent', () => {
+    // The WorkBuddy live writer stamped this unknown row in a shared
+    // workspace; the Codex transcript upgrade must not claim or upgrade it.
+    const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+    db.exec('CREATE TABLE IF NOT EXISTS sessions (session_id TEXT PRIMARY KEY, started_at TEXT NOT NULL, updated_at TEXT NOT NULL)');
+    db.exec('CREATE TABLE IF NOT EXISTS tool_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, tool_name TEXT NOT NULL, outcome TEXT NOT NULL, duration_ms INTEGER, exit_code INTEGER, error_type TEXT, error_message TEXT, gfi_before REAL, gfi_after REAL, params_json TEXT NOT NULL, result_preview TEXT, created_at TEXT NOT NULL, tool_use_id TEXT, project_dir TEXT, host_kind TEXT)');
+    db.prepare('INSERT INTO tool_calls (session_id, tool_name, outcome, exit_code, params_json, result_preview, created_at, tool_use_id, host_kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(ROOT_SESSION, 'Bash', 'unknown', null, '{"invocation":"wb-probe"}', 'workbuddy raw text', new Date().toISOString(), TOOL_USE_ID, 'workbuddy');
+    db.close();
+
+    fs.writeFileSync(transcriptPath, failingTranscript());
+    const result = ingestCodexConversation(stopPayload(), 'turn_complete', { workspaceDir, env: { CODEX_HOME: codexHome } });
+    expect(result.status).toBe('ok');
+    const db2 = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+    try {
+      const all = db2.prepare('SELECT outcome, exit_code, host_kind FROM tool_calls ORDER BY id').all() as Array<{ outcome: string; exit_code: number | null; host_kind: string | null }>;
+      expect(all).toHaveLength(2);
+      expect(all.find(row => row.host_kind === 'workbuddy')).toMatchObject({ outcome: 'unknown' });
+      expect(all.find(row => row.host_kind === 'codex')).toMatchObject({ outcome: 'failure', exit_code: 1 });
+    } finally {
+      db2.close();
+    }
+  });
+
+  it('R3/P2: a LEGACY host_kind=NULL row with the same identity is never claimed — the verified fact lands as its own attributed row', () => {
+    // Pre-attribution live observation (written before the host_kind column
+    // existed): identity collision must not let Codex implicitly adopt it.
     const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
     db.exec('CREATE TABLE IF NOT EXISTS sessions (session_id TEXT PRIMARY KEY, started_at TEXT NOT NULL, updated_at TEXT NOT NULL)');
     db.exec('CREATE TABLE IF NOT EXISTS tool_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, tool_name TEXT NOT NULL, outcome TEXT NOT NULL, duration_ms INTEGER, exit_code INTEGER, error_type TEXT, error_message TEXT, gfi_before REAL, gfi_after REAL, params_json TEXT NOT NULL, result_preview TEXT, created_at TEXT NOT NULL, tool_use_id TEXT)');
@@ -101,9 +144,15 @@ describe('CR-01 transcript verified-outcome upgrade (production orchestrator)', 
     fs.writeFileSync(transcriptPath, failingTranscript());
     const result = ingestCodexConversation(stopPayload(), 'turn_complete', { workspaceDir, env: { CODEX_HOME: codexHome } });
     expect(result.status).toBe('ok');
-    const rows = toolCallsRows();
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toEqual({ tool_name: 'Bash', outcome: 'failure', exit_code: 1, tool_use_id: TOOL_USE_ID });
+    const db2 = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+    try {
+      const all = db2.prepare('SELECT outcome, exit_code, host_kind FROM tool_calls ORDER BY id').all() as Array<{ outcome: string; exit_code: number | null; host_kind: string | null }>;
+      expect(all).toHaveLength(2);
+      expect(all[0]).toMatchObject({ outcome: 'unknown', host_kind: null });
+      expect(all[1]).toMatchObject({ outcome: 'failure', exit_code: 1, host_kind: 'codex' });
+    } finally {
+      db2.close();
+    }
   });
 
   it('replaying the same Stop does not duplicate the verified row (idempotent)', () => {

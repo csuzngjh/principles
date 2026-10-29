@@ -163,6 +163,8 @@ export function handleBeforeToolCall(
           ruleId: shadowDecision.ruleId,
           activationId: shadowDecision.activationId,
           activationMode: 'shadow',
+          // SPEC-RULECODE-HOST-PROMOTION-001 B3: per-host shadow attribution.
+          hostKind: 'openclaw',
         });
       } catch (evErr) {
         logger?.warn?.(`[PD_GATE] Failed to record shadow rulehost_evaluated: ${String(evErr)}`);
@@ -182,6 +184,7 @@ export function handleBeforeToolCall(
         // 无法对账到规则的审计缺口
         activationId: report.liveDecisionActivationId,
         activationMode: 'live',
+        hostKind: 'openclaw',
       });
     } catch (evErr) {
       logger?.warn?.(`[PD_GATE] Failed to record rulehost_evaluated: ${String(evErr)}`);
@@ -715,6 +718,9 @@ export function handleSharedRuleHostResult(
           ...(evaluation.ruleId !== undefined ? { ruleId: evaluation.ruleId } : {}),
           ...(evaluation.activationId !== undefined ? { activationId: evaluation.activationId } : {}),
           ...(evaluation.activationMode !== undefined ? { activationMode: evaluation.activationMode } : {}),
+          // SPEC B3: preserve the shared gate's host attribution; this plugin
+          // IS the OpenClaw boundary, so an unattributed row defaults here.
+          ...(evaluation.hostKind !== undefined ? { hostKind: evaluation.hostKind } : { hostKind: 'openclaw' }),
         });
         wroteEvaluationRow = true;
       }
@@ -731,7 +737,7 @@ export function handleSharedRuleHostResult(
       eventLog.recordRuleHostEvaluated({
         toolName: event.toolName, filePath: action.normalizedPath,
         matched: result.decision === 'deny', decision: result.decision === 'deny' ? 'block' : 'allow',
-        ruleId, activationMode: 'live',
+        ruleId, activationMode: 'live', hostKind: 'openclaw',
       });
     }
     if (result.decision === 'deny') {

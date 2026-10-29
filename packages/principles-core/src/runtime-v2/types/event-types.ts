@@ -477,6 +477,15 @@ export interface RuleHostEvaluatedEventData {
   ruleId?: string;
   activationId?: string;
   activationMode?: 'shadow' | 'live';
+  /**
+   * SPEC-RULECODE-HOST-PROMOTION-001 B3: which host produced this evaluation.
+   * Promotion shadow thresholds count per-host samples only — an OpenClaw
+   * sample must never satisfy a Codex (or WorkBuddy) readiness threshold.
+   * Optional for backward compatibility with events persisted before the
+   * field existed; readers applying host attribution treat a missing value
+   * as UNATTRIBUTED (not counted toward any host's threshold).
+   */
+  hostKind?: string;
 }
 
 export const RuleHostEvaluatedEventDataSchema = Type.Object({
@@ -497,6 +506,7 @@ export const RuleHostEvaluatedEventDataSchema = Type.Object({
     Type.Literal('shadow'),
     Type.Literal('live'),
   ])),
+  hostKind: Type.Optional(Type.String()),
 });
 export type RuleHostEvaluatedEventDataStatic = Static<typeof RuleHostEvaluatedEventDataSchema>;
 

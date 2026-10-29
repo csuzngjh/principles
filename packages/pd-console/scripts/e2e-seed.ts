@@ -656,6 +656,10 @@ const shadowEvents = Array.from({ length: 20 }, (_, index) => ({
   data: {
     activationId: 'act-rule-shadow-e2e',
     activationMode: 'shadow',
+    // SPEC-RULECODE-HOST-PROMOTION-001 B3: promotion thresholds count
+    // per-host samples only; this undeclared e2e workspace resolves the
+    // OpenClaw contract, so the seeded rows carry that attribution.
+    hostKind: 'openclaw',
     matched: index < 4,
     decision: index < 2 ? 'block' : 'allow',
     toolName: 'edit_file',

@@ -77,11 +77,32 @@ export function createWorkspaceBehaviorEvidencePort(workspaceDir: string, toolSe
  * database. The timestamp is the caller's pre-event cutoff; rows at or after
  * it are excluded so replayed/future calls cannot enter a live RuleContext.
  * This is read-only and never creates or migrates trajectory state.
+ *
+ * Review R2 (SPEC-RULECODE-HOST-PROMOTION-001): when `hostKind` is supplied,
+ * the reader partitions the window by PROVEN producer attribution
+ * (`tool_calls.host_kind`, stamped by each host's writer) instead of handing
+ * back every row: `rows` carries only rows stamped with that host,
+ * `otherHostRows` counts rows stamped with a different host (a cross-host
+ * session-id collision), and `unattributedRows` counts legacy rows with no
+ * stamp (written before the column existed — attribution is unprovable, not
+ * assumed). A database whose tool_calls predates the column entirely counts
+ * every row in the unattributed bucket. The caller decides the failure
+ * policy; this reader never guesses an attribution.
  */
+export interface WorkspaceRuleContextRowsResult {
+  rows: readonly RuleHostContextRow[];
+  truncated: boolean;
+  unscopedPriorRows: boolean;
+  /** Present only for attribution-aware reads: rows stamped with ANOTHER host (never zero-checked when hostKind is absent). */
+  otherHostRows?: number;
+  /** Present only for attribution-aware reads: legacy rows with no host stamp. */
+  unattributedRows?: number;
+}
+
 export function readWorkspaceRuleContextRowsBefore(
   workspaceDir: string,
-  input: { sessionId: string; projectDir: string; beforeCreatedAt: string; excludeToolUseId: string; limit: number },
-): { rows: readonly RuleHostContextRow[]; truncated: boolean; unscopedPriorRows: boolean } {
+  input: { sessionId: string; projectDir: string; beforeCreatedAt: string; excludeToolUseId: string; limit: number; hostKind?: string },
+): WorkspaceRuleContextRowsResult {
   const { sessionId, projectDir, beforeCreatedAt, excludeToolUseId, limit } = input;
   if (sessionId.trim().length === 0) throw new Error('history_session_id_invalid');
   if (!path.isAbsolute(projectDir)) throw new Error('history_project_dir_invalid');
@@ -92,9 +113,21 @@ export function readWorkspaceRuleContextRowsBefore(
   const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true, fileMustExist: true });
   try {
     db.pragma('busy_timeout = 100');
+    const attributionAware = input.hostKind !== undefined;
+    // Select host_kind ONLY for attribution-aware reads on schemas that carry
+    // the column. A plain read (or a legacy schema without the column) keeps
+    // the historical column list — never a failing query.
+    const includeHostKind = attributionAware && (() => {
+      const columns: unknown = db.prepare('PRAGMA table_info(tool_calls)').all();
+      return Array.isArray(columns)
+        && columns.some((column) => record(column) && typeof column.name === 'string' && column.name === 'host_kind');
+    })();
     return db.transaction(() => {
-      const rows: unknown[] = db.prepare(`
-        SELECT id, tool_name, outcome, params_json
+      // Attribution-aware read: fetch one extra slot beyond the limit so the
+      // partition counts stay truthful about a truncated window's tail.
+      const selectColumns = includeHostKind ? 'id, tool_name, outcome, params_json, host_kind' : 'id, tool_name, outcome, params_json';
+      const fetched = db.prepare(`
+        SELECT ${selectColumns}
         FROM tool_calls
         WHERE session_id = ? AND project_dir = ? AND created_at < ? AND (tool_use_id IS NULL OR tool_use_id <> ?)
         ORDER BY created_at DESC, id DESC
@@ -105,11 +138,35 @@ export function readWorkspaceRuleContextRowsBefore(
         WHERE session_id = ? AND project_dir IS NULL AND created_at < ?
           AND (tool_use_id IS NULL OR tool_use_id <> ?) LIMIT 1
       `).get(sessionId, beforeCreatedAt, excludeToolUseId);
-      if (!Array.isArray(rows)) throw new Error('history_query_invalid');
+      if (!Array.isArray(fetched)) throw new Error('history_query_invalid');
+      if (!attributionAware) {
+        return {
+          rows: fetched.slice(0, limit).reverse().map(contextRow),
+          truncated: fetched.length > limit,
+          unscopedPriorRows: unscoped !== undefined,
+        };
+      }
+      let otherHostRows = 0;
+      let unattributedRows = 0;
+      const matching: unknown[] = [];
+      for (const row of fetched) {
+        if (!record(row) || !Object.hasOwn(row, 'host_kind') || row.host_kind === null || row.host_kind === undefined) {
+          // No stamp (or no column): unprovable — never guessed into the host.
+          unattributedRows += 1;
+          continue;
+        }
+        if (row.host_kind !== input.hostKind) {
+          otherHostRows += 1;
+          continue;
+        }
+        matching.push(row);
+      }
       return {
-        rows: rows.slice(0, limit).reverse().map(contextRow),
-        truncated: rows.length > limit,
+        rows: matching.slice(0, limit).reverse().map(contextRow),
+        truncated: fetched.length > limit,
         unscopedPriorRows: unscoped !== undefined,
+        otherHostRows,
+        unattributedRows,
       };
     })();
   } finally {

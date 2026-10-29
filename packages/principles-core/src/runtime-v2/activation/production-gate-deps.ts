@@ -71,11 +71,14 @@ function isValidRuleHostResult(value: unknown): value is RuleHostResult {
  * Untrusted input crosses as DATA (a string), never as code or objects.
  */
 function normalizeSource(sourceCode: string): string {
-  const withoutExports = sourceCode
+  return sourceCode
     .replace(/export\s+const\s+meta\s*=/, 'const meta =')
     .replace(/export\s+function\s+evaluate\s*\(/, 'function evaluate(');
+}
 
-  return `${withoutExports}
+// Compile the intentionally executable RuleCode separately from this fixed
+// data bridge. Untrusted source never becomes part of the bridge's code text.
+const RULE_MODULE_BRIDGE = `
 globalThis.__pdRuleModule = {
   meta: typeof meta === 'undefined' ? undefined : meta,
   evaluate: typeof evaluate === 'undefined' ? undefined : function (__pdJsonBridge) {
@@ -90,7 +93,6 @@ globalThis.__pdRuleModule = {
     return evaluate(__pdCallInput, __pdCallHelpers);
   },
 };`;
-}
 
 interface CompiledModuleExports {
   meta?: unknown;
@@ -154,6 +156,8 @@ export function compileHardenedRuleEvaluator(code: string, sourceLabel: string):
   const script = new vm.Script(normalizeSource(code), { filename: sourceLabel });
 
   script.runInContext(context, { timeout: 1000, displayErrors: true });
+  new vm.Script(RULE_MODULE_BRIDGE, { filename: `${sourceLabel}#bridge` })
+    .runInContext(context, { timeout: 1000, displayErrors: true });
 
   // Treat sandbox output as untrusted — use Reflect.get + type guard, not `as`.
   const moduleExportsUnknown = Reflect.get(context, '__pdRuleModule');

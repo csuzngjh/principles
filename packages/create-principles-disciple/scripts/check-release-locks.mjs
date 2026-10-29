@@ -29,7 +29,10 @@ const npmArgs = (args) => process.platform === 'win32' ? ['/d', '/s', '/c', ['np
 
 try {
   execFileSync(process.execPath, [bundleScript, '--prepare-release-locks', '--output-root', stagingRoot], { cwd: root, stdio: 'inherit' });
-  cpSync(join(stagingRoot, 'core'), join(stagingRoot, 'plugin', 'core'), { recursive: true });
+  // PRI-1037 payload fix: no file:./core sibling is provisioned anymore — the
+  // plugin's shipped manifest declares only its native module (better-sqlite3),
+  // so the historical core copy has nothing to satisfy. Keep in sync with
+  // generate-release-locks.mjs.
   for (const component of components) {
     const lockPath = join(lockRoot, component, 'package-lock.json');
     if (!existsSync(lockPath)) throw new Error(`Missing committed release lock: ${lockPath}`);

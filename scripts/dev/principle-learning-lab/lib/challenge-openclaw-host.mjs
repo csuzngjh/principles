@@ -48,6 +48,7 @@
 //     probe authorization's targetHost.kind selects the adapter.
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 export const OPENCLAW_TRAJECTORY_POINTER_SCHEMA = 'openclaw-trajectory-pointer';
@@ -64,6 +65,53 @@ export function resolveAmbientStateRoot(env = process.env) {
   if (explicit) return explicit;
   if (home) return path.join(home, '.openclaw');
   throw new Error('resolveAmbientStateRoot: cannot resolve the ambient OpenClaw state root (no OPENCLAW_STATE_DIR / OPENCLAW_HOME / USERPROFILE / HOME)');
+}
+
+/** S9 (PRI-1037 runtime repair): child-process TEMP/TMP normalization.
+ *
+ *  Windows can hand a process an 8.3 short temp path (C:\Users\ADMINI~1\...).
+ *  OpenClaw's plugin capture then fails with
+ *    FsSafeError: copy path changed during operation
+ *  because the same file is addressed by two different spellings during the
+ *  copy/verify pass. The fix is scoped to the host child we spawn: resolve the
+ *  real (long) directory and hand ONLY that child TEMP/TMP. The parent/user
+ *  environment is never mutated.
+ *
+ *  Fail-closed (rc-3): a temp directory that cannot be resolved, is not a
+ *  directory, or is not writable REFUSES the transport — passing the short
+ *  path through would reproduce the failure on user machines. */
+export function resolveChildTempEnv({ sourceEnv = process.env, platform = process.platform } = {}) {
+  if (platform !== 'win32') return {};
+  const declared = [sourceEnv.TEMP, sourceEnv.TMP].find((value) => typeof value === 'string' && value.trim().length > 0);
+  const candidate = declared ? declared.trim() : os.tmpdir();
+  let resolved;
+  try {
+    // realpathSync.native resolves 8.3 short names to their long form on Windows.
+    resolved = fs.realpathSync.native(candidate);
+  } catch (err) {
+    throw new Error(`openclaw transport: cannot resolve a real temporary directory for the child process (${candidate}): ${err instanceof Error ? err.message : String(err)}. Refusing to spawn with an unusable TEMP.`);
+  }
+  // Keep drive roots intact (C:\ must not become C:).
+  const normalized = /^[A-Za-z]:\\$/.test(resolved) ? resolved : resolved.replace(/[\\/]+$/, '');
+  let stats;
+  try {
+    stats = fs.statSync(normalized);
+  } catch (err) {
+    throw new Error(`openclaw transport: resolved temporary directory is not accessible (${normalized}): ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (!stats.isDirectory()) {
+    throw new Error(`openclaw transport: temporary directory path is not a directory (${normalized}) — the child would receive an unusable TEMP/TMP.`);
+  }
+  let probeDir;
+  try {
+    // accessSync(W_OK) is unreliable for directories on Windows; a real
+    // create/remove proves the child can use the directory.
+    probeDir = fs.mkdtempSync(path.join(normalized, 'pd-child-temp-probe-'));
+  } catch (err) {
+    throw new Error(`openclaw transport: temporary directory is not writable (${normalized}): ${err instanceof Error ? err.message : String(err)}`);
+  }
+  fs.rmSync(probeDir, { recursive: true, force: true });
+  return { TEMP: normalized, TMP: normalized };
 }
 
 export const OPENCLAW_PROBE_AGENTS_HEADER = '<!-- PRI-1037 isolation-probe system instructions (loaded by the OpenClaw runtime as workspace instruction context; NOT a provider-level system role message) -->\n\n';
@@ -122,6 +170,9 @@ export function createOpenClawHostTransport({
   if (!Number.isFinite(timeoutMsPerCall) || timeoutMsPerCall <= 0) {
     throw new Error('createOpenClawHostTransport: timeoutMsPerCall must be a positive finite number');
   }
+  // S9: resolve once, before any process exists — a temp dir the host child
+  // cannot use is a refusal, not a round-level failure.
+  const childTempEnv = resolveChildTempEnv({ sourceEnv: env });
   const cliVersion = probeOpenclawVersion(openclawBin, openclawPrefixArgs, versionProbe);
   // S7.1 §3 — ambient state root contract: the sessions evidence dir is
   // derived from the DECLARED openclawHome, and the ACTUAL state root (from
@@ -192,7 +243,9 @@ export function createOpenClawHostTransport({
     ];
     const t0 = now();
     const stdout = await new Promise((resolve, reject) => {
-      const child = spawnProcess(openclawBin, [...openclawPrefixArgs, ...args], { cwd: roundDir, stdio: ['pipe', 'pipe', 'pipe'] });
+      // S9: the child alone gets the normalized long-form TEMP/TMP; everything
+      // else stays exactly the inherited environment.
+      const child = spawnProcess(openclawBin, [...openclawPrefixArgs, ...args], { cwd: roundDir, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, ...childTempEnv } });
       let out = '';
       let err = '';
       const timer = setTimeout(() => {
@@ -204,9 +257,36 @@ export function createOpenClawHostTransport({
       child.on('error', (e) => { clearTimeout(timer); reject(e); });
       child.on('close', (code) => {
         clearTimeout(timer);
-        if (code !== 0 && out.trim().length === 0) {
-          reject(new Error(`openclaw exec exited ${code}: ${err.slice(0, 400)}`));
-          return;
+        // Exit-code contract (S9.1, task E): OpenClaw stamps POST-RUN cleanup
+        // failures with a dedicated error kind ("cleanup") and OVERWRITES an
+        // otherwise-successful envelope (ok flipped false, exit 1) while the
+        // round data (final/payloads/usage/model/provider/sessionId) stays
+        // intact — observed on Windows where the exec's own agent owner.sqlite
+        // stays locked until process exit. A non-zero exit therefore refuses
+        // ONLY when no complete successful-round envelope is present; a
+        // cleanup-kind envelope with full round data resolves and carries the
+        // anomaly in the evidence (rc-9, never silent). Every other non-zero
+        // exit (model failure, no output, timeout kill) still rejects.
+        if (code !== 0) {
+          const envelopeHint = out.trim().split('\n').filter((l) => l.trim().startsWith('{')).pop();
+          let cleanupRound = false;
+          if (envelopeHint) {
+            try {
+              const probe = JSON.parse(envelopeHint);
+              cleanupRound = Boolean(probe) && probe.error && probe.error.kind === 'cleanup'
+                && typeof probe.sessionId === 'string' && probe.sessionId.length > 0
+                && typeof probe.model === 'string' && probe.model.length > 0
+                && typeof probe.final === 'string' && probe.final.length > 0;
+            } catch {
+              cleanupRound = false; // not JSON — genuine garbage output
+            }
+          }
+          if (!cleanupRound) {
+            const hostDiagnostic = (err.trim().length > 0 ? err.trim() : envelopeHint ?? 'no host diagnostic').slice(0, 400);
+            reject(new Error(`openclaw exec exited ${code}: ${hostDiagnostic}`));
+            return;
+          }
+          // fall through: the cleanup-failed round's envelope is the evidence.
         }
         resolve(out);
       });
@@ -224,7 +304,13 @@ export function createOpenClawHostTransport({
     if (!envelope || typeof envelope.sessionId !== 'string' || envelope.sessionId.length === 0) {
       throw new Error(`openclaw exec envelope carries no sessionId (round ${rounds}, task ${taskId}) — session independence unprovable, refusing`);
     }
-    if (envelope.status === 'timeout' || envelope.ok !== true) {
+    // S9.1 task E: a cleanup-kind envelope reached here only through the
+    // exit-code contract above (round data complete). The envelope's ok=false
+    // reflects POST-RUN cleanup only; the round itself is classified below by
+    // its model/provider identity and final text. Any non-cleanup error still
+    // refuses here.
+    const cleanupKind = envelope.error && envelope.error.kind === 'cleanup';
+    if (envelope.status === 'timeout' || (envelope.ok !== true && !cleanupKind)) {
       throw new Error(`openclaw exec failed (status=${String(envelope.status)}, error=${String(envelope.error && envelope.error.message).slice(0, 200)})`);
     }
     // host-reported identity → snapshot (S5 P1-2: BOTH model and provider must
@@ -249,7 +335,7 @@ export function createOpenClawHostTransport({
     if (roundIdentityStatus !== 'VERIFIED') {
       throw new Error(`openclaw exec round ${rounds} identity not VERIFIED (status=${roundIdentityStatus}, envelope model=${JSON.stringify(envelope.model ?? null)}, provider=${JSON.stringify(envelope.provider ?? null)}, expected provider=${JSON.stringify(expectedProvider)}) — refusing (S5 P1-2: provider mismatch is a hard refusal, never normalized)`);
     }
-    sessionRecords.push({ taskId, sessionId: envelope.sessionId, rounds: 1, elapsedMs, model: envelope.model ?? null, provider: envelope.provider ?? null, roundDir, sessionsDir, stateDir: null /* ambient state root (S7 §四) */, systemPromptChannel: OPENCLAW_SYSTEM_PROMPT_CHANNEL });
+    sessionRecords.push({ taskId, sessionId: envelope.sessionId, rounds: 1, elapsedMs, model: envelope.model ?? null, provider: envelope.provider ?? null, roundDir, sessionsDir, stateDir: null /* ambient state root (S7 §四) */, systemPromptChannel: OPENCLAW_SYSTEM_PROMPT_CHANNEL, hostCleanupAnomaly: envelope.ok !== true && envelope.error && envelope.error.kind === 'cleanup' ? String(envelope.error.message).slice(0, 200) : null });
 
     const payloadText = typeof envelope.final === 'string' && envelope.final.length > 0
       ? envelope.final
@@ -267,11 +353,12 @@ export function createOpenClawHostTransport({
       cliVersion,
       hostKind: 'openclaw',
       agent,
+      childTempDir: childTempEnv.TEMP ?? null,
       rounds,
       systemPromptChannel: OPENCLAW_SYSTEM_PROMPT_CHANNEL,
       roundsRoot,
       sessions: sessionRecords.map((s) => s.sessionId),
-      sessionDetails: sessionRecords.map((s) => ({ sessionId: s.sessionId, stateDir: s.stateDir, sessionsDir: s.sessionsDir })),
+      sessionDetails: sessionRecords.map((s) => ({ sessionId: s.sessionId, stateDir: s.stateDir, sessionsDir: s.sessionsDir, hostCleanupAnomaly: s.hostCleanupAnomaly ?? null })),
     };
   }
 
