@@ -233,7 +233,12 @@ describe('Real packaged install smoke test', () => {
     expect(fs.existsSync(path.join(coreDir, 'package.json'))).toBe(true);
 
     const pluginPkgJson = JSON.parse(fs.readFileSync(path.join(tempHomeDir, 'node_modules', 'create-principles-disciple', 'plugin', 'package.json'), 'utf-8'));
-    expect(pluginPkgJson.dependencies?.['@principles/core']).toBe('file:./core');
+    // PRI-1037 payload fix: the shipped plugin declares exactly the modules its
+    // self-contained bundle still resolves at runtime (the native sqlite
+    // module). Everything else is inlined at build time, and the historical
+    // file:./core contract is gone.
+    expect(pluginPkgJson.dependencies?.['@principles/core']).toBeUndefined();
+    expect(pluginPkgJson.dependencies?.['better-sqlite3']).toBeDefined();
     expect(pluginPkgJson.dependencies?.['@principles/host-runtime']).toBeUndefined();
     expect(pluginPkgJson.devDependencies?.['@principles/host-runtime']).toBeUndefined();
   }, 240_000);
@@ -324,46 +329,38 @@ describe('Real packaged install smoke test', () => {
     expect(npmWasInvoked).toBe(false);
   }, 600_000);
 
-  it('PRI-912: installed plugin core copies are canonical junctions into the runtime core', () => {
+  it('PRI-1037: installed plugin payload is lean — better-sqlite3 only, no core copy or link', () => {
     // Runs right after the real installer succeeded above, so tempHomeDir is
-    // the production-path AFTER state: both deployed plugins' materialized
-    // @principles/core copies (what the release asset ships, ~119MB each on a
-    // real install) must have been converted to junctions/symlinks resolving
-    // to <home>/.pd/runtime/core, and a bare import from each plugin must
-    // resolve through the canonical tree.
-    const runtimeCore = path.join(tempHomeDir, '.pd', 'runtime', 'core');
-    expect(fs.existsSync(path.join(runtimeCore, 'package.json'))).toBe(true);
-    const runtimeCoreReal = fs.realpathSync(runtimeCore);
-
+    // the production-path AFTER state. dist/bundle.js imports core code inline
+    // and statically imports only the native sqlite module, so the historical
+    // @principles/core materialized copy, its junction, and the `core`
+    // file-dependency link must all be gone from BOTH deployed plugins.
     const pluginDirs = [
       path.join(tempHomeDir, '.pd', 'runtime', 'plugin'),
       path.join(tempHomeDir, '.openclaw', 'extensions', 'principles-disciple'),
     ];
-    let physicalCopyBytes = 0;
-    for (const pluginDir of pluginDirs) {
-      const slot = path.join(pluginDir, 'node_modules', '@principles', 'core');
-      expect(fs.existsSync(slot), `core slot missing at ${slot}`).toBe(true);
-      expect(fs.lstatSync(slot).isSymbolicLink(), `core slot is still a materialized copy at ${slot}`).toBe(true);
-      expect(fs.realpathSync(slot)).toBe(runtimeCoreReal);
-      const resolved = createRequire(path.join(pluginDir, 'probe.cjs')).resolve('@principles/core');
-      expect(resolved.startsWith(runtimeCoreReal), `bare import resolved outside the canonical core: ${resolved}`).toBe(true);
-    }
-
-    // Installed-footprint evidence: the canonical tree is counted once; each
-    // converted slot adds only link metadata (0 physical bytes).
-    const measure = (dir: string): number => {
+    const countFiles = (dir: string): number => {
       let total = 0;
       for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-        const child = path.join(dir, entry.name);
         if (entry.isSymbolicLink()) continue;
-        if (entry.isDirectory()) total += measure(child);
-        else if (entry.isFile()) total += fs.statSync(child).size;
+        const child = path.join(dir, entry.name);
+        if (entry.isDirectory()) total += countFiles(child);
+        else if (entry.isFile()) total += 1;
       }
       return total;
     };
-    physicalCopyBytes = measure(runtimeCore);
-    console.info(`[pri-912] canonical core ${physicalCopyBytes} bytes counted once; ${pluginDirs.length} plugin slots converted to links.`);
-    expect(physicalCopyBytes).toBeGreaterThan(0);
+    for (const pluginDir of pluginDirs) {
+      expect(fs.existsSync(path.join(pluginDir, 'dist', 'bundle.js'))).toBe(true);
+      expect(fs.existsSync(path.join(pluginDir, 'core'))).toBe(false);
+      expect(fs.existsSync(path.join(pluginDir, 'node_modules', '@principles'))).toBe(false);
+      expect(fs.existsSync(path.join(pluginDir, 'node_modules', 'better-sqlite3', 'package.json'))).toBe(true);
+      const moduleEntries = fs.readdirSync(path.join(pluginDir, 'node_modules'))
+        .filter((name) => !name.startsWith('.'));
+      expect(moduleEntries.sort()).toEqual(['better-sqlite3', 'node-addon-api']);
+      // Payload ceiling: the pre-fix install shipped 16,425 files (16,190 of
+      // them the pi-ai graph) and OpenClaw's per-exec capture timed out at 120s.
+      expect(countFiles(pluginDir)).toBeLessThan(1000);
+    }
   }, 120_000);
 
   it('installer demo verification does not pollute the user workspace', () => {

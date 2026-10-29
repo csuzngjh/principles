@@ -460,6 +460,34 @@ function copyExecutorDependencyClosure(sourcePackageDir: string, stagingDir: str
   }
 }
 
+/**
+ * Resolve which installer bytes the bootstrap executor should be deployed
+ * from. The deployed executor is what RUNS an update, so delivering it from
+ * "whichever installer is executing" pins that old code forever: the executor
+ * re-delivers itself, its same-version fast path matches, and every later
+ * update keeps running retired behavior. That is how the PRI-1021 legacy
+ * `~/.openclaw/plugins/installs.json` writer came back on 2026-10-28 — a
+ * 1.145.1 executor deployed 2026-10-15 applied release 2.4.0 using its own
+ * pre-PRI-1021 host installer while the release shipped the fixed one.
+ *
+ * The payload's `release-manager` component is the installer this transaction
+ * deploys, so it is the authority for the NEXT executor. Fall back to the
+ * executing package only when the payload carries no installer component
+ * (npm-distributed legacy shape).
+ */
+export function resolveBootstrapExecutorSourceDir(payloadRoot: string): string {
+  const shipped = path.join(payloadRoot, 'release-manager');
+  try {
+    const manifest = JSON.parse(readFileSync(path.join(shipped, 'package.json'), 'utf8')) as { name?: unknown };
+    if (manifest.name === 'create-principles-disciple' && existsSync(path.join(shipped, 'dist', 'update', 'bootstrap-executor.js'))) {
+      return shipped;
+    }
+  } catch {
+    // Absent or unreadable component — the executing package is the only source.
+  }
+  return path.resolve(fileURLToPath(import.meta.url), '../..');
+}
+
 export async function deliverBootstrapExecutor(input: {
   pdHome: string;
   /** The installer package's own root (contains dist/ and package.json). */
@@ -1669,17 +1697,24 @@ export async function installPluginToStaging(pluginDir: string, language: SkillL
   const builtPluginDir = path.join(pluginDir, 'plugin');
   for (const targetDir of pluginInstallDirs()) {
     await fse.ensureDir(targetDir);
+    // PRI-1037 payload fix: npm-era payloads carried a ~16k-file node_modules
+    // (the whole pi-ai/openai/anthropic tree, dragged in through the plugin's
+    // historical file:./core dependency) plus a `core` junction, in BOTH plugin
+    // install dirs. fse.copy(overwrite) never deletes extraneous entries, so
+    // that payload survived every upgrade — and OpenClaw's workspace-plugin
+    // capture copies plugin files package-by-package into each `agent exec`
+    // state under a hard 120s publication budget, timing out every exec. The
+    // shipped plugin now declares better-sqlite3 as its only runtime dependency
+    // (dist/bundle.js imports it statically; everything else is inlined at
+    // build time), so prune the stale trees before the copy and let the
+    // installed payload converge to the lean shape.
+    // Unconditional removes: fse.remove is a no-op on a missing path, and an
+    // existsSync guard would skip dangling `core` links (existsSync follows the
+    // link, so it reports false once the link target is gone) and leave the
+    // retired surface behind.
+    await fse.remove(path.join(targetDir, 'node_modules'));
+    await fse.remove(path.join(targetDir, 'core'));
     await fse.copy(builtPluginDir, targetDir, { overwrite: true });
-
-    // The published plugin declares its bundled core as file:./core. Keep that
-    // package-local contract while storing the actual core once in the shared
-    // host-neutral runtime directory.
-    const pluginCoreLink = path.join(targetDir, 'core');
-    if (!existsSync(pluginCoreLink)) {
-      const coreDir = path.join(getPdRuntimeDir(), 'core');
-      if (isWindows()) symlinkSync(coreDir, pluginCoreLink, 'junction');
-      else symlinkSync(path.relative(targetDir, coreDir), pluginCoreLink, 'dir');
-    }
 
     // OpenClaw publishes skills by name with no locale mechanism. Applying the
     // same selected language to both copies also keeps the canonical package
@@ -4182,8 +4217,10 @@ export async function install(
     try {
       await deliverBootstrapExecutor({
         pdHome: getPdDir(),
-        // This compiled installer's own package root (dist/installer.js → ..).
-        sourcePackageDir: path.resolve(fileURLToPath(import.meta.url), '../..'),
+        // The installer shipped in THIS payload — never the executing package:
+        // during an update the executor is the executing package, and sourcing
+        // from it would re-pin the executor to its own stale code forever.
+        sourcePackageDir: resolveBootstrapExecutorSourceDir(pluginDir),
       });
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
