@@ -236,7 +236,9 @@ function ingestTranscriptDelta({ fallbackRootSessionId, canonicalPath, identity,
   // and the next Stop retries instead of silently losing the verified facts.
   const verifiedOutcomes = collectVerifiedToolOutcomes(decoded.observations);
   if (verifiedOutcomes.length > 0) {
-    const verified = recordVerifiedToolOutcomes({ workspaceDir, sessionId: rootSessionId, outcomes: verifiedOutcomes });
+    // SPEC-RULECODE-HOST-PROMOTION-001 R2: stamp the producing host on the
+    // inserted rows so attribution-aware readers can prove provenance.
+    const verified = recordVerifiedToolOutcomes({ workspaceDir, sessionId: rootSessionId, outcomes: verifiedOutcomes, hostKind: 'codex' });
     const failed = verified.find((result) => result.status === 'unavailable');
     if (failed !== undefined) {
       const reason = failed.reason === 'trajectory_db_not_found' ? 'verified_outcome_db_unavailable' : `verified_outcome_write_failed:${failed.reason.split(':', 2)[1] ?? ''}`;

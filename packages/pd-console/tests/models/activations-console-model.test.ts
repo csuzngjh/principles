@@ -322,7 +322,7 @@ describe('ActivationsConsoleModel — governance action event coverage', () => {
     db.prepare("INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES ('task-promote', 'diagnosis', 'pending', ?, ?)").run(now, now);
     db.prepare(`INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
       VALUES ('artifact-promote', 'rule', 'task-promote', 'rule-promote', '[]', 'validated', ?, ?, ?)`)
-      .run(JSON.stringify({ implementationCode: 'export function evaluate(){ return { decision: "allow", matched: false, reason: "neutral" }; }' }), now, now);
+      .run(JSON.stringify({ implementationCode: 'function evaluate(input) { const risky = input.action.toolName === "edit_file" && input.action.paramsSummary.path === "/etc/passwd"; return { decision: risky ? "block" : "allow", matched: risky, reason: risky ? "risk path" : "neutral" }; }' }), now, now);
     db.prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at)
       VALUES ('act-promote', 'idem-promote', 'artifact-promote', 'code_tool_hook', 'code_tool_hook_shadow_activate', 'impl://rule-promote', ?, NULL)`).run(now);
     db.prepare("INSERT INTO activation_control_states (activation_id, enforcement, version, updated_at) VALUES ('act-promote', 'eligible', 1, ?)").run(now);
@@ -366,7 +366,7 @@ describe('ActivationsConsoleModel — governance action event coverage', () => {
     db.prepare("INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES ('task-emergency', 'diagnosis', 'pending', ?, ?)").run(now, now);
     db.prepare(`INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
       VALUES ('artifact-emergency', 'rule', 'task-emergency', 'rule-emergency', '[]', 'validated', ?, ?, ?)`)
-      .run(JSON.stringify({ implementationCode: 'export function evaluate(){ return { decision: "allow", matched: false, reason: "neutral" }; }' }), now, now);
+      .run(JSON.stringify({ implementationCode: 'function evaluate(input) { const risky = input.action.toolName === "edit_file" && input.action.paramsSummary.path === "/etc/passwd"; return { decision: risky ? "block" : "allow", matched: risky, reason: risky ? "risk path" : "neutral" }; }' }), now, now);
     db.prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at)
       VALUES ('act-emergency', 'idem-emergency', 'artifact-emergency', 'code_tool_hook', 'code_tool_hook_live_activate', 'impl://rule-emergency', ?, NULL)`).run(now);
     db.prepare("INSERT INTO activation_control_states (activation_id, enforcement, version, updated_at) VALUES ('act-emergency', 'eligible', 1, ?)").run(now);
@@ -423,7 +423,7 @@ describe('ActivationsConsoleModel — Owner review', () => {
     db.prepare("INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES ('task-review', 'diagnosis', 'pending', ?, ?)").run(now, now);
     db.prepare(`INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
       VALUES ('artifact-review', 'rule', 'task-review', 'rule-review', '["parent-1"]', 'validated', ?, ?, ?)`)
-      .run(JSON.stringify({ implementationCode: 'export function evaluate(){ return { decision: "allow", matched: false, reason: "neutral" }; }' }), now, now);
+      .run(JSON.stringify({ implementationCode: 'function evaluate(input) { const risky = input.action.toolName === "edit_file" && input.action.paramsSummary.path === "/etc/passwd"; return { decision: risky ? "block" : "allow", matched: risky, reason: risky ? "risk path" : "neutral" }; }' }), now, now);
     db.prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at)
       VALUES ('act-review', 'idem-review', 'artifact-review', 'code_tool_hook', 'code_tool_hook_shadow_activate', 'impl://rule-review', ?, NULL)`).run(now);
     db.prepare(`INSERT INTO activation_control_states (activation_id, enforcement, version, updated_at) VALUES ('act-review', 'eligible', 1, ?)`).run(now);
@@ -452,7 +452,7 @@ describe('ActivationsConsoleModel — Owner review', () => {
     db.prepare("INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES ('task-codex-813', 'diagnosis', 'pending', ?, ?)").run(now, now);
     db.prepare(`INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
       VALUES ('artifact-codex-813', 'rule', 'task-codex-813', 'rule-codex-813', '["parent-1"]', 'validated', ?, ?, ?)`)
-      .run(JSON.stringify({ implementationCode: 'export function evaluate(){ return { decision: "allow", matched: false, reason: "neutral" }; }' }), now, now);
+      .run(JSON.stringify({ implementationCode: 'function evaluate(input) { const risky = input.action.toolName === "edit_file" && input.action.paramsSummary.path === "/etc/passwd"; return { decision: risky ? "block" : "allow", matched: risky, reason: risky ? "risk path" : "neutral" }; }' }), now, now);
     db.prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at)
       VALUES ('act-codex-813', 'idem-codex-813', 'artifact-codex-813', 'code_tool_hook', 'code_tool_hook_shadow_activate', 'impl://rule-codex-813', ?, NULL)`).run(now);
     db.prepare(`INSERT INTO activation_control_states (activation_id, enforcement, version, updated_at) VALUES ('act-codex-813', 'eligible', 1, ?)`).run(now);
@@ -477,7 +477,7 @@ describe('ActivationsConsoleModel — Owner review', () => {
     // the OpenClaw legacy contract for this Codex workspace must fail
     // runtime_compatibility (wrong-host capability authority).
     const wrongHostChecks = await collectOpenClawPromotionChecks(
-      { artifactId: 'artifact-codex-813', artifactKind: 'rule', sourceTaskId: 'task-codex-813', sourcePrincipleId: null, sourceRuleId: 'rule-codex-813', lineageArtifactIds: ['parent-1'], validationStatus: 'validated', contentJson: JSON.stringify({ implementationCode: 'export function evaluate(){ return { decision: "allow", matched: false, reason: "neutral" }; }', affectedTools: ['write'] }), createdAt: now, updatedAt: now },
+      { artifactId: 'artifact-codex-813', artifactKind: 'rule', sourceTaskId: 'task-codex-813', sourcePrincipleId: null, sourceRuleId: 'rule-codex-813', lineageArtifactIds: ['parent-1'], validationStatus: 'validated', contentJson: JSON.stringify({ implementationCode: 'function evaluate(input) { const risky = input.action.toolName === "edit_file" && input.action.paramsSummary.path === "/etc/passwd"; return { decision: risky ? "block" : "allow", matched: risky, reason: risky ? "risk path" : "neutral" }; }', affectedTools: ['write'] }), createdAt: now, updatedAt: now },
       {
         ownerIdentityConfigured: true,
         safetyControlsEnabled: true,
@@ -498,9 +498,27 @@ describe('ActivationsConsoleModel — Owner review', () => {
     const db = conn.getDb();
     const now = '2026-09-16T07:00:00.000Z';
     db.prepare("INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES ('task-openclaw-813', 'diagnosis', 'pending', ?, ?)").run(now, now);
+    // SPEC R1: emergency_controls now requires the recovery probes to replay
+    // under composition — the fixture artifact carries a real golden trace and
+    // a bounded affectedTools scope like production artifacts.
     db.prepare(`INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
       VALUES ('artifact-openclaw-813', 'rule', 'task-openclaw-813', 'rule-openclaw-813', '["parent-1"]', 'validated', ?, ?, ?)`)
-      .run(JSON.stringify({ implementationCode: 'export function evaluate(){ return { decision: "allow", matched: false, reason: "neutral" }; }' }), now, now);
+      .run(JSON.stringify({
+        // Real OpenClaw vocabulary: `exec` is the hook-face shell tool
+        // (PRI-741); the rule, trace, and scope all use dispatched names so
+        // the adapter-layer dispatchability check passes and the recovery
+        // probes can actually replay (SPEC R1).
+        implementationCode: 'function evaluate(input) { const risky = input.action.toolName === "exec" && String(input.action.paramsSummary.command ?? "").includes("/etc/passwd"); return { decision: risky ? "block" : "allow", matched: risky, reason: risky ? "risk path" : "neutral" }; }',
+        goldenTrace: {
+          traceId: 'trace-openclaw-813', sourcePainId: 'pain-openclaw-813',
+          cases: [
+            { caseId: 'negative', kind: 'negative', toolName: 'exec', params: { command: 'echo x > /etc/passwd' }, expectedDecision: 'block' },
+            { caseId: 'positive', kind: 'positive', toolName: 'exec', params: { command: 'echo ok' }, expectedDecision: 'allow' },
+          ],
+          createdAt: now, version: 1,
+        },
+        affectedTools: ['exec'], ruleHostGateDecision: 'accepted_shadow',
+      }), now, now);
     db.prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at)
       VALUES ('act-openclaw-813', 'idem-openclaw-813', 'artifact-openclaw-813', 'code_tool_hook', 'code_tool_hook_shadow_activate', 'impl://rule-openclaw-813', ?, NULL)`).run(now);
     db.prepare(`INSERT INTO activation_control_states (activation_id, enforcement, version, updated_at) VALUES ('act-openclaw-813', 'eligible', 1, ?)`).run(now);
@@ -508,7 +526,7 @@ describe('ActivationsConsoleModel — Owner review', () => {
     expect(saveHostToolDeclaration(workspaceDir, {
       version: 1,
       hostKind: 'openclaw',
-      mappings: [{ rawToolName: 'shell', canonicalKind: 'execute' }],
+      mappings: [{ rawToolName: 'exec', canonicalKind: 'execute' }],
       declaredAt: now,
     }).ok).toBe(true);
 

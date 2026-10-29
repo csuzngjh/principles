@@ -1,6 +1,6 @@
 {
   "barrel": "src/runtime-v2/index.ts",
-  "count": 1958,
+  "count": 1963,
   "names": [
     "ADMISSION_CONFIDENCE_THRESHOLD",
     "ADMISSION_POLICY_VERSION",
@@ -1061,6 +1061,7 @@
     "PruningRiskLevel",
     "QueueNoReadyTasksReason",
     "RECEIPT_RETENTION_POLICY_DAYS",
+    "RECOVERY_CONTROL_SURFACES",
     "REDACTED_PATH",
     "REDACTED_VALUE",
     "REPEATED_FAILURE_THRESHOLD",
@@ -1090,6 +1091,9 @@
     "RecoveryActionKind",
     "RecoveryActionRecord",
     "RecoveryActionResult",
+    "RecoveryControlCapability",
+    "RecoveryControlSurface",
+    "RecoveryControlValidation",
     "RecoveryResult",
     "RecoverySweep",
     "RecoverySweepService",
@@ -1947,6 +1951,7 @@
     "validateProposedParams",
     "validateProposedPathBounds",
     "validateRecommendation",
+    "validateRecoveryControlSurfaces",
     "validateReuseEvaluationOutput",
     "validateRuleBehaviorFacts",
     "validateRuleContextV2",

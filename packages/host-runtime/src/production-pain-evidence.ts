@@ -401,6 +401,21 @@ function ensureToolCallsProjectDirColumn(db: Database.Database): void {
   }
 }
 
+/**
+ * SPEC-RULECODE-HOST-PROMOTION-001 R2: additive migration for producer host
+ * attribution. Legacy rows stay NULL — the WorkBuddy rule-context reader
+ * treats a NULL stamp as unprovable (never guessed), so no backfill exists.
+ */
+function ensureToolCallsHostKindColumn(db: Database.Database): void {
+  const columns: unknown[] = db.prepare('PRAGMA table_info(tool_calls)').all();
+  if (columns.some((row) => pragmaField(row, 'name') === 'host_kind')) return;
+  try {
+    db.exec('ALTER TABLE tool_calls ADD COLUMN host_kind TEXT');
+  } catch {
+    // Same concurrent-writer contract as the sibling migrations above.
+  }
+}
+
 /** One host-verified tool outcome (SPEC-CODEX-PAIN-CLOSURE-001 CR-01). */
 export interface VerifiedToolOutcomeInput {
   /** Host tool-call id — the join key written by the live PostToolUse path. */
@@ -431,6 +446,8 @@ export function recordVerifiedToolOutcomes(args: {
   sessionId: string;
   outcomes: readonly VerifiedToolOutcomeInput[];
   painDatabaseFactory?: PainDatabaseFactory;
+  /** SPEC R2: producer host attribution stamped onto inserted rows (upgraded rows keep their original stamp). */
+  hostKind?: string;
 }): VerifiedToolOutcomeStatus[] {
   const results: VerifiedToolOutcomeStatus[] = [];
   if (args.outcomes.length === 0) return results;
@@ -449,9 +466,10 @@ export function recordVerifiedToolOutcomes(args: {
     const hasToolCalls = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'tool_calls'").get() !== undefined);
     if (!hasToolCalls) applyTrajectorySchemaBase(db);
     ensureToolCallsToolUseIdColumn(db);
+    ensureToolCallsHostKindColumn(db);
     const findByToolUseId = db.prepare('SELECT id, outcome FROM tool_calls WHERE session_id = ? AND tool_use_id = ? ORDER BY id LIMIT 1');
     const upgradeUnknown = db.prepare("UPDATE tool_calls SET outcome = ?, exit_code = ?, result_preview = COALESCE(?, result_preview) WHERE id = ? AND outcome = 'unknown'");
-    const insertVerified = db.prepare('INSERT INTO tool_calls (session_id, tool_name, outcome, duration_ms, exit_code, error_type, error_message, gfi_before, gfi_after, params_json, result_preview, created_at, tool_use_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    const insertVerified = db.prepare('INSERT INTO tool_calls (session_id, tool_name, outcome, duration_ms, exit_code, error_type, error_message, gfi_before, gfi_after, params_json, result_preview, created_at, tool_use_id, host_kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
     const upsertSession = db.prepare('INSERT INTO sessions (session_id, started_at, updated_at) VALUES (?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET updated_at = excluded.updated_at');
     const createdAt = new Date().toISOString();
     db.transaction(() => {
@@ -473,7 +491,7 @@ export function recordVerifiedToolOutcomes(args: {
         }
         upsertSession.run(args.sessionId, createdAt, createdAt);
         const sanitizedParams = sanitizeToolParams(input.params ?? {}, args.workspaceDir);
-        const info = insertVerified.run(args.sessionId, input.toolName, finalOutcome, null, input.exitCode, null, null, null, null, stable(sanitizedParams), boundedPreview, createdAt, input.toolUseId);
+        const info = insertVerified.run(args.sessionId, input.toolName, finalOutcome, null, input.exitCode, null, null, null, null, stable(sanitizedParams), boundedPreview, createdAt, input.toolUseId, args.hostKind ?? null);
         results.push({ status: 'inserted', id: Number(info.lastInsertRowid) });
       }
     })();
@@ -527,6 +545,7 @@ export function createProductionPainEvidenceHandler(options: { painEnrichmentPro
       db.pragma('busy_timeout = 5000');
       ensureToolCallsToolUseIdColumn(db);
       ensureToolCallsProjectDirColumn(db);
+      ensureToolCallsHostKindColumn(db);
       if (!hasCanonicalSchema(db)) {
         db.close();
         db = undefined;
@@ -628,8 +647,8 @@ export function createProductionPainEvidenceHandler(options: { painEnrichmentPro
           return;
         }
         db.prepare(`INSERT INTO sessions (session_id, started_at, updated_at) VALUES (?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET updated_at = excluded.updated_at`).run(event.context.sessionId, createdAt, createdAt);
-        db.prepare(`INSERT INTO tool_calls (session_id, tool_name, outcome, duration_ms, exit_code, error_type, error_message, gfi_before, gfi_after, params_json, result_preview, created_at, tool_use_id, project_dir) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-          .run(event.context.sessionId, toolName, outcome.outcome, outcome.durationMs ?? null, outcome.exitCode, outcome.error ? outcome.error.split(/[\s:]/, 1)[0] : null, outcome.error ?? null, null, null, paramsJson, resultPreview, createdAt, event.context.toolCallId ?? null, path.resolve(options.projectDir ?? event.context.workspaceDir));
+        db.prepare(`INSERT INTO tool_calls (session_id, tool_name, outcome, duration_ms, exit_code, error_type, error_message, gfi_before, gfi_after, params_json, result_preview, created_at, tool_use_id, project_dir, host_kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(event.context.sessionId, toolName, outcome.outcome, outcome.durationMs ?? null, outcome.exitCode, outcome.error ? outcome.error.split(/[\s:]/, 1)[0] : null, outcome.error ?? null, null, null, paramsJson, resultPreview, createdAt, event.context.toolCallId ?? null, path.resolve(options.projectDir ?? event.context.workspaceDir), options.hostKind ?? null);
         if (admitted) {
           // Raw observation only (Pain Diagnosis Persistence SPEC §8): the
           // pain row must record WHAT happened, not WHY. Attribution

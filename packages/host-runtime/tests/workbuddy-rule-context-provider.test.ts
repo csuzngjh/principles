@@ -56,13 +56,14 @@ function provider(overrides: Partial<Parameters<typeof createWorkbuddyRuleContex
   });
 }
 
-function seedTrajectory(): void {
+/** Seed trajectory rows attributed to `hostKind` (null = legacy unattributed row). */
+function seedTrajectory(attribution: 'workbuddy' | 'codex' | null = 'workbuddy'): void {
   mkdirSync(path.join(ws, '.state'), { recursive: true });
   const db = new Database(path.join(ws, '.state', 'trajectory.db'));
-  db.exec(`CREATE TABLE tool_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, tool_name TEXT NOT NULL, outcome TEXT NOT NULL, duration_ms INTEGER, exit_code INTEGER, error_type TEXT, error_message TEXT, gfi_before REAL, gfi_after REAL, params_json TEXT NOT NULL, result_preview TEXT, created_at TEXT NOT NULL, tool_use_id TEXT, project_dir TEXT)`);
-  const insert = db.prepare(`INSERT INTO tool_calls (session_id, tool_name, outcome, params_json, created_at, tool_use_id, project_dir) VALUES (?, ?, ?, ?, ?, ?, ?)`);
-  insert.run('wb-session-1', 'Read', 'success', JSON.stringify({ file_path: path.join(project, 'a.ts') }), '2026-10-28T11:00:00.000Z', 'call-1', project);
-  insert.run('wb-session-1', 'Write', 'success', JSON.stringify({ file_path: path.join(project, 'b.ts') }), '2026-10-28T11:30:00.000Z', 'call-2', project);
+  db.exec(`CREATE TABLE tool_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, tool_name TEXT NOT NULL, outcome TEXT NOT NULL, duration_ms INTEGER, exit_code INTEGER, error_type TEXT, error_message TEXT, gfi_before REAL, gfi_after REAL, params_json TEXT NOT NULL, result_preview TEXT, created_at TEXT NOT NULL, tool_use_id TEXT, project_dir TEXT, host_kind TEXT)`);
+  const insert = db.prepare(`INSERT INTO tool_calls (session_id, tool_name, outcome, params_json, created_at, tool_use_id, project_dir, host_kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
+  insert.run('wb-session-1', 'Read', 'success', JSON.stringify({ file_path: path.join(project, 'a.ts') }), '2026-10-28T11:00:00.000Z', 'call-1', project, attribution);
+  insert.run('wb-session-1', 'Write', 'success', JSON.stringify({ file_path: path.join(project, 'b.ts') }), '2026-10-28T11:30:00.000Z', 'call-2', project, attribution);
   db.close();
 }
 
@@ -103,7 +104,7 @@ describe('createWorkbuddyRuleContextProvider (SPEC C/H08)', () => {
   });
 
   it('resolves an available context from WorkBuddy\'s own trajectory rows — with facts computed and NO designGate fact', () => {
-    seedTrajectory();
+    seedTrajectory('workbuddy');
     const context = provider()(request());
     expect(context).toMatchObject({
       version: 2,
@@ -115,11 +116,44 @@ describe('createWorkbuddyRuleContextProvider (SPEC C/H08)', () => {
     expect((context as { facts: Record<string, unknown> }).facts.designGate).toBeUndefined();
   });
 
-  it('excludes the current tool call and rows at/after the cutoff from the history window', () => {
-    seedTrajectory();
+  // ── Review finding 2 (P1): history rows must be PROVEN WorkBuddy's ──
+
+  it('R2-red→green: a Codex-attributed session history must NEVER become WorkBuddy\'s priorReadOfTarget', () => {
+    // The exact cross-host contamination scenario: same governance workspace,
+    // same sessionId, same projectDir — but every row was produced by Codex.
+    seedTrajectory('codex');
+    const context = provider()(request());
+    expect(context).toMatchObject({
+      history: { status: 'unavailable', unavailableReason: 'workbuddy_history_attribution_conflict' },
+      facts: { priorReadOfTarget: 'unknown' },
+    });
+  });
+
+  it('R2-red→green: legacy rows with NO host attribution cannot pose as WorkBuddy history', () => {
+    seedTrajectory(null);
+    const context = provider()(request());
+    expect(context).toMatchObject({
+      history: { status: 'unavailable', unavailableReason: 'workbuddy_history_attribution_unprovable' },
+      facts: { priorReadOfTarget: 'unknown' },
+    });
+  });
+
+  it('R2: a workspace whose tool_calls predates the host_kind column entirely is also unprovable — never guessed', () => {
+    mkdirSync(path.join(ws, '.state'), { recursive: true });
     const db = new Database(path.join(ws, '.state', 'trajectory.db'));
+    db.exec(`CREATE TABLE tool_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, tool_name TEXT NOT NULL, outcome TEXT NOT NULL, duration_ms INTEGER, exit_code INTEGER, error_type TEXT, error_message TEXT, gfi_before REAL, gfi_after REAL, params_json TEXT NOT NULL, result_preview TEXT, created_at TEXT NOT NULL, tool_use_id TEXT, project_dir TEXT)`);
     db.prepare(`INSERT INTO tool_calls (session_id, tool_name, outcome, params_json, created_at, tool_use_id, project_dir) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-      .run('wb-session-1', 'Write', 'success', JSON.stringify({ file_path: path.join(project, 'c.ts') }), '2026-10-28T12:00:00.000Z', 'call-99', project);
+      .run('wb-session-1', 'Read', 'success', JSON.stringify({ file_path: path.join(project, 'a.ts') }), '2026-10-28T11:00:00.000Z', 'call-1', project);
+    db.close();
+    const context = provider()(request());
+    expect(context).toMatchObject({ history: { status: 'unavailable', unavailableReason: 'workbuddy_history_attribution_unprovable' } });
+  });
+
+  it('excludes the current tool call and rows at/after the cutoff from the history window', () => {
+    seedTrajectory('workbuddy');
+    const db = new Database(path.join(ws, '.state', 'trajectory.db'));
+    db.prepare(`INSERT INTO tool_calls (session_id, tool_name, outcome, params_json, created_at, tool_use_id, project_dir, host_kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run('wb-session-1', 'Write', 'success', JSON.stringify({ file_path: path.join(project, 'c.ts') }), '2026-10-28T12:00:00.000Z', 'call-99', project, 'workbuddy');
     db.close();
     const context = provider()(request());
     // The seeded window (Read + Write before cutoff) stays; the current call
@@ -130,9 +164,9 @@ describe('createWorkbuddyRuleContextProvider (SPEC C/H08)', () => {
   it('marks facts unknown when the window contains execute/other-kind calls (partial semantic view)', () => {
     mkdirSync(path.join(ws, '.state'), { recursive: true });
     const db = new Database(path.join(ws, '.state', 'trajectory.db'));
-    db.exec(`CREATE TABLE tool_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, tool_name TEXT NOT NULL, outcome TEXT NOT NULL, duration_ms INTEGER, exit_code INTEGER, error_type TEXT, error_message TEXT, gfi_before REAL, gfi_after REAL, params_json TEXT NOT NULL, result_preview TEXT, created_at TEXT NOT NULL, tool_use_id TEXT, project_dir TEXT)`);
-    db.prepare(`INSERT INTO tool_calls (session_id, tool_name, outcome, params_json, created_at, tool_use_id, project_dir) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-      .run('wb-session-1', 'Bash', 'success', JSON.stringify({ command: 'npm test' }), '2026-10-28T11:00:00.000Z', 'call-1', project);
+    db.exec(`CREATE TABLE tool_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, tool_name TEXT NOT NULL, outcome TEXT NOT NULL, duration_ms INTEGER, exit_code INTEGER, error_type TEXT, error_message TEXT, gfi_before REAL, gfi_after REAL, params_json TEXT NOT NULL, result_preview TEXT, created_at TEXT NOT NULL, tool_use_id TEXT, project_dir TEXT, host_kind TEXT)`);
+    db.prepare(`INSERT INTO tool_calls (session_id, tool_name, outcome, params_json, created_at, tool_use_id, project_dir, host_kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run('wb-session-1', 'Bash', 'success', JSON.stringify({ command: 'npm test' }), '2026-10-28T11:00:00.000Z', 'call-1', project, 'workbuddy');
     db.close();
     const context = provider()(request());
     expect(context).toMatchObject({ history: { status: 'available' }, facts: { priorReadOfTarget: 'unknown', readCount: null } });

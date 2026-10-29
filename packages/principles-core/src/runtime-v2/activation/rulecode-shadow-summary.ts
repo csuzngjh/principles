@@ -41,6 +41,14 @@ export function summarizeRuleCodeShadowEvents(
   let lastObservedAt: string | null = null;
   for (const entry of entries) {
     if (!isRecord(entry) || !isRecord(entry.data) || entry.data.activationId !== activationId) continue;
+    // Review R3: host attribution gates EVERY event class that feeds this
+    // summary — including `rulehost_unhealthy`. The unhealthy branch used to
+    // run before the host filter, so a foreign host's anomaly inflated the
+    // target host's error count (errors > 0 fails runtime_shadow_evidence)
+    // and an unattributed legacy anomaly poisoned every host's threshold.
+    // The target host's OWN anomalies still count (never silenced wholesale);
+    // the no-target aggregate keeps its historical semantics.
+    if (targetHostKind !== undefined && entry.data.hostKind !== targetHostKind) continue;
     if (entry.type === 'rulehost_unhealthy') {
       errors += 1;
       continue;

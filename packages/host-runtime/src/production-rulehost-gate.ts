@@ -484,9 +484,20 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
                   : context === UNAVAILABLE_RULE_CONTEXT
                     ? (contextFault ?? 'provider_invalid')
                     : 'history_unavailable';
+                // SPEC-RULECODE-HOST-PROMOTION-001 R2: a schema-valid
+                // unavailable context carries the provider's precise reason
+                // (e.g. workbuddy_history_attribution_conflict) — surface it
+                // in the warning instead of collapsing every legit
+                // unavailability into one opaque class (rc-9).
+                const preciseReason = context !== undefined
+                  && context !== UNAVAILABLE_RULE_CONTEXT
+                  && typeof context.history.unavailableReason === 'string'
+                  && context.history.unavailableReason.length > 0
+                  ? `:${context.history.unavailableReason}`
+                  : '';
                 addWarning(
                   warnings,
-                  `rule_context_v2_unavailable: ${fault} (activation=${activationId})`,
+                  `rule_context_v2_unavailable: ${fault}${preciseReason} (activation=${activationId})`,
                   'enable and wire the host rule context provider, or regenerate the rule without context dependence',
                 );
                 continue;

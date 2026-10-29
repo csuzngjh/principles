@@ -397,6 +397,14 @@ function ensureGovernanceAdmissionSchema(db: Database.Database): void {
         const message = err instanceof Error ? err.message : String(err);
         if (!message.includes('duplicate column name')) throw err;
       }
+      try {
+        // SPEC-RULECODE-HOST-PROMOTION-001 R2: additive producer host
+        // attribution; legacy rows stay NULL (unprovable, never backfilled).
+        db.exec('ALTER TABLE tool_calls ADD COLUMN host_kind TEXT');
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (!message.includes('duplicate column name')) throw err;
+      }
       db.exec('CREATE INDEX IF NOT EXISTS idx_tool_calls_session_tool_use_id ON tool_calls(session_id, tool_use_id)');
     }
   })();
@@ -888,8 +896,8 @@ function admitToolFailure({ db, candidate, workspaceDir, nowIso }: AdmitToolFail
       const projectDir = typeof candidate.projectDir === 'string' && path.isAbsolute(candidate.projectDir)
         ? path.resolve(candidate.projectDir)
         : null;
-      db.prepare(`INSERT INTO tool_calls (session_id, tool_name, outcome, duration_ms, exit_code, error_type, error_message, gfi_before, gfi_after, params_json, result_preview, created_at, tool_use_id, project_dir) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(candidate.rootSessionId, candidate.toolName, outcome.outcome, outcome.durationMs ?? null, outcome.exitCode, outcome.error ? outcome.error.split(/[\s:]/, 1)[0] : null, outcome.error ?? null, null, null, paramsJson, resultPreview, nowIso, candidate.toolUseId ?? null, projectDir);
+      db.prepare(`INSERT INTO tool_calls (session_id, tool_name, outcome, duration_ms, exit_code, error_type, error_message, gfi_before, gfi_after, params_json, result_preview, created_at, tool_use_id, project_dir, host_kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(candidate.rootSessionId, candidate.toolName, outcome.outcome, outcome.durationMs ?? null, outcome.exitCode, outcome.error ? outcome.error.split(/[\s:]/, 1)[0] : null, outcome.error ?? null, null, null, paramsJson, resultPreview, nowIso, candidate.toolUseId ?? null, projectDir, candidate.hostKind);
       reason = `tool=${candidate.toolName}; error=${outcome.error ?? `exit=${outcome.exitCode}`}; path=${relativePath}`;
       db.prepare(`INSERT INTO pain_events (session_id, source, score, reason, severity, origin, confidence, text, canonical_pain_id, runtime_task_id, host_kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(candidate.rootSessionId, sourceObservation.failureSource ?? 'tool_failure', painScore, reason, painScore >= 70 ? 'severe' : painScore >= 40 ? 'moderate' : 'mild', 'system_infer', null, null, painId, null, candidate.hostKind, nowIso);

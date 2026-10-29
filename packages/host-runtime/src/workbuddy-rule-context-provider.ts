@@ -93,10 +93,29 @@ export function createWorkbuddyRuleContextProvider(options: WorkbuddyRuleContext
           beforeCreatedAt: cutoff.toISOString(),
           excludeToolUseId: options.currentToolCallId,
           limit: HISTORY_LIMIT,
+          // Review R2: consume ONLY rows PROVEN to be WorkBuddy's (stamped by
+          // this host's own writer). "Same workspace + same session id +
+          // same project" is NOT proof — a Codex session id colliding here
+          // must never lend its reads to a WorkBuddy read-before-write rule.
+          hostKind: 'workbuddy',
         },
       );
       if (historyRows.unscopedPriorRows) return unavailable('trajectory_project_scope_incomplete');
-      if (historyRows.rows.length === 0) return unavailable('no_prior_session_history');
+      if ((historyRows.otherHostRows ?? 0) > 0) {
+        return unavailable('workbuddy_history_attribution_conflict');
+      }
+      if (historyRows.rows.length === 0) {
+        // Fail closed with the precise reason: legacy rows exist but cannot
+        // be PROVEN WorkBuddy's (never back-filled, never assumed).
+        if ((historyRows.unattributedRows ?? 0) > 0) return unavailable('workbuddy_history_attribution_unprovable');
+        return unavailable('no_prior_session_history');
+      }
+      if ((historyRows.unattributedRows ?? 0) > 0) {
+        // Mixed window: consuming only the proven subset could UNDERCOUNT
+        // prior reads (a hidden foreign read would flip priorReadOfTarget),
+        // so the window is unprovable as a whole — suspend precisely.
+        return unavailable('workbuddy_history_attribution_unprovable');
+      }
       const history = assembleBehaviorHistory(historyRows.rows, historyRows.truncated, {
         projectDir,
         toolSemantics: options.toolSemantics,

@@ -441,3 +441,148 @@ describe('degraded / unsupported never masquerade as healthy', () => {
     expect(result.stderr).toContain('hook_stream_failed');
   });
 });
+
+// ── Review finding 2 wiring: producer → storage → provider → shared gate ──
+
+/** Seed a WorkBuddy-stamped V2 artifact with Owner approval + digest-bound live promotion. */
+async function qualifiedWorkbuddyV2Artifact(governance: string, artifactId: string, code: string): Promise<void> {
+  await activationArtifact(governance, {
+    id: artifactId, kind: 'rule', principleId: `P_${artifactId}`, ruleId: `R_${artifactId}`,
+    content: {
+      principleId: `P_${artifactId}`, ruleId: `R_${artifactId}`, requiresContextVersion: 2,
+      implementationCode: code,
+      ruleHostInputContract: { version: 1, contextVersion: 2, hostKinds: ['workbuddy'] },
+    },
+    channel: 'code_tool_hook', action: 'code_tool_hook_shadow_activate', target: `impl://R_${artifactId}`,
+  });
+  const connection = new SqliteConnection(governance);
+  try {
+    const approvals = new SqliteApprovalQueueStore(connection);
+    const approval = await approvals.enqueue({ artifactId, channel: 'code_tool_hook', riskLevel: 'high' }, new Date().toISOString());
+    const decision = await approvals.approve(approval.approvalId, 'owner-test', 'WorkBuddy v2 wiring fixture');
+    if (!decision.ok) throw new Error(`test approval fixture failed: ${decision.error}`);
+    const artifactRow: unknown = connection.getDb().prepare('SELECT artifact_id, artifact_kind, source_task_id, source_principle_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at FROM pi_artifacts WHERE artifact_id = ?').get(artifactId);
+    if (typeof artifactRow !== 'object' || artifactRow === null) throw new Error('fixture artifact row missing');
+    const digest = computeArtifactDigest(mapPiArtifactRow(artifactRow));
+    await new SqliteActivationSafetyStore(connection).commitPromotion({
+      decision: {
+        decisionId: `decision-${artifactId}`,
+        subject: { kind: 'activation', activationId: `act-${artifactId}`, artifactId, artifactDigest: digest },
+        decision: 'promote_live',
+        principal: { kind: 'configured_owner', ownerId: 'owner-test' },
+        authentication: { method: 'console_token', credentialId: 'credential-test' },
+        reasonCode: 'workbuddy_v2_wiring_fixture',
+        note: 'Test fixture for a digest-bound live activation.',
+        evidenceSnapshotId: `snapshot-${artifactId}`,
+        decidedAt: new Date().toISOString(),
+      },
+      evidenceSnapshot: {
+        snapshotId: `snapshot-${artifactId}`, snapshotDigest: `sha256:snapshot-${artifactId}`, artifactDigest: digest,
+        lineageRefs: [`task-${artifactId}`], hostRuntimeVersion: 'host-runtime-test',
+        safetyGateResults: [{ checkId: 'wb-v2-wiring', status: 'passed' }],
+        shadowSummary: {
+          observed: 2, matched: 1, wouldBlock: 1, wouldAllow: 1, requireApproval: 0,
+          autoCorrect: 0, errors: 0, neutralControl: 0,
+          firstObservedAt: new Date().toISOString(), lastObservedAt: new Date().toISOString(),
+        },
+        configurationVersion: 'test-config-v1', redaction: { version: 'test-redaction-v1', rawParametersStored: false },
+        createdAt: new Date().toISOString(),
+      },
+      readinessEvaluationId: `readiness-${artifactId}`,
+      evidenceSnapshotDigest: `sha256:snapshot-${artifactId}`,
+      expectedControlVersion: 1,
+      idempotencyKey: `promotion-${artifactId}`,
+    });
+  } finally {
+    connection.close();
+  }
+}
+
+describe('R2 wiring — real producer stamps attribution, provider consumes it, shared gate executes', () => {
+  const v2DenyCode = (marker: string, reason: string) => `function evaluate(input) { if (input.action.normalizedPath.indexOf('${marker}') >= 0) return { decision: 'block', matched: true, reason: '${reason}' }; return { decision: 'allow', matched: false, reason: 'safe' }; } var meta={name:'wb',version:'1',ruleId:'R_WB_V2_WIRE',coversCondition:'all'};`;
+
+  function runRealWorkbuddyRead(home: string, project: string, session: string, callId: string): { status: number; stdout: string; stderr: string } {
+    // A REAL PostToolUse through the production entry: the shared afterToolCall
+    // writer is the producer under test (it must stamp host_kind='workbuddy').
+    return runEntry(home, JSON.stringify(fixturePayload('post-tool-use-read-success.json', {
+      cwd: project,
+      session_id: session,
+      tool_input: { file_path: path.join(project, 'readme-wire.txt') },
+      call_id: callId,
+      tool_use_id: callId,
+    })), 'PostToolUse');
+  }
+
+  it('positive: attributed history from the REAL producer lets a qualified v2 rule EXECUTE (deny, not suspension)', async () => {
+    const home = makeHome();
+    const governance = makeGovernance(home, { workbuddyFlag: true, ruleContextV2Flag: true });
+    makeTrajectory(governance);
+    const project = makeProjectDir(home, 'r2wire');
+    const session = 'wb-r2-wiring-session';
+
+    const observed = runRealWorkbuddyRead(home, project, session, 'wb-r2-call-a');
+    expect(observed.status).toBe(0);
+
+    // Producer proof: the durable row carries the WorkBuddy stamp.
+    const trajectory = new Database(path.join(governance, '.state', 'trajectory.db'), { readonly: true });
+    try {
+      const rows = trajectory.prepare('SELECT host_kind, project_dir FROM tool_calls WHERE session_id = ?').all(session) as { host_kind: string | null; project_dir: string | null }[];
+      expect(rows.length).toBe(1);
+      expect(rows[0]?.host_kind).toBe('workbuddy');
+      expect(rows[0]?.project_dir).toBe(path.resolve(project));
+    } finally {
+      trajectory.close();
+    }
+
+    await qualifiedWorkbuddyV2Artifact(governance, 'art-v2-wire-610', v2DenyCode('wb-v2ctx-610', 'WB_V2_DENY_610'));
+    const result = runEntry(home, JSON.stringify(fixturePayload('pre-tool-use-write.json', {
+      cwd: project,
+      session_id: session,
+      tool_input: { file_path: path.join(project, 'wb-v2ctx-610.txt'), content: 'x' },
+      call_id: 'wb-r2-call-b',
+      tool_use_id: 'wb-r2-call-b',
+    })), 'PreToolUse');
+    // Deny proves the whole chain: provider resolved PROVEN WorkBuddy history
+    // (available context) → the qualified v2 rule executed live. An
+    // attribution failure would instead suspend with allow + warnings.
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'WB_V2_DENY_610' } });
+    expect(result.stderr).not.toContain('rule_context_v2_unavailable');
+  });
+
+  it('negative: a codex-attributed row in the same session suspends the v2 rule with the precise conflict reason', async () => {
+    const home = makeHome();
+    const governance = makeGovernance(home, { workbuddyFlag: true, ruleContextV2Flag: true });
+    makeTrajectory(governance);
+    const project = makeProjectDir(home, 'r2conf');
+    const session = 'wb-r2-conflict-session';
+
+    // REAL WorkBuddy row first, then a FOREIGN-host row (what the Codex
+    // producer writes into a shared workspace) in the same session/project.
+    const observed = runRealWorkbuddyRead(home, project, session, 'wb-r2-call-c');
+    expect(observed.status).toBe(0);
+    const trajectory = new Database(path.join(governance, '.state', 'trajectory.db'));
+    try {
+      trajectory.prepare(`INSERT INTO tool_calls (session_id, tool_name, outcome, params_json, created_at, tool_use_id, project_dir, host_kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(session, 'Read', 'success', JSON.stringify({ file_path: path.join(project, 'codex-read.txt') }), '2026-10-28T11:15:00.000Z', 'codex-call-1', path.resolve(project), 'codex');
+    } finally {
+      trajectory.close();
+    }
+
+    await qualifiedWorkbuddyV2Artifact(governance, 'art-v2-wire-611', v2DenyCode('wb-v2ctx-611', 'WB_V2_DENY_611'));
+    const result = runEntry(home, JSON.stringify(fixturePayload('pre-tool-use-write.json', {
+      cwd: project,
+      session_id: session,
+      tool_input: { file_path: path.join(project, 'wb-v2ctx-611.txt'), content: 'x' },
+      call_id: 'wb-r2-call-d',
+      tool_use_id: 'wb-r2-call-d',
+    })), 'PreToolUse');
+    // Same workspace + same session id + same project — the mixed window is a
+    // collision the provider must NOT resolve by guessing: the rule suspends
+    // (allow) with the structured attribution-conflict reason.
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('rule_context_v2_unavailable: history_unavailable:workbuddy_history_attribution_conflict (activation=act-art-v2-wire-611)');
+    expect(result.stderr).toContain('workbuddy_history_attribution_conflict');
+  });
+});

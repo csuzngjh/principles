@@ -33,3 +33,25 @@ RuleCode host promotion loop (SPEC-RULECODE-HOST-PROMOTION-001 v0.1, A→B→C):
   applies symmetrically: a Codex-stamped artifact never auto-executes on
   WorkBuddy and vice versa (SPEC §11.3/H13). pd-console rides inside the
   create-principles-disciple artifact.
+
+  Review fixes (round 2, findings 1-3):
+  - R1: `emergency_controls` no longer passes on contract shape + flag
+    alone. A core-owned recovery-control registry (verified against the
+    real pd CLI registrations and the Console emergency-pause route by
+    cross-package contract tests) gates every probe; the fabricated
+    `pd status` / `pd activation emergency-pause` commands were removed
+    (they never existed), the global pause is honestly declared through
+    its real Console surface, OpenClaw probes use the real `exec` tool,
+    and a rule combination that blocks the recovery probes fails the
+    check.
+  - R2: tool_calls rows now carry producer host attribution
+    (`host_kind`, stamped by every writer; legacy rows stay NULL and are
+    never backfilled). The WorkBuddy provider consumes ONLY rows proven
+    to be WorkBuddy's — a colliding Codex session can no longer lend its
+    reads to a WorkBuddy read-before-write rule (precise
+    unavailable reasons instead). The WorkBuddy PostToolUse channel
+    contract classifies string responses as completed successes (the
+    failure channel is a separate registration).
+  - R3: `rulehost_unhealthy` events pass the same host-attribution
+    filter as every other shadow event — a foreign host's anomaly can no
+    longer fail (or gate) the target host's readiness.

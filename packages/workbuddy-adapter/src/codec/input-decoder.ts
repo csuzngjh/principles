@@ -134,21 +134,33 @@ function field(value: Record<string, unknown>, key: string): unknown {
  * SPEC §4.2 failure normalization: WorkBuddy marks tool failure through
  * explicit shapes — `{is_error:true,...}` (Read failures), Bash
  * `{exitCode>0, error}` — while SUCCESS may be a bare STRING (rendered Read
- * output). A string carries no failure marker and is passed through
- * faithfully (the frozen fixtures show string === Read success; asserting
- * success-or-failure from string-ness alone would be fabrication).
+ * output).
  *
- * The shared production pain path (production-pain-evidence normalizeOutcome)
- * detects failure from an `error` field or a non-zero `exitCode` on the
- * envelope/result. `{is_error:true}` WITHOUT either (the read-iserror fixture
- * shape) would silently classify as success there — so this decoder wraps
- * every DETECTED failure in an explicit envelope
- * `{result: <original>, error: <explicit>}`, preserving the raw response
- * inside `result` while guaranteeing the failure is never missed. Missing
- * exitCode on a detected failure NEVER defaults to success.
+ * SPEC-RULECODE-HOST-PROMOTION-001 R2: on the PostToolUse channel the FROZEN
+ * host contract (Phase 0 baseline; see the channel table at the top of this
+ * file) is itself completion evidence — PostToolUseFailure is a SEPARATE
+ * registration and "PostToolUse never fires for that failure class". A
+ * response with NO failure marker on THIS channel is therefore a completed
+ * success, not an unconfirmed shape: the durable tool_calls row must record
+ * `success` so the WorkBuddy rule-context provider can assemble a real
+ * history window (an `unknown` row is rejected by the shared history
+ * validator, which would leave the provider permanently unavailable on this
+ * host). String-ness ALONE still proves nothing on any other channel — the
+ * classification rides on the channel contract, and every DETECTED failure
+ * is still wrapped `{result, error}` so the shared classifier can never
+ * miss it. Missing exitCode on a detected failure NEVER defaults to success.
  */
 export function normalizeWorkbuddyToolResponse(toolResponse: unknown, eventForDiagnostics: string): unknown {
-  if (typeof toolResponse === 'string') return toolResponse;
+  if (typeof toolResponse === 'string') {
+    // Wrap under a NON-`result` key: the shared classifier treats a record
+    // envelope as a structured completion, but a string inside `result` would
+    // still hit its text-only → unknown branch. `toolResponse` preserves the
+    // rendered text verbatim while the envelope carries the channel-contract
+    // completion.
+    return eventForDiagnostics === 'PostToolUse'
+      ? { toolResponse }
+      : toolResponse;
+  }
   if (!isRecord(toolResponse)) {
     throw new WorkBuddyDecoderError(`malformed required field "tool_response"`, `${eventForDiagnostics} tool_response must be the rendered string or the engine result object from ${HOST_CONTRACT_BASELINE}.`);
   }
@@ -158,7 +170,11 @@ export function normalizeWorkbuddyToolResponse(toolResponse: unknown, eventForDi
   const errorValue = field(toolResponse, 'error');
   const errorText = typeof errorValue === 'string' && errorValue.trim().length > 0 ? errorValue : undefined;
   const failed = isError || (exitCode !== undefined && exitCode > 0) || errorText !== undefined;
-  if (!failed) return toolResponse;
+  if (!failed) {
+    // An object envelope is already a structured completion for the shared
+    // classifier (normalizeOutcome: record ⇒ success) — pass through.
+    return toolResponse;
+  }
   const toolErrorCode = field(toolResponse, 'tool_error_code');
   let explicitError: string;
   if (errorText !== undefined) {

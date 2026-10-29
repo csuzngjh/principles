@@ -1,5 +1,6 @@
 import type { PIArtifactSnapshot } from './activation-types.js';
 import type { PromotionReadinessCheck } from './promotion-readiness-evaluator.js';
+import { validateRecoveryControlSurfaces } from './recovery-control-surfaces.js';
 
 export interface HostLivenessContract {
   version: string;
@@ -146,6 +147,11 @@ export async function collectOpenClawPromotionChecks(
     input.hostContract,
     input.expectedHostContractVersion ?? DEFAULT_HOST_CONTRACT_VERSION,
   );
+  // Review R1 (SPEC-RULECODE-HOST-PROMOTION-001): the contract SHAPE alone
+  // never certifies control health. Validate its recovery entries against the
+  // real-surface registry (command/route registrations proven by the
+  // cross-package contract tests that import it).
+  const recoverySurfaces = contract !== null ? validateRecoveryControlSurfaces(contract) : null;
 
   let probesPassed = false;
   if (contract && scopeAvoidsProtectedCapabilities) {
@@ -159,12 +165,30 @@ export async function collectOpenClawPromotionChecks(
     }
   }
 
-  const emergencyControlsHealthy = contract !== null && input.safetyControlsEnabled;
+  // Review R1: emergency controls are healthy only when ALL of the following
+  // hold — the contract shape-bound to the resolver's version, the safety
+  // flag on, every recovery entry verified against the REAL surface registry,
+  // AND the composed rule set (candidate + existing live) still allows the
+  // control probes (a rule combination that blocks a recovery action must
+  // fail readiness even when each rule passes individually-composed replay
+  // of its own trace).
+  const emergencyControlsHealthy = contract !== null
+    && input.safetyControlsEnabled
+    && recoverySurfaces !== null
+    && recoverySurfaces.ok
+    && probesPassed;
+  const emergencyReason = contract === null
+    ? 'out_of_band_controls_unavailable'
+    : !input.safetyControlsEnabled
+      ? 'safety_controls_disabled'
+      : recoverySurfaces !== null && !recoverySurfaces.ok
+        ? recoverySurfaces.reason
+        : 'control_probe_composition_failed';
   return [
     { checkId: 'bounded_scope', status: bounded ? 'passed' : 'failed', ...(!bounded ? { reasonCode: 'explicit_affected_tools_required' } : {}) },
     { checkId: 'runtime_compatibility', status: contract ? 'passed' : 'failed', ...(!contract ? { reasonCode: 'host_liveness_contract_missing_invalid_or_unsupported' } : {}) },
     { checkId: 'host_liveness_composition', status: probesPassed ? 'passed' : 'failed', ...(!probesPassed ? { reasonCode: 'neutral_probe_or_live_composition_failed' } : {}) },
-    { checkId: 'emergency_controls', status: emergencyControlsHealthy ? 'passed' : 'failed', ...(!emergencyControlsHealthy ? { reasonCode: contract ? 'safety_controls_disabled' : 'out_of_band_controls_unavailable' } : {}) },
+    { checkId: 'emergency_controls', status: emergencyControlsHealthy ? 'passed' : 'failed', ...(!emergencyControlsHealthy ? { reasonCode: emergencyReason } : {}) },
     { checkId: 'runtime_shadow_evidence', status: contract?.supportsShadowEvidence === true ? 'passed' : 'failed', ...(contract?.supportsShadowEvidence === true ? {} : { reasonCode: 'runtime_shadow_evidence_unsupported' }) },
     { checkId: 'owner_identity_configuration', status: input.ownerIdentityConfigured ? 'passed' : 'failed', ...(!input.ownerIdentityConfigured ? { reasonCode: 'configured_owner_missing' } : {}) },
   ];

@@ -89,3 +89,55 @@ Rollback: revert the PR (single revert); behavior returns to the pre-SPEC resolv
 2. **Release + install chain** (changeset included; runtime pins refresh via the existing pins-maintenance flow) — required before any native verification of THIS code.
 3. **Native verification** needs a real Codex and a real WorkBuddy client session against an isolated project (H04/H09/H16/H18 native halves).
 4. **Live promotion** of artifact `pi-rule-evaluator-52d98a96…code_tool_hook_3` remains an explicit Owner decision in the Web Console on a current readiness snapshot — intentionally not exercised here.
+
+---
+
+# Round 2 — 三项代码评审发现修复（2026-10-29）
+
+评审对象 HEAD `29ee5d69d`。三项根因、修复与红绿证据如下；被推翻的旧结论在本节末尾更正。
+
+## 发现一（P1）：能力声明不能替代真实恢复检查
+
+**根因**：`emergency_controls = 合同形状有效 && safetyControlsEnabled`；中性探针只做规则回放，从不验证控制入口真实存在。三份合同（含被本轮复制的 OpenClaw 旧合同）声明了**不存在**的命令——盘点证实：`pd status`（裸）不存在（真实状态面是 `pd activation list`）；`pd activation emergency-pause` **不存在任何 CLI 命令**（全局暂停唯一真实入口是 Console 路由 `POST /api/v1/activations/emergency-pause` → `pauseAllRuleCode` → `pauseAllLive`）；`pd activation deactivate --activation-id` 存在。另发现 OpenClaw 探针用小写 `bash`，而 OpenClaw hook 面真实 shell 工具是 `exec`（PRI-741：bash/exec_command 是 config 别名，永不达 hook）。
+
+**修复**（复用既有机制，无新能力数据库）：
+1. core 新增 `RECOVERY_CONTROL_SURFACES` 注册表（`recovery-control-surfaces.ts`）——每能力的**真实**入口面 SSoT：pd_status→CLI `pd activation list --json`；rulecode_deactivate→CLI `pd activation deactivate --activation-id recovery-probe`；rulecode_global_pause→Console `/api/v1/activations/emergency-pause`（虚拟工具探针，不伪造 shell 命令）；owner_review_access→Console owner-review 路由。
+2. `validateRecoveryControlSurfaces` 校验合同探针与注册表逐项一致（命令串精确相等；console 通道必须用其虚拟工具+空参数）。
+3. `emergency_controls = 合同 && safetyControls && 注册表校验通过 && 探针组合回放通过`，reasonCode 区分 `recovery_control_probe_mismatch` / `recovery_control_surface_unregistered` / `control_probe_composition_failed` / `safety_controls_disabled`。合同只声明映射，不再单独签发"能力健康"。
+4. 跨包注册证明（生产接线证据）：pd-cli 新测试以**构建产物**验证注册表两条 CLI 命令真实注册、且 `activation emergency-pause` 未注册（负例）；pd-console 新测试驱动**真实路由处理器**：`/emergency-pause` 写入 gate 实读的 `global_rulecode_pauses` 行，owner-review 路由非 404。无破坏性探针执行（要求 7：readiness 从不执行暂停/停用，只做注册证明+回放组合）。
+5. 健康证据绑定：注册表校验每次 readiness 现算（无缓存）；digest/controlVersion 绑定沿用既有 promotion 链（H12 未动）。
+
+**红→绿证据**（`host-promotion-attribution.test.ts`）：红=旧实现下 `FABRICATED_COMMANDS_CONTRACT`（形状正确+开关开+伪造命令）emergency 通过（修复后 FAIL `recovery_control_probe_mismatch`）；组合阻断（候选中性+live 拦截全部 shell 调用）→ FAIL `control_probe_composition_failed`；开关关 → `safety_controls_disabled`；注册表验证+组合通过 → PASS。Console Test G 修复后三检查 PASS（fixture 对齐真实 exec 词汇后探针真实回放，`canActivate` 实证 ok）。
+
+## 发现二（P1）：WorkBuddy 历史缺少宿主归属证明
+
+**根因**：`tool_calls` 无宿主列；provider 按 sessionId+projectDir+cutoff 读取，无法证明行来自 WorkBuddy。同治理工作区跨宿主 session id 碰撞时，Codex 的 Read 会被当作 WorkBuddy 已读目标（priorReadOfTarget=yes）错误放行"读前写"规则。
+
+**修复**（最小生产者—存储—读取链，不在 reader 贴标签）：
+1. **存储**：`tool_calls` 增 `host_kind TEXT`（core `trajectory-schema.ts` 基础 schema + 加法迁移，同 tool_use_id/project_dir 先例；旧行保持 NULL，**不回填**）。
+2. **生产者**（三个写入点全盖章）：共享 afterToolCall 写入器（`production-pain-evidence.ts`，`options.hostKind`，Codex/WorkBuddy hook 均传入）；`recordVerifiedToolOutcomes`（新增 hostKind 参数，Codex ingestion 传 `'codex'`）；`governance-signal-admission` 准入写入（`candidate.hostKind`）。
+3. **读取**：`readWorkspaceRuleContextRowsBefore` 增可选 `hostKind`——按行分区（匹配/他宿主/无归属），列缺失的旧库整体视为无归属；从不猜测。
+4. **Provider 严格失败关闭**：窗口含他宿主行 → `workbuddy_history_attribution_conflict`；含无归属行（纯旧或混合）→ `workbuddy_history_attribution_unprovable`（消费子集会**低估** prior reads，方向性不安全，故精确暂停）；仅全为 workbuddy 行才计算。gate 警告现带出 provider 精确原因（`history_unavailable:<reason>`）。
+5. **通道契约补全**：WorkBuddy PostToolUse 通道（失败走独立 PostToolUseFailure 注册）的字符串响应按宿主契约分类为完成 success（信封 `{toolResponse}` 原文无损）——否则真实 WorkBuddy 成功行永远 `unknown`，provider 永不可用。他通道字符串语义不变。
+6. PRI-1019 例外（gate L467-472）原样保留，未扩大未删除。
+
+**红→绿证据**：provider 单测红 3（codex 行/无归属行/无列旧行 均曾被当作 WorkBuddy 历史得到 priorReadOfTarget=yes）→ 修复后全部精确 unavailable。**生产接线测试**（workbuddy-adapter，真实构建 hook 进程）：真实 PostToolUse 经共享生产者写入 → DB 行实证 `host_kind='workbuddy'` → 合格 v2 工件在下一次 PreToolUse **真实执行**（deny 输出，非暂停）；同 session 插入 codex 行 → 暂停+精确冲突原因浮出 stderr。
+
+## 发现三（P2）：异常事件绕过宿主过滤
+
+**根因**：`rulehost_unhealthy` 分支位于 hostKind 过滤之前，外宿主异常计入目标宿主 errors（errors>0 直接 fail runtime_shadow_evidence——反向也可被利用：他宿主异常阻塞本宿主上线；本宿主异常被他宿主摘要忽略）。
+
+**修复**：`summarizeRuleCodeShadowEvents` 将归属过滤提到所有事件类之前（含 unhealthy）；本宿主真实异常仍计数（未整体忽略）；无 target 参数的历史语义不变。Console 与 CLI 均经同一函数消费（`getOwnerReview`/`readShadowSummaryForActivation` 已传 resolved hostKind——同一口径）。
+
+**红→绿证据**：任务书复现器（workbuddy unhealthy + codex target）红（errors=1）→ 绿（errors=0）；无归属 unhealthy 指定宿主=0；本宿主 unhealthy=1；无目标参数旧语义=1；外宿主样本+异常混合不影响目标阈值输入（5 用例全绿）。
+
+## 被推翻/修正的旧结论
+
+1. 旧报告 §2 H11 行"Out-of-band path = host-neutral pd CLI / Web Console (contract-declared)"——**部分不实**：全局暂停无任何 CLI 入口，仅 Console 路由（本轮已实证并写入注册表；CLI 侧 emergency-pause 为 follow-up 候选，未实现即未声明）。
+2. 旧 §1 B 段"neutral probes replay"描述曾暗示控制面可用——探针命令彼时含两个不存在命令与一个不可派发工具名，回放在真实语义下必然失败（Test G 旧绿是被旧 emergency 逻辑掩盖）。现合同面=真实面。
+3. 旧 §2 H04/H05"WorkBuddy 影子事件正确归因"结论保留，但新增：WorkBuddy 影子样本现需生产者盖章行才可积累历史（旧行不可证明）。
+4. H03 安装面结论不变（本轮亦未触碰任何安装目录）。
+
+## Round 2 测试总量（本 diff）
+
+core runtime-v2 7838 绿（+barrel 快照更新）；host-runtime 593 绿（+R2 provider 3 红→绿 +R1 wiring）；codex-adapter 355 绿；workbuddy-adapter 79 绿（host-contract 45/45 + production 16/16 含 2 新接线）；pd-console 2987+1 绿（含新注册表路由 4/4 与 Test G 修复）；pd-cli 2112 绿（含新注册表 CLI 4/4）；openclaw-plugin 环境失败集不变（4 例，与改前同名单）；owner e2e 6/6。BDD AMD 网关 400 仍为既有环境失败（前轮已基线复现）。

@@ -10,15 +10,25 @@ export const OPENCLAW_HOST_LIVENESS_CONTRACT: HostLivenessContract = {
   supportsShadowEvidence: true,
   outOfBandControls: ['activation_deactivate', 'global_rulecode_pause', 'owner_review_console'],
   protectedCapabilities: [
-    { capabilityId: 'pd_status', hostToolAliases: ['bash', 'exec_command'] },
-    { capabilityId: 'rulecode_deactivate', hostToolAliases: ['bash', 'exec_command'] },
-    { capabilityId: 'rulecode_global_pause', hostToolAliases: ['bash', 'exec_command'] },
+    // Review R1: `exec` is the ONLY shell tool name that reaches the OpenClaw
+    // hook face (constants/tools.ts PRI-741: `bash`/`exec_command` are
+    // config-level aliases that normalize away). Aliases and probes must use
+    // the real dispatched name or the neutral-probe replay rejects them.
+    { capabilityId: 'pd_status', hostToolAliases: ['exec'] },
+    { capabilityId: 'rulecode_deactivate', hostToolAliases: ['exec'] },
+    // Review R1: the global pause has NO pd CLI command — its real surface is
+    // the authenticated Owner Console route. Declaring a shell alias here
+    // would claim a recovery entry that does not exist.
+    { capabilityId: 'rulecode_global_pause', hostToolAliases: ['rulecode_global_pause'] },
     { capabilityId: 'owner_review_access', hostToolAliases: ['owner_review_access'] },
   ],
   neutralProbes: [
-    { probeId: 'probe-pd-status', capabilityId: 'pd_status', toolName: 'bash', params: { command: 'pd status' }, expectedDecision: 'allow' },
-    { probeId: 'probe-rule-deactivate', capabilityId: 'rulecode_deactivate', toolName: 'bash', params: { command: 'pd activation deactivate --activation-id test' }, expectedDecision: 'allow' },
-    { probeId: 'probe-global-pause', capabilityId: 'rulecode_global_pause', toolName: 'bash', params: { command: 'pd activation emergency-pause' }, expectedDecision: 'allow' },
+    // Review R1: probe commands are the REAL registered pd commands
+    // (verified against the recovery-control registry; `pd status` and
+    // `pd activation emergency-pause` do not exist and were removed).
+    { probeId: 'probe-pd-status', capabilityId: 'pd_status', toolName: 'exec', params: { command: 'pd activation list --json' }, expectedDecision: 'allow' },
+    { probeId: 'probe-rule-deactivate', capabilityId: 'rulecode_deactivate', toolName: 'exec', params: { command: 'pd activation deactivate --activation-id recovery-probe' }, expectedDecision: 'allow' },
+    { probeId: 'probe-global-pause', capabilityId: 'rulecode_global_pause', toolName: 'rulecode_global_pause', params: {}, expectedDecision: 'allow' },
     { probeId: 'probe-owner-review', capabilityId: 'owner_review_access', toolName: 'owner_review_access', params: {}, expectedDecision: 'allow' },
   ],
 };
@@ -42,13 +52,13 @@ export const CODEX_HOST_LIVENESS_CONTRACT: HostLivenessContract = {
   protectedCapabilities: [
     { capabilityId: 'pd_status', hostToolAliases: ['Bash'] },
     { capabilityId: 'rulecode_deactivate', hostToolAliases: ['Bash'] },
-    { capabilityId: 'rulecode_global_pause', hostToolAliases: ['Bash'] },
+    { capabilityId: 'rulecode_global_pause', hostToolAliases: ['rulecode_global_pause'] },
     { capabilityId: 'owner_review_access', hostToolAliases: ['owner_review_access'] },
   ],
   neutralProbes: [
-    { probeId: 'probe-pd-status', capabilityId: 'pd_status', toolName: 'Bash', params: { command: 'pd status' }, expectedDecision: 'allow' },
-    { probeId: 'probe-rule-deactivate', capabilityId: 'rulecode_deactivate', toolName: 'Bash', params: { command: 'pd activation deactivate --activation-id test' }, expectedDecision: 'allow' },
-    { probeId: 'probe-global-pause', capabilityId: 'rulecode_global_pause', toolName: 'Bash', params: { command: 'pd activation emergency-pause' }, expectedDecision: 'allow' },
+    { probeId: 'probe-pd-status', capabilityId: 'pd_status', toolName: 'Bash', params: { command: 'pd activation list --json' }, expectedDecision: 'allow' },
+    { probeId: 'probe-rule-deactivate', capabilityId: 'rulecode_deactivate', toolName: 'Bash', params: { command: 'pd activation deactivate --activation-id recovery-probe' }, expectedDecision: 'allow' },
+    { probeId: 'probe-global-pause', capabilityId: 'rulecode_global_pause', toolName: 'rulecode_global_pause', params: {}, expectedDecision: 'allow' },
     { probeId: 'probe-owner-review', capabilityId: 'owner_review_access', toolName: 'owner_review_access', params: {}, expectedDecision: 'allow' },
   ],
 };
@@ -69,13 +79,13 @@ export const WORKBUDDY_HOST_LIVENESS_CONTRACT: HostLivenessContract = {
   protectedCapabilities: [
     { capabilityId: 'pd_status', hostToolAliases: ['Bash'] },
     { capabilityId: 'rulecode_deactivate', hostToolAliases: ['Bash'] },
-    { capabilityId: 'rulecode_global_pause', hostToolAliases: ['Bash'] },
+    { capabilityId: 'rulecode_global_pause', hostToolAliases: ['rulecode_global_pause'] },
     { capabilityId: 'owner_review_access', hostToolAliases: ['owner_review_access'] },
   ],
   neutralProbes: [
-    { probeId: 'probe-pd-status', capabilityId: 'pd_status', toolName: 'Bash', params: { command: 'pd status' }, expectedDecision: 'allow' },
-    { probeId: 'probe-rule-deactivate', capabilityId: 'rulecode_deactivate', toolName: 'Bash', params: { command: 'pd activation deactivate --activation-id test' }, expectedDecision: 'allow' },
-    { probeId: 'probe-global-pause', capabilityId: 'rulecode_global_pause', toolName: 'Bash', params: { command: 'pd activation emergency-pause' }, expectedDecision: 'allow' },
+    { probeId: 'probe-pd-status', capabilityId: 'pd_status', toolName: 'Bash', params: { command: 'pd activation list --json' }, expectedDecision: 'allow' },
+    { probeId: 'probe-rule-deactivate', capabilityId: 'rulecode_deactivate', toolName: 'Bash', params: { command: 'pd activation deactivate --activation-id recovery-probe' }, expectedDecision: 'allow' },
+    { probeId: 'probe-global-pause', capabilityId: 'rulecode_global_pause', toolName: 'rulecode_global_pause', params: {}, expectedDecision: 'allow' },
     { probeId: 'probe-owner-review', capabilityId: 'owner_review_access', toolName: 'owner_review_access', params: {}, expectedDecision: 'allow' },
   ],
 };
