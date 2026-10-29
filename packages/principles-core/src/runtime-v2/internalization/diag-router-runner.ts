@@ -27,7 +27,9 @@
  * @see BasePeerRunner in runner/base-peer-runner.ts
  */
 
+import { createHash } from 'node:crypto';
 import { Value } from '@sinclair/typebox/value';
+import { verifyRouterContextReceipt } from './router-context-evidence.js';
 import type { RunHandle } from '../runtime-protocol.js';
 import type { DiagnosticianOutputV1 } from '../diagnostician-output.js';
 import { DiagnosticianOutputV1Schema } from '../diagnostician-output.js';
@@ -61,6 +63,14 @@ interface DiagRouterContext {
   readonly rootCauseOutput: DiagRootCauseOutputV1;
   readonly distillerArtifactId: string;
   readonly distillerOutput: DiagDistillerOutputV1;
+  invocationEvidence?: {
+    taskId: string;
+    message: string;
+    systemPrompt: string;
+    messageDigest: string;
+    systemPromptDigest: string;
+    predecessorDigests: { artifactId: string; contentDigest: string }[];
+  };
 }
 
 // ── Callback type (removed — P0-1 fix) ─────────────────────────────────────
@@ -233,6 +243,19 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
       },
     );
 
+    // System-owned evidence from the exact message submitted, never model output.
+    // Router currently receives no trusted canonical Principle allowlist.
+    context.invocationEvidence = {
+      taskId,
+      message,
+      systemPrompt,
+      messageDigest: createHash('sha256').update(message).digest('hex'),
+      systemPromptDigest: createHash('sha256').update(systemPrompt).digest('hex'),
+      predecessorDigests: [
+        { artifactId: context.rootCauseArtifactId, contentDigest: createHash('sha256').update(JSON.stringify(context.rootCauseOutput)).digest('hex') },
+        { artifactId: context.distillerArtifactId, contentDigest: createHash('sha256').update(JSON.stringify(context.distillerOutput)).digest('hex') },
+      ],
+    };
     return this.runtimeAdapter.startRun({
       agentSpec: { agentId: this.resolvedOptions.agentId, schemaVersion: 'v1' },
       taskRef: { taskId },
@@ -273,7 +296,7 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
     output: DiagnosticianOutputV1,
     task: TaskRecord,
     contextHash: string,
-    _context: DiagRouterContext,
+    context: DiagRouterContext,
   ): Promise<PeerRunnerResult<DiagnosticianOutputV1>> {
     // 1. Store output before commit
     try {
@@ -287,7 +310,40 @@ export class DiagRouterRunner extends BasePeerRunner<DiagRouterContext, Diagnost
     }
 
     // 2. Commit via DiagnosticianCommitter (reuse existing committer — same as monolith)
-    const routerContentJson = JSON.stringify(output);
+    const evidence = context.invocationEvidence;
+    if (!evidence || evidence.taskId !== taskId) {
+      throw new PDRuntimeError('input_invalid', 'Router invocation context evidence is missing or belongs to another task');
+    }
+    const routerContentJson = JSON.stringify({
+      ...output,
+      trustedContextReceipt: {
+        schemaVersion: 'router-context-v1',
+        taskId,
+        runId,
+        outputSchemaRef: 'diagnostician-output-v1',
+        contextHash,
+        messageDigest: evidence.messageDigest,
+        systemPromptDigest: evidence.systemPromptDigest,
+        predecessorDigests: evidence.predecessorDigests,
+        canonicalPrinciples: {
+          status: 'unavailable',
+          reason: 'router_has_no_system_canonical_principle_allowlist',
+          nextAction: 'Keep source association in shadow; provide a system-owned invocation allowlist before canonical association.',
+        },
+      },
+    });
+    // Check the persisted shape at the real write boundary.
+    const persistedEnvelope: unknown = JSON.parse(routerContentJson);
+    const receiptCheck = verifyRouterContextReceipt(persistedEnvelope, {
+      taskId, runId, message: evidence.message, systemPrompt: evidence.systemPrompt,
+      predecessors: [
+        { artifactId: context.rootCauseArtifactId, content: context.rootCauseOutput },
+        { artifactId: context.distillerArtifactId, content: context.distillerOutput },
+      ],
+    });
+    if (receiptCheck.status !== 'available') {
+      throw new PDRuntimeError('input_invalid', 'Invalid router context receipt');
+    }
     let commitResult: CommitResult;
     try {
       commitResult = await this.committer.commit({
