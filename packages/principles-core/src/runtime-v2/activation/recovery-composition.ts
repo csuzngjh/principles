@@ -24,10 +24,6 @@ import type { ToolSemanticRegistry } from '../internalization/tool-semantic-regi
  * independence is structural and their real-world reachability is supplied
  * separately as target-environment evidence by the readiness caller.
  */
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 export interface RecoveryCompositionArtifact {
   artifactId: string;
   /** Direct source when the caller already parsed the artifact content. */

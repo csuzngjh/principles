@@ -50,14 +50,15 @@ function runStatusProbe(cliEntry: string, workspaceDir: string): Promise<ProbeRu
     });
     let stdout = '';
     let finished = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const finish = (result: ProbeRun): void => {
       if (finished) return;
       finished = true;
-      clearTimeout(timer);
+      if (timer !== undefined) clearTimeout(timer);
       child.removeAllListeners();
       resolve(result);
     };
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
       child.kill();
       finish({ ok: false, detail: 'cli-status-probe timeout' });
     }, PROBE_TIMEOUT_MS);
