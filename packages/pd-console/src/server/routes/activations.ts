@@ -133,7 +133,10 @@ export async function handleActivationsRoute(
       else if (operation === 'recover-to-shadow') { if (body.controlVersion === undefined) throw new Error('Recovery requires controlVersion'); sendSuccess(res, await model.recoverRuleCodeToShadow(activationId, body.controlVersion, input)); }
       else {
         if (!body.artifactId || !body.artifactDigest || body.controlVersion === undefined || body.confirmed !== true) throw new Error('Promotion requires artifactId, artifactDigest, controlVersion, and confirmed=true');
-        const result = await model.promoteRuleCode(activationId, { artifactId: body.artifactId, artifactDigest: body.artifactDigest, controlVersion: body.controlVersion, confirmed: body.confirmed }, input);
+        // SPEC R4/P1: the authenticated promote POST is likewise a real
+        // Console HTTP entry — the readiness evaluation it triggers carries
+        // the route-served signal for owner_review_access.
+        const result = await model.promoteRuleCode(activationId, { artifactId: body.artifactId, artifactDigest: body.artifactDigest, controlVersion: body.controlVersion, confirmed: body.confirmed }, { ...input, routeContext: { servedThroughAuthenticatedConsoleRoute: true } });
         if (!result.ok) { sendError(res, 409, result.reasonCode, result.summary, { failedChecks: result.failedChecks, nextAction: result.nextAction }); return; }
         sendSuccess(res, result);
       }
@@ -149,7 +152,9 @@ export async function handleActivationsRoute(
     try { activationId = decodeURIComponent(rawId); }
     catch { sendError(res, 400, 'invalid_id', 'Activation ID contains invalid URI encoding'); return; }
     try {
-      sendSuccess(res, await getModel(workspaceDir).getOwnerReview(activationId, authority?.ownerActor !== null && authority?.ownerActor !== undefined, authority?.ownerActor ?? undefined));
+      // SPEC R4/P1: this real authenticated GET is the owner_review_access
+      // entry evidence — pass the route signal into the readiness assembly.
+      sendSuccess(res, await getModel(workspaceDir).getOwnerReview(activationId, authority?.ownerActor !== null && authority?.ownerActor !== undefined, { ownerActor: authority?.ownerActor ?? undefined, routeContext: { servedThroughAuthenticatedConsoleRoute: true } }));
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       if (message.includes('requires exactly one') || message.includes('not found')) sendNotFound(res, message);

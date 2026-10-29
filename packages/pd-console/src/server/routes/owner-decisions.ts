@@ -215,7 +215,7 @@ export async function handleOwnerDecisionsRoute(
       return;
     }
     try {
-      const result = await getModel(workspaceDir).listOwnerDecisionItems();
+      const result = await getModel(workspaceDir).listOwnerDecisionItems({ servedThroughAuthenticatedConsoleRoute: true });
       sendSuccess(res, result);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

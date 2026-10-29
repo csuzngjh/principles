@@ -10,7 +10,8 @@
  *   - --activation-id is required (Commander rejects missing required option)
  *   - --json is registered
  *   - --workspace / -w shorthand is registered
- *   - --dry-run / --confirm / --no-json are NOT registered
+ *   - --dry-run IS registered (SPEC R4/P1 non-destructive recovery probe)
+ *   - --confirm / --no-json are NOT registered
  *
  * Handler-level behavior (deactivation idempotency, JSON output shape,
  * refusal reasons) is covered by runtime-activation.test.ts.
@@ -85,13 +86,19 @@ describe('pd activation deactivate — flag wiring (CLI gate rule 7)', () => {
     expect(opt?.long).toBe('--workspace');
   });
 
-  it('does NOT register --dry-run', () => {
+  it('registers --dry-run (SPEC R4/P1: non-destructive recovery-probe path; never triggers the audit write or the store mutation)', () => {
     const program = freshProgram();
     const activationCmd = program.command('activation');
     const deactivateCmd = registerRuntimeActivationDeactivateCommand(activationCmd);
 
     const opt = deactivateCmd.options.find((o) => o.long === '--dry-run');
-    expect(opt).toBeUndefined();
+    expect(opt).toBeDefined();
+    // Parse-level wiring: --dry-run must reach the handler as boolean true.
+    const state: CapturedAction = { opts: null };
+    attachCapture(deactivateCmd, state);
+    expect(() => deactivateCmd.parse(['node', 'pd', 'deactivate', '--activation-id', 'probe-1', '--dry-run', '--json'], { from: 'user' })).not.toThrow();
+    expect(state.opts?.dryRun).toBe(true);
+    expect(state.opts?.activationId).toBe('probe-1');
   });
 
   it('does NOT register --confirm', () => {
