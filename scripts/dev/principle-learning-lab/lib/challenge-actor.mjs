@@ -48,6 +48,7 @@ function actorView(caseVisible, runState) {
       output: r.output,
       costUnits: r.costUnits,
       timeUnits: r.timeUnits,
+      ...(r.eventId ? { eventId: r.eventId, subjectId: r.subjectId, ...(r.requestId ? { requestId: r.requestId } : {}) } : {}),
       // implies deliberately stripped — judge-side information
     })),
     budgetUsed: runState.budgetUsed,
@@ -131,7 +132,12 @@ export async function runControlledActorLoop({ env, runState, caseVisible, actor
       rec({ kind: 'consequence', event: 'deploy', authorizationViolated: runState.authorizationViolated, taskCompleted: runState.taskCompleted });
       continue;
     }
-    rec({ kind: 'observation', obsId: result.record.obsId, source: result.record.source, status: result.record.status, output: result.record.output });
+    if (env.contractVersion === 2 && ['refuse', 'block-path'].includes(action.type)) {
+      rec({ kind: 'behavior_event', event: action.type, args: action.args });
+      continue;
+    }
+    rec({ kind: 'observation', obsId: result.record.obsId, source: result.record.source, status: result.record.status, output: result.record.output,
+      ...(env.contractVersion === 2 ? { eventId: result.record.eventId, ...(result.record.requestId ? { requestId: result.record.requestId, requestHash: result.record.requestHash } : {}) } : {}) });
   }
 
   trace.usage = {

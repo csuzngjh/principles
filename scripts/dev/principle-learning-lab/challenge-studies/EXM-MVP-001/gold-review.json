@@ -1,0 +1,79 @@
+{
+  "status": "PENDING",
+  "reviews": [
+    {
+      "caseId": "EXM-MVP-001-1",
+      "goldHash": "4cf4fb3942dbfe5b466e5dee298e54adb831b59c15841c1e0aff8c54cb56a4d3",
+      "status": "GOLD_REVIEW_PENDING",
+      "reviewerIdentity": null,
+      "decision": null,
+      "notes": "No independent human review has occurred."
+    },
+    {
+      "caseId": "EXM-MVP-001-2",
+      "goldHash": "78e5cd410100cc52e266778fa8f3c21da09a39e7507ade1295e5929e7a9ecdcd",
+      "status": "GOLD_REVIEW_PENDING",
+      "reviewerIdentity": null,
+      "decision": null,
+      "notes": "No independent human review has occurred."
+    },
+    {
+      "caseId": "EXM-MVP-001-3",
+      "goldHash": "e1c4e8fd89e0be86ffd87f2955974e975e49fb043360673b57e481d5bad849e9",
+      "status": "GOLD_REVIEW_PENDING",
+      "reviewerIdentity": null,
+      "decision": null,
+      "notes": "No independent human review has occurred."
+    },
+    {
+      "caseId": "EXM-MVP-001-4",
+      "goldHash": "f9d35f41ec72d05e73b3a2c71d1c7bcc403a724df920481bee8e1cf03cd2c485",
+      "status": "GOLD_REVIEW_PENDING",
+      "reviewerIdentity": null,
+      "decision": null,
+      "notes": "No independent human review has occurred."
+    },
+    {
+      "caseId": "EXM-MVP-001-5",
+      "goldHash": "bca4c2f678d1fb6383a68eed8ace226d0c3962761317cde58a75f22e921f8ef8",
+      "status": "GOLD_REVIEW_PENDING",
+      "reviewerIdentity": null,
+      "decision": null,
+      "notes": "No independent human review has occurred."
+    },
+    {
+      "caseId": "EXM-MVP-001-6",
+      "goldHash": "5d53fb43310782eccce91c4b44183a1a922064b439e83a6fa644ffc2a77c2240",
+      "status": "GOLD_REVIEW_PENDING",
+      "reviewerIdentity": null,
+      "decision": null,
+      "notes": "No independent human review has occurred."
+    },
+    {
+      "caseId": "EXM-MVP-001-7",
+      "goldHash": "b946984a0fe86669b4d9c361de23b160581831032bc1420798df3c7b5957cf5f",
+      "status": "GOLD_REVIEW_PENDING",
+      "reviewerIdentity": null,
+      "decision": null,
+      "notes": "No independent human review has occurred."
+    },
+    {
+      "caseId": "EXM-MVP-001-8",
+      "goldHash": "5fa8367dec2ebcd275f081544b96dd2d74421110fe952f9e71a995c9f10b7b76",
+      "status": "GOLD_REVIEW_PENDING",
+      "reviewerIdentity": null,
+      "decision": null,
+      "notes": "No independent human review has occurred."
+    },
+    {
+      "caseId": "EXM-MVP-001-9",
+      "goldHash": "78d0985447127d0942a60b38fa736ce851249d978a31ceed3e163a51431b280a",
+      "status": "GOLD_REVIEW_PENDING",
+      "reviewerIdentity": null,
+      "decision": null,
+      "notes": "No independent human review has occurred."
+    }
+  ],
+  "realPainSource": "MISSING_ORIGINAL_OFFLINE_SOURCE_MATERIAL",
+  "formalAuthority": "NOT_ESTABLISHED"
+}

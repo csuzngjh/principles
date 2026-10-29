@@ -1,0 +1,68 @@
+
+> principles-disciple-monorepo@2.4.0 test:scripts
+> cd scripts && vitest run principle-learning-lab-challenge-
+
+
+ RUN  v5.0.0 D:/Code/principles/scripts
+
+[temp-lifecycle] .pd-test-temp: kept 12
+[temp-lifecycle] TMPDIR -> D:\Code\.pd-test-temp\vitest-20261029-165039-ff94b7
+ ❯ __tests__/principle-learning-lab-challenge-isolation-probe.test.ts (15 tests | 2 failed) 3287ms
+   ❯ B. verifyF2ProbeEvidence (4)
+     × B3: real-host evidence WITH corroborated rollouts verifies (wiring proof; fabrication boundary documented); missing codexHome fails closed 339ms
+   ❯ C. Stage R runner F2 integration (4)
+     × C2: with valid real-host evidence + corroborated rollouts an authorized F2 unit executes (wiring double — never real-host acceptance) 257ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  __tests__/principle-learning-lab-challenge-isolation-probe.test.ts > B. verifyF2ProbeEvidence > B3: real-host evidence WITH corroborated rollouts verifies (wiring proof; fabrication boundary documented); missing codexHome fails closed
+AssertionError: expected { ok: false, reasons: [ …(5) ] } to match object { ok: true, reasons: [] }
+
+- Expected
++ Received
+
+  {
+-   "ok": true,
+-   "reasons": [],
++   "ok": false,
++   "reasons": [
++     "probe session 'probe-s1' is not corroborated by a rollout under codexHome — record fields alone are never authorization evidence",
++     "probe session 'probe-s2' is not corroborated by a rollout under codexHome — record fields alone are never authorization evidence",
++     "probe session 'probe-s3' is not corroborated by a rollout under codexHome — record fields alone are never authorization evidence",
++     "probe session 'probe-s4' is not corroborated by a rollout under codexHome — record fields alone are never authorization evidence",
++     "probe session 'probe-s5' is not corroborated by a rollout under codexHome — record fields alone are never authorization evidence",
++   ],
+  }
+
+ ❯ __tests__/principle-learning-lab-challenge-isolation-probe.test.ts:283:15
+    281|     writeProbeEvidence(dir, codexHome);
+    282|     const v = verifyF2ProbeEvidence({ studyDir: dir, evidenceRef: EVID…
+    283|     expect(v).toMatchObject({ ok: true, reasons: [] });
+       |               ^
+    284|     const v2 = verifyF2ProbeEvidence({ studyDir: dir, evidenceRef: EVI…
+    285|     expect(v2.ok).toBe(false);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  __tests__/principle-learning-lab-challenge-isolation-probe.test.ts > C. Stage R runner F2 integration > C2: with valid real-host evidence + corroborated rollouts an authorized F2 unit executes (wiring double — never real-host acceptance)
+AssertionError: expected 'STAGE_R_REFUSED' to be 'SUCCEEDED' // Object.is equality
+
+Expected: "SUCCEEDED"
+Received: "STAGE_R_REFUSED"
+
+ ❯ __tests__/principle-learning-lab-challenge-isolation-probe.test.ts:376:36
+    374|       owner: 'probe-c2',
+    375|     });
+    376|     expect(summary.units[0].state).toBe('SUCCEEDED');
+       |                                    ^
+    377|     expect(readInside(dir, path.join('runs', CASE_ID, 'A', 'r1', 'a1.j…
+    378|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 12 passed (13)
+      Tests  2 failed | 372 passed (374)
+   Start at  16:50:39
+   Duration  18.43s (tests 81%, import 14%, transform 4%, worker 1%)
+

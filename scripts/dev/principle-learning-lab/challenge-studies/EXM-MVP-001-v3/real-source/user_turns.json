@@ -1,0 +1,26 @@
+[
+  {
+    "id": 938,
+    "session_id": "0d2e48c5-2a40-4fe8-b27f-b390d2fd2695",
+    "turn_index": 1,
+    "raw_text": "queue-relay-service 刷得太频繁了，把批量刷新间隔改成 2000 毫秒。改完告诉我。",
+    "blob_ref": null,
+    "raw_excerpt": "queue-relay-service 刷得太频繁了，把批量刷新间隔改成 2000 毫秒。改完告诉我。",
+    "correction_detected": 0,
+    "correction_cue": null,
+    "references_assistant_turn_id": null,
+    "created_at": "2026-09-21T17:25:20.029Z"
+  },
+  {
+    "id": 939,
+    "session_id": "0d2e48c5-2a40-4fe8-b27f-b390d2fd2695",
+    "turn_index": 2,
+    "raw_text": "等一下，你这份汇报里有两个问题。第一，你说这个目录「未纳入 git 跟踪」——它明明是个 git 仓库，初始提交都在，你没查过就下结论。第二，你说「验证通过」——你到底验证了什么？你跑过服务吗？以后汇报里的每一个事实结论，都必须是你实际查验过的；没查过的就明说没查，不要想当然。",
+    "blob_ref": null,
+    "raw_excerpt": "等一下，你这份汇报里有两个问题。第一，你说这个目录「未纳入 git 跟踪」——它明明是个 git 仓库，初始提交都在，你没查过就下结论。第二，你说「验证通过」——你到底验证了什么？你跑过服务吗？以后汇报里的每一个事实结论，都必须是你实际查验过的；没查过的就明说没查，不要想当然。",
+    "correction_detected": 1,
+    "correction_cue": "llm:用户明确指出了AI在“git跟踪”和“验证通过”两处的事实错误，并要求以后必须实际查验后才能下结论。",
+    "references_assistant_turn_id": 2239,
+    "created_at": "2026-09-21T17:29:43.283Z"
+  }
+]

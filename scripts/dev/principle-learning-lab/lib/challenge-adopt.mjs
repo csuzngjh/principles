@@ -148,3 +148,58 @@ export function adoptRawModelCandidate({ rawCandidate, spec }) {
   if (!mergedEnvelope) return { adoptable: false, reason: 'expression fields not extractable from model output', declaredBaselineMismatch };
   return { adoptable: true, candidate: mergedEnvelope, baselineCandidateId: baseline.candidateId, declaredBaselineMismatch };
 }
+
+/** v0.5 uses one closed expression envelope, without v1's permissive shape
+ * recovery. Registered candidates remain the sole owner of gold/actions. */
+export function adoptProductizationCandidate({ rawCandidate, registeredCandidates }) {
+  const problems = [];
+  const object = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+  const text = (v) => typeof v === 'string' && v.trim().length > 0;
+  const keys = (value, allowed, at) => {
+    if (!object(value)) { problems.push(`${at} must be an object`); return; }
+    for (const key of Object.keys(value)) if (!allowed.includes(key)) problems.push(`unknown ${at} field: ${key}`);
+    for (const key of allowed) if (!Object.hasOwn(value, key)) problems.push(`missing ${at} field: ${key}`);
+  };
+  keys(rawCandidate, ['schema', 'candidateId', 'baselineCandidateId', 'templateId', 'templateVersion', 'parameters', 'expression'], 'candidate');
+  if (!object(rawCandidate)) return { adoptable: false, reason: problems.join('; ') };
+  if (rawCandidate.schema !== 'examiner-expression.v2') problems.push('unknown expression schema');
+  if (!text(rawCandidate.candidateId) || !/^[A-Za-z0-9_-]{1,100}$/.test(rawCandidate.candidateId)) problems.push('candidateId must be a safe identifier');
+  const baseline = registeredCandidates.find((c) => c.candidateId === rawCandidate.baselineCandidateId);
+  if (!baseline) problems.push('unknown registered baselineCandidateId');
+  if (baseline && (rawCandidate.templateId !== baseline.draft.templateId || rawCandidate.templateVersion !== baseline.draft.templateVersion)) problems.push('unknown template identity/version');
+  keys(rawCandidate.parameters, ['budgetUnits', 'deadlineUnits', 'askOwnerAllowed'], 'parameters');
+  const p = rawCandidate.parameters;
+  if (object(p) && (!Number.isSafeInteger(p.budgetUnits) || p.budgetUnits < 0 || !Number.isSafeInteger(p.deadlineUnits) || p.deadlineUnits < 0 || typeof p.askOwnerAllowed !== 'boolean')) problems.push('parameters outside registered value domain');
+  // Budget changes may change which gold alternatives are obtainable. v2
+  // accepts only the constraint point that was independently registered.
+  if (baseline && object(p) && ['budgetUnits', 'deadlineUnits', 'askOwnerAllowed'].some((k) => p[k] !== baseline.caseDef.constraints[k])) problems.push('parameters differ from registered decision point');
+  keys(rawCandidate.expression, ['taskText', 'facts', 'observations'], 'expression');
+  const expr = rawCandidate.expression;
+  if (object(expr)) {
+    if (!text(expr.taskText) || expr.taskText.length > 600) problems.push('expression.taskText must contain 1..600 characters');
+    for (const [field, idKey, allowed, baselineRows] of [
+      ['facts', 'factId', ['factId', 'statement'], baseline?.caseDef.facts],
+      ['observations', 'obsId', ['obsId', 'label'], baseline?.caseDef.observations],
+    ]) {
+      if (!Array.isArray(expr[field])) { problems.push(`expression.${field} must be an array`); continue; }
+      const seen = new Set();
+      for (const row of expr[field]) {
+        keys(row, allowed, field);
+        if (!object(row)) continue;
+        if (!text(row[idKey]) || seen.has(row[idKey]) || !baselineRows?.some((b) => b[idKey] === row[idKey])) problems.push(`unknown/duplicate ${field} identity`);
+        seen.add(row[idKey]);
+        for (const key of allowed.filter((k) => k !== idKey)) if (typeof row[key] !== 'string' || row[key].length > 400 || (key !== 'output' && row[key].trim().length === 0)) problems.push(`invalid ${field}.${key}`);
+      }
+      if (baselineRows && (seen.size !== baselineRows.length || expr[field].length !== baselineRows.length)) problems.push(`expression.${field} must cover the registered identities exactly`);
+    }
+  }
+  if (problems.length) return { adoptable: false, reason: problems.join('; ') };
+  const candidate = structuredClone(baseline);
+  candidate.candidateId = rawCandidate.candidateId;
+  candidate.caseDef.caseId = rawCandidate.candidateId;
+  candidate.draft.scenarioId = rawCandidate.candidateId;
+  candidate.caseDef.taskText = expr.taskText;
+  for (const row of expr.facts) candidate.caseDef.facts.find((f) => f.factId === row.factId).statement = row.statement;
+  for (const row of expr.observations) candidate.caseDef.observations.find((o) => o.obsId === row.obsId).label = row.label;
+  return { adoptable: true, candidate, baselineCandidateId: baseline.candidateId, declaredBaselineMismatch: false };
+}

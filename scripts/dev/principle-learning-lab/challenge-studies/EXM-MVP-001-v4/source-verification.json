@@ -1,0 +1,70 @@
+{
+  "status": "OFFLINE_SNAPSHOT_HASHES_VERIFIED_NOT_HUMAN_REVIEWED",
+  "sqliteReadMode": "mode=ro&immutable=1",
+  "snapshotPath": "D:/Code/principles/pd-data-audit/raw_snapshot",
+  "snapshotFileHashes": [
+    {
+      "name": "live_state.db",
+      "sha256": "31e42e4a2dda223f7632f87e58de710a81e8a1a1e84011b67101cf4fcb84cd59"
+    },
+    {
+      "name": "live_trajectory.db",
+      "sha256": "c33bf26df91362a3ece251bdb2d251c8acb7e6d6d358a346b7012122e546894f"
+    }
+  ],
+  "painId": "pain_host_f31331de9908cd92da55ad27cc8fb1c5cc6855352db29b35ce070fa043a6052b",
+  "painRowHash": "679f23d6312bed5d48de0ba0842960b243ef805df6db25e82c864d7d880cd3a0",
+  "scribeArtifactId": "pi-art-scribe-95427453-ff20-45e9-bd9d-0592affdd86b-prompt-run_scribe-95427453-ff20-45e9-bd9d-0592affdd86b-prompt_1",
+  "principleContentHash": "8ac06edda31bcc4e5dc98a90bd1457435d1a7481a2477bb391c5d87824e9e3ca",
+  "sources": [
+    {
+      "path": "real-source/pain44.json",
+      "rows": 1,
+      "canonicalHash": "5ffae71627a0476eb9cf9ca2e23a3ddcc8381d43dfdd193da8c69d4e15ad2905",
+      "fileHash": "a8481b7c14e793c4244725b59955aef1c9771d97c1ac11a9618e36c48b1a72bb"
+    },
+    {
+      "path": "real-source/scribe.json",
+      "rows": 1,
+      "canonicalHash": "2a511454bb461ec7ffaee76b39f0671412becca82c6b37224305e1bd12825fbf",
+      "fileHash": "81aed2fd2a17638fed1ead42001e8f2dd652c623d21886ab0d5b36e43952f3ac"
+    },
+    {
+      "path": "real-source/dreamer.json",
+      "rows": 1,
+      "canonicalHash": "73485d2f3161b8d2f054539c35016ad348b8adc96bf31a2d2b83bbf25efa5142",
+      "fileHash": "b413cc37dded6bd45af97777a212ff778e97d817d2c0e6cf8e2b6399e0d9d996"
+    },
+    {
+      "path": "real-source/philosopher.json",
+      "rows": 1,
+      "canonicalHash": "83dfd2a07bd33a6f80d0d41ff48a34d781a5017015b0bfa61b6c1430b0758cb6",
+      "fileHash": "b94590464e8e861c61f2638d8f4df877d3e8f555268b8eeb97e17b508fa41f79"
+    },
+    {
+      "path": "real-source/pain_diagnoses.json",
+      "rows": 1,
+      "canonicalHash": "f396fb6ab156239007306acb9e29f0d7d123b7094948d150d57a35cc86ea9945",
+      "fileHash": "a1be8a8ab8ab5ff8a8a585c300ef9d8e7a5aa2fe16cd4cf9055e0c3ac2f196b1"
+    },
+    {
+      "path": "real-source/assistant_turns.json",
+      "rows": 1,
+      "canonicalHash": "c817ec1b2f9e1870d3826ff0766bc7b332a0f050af88133c7ede7ed95c2a59a2",
+      "fileHash": "571fa5a953c35e6338895cc9450491d7001766b33d9815557150667e4631487e"
+    },
+    {
+      "path": "real-source/user_turns.json",
+      "rows": 2,
+      "canonicalHash": "fbd3dbde88cb8a04f7a347e349c1e8852404cdb93ee20287f7821908aea5dd7c",
+      "fileHash": "c84d1a7e492bf315ef426f58066d958e337427ecea198eecb6462bae1f272819"
+    },
+    {
+      "path": "real-source/tool_calls.json",
+      "rows": 15,
+      "canonicalHash": "ab1cc49cc1fcb73c7eb66c8c8e4b423a5ba3661447ad232d6ab2f2ea5f2e7ddf",
+      "fileHash": "d97f733304640bba4cdfcb5d526dce16fd98a11632701a7b9ab310a30ffc13bc"
+    }
+  ],
+  "scope": "Mechanism lineage only. Synthetic configuration truth is NOT derived from real Pain or Principle."
+}

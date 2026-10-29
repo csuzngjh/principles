@@ -40,6 +40,11 @@
 *.tgz binary
 *.db binary
 *.sqlite binary
+# New Examiner evidence packages preserve exact original bytes (including
+# offline snapshot CRLF) rather than silently changing hashes on checkout.
+scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001/** -text
+scripts/dev/principle-learning-lab/challenge-studies/EXM-MVP-001-v*/** -text
+docs/research/examiner-productization-20261029/** -text
 # Git LFS — large binary assets tracked via LFS
 # Install Git LFS: https://git-lfs.com
 # After clone, run: git lfs pull

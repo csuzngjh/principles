@@ -52,12 +52,140 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { hashOfCanonical, challengeImplementationManifest } from './challenge-freeze.mjs';
+import { buildClaimEnvironment, newClaimRunState, stepClaimEnvironment } from './claim-evidence-env.mjs';
+import { adjudicateClaimEvidence } from './claim-evidence-scorer.mjs';
 
 import { sha256, verifyCanonicalHash } from './challenge-freeze.mjs';
 import { verifyFrozenStudy, isCapacityFailureDetail } from './challenge-runner.mjs';
 import { createChallengeLedger, acquireStudyWriteLock, releaseStudyWriteLock } from './challenge-ledger.mjs';
 
 export const BEHAVIOR_REPORT_SCHEMA = 'challenge-behavior-report.v1';
+
+// v0.5 is additive: historical v1 reports continue to copy their recorded
+// judgments. New offline evidence must instead replay actions under a pinned
+// implementation before any saved judgment is counted.
+export { challengeImplementationManifest };
+
+export function replayChallengeExecution({ caseDef, execution, implementation, studyId = 'EXM-MVP-001' }) {
+  if (hashOfCanonical(implementation) !== hashOfCanonical(challengeImplementationManifest())) {
+    throw new Error('IMPLEMENTATION_DRIFT');
+  }
+  if (caseDef.schema !== 'claim-evidence-judge-only.v2') throw new Error('v2 case required');
+  if (!execution || !execution.trace || !Array.isArray(execution.trace.records)
+      || execution.trace.records.length === 0) throw new Error('TRAJECTORY_EVIDENCE_INSUFFICIENT');
+  if (execution.caseHash !== hashOfCanonical(caseDef)) throw new Error('GOLD_OR_INPUT_DRIFT');
+  if (execution.trace.schema !== 'actor-trace.v1' || execution.trace.actorKind !== 'stub-scripted'
+      || hashOfCanonical(execution.trace.linkage) !== hashOfCanonical({ studyId, caseId: caseDef.caseId })) {
+    throw new Error('CALIBRATION_LINKAGE_INVALID');
+  }
+  const env = buildClaimEnvironment(caseDef);
+  const state = newClaimRunState(env);
+  let actions = 0;
+  let lastResult = null;
+  let invalidActions = 0;
+  const expectedObservations = [];
+  const expectedEvents = [];
+  for (const [seq, record] of execution.trace.records.entries()) {
+    if (!record || record.seq !== seq) throw new Error('TRACE_SEQUENCE_INVALID');
+    if (!['action', 'observation', 'invalid_action', 'narrative_carried', 'budget_event', 'consequence', 'termination', 'behavior_event'].includes(record.kind)) throw new Error('UNKNOWN_TRACE_RECORD');
+    if (record.kind === 'action') {
+      if (state.done) throw new Error('ACTION_AFTER_TERMINATION');
+      actions++;
+      lastResult = stepClaimEnvironment(env, state, record.action);
+      if (!lastResult.ok) invalidActions++;
+      if (!lastResult.ok) expectedEvents.push({ kind: 'invalid_action', error: lastResult.error });
+      else if (lastResult.record?.status === 'refused_budget') expectedEvents.push({ kind: 'budget_event', event: 'observation_refused_budget', obsId: lastResult.record.obsId, output: lastResult.record.output });
+      else if (record.action.type === 'report') expectedEvents.push({ kind: 'termination', reason: 'report_submitted', detail: 'actor submitted final claims' });
+      else if (record.action.type === 'deploy') expectedEvents.push({ kind: 'consequence', event: 'deploy', authorizationViolated: state.authorizationViolated, taskCompleted: state.taskCompleted });
+      else if (['refuse', 'block-path'].includes(record.action.type)) expectedEvents.push({ kind: 'behavior_event', event: record.action.type, args: record.action.args });
+      else expectedEvents.push({ kind: 'observation', obsId: lastResult.record.obsId, source: lastResult.record.source, status: lastResult.record.status, output: lastResult.record.output,
+        eventId: lastResult.record.eventId, ...(lastResult.record.requestId ? { requestId: lastResult.record.requestId, requestHash: lastResult.record.requestHash } : {}) });
+      if (lastResult.ok && lastResult.record && lastResult.record.status === 'ok') {
+        expectedObservations.push(Object.fromEntries(['obsId', 'source', 'status', 'output']
+          .map((key) => [key, lastResult.record[key]])));
+      }
+    } else if (record.kind === 'observation') {
+      if (!lastResult || !lastResult.record || ['obsId', 'source', 'status', 'output']
+        .some((key) => record[key] !== lastResult.record[key])) throw new Error('OBSERVATION_REPLAY_MISMATCH');
+    } else if (record.kind === 'invalid_action') {
+      if (!lastResult || lastResult.ok || record.error !== lastResult.error) throw new Error('INVALID_ACTION_REPLAY_MISMATCH');
+    } else if (record.kind === 'consequence') {
+      if (record.event !== 'deploy' || record.authorizationViolated !== state.authorizationViolated
+          || record.taskCompleted !== state.taskCompleted) throw new Error('CONSEQUENCE_REPLAY_MISMATCH');
+    } else if (record.kind === 'budget_event') {
+      if (!lastResult?.record || lastResult.record.status !== 'refused_budget'
+          || record.obsId !== lastResult.record.obsId || record.output !== lastResult.output) throw new Error('BUDGET_REPLAY_MISMATCH');
+    }
+  }
+  if (actions === 0) throw new Error('TRAJECTORY_EVIDENCE_INSUFFICIENT');
+  const actualEvents = execution.trace.records.filter((record) => !['action', 'narrative_carried'].includes(record.kind))
+    .map(({ seq: _seq, ...event }) => event);
+  if (hashOfCanonical(actualEvents) !== hashOfCanonical(expectedEvents)) throw new Error('TRACE_EVENTS_REPLAY_MISMATCH');
+  if (!state.report || hashOfCanonical(execution.trace.termination) !== hashOfCanonical({ reason: 'report_submitted', actorRunStatus: 'COMPLETED' })) {
+    throw new Error('EXECUTION_INCOMPLETE');
+  }
+  const usage = { steps: state.step, invalidActions,
+    observationsExecuted: state.executedObservations.filter((r) => r.status === 'ok').length,
+    budgetRefusals: state.refusedCount, budgetUsed: state.budgetUsed, timeUnits: state.timeUsed };
+  if (hashOfCanonical(usage) !== hashOfCanonical(execution.trace.usage)) throw new Error('USAGE_REPLAY_MISMATCH');
+  const observed = execution.trace.records.filter((r) => r.kind === 'observation')
+    .map((r) => Object.fromEntries(['obsId', 'source', 'status', 'output'].map((key) => [key, r[key]])));
+  if (hashOfCanonical(observed) !== hashOfCanonical(expectedObservations)) throw new Error('OBSERVATION_REPLAY_MISMATCH');
+  if (hashOfCanonical(execution.trace.finalReport) !== hashOfCanonical(state.report)) throw new Error('REPORT_REPLAY_MISMATCH');
+  if (hashOfCanonical(state) !== hashOfCanonical(execution.runState)) throw new Error('STATE_REPLAY_MISMATCH');
+  const adjudication = adjudicateClaimEvidence({ caseDef, runState: state });
+  if (hashOfCanonical(adjudication) !== hashOfCanonical(execution.adjudication)) throw new Error('SCORE_REPLAY_MISMATCH');
+  return adjudication;
+}
+
+export function buildProductizationCalibrationReport({ cases, executions, implementation, candidateCounts, studyId = 'EXM-MVP-001' }) {
+  if (hashOfCanonical(implementation) !== hashOfCanonical(challengeImplementationManifest())) throw new Error('IMPLEMENTATION_DRIFT');
+  if (!Array.isArray(cases) || !Array.isArray(executions)) throw new Error('cases/executions required');
+  const caseMap = new Map(cases.map((c) => [c.caseId, c]));
+  if (caseMap.size !== cases.length) throw new Error('duplicate case ID');
+  const ids = new Set();
+  const rows = executions.map((execution) => {
+    if (!execution || typeof execution.id !== 'string' || ids.has(execution.id)) throw new Error('duplicate/missing execution ID');
+    ids.add(execution.id);
+    const caseDef = caseMap.get(execution.caseId);
+    if (!caseDef) throw new Error('unknown execution case');
+    const score = replayChallengeExecution({ caseDef, execution, implementation, studyId });
+    return { id: execution.id, caseId: caseDef.caseId, strategy: execution.strategy, score };
+  });
+  const denominator = rows.length;
+  const negativeTransfer = rows.filter((r) => r.score.negativeTransfer === true).length;
+  const knownCandidates = candidateCounts && Number.isSafeInteger(candidateCounts.total) && candidateCounts.total >= 0;
+  if (candidateCounts && candidateCounts.total !== null && !knownCandidates) throw new Error('invalid candidate counts');
+  if (knownCandidates && (!Number.isSafeInteger(candidateCounts.valid) || candidateCounts.valid < 0
+      || candidateCounts.valid > candidateCounts.total)) throw new Error('invalid candidate counts');
+  return {
+    schema: 'challenge-productization-calibration-report.v1',
+    status: 'OFFLINE_ONLY_NOT_AUTHORIZED',
+    implementationHash: hashOfCanonical(implementation),
+    rows,
+    executionDenominator: denominator,
+    negativeTransfer: { numerator: negativeTransfer, denominator },
+    boundaryNegativeTransfer: {
+      numerator: rows.filter((r) => caseMap.get(r.caseId).principleApplicable === false && r.score.negativeTransfer === true).length,
+      denominator: rows.filter((r) => caseMap.get(r.caseId).principleApplicable === false).length,
+    },
+    negativeTransferMetrics: Object.fromEntries(['unnecessaryRefusal', 'alternativePathBlocking', 'repeatedConfirmation', 'inapplicableTrigger'].map((type) => [type, {
+      numerator: rows.filter((row) => row.score.negativeTransferTypes[type].some((event) => event.status === 'DETECTED')).length,
+      unknown: rows.filter((row) => row.score.negativeTransferTypes[type].some((event) => event.status === 'UNKNOWN')).length,
+      denominator, deduplication: 'one execution per type; overlapping types never summed',
+    }])),
+    overChecking: { numerator: rows.filter((row) => row.score.overCheck.overCheckOccurred).length, denominator,
+      unnecessaryCostUnits: rows.reduce((sum, row) => sum + row.score.overCheck.unnecessaryCostUnits, 0) },
+    candidateCounts,
+    validCandidateRate: knownCandidates && candidateCounts.total > 0
+      ? { numerator: candidateCounts.valid, denominator: candidateCounts.total }
+      : { status: 'NOT_ESTIMABLE', reason: 'empty_or_unknown_candidate_denominator' },
+    goldReview: 'GOLD_REVIEW_PENDING',
+    realExaminerValidCases: 0,
+    validatedBehavioralDiscriminationRate: { status: 'NOT_RUN', reason: 'calibration_is_not_real_behavior_experiment' },
+  };
+}
 export const REPORT_STATUS_READY = 'REPORT_READY';
 export const REPORT_STATUS_INCONCLUSIVE = 'REPORT_INCONCLUSIVE';
 export const REPORT_DIMENSIONS = [

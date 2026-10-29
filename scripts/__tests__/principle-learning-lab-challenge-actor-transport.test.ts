@@ -571,7 +571,7 @@ describe('D. F1 real-model actor via runChallengeStudy', () => {
 
   it('P1-5 (cross-mode): an F2 authorization refuses an F1 actor BEFORE any model request; an F1 authorization refuses an F2 adapter BEFORE any host round', async () => {
     const dirF2auth = copyStudy('crossmode-f2auth');
-    const codexHome = path.join(tmpRoot, `codex-crossmode-${++copyCounter}`);
+    const codexHome = fs.mkdtempSync(path.join(tmpRoot, 'codex-crossmode-'));
     writeF2ProbeEvidence(dirF2auth, codexHome); // evidence valid → the ACTOR mode mismatch is what refuses
     approveStudy(dirF2auth, f2AuthWithEvidence()); // F2 approved
     const responder = perfectPlayResponder();
@@ -668,7 +668,7 @@ describe('E. F2 host actor adapter', () => {
     // PRI-1037 wiring fixture: real-host-marked probe evidence + fabricated
     // rollouts under a tmp codexHome (cooperative boundary — wiring proof
     // only, never real-host acceptance).
-    const codexHome = path.join(tmpRoot, `codex-f2-happy-${++copyCounter}`);
+    const codexHome = fs.mkdtempSync(path.join(tmpRoot, 'codex-f2-happy-'));
     writeF2ProbeEvidence(dir, codexHome);
     approveStudy(dir, f2AuthWithEvidence());
     const host = fakeHostTransport({ identityStatus: 'VERIFIED', observedModel: 'gpt-6-luna', sessionId: 'sess-f2-9' });

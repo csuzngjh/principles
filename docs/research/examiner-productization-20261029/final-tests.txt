@@ -1,0 +1,15 @@
+
+> principles-disciple-monorepo@2.4.0 test:scripts
+> cd scripts && vitest run principle-learning-lab
+
+
+ RUN  v5.0.0 D:/Code/_worktrees/principles/adhoc-20261029-examiner-productization-20261029-0902da/scripts
+
+[temp-lifecycle] .pd-test-temp: kept 96
+[temp-lifecycle] TMPDIR -> D:\Code\_worktrees\principles\.pd-test-temp\vitest-20261029-225242-8649f3
+
+ Test Files  32 passed (32)
+      Tests  689 passed (689)
+   Start at  22:52:42
+   Duration  29.98s (tests 79%, import 14%, transform 7%)
+

@@ -180,11 +180,19 @@ function compileCaseV2(caseDef) {
     facts: caseDef.facts.map(({ factId, statement }) => ({ factId, statement })),
     availableObservations: caseDef.observations.map(({ obsId, action, label, costUnits, timeUnits }) => ({ obsId, action, label, costUnits, timeUnits })),
     availableOwnerRequests: Object.keys(caseDef.ownerAnswers || {}).map((requestType) => ({ requestType })),
+    behaviorActions: { refuse: { factId: 'fact identifier' }, 'block-path': { obsId: 'registered observation identifier' } },
     preSeededEvidence: env.preSeeded.map((obsId) => ({ obsId, output: env.observations.get(obsId).output })),
-    constraints: { ...env.constraints, ...(env.extraActions.deploy ? { extraActions: ['deploy'] } : {}) },
+    constraints: { ...env.constraints, ...(env.extraActions.deploy ? { extraActions: ['deploy'] } : {}),
+      ...(caseDef.gold.pathConstraints ? { pathConstraints: caseDef.gold.pathConstraints.map(({ obsId, decision, reasonCode }) => ({ obsId, decision, reasonCode })) } : {}) },
     reportSchema: {
       action: { type: 'report', args: { claims: [{ factId: 'string', verdict: 'verified_true|verified_false|inferred|unknown', evidenceRefs: ['obsId of an executed observation'], minimalSteps: 'string? (uncertainty verification steps)' }] } },
-      note: 'Use executed observations or pre-seeded evidence; multiple refs can support a conjunction. Narrative is not evidence.',
+      note: 'Prefer unique eventId references to executed observations or pre-seeded evidence. An obsId is accepted only when it resolves to exactly one event. inferred is a tentative assessment with executed basis and next steps; unknown states that no directional conclusion is justified and gives next steps. Narrative is not evidence.',
+      ...(caseDef.gold.assessmentContract === 'structured.v1' ? {
+        assessmentContract: 'structured.v1',
+        uncertaintyRequirements: structuredClone(caseDef.gold.uncertaintyRules),
+        inferredRequired: { assessment: { observedEventRefs: ['executed eventId'], tentativeDirection: 'true|false (tentative, never verified)', nextSteps: [{ type: 'observe|ask-owner|request-evidence', target: 'registered observation/requestType/factId' }] } },
+        unknownRequired: { uncertainty: { reasonCode: 'MISSING_EVIDENCE|CONFLICTING_EVIDENCE|STALE_EVIDENCE', nextSteps: [{ type: 'observe|ask-owner|request-evidence', target: 'registered observation/requestType/factId' }] } },
+      } : {}),
     },
   };
   const judgeOnly = structuredClone(caseDef);
