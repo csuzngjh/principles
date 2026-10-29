@@ -565,8 +565,35 @@ function removeBundledDependency(pkgPath, label, depName) {
   }
 }
 
-rewriteBundledDependency(join(PLUGIN_DEST, 'package.json'), 'plugin', '@principles/core', 'file:./core');
-removeBundledDependency(join(PLUGIN_DEST, 'package.json'), 'plugin', '@principles/host-runtime');
+// PRI-1037 payload fix: the shipped plugin is the self-contained dist/bundle.js
+// (setupEntry). Its only unresolved runtime import is the native better-sqlite3
+// module; every other declared dependency is inlined by esbuild at build time.
+// The historical file:./core rewrite dragged the 17,711-file core tree plus the
+// whole pi-ai transitive graph (openai/anthropic/aws-sdk) into BOTH plugin
+// install dirs, and OpenClaw's workspace-plugin capture then copied that payload
+// package-by-package into every `agent exec` state under a hard 120s publication
+// budget — timing out every exec.
+function pruneShippedPluginDependencies(pkgPath, keep) {
+  let pkg;
+  try {
+    pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+  } catch (err) {
+    if (err.code === 'ENOENT') return;
+    throw err;
+  }
+  const removed = [];
+  for (const section of ['dependencies', 'devDependencies']) {
+    for (const depName of Object.keys(pkg[section] ?? {})) {
+      if (keep.includes(depName)) continue;
+      delete pkg[section][depName];
+      removed.push(depName);
+    }
+  }
+  if (removed.length === 0) return;
+  writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
+  log(`  ✅ Pruned inlined deps from plugin/package.json: ${removed.join(', ')} (kept: ${keep.join(', ') || 'none'})`);
+}
+pruneShippedPluginDependencies(join(PLUGIN_DEST, 'package.json'), ['better-sqlite3']);
 rewriteBundledDependency(join(PD_CLI_DEST, 'package.json'), 'pd-cli', '@principles/core', 'file:../core');
 // pd-cli depends on @principles/host-runtime at runtime (it statically imports
 // createProductionHostRuntime). Rewrite to a local file reference so the
@@ -688,46 +715,40 @@ if (BUILD_SELF_CONTAINED_ASSET) {
     log(`  ✅ ${label}/node_modules is complete`);
   };
 
-  // plugin's local core reference is package-relative (`file:./core`). Provide
-  // the source while npm materializes it into node_modules via --install-links,
-  // then remove the temporary duplicate from the shipped component root.
-  cpSync(CORE_DEST, join(PLUGIN_DEST, 'core'), { recursive: true });
-  try {
-    await Promise.all([
-      installBundledRuntimeDependencies(CORE_DEST, 'core'),
-      installBundledRuntimeDependencies(HOST_RUNTIME_DEST, 'host-runtime'),
-    ]);
-    await installBundledRuntimeDependencies(PLUGIN_DEST, 'plugin');
-    const installedPluginCore = join(PLUGIN_DEST, 'node_modules', '@principles', 'core');
-    rmSync(installedPluginCore, { recursive: true, force: true });
-    cpSync(CORE_DEST, installedPluginCore, { recursive: true });
-    await Promise.all([
-      installBundledRuntimeDependencies(PD_CLI_DEST, 'pd-cli'),
-      installBundledRuntimeDependencies(CONSOLE_DEST, 'console'),
-      // install-layout has no runtime dependencies, but npm ci still verifies
-      // that its committed release lock matches the bundled package. Keep all
-      // release locks on the real PR build path without a second full
-      // component-materialization pass.
-      installBundledRuntimeDependencies(INSTALL_LAYOUT_DEST, 'install-layout'),
-      // PRI-672: ships tuf-js / @tufjs/models for the ReleaseManager authority
-      // module graph; its file:../install-layout dep materializes from the
-      // sibling component via --install-links.
-      installBundledRuntimeDependencies(RELEASE_MANAGER_DEST, 'release-manager'),
-      // PRI-711: pd-cli's eager import graph (health-codex) statically resolves
-      // @principles/codex-adapter, whose file:../core + file:../host-runtime
-      // deps must materialize here or every pd command dies with
-      // ERR_MODULE_NOT_FOUND on updated installs.
-      installBundledRuntimeDependencies(CODEX_ADAPTER_DEST, 'codex-adapter'),
-      // WorkBuddy adapter (SPEC §4.1): P05 lesson — the payload MUST ship its
-      // own runtime deps (better-sqlite3 native module included); the host's
-      // bundled copy is not requirable from outside the engine.
-      ...(WORKBUDDY_ADAPTER_PRESENT
-        ? [installBundledRuntimeDependencies(WORKBUDDY_ADAPTER_DEST, 'workbuddy-adapter')]
-        : []),
-    ]);
-  } finally {
-    rmSync(join(PLUGIN_DEST, 'core'), { recursive: true, force: true });
-  }
+  // PRI-1037 payload fix: the plugin is materialized from its own lean lock
+  // (self-contained dist plus the single native module dist/bundle.js imports).
+  // No core copy and no file:./core sibling exist anymore — that historical
+  // graph pulled the whole pi-ai tree into every plugin install, and OpenClaw's
+  // workspace-plugin capture copies the payload per `agent exec` under a hard
+  // 120s publication budget.
+  await Promise.all([
+    installBundledRuntimeDependencies(PLUGIN_DEST, 'plugin'),
+    installBundledRuntimeDependencies(CORE_DEST, 'core'),
+    installBundledRuntimeDependencies(HOST_RUNTIME_DEST, 'host-runtime'),
+    installBundledRuntimeDependencies(PD_CLI_DEST, 'pd-cli'),
+    installBundledRuntimeDependencies(CONSOLE_DEST, 'console'),
+    // install-layout has no runtime dependencies, but npm ci still verifies
+    // that its committed release lock matches the bundled package. Keep all
+    // release locks on the real PR build path without a second full
+    // component-materialization pass.
+    installBundledRuntimeDependencies(INSTALL_LAYOUT_DEST, 'install-layout'),
+    // PRI-672: ships tuf-js / @tufjs/models for the ReleaseManager authority
+    // module graph; its file:../install-layout dep materializes from the
+    // sibling component via --install-links.
+    installBundledRuntimeDependencies(RELEASE_MANAGER_DEST, 'release-manager'),
+    // PRI-711: pd-cli's eager import graph (health-codex) statically resolves
+    // @principles/codex-adapter, whose file:../core + file:../host-runtime
+    // deps must materialize here or every pd command dies with
+    // ERR_MODULE_NOT_FOUND on updated installs.
+    installBundledRuntimeDependencies(CODEX_ADAPTER_DEST, 'codex-adapter'),
+    // WorkBuddy adapter (SPEC §4.1): P05 lesson — the payload MUST ship its
+    // own runtime deps (better-sqlite3 native module included); the host's
+    // bundled copy is not requirable from outside the engine.
+    ...(WORKBUDDY_ADAPTER_PRESENT
+      ? [installBundledRuntimeDependencies(WORKBUDDY_ADAPTER_DEST, 'workbuddy-adapter')]
+      : []),
+  ]);
+  log('  ✅ plugin ships lean (self-contained dist + its single native module; no core copy)');
 } else {
   log('\nℹ️  Skipping platform node_modules (use --self-contained for release assets).');
 }
