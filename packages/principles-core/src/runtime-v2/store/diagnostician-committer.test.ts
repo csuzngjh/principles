@@ -19,6 +19,7 @@ import { SqliteRunStore } from './run/sqlite-run-store.js';
 import { SqliteDiagnosticianCommitter, type CommitInput } from './commit/diagnostician-committer.js';
 import { Value } from '@sinclair/typebox/value';
 import { Type } from '@sinclair/typebox';
+import { proposeShadowAssociations } from '../diagnostician-association-shadow.js';
 import type { DiagnosticianOutputV1, DiagnosticianOutputV2 } from '../diagnostician-output.js';
 
 describe('SqliteDiagnosticianCommitter', () => {
@@ -97,10 +98,20 @@ describe('SqliteDiagnosticianCommitter', () => {
     const artifact: unknown = connection.getDb().prepare('SELECT content_json FROM artifacts WHERE artifact_id = ?').get(first.artifactId);
     if (!Value.Check(Type.Object({ content_json: Type.String() }), artifact)) throw new Error('Missing artifact');
     expect(JSON.parse(artifact.content_json)).toEqual(envelope);
-    const rows: unknown = connection.getDb().prepare('SELECT source_recommendation_json FROM principle_candidates WHERE artifact_id = ? ORDER BY rowid').all(first.artifactId);
+    const rows: unknown = connection.getDb().prepare('SELECT candidate_id, artifact_id, source_recommendation_json FROM principle_candidates WHERE artifact_id = ? ORDER BY rowid').all(first.artifactId);
     if (!Value.Check(Type.Array(Type.Object({ source_recommendation_json: Type.String() })), rows)) throw new Error('Missing candidates');
     expect(rows.map((row) => JSON.parse(row.source_recommendation_json))).toEqual(output.recommendations);
     expect(rows).toHaveLength(2);
+    const persisted: unknown = connection.getDb().prepare('SELECT candidate_id AS candidateId, artifact_id AS artifactId, source_recommendation_json AS sourceRecommendation FROM principle_candidates WHERE artifact_id = ? ORDER BY rowid').all(first.artifactId);
+    if (!Value.Check(Type.Array(Type.Object({ candidateId: Type.String(), artifactId: Type.String(), sourceRecommendation: Type.String() })), persisted)) throw new Error('Missing persisted mapping');
+    const candidates = persisted.map((row) => ({ ...row, sourceRecommendation: JSON.parse(row.sourceRecommendation) }));
+    expect(proposeShadowAssociations(output, { principleIds: [], evidenceRefs: ['trace:1'] }, {
+      artifactId: first.artifactId, candidates,
+      resolvePrincipleCandidate: (id) => {
+        expect(id).toBe(candidates[0]?.candidateId);
+        return { status: 'resolved', principleId: '11111111-1111-4111-8111-111111111111' };
+      },
+    })).toMatchObject({ ok: true, proposals: [{ status: 'proposed', authorizesGeneration: false }] });
   });
 
   // ── COMT-06: CommitResult shape ──────────────────────────────────────────
