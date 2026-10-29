@@ -103,6 +103,10 @@ function runCli(cliEntry: string, args: readonly string[], timeoutMs: number): P
   });
 }
 
+function pathResolved(value: string): string {
+  return value.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+}
+
 export interface CliRecoveryProbeOptions {
   /** Absolute path to the built pd CLI entry (dist/index.js). */
   cliEntry: string;
@@ -167,10 +171,6 @@ export async function probeCliDeactivateDryRun(options: CliRecoveryProbeOptions)
     return capability('rulecode_deactivate', { channel: 'cli', ok: false, workspaceMatched: false, detail: `pd activation deactivate --dry-run: bound to ${String(parsed.workspaceDir)}, not the governed workspace` });
   }
   return capability('rulecode_deactivate', { channel: 'cli', ok: true, workspaceMatched: true });
-}
-
-function pathResolved(value: string): string {
-  return value.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
 }
 
 /** Both CLI-channel capabilities plus explicit NOT-VERIFIED entries for the console channel (fail closed, never fabricated). */
