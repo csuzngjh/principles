@@ -526,12 +526,24 @@ function countPayloadFiles(dir: string): number {
 }
 
 /**
- * PRI-913 Phase 1 (backup leg): the upgrade's rename-swap must have MOVED
- * (never traversed) the superseded trees. Exactly one runtime backup is
- * retained; it carries the N-1-stamped pd-cli, and its pd-cli core slot is
- * STILL a link (lstat) — proof the swap did not materialize or follow the
- * junction. The ext-plugin backup lives outside extensions/ (ERR-097
- * discovery isolation) and carries the lean PRI-1037 plugin payload.
+ * PRI-913 Phase 1 (backup leg), corrected for the lean PRI-1037 payload: the
+ * upgrade's rename-swap must have MOVED (never traversed) the superseded
+ * trees. Exactly one runtime backup is retained; it carries the N-1-stamped
+ * pd-cli. The rename-never-followed-a-junction proof now uses the
+ * codex-adapter core slot — the ONE slot the installer guarantees as a
+ * canonical LINK (expectCanonicalRuntimeLayout's documented invariant). The
+ * pd-cli `@principles/core` slot is a PHYSICAL copy by construction
+ * (self-contained payloads materialize file:../core via npm ci
+ * --install-links; syncPdCli then copies node_modules wholesale, so the
+ * post-copy link creation is skipped) AND this scenario additionally injects
+ * the PRI-665 physical duplicate into exactly that slot — asserting
+ * link-ness there was self-defeating and failed the publish release matrix
+ * (ubuntu-24.04, node 22.22.2; the test is excluded from test:fast so the
+ * PR never ran it). The physical slot instead proves the complementary
+ * invariant: the rename moved the injected tree verbatim (still a
+ * directory, still N-1 content, never traversed or re-materialized). The
+ * ext-plugin backup lives outside extensions/ (ERR-097 discovery isolation)
+ * and carries the lean PRI-1037 plugin payload.
  */
 function expectBackupTreesJunctionIntact(): void {
   const backupsDir = path.join(homeDir, '.pd', 'backups');
@@ -544,8 +556,22 @@ function expectBackupTreesJunctionIntact(): void {
     readPackageVersion(path.join(backupRuntime, 'pd-cli', 'package.json')),
     'the retained backup carries the superseded N-1 runtime',
   ).toBe(baselineVersion);
+  const backupAdapterCoreLink = path.join(backupRuntime, 'codex-adapter', 'node_modules', '@principles', 'core');
+  expect(
+    fs.lstatSync(backupAdapterCoreLink, { throwIfNoEntry: false })?.isSymbolicLink() ?? false,
+    'backup codex-adapter core link survived the rename (the swap never followed a junction)',
+  ).toBe(true);
   const backupPdCliSlot = path.join(backupRuntime, 'pd-cli', 'node_modules', '@principles', 'core');
-  expect(fs.lstatSync(backupPdCliSlot).isSymbolicLink(), 'backup pd-cli core slot survived the rename as a link').toBe(true);
+  const backupPdCliSlotStat = fs.lstatSync(backupPdCliSlot, { throwIfNoEntry: false });
+  expect(backupPdCliSlotStat, 'backup pd-cli core slot (the injected PRI-665 physical duplicate) survived the swap').toBeDefined();
+  expect(
+    backupPdCliSlotStat?.isSymbolicLink() === false && backupPdCliSlotStat?.isDirectory(),
+    'backup pd-cli core slot moved VERBATIM as the injected physical tree (never traversed or re-materialized)',
+  ).toBe(true);
+  expect(
+    readPackageVersion(path.join(backupPdCliSlot, 'package.json')),
+    'backup pd-cli core slot still carries the N-1 core content the scenario injected',
+  ).toBe(readPackageVersion(path.join(payloadN1Dir, 'core', 'package.json')));
   const backupPluginDir = path.join(backupRuntime, 'plugin');
   expect(fs.existsSync(path.join(backupPluginDir, 'dist', 'bundle.js')), 'backup plugin payload survived the swap').toBe(true);
   expect(
