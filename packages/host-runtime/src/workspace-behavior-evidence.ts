@@ -85,9 +85,9 @@ export function createWorkspaceBehaviorEvidencePort(workspaceDir: string, toolSe
  * `otherHostRows` counts rows stamped with a different host (a cross-host
  * session-id collision), and `unattributedRows` counts legacy rows with no
  * stamp (written before the column existed — attribution is unprovable, not
- * assumed). A database whose tool_calls predates the column entirely reports
- * every row as unattributed. The caller decides the failure policy; this
- * reader never guesses an attribution.
+ * assumed). A database whose tool_calls predates the column entirely counts
+ * every row in the unattributed bucket. The caller decides the failure
+ * policy; this reader never guesses an attribution.
  */
 export interface WorkspaceRuleContextRowsResult {
   rows: readonly RuleHostContextRow[];
