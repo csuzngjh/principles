@@ -50,14 +50,17 @@ export type RecoveryCompositionResult =
   | { ok: true }
   | { ok: false; probeId: string; blockerArtifactId?: string; reason: string };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function parseImplementationCode(artifact: RecoveryCompositionArtifact): string | null {
   if (typeof artifact.implementationCode === 'string' && artifact.implementationCode.trim().length > 0) return artifact.implementationCode;
   if (typeof artifact.contentJson === 'string') {
     try {
       const parsed: unknown = JSON.parse(artifact.contentJson);
-      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
-        && typeof (parsed as Record<string, unknown>).implementationCode === 'string') {
-        return (parsed as Record<string, unknown>).implementationCode as string;
+      if (isRecord(parsed) && typeof parsed.implementationCode === 'string') {
+        return parsed.implementationCode;
       }
     } catch {
       return null;
