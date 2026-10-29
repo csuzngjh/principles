@@ -247,7 +247,7 @@ export class OwnerDecisionConsoleModel {
    * 派生当前真实可执行的 Owner 决策列表（INV-01 / SPEC §27 badge 的唯一来源）。
    * N = items.length — 不是 candidate 数、不是 NHR 总数、不是 failed 数。
    */
-  async listOwnerDecisionItems(): Promise<OwnerDecisionListResult> {
+  async listOwnerDecisionItems(routeContext?: { servedThroughAuthenticatedConsoleRoute: boolean }): Promise<OwnerDecisionListResult> {
     const stateDbPath = path.join(this.workspaceDir, '.pd', 'state.db');
     if (!fs.existsSync(stateDbPath)) {
       return { items: [], total: 0, generatedAt: new Date().toISOString() };
@@ -331,7 +331,11 @@ export class OwnerDecisionConsoleModel {
           const artifactId = typeof row.artifact_id === 'string' ? row.artifact_id : '';
           const activationId = typeof row.activation_id === 'string' ? row.activation_id : '';
           try {
-            const review = await activationModel.getOwnerReview(activationId, true);
+            // SPEC R4/P1: this projection runs inside the real authenticated
+            // owner-decisions GET route — the route signal evidences the
+            // Console HTTP surface for the visibility evaluation; promotion
+            // still re-evaluates at the real owner-review/promote entry.
+            const review = await activationModel.getOwnerReview(activationId, true, { routeContext });
             if (review.readiness.status !== 'ready' && review.readiness.status !== 'evidence_insufficient') continue;
           } catch {
             continue;
