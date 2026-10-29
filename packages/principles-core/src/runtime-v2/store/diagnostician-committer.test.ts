@@ -109,7 +109,7 @@ describe('SqliteDiagnosticianCommitter', () => {
       artifactId: first.artifactId, candidates,
       resolvePrincipleCandidate: (id) => {
         expect(id).toBe(candidates[0]?.candidateId);
-        return { status: 'resolved', principleId: '11111111-1111-4111-8111-111111111111' };
+        return { status: 'resolved', candidateId: id, principleId: '11111111-1111-4111-8111-111111111111' };
       },
     })).toMatchObject({ ok: true, proposals: [{ status: 'proposed', authorizesGeneration: false }] });
   });

@@ -8,7 +8,7 @@ const CandidateRowsSchema = Type.Array(Type.Object({
   candidateId: Type.String({ minLength: 1 }), artifactId: Type.String({ minLength: 1 }),
   sourceRecommendation: DiagnosticianRecommendationV2Schema,
 }, { additionalProperties: false }));
-const IdentitySchema = Type.Object({ status: Type.Literal('resolved'), principleId: Type.String() });
+const IdentitySchema = Type.Object({ status: Type.Literal('resolved'), candidateId: Type.String({ minLength: 1 }), principleId: Type.String() });
 
 export interface ShadowAssociationProposal {
   mode: 'shadow';
@@ -69,7 +69,7 @@ export function proposeShadowAssociations(
         proposed.push(result);
         continue;
       }
-      if (Value.Check(IdentitySchema, identity) && isCanonicalBindingPrincipleId(identity.principleId)) {
+      if (Value.Check(IdentitySchema, identity) && identity.candidateId === candidate.candidateId && isCanonicalBindingPrincipleId(identity.principleId)) {
         result.status = 'proposed';
         result.reason = 'canonical_identity_proposed';
         result.principleId = identity.principleId;

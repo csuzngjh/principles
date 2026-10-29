@@ -23,7 +23,7 @@ describe('opt-in V2 association reference checks', () => {
     const candidates = value.recommendations.map((sourceRecommendation, index) => ({ candidateId: `candidate-${index}`, artifactId: 'artifact', sourceRecommendation }));
     const resolve = (id: string) => {
       expect(id).toBe('candidate-0');
-      return { status: 'resolved', principleId: '11111111-1111-4111-8111-111111111111' };
+      return { status: 'resolved', candidateId: id, principleId: '11111111-1111-4111-8111-111111111111' };
     };
     expect(proposeShadowAssociations(value, context, { artifactId: 'artifact', candidates, resolvePrincipleCandidate: resolve })).toMatchObject({ ok: true, proposals: [{
       status: 'proposed', targetCandidateId: 'candidate-0', authorizesGeneration: false,
@@ -32,6 +32,7 @@ describe('opt-in V2 association reference checks', () => {
     expect(proposeShadowAssociations(value, context, { artifactId: 'artifact', candidates: candidates.map((row, i) => i === 1 ? { ...row, artifactId: 'foreign' } : row), resolvePrincipleCandidate: resolve })).toMatchObject({ proposals: [{ reason: 'candidate_mapping_invalid' }] });
     expect(proposeShadowAssociations(value, context, { artifactId: 'artifact', candidates: candidates.map((row, i) => i === 1 ? { ...row, sourceRecommendation: { ...row.sourceRecommendation, description: 'tampered' } } : row), resolvePrincipleCandidate: resolve })).toMatchObject({ proposals: [{ reason: 'candidate_mapping_invalid' }] });
     expect(proposeShadowAssociations(value, context, { artifactId: 'artifact', candidates, resolvePrincipleCandidate: () => ({ status: 'unresolved', reason: 'ledger_corrupt' }) })).toMatchObject({ proposals: [{ reason: 'ledger_corrupt' }] });
+    expect(proposeShadowAssociations(value, context, { artifactId: 'artifact', candidates, resolvePrincipleCandidate: () => ({ status: 'resolved', candidateId: 'wrong', principleId: '11111111-1111-4111-8111-111111111111' }) })).toMatchObject({ proposals: [{ status: 'unresolved' }] });
     expect(proposeShadowAssociations(value, context, { artifactId: 'foreign', candidates, resolvePrincipleCandidate: resolve })).toMatchObject({ proposals: [{ reason: 'candidate_mapping_invalid' }] });
     expect(proposeShadowAssociations(value, context, { artifactId: 'artifact', candidates: [...candidates, ...candidates], resolvePrincipleCandidate: resolve })).toMatchObject({ proposals: [{ reason: 'candidate_mapping_invalid' }] });
     expect(proposeShadowAssociations(value, context, { artifactId: 'artifact', candidates, resolvePrincipleCandidate: () => ({ status: 'unresolved' }) })).toMatchObject({ proposals: [{ reason: 'related_candidate_unresolved' }] });
