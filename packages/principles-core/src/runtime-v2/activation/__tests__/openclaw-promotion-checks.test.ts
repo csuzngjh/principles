@@ -77,7 +77,7 @@ describe('OpenClaw Host Liveness promotion checks', () => {
     expect(checks.find(check => check.checkId === 'host_liveness_composition')).toEqual({
       checkId: 'host_liveness_composition',
       status: 'failed',
-      reasonCode: 'neutral_probe_or_live_composition_failed',
+      reasonCode: 'recovery_probe_composition_blocked',
     });
   });
 

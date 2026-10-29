@@ -19,8 +19,8 @@ import * as path from 'path';
 import * as os from 'os';
 import { ActivationsConsoleModel } from '../../src/server/models/ActivationsConsoleModel.js';
 import { updateFeatureFlag } from '../../src/server/config/pd-config-store.js';
-import { SqliteConnection } from '@principles/core/runtime-v2';
-import { saveHostToolDeclaration } from '@principles/host-runtime';
+import { SqliteConnection, collectOpenClawPromotionChecks } from '@principles/core/runtime-v2';
+import { saveHostToolDeclaration, OPENCLAW_HOST_LIVENESS_CONTRACT } from '@principles/host-runtime';
 import type { GovernanceAuditWriter } from 'principles-disciple/governance-audit';
 
 // ── Test Setup ───────────────────────────────────────────────────────────────
@@ -322,7 +322,7 @@ describe('ActivationsConsoleModel — governance action event coverage', () => {
     db.prepare("INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES ('task-promote', 'diagnosis', 'pending', ?, ?)").run(now, now);
     db.prepare(`INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
       VALUES ('artifact-promote', 'rule', 'task-promote', 'rule-promote', '[]', 'validated', ?, ?, ?)`)
-      .run(JSON.stringify({ implementationCode: 'export function evaluate(){ return { decision: "allow", matched: false, reason: "neutral" }; }' }), now, now);
+      .run(JSON.stringify({ implementationCode: 'function evaluate(input) { const risky = input.action.toolName === "edit_file" && input.action.paramsSummary.path === "/etc/passwd"; return { decision: risky ? "block" : "allow", matched: risky, reason: risky ? "risk path" : "neutral" }; }' }), now, now);
     db.prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at)
       VALUES ('act-promote', 'idem-promote', 'artifact-promote', 'code_tool_hook', 'code_tool_hook_shadow_activate', 'impl://rule-promote', ?, NULL)`).run(now);
     db.prepare("INSERT INTO activation_control_states (activation_id, enforcement, version, updated_at) VALUES ('act-promote', 'eligible', 1, ?)").run(now);
@@ -366,7 +366,7 @@ describe('ActivationsConsoleModel — governance action event coverage', () => {
     db.prepare("INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES ('task-emergency', 'diagnosis', 'pending', ?, ?)").run(now, now);
     db.prepare(`INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
       VALUES ('artifact-emergency', 'rule', 'task-emergency', 'rule-emergency', '[]', 'validated', ?, ?, ?)`)
-      .run(JSON.stringify({ implementationCode: 'export function evaluate(){ return { decision: "allow", matched: false, reason: "neutral" }; }' }), now, now);
+      .run(JSON.stringify({ implementationCode: 'function evaluate(input) { const risky = input.action.toolName === "edit_file" && input.action.paramsSummary.path === "/etc/passwd"; return { decision: risky ? "block" : "allow", matched: risky, reason: risky ? "risk path" : "neutral" }; }' }), now, now);
     db.prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at)
       VALUES ('act-emergency', 'idem-emergency', 'artifact-emergency', 'code_tool_hook', 'code_tool_hook_live_activate', 'impl://rule-emergency', ?, NULL)`).run(now);
     db.prepare("INSERT INTO activation_control_states (activation_id, enforcement, version, updated_at) VALUES ('act-emergency', 'eligible', 1, ?)").run(now);
@@ -423,7 +423,7 @@ describe('ActivationsConsoleModel — Owner review', () => {
     db.prepare("INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES ('task-review', 'diagnosis', 'pending', ?, ?)").run(now, now);
     db.prepare(`INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
       VALUES ('artifact-review', 'rule', 'task-review', 'rule-review', '["parent-1"]', 'validated', ?, ?, ?)`)
-      .run(JSON.stringify({ implementationCode: 'export function evaluate(){ return { decision: "allow", matched: false, reason: "neutral" }; }' }), now, now);
+      .run(JSON.stringify({ implementationCode: 'function evaluate(input) { const risky = input.action.toolName === "edit_file" && input.action.paramsSummary.path === "/etc/passwd"; return { decision: risky ? "block" : "allow", matched: risky, reason: risky ? "risk path" : "neutral" }; }' }), now, now);
     db.prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at)
       VALUES ('act-review', 'idem-review', 'artifact-review', 'code_tool_hook', 'code_tool_hook_shadow_activate', 'impl://rule-review', ?, NULL)`).run(now);
     db.prepare(`INSERT INTO activation_control_states (activation_id, enforcement, version, updated_at) VALUES ('act-review', 'eligible', 1, ?)`).run(now);
@@ -438,17 +438,21 @@ describe('ActivationsConsoleModel — Owner review', () => {
     expect(review.readiness.status).not.toBe('ready');
   });
 
-  it('PRI-813 (Test F): a Codex-declared workspace no longer inherits the OpenClaw capability claim — readiness and runtimeCapability report the truth', async () => {
-    // Before PRI-813 this exact fixture reported runtime_compatibility /
+  it('SPEC-HOST-PROMOTION B: a Codex-declared workspace resolves its OWN evidence-backed contract — never the OpenClaw claim; wrong-host contracts still fail runtime_compatibility', async () => {
+    // Before PRI-813 this fixture reported runtime_compatibility /
     // runtime_shadow_evidence as PASSED (the OpenClaw contract was passed
-    // unconditionally), and only the sample-count gate ever refused.
+    // unconditionally). SPEC-RULECODE-HOST-PROMOTION-001 B then gave Codex
+    // its OWN contract, so the truth this test locks in moves: the Codex
+    // workspace now reports codex-v2@1 (NOT openclaw-legacy@1), and the
+    // shape validator bound to the resolver's version rejects a wrong-host
+    // contract (the false-claim guard the original Test F existed for).
     const conn = new SqliteConnection({ workspaceDir, readonly: false });
     const db = conn.getDb();
     const now = '2026-09-16T06:00:00.000Z';
     db.prepare("INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES ('task-codex-813', 'diagnosis', 'pending', ?, ?)").run(now, now);
     db.prepare(`INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
       VALUES ('artifact-codex-813', 'rule', 'task-codex-813', 'rule-codex-813', '["parent-1"]', 'validated', ?, ?, ?)`)
-      .run(JSON.stringify({ implementationCode: 'export function evaluate(){ return { decision: "allow", matched: false, reason: "neutral" }; }' }), now, now);
+      .run(JSON.stringify({ implementationCode: 'function evaluate(input) { const risky = input.action.toolName === "edit_file" && input.action.paramsSummary.path === "/etc/passwd"; return { decision: risky ? "block" : "allow", matched: risky, reason: risky ? "risk path" : "neutral" }; }' }), now, now);
     db.prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at)
       VALUES ('act-codex-813', 'idem-codex-813', 'artifact-codex-813', 'code_tool_hook', 'code_tool_hook_shadow_activate', 'impl://rule-codex-813', ?, NULL)`).run(now);
     db.prepare(`INSERT INTO activation_control_states (activation_id, enforcement, version, updated_at) VALUES ('act-codex-813', 'eligible', 1, ?)`).run(now);
@@ -463,16 +467,27 @@ describe('ActivationsConsoleModel — Owner review', () => {
     const review = await model.getOwnerReview('act-codex-813');
 
     expect(review.readiness.status).not.toBe('ready');
-    // The overall result short-circuits to 'unavailable' while shadow
-    // telemetry is absent; the check-level capability truth rides in the
-    // evidence snapshot's safety gate results.
-    const failedIds = review.readiness.evidenceSnapshot.safetyGateResults
-      .filter(check => check.status === 'failed')
-      .map(check => check.checkId);
-    expect(failedIds).toContain('runtime_compatibility');
-    expect(failedIds).toContain('runtime_shadow_evidence');
-    expect(failedIds).toContain('emergency_controls');
-    expect(review.runtimeCapability).toEqual({ hostRuntimeVersion: 'promotion_host_unsupported', shadowEvidence: false });
+    // The Codex contract is real now: the capability surface reports the
+    // Codex runtime version and shadow support from Codex's own contract,
+    // never from the OpenClaw legacy claim.
+    expect(review.runtimeCapability).toEqual({ hostRuntimeVersion: 'codex-v2@1', shadowEvidence: true });
+    const byId = new Map(review.readiness.evidenceSnapshot.safetyGateResults.map(check => [check.checkId, check.status]));
+    expect(byId.get('runtime_compatibility')).toBe('passed');
+    // The false-claim guard survives as a version-binding check: presenting
+    // the OpenClaw legacy contract for this Codex workspace must fail
+    // runtime_compatibility (wrong-host capability authority).
+    const wrongHostChecks = await collectOpenClawPromotionChecks(
+      { artifactId: 'artifact-codex-813', artifactKind: 'rule', sourceTaskId: 'task-codex-813', sourcePrincipleId: null, sourceRuleId: 'rule-codex-813', lineageArtifactIds: ['parent-1'], validationStatus: 'validated', contentJson: JSON.stringify({ implementationCode: 'function evaluate(input) { const risky = input.action.toolName === "edit_file" && input.action.paramsSummary.path === "/etc/passwd"; return { decision: risky ? "block" : "allow", matched: risky, reason: risky ? "risk path" : "neutral" }; }', affectedTools: ['write'] }), createdAt: now, updatedAt: now },
+      {
+        ownerIdentityConfigured: true,
+        safetyControlsEnabled: true,
+        hostContract: OPENCLAW_HOST_LIVENESS_CONTRACT,
+        expectedHostContractVersion: 'codex-v2@1',
+        existingLiveArtifacts: [],
+        validateProductionArtifact: async () => ({ ok: true }),
+      },
+    );
+    expect(wrongHostChecks.find(check => check.checkId === 'runtime_compatibility')?.status).toBe('failed');
   });
 
   it('PRI-813 (Test G positive): an OpenClaw-declared workspace keeps the truthful OpenClaw capability — host checks stay passed', async () => {
@@ -483,9 +498,27 @@ describe('ActivationsConsoleModel — Owner review', () => {
     const db = conn.getDb();
     const now = '2026-09-16T07:00:00.000Z';
     db.prepare("INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES ('task-openclaw-813', 'diagnosis', 'pending', ?, ?)").run(now, now);
+    // SPEC R1: emergency_controls now requires the recovery probes to replay
+    // under composition — the fixture artifact carries a real golden trace and
+    // a bounded affectedTools scope like production artifacts.
     db.prepare(`INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
       VALUES ('artifact-openclaw-813', 'rule', 'task-openclaw-813', 'rule-openclaw-813', '["parent-1"]', 'validated', ?, ?, ?)`)
-      .run(JSON.stringify({ implementationCode: 'export function evaluate(){ return { decision: "allow", matched: false, reason: "neutral" }; }' }), now, now);
+      .run(JSON.stringify({
+        // Real OpenClaw vocabulary: `exec` is the hook-face shell tool
+        // (PRI-741); the rule, trace, and scope all use dispatched names so
+        // the adapter-layer dispatchability check passes and the recovery
+        // probes can actually replay (SPEC R1).
+        implementationCode: 'function evaluate(input) { const risky = input.action.toolName === "exec" && String(input.action.paramsSummary.command ?? "").includes("/etc/passwd"); return { decision: risky ? "block" : "allow", matched: risky, reason: risky ? "risk path" : "neutral" }; }',
+        goldenTrace: {
+          traceId: 'trace-openclaw-813', sourcePainId: 'pain-openclaw-813',
+          cases: [
+            { caseId: 'negative', kind: 'negative', toolName: 'exec', params: { command: 'echo x > /etc/passwd' }, expectedDecision: 'block' },
+            { caseId: 'positive', kind: 'positive', toolName: 'exec', params: { command: 'echo ok' }, expectedDecision: 'allow' },
+          ],
+          createdAt: now, version: 1,
+        },
+        affectedTools: ['exec'], ruleHostGateDecision: 'accepted_shadow',
+      }), now, now);
     db.prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at)
       VALUES ('act-openclaw-813', 'idem-openclaw-813', 'artifact-openclaw-813', 'code_tool_hook', 'code_tool_hook_shadow_activate', 'impl://rule-openclaw-813', ?, NULL)`).run(now);
     db.prepare(`INSERT INTO activation_control_states (activation_id, enforcement, version, updated_at) VALUES ('act-openclaw-813', 'eligible', 1, ?)`).run(now);
@@ -493,17 +526,62 @@ describe('ActivationsConsoleModel — Owner review', () => {
     expect(saveHostToolDeclaration(workspaceDir, {
       version: 1,
       hostKind: 'openclaw',
-      mappings: [{ rawToolName: 'shell', canonicalKind: 'execute' }],
+      mappings: [{ rawToolName: 'exec', canonicalKind: 'execute' }],
       declaredAt: now,
     }).ok).toBe(true);
 
-    const review = await model.getOwnerReview('act-openclaw-813');
+    // SPEC R4/P1: the owner_review_access capability is evidenced by the
+    // REAL authenticated Console route serving this evaluation — the test
+    // passes the same route signal the GET/promote routes pass in production.
+    const review = await model.getOwnerReview('act-openclaw-813', false, { routeContext: { servedThroughAuthenticatedConsoleRoute: true } });
 
     const hostChecks = review.readiness.evidenceSnapshot.safetyGateResults
       .filter(check => ['runtime_compatibility', 'runtime_shadow_evidence', 'emergency_controls'].includes(check.checkId));
     expect(hostChecks).toHaveLength(3);
     expect(hostChecks.every(check => check.status === 'passed')).toBe(true);
     expect(review.runtimeCapability).toEqual({ hostRuntimeVersion: 'openclaw-legacy@1', shadowEvidence: true });
+  });
+
+  it('SPEC R4/P1: WITHOUT the route-served signal, owner_review_access is not evidenced and emergency_controls fails (direct model calls never self-certify the HTTP entry)', async () => {
+    // Same workspace shape as Test G but WITHOUT the route signal: the
+    // owner-review entry must stay unverified — a direct model call cannot
+    // self-certify the browser→HTTP path.
+    const conn = new SqliteConnection({ workspaceDir, readonly: false });
+    const db = conn.getDb();
+    const now = '2026-09-16T07:30:00.000Z';
+    db.prepare("INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES ('task-noroute', 'diagnosis', 'pending', ?, ?)").run(now, now);
+    db.prepare(`INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, source_rule_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at)
+      VALUES ('artifact-noroute', 'rule', 'task-noroute', 'rule-noroute', '["parent-1"]', 'validated', ?, ?, ?)`)
+      .run(JSON.stringify({
+        implementationCode: 'function evaluate(input) { const risky = input.action.toolName === "exec" && String(input.action.paramsSummary.command ?? "").includes("/etc/passwd"); return { decision: risky ? "block" : "allow", matched: risky, reason: risky ? "risk path" : "neutral" }; }',
+        goldenTrace: {
+          traceId: 'trace-noroute', sourcePainId: 'pain-noroute',
+          cases: [
+            { caseId: 'negative', kind: 'negative', toolName: 'exec', params: { command: 'echo x > /etc/passwd' }, expectedDecision: 'block' },
+            { caseId: 'positive', kind: 'positive', toolName: 'exec', params: { command: 'echo ok' }, expectedDecision: 'allow' },
+          ],
+          createdAt: now, version: 1,
+        },
+        affectedTools: ['exec'], ruleHostGateDecision: 'accepted_shadow',
+      }), now, now);
+    db.prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at)
+      VALUES ('act-noroute', 'idem-noroute', 'artifact-noroute', 'code_tool_hook', 'code_tool_hook_shadow_activate', 'impl://rule-noroute', ?, NULL)`).run(now);
+    db.prepare(`INSERT INTO activation_control_states (activation_id, enforcement, version, updated_at) VALUES ('act-noroute', 'eligible', 1, ?)`).run(now);
+    conn.close();
+    expect(saveHostToolDeclaration(workspaceDir, {
+      version: 1,
+      hostKind: 'openclaw',
+      mappings: [{ rawToolName: 'exec', canonicalKind: 'execute' }],
+      declaredAt: now,
+    }).ok).toBe(true);
+
+    const review = await model.getOwnerReview('act-noroute');
+
+    const emergency = review.readiness.evidenceSnapshot.safetyGateResults.find(check => check.checkId === 'emergency_controls');
+    expect(emergency?.status).toBe('failed');
+    expect(['recovery_capability_evidence_incomplete', 'recovery_reachability_unverified']).toContain(emergency?.reasonCode);
+    // The overall readiness must never be promotable without the evidence.
+    expect(review.readiness.status).not.toBe('ready');
   });
 });
 

@@ -76,12 +76,17 @@ describe('frozen fixture payloads decode with exact field mapping', () => {
     });
   }
 
-  it('PostToolUse Read success: STRING tool_response passes through unmodified', () => {
+  it('PostToolUse Read success: STRING tool_response wraps into the channel-contract completion envelope (SPEC R2 wiring)', () => {
     const payload = payloadOf('post-tool-use-read-success.json');
     const event = decodeWorkbuddyInput(payload);
     expect(event.kind).toBe('after_tool_call');
-    // Verified success shape: no failure marker is invented on either side.
-    expect(event.context.toolOutput).toBe('   1→hello from proj-a\n   2→');
+    // SPEC-RULECODE-HOST-PROMOTION-001 R2: on the PostToolUse channel the
+    // frozen host contract is completion evidence (PostToolUseFailure is a
+    // separate registration). The rendered text rides verbatim inside the
+    // envelope; the record shape classifies as success for the shared writer
+    // so the durable row is provable WorkBuddy history. No failure marker is
+    // invented on either side.
+    expect(event.context.toolOutput).toEqual({ toolResponse: '   1→hello from proj-a\n   2→' });
     expect(event.context.toolCallId).toBe('toolu_p03_success');
   });
 
