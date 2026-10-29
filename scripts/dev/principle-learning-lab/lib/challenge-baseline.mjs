@@ -31,6 +31,7 @@ import path from 'node:path';
 import { readStageRAuthorization, deriveRealHostBaseline } from './challenge-stage-r-gate.mjs';
 import { verifyFrozenStudy } from './challenge-runner.mjs';
 import { readRolloutEvidenceForSession } from './host-actor.mjs';
+import { readOpenClawExecStateTrajectory } from './challenge-openclaw-host.mjs';
 
 function readAttemptFiles(runsDir) {
   if (!fs.existsSync(runsDir)) return [];
@@ -54,8 +55,16 @@ function readAttemptFiles(runsDir) {
  * Formal realHostBaseline for a study directory. Never throws — every
  * failure mode is a structured { status, reasons } verdict.
  *
- * `codexHome` is REQUIRED for corroboration: without it the derivation
- * refuses (UNKNOWN is not claimable when corroboration cannot even run).
+ * Corroboration dispatch follows the authorization's probe binding hostKind:
+ *   - 'openclaw' → each attempt's hostEvidence (kind 'openclaw-exec-state',
+ *     recorded at execution time by the F2 actor adapter) is corroborated
+ *     against the OpenClaw runtime's OWN per-round state database
+ *     (readOpenClawExecStateTrajectory; trustedRoot = the recorded stateDir);
+ *   - anything else → the historical codex path (rollout files under
+ *     codexHome), unchanged.
+ *
+ * `codexHome` is REQUIRED for the codex path; the openclaw path needs no
+ * home (the exec-state db travels with the attempt evidence).
  */
 export function deriveRealHostBaselineFromStudy(studyDir, { codexHome } = {}) {
   const notEstimable = (reason) => ({ status: 'NOT_ESTIMABLE', reasons: [reason] });
@@ -78,6 +87,46 @@ export function deriveRealHostBaselineFromStudy(studyDir, { codexHome } = {}) {
     expected: { suiteHash: bindings.suiteHash, requestedActorIdentity: typeof auth.requestedActorIdentity === 'string' ? auth.requestedActorIdentity : null },
   });
   if (verdict.status !== 'PASS') return verdict;
+
+  const openclawCorroboration = auth.isolationAcceptance
+    && auth.isolationAcceptance.realHostProbe
+    && auth.isolationAcceptance.realHostProbe.hostKind === 'openclaw';
+
+  if (openclawCorroboration) {
+    const corroborated = new Map();
+    for (const attempt of attempts) {
+      const evidence = attempt.observedHostEvidence;
+      const sessionId = evidence && evidence.hostSessionId;
+      if (!sessionId || corroborated.has(sessionId)) continue;
+      const loc = evidence.hostEvidence;
+      if (!loc || loc.kind !== 'openclaw-exec-state'
+        || typeof loc.stateAgentDb !== 'string' || typeof loc.stateDir !== 'string') {
+        corroborated.set(sessionId, `host session '${sessionId}' carries no openclaw-exec-state evidence location — record fields alone are never real-host acceptance evidence`);
+        continue;
+      }
+      const state = readOpenClawExecStateTrajectory({ stateAgentDb: loc.stateAgentDb, sessionId, trustedRoot: loc.stateDir });
+      if (!state || state.found !== true || state.ambiguous) {
+        corroborated.set(sessionId, `host session '${sessionId}' is not corroborated by the OpenClaw runtime's exec-state trajectory — record fields alone are never real-host acceptance evidence (${(state && state.reason) || 'no exec-state evidence'})`);
+        continue;
+      }
+      const observed = evidence.observedModelIdentity;
+      if (typeof state.model !== 'string' || state.model.length === 0) {
+        corroborated.set(sessionId, `exec-state trajectory for session '${sessionId}' carries no model identity — identity cannot be corroborated`);
+      } else if (state.model !== observed && !state.model.endsWith(`/${observed}`) && observed !== state.model.split('/').pop()) {
+        corroborated.set(sessionId, `exec-state trajectory for session '${sessionId}' reports model '${state.model}' which conflicts with the attempt's observed identity '${observed}'`);
+      }
+    }
+    const failures = [...corroborated.values()];
+    if (failures.length > 0) {
+      return { status: 'NOT_ESTIMABLE', reasons: failures };
+    }
+    return {
+      status: 'PASS',
+      reasons: [
+        `${attempts.length} F2-real-host attempt(s) with approved authorization linkage, lineage-consistent observed host evidence and OpenClaw exec-state-corroborated host sessions (≥1 SUCCEEDED)`,
+      ],
+    };
+  }
 
   if (typeof codexHome !== 'string' || codexHome.length === 0) {
     return notEstimable('codexHome not provided — host-session corroboration cannot run, so a formal PASS is not claimable (fail-closed)');
