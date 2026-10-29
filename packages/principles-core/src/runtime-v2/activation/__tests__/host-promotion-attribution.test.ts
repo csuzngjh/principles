@@ -5,11 +5,16 @@
 import { describe, expect, it } from 'vitest';
 import { summarizeRuleCodeShadowEvents } from '../rulecode-shadow-summary.js';
 import { collectOpenClawPromotionChecks } from '../openclaw-promotion-checks.js';
+import { verifyRecoveryProbeComposition } from '../recovery-composition.js';
+import { compileHardenedRuleEvaluator } from '../production-gate-deps.js';
+import { createSyntheticRuleHostInput } from '../../golden-trace.js';
+import { createRuleHostHelpers } from '../../internalization/rule-host-helpers.js';
 import { validateRecoveryControlSurfaces } from '../recovery-control-surfaces.js';
 import type { PIArtifactSnapshot } from '../activation-types.js';
 import type { HostLivenessContract } from '../openclaw-promotion-checks.js';
 
-function shadowEntry(activationId: string, hostKind: string | undefined, decision: 'allow' | 'block' = 'allow', matched = false): unknown {
+function shadowEntry(activationId: string, hostKind: string | undefined, outcome: { decision?: 'allow' | 'block'; matched?: boolean } = {}): unknown {
+  const { decision = 'allow', matched = false } = outcome;
   return {
     type: 'rulehost_evaluated',
     category: 'evaluated',
@@ -30,7 +35,7 @@ describe('summarizeRuleCodeShadowEvents — per-host attribution (SPEC B3/H05)',
   const activationId = 'act-attribution-1';
   const entries = [
     shadowEntry(activationId, 'codex'),
-    shadowEntry(activationId, 'codex', 'allow', true),
+    shadowEntry(activationId, 'codex', { decision: 'allow', matched: true }),
     shadowEntry(activationId, 'openclaw'),
     shadowEntry(activationId, 'openclaw'),
     shadowEntry(activationId, 'openclaw'),
@@ -64,13 +69,13 @@ describe('summarizeRuleCodeShadowEvents — per-host attribution (SPEC B3/H05)',
 
   // ── Review finding 3 (P2): unhealthy events must pass the host filter too ──
 
-  function unhealthyEntry(activationId: string, hostKind: string | undefined): unknown {
+  function unhealthyEntry(targetActivationId: string, hostKind: string | undefined): unknown {
     return {
       type: 'rulehost_unhealthy',
       category: 'failure',
       ts: '2026-10-28T10:00:00.000Z',
       data: {
-        activationId,
+        activationId: targetActivationId,
         ...(hostKind !== undefined ? { hostKind } : {}),
       },
     };
@@ -615,5 +620,42 @@ describe('emergency_controls binds to the REAL recovery surface registry (SPEC R
       status: 'failed',
       reasonCode: 'safety_controls_disabled',
     });
+  });
+});
+
+describe('R5 recovery probes under truthful synthetic V2 scenarios', () => {
+  const probe = { probeId: 'deactivate', toolName: 'Bash', params: { command: 'pd activation deactivate --activation-id recovery-probe' } };
+  const conditions = [
+    ["input.context?.facts?.designGate?.resolution === 'not_approved'", 'not-approved'],
+    ["input.context?.facts?.designGate?.resolution === 'approved'", 'approved'],
+    ["input.context?.facts?.designGate?.resolution === 'unknown'", 'unknown'],
+    ["input.context?.facts?.designGate?.resolution === 'not_required'", 'not-required'],
+    ["input.context?.facts?.designGate?.revoked === true", 'revoked'],
+    ["input.context?.facts?.readCount > 0", 'observed'],
+    ["input.context?.facts?.writeCount > 0", 'observed'],
+    ["input.context?.facts?.sameActionBlockCount > 0", 'observed'],
+    ["input.context?.history?.calls?.length > 0", 'observed'],
+    ["input.context?.history?.status === 'available' && input.context.facts.priorReadOfTarget === 'no'", 'empty'],
+    ["input.context?.history?.status === 'unavailable' && input.context?.facts?.designGate?.resolution === 'not_approved'", 'unavailable:not-approved'],
+  ];
+  it.each(conditions)('rejects a control blocker conditional on %s (old missing-context replay allowed it)', (condition, scenario) => {
+    const code = `function evaluate(input) { return (${condition}) ? { decision: 'block', matched: true, reason: 'conditional recovery lockout' } : { decision: 'allow', matched: false, reason: 'neutral' }; }`;
+    // Negative control replays the OLD boundary's exact missing-context input.
+    const oldInput = createSyntheticRuleHostInput({ toolName: probe.toolName, params: probe.params }, {}, { projectDir: '/workspace/recovery' });
+    const evaluator = compileHardenedRuleEvaluator(code, 'r5-old-boundary-negative-control');
+    expect(evaluator(oldInput, createRuleHostHelpers(oldInput)).decision).toBe('allow');
+    const result = verifyRecoveryProbeComposition({ artifacts: [{ artifactId: 'conditional-blocker', implementationCode: code }], probes: [probe], projectDir: '/workspace/recovery' });
+    expect(result).toMatchObject({ ok: false, probeId: probe.probeId, blockerArtifactId: 'conditional-blocker' });
+    if (!result.ok) expect(result.reason).toContain(scenario);
+  });
+
+  it('accepts context-independent control exemptions through the full mixed rule composition', () => {
+    const validCode = `function evaluate(input) {
+      var gate = input.context?.facts?.designGate;
+      if (gate && gate.resolution !== 'unknown' && (gate.taskRef !== gate.decisionTaskRef || gate.specDigest !== gate.decisionSpecDigest || gate.scopeRef !== gate.decisionScopeRef)) throw new Error('invalid synthetic binding');
+      if (input.action.paramsSummary.command.startsWith('pd activation ')) return { decision: 'allow', matched: false, reason: 'official recovery stays available' };
+      return gate?.resolution === 'not_approved' ? { decision: 'block', matched: true, reason: 'design approval required' } : { decision: 'allow', matched: false, reason: 'neutral' };
+    }`;
+    expect(verifyRecoveryProbeComposition({ artifacts: [{ artifactId: 'valid-control-exemption', implementationCode: validCode }, { artifactId: 'neutral-existing', implementationCode: 'function evaluate(){return {decision:"allow",matched:false,reason:"neutral"};}' }], probes: [probe], projectDir: '/workspace/recovery' })).toEqual({ ok: true });
   });
 });

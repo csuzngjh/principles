@@ -4,6 +4,8 @@ import { mergeDecisions } from '../internalization/rule-host-evaluator.js';
 import { validateRuleHostResult } from '../internalization/rule-host-validator.js';
 import { createRuleHostHelpers } from '../internalization/rule-host-helpers.js';
 import type { LoadedImplementation, RuleHostInput, RuleHostResult } from '../internalization/rule-host-contracts.js';
+import { computeBehaviorFacts, UNAVAILABLE_RULE_CONTEXT, type RuleContextV2, type RuleHistoryWindow } from '../internalization/rule-context-v2.js';
+import type { DesignGateFact } from '../internalization/design-gate-facts.js';
 import type { ToolSemanticRegistry } from '../internalization/tool-semantic-registry.js';
 
 /**
@@ -69,6 +71,44 @@ function parseImplementationCode(artifact: RecoveryCompositionArtifact): string 
   return null;
 }
 
+/** Synthetic control-safety scenarios, never production or historical approvals. */
+function recoveryContexts(probeInput: RuleHostInput): readonly { name: string; context?: RuleContextV2 }[] {
+  const target = probeInput.action.normalizedPath;
+  const histories: readonly { name: string; history: RuleHistoryWindow }[] = [
+    { name: 'empty', history: { status: 'available', truncated: false, calls: [] } },
+    { name: 'observed', history: { status: 'available', truncated: false, calls: [
+      { sequenceId: 1, toolName: 'read_file', canonicalKind: 'read', normalizedPath: target, paramsSummary: {}, outcome: 'success' },
+      { sequenceId: 2, toolName: 'write_file', canonicalKind: 'write', normalizedPath: target, paramsSummary: {}, outcome: 'success' },
+      { sequenceId: 3, toolName: probeInput.action.toolName, canonicalKind: probeInput.action.canonicalKind ?? 'other', normalizedPath: target, paramsSummary: {}, outcome: 'blocked' },
+    ] } },
+    { name: 'unavailable', history: UNAVAILABLE_RULE_CONTEXT.history },
+  ];
+  const base: DesignGateFact = {
+    version: 1, sourceRef: 'system-counterfactual:recovery-control', revision: 1,
+    requiresApproval: true, taskRef: 'recovery-task', specDigest: 'recovery-spec', scopeRef: 'recovery-scope',
+    decisionTaskRef: 'recovery-task', decisionSpecDigest: 'recovery-spec', decisionScopeRef: 'recovery-scope',
+    resolution: 'not_approved', revoked: false,
+  };
+  const facts: readonly { name: string; fact?: DesignGateFact }[] = [
+    { name: 'missing' },
+    { name: 'unknown', fact: { ...base, resolution: 'unknown', invalidationReason: 'source_unavailable' } },
+    { name: 'not-approved', fact: base },
+    { name: 'approved', fact: { ...base, resolution: 'approved' } },
+    { name: 'not-required', fact: { ...base, requiresApproval: false, resolution: 'not_required' } },
+    { name: 'revoked', fact: { ...base, revoked: true, invalidationReason: 'declaration_revoked' } },
+  ];
+  return [
+    { name: 'no-context' },
+    ...histories.flatMap(({ name, history }) => facts.map(variant => ({
+      name: `${name}:${variant.name}`,
+      context: {
+        version: 2 as const, history,
+        facts: { ...computeBehaviorFacts(history, target, history.status === 'unavailable' ? null : name === 'observed' ? 1 : 0), ...(variant.fact ? { designGate: variant.fact } : {}) },
+      },
+    }))),
+  ];
+}
+
 /**
  * Verify that the COMPOSED rule set (candidate + existing live) allows every
  * rule-interceptable recovery probe. Any rule that blocks (or escalates) a
@@ -92,42 +132,47 @@ export function verifyRecoveryProbeComposition(input: RecoveryCompositionInput):
   if (compiled.length === 0) return { ok: true };
 
   for (const probe of input.probes) {
-    const probeInput = createSyntheticRuleHostInput(
+    const baseInput = createSyntheticRuleHostInput(
       { toolName: probe.toolName, params: { ...probe.params } },
       {},
       { projectDir: input.projectDir, ...(input.toolSemantics !== undefined ? { toolSemantics: input.toolSemantics } : {}) },
     );
-    const results: { artifactId: string; result: RuleHostResult }[] = [];
-    for (const entry of compiled) {
-      let result: RuleHostResult;
-      try {
-        result = entry.evaluate(probeInput);
-      } catch (error: unknown) {
-        return { ok: false, probeId: probe.probeId, blockerArtifactId: entry.artifactId, reason: `rule threw during recovery probe ${probe.probeId}: ${error instanceof Error ? error.message : String(error)}` };
+    // A missing context alone exercises only neutral passthrough in V2 rules.
+    // Recovery must remain usable under actionable facts and observed history too.
+    for (const variant of recoveryContexts(baseInput)) {
+      const probeInput: RuleHostInput = { ...baseInput, ...(variant.context ? { context: variant.context } : {}) };
+      const results: { artifactId: string; result: RuleHostResult }[] = [];
+      for (const entry of compiled) {
+        let result: RuleHostResult;
+        try {
+          result = entry.evaluate(probeInput);
+        } catch (error: unknown) {
+          return { ok: false, probeId: probe.probeId, blockerArtifactId: entry.artifactId, reason: `rule threw during recovery probe ${probe.probeId}: ${error instanceof Error ? error.message : String(error)}` };
+        }
+        const validation = validateRuleHostResult(result);
+        if (!validation.valid) {
+          return { ok: false, probeId: probe.probeId, blockerArtifactId: entry.artifactId, reason: `rule returned an invalid result on recovery probe ${probe.probeId}: ${validation.errors.join('; ')}` };
+        }
+        results.push({ artifactId: entry.artifactId, result });
       }
-      const validation = validateRuleHostResult(result);
-      if (!validation.valid) {
-        return { ok: false, probeId: probe.probeId, blockerArtifactId: entry.artifactId, reason: `rule returned an invalid result on recovery probe ${probe.probeId}: ${validation.errors.join('; ')}` };
+      const implementations: LoadedImplementation[] = results.map((entry) => ({
+        implId: entry.artifactId,
+        ruleId: entry.artifactId,
+        meta: { name: entry.artifactId, version: '1', ruleId: entry.artifactId, coversCondition: 'all' },
+        evaluate: () => entry.result,
+      }));
+      const merged = mergeDecisions(implementations, probeInput);
+      if (merged !== undefined && merged.decision !== 'allow') {
+        // Attribute the winning decision back to its artifact by reference
+        // identity (the merge returns the winning rule's own result object).
+        const winner = results.find(entry => entry.result === merged);
+        return {
+          ok: false,
+          probeId: probe.probeId,
+          ...(winner !== undefined ? { blockerArtifactId: winner.artifactId } : {}),
+          reason: `recovery probe ${probe.probeId} would be ${merged.decision === 'block' ? 'blocked' : merged.decision} under the composed rule set (${variant.name})`,
+        };
       }
-      results.push({ artifactId: entry.artifactId, result });
-    }
-    const implementations: LoadedImplementation[] = results.map((entry) => ({
-      implId: entry.artifactId,
-      ruleId: entry.artifactId,
-      meta: { name: entry.artifactId, version: '1', ruleId: entry.artifactId, coversCondition: 'all' },
-      evaluate: () => entry.result,
-    }));
-    const merged = mergeDecisions(implementations, probeInput);
-    if (merged !== undefined && merged.decision !== 'allow') {
-      // Attribute the winning decision back to its artifact by reference
-      // identity (the merge returns the winning rule's own result object).
-      const winner = results.find(entry => entry.result === merged);
-      return {
-        ok: false,
-        probeId: probe.probeId,
-        ...(winner !== undefined ? { blockerArtifactId: winner.artifactId } : {}),
-        reason: `recovery probe ${probe.probeId} would be ${merged.decision === 'block' ? 'blocked' : merged.decision} under the composed rule set`,
-      };
     }
   }
   return { ok: true };

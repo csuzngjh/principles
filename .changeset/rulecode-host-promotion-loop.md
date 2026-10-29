@@ -103,3 +103,7 @@ RuleCode host promotion loop (SPEC-RULECODE-HOST-PROMOTION-001 v0.1, A→B→C):
     admission entry (both dedup queries), and the Codex ingestion chain each
     get cross-host collision, legacy-NULL, same-host idempotency, and
     terminal-protection regressions against real production entries.
+
+Round 5: verify recovery controls under actionable V2 facts and history,
+normalize probe paths in linear time, and compile RuleCode separately from
+its fixed VM JSON bridge without weakening sandbox limits.

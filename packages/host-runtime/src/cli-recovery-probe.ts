@@ -104,7 +104,10 @@ function runCli(cliEntry: string, args: readonly string[], timeoutMs: number): P
 }
 
 function pathResolved(value: string): string {
-  return value.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  const normalized = value.replace(/\\/g, '/');
+  let end = normalized.length;
+  while (end > 0 && normalized.charCodeAt(end - 1) === 47) end -= 1;
+  return normalized.slice(0, end).toLowerCase();
 }
 
 export interface CliRecoveryProbeOptions {

@@ -251,3 +251,17 @@ native（真实客户端带外恢复、真实安装环境四能力验证）仍 N
 3. CI 严格 tsc 抓到测试文件索引访问（`6f4f1b2e7`）——已改具名常量。
 
 **CodeQL 幽灵 check-run 说明**：最终 head（`136d96a9a`，empty commit 重建 check 行）上，GitHub 同时存在一个失败的 "CodeQL" 聚合 check-run（4 秒、无对应 workflow run、re-run API 404）与一个成功的真实分析 job（run `40900216980`，"Analyze (javascript-typescript)" success；此前 `6c86f9545` 上两个 run 亦 success）。该聚合行 main 上不存在、无日志、无法重跑，属平台残留；CodeQL 非 branch protection required check（唯一 required = Verify Merge Gate，passed），PR 保持 MERGEABLE。两个真实分析 run 覆盖的代码内容与最终 head 完全一致。
+
+## Round 5：Owner 复核阻断修复（2026-10-29）
+
+- 源码基线：a6e37d1c7639ba34d63cdbcd3e3b32fafc735553；单独任务工作树，未写入仍由 ZCode 持有租约的原工作树。
+- 恢复组合验证：每条真实恢复命令增加19个合成场景（无上下文及3类历史×6类设计事实），覆盖可行动not_approved、合法批准/无需批准、未知/缺失/撤销与无历史。事实派生复用computeBehaviorFacts；此为系统反事实，不是生产Owner批准。条件性锁死规则不再仅凭缺事实中性放行取得资格。
+- 回归：新增12例，含11例旧无上下文实现放行的负控；明确豁免恢复命令的合法混合组合正例仍通过。独立子代理复评：未发现新增确定P1/P2；相关core 77/77通过，host-runtime路径探针6/6通过。
+- CodeQL high 784：用反向尾部扫描替代多项式尾斜杠正则；公开探针测试25万斜杠后接非斜杠的恶意响应快速拒绝。
+- CodeQL medium 528：该告警首次记录于2026-09-16，属于既有动态规则编译器的新调用链。将可执行RuleCode源与固定JSON桥分成两个vm.Script，同一隔离realm中顺序编译，不再把不可信源插入固定桥代码字符串；JSON原始字符串跨界、编译/调用超时和microtask约束保留。没有关闭安全规则或添加告警抑制。
+- 勘误：Round4所谓CodeQL“平台残留”结论撤回。检查123549745787实际包含high/medium两条注释，分析job成功不等于告警检查通过。以新head实际扫描结果验收，禁止预报告警已消失。
+- 记录复用教训：ERR-025 recovery-probes-cover-actionable-context；ERR-120 path-normalization-linear-time，均通过正规error:record入口新增occurrence。
+- Complexity Delta：新持久权威/状态/子系统/feature flag/公共接口/网络能力均NO；仅扩充现有合成恢复场景与分离现有VM源和静态桥。
+- 限制：有限场景不证明任意RuleCode在无限历史下绝对安全。当前批准的原52d规则若在可信未批准状态阻止恢复命令，将被新恢复检查拒绝；这属于拒绝不安全上线，不能报告原工件已获上线资格。需在后续官方规则修订或保护路径中处理，不在本轮手改生产工件。
+- native/安装/生产live：均未执行；原shadow及Owner审批历史未修改；没有合并或发版。
+- 回滚：revert本轮修复提交；无数据库迁移。验证与远程CI结果见本轮最终PR证据评论。
