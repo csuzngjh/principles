@@ -78,6 +78,12 @@ export { evaluateRuleCodeSafetyCircuit, initialRuleCodeSafetyCircuitState } from
 export type { RuleCodeSafetySample, RuleCodeSafetyCircuitState, RuleCodeSafetyTripReason } from './rulecode-safety-circuit-breaker.js';
 export { collectOpenClawPromotionChecks } from './openclaw-promotion-checks.js';
 export type { HostLivenessContract } from './openclaw-promotion-checks.js';
+export type { RecoveryReachabilityEvidence, RecoveryCapabilityEvidence, RecoveryCapabilityCoverage } from './openclaw-promotion-checks.js';
+export { validateRecoveryCapabilityCoverage } from './openclaw-promotion-checks.js';
+export { RECOVERY_CONTROL_SURFACES, validateRecoveryControlSurfaces } from './recovery-control-surfaces.js';
+export type { RecoveryControlCapability, RecoveryControlSurface, RecoveryControlValidation } from './recovery-control-surfaces.js';
+export { verifyRecoveryProbeComposition } from './recovery-composition.js';
+export type { RecoveryCompositionArtifact, RecoveryCompositionInput, RecoveryCompositionProbe, RecoveryCompositionResult } from './recovery-composition.js';
 export { summarizeRuleCodeShadowEvents } from './rulecode-shadow-summary.js';
 export type { RuleCodeShadowSummary } from './rulecode-shadow-summary.js';
 export { buildPromotionEvidenceSnapshot, computeArtifactDigest, normalizeOwnerIdentity, verifyPiArtifactRowDigest } from './promotion-evidence-snapshot.js';

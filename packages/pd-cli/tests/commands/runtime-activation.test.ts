@@ -27,13 +27,22 @@ const mockListCodeToolHookActivations = vi.fn().mockResolvedValue([
   { activationId: 'act-hook-1', artifactId: 'art-002', channel: 'code_tool_hook', action: 'code_tool_hook_shadow_activate', targetRef: 'rule-001', activatedAt: '2026-06-18T00:00:00.000Z', promotedAt: null, deactivatedAt: null },
 ]);
 
-vi.mock('../../src/services/workspace-tool-semantics.js', () => ({
+vi.mock('../../src/services/workspace-tool-semantics.js', async () => {
   // Unit boundary: dispatch/approve tests exercise flag wiring and approval
   // state transitions; host-provenance resolution has its own contract tests
   // (workspace-tool-semantics.test.ts). Tests that need the refusal path
-  // override the return value via vi.mocked.
-  resolveWorkspaceToolSemantics: vi.fn().mockReturnValue({ ok: true, registry: { version: 1, hasHostLayer: true }, hostKind: 'test-host' }),
-}));
+  // override the return value via vi.mocked. The default registry is a REAL
+  // built one (SPEC R3/P1: readiness composition executes rules through it —
+  // a fake without resolve would break the production code path under test).
+  const { buildToolSemanticRegistry } = await import('@principles/core/runtime-v2');
+  return {
+    resolveWorkspaceToolSemantics: vi.fn().mockReturnValue({
+      ok: true,
+      registry: buildToolSemanticRegistry().registry,
+      hostKind: 'test-host',
+    }),
+  };
+});
 
 vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn().mockReturnValue('/fake/workspace'),
@@ -1026,7 +1035,7 @@ describe('handleRuntimeActivationPromote', () => {
     expect(process.exitCode).toBe(1);
   });
 
-  it('P0-3: commit store failure emits structured refusal JSON and exit code 1', async () => {
+  it('P0-3 (R4): CLI promote refuses at emergency_controls when console-channel recovery evidence is unavailable from the CLI process (fail closed; commit-failure semantics covered at the service level)', async () => {
     mockFeatureFlags.flags.rulecode_owner_live_decision.enabled = true;
     vi.stubEnv('PD_CONSOLE_TOKEN', 'configured-secret');
     vi.stubEnv('PD_OWNER_ID', 'owner-1');
@@ -1037,6 +1046,7 @@ describe('handleRuntimeActivationPromote', () => {
       lineageArtifactIds: ['task-000'],
       contentJson: JSON.stringify({
         principleId: 'P_001',
+        implementationCode: 'function evaluate(input) { return { decision: "allow", matched: false, reason: "neutral" }; } var meta={name:"p03",version:"1",ruleId:"R_P03",coversCondition:"all"};',
         affectedTools: ['Bash'],
         goldenTrace: {
           traceId: 'trace-1',
@@ -1053,6 +1063,20 @@ describe('handleRuntimeActivationPromote', () => {
     // shadow telemetry source, so seed a real events file before promoting.
     const wsDir = mkdtempSync(path.join(tmpdir(), 'pd-cli-p03-'));
     mkdirSync(path.join(wsDir, '.pd', 'logs'), { recursive: true });
+    // SPEC R3/P1+R4/P1: readiness probes the REAL CLI entries against the
+    // target workspace — seed a real state.db so the two CLI-channel probes
+    // are exercised for real (the console-channel entries still come back
+    // not-verified from a CLI process, which is exactly what this test now
+    // asserts).
+    {
+      const { SqliteConnection } = await import('@principles/core/runtime-v2');
+      const conn = new SqliteConnection({ workspaceDir: wsDir, readonly: false });
+      const now = '2026-01-01T00:00:00.000Z';
+      conn.getDb().prepare("INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES ('task-000', 'diagnosis', 'pending', ?, ?)").run(now, now);
+      conn.getDb().prepare(`INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at) VALUES ('art-002', 'rule', 'task-000', '["parent-1"]', 'validated', '{}', ?, ?)`).run(now, now);
+      conn.getDb().prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at) VALUES ('act-hook-1', 'idem-p03', 'art-002', 'code_tool_hook', 'code_tool_hook_shadow_activate', 'impl://R_P03', ?, NULL)`).run(now);
+      conn.close();
+    }
     writeFileSync(
       path.join(wsDir, '.pd', 'logs', 'events_20260821.jsonl'),
       `${JSON.stringify({ type: 'rulehost_evaluated', ts: '2026-08-21T00:00:00.000Z', data: { activationId: 'act-hook-1', activationMode: 'shadow', matched: true, decision: 'allow' } })}\n`,
@@ -1075,12 +1099,18 @@ describe('handleRuntimeActivationPromote', () => {
 
       const output = JSON.parse(consoleLogSpy.mock.calls[0][0]) as {
         ok: boolean; decision: string; reasonCode: string; summary?: string; nextAction?: string;
+        failedChecks?: { checkId: string; reasonCode: string }[];
       };
+      // SPEC R4/P1: the CLI process can only evidence the two CLI-channel
+      // capabilities (real subprocesses); the console-channel recovery
+      // entries are reported NOT verified, so emergency_controls fails and
+      // promotion is refused BEFORE any commit attempt — fail closed.
       expect(output.ok).toBe(false);
       expect(output.decision).toBe('refused');
-      expect(output.reasonCode).toBe('promotion_commit_failed');
-      expect(output.summary).toContain('durable safety store');
-      expect(output.nextAction).toContain('retry');
+      expect(output.reasonCode).toBe('promotion_safety_gate_blocked');
+      const emergency = (output.failedChecks ?? []).find(check => check.checkId === 'emergency_controls');
+      expect(emergency).toBeDefined();
+      expect(['recovery_capability_evidence_incomplete', 'recovery_reachability_unverified']).toContain(emergency?.reasonCode);
       expect(process.exitCode).toBe(1);
       expect(mockPromoteActivation).not.toHaveBeenCalled();
     } finally {

@@ -48,6 +48,7 @@
 //     probe authorization's targetHost.kind selects the adapter.
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 export const OPENCLAW_TRAJECTORY_POINTER_SCHEMA = 'openclaw-trajectory-pointer';
@@ -64,6 +65,53 @@ export function resolveAmbientStateRoot(env = process.env) {
   if (explicit) return explicit;
   if (home) return path.join(home, '.openclaw');
   throw new Error('resolveAmbientStateRoot: cannot resolve the ambient OpenClaw state root (no OPENCLAW_STATE_DIR / OPENCLAW_HOME / USERPROFILE / HOME)');
+}
+
+/** S9 (PRI-1037 runtime repair): child-process TEMP/TMP normalization.
+ *
+ *  Windows can hand a process an 8.3 short temp path (C:\Users\ADMINI~1\...).
+ *  OpenClaw's plugin capture then fails with
+ *    FsSafeError: copy path changed during operation
+ *  because the same file is addressed by two different spellings during the
+ *  copy/verify pass. The fix is scoped to the host child we spawn: resolve the
+ *  real (long) directory and hand ONLY that child TEMP/TMP. The parent/user
+ *  environment is never mutated.
+ *
+ *  Fail-closed (rc-3): a temp directory that cannot be resolved, is not a
+ *  directory, or is not writable REFUSES the transport — passing the short
+ *  path through would reproduce the failure on user machines. */
+export function resolveChildTempEnv({ sourceEnv = process.env, platform = process.platform } = {}) {
+  if (platform !== 'win32') return {};
+  const declared = [sourceEnv.TEMP, sourceEnv.TMP].find((value) => typeof value === 'string' && value.trim().length > 0);
+  const candidate = declared ? declared.trim() : os.tmpdir();
+  let resolved;
+  try {
+    // realpathSync.native resolves 8.3 short names to their long form on Windows.
+    resolved = fs.realpathSync.native(candidate);
+  } catch (err) {
+    throw new Error(`openclaw transport: cannot resolve a real temporary directory for the child process (${candidate}): ${err instanceof Error ? err.message : String(err)}. Refusing to spawn with an unusable TEMP.`);
+  }
+  // Keep drive roots intact (C:\ must not become C:).
+  const normalized = /^[A-Za-z]:\\$/.test(resolved) ? resolved : resolved.replace(/[\\/]+$/, '');
+  let stats;
+  try {
+    stats = fs.statSync(normalized);
+  } catch (err) {
+    throw new Error(`openclaw transport: resolved temporary directory is not accessible (${normalized}): ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (!stats.isDirectory()) {
+    throw new Error(`openclaw transport: temporary directory path is not a directory (${normalized}) — the child would receive an unusable TEMP/TMP.`);
+  }
+  let probeDir;
+  try {
+    // accessSync(W_OK) is unreliable for directories on Windows; a real
+    // create/remove proves the child can use the directory.
+    probeDir = fs.mkdtempSync(path.join(normalized, 'pd-child-temp-probe-'));
+  } catch (err) {
+    throw new Error(`openclaw transport: temporary directory is not writable (${normalized}): ${err instanceof Error ? err.message : String(err)}`);
+  }
+  fs.rmSync(probeDir, { recursive: true, force: true });
+  return { TEMP: normalized, TMP: normalized };
 }
 
 export const OPENCLAW_PROBE_AGENTS_HEADER = '<!-- PRI-1037 isolation-probe system instructions (loaded by the OpenClaw runtime as workspace instruction context; NOT a provider-level system role message) -->\n\n';
@@ -122,6 +170,9 @@ export function createOpenClawHostTransport({
   if (!Number.isFinite(timeoutMsPerCall) || timeoutMsPerCall <= 0) {
     throw new Error('createOpenClawHostTransport: timeoutMsPerCall must be a positive finite number');
   }
+  // S9: resolve once, before any process exists — a temp dir the host child
+  // cannot use is a refusal, not a round-level failure.
+  const childTempEnv = resolveChildTempEnv({ sourceEnv: env });
   const cliVersion = probeOpenclawVersion(openclawBin, openclawPrefixArgs, versionProbe);
   // S7.1 §3 — ambient state root contract: the sessions evidence dir is
   // derived from the DECLARED openclawHome, and the ACTUAL state root (from
@@ -192,7 +243,9 @@ export function createOpenClawHostTransport({
     ];
     const t0 = now();
     const stdout = await new Promise((resolve, reject) => {
-      const child = spawnProcess(openclawBin, [...openclawPrefixArgs, ...args], { cwd: roundDir, stdio: ['pipe', 'pipe', 'pipe'] });
+      // S9: the child alone gets the normalized long-form TEMP/TMP; everything
+      // else stays exactly the inherited environment.
+      const child = spawnProcess(openclawBin, [...openclawPrefixArgs, ...args], { cwd: roundDir, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, ...childTempEnv } });
       let out = '';
       let err = '';
       const timer = setTimeout(() => {
@@ -204,8 +257,16 @@ export function createOpenClawHostTransport({
       child.on('error', (e) => { clearTimeout(timer); reject(e); });
       child.on('close', (code) => {
         clearTimeout(timer);
-        if (code !== 0 && out.trim().length === 0) {
-          reject(new Error(`openclaw exec exited ${code}: ${err.slice(0, 400)}`));
+        // A non-zero exit is NEVER a usable round, even when stdout carries a
+        // well-formed envelope: OpenClaw reports its post-run cleanup failures
+        // (e.g. Windows EBUSY unlinking a still-open plugin-capture
+        // owner.sqlite) AFTER the envelope is serialized, and the envelope it
+        // leaves behind can still look like a success. Never reclassify a
+        // failed process as success (S9 task E contract).
+        if (code !== 0) {
+          const envelopeHint = out.trim().split('\n').filter((l) => l.trim().startsWith('{')).pop();
+          const hostDiagnostic = (err.trim().length > 0 ? err.trim() : envelopeHint ?? 'no host diagnostic').slice(0, 400);
+          reject(new Error(`openclaw exec exited ${code}: ${hostDiagnostic}`));
           return;
         }
         resolve(out);
@@ -267,6 +328,7 @@ export function createOpenClawHostTransport({
       cliVersion,
       hostKind: 'openclaw',
       agent,
+      childTempDir: childTempEnv.TEMP ?? null,
       rounds,
       systemPromptChannel: OPENCLAW_SYSTEM_PROMPT_CHANNEL,
       roundsRoot,

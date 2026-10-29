@@ -2092,14 +2092,20 @@ describe('PRI-442 P0: principles-disciple dependency rewrite in bundle-plugin.mj
     );
   });
 
-  it('bundle-plugin.mjs still rewrites @principles/core for all three packages', () => {
-    // Regression guard: the core rewrite must still work after generalizing the function
-    expect(content).toContain("'@principles/core', 'file:./core'");
+  it('bundle-plugin.mjs keeps the plugin free of @principles/core while sibling consumers keep the rewrite', () => {
+    // PRI-1037 payload fix: the plugin bundle inlines core, so the shipped
+    // plugin manifest must not declare it at all. The historical file:./core
+    // rewrite is what dragged the 17,711-file core tree plus the whole pi-ai
+    // transitive graph into every plugin install. pd-cli / console still need
+    // the sibling rewrite.
+    expect(content).not.toContain("join(PLUGIN_DEST, 'package.json'), 'plugin', '@principles/core'");
     expect(content).toContain("'@principles/core', 'file:../core'");
   });
 
-  it('bundle-plugin.mjs removes the inlined host runtime from the bundled plugin manifest', () => {
-    expect(content).toContain("removeBundledDependency(join(PLUGIN_DEST, 'package.json'), 'plugin', '@principles/host-runtime')");
+  it('bundle-plugin.mjs ships exactly the bundle runtime externals in the plugin manifest', () => {
+    // The shipped plugin manifest keeps only the native module dist/bundle.js
+    // resolves at runtime; everything else is inlined at build time.
+    expect(content).toContain("pruneShippedPluginDependencies(join(PLUGIN_DEST, 'package.json'), ['better-sqlite3'])");
   });
 });
 

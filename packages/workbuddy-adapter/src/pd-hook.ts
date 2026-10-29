@@ -38,7 +38,7 @@ import process from 'node:process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { appendEventLogLine, redactTelemetryString, isRuleHostEvaluatedEventData } from '@principles/core/runtime-v2';
 import type { HostEventEmitter, HostEventResult } from '@principles/core/host';
-import { createProductionHostRuntime, loadPdConfigForPlugin, parseOwnerStatementPrefix, assessWorkbuddyLiveKeyword, resolveSharedCorrectionKeywordStoreForDetection, admitTrustedWorkbuddyLiveCorrection, ensureGovernanceDiagnosticianTask } from '@principles/host-runtime';
+import { createProductionHostRuntime, createWorkbuddyRuleContextProvider, loadPdConfigForPlugin, parseOwnerStatementPrefix, assessWorkbuddyLiveKeyword, resolveSharedCorrectionKeywordStoreForDetection, admitTrustedWorkbuddyLiveCorrection, ensureGovernanceDiagnosticianTask } from '@principles/host-runtime';
 import { computeFeatureFlagsFromConfig } from '@principles/core/runtime-v2';
 import { WorkBuddyHooksHostAdapter } from './host-adapter.js';
 import { WORKBUDDY_TOOL_SEMANTICS } from './tool-semantics.js';
@@ -173,16 +173,16 @@ function recordRuleHostEvaluations(stateDir: string, sessionId: string | undefin
 }
 
 /**
- * PRI-780 pattern (WorkBuddy boundary, same as Codex): this host supplies no
- * runtime context provider, and the "unavailable → allow" contract is prompt
- * discipline, NOT a runtime-enforced invariant. Handing v2 rules a truthy
- * context would let a persisted rule evaluate context-blind and deny calls
- * that were previously suspended — a silent governance change. The gate skips
- * v2 rules with its structured `rule_context_v2_unavailable` warning and this
- * hook annotates the warning with the explicit host-unsupported reason before
- * it reaches stderr (明确 unsupported, never a silent skip).
+ * SPEC-RULECODE-HOST-PROMOTION-001 C: WorkBuddy now supplies a REAL V2 rule
+ * context provider over its own trajectory (see the dispatch wiring below),
+ * so the old blanket "host provides no runtime context provider" note no
+ * longer applies. The remaining honest boundary: rules whose required facts
+ * include design_approval stay suspended on this host (no WorkBuddy
+ * design-gate attestation entry exists), and unavailable history still
+ * suspends context-dependent rules through the shared-gate contract. The
+ * note below annotates exactly that residual state.
  */
-const WORKBUDDY_CONTEXT_UNSUPPORTED_NOTE = 'workbuddy_runtime_context_unsupported: the WorkBuddy host provides no runtime context provider; v2 rules stay suspended on this host';
+const WORKBUDDY_CONTEXT_UNSUPPORTED_NOTE = 'workbuddy_runtime_context_limited: WorkBuddy resolves rule context from its own trajectory only; rules requiring design_approval facts or unavailable history stay suspended on this host';
 
 export function annotateContextWarnings(warnings: readonly string[]): string[] {
   return warnings.map((warning) => warning.startsWith('rule_context_v2_unavailable')
@@ -222,8 +222,7 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
   const adapter = new WorkBuddyHooksHostAdapter();
   let event;
   try { event = adapter.decodeEvent(parsed); }
-  catch (error) {
-    const reason = error instanceof WorkBuddyDecoderError ? error.reason : `decode_threw:${errorMessage(error)}`;
+  catch (error) {    const reason = error instanceof WorkBuddyDecoderError ? error.reason : `decode_threw:${errorMessage(error)}`;
     const nextAction = error instanceof WorkBuddyDecoderError ? error.nextAction : 'Inspect the WorkBuddy hook payload against the Phase 0 host contract.';
     const failure = channelFailure(channelEventName, reason, nextAction);
     // Rejection communicates failure, never grants Owner authority or bypasses
@@ -244,6 +243,11 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
     }
     return failure;
   }
+
+  // Capture the decode boundary before governance or runtime work can consume
+  // time; the rule-context history window must never include rows written
+  // afterwards (same cutoff discipline as the Codex hook epoch).
+  const hookEpoch = new Date();
 
   // OD-07/P06 governance workspace: explicit, user-level, shared across
   // projects; never auto-created here and never falling back to another host.
@@ -374,6 +378,23 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
       hostKind: 'workbuddy',
       toolSemantics: WORKBUDDY_TOOL_SEMANTICS,
       events: workbuddyEventEmitter(stateDir, evidenceContext),
+      // SPEC-RULECODE-HOST-PROMOTION-001 C: the V2 rule context provider over
+      // WorkBuddy's own observable trajectory (same-session tool_calls rows
+      // the shared afterToolCall path records). No designGate fact is
+      // supplied — WorkBuddy has no design-gate attestation entry point, so
+      // design_approval-dependent rules suspend with the precise
+      // `rule_required_fact_unavailable` warning rather than borrowing
+      // another host's declaration. Unavailable history (disabled flag, no
+      // project scope, first session turn) degrades through the shared
+      // suspension contract, observably.
+      ruleContextProvider: createWorkbuddyRuleContextProvider({
+        workspaceDir: resolution.workspaceDir,
+        ...(projectDir !== undefined ? { projectDir } : {}),
+        enabled: flags.rulecode_context_v2?.enabled === true,
+        cutoffAt: hookEpoch,
+        currentToolCallId: event.context.toolCallId ?? '',
+        toolSemantics: WORKBUDDY_TOOL_SEMANTICS,
+      }),
       // Remediation R2 (candidate-level admission): the diagnostician's
       // candidates are admitted ONLY with input evidence (needs_evidence
       // otherwise), and Codex-style transcript promotion does not exist on
@@ -399,8 +420,6 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
           }],
         };
       },
-      // PRI-780 boundary: NO context provider — v2 rules stay SUSPENDED on
-      // WorkBuddy (never loaded context-blind). See annotateContextWarnings.
     }).dispatch(event);
     const evaluationDiagnostics = recordRuleHostEvaluations(stateDir, event.context.sessionId, result.metadata?.evaluations);
     // Encode BEFORE recording an attributed deny: a runtime_verified

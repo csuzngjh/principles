@@ -1,43 +1,42 @@
 /**
- * PRI-913 — Junction lifecycle regression coverage (Phases 2-5).
+ * PRI-913 — installed plugin payload lifecycle (Phases 2-5), re-pinned by
+ * PRI-1037.
  *
- * PRI-912 made the installer convert the plugin's materialized
- * @principles/core copies into canonical junctions (Windows) / relative
- * symlinks (Unix) pointing at ~/.pd/runtime/core. The unit suite proves the
- * conversion; this file proves the JUNCTIONS SURVIVE THE FULL LIFECYCLE on a
- * real installation driven through the production code paths — no mocked fs
- * link semantics, no helper-level shortcuts:
+ * History: PRI-912 converted the plugin's materialized `@principles/core`
+ * copies into canonical junctions. PRI-1037 retired the `file:./core`
+ * surface entirely — OpenClaw's per-exec plugin capture materializes reparse
+ * points, so the ~17k-file core tree (junction or copy alike) blew the 120s
+ * runtime-publication budget. The plugin now ships only dist/bundle.js plus
+ * better-sqlite3. This file proves the LEAN payload survives the full
+ * lifecycle through the real production code paths:
  *
  *   1. REAL installer transaction (upgrade-gate-runner 'install' mode)
  *      materializes the production release asset into an isolated HOME;
- *      both plugin core slots must be live canonical links.
+ *      both plugin dirs must carry the lean payload and NO core slot.
  *   2. Idempotency (Phase 3): re-invoking the production reconcile pass
- *      over the installed tree is a NO-OP — alreadyCanonical only, digest
- *      of the canonical core unchanged, no *.pri912-materialized residue,
- *      the transaction journals do not grow.
- *   3. Mixed-tree diagnosis (Phase 5): slot physically restored with
- *      digest-equal content → converted; physically restored with DIVERGENT
- *      content → skipped('content_digest_mismatch'), the divergent bytes
- *      survive untouched (no silent overwrite), the other slot's link is
- *      not disturbed. Verification of current capability only — no repair
- *      logic is expected or asserted.
+ *      over the installed tree is a NO-OP — every slot reports
+ *      skipped('copy_absent'), digest of the canonical core unchanged, no
+ *      *.pri912-materialized residue, the journals do not grow.
+ *   3. Legacy-tree safety (Phase 5): a physical `node_modules/@principles/core`
+ *      copy left by a pre-PRI-1037 install is NOT converted (the manifest no
+ *      longer declares the file: dependency) and NOT mutated — the next real
+ *      install prunes it instead. The canonical target is never touched.
  *   4. Rollback (Phase 2): a second install with a mutated payload whose
- *      console entry is missing fails AFTER reconcile (the junctions are
- *      live in the new tree), lands in the existing fail → restoreBackup
- *      channel, and the restored runtime must be healthy: active.json still
- *      the old version, canonical core digest identical (rmSync over the
- *      failed tree never followed a junction), plugin links back, the new
- *      transaction journal terminates 'rolled_back', and the restored
- *      console actually boots and serves /api/health.
+ *      console entry is missing fails, lands in the existing fail →
+ *      restoreBackup channel, and the restored runtime must be healthy:
+ *      active.json still the old version, canonical core digest identical,
+ *      lean plugin payload back, the new transaction journal terminates
+ *      'rolled_back', and the restored console actually boots and serves
+ *      /api/health.
  *   5. Uninstall safety (Phase 4): the REAL uninstaller removing the
  *      openclaw host (shared runtime preserved via the two-host install
- *      manifest) deletes the ext plugin tree CONTAINING the junction slot
- *      and must leave ~/.pd/runtime/core byte-identical and the pd CLI
- *      working; the final --host-all pass removes the target explicitly.
+ *      manifest) deletes the ext plugin tree and must leave
+ *      ~/.pd/runtime/core byte-identical and the pd CLI working; the final
+ *      --host-all pass removes the target explicitly.
  *
  * The upgrade leg (Phase 1) lives in release-upgrade-gate.test.ts
- * (expectPluginCoreCanonicalLinks / expectBackupTreesJunctionIntact) — the
- * real /apply-full flow already runs there on the windows-2025 gate job.
+ * (expectLeanPluginPayload / expectBackupTreesJunctionIntact) — the real
+ * /apply-full flow already runs there on the windows-2025 gate job.
  *
  * All child processes go through the committed gate helpers; this file only
  * orchestrates and asserts.
@@ -96,7 +95,8 @@ const consolePidFile = path.join(root, 'console.pid.json');
 const gateContext: GateProcessContext = { root, homeDir, workspaceDir, binDir };
 
 const runtimeCore = path.join(homeDir, '.pd', 'runtime', 'core');
-const runtimePluginSlot = path.join(homeDir, '.pd', 'runtime', 'plugin', 'node_modules', '@principles', 'core');
+const runtimePluginDir = path.join(homeDir, '.pd', 'runtime', 'plugin');
+const runtimePluginSlot = path.join(runtimePluginDir, 'node_modules', '@principles', 'core');
 const extPluginDir = path.join(homeDir, '.openclaw', 'extensions', 'principles-disciple');
 const extPluginSlot = path.join(extPluginDir, 'node_modules', '@principles', 'core');
 const transactionsDir = path.join(homeDir, '.pd', 'transactions');
@@ -216,31 +216,45 @@ function findMaterializedResidue(): string[] {
   return found;
 }
 
-function expectPluginCoreLinks(): void {
+/** Recursive file count that never follows reparse points (a junction into the
+ *  runtime core would otherwise re-count the whole 17k-file tree). */
+function countPayloadFiles(dir: string): number {
+  let total = 0;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const child = path.join(dir, entry.name);
+    if (fs.lstatSync(child).isSymbolicLink()) continue;
+    if (entry.isDirectory()) total += countPayloadFiles(child);
+    else if (entry.isFile()) total += 1;
+  }
+  return total;
+}
+
+/**
+ * PRI-1037: the installed plugin payload is lean — dist/bundle.js plus the one
+ * native module the bundle imports. No core slot in either plugin dir, and a
+ * hard file-count ceiling so the ~16k-file regression cannot silently return.
+ */
+function expectLeanPluginPayload(): void {
   expect(fs.existsSync(path.join(runtimeCore, 'package.json')), 'canonical runtime core exists').toBe(true);
-  const runtimeCoreReal = fs.realpathSync(runtimeCore);
-  for (const slot of [runtimePluginSlot, extPluginSlot]) {
-    expect(fs.existsSync(slot), `plugin core slot exists at ${slot}`).toBe(true);
-    expect(fs.lstatSync(slot).isSymbolicLink(), `plugin core slot is canonical at ${slot}`).toBe(true);
-    expect(fs.realpathSync(slot), `plugin core slot resolves into the runtime core: ${slot}`).toBe(runtimeCoreReal);
+  for (const pluginDir of [runtimePluginDir, extPluginDir]) {
+    expect(fs.existsSync(path.join(pluginDir, 'dist', 'bundle.js')), `plugin bundle shipped at ${pluginDir}`).toBe(true);
+    expect(fs.lstatSync(path.join(pluginDir, 'core'), { throwIfNoEntry: false }), `retired file:./core slot is absent at ${pluginDir}`).toBeUndefined();
+    expect(fs.lstatSync(path.join(pluginDir, 'node_modules', '@principles'), { throwIfNoEntry: false }), `no @principles scope at ${pluginDir}`).toBeUndefined();
+    expect(fs.existsSync(path.join(pluginDir, 'node_modules', 'better-sqlite3', 'package.json')), `native module shipped at ${pluginDir}`).toBe(true);
+    expect(countPayloadFiles(pluginDir), `plugin payload stays lean at ${pluginDir}`).toBeLessThan(1000);
   }
 }
 
 /**
- * Recreate the PRI-665 "legacy physical duplicate" state at ONE slot from a
- * byte copy of the live canonical tree (digest-equal by construction), so
- * the production reconcile pass sees exactly what an old install carried.
+ * Recreate the pre-PRI-1037 "legacy physical duplicate" shape at the runtime
+ * plugin slot: a real directory at node_modules/@principles/core. Deliberately
+ * NOT a byte copy of the canonical tree — the reconcile pass must reject the
+ * slot on its manifest gate before any digest walk, which is what makes this
+ * cheap to set up.
  */
-function materializeSlotFromCanonical(slot: string): void {
-  // Same idiom the unit suite proved Windows-safe with (plugin-core-junction
-  // test D): rmSync over the junction unlinks the reparse point without
-  // ever traversing into the canonical target.
-  fs.rmSync(slot, { recursive: true, force: true });
-  // rmSync over a Windows junction must unlink the link, never traverse it.
-  expect(fs.existsSync(path.join(runtimeCore, 'package.json')), 'canonical core survived slot removal').toBe(true);
-  fs.cpSync(runtimeCore, slot, { recursive: true, dereference: false });
-  expect(fs.lstatSync(slot).isDirectory()).toBe(true);
-  expect(fs.lstatSync(slot).isSymbolicLink()).toBe(false);
+function materializeLegacySlot(): void {
+  fs.mkdirSync(runtimePluginSlot, { recursive: true });
+  fs.writeFileSync(path.join(runtimePluginSlot, 'package.json'), JSON.stringify({ name: '@principles/core', version: '0.0.0-legacy' }));
 }
 
 async function runPdVersionOrThrow(): Promise<Record<string, unknown>> {
@@ -303,12 +317,12 @@ afterAll(async () => {
 
 describe('PRI-913 junction lifecycle (real installer / reconciler / uninstaller)', () => {
   it(
-    'Phase 1 leg: the real installer transaction leaves both plugin core slots as live canonical links',
+    'Phase 1 leg: the real installer transaction deploys the lean plugin payload and no core slot',
     async () => {
       const result = await phaseAsync('install-v0', async () => await gateRunInstall(gateContext, payloadDir));
       expect(result.success, `install failed: ${JSON.stringify(result.error ?? result.reason ?? '')}`).toBe(true);
 
-      expectPluginCoreLinks();
+      expectLeanPluginPayload();
       expect(findMaterializedResidue(), 'no *.pri912-materialized residue after install').toEqual([]);
       expect(fs.existsSync(npmMarker), 'the lifecycle never invoked npm').toBe(false);
 
@@ -319,82 +333,73 @@ describe('PRI-913 junction lifecycle (real installer / reconciler / uninstaller)
   );
 
   it(
-    'Phase 3: re-invoking the production reconcile pass is a pure no-op, and the production repair path never touches the junctions',
+    'Phase 3: re-invoking the production reconcile pass is a pure no-op, and the production repair path never touches the payload',
     async () => {
       const coreDigestBefore = digestTree(runtimeCore);
       const linesBefore = totalJournalLineCount();
 
       const reconciliation = await phaseAsync('reconcile-again', async () => await gateRunReconcile(gateContext));
       expect(reconciliation.converted, 'nothing was re-converted').toEqual([]);
-      expect(new Set(reconciliation.alreadyCanonical as string[]), 'both live slots were recognized as canonical').toEqual(
-        new Set([runtimePluginSlot, extPluginSlot]),
-      );
-      expect(reconciliation.skipped, 'nothing was skipped on a healthy tree').toEqual([]);
+      expect(reconciliation.alreadyCanonical, 'no slot can be canonical — the dependency is retired').toEqual([]);
+      expect(reconciliation.skipped.map((entry: { dir: string; reason: string }) => [entry.dir, entry.reason])).toEqual([
+        [runtimePluginSlot, 'copy_absent'],
+        [extPluginSlot, 'copy_absent'],
+      ]);
 
       expect(digestTree(runtimeCore), 'canonical core bytes unchanged by a repeated pass').toBe(coreDigestBefore);
       expect(totalJournalLineCount(), 'the reconcile pass journals nothing').toBe(linesBefore);
       expect(findMaterializedResidue(), 'still no materialized residue').toEqual([]);
-      expectPluginCoreLinks();
+      expectLeanPluginPayload();
 
       // G4 regression lock: repairUpdateChain (PRI-850) deploys the bootstrap
-      // executor and registers the update source — it must leave both
-      // canonical junction slots, the core bytes, and the journals untouched.
+      // executor and registers the update source — it must leave the lean
+      // payload, the core bytes, and the journals untouched.
       const repair = await phaseAsync('repair-zero-contact', async () => await gateRunRepair(gateContext));
       expect(repair.success, `production repair failed: ${JSON.stringify(repair.error ?? '')}`).toBe(true);
       expect(repair.needsFullInstall, 'a verified install must not be flagged for full install').toBe(false);
       expect(digestTree(runtimeCore), 'canonical core bytes unchanged by the repair path').toBe(coreDigestBefore);
       expect(totalJournalLineCount(), 'the repair path journals no payload transaction').toBe(linesBefore);
       expect(findMaterializedResidue(), 'the repair path left no materialized residue').toEqual([]);
-      expectPluginCoreLinks();
+      expectLeanPluginPayload();
     },
     SCENARIO_PROBE_TIMEOUT_MS,
   );
 
   it(
-    'Phase 5: the pass diagnoses a mixed tree — converts digest-equal physical copies, skips divergent ones without touching them',
+    'Phase 5: a legacy physical core copy is diagnosed and left untouched — never converted, never mutated',
     async () => {
-      // (a) legacy physical duplicate (PRI-665 shape) at the runtime/plugin
-      // slot, ext slot stays a canonical link: the pass must convert exactly
-      // the one slot and report the link as alreadyCanonical.
-      materializeSlotFromCanonical(runtimePluginSlot);
-      const converted = await phaseAsync('mixed-convert', async () => await gateRunReconcile(gateContext));
-      expect(converted.converted, 'the physical duplicate was converted').toEqual([runtimePluginSlot]);
-      expect(converted.alreadyCanonical, 'the untouched link was recognized').toEqual([extPluginSlot]);
-      expect(converted.skipped).toEqual([]);
-      expectPluginCoreLinks();
-
-      // (b) DIVERGENT physical copy: byte-modified content must NOT be
-      // silently overwritten — the pass skips with the digest reason and
-      // leaves the copy (and the other slot's link) exactly as found.
-      materializeSlotFromCanonical(runtimePluginSlot);
-      const divergentProbe = path.join(runtimePluginSlot, 'lifecycle-divergence-probe.js');
-      fs.writeFileSync(divergentProbe, '// PRI-913 divergence marker — must survive untouched\n');
+      // A pre-PRI-1037 install left a real directory at the plugin's core
+      // slot. The retired dependency means the pass must reject it on the
+      // manifest gate and leave every byte alone (no silent conversion, no
+      // deletion): the next real install prunes it instead.
+      materializeLegacySlot();
+      const legacyCopyDigest = digestTree(runtimePluginSlot);
       const coreDigestBefore = digestTree(runtimeCore);
 
-      const divergent = await phaseAsync('mixed-skip', async () => await gateRunReconcile(gateContext));
-      expect(divergent.converted, 'a divergent copy is never converted').toEqual([]);
-      expect(divergent.alreadyCanonical).toEqual([extPluginSlot]);
-      expect(divergent.skipped).toHaveLength(1);
-      expect(String(divergent.skipped[0]?.dir)).toBe(runtimePluginSlot);
-      expect(String(divergent.skipped[0]?.reason)).toContain('content_digest_mismatch');
-      expect(fs.readFileSync(divergentProbe, 'utf8')).toContain('PRI-913 divergence marker');
-      expect(fs.lstatSync(runtimePluginSlot).isSymbolicLink(), 'the divergent copy stayed physical').toBe(false);
-      expect(digestTree(runtimeCore), 'skipping a divergent copy never perturbs the canonical target').toBe(coreDigestBefore);
+      const legacy = await phaseAsync('legacy-slot-pass', async () => await gateRunReconcile(gateContext));
+      expect(legacy.converted, 'a legacy copy is never converted once the dependency is retired').toEqual([]);
+      expect(legacy.alreadyCanonical).toEqual([]);
+      expect(legacy.skipped.map((entry: { dir: string; reason: string }) => [entry.dir, entry.reason])).toEqual([
+        [runtimePluginSlot, 'declared_dependency_not_file_ref: null'],
+        [extPluginSlot, 'copy_absent'],
+      ]);
+      expect(fs.lstatSync(runtimePluginSlot).isSymbolicLink(), 'the legacy copy stayed physical').toBe(false);
+      expect(digestTree(runtimePluginSlot), 'the reconcile pass never mutated the legacy copy').toBe(legacyCopyDigest);
+      expect(digestTree(runtimeCore), 'the canonical target is untouched').toBe(coreDigestBefore);
 
       // Normalize for the remaining lifecycle legs: the next real install
-      // re-materializes everything anyway.
-      const normalize = await phaseAsync('mixed-normalize', async () => await gateRunReconcile(gateContext));
-      expect(normalize.converted, 'removing the marker restores convertibility').toEqual([]);
-      fs.rmSync(divergentProbe);
-      const finalPass = await phaseAsync('mixed-normalize-2', async () => await gateRunReconcile(gateContext));
-      expect(finalPass.converted).toEqual([runtimePluginSlot]);
-      expectPluginCoreLinks();
+      // re-materializes the lean payload anyway, but remove the synthetic
+      // slot so the following phases start from the installed shape.
+      fs.rmSync(path.join(runtimePluginDir, 'node_modules', '@principles'), { recursive: true, force: true });
+      const normalized = await phaseAsync('legacy-normalize', async () => await gateRunReconcile(gateContext));
+      expect(normalized.skipped.map((entry: { reason: string }) => entry.reason)).toEqual(['copy_absent', 'copy_absent']);
+      expectLeanPluginPayload();
     },
     SCENARIO_PROBE_TIMEOUT_MS,
   );
 
   it(
-    'Phase 2: an install that fails AFTER junction creation rolls back with every link intact and the runtime still bootable',
+    'Phase 2: an install that fails after the payload deploy rolls back with the runtime still bootable',
     async () => {
       const coreDigestBefore = digestTree(runtimeCore);
       const activeBefore = readActiveRecord();
@@ -411,8 +416,8 @@ describe('PRI-913 junction lifecycle (real installer / reconciler / uninstaller)
         await gateRestampPayload(gateContext, payloadDir, nextVersion, sourceCommitV0);
       });
 
-      // The REAL transaction: backups are taken, everything is deployed,
-      // reconcile converts — then verifyConsole fails and the EXISTING
+      // The REAL transaction: backups are taken, everything is deployed and
+      // reconciled — then verifyConsole fails and the EXISTING
       // fail → restoreBackup channel engages.
       const result = await phaseAsync('install-failing', async () => await gateRunInstall(gateContext, payloadDir));
       expect(result.success, 'the mutated payload must fail the install').toBe(false);
@@ -425,10 +430,10 @@ describe('PRI-913 junction lifecycle (real installer / reconciler / uninstaller)
       expect(transitions.length, 'the failing transaction has transitions').toBeGreaterThan(0);
       expect(String(transitions[transitions.length - 1]?.to), 'terminal state is rolled_back').toBe('rolled_back');
 
-      // (2) the restored tree is exactly what was there before: links back,
-      // canonical target byte-identical (the failed new tree — junctions and
-      // all — was removed WITHOUT following a single link).
-      expectPluginCoreLinks();
+      // (2) the restored tree is exactly what was there before: the lean
+      // payload is back and the canonical target is byte-identical (the
+      // failed new tree was removed WITHOUT following a single link).
+      expectLeanPluginPayload();
       expect(digestTree(runtimeCore), 'canonical core bytes survived the rollback untouched').toBe(coreDigestBefore);
       expect(findMaterializedResidue(), 'rollback left no materialized residue in the live tree').toEqual([]);
 
@@ -458,9 +463,9 @@ describe('PRI-913 junction lifecycle (real installer / reconciler / uninstaller)
   );
 
   it(
-    'Phase 4: uninstalling the openclaw host removes the link-carrying plugin tree and preserves the canonical target byte-for-byte',
+    'Phase 4: uninstalling the openclaw host removes the plugin tree and preserves the canonical target byte-for-byte',
     async () => {
-      expectPluginCoreLinks();
+      expectLeanPluginPayload();
       const coreDigestBefore = digestTree(runtimeCore);
 
       // Two-host manifest: the REAL uninstaller decision for a shared
@@ -474,7 +479,7 @@ describe('PRI-913 junction lifecycle (real installer / reconciler / uninstaller)
       expect(openclawUninstall.success, `openclaw uninstall failed: ${JSON.stringify(openclawUninstall.error ?? '')}`).toBe(true);
 
       // The link is gone; the target is untouched and still functional.
-      expect(fs.existsSync(extPluginDir), 'the ext plugin tree (junction carrier) was removed').toBe(false);
+      expect(fs.existsSync(extPluginDir), 'the ext plugin tree was removed').toBe(false);
       expect(fs.existsSync(runtimeCore), 'the canonical target still exists after removing the link').toBe(true);
       expect(digestTree(runtimeCore), 'the canonical target is byte-identical').toBe(coreDigestBefore);
       expect(fs.existsSync(path.join(homeDir, '.pd', 'runtime', 'pd-cli')), 'shared runtime preserved for the remaining host').toBe(true);
