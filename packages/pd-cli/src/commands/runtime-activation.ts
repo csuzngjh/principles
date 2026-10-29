@@ -73,6 +73,7 @@ import type {
 } from '@principles/core/runtime-v2';
 import type { PIArtifactRecord, ActivationStatusRecord, PromotionEvidenceSnapshot } from '@principles/core/runtime-v2';
 import { resolvePromotionHostLiveness } from '@principles/host-runtime';
+import { probeCliRecoveryReachability } from './recovery-reachability-probe.js';
 import { authorizeGovernanceAction, writeGovernanceAction } from 'principles-disciple/governance-audit';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../services/pd-config-loader.js';
@@ -657,6 +658,13 @@ export async function handleRuntimeActivationPromote(opts: ActivationPromoteOpti
               // runtime_compatibility instead of passing as-is.
               ...(promotionHost.ok ? { expectedHostContractVersion: promotionHost.hostRuntimeVersion } : {}),
               existingLiveArtifacts: liveArtifacts,
+              // Review R3/P1: composition through the production boundary +
+              // per-evaluation target-environment reachability (real
+              // read-only status subprocess against THIS workspace; the
+              // expected activation must be visible in its listing).
+              projectDir: workspaceDir,
+              ...(workspaceToolSemantics ? { toolSemantics: workspaceToolSemantics } : {}),
+              recoveryReachability: await probeCliRecoveryReachability(workspaceDir, activationId),
               validateProductionArtifact: value => writer.canActivate(value),
             });
           },

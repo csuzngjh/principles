@@ -15,6 +15,7 @@ import {
   buildPromotionEvidenceSnapshot,
 } from '@principles/core/runtime-v2';
 import type { ActivationStatusRecord, PIArtifactRecord, PIArtifactSnapshot, PromotionReadinessResult, PromotionEvidenceSnapshot, ActivationControlState, ActivationDecisionRecord, GlobalRuleCodePause, OwnerPromotionActor, OwnerPromotionResult } from '@principles/core/runtime-v2';
+import type { RecoveryReachabilityEvidence } from '@principles/core/runtime-v2';
 import { resolvePromotionHostLiveness, resolveWorkspaceHostToolSemantics, readPromptActivationInjectionStatuses, operatorDeclaredBudgetResolution, runtimeBudgetObservationToResolution, selectConsoleRuntimeBudgetFacts, RUNTIME_BUDGET_OBSERVATION_STALE_REASON, RUNTIME_V2_EVENT_LOG_CANDIDATE_DIRS, type PromptInjectionTargetHost } from '@principles/host-runtime';
 import { PROMPT_BUDGET_HOST_KINDS } from '@principles/core/runtime-v2';
 import { loadPdConfig, computeFlagsFromLoadResult } from '../config/pd-config-store.js';
@@ -569,6 +570,17 @@ export class ActivationsConsoleModel {
       // to the SAME host the readiness checks will run against
       // (SPEC-RULECODE-HOST-PROMOTION-001 B3).
       const promotionHost = resolvePromotionHostLiveness(this.workspaceDir);
+      // Review R3/P1: non-destructive console reachability probe (see the
+      // collectHostChecks comment for the exact evidence boundary). Reading
+      // the active global pause through the SAME safety store the emergency
+      // pause route writes proves the substrate is live for this workspace.
+      let recoveryStoreProbe: RecoveryReachabilityEvidence;
+      try {
+        await safetyStore.getActiveGlobalPause();
+        recoveryStoreProbe = { source: 'console-store-probe', ok: true, workspaceMatched: true };
+      } catch (error: unknown) {
+        recoveryStoreProbe = { source: 'console-store-probe', ok: false, workspaceMatched: false, detail: error instanceof Error ? error.message : String(error) };
+      }
       const telemetry = readRuleCodeTelemetry(this.workspaceDir, activationId, { decisions, promotionHostKind: promotionHost.ok ? promotionHost.hostKind : undefined });
       const flags = computeFlagsFromLoadResult(loadPdConfig(this.workspaceDir));
       // PRI-634-F R3 (SPEC P1-1): promotion readiness evaluates through the
@@ -607,6 +619,18 @@ export class ActivationsConsoleModel {
             // version must fail runtime_compatibility, not pass as-is.
             ...(promotionHost.ok ? { expectedHostContractVersion: promotionHost.hostRuntimeVersion } : {}),
             existingLiveArtifacts: liveArtifacts,
+            // Review R3/P1: composition executes through the production
+            // boundary and needs the same root the replay normalizes against.
+            projectDir: this.workspaceDir,
+            ...(toolSemantics.ok ? { toolSemantics: toolSemantics.registry } : {}),
+            // Review R3/P1: console-side target-environment reachability —
+            // prove the recovery controls' DURABLE SUBSTRATE is reachable
+            // from this process by reading the same safety store the pause
+            // handler writes (non-destructive). The authenticated owner
+            // review route serving this very request is the entry evidence
+            // for this surface; the Owner-browser → HTTP entry path is
+            // e2e/isolated-test evidence, deliberately NOT claimed here.
+            recoveryReachability: recoveryStoreProbe,
             validateProductionArtifact: candidate => writer.canActivate(candidate),
           });
         },

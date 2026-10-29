@@ -56,3 +56,25 @@ RuleCode host promotion loop (SPEC-RULECODE-HOST-PROMOTION-001 v0.1, A→B→C):
   - R3: `rulehost_unhealthy` events pass the same host-attribution
     filter as every other shadow event — a foreign host's anomaly can no
     longer fail (or gate) the target host's readiness.
+
+  Review fixes (round 3, findings 1-2):
+  - R3/P1: readiness now separates four evidence layers. Composition
+    verification executes through the production boundary (every rule of
+    candidate+live compiled by the production hardened evaluator, merged by
+    the gate's mergeDecisions — a requireApproval escalation fails too);
+    console-channel controls carry NO rule probe (their path never passes
+    the gate; isolated tests prove the real pause route changes gate
+    behavior); emergency_controls additionally requires per-evaluation
+    TARGET-ENVIRONMENT reachability evidence — the CLI readiness spawns the
+    real `pd activation list --json` subprocess against the target
+    workspace (the expected activation must appear in its listing), the
+    console proves the pause substrate readable. Absent/failed/mismatched
+    evidence fails with `recovery_reachability_unverified`; nothing is
+    cached, so no install inherits another's "verified" state.
+  - R3/P2: host attribution now runs through DEDUP and FACT UPGRADE. All
+    tool_calls dedup/upgrade queries (recordVerifiedToolOutcomes, the live
+    PostToolUse path, governance admission) are host-scoped for known
+    hosts: a colliding row from another host is a different record (no
+    swallowing), a legacy NULL row is never implicitly claimed (a new
+    attributed row lands beside it), same-host re-delivery stays
+    idempotent, and unknown→final upgrades only same-host rows.

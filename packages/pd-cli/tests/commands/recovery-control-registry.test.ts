@@ -51,11 +51,10 @@ describe('recovery-control registry ↔ real pd command registration (SPEC R1)',
     expect(RECOVERY_CONTROL_SURFACES.some(surface => surface.cliCommand?.includes('emergency-pause'))).toBe(false);
   });
 
-  it('console-channel capabilities declare no CLI command (their real surface is the Owner Console route)', () => {
+  it('console-channel capabilities declare no CLI command and no rule probe channel (their real surface is the Owner Console route)', () => {
     for (const surface of RECOVERY_CONTROL_SURFACES.filter(entry => entry.channel === 'console')) {
       expect(surface.cliCommand).toBeUndefined();
       expect(surface.consoleRoute).toMatch(/^\//);
-      expect(surface.virtualToolName).toBeTruthy();
     }
   });
 });

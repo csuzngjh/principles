@@ -41,8 +41,6 @@ export interface RecoveryControlSurface {
   readonly cliCommand?: string;
   /** channel 'console': the console route backing the control. */
   readonly consoleRoute?: string;
-  /** channel 'console': the virtual host tool the contract probe must use (the rule must not match it). */
-  readonly virtualToolName?: string;
 }
 
 export const RECOVERY_CONTROL_SURFACES: readonly RecoveryControlSurface[] = Object.freeze([
@@ -60,13 +58,11 @@ export const RECOVERY_CONTROL_SURFACES: readonly RecoveryControlSurface[] = Obje
     capabilityId: 'rulecode_global_pause',
     channel: 'console',
     consoleRoute: '/api/v1/activations/emergency-pause',
-    virtualToolName: 'rulecode_global_pause',
   } satisfies RecoveryControlSurface),
   Object.freeze({
     capabilityId: 'owner_review_access',
     channel: 'console',
     consoleRoute: '/api/v1/activations/{activationId}/owner-review',
-    virtualToolName: 'owner_review_access',
   } satisfies RecoveryControlSurface),
 ]);
 
@@ -85,9 +81,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * - every neutral probe for a CLI-channel capability must replay EXACTLY the
  *   registry's canonical command (no invented `pd status`,
  *   no non-existent `pd activation emergency-pause`);
- * - every console-channel capability must probe through its registry virtual
- *   tool (the honest representation — the real control lives on the Console
- *   route, not in a fabricated shell command).
+ * - console-channel capabilities must carry NO probe: their recovery path
+ *   never passes through the RuleHost gate, so a virtual-tool allow replay
+ *   would misrepresent rule-side verification as control verification
+ *   (review R3/P1 — their independence is structural and their real-world
+ *   reachability is supplied as target-environment evidence instead).
  */
 export function validateRecoveryControlSurfaces(contract: HostLivenessContract): RecoveryControlValidation {
   const protectedIds = new Set(contract.protectedCapabilities.map((capability) => capability.capabilityId));
@@ -104,17 +102,17 @@ export function validateRecoveryControlSurfaces(contract: HostLivenessContract):
   const byCapability = new Map(contract.neutralProbes.map((probe) => [probe.capabilityId, probe]));
   for (const surface of RECOVERY_CONTROL_SURFACES) {
     const probe = byCapability.get(surface.capabilityId);
-    if (probe === undefined) {
-      return {
-        ok: false,
-        reason: 'recovery_control_probe_mismatch',
-        capabilityId: surface.capabilityId,
-        nextAction: `the contract must carry a neutral probe for ${surface.capabilityId}`,
-      };
-    }
     if (surface.channel === 'cli') {
+      if (probe === undefined) {
+        return {
+          ok: false,
+          reason: 'recovery_control_probe_mismatch',
+          capabilityId: surface.capabilityId,
+          nextAction: `the contract must carry a neutral probe for ${surface.capabilityId}`,
+        };
+      }
       const command = isRecord(probe.params) && typeof probe.params.command === 'string' ? probe.params.command : undefined;
-      if (probe.toolName === surface.virtualToolName || command !== surface.cliCommand) {
+      if (command !== surface.cliCommand) {
         return {
           ok: false,
           reason: 'recovery_control_probe_mismatch',
@@ -122,16 +120,13 @@ export function validateRecoveryControlSurfaces(contract: HostLivenessContract):
           nextAction: `the ${surface.capabilityId} probe must replay the registered command "${surface.cliCommand}" — a command that is not registered is a fabricated recovery entry`,
         };
       }
-    } else {
-      const paramsEmpty = isRecord(probe.params) && Object.keys(probe.params).length === 0;
-      if (probe.toolName !== surface.virtualToolName || !paramsEmpty) {
-        return {
-          ok: false,
-          reason: 'recovery_control_probe_mismatch',
-          capabilityId: surface.capabilityId,
-          nextAction: `the ${surface.capabilityId} control has no CLI command; its probe must use the ${surface.virtualToolName} virtual tool with empty params (real surface: ${surface.consoleRoute})`,
-        };
-      }
+    } else if (probe !== undefined) {
+      return {
+        ok: false,
+        reason: 'recovery_control_probe_mismatch',
+        capabilityId: surface.capabilityId,
+        nextAction: `the ${surface.capabilityId} control never passes through the RuleHost gate; a virtual-tool probe would misrepresent its verification — remove the probe (real surface: ${surface.consoleRoute})`,
+      };
     }
   }
   return { ok: true };

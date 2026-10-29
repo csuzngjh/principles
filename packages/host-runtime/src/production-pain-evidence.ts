@@ -467,7 +467,15 @@ export function recordVerifiedToolOutcomes(args: {
     if (!hasToolCalls) applyTrajectorySchemaBase(db);
     ensureToolCallsToolUseIdColumn(db);
     ensureToolCallsHostKindColumn(db);
-    const findByToolUseId = db.prepare('SELECT id, outcome FROM tool_calls WHERE session_id = ? AND tool_use_id = ? ORDER BY id LIMIT 1');
+    // Review R3/P2: a KNOWN host's call identity includes its attribution.
+    // The lookup matches ONLY rows of the same host — a colliding row from
+    // another host (or an unattributed legacy row) is a DIFFERENT record: the
+    // caller inserts its own row instead of swallowing or claiming it.
+    // Callers without a hostKind keep the historical match-any semantics
+    // (explicit compat contract, asserted by tests).
+    const findByToolUseId = args.hostKind !== undefined
+      ? db.prepare('SELECT id, outcome FROM tool_calls WHERE session_id = ? AND tool_use_id = ? AND host_kind = ? ORDER BY id LIMIT 1')
+      : db.prepare('SELECT id, outcome FROM tool_calls WHERE session_id = ? AND tool_use_id = ? ORDER BY id LIMIT 1');
     const upgradeUnknown = db.prepare("UPDATE tool_calls SET outcome = ?, exit_code = ?, result_preview = COALESCE(?, result_preview) WHERE id = ? AND outcome = 'unknown'");
     const insertVerified = db.prepare('INSERT INTO tool_calls (session_id, tool_name, outcome, duration_ms, exit_code, error_type, error_message, gfi_before, gfi_after, params_json, result_preview, created_at, tool_use_id, host_kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
     const upsertSession = db.prepare('INSERT INTO sessions (session_id, started_at, updated_at) VALUES (?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET updated_at = excluded.updated_at');
@@ -476,7 +484,9 @@ export function recordVerifiedToolOutcomes(args: {
       for (const input of args.outcomes) {
         if (typeof input.exitCode !== 'number' || !Number.isInteger(input.exitCode)) continue;
         const finalOutcome = input.exitCode === 0 ? 'success' : 'failure';
-        const existing = findByToolUseId.get(args.sessionId, input.toolUseId) as { id: number; outcome: string } | undefined;
+        const existing = (args.hostKind !== undefined
+          ? findByToolUseId.get(args.sessionId, input.toolUseId, args.hostKind)
+          : findByToolUseId.get(args.sessionId, input.toolUseId)) as { id: number; outcome: string } | undefined;
         const boundedPreview = typeof input.outputPreview === 'string' && input.outputPreview.length > 0
           ? input.outputPreview.slice(0, MAX_PREVIEW)
           : null;
@@ -635,13 +645,23 @@ export function createProductionPainEvidenceHandler(options: { painEnrichmentPro
         // CR-01: the host tool-call id is the stable join key for the
         // consent-gated transcript upgrade (recordVerifiedToolOutcomes);
         // content-shape probing stays the fallback for hosts without ids.
+        // Review R3/P2: for a known host the identity is host-scoped — a
+        // colliding row from ANOTHER host (or an unattributed legacy row) is
+        // NOT this delivery's duplicate, so both hosts keep independent
+        // records instead of the second being swallowed.
         if (event.context.toolCallId !== undefined
-          && db.prepare('SELECT 1 FROM tool_calls WHERE session_id = ? AND tool_use_id = ?').get(event.context.sessionId, event.context.toolCallId) !== undefined) {
+          && (options.hostKind !== undefined
+            ? db.prepare('SELECT 1 FROM tool_calls WHERE session_id = ? AND tool_use_id = ? AND host_kind = ?').get(event.context.sessionId, event.context.toolCallId, options.hostKind)
+            : db.prepare('SELECT 1 FROM tool_calls WHERE session_id = ? AND tool_use_id = ?').get(event.context.sessionId, event.context.toolCallId)) !== undefined) {
           duplicate = true;
           duplicateAdmitted = db.prepare('SELECT 1 FROM pain_events WHERE canonical_pain_id = ?').get(painId) !== undefined;
           return;
         }
-        if (db.prepare('SELECT 1 FROM tool_calls WHERE session_id = ? AND tool_name = ? AND params_json = ? AND outcome = ? AND exit_code IS ? AND error_message IS ? AND result_preview IS ?').get(event.context.sessionId, toolName, paramsJson, outcome.outcome, outcome.exitCode, outcome.error ?? null, resultPreview)) {
+        // Review R3/P2: the content-shape fallback dedup is host-scoped the
+        // same way — identical content from two hosts is two records.
+        if ((options.hostKind !== undefined
+          ? db.prepare('SELECT 1 FROM tool_calls WHERE session_id = ? AND tool_name = ? AND params_json = ? AND outcome = ? AND exit_code IS ? AND error_message IS ? AND result_preview IS ? AND host_kind = ?').get(event.context.sessionId, toolName, paramsJson, outcome.outcome, outcome.exitCode, outcome.error ?? null, resultPreview, options.hostKind)
+          : db.prepare('SELECT 1 FROM tool_calls WHERE session_id = ? AND tool_name = ? AND params_json = ? AND outcome = ? AND exit_code IS ? AND error_message IS ? AND result_preview IS ?').get(event.context.sessionId, toolName, paramsJson, outcome.outcome, outcome.exitCode, outcome.error ?? null, resultPreview)) !== undefined) {
           duplicate = true;
           duplicateAdmitted = db.prepare('SELECT 1 FROM pain_events WHERE canonical_pain_id = ?').get(painId) !== undefined;
           return;

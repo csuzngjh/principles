@@ -1,6 +1,8 @@
 import type { PIArtifactSnapshot } from './activation-types.js';
+import type { ToolSemanticRegistry } from '../internalization/tool-semantic-registry.js';
 import type { PromotionReadinessCheck } from './promotion-readiness-evaluator.js';
-import { validateRecoveryControlSurfaces } from './recovery-control-surfaces.js';
+import { validateRecoveryControlSurfaces, RECOVERY_CONTROL_SURFACES } from './recovery-control-surfaces.js';
+import { verifyRecoveryProbeComposition } from './recovery-composition.js';
 
 export interface HostLivenessContract {
   version: string;
@@ -33,7 +35,38 @@ interface OpenClawPromotionCheckInput {
    */
   expectedHostContractVersion?: string;
   existingLiveArtifacts: readonly PIArtifactSnapshot[];
+  /**
+   * Review R3/P1: composition verification executes through the production
+   * boundary (same hardened evaluator + mergeDecisions as the shared gate)
+   * and needs the project root for path normalization, exactly like the
+   * golden-trace replay does.
+   */
+  projectDir?: string;
+  toolSemantics?: ToolSemanticRegistry;
+  /**
+   * Review R3/P1: target-environment reachability evidence for the recovery
+   * controls, produced per readiness evaluation by the CALLER through a
+   * bounded, non-destructive probe (never cached, never destructive):
+   * - CLI channel: the caller spawns the real read-only status command and
+   *   verifies it executes, parses, and reflects the TARGET workspace;
+   * - console channel: the caller proves the control's durable substrate is
+   *   reachable from this process (and the authenticated review route served
+   *   this request) — the full HTTP entry path from the Owner's browser is
+   *   e2e/isolated-test evidence, not something a server can self-assert.
+   * Absent or failed evidence keeps emergency_controls FAILED — a registry
+   * proof in code is not an environment health fact.
+   */
+  recoveryReachability?: RecoveryReachabilityEvidence;
   validateProductionArtifact(artifact: PIArtifactSnapshot): Promise<{ ok: boolean }>;
+}
+
+export interface RecoveryReachabilityEvidence {
+  source: 'cli-status-probe' | 'console-store-probe';
+  ok: boolean;
+  /** The probe was observed to target the workspace this readiness run governs. */
+  workspaceMatched: boolean;
+  /** Bounded, structured detail for the failed case (rc-9). */
+  detail?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -84,7 +117,15 @@ function validateHostContract(value: unknown, expectedVersion: string): HostLive
       expectedDecision: 'allow',
     });
   }
-  if (!requiredCapabilities.every(capability => neutralProbeList.some(
+  // Review R3/P1: probe coverage is required for the RULE-INTERCEPTABLE
+  // capabilities only (registry CLI channel). Console-channel recovery never
+  // passes through the RuleHost gate, so its verification is not a rule
+  // replay — probes for those capabilities are rejected by the registry
+  // validator instead of demanded here.
+  const cliProbeCapabilities = RECOVERY_CONTROL_SURFACES
+    .filter(surface => surface.channel === 'cli')
+    .map(surface => surface.capabilityId);
+  if (!cliProbeCapabilities.every(capability => neutralProbeList.some(
     probe => probe.capabilityId === capability,
   ))) return null;
   return {
@@ -103,29 +144,6 @@ function parseArtifactContent(artifact: PIArtifactSnapshot): Record<string, unkn
   } catch {
     return null;
   }
-}
-
-function artifactWithNeutralProbes(
-  artifact: PIArtifactSnapshot,
-  contract: HostLivenessContract,
-): PIArtifactSnapshot | null {
-  const content = parseArtifactContent(artifact);
-  if (!content || !isRecord(content.goldenTrace) || !Array.isArray(content.goldenTrace.cases)) return null;
-  const cases = contract.neutralProbes.map(probe => ({
-    caseId: `host-liveness:${probe.probeId}`,
-    kind: 'positive',
-    toolName: probe.toolName,
-    params: { ...probe.params },
-    expectedDecision: 'allow',
-  }));
-  const trace = {
-    traceId: `${String(content.goldenTrace.traceId)}:host-liveness`,
-    sourcePainId: String(content.goldenTrace.sourcePainId),
-    cases: [...content.goldenTrace.cases, ...cases],
-    createdAt: String(content.goldenTrace.createdAt),
-    version: 1,
-  };
-  return { ...artifact, contentJson: JSON.stringify({ ...content, goldenTrace: trace }) };
 }
 
 export async function collectOpenClawPromotionChecks(
@@ -153,41 +171,60 @@ export async function collectOpenClawPromotionChecks(
   // cross-package contract tests that import it).
   const recoverySurfaces = contract !== null ? validateRecoveryControlSurfaces(contract) : null;
 
-  let probesPassed = false;
+  // Review R3/P1: composition verification runs through the PRODUCTION
+  // composition boundary — every rule of the composed set compiled by the
+  // same hardened evaluator production replay uses, evaluated on each
+  // rule-interceptable probe input, merged by the same mergeDecisions the
+  // shared gate uses. Per-artifact golden-trace replay alone is NOT
+  // "composition verification" and is no longer described or used as one.
+  let composition: ReturnType<typeof verifyRecoveryProbeComposition>;
   if (contract && scopeAvoidsProtectedCapabilities) {
-    probesPassed = true;
-    for (const candidate of [artifact, ...input.existingLiveArtifacts]) {
-      const withProbes = artifactWithNeutralProbes(candidate, contract);
-      if (!withProbes || !(await input.validateProductionArtifact(withProbes)).ok) {
-        probesPassed = false;
-        break;
-      }
-    }
+    composition = verifyRecoveryProbeComposition({
+      artifacts: [artifact, ...input.existingLiveArtifacts],
+      probes: contract.neutralProbes.map(probe => ({ probeId: probe.probeId, toolName: probe.toolName, params: probe.params })),
+      projectDir: input.projectDir ?? '.',
+      ...(input.toolSemantics !== undefined ? { toolSemantics: input.toolSemantics } : {}),
+    });
+  } else if (contract) {
+    composition = { ok: false, probeId: '__scope__', reason: 'artifact scope overlaps protected capabilities' };
+  } else {
+    // No validated contract → no verified composition (parity with the
+    // pre-R3 probesPassed contract requirement).
+    composition = { ok: false, probeId: '__contract__', reason: 'no validated host contract' };
   }
 
-  // Review R1: emergency controls are healthy only when ALL of the following
-  // hold — the contract shape-bound to the resolver's version, the safety
-  // flag on, every recovery entry verified against the REAL surface registry,
-  // AND the composed rule set (candidate + existing live) still allows the
-  // control probes (a rule combination that blocks a recovery action must
-  // fail readiness even when each rule passes individually-composed replay
-  // of its own trace).
+  // Review R3/P1: emergency controls are healthy only when ALL of the
+  // following hold — the contract shape-bound to the resolver's version, the
+  // safety flag on, every recovery entry verified against the REAL surface
+  // registry, TARGET-ENVIRONMENT reachability evidence produced by this very
+  // readiness evaluation (no cached "verified once" state), AND the composed
+  // rule set (candidate + existing live) allows the rule-interceptable
+  // recovery probes through the production merge boundary. Console-channel
+  // controls are covered by registry + reachability + structural
+  // independence (they never pass through the RuleHost gate; isolated-env
+  // route tests prove the pause path and its effect on the gate).
+  const reachability = input.recoveryReachability;
   const emergencyControlsHealthy = contract !== null
     && input.safetyControlsEnabled
     && recoverySurfaces !== null
     && recoverySurfaces.ok
-    && probesPassed;
+    && reachability !== undefined
+    && reachability.ok
+    && reachability.workspaceMatched
+    && composition.ok;
   const emergencyReason = contract === null
     ? 'out_of_band_controls_unavailable'
     : !input.safetyControlsEnabled
       ? 'safety_controls_disabled'
       : recoverySurfaces !== null && !recoverySurfaces.ok
         ? recoverySurfaces.reason
-        : 'control_probe_composition_failed';
+        : reachability === undefined || !reachability.ok || !reachability.workspaceMatched
+          ? 'recovery_reachability_unverified'
+          : 'control_probe_composition_failed';
   return [
     { checkId: 'bounded_scope', status: bounded ? 'passed' : 'failed', ...(!bounded ? { reasonCode: 'explicit_affected_tools_required' } : {}) },
     { checkId: 'runtime_compatibility', status: contract ? 'passed' : 'failed', ...(!contract ? { reasonCode: 'host_liveness_contract_missing_invalid_or_unsupported' } : {}) },
-    { checkId: 'host_liveness_composition', status: probesPassed ? 'passed' : 'failed', ...(!probesPassed ? { reasonCode: 'neutral_probe_or_live_composition_failed' } : {}) },
+    { checkId: 'host_liveness_composition', status: composition.ok ? 'passed' : 'failed', ...(!composition.ok ? { reasonCode: composition.probeId.startsWith('__') ? `recovery_composition_${composition.probeId.slice(2)}` : 'recovery_probe_composition_blocked' } : {}) },
     { checkId: 'emergency_controls', status: emergencyControlsHealthy ? 'passed' : 'failed', ...(!emergencyControlsHealthy ? { reasonCode: emergencyReason } : {}) },
     { checkId: 'runtime_shadow_evidence', status: contract?.supportsShadowEvidence === true ? 'passed' : 'failed', ...(contract?.supportsShadowEvidence === true ? {} : { reasonCode: 'runtime_shadow_evidence_unsupported' }) },
     { checkId: 'owner_identity_configuration', status: input.ownerIdentityConfigured ? 'passed' : 'failed', ...(!input.ownerIdentityConfigured ? { reasonCode: 'configured_owner_missing' } : {}) },

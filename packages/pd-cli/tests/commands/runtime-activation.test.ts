@@ -27,13 +27,22 @@ const mockListCodeToolHookActivations = vi.fn().mockResolvedValue([
   { activationId: 'act-hook-1', artifactId: 'art-002', channel: 'code_tool_hook', action: 'code_tool_hook_shadow_activate', targetRef: 'rule-001', activatedAt: '2026-06-18T00:00:00.000Z', promotedAt: null, deactivatedAt: null },
 ]);
 
-vi.mock('../../src/services/workspace-tool-semantics.js', () => ({
+vi.mock('../../src/services/workspace-tool-semantics.js', async () => {
   // Unit boundary: dispatch/approve tests exercise flag wiring and approval
   // state transitions; host-provenance resolution has its own contract tests
   // (workspace-tool-semantics.test.ts). Tests that need the refusal path
-  // override the return value via vi.mocked.
-  resolveWorkspaceToolSemantics: vi.fn().mockReturnValue({ ok: true, registry: { version: 1, hasHostLayer: true }, hostKind: 'test-host' }),
-}));
+  // override the return value via vi.mocked. The default registry is a REAL
+  // built one (SPEC R3/P1: readiness composition executes rules through it —
+  // a fake without resolve would break the production code path under test).
+  const { buildToolSemanticRegistry } = await import('@principles/core/runtime-v2');
+  return {
+    resolveWorkspaceToolSemantics: vi.fn().mockReturnValue({
+      ok: true,
+      registry: buildToolSemanticRegistry().registry,
+      hostKind: 'test-host',
+    }),
+  };
+});
 
 vi.mock('../../src/resolve-workspace.js', () => ({
   resolveWorkspaceDir: vi.fn().mockReturnValue('/fake/workspace'),
@@ -1037,6 +1046,7 @@ describe('handleRuntimeActivationPromote', () => {
       lineageArtifactIds: ['task-000'],
       contentJson: JSON.stringify({
         principleId: 'P_001',
+        implementationCode: 'function evaluate(input) { return { decision: "allow", matched: false, reason: "neutral" }; } var meta={name:"p03",version:"1",ruleId:"R_P03",coversCondition:"all"};',
         affectedTools: ['Bash'],
         goldenTrace: {
           traceId: 'trace-1',
@@ -1053,6 +1063,19 @@ describe('handleRuntimeActivationPromote', () => {
     // shadow telemetry source, so seed a real events file before promoting.
     const wsDir = mkdtempSync(path.join(tmpdir(), 'pd-cli-p03-'));
     mkdirSync(path.join(wsDir, '.pd', 'logs'), { recursive: true });
+    // SPEC R3/P1: readiness now probes the REAL CLI status entry against the
+    // target workspace — seed a real state.db listing this activation so the
+    // probe certifies the workspace (the commit-failure under test is the
+    // next stage after a fully passing readiness).
+    {
+      const { SqliteConnection } = await import('@principles/core/runtime-v2');
+      const conn = new SqliteConnection({ workspaceDir: wsDir, readonly: false });
+      const now = '2026-01-01T00:00:00.000Z';
+      conn.getDb().prepare("INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at) VALUES ('task-000', 'diagnosis', 'pending', ?, ?)").run(now, now);
+      conn.getDb().prepare(`INSERT INTO pi_artifacts (artifact_id, artifact_kind, source_task_id, lineage_artifact_ids, validation_status, content_json, created_at, updated_at) VALUES ('art-002', 'rule', 'task-000', '["parent-1"]', 'validated', '{}', ?, ?)`).run(now, now);
+      conn.getDb().prepare(`INSERT INTO activations (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, deactivated_at) VALUES ('act-hook-1', 'idem-p03', 'art-002', 'code_tool_hook', 'code_tool_hook_shadow_activate', 'impl://R_P03', ?, NULL)`).run(now);
+      conn.close();
+    }
     writeFileSync(
       path.join(wsDir, '.pd', 'logs', 'events_20260821.jsonl'),
       `${JSON.stringify({ type: 'rulehost_evaluated', ts: '2026-08-21T00:00:00.000Z', data: { activationId: 'act-hook-1', activationMode: 'shadow', matched: true, decision: 'allow' } })}\n`,

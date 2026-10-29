@@ -122,11 +122,11 @@ const BASE_CONTRACT: HostLivenessContract = {
     { capabilityId: 'rulecode_global_pause', hostToolAliases: ['rulecode_global_pause'] },
     { capabilityId: 'owner_review_access', hostToolAliases: ['owner_review_access'] },
   ],
+  // Review R3/P1: console-channel capabilities carry NO probe (their
+  // recovery path never passes through the RuleHost gate).
   neutralProbes: [
     { probeId: 'status', capabilityId: 'pd_status', toolName: 'Bash', params: { command: 'pd activation list --json' }, expectedDecision: 'allow' },
     { probeId: 'deactivate', capabilityId: 'rulecode_deactivate', toolName: 'Bash', params: { command: 'pd activation deactivate --activation-id recovery-probe' }, expectedDecision: 'allow' },
-    { probeId: 'pause', capabilityId: 'rulecode_global_pause', toolName: 'rulecode_global_pause', params: {}, expectedDecision: 'allow' },
-    { probeId: 'review', capabilityId: 'owner_review_access', toolName: 'owner_review_access', params: {}, expectedDecision: 'allow' },
   ],
 };
 
@@ -136,10 +136,19 @@ const FABRICATED_COMMANDS_CONTRACT: HostLivenessContract = {
   neutralProbes: [
     { probeId: 'status', capabilityId: 'pd_status', toolName: 'Bash', params: { command: 'pd status' }, expectedDecision: 'allow' },
     { probeId: 'deactivate', capabilityId: 'rulecode_deactivate', toolName: 'Bash', params: { command: 'pd activation deactivate --activation-id test' }, expectedDecision: 'allow' },
-    { probeId: 'pause', capabilityId: 'rulecode_global_pause', toolName: 'Bash', params: { command: 'pd activation emergency-pause' }, expectedDecision: 'allow' },
-    { probeId: 'review', capabilityId: 'owner_review_access', toolName: 'owner_review_access', params: {}, expectedDecision: 'allow' },
   ],
 };
+
+function neutralArtifactTraceCases() {
+  return {
+    traceId: 'trace-attribution', sourcePainId: 'pain-attribution',
+    cases: [
+      { caseId: 'negative', kind: 'negative', toolName: 'edit_file', params: { path: '/etc/passwd' }, expectedDecision: 'block' },
+      { caseId: 'positive', kind: 'positive', toolName: 'edit_file', params: { path: '/workspace/safe.ts' }, expectedDecision: 'allow' },
+    ],
+    createdAt: '2026-10-28T00:00:00.000Z', version: 1,
+  };
+}
 
 function neutralArtifact(): PIArtifactSnapshot {
   return {
@@ -211,18 +220,76 @@ describe('collectOpenClawPromotionChecks — host-contract version binding (SPEC
 // ── Review finding 1 (P1): capability declarations ≠ real recovery checks ──
 
 describe('emergency_controls binds to the REAL recovery surface registry (SPEC R1)', () => {
-  it('passes only with a registry-verified contract, the safety flag, and passing control-probe composition', async () => {
+  const reachabilityOk = { source: 'cli-status-probe' as const, ok: true, workspaceMatched: true };
+
+  it('passes only with a registry-verified contract, the safety flag, passing control-probe composition, AND target-environment reachability evidence', async () => {
     const checks = await collectOpenClawPromotionChecks(neutralArtifact(), {
       ownerIdentityConfigured: true,
       safetyControlsEnabled: true,
       hostContract: BASE_CONTRACT,
       expectedHostContractVersion: 'codex-v2@1',
       existingLiveArtifacts: [],
+      projectDir: '/workspace/probe-root',
+      recoveryReachability: reachabilityOk,
       validateProductionArtifact: async () => ({ ok: true }),
     });
     expect(checks.find(check => check.checkId === 'emergency_controls')).toEqual({
       checkId: 'emergency_controls',
       status: 'passed',
+    });
+    expect(checks.find(check => check.checkId === 'host_liveness_composition')).toEqual({
+      checkId: 'host_liveness_composition',
+      status: 'passed',
+    });
+  });
+
+  it('R3-red→green: registry+flag+composition all correct but NO reachability evidence → emergency FAILS (a code-level registry proof is not an environment health fact)', async () => {
+    const checks = await collectOpenClawPromotionChecks(neutralArtifact(), {
+      ownerIdentityConfigured: true,
+      safetyControlsEnabled: true,
+      hostContract: BASE_CONTRACT,
+      expectedHostContractVersion: 'codex-v2@1',
+      existingLiveArtifacts: [],
+      projectDir: '/workspace/probe-root',
+      validateProductionArtifact: async () => ({ ok: true }),
+    });
+    expect(checks.find(check => check.checkId === 'emergency_controls')).toMatchObject({
+      status: 'failed',
+      reasonCode: 'recovery_reachability_unverified',
+    });
+  });
+
+  it('R3: a FAILED reachability probe (entry unreachable / execution failure) → emergency FAILS with the same precise reason', async () => {
+    const checks = await collectOpenClawPromotionChecks(neutralArtifact(), {
+      ownerIdentityConfigured: true,
+      safetyControlsEnabled: true,
+      hostContract: BASE_CONTRACT,
+      expectedHostContractVersion: 'codex-v2@1',
+      existingLiveArtifacts: [],
+      projectDir: '/workspace/probe-root',
+      recoveryReachability: { source: 'cli-status-probe', ok: false, workspaceMatched: false, detail: 'cli-status-probe exited with code 1' },
+      validateProductionArtifact: async () => ({ ok: true }),
+    });
+    expect(checks.find(check => check.checkId === 'emergency_controls')).toMatchObject({
+      status: 'failed',
+      reasonCode: 'recovery_reachability_unverified',
+    });
+  });
+
+  it('R3: a probe that reached the WRONG workspace (workspaceMatched=false) → emergency FAILS', async () => {
+    const checks = await collectOpenClawPromotionChecks(neutralArtifact(), {
+      ownerIdentityConfigured: true,
+      safetyControlsEnabled: true,
+      hostContract: BASE_CONTRACT,
+      expectedHostContractVersion: 'codex-v2@1',
+      existingLiveArtifacts: [],
+      projectDir: '/workspace/probe-root',
+      recoveryReachability: { source: 'cli-status-probe', ok: true, workspaceMatched: false, detail: 'listing does not include the target activation' },
+      validateProductionArtifact: async () => ({ ok: true }),
+    });
+    expect(checks.find(check => check.checkId === 'emergency_controls')).toMatchObject({
+      status: 'failed',
+      reasonCode: 'recovery_reachability_unverified',
     });
   });
 
@@ -233,6 +300,8 @@ describe('emergency_controls binds to the REAL recovery surface registry (SPEC R
       hostContract: FABRICATED_COMMANDS_CONTRACT,
       expectedHostContractVersion: 'codex-v2@1',
       existingLiveArtifacts: [],
+      projectDir: '/workspace/probe-root',
+      recoveryReachability: reachabilityOk,
       validateProductionArtifact: async () => ({ ok: true }),
     });
     expect(checks.find(check => check.checkId === 'emergency_controls')).toMatchObject({
@@ -241,22 +310,40 @@ describe('emergency_controls binds to the REAL recovery surface registry (SPEC R
     });
   });
 
-  it('R1: a console-channel control probed through a fabricated shell command → FAIL (no CLI command exists for the global pause)', async () => {
-    const checks = await collectOpenClawPromotionChecks(neutralArtifact(), {
+  it('R3: a console-channel control carrying ANY probe (shell or virtual tool) → registry FAIL — rule replay must not pose as control verification', async () => {
+    // Virtual-tool variant (the pre-R3 contract shape).
+    const virtual = await collectOpenClawPromotionChecks(neutralArtifact(), {
       ownerIdentityConfigured: true,
       safetyControlsEnabled: true,
       hostContract: {
         ...BASE_CONTRACT,
-        neutralProbes: BASE_CONTRACT.neutralProbes.map(probe =>
-          probe.capabilityId === 'rulecode_global_pause'
-            ? { ...probe, toolName: 'Bash', params: { command: 'pd activation emergency-pause' } }
-            : probe),
+        neutralProbes: [...BASE_CONTRACT.neutralProbes, { probeId: 'pause', capabilityId: 'rulecode_global_pause', toolName: 'rulecode_global_pause', params: {}, expectedDecision: 'allow' as const }],
       },
       expectedHostContractVersion: 'codex-v2@1',
       existingLiveArtifacts: [],
+      projectDir: '/workspace/probe-root',
+      recoveryReachability: reachabilityOk,
       validateProductionArtifact: async () => ({ ok: true }),
     });
-    expect(checks.find(check => check.checkId === 'emergency_controls')).toMatchObject({
+    expect(virtual.find(check => check.checkId === 'emergency_controls')).toMatchObject({
+      status: 'failed',
+      reasonCode: 'recovery_control_probe_mismatch',
+    });
+    // Fabricated shell-command variant.
+    const shell = await collectOpenClawPromotionChecks(neutralArtifact(), {
+      ownerIdentityConfigured: true,
+      safetyControlsEnabled: true,
+      hostContract: {
+        ...BASE_CONTRACT,
+        neutralProbes: [...BASE_CONTRACT.neutralProbes, { probeId: 'pause', capabilityId: 'rulecode_global_pause', toolName: 'Bash', params: { command: 'pd activation emergency-pause' }, expectedDecision: 'allow' as const }],
+      },
+      expectedHostContractVersion: 'codex-v2@1',
+      existingLiveArtifacts: [],
+      projectDir: '/workspace/probe-root',
+      recoveryReachability: reachabilityOk,
+      validateProductionArtifact: async () => ({ ok: true }),
+    });
+    expect(shell.find(check => check.checkId === 'emergency_controls')).toMatchObject({
       status: 'failed',
       reasonCode: 'recovery_control_probe_mismatch',
     });
@@ -288,6 +375,8 @@ describe('emergency_controls binds to the REAL recovery surface registry (SPEC R
       hostContract: BASE_CONTRACT,
       expectedHostContractVersion: 'codex-v2@1',
       existingLiveArtifacts: [controlBlocking],
+      projectDir: '/workspace/probe-root',
+      recoveryReachability: reachabilityOk,
       validateProductionArtifact: async () => ({ ok: true }),
     });
     expect(checks.find(check => check.checkId === 'emergency_controls')).toMatchObject({
@@ -295,6 +384,30 @@ describe('emergency_controls binds to the REAL recovery surface registry (SPEC R
       reasonCode: 'control_probe_composition_failed',
     });
     expect(checks.find(check => check.checkId === 'host_liveness_composition')?.status).toBe('failed');
+  });
+
+  it('R3: production MERGE precedence is exercised — a live rule returning requireApproval on a recovery probe fails the composed check even though nothing blocks', async () => {
+    // allow + requireApproval merges to requireApproval under mergeDecisions:
+    // the recovery entry would demand an approval nobody can give out-of-band.
+    const escalator = { ...neutralArtifact(), contentJson: JSON.stringify({
+      implementationCode: `function evaluate(input) { const b = input.action.toolName === 'Bash' || input.action.toolName === 'bash'; return { decision: b ? 'requireApproval' : 'allow', matched: b, reason: b ? 'needs owner' : 'neutral' }; }`,
+      goldenTrace: neutralArtifactTraceCases(),
+      affectedTools: ['edit_file'], ruleHostGateDecision: 'accepted_shadow',
+    }) };
+    const checks = await collectOpenClawPromotionChecks(neutralArtifact(), {
+      ownerIdentityConfigured: true,
+      safetyControlsEnabled: true,
+      hostContract: BASE_CONTRACT,
+      expectedHostContractVersion: 'codex-v2@1',
+      existingLiveArtifacts: [escalator],
+      projectDir: '/workspace/probe-root',
+      recoveryReachability: reachabilityOk,
+      validateProductionArtifact: async () => ({ ok: true }),
+    });
+    expect(checks.find(check => check.checkId === 'emergency_controls')).toMatchObject({
+      status: 'failed',
+      reasonCode: 'control_probe_composition_failed',
+    });
   });
 
   it('R1: safety flag OFF still fails with the flag reason (registry alone is not health either)', async () => {

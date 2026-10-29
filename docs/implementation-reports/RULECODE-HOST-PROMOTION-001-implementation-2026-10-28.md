@@ -141,3 +141,46 @@ Rollback: revert the PR (single revert); behavior returns to the pre-SPEC resolv
 ## Round 2 测试总量（本 diff）
 
 core runtime-v2 7838 绿（+barrel 快照更新）；host-runtime 593 绿（+R2 provider 3 红→绿 +R1 wiring）；codex-adapter 355 绿；workbuddy-adapter 79 绿（host-contract 45/45 + production 16/16 含 2 新接线）；pd-console 2987+1 绿（含新注册表路由 4/4 与 Test G 修复）；pd-cli 2112 绿（含新注册表 CLI 4/4）；openclaw-plugin 环境失败集不变（4 例，与改前同名单）；owner e2e 6/6。BDD AMD 网关 400 仍为既有环境失败（前轮已基线复现）。
+
+---
+
+# Round 3 — 评审发现修复（2026-10-29，P1 真实恢复能力接入 + P2 归属贯穿去重/升级）
+
+评审对象 HEAD `f5ae754c4`。被推翻的 Round 2 结论在本节末尾更正。
+
+## P1：把真实恢复能力接入上线判断
+
+**已确认缺口**：emergency_controls 仍主要依赖 合同存在+安全开关+静态注册表一致+工件逐个回放。注册表与跨包测试只证明**代码中存在入口**，不证明目标环境入口当前可达/认证有效/指向正确工作区；逐工件回放不等于真实规则组合执行；console 通道用虚拟工具 allow 回放替代其独立性验证。
+
+**修复（区分四层证据，全部复用既有组件）**：
+1. **组合验证走生产边界**（新 core 模块 `recovery-composition.ts`）：`verifyRecoveryProbeComposition` 将候选+全部既有 live 工件的规则，用生产回放同一 hardened evaluator（`compileHardenedRuleEvaluator`）编译、同一输入构造器（`createSyntheticRuleHostInput`）求值、同一合并器（`mergeDecisions`）合并——block 与 requireApproval 升级均判失败，并按引用恒等定位阻断工件。旧 `artifactWithNeutralProbes` 逐工件近似已删除，代码与注释不再称其为"组合验证"。
+2. **console 通道不再用规则回放替代**：三合同移除 pause/owner-review 虚拟探针；注册表校验器现在**拒绝** console 能力携带任何探针（虚拟工具或伪造 shell 命令均 mismatch）；形状校验只要求 CLI 通道能力有探针。其独立性由隔离环境真实官方路径测试证明（下 4）。
+3. **目标环境可达性证据**（`RecoveryReachabilityEvidence`，每次 readiness 现算、不缓存）：
+   - CLI 侧（`pd-cli/src/commands/recovery-reachability-probe.ts`）：真实子进程执行 `pd activation list --json --workspace <目标工作区>`（有界 15s/1MiB、非破坏性），要求 exit 0、JSON 可解析、且**目标 activation 出现在列表中**（证明探测的就是被治理的工作区，而非任意工作区）。
+   - Console 侧：读取紧急暂停路由写入的同一 safety store（`getActiveGlobalPause`）证明控制底座在本进程可达；注释明确不宣称 Owner 浏览器→HTTP 全路径（那是 e2e/隔离测试证据）——普通 200 不再被当作所有能力健康。
+   - 证据缺失/失败/工作区不匹配 → emergency_controls FAIL `recovery_reachability_unverified`；注册表证明不再等同环境健康，任何安装不得继承他处的"已验证"状态。
+4. **隔离环境真实恢复效果**（`pd-console/tests/server/routes/recovery-official-path.test.ts`）：坏规则（拦截全部 write）live 生效 deny → **真实** break-glass `POST /emergency-pause` 路由 → 共享生产 gate 实读该 pause 行并 allow+`global_rulecode_pause_active` → Owner 身份经官方 release 路由（expectedVersion；break-glass 只能停不能放——路由语义如实测试）→ gate 恢复 deny。全程无手改控制状态，恢复到可执行状态走既有 Owner 决定，无任何自动复活。
+
+**红→绿证据**（core 21 用例）：红=旧实现下 注册表+开关+组合全对但**无可达性证据 → emergency 通过**（修复后 FAIL `recovery_reachability_unverified`）；探针失败/工作区不匹配分别 FAIL；console 能力携带虚拟/shell 探针 → 注册表 FAIL；组合阻断（live 拦截 shell）与 merge 优先级（requireApproval）→ FAIL 且定位阻断工件；全证据齐备 → PASS。CLI 探针真实子进程测试 2 用例（正确工作区 ok+matched；目标 activation 缺席 → 精确 detail）。
+
+## P2：宿主归属贯穿去重与事实升级
+
+**已确认缺口**：`recordVerifiedToolOutcomes` 按 session+tool_use_id 找首行、命中 unknown 即升级，未核对 host_kind；live 写入的 toolCallId 去重与内容形状去重同样不分宿主。跨宿主自然标识碰撞会吞掉第二宿主调用，或把 Codex 结果写进保留 WorkBuddy 标记的行。
+
+**修复（三个写入点全部宿主辖域化，无索引/重构扩张）**：
+- `recordVerifiedToolOutcomes`：已知宿主时查找/升级仅匹配 `host_kind = 调用宿主` 的行；命中他宿主或 NULL 行 → 各自独立记录（insert attributed 行），不吞不认领；无 hostKind 调用者保持历史 match-any 语义（显式兼容契约，有回归锁定）。
+- live PostToolUse 路径：toolCallId 去重与内容形状去重在已知宿主时均加 `host_kind =` 谓词。
+- governance 准入路径：两处去重同样宿主辖域化（INSERT 已在 Round 2 盖章）。
+- 旧行不回填；Codex 历史读取侧对称归属过滤仍为**已记录的后续项**（本轮未改其消费者，写入侧已为未来切换备好全部数据）。
+
+**真实存储回归**（`host-runtime/tests/recovery-dedup-host-attribution.test.ts`，红 3→7/7 绿）：WB unknown 行+Codex 同标识终值 → WB 行原样、Codex 独立落行（红：旧实现直接升级吞并）；两宿主同 session/call 各一次 → 两条独立记录（红：第二宿主被吞）；同宿主重复投递幂等；同宿主 unknown→终值正确升级且终值不被后续冲突覆盖；NULL 行不被认领（红：旧实现隐式认领）；交错双连接不丢行；无 hostKind 兼容语义。生产编排级（codex-adapter ingestion 真实 orchestrator）5/7 用例同步更新为双契约。
+
+## Round 2 结论更正
+
+1. Round 2 曾把"跨包注册测试"表述为控制面可用的证明——**不准确**：那只是代码注册证明。环境健康现由每评估现算的可达性证据承担。
+2. Round 2 的 emergency_controls 仍含"合同+开关+注册表"即通过的路径——本轮补齐可达性与生产组合执行后该路径不再存在。
+3. Round 2 的 console 通道虚拟工具探针（当时视为"诚实表示"）——**推翻**：规则回放不能代表 console 控制验证，已移除并以隔离环境真实路由效果测试替代。
+
+## Round 3 测试总量
+
+core runtime-v2 7848（21 归属/注册表/组合/可达性矩阵）；host-runtime 600（+7 去重归属）；codex-adapter 357（upgrade 双契约 5/5）；pd-cli 2114（+CLI 真子进程探针 2；P0-3 fixture 补真实 DB 种子+真实 registry mock）；pd-console 2991（+隔离恢复效果 3）；openclaw-plugin 环境失败集与既有相同（4 例；两个 perf 测试在全量并行时抖动、隔离复跑全绿）；owner e2e 6/6。

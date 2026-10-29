@@ -1,6 +1,6 @@
 {
   "barrel": "src/runtime-v2/index.ts",
-  "count": 1963,
+  "count": 1969,
   "names": [
     "ADMISSION_CONFIDENCE_THRESHOLD",
     "ADMISSION_POLICY_VERSION",
@@ -1091,9 +1091,14 @@
     "RecoveryActionKind",
     "RecoveryActionRecord",
     "RecoveryActionResult",
+    "RecoveryCompositionArtifact",
+    "RecoveryCompositionInput",
+    "RecoveryCompositionProbe",
+    "RecoveryCompositionResult",
     "RecoveryControlCapability",
     "RecoveryControlSurface",
     "RecoveryControlValidation",
+    "RecoveryReachabilityEvidence",
     "RecoveryResult",
     "RecoverySweep",
     "RecoverySweepService",
@@ -1964,6 +1969,7 @@
     "validateTaskTransition",
     "validateToolSemanticMappings",
     "verifyPiArtifactRowDigest",
+    "verifyRecoveryProbeComposition",
     "writeOwnerIdentityFile"
   ]
 }

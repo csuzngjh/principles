@@ -28,8 +28,11 @@ export const OPENCLAW_HOST_LIVENESS_CONTRACT: HostLivenessContract = {
     // `pd activation emergency-pause` do not exist and were removed).
     { probeId: 'probe-pd-status', capabilityId: 'pd_status', toolName: 'exec', params: { command: 'pd activation list --json' }, expectedDecision: 'allow' },
     { probeId: 'probe-rule-deactivate', capabilityId: 'rulecode_deactivate', toolName: 'exec', params: { command: 'pd activation deactivate --activation-id recovery-probe' }, expectedDecision: 'allow' },
-    { probeId: 'probe-global-pause', capabilityId: 'rulecode_global_pause', toolName: 'rulecode_global_pause', params: {}, expectedDecision: 'allow' },
-    { probeId: 'probe-owner-review', capabilityId: 'owner_review_access', toolName: 'owner_review_access', params: {}, expectedDecision: 'allow' },
+    // Review R3/P1: console-channel capabilities (global pause, owner review)
+    // carry NO probe — their recovery path never passes through the RuleHost
+    // gate, so a rule replay would misrepresent their verification. Their
+    // entry surfaces live in the recovery-control registry and their
+    // target-environment reachability is supplied by the readiness caller.
   ],
 };
 
@@ -58,8 +61,11 @@ export const CODEX_HOST_LIVENESS_CONTRACT: HostLivenessContract = {
   neutralProbes: [
     { probeId: 'probe-pd-status', capabilityId: 'pd_status', toolName: 'Bash', params: { command: 'pd activation list --json' }, expectedDecision: 'allow' },
     { probeId: 'probe-rule-deactivate', capabilityId: 'rulecode_deactivate', toolName: 'Bash', params: { command: 'pd activation deactivate --activation-id recovery-probe' }, expectedDecision: 'allow' },
-    { probeId: 'probe-global-pause', capabilityId: 'rulecode_global_pause', toolName: 'rulecode_global_pause', params: {}, expectedDecision: 'allow' },
-    { probeId: 'probe-owner-review', capabilityId: 'owner_review_access', toolName: 'owner_review_access', params: {}, expectedDecision: 'allow' },
+    // Review R3/P1: console-channel capabilities (global pause, owner review)
+    // carry NO probe — their recovery path never passes through the RuleHost
+    // gate, so a rule replay would misrepresent their verification. Their
+    // entry surfaces live in the recovery-control registry and their
+    // target-environment reachability is supplied by the readiness caller.
   ],
 };
 
@@ -85,8 +91,11 @@ export const WORKBUDDY_HOST_LIVENESS_CONTRACT: HostLivenessContract = {
   neutralProbes: [
     { probeId: 'probe-pd-status', capabilityId: 'pd_status', toolName: 'Bash', params: { command: 'pd activation list --json' }, expectedDecision: 'allow' },
     { probeId: 'probe-rule-deactivate', capabilityId: 'rulecode_deactivate', toolName: 'Bash', params: { command: 'pd activation deactivate --activation-id recovery-probe' }, expectedDecision: 'allow' },
-    { probeId: 'probe-global-pause', capabilityId: 'rulecode_global_pause', toolName: 'rulecode_global_pause', params: {}, expectedDecision: 'allow' },
-    { probeId: 'probe-owner-review', capabilityId: 'owner_review_access', toolName: 'owner_review_access', params: {}, expectedDecision: 'allow' },
+    // Review R3/P1: console-channel capabilities (global pause, owner review)
+    // carry NO probe — their recovery path never passes through the RuleHost
+    // gate, so a rule replay would misrepresent their verification. Their
+    // entry surfaces live in the recovery-control registry and their
+    // target-environment reachability is supplied by the readiness caller.
   ],
 };
 
