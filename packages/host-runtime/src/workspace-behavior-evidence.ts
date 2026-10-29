@@ -126,13 +126,13 @@ export function readWorkspaceRuleContextRowsBefore(
       // Attribution-aware read: fetch one extra slot beyond the limit so the
       // partition counts stay truthful about a truncated window's tail.
       const selectColumns = includeHostKind ? 'id, tool_name, outcome, params_json, host_kind' : 'id, tool_name, outcome, params_json';
-      const fetched: unknown[] = db.prepare(`
+      const fetched = db.prepare(`
         SELECT ${selectColumns}
         FROM tool_calls
         WHERE session_id = ? AND project_dir = ? AND created_at < ? AND (tool_use_id IS NULL OR tool_use_id <> ?)
         ORDER BY created_at DESC, id DESC
         LIMIT ?
-      `).all(sessionId, projectDir, beforeCreatedAt, excludeToolUseId, limit + 1) as unknown[];
+      `).all(sessionId, projectDir, beforeCreatedAt, excludeToolUseId, limit + 1);
       const unscoped: unknown = db.prepare(`
         SELECT 1 AS found FROM tool_calls
         WHERE session_id = ? AND project_dir IS NULL AND created_at < ?
