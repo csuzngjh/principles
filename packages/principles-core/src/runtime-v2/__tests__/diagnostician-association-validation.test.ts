@@ -28,6 +28,10 @@ describe('opt-in V2 association reference checks', () => {
     expect(proposeShadowAssociations(value, context, { artifactId: 'artifact', candidates, resolvePrincipleCandidate: resolve })).toMatchObject({ ok: true, proposals: [{
       status: 'proposed', targetCandidateId: 'candidate-0', authorizesGeneration: false,
     }] });
+    expect(proposeShadowAssociations(value, context, { artifactId: 'artifact', candidates: candidates.slice(0, 1), resolvePrincipleCandidate: resolve })).toMatchObject({ proposals: [{ reason: 'candidate_mapping_invalid' }] });
+    expect(proposeShadowAssociations(value, context, { artifactId: 'artifact', candidates: candidates.map((row, i) => i === 1 ? { ...row, artifactId: 'foreign' } : row), resolvePrincipleCandidate: resolve })).toMatchObject({ proposals: [{ reason: 'candidate_mapping_invalid' }] });
+    expect(proposeShadowAssociations(value, context, { artifactId: 'artifact', candidates: candidates.map((row, i) => i === 1 ? { ...row, sourceRecommendation: { ...row.sourceRecommendation, description: 'tampered' } } : row), resolvePrincipleCandidate: resolve })).toMatchObject({ proposals: [{ reason: 'candidate_mapping_invalid' }] });
+    expect(proposeShadowAssociations(value, context, { artifactId: 'artifact', candidates, resolvePrincipleCandidate: () => ({ status: 'unresolved', reason: 'ledger_corrupt' }) })).toMatchObject({ proposals: [{ reason: 'ledger_corrupt' }] });
     expect(proposeShadowAssociations(value, context, { artifactId: 'foreign', candidates, resolvePrincipleCandidate: resolve })).toMatchObject({ proposals: [{ reason: 'candidate_mapping_invalid' }] });
     expect(proposeShadowAssociations(value, context, { artifactId: 'artifact', candidates: [...candidates, ...candidates], resolvePrincipleCandidate: resolve })).toMatchObject({ proposals: [{ reason: 'candidate_mapping_invalid' }] });
     expect(proposeShadowAssociations(value, context, { artifactId: 'artifact', candidates, resolvePrincipleCandidate: () => ({ status: 'unresolved' }) })).toMatchObject({ proposals: [{ reason: 'related_candidate_unresolved' }] });

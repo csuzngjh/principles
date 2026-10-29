@@ -40,6 +40,13 @@ export function proposeShadowAssociations(
     if (check.status !== 'linked') { proposed.push(result); continue; }
     const rule = output.recommendations.find((item) => item.recommendationRef === check.recommendationRef);
     if (rule?.kind !== 'rule' || rule.principleAssociation.status !== 'linked') { proposed.push(result); continue; }
+    const ownRows = candidates.filter((row) => row.sourceRecommendation.recommendationRef === rule.recommendationRef);
+    const [ownRow] = ownRows;
+    if (ownRows.length !== 1 || ownRow === undefined || ownRow.artifactId !== artifactId || !Value.Equal(ownRow.sourceRecommendation, rule)) {
+      result.reason = 'candidate_mapping_invalid';
+      proposed.push(result);
+      continue;
+    }
     const { target } = rule.principleAssociation;
     if (target.type === 'canonical_principle') {
       result.reason = 'trusted_context_producer_unavailable';
@@ -66,7 +73,13 @@ export function proposeShadowAssociations(
         result.status = 'proposed';
         result.reason = 'canonical_identity_proposed';
         result.principleId = identity.principleId;
-      } else result.reason = 'related_candidate_unresolved';
+      } else {
+        const failureSchema = Type.Object({ status: Type.Literal('unresolved'), reason: Type.Union([
+          Type.Literal('ledger_unavailable'), Type.Literal('ledger_corrupt'), Type.Literal('ambiguous'),
+          Type.Literal('conflicting_authorities'), Type.Literal('target_missing'), Type.Literal('target_ineligible'),
+        ]) });
+        result.reason = Value.Check(failureSchema, identity) ? identity.reason : 'related_candidate_unresolved';
+      }
     }
     proposed.push(result);
   }
