@@ -14,6 +14,12 @@ layout: page
 <div class="abyss-list">
 
 <div class="abyss-item">
+  <div class="abyss-meta">LOG #008 · 2026-10-30</div>
+  <a class="abyss-title" href="/zh/abyss/08-goal-not-a-prompt">08 | 目标不是一段 Prompt：当智能体学会执行，谁来负责判断？</a>
+  <p class="abyss-desc">从圣塔菲号的错误命令到西蒙的决策前提与 Bungay 的三重落差：当智能体学会执行，谁来负责判断什么值得做？探讨“我打算”式的意图协作、四问审议框架，以及从服从指令到共同承担判断的第三条道路。</p>
+</div>
+
+<div class="abyss-item">
   <div class="abyss-meta">LOG #007 · 2026-10-13</div>
   <a class="abyss-title" href="/zh/abyss/07-goal-management-paradox">07 | 当我们越来越擅长实现目标，为什么反而可能离目标越来越远？</a>
   <p class="abyss-desc">从南辕北辙到刻舟求剑：当 AI Agent 成为越来越优秀的“车夫”，我们为什么可能更高效地走向错误的未来？从古德哈特定律到双环学习，探讨人与智能体通过真实反馈共同校准方向、共同成长的可能。</p>
