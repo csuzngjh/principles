@@ -13,13 +13,16 @@ test.describe('RuleCode Owner live-decision safety journey', () => {
       throw new Error('Owner decision response shape is invalid');
     }
     const shadowDecision = decisionsBody.data.items.find(item => isRecord(item) && item.kind === 'rulecode_decision');
-    if (!isRecord(shadowDecision) || typeof shadowDecision.taskId !== 'string') {
+    if (!isRecord(shadowDecision) || typeof shadowDecision.taskId !== 'string' || typeof shadowDecision.reviewKey !== 'string') {
       throw new Error('Seeded RuleCode owner decision is missing');
     }
 
     await page.goto('/#/focus');
     // Focus is the Owner inbox. The activation page remains the authority for
     // RuleCode evidence and containment controls.
+    const item = page.getByTestId('owner-work-item').and(page.locator(`[data-item-key="decision:${shadowDecision.reviewKey}"]`));
+    await expect(item).toBeVisible();
+    await item.click();
     const activationCta = page.getByTestId(`go-activation-${shadowDecision.taskId}`);
     await expect(activationCta).toBeVisible();
     await activationCta.click();

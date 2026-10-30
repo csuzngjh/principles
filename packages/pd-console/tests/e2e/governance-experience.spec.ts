@@ -49,6 +49,8 @@ test('governance experience snapshot serves Focus and routes its recovery action
     if (pathname.startsWith('/api/')) apiRequests.push(pathname);
   });
   await page.goto('/#/focus');
+  // 004 keeps runtime status available on demand, outside the primary task flow.
+  await page.getByTestId('focus-runtime-records').locator(':scope > summary').click();
   await expect(page.getByTestId('experience-summary')).toBeVisible();
   expect(apiRequests).toContain('/api/v1/governance/experience');
   // Exactly ONE /governance/queue request is permitted: the NotificationProvider's

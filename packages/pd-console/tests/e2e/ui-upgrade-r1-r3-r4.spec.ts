@@ -279,7 +279,7 @@ test.describe('R2 review round 2: degraded inbox, feature-off, drawer resize', (
     await expect(strip).toBeVisible();
     const text = await strip.innerText();
     expect(text).not.toContain('当前没有需要你处理的治理事项');
-    expect(text).toContain('待处理数暂不可确认');
+    expect(text).toContain('部分资料暂未读取，当前列表可能不完整。');
     // The server's own reason + nextAction are shown as the recovery entry.
     const degraded = page.locator('[data-testid="focus-conclusion-degraded"]');
     await expect(degraded).toBeVisible();
@@ -299,17 +299,21 @@ test.describe('R2 review round 2: degraded inbox, feature-off, drawer resize', (
     const counts = page.locator('[data-testid="focus-conclusion-counts"]');
     await expect(counts).toBeVisible();
     const text = await counts.innerText();
-    // Unavailable headline, never allClear.
-    expect(text).toContain('待处理数暂不可确认');
+    // A deliberately disabled optional projection is not an outage; confirmed
+    // work items still prevent a false all-clear headline.
+    expect(text).toMatch(/\d+ 项/);
     expect(text).not.toContain('当前没有需要你处理的治理事项');
     // This e2e workspace runs --no-auth, so governance actions are LOCKED
     // (PRI-787): the S3 regression was the contradictory pairing of the
     // actionable-now count with the lock notice. The unified wording must
     // name the lock, never claim actionability.
     expect(text).not.toMatch(/现在可操作/);
-    expect(text).toContain('治理动作已锁定');
-    // Cards stay on screen.
-    await expect(page.locator('[data-testid="owner-decisions-section"]').locator('button, article, a').first()).toBeVisible();
+    await expect(page.getByTestId('focus-conclusion-lock')).toContainText('决策动作已锁定');
+    // The exact approval remains discoverable and no-auth actions remain locked.
+    const item = page.getByTestId('owner-work-item').and(page.locator('[data-item-key="approval:apr-click-approve"]'));
+    await expect(item).toBeVisible();
+    await item.click();
+    await expect(page.getByTestId('approve-btn-e2e00000-0000-4000-8000-000000000008')).toBeDisabled();
   });
 
   test('drawer open at 390px closes when the window grows to desktop; main regains interaction (Q2)', async ({ page }) => {

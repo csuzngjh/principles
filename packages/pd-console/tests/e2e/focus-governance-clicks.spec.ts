@@ -9,7 +9,7 @@
 // the activation card located, 查看恢复详情 → /failed-tasks with the task
 // expanded (covered by the failed-tasks suite). 部署审批 (activation_approval)
 // changed shape in PRI-889: the decision actions render inline on Focus
-// (PendingReviewCard) instead of a deep-link CTA; the CTA remains only as the
+// (the selected per-object reader) instead of a deep-link CTA; the CTA remains only as the
 // fallback when grouped approvals data is unavailable.
 
 import { test, expect, type Page } from '@playwright/test';
@@ -47,17 +47,25 @@ test.describe('PRI-629: Focus routes Owner decisions to their existing authoriti
     expect(group).toBeTruthy();
 
     await gotoFocus(page);
-    // The inline card carries the decision actions for the whole group. The
-    // e2e server runs no-auth (playwright.config webServer env), so the
-    // PRI-787 governance lock is INTENTIONALLY active: actions render but
-    // are disabled with a visible reason — assert that honest contract
-    // (rc-9: no silent disablement) instead of enabled buttons.
-    const approve = page.getByTestId(`approve-btn-${group.principleId}`);
-    await expect(approve).toBeVisible();
-    await expect(approve).toBeDisabled();
-    await expect(page.getByTestId(`reject-btn-${group.principleId}`)).toBeVisible();
-    await expect(page.getByTestId(`edit-btn-${group.principleId}`)).toBeVisible();
-    await expect(page.getByTestId(`pending-actions-locked-${group.principleId}`)).toBeVisible();
+    // 004 selects one exact approval before reading; grouping is not batch authority.
+    const record = group.records.find((entry: any) => entry.status === 'pending');
+    expect(record).toBeTruthy();
+    const selected = page.getByTestId('owner-work-item').and(page.locator(`[data-item-key="approval:${record.id}"]`));
+    await expect(selected).toBeVisible();
+    await selected.click();
+    await expect(page).toHaveURL(new RegExp(`review=${encodeURIComponent(`approval:${record.id}`)}`));
+    const reading = page.getByTestId('owner-work-reading');
+    // The no-auth fixture intentionally keeps every mutation locked with a visible reason.
+    const approve = reading.getByTestId(`approve-btn-${group.principleId}`);
+    const reject = reading.getByRole('button', { name: '拒绝这个版本', exact: true });
+    const edit = reading.getByTestId(`edit-btn-${group.principleId}`);
+    for (const action of [approve, reject, edit]) {
+      await expect(action).toBeVisible();
+      await expect(action).toBeDisabled();
+    }
+    await expect(page.getByTestId('focus-conclusion-lock')).toBeVisible();
+    await expect(reading.getByRole('alert').filter({ hasText: '认证' })).toBeVisible();
+
   });
 
   test('pending RuleCode shadow decision is visible and locates its activation card', async ({ page }) => {
@@ -67,6 +75,9 @@ test.describe('PRI-629: Focus routes Owner decisions to their existing authoriti
     expect(shadow).toBeTruthy();
 
     await gotoFocus(page);
+    const selected = page.getByTestId('owner-work-item').and(page.locator(`[data-item-key="decision:${shadow.reviewKey}"]`));
+    await expect(selected).toBeVisible();
+    await selected.click();
     const cta = page.getByTestId(`go-activation-${shadow.taskId}`);
     await expect(cta).toBeVisible();
     const expectedHash = `#/activation?activationId=${encodeURIComponent(shadow.taskId)}`;
