@@ -230,11 +230,6 @@ export class ApprovalsConsoleModel {
     } finally { connection.close(); }
   }
 
-  private async reviewIsCurrent(approvalId: string, expectedReview: ApprovalReviewGuard): Promise<boolean> {
-    const current = await this.getApprovalDetail(approvalId);
-    return current !== null && Value.Equal(current.review.expectedReview, expectedReview);
-  }
-
   async approve(
     approvalId: string,
     decidedBy: string,
@@ -245,9 +240,10 @@ export class ApprovalsConsoleModel {
     if (!stateDbExists(this.workspaceDir)) {
       return { ok: false, error: 'not_found' };
     }
-    const existing = await this.readSafeGetById(approvalId);
+    const reviewed = options?.expectedReview ? await this.getApprovalDetail(approvalId) : null;
+    const existing = options?.expectedReview ? reviewed : await this.readSafeGetById(approvalId);
     if (!existing) return { ok: false, error: 'not_found' };
-    if (options?.expectedReview && !await this.reviewIsCurrent(approvalId, options?.expectedReview)) return { ok: false, error: 'stale_review', reason: 'The reviewed approval material changed.', nextAction: 'Reload this approval before deciding again.' };
+    if (options?.expectedReview && !Value.Equal(reviewed?.review.expectedReview, options?.expectedReview)) return { ok: false, error: 'stale_review', reason: 'The reviewed approval material changed.', nextAction: 'Reload this approval before deciding again.' };
     if (!MVP_PROVEN_CHANNELS.has(existing.channel)) {
       return { ok: false, error: 'unsupported_channel', channel: existing.channel };
     }
@@ -639,9 +635,10 @@ export class ApprovalsConsoleModel {
     if (!stateDbExists(this.workspaceDir)) {
       return { ok: false, error: 'not_found' };
     }
-    const existing = await this.readSafeGetById(approvalId);
+    const reviewed = input.expectedReview ? await this.getApprovalDetail(approvalId) : null;
+    const existing = input.expectedReview ? reviewed : await this.readSafeGetById(approvalId);
     if (!existing) return { ok: false, error: 'not_found' };
-    if (input.expectedReview && !await this.reviewIsCurrent(approvalId, input.expectedReview)) return { ok: false, error: 'stale_review', reason: 'The reviewed approval material changed.', nextAction: 'Reload this approval before deciding again.' };
+    if (input.expectedReview && !Value.Equal(reviewed?.review.expectedReview, input.expectedReview)) return { ok: false, error: 'stale_review', reason: 'The reviewed approval material changed.', nextAction: 'Reload this approval before deciding again.' };
     if (existing.status !== 'pending') {
       return { ok: false, error: 'already_decided', status: existing.status };
     }
@@ -850,9 +847,10 @@ export class ApprovalsConsoleModel {
     if (!stateDbExists(this.workspaceDir)) {
       return { ok: false, error: 'not_found' };
     }
-    const existing = await this.readSafeGetById(approvalId);
+    const reviewed = expectedReview ? await this.getApprovalDetail(approvalId) : null;
+    const existing = expectedReview ? reviewed : await this.readSafeGetById(approvalId);
     if (!existing) return { ok: false, error: 'not_found' };
-    if (expectedReview && !await this.reviewIsCurrent(approvalId, expectedReview)) return { ok: false, error: 'stale_review', reason: 'The reviewed approval material changed.', nextAction: 'Reload this approval before deciding again.' };
+    if (expectedReview && !Value.Equal(reviewed?.review.expectedReview, expectedReview)) return { ok: false, error: 'stale_review', reason: 'The reviewed approval material changed.', nextAction: 'Reload this approval before deciding again.' };
     if (!MVP_PROVEN_CHANNELS.has(existing.channel)) {
       return { ok: false, error: 'unsupported_channel', channel: existing.channel };
     }

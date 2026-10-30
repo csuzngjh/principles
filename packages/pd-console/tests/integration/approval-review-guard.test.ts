@@ -121,3 +121,23 @@ it('refuses a replacement changed after service validation but before the edit t
     expect((await review()).artifactId).toBe('a');
   } finally { spy.mockRestore(); }
 });
+
+
+it('never validates the guard for B while using an independently read record A for decision prechecks', async () => {
+  const db = connection.getDb();
+  db.prepare('UPDATE approvals SET artifact_id = ? WHERE approval_id = ?').run('b', approvalId);
+  const readingB = await review();
+  db.prepare('UPDATE approvals SET artifact_id = ? WHERE approval_id = ?').run('a', approvalId);
+  const original = SqliteApprovalQueueStore.prototype.getById;
+  const spy = vi.spyOn(SqliteApprovalQueueStore.prototype, 'getById').mockImplementationOnce(async function (this: SqliteApprovalQueueStore, id: string) {
+    const recordA = await original.call(this, id);
+    db.prepare('UPDATE approvals SET artifact_id = ? WHERE approval_id = ?').run('b', approvalId);
+    return recordA;
+  });
+  try {
+    const result = await model.approve(approvalId, 'owner', { expectedReview: readingB.review.expectedReview });
+    expect(result).toMatchObject({ ok: false, error: 'stale_review' });
+    expect(await review()).toMatchObject({ artifactId: 'b', status: 'pending' });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM activations').get()).toMatchObject({ count: 0 });
+  } finally { spy.mockRestore(); }
+});
