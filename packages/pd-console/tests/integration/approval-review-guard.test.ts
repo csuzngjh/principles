@@ -19,7 +19,7 @@ beforeEach(async () => {
   const db = connection.getDb();
   for (const id of ['a', 'b', 'c']) {
     db.prepare("INSERT INTO tasks(task_id,task_kind,status,created_at,updated_at) VALUES (?, 'diagnosis','pending','now','now')").run(`task-${id}`);
-    db.prepare("INSERT INTO pi_artifacts(artifact_id,artifact_kind,source_task_id,lineage_artifact_ids,validation_status,content_json,created_at,updated_at) VALUES (?, 'principle', ?, ?, 'validated', ?, 'now','now')").run(id, `task-${id}`, JSON.stringify(id === 'a' ? [] : ['a']), JSON.stringify({ principleDraft: { statement: `Statement ${id}`, rationale: 'Reason', applicability: ['local'] }, secret: 'not-for-ui' }));
+    db.prepare("INSERT INTO pi_artifacts(artifact_id,artifact_kind,source_task_id,lineage_artifact_ids,validation_status,content_json,created_at,updated_at) VALUES (?, 'principle', ?, ?, 'validated', ?, 'now','now')").run(id, `task-${id}`, JSON.stringify(id === 'a' ? [] : ['a']), JSON.stringify({ principleDraft: { statement: `Statement ${id}`, rationale: 'Reason', applicability: ['local'] }, risks: [`Risk ${id}`], secret: 'not-for-ui' }));
   }
   approvalId = (await new SqliteApprovalQueueStore(connection).enqueue({ artifactId: 'a', channel: 'defer_archive', riskLevel: 'low' }, 'now')).approvalId;
   model = new ApprovalsConsoleModel(directory);
@@ -42,7 +42,7 @@ it('GET returns same-object exact material and guard without raw private metadat
   const response = await fetch(base);
   expect(response.status).toBe(200);
   const body: unknown = await response.json();
-  expect(body).toMatchObject({ data: { writeGuardVersion: 'approval-review-v1', review: { expectedReview: { artifactState: 'present', artifactId: 'a' }, material: { exactBody: { kind: 'principle', text: 'Statement a' }, rationale: 'Reason', scope: ['local'] } } } });
+  expect(body).toMatchObject({ data: { writeGuardVersion: 'approval-review-v1', review: { expectedReview: { artifactState: 'present', artifactId: 'a' }, material: { exactBody: { kind: 'principle', text: 'Statement a' }, rationale: 'Reason', scope: ['local'], risks: ['Risk a'] } } } });
   expect(JSON.stringify(body)).not.toContain('not-for-ui');
 });
 it('route rejects stale approve, reject and edit without changing the winner', async () => {
@@ -140,4 +140,19 @@ it('never validates the guard for B while using an independently read record A f
     expect(await review()).toMatchObject({ artifactId: 'b', status: 'pending' });
     expect(db.prepare('SELECT COUNT(*) AS count FROM activations').get()).toMatchObject({ count: 0 });
   } finally { spy.mockRestore(); }
+});
+
+
+it('distinguishes missing or malformed exact-artifact risks from an explicitly empty risk list', async () => {
+  for (const fields of [{}, { risks: 'unknown' }, { risks: ['Risk', 42] }, { risks: null }]) {
+    connection.getDb().prepare('UPDATE pi_artifacts SET content_json = ? WHERE artifact_id = ?').run(JSON.stringify({ principleDraft: { statement: 'Current body', risks: ['Nested risk is not authoritative'] }, ...fields }), 'a');
+    const response = await fetch(base);
+    expect(response.status).toBe(200);
+    const body: unknown = await response.json();
+    expect(body).toMatchObject({ data: { review: { material: { risks: null } } } });
+    expect(JSON.stringify(body)).not.toContain('Risk b');
+    expect(JSON.stringify(body)).not.toContain('Nested risk is not authoritative');
+  }
+  connection.getDb().prepare('UPDATE pi_artifacts SET content_json = ? WHERE artifact_id = ?').run(JSON.stringify({ principleDraft: { statement: 'Current body' }, risks: [] }), 'a');
+  expect(await (await fetch(base)).json()).toMatchObject({ data: { review: { material: { risks: [] } } } });
 });
