@@ -69,7 +69,9 @@ describe('PRI-553 Principle Detail governance projection wiring', () => {
     expect(page).toContain('fetchOwnerDecisionView');
     expect(page).toContain('data-testid="owner-decision-view"');
     expect(page).toContain('data-testid="owner-decision-unavailable"');
-    expect(page).toContain('ownerDecision.availableActions.map');
+    expect(page).toContain("ownerDecision.availableActions.filter(action => action.semantic === 'disable').map");
+    expect(page).toContain("<ApprovalSubjectReading");
+    expect(page).toContain("lockedReason={ownerDecision.availableActions.some(action => actionTargetId(action, 'approval') === record.id)");
     expect(page).not.toContain('showDecisionControls');
     // The old local qualification derivation must NOT come back:
     expect(page).not.toContain('isActionable');

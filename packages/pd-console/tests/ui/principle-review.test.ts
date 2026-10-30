@@ -13,6 +13,7 @@ const UI_SRC = path.join(PKG_ROOT, "src", "ui");
 
 let principlesPageSrc: string;
 let principleDetailSrc: string;
+let approvalReaderSrc: string;
 let apiSrc: string;
 let validatorsSrc: string;
 let enJson: Record<string, unknown>;
@@ -27,6 +28,7 @@ beforeAll(() => {
     path.join(UI_SRC, "pages", "principles", "PrincipleDetailPage.tsx"),
     "utf-8",
   );
+  approvalReaderSrc = fs.readFileSync(path.join(UI_SRC, "pages", "focus", "ApprovalSubjectReading.tsx"), "utf-8");
   apiSrc = fs.readFileSync(path.join(UI_SRC, "api.ts"), "utf-8");
   validatorsSrc = fs.readFileSync(path.join(UI_SRC, "utils", "validators.ts"), "utf-8");
   enJson = JSON.parse(
@@ -138,11 +140,14 @@ describe("Approval integration", () => {
   });
 
   it("PrincipleDetailPage calls approveApproval", () => {
-    expect(principleDetailSrc).toMatch(/approveApproval/);
+    expect(principleDetailSrc).toContain("<ApprovalSubjectReading");
+    expect(approvalReaderSrc).toContain("approveApproval(approvalId,");
+    expect(approvalReaderSrc).toContain("expectedReview: snapshot.expectedReview");
   });
 
   it("PrincipleDetailPage calls rejectApproval", () => {
-    expect(principleDetailSrc).toMatch(/rejectApproval/);
+    expect(principleDetailSrc).toContain("<ApprovalSubjectReading");
+    expect(approvalReaderSrc).toContain("rejectApproval(approvalId, reason.trim(), snapshot.expectedReview)");
   });
 
   it("approval status includes pending/approved/rejected", () => {
@@ -355,29 +360,28 @@ describe("Rejection reason required", () => {
 // 8b. Approval note rendered and submitted (PRI-948)
 // ════════════════════════════════════════════════════════════════════════════
 describe("Approval note rendered and submitted (PRI-948)", () => {
-  it("confirm panel renders the optional note field when the action declares it", () => {
-    // Requirement-driven rendering: the approve action's note requirement from
-    // the owner-decision view must reach the Owner as an input, not vanish.
-    expect(principleDetailSrc).toMatch(/req\.name === 'note'/);
-    expect(principleDetailSrc).toMatch(/data-testid="owner-decision-note"/);
+  it("guarded per-object reader renders the optional approval note field", () => {
+    // The shared reader is the real approval surface in both Focus and Detail.
+    // A dead legacy confirmation dialog must not satisfy the note contract.
+    expect(principleDetailSrc).toContain("<ApprovalSubjectReading");
+    expect(approvalReaderSrc).toContain("value={approveNote}");
+    expect(approvalReaderSrc).toContain("setApproveNote(event.target.value)");
   });
 
   it("note is optional — confirm is not gated on it", () => {
-    // The disabled expression gates reason/newArtifactId only; a 'note' gate
-    // would silently block approval when the Owner leaves the note blank.
-    const disabled = principleDetailSrc.match(/disabled=\{actionLoading[\s\S]*?\}\}/);
+    // The actual approve button may require material/confirmation, but an
+    // optional note must not become a new approval gate.
+    const disabled = approvalReaderSrc.match(/<button[^>]*disabled=\{([^}]+)\}[^>]*data-testid=\{`approve-btn-/);
     expect(disabled).toBeTruthy();
-    expect(disabled![0]).not.toMatch(/note/);
+    expect(disabled![0]).not.toMatch(/note/i);
   });
 
-  it("confirm click passes the trimmed note (undefined when blank) into submitOwnerAction", () => {
-    expect(principleDetailSrc).toMatch(
-      /approveNote\.trim\(\) === '' \? undefined : approveNote\.trim\(\)/,
-    );
+  it("guarded approve submission trims the optional note and omits a blank value", () => {
+    expect(approvalReaderSrc).toMatch(/approveNote\.trim\(\)\s*\|\|\s*undefined/);
   });
 
   it("approve branch forwards the note to approveApproval", () => {
-    expect(principleDetailSrc).toMatch(/approveApproval\(approvalId, note\)/);
+    expect(approvalReaderSrc).toMatch(/approveApproval\(approvalId,\s*approveNote\.trim\(\)\s*\|\|\s*undefined,/);
   });
 
   it("api.ts serializes note into the approve request body", () => {

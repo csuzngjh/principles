@@ -21,6 +21,7 @@ function readSrc(relativePath: string): string {
 }
 
 const focusSrc = () => readSrc("../../src/ui/pages/focus/FocusPage.tsx");
+const readerSrc = () => readSrc("../../src/ui/pages/focus/ApprovalSubjectReading.tsx");
 const detailSrc = () => readSrc("../../src/ui/pages/principles/PrincipleDetailPage.tsx");
 
 // ── API client tests ─────────────────────────────────────────────────────────
@@ -110,17 +111,24 @@ describe("approval edit API client (PRI-447)", () => {
 describe("FocusPage exposes edit action (PRI-447)", () => {
   it("contains an Edit button/action label", () => {
     const src = focusSrc();
-    expect(src).toMatch(/editAction|pages\.focus\.editAction/);
+    expect(src).toContain("<ApprovalSubjectReading");
+    expect(readerSrc()).toContain("pages.focus.workbench.replaceOne");
+    expect(readerSrc()).toContain("onClick={() => setMode('edit')}");
   });
 
   it("contains edit form state and handler wiring", () => {
     const src = focusSrc();
-    expect(src).toMatch(/showEditInput|handleEdit|editReason|newArtifactId/);
+    expect(src).toContain("<ApprovalSubjectReading");
+    expect(readerSrc()).toContain("mode === 'edit'");
+    expect(readerSrc()).toContain("newArtifact.trim()");
+    expect(readerSrc()).toContain("void submit(mode)");
   });
 
   it("imports editApproval from the API client", () => {
     const src = focusSrc();
-    expect(src).toContain("editApproval");
+    expect(src).toContain("<ApprovalSubjectReading");
+    expect(readerSrc()).toContain("editApproval(approvalId, newArtifact.trim()");
+    expect(readerSrc()).toContain("expectedReview: snapshot.expectedReview");
   });
 
   it("disables edit for processed records by gating on pending status", () => {
@@ -144,12 +152,16 @@ describe("PrincipleDetailPage exposes edit action (PRI-447 / Owner Decision v1)"
 
   it("contains edit form state and handler wiring", () => {
     const src = detailSrc();
-    expect(src).toMatch(/newArtifactId/);
-    expect(src).toMatch(/editApproval/);
+    expect(src).toContain("<ApprovalSubjectReading");
+    expect(readerSrc()).toContain("mode === 'edit'");
+    expect(readerSrc()).toContain("newArtifact.trim()");
+    expect(readerSrc()).toContain("void submit(mode)");
   });
 
   it("imports editApproval from the API client", () => {
     const src = detailSrc();
-    expect(src).toContain("editApproval");
+    expect(src).toContain("<ApprovalSubjectReading");
+    expect(readerSrc()).toContain("editApproval(approvalId, newArtifact.trim()");
+    expect(readerSrc()).toContain("expectedReview: snapshot.expectedReview");
   });
 });
