@@ -12,6 +12,7 @@ import {
   buildOwnerRevisionArtifact,
   SqliteApprovalQueueStore,
   ApprovalQueue,
+  computeArtifactDigest,
 } from '@principles/core/runtime-v2';
 import { saveHostToolDeclaration } from '@principles/host-runtime';
 import { handleApprovalsRoute, disposeApprovalsModels } from '../../src/server/routes/approvals.js';
@@ -376,6 +377,17 @@ it('shows retained intent with the revision and refuses approval until it is rev
   expect(typeof approvalId).toBe('string');
   const groups = await new ApprovalsGroupedConsoleModel(tmpDir).getApprovalsGrouped('openclaw');
   const group = groups.groups.find((entry) => entry.principleId === SCENARIO_C.principle);
+  const revisionArtifactId = group?.revisionReview?.artifactId;
+  if (!revisionArtifactId) throw new Error('missing revision review identity');
+  const revisionArtifact = await new SqlitePIArtifactStore(sqliteConn).getArtifactById(revisionArtifactId);
+  if (!revisionArtifact) throw new Error('missing revision artifact');
+  expect(group?.revisionReview?.artifactDigest).toBe(computeArtifactDigest(revisionArtifact));
+  // A comparison read must become visibly stale even when the replacement ID is unchanged.
+  sqliteConn.getDb().prepare('UPDATE pi_artifacts SET content_json = ? WHERE artifact_id = ?').run(revisionArtifact.contentJson.replace('禁止忽略触发条件；提交前完成必要验证。', '比较后被修改的原则正文'), revisionArtifactId);
+  const changedArtifact = await new SqlitePIArtifactStore(sqliteConn).getArtifactById(revisionArtifactId);
+  if (!changedArtifact) throw new Error('missing changed revision artifact');
+  expect(group?.revisionReview?.artifactDigest).not.toBe(computeArtifactDigest(changedArtifact));
+  sqliteConn.getDb().prepare('UPDATE pi_artifacts SET content_json = ? WHERE artifact_id = ?').run(revisionArtifact.contentJson, revisionArtifactId);
   expect(group?.revisionReview?.oldStatement).toBe(SCENARIO_C.longStatement);
   expect(group?.revisionReview?.intentFields.ownerIntent).toBe('keep statements injectable');
   const refused = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ intentReviewed: false }) });
