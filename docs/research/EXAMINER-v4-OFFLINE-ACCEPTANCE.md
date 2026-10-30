@@ -43,10 +43,10 @@
 
 ## 冻结与运行条件
 
-- v4 packageHash：`010ec34624231656be093d105129654074022586ea2859b50a6c2a5868e2eb09`
-- review subjectHash：`eb7147c4ebeb1b65213baae21e03966313f33b561ab8e8091d1e0665fa7c9fef`
-- reportHash：`da5f7fa4064a8cd8061a12b726ed17e9ea8f2919366ebfd474e074482f67f32f`
-- 盲审 ZIP SHA-256：`698ee4d95b30c1694d5c8bffac046482dcf92f21d14492792165380996b5a452`
+- v4 packageHash：`2f04a89b670a5bca47317e9ac3b6cb360cb16b2316ddc289a53efe8dcdbbfa9b`
+- review subjectHash：`0901033532263d6c15abcc33b2d9b2b88513590e551e9495396e45bc67d51741`
+- reportHash：`5f13560092ada3e904f1f30e0b50e5fd68e08418e3ce4aa58c82cc1f42419bb3`
+- 盲审 ZIP SHA-256：`ece489bfd20badf744535ab623853446f225d1487c0d4cea58f4fe110f994a5e`
 
 manifest 绑定完整 lib 实现；inputs 另绑定 runner 源码、九题、Gold、六主策略和三项负迁移策略、种子 0、Mock 版本与执行参数。Node 契约为固定 `node-22-to-26-offline-js-v1`，实际本地 26.7.0；CI 使用 22。该范围是明确的受支持运行环境，不声称精确二进制冻结；范围外拒绝。跨运行时一致性由同一冻结包的实际 CI 重放验证。新 v4 草稿最终定版前曾重新生成；评审修复移除重复的 skeleton 去重结果后再次按同一规则重新生成（报告、包、subject 与盲审 ZIP 同步更新）。分支随后刷新到当前 main，main 期间修改了 `lib/challenge-openclaw-host.mjs`，而冻结按设计绑定完整 lib 实现，故以同一规则再次重新生成；两次重生成之间 executions 与报告各行逐字节不变，仅实现绑定 hash 及其派生 hash 移动。分支第三次刷新到当前 main 后同样再次失效，本次起由已提交工具执行：`node scripts/dev/principle-learning-lab/rebind-exm-v4-freeze.mjs --record-evidence` 重算实现绑定及其全部派生件（包件、盲审 ZIP、Owner 内容评审账本的包级 provenance、证据与验收 hash），动手前逐条目校验既有盲审载荷可由仓库字节复现，动手后断言 executions、报告各行、mappingHash 与逐题 goldHash 一律不变；后续 main 刷新只需在该分支重跑该命令。工具重写了 ZIP 容器：条目名、顺序、条目内容与随包 SHA256SUMS 均与原包逐条目一致，仅把中央目录外部属性字段中原本误写为本地位移副本的字节回归为标准零值，解压结果不受影响（`unzip -t` 与 Windows `.NET ZipFile` 均已复核）。旧 EXM/v3 从未重写。上面的 hash 均指当前 v4；修复后实跑记录见 `examiner-productization-20261029/v4-evidence/post-review-fix-freeze.txt`，同目录 `human-gate.txt` 与 `replay.txt` 保留的是修复前冻结的原始捕获。
 
