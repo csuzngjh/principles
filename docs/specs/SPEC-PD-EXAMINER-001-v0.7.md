@@ -8,7 +8,7 @@
 | SPEC ID | SPEC-PD-EXAMINER-001 |
 | Version | v0.7 |
 | Date | 2026-10-30 |
-| Status | PROPOSED_FOR_OWNER_REVIEW |
+| Status | APPROVED_OFFLINE_IMPLEMENTATION_ONLY（2026-10-30 Owner 端到端离线实施指令；原始状态 PROPOSED_FOR_OWNER_REVIEW 保留于本文件首个提交 c843322a4） |
 | Code baseline | `288ed6eff28b737ecb158e42f6e9042b4569ca96` |
 | Previous formal version | v0.4 |
 | Previous incremental draft | v0.5 |
@@ -1503,3 +1503,12 @@ v0.7 的最终目标不是完成更多代码或产生更多实验报告。
 版本：SPEC-PD-EXAMINER-001 v0.7  
 状态：PROPOSED_FOR_OWNER_REVIEW  
 本版不构成代码实施、真实模型请求、宿主实验或生产操作授权。
+---
+
+# 附录：离线实施授权记录（2026-10-30）
+
+- 授权来源：Owner 端到端实施指令（ZCode directive，本会话）。
+- 授权范围：仅 SPEC §10 Phase 0–Phase 5 的离线实施（评分契约 V3、行为统计、隔离契约、报告 V2/重放、离线校准与 Gate 1 评估）。
+- 硬性边界：Real Model Calls = 0；Real Host Runs = 0；Production Writes = 0；不合并 PR；不部署；不触碰生产治理；历史冻结资产与历史实验记录（含 PRI-1037/1038、F1/F2）不重跑、不重评、不覆盖。
+- 本授权不是真实实验授权：Stage G/R、F1/F2、2×2 真实执行、Gate 4 集成均需 Owner 后续单独签发。
+- 原始提案版本（PROPOSED_FOR_OWNER_REVIEW）完整保留于本文件首个提交（c843322a4），未做任何删改。
