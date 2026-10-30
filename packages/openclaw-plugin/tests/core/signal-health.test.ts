@@ -52,6 +52,21 @@ describe('signal-health (PRI-788 G4)', () => {
     expect(state?.updatedAt).toBeTruthy();
   });
 
+  it('stage2DiscoverySkipped round-trips and defaults to 0 for old files', () => {
+    const stateDir = makeStateDir();
+    updateSignalHealth(stateDir, (s) => { s.stage2DiscoverySkipped += 2; });
+    updateSignalHealth(stateDir, (s) => { s.stage2DiscoverySkipped += 1; });
+    expect(readSignalHealth(stateDir)?.stage2DiscoverySkipped).toBe(3);
+
+    // 旧格式文件（无该字段）→ 读作 0，不退化为 unknown
+    const legacyDir = makeStateDir();
+    const legacyPath = path.join(legacyDir, 'signal-health.json');
+    const legacy = JSON.parse(fs.readFileSync(path.join(stateDir, 'signal-health.json'), 'utf-8')) as Record<string, unknown>;
+    delete legacy['stage2DiscoverySkipped'];
+    fs.writeFileSync(legacyPath, JSON.stringify(legacy));
+    expect(readSignalHealth(legacyDir)?.stage2DiscoverySkipped).toBe(0);
+  });
+
   it('corrupt file is rebuilt from defaults on next write (rc-1)', () => {
     const stateDir = makeStateDir();
     fs.writeFileSync(path.join(stateDir, 'signal-health.json'), '{not-json');

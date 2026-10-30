@@ -163,7 +163,7 @@ function formatTextOutput(output: DoctorOutput): string {
     // AUDIT-P2-02: 让 Owner 能区分「没检测到信号 / 没调用模型 / 队列没被消费」。
     // invocations=0 且 queued>0 → 检测停摆；invocations>0 且 batchSkipped 增长 →
     // 分类器配置失效，积压在堆；pending 持续增长 → 消费者没跑。
-    lines.push(`  stage2 llm:                 invocations=${c.stage2Invocations} batchSkipped=${c.stage2BatchSkipped}`);
+    lines.push(`  stage2 llm:                 invocations=${c.stage2Invocations} batchSkipped=${c.stage2BatchSkipped} discoverySkipped=${c.stage2DiscoverySkipped}`);
   }
   if (sh.observerLastSuccessAt) lines.push(`  observer last success:      ${sh.observerLastSuccessAt}`);
   if (sh.observerConsecutiveFailures !== null) lines.push(`  observer consecutive fails: ${sh.observerConsecutiveFailures}`);
