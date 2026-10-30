@@ -350,20 +350,31 @@ export class TrajectoryDatabase {
   recordSession(input: TrajectorySessionInput): void {
     const startedAt = input.startedAt ?? nowIso();
     this.withWrite(() => {
-      this.db.prepare(`
-        INSERT INTO sessions (session_id, started_at, updated_at)
-        VALUES (?, ?, ?)
-        ON CONFLICT(session_id) DO UPDATE SET updated_at = excluded.updated_at
-      `).run(input.sessionId, startedAt, nowIso());
+      this.upsertSessionUnlocked(input.sessionId, startedAt);
     });
   }
 
+  /**
+   * Session upsert WITHOUT taking the file lock. `withWrite` serialises through a
+   * lock file (open+write+read+unlink) — ~6ms per acquisition on Windows, and it
+   * sits on the before_prompt_build critical path. Callers that already hold the
+   * lock (recordUserTurn / recordAssistantTurn) must reuse it instead of paying
+   * for a second acquisition.
+   */
+  private upsertSessionUnlocked(sessionId: string, startedAt: string): void {
+    this.db.prepare(`
+      INSERT INTO sessions (session_id, started_at, updated_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(session_id) DO UPDATE SET updated_at = excluded.updated_at
+    `).run(sessionId, startedAt, nowIso());
+  }
+
   recordAssistantTurn(input: TrajectoryAssistantTurnInput): number {
-    this.recordSession({ sessionId: input.sessionId, startedAt: input.createdAt });
     const rawStorage = this.storeRawText('assistant', input.rawText);
     const createdAt = input.createdAt ?? nowIso();
 
     return this.withWrite(() => {
+      this.upsertSessionUnlocked(input.sessionId, input.createdAt ?? createdAt);
       const result = this.db.prepare(`
         INSERT INTO assistant_turns (
           session_id, run_id, provider, model, raw_text, sanitized_text, usage_json,
@@ -389,10 +400,10 @@ export class TrajectoryDatabase {
   }
 
   recordUserTurn(input: TrajectoryUserTurnInput): number {
-    this.recordSession({ sessionId: input.sessionId, startedAt: input.createdAt });
     const rawStorage = this.storeRawText('user', input.rawText);
     const createdAt = input.createdAt ?? nowIso();
     return this.withWrite(() => {
+      this.upsertSessionUnlocked(input.sessionId, input.createdAt ?? createdAt);
       const result = this.db.prepare(`
         INSERT INTO user_turns (
           session_id, turn_index, raw_text, blob_ref, raw_excerpt,
