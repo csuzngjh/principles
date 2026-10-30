@@ -17,7 +17,10 @@ import { SqliteConnection } from './sqlite-connection.js';
 import { SqliteTaskStore } from './task/sqlite-task-store.js';
 import { SqliteRunStore } from './run/sqlite-run-store.js';
 import { SqliteDiagnosticianCommitter, type CommitInput } from './commit/diagnostician-committer.js';
-import type { DiagnosticianOutputV1 } from '../diagnostician-output.js';
+import { Value } from '@sinclair/typebox/value';
+import { Type } from '@sinclair/typebox';
+import { proposeShadowAssociations } from '../diagnostician-association-shadow.js';
+import type { DiagnosticianOutputV1, DiagnosticianOutputV2 } from '../diagnostician-output.js';
 
 describe('SqliteDiagnosticianCommitter', () => {
   let tmpdir = '';
@@ -77,6 +80,39 @@ describe('SqliteDiagnosticianCommitter', () => {
       ...overrides,
     };
   }
+
+  it('preserves V2 relationship JSON on isolated commit, reopen and replay without an intake runner', async () => {
+    await createTaskAndRun('task-shadow-v2', 'run-shadow-v2');
+    const output: DiagnosticianOutputV2 = { ...makeOutput(), schemaVersion: 'diagnostician-output-v2', recommendations: [
+      { kind: 'principle', description: 'Scope', recommendationRef: 'p' },
+      { kind: 'rule', description: 'Check scope', triggerPattern: 'write', action: 'check', recommendationRef: 'r', principleAssociation: {
+        status: 'linked', relation: 'implements', target: { type: 'recommendation_ref', recommendationRef: 'p' }, rationale: 'Scope', evidenceRefs: ['trace:1'] } },
+    ] };
+    const envelope = { output, trustedInputReference: { contextHash: 'fixture-only', sourceRefs: ['trace:1'] } };
+    const input: CommitInput = { taskId: 'task-shadow-v2', runId: 'run-shadow-v2', idempotencyKey: 'shadow-v2', output, contentJson: JSON.stringify(envelope) };
+    const first = await committer.commit(input);
+    connection.close();
+    connection = new SqliteConnection(tmpdir);
+    committer = new SqliteDiagnosticianCommitter(connection);
+    expect(await committer.commit(input)).toEqual(first);
+    const artifact: unknown = connection.getDb().prepare('SELECT content_json FROM artifacts WHERE artifact_id = ?').get(first.artifactId);
+    if (!Value.Check(Type.Object({ content_json: Type.String() }), artifact)) throw new Error('Missing artifact');
+    expect(JSON.parse(artifact.content_json)).toEqual(envelope);
+    const rows: unknown = connection.getDb().prepare('SELECT candidate_id, artifact_id, source_recommendation_json FROM principle_candidates WHERE artifact_id = ? ORDER BY rowid').all(first.artifactId);
+    if (!Value.Check(Type.Array(Type.Object({ source_recommendation_json: Type.String() })), rows)) throw new Error('Missing candidates');
+    expect(rows.map((row) => JSON.parse(row.source_recommendation_json))).toEqual(output.recommendations);
+    expect(rows).toHaveLength(2);
+    const persisted: unknown = connection.getDb().prepare('SELECT candidate_id AS candidateId, artifact_id AS artifactId, source_recommendation_json AS sourceRecommendation FROM principle_candidates WHERE artifact_id = ? ORDER BY rowid').all(first.artifactId);
+    if (!Value.Check(Type.Array(Type.Object({ candidateId: Type.String(), artifactId: Type.String(), sourceRecommendation: Type.String() })), persisted)) throw new Error('Missing persisted mapping');
+    const candidates = persisted.map((row) => ({ ...row, sourceRecommendation: JSON.parse(row.sourceRecommendation) }));
+    expect(proposeShadowAssociations(output, { principleIds: [], evidenceRefs: ['trace:1'] }, {
+      artifactId: first.artifactId, candidates,
+      resolvePrincipleCandidate: (id) => {
+        expect(id).toBe(candidates[0]?.candidateId);
+        return { status: 'resolved', candidateId: id, principleId: '11111111-1111-4111-8111-111111111111' };
+      },
+    })).toMatchObject({ ok: true, proposals: [{ status: 'proposed', authorizesGeneration: false }] });
+  });
 
   // ── COMT-06: CommitResult shape ──────────────────────────────────────────
 
