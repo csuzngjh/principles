@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { UnifiedKeywordStore, SignalCollectorConfig } from '@principles/core/runtime-v2';
 
 // mock 掉会触发真实副作用 (evolution reducer / pain service / trajectory DB) 的模块
@@ -17,7 +17,12 @@ vi.mock('../../src/utils/trace-id.js', () => ({
   createTraceId: vi.fn(() => 'trace-mock'),
 }));
 
-import { SignalCollectorHost } from '../../src/core/signal-collector-host.js';
+import { SignalCollectorHost, DEFAULT_SIGNAL_CONFIG } from '../../src/core/signal-collector-host.js';
+import { readSignalHealth } from '../../src/core/signal-health.js';
+import { safeRmDir } from '../test-utils.js';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { emitPainDetectedEvent } from '../../src/hooks/pain.js';
 import { trackFriction } from '../../src/core/session-tracker.js';
 import { SystemLogger } from '../../src/core/system-logger.js';
@@ -1228,5 +1233,111 @@ describe('SignalCollectorHost — correctionEvidence (PRI-844)', () => {
     host.detectSync('搞什么呀这是', 'sess-pri844-b', 'user');
     await flushAsync();
     expect(emitPainDetectedEvent).not.toHaveBeenCalled();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 零命中发现预算 (discoveryRateLimitPerHour)
+//
+// 真实语料里 93.5% 的 user 消息零命中关键词，旧行为是对每条这种消息都发起一次
+// Stage2「发现新纠正词」调用。预算只封零命中发现，歧义命中（确认调用）不受影响。
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('SignalCollectorHost discovery budget (P0-A)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  let workspaceDir: string;
+  let wctx: ReturnType<typeof makeMockWctx> & { stateDir: string };
+
+  function setup(): void {
+    workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-disc-budget-'));
+    const stateDir = path.join(workspaceDir, '.state');
+    fs.mkdirSync(stateDir, { recursive: true });
+    wctx = {
+      workspaceDir,
+      stateDir,
+      trajectory: { recordUserTurn: vi.fn() },
+    } as unknown as ReturnType<typeof makeMockWctx> & { stateDir: string };
+  }
+
+  afterEach(() => {
+    if (workspaceDir) safeRmDir(workspaceDir);
+  });
+
+  it('default config caps zero-match discovery at 6/hour', () => {
+    expect(DEFAULT_SIGNAL_CONFIG.discoveryRateLimitPerHour).toBe(6);
+  });
+
+  it('zero-match discovery stops after the budget, and the skip is counted', async () => {
+    setup();
+    const llmClassifier = vi.fn(async () => ({ is_feedback: false, type: 'none', confidence: 1, reason: '普通' }));
+    const host = makeHost(wctx, {
+      keywordStore: testStore,
+      config: { ...testConfig, discoveryRateLimitPerHour: 2 },
+      llmClassifier,
+    });
+
+    for (let i = 0; i < 3; i++) {
+      host.detectSync('今天想聊聊下周的计划', `sess-disc-${i}`, 'user', { turnIndex: i });
+    }
+    await flushAsync();
+
+    expect(llmClassifier).toHaveBeenCalledTimes(2);
+    expect(readSignalHealth(wctx.stateDir)?.stage2DiscoverySkipped).toBe(1);
+    // 被配额挡下的消息仍然进入轨迹（检测降级不影响常规记录）
+    expect(wctx.trajectory.recordUserTurn).toHaveBeenCalledTimes(3);
+  });
+
+  it('ambiguous hits are confirmations, not discovery — the budget does not apply', async () => {
+    setup();
+    const llmClassifier = vi.fn(async () => ({ is_feedback: false, type: 'none', confidence: 1, reason: '普通' }));
+    const host = makeHost(wctx, {
+      keywordStore: testStore,
+      config: { ...testConfig, discoveryRateLimitPerHour: 1 },
+      llmClassifier,
+    });
+
+    for (let i = 0; i < 3; i++) {
+      host.detectSync('这个不对', 'sess-amb-disc', 'user', { turnIndex: i });
+    }
+    await flushAsync();
+
+    expect(llmClassifier).toHaveBeenCalledTimes(3);
+    expect(readSignalHealth(wctx.stateDir)?.stage2DiscoverySkipped).toBe(0);
+  });
+
+  it('no classifier ⇒ no LLM call and no budget consumed (degraded path unchanged)', async () => {
+    setup();
+    const host = makeHost(wctx, {
+      keywordStore: testStore,
+      config: { ...testConfig, discoveryRateLimitPerHour: 1 },
+      llmClassifier: null,
+    });
+
+    for (let i = 0; i < 3; i++) {
+      host.detectSync('今天想聊聊下周的计划', 'sess-disc-degraded', 'user', { turnIndex: i });
+    }
+    await flushAsync();
+
+    expect(readSignalHealth(wctx.stateDir)?.stage2DiscoverySkipped).toBe(0);
+    expect(readSignalHealth(wctx.stateDir)?.stage2Invocations).toBe(0);
+  });
+
+  it('limit 0 / unset keeps the old unlimited behavior', async () => {
+    setup();
+    const llmClassifier = vi.fn(async () => ({ is_feedback: false, type: 'none', confidence: 1, reason: '普通' }));
+    const host = makeHost(wctx, {
+      keywordStore: testStore,
+      config: { ...testConfig, discoveryRateLimitPerHour: 0 },
+      llmClassifier,
+    });
+
+    for (let i = 0; i < 8; i++) {
+      host.detectSync('今天想聊聊下周的计划', 'sess-disc-unlimited', 'user', { turnIndex: i });
+    }
+    await flushAsync();
+
+    expect(llmClassifier).toHaveBeenCalledTimes(8);
+    expect(readSignalHealth(wctx.stateDir)?.stage2DiscoverySkipped).toBe(0);
   });
 });

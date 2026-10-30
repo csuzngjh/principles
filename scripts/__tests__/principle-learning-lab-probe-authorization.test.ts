@@ -111,6 +111,9 @@ describe('probe authorization gate (fail-closed, PRI-1037 / S2-D3)', () => {
     expect(committed.issuedBy).toBe('owner-goal-20261030-final');
     expect(committed.validFrom).toBe('2026-10-29T19:30:00Z');
     expect(committed.validUntil).toBe('2026-10-30T01:30:00Z'); // 6h window per the Owner authorization
+    // issuance must precede the window it opens — a local-time stamp mislabeled
+    // 'Z' once put issuedAt after validUntil while the gate never reads it
+    expect(Date.parse(committed.issuedAt)).toBeLessThan(Date.parse(committed.validFrom));
     expect(committed.caps).toEqual({ probeRounds: 5, timeoutMsPerCall: 600000 });
     expect(committed.targetHost.kind).toBe('openclaw'); // S4 host switch, pinned
     expect(committed.targetHost.provider).toBe('zai');
