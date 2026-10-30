@@ -61,7 +61,7 @@ export const DEFAULT_SIGNAL_CONFIG: SignalCollectorConfig = {
   strongPainScore: GOVERNANCE_STRONG_PAIN_SCORE,
   strongRateLimitPerHour: GOVERNANCE_STRONG_RATE_LIMIT_PER_HOUR,
   // 零命中的「发现」调用按小时限量（见 SignalCollectorConfig 注释）：
-  // 实测真实语料 93.5% 消息零命中，全量发起等于把普通消息也送去分类。
+  // 实测 live 语料约九成（不同时间窗 90–93%）消息零命中，全量发起等于把普通消息也送去分类。
   discoveryRateLimitPerHour: 6,
 };
 
@@ -813,9 +813,11 @@ export function createSignalLlmClassifierFromConfig(
       maxTokens: cfg.maxTokens ?? undefined,
       baseUrl: cfg.baseUrl ?? undefined,
       workspace: wctx.workspaceDir,
-      // Stage2 只产 5 个字段的 JSON：不值得走 tool_call→json_schema→修复 3 次往返的
-      // 默认链。json_mode_first 一次往返拿结构化结果；修复上限收到 1 次（超时/往返
-      // 都是占用与主模型共享端点额度的成本，不是本地 CPU）。
+      // Stage2 只产 5 个字段的 JSON。实测同一 profile / 同 5 条真实消息：
+      // tool_call_first 与 json_mode_first 都只需 1 次 HTTP 请求（合计 36.2s vs
+      // 11.5s，单次最高 23.9s vs 3.5s）——差别在尾部延迟而不在往返次数。
+      // json_mode_first 也不依赖 provider 的 tool-call 支持；修复上限收到 1 次
+      // （超时与重试同样占用与主模型共享的端点额度，不是本地 CPU）。
       outputPathStrategy: 'json_mode_first',
       maxRepairAttempts: 1,
     });
