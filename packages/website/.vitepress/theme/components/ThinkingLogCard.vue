@@ -25,44 +25,44 @@
              880w variant is chosen on retina too instead of falling back to
              the 1916w original. -->
         <img
-          src="/images/abyss/06/abyss-06-cover.webp"
-          :srcset="`/images/abyss/06/abyss-06-cover-880.webp 880w, /images/abyss/06/abyss-06-cover.webp 1916w`"
+          src="/images/abyss/08/abyss-08-cover.webp"
+          :srcset="`/images/abyss/08/abyss-08-cover-880.webp 880w, /images/abyss/08/abyss-08-cover.webp 1916w`"
           sizes="(max-width: 767px) 100vw, min(46vw, 461px)"
           width="880"
           height="377"
           loading="lazy"
           decoding="async"
-          :alt="lang === 'zh-CN' ? '关于 Owner 与 Agent 边界的文章封面' : 'Article cover about Owner and Agent boundaries'"
+          :alt="lang === 'zh-CN' ? '潜艇在深渊海沟中航行的文章封面' : 'Article cover of a submarine navigating an abyssal trench'"
         />
         <div class="thumb-overlay"></div>
       </div>
       
       <div class="journal-body">
         <div class="journal-meta">
-          <span class="journal-series">LOG #006</span>
+          <span class="journal-series">LOG #008</span>
           <span class="meta-dot">&middot;</span>
-          <span class="journal-date">2026-06-17</span>
+          <span class="journal-date">2026-10-30</span>
         </div>
-        
+
         <h3 class="journal-title">
-          {{ lang === 'zh-CN' ? '智能的膨胀边界：巨塔、小艇与硅基阿米巴' : 'The Expanding Boundary: The Tower, the Boat, and the Silicon Amoeba' }}
+          {{ lang === 'zh-CN' ? '目标不是一段 Prompt：当智能体学会执行，谁来负责判断？' : 'A Goal Is Not a Prompt: When Agents Learn to Execute, Who Is Responsible for Judgment?' }}
         </h3>
-        
+
         <p class="journal-excerpt">
           {{ lang === 'zh-CN'
-            ? '当 Agent 改写公司、社会与意义系统的边界，人类作为 Owner 如何守住不可外包的判断？从 ExO 到 MVO，探讨最小可存活组织与 PD 在智能洪流中的真实位置。'
-            : 'As Agents rewrite the boundaries of corporations, society, and meaning systems, how do humans as Owners hold onto the non-outsourceable? From ExO to MVO — exploring the Minimum Viable Organization and where PD stands in the intelligent flood.'
+            ? '从圣塔菲号的错误命令，到西蒙的决策前提与 Bungay 的三重落差：当智能体学会执行，谁来负责判断？探讨“我打算”式的意图协作，以及从服从指令到共同承担判断的第三条道路。'
+            : 'From the Santa Fe\'s wrong order to Simon\'s decision premises and Bungay\'s three gaps: when agents learn to execute, who judges what is worth doing? Exploring "I intend to..." collaboration and the third path from obedience to shared judgment.'
           }}
         </p>
 
         <div class="journal-tags">
-          <span class="j-tag">{{ lang === 'zh-CN' ? 'MVO' : 'MVO' }}</span>
-          <span class="j-tag">{{ lang === 'zh-CN' ? '组织边界' : 'Org Boundary' }}</span>
-          <span class="j-tag">{{ lang === 'zh-CN' ? '硅基阿米巴' : 'Silicon Amoeba' }}</span>
+          <span class="j-tag">{{ lang === 'zh-CN' ? '意图领导' : 'Intent-Based Leadership' }}</span>
+          <span class="j-tag">{{ lang === 'zh-CN' ? '决策前提' : 'Decision Premises' }}</span>
+          <span class="j-tag">{{ lang === 'zh-CN' ? '人机协作' : 'Human–AI Collaboration' }}</span>
         </div>
 
         <div class="journal-action">
-          <a :href="lang === 'zh-CN' ? '/zh/abyss/06-expanding-boundary' : '/abyss/06-expanding-boundary'" class="read-link">
+          <a :href="lang === 'zh-CN' ? '/zh/abyss/08-goal-not-a-prompt' : '/abyss/08-goal-not-a-prompt'" class="read-link">
             <span>{{ lang === 'zh-CN' ? '阅读文章' : 'Read the article' }}</span>
             <span class="arrow">&rarr;</span>
           </a>

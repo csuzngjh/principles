@@ -14,6 +14,12 @@ layout: page
 <div class="abyss-list">
 
 <div class="abyss-item">
+  <div class="abyss-meta">LOG #008 · 2026-10-30</div>
+  <a class="abyss-title" href="/abyss/08-goal-not-a-prompt">08 | A Goal Is Not a Prompt: When Agents Learn to Execute, Who Is Responsible for Judgment?</a>
+  <p class="abyss-desc">From the Santa Fe's wrong order to Simon's decision premises and Bungay's three gaps: when agents learn to execute, who is responsible for judging what is worth doing? Explores "I intend to..." collaboration, a four-question deliberation frame, and the third path from obeying orders to shared judgment.</p>
+</div>
+
+<div class="abyss-item">
   <div class="abyss-meta">LOG #007 · 2026-10-13</div>
   <a class="abyss-title" href="/abyss/07-goal-management-paradox">07 | The Goal Management Paradox: The Better We Get at Achieving Goals, the Farther We May Drift</a>
   <p class="abyss-desc">From an ancient Chinese parable to double-loop learning: as AI Agents become ever-better "charioteers", why might we march ever more efficiently toward the wrong future — and how can humans and agents calibrate direction together through real-world feedback?</p>
