@@ -20,6 +20,24 @@ import { hashOfCanonical } from './challenge-freeze.mjs';
 
 export const CLAIM_EVIDENCE_V2 = 'claim-evidence-judge-only.v2';
 
+// SPEC-PD-EXAMINER-001 v0.7 §5 — versioned scoring contract
+// `claim-evidence-adjudication.v3`. A v3 case is a v2 case plus the frozen
+// Mapping behavior predicates (gold.principlePredicates) and an optional
+// preregistered cost envelope (gold.costEnvelope). Everything a v2 case
+// accepts stays valid; nothing in the v1/v2 paths changes.
+export const CLAIM_EVIDENCE_V3 = 'claim-evidence-judge-only.v3';
+
+export const PRINCIPLE_PREDICATE_KEYS = ['requiredBehaviors', 'prohibitedBehaviors', 'exceptions', 'boundaryRules'];
+export const NEGATIVE_TRANSFER_KINDS_V3 = [
+  'unnecessaryRefusal',
+  'alternativePathBlocking',
+  'overChecking',
+  'repeatedConfirmation',
+  'inapplicableTrigger',
+  'unsupportedAction',
+  'additionalOperationalCost',
+];
+
 export const CLAIM_EVIDENCE_TEMPLATE_ID = 'T-CLAIM-EVIDENCE-BINDING-V1';
 export const CLAIM_EVIDENCE_TEMPLATE_VERSION = '1.0.0';
 
@@ -47,9 +65,152 @@ function err(message) {
  * Throws on structural defects — compiler and runtime share this gate.
  */
 export function buildClaimEnvironment(caseDef) {
+  if (caseDef?.schema === CLAIM_EVIDENCE_V3) {
+    // v3 reuses the full v2 structural gate (the key whitelist inside
+    // buildClaimEnvironmentV2 admits the two v3 gold fields by schema), then
+    // adds its own fail-loud predicate validation on top.
+    const env = buildClaimEnvironmentV2(caseDef);
+    validatePrinciplePredicates(caseDef, env);
+    validateCostEnvelope(caseDef);
+    return { ...env, contractVersion: 3 };
+  }
   if (caseDef?.schema === CLAIM_EVIDENCE_V2) return buildClaimEnvironmentV2(caseDef);
   if (caseDef?.schema && caseDef.schema !== 'claim-evidence-judge-only.v1') throw new Error('unknown claim-evidence schema');
   return buildClaimEnvironmentV1(caseDef);
+}
+
+// --- v0.7 §5.3: frozen Mapping behavior predicates (fail-loud validation) ---
+//
+// Mechanical shape (every field checked; dropping any entry the scorer relies
+// on must make this validator reject — tests pin that round-trip):
+//   requiredBehaviors:  [{ id, kind: 'observe'|'ask-owner'|'deploy'|'report',
+//                          target? (single) | anyOf: [targets], description }]
+//                        (kind 'report' takes require: 'acceptable-verdicts' and
+//                        is satisfied when the submitted report respects the
+//                        Gold acceptable-verdict contract — the assertion-
+//                        discipline behavior of Pain #44)
+//   prohibitedBehaviors:[{ id, kind: 'observe'|'ask-owner'|'deploy'|'refuse'|'block-path',
+//                          target?, maxOccurrences? (default 0), description }]
+//   exceptions:         [{ id, when: { executedObservation } | { requestType },
+//                          suspends: <requiredBehaviorId>, description }]
+//   boundaryRules:      [{ id, kind: 'maxObservations'|'maxOwnerRequests'|'maxRepeatObservations',
+//                          limit, description }]
+function validatePrinciplePredicates(caseDef, env) {
+  const where = `buildClaimEnvironmentV3(${caseDef.caseId || '?'})`;
+  if (caseDef.principleApplicable === false) return; // NOT_APPLICABLE cases carry no predicates
+  const predicates = caseDef.gold.principlePredicates;
+  if (!predicates || typeof predicates !== 'object' || Array.isArray(predicates)) {
+    throw new Error(`${where}: principleApplicable=true requires gold.principlePredicates (frozen Mapping behavior predicates)`);
+  }
+  const unknown = Object.keys(predicates).filter((key) => !PRINCIPLE_PREDICATE_KEYS.includes(key));
+  if (unknown.length > 0) throw new Error(`${where}: unknown principlePredicates field(s): ${unknown.join(', ')}`);
+  const ids = new Set();
+  const claimId = (id, what) => {
+    if (typeof id !== 'string' || id.length === 0) throw new Error(`${where}: ${what} requires a non-empty id`);
+    if (ids.has(id)) throw new Error(`${where}: duplicate predicate id ${id}`);
+    ids.add(id);
+  };
+  const targets = (behavior, kinds) => {
+    if (!kinds.includes(behavior.kind)) throw new Error(`${where}: predicate ${behavior.id} kind must be one of ${kinds.join('|')}`);
+    const hasTarget = behavior.target !== undefined;
+    const hasAnyOf = behavior.anyOf !== undefined;
+    if (hasTarget === hasAnyOf) throw new Error(`${where}: predicate ${behavior.id} needs exactly one of target|anyOf`);
+    const list = hasAnyOf ? behavior.anyOf : [behavior.target];
+    if (!Array.isArray(list) || list.length === 0 || !list.every((t) => typeof t === 'string' && t.length > 0)) {
+      throw new Error(`${where}: predicate ${behavior.id} target(s) must be non-empty strings`);
+    }
+    if (hasAnyOf && new Set(list).size !== list.length) throw new Error(`${where}: predicate ${behavior.id} anyOf contains duplicates`);
+    return list;
+  };
+  const required = [];
+  const list = predicates.requiredBehaviors || [];
+  if (!Array.isArray(list)) throw new Error(`${where}: requiredBehaviors must be an array`);
+  for (const behavior of list) {
+    if (!behavior || typeof behavior !== 'object' || Array.isArray(behavior)) throw new Error(`${where}: required behavior must be an object`);
+    const unknownKeys = Object.keys(behavior).filter((key) => !['id', 'kind', 'target', 'anyOf', 'require', 'description'].includes(key));
+    if (unknownKeys.length > 0) throw new Error(`${where}: unknown required behavior field(s): ${unknownKeys.join(', ')}`);
+    claimId(behavior.id, 'required behavior');
+    if (behavior.kind === 'deploy') {
+      if (behavior.target !== undefined || behavior.anyOf !== undefined) throw new Error(`${where}: deploy predicate ${behavior.id} takes no target`);
+      if (!env.extraActions.deploy) throw new Error(`${where}: deploy predicate ${behavior.id} but the case declares no deploy action`);
+    } else if (behavior.kind === 'report') {
+      if (behavior.target !== undefined || behavior.anyOf !== undefined) throw new Error(`${where}: report predicate ${behavior.id} takes no target`);
+      if (behavior.require !== 'acceptable-verdicts') throw new Error(`${where}: report predicate ${behavior.id} require must be 'acceptable-verdicts'`);
+    } else {
+      for (const target of targets(behavior, ['observe', 'ask-owner'])) {
+        if (behavior.kind === 'observe' && !env.observations.has(target)) throw new Error(`${where}: predicate ${behavior.id} references unknown observation ${target}`);
+        if (behavior.kind === 'ask-owner' && !Object.hasOwn(env.ownerAnswers, target)) throw new Error(`${where}: predicate ${behavior.id} references unknown owner requestType ${target}`);
+      }
+    }
+    if (typeof behavior.description !== 'string' || behavior.description.length === 0) throw new Error(`${where}: predicate ${behavior.id} requires a description`);
+    required.push(behavior);
+  }
+  const requiredIds = new Set(required.map((behavior) => behavior.id));
+  if (!Array.isArray(predicates.prohibitedBehaviors)) throw new Error(`${where}: prohibitedBehaviors must be an array`);
+  for (const behavior of predicates.prohibitedBehaviors) {
+    if (!behavior || typeof behavior !== 'object') throw new Error(`${where}: prohibited behavior must be an object`);
+    const unknownKeys = Object.keys(behavior).filter((key) => !['id', 'kind', 'target', 'anyOf', 'maxOccurrences', 'description'].includes(key));
+    if (unknownKeys.length > 0) throw new Error(`${where}: unknown prohibited behavior field(s): ${unknownKeys.join(', ')}`);
+    claimId(behavior.id, 'prohibited behavior');
+    if (behavior.kind === 'refuse' || behavior.kind === 'block-path') {
+      const target = behavior.target;
+      if (typeof target !== 'string' || target.length === 0 || behavior.anyOf !== undefined) throw new Error(`${where}: predicate ${behavior.id} requires a single target`);
+      if (behavior.kind === 'refuse' && ![...env.facts.keys()].includes(target)) throw new Error(`${where}: refuse predicate ${behavior.id} references unknown fact ${target}`);
+      if (behavior.kind === 'block-path' && !env.observations.has(target)) throw new Error(`${where}: block-path predicate ${behavior.id} references unknown observation ${target}`);
+    } else if (behavior.kind === 'deploy') {
+      if (behavior.target !== undefined || behavior.anyOf !== undefined) throw new Error(`${where}: deploy predicate ${behavior.id} takes no target`);
+    } else {
+      for (const target of targets(behavior, ['observe', 'ask-owner'])) {
+        if (behavior.kind === 'observe' && !env.observations.has(target)) throw new Error(`${where}: predicate ${behavior.id} references unknown observation ${target}`);
+        if (behavior.kind === 'ask-owner' && !Object.hasOwn(env.ownerAnswers, target)) throw new Error(`${where}: predicate ${behavior.id} references unknown owner requestType ${target}`);
+      }
+    }
+    if (behavior.maxOccurrences !== undefined && (!Number.isInteger(behavior.maxOccurrences) || behavior.maxOccurrences < 0)) {
+      throw new Error(`${where}: predicate ${behavior.id} maxOccurrences must be a non-negative integer`);
+    }
+    if (typeof behavior.description !== 'string' || behavior.description.length === 0) throw new Error(`${where}: predicate ${behavior.id} requires a description`);
+  }
+  if (!Array.isArray(predicates.exceptions)) throw new Error(`${where}: exceptions must be an array`);
+  for (const exception of predicates.exceptions) {
+    if (!exception || typeof exception !== 'object') throw new Error(`${where}: exception must be an object`);
+    const unknownKeys = Object.keys(exception).filter((key) => !['id', 'when', 'suspends', 'description'].includes(key));
+    if (unknownKeys.length > 0) throw new Error(`${where}: unknown exception field(s): ${unknownKeys.join(', ')}`);
+    claimId(exception.id, 'exception');
+    const when = exception.when;
+    if (!when || typeof when !== 'object' || Array.isArray(when)) throw new Error(`${where}: exception ${exception.id} requires a when object`);
+    const whenKeys = Object.keys(when);
+    if (whenKeys.length !== 1 || !['executedObservation', 'requestType'].includes(whenKeys[0])) {
+      throw new Error(`${where}: exception ${exception.id} when must be exactly one of executedObservation|requestType`);
+    }
+    if (whenKeys[0] === 'executedObservation' && !env.observations.has(when.executedObservation)) throw new Error(`${where}: exception ${exception.id} references unknown observation`);
+    if (whenKeys[0] === 'requestType' && !Object.hasOwn(env.ownerAnswers, when.requestType)) throw new Error(`${where}: exception ${exception.id} references unknown requestType`);
+    if (!requiredIds.has(exception.suspends)) throw new Error(`${where}: exception ${exception.id} suspends unknown required behavior ${exception.suspends}`);
+    if (typeof exception.description !== 'string' || exception.description.length === 0) throw new Error(`${where}: exception ${exception.id} requires a description`);
+  }
+  if (!Array.isArray(predicates.boundaryRules)) throw new Error(`${where}: boundaryRules must be an array`);
+  for (const rule of predicates.boundaryRules) {
+    if (!rule || typeof rule !== 'object') throw new Error(`${where}: boundary rule must be an object`);
+    const unknownKeys = Object.keys(rule).filter((key) => !['id', 'kind', 'limit', 'description'].includes(key));
+    if (unknownKeys.length > 0) throw new Error(`${where}: unknown boundary rule field(s): ${unknownKeys.join(', ')}`);
+    claimId(rule.id, 'boundary rule');
+    if (!['maxObservations', 'maxOwnerRequests', 'maxRepeatObservations'].includes(rule.kind)) {
+      throw new Error(`${where}: boundary rule ${rule.id} kind must be maxObservations|maxOwnerRequests|maxRepeatObservations`);
+    }
+    if (!Number.isInteger(rule.limit) || rule.limit < 0) throw new Error(`${where}: boundary rule ${rule.id} limit must be a non-negative integer`);
+    if (typeof rule.description !== 'string' || rule.description.length === 0) throw new Error(`${where}: boundary rule ${rule.id} requires a description`);
+  }
+}
+
+function validateCostEnvelope(caseDef) {
+  if (caseDef.gold.costEnvelope === undefined) return;
+  const envelope = caseDef.gold.costEnvelope;
+  const where = `buildClaimEnvironmentV3(${caseDef.caseId || '?'})`;
+  if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) throw new Error(`${where}: costEnvelope must be an object`);
+  const unknown = Object.keys(envelope).filter((key) => !['maxBudgetUnits', 'maxObservationCalls', 'maxOwnerRequests'].includes(key));
+  if (unknown.length > 0) throw new Error(`${where}: unknown costEnvelope field(s): ${unknown.join(', ')}`);
+  for (const value of Object.values(envelope)) {
+    if (!Number.isInteger(value) || value < 0) throw new Error(`${where}: costEnvelope values must be non-negative integers`);
+  }
 }
 
 function buildClaimEnvironmentV1(caseDef) {
@@ -137,13 +298,16 @@ export function newClaimRunState(env) {
     report: null,
     done: false,
     refusedCount: 0,
-    ...(env.contractVersion === 2 ? { refusalActionCount: 0 } : {}),
+    ...(env.contractVersion >= 2 ? { refusalActionCount: 0 } : {}),
+    // v0.7 §5.6: v3 records environment-rejected action attempts so the
+    // scorer can detect Unsupported Action negative transfer mechanically.
+    ...(env.contractVersion === 3 ? { rejectedActions: [] } : {}),
   };
   let seq = 0;
   for (const obsId of env.preSeeded) {
     const o = env.observations.get(obsId);
     const record = { obsId, seq: seq++, status: 'ok', source: 'pre-seeded-task-context', output: o.output, implies: o.implies, costUnits: 0, timeUnits: 0 };
-    if (env.contractVersion === 2) {
+    if (env.contractVersion >= 2) {
       const definition = env.caseDef.observations.find((observation) => observation.obsId === obsId);
       Object.assign(record, { eventId: `EVT-OBS-${record.seq}`, subjectId: definition.subjectId, sourceRef: definition.sourceRef, revision: env.sources.get(definition.sourceRef).revision, definitionRef: obsId });
     }
@@ -158,6 +322,18 @@ export function newClaimRunState(env) {
  * citing a refused observation can never count as evidence.
  */
 export function stepClaimEnvironment(env, state, action) {
+  if (env.contractVersion === 3) {
+    // v3 wrapper: identical mechanics to v2, plus a durable record of every
+    // environment-REJECTED action attempt (unknown action/type/args, blocked
+    // or prohibited path, terminated run). A rejected attempt consumed no
+    // observation budget and is never evidence — it is negative-transfer
+    // signal only. v1/v2 states stay byte-identical.
+    const result = stepClaimEnvironmentV2(env, state, action);
+    if (!result.ok) {
+      state.rejectedActions.push({ step: state.step, actionType: action && typeof action === 'object' ? action.type ?? null : null, error: result.error });
+    }
+    return result;
+  }
   if (env.contractVersion === 2) return stepClaimEnvironmentV2(env, state, action);
   return stepClaimEnvironmentV1(env, state, action);
 }
@@ -271,7 +447,12 @@ function buildClaimEnvironmentV2(caseDef) {
     recordV2(caseDef.extraActions.deploy, ['requiresSignoff'], 'deploy');
     requireV2(caseDef.extraActions.deploy.requiresSignoff === true, 'deployment must require signoff');
   }
-  recordV2(caseDef.gold, ['requiredClaims', 'sources', 'supportRules', 'taskObjective', 'assessmentContract', 'pathConstraints', 'inferenceRules', 'uncertaintyRules'], 'gold');
+  recordV2(caseDef.gold, [
+    'requiredClaims', 'sources', 'supportRules', 'taskObjective', 'assessmentContract', 'pathConstraints', 'inferenceRules', 'uncertaintyRules',
+    // v0.7 §5.3: v3-only gold fields, admitted by schema so a v2 case can
+    // never carry them (silent compatibility is forbidden).
+    ...(caseDef.schema === CLAIM_EVIDENCE_V3 ? ['principlePredicates', 'costEnvelope'] : []),
+  ], 'gold');
   if (caseDef.gold.assessmentContract !== undefined) requireV2(caseDef.gold.assessmentContract === 'structured.v1', 'unknown assessment contract');
   requireV2(Array.isArray(caseDef.gold.sources) && Array.isArray(caseDef.gold.supportRules), 'Gold sources/supportRules required');
   const sources = new Map();

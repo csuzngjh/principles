@@ -10,6 +10,7 @@
 import { hashOfCanonical } from './challenge-freeze.mjs';
 import {
   CLAIM_EVIDENCE_V2,
+  CLAIM_EVIDENCE_V3,
   CLAIM_EVIDENCE_TEMPLATE_ID,
   CLAIM_EVIDENCE_TEMPLATE_VERSION,
   CLAIM_FAMILIES,
@@ -33,7 +34,7 @@ export function validateChallengeDraft(draft) {
   const problems = [];
   if (!draft || typeof draft !== 'object') throw new Error('draft must be an object');
   if (draft.templateId !== CLAIM_EVIDENCE_TEMPLATE_ID) problems.push(`templateId must be ${CLAIM_EVIDENCE_TEMPLATE_ID}`);
-  if (![CLAIM_EVIDENCE_TEMPLATE_VERSION, '2.0.0'].includes(draft.templateVersion)) problems.push('unknown templateVersion');
+  if (![CLAIM_EVIDENCE_TEMPLATE_VERSION, '2.0.0', '3.0.0'].includes(draft.templateVersion)) problems.push('unknown templateVersion');
   if (!CLAIM_FAMILIES.includes(draft.family)) problems.push(`family must be one of ${CLAIM_FAMILIES.join('|')}`);
   if (typeof draft.scenarioId !== 'string' || draft.scenarioId.length === 0) problems.push('scenarioId required');
   if (typeof draft.sourceMechanismRef !== 'string' || draft.sourceMechanismRef.length === 0) problems.push('sourceMechanismRef required');
@@ -44,7 +45,7 @@ export function validateChallengeDraft(draft) {
 
 /** Validate one case definition (structural gold sanity). Throws on violation. */
 export function validateCaseDef(caseDef) {
-  if (caseDef?.schema === CLAIM_EVIDENCE_V2) {
+  if (caseDef?.schema === CLAIM_EVIDENCE_V2 || caseDef?.schema === CLAIM_EVIDENCE_V3) {
     if (typeof caseDef.caseId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(caseDef.caseId)) throw new Error('v2 safe caseId required');
     if (!CLAIM_FAMILIES.includes(caseDef.family) || !EXPECTED_MODES.includes(caseDef.expectedMode) || typeof caseDef.principleApplicable !== 'boolean' || caseDef.studyEligible !== true || typeof caseDef.taskText !== 'string' || !caseDef.taskText.trim()) throw new Error('v2 invalid case metadata');
     buildClaimEnvironment(caseDef);
@@ -89,7 +90,7 @@ export function validateCaseDef(caseDef) {
  */
 export function compileCase(caseDef) {
   validateCaseDef(caseDef);
-  if (caseDef.schema === CLAIM_EVIDENCE_V2) return compileCaseV2(caseDef);
+  if (caseDef.schema === CLAIM_EVIDENCE_V2 || caseDef.schema === CLAIM_EVIDENCE_V3) return compileCaseV2(caseDef);
   const env = buildClaimEnvironment(caseDef);
 
   const preSeededEvidence = env.preSeeded.map((obsId) => ({ obsId, output: env.observations.get(obsId).output }));
@@ -152,14 +153,14 @@ export function compileSuite({ studyId, mappingHash, graderHash, caseDefs }) {
     familyCounts[cd.family] = (familyCounts[cd.family] || 0) + 1;
     cases.push({ caseId: cd.caseId, family: cd.family, expectedMode: cd.expectedMode, principleApplicable: cd.principleApplicable, studyEligible: cd.studyEligible, inputHash: compiled.inputHash, goldHash: compiled.goldHash });
   }
-  const versions = new Set(caseDefs.map((item) => item.schema === CLAIM_EVIDENCE_V2 ? 2 : 1));
-  if (versions.size > 1) throw new Error('cannot mix v1/v2 contracts in one suite');
-  const v2 = versions.has(2);
+  const versions = new Set(caseDefs.map((item) => (item.schema === CLAIM_EVIDENCE_V3 ? 3 : item.schema === CLAIM_EVIDENCE_V2 ? 2 : 1)));
+  if (versions.size > 1) throw new Error('cannot mix v1/v2/v3 contracts in one suite');
+  const suiteVersion = versions.has(3) ? 3 : versions.has(2) ? 2 : 1;
   const manifestCore = {
-    schema: v2 ? 'challenge-suite-manifest.v2' : SUITE_MANIFEST_SCHEMA,
+    schema: suiteVersion >= 2 ? 'challenge-suite-manifest.v2' : SUITE_MANIFEST_SCHEMA,
     studyId,
     templateId: CLAIM_EVIDENCE_TEMPLATE_ID,
-    templateVersion: v2 ? '2.0.0' : CLAIM_EVIDENCE_TEMPLATE_VERSION,
+    templateVersion: suiteVersion === 3 ? '3.0.0' : suiteVersion === 2 ? '2.0.0' : CLAIM_EVIDENCE_TEMPLATE_VERSION,
     mappingHash,
     graderHash,
     familyCounts,
@@ -173,9 +174,14 @@ export function compileSuite({ studyId, mappingHash, graderHash, caseDefs }) {
 
 function compileCaseV2(caseDef) {
   const env = buildClaimEnvironment(caseDef);
+  // v3 cases compile through the same actor/judge split with their own
+  // version labels; the v3 gold additions (principlePredicates/costEnvelope)
+  // ride only in judgeOnly — the actor-visible projection below never reads
+  // them, so no predicate or envelope can leak to the Actor.
+  const v3 = caseDef.schema === CLAIM_EVIDENCE_V3;
   const actorVisible = {
-    schema: 'claim-evidence-actor-visible.v2', caseId: caseDef.caseId,
-    templateId: CLAIM_EVIDENCE_TEMPLATE_ID, templateVersion: '2.0.0',
+    schema: v3 ? 'claim-evidence-actor-visible.v3' : 'claim-evidence-actor-visible.v2', caseId: caseDef.caseId,
+    templateId: CLAIM_EVIDENCE_TEMPLATE_ID, templateVersion: v3 ? '3.0.0' : '2.0.0',
     taskText: caseDef.taskText,
     facts: caseDef.facts.map(({ factId, statement }) => ({ factId, statement })),
     availableObservations: caseDef.observations.map(({ obsId, action, label, costUnits, timeUnits }) => ({ obsId, action, label, costUnits, timeUnits })),
