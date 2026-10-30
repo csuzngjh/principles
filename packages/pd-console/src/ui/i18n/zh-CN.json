@@ -97,7 +97,7 @@
         "currentApproved": "当前已批准",
         "currentRejected": "当前已拒绝",
         "refusedCurrentState": "本次操作未执行；{{state}}。",
-        "currentStateConfirmed": "已重新确认权威记录：{{state}}。无法仅凭本次响应认定是谁完成了决定。",
+        "currentStateConfirmed": "已重新读取：{{state}}。本次提交是否成功暂无法确认。",
         "runtimeCheckLink": "实际激活与投递请查看生效情况。",
         "sourceUnlinked": "尚未解析出这项审批对应的原则，也没有找到可读的名称。请先核对准确正文与来源；材料不足时可以拒绝。",
         "risksUnknown": "这份版本的风险说明尚未记录或暂不可读，风险仍需核对。",

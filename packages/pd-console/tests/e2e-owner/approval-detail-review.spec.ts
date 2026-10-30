@@ -56,11 +56,14 @@ test('A late detail read cannot replace the newly selected principle', async ({ 
     await route.fulfill({ response });
   });
   try {
+    const lateResponse = page.waitForResponse(response => response.url().endsWith('/api/principles/e2e00000-0000-4000-8000-000000000009'));
     await page.goto('/#/principles/e2e00000-0000-4000-8000-000000000009');
     await requested;
     await page.evaluate(() => { window.location.hash = '/principles/e2e00000-0000-4000-8000-00000000000a'; });
     await expect(page.locator('h1')).toContainText('点击编辑测试原则');
     release?.();
+    await (await lateResponse).finished();
+    await page.evaluate(() => new Promise<void>(resolveFrame => requestAnimationFrame(() => requestAnimationFrame(() => resolveFrame()))));
     await expect(page.locator('h1')).toContainText('点击编辑测试原则');
     await expect(page.getByTestId('owner-decision-view')).not.toContainText('点击拒绝测试原则');
   } finally { release?.(); }

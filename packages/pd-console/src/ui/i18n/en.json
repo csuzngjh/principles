@@ -97,7 +97,7 @@
         "currentApproved": "currently approved",
         "currentRejected": "currently rejected",
         "refusedCurrentState": "This operation was not performed; {{state}}.",
-        "currentStateConfirmed": "The authoritative record was rechecked: {{state}}. This response alone does not establish who made the decision.",
+        "currentStateConfirmed": "The record was reloaded: {{state}}. Whether this submission succeeded remains unconfirmed.",
         "runtimeCheckLink": "Check activation and delivery on the runtime page.",
         "sourceUnlinked": "This approval could not be linked to a principle or a readable name. Check the exact text and source first; you can reject it if the material is insufficient.",
         "risksUnknown": "Risk notes for this revision are missing or unreadable. Risks remain unconfirmed.",

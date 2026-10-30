@@ -53,7 +53,7 @@ test('A lost approval response is reconciled from persisted status without anoth
   await page.locator('[data-item-key="approval:apr-lost-response"]').click();
   await page.getByTestId('owner-work-reading').getByRole('button', { name: '批准这个版本', exact: true }).click();
   await expect(page.getByTestId('owner-work-reading')).toContainText('当前已批准');
-  await expect(page.getByTestId('owner-work-reading')).toContainText('已重新确认权威记录');
+  await expect(page.getByTestId('owner-work-reading')).toContainText('已重新读取');
   await expect(page.getByTestId('owner-work-reading')).toContainText('实际激活与投递请查看生效情况');
   expect(posts).toBe(1);
   const persisted = await request.get('/api/v1/approvals/apr-lost-response', { headers: auth });

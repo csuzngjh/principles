@@ -78,7 +78,7 @@ export function ApprovalSubjectReading({ principleId, approvalId, artifactId, ch
         const activations = await fetchAllActivations(targetHost);
         if (epoch.current !== current + 1) return;
         const active = activations.success && activations.data.activations.some(item => item.artifactId === fresh.approval.artifactId && item.status === 'active');
-        message += ' ' + t(result.reason === 'activation_failed' ? 'pages.focus.workbench.activationFailed' : active ? 'pages.focus.workbench.runtimeCheckLink' : 'pages.focus.workbench.approvedRuntimeUnknown');
+        message += ' ' + t(active ? 'pages.focus.workbench.runtimeCheckLink' : result.reason === 'activation_failed' ? 'pages.focus.workbench.activationFailed' : 'pages.focus.workbench.approvedRuntimeUnknown');
       }
       if (result.success && result.data.warning) {
         const warning = localizeApprovalWarning(result.data.warning, t);

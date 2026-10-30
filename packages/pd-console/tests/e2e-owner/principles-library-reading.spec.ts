@@ -62,6 +62,8 @@ test('Long learned text stays searchable while library titles remain short', asy
 });
 
 test('A late all-principles response cannot overwrite the newer actionable filter', async ({ page }) => {
+  function record(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === 'object' && !Array.isArray(value); }
+  let allCount = 0;
   await page.goto('/#/focus');
   await page.getByLabel('访问令牌').fill('owner-e2e-token');
   await page.getByRole('button', { name: '连接', exact: true }).click();
@@ -71,15 +73,23 @@ test('A late all-principles response cannot overwrite the newer actionable filte
   let release: (() => void) | undefined;
   const held = new Promise<void>(resolveHeld => { release = resolveHeld; });
   await page.route('**/api/principles?filter=all', async route => {
-    const response = await route.fetch(); started?.(); await held; await route.fulfill({ response });
+    const response = await route.fetch();
+    const body: unknown = await response.json();
+    if (!record(body) || !record(body.data) || !Array.isArray(body.data.principles)) throw new Error('Invalid all-principles fixture');
+    allCount = body.data.principles.length;
+    started?.(); await held; await route.fulfill({ response });
   });
   try {
+    const lateResponse = page.waitForResponse(response => response.url().endsWith('/api/principles?filter=all'));
     await page.goto('/#/principles?mode=all');
     await requested;
     await page.evaluate(() => { window.location.hash = '/principles?mode=actionable'; });
     await expect(page.locator('article').first()).toBeVisible();
     const titles = await page.locator('article h3').allTextContents();
+    expect(allCount).toBeGreaterThan(titles.length);
     release?.();
+    await (await lateResponse).finished();
+    await page.evaluate(() => new Promise<void>(resolveFrame => requestAnimationFrame(() => requestAnimationFrame(() => resolveFrame()))));
     await expect(page).toHaveURL(/mode=actionable/);
     await expect(page.locator('article h3')).toHaveText(titles);
   } finally { release?.(); }
