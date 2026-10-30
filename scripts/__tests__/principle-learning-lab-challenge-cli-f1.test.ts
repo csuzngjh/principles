@@ -148,10 +148,12 @@ describe('CLI Stage R F1 entry — dry-run and refusal paths (zero network by co
     expect(r1.status).toBe(1);
     expect(r1.out).toContain('does not match the runner-declared');
 
+    // PRI-1038: F2 is now WIRED (Owner F2 authorization + PRI-1037 PASSED) — a
+    // bare invocation still refuses: the OpenClaw wiring flags are mandatory.
     const dir2 = copyStudy('f2-cli');
     const r2 = runCli(['--execution-mode', 'F2-real-host', '--now', NOW], dir2);
     expect(r2.status).toBe(1);
-    expect(r2.out).toContain('F2-real-host is not available through this CLI');
+    expect(r2.out).toContain('F2-real-host requires the OpenClaw wiring flags');
 
     const dir3 = copyStudy('no-clock');
     approveF1(dir3);

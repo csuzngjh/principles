@@ -367,18 +367,23 @@ export function hostTaskIdForUnit({ studyId, caseId, armId, repetitionId }) {
 }
 
 /**
- * F2 real-host actor over createCodexHostTransport. The host transport's own
- * event stream / rollout read-back are the ONLY identity source:
- * observedHostEvidence is populated ONLY when hostSnapshot().identityStatus
- * === 'VERIFIED' and the round carried a session id. A test double can of
- * course fake a host transport — that is the cooperative boundary; the
- * machine protection is that F2 mode itself requires the Stage R gate (probe
- * PASSED) and deriveRealHostBaseline never upgrades offline evidence.
+ * F2 real-host actor over a duck-typed host transport ({ complete,
+ * hostSnapshot }). Two production wirings exist:
+ *   - codex-cli → createCodexHostTransport (host-actor.mjs; rollout read-back);
+ *   - openclaw  → createOpenClawHostTransport (challenge-openclaw-host.mjs;
+ *                 exec JSON envelope + per-round exec-state trajectory).
+ * The host transport's own event stream / state evidence are the ONLY identity
+ * source: observedHostEvidence is populated ONLY when hostSnapshot()
+ * identityStatus === 'VERIFIED' and the round carried a session id. For an
+ * OpenClaw transport the round's exec-state database location travels with
+ * the evidence (hostEvidence.kind='openclaw-exec-state') so the formal
+ * baseline can corroborate against the host's OWN state db instead of
+ * trusting the record strings.
  */
 export function createHostActorAdapter({ ctx, hostTransport, taskId }) {
   assertRealActorCtx(ctx, 'HostActorAdapter');
   if (!hostTransport || typeof hostTransport.complete !== 'function' || typeof hostTransport.hostSnapshot !== 'function') {
-    throw new Error('createHostActorAdapter: hostTransport must be a codex-host transport ({ complete, hostSnapshot }) — createCodexHostTransport(host-actor.mjs)');
+    throw new Error('createHostActorAdapter: hostTransport must be a codex-host transport ({ complete, hostSnapshot }) — createCodexHostTransport(host-actor.mjs) or createOpenClawHostTransport(challenge-openclaw-host.mjs)');
   }
   if (!isPlainString(taskId) || taskId.split('#').length < 3 || taskId.split('#')[1].length === 0) {
     throw new Error('createHostActorAdapter: taskId must carry the unit opportunity segment (use hostTaskIdForUnit)');
@@ -410,12 +415,23 @@ export function createHostActorAdapter({ ctx, hostTransport, taskId }) {
               identityEvidenceSource: snap.identityEvidenceSource ?? null,
             };
             const sessionId = round && round.hostRound ? round.hostRound.sessionId : null;
+            // OpenClaw exec-state evidence: the transport records WHERE the
+            // runtime persisted this session's trajectory (per-round state db).
+            // Codex transports have no such field → null (rollout corroboration
+            // covers them instead).
+            const detail = snap && Array.isArray(snap.sessionDetails)
+              ? snap.sessionDetails.find((d) => d && d.sessionId === sessionId)
+              : null;
+            const hostEvidence = detail && typeof detail.stateAgentDb === 'string' && detail.stateAgentDb.length > 0
+              ? { kind: 'openclaw-exec-state', roundDir: detail.roundDir, stateDir: detail.stateDir, stateAgentDb: detail.stateAgentDb }
+              : null;
             roundLog.push({
               step: view.step,
               runId: round && round.runId ? round.runId : null,
               sessionId: typeof sessionId === 'string' ? sessionId : null,
               usage: (round && round.hostRound && round.hostRound.usage) || null,
               identityStatus: adapter.hostIdentityAudit.identityStatus,
+              ...(hostEvidence ? { hostEvidence } : {}),
             });
             // Evidence rule: host session id + host-VERIFIED observed identity.
             // UNVERIFIED / MISMATCH / missing session → no evidence (honest null).
@@ -426,12 +442,25 @@ export function createHostActorAdapter({ ctx, hostTransport, taskId }) {
               adapter.observedHostEvidence = {
                 hostSessionId: sessionId,
                 observedModelIdentity: adapter.hostIdentityAudit.observedModel,
+                ...(hostEvidence ? { hostEvidence } : {}),
               };
             } else {
               adapter.observedHostEvidence = null;
             }
-            const parsed = parseActorAction(round && typeof round.payload !== 'undefined' ? JSON.stringify(round.payload) : null);
-            if (!parsed.ok) return invalidResponseAction(parsed.reason, round && round.payload ? JSON.stringify(round.payload) : null);
+            // Payload shape discipline (PRI-1038 wiring fix): the codex host
+            // transport returns the model reply as an OBJECT (JSON.stringify
+            // re-serializes it); the OpenClaw exec transport returns the
+            // envelope's final text as a STRING already. Stringify only
+            // objects — stringifying a string double-encodes it ("\"{...}\"")
+            // and every reply parses as a JSON string instead of an action
+            // object (observed live 2026-10-30: 18/18 first-batch units died
+            // invalid_action_cap with perfectly valid model replies).
+            const rawPayload = round && typeof round.payload !== 'undefined' ? round.payload : null;
+            const payloadText = typeof rawPayload === 'string'
+              ? rawPayload
+              : (rawPayload === null || rawPayload === undefined ? null : JSON.stringify(rawPayload));
+            const parsed = parseActorAction(payloadText);
+            if (!parsed.ok) return invalidResponseAction(parsed.reason, payloadText);
             return parsed.action;
           },
           (e) => {
