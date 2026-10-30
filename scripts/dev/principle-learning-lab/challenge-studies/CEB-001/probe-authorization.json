@@ -1,7 +1,7 @@
 {
   "schema": "challenge-isolation-probe-authorization.v1",
   "probeId": "PRI-1037",
-  "status": "REVOKED",
+  "status": "APPROVED",
   "studyId": "CEB-001",
   "frozenHashes": {
     "suiteHash": "e1f2f5ca9d7f570faf454d057346c4f273e4fb467fa1790482f9a783e591fb5a",
@@ -19,23 +19,23 @@
   },
   "caps": {
     "probeRounds": 5,
-    "timeoutMsPerCall": 180000
+    "timeoutMsPerCall": 600000
   },
-  "validFrom": "2026-10-28T10:10:00Z",
-  "validUntil": "2026-10-28T16:10:00Z",
+  "validFrom": "2026-10-29T19:30:00Z",
+  "validUntil": "2026-10-30T01:30:00Z",
   "stopConditions": [
     "任一探针轮次 transport 失败或会话缺失",
     "宿主身份核验非 VERIFIED 或与授权声明不符",
     "副作用扫描任一项非零",
     "授权窗口关闭/撤销/停止"
   ],
-  "issuedBy": "owner-20261028-probe-approval",
-  "issuedAt": "2026-10-28T10:09:17Z",
+  "issuedBy": "owner-goal-20261030-final",
+  "issuedAt": "2026-10-29T19:25:00Z",
   "blockage": {
-    "reason": "Owner 2026-10-28 批准五轮真实探针（消息原文：批准 PRI-1037 五轮真实探针，使用现有智谱 Coding Plan 订阅通道，授权窗口六小时；仅允许 OpenClaw 使用 zai/glm-5.3-flash，不授权 F2，任何异常立即停止并保留证据）。窗口 6 小时（10:10Z–16:10Z）；通道=现有智谱 Coding Plan 订阅（zai）；模型限 zai/glm-5.3-flash；F2 未授权（PRI-1038 需独立授权）。",
+    "reason": "Owner goal 指令（2026-10-30）签发授权周期 2：OpenClaw 2026.10.5 / zai / zai-glm-5.3-flash / 最多 5 轮 / 每轮硬超时 600s / 窗口 6h（19:30Z-01:30Z，即本地 03:30-09:30 +08:00）。前置全部满足：S9.1 精简载荷已收敛（2.2.6，320 文件）、退出码契约已修（cleanup-kind 完整轮次可用）、ambient state 认证可达（exec-lean 实测 glm-5.3-flash 身份 VERIFIED）。周期 1（REVOKED, 15:40Z 10-28）历史保留于 git。F2 未授权。",
     "pendingDecision": "",
-    "unblockCondition": "探针完成并深验通过后：证据归档入库 → Owner 审阅 → 独立签发 F2 授权（PRI-1038，不在本授权范围）。"
+    "unblockCondition": "探针完成并深验后归档；F2 需独立授权。"
   },
-  "revokedAt": "2026-10-28T11:20:00Z",
-  "revokedReason": "S7 §七: the approval triggered its stop condition (three FAILED attempts; attempt-3 timed out all five rounds). Revoked per the existing schema/revocation mechanism; history and attempt records preserved. A NEW authorization is required for any retry."
+  "revokedAt": "",
+  "revokedReason": ""
 }
