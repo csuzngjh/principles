@@ -56,6 +56,10 @@ manifest 绑定完整 lib 实现；inputs 另绑定 runner 源码、九题、Gol
 
 人工 Gold 独立性与语义结论只能由真实 Owner 指定及人工裁定确立，签名不能代替判断。操作指南见 `EXAMINER-v4-HUMAN-REVIEW.md`。唯一预期外部依赖是 Owner 指定的独立人工审核者回传 Mapping 与九题签名；未发生前保持 PENDING。
 
+## Owner 内容评审（2026-10-30）
+
+Owner 已逐题完成 Mapping 与 Case 1–9 的内容评审（全部 APPROVED），固化于 `examiner-productization-20261029/owner-content-review/records.v1.json`（10 条追加式记录，意见原文逐字保留，绑定校验测试 `scripts/__tests__/principle-learning-lab-owner-content-review.test.ts`）。逐题语义一致性审计见同目录 `semantic-consistency-audit.md`：十项全部一致，事实正确/任务完成/行为对齐/负迁移四维独立。内容哈希（mappingHash 与逐题 goldHash）在两次包级重生成中不变，Owner 认可的内容效力跨重生成持续有效。该评审不是独立人工审核 receipt；独立人工审核状态仍为 `INDEPENDENT_HUMAN_REVIEW_PENDING`。
+
 Complexity Delta：新持久契约字段 YES（现有研究包/receipt 增量）、公开模块参数 YES（包外可信审核上下文）；均复用现有 authority/validator，不建第二审批源。新 durable source of truth、服务、flag、跨包依赖、宿主特性、外部网络能力均 NO。回滚为停止使用 v4/revert 代码，不迁移生产或历史数据。Emotional value：N/A — no direct Owner-facing behavior.
 
 错误模式：EP-10 的范围/冻结/基线核对已留证；P-ERR-108 三个真实复现记录保留。EP-08 的 canonical/hash 边界由负控测试覆盖；i18n 规则不适用于本离线研究 CLI。审核工具不签名、不授权、不启动 transport。
