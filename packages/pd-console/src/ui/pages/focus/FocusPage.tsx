@@ -661,6 +661,8 @@ function ExperienceSummaryCard({ snapshot }: { snapshot: GovernanceExperienceSna
 // ── Main page component ──────────────────────────────────────────────────────
 
 type LoadingState = "loading" | "loaded" | "error";
+type FocusSource = 'summary' | 'approvals' | 'activations' | 'bindings' | 'decisions' | 'inbox';
+const FOCUS_SOURCES: FocusSource[] = ['summary', 'approvals', 'activations', 'bindings', 'decisions', 'inbox'];
 
 export interface FocusPageProps {
   /** Feature flags from /api/v1/config/summary — gates the experience snapshot path. */
@@ -682,6 +684,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
   const [bindingError, setBindingError] = useState<string | null>(null);
   const [completedMessage, setCompletedMessage] = useState<{ key: string; message: string } | null>(null);
   const requestEpoch = useRef(0);
+  const [pendingSources, setPendingSources] = useState<FocusSource[]>(FOCUS_SOURCES);
   const [queueData, setQueueData] = useState<GovernanceQueueData | null>(null);
   const [experienceData, setExperienceData] = useState<GovernanceExperienceSnapshot | null>(null);
   const [groupedData, setGroupedData] = useState<ApprovalsGroupedData | null>(null);
@@ -705,85 +708,65 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
 
   const loadData = useCallback(async () => {
     const epoch = ++requestEpoch.current;
-    setLoadingState(previous => previous === "loaded" ? "loaded" : "loading");
+    setLoadingState("loaded");
+    setPendingSources(FOCUS_SOURCES);
+    setExperienceData(null); setQueueData(null); setGroupedData(null);
+    setRuleCodeItems([]); setBindingQueue(null); setOwnerDecisionItems([]); setOwnerInbox(null);
     setErrorMessage(null);
     setGroupedErrorReason(null);
     setRuleCodeErrorReason(null);
+    setBindingError(null); setOwnerDecisionError(null); setOwnerInboxError(null);
 
-    const [experienceResult, queueResult, groupedResult, activationsResult, bindingsResult, decisionsResult, ownerInboxResult] = await Promise.all([
-      experienceMode ? fetchGovernanceExperience() : Promise.resolve(null),
-      experienceMode ? Promise.resolve(null) : fetchGovernanceQueue(),
-      fetchApprovalsGrouped(promptTargetHost ?? undefined),
-      fetchAllActivations(promptTargetHost ?? undefined),
-      fetchRuleBindingQueue(),
-      fetchOwnerDecisions(),
-      fetchOwnerDecisionInbox(),
-    ]);
-
-    if (epoch !== requestEpoch.current) return;
-    if (bindingsResult.success) { setBindingQueue(bindingsResult.data); setBindingError(null); }
-    else { setBindingQueue(null); setBindingError(bindingsResult.error); }
-    if (experienceMode) {
-      if (experienceResult === null || !experienceResult.success) {
-        setExperienceData(null);
-        setErrorMessage(experienceResult === null ? t("pages.focus.experience.error.snapshotUnavailable") : experienceResult.error);
-      } else setExperienceData(experienceResult.data);
-      setQueueData(null);
-    } else {
-      // Queue data is already validated by the API layer (validateGovernanceQueue)
-      if (queueResult === null || !queueResult.success) {
-        setQueueData(null);
-        setErrorMessage(queueResult === null ? t("pages.focus.loadError") : queueResult.error);
-      } else setQueueData(queueResult.data);
-      setExperienceData(null);
-    }
-
-    // Validate grouped data (ERR-002: degradation with reason)
-    if (!groupedResult.success) {
-      setGroupedData(null);
-      setGroupedErrorReason(groupedResult.error ?? "Approvals data unavailable");
-    } else {
-      const validatedGrouped = validateApprovalsGroupedData(groupedResult.data);
-      setGroupedData(validatedGrouped);
-      if (validatedGrouped === null) {
-        setGroupedErrorReason("Approvals data has unexpected shape");
+    // Each source publishes independently. A stalled history/inbox request must
+    // not hide already available decisions; old request epochs cannot publish.
+    async function settle<T>(source: FocusSource, request: Promise<T>, apply: (value: T) => void, fail: (message: string) => void) {
+      try {
+        const result = await request;
+        if (epoch === requestEpoch.current) apply(result);
+      } catch (error) {
+        if (epoch === requestEpoch.current) fail(error instanceof Error ? error.message : t('pages.focus.loadError'));
+      } finally {
+        if (epoch === requestEpoch.current) setPendingSources(current => current.filter(item => item !== source));
       }
     }
-    if (activationsResult.success) {
-      setRuleCodeItems(
-        activationsResult.data.activations.filter(
-          (item) => item.channel === "code_tool_hook" && item.status === "active",
-        ),
-      );
-    } else {
-      setRuleCodeItems([]);
-      setRuleCodeErrorReason(activationsResult.error);
-    }
-
-    // PRI-629: 统一 Owner Inbox (decision-capable NHR + approvals + rulecode)。
-    // 投影失败不阻塞页面 (rc-9 降级 — 显示原因,治理摘要仍可用)。
-    if (epoch !== requestEpoch.current) return;
-    if (decisionsResult.success) {
-      setOwnerDecisionItems(decisionsResult.data.items);
-      setOwnerDecisionError(null);
-    } else {
-      setOwnerDecisionItems([]);
-      setOwnerDecisionError(decisionsResult.error ?? "Owner decisions unavailable");
-    }
-
-    // Owner Decision Experience v1 inbox: failure degrades observably (rc-9),
-    // never blocking the rest of the focus page.
-    if (epoch !== requestEpoch.current) return;
-    if (ownerInboxResult.success) {
-      setOwnerInbox(ownerInboxResult.data);
-      setOwnerInboxError(null);
-    } else {
-      setOwnerInbox(null);
-      setOwnerInboxError(ownerInboxResult.reason === 'feature_disabled' ? null : (ownerInboxResult.error ?? "Owner decision inbox unavailable"));
-    }
-
-    setLoadingState("loaded");
+    await Promise.all([
+      experienceMode
+        ? settle('summary', fetchGovernanceExperience(), result => {
+          if (result.success) setExperienceData(result.data); else setErrorMessage(result.error);
+        }, setErrorMessage)
+        : settle('summary', fetchGovernanceQueue(), result => {
+          if (result.success) setQueueData(result.data); else setErrorMessage(result.error);
+        }, setErrorMessage),
+      settle('approvals', fetchApprovalsGrouped(promptTargetHost ?? undefined), result => {
+        if (!result.success) { setGroupedErrorReason(result.error); return; }
+        const data = validateApprovalsGroupedData(result.data);
+        setGroupedData(data);
+        if (data === null) setGroupedErrorReason(t('pages.focus.workbench.approvalsUnavailable'));
+      }, setGroupedErrorReason),
+      settle('activations', fetchAllActivations(promptTargetHost ?? undefined), result => {
+        if (result.success) setRuleCodeItems(result.data.activations.filter(item => item.channel === 'code_tool_hook' && item.status === 'active'));
+        else setRuleCodeErrorReason(result.error);
+      }, setRuleCodeErrorReason),
+      settle('bindings', fetchRuleBindingQueue(), result => {
+        if (result.success) setBindingQueue(result.data); else setBindingError(result.error);
+      }, setBindingError),
+      settle('decisions', fetchOwnerDecisions(), result => {
+        if (result.success) setOwnerDecisionItems(result.data.items); else setOwnerDecisionError(result.error);
+      }, setOwnerDecisionError),
+      settle('inbox', fetchOwnerDecisionInbox(), result => {
+        if (result.success) setOwnerInbox(result.data);
+        else if (result.reason !== 'feature_disabled') setOwnerInboxError(result.error);
+      }, setOwnerInboxError),
+    ]);
   }, [experienceMode, t, promptTargetHost]);
+
+  function changePromptTargetHost(host: typeof promptTargetHost) {
+    if (host === promptTargetHost) return;
+    requestEpoch.current++;
+    setPendingSources(FOCUS_SOURCES);
+    setCompletedMessage(null);
+    setPromptTargetHost(host);
+  }
 
   useEffect(() => {
     if (!flagsResolved) return;
@@ -843,8 +826,8 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
   const ruleCodeAlerts = ruleCodeItems.filter(item => item.enforcement === 'safety_isolated');
 
   // PRI-787: 决策动作被治理就绪门锁定时，必须在卡片上给出可见原因（rc-9 —
-  // 禁用不允许是无声的）。experienceData 未加载（null）时门默认放行、无锁定。
-  const ownerActionsLockedReason = experienceMode && experienceData === null
+  // 未知就绪状态或新宿主的材料仍在读取时，允许阅读，不放行动作。
+  const ownerActionsLockedReason = pendingSources.includes('summary') || (experienceMode && experienceData === null)
     ? t("pages.focus.workbench.permissionsUnknown")
     : experienceData === null
     || (experienceData.readiness.authenticationMode === "authenticated"
@@ -897,21 +880,27 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
   const stateReason = getStateReasonText(stateReasonCode, t, stateReasonCount);
   const nextAction = getNextActionText(nextActionCode, t);
 
-  const sourcesUncertain = ruleCodeErrorReason !== null || errorMessage !== null || ownerDecisionError !== null || groupedErrorReason !== null || bindingError !== null || ownerInboxError !== null;
+  const sourcesUncertain = pendingSources.length > 0 || conclusionDisplay.mode === 'degraded' || experienceData?.dataQuality.degraded === true
+    || ruleCodeErrorReason !== null || errorMessage !== null || ownerDecisionError !== null || groupedErrorReason !== null || bindingError !== null || ownerInboxError !== null;
   const workItems: OwnerWorkItem[] = [
     ...ruleCodePending.filter(item => !decisionItems.some(decision => decision.kind === 'rulecode_decision' && decision.taskId === item.activationId)).map(item => ({ key: `activation:${item.activationId}`, title: splitReadingTitleBody(t('pages.focus.workbench.rulePromotion')).title,
       kind: t('pages.focus.workbench.rulePromotion'), summary: t('pages.focus.workbench.promotionSummary'),
       content: <div className="text-sm leading-relaxed text-ink-2"><p>{t('pages.focus.workbench.promotionSummary')}</p><Link to={`/activation?activationId=${encodeURIComponent(item.activationId)}`} className="mt-4 inline-block text-gov underline">{t('pages.focus.workbench.openActivation')}</Link></div> })),
     ...decisionItems.map(item => ({ key: `decision:${item.reviewKey}`, title: splitReadingTitleBody(item.title).title,
-      kind: t('pages.focus.workbench.taskDecision'), summary: item.summary,
-      content: <OwnerDecisionCard key={item.reviewKey} item={item} governanceReady={ownerActionsLockedReason === null}
+      kind: t('pages.focus.workbench.taskDecision'), summary: item.summary, reference: item.taskId,
+      content: <OwnerDecisionCard key={`${item.reviewKey}:${promptTargetHost ?? 'default'}`} item={item} governanceReady={ownerActionsLockedReason === null}
         actionsLockedReason={ownerActionsLockedReason ?? undefined} onResolved={() => { setCompletedMessage({ key: `decision:${item.reviewKey}`, message: t('pages.focus.workbench.decisionRecorded') }); void loadData(); }} /> })),
     ...pendingGroups.flatMap(group => group.records.filter(record => record.status === 'pending').map((record, index) => ({
       key: `approval:${record.id}`, title: new Set(group.records.map(entry => entry.artifactId)).size > 1 ? t('pages.focus.workbench.versionNeedsReview', { index: index + 1 }) : splitReadingTitleBody(selectApprovalGroupDisplayTitle(group) ?? t('pages.focus.untitledCandidate')).title,
-      kind: t(record.channel === 'prompt' ? 'pages.focus.workbench.promptReview' : 'pages.focus.workbench.ruleReview'),
+      kind: t(record.channel === 'prompt' ? 'pages.focus.workbench.promptReview' : record.channel === 'defer_archive' ? 'pages.focus.workbench.archiveReview' : 'pages.focus.workbench.ruleReview'),
       summary: t('pages.focus.workbench.approvalSummary'),
-      content: <ApprovalSubjectReading principleId={group.principleId} approvalId={record.id} artifactId={record.artifactId} channel={record.channel} lockedReason={ownerActionsLockedReason ?? undefined}
+      content: <ApprovalSubjectReading key={`${record.id}:${promptTargetHost ?? 'default'}`} principleId={group.principleId} approvalId={record.id} artifactId={record.artifactId} channel={record.channel} lockedReason={ownerActionsLockedReason ?? undefined}
         targetHost={promptTargetHost ?? undefined} revisionReview={new Set(group.records.filter(entry => entry.status === 'pending').map(entry => entry.artifactId)).size === 1 ? group.revisionReview : undefined}
+        revisionReviewUnavailable={group.revisionReviewUnavailable}
+        budgetNotice={groupedData?.promptInjection?.truncated === true && groupedData.promptInjection.capacityStatus !== 'unconfirmed' ? t(
+          groupedData.promptInjection.productionRotates === true ? group.fitsPromptBudget === true ? group.promptBudgetTierFit === 'model_dependent'
+            ? 'pages.focus.approveQueueBadgeRotationModelDependent' : 'pages.focus.approveQueueBadgeRotation' : 'pages.focus.approveQueueBadgeOversized' : 'pages.focus.approveQueueBadge',
+          { used: groupedData.promptInjection.usedChars, budget: groupedData.promptInjection.budget }) : undefined}
         onResolved={message => { setCompletedMessage({ key: `approval:${record.id}`, message }); void loadData(); }} />,
     }))),
     ...(bindingQueue?.items ?? []).filter(item => !['bound_generating', 'bound_advanced', 'bound_not_built'].includes(deriveRuleBindingCardState(item))).map(item => ({ key: `binding:${item.candidateId}`, title: splitReadingTitleBody(item.text).title,
@@ -965,7 +954,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
             role="status"
             data-testid="focus-conclusion-badge"
           >
-            {experienceMode && experienceData !== null
+            {sourcesUncertain ? t('pages.focus.workbench.uncertain') : workItems.length > 0 ? t('pages.focus.workbench.title') : experienceMode && experienceData !== null
               ? t(EXPERIENCE_ATTENTION[experienceData.summary.primaryAttention].labelKey)
               : t(`pages.focus.stateLabel.${governanceState}`)}
           </span>
@@ -997,9 +986,9 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
             </Link>
           </div>
         )}
-        <p className="mt-2 text-ink-4 text-[11.5px] leading-relaxed" data-testid="focus-conclusion-scope-note">
-          {t("pages.focus.conclusion.countsNote")}
-        </p>
+        <details className="mt-2 text-ink-4 text-[11.5px] leading-relaxed"><summary className="cursor-pointer">{t('pages.focus.workbench.countExplanation')}</summary>
+          <p className="mt-2" data-testid="focus-conclusion-scope-note">{t("pages.focus.conclusion.countsNote")}</p>
+        </details>
       </section>
 
       {(errorMessage || bindingError) && <div role="alert" className="mb-5 border-l-2 border-amber pl-3 text-sm leading-relaxed text-ink-3">
@@ -1080,7 +1069,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
                 <button
                   key={host}
                   type="button"
-                  onClick={() => setPromptTargetHost(host)}
+                  onClick={() => changePromptTargetHost(host)}
                   data-testid={`prompt-capacity-pick-${host}`}
                   className={`inline-flex items-center border rounded-[3px] px-[10px] py-[4px] transition-colors ${
                     promptTargetHost === host ? "border-amber bg-amber/10" : "border-line hover:border-line-2"
@@ -1092,7 +1081,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
               {promptTargetHost !== null && (
                 <button
                   type="button"
-                  onClick={() => setPromptTargetHost(null)}
+                  onClick={() => changePromptTargetHost(null)}
                   data-testid="prompt-capacity-pick-clear"
                   className="inline-flex items-center border border-line rounded-[3px] px-[10px] py-[4px] hover:border-line-2"
                 >
@@ -1172,7 +1161,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
           <details className="mb-6"><summary className="cursor-pointer text-sm text-gov">{t('pages.focus.ruleBinding.title')}</summary><RuleCandidateBindingPanel onChanged={() => { void loadData(); }} /></details>
       {/* Governance blocker/recovery follows the actual decision index so the
           first actionable card remains visible in common Companion viewports. */}
-      {experienceMode && experienceData !== null ? (
+      {experienceMode && experienceData !== null && !(experienceData.summary.primaryAttention === 'all_clear' && (sourcesUncertain || workItems.length > 0)) ? (
         <ExperienceSummaryCard snapshot={experienceData} />
       ) : !experienceMode ? (
         <div className="mb-7 px-[18px] py-[14px] bg-panel border border-line rounded-[6px]">
@@ -1238,7 +1227,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
         </>
       )}
 
-      {experienceMode && experienceData !== null && experienceData.summary.primaryAttention === "all_clear" && pendingGroups.length === 0 && (
+      {experienceMode && experienceData !== null && experienceData.summary.primaryAttention === "all_clear" && !sourcesUncertain && workItems.length === 0 && (
         <div className="mt-4">
           <OnboardingGuide />
         </div>
