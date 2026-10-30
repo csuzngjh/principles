@@ -1,3 +1,4 @@
+import { computeArtifactDigest } from './promotion-evidence-snapshot.js';
 import { matchesApprovalReview, staleApprovalReview, type ApprovalReviewGuard } from './approval-review-guard.js';
 import { isArtifactRevisionOf, type PIArtifactSnapshot } from './activation-types.js';
 import type {
@@ -147,7 +148,7 @@ export class MemoryApprovalQueueStore implements ApprovalQueueStore {
     if (input.expectedReview) {
       const original = this.readArtifact?.(existing.artifactId);
       const replacement = this.readArtifact?.(input.newArtifactId);
-      if (!original || !replacement || replacement.validationStatus !== 'validated' || !isArtifactRevisionOf(replacement, original)) return staleApprovalReview();
+      if (!original || !replacement || replacement.validationStatus !== 'validated' || computeArtifactDigest(replacement) !== input.expectedNewArtifactDigest || !isArtifactRevisionOf(replacement, original)) return staleApprovalReview();
     }
     const updated: ApprovalRecord = {
       ...existing,

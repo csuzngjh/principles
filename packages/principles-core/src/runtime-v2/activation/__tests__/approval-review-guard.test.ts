@@ -48,16 +48,21 @@ it('rejects same-ID changed content for both approve and reject', async () => {
 });
 it('serializes two edits against the same old reading and preserves the winning lineage', async () => {
   const { record, guard } = await reviewed();
-  expect(await new SqliteApprovalQueueStore(other).edit({ approvalId: record.approvalId, expectedReview: guard, newArtifactId: 'b', editedBy: 'first', editReason: 'first', now: 'later' })).toMatchObject({ ok: true });
+  const replacement = await new SqlitePIArtifactStore(connection).getArtifactById('b');
+  if (!replacement) throw new Error('missing replacement');
+  expect(await new SqliteApprovalQueueStore(other).edit({ approvalId: record.approvalId, expectedNewArtifactDigest: computeArtifactDigest(replacement), expectedReview: guard, newArtifactId: 'b', editedBy: 'first', editReason: 'first', now: 'later' })).toMatchObject({ ok: true });
   expect(await store.edit({ approvalId: record.approvalId, expectedReview: guard, newArtifactId: 'c', editedBy: 'second', editReason: 'second', now: 'later' })).toMatchObject({ error: 'stale_review' });
   expect(await store.getById(record.approvalId)).toMatchObject({ artifactId: 'b', previousArtifactId: 'a' });
 });
 it('revalidates replacement eligibility and lineage inside the edit transaction', async () => {
   const { record, guard } = await reviewed();
+  const replacement = await new SqlitePIArtifactStore(connection).getArtifactById('b');
+  if (!replacement) throw new Error('missing replacement');
+  const expectedNewArtifactDigest = computeArtifactDigest(replacement);
   other.getDb().prepare("UPDATE pi_artifacts SET validation_status = 'pending' WHERE artifact_id = 'b'").run();
-  expect(await store.edit({ approvalId: record.approvalId, expectedReview: guard, newArtifactId: 'b', editedBy: 'owner', editReason: 'replace', now: 'later' })).toMatchObject({ error: 'stale_review' });
+  expect(await store.edit({ approvalId: record.approvalId, expectedNewArtifactDigest, expectedReview: guard, newArtifactId: 'b', editedBy: 'owner', editReason: 'replace', now: 'later' })).toMatchObject({ error: 'stale_review' });
   other.getDb().prepare("UPDATE pi_artifacts SET validation_status = 'validated', lineage_artifact_ids = '[]' WHERE artifact_id = 'b'").run();
-  expect(await store.edit({ approvalId: record.approvalId, expectedReview: guard, newArtifactId: 'b', editedBy: 'owner', editReason: 'replace', now: 'later' })).toMatchObject({ error: 'stale_review' });
+  expect(await store.edit({ approvalId: record.approvalId, expectedNewArtifactDigest, expectedReview: guard, newArtifactId: 'b', editedBy: 'owner', editReason: 'replace', now: 'later' })).toMatchObject({ error: 'stale_review' });
   expect((await store.getById(record.approvalId))?.artifactId).toBe('a');
 });
 it('checks target identity and channel and preserves legacy unguarded callers', async () => {

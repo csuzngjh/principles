@@ -327,7 +327,7 @@ export class SqliteApprovalQueueStore implements ApprovalQueueStore {
   }
 
   async edit(input: ApprovalEditInput): Promise<ApprovalDecisionResult> {
-    if (input.expectedReview) return this.guardedMutation({ approvalId: input.approvalId, guard: input.expectedReview, allowMissing: false, mutate: () => this.editUnchecked(input), newArtifactId: input.newArtifactId });
+    if (input.expectedReview) return this.guardedMutation({ approvalId: input.approvalId, guard: input.expectedReview, allowMissing: false, mutate: () => this.editUnchecked(input), newArtifactId: input.newArtifactId, expectedNewArtifactDigest: input.expectedNewArtifactDigest });
     return this.editUnchecked(input);
   }
 
@@ -348,7 +348,7 @@ export class SqliteApprovalQueueStore implements ApprovalQueueStore {
     return { ok: true, record };
   }
 
-  private guardedMutation(input: { approvalId: string; guard: ApprovalReviewGuard; allowMissing: boolean; mutate: () => ApprovalDecisionResult; newArtifactId?: string }): ApprovalDecisionResult {
+  private guardedMutation(input: { approvalId: string; guard: ApprovalReviewGuard; allowMissing: boolean; mutate: () => ApprovalDecisionResult; newArtifactId?: string; expectedNewArtifactDigest?: string }): ApprovalDecisionResult {
     const { approvalId, guard, allowMissing, mutate, newArtifactId } = input;
     const db = this.connection.getDb();
     db.exec('BEGIN IMMEDIATE');
@@ -363,7 +363,7 @@ export class SqliteApprovalQueueStore implements ApprovalQueueStore {
         if ((raw !== undefined && artifact === null) || !matchesApprovalReview(current, artifact, guard, allowMissing)) result = staleApprovalReview();
         else if (newArtifactId !== undefined) {
           const replacement: unknown = db.prepare('SELECT * FROM pi_artifacts WHERE artifact_id = ?').get(newArtifactId);
-          result = artifact !== null && isPiArtifactRow(replacement) && replacement.validation_status === 'validated' && isArtifactRevisionOf(mapPiArtifactRow(replacement), artifact)
+          result = artifact !== null && isPiArtifactRow(replacement) && replacement.validation_status === 'validated' && computeArtifactDigest(mapPiArtifactRow(replacement)) === input.expectedNewArtifactDigest && isArtifactRevisionOf(mapPiArtifactRow(replacement), artifact)
             ? mutate() : staleApprovalReview();
         } else result = mutate();
       }

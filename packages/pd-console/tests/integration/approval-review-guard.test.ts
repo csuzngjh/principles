@@ -107,3 +107,17 @@ it('storage guard still refuses changes after the service precheck, with no acti
     expect(connection.getDb().prepare('SELECT COUNT(*) AS count FROM activations').get()).toMatchObject({ count: 0 });
   } finally { spy.mockRestore(); }
 });
+
+it('refuses a replacement changed after service validation but before the edit transaction', async () => {
+  const detail = await review();
+  const original = SqliteApprovalQueueStore.prototype.edit;
+  const spy = vi.spyOn(SqliteApprovalQueueStore.prototype, 'edit').mockImplementationOnce(async function (this: SqliteApprovalQueueStore, input: Parameters<typeof original>[0]) {
+    connection.getDb().prepare('UPDATE pi_artifacts SET content_json = ? WHERE artifact_id = ?').run('{"principleDraft":{"statement":"Changed replacement"}}', 'b');
+    return original.call(this, input);
+  });
+  try {
+    const response = await post('edit', { newArtifactId: 'b', editReason: 'replace', expectedReview: detail.review.expectedReview });
+    expect(response.status).toBe(409);
+    expect((await review()).artifactId).toBe('a');
+  } finally { spy.mockRestore(); }
+});

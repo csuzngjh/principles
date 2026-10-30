@@ -289,6 +289,8 @@ export interface ApprovalQueueStore {
 }
 
 export interface ApprovalEditInput {
+  /** Captured by the service after validating the proposed replacement, never trusted from UI text. */
+  expectedNewArtifactDigest?: string;
   expectedReview?: ApprovalReviewGuard;
   approvalId: string;
   editedBy: string;

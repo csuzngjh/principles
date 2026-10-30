@@ -676,6 +676,7 @@ export class ApprovalsConsoleModel {
       }
 
       const editResult = await queue.edit({
+        expectedNewArtifactDigest: input.expectedReview ? computeArtifactDigest(newArtifact) : undefined,
         expectedReview: input.expectedReview,
         approvalId,
         editedBy,
