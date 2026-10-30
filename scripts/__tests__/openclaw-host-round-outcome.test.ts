@@ -122,11 +122,44 @@ describe('openclaw round outcome', () => {
     expect(transport.hostSnapshot().identityStatus).toBe('VERIFIED');
   });
 
-  it('refuses a cleanup anomaly: exit 1 with error.kind=cleanup and the EBUSY detail surfaces', async () => {
+  it('refuses a cleanup anomaly with NO round data: exit 1, error.kind=cleanup, EBUSY detail surfaces (fail closed — the round cannot be proven)', async () => {
     const transport = makeTransport({ spawn: () => childThatFinishes({ stdout: JSON.stringify(CLEANUP_ENVELOPE), code: 1 }) });
 
     await expect(transport.complete(call)).rejects.toThrow(/openclaw exec exited 1: .*EBUSY/);
     expect(transport.hostSnapshot().rounds).toBe(1);
+  });
+
+  it('S9.1 task E: a cleanup-kind envelope carrying a COMPLETE round (final + model + provider + sessionId + usage) with exit 1 is a usable round with the anomaly recorded — the host itself distinguishes post-run cleanup from round failure', async () => {
+    // The 2026-10-29 real-exec shape (exec-lean.json): the model round
+    // COMPLETED (refusal final text, identity, usage all present) and only the
+    // post-run temp cleanup failed (EBUSY unlinking the exec's own still-open
+    // owner.sqlite). OpenClaw stamps this with error.kind='cleanup' — its own
+    // distinction between round failure and cleanup failure.
+    const completeCleanupEnvelope = {
+      ok: false,
+      status: 'error',
+      final: '{"executed":false,"refusalReason":"smoke"}',
+      payloads: [{ text: '{"executed":false,"refusalReason":"smoke"}', mediaUrl: null }],
+      usage: { input: 16516, output: 63, total: 16899 },
+      model: 'glm-5.3-flash',
+      provider: 'zai',
+      sessionId: 'round-outcome-session-cleanup',
+      error: {
+        kind: 'cleanup',
+        message: "Agent exec cleanup failed: EBUSY: resource busy or locked, unlink '...owner.sqlite'",
+      },
+    };
+    const transport = makeTransport({ spawn: () => childThatFinishes({ stdout: JSON.stringify(completeCleanupEnvelope), code: 1 }) });
+
+    const result = await transport.complete(call);
+
+    // The round is usable: the final text, identity and session all survive.
+    expect(result.payload).toBe('{"executed":false,"refusalReason":"smoke"}');
+    expect(result.hostRound.sessionId).toBe('round-outcome-session-cleanup');
+    const snap = transport.hostSnapshot();
+    expect(snap.identityStatus).toBe('VERIFIED');
+    // The anomaly is RECORDED in the evidence (rc-9), never silent.
+    expect(snap.sessionDetails?.[0]?.hostCleanupAnomaly).toContain('EBUSY');
   });
 
   it('refuses a non-zero exit even when stdout carries a success-shaped envelope', async () => {
