@@ -32,6 +32,14 @@ export interface SignalCollectorConfig {
   promptTemplate: string;
   strongPainScore: number;       // STRONG 信号的 pain score,默认 70
   strongRateLimitPerHour: number; // 单 session 每小时 STRONG 上限,默认 5
+  /**
+   * 零命中(= 无任何关键词候选)时发起 Stage2「发现新纠正词」调用的每小时上限。
+   * 未命中不代表纠正,但它是学习通道的入口;真实语料里 93.5% 的消息零命中,
+   * 每条都发起一次发现调用会把端点额度烧在普通消息上。歧义命中(有候选词)是
+   * 确认调用,不受此限。仅 host 层执行,core 只承载配置值。
+   * 0 / 未设置 = 不限制(旧行为)。
+   */
+  discoveryRateLimitPerHour?: number;
 }
 
 export type SignalStrength = 'STRONG' | 'WEAK';

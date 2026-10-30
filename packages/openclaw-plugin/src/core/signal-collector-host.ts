@@ -60,6 +60,9 @@ export const DEFAULT_SIGNAL_CONFIG: SignalCollectorConfig = {
   // one score/rate-limit truth for OpenClaw and Codex.
   strongPainScore: GOVERNANCE_STRONG_PAIN_SCORE,
   strongRateLimitPerHour: GOVERNANCE_STRONG_RATE_LIMIT_PER_HOUR,
+  // 零命中的「发现」调用按小时限量（见 SignalCollectorConfig 注释）：
+  // 实测真实语料 93.5% 消息零命中，全量发起等于把普通消息也送去分类。
+  discoveryRateLimitPerHour: 6,
 };
 
 /**
@@ -174,6 +177,9 @@ export class SignalCollectorHost {
   /** rate limit 状态:sessionId → STRONG 计数桶 */
   private readonly rateLimit = new Map<string, RateLimitBucket>();
 
+  /** 零命中「发现」调用的配额桶(每 host = 每 workspace,进程内) */
+  private discoveryBucket: RateLimitBucket = { count: 0, windowStart: 0 };
+
   constructor(wctx: WorkspaceContext, options: SignalCollectorHostOptions = {}) {
     this.wctx = wctx;
     this.storeProvider = options.keywordStoreProvider
@@ -248,6 +254,14 @@ export class SignalCollectorHost {
 
     // 6. 普通歧义词 / 未命中 → 入队异步 LLM 确认 (不阻塞 prompt hook)
     if (output.needsLlmConfirmation) {
+      // 零命中(Stage1 没有任何候选词)只有「发现新纠正词」这一种价值,不是确认:
+      // 按小时配额放行,超出直接返回(计数可见,不静默)。歧义命中是确认调用,不受限。
+      // 分类器不可用时本来就不会发生 LLM 调用,不消耗配额(降级语义保持原样)。
+      const willCallLlm = this.llmClassifier !== null && this.config.enableLlmStage;
+      if (willCallLlm && output.matchedTerms.length === 0 && !this.takeDiscoveryBudget()) {
+        this.countStage2DiscoverySkipped();
+        return;
+      }
       const pending: PendingSignal = {
         output,
         sessionId,
@@ -454,6 +468,30 @@ export class SignalCollectorHost {
     const stateDir = this.wctx.stateDir;
     queueMicrotask(() => {
       updateSignalHealth(stateDir, (s) => { s.stage2Invocations += 1; });
+    });
+  }
+
+  /**
+   * 零命中发现调用的配额判定（纯内存,同步安全）。
+   * 每 host 每小时最多 discoveryRateLimitPerHour 次;0/未设置 = 不限制。
+   */
+  private takeDiscoveryBudget(): boolean {
+    const limit = this.config.discoveryRateLimitPerHour ?? 0;
+    if (limit <= 0) return true;
+    const now = Date.now();
+    if (now - this.discoveryBucket.windowStart >= ONE_HOUR_MS) {
+      this.discoveryBucket = { count: 0, windowStart: now };
+    }
+    if (this.discoveryBucket.count >= limit) return false;
+    this.discoveryBucket.count += 1;
+    return true;
+  }
+
+  /** 被配额挡下的零命中发现计数（旁路，同 countStage2* 推迟到微任务）。 */
+  private countStage2DiscoverySkipped(): void {
+    const stateDir = this.wctx.stateDir;
+    queueMicrotask(() => {
+      updateSignalHealth(stateDir, (s) => { s.stage2DiscoverySkipped += 1; });
     });
   }
 
@@ -775,6 +813,11 @@ export function createSignalLlmClassifierFromConfig(
       maxTokens: cfg.maxTokens ?? undefined,
       baseUrl: cfg.baseUrl ?? undefined,
       workspace: wctx.workspaceDir,
+      // Stage2 只产 5 个字段的 JSON：不值得走 tool_call→json_schema→修复 3 次往返的
+      // 默认链。json_mode_first 一次往返拿结构化结果；修复上限收到 1 次（超时/往返
+      // 都是占用与主模型共享端点额度的成本，不是本地 CPU）。
+      outputPathStrategy: 'json_mode_first',
+      maxRepairAttempts: 1,
     });
 
     // 包装成 SignalLlmClassifier:内部调 startRun/pollRun/fetchOutput。

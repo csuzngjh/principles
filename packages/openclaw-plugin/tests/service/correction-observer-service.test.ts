@@ -139,6 +139,7 @@ vi.mock('@principles/core/runtime-v2', async (importOriginal) => {
 });
 
 import { CorrectionObserverService, runCorrectionObserverCycle, resolveCorrectionObserver } from '../../src/service/correction-observer-service.js';
+import { readSignalHealth, updateSignalHealth } from '../../src/core/signal-health.js';
 import { safeRmDir } from '../test-utils.js';
 
 describe('CorrectionObserverService — Independent Service (PRI-293)', () => {
@@ -489,6 +490,94 @@ describe('runCorrectionObserverCycle — Independent Execution', () => {
         expect.stringContaining('Correction observer cycle failed')
       );
     } finally {
+      safeRmDir(workspaceDir);
+    }
+  });
+
+  // P2-E: observer 只看最近的 user 回合。若最新会话的 updated_at 不晚于上次成功
+  // 的周期，本轮输入与上轮完全相同，重跑只是再花一次调用。
+  it('skips the optimization cycle when no new turns arrived since the last success', async () => {
+    vi.clearAllMocks();
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-corr-noop-'));
+    const stateDir = path.join(workspaceDir, '.state');
+    fs.mkdirSync(stateDir, { recursive: true });
+    updateSignalHealth(stateDir, (s) => { s.observerLastSuccessAt = '2026-01-02T00:00:00.000Z'; });
+
+    const wctx = WorkspaceContext.fromHookContext({ workspaceDir });
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    mockDb.listRecentSessions.mockReturnValueOnce([
+      { sessionId: 'session-1', startedAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z' },
+    ]);
+
+    try {
+      await runCorrectionObserverCycle(wctx, logger as any);
+
+      expect(mockDispatch).not.toHaveBeenCalled();
+      expect(mockOptimizationService.buildTrajectoryHistory).not.toHaveBeenCalled();
+      expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining('No new turns since'));
+      // 跳过也要推进成功时间戳，否则下一轮会重复判定同一份输入
+      expect(readSignalHealth(stateDir)?.observerLastSuccessAt).not.toBe('2026-01-02T00:00:00.000Z');
+      // 跳过是正常完成，不累计失败
+      expect(readSignalHealth(stateDir)?.observerConsecutiveFailures).toBe(0);
+    } finally {
+      safeRmDir(workspaceDir);
+    }
+  });
+
+  it('still runs when a newer turn arrived after the last success', async () => {
+    vi.clearAllMocks();
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-corr-newturn-'));
+    const stateDir = path.join(workspaceDir, '.state');
+    fs.mkdirSync(stateDir, { recursive: true });
+    updateSignalHealth(stateDir, (s) => { s.observerLastSuccessAt = '2026-01-02T00:00:00.000Z'; });
+
+    const wctx = WorkspaceContext.fromHookContext({ workspaceDir });
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    mockDb.listRecentSessions.mockReturnValueOnce([
+      { sessionId: 'session-1', startedAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-02T00:00:01.000Z' },
+    ]);
+
+    try {
+      await runCorrectionObserverCycle(wctx, logger as any);
+      expect(mockDispatch).toHaveBeenCalledTimes(1);
+    } finally {
+      safeRmDir(workspaceDir);
+    }
+  });
+
+  it('caps the payload: at most 40 recent messages, each truncated to 400 chars', async () => {
+    vi.clearAllMocks();
+    const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-corr-cap-'));
+    const stateDir = path.join(workspaceDir, '.state');
+    fs.mkdirSync(stateDir, { recursive: true });
+
+    const wctx = WorkspaceContext.fromHookContext({ workspaceDir });
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    mockDb.listRecentSessions.mockReturnValueOnce(
+      Array.from({ length: 10 }, (_, i) => ({
+        sessionId: `session-${i}`,
+        startedAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-03T00:00:00.000Z',
+      })),
+    );
+    const longExcerpt = `y${'x'.repeat(999)}`;
+    mockDb.listUserTurnsForSession.mockReturnValue(
+      Array.from({ length: 10 }, () => ({ rawExcerpt: longExcerpt })),
+    );
+
+    try {
+      await runCorrectionObserverCycle(wctx, logger as any);
+
+      expect(mockDispatch).toHaveBeenCalledTimes(1);
+      const payload = mockDispatch.mock.calls[0][1] as { recentMessages: string[]; trajectoryHistory: unknown[] };
+      expect(payload.recentMessages.length).toBe(40);
+      expect(Math.max(...payload.recentMessages.map((m) => m.length))).toBe(401); // 400 chars + ellipsis
+      expect(payload.recentMessages[0].endsWith('…')).toBe(true);
+      expect(Array.isArray(payload.trajectoryHistory)).toBe(true);
+    } finally {
+      mockDb.listUserTurnsForSession.mockReturnValue(
+        [{ rawExcerpt: 'User said wrong input', correctionDetected: true, correctionCue: 'wrong' }] as any,
+      );
       safeRmDir(workspaceDir);
     }
   });
