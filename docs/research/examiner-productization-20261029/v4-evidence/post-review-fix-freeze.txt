@@ -1,6 +1,6 @@
-{"status":"CALIBRATION_REPLAYED_GOLD_REVIEW_PENDING","packageHash":"d9c42e5b54f941ef8d8f39e49ffbae2cd9f26d7c342e0e6c0b6c3babede56459","reportHash":"afbe0a49bef242ec9cdbec6b286fdfc33ea486773acc93ce7528cbb7310d54d6","executions":9,"observedNodeVersion":"26.7.0"}
+{"status":"CALIBRATION_REPLAYED_GOLD_REVIEW_PENDING","packageHash":"12e45c080c76c3599ae4867818c1be250961b34e31c564648837e9f70ae90b10","reportHash":"e520dd4dd59a5b1dfec63d6f00f2a35c0511462b55ae68ac0dcecb2fe6a1c2f1","executions":9,"observedNodeVersion":"26.7.0"}
 replay exit=0
-{"ok":false,"status":"GOLD_REVIEW_PENDING","subjectHash":"5ac072bfea8bd3b216889c52a348403baf5044ac4ca7054d12194c59b24646ba","reasonCode":"INDEPENDENT_HUMAN_REVIEW_REQUIRED","nextAction":"Owner designates a human reviewer; supply signed mapping/Gold receipts and the independently pinned authority file."}
+{"ok":false,"status":"GOLD_REVIEW_PENDING","subjectHash":"d6b08e0551363f7db59188500cf31528a9def4fdb9e0b91ba2afbd2f67d7564c","reasonCode":"INDEPENDENT_HUMAN_REVIEW_REQUIRED","nextAction":"Owner designates a human reviewer; supply signed mapping/Gold receipts and the independently pinned authority file."}
 human-gate exit=1
 RUN  v5.0.0 D:/Code/_worktrees/principles/adhoc-20261030-20261030-pr-review-fixes-4e8219/scripts
  ✓ __tests__/principle-learning-lab-examiner-productization-entry.test.ts (32 tests)
@@ -8,6 +8,7 @@ RUN  v5.0.0 D:/Code/_worktrees/principles/adhoc-20261030-20261030-pr-review-fixe
  ✓ __tests__/principle-learning-lab-human-review-intake.test.ts (5 tests)
  Test Files  3 passed (3)
       Tests  44 passed (44)
-sums entries 18 mismatches 0
-zip subjectHash 5ac072bfea8bd3b216889c52a348403baf5044ac4ca7054d12194c59b24646ba template hashes [ '5ac072bfea8bd3b216889c52a348403baf5044ac4ca7054d12194c59b24646ba' ]
-GOLD-BLIND-REVIEW-v4.zip sha256 b1c7febd0ffefda3314f4f8ed8fc7cd37d9a984d59b5aa735ca2db8618ca4c72 (19 entries)
+executions identical to the previous freeze: true
+report rows identical to the previous freeze (only implementationHash moved): true
+zip subjectHash d6b08e0551363f7db59188500cf31528a9def4fdb9e0b91ba2afbd2f67d7564c matches receipts.template.json
+GOLD-BLIND-REVIEW-v4.zip sha256 1237dd0c3af89a56b35a3ffdd231e5fd75e64c010411a7e9fcc7857c569b5880 (19 entries)

@@ -43,12 +43,12 @@
 
 ## 冻结与运行条件
 
-- v4 packageHash：`d9c42e5b54f941ef8d8f39e49ffbae2cd9f26d7c342e0e6c0b6c3babede56459`
-- review subjectHash：`5ac072bfea8bd3b216889c52a348403baf5044ac4ca7054d12194c59b24646ba`
-- reportHash：`afbe0a49bef242ec9cdbec6b286fdfc33ea486773acc93ce7528cbb7310d54d6`
-- 盲审 ZIP SHA-256：`b1c7febd0ffefda3314f4f8ed8fc7cd37d9a984d59b5aa735ca2db8618ca4c72`
+- v4 packageHash：`12e45c080c76c3599ae4867818c1be250961b34e31c564648837e9f70ae90b10`
+- review subjectHash：`d6b08e0551363f7db59188500cf31528a9def4fdb9e0b91ba2afbd2f67d7564c`
+- reportHash：`e520dd4dd59a5b1dfec63d6f00f2a35c0511462b55ae68ac0dcecb2fe6a1c2f1`
+- 盲审 ZIP SHA-256：`1237dd0c3af89a56b35a3ffdd231e5fd75e64c010411a7e9fcc7857c569b5880`
 
-manifest 绑定完整 lib 实现；inputs 另绑定 runner 源码、九题、Gold、六主策略和三项负迁移策略、种子 0、Mock 版本与执行参数。Node 契约为固定 `node-22-to-26-offline-js-v1`，实际本地 26.7.0；CI 使用 22。该范围是明确的受支持运行环境，不声称精确二进制冻结；范围外拒绝。跨运行时一致性由同一冻结包的实际 CI 重放验证。新 v4 草稿最终定版前曾重新生成；评审修复移除重复的 skeleton 去重结果后再次按同一规则重新生成（报告、包、subject 与盲审 ZIP 同步更新），旧 EXM/v3 从未重写。上面的 hash 均指当前 v4；修复后实跑记录见 `examiner-productization-20261029/v4-evidence/post-review-fix-freeze.txt`，同目录 `human-gate.txt` 保留的是修复前冻结的原始捕获。
+manifest 绑定完整 lib 实现；inputs 另绑定 runner 源码、九题、Gold、六主策略和三项负迁移策略、种子 0、Mock 版本与执行参数。Node 契约为固定 `node-22-to-26-offline-js-v1`，实际本地 26.7.0；CI 使用 22。该范围是明确的受支持运行环境，不声称精确二进制冻结；范围外拒绝。跨运行时一致性由同一冻结包的实际 CI 重放验证。新 v4 草稿最终定版前曾重新生成；评审修复移除重复的 skeleton 去重结果后再次按同一规则重新生成（报告、包、subject 与盲审 ZIP 同步更新）。分支随后刷新到当前 main，main 期间修改了 `lib/challenge-openclaw-host.mjs`，而冻结按设计绑定完整 lib 实现，故以同一规则再次重新生成；两次重生成之间 executions 与报告各行逐字节不变，仅实现绑定 hash 及其派生 hash 移动。旧 EXM/v3 从未重写。上面的 hash 均指当前 v4；修复后实跑记录见 `examiner-productization-20261029/v4-evidence/post-review-fix-freeze.txt`，同目录 `human-gate.txt` 与 `replay.txt` 保留的是修复前冻结的原始捕获。
 
 历史 EXM/v3 以原始 manifest 检查文件字节保留；它们绑定的是历史实现，不能用当前实现冒充历史重放。新增 `.gitattributes` 仅将 EXM 研究包设为原文字节，避免检出时换行重写，不触及 CEB。
 
