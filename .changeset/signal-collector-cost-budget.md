@@ -1,6 +1,7 @@
 ---
 '@principles/core': patch
 'principles-disciple': patch
+'create-principles-disciple': patch
 '@principles/pd-cli': patch
 ---
 
