@@ -1,3 +1,5 @@
+import { Value } from '@sinclair/typebox/value';
+import { approvalReviewMaterial, type ApprovalReviewMaterial } from './approval-review-material.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type {
@@ -6,6 +8,7 @@ import type {
   ApprovalDecisionResult,
   ApprovalRecord,
   ApprovalStatus,
+  ApprovalReviewGuard,
 } from '@principles/core/runtime-v2';
 import {
   SqliteConnection,
@@ -25,6 +28,7 @@ import {
   buildOwnerRevisionArtifact,
   PrincipleTreeLedgerAdapter,
   MVP_CHANNELS,
+  computeArtifactDigest,
 } from '@principles/core/runtime-v2';
 import type { ApprovalWithContext, ActivationDecision, PIArtifactSnapshot } from '@principles/core/runtime-v2';
 import { resolveLedgerPrincipleId } from './principle-id-resolution.js';
@@ -120,6 +124,7 @@ export type ApproveWithActivationResult =
   | { ok: true; record: ApprovalRecord; activation?: ActivationDecision; warning?: string }
   | { ok: false, error: 'already_decided'; status: ApprovalStatus }
   | { ok: false; error: 'not_found' }
+  | { ok: false; error: 'stale_review'; reason: string; nextAction: string; status?: never }
   | { ok: false; error: 'unsupported_channel'; channel: string }
   | { ok: false; error: 'activation_failed'; reason: string; approvalRolledBack: boolean; nextAction?: string }
   | { ok: false; error: 'prompt_replacement_refused'; reason: string; nextAction: string }
@@ -204,23 +209,36 @@ export class ApprovalsConsoleModel {
     };
   }
 
-  async getApprovalDetail(approvalId: string): Promise<(ApprovalWithContext & { isMvpProven: boolean }) | null> {
-    if (!stateDbExists(this.workspaceDir)) {
-      return null;
-    }
-    const record = await this.readSafeGetById(approvalId);
-    if (!record) return null;
-    return {
-      ...record,
-      confidenceLabel: mapConfidenceToLabel(record.confidence),
-      isMvpProven: MVP_PROVEN_CHANNELS.has(record.channel),
-    };
+  async getApprovalDetail(approvalId: string): Promise<(ApprovalWithContext & { isMvpProven: boolean; writeGuardVersion: 'approval-review-v1'; review: { expectedReview: ApprovalReviewGuard; material: ApprovalReviewMaterial } }) | null> {
+    if (!stateDbExists(this.workspaceDir)) return null;
+    const { queue, connection } = this.createReadContext();
+    const db = connection.getDb();
+    db.exec('BEGIN');
+    try {
+      const record = await queue.getById(approvalId);
+      if (!record) { db.exec('COMMIT'); return null; }
+      const artifact = await new SqlitePIArtifactStore(connection).getArtifactById(record.artifactId);
+      const common = { schemaVersion: 'approval-review-v1' as const, approvalId, artifactId: record.artifactId, channel: record.channel };
+      const expectedReview: ApprovalReviewGuard = artifact
+        ? { ...common, artifactState: 'present', artifactDigest: computeArtifactDigest(artifact) }
+        : { ...common, artifactState: 'missing' };
+      const material = approvalReviewMaterial(record.artifactId, record.channel, artifact?.contentJson ?? null);
+      db.exec('COMMIT');
+      return { ...record, confidenceLabel: mapConfidenceToLabel(record.confidence), isMvpProven: MVP_PROVEN_CHANNELS.has(record.channel),
+        writeGuardVersion: 'approval-review-v1', review: { expectedReview, material } };
+    } catch (error) { try { db.exec('ROLLBACK'); } catch { /* Preserve the original read failure. */ } if (isMissingTableError(error)) return null; throw error;
+    } finally { connection.close(); }
+  }
+
+  private async reviewIsCurrent(approvalId: string, expectedReview: ApprovalReviewGuard): Promise<boolean> {
+    const current = await this.getApprovalDetail(approvalId);
+    return current !== null && Value.Equal(current.review.expectedReview, expectedReview);
   }
 
   async approve(
     approvalId: string,
     decidedBy: string,
-    options?: { note?: string; targetHost?: PromptInjectionTargetHost; intentReviewed?: boolean; reviewedArtifactId?: string; retryActivation?: boolean },
+    options?: { note?: string; targetHost?: PromptInjectionTargetHost; intentReviewed?: boolean; reviewedArtifactId?: string; retryActivation?: boolean; expectedReview?: ApprovalReviewGuard },
   ): Promise<ApproveWithActivationResult> {
     const note = options?.note;
     const targetHost = options?.targetHost;
@@ -229,6 +247,7 @@ export class ApprovalsConsoleModel {
     }
     const existing = await this.readSafeGetById(approvalId);
     if (!existing) return { ok: false, error: 'not_found' };
+    if (options?.expectedReview && !await this.reviewIsCurrent(approvalId, options?.expectedReview)) return { ok: false, error: 'stale_review', reason: 'The reviewed approval material changed.', nextAction: 'Reload this approval before deciding again.' };
     if (!MVP_PROVEN_CHANNELS.has(existing.channel)) {
       return { ok: false, error: 'unsupported_channel', channel: existing.channel };
     }
@@ -278,11 +297,12 @@ export class ApprovalsConsoleModel {
     try {
       approvalResult = existing.channel === 'prompt' && existing.status === 'approved' && options?.retryActivation === true
         ? { ok: true, record: existing }
-        : await writeQueue.approve(approvalId, decidedBy, note);
+        : await writeQueue.approve(approvalId, decidedBy, note, options?.expectedReview);
     } finally {
       try { writeConnection.close(); } catch { /* best-effort */ }
     }
     if (!approvalResult.ok) {
+      if (approvalResult.error === 'stale_review') return approvalResult;
       if (approvalResult.error === 'already_decided') {
         return { ok: false, error: 'already_decided', status: approvalResult.status };
       }
@@ -609,10 +629,11 @@ export class ApprovalsConsoleModel {
    * at an arbitrary, unvalidated, or lineage-mismatched artifact.
    */
   async editApproval(
-    input: { approvalId: string; editedBy: string; newArtifactId: string; editReason: string },
+    input: { approvalId: string; editedBy: string; newArtifactId: string; editReason: string; expectedReview?: ApprovalReviewGuard },
   ): Promise<
     | { ok: true; record: ApprovalRecord }
     | { ok: false; error: 'not_found' | 'already_decided' | 'artifact_not_found' | 'artifact_not_validated' | 'artifact_lineage_mismatch'; status?: ApprovalStatus; reason?: string }
+    | { ok: false; error: 'stale_review'; reason: string; nextAction: string; status?: never }
   > {
     const { approvalId, editedBy, newArtifactId, editReason } = input;
     if (!stateDbExists(this.workspaceDir)) {
@@ -620,6 +641,7 @@ export class ApprovalsConsoleModel {
     }
     const existing = await this.readSafeGetById(approvalId);
     if (!existing) return { ok: false, error: 'not_found' };
+    if (input.expectedReview && !await this.reviewIsCurrent(approvalId, input.expectedReview)) return { ok: false, error: 'stale_review', reason: 'The reviewed approval material changed.', nextAction: 'Reload this approval before deciding again.' };
     if (existing.status !== 'pending') {
       return { ok: false, error: 'already_decided', status: existing.status };
     }
@@ -654,6 +676,7 @@ export class ApprovalsConsoleModel {
       }
 
       const editResult = await queue.edit({
+        expectedReview: input.expectedReview,
         approvalId,
         editedBy,
         newArtifactId,
@@ -661,6 +684,7 @@ export class ApprovalsConsoleModel {
         now: new Date().toISOString(),
       });
       if (!editResult.ok) {
+        if (editResult.error === 'stale_review') return editResult;
         if (editResult.error === 'already_decided') {
           return { ok: false, error: 'already_decided', status: editResult.status };
         }
@@ -820,18 +844,20 @@ export class ApprovalsConsoleModel {
     }
   }
 
-  async reject(approvalId: string, decidedBy: string, reason: string): Promise<ChannelGuardedDecisionResult> {
+  // eslint-disable-next-line @typescript-eslint/max-params -- preserve the existing model contract with an additive optional review guard
+  async reject(approvalId: string, decidedBy: string, reason: string, expectedReview?: ApprovalReviewGuard): Promise<ChannelGuardedDecisionResult> {
     if (!stateDbExists(this.workspaceDir)) {
       return { ok: false, error: 'not_found' };
     }
     const existing = await this.readSafeGetById(approvalId);
     if (!existing) return { ok: false, error: 'not_found' };
+    if (expectedReview && !await this.reviewIsCurrent(approvalId, expectedReview)) return { ok: false, error: 'stale_review', reason: 'The reviewed approval material changed.', nextAction: 'Reload this approval before deciding again.' };
     if (!MVP_PROVEN_CHANNELS.has(existing.channel)) {
       return { ok: false, error: 'unsupported_channel', channel: existing.channel };
     }
     const { queue, connection } = this.createWriteContext();
     try {
-      return await queue.reject(approvalId, decidedBy, reason);
+      return await queue.reject(approvalId, decidedBy, reason, expectedReview);
     } finally {
       try { connection.close(); } catch { /* best-effort */ }
     }

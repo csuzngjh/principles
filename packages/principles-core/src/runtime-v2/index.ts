@@ -2371,3 +2371,6 @@ export type { CandidatePrincipleIdentityResolution, RuleCandidateBindingRequest,
 export { reviseRuleBindingOnce, resolveRuleBindingRevisionTarget } from './internalization/rule-binding-revision.js';
 export { reviseRuleSourceOnce, previewRuleSourceCorrection, SOURCE_CORRECTION_STOP_REASON_CODES } from './internalization/rule-source-correction.js';
 export type { ReviseRuleSourceOnceArgs, ReviseRuleSourceOnceResult, RuleSourceCorrectionPreview } from './internalization/rule-source-correction.js';
+
+export { ApprovalReviewGuardSchema, isApprovalReviewGuard } from './activation/approval-review-guard.js';
+export type { ApprovalReviewGuard } from './activation/approval-review-guard.js';

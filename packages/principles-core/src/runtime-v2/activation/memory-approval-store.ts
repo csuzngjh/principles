@@ -1,3 +1,5 @@
+import { matchesApprovalReview, staleApprovalReview, type ApprovalReviewGuard } from './approval-review-guard.js';
+import { isArtifactRevisionOf, type PIArtifactSnapshot } from './activation-types.js';
 import type {
   ApprovalDecisionResult,
   ApprovalEditInput,
@@ -15,6 +17,8 @@ function makeApprovalId(artifactId: string, channel: InternalizationChannel): st
 }
 
 export class MemoryApprovalQueueStore implements ApprovalQueueStore {
+  constructor(private readonly readArtifact?: (artifactId: string) => PIArtifactSnapshot | null) {}
+
   private readonly records = new Map<string, ApprovalRecord>();
 
   async enqueue(input: ApprovalEnqueueInput, now: string): Promise<ApprovalRecord> {
@@ -78,15 +82,18 @@ export class MemoryApprovalQueueStore implements ApprovalQueueStore {
     return stats;
   }
 
-  async approve(approvalId: string, decidedBy: string, note?: string): Promise<ApprovalDecisionResult> {
+  // eslint-disable-next-line @typescript-eslint/max-params -- preserve the existing positional CLI contract with an additive optional review guard
+  async approve(approvalId: string, decidedBy: string, note?: string, expectedReview?: ApprovalReviewGuard): Promise<ApprovalDecisionResult> {
     const existing = this.records.get(approvalId);
     if (!existing) return { ok: false, error: 'not_found' };
     if (existing.status !== 'pending') {
       return { ok: false, error: 'already_decided', status: existing.status };
     }
+    if (expectedReview && (!this.readArtifact || !matchesApprovalReview(existing, this.readArtifact(existing.artifactId), expectedReview))) return staleApprovalReview();
     const updated: ApprovalRecord = {
       ...existing,
       status: 'approved',
+      artifactDigest: expectedReview?.artifactState === 'present' ? expectedReview.artifactDigest : existing.artifactDigest,
       decidedAt: new Date().toISOString(),
       decidedBy,
       decisionNote: note,
@@ -95,12 +102,14 @@ export class MemoryApprovalQueueStore implements ApprovalQueueStore {
     return { ok: true, record: updated };
   }
 
-  async reject(approvalId: string, decidedBy: string, reason: string): Promise<ApprovalDecisionResult> {
+  // eslint-disable-next-line @typescript-eslint/max-params -- preserve the existing positional CLI contract with an additive optional review guard
+  async reject(approvalId: string, decidedBy: string, reason: string, expectedReview?: ApprovalReviewGuard): Promise<ApprovalDecisionResult> {
     const existing = this.records.get(approvalId);
     if (!existing) return { ok: false, error: 'not_found' };
     if (existing.status !== 'pending') {
       return { ok: false, error: 'already_decided', status: existing.status };
     }
+    if (expectedReview && (!this.readArtifact || !matchesApprovalReview(existing, this.readArtifact(existing.artifactId), expectedReview, true))) return staleApprovalReview();
     const updated: ApprovalRecord = {
       ...existing,
       status: 'rejected',
@@ -122,6 +131,7 @@ export class MemoryApprovalQueueStore implements ApprovalQueueStore {
       decidedAt: undefined,
       decidedBy: undefined,
       decisionNote: undefined,
+      artifactDigest: undefined,
     };
     this.records.set(approvalId, reset);
     return { ok: true };
@@ -133,9 +143,16 @@ export class MemoryApprovalQueueStore implements ApprovalQueueStore {
     if (existing.status !== 'pending') {
       return { ok: false, error: 'already_decided', status: existing.status };
     }
+    if (input.expectedReview && (!this.readArtifact || !matchesApprovalReview(existing, this.readArtifact(existing.artifactId), input.expectedReview))) return staleApprovalReview();
+    if (input.expectedReview) {
+      const original = this.readArtifact?.(existing.artifactId);
+      const replacement = this.readArtifact?.(input.newArtifactId);
+      if (!original || !replacement || replacement.validationStatus !== 'validated' || !isArtifactRevisionOf(replacement, original)) return staleApprovalReview();
+    }
     const updated: ApprovalRecord = {
       ...existing,
       artifactId: input.newArtifactId,
+      artifactDigest: undefined,
       editedAt: input.now,
       editedBy: input.editedBy,
       editReason: input.editReason,

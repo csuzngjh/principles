@@ -407,6 +407,19 @@ it('retries an approved failed replacement without rewriting the Owner decision'
   expect(sqliteConn.getDb().prepare("SELECT owner_id FROM activation_decisions WHERE decision = 'supersede' AND artifact_id = ?").get(SCENARIO_C.artifactId)).toEqual({ owner_id: row.decided_by });
 });
 
+it('guarded recovery of an approved failed replacement preserves the original decision', async () => {
+  const row = sqliteConn.getDb().prepare("SELECT a.approval_id, a.decided_by FROM approvals a JOIN pi_artifacts p ON p.artifact_id = a.artifact_id WHERE p.source_principle_id = ? AND a.status = 'approved'").get(SCENARIO_C.principle) as { approval_id: string; decided_by: string };
+  const detail = await fetchJson(`/api/v1/approvals/${row.approval_id}`);
+  const data = getDataObject(detail.body);
+  if (!data || typeof data.review !== 'object' || data.review === null || !Object.hasOwn(data.review, 'expectedReview')) throw new Error('missing review guard');
+  const expectedReview: unknown = Reflect.get(data.review, 'expectedReview');
+  const response = await fetchJson(`/api/v1/approvals/${row.approval_id}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ retryActivation: true, decidedBy: 'Bob' }) });
+  expect(response.status).toBe(200);
+  expect(sqliteConn.getDb().prepare('SELECT status, decided_by FROM approvals WHERE approval_id = ?').get(row.approval_id)).toEqual({ status: 'approved', decided_by: row.decided_by });
+  expect(sqliteConn.getDb().prepare('SELECT deactivated_at FROM activations WHERE artifact_id = ?').get(SCENARIO_C.artifactId)).not.toEqual({ deactivated_at: null });
+  expect(sqliteConn.getDb().prepare("SELECT owner_id FROM activation_decisions WHERE decision = 'supersede' AND artifact_id = ?").get(SCENARIO_C.artifactId)).toEqual({ owner_id: row.decided_by });
+});
+
 it('refuses an apparently completed retry when the historical supersede decision is missing', async () => {
   const principleId = crypto.randomUUID();
   const oldArtifactId = `art-missing-${principleId}`;
