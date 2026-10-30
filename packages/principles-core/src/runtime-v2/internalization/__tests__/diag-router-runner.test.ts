@@ -21,6 +21,10 @@
  *   - ERR-004: Lineage fields must be internally consistent
  *   - ERR-009: Required fields fail loud — TypeBox schema + semantic checks
  */
+import { createHash } from 'node:crypto';
+import { readRouterContextReceipt, verifyRouterContextReceipt } from '../router-context-evidence.js';
+import { Value } from '@sinclair/typebox/value';
+import { DiagnosticianOutputV1Schema } from '../../diagnostician-output.js';
 import type { vi } from 'vitest';
 import { describe, it, expect } from 'vitest';
 import type { MemoryPIArtifactStore } from '../pi-artifact-store.js';
@@ -40,6 +44,67 @@ import {
 type MockFn = ReturnType<typeof vi.fn>;
 
 describe('DiagRouterRunner V-slice', () => {
+  it('persists system invocation evidence, survives serialization, and refuses foreign lineage', async () => {
+    const h = createDiagRunnerHarness('router');
+    expect((await h.runner.run(ROUTER_TASK_ID)).status).toBe('succeeded');
+    const [artifact] = await h.deps.artifactStore.listBySourceTaskId(ROUTER_TASK_ID);
+    if (!artifact) throw new Error('missing persisted router artifact');
+    const envelope: unknown = JSON.parse(artifact.contentJson);
+    expect(Value.Check(DiagnosticianOutputV1Schema, envelope)).toBe(true);
+    const restored = readRouterContextReceipt(envelope, { taskId: ROUTER_TASK_ID, runId: ROUTER_RUN_ID });
+    expect(restored.status).toBe('available');
+    if (restored.status !== 'available') throw new Error('receipt unavailable');
+    const invocation: unknown = h.deps._runtimeAdapter.startRun?.mock.calls[0]?.[0];
+    if (invocation === null || typeof invocation !== 'object') throw new Error('missing actual invocation');
+    const message: unknown = Reflect.get(invocation, 'inputPayload');
+    const systemPrompt: unknown = Reflect.get(invocation, 'systemPrompt');
+    if (typeof message !== 'string' || typeof systemPrompt !== 'string') throw new Error('invalid actual prompt');
+    expect(restored.receipt.messageDigest).toBe(createHash('sha256').update(message).digest('hex'));
+    expect(restored.receipt.systemPromptDigest).toBe(createHash('sha256').update(systemPrompt).digest('hex'));
+    expect(restored.receipt.canonicalPrinciples.status).toBe('unavailable');
+    const predecessors = [];
+    for (const source of restored.receipt.predecessorDigests) {
+      const sourceArtifact = await h.deps.artifactStore.getArtifactById(source.artifactId);
+      if (!sourceArtifact) throw new Error('missing source artifact');
+      predecessors.push({ artifactId: source.artifactId, content: JSON.parse(sourceArtifact.contentJson) });
+    }
+    const expected = { taskId: ROUTER_TASK_ID, runId: ROUTER_RUN_ID, contextHash: restored.receipt.contextHash, message, systemPrompt, predecessors };
+    expect(verifyRouterContextReceipt(JSON.parse(JSON.stringify(envelope)), expected).status).toBe('available');
+    expect(verifyRouterContextReceipt(envelope, { ...expected, contextHash: 'foreign-context' })).toMatchObject({ status: 'unavailable', reason: 'context_receipt_source_mismatch' });
+    expect(verifyRouterContextReceipt({ trustedContextReceipt: { ...restored.receipt, contextHash: 'tampered' } }, expected)).toMatchObject({ status: 'unavailable', reason: 'context_receipt_source_mismatch' });
+    expect(verifyRouterContextReceipt(envelope, { ...expected, message: message + ' changed' })).toMatchObject({ status: 'unavailable', reason: 'context_receipt_source_mismatch' });
+    expect(verifyRouterContextReceipt(envelope, { ...expected, predecessors: predecessors.map(source => ({ ...source, content: {} })) })).toMatchObject({ status: 'unavailable', reason: 'context_receipt_source_mismatch' });
+    expect(readRouterContextReceipt(envelope, { taskId: 'foreign', runId: ROUTER_RUN_ID })).toMatchObject({ status: 'unavailable', reason: 'context_receipt_lineage_mismatch' });
+    expect(readRouterContextReceipt(envelope, { taskId: ROUTER_TASK_ID, runId: 'foreign' })).toMatchObject({ status: 'unavailable', reason: 'context_receipt_lineage_mismatch' });
+    expect(readRouterContextReceipt({}, { taskId: ROUTER_TASK_ID, runId: ROUTER_RUN_ID })).toMatchObject({ status: 'unavailable', reason: 'context_receipt_missing' });
+    expect(readRouterContextReceipt({ trustedContextReceipt: { ...restored.receipt, messageDigest: 'broken' } }, { taskId: ROUTER_TASK_ID, runId: ROUTER_RUN_ID })).toMatchObject({ status: 'unavailable', reason: 'context_receipt_invalid' });
+    const commit = h.deps._committer.commit.mock.calls[0]?.[0];
+    expect(commit?.contentJson).toBe(artifact.contentJson);
+  });
+
+  it('changes evidence when predecessor contents change even with the same source identity', async () => {
+    const first = createDiagRunnerHarness('router');
+    const second = createDiagRunnerHarness('router');
+    const [predecessor] = await second.deps.artifactStore.listBySourceTaskId(ROOTCAUSE_TASK_ID);
+    if (!predecessor) throw new Error('missing predecessor');
+    const parsed: unknown = JSON.parse(predecessor.contentJson);
+    if (parsed === null || typeof parsed !== 'object') throw new Error('invalid predecessor');
+    await second.deps.artifactStore.upsertArtifact({ ...predecessor, contentJson: JSON.stringify({ ...parsed, summary: 'Changed source diagnosis' }) });
+    await first.runner.run(ROUTER_TASK_ID);
+    await second.runner.run(ROUTER_TASK_ID);
+    const extract = async (h: typeof first) => {
+      const [artifact] = await h.deps.artifactStore.listBySourceTaskId(ROUTER_TASK_ID);
+      if (!artifact) throw new Error('missing persisted artifact');
+      const result = readRouterContextReceipt(JSON.parse(artifact.contentJson), { taskId: ROUTER_TASK_ID, runId: ROUTER_RUN_ID });
+      if (result.status !== 'available') throw new Error('invalid receipt');
+      return result.receipt;
+    };
+    const a = await extract(first);
+    const b = await extract(second);
+    expect(a.predecessorDigests[0]?.artifactId).toBe(b.predecessorDigests[0]?.artifactId);
+    expect(a.predecessorDigests[0]?.contentDigest).not.toBe(b.predecessorDigests[0]?.contentDigest);
+    expect(a.messageDigest).not.toBe(b.messageDigest);
+  });
   it('lease → succeed → commits candidates via DiagnosticianCommitter', async () => {
     const h = createDiagRunnerHarness('router');
 

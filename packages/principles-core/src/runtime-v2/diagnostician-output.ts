@@ -83,6 +83,52 @@ export const DiagnosticianOutputV1Schema = Type.Object({
  
 export type DiagnosticianOutputV1 = Static<typeof DiagnosticianOutputV1Schema>;
 
+// Opt-in shadow contract. Existing generation and validation remain on V1.
+export const PrincipleAssociationSchema = Type.Union([
+  Type.Object({
+    status: Type.Literal('linked'),
+    relation: Type.Literal('implements'),
+    target: Type.Union([
+      Type.Object({ type: Type.Literal('recommendation_ref'), recommendationRef: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
+      Type.Object({ type: Type.Literal('canonical_principle'), principleId: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
+    ]),
+    rationale: Type.String({ minLength: 1 }),
+    evidenceRefs: Type.Array(Type.String({ minLength: 1 }), { minItems: 1, uniqueItems: true }),
+  }, { additionalProperties: false }),
+  Type.Object({
+    status: Type.Literal('unresolved'),
+    reason: Type.Union([
+      Type.Literal('no_supported_target'), Type.Literal('ambiguous_target'),
+      Type.Literal('insufficient_evidence'), Type.Literal('principle_not_in_context'),
+    ]),
+    candidateRecommendationRefs: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { uniqueItems: true })),
+  }, { additionalProperties: false }),
+]);
+
+export const DiagnosticianRecommendationV2Schema = Type.Union([
+  Type.Object({
+    ...DiagnosticianRecommendationSchema.properties,
+    kind: Type.Literal('rule'),
+    recommendationRef: Type.String({ minLength: 1 }),
+    triggerPattern: Type.String({ minLength: 1 }),
+    action: Type.String({ minLength: 1 }),
+    principleAssociation: PrincipleAssociationSchema,
+  }, { additionalProperties: false }),
+  Type.Object({
+    ...DiagnosticianRecommendationSchema.properties,
+    kind: Type.Union([Type.Literal('principle'), Type.Literal('implementation'), Type.Literal('prompt'), Type.Literal('defer')]),
+    recommendationRef: Type.String({ minLength: 1 }),
+  }, { additionalProperties: false }),
+]);
+
+export const DiagnosticianOutputV2Schema = Type.Object({
+  ...DiagnosticianOutputV1Schema.properties,
+  schemaVersion: Type.Literal('diagnostician-output-v2'),
+  recommendations: Type.Array(DiagnosticianRecommendationV2Schema, { minItems: 1 }),
+}, { additionalProperties: false });
+
+export type DiagnosticianOutputV2 = Static<typeof DiagnosticianOutputV2Schema>;
+
 // ── Diagnostician Invocation Input ──
 
 /**
