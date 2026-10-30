@@ -33,7 +33,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { hashOfCanonical, sha256 } from './challenge-freeze.mjs';
+import { hashOfCanonical, sha256, challengeImplementationManifest } from './challenge-freeze.mjs';
 import { verifyCanonicalHash } from './challenge-freeze.mjs';
 import { buildClaimEnvironment, newClaimRunState } from './claim-evidence-env.mjs';
 import { adjudicateClaimEvidence } from './claim-evidence-scorer.mjs';
@@ -67,6 +67,14 @@ export function verifyFrozenStudy(studyDir) {
   const scoringContract = readJson(path.join(studyDir, 'scoring-contract.json'));
   const manifest = readJson(path.join(studyDir, 'suite-manifest.json'));
 
+  if (!['claim-evidence-scoring.v1', 'claim-evidence-scoring.v2'].includes(scoringContract.schema)) {
+    problems.push('unsupported scoring contract version');
+  }
+  if (scoringContract.schema === 'claim-evidence-scoring.v2'
+      && hashOfCanonical(scoringContract.implementation) !== hashOfCanonical(challengeImplementationManifest())) {
+    problems.push('v2 scoring implementation drift');
+  }
+
   const principleContentHash = hashOfCanonical(principle.contentJson);
   if (principleContentHash !== inputManifest.expectedSourceHashes.principleContentHash) problems.push('principle content hash != input-manifest expected');
   if (principleContentHash !== mapping.principleContentHash) problems.push('mapping.principleContentHash mismatch');
@@ -82,6 +90,10 @@ export function verifyFrozenStudy(studyDir) {
     const visibleFile = path.join(studyDir, 'actor-visible', `${c.caseId}.json`);
     if (!fs.existsSync(judgeFile) || !fs.existsSync(visibleFile)) { problems.push(`case ${c.caseId}: missing frozen file`); continue; }
     const judge = readJson(judgeFile);
+    const expectedJudgeSchema = scoringContract.schema === 'claim-evidence-scoring.v2' ? 'claim-evidence-judge-only.v2' : 'claim-evidence-judge-only.v1';
+    if (judge.schema !== expectedJudgeSchema) {
+      problems.push(`case ${c.caseId}: scoring contract version mismatch`);
+    }
     const visible = readJson(visibleFile);
     if (!verifyCanonicalHash(judge, c.goldHash, { stripFields: ['inputHash', 'goldHash'] }).ok) problems.push(`case ${c.caseId}: judge-only goldHash drift`);
     if (hashOfCanonical(visible) !== c.inputHash) problems.push(`case ${c.caseId}: actor-visible inputHash drift`);
@@ -321,17 +333,30 @@ export async function runChallengeStudy({
             // structural probe check, BEFORE the factory): the authorization's
             // realHostProbe.evidenceRef must resolve to a real-host-executed,
             // all-checks-PASSED probe record bound to THIS frozen study, with
-            // every recorded session corroborated by the host's own rollouts
-            // (execution.codexHome). Offline-rehearsal evidence, missing,
-            // corrupt, mismatched or uncorroborated evidence refuses F2.
+            // every recorded session corroborated by the host's own evidence.
+            // Host dispatch follows the probe binding's hostKind: codex-cli →
+            // rollout corroboration under execution.codexHome (historical
+            // path); openclaw → exec-state corroboration with the operator-
+            // declared probe controlled root (execution.probeControlledRoot —
+            // the workRoot rounds dir the probe ran in; missing = refuse,
+            // never a silent skip). Offline-rehearsal, missing, corrupt,
+            // mismatched or uncorroborated evidence refuses F2.
             if (declaredMode === 'F2-real-host') {
+              const probeBinding = authorizationRecord && authorizationRecord.isolationAcceptance && authorizationRecord.isolationAcceptance.realHostProbe;
+              const probeHostKind = probeBinding && probeBinding.hostKind === 'openclaw' ? 'openclaw' : 'codex-cli';
+              const { readOpenClawExecStateTrajectory } = await import('./challenge-openclaw-host.mjs');
               const probeVerify = verifyF2ProbeEvidence({
                 studyDir,
-                evidenceRef: authorizationRecord && authorizationRecord.isolationAcceptance && authorizationRecord.isolationAcceptance.realHostProbe
-                  ? authorizationRecord.isolationAcceptance.realHostProbe.evidenceRef
+                evidenceRef: probeBinding
+                  ? probeBinding.evidenceRef
                   : null,
                 expected: { studyId: frozen.studyId, suiteHash: frozen.suiteHash },
-                codexHome: execution.codexHome ?? null,
+                codexHome: probeHostKind === 'codex-cli' ? (execution.codexHome ?? null) : null,
+                hostKind: probeHostKind,
+                ...(probeHostKind === 'openclaw' ? {
+                  openclawControlledRoot: execution.probeControlledRoot ?? null,
+                  readOpenClawTrajectory: readOpenClawExecStateTrajectory,
+                } : {}),
               });
               if (!probeVerify.ok) {
                 ledger.appendEvent({ type: 'UNIT_REFUSED', unit, reason: 'stage_r_probe_evidence_invalid', detail: probeVerify.reasons });
@@ -345,6 +370,7 @@ export async function runChallengeStudy({
             actor = actorFactory({
               armId,
               caseId,
+              repetitionId, // unit-unique taskId segment for host transports (one host session per SPEC §6.2.8 unit)
               caseDef,
               caseVisible,
               armPrompt, // SPEC §6.2 — the ONLY injection channel a real actor receives

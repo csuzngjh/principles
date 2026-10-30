@@ -1,0 +1,16 @@
+{
+  "scope": "one non-Examiner local race failure; final serial full suite passed",
+  "files": [
+    {
+      "path": "scripts/__tests__/dev-concurrency.test.ts",
+      "current": "a10d44f09bcb0c3be78abd317e49e494f1db3af65d6c6073478d3c2b4d572f85",
+      "originMain": "a10d44f09bcb0c3be78abd317e49e494f1db3af65d6c6073478d3c2b4d572f85"
+    },
+    {
+      "path": "scripts/dev/lib/git-mutation-lock.mjs",
+      "current": "8030c3a28a7d333bc35ce4d83544149f9fa7c9a60bd7ef04eebd6deb61c50d85",
+      "originMain": "8030c3a28a7d333bc35ce4d83544149f9fa7c9a60bd7ef04eebd6deb61c50d85"
+    }
+  ],
+  "imports": "dev-concurrency imports only dev worktree test utilities / git mutation lock; no principle-learning-lab imports"
+}

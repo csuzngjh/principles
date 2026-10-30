@@ -1,0 +1,1102 @@
+Test shared runtime & adapters	Set up job	﻿2026-10-29T16:53:48.8976634Z Current runner version: '2.338.0'
+Test shared runtime & adapters	Set up job	2026-10-29T16:53:48.9002983Z ##[group]Runner Image Provisioner
+Test shared runtime & adapters	Set up job	2026-10-29T16:53:48.9003888Z Hosted Compute Agent
+Test shared runtime & adapters	Set up job	2026-10-29T16:53:48.9004584Z Version: 20261021.618
+Test shared runtime & adapters	Set up job	2026-10-29T16:53:48.9005260Z Commit: 21505ad2541d5be6135ed84fc33697146cf75b8e
+Test shared runtime & adapters	Set up job	2026-10-29T16:53:48.9005983Z Build Date: 2026-10-21T00:45:21Z
+Test shared runtime & adapters	Set up job	2026-10-29T16:53:48.9006758Z Worker ID: {26a99eef-ac1d-4df6-a7eb-d4bbadabac12}
+Test shared runtime & adapters	Set up job	2026-10-29T16:53:48.9007530Z Region: eastus2
+Test shared runtime & adapters	Set up job	2026-10-29T16:53:48.9008176Z Cloud: Azure
+Test shared runtime & adapters	Set up job	2026-10-29T16:53:48.9008757Z ##[endgroup]
+Test shared runtime & adapters	Set up job	2026-10-29T16:53:48.9010664Z ##[group]Operating System
+Test shared runtime & adapters	Set up job	2026-10-29T16:53:48.9011457Z Ubuntu
+Test shared runtime & adapters	Set up job	2026-10-29T16:53:48.9012003Z 24.04.5
+Test shared runtime & adapters	Set up job	2026-10-29T16:53:48.9012684Z LTS
+Test shared runtime & adapters	Set up job	2026-10-29T16:53:48.9013651Z ##[endgroup]
+Test shared runtime & adapters	Set up job	2026-10-29T16:53:48.9014534Z ##[group]Runner Image
+Test shared runtime & adapters	Set up job	2026-10-29T16:53:48.9015579Z Image: ubuntu-24.04
+Test shared runtime & adapters	Set up job	2026-10-29T16:53:48.9016518Z Version: 20261025.353.1
+Test shared runtime & adapters	Set up job	2026-10-29T16:53:48.9017886Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261025.353/images/ubuntu/Ubuntu2404-Readme.md
+Test shared runtime & adapters	Set up job	2026-10-29T16:53:48.9020121Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20261025.353
+Test shared runtime & adapters	Set up job	2026-10-29T16:53:48.9021228Z ##[endgroup]
+Test shared runtime & adapters	Set up job	2026-10-29T16:53:48.9022386Z ##[group]GITHUB_TOKEN Permissions
+Test shared runtime & adapters	Set up job	2026-10-29T16:53:48.9024598Z Contents: read
+Test shared runtime & adapters	Set up job	2026-10-29T16:53:48.9025291Z Metadata: read
+Test shared runtime & adapters	Set up job	2026-10-29T16:53:48.9025920Z ##[endgroup]
+Test shared runtime & adapters	Set up job	2026-10-29T16:53:48.9027973Z Secret source: Actions
+Test shared runtime & adapters	Set up job	2026-10-29T16:53:48.9029247Z Cache mode: write
+Test shared runtime & adapters	Set up job	2026-10-29T16:53:48.9030641Z Prepare workflow directory
+Test shared runtime & adapters	Set up job	2026-10-29T16:53:48.9362859Z Prepare all required actions
+Test shared runtime & adapters	Set up job	2026-10-29T16:53:48.9410644Z Getting action download info
+Test shared runtime & adapters	Set up job	2026-10-29T16:53:49.1911252Z Download action repository 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' (SHA:3d3c42e5aac5ba805825da76410c181273ba90b1)
+Test shared runtime & adapters	Set up job	2026-10-29T16:53:49.3082433Z Download action repository 'actions/setup-node@820762786026740c76f36085b0efc47a31fe5020' (SHA:820762786026740c76f36085b0efc47a31fe5020)
+Test shared runtime & adapters	Set up job	2026-10-29T16:53:49.5326264Z Complete job name: Test shared runtime & adapters
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	﻿2026-10-29T16:53:49.6209459Z ##[group]Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.6210564Z with:
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.6211018Z   persist-credentials: false
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.6211571Z   repository: csuzngjh/principles
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.6215231Z   token: ***
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.6215658Z   ssh-strict: true
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.6216078Z   ssh-user: git
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.6216487Z   clean: true
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.6216922Z   sparse-checkout-cone-mode: true
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.6217435Z   fetch-depth: 1
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.6217855Z   fetch-tags: false
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.6218292Z   show-progress: true
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.6219097Z   lfs: false
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.6219521Z   submodules: false
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.6220056Z   set-safe-directory: true
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.6220573Z   allow-unsafe-pr-checkout: false
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.6221372Z ##[endgroup]
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.8703727Z Syncing repository: csuzngjh/principles
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.8707047Z ##[group]Getting Git version info
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.8708730Z Working directory is '/home/runner/work/principles/principles'
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.8711263Z [command]/usr/bin/git version
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.8799797Z git version 2.56.0
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.8826802Z ##[endgroup]
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.8839979Z Temporarily overriding HOME='/home/runner/work/_temp/2adcae43-5ab6-43ec-b6f8-e23c73d211a5' before making global git config changes
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.8841696Z Adding repository directory to the temporary git global config as a safe directory
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.8845870Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/principles/principles
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.8896927Z Deleting the contents of '/home/runner/work/principles/principles'
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.8900996Z ##[group]Determining repository object format
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.8902708Z ##[endgroup]
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.8903564Z ##[group]Initializing the repository
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.8907711Z [command]/usr/bin/git init /home/runner/work/principles/principles
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.9001300Z hint: Using 'master' as the name for the initial branch. This default branch name
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.9003076Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.9004166Z hint: to use in all of your new repositories, which will suppress this warning,
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.9005313Z hint: call:
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.9005816Z hint:
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.9006442Z hint: 	git config --global init.defaultBranch <name>
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.9007310Z hint:
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.9008372Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.9009774Z hint: 'development'. The just-created branch can be renamed via this command:
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.9011236Z hint:
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.9012300Z hint: 	git branch -m <name>
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.9013581Z hint:
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.9018636Z hint: Disable this message with "git config set advice.defaultBranchName false"
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.9024039Z Initialized empty Git repository in /home/runner/work/principles/principles/.git/
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.9038096Z [command]/usr/bin/git remote add origin https://github.com/csuzngjh/principles
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.9090479Z ##[endgroup]
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.9092421Z ##[group]Disabling automatic garbage collection
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.9095889Z [command]/usr/bin/git config --local gc.auto 0
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.9133479Z ##[endgroup]
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.9135419Z ##[group]Setting up auth
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.9136732Z Removing SSH command configuration
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.9141510Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.9183270Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.9628129Z Removing HTTP extra header
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.9651245Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:49.9748821Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:50.0036604Z Removing includeIf entries pointing to credentials config files
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:50.0045305Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:50.0098637Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:50.0352972Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-ce90c0b6-ea74-4330-a49d-a0a9082de7bc.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:50.0401530Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/principles/principles/.git.path /home/runner/work/_temp/git-credentials-ce90c0b6-ea74-4330-a49d-a0a9082de7bc.config
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:50.0444498Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/principles/principles/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-ce90c0b6-ea74-4330-a49d-a0a9082de7bc.config
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:50.0486621Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-ce90c0b6-ea74-4330-a49d-a0a9082de7bc.config
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:50.0529611Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-ce90c0b6-ea74-4330-a49d-a0a9082de7bc.config
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:50.0569799Z ##[endgroup]
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:50.0570696Z ##[group]Fetching the repository
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:50.0576588Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +3b39072e5f216c7d208432ed921ff12136fae973:refs/remotes/pull/2224/merge
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.0544666Z From https://github.com/csuzngjh/principles
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.0547239Z  * [new ref]         3b39072e5f216c7d208432ed921ff12136fae973 -> pull/2224/merge
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.0552278Z ##[endgroup]
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.0554214Z ##[group]Determining the checkout info
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.0555953Z ##[endgroup]
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.0557246Z [command]/usr/bin/git sparse-checkout disable
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.0625073Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.0668240Z ##[group]Checking out the ref
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.0672672Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/2224/merge
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.5969490Z Note: switching to 'refs/remotes/pull/2224/merge'.
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.5970128Z 
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.5970585Z You are in 'detached HEAD' state. You can look around, make experimental
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.5971484Z changes and commit them, and you can discard any commits you make in this
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.5972376Z state without impacting any branches by switching back to a branch.
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.5974645Z 
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.5974986Z If you want to create a new branch to retain commits you create, you may
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.5975505Z do so (now or later) by using -c with the switch command. Example:
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.5975800Z 
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.5975940Z   git switch -c <new-branch-name>
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.5976178Z 
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.5977597Z Or undo this operation with:
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.5977948Z 
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.5978078Z   git switch -
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.5978268Z 
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.5978605Z Turn off this advice by setting config variable advice.detachedHead to false
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.5979284Z 
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.5979677Z HEAD is now at 3b39072 Merge 932b0670ff5350edf57e3830e4fb40ac5cd32c01 into ac11a2a43ee19a7cc820811f4b58821e6d4a3df9
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.7032894Z ##[endgroup]
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.7089751Z [command]/usr/bin/git log -1 --format=%H
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.7126871Z 3b39072e5f216c7d208432ed921ff12136fae973
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.7138312Z ##[group]Removing auth
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.7143555Z Removing SSH command configuration
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.7144362Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.7194113Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.7454865Z Removing HTTP extra header
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.7459130Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.7501703Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.7747145Z Removing includeIf entries pointing to credentials config files
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.7828649Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.7830069Z includeif.gitdir:/home/runner/work/principles/principles/.git.path
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.7830942Z includeif.gitdir:/home/runner/work/principles/principles/.git/worktrees/*.path
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.7831959Z includeif.gitdir:/github/workspace/.git.path
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.7832627Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.7834390Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/principles/principles/.git.path
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.7835639Z /home/runner/work/_temp/git-credentials-ce90c0b6-ea74-4330-a49d-a0a9082de7bc.config
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.7849274Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/principles/principles/.git.path \/home\/runner\/work\/_temp\/git\-credentials\-ce90c0b6\-ea74\-4330\-a49d\-a0a9082de7bc\.config
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.7900064Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/principles/principles/.git/worktrees/*.path
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.7939776Z /home/runner/work/_temp/git-credentials-ce90c0b6-ea74-4330-a49d-a0a9082de7bc.config
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.7950103Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/principles/principles/.git/worktrees/*.path \/home\/runner\/work\/_temp\/git\-credentials\-ce90c0b6\-ea74\-4330\-a49d\-a0a9082de7bc\.config
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.7995140Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.8029295Z /github/runner_temp/git-credentials-ce90c0b6-ea74-4330-a49d-a0a9082de7bc.config
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.8038614Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path \/github\/runner_temp\/git\-credentials\-ce90c0b6\-ea74\-4330\-a49d\-a0a9082de7bc\.config
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.8085775Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.8120825Z /github/runner_temp/git-credentials-ce90c0b6-ea74-4330-a49d-a0a9082de7bc.config
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.8131469Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path \/github\/runner_temp\/git\-credentials\-ce90c0b6\-ea74\-4330\-a49d\-a0a9082de7bc\.config
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.8176475Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.8420516Z Removing credentials config '/home/runner/work/_temp/git-credentials-ce90c0b6-ea74-4330-a49d-a0a9082de7bc.config'
+Test shared runtime & adapters	Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:53:51.8428677Z ##[endgroup]
+Test shared runtime & adapters	Setup Node.js	﻿2026-10-29T16:53:51.8690765Z ##[group]Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+Test shared runtime & adapters	Setup Node.js	2026-10-29T16:53:51.8691180Z with:
+Test shared runtime & adapters	Setup Node.js	2026-10-29T16:53:51.8691386Z   node-version: 22
+Test shared runtime & adapters	Setup Node.js	2026-10-29T16:53:51.8691593Z   cache: npm
+Test shared runtime & adapters	Setup Node.js	2026-10-29T16:53:51.8691794Z   check-latest: false
+Test shared runtime & adapters	Setup Node.js	2026-10-29T16:53:51.8694143Z   token: ***
+Test shared runtime & adapters	Setup Node.js	2026-10-29T16:53:51.8694375Z   package-manager-cache: true
+Test shared runtime & adapters	Setup Node.js	2026-10-29T16:53:51.8694654Z ##[endgroup]
+Test shared runtime & adapters	Setup Node.js	2026-10-29T16:53:52.0016975Z Found in cache @ /opt/hostedtoolcache/node/22.23.4/x64
+Test shared runtime & adapters	Setup Node.js	2026-10-29T16:53:52.0020560Z ##[group]Environment details
+Test shared runtime & adapters	Setup Node.js	2026-10-29T16:53:52.3832890Z node: v22.23.4
+Test shared runtime & adapters	Setup Node.js	2026-10-29T16:53:52.3833203Z npm: 10.9.9
+Test shared runtime & adapters	Setup Node.js	2026-10-29T16:53:52.3833401Z yarn: 1.22.22
+Test shared runtime & adapters	Setup Node.js	2026-10-29T16:53:52.3834129Z ##[endgroup]
+Test shared runtime & adapters	Setup Node.js	2026-10-29T16:53:52.3852362Z [command]/opt/hostedtoolcache/node/22.23.4/x64/bin/npm config get cache
+Test shared runtime & adapters	Setup Node.js	2026-10-29T16:53:52.5010612Z /home/runner/.npm
+Test shared runtime & adapters	Setup Node.js	2026-10-29T16:53:52.6085499Z Cache hit for: node-cache-Linux-x64-npm-0f21b534452146684fa38231ffa2e990563f6459c97132accd11f3f1144ca6ed
+Test shared runtime & adapters	Setup Node.js	2026-10-29T16:53:53.3777286Z Received 161310834 of 161310834 (100.0%), 218.8 MBs/sec
+Test shared runtime & adapters	Setup Node.js	2026-10-29T16:53:53.3778626Z Cache Size: ~154 MB (161310834 B)
+Test shared runtime & adapters	Setup Node.js	2026-10-29T16:53:53.3893363Z [command]/usr/bin/tar -xf /home/runner/work/_temp/9ad7078d-0c30-4b4f-b717-1f71a7e048fa/cache.tzst -P -C /home/runner/work/principles/principles --use-compress-program unzstd
+Test shared runtime & adapters	Setup Node.js	2026-10-29T16:53:53.7727284Z Cache restored successfully
+Test shared runtime & adapters	Setup Node.js	2026-10-29T16:53:53.7810060Z Cache restored from key: node-cache-Linux-x64-npm-0f21b534452146684fa38231ffa2e990563f6459c97132accd11f3f1144ca6ed
+Test shared runtime & adapters	Install dependencies	﻿2026-10-29T16:53:53.8025866Z ##[group]Run npm ci --ignore-scripts
+Test shared runtime & adapters	Install dependencies	2026-10-29T16:53:53.8026317Z [36;1mnpm ci --ignore-scripts[0m
+Test shared runtime & adapters	Install dependencies	2026-10-29T16:53:53.8059557Z shell: /usr/bin/bash -e {0}
+Test shared runtime & adapters	Install dependencies	2026-10-29T16:53:53.8059863Z ##[endgroup]
+Test shared runtime & adapters	Install dependencies	2026-10-29T16:53:58.1880085Z npm warn deprecated @types/tar@7.0.87: This is a stub types definition. tar provides its own type definitions, so you do not need this installed.
+Test shared runtime & adapters	Install dependencies	2026-10-29T16:53:58.2277023Z npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.
+Test shared runtime & adapters	Install dependencies	2026-10-29T16:53:58.3109941Z npm warn deprecated rimraf@2.6.3: Rimraf versions prior to v4 are no longer supported
+Test shared runtime & adapters	Install dependencies	2026-10-29T16:53:58.5014896Z npm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+Test shared runtime & adapters	Install dependencies	2026-10-29T16:53:58.5063382Z npm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+Test shared runtime & adapters	Install dependencies	2026-10-29T16:53:59.2375456Z npm warn deprecated boolean@3.2.0: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
+Test shared runtime & adapters	Install dependencies	2026-10-29T16:53:59.8048223Z npm warn deprecated node-domexception@1.0.0: Use your platform's native DOMException instead
+Test shared runtime & adapters	Install dependencies	2026-10-29T16:54:06.7715068Z 
+Test shared runtime & adapters	Install dependencies	2026-10-29T16:54:06.7715799Z added 952 packages, and audited 964 packages in 13s
+Test shared runtime & adapters	Install dependencies	2026-10-29T16:54:06.7716296Z 
+Test shared runtime & adapters	Install dependencies	2026-10-29T16:54:06.7716792Z 196 packages are looking for funding
+Test shared runtime & adapters	Install dependencies	2026-10-29T16:54:06.8190927Z   run `npm fund` for details
+Test shared runtime & adapters	Install dependencies	2026-10-29T16:54:06.8191271Z 
+Test shared runtime & adapters	Install dependencies	2026-10-29T16:54:06.8191744Z 16 vulnerabilities (6 moderate, 9 high, 1 critical)
+Test shared runtime & adapters	Install dependencies	2026-10-29T16:54:06.8192188Z 
+Test shared runtime & adapters	Install dependencies	2026-10-29T16:54:06.8192553Z To address issues that do not require attention, run:
+Test shared runtime & adapters	Install dependencies	2026-10-29T16:54:06.8193121Z   npm audit fix
+Test shared runtime & adapters	Install dependencies	2026-10-29T16:54:06.8193342Z 
+Test shared runtime & adapters	Install dependencies	2026-10-29T16:54:06.8193617Z To address all issues possible, run:
+Test shared runtime & adapters	Install dependencies	2026-10-29T16:54:06.8194119Z   npm audit fix --force
+Test shared runtime & adapters	Install dependencies	2026-10-29T16:54:06.8194366Z 
+Test shared runtime & adapters	Install dependencies	2026-10-29T16:54:06.8194711Z Some issues need review, and may require choosing
+Test shared runtime & adapters	Install dependencies	2026-10-29T16:54:06.8195287Z a different dependency.
+Test shared runtime & adapters	Install dependencies	2026-10-29T16:54:06.8195543Z 
+Test shared runtime & adapters	Install dependencies	2026-10-29T16:54:06.8195748Z Run `npm audit` for details.
+Test shared runtime & adapters	Rebuild native modules (better-sqlite3)	﻿2026-10-29T16:54:06.9443935Z ##[group]Run npm rebuild better-sqlite3
+Test shared runtime & adapters	Rebuild native modules (better-sqlite3)	2026-10-29T16:54:06.9444328Z [36;1mnpm rebuild better-sqlite3[0m
+Test shared runtime & adapters	Rebuild native modules (better-sqlite3)	2026-10-29T16:54:06.9470486Z shell: /usr/bin/bash -e {0}
+Test shared runtime & adapters	Rebuild native modules (better-sqlite3)	2026-10-29T16:54:06.9470776Z ##[endgroup]
+Test shared runtime & adapters	Rebuild native modules (better-sqlite3)	2026-10-29T16:54:11.0635962Z rebuilt dependencies successfully
+Test shared runtime & adapters	Build dependencies	﻿2026-10-29T16:54:11.0786371Z ##[group]Run npm run build --workspace=@principles/core
+Test shared runtime & adapters	Build dependencies	2026-10-29T16:54:11.0786869Z [36;1mnpm run build --workspace=@principles/core[0m
+Test shared runtime & adapters	Build dependencies	2026-10-29T16:54:11.0787292Z [36;1mnpm run build --workspace=@principles/install-layout[0m
+Test shared runtime & adapters	Build dependencies	2026-10-29T16:54:11.0787727Z [36;1mnpm run build --workspace=@principles/host-runtime[0m
+Test shared runtime & adapters	Build dependencies	2026-10-29T16:54:11.0788119Z [36;1mnpm run build --workspace=principles-disciple[0m
+Test shared runtime & adapters	Build dependencies	2026-10-29T16:54:11.0808026Z shell: /usr/bin/bash -e {0}
+Test shared runtime & adapters	Build dependencies	2026-10-29T16:54:11.0808296Z ##[endgroup]
+Test shared runtime & adapters	Build dependencies	2026-10-29T16:54:11.1987891Z 
+Test shared runtime & adapters	Build dependencies	2026-10-29T16:54:11.1988405Z > @principles/core@1.297.4 build
+Test shared runtime & adapters	Build dependencies	2026-10-29T16:54:11.1989744Z > npm run clean && tsc -p tsconfig.build.json && node ../../scripts/build/check-dist-hygiene.mjs
+Test shared runtime & adapters	Build dependencies	2026-10-29T16:54:11.1990245Z 
+Test shared runtime & adapters	Build dependencies	2026-10-29T16:54:11.3306518Z 
+Test shared runtime & adapters	Build dependencies	2026-10-29T16:54:11.3307168Z > @principles/core@1.297.4 clean
+Test shared runtime & adapters	Build dependencies	2026-10-29T16:54:11.3307704Z > node ../../scripts/build/clean-dist.mjs
+Test shared runtime & adapters	Build dependencies	2026-10-29T16:54:11.3307981Z 
+Test shared runtime & adapters	Build dependencies	2026-10-29T16:54:14.6426728Z [check-dist-hygiene] OK: dist contains no compiled test artifacts.
+Test shared runtime & adapters	Build dependencies	2026-10-29T16:54:14.7688679Z 
+Test shared runtime & adapters	Build dependencies	2026-10-29T16:54:14.7689689Z > @principles/install-layout@0.4.0 build
+Test shared runtime & adapters	Build dependencies	2026-10-29T16:54:14.7690953Z > npm run clean && tsc -p tsconfig.build.json && node ../../scripts/build/check-dist-hygiene.mjs
+Test shared runtime & adapters	Build dependencies	2026-10-29T16:54:14.7691738Z 
+Test shared runtime & adapters	Build dependencies	2026-10-29T16:54:14.8942655Z 
+Test shared runtime & adapters	Build dependencies	2026-10-29T16:54:14.8943600Z > @principles/install-layout@0.4.0 clean
+Test shared runtime & adapters	Build dependencies	2026-10-29T16:54:14.8944276Z > node ../../scripts/build/clean-dist.mjs
+Test shared runtime & adapters	Build dependencies	2026-10-29T16:54:14.8944551Z 
+Test shared runtime & adapters	Build dependencies	2026-10-29T16:54:15.1061489Z [check-dist-hygiene] OK: dist contains no compiled test artifacts.
+Test shared runtime & adapters	Build dependencies	2026-10-29T16:54:15.2295945Z 
+Test shared runtime & adapters	Build dependencies	2026-10-29T16:54:15.2296740Z > @principles/host-runtime@0.14.1 build
+Test shared runtime & adapters	Build dependencies	2026-10-29T16:54:15.2297357Z > tsc
+Test shared runtime & adapters	Build dependencies	2026-10-29T16:54:15.2297514Z 
+Test shared runtime & adapters	Build dependencies	2026-10-29T16:54:16.0607454Z 
+Test shared runtime & adapters	Build dependencies	2026-10-29T16:54:16.0608256Z > principles-disciple@2.2.6 build
+Test shared runtime & adapters	Build dependencies	2026-10-29T16:54:16.0611386Z > tsc -p tsconfig.build.json && node ../../scripts/build/check-dist-hygiene.mjs
+Test shared runtime & adapters	Build dependencies	2026-10-29T16:54:16.0612368Z 
+Test shared runtime & adapters	Build dependencies	2026-10-29T16:54:16.9068054Z [check-dist-hygiene] OK: dist contains no compiled test artifacts.
+Test shared runtime & adapters	Test scripts	﻿2026-10-29T16:54:16.9202755Z ##[group]Run npm run test:scripts
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:16.9203098Z [36;1mnpm run test:scripts[0m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:16.9223132Z shell: /usr/bin/bash -e {0}
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:16.9223408Z ##[endgroup]
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:17.0163128Z 
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:17.0163889Z > principles-disciple-monorepo@2.4.0 test:scripts
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:17.0164438Z > cd scripts && vitest run
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:17.0164631Z 
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:17.3372711Z 
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:17.3376376Z [1m[30m[46m RUN [49m[39m[22m [36mv5.0.0 [39m[90m/home/runner/work/principles/principles/scripts[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:17.3377045Z 
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:17.3852450Z [temp-lifecycle] .pd-test-temp: nothing to do
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:17.3853758Z [temp-lifecycle] TMPDIR -> /home/runner/work/principles/.pd-test-temp/vitest-20261029-165417-e78c1d
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:18.5131857Z  [32m✓[39m __tests__/principle-learning-lab-challenge-actor-transport.test.ts [2m([22m[2m36 tests[22m[2m)[22m[33m 388[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:18.8422144Z  [32m✓[39m __tests__/principle-learning-lab-challenge-stager.test.ts [2m([22m[2m58 tests[22m[2m)[22m[33m 715[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:19.7305984Z  [32m✓[39m __tests__/publish-recovery.test.ts [2m([22m[2m36 tests[22m[2m)[22m[33m 992[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:20.2485872Z  [32m✓[39m __tests__/principle-learning-lab-challenge-examiner.test.ts [2m([22m[2m41 tests[22m[2m)[22m[32m 168[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:22.6768716Z  [32m✓[39m __tests__/principle-learning-lab-budget-auth.test.ts [2m([22m[2m28 tests[22m[2m)[22m[33m 2080[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:22.6771020Z    [32m✓[39m P1-02: real-model transport authorization gate (zero HTTP on refusal) [2m(8)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:22.6777803Z      [33m[2m✓[22m[39m createAuthorizedPiTransport refuses fetch/eventEmitter injection (no bypass path) and builds a budget-wired adapter when valid[33m 1997[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:22.8198345Z  [32m✓[39m __tests__/prr-freeze-readonly.test.ts [2m([22m[2m53 tests[22m[2m)[22m[32m 151[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:23.0935487Z  [32m✓[39m __tests__/principle-learning-lab-host-actor.test.ts [2m([22m[2m26 tests[22m[2m)[22m[32m 137[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:23.1443547Z  [32m✓[39m __tests__/principle-learning-lab-challenge-ceb001.test.ts [2m([22m[2m52 tests[22m[2m)[22m[32m 115[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:23.7832801Z fatal: ambiguous argument 'no-such-ref...HEAD': unknown revision or path not in the working tree.
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:23.7840986Z Use '--' to separate paths from revisions, like this:
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:23.7842165Z 'git <command> [<revision>...] -- [<file>...]'
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:23.8147223Z  [32m✓[39m __tests__/error-context.test.ts [2m([22m[2m54 tests[22m[2m)[22m[33m 493[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:24.4378105Z  [32m✓[39m __tests__/principle-learning-lab-actor.test.ts [2m([22m[2m25 tests[22m[2m)[22m[32m 71[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:24.5533414Z  [32m✓[39m __tests__/principle-learning-lab-probe-e2e.test.ts [2m([22m[2m18 tests[22m[2m)[22m[33m 479[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:24.6351883Z [2m4:54:24 PM[22m [33m[1m[vite][22m[39m [33m[2m(ssr)[22m[39m [33mwarning: Invalid file URL: must not contain hostname file://${libpath.replace(/g,%20%22/%22)%7D[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:24.6380156Z   Plugin: [35mbuiltin:vite-resolve[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:25.3511395Z  [32m✓[39m __tests__/principle-learning-lab.test.ts [2m([22m[2m51 tests[22m[2m)[22m[33m 557[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:26.9256465Z  [32m✓[39m __tests__/principle-learning-lab-challenge-1b.test.ts [2m([22m[2m28 tests[22m[2m)[22m[33m 1356[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:26.9271605Z    [32m✓[39m offline golden path (CEB-001, 12 cases × 3 arms × 1 rep, stub) [2m(7)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:26.9280470Z      [33m[2m✓[22m[39m determinism: two fresh copies produce byte-identical adjudication ledgers[33m 353[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:26.9281869Z      [33m[2m✓[22m[39m the run CLI executes the golden path on a copy end-to-end (subprocess, exit 0)[33m 340[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:27.3085276Z  [32m✓[39m __tests__/principle-learning-lab-probe-authorization.test.ts [2m([22m[2m22 tests[22m[2m)[22m[32m 157[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:31.7011164Z  [32m✓[39m __tests__/principle-learning-lab-challenge-cli-f1.test.ts [2m([22m[2m30 tests[22m[2m)[22m[33m 4195[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:31.7061451Z    [32m✓[39m CLI Stage R F1 entry — dry-run and refusal paths (zero network by construction) [2m(9)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:31.7065093Z      [33m[2m✓[22m[39m E3: wrong execution mode (F1 declared, F2-approved record) refuses; F2 via CLI is refused outright; missing --now refuses[33m 430[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:31.7067279Z      [33m[2m✓[22m[39m E7: the CLI end-to-end stub golden path still passes after the F1 extension (subprocess, exit 0)[33m 341[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:31.7068805Z    [32m✓[39m E. request-timeout authorization binding [2m(5)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:31.7070966Z      [33m[2m✓[22m[39m E3: invalid timeout values (non-integer, out-of-range) refuse at CLI argument validation[33m 309[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:31.7072476Z    [32m✓[39m F. per-attempt request-cap authorization binding [2m(7)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:31.7074415Z      [33m[2m✓[22m[39m F7: invalid --repetitions values refuse at CLI argument validation (NaN / decimal / zero / negative / empty list)[33m 558[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:33.3498095Z  [32m✓[39m __tests__/principle-learning-lab-challenge-behavior-report.test.ts [2m([22m[2m17 tests[22m[2m)[22m[33m 1385[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:33.6174417Z  [32m✓[39m __tests__/pipeline-evolution-evidence.test.ts [2m([22m[2m24 tests[22m[2m | [22m[33m1 skipped[39m[2m)[22m[33m 8926[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:33.6176523Z    [32m✓[39m missing evidence stays non-PASS (缺失 evidence 时不能 PASS) [2m(3)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:33.6178243Z      [33m[2m✓[22m[39m a session with no pain yields NOT_CONFIRMED capture and UNKNOWN metrics[33m 476[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:33.6180422Z      [33m[2m✓[22m[39m rejects an invalid manifest loudly (rc-3)[33m 437[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:33.6182016Z      [33m[2m✓[22m[39m declares a missing painId as a binding note instead of guessing[33m 474[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:33.6183368Z    [32m✓[39m truncation marks (截断数据必须标记) [2m(2)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:33.6184849Z      [33m[2m✓[22m[39m marks truncated tool calls and adversarial events with returned/total[33m 487[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:33.6186609Z      [33m[2m✓[22m[39m marks artifact export capacity truncation (never silently drops)[33m 518[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:33.6188035Z    [32m✓[39m deterministic reports (同一 JSON 生成相同报告) [2m(2)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:33.6189725Z      [33m[2m✓[22m[39m two package builds produce byte-identical derived files[33m 603[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:33.6191393Z      [33m[2m✓[22m[39m renderOwnerReview is a pure function of the package data[33m 501[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:33.6193037Z    [32m✓[39m PRI-703 Phase 3: behavior observation evidence integrity (CONFIRMED without evidence is invalid) [2m(10)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:33.6194689Z      [33m[2m✓[22m[39m rejects a manifest whose behaviorObservation claims CONFIRMED with no evidence entries (rc-3 fail loud)[33m 379[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:33.6195787Z      [33m[2m✓[22m[39m rejects CONFIRMED/IMPROVED whose evidence entries carry no detail/source string[33m 322[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:33.6196805Z      [33m[2m✓[22m[39m accepts an evidence entry with an EMPTY detail but a valid source (评审修正: ?? 不回退空串)[33m 365[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:33.6197711Z      [33m[2m✓[22m[39m rejects an evidence entry whose detail AND source are both blank[33m 418[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:33.6198564Z      [33m[2m✓[22m[39m accepts IMPROVED with a real evidence entry (new outcome vocabulary)[33m 606[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:33.6200634Z      [33m[2m✓[22m[39m normalizes the Episode-001 field-name drift (result → status)[33m 449[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:33.6202683Z      [33m[2m✓[22m[39m R4: negative outcomes demand evidence — NO_IMPROVEMENT with no evidence is rejected[33m 429[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:33.6204513Z      [33m[2m✓[22m[39m R4: REGRESSION with a null evidence element is rejected (used to crash the builder)[33m 505[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:33.6206114Z      [33m[2m✓[22m[39m R4: INCONCLUSIVE without evidence stays accepted (it MEANS insufficient evidence)[33m 449[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:33.6207911Z      [33m[2m✓[22m[39m with an activation present: CONFIRMED derives IMPROVED, and metrics map IMPROVED→PASS / NO_IMPROVEMENT→FAIL[33m 671[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:33.9556571Z  [32m✓[39m __tests__/principle-learning-lab-challenge-isolation-probe.test.ts [2m([22m[2m16 tests[22m[2m)[22m[32m 244[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:34.3181690Z Switched to a new branch 'agent-a'
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:34.3375052Z Switched to branch 'main'
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:34.3428343Z Switched to a new branch 'agent-b'
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:34.4142271Z Switched to a new branch 'agent-a'
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:34.4335258Z Switched to branch 'main'
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:34.4399707Z Switched to a new branch 'agent-b'
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:34.4980507Z Switched to a new branch 'agent-a'
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:34.5168104Z Switched to branch 'main'
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:34.5206998Z Switched to a new branch 'agent-b'
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:34.5970713Z Switched to a new branch 'agent-a'
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:34.6184325Z Switched to branch 'main'
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:34.6233607Z Switched to a new branch 'agent-b'
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:34.6669313Z  [32m✓[39m __tests__/error-records.test.ts [2m([22m[2m26 tests[22m[2m)[22m[33m 465[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:35.1748214Z  [32m✓[39m __tests__/principle-learning-lab-stage-r-f1-report.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 274[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:35.4434557Z  [32m✓[39m __tests__/linear-sync.test.mjs [2m([22m[2m33 tests[22m[2m)[22m[32m 33[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:35.6611576Z  [32m✓[39m __tests__/learning-scenario-contract.test.mjs [2m([22m[2m42 tests[22m[2m)[22m[32m 29[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:35.8737514Z  [32m✓[39m __tests__/check-runtime-contract.test.ts [2m([22m[2m56 tests[22m[2m)[22m[32m 22[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.0868866Z  [32m✓[39m __tests__/release-workflows.test.ts [2m([22m[2m32 tests[22m[2m)[22m[32m 59[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.4491090Z  [32m✓[39m __tests__/principle-learning-lab-challenge-skeleton.test.ts [2m([22m[2m26 tests[22m[2m)[22m[32m 137[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6556360Z [90mstdout[2m | __tests__/check-satellite-purity.test.ts[2m > [22m[2massertSatellitePurity[2m > [22m[2mdoes not throw on the clean metafile
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6557615Z [22m[39m[satellite-purity] OK: Forbidden dependency count: 0 (governance-audit.js: 0, rulehost-evidence.js: 0)
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6558297Z Bundle dependency budget PASS (development)
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6558541Z 
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6558628Z artifact:
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6558855Z governance-audit.js
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6559312Z 
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6559489Z size:
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6560000Z 1000 (budget max 866390, baseline 693112)
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6560388Z 
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6560626Z forbidden dependencies:
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6561055Z 0
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6561236Z 
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6561384Z artifact:
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6561786Z rulehost-evidence.js
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6562038Z 
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6562197Z size:
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6562689Z 1000 (budget max 553489, baseline 442791)
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6563059Z 
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6563276Z forbidden dependencies:
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6563692Z 0
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6563871Z 
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6607729Z [90mstdout[2m | __tests__/check-satellite-purity.test.ts[2m > [22m[2mcollectSizeBudgetViolations (PRI-919)[2m > [22m[2mmission Case 4: bundle.js size is never judged (rules constrain satellites only)
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6611124Z [22m[39m[satellite-purity] OK: Forbidden dependency count: 0 (governance-audit.js: 0, rulehost-evidence.js: 0)
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6612291Z Bundle dependency budget PASS (production)
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6612698Z 
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6612874Z artifact:
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6613270Z governance-audit.js
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6613526Z 
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6613675Z size:
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6614171Z 70786 (budget max 77865, baseline 70786)
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6614535Z 
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6614745Z forbidden dependencies:
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6615159Z 0
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6615361Z 
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6615514Z artifact:
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6615929Z rulehost-evidence.js
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6616176Z 
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6616330Z size:
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6616784Z 60244 (budget max 66268, baseline 60244)
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6617102Z 
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6617284Z forbidden dependencies:
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6617669Z 0
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.6617843Z 
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.7446541Z [satellite-purity] FAIL: LLM SDK dependencies found inside satellite bundles (5 inputs).
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.7448036Z Satellites (governance-audit / rulehost-evidence) must not reach the LLM graph.
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.7451834Z Root cause pattern: a VALUE import of the @principles/core/runtime-v2 barrel on a
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.7453341Z satellite path re-pulls the whole transitive graph — import the specific leaf
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.7454508Z subpath instead (e.g. @principles/core/runtime-v2/trajectory-schema). See OPT-002.
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.7455524Z   - @earendil-works/pi-ai: 1 inputs in [dist/governance-audit.js]
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.7456424Z       e.g. ../../node_modules/@earendil-works/pi-ai/dist/providers/json
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.7457240Z   - @anthropic-ai: 1 inputs in [dist/governance-audit.js]
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.7457985Z       e.g. ../../node_modules/@anthropic-ai/sdk/index.mjs
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.7458668Z   - openai: 1 inputs in [dist/governance-audit.js]
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.7459578Z       e.g. ../../node_modules/openai/index.mjs
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.7460320Z   - @google/genai: 1 inputs in [dist/governance-audit.js]
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.7461289Z       e.g. ../../node_modules/@google/genai/node_modules/undici/index.js
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.7461913Z   - undici: 1 inputs in [dist/governance-audit.js]
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.7462343Z       e.g. ../../node_modules/undici/lib/core/request.js
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.7839298Z Usage: node scripts/build/check-satellite-purity.mjs --metafile <esbuild-metafile.json> [--production]
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8905062Z [satellite-purity] FAIL: LLM SDK dependencies found inside satellite bundles (1 inputs).
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8906409Z Satellites (governance-audit / rulehost-evidence) must not reach the LLM graph.
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8907939Z Root cause pattern: a VALUE import of the @principles/core/runtime-v2 barrel on a
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8910114Z satellite path re-pulls the whole transitive graph — import the specific leaf
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8911093Z subpath instead (e.g. @principles/core/runtime-v2/trajectory-schema). See OPT-002.
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8912005Z   - openai: 1 inputs in [dist/governance-audit.js]
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8912823Z       e.g. ../../node_modules/openai/index.mjs
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8913194Z 
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8913707Z [satellite-purity] FAIL: size budget exceeded in dist/governance-audit.js
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8914238Z 
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8914386Z bundle:
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8914742Z governance-audit.js
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8914976Z 
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8915123Z violated rule:
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8915504Z SIZE_BUDGET_EXCEEDED
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8915728Z 
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8915869Z mode:
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8916190Z production
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8916344Z 
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8916437Z baseline:
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8916626Z 70786
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8916733Z 
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8916812Z max:
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8916998Z 77865
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8917107Z 
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8917195Z current:
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8917641Z 212358
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8917750Z 
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8917969Z size delta:
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8918185Z +141572 (+200.0%)
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8918304Z 
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8918484Z introduced by (largest inputs in the bundle):
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8918848Z   120000 ../../node_modules/openai/index.mjs
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8920300Z 
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8920625Z If the growth is legitimate, rebaseline SIZE_BUDGETS in this file in the
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8921238Z same PR so the jump is review-visible (docs/release/bundle-budget-audit.md).
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:36.8955669Z  [32m✓[39m __tests__/check-satellite-purity.test.ts [2m([22m[2m30 tests[22m[2m)[22m[32m 250[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:38.6981269Z  [32m✓[39m __tests__/workspace-lifecycle.test.ts [2m([22m[2m26 tests[22m[2m)[22m[33m 4533[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:38.6983010Z    [32m✓[39m workspace-cleanup (integration) [2m(6)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:38.6984591Z      [33m[2m✓[22m[39m dry-run lists evidence-backed candidates and mutates nothing[33m 416[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:38.6986518Z      [33m[2m✓[22m[39m apply removes the worktree and the task branch, then prunes[33m 587[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:38.6988195Z      [33m[2m✓[22m[39m default grace period keeps a freshly merged worktree alive[33m 648[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:38.6990190Z      [33m[2m✓[22m[39m refuses a dirty worktree at apply time and preserves the unknown work[33m 494[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:38.6991999Z      [33m[2m✓[22m[39m skips a clean but unmerged worktree (no completion evidence)[33m 335[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:38.6994060Z      [33m[2m✓[22m[39m apply still cleans its target but SKIPS the global prune while a sibling worktree is unreadable (PRI-712)[33m 852[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:38.6995155Z    [32m✓[39m workspace-cleanup prune safety (PRI-712) [2m(1)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:38.6995895Z      [33m[2m✓[22m[39m runs the global prune when every live worktree probes clean[33m 373[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:38.6997107Z    [32m✓[39m workspace-health (integration) [2m(1)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:38.6998546Z      [33m[2m✓[22m[39m reports primary OK on clean main and classifies merged vs unmerged tasks[33m 494[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:38.9627890Z  [32m✓[39m __tests__/prr-real-pi.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 29[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:39.3376029Z  [32m✓[39m __tests__/prr-ac-lab.test.ts [2m([22m[2m36 tests[22m[2m)[22m[33m 2269[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:39.3381434Z    [32m✓[39m CLI end-to-end rehearsal [2m(5)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:39.3390025Z      [33m[2m✓[22m[39m exits 0 with gate PASS and a machine-readable result[33m 691[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:39.3440684Z      [33m[2m✓[22m[39m byte-identical determinism across two runs (no timestamps, no randomness)[33m 1527[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:40.7220943Z  [32m✓[39m __tests__/worktree-readiness.test.ts [2m([22m[2m23 tests[22m[2m)[22m[33m 1200[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:41.0926264Z  [32m✓[39m __tests__/principle-learning-lab-challenge-stageg.test.ts [2m([22m[2m30 tests[22m[2m)[22m[32m 201[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:41.1722473Z  [32m✓[39m __tests__/impact.test.ts [2m([22m[2m26 tests[22m[2m)[22m[33m 2058[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:41.9700985Z [prr-real] REFUSED — trusted-evidence reconciliation FAILED (1):
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:41.9760240Z   - resolver protocol digest does not match the submitted protocol (a frozen value, the prereg body, or the studyId changed after approval)
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:41.9790019Z [prr-real] No transport was constructed; zero model calls, zero cost.
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:42.0802570Z [prr-real] REFUSED — trusted-evidence reconciliation FAILED (1):
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:42.0803500Z   - resolver frozen commit does not match the freeze record
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:42.0804185Z [prr-real] No transport was constructed; zero model calls, zero cost.
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:42.1898552Z [prr-real] REFUSED — trusted-evidence reconciliation FAILED (1):
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:42.1910451Z   - resolver dataset hash does not match the loaded dataset
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:42.1911971Z [prr-real] No transport was constructed; zero model calls, zero cost.
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:42.2085901Z  [32m✓[39m __tests__/release-contracts.test.ts [2m([22m[2m23 tests[22m[2m)[22m[33m 23166[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:42.2087666Z    [32m✓[39m guard: normal PR release-intent contract [2m(15)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:42.2089831Z      [33m[2m✓[22m[39m T12/C4-2: console payload change without installer intent fails; with it passes[33m 479[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:42.2092230Z      [33m[2m✓[22m[39m C4-direct: console dev-config change + official empty changeset passes; undeclared still fails (PRI-884)[33m 412[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:42.2094668Z      [33m[2m✓[22m[39m T13/C4-3: plugin in the final plan via a sibling changeset requires the installer[33m 501[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:42.2096348Z    [32m✓[39m version-pr: Version Packages PR contract [2m(2)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:42.2098395Z      [33m[2m✓[22m[39m T2/T3/T10/T14/T16/T5/T15: materialization reproduces; independent versions; containment; mirror; ghost untouched[33m 2688[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:42.2101003Z      [33m[2m✓[22m[39m T4: internal dependency major + manual range update + lockfile materialization + fresh npm ci[33m 1619[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:42.2102591Z    [32m✓[39m cohort: release cohort resolution [2m(5)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:42.2104317Z      [33m[2m✓[22m[39m T21/T24: main advancing past a cohort does not change the release SHA; no cohort is a clean no-op[33m 3406[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:42.2106489Z      [33m[2m✓[22m[39m T21-squash: a squash-merged Version PR (one parent) is still the cohort[33m 2267[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:42.2108343Z      [33m[2m✓[22m[39m T21-detached: the auto-scan resolves a cohort from a detached SHA checkout[33m 1569[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:42.2110461Z      [33m[2m✓[22m[39m T24-alarm: main carrying unpublished versions with no cohort is a red chain break[33m 526[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:42.2112350Z      [33m[2m✓[22m[39m T24-registry: a registry failure is never read as absent (SPEC §18.3)[33m 6281[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:42.2113989Z    [32m✓[39m err131: changeset version is install-free (T26) [2m(1)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:42.2115440Z      [33m[2m✓[22m[39m mutates no lockfile and creates no node_modules[33m 364[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:42.3068557Z [prr-real] REFUSED — trusted-evidence reconciliation FAILED (1):
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:42.3071088Z   - resolver decisionRef (owner-decision-1) does not match the freeze record (other-decision)
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:42.3072413Z [prr-real] No transport was constructed; zero model calls, zero cost.
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:42.4026550Z [prr-real] REFUSED — trusted-evidence reconciliation FAILED (2):
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:42.4027796Z   - resolver did not verify the official pricing schedule
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:42.4029707Z   - resolver pricing reference does not match the frozen costBasisRef
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:42.4031145Z [prr-real] No transport was constructed; zero model calls, zero cost.
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:42.5071215Z [prr-real] REFUSED — --transport pi requires --evidence-resolver <module>: an INDEPENDENT trusted Owner-decision resolver. The authorization file alone cannot vouch for itself, and the O-05 production resolver is not yet available — the real execution path is NOT ready without it.
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:42.5204060Z  [32m✓[39m __tests__/prr-real-cli.test.ts [2m([22m[2m8 tests[22m[2m)[22m[33m 1188[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:42.5206026Z    [32m✓[39m CLI authorization reconciliation (real CLI, real reconciliation stage) [2m(7)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:42.5208019Z      [33m[2m✓[22m[39m a matching resolver completes the authorization chain and the mock study runs[33m 538[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:44.0890896Z  [32m✓[39m __tests__/workspace-lease.test.ts [2m([22m[2m16 tests[22m[2m)[22m[33m 2846[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:44.0950224Z    [32m✓[39m workspace-lease CLI [2m(10)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:44.0952377Z      [33m[2m✓[22m[39m status reports none → active → expired over the lease lifecycle[33m 350[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:44.6203431Z  [32m✓[39m __tests__/workspace-residue-cleanup.test.ts [2m([22m[2m19 tests[22m[2m)[22m[33m 2217[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:44.6205361Z    [32m✓[39m half-deleted shell discovery (the shape a failed removal leaves) [2m(7)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:44.6207140Z      [33m[2m✓[22m[39m is deletable ONLY through the same acked gate, and the sweep never schedules it[33m 566[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:47.4191588Z  [32m✓[39m __tests__/git-mutation-lock.test.ts [2m([22m[2m12 tests[22m[2m)[22m[33m 3142[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:47.4193116Z    [32m✓[39m repo mutation mutex [2m(12)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:47.4194815Z      [33m[2m✓[22m[39m lets exactly one process hold it, and the loser fails loud with the holder identity[33m 3057[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:47.6158670Z  [32m✓[39m __tests__/principle-learning-lab-challenge-amd.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 23[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:50.8033801Z  [32m✓[39m __tests__/release-finalize-tag.test.ts [2m([22m[2m11 tests[22m[2m)[22m[33m 8082[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:50.8035786Z    [32m✓[39m finalize-tag-reconcile CLI on fixture repos (PRI-923) [2m(7)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:50.8037678Z      [33m[2m✓[22m[39m tag sits elsewhere than the registry publisher commit: skip claim unproven -> fail loud[33m 351[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:50.8040006Z      [33m[2m✓[22m[39m foreign publisher commit (not an ancestor) still refuses to move the tag[33m 320[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:54:50.8041808Z      [33m[2m✓[22m[39m registry failure is never read as a prior release (SPEC §18.3)[33m 6321[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:03.1707178Z  [32m✓[39m __tests__/principle-learning-lab-ceb002.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 268[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:04.5397922Z  [32m✓[39m __tests__/prr-linear-resolver.test.ts [2m([22m[2m18 tests[22m[2m)[22m[33m 1111[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:04.5531206Z    [32m✓[39m linear-owner-resolver (stable-id identity binding, round 8) [2m(18)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:04.5601518Z      [33m[2m✓[22m[39m every authoritative status is usable and statuses keep deriving from the schema[33m 1075[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:07.2743596Z  [32m✓[39m __tests__/worktree-claim.test.ts [2m([22m[2m13 tests[22m[2m)[22m[33m 2495[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:07.2745261Z    [32m✓[39m writer claim (git-11) [2m(7)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:07.2746821Z      [33m[2m✓[22m[39m renews for the SAME writer across a different process (pid is not the identity)[33m 330[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:07.2748681Z      [33m[2m✓[22m[39m refuses a DIFFERENT writer on an occupied slot[33m 323[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:07.2750171Z    [32m✓[39m writer release (git-11) [2m(2)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:07.2751480Z      [33m[2m✓[22m[39m releases both halves and is idempotent[33m 421[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:07.2752701Z    [32m✓[39m STALE_LOCK classification (SPEC §10.3) [2m(3)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:07.2754173Z      [33m[2m✓[22m[39m a losing claim on an expired-lease slot never touches the winning lease[33m 333[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:09.1750807Z  [32m✓[39m __tests__/dev-concurrency.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 1714[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:09.1751917Z    [32m✓[39m mutation mutex — real two-process race [2m(1)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:09.1753015Z      [33m[2m✓[22m[39m exactly one of two concurrent acquirers wins; the loser names the winner[33m 864[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:09.1754104Z    [32m✓[39m writer claim — real two-process race (one final owner) [2m(1)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:09.1755223Z      [33m[2m✓[22m[39m two processes claiming a stale-expired slot end in exactly one owner[33m 303[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:09.1760861Z    [32m✓[39m release vs claim — the transition is atomic [2m(2)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:09.1762449Z      [33m[2m✓[22m[39m never leaves git-lock-without-lease or lease-without-lock[33m 412[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:13.0452245Z  [32m✓[39m __tests__/cleanup-task-worktree.test.ts [2m([22m[2m11 tests[22m[2m)[22m[33m 3688[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:13.0455939Z    [32m✓[39m cleanup-task-worktree [2m(11)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:13.0457671Z      [33m[2m✓[22m[39m removes a clean, merged worktree and deletes the branch when asked[33m 334[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:13.0459795Z      [33m[2m✓[22m[39m REFUSES a dirty worktree and destroys nothing (git-4)[33m 353[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:13.0461642Z      [33m[2m✓[22m[39m REFUSES a Git-locked worktree and never unlocks it (SPEC §14.3)[33m 322[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:13.0463622Z      [33m[2m✓[22m[39m REFUSES a worktree held by an ACTIVE write lease — same behaviour as the batch sweep (SPEC §14.2)[33m 311[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:13.0465900Z      [33m[2m✓[22m[39m SKIPS the global prune while a sibling worktree is unreadable, and still cleans the target (PRI-712)[33m 875[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:13.0468179Z      [33m[2m✓[22m[39m succeeds on a porcelain-clean worktree that still contains ignored build output (node_modules)[33m 413[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:13.2849810Z  [32m✓[39m __tests__/lint-by-package.test.mjs [2m([22m[2m13 tests[22m[2m)[22m[32m 34[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:13.7570174Z  [32m✓[39m __tests__/principle-learning-lab-v2.test.ts [2m([22m[2m16 tests[22m[2m)[22m[32m 260[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:14.0240570Z fatal: not a git repository (or any of the parent directories): .git
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:14.2941060Z fatal: not a git repository (or any of the parent directories): .git
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:14.3057349Z  [32m✓[39m __tests__/check-repo-hygiene.test.ts [2m([22m[2m29 tests[22m[2m)[22m[33m 338[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:14.5816250Z  [32m✓[39m __tests__/principle-learning-lab-challenge-v2.test.ts [2m([22m[2m21 tests[22m[2m)[22m[32m 71[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:14.7941613Z  [32m✓[39m __tests__/prr-real-runner.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 32[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:14.9932799Z  [32m✓[39m __tests__/residue-delete.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 39[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:15.9438135Z  [32m✓[39m __tests__/principle-learning-lab-formal-entry.test.ts [2m([22m[2m13 tests[22m[2m)[22m[33m 741[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:16.3131597Z  [32m✓[39m __tests__/principle-learning-lab-examiner-productization-entry.test.ts [2m([22m[2m32 tests[22m[2m)[22m[32m 116[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:16.6846789Z  [32m✓[39m __tests__/principle-learning-lab-ceb002-contract.test.ts [2m([22m[2m13 tests[22m[2m)[22m[33m 31923[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:16.6848805Z    [32m✓[39m CEB-002 preregistration contract consistency [2m(13)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:16.6851812Z      [33m[2m✓[22m[39m 10b. ISOLATED CLI rebuild: deterministic (two rebuilds byte-identical), builder authority-reference intact; real CEB-002 directory FULLY unchanged[33m 31543[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:16.6861622Z      [33m[2m✓[22m[39m 10c. ALL illegal CLI arguments exit code 1 BEFORE any file write; real directory FULLY unchanged[33m 303[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:17.8955471Z  [32m✓[39m __tests__/check-dev-worktree.test.ts [2m([22m[2m12 tests[22m[2m)[22m[33m 1423[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:18.0310540Z  [32m✓[39m __tests__/create-task-worktree.test.ts [2m([22m[2m10 tests[22m[2m)[22m[33m 1158[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:18.0801815Z [90mstdout[2m | __tests__/temp-lifecycle.test.mjs[2m > [22m[2mglobalSetup redirects TMPDIR/TEMP/TMP, teardown removes run dir and restores env
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:18.0803848Z [22m[39m[temp-lifecycle] temp-lifecycle-test-mIqtRL: nothing to do
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:18.0806492Z [temp-lifecycle] TMPDIR -> /home/runner/work/principles/.pd-test-temp/vitest-20261029-165417-e78c1d/temp-lifecycle-test-mIqtRL/vitest-unit-test-20261029-165518-6d2b40
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:18.0808297Z 
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:18.0832473Z [90mstdout[2m | __tests__/temp-lifecycle.test.mjs[2m > [22m[2mPD_TEST_TEMP_ROOT=system disables redirection entirely
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:18.0835228Z [22m[39m[temp-lifecycle] PD_TEST_TEMP_ROOT=system — redirection disabled
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:18.0836085Z 
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:18.0860050Z  [32m✓[39m __tests__/temp-lifecycle.test.mjs [2m([22m[2m10 tests[22m[2m)[22m[32m 18[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:18.4655912Z  [32m✓[39m __tests__/release-registry.test.ts [2m([22m[2m14 tests[22m[2m)[22m[32m 195[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:18.6603919Z  [32m✓[39m __tests__/e2e-story-a-verdict.test.mjs [2m([22m[2m25 tests[22m[2m)[22m[32m 13[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:19.3167040Z  [32m✓[39m __tests__/check-compiler-runnable.test.ts [2m([22m[2m13 tests[22m[2m)[22m[33m 1114[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:19.3168314Z    [32m✓[39m CLI contract [2m(3)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:19.3169788Z      [33m[2m✓[22m[39m exits 0 on the real repository tree, on the platform running the tests[33m 688[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:21.4088515Z  [32m✓[39m __tests__/principle-learning-lab-transport-keepalive.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 2550[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:21.4105320Z    [32m✓[39m deterministic awaiting_headers reproduction — server goes silent on the first connection after one response [2m(2)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:21.4108213Z      [33m[2m✓[22m[39m HANG: a keep-alive agent reusing the silenced connection gets NO bytes and NO error (the awaiting_headers class)[33m 2506[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:21.6280616Z  [32m✓[39m __tests__/check-release-artifact-hygiene.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 27[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:22.2491948Z  [32m✓[39m __tests__/principle-learning-lab-archived-authorization-gate.test.ts [2m([22m[2m9 tests[22m[2m)[22m[33m 450[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:22.4671745Z  [32m✓[39m __tests__/check-error-handbook.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 29[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:22.4880992Z  [32m✓[39m __tests__/check-workspace-tools.test.ts [2m([22m[2m15 tests[22m[2m)[22m[33m 3029[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:22.6341699Z  [32m✓[39m __tests__/quality-report.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 13[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:22.7773157Z  [32m✓[39m __tests__/principle-learning-lab-v4-contract.test.ts [2m([22m[2m19 tests[22m[2m)[22m[32m 63[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:22.9196156Z  [32m✓[39m __tests__/principle-learning-lab-challenge-distractor.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 65[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:23.1802126Z  [32m✓[39m __tests__/openclaw-host-round-outcome.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 78[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:23.3149326Z  [32m✓[39m __tests__/check-runtime-writers.test.ts [2m([22m[2m13 tests[22m[2m)[22m[33m 367[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:23.3779986Z  [32m✓[39m __tests__/product-version-order.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:23.4923343Z  [32m✓[39m __tests__/openclaw-child-temp-env.test.ts [2m([22m[2m7 tests[22m[2m | [22m[33m6 skipped[39m[2m)[22m[32m 7[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:23.6879967Z  [32m✓[39m __tests__/worktree-preflight.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 135[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:23.7051159Z  [32m✓[39m __tests__/setup-private-docs-symlink.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 22[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:23.8871539Z  [32m✓[39m __tests__/worktree-root.test.ts [2m([22m[2m12 tests[22m[2m | [22m[33m1 skipped[39m[2m)[22m[32m 13[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:24.9464090Z  [32m✓[39m __tests__/workspace-migrate.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 853[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:25.1741478Z  [32m✓[39m __tests__/principle-learning-lab-gold-review-regression.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 28[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:25.6482590Z [90mstdout[2m | __tests__/principle-learning-lab-productization-integration.test.ts[2m > [22m[2mEXM-MVP-001 offline integration — no formal Gold approval[2m > [22m[2mMock candidates → compile → six strategies → pinned action replay → independent negative-transfer report
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:25.6491317Z [22m[39mEXM-MVP-001 evidence: /home/runner/work/principles/.pd-test-temp/vitest-20261029-165417-e78c1d/exm-mvp-001-cLrH5d/calibration-evidence.json
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:25.6499842Z 
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:25.6504463Z  [32m✓[39m __tests__/principle-learning-lab-productization-integration.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 204[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:25.8191834Z  [32m✓[39m __tests__/principle-learning-lab-negative-transfer.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 29[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:26.0171954Z  [32m✓[39m __tests__/workspace-lease-race.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 16[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:26.2553483Z ##[error]--resolved-version is not a strict x.y.z version: "2.0"
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:26.3011347Z ##[error]--resolved-version is not a strict x.y.z version: "2.0.0-rc.1"
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:26.3522231Z ##[error]--channel-product-version is not a strict x.y.z version: "bogus"
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:26.3543254Z  [32m✓[39m __tests__/check-product-version-channel.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 157[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:26.9271846Z  [32m✓[39m __tests__/bootstrap-worktree.test.ts [2m([22m[2m3 tests[22m[2m)[22m[33m 385[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:27.1405519Z  [32m✓[39m __tests__/principle-learning-lab-human-review-signature.test.ts [2m([22m[2m16 tests[22m[2m)[22m[32m 26[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:27.6566891Z  [32m✓[39m __tests__/principle-learning-lab-frozen-package.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 252[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:28.4801989Z  [32m✓[39m __tests__/principle-learning-lab-human-review-intake.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 565[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:28.7701100Z  [32m✓[39m __tests__/pre-push-fast.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 84[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:28.9802475Z  [32m✓[39m __tests__/ci-impact-gate-contract.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:29.1890065Z  [32m✓[39m __tests__/codex-runtime-delivery.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 11[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:29.3421942Z  [32m✓[39m __tests__/cnb-auto-deliver.test.mjs [2m([22m[2m8 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:30.3191153Z  [32m✓[39m __tests__/telemetry-smoke-config.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 13[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:38.6421181Z  [32m✓[39m __tests__/principle-learning-lab-challenge-b1.test.ts [2m([22m[2m18 tests[22m[2m)[22m[33m 29221[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:38.6422272Z    [32m✓[39m full legal space verification (exhaustive, not multiplication) [2m(3)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:38.6423334Z      [33m[2m✓[22m[39m enumerates and fully validates ALL 31,680 legal combos: 0 failures; 3,960 substantive points; stable fingerprint[33m 16388[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:38.6424383Z    [32m✓[39m B1 v2 (primary baseline: exhaustive-verify-then-select) and v1 (historical) [2m(9)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:55:38.6425405Z      [33m[2m✓[22m[39m is deterministic (identical output on repeated calls; each call re-runs the ~7s exhaustive proof)[33m 12752[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:56:00.5061294Z  [32m✓[39m __tests__/principle-learning-lab-phase2a-final-metrics.test.ts [2m([22m[2m3 tests[22m[2m)[22m[33m 36633[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:56:00.5062584Z    [32m✓[39m phase 2a final metrics recomputation [2m(2)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:56:00.5063753Z      [33m[2m✓[22m[39m recomputes the full B0/B1/E comparison from frozen evidence (offline, no writes)[33m 14278[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:56:00.5065697Z      [33m[2m✓[22m[39m is deterministic: two invocations produce identical values except generatedAt[33m 22351[2mms[22m[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:56:00.5129662Z 
+Test shared runtime & adapters	Test scripts	2026-10-29T16:56:00.5150123Z [2m Test Files [22m [1m[32m91 passed[39m[22m[90m (91)[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:56:00.5190433Z [2m      Tests [22m [1m[32m1680 passed[39m[22m[2m | [22m[33m8 skipped[39m[90m (1688)[39m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:56:00.5202915Z [2m   Start at [22m 16:54:17
+Test shared runtime & adapters	Test scripts	2026-10-29T16:56:00.5240128Z [2m   Duration [22m 103.15s[2m (tests 81%, import 16%, transform 3%)[22m
+Test shared runtime & adapters	Test scripts	2026-10-29T16:56:00.5249826Z 
+Test shared runtime & adapters	Test scripts	2026-10-29T16:56:00.6231192Z [temp-lifecycle] kept /home/runner/work/principles/.pd-test-temp/vitest-20261029-165417-e78c1d (EACCES)
+Test shared runtime & adapters	Test root guard contracts	﻿2026-10-29T16:56:00.6680363Z ##[group]Run npm run test:guard-contracts
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:00.6680745Z [36;1mnpm run test:guard-contracts[0m
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:00.6700377Z shell: /usr/bin/bash -e {0}
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:00.6700673Z ##[endgroup]
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:00.7647941Z 
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:00.7648753Z > principles-disciple-monorepo@2.4.0 test:guard-contracts
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:00.7650222Z > npx vitest run tests/sync-plugin-installation-truth.test.js && node --test scripts/dev/workbuddy-probe/lib/console-owner-loop-assertions.regression.mjs
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:00.7650918Z 
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:01.3535409Z 
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:01.3539233Z [1m[30m[46m RUN [49m[39m[22m [36mv5.0.0 [39m[90m/home/runner/work/principles/principles[39m
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:01.3539995Z 
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:01.5548109Z [temp-lifecycle] .pd-test-temp: kept 1
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:01.5549888Z [temp-lifecycle] TMPDIR -> /home/runner/work/principles/.pd-test-temp/vitest-20261029-165601-c6e047
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.3185400Z  [32m✓[39m tests/sync-plugin-installation-truth.test.js [2m([22m[2m21 tests[22m[2m)[22m[33m 635[2mms[22m[39m
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.3230277Z 
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.3235822Z [2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.3236845Z [2m      Tests [22m [1m[32m21 passed[39m[22m[90m (21)[39m
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.3238144Z [2m   Start at [22m 16:56:01
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.3243955Z [2m   Duration [22m 795ms[2m (tests 96%, import 2%, transform 1%, worker 1%)[22m
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.3260808Z 
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.3994355Z TAP version 13
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4712153Z # Subtest: same artifact, approved prompt, explicit workbuddy route passes even after withdrawal
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4717615Z ok 1 - same artifact, approved prompt, explicit workbuddy route passes even after withdrawal
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4718505Z   ---
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4719160Z   duration_ms: 1.177135
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4719632Z   type: 'test'
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4720022Z   ...
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4723868Z # Subtest: non-prompt approval never qualifies
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4726364Z ok 2 - non-prompt approval never qualifies
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4727702Z   ---
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4728466Z   duration_ms: 0.214492
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4729411Z   type: 'test'
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4729959Z   ...
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4730993Z # Subtest: unrelated approved artifact and activation cannot fake a passing owner loop
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4732459Z ok 3 - unrelated approved artifact and activation cannot fake a passing owner loop
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4733440Z   ---
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4733967Z   duration_ms: 0.184716
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4734550Z   type: 'test'
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4735077Z   ...
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4735957Z # Subtest: different artifact with same activation ID does not count
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4737143Z ok 4 - different artifact with same activation ID does not count
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4738025Z   ---
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4738447Z   duration_ms: 0.14367
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4738891Z   type: 'test'
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4739543Z   ...
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4741068Z # Subtest: expected artifact/activation IDs pin the lab to its own chain
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4745782Z ok 5 - expected artifact/activation IDs pin the lab to its own chain
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4746955Z   ---
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4747340Z   duration_ms: 0.247644
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4747996Z   type: 'test'
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4748372Z   ...
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4749421Z # Subtest: host attribution is required, not inferred from host query status 200
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4760577Z ok 6 - host attribution is required, not inferred from host query status 200
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4761473Z   ---
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4761979Z   duration_ms: 0.168777
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4762567Z   type: 'test'
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4763090Z   ...
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4763899Z # Subtest: unconfirmed host route does not certify delivery
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4764975Z ok 7 - unconfirmed host route does not certify delivery
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4765780Z   ---
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4766377Z   duration_ms: 0.231915
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4767033Z   type: 'test'
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4768083Z   ...
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4769182Z # Subtest: activation cannot predate approval decision
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4770474Z ok 8 - activation cannot predate approval decision
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4771494Z   ---
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4772458Z   duration_ms: 0.130865
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4773308Z   type: 'test'
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4774143Z   ...
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4775192Z # Subtest: unparseable timestamps cannot manufacture a valid approval chain
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4776895Z ok 9 - unparseable timestamps cannot manufacture a valid approval chain
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4778440Z   ---
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4795460Z   duration_ms: 0.353473
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4796227Z   type: 'test'
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4796892Z   ...
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4797719Z # Subtest: missing/empty identity fields never qualify
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4798740Z ok 10 - missing/empty identity fields never qualify
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4799803Z   ---
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4800327Z   duration_ms: 0.410048
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4801174Z   type: 'test'
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4801770Z   ...
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4803115Z # Subtest: learning receipt binds to the exact owner-approved artifact and activation
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4804691Z ok 11 - learning receipt binds to the exact owner-approved artifact and activation
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4805829Z   ---
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4806353Z   duration_ms: 1.265671
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4807161Z   type: 'test'
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.4807677Z   ...
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.6660237Z # Subtest: HTTP timeouts abort stalled headers AND a response that never ends
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.6664671Z ok 12 - HTTP timeouts abort stalled headers AND a response that never ends
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.6665752Z   ---
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.6666281Z   duration_ms: 209.570468
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.6666846Z   type: 'test'
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.6667347Z   ...
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.6790377Z 1..12
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.6790821Z # tests 12
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.6791242Z # suites 0
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.6791595Z # pass 12
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.6791942Z # fail 0
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.6792370Z # cancelled 0
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.6792747Z # skipped 0
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.6793217Z # todo 0
+Test shared runtime & adapters	Test root guard contracts	2026-10-29T16:56:02.6793575Z # duration_ms 293.016871
+Test shared runtime & adapters	Test host-runtime	﻿2026-10-29T16:56:02.6970571Z ##[group]Run npm run build --workspace=@principles/host-runtime && npm test --workspace=@principles/host-runtime
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:02.6972012Z [36;1mnpm run build --workspace=@principles/host-runtime && npm test --workspace=@principles/host-runtime[0m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:02.7001438Z shell: /usr/bin/bash -e {0}
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:02.7001727Z ##[endgroup]
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:02.8214334Z 
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:02.8215123Z > @principles/host-runtime@0.14.1 build
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:02.8215734Z > tsc
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:02.8215952Z 
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:03.6424923Z 
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:03.6425658Z > @principles/host-runtime@0.14.1 test
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:03.6426488Z > vitest run
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:03.6426998Z 
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:03.9442056Z 
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:03.9446147Z [1m[30m[46m RUN [49m[39m[22m [36mv5.0.0 [39m[90m/home/runner/work/principles/principles/packages/host-runtime[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:03.9446953Z 
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:03.9852284Z [temp-lifecycle] .pd-test-temp: kept 1
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:03.9853741Z [temp-lifecycle] TMPDIR -> /home/runner/work/principles/.pd-test-temp/vitest-20261029-165603-07b68b
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:08.0837847Z  [32m✓[39m tests/governance-signal-admission.test.ts [2m([22m[2m55 tests[22m[2m)[22m[33m 1410[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:16.4620872Z  [32m✓[39m tests/production-host-runtime.test.ts [2m([22m[2m41 tests[22m[2m)[22m[33m 7234[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:16.4650151Z    [32m✓[39m shared production RuleHost gate kernel [2m(31)[22m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:16.4680719Z      [33m[2m✓[22m[39m PRI-813 (CR-3): an unhealthy shadow rule never suppresses live enforcement — live deny survives a shadow timeout[33m 1100[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:16.4682871Z      [33m[2m✓[22m[39m fails open observably when child RuleCode hits top-level infinite loop[33m 1059[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:16.4699908Z      [33m[2m✓[22m[39m fails open observably when child RuleCode hits bounded memory[33m 1025[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:16.4701223Z      [33m[2m✓[22m[39m bounds total multi-rule gate elapsed time independently of active rule count[33m 2560[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:17.6405802Z  [32m✓[39m tests/governance-observation-store.test.ts [2m([22m[2m26 tests[22m[2m)[22m[33m 357[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:18.5861357Z  [32m✓[39m tests/prompt-injection-budget-observation.test.ts [2m([22m[2m33 tests[22m[2m)[22m[32m 68[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:19.8477216Z  [32m✓[39m tests/prompt-injection-route-and-deliverability.test.ts [2m([22m[2m31 tests[22m[2m)[22m[33m 399[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:21.2591122Z  [32m✓[39m tests/internalization-consumer-cycle-artificer-evidence.test.ts [2m([22m[2m11 tests[22m[2m)[22m[33m 568[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:22.2614857Z  [32m✓[39m tests/product-telemetry-units.test.ts [2m([22m[2m34 tests[22m[2m)[22m[32m 136[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:23.6426454Z  [32m✓[39m tests/product-telemetry-service.test.ts [2m([22m[2m28 tests[22m[2m)[22m[33m 550[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:24.9171957Z  [32m✓[39m tests/production-rulehost-gate-codex-v2.test.ts [2m([22m[2m14 tests[22m[2m)[22m[33m 454[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:26.0784874Z  [32m✓[39m tests/production-pain-evidence.test.ts [2m([22m[2m22 tests[22m[2m)[22m[32m 287[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:27.6391044Z  [32m✓[39m tests/prompt-budget-model-aware.test.ts [2m([22m[2m15 tests[22m[2m)[22m[33m 684[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:29.5403145Z  [32m✓[39m tests/intervention-evidence-ingress.test.ts [2m([22m[2m17 tests[22m[2m)[22m[33m 1070[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:29.5403974Z    [32m✓[39m intervention evidence ingress [2m(17)[22m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:29.5404747Z      [33m[2m✓[22m[39m keeps first-scope creation consistent across simultaneous ingress workers[33m 808[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:30.5460311Z  [32m✓[39m tests/single-task-recovery-evidence-gate.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 184[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:31.5890115Z  [32m✓[39m tests/internalization-consumer-cycle-artificer-intent.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 205[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:32.8572611Z  [32m✓[39m tests/production-design-gate-pretool.test.ts [2m([22m[2m2 tests[22m[2m)[22m[33m 383[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:34.0017007Z  [32m✓[39m tests/prompt-injection-projection.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 273[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:35.2671649Z  [32m✓[39m tests/production-rulehost-gate-v2-isolation.test.ts [2m([22m[2m9 tests[22m[2m)[22m[33m 379[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:36.3683960Z  [32m✓[39m tests/active-principle-prompt-fair-rotation.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 233[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:37.2978164Z  [32m✓[39m tests/production-rulehost-gate-digest.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 102[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:38.3826426Z  [32m✓[39m tests/production-pain-evidence-outcome-contract.test.ts [2m([22m[2m20 tests[22m[2m)[22m[32m 226[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:39.3775082Z  [32m✓[39m tests/internalization-consumer-cycle-evaluator-telemetry.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 159[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:40.3470162Z  [32m✓[39m tests/prompt-injection-golden-characterization.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 90[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:41.2204638Z  [32m✓[39m tests/host-liveness-contract.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 43[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:42.1725315Z [90mstdout[2m | tests/internalization-consumer-cycle-fairness.test.ts[2m > [22m[2mPRI-954 oldest-ready-stage-first fairness[2m > [22m[2mA: an older ready philosopher is served before a newer ready dreamer (old order starved it)
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:42.1728632Z [22m[39mC-DIAG-FULL: {"ran":true,"taskId":"philosopher-corr-fair-prompt","taskKind":"philosopher","runStatus":"succeeded"}
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:42.1730279Z 
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:42.4785217Z  [32m✓[39m tests/internalization-consumer-cycle-fairness.test.ts [2m([22m[2m6 tests[22m[2m)[22m[33m 433[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:43.3708830Z  [32m✓[39m tests/governance-signal-admission.workbuddy-live.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 87[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:44.2461276Z  [32m✓[39m tests/workbuddy-rule-context-provider.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 45[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:44.3841336Z  [32m✓[39m tests/evaluator-gate-wiring-guard.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:45.3130204Z  [32m✓[39m tests/internalization-consumer-cycle-language.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 113[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:46.2893367Z  [32m✓[39m tests/internalization-consumer-cycle-per-agent-profile.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 153[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:47.2239256Z  [32m✓[39m tests/governance-quarantine.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 129[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:47.3623679Z  [32m✓[39m tests/codex-ingestion-consent.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 16[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:48.2322430Z  [32m✓[39m tests/recovery-dedup-host-attribution.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 59[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:49.1522649Z  [32m✓[39m tests/codex-design-gate-facts.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 95[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:50.0514019Z  [32m✓[39m tests/evaluator-runtime-context.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 30[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:51.1404346Z  [32m✓[39m tests/admission-host-dedup.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 258[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:52.0214758Z  [32m✓[39m tests/prompt-injection-event-evidence.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 15[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:52.8510328Z  [32m✓[39m tests/workspace-telemetry-emitter.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 16[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:53.8571397Z  [32m✓[39m tests/pain-evidence-host-dedup.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 194[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:54.7478144Z  [32m✓[39m tests/host-runtime.test.ts [2m([22m[2m16 tests[22m[2m)[22m[32m 21[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:55.5791196Z  [32m✓[39m tests/host-tool-declaration.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:56.8276826Z  [32m✓[39m tests/workspace-behavior-evidence.test.ts [2m([22m[2m13 tests[22m[2m)[22m[33m 431[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:57.6630364Z  [32m✓[39m tests/pd-config-flag-alias.integration.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 18[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:57.7966268Z  [32m✓[39m tests/legacy-rule-contract-parity.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:58.6564287Z  [32m✓[39m tests/receipt-runid-emission.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:56:59.4886701Z  [32m✓[39m tests/workspace-telemetry-reuse-events.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:57:00.3226079Z  [32m✓[39m tests/host-tool-semantic-resolver.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 13[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:57:00.4506116Z  [32m✓[39m tests/host-semantic-projection-wiring-guard.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:57:00.5916736Z  [32m✓[39m tests/degraded-enforcement-marker.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 11[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:57:01.4035891Z  [32m✓[39m tests/workspace-telemetry-artificer-l2-complete.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:57:02.2431631Z  [32m✓[39m tests/pd-config.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:57:02.3756863Z  [32m✓[39m tests/codex-disclosure-g2a-guard.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:57:02.5713288Z  [32m✓[39m tests/rule-implementation-runtime.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 81[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:57:03.3952739Z  [32m✓[39m tests/production-rulehost-gate-marker.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 8[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:57:04.2453708Z  [32m✓[39m tests/generated-design-gate-rule.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 25[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:57:04.3924397Z  [32m✓[39m tests/cli-recovery-probe-path.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:57:04.5163214Z  [32m✓[39m tests/behavior-history.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 4[2mms[22m[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:57:04.5210519Z 
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:57:04.5218311Z [2m Test Files [22m [1m[32m56 passed[39m[22m[90m (56)[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:57:04.5222098Z [2m      Tests [22m [1m[32m619 passed[39m[22m[90m (619)[39m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:57:04.5222944Z [2m   Start at [22m 16:56:03
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:57:04.5227924Z [2m   Duration [22m 60.56s[2m (import 62%, tests 33%, transform 5%)[22m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:57:04.5244169Z 
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:57:04.5245047Z [2m    Isolate [22m [33m56 workers spawned[39m[2m · ~100ms startup each (spawn + environment, per file)[22m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:57:04.5246775Z [2m            [22m [2mat least ~5.51s faster with [22m[33misolate: false[39m[2m — reuses workers across files instead of one per file[22m
+Test shared runtime & adapters	Test host-runtime	2026-10-29T16:57:04.5247601Z 
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	﻿2026-10-29T16:57:04.5868155Z ##[group]Run npm run test:host-runtime-parity --workspace=principles-disciple
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:04.5869399Z [36;1mnpm run test:host-runtime-parity --workspace=principles-disciple[0m
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:04.5898003Z shell: /usr/bin/bash -e {0}
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:04.5898460Z ##[endgroup]
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:04.7173577Z 
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:04.7174234Z > principles-disciple@2.2.6 test:host-runtime-parity
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:04.7175827Z > vitest run --config vitest.parity.config.ts tests/bdd/openclaw-shared-host-runtime-parity.steps.test.ts tests/package/published-host-runtime-bundle.test.ts
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:04.7176667Z 
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:05.0359568Z 
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:05.0363713Z [1m[30m[46m RUN [49m[39m[22m [36mv5.0.0 [39m[90m/home/runner/work/principles/principles/packages/openclaw-plugin[39m
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:05.0364773Z 
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:05.0870452Z [temp-lifecycle] .pd-test-temp: kept 1
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:05.0871859Z [temp-lifecycle] TMPDIR -> /home/runner/work/principles/.pd-test-temp/vitest-20261029-165705-152285
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:08.6556196Z [90mstdout[2m | tests/bdd/openclaw-shared-host-runtime-parity.steps.test.ts[2m > [22m[2mOpenClaw shared host runtime preserves MVP behavior[2m > [22m[2mAn activated principle is injected into the prompt
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:08.6560019Z [22m[39m[PD:Config] Settings not found at /home/runner/work/principles/.pd-test-temp/vitest-20261029-165705-152285/pd-host-runtime-bdd-QsbBVL/.state/pain_settings.json, creating with defaults
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:08.6562623Z [PD:Config] Settings saved to /home/runner/work/principles/.pd-test-temp/vitest-20261029-165705-152285/pd-host-runtime-bdd-QsbBVL/.state/pain_settings.json
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:08.6564071Z 
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:08.7466793Z [90mstdout[2m | tests/bdd/openclaw-shared-host-runtime-parity.steps.test.ts[2m > [22m[2mOpenClaw shared host runtime preserves MVP behavior[2m > [22m[2mA legacy-budget overlap remains available through Runtime V2
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:08.7470887Z [22m[39m[PD:Config] Settings not found at /home/runner/work/principles/.pd-test-temp/vitest-20261029-165705-152285/pd-host-runtime-bdd-joypZl/.state/pain_settings.json, creating with defaults
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:08.7473074Z [PD:Config] Settings saved to /home/runner/work/principles/.pd-test-temp/vitest-20261029-165705-152285/pd-host-runtime-bdd-joypZl/.state/pain_settings.json
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:08.7474071Z 
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:08.8139993Z [90mstdout[2m | tests/bdd/openclaw-shared-host-runtime-parity.steps.test.ts[2m > [22m[2mOpenClaw shared host runtime preserves MVP behavior[2m > [22m[2mA live RuleHost rule denies a protected write
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:08.8143314Z [22m[39m[PD:Config] Settings not found at /home/runner/work/principles/.pd-test-temp/vitest-20261029-165705-152285/pd-host-runtime-bdd-cNnedM/.state/pain_settings.json, creating with defaults
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:08.8145893Z [PD:Config] Settings saved to /home/runner/work/principles/.pd-test-temp/vitest-20261029-165705-152285/pd-host-runtime-bdd-cNnedM/.state/pain_settings.json
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:08.8147207Z 
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:08.8943746Z [90mstdout[2m | tests/bdd/openclaw-shared-host-runtime-parity.steps.test.ts[2m > [22m[2mOpenClaw shared host runtime preserves MVP behavior[2m > [22m[2mA live RuleHost rule allows the safe control write
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:08.8946001Z [22m[39m[PD:Config] Settings not found at /home/runner/work/principles/.pd-test-temp/vitest-20261029-165705-152285/pd-host-runtime-bdd-CqjPC1/.state/pain_settings.json, creating with defaults
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:08.8947748Z [PD:Config] Settings saved to /home/runner/work/principles/.pd-test-temp/vitest-20261029-165705-152285/pd-host-runtime-bdd-CqjPC1/.state/pain_settings.json
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:08.8948531Z 
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:08.9610969Z [90mstdout[2m | tests/bdd/openclaw-shared-host-runtime-parity.steps.test.ts[2m > [22m[2mOpenClaw shared host runtime preserves MVP behavior[2m > [22m[2mComment-only retired context text cannot disable host tools
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:08.9613501Z [22m[39m[PD:Config] Settings not found at /home/runner/work/principles/.pd-test-temp/vitest-20261029-165705-152285/pd-host-runtime-bdd-y66rpT/.state/pain_settings.json, creating with defaults
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:08.9615659Z [PD:Config] Settings saved to /home/runner/work/principles/.pd-test-temp/vitest-20261029-165705-152285/pd-host-runtime-bdd-y66rpT/.state/pain_settings.json
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:08.9616454Z 
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:09.0267636Z [90mstdout[2m | tests/bdd/openclaw-shared-host-runtime-parity.steps.test.ts[2m > [22m[2mOpenClaw shared host runtime preserves MVP behavior[2m > [22m[2mAn incompatible live RuleHost rule is skipped without blocking the host
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:09.0271451Z [22m[39m[PD:Config] Settings not found at /home/runner/work/principles/.pd-test-temp/vitest-20261029-165705-152285/pd-host-runtime-bdd-NKC4oY/.state/pain_settings.json, creating with defaults
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:09.0273945Z [PD:Config] Settings saved to /home/runner/work/principles/.pd-test-temp/vitest-20261029-165705-152285/pd-host-runtime-bdd-NKC4oY/.state/pain_settings.json
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:09.0275016Z 
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:09.0569944Z [90mstdout[2m | tests/bdd/openclaw-shared-host-runtime-parity.steps.test.ts[2m > [22m[2mOpenClaw shared host runtime preserves MVP behavior[2m > [22m[2mAn owner pain signal is persisted as evidence
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:09.0571975Z [22m[39m[PD:Config] Settings not found at /home/runner/work/principles/.pd-test-temp/vitest-20261029-165705-152285/pd-host-runtime-bdd-TL7Jou/.state/pain_settings.json, creating with defaults
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:09.0573542Z [PD:Config] Settings saved to /home/runner/work/principles/.pd-test-temp/vitest-20261029-165705-152285/pd-host-runtime-bdd-TL7Jou/.state/pain_settings.json
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:09.0574493Z 
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:09.0916385Z [90mstdout[2m | tests/bdd/openclaw-shared-host-runtime-parity.steps.test.ts[2m > [22m[2mOpenClaw shared host runtime preserves MVP behavior[2m > [22m[2mAn ordinary failed write is admitted through the shared pain kernel
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:09.0918709Z [22m[39m[PD:Config] Settings not found at /home/runner/work/principles/.pd-test-temp/vitest-20261029-165705-152285/pd-host-runtime-bdd-6ClnlF/.state/pain_settings.json, creating with defaults
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:09.0920952Z [PD:Config] Settings saved to /home/runner/work/principles/.pd-test-temp/vitest-20261029-165705-152285/pd-host-runtime-bdd-6ClnlF/.state/pain_settings.json
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:09.0921726Z 
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:09.1149698Z  [32m✓[39m tests/bdd/openclaw-shared-host-runtime-parity.steps.test.ts [2m([22m[2m8 tests[22m[2m)[22m[33m 495[2mms[22m[39m
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:14.3429574Z  [32m✓[39m tests/package/published-host-runtime-bundle.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 5099[2mms[22m[39m
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:14.3460127Z 
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:14.3464060Z [2m Test Files [22m [1m[32m2 passed[39m[22m[90m (2)[39m
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:14.3464860Z [2m      Tests [22m [1m[32m9 passed[39m[22m[90m (9)[39m
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:14.3465393Z [2m   Start at [22m 16:57:05
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:14.3470254Z [2m   Duration [22m 9.29s[2m (tests 62%, transform 28%, import 10%)[22m
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:14.3482662Z 
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:14.3484552Z [2m  Transform [22m [33mtransforming modules took 2.53s[39m[2m · 28% of tracked time, re-done on every run[22m
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:14.3485480Z [2m            [22m [2mpersist transforms across runs with [22m[33mfsModuleCache: true[39m
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:14.3486287Z [2m            [22m [2mon CI this only helps when the cache directory is persisted between runs[22m
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:14.3487177Z [2m            [22m [2mlearn more: https://vitest.dev/guide/improving-performance#caching-between-reruns[22m
+Test shared runtime & adapters	Verify real OpenClaw host parity and published bundle	2026-10-29T16:57:14.3487612Z 
+Test shared runtime & adapters	Test codex-adapter	﻿2026-10-29T16:57:14.4103359Z ##[group]Run npm test --workspace=@principles/codex-adapter
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:14.4103852Z [36;1mnpm test --workspace=@principles/codex-adapter[0m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:14.4123846Z shell: /usr/bin/bash -e {0}
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:14.4124120Z ##[endgroup]
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:14.5322461Z 
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:14.5322974Z > @principles/codex-adapter@0.6.0 test
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:14.5323478Z > npm run build && vitest run
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:14.5323720Z 
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:14.6568265Z 
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:14.6568809Z > @principles/codex-adapter@0.6.0 build
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:14.6569674Z > tsc
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:14.6569851Z 
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:15.5602959Z 
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:15.5606845Z [1m[30m[46m RUN [49m[39m[22m [36mv5.0.0 [39m[90m/home/runner/work/principles/principles/packages/codex-adapter[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:15.5607658Z 
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:15.6043316Z [temp-lifecycle] .pd-test-temp: kept 1
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:15.6044497Z [temp-lifecycle] TMPDIR -> /home/runner/work/principles/.pd-test-temp/vitest-20261029-165715-4c8c31
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:39.9445116Z  [32m✓[39m tests/pd-hook.production.test.ts [2m([22m[2m16 tests[22m[2m)[22m[33m 20809[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:39.9471089Z    [32m✓[39m pd-hook executable shared MVP paths [2m(5)[22m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:39.9481278Z      [33m[2m✓[22m[39m injects a real owner-approved prompt activation from SQLite[33m 1133[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:39.9483532Z      [33m[2m✓[22m[39m denies a protected live RuleCode input and allows the safe control[33m 2186[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:39.9485263Z      [33m[2m✓[22m[39m persists exact PostToolUse evidence once in the selected Workspace[33m 1050[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:39.9487121Z      [33m[2m✓[22m[39m creates no workspace state when host.codex is disabled (flag-off no-side-effect)[33m 844[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:39.9489310Z      [33m[2m✓[22m[39m T7 (PRI-904 Phase-1): Codex prompt injection still works and never claims an unearned fair rotation[33m 1046[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:39.9491488Z    [32m✓[39m PRI-780 Codex runtime context capability declaration (v2 rules) [2m(3)[22m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:39.9493402Z      [33m[2m✓[22m[39m PRI-780 (rev 2): a v2 rule stays SUSPENDED on Codex — never executed context-blind — with the structured unsupported warning[33m 940[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:39.9495660Z      [33m[2m✓[22m[39m flag OFF: an unqualified historical v2 rule stays suspended and observable[33m 977[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:39.9498274Z      [33m[2m✓[22m[39m runs an Owner-approved, system-stamped Codex V2 shadow rule through the real hook with valid same-session history[33m 2209[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:39.9500580Z    [32m✓[39m PRI-813 shared shadow evidence reconnection [2m(7)[22m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:39.9502827Z      [33m[2m✓[22m[39m records canonical shadow rulehost_evaluated evidence with the exact activationId while the host action stays allowed[33m 1227[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:39.9516427Z      [33m[2m✓[22m[39m records the live evaluation row with its exact activationId on a live deny[33m 1238[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:39.9518683Z      [33m[2m✓[22m[39m rejects shadow activationId "" with a diagnostic and preserves host allow[33m 1180[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:39.9520963Z      [33m[2m✓[22m[39m rejects shadow activationId "   " with a diagnostic and preserves host allow[33m 1175[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:39.9523149Z      [33m[2m✓[22m[39m keeps the computed deny when telemetry persistence fails (CR-1): fs failure degrades to a diagnostic, never drops the decision[33m 1225[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:39.9526082Z      [33m[2m✓[22m[39m keeps a v2 shadow rule suspended: zero shadow evidence, structured warning (Codex v2 boundary extends to shadow)[33m 981[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:39.9544148Z      [33m[2m✓[22m[39m isolates two shadow activations into two exact-identity evidence rows the shadow summary can aggregate separately[33m 865[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:39.9546375Z    [32m✓[39m Codex desktop hook uses the shared owner-governed runtime [2m(1)[22m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:39.9548467Z      [33m[2m✓[22m[39m Codex executable exercises all three MVP-Core behavior paths[33m 2531[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:41.7185613Z  [32m✓[39m tests/ingestion/ingestion.test.ts [2m([22m[2m21 tests[22m[2m)[22m[33m 587[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:43.8676882Z  [32m✓[39m tests/turn-context-bridge.test.ts [2m([22m[2m20 tests[22m[2m)[22m[33m 957[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:44.3658560Z  [32m✓[39m tests/worker/workspace-worker.test.ts [2m([22m[2m30 tests[22m[2m)[22m[33m 24647[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:44.3660584Z    [32m✓[39m worker cycle — SPEC §13 flag ladder (matrix B) [2m(5)[22m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:44.3665147Z      [33m[2m✓[22m[39m codex_conversation_ingestion=false → ZERO transcript I/O while reconcile + diagnostician still run[33m 1372[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:44.3667788Z      [33m[2m✓[22m[39m internalization_auto_consumer=false → paused: NO lease, NO LLM, but catch-up attempt + reconcile continue[33m 1095[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:44.3670540Z    [32m✓[39m worker cycle — diagnostician terminal closure (matrix C, acceptance #1) [2m(3)[22m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:44.3672551Z      [33m[2m✓[22m[39m an admitted pain reaches terminal diagnosis exactly once, with 0 LLM inside the hook[33m 1186[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:44.3674709Z      [33m[2m✓[22m[39m live lease held by another worker (not expired) → skipped, not stolen, no duplicate run[33m 967[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:44.3677002Z      [33m[2m✓[22m[39m EXPIRED lease → sweep flips it to retry_wait (fresh backoff), then the worker executes after the deadline[33m 1275[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:44.3679294Z    [32m✓[39m worker cycle — Reuse Review Gate park reporting (PRI-917 v0.3.3 review fix P2-2) [2m(1)[22m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:44.3681511Z      [33m[2m✓[22m[39m a parked candidate reaches the report as reuseReviewRequiredCandidateIds with a degraded status[33m 1138[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:44.3684104Z    [32m✓[39m worker cycle — SPEC §18 scenario 12: provider failure and recovery without duplicate candidates [2m(2)[22m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:44.3686437Z      [33m[2m✓[22m[39m provider outage → retry_wait with preserved budget; backoff elapsed → next cycle succeeds; exactly one candidate[33m 1232[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:44.3689206Z      [33m[2m✓[22m[39m review P1: an old retry_wait inside its backoff does not starve a younger elapsed one (no head-of-line blocking)[33m 2483[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:44.3691032Z    [32m✓[39m worker cycle — aggregated mode (review P1) [2m(2)[22m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:44.3692766Z      [33m[2m✓[22m[39m a failed diagnostician surfaces the cycle as degraded with a structured reason[33m 1204[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:44.3694790Z      [33m[2m✓[22m[39m a lease_conflict diagnostician failure is contention, NOT degradation[33m 1270[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:44.3696345Z    [32m✓[39m worker cycle — backlog bound (matrix E) [2m(1)[22m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:44.3698074Z      [33m[2m✓[22m[39m two pending diagnostics → exactly ONE executes per cycle, later cycles converge[33m 5651[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:44.3700091Z    [32m✓[39m worker cycle — concurrent consumers (matrix G) [2m(1)[22m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:44.3702540Z      [33m[2m✓[22m[39m two worker cycles racing one ready task → exactly one lease, one execution, one candidate set[33m 994[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:44.3704320Z    [32m✓[39m worker cycle — multi-workspace isolation (matrix H) [2m(1)[22m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:44.3705907Z      [33m[2m✓[22m[39m workspace A execution never touches workspace B state[33m 2007[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:44.3707513Z    [32m✓[39m worker cycle — reconciliation reuse (matrix D: Slice B seam) [2m(1)[22m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:44.3709720Z      [33m[2m✓[22m[39m crash-before-link (Case B) is repaired by the worker cycle without creating a second task[33m 1051[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:44.3711841Z    [32m✓[39m worker cycle — downstream reuse (shared executor) [2m(4)[22m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:44.3713683Z      [33m[2m✓[22m[39m runs the dreamer successor through the shared consumer cycle in the same worker cycle[33m 1017[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:46.3371347Z  [32m✓[39m tests/codex-explicit-owner-statement.test.ts [2m([22m[2m12 tests[22m[2m)[22m[33m 597[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:52.6968786Z  [32m✓[39m tests/codex-plugin-bundle.test.ts [2m([22m[2m59 tests[22m[2m)[22m[33m 36777[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:52.6990237Z    [32m✓[39m installed-layout plugin run with a spaced PLUGIN_ROOT (ADR-0020 §10.5) [2m(3)[22m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:52.6993273Z      [33m[2m✓[22m[39m injects the approved principle into UserPromptSubmit from the installed layout[33m 1095[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:52.7050343Z      [33m[2m✓[22m[39m persists PostToolUse evidence into the workspace trajectory database[33m 1236[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:52.7109930Z    [32m✓[39m first-run $pd-control setup (real user flow) [2m(1)[22m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:52.7111618Z      [33m[2m✓[22m[39m creates the plugin data dir Codex never creates, and npm-installs the pinned runtime[33m 15120[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:52.7161547Z    [32m✓[39m skill locator entrypoint via pd-locate.cjs (PR #2106 review round 2) [2m(11)[22m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:52.7200599Z      [33m[2m✓[22m[39m status skill command selects 1.10.0 over 1.9.0 and passes -- --json through (scenario A)[33m 6218[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:52.7230784Z      [33m[2m✓[22m[39m status skill command refuses to run an older version when the newest install lacks the script (scenario B)[33m 1869[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:52.7236293Z      [33m[2m✓[22m[39m status skill command fails loud on a marketplace tie instead of guessing (scenario C)[33m 1884[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:54.6482871Z  [32m✓[39m tests/codex-evidence-recorder.test.ts [2m([22m[2m12 tests[22m[2m)[22m[33m 558[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:56.8246637Z  [32m✓[39m tests/pd-hook-owner-loop.test.ts [2m([22m[2m9 tests[22m[2m)[22m[33m 11476[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:56.8251861Z    [32m✓[39m Codex governance owner loop — bounded observation, durable recovery, shared workspace [2m(9)[22m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:56.8260148Z      [33m[2m✓[22m[39m Existing Principle injection and RuleHost denial remain unchanged (§18-1)[33m 1099[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:56.8262394Z      [33m[2m✓[22m[39m Live user and tool delivery plus transcript replay enrich rather than duplicate (§18-3)[33m 2320[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:56.8264329Z      [33m[2m✓[22m[39m Two forks sharing a root session remain separate and correctly linked (§18-4)[33m 1977[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:56.8266149Z      [33m[2m✓[22m[39m A truncated turn-complete capture exposes lag that catch-up resolves (§18-8)[33m 1161[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:56.8268090Z      [33m[2m✓[22m[39m Privacy negatives — hidden context and raw paths never persist or leak (§18-9)[33m 1138[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:56.8270481Z      [33m[2m✓[22m[39m A permanently invalid record is quarantined with an audit trail and survives restart (§18-10)[33m 1251[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:56.8272616Z      [33m[2m✓[22m[39m Recovery advances one admitted pain without duplicate tasks (§18-12)[33m 1298[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:56.8274575Z      [33m[2m✓[22m[39m OpenClaw and Codex share a Workspace without evidence contamination (§18-16)[33m 1188[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:56.8731520Z  [32m✓[39m tests/worker/corrupt-admission-worker.test.ts [2m([22m[2m2 tests[22m[2m)[22m[33m 614[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:56.8736425Z    [32m✓[39m review round-5: the healthy candidate really advances; the corrupt one stays contained [2m(2)[22m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:56.8760984Z      [33m[2m✓[22m[39m admits + consumes + writes a REAL Ledger entry + seeds for the healthy candidate, and blocks only the corrupt one[33m 349[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:57.0622730Z  [32m✓[39m tests/ingestion/transcript-decoder.test.ts [2m([22m[2m17 tests[22m[2m)[22m[32m 20[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:57.2639635Z  [32m✓[39m tests/g1-contract-fixtures.test.ts [2m([22m[2m28 tests[22m[2m)[22m[32m 25[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:57:58.8679903Z  [32m✓[39m tests/ingestion/catch-up.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 263[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:00.3779249Z  [32m✓[39m tests/codex-rule-context-provider.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 201[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:02.0061145Z  [32m✓[39m tests/ingestion/verified-outcome-upgrade.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 240[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:02.1835943Z  [32m✓[39m tests/setup-worker-registration.test.ts [2m([22m[2m11 tests[22m[2m)[22m[33m 5112[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:02.1853290Z    [32m✓[39m real plugin setup connects the existing Companion worker [2m(8)[22m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:02.1888046Z      [33m[2m✓[22m[39m registers Codex without losing OpenClaw or update settings, and rerunning does not duplicate workspaces[33m 749[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:02.1891602Z      [33m[2m✓[22m[39m reports manual processing explicitly when no canonical installation exists[33m 428[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:02.1893751Z      [33m[2m✓[22m[39m reports manual processing when a canonical manifest has no canonical runtime module[33m 377[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:02.1895949Z      [33m[2m✓[22m[39m reports manual processing for a legacy manifest without requiring the canonical module[33m 375[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:02.1898040Z      [33m[2m✓[22m[39m reports manual workspace initialization when the workspace has no config[33m 398[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:02.1940056Z    [32m✓[39m pd-setup attests the installed runtime bytes [2m(2)[22m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:02.1941568Z      [33m[2m✓[22m[39m short-circuits the reinstall only while the installed bytes match the pins[33m 393[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:02.1943622Z      [33m[2m✓[22m[39m refuses a marker whose claim the installed bytes contradict[33m 666[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:02.1944938Z    [32m✓[39m pd-setup repairs a runtime tree npm claimed to install [2m(1)[22m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:02.1946461Z      [33m[2m✓[22m[39m reinstalls once from a clean tree, then still fails loud when no bytes arrive[33m 1159[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:02.3598252Z  [32m✓[39m tests/g1-host-runtime-contract.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 13[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:03.7865744Z  [32m✓[39m tests/ingestion/transcript-path.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 41[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:04.1871264Z  [32m✓[39m tests/user-workspace-scripts.test.ts [2m([22m[2m6 tests[22m[2m)[22m[33m 689[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:04.1888455Z    [32m✓[39m user-level Codex principle injection [2m(3)[22m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:04.1897680Z      [33m[2m✓[22m[39m injects the same activated user principle into two projects, including a project with its own config[33m 475[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:05.9244621Z  [32m✓[39m tests/pd-hook-stop.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 55[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:07.6649375Z  [32m✓[39m tests/pd-hook-slice-b.test.ts [2m([22m[2m9 tests[22m[2m)[22m[33m 20004[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:07.6680578Z    [32m✓[39m pd-hook Slice B admission (production executable, ingestion flag on) [2m(5)[22m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:07.6740562Z      [33m[2m✓[22m[39m ordinary conversation → observations only, zero pain / zero task / zero quota[33m 1157[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:07.6782039Z      [33m[2m✓[22m[39m a real owner correction → exactly one canonical pain, one pending task, promotion tail armed[33m 1213[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:07.6810642Z      [33m[2m✓[22m[39m duplicate delivery in fresh processes → still exactly one pain and one task[33m 2132[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:07.6813515Z      [33m[2m✓[22m[39m one real tool failure via live PostToolUse + Stop transcript replay → one pain, one task[33m 2252[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:07.6861656Z      [33m[2m✓[22m[39m the STRONG persisted bucket rate-limits the sixth distinct correction across fresh processes[33m 6470[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:07.6890447Z    [32m✓[39m Codex governance signal admission — one correction, one canonical pain, one task [2m(4)[22m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:07.6920622Z      [33m[2m✓[22m[39m Ordinary conversation stays completely quiet[33m 1076[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:07.6930560Z      [33m[2m✓[22m[39m A real owner correction creates exactly one canonical pain and one pending Diagnostician task[33m 1124[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:07.6980305Z      [33m[2m✓[22m[39m Duplicate delivery of the same correction converges (live + replay + fresh process)[33m 2324[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:07.6982418Z      [33m[2m✓[22m[39m One real tool failure resolves to one pain whether delivered live or via transcript[33m 2244[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:09.4555832Z  [32m✓[39m tests/codex-rule-context-live-history.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 44[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:12.2301186Z  [32m✓[39m tests/pd-hook-entry-belt.test.ts [2m([22m[2m6 tests[22m[2m)[22m[33m 6036[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:12.2303400Z    [32m✓[39m pd-hook process-boundary fail-open belt (PRI-943) [2m(6)[22m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:12.2305252Z      [33m[2m✓[22m[39m exits 0 when a stderr write throws synchronously during the write-out tail[33m 934[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:12.2307092Z      [33m[2m✓[22m[39m exits 0 when a stdout write throws synchronously during the write-out tail[33m 1085[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:12.2308790Z      [33m[2m✓[22m[39m exits 0 when the host closes the pipe and stdout emits an async EPIPE error[33m 954[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:12.2310686Z      [33m[2m✓[22m[39m exits 0 when the host closes the pipe and stderr emits an async EPIPE error[33m 972[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:12.2312851Z      [33m[2m✓[22m[39m belts a throw escaping main() at the write-out tail: exit 0, one JSON object, bounded diagnostic[33m 1068[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:12.2314733Z      [33m[2m✓[22m[39m keeps the degraded path unchanged: exit 0, one JSON object, bounded diagnostic[33m 1017[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:12.4851094Z  [32m✓[39m tests/host-adapter.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 17[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:13.8581455Z  [32m✓[39m tests/pd-hook-linked-entry.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 4227[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:13.8583137Z    [32m✓[39m pd-hook entry guard via linked path (PRI-892) [2m(1)[22m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:13.8586028Z      [33m[2m✓[22m[39m runs main() when spawned through a symlink/junction entry path[33m 1064[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:13.8587540Z    [32m✓[39m pd-hook entry guard layering (PRI-892 review) [2m(3)[22m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:13.8589432Z      [33m[2m✓[22m[39m runs main() on a direct real-path invocation without needing link resolution[33m 976[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:13.8591803Z      [33m[2m✓[22m[39m falls back to a loud diagnostic when realpath cannot verify an entry that names this file[33m 1087[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:13.8593793Z      [33m[2m✓[22m[39m stays silent for an unresolvable entry that names a different file[33m 1092[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:14.7901071Z  [32m✓[39m tests/pd-hook.test.ts [2m([22m[2m6 tests[22m[2m)[22m[33m 992[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:14.7902715Z    [32m✓[39m pd-hook production boundary [2m(6)[22m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:14.7942921Z      [33m[2m✓[22m[39m the built executable emits exactly one JSON object on stdout and bounded diagnostics on stderr[33m 956[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:14.9693047Z  [32m✓[39m tests/ingestion/codex-home-version.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 15[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:15.5449260Z  [32m✓[39m tests/worker/fair-share.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 256[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:15.7530188Z  [32m✓[39m tests/runtime-pin-guard.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:16.1593588Z  [32m✓[39m tests/model-context-propagation.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:16.3404420Z  [32m✓[39m tests/output-whitelist.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:16.9960954Z  [32m✓[39m tests/tool-semantics.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:21.7256707Z  [32m✓[39m tests/published-codex-adapter-bundle.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 17758[2mms[22m[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:21.7306019Z 
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:21.7313742Z [2m Test Files [22m [1m[32m32 passed[39m[22m[90m (32)[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:21.7315089Z [2m      Tests [22m [1m[32m358 passed[39m[22m[90m (358)[39m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:21.7315941Z [2m   Start at [22m 16:57:15
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:21.7321238Z [2m   Duration [22m 66.16s[2m (tests 84%, import 13%, transform 3%)[22m
+Test shared runtime & adapters	Test codex-adapter	2026-10-29T16:58:21.7339657Z 
+Test shared runtime & adapters	Build and test pd-companion	﻿2026-10-29T16:58:21.8296240Z ##[group]Run npm run build --workspace=@principles/pd-companion && npm test --workspace=@principles/pd-companion
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:21.8297086Z [36;1mnpm run build --workspace=@principles/pd-companion && npm test --workspace=@principles/pd-companion[0m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:21.8317314Z shell: /usr/bin/bash -e {0}
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:21.8317591Z ##[endgroup]
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:21.9531998Z 
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:21.9532646Z > @principles/pd-companion@0.1.5 build
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:21.9533216Z > tsc
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:21.9533419Z 
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:22.2550891Z 
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:22.2551501Z > @principles/pd-companion@0.1.5 test
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:22.2552075Z > vitest run
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:22.2552320Z 
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:22.5685228Z 
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:22.5689672Z [1m[30m[46m RUN [49m[39m[22m [36mv5.0.0 [39m[90m/home/runner/work/principles/principles/packages/pd-companion[39m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:22.5691015Z 
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:22.6079896Z [temp-lifecycle] .pd-test-temp: kept 1
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:22.6081818Z [temp-lifecycle] TMPDIR -> /home/runner/work/principles/.pd-test-temp/vitest-20261029-165822-b2ea78
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:22.8744355Z  [32m✓[39m tests/lib/workspace-workers-manifest-failure.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 19[2mms[22m[39m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:22.8755056Z  [32m✓[39m tests/lib/workspace-workers.test.ts [2m([22m[2m14 tests[22m[2m | [22m[33m1 skipped[39m[2m)[22m[32m 21[2mms[22m[39m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:22.8858427Z  [32m✓[39m tests/lib/supervisor.test.ts [2m([22m[2m21 tests[22m[2m)[22m[32m 13[2mms[22m[39m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:23.0611046Z  [32m✓[39m tests/main/coexistence.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 16[2mms[22m[39m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:23.0874088Z  [32m✓[39m tests/lib/release-watch.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 16[2mms[22m[39m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:23.2357379Z  [32m✓[39m tests/main/entry-wait-wiring.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 13[2mms[22m[39m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:23.2643225Z  [32m✓[39m tests/bdd/release-watch.steps.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:23.3960669Z  [32m✓[39m tests/lib/worker-release-handover.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 21[2mms[22m[39m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:23.4207091Z  [32m✓[39m tests/main/release-watch-wiring.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 16[2mms[22m[39m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:23.5837898Z  [32m✓[39m tests/lib/locate.test.ts [2m([22m[2m17 tests[22m[2m)[22m[32m 15[2mms[22m[39m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:23.6160484Z  [32m✓[39m tests/bdd/supervisor.steps.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:23.7586895Z  [2m[90m↓[39m[22m tests/lib/install-manifest-cross-version.test.ts [2m([22m[2m6 tests[22m[2m | [22m[33m6 skipped[39m[2m)[22m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:23.8090922Z  [32m✓[39m tests/verify-package.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 44[2mms[22m[39m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:23.9294430Z  [32m✓[39m tests/check-release-version-consistency.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 24[2mms[22m[39m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:23.9559655Z  [32m✓[39m tests/lib/launch-result.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:24.0796871Z  [32m✓[39m tests/lib/degraded.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:24.2613485Z  [32m✓[39m tests/bdd/notification.steps.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:24.3844821Z  [32m✓[39m tests/lib/poller.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:24.5117260Z  [32m✓[39m tests/lib/state-store.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:24.6332493Z  [32m✓[39m tests/lib/version-handover.test.ts [2m([22m[2m15 tests[22m[2m)[22m[33m 1600[2mms[22m[39m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:24.6334678Z    [32m✓[39m version-handover (PRI-1012 P1) — the killable-handle guard [2m(5)[22m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:24.6336239Z      [33m[2m✓[22m[39m a REAL attached console survives the hand-over decision untouched[33m 364[2mms[22m[39m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:24.6338223Z    [32m✓[39m version-handover (PRI-1012 P1) — real stop-and-confirm against real processes [2m(5)[22m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:24.6340467Z      [33m[2m✓[22m[39m old console healthy and holding the port: stop is confirmed, port frees, new process takes it with a NEW PID[33m 318[2mms[22m[39m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:24.6596510Z  [32m✓[39m tests/bdd/degraded.steps.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:24.7609552Z  [32m✓[39m tests/lib/worker-release-child.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 676[2mms[22m[39m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:24.7611459Z    [32m✓[39m real owned child IPC release handover [2m(1)[22m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:24.7613192Z      [33m[2m✓[22m[39m busy cycle finishes naturally before registry launches replacement[33m 674[2mms[22m[39m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:24.7721850Z  [32m✓[39m tests/lib/console-origin.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:24.8457668Z  [32m✓[39m tests/bdd/launch-result.steps.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:24.9043746Z  [32m✓[39m tests/lib/bundled-parser-compat.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:24.9204737Z  [32m✓[39m tests/lib/entry-verdict.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:24.9247550Z 
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:24.9253981Z [2m Test Files [22m [1m[32m25 passed[39m[22m[2m | [22m[33m1 skipped[39m[90m (26)[39m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:24.9255634Z [2m      Tests [22m [1m[32m248 passed[39m[22m[2m | [22m[33m7 skipped[39m[90m (255)[39m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:24.9256445Z [2m   Start at [22m 16:58:22
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:24.9261872Z [2m   Duration [22m 2.34s[2m (tests 70%, import 15%, transform 12%, worker 3%)[22m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:24.9278288Z 
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:24.9279386Z [2m    Isolate [22m [33m26 workers spawned[39m[2m · ~110ms startup each (spawn + environment, per file)[22m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:24.9280786Z [2m            [22m [2mat least ~845ms faster with [22m[33misolate: false[39m[2m — reuses workers across files instead of one per file[22m
+Test shared runtime & adapters	Build and test pd-companion	2026-10-29T16:58:24.9281383Z 
+Test shared runtime & adapters	Post Setup Node.js	﻿2026-10-29T16:58:24.9904757Z Post job cleanup.
+Test shared runtime & adapters	Post Setup Node.js	2026-10-29T16:58:25.1055596Z Cache hit occurred on the primary key node-cache-Linux-x64-npm-0f21b534452146684fa38231ffa2e990563f6459c97132accd11f3f1144ca6ed, not saving cache.
+Test shared runtime & adapters	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	﻿2026-10-29T16:58:25.1213485Z Post job cleanup.
+Test shared runtime & adapters	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:58:25.2121150Z [command]/usr/bin/git version
+Test shared runtime & adapters	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:58:25.2172090Z git version 2.56.0
+Test shared runtime & adapters	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:58:25.2210956Z Temporarily overriding HOME='/home/runner/work/_temp/4b311438-ae00-429b-a8e8-bf5f9a28b692' before making global git config changes
+Test shared runtime & adapters	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:58:25.2212506Z Adding repository directory to the temporary git global config as a safe directory
+Test shared runtime & adapters	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:58:25.2216020Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/principles/principles
+Test shared runtime & adapters	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:58:25.2253212Z Removing SSH command configuration
+Test shared runtime & adapters	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:58:25.2268323Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+Test shared runtime & adapters	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:58:25.2303269Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+Test shared runtime & adapters	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:58:25.2592532Z Removing HTTP extra header
+Test shared runtime & adapters	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:58:25.2599331Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+Test shared runtime & adapters	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:58:25.2643136Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+Test shared runtime & adapters	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:58:25.2947454Z Removing includeIf entries pointing to credentials config files
+Test shared runtime & adapters	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:58:25.2970275Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+Test shared runtime & adapters	Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1	2026-10-29T16:58:25.3031099Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+Test shared runtime & adapters	Complete job	﻿2026-10-29T16:58:25.3500039Z Cleaning up orphan processes

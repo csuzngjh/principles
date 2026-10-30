@@ -1,0 +1,7 @@
+{
+  "head": "932b0670ff5350edf57e3830e4fb40ac5cd32c01",
+  "checked": 47,
+  "errors": [
+    "docs/research/examiner-productization-20261029/examiner-vitest.txt"
+  ]
+}

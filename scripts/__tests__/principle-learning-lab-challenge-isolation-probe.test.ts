@@ -9,8 +9,9 @@
 // pending its own Owner authorization (the PRI-1037 ticket itself forbids
 // auto-initiating model calls).
 
-import { describe, expect, it, beforeEach } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -25,10 +26,13 @@ import { runChallengeStudy, verifyFrozenStudy } from '../dev/principle-learning-
 import { createChallengeLedger } from '../dev/principle-learning-lab/lib/challenge-ledger.mjs';
 import { createHostActorAdapter, createRealModelActor, hostTaskIdForUnit } from '../dev/principle-learning-lab/lib/challenge-actor-transport.mjs';
 import { STAGE_R_AUTH_SCHEMA } from '../dev/principle-learning-lab/lib/challenge-stage-r-gate.mjs';
+import { readRolloutEvidenceForSession } from '../dev/principle-learning-lab/lib/host-actor.mjs';
 
 const labRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../dev/principle-learning-lab');
 const realStudyDir = path.join(labRoot, 'challenge-studies', 'CEB-001');
-const tmpRoot = path.join(labRoot, '..', '..', '..', '.tmp', 'isolation-probe-tests');
+// Run-scoped managed temp storage keeps yesterday's fixed session ids from
+// corroborating an empty home or making today's rollout ambiguous.
+const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'isolation-probe-tests-'));
 // fixed evidence location inside every study copy (the module's own contract)
 const EVIDENCE_REL = 'isolation-probes/PRI-1037.json';
 
@@ -63,10 +67,9 @@ const NOW = Date.now();
 const NOW_ISO = '2026-10-26T12:00:00Z';
 const CASE_ID = 'CEB-001-FV-01';
 
-let copyCounter = 0;
+let copyCounter = 0; // per-run tag counter (study copies); codex homes are mkdtemp (fresh per run)
 function copyStudy(tag: string): string {
   const dir = path.join(tmpRoot, `${tag}-${++copyCounter}`);
-  fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(path.dirname(dir), { recursive: true });
   fs.cpSync(realStudyDir, dir, { recursive: true });
   return dir;
@@ -112,10 +115,9 @@ const cleanScanner = () => ({ crossGroupLeakage: 0, productionWrites: 0, externa
  *  searches today/yesterday). Wiring-fixture only — fabricating these in a
  *  test tmp dir is the documented cooperative boundary, never real-host
  *  evidence. */
-function fabricateRollout(codexHome: string, sessionId: string, model = 'test-double/never-real') {
+function fabricateRollout(codexHome: string, sessionId: string, model = 'test-double/never-real', d = new Date()) {
   const safe = sessionId.replace(/[^A-Za-z0-9_-]/g, ''); // filename whitelist
   if (safe.length === 0) throw new Error('fabricateRollout: sessionId sanitizes to empty');
-  const d = new Date();
   const dayRel = path.join('sessions', String(d.getUTCFullYear()), String(d.getUTCMonth() + 1).padStart(2, '0'), String(d.getUTCDate()).padStart(2, '0'));
   fs.mkdirSync(path.join(codexHome, dayRel), { recursive: true });
   const lines = [
@@ -175,10 +177,6 @@ function validF2Auth(over: Record<string, any> = {}) {
     ...over,
   };
 }
-
-beforeEach(() => {
-  fs.mkdirSync(tmpRoot, { recursive: true });
-});
 
 // ===========================================================================
 // A. probe engine (injected doubles)
@@ -257,7 +255,7 @@ describe('A. isolation probe engine', () => {
 describe('B. verifyF2ProbeEvidence', () => {
   it('B1: offline-rehearsal evidence can NEVER authorize F2 — the honest marker is machine-enforced', () => {
     const dir = copyStudy('verify-offline');
-    const codexHome = path.join(tmpRoot, `codex-${++copyCounter}`);
+    const codexHome = fs.mkdtempSync(path.join(tmpRoot, 'codex-'));
     writeProbeEvidence(dir, codexHome, { executedIn: 'offline-rehearsal' });
     const v = verifyF2ProbeEvidence({ studyDir: dir, evidenceRef: EVIDENCE_REL, expected: { studyId: FROZEN.studyId, suiteHash: FROZEN.suiteHash }, codexHome });
     expect(v.ok).toBe(false);
@@ -266,8 +264,8 @@ describe('B. verifyF2ProbeEvidence', () => {
 
   it('B2: real-host evidence without rollout corroboration is refused (record fields alone authorize nothing)', () => {
     const dir = copyStudy('verify-norollout');
-    const rolloutsHome = path.join(tmpRoot, `codex-${++copyCounter}`); // rollouts land here…
-    const verifyHome = path.join(tmpRoot, `codex-${++copyCounter}`); // …but F2 verifies against THIS empty home
+    const rolloutsHome = fs.mkdtempSync(path.join(tmpRoot, 'codex-')); // rollouts land here…
+    const verifyHome = fs.mkdtempSync(path.join(tmpRoot, 'codex-')); // …but F2 verifies against THIS empty home
     fs.mkdirSync(verifyHome, { recursive: true });
     writeProbeEvidence(dir, rolloutsHome);
     const v = verifyF2ProbeEvidence({ studyDir: dir, evidenceRef: EVIDENCE_REL, expected: { studyId: FROZEN.studyId, suiteHash: FROZEN.suiteHash }, codexHome: verifyHome });
@@ -277,7 +275,7 @@ describe('B. verifyF2ProbeEvidence', () => {
 
   it('B3: real-host evidence WITH corroborated rollouts verifies (wiring proof; fabrication boundary documented); missing codexHome fails closed', () => {
     const dir = copyStudy('verify-ok');
-    const codexHome = path.join(tmpRoot, `codex-${++copyCounter}`);
+    const codexHome = fs.mkdtempSync(path.join(tmpRoot, 'codex-'));
     writeProbeEvidence(dir, codexHome);
     const v = verifyF2ProbeEvidence({ studyDir: dir, evidenceRef: EVIDENCE_REL, expected: { studyId: FROZEN.studyId, suiteHash: FROZEN.suiteHash }, codexHome });
     expect(v).toMatchObject({ ok: true, reasons: [] });
@@ -288,7 +286,7 @@ describe('B. verifyF2ProbeEvidence', () => {
 
   it('B4: corrupt, missing, null, wrong-schema, traversal-style, mismatched and partially-failed evidence all refuse (boundary guard: only the fixed in-study evidence path is ever read)', () => {
     const dir = copyStudy('verify-bad');
-    const codexHome = path.join(tmpRoot, `codex-${++copyCounter}`);
+    const codexHome = fs.mkdtempSync(path.join(tmpRoot, 'codex-'));
     const expectRefused = (v: { ok: boolean; reasons: string[] }) => { expect(v.ok).toBe(false); expect(v.reasons.length).toBeGreaterThan(0); };
     // missing file
     expectRefused(verifyF2ProbeEvidence({ studyDir: dir, evidenceRef: 'isolation-probes/absent.json', expected: { studyId: FROZEN.studyId, suiteHash: FROZEN.suiteHash }, codexHome }));
@@ -320,6 +318,20 @@ describe('B. verifyF2ProbeEvidence', () => {
     writeProbeEvidence(dir, codexHome, { executedAt: '2026-10-26T12:00:00' });
     expectRefused(verifyF2ProbeEvidence({ studyDir: dir, evidenceRef: EVIDENCE_REL, expected: { studyId: FROZEN.studyId, suiteHash: FROZEN.suiteHash }, codexHome }));
   });
+
+  it('B5: two rollouts claiming one session across UTC days remain ambiguous and cannot authorize F2', () => {
+    const dir = copyStudy('verify-ambiguous');
+    const codexHome = path.join(tmpRoot, `codex-${++copyCounter}`);
+    writeProbeEvidence(dir, codexHome);
+    const now = new Date();
+    fabricateRollout(codexHome, 'probe-s1', 'test-double/never-real', new Date(now.getTime() - 86_400_000));
+    const evidence = readRolloutEvidenceForSession({ codexHome, sessionId: 'probe-s1', now });
+    expect(evidence).toMatchObject({ found: false, ambiguous: true });
+    expect(evidence.files).toHaveLength(2);
+    const v = verifyF2ProbeEvidence({ studyDir: dir, evidenceRef: EVIDENCE_REL, expected: { studyId: FROZEN.studyId, suiteHash: FROZEN.suiteHash }, codexHome });
+    expect(v.ok).toBe(false);
+    expect(v.reasons.join(' ')).toContain("probe session 'probe-s1' is not corroborated");
+  });
 });
 
 // ===========================================================================
@@ -347,7 +359,7 @@ describe('C. Stage R runner F2 integration', () => {
 
   it('C2: with valid real-host evidence + corroborated rollouts an authorized F2 unit executes (wiring double — never real-host acceptance)', async () => {
     const dir = copyStudy('runner-withevidence');
-    const codexHome = path.join(tmpRoot, `codex-${++copyCounter}`);
+    const codexHome = fs.mkdtempSync(path.join(tmpRoot, 'codex-'));
     writeProbeEvidence(dir, codexHome);
     writeInside(dir, 'run-authorization.json', JSON.stringify(validF2Auth(), null, 2));
     let round = 0;

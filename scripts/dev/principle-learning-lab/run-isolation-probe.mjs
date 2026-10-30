@@ -88,7 +88,7 @@ const scanner = createProbeSideEffectScanner({
 let transport = null;
 let evidenceDispatch = null;
 if (record.targetHost.kind === 'openclaw') {
-  const { createOpenClawHostTransport, readOpenClawTrajectoryEvidence } = await import('./lib/challenge-openclaw-host.mjs');
+  const { createOpenClawHostTransport, readOpenClawExecStateTrajectory } = await import('./lib/challenge-openclaw-host.mjs');
   // S5 P1-2: the approved provider comes from the authorization record (NOT
   // inferred from the model id string) and is enforced on every round.
   const expectedProvider = record.targetHost.provider;
@@ -113,15 +113,18 @@ if (record.targetHost.kind === 'openclaw') {
     configPath: path.join(record.targetHost.openclawHome, 'openclaw.json'), // pin the owner's config (zai provider + credentials)
     timeoutMsPerCall: record.caps.timeoutMsPerCall,
   });
-  const sessionsDir = path.join(record.targetHost.openclawHome, 'agents', record.targetHost.openclawAgent || 'main', 'sessions');
   evidenceDispatch = {
     hostKind: 'openclaw',
-    openclawSessionsDir: sessionsDir, // S7 §四: the AMBIENT sessions dir — existing auth profile store stays reachable, trajectories persist there
-    openclawTrustedRoot: sessionsDir,
     openclawExpectedProvider: expectedProvider,
     openclawExpectedModel: record.targetHost.requestedModelIdentity, // S5.1 §四: deep verification binds the AUTHORIZED model
-    openclawControlledRoot: sessionsDir, // S7 §四: mapped session dirs must resolve inside the ambient sessions root
-    readOpenClawTrajectory: readOpenClawTrajectoryEvidence,
+    // S9 cycle-2: exec sessions persist their trajectory in each round's own
+    // state database under this runner-controlled rounds root; the evidence
+    // map's roundDir must resolve inside it and the state dir is derived
+    // structurally (<roundDir>/state), so self-reported paths are never the
+    // trust anchor. (The ambient sessions dir is no longer an evidence root —
+    // exec sessions never write the gateway-era pointer files there.)
+    openclawControlledRoot: roundsRoot,
+    readOpenClawTrajectory: readOpenClawExecStateTrajectory,
   };
 } else {
   // codex-cli route: the Zhipu per-spawn adapter (merged to main via #2204).

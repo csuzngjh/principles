@@ -1,7 +1,7 @@
 # Principle Learning 项目状态（唯一权威）
 
 > 本文档是 Principle Learning 研究项目的唯一状态来源。后续任何 AI 执行前必须先读本文件。
-> 最后更新：2026-10-25（新增 §10 Examiner 支线状态）；此前 2026-10-23；分支 `ai/PRI-966-ca-content-modes` HEAD `5c11c908b`（PR #2116）。
+> 最后更新：2026-10-30（§10 第三十七次增补：F2/PRI-1038 真实宿主实验完成，realHostBaseline=PASS）；此前 2026-10-30（第三十六次：探针 PASSED）；分支 `ai/PRI-1038-f2-real-execution`。 2026-10-30 追加 §10.1 与 S8（PRI-1037 周期 1）历史归档补录（archive-only，不改变任何状态结论）。
 > 维护规则：状态变化时更新本文件对应小节；禁止另建竞争性状态报告。
 
 ## 1. 研究协议
@@ -152,3 +152,44 @@
 - **S6 授权签发与真实探针三连败停机（2026-10-28 第三十三次增补，branch `ai/PRI-1037-probe-execution`）**：Owner 批准五轮真实探针（zai 通道/6h 窗口/异常即停）→ 授权记录翻 APPROVED（窗口 2026-10-28T10:10Z–16:10Z，issuedBy=owner-20261028-probe-approval）。**三次真实执行全部 FAILED，按「异常立即停止并保留证据」停机**——attempt-1：`--agent` 非 exec 选项（2026.10.5 help 实据）CLI 直接拒参；attempt-2：`--state-dir` 要求已存在目录（ENOENT 实据）；attempt-3（参数面修复后真实到达模型执行）：**全 5 轮 180s 超时**——state 内 plugin-captures 实据显示 exec 对 pin 配置执行插件安装耗尽预算；且 productionWrites=1 无法归因（多 Agent 并行环境）。**遗留三个 Owner 决策**：①caps.timeoutMsPerCall 180s→600s（exec 默认值，授权预算变更=Owner）；②精简 pin 配置（剥离 plugins/skills——需确认 zai 凭据在 pin 配置+新 state 下的解析路径：zai.apiKey 为空串，宿主凭据走 auth-profiles 存储，其在新 state 的可用性未证实）或改用 --auth-env-only+env 注入（env 名待从 provider-env-vars 确认）；③productionWrites 归因（并行环境噪声 vs 真实写入）。**证据全保留**：attempt-1/2/3 记录入库 `docs/research/pri1037-probe-attempts/`+三个 workRoot 未清理；适配器/runner 修复入库（openclawBin prefix plumbing、--config pin、--state-dir 预建、--isolated/--agent 移除及语义注释）；授权窗口未过（Owner 可指示重试或调整）；十套件 176/176 维持；真实模型调用=15 次（3×5 轮全部超时/拒参，零有效完成）。F2 未授权未启动。
 
 - **S7.1 ambient state 证据绑定契约+定点修复（2026-10-28 第三十五次增补，PR #2213 分支）**：**§2 CodeQL/路径验证**——runner 未用导入（zhipu 静态导入+残留 scanForGold 局部函数）已删；`verifyF2ProbeEvidence` 的 `sessionsDirReal` 不可达 null 判断删除：ambient sessions 目录 realpath 解析失败即**整体 fail-closed 拒绝**（无跳过/无回退），映射 sessionsDir 的 realpath 包含性校验保留。**§3 ambient state 根目录契约**——adapter 新增注入式 `env` 参数（默认 process.env）：构造期用 `resolveAmbientStateRoot(env)` 解析实际 state 根，与声明 `openclawHome` 做 normalized+大小写不敏感比对，**不一致即在任何 spawn 之前拒绝**（声明的 openclawHome 字符串不再是实际路径的证据）；离线测试：env 重定向拒绝（零 spawn 断言）/匹配接受/大小写归一化。**§4 E2E 修正+副作用时序**——stub 移除对已不存在的 `--state-dir` 的读取；断言 `--config`+每轮 `--cwd` 存在且**无 `--state-dir`**；每轮独立 sessionId 断言保留；**副作用扫描改每轮门**（failFast 下每轮后即扫：不洁/扫描器抛错/无 clean 判定=不可验证→立即停止剩余轮，最终 scan 检查透出「first went unclean after round N」；S7.1 前 5 轮后才发现的缺陷已关闭）；注入式测试：round-2 后不洁→spawnCount=2（rounds 3-5 未执行）/扫描器抛错同停。**授权 REVOKED 保持**；三研究 freeze OK；真实模型请求 0。**验证**：E2E 18 项+授权 22 项+全套 **184/184 绿**；eslint 净。
+
+> **PRI-1037 周期 1 / 2026-10-28（S8 补录，archive-only）**：以下两条 S8 增补来自授权周期 1 分支 `ai/PRI-1037-probe-execution`（PR #2216），原文逐字保留。它们记录**周期 1 attempt-4 FAILED**、周期 1 授权 REVOKED、OpenClaw 宿主半更新故障的诊断与修复过程；失败证据原件已归档 `docs/research/pri1037-probe-attempts/cycle-1-20261028/`（见该目录 README 的 SHA-256 对账）。
+>
+> **编号说明**：原文的「第三十六/第三十七次增补」是周期 1 分支上的并行编号，与主干 S9/F2 的同号增补**不是同一条记录**。本节排序权威=日期 + 周期标签：S8=周期 1 / 2026-10-28，S9=周期 2 / 2026-10-30，F2=2026-10-30。两个周期各有一个 attempt-4，不得合并理解、相互覆盖或当作同一次实验。
+
+- **S8 新授权签发+attempt-4 停机：宿主卡死于半更新状态（2026-10-28 第三十六次增补，branch `ai/PRI-1037-probe-execution`）**：Owner goal 指令签发全新授权（APPROVED，5 轮×600s caps，窗口 15:10Z–21:10Z）。**attempt-4 round-1 即触发停止条件**（failFast 生效，rounds 2–5 未执行）：OpenClaw ambient 插件加载全部抛 `FsSafeError: copy path changed during operation`，exec 以 exception 退出——模型调用未发生。三次独立执行（attempt-4+两次复现）同错 → **非瞬时故障**。`openclaw update status`/`doctor` 实据：宿主卡死于半更新状态（七插件 data/settings upgrade 未完成+abandoned update 事务），官方修复=`openclaw update repair`+`doctor --fix`，另有待装更新 2026.10.5→2026.10.8。**BLOCKED_ON_OWNER_DECISION**（`pri1037-probe-attempts/HOST-REPAIR-DECISION.md`）：修复=共享宿主变更（多 Agent 并行干扰风险）+版本变更超出授权目标（OpenClaw 2026.10.5）；备选路径（精简配置/移除插件）被 S7 §三 禁止。**处置**：授权周期 1 翻 REVOKED（15:40Z+证据位置）；attempt-4 归档 `attempt-4-PRI-1037.json`；workRoot 未清理；真实模型请求 0。Owner 批准修复后的执行序列已机械就绪（版本核验→全新授权→探针→深验→F2→收口）。
+- **S8 宿主修复执行与硬阻塞落定（2026-10-28 第三十七次增补）**：Owner 批准修复后执行——gateway stop --force → `update repair`（40 分钟，doctor 在 plugin-install-index 迁移拒绝，后续四迁移全部 blocked-by-prior-refusal）→ `doctor --fix`（同拒绝链；**vendor 根因落地**：`plugins/installs.json` 早于 2026-07 升级支持窗口，doctor fail-closed 保留数据，官方修复前置=**回退 2026.9.5 带备份执行 doctor --fix 再升级**）；修复后 exec 仍 `copy path changed during operation` 失败、版本仍 2026.10.5；Gateway 已按规程手动重启恢复在线（127.0.0.1:18789）。**触及自主停止条件「重大数据风险」**：修复=生产宿主降级+备份+重升级（PD 插件/工作区/认证资料所在宿主），时机与备份范围=Owner 决策。**BLOCKED_ON_OWNER_DECISION**（HOST-REPAIR-DECISION.md 已更新修复记录）；探针授权周期 1 REVOKED 保持；真实模型请求 0。
+
+- **S9 周期 2：探针根因修复+真实宿主隔离探针 PASSED（2026-10-30 第三十六次增补，branch `ai/PRI-1037-probe-execution-2`，提交 acc6414a8）**：Owner goal 授权周期 2（OpenClaw 2026.10.5 / zai / glm-5.3-flash / 5 轮 / 每轮 600s / 窗 2026-10-29T19:30Z–2026-10-30T01:30Z）。**attempt-1 失败根因（真实 exec tee 取证）**：OpenClaw 2026.10.x 经 `writeRuntimeJson` 以 `JSON.stringify(v, undefined, 2)` **pretty-print** exec 信封——适配器"最后一个 `{` 开头单行"解析器只抓到裸 `{`，`JSON.parse` 必败：退出码契约永远见不到真实 cleanup 信封（诊断被 stderr 配置警告淹没），**成功路径同样损坏**（任何真实 exec 信封从未被解析过；单行合成信封离线测试掩盖）。**修复（acc6414a8）**：①`extractExecEnvelope` 有序提取（整体→首尾跨度→末行，仅对象）+失败诊断优先信封结构化错误；②每轮 `--state-dir <轮目录>/state`——源码+真实 exec 机制验证：auth store 在 state 重定前自 ambient 解析并桥接（**S7「重指 state 即空凭据」系归因错误，attempt-3 真凶=逐轮插件安装耗尽预算**；用户 state 目录永不 rm→Windows EBUSY 路径不再触发，轮次 exit 0 干净 ok:true，机制验证 96s/轮）；③证据通道重定：exec 会话轨迹只存于 `<stateDir>/agents/<agent>/agent/openclaw-agent.sqlite` trajectory_runtime_events（**ambient 指针文件从不产生**——实测 ambient sessions 零写入，S5.2 指针读取器保留供 gateway 时代证据）——新增 `readOpenClawExecStateTrajectory`（包含性/逐行 schema/单一 session.started/model+provider 双要求）；深验映射改结构化三元组 roundDir/stateDir/stateAgentDb，stateDir 由验证器自受控 roundDir **派生**（伪造位置仍拒），映射缺失即拒。测试：622 项 lab 全绿（27 文件；pretty 信封回归×3+伪造 roundDir/stateDir 负控+授权周期 2 PIN 重钉）。**attempt-4 正式探针 PASSED（2026-10-29T20:39–20:56Z）**：9/9 检查全过（金标/评分规则/跨臂/生产写 git push/外网 curl 五项全真拒；5 独立会话；身份 VERIFIED=信封+轨迹双源；副作用零泄漏零生产写，state 40 文件全审计）+ `verifyF2ProbeEvidence` 深验 ok 零理由。**真实调用对账（授权窗内）**：8 次（探针轮尝试 6=1 失败+5 成功+诊断 2，全部 zai/glm-5.3-flash，每轮 ~12.7–18.3k tokens）。证据归档 `docs/research/pri1037-probe-attempts/`（attempt-4 记录+轮次摘要+逐会话轨迹 JSONL〔派生物已标注〕+CYCLE-2-REPORT.md）；state DB 一手证据留存 workRoot 待合并后清理。**PRI-1037=RUN+PASSED（真实宿主隔离门通过）**；F2/PRI-1038 维持未授权未启动（unblockCondition 要求 Owner 独立签发）；CEB-001/002/003-P 冻结不变。
+
+- **F2/PRI-1038 真实宿主实验完成（2026-10-30 第三十七次增补，branch `ai/PRI-1038-f2-real-execution`）**：Owner 指令「授权F2」→ 授权记录归档 `docs/research/pri1038-f2/F2-RUN-AUTHORIZATION.json`（36 单元=12 题×三臂×1 重复〔与 F1 可比〕/360 requests/每 attempt ≤10/600s exec 墙钟/24h 窗；冻结 study 目录保持占位原样，驱动脚本注入副本）。**接线**（c556e92b4）：F2 actor 适配器接受双宿主（codex/openclaw）并捕获 per-round exec-state 证据位置；gate `readObservedHostEvidence` 闭形状透传；runner F2 探针深验按授权 `realHostProbe.hostKind` 分派（openclaw→exec-state 佐证+受控根，缺失即拒）；baseline 派生按 hostKind 分派；CLI 解锁 F2（--openclaw-bin/--probe-controlled-root 强制）；驱动脚本 `run-stage-r-f2.mjs`（新副本/授权注入/断点续跑）。**批次 1 WIRING_DEFECT**（18 单元全部 invalid_action_cap/no_report）：trace 取证证明模型回复为完全合法动作 JSON——适配器无条件 `JSON.stringify(string payload)` 双重编码致解析恒败；即时停机，批次 1 副本原样保留为缺陷证据不入研究判定；修复（仅对象 stringify）+ 夹具新鲜度修复（codex 夹具 mkdtemp，跨运行 appendFileSync 累积跨 UTC 日后变 ambiguous 的三处 flaky 根因）入库（c443eb0bd）。**批次 2 完整执行（副本 1793322627130，01:10–03:10Z）**：36/36 SUCCEEDED、裁定 A 12/12 PASS、B 11/12（CT-02 no_report）、C 11/12（CT-02 no_report，与 B 同题同败而 A 臂同题 PASS）；97 真实请求（每单元 1–7 步、中位 3）、身份 97/97 观测 glm-5.3-flash（信封+轨迹双源）、97 独立会话、36/36 记录携授权链+exec-state 证据；**`deriveRealHostBaselineFromStudy` = PASS（机器派生）**；行为报告 REPORT_READY + verify 零 findings；三 freeze 执行前后不变；零生产写入。**对账**：授权窗内 ~133 请求（批次1 ~36 + 批次2 97 ≤360）；批次 2 token 记账缺口如实披露（transport 未透传 envelope.usage 至 attempt 记录，原始 usage 保留于 exec-state DB，适配器已补）。**F1 对照（描述性）**：A 臂天花板复现（12/12 vs F1 10/10 可评全 PASS）；唯一失败=B/C 注入臂同题同败（CT-02）——与 F1「注入臂同败、B≠C 未分化」模式同构，继续支持既有判定边界；n=1 不做假设检验。**PRI-1038=RUN+PASS、realHostBaseline=PASS；PRI-1024 剩余收口=状态与 Linear 终局**。证据：`docs/research/pri1038-f2/F2-EXECUTION-REPORT.md` + `execution-archive/`（36 attempt 文件+三层账本+报告对+97 轨迹 JSONL〔派生已标注〕）；647 项 lab 测试绿。
+
+### 10.1 PRI-1037 两次 attempt-4 的历史关联（2026-10-30 归档补录）
+
+```text
+Cycle 1 attempt-4 FAILED
+    ↓
+OpenClaw 宿主故障诊断及修复
+    ↓
+Cycle 2 attempt-4 PASSED
+    ↓
+F2 36/36 SUCCEEDED
+    ↓
+realHostBaseline PASS
+```
+
+逐项对应（供后续研究者核对，勿把两个 attempt-4 当作同一次实验）：
+
+| 阶段 | 记录 | 时间 | 结果 | 证据位置 |
+| --- | --- | --- | --- | --- |
+| Cycle 1 attempt-4 | S8（周期 1） | 2026-10-28T15:11Z | **FAILED**：round-1 触发停止条件（`FsSafeError: copy path changed during operation`），rounds 2–5 未执行，真实模型请求 **0**，授权 REVOKED（15:40Z） | `pri1037-probe-attempts/cycle-1-20261028/` |
+| 宿主诊断与修复 | S8（周期 1） | 2026-10-28 | 半更新卡死；`update repair`/`doctor --fix` 均 fail-closed 拒绝；vendor 根因=`plugins/installs.json` 早于 2026-07 支持窗口，前置=生产宿主降级+备份+重升级 → `BLOCKED_ON_OWNER_DECISION` | `cycle-1-20261028/HOST-REPAIR-DECISION.md` |
+| Cycle 2 attempt-4 | S9（周期 2） | 2026-10-29T20:39–20:56Z | **PASSED**：9/9 检查 + `verifyF2ProbeEvidence` 深验 ok，授权窗内真实调用 8 次 | `pri1037-probe-attempts/attempt-4-PRI-1037.json`、`CYCLE-2-REPORT.md` |
+| F2 | F2/PRI-1038 | 2026-10-30 批次 2 | **36/36 SUCCEEDED**，97 真实请求 | `pri1038-f2/` |
+| realHostBaseline | F2/PRI-1038 | 2026-10-30 | **PASS**（`deriveRealHostBaselineFromStudy` 机器派生） | 同上 |
+
+边界声明：
+
+- 周期 2 的 PASSED **不抹除**周期 1 的失败证据；周期 1 的 FAILED **不构成**周期 2 结论的反例——两者属不同授权周期、不同宿主状态、不同 attempt 序列。
+- 周期 1 记录（含 `status=REVOKED` 的授权快照）为**历史证据**，不参与任何门禁读取；探针授权权威始终是主干 `scripts/dev/principle-learning-lab/challenge-studies/CEB-001/probe-authorization.json`（当前=周期 2 APPROVED）。
+- 归档来源：PR #2216（HEAD `34652891d`）；该 PR 因会覆写周期 2 记录而不再合并，其历史证据由 archive-only 分支迁入本节与 `cycle-1-20261028/`。

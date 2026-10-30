@@ -1,0 +1,5 @@
+{
+  "revision": 2,
+  "previousPackageHash": "9d92761b827ddf2c85790a1dac82ab1cb55667ba3529cfabe03a3fc60751806c",
+  "reason": "Refusal classification now treats stale/conflicting evidence as insufficient, preserving UNKNOWN; no human review occurred."
+}

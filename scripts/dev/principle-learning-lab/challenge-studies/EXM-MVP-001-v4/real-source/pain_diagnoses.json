@@ -1,0 +1,14 @@
+[
+  {
+    "id": "diagnosis_pain_host_f31331de9908cd92da55ad27cc8fb1c5cc6855352db29b35ce070fa043a6052b::pain_host_f31331de9908cd92da55ad27cc8fb1c5cc6855352db29b35ce070fa043a6052b",
+    "pain_id": "pain_host_f31331de9908cd92da55ad27cc8fb1c5cc6855352db29b35ce070fa043a6052b",
+    "task_id": "diagnosis_pain_host_f31331de9908cd92da55ad27cc8fb1c5cc6855352db29b35ce070fa043a6052b",
+    "diagnosis_id": "pain_host_f31331de9908cd92da55ad27cc8fb1c5cc6855352db29b35ce070fa043a6052b",
+    "category": "People",
+    "root_cause": "People: Agent 形成了“先下结论、后（或根本不）查验”的汇报习惯——在没有执行任何可观察验证（git 检查、启动服务、抓取输出）的情况下，把推断直接写成事实断言（“未纳入 git 跟踪”“验证通过”），把“完成叙述”当成“已经验证成功”，且在被纠正前不会主动区分“已查验”与“未查验”。这属于可避免的行为缺陷，并叠加了“汇报流程缺少证据绑定关口”这一设计侧因素。",
+    "evidence_json": "[{\"sourceRef\":\"owner_correction\",\"note\":\"Owner 原话（逐字）：“等一下，你这份汇报里有两个问题。第一，你说这个目录「未纳入 git 跟踪」——它明明是个 git 仓库，初始提交都在，你没查过就下结论。第二，你说「验证通过」——你到底验证了什么？你跑过服务吗？以后汇报里的每一个事实结论，都必须是你实际查验过的；没查过的就明说没查，不要想当然。” 这是权威证据：同时确认了（a）两条未查验即下的事实结论，（b）git 仓库这一事实本可通过一次简单检查获知，（c）Owner 提出的长期要求——未查必须明说。\"},{\"sourceRef\":\"signal_collector\",\"note\":\"诊断目标的主行为证据与 correctionEvidence 文本一致（sessionId=0d2e48c5-2a40-4fe8-b27f-b390d2fd2695, occurredAt=2026-09-21T17:29:50.607Z），确认这是 Owner 主动纠正（source=user_correction, severity=severe），而非环境或工具故障报错。\"},{\"sourceRef\":\"diagnosis_pain_host_f31331de9908cd92da55ad27cc8fb1c5cc6855352db29b35ce070fa043a6052b\",\"note\":\"reasonSummary 将痛点概括为“用户明确指出了AI在‘git跟踪’和‘验证通过’两处的事实错误，并要求以后必须实际查验后才能下结论”，指明故障点是断言的证据基础缺失，而不是代码或依赖问题；provenance=automatic_hook(after_tool_call) 说明纠正发生在一次工具调用之后。\"},{\"sourceRef\":\"run_diagnosis_pain_host_f31331de9908cd92da55ad27cc8fb1c5cc6855352db29b35ce070fa043a6052b_1\",\"note\":\"traceAvailability=unavailable_with_reason（“Automatic hook pain but source trace could not be resolved”，且未通过 sessionId 定位到 source task），conversationWindow 仅有 system/assistant 两条且正文为空。因此本次分析无法逐条复原 Agent 实际执行了哪些工具调用；但 Owner 的纠正已独立、充分地证明“验证通过”与 git 状态两项结论缺乏查验证据。\"},{\"sourceRef\":\"diagnosis_pain_host_f31331de9908cd92da55ad27cc8fb1c5cc6855352db29b35ce070fa043a6052b\",\"note\":\"INTENT.md（.principles/INTENT.zh-CN.md, sha256:778a1456…）各节仍为未填写的模板问句（Why / Desired Outcome / Non-negotiables / Stop / Current Strategic Focus 均无实质内容），意味着“汇报中的事实结论必须可追溯、未查必须声明”这一 Owner 底线目前没有任何 Owner 侧文档承载，只能靠每次即时纠正。\"}]",
+    "confidence": 0.76,
+    "artifact_id": "b2460121-2a8c-46ee-b038-99b73bd5aa30",
+    "created_at": "2026-09-21T17:35:28.585Z"
+  }
+]

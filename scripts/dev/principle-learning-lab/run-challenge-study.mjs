@@ -25,15 +25,18 @@
 //   node run-challenge-study.mjs --study-dir <copy> \
 //        --execution-mode F1-direct-model --now 2026-10-27T00:00:00Z --dry-run
 //
-// F2-real-host is deliberately NOT exposed here: it needs a configured real
-// host environment and stays behind its own execution round (PRI-1037 must
-// pass first). The gate, not this CLI, remains the authorization authority.
+// F2-real-host (PRI-1038) requires an Owner-issued APPROVED run-authorization.json
+// with executionMode F2-real-host INSIDE the study copy, a PASSED PRI-1037 probe
+// bound to this suite with its hostKind declared, and the operator-declared probe
+// controlled root (the probe workRoot rounds dir) for deep evidence
+// re-verification. The gate, not this CLI, remains the authorization authority.
 
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { verifyFrozenStudy, verifyArmConfigsFrozen, runChallengeStudy, STUB_STRATEGIES, RUNNER_EXECUTION_MODES } from './lib/challenge-runner.mjs';
 import { readStageRAuthorization, verifyStageRAuthorization, readStudyPlanHash, readAuthorizationRevocations, MAX_REQUESTS_PER_ATTEMPT_CEILING } from './lib/challenge-stage-r-gate.mjs';
-import { createRealModelActor, createAmdActorResponder } from './lib/challenge-actor-transport.mjs';
+import { createRealModelActor, createHostActorAdapter, createAmdActorResponder, hostTaskIdForUnit } from './lib/challenge-actor-transport.mjs';
 import { INTERN_S2_BASE_URL, resolveInternS2ApiKey, BIGMODEL_CODING_BASE_URL, BIGMODEL_CODING_MODEL_ID, resolveBigmodelCodingApiKey } from './lib/challenge-amd-transport.mjs';
 import { createChallengeLedger } from './lib/challenge-ledger.mjs';
 
@@ -54,8 +57,9 @@ if (!RUNNER_EXECUTION_MODES.includes(executionMode)) {
   console.error(`run-challenge-study: --execution-mode must be one of ${RUNNER_EXECUTION_MODES.join(' | ')} (got '${executionMode}')`);
   process.exit(1);
 }
-if (executionMode === 'F2-real-host') {
-  console.error('run-challenge-study: F2-real-host is not available through this CLI — it requires a configured real host environment and a PASSED PRI-1037 isolation probe (own execution round). Stage R F1 only.');
+if (executionMode === 'F2-real-host'
+  && (arg('--openclaw-bin') === undefined || arg('--probe-controlled-root') === undefined)) {
+  console.error('run-challenge-study: F2-real-host requires the OpenClaw wiring flags — pass --openclaw-bin (the openclaw.mjs path or a spawnable bin) and --probe-controlled-root (the PRI-1037 probe workRoot rounds dir for deep evidence re-verification)');
   process.exit(1);
 }
 const dryRun = process.argv.includes('--dry-run');
@@ -224,7 +228,50 @@ try {
   // a provider its authorization does not name (and a failover authorization
   // names the alternate model explicitly, per the owner runbook).
   let responderFactory = null;
-  if (executionMode !== 'offline-stub') {
+  let hostTransportFactory = null;
+  if (executionMode === 'F2-real-host') {
+    const identity = verified.auth && typeof verified.auth.requestedActorIdentity === 'string' ? verified.auth.requestedActorIdentity : null;
+    const probeBinding = verified.auth && verified.auth.isolationAcceptance && verified.auth.isolationAcceptance.realHostProbe;
+    if (!probeBinding || typeof probeBinding.hostKind !== 'string' || probeBinding.hostKind.length === 0) {
+      console.error('run-challenge-study: F2 authorization carries no isolationAcceptance.realHostProbe.hostKind — the host evidence dispatch is closed (openclaw | codex-cli), refusing');
+      process.exit(1);
+    }
+    if (probeBinding.hostKind !== 'openclaw') {
+      console.error(`run-challenge-study: no F2 host wiring is registered for hostKind '${probeBinding.hostKind}' — only the PRI-1037 cycle-2-verified OpenClaw path is wired (fail-closed; never guess a host)`);
+      process.exit(1);
+    }
+    if (typeof probeBinding.hostProvider !== 'string' || probeBinding.hostProvider.length === 0) {
+      console.error('run-challenge-study: F2 authorization carries no realHostProbe.hostProvider — the approved provider must be declared (fail-closed)');
+      process.exit(1);
+    }
+    if (identity !== 'glm-5.3-flash') {
+      console.error(`run-challenge-study: no F2 host transport wiring is registered for requestedActorIdentity '${String(identity)}' — refusing (fail-closed; never guess a provider)`);
+      process.exit(1);
+    }
+    const { createOpenClawHostTransport } = await import('./lib/challenge-openclaw-host.mjs');
+    const openclawBinPath = arg('--openclaw-bin');
+    const openclawSpawn = openclawBinPath.endsWith('.mjs')
+      ? { bin: process.execPath, prefixArgs: [openclawBinPath] }
+      : { bin: openclawBinPath, prefixArgs: [] };
+    const openclawHome = path.join(process.env.USERPROFILE || process.env.HOME || '', '.openclaw');
+    const f2RoundsRoot = path.join(path.dirname(resolved), 'f2-host-rounds');
+    const probeControlledRoot = path.resolve(process.cwd(), arg('--probe-controlled-root'));
+    if (!fs.existsSync(probeControlledRoot)) {
+      console.error(`run-challenge-study: --probe-controlled-root does not exist: ${probeControlledRoot} (the PRI-1037 probe workRoot rounds dir — deep evidence re-verification is fail-closed without it)`);
+      process.exit(1);
+    }
+    hostTransportFactory = () => createOpenClawHostTransport({
+      model: `zai/${identity}`, // provider-prefixed transport model id (envelope provider must equal zai exactly)
+      expectedProvider: probeBinding.hostProvider,
+      roundsRoot: f2RoundsRoot,
+      openclawBin: openclawSpawn.bin,
+      openclawPrefixArgs: openclawSpawn.prefixArgs,
+      openclawHome,
+      configPath: path.join(openclawHome, 'openclaw.json'),
+      timeoutMsPerCall: requestTimeoutMs !== undefined ? requestTimeoutMs : 240_000, // exec wall clock (agent deadline); the gate binds the approved value
+    });
+    console.log(`run-challenge-study: transport = OpenClaw agent exec (zai/${identity}; provider binding=${probeBinding.hostProvider}; probe deep verify root=${probeControlledRoot})`);
+  } else if (executionMode !== 'offline-stub') {
     const identity = verified.auth && typeof verified.auth.requestedActorIdentity === 'string' ? verified.auth.requestedActorIdentity : null;
     if (identity === 'GLM-5.3-Flash') {
       responderFactory = () => createAmdActorResponder({ requestTimeoutMs: requestTimeoutMs !== undefined ? requestTimeoutMs : 240_000 });
@@ -277,7 +324,17 @@ try {
 
   const actorFactory = executionMode === 'offline-stub'
     ? (ctx) => STUB_STRATEGIES[strategy](ctx)
-    : (ctx) => createRealModelActor({ ctx, responder: responderFactory() });
+    : executionMode === 'F1-direct-model'
+      ? (ctx) => createRealModelActor({ ctx, responder: responderFactory() })
+      // F2: one host session per unit (SPEC §6.2.8) — the OpenClaw exec
+      // transport creates a FRESH explicit session per complete() call, so
+      // each step round is its own host session within the unit's taskId
+      // (session-independence is transport-level, recorded per round).
+      : (ctx) => createHostActorAdapter({
+        ctx,
+        hostTransport: hostTransportFactory(),
+        taskId: hostTaskIdForUnit({ studyId: verified.auth.studyId, caseId: ctx.caseId, armId: ctx.armId, repetitionId: ctx.repetitionId }),
+      });
 
   const summary = await runChallengeStudy({
     studyDir: resolved,
@@ -285,7 +342,15 @@ try {
     actorFactory,
     maxAttemptsTotal,
     owner,
-    ...(executionMode === 'offline-stub' ? {} : { execution: { mode: executionMode, now: () => Date.now(), requestTimeoutMs, maxRequestsPerAttempt } }),
+    ...(executionMode === 'offline-stub' ? {} : {
+      execution: {
+        mode: executionMode,
+        now: () => Date.now(),
+        requestTimeoutMs,
+        maxRequestsPerAttempt,
+        ...(executionMode === 'F2-real-host' ? { probeControlledRoot: path.resolve(process.cwd(), arg('--probe-controlled-root')) } : {}),
+      },
+    }),
   });
 
   const counts = {};

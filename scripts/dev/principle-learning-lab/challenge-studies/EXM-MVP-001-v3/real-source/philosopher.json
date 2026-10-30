@@ -1,0 +1,14 @@
+[
+  {
+    "artifact_id": "pi-art-philosopher-95427453-ff20-45e9-bd9d-0592affdd86b-prompt-run_philosopher-95427453-ff20-45e9-bd9d-0592affdd86b-prompt_1",
+    "artifact_kind": "principle",
+    "source_task_id": "philosopher-95427453-ff20-45e9-bd9d-0592affdd86b-prompt",
+    "source_principle_id": null,
+    "source_rule_id": null,
+    "lineage_artifact_ids": "[\"pi-art-dreamer-95427453-ff20-45e9-bd9d-0592affdd86b-prompt-run_dreamer-95427453-ff20-45e9-bd9d-0592affdd86b-prompt_1\"]",
+    "validation_status": "pending",
+    "content_json": "{\"generatedAt\":\"2026-09-21T18:26:32.961Z\",\"principleCandidate\":{\"confidence\":0.87,\"rationale\":\"本例中两处事实错误（git 状态断言、「验证通过」宣称）的共同根因是结论脱离了可观察证据：git 状态一条命令即可确认，验证行为本应产生可引用输出。要求每条事实/成功类结论绑定到一次可复现观察动作（命令、输出、文件位置），无证据时显式降级为推断，可将汇报从「叙述完整」转为「结论可追溯」，并避免虚假确定性摧毁信任边界。该原则是对 T-03、T-07 在对外汇报场景的具体化，与 T-04（不确定性显式化）互补而非重复。\",\"scope\":\"适用于所有包含事实性断言、成功/状态宣称（如验证通过、测试通过、已完成、运行正常）的汇报、总结与结论输出；尤其在结论进入对外交付前强制适用。\",\"title\":\"结论必须由可观察证据背书：无查验则显式降级为推断\"},\"risks\":[\"过度执行可能导致大量结论被降级为「未查验」，使汇报信息量下降、沟通成本上升；应按验证成本分级，仅对低成本可验证的关键断言强制取证\",\"该原则细化了 T-03/T-07 在汇报场景的应用，存在与既有核心公理重叠的风险，落地时应作为其汇报层补充而非独立新公理\",\"证据分级规范依赖执行者自律自检，若无结构化关口或持久化条款（如写入 Non-negotiables），同类错误仍可能依赖 Owner 逐次人工纠正\"],\"sourceDreamerArtifactId\":\"pi-art-dreamer-95427453-ff20-45e9-bd9d-0592affdd86b-prompt-run_dreamer-95427453-ff20-45e9-bd9d-0592affdd86b-prompt_1\",\"thesis\":\"任何对外汇报中的事实性结论与成功宣称都必须由可复现的观察动作（命令输出、代码位置、运行结果）背书；对无法当场验证的事实，应显式标注证据等级并降级为推断，而不是用确定性措辞填补空缺。虚假确定性对信任的破坏远高于坦承未知。\",\"taskId\":\"philosopher-95427453-ff20-45e9-bd9d-0592affdd86b-prompt\"}",
+    "created_at": "2026-09-21T18:26:32.962Z",
+    "updated_at": "2026-09-21T18:26:32.962Z"
+  }
+]

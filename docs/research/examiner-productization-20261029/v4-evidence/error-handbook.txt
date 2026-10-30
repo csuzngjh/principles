@@ -1,0 +1,5 @@
+
+> principles-disciple-monorepo@2.4.0 check:error-handbook
+> node scripts/check-error-handbook.cjs
+
+[check:error-handbook] OK: 131 active pattern records, 41 archived, 336 occurrences (131 structured), 14 routing cards — authority: docs/process/error-management/records/

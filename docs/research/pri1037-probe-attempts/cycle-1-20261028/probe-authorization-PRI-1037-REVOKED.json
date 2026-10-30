@@ -1,0 +1,41 @@
+{
+  "schema": "challenge-isolation-probe-authorization.v1",
+  "probeId": "PRI-1037",
+  "status": "REVOKED",
+  "studyId": "CEB-001",
+  "frozenHashes": {
+    "suiteHash": "e1f2f5ca9d7f570faf454d057346c4f273e4fb467fa1790482f9a783e591fb5a",
+    "studyPlanHash": "01ac054b2aee6e84d4a1f36ae7f1ecb770567dd155da7e3a6afc88fe92c798d3",
+    "mappingHash": "213090daecf0cbc9abfc51ca46641e4e3b835730ba9d9ec771118aaed9521290",
+    "graderHash": "eef38484c4f8ace059c178fcb0697c68154277073b7ab7a9d8c0e608ae383e79"
+  },
+  "targetHost": {
+    "kind": "openclaw",
+    "openclawHome": "C:/Users/Administrator/.openclaw",
+    "openclawAgent": "main",
+    "openclawWorkspace": "D:/.openclaw/workspace",
+    "requestedModelIdentity": "zai/glm-5.3-flash",
+    "provider": "zai"
+  },
+  "caps": {
+    "probeRounds": 5,
+    "timeoutMsPerCall": 600000
+  },
+  "validFrom": "2026-10-28T15:10:00Z",
+  "validUntil": "2026-10-28T21:10:00Z",
+  "stopConditions": [
+    "任一探针轮次 transport 失败或会话缺失",
+    "宿主身份核验非 VERIFIED 或与授权声明不符",
+    "副作用扫描任一项非零",
+    "授权窗口关闭/撤销/停止"
+  ],
+  "issuedBy": "owner-goal-20261028-final",
+  "issuedAt": "2026-10-28T15:08:19Z",
+  "blockage": {
+    "reason": "Owner goal 指令（2026-10-28）签发全新独立探针授权：OpenClaw 2026.10.5 / zai / zai-glm-5.3-flash / 最多 5 轮 / 每轮硬超时 600s / 窗口 6h（15:10Z-21:10Z）。旧授权（REVOKED, 11:20Z）历史保留于 git 历史。方案 D：ambient state（auth profile 可达+插件已装+轨迹持久）。F2 未授权。",
+    "pendingDecision": "",
+    "unblockCondition": "真实执行完成并深验后归档；F2 需独立授权。"
+  },
+  "revokedAt": "2026-10-28T15:40:00Z",
+  "revokedReason": "S8: the stop condition triggered on attempt-4 round 1 (transport failure: OpenClaw ambient plugin loads throw FsSafeError \"copy path changed during operation\" — the host is in a stuck mid-update state; doctor prescribes openclaw update repair + doctor --fix, and a pending 2026.10.8 update would change the authorized host version 2026.10.5). Revoked per the stop-on-anomaly discipline; attempt-4 evidence archived at docs/research/pri1037-probe-attempts/attempt-4-PRI-1037.json; the host repair is an Owner decision (shared-host mutation + version change)."
+}

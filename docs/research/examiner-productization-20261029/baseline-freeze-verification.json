@@ -1,0 +1,277 @@
+{
+  "command": "verifyFrozenStudy + verifyArmConfigsFrozen (existing repository functions)",
+  "studies": [
+    {
+      "studyId": "CEB-001",
+      "frozenPerCaseAndArms": "PASS",
+      "frozenHashes": {
+        "mappingHash": "213090daecf0cbc9abfc51ca46641e4e3b835730ba9d9ec771118aaed9521290",
+        "graderHash": "eef38484c4f8ace059c178fcb0697c68154277073b7ab7a9d8c0e608ae383e79",
+        "suiteHash": "e1f2f5ca9d7f570faf454d057346c4f273e4fb467fa1790482f9a783e591fb5a",
+        "preregistrationHash": "01ac054b2aee6e84d4a1f36ae7f1ecb770567dd155da7e3a6afc88fe92c798d3"
+      },
+      "rawFileSha256": [
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-001/hashes.json",
+          "sha256": "506d6a919ea71a834077460419100622b50ed5d1b89f9f5bf2794352512d02f2"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-001/suite-manifest.json",
+          "sha256": "c187fb767c0b3d015f78f1d405a8c66dcb1e531da2997fb72cb5efd3759b3cd1"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-001/preregistration.json",
+          "sha256": "94d55b5861c9194d6fb6fafbadda5cd8c6611f6118590bba819162487c31d2b7"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-001/scoring-contract.json",
+          "sha256": "4e8b6ad4d1d4021f844434f914991cdefbe32641a76c4aace364ee82ef04a8f6"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-001/pain-mechanism-mapping.json",
+          "sha256": "76bb6635db8f3df8e190e7fa435a91662dbeb7e9b319dd406aa40206a2c9320d"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-001/judge-only/CEB-001-BN-01.json",
+          "sha256": "1b2e9ce630e3162e52530718ffc5eeff5fe905067b56cab9b2cfa6863707b66e"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-001/judge-only/CEB-001-BN-02.json",
+          "sha256": "c1662fe120e69d9d995ed65be0ecfec412b1375eaf960ad7504528af60291a62"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-001/judge-only/CEB-001-BN-03.json",
+          "sha256": "d151826f09fa94e86aa1cde534152cdfe8542a0c7b2495da4f61436da6f746dd"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-001/judge-only/CEB-001-CT-01.json",
+          "sha256": "f27207a702cd52782c6a3c21c052c20e62ff6cbf7011eeb0e5065e42fc27f707"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-001/judge-only/CEB-001-CT-02.json",
+          "sha256": "4a8220b47ed3f8aca32299f48140fcd62c74fc42d8006adba7ccc1de2352a92f"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-001/judge-only/CEB-001-CT-03.json",
+          "sha256": "b7d06ee1b0932f8a4e1b6c27422a8d9947fed86b1a51bf68d9c6b54359a4cdf4"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-001/judge-only/CEB-001-FV-01.json",
+          "sha256": "1a0b408ad70f17d9d5d0e609f1a693cef05998b6565b323ee4bb7db9332dd82f"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-001/judge-only/CEB-001-FV-02.json",
+          "sha256": "4fcaa6da33f21eb1fc36c6737523f1c406c13d64f62f7e4639cd90e4ac42054f"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-001/judge-only/CEB-001-FV-03.json",
+          "sha256": "8f855e1514f86268a6f71687321a76e785f79d72784be05bc73981f56b3c2200"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-001/judge-only/CEB-001-TC-01.json",
+          "sha256": "e912a6836a5061929994e9e9e1c281884f481cd558929c463c5b53f99523c694"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-001/judge-only/CEB-001-TC-02.json",
+          "sha256": "7a6646fbba7e1b3ca3681195487a0d42a31a41310ff8bb1acd353c3bc587bf80"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-001/judge-only/CEB-001-TC-03.json",
+          "sha256": "bdf3d75801fe9e72bdbd295c5e0f2492b64351e43bf4d5643f5ff3e052e609b2"
+        }
+      ]
+    },
+    {
+      "studyId": "CEB-002",
+      "frozenPerCaseAndArms": "PASS",
+      "frozenHashes": {
+        "mappingHash": "213090daecf0cbc9abfc51ca46641e4e3b835730ba9d9ec771118aaed9521290",
+        "graderHash": "eef38484c4f8ace059c178fcb0697c68154277073b7ab7a9d8c0e608ae383e79",
+        "suiteHash": "02cbc15cfd9cf8a8b9e986950fdf722fcda6632604f4e62d4bd50ea0950d04f5",
+        "preregistrationHash": "bd0a84085d2aefa0aa3203b547e4dc53fc0c4375e8ecaf2a0ba980913dcc4f47"
+      },
+      "rawFileSha256": [
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-002/hashes.json",
+          "sha256": "68cd949c3e5f6cc316478712906d5718520d8c9a3a5cd1a58b63837b3b82a058"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-002/suite-manifest.json",
+          "sha256": "9b60c0f5982ba007921551e153dd2f201283988e563f35afb84fc8c634943b5d"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-002/preregistration.json",
+          "sha256": "8392c363421197f5dce78ad825268101eec1dd40d1648fb60fdc64cdf952ef5d"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-002/scoring-contract.json",
+          "sha256": "4e8b6ad4d1d4021f844434f914991cdefbe32641a76c4aace364ee82ef04a8f6"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-002/pain-mechanism-mapping.json",
+          "sha256": "76bb6635db8f3df8e190e7fa435a91662dbeb7e9b319dd406aa40206a2c9320d"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-002/judge-only/CEB-002-B1-12.json",
+          "sha256": "1b1ffe923a82d5eb6549a005cfaa50aa90218e5a2b425ea865d9f5d9820e8bd3"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-002/judge-only/CEB-002-B2-13.json",
+          "sha256": "09bd96b43e6fafe04e236fda052c5a52c5b965498a7abc345c5da25db1d70b22"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-002/judge-only/CEB-002-B3-14.json",
+          "sha256": "dcbfc40c8348f1d887aafd08eb6c2a13f3910ea3ffade8e564145352d43975a2"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-002/judge-only/CEB-002-B4-15.json",
+          "sha256": "596ac71cf4e8748408d8ea7a858192745627493853265f7fb20f7efebcf6809a"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-002/judge-only/CEB-002-B5-16.json",
+          "sha256": "1f68089e0de61d242b1a7461344533120d48da16f1584f77a2cb44609019d22c"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-002/judge-only/CEB-002-L1-01.json",
+          "sha256": "02c9eab51e2f91c393f21824617028f8b7ab712144ff60ec2b9c34a1169403a6"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-002/judge-only/CEB-002-L1-02.json",
+          "sha256": "09c6473bb4a4d9152d093a5137996c97d5fa25734cc54c58ca4661b0646ecf2c"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-002/judge-only/CEB-002-L1-03.json",
+          "sha256": "cbc820dc8de594fc89b3b48c2bbe6eaaba3aca28974a560e9fc8d56bb0beb1be"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-002/judge-only/CEB-002-L2-04.json",
+          "sha256": "f4cedadb9529dbb29c88a657765fe4fb2f003d4170127e924bb9bc18766d53a8"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-002/judge-only/CEB-002-L2-05.json",
+          "sha256": "aef17d8b9fe023a84ce1bdc37a66a09f44199b37d2290dc06fc5a5fc28b5bcdd"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-002/judge-only/CEB-002-L2-06.json",
+          "sha256": "86f79bb24ad3f6eb5823b01aa08d9f46ad1f29659b759f4c85fb573351ed1c0a"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-002/judge-only/CEB-002-L2-07.json",
+          "sha256": "b8cd3827aaa05d35c755405fac9b0615629138a5ffa10cba649e2bfea9cbae64"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-002/judge-only/CEB-002-L3-08.json",
+          "sha256": "c4c07ed76f497e8dce9c2d1f33362420665c94c0a8418c2612fc62ffdca346ed"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-002/judge-only/CEB-002-L3-09.json",
+          "sha256": "5e3012ba757c37974cf6413e8454c0dbea7252a5065410cd0d4ffc374b8e5fd0"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-002/judge-only/CEB-002-L3-10.json",
+          "sha256": "c0df448e18662c3018a8893d8afad2234962745f05ecfec58fb831048caf6d06"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-002/judge-only/CEB-002-L3-11.json",
+          "sha256": "21ea63c963675e5499532e9f0b77c2a335e66998c88bda8b35d91c58a2c4f937"
+        }
+      ]
+    },
+    {
+      "studyId": "CEB-003-P",
+      "frozenPerCaseAndArms": "PASS",
+      "frozenHashes": {
+        "mappingHash": "213090daecf0cbc9abfc51ca46641e4e3b835730ba9d9ec771118aaed9521290",
+        "graderHash": "eef38484c4f8ace059c178fcb0697c68154277073b7ab7a9d8c0e608ae383e79",
+        "suiteHash": "dec7ba6385a3cc0ced1670a3a5f851cd90f1b720b1256829891efcc1ad748977",
+        "preregistrationHash": "413673beb360981cb680b58ab4edd659ab9543d9da1bd0383aaaf937ad7eb3a1"
+      },
+      "rawFileSha256": [
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-003-P/hashes.json",
+          "sha256": "9b70caa7147bc73bf76d2b3e0c93cc2633daeae5b5f73962f210037526a7d9ae"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-003-P/suite-manifest.json",
+          "sha256": "1cc4587ee166369d8516fd195304459e92917376275a84dc17a57a4449353f30"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-003-P/preregistration.json",
+          "sha256": "a88ce1c64b3d79ef78291a23015524e1227494a3497e988a1bfe104c27c0ddbb"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-003-P/scoring-contract.json",
+          "sha256": "4e8b6ad4d1d4021f844434f914991cdefbe32641a76c4aace364ee82ef04a8f6"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-003-P/pain-mechanism-mapping.json",
+          "sha256": "76bb6635db8f3df8e190e7fa435a91662dbeb7e9b319dd406aa40206a2c9320d"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-003-P/judge-only/CEB-002-B1-12.json",
+          "sha256": "1b1ffe923a82d5eb6549a005cfaa50aa90218e5a2b425ea865d9f5d9820e8bd3"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-003-P/judge-only/CEB-002-B2-13.json",
+          "sha256": "09bd96b43e6fafe04e236fda052c5a52c5b965498a7abc345c5da25db1d70b22"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-003-P/judge-only/CEB-002-B3-14.json",
+          "sha256": "dcbfc40c8348f1d887aafd08eb6c2a13f3910ea3ffade8e564145352d43975a2"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-003-P/judge-only/CEB-002-B4-15.json",
+          "sha256": "596ac71cf4e8748408d8ea7a858192745627493853265f7fb20f7efebcf6809a"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-003-P/judge-only/CEB-002-B5-16.json",
+          "sha256": "1f68089e0de61d242b1a7461344533120d48da16f1584f77a2cb44609019d22c"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-003-P/judge-only/CEB-002-L1-01.json",
+          "sha256": "02c9eab51e2f91c393f21824617028f8b7ab712144ff60ec2b9c34a1169403a6"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-003-P/judge-only/CEB-002-L1-02.json",
+          "sha256": "09c6473bb4a4d9152d093a5137996c97d5fa25734cc54c58ca4661b0646ecf2c"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-003-P/judge-only/CEB-002-L1-03.json",
+          "sha256": "cbc820dc8de594fc89b3b48c2bbe6eaaba3aca28974a560e9fc8d56bb0beb1be"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-003-P/judge-only/CEB-002-L2-04.json",
+          "sha256": "f4cedadb9529dbb29c88a657765fe4fb2f003d4170127e924bb9bc18766d53a8"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-003-P/judge-only/CEB-002-L2-05.json",
+          "sha256": "aef17d8b9fe023a84ce1bdc37a66a09f44199b37d2290dc06fc5a5fc28b5bcdd"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-003-P/judge-only/CEB-002-L2-06.json",
+          "sha256": "86f79bb24ad3f6eb5823b01aa08d9f46ad1f29659b759f4c85fb573351ed1c0a"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-003-P/judge-only/CEB-002-L2-07.json",
+          "sha256": "b8cd3827aaa05d35c755405fac9b0615629138a5ffa10cba649e2bfea9cbae64"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-003-P/judge-only/CEB-002-L3-08.json",
+          "sha256": "c4c07ed76f497e8dce9c2d1f33362420665c94c0a8418c2612fc62ffdca346ed"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-003-P/judge-only/CEB-002-L3-09.json",
+          "sha256": "5e3012ba757c37974cf6413e8454c0dbea7252a5065410cd0d4ffc374b8e5fd0"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-003-P/judge-only/CEB-002-L3-10.json",
+          "sha256": "c0df448e18662c3018a8893d8afad2234962745f05ecfec58fb831048caf6d06"
+        },
+        {
+          "path": "scripts/dev/principle-learning-lab/challenge-studies/CEB-003-P/judge-only/CEB-002-L3-11.json",
+          "sha256": "21ea63c963675e5499532e9f0b77c2a335e66998c88bda8b35d91c58a2c4f937"
+        }
+      ]
+    }
+  ]
+}

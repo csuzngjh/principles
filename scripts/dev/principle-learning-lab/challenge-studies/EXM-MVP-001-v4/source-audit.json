@@ -1,0 +1,108 @@
+{
+  "schema": "examiner-source-audit.v1",
+  "painRowHash": "679f23d6312bed5d48de0ba0842960b243ef805df6db25e82c864d7d880cd3a0",
+  "principleContentHash": "8ac06edda31bcc4e5dc98a90bd1457435d1a7481a2477bb391c5d87824e9e3ca",
+  "diagnosesHash": "f396fb6ab156239007306acb9e29f0d7d123b7094948d150d57a35cc86ea9945",
+  "initialReportAt": "2026-09-21T17:26:58.348Z",
+  "ownerCorrectionAt": "2026-09-21T17:29:43.283Z",
+  "verifiedFacts": [
+    {
+      "claim": "Static file checking DID occur before the initial report.",
+      "toolIds": [
+        13902,
+        13903,
+        13905,
+        13910
+      ]
+    },
+    {
+      "claim": "rev-parse true proves inside a work tree, not the root/identity of a nested repository.",
+      "toolIds": [
+        13913
+      ]
+    },
+    {
+      "claim": "Parent-repository status reported the service path untracked; it does not prove the service has no independent repository, nor that the entire lab is untracked.",
+      "toolIds": [
+        13915
+      ]
+    },
+    {
+      "claim": "The initial report explicitly says a restart is needed for running-service effect. No runtime effect was demonstrated in the pre-correction window.",
+      "assistantTurnId": 2239
+    }
+  ],
+  "rootCause": {
+    "status": "INFERRED_NOT_CAUSALLY_PROVEN",
+    "description": "The report did not consistently bind conclusion scope to observed object/verification level. This is NOT a claim that no checks were executed or that a successful restart was asserted."
+  },
+  "preCorrectionTools": [
+    {
+      "id": 13900,
+      "createdAt": "2026-09-21T17:25:43.247Z"
+    },
+    {
+      "id": 13902,
+      "createdAt": "2026-09-21T17:25:50.160Z"
+    },
+    {
+      "id": 13903,
+      "createdAt": "2026-09-21T17:25:50.432Z"
+    },
+    {
+      "id": 13905,
+      "createdAt": "2026-09-21T17:26:02.603Z"
+    },
+    {
+      "id": 13907,
+      "createdAt": "2026-09-21T17:26:13.758Z"
+    },
+    {
+      "id": 13908,
+      "createdAt": "2026-09-21T17:26:13.774Z"
+    },
+    {
+      "id": 13909,
+      "createdAt": "2026-09-21T17:26:13.786Z"
+    },
+    {
+      "id": 13910,
+      "createdAt": "2026-09-21T17:26:20.907Z"
+    },
+    {
+      "id": 13913,
+      "createdAt": "2026-09-21T17:26:34.315Z"
+    },
+    {
+      "id": 13915,
+      "createdAt": "2026-09-21T17:26:40.872Z"
+    }
+  ],
+  "postCorrectionTools": [
+    {
+      "id": 13928,
+      "createdAt": "2026-09-21T17:30:11.062Z"
+    },
+    {
+      "id": 13929,
+      "createdAt": "2026-09-21T17:30:11.334Z"
+    },
+    {
+      "id": 13930,
+      "createdAt": "2026-09-21T17:30:28.216Z"
+    },
+    {
+      "id": 13931,
+      "createdAt": "2026-09-21T17:30:28.394Z"
+    },
+    {
+      "id": 13932,
+      "createdAt": "2026-09-21T17:30:33.194Z"
+    }
+  ],
+  "limits": [
+    "Owner correction is an intent/evidence source, not proof of every inferred Git fact.",
+    "Post-correction observations must not be retroactively attributed to the initial report.",
+    "Real mechanism evidence does not prove synthetic config truth or Principle-caused improvements."
+  ]
+}
