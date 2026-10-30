@@ -121,14 +121,20 @@ function headersOf(callArgs: unknown[]): Record<string, string> | undefined {
 }
 
 /**
- * Health responses for the two probe phases. `requireBearer` makes the
- * auto-launch readiness probe DEMAND the token header — dropping it in
- * production code then turns this suite red instead of silently accepting an
- * unauthenticated answer.
+ * Health responses for the auto-launch readiness probe.
+ *
+ * `mode` is what the responder reports in `data.authenticationMode`, and — for
+ * 'authenticated' — it also enforces the console's real auth gate: a bare
+ * request gets 401 with sendUnauthorized's envelope, and only THIS token is
+ * accepted. 'foreign-401' models a console holding a different token.
  */
+type HealthStub =
+  | { kind: 'console'; mode: 'authenticated' | 'no_auth' }
+  | { kind: 'foreign-401' };
+
 function stubHealth(
   httpMock: { get: ReturnType<typeof vi.fn> },
-  behavior: { requireBearer: boolean; authenticatedConsole: boolean },
+  behavior: HealthStub,
 ): void {
   httpMock.get.mockImplementation((...callArgs: unknown[]) => {
     const url = String(callArgs[0]);
@@ -136,17 +142,26 @@ function stubHealth(
     const res = new EventEmitter() as EventEmitter & { statusCode: number };
     const isAutoLaunchProbe = autoLaunchPhaseStarted && url.endsWith('/api/health');
     const bearerAccepted = headersOf(callArgs)?.Authorization === `Bearer ${TOKEN}`;
-    if (isAutoLaunchProbe && (!behavior.authenticatedConsole || (behavior.requireBearer && !bearerAccepted))) {
+    const consoleAnswer = behavior.kind === 'console' ? behavior : undefined;
+    const unauthorized = isAutoLaunchProbe && (
+      behavior.kind === 'foreign-401'
+      || (consoleAnswer?.mode === 'authenticated' && !bearerAccepted)
+    );
+    if (unauthorized) {
       res.statusCode = 401;
       setImmediate(() => {
         cb?.(res);
+        res.emit('data', Buffer.from(JSON.stringify({ success: false, error: 'unauthorized', message: 'Unauthorized' })));
         res.emit('end');
       });
     } else {
       res.statusCode = 200;
       setImmediate(() => {
         cb?.(res);
-        res.emit('data', Buffer.from(JSON.stringify({ success: true, data: { overall: 'healthy' } })));
+        res.emit('data', Buffer.from(JSON.stringify({
+          success: true,
+          data: { overall: 'healthy', authenticationMode: consoleAnswer?.mode ?? 'no_auth' },
+        })));
         res.emit('end');
       });
     }
@@ -250,7 +265,7 @@ describe('install() — console auto-launch inherits the authentication posture 
     });
 
     const httpModule = await import('http') as unknown as { get: ReturnType<typeof vi.fn> };
-    stubHealth(httpModule, { requireBearer: false, authenticatedConsole: true });
+    stubHealth(httpModule, { kind: 'console', mode: 'no_auth' });
   });
 
   afterEach(async () => {
@@ -279,7 +294,7 @@ describe('install() — console auto-launch inherits the authentication posture 
     process.env.PD_CONSOLE_TOKEN = TOKEN;
     const httpModule = await import('http') as unknown as { get: ReturnType<typeof vi.fn> };
     // An authenticated console answers 401 to a header-less /api/health probe.
-    stubHealth(httpModule, { requireBearer: true, authenticatedConsole: true });
+    stubHealth(httpModule, { kind: 'console', mode: 'authenticated' });
 
     const result = await install(baseInstallOptions, payloadDir, { quiet: true });
 
@@ -298,7 +313,7 @@ describe('install() — console auto-launch inherits the authentication posture 
   it('authenticated console never becomes ready → manual instruction stays authenticated', { timeout: 90_000 }, async () => {
     process.env.PD_CONSOLE_TOKEN = TOKEN;
     const httpModule = await import('http') as unknown as { get: ReturnType<typeof vi.fn> };
-    stubHealth(httpModule, { requireBearer: false, authenticatedConsole: false });
+    stubHealth(httpModule, { kind: 'foreign-401' });
 
     const result = await install(baseInstallOptions, payloadDir, { quiet: true });
 
@@ -320,5 +335,34 @@ describe('install() — console auto-launch inherits the authentication posture 
     expect(consoleOpenArgs).toContain('--no-auth');
     expect(authorizationHeaderCalls(httpModule)).toEqual([]);
     expect(result.consoleUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/#\/welcome$/);
+  });
+
+  it('a healthy console in the WRONG posture is not "ready" and receives no bearer token', { timeout: 90_000 }, async () => {
+    process.env.PD_CONSOLE_TOKEN = TOKEN;
+    const httpModule = await import('http') as unknown as { get: ReturnType<typeof vi.fn> };
+    // A pre-existing no-auth console: healthy, PD-shaped, 200 even without the
+    // token. `pd console open` refuses to adopt it
+    // (console_authentication_mode_mismatch), so the installer must not certify
+    // it as the console it just launched.
+    stubHealth(httpModule, { kind: 'console', mode: 'no_auth' });
+
+    const result = await install(baseInstallOptions, payloadDir, { quiet: true });
+
+    expect(result.consoleUrl).toBeUndefined();
+    expect(result.nextAction).toContain('auto-launch did not become ready in time');
+    // It was never asked for credentials, so there was nothing to hand over.
+    expect(authorizationHeaderCalls(httpModule)).toEqual([]);
+  });
+
+  it('no PD_CONSOLE_TOKEN → an authenticated console is not adopted and never sees a bearer token', { timeout: 90_000 }, async () => {
+    delete process.env.PD_CONSOLE_TOKEN;
+    const httpModule = await import('http') as unknown as { get: ReturnType<typeof vi.fn> };
+    stubHealth(httpModule, { kind: 'console', mode: 'authenticated' });
+
+    const result = await install(baseInstallOptions, payloadDir, { quiet: true });
+
+    expect(result.consoleUrl).toBeUndefined();
+    expect(result.nextAction).toContain(`pd console open --workspace "${baseInstallOptions.workspaceDir}" --no-auth (listens on 127.0.0.1 only)`);
+    expect(authorizationHeaderCalls(httpModule)).toEqual([]);
   });
 });

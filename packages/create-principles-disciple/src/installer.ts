@@ -2997,50 +2997,96 @@ function openBrowserForOnboarding(url: string): { opened: boolean; reason?: stri
   }
 }
 
-/**
- * Probe /api/health on a single port. Reuses the http module already imported.
- *
- * PRI-1054: every `/api/*` route sits behind the console's auth gate
- * (pd-console/src/server/index.ts), so an authenticated console answers 401 to
- * a bare probe. The token is the one this posture was derived from.
- */
-function probeAutolaunchHealth(port: number, token?: string, timeoutMs = 1500): Promise<boolean> {
+/** The authentication posture the update chain launches the console in (PRI-1054). */
+type ConsoleAuthPosture = { authenticated: true; token: string } | { authenticated: false };
+
+interface HealthProbeResponse {
+  readonly status: number;
+  readonly payload: unknown;
+}
+
+function requestConsoleHealth(
+  port: number,
+  token: string | undefined,
+  timeoutMs: number,
+): Promise<HealthProbeResponse | null> {
   return new Promise((resolve) => {
     const req = http.get(
       `http://127.0.0.1:${port}/api/health`,
       { headers: token ? { Authorization: `Bearer ${token}` } : {} },
       (res) => {
-      if (res.statusCode !== 200) { resolve(false); return; }
-      const chunks: Buffer[] = [];
-      res.on('data', (c: Buffer) => chunks.push(c));
-      res.on('end', () => {
-        try {
-          const body = JSON.parse(Buffer.concat(chunks).toString()) as unknown;
-          // P1-B: verify a PD-specific field inside body.data, not just the generic
-          // { success: true } envelope that ANY service could return. PD Console's
-          // /api/health responds via sendSuccess -> { success: true, data: {...} } where
-          // data.overall is one of 'healthy' | 'degraded' | 'error' (HealthCheckModel).
-          // The previous top-level `body.healthy` branch was dead code (PD Console never
-          // returns it) and `body.success === true` alone matched any generic service.
-          // rc-5-object-hasown-not-in: use Object.hasOwn, not `in`, for untrusted keys.
-          const isPdConsole = (() => {
-            if (typeof body !== 'object' || body === null) return false;
-            if (!Object.hasOwn(body, 'success') || Reflect.get(body, 'success') !== true) return false;
-            if (!Object.hasOwn(body, 'data')) return false;
-            const data = Reflect.get(body, 'data');
-            if (typeof data !== 'object' || data === null) return false;
-            // data.overall is the PD-specific discriminative field.
-            if (!Object.hasOwn(data, 'overall')) return false;
-            const overall = Reflect.get(data, 'overall');
-            return overall === 'healthy' || overall === 'degraded' || overall === 'error';
-          })();
-          resolve(isPdConsole);
-        } catch { resolve(false); }
-      });
-    });
-    req.on('error', () => resolve(false));
-    req.setTimeout(timeoutMs, () => { req.destroy(); resolve(false); });
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () => {
+          let payload: unknown;
+          try { payload = JSON.parse(Buffer.concat(chunks).toString()); } catch { payload = undefined; }
+          resolve({ status: res.statusCode ?? 0, payload });
+        });
+      },
+    );
+    req.on('error', () => resolve(null));
+    req.setTimeout(timeoutMs, () => { req.destroy(); resolve(null); });
   });
+}
+
+/**
+ * PD Console health shape, bound to the posture we launched (rc-5: Object.hasOwn
+ * for untrusted keys).
+ *
+ * P1-B: `data.overall` is the PD-specific discriminative field — the generic
+ * { success: true } envelope alone matches any service. PRI-1054 review P2:
+ * `data.authenticationMode` must equal the launched posture, because that is the
+ * same fact `pd console open` refuses on (`console_authentication_mode_mismatch`).
+ * Without it the installer certified ANY healthy PD console on 3100..3119 as
+ * "the console I just launched", including a pre-existing no-auth one that
+ * `pd console open` had already refused to adopt.
+ */
+function isLaunchedConsoleHealth(payload: unknown, expectedMode: 'authenticated' | 'no_auth'): boolean {
+  if (typeof payload !== 'object' || payload === null) return false;
+  if (!Object.hasOwn(payload, 'success') || Reflect.get(payload, 'success') !== true) return false;
+  if (!Object.hasOwn(payload, 'data')) return false;
+  const data = Reflect.get(payload, 'data');
+  if (typeof data !== 'object' || data === null) return false;
+  if (!Object.hasOwn(data, 'overall')) return false;
+  const overall = Reflect.get(data, 'overall');
+  if (overall !== 'healthy' && overall !== 'degraded' && overall !== 'error') return false;
+  if (!Object.hasOwn(data, 'authenticationMode')) return false;
+  return Reflect.get(data, 'authenticationMode') === expectedMode;
+}
+
+/** sendUnauthorized's envelope — the only responder worth offering the token to. */
+function isConsoleUnauthorizedEnvelope(payload: unknown): boolean {
+  if (typeof payload !== 'object' || payload === null) return false;
+  return Object.hasOwn(payload, 'success') && Reflect.get(payload, 'success') === false
+    && Object.hasOwn(payload, 'error') && Reflect.get(payload, 'error') === 'unauthorized';
+}
+
+/**
+ * Is the console READY on this port — meaning the one launched in `posture`?
+ *
+ * Two-phase on purpose:
+ *  1. bare GET first: a bearer credential must never be sprayed at up to
+ *     CONSOLE_AUTOLAUNCH_PORT_SCAN_LIMIT unidentified local ports;
+ *  2. the token is attached only to a responder that answered 401 with the
+ *     console's own error envelope, and 200 is accepted only when
+ *     `authenticationMode` matches the launched posture.
+ * An authenticated console answers 401 to a bare probe, so phase 1 alone cannot
+ * distinguish it — phase 2 is the proof that the responder accepts THIS token.
+ */
+async function probeAutolaunchHealth(
+  port: number,
+  posture: ConsoleAuthPosture,
+  timeoutMs = 1500,
+): Promise<boolean> {
+  const expectedMode = posture.authenticated ? 'authenticated' : 'no_auth';
+  const bare = await requestConsoleHealth(port, undefined, timeoutMs);
+  if (bare === null) return false;
+  if (bare.status === 200) return isLaunchedConsoleHealth(bare.payload, expectedMode);
+  if (bare.status !== 401 || !posture.authenticated) return false;
+  if (!isConsoleUnauthorizedEnvelope(bare.payload)) return false;
+  const authorized = await requestConsoleHealth(port, posture.token, timeoutMs);
+  return authorized !== null && authorized.status === 200
+    && isLaunchedConsoleHealth(authorized.payload, expectedMode);
 }
 
 /**
@@ -3084,10 +3130,7 @@ export function resolveConsoleWorkspaceDir(
  * resolves `opts.token ?? process.env.PD_CONSOLE_TOKEN` and only skips auth for
  * `--no-auth`). No new authority: the variable stays the single declaration.
  */
-function readConsoleAuthPosture(env: Record<string, string | undefined> = process.env): {
-  authenticated: boolean;
-  token?: string;
-} {
+function readConsoleAuthPosture(env: Record<string, string | undefined> = process.env): ConsoleAuthPosture {
   const token = env.PD_CONSOLE_TOKEN?.trim();
   return token ? { authenticated: true, token } : { authenticated: false };
 }
@@ -3121,13 +3164,14 @@ async function autoLaunchConsole(workspaceDir: string): Promise<{ consoleUrl?: s
   );
   child.unref();
 
-  // Wait for the console to become ready (bounded poll on 3100..3105).
+  // Wait for the console to become ready (bounded poll on
+  // CONSOLE_AUTOLAUNCH_BASE_PORT..+CONSOLE_AUTOLAUNCH_PORT_SCAN_LIMIT-1).
   const deadline = Date.now() + CONSOLE_AUTOLAUNCH_READY_TIMEOUT_MS;
   while (Date.now() < deadline) {
     for (let i = 0; i < CONSOLE_AUTOLAUNCH_PORT_SCAN_LIMIT; i++) {
       const port = CONSOLE_AUTOLAUNCH_BASE_PORT + i;
-       
-      if (await probeAutolaunchHealth(port, posture.token)) {
+
+      if (await probeAutolaunchHealth(port, posture)) {
         // HashRouter: client-side routes live under /#/ — server only serves /,
         // anything else (incl. /welcome) is treated as an API path and returns
         // 404 not_found. Must open /#/welcome so the browser loads index.html

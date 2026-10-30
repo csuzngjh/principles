@@ -9,10 +9,13 @@ machine's declared authentication posture instead of hardcoding `--no-auth`.
   spawns `pd console open` without `--no-auth`, so the console it brings up is
   in the same mode the previous one was in. `pd console open` resolves the
   token from the same variable, so nothing new is invented here.
-- The readiness probe sends `Authorization: Bearer <token>` in that mode.
-  Every `/api/*` route, `/api/health` included, sits behind the console's auth
-  gate, so a header-less probe would have read 401 and the auto-launch would
-  have reported "did not become ready" forever.
+- The readiness probe is two-phase in that mode: a bare probe first, and only a
+  responder that answers 401 with the console's own `unauthorized` envelope gets
+  `Authorization: Bearer <token>` retried. 200 is accepted only when
+  `data.authenticationMode` equals the launched posture — the same fact
+  `pd console open` refuses on — so a pre-existing console in the other mode is
+  not certified as the one this installer launched, and the token is never
+  sprayed across the scan range.
 - The manual `pd console open …` instruction surfaced when auto-launch is
   skipped, when the CLI entry is missing, and when the console never becomes
   ready now carries the same posture. A token-configured machine is no longer
