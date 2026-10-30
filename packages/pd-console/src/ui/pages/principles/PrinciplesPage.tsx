@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, type ReactNode } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { PageShell } from "../../components/layout/page-shell.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
@@ -188,7 +188,6 @@ function validateApprovalsGrouped(data: unknown): ApprovalsGroupedData | null {
 // ── Component ───────────────────────────────────────────────────────────────
 export function PrinciplesPage() {
   const { t, i18n } = useTranslation("pages");
-  const navigate = useNavigate();
 
   const [principles, setPrinciples] = useState<PrincipleListItem[]>([]);
   const [approvalGroups, setApprovalGroups] = useState<ApprovalGroup[]>([]);
@@ -533,24 +532,14 @@ export function PrinciplesPage() {
             return (
               <article
                 key={card.principleId}
-                onClick={() => navigate(`/principles/${card.principleId}`, { state: { returnTo: `/principles?${searchParams}` } })}
                 className={
-                  "relative bg-panel border border-line rounded-[var(--radius-md)] p-4 cursor-pointer " +
+                  "relative bg-panel border border-line rounded-[var(--radius-md)] p-5 " +
                   "border-l-[3px] " +
                   STATUS_BORDER[card.status] + " " +
                   "transition-[border-color,background,transform] duration-150 " +
-                  "hover:border-line-2 hover:bg-surface hover:-translate-y-px " +
+                  "hover:border-line-2 " +
                   "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
                 }
-                tabIndex={0}
-                role="link"
-                aria-label={card.title}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    navigate(`/principles/${card.principleId}`, { state: { returnTo: `/principles?${searchParams}` } });
-                  }
-                }}
               >
                 {/* timeline node */}
                 <span
@@ -560,6 +549,22 @@ export function PrinciplesPage() {
                   }
                   aria-hidden="true"
                 />
+                <div className="mb-2 flex flex-wrap items-start justify-between gap-3">
+                  <h3 className="min-w-0 flex-1 text-[15px] font-semibold leading-relaxed text-ink"><Link className="rounded-sm hover:text-gov focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov" to={`/principles/${card.principleId}`} state={{ returnTo: `/principles?${searchParams}` }}>{card.title}</Link></h3>
+                  <span className={`rounded-[2px] border px-2 py-1 text-[11px] ${STATUS_TEXT[card.status]}`}>{card.decisionState !== undefined ? t(`principles.ownerDecision.state.${card.decisionState}`, { defaultValue: card.decisionState }) : t(decision.labelKey)}</span>
+                </div>
+                {/* PRI-332 P1-5: Readability warning — rendered via i18n code, never raw English string */}
+                {card.readabilityWarningCode && (
+                  <div className="mb-2 px-3 py-1.5 bg-amber/5 border border-amber/20 rounded-[3px] text-ink-3 text-[12px] leading-snug">
+                    {t("principles.readabilityWarning." + card.readabilityWarningCode, { defaultValue: t("principles.readabilityFallbackTitle") })}
+                  </div>
+                )}
+
+                <p className="text-ink-3 text-[13px] line-clamp-2 leading-relaxed">{card.text}</p>
+                {card.runtimeDeactivated === true && <p className="mt-3 text-[12px] text-amber" role="status">{t('principles.runtimeDeactivated')}</p>}
+                <details className="mt-4 border-t border-line/60 pt-3" data-testid="principle-context-disclosure">
+                  <summary className="cursor-pointer text-[12px] text-gov">{t('principles.contextDisclosure')}</summary>
+                  <div className="mt-4 space-y-3">
                 {/* Tags row */}
                 <div className="flex items-center gap-2 mb-2 flex-wrap">
                   <span
@@ -598,22 +603,12 @@ export function PrinciplesPage() {
                   )}
                 </div>
 
-                {/* PRI-332 P1-5: Readability warning — rendered via i18n code, never raw English string */}
-                {card.readabilityWarningCode && (
-                  <div className="mb-2 px-3 py-1.5 bg-amber/5 border border-amber/20 rounded-[3px] text-ink-3 text-[12px] leading-snug">
-                    {t("principles.readabilityWarning." + card.readabilityWarningCode, { defaultValue: t("principles.readabilityFallbackTitle") })}
-                  </div>
-                )}
-
                 {/* PRI-332: Language mismatch hint when principle language ≠ current UI language */}
                 {card.detectedLanguage && card.detectedLanguage !== 'unknown' && i18n.language && !i18n.language.startsWith(card.detectedLanguage) && (
                   <div className="mb-2 px-3 py-1.5 bg-surface/60 border-l-2 border-line rounded-[3px] text-ink-4 text-[12px] leading-snug">
                     {t("principles.languageMismatchHint", { lang: card.detectedLanguage === 'en' ? 'English' : '中文' })}
                   </div>
                 )}
-
-                {/* Title */}
-                <h3 className="font-semibold text-ink mb-1">{card.title}</h3>
 
                 {/* PRI-332: When title used fallback, show original technical text in collapsed details */}
                 {card.titleUsedFallback && card.originalTitle && (
@@ -626,11 +621,6 @@ export function PrinciplesPage() {
                     </div>
                   </details>
                 )}
-
-                {/* Text preview */}
-                <p className="text-ink-3 text-[13px] line-clamp-3 leading-relaxed">
-                  {card.text}
-                </p>
 
                 {/* Timestamp */}
                 <p className="font-mono text-[11px] text-ink-4 mt-2">
@@ -659,34 +649,10 @@ export function PrinciplesPage() {
                 <EvolutionBlock label={t("principles.blockBehavior")}>
                   {card.action ? card.action : t("principles.blockBehaviorFallback")}
                 </EvolutionBlock>
-                <div className="mt-3 pt-3 border-t border-line/60">
-                  <div className="flex items-center justify-between gap-3 bg-gov/5 border border-line rounded-[3px] px-3 py-2">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-mono text-[11px] uppercase tracking-[0.02em] text-ink-4">
-                        {t("principles.govDecision")}
-                      </span>
-                      <span
-                        className={
-                          "font-mono text-[11px] uppercase tracking-[0.02em] border rounded-[2px] px-2 py-0.5 " +
-                          STATUS_TEXT[card.status] +
-                          " border-current/20"
-                        }
-                      >
-                        {decision.glyph} {t(decision.labelKey)}
-                      </span>
-                      {card.runtimeDeactivated === true && (
-                        <span className="font-mono text-[11px] uppercase tracking-[0.02em] border rounded-[2px] px-2 py-0.5 border-amber-300 text-amber-700 bg-amber-50">
-                          {t("principles.runtimeDeactivated")}
-                        </span>
-                      )}
-                    </div>
-                    {decisionDate && (
-                      <span className="font-mono text-[11px] text-ink-4 whitespace-nowrap">
-                        {formatDate(decisionDate, i18n.language)}
-                      </span>
-                    )}
+                    {decisionDate && <p className="text-[11px] text-ink-4">{t('principles.govDecision')}: {formatDate(decisionDate, i18n.language)}</p>}
                   </div>
-                </div>
+                </details>
+                <Link className="mt-3 inline-block text-[12px] text-gov underline underline-offset-4" to={`/principles/${card.principleId}`} state={{ returnTo: `/principles?${searchParams}` }}>{t('principles.openDetails')}</Link>
               </article>
             );
           })}

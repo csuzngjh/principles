@@ -838,6 +838,8 @@
       "metricLatest": "最近更新",
       "blockBasis": "形成依据",
       "blockBasisFallback": "该原则由历史行为校准沉淀而来，详细来源尚未关联。",
+      "contextDisclosure": "形成过程与其他信息",
+      "openDetails": "查看原则详情",
       "blockImpact": "当前影响",
       "blockImpactSeeDecisionView": "当前是否影响行为，以详情页「当前实际执行」为准（本卡片不据生命周期状态断言影响）。",
       "blockImpactActive": "该原则正在影响智能体后续行为。",
@@ -894,6 +896,9 @@
       "detail": {
         "loading": "加载中…",
         "backToList": "← 返回列表",
+        "formationDisclosure": "这条原则如何形成",
+        "fullRule": "展开完整原则正文",
+        "extraContext": "其他来源说明与回顾问题",
         "conclusion": "结论",
         "policyNote": "这是面向未来相似场景的行为政策，可批准、修改、拒绝或暂存。",
         "modifyWording": "修改措辞",

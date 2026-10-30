@@ -594,12 +594,6 @@ export function PrincipleDetailPage() {
               </span>
             </div>
 
-            {/* 1. 发生了什么 */}
-            <OwnerNarrativeBlock
-              testId="owner-decision-incident"
-              label={t("principles.detail.ownerDecision.incident", { defaultValue: "发生了什么" })}
-              field={ownerDecision.incidentSummary}
-            />
             {/* 2. 学到了什么 */}
             <div className="mt-4" data-testid="owner-decision-learned">
               <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
@@ -608,8 +602,9 @@ export function PrincipleDetailPage() {
               {ownerDecision.learnedPrinciple.status === 'known' ? (
                 <>
                   <p className="mt-1 text-ink-2 text-[15px] leading-relaxed whitespace-pre-wrap break-words">
-                    {learnedText}
+                    {learnedText && learnedText.length > 240 ? learnedText.slice(0, 240) + '…' : learnedText}
                   </p>
+                  {learnedText && learnedText.length > 240 && <details className="mt-3 text-sm text-ink-2"><summary className="cursor-pointer text-gov">{t('principles.detail.fullRule')}</summary><p className="mt-3 whitespace-pre-wrap break-words leading-relaxed">{learnedText}</p></details>}
                   <p className="mt-1 text-ink-4 text-[12px]">
                     {t("principles.detail.ownerDecision.sourceTierLabel", {
                       defaultValue: "来源：{{tier}}（未经改写）",
@@ -623,119 +618,6 @@ export function PrincipleDetailPage() {
                 </p>
               )}
             </div>
-            {/* 3. 为什么 */}
-            <OwnerNarrativeBlock
-              testId="owner-decision-rationale"
-              label={t("principles.detail.ownerDecision.rationale", { defaultValue: "为什么这么判断" })}
-              field={ownerDecision.rationale}
-            />
-            {/* 4. 什么时候适用 */}
-            <OwnerNarrativeBlock
-              testId="owner-decision-applicability"
-              label={t("principles.detail.ownerDecision.applicability", { defaultValue: "什么时候适用" })}
-              field={ownerDecision.applicability}
-            />
-            {/* 5. 会怎样改变行为 */}
-            <OwnerNarrativeBlock
-              testId="owner-decision-expected"
-              label={t("principles.detail.ownerDecision.expected", { defaultValue: "批准后会怎样（拟议行为，未部署）" })}
-              field={ownerDecision.expectedBehavior}
-            />
-            {/* 5b. 当前实际执行 */}
-            {ownerDecision.currentEnforcement.status === 'known' && (
-              <div className="mt-4" data-testid="owner-decision-enforcement">
-                <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
-                  {t("principles.detail.ownerDecision.enforcementLabel", { defaultValue: "当前实际执行" })}
-                </p>
-                <p className="mt-1 text-ink-2 text-[14px] leading-relaxed">
-                  {ownerDecision.currentEnforcement.value?.state === 'active'
-                    ? t("principles.detail.ownerDecision.enforcement.active", { defaultValue: "当前有正在执行的生效方式（见下方明细）。" })
-                    : ownerDecision.currentEnforcement.value?.state === 'deactivated'
-                      ? t("principles.detail.ownerDecision.enforcement.deactivated", { defaultValue: "此前的执行方式已停用；当前没有正在执行的生效方式。" })
-                      : ownerDecision.currentEnforcement.value?.state === 'partially_active'
-                        ? t("principles.detail.ownerDecision.enforcement.partial", { defaultValue: "部分执行方式仍在运行（见下方明细）。" })
-                        : t("principles.detail.ownerDecision.enforcement.none", { defaultValue: "这条原则当前没有生效中的执行方式。" })}
-                </p>
-                {ownerDecision.currentEnforcement.value?.items.map((item) => (
-                  <p key={item.activationRef.id} className="mt-1 text-ink-3 text-[12px]">
-                    {item.mode.status === 'known' ? item.mode.value : item.channel}
-                    {" · "}
-                    {item.active
-                      ? t("principles.detail.ownerDecision.enforcement.since", { defaultValue: "生效中（自 {{since}}）", since: item.since.status === 'known' ? item.since.value.slice(0, 10) : '?' })
-                      : t("principles.detail.ownerDecision.enforcement.stopped", { defaultValue: "已停用" })}
-                  </p>
-                ))}
-              </div>
-            )}
-            {ownerDecision.currentEnforcement.status === 'unknown' && (
-              <p className="mt-4 text-amber text-[13px]" data-testid="owner-decision-enforcement-unknown">
-                {ownerDecision.currentEnforcement.reason?.ownerText}
-              </p>
-            )}
-            {/* 5c. 证据概览（§12 五维度独立） */}
-            {ownerDecision.evidenceSummary.status === 'known' && (
-              <div className="mt-4" data-testid="owner-decision-evidence">
-                <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
-                  {t("principles.detail.ownerDecision.evidence", { defaultValue: "行为证据" })}
-                </p>
-                <p className="mt-1 text-ink-2 text-[13px] leading-relaxed">
-                  {ownerDecision.evidenceSummary.value?.ownerExplanation}
-                </p>
-              </div>
-            )}
-            {/* 6. 风险与不确定性 */}
-            <div className="mt-4" data-testid="owner-decision-uncertainty">
-              <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
-                {t("principles.detail.ownerDecision.uncertainty", { defaultValue: "风险与不确定性" })}
-              </p>
-              {ownerDecision.risk.status === 'known' && (ownerDecision.risk.value?.items.length ?? 0) > 0 && (
-                <ul className="mt-1 space-y-1 text-[13px] text-ink-2">
-                  {ownerDecision.risk.value?.items.map((item, index) => (
-                    <li key={`risk-${index}`}>{item.text}</li>
-                  ))}
-                </ul>
-              )}
-              {ownerDecision.risk.status === 'known' && (ownerDecision.risk.value?.items.length ?? 0) === 0 && (
-                <p className="mt-1 text-ink-3 text-[13px]">
-                  {t("principles.detail.ownerDecision.riskNotAssessed", { defaultValue: "尚未做过风险评估；这不代表没有风险。" })}
-                </p>
-              )}
-              {ownerDecision.risk.status === 'unknown' && (
-                <p className="mt-1 text-ink-3 text-[13px]">{ownerDecision.risk.reason?.ownerText}</p>
-              )}
-              {ownerDecision.uncertainty.status === 'known' && ownerDecision.uncertainty.value.length > 0 && (
-                <ul className="mt-2 space-y-1 text-[12px] text-ink-3">
-                  {ownerDecision.uncertainty.value.map((item, index) => (
-                    <li key={`unc-${index}`}>{item.text}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
-            {/* 7. 如何撤销 */}
-            <div className="mt-4" data-testid="owner-decision-rollback">
-              <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
-                {t("principles.detail.ownerDecision.rollback", { defaultValue: "如何停止影响" })}
-              </p>
-              {ownerDecision.rollback.status === 'known' && (
-                <>
-                  <p className="mt-1 text-ink-2 text-[13px] leading-relaxed">{ownerDecision.rollback.value?.ownerText}</p>
-                  {ownerDecision.rollback.value?.stopFuture.status === 'known' && (
-                    <ul className="mt-1 space-y-1 text-[12px] text-ink-3">
-                      {ownerDecision.rollback.value.stopFuture.value.map((item, index) => (
-                        <li key={`rb-${index}`}>{item.text}</li>
-                      ))}
-                    </ul>
-                  )}
-                  {ownerDecision.rollback.value?.stopFuture.status === 'not_applicable' && (
-                    <p className="mt-1 text-ink-3 text-[12px]">{ownerDecision.rollback.value.stopFuture.reason.ownerText}</p>
-                  )}
-                </>
-              )}
-              {ownerDecision.rollback.status === 'unknown' && (
-                <p className="mt-1 text-amber text-[13px]">{ownerDecision.rollback.reason?.ownerText}</p>
-              )}
-            </div>
-
             {/* 8. Owner Decision — backend-assessed actions only */}
               {/* S3 finding (AI User QA): decided subjects were invisible on the
                   Detail page — the Owner could not see WHEN/HOW this principle
@@ -773,6 +655,7 @@ export function PrincipleDetailPage() {
                 <details key={record.id} className="mt-4 rounded border border-line p-4" data-testid="detail-approval-review">
                   <summary className="cursor-pointer text-sm text-gov">{t('focus.workbench.proposal')} · {t(`principles.detail.ownerDecision.channel.${record.channel}`, { defaultValue: record.channel })}</summary>
                   <div className="mt-5"><ApprovalSubjectReading principleId={principle.id} approvalId={record.id} artifactId={record.artifactId} channel={record.channel}
+                    showPrincipleLink={false}
                     revisionReview={new Set(approvalGroup.records.filter(entry => entry.status === 'pending').map(entry => entry.artifactId)).size === 1 ? approvalGroup.revisionReview : undefined}
                     revisionReviewUnavailable={approvalGroup.revisionReviewUnavailable}
                     lockedReason={ownerDecision.availableActions.some(action => actionTargetId(action, 'approval') === record.id) ? undefined : t('focus.workbench.permissionsUnknown')}
@@ -889,6 +772,127 @@ export function PrincipleDetailPage() {
                 </div>
               )}
             </div>
+            <details className="mt-5 border-t border-line pt-4" data-testid="principle-formation-disclosure"><summary className="cursor-pointer text-sm text-gov">{t('principles.detail.formationDisclosure')}</summary><div className="mt-4">
+            {/* 1. 发生了什么 */}
+            <OwnerNarrativeBlock
+              testId="owner-decision-incident"
+              label={t("principles.detail.ownerDecision.incident", { defaultValue: "发生了什么" })}
+              field={ownerDecision.incidentSummary}
+            />
+            {/* 3. 为什么 */}
+            <OwnerNarrativeBlock
+              testId="owner-decision-rationale"
+              label={t("principles.detail.ownerDecision.rationale", { defaultValue: "为什么这么判断" })}
+              field={ownerDecision.rationale}
+            />
+            </div></details>
+            {/* 4. 什么时候适用 */}
+            <OwnerNarrativeBlock
+              testId="owner-decision-applicability"
+              label={t("principles.detail.ownerDecision.applicability", { defaultValue: "什么时候适用" })}
+              field={ownerDecision.applicability}
+            />
+            {/* 5. 会怎样改变行为 */}
+            <OwnerNarrativeBlock
+              testId="owner-decision-expected"
+              label={t("principles.detail.ownerDecision.expected", { defaultValue: "批准后会怎样（拟议行为，未部署）" })}
+              field={ownerDecision.expectedBehavior}
+            />
+            {/* 5b. 当前实际执行 */}
+            {ownerDecision.currentEnforcement.status === 'known' && (
+              <div className="mt-4" data-testid="owner-decision-enforcement">
+                <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
+                  {t("principles.detail.ownerDecision.enforcementLabel", { defaultValue: "当前实际执行" })}
+                </p>
+                <p className="mt-1 text-ink-2 text-[14px] leading-relaxed">
+                  {ownerDecision.currentEnforcement.value?.state === 'active'
+                    ? t("principles.detail.ownerDecision.enforcement.active", { defaultValue: "当前有正在执行的生效方式（见下方明细）。" })
+                    : ownerDecision.currentEnforcement.value?.state === 'deactivated'
+                      ? t("principles.detail.ownerDecision.enforcement.deactivated", { defaultValue: "此前的执行方式已停用；当前没有正在执行的生效方式。" })
+                      : ownerDecision.currentEnforcement.value?.state === 'partially_active'
+                        ? t("principles.detail.ownerDecision.enforcement.partial", { defaultValue: "部分执行方式仍在运行（见下方明细）。" })
+                        : t("principles.detail.ownerDecision.enforcement.none", { defaultValue: "这条原则当前没有生效中的执行方式。" })}
+                </p>
+                {ownerDecision.currentEnforcement.value?.items.map((item) => (
+                  <p key={item.activationRef.id} className="mt-1 text-ink-3 text-[12px]">
+                    {item.mode.status === 'known' ? item.mode.value : item.channel}
+                    {" · "}
+                    {item.active
+                      ? t("principles.detail.ownerDecision.enforcement.since", { defaultValue: "生效中（自 {{since}}）", since: item.since.status === 'known' ? item.since.value.slice(0, 10) : '?' })
+                      : t("principles.detail.ownerDecision.enforcement.stopped", { defaultValue: "已停用" })}
+                  </p>
+                ))}
+              </div>
+            )}
+            {ownerDecision.currentEnforcement.status === 'unknown' && (
+              <p className="mt-4 text-amber text-[13px]" data-testid="owner-decision-enforcement-unknown">
+                {ownerDecision.currentEnforcement.reason?.ownerText}
+              </p>
+            )}
+            {/* 5c. 证据概览（§12 五维度独立） */}
+            {ownerDecision.evidenceSummary.status === 'known' && (
+              <div className="mt-4" data-testid="owner-decision-evidence">
+                <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
+                  {t("principles.detail.ownerDecision.evidence", { defaultValue: "行为证据" })}
+                </p>
+                <p className="mt-1 text-ink-2 text-[13px] leading-relaxed">
+                  {ownerDecision.evidenceSummary.value?.ownerExplanation}
+                </p>
+              </div>
+            )}
+            {/* 6. 风险与不确定性 */}
+            <div className="mt-4" data-testid="owner-decision-uncertainty">
+              <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
+                {t("principles.detail.ownerDecision.uncertainty", { defaultValue: "风险与不确定性" })}
+              </p>
+              {ownerDecision.risk.status === 'known' && (ownerDecision.risk.value?.items.length ?? 0) > 0 && (
+                <ul className="mt-1 space-y-1 text-[13px] text-ink-2">
+                  {ownerDecision.risk.value?.items.map((item, index) => (
+                    <li key={`risk-${index}`}>{item.text}</li>
+                  ))}
+                </ul>
+              )}
+              {ownerDecision.risk.status === 'known' && (ownerDecision.risk.value?.items.length ?? 0) === 0 && (
+                <p className="mt-1 text-ink-3 text-[13px]">
+                  {t("principles.detail.ownerDecision.riskNotAssessed", { defaultValue: "尚未做过风险评估；这不代表没有风险。" })}
+                </p>
+              )}
+              {ownerDecision.risk.status === 'unknown' && (
+                <p className="mt-1 text-ink-3 text-[13px]">{ownerDecision.risk.reason?.ownerText}</p>
+              )}
+              {ownerDecision.uncertainty.status === 'known' && ownerDecision.uncertainty.value.length > 0 && (
+                <ul className="mt-2 space-y-1 text-[12px] text-ink-3">
+                  {ownerDecision.uncertainty.value.map((item, index) => (
+                    <li key={`unc-${index}`}>{item.text}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            {/* 7. 如何撤销 */}
+            <div className="mt-4" data-testid="owner-decision-rollback">
+              <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
+                {t("principles.detail.ownerDecision.rollback", { defaultValue: "如何停止影响" })}
+              </p>
+              {ownerDecision.rollback.status === 'known' && (
+                <>
+                  <p className="mt-1 text-ink-2 text-[13px] leading-relaxed">{ownerDecision.rollback.value?.ownerText}</p>
+                  {ownerDecision.rollback.value?.stopFuture.status === 'known' && (
+                    <ul className="mt-1 space-y-1 text-[12px] text-ink-3">
+                      {ownerDecision.rollback.value.stopFuture.value.map((item, index) => (
+                        <li key={`rb-${index}`}>{item.text}</li>
+                      ))}
+                    </ul>
+                  )}
+                  {ownerDecision.rollback.value?.stopFuture.status === 'not_applicable' && (
+                    <p className="mt-1 text-ink-3 text-[12px]">{ownerDecision.rollback.value.stopFuture.reason.ownerText}</p>
+                  )}
+                </>
+              )}
+              {ownerDecision.rollback.status === 'unknown' && (
+                <p className="mt-1 text-amber text-[13px]">{ownerDecision.rollback.reason?.ownerText}</p>
+              )}
+            </div>
+
           </div>
         </section>
       )}
@@ -1173,6 +1177,7 @@ export function PrincipleDetailPage() {
         </section>
       )}
 
+      <details className="mb-8 border-t border-line pt-4" data-testid="principle-extra-context"><summary className="cursor-pointer text-sm text-gov">{t('principles.detail.extraContext')}</summary><div className="mt-5">
       {/* ── Layer 2: Why (technical proposal fields — original texts) ────── */}
       <section className="mb-8">
         <SectionTitle>{t("principles.detail.whyExists")}</SectionTitle>
@@ -1289,6 +1294,7 @@ export function PrincipleDetailPage() {
         </div>
       </section>
 
+      </div></details>
       {/* ── Layer 3: Full trajectory (collapsed by default, D section) ──── */}
       <details className="mb-8 border border-line rounded-[var(--radius-md)]">
         <summary className="px-4 py-3 cursor-pointer font-mono text-[11px] uppercase tracking-[0.1em] text-ink-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov">

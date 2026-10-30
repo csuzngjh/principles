@@ -838,6 +838,8 @@
       "metricLatest": "Last Updated",
       "blockBasis": "Formation Basis",
       "blockBasisFallback": "This principle was distilled from historical behavior calibration. Its detailed source is not yet linked.",
+      "contextDisclosure": "Formation and other information",
+      "openDetails": "View principle details",
       "blockImpact": "Current Impact",
       "blockImpactSeeDecisionView": "Whether this currently shapes behavior is shown on the detail page under current enforcement — this card does not assert impact from lifecycle status alone.",
       "blockImpactActive": "This principle is currently shaping the Agent's subsequent behavior.",
@@ -894,6 +896,9 @@
       "detail": {
         "loading": "Loading…",
         "backToList": "← Back to list",
+        "formationDisclosure": "How this principle formed",
+        "fullRule": "Read the complete principle",
+        "extraContext": "Other source notes and reflection questions",
         "conclusion": "Conclusion",
         "policyNote": "This is a behavioral policy for future similar scenarios. You can approve, modify, reject, or park it.",
         "modifyWording": "Modify Wording",

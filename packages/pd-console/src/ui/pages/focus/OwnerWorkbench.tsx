@@ -17,7 +17,8 @@ export function OwnerWorkbench({ items, completed, uncertain }: { items: OwnerWo
   useEffect(() => {
     if (selectedKey) {
       heading.current?.focus({ preventScroll: true });
-      if (heading.current && (heading.current.getBoundingClientRect().top < 0 || heading.current.getBoundingClientRect().bottom > window.innerHeight)) heading.current.scrollIntoView({ block: 'start' });
+      const reading = heading.current?.closest<HTMLElement>('[data-testid="owner-work-reading"]');
+      if (reading && (reading.getBoundingClientRect().top < 0 || reading.getBoundingClientRect().top > window.innerHeight - 100)) reading.scrollIntoView({ block: 'start' });
       const current = list.current?.querySelector<HTMLElement>('[aria-current="true"]');
       if (current && list.current && list.current.scrollHeight > list.current.clientHeight) {
         list.current.scrollTop = Math.max(0, current.offsetTop - list.current.offsetTop - 24);

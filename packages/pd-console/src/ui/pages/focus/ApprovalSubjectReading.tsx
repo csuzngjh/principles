@@ -7,11 +7,11 @@ import type { ApprovalsGroupedData } from '../../api.js';
 import type { ApprovalReviewData } from '../../utils/approval-review.js';
 import type { OwnerDecisionViewCore, NarrativeField } from '@principles/core/runtime-v2';
 
-export function ApprovalSubjectReading({ principleId, approvalId, artifactId, channel, lockedReason, targetHost, onResolved, revisionReview, revisionReviewUnavailable, budgetNotice, promptInjection, sourceUnlinked }: {
+export function ApprovalSubjectReading({ principleId, approvalId, artifactId, channel, lockedReason, targetHost, onResolved, revisionReview, revisionReviewUnavailable, budgetNotice, promptInjection, sourceUnlinked, showPrincipleLink = true }: {
   principleId: string; approvalId: string; artifactId: string; channel: string; lockedReason?: string;
   targetHost?: 'openclaw' | 'codex' | 'workbuddy'; onResolved?: (message: string) => void;
   revisionReview?: { artifactId?: string; artifactDigest?: string; oldStatement: string; newStatement: string; intentFields: Record<string, string> };
-  revisionReviewUnavailable?: boolean; budgetNotice?: string; promptInjection?: ApprovalsGroupedData['promptInjection']; sourceUnlinked?: boolean;
+  revisionReviewUnavailable?: boolean; budgetNotice?: string; promptInjection?: ApprovalsGroupedData['promptInjection']; sourceUnlinked?: boolean; showPrincipleLink?: boolean;
 }) {
   const { t } = useTranslation();
   const location = useLocation();
@@ -154,7 +154,7 @@ export function ApprovalSubjectReading({ principleId, approvalId, artifactId, ch
           <button type="button" onClick={() => setMode(null)} className="ml-3 text-sm text-ink-3">{t('pages.focus.workbench.cancel')}</button>
         </form>}
       </>}
-      <Link className="mt-5 inline-block text-[13px] text-gov underline underline-offset-4" state={{ returnTo: `/focus${location.search}` }} to={`/principles/${encodeURIComponent(principleId)}`}>{t('pages.focus.workbench.openPrinciple')}</Link>
+      {showPrincipleLink && <Link className="mt-5 inline-block text-[13px] text-gov underline underline-offset-4" state={{ returnTo: `/focus${location.search}` }} to={`/principles/${encodeURIComponent(principleId)}`}>{t('pages.focus.workbench.openPrinciple')}</Link>}
       <details className="mt-4 text-[12px] text-ink-4"><summary className="cursor-pointer">{t('pages.focus.workbench.subjectDetails')}</summary>
         <dl className="mt-2 break-all font-mono"><div>approval: {approvalId}</div><div>artifact: {review?.expectedReview.artifactId ?? artifactId}</div><div>channel: {review?.expectedReview.channel ?? channel}</div></dl>
       </details>

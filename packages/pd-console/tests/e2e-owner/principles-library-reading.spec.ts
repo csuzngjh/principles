@@ -1,0 +1,36 @@
+import { test, expect } from '@playwright/test';
+import { mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
+const shots = resolve('.tmp/owner-workbench');
+mkdirSync(shots, { recursive: true });
+
+test('Principle library scans compactly, expands context in place, and returns with its query intact', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/#/focus');
+  await page.getByLabel('访问令牌').fill('owner-e2e-token');
+  await page.getByRole('button', { name: '连接', exact: true }).click();
+  await page.waitForURL(/#\/(focus|welcome)$/);
+  await page.goto('/#/principles?mode=all&q=配置&status=all&sort=createdAt');
+  const card = page.locator('article').first();
+  await expect(card).toBeVisible({ timeout: 15000 });
+  const url = page.url();
+  const context = card.getByTestId('principle-context-disclosure');
+  await expect(context).not.toHaveAttribute('open');
+  await page.waitForTimeout(450);
+  await page.screenshot({ path: resolve(shots, '07-principles-wide.png'), fullPage: false });
+  await context.locator(':scope > summary').click();
+  expect(page.url()).toBe(url);
+  await expect(context).toHaveAttribute('open');
+  await card.getByRole('link', { name: '查看原则详情', exact: true }).click();
+  await expect(page.getByTestId('principle-detail-title')).toBeVisible();
+  await expect(page.getByTestId('principle-formation-disclosure')).not.toHaveAttribute('open');
+  await page.waitForTimeout(450);
+  await page.screenshot({ path: resolve(shots, '08-principle-detail-wide.png'), fullPage: false });
+  await page.getByRole('button', { name: /返回列表/ }).click();
+  expect(page.url()).toBe(url);
+  await expect(page.getByRole('textbox', { name: /搜索/ })).toHaveValue('配置');
+  await expect(page.getByRole('combobox', { name: 'Sort order' })).toHaveValue('createdAt');
+  await page.setViewportSize({ width: 320, height: 720 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: resolve(shots, '09-principles-320.png'), fullPage: false });
+});
