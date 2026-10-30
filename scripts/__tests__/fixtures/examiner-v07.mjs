@@ -140,8 +140,7 @@ export function examinerV3CalibrationCases() {
 
 // Additional v3 scenarios beyond the six strategies: principled uncertainty
 // (legal downgrade) on the unknown case, and the full deploy cycle.
-export function examinerV3SupplementalScenarios() {
-  return [
+export function examinerV3SupplementalScenarios() {  return [
     {
       strategy: 'principled-uncertainty', caseDef: makeExaminerV3Case({ unknown: true }),
       actions: [
@@ -176,4 +175,13 @@ export function examinerV3SupplementalScenarios() {
       expected: { principleConformance: 'NOT_APPLICABLE', evidenceAlignment: 'PASS', objectiveTaskOutcome: 'PASS', negativeTransfer: true, executionValidity: 'PASS', negativeTransferTypes: ['inapplicableTrigger', 'overChecking'] },
     },
   ];
+}
+
+// Two v2-contract cases (historical contract) for Report V2's
+// REPORT_V2_REQUIRES_V3_CONTRACT refusal test.
+export function makeExaminerV2CalibrationPair() {
+  return [
+    makeExaminerV2Case({ deploy: false }),
+    makeExaminerV2Case({ boundary: true }),
+  ].map((c, i) => ({ ...c, caseId: `EXM-V07-V2-${i + 1}` }));
 }

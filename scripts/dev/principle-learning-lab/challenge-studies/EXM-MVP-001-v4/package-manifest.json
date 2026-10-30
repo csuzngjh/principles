@@ -23,7 +23,7 @@
       },
       {
         "name": "challenge-actor.mjs",
-        "sha256": "c4479981820bdcab075a00168ea83837f517f10e6707e7bebe31e2a51f0ed6ec"
+        "sha256": "af9fe423f46b9fd1deda00c330b826a699900560859c0443cb3918060f7c76be"
       },
       {
         "name": "challenge-adopt.mjs",
@@ -43,11 +43,11 @@
       },
       {
         "name": "challenge-behavior-report.mjs",
-        "sha256": "a1192dd724d0a874aad9ca33c595d32c6593e7f3638147f9117806f052bdcbf8"
+        "sha256": "c5a4e6150ec3a00a9530030f9fd5b46fd8aeb54118fbf2066b50eb5d3811973b"
       },
       {
         "name": "challenge-compile.mjs",
-        "sha256": "ed66b3471e159ece868f15c86f9227bfe24fb1fd8a3e01f95b50ecb18b25cf3e"
+        "sha256": "677730ed16be212b125d7b95219e8ae9c389aa580561b804de4af9a3a3a05451"
       },
       {
         "name": "challenge-enumerator.mjs",
@@ -62,12 +62,16 @@
         "sha256": "e40fc00684392cb9763a184128cd029a5594b5b6a029df1fc4e7e5802c94ca50"
       },
       {
+        "name": "challenge-isolation-contract.mjs",
+        "sha256": "6c4f6022982ef10b71c42381734bbf2f17046d68b11d8e28fd958bceca485131"
+      },
+      {
         "name": "challenge-isolation-probe.mjs",
         "sha256": "71de73d119b1b2609ee193b896c90951a4ca908cc999137ce00da31800745daa"
       },
       {
         "name": "challenge-ledger.mjs",
-        "sha256": "bd2560bfebbdb767393e84055a878739c2851926828904c3a6cd17f9268c86f1"
+        "sha256": "e4bd083a642630aa792127b31d43e88f6ddcad9fc346af46700b2c404584b82e"
       },
       {
         "name": "challenge-openclaw-host.mjs",
@@ -83,7 +87,7 @@
       },
       {
         "name": "challenge-runner.mjs",
-        "sha256": "1dbbb00e2e667018a88a86586c8424b00d72c6ce3a6b041b30aefba734d98c81"
+        "sha256": "5c6adb5d0ee1f1737ff8c0a26e87904acbeda3ffcb886ff21f9b67e58e4658d5"
       },
       {
         "name": "challenge-skeleton.mjs",
@@ -92,6 +96,10 @@
       {
         "name": "challenge-stage-r-gate.mjs",
         "sha256": "a233ef52a8b165245ac0e02300ed1e25302de11f1cad4e721f484081496dca61"
+      },
+      {
+        "name": "challenge-statistics.mjs",
+        "sha256": "2ed3ebbde1f4b09e7e6c280e043c67e0902bc0fb1987a8c5b3252c850fcbb1b0"
       },
       {
         "name": "challenge-validator.mjs",
@@ -103,11 +111,11 @@
       },
       {
         "name": "claim-evidence-env.mjs",
-        "sha256": "5b42aaf376f496579d5b2eb1606d0b7828fe35ff2518206138a62165580c2de3"
+        "sha256": "9b787bc7b37e53c0af8e5303ad8b5b9807a01c61f70d4d702ae49daf386644c3"
       },
       {
         "name": "claim-evidence-scorer.mjs",
-        "sha256": "9bb10f4633639acb6b4b78451d1f67d32d1cc20e5b4f322c3434f8ff6e9bbee2"
+        "sha256": "89a5d5c0ea68b9028b070c164d9c4bb7ac3191665a93c62a6368d0e6f5a4aee6"
       },
       {
         "name": "evaluator.mjs",
@@ -186,7 +194,7 @@
     },
     {
       "path": "blind-review/receipts.template.json",
-      "sha256": "683a847c5ed478065fecf72777d6630700566a26f32bf8ee67e0e74801b86699"
+      "sha256": "7b535afb88af05eda67b74fdd9d9d83e3d28c0676358acc4e8f86e46d5317fe4"
     },
     {
       "path": "blind-review/review-form.json",
@@ -194,7 +202,7 @@
     },
     {
       "path": "expected-replay.json",
-      "sha256": "70eec632e25397e1d78cc22d5f034f9e90c79ff661f24fb1318ffe25bc4425ce"
+      "sha256": "4056f84f3e722d0d7693c95f2320c82931fcd21020c1c98747c95647421442c6"
     },
     {
       "path": "gold-review.json",
@@ -238,7 +246,7 @@
     },
     {
       "path": "review-subject.json",
-      "sha256": "9080529621d6f7dd4f41a7663d71b7cf9abe61edeae506880f62467951f2f8e3"
+      "sha256": "9c2cd667b8e9b476fd1b9d009faae910f9ab70c76371f9106266f3d401665ca3"
     },
     {
       "path": "revision.json",
@@ -253,5 +261,5 @@
       "sha256": "8c96f68ebfcd0ff71c1625cef036d6ef7f4f82785a303f45ff4a45952df9185c"
     }
   ],
-  "packageHash": "010ec34624231656be093d105129654074022586ea2859b50a6c2a5868e2eb09"
+  "packageHash": "2f04a89b670a5bca47317e9ac3b6cb360cb16b2316ddc289a53efe8dcdbbfa9b"
 }
