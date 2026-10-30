@@ -26,11 +26,11 @@ async function ownerLogin(page: import('@playwright/test').Page): Promise<void> 
 
 test('authenticated Owner clicks the Focus card approve button — real UI click, real request, real state', async ({ page, request }) => {
   await ownerLogin(page);
-  await page.goto('/#/focus');
+  await page.goto('/#/focus?review=approval%3Aapr-click-approve');
   await page.waitForLoadState('networkidle');
 
   const approveBtn = page.getByTestId(`approve-btn-${CLICK_APPROVE_PRINCIPLE}`);
-  await expect(approveBtn).toBeVisible();
+  await expect(approveBtn).toBeVisible({ timeout: 15000 });
   // 治理就绪门放行（owner-auth + 身份已配置）→ 按钮可点击
   await expect(approveBtn).toBeEnabled();
 
@@ -39,6 +39,8 @@ test('authenticated Owner clicks the Focus card approve button — real UI click
   await expect(editBtn).toBeEnabled();
   await expect(editBtn).toContainText(/替换待审版本|Replace pending version/);
 
+  await page.getByTestId('owner-work-reading').locator('details > summary').filter({ hasText: '批准备注（可选）' }).click();
+  await page.getByLabel('批准备注（可选）').fill('  看过这份确切草案后批准。  ');
   // 观察真实提交请求（UI 点击产生，而非测试直接 POST）
   const approveResponse = page.waitForResponse(
     (response) => response.url().endsWith('/api/v1/approvals/apr-click-approve/approve') && response.request().method() === 'POST',
@@ -46,14 +48,17 @@ test('authenticated Owner clicks the Focus card approve button — real UI click
   await approveBtn.click();
   const response = await approveResponse;
   expect(response.status()).toBe(200);
+  const submitted: unknown = response.request().postDataJSON();
+  expect(submitted).toMatchObject({ note: '看过这份确切草案后批准。', expectedReview: { schemaVersion: 'approval-review-v1', approvalId: 'apr-click-approve', artifactState: 'present' } });
   const responseBody: unknown = await response.json();
   const data = isRecord(responseBody) && isRecord(responseBody.data) ? responseBody.data : {};
   // 审批结果与激活结果分层断言：审批 approved，激活已派发成功
   expect(data.status).toBe('approved');
   expect(data.activation).toBeTruthy();
 
-  // rc-9：操作结果必须可见——卡片停留并显示已批准终态
-  await expect(page.getByTestId(`decided-banner-${CLICK_APPROVE_PRINCIPLE}`)).toBeVisible();
+  // rc-9：操作结果必须可见——已处理事项退出待办，结果与下一步仍留在阅读区。
+  await expect(page.getByRole('heading', { name: '本次决定已记录', exact: true })).toBeVisible();
+  await expect(page.getByTestId('owner-work-reading')).toContainText('已批准');
 
   // 服务端最终权威状态：审批列表含 approved 记录；激活列表含该激活且 active
   const approvalsResponse = await request.get('/api/v1/approvals?status=approved', { headers: AUTHORIZATION });

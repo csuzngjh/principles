@@ -2065,7 +2065,7 @@ export interface ApprovalGroupData {
    * "do not promise rotation".
    */
   revisionReviewUnavailable?: boolean;
-  revisionReview?: { oldStatement: string; newStatement: string; intentFields: Record<string, string> };
+  revisionReview?: { artifactId?: string; artifactDigest?: string; oldStatement: string; newStatement: string; intentFields: Record<string, string> };
   fitsPromptBudget?: boolean;
   /**
    * SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: honest tier classification of the
@@ -2105,7 +2105,9 @@ function validateApprovalGroup(v: unknown): ApprovalGroupData | null {
       if (value !== undefined && typeof value !== 'string') return null;
       if (typeof value === 'string') intentFields[key] = value;
     }
-    result.revisionReview = { oldStatement: review.oldStatement, newStatement: review.newStatement, intentFields };
+    result.revisionReview = { oldStatement: review.oldStatement, newStatement: review.newStatement, intentFields,
+      ...(typeof review.artifactId === 'string' ? { artifactId: review.artifactId } : {}),
+      ...(typeof review.artifactDigest === 'string' && /^sha256:[a-f0-9]{64}$/.test(review.artifactDigest) ? { artifactDigest: review.artifactDigest } : {}) };
   }
   // Wave 7: optional candidateDescription from artifact contentJson
   if (Object.hasOwn(v, 'candidateDescription') && isString(v.candidateDescription) && v.candidateDescription.length > 0) {

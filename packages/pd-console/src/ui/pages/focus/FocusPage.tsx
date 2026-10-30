@@ -21,7 +21,7 @@ import type {
   ActivationRecord,
 } from "../../api.js";
 import type { OwnerDecisionItemData } from "../../utils/validators.js";
-import { selectApprovalGroupDisplayTitle, validateApprovalsGroupedData } from "./focus-validation.js";
+import { selectApprovalGroupDisplayTitle, showsUnlinkedCandidateNote, validateApprovalsGroupedData } from "./focus-validation.js";
 import { splitReadingTitleBody } from "../../utils/reading-layout.js";
 import { OwnerWorkbench, type OwnerWorkItem } from "./OwnerWorkbench.js";
 import { ApprovalSubjectReading } from "./ApprovalSubjectReading.js";
@@ -884,7 +884,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
     || ruleCodeErrorReason !== null || errorMessage !== null || ownerDecisionError !== null || groupedErrorReason !== null || bindingError !== null || ownerInboxError !== null;
   const workItems: OwnerWorkItem[] = [
     ...ruleCodePending.filter(item => !decisionItems.some(decision => decision.kind === 'rulecode_decision' && decision.taskId === item.activationId)).map(item => ({ key: `activation:${item.activationId}`, title: splitReadingTitleBody(t('pages.focus.workbench.rulePromotion')).title,
-      kind: t('pages.focus.workbench.rulePromotion'), summary: t('pages.focus.workbench.promotionSummary'),
+      kind: t('pages.focus.workbench.rulePromotion'), summary: t('pages.focus.workbench.promotionSummary'), reference: item.activationId,
       content: <div className="text-sm leading-relaxed text-ink-2"><p>{t('pages.focus.workbench.promotionSummary')}</p><Link to={`/activation?activationId=${encodeURIComponent(item.activationId)}`} className="mt-4 inline-block text-gov underline">{t('pages.focus.workbench.openActivation')}</Link></div> })),
     ...decisionItems.map(item => ({ key: `decision:${item.reviewKey}`, title: splitReadingTitleBody(item.title).title,
       kind: t('pages.focus.workbench.taskDecision'), summary: item.summary, reference: item.taskId,
@@ -897,6 +897,8 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
       content: <ApprovalSubjectReading key={`${record.id}:${promptTargetHost ?? 'default'}`} principleId={group.principleId} approvalId={record.id} artifactId={record.artifactId} channel={record.channel} lockedReason={ownerActionsLockedReason ?? undefined}
         targetHost={promptTargetHost ?? undefined} revisionReview={new Set(group.records.filter(entry => entry.status === 'pending').map(entry => entry.artifactId)).size === 1 ? group.revisionReview : undefined}
         revisionReviewUnavailable={group.revisionReviewUnavailable}
+        sourceUnlinked={showsUnlinkedCandidateNote(group)}
+        promptInjection={groupedData?.promptInjection}
         budgetNotice={groupedData?.promptInjection?.truncated === true && groupedData.promptInjection.capacityStatus !== 'unconfirmed' ? t(
           groupedData.promptInjection.productionRotates === true ? group.fitsPromptBudget === true ? group.promptBudgetTierFit === 'model_dependent'
             ? 'pages.focus.approveQueueBadgeRotationModelDependent' : 'pages.focus.approveQueueBadgeRotation' : 'pages.focus.approveQueueBadgeOversized' : 'pages.focus.approveQueueBadge',
@@ -904,7 +906,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
         onResolved={message => { setCompletedMessage({ key: `approval:${record.id}`, message }); void loadData(); }} />,
     }))),
     ...(bindingQueue?.items ?? []).filter(item => !['bound_generating', 'bound_advanced', 'bound_not_built'].includes(deriveRuleBindingCardState(item))).map(item => ({ key: `binding:${item.candidateId}`, title: splitReadingTitleBody(item.text).title,
-      kind: t('pages.focus.workbench.bindingReview'), summary: item.pain.text ?? t('pages.focus.workbench.bindingSummary'),
+      kind: t('pages.focus.workbench.bindingReview'), summary: item.pain.text ?? t('pages.focus.workbench.bindingSummary'), reference: item.candidateId,
       content: <RuleCandidateBindingPanel key={item.candidateId} candidateId={item.candidateId} onChanged={() => { void loadData(); }} /> })),
   ];
 
@@ -954,7 +956,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
             role="status"
             data-testid="focus-conclusion-badge"
           >
-            {sourcesUncertain ? t('pages.focus.workbench.uncertain') : workItems.length > 0 ? t('pages.focus.workbench.title') : experienceMode && experienceData !== null
+            {sourcesUncertain ? t('pages.focus.workbench.sourcesPending') : workItems.length > 0 ? t('pages.focus.workbench.title') : experienceMode && experienceData !== null
               ? t(EXPERIENCE_ATTENTION[experienceData.summary.primaryAttention].labelKey)
               : t(`pages.focus.stateLabel.${governanceState}`)}
           </span>

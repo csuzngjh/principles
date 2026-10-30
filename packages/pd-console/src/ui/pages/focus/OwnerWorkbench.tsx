@@ -2,7 +2,7 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
-export interface OwnerWorkItem { key: string; title: string; kind: string; summary: string; content: ReactNode }
+export interface OwnerWorkItem { key: string; title: string; kind: string; summary: string; reference?: string; content: ReactNode }
 
 /** Presentation only: list grouping never changes an action's identity or authority. */
 export function OwnerWorkbench({ items, completed, uncertain }: { items: OwnerWorkItem[]; completed: { key: string; message: string } | null; uncertain: boolean }) {
@@ -12,8 +12,25 @@ export function OwnerWorkbench({ items, completed, uncertain }: { items: OwnerWo
   const selected = items.find(item => item.key === selectedKey);
   const heading = useRef<HTMLHeadingElement>(null);
   const list = useRef<HTMLElement>(null);
-  useEffect(() => { if (selectedKey) heading.current?.focus({ preventScroll: true }); else list.current?.focus({ preventScroll: true }); }, [selectedKey]);
+  const lastSelected = useRef('');
+  const listScroll = useRef(0);
+  useEffect(() => {
+    if (selectedKey) {
+      heading.current?.focus({ preventScroll: true });
+      if (heading.current && (heading.current.getBoundingClientRect().top < 0 || heading.current.getBoundingClientRect().bottom > window.innerHeight)) heading.current.scrollIntoView({ block: 'start' });
+      const current = list.current?.querySelector<HTMLElement>('[aria-current="true"]');
+      if (current && list.current && list.current.scrollHeight > list.current.clientHeight) {
+        list.current.scrollTop = Math.max(0, current.offsetTop - list.current.offsetTop - 24);
+      }
+    } else if (lastSelected.current && list.current) {
+      list.current.scrollTop = listScroll.current;
+      const previous = Array.from(list.current.querySelectorAll<HTMLButtonElement>('[data-item-key]')).find(button => button.dataset.itemKey === lastSelected.current);
+      previous?.focus({ preventScroll: true });
+      if (previous && (previous.getBoundingClientRect().top < 0 || previous.getBoundingClientRect().bottom > window.innerHeight)) previous.scrollIntoView({ block: 'nearest' });
+    } else list.current?.focus({ preventScroll: true });
+  }, [selectedKey]);
   function choose(key: string) {
+    if (!key && selectedKey) { lastSelected.current = selectedKey; listScroll.current = list.current?.scrollTop ?? 0; }
     const next = new URLSearchParams(params);
     if (key) next.set('review', key); else next.delete('review');
     setParams(next, { preventScrollReset: true });
@@ -25,9 +42,10 @@ export function OwnerWorkbench({ items, completed, uncertain }: { items: OwnerWo
       <div className="mb-3 flex items-baseline justify-between gap-3"><h2 className="text-[15px] font-medium text-ink">{t('pages.focus.workbench.list')}</h2><span className="text-[12px] text-ink-4">{t('pages.focus.workbench.count', { count: items.length })}</span></div>
       {items.length === 0 && <p className="text-sm leading-relaxed text-ink-3">{t(uncertain ? 'pages.focus.workbench.uncertain' : 'pages.focus.workbench.empty')}</p>}
       <ol className="space-y-2">{items.map(item => <li key={item.key}><button type="button" onClick={() => choose(item.key)} aria-current={selected?.key === item.key ? 'true' : undefined}
-        data-testid="owner-work-item" className={`w-full rounded-[6px] border px-4 py-4 text-left transition-colors focus-visible:outline-2 focus-visible:outline-gov ${selected?.key === item.key ? 'border-gov bg-gov/5' : 'border-line bg-panel hover:border-gov/50'}`}>
+        data-testid="owner-work-item" data-item-key={item.key} className={`w-full rounded-[6px] border px-4 py-4 text-left transition-colors focus-visible:outline-2 focus-visible:outline-gov ${selected?.key === item.key ? 'border-gov bg-gov/5' : 'border-line bg-panel hover:border-gov/50'}`}>
         <span className="mb-2 block text-[11px] text-ink-4">{item.kind}</span><span className="block text-[14px] font-medium leading-relaxed text-ink break-words">{item.title}</span>
         <span className="mt-2 block text-[12.5px] leading-relaxed text-ink-3 line-clamp-2">{item.summary}</span>
+        {item.reference && items.some(other => other.key !== item.key && other.title === item.title && other.summary === item.summary) && <span className="mt-2 block break-all font-mono text-[11px] text-ink-4">{item.reference}</span>}
       </button></li>)}</ol>
     </nav>
     <div className="owner-work-reading min-w-0" data-testid="owner-work-reading">

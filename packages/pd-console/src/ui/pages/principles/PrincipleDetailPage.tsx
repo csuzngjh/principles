@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useNavigate, useLocation, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -15,11 +15,9 @@ import {
   fetchPrincipleReceipts,
   fetchEvidenceAudit,
   fetchOwnerDecisionView,
-  approveApproval,
-  rejectApproval,
-  editApproval,
   disableActivation,
 } from "../../api.js";
+import { ApprovalSubjectReading } from "../focus/ApprovalSubjectReading.js";
 import type { PrincipleReceiptsData, EvidenceAuditData } from "../../api.js";
 import type { OwnerDecisionViewCore, Action as OwnerAction } from "@principles/core/runtime-v2";
 import { ReceiptCoverageDisclosure, getReceiptSourceStatusLabelKey } from "../../components/receipts/ReceiptCoverageDisclosure.js";
@@ -284,6 +282,7 @@ export function PrincipleDetailPage() {
   const [loadingEvidenceKind, setLoadingEvidenceKind] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const detailEpoch = useRef(0);
 
   // Decision action state — driven by backend available_actions only.
   const [pendingAction, setPendingAction] = useState<OwnerAction | null>(null);
@@ -299,6 +298,7 @@ export function PrincipleDetailPage() {
   // Fetch data
   const loadData = useCallback(async () => {
     if (!id) return;
+    const epoch = ++detailEpoch.current;
     setLoading(true);
     setError(null);
     setApprovalGroup(null); // Clear previous approval group to prevent stale actionability (P1)
@@ -319,6 +319,7 @@ export function PrincipleDetailPage() {
         fetchPrincipleReceipts(id),
         fetchEvidenceAudit('principle', id),
       ]);
+      if (epoch !== detailEpoch.current) return;
 
       if (!pResult.success) {
         setError(pResult.error ?? "Failed to load principle");
@@ -378,15 +379,18 @@ export function PrincipleDetailPage() {
         setEvidenceAudit(null);
       }
     } catch (err) {
+      if (epoch !== detailEpoch.current) return;
       setError(err instanceof Error ? err.message : "Unknown error");
       setApprovalGroup(null);
     } finally {
-      setLoading(false);
+      if (epoch === detailEpoch.current) setLoading(false);
     }
   }, [id]);
 
   useEffect(() => {
-    loadData();
+    setPendingAction(null); setRejectReason(''); setNewArtifactId(''); setApproveNote(''); setActionLoading(false);
+    void loadData();
+    return () => { detailEpoch.current++; };
   }, [loadData]);
 
   const loadOlderEvidence = async (kind: EvidenceAuditData["deliveries"][number]["kind"]): Promise<void> => {
@@ -394,8 +398,10 @@ export function PrincipleDetailPage() {
     const page = evidenceAudit.pages[kind];
     if (!page.hasMore || !page.nextCursor) return;
     setLoadingEvidenceKind(kind);
+    const epoch = detailEpoch.current;
     try {
       const result = await fetchEvidenceAudit('principle', id, { kind, after: page.nextCursor });
+      if (epoch !== detailEpoch.current) return;
       if (!result.success || !result.data) return;
       if (result.data.status !== 'ok') {
         toast.error(result.data.reason ?? '读取更早的干预证据失败');
@@ -413,9 +419,10 @@ export function PrincipleDetailPage() {
           .map((entry) => [`${entry.evidenceId}:${entry.field}:${entry.missingKey}`, entry])).values()],
       }));
     } catch (err) {
+      if (epoch !== detailEpoch.current) return;
       toast.error(err instanceof Error ? err.message : '读取更早的干预证据失败');
     } finally {
-      setLoadingEvidenceKind(null);
+      if (epoch === detailEpoch.current) setLoadingEvidenceKind(null);
     }
   };
 
@@ -423,13 +430,11 @@ export function PrincipleDetailPage() {
   // The view's actions are advisory; every submission goes through the real
   // mutation service. On failure: show the service reason, invalidate stale
   // actions, re-GET the view. Never auto-retry a mutation.
-  const submitOwnerAction = async (action: OwnerAction, reason?: string, note?: string): Promise<void> => {
+  const submitOwnerAction = async (action: OwnerAction): Promise<void> => {
     if (actionLoading) return;
-    if (['approve', 'reject', 'edit_approval'].includes(action.semantic)) {
-      toast.error(t('pages.focus.workbench.versionLock'));
-      return;
-    }
+    if (action.semantic !== 'disable') return;
     setActionLoading(true);
+    const epoch = detailEpoch.current;
     try {
       let failed = false;
       let failureDetail = '';
@@ -439,34 +444,7 @@ export function PrincipleDetailPage() {
           failureDetail = `${result.error ?? ''}${result.nextAction ? ` ${result.nextAction}` : ''}`.trim();
         }
       };
-      if (action.semantic === 'approve') {
-        const approvalId = actionTargetId(action, 'approval');
-        if (approvalId === null) {
-          toast.error(t("principles.detail.ownerDecision.invalidTarget", { defaultValue: "动作目标缺失，无法提交。" }));
-          return;
-        }
-        const approveResult = await approveApproval(approvalId, note);
-        settle(approveResult);
-        // PRI-890: non-fatal server warnings (e.g. prompt injection budget
-        // exclusion) must reach the Owner on this path too, not vanish.
-        if (approveResult.success && typeof approveResult.data?.warning === 'string') {
-          toast.warning(approveResult.data.warning, { duration: 15000 });
-        }
-      } else if (action.semantic === 'reject') {
-        const approvalId = actionTargetId(action, 'approval');
-        if (approvalId === null) {
-          toast.error(t("principles.detail.ownerDecision.invalidTarget", { defaultValue: "动作目标缺失，无法提交。" }));
-          return;
-        }
-        settle(await rejectApproval(approvalId, reason ?? ""));
-      } else if (action.semantic === 'edit_approval') {
-        const approvalId = actionTargetId(action, 'approval');
-        if (approvalId === null || reason === undefined || newArtifactId.trim() === '') {
-          toast.error(t("principles.detail.ownerDecision.invalidTarget", { defaultValue: "动作目标缺失，无法提交。" }));
-          return;
-        }
-        settle(await editApproval(approvalId, newArtifactId.trim(), reason));
-      } else if (action.semantic === 'disable') {
+      if (action.semantic === 'disable') {
         const activationId = actionTargetId(action, 'activation');
         if (activationId === null) {
           toast.error(t("principles.detail.ownerDecision.invalidTarget", { defaultValue: "动作目标缺失，无法提交。" }));
@@ -476,6 +454,7 @@ export function PrincipleDetailPage() {
       } else {
         return; // unknown semantics are never rendered; belt-and-suspenders
       }
+      if (epoch !== detailEpoch.current) return;
       if (!failed) {
         toast.success(t("principles.detail.ownerDecision.actionDone", { defaultValue: "操作已提交。" }));
       } else {
@@ -487,15 +466,18 @@ export function PrincipleDetailPage() {
         }));
       }
     } catch (err) {
+      if (epoch !== detailEpoch.current) return;
       toast.error(err instanceof Error ? err.message : String(err));
     } finally {
-      setActionLoading(false);
-      setPendingAction(null);
-      setRejectReason("");
-      setNewArtifactId("");
-      setApproveNote("");
-      // Invalidate the stale action list and re-derive from a fresh GET.
-      await loadData();
+      if (epoch === detailEpoch.current) {
+        setActionLoading(false);
+        setPendingAction(null);
+        setRejectReason("");
+        setNewArtifactId("");
+        setApproveNote("");
+        // Invalidate the stale action list and re-derive from a fresh GET.
+        await loadData();
+      }
     }
   };
 
@@ -787,41 +769,23 @@ export function PrincipleDetailPage() {
                   {t("principles.detail.ownerDecision.noActions", { defaultValue: "当前没有可以执行的操作。" })}
                 </p>
               )}
-              {/* Fix 1 (review P1): per-subject decision material. Each pending
-                  decision shows ITS OWN revision's material — never another
-                  revision's text. Principle-level learnedPrinciple above stays
-                  the overview summary only. */}
-              {ownerDecision.decisionSubjects.filter((subject) => subject.state === 'pending').length > 0 && (
-                <div className="mt-3 space-y-3" data-testid="owner-decision-subject-materials">
-                  {ownerDecision.decisionSubjects.filter((subject) => subject.state === 'pending').map((subject) => (
-                    <div key={subject.key} className="rounded-[var(--radius-sm)] border border-line p-3" data-subject-key={subject.key}>
-                      <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
-                        {t("principles.detail.ownerDecision.subjectMaterial", { defaultValue: "这项决定的材料" })}
-                      </p>
-                      {subject.decisionMaterial.learnedPrinciple.status === 'known' ? (
-                        subject.decisionMaterial.learnedPrinciple.value.map((item, index) => (
-                          <p key={`sm-${index}`} className="mt-1 text-ink-2 text-[13px] leading-relaxed">{item.text}</p>
-                        ))
-                      ) : (
-                        <p className="mt-1 text-amber text-[13px]">{subject.decisionMaterial.learnedPrinciple.reason.ownerText}</p>
-                      )}
-                      {subject.decisionMaterial.consequence.status === 'known' && (
-                        <p className="mt-1 text-ink-3 text-[12px] leading-relaxed">
-                          {subject.decisionMaterial.consequence.value.map((item) => item.text).join(' ')}
-                        </p>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
+              {approvalGroup?.records.filter(record => record.status === 'pending').map(record => (
+                <details key={record.id} className="mt-4 rounded border border-line p-4" data-testid="detail-approval-review">
+                  <summary className="cursor-pointer text-sm text-gov">{t('focus.workbench.proposal')} · {t(`principles.detail.ownerDecision.channel.${record.channel}`, { defaultValue: record.channel })}</summary>
+                  <div className="mt-5"><ApprovalSubjectReading principleId={principle.id} approvalId={record.id} artifactId={record.artifactId} channel={record.channel}
+                    revisionReview={new Set(approvalGroup.records.filter(entry => entry.status === 'pending').map(entry => entry.artifactId)).size === 1 ? approvalGroup.revisionReview : undefined}
+                    revisionReviewUnavailable={approvalGroup.revisionReviewUnavailable}
+                    lockedReason={ownerDecision.availableActions.some(action => actionTargetId(action, 'approval') === record.id) ? undefined : t('focus.workbench.permissionsUnknown')}
+                    onResolved={message => { toast.success(message); void loadData(); }} /></div>
+                </details>
+              ))}
               <div className="mt-2 flex flex-wrap gap-3">
-                {ownerDecision.availableActions.some(action => ['approve', 'reject', 'edit_approval'].includes(action.semantic)) && <p className="mb-3 text-[13px] leading-relaxed text-amber">{t('pages.focus.workbench.versionLock')}</p>}
-                {ownerDecision.availableActions.map((action) => (
+                {ownerDecision.availableActions.filter(action => action.semantic === 'disable').map((action) => (
                   <Button
                     key={action.key}
                     variant={action.semantic === 'reject' ? 'destructive' : action.semantic === 'disable' ? 'outline' : 'default'}
                     size="sm"
-                    disabled={actionLoading || ['approve', 'reject', 'edit_approval'].includes(action.semantic)}
+                    disabled={actionLoading}
                     data-action-semantic={action.semantic}
                     onClick={() => {
                       setRejectReason("");
@@ -912,11 +876,7 @@ export function PrincipleDetailPage() {
                           || (pendingAction.requirements.some((req) => req.name === 'newArtifactId') && !newArtifactId.trim())}
                         onClick={() => {
                           const action = pendingAction;
-                          void submitOwnerAction(
-                            action,
-                            rejectReason.trim() === '' ? undefined : rejectReason.trim(),
-                            approveNote.trim() === '' ? undefined : approveNote.trim(),
-                          );
+                          void submitOwnerAction(action);
                         }}
                       >
                         {t("principles.detail.confirm", { defaultValue: "确认" })}
