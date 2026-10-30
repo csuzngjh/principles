@@ -13,7 +13,7 @@
 
 **内容哈希是强绑定**：每条记录的 `goldHash`（九题）与 `mappingHash` 与冻结包内 `gold-review.json` / `receipts.template.json` 及 `compileCase` 权威计算逐项相等，由上述测试在 CI 强制。这两类哈希在包级重生成（如 main 刷新后的 freeze 重绑定）中保持不变，因此 Owner 认可的内容效力跨包级重生成持续有效。
 
-**包级哈希是记录时上下文（provenance）**：`bindingContext.packageHash` / `subjectHash` 记录评审固化时点（提交 `e39239e59`）的包状态，不作为内容效力条件，测试不对其做漂移断言。截至记录时点，账本绑定与包状态完全一致。
+**包级哈希是记录时上下文（provenance）**：`bindingContext.packageHash` / `subjectHash` / `baseCommit` 记录评审固化时的包状态，不作为内容效力条件，测试不对其做漂移断言。每次 freeze 重绑定（`scripts/dev/principle-learning-lab/rebind-exm-v4-freeze.mjs`）把这三项刷新到重绑定点，账本决策、意见、时间与内容哈希不变。
 
 ## 治理边界（必须区分）
 
