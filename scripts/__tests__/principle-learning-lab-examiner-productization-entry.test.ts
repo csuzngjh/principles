@@ -158,6 +158,9 @@ describe('v0.5 shared ledger lifecycle and honest candidate denominators', () =>
     changedDecision.caseDef.constraints.budgetUnits += 1;
     const result = dedupeProductizationCandidates([original, renamed, changedDecision]);
     expect(result.structuralDuplicatePairs).toContainEqual([0, 1]);
+    // v2's only mutation axis is expression, so there is no third tier: a
+    // skeleton list would just restate structural.
+    expect(result).not.toHaveProperty('skeletonDuplicatePairs');
     expect(result.unresolvedSemantic).toContainEqual({ candidateIds: [original.candidateId, 'OTHER'], reason: 'semantic equivalence requires independent review', status: 'PENDING' });
   });
 });

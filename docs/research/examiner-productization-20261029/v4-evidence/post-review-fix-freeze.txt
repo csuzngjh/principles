@@ -1,0 +1,13 @@
+{"status":"CALIBRATION_REPLAYED_GOLD_REVIEW_PENDING","packageHash":"d9c42e5b54f941ef8d8f39e49ffbae2cd9f26d7c342e0e6c0b6c3babede56459","reportHash":"afbe0a49bef242ec9cdbec6b286fdfc33ea486773acc93ce7528cbb7310d54d6","executions":9,"observedNodeVersion":"26.7.0"}
+replay exit=0
+{"ok":false,"status":"GOLD_REVIEW_PENDING","subjectHash":"5ac072bfea8bd3b216889c52a348403baf5044ac4ca7054d12194c59b24646ba","reasonCode":"INDEPENDENT_HUMAN_REVIEW_REQUIRED","nextAction":"Owner designates a human reviewer; supply signed mapping/Gold receipts and the independently pinned authority file."}
+human-gate exit=1
+RUN  v5.0.0 D:/Code/_worktrees/principles/adhoc-20261030-20261030-pr-review-fixes-4e8219/scripts
+ ✓ __tests__/principle-learning-lab-examiner-productization-entry.test.ts (32 tests)
+ ✓ __tests__/principle-learning-lab-frozen-package.test.ts (7 tests)
+ ✓ __tests__/principle-learning-lab-human-review-intake.test.ts (5 tests)
+ Test Files  3 passed (3)
+      Tests  44 passed (44)
+sums entries 18 mismatches 0
+zip subjectHash 5ac072bfea8bd3b216889c52a348403baf5044ac4ca7054d12194c59b24646ba template hashes [ '5ac072bfea8bd3b216889c52a348403baf5044ac4ca7054d12194c59b24646ba' ]
+GOLD-BLIND-REVIEW-v4.zip sha256 b1c7febd0ffefda3314f4f8ed8fc7cd37d9a984d59b5aa735ca2db8618ca4c72 (19 entries)

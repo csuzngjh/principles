@@ -383,7 +383,12 @@ export function validateProductizationCandidate({ candidate, frozenRefs, goldRev
 }
 
 /** Mechanical signatures cannot settle semantic equivalence. v2 callers must
- * preserve explicit unresolved pairs until a separate review resolves them. */
+ * preserve explicit unresolved pairs until a separate review resolves them.
+ *
+ * Two tiers, not three: v2 candidates may only vary in EXPRESSION (fact
+ * statements, observation labels/outputs) against a fixed decision body, so the
+ * decision projection already IS the skeleton — a third signature would only
+ * restate it. */
 export function dedupeProductizationCandidates(candidates) {
   const pairs = (project) => {
     const seen = new Map();
@@ -400,8 +405,8 @@ export function dedupeProductizationCandidates(candidates) {
   });
   const structural = pairs(decision);
   const exactKeys = new Set(exact.map(([a, b]) => `${a}:${b}`));
-  const result = { exactDuplicatePairs: exact, structuralDuplicatePairs: structural.filter(([a, b]) => !exactKeys.has(`${a}:${b}`)), skeletonDuplicatePairs: structural.filter(([a, b]) => !exactKeys.has(`${a}:${b}`)) };
-  const matched = new Set([...result.exactDuplicatePairs, ...result.structuralDuplicatePairs, ...result.skeletonDuplicatePairs].map(([a, b]) => `${a}:${b}`));
+  const result = { exactDuplicatePairs: exact, structuralDuplicatePairs: structural.filter(([a, b]) => !exactKeys.has(`${a}:${b}`)) };
+  const matched = new Set([...result.exactDuplicatePairs, ...result.structuralDuplicatePairs].map(([a, b]) => `${a}:${b}`));
   return { ...result, unresolvedSemantic: candidates.flatMap((c, a) => candidates.slice(a + 1).flatMap((other, offset) => {
     const b = a + offset + 1;
     return matched.has(`${a}:${b}`) ? [] : [{ candidateIds: [c.candidateId, other.candidateId], reason: 'semantic equivalence requires independent review', status: 'PENDING' }];

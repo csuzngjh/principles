@@ -1,7 +1,7 @@
 [
   {
     "path": "README.md",
-    "sha256": "6423ffad6ffd9dc555a10b0a9c3b07f7e59f25862db37bb9cf3d852b381bb4a0"
+    "sha256": "b83001b260f264d7d74d5b7b8464dd3a637f0e8c52ee1959987da74e4eaf9056"
   },
   {
     "path": "all-script-tests-isolated.txt",
@@ -90,6 +90,10 @@
   {
     "path": "lint.txt",
     "sha256": "140543db06fd12dffc1e574283670467fd744e18ec6171a78234ba8a7df24130"
+  },
+  {
+    "path": "post-review-fix-freeze.txt",
+    "sha256": "542b976207fffc6836976c0cd969f6c7043da3b7455d2651f927676ddb315f89"
   },
   {
     "path": "race-scope.txt",
