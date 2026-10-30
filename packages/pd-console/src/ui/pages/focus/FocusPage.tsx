@@ -15,6 +15,7 @@ import {
   editApproval,
   fetchAllActivations,
   fetchOwnerDecisions,
+  fetchRuleBindingQueue,
 } from "../../api.js";
 import type {
   GovernanceQueueData,
@@ -28,6 +29,9 @@ import type { OwnerDecisionItemData } from "../../utils/validators.js";
 import type { PromptInjectionBudgetStatus } from "../../utils/validators.js";
 import { selectApprovalGroupDisplayTitle, showsUnlinkedCandidateNote, validateApprovalsGroupedData } from "./focus-validation.js";
 import { splitReadingTitleBody } from "../../utils/reading-layout.js";
+import { OwnerWorkbench, type OwnerWorkItem } from "./OwnerWorkbench.js";
+import { ApprovalSubjectReading } from "./ApprovalSubjectReading.js";
+import type { RuleBindingQueueView } from "../../../shared/rule-candidate-binding-contract.js";
 import { OwnerDecisionCard } from "./OwnerDecisionCard.js";
 import { RuleCandidateBindingPanel } from './RuleCandidateBindingPanel.js';
 import { localizeApprovalWarning, splitApprovalWarnings } from "../../utils/approval-warning-localization.js";
@@ -1285,6 +1289,10 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
   // otherwise a transient legacy queue request goes out before the flag turns
   // experience mode on (wasted call + legacy-panel flash). Hold in `loading`.
   const flagsResolved = featureFlags !== undefined;
+  const [bindingQueue, setBindingQueue] = useState<RuleBindingQueueView | null>(null);
+  const [bindingError, setBindingError] = useState<string | null>(null);
+  const [completedMessage, setCompletedMessage] = useState<{ key: string; message: string } | null>(null);
+  const requestEpoch = useRef(0);
   const [queueData, setQueueData] = useState<GovernanceQueueData | null>(null);
   const [experienceData, setExperienceData] = useState<GovernanceExperienceSnapshot | null>(null);
   const [groupedData, setGroupedData] = useState<ApprovalsGroupedData | null>(null);
@@ -1307,34 +1315,35 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
   const [promptTargetHost, setPromptTargetHost] = useState<"openclaw" | "codex" | "workbuddy" | null>(null);
 
   const loadData = useCallback(async () => {
-    setLoadingState("loading");
+    const epoch = ++requestEpoch.current;
+    setLoadingState(previous => previous === "loaded" ? "loaded" : "loading");
     setErrorMessage(null);
     setGroupedErrorReason(null);
     setRuleCodeErrorReason(null);
 
-    const [experienceResult, queueResult, groupedResult, activationsResult] = await Promise.all([
+    const [experienceResult, queueResult, groupedResult, activationsResult, bindingsResult] = await Promise.all([
       experienceMode ? fetchGovernanceExperience() : Promise.resolve(null),
       experienceMode ? Promise.resolve(null) : fetchGovernanceQueue(),
       fetchApprovalsGrouped(promptTargetHost ?? undefined),
       fetchAllActivations(promptTargetHost ?? undefined),
+      fetchRuleBindingQueue(),
     ]);
 
+    if (epoch !== requestEpoch.current) return;
+    if (bindingsResult.success) { setBindingQueue(bindingsResult.data); setBindingError(null); }
+    else { setBindingQueue(null); setBindingError(bindingsResult.error); }
     if (experienceMode) {
       if (experienceResult === null || !experienceResult.success) {
-        setLoadingState("error");
+        setExperienceData(null);
         setErrorMessage(experienceResult === null ? t("pages.focus.experience.error.snapshotUnavailable") : experienceResult.error);
-        return;
-      }
-      setExperienceData(experienceResult.data);
+      } else setExperienceData(experienceResult.data);
       setQueueData(null);
     } else {
       // Queue data is already validated by the API layer (validateGovernanceQueue)
       if (queueResult === null || !queueResult.success) {
-        setLoadingState("error");
+        setQueueData(null);
         setErrorMessage(queueResult === null ? t("pages.focus.loadError") : queueResult.error);
-        return;
-      }
-      setQueueData(queueResult.data);
+      } else setQueueData(queueResult.data);
       setExperienceData(null);
     }
 
@@ -1363,6 +1372,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
     // PRI-629: 统一 Owner Inbox (decision-capable NHR + approvals + rulecode)。
     // 投影失败不阻塞页面 (rc-9 降级 — 显示原因,治理摘要仍可用)。
     const decisionsResult = await fetchOwnerDecisions();
+    if (epoch !== requestEpoch.current) return;
     if (decisionsResult.success) {
       setOwnerDecisionItems(decisionsResult.data.items);
       setOwnerDecisionError(null);
@@ -1374,6 +1384,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
     // Owner Decision Experience v1 inbox: failure degrades observably (rc-9),
     // never blocking the rest of the focus page.
     const ownerInboxResult = await fetchOwnerDecisionInbox();
+    if (epoch !== requestEpoch.current) return;
     if (ownerInboxResult.success) {
       setOwnerInbox(ownerInboxResult.data);
       setOwnerInboxError(null);
@@ -1387,7 +1398,8 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
 
   useEffect(() => {
     if (!flagsResolved) return;
-    loadData();
+    void loadData();
+    return () => { requestEpoch.current++; };
   }, [flagsResolved, loadData]);
 
   // ── Loading state ────────────────────────────────────────────────────────
@@ -1443,7 +1455,9 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
 
   // PRI-787: 决策动作被治理就绪门锁定时，必须在卡片上给出可见原因（rc-9 —
   // 禁用不允许是无声的）。experienceData 未加载（null）时门默认放行、无锁定。
-  const ownerActionsLockedReason = experienceData === null
+  const ownerActionsLockedReason = experienceMode && experienceData === null
+    ? t("pages.focus.workbench.permissionsUnknown")
+    : experienceData === null
     || (experienceData.readiness.authenticationMode === "authenticated"
       && experienceData.readiness.ownerIdentityConfiguration === "configured")
     ? null
@@ -1494,8 +1508,28 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
   const stateReason = getStateReasonText(stateReasonCode, t, stateReasonCount);
   const nextAction = getNextActionText(nextActionCode, t);
 
+  const sourcesUncertain = ruleCodeErrorReason !== null || errorMessage !== null || ownerDecisionError !== null || groupedErrorReason !== null || bindingError !== null || ownerInboxError !== null;
+  const workItems: OwnerWorkItem[] = [
+    ...ruleCodePending.map(item => ({ key: `activation:${item.activationId}`, title: splitReadingTitleBody(t('pages.focus.workbench.rulePromotion')).title,
+      kind: t('pages.focus.workbench.rulePromotion'), summary: t('pages.focus.workbench.promotionSummary'),
+      content: <div className="text-sm leading-relaxed text-ink-2"><p>{t('pages.focus.workbench.promotionSummary')}</p><Link to={`/activation?activationId=${encodeURIComponent(item.activationId)}`} className="mt-4 inline-block text-gov underline">{t('pages.focus.workbench.openActivation')}</Link></div> })),
+    ...decisionItems.map(item => ({ key: `decision:${item.reviewKey}`, title: splitReadingTitleBody(item.title).title,
+      kind: t('pages.focus.workbench.taskDecision'), summary: item.summary,
+      content: <OwnerDecisionCard key={item.reviewKey} item={item} governanceReady={ownerActionsLockedReason === null}
+        actionsLockedReason={ownerActionsLockedReason ?? undefined} onResolved={() => { setCompletedMessage({ key: `decision:${item.reviewKey}`, message: t('pages.focus.workbench.decisionRecorded') }); void loadData(); }} /> })),
+    ...pendingGroups.flatMap(group => group.records.filter(record => record.status === 'pending').map((record, index) => ({
+      key: `approval:${record.id}`, title: new Set(group.records.map(entry => entry.artifactId)).size > 1 ? t('pages.focus.workbench.versionNeedsReview', { index: index + 1 }) : splitReadingTitleBody(selectApprovalGroupDisplayTitle(group) ?? t('pages.focus.untitledCandidate')).title,
+      kind: t(record.channel === 'prompt' ? 'pages.focus.workbench.promptReview' : 'pages.focus.workbench.ruleReview'),
+      summary: t('pages.focus.workbench.approvalSummary'),
+      content: <ApprovalSubjectReading principleId={group.principleId} approvalId={record.id} artifactId={record.artifactId} channel={record.channel} />,
+    }))),
+    ...(bindingQueue?.items ?? []).map(item => ({ key: `binding:${item.candidateId}`, title: splitReadingTitleBody(item.text).title,
+      kind: t('pages.focus.workbench.bindingReview'), summary: item.pain.text ?? t('pages.focus.workbench.bindingSummary'),
+      content: <RuleCandidateBindingPanel key={item.candidateId} candidateId={item.candidateId} /> })),
+  ];
+
   return (
-    <PageShell>
+    <PageShell className="max-w-[1120px] owner-workbench-container">
       <div className="animate-[pdFadeIn_400ms_ease-out]">
       {/* Layer 1: Conclusion — eyebrow + title + subtitle */}
       <div className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase mb-3">
@@ -1508,10 +1542,10 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
         brightness={0.5}
         disabled={pendingCount === 0}
       >
-        {t("pages.focus.title")}
+        {t('pages.focus.workbench.title')}
       </ShinyText>
       <p className="text-ink-3 text-[14px] max-w-[760px] leading-relaxed mb-7">
-        {t("pages.focus.subtitle")}
+        {t('pages.focus.workbench.subtitle')}
       </p>
 
       {/* SPEC-PD-UIUX-001 R2 Layer 1: 当前结论 — readiness, one lock reason,
@@ -1596,37 +1630,21 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
         </p>
       </section>
 
-      <RuleCandidateBindingPanel />
+      {(errorMessage || bindingError) && <div role="alert" className="mb-5 border-l-2 border-amber pl-3 text-sm leading-relaxed text-ink-3">
+        <p>{t('pages.focus.workbench.uncertain')}</p><p className="mt-1 text-[12px]">{errorMessage ?? bindingError}</p>
+        <button type="button" onClick={() => { void loadData(); }} className="mt-2 text-gov underline">{t('pages.focus.workbench.retry')}</button>
+      </div>}
+      {ruleCodeAlerts.length > 0 && <section role="alert" className="mb-5 border-l-2 border-danger pl-3 text-sm text-ink">
+        <p>{t('pages.focus.workbench.safetyAlert', { count: ruleCodeAlerts.length })}</p>
+        <Link to="/activation" className="mt-2 inline-block text-gov underline">{t('pages.focus.workbench.openActivation')}</Link>
+      </section>}
+      {groupedErrorReason && <p role="alert" className="mb-4 text-[13px] text-amber">{t('pages.focus.workbench.approvalsUnavailable')}</p>}
+      <OwnerWorkbench items={workItems} completed={completedMessage} uncertain={sourcesUncertain} />
 
       {/* PRI-629: 需要你决定 — 统一 Owner Inbox。两种治理摘要模式下都渲染;
           N = 真实可执行决策数 (INV-01),不是 lifecycle/NHR/failed 计数。 */}
       <section aria-label={t("pages.focus.ownerDecision.sectionTitle")} className="mb-7" data-testid="owner-decisions-section">
-        <div className="flex items-baseline gap-2 mb-3">
-          <SectionTitle>{t("pages.focus.ownerDecision.sectionTitle")}</SectionTitle>
-          <span className="font-mono text-ink-4 text-[12px]">
-            {ownerDecisionError !== null
-              ? t("pages.focus.ownerDecision.unavailable")
-              : `· ${decisionItems.length + (showApprovalCards ? pendingGroups.length : 0)}`}
-          </span>
-        </div>
-        {ownerDecisionError !== null && (
-          <p className="text-ink-4 text-[12.5px]">{t("pages.focus.ownerDecision.loadError")}</p>
-        )}
-        {ownerDecisionError === null && decisionItems.length === 0 && !showApprovalCards && (
-          <p className="text-ink-4 text-[13px]">{t("pages.focus.ownerDecision.empty")}</p>
-        )}
-        {decisionItems.map((item) => (
-          <OwnerDecisionCard
-            key={item.reviewKey}
-            item={item}
-            governanceReady={experienceData === null || (
-              experienceData.readiness.authenticationMode === "authenticated"
-              && experienceData.readiness.ownerIdentityConfiguration === "configured"
-            )}
-            actionsLockedReason={ownerActionsLockedReason ?? undefined}
-            onResolved={() => { void loadData(); }}
-          />
-        ))}
+        {ownerDecisionError !== null && <p role="alert" className="text-amber text-[13px]">{t('pages.focus.ownerDecision.loadError')}</p>}
         {/* 分组数据不可用时 OwnerDecisionCard 保持原渲染（含降级 CTA），决策不静默消失（rc-9）——见 selectDecisionSurfaceItems。 */}
         {/* PD_PROMPT_CAPACITY_V1 R-A1: 适用宿主会走不同路由且未选择目标宿主时，
             明确标注"当前宿主容量未确认"并分别展示各宿主的能力——不猜测 FIFO 或轮转。 */}
@@ -1713,16 +1731,6 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
           </div>
           );
         })()}
-        {groupedAvailable && pendingGroups.map((group) => (
-          <PendingReviewCard
-            key={group.principleId}
-            group={group}
-            actionsLockedReason={ownerActionsLockedReason ?? undefined}
-            promptInjection={groupedData.promptInjection}
-            promptTargetHost={promptTargetHost ?? undefined}
-            onDecisionApplied={() => { void loadData(); }}
-          />
-        ))}
       </section>
 
       {/* SPEC-PD-UIUX-001 R2 Layer 3: 被阻塞与需要恢复 — from the owner inbox.
@@ -1786,6 +1794,9 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
         )}
       </section>
 
+      <details className="mt-8 border-t border-line pt-5" data-testid="focus-runtime-records">
+        <summary className="cursor-pointer text-[14px] text-ink-3">{t('pages.focus.workbench.runtimeRecords')}</summary>
+        <div className="mt-5">
       {/* Governance blocker/recovery follows the actual decision index so the
           first actionable card remains visible in common Companion viewports. */}
       {experienceMode && experienceData !== null ? (
@@ -1928,6 +1939,8 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
           secondary reading BELOW the evidence sections (SPEC-PD-UIUX-001 R2);
           retained in BOTH modes with no persistence change (PRI-589 pending). */}
       <DailyThoughtCard />
+        </div>
+      </details>
 
       {/* Footer — one line (US-1.7) */}
       <footer className="mt-12 pt-6 border-t border-line text-ink-3 text-[13px]">

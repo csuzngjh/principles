@@ -493,3 +493,14 @@
   background: color-mix(in srgb, var(--color-amber) 10%, var(--color-surface));
   color: var(--color-amber);
 }
+
+/* The workbench responds to usable content width, after the application sidebar. */
+.owner-workbench-container { container-type: inline-size; }
+.owner-workbench { display: grid; gap: 28px; }
+.owner-work-reading { border-top: 1px solid var(--color-line); padding-top: 24px; }
+.owner-workbench:has(.owner-work-list-selected) .owner-work-list { display: none; }
+@container (min-width: 900px) {
+  .owner-workbench { grid-template-columns: 272px minmax(0, 1fr); align-items: start; }
+  .owner-workbench:has(.owner-work-list-selected) .owner-work-list { display: block; }
+  .owner-work-reading { border-top: 0; border-left: 1px solid var(--color-line); padding-top: 0; padding-left: 28px; }
+}

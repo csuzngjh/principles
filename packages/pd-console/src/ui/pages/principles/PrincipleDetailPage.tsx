@@ -421,6 +421,10 @@ export function PrincipleDetailPage() {
   // actions, re-GET the view. Never auto-retry a mutation.
   const submitOwnerAction = async (action: OwnerAction, reason?: string, note?: string): Promise<void> => {
     if (actionLoading) return;
+    if (['approve', 'reject', 'edit_approval'].includes(action.semantic)) {
+      toast.error(t('pages.focus.workbench.versionLock'));
+      return;
+    }
     setActionLoading(true);
     try {
       let failed = false;
@@ -565,9 +569,6 @@ export function PrincipleDetailPage() {
         </p>
         {/* Modify wording — DISABLED (MVP3, F.5 honest constraint) */}
         <div className="flex items-center gap-3">
-          <Button variant="outline" size="sm" disabled>
-            {t("principles.detail.modifyWording")}
-          </Button>
           <span className="text-ink-4 text-[13px]">
             {t("principles.detail.modifyWordingNote")}
           </span>
@@ -810,12 +811,13 @@ export function PrincipleDetailPage() {
                 </div>
               )}
               <div className="mt-2 flex flex-wrap gap-3">
+                {ownerDecision.availableActions.some(action => ['approve', 'reject', 'edit_approval'].includes(action.semantic)) && <p className="mb-3 text-[13px] leading-relaxed text-amber">{t('pages.focus.workbench.versionLock')}</p>}
                 {ownerDecision.availableActions.map((action) => (
                   <Button
                     key={action.key}
                     variant={action.semantic === 'reject' ? 'destructive' : action.semantic === 'disable' ? 'outline' : 'default'}
                     size="sm"
-                    disabled={actionLoading}
+                    disabled={actionLoading || ['approve', 'reject', 'edit_approval'].includes(action.semantic)}
                     data-action-semantic={action.semantic}
                     onClick={() => {
                       setRejectReason("");
