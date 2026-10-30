@@ -17,7 +17,6 @@ import { verifyProbeAuthorization, readProbeAuthorization } from './lib/challeng
 import { runIsolationProbe, saveProbeEvidence, verifyF2ProbeEvidence } from './lib/challenge-isolation-probe.mjs';
 import { createCodexHostTransport } from './lib/host-actor.mjs';
 import { createProbeSideEffectScanner } from './lib/challenge-probe-side-effect-scanner.mjs'; // ROUND_DIR_ALLOWLIST is managed inside the scanner module (S5.2.1: unused-import cleanup, CodeQL)
-import { ZHIPU_CODING_PROVIDER, buildZhipuCodexOverrides, ensureZhipuProviderReady } from './lib/challenge-zhipu-host-provider.mjs';
 
 const labRoot = path.dirname(fileURLToPath(import.meta.url));
 
@@ -27,6 +26,7 @@ function arg(name, fallback = undefined) {
 }
 const studyId = arg('study', 'CEB-001');
 const dryRun = process.argv.includes('--dry-run');
+const openclawBin = arg('openclaw-bin', 'openclaw'); // S5.2 env fix: e.g. "node <npm>/node_modules/openclaw/openclaw.mjs" is a single spawnable unit via process.execPath? No — openclawBin is the PROGRAM; pass --openclaw-bin with the absolute .mjs and we spawn it via node when it ends with .mjs
 const studyDir = path.join(labRoot, 'challenge-studies', studyId);
 const authFile = path.join(studyDir, 'probe-authorization.json');
 
@@ -64,13 +64,6 @@ const windowStart = Date.now();
 // / codex rollouts are RESEARCH EVIDENCE and are never touched by cleanup.
 const judgeOnlyFile = path.join(copyDir, 'judge-only', `${JSON.parse(fs.readFileSync(path.join(copyDir, 'suite-manifest.json'), 'utf8')).cases[0].caseId}.json`);
 const goldHexRuns = (JSON.parse(fs.readFileSync(judgeOnlyFile, 'utf8')).toString().match(/[0-9a-f]{32,}/g) || []);
-const scanForGold = (root) => {
-  let hits = 0;
-  if (!fs.existsSync(root)) return hits;
-  const walk = (dir, fn) => { for (const f of fs.readdirSync(dir, { withFileTypes: true })) { const p = path.join(dir, f.name); if (f.isDirectory()) walk(p, fn); else fn(p); } };
-  walk(root, (p) => { try { const t = fs.readFileSync(p, 'utf8'); if (goldHexRuns.some((run) => t.includes(run))) hits += 1; } catch { /* binary/unreadable — not a leak signal */ } });
-  return hits;
-};
 // S5.1 §五: the ONLY files the probe itself creates in a round dir. Anything
 // else appearing there during the window is an unauthorized extra write and
 // fails the side-effect scan (the runtime may also write host-internal state
@@ -103,20 +96,31 @@ if (record.targetHost.kind === 'openclaw') {
     console.log(JSON.stringify({ ok: false, stage: 'provider', reasons: ["authorization targetHost.provider missing — the approved provider must be declared (S5 P1-2)"] }, null, 2));
     process.exit(1);
   }
+  // S5.2 env fix: on Windows the npm shim (openclaw / openclaw.cmd) is not
+  // directly spawnable (ENOENT / Node EINVAL). When --openclaw-bin points at
+  // the package's openclaw.mjs we spawn `<node> <openclaw.mjs> ...`; the
+  // version probe inside the adapter handles the same rule.
+  const openclawSpawn = openclawBin.endsWith('.mjs')
+    ? { bin: process.execPath, prefixArgs: [openclawBin] }
+    : { bin: openclawBin, prefixArgs: [] };
   transport = createOpenClawHostTransport({
     model: record.targetHost.requestedModelIdentity,
     expectedProvider,
     roundsRoot,
+    openclawBin: openclawSpawn.bin,
+    openclawPrefixArgs: openclawSpawn.prefixArgs,
+    openclawHome: record.targetHost.openclawHome, // S7 §四: explicit ambient root — never process.env
+    configPath: path.join(record.targetHost.openclawHome, 'openclaw.json'), // pin the owner's config (zai provider + credentials)
     timeoutMsPerCall: record.caps.timeoutMsPerCall,
   });
   const sessionsDir = path.join(record.targetHost.openclawHome, 'agents', record.targetHost.openclawAgent || 'main', 'sessions');
   evidenceDispatch = {
     hostKind: 'openclaw',
-    openclawSessionsDir: sessionsDir,
+    openclawSessionsDir: sessionsDir, // S7 §四: the AMBIENT sessions dir — existing auth profile store stays reachable, trajectories persist there
     openclawTrustedRoot: sessionsDir,
     openclawExpectedProvider: expectedProvider,
     openclawExpectedModel: record.targetHost.requestedModelIdentity, // S5.1 §四: deep verification binds the AUTHORIZED model
-    openclawControlledRoot: roundsRoot, // S5.2 §四: mapped session dirs must live inside the controlled rounds root
+    openclawControlledRoot: sessionsDir, // S7 §四: mapped session dirs must resolve inside the ambient sessions root
     readOpenClawTrajectory: readOpenClawTrajectoryEvidence,
   };
 } else {
@@ -147,7 +151,7 @@ if (record.targetHost.kind === 'openclaw') {
 }
 transportFactoryCalls += 1;
 
-const probeRecord = await runIsolationProbe({ studyDir: copyDir, hostTransport: transport, mode: 'real-host', now: Date.now(), sideEffectScanner: scanner });
+const probeRecord = await runIsolationProbe({ studyDir: copyDir, hostTransport: transport, mode: 'real-host', now: Date.now(), sideEffectScanner: scanner, failFast: true }); // S7 §六: first failed round stops the run
 const evidenceRef = saveProbeEvidence(copyDir, probeRecord);
 const deep = verifyF2ProbeEvidence({ studyDir: copyDir, evidenceRef, expected: { studyId, suiteHash: record.frozenHashes.suiteHash }, ...evidenceDispatch });
 console.log(JSON.stringify({ ok: deep.ok && probeRecord.status === 'PASSED', probeStatus: probeRecord.status, evidenceRef, deepVerification: deep, workRoot }, null, 2));

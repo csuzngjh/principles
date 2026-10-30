@@ -87,7 +87,7 @@ export function applyTrajectorySchemaBase(
   db.exec('CREATE TABLE IF NOT EXISTS sessions (session_id TEXT PRIMARY KEY, started_at TEXT NOT NULL, updated_at TEXT NOT NULL)');
   db.exec('CREATE TABLE IF NOT EXISTS assistant_turns (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, run_id TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, raw_text TEXT, sanitized_text TEXT NOT NULL, usage_json TEXT NOT NULL, empathy_signal_json TEXT NOT NULL, blob_ref TEXT, raw_excerpt TEXT, stop_reason TEXT, thinking_blocks_count INTEGER, created_at TEXT NOT NULL)');
   db.exec('CREATE TABLE IF NOT EXISTS user_turns (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, turn_index INTEGER NOT NULL, raw_text TEXT, blob_ref TEXT, raw_excerpt TEXT, correction_detected INTEGER NOT NULL DEFAULT 0, correction_cue TEXT, references_assistant_turn_id INTEGER, created_at TEXT NOT NULL)');
-  db.exec('CREATE TABLE IF NOT EXISTS tool_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, tool_name TEXT NOT NULL, outcome TEXT NOT NULL, duration_ms INTEGER, exit_code INTEGER, error_type TEXT, error_message TEXT, gfi_before REAL, gfi_after REAL, params_json TEXT NOT NULL, result_preview TEXT, created_at TEXT NOT NULL, project_dir TEXT)');
+  db.exec('CREATE TABLE IF NOT EXISTS tool_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, tool_name TEXT NOT NULL, outcome TEXT NOT NULL, duration_ms INTEGER, exit_code INTEGER, error_type TEXT, error_message TEXT, gfi_before REAL, gfi_after REAL, params_json TEXT NOT NULL, result_preview TEXT, created_at TEXT NOT NULL, project_dir TEXT, host_kind TEXT)');
   db.exec('CREATE TABLE IF NOT EXISTS pain_events (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, source TEXT NOT NULL, score REAL NOT NULL, reason TEXT, severity TEXT, origin TEXT, confidence REAL, text TEXT, canonical_pain_id TEXT, runtime_task_id TEXT, host_kind TEXT, created_at TEXT NOT NULL)');
   db.exec('CREATE TABLE IF NOT EXISTS gate_blocks (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, tool_name TEXT NOT NULL, file_path TEXT, reason TEXT NOT NULL, created_at TEXT NOT NULL)');
   db.exec('CREATE TABLE IF NOT EXISTS trust_changes (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, previous_score REAL NOT NULL, new_score REAL NOT NULL, delta REAL NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL)');
@@ -156,6 +156,16 @@ export function applyTrajectorySchemaBase(
   // NULL and are never assigned a cwd retroactively.
   try {
     db.exec('ALTER TABLE tool_calls ADD COLUMN project_dir TEXT');
+  } catch (err: unknown) {
+    if (!isDuplicateColumnError(err)) throw err;
+  }
+
+  // SPEC-RULECODE-HOST-PROMOTION-001 R2: producer host attribution. Every
+  // host's tool_calls writer stamps its host_kind; readers that need proven
+  // attribution (the WorkBuddy rule-context provider) refuse unstamped legacy
+  // rows instead of guessing. Historical rows stay NULL by construction.
+  try {
+    db.exec('ALTER TABLE tool_calls ADD COLUMN host_kind TEXT');
   } catch (err: unknown) {
     if (!isDuplicateColumnError(err)) throw err;
   }

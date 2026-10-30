@@ -42,7 +42,6 @@
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as http from 'node:http';
-import { createRequire } from 'node:module';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -482,39 +481,69 @@ function expectCanonicalRuntimeLayout(): void {
 }
 
 /**
- * PRI-913 Phase 1: the PRI-912 reconcile pass must have re-run on the
- * freshly deployed tree — BOTH plugin dirs' materialized
- * `node_modules/@principles/core` copies are live canonical links into the
- * deployed `<home>/.pd/runtime/core`, and a bare import from each plugin
- * resolves through them. `expectCanonicalRuntimeLayout` deliberately does
- * NOT cover this (its invariant for pd-cli slots is content freshness); the
- * plugin-core LINK is the junction-pass product and is asserted here on the
- * real upgrade path.
+ * PRI-1037: the shipped plugin payload is self-contained — dist/bundle.js plus
+ * the single native module the bundle actually imports (better-sqlite3). The
+ * retired `file:./core` surface must never come back: OpenClaw's per-exec
+ * plugin capture materializes reparse points, so even a junction into the
+ * 17k-file core tree exhausted the 120s publication budget.
  */
-function expectPluginCoreCanonicalLinks(): void {
+function expectLeanPluginPayload(): void {
   const runtimeCore = path.join(homeDir, '.pd', 'runtime', 'core');
   expect(fs.existsSync(path.join(runtimeCore, 'package.json')), 'canonical runtime core exists').toBe(true);
-  const runtimeCoreReal = fs.realpathSync(runtimeCore);
   for (const pluginDir of [
     path.join(homeDir, '.pd', 'runtime', 'plugin'),
     path.join(homeDir, '.openclaw', 'extensions', 'principles-disciple'),
   ]) {
-    const slot = path.join(pluginDir, 'node_modules', '@principles', 'core');
-    expect(fs.existsSync(slot), `plugin core slot exists at ${slot}`).toBe(true);
-    expect(fs.lstatSync(slot).isSymbolicLink(), `plugin core slot is canonical at ${slot}`).toBe(true);
-    expect(fs.realpathSync(slot), `plugin core slot resolves to the deployed runtime core: ${slot}`).toBe(runtimeCoreReal);
-    const resolved = createRequire(path.join(pluginDir, 'probe.cjs')).resolve('@principles/core');
-    expect(resolved.startsWith(runtimeCoreReal), `bare import resolved outside the canonical core: ${resolved}`).toBe(true);
+    expect(fs.existsSync(path.join(pluginDir, 'dist', 'bundle.js')), `plugin bundle shipped at ${pluginDir}`).toBe(true);
+    expect(
+      fs.lstatSync(path.join(pluginDir, 'core'), { throwIfNoEntry: false }),
+      `retired file:./core slot is absent at ${pluginDir}`,
+    ).toBeUndefined();
+    expect(
+      fs.lstatSync(path.join(pluginDir, 'node_modules', '@principles'), { throwIfNoEntry: false }),
+      `no @principles scope (core tree) at ${pluginDir}`,
+    ).toBeUndefined();
+    expect(
+      fs.existsSync(path.join(pluginDir, 'node_modules', 'better-sqlite3', 'package.json')),
+      `native module shipped at ${pluginDir}`,
+    ).toBe(true);
+    const files = countPayloadFiles(pluginDir);
+    expect(files, `plugin payload stays lean at ${pluginDir} (was ~16,425 files before PRI-1037)`).toBeLessThan(1000);
   }
 }
 
+/** Recursive file count that never follows reparse points (a junction into the
+ *  runtime core would otherwise re-count the whole 17k-file tree). */
+function countPayloadFiles(dir: string): number {
+  let total = 0;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const child = path.join(dir, entry.name);
+    if (fs.lstatSync(child).isSymbolicLink()) continue;
+    if (entry.isDirectory()) total += countPayloadFiles(child);
+    else if (entry.isFile()) total += 1;
+  }
+  return total;
+}
+
 /**
- * PRI-913 Phase 1 (backup leg): the upgrade's rename-swap must have MOVED
- * (never traversed) the superseded junction-carrying trees. Exactly one
- * runtime backup is retained; it carries the N-1-stamped pd-cli, and its
- * plugin core slot is STILL a link (lstat) — proof the swap did not
- * materialize or follow the junction. The ext-plugin backup lives outside
- * extensions/ (ERR-097 discovery isolation) and likewise keeps its link.
+ * PRI-913 Phase 1 (backup leg), corrected for the lean PRI-1037 payload: the
+ * upgrade's rename-swap must have MOVED (never traversed) the superseded
+ * trees. Exactly one runtime backup is retained; it carries the N-1-stamped
+ * pd-cli. The rename-never-followed-a-junction proof now uses the
+ * codex-adapter core slot — the ONE slot the installer guarantees as a
+ * canonical LINK (expectCanonicalRuntimeLayout's documented invariant). The
+ * pd-cli `@principles/core` slot is a PHYSICAL copy by construction
+ * (self-contained payloads materialize file:../core via npm ci
+ * --install-links; syncPdCli then copies node_modules wholesale, so the
+ * post-copy link creation is skipped) AND this scenario additionally injects
+ * the PRI-665 physical duplicate into exactly that slot — asserting
+ * link-ness there was self-defeating and failed the publish release matrix
+ * (ubuntu-24.04, node 22.22.2; the test is excluded from test:fast so the
+ * PR never ran it). The physical slot instead proves the complementary
+ * invariant: the rename moved the injected tree verbatim (still a
+ * directory, still N-1 content, never traversed or re-materialized). The
+ * ext-plugin backup lives outside extensions/ (ERR-097 discovery isolation)
+ * and carries the lean PRI-1037 plugin payload.
  */
 function expectBackupTreesJunctionIntact(): void {
   const backupsDir = path.join(homeDir, '.pd', 'backups');
@@ -527,16 +556,38 @@ function expectBackupTreesJunctionIntact(): void {
     readPackageVersion(path.join(backupRuntime, 'pd-cli', 'package.json')),
     'the retained backup carries the superseded N-1 runtime',
   ).toBe(baselineVersion);
-  const backupPluginSlot = path.join(backupRuntime, 'plugin', 'node_modules', '@principles', 'core');
-  expect(fs.lstatSync(backupPluginSlot).isSymbolicLink(), 'backup plugin core slot survived the rename as a link').toBe(true);
+  const backupAdapterCoreLink = path.join(backupRuntime, 'codex-adapter', 'node_modules', '@principles', 'core');
+  expect(
+    fs.lstatSync(backupAdapterCoreLink, { throwIfNoEntry: false })?.isSymbolicLink() ?? false,
+    'backup codex-adapter core link survived the rename (the swap never followed a junction)',
+  ).toBe(true);
+  const backupPdCliSlot = path.join(backupRuntime, 'pd-cli', 'node_modules', '@principles', 'core');
+  const backupPdCliSlotStat = fs.lstatSync(backupPdCliSlot, { throwIfNoEntry: false });
+  expect(backupPdCliSlotStat, 'backup pd-cli core slot (the injected PRI-665 physical duplicate) survived the swap').toBeDefined();
+  expect(
+    backupPdCliSlotStat?.isSymbolicLink() === false && backupPdCliSlotStat?.isDirectory(),
+    'backup pd-cli core slot moved VERBATIM as the injected physical tree (never traversed or re-materialized)',
+  ).toBe(true);
+  expect(
+    readPackageVersion(path.join(backupPdCliSlot, 'package.json')),
+    'backup pd-cli core slot still carries the N-1 core content the scenario injected',
+  ).toBe(readPackageVersion(path.join(payloadN1Dir, 'core', 'package.json')));
+  const backupPluginDir = path.join(backupRuntime, 'plugin');
+  expect(fs.existsSync(path.join(backupPluginDir, 'dist', 'bundle.js')), 'backup plugin payload survived the swap').toBe(true);
+  expect(
+    fs.lstatSync(path.join(backupPluginDir, 'node_modules', '@principles'), { throwIfNoEntry: false }),
+    'the retired plugin core slot is not resurrected in the backup',
+  ).toBeUndefined();
 
   const extBackupsDir = path.join(homeDir, '.openclaw', 'pd-backups');
   const extBackups = fs.readdirSync(extBackupsDir).filter((name) => name.startsWith('principles-disciple.backup.'));
   expect(extBackups.length >= 1, 'the superseded ext plugin backup is retained').toBe(true);
   const [extBackupName] = extBackups;
   if (extBackupName === undefined) throw new Error('unreachable: empty ext backup list');
-  const extBackupSlot = path.join(extBackupsDir, extBackupName, 'node_modules', '@principles', 'core');
-  expect(fs.lstatSync(extBackupSlot).isSymbolicLink(), 'backup ext plugin core slot survived the rename as a link').toBe(true);
+  expect(
+    fs.lstatSync(path.join(extBackupsDir, extBackupName, 'node_modules', '@principles'), { throwIfNoEntry: false }),
+    'the retired plugin core slot is not resurrected in the ext backup',
+  ).toBeUndefined();
 }
 
 beforeAll(async () => {
@@ -684,6 +735,26 @@ describe('N-1 → N real upgrade gate (Console /apply-full, PRI-671)', () => {
       const active = readActiveRecord();
       expect(active.productVersion).toBe(baselineVersion);
       expect(fs.existsSync(npmMarker)).toBe(false);
+
+      // PRI-1021 / PRI-1037 task D: the official transaction must neither
+      // resurrect OpenClaw's legacy install index nor leave the bootstrap
+      // executor pinned to whatever code happened to run the install. The
+      // executor is what performs the NEXT update, so it must carry exactly
+      // the installer bytes this payload ships (the 2026-10-28 regression:
+      // a 1.145.1 executor applied 2.4.0 with its own pre-PRI-1021 writer).
+      expect(
+        fs.existsSync(path.join(homeDir, '.openclaw', 'plugins', 'installs.json')),
+        'install must not write the host-owned openclaw/plugins/installs.json',
+      ).toBe(false);
+      const shippedInstallerVersion = readPackageVersion(path.join(payloadN1Dir, 'release-manager', 'package.json'));
+      const bootstrapRegistration = JSON.parse(
+        fs.readFileSync(path.join(homeDir, '.pd', 'bootstrap', 'bootstrap.json'), 'utf8'),
+      ) as { bootstrapVersion: string };
+      expect(bootstrapRegistration.bootstrapVersion).toBe(shippedInstallerVersion);
+      const deployedExecutorManifest = JSON.parse(
+        fs.readFileSync(path.join(homeDir, '.pd', 'bootstrap', 'executor', 'package.json'), 'utf8'),
+      ) as { version: string };
+      expect(deployedExecutorManifest.version).toBe(shippedInstallerVersion);
     },
     900_000,
   );
@@ -739,12 +810,12 @@ describe('N-1 → N real upgrade gate (Console /apply-full, PRI-671)', () => {
       // candidate content (freshness, not link-ness — see the helper).
       expectCanonicalRuntimeLayout();
       // PRI-913 Phase 1: the reconcile pass ran on the REAL upgrade path —
-      // both plugin dirs carry live canonical core links into the deployed
-      // runtime core, and the superseded junction-carrying trees landed in
-      // the backup exactly once, still as links (rename never followed a
+      // the deployed plugin payload is the lean PRI-1037 shape (no core slot
+      // to reconcile) and the superseded trees landed in the backup exactly
+      // once, still carrying their pd-cli link (rename never followed a
       // junction). Windows reparse semantics included: this scenario runs
       // on the windows-2025 upgrade-gate job.
-      expectPluginCoreCanonicalLinks();
+      expectLeanPluginPayload();
       expectBackupTreesJunctionIntact();
 
       // Trust root still pins the gate anchor (the candidate payload carries
@@ -756,7 +827,7 @@ describe('N-1 → N real upgrade gate (Console /apply-full, PRI-671)', () => {
       // is covered by the live-machine evidence; here the layout contract).
       const extPlugin = path.join(homeDir, '.openclaw', 'extensions', 'principles-disciple');
       expect(fs.existsSync(path.join(extPlugin, 'dist', 'bundle.js'))).toBe(true);
-      expect(fs.lstatSync(path.join(extPlugin, 'core')).isSymbolicLink()).toBe(true);
+      expect(fs.lstatSync(path.join(extPlugin, 'core'), { throwIfNoEntry: false }), 'PRI-1037: the retired core slot stays retired').toBeUndefined();
       const pluginManifest = JSON.parse(fs.readFileSync(path.join(extPlugin, 'openclaw.plugin.json'), 'utf8')) as { activation?: { onCapabilities?: string[] } };
       expect(pluginManifest.activation?.onCapabilities).toContain('hook');
 
@@ -767,6 +838,21 @@ describe('N-1 → N real upgrade gate (Console /apply-full, PRI-671)', () => {
 
       // No registry resolution anywhere in the upgrade.
       expect(fs.existsSync(npmMarker)).toBe(false);
+
+      // PRI-1037 task D: the upgrade itself (executed by the N-1 executor,
+      // which this transaction deployed) must also leave the legacy index
+      // absent and re-deliver the executor from the CANDIDATE payload — the
+      // executor only converges if delivery is sourced from the payload
+      // rather than from the executing package.
+      expect(
+        fs.existsSync(path.join(homeDir, '.openclaw', 'plugins', 'installs.json')),
+        'upgrade must not resurrect OpenClaw\'s host-owned installs.json',
+      ).toBe(false);
+      const candidateInstallerVersion = readPackageVersion(path.join(payloadNDir, 'release-manager', 'package.json'));
+      const upgradedBootstrap = JSON.parse(
+        fs.readFileSync(path.join(homeDir, '.pd', 'bootstrap', 'bootstrap.json'), 'utf8'),
+      ) as { bootstrapVersion: string };
+      expect(upgradedBootstrap.bootstrapVersion).toBe(candidateInstallerVersion);
     },
     SCENARIO_UPGRADE_TIMEOUT_MS,
   );
@@ -850,14 +936,25 @@ describe('N-1 → N real upgrade gate (Console /apply-full, PRI-671)', () => {
       expect(pdVersion.exitCode).toBe(0);
       expect((JSON.parse(pdVersion.stdout) as Record<string, unknown>).productVersion).toBe(candidateVersion);
       expectCanonicalRuntimeLayout();
-      // PRI-913: a refused update must leave the EXISTING canonical junctions
-      // untouched (the download fails before any backup/deploy, so the live
-      // links the confirmed upgrade established are still live links).
-      expectPluginCoreCanonicalLinks();
+      expectLeanPluginPayload();
       // Runtime state first, console health second (same ordering discipline).
       await waitForRuntimeVersion(candidateVersion, UPGRADE_RESULT_CONVERGE_TIMEOUT_MS, 'N runtime after corruption refusal');
       await waitForConsole();
       expect(fs.existsSync(npmMarker)).toBe(false);
+
+      // PRI-1037 task D: failure recovery must not resurrect the legacy
+      // index either, and must not re-pin the executor to whatever ran the
+      // refused attempt.
+      expect(
+        fs.existsSync(path.join(homeDir, '.openclaw', 'plugins', 'installs.json')),
+        'a failed update must not write openclaw/plugins/installs.json',
+      ).toBe(false);
+      const recoveredBootstrap = JSON.parse(
+        fs.readFileSync(path.join(homeDir, '.pd', 'bootstrap', 'bootstrap.json'), 'utf8'),
+      ) as { bootstrapVersion: string };
+      expect(recoveredBootstrap.bootstrapVersion).toBe(
+        readPackageVersion(path.join(payloadNDir, 'release-manager', 'package.json')),
+      );
     },
     SCENARIO_CORRUPT_TIMEOUT_MS,
   );

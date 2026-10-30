@@ -16,7 +16,9 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { saveHostToolDeclaration } from '../src/host-tool-declaration.js';
 import {
+  CODEX_HOST_LIVENESS_CONTRACT,
   OPENCLAW_HOST_LIVENESS_CONTRACT,
+  WORKBUDDY_HOST_LIVENESS_CONTRACT,
   readWorkspaceHostKindFacts,
   resolvePromotionHostLiveness,
 } from '../src/host-liveness-contract.js';
@@ -43,6 +45,13 @@ const CODEX = {
   hostKind: 'codex',
   mappings: [{ rawToolName: 'Bash', canonicalKind: 'execute' as const }],
   declaredAt: '2026-09-16T00:00:00.000Z',
+};
+
+const WORKBUDDY = {
+  version: 1 as const,
+  hostKind: 'workbuddy',
+  mappings: [{ rawToolName: 'Bash', canonicalKind: 'execute' as const }],
+  declaredAt: '2026-10-28T00:00:00.000Z',
 };
 
 /** Seed durable host-behavior provenance: pain_events.host_kind rows (trajectory.db). */
@@ -80,15 +89,62 @@ describe('resolvePromotionHostLiveness (PRI-813 fail-closed capability routing)'
     });
   });
 
-  it('fails closed for a Codex-only workspace — no contract inheritance, no false PASS (Test F)', () => {
+  it('SPEC H01/B: a Codex-declared workspace resolves the Codex capability contract (was promotion_host_unsupported before the evidence-backed Codex contract existed)', () => {
     expect(saveHostToolDeclaration(ws, CODEX).ok).toBe(true);
+    const resolved = resolvePromotionHostLiveness(ws);
+    expect(resolved).toEqual({
+      ok: true,
+      hostKind: 'codex',
+      hostKinds: ['codex'],
+      hostContract: CODEX_HOST_LIVENESS_CONTRACT,
+      hostRuntimeVersion: 'codex-v2@1',
+    });
+    // The Codex contract's protected tool aliases are the REAL Codex tool
+    // surface (B1) — capitalized Bash, not the OpenClaw lowercase vocabulary.
+    expect(CODEX_HOST_LIVENESS_CONTRACT.protectedCapabilities.every(
+      capability => capability.hostToolAliases.every(alias => alias !== 'bash'),
+    )).toBe(true);
+  });
+
+  it('SPEC H01/C: a WorkBuddy-declared workspace resolves the WorkBuddy capability contract — never the OpenClaw one (H02)', () => {
+    expect(saveHostToolDeclaration(ws, WORKBUDDY).ok).toBe(true);
+    const resolved = resolvePromotionHostLiveness(ws);
+    expect(resolved).toEqual({
+      ok: true,
+      hostKind: 'workbuddy',
+      hostKinds: ['workbuddy'],
+      hostContract: WORKBUDDY_HOST_LIVENESS_CONTRACT,
+      hostRuntimeVersion: 'workbuddy-v1@1',
+    });
+    expect(resolved.ok && resolved.hostContract).not.toBe(OPENCLAW_HOST_LIVENESS_CONTRACT);
+  });
+
+  it('SPEC H01: an unknown declared host kind fails closed as promotion_host_unsupported', () => {
+    expect(saveHostToolDeclaration(ws, {
+      version: 1 as const,
+      hostKind: 'trae',
+      mappings: [{ rawToolName: 'shell', canonicalKind: 'execute' as const }],
+      declaredAt: '2026-10-28T00:00:00.000Z',
+    }).ok).toBe(true);
     const resolved = resolvePromotionHostLiveness(ws);
     expect(resolved).toMatchObject({
       ok: false,
       reason: 'promotion_host_unsupported',
-      hostKinds: ['codex'],
+      hostKinds: ['trae'],
       hostContract: null,
       hostRuntimeVersion: null,
+    });
+  });
+
+  it('SPEC H01: codex and workbuddy declarations together stay multi-host ambiguous', () => {
+    expect(saveHostToolDeclaration(ws, CODEX).ok).toBe(true);
+    expect(saveHostToolDeclaration(ws, WORKBUDDY).ok).toBe(true);
+    const resolved = resolvePromotionHostLiveness(ws);
+    expect(resolved).toMatchObject({
+      ok: false,
+      reason: 'multi_host_promotion_ambiguous',
+      hostKinds: ['codex', 'workbuddy'],
+      hostContract: null,
     });
   });
 
@@ -143,22 +199,36 @@ describe('resolvePromotionHostLiveness (PRI-813 fail-closed capability routing)'
     });
   });
 
-  it('review R1: workbuddy pain evidence counts as a workspace host fact (never silently dropped)', () => {
+  it('SPEC H02: workbuddy pain evidence without a declaration fails closed — the historical OpenClaw default must NOT extend to a workspace where WorkBuddy appeared', () => {
     seedProvenance(['workbuddy']);
     const facts = readWorkspaceHostKindFacts(ws);
     expect(facts.ok).toBe(true);
     if (!facts.ok) return;
     expect(facts.evidenceKinds).toEqual(['workbuddy']);
     expect(facts.effectiveKinds).toEqual(['workbuddy']);
-    // The promotion gate itself is unchanged: workbuddy-only evidence is not
-    // Codex evidence, so the historical OpenClaw default still stands.
+    // SPEC §4.3: durable non-OpenClaw evidence whose declaration is missing
+    // is a structured refusal — never a silent OpenClaw fallback. (The
+    // pre-SPEC resolver returned the OpenClaw contract here; that behavior
+    // is intentionally changed by SPEC-RULECODE-HOST-PROMOTION-001 A.)
     const resolved = resolvePromotionHostLiveness(ws);
-    expect(resolved).toEqual({
-      ok: true,
-      hostKind: 'openclaw',
-      hostKinds: [],
-      hostContract: OPENCLAW_HOST_LIVENESS_CONTRACT,
-      hostRuntimeVersion: 'openclaw-legacy@1',
+    expect(resolved).toMatchObject({
+      ok: false,
+      reason: 'host_declaration_missing_for_configured_host',
+      hostKinds: ['workbuddy'],
+      hostContract: null,
+      hostRuntimeVersion: null,
+    });
+  });
+
+  it('SPEC H02: an openclaw.json surviving alongside workbuddy evidence still fails closed (WorkBuddy partial-declaration variant)', () => {
+    seedProvenance(['workbuddy']);
+    expect(saveHostToolDeclaration(ws, OPENCLAW).ok).toBe(true);
+    const resolved = resolvePromotionHostLiveness(ws);
+    expect(resolved).toMatchObject({
+      ok: false,
+      reason: 'host_declaration_missing_for_configured_host',
+      hostKinds: ['openclaw', 'workbuddy'],
+      hostContract: null,
     });
   });
 

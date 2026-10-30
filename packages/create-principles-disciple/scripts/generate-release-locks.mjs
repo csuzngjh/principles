@@ -44,7 +44,9 @@ if (!npmCliJs) {
 
 try {
   execFileSync(process.execPath, [bundleScript, '--prepare-release-locks', '--output-root', stagingRoot], { cwd: root, stdio: 'inherit' });
-  cpSync(join(stagingRoot, 'core'), join(stagingRoot, 'plugin', 'core'), { recursive: true });
+  // PRI-1037 payload fix: the plugin's shipped manifest declares only the
+  // native module its self-contained bundle imports (better-sqlite3), so there
+  // is no file:./core source to provision for its lock generation anymore.
   for (const component of components) {
     const directory = join(stagingRoot, component);
     execFileSync(process.execPath, [npmCliJs,
