@@ -9,7 +9,7 @@ export interface ApprovalReviewData {
   approval: ApprovalRecordData;
   expectedReview: ApprovalReviewGuard;
   material: { availability: 'available' | 'missing' | 'unreadable'; artifactId: string; statement: string | null;
-    rationale: string | null; scope: string[]; risks: string[] | null; exactBody: { kind: 'principle' | 'rule_code'; text: string } | null };
+    rationale: string | null; targetBehavior: string | null; scope: string[]; risks: string[] | null; exactBody: { kind: 'principle' | 'rule_code'; text: string } | null };
 }
 function record(v: unknown): v is Record<string, unknown> { return v !== null && typeof v === 'object' && !Array.isArray(v); }
 export function validateApprovalReview(value: unknown): ApprovalReviewData | null {
@@ -26,6 +26,7 @@ export function validateApprovalReview(value: unknown): ApprovalReviewData | nul
     || !['available', 'missing', 'unreadable'].includes(String(material.availability))
     || (material.statement !== null && typeof material.statement !== 'string')
     || (material.rationale !== null && typeof material.rationale !== 'string')
+    || (material.targetBehavior !== null && typeof material.targetBehavior !== 'string')
     || !Array.isArray(material.scope) || !material.scope.every(item => typeof item === 'string')
     || (material.risks !== null && (!Array.isArray(material.risks) || !material.risks.every(item => typeof item === 'string')))) return null;
   if (guard.artifactState === 'missing' && (material.availability !== 'missing' || material.exactBody !== null || material.statement !== null || Object.hasOwn(guard, 'artifactDigest'))) return null;
@@ -44,5 +45,5 @@ export function validateApprovalReview(value: unknown): ApprovalReviewData | nul
   const {availability} = material;
   if (availability !== 'available' && availability !== 'missing' && availability !== 'unreadable') return null;
   return { approval, expectedReview, material: { availability, artifactId: approval.artifactId, statement: material.statement,
-    rationale: material.rationale, scope: material.scope, risks: material.risks, exactBody } };
+    rationale: material.rationale, targetBehavior: material.targetBehavior, scope: material.scope, risks: material.risks, exactBody } };
 }

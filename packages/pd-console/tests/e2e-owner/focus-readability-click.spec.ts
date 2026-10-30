@@ -57,7 +57,7 @@ test('authenticated Owner clicks the Focus card approve button — real UI click
   expect(data.activation).toBeTruthy();
 
   // rc-9：操作结果必须可见——已处理事项退出待办，结果与下一步仍留在阅读区。
-  await expect(page.getByRole('heading', { name: '本次决定已记录', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '处理结果', exact: true })).toBeVisible();
   await expect(page.getByTestId('owner-work-reading')).toContainText('已批准');
 
   // 服务端最终权威状态：审批列表含 approved 记录；激活列表含该激活且 active

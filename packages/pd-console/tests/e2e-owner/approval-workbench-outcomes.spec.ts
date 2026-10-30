@@ -52,7 +52,8 @@ test('A lost approval response is reconciled from persisted status without anoth
   await login(page);
   await page.locator('[data-item-key="approval:apr-lost-response"]').click();
   await page.getByTestId('owner-work-reading').getByRole('button', { name: '批准这个版本', exact: true }).click();
-  await expect(page.getByTestId('owner-work-reading')).toContainText('已批准');
+  await expect(page.getByTestId('owner-work-reading')).toContainText('当前已批准');
+  await expect(page.getByTestId('owner-work-reading')).toContainText('已重新确认权威记录');
   await expect(page.getByTestId('owner-work-reading')).toContainText('实际激活与投递请查看生效情况');
   expect(posts).toBe(1);
   const persisted = await request.get('/api/v1/approvals/apr-lost-response', { headers: auth });
@@ -82,4 +83,30 @@ test('Keyboard can open an exact item, read disclosures, submit and receive its 
   await page.keyboard.press('Enter');
   expect((await responsePromise).status()).toBe(200);
   await expect(reading).toContainText('已批准');
+});
+
+
+test('A refused rejection reports another completed approval without claiming the Owner rejection succeeded', async ({ page, request }) => {
+  let posts = 0;
+  await page.route('**/api/v1/approvals/apr-race/reject', async route => {
+    posts++;
+    const competing = await request.post('/api/v1/approvals/apr-race/approve', { headers: auth, data: {} });
+    expect(competing.status()).toBe(200);
+    const response = await route.fetch();
+    expect(response.status()).toBe(409);
+    await route.fulfill({ response });
+  });
+  await login(page);
+  await page.locator('[data-item-key="approval:apr-race"]').click();
+  await page.getByTestId('owner-work-reading').getByRole('button', { name: '拒绝这个版本', exact: true }).click();
+  await page.getByLabel('请说明理由').fill('我原本准备拒绝当前草案。');
+  await page.getByRole('button', { name: '确认提交', exact: true }).click();
+  const reading = page.getByTestId('owner-work-reading');
+  await expect(reading).toContainText('本次操作未执行');
+  await expect(reading).toContainText('当前已批准');
+  await expect(reading).not.toContainText('已拒绝这个版本');
+  await expect(reading.getByRole('heading', { name: '处理结果', exact: true })).toBeVisible();
+  expect(posts).toBe(1);
+  const persisted = await request.get('/api/v1/approvals/apr-race', { headers: auth });
+  expect(await persisted.json()).toMatchObject({ data: { status: 'approved' } });
 });

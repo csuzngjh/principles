@@ -32,5 +32,55 @@ test('Principle library scans compactly, expands context in place, and returns w
   await expect(page.getByRole('combobox', { name: 'Sort order' })).toHaveValue('createdAt');
   await page.setViewportSize({ width: 320, height: 720 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await expect(page.locator('article').first()).toBeVisible();
+  await page.waitForTimeout(450);
   await page.screenshot({ path: resolve(shots, '09-principles-320.png'), fullPage: false });
+});
+
+
+test('Long learned text stays searchable while library titles remain short', async ({ page }) => {
+  function record(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === 'object' && !Array.isArray(value); }
+  const longText = '先核对影响范围，再处理共享状态。' + '保留触发条件与必要例外。'.repeat(100) + '独特检索尾句';
+  await page.route('**/api/v1/principles/owner-decision-library', async route => {
+    const response = await route.fetch();
+    const body: unknown = await response.json();
+    if (!record(body) || !record(body.data) || !record(body.data.entries)) throw new Error('Invalid library fixture');
+    const entry = body.data.entries['e2e00000-0000-4000-8000-00000000000b'];
+    if (!record(entry)) throw new Error('Missing library fixture entry');
+    entry.learnedPrinciple = { status: 'known', text: longText, sourceTier: 'scribe' };
+    await route.fulfill({ response, json: body });
+  });
+  await page.goto('/#/focus');
+  await page.getByLabel('访问令牌').fill('owner-e2e-token');
+  await page.getByRole('button', { name: '连接', exact: true }).click();
+  await page.waitForURL(/#\/(focus|welcome)$/);
+  await page.goto('/#/principles?mode=all&q=独特检索尾句');
+  const title = page.locator('article h3').first();
+  await expect(title).toBeVisible();
+  expect((await title.innerText()).length).toBeLessThanOrEqual(49);
+  expect(await title.evaluate(element => element.getBoundingClientRect().height)).toBeLessThan(100);
+});
+
+test('A late all-principles response cannot overwrite the newer actionable filter', async ({ page }) => {
+  await page.goto('/#/focus');
+  await page.getByLabel('访问令牌').fill('owner-e2e-token');
+  await page.getByRole('button', { name: '连接', exact: true }).click();
+  await page.waitForURL(/#\/(focus|welcome)$/);
+  let started: (() => void) | undefined;
+  const requested = new Promise<void>(resolveRequested => { started = resolveRequested; });
+  let release: (() => void) | undefined;
+  const held = new Promise<void>(resolveHeld => { release = resolveHeld; });
+  await page.route('**/api/principles?filter=all', async route => {
+    const response = await route.fetch(); started?.(); await held; await route.fulfill({ response });
+  });
+  try {
+    await page.goto('/#/principles?mode=all');
+    await requested;
+    await page.evaluate(() => { window.location.hash = '/principles?mode=actionable'; });
+    await expect(page.locator('article').first()).toBeVisible();
+    const titles = await page.locator('article h3').allTextContents();
+    release?.();
+    await expect(page).toHaveURL(/mode=actionable/);
+    await expect(page.locator('article h3')).toHaveText(titles);
+  } finally { release?.(); }
 });

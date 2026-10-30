@@ -5,7 +5,7 @@ import { validateApprovalReview } from '../../src/ui/utils/approval-review.js';
 function fixture() {
   return { approvalId: 'approval-one', artifactId: 'artifact-one', channel: 'prompt', status: 'pending', riskLevel: 'low', requestedAt: '2026-10-30T00:00:00Z', writeGuardVersion: 'approval-review-v1',
     review: { expectedReview: { schemaVersion: 'approval-review-v1', approvalId: 'approval-one', artifactId: 'artifact-one', channel: 'prompt', artifactState: 'present', artifactDigest: 'sha256:' + 'a'.repeat(64) },
-      material: { availability: 'available', artifactId: 'artifact-one', statement: 'Check the requested scope.', rationale: null, scope: ['File operations'], risks: ['Verify the deletion boundary.'], exactBody: { kind: 'principle', text: 'Complete normative text.' } } } };
+      material: { availability: 'available', artifactId: 'artifact-one', statement: 'Check the requested scope.', rationale: null, targetBehavior: 'Ask before the shared write.', scope: ['File operations'], risks: ['Verify the deletion boundary.'], exactBody: { kind: 'principle', text: 'Complete normative text.' } } } };
 }
 describe('one response binds readable material to the submitted approval snapshot', () => {
   it('retains exact material with its guard; unreadable present artifacts remain readable only as unavailable material', () => {

@@ -68,12 +68,17 @@ export function ApprovalSubjectReading({ principleId, approvalId, artifactId, ch
     setBusy(false);
     if (!fresh) { setError(t('pages.focus.workbench.resultUnknown')); return; }
     if (fresh.approval.status === 'approved' || fresh.approval.status === 'rejected') {
-      let message = t(fresh.approval.status === 'approved' ? 'pages.focus.workbench.approved' : 'pages.focus.workbench.rejected');
-      if (fresh.approval.status === 'approved' && !result.success) {
+      const state = t(fresh.approval.status === 'approved' ? 'pages.focus.workbench.currentApproved' : 'pages.focus.workbench.currentRejected');
+      const ownOutcome = result.success && ((action === 'approve' && fresh.approval.status === 'approved') || (action === 'reject' && fresh.approval.status === 'rejected'));
+      const refused = !result.success && result.status !== undefined && result.status >= 400 && result.status < 500;
+      let message = ownOutcome ? t(fresh.approval.status === 'approved' ? 'pages.focus.workbench.approved' : 'pages.focus.workbench.rejected')
+        : refused ? t('pages.focus.workbench.refusedCurrentState', { state }) + ' ' + [result.error, result.nextAction].filter(Boolean).join(' ')
+          : t('pages.focus.workbench.currentStateConfirmed', { state });
+      if (fresh.approval.status === 'approved' && !result.success && !refused) {
         const activations = await fetchAllActivations(targetHost);
         if (epoch.current !== current + 1) return;
         const active = activations.success && activations.data.activations.some(item => item.artifactId === fresh.approval.artifactId && item.status === 'active');
-        message = t(active ? 'pages.focus.workbench.approved' : result.reason === 'activation_failed' ? 'pages.focus.workbench.activationFailed' : 'pages.focus.workbench.approvedRuntimeUnknown');
+        message += ' ' + t(result.reason === 'activation_failed' ? 'pages.focus.workbench.activationFailed' : active ? 'pages.focus.workbench.runtimeCheckLink' : 'pages.focus.workbench.approvedRuntimeUnknown');
       }
       if (result.success && result.data.warning) {
         const warning = localizeApprovalWarning(result.data.warning, t);
@@ -97,7 +102,7 @@ export function ApprovalSubjectReading({ principleId, approvalId, artifactId, ch
           <p className="mb-2 text-[12px] text-ink-4">{t(body?.kind === 'rule_code' ? 'pages.focus.workbench.codePreview' : 'pages.focus.workbench.textPreview')}</p>
           <p className="whitespace-pre-wrap break-words text-[15px] leading-[1.85] text-ink">{bodyText.length > 240 ? bodyText.slice(0, 240) + '…' : bodyText}</p>
           <details className="mt-4 rounded-[4px] border border-line px-4 py-3 text-[13px]"><summary className="cursor-pointer text-gov">{t(body?.kind === 'rule_code' ? 'pages.focus.workbench.fullCode' : 'pages.focus.workbench.fullText')}</summary>
-            <div className="mt-4 whitespace-pre-wrap break-words leading-[1.85] text-ink-2">{bodyText}</div>
+            <div className="mt-4 whitespace-pre-wrap break-words text-[15px] leading-[1.85] text-ink-2">{bodyText}</div>
           </details>
         </> : <p className="text-sm text-amber">{t('pages.focus.workbench.exactMaterialMissing')}</p>}
         {review?.material.scope.length ? <div className="mt-4"><h4 className="text-sm font-medium text-ink">{t('pages.focus.workbench.scope')}</h4><ul className="mt-2 list-disc space-y-1 pl-5 text-[13px] leading-relaxed text-ink-2">{review.material.scope.map((scope, index) => <li key={index}>{scope}</li>)}</ul></div> : null}
@@ -125,6 +130,7 @@ export function ApprovalSubjectReading({ principleId, approvalId, artifactId, ch
           : promptInjection.budgetObservedAt !== undefined ? t('pages.focus.promptBudgetFallbackObservedNote', { reason: t(`pages.focus.budgetFallbackReason.${promptInjection.budgetFallbackReason}`, { defaultValue: promptInjection.budgetFallbackReason ?? 'unknown' }), observedAt: promptInjection.budgetObservedAt })
             : t('pages.focus.promptBudgetFallbackNote', { reason: promptInjection.budgetFallbackReason ? t('pages.focus.promptBudgetFallbackReasonSuffix', { code: t(`pages.focus.budgetFallbackReason.${promptInjection.budgetFallbackReason}`, { defaultValue: promptInjection.budgetFallbackReason }) }) : '' })}</p>
       </details>}
+      {review?.material.targetBehavior && <div className="mb-3 text-[14px] leading-relaxed text-ink-2" data-testid="approval-exact-target-behavior"><h4 className="mb-1 font-medium">{t('pages.focus.workbench.proposedBehavior')}</h4><p className="whitespace-pre-wrap break-words">{review.material.targetBehavior}</p></div>}
       {subject && <p className="text-sm leading-relaxed text-ink-2">{narrative(subject.decisionMaterial.consequence)}</p>}
       <p className="mt-2 text-[13px] leading-relaxed text-ink-3">{t('pages.focus.workbench.scopeUnknown')}</p>
       {view && <details className="mt-3 text-[13px] leading-relaxed text-ink-3"><summary className="cursor-pointer text-gov">{t('pages.focus.workbench.principleLimits')}</summary>

@@ -53,6 +53,7 @@ const PRINCIPLE_IDS = {
   workbenchPair: 'e2e00000-0000-4000-8000-00000000000c',
   lostResponse: 'e2e00000-0000-4000-8000-00000000000d',
   keyboardReview: 'e2e00000-0000-4000-8000-00000000000e',
+  raceOutcome: 'e2e00000-0000-4000-8000-00000000000f',
 } as const;
 
 const BAD_TRACE_CANDIDATE_ID = 'e2e00000-0000-4000-8000-000000000105';
@@ -492,11 +493,11 @@ insertClickApproval.run(
 );
 
 // Independent same-principle approvals for workbench isolation and lost-response UI checks.
-for (const suffix of ['isolated-a', 'isolated-b', 'lost-response', 'keyboard']) {
+for (const suffix of ['isolated-a', 'isolated-b', 'lost-response', 'keyboard', 'race']) {
   stateDb.prepare(`INSERT INTO tasks (task_id, task_kind, status, created_at, updated_at, attempt_count, max_attempts, diagnostic_json)
     VALUES (?, 'scribe', 'succeeded', ?, ?, 0, 3, ?)`)
     .run(`task-${suffix}`, eightDaysAgo, eightDaysAgo, scribeTaskDiagnosticJson);
-  const principleId = suffix === 'lost-response' ? PRINCIPLE_IDS.lostResponse : suffix === 'keyboard' ? PRINCIPLE_IDS.keyboardReview : PRINCIPLE_IDS.workbenchPair;
+  const principleId = suffix === 'race' ? PRINCIPLE_IDS.raceOutcome : suffix === 'lost-response' ? PRINCIPLE_IDS.lostResponse : suffix === 'keyboard' ? PRINCIPLE_IDS.keyboardReview : PRINCIPLE_IDS.workbenchPair;
   insertPiArtifact.run(`artifact-${suffix}`, 'principle', `task-${suffix}`, principleId,
     '[]', 'validated', JSON.stringify({ principleId, title: `Owner workbench ${suffix}`, principleDraft: { statement: '高代价的共享状态写入必须先给出可读的后果说明，再由 Owner 决定。', rationale: '审批应独立复核。' }, intentContract: { targetBehavior: 'Owner 核对当前版本后独立决定。' } }), now, now);
   insertClickApproval.run(`apr-${suffix}`, `artifact-${suffix}`, 'prompt', 'low', 'pending', 0.85,
@@ -798,6 +799,7 @@ const ledgerPrinciples: Record<string, ReturnType<typeof seededLedgerPrinciple>>
   [PRINCIPLE_IDS.rulecodeReject]: seededLedgerPrinciple(PRINCIPLE_IDS.rulecodeReject, 'RuleCode 拒绝路径原则', ['pain-e2e-rulereject']),
   [PRINCIPLE_IDS.workbenchPair]: seededLedgerPrinciple(PRINCIPLE_IDS.workbenchPair, '分组审批各自决定'),
   [PRINCIPLE_IDS.lostResponse]: seededLedgerPrinciple(PRINCIPLE_IDS.lostResponse, '响应丢失后核对已存状态'),
+  [PRINCIPLE_IDS.raceOutcome]: seededLedgerPrinciple(PRINCIPLE_IDS.raceOutcome, '并发结果不得冒认本次决定'),
   [PRINCIPLE_IDS.keyboardReview]: seededLedgerPrinciple(PRINCIPLE_IDS.keyboardReview, '键盘审查真实提交'),
   [PRINCIPLE_IDS.clickApprove]: seededLedgerPrinciple(PRINCIPLE_IDS.clickApprove, '点击批准测试原则', ['pain-e2e-click-approve']),
   [PRINCIPLE_IDS.clickReject]: seededLedgerPrinciple(PRINCIPLE_IDS.clickReject, '点击拒绝测试原则', ['pain-e2e-click-reject']),

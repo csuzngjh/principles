@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, type ReactNode } from "react";
+import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { PageShell } from "../../components/layout/page-shell.js";
@@ -19,6 +19,7 @@ import type {
   OwnerDecisionLibraryData,
 } from "../../api.js";
 import { enumLabel } from "../../utils/enum-labels.js";
+import { splitReadingTitleBody } from "../../utils/reading-layout.js";
 import { formatDate } from "../../utils/format-date.js";
 import { PrinciplesViewNav } from "./PrinciplesViewNav.js";
 
@@ -29,6 +30,7 @@ type ReviewStatus = "pending" | "candidate" | "approved" | "rejected" | "parked"
 interface PrincipleCard {
   principleId: string;
   title: string;
+  searchText: string;
   /** Original title before fallback (shown in details when title is unreadable). PRI-332 */
   originalTitle: string;
   /** Whether the title was replaced with a bounded fallback. PRI-332 */
@@ -217,8 +219,11 @@ export function PrinciplesPage() {
   // PRI-956 (F15, D3): runtime status cannot be confirmed when set
   const [revocationUnavailable, setRevocationUnavailable] = useState<string | null>(null);
 
+  const requestEpoch = useRef(0);
+
   // Fetch data
   const loadData = useCallback(async () => {
+    const epoch = ++requestEpoch.current;
     setLoading(true);
     setError(null);
     try {
@@ -228,6 +233,7 @@ export function PrinciplesPage() {
         fetchOwnerDecisionLibrary(),
       ]);
 
+      if (epoch !== requestEpoch.current) return;
       setOwnerDecisionLibrary(dResult.success && dResult.data ? dResult.data : null);
 
       if (!pResult.success) {
@@ -251,14 +257,16 @@ export function PrinciplesPage() {
       const aData = aResult.success ? validateApprovalsGrouped(aResult.data) : null;
       setApprovalGroups(aData?.groups ?? []);
     } catch (err) {
+      if (epoch !== requestEpoch.current) return;
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
-      setLoading(false);
+      if (epoch === requestEpoch.current) setLoading(false);
     }
   }, [filterMode]);
 
   useEffect(() => {
-    loadData();
+    void loadData();
+    return () => { requestEpoch.current++; };
   }, [loadData]);
 
   // Build approval lookup
@@ -300,7 +308,8 @@ export function PrinciplesPage() {
 
     return {
       principleId: p.id,
-      title: displayTitle,
+      title: splitReadingTitleBody(displayTitle).title,
+      searchText: semanticTitle ?? rawTitle,
       originalTitle: rawTitle,
       titleUsedFallback: usedFallback,
       text: p.text,
@@ -324,7 +333,7 @@ export function PrinciplesPage() {
       if (statusFilter !== "all" && c.status !== statusFilter) return false;
       if (search) {
         const q = search.toLowerCase();
-        if (!c.text.toLowerCase().includes(q) && !c.title.toLowerCase().includes(q))
+        if (!c.text.toLowerCase().includes(q) && !c.title.toLowerCase().includes(q) && !c.searchText.toLowerCase().includes(q))
           return false;
       }
       return true;
@@ -560,7 +569,7 @@ export function PrinciplesPage() {
                   </div>
                 )}
 
-                <p className="text-ink-3 text-[13px] line-clamp-2 leading-relaxed">{card.text}</p>
+                {card.text.trim() !== card.title.trim() && <p className="text-ink-3 text-[13px] line-clamp-2 leading-relaxed">{card.text}</p>}
                 {card.runtimeDeactivated === true && <p className="mt-3 text-[12px] text-amber" role="status">{t('principles.runtimeDeactivated')}</p>}
                 <details className="mt-4 border-t border-line/60 pt-3" data-testid="principle-context-disclosure">
                   <summary className="cursor-pointer text-[12px] text-gov">{t('principles.contextDisclosure')}</summary>
