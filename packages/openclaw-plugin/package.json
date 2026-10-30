@@ -1,6 +1,6 @@
 {
   "name": "principles-disciple",
-  "version": "2.2.7",
+  "version": "2.2.8",
   "description": "Principles Disciple is an AI Agent Governance System. Stop correcting the same AI behavior across sessions. Turn repeated Agent corrections into Owner-approved, observable, reversible behavior principles.",
   "type": "module",
   "main": "./dist/index.js",
@@ -75,7 +75,7 @@
     "compile-principles": "node scripts/compile-principles.mjs"
   },
   "devDependencies": {
-    "@principles/core": "^1.297.5",
+    "@principles/core": "^1.297.6",
     "@principles/host-runtime": "^0.14.2",
     "@types/better-sqlite3": "^9.6.0",
     "@types/js-yaml": "^4.0.9",
