@@ -310,7 +310,11 @@ export function createOpenClawHostTransport({
       let err = '';
       const timer = setTimeout(() => {
         child.kill('SIGKILL');
-        reject(new Error(`openclaw exec timed out after ${timeoutMsPerCall}ms (round ${rounds}, task ${taskId})`));
+        // code:'timeout' — the adapter-classified ambiguity marker (createHostActorAdapter
+        // rethrows it as ambiguous: the exec was dispatched and killed at the wall
+        // clock, so whether the model ran is unknowable → RESULT_UNKNOWN, never
+        // a clean failure).
+        reject(Object.assign(new Error(`openclaw exec timed out after ${timeoutMsPerCall}ms (round ${rounds}, task ${taskId})`), { code: 'timeout' }));
       }, timeoutMsPerCall);
       child.stdout.on('data', (d) => { out += d; });
       child.stderr.on('data', (d) => { err += d; });
@@ -404,7 +408,7 @@ export function createOpenClawHostTransport({
     const payloadText = typeof envelope.final === 'string' && envelope.final.length > 0
       ? envelope.final
       : (envelope.payloads || []).filter((p) => p.isError !== true).map((p) => p.text || '').join('\n');
-    return { payload: payloadText, hostRound: { sessionId: envelope.sessionId, elapsedMs, envelope, roundDir } };
+    return { payload: payloadText, hostRound: { sessionId: envelope.sessionId, elapsedMs, envelope, usage: envelope.usage ?? null, roundDir } };
   }
 
   function hostSnapshot() {

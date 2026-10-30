@@ -357,12 +357,29 @@ export function verifyStageRAuthorization({ authorizationRecord, bindings, plan,
  *  actor implementation can provide it (session id + observed model identity
  *  come from the host's own event stream — host-actor.mjs discipline); an
  *  offline test double yields null and therefore never counts as real-host
- *  acceptance evidence. */
+ *  acceptance evidence. When the transport records WHERE the host persisted
+ *  the session's trajectory (OpenClaw exec-state), that location travels with
+ *  the evidence as a closed-shape `hostEvidence` object — the formal baseline
+ *  corroborates against it instead of the record strings. */
 export function readObservedHostEvidence(actor) {
   const e = actor && actor.observedHostEvidence;
   if (!e || typeof e !== 'object') return null;
   if (typeof e.hostSessionId !== 'string' || e.hostSessionId.length === 0) return null;
   if (typeof e.observedModelIdentity !== 'string' || e.observedModelIdentity.length === 0) return null;
+  if (e.hostEvidence !== undefined) {
+    const h = e.hostEvidence;
+    if (!h || typeof h !== 'object' || h.kind !== 'openclaw-exec-state'
+      || typeof h.roundDir !== 'string' || h.roundDir.length === 0
+      || typeof h.stateDir !== 'string' || h.stateDir.length === 0
+      || typeof h.stateAgentDb !== 'string' || h.stateAgentDb.length === 0) {
+      return { hostSessionId: e.hostSessionId, observedModelIdentity: e.observedModelIdentity, hostEvidence: null }; // malformed location is dropped, never trusted
+    }
+    return {
+      hostSessionId: e.hostSessionId,
+      observedModelIdentity: e.observedModelIdentity,
+      hostEvidence: { kind: h.kind, roundDir: h.roundDir, stateDir: h.stateDir, stateAgentDb: h.stateAgentDb },
+    };
+  }
   return { hostSessionId: e.hostSessionId, observedModelIdentity: e.observedModelIdentity };
 }
 

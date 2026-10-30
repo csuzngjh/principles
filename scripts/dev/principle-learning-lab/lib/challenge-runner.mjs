@@ -333,17 +333,30 @@ export async function runChallengeStudy({
             // structural probe check, BEFORE the factory): the authorization's
             // realHostProbe.evidenceRef must resolve to a real-host-executed,
             // all-checks-PASSED probe record bound to THIS frozen study, with
-            // every recorded session corroborated by the host's own rollouts
-            // (execution.codexHome). Offline-rehearsal evidence, missing,
-            // corrupt, mismatched or uncorroborated evidence refuses F2.
+            // every recorded session corroborated by the host's own evidence.
+            // Host dispatch follows the probe binding's hostKind: codex-cli →
+            // rollout corroboration under execution.codexHome (historical
+            // path); openclaw → exec-state corroboration with the operator-
+            // declared probe controlled root (execution.probeControlledRoot —
+            // the workRoot rounds dir the probe ran in; missing = refuse,
+            // never a silent skip). Offline-rehearsal, missing, corrupt,
+            // mismatched or uncorroborated evidence refuses F2.
             if (declaredMode === 'F2-real-host') {
+              const probeBinding = authorizationRecord && authorizationRecord.isolationAcceptance && authorizationRecord.isolationAcceptance.realHostProbe;
+              const probeHostKind = probeBinding && probeBinding.hostKind === 'openclaw' ? 'openclaw' : 'codex-cli';
+              const { readOpenClawExecStateTrajectory } = await import('./challenge-openclaw-host.mjs');
               const probeVerify = verifyF2ProbeEvidence({
                 studyDir,
-                evidenceRef: authorizationRecord && authorizationRecord.isolationAcceptance && authorizationRecord.isolationAcceptance.realHostProbe
-                  ? authorizationRecord.isolationAcceptance.realHostProbe.evidenceRef
+                evidenceRef: probeBinding
+                  ? probeBinding.evidenceRef
                   : null,
                 expected: { studyId: frozen.studyId, suiteHash: frozen.suiteHash },
-                codexHome: execution.codexHome ?? null,
+                codexHome: probeHostKind === 'codex-cli' ? (execution.codexHome ?? null) : null,
+                hostKind: probeHostKind,
+                ...(probeHostKind === 'openclaw' ? {
+                  openclawControlledRoot: execution.probeControlledRoot ?? null,
+                  readOpenClawTrajectory: readOpenClawExecStateTrajectory,
+                } : {}),
               });
               if (!probeVerify.ok) {
                 ledger.appendEvent({ type: 'UNIT_REFUSED', unit, reason: 'stage_r_probe_evidence_invalid', detail: probeVerify.reasons });
@@ -357,6 +370,7 @@ export async function runChallengeStudy({
             actor = actorFactory({
               armId,
               caseId,
+              repetitionId, // unit-unique taskId segment for host transports (one host session per SPEC §6.2.8 unit)
               caseDef,
               caseVisible,
               armPrompt, // SPEC §6.2 — the ONLY injection channel a real actor receives

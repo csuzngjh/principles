@@ -67,7 +67,7 @@ const NOW = Date.now();
 const NOW_ISO = '2026-10-26T12:00:00Z';
 const CASE_ID = 'CEB-001-FV-01';
 
-let copyCounter = 0;
+let copyCounter = 0; // per-run tag counter (study copies); codex homes are mkdtemp (fresh per run)
 function copyStudy(tag: string): string {
   const dir = path.join(tmpRoot, `${tag}-${++copyCounter}`);
   fs.mkdirSync(path.dirname(dir), { recursive: true });
@@ -255,7 +255,7 @@ describe('A. isolation probe engine', () => {
 describe('B. verifyF2ProbeEvidence', () => {
   it('B1: offline-rehearsal evidence can NEVER authorize F2 — the honest marker is machine-enforced', () => {
     const dir = copyStudy('verify-offline');
-    const codexHome = path.join(tmpRoot, `codex-${++copyCounter}`);
+    const codexHome = fs.mkdtempSync(path.join(tmpRoot, 'codex-'));
     writeProbeEvidence(dir, codexHome, { executedIn: 'offline-rehearsal' });
     const v = verifyF2ProbeEvidence({ studyDir: dir, evidenceRef: EVIDENCE_REL, expected: { studyId: FROZEN.studyId, suiteHash: FROZEN.suiteHash }, codexHome });
     expect(v.ok).toBe(false);
@@ -264,8 +264,8 @@ describe('B. verifyF2ProbeEvidence', () => {
 
   it('B2: real-host evidence without rollout corroboration is refused (record fields alone authorize nothing)', () => {
     const dir = copyStudy('verify-norollout');
-    const rolloutsHome = path.join(tmpRoot, `codex-${++copyCounter}`); // rollouts land here…
-    const verifyHome = path.join(tmpRoot, `codex-${++copyCounter}`); // …but F2 verifies against THIS empty home
+    const rolloutsHome = fs.mkdtempSync(path.join(tmpRoot, 'codex-')); // rollouts land here…
+    const verifyHome = fs.mkdtempSync(path.join(tmpRoot, 'codex-')); // …but F2 verifies against THIS empty home
     fs.mkdirSync(verifyHome, { recursive: true });
     writeProbeEvidence(dir, rolloutsHome);
     const v = verifyF2ProbeEvidence({ studyDir: dir, evidenceRef: EVIDENCE_REL, expected: { studyId: FROZEN.studyId, suiteHash: FROZEN.suiteHash }, codexHome: verifyHome });
@@ -275,7 +275,7 @@ describe('B. verifyF2ProbeEvidence', () => {
 
   it('B3: real-host evidence WITH corroborated rollouts verifies (wiring proof; fabrication boundary documented); missing codexHome fails closed', () => {
     const dir = copyStudy('verify-ok');
-    const codexHome = path.join(tmpRoot, `codex-${++copyCounter}`);
+    const codexHome = fs.mkdtempSync(path.join(tmpRoot, 'codex-'));
     writeProbeEvidence(dir, codexHome);
     const v = verifyF2ProbeEvidence({ studyDir: dir, evidenceRef: EVIDENCE_REL, expected: { studyId: FROZEN.studyId, suiteHash: FROZEN.suiteHash }, codexHome });
     expect(v).toMatchObject({ ok: true, reasons: [] });
@@ -286,7 +286,7 @@ describe('B. verifyF2ProbeEvidence', () => {
 
   it('B4: corrupt, missing, null, wrong-schema, traversal-style, mismatched and partially-failed evidence all refuse (boundary guard: only the fixed in-study evidence path is ever read)', () => {
     const dir = copyStudy('verify-bad');
-    const codexHome = path.join(tmpRoot, `codex-${++copyCounter}`);
+    const codexHome = fs.mkdtempSync(path.join(tmpRoot, 'codex-'));
     const expectRefused = (v: { ok: boolean; reasons: string[] }) => { expect(v.ok).toBe(false); expect(v.reasons.length).toBeGreaterThan(0); };
     // missing file
     expectRefused(verifyF2ProbeEvidence({ studyDir: dir, evidenceRef: 'isolation-probes/absent.json', expected: { studyId: FROZEN.studyId, suiteHash: FROZEN.suiteHash }, codexHome }));
@@ -359,7 +359,7 @@ describe('C. Stage R runner F2 integration', () => {
 
   it('C2: with valid real-host evidence + corroborated rollouts an authorized F2 unit executes (wiring double — never real-host acceptance)', async () => {
     const dir = copyStudy('runner-withevidence');
-    const codexHome = path.join(tmpRoot, `codex-${++copyCounter}`);
+    const codexHome = fs.mkdtempSync(path.join(tmpRoot, 'codex-'));
     writeProbeEvidence(dir, codexHome);
     writeInside(dir, 'run-authorization.json', JSON.stringify(validF2Auth(), null, 2));
     let round = 0;
