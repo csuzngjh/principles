@@ -30,9 +30,9 @@
     "授权窗口关闭/撤销/停止"
   ],
   "issuedBy": "owner-goal-20261030-final",
-  "issuedAt": "2026-10-30T03:25:00Z",
+  "issuedAt": "2026-10-29T19:25:00Z",
   "blockage": {
-    "reason": "Owner goal 指令（2026-10-30）签发授权周期 2：OpenClaw 2026.10.5 / zai / zai-glm-5.3-flash / 最多 5 轮 / 每轮硬超时 600s / 窗口 6h（03:30Z-09:30Z）。前置全部满足：S9.1 精简载荷已收敛（2.2.6，320 文件）、退出码契约已修（cleanup-kind 完整轮次可用）、ambient state 认证可达（exec-lean 实测 glm-5.3-flash 身份 VERIFIED）。周期 1（REVOKED, 15:40Z 10-28）历史保留于 git。F2 未授权。",
+    "reason": "Owner goal 指令（2026-10-30）签发授权周期 2：OpenClaw 2026.10.5 / zai / zai-glm-5.3-flash / 最多 5 轮 / 每轮硬超时 600s / 窗口 6h（19:30Z-01:30Z，即本地 03:30-09:30 +08:00）。前置全部满足：S9.1 精简载荷已收敛（2.2.6，320 文件）、退出码契约已修（cleanup-kind 完整轮次可用）、ambient state 认证可达（exec-lean 实测 glm-5.3-flash 身份 VERIFIED）。周期 1（REVOKED, 15:40Z 10-28）历史保留于 git。F2 未授权。",
     "pendingDecision": "",
     "unblockCondition": "探针完成并深验后归档；F2 需独立授权。"
   },
