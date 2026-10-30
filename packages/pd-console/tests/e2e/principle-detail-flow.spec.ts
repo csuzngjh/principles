@@ -175,8 +175,14 @@ test.describe('PrincipleDetailPage 4 源拼接流程', () => {
     expect(panelGeometry.top).toBeLessThan(panelGeometry.viewportHeight);
     expect(panelGeometry.bottom).toBeGreaterThan(0);
 
-    // Keep the fixture's specific consequence; channel boilerplate alone is insufficient.
-    await expect(panel).toContainText('【拟议行为】提交确认面板前，Owner 能在决策区读到本条后果说明。');
+    // The exact artifact's proposed behavior remains visible. The old view's
+    // decorative prefix is now a separate label, not part of the stored text.
+    const review = await apiGet(`/api/v1/approvals/${encodeURIComponent(record.id)}`);
+    expect(review.status).toBe(200);
+    const expectedBehavior = '提交确认面板前，Owner 能在决策区读到本条后果说明。';
+    expect(review.body).toMatchObject({ data: { review: { material: { targetBehavior: expectedBehavior } } } });
+    await expect(panel).toContainText('拟议行为（来自本次草案）');
+    await expect(panel).toContainText(expectedBehavior);
     const noteDisclosure = panel.locator('details').filter({ has: page.locator('summary', { hasText: '批准备注' }) }).first();
     await noteDisclosure.locator(':scope > summary').click();
     const noteField = noteDisclosure.locator('textarea');
