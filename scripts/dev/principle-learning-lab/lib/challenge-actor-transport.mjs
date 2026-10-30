@@ -447,8 +447,20 @@ export function createHostActorAdapter({ ctx, hostTransport, taskId }) {
             } else {
               adapter.observedHostEvidence = null;
             }
-            const parsed = parseActorAction(round && typeof round.payload !== 'undefined' ? JSON.stringify(round.payload) : null);
-            if (!parsed.ok) return invalidResponseAction(parsed.reason, round && round.payload ? JSON.stringify(round.payload) : null);
+            // Payload shape discipline (PRI-1038 wiring fix): the codex host
+            // transport returns the model reply as an OBJECT (JSON.stringify
+            // re-serializes it); the OpenClaw exec transport returns the
+            // envelope's final text as a STRING already. Stringify only
+            // objects — stringifying a string double-encodes it ("\"{...}\"")
+            // and every reply parses as a JSON string instead of an action
+            // object (observed live 2026-10-30: 18/18 first-batch units died
+            // invalid_action_cap with perfectly valid model replies).
+            const rawPayload = round && typeof round.payload !== 'undefined' ? round.payload : null;
+            const payloadText = typeof rawPayload === 'string'
+              ? rawPayload
+              : (rawPayload === null || rawPayload === undefined ? null : JSON.stringify(rawPayload));
+            const parsed = parseActorAction(payloadText);
+            if (!parsed.ok) return invalidResponseAction(parsed.reason, payloadText);
             return parsed.action;
           },
           (e) => {

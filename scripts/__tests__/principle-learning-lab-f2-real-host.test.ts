@@ -80,15 +80,18 @@ function prepareStudyCopy(): string {
 
 /** Host transport double carrying the VERIFIED OpenClaw identity and the
  *  exec-state evidence location — the exact snapshot shape the real
- *  transport reports (createOpenClawHostTransport.hostSnapshot). */
-function fakeOpenClawTransport(loc: { roundDir: string; stateDir: string; stateAgentDb: string }) {
+ *  transport reports (createOpenClawHostTransport.hostSnapshot). Payload
+ *  shape is configurable: the REAL OpenClaw transport returns the envelope
+ *  final as a STRING (the live 2026-10-30 first batch proved stringifying it
+ *  breaks every reply); codex transports return objects. */
+function fakeOpenClawTransport(loc: { roundDir: string; stateDir: string; stateAgentDb: string }, payloadShape: 'string' | 'object' = 'string') {
   let rounds = 0;
+  const payload = { type: 'report', args: { claims: [{ factId: 'F-1', verdict: 'inferred', evidenceRef: 'OBS-OWNER-1', minimalSteps: 'r' }] }, narrative: 'offline double' };
   return {
     complete: async () => {
       rounds += 1;
-      const payload = { type: 'report', args: { claims: [{ factId: 'F-1', verdict: 'inferred', evidenceRef: 'OBS-OWNER-1', minimalSteps: 'r' }] }, narrative: 'offline double' };
       return {
-        payload,
+        payload: payloadShape === 'string' ? JSON.stringify(payload) : payload,
         hostRound: { sessionId: SESSION_ID, elapsedMs: 5, envelope: { model: 'glm-5.3-flash', provider: 'zai', ok: true }, roundDir: loc.roundDir },
       };
     },
@@ -162,6 +165,46 @@ describe('PRI-1038 F2 real-host wiring (offline; injected transport)', () => {
     expect(summary.units[0].reasons.join(' ')).toContain('conflicts with the probe');
     const baseline = deriveRealHostBaselineFromStudy(studyCopy, {});
     expect(baseline.status).toBe('UNKNOWN'); // no attempts recorded — nothing to upgrade
+  });
+
+  it('parses a STRING payload (the real OpenClaw transport shape) into a valid action — the 2026-10-30 first-batch wiring defect cannot recur', async () => {
+    const loc = writeExecStateDb(path.join(roundsRoot, 'round-01-a'), SESSION_ID, 'glm-5.3-flash', 'zai');
+    const studyCopy = prepareStudyCopy();
+    writeProbeRecord(studyCopy, loc);
+
+    const summary = await runChallengeStudy({
+      studyDir: studyCopy,
+      plan: { arms: ['A'], cases: ['CEB-001-FV-01'], repetitions: [1], attemptId: 'a1' },
+      actorFactory: (ctx: any) => createHostActorAdapter({ ctx, hostTransport: fakeOpenClawTransport(loc, 'string'), taskId: `stage-r#CEB-001/CEB-001-FV-01/A/r1#challenge-actor` }),
+      maxAttemptsTotal: 1,
+      owner: 'f2-offline-test',
+      execution: { mode: 'F2-real-host', now: Date.now(), requestTimeoutMs: 600000, maxRequestsPerAttempt: 10, probeControlledRoot: roundsRoot },
+    });
+    expect(summary.units[0].state).toBe('SUCCEEDED');
+    const attempt = JSON.parse(fs.readFileSync(path.join(studyCopy, 'runs', 'CEB-001-FV-01', 'A', 'r1', 'a1.json'), 'utf8'));
+    // The single report action parsed cleanly: one step, no invalid_response,
+    // and the report's claims reached the adjudicator (not no_report).
+    expect(attempt.trace.termination.reason).not.toBe('invalid_action_cap');
+    expect(attempt.trace.records.filter((r: any) => r.kind === 'action' && r.action && r.action.type === 'invalid_response')).toHaveLength(0);
+    expect(attempt.adjudication.protocol.reportPresent).toBe(true);
+  });
+
+  it('parses an OBJECT payload (the codex transport shape) unchanged', async () => {
+    const loc = writeExecStateDb(path.join(roundsRoot, 'round-01-a'), SESSION_ID, 'glm-5.3-flash', 'zai');
+    const studyCopy = prepareStudyCopy();
+    writeProbeRecord(studyCopy, loc);
+
+    const summary = await runChallengeStudy({
+      studyDir: studyCopy,
+      plan: { arms: ['A'], cases: ['CEB-001-FV-01'], repetitions: [1], attemptId: 'a1' },
+      actorFactory: (ctx: any) => createHostActorAdapter({ ctx, hostTransport: fakeOpenClawTransport(loc, 'object'), taskId: `stage-r#CEB-001/CEB-001-FV-01/A/r1#challenge-actor` }),
+      maxAttemptsTotal: 1,
+      owner: 'f2-offline-test',
+      execution: { mode: 'F2-real-host', now: Date.now(), requestTimeoutMs: 600000, maxRequestsPerAttempt: 10, probeControlledRoot: roundsRoot },
+    });
+    expect(summary.units[0].state).toBe('SUCCEEDED');
+    const attempt = JSON.parse(fs.readFileSync(path.join(studyCopy, 'runs', 'CEB-001-FV-01', 'A', 'r1', 'a1.json'), 'utf8'));
+    expect(attempt.adjudication.protocol.reportPresent).toBe(true);
   });
 
   it('a mapped roundDir ESCAPING the probe controlled root refuses the F2 unit before any actor step (forged evidence location)', async () => {
