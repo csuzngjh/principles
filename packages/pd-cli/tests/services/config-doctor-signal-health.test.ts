@@ -109,14 +109,19 @@ describe('buildSignalHealthEntry (PRI-788 G4)', () => {
 });
 
 describe('buildSignalHealthEntry (AUDIT-P2-02 新增指标)', () => {
-  it('新字段存在 → counts 如实呈现 stage2Invocations/stage2BatchSkipped', () => {
+  it('新字段存在 → counts 如实呈现 stage2Invocations/stage2BatchSkipped/stage2DiscoverySkipped', () => {
     const stateDir = makeStateDir();
     // pending=0：纯计数展示。pending>0 && batchSkipped>0 的 degraded 组合
     // 由 AUDIT-P2-04 describe 单独覆盖。
-    writeHealth(stateDir, { stage2Invocations: 12, stage2BatchSkipped: 3, pendingCount: 0 });
+    writeHealth(stateDir, { stage2Invocations: 12, stage2BatchSkipped: 3, stage2DiscoverySkipped: 5, pendingCount: 0 });
     const entry = buildSignalHealthEntry(stateDir);
     expect(entry.status).toBe('ok');
-    expect(entry.counts).toMatchObject({ stage2Invocations: 12, stage2BatchSkipped: 3, pendingCount: 0 });
+    expect(entry.counts).toMatchObject({
+      stage2Invocations: 12,
+      stage2BatchSkipped: 3,
+      stage2DiscoverySkipped: 5,
+      pendingCount: 0,
+    });
   });
 
   it('旧格式文件（无新字段）→ counts 读作 0，不退化为 unknown（向后兼容）', () => {
@@ -127,6 +132,7 @@ describe('buildSignalHealthEntry (AUDIT-P2-02 新增指标)', () => {
     expect(entry.counts).not.toBeNull();
     expect(entry.counts?.stage2Invocations).toBe(0);
     expect(entry.counts?.stage2BatchSkipped).toBe(0);
+    expect(entry.counts?.stage2DiscoverySkipped).toBe(0);
     expect(entry.counts?.stage2Queued).toBe(7);
   });
 });
