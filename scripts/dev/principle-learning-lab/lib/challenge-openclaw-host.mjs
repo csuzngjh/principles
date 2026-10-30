@@ -408,7 +408,7 @@ export function createOpenClawHostTransport({
     const payloadText = typeof envelope.final === 'string' && envelope.final.length > 0
       ? envelope.final
       : (envelope.payloads || []).filter((p) => p.isError !== true).map((p) => p.text || '').join('\n');
-    return { payload: payloadText, hostRound: { sessionId: envelope.sessionId, elapsedMs, envelope, roundDir } };
+    return { payload: payloadText, hostRound: { sessionId: envelope.sessionId, elapsedMs, envelope, usage: envelope.usage ?? null, roundDir } };
   }
 
   function hostSnapshot() {
