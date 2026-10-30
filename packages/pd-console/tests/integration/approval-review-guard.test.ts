@@ -156,3 +156,26 @@ it('distinguishes missing or malformed exact-artifact risks from an explicitly e
   connection.getDb().prepare('UPDATE pi_artifacts SET content_json = ? WHERE artifact_id = ?').run(JSON.stringify({ principleDraft: { statement: 'Current body' }, risks: [] }), 'a');
   expect(await (await fetch(base)).json()).toMatchObject({ data: { review: { material: { risks: [] } } } });
 });
+
+it('reads proposed behavior only from the exact approval artifact intent contract', async () => {
+  const db = connection.getDb();
+  db.prepare('UPDATE pi_artifacts SET content_json = ? WHERE artifact_id = ?').run(JSON.stringify({ principleDraft: { statement: 'Other statement' }, intentContract: { targetBehavior: 'Other artifact behavior' } }), 'b');
+  db.prepare('UPDATE pi_artifacts SET content_json = ? WHERE artifact_id = ?').run(JSON.stringify({ principleDraft: { statement: 'Current statement' }, intentContract: { targetBehavior: 'Current artifact proposed behavior' } }), 'a');
+  const response = await fetch(base);
+  expect(response.status).toBe(200);
+  const body: unknown = await response.json();
+  expect(body).toMatchObject({ data: { review: { expectedReview: { artifactId: 'a' }, material: { targetBehavior: 'Current artifact proposed behavior' } } } });
+  expect(JSON.stringify(body)).not.toContain('Other artifact behavior');
+});
+
+it('keeps missing or malformed proposed behavior unknown instead of borrowing another source', async () => {
+  for (const fields of [{}, { intentContract: null }, { intentContract: [] }, { intentContract: { targetBehavior: 42 } }, { intentContract: { targetBehavior: '' } }, { intentContract: { targetBehavior: '  \n ' } }]) {
+    connection.getDb().prepare('UPDATE pi_artifacts SET content_json = ? WHERE artifact_id = ?').run(JSON.stringify({ principleDraft: { statement: 'Current body', targetBehavior: 'Nested behavior is not authoritative' }, targetBehavior: 'Root behavior is not authoritative', ...fields }), 'a');
+    const response = await fetch(base);
+    expect(response.status).toBe(200);
+    const body: unknown = await response.json();
+    expect(body).toMatchObject({ data: { review: { material: { targetBehavior: null } } } });
+    expect(JSON.stringify(body)).not.toContain('Nested behavior is not authoritative');
+    expect(JSON.stringify(body)).not.toContain('Root behavior is not authoritative');
+  }
+});
