@@ -41,6 +41,15 @@ test('Owner chooses one exact item, reads it, returns and keeps runtime records 
   await page.screenshot({ path: resolve(shots, '02-reading-wide.png'), fullPage: false });
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.screenshot({ path: resolve(shots, '04-reading-1280.png'), fullPage: false });
+  for (const viewport of [{ width: 1280, height: 800 }, { width: 1440, height: 1024 }]) {
+    await page.setViewportSize(viewport);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    const decision = page.getByTestId('owner-work-reading').getByRole('button', { name: '批准这个版本', exact: true });
+    await decision.scrollIntoViewIfNeeded();
+    await expect(decision).toBeInViewport();
+    await page.getByRole('button', { name: '返回事项列表', exact: true }).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: resolve(shots, `reading-${viewport.width}x${viewport.height}.png`), fullPage: false });
+  }
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByRole('button', { name: '返回事项列表', exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
