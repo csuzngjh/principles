@@ -845,6 +845,7 @@
       "blockBasis": "形成依据",
       "blockBasisFallback": "该原则由历史行为校准沉淀而来，详细来源尚未关联。",
       "contextDisclosure": "形成过程与其他信息",
+      "libraryOverview": "原则概况",
       "openDetails": "查看原则详情",
       "blockImpact": "当前影响",
       "blockImpactSeeDecisionView": "当前是否影响行为，以详情页「当前实际执行」为准（本卡片不据生命周期状态断言影响）。",

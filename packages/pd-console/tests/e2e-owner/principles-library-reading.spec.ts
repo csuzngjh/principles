@@ -14,6 +14,7 @@ test('Principle library scans compactly, expands context in place, and returns w
   const card = page.locator('article').first();
   await expect(card).toBeVisible({ timeout: 15000 });
   const url = page.url();
+  await expect(page.getByTestId('principle-library-overview')).not.toHaveAttribute('open');
   const context = card.getByTestId('principle-context-disclosure');
   await expect(context).not.toHaveAttribute('open');
   await page.waitForTimeout(450);
@@ -33,6 +34,7 @@ test('Principle library scans compactly, expands context in place, and returns w
   await page.setViewportSize({ width: 320, height: 720 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await expect(page.locator('article').first()).toBeVisible();
+  await expect(page.locator('article h3').first()).toBeInViewport();
   await page.waitForTimeout(450);
   await page.screenshot({ path: resolve(shots, '09-principles-320.png'), fullPage: false });
 });

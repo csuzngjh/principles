@@ -845,6 +845,7 @@
       "blockBasis": "Formation Basis",
       "blockBasisFallback": "This principle was distilled from historical behavior calibration. Its detailed source is not yet linked.",
       "contextDisclosure": "Formation and other information",
+      "libraryOverview": "Principle overview",
       "openDetails": "View principle details",
       "blockImpact": "Current Impact",
       "blockImpactSeeDecisionView": "Whether this currently shapes behavior is shown on the detail page under current enforcement — this card does not assert impact from lifecycle status alone.",

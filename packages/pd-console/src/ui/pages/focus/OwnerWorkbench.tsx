@@ -28,7 +28,7 @@ export function OwnerWorkbench({ items, completed, uncertain }: { items: OwnerWo
       const previous = Array.from(list.current.querySelectorAll<HTMLButtonElement>('[data-item-key]')).find(button => button.dataset.itemKey === lastSelected.current);
       previous?.focus({ preventScroll: true });
       if (previous && (previous.getBoundingClientRect().top < 0 || previous.getBoundingClientRect().bottom > window.innerHeight)) previous.scrollIntoView({ block: 'nearest' });
-    } else list.current?.focus({ preventScroll: true });
+    }
   }, [selectedKey]);
   function choose(key: string) {
     if (!key && selectedKey) { lastSelected.current = selectedKey; listScroll.current = list.current?.scrollTop ?? 0; }

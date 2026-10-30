@@ -455,11 +455,12 @@ export function PrinciplesPage() {
 
       {/* PRI-558: metrics bar — bound to existing summary + derived latest update */}
       {!loading && !error && summary && (
-        <div className="flex flex-wrap border border-line rounded-[var(--radius-md)] bg-panel overflow-hidden mb-6">
+        <details className="mb-6 text-[12px] text-ink-3" data-testid="principle-library-overview"><summary className="cursor-pointer text-gov">{t('principles.libraryOverview')}</summary>
+        <div className="mt-3 flex flex-wrap border border-line rounded-[var(--radius-md)] bg-panel overflow-hidden">
           <Metric num={String(summary.total)} label={t("principles.metricDeposited")} />
           <Metric num={String(summary.active)} label={t("principles.metricActive")} />
           <Metric num={latestUpdatedAt ? formatDate(latestUpdatedAt, i18n.language) : "—"} label={t("principles.metricLatest")} />
-        </div>
+        </div></details>
       )}
 
       {/* Content */}
