@@ -257,17 +257,36 @@ export function createOpenClawHostTransport({
       child.on('error', (e) => { clearTimeout(timer); reject(e); });
       child.on('close', (code) => {
         clearTimeout(timer);
-        // A non-zero exit is NEVER a usable round, even when stdout carries a
-        // well-formed envelope: OpenClaw reports its post-run cleanup failures
-        // (e.g. Windows EBUSY unlinking a still-open plugin-capture
-        // owner.sqlite) AFTER the envelope is serialized, and the envelope it
-        // leaves behind can still look like a success. Never reclassify a
-        // failed process as success (S9 task E contract).
+        // Exit-code contract (S9.1, task E): OpenClaw stamps POST-RUN cleanup
+        // failures with a dedicated error kind ("cleanup") and OVERWRITES an
+        // otherwise-successful envelope (ok flipped false, exit 1) while the
+        // round data (final/payloads/usage/model/provider/sessionId) stays
+        // intact — observed on Windows where the exec's own agent owner.sqlite
+        // stays locked until process exit. A non-zero exit therefore refuses
+        // ONLY when no complete successful-round envelope is present; a
+        // cleanup-kind envelope with full round data resolves and carries the
+        // anomaly in the evidence (rc-9, never silent). Every other non-zero
+        // exit (model failure, no output, timeout kill) still rejects.
         if (code !== 0) {
           const envelopeHint = out.trim().split('\n').filter((l) => l.trim().startsWith('{')).pop();
-          const hostDiagnostic = (err.trim().length > 0 ? err.trim() : envelopeHint ?? 'no host diagnostic').slice(0, 400);
-          reject(new Error(`openclaw exec exited ${code}: ${hostDiagnostic}`));
-          return;
+          let cleanupRound = false;
+          if (envelopeHint) {
+            try {
+              const probe = JSON.parse(envelopeHint);
+              cleanupRound = Boolean(probe) && probe.error && probe.error.kind === 'cleanup'
+                && typeof probe.sessionId === 'string' && probe.sessionId.length > 0
+                && typeof probe.model === 'string' && probe.model.length > 0
+                && typeof probe.final === 'string' && probe.final.length > 0;
+            } catch {
+              cleanupRound = false; // not JSON — genuine garbage output
+            }
+          }
+          if (!cleanupRound) {
+            const hostDiagnostic = (err.trim().length > 0 ? err.trim() : envelopeHint ?? 'no host diagnostic').slice(0, 400);
+            reject(new Error(`openclaw exec exited ${code}: ${hostDiagnostic}`));
+            return;
+          }
+          // fall through: the cleanup-failed round's envelope is the evidence.
         }
         resolve(out);
       });
@@ -285,7 +304,13 @@ export function createOpenClawHostTransport({
     if (!envelope || typeof envelope.sessionId !== 'string' || envelope.sessionId.length === 0) {
       throw new Error(`openclaw exec envelope carries no sessionId (round ${rounds}, task ${taskId}) — session independence unprovable, refusing`);
     }
-    if (envelope.status === 'timeout' || envelope.ok !== true) {
+    // S9.1 task E: a cleanup-kind envelope reached here only through the
+    // exit-code contract above (round data complete). The envelope's ok=false
+    // reflects POST-RUN cleanup only; the round itself is classified below by
+    // its model/provider identity and final text. Any non-cleanup error still
+    // refuses here.
+    const cleanupKind = envelope.error && envelope.error.kind === 'cleanup';
+    if (envelope.status === 'timeout' || (envelope.ok !== true && !cleanupKind)) {
       throw new Error(`openclaw exec failed (status=${String(envelope.status)}, error=${String(envelope.error && envelope.error.message).slice(0, 200)})`);
     }
     // host-reported identity → snapshot (S5 P1-2: BOTH model and provider must
@@ -310,7 +335,7 @@ export function createOpenClawHostTransport({
     if (roundIdentityStatus !== 'VERIFIED') {
       throw new Error(`openclaw exec round ${rounds} identity not VERIFIED (status=${roundIdentityStatus}, envelope model=${JSON.stringify(envelope.model ?? null)}, provider=${JSON.stringify(envelope.provider ?? null)}, expected provider=${JSON.stringify(expectedProvider)}) — refusing (S5 P1-2: provider mismatch is a hard refusal, never normalized)`);
     }
-    sessionRecords.push({ taskId, sessionId: envelope.sessionId, rounds: 1, elapsedMs, model: envelope.model ?? null, provider: envelope.provider ?? null, roundDir, sessionsDir, stateDir: null /* ambient state root (S7 §四) */, systemPromptChannel: OPENCLAW_SYSTEM_PROMPT_CHANNEL });
+    sessionRecords.push({ taskId, sessionId: envelope.sessionId, rounds: 1, elapsedMs, model: envelope.model ?? null, provider: envelope.provider ?? null, roundDir, sessionsDir, stateDir: null /* ambient state root (S7 §四) */, systemPromptChannel: OPENCLAW_SYSTEM_PROMPT_CHANNEL, hostCleanupAnomaly: envelope.ok !== true && envelope.error && envelope.error.kind === 'cleanup' ? String(envelope.error.message).slice(0, 200) : null });
 
     const payloadText = typeof envelope.final === 'string' && envelope.final.length > 0
       ? envelope.final
@@ -333,7 +358,7 @@ export function createOpenClawHostTransport({
       systemPromptChannel: OPENCLAW_SYSTEM_PROMPT_CHANNEL,
       roundsRoot,
       sessions: sessionRecords.map((s) => s.sessionId),
-      sessionDetails: sessionRecords.map((s) => ({ sessionId: s.sessionId, stateDir: s.stateDir, sessionsDir: s.sessionsDir })),
+      sessionDetails: sessionRecords.map((s) => ({ sessionId: s.sessionId, stateDir: s.stateDir, sessionsDir: s.sessionsDir, hostCleanupAnomaly: s.hostCleanupAnomaly ?? null })),
     };
   }
 
