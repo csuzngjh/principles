@@ -1,0 +1,80 @@
+{
+  "version": 3,
+  "status": "PENDING",
+  "reviewerId": null,
+  "identityEvidence": null,
+  "caseDecisions": [
+    {
+      "caseId": "EXM-MVP-001-1",
+      "goldHash": "b60549ef78c04c75e800b749165b30230e6308afb8991874c67fdebdbe07c2fd",
+      "decision": null,
+      "rationale": null,
+      "alternativeAnswer": null,
+      "uncertaintyBoundary": null
+    },
+    {
+      "caseId": "EXM-MVP-001-2",
+      "goldHash": "15e701af2fb87aae98f71e4c03de002265b59be63368ac3ddada2312d2919943",
+      "decision": null,
+      "rationale": null,
+      "alternativeAnswer": null,
+      "uncertaintyBoundary": null
+    },
+    {
+      "caseId": "EXM-MVP-001-3",
+      "goldHash": "497c9ea55af707c98feeaae35866a1bddf12f7feaa3bc7cbb73f0bff9b8fbf6f",
+      "decision": null,
+      "rationale": null,
+      "alternativeAnswer": null,
+      "uncertaintyBoundary": null
+    },
+    {
+      "caseId": "EXM-MVP-001-4",
+      "goldHash": "dcf9724d59f01066cc208076df68b658ecdd1473d69212cb729d343a2f9df082",
+      "decision": null,
+      "rationale": null,
+      "alternativeAnswer": null,
+      "uncertaintyBoundary": null
+    },
+    {
+      "caseId": "EXM-MVP-001-5",
+      "goldHash": "5d7b98b0417991a29fe4a74fb00ba4ca79b8892e3749d876158a992e53663a81",
+      "decision": null,
+      "rationale": null,
+      "alternativeAnswer": null,
+      "uncertaintyBoundary": null
+    },
+    {
+      "caseId": "EXM-MVP-001-6",
+      "goldHash": "5d53fb43310782eccce91c4b44183a1a922064b439e83a6fa644ffc2a77c2240",
+      "decision": null,
+      "rationale": null,
+      "alternativeAnswer": null,
+      "uncertaintyBoundary": null
+    },
+    {
+      "caseId": "EXM-MVP-001-7",
+      "goldHash": "0f13efa28493a1e3d77d47f897c5c7a02bd859e760b884f7b0c44997bbd8225a",
+      "decision": null,
+      "rationale": null,
+      "alternativeAnswer": null,
+      "uncertaintyBoundary": null
+    },
+    {
+      "caseId": "EXM-MVP-001-8",
+      "goldHash": "342f0c6c5be4d0d3bf5908a5ff1f079e5f60c5ccda8e421e0f8b2ac3f80f1485",
+      "decision": null,
+      "rationale": null,
+      "alternativeAnswer": null,
+      "uncertaintyBoundary": null
+    },
+    {
+      "caseId": "EXM-MVP-001-9",
+      "goldHash": "9cb4ac12aec2f775bc58d165bfa17817f613d201af1add565d3ca3a4e8c13476",
+      "decision": null,
+      "rationale": null,
+      "alternativeAnswer": null,
+      "uncertaintyBoundary": null
+    }
+  ]
+}

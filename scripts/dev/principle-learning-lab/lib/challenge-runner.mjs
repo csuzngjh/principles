@@ -33,7 +33,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { hashOfCanonical, sha256 } from './challenge-freeze.mjs';
+import { hashOfCanonical, sha256, challengeImplementationManifest } from './challenge-freeze.mjs';
 import { verifyCanonicalHash } from './challenge-freeze.mjs';
 import { buildClaimEnvironment, newClaimRunState } from './claim-evidence-env.mjs';
 import { adjudicateClaimEvidence } from './claim-evidence-scorer.mjs';
@@ -67,6 +67,14 @@ export function verifyFrozenStudy(studyDir) {
   const scoringContract = readJson(path.join(studyDir, 'scoring-contract.json'));
   const manifest = readJson(path.join(studyDir, 'suite-manifest.json'));
 
+  if (!['claim-evidence-scoring.v1', 'claim-evidence-scoring.v2'].includes(scoringContract.schema)) {
+    problems.push('unsupported scoring contract version');
+  }
+  if (scoringContract.schema === 'claim-evidence-scoring.v2'
+      && hashOfCanonical(scoringContract.implementation) !== hashOfCanonical(challengeImplementationManifest())) {
+    problems.push('v2 scoring implementation drift');
+  }
+
   const principleContentHash = hashOfCanonical(principle.contentJson);
   if (principleContentHash !== inputManifest.expectedSourceHashes.principleContentHash) problems.push('principle content hash != input-manifest expected');
   if (principleContentHash !== mapping.principleContentHash) problems.push('mapping.principleContentHash mismatch');
@@ -82,6 +90,10 @@ export function verifyFrozenStudy(studyDir) {
     const visibleFile = path.join(studyDir, 'actor-visible', `${c.caseId}.json`);
     if (!fs.existsSync(judgeFile) || !fs.existsSync(visibleFile)) { problems.push(`case ${c.caseId}: missing frozen file`); continue; }
     const judge = readJson(judgeFile);
+    const expectedJudgeSchema = scoringContract.schema === 'claim-evidence-scoring.v2' ? 'claim-evidence-judge-only.v2' : 'claim-evidence-judge-only.v1';
+    if (judge.schema !== expectedJudgeSchema) {
+      problems.push(`case ${c.caseId}: scoring contract version mismatch`);
+    }
     const visible = readJson(visibleFile);
     if (!verifyCanonicalHash(judge, c.goldHash, { stripFields: ['inputHash', 'goldHash'] }).ok) problems.push(`case ${c.caseId}: judge-only goldHash drift`);
     if (hashOfCanonical(visible) !== c.inputHash) problems.push(`case ${c.caseId}: actor-visible inputHash drift`);

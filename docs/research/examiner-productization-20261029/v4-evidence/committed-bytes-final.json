@@ -1,0 +1,5 @@
+{
+  "basis": "staged index; no conversion of historical source/log bytes",
+  "checked": 50,
+  "pass": true
+}

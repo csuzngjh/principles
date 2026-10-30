@@ -23,7 +23,7 @@
 // (the oracle world is consistent). Candidates that fail this never enter the
 // valid set regardless of how good the prose looks.
 
-import { canonicalJson } from './challenge-freeze.mjs';
+import { canonicalJson, hashOfCanonical, verifyExaminerReview } from './challenge-freeze.mjs';
 import { compileCase } from './challenge-compile.mjs';
 import { CLAIM_EVIDENCE_TEMPLATE_ID, CLAIM_EVIDENCE_TEMPLATE_VERSION, CLAIM_FAMILIES, EXPECTED_MODES, buildClaimEnvironment } from './claim-evidence-env.mjs';
 import { CLAIM_VERDICTS } from './claim-evidence-env.mjs';
@@ -347,4 +347,68 @@ export function coverageStats(candidates, verdicts) {
   const out = { perFamily: {}, facetCoverage: { covered: [...facetTotal].sort(), planned: MECHANISM_FACETS, coverageRatio: facetTotal.size / MECHANISM_FACETS.length } };
   for (const [fam, s] of Object.entries(families)) out.perFamily[fam] = { ...s, facets: [...s.facets].sort() };
   return out;
+}
+
+/** External receipt is deliberately outside judgeOnly's hash input. It can
+ * approve only this exact gold, never mutate it or replace missing evidence. */
+export function verifyIndependentGoldReview({ caseDef, review, sourceArtifacts, mode, reviewTrust = null }) {
+  const problems = [];
+  let compiled;
+  try { compiled = compileCase(caseDef); } catch (e) { return { ok: false, status: 'INVALID_CASE', problems: [e.message], eligibleForFormalSet: false }; }
+  const receipt = verifyExaminerReview({ review, schema: 'examiner-gold-review.v1', mode, reviewTrust });
+  problems.push(...receipt.problems);
+  if (review?.caseId !== caseDef.caseId || review?.goldHash !== compiled.goldHash) problems.push('Gold review does not bind the current case/goldHash');
+  const sources = caseDef.gold?.sources;
+  if (!Array.isArray(sources) || sources.length === 0) problems.push('independent Gold sources required');
+  for (const source of Array.isArray(sources) ? sources : []) {
+    const actual = Array.isArray(sourceArtifacts) && sourceArtifacts.find((a) => a?.ref === source?.sourceId);
+    if (!actual || actual.contentHash !== source.contentHash || hashOfCanonical(actual.content) !== source.contentHash || hashOfCanonical(source.content) !== source.contentHash) problems.push(`Gold source missing/hash mismatch: ${source?.sourceId}`);
+    if (!['FIXTURE', 'INDEPENDENT_ARTIFACT'].includes(source?.role) || (mode === 'formal' && source.role === 'FIXTURE' && !(receipt.ok && review.scope === 'OFFLINE_GOLD_ONLY' && review.goldSourcesVerified === true))) problems.push('Gold cannot be established by Examiner/Principle or fixture self-approval');
+    if (!Array.isArray(review?.sourceRefs) || !review.sourceRefs.includes(source?.sourceId)) problems.push(`Gold review source reference missing: ${source?.sourceId}`);
+  }
+  return { ok: problems.length === 0, status: problems.length ? 'GOLD_REVIEW_PENDING' : mode === 'calibration' ? 'CALIBRATION_ONLY' : 'GOLD_REVIEW_APPROVED', problems, eligibleForFormalSet: problems.length === 0 && mode === 'formal', goldHash: compiled.goldHash };
+}
+
+export function validateProductizationCandidate({ candidate, frozenRefs, goldReviews, sourceArtifacts, mode, reviewTrust = null }) {
+  const groups = { structure: [], source: [], executability: [], gold: [], leak: [] };
+  if (!candidate || typeof candidate !== 'object' || !candidate.caseDef || typeof candidate.caseDef !== 'object') return { ok: false, groups: { ...groups, structure: ['candidate.caseDef required'] }, goldIndependence: { tier: 'INVALID_CASE', eligibleForValidSet: false, eligibleForFormalSet: false, flags: [] } };
+  if (typeof candidate.candidateId !== 'string' || !/^[A-Za-z0-9_-]{1,100}$/.test(candidate.candidateId) || candidate.caseDef.caseId !== candidate.candidateId) groups.structure.push('registered candidate identity mismatch/unsafe ID');
+  if (!candidate.draft || candidate.draft.scenarioId !== candidate.caseDef.caseId || candidate.draft.templateId !== frozenRefs.templateId || candidate.draft.templateVersion !== frozenRefs.templateVersion || typeof candidate.draft.sourceMechanismRef !== 'string' || !candidate.draft.sourceMechanismRef.startsWith(`${frozenRefs.mappingId}#`)) groups.source.push('registered draft template/mechanism binding mismatch');
+  if (candidate.caseDef.schema !== 'claim-evidence-judge-only.v2') groups.structure.push('v0.5 requires the registered v2 judge contract');
+  for (const key of ['mappingId', 'mappingHash', 'templateId', 'templateVersion']) if (candidate.sourceBinding?.[key] !== frozenRefs[key]) groups.source.push(`sourceBinding.${key} mismatch`);
+  const review = Array.isArray(goldReviews) ? goldReviews.find((r) => r?.caseId === candidate.caseDef.caseId) : null;
+  const gold = verifyIndependentGoldReview({ caseDef: candidate.caseDef, review, sourceArtifacts, mode, reviewTrust });
+  groups.gold.push(...gold.problems);
+  return { ok: Object.values(groups).every((g) => g.length === 0), groups, goldIndependence: { tier: gold.status, eligibleForValidSet: gold.eligibleForFormalSet, eligibleForCalibration: mode === 'calibration' && gold.ok, eligibleForFormalSet: gold.eligibleForFormalSet, flags: gold.ok ? [] : [{ kind: 'independent_semantic_review_required', candidateId: candidate.candidateId }] } };
+}
+
+/** Mechanical signatures cannot settle semantic equivalence. v2 callers must
+ * preserve explicit unresolved pairs until a separate review resolves them.
+ *
+ * Two tiers, not three: v2 candidates may only vary in EXPRESSION (fact
+ * statements, observation labels/outputs) against a fixed decision body, so the
+ * decision projection already IS the skeleton — a third signature would only
+ * restate it. */
+export function dedupeProductizationCandidates(candidates) {
+  const pairs = (project) => {
+    const seen = new Map();
+    const duplicates = [];
+    candidates.forEach((c, i) => { const signature = canonicalJson(project(c.caseDef)); if (seen.has(signature)) duplicates.push([seen.get(signature), i]); else seen.set(signature, i); });
+    return duplicates;
+  };
+  const exact = pairs(({ caseId: _id, ...content }) => content);
+  const decision = (cd) => ({
+    schema: cd.schema, family: cd.family, principleApplicable: cd.principleApplicable, expectedMode: cd.expectedMode,
+    constraints: cd.constraints, facts: cd.facts.map(({ statement: _statement, ...fact }) => fact),
+    observations: cd.observations.map(({ label: _label, output: _output, ...obs }) => obs),
+    gold: cd.gold, ownerAnswers: cd.ownerAnswers, preSeededObservations: cd.preSeededObservations, overCheck: cd.overCheck, extraActions: cd.extraActions,
+  });
+  const structural = pairs(decision);
+  const exactKeys = new Set(exact.map(([a, b]) => `${a}:${b}`));
+  const result = { exactDuplicatePairs: exact, structuralDuplicatePairs: structural.filter(([a, b]) => !exactKeys.has(`${a}:${b}`)) };
+  const matched = new Set([...result.exactDuplicatePairs, ...result.structuralDuplicatePairs].map(([a, b]) => `${a}:${b}`));
+  return { ...result, unresolvedSemantic: candidates.flatMap((c, a) => candidates.slice(a + 1).flatMap((other, offset) => {
+    const b = a + offset + 1;
+    return matched.has(`${a}:${b}`) ? [] : [{ candidateIds: [c.candidateId, other.candidateId], reason: 'semantic equivalence requires independent review', status: 'PENDING' }];
+  })) };
 }

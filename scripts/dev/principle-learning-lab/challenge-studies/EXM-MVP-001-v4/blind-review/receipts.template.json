@@ -1,0 +1,220 @@
+{
+  "mappingReview": {
+    "reviewerId": null,
+    "reviewerRole": "INDEPENDENT_REVIEWER",
+    "decision": null,
+    "reviewedAt": null,
+    "reason": null,
+    "subjectHash": "eb7147c4ebeb1b65213baae21e03966313f33b561ab8e8091d1e0665fa7c9fef",
+    "scope": "OFFLINE_GOLD_ONLY",
+    "goldSourcesVerified": null,
+    "signature": null,
+    "schema": "examiner-mapping-review.v1",
+    "mappingHash": "074220abbe8637915983ff8467493314482bc9f475cdeba833ac78066cf0df35"
+  },
+  "goldReviews": [
+    {
+      "reviewerId": null,
+      "reviewerRole": "INDEPENDENT_REVIEWER",
+      "decision": null,
+      "reviewedAt": null,
+      "reason": null,
+      "subjectHash": "eb7147c4ebeb1b65213baae21e03966313f33b561ab8e8091d1e0665fa7c9fef",
+      "scope": "OFFLINE_GOLD_ONLY",
+      "goldSourcesVerified": null,
+      "signature": null,
+      "schema": "examiner-gold-review.v1",
+      "caseId": "EXM-MVP-001-1",
+      "goldHash": "8fe374f8544c9ddf3721cecaa348861457c145cae639bccc0933ecfaf5e88bc1",
+      "sourceRefs": [
+        "SRC-OBS-PRIMARY",
+        "SRC-OBS-ALT",
+        "SRC-OBS-WRONG",
+        "SRC-OBS-STALE",
+        "SRC-OBS-NEUTRAL",
+        "SRC-OWNER",
+        "SRC-PATH-POLICY"
+      ]
+    },
+    {
+      "reviewerId": null,
+      "reviewerRole": "INDEPENDENT_REVIEWER",
+      "decision": null,
+      "reviewedAt": null,
+      "reason": null,
+      "subjectHash": "eb7147c4ebeb1b65213baae21e03966313f33b561ab8e8091d1e0665fa7c9fef",
+      "scope": "OFFLINE_GOLD_ONLY",
+      "goldSourcesVerified": null,
+      "signature": null,
+      "schema": "examiner-gold-review.v1",
+      "caseId": "EXM-MVP-001-2",
+      "goldHash": "3251c61d0ecd3a1b8a1c53d4c004d758fa866f4a58794ddbce086de342ad01aa",
+      "sourceRefs": [
+        "SRC-OBS-PRIMARY",
+        "SRC-OBS-ALT",
+        "SRC-OBS-WRONG",
+        "SRC-OBS-STALE",
+        "SRC-OBS-NEUTRAL",
+        "SRC-OWNER",
+        "SRC-PATH-POLICY"
+      ]
+    },
+    {
+      "reviewerId": null,
+      "reviewerRole": "INDEPENDENT_REVIEWER",
+      "decision": null,
+      "reviewedAt": null,
+      "reason": null,
+      "subjectHash": "eb7147c4ebeb1b65213baae21e03966313f33b561ab8e8091d1e0665fa7c9fef",
+      "scope": "OFFLINE_GOLD_ONLY",
+      "goldSourcesVerified": null,
+      "signature": null,
+      "schema": "examiner-gold-review.v1",
+      "caseId": "EXM-MVP-001-3",
+      "goldHash": "167bcbe626bc3f5dc540f306d581f42b7479fbc4361d73597a9baed5c0456ae6",
+      "sourceRefs": [
+        "SRC-OBS-PRIMARY",
+        "SRC-OBS-ALT",
+        "SRC-OBS-WRONG",
+        "SRC-OBS-STALE",
+        "SRC-OBS-NEUTRAL",
+        "SRC-OWNER",
+        "SRC-SIGNOFF",
+        "SRC-PATH-POLICY"
+      ]
+    },
+    {
+      "reviewerId": null,
+      "reviewerRole": "INDEPENDENT_REVIEWER",
+      "decision": null,
+      "reviewedAt": null,
+      "reason": null,
+      "subjectHash": "eb7147c4ebeb1b65213baae21e03966313f33b561ab8e8091d1e0665fa7c9fef",
+      "scope": "OFFLINE_GOLD_ONLY",
+      "goldSourcesVerified": null,
+      "signature": null,
+      "schema": "examiner-gold-review.v1",
+      "caseId": "EXM-MVP-001-4",
+      "goldHash": "445c090a54554ef45992cd46173d9eb242158dfc8ee37dd182eec0a713c579df",
+      "sourceRefs": [
+        "SRC-OBS-PRIMARY",
+        "SRC-OBS-ALT",
+        "SRC-OBS-WRONG",
+        "SRC-OBS-STALE",
+        "SRC-OBS-NEUTRAL",
+        "SRC-OWNER",
+        "SRC-PATH-POLICY"
+      ]
+    },
+    {
+      "reviewerId": null,
+      "reviewerRole": "INDEPENDENT_REVIEWER",
+      "decision": null,
+      "reviewedAt": null,
+      "reason": null,
+      "subjectHash": "eb7147c4ebeb1b65213baae21e03966313f33b561ab8e8091d1e0665fa7c9fef",
+      "scope": "OFFLINE_GOLD_ONLY",
+      "goldSourcesVerified": null,
+      "signature": null,
+      "schema": "examiner-gold-review.v1",
+      "caseId": "EXM-MVP-001-5",
+      "goldHash": "aafc5eed21e627d8af38e9b122a733e96024f19c25965f03b9e0aa4e5653aec8",
+      "sourceRefs": [
+        "SRC-OBS-PRIMARY",
+        "SRC-OBS-ALT",
+        "SRC-OBS-WRONG",
+        "SRC-OBS-STALE",
+        "SRC-OBS-NEUTRAL",
+        "SRC-OWNER",
+        "SRC-PATH-POLICY"
+      ]
+    },
+    {
+      "reviewerId": null,
+      "reviewerRole": "INDEPENDENT_REVIEWER",
+      "decision": null,
+      "reviewedAt": null,
+      "reason": null,
+      "subjectHash": "eb7147c4ebeb1b65213baae21e03966313f33b561ab8e8091d1e0665fa7c9fef",
+      "scope": "OFFLINE_GOLD_ONLY",
+      "goldSourcesVerified": null,
+      "signature": null,
+      "schema": "examiner-gold-review.v1",
+      "caseId": "EXM-MVP-001-6",
+      "goldHash": "7bb40f0b2d0e1cd2a9d147998562f9b75a6ccc190dd53eb270deafe7ee3cda38",
+      "sourceRefs": [
+        "SRC-OBS-NEUTRAL",
+        "SRC-PROPOSAL"
+      ]
+    },
+    {
+      "reviewerId": null,
+      "reviewerRole": "INDEPENDENT_REVIEWER",
+      "decision": null,
+      "reviewedAt": null,
+      "reason": null,
+      "subjectHash": "eb7147c4ebeb1b65213baae21e03966313f33b561ab8e8091d1e0665fa7c9fef",
+      "scope": "OFFLINE_GOLD_ONLY",
+      "goldSourcesVerified": null,
+      "signature": null,
+      "schema": "examiner-gold-review.v1",
+      "caseId": "EXM-MVP-001-7",
+      "goldHash": "d1725dbabc49638e72e79ded145956b82be23a193a48b152f385c0438e226d83",
+      "sourceRefs": [
+        "SRC-OBS-PRIMARY",
+        "SRC-OBS-ALT",
+        "SRC-OBS-WRONG",
+        "SRC-OBS-STALE",
+        "SRC-OBS-NEUTRAL",
+        "SRC-OWNER",
+        "SRC-PATH-POLICY"
+      ]
+    },
+    {
+      "reviewerId": null,
+      "reviewerRole": "INDEPENDENT_REVIEWER",
+      "decision": null,
+      "reviewedAt": null,
+      "reason": null,
+      "subjectHash": "eb7147c4ebeb1b65213baae21e03966313f33b561ab8e8091d1e0665fa7c9fef",
+      "scope": "OFFLINE_GOLD_ONLY",
+      "goldSourcesVerified": null,
+      "signature": null,
+      "schema": "examiner-gold-review.v1",
+      "caseId": "EXM-MVP-001-8",
+      "goldHash": "babe8192d4546e77e9dba6870e3e45a08948833b16aca6fca67d6423bec03ce7",
+      "sourceRefs": [
+        "SRC-OBS-PRIMARY",
+        "SRC-OBS-ALT",
+        "SRC-OBS-WRONG",
+        "SRC-OBS-STALE",
+        "SRC-OBS-NEUTRAL",
+        "SRC-OWNER",
+        "SRC-PATH-POLICY"
+      ]
+    },
+    {
+      "reviewerId": null,
+      "reviewerRole": "INDEPENDENT_REVIEWER",
+      "decision": null,
+      "reviewedAt": null,
+      "reason": null,
+      "subjectHash": "eb7147c4ebeb1b65213baae21e03966313f33b561ab8e8091d1e0665fa7c9fef",
+      "scope": "OFFLINE_GOLD_ONLY",
+      "goldSourcesVerified": null,
+      "signature": null,
+      "schema": "examiner-gold-review.v1",
+      "caseId": "EXM-MVP-001-9",
+      "goldHash": "79cf9f3ec25dea01cb051175f7e00722adee95732b903d6eea6ea24bd26d85f3",
+      "sourceRefs": [
+        "SRC-OBS-PRIMARY",
+        "SRC-OBS-ALT",
+        "SRC-OBS-WRONG",
+        "SRC-OBS-STALE",
+        "SRC-OBS-NEUTRAL",
+        "SRC-OWNER",
+        "SRC-PATH-POLICY"
+      ]
+    }
+  ]
+}

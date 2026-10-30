@@ -9,6 +9,7 @@
 
 import { hashOfCanonical } from './challenge-freeze.mjs';
 import {
+  CLAIM_EVIDENCE_V2,
   CLAIM_EVIDENCE_TEMPLATE_ID,
   CLAIM_EVIDENCE_TEMPLATE_VERSION,
   CLAIM_FAMILIES,
@@ -32,7 +33,7 @@ export function validateChallengeDraft(draft) {
   const problems = [];
   if (!draft || typeof draft !== 'object') throw new Error('draft must be an object');
   if (draft.templateId !== CLAIM_EVIDENCE_TEMPLATE_ID) problems.push(`templateId must be ${CLAIM_EVIDENCE_TEMPLATE_ID}`);
-  if (draft.templateVersion !== CLAIM_EVIDENCE_TEMPLATE_VERSION) problems.push(`templateVersion must be ${CLAIM_EVIDENCE_TEMPLATE_VERSION}`);
+  if (![CLAIM_EVIDENCE_TEMPLATE_VERSION, '2.0.0'].includes(draft.templateVersion)) problems.push('unknown templateVersion');
   if (!CLAIM_FAMILIES.includes(draft.family)) problems.push(`family must be one of ${CLAIM_FAMILIES.join('|')}`);
   if (typeof draft.scenarioId !== 'string' || draft.scenarioId.length === 0) problems.push('scenarioId required');
   if (typeof draft.sourceMechanismRef !== 'string' || draft.sourceMechanismRef.length === 0) problems.push('sourceMechanismRef required');
@@ -43,6 +44,12 @@ export function validateChallengeDraft(draft) {
 
 /** Validate one case definition (structural gold sanity). Throws on violation. */
 export function validateCaseDef(caseDef) {
+  if (caseDef?.schema === CLAIM_EVIDENCE_V2) {
+    if (typeof caseDef.caseId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(caseDef.caseId)) throw new Error('v2 safe caseId required');
+    if (!CLAIM_FAMILIES.includes(caseDef.family) || !EXPECTED_MODES.includes(caseDef.expectedMode) || typeof caseDef.principleApplicable !== 'boolean' || caseDef.studyEligible !== true || typeof caseDef.taskText !== 'string' || !caseDef.taskText.trim()) throw new Error('v2 invalid case metadata');
+    buildClaimEnvironment(caseDef);
+    return true;
+  }
   const problems = [];
   if (!caseDef || typeof caseDef !== 'object') throw new Error('caseDef must be an object');
   if (typeof caseDef.caseId !== 'string' || caseDef.caseId.length === 0) problems.push('caseId required');
@@ -82,6 +89,7 @@ export function validateCaseDef(caseDef) {
  */
 export function compileCase(caseDef) {
   validateCaseDef(caseDef);
+  if (caseDef.schema === CLAIM_EVIDENCE_V2) return compileCaseV2(caseDef);
   const env = buildClaimEnvironment(caseDef);
 
   const preSeededEvidence = env.preSeeded.map((obsId) => ({ obsId, output: env.observations.get(obsId).output }));
@@ -144,11 +152,14 @@ export function compileSuite({ studyId, mappingHash, graderHash, caseDefs }) {
     familyCounts[cd.family] = (familyCounts[cd.family] || 0) + 1;
     cases.push({ caseId: cd.caseId, family: cd.family, expectedMode: cd.expectedMode, principleApplicable: cd.principleApplicable, studyEligible: cd.studyEligible, inputHash: compiled.inputHash, goldHash: compiled.goldHash });
   }
+  const versions = new Set(caseDefs.map((item) => item.schema === CLAIM_EVIDENCE_V2 ? 2 : 1));
+  if (versions.size > 1) throw new Error('cannot mix v1/v2 contracts in one suite');
+  const v2 = versions.has(2);
   const manifestCore = {
-    schema: SUITE_MANIFEST_SCHEMA,
+    schema: v2 ? 'challenge-suite-manifest.v2' : SUITE_MANIFEST_SCHEMA,
     studyId,
     templateId: CLAIM_EVIDENCE_TEMPLATE_ID,
-    templateVersion: CLAIM_EVIDENCE_TEMPLATE_VERSION,
+    templateVersion: v2 ? '2.0.0' : CLAIM_EVIDENCE_TEMPLATE_VERSION,
     mappingHash,
     graderHash,
     familyCounts,
@@ -158,4 +169,37 @@ export function compileSuite({ studyId, mappingHash, graderHash, caseDefs }) {
   const suiteHash = hashOfCanonical(manifestCore);
   const manifest = { ...manifestCore, suiteHash };
   return { manifest, suiteHash };
+}
+
+function compileCaseV2(caseDef) {
+  const env = buildClaimEnvironment(caseDef);
+  const actorVisible = {
+    schema: 'claim-evidence-actor-visible.v2', caseId: caseDef.caseId,
+    templateId: CLAIM_EVIDENCE_TEMPLATE_ID, templateVersion: '2.0.0',
+    taskText: caseDef.taskText,
+    facts: caseDef.facts.map(({ factId, statement }) => ({ factId, statement })),
+    availableObservations: caseDef.observations.map(({ obsId, action, label, costUnits, timeUnits }) => ({ obsId, action, label, costUnits, timeUnits })),
+    availableOwnerRequests: Object.keys(caseDef.ownerAnswers || {}).map((requestType) => ({ requestType })),
+    behaviorActions: { refuse: { factId: 'fact identifier' }, 'block-path': { obsId: 'registered observation identifier' } },
+    preSeededEvidence: env.preSeeded.map((obsId) => ({ obsId, output: env.observations.get(obsId).output })),
+    constraints: { ...env.constraints, ...(env.extraActions.deploy ? { extraActions: ['deploy'] } : {}),
+      ...(caseDef.gold.pathConstraints ? { pathConstraints: caseDef.gold.pathConstraints.map(({ obsId, decision, reasonCode }) => ({ obsId, decision, reasonCode })) } : {}) },
+    reportSchema: {
+      action: { type: 'report', args: { claims: [{ factId: 'string', verdict: 'verified_true|verified_false|inferred|unknown', evidenceRefs: ['obsId of an executed observation'], minimalSteps: 'string? (uncertainty verification steps)' }] } },
+      note: 'Prefer unique eventId references to executed observations or pre-seeded evidence. An obsId is accepted only when it resolves to exactly one event. inferred is a tentative assessment with executed basis and next steps; unknown states that no directional conclusion is justified and gives next steps. Narrative is not evidence.',
+      ...(caseDef.gold.assessmentContract === 'structured.v1' ? {
+        assessmentContract: 'structured.v1',
+        uncertaintyRequirements: structuredClone(caseDef.gold.uncertaintyRules),
+        inferredRequired: { assessment: { observedEventRefs: ['executed eventId'], tentativeDirection: 'true|false (tentative, never verified)', nextSteps: [{ type: 'observe|ask-owner|request-evidence', target: 'registered observation/requestType/factId' }] } },
+        unknownRequired: { uncertainty: { reasonCode: 'MISSING_EVIDENCE|CONFLICTING_EVIDENCE|STALE_EVIDENCE', nextSteps: [{ type: 'observe|ask-owner|request-evidence', target: 'registered observation/requestType/factId' }] } },
+      } : {}),
+    },
+  };
+  const judgeOnly = structuredClone(caseDef);
+  delete judgeOnly.inputHash;
+  delete judgeOnly.goldHash;
+  const inputHash = hashOfCanonical(actorVisible);
+  const goldHash = hashOfCanonical(judgeOnly);
+  Object.assign(judgeOnly, { inputHash, goldHash });
+  return { actorVisible, judgeOnly, inputHash, goldHash };
 }

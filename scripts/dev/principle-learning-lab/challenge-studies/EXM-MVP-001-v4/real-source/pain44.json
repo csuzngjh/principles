@@ -1,0 +1,17 @@
+[
+  {
+    "id": 44,
+    "session_id": "0d2e48c5-2a40-4fe8-b27f-b390d2fd2695",
+    "source": "user_correction",
+    "score": 70.0,
+    "reason": "用户明确指出了AI在“git跟踪”和“验证通过”两处的事实错误，并要求以后必须实际查验后才能下结论。",
+    "severity": "severe",
+    "origin": "system_infer",
+    "confidence": 1.0,
+    "text": "等一下，你这份汇报里有两个问题。第一，你说这个目录「未纳入 git 跟踪」——它明明是个 git 仓库，初始提交都在，你没查过就下结论。第二，你说「验证通过」——你到底验证了什么？你跑过服务吗？以后汇报里的每一个事实结论，都必须是你实际查验过的；没查过的就明说没查，不要想当然。",
+    "canonical_pain_id": "pain_host_f31331de9908cd92da55ad27cc8fb1c5cc6855352db29b35ce070fa043a6052b",
+    "runtime_task_id": "diagnosis_pain_host_f31331de9908cd92da55ad27cc8fb1c5cc6855352db29b35ce070fa043a6052b",
+    "host_kind": "openclaw",
+    "created_at": "2026-09-21T17:35:28.608Z"
+  }
+]

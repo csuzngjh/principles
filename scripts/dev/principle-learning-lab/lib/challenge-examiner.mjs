@@ -21,15 +21,17 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { canonicalJson, sha256 } from './challenge-freeze.mjs';
+import { canonicalJson, sha256, hashOfCanonical, verifyExaminerSourceBundle } from './challenge-freeze.mjs';
 import { CLAIM_EVIDENCE_TEMPLATE_ID, CLAIM_EVIDENCE_TEMPLATE_VERSION } from './claim-evidence-env.mjs';
 import { VALUE_DOMAINS, VALUE_DOMAINS_VERSION, SKELETON_VERSION } from './challenge-skeleton.mjs';
-import { validateStageGCandidate } from './challenge-validator.mjs';
+import { validateStageGCandidate, validateProductizationCandidate } from './challenge-validator.mjs';
 import { enumerateCandidates } from './challenge-enumerator.mjs';
-import { adoptRawModelCandidate } from './challenge-adopt.mjs';
+import { adoptRawModelCandidate, adoptProductizationCandidate } from './challenge-adopt.mjs';
 import { SimulatedCrashError } from './challenge-actor.mjs';
 
 export const EXAMINER_SPEC_SCHEMA = 'examiner-run-spec.v1';
+export const EXAMINER_PRODUCTIZATION_SPEC_SCHEMA = 'examiner-run-spec.v2';
+export const EXAMINER_PRODUCTIZATION_EXPRESSION_FIELDS = ['taskText', 'facts[].statement', 'observations[].label'];
 export const STAGE_G_AUTH_SCHEMA = 'challenge-stage-g-authorization.v1';
 export const AUTH_STATUS_APPROVED = 'APPROVED';
 
@@ -69,6 +71,16 @@ function parseIso(value) {
  * built ONLY from the frozen enumerator's actor-visible projections.
  */
 export function validateExaminerSpec(spec) {
+  if (spec?.schema === EXAMINER_PRODUCTIZATION_SPEC_SCHEMA) {
+    const { pipelineMode, libraryHash, ...legacyFields } = spec;
+    const checked = validateExaminerSpec({ ...legacyFields, schema: EXAMINER_SPEC_SCHEMA, templateVersion: CLAIM_EVIDENCE_TEMPLATE_VERSION, schemaVersion: SKELETON_VERSION, valueDomainVersion: VALUE_DOMAINS_VERSION, allowedExpressionFields: VALUE_DOMAINS.allowedExpressionFields });
+    for (const key of ['templateVersion', 'schemaVersion', 'valueDomainVersion']) if (spec[key] !== '2.0.0') checked.problems.push(`v2 ${key} must be 2.0.0`);
+    if (JSON.stringify(spec.allowedExpressionFields) !== JSON.stringify(EXAMINER_PRODUCTIZATION_EXPRESSION_FIELDS)) checked.problems.push('v2 allowedExpressionFields must match the closed public expression contract');
+    if (!['formal', 'calibration'].includes(pipelineMode)) checked.problems.push('pipelineMode must be formal or calibration');
+    if (typeof libraryHash !== 'string' || !/^[a-f0-9]{64}$/.test(libraryHash)) checked.problems.push('libraryHash required');
+    for (const key of ['candidateCap', 'requestCap', 'perRequestCandidateCap', 'inputTokenCap', 'outputTokenCap']) if (!Number.isSafeInteger(spec[key]) || spec[key] < 1) checked.problems.push(`${key} must be a positive safe integer`);
+    return { ok: checked.problems.length === 0, problems: checked.problems };
+  }
   const problems = [];
   if (!spec || spec.schema !== EXAMINER_SPEC_SCHEMA) problems.push(`spec.schema must be ${EXAMINER_SPEC_SCHEMA}`);
   for (const k of Object.keys(spec || {})) if (!EXAMINER_SPEC_KEYS.includes(k) && !EXAMINER_SPEC_OPTIONAL_KEYS.includes(k)) problems.push(`unknown spec field: ${k}`);
@@ -224,12 +236,17 @@ export function createGenerationLedger(workDir) {
       if (mine.some((e) => e.type === 'REQUEST_RESERVE')) return 'RESERVED';
       return 'NOT_STARTED';
     },
-    reserve({ requestId, worstCaseUsd, requestCap, costCapUsd, reason }) {
+    reserve({ requestId, worstCaseUsd, requestCap, costCapUsd, reason, candidateSlots = null, candidateCap = null }) {
       const entries = read(files.ledger);
       const used = entries.filter((e) => e.type === 'REQUEST_RESERVE').length;
       const observed = entries.reduce((acc, e) => acc + (e.type === 'REQUEST_RESULT' && e.usage && e.usage.costUsd ? e.usage.costUsd : 0), 0);
       const reserved = entries.filter((e) => e.type === 'REQUEST_RESERVE' && e.requestId === requestId);
       if (reserved.length > 0) return { ok: true, alreadyReserved: true, used }; // idempotent — crash never double-reserves
+      const usedCandidateSlots = entries.filter((e) => e.type === 'REQUEST_RESERVE').reduce((n, e) => n + (e.candidateSlots || 0), 0);
+      if (candidateSlots !== null && usedCandidateSlots + candidateSlots > candidateCap) {
+        append(files.ledger, { seq: entries.length + 1, type: 'REQUEST_REFUSED', requestId, reason: 'candidate_cap_exhausted', usedCandidateSlots, requestedSlots: candidateSlots, cap: candidateCap });
+        return { ok: false, code: 'candidate_cap_exhausted', usedCandidateSlots, cap: candidateCap };
+      }
       if (used + 1 > requestCap) {
         append(files.ledger, { seq: entries.length + 1, type: 'REQUEST_REFUSED', requestId, reason: 'request_cap_exhausted', used, cap: requestCap });
         return { ok: false, code: 'request_cap_exhausted', used, cap: requestCap };
@@ -238,7 +255,7 @@ export function createGenerationLedger(workDir) {
         append(files.ledger, { seq: entries.length + 1, type: 'REQUEST_REFUSED', requestId, reason: 'budget_cap', observedUsd: observed, worstCaseUsd, cap: costCapUsd });
         return { ok: false, code: 'budget_cap', observed, worstCaseUsd, cap: costCapUsd };
       }
-      append(files.ledger, { seq: entries.length + 1, type: 'REQUEST_RESERVE', requestId, worstCaseUsd, reason });
+      append(files.ledger, { seq: entries.length + 1, type: 'REQUEST_RESERVE', requestId, worstCaseUsd, reason, ...(candidateSlots !== null ? { candidateSlots } : {}) });
       return { ok: true, alreadyReserved: false, used: used + 1 };
     },
     markPrepared(requestId, payloadHash) {
@@ -261,7 +278,15 @@ export function createGenerationLedger(workDir) {
  * domains. The Examiner sees everything it may rewrite and nothing it may
  * not know.
  */
-export function buildConstrainedInput(spec) {
+export function buildConstrainedInput(spec, { registeredCandidates = [] } = {}) {
+  if (spec.schema === EXAMINER_PRODUCTIZATION_SPEC_SCHEMA) {
+    return {
+      schema: 'examiner-constrained-input.v2', template: { id: spec.templateId, version: spec.templateVersion },
+      responseSchema: 'examiner-expression.v2',
+      instruction: 'Return only candidateId, baselineCandidateId, templateId/templateVersion, schema, parameters and expression. Gold, commands, actions and arbitrary fields are forbidden. Expression changes require a new independent review; a model cannot approve its own candidate.',
+      combinations: registeredCandidates.map((c) => ({ baselineCandidateId: c.candidateId, parameters: c.caseDef.constraints, expression: { taskText: c.caseDef.taskText, facts: c.caseDef.facts.map((f) => ({ factId: f.factId, statement: f.statement })), observations: c.caseDef.observations.map((o) => ({ obsId: o.obsId, label: o.label })) } })),
+    };
+  }
   const pool = enumerateCandidates({ mappingId: spec.mappingId, mappingHash: spec.mappingHash });
   let combos = pool;
   let slice = null;
@@ -300,11 +325,31 @@ export function buildConstrainedInput(spec) {
  * PREPARED → transport → parse drafts → skeleton gate + validator → draft
  * log → settle (SUCCEEDED / FAILED_KNOWN; crashes leave RESULT_UNKNOWN).
  */
-export async function runExaminerRequest({ spec, workDir, requestId, response, transport = 'mock', authorizationRecord = null, transportFactory = null, now = null }) {
+export async function runExaminerRequest({ spec, workDir, requestId, response, transport = 'mock', authorizationRecord = null, transportFactory = null, now = null, sourceBundle = null, registeredCandidates = [], goldReviews = [], reviewTrust = null }) {
   const specCheck = validateExaminerSpec(spec);
   if (!specCheck.ok) return { refused: true, stage: 'spec', problems: specCheck.problems };
 
+  const productization = spec.schema === EXAMINER_PRODUCTIZATION_SPEC_SCHEMA;
+  if (productization) {
+    // This entry is OFFLINE_ONLY. Even a fabricated APPROVED receipt cannot
+    // construct a real transport or dispatch a request through it.
+    if (transport !== 'mock' || spec.requestedModelIdentity !== 'mock://offline') return { refused: true, stage: 'offline_only', reasons: ['v0.5 real execution is NOT_AUTHORIZED'], transportCalls: 0 };
+    const sources = verifyExaminerSourceBundle({ bundle: sourceBundle, mappingId: spec.mappingId, mappingHash: spec.mappingHash, inputManifestHash: spec.inputManifestHash, mode: spec.pipelineMode, reviewTrust });
+    if (!sources.ok) return { refused: true, stage: 'source', ...sources, transportCalls: 0 };
+    if (!Array.isArray(registeredCandidates) || registeredCandidates.length === 0 || registeredCandidates.length > 64 || hashOfCanonical(registeredCandidates) !== spec.libraryHash || new Set(registeredCandidates.map((c) => c?.candidateId)).size !== registeredCandidates.length) return { refused: true, stage: 'library', reasons: ['registered library missing/hash mismatch/duplicate identity'], transportCalls: 0 };
+    for (const candidate of registeredCandidates) {
+      const checked = validateProductizationCandidate({ candidate, frozenRefs: { mappingId: spec.mappingId, mappingHash: spec.mappingHash, templateId: spec.templateId, templateVersion: spec.templateVersion }, goldReviews, sourceArtifacts: sourceBundle.sourceArtifacts, mode: spec.pipelineMode, reviewTrust });
+      if (!checked.ok) return { refused: true, stage: 'library_gold', candidateId: candidate.candidateId, problems: Object.values(checked.groups).flat(), transportCalls: 0 };
+    }
+  }
+
   const ledger = createGenerationLedger(workDir);
+  if (productization) {
+    const bindingHash = hashOfCanonical({ spec, sourceBundle, registeredCandidates, goldReviews, ...(reviewTrust ? { authorityHash: reviewTrust.trustedAuthorityHash, subjectHash: reviewTrust.subjectHash } : {}) });
+    const binding = ledger.eventEntries().find((e) => e.type === 'PRODUCTIZATION_BINDING');
+    if ((binding && binding.bindingHash !== bindingHash) || (!binding && ledger.usedRequests() > 0)) return { refused: true, stage: 'binding', reasons: ['generation ledger belongs to a different frozen input; use a new work directory'], transportCalls: 0 };
+    if (!binding) ledger.appendEvent({ type: 'PRODUCTIZATION_BINDING', bindingHash });
+  }
   const worst = worstCaseRequestUsd(spec);
   if (transport === 'real') {
     // Cross-request enforcement: the gate sees the LEDGER's actual cumulative
@@ -323,13 +368,13 @@ export async function runExaminerRequest({ spec, workDir, requestId, response, t
     return { refused: true, stage: 'recovery', reason: `request already settled (${state}) — never re-executed`, transportCalls: 0 };
   }
 
-  const reserve = ledger.reserve({ requestId, worstCaseUsd: worst, requestCap: spec.requestCap, costCapUsd: spec.costCapUsd, reason: 'examiner generation request' });
+  const reserve = ledger.reserve({ requestId, worstCaseUsd: worst, requestCap: spec.requestCap, costCapUsd: spec.costCapUsd, reason: 'examiner generation request', ...(productization ? { candidateSlots: spec.perRequestCandidateCap, candidateCap: spec.candidateCap } : {}) });
   if (!reserve.ok) {
     ledger.appendEvent({ type: 'REQUEST_REFUSED', requestId, reason: reserve.code, detail: reserve });
     return { refused: true, stage: 'budget', code: reserve.code, transportCalls: 0 };
   }
 
-  const constrained = buildConstrainedInput(spec);
+  const constrained = buildConstrainedInput(spec, { registeredCandidates });
   const payloadHash = sha256(canonicalJson(constrained));
   ledger.markPrepared(requestId, payloadHash);
   ledger.appendEvent({ type: 'REQUEST_PREPARED_EVENT', requestId, payloadHash });
@@ -355,12 +400,17 @@ export async function runExaminerRequest({ spec, workDir, requestId, response, t
     return { result: 'FAILED_KNOWN', error: e.message, candidates: [], transportCalls: 1 };
   }
 
+  if (productization) ledger.appendDraft({ requestId, type: 'RAW_RESPONSE', rawResponse: reply ?? null, rawResponseHash: hashOfCanonical(reply ?? null), inputHash: payloadHash, simulated: true });
   if (!reply || reply.ok !== true) {
     const error = (reply && reply.error) || 'empty response';
     ledger.markResult(requestId, 'FAILED_KNOWN', null, `response_error: ${error}`);
     return { result: 'FAILED_KNOWN', error, candidates: [], transportCalls: 1 };
   }
 
+  if (productization && !Array.isArray(reply.candidates)) {
+    ledger.markResult(requestId, 'FAILED_KNOWN', null, 'candidates must be an array — raw response retained');
+    return { result: 'FAILED_KNOWN', error: 'candidates must be an array', candidates: [], transportCalls: 1 };
+  }
   if (Array.isArray(reply.candidates) && reply.candidates.length > spec.perRequestCandidateCap) {
     const error = `candidates exceed perRequestCandidateCap (${reply.candidates.length} > ${spec.perRequestCandidateCap}) — protocol failure, nothing adopted`;
     ledger.markResult(requestId, 'FAILED_KNOWN', null, `response_error: ${error}`);
@@ -377,10 +427,10 @@ export async function runExaminerRequest({ spec, workDir, requestId, response, t
     // inject gold (it never receives it, and the merge never reads it from
     // model output). The merged candidate then passes the full skeleton gate +
     // validator exactly like any other candidate.
-    const adoption = adoptRawModelCandidate({ rawCandidate, spec });
+    const adoption = productization ? adoptProductizationCandidate({ rawCandidate, registeredCandidates }) : adoptRawModelCandidate({ rawCandidate, spec });
     let verdict = null;
     if (adoption.adoptable) {
-      verdict = validateStageGCandidate({ candidate: adoption.candidate, frozenRefs });
+      verdict = productization ? validateProductizationCandidate({ candidate: adoption.candidate, frozenRefs, goldReviews, sourceArtifacts: sourceBundle.sourceArtifacts, mode: spec.pipelineMode, reviewTrust }) : validateStageGCandidate({ candidate: adoption.candidate, frozenRefs });
       outcomes.push({
         candidateId: adoption.candidate.candidateId,
         tier: verdict.goldIndependence ? verdict.goldIndependence.tier : null,
@@ -389,6 +439,7 @@ export async function runExaminerRequest({ spec, workDir, requestId, response, t
         declaredBaselineMismatch: adoption.declaredBaselineMismatch === true,
         problems: Object.values(verdict.groups).flat(),
         expressionFlags: verdict.goldIndependence ? verdict.goldIndependence.flags : [],
+        ...(productization ? { eligibleForFormalSet: verdict.goldIndependence.eligibleForFormalSet } : {}),
       });
       adoptionLog.push({ raw: rawCandidate, adopted: adoption.candidate, baseline: adoption.baselineCandidateId, declaredBaselineMismatch: adoption.declaredBaselineMismatch === true, verdict });
     } else {

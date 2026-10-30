@@ -1,0 +1,144 @@
+
+> principles-disciple-monorepo@2.4.0 lint
+> npm run build --workspace=@principles/core && npm run build --workspace=@principles/install-layout && npm run build --workspace=@principles/host-runtime && node scripts/lint-by-package.mjs
+
+
+> @principles/core@1.297.4 build
+> npm run clean && tsc -p tsconfig.build.json && node ../../scripts/build/check-dist-hygiene.mjs
+
+
+> @principles/core@1.297.4 clean
+> node ../../scripts/build/clean-dist.mjs
+
+[check-dist-hygiene] OK: dist contains no compiled test artifacts.
+
+> @principles/install-layout@0.4.0 build
+> npm run clean && tsc -p tsconfig.build.json && node ../../scripts/build/check-dist-hygiene.mjs
+
+
+> @principles/install-layout@0.4.0 clean
+> node ../../scripts/build/clean-dist.mjs
+
+[check-dist-hygiene] OK: dist contains no compiled test artifacts.
+
+> @principles/host-runtime@0.14.1 build
+> tsc
+
+[lint-by-package] (1/11) eslint packages/codex-adapter ...
+
+D:\Code\_worktrees\principles\adhoc-20261029-examiner-productization-20261029-0902da\packages\codex-adapter\src\ingestion\admission.ts
+  166:11  warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+
+D:\Code\_worktrees\principles\adhoc-20261029-examiner-productization-20261029-0902da\packages\codex-adapter\src\ingestion\explicit-owner-statement.ts
+  119:34  warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+  123:77  warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+
+D:\Code\_worktrees\principles\adhoc-20261029-examiner-productization-20261029-0902da\packages\codex-adapter\src\ingestion\ingestion.ts
+  177:32  warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+  177:63  warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+  180:43  warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+
+D:\Code\_worktrees\principles\adhoc-20261029-examiner-productization-20261029-0902da\packages\codex-adapter\src\ingestion\turn-context.ts
+  272:7  warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+
+✖ 7 problems (0 errors, 7 warnings)
+
+[lint-by-package] packages/codex-adapter -> ok in 10.8s
+[lint-by-package] (2/11) eslint packages/create-principles-disciple ...
+[lint-by-package] packages/create-principles-disciple -> ok in 4.6s
+[lint-by-package] (3/11) eslint packages/host-runtime ...
+
+D:\Code\_worktrees\principles\adhoc-20261029-examiner-productization-20261029-0902da\packages\host-runtime\src\governance-observation-store.ts
+   571:9  warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+   684:9  warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+   726:9  warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+   766:9  warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+   813:9  warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+   988:9  warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+  1099:9  warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+
+D:\Code\_worktrees\principles\adhoc-20261029-examiner-productization-20261029-0902da\packages\host-runtime\src\governance-signal-admission.ts
+   989:9  warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+  1198:9  warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+  1362:9  warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+  1449:9  warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+  1592:9  warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+  1718:9  warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+
+D:\Code\_worktrees\principles\adhoc-20261029-examiner-productization-20261029-0902da\packages\host-runtime\src\host-tool-declaration.ts
+  166:9  warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+
+D:\Code\_worktrees\principles\adhoc-20261029-examiner-productization-20261029-0902da\packages\host-runtime\src\internalization-consumer-governance.ts
+  61:18  warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+
+D:\Code\_worktrees\principles\adhoc-20261029-examiner-productization-20261029-0902da\packages\host-runtime\src\production-pain-evidence.ts
+  104:19  warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+
+D:\Code\_worktrees\principles\adhoc-20261029-examiner-productization-20261029-0902da\packages\host-runtime\src\prompt-injection-status.ts
+  208:11  warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+  240:9   warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+
+✖ 18 problems (0 errors, 18 warnings)
+
+[lint-by-package] packages/host-runtime -> ok in 5.9s
+[lint-by-package] (4/11) eslint packages/install-layout ...
+[lint-by-package] packages/install-layout -> ok in 2.0s
+[lint-by-package] (5/11) eslint packages/openclaw-plugin ...
+
+D:\Code\_worktrees\principles\adhoc-20261029-examiner-productization-20261029-0902da\packages\openclaw-plugin\src\core\trajectory.ts
+  144:10  warning  'tableExists' is defined but never used             @typescript-eslint/no-unused-vars
+  156:10  warning  'isDuplicateColumnError' is defined but never used  @typescript-eslint/no-unused-vars
+
+D:\Code\_worktrees\principles\adhoc-20261029-examiner-productization-20261029-0902da\packages\openclaw-plugin\src\hooks\after-tool-call-helpers.ts
+  30:10  warning  'buildTrajectoryEvidence' is defined but never used  @typescript-eslint/no-unused-vars
+
+✖ 3 problems (0 errors, 3 warnings)
+
+[lint-by-package] packages/openclaw-plugin -> ok in 12.2s
+[lint-by-package] (6/11) eslint packages/pd-cli ...
+
+D:\Code\_worktrees\principles\adhoc-20261029-examiner-productization-20261029-0902da\packages\pd-cli\src\commands\health-codex.ts
+  358:28  warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+  471:7   warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+  598:7   warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+  613:7   warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+  619:7   warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+  630:7   warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+  638:7   warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+  645:7   warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+  651:7   warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+
+✖ 9 problems (0 errors, 9 warnings)
+
+[lint-by-package] packages/pd-cli -> ok in 6.6s
+[lint-by-package] (7/11) eslint packages/pd-companion ...
+[lint-by-package] packages/pd-companion -> ok in 1.7s
+[lint-by-package] (8/11) eslint packages/pd-console ...
+
+D:\Code\_worktrees\principles\adhoc-20261029-examiner-productization-20261029-0902da\packages\pd-console\src\server\models\ApprovalsConsoleModel.ts
+   356:11  warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+  1078:24  warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+
+✖ 2 problems (0 errors, 2 warnings)
+
+[lint-by-package] packages/pd-console -> ok in 16.5s
+[lint-by-package] (9/11) eslint packages/principles-core ...
+
+D:\Code\_worktrees\principles\adhoc-20261029-examiner-productization-20261029-0902da\packages\principles-core\src\runtime-v2\activation\activation-dispatcher.ts
+  358:9  warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+  428:9  warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+
+✖ 2 problems (0 errors, 2 warnings)
+
+[lint-by-package] packages/principles-core -> ok in 11.7s
+[lint-by-package] (10/11) eslint packages/website ...
+[lint-by-package] packages/website -> ok in 1.1s
+[lint-by-package] (11/11) eslint packages/workbuddy-adapter ...
+
+D:\Code\_worktrees\principles\adhoc-20261029-examiner-productization-20261029-0902da\packages\workbuddy-adapter\src\pd-hook.ts
+  312:21  warning  Runtime Contract rc-5-object-hasown-not-in: 对不可信对象用 Object.hasOwn() 而非 `in`（`in` 会匹配继承属性 toString/constructor）。若为合法用法（如检查数组 length）请忽略。Ref: ERR-013  no-restricted-syntax
+
+✖ 1 problem (0 errors, 1 warning)
+
+[lint-by-package] packages/workbuddy-adapter -> ok in 4.4s
+[lint-by-package] summary: 11/11 packages ok

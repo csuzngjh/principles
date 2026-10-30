@@ -1,0 +1,1 @@
+{"ok":false,"status":"GOLD_REVIEW_PENDING","subjectHash":"d41aa703ff19921b6ec9f3481af62d03bb71e9a91debc75dd025592b256c4dc8","reasonCode":"INDEPENDENT_HUMAN_REVIEW_REQUIRED","nextAction":"Owner designates a human reviewer; supply signed mapping/Gold receipts and the independently pinned authority file."}

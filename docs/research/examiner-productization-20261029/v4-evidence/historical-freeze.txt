@@ -1,0 +1,33 @@
+{
+  "historical": [
+    {
+      "studyId": "CEB-001",
+      "rawFiles": 17,
+      "status": "PASS"
+    },
+    {
+      "studyId": "CEB-002",
+      "rawFiles": 21,
+      "status": "PASS"
+    },
+    {
+      "studyId": "CEB-003-P",
+      "rawFiles": 21,
+      "status": "PASS"
+    }
+  ],
+  "exm": [
+    {
+      "version": "EXM-MVP-001",
+      "packageHash": "d8751159f5aa9758387dc23736cd9ae948757395ec6ba042d5f1602e6c6e511e",
+      "rawFiles": 7,
+      "status": "BYTE_PRESERVED_IMPLEMENTATION_HISTORICAL"
+    },
+    {
+      "version": "EXM-MVP-001-v3",
+      "packageHash": "3408f9e8049155f6781a6724d070f99c304227805f178b4f3310008beb09fa4e",
+      "rawFiles": 18,
+      "status": "BYTE_PRESERVED_IMPLEMENTATION_HISTORICAL"
+    }
+  ]
+}
