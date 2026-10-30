@@ -147,6 +147,8 @@ export interface SignalHealthEntry {
     stage2Invocations: number;
     /** AUDIT-P2-02: 因分类器不可用被整批跳过的批量确认次数（旧文件缺省 0）。 */
     stage2BatchSkipped: number;
+    /** 零命中发现调用被每小时配额挡下的次数（旧文件缺省 0）。 */
+    stage2DiscoverySkipped: number;
     pendingCount: number;
   } | null;
   lastStage2SuccessAt: string | null;
@@ -480,6 +482,7 @@ export function buildSignalHealthEntry(stateDir: string): SignalHealthEntry {
       stage2Dropped: numberOr(parsed.stage2Dropped, 0),
       stage2Invocations: numberOr(parsed.stage2Invocations, 0),
       stage2BatchSkipped: numberOr(parsed.stage2BatchSkipped, 0),
+      stage2DiscoverySkipped: numberOr(parsed.stage2DiscoverySkipped, 0),
       pendingCount: numberOr(parsed.pendingCount, 0),
     },
     lastStage2SuccessAt: stringOrNull(parsed.lastStage2SuccessAt),

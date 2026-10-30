@@ -1,5 +1,72 @@
 # create-principles-disciple
 
+## 1.145.35
+
+### Patch Changes
+
+- 7d30045: Signals: bound the cost of correction detection instead of paying it on every message.
+  
+  - **Zero-match discovery is now budgeted.** Replaying live user turns showed that
+    ~90% (93.5% in an earlier window, 90.9% in the most recent one) match no keyword
+    at all, and every one of those used to start a Stage2 "discover a new
+    correction phrase" call. `SignalCollectorConfig` gained
+    `discoveryRateLimitPerHour` (default 6/hour, `0` = unlimited as before). Only
+    zero-match discovery is limited — ambiguous hits are confirmations and stay
+    unmetered — and the skipped calls are surfaced as `stage2DiscoverySkipped` in
+    signal health, so the degradation is observable in `pd config doctor` rather
+    than silent. Measured end-to-end through the production host with real messages:
+    12 messages started 12 calls before, 6 after.
+  - **Stage2 calls are bounded.** The classifier now resolves with
+    `outputPathStrategy: 'json_mode_first'` and `maxRepairAttempts: 1`. On the same
+    5 real messages the two strategies both needed one HTTP request, but
+    `json_mode_first` finished in 11.5s total (max 3.5s) against 36.2s (max 23.9s),
+    and it does not depend on the provider supporting tool calls.
+  - **The observer stops re-running on unchanged input.** The periodic cycle skips
+    when no user turn arrived since the last successful cycle (measured: 4ms versus
+    14.1s for a real dispatch), and its payload now carries at most 40 messages
+    truncated to 400 chars instead of every excerpt from 10 sessions (live measure:
+    31.9KB → 23.5KB).
+  - **One file lock per turn instead of two.** `recordUserTurn` /
+    `recordAssistantTurn` used to take the trajectory write lock twice (session
+    upsert, then the turn insert). Measured on real SQLite: 8.69ms → 4.47ms per
+    turn over 300 writes, byte-identical rows, on the `before_prompt_build` path.
+
+## 1.145.34
+
+### Patch Changes
+
+- f3b413a: PRI-1054: the installer's end-of-run console auto-launch now inherits the
+  machine's declared authentication posture instead of hardcoding `--no-auth`.
+  
+  - With a non-empty `PD_CONSOLE_TOKEN` in the environment, the update chain
+    spawns `pd console open` without `--no-auth`, so the console it brings up is
+    in the same mode the previous one was in. `pd console open` resolves the
+    token from the same variable, so nothing new is invented here.
+  - The readiness probe is two-phase in that mode: a bare probe first, and only a
+    responder that answers 401 with the console's own `unauthorized` envelope gets
+    `Authorization: Bearer <token>` retried. 200 is accepted only when
+    `data.authenticationMode` equals the launched posture — the same fact
+    `pd console open` refuses on — so a pre-existing console in the other mode is
+    not certified as the one this installer launched, and the token is never
+    sprayed across the scan range.
+  - The manual `pd console open …` instruction surfaced when auto-launch is
+    skipped, when the CLI entry is missing, and when the console never becomes
+    ready now carries the same posture. A token-configured machine is no longer
+    told to start an unauthenticated console.
+  
+  Why this mattered: PD Companion requests an authenticated console whenever
+  `PD_CONSOLE_TOKEN` is in its environment, and it restores that token from its
+  own encrypted state on every launch. The unconditional `--no-auth` therefore
+  replaced a healthy authenticated console on every release, and the next
+  Companion start aborted with `console_authentication_mode_mismatch` — anyone who
+  had configured a console token had the desktop app bricked by every version
+  bump, and recovering it meant deleting the token, which in turn locks the
+  governance decision actions.
+  
+  Machines with no console token (every fresh install) keep the existing
+  `--no-auth` default, and `PD_SKIP_CONSOLE_AUTOLAUNCH` (release smoke, upgrade
+  gate) is unchanged.
+
 ## 1.145.33
 
 ### Patch Changes

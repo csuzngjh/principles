@@ -7,8 +7,8 @@
  *
  * 契约：
  *  - 当日计数（stage1Strong/stage2Confirmed/stage2Queued/stage2Dropped/
- *    stage2Invocations/stage2BatchSkipped）在跨日首次写入时归零；时间戳字段
- *    为绝对 ISO 值。
+ *    stage2Invocations/stage2BatchSkipped/stage2DiscoverySkipped）在跨日首次写入时归零；
+ *    时间戳字段为绝对 ISO 值。
  *  - 写失败绝不抛出（健康度是旁路观测，不阻塞检测管线）——记 SYSTEM log（rc-9）。
  *  - 文件缺失/损坏按默认值重建，读取方（doctor）自行 unknown 呈现。
  *  - AUDIT-P2-02：stage2Invocations/stage2BatchSkipped 为新增字段，升级前的
@@ -41,6 +41,12 @@ export interface SignalHealthState {
    * 跨日归零；旧文件缺失按 0 读。
    */
   stage2BatchSkipped: number;
+  /**
+   * 零命中「发现」调用被每小时配额挡下的次数（AUDIT-P2-03 性能整改）。
+   * 它回答「有多少普通消息本来要送去分类、被预算拦住了」——没有这个计数，
+   * 调用量下降就无法与「检测失效」区分。跨日归零；旧文件缺失按 0 读。
+   */
+  stage2DiscoverySkipped: number;
   /** 最近一次刷新的队列深度（非计数） */
   pendingCount: number;
   lastStage2SuccessAt: string | null;
@@ -60,6 +66,7 @@ function defaultState(now: Date): SignalHealthState {
     stage2Dropped: 0,
     stage2Invocations: 0,
     stage2BatchSkipped: 0,
+    stage2DiscoverySkipped: 0,
     pendingCount: 0,
     lastStage2SuccessAt: null,
     observerLastSuccessAt: null,
@@ -119,6 +126,7 @@ function parseSignalHealthState(value: unknown): SignalHealthState | null {
   // 新字段存在但非数值 → 视为损坏（与旧必需字段同一纪律）。
   if (Object.hasOwn(obj, 'stage2Invocations') && typeof obj['stage2Invocations'] !== 'number') return null;
   if (Object.hasOwn(obj, 'stage2BatchSkipped') && typeof obj['stage2BatchSkipped'] !== 'number') return null;
+  if (Object.hasOwn(obj, 'stage2DiscoverySkipped') && typeof obj['stage2DiscoverySkipped'] !== 'number') return null;
   return {
     stage1Strong,
     stage2Confirmed,
@@ -126,6 +134,7 @@ function parseSignalHealthState(value: unknown): SignalHealthState | null {
     stage2Dropped,
     stage2Invocations: optionalNum('stage2Invocations'),
     stage2BatchSkipped: optionalNum('stage2BatchSkipped'),
+    stage2DiscoverySkipped: optionalNum('stage2DiscoverySkipped'),
     pendingCount,
     lastStage2SuccessAt: optionalStr('lastStage2SuccessAt'),
     observerLastSuccessAt: optionalStr('observerLastSuccessAt'),
@@ -152,6 +161,7 @@ function loadState(stateDir: string, now: Date): SignalHealthState {
           stage2Dropped: 0,
           stage2Invocations: 0,
           stage2BatchSkipped: 0,
+          stage2DiscoverySkipped: 0,
           day: today,
         };
       }

@@ -12,7 +12,7 @@ import { SystemLogger } from '../core/system-logger.js';
 import { resolveObserverConfig } from '../core/pd-config-loader.js';
 import { createSignalLlmClassifierFromConfig } from '../core/signal-collector-host.js';
 import { getSignalCollectorHost } from '../hooks/prompt.js';
-import { updateSignalHealth } from '../core/signal-health.js';
+import { readSignalHealth, updateSignalHealth } from '../core/signal-health.js';
 
 export interface CorrectionObserverServiceShape {
     id: string;
@@ -55,6 +55,14 @@ const CORRECTION_OBSERVER_MAX_RECENT_SESSIONS = 20;
 // sessions the correction-hit history (trajectoryHistory) reports on,
 // otherwise hits outside the text window are unjudgeable for the observer.
 const CORRECTION_OBSERVER_MAX_PAYLOAD_SESSIONS = 10;
+/**
+ * payload 体积上限：recentMessages 是"反证素材"，不是全量审计。观测到的真实
+ * 语料里 10 个会话可拼出 25KB（最坏 48KB）的 user 回合正文；这些文本全部塞进
+ * prompt 只换来更强的上下文，代价是每次调用都变慢。封顶保留最近的 40 条，每条
+ * 截断到 400 字符（足够判断是否同一主题）。
+ */
+const CORRECTION_OBSERVER_MAX_PAYLOAD_MESSAGES = 40;
+const CORRECTION_OBSERVER_MAX_MESSAGE_CHARS = 400;
 
 /** PRI-788 G2: 每周期批量确认的待确认信号条数上限。 */
 const SIGNAL_CONFIRM_BATCH_LIMIT = 20;
@@ -260,18 +268,46 @@ export async function runCorrectionObserverCycle(
             return;
         }
 
+        // 无新增回合就跳过：observer 只看最近的 user 回合，若最新会话的
+        // updated_at 不晚于上次成功的周期，本轮输入与上轮完全相同，重跑只会
+        // 重复消耗一次调用。`updated_at` 由 recordUserTurn / recordAssistantTurn
+        // 在同一把写锁内刷新，因此这是"有没有新内容"的可靠判据。
+        // 例外：本轮刚确认了队列里的候选信号 ⇒ payload 里的 TP/FP 计数变了，
+        // 必须投递一次让 observer 看到新证据。
+        const health = readSignalHealth(wctx.stateDir);
+        const newestActivity = recentSessions[0]?.updatedAt ?? null;
+        if (
+            confirmedCount === 0 &&
+            health?.observerLastSuccessAt &&
+            newestActivity &&
+            newestActivity <= health.observerLastSuccessAt
+        ) {
+            logger?.debug?.(
+                `[PD:CorrectionObserver] No new turns since ${health.observerLastSuccessAt}. Skipping optimization cycle.`,
+            );
+            recordObserverCycleOutcome(wctx, true);
+            return;
+        }
+
         const recentMessages: string[] = [];
         for (const sId of recentSessionIds.slice(0, CORRECTION_OBSERVER_MAX_PAYLOAD_SESSIONS)) {
             try {
                 const turns = db.listUserTurnsForSession(sId);
                 for (const t of turns) {
                     if (t.rawExcerpt) {
-                        recentMessages.push(t.rawExcerpt);
+                        recentMessages.push(
+                            t.rawExcerpt.length > CORRECTION_OBSERVER_MAX_MESSAGE_CHARS
+                                ? `${t.rawExcerpt.slice(0, CORRECTION_OBSERVER_MAX_MESSAGE_CHARS)}…`
+                                : t.rawExcerpt,
+                        );
                     }
                 }
             } catch (turnErr) {
                 logger?.warn?.(`[PD:CorrectionObserver] Failed to load user turns for session ${sId}: ${String(turnErr)}`);
             }
+        }
+        if (recentMessages.length > CORRECTION_OBSERVER_MAX_PAYLOAD_MESSAGES) {
+            recentMessages.splice(0, recentMessages.length - CORRECTION_OBSERVER_MAX_PAYLOAD_MESSAGES);
         }
 
         const learner = CorrectionCueLearner.get(wctx.stateDir);
