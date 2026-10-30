@@ -502,5 +502,6 @@
 @container (min-width: 900px) {
   .owner-workbench { grid-template-columns: 272px minmax(0, 1fr); align-items: start; }
   .owner-workbench:has(.owner-work-list-selected) .owner-work-list { display: block; }
+  .owner-work-list { max-height: 72dvh; overflow-y: auto; padding-right: 4px; }
   .owner-work-reading { border-top: 0; border-left: 1px solid var(--color-line); padding-top: 0; padding-left: 28px; }
 }

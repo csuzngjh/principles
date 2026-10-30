@@ -12,7 +12,7 @@ export function OwnerWorkbench({ items, completed, uncertain }: { items: OwnerWo
   const selected = items.find(item => item.key === selectedKey);
   const heading = useRef<HTMLHeadingElement>(null);
   const list = useRef<HTMLElement>(null);
-  useEffect(() => { if (selectedKey) heading.current?.focus(); else list.current?.focus(); }, [selectedKey]);
+  useEffect(() => { if (selectedKey) heading.current?.focus({ preventScroll: true }); else list.current?.focus({ preventScroll: true }); }, [selectedKey]);
   function choose(key: string) {
     const next = new URLSearchParams(params);
     if (key) next.set('review', key); else next.delete('review');

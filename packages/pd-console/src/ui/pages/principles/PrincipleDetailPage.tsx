@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useParams, useNavigate, useLocation, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { PageShell } from "../../components/layout/page-shell.js";
@@ -264,6 +264,10 @@ export function PrincipleDetailPage() {
   const { t, i18n } = useTranslation("pages");
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const navigationState: unknown = location.state;
+  const requestedReturn: unknown = navigationState !== null && typeof navigationState === 'object' && Object.hasOwn(navigationState, 'returnTo') ? Reflect.get(navigationState, 'returnTo') : null;
+  const returnTo = typeof requestedReturn === 'string' && (requestedReturn === '/principles' || requestedReturn.startsWith('/principles?') || requestedReturn === '/focus' || requestedReturn.startsWith('/focus?')) ? requestedReturn : '/principles';
 
   const [principle, setPrinciple] = useState<PrincipleDetail | null>(null);
   const [approvalGroup, setApprovalGroup] = useState<ApprovalGroup | null>(null);
@@ -507,7 +511,7 @@ export function PrincipleDetailPage() {
   if (error || !principle) {
     return (
       <PageShell>
-        <Button variant="ghost" onClick={() => navigate("/principles")} className="mb-4">
+        <Button variant="ghost" onClick={() => navigate(returnTo)} className="mb-4">
           ← {t("principles.detail.backToList")}
         </Button>
         <div className="border border-danger/30 rounded-[var(--radius-md)] p-4">
@@ -536,7 +540,7 @@ export function PrincipleDetailPage() {
     <PageShell>
       <div className="animate-[pdFadeIn_400ms_ease-out]">
       {/* Back link */}
-      <Button variant="ghost" onClick={() => navigate("/principles")} className="mb-4 -ml-2">
+      <Button variant="ghost" onClick={() => navigate(returnTo)} className="mb-4 -ml-2">
         ← {t("principles.detail.backToList")}
       </Button>
 

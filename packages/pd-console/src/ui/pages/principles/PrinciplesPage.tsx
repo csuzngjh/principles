@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, type ReactNode } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { PageShell } from "../../components/layout/page-shell.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
@@ -198,12 +198,19 @@ export function PrinciplesPage() {
   const [summary, setSummary] = useState<PrinciplesListData["summary"] | null>(null);
 
   // Search / filter / sort
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<ReviewStatus | "all">("all");
-  const [sortBy, setSortBy] = useState<"updatedAt" | "createdAt">("updatedAt");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const updateQuery = (key: string, value: string) => { const next = new URLSearchParams(searchParams); next.set(key, value); setSearchParams(next, { replace: true, preventScrollReset: true }); };
+  const search = searchParams.get('q') ?? '';
+  const setSearch = (value: string) => updateQuery('q', value);
+  const statusParam = searchParams.get('status');
+  const statusFilter: ReviewStatus | 'all' = statusParam === 'pending' || statusParam === 'candidate' || statusParam === 'approved' || statusParam === 'rejected' || statusParam === 'parked' ? statusParam : 'all';
+  const setStatusFilter = (value: ReviewStatus | 'all') => updateQuery('status', value);
+  const sortBy = searchParams.get('sort') === 'createdAt' ? 'createdAt' : 'updatedAt';
+  const setSortBy = (value: 'createdAt' | 'updatedAt') => updateQuery('sort', value);
   // PRI-629 (INV-02): 默认展示全部 — candidate 是生命周期而非待办,
   // "只看待决策"不再作为默认视图 (真实决策在治理焦点)。
-  const [filterMode, setFilterMode] = useState<'actionable' | 'all'>('all');
+  const filterMode = searchParams.get('mode') === 'actionable' ? 'actionable' : 'all';
+  const setFilterMode = (value: 'actionable' | 'all') => updateQuery('mode', value);
   const [categories, setCategories] = useState<Record<string, number> | undefined>();
   // Owner Decision Experience v1: backend semantic titles + decision states
   // (display-only — the page never re-derives decision qualification).
@@ -526,7 +533,7 @@ export function PrinciplesPage() {
             return (
               <article
                 key={card.principleId}
-                onClick={() => navigate(`/principles/${card.principleId}`)}
+                onClick={() => navigate(`/principles/${card.principleId}`, { state: { returnTo: `/principles?${searchParams}` } })}
                 className={
                   "relative bg-panel border border-line rounded-[var(--radius-md)] p-4 cursor-pointer " +
                   "border-l-[3px] " +
@@ -541,7 +548,7 @@ export function PrinciplesPage() {
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
-                    navigate(`/principles/${card.principleId}`);
+                    navigate(`/principles/${card.principleId}`, { state: { returnTo: `/principles?${searchParams}` } });
                   }
                 }}
               >

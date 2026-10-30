@@ -169,7 +169,7 @@ function stageKindLabel(t: (key: string) => string, stageKind: string | null): s
 }
 
 /** Inline in Governance Focus; assignment, rule approval and live promotion remain separate. */
-export function RuleCandidateBindingPanel({ candidateId }: { candidateId?: string } = {}) {
+export function RuleCandidateBindingPanel({ candidateId, onChanged }: { candidateId?: string; onChanged?: () => void } = {}) {
   const { t } = useTranslation();
   const [queue, setQueue] = useState<RuleBindingQueueView | null>(null);
   const [review, setReview] = useState<RuleBindingReviewView | null>(null);
@@ -194,10 +194,11 @@ export function RuleCandidateBindingPanel({ candidateId }: { candidateId?: strin
     else setError([result.error, result.nextAction].filter(Boolean).join(' ') || t('pages.focus.ruleBinding.unavailable'));
     setBusy(false);
   }
+  useEffect(() => { if (candidateId) void load(candidateId); }, [candidateId]);
   function closeReview() { setOpenCandidateId(''); setReview(null); setSearch(''); setReason(''); }
   async function refreshQueue() {
     const result = await fetchRuleBindingQueue();
-    if (result.success) setQueue(result.data);
+    if (result.success) { setQueue(result.data); onChanged?.(); }
   }
   async function decide(action: 'bind' | 'revoke') {
     if (!review) return;
