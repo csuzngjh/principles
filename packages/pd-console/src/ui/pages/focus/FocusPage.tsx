@@ -23,7 +23,7 @@ import type {
 import type { OwnerDecisionItemData } from "../../utils/validators.js";
 import { selectApprovalGroupDisplayTitle, showsUnlinkedCandidateNote, validateApprovalsGroupedData } from "./focus-validation.js";
 import { splitReadingTitleBody } from "../../utils/reading-layout.js";
-import { OwnerWorkbench, type OwnerWorkItem } from "./OwnerWorkbench.js";
+import { OwnerWorkbench, type OwnerWorkItem, type OwnerWorkItemKind } from "./OwnerWorkbench.js";
 import { ApprovalSubjectReading } from "./ApprovalSubjectReading.js";
 import type { RuleBindingQueueView } from "../../../shared/rule-candidate-binding-contract.js";
 import { OwnerDecisionCard } from "./OwnerDecisionCard.js";
@@ -662,6 +662,23 @@ function ExperienceSummaryCard({ snapshot }: { snapshot: GovernanceExperienceSna
 
 type LoadingState = "loading" | "loaded" | "error";
 type FocusSource = 'summary' | 'approvals' | 'activations' | 'bindings' | 'decisions' | 'inbox';
+function decisionWorkKind(kind: string): OwnerWorkItemKind {
+  switch (kind) {
+    case 'rulecode_decision': return 'promotion';
+    case 'evaluator_review': return 'revision';
+    case 'rollout_review': return 'validation';
+    case 'activation_approval': return 'approval';
+    default: return 'unknown';
+  }
+}
+function approvalWorkKind(channel: string): OwnerWorkItemKind {
+  switch (channel) {
+    case 'prompt': return 'prompt';
+    case 'code_tool_hook': return 'rule';
+    case 'defer_archive': return 'archive';
+    default: return 'unknown';
+  }
+}
 const FOCUS_SOURCES: FocusSource[] = ['summary', 'approvals', 'activations', 'bindings', 'decisions', 'inbox'];
 
 export interface FocusPageProps {
@@ -884,15 +901,15 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
     || ruleCodeErrorReason !== null || errorMessage !== null || ownerDecisionError !== null || groupedErrorReason !== null || bindingError !== null || ownerInboxError !== null;
   const workItems: OwnerWorkItem[] = [
     ...ruleCodePending.filter(item => !decisionItems.some(decision => decision.kind === 'rulecode_decision' && decision.taskId === item.activationId)).map(item => ({ key: `activation:${item.activationId}`, title: splitReadingTitleBody(t('pages.focus.workbench.rulePromotion')).title,
-      kind: t('pages.focus.workbench.rulePromotion'), summary: t('pages.focus.workbench.promotionSummary'), reference: item.activationId,
+      kind: 'promotion' as const, summary: t('pages.focus.workbench.promotionSummary'), reference: item.activationId,
       content: <div className="text-sm leading-relaxed text-ink-2"><p>{t('pages.focus.workbench.promotionSummary')}</p><Link to={`/activation?activationId=${encodeURIComponent(item.activationId)}`} className="mt-4 inline-block text-gov underline">{t('pages.focus.workbench.openActivation')}</Link></div> })),
     ...decisionItems.map(item => ({ key: `decision:${item.reviewKey}`, title: splitReadingTitleBody(item.title).title,
-      kind: t('pages.focus.workbench.taskDecision'), summary: item.summary, reference: item.taskId,
+      kind: decisionWorkKind(item.kind), summary: item.summary, reference: item.taskId,
       content: <OwnerDecisionCard key={`${item.reviewKey}:${promptTargetHost ?? 'default'}`} item={item} governanceReady={ownerActionsLockedReason === null}
         actionsLockedReason={ownerActionsLockedReason ?? undefined} onResolved={() => { setCompletedMessage({ key: `decision:${item.reviewKey}`, message: t('pages.focus.workbench.decisionRecorded') }); void loadData(); }} /> })),
     ...pendingGroups.flatMap(group => group.records.filter(record => record.status === 'pending').map((record, index) => ({
       key: `approval:${record.id}`, title: new Set(group.records.map(entry => entry.artifactId)).size > 1 ? t('pages.focus.workbench.versionNeedsReview', { index: index + 1 }) : splitReadingTitleBody(selectApprovalGroupDisplayTitle(group) ?? t('pages.focus.untitledCandidate')).title,
-      kind: t(record.channel === 'prompt' ? 'pages.focus.workbench.promptReview' : record.channel === 'defer_archive' ? 'pages.focus.workbench.archiveReview' : 'pages.focus.workbench.ruleReview'),
+      kind: approvalWorkKind(record.channel),
       summary: t('pages.focus.workbench.approvalSummary'),
       content: <ApprovalSubjectReading key={`${record.id}:${promptTargetHost ?? 'default'}`} principleId={group.principleId} approvalId={record.id} artifactId={record.artifactId} channel={record.channel} lockedReason={ownerActionsLockedReason ?? undefined}
         targetHost={promptTargetHost ?? undefined} revisionReview={new Set(group.records.filter(entry => entry.status === 'pending').map(entry => entry.artifactId)).size === 1 ? group.revisionReview : undefined}
@@ -906,7 +923,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
         onResolved={message => { setCompletedMessage({ key: `approval:${record.id}`, message }); void loadData(); }} />,
     }))),
     ...(bindingQueue?.items ?? []).filter(item => !['bound_generating', 'bound_advanced', 'bound_not_built'].includes(deriveRuleBindingCardState(item))).map(item => ({ key: `binding:${item.candidateId}`, title: splitReadingTitleBody(item.text).title,
-      kind: t('pages.focus.workbench.bindingReview'), summary: item.pain.text ?? t('pages.focus.workbench.bindingSummary'), reference: item.candidateId,
+      kind: 'binding' as const, summary: item.pain.text ?? t('pages.focus.workbench.bindingSummary'), reference: item.candidateId,
       content: <RuleCandidateBindingPanel key={item.candidateId} candidateId={item.candidateId} onChanged={() => { void loadData(); }} /> })),
   ];
 

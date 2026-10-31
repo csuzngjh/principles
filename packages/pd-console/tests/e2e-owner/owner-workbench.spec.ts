@@ -70,6 +70,29 @@ test('A failed governance summary preserves readable items and does not unlock u
   await expect(page.getByText('部分资料暂未读取，当前列表可能不完整。').first()).toBeVisible();
 });
 
+test('Work item types identify their real decision and remain clear without relying on color', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1024 });
+  await login(page);
+  const promotion = page.getByTestId('owner-work-item').filter({ hasText: 'RuleCode 影子规则待决' }).first();
+  await expect(promotion.getByTestId('owner-work-type')).toHaveAttribute('data-kind', 'promotion');
+  await expect(promotion.getByTestId('owner-work-type')).toHaveText('规则上线审查');
+  const prompt = page.locator('[data-item-key="approval:apr-readability-long"]');
+  await expect(prompt.getByTestId('owner-work-type')).toHaveAttribute('data-kind', 'prompt');
+  await expect(prompt.getByTestId('owner-work-type')).toHaveText('提示原则审查');
+  const rule = page.locator('[data-item-key="approval:apr-hook-1"]');
+  await expect(rule.getByTestId('owner-work-type')).toHaveAttribute('data-kind', 'rule');
+  await expect(rule.getByTestId('owner-work-type')).toHaveText('执行方案审查');
+  await expect(page.locator('[data-item-key^="binding:"]').first().getByTestId('owner-work-type')).toHaveAttribute('data-kind', 'binding');
+  await expect(prompt.getByTestId('owner-work-type').locator('svg')).toHaveAttribute('aria-hidden', 'true');
+  await prompt.click();
+  await expect(page.getByTestId('owner-work-reading').getByTestId('owner-work-type')).toHaveAttribute('data-kind', 'prompt');
+  await page.waitForTimeout(450);
+  await page.screenshot({ path: resolve(shots, 'item-types-light.png'), fullPage: false });
+  await page.getByRole('button', { name: '切换暗色模式', exact: true }).click();
+  await page.waitForTimeout(450);
+  await page.screenshot({ path: resolve(shots, 'item-types-dark.png'), fullPage: false });
+});
+
 test('The task scrollbar follows both themes and daily thoughts remain visible outside runtime history', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1024 });
   await login(page);

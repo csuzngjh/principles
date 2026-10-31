@@ -1,8 +1,32 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { Archive, CircleHelp, ClipboardCheck, Code2, FilePenLine, FlaskConical, Link2, MessageSquareText, ShieldCheck, type LucideIcon } from 'lucide-react';
 
-export interface OwnerWorkItem { key: string; title: string; kind: string; summary: string; reference?: string; content: ReactNode }
+export type OwnerWorkItemKind = 'prompt' | 'rule' | 'promotion' | 'revision' | 'validation' | 'binding' | 'archive' | 'approval' | 'unknown';
+export interface OwnerWorkItem { key: string; title: string; kind: OwnerWorkItemKind; summary: string; reference?: string; content: ReactNode }
+
+// Type describes the decision, not an inferred urgency or permission.
+const KIND_PRESENTATION: Record<OwnerWorkItemKind, { icon: LucideIcon; label: string; style: string }> = {
+  prompt: { icon: MessageSquareText, label: 'promptReview', style: 'border-gov/30 bg-gov/10 text-gov' },
+  rule: { icon: Code2, label: 'ruleReview', style: 'border-ink-3/30 bg-ink-3/10 text-ink-2' },
+  promotion: { icon: ShieldCheck, label: 'rulePromotion', style: 'border-amber/30 bg-amber/10 text-ink-2' },
+  revision: { icon: FilePenLine, label: 'revisionDecision', style: 'border-amber/30 text-ink-2' },
+  validation: { icon: FlaskConical, label: 'validationReview', style: 'border-gov/30 text-gov' },
+  binding: { icon: Link2, label: 'bindingReview', style: 'border-gov/30 text-gov' },
+  archive: { icon: Archive, label: 'archiveReview', style: 'border-line bg-surface text-ink-3' },
+  approval: { icon: ClipboardCheck, label: 'approvalMaterialReview', style: 'border-line text-ink-2' },
+  unknown: { icon: CircleHelp, label: 'unknownReview', style: 'border-line text-ink-3' },
+};
+
+function WorkItemType({ kind }: { kind: OwnerWorkItemKind }) {
+  const { t } = useTranslation();
+  const { icon: Icon, label, style } = KIND_PRESENTATION[kind];
+  return <span data-testid="owner-work-type" data-kind={kind} className={`inline-flex max-w-full items-center gap-1.5 rounded-[4px] border px-2 py-1 text-[11px] font-medium leading-relaxed ${style}`}>
+    <Icon aria-hidden="true" className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+    {t(`pages.focus.workbench.${label}`)}
+  </span>;
+}
 
 /** Presentation only: list grouping never changes an action's identity or authority. */
 export function OwnerWorkbench({ items, completed, uncertain }: { items: OwnerWorkItem[]; completed: { key: string; message: string } | null; uncertain: boolean }) {
@@ -44,7 +68,7 @@ export function OwnerWorkbench({ items, completed, uncertain }: { items: OwnerWo
       {items.length === 0 && <p className="text-sm leading-relaxed text-ink-3">{t(uncertain ? 'pages.focus.workbench.uncertain' : 'pages.focus.workbench.empty')}</p>}
       <ol className="space-y-2">{items.map(item => <li key={item.key}><button type="button" onClick={() => choose(item.key)} aria-current={selected?.key === item.key ? 'true' : undefined}
         data-testid="owner-work-item" data-item-key={item.key} className={`w-full rounded-[6px] border px-4 py-4 text-left transition-colors focus-visible:outline-2 focus-visible:outline-gov ${selected?.key === item.key ? 'border-gov bg-gov/5' : 'border-line bg-panel hover:border-gov/50'}`}>
-        <span className="mb-2 block text-[11px] text-ink-4">{item.kind}</span><span className="block text-[14px] font-medium leading-relaxed text-ink break-words">{item.title}</span>
+        <span className="mb-3 block"><WorkItemType kind={item.kind} /></span><span className="block text-[14px] font-medium leading-relaxed text-ink break-words">{item.title}</span>
         <span className="mt-2 block text-[12.5px] leading-relaxed text-ink-3 line-clamp-2">{item.summary}</span>
         {item.reference && items.some(other => other.key !== item.key && other.title === item.title && other.summary === item.summary) && <span className="mt-2 block break-all font-mono text-[11px] text-ink-4">{item.reference}</span>}
       </button></li>)}</ol>
@@ -52,6 +76,7 @@ export function OwnerWorkbench({ items, completed, uncertain }: { items: OwnerWo
     <div className="owner-work-reading min-w-0" data-testid="owner-work-reading">
       {selected ? <>
         <button type="button" className="mb-5 text-[13px] text-gov underline underline-offset-4" onClick={() => choose('')}>{t('pages.focus.workbench.back')}</button>
+        <div className="mb-3"><WorkItemType kind={selected.kind} /></div>
         <h2 ref={heading} tabIndex={-1} className="mb-6 text-[22px] font-semibold leading-snug text-ink break-words">{selected.title}</h2>
         <div key={selected.key}>{selected.content}</div>
         <footer className="mt-7 border-t border-line pt-5"><p className="mb-3 text-[12.5px] text-ink-3">{t('pages.focus.workbench.readingEnd')}</p>
