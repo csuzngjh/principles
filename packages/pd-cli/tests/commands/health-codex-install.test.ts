@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { CODEX_INGESTION_VERIFIED_VERSION, CODEX_INGESTION_MIN_VERSION } from '@principles/codex-adapter';
+import { CODEX_INGESTION_VERIFIED_VERSION, CODEX_INGESTION_MIN_VERSION, classifyCodexVersion } from '@principles/codex-adapter';
 import { assessCodexInstall } from '../../src/commands/health-codex-install.js';
 import { selectMarketplaceCacheVersionDir } from '../../src/services/codex-plugin-install.js';
 
@@ -159,7 +159,9 @@ describe('assessCodexInstall — R1 merge-readiness (A1–A4)', () => {
       // classified unverified and must NOT be presented as the current binary.
       const unverified = bumpPatch(CODEX_INGESTION_VERIFIED_VERSION);
       writeRollout(home, unverified, 2000);
-      const result = assessCodexInstall({ CODEX_HOME: home });
+      // PRI-1061: classifyCodexVersion is injected by the caller — the module
+      // itself no longer statically binds @principles/codex-adapter.
+      const result = assessCodexInstall({ CODEX_HOME: home }, undefined, { classifyVersion: classifyCodexVersion });
       expect(result).toMatchObject({
         ok: true,
         currentCliVersion: null,
