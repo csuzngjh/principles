@@ -31,7 +31,11 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { classifyCodexVersion } from '@principles/codex-adapter';
+// PRI-1061: the classifier is injected (type-only import — no runtime binding).
+// @principles/codex-adapter is a host-scoped payload: a workbuddy-host install
+// ships no codex adapter, and this module sits on the CLI's startup graph via
+// health.ts → health-codex.ts, so it must never statically import the adapter.
+import type { classifyCodexVersion } from '@principles/codex-adapter';
 import {
   findNewestRolloutFile,
   readInstalledCodexRuntime,
@@ -90,8 +94,12 @@ export const CODEX_INSTALL_NEXT_ACTIONS = {
 export function assessCodexInstall(env: { CODEX_HOME?: string }, homeDir: string = os.homedir(), deps: {
   fsMod?: Pick<typeof fs, 'existsSync' | 'readdirSync' | 'readFileSync' | 'statSync' | 'openSync' | 'readSync' | 'closeSync'>;
   probeCli?: () => string | null;
+  /** PRI-1061: injected by the caller (health-codex loads the adapter lazily).
+   * Absent → cliStatus stays 'unknown' (never guessed; A4). */
+  classifyVersion?: typeof classifyCodexVersion;
 } = {}): CodexInstallHealth {
   const fsMod = deps.fsMod ?? fs;
+  const {classifyVersion} = deps;
   const codexHome = resolveCodexHome(env, homeDir);
   if (!fsMod.existsSync(codexHome)) {
     return { ok: false, reason: 'codex_home_missing', nextAction: 'Codex has never run on this machine (CODEX_HOME not found); nothing to assess.' };
@@ -142,7 +150,7 @@ export function assessCodexInstall(env: { CODEX_HOME?: string }, homeDir: string
   // lastRolloutCliVersion for this field (A4: don't misrepresent history).
   const currentCliVersion: string | null = null;
   const classificationInput = lastRolloutCliVersion;
-  const cliStatus: CodexCliStatus = classificationInput ? classifyCodexVersion(classificationInput).status : 'unknown';
+  const cliStatus: CodexCliStatus = classificationInput && classifyVersion ? classifyVersion(classificationInput).status : 'unknown';
   const cliStatusSource: 'current_cli' | 'last_rollout' | 'none' = lastRolloutCliVersion ? 'last_rollout' : 'none';
   return {
     ok: true,

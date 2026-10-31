@@ -170,12 +170,12 @@ describe('runLegacyRuleContractPreflight', () => {
   });
 });
 
-describe('ensureBundledPdCliResolution (PRI-693)', () => {
+describe('ensureBundledPdCliResolution (PRI-693 / PRI-1060)', () => {
   function seedPackageLayout(): string {
     const pkgDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-bundled-pdcli-'));
     fs.mkdirSync(path.join(pkgDir, 'pd-cli', 'dist'), { recursive: true });
     fs.writeFileSync(path.join(pkgDir, 'pd-cli', 'dist', 'index.js'), '// stub\n', 'utf8');
-    for (const component of ['core', 'host-runtime', 'codex-adapter', 'install-layout', 'plugin']) {
+    for (const component of ['core', 'host-runtime', 'codex-adapter', 'workbuddy-adapter', 'install-layout', 'plugin']) {
       fs.mkdirSync(path.join(pkgDir, component), { recursive: true });
       fs.writeFileSync(path.join(pkgDir, component, 'package.json'), '{"name":"x"}', 'utf8');
     }
@@ -190,10 +190,30 @@ describe('ensureBundledPdCliResolution (PRI-693)', () => {
     expect(fs.existsSync(path.join(nm, '@principles', 'core'))).toBe(true);
     expect(fs.existsSync(path.join(nm, '@principles', 'host-runtime'))).toBe(true);
     expect(fs.existsSync(path.join(nm, '@principles', 'codex-adapter'))).toBe(true);
+    expect(fs.existsSync(path.join(nm, '@principles', 'workbuddy-adapter'))).toBe(true);
     expect(fs.existsSync(path.join(nm, '@principles', 'install-layout'))).toBe(true);
     expect(fs.existsSync(path.join(nm, 'principles-disciple'))).toBe(true);
     // The link resolves to the sibling component content.
     expect(fs.existsSync(path.join(nm, '@principles', 'core', 'package.json'))).toBe(true);
+    fs.rmSync(pkgDir, { recursive: true, force: true });
+  });
+
+  it('creates PACKAGE-ROOT node_modules links so bundled components resolve their own file:../ deps (PRI-1060)', () => {
+    // Node resolves a component reached through a junction by its REAL path,
+    // so host-runtime importing '@principles/core' only resolves via the
+    // package root's node_modules — pd-cli-local links are invisible to it.
+    const pkgDir = seedPackageLayout();
+    const pdCliRoot = path.join(pkgDir, 'pd-cli');
+    ensureBundledPdCliResolution(pdCliRoot);
+    const rootNm = path.join(pkgDir, 'node_modules');
+    expect(fs.existsSync(path.join(rootNm, '@principles', 'core'))).toBe(true);
+    expect(fs.existsSync(path.join(rootNm, '@principles', 'host-runtime'))).toBe(true);
+    expect(fs.existsSync(path.join(rootNm, '@principles', 'codex-adapter'))).toBe(true);
+    expect(fs.existsSync(path.join(rootNm, '@principles', 'workbuddy-adapter'))).toBe(true);
+    expect(fs.existsSync(path.join(rootNm, '@principles', 'install-layout'))).toBe(true);
+    expect(fs.existsSync(path.join(rootNm, 'principles-disciple'))).toBe(true);
+    // The links resolve to the sibling component content.
+    expect(fs.existsSync(path.join(rootNm, '@principles', 'core', 'package.json'))).toBe(true);
     fs.rmSync(pkgDir, { recursive: true, force: true });
   });
 
@@ -212,6 +232,7 @@ describe('ensureBundledPdCliResolution (PRI-693)', () => {
     expect(() => ensureBundledPdCliResolution(pdCliRoot)).not.toThrow();
     expect(fs.existsSync(path.join(pdCliRoot, 'node_modules', '@principles', 'core'))).toBe(true);
     expect(fs.existsSync(path.join(pdCliRoot, 'node_modules', '@principles', 'codex-adapter'))).toBe(false);
+    expect(fs.existsSync(path.join(pkgDir, 'node_modules', '@principles', 'codex-adapter'))).toBe(false);
     fs.rmSync(pkgDir, { recursive: true, force: true });
   });
 });
