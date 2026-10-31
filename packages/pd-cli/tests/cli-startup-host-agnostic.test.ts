@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /**
  * PRI-1061: a workbuddy-host install ships no @principles/codex-adapter, and
@@ -20,7 +21,11 @@ import { join } from 'node:path';
  */
 
 function buildSandbox(): string {
-  const pkgRoot = process.cwd(); // packages/pd-cli (vitest cwd)
+  // Package root from the test file's own location, NOT process.cwd(): vitest
+  // runs this suite from the package dir in CI but from the repo root for
+  // `vitest run packages/pd-cli/tests`, and a cwd-derived root silently looked
+  // for <repo>/dist instead of packages/pd-cli/dist.
+  const pkgRoot = fileURLToPath(new URL('..', import.meta.url));
   const sandbox = mkdtempSync(join(tmpdir(), 'pd-cli-no-adapters-'));
   cpSync(join(pkgRoot, 'dist'), join(sandbox, 'pd-cli', 'dist'), { recursive: true });
   cpSync(join(pkgRoot, 'package.json'), join(sandbox, 'pd-cli', 'package.json'));

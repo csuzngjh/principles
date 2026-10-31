@@ -54,6 +54,11 @@ function emitFailure(opts: ExplicitOptions, failure: { reason: string; message: 
     console.error(`Next action: ${failure.nextAction}`);
   }
   process.exit(1);
+  // cli-2: `never` must be honest. `process.exit` returns when stubbed
+  // (in-process callers, tests), and every caller relies on this function
+  // never returning — handlePainExplicit would otherwise continue with an
+  // unassigned `workspaceDir` / lazy adapter binding.
+  throw new Error(`unreachable: emitFailure(${failure.reason})`);
 }
 
 export async function handlePainExplicit(opts: ExplicitOptions): Promise<void> {

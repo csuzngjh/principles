@@ -309,7 +309,10 @@ export async function handleHealthCodex(opts: CodexHealthOptions = {}): Promise<
   // lazily here instead of as a static import. A static import would sit on
   // the CLI's startup module graph (index.ts → health.ts → this file) and
   // brick `pd --help` on every non-codex machine.
-  const codexAdapter: typeof CodexAdapterModule = await import('@principles/codex-adapter').catch(() => {
+  let codexAdapter: typeof CodexAdapterModule;
+  try {
+    codexAdapter = await import('@principles/codex-adapter');
+  } catch {
     // rc-9/cli-6: degraded result carries a structured reason + nextAction
     // instead of a raw ERR_MODULE_NOT_FOUND stack trace.
     const message = 'The Codex host adapter is not installed in this PD runtime; Codex host health is unavailable.';
@@ -321,8 +324,12 @@ export async function handleHealthCodex(opts: CodexHealthOptions = {}): Promise<
       console.error('Reason: codex_adapter_unavailable');
       console.error(`Next action: ${nextAction}`);
     }
+    // cli-2: an exit path must STOP execution. `process.exit(1)` alone is not
+    // a return — when it is stubbed (in-process callers, tests) execution
+    // would fall through into a destructuring of `undefined`.
     process.exit(1);
-  });
+    return;
+  }
   const {
     computeCodexWorkerStatusMode,
     locateCodexTranscriptByRolloutIdentity,
