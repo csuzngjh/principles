@@ -1299,12 +1299,11 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
       </section>
       )}
 
-      {/* Daily thought — reflection content, not governance status. Demoted to
-          secondary reading BELOW the evidence sections (SPEC-PD-UIUX-001 R2);
-          retained in BOTH modes with no persistence change (PRI-589 pending). */}
-      <DailyThoughtCard />
         </div>
       </details>
+
+      {/* Reflection remains visible below the decision workspace, outside runtime history. */}
+      <div className="mt-8"><DailyThoughtCard /></div>
 
       {/* Footer — one line (US-1.7) */}
       <footer className="mt-12 pt-6 border-t border-line text-ink-3 text-[13px]">

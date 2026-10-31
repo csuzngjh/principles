@@ -70,6 +70,35 @@ test('A failed governance summary preserves readable items and does not unlock u
   await expect(page.getByText('部分资料暂未读取，当前列表可能不完整。').first()).toBeVisible();
 });
 
+test('The task scrollbar follows both themes and daily thoughts remain visible outside runtime history', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1024 });
+  await login(page);
+  await expect(page.getByTestId('owner-work-item').first()).toBeVisible();
+  const list = page.getByRole('navigation', { name: '待处理事项', exact: true });
+  const thought = page.getByRole('article', { name: '今日思考', exact: true });
+  await expect(thought).toBeVisible();
+  await expect(page.getByTestId('focus-runtime-records')).not.toHaveAttribute('open');
+  const originalQuote = await thought.locator('p').first().innerText();
+  await thought.getByRole('button', { name: '换一句', exact: true }).click();
+  await expect(thought.locator('p').first()).not.toHaveText(originalQuote);
+  const lightThumb = await list.evaluate(element => getComputedStyle(element, '::-webkit-scrollbar-thumb').backgroundColor);
+  const scrollbarWidth = await list.evaluate(element => parseFloat(getComputedStyle(element, '::-webkit-scrollbar').width));
+  expect(scrollbarWidth).toBeGreaterThan(0);
+  expect(scrollbarWidth).toBeLessThanOrEqual(8);
+  await page.getByRole('button', { name: '切换暗色模式', exact: true }).click();
+  const darkThumb = await list.evaluate(element => getComputedStyle(element, '::-webkit-scrollbar-thumb').backgroundColor);
+  expect(darkThumb).not.toBe(lightThumb);
+  expect(await list.evaluate(element => getComputedStyle(element, '::-webkit-scrollbar-track').backgroundColor)).toBe('rgba(0, 0, 0, 0)');
+  await list.focus();
+  await page.keyboard.press('End');
+  await expect.poll(() => list.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+  await page.waitForTimeout(450);
+  await list.screenshot({ path: resolve(shots, 'scrollbar-dark.png') });
+  await page.getByRole('button', { name: '切换亮色模式', exact: true }).click();
+  await page.waitForTimeout(450);
+  await list.screenshot({ path: resolve(shots, 'scrollbar-light.png') });
+});
+
 
 test('A hanging runtime source does not hide known approvals or claim all clear', async ({ page }) => {
   let release: (() => void) | undefined;
