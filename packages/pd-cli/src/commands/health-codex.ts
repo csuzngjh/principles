@@ -40,13 +40,8 @@ import {
   detectLegacyCodexHookRegistration,
   CODEX_INGESTION_DISCLOSURE_VERSION,
 } from '@principles/host-runtime';
-import {
-  computeCodexWorkerStatusMode,
-  locateCodexTranscriptByRolloutIdentity,
-  CODEX_INGESTION_MIN_VERSION,
-  CODEX_INGESTION_VERIFIED_VERSION,
-} from '@principles/codex-adapter';
 import { assessCodexInstall, CODEX_INSTALL_NEXT_ACTIONS } from './health-codex-install.js';
+import type * as CodexAdapterModule from '@principles/codex-adapter';
 import { getInstallLayoutPaths, parseInstallManifest } from '@principles/install-layout';
 import { SqliteConnection, SqliteTaskStore, computeFeatureFlagsFromConfig, isFeatureEnabled } from '@principles/core/runtime-v2';
 
@@ -309,6 +304,39 @@ async function readDiagnosticianCounts(workspace: string): Promise<CodexHealthRe
 }
 
 export async function handleHealthCodex(opts: CodexHealthOptions = {}): Promise<void> {
+  // PRI-1061: @principles/codex-adapter is a host-scoped payload — a
+  // workbuddy-host install ships no codex adapter at all — so it is loaded
+  // lazily here instead of as a static import. A static import would sit on
+  // the CLI's startup module graph (index.ts → health.ts → this file) and
+  // brick `pd --help` on every non-codex machine.
+  let codexAdapter: typeof CodexAdapterModule;
+  try {
+    codexAdapter = await import('@principles/codex-adapter');
+  } catch {
+    // rc-9/cli-6: degraded result carries a structured reason + nextAction
+    // instead of a raw ERR_MODULE_NOT_FOUND stack trace.
+    const message = 'The Codex host adapter is not installed in this PD runtime; Codex host health is unavailable.';
+    const nextAction = 'Re-run the PD installer with the codex host selected to install it.';
+    if (opts.json) {
+      console.log(JSON.stringify({ status: 'failed', reason: 'codex_adapter_unavailable', message, nextAction }, null, 2));
+    } else {
+      console.error(`Error: ${message}`);
+      console.error('Reason: codex_adapter_unavailable');
+      console.error(`Next action: ${nextAction}`);
+    }
+    // cli-2: an exit path must STOP execution. `process.exit(1)` alone is not
+    // a return — when it is stubbed (in-process callers, tests) execution
+    // would fall through into a destructuring of `undefined`.
+    process.exit(1);
+    return;
+  }
+  const {
+    computeCodexWorkerStatusMode,
+    locateCodexTranscriptByRolloutIdentity,
+    CODEX_INGESTION_MIN_VERSION,
+    CODEX_INGESTION_VERIFIED_VERSION,
+    classifyCodexVersion,
+  } = codexAdapter;
   const generatedAt = new Date().toISOString();
   const workspaceDir = opts.workspace ? path.resolve(opts.workspace) : resolveWorkspaceDir();
 
@@ -481,7 +509,7 @@ export async function handleHealthCodex(opts: CodexHealthOptions = {}): Promise<
   // is a §15 ready blocker with a nextAction — fail-open fake health is the
   // F2 defect class. With ingestion disabled these stay warnings: hook
   // enforcement permission semantics are independent of ingestion.
-  const install = assessCodexInstall(process.env);
+  const install = assessCodexInstall(process.env, os.homedir(), { classifyVersion: classifyCodexVersion });
   if (install.ok) {
     const installReason =
       install.installMode === 'STALE_INSTALL'
