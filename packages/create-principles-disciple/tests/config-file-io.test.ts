@@ -23,6 +23,78 @@ describe('atomicReplaceTextFile', () => {
   });
 });
 
+describe('atomicReplaceTextFile rename retry (PRI-1062)', () => {
+  const lockedError = () => Object.assign(new Error('EPERM: operation not permitted, rename'), { code: 'EPERM' });
+
+  it('retries a Windows-style lock (EPERM) and succeeds once released', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-config-retry-'));
+    const target = path.join(dir, 'settings.json');
+    fs.writeFileSync(target, '{"original":true}\n', 'utf8');
+    const sleepCalls: number[] = [];
+    let attempts = 0;
+    try {
+      atomicReplaceTextFile(target, '{"replaced":true}\n', {
+        ...fs,
+        renameSync: (...args: Parameters<typeof fs.renameSync>) => {
+          attempts += 1;
+          if (attempts < 3) throw lockedError();
+          return fs.renameSync(...args);
+        },
+      }, { sleep: (ms) => { sleepCalls.push(ms); } });
+      expect(attempts).toBe(3);
+      expect(fs.readFileSync(target, 'utf8')).toBe('{"replaced":true}\n');
+      expect(sleepCalls).toEqual([100, 200]);
+      expect(fs.readdirSync(dir)).toEqual(['settings.json']);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('exhausts retry attempts on a persistent lock and reports the LAST error without touching the target', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-config-retry-'));
+    const target = path.join(dir, 'settings.json');
+    fs.writeFileSync(target, '{"original":true}\n', 'utf8');
+    const sleepCalls: number[] = [];
+    let attempts = 0;
+    try {
+      expect(() => atomicReplaceTextFile(target, '{"replaced":true}\n', {
+        ...fs,
+        renameSync: () => {
+          attempts += 1;
+          throw lockedError();
+        },
+      }, { maxAttempts: 3, sleep: (ms) => { sleepCalls.push(ms); } })).toThrow(/EPERM/);
+      expect(attempts).toBe(3);
+      expect(fs.readFileSync(target, 'utf8')).toBe('{"original":true}\n');
+      expect(sleepCalls).toEqual([100, 200]);
+      expect(fs.readdirSync(dir)).toEqual(['settings.json']);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('does NOT retry non-lock failures (no errno)', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-config-retry-'));
+    const target = path.join(dir, 'settings.json');
+    fs.writeFileSync(target, '{"original":true}\n', 'utf8');
+    const sleepCalls: number[] = [];
+    let attempts = 0;
+    try {
+      expect(() => atomicReplaceTextFile(target, '{"replaced":true}\n', {
+        ...fs,
+        renameSync: () => {
+          attempts += 1;
+          throw new Error('disk on fire');
+        },
+      }, { sleep: (ms) => { sleepCalls.push(ms); } })).toThrow(/disk on fire/);
+      expect(attempts).toBe(1);
+      expect(sleepCalls).toEqual([]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('withConfigFileLock', () => {
   it('cleans its exclusive lock when lock metadata cannot be flushed', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-config-lock-'));

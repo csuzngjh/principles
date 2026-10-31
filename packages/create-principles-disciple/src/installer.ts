@@ -37,6 +37,7 @@ import {
   type RuntimeProfileInput,
 } from './mvp-config.js';
 import { getHostInstallers, type HostTarget } from './installers/index.js';
+import { runWorkbuddyEarlyPreflight } from './installers/workbuddy-host-installer.js';
 import type { HostInstallContext, HostInstallResult } from '@principles/core/host';
 import { INSTALL_LAYOUT_VERSION, getWorkbuddyWorkspaceDir, installManifestHostsForPersist, mergeInstallManifestWorkspaces, parseInstallManifest } from '@principles/install-layout';
 import { detectOpenClawMainWorkspaceDivergence } from './utils/workspace-divergence.js';
@@ -181,6 +182,10 @@ const ALLOWED_NATIVE_MODULES = ['better-sqlite3'];
 let activeHostTarget: HostTarget = 'openclaw';
 function installsOpenClaw(host: HostTarget): boolean {
   return host === 'openclaw' || host === 'all';
+}
+
+function installsWorkbuddy(host: HostTarget): boolean {
+  return host === 'workbuddy' || host === 'all';
 }
 
 function installedPluginDir(): string {
@@ -3889,6 +3894,28 @@ export async function install(
       };
     }
   }
+  // PRI-1062: WorkBuddy hard preflights run BEFORE any side effect — including
+  // the gateway stop below. A running WorkBuddy holds settings.json with
+  // exclusive sharing (the commit-stage rename fails with EPERM after minutes
+  // of npm work) and hooks never launch without Git Bash. Both are knowable up
+  // front; failing here costs one bash probe + two file opens instead of a
+  // full install + rollback.
+  //
+  // Ordering is load-bearing: this must precede the gateway pre-flight. On
+  // `--host all` the gateway block below may STOP the Owner's OpenClaw
+  // gateway, and a refusal that returns from here would leave it stopped —
+  // `restartedGateway` is only honoured at the end of the install flow.
+  if (installsWorkbuddy(options.host)) {
+    const workbuddyPreflight = runWorkbuddyEarlyPreflight();
+    if (!workbuddyPreflight.ok) {
+      logger.error(workbuddyPreflight.reason);
+      return buildGatewayRefusalResult(options, {
+        reason: `workbuddy_preflight_failed: ${workbuddyPreflight.reason}`,
+        nextAction: workbuddyPreflight.nextAction,
+      });
+    }
+  }
+
   // Gateway lock pre-flight: a running gateway holds native-module file handles
   // that make the backup rename fail with EPERM. Decide stop/abort/proceed
   // BEFORE mutating anything (cli-5: abort/stop-failed paths must not mutate).

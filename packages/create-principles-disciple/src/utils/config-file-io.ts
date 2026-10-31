@@ -24,8 +24,35 @@ export function errnoCode(value: unknown): string | undefined {
   return typeof code === 'string' ? code : undefined;
 }
 
-/** Same-directory, flushed temp write followed by atomic replacement. */
-export function atomicReplaceTextFile(filePath: string, content: string, ops: ConfigFileOps = FILE_OPS): void {
+/** Rename errnos worth retrying: a host process (WorkBuddy) holding the
+ * target with exclusive sharing surfaces as these on Windows. Transient by
+ * nature — the host rewrites its settings periodically and releases. */
+const RETRYABLE_RENAME_ERRNOS = new Set(['EPERM', 'EBUSY', 'EACCES']);
+
+export interface AtomicReplaceRetryOptions {
+  /** Total rename attempts (default 5: initial + 4 retries). */
+  maxAttempts?: number;
+  sleep?: (milliseconds: number) => void;
+}
+
+function sleepSync(milliseconds: number): void {
+  if (milliseconds <= 0) return;
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
+/** Same-directory, flushed temp write followed by atomic replacement.
+ * PRI-1062: the rename stage retries briefly on Windows lock errnos — the
+ * WorkBuddy host holds settings.json while running and a single-attempt
+ * rename turned minutes of installer work into a full rollback. */
+// eslint-disable-next-line @typescript-eslint/max-params -- fs-ops seam + retry options; merging them would break every existing ops caller
+export function atomicReplaceTextFile(
+  filePath: string,
+  content: string,
+  ops: ConfigFileOps = FILE_OPS,
+  retry: AtomicReplaceRetryOptions = {},
+): void {
+  const maxAttempts = Math.max(1, retry.maxAttempts ?? 5);
+  const wait = retry.sleep ?? sleepSync;
   const tempDir = ops.mkdtempSync(path.join(path.dirname(filePath), '.pd-config-write-'));
   const tempPath = path.join(tempDir, 'config.yaml');
   let fd: number | undefined;
@@ -37,8 +64,18 @@ export function atomicReplaceTextFile(filePath: string, content: string, ops: Co
     ops.fsyncSync(fd);
     ops.closeSync(fd);
     fd = undefined;
-    ops.renameSync(tempPath, filePath);
-    replaced = true;
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        ops.renameSync(tempPath, filePath);
+        operationError = undefined;
+        break;
+      } catch (error: unknown) {
+        operationError = error;
+        if (attempt >= maxAttempts - 1 || !RETRYABLE_RENAME_ERRNOS.has(errnoCode(error) ?? '')) break;
+        wait(Math.min(100 * 2 ** attempt, 1_600));
+      }
+    }
+    if (operationError === undefined) replaced = true;
   } catch (error: unknown) {
     operationError = error;
   }
@@ -59,11 +96,6 @@ export function atomicReplaceTextFile(filePath: string, content: string, ops: Co
   }
   if (operationError !== undefined) throw operationError instanceof Error ? operationError : new Error(String(operationError));
   if (cleanupError !== undefined) throw cleanupError instanceof Error ? cleanupError : new Error(String(cleanupError));
-}
-
-function sleepSync(milliseconds: number): void {
-  if (milliseconds <= 0) return;
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
 }
 
 function readLockPid(lockPath: string, ops: ConfigFileOps): number | null {
