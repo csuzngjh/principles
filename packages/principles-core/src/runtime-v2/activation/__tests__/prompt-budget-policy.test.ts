@@ -7,6 +7,7 @@ import {
   isValidContextWindowTokens,
   promptBudgetCharsForContextWindow,
   resolvePromptBudget,
+  resolveTotalInjectionBudgetChars,
   type PromptModelCatalog,
 } from '../prompt-budget-policy.js';
 import { getPromptModelCatalog } from '../../adapter/pi-ai-catalog.js';
@@ -362,5 +363,40 @@ describe('resolvePromptBudget tier 0: operator_declared (PRI-1020)', () => {
     });
     expect(result.capacitySource).toBe('host_effective_window');
     expect(result.budgetChars).toBe(4000);
+  });
+});
+
+describe('resolveTotalInjectionBudgetChars (PRI-1065 total-ceiling reconciliation)', () => {
+  it('keeps the historical 9000 total at the reference window (backward compatible)', () => {
+    // 128K → principle budget 2000 + 7000 background allowance = the legacy
+    // hard-coded size-guard constant. Existing behavior must not change.
+    expect(resolveTotalInjectionBudgetChars(promptBudgetCharsForContextWindow(128_000))).toBe(9000);
+    expect(resolveTotalInjectionBudgetChars(PROMPT_BUDGET_FALLBACK_CHARS)).toBe(9000);
+  });
+
+  it('grows the ceiling with the model window instead of pinning it', () => {
+    expect(resolveTotalInjectionBudgetChars(PROMPT_BUDGET_MIN_CHARS)).toBe(8250);
+    expect(resolveTotalInjectionBudgetChars(promptBudgetCharsForContextWindow(1_000_000))).toBe(22_625);
+    expect(resolveTotalInjectionBudgetChars(PROMPT_BUDGET_MAX_CHARS)).toBe(23_000);
+  });
+
+  it('composes with the resolver: a 1M window leaves room for background blocks', () => {
+    // The audited failure: 15625 principle budget with 5145 injected chars
+    // left only 9000-5865=3135 for background under the old constant. The
+    // reconciled ceiling leaves 22625-5865=16760.
+    const resolution = resolvePromptBudget({ operatorDeclared: { contextWindowTokens: 1_000_000 } });
+    const total = resolveTotalInjectionBudgetChars(resolution.budgetChars);
+    expect(resolution.budgetChars).toBe(15_625);
+    expect(total).toBe(22_625);
+    expect(total - (720 + 5145)).toBeGreaterThan(10_000);
+  });
+
+  it('is monotonic: a larger principle budget never lowers the total ceiling', () => {
+    let previous = -Infinity;
+    for (let budget = PROMPT_BUDGET_MIN_CHARS; budget <= PROMPT_BUDGET_MAX_CHARS; budget += 125) {
+      const total = resolveTotalInjectionBudgetChars(budget);
+      expect(total).toBeGreaterThan(previous);
+      previous = total;
+    }
   });
 });
