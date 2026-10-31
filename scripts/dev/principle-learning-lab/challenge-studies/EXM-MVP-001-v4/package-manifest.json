@@ -43,7 +43,7 @@
       },
       {
         "name": "challenge-behavior-report.mjs",
-        "sha256": "14a7970103c85ba036df13fe2daa2e51c97f0d16d2de84b2bfd8dc53f4207b9b"
+        "sha256": "fb160e9d0021218c1fe00614f8c4d63f145900260e63ade46bab76019510d180"
       },
       {
         "name": "challenge-compile.mjs",
@@ -87,7 +87,7 @@
       },
       {
         "name": "challenge-runner.mjs",
-        "sha256": "5c6adb5d0ee1f1737ff8c0a26e87904acbeda3ffcb886ff21f9b67e58e4658d5"
+        "sha256": "005f49e9b76d4153834d8b727f13da2c56b2616a093ce588dc15b65445d0f6b5"
       },
       {
         "name": "challenge-skeleton.mjs",
@@ -99,7 +99,7 @@
       },
       {
         "name": "challenge-statistics.mjs",
-        "sha256": "a03610794be8e86af0cec67d9416c8fb274f3fa1f21afafe46eaeae7dde933f3"
+        "sha256": "bb398e396f22045e70e5009af9166ac301856c72263600f35340e3051fc6941b"
       },
       {
         "name": "challenge-validator.mjs",
@@ -124,6 +124,14 @@
       {
         "name": "evidence-verifier.mjs",
         "sha256": "dc5d0cf5df16c388680f963d582fb0174f70b58c11640e7154b41852794b7f7e"
+      },
+      {
+        "name": "examiner-injection-evidence.mjs",
+        "sha256": "112734183cfe4c551e30da7430c259a2bf73160c4ce9ee64d8b65af10d8f9153"
+      },
+      {
+        "name": "examiner-study.mjs",
+        "sha256": "c557689a39dc83767079d3701bdff3f680d12ea1518d929914e274af683a2599"
       },
       {
         "name": "fixture.mjs",
@@ -194,7 +202,7 @@
     },
     {
       "path": "blind-review/receipts.template.json",
-      "sha256": "223b048d591669410d09f639c3db331a343c6abbb39df78084a83297f119bf89"
+      "sha256": "76f989b5c4434920f8c6160d8ef88a852ff777c7efbe51cd5b25d6f489fc80de"
     },
     {
       "path": "blind-review/review-form.json",
@@ -202,7 +210,7 @@
     },
     {
       "path": "expected-replay.json",
-      "sha256": "1c2c733042f7fc2c414a7d9461337086c2dccd7d60452e4f3f3a6d900403ce8b"
+      "sha256": "9ba1d1c12f050a9711ae3f5a9090fad8b17de122a6568b0ce3e2b44b5851cafd"
     },
     {
       "path": "gold-review.json",
@@ -246,7 +254,7 @@
     },
     {
       "path": "review-subject.json",
-      "sha256": "44111914af30bafe4ffdb09ae6c3aeff4c2477862b7c5e2534478bd6b117b53b"
+      "sha256": "bb05d523cacc9886bb028b394cf3b50e32b286783b73dda551328ed71bb07343"
     },
     {
       "path": "revision.json",
@@ -261,5 +269,5 @@
       "sha256": "8c96f68ebfcd0ff71c1625cef036d6ef7f4f82785a303f45ff4a45952df9185c"
     }
   ],
-  "packageHash": "5c55977c749e741f92e0f33dd54bef61e4b47a55ad8381f5e4af8b893fb23773"
+  "packageHash": "0c5439bc627b796aa24951cbbaa3632c7e636d5c894a0be9d2a1242f078bae49"
 }
