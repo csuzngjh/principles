@@ -17,7 +17,7 @@
  * entry (manual pain ids, no admission marker); this one is the bound
  * agent-assisted counterpart of the prefix entry.
  */
-import { registerCurrentTurnOwnerStatement, type RegisterCurrentTurnResult } from '@principles/codex-adapter';
+import type { RegisterCurrentTurnResult, registerCurrentTurnOwnerStatement as registerCurrentTurnOwnerStatementFn } from '@principles/codex-adapter';
 import { MAX_OWNER_STATEMENT_CHARS } from '@principles/host-runtime';
 import { resolveWorkspaceDir } from '../resolve-workspace.js';
 
@@ -63,6 +63,20 @@ export async function handlePainExplicit(opts: ExplicitOptions): Promise<void> {
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     emitFailure(opts, { reason: 'workspace_unresolvable', message: detail.slice(0, 400), nextAction: 'Pass --workspace explicitly or run from a directory inside a PD workspace.' });
+  }
+  // PRI-1061: @principles/codex-adapter is a host-scoped payload — a
+  // workbuddy-host install ships no codex adapter at all, so this must NOT be
+  // a static import: a static import would sit on the CLI's startup module
+  // graph and brick `pd --help` on every non-codex machine.
+  let registerCurrentTurnOwnerStatement: typeof registerCurrentTurnOwnerStatementFn;
+  try {
+    ({ registerCurrentTurnOwnerStatement } = await import('@principles/codex-adapter'));
+  } catch {
+    emitFailure(opts, {
+      reason: 'codex_adapter_unavailable',
+      message: 'The Codex host adapter is not installed in this PD runtime; agent-assisted explicit pain registration is unavailable.',
+      nextAction: 'This command requires the Codex host. Re-run the PD installer with the codex host selected, or use `pd pain record` for the unbound manual entry.',
+    });
   }
   const result: RegisterCurrentTurnResult = await registerCurrentTurnOwnerStatement({
     workspaceDir,
