@@ -63,7 +63,11 @@ describe('pd-hook Stop behavior', () => {
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toHaveLength(1);
     expect(result.stderr[0]).toContain('reason=feature_disabled');
-    expect(result.stderr[0]).toContain('codex_conversation_ingestion.enabled=true');
+    // PRI-1063: the enable instruction is a paste-ready FLAT-key snippet —
+    // the dotted id is one key, so the assertion pins the snippet shape.
+    expect(result.stderr[0]).toContain('codex_conversation_ingestion:');
+    expect(result.stderr[0]).toContain('enabled: true');
+    expect(result.stderr[0]).toContain('FLAT key');
   });
 
   it('flag off on the per-tool/prompt events stays fully quiet (no per-event noise, PR #1455 review P2)', async () => {

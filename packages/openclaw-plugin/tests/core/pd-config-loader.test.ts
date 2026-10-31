@@ -464,7 +464,11 @@ describe('Feature flag vs agent enabled mismatch', () => {
       expect(result.enabled).toBe(false);
       expect(result.readiness).toBe('disabled');
       expect(result.reason).toContain('enabled is false');
-      expect(result.nextAction).toContain('internalAgents.agents.correctionObserver.enabled=true');
+      // PRI-1063: paste-ready snippet — internalAgents IS a real nested path,
+      // so the assertion pins the nested YAML shape.
+      expect(result.nextAction).toContain('internalAgents:');
+      expect(result.nextAction).toContain('correctionObserver:');
+      expect(result.nextAction).toContain('enabled: true');
     } finally { rmTmpDir(tmp); }
   });
 });

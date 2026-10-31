@@ -70,14 +70,16 @@ export function resolveObserverConfig(
   const config = result.effective.config;
   const feature = config.features[observerFlagId];
   if (!feature?.enabled) {
-    return { enabled: false, readiness: 'disabled', ...base(result), ...emptyRuntime(), reason: `${observerFlagId} is disabled in .pd/config.yaml`, nextAction: `Set features.${observerFlagId}.enabled=true in .pd/config.yaml to enable` };
+    // PRI-1063: paste-ready YAML snippet; the dotted id is ONE flat key —
+    // a nested expansion of the dots is silently not the same key.
+    return { enabled: false, readiness: 'disabled', ...base(result), ...emptyRuntime(), reason: `${observerFlagId} is disabled in .pd/config.yaml`, nextAction: `Enable it in .pd/config.yaml — the flag id is one FLAT key, not nested keys:\nfeatures:\n  ${observerFlagId}:\n    enabled: true` };
   }
   if (!isInternalAgentName(observerAgentName)) {
     return { enabled: false, readiness: 'needs_setup', ...base(result), ...emptyRuntime(), reason: `Unknown agent name '${observerAgentName}'`, nextAction: `Use one of the known agent names: ${INTERNAL_AGENT_NAMES.join(', ')}` };
   }
   const agent = config.internalAgents.agents[observerAgentName];
   if (!agent?.enabled) {
-    return { enabled: false, readiness: 'disabled', ...base(result), ...emptyRuntime(), reason: `${observerFlagId} feature flag is enabled but internalAgents.agents.${observerAgentName}.enabled is false`, nextAction: `Set internalAgents.agents.${observerAgentName}.enabled=true in .pd/config.yaml, or disable features.${observerFlagId}` };
+    return { enabled: false, readiness: 'disabled', ...base(result), ...emptyRuntime(), reason: `${observerFlagId} feature flag is enabled but internalAgents.agents.${observerAgentName}.enabled is false`, nextAction: `Enable the agent in .pd/config.yaml (nested path is REAL here):\ninternalAgents:\n  agents:\n    ${observerAgentName}:\n      enabled: true\n—or disable the flag instead (flat key):\nfeatures:\n  ${observerFlagId}:\n    enabled: false` };
   }
   const runtimeProfileId = agent.runtimeProfile ?? config.internalAgents.defaultRuntime;
   const profile = config.runtimeProfiles[runtimeProfileId];

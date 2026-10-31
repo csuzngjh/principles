@@ -250,7 +250,9 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
   }
   const { flags } = computeFeatureFlagsFromConfig(config.effective);
   if (flags['host.codex']?.enabled !== true) {
-    return { stdout: {}, exitCode: 0, stderr: [diagnostic('host.codex_disabled', 'Set features.host.codex.enabled=true in the selected Workspace to enable PD.')] };
+    // PRI-1063: paste-ready YAML snippet; the dotted id is ONE flat key —
+    // a nested host:→codex: write is silently not the same key.
+    return { stdout: {}, exitCode: 0, stderr: [diagnostic('host.codex_disabled', 'Enable PD in the selected Workspace .pd/config.yaml — the flag id is one FLAT key, not nested keys:\nfeatures:\n  host.codex:\n    enabled: true')] };
   }
   const ingestionEnabled = flags.codex_conversation_ingestion?.enabled === true;
 
@@ -276,7 +278,7 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
     // would be per-event noise).
     const stderr = ingestionEnabled
       ? [...clearDiagnostics, ...await runConversationIngestion({ rawPayload: parsed, kind: event.kind, workspaceDir: resolution.workspaceDir, env: _env })]
-      : [...clearDiagnostics, diagnostic('feature_disabled', 'Set features.codex_conversation_ingestion.enabled=true in the selected Workspace .pd/config.yaml to enable bounded conversation ingestion.')];
+      : [...clearDiagnostics, diagnostic('feature_disabled', 'Enable bounded conversation ingestion in the selected Workspace .pd/config.yaml — the flag id is one FLAT key, not nested keys:\nfeatures:\n  codex_conversation_ingestion:\n    enabled: true')];
     return { stdout: {}, exitCode: 0, stderr };
   }
 
