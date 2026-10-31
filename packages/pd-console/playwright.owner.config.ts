@@ -12,6 +12,12 @@ export default defineConfig({
   workers: 1,
   retries: process.env.CI ? 2 : 0,
   reporter: [['list']],
+  // Readiness pages evaluate fresh CLI capability probes server-side (two
+  // subprocesses per shadow activation) and `asyncHandler` allows up to 10s
+  // for the request. The Playwright default (5s) is below that budget, so a
+  // legitimately slow-but-successful load fails the visibility assertion.
+  // Keep the assertion timeouts above the server's own request budget.
+  expect: { timeout: 15000 },
   use: {
     baseURL,
     trace: 'on-first-retry',

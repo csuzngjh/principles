@@ -246,6 +246,10 @@ function asyncHandler(fn: AsyncRouteHandler, timeoutMs: number = REQUEST_TIMEOUT
   return (innerReq, innerRes) => {
     const timeoutId = setTimeout(() => {
       if (!innerRes.headersSent) {
+        // The route keeps running after this point; record the real cause
+        // before any dropped late write, so the log never leads with a
+        // transport error (ERR_HTTP_HEADERS_SENT) instead of the timeout.
+        console.warn(`[pd-console] Request timed out after ${timeoutMs}ms: ${innerReq.method ?? 'GET'} ${innerReq.url ?? ''}`);
         sendJson(innerRes, 504, { success: false, error: 'Request timeout' });
         innerRes.end();
       }
