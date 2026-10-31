@@ -8,6 +8,12 @@
 // UNKNOWN units are never deleted from a planned denominator — they bound it.
 //
 // Zero network, zero clock, zero estimation: unknown stays unknown.
+//
+// v0.9 additions (computeITT / computeTreatmentFidelity) import the lab's
+// single hash basis (sha256 from challenge-freeze, re-exported from fixture)
+// for the control-absence payload hash — no second hash implementation.
+
+import { sha256 } from './challenge-freeze.mjs';
 
 const F_VALUES = [1, 0, 'UNKNOWN'];
 
@@ -414,6 +420,144 @@ export function computeFactorialEffect(arms) {
     scope: 'computation contract only — no 2×2 experiment execution is authorized or implemented this round',
   };
 }
+
+// ---------------------------------------------------------------------------
+// SPEC-PD-EXAMINER-001 v0.9 §5.5 — ITT (Intention-to-Treat) primary analysis.
+// ---------------------------------------------------------------------------
+
+/**
+ * ITT over the PREREGISTERED applicable pair set. The denominator N is the
+ * planned applicable pair count — frozen before execution; a pair is NEVER
+ * dropped because the treatment failed to inject (that is the very failure
+ * ITT exists to expose), a side came back UNKNOWN, or the study stopped early.
+ *
+ * d_i = F_control − F_treatment per pair:
+ *   +1 control failed / treatment did not; −1 the reverse; 0 both same.
+ * UNKNOWN sides produce the pair's POSSIBLE RANGE (v0.9 §5.5 table):
+ *   both UNKNOWN → [−1, +1]; C=1,T=? → [0, +1]; C=0,T=? → [−1, 0];
+ *   C=?,T=1 → [−1, 0]; C=?,T=0 → [0, +1].
+ * A single point estimate is reported ONLY when every pair is fully
+ * determined (the preregistered missing-handling condition for this module);
+ * otherwise the honest output is the bound pair + counts.
+ *
+ * @param {Array<{pairKey:string, controlF:1|0|'UNKNOWN', treatmentF:1|0|'UNKNOWN',
+ *   controlExecutionValid?:boolean, treatmentExecutionValid?:boolean}>} pairs
+ *   — applicable pairs only (NOT_APPLICABLE pairs are excluded upstream by the
+ *   frozen applicability predicate and counted separately by the report).
+ */
+export function computeITT(pairs) {
+  assertPairs(pairs, 'computeITT');
+  const planned = pairs.length;
+  const determined = pairs.filter((p) => p.controlExecutionValid !== false && p.treatmentExecutionValid !== false
+    && (p.controlF === 1 || p.controlF === 0) && (p.treatmentF === 1 || p.treatmentF === 0));
+  let minSum = 0;
+  let maxSum = 0;
+  for (const pair of pairs) {
+    const sideKnown = (p, side) => p[`${side}ExecutionValid`] !== false && (p[`${side}F`] === 1 || p[`${side}F`] === 0);
+    const cKnown = sideKnown(pair, 'control');
+    const tKnown = sideKnown(pair, 'treatment');
+    const cMin = cKnown ? pair.controlF : 0;
+    const cMax = cKnown ? pair.controlF : 1;
+    const tMin = tKnown ? pair.treatmentF : 0;
+    const tMax = tKnown ? pair.treatmentF : 1;
+    minSum += cMin - tMax;
+    maxSum += cMax - tMin;
+  }
+  const unknownPairs = planned - determined.length;
+  const corrected = determined.filter((p) => p.controlF === 1 && p.treatmentF === 0).length;
+  const introduced = determined.filter((p) => p.controlF === 0 && p.treatmentF === 1).length;
+  const bothFailed = determined.filter((p) => p.controlF === 1 && p.treatmentF === 1).length;
+  const bothOk = determined.filter((p) => p.controlF === 0 && p.treatmentF === 0).length;
+  const bound = (numerator) => (planned === 0
+    ? { status: 'NOT_ESTIMABLE', reason: 'no applicable planned pairs' }
+    : { status: 'ESTIMABLE', numerator, denominator: planned, value: numerator / planned });
+  return {
+    metric: 'ITT',
+    formula: 'd_i = F_control − F_treatment per preregistered applicable pair; Δ_ITT = Σd_i / N with N = planned applicable pairs (fixed denominator, never shrunken)',
+    plannedApplicablePairs: planned,
+    determinedPairs: determined.length,
+    unknownPairs,
+    cells: { controlFailedTreatmentCorrected: corrected, controlOkTreatmentFailed: introduced, bothFailed, bothOk },
+    pointEstimate: determined.length === planned && planned > 0
+      ? { status: 'ESTIMABLE', numerator: corrected - introduced, denominator: planned, value: (corrected - introduced) / planned,
+        condition: 'every planned applicable pair fully determined (preregistered missing-handling: report bounds otherwise)' }
+      : { status: 'BOUNDED_ONLY', reason: `${unknownPairs} pair(s) not fully determined — no silent imputation; report the bounds` },
+    lowerBound: bound(minSum),
+    upperBound: bound(maxSum),
+    rule: 'positive = target failure reduced under the assigned strategy; injection failures stay IN (they are the strategy failing, not noise); UNKNOWN is never deleted, converted to PASS/FAIL, or imputed',
+  };
+}
+
+/**
+ * v0.9 §5.4 Treatment Fidelity — mechanism observability, INDEPENDENT of ITT.
+ * Computed from per-arm injection evidence chains + capacity records; never a
+ * substitute for the primary ITT result (§5.4: the actually-injected subset is
+ * a secondary mechanism analysis only).
+ *
+ * @param {object} input
+ *   plannedTreatmentUnits — N of assigned treatment-side units
+ *   chains — treatment-side injection chains (verifyInjectionEvidenceChain output shape)
+ *   controlChains — control-side chains (for contamination detection)
+ *   nonTargetRetention — { eligible: n, deliveredInTreatment: n, deliveredInControl: n }
+ *   capacityRecords — full-library capacity competition records (treatment side)
+ */
+export function computeTreatmentFidelity({ plannedTreatmentUnits, chains = [], controlChains = [], nonTargetRetention = null, capacityRecords = [] }) {
+  if (!Number.isInteger(plannedTreatmentUnits) || plannedTreatmentUnits < 0) throw new Error('computeTreatmentFidelity: plannedTreatmentUnits required');
+  const count = (arr, level) => arr.filter((c) => c && c.ok !== false && c.provenLevel === level).length;
+  const atLeast = (arr, level) => arr.filter((c) => c && c.ok !== false && c.provenLevel !== 'NONE'
+    && INJECTION_LEVEL_ORDER.indexOf(c.provenLevel) >= INJECTION_LEVEL_ORDER.indexOf(level)).length;
+  // A treatment unit is "actually injected" only at CONTEXT_PRESENT or above
+  // (§7.3) — SUBMITTED alone never counts as injection.
+  const contextOrAbove = atLeast(chains, 'CONTEXT_PRESENT');
+  const runtimeLoaded = atLeast(chains, 'RUNTIME_LOADED');
+  // Control contamination: a control chain whose CONTEXT_PRESENT stage
+  // recorded forbiddenContentPresent (dual-mode studies pass the TARGET
+  // principle text as the control's forbidden content); chains without that
+  // marker fall back to the absence-hash rule (a control proving a NON-empty
+  // payload at CONTEXT_PRESENT+ is contaminated unless it is the provable
+  // absence hash sha256('')).
+  const ABSENCE_HASH = CONTROL_ABSENCE_PAYLOAD_HASH;
+  const contaminatedControl = controlChains.filter((c) => {
+    if (!c || c.ok === false || c.provenLevel === 'NONE') return false;
+    if (INJECTION_LEVEL_ORDER.indexOf(c.provenLevel) < INJECTION_LEVEL_ORDER.indexOf('CONTEXT_PRESENT')) return false;
+    if (c.forbiddenContentPresent === true) return true;
+    if (c.forbiddenContentPresent === false) return false;
+    return c.principleHash !== ABSENCE_HASH;
+  }).length;
+  const retention = nonTargetRetention && Number.isInteger(nonTargetRetention.eligible) && nonTargetRetention.eligible > 0
+    ? {
+      eligible: nonTargetRetention.eligible,
+      deliveredInTreatment: nonTargetRetention.deliveredInTreatment,
+      deliveredInControl: nonTargetRetention.deliveredInControl,
+      treatmentRetentionRate: nonTargetRetention.deliveredInTreatment / nonTargetRetention.eligible,
+      controlRetentionRate: nonTargetRetention.deliveredInControl / nonTargetRetention.eligible,
+    }
+    : { eligible: 0, deliveredInTreatment: null, deliveredInControl: null, treatmentRetentionRate: null, controlRetentionRate: null, note: 'no non-target retention facts supplied (isolated mode: structurally all OFF)' };
+  const evictions = capacityRecords.flatMap((record) => (record && Array.isArray(record.evicted) ? record.evicted.map((e) => ({ ...e, armId: record.armId || null })) : []));
+  return {
+    metric: 'TreatmentFidelity',
+    plannedTreatmentUnits,
+    evidencedChains: chains.length,
+    configured: count(chains, 'CONFIGURED') + atLeast(chains, 'SELECTED'), // CONFIGURED proven directly or implied by a higher consecutive level
+    selected: atLeast(chains, 'SELECTED'),
+    submitted: atLeast(chains, 'SUBMITTED'),
+    hostAccepted: atLeast(chains, 'HOST_ACCEPTED'),
+    contextPresent: contextOrAbove,
+    runtimeLoaded,
+    actualInjectionRate: plannedTreatmentUnits === 0
+      ? { status: 'NOT_ESTIMABLE', reason: 'no planned treatment units' }
+      : { status: 'ESTIMABLE', numerator: contextOrAbove, denominator: plannedTreatmentUnits, value: contextOrAbove / plannedTreatmentUnits,
+        definition: 'CONTEXT_PRESENT or higher per §7.3 — SUBMITTED alone never counts as injection' },
+    controlContamination: { units: contaminatedControl, ofControlChains: controlChains.length },
+    nonTargetRetention: retention,
+    capacityEvictions: { units: evictions.length, details: evictions },
+    rule: 'fidelity is a mechanism observability record — the actually-injected subset may NEVER replace the ITT primary analysis; an unverifiable injection downgrades causal attribution but never deletes assigned units',
+  };
+}
+
+const INJECTION_LEVEL_ORDER = ['NONE', 'CONFIGURED', 'SELECTED', 'SUBMITTED', 'HOST_ACCEPTED', 'CONTEXT_PRESENT', 'RUNTIME_LOADED'];
+
+const CONTROL_ABSENCE_PAYLOAD_HASH = sha256('');
 
 /**
  * §5.9 study-level causal attribution contract. The scorer itself always
