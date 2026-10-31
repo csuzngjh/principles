@@ -1,0 +1,130 @@
+{
+  "schema": "examiner-pair-assignment.v1",
+  "strategy": "balanced-randomized",
+  "seed": "v09-acceptance-iso-20261101",
+  "controlArm": "A",
+  "treatmentArm": "B",
+  "balance": {
+    "controlFirst": 3,
+    "treatmentFirst": 3
+  },
+  "pairs": [
+    {
+      "pairId": "P-001",
+      "caseId": "EXM-V09-ACC-01",
+      "repetitionId": "1",
+      "armOrder": [
+        "A",
+        "B"
+      ]
+    },
+    {
+      "pairId": "P-002",
+      "caseId": "EXM-V09-ACC-01",
+      "repetitionId": "2",
+      "armOrder": [
+        "B",
+        "A"
+      ]
+    },
+    {
+      "pairId": "P-003",
+      "caseId": "EXM-V09-ACC-02",
+      "repetitionId": "1",
+      "armOrder": [
+        "A",
+        "B"
+      ]
+    },
+    {
+      "pairId": "P-004",
+      "caseId": "EXM-V09-ACC-02",
+      "repetitionId": "2",
+      "armOrder": [
+        "B",
+        "A"
+      ]
+    },
+    {
+      "pairId": "P-005",
+      "caseId": "EXM-V09-ACC-03",
+      "repetitionId": "1",
+      "armOrder": [
+        "A",
+        "B"
+      ]
+    },
+    {
+      "pairId": "P-006",
+      "caseId": "EXM-V09-ACC-03",
+      "repetitionId": "2",
+      "armOrder": [
+        "B",
+        "A"
+      ]
+    }
+  ],
+  "unitOrder": [
+    {
+      "caseId": "EXM-V09-ACC-01",
+      "armId": "A",
+      "repetitionId": "1"
+    },
+    {
+      "caseId": "EXM-V09-ACC-01",
+      "armId": "B",
+      "repetitionId": "1"
+    },
+    {
+      "caseId": "EXM-V09-ACC-01",
+      "armId": "B",
+      "repetitionId": "2"
+    },
+    {
+      "caseId": "EXM-V09-ACC-01",
+      "armId": "A",
+      "repetitionId": "2"
+    },
+    {
+      "caseId": "EXM-V09-ACC-02",
+      "armId": "A",
+      "repetitionId": "1"
+    },
+    {
+      "caseId": "EXM-V09-ACC-02",
+      "armId": "B",
+      "repetitionId": "1"
+    },
+    {
+      "caseId": "EXM-V09-ACC-02",
+      "armId": "B",
+      "repetitionId": "2"
+    },
+    {
+      "caseId": "EXM-V09-ACC-02",
+      "armId": "A",
+      "repetitionId": "2"
+    },
+    {
+      "caseId": "EXM-V09-ACC-03",
+      "armId": "A",
+      "repetitionId": "1"
+    },
+    {
+      "caseId": "EXM-V09-ACC-03",
+      "armId": "B",
+      "repetitionId": "1"
+    },
+    {
+      "caseId": "EXM-V09-ACC-03",
+      "armId": "B",
+      "repetitionId": "2"
+    },
+    {
+      "caseId": "EXM-V09-ACC-03",
+      "armId": "A",
+      "repetitionId": "2"
+    }
+  ],
+  "assignmentHash": "ec0811cf2a80ac32a53f7443681c6959cb9644b77d354246cff75e145e4d213f"
+}

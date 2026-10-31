@@ -1,0 +1,43 @@
+{
+  "schema": "examiner-injection-evidence.v1",
+  "producedBy": "runner-offline-stub",
+  "scope": "offline-stub",
+  "armId": "A",
+  "principleHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "expectedLevel": "RUNTIME_LOADED",
+  "stages": {
+    "CONFIGURED": {
+      "evidenceRef": "arm-configs.json#arm-A",
+      "contentHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "note": "control arm: empty payload CONFIGURED (principle OFF)"
+    },
+    "SELECTED": {
+      "evidenceRef": "arm-selection:A",
+      "contentHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "note": "offline deterministic selection: the arm payload is the complete selection output for this arm"
+    },
+    "SUBMITTED": {
+      "evidenceRef": "actor-prompt:A",
+      "contentHash": "fde72f05982fd03e3d693bc1574efbe41ea2f3d58b5997daf2ecf84b047f478a",
+      "note": "composed actor prompt submitted to the offline actor transport"
+    },
+    "HOST_ACCEPTED": {
+      "evidenceRef": "offline-actor-transport:A",
+      "contentHash": "fde72f05982fd03e3d693bc1574efbe41ea2f3d58b5997daf2ecf84b047f478a",
+      "note": "offline-stub scope: the actor transport IS the host boundary — acceptance is the transport handing the prompt to the controlled actor loop (never a claim about a real host)"
+    },
+    "CONTEXT_PRESENT": {
+      "evidenceRef": "prompt-contains-payload:A",
+      "contentHash": "fde72f05982fd03e3d693bc1574efbe41ea2f3d58b5997daf2ecf84b047f478a",
+      "note": "empty payload trivially present (nothing to leak)",
+      "forbiddenContentPresent": false
+    },
+    "RUNTIME_LOADED": {
+      "evidenceRef": "runs/EXM-V09-ACC-03/A/r2/a1.json",
+      "contentHash": "fde72f05982fd03e3d693bc1574efbe41ea2f3d58b5997daf2ecf84b047f478a",
+      "note": "offline actor loop consumed the prompt (attempt record binds the executed trace)"
+    }
+  },
+  "provenLevel": "RUNTIME_LOADED",
+  "chainHash": "ad1691beabf496dc90ecbe748b0e6fa760167421ae39b522c9227460f5697fff"
+}

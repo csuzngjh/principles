@@ -1,0 +1,23 @@
+{
+  "preregistrationHash": {
+    "value": "3f89b25ea10c3ebb8714b49b51c08d4ceb9e7b6a5362992fa697ce2fe8cf25fe"
+  },
+  "suiteHash": {
+    "value": "1a6b91a112a617c256e0d22fe1758ae38d73244d109c066fd77ba4d8bf326816"
+  },
+  "mappingHash": {
+    "value": "b76de6988dba84bd1caa242763e580bedac2c7bab0807918742d804a51c3f7a7"
+  },
+  "graderHash": {
+    "value": "b615ab31dc858aaa9fefcf2c68fcc10cad96813f9e04f00df114cfa4653abcfe"
+  },
+  "principleContentHash": {
+    "value": "0f23c5465cda629e79de9e31d4d53ddcbb6073a5a2f7390958de3276983337e1"
+  },
+  "examinerManifestHash": {
+    "value": "e622d0418ef982d5e26a4cb69459e391acfaa684df3c51907ee74c02ed5a6305"
+  },
+  "pairAssignmentHash": {
+    "value": "ec0811cf2a80ac32a53f7443681c6959cb9644b77d354246cff75e145e4d213f"
+  }
+}

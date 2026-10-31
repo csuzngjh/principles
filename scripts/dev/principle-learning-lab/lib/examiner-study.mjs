@@ -756,13 +756,24 @@ export function runExaminerPreflight(input) {
   const pairCheck = verifyPairAssignment(pairAssignment);
   check('pair_assignment_verified', 'blocker', pairCheck.ok, pairCheck.ok ? `${pairAssignment.pairs.length} pairs, balanced ${pairAssignment.balance.controlFirst}/${pairAssignment.balance.treatmentFirst}, seed frozen` : pairCheck.reason);
 
-  // A/B contrast: the arm configs may differ ONLY in the treatment payload.
+  // A/B contrast: the arms may differ ONLY in the target principle. In
+  // isolated mode that is empty-vs-target; in full-library mode BOTH carry
+  // the frozen non-target library, so the contrast is target-absent-in-A vs
+  // target-present-in-B (requires the target text for a content-level check).
   if (armConfigs && armConfigs.arms) {
     const a = armConfigs.arms.A;
     const b = armConfigs.arms.B;
-    const contrastOk = a && b && a.delivery.payloadText === '' !== (b.delivery.payloadText === '');
-    check('ab_contrast_only_target', 'blocker', contrastOk,
-      contrastOk ? 'arm A/B contrast is exactly the target Principle payload' : 'arm A/B payloads do not form a clean OFF/ON contrast on the target variable');
+    const targetText = input && text(input.targetPrincipleText) ? input.targetPrincipleText : null;
+    let contrastOk = false;
+    let detail = '';
+    if (targetText) {
+      contrastOk = Boolean(a && b && !String(a.delivery.payloadText).includes(targetText) && String(b.delivery.payloadText).includes(targetText));
+      detail = contrastOk ? 'arm A/B contrast is exactly the target Principle (absent in control, present in treatment)' : 'arm A/B payloads do not form a clean OFF/ON contrast on the target variable';
+    } else {
+      contrastOk = Boolean(a && b && (a.delivery.payloadText === '') !== (b.delivery.payloadText === ''));
+      detail = contrastOk ? 'arm A/B contrast is exactly the target Principle payload (emptiness contrast)' : 'arm A/B payloads do not form a clean OFF/ON contrast — supply targetPrincipleText for full-library content-level contrast checking';
+    }
+    check('ab_contrast_only_target', 'blocker', contrastOk, detail);
   } else {
     check('ab_contrast_only_target', 'blocker', false, 'arm configs missing');
   }
