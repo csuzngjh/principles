@@ -147,11 +147,13 @@ export {
   PROMPT_BUDGET_MIN_CHARS,
   PROMPT_BUDGET_MAX_CHARS,
   PROMPT_BUDGET_FALLBACK_CHARS,
+  PROMPT_BACKGROUND_ALLOWANCE_CHARS,
   MIN_PLAUSIBLE_CONTEXT_WINDOW_TOKENS,
   MAX_PLAUSIBLE_CONTEXT_WINDOW_TOKENS,
   TRUSTED_HOST_CONTEXT_WINDOW_SOURCES,
   isValidContextWindowTokens,
   promptBudgetCharsForContextWindow,
+  resolveTotalInjectionBudgetChars,
   classifySingleItemBudgetTier,
   resolvePromptBudget,
 } from './prompt-budget-policy.js';

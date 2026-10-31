@@ -69,6 +69,31 @@ export const PROMPT_BUDGET_MAX_CHARS = 16000;
 export const PROMPT_BUDGET_FALLBACK_CHARS = RUNTIME_V2_PRINCIPLE_BUDGET;
 
 /**
+ * PRI-1065: the fixed background allowance the total-injection ceiling adds
+ * on top of the principle budget. One model window pays for BOTH the
+ * owner-approved directives and the background blocks (project context,
+ * intent block, working memory, thinking_os, current focus), so the ceiling
+ * must grow with the principle budget instead of pinning the total to a
+ * constant — the former 9000 size guard left a 1M-window model only 9000-5145
+ * chars for background and stripped every block in one turn.
+ *
+ * 7000 keeps the historical total of 9000 at the reference window
+ * (2000 principle budget + 7000 = 9000), so existing 128K behavior is
+ * byte-identical; a 1M window resolves to 15625 + 7000.
+ */
+export const PROMPT_BACKGROUND_ALLOWANCE_CHARS = 7000;
+
+/**
+ * Total character ceiling for the assembled injection (prependSystemContext +
+ * prependContext + appendSystemContext). Derives from the SAME principle
+ * budget its directives were rendered under — one authority, no second
+ * constant (PRI-1065). Pure: one number in, one number out.
+ */
+export function resolveTotalInjectionBudgetChars(principleBudgetChars: number): number {
+  return principleBudgetChars + PROMPT_BACKGROUND_ALLOWANCE_CHARS;
+}
+
+/**
  * Plausibility bounds for a claimed context window (tokens). Values outside
  * this range are rejected as malformed rather than clamped — a corrupted
  * field must degrade to the fallback, never look like a confirmed capacity.
