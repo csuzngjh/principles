@@ -106,6 +106,10 @@ vi.mock('@principles/codex-adapter', () => ({
   locateCodexTranscriptByRolloutIdentity: mockLocateTranscript,
   CODEX_INGESTION_MIN_VERSION: '0.148.0',
   CODEX_INGESTION_VERIFIED_VERSION: '0.150.1',
+  // PRI-1061: health-codex lazily imports the adapter and injects the
+  // classifier into assessCodexInstall; the install layer is separately
+  // mocked below, so a benign stub keeps this suite focused.
+  classifyCodexVersion: () => ({ status: 'supported' }),
 }));
 
 // PRI-953: the install/version layer is unit-tested against real temp dirs in
