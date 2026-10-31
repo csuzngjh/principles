@@ -129,68 +129,27 @@ export function partitionInboxForDisplay<T extends { principleId: string; inbox:
 
 /**
  * SPEC-PD-UIUX-001 R2 (Owner review round 2): the conclusion strip's headline
- * and total must agree with the objects actually on screen and with the inbox
- * response contract.
+ * must never claim the system is clear when the inbox response cannot back
+ * that claim.
  *
  * Modes (display-only; no permission derivation):
  * - 'unavailable' — inbox projection off (feature_disabled surfaces as
- *   ownerInbox===null with NO error) or the request failed: the pending count
- *   CANNOT be confirmed; never allClear.
+ *   ownerInbox===null with NO error) or the request failed.
  * - 'degraded' — the inbox answered HTTP-success but carries
  *   `degraded: { reason, nextAction }` (e.g. principle ledger unreadable, the
- *   server then returns EMPTY groups): counts cannot be trusted; the strip
- *   shows the server's reason + nextAction and never allClear.
- * - 'ok' — counts are trusted.
- *
- * Counting (S2): displayTotal = actionableCount + inbox pending items NOT
- * already represented by an on-screen action card. The association is the
- * verified principleId field (partition.unmatchedDecisions are inbox items
- * WITHOUT a card). One inbox item matching N cards of the same principle
- * counts the N cards (each is a distinct decision); disjoint sets sum.
+ *   server then returns EMPTY groups): the strip shows the server's reason.
+ * - 'ok' — the inbox answered without degradation.
  */
 export function deriveConclusionDisplay(input: {
   ownerInbox: { groups: { decision: unknown[] }; degraded?: { reason: string; nextAction: string } } | null;
   ownerInboxError: string | null;
-  partition: { pendingTotal: number; unmatchedDecisions: unknown[] } | null;
-  actionableCount: number;
 }): {
   mode: 'ok' | 'degraded' | 'unavailable';
-  displayTotal: number;
-  actionableCount: number;
   degraded?: { reason: string; nextAction: string };
 } {
-  if (input.ownerInbox === null || input.ownerInboxError !== null || input.partition === null) {
-    return { mode: 'unavailable', displayTotal: input.actionableCount, actionableCount: input.actionableCount };
-  }
-  const matchedDecisions = input.ownerInbox.groups.decision.length - input.partition.unmatchedDecisions.length;
-  const uncoveredInboxPending = Math.max(0, input.partition.pendingTotal - matchedDecisions);
-  const base = {
-    actionableCount: input.actionableCount,
-  };
-  if (input.ownerInbox.degraded !== undefined) {
-    return {
-      mode: 'degraded',
-      displayTotal: input.actionableCount + uncoveredInboxPending,
-      ...base,
-      degraded: input.ownerInbox.degraded,
-    };
-  }
-  return {
-    mode: 'ok',
-    displayTotal: input.actionableCount + uncoveredInboxPending,
-    ...base,
-  };
-}
-
-/**
- * SPEC-PD-UIUX-001 R2 (Owner review S3): EVERY conclusion branch must express
- * governance readiness the same way — "actionable now" is only claimable when
- * the actions are not locked. One matrix, one source.
- */
-export function resolveConclusionActionableKey(mode: 'ok' | 'degraded' | 'unavailable', locked: boolean): string {
-  if (locked) return "pages.focus.conclusion.actionableLocked";
-  if (mode === 'unavailable') return "pages.focus.conclusion.actionableWithoutTotal";
-  return "pages.focus.conclusion.actionableUnlocked";
+  if (input.ownerInbox === null || input.ownerInboxError !== null) return { mode: 'unavailable' };
+  if (input.ownerInbox.degraded !== undefined) return { mode: 'degraded', degraded: input.ownerInbox.degraded };
+  return { mode: 'ok' };
 }
 
 // ── i18n code mapping helpers ─────────────────────────────────────────────
@@ -824,9 +783,6 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
   const pendingGroups = groupedData?.groups.filter((g) => g.status === "pending") ?? [];
   const groupedAvailable = groupedData !== null;
   const decisionItems = selectDecisionSurfaceItems(ownerDecisionItems, groupedAvailable);
-  // Single source for "the inline approval cards are on screen" — the section
-  // count and the empty state must agree on it.
-  const showApprovalCards = groupedAvailable && pendingGroups.length > 0;
   const pendingCount = queueData?.pendingReviewCount ?? 0;
   const deviationCount = queueData?.behaviorDeviationCount ?? 0;
   const stagnationSignals = queueData?.stagnationSignals ?? [];
@@ -873,21 +829,9 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
   const unmatchedInboxDecisions = inboxPartition?.unmatchedDecisions ?? [];
   // 待处理口径 (INV-01 lineage): decision + blocked-individual + recovery —
   // same three groups the inbox renders; historical unknowns stay explanatory.
-  const inboxPendingTotal = inboxPartition?.pendingTotal ?? 0;
-  // 可操作口径: the action cards actually on screen (decision cards + approval
-  // cards) — the same number the「需要你决定」section header shows.
-  const actionableCount = (ownerDecisionError === null ? decisionItems.length : 0)
-    + (showApprovalCards ? pendingGroups.length : 0);
   // Review round 2 (P2): the headline never claims allClear from the inbox
-  // alone, degraded payloads surface their reason, and the total is the
-  // association-deduped union of on-screen cards and inbox items — see
-  // deriveConclusionDisplay.
-  const conclusionDisplay = deriveConclusionDisplay({
-    ownerInbox,
-    ownerInboxError,
-    partition: inboxPartition,
-    actionableCount,
-  });
+  // alone; degraded payloads surface their reason — see deriveConclusionDisplay.
+  const conclusionDisplay = deriveConclusionDisplay({ ownerInbox, ownerInboxError });
 
   // Map codes to i18n text
   // Governance Recovery Actions v1: tasks_need_human_review interpolates the
@@ -913,7 +857,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
       summary: t('pages.focus.workbench.approvalSummary'),
       content: <ApprovalSubjectReading key={`${record.id}:${promptTargetHost ?? 'default'}`} principleId={group.principleId} approvalId={record.id} artifactId={record.artifactId} channel={record.channel} lockedReason={ownerActionsLockedReason ?? undefined}
         targetHost={promptTargetHost ?? undefined} revisionReview={new Set(group.records.filter(entry => entry.status === 'pending').map(entry => entry.artifactId)).size === 1 ? group.revisionReview : undefined}
-        revisionReviewUnavailable={group.revisionReviewUnavailable}
+        revisionReviewUnavailable={record.revisionReviewUnavailable ?? (group.records.some(entry => entry.status === 'pending' && entry.revisionReviewUnavailable === true) ? false : group.revisionReviewUnavailable)}
         sourceUnlinked={showsUnlinkedCandidateNote(group)}
         promptInjection={groupedData?.promptInjection}
         budgetNotice={groupedData?.promptInjection?.truncated === true && groupedData.promptInjection.capacityStatus !== 'unconfirmed' ? t(

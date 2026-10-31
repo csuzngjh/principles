@@ -1,6 +1,6 @@
 {
   "barrel": "src/runtime-v2/index.ts",
-  "count": 1972,
+  "count": 1975,
   "names": [
     "ADMISSION_CONFIDENCE_THRESHOLD",
     "ADMISSION_POLICY_VERSION",
@@ -82,6 +82,8 @@
     "ApprovalQueue",
     "ApprovalQueueStore",
     "ApprovalRecord",
+    "ApprovalReviewGuard",
+    "ApprovalReviewGuardSchema",
     "ApprovalStats",
     "ApprovalStatus",
     "ApprovalWithContext",
@@ -1738,6 +1740,7 @@
     "invalidatePainSignalBridge",
     "isAcyclic",
     "isAdmittedOutcome",
+    "isApprovalReviewGuard",
     "isArtifactRecord",
     "isArtifactRejected",
     "isArtifactRevisionOf",

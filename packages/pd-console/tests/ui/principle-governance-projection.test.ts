@@ -72,6 +72,10 @@ describe('PRI-553 Principle Detail governance projection wiring', () => {
     expect(page).toContain("ownerDecision.availableActions.filter(action => action.semantic === 'disable').map");
     expect(page).toContain("<ApprovalSubjectReading");
     expect(page).toContain("lockedReason={ownerDecision.availableActions.some(action => actionTargetId(action, 'approval') === record.id)");
+    // Each control follows the projection's own action set for THAT approval;
+    // a sibling's broken review (or a stale approve gate) must not unlock it.
+    expect(page).toContain("allowedActions={allowedActions}");
+    expect(page).toContain("entry.status === 'pending' && entry.revisionReviewUnavailable === true");
     expect(page).not.toContain('showDecisionControls');
     // The old local qualification derivation must NOT come back:
     expect(page).not.toContain('isActionable');

@@ -39,6 +39,10 @@ export function validateApprovalReview(value: unknown): ApprovalReviewData | nul
   }
   const {channel} = guard;
   if (channel !== 'prompt' && channel !== 'code_tool_hook' && channel !== 'defer_archive') return null;
+  // The reader treats a material body as present exactly when availability says so;
+  // a payload that disagrees must fail loud rather than render the wrong preview.
+  if ((material.availability === 'available') !== (exactBody !== null)) return null;
+  if (exactBody !== null && (channel === 'code_tool_hook') !== (exactBody.kind === 'rule_code')) return null;
   const expectedReview: ApprovalReviewGuard = guard.artifactState === 'present' && typeof guard.artifactDigest === 'string'
     ? { schemaVersion: 'approval-review-v1', approvalId: approval.approvalId, artifactId: approval.artifactId, channel, artifactState: 'present', artifactDigest: guard.artifactDigest }
     : { schemaVersion: 'approval-review-v1', approvalId: approval.approvalId, artifactId: approval.artifactId, channel, artifactState: 'missing' };

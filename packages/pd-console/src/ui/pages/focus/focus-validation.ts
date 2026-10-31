@@ -49,12 +49,18 @@ function validateApprovalGroup(raw: unknown): ApprovalGroup | null {
     ) {
       return null;
     }
+    let recordRevisionReviewUnavailable: boolean | undefined;
+    if (Object.hasOwn(r, "revisionReviewUnavailable")) {
+      if (typeof r.revisionReviewUnavailable !== "boolean") return null;
+      recordRevisionReviewUnavailable = r.revisionReviewUnavailable;
+    }
     validRecords.push({
       id: r.id,
       artifactId: r.artifactId,
       channel: r.channel,
       createdAt: r.createdAt,
       status: r.status,
+      ...(recordRevisionReviewUnavailable !== undefined ? { revisionReviewUnavailable: recordRevisionReviewUnavailable } : {}),
     });
   }
   // Wave 7: candidateDescription is optional — present when backend could

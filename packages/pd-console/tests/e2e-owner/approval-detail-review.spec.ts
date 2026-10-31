@@ -44,6 +44,19 @@ test('Principle detail replacement carries the reviewed old version and reads th
 });
 
 
+test('A grouped approval read failure keeps the pending decision visible with a retry', async ({ page }) => {
+  await page.route('**/api/v1/approvals/grouped*', route => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ success: false, error: 'grouped_unavailable' }) }));
+  await login(page);
+  await page.goto('/#/principles/e2e00000-0000-4000-8000-00000000000a');
+  const alert = page.getByTestId('detail-approvals-unavailable');
+  await expect(alert).toBeVisible();
+  await expect(alert).toContainText('部分审批材料未能读取');
+  await expect(alert.getByRole('button', { name: '重新读取', exact: true })).toBeVisible();
+  // The decision view still knows about the pending approval; the alert
+  // explains why its reading surface is absent instead of hiding it silently.
+  await expect(page.getByTestId('owner-decision-view')).toBeVisible();
+});
+
 test('A late detail read cannot replace the newly selected principle', async ({ page }) => {
   await login(page);
   let started: (() => void) | undefined;

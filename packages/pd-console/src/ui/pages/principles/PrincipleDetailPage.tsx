@@ -24,7 +24,7 @@ import { ReceiptCoverageDisclosure, getReceiptSourceStatusLabelKey } from "../..
 import { formatDate } from "../../utils/format-date.js";
 import { localizeAggregatedBlocker } from "../../utils/blocker-localization.js";
 import { groupByReasonCode, formatGroupedReasonLine } from "../../utils/attention-presentation.js";
-import { splitReadingTitleBody } from "../../utils/reading-layout.js";
+import { splitReadingTitleBody, truncateByCodePoints } from "../../utils/reading-layout.js";
 import type { OwnerGovernanceView } from '@principles/core/runtime-v2';
 import type {
   PrincipleDetail,
@@ -269,6 +269,7 @@ export function PrincipleDetailPage() {
 
   const [principle, setPrinciple] = useState<PrincipleDetail | null>(null);
   const [approvalGroup, setApprovalGroup] = useState<ApprovalGroup | null>(null);
+  const [approvalGroupUnavailable, setApprovalGroupUnavailable] = useState(false);
   const [lifecycle, setLifecycle] = useState<LifecycleMetricsData | null>(null);
   const [trajectory, setTrajectory] = useState<TrajectoryData | null>(null);
   const [governance, setGovernance] = useState<OwnerGovernanceView | null>(null);
@@ -300,8 +301,10 @@ export function PrincipleDetailPage() {
     if (!id) return;
     const epoch = ++detailEpoch.current;
     setLoading(true);
+    setLoadingEvidenceKind(null);
     setError(null);
     setApprovalGroup(null); // Clear previous approval group to prevent stale actionability (P1)
+    setApprovalGroupUnavailable(false);
     setGovernance(null);
     setGovernanceUnavailable(null);
     setOwnerDecision(null);
@@ -339,6 +342,9 @@ export function PrincipleDetailPage() {
         setApprovalGroup(group ?? null);
       } else {
         setApprovalGroup(null);
+        // The grouped list is the only source of pending approval records here;
+        // swallowing the failure would hide the decision surface without a word.
+        setApprovalGroupUnavailable(true);
       }
 
       const lData = lResult.success ? validateLifecycleMetrics(lResult.data) : null;
@@ -382,6 +388,7 @@ export function PrincipleDetailPage() {
       if (epoch !== detailEpoch.current) return;
       setError(err instanceof Error ? err.message : "Unknown error");
       setApprovalGroup(null);
+      setApprovalGroupUnavailable(true);
     } finally {
       if (epoch === detailEpoch.current) setLoading(false);
     }
@@ -516,6 +523,8 @@ export function PrincipleDetailPage() {
     ? ownerDecision.learnedPrinciple.value.text
     : undefined;
   const learnedKnown = learnedText !== undefined;
+  const learnedPreview = learnedText === undefined ? undefined : truncateByCodePoints(learnedText, 240);
+  const learnedTruncated = learnedPreview !== learnedText;
   const headlineLayout = splitReadingTitleBody(learnedText ?? principle.text);
 
   return (
@@ -602,9 +611,9 @@ export function PrincipleDetailPage() {
               {ownerDecision.learnedPrinciple.status === 'known' ? (
                 <>
                   <p className="mt-1 text-ink-2 text-[15px] leading-relaxed whitespace-pre-wrap break-words">
-                    {learnedText && learnedText.length > 240 ? learnedText.slice(0, 240) + '…' : learnedText}
+                    {learnedPreview}
                   </p>
-                  {learnedText && learnedText.length > 240 && <details className="mt-3 text-sm text-ink-2"><summary className="cursor-pointer text-gov">{t('principles.detail.fullRule')}</summary><p className="mt-3 whitespace-pre-wrap break-words leading-relaxed">{learnedText}</p></details>}
+                  {learnedTruncated && <details className="mt-3 text-sm text-ink-2"><summary className="cursor-pointer text-gov">{t('principles.detail.fullRule')}</summary><p className="mt-3 whitespace-pre-wrap break-words leading-relaxed">{learnedText}</p></details>}
                   <p className="mt-1 text-ink-4 text-[12px]">
                     {t("principles.detail.ownerDecision.sourceTierLabel", {
                       defaultValue: "来源：{{tier}}（未经改写）",
@@ -651,17 +660,34 @@ export function PrincipleDetailPage() {
                   {t("principles.detail.ownerDecision.noActions", { defaultValue: "当前没有可以执行的操作。" })}
                 </p>
               )}
-              {approvalGroup?.records.filter(record => record.status === 'pending').map(record => (
-                <details key={record.id} className="mt-4 rounded border border-line p-4" data-testid="detail-approval-review">
+              {approvalGroupUnavailable && ownerDecision.availableActions.length > 0 && (
+                <div role="alert" className="mt-2 text-[13px] leading-relaxed text-amber" data-testid="detail-approvals-unavailable">
+                  <p>{t('focus.workbench.approvalsUnavailable')}</p>
+                  <button type="button" onClick={() => { void loadData(); }} className="mt-1 text-gov underline">{t('focus.workbench.retry')}</button>
+                </div>
+              )}
+              {approvalGroup?.records.filter(record => record.status === 'pending').map(record => {
+                const allowedActions = ownerDecision.availableActions
+                  .filter(action => actionTargetId(action, 'approval') === record.id)
+                  .map(action => action.semantic)
+                  .filter((semantic): semantic is 'approve' | 'reject' | 'edit_approval' => semantic === 'approve' || semantic === 'reject' || semantic === 'edit_approval');
+                // A sibling's broken revision review must not block this record;
+                // without any per-record defect the group flag still covers the
+                // "multiple versions pending" ambiguity.
+                const revisionReviewUnavailable = record.revisionReviewUnavailable
+                  ?? (approvalGroup.records.some(entry => entry.status === 'pending' && entry.revisionReviewUnavailable === true)
+                    ? false : approvalGroup.revisionReviewUnavailable);
+                return <details key={record.id} className="mt-4 rounded border border-line p-4" data-testid="detail-approval-review">
                   <summary className="cursor-pointer text-sm text-gov">{t('focus.workbench.proposal')} · {t(`principles.detail.ownerDecision.channel.${record.channel}`, { defaultValue: record.channel })}</summary>
                   <div className="mt-5"><ApprovalSubjectReading principleId={principle.id} approvalId={record.id} artifactId={record.artifactId} channel={record.channel}
                     showPrincipleLink={false}
                     revisionReview={new Set(approvalGroup.records.filter(entry => entry.status === 'pending').map(entry => entry.artifactId)).size === 1 ? approvalGroup.revisionReview : undefined}
-                    revisionReviewUnavailable={approvalGroup.revisionReviewUnavailable}
+                    revisionReviewUnavailable={revisionReviewUnavailable}
+                    allowedActions={allowedActions}
                     lockedReason={ownerDecision.availableActions.some(action => actionTargetId(action, 'approval') === record.id) ? undefined : t('focus.workbench.permissionsUnknown')}
                     onResolved={message => { toast.success(message); void loadData(); }} /></div>
-                </details>
-              ))}
+                </details>;
+              })}
               <div className="mt-2 flex flex-wrap gap-3">
                 {ownerDecision.availableActions.filter(action => action.semantic === 'disable').map((action) => (
                   <Button

@@ -13,6 +13,21 @@ describe('one response binds readable material to the submitted approval snapsho
     const value = fixture();
     expect(validateApprovalReview({ ...value, review: { ...value.review, material: { ...value.review.material, availability: 'unreadable', exactBody: null } } })).not.toBeNull();
   });
+  it('rejects material whose availability and exact body disagree', () => {
+    const value = fixture();
+    const noBody = { ...value.review.material, exactBody: null };
+    const unavailableBody = { ...value.review.material, availability: 'unreadable' };
+    expect(validateApprovalReview({ ...value, review: { ...value.review, material: noBody } })).toBeNull();
+    expect(validateApprovalReview({ ...value, review: { ...value.review, material: unavailableBody } })).toBeNull();
+  });
+  it('rejects an exact body whose kind contradicts the approval channel', () => {
+    const value = fixture();
+    expect(validateApprovalReview({ ...value, review: { ...value.review, material: { ...value.review.material, exactBody: { kind: 'rule_code', text: 'x' } } } })).toBeNull();
+    const hook = fixture();
+    hook.channel = 'code_tool_hook';
+    hook.review.expectedReview.channel = 'code_tool_hook';
+    expect(validateApprovalReview({ ...hook, review: { ...hook.review, material: { ...hook.review.material, exactBody: { kind: 'rule_code', text: 'x' } } } })).not.toBeNull();
+  });
   it.each(['approvalId', 'artifactId', 'channel'])('rejects mismatched guard %s', key => {
     const value = fixture();
     expect(validateApprovalReview({ ...value, review: { ...value.review, expectedReview: { ...value.review.expectedReview, [key]: 'different' } } })).toBeNull();
@@ -33,9 +48,14 @@ describe('one response binds readable material to the submitted approval snapsho
 });
 
 
-it('Focus preserves revision identity, digest and unavailable intent across its extra validation boundary', () => {
+it('Focus preserves revision identity, digest, per-record availability and unavailable intent across its extra validation boundary', () => {
   const revisionReview = { artifactId: 'artifact-one', artifactDigest: 'sha256:' + 'b'.repeat(64), oldStatement: 'before', newStatement: 'after', intentFields: { ownerIntent: 'Keep the boundary' } };
-  const data = validateApprovalsGroupedData({ generatedAt: '2026-10-30T00:00:00Z', groups: [{ principleId: 'principle-one', principleTitle: 'A readable title', status: 'pending', records: [], revisionReview, revisionReviewUnavailable: true }] });
+  const base = { generatedAt: '2026-10-30T00:00:00Z' };
+  const records = [{ id: 'approval-one', artifactId: 'artifact-one', channel: 'prompt', createdAt: '2026-10-30T00:00:00Z', status: 'pending', revisionReviewUnavailable: true }];
+  const data = validateApprovalsGroupedData({ ...base, groups: [{ principleId: 'principle-one', principleTitle: 'A readable title', status: 'pending', records, revisionReview, revisionReviewUnavailable: true }] });
   expect(data?.groups[0]?.revisionReview).toEqual(revisionReview);
   expect(data?.groups[0]?.revisionReviewUnavailable).toBe(true);
+  expect(data?.groups[0]?.records[0]?.revisionReviewUnavailable).toBe(true);
+  const malformed = { ...records[0], revisionReviewUnavailable: 'yes' };
+  expect(validateApprovalsGroupedData({ ...base, groups: [{ principleId: 'principle-one', principleTitle: 'A readable title', status: 'pending', records: [malformed] }] })).toBeNull();
 });

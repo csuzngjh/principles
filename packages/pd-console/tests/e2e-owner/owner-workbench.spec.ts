@@ -143,7 +143,8 @@ test('Narrow layout opens the final item at its reading start and returns to its
   await login(page);
   const last = page.getByTestId('owner-work-item').last();
   const key = await last.getAttribute('data-item-key');
-  await last.click();
+  const item = page.locator(`[data-item-key="${key}"]`);
+  await item.click();
   const back = page.getByRole('button', { name: '返回事项列表', exact: true });
   await expect(back).toBeInViewport();
   await back.click();

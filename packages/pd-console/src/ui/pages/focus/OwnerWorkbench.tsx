@@ -38,8 +38,12 @@ export function OwnerWorkbench({ items, completed, uncertain }: { items: OwnerWo
   const list = useRef<HTMLElement>(null);
   const lastSelected = useRef('');
   const listScroll = useRef(0);
+  // A deep link can arrive before the items do. `focusKey` only becomes the
+  // selection once the item exists, so the effect re-runs when it appears
+  // without stealing focus on every data refresh.
+  const focusKey = selected ? selectedKey : '';
   useEffect(() => {
-    if (selectedKey) {
+    if (focusKey) {
       heading.current?.focus({ preventScroll: true });
       const reading = heading.current?.closest<HTMLElement>('[data-testid="owner-work-reading"]');
       if (reading && (reading.getBoundingClientRect().top < 0 || reading.getBoundingClientRect().top > window.innerHeight - 100)) reading.scrollIntoView({ block: 'start' });
@@ -47,13 +51,15 @@ export function OwnerWorkbench({ items, completed, uncertain }: { items: OwnerWo
       if (current && list.current && list.current.scrollHeight > list.current.clientHeight) {
         list.current.scrollTop = Math.max(0, current.offsetTop - list.current.offsetTop - 24);
       }
+    } else if (selectedKey) {
+      heading.current?.focus({ preventScroll: true });
     } else if (lastSelected.current && list.current) {
       list.current.scrollTop = listScroll.current;
       const previous = Array.from(list.current.querySelectorAll<HTMLButtonElement>('[data-item-key]')).find(button => button.dataset.itemKey === lastSelected.current);
       previous?.focus({ preventScroll: true });
       if (previous && (previous.getBoundingClientRect().top < 0 || previous.getBoundingClientRect().bottom > window.innerHeight)) previous.scrollIntoView({ block: 'nearest' });
     }
-  }, [selectedKey]);
+  }, [focusKey, selectedKey]);
   function choose(key: string) {
     if (!key && selectedKey) { lastSelected.current = selectedKey; listScroll.current = list.current?.scrollTop ?? 0; }
     const next = new URLSearchParams(params);
@@ -61,7 +67,8 @@ export function OwnerWorkbench({ items, completed, uncertain }: { items: OwnerWo
     setParams(next, { preventScrollReset: true });
   }
   const completedHere = completed?.key === selectedKey ? completed : null;
-  const nextItem = items.find(item => item.key !== selectedKey);
+  const selectedIndex = items.findIndex(item => item.key === selectedKey);
+  const nextItem = selectedIndex >= 0 ? items[selectedIndex + 1] : undefined;
   return <section className="owner-workbench" data-testid="owner-workbench">
     <nav ref={list} tabIndex={-1} className={`owner-work-list ${selected ? 'owner-work-list-selected' : ''}`} aria-label={t('pages.focus.workbench.list')}>
       <div className="mb-3 flex items-baseline justify-between gap-3"><h2 className="text-[15px] font-medium text-ink">{t('pages.focus.workbench.list')}</h2><span className="text-[12px] text-ink-4">{t('pages.focus.workbench.count', { count: items.length })}</span></div>

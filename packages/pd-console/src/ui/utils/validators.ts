@@ -2042,6 +2042,8 @@ export interface ApprovalGroupRecordData {
   channel: string;
   createdAt: string;
   status: string;
+  /** This record's own revision review is incomplete; absent = no such defect. */
+  revisionReviewUnavailable?: boolean;
 }
 
 function validateApprovalGroupRecord(v: unknown): ApprovalGroupRecordData | null {
@@ -2051,7 +2053,12 @@ function validateApprovalGroupRecord(v: unknown): ApprovalGroupRecordData | null
   if (!Object.hasOwn(v, 'channel') || !isString(v.channel)) return null;
   if (!Object.hasOwn(v, 'createdAt') || !isString(v.createdAt)) return null;
   if (!Object.hasOwn(v, 'status') || !isString(v.status)) return null;
-  return { id: v.id, artifactId: v.artifactId, channel: v.channel, createdAt: v.createdAt, status: v.status };
+  const record: ApprovalGroupRecordData = { id: v.id, artifactId: v.artifactId, channel: v.channel, createdAt: v.createdAt, status: v.status };
+  if (Object.hasOwn(v, 'revisionReviewUnavailable')) {
+    if (typeof v.revisionReviewUnavailable !== 'boolean') return null;
+    record.revisionReviewUnavailable = v.revisionReviewUnavailable;
+  }
+  return record;
 }
 
 export interface ApprovalGroupData {

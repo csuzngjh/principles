@@ -3,20 +3,25 @@ import { Link, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { fetchApprovalReview, fetchOwnerDecisionView, approveApproval, rejectApproval, editApproval, fetchAllActivations } from '../../api.js';
 import { localizeApprovalWarning } from '../../utils/approval-warning-localization.js';
+import { truncateByCodePoints } from '../../utils/reading-layout.js';
 import type { ApprovalsGroupedData } from '../../api.js';
 import type { ApprovalReviewData } from '../../utils/approval-review.js';
 import type { OwnerDecisionViewCore, NarrativeField } from '@principles/core/runtime-v2';
 
-export function ApprovalSubjectReading({ principleId, approvalId, artifactId, channel, lockedReason, targetHost, onResolved, revisionReview, revisionReviewUnavailable, budgetNotice, promptInjection, sourceUnlinked, showPrincipleLink = true }: {
+export function ApprovalSubjectReading({ principleId, approvalId, artifactId, channel, lockedReason, targetHost, onResolved, revisionReview, revisionReviewUnavailable, allowedActions, budgetNotice, promptInjection, sourceUnlinked, showPrincipleLink = true }: {
   principleId: string; approvalId: string; artifactId: string; channel: string; lockedReason?: string;
   targetHost?: 'openclaw' | 'codex' | 'workbuddy'; onResolved?: (message: string) => void;
   revisionReview?: { artifactId?: string; artifactDigest?: string; oldStatement: string; newStatement: string; intentFields: Record<string, string> };
-  revisionReviewUnavailable?: boolean; budgetNotice?: string; promptInjection?: ApprovalsGroupedData['promptInjection']; sourceUnlinked?: boolean; showPrincipleLink?: boolean;
+  revisionReviewUnavailable?: boolean;
+  /** Backend-assessed actions for THIS approval; absent means no per-action gate (the guarded submit still applies). */
+  allowedActions?: readonly ('approve' | 'reject' | 'edit_approval')[];
+  budgetNotice?: string; promptInjection?: ApprovalsGroupedData['promptInjection']; sourceUnlinked?: boolean; showPrincipleLink?: boolean;
 }) {
   const { t } = useTranslation();
   const location = useLocation();
   const [review, setReview] = useState<ApprovalReviewData | null>(null);
   const [view, setView] = useState<OwnerDecisionViewCore | null>(null);
+  const [viewSettled, setViewSettled] = useState(false);
   const [error, setError] = useState('');
   const [resultText, setResultText] = useState('');
   const [loading, setLoading] = useState(true);
@@ -29,7 +34,7 @@ export function ApprovalSubjectReading({ principleId, approvalId, artifactId, ch
   const epoch = useRef(0);
   const read = useCallback(async () => {
     const current = ++epoch.current;
-    setReview(null); setLoading(true); setIntentReviewed(false);
+    setReview(null); setLoading(true); setIntentReviewed(false); setError('');
     const result = await fetchApprovalReview(approvalId);
     if (current !== epoch.current) return null;
     setLoading(false);
@@ -38,10 +43,10 @@ export function ApprovalSubjectReading({ principleId, approvalId, artifactId, ch
     return null;
   }, [approvalId]);
   useEffect(() => {
-    setError(''); setResultText(''); setView(null); setMode(null); setReason(''); setNewArtifact(''); setApproveNote('');
+    setError(''); setResultText(''); setView(null); setViewSettled(false); setMode(null); setReason(''); setNewArtifact(''); setApproveNote('');
     let current = true;
     void read();
-    void fetchOwnerDecisionView(principleId).then(result => { if (current && result.success) setView(result.data); });
+    void fetchOwnerDecisionView(principleId).then(result => { if (current) { setView(result.success ? result.data : null); setViewSettled(true); } });
     return () => { current = false; epoch.current++; };
   }, [principleId, approvalId, artifactId, channel, read]);
   const narrative = (field: NarrativeField) => field.status === 'known' ? field.value.map(item => item.text).join('\n\n') : field.reason.ownerText;
@@ -50,9 +55,11 @@ export function ApprovalSubjectReading({ principleId, approvalId, artifactId, ch
   const materialBlocks = subject?.materialGates.find(gate => gate.actionSemantic === 'approve')?.requiredItems.filter(item => item.status !== 'satisfied') ?? [];
   const revisionMatches = !revisionReview || (review?.expectedReview.artifactState === 'present' && review.expectedReview.artifactId === artifactId
     && revisionReview.artifactId === review.expectedReview.artifactId && revisionReview.artifactDigest === review.expectedReview.artifactDigest);
-  const approveReady = review?.approval.status === 'pending' && review.expectedReview.artifactState === 'present' && review.material.exactBody !== null && review.material.availability === 'available' && revisionMatches && !revisionReviewUnavailable && materialBlocks.length === 0;
+  const approveReady = review?.approval.status === 'pending' && subject !== undefined && review.expectedReview.artifactState === 'present' && review.material.exactBody !== null && review.material.availability === 'available' && revisionMatches && !revisionReviewUnavailable && materialBlocks.length === 0;
+  const may = (semantic: 'approve' | 'reject' | 'edit_approval') => allowedActions === undefined || allowedActions.includes(semantic);
   async function submit(action: 'approve' | 'reject' | 'edit') {
     if (!review || busy || lockedReason || review.approval.status !== 'pending') return;
+    if (!may(action === 'approve' ? 'approve' : action === 'reject' ? 'reject' : 'edit_approval')) return;
     if (action === 'approve' && (!approveReady || (revisionReview && !intentReviewed))) return;
     if (action !== 'approve' && !reason.trim()) return;
     if (action === 'edit' && !newArtifact.trim()) return;
@@ -86,7 +93,7 @@ export function ApprovalSubjectReading({ principleId, approvalId, artifactId, ch
       }
       setResultText(message); onResolved?.(message); return;
     }
-    if (!result.success) setError(t('pages.focus.workbench.notRecorded') + ' ' + [result.error, result.nextAction].filter(Boolean).join(' '));
+    if (!result.success) setError(t(result.status === undefined ? 'pages.focus.workbench.resultUnknown' : 'pages.focus.workbench.notRecorded') + ' ' + [result.error, result.nextAction].filter(Boolean).join(' '));
     else if (action === 'edit') { setResultText(t('pages.focus.workbench.replaced')); setMode(null); setReason(''); setNewArtifact(''); setApproveNote(''); }
   }
   const body = review?.material.exactBody;
@@ -100,7 +107,7 @@ export function ApprovalSubjectReading({ principleId, approvalId, artifactId, ch
       {loading ? <p role="status" className="text-sm text-ink-3">{t('pages.focus.workbench.loading')}</p> : <>
         {bodyText ? <>
           <p className="mb-2 text-[12px] text-ink-4">{t(body?.kind === 'rule_code' ? 'pages.focus.workbench.codePreview' : 'pages.focus.workbench.textPreview')}</p>
-          <p className="whitespace-pre-wrap break-words text-[15px] leading-[1.85] text-ink">{bodyText.length > 240 ? bodyText.slice(0, 240) + '…' : bodyText}</p>
+          <p className="whitespace-pre-wrap break-words text-[15px] leading-[1.85] text-ink">{truncateByCodePoints(bodyText, 240)}</p>
           <details className="mt-4 rounded-[4px] border border-line px-4 py-3 text-[13px]"><summary className="cursor-pointer text-gov">{t(body?.kind === 'rule_code' ? 'pages.focus.workbench.fullCode' : 'pages.focus.workbench.fullText')}</summary>
             <div className="mt-4 whitespace-pre-wrap break-words text-[15px] leading-[1.85] text-ink-2">{bodyText}</div>
           </details>
@@ -114,7 +121,7 @@ export function ApprovalSubjectReading({ principleId, approvalId, artifactId, ch
       </>}
     </section>
     <section className="border-t border-line pt-5" data-testid="approval-review-limits"><h3 className="mb-3 text-[15px] font-medium text-ink">{t('pages.focus.workbench.beforeDecision')}</h3>
-      {!subject && <p className="text-sm leading-relaxed text-amber">{t('pages.focus.workbench.subjectUnconfirmed')}</p>}
+      {viewSettled && !subject && <p className="text-sm leading-relaxed text-amber">{t('pages.focus.workbench.subjectUnconfirmed')}</p>}
       {review && <div className="mb-3 text-sm leading-relaxed text-ink-2" data-testid="approval-exact-risks">
         {review.material.risks?.length ? <ul className="list-disc space-y-1 pl-5">{review.material.risks.map((risk, index) => <li key={index}>{risk}</li>)}</ul> : <p>{t(review.material.risks === null ? 'pages.focus.workbench.risksUnknown' : 'pages.focus.workbench.risksEmpty')}</p>}
       </div>}
@@ -149,9 +156,9 @@ export function ApprovalSubjectReading({ principleId, approvalId, artifactId, ch
         {revisionReview && <label className="mb-4 block text-sm text-ink-2"><input type="checkbox" checked={intentReviewed} onChange={event => setIntentReviewed(event.target.checked)} className="mr-2" />{t('pages.focus.workbench.intentReviewed')}</label>}
         <p className="mb-4 text-[12.5px] leading-relaxed text-ink-3">{t(channel === 'code_tool_hook' ? 'pages.focus.workbench.ruleConsequence' : channel === 'defer_archive' ? 'pages.focus.workbench.archiveConsequence' : 'pages.focus.workbench.promptConsequence')}</p>
         <div className="flex flex-wrap gap-3">
-          <button type="button" disabled={!approveReady || busy || Boolean(lockedReason) || Boolean(revisionReview && !intentReviewed)} data-testid={`approve-btn-${principleId}`} onClick={() => { void submit('approve'); }} className="rounded-[4px] border border-gov bg-gov px-4 py-2.5 text-[13px] text-paper disabled:opacity-50">{t(channel === 'defer_archive' ? 'pages.focus.workbench.approveArchive' : 'pages.focus.workbench.approveOne')}</button>
-          <button type="button" disabled={busy || Boolean(lockedReason)} onClick={() => setMode('reject')} className="rounded-[4px] border border-line px-4 py-2.5 text-[13px] text-ink disabled:opacity-50">{t('pages.focus.workbench.rejectOne')}</button>
-          <button type="button" data-testid={`edit-btn-${principleId}`} disabled={busy || Boolean(lockedReason) || review.expectedReview.artifactState === 'missing'} onClick={() => setMode('edit')} className="text-[13px] text-gov underline disabled:opacity-50">{t('pages.focus.workbench.replaceOne')}</button>
+          <button type="button" disabled={!approveReady || busy || Boolean(lockedReason) || !may('approve') || Boolean(revisionReview && !intentReviewed)} data-testid={`approve-btn-${principleId}`} onClick={() => { void submit('approve'); }} className="rounded-[4px] border border-gov bg-gov px-4 py-2.5 text-[13px] text-paper disabled:opacity-50">{t(channel === 'defer_archive' ? 'pages.focus.workbench.approveArchive' : 'pages.focus.workbench.approveOne')}</button>
+          <button type="button" disabled={busy || Boolean(lockedReason) || !may('reject')} onClick={() => setMode('reject')} className="rounded-[4px] border border-line px-4 py-2.5 text-[13px] text-ink disabled:opacity-50">{t('pages.focus.workbench.rejectOne')}</button>
+          <button type="button" data-testid={`edit-btn-${principleId}`} disabled={busy || Boolean(lockedReason) || !may('edit_approval') || review.expectedReview.artifactState === 'missing'} onClick={() => setMode('edit')} className="text-[13px] text-gov underline disabled:opacity-50">{t('pages.focus.workbench.replaceOne')}</button>
         </div>
         {mode && <form className="mt-4 space-y-3" onSubmit={event => { event.preventDefault(); void submit(mode); }}>
           {mode === 'edit' && <label className="block text-sm text-ink-2">{t('pages.focus.workbench.replacementId')}<input value={newArtifact} onChange={event => setNewArtifact(event.target.value)} className="mt-2 block w-full rounded border border-line bg-panel px-3 py-2" /></label>}

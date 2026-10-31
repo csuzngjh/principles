@@ -88,6 +88,12 @@ export interface ApprovalGroup {
     artifactId: string;
     channel: string;
     createdAt: string;
+    /**
+     * This record's own revision review is incomplete (the group flag also
+     * covers the multi-pending ambiguity, so readers must not use it to block
+     * an intact sibling approval).
+     */
+    revisionReviewUnavailable?: boolean;
   }[];
 }
 
@@ -357,6 +363,7 @@ export class ApprovalsGroupedConsoleModel {
         channel: string;
         createdAt: string;
         status: 'pending' | 'approved' | 'rejected';
+        revisionReviewUnavailable?: boolean;
       }[]>();
 
       for (const approval of allApprovals) {
@@ -377,6 +384,7 @@ export class ApprovalsGroupedConsoleModel {
           status: approval.status === 'approved' || approval.status === 'rejected'
             ? approval.status
             : 'pending',
+          ...(revisionReviewUnavailable.has(approval.artifactId) ? { revisionReviewUnavailable: true } : {}),
         });
       }
 
