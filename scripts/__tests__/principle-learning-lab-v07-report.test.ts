@@ -10,8 +10,10 @@ import { runChallengeStudy } from '../dev/principle-learning-lab/lib/challenge-r
 import { createScriptedStub } from '../dev/principle-learning-lab/lib/challenge-actor.mjs';
 import {
   buildBehaviorReportV2, renderBehaviorReportV2Json, writeBehaviorReportV2, verifyBehaviorReportV2,
+  projectVBDRCase,
   REPORT_STATUS_PENDING, REPORT_STATUS_INVALID, REPORT_STATUS_READY,
 } from '../dev/principle-learning-lab/lib/challenge-behavior-report.mjs';
+import { computeVBDR } from '../dev/principle-learning-lab/lib/challenge-statistics.mjs';
 
 const labRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../dev/principle-learning-lab');
 const tmpRoot = path.join(labRoot, '..', '..', '..', '.tmp', 'v07-report-tests');
@@ -108,8 +110,11 @@ describe('EXAMINER v0.7 Report V2 — full offline study (run → replay → nin
     expect(report.schema).toBe('challenge-behavior-report.v2');
     // gold review pending → REPORT_PENDING (never READY with unreviewed gold)
     expect(report.status).toBe(REPORT_STATUS_PENDING);
-    // fixed denominator table — planned = 2 cases × 2 arms × 1 rep
-    expect(report.scope.denominator).toMatchObject({ planned: 4, authorized: 4, attempted: 4, completed: 4, valid: 4, pairedValid: 2, unknown: 0, executionInvalid: 0, reviewPending: 2 });
+    // fixed denominator table — planned = 2 cases × 2 arms × 1 rep.
+    // P2-3: an offline-stub study has NO real authorization record, so
+    // authorized is honestly null (NOT_APPLICABLE), never plan-sized.
+    expect(report.scope.denominator).toMatchObject({ planned: 4, authorized: null, attempted: 4, completed: 4, valid: 4, pairedValid: 2, unknown: 0, executionInvalid: 0, reviewPending: 2 });
+    expect(report.scope.denominator.authorizedNote).toContain('offline-stub');
     // every valid unit was REPLAY-rescored (never a verbatim copy)
     expect(report.planUnits.every((u: any) => u.currentState === 'succeeded' ? u.replayRescored === true : true)).toBe(true);
     // independent dimensions per arm
@@ -201,3 +206,148 @@ async function verifyBehaviorReportV2ForPending(dir: string) {
   const result = verifyBehaviorReportV2(dir);
   return result.ok;
 }
+
+// ---------------------------------------------------------------------------
+// P1-4 repair round (PR #2239 review): VBDR repetition-exact pairing,
+// repetition stability tri-state, independent noise adjudication, mechanism
+// binding
+// ---------------------------------------------------------------------------
+describe('P1-4 — projectVBDRCase pairs by exact (caseId, repetitionId)', () => {
+  const rollup = (state: string, f: any) => ({ currentState: state, replayRescored: state === 'succeeded', f });
+  const rollups = (rows: Array<[string, any]>) => new Map(rows.map(([key, r]: any) => [key, r]));
+  const base = {
+    caseId: 'T1',
+    plannedRepetitions: ['1', '2'],
+    controlArm: 'A',
+    treatmentArm: 'B',
+    goldReview: 'APPROVED',
+    mechanismBinding: { status: 'VERIFIED', mappingHash: 'm'.repeat(64), fDerivation: 'EVIDENCE_ALIGNMENT' },
+    noiseAdjudication: { traceHashes: { control: 'tc1', treatment: 'tt1' }, decision: 'CONFIRMED_REAL_DIFFERENCE', basis: 'independent review', source: 'human-adjudicator' },
+    primaryTraceHashes: { control: 'tc1', treatment: 'tt1' },
+  };
+
+  it('RED: cross-repetition splicing must not form a pair (R1 C-valid/T-unknown + R2 C-unknown/T-valid)', () => {
+    const map = rollups([
+      ['T1/A/r1', rollup('succeeded', 1)],
+      ['T1/B/r1', rollup('result_unknown', 'UNKNOWN')],
+      ['T1/A/r2', rollup('result_unknown', 'UNKNOWN')],
+      ['T1/B/r2', rollup('succeeded', 0)],
+    ]);
+    const projected = projectVBDRCase({ ...base, rollupsByUnit: map });
+    expect(projected.pairedValid).toBe(false); // no SINGLE repetition has both sides valid
+    expect(projected.repetitionCoverage).toEqual({ r1: false, r2: false });
+  });
+
+  it('same-repetition complete pairing is valid', () => {
+    const map = rollups([
+      ['T1/A/r1', rollup('succeeded', 1)],
+      ['T1/B/r1', rollup('succeeded', 0)],
+      ['T1/A/r2', rollup('succeeded', 1)],
+      ['T1/B/r2', rollup('succeeded', 0)],
+    ]);
+    const projected = projectVBDRCase({ ...base, rollupsByUnit: map });
+    expect(projected.pairedValid).toBe(true);
+    expect(projected.repetitionStable).toBe(true);
+    expect(projected.differenceObserved).toBe(true);
+  });
+
+  it('both sides have SOME valid record but never in the same repetition — not a pair', () => {
+    const map = rollups([
+      ['T1/A/r1', rollup('succeeded', 1)],
+      ['T1/B/r1', rollup('not_started', 'UNKNOWN')],
+      ['T1/A/r2', rollup('not_started', 'UNKNOWN')],
+      ['T1/B/r2', rollup('succeeded', 0)],
+    ]);
+    const projected = projectVBDRCase({ ...base, rollupsByUnit: map });
+    expect(projected.pairedValid).toBe(false);
+  });
+
+  it('repetition instability is OBSERVED inconsistency (false), not missing data', () => {
+    const map = rollups([
+      ['T1/A/r1', rollup('succeeded', 1)],
+      ['T1/B/r1', rollup('succeeded', 0)],
+      ['T1/A/r2', rollup('succeeded', 0)], // control flips 1 -> 0 across reps
+      ['T1/B/r2', rollup('succeeded', 0)],
+    ]);
+    const projected = projectVBDRCase({ ...base, rollupsByUnit: map });
+    expect(projected.repetitionStable).toBe(false);
+  });
+
+  it('a missing repetition is UNKNOWN (null), never conflated with UNSTABLE', () => {
+    const map = rollups([
+      ['T1/A/r1', rollup('succeeded', 1)],
+      ['T1/B/r1', rollup('succeeded', 0)],
+      // r2 never started on either side
+      ['T1/A/r2', rollup('not_started', 'UNKNOWN')],
+      ['T1/B/r2', rollup('not_started', 'UNKNOWN')],
+    ]);
+    const projected = projectVBDRCase({ ...base, rollupsByUnit: map });
+    expect(projected.repetitionStable).toBe(null);
+    expect(projected.pairedValid).toBe(false);
+  });
+
+  it('a missing noise adjudication keeps adjudicatedNotNoise null → VBDR INDETERMINATE', () => {
+    const map = rollups([
+      ['T1/A/r1', rollup('succeeded', 1)], ['T1/B/r1', rollup('succeeded', 0)],
+      ['T1/A/r2', rollup('succeeded', 1)], ['T1/B/r2', rollup('succeeded', 0)],
+    ]);
+    const projected = projectVBDRCase({ ...base, rollupsByUnit: map, noiseAdjudication: null });
+    expect(projected.adjudicatedNotNoise).toBe(null);
+    const vbdr = computeVBDR([projected]);
+    expect(vbdr.rate.status).toBe('INDETERMINATE');
+  });
+
+  it('a noise adjudication bound to DIFFERENT traces does not count (hash binding)', () => {
+    const map = rollups([
+      ['T1/A/r1', rollup('succeeded', 1)], ['T1/B/r1', rollup('succeeded', 0)],
+      ['T1/A/r2', rollup('succeeded', 1)], ['T1/B/r2', rollup('succeeded', 0)],
+    ]);
+    const projected = projectVBDRCase({ ...base, rollupsByUnit: map, noiseAdjudication: { ...base.noiseAdjudication, traceHashes: { control: 'other-trace', treatment: 'tt1' } } });
+    expect(projected.adjudicatedNotNoise).toBe(null);
+  });
+
+  it('a NOISE adjudication yields adjudicatedNotNoise=false (false-positive accounting)', () => {
+    const map = rollups([
+      ['T1/A/r1', rollup('succeeded', 1)], ['T1/B/r1', rollup('succeeded', 0)],
+      ['T1/A/r2', rollup('succeeded', 1)], ['T1/B/r2', rollup('succeeded', 0)],
+    ]);
+    const projected = projectVBDRCase({ ...base, rollupsByUnit: map, noiseAdjudication: { ...base.noiseAdjudication, decision: 'NOISE' } });
+    expect(projected.adjudicatedNotNoise).toBe(false);
+    const vbdr = computeVBDR([projected]);
+    expect(vbdr.falsePositive).toBe(1);
+    expect(vbdr.rate.status).toBe('ESTIMABLE');
+    expect(vbdr.discriminativeCases).toBe(0);
+  });
+
+  it('an unverified mechanism binding keeps relatedToTargetMechanism null → INDETERMINATE', () => {
+    const map = rollups([
+      ['T1/A/r1', rollup('succeeded', 1)], ['T1/B/r1', rollup('succeeded', 0)],
+      ['T1/A/r2', rollup('succeeded', 1)], ['T1/B/r2', rollup('succeeded', 0)],
+    ]);
+    const projected = projectVBDRCase({ ...base, rollupsByUnit: map, mechanismBinding: { status: 'UNKNOWN' } });
+    expect(projected.relatedToTargetMechanism).toBe(null);
+    const vbdr = computeVBDR([projected]);
+    expect(vbdr.rate.status).toBe('INDETERMINATE');
+  });
+
+  it('all six conditions satisfied → VBDR ESTIMABLE at 1/1', () => {
+    const map = rollups([
+      ['T1/A/r1', rollup('succeeded', 1)], ['T1/B/r1', rollup('succeeded', 0)],
+      ['T1/A/r2', rollup('succeeded', 1)], ['T1/B/r2', rollup('succeeded', 0)],
+    ]);
+    const vbdr = computeVBDR([projectVBDRCase({ ...base, rollupsByUnit: map })]);
+    expect(vbdr.rate).toMatchObject({ status: 'ESTIMABLE', numerator: 1, denominator: 1 });
+  });
+
+  it('gold review statuses never let REJECTED masquerade as PENDING', () => {
+    const map = rollups([
+      ['T1/A/r1', rollup('succeeded', 1)], ['T1/B/r1', rollup('succeeded', 0)],
+      ['T1/A/r2', rollup('succeeded', 1)], ['T1/B/r2', rollup('succeeded', 0)],
+    ]);
+    const rejected = projectVBDRCase({ ...base, rollupsByUnit: map, goldReview: 'REJECTED' });
+    const vbdr = computeVBDR([rejected]);
+    expect(vbdr.validPairedCases).toBe(0);
+    expect(vbdr.reviewPending).toBe(0);
+    expect(vbdr.reviewRejected).toBe(1);
+  });
+});

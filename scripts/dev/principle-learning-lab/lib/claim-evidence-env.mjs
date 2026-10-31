@@ -199,6 +199,16 @@ function validatePrinciplePredicates(caseDef, env) {
     if (!Number.isInteger(rule.limit) || rule.limit < 0) throw new Error(`${where}: boundary rule ${rule.id} limit must be a non-negative integer`);
     if (typeof rule.description !== 'string' || rule.description.length === 0) throw new Error(`${where}: boundary rule ${rule.id} requires a description`);
   }
+  // P1-2 (PR #2239 review): an APPLICABLE principle with no evaluable behavior
+  // predicate can never be scored PASS. At least one required behavior,
+  // prohibited behavior or boundary rule must exist — exceptions alone suspend
+  // other predicates and are never evaluable on their own.
+  const evaluable = (predicates.requiredBehaviors || []).length
+    + (predicates.prohibitedBehaviors || []).length
+    + (predicates.boundaryRules || []).length;
+  if (evaluable === 0) {
+    throw new Error(`${where}: an applicable principle requires at least one evaluable predicate (requiredBehaviors | prohibitedBehaviors | boundaryRules) — exceptions alone cannot establish conformance`);
+  }
 }
 
 function validateCostEnvelope(caseDef) {
@@ -206,6 +216,11 @@ function validateCostEnvelope(caseDef) {
   const envelope = caseDef.gold.costEnvelope;
   const where = `buildClaimEnvironmentV3(${caseDef.caseId || '?'})`;
   if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) throw new Error(`${where}: costEnvelope must be an object`);
+  // P2-6 (PR #2239 review): an empty envelope would silently mean "no
+  // threshold exceeded" — an absence of thresholds is NOT evidence of no
+  // overage. At least one threshold must be preregistered, or the field
+  // should be omitted entirely (which keeps the scorer's judgment UNKNOWN).
+  if (Object.keys(envelope).length === 0) throw new Error(`${where}: costEnvelope must declare at least one threshold (maxBudgetUnits | maxObservationCalls | maxOwnerRequests) — an empty envelope implies a verdict it cannot support`);
   const unknown = Object.keys(envelope).filter((key) => !['maxBudgetUnits', 'maxObservationCalls', 'maxOwnerRequests'].includes(key));
   if (unknown.length > 0) throw new Error(`${where}: unknown costEnvelope field(s): ${unknown.join(', ')}`);
   for (const value of Object.values(envelope)) {
@@ -327,10 +342,19 @@ export function stepClaimEnvironment(env, state, action) {
     // environment-REJECTED action attempt (unknown action/type/args, blocked
     // or prohibited path, terminated run). A rejected attempt consumed no
     // observation budget and is never evidence — it is negative-transfer
-    // signal only. v1/v2 states stay byte-identical.
+    // signal only. `target` carries the requestType/obsId/factId the attempt
+    // aimed at so repeated-confirmation detection can classify REFUSED and
+    // structurally-rejected owner requests too. v1/v2 states stay
+    // byte-identical.
     const result = stepClaimEnvironmentV2(env, state, action);
     if (!result.ok) {
-      state.rejectedActions.push({ step: state.step, actionType: action && typeof action === 'object' ? action.type ?? null : null, error: result.error });
+      const args = action && typeof action === 'object' && action.args && typeof action.args === 'object' ? action.args : {};
+      state.rejectedActions.push({
+        step: state.step,
+        actionType: action && typeof action === 'object' ? action.type ?? null : null,
+        target: args.requestType ?? args.obsId ?? args.factId ?? null,
+        error: result.error,
+      });
     }
     return result;
   }

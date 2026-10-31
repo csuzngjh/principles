@@ -57,7 +57,7 @@ import { buildClaimEnvironment, newClaimRunState, stepClaimEnvironment } from '.
 import { adjudicateClaimEvidence } from './claim-evidence-scorer.mjs';
 import { compileCase } from './challenge-compile.mjs';
 import {
-  computeBFRR, computePCR, computeFIR, computePairedEffect, computeVBDR, causalAttributionStatus,
+  computeBFRR, computePCR, computeFIR, computePairedEffect, computeVBDR, causalAttributionStatus, buildPlannedPairs,
 } from './challenge-statistics.mjs';
 
 import { sha256, verifyCanonicalHash } from './challenge-freeze.mjs';
@@ -1200,6 +1200,161 @@ function readGoldReviewStatuses(studyDir) {
   return { statuses, note: 'per-case statuses from gold-review.json' };
 }
 
+// P1-4 (PR #2239 review): independent noise adjudication input. A record is
+// only honored when it binds the caseId, BOTH primary trace hashes, the
+// target mechanism and carries a decision + basis + source. Nothing here
+// auto-approves anything — a missing or mis-bound record leaves the case
+// INDETERMINATE, and the file itself is study-side material the scorer never
+// writes.
+function readNoiseAdjudications(studyDir) {
+  const file = path.join(studyDir, 'noise-adjudications.json');
+  let parsed = null;
+  try {
+    parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return { records: {}, note: 'no noise-adjudications.json — independent noise adjudication stays pending (VBDR stays INDETERMINATE)' };
+  }
+  if (!parsed || typeof parsed !== 'object' || parsed.schema !== 'examiner-noise-adjudication.v1' || !parsed.records || typeof parsed.records !== 'object') {
+    return { records: {}, note: 'noise-adjudications.json malformed (schema examiner-noise-adjudication.v1 required) — records ignored, VBDR stays INDETERMINATE' };
+  }
+  const records = {};
+  for (const [caseId, record] of Object.entries(parsed.records)) {
+    const ok = record && typeof record === 'object'
+      && ['CONFIRMED_REAL_DIFFERENCE', 'NOISE'].includes(record.decision)
+      && record.traceHashes && typeof record.traceHashes === 'object'
+      && typeof record.traceHashes.control === 'string' && typeof record.traceHashes.treatment === 'string'
+      && typeof record.targetMechanism === 'string' && record.targetMechanism.length > 0
+      && typeof record.basis === 'string' && record.basis.length > 0
+      && typeof record.source === 'string' && record.source.length > 0
+      && typeof record.adjudicatedAt === 'string';
+    if (!ok) continue; // malformed records are ignored, never partially honored
+    records[caseId] = record;
+  }
+  return { records, note: `per-case independent adjudications from noise-adjudications.json (${Object.keys(records).length} well-formed record(s))` };
+}
+
+// P1-4 (PR #2239 review): the F indicator must be VERIFIABLY bound to the
+// frozen Pain/Mechanism mapping before a difference can be called
+// mechanism-related. The binding is VERIFIED only when the study's mapping
+// file re-validates under its own recorded hash AND the study's F-derivation
+// rule is registered against that mechanism family. Anything less is UNKNOWN.
+const F_DERIVATION_MECHANISM_BINDINGS = [
+  { fDerivation: 'EVIDENCE_ALIGNMENT', mechanismFamily: 'PAIN44_CONCLUSION_BEYOND_OBSERVATION' },
+];
+
+function resolveMechanismBinding(studyDir) {
+  let mapping = null;
+  try {
+    mapping = readJsonFile(path.join(studyDir, 'pain-mechanism-mapping.json'));
+  } catch {
+    return { status: 'UNKNOWN', reason: 'no pain-mechanism-mapping.json — the F indicator cannot be bound to a frozen target mechanism' };
+  }
+  const hashOk = verifyCanonicalHash(mapping, mapping.mappingHash, { stripFields: ['mappingHash'] }).ok;
+  if (!hashOk) return { status: 'UNKNOWN', reason: 'mappingHash drift — the frozen mechanism binding is unverifiable' };
+  const registered = F_DERIVATION_MECHANISM_BINDINGS.some((binding) => binding.fDerivation === 'EVIDENCE_ALIGNMENT');
+  if (!registered) return { status: 'UNKNOWN', reason: 'the EVIDENCE_ALIGNMENT F derivation is not registered against a frozen mechanism family' };
+  const bound = F_DERIVATION_MECHANISM_BINDINGS.find((binding) => binding.fDerivation === 'EVIDENCE_ALIGNMENT');
+  return {
+    status: 'VERIFIED',
+    mappingId: mapping.mappingId ?? null,
+    mappingHash: mapping.mappingHash,
+    mechanismFamily: bound.mechanismFamily,
+    fDerivation: bound.fDerivation,
+  };
+}
+
+/**
+ * P1-4 (PR #2239 review): project ONE case into its VBDR row using
+ * repetition-EXACT pairing. A pair exists only when the SAME planned
+ * repetition has both sides valid; different-repetition results can never be
+ * spliced into one pair. repetitionStable is a tri-state: true = every
+ * planned repetition complete AND consistent, false = complete but
+ * inconsistent (OBSERVED instability), null = any repetition missing or
+ * undetermined (UNKNOWN — never conflated with observed instability).
+ */
+export function projectVBDRCase({
+  caseId, plannedRepetitions, rollupsByUnit, controlArm, treatmentArm,
+  goldReview, mechanismBinding = null, noiseAdjudication = null, primaryTraceHashes = {},
+}) {
+  if (!caseId || !Array.isArray(plannedRepetitions) || !(rollupsByUnit instanceof Map)) {
+    throw new Error('projectVBDRCase: caseId, plannedRepetitions[] and rollupsByUnit (Map) required');
+  }
+  if (!controlArm || !treatmentArm) throw new Error('projectVBDRCase: controlArm/treatmentArm required');
+  const sideValid = (rep, armId) => {
+    const row = rollupsByUnit.get(`${caseId}/${armId}/r${String(rep)}`);
+    return row && row.currentState === 'succeeded' && row.replayRescored === true;
+  };
+  const sideF = (rep, armId) => {
+    const row = rollupsByUnit.get(`${caseId}/${armId}/r${String(rep)}`);
+    if (!row) return 'UNKNOWN';
+    return row.currentState === 'succeeded' && row.replayRescored === true && (row.f === 1 || row.f === 0) ? row.f : 'UNKNOWN';
+  };
+  const repetitionCoverage = {};
+  const pairedReps = [];
+  for (const rep of plannedRepetitions) {
+    const paired = sideValid(rep, controlArm) && sideValid(rep, treatmentArm);
+    repetitionCoverage[`r${String(rep)}`] = paired;
+    if (paired) pairedReps.push(rep);
+  }
+  // pairedValid requires EVERY planned repetition to have a complete pair.
+  const pairedValid = plannedRepetitions.length > 0 && pairedReps.length === plannedRepetitions.length;
+
+  // Tri-state repetition stability: per-arm across ALL planned repetitions.
+  const armStability = (armId) => {
+    const values = plannedRepetitions.map((rep) => sideF(rep, armId));
+    if (values.some((f) => f !== 0 && f !== 1)) return null; // any missing/undetermined rep → UNKNOWN
+    return new Set(values.map(String)).size <= 1; // complete: consistent → true, inconsistent → false
+  };
+  const controlStable = armStability(controlArm);
+  const treatmentStable = armStability(treatmentArm);
+  let repetitionStable = null;
+  if (controlStable !== null && treatmentStable !== null) repetitionStable = controlStable && treatmentStable;
+
+  // Difference observed: only over repetition-exact pairs, and only when the
+  // paired evidence does not point in opposite directions.
+  let differenceObserved = null;
+  if (pairedReps.length > 0) {
+    const benefits = pairedReps.map((rep) => sideF(rep, controlArm) - sideF(rep, treatmentArm));
+    differenceObserved = benefits.some((b) => b !== 0);
+    if (benefits.some((b) => b > 0) && benefits.some((b) => b < 0)) differenceObserved = false; // opposite directions → no stable difference
+  }
+
+  // Mechanism relation: VERIFIED binding only — an observed difference alone
+  // never establishes mechanism relatedness.
+  const relatedToTargetMechanism = mechanismBinding && mechanismBinding.status === 'VERIFIED' ? true : null;
+
+  // Independent noise adjudication: bound to BOTH primary trace hashes and
+  // the registered mechanism family; missing/mis-bound → null (UNKNOWN).
+  let adjudicatedNotNoise = null;
+  if (noiseAdjudication) {
+    const hashBound = typeof primaryTraceHashes.control === 'string' && typeof primaryTraceHashes.treatment === 'string'
+      && noiseAdjudication.traceHashes.control === primaryTraceHashes.control
+      && noiseAdjudication.traceHashes.treatment === primaryTraceHashes.treatment
+      && (!mechanismBinding || mechanismBinding.status !== 'VERIFIED' || noiseAdjudication.targetMechanism === mechanismBinding.mechanismFamily);
+    if (hashBound) adjudicatedNotNoise = noiseAdjudication.decision === 'CONFIRMED_REAL_DIFFERENCE';
+  }
+
+  const executionInvalid = plannedRepetitions.some((rep) => [controlArm, treatmentArm]
+    .some((armId) => rollupsByUnit.get(`${caseId}/${armId}/r${String(rep)}`)?.currentState === 'failed_known'));
+
+  return {
+    caseId,
+    goldReview,
+    pairedValid,
+    executionInvalid,
+    repetitionStable,
+    differenceObserved,
+    relatedToTargetMechanism,
+    adjudicatedNotNoise,
+    repetitionCoverage,
+    diagnostics: {
+      pairedRepetitions: pairedReps.map(String),
+      controlStability: controlStable,
+      treatmentStability: treatmentStable,
+    },
+  };
+}
+
 export function buildBehaviorReportV2(studyDir, { now } = {}) {
   const findings = [];
   const addFinding = (id, severity, subject, detail) => findings.push({ id, severity, subject, detail });
@@ -1415,56 +1570,44 @@ export function buildBehaviorReportV2(studyDir, { now } = {}) {
   })();
 
   // --- §6 statistics over the replay-derived F flags --------------------------
+  // P1-3 (PR #2239 review): statistics are built from the PREREGISTERED plan —
+  // one row per planned (caseId, repetitionId) — never reverse-derived from
+  // the successfully executed records. Missing/invalid sides stay in their
+  // pairs with explicit statuses and bound every downstream rate.
+  const caseIds = [...new Set(cases.map((c) => c.caseId))].sort();
+  const repetitionsPlanned = plannedRepetitions.length;
   const controlUnits = unitRollups.filter((u) => u.armId === controlArm);
-  const bfrr = computeBFRR(controlUnits.map((u) => ({ f: u.f, executionValid: primaryValid(u) })), { plannedControlUnits: controlUnits.length });
-  const pairs = unitRollups.filter((u) => u.armId === controlArm || u.armId === treatmentArm)
-    .filter((u) => primaryValid(u) || u.currentState === 'result_unknown')
-    .map((u) => ({
-      unitId: u.unit,
-      controlF: u.armId === controlArm ? u.f : (() => { const twin = unitRollups.find((x) => x.caseId === u.caseId && x.repetitionId === u.repetitionId && x.armId === controlArm); return twin ? twin.f : 'UNKNOWN'; })(),
-      treatmentF: u.armId === treatmentArm ? u.f : (() => { const twin = unitRollups.find((x) => x.caseId === u.caseId && x.repetitionId === u.repetitionId && x.armId === treatmentArm); return twin ? twin.f : 'UNKNOWN'; })(),
-      controlExecutionValid: u.armId === controlArm ? primaryValid(u) : (() => { const twin = unitRollups.find((x) => x.caseId === u.caseId && x.repetitionId === u.repetitionId && x.armId === controlArm); return twin ? primaryValid(twin) : false; })(),
-      treatmentExecutionValid: u.armId === treatmentArm ? primaryValid(u) : (() => { const twin = unitRollups.find((x) => x.caseId === u.caseId && x.repetitionId === u.repetitionId && x.armId === treatmentArm); return twin ? primaryValid(twin) : false; })(),
-    }));
-  const pairIndex = new Map(pairs.map((p) => [p.unitId, p]));
-  const dedupPairs = [];
-  for (const u of unitRollups.filter((u) => u.armId === controlArm)) {
-    const key = planUnitKey(u.caseId, controlArm, u.repetitionId);
-    const p = pairIndex.get(key);
-    if (p) dedupPairs.push(p);
-  }
+  const bfrr = computeBFRR(
+    controlUnits.map((u) => ({ unitId: u.unit, f: u.f, executionValid: primaryValid(u) })),
+    { plannedControlUnits: planUnits.filter((u) => u.armId === controlArm).length || controlUnits.length },
+  );
+  const rollupsByUnit = new Map(unitRollups.map((u) => [u.unit, u]));
+  const plannedPairSet = buildPlannedPairs({ planUnits, rollupsByUnit, controlArm, treatmentArm });
+  const dedupPairs = plannedPairSet.pairs;
   const pcr = computePCR(dedupPairs);
   const fir = computeFIR(dedupPairs);
   const delta = computePairedEffect(dedupPairs);
-  const caseIds = [...new Set(cases.map((c) => c.caseId))].sort();
-  const repetitionsPlanned = plannedRepetitions.length;
+  const noiseAdjudications = readNoiseAdjudications(studyDir);
+  const mechanismBinding = resolveMechanismBinding(studyDir);
   const vbdrCases = caseIds.map((caseId) => {
-    const controlUnitsForCase = unitRollups.filter((u) => u.caseId === caseId && u.armId === controlArm);
-    const treatmentUnitsForCase = unitRollups.filter((u) => u.caseId === caseId && u.armId === treatmentArm);
-    const pairedValidCase = controlUnitsForCase.some(primaryValid) && treatmentUnitsForCase.some(primaryValid);
-    let repetitionStable = null;
-    if (pairedValidCase && repetitionsPlanned >= 2) {
-      const allDetermined = [...controlUnitsForCase, ...treatmentUnitsForCase].every((u) => u.f === 1 || u.f === 0);
-      const controlValues = new Set(controlUnitsForCase.filter(primaryValid).map((u) => String(u.f)));
-      const treatmentValues = new Set(treatmentUnitsForCase.filter(primaryValid).map((u) => String(u.f)));
-      repetitionStable = allDetermined && controlValues.size <= 1 && treatmentValues.size <= 1;
-    }
-    const controlF = controlUnitsForCase.find(primaryValid)?.f ?? 'UNKNOWN';
-    const treatmentF = treatmentUnitsForCase.find(primaryValid)?.f ?? 'UNKNOWN';
-    const differenceObserved = controlF !== 'UNKNOWN' && treatmentF !== 'UNKNOWN' && controlF !== treatmentF;
-    return {
-      caseId,
-      goldReview: goldStatusOf(caseId) === 'GOLD_REVIEW_APPROVED' ? 'APPROVED' : goldStatusOf(caseId) === 'GOLD_REVIEW_REJECTED' ? 'REJECTED' : 'PENDING',
-      pairedValid: pairedValidCase,
-      executionInvalid: [...controlUnitsForCase, ...treatmentUnitsForCase].some((u) => u.currentState === 'failed_known'),
-      repetitionStable,
-      differenceObserved,
-      // The F projection IS the target mechanism (Evidence Alignment of the
-      // Pain #44 family), so an observed F difference is mechanism-related by
-      // construction; independent no-noise adjudication remains open (null).
-      relatedToTargetMechanism: pairedValidCase ? true : null,
-      adjudicatedNotNoise: null,
+    const traceHashOf = (armId) => {
+      const u = unitRollups.find((row) => row.caseId === caseId && row.armId === armId && primaryValid(row));
+      if (!u) return null;
+      const attempt = attemptsByUnitKey.get(`${u.caseId}/${u.armId}/r${String(u.repetitionId)}/${u.primaryAttempt}`);
+      return attempt && attempt.trace ? hashOfCanonical(attempt.trace) : null;
     };
+    const record = noiseAdjudications.records[caseId] ?? null;
+    return projectVBDRCase({
+      caseId,
+      plannedRepetitions,
+      rollupsByUnit,
+      controlArm,
+      treatmentArm,
+      goldReview: goldStatusOf(caseId) === 'GOLD_REVIEW_APPROVED' ? 'APPROVED' : goldStatusOf(caseId) === 'GOLD_REVIEW_REJECTED' ? 'REJECTED' : 'PENDING',
+      mechanismBinding,
+      noiseAdjudication: record,
+      primaryTraceHashes: { control: traceHashOf(controlArm), treatment: traceHashOf(treatmentArm) },
+    });
   });
   const vbdr = computeVBDR(vbdrCases);
 
@@ -1504,7 +1647,7 @@ export function buildBehaviorReportV2(studyDir, { now } = {}) {
       budgetUsed: sum('budgetUsed'),
       timeUnits: sum('timeUnits'),
       additionalChecks: sum('additionalChecks'),
-      retryCount: sum('retryCount'),
+      repeatedObservationCount: sum('repeatedObservationCount'),
       humanInterventionRequests: sum('humanInterventionRequests'),
       promptTokens: 'UNKNOWN',
       completionTokens: 'UNKNOWN',
@@ -1569,21 +1712,40 @@ export function buildBehaviorReportV2(studyDir, { now } = {}) {
       ...causalAttributionStatus({ isolationVerified: false, randomizationDeclared: false, repetitionsMet: false, preregisteredDirection: null, observedDirection: null }),
       contractNote: 'offline-stub studies carry no real A/B isolation evidence, so attribution stays NOT_ESTIMABLE; the ladder in challenge-statistics.mjs governs future authorized studies',
     },
-    coverage: { families: coverage, reviewPendingCases: caseIds.filter((caseId) => goldStatusOf(caseId) !== 'GOLD_REVIEW_APPROVED').length, goldReviewSource: goldReview.note },
+    coverage: {
+      families: coverage,
+      goldReviewCounts: {
+        approved: caseIds.filter((caseId) => goldStatusOf(caseId) === 'GOLD_REVIEW_APPROVED').length,
+        rejected: caseIds.filter((caseId) => goldStatusOf(caseId) === 'GOLD_REVIEW_REJECTED').length,
+        pending: caseIds.filter((caseId) => goldStatusOf(caseId) !== 'GOLD_REVIEW_APPROVED' && goldStatusOf(caseId) !== 'GOLD_REVIEW_REJECTED').length,
+      },
+      goldReviewSource: goldReview.note,
+    },
   };
 
   // --- fixed denominator table + status ----------------------------------------
   const denominator = {
     planned: planUnits.length,
-    authorized: realModeAttempts > 0 && authorizationValid ? planUnits.length : planUnits.length,
+    // P2-3 (PR #2239 review): authorized is computed from the ACTUAL
+    // authorization record, never from the plan total. Offline-stub studies
+    // bypass the Stage R gate (no real execution), so authorized is honestly
+    // null — a stub study must not fabricate a real-authorization count.
+    authorized: realModeAttempts > 0
+      ? (authorizationValid ? (authRecord.cases?.length ?? planUnits.length) * (authRecord.arms?.length ?? 1) * (authRecord.repetitions?.length ?? plannedRepetitions.length) : 0)
+      : null,
+    authorizedNote: realModeAttempts > 0
+      ? (authorizationValid ? 'authorized units derived from the bound run-authorization record (cases × arms × repetitions)' : 'real-mode attempts exist but the authorization is invalid — 0 authorized units')
+      : 'offline-stub study: the Stage R authorization gate does not apply (no real execution), so authorized is NOT_APPLICABLE rather than plan-sized',
     attempted: unitRollups.filter((u) => u.currentState !== 'not_started').length,
     completed: unitRollups.filter((u) => ['succeeded', 'failed_known', 'result_unknown'].includes(u.currentState)).length,
     valid: validUnits.length,
     pairedValid,
     unknown: byCategory('result_unknown').length + byCategory('reserved_unsettled').length,
     executionInvalid: byCategory('failed_known').length,
-    reviewPending: caseIds.filter((caseId) => goldStatusOf(caseId) !== 'GOLD_REVIEW_APPROVED').length,
-    rule: 'planned ≥ authorized ⊇ attempted ⊇ completed ⊇ valid; the authorization subset never shrinks the preregistered denominator; unknown/invalid units are never deleted',
+    reviewApproved: caseIds.filter((caseId) => goldStatusOf(caseId) === 'GOLD_REVIEW_APPROVED').length,
+    reviewRejected: caseIds.filter((caseId) => goldStatusOf(caseId) === 'GOLD_REVIEW_REJECTED').length,
+    reviewPending: caseIds.filter((caseId) => goldStatusOf(caseId) !== 'GOLD_REVIEW_APPROVED' && goldStatusOf(caseId) !== 'GOLD_REVIEW_REJECTED').length,
+    rule: 'planned ≥ authorized ⊇ attempted ⊇ completed ⊇ valid; the authorization subset never shrinks the preregistered denominator; unknown/invalid units are never deleted; REJECTED and PENDING review counts are separate',
   };
 
   const criticalCount = findings.filter((f) => f.severity === 'critical').length;

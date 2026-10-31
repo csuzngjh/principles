@@ -239,3 +239,110 @@ describe('EXAMINER v0.7 statistics — fail-loud inputs', () => {
     expect(() => computeBFRR(null)).toThrow('array');
   });
 });
+
+// ---------------------------------------------------------------------------
+// P1-3 repair round (PR #2239 review): full planned denominators, retained
+// unknowns, and a full-plan sensitivity bound for the paired effect
+// ---------------------------------------------------------------------------
+describe('P1-3 — BFRR keeps the FULL planned denominator', () => {
+  it('RED: 12 planned, 6 observed (all failures), 6 never observed — bounds must be 6/12..12/12', () => {
+    const units = Array.from({ length: 6 }, (_, i) => ({ unitId: `c${i}`, f: 1, executionValid: true }));
+    const result = computeBFRR(units, { plannedControlUnits: 12 });
+    expect(result.missingPlannedUnits).toBe(6);
+    expect(result.unknownUnits).toBe(6); // never-observed units count as unknown, never vanish
+    expect(result.bounds.lower).toMatchObject({ numerator: 6, denominator: 12, value: 0.5 });
+    expect(result.bounds.upper).toMatchObject({ numerator: 12, denominator: 12, value: 1 });
+  });
+
+  it('RED: observed units beyond the plan are a contract violation (throw)', () => {
+    const units = Array.from({ length: 7 }, (_, i) => ({ unitId: `c${i}`, f: 0, executionValid: true }));
+    expect(() => computeBFRR(units, { plannedControlUnits: 6 })).toThrow(/exceed|planned/i);
+  });
+
+  it('RED: duplicate unitIds inside the observed set are rejected', () => {
+    const units = [{ unitId: 'c1', f: 1, executionValid: true }, { unitId: 'c1', f: 0, executionValid: true }];
+    expect(() => computeBFRR(units, { plannedControlUnits: 4 })).toThrow(/duplicate/i);
+  });
+
+  it('observed-only study (units.length === planned) keeps the previous semantics', () => {
+    const units = [
+      ...Array.from({ length: 4 }, (_, i) => ({ unitId: `a${i}`, f: 1, executionValid: true })),
+      ...Array.from({ length: 4 }, (_, i) => ({ unitId: `b${i}`, f: 0, executionValid: true })),
+    ];
+    const result = computeBFRR(units, { plannedControlUnits: 8 });
+    expect(result.missingPlannedUnits).toBe(0);
+    expect(result.rate).toMatchObject({ numerator: 4, denominator: 8, value: 0.5 });
+    expect(result.bounds.upper).toMatchObject({ numerator: 4, denominator: 8 });
+  });
+});
+
+describe('P1-3 — paired effect gains a full-plan sensitivity bound', () => {
+  it('RED: one-sided unknown contributes its possible range; two-sided unknown contributes [-1,+1]', () => {
+    // planned=3: (1,0) determined +1; (1,UNKNOWN) in [0,1]; (UNKNOWN,UNKNOWN) in [-1,+1]
+    const pairs = [
+      pair(1, 0),
+      pair(1, 'UNKNOWN'),
+      pair('UNKNOWN', 'UNKNOWN'),
+    ];
+    const effect = computePairedEffect(pairs);
+    expect(effect.plannedPairs).toBe(3);
+    expect(effect.determinedPairs).toBe(1);
+    expect(effect.completeCaseDelta).toMatchObject({ status: 'ESTIMABLE', numerator: 1, denominator: 1, value: 1 });
+    // min: +1 + (1-1=0) + (-1) = 0 → 0/3 ; max: +1 + (1-0=1) + (+1) = 3 → 3/3
+    expect(effect.fullPlanLowerBound).toMatchObject({ numerator: 0, denominator: 3, value: 0 });
+    expect(effect.fullPlanUpperBound).toMatchObject({ numerator: 3, denominator: 3, value: 1 });
+  });
+
+  it('RED: execution-invalid sides participate in the sensitivity range like unknowns', () => {
+    // (1,0) + (0, f=0 but treatmentExecutionValid=false → range [0-0,0-1]=[-1..0]) → min 0, max 1 over 2
+    const pairs = [pair(1, 0), pair(0, 0, { treatmentExecutionValid: false })];
+    const effect = computePairedEffect(pairs);
+    expect(effect.fullPlanLowerBound).toMatchObject({ numerator: 0, denominator: 2, value: 0 });
+    expect(effect.fullPlanUpperBound).toMatchObject({ numerator: 1, denominator: 2, value: 0.5 });
+  });
+
+  it('all-determined pairs keep the point estimate as the exact bound', () => {
+    const pairs = [pair(1, 0), pair(0, 0)];
+    const effect = computePairedEffect(pairs);
+    expect(effect.fullPlanLowerBound).toMatchObject({ value: 0.5 });
+    expect(effect.fullPlanUpperBound).toMatchObject({ value: 0.5 });
+    expect(effect.completeCaseDelta.value).toBeCloseTo(0.5, 12);
+  });
+
+  it('zero planned pairs stay NOT_ESTIMABLE', () => {
+    const effect = computePairedEffect([]);
+    expect(effect.completeCaseDelta.status).toBe('NOT_ESTIMABLE');
+    expect(effect.fullPlanLowerBound.status).toBe('NOT_ESTIMABLE');
+    expect(effect.fullPlanUpperBound.status).toBe('NOT_ESTIMABLE');
+  });
+});
+
+describe('P1-3 — planned pair construction from the preregistered plan', () => {
+  it('RED: buildPlannedPairs derives one row per planned (caseId, repetitionId) with per-side status', async () => {
+    const { buildPlannedPairs } = await import('../dev/principle-learning-lab/lib/challenge-statistics.mjs');
+    const planUnits = [
+      { caseId: 'T1', armId: 'A', repetitionId: '1' },
+      { caseId: 'T1', armId: 'B', repetitionId: '1' },
+      { caseId: 'T1', armId: 'A', repetitionId: '2' },
+      { caseId: 'T1', armId: 'B', repetitionId: '2' }, // never started on either side
+      { caseId: 'T2', armId: 'A', repetitionId: '1' },
+      { caseId: 'T2', armId: 'B', repetitionId: '1' },
+    ];
+    const rollups = new Map([
+      ['T1/A/r1', { f: 1, currentState: 'succeeded', replayRescored: true }],
+      ['T1/B/r1', { f: 0, currentState: 'succeeded', replayRescored: true }],
+      ['T1/A/r2', { f: 'UNKNOWN', currentState: 'not_started', replayRescored: false }],
+      ['T1/B/r2', { f: 'UNKNOWN', currentState: 'not_started', replayRescored: false }],
+      ['T2/A/r1', { f: 'UNKNOWN', currentState: 'failed_known', replayRescored: false }],
+      ['T2/B/r1', { f: 0, currentState: 'succeeded', replayRescored: true }],
+    ]);
+    const pairs = buildPlannedPairs({ planUnits, rollupsByUnit: rollups, controlArm: 'A', treatmentArm: 'B' });
+    expect(pairs.plannedPairs).toBe(3);
+    const t1r1 = pairs.pairs.find((p: any) => p.pairKey === 'T1/r1');
+    expect(t1r1).toMatchObject({ controlF: 1, treatmentF: 0, pairValidity: 'VALID', controlExecutionStatus: 'succeeded', treatmentExecutionStatus: 'succeeded' });
+    const t1r2 = pairs.pairs.find((p: any) => p.pairKey === 'T1/r2');
+    expect(t1r2).toMatchObject({ pairValidity: 'UNKNOWN', unknownReason: 'BOTH_SIDES_NOT_STARTED' });
+    const t2r1 = pairs.pairs.find((p: any) => p.pairKey === 'T2/r1');
+    expect(t2r1).toMatchObject({ pairValidity: 'EXECUTION_INVALID', invalidityReason: 'CONTROL_FAILED_KNOWN' });
+  });
+});

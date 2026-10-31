@@ -1,38 +1,48 @@
 import { describe, expect, it } from 'vitest';
 import {
-  verifyIsolationContract, EXPERIMENT_DESIGNS, ISOLATION_FROZEN_VARIABLES,
+  verifyIsolationContract, collectOfflineStubLoadEvidence,
+  EXPERIMENT_DESIGNS, ISOLATION_FROZEN_VARIABLES, HOST_PROBE_VARIABLES,
 } from '../dev/principle-learning-lab/lib/challenge-isolation-contract.mjs';
+import { hashOfCanonical } from '../dev/principle-learning-lab/lib/challenge-freeze.mjs';
 
-// A fully valid principle-only contract: identical frozen variables with load
-// evidence, empty control payload, clean actor inputs, independent
-// session/workspace, randomized order with evidence, preregistered reps.
-function validContract() {
-  const frozen = {
+const PRINCIPLE_HASH = 'b'.repeat(64);
+const CONTEXT_HASH = 'c'.repeat(64);
+
+const frozen = () => ({
+  studyId: 'EXM-V07-STUDY', suiteHash: '1'.repeat(64), mappingHash: '2'.repeat(64),
+  graderHash: '3'.repeat(64), principleContentHash: PRINCIPLE_HASH,
+});
+
+const armCheck = () => ({
+  commonContextHash: CONTEXT_HASH,
+  arms: {
+    A: { delivery: { payloadText: '', payloadHash: null } },
+    B: { delivery: { payloadText: '结论不得超越观察。', payloadHash: PRINCIPLE_HASH } },
+  },
+});
+
+const executionOrder = () => ({ strategy: 'randomized', seed: 'lcg-7', order: ['T1/B/r1', 'T1/A/r1'] });
+
+const declaredArms = () => {
+  const shared = {
     model: 'gpt-test-1', host: 'openclaw', memory: 'empty-v1', hook: 'none',
     tools: 'readonly-set', initialState: 'seed-42', budget: '20-units',
     provider: 'test-provider', systemPrompt: 'shared-prompt', plugin: 'none', commonContext: 'ctx-v1',
   };
   return {
-    design: 'principleOnly',
-    arms: {
-      control: { ...frozen, targetPrinciple: 'OFF', targetRuleCode: 'OFF', sessionId: 'sess-A', workspaceId: 'ws-A' },
-      treatment: { ...frozen, targetPrinciple: 'ON', targetRuleCode: 'OFF', sessionId: 'sess-B', workspaceId: 'ws-B' },
-    },
-    evidence: {
-      model: { control: 'observed:gpt-test-1@round1', treatment: 'observed:gpt-test-1@round1' },
-      host: { control: 'exec-state:openclaw-1', treatment: 'exec-state:openclaw-2' },
-      memory: { control: 'snapshot:empty-v1', treatment: 'snapshot:empty-v1' },
-      hook: { control: 'hook-log:none', treatment: 'hook-log:none' },
-      tools: { control: 'perm-set:readonly', treatment: 'perm-set:readonly' },
-      principleDelivery: { treatmentPrincipleHash: 'a'.repeat(64), controlPayloadText: '', normativeMarkers: ['必须在变更前运行每项检查'] },
-      actorInputs: {
-        control: '{"schema":"claim-evidence-actor-visible.v3","taskText":"check the config"}',
-        treatment: '{"schema":"claim-evidence-actor-visible.v3","taskText":"check the config"}',
-      },
-    },
-    execution: { orderStrategy: 'randomized', orderEvidence: 'seed-record:lcg-7', repetitionsPlanned: 2, preregistrationRef: 'preregistration.json#repetitions' },
+    control: { ...shared, targetPrinciple: 'OFF', targetRuleCode: 'OFF', sessionId: 'sess-A', workspaceId: 'ws-A' },
+    treatment: { ...shared, targetPrinciple: 'ON', targetRuleCode: 'OFF', sessionId: 'sess-B', workspaceId: 'ws-B' },
   };
-}
+};
+
+const validInput = () => ({
+  design: 'principleOnly',
+  arms: declaredArms(),
+  actualLoad: collectOfflineStubLoadEvidence({ frozen: frozen(), armCheck: armCheck(), armBindings: { control: 'A', treatment: 'B' }, executionOrder: executionOrder() }),
+  expectations: { principleHash: PRINCIPLE_HASH, commonContextHash: CONTEXT_HASH },
+  execution: { orderStrategy: 'randomized', repetitionsPlanned: 2, preregistrationRef: 'preregistration.json#repetitions' },
+  mode: 'offline-stub',
+});
 
 describe('EXAMINER v0.7 §4 isolation contract — definitions', () => {
   it('defines the three designs with the SPEC condition matrices', () => {
@@ -42,98 +52,254 @@ describe('EXAMINER v0.7 §4 isolation contract — definitions', () => {
     });
     expect(EXPERIMENT_DESIGNS.ruleCodeOnly.arms.treatment).toEqual({ targetPrinciple: 'OFF', targetRuleCode: 'ON' });
     expect(Object.keys(EXPERIMENT_DESIGNS.factorial2x2.arms).sort()).toEqual(['P0R0', 'P0R1', 'P1R0', 'P1R1']);
-    expect(EXPERIMENT_DESIGNS.factorial2x2.rule).toContain('out of scope');
   });
-  it('freezes the full §4.5 variable list', () => {
+  it('freezes the full §4.5 variable list and the host-probe split', () => {
     for (const variable of ['model', 'host', 'memory', 'hook', 'tools', 'initialState', 'budget', 'provider', 'systemPrompt', 'plugin', 'commonContext']) {
       expect(ISOLATION_FROZEN_VARIABLES).toContain(variable);
+    }
+    for (const variable of ['model', 'systemPrompt', 'provider', 'plugin', 'tools', 'memory', 'hook', 'session', 'workspace']) {
+      expect(HOST_PROBE_VARIABLES).toContain(variable);
     }
   });
 });
 
-describe('EXAMINER v0.7 §4 isolation contract — accept path', () => {
-  it('verifies a fully evidenced contract', () => {
-    const result = verifyIsolationContract(validContract());
-    expect(result.status).toBe('ISOLATION_VERIFIED');
-    expect(result.ok).toBe(true);
+describe('EXAMINER v0.7 §4 isolation contract — accept path (P1-1)', () => {
+  it('verifies a fully evidenced offline contract with a SCOPED verdict', () => {
+    const result = verifyIsolationContract(validInput());
+    expect(result.status).toBe('ISOLATION_VERIFIED_OFFLINE_SCOPE');
     expect(result.problems).toEqual([]);
+    // treatment/control load states are explicit
+    expect(result.loadStates.treatment.principle).toBe('VERIFIED');
+    expect(result.loadStates.control.principle).toBe('VERIFIED'); // verified as ABSENT
+    expect(result.loadStates.control.ruleCode).toBe('VERIFIED');
+    expect(result.loadStates.control.model).toBe('UNKNOWN'); // offline cannot observe — honest UNKNOWN
+  });
+  it('a real-host producer with full probe evidence reaches full ISOLATION_VERIFIED', () => {
+    const input = validInput();
+    input.mode = 'real-host';
+    const core = {
+      generatedBy: 'trusted-host-probe', studyId: 'EXM-V07-STUDY', suiteHash: '1'.repeat(64),
+      mappingHash: '2'.repeat(64), graderHash: '3'.repeat(64), executionMode: 'F2-real-host',
+      arms: {
+        control: {
+          resolvedPrincipleHash: null, resolvedPrincipleLoaded: false,
+          actualRuleCodeState: 'OFF', actualRuleCodeStateBasis: 'HOST_PROBE', commonContextHash: CONTEXT_HASH,
+          modelIdentity: 'gpt-test-1@round1', systemPromptHash: 'p'.repeat(64), providerIdentity: 'test-provider',
+          pluginSetHash: 'q'.repeat(64), toolsSetHash: 'r'.repeat(64), memoryIdentity: 'empty-v1',
+          hookSetHash: 's'.repeat(64), sessionIdentity: 'host-sess-A', workspaceIdentity: 'host-ws-A',
+        },
+        treatment: {
+          resolvedPrincipleHash: PRINCIPLE_HASH, resolvedPrincipleLoaded: true,
+          actualRuleCodeState: 'OFF', actualRuleCodeStateBasis: 'HOST_PROBE', commonContextHash: CONTEXT_HASH,
+          modelIdentity: 'gpt-test-1@round1', systemPromptHash: 'p'.repeat(64), providerIdentity: 'test-provider',
+          pluginSetHash: 'q'.repeat(64), toolsSetHash: 'r'.repeat(64), memoryIdentity: 'empty-v1',
+          hookSetHash: 's'.repeat(64), sessionIdentity: 'host-sess-B', workspaceIdentity: 'host-ws-B',
+        },
+      },
+      randomizationRecord: { strategy: 'randomized', seed: 'lcg-7', actualOrder: ['T1/B/r1', 'T1/A/r1'] },
+    };
+    input.actualLoad = { ...core, evidenceHash: hashOfCanonical(core) };
+    input.expectations = {
+      principleHash: PRINCIPLE_HASH, commonContextHash: CONTEXT_HASH,
+      modelIdentity: 'gpt-test-1@round1', systemPromptHash: 'p'.repeat(64), providerIdentity: 'test-provider',
+      pluginSetHash: 'q'.repeat(64), toolsSetHash: 'r'.repeat(64), memoryIdentity: 'empty-v1', hookSetHash: 's'.repeat(64),
+    };
+    const result = verifyIsolationContract(input);
+    expect(result.problems).toEqual([]);
+    expect(result.status).toBe('ISOLATION_VERIFIED');
   });
   it('is a pure pre-execution gate — repeated calls, no mutation of inputs', () => {
-    const input = validContract();
+    const input = validInput();
     const first = verifyIsolationContract(input);
-    const second = verifyIsolationContract(input);
-    expect(second).toEqual(first);
+    expect(verifyIsolationContract(input)).toEqual(first);
+  });
+  it('REGRESSION (red→green): a declaration-only input with no actual load evidence is refused — the pre-P1-1 gate accepted exactly this shape', () => {
+    // Before the P1-1 repair, arms + non-empty per-arm evidence strings were
+    // enough to reach ISOLATION_VERIFIED. The same declaration plane now
+    // fails closed because no runner-produced load evidence exists.
+    const input = validInput();
+    delete input.actualLoad;
+    const result = verifyIsolationContract(input);
+    expect(result.status).toBe('EXPERIMENT_INVALID');
+    expect(result.problems.join('\n')).toContain('no actual load evidence');
   });
 });
 
-describe('EXAMINER v0.7 §4 isolation contract — fail-closed refusals', () => {
+describe('EXAMINER v0.7 §4 isolation contract — P1-1 fail-closed refusals', () => {
   const refuse = (mutate, fragment) => {
-    const input = validContract();
+    const input = validInput();
     mutate(input);
     const result = verifyIsolationContract(input);
     expect(result.status).toBe('EXPERIMENT_INVALID');
     expect(result.problems.join('\n')).toContain(fragment);
     return result;
   };
+  const rebuildEvidence = (input, mutateArms) => {
+    const armCheckValue = armCheck();
+    if (mutateArms) mutateArms(armCheckValue);
+    input.actualLoad = collectOfflineStubLoadEvidence({ frozen: frozen(), armCheck: armCheckValue, armBindings: { control: 'A', treatment: 'B' }, executionOrder: executionOrder() });
+    return input;
+  };
 
-  it('refuses Principle leakage into the control arm', () => {
-    refuse((i) => { i.evidence.principleDelivery.controlPayloadText = '变更前必须运行每项检查。'; }, 'control arm must not carry the target Principle');
+  it('1. declared RuleCode OFF but actually loaded ON', () => {
+    const input = validInput();
+    input.actualLoad.arms.control.actualRuleCodeState = 'ON';
+    input.actualLoad.evidenceHash = hashOfCanonical((({ evidenceHash: _h, ...core }) => core)(input.actualLoad));
+    const result = verifyIsolationContract(input);
+    expect(result.status).toBe('EXPERIMENT_INVALID');
+    expect(result.problems.join('\n')).toContain("declared RuleCode OFF but the actually loaded state is 'ON'");
   });
-  it('refuses normative-marker leakage through paraphrase', () => {
-    refuse((i) => { i.evidence.principleDelivery.controlPayloadText = '注意：必须在变更前运行每项检查后才能继续。'; }, 'normative marker');
+  it('2. declared model A, loaded model B (real-host producer)', () => {
+    const input = validInput();
+    input.mode = 'real-host';
+    const core = {
+      generatedBy: 'trusted-host-probe', studyId: 'EXM-V07-STUDY', suiteHash: '1'.repeat(64),
+      mappingHash: '2'.repeat(64), graderHash: '3'.repeat(64), executionMode: 'F2-real-host',
+      arms: {
+        control: {
+          resolvedPrincipleHash: null, resolvedPrincipleLoaded: false, actualRuleCodeState: 'OFF',
+          actualRuleCodeStateBasis: 'HOST_PROBE', commonContextHash: CONTEXT_HASH,
+          modelIdentity: 'gpt-test-B@round1', systemPromptHash: 'p'.repeat(64), providerIdentity: 'test-provider',
+          pluginSetHash: 'q'.repeat(64), toolsSetHash: 'r'.repeat(64), memoryIdentity: 'empty-v1',
+          hookSetHash: 's'.repeat(64), sessionIdentity: 'hs-A', workspaceIdentity: 'hw-A',
+        },
+        treatment: {
+          resolvedPrincipleHash: PRINCIPLE_HASH, resolvedPrincipleLoaded: true, actualRuleCodeState: 'OFF',
+          actualRuleCodeStateBasis: 'HOST_PROBE', commonContextHash: CONTEXT_HASH,
+          modelIdentity: 'gpt-test-1@round1', systemPromptHash: 'p'.repeat(64), providerIdentity: 'test-provider',
+          pluginSetHash: 'q'.repeat(64), toolsSetHash: 'r'.repeat(64), memoryIdentity: 'empty-v1',
+          hookSetHash: 's'.repeat(64), sessionIdentity: 'hs-B', workspaceIdentity: 'hw-B',
+        },
+      },
+      randomizationRecord: { strategy: 'randomized', seed: 'lcg-7', actualOrder: ['T1/B/r1', 'T1/A/r1'] },
+    };
+    input.actualLoad = { ...core, evidenceHash: hashOfCanonical(core) };
+    input.expectations = {
+      principleHash: PRINCIPLE_HASH, commonContextHash: CONTEXT_HASH,
+      modelIdentity: 'gpt-test-1@round1', systemPromptHash: 'p'.repeat(64), providerIdentity: 'test-provider',
+      pluginSetHash: 'q'.repeat(64), toolsSetHash: 'r'.repeat(64), memoryIdentity: 'empty-v1', hookSetHash: 's'.repeat(64),
+    };
+    const result = verifyIsolationContract(input);
+    expect(result.status).toBe('EXPERIMENT_INVALID');
+    expect(result.problems.join('\n')).toContain('does not match the frozen expectation');
   });
-  it('refuses Gold leakage into actor inputs', () => {
-    refuse((i) => { i.evidence.actorInputs.treatment = '{"goldTruth":true}'; }, "leaks judge-side key 'goldTruth'");
+  it('3. identical sessionIdentity across arms (observed load state)', () => {
+    const input = validInput();
+    input.mode = 'real-host';
+    const makeArm = (on: boolean, session: string) => ({
+      resolvedPrincipleHash: on ? PRINCIPLE_HASH : null, resolvedPrincipleLoaded: on,
+      actualRuleCodeState: 'OFF', actualRuleCodeStateBasis: 'HOST_PROBE', commonContextHash: CONTEXT_HASH,
+      modelIdentity: 'gpt-test-1@round1', systemPromptHash: 'p'.repeat(64), providerIdentity: 'test-provider',
+      pluginSetHash: 'q'.repeat(64), toolsSetHash: 'r'.repeat(64), memoryIdentity: 'empty-v1',
+      hookSetHash: 's'.repeat(64), sessionIdentity: session, workspaceIdentity: on ? 'hw-B' : 'hw-A',
+    });
+    const core = {
+      generatedBy: 'trusted-host-probe', studyId: 'EXM-V07-STUDY', suiteHash: '1'.repeat(64),
+      mappingHash: '2'.repeat(64), graderHash: '3'.repeat(64), executionMode: 'F2-real-host',
+      arms: { control: makeArm(false, 'SAME-SESSION'), treatment: makeArm(true, 'SAME-SESSION') },
+      randomizationRecord: { strategy: 'randomized', seed: 'lcg-7', actualOrder: ['T1/B/r1'] },
+    };
+    input.actualLoad = { ...core, evidenceHash: hashOfCanonical(core) };
+    input.expectations = {
+      principleHash: PRINCIPLE_HASH, commonContextHash: CONTEXT_HASH,
+      modelIdentity: 'gpt-test-1@round1', systemPromptHash: 'p'.repeat(64), providerIdentity: 'test-provider',
+      pluginSetHash: 'q'.repeat(64), toolsSetHash: 'r'.repeat(64), memoryIdentity: 'empty-v1', hookSetHash: 's'.repeat(64),
+    };
+    const result = verifyIsolationContract(input);
+    expect(result.status).toBe('EXPERIMENT_INVALID');
+    expect(result.problems.join('\n')).toContain('sessionIdentity');
   });
-  it('refuses principlePredicates leakage into actor inputs', () => {
-    refuse((i) => { i.evidence.actorInputs.control = '{"principlePredicates":[]}'; }, 'principlePredicates');
+  it('4a. commonContextHash drift from the frozen value refuses execution (the anti-drift reading of "shared context")', () => {
+    refuse((i) => { i.expectations.commonContextHash = 'd'.repeat(64); }, 'does not re-bind to the frozen common context');
   });
-  it('refuses A/B model mismatch', () => {
+  it('4b. cross-arm divergence of the loaded common context refuses execution', () => {
+    const input = validInput();
+    const load = input.actualLoad;
+    load.arms.treatment.commonContextHash = 'e'.repeat(64);
+    load.evidenceHash = hashOfCanonical((({ evidenceHash: _h, ...core }) => core)(load));
+    const result = verifyIsolationContract(input);
+    expect(result.status).toBe('EXPERIMENT_INVALID');
+    expect(result.problems.join('\n')).toContain('does not re-bind to the frozen common context');
+  });
+  it('5. systemPromptHash drift (real-host producer)', () => {
+    const input = validInput();
+    input.mode = 'real-host';
+    const makeArm = (on: boolean) => ({
+      resolvedPrincipleHash: on ? PRINCIPLE_HASH : null, resolvedPrincipleLoaded: on,
+      actualRuleCodeState: 'OFF', actualRuleCodeStateBasis: 'HOST_PROBE', commonContextHash: CONTEXT_HASH,
+      modelIdentity: 'gpt-test-1@round1', systemPromptHash: 'drifted'.padEnd(64, 'x'), providerIdentity: 'test-provider',
+      pluginSetHash: 'q'.repeat(64), toolsSetHash: 'r'.repeat(64), memoryIdentity: 'empty-v1',
+      hookSetHash: 's'.repeat(64), sessionIdentity: on ? 'hs-B' : 'hs-A', workspaceIdentity: on ? 'hw-B' : 'hw-A',
+    });
+    const core = {
+      generatedBy: 'trusted-host-probe', studyId: 'EXM-V07-STUDY', suiteHash: '1'.repeat(64),
+      mappingHash: '2'.repeat(64), graderHash: '3'.repeat(64), executionMode: 'F2-real-host',
+      arms: { control: makeArm(false), treatment: makeArm(true) },
+      randomizationRecord: { strategy: 'randomized', seed: 'lcg-7', actualOrder: ['T1/B/r1'] },
+    };
+    input.actualLoad = { ...core, evidenceHash: hashOfCanonical(core) };
+    input.expectations = {
+      principleHash: PRINCIPLE_HASH, commonContextHash: CONTEXT_HASH,
+      modelIdentity: 'gpt-test-1@round1', systemPromptHash: 'p'.repeat(64), providerIdentity: 'test-provider',
+      pluginSetHash: 'q'.repeat(64), toolsSetHash: 'r'.repeat(64), memoryIdentity: 'empty-v1', hookSetHash: 's'.repeat(64),
+    };
+    const result = verifyIsolationContract(input);
+    expect(result.status).toBe('EXPERIMENT_INVALID');
+    expect(result.problems.join('\n')).toContain('systemPromptHash');
+  });
+  it('6. missing actual load evidence (whole object and per-arm)', () => {
+    refuse((i) => { delete i.actualLoad; }, 'no actual load evidence');
+    refuse((i) => { i.actualLoad.arms = { control: i.actualLoad.arms.control }; }, 'no load evidence for arm treatment');
+  });
+  it('7. actor-forged / tampered evidence fails provenance or hash', () => {
+    refuse((i) => { i.actualLoad.generatedBy = 'actor-self-report'; }, 'not a trusted producer');
+    refuse((i) => {
+      i.actualLoad.arms.control.resolvedPrincipleHash = 'f'.repeat(64);
+      i.actualLoad.arms.control.resolvedPrincipleLoaded = true; // forged WITHOUT recomputing the hash
+    }, 'hash mismatch');
+  });
+  it('8. randomization declared but never executed (no order record)', () => {
+    refuse((i) => {
+      const core = (({ evidenceHash: _h, randomizationRecord: _r, ...rest }) => rest)(i.actualLoad);
+      i.actualLoad = { ...core, randomizationRecord: null, evidenceHash: hashOfCanonical(core) };
+    }, 'no actual execution record');
+    refuse((i) => {
+      const core = (({ evidenceHash: _h, ...rest }) => rest)(i.actualLoad);
+      core.randomizationRecord = { strategy: 'randomized', seed: '', actualOrder: [] };
+      i.actualLoad = { ...core, evidenceHash: hashOfCanonical(core) };
+    }, 'no actual execution record');
+  });
+  it('9a. principle leak into the control arm (OFF declared, payload loaded)', () => {
+    refuse((i) => rebuildEvidence(i, (ac) => { ac.arms.A.delivery.payloadText = '结论不得超越观察。'; ac.arms.A.delivery.payloadHash = PRINCIPLE_HASH; }), 'Principle leak into the control arm');
+  });
+  it('9b. treatment arm missing its principle payload', () => {
+    refuse((i) => rebuildEvidence(i, (ac) => { ac.arms.B.delivery.payloadText = ''; ac.arms.B.delivery.payloadHash = null; }), 'treatment was not verifiably injected');
+  });
+  it('declared-plane failures are still refused (model mismatch, frozen drift, shared declared ids)', () => {
     refuse((i) => { i.arms.treatment.model = 'gpt-test-2'; }, "'model' differs across arms");
-  });
-  it('refuses missing model identity binding (evidence does not attest the declared model)', () => {
-    refuse((i) => { i.evidence.model.treatment = 'observed:some-other-model@round1'; }, 'does not attest the declared model');
-  });
-  it('refuses unverifiable hook/memory load (declaration without load evidence)', () => {
-    refuse((i) => { delete i.evidence.hook; }, 'no actual-load evidence for \'hook\'');
-    refuse((i) => { i.evidence.memory.control = ''; }, 'no actual-load evidence for \'memory\'');
-  });
-  it('refuses tool permission mismatch', () => {
-    refuse((i) => { i.arms.control.tools = 'readonly-set'; i.arms.treatment.tools = 'write-set'; }, "'tools' differs across arms");
-  });
-  it('refuses unprovable host (missing host load evidence)', () => {
-    refuse((i) => { i.evidence.host.control = undefined; }, 'no actual-load evidence for \'host\'');
-  });
-  it('refuses shared session across arms', () => {
-    refuse((i) => { i.arms.treatment.sessionId = 'sess-A'; }, 'sessionId');
-  });
-  it('refuses shared workspace across arms', () => {
-    refuse((i) => { i.arms.treatment.workspaceId = 'ws-A'; }, 'workspaceId');
-  });
-  it('refuses budget condition mismatch', () => {
-    refuse((i) => { i.arms.treatment.budget = '40-units'; }, "'budget' differs across arms");
-  });
-  it('refuses an undeclared frozen variable (confound cannot be verified)', () => {
     refuse((i) => { delete i.arms.treatment.memory; }, "'memory' missing on at least one arm");
-  });
-  it('refuses a wrong treatment matrix (RuleCode ON in a principle-only control)', () => {
+    refuse((i) => { i.arms.treatment.sessionId = 'sess-A'; }, 'sessionId');
     refuse((i) => { i.arms.treatment.targetRuleCode = 'ON'; }, 'targetRuleCode must be OFF');
-  });
-  it('refuses neither-randomized-nor-balanced execution order', () => {
-    refuse((i) => { i.execution.orderStrategy = 'sequential-as-issued'; }, 'randomized');
-  });
-  it('refuses randomized order declared without evidence', () => {
-    refuse((i) => { i.execution.orderEvidence = ''; }, 'without evidence');
-  });
-  it('refuses non-preregistered repetitions (post-hoc sampling)', () => {
     refuse((i) => { i.execution.repetitionsPlanned = 0; }, 'preregistered');
-    refuse((i) => { i.execution.preregistrationRef = ''; }, 'preregistered');
+    refuse((i) => { i.execution.orderStrategy = 'sequential'; }, 'randomized');
   });
-  it('refuses an arm outside the design', () => {
-    refuse((i) => { i.arms.C = { ...i.arms.control }; }, 'does not belong to design');
+  it('judge-side leak through actor inputs is refused when inputs are supplied', () => {
+    const input = validInput();
+    input.actorInputs = { control: '{"schema":"x"}', treatment: '{"goldTruth":true}' };
+    const result = verifyIsolationContract(input);
+    expect(result.status).toBe('EXPERIMENT_INVALID');
+    expect(result.problems.join('\n')).toContain("leaks judge-side key 'goldTruth'");
   });
-  it('throws on malformed input (unknown design / missing arms)', () => {
-    expect(() => verifyIsolationContract({ design: 'teleportOnly', arms: {}, evidence: {}, execution: {} })).toThrow('unknown design');
-    expect(() => verifyIsolationContract({ design: 'principleOnly', arms: { control: {} }, evidence: {}, execution: {} })).toThrow('arms.treatment');
+  it('real-host mode BLOCKS on missing probe evidence rather than accepting UNKNOWN', () => {
+    const input = validInput();
+    input.mode = 'real-host'; // offline-shaped evidence (host fields null) under a real declaration
+    const result = verifyIsolationContract(input);
+    expect(result.status).toBe('EXPERIMENT_INVALID');
+    expect(result.problems.join('\n')).toContain('trusted host-probe proof is required');
+  });
+  it('throws on malformed input (unknown design / missing arms / bad mode)', () => {
+    expect(() => verifyIsolationContract({ design: 'teleportOnly', arms: {}, actualLoad: null, expectations: {}, execution: {} } as any)).toThrow('unknown design');
+    expect(() => verifyIsolationContract({ design: 'principleOnly', arms: { control: {} }, actualLoad: null, expectations: {}, execution: {} } as any)).toThrow('arms.treatment');
+    expect(() => verifyIsolationContract({ ...validInput(), mode: 'quantum' } as any)).toThrow('mode');
   });
 });

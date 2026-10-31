@@ -34,35 +34,51 @@ function rateOrNotEstimable(numerator, denominator) {
  *
  * BFRR = N(F_C=1) / N(F_C ∈ {0,1}) over execution-valid control units, plus
  * the full-planned-denominator sensitivity interval so unknown units can never
- * be silently dropped:
+ * be silently dropped. Units in the plan that produced NO record yet count as
+ * unknown (missingPlannedUnits) — an unfinished study can never shrink its
+ * own denominator:
  *   lower = N(F_C=1) / N_planned
- *   upper = (N(F_C=1) + N(F_C=UNKNOWN or execution-invalid)) / N_planned
+ *   upper = (N(F_C=1) + N(unknown) + N(missing)) / N_planned
  */
 export function computeBFRR(units, { plannedControlUnits } = {}) {
   assertUnits(units, 'computeBFRR');
   const planned = plannedControlUnits ?? units.length;
   if (!Number.isInteger(planned) || planned < 0) throw new Error('computeBFRR: plannedControlUnits must be a non-negative integer');
+  if (units.length > planned) {
+    throw new Error(`computeBFRR: observed units (${units.length}) exceed the planned control units (${planned}) — more evidence than preregistered is a contract violation, not extra credit`);
+  }
+  const seenIds = new Set();
+  for (const unit of units) {
+    if (unit.unitId === undefined) continue;
+    if (seenIds.has(unit.unitId)) throw new Error(`computeBFRR: duplicate unitId '${String(unit.unitId)}' — a unit may appear exactly once in the observed set`);
+    seenIds.add(unit.unitId);
+  }
   const determined = units.filter((unit) => unit.executionValid !== false && (unit.f === 1 || unit.f === 0));
   const confirmedFailures = determined.filter((unit) => unit.f === 1);
   const confirmedNonFailures = determined.filter((unit) => unit.f === 0);
-  const unknownUnits = units.filter((unit) => !(unit.executionValid !== false && (unit.f === 1 || unit.f === 0)));
+  const undeterminedObserved = units.filter((unit) => !(unit.executionValid !== false && (unit.f === 1 || unit.f === 0)));
+  const missingPlannedUnits = planned - units.length;
+  const unknownUnits = undeterminedObserved.length + missingPlannedUnits;
   return {
     metric: 'BFRR',
-    formula: 'N(F_C=1) / N(F_C in {0,1}) over valid control units; bounds over the full planned denominator',
+    formula: 'N(F_C=1) / N(F_C in {0,1}) over valid control units; bounds over the full planned denominator (missing planned units count as unknown)',
     plannedControlUnits: planned,
+    observedControlUnits: units.length,
+    missingPlannedUnits,
     validControlUnits: determined.length,
     confirmedFailures: confirmedFailures.length,
     confirmedNonFailures: confirmedNonFailures.length,
-    unknownUnits: unknownUnits.length,
+    unknownUnits,
+    unknownBreakdown: { undeterminedObserved: undeterminedObserved.length, neverObserved: missingPlannedUnits },
     rate: rateOrNotEstimable(confirmedFailures.length, determined.length),
     bounds: planned === 0
       ? { status: 'NOT_ESTIMABLE', reason: 'empty planned denominator' }
       : {
         status: 'ESTIMABLE',
         lower: { numerator: confirmedFailures.length, denominator: planned, value: confirmedFailures.length / planned },
-        upper: { numerator: confirmedFailures.length + unknownUnits.length, denominator: planned, value: (confirmedFailures.length + unknownUnits.length) / planned },
+        upper: { numerator: confirmedFailures.length + unknownUnits, denominator: planned, value: (confirmedFailures.length + unknownUnits) / planned },
       },
-    rule: 'a baseline that did not reproduce the failure cannot claim the Principle corrected it',
+    rule: 'a baseline that did not reproduce the failure cannot claim the Principle corrected it; unexecuted planned units never vanish from the denominator',
   };
 }
 
@@ -128,7 +144,14 @@ export function computeFIR(pairs) {
 /**
  * §6.5 Overall Paired Treatment Effect: Δ_benefit = P(F_C=1) − P(F_T=1) over
  * fully determined valid pairs, with the COMPLETE four-cell table — the point
- * estimate alone is never an acceptable report.
+ * estimate alone is never an acceptable report. In addition, a FULL-PLAN
+ * sensitivity bound spreads every not-yet-determined pair over its possible
+ * pairBenefit = controlFailure − treatmentFailure range:
+ *   both sides determined      → exact contribution
+ *   one side unknown/invalid   → the other side fixed, missing side ∈ {0,1}
+ *   both sides unknown/invalid → [−1, +1]
+ * The complete-case point estimate may NEVER masquerade as the full-plan
+ * result; the bounds make the unfinished part of the plan visible.
  */
 export function computePairedEffect(pairs) {
   assertPairs(pairs, 'computePairedEffect');
@@ -141,14 +164,33 @@ export function computePairedEffect(pairs) {
     bothOk: determined.filter((p) => p.controlF === 0 && p.treatmentF === 0).length,
   };
   const n = determined.length;
+  const plannedPairs = pairs.length;
   const controlFailures = cells.controlFailureTreatmentCorrected + cells.bothFailed;
   const treatmentFailures = cells.controlOkTreatmentFailed + cells.bothFailed;
+  // Full-plan sensitivity range over EVERY preregistered pair.
+  const sideDetermined = (pair, side) => pair[`${side}ExecutionValid`] !== false && (pair[`${side}F`] === 1 || pair[`${side}F`] === 0);
+  let minSum = 0;
+  let maxSum = 0;
+  for (const pair of pairs) {
+    const cKnown = sideDetermined(pair, 'control');
+    const tKnown = sideDetermined(pair, 'treatment');
+    const cMin = cKnown ? pair.controlF : 0;
+    const cMax = cKnown ? pair.controlF : 1;
+    const tMin = tKnown ? pair.treatmentF : 0;
+    const tMax = tKnown ? pair.treatmentF : 1;
+    minSum += cMin - tMax;
+    maxSum += cMax - tMin;
+  }
+  const bound = (numerator) => (plannedPairs === 0
+    ? { status: 'NOT_ESTIMABLE', reason: 'no planned pairs' }
+    : { status: 'ESTIMABLE', numerator, denominator: plannedPairs, value: numerator / plannedPairs });
   return {
     metric: 'DeltaBenefit',
-    formula: 'P(F_C=1) - P(F_T=1) over fully determined valid pairs',
+    formula: 'P(F_C=1) - P(F_T=1) over fully determined valid pairs; full-plan bounds over every preregistered pair',
+    plannedPairs,
     pairedUnits: pairs.length,
     determinedPairs: n,
-    unknownPairsRetained: pairs.length - n,
+    unknownPairsRetained: plannedPairs - n,
     cells,
     cellsMeaning: {
       controlFailureTreatmentCorrected: 'C=1,T=0 — failure corrected',
@@ -158,10 +200,101 @@ export function computePairedEffect(pairs) {
     },
     controlFailureRate: n === 0 ? 'NOT_ESTIMABLE' : { numerator: controlFailures, denominator: n, value: controlFailures / n },
     treatmentFailureRate: n === 0 ? 'NOT_ESTIMABLE' : { numerator: treatmentFailures, denominator: n, value: treatmentFailures / n },
+    completeCaseDelta: n === 0
+      ? { status: 'NOT_ESTIMABLE', reason: 'no fully determined pairs' }
+      : { status: 'ESTIMABLE', numerator: controlFailures - treatmentFailures, denominator: n, value: (controlFailures - treatmentFailures) / n },
     deltaBenefit: n === 0
       ? { status: 'NOT_ESTIMABLE', reason: 'no fully determined pairs' }
       : { status: 'ESTIMABLE', numerator: controlFailures - treatmentFailures, denominator: n, value: (controlFailures - treatmentFailures) / n },
+    fullPlanLowerBound: bound(minSum),
+    fullPlanUpperBound: bound(maxSum),
+    fullPlanBoundRule: 'per planned pair: benefit = controlFailure − treatmentFailure; a determined side pins its value, an unknown/execution-invalid side ranges over {0,1}; bounds divide by plannedPairs — the complete-case delta is never the full-plan result',
     rule: 'positive = target failure rate decreased; zero = no observed difference; negative = rate increased; small samples must not be dressed up with single p-values',
+  };
+}
+
+/**
+ * P1-3 (PR #2239 review): build the COMPLETE paired set from the
+ * preregistered plan — never from the successfully executed records in
+ * reverse. One row per planned (caseId, repetitionId); a pair survives even
+ * when a side never started. Per-side execution status, F flags, validity and
+ * explicit reasons make every downstream statistic recomputable from the plan
+ * plus the raw ledger states.
+ */
+export function buildPlannedPairs({ planUnits, rollupsByUnit, controlArm, treatmentArm }) {
+  if (!Array.isArray(planUnits)) throw new Error('buildPlannedPairs: planUnits must be an array');
+  if (!(rollupsByUnit instanceof Map)) throw new Error('buildPlannedPairs: rollupsByUnit must be a Map(unit -> rollup)');
+  if (!controlArm || !treatmentArm) throw new Error('buildPlannedPairs: controlArm/treatmentArm required');
+  const byCaseRep = new Map();
+  for (const unit of planUnits) {
+    if (!unit || !unit.caseId || !unit.armId || unit.repetitionId === undefined) throw new Error('buildPlannedPairs: malformed plan unit');
+    if (unit.armId !== controlArm && unit.armId !== treatmentArm) continue;
+    const key = `${unit.caseId}/r${String(unit.repetitionId)}`;
+    if (!byCaseRep.has(key)) byCaseRep.set(key, {});
+    const slot = byCaseRep.get(key);
+    if (slot[unit.armId]) throw new Error(`buildPlannedPairs: duplicate plan unit ${key}/${unit.armId}`);
+    slot[unit.armId] = unit;
+  }
+  const sideOf = (caseId, repetitionId, armId) => {
+    // rollupsByUnit keys follow the plan-unit form `${caseId}/${armId}/r${rep}`
+    const rollup = rollupsByUnit.get(`${caseId}/${armId}/r${String(repetitionId)}`) ?? null;
+    const executionStatus = rollup ? (rollup.currentState ?? 'not_started') : 'not_started';
+    const valid = executionStatus === 'succeeded' && rollup?.replayRescored === true;
+    const f = valid && (rollup.f === 1 || rollup.f === 0) ? rollup.f : 'UNKNOWN';
+    return { executionStatus, valid, f };
+  };
+  const pairs = [];
+  for (const [key, slot] of [...byCaseRep.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    const [caseId, repRaw] = [key.split('/r')[0], key.split('/r')[1]];
+    const control = sideOf(caseId, repRaw, controlArm);
+    const treatment = sideOf(caseId, repRaw, treatmentArm);
+    let pairValidity = 'VALID';
+    let unknownReason = null;
+    let invalidityReason = null;
+    const sideProblem = (side, label) => (side.executionStatus === 'failed_known' ? `${label}_FAILED_KNOWN`
+      : side.executionStatus === 'result_unknown' ? `${label}_RESULT_UNKNOWN`
+        : side.executionStatus === 'reserved_unsettled' ? `${label}_RESERVED_UNSETTLED`
+          : side.executionStatus === 'not_started' ? `${label}_NOT_STARTED` : null);
+    const cProblem = sideProblem(control, 'CONTROL');
+    const tProblem = sideProblem(treatment, 'TREATMENT');
+    const anyInvalid = control.executionStatus === 'failed_known' || treatment.executionStatus === 'failed_known';
+    if (anyInvalid) {
+      pairValidity = 'EXECUTION_INVALID';
+      invalidityReason = [cProblem, tProblem].filter(Boolean).join('+') || 'FAILED_KNOWN';
+    } else if (cProblem || tProblem) {
+      pairValidity = 'UNKNOWN';
+      const reasons = [cProblem, tProblem].filter(Boolean);
+      // Same cause on both sides collapses to one reason (BOTH_SIDES_NOT_STARTED);
+      // different causes keep both (e.g. CONTROL_NOT_STARTED_AND_TREATMENT_RESULT_UNKNOWN).
+      const cause = (reason) => reason.split('_').slice(1).join('_');
+      unknownReason = reasons.length === 2
+        ? (cause(reasons[0]) === cause(reasons[1])
+          ? `BOTH_SIDES_${cause(reasons[0])}`
+          : reasons.join('_AND_'))
+        : reasons[0];
+    }
+    pairs.push({
+      pairKey: key,
+      caseId,
+      repetitionId: repRaw,
+      controlF: control.f,
+      treatmentF: treatment.f,
+      controlExecutionStatus: control.executionStatus,
+      treatmentExecutionStatus: treatment.executionStatus,
+      controlExecutionValid: control.valid,
+      treatmentExecutionValid: treatment.valid,
+      pairValidity,
+      unknownReason,
+      invalidityReason,
+    });
+    void slot;
+  }
+  return {
+    plannedPairs: pairs.length,
+    controlArm,
+    treatmentArm,
+    pairs,
+    rule: 'denominator = preregistered (caseId, repetitionId) pairs; a pair is never dropped because a side is missing, invalid or never started',
   };
 }
 
@@ -200,6 +333,9 @@ export function computeVBDR(cases) {
   const goldReviewApproved = cases.filter((item) => item.goldReview === 'APPROVED');
   const executionInvalid = cases.filter((item) => item.executionInvalid === true);
   const reviewPending = cases.filter((item) => item.goldReview === 'PENDING');
+  // P2-2 (PR #2239 review): REJECTED is a definite adverse outcome, not a
+  // pending one — the two counts are reported separately, never merged.
+  const reviewRejected = cases.filter((item) => item.goldReview === 'REJECTED');
   const validPaired = goldReviewApproved.filter((item) => item.pairedValid === true && item.executionInvalid !== true);
   const repetitionInstability = validPaired.filter((item) => item.repetitionStable === false);
   const discriminative = validPaired.filter((item) => item.repetitionStable === true
@@ -231,6 +367,7 @@ export function computeVBDR(cases) {
     executionInvalid: executionInvalid.length,
     unknown: unknown.length,
     reviewPending: reviewPending.length,
+    reviewRejected: reviewRejected.length,
     falsePositive: falsePositive.length,
     falseNegative: falseNegative.length,
     repetitionInstability: repetitionInstability.length,
