@@ -345,6 +345,13 @@ export class DefaultDiagRootCauseValidator implements DiagRootCauseValidator {
           errors.push(`causalChain[${i}].evidenceRefs must be an array`);
         } else if (entry.evidenceRefs.length === 0) {
           errors.push(`causalChain[${i}].evidenceRefs must have at least 1 item`);
+        } else {
+          for (let j = 0; j < entry.evidenceRefs.length; j++) {
+            const ref = entry.evidenceRefs[j];
+            if (typeof ref !== 'string' || ref.trim() === '') {
+              errors.push(`causalChain[${i}].evidenceRefs[${j}] must be a non-empty string`);
+            }
+          }
         }
       }
     }

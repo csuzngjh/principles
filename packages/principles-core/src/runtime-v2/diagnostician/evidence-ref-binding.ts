@@ -19,25 +19,26 @@ const OWNER_CORRECTION_REF = 'owner_correction';
 function addTrustedRef(target: Set<string>, value: unknown): void {
   if (typeof value !== 'string') return;
   const ref = value.trim();
-  if (ref.length > 0) target.add(ref);
+  // Reserved sentinel: added explicitly below, and only when the Owner's
+  // correction is actually present. Generic provenance sources must not be
+  // able to smuggle it in through an evidence entry named "owner_correction".
+  if (ref.length === 0 || ref === OWNER_CORRECTION_REF) return;
+  target.add(ref);
 }
 
 /**
  * Collect every source reference the current Stage A prompt legitimately
  * exposes to the model.
  *
- * `contextRefs` is the runner's already-computed context identity (pain refs +
- * predecessor refs). `painPayload.sourceRefs` is the canonical list rendered in
- * the prompt. Evidence sourceRefs are included again defensively so a partially
- * reconstructed payload cannot weaken the gate.
+ * Only `payload` participates: `sourceRefs` is what the prompt renders, and
+ * `diagnosisTarget` carries the evidence and optional correction. Runner-only
+ * predecessor refs are deliberately excluded because the model never sees them.
  */
 export function collectTrustedEvidenceRefs(
   payload: DiagnosticianContextPayload,
-  contextRefs: readonly string[] = [],
 ): ReadonlySet<string> {
   const trusted = new Set<string>();
 
-  for (const ref of contextRefs) addTrustedRef(trusted, ref);
   for (const ref of payload.sourceRefs ?? []) addTrustedRef(trusted, ref);
 
   const target = payload.diagnosisTarget;
@@ -45,7 +46,7 @@ export function collectTrustedEvidenceRefs(
 
   // `owner_correction` is a prompt-defined synthetic ref, valid only when the
   // Owner's correction was actually supplied. It must never be a wildcard.
-  if (target?.correctionEvidence) addTrustedRef(trusted, OWNER_CORRECTION_REF);
+  if (target?.correctionEvidence) trusted.add(OWNER_CORRECTION_REF);
 
   // Conversation entries have no sourceRef field of their own, so the prompt
   // allows citing their timestamp. Accept only the role/timestamp combinations

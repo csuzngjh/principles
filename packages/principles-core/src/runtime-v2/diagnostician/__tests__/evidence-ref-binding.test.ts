@@ -44,7 +44,7 @@ function makeOutput(
 describe('evidence reference binding (PRI-1059)', () => {
   it('rejects the Stage A prompt-example references from the incident replay', () => {
     const payload = makePayload();
-    const trusted = collectTrustedEvidenceRefs(payload, [TASK_ID, 'run-1']);
+    const trusted = collectTrustedEvidenceRefs(payload);
     const output = {
       evidence: [{ sourceRef: 'example', note: 'example' }],
       causalChain: [{ why: 1, statement: 'example', evidenceRefs: ['example'] }],
@@ -58,7 +58,7 @@ describe('evidence reference binding (PRI-1059)', () => {
 
   it('accepts refs that are present in the real diagnosis context', () => {
     const payload = makePayload();
-    const trusted = collectTrustedEvidenceRefs(payload, [TASK_ID, 'run-1']);
+    const trusted = collectTrustedEvidenceRefs(payload);
 
     expect(findUnboundEvidenceRefs(makeOutput(), trusted)).toEqual([]);
   });
@@ -83,6 +83,22 @@ describe('evidence reference binding (PRI-1059)', () => {
         collectTrustedEvidenceRefs(withCorrection),
       ),
     ).toEqual([]);
+  });
+
+  it('does not trust a reserved owner_correction ref smuggled through pain evidence', () => {
+    const payload = makePayload({
+      sourceRefs: [TASK_ID, 'owner_correction'],
+      diagnosisTarget: {
+        evidence: [{ sourceRef: 'owner_correction', note: 'not a real correction' }],
+      },
+    });
+
+    expect(
+      findUnboundEvidenceRefs(
+        makeOutput('owner_correction', ['owner_correction']),
+        collectTrustedEvidenceRefs(payload),
+      ),
+    ).not.toEqual([]);
   });
 
   it('accepts conversation timestamp refs only for the matching role and entry', () => {

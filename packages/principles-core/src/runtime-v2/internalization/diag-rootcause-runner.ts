@@ -241,7 +241,7 @@ export class DiagRootCauseRunner extends BasePeerRunner<DiagRootCauseContext, Di
     // PRI-1059: structure is not provenance. Bind every cited evidence ref to
     // the context this run actually received; a copied prompt example (or any
     // fabricated reference) must fail before it can become a PIArtifact.
-    const trustedRefs = collectTrustedEvidenceRefs(context.painPayload, context.contextRefs);
+    const trustedRefs = collectTrustedEvidenceRefs(context.painPayload);
     const unbound = findUnboundEvidenceRefs(output, trustedRefs);
     const bindingErrors = formatUnboundEvidenceRefErrors(unbound);
 

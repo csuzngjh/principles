@@ -470,11 +470,19 @@ describe('Attack E2E: LLM output unreliability across pipeline handoffs', () => 
       painType: 'tool_failure',
       source: 'write',
       reason: 'Attack test: empty recommendations',
-      evidence: [{ sourceRef: 'test', note: 'Attack test evidence' }],
+      evidence: [{ sourceRef: 'attack-test', note: 'Attack test evidence' }],
     });
 
     expect(result.status).toMatch(/^(failed|retried)$/);
     expect(result.candidateIds).toEqual([]);
+
+    // The failure must come from the router's empty recommendations, not from
+    // Stage A rejecting the evidence reference. Both predecessors must finish.
+    const parentTaskId = 'diagnosis_pain_attack_6';
+    const taskA = await stateManager.getTask(`diag_rootcause-${parentTaskId}`);
+    const taskB = await stateManager.getTask(`diag_distiller-${parentTaskId}`);
+    expect(taskA?.status).toBe('succeeded');
+    expect(taskB?.status).toBe('succeeded');
   });
 
   it('ATTACK-7: LLM returns unknown recommendation kind — route must defer safely', () => {
