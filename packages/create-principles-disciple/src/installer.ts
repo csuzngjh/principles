@@ -4118,7 +4118,7 @@ export async function install(
     } else {
       components.cli = 'verified_local_only';
       components.cliLocalPath = cliVerify.localPath;
-      logger.warn(`Global pd command not on PATH. Use local entry: "${cliVerify.localPath}" or add ${getInstalledBinDir()} to PATH.`);
+      logger.warn(`Global pd command not on PATH. Use local entry: "${cliVerify.localPath}" (always-available form: node "${path.join(getPdRuntimeDir(), 'pd-cli', 'dist', 'index.js')}"), or add ${getInstalledBinDir()} to PATH.`);
     }
     stepIndex++;
 

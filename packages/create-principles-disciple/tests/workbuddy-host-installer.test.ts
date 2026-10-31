@@ -37,6 +37,8 @@ import {
   writeHostJsonFileProtected,
   setWorkbuddyGovernanceFlag,
   findWorkbuddyPluginPayload,
+  ensureWorkbuddyGovernanceEnabled,
+  describeGovernanceDefaults,
 } from '../src/installers/workbuddy-host-installer.js';
 import { getHostInstallers, isHostTarget, WorkBuddyHostInstaller as WiredInstaller } from '../src/installers/index.js';
 import { computeEffectiveFlags, computeFeatureFlagsFromConfig, DEFAULT_FEATURE_FLAGS, getDefaultPdConfig } from '@principles/core/runtime-v2';
@@ -978,5 +980,120 @@ describe('readHostJsonFile', () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+// PRI-1064 (Owner directive 2026-10-31): governance is ON by default at
+// install time; the only preserved OFF is an explicit opt-out. Pinned here
+// against the user-reported trap: a sparse config left by a failed install
+// round used to keep every hook silently skipped.
+describe('ensureWorkbuddyGovernanceEnabled (PRI-1064)', () => {
+  function seedGovernance(featuresYaml: string): { dir: string; configPath: string } {
+    const dir = fs.mkdtempSync(path.join(TMP, 'pd-wb-ensure-'));
+    const configPath = path.join(dir, '.pd', 'config.yaml');
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, `version: 1\n${featuresYaml}`, 'utf8');
+    return { dir, configPath };
+  }
+
+  function readFlags(dir: string): Record<string, { enabled?: boolean }> {
+    return parseYaml(fs.readFileSync(path.join(dir, '.pd', 'config.yaml'), 'utf8')).features as Record<string, { enabled?: boolean }>;
+  }
+
+  it('enables both gates on a sparse config (failed-install residue no longer keeps governance off)', () => {
+    const { dir } = seedGovernance('features: {}\n');
+    try {
+      const result = ensureWorkbuddyGovernanceEnabled(dir);
+      expect(result.ok).toBe(true);
+      expect(result.hostExplicitOff).toBe(false);
+      expect(result.changed).toBe(true);
+      const flags = readFlags(dir);
+      expect(flags['host.workbuddy'].enabled).toBe(true);
+      expect(flags.workbuddy_live_keyword_pain.enabled).toBe(true);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('PRESERVES an explicit host opt-out while still enabling the keyword gate', () => {
+    const { dir } = seedGovernance('features:\n  host.workbuddy:\n    enabled: false\n    category: quiet\n');
+    try {
+      const result = ensureWorkbuddyGovernanceEnabled(dir);
+      expect(result.ok).toBe(true);
+      expect(result.hostExplicitOff).toBe(true);
+      const flags = readFlags(dir);
+      expect(flags['host.workbuddy'].enabled).toBe(false);
+      expect(flags.workbuddy_live_keyword_pain.enabled).toBe(true);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('PRESERVES an explicit keyword opt-out while still enabling the governance gate', () => {
+    const { dir } = seedGovernance('features:\n  workbuddy_live_keyword_pain:\n    enabled: false\n    category: quiet\n');
+    try {
+      const result = ensureWorkbuddyGovernanceEnabled(dir);
+      expect(result.ok).toBe(true);
+      expect(result.keywordExplicitOff).toBe(true);
+      const flags = readFlags(dir);
+      expect(flags['host.workbuddy'].enabled).toBe(true);
+      expect(flags.workbuddy_live_keyword_pain.enabled).toBe(false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves an already-correct config byte-identical (changed=false, no rewrite)', () => {
+    const correct = 'features:\n  host.workbuddy:\n    enabled: true\n    category: quiet\n  workbuddy_live_keyword_pain:\n    enabled: true\n    category: quiet\n';
+    const { dir, configPath } = seedGovernance(correct);
+    try {
+      const before = fs.readFileSync(configPath, 'utf8');
+      const result = ensureWorkbuddyGovernanceEnabled(dir);
+      expect(result.ok).toBe(true);
+      expect(result.changed).toBe(false);
+      expect(fs.readFileSync(configPath, 'utf8')).toBe(before);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails loud on a features section that is not a mapping', () => {
+    const { dir } = seedGovernance('features: [not, a, map]\n');
+    try {
+      const result = ensureWorkbuddyGovernanceEnabled(dir);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toBe('fresh_workbuddy_features_invalid');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// PRI-1064 review: the install summary derived the whole sentence from the
+// host gate, so an explicit keyword-Pain opt-out was reported as "keyword Pain
+// detection ... ON". These cases pin each gate to its own clause.
+describe('describeGovernanceDefaults (PRI-1064 review)', () => {
+  it('never reports keyword Pain as ON when the Owner explicitly disabled it', () => {
+    const note = describeGovernanceDefaults({ hostExplicitOff: false, keywordExplicitOff: true, changed: true }, 'C:/ws');
+    expect(note).toContain('four-term keyword Pain detection is OFF');
+    expect(note).not.toContain('keyword Pain detection is ON');
+    expect(note).toContain('features.workbuddy_live_keyword_pain.enabled=false');
+  });
+
+  it('states the host gate OFF and the keyword gate ON when only the host was opted out', () => {
+    const note = describeGovernanceDefaults({ hostExplicitOff: true, keywordExplicitOff: false, changed: false }, 'C:/ws');
+    expect(note).toContain('WorkBuddy governance is OFF');
+    expect(note).toContain('features.host.workbuddy.enabled=false');
+    expect(note).toContain('four-term keyword Pain detection is ON');
+  });
+
+  it('reports the default-ON state with its install attribution', () => {
+    const note = describeGovernanceDefaults({ hostExplicitOff: false, keywordExplicitOff: false, changed: true }, 'C:/ws');
+    expect(note).toContain('enabled by this install');
+    expect(note).toContain('four-term keyword Pain detection is ON');
+  });
+
+  it('names the missing governance config as UNKNOWN rather than claiming a state', () => {
+    expect(describeGovernanceDefaults(null, 'C:/ws')).toContain('UNKNOWN');
   });
 });

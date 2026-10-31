@@ -402,6 +402,32 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
         console.log(`                  re-run with --provider <name> --api-key-env <ENV_VAR_NAME>, or`);
         console.log(`                  use the console: pd console open --workspace "${operatorWorkspaceDir}"`);
       }
+      // PRI-1064: governance switch state is a first-class summary line —
+      // "Install complete!" while every hook silently skips is exactly the
+      // P1 defect this replaces. An explicit Owner opt-out stays OFF and is
+      // stated as such; everything else is ON by default.
+      for (const hr of result.hostResults ?? []) {
+        if (!hr.governance) continue;
+        const keywordPart = hr.governance.keywordPainEnabled === undefined ? '' : `, keyword Pain: ${hr.governance.keywordPainEnabled ? 'ON' : 'OFF'}`;
+        const stateLine = hr.governance.enabled
+          ? `ON${hr.governance.explicitOptOut ? '' : ' (default)'}`
+          : 'OFF (your explicit opt-out was preserved)';
+        console.log(`  ${hr.hostId} governance ............. ${stateLine}${keywordPart}`);
+        const disabledFlags: string[] = [];
+        if (!hr.governance.enabled) disabledFlags.push('host.workbuddy');
+        if (hr.governance.keywordPainEnabled === false) disabledFlags.push('workbuddy_live_keyword_pain');
+        if (disabledFlags.length > 0) {
+          // PRI-1063/1064 review: name the exact flag ids and the exact edit.
+          // A `features.<flag>.enabled=true` placeholder left the operator to
+          // guess both the id and whether the dotted form is nested. It is NOT
+          // nested: the dotted id is one flat key inside the existing
+          // `features:` block, and the flow mapping below keeps the line
+          // copy-pasteable (no new `features:` key that would duplicate one).
+          const target = hr.governance.configPath ?? 'the governance workspace .pd/config.yaml';
+          const edits = disabledFlags.map((flag) => `${flag}: {enabled: true}`).join(' or ');
+          console.log(`             to enable: in ${target}, inside the existing "features:" block set ${edits}`);
+        }
+      }
       console.log();
       console.log(t('ready'));
       console.log(`${t('diagnostics')}: pd runtime canary --workspace "${operatorWorkspaceDir}" --json`);
