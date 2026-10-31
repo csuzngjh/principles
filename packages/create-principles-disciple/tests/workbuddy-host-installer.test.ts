@@ -1074,4 +1074,21 @@ describe('runWorkbuddyEarlyPreflight (PRI-1062)', () => {
       fs.rmSync(home, { recursive: true, force: true });
     }
   });
+
+  it('is wired into install() BEFORE the gateway pre-flight can stop the gateway (PRI-1062 review)', () => {
+    // The ordering is the fix, and it is invisible at runtime until an Owner
+    // hits --host all with a live gateway: a refusal that returns after the
+    // gateway was stopped leaves it down (the restart is only honoured at the
+    // end of the flow). Source-order is the only cheap way to pin a property
+    // that a behavioural test would need a real gateway process to observe.
+    const source = fs.readFileSync(
+      new URL('../src/installer.ts', import.meta.url),
+      'utf8',
+    );
+    const preflightCall = source.indexOf('runWorkbuddyEarlyPreflight()');
+    const gatewayStop = source.indexOf('stopOpenClawGateway(gatewayStatus)');
+    expect(preflightCall).toBeGreaterThan(-1);
+    expect(gatewayStop).toBeGreaterThan(-1);
+    expect(preflightCall).toBeLessThan(gatewayStop);
+  });
 });

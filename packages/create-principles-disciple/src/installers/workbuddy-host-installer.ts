@@ -1087,14 +1087,25 @@ function defaultProbeBash(): { ok: true } | { ok: false; detail: string } {
 }
 
 /**
- * Default lock probe: an exclusive-open attempt on the host JSON file.
- * EPERM/EBUSY (Windows sharing violation while WorkBuddy runs) and EACCES
- * are lock signals; anything else (incl. ENOENT) is not a lock verdict.
+ * Default lock probe: a read-WRITE open of the host JSON file.
+ *
+ * Why `r+` and not `r`: a plain read open succeeds whenever the holder shared
+ * FILE_SHARE_READ — the common case for a running editor-host — while the
+ * commit-stage `rename` still fails. A write-intent open narrows that gap by
+ * requiring write access on the shared handle.
+ *
+ * Known limit (documented, not guessed): the final `rename` to this path needs
+ * DELETE sharing, which Node exposes no flag for, so a host that grants
+ * read+write but not delete is NOT detectable here. That residual case is
+ * covered by atomicReplaceTextFile's rename retry rather than by this probe.
+ *
+ * EPERM/EBUSY (sharing violation while WorkBuddy runs) and EACCES are lock
+ * signals; anything else (incl. ENOENT) is not a lock verdict.
  */
 function defaultProbeHostFileLock(filePath: string): string | undefined {
   let fd: number | undefined;
   try {
-    fd = openSync(filePath, 'r');
+    fd = openSync(filePath, 'r+');
     closeSync(fd);
     fd = undefined;
     return undefined;
@@ -1110,7 +1121,14 @@ function defaultProbeHostFileLock(filePath: string): string | undefined {
 }
 
 /**
- * PRI-1062: hard preflights the main installer runs BEFORE any mutation.
+ * PRI-1062: hard preflights the main installer runs BEFORE any side effect.
+ *
+ * Call-site contract (enforced in installer.ts): this must run before the
+ * gateway pre-flight, because that block may STOP a running OpenClaw gateway.
+ * A refusal from here returns immediately and would otherwise leave the
+ * Owner's gateway down, since the restart is only honoured at the end of the
+ * install flow.
+ *
  * A RUNNING WorkBuddy holds settings.json with exclusive sharing — the
  * commit-stage atomic rename fails with EPERM after minutes of npm work and
  * the whole install rolls back. Git Bash availability is equally knowable
