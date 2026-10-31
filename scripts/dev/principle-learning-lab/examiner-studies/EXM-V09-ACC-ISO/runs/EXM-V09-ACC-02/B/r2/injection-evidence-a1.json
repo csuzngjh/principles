@@ -1,0 +1,42 @@
+{
+  "schema": "examiner-injection-evidence.v1",
+  "producedBy": "runner-offline-stub",
+  "scope": "offline-stub",
+  "armId": "B",
+  "principleHash": "b61aec676a7063356cb7ad8096fe4a4d352f73a823e30eef486c5c9b1a97e4b3",
+  "expectedLevel": "RUNTIME_LOADED",
+  "stages": {
+    "CONFIGURED": {
+      "evidenceRef": "arm-configs.json#arm-B",
+      "contentHash": "b61aec676a7063356cb7ad8096fe4a4d352f73a823e30eef486c5c9b1a97e4b3",
+      "note": "arm payload CONFIGURED from the frozen study materials"
+    },
+    "SELECTED": {
+      "evidenceRef": "arm-selection:B",
+      "contentHash": "b61aec676a7063356cb7ad8096fe4a4d352f73a823e30eef486c5c9b1a97e4b3",
+      "note": "offline deterministic selection: the arm payload is the complete selection output for this arm"
+    },
+    "SUBMITTED": {
+      "evidenceRef": "actor-prompt:B",
+      "contentHash": "7617643acf135c9b4aaa9a989f68883d1a845765cbedb88865ec9cd26dc3c0fc",
+      "note": "composed actor prompt submitted to the offline actor transport"
+    },
+    "HOST_ACCEPTED": {
+      "evidenceRef": "offline-actor-transport:B",
+      "contentHash": "7617643acf135c9b4aaa9a989f68883d1a845765cbedb88865ec9cd26dc3c0fc",
+      "note": "offline-stub scope: the actor transport IS the host boundary — acceptance is the transport handing the prompt to the controlled actor loop (never a claim about a real host)"
+    },
+    "CONTEXT_PRESENT": {
+      "evidenceRef": "prompt-contains-payload:B",
+      "contentHash": "7617643acf135c9b4aaa9a989f68883d1a845765cbedb88865ec9cd26dc3c0fc",
+      "note": "payload text verified verbatim inside the composed actor-visible prompt"
+    },
+    "RUNTIME_LOADED": {
+      "evidenceRef": "runs/EXM-V09-ACC-02/B/r2/a1.json",
+      "contentHash": "7617643acf135c9b4aaa9a989f68883d1a845765cbedb88865ec9cd26dc3c0fc",
+      "note": "offline actor loop consumed the prompt (attempt record binds the executed trace)"
+    }
+  },
+  "provenLevel": "RUNTIME_LOADED",
+  "chainHash": "25bb84efc972704fbaa99a3e5c4a03ec6b9f69bc90462c23e5eadd5269908c6f"
+}

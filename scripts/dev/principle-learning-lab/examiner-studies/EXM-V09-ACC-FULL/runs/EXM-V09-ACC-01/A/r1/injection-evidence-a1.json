@@ -1,0 +1,43 @@
+{
+  "schema": "examiner-injection-evidence.v1",
+  "producedBy": "runner-offline-stub",
+  "scope": "offline-stub",
+  "armId": "A",
+  "principleHash": "0177ccec2e18e49d5d0c977458c8fbe09c0d29d809dbc98c205a7210c16de3a2",
+  "expectedLevel": "RUNTIME_LOADED",
+  "stages": {
+    "CONFIGURED": {
+      "evidenceRef": "arm-configs.json#arm-A",
+      "contentHash": "0177ccec2e18e49d5d0c977458c8fbe09c0d29d809dbc98c205a7210c16de3a2",
+      "note": "arm payload CONFIGURED from the frozen study materials"
+    },
+    "SELECTED": {
+      "evidenceRef": "arm-selection:A",
+      "contentHash": "0177ccec2e18e49d5d0c977458c8fbe09c0d29d809dbc98c205a7210c16de3a2",
+      "note": "offline deterministic selection: the arm payload is the complete selection output for this arm"
+    },
+    "SUBMITTED": {
+      "evidenceRef": "actor-prompt:A",
+      "contentHash": "7390a759fd0fe87b895fdce6462f0ac132282350e0acd89ea793ed9f681877f1",
+      "note": "composed actor prompt submitted to the offline actor transport"
+    },
+    "HOST_ACCEPTED": {
+      "evidenceRef": "offline-actor-transport:A",
+      "contentHash": "7390a759fd0fe87b895fdce6462f0ac132282350e0acd89ea793ed9f681877f1",
+      "note": "offline-stub scope: the actor transport IS the host boundary — acceptance is the transport handing the prompt to the controlled actor loop (never a claim about a real host)"
+    },
+    "CONTEXT_PRESENT": {
+      "evidenceRef": "prompt-contains-payload:A",
+      "contentHash": "7390a759fd0fe87b895fdce6462f0ac132282350e0acd89ea793ed9f681877f1",
+      "note": "payload text verified verbatim inside the composed actor-visible prompt",
+      "forbiddenContentPresent": false
+    },
+    "RUNTIME_LOADED": {
+      "evidenceRef": "runs/EXM-V09-ACC-01/A/r1/a1.json",
+      "contentHash": "7390a759fd0fe87b895fdce6462f0ac132282350e0acd89ea793ed9f681877f1",
+      "note": "offline actor loop consumed the prompt (attempt record binds the executed trace)"
+    }
+  },
+  "provenLevel": "RUNTIME_LOADED",
+  "chainHash": "26ca32e88b9d08d9a4c4f4ce1ea4437f46d45584caafb609a26df2db295293ac"
+}

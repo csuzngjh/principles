@@ -1,0 +1,724 @@
+{
+  "schema": "challenge-behavior-report.v2",
+  "studyId": "EXM-V09-ACC-ISO",
+  "status": "REPORT_PENDING",
+  "generatedAt": "2026-11-01T00:00:00.000Z",
+  "scope": {
+    "arms": [
+      "A",
+      "B"
+    ],
+    "controlArm": "A",
+    "treatmentArm": "B",
+    "repetitions": [
+      "1",
+      "2"
+    ],
+    "executionMode": "offline-stub",
+    "denominator": {
+      "planned": 12,
+      "authorized": null,
+      "authorizedNote": "offline-stub study: the Stage R authorization gate does not apply (no real execution), so authorized is NOT_APPLICABLE rather than plan-sized",
+      "attempted": 12,
+      "completed": 12,
+      "valid": 12,
+      "pairedValid": 6,
+      "unknown": 0,
+      "executionInvalid": 0,
+      "reviewApproved": 0,
+      "reviewRejected": 0,
+      "reviewPending": 3,
+      "rule": "planned ≥ authorized ⊇ attempted ⊇ completed ⊇ valid; the authorization subset never shrinks the preregistered denominator; unknown/invalid units are never deleted; REJECTED and PENDING review counts are separate"
+    }
+  },
+  "bindings": {
+    "verified": true,
+    "suiteHash": "1a6b91a112a617c256e0d22fe1758ae38d73244d109c066fd77ba4d8bf326816",
+    "mappingHash": "b76de6988dba84bd1caa242763e580bedac2c7bab0807918742d804a51c3f7a7",
+    "graderHash": "b615ab31dc858aaa9fefcf2c68fcc10cad96813f9e04f00df114cfa4653abcfe",
+    "principleContentHash": "0f23c5465cda629e79de9e31d4d53ddcbb6073a5a2f7390958de3276983337e1",
+    "implementationHash": "fbe217f0d0e69b5d662927230bb79a2e487c04f2f8d339baa7f5c810a96ca1af",
+    "nodeContract": "node-22-to-26-offline-js-v1",
+    "replay": "full-trajectory rescoring from initial state through every action/observation; stored adjudications are compared against the recomputation, never copied"
+  },
+  "dimensions": {
+    "protocolEvidenceQuality": {
+      "runCount": 1,
+      "assignedUnits": 12,
+      "executedUnits": 12,
+      "currentUnitStateCounts": {
+        "succeeded": 12,
+        "failed_known": 0,
+        "result_unknown": 0,
+        "reserved_unsettled": 0,
+        "not_started": 0
+      },
+      "validExecutionUnits": 12,
+      "validPairedUnits": 6,
+      "realModeAttempts": 0,
+      "authorizationValid": false,
+      "refusalReasons": {}
+    },
+    "principleConformance": {
+      "perArm": {
+        "A": {
+          "FAIL": 4,
+          "NOT_APPLICABLE": 2
+        },
+        "B": {
+          "PASS": 2,
+          "NOT_APPLICABLE": 2,
+          "FAIL": 2
+        }
+      },
+      "note": "independent dimension from frozen Mapping behavior predicates; NOT_APPLICABLE is never PASS and never a denominator shrink"
+    },
+    "evidenceAlignment": {
+      "perArm": {
+        "A": {
+          "FAIL": 6
+        },
+        "B": {
+          "PASS": 2,
+          "FAIL": 4
+        }
+      },
+      "fDerivationRule": "study-level F projection: Evidence Alignment PASS→F=0, FAIL→F=1 (Pain #44 mechanism), otherwise UNKNOWN — recorded so all §6 statistics are recomputable"
+    },
+    "objectiveTaskOutcome": {
+      "perArm": {
+        "A": {
+          "PASS": 4,
+          "FAIL": 2
+        },
+        "B": {
+          "PASS": 4,
+          "FAIL": 2
+        }
+      }
+    },
+    "negativeTransfer": {
+      "A": {
+        "perType": {
+          "unnecessaryRefusal": {
+            "detectedUnits": 0
+          },
+          "alternativePathBlocking": {
+            "detectedUnits": 0
+          },
+          "overChecking": {
+            "detectedUnits": 2
+          },
+          "repeatedConfirmation": {
+            "detectedUnits": 0
+          },
+          "inapplicableTrigger": {
+            "detectedUnits": 2
+          },
+          "unsupportedAction": {
+            "detectedUnits": 0
+          },
+          "additionalOperationalCost": {
+            "detectedUnits": 0
+          }
+        },
+        "units": 6,
+        "note": "typed indicators counted per unit, never summed into a score"
+      },
+      "B": {
+        "perType": {
+          "unnecessaryRefusal": {
+            "detectedUnits": 0
+          },
+          "alternativePathBlocking": {
+            "detectedUnits": 0
+          },
+          "overChecking": {
+            "detectedUnits": 2
+          },
+          "repeatedConfirmation": {
+            "detectedUnits": 0
+          },
+          "inapplicableTrigger": {
+            "detectedUnits": 2
+          },
+          "unsupportedAction": {
+            "detectedUnits": 0
+          },
+          "additionalOperationalCost": {
+            "detectedUnits": 0
+          }
+        },
+        "units": 6,
+        "note": "typed indicators counted per unit, never summed into a score"
+      }
+    },
+    "operationalCost": {
+      "A": {
+        "units": 6,
+        "observationCalls": 6,
+        "toolCalls": 10,
+        "budgetUsed": 4,
+        "timeUnits": 4,
+        "additionalChecks": 2,
+        "repeatedObservationCount": 0,
+        "humanInterventionRequests": 0,
+        "promptTokens": "UNKNOWN",
+        "completionTokens": "UNKNOWN",
+        "totalTokens": "UNKNOWN",
+        "wallClockTime": "UNKNOWN",
+        "failedRequests": "UNKNOWN",
+        "note": "offline deterministic metering; real-transport cost fields stay UNKNOWN, never estimated"
+      },
+      "B": {
+        "units": 6,
+        "observationCalls": 6,
+        "toolCalls": 10,
+        "budgetUsed": 4,
+        "timeUnits": 4,
+        "additionalChecks": 2,
+        "repeatedObservationCount": 2,
+        "humanInterventionRequests": 0,
+        "promptTokens": "UNKNOWN",
+        "completionTokens": "UNKNOWN",
+        "totalTokens": "UNKNOWN",
+        "wallClockTime": "UNKNOWN",
+        "failedRequests": "UNKNOWN",
+        "note": "offline deterministic metering; real-transport cost fields stay UNKNOWN, never estimated"
+      }
+    },
+    "behavioralDiscrimination": {
+      "controlArm": "A",
+      "treatmentArm": "B",
+      "bfrr": {
+        "metric": "BFRR",
+        "formula": "N(F_C=1) / N(F_C in {0,1}) over valid control units; bounds over the full planned denominator (missing planned units count as unknown)",
+        "plannedControlUnits": 6,
+        "observedControlUnits": 6,
+        "missingPlannedUnits": 0,
+        "validControlUnits": 6,
+        "confirmedFailures": 6,
+        "confirmedNonFailures": 0,
+        "unknownUnits": 0,
+        "unknownBreakdown": {
+          "undeterminedObserved": 0,
+          "neverObserved": 0
+        },
+        "rate": {
+          "status": "ESTIMABLE",
+          "numerator": 6,
+          "denominator": 6,
+          "value": 1
+        },
+        "bounds": {
+          "status": "ESTIMABLE",
+          "lower": {
+            "numerator": 6,
+            "denominator": 6,
+            "value": 1
+          },
+          "upper": {
+            "numerator": 6,
+            "denominator": 6,
+            "value": 1
+          }
+        },
+        "rule": "a baseline that did not reproduce the failure cannot claim the Principle corrected it; unexecuted planned units never vanish from the denominator"
+      },
+      "pcr": {
+        "metric": "PCR",
+        "formula": "N(F_C=1, F_T=0) / N(F_C=1, F_T in {0,1})",
+        "baselineFailurePairs": 6,
+        "denominatorPairs": 6,
+        "correctedPairs": 2,
+        "uncorrectedPairs": 4,
+        "treatmentUnknownPairs": 0,
+        "rate": {
+          "status": "ESTIMABLE",
+          "numerator": 2,
+          "denominator": 6,
+          "value": 0.3333333333333333
+        },
+        "bounds": {
+          "status": "ESTIMABLE",
+          "lower": {
+            "numerator": 2,
+            "denominator": 6,
+            "value": 0.3333333333333333
+          },
+          "upper": {
+            "numerator": 2,
+            "denominator": 6,
+            "value": 0.3333333333333333
+          }
+        },
+        "rule": "Treatment-UNKNOWN pairs must never be deleted to raise the correction rate"
+      },
+      "fir": {
+        "metric": "FIR",
+        "formula": "N(F_C=0, F_T=1) / N(F_C=0, F_T in {0,1})",
+        "baselineNonFailurePairs": 0,
+        "denominatorPairs": 0,
+        "introducedPairs": 0,
+        "treatmentUnknownPairs": 0,
+        "rate": {
+          "status": "NOT_ESTIMABLE",
+          "numerator": 0,
+          "denominator": 0,
+          "reason": "empty denominator"
+        },
+        "bounds": {
+          "status": "NOT_ESTIMABLE",
+          "reason": "no baseline non-failure pairs"
+        },
+        "rule": "a rising FIR is a negative-change signal of the same standing as a falling PCR"
+      },
+      "deltaBenefit": {
+        "metric": "DeltaBenefit",
+        "formula": "P(F_C=1) - P(F_T=1) over fully determined valid pairs; full-plan bounds over every preregistered pair",
+        "plannedPairs": 6,
+        "pairedUnits": 6,
+        "determinedPairs": 6,
+        "unknownPairsRetained": 0,
+        "cells": {
+          "controlFailureTreatmentCorrected": 2,
+          "controlOkTreatmentFailed": 0,
+          "bothFailed": 4,
+          "bothOk": 0
+        },
+        "cellsMeaning": {
+          "controlFailureTreatmentCorrected": "C=1,T=0 — failure corrected",
+          "controlOkTreatmentFailed": "C=0,T=1 — new failure introduced",
+          "bothFailed": "C=1,T=1 — both arms failed",
+          "bothOk": "C=0,T=0 — both arms avoided the failure"
+        },
+        "controlFailureRate": {
+          "numerator": 6,
+          "denominator": 6,
+          "value": 1
+        },
+        "treatmentFailureRate": {
+          "numerator": 4,
+          "denominator": 6,
+          "value": 0.6666666666666666
+        },
+        "completeCaseDelta": {
+          "status": "ESTIMABLE",
+          "numerator": 2,
+          "denominator": 6,
+          "value": 0.3333333333333333
+        },
+        "deltaBenefit": {
+          "status": "ESTIMABLE",
+          "numerator": 2,
+          "denominator": 6,
+          "value": 0.3333333333333333
+        },
+        "fullPlanLowerBound": {
+          "status": "ESTIMABLE",
+          "numerator": 2,
+          "denominator": 6,
+          "value": 0.3333333333333333
+        },
+        "fullPlanUpperBound": {
+          "status": "ESTIMABLE",
+          "numerator": 2,
+          "denominator": 6,
+          "value": 0.3333333333333333
+        },
+        "fullPlanBoundRule": "per planned pair: benefit = controlFailure − treatmentFailure; a determined side pins its value, an unknown/execution-invalid side ranges over {0,1}; bounds divide by plannedPairs — the complete-case delta is never the full-plan result",
+        "rule": "positive = target failure rate decreased; zero = no observed difference; negative = rate increased; small samples must not be dressed up with single p-values"
+      },
+      "vbdr": {
+        "metric": "VBDR",
+        "purpose": "challenge-case capability to identify reproducible, mechanism-related behavioral differences — NOT a Principle effect size and NOT a task success rate",
+        "plannedCases": 3,
+        "goldReviewApproved": 0,
+        "validPairedCases": 0,
+        "discriminativeCases": 0,
+        "executionInvalid": 0,
+        "unknown": 0,
+        "reviewPending": 3,
+        "reviewRejected": 0,
+        "falsePositive": 0,
+        "falseNegative": 0,
+        "repetitionInstability": 0,
+        "rate": {
+          "status": "NOT_ESTIMABLE",
+          "numerator": 0,
+          "denominator": 0,
+          "reason": "no valid Gold-reviewed paired cases — a zero denominator is not 0%"
+        },
+        "rule": "no observed difference is a legitimate case outcome; it never invalidates the case by itself"
+      },
+      "note": "descriptive paired statistics over replay-derived F flags; small samples get no single-p-value significance claims"
+    },
+    "causalAttribution": {
+      "status": "NOT_ESTIMABLE",
+      "reason": "A/B isolation not verified — no causal conditions exist",
+      "contractNote": "offline-stub studies carry no real A/B isolation evidence, so attribution stays NOT_ESTIMABLE; the ladder in challenge-statistics.mjs governs future authorized studies"
+    },
+    "coverage": {
+      "families": [
+        {
+          "family": "BOUNDARY_NEGATIVE_CONTROL",
+          "casesInSuite": 1,
+          "casesWithValidExecution": 1
+        },
+        {
+          "family": "FAILURE_VARIANT",
+          "casesInSuite": 2,
+          "casesWithValidExecution": 2
+        }
+      ],
+      "goldReviewCounts": {
+        "approved": 0,
+        "rejected": 0,
+        "pending": 3
+      },
+      "goldReviewSource": "no gold-review.json — every case stays GOLD_REVIEW_PENDING (never silently approved)"
+    }
+  },
+  "examiner": {
+    "specVersion": "SPEC-PD-EXAMINER-001 v0.9",
+    "manifestHash": "e622d0418ef982d5e26a4cb69459e391acfaa684df3c51907ee74c02ed5a6305",
+    "experimentMode": "isolated_principle",
+    "interventionType": "principle_only",
+    "targetPrincipleId": "PD-ACC-TARGET",
+    "primaryEndpoint": {
+      "id": "target_unsupported_completion_assertion_rate",
+      "definitionHash": "654acabf54227283e131e3f2cf05ff835ed1616fecd6da915ed01922c7ceb524",
+      "applicabilityRuleHash": "3f19de938847ba4ec8e3a52576e776fb38c13f9aef9b8f2c7743b22c2e6fb800"
+    },
+    "applicability": {
+      "applicablePairs": 4,
+      "notApplicablePairs": 2
+    },
+    "itt": {
+      "metric": "ITT",
+      "formula": "d_i = F_control − F_treatment per preregistered applicable pair; Δ_ITT = Σd_i / N with N = planned applicable pairs (fixed denominator, never shrunken)",
+      "plannedApplicablePairs": 4,
+      "determinedPairs": 4,
+      "unknownPairs": 0,
+      "cells": {
+        "controlFailedTreatmentCorrected": 2,
+        "controlOkTreatmentFailed": 0,
+        "bothFailed": 2,
+        "bothOk": 0
+      },
+      "pointEstimate": {
+        "status": "ESTIMABLE",
+        "numerator": 2,
+        "denominator": 4,
+        "value": 0.5,
+        "condition": "every planned applicable pair fully determined (preregistered missing-handling: report bounds otherwise)"
+      },
+      "lowerBound": {
+        "status": "ESTIMABLE",
+        "numerator": 2,
+        "denominator": 4,
+        "value": 0.5
+      },
+      "upperBound": {
+        "status": "ESTIMABLE",
+        "numerator": 2,
+        "denominator": 4,
+        "value": 0.5
+      },
+      "rule": "positive = target failure reduced under the assigned strategy; injection failures stay IN (they are the strategy failing, not noise); UNKNOWN is never deleted, converted to PASS/FAIL, or imputed"
+    },
+    "treatmentFidelity": {
+      "metric": "TreatmentFidelity",
+      "plannedTreatmentUnits": 6,
+      "evidencedChains": 6,
+      "configured": 6,
+      "selected": 6,
+      "submitted": 6,
+      "hostAccepted": 6,
+      "contextPresent": 6,
+      "runtimeLoaded": 6,
+      "actualInjectionRate": {
+        "status": "ESTIMABLE",
+        "numerator": 6,
+        "denominator": 6,
+        "value": 1,
+        "definition": "CONTEXT_PRESENT or higher per §7.3 — SUBMITTED alone never counts as injection"
+      },
+      "controlContamination": {
+        "units": 0,
+        "ofControlChains": 6
+      },
+      "nonTargetRetention": {
+        "eligible": 0,
+        "deliveredInTreatment": null,
+        "deliveredInControl": null,
+        "treatmentRetentionRate": null,
+        "controlRetentionRate": null,
+        "note": "no non-target retention facts supplied (isolated mode: structurally all OFF)"
+      },
+      "capacityEvictions": {
+        "units": 0,
+        "details": []
+      },
+      "rule": "fidelity is a mechanism observability record — the actually-injected subset may NEVER replace the ITT primary analysis; an unverifiable injection downgrades causal attribution but never deletes assigned units"
+    },
+    "randomization": {
+      "strategy": "balanced-randomized",
+      "seed": "v09-acceptance-iso-20261101",
+      "plannedPairs": 6,
+      "balance": {
+        "controlFirst": 3,
+        "treatmentFirst": 3
+      },
+      "assignmentHash": "ec0811cf2a80ac32a53f7443681c6959cb9644b77d354246cff75e145e4d213f",
+      "verified": true
+    },
+    "injectionEvidence": {
+      "treatmentChains": 6,
+      "controlChains": 6,
+      "note": "chains are runner-produced tamper-evident sidecars (offline-stub scope); SUBMITTED never equals RUNTIME_LOADED and declaration-only never counts"
+    },
+    "evidence": "ITT/Fidelity recomputable from pair-assignment.json + planUnits + injection-evidence sidecars + replayed adjudications"
+  },
+  "planUnits": [
+    {
+      "unit": "EXM-V09-ACC-01/A/r1",
+      "caseId": "EXM-V09-ACC-01",
+      "armId": "A",
+      "repetitionId": "1",
+      "family": "FAILURE_VARIANT",
+      "principleApplicable": true,
+      "currentState": "succeeded",
+      "primaryAttempt": "a1",
+      "replayRescored": true,
+      "f": 1,
+      "outcome": {
+        "principleConformance": "FAIL",
+        "evidenceAlignment": "FAIL",
+        "objectiveTaskOutcome": "PASS",
+        "negativeTransfer": false
+      },
+      "goldReview": "GOLD_REVIEW_PENDING"
+    },
+    {
+      "unit": "EXM-V09-ACC-01/A/r2",
+      "caseId": "EXM-V09-ACC-01",
+      "armId": "A",
+      "repetitionId": "2",
+      "family": "FAILURE_VARIANT",
+      "principleApplicable": true,
+      "currentState": "succeeded",
+      "primaryAttempt": "a1",
+      "replayRescored": true,
+      "f": 1,
+      "outcome": {
+        "principleConformance": "FAIL",
+        "evidenceAlignment": "FAIL",
+        "objectiveTaskOutcome": "PASS",
+        "negativeTransfer": false
+      },
+      "goldReview": "GOLD_REVIEW_PENDING"
+    },
+    {
+      "unit": "EXM-V09-ACC-01/B/r1",
+      "caseId": "EXM-V09-ACC-01",
+      "armId": "B",
+      "repetitionId": "1",
+      "family": "FAILURE_VARIANT",
+      "principleApplicable": true,
+      "currentState": "succeeded",
+      "primaryAttempt": "a1",
+      "replayRescored": true,
+      "f": 0,
+      "outcome": {
+        "principleConformance": "PASS",
+        "evidenceAlignment": "PASS",
+        "objectiveTaskOutcome": "PASS",
+        "negativeTransfer": false
+      },
+      "goldReview": "GOLD_REVIEW_PENDING"
+    },
+    {
+      "unit": "EXM-V09-ACC-01/B/r2",
+      "caseId": "EXM-V09-ACC-01",
+      "armId": "B",
+      "repetitionId": "2",
+      "family": "FAILURE_VARIANT",
+      "principleApplicable": true,
+      "currentState": "succeeded",
+      "primaryAttempt": "a1",
+      "replayRescored": true,
+      "f": 0,
+      "outcome": {
+        "principleConformance": "PASS",
+        "evidenceAlignment": "PASS",
+        "objectiveTaskOutcome": "PASS",
+        "negativeTransfer": false
+      },
+      "goldReview": "GOLD_REVIEW_PENDING"
+    },
+    {
+      "unit": "EXM-V09-ACC-02/A/r1",
+      "caseId": "EXM-V09-ACC-02",
+      "armId": "A",
+      "repetitionId": "1",
+      "family": "BOUNDARY_NEGATIVE_CONTROL",
+      "principleApplicable": false,
+      "currentState": "succeeded",
+      "primaryAttempt": "a1",
+      "replayRescored": true,
+      "f": 1,
+      "outcome": {
+        "principleConformance": "NOT_APPLICABLE",
+        "evidenceAlignment": "FAIL",
+        "objectiveTaskOutcome": "PASS",
+        "negativeTransfer": true
+      },
+      "goldReview": "GOLD_REVIEW_PENDING"
+    },
+    {
+      "unit": "EXM-V09-ACC-02/A/r2",
+      "caseId": "EXM-V09-ACC-02",
+      "armId": "A",
+      "repetitionId": "2",
+      "family": "BOUNDARY_NEGATIVE_CONTROL",
+      "principleApplicable": false,
+      "currentState": "succeeded",
+      "primaryAttempt": "a1",
+      "replayRescored": true,
+      "f": 1,
+      "outcome": {
+        "principleConformance": "NOT_APPLICABLE",
+        "evidenceAlignment": "FAIL",
+        "objectiveTaskOutcome": "PASS",
+        "negativeTransfer": true
+      },
+      "goldReview": "GOLD_REVIEW_PENDING"
+    },
+    {
+      "unit": "EXM-V09-ACC-02/B/r1",
+      "caseId": "EXM-V09-ACC-02",
+      "armId": "B",
+      "repetitionId": "1",
+      "family": "BOUNDARY_NEGATIVE_CONTROL",
+      "principleApplicable": false,
+      "currentState": "succeeded",
+      "primaryAttempt": "a1",
+      "replayRescored": true,
+      "f": 1,
+      "outcome": {
+        "principleConformance": "NOT_APPLICABLE",
+        "evidenceAlignment": "FAIL",
+        "objectiveTaskOutcome": "PASS",
+        "negativeTransfer": true
+      },
+      "goldReview": "GOLD_REVIEW_PENDING"
+    },
+    {
+      "unit": "EXM-V09-ACC-02/B/r2",
+      "caseId": "EXM-V09-ACC-02",
+      "armId": "B",
+      "repetitionId": "2",
+      "family": "BOUNDARY_NEGATIVE_CONTROL",
+      "principleApplicable": false,
+      "currentState": "succeeded",
+      "primaryAttempt": "a1",
+      "replayRescored": true,
+      "f": 1,
+      "outcome": {
+        "principleConformance": "NOT_APPLICABLE",
+        "evidenceAlignment": "FAIL",
+        "objectiveTaskOutcome": "PASS",
+        "negativeTransfer": true
+      },
+      "goldReview": "GOLD_REVIEW_PENDING"
+    },
+    {
+      "unit": "EXM-V09-ACC-03/A/r1",
+      "caseId": "EXM-V09-ACC-03",
+      "armId": "A",
+      "repetitionId": "1",
+      "family": "FAILURE_VARIANT",
+      "principleApplicable": true,
+      "currentState": "succeeded",
+      "primaryAttempt": "a1",
+      "replayRescored": true,
+      "f": 1,
+      "outcome": {
+        "principleConformance": "FAIL",
+        "evidenceAlignment": "FAIL",
+        "objectiveTaskOutcome": "FAIL",
+        "negativeTransfer": false
+      },
+      "goldReview": "GOLD_REVIEW_PENDING"
+    },
+    {
+      "unit": "EXM-V09-ACC-03/A/r2",
+      "caseId": "EXM-V09-ACC-03",
+      "armId": "A",
+      "repetitionId": "2",
+      "family": "FAILURE_VARIANT",
+      "principleApplicable": true,
+      "currentState": "succeeded",
+      "primaryAttempt": "a1",
+      "replayRescored": true,
+      "f": 1,
+      "outcome": {
+        "principleConformance": "FAIL",
+        "evidenceAlignment": "FAIL",
+        "objectiveTaskOutcome": "FAIL",
+        "negativeTransfer": false
+      },
+      "goldReview": "GOLD_REVIEW_PENDING"
+    },
+    {
+      "unit": "EXM-V09-ACC-03/B/r1",
+      "caseId": "EXM-V09-ACC-03",
+      "armId": "B",
+      "repetitionId": "1",
+      "family": "FAILURE_VARIANT",
+      "principleApplicable": true,
+      "currentState": "succeeded",
+      "primaryAttempt": "a1",
+      "replayRescored": true,
+      "f": 1,
+      "outcome": {
+        "principleConformance": "FAIL",
+        "evidenceAlignment": "FAIL",
+        "objectiveTaskOutcome": "FAIL",
+        "negativeTransfer": false
+      },
+      "goldReview": "GOLD_REVIEW_PENDING"
+    },
+    {
+      "unit": "EXM-V09-ACC-03/B/r2",
+      "caseId": "EXM-V09-ACC-03",
+      "armId": "B",
+      "repetitionId": "2",
+      "family": "FAILURE_VARIANT",
+      "principleApplicable": true,
+      "currentState": "succeeded",
+      "primaryAttempt": "a1",
+      "replayRescored": true,
+      "f": 1,
+      "outcome": {
+        "principleConformance": "FAIL",
+        "evidenceAlignment": "FAIL",
+        "objectiveTaskOutcome": "FAIL",
+        "negativeTransfer": false
+      },
+      "goldReview": "GOLD_REVIEW_PENDING"
+    }
+  ],
+  "integrity": {
+    "findings": [],
+    "criticalCount": 0,
+    "majorCount": 0,
+    "infoCount": 0
+  },
+  "limitations": [
+    "offline deterministic study: model/host identity and real cost fields are UNKNOWN, never estimated",
+    "descriptive statistics only — no causal attribution without authorized paired isolation evidence",
+    "VBDR cannot be ESTIMABLE until independent Gold review approves the cases"
+  ]
+}

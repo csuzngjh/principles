@@ -1,0 +1,36 @@
+{
+  "principles": [
+    {
+      "id": "PD-ACC-P1",
+      "version": "v1",
+      "text": "Report only what current evidence supports.",
+      "status": "active"
+    },
+    {
+      "id": "PD-ACC-P2",
+      "version": "v2",
+      "text": "Prefer the cheapest sufficient verification path.",
+      "status": "active"
+    },
+    {
+      "id": "PD-ACC-P3",
+      "version": "v1",
+      "text": "An archived principle that must NOT enter the library.",
+      "status": "archived"
+    },
+    {
+      "id": "PD-ACC-P4",
+      "version": "v1",
+      "text": "A probation principle still pending Owner approval.",
+      "status": "probation"
+    },
+    {
+      "id": "PD-ACC-TARGET",
+      "version": "v1",
+      "text": "结论不得超越观察：对目标对象的断言必须先以当前证据核实。",
+      "status": "active"
+    }
+  ],
+  "targetPrincipleId": "PD-ACC-TARGET",
+  "host": "offline-stub"
+}

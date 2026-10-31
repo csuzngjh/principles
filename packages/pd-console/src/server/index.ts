@@ -28,6 +28,7 @@ import { handleApprovalsRoute, disposeApprovalsModels } from './routes/approvals
 import { handleHealthRoute, disposeHealthModels } from './routes/health.js';
 import { handlePrinciplesRoute, handleCorePrinciplesRoute, disposePrinciplesModels } from './routes/principles.js';
 import { handleLifecycleRoute, disposeLifecycleModels } from './routes/lifecycle.js';
+import { handleExaminerRoute } from './routes/examiner.js';
 import { handleActivationsRoute, disposeActivationsModels } from './routes/activations.js';
 import { handleReceiptsRoute, disposeReceiptsModels } from './routes/receipts.js';
 import { handleApprovalsGroupedRoute, disposeApprovalsGroupedModels } from './routes/approvals-grouped.js';
@@ -535,6 +536,14 @@ function handleRequest(services: AppServices): (req: http.IncomingMessage, res: 
       if (urlPath.startsWith('/api/v1/lifecycle')) {
         const subPath = urlPath.slice('/api/v1/lifecycle'.length);
         asyncHandler(() => handleLifecycleRoute(req, res, services.workspaceDir, subPath))(req, res);
+        return;
+      }
+
+      // SPEC-PD-EXAMINER-001 v0.9 §8: Examiner offline studies (local-dev
+      // scope — the route answers 503 when the lab tooling is not present).
+      if (urlPath === '/api/v1/examiner' || urlPath.startsWith('/api/v1/examiner/')) {
+        const subPath = urlPath.slice('/api/v1/examiner'.length);
+        asyncHandler(() => handleExaminerRoute(req, res, services.workspaceDir, subPath))(req, res);
         return;
       }
 

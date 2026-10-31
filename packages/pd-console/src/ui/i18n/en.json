@@ -2022,6 +2022,68 @@
         "collapseHint": "Click to collapse diff"
       }
     },
+    "examiner": {
+      "loading": "Loading Examiner…",
+      "title": "Examiner Verification",
+      "subtitle": "Controlled A/B behavior-effect verification for a target principle (offline-first).",
+      "scope": {
+        "title": "Execution scope & gates"
+      },
+      "mode": {
+        "full": "Full Library Incremental A/B (default)",
+        "isolated": "Isolated Principle A/B (diagnostic)"
+      },
+      "create": {
+        "title": "Create an offline study",
+        "target": "Target principle (one per study)",
+        "mode": "Experiment mode",
+        "repetitions": "Repetitions per case",
+        "submit": "Create study",
+        "note": "Synthetic calibration cases (SYNTHETIC_OFFLINE gold). Study identities are server-minted and never overwritten."
+      },
+      "studies": {
+        "title": "Studies",
+        "empty": "No studies yet — create an offline study above."
+      },
+      "study": {
+        "title": "Study {{studyId}}",
+        "mode": "Mode",
+        "intervention": "Intervention",
+        "target": "Target",
+        "plannedPairs": "Planned pairs",
+        "run": "Execution",
+        "finished": "finished",
+        "running": "running",
+        "notRun": "not run",
+        "report": "Report",
+        "preflight": "Run preflight",
+        "runOffline": "Run offline"
+      },
+      "preflight": {
+        "status": "Preflight status"
+      },
+      "report": {
+        "title": "Report V2",
+        "target": "Target",
+        "endpoint": "Primary endpoint",
+        "fidelity": "Treatment Fidelity",
+        "contamination": "Control contamination",
+        "evictions": "Capacity evictions",
+        "ittNote": "planned applicable {{planned}} · determined {{determined}} · unknown sides {{unknown}} · NOT_APPLICABLE {{na}} (excluded from the denominator)",
+        "noExaminerBlock": "This report predates the v0.9 contract (no examiner block).",
+        "offlineNote": "Offline-stub results validate the contract pipeline only — never real-host behavior. Real host experiments require separate Owner authorization."
+      },
+      "created": "Study {{studyId}} created.",
+      "runDone": "Offline execution finished: {{count}} units succeeded.",
+      "reportGenerated": "Report generated ({{status}}).",
+      "errors": {
+        "unavailable": "Examiner dev tooling is unavailable in this installation.",
+        "create": "Failed to create the study.",
+        "preflight": "Preflight failed.",
+        "run": "Offline execution failed.",
+        "report": "Report generation failed."
+      }
+    },
     "debt": {
       "eyebrow": "Principle Debt",
       "title": "Principle Debt Management",
@@ -2234,6 +2296,7 @@
       "principles": "Principles Review",
       "activation": "Activation",
       "debt": "Principle Debt",
+      "examiner": "Examiner Verification",
       "controlCenter": "Control Center",
       "reportProblem": "Feedback",
       "failedTasks": "Failed Tasks",

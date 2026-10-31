@@ -1,0 +1,15 @@
+{
+  "ruleCodes": [
+    {
+      "ruleCodeId": "RC-TARGET",
+      "principleId": "PD-ACC-TARGET",
+      "baselineState": "OFF"
+    },
+    {
+      "ruleCodeId": "RC-P1",
+      "principleId": "PD-ACC-P1",
+      "baselineState": "ON"
+    }
+  ],
+  "principleRuleCodeIndependence": true
+}

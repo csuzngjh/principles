@@ -10,6 +10,7 @@ import {
   Zap,
   Archive,
   Compass,
+  FlaskConical,
   Settings,
   MessageSquare,
   RefreshCw,
@@ -46,6 +47,7 @@ const mainNavItems = [
   { id: "principles", labelKey: "components.sidebar.principles", href: "/principles", icon: BookOpen },
   { id: "activation", labelKey: "components.sidebar.activation", href: "/activation", icon: Zap },
   { id: "debt", labelKey: "components.sidebar.debt", href: "/debt", icon: Archive },
+  { id: "examiner", labelKey: "components.sidebar.examiner", href: "/examiner", icon: FlaskConical },
   { id: "intent", labelKey: "components.sidebar.intent", href: "/intent", icon: Compass },
 ];
 
