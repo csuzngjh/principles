@@ -1035,3 +1035,100 @@ describe('Registry-resolved dependency install (npx parity)', () => {
     }
   }, 420_000);
 });
+
+// PRI-1060: the bundled components must be EXECUTABLE from a plain registry
+// install of the tarball. The pre-deployment compatibility scan runs the
+// bundled pd-cli BEFORE anything is deployed, and Node resolves a component
+// reached through a junction by its REAL path — so the bundled components'
+// own `file:../` deps and third-party imports only resolve through the
+// PACKAGE-ROOT node_modules links (materialized by the installer's
+// ensureBundledPdCliResolution) plus the runtime dependencies hoisted into
+// this package's top-level dependencies. Before the fix this path crashed on
+// every registry install with ERR_MODULE_NOT_FOUND (user report PRI-1060).
+describe('Registry-resolved bundled pd-cli execution (PRI-1060)', () => {
+  it('bundled pd-cli inits a workspace and passes compatibility-scan after ensureBundledPdCliResolution', async (ctx) => {
+    const cleanDir = fs.mkdtempSync(path.join(TMPDIR, 'pd-registry-bundled-exec-'));
+    // Pin the install target: without a local manifest npm walks up to the
+    // nearest ancestor package.json and installs THERE.
+    fs.writeFileSync(path.join(cleanDir, 'package.json'), JSON.stringify({ name: 'pd-registry-bundled-exec', private: true, version: '0.0.0' }));
+    const homeDir = fs.mkdtempSync(path.join(TMPDIR, 'pd-registry-bundled-home-'));
+    const workspaceDir = fs.mkdtempSync(path.join(TMPDIR, 'pd-registry-bundled-ws-'));
+    const childEnv = { ...process.env, HOME: homeDir, USERPROFILE: homeDir };
+    try {
+      // 1. Registry-resolution parity with the sibling test above: skip only
+      //    in the pre-publish cohort window, rethrow everything else.
+      try {
+        await npmRun(['install', tarballPath], { cwd: cleanDir, timeout: 300_000, env: childEnv });
+      } catch (installErr) {
+        const errorText = [
+          (installErr as { message?: unknown }).message,
+          (installErr as { stderr?: unknown }).stderr,
+          (installErr as { stdout?: unknown }).stdout,
+        ].map((part) => (typeof part === 'string' ? part : '')).join('\n');
+        if (!/ETARGET|notarget/i.test(errorText) || !errorText.includes(`${INSTALL_LAYOUT_PACKAGE}@`)) {
+          throw installErr;
+        }
+        const registryVersions = await registryVersionsFor(INSTALL_LAYOUT_PACKAGE, cleanDir);
+        const installerManifest = readJsonFile(path.join(INSTALLER_DIR, 'package.json'));
+        const cohortNote =
+          registryVersions === null
+            ? null
+            : classifyPrePublishCohort({
+                npmErrorText: errorText,
+                range: stringField(unknownField(installerManifest, 'dependencies'), INSTALL_LAYOUT_PACKAGE),
+                localVersion: stringField(
+                  readJsonFile(path.resolve(INSTALLER_DIR, '..', 'install-layout', 'package.json')),
+                  'version',
+                ),
+              });
+        if (cohortNote === null) throw installErr;
+        console.warn(`[pri-1060] pre-publish cohort window — skipping: ${cohortNote}`);
+        ctx.skip();
+        return;
+      }
+
+      const pkgDir = path.join(cleanDir, 'node_modules', 'create-principles-disciple');
+      const pdCliRoot = path.join(pkgDir, 'pd-cli');
+      const pdEntry = path.join(pdCliRoot, 'dist', 'index.js');
+      expect(fs.existsSync(pdEntry), 'installed bundled pd-cli entry missing').toBe(true);
+
+      // 2. Exercise the installer's own materializer — the exact function the
+      // production scan path calls before running the bundled CLI.
+      const installerModule = await import(pathToFileURL(path.join(pkgDir, 'dist', 'installer.js')).href);
+      if (typeof installerModule.ensureBundledPdCliResolution !== 'function') {
+        throw new Error('ensureBundledPdCliResolution is not exported from the packed installer dist');
+      }
+      installerModule.ensureBundledPdCliResolution(pdCliRoot);
+
+      // 3. The bundled CLI must now work end to end (this is the execution
+      // path of `npx create-principles-disciple`'s compatibility scan).
+      const execFileAsync = await loadExecFileAsync();
+      const runBundled = async (args: readonly string[]) =>
+        execFileAsync(process.execPath, [pdEntry, ...args], { timeout: 120_000, env: childEnv });
+
+      const version = await runBundled(['--version']);
+      expect(version.stdout.trim().length, 'bundled pd-cli --version produced no output').toBeGreaterThan(0);
+
+      // --help exercises the full command-registration graph (incl. the
+      // commander major the registry resolves at the install root).
+      const help = await runBundled(['--help']);
+      expect(help.stdout).toContain('Usage: pd');
+
+      // runtime init creates the workspace state the compatibility scan reads.
+      await runBundled(['runtime', 'init', '--confirm', '--workspace', workspaceDir]);
+      expect(fs.existsSync(path.join(workspaceDir, '.pd', 'state.db')), 'runtime init did not create state.db').toBe(true);
+
+      const scan = await runBundled(['runtime', 'compatibility-scan', '--json', '--workspace', workspaceDir]);
+      // The scan prints one pretty-printed JSON object; parse from the first
+      // '{' so multi-line formatting cannot split it.
+      const scanText = scan.stdout.slice(Math.max(0, scan.stdout.indexOf('{'))).trim();
+      const scanJson = JSON.parse(scanText) as { ok?: boolean; status?: string };
+      expect(scanJson.ok, `bundled compatibility-scan failed: ${scanText}`).toBe(true);
+      expect(['clean', 'no_state_db']).toContain(scanJson.status);
+    } finally {
+      cleanupDir(cleanDir);
+      cleanupDir(homeDir);
+      cleanupDir(workspaceDir);
+    }
+  }, 600_000);
+});
