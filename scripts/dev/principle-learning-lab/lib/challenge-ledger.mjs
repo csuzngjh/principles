@@ -40,7 +40,10 @@ export class StudyLockError extends Error {
 }
 
 function readLines(file) {
-  if (!fs.existsSync(file)) return { lines: [], malformedTail: false };
+  // The missing-file branch must carry the same `entries` field the readers
+  // destructure — a fresh study dir has no ledgers yet and the first
+  // appendEvent(nextSeq) would otherwise crash on undefined.
+  if (!fs.existsSync(file)) return { lines: [], entries: [], malformedTail: false };
   const raw = fs.readFileSync(file, 'utf8');
   const lines = raw === '' ? [] : raw.split('\n');
   let malformedTail = false;
