@@ -267,7 +267,10 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
   const { flags } = computeFeatureFlagsFromConfig(config.effective);
   if (flags['host.workbuddy']?.enabled !== true) {
     // OD-03: default OFF; observable skip, no dispatch, no workspace writes.
-    return neutralWithDiagnostics([diagnostic('skipped', 'host.workbuddy_disabled', 'Set features.host.workbuddy.enabled=true in the WorkBuddy governance workspace config to enable PD for WorkBuddy.')]);
+    // PRI-1063: the nextAction must be a paste-ready YAML snippet — the
+    // dotted id is ONE flat key; a nested host:→workbuddy: write is silently
+    // not the same key and left users stuck.
+    return neutralWithDiagnostics([diagnostic('skipped', 'host.workbuddy_disabled', 'Enable PD for WorkBuddy in the governance workspace config (~/.workbuddy/pd-workspace/.pd/config.yaml) — the flag id is one FLAT key, not nested keys:\nfeatures:\n  host.workbuddy:\n    enabled: true')]);
   }
   const evidenceEnabled = flags.principle_receipt_ledger?.enabled === true;
 

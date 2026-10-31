@@ -153,7 +153,9 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
   }
   const { flags } = computeFeatureFlagsFromConfig(config.effective);
   if (flags['host.workbuddy']?.enabled !== true) {
-    return { ...base, mode: 'paused', reason: 'host.workbuddy_disabled', nextAction: 'Set features.host.workbuddy.enabled=true in the governance workspace .pd/config.yaml to enable WorkBuddy PD behavior.' };
+    // PRI-1063: paste-ready YAML snippet; the dotted id is ONE flat key —
+    // a nested host:→workbuddy: write is silently not the same key.
+    return { ...base, mode: 'paused', reason: 'host.workbuddy_disabled', nextAction: 'Enable WorkBuddy PD behavior in the governance workspace .pd/config.yaml — the flag id is one FLAT key, not nested keys:\nfeatures:\n  host.workbuddy:\n    enabled: true' };
   }
 
   const consumerFlag = loadFeatureFlagFromConfig(workspaceDir, 'internalization_auto_consumer', { info: (m) => logger.info(m), warn: (m) => logger.warn(m) });

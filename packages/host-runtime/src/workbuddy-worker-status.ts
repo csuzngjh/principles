@@ -49,7 +49,9 @@ export function computeWorkbuddyWorkerStatusMode(input: {
   }
   const { flags } = computeFeatureFlagsFromConfig(config.effective);
   if (flags['host.workbuddy']?.enabled !== true) {
-    return { mode: 'paused', reason: 'host.workbuddy_disabled', nextAction: 'Set features.host.workbuddy.enabled=true in the governance workspace .pd/config.yaml to enable WorkBuddy PD behavior.' };
+    // PRI-1063: paste-ready YAML snippet; the dotted id is ONE flat key —
+    // a nested host:→workbuddy: write is silently not the same key.
+    return { mode: 'paused', reason: 'host.workbuddy_disabled', nextAction: 'Enable WorkBuddy PD behavior in the governance workspace .pd/config.yaml — the flag id is one FLAT key, not nested keys:\nfeatures:\n  host.workbuddy:\n    enabled: true' };
   }
   if (flags.internalization_auto_consumer?.enabled !== true) {
     return { mode: 'paused', reason: 'internalization_auto_consumer_disabled', nextAction: 'Automatic execution is paused; manual commands remain available: pd diagnose, pd runtime internalization run-once.' };
