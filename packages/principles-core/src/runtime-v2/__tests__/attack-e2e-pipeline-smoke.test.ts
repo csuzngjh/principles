@@ -150,10 +150,10 @@ class MockRuntimeAdapter implements PDRuntimeAdapter {
           diagnosisId: 'diag-mock',
           taskId: taskId,
           summary: 'Mock rootcause summary',
-          causalChain: [{ why: 1, statement: 'why', evidenceRefs: ['ref-1'] }],
+          causalChain: [{ why: 1, statement: 'why', evidenceRefs: ['attack-test'] }],
           rootCause: 'Design: Mock rootcause',
           rootCauseCategory: 'Design',
-          evidence: [{ sourceRef: 'ref-1', note: 'note' }],
+          evidence: [{ sourceRef: 'attack-test', note: 'note' }],
           confidence: 0.9,
         };
       } else if (taskId.includes('diag_distiller')) {

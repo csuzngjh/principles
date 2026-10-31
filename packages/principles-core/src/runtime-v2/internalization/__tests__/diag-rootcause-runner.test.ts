@@ -84,6 +84,73 @@ describe('DiagRootCauseRunner V-slice', () => {
     expect(h.deps._stateManager.updateRunOutput).not.toHaveBeenCalled();
   });
 
+  it('PRI-1059: rejects a copied prompt example whose evidence refs are unbound', async () => {
+    const h = createDiagRunnerHarness('rootcause');
+    const forged = {
+      ...h.makeOutput(),
+      diagnosisId: 'example',
+      summary: 'example',
+      rootCause: 'People: Example root cause',
+      rootCauseCategory: 'People',
+      causalChain: [{ why: 1, statement: 'example', evidenceRefs: ['example'] }],
+      evidence: [{ sourceRef: 'example', note: 'example' }],
+      confidence: 0.5,
+    };
+    (h.deps._runtimeAdapter.fetchOutput as MockFn).mockResolvedValue({ payload: forged });
+
+    const result = await h.runner.run(ROOTCAUSE_TASK_ID);
+
+    expect(result.status).toBe('failed');
+    expect(result.failureReason).toContain('evidence_ref_unbound');
+    expect(result.failureReason).toContain('evidence[0].sourceRef');
+    expect(h.deps._stateManager.markTaskSucceeded).not.toHaveBeenCalled();
+    await expect(h.deps.artifactStore.listBySourceTaskId(ROOTCAUSE_TASK_ID)).resolves.toHaveLength(0);
+  });
+
+  it('PRI-1059: rejects a fabricated ref in causalChain even when evidence[] is real', async () => {
+    const h = createDiagRunnerHarness('rootcause');
+    const valid = h.makeOutput();
+    const causalChain = (valid.causalChain as Record<string, unknown>[]).map((entry, index) => ({
+      ...entry,
+      evidenceRefs: index === 0 ? ['fabricated:ref'] : entry.evidenceRefs,
+    }));
+    (h.deps._runtimeAdapter.fetchOutput as MockFn).mockResolvedValue({
+      payload: { ...valid, causalChain },
+    });
+
+    const result = await h.runner.run(ROOTCAUSE_TASK_ID);
+
+    expect(result.status).toBe('failed');
+    expect(result.failureReason).toContain('causalChain[0].evidenceRefs[0]');
+    await expect(h.deps.artifactStore.listBySourceTaskId(ROOTCAUSE_TASK_ID)).resolves.toHaveLength(0);
+  });
+
+  it('PRI-1059: accepts owner_correction only when the context carries the Owner words', async () => {
+    const h = createDiagRunnerHarness('rootcause');
+    h.deps._contextAssembler.assemble.mockResolvedValue({
+      sourceRefs: ['ref-1', 'ref-2'],
+      conversationWindow: [],
+      diagnosisTarget: { correctionEvidence: { text: 'Do not give me unverified answers' } },
+    });
+    const valid = h.makeOutput();
+    const causalChain = (valid.causalChain as Record<string, unknown>[]).map((entry) => ({
+      ...entry,
+      evidenceRefs: ['owner_correction'],
+    }));
+    (h.deps._runtimeAdapter.fetchOutput as MockFn).mockResolvedValue({
+      payload: {
+        ...valid,
+        causalChain,
+        evidence: [{ sourceRef: 'owner_correction', note: 'Do not give me unverified answers' }],
+      },
+    });
+
+    const result = await h.runner.run(ROOTCAUSE_TASK_ID);
+
+    expect(result.status).toBe('succeeded');
+    await expect(h.deps.artifactStore.listBySourceTaskId(ROOTCAUSE_TASK_ID)).resolves.toHaveLength(1);
+  });
+
   it('no dependency → runs standalone (first stage)', async () => {
     // The default rootcause self task has no dependencies (first stage in pipeline)
     const h = createDiagRunnerHarness('rootcause');

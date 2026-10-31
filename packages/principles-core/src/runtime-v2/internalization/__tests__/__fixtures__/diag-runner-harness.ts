@@ -463,7 +463,7 @@ function createRootCauseHarness(overrides: Record<string, unknown> = {}): DiagRo
   };
   const _contextAssembler = {
     assemble: vi.fn().mockResolvedValue({
-      sourceRefs: ['ref-1', 'ref-2'],
+      sourceRefs: ['ref-1', 'ref-2', 'owner_reported:cli'],
       conversationWindow: [],
       trajectorySummary: '',
       painSignal: { painId: 'pain-001', painType: 'tool_failure', source: 'test', reason: 'test reason', score: 70 },
