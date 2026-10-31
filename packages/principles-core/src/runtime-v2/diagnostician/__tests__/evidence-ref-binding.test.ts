@@ -106,7 +106,10 @@ describe('evidence reference binding (PRI-1059)', () => {
 
     expect(findUnboundEvidenceRefs(makeOutput('owner_message:2026-10-30T13:22:00.000Z'), trusted)).toEqual([]);
     expect(findUnboundEvidenceRefs(makeOutput('agent_turn:2026-10-30T13:22:05.000Z'), trusted)).toEqual([]);
-    expect(findUnboundEvidenceRefs(makeOutput('tool_call_failure:2026-10-30T13:22:06.000Z'), trusted)).toEqual([]);
+    expect(findUnboundEvidenceRefs(makeOutput('tool_call:2026-10-30T13:22:06.000Z'), trusted)).toEqual([]);
+    // A tool entry alone is not a failure witness; that label must come from
+    // pain evidence carrying tool_call_failure:<ts>.
+    expect(findUnboundEvidenceRefs(makeOutput('tool_call_failure:2026-10-30T13:22:06.000Z'), trusted)).not.toEqual([]);
     expect(findUnboundEvidenceRefs(makeOutput('owner_message:2026-10-30T13:22:05.000Z'), trusted)).not.toEqual([]);
     expect(findUnboundEvidenceRefs(makeOutput('agent_turn:does-not-exist'), trusted)).not.toEqual([]);
   });

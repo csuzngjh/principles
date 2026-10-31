@@ -62,8 +62,10 @@ export function collectTrustedEvidenceRefs(
         trusted.add(`agent_turn:${ts}`);
         break;
       case 'tool':
+        // Neutral alias only. `tool_call_failure:*` is a claim that needs a
+        // failure witness; when the pain evidence carries one it is already in
+        // sourceRefs. Do not synthesize that label for an arbitrary tool entry.
         trusted.add(`tool_call:${ts}`);
-        trusted.add(`tool_call_failure:${ts}`);
         break;
       case 'system':
         trusted.add(`system_event:${ts}`);
