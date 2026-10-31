@@ -1490,37 +1490,62 @@ export function parseCompatibilityScanStdout(stdout: unknown): LegacyRulePreflig
 }
 
 /**
- * PRI-693: materialize node_modules links for the BUNDLED (not yet deployed)
- * pd-cli so its static @principles/* / principles-disciple imports resolve
- * during the pre-deployment compatibility scan. Mirrors the links syncPdCli
- * creates for the deployed copy — targets are the sibling component
- * directories of the npm package (files whitelist: core/, host-runtime/,
- * codex-adapter/, install-layout/, plugin/). Idempotent.
+ * PRI-693 / PRI-1060: materialize node_modules links for the BUNDLED (not yet
+ * deployed) components so the pre-deployment compatibility scan can execute
+ * the bundled pd-cli. Mirrors the links syncPdCli creates for the deployed
+ * copy — targets are the sibling component directories of the npm package
+ * (files whitelist: core/, host-runtime/, codex-adapter/, workbuddy-adapter/,
+ * install-layout/, plugin/). Idempotent.
+ *
+ * Links are materialized at BOTH levels:
+ *
+ * 1. <root>/pd-cli/node_modules/* — pd-cli's OWN first-hop imports.
+ * 2. <root>/node_modules/* — every OTHER bundled component's `file:../`
+ *    sibling dependencies. Node resolves a component reached through a
+ *    junction by its REAL path, so host-runtime/dist/index.js importing
+ *    '@principles/core' never sees pd-cli's node_modules — it only resolves
+ *    via the package root's node_modules (PRI-1060: this exact gap crashed
+ *    the scan with ERR_MODULE_NOT_FOUND on every registry install). The
+ *    third-party dependencies of the bundled graph (@sinclair/typebox,
+ *    better-sqlite3, …) are declared as top-level installer dependencies so
+ *    the surrounding npx/npm install places them one node_modules above the
+ *    package, reachable by the same upward resolution.
  */
 export function ensureBundledPdCliResolution(pdCliRoot: string): void {
   const packageRoot = path.resolve(pdCliRoot, '..');
-  // Unix relative targets are computed from EACH link's own directory:
-  //   @principles/* links sit at <root>/pd-cli/node_modules/@principles/<name>
-  //     → three levels up to <root>;
-  //   principles-disciple sits at <root>/pd-cli/node_modules/principles-disciple
-  //     → two levels up to <root>.
-  // (Windows junctions take absolute targets.) A wrong level produces a
-  // DANGLING link — existsSync() is false and the second run hits EEXIST.
-  const linkSpecs: { linkPath: string; windowsTarget: string; unixTarget: string }[] = [
-    { linkPath: path.join(pdCliRoot, 'node_modules', '@principles', 'core'), windowsTarget: path.join(packageRoot, 'core'), unixTarget: '../../../core' },
-    { linkPath: path.join(pdCliRoot, 'node_modules', '@principles', 'host-runtime'), windowsTarget: path.join(packageRoot, 'host-runtime'), unixTarget: '../../../host-runtime' },
-    { linkPath: path.join(pdCliRoot, 'node_modules', '@principles', 'codex-adapter'), windowsTarget: path.join(packageRoot, 'codex-adapter'), unixTarget: '../../../codex-adapter' },
-    { linkPath: path.join(pdCliRoot, 'node_modules', '@principles', 'install-layout'), windowsTarget: path.join(packageRoot, 'install-layout'), unixTarget: '../../../install-layout' },
-    { linkPath: path.join(pdCliRoot, 'node_modules', 'principles-disciple'), windowsTarget: path.join(packageRoot, 'plugin'), unixTarget: '../../plugin' },
+  const componentLinks: { linkName: string; componentDir: string }[] = [
+    { linkName: path.join('@principles', 'core'), componentDir: 'core' },
+    { linkName: path.join('@principles', 'host-runtime'), componentDir: 'host-runtime' },
+    { linkName: path.join('@principles', 'codex-adapter'), componentDir: 'codex-adapter' },
+    { linkName: path.join('@principles', 'workbuddy-adapter'), componentDir: 'workbuddy-adapter' },
+    { linkName: path.join('@principles', 'install-layout'), componentDir: 'install-layout' },
+    { linkName: 'principles-disciple', componentDir: 'plugin' },
   ];
-  for (const spec of linkSpecs) {
-    if (existsSync(spec.linkPath)) continue;
-    if (!existsSync(spec.windowsTarget)) continue; // component absent from this package layout — skip
-    mkdirSync(path.dirname(spec.linkPath), { recursive: true });
-    if (isWindows()) {
-      symlinkSync(spec.windowsTarget, spec.linkPath, 'junction');
-    } else {
-      symlinkSync(spec.unixTarget, spec.linkPath, 'dir');
+  // Unix relative targets are computed from EACH link's own directory — a
+  // wrong level produces a DANGLING link (existsSync() false, second run hits
+  // EEXIST). Windows junctions take absolute targets and ignore the depth.
+  const linkBases: { nodeModulesDir: string; depth: number }[] = [
+    // <root>/pd-cli/node_modules/@principles/<name> → three levels up to
+    // <root>; <root>/pd-cli/node_modules/principles-disciple → two levels.
+    { nodeModulesDir: path.join(pdCliRoot, 'node_modules'), depth: 3 },
+    // <root>/node_modules/@principles/<name> → two levels up; principles-
+    // disciple → one level.
+    { nodeModulesDir: path.join(packageRoot, 'node_modules'), depth: 2 },
+  ];
+  for (const base of linkBases) {
+    for (const spec of componentLinks) {
+      const linkPath = path.join(base.nodeModulesDir, spec.linkName);
+      if (existsSync(linkPath)) continue;
+      const windowsTarget = path.join(packageRoot, spec.componentDir);
+      if (!existsSync(windowsTarget)) continue; // component absent from this package layout — skip
+      const depthUp = spec.linkName.includes(path.sep) ? base.depth : base.depth - 1;
+      const unixTarget = `${'../'.repeat(depthUp)}${spec.componentDir}`;
+      mkdirSync(path.dirname(linkPath), { recursive: true });
+      if (isWindows()) {
+        symlinkSync(windowsTarget, linkPath, 'junction');
+      } else {
+        symlinkSync(unixTarget, linkPath, 'dir');
+      }
     }
   }
 }
