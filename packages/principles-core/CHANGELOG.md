@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.297.9
+
+### Patch Changes
+
+- 216ddbb: Bind Stage A evidence references to the trusted diagnosis context. Unknown or copied prompt-example refs now fail closed with `evidence_ref_unbound` before an artifact or candidate can be created (PRI-1059).
+
 ## 1.297.8
 
 ### Patch Changes
