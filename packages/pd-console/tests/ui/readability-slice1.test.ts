@@ -183,6 +183,20 @@ describe("切片1 R2/R3 — 标题/正文分层与换行保留", () => {
     expect(block).toContain("{learnedText}");
     expect(block).toContain("whitespace-pre-wrap");
   });
+
+  it("正文/标题预览按码点截断，不使用 UTF-16 slice（避免孤立代理项显示为替换字符）", () => {
+    const detail = readSource("../../src/ui/pages/principles/PrincipleDetailPage.tsx");
+    expect(detail).toContain("truncateByCodePoints(learnedText, 240)");
+    expect(detail).not.toContain("learnedText.slice(0, 240)");
+
+    const reading = readSource("../../src/ui/pages/focus/ApprovalSubjectReading.tsx");
+    expect(reading).toContain("truncateByCodePoints(bodyText, 240)");
+    expect(reading).not.toContain("bodyText.slice(0, 240)");
+
+    const list = readSource("../../src/ui/pages/principles/PrinciplesPage.tsx");
+    expect(list).toContain("truncateByCodePoints(p.text, 80)");
+    expect(list).not.toContain("p.text.slice(0, 80)");
+  });
 });
 
 // ── R7：去重 ────────────────────────────────────────────────────────────────

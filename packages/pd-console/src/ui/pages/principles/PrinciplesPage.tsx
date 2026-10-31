@@ -19,7 +19,7 @@ import type {
   OwnerDecisionLibraryData,
 } from "../../api.js";
 import { enumLabel } from "../../utils/enum-labels.js";
-import { splitReadingTitleBody } from "../../utils/reading-layout.js";
+import { splitReadingTitleBody, truncateByCodePoints } from "../../utils/reading-layout.js";
 import { formatDate } from "../../utils/format-date.js";
 import { PrinciplesViewNav } from "./PrinciplesViewNav.js";
 
@@ -291,7 +291,7 @@ export function PrinciplesPage() {
     const semanticTitle = decision?.learnedPrinciple.status === 'known' ? decision.learnedPrinciple.text : undefined;
 
     // PRI-332: Determine display title with bounded fallback for unreadable titles
-    const rawTitle = p.triggerPattern || p.text.slice(0, 80);
+    const rawTitle = p.triggerPattern || truncateByCodePoints(p.text, 80);
     const detectedLang = p.detectedLanguage ?? 'unknown';
     const readWarningCode = p.readabilityWarningCode;
     let displayTitle = rawTitle;
