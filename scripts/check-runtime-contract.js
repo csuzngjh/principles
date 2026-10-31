@@ -4,14 +4,20 @@
  *
  * Checks only the lines added/modified in the current PR diff against
  * `origin/main...HEAD` (with fallbacks), and returns a non-zero exit code when
- * new violations of ERR-001 / ERR-005 / ERR-013 are introduced.
+ * new violations of ERR-001 / ERR-005 / ERR-013 / ERR-175 are introduced.
  *
  * Historical (pre-existing) code is NOT blocked — this is the key fix for the
  * dropped full-repo scanner from PR #991, which produced ~1171 warnings and
  * masked new violations.
  *
+ * ERR-175 is path-scoped: it applies only to the Owner-visible console UI
+ * (`packages/pd-console/src/ui/**`), because there a `slice(0, n)` on text is
+ * UTF-16 truncation and renders U+FFFD. See isUiTextSurface().
+ *
  * Exemptions (line-scoped, like eslint-disable-next-line):
  *   // runtime-contract-exempt: ERR-XXX <non-empty reason>
+ *   Block-comment and JSX comment forms are accepted too, same contract
+ *   (see EXEMPTION_PREFIX in runtime-contract-rules.js).
  *
  * Env:
  *   PD_RUNTIME_CONTRACT_SCAN=0   skip the scanner (escape hatch for emergency releases)
@@ -32,6 +38,8 @@ import {
   TAG,
   RULES,
   checkLine,
+  checkUiTextTruncation,
+  isUiTextSurface,
   parseExemption,
 } from './runtime-contract-rules.js';
 import {
@@ -94,7 +102,11 @@ export function scan(inject) {
       const malformedExemption = checkMalformedExemption(text);
       if (malformedExemption) findings.push(malformedExemption(hunk.file, lineNo, text));
 
-      const violation = checkLine(text, ctx);
+      // ERR-175 is only meaningful on the Owner-visible UI surface; elsewhere a
+      // `slice(0, n)` on a text-shaped identifier is not a rendering defect.
+      const violation =
+        checkLine(text, ctx) ||
+        (isUiTextSurface(hunk.file) ? checkUiTextTruncation(text) : null);
       if (!violation) continue;
 
       // Check exemption: same line or the previous NEW line in the diff.

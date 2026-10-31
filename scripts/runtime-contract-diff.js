@@ -28,10 +28,16 @@ import { readFileSync } from 'node:fs';
  * @property {NewLine[]} newLines - only the added/modified lines
  */
 
-/** Scan target: only TypeScript sources (not scripts/, not tests). */
-const TS_INCLUDE = ['*.ts'];
+/**
+ * Scan target: TypeScript sources, `.ts` AND `.tsx`.
+ *
+ * `.tsx` was missing until ERR-175: the Owner-visible UI lives in `.tsx`, so a
+ * UI-only rule scoped to those paths was dead code — the extension filter
+ * silently dropped every file it was meant to guard.
+ */
+export const SCAN_INCLUDE = ['*.ts', '*.tsx'];
 /** Exclude test files and the scripts tree (avoid self-scan recursion). */
-const SCAN_EXCLUDES = ['*.test.ts', '*.spec.ts', 'scripts/**'];
+const SCAN_EXCLUDES = ['*.test.ts', '*.test.tsx', '*.spec.ts', '*.spec.tsx', 'scripts/**'];
 
 /**
  * Probe candidates in priority order. First rev that verifies wins.
@@ -226,7 +232,7 @@ export function parseDiffHunks(diffText) {
  * Get the diff hunks for the current branch vs the resolved base.
  *
  * Uses `--unified=0` to minimize noise (we only need added-line text + numbers).
- * Restricts to `.ts` files and excludes tests / scripts / fixtures.
+ * Restricts to `.ts` / `.tsx` files and excludes tests / scripts / fixtures.
  *
  * @param {string} baseRef - e.g. `origin/main...HEAD`
  * @returns {FileHunks[]}
@@ -235,7 +241,7 @@ export function getDiffHunks(baseRef) {
   if (typeof baseRef !== 'string' || baseRef.length === 0) return [];
 
   const args = ['diff', '--unified=0', '--no-color', baseRef];
-  for (const pat of TS_INCLUDE) args.push(pat);
+  for (const pat of SCAN_INCLUDE) args.push(pat);
   for (const ex of SCAN_EXCLUDES) {
     args.push(`:!${ex}`);
   }

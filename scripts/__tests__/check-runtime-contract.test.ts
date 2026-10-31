@@ -14,6 +14,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   checkLine,
+  checkUiTextTruncation,
+  isUiTextSurface,
   parseExemption,
   RULES,
 } from '../runtime-contract-rules.js';
@@ -21,6 +23,7 @@ import {
   parseDiffHunks,
   resolveBaseRef,
   buildTrustContext,
+  SCAN_INCLUDE,
 } from '../runtime-contract-diff.js';
 import { scan, isEscapeHatchSet } from '../check-runtime-contract.js';
 import type { ResolvedBase, FileHunks } from '../runtime-contract-diff.js';
@@ -28,14 +31,22 @@ import type { ResolvedBase, FileHunks } from '../runtime-contract-diff.js';
 const untrustedCtx = (vars: string[]) => ({ untrustedVars: new Set(vars) });
 
 describe('runtime-contract-rules — RULES export', () => {
-  it('exposes ERR-001, ERR-005, ERR-013 with title + autofix', () => {
+  it('exposes every rule with title + autofix', () => {
     const ids = RULES.map((r) => r.id).sort();
-    expect(ids).toEqual(['ERR-001', 'ERR-005', 'ERR-013']);
+    expect(ids).toEqual(['ERR-001', 'ERR-005', 'ERR-013', 'ERR-175']);
     for (const r of RULES) {
       expect(typeof r.title).toBe('string');
       expect(r.title.length).toBeGreaterThan(10);
       expect(typeof r.autofix).toBe('string');
     }
+  });
+});
+
+describe('runtime-contract-diff — scan surface', () => {
+  it('includes .tsx, where the Owner-visible UI lives (ERR-175 would be dead code otherwise)', () => {
+    // Found the hard way: a UI-only rule scoped to packages/pd-console/src/ui
+    // never fires if the git pathspec only asks for `*.ts`.
+    expect(SCAN_INCLUDE).toEqual(['*.ts', '*.tsx']);
   });
 });
 
@@ -212,6 +223,78 @@ describe('runtime-contract-rules — checkLine', () => {
   });
 });
 
+describe('runtime-contract-rules — ERR-175 UI text truncation', () => {
+  it('flags the exact pre-fix expressions from the U+FFFD incident (negative control)', () => {
+    // These are the three user-visible sites PR #2238 had to repair. A guard
+    // that does not flag the pre-fix code would have let the regression ship.
+    expect(checkUiTextTruncation('const preview = learnedText.slice(0, 240);')).toEqual({
+      ruleId: 'ERR-175',
+    });
+    expect(checkUiTextTruncation('const preview = bodyText.slice(0, 240);')).toEqual({
+      ruleId: 'ERR-175',
+    });
+    expect(checkUiTextTruncation('const rawTitle = p.text.slice(0, 80);')).toEqual({
+      ruleId: 'ERR-175',
+    });
+  });
+
+  it('flags truncation inside JSX and through optional chaining', () => {
+    expect(checkUiTextTruncation('<span>{bodyText.slice(0, 80)}</span>')).toEqual({
+      ruleId: 'ERR-175',
+    });
+    expect(checkUiTextTruncation('const x = text?.slice(0, 10);')).toEqual({
+      ruleId: 'ERR-175',
+    });
+  });
+
+  it('flags string-only substring/substr prefix truncation', () => {
+    expect(checkUiTextTruncation('const y = bodyText.substring(0, 240);')).toEqual({
+      ruleId: 'ERR-175',
+    });
+    expect(checkUiTextTruncation('const z = msg.substr(0, 20);')).toEqual({
+      ruleId: 'ERR-175',
+    });
+  });
+
+  it('does NOT flag the sanctioned helper or array slicing', () => {
+    // Positive control: the fixed form must stay clean, otherwise the gate is
+    // just noise and gets bypassed.
+    expect(checkUiTextTruncation('const rawTitle = truncateByCodePoints(p.text, 80);')).toBeNull();
+    expect(checkUiTextTruncation('const rows = items.slice(0, 10);')).toBeNull();
+    expect(checkUiTextTruncation('const arr = Array.from(text).slice(0, 24);')).toBeNull();
+    expect(checkUiTextTruncation('const chars = Array.from(text); chars.slice(0, 24);')).toBeNull();
+  });
+
+  it('does NOT flag a text keyword that is not the trailing segment (context trap)', () => {
+    // `context` ends with "text"; matching on suffix alone would flag ordinary
+    // object slicing. The rule matches whole camelCase segments.
+    expect(checkUiTextTruncation('const x = context.slice(0, 10);')).toBeNull();
+  });
+
+  it('does NOT flag a single-argument slice (not a truncation)', () => {
+    expect(checkUiTextTruncation('const x = text.slice(5);')).toBeNull();
+  });
+
+  it('does NOT flag text inside comments or string literals', () => {
+    expect(checkUiTextTruncation("const s = 'p.text.slice(0, 80)';")).toBeNull();
+    expect(checkUiTextTruncation('// p.text.slice(0, 80)')).toBeNull();
+  });
+});
+
+describe('runtime-contract-rules — isUiTextSurface', () => {
+  it('applies to the console UI surface (.ts/.tsx), including Windows paths', () => {
+    expect(isUiTextSurface('packages/pd-console/src/ui/pages/focus/FocusPage.tsx')).toBe(true);
+    expect(isUiTextSurface('packages/pd-console/src/ui/utils/reading-layout.ts')).toBe(true);
+    expect(isUiTextSurface(String.raw`packages\pd-console\src\ui\pages\FocusPage.tsx`)).toBe(true);
+  });
+
+  it('does not apply outside pd-console/src/ui', () => {
+    expect(isUiTextSurface('packages/pd-console/src/server/models/X.ts')).toBe(false);
+    expect(isUiTextSurface('packages/principles-core/src/ui/x.ts')).toBe(false);
+    expect(isUiTextSurface('packages/pd-console/src/ui/pages/x.js')).toBe(false);
+  });
+});
+
 describe('runtime-contract-rules — parseExemption', () => {
   it('#3 honors valid exemption (ERR ID + non-empty reason)', () => {
     // Issue acceptance criterion.
@@ -237,6 +320,27 @@ describe('runtime-contract-rules — parseExemption', () => {
   it('returns MALFORMED for wrong ID format', () => {
     // Non-ERR-XXX identifier — refuse, do not silently honor.
     expect(parseExemption('// runtime-contract-exempt: FOO-999 reason here')).toBe('MALFORMED');
+  });
+
+  it('accepts block and JSX comment forms with the same contract', () => {
+    // JSX markup has no line comments; without these forms a .tsx exemption
+    // cannot be written on the line that needs it.
+    expect(parseExemption('/* runtime-contract-exempt: ERR-175 numeric id prefix */')).toEqual({
+      errId: 'ERR-175',
+      reason: 'numeric id prefix',
+    });
+    expect(parseExemption('{/* runtime-contract-exempt: ERR-175 numeric id prefix */}')).toEqual({
+      errId: 'ERR-175',
+      reason: 'numeric id prefix',
+    });
+  });
+
+  it('treats a block/JSX exemption without a reason as MALFORMED', () => {
+    // The marker is assembled from parts so this fixture line is not itself
+    // read as a malformed exemption by the diff scanner that gates this repo.
+    const marker = 'runtime-contract-exempt';
+    expect(parseExemption(`/* ${marker}: ERR-175 */`)).toBe('MALFORMED');
+    expect(parseExemption(`{/* ${marker}: ERR-175 */}`)).toBe('MALFORMED');
   });
 });
 
@@ -506,6 +610,55 @@ describe('check-runtime-contract — scan (end-to-end with injected diff)', () =
       'const legacy = parsed as string;',
       'const ctx = 1;',
       'const clean = Object.hasOwn(parsed, "x");',
+    ]);
+    expect(findings).toHaveLength(0);
+  });
+
+  it('flags ERR-175 on the console UI surface', () => {
+    const diff = [
+      'diff --git a/packages/pd-console/src/ui/pages/focus/FocusPage.tsx b/packages/pd-console/src/ui/pages/focus/FocusPage.tsx',
+      '+++ b/packages/pd-console/src/ui/pages/focus/FocusPage.tsx',
+      '@@ -1,1 +1,2 @@',
+      ' const title = x;',
+      '+const preview = learnedText.slice(0, 240);',
+    ].join('\n');
+    const { findings } = scanWith(diff, ['const title = x;', 'const preview = learnedText.slice(0, 240);']);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].ruleId).toBe('ERR-175');
+    expect(findings[0].line).toBe(2);
+    expect(findings[0].nextAction).toContain('truncateByCodePoints');
+  });
+
+  it('does NOT apply ERR-175 outside the console UI surface', () => {
+    // Same line, different path: a server-side slice on a text-shaped field is
+    // not a rendering defect, so the path scope must hold.
+    const diff = [
+      'diff --git a/packages/pd-console/src/server/models/X.ts b/packages/pd-console/src/server/models/X.ts',
+      '+++ b/packages/pd-console/src/server/models/X.ts',
+      '@@ -1,1 +1,2 @@',
+      ' const title = x;',
+      '+const preview = learnedText.slice(0, 240);',
+    ].join('\n');
+    const { findings } = scanWith(diff, [
+      'const title = x;',
+      'const preview = learnedText.slice(0, 240);',
+    ]);
+    expect(findings).toHaveLength(0);
+  });
+
+  it('honors a JSX exemption on the preceding line for ERR-175', () => {
+    const diff = [
+      'diff --git a/packages/pd-console/src/ui/pages/focus/FocusPage.tsx b/packages/pd-console/src/ui/pages/focus/FocusPage.tsx',
+      '+++ b/packages/pd-console/src/ui/pages/focus/FocusPage.tsx',
+      '@@ -1,1 +1,3 @@',
+      ' const title = x;',
+      '+{/* runtime-contract-exempt: ERR-175 raw ASCII id, never contains supplementary chars */}',
+      '+<span>{idText.slice(0, 40)}</span>',
+    ].join('\n');
+    const { findings } = scanWith(diff, [
+      'const title = x;',
+      '{/* runtime-contract-exempt: ERR-175 raw ASCII id, never contains supplementary chars */}',
+      '<span>{idText.slice(0, 40)}</span>',
     ]);
     expect(findings).toHaveLength(0);
   });
