@@ -37,6 +37,7 @@ import {
   type RuntimeProfileInput,
 } from './mvp-config.js';
 import { getHostInstallers, type HostTarget } from './installers/index.js';
+import { runWorkbuddyEarlyPreflight } from './installers/workbuddy-host-installer.js';
 import type { HostInstallContext, HostInstallResult } from '@principles/core/host';
 import { INSTALL_LAYOUT_VERSION, getWorkbuddyWorkspaceDir, installManifestHostsForPersist, mergeInstallManifestWorkspaces, parseInstallManifest } from '@principles/install-layout';
 import { detectOpenClawMainWorkspaceDivergence } from './utils/workspace-divergence.js';
@@ -181,6 +182,10 @@ const ALLOWED_NATIVE_MODULES = ['better-sqlite3'];
 let activeHostTarget: HostTarget = 'openclaw';
 function installsOpenClaw(host: HostTarget): boolean {
   return host === 'openclaw' || host === 'all';
+}
+
+function installsWorkbuddy(host: HostTarget): boolean {
+  return host === 'workbuddy' || host === 'all';
 }
 
 function installedPluginDir(): string {
@@ -3906,6 +3911,22 @@ export async function install(
     } else {
       // action === 'proceed': user accepted the risk of EPERM.
       logger.warn(t('gateway_proceed_warn'));
+    }
+  }
+
+  // PRI-1062: WorkBuddy hard preflights run BEFORE any mutation — a running
+  // WorkBuddy holds settings.json with exclusive sharing (the commit-stage
+  // rename fails with EPERM after minutes of npm work) and hooks never
+  // launch without Git Bash. Both are knowable up front; failing here costs
+  // one bash probe + two file opens instead of a full install + rollback.
+  if (installsWorkbuddy(options.host)) {
+    const workbuddyPreflight = runWorkbuddyEarlyPreflight();
+    if (!workbuddyPreflight.ok) {
+      logger.error(workbuddyPreflight.reason);
+      return buildGatewayRefusalResult(options, {
+        reason: `workbuddy_preflight_failed: ${workbuddyPreflight.reason}`,
+        nextAction: workbuddyPreflight.nextAction,
+      });
     }
   }
 

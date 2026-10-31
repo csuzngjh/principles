@@ -37,6 +37,7 @@ import {
   writeHostJsonFileProtected,
   setWorkbuddyGovernanceFlag,
   findWorkbuddyPluginPayload,
+  runWorkbuddyEarlyPreflight,
 } from '../src/installers/workbuddy-host-installer.js';
 import { getHostInstallers, isHostTarget, WorkBuddyHostInstaller as WiredInstaller } from '../src/installers/index.js';
 import { computeEffectiveFlags, computeFeatureFlagsFromConfig, DEFAULT_FEATURE_FLAGS, getDefaultPdConfig } from '@principles/core/runtime-v2';
@@ -977,6 +978,100 @@ describe('readHostJsonFile', () => {
       if (!outcome.ok) expect(outcome.nextAction.length).toBeGreaterThan(0);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// PRI-1062: the pre-mutation hard preflights the MAIN installer runs before
+// any npm/deployment work. Every case names what it pins from the feedback:
+// a running host (locked settings.json) or a missing Git Bash must abort in
+// seconds with an actionable nextAction, not after minutes of work.
+describe('runWorkbuddyEarlyPreflight (PRI-1062)', () => {
+  function seedHostHome(): { home: string; settingsPath: string } {
+    const home = fs.mkdtempSync(path.join(TMP, 'pd-wb-preflight-'));
+    const paths = resolveWorkbuddyPaths(home);
+    fs.mkdirSync(path.dirname(paths.settingsPath), { recursive: true });
+    fs.writeFileSync(paths.settingsPath, '{}');
+    return { home, settingsPath: paths.settingsPath };
+  }
+
+  it('fails with git_bash_not_available when bash is unresolvable (win32 path)', () => {
+    const { home } = seedHostHome();
+    try {
+      const result = runWorkbuddyEarlyPreflight({
+        homeDir: () => home,
+        platform: 'win32',
+        probeBash: () => ({ ok: false, detail: 'exit 1' }),
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.reason).toContain('git_bash_not_available');
+        expect(result.nextAction).toContain('bash.exe on PATH');
+      }
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('fails with workbuddy_host_file_locked when settings.json is held by the running host', () => {
+    const { home, settingsPath } = seedHostHome();
+    try {
+      const result = runWorkbuddyEarlyPreflight({
+        homeDir: () => home,
+        platform: 'linux',
+        probeHostFileLock: (filePath) => (filePath === settingsPath ? 'EPERM' : undefined),
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.reason).toContain('workbuddy_host_file_locked');
+        expect(result.reason).toContain('settings.json');
+        // The nextAction must name the user action AND note that nothing
+        // was rolled back (the whole point of the early check).
+        expect(result.nextAction).toContain('Fully exit WorkBuddy');
+        expect(result.nextAction).toContain('before any installation work');
+      }
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('passes when host files are absent or unlocked (real default probe, happy path)', () => {
+    const { home } = seedHostHome();
+    try {
+      const result = runWorkbuddyEarlyPreflight({ homeDir: () => home, platform: 'linux' });
+      expect(result).toEqual({ ok: true });
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('skips the bash probe on non-win32 platforms', () => {
+    const { home } = seedHostHome();
+    try {
+      // probeBash would fail if consulted; linux must not consult it.
+      const result = runWorkbuddyEarlyPreflight({
+        homeDir: () => home,
+        platform: 'linux',
+        probeBash: () => ({ ok: false, detail: 'must not be called' }),
+      });
+      expect(result).toEqual({ ok: true });
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('ignores lock errnos that are not exclusive-hold signals (default probe semantics)', () => {
+    const { home } = seedHostHome();
+    try {
+      // ENOENT-style "not a lock verdict" must not abort the install.
+      const result = runWorkbuddyEarlyPreflight({
+        homeDir: () => home,
+        platform: 'linux',
+        probeHostFileLock: () => undefined,
+      });
+      expect(result).toEqual({ ok: true });
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
     }
   });
 });

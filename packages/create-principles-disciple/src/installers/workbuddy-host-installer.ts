@@ -41,8 +41,8 @@
  * - rc-9-no-silent-fallback: engine-unreachable fallback is reported in the
  *   result reason; every result carries reason + nextAction.
  */
-import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, cpSync, writeFileSync } from 'node:fs';
+import { spawnSync, execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, cpSync, writeFileSync, openSync, closeSync } from 'node:fs';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
 import semver from 'semver';
@@ -1056,6 +1056,93 @@ export interface WorkbuddyDetectDetails extends HostDetectResult {
 
 // ─── WorkBuddyHostInstaller ─────────────────────────────────────────────────
 
+/** Shared Git Bash failure message (win32 hooks launch through bash). */
+function gitBashUnavailableReason(detail: string): { reason: string; nextAction: string } {
+  return {
+    reason: `git_bash_not_available: WorkBuddy executes command hooks through Git Bash on Windows, but "bash" is not resolvable (${detail}). Hooks would fail to launch.`,
+    nextAction: 'Install Git for Windows (or otherwise provide bash.exe on PATH), then re-run the installer.',
+  };
+}
+
+export interface WorkbuddyEarlyPreflightDeps {
+  homeDir?: () => string;
+  /** Bash availability probe override (default: literal `bash -c "exit 0"`). */
+  probeBash?: () => { ok: true } | { ok: false; detail: string };
+  /** Exclusive-open probe; returns the errno string when the file is held. */
+  probeHostFileLock?: (filePath: string) => string | undefined;
+  platform?: (typeof process)['platform'];
+}
+
+export type WorkbuddyEarlyPreflight = { ok: true } | { ok: false; reason: string; nextAction: string };
+
+/** Default bash probe: literal program name + argv array, no shell. */
+function defaultProbeBash(): { ok: true } | { ok: false; detail: string } {
+  try {
+    execFileSync('bash', ['-c', 'exit 0'], { encoding: 'utf-8', timeout: 15_000, windowsHide: true });
+    return { ok: true };
+  } catch (error) {
+    const err = error as { status?: number; message?: string };
+    return { ok: false, detail: typeof err.status === 'number' ? `exit ${err.status}` : (err.message ?? 'unresolvable') };
+  }
+}
+
+/**
+ * Default lock probe: an exclusive-open attempt on the host JSON file.
+ * EPERM/EBUSY (Windows sharing violation while WorkBuddy runs) and EACCES
+ * are lock signals; anything else (incl. ENOENT) is not a lock verdict.
+ */
+function defaultProbeHostFileLock(filePath: string): string | undefined {
+  let fd: number | undefined;
+  try {
+    fd = openSync(filePath, 'r');
+    closeSync(fd);
+    fd = undefined;
+    return undefined;
+  } catch (error: unknown) {
+    const code = (error as { code?: unknown })?.code;
+    if (code === 'EPERM' || code === 'EBUSY' || code === 'EACCES') return String(code);
+    return undefined;
+  } finally {
+    if (fd !== undefined) {
+      try { closeSync(fd); } catch { /* already closed */ }
+    }
+  }
+}
+
+/**
+ * PRI-1062: hard preflights the main installer runs BEFORE any mutation.
+ * A RUNNING WorkBuddy holds settings.json with exclusive sharing — the
+ * commit-stage atomic rename fails with EPERM after minutes of npm work and
+ * the whole install rolls back. Git Bash availability is equally knowable
+ * up front. Both checks are cheap (one bash spawn + two file opens) and
+ * fail with a nextAction naming the exact user action.
+ */
+export function runWorkbuddyEarlyPreflight(deps: WorkbuddyEarlyPreflightDeps = {}): WorkbuddyEarlyPreflight {
+  const platform = deps.platform ?? process.platform;
+  if (platform === 'win32') {
+    const bash = (deps.probeBash ?? defaultProbeBash)();
+    if (!bash.ok) return { ok: false, ...gitBashUnavailableReason(bash.detail) };
+  }
+  const paths = resolveWorkbuddyPaths((deps.homeDir ?? getHomeDir)());
+  const probe = deps.probeHostFileLock ?? defaultProbeHostFileLock;
+  const hostFiles: readonly (readonly [label: string, filePath: string])[] = [
+    ['settings.json', paths.settingsPath],
+    ['installed_plugins.json', paths.registryPath],
+  ];
+  for (const [label, filePath] of hostFiles) {
+    if (!existsSync(filePath)) continue;
+    const code = probe(filePath);
+    if (code !== undefined) {
+      return {
+        ok: false,
+        reason: `workbuddy_host_file_locked: ${label} is held with an exclusive handle (${code}) — WorkBuddy appears to be running. The registration commit would fail after minutes of work and roll the install back.`,
+        nextAction: 'Fully exit WorkBuddy (tray icon → Quit, then confirm in Task Manager that no WorkBuddy process remains) and re-run the installer. This check ran before any installation work, so nothing needs recovering.',
+      };
+    }
+  }
+  return { ok: true };
+}
+
 /** Materialize the PD-owned marketplace dir (source never escapes its root). */
 function materializeMarketplace(marketplaceRoot: string, pluginDir: string): void {
   rmSync(marketplaceRoot, { recursive: true, force: true });
@@ -1149,11 +1236,7 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     if (process.platform === 'win32') {
       const bashCheck = this.deps.runCommand('bash', ['-c', 'exit 0'], { timeoutMs: 15_000 });
       if (bashCheck.status !== 0) {
-        return {
-          ok: false,
-          reason: `git_bash_not_available: WorkBuddy executes command hooks through Git Bash on Windows, but "bash" is not resolvable (${bashCheck.error ?? `exit ${bashCheck.status}`}). Hooks would fail to launch.`,
-          nextAction: 'Install Git for Windows (or otherwise provide bash.exe on PATH), then re-run the installer.',
-        };
+        return { ok: false, ...gitBashUnavailableReason(bashCheck.error ?? `exit ${bashCheck.status}`) };
       }
     }
     return { ok: true };
