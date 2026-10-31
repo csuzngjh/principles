@@ -413,8 +413,19 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
           ? `ON${hr.governance.explicitOptOut ? '' : ' (default)'}`
           : 'OFF (your explicit opt-out was preserved)';
         console.log(`  ${hr.hostId} governance ............. ${stateLine}${keywordPart}`);
-        if (!hr.governance.enabled || hr.governance.keywordPainEnabled === false) {
-          console.log(`             to enable: set features.<flag>.enabled=true in ${hr.governance.configPath ?? 'the governance workspace .pd/config.yaml'}`);
+        const disabledFlags: string[] = [];
+        if (!hr.governance.enabled) disabledFlags.push('host.workbuddy');
+        if (hr.governance.keywordPainEnabled === false) disabledFlags.push('workbuddy_live_keyword_pain');
+        if (disabledFlags.length > 0) {
+          // PRI-1063/1064 review: name the exact flag ids and the exact edit.
+          // A `features.<flag>.enabled=true` placeholder left the operator to
+          // guess both the id and whether the dotted form is nested. It is NOT
+          // nested: the dotted id is one flat key inside the existing
+          // `features:` block, and the flow mapping below keeps the line
+          // copy-pasteable (no new `features:` key that would duplicate one).
+          const target = hr.governance.configPath ?? 'the governance workspace .pd/config.yaml';
+          const edits = disabledFlags.map((flag) => `${flag}: {enabled: true}`).join(' or ');
+          console.log(`             to enable: in ${target}, inside the existing "features:" block set ${edits}`);
         }
       }
       console.log();

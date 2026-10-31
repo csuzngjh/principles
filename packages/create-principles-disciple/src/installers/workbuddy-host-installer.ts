@@ -641,6 +641,36 @@ export function ensureWorkbuddyGovernanceEnabled(governanceDir: string): FlagOve
   return { ok: true, configPath, enabled: !hostExplicitOff, hostExplicitOff, keywordExplicitOff, changed: true };
 }
 
+/**
+ * PRI-1064 review: the install summary must state BOTH gates.
+ *
+ * The first version derived the whole sentence from `hostExplicitOff` alone,
+ * so a config with `workbuddy_live_keyword_pain.enabled: false` was reported as
+ * "governance and four-term keyword Pain detection are ON" — a false summary
+ * of exactly the kind this change set out to remove. Each gate is now stated
+ * on its own, and an OFF state always names the flag the Owner wrote.
+ *
+ * Inherited verbatim by the PRI-1063 copy work, which keeps the flag ids
+ * dotted (they ARE the flat keys) but replaces the prose with paste-ready
+ * snippets.
+ */
+export function describeGovernanceDefaults(
+  state: { hostExplicitOff: boolean; keywordExplicitOff: boolean; changed: boolean } | null,
+  governanceDir: string,
+): string {
+  if (state === null) {
+    return ` Governance flag state is UNKNOWN — no governance config exists at ${governanceDir} (run "pd runtime init --workspace ${governanceDir}", then re-run the installer).`;
+  }
+  if (state.hostExplicitOff) {
+    return ' WorkBuddy governance is OFF — your explicit opt-out (features.host.workbuddy.enabled=false) was preserved; four-term keyword Pain detection is ON.';
+  }
+  const hostState = ` WorkBuddy governance is ON${state.changed ? ' (enabled by this install)' : ' (already enabled)'}`;
+  const keywordState = state.keywordExplicitOff
+    ? 'four-term keyword Pain detection is OFF — your explicit opt-out (features.workbuddy_live_keyword_pain.enabled=false) was preserved'
+    : 'four-term keyword Pain detection is ON';
+  return `${hostState}; ${keywordState}.`;
+}
+
 export function setWorkbuddyGovernanceFlag(governanceDir: string, enabled: boolean): FlagOverrideResult {
   const configDir = path.join(governanceDir, '.pd');
   const configPath = path.join(configDir, 'config.yaml');
@@ -1325,11 +1355,7 @@ export class WorkBuddyHostInstaller implements HostInstaller {
       return { success: false, hostId: this.hostId, configPath: p.settingsPath,
         configAction: registration.settingsAction, reason: governanceDefaults.reason, nextAction: governanceDefaults.nextAction };
     }
-    const keywordDefaultsNote = governanceDefaults === null
-      ? ` Governance flag state is UNKNOWN — no governance config exists at ${p.governanceDir} (run "pd runtime init --workspace ${p.governanceDir}", then re-run the installer).`
-      : governanceDefaults.hostExplicitOff
-      ? ' WorkBuddy governance is OFF — your explicit opt-out (features.host.workbuddy.enabled=false) was preserved.'
-      : ` WorkBuddy governance and four-term keyword Pain detection are ON${governanceDefaults.changed ? ' (enabled by this install)' : ' (already enabled)'}.`;
+    const governanceDefaultsNote = describeGovernanceDefaults(governanceDefaults, p.governanceDir);
     const effectiveNote = 'Registration takes effect in NEW WorkBuddy sessions (or /reload-plugins in a running CLI session).';
     // Round-4 S1: honest pending-config surface — legacy init rows and Owner
     // rows are kept (no silent override); the rebind path is stated, never
@@ -1350,7 +1376,7 @@ export class WorkBuddyHostInstaller implements HostInstaller {
             keywordPainEnabled: !governanceDefaults.keywordExplicitOff,
             configPath: governanceDefaults.configPath,
           },
-      reason: `Registered ${WORKBUDDY_PLUGIN_KEY} via ${registration.mode}${registration.mode === 'engine' ? '' : ` (engine unreachable: ${registration.engineNote})`}. Governance workspace initialized at ${p.governanceDir}${governance.dbInit === 'skipped' ? ` (${governance.note})` : ''}.${profileNote}${keywordDefaultsNote}`,
+      reason: `Registered ${WORKBUDDY_PLUGIN_KEY} via ${registration.mode}${registration.mode === 'engine' ? '' : ` (engine unreachable: ${registration.engineNote})`}. Governance workspace initialized at ${p.governanceDir}${governance.dbInit === 'skipped' ? ` (${governance.note})` : ''}.${profileNote}${governanceDefaultsNote}`,
       nextAction: `${effectiveNote}${governance.dbInit === 'skipped' ? ` After the install, run "pd runtime init --workspace ${p.governanceDir}" to create the governance databases.` : ''} To disable keyword Pain, set features.workbuddy_live_keyword_pain.enabled=false; to disable all WorkBuddy governance, set features.host.workbuddy.enabled=false.${pendingRebindNote}`,
     };
   }

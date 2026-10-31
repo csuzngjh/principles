@@ -38,6 +38,7 @@ import {
   setWorkbuddyGovernanceFlag,
   findWorkbuddyPluginPayload,
   ensureWorkbuddyGovernanceEnabled,
+  describeGovernanceDefaults,
 } from '../src/installers/workbuddy-host-installer.js';
 import { getHostInstallers, isHostTarget, WorkBuddyHostInstaller as WiredInstaller } from '../src/installers/index.js';
 import { computeEffectiveFlags, computeFeatureFlagsFromConfig, DEFAULT_FEATURE_FLAGS, getDefaultPdConfig } from '@principles/core/runtime-v2';
@@ -1065,5 +1066,34 @@ describe('ensureWorkbuddyGovernanceEnabled (PRI-1064)', () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+// PRI-1064 review: the install summary derived the whole sentence from the
+// host gate, so an explicit keyword-Pain opt-out was reported as "keyword Pain
+// detection ... ON". These cases pin each gate to its own clause.
+describe('describeGovernanceDefaults (PRI-1064 review)', () => {
+  it('never reports keyword Pain as ON when the Owner explicitly disabled it', () => {
+    const note = describeGovernanceDefaults({ hostExplicitOff: false, keywordExplicitOff: true, changed: true }, 'C:/ws');
+    expect(note).toContain('four-term keyword Pain detection is OFF');
+    expect(note).not.toContain('keyword Pain detection is ON');
+    expect(note).toContain('features.workbuddy_live_keyword_pain.enabled=false');
+  });
+
+  it('states the host gate OFF and the keyword gate ON when only the host was opted out', () => {
+    const note = describeGovernanceDefaults({ hostExplicitOff: true, keywordExplicitOff: false, changed: false }, 'C:/ws');
+    expect(note).toContain('WorkBuddy governance is OFF');
+    expect(note).toContain('features.host.workbuddy.enabled=false');
+    expect(note).toContain('four-term keyword Pain detection is ON');
+  });
+
+  it('reports the default-ON state with its install attribution', () => {
+    const note = describeGovernanceDefaults({ hostExplicitOff: false, keywordExplicitOff: false, changed: true }, 'C:/ws');
+    expect(note).toContain('enabled by this install');
+    expect(note).toContain('four-term keyword Pain detection is ON');
+  });
+
+  it('names the missing governance config as UNKNOWN rather than claiming a state', () => {
+    expect(describeGovernanceDefaults(null, 'C:/ws')).toContain('UNKNOWN');
   });
 });
