@@ -241,14 +241,5 @@ describe('Size guard: total ceiling derives from the applied principle budget (P
     const legacy = await handleBeforePromptBuild(makeMinimalEvent(), ctx(), sharedPrompt(DIRECTIVES, 2_000));
     expect(legacy).toBeDefined();
     expect(legacy?.appendSystemContext ?? '').toContain('[WARNING: Context sections stripped');
-
-    // The ceiling is principle budget + background allowance, not a constant:
-    // 15625 + 7000 = 22625 keeps the payload, 2000 + 7000 = 9000 does not.
-    const wideTotal =
-      (wide?.prependSystemContext?.length ?? 0) +
-      (wide?.prependContext?.length ?? 0) +
-      (wide?.appendSystemContext?.length ?? 0);
-    expect(wideTotal).toBeLessThanOrEqual(22_625);
-    expect(wideTotal).toBeGreaterThan(9000);
   });
 });

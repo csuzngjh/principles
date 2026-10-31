@@ -81,7 +81,7 @@ export const PROMPT_BUDGET_FALLBACK_CHARS = RUNTIME_V2_PRINCIPLE_BUDGET;
  * (2000 principle budget + 7000 = 9000), so existing 128K behavior is
  * byte-identical; a 1M window resolves to 15625 + 7000.
  */
-export const PROMPT_BACKGROUND_ALLOWANCE_CHARS = 7000;
+const PROMPT_BACKGROUND_ALLOWANCE_CHARS = 7000;
 
 /**
  * Total character ceiling for the assembled injection (prependSystemContext +
