@@ -250,9 +250,11 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
   }
   const { flags } = computeFeatureFlagsFromConfig(config.effective);
   if (flags['host.codex']?.enabled !== true) {
-    // PRI-1063: paste-ready YAML snippet; the dotted id is ONE flat key —
-    // a nested host:→codex: write is silently not the same key.
-    return { stdout: {}, exitCode: 0, stderr: [diagnostic('host.codex_disabled', 'Enable PD in the selected Workspace .pd/config.yaml — the flag id is one FLAT key, not nested keys:\nfeatures:\n  host.codex:\n    enabled: true')] };
+    // PRI-1063 (review fix): single-line flow mapping. `diagnostic()` below
+    // collapses every whitespace run, so a multi-line YAML block would reach
+    // the user flattened into garbage; and a second `features:` block would
+    // duplicate the key already present in every real config.
+    return { stdout: {}, exitCode: 0, stderr: [diagnostic('host.codex_disabled', 'Enable PD in the selected Workspace .pd/config.yaml — in the existing "features:" block set host.codex: {enabled: true} (one flat key, not nested).')] };
   }
   const ingestionEnabled = flags.codex_conversation_ingestion?.enabled === true;
 
@@ -278,7 +280,7 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
     // would be per-event noise).
     const stderr = ingestionEnabled
       ? [...clearDiagnostics, ...await runConversationIngestion({ rawPayload: parsed, kind: event.kind, workspaceDir: resolution.workspaceDir, env: _env })]
-      : [...clearDiagnostics, diagnostic('feature_disabled', 'Enable bounded conversation ingestion in the selected Workspace .pd/config.yaml — the flag id is one FLAT key, not nested keys:\nfeatures:\n  codex_conversation_ingestion:\n    enabled: true')];
+      : [...clearDiagnostics, diagnostic('feature_disabled', 'Enable bounded conversation ingestion in the selected Workspace .pd/config.yaml — in the existing "features:" block set codex_conversation_ingestion: {enabled: true} (one flat key, not nested).')];
     return { stdout: {}, exitCode: 0, stderr };
   }
 

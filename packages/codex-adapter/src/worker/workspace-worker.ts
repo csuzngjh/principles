@@ -251,9 +251,8 @@ export async function runCodexWorkspaceWorkerCycle(options: CodexWorkerCycleOpti
   }
   const { flags } = computeFeatureFlagsFromConfig(config.effective);
   if (flags['host.codex']?.enabled !== true) {
-    // PRI-1063: paste-ready YAML snippet; the dotted id is ONE flat key —
-    // a nested host:→codex: write is silently not the same key.
-    return { ...base, mode: 'paused', reason: 'host.codex_disabled', nextAction: 'Enable Codex PD behavior in the Workspace .pd/config.yaml — the flag id is one FLAT key, not nested keys:\nfeatures:\n  host.codex:\n    enabled: true' };
+    // PRI-1063 (review fix): single-line flow mapping — see catch-up.ts.
+    return { ...base, mode: 'paused', reason: 'host.codex_disabled', nextAction: 'Enable Codex PD behavior in the Workspace .pd/config.yaml — in the existing "features:" block set host.codex: {enabled: true} (one flat key, not nested).' };
   }
 
   // CR-08: liveness bookkeeping starts only after the workspace proved

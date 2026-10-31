@@ -49,9 +49,10 @@ export function computeWorkbuddyWorkerStatusMode(input: {
   }
   const { flags } = computeFeatureFlagsFromConfig(config.effective);
   if (flags['host.workbuddy']?.enabled !== true) {
-    // PRI-1063: paste-ready YAML snippet; the dotted id is ONE flat key —
-    // a nested host:→workbuddy: write is silently not the same key.
-    return { mode: 'paused', reason: 'host.workbuddy_disabled', nextAction: 'Enable WorkBuddy PD behavior in the governance workspace .pd/config.yaml — the flag id is one FLAT key, not nested keys:\nfeatures:\n  host.workbuddy:\n    enabled: true' };
+    // PRI-1063 (review fix): single-line flow mapping — the dotted id is ONE
+    // flat key inside the existing `features:` block; a second `features:`
+    // block would be a duplicate-key YAML error.
+    return { mode: 'paused', reason: 'host.workbuddy_disabled', nextAction: 'Enable WorkBuddy PD behavior in the governance workspace .pd/config.yaml — in the existing "features:" block set host.workbuddy: {enabled: true} (one flat key, not nested).' };
   }
   if (flags.internalization_auto_consumer?.enabled !== true) {
     return { mode: 'paused', reason: 'internalization_auto_consumer_disabled', nextAction: 'Automatic execution is paused; manual commands remain available: pd diagnose, pd runtime internalization run-once.' };

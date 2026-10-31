@@ -53,7 +53,15 @@ export type CodexCatchUpResult =
 
 const DEFAULT_MAX_ROLLOUTS = 8;
 
-export const CODEX_CATCH_UP_NEXT_ACTION = 'Enable bounded conversation ingestion in the selected Workspace .pd/config.yaml — the flag id is one FLAT key, not nested keys:\nfeatures:\n  codex_conversation_ingestion:\n    enabled: true';
+// PRI-1063 (review fix): the hint must survive two hard constraints.
+// 1. It may travel through `diagnostic()` elsewhere, which collapses ALL
+//    whitespace (`replace(/\s+/g, ' ')`) — a multi-line YAML block would be
+//    flattened into unusable text, so the snippet itself is single-line.
+// 2. A real .pd/config.yaml ALWAYS already has a top-level `features:` key, so
+//    pasting a second `features:` block throws "duplicated mapping key". The
+//    instruction therefore says "in the existing features: block", and the
+//    flow mapping keeps the edited line copy-pasteable.
+export const CODEX_CATCH_UP_NEXT_ACTION = 'Enable bounded conversation ingestion in the selected Workspace .pd/config.yaml — in the existing "features:" block set codex_conversation_ingestion: {enabled: true} (one flat key, not nested).';
 
 /**
  * Perform one bounded catch-up pass. `remainingLagRollouts` is derived from
@@ -70,7 +78,7 @@ export async function catchUpCodexIngestion(options: CodexCatchUpOptions): Promi
   }
   const { flags } = computeFeatureFlagsFromConfig(config.effective);
   if (flags['host.codex']?.enabled !== true) {
-    return { status: 'skipped', reason: 'host.codex_disabled', nextAction: 'Enable PD in the selected Workspace .pd/config.yaml — the flag id is one FLAT key, not nested keys:\nfeatures:\n  host.codex:\n    enabled: true' };
+    return { status: 'skipped', reason: 'host.codex_disabled', nextAction: 'Enable PD in the selected Workspace .pd/config.yaml — in the existing "features:" block set host.codex: {enabled: true} (one flat key, not nested).' };
   }
   if (flags.codex_conversation_ingestion?.enabled !== true) {
     return { status: 'skipped', reason: 'feature_disabled', nextAction: CODEX_CATCH_UP_NEXT_ACTION };
