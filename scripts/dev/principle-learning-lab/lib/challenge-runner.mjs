@@ -67,12 +67,12 @@ export function verifyFrozenStudy(studyDir) {
   const scoringContract = readJson(path.join(studyDir, 'scoring-contract.json'));
   const manifest = readJson(path.join(studyDir, 'suite-manifest.json'));
 
-  if (!['claim-evidence-scoring.v1', 'claim-evidence-scoring.v2'].includes(scoringContract.schema)) {
+  if (!['claim-evidence-scoring.v1', 'claim-evidence-scoring.v2', 'claim-evidence-scoring.v3'].includes(scoringContract.schema)) {
     problems.push('unsupported scoring contract version');
   }
-  if (scoringContract.schema === 'claim-evidence-scoring.v2'
+  if (['claim-evidence-scoring.v2', 'claim-evidence-scoring.v3'].includes(scoringContract.schema)
       && hashOfCanonical(scoringContract.implementation) !== hashOfCanonical(challengeImplementationManifest())) {
-    problems.push('v2 scoring implementation drift');
+    problems.push('v2/v3 scoring implementation drift');
   }
 
   const principleContentHash = hashOfCanonical(principle.contentJson);
@@ -90,7 +90,9 @@ export function verifyFrozenStudy(studyDir) {
     const visibleFile = path.join(studyDir, 'actor-visible', `${c.caseId}.json`);
     if (!fs.existsSync(judgeFile) || !fs.existsSync(visibleFile)) { problems.push(`case ${c.caseId}: missing frozen file`); continue; }
     const judge = readJson(judgeFile);
-    const expectedJudgeSchema = scoringContract.schema === 'claim-evidence-scoring.v2' ? 'claim-evidence-judge-only.v2' : 'claim-evidence-judge-only.v1';
+    const expectedJudgeSchema = scoringContract.schema === 'claim-evidence-scoring.v3'
+      ? 'claim-evidence-judge-only.v3'
+      : scoringContract.schema === 'claim-evidence-scoring.v2' ? 'claim-evidence-judge-only.v2' : 'claim-evidence-judge-only.v1';
     if (judge.schema !== expectedJudgeSchema) {
       problems.push(`case ${c.caseId}: scoring contract version mismatch`);
     }
