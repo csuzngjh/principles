@@ -37,6 +37,7 @@ import {
   writeHostJsonFileProtected,
   setWorkbuddyGovernanceFlag,
   findWorkbuddyPluginPayload,
+  ensureWorkbuddyGovernanceEnabled,
 } from '../src/installers/workbuddy-host-installer.js';
 import { getHostInstallers, isHostTarget, WorkBuddyHostInstaller as WiredInstaller } from '../src/installers/index.js';
 import { computeEffectiveFlags, computeFeatureFlagsFromConfig, DEFAULT_FEATURE_FLAGS, getDefaultPdConfig } from '@principles/core/runtime-v2';
@@ -975,6 +976,92 @@ describe('readHostJsonFile', () => {
       const outcome = readHostJsonFile(file);
       expect(outcome.ok).toBe(false);
       if (!outcome.ok) expect(outcome.nextAction.length).toBeGreaterThan(0);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// PRI-1064 (Owner directive 2026-10-31): governance is ON by default at
+// install time; the only preserved OFF is an explicit opt-out. Pinned here
+// against the user-reported trap: a sparse config left by a failed install
+// round used to keep every hook silently skipped.
+describe('ensureWorkbuddyGovernanceEnabled (PRI-1064)', () => {
+  function seedGovernance(featuresYaml: string): { dir: string; configPath: string } {
+    const dir = fs.mkdtempSync(path.join(TMP, 'pd-wb-ensure-'));
+    const configPath = path.join(dir, '.pd', 'config.yaml');
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, `version: 1\n${featuresYaml}`, 'utf8');
+    return { dir, configPath };
+  }
+
+  function readFlags(dir: string): Record<string, { enabled?: boolean }> {
+    return parseYaml(fs.readFileSync(path.join(dir, '.pd', 'config.yaml'), 'utf8')).features as Record<string, { enabled?: boolean }>;
+  }
+
+  it('enables both gates on a sparse config (failed-install residue no longer keeps governance off)', () => {
+    const { dir } = seedGovernance('features: {}\n');
+    try {
+      const result = ensureWorkbuddyGovernanceEnabled(dir);
+      expect(result.ok).toBe(true);
+      expect(result.hostExplicitOff).toBe(false);
+      expect(result.changed).toBe(true);
+      const flags = readFlags(dir);
+      expect(flags['host.workbuddy'].enabled).toBe(true);
+      expect(flags.workbuddy_live_keyword_pain.enabled).toBe(true);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('PRESERVES an explicit host opt-out while still enabling the keyword gate', () => {
+    const { dir } = seedGovernance('features:\n  host.workbuddy:\n    enabled: false\n    category: quiet\n');
+    try {
+      const result = ensureWorkbuddyGovernanceEnabled(dir);
+      expect(result.ok).toBe(true);
+      expect(result.hostExplicitOff).toBe(true);
+      const flags = readFlags(dir);
+      expect(flags['host.workbuddy'].enabled).toBe(false);
+      expect(flags.workbuddy_live_keyword_pain.enabled).toBe(true);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('PRESERVES an explicit keyword opt-out while still enabling the governance gate', () => {
+    const { dir } = seedGovernance('features:\n  workbuddy_live_keyword_pain:\n    enabled: false\n    category: quiet\n');
+    try {
+      const result = ensureWorkbuddyGovernanceEnabled(dir);
+      expect(result.ok).toBe(true);
+      expect(result.keywordExplicitOff).toBe(true);
+      const flags = readFlags(dir);
+      expect(flags['host.workbuddy'].enabled).toBe(true);
+      expect(flags.workbuddy_live_keyword_pain.enabled).toBe(false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves an already-correct config byte-identical (changed=false, no rewrite)', () => {
+    const correct = 'features:\n  host.workbuddy:\n    enabled: true\n    category: quiet\n  workbuddy_live_keyword_pain:\n    enabled: true\n    category: quiet\n';
+    const { dir, configPath } = seedGovernance(correct);
+    try {
+      const before = fs.readFileSync(configPath, 'utf8');
+      const result = ensureWorkbuddyGovernanceEnabled(dir);
+      expect(result.ok).toBe(true);
+      expect(result.changed).toBe(false);
+      expect(fs.readFileSync(configPath, 'utf8')).toBe(before);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails loud on a features section that is not a mapping', () => {
+    const { dir } = seedGovernance('features: [not, a, map]\n');
+    try {
+      const result = ensureWorkbuddyGovernanceEnabled(dir);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toBe('fresh_workbuddy_features_invalid');
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

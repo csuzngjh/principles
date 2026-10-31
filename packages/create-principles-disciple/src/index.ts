@@ -402,6 +402,21 @@ async function runInstall(options: Record<string, unknown>): Promise<void> {
         console.log(`                  re-run with --provider <name> --api-key-env <ENV_VAR_NAME>, or`);
         console.log(`                  use the console: pd console open --workspace "${operatorWorkspaceDir}"`);
       }
+      // PRI-1064: governance switch state is a first-class summary line —
+      // "Install complete!" while every hook silently skips is exactly the
+      // P1 defect this replaces. An explicit Owner opt-out stays OFF and is
+      // stated as such; everything else is ON by default.
+      for (const hr of result.hostResults ?? []) {
+        if (!hr.governance) continue;
+        const keywordPart = hr.governance.keywordPainEnabled === undefined ? '' : `, keyword Pain: ${hr.governance.keywordPainEnabled ? 'ON' : 'OFF'}`;
+        const stateLine = hr.governance.enabled
+          ? `ON${hr.governance.explicitOptOut ? '' : ' (default)'}`
+          : 'OFF (your explicit opt-out was preserved)';
+        console.log(`  ${hr.hostId} governance ............. ${stateLine}${keywordPart}`);
+        if (!hr.governance.enabled || hr.governance.keywordPainEnabled === false) {
+          console.log(`             to enable: set features.<flag>.enabled=true in ${hr.governance.configPath ?? 'the governance workspace .pd/config.yaml'}`);
+        }
+      }
       console.log();
       console.log(t('ready'));
       console.log(`${t('diagnostics')}: pd runtime canary --workspace "${operatorWorkspaceDir}" --json`);
