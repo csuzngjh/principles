@@ -691,3 +691,28 @@ describe('GET owner-decisions: activation_approval principleId deep link', () =>
     expect(stale?.principleId).toBeUndefined();
   });
 });
+
+describe('GET owner-decisions: response already answered by the timeout path', () => {
+  it('drops the late error write instead of throwing ERR_HTTP_HEADERS_SENT', async () => {
+    // asyncHandler answers 504 after 10s while the route keeps running; a list
+    // failure arriving afterwards used to re-write headers and mask the real
+    // cause. Model failure is forced by making state.db unopenable.
+    fs.mkdirSync(path.join(workspaceDir, '.pd', 'state.db'), { recursive: true });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const writes: string[] = [];
+    const res = {
+      statusCode: 504,
+      headersSent: true,
+      writableEnded: true,
+      writeHead(code: number) { writes.push(`writeHead:${code}`); },
+      end(chunk?: string) { writes.push(`end:${chunk ?? ''}`); },
+    } as unknown as ServerResponse;
+
+    await expect(handleOwnerDecisionsRoute(makeReq('GET'), res, ctxBase(''))).resolves.toBeUndefined();
+
+    expect(writes).toEqual([]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]?.[0])).toContain('headers already sent');
+    warn.mockRestore();
+  });
+});

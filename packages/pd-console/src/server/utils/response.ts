@@ -1,6 +1,14 @@
 import type { ServerResponse } from 'node:http';
 
 export function sendJson(res: ServerResponse, statusCode: number, payload: unknown): void {
+  // A response can already be committed by an earlier writer — most often the
+  // request-timeout path in server/index.ts, which answers 504 while the route
+  // is still running. Writing again throws ERR_HTTP_HEADERS_SENT, which hides
+  // the first (real) failure behind a transport error. Drop the late write.
+  if (res.headersSent || res.writableEnded) {
+    console.warn(`[pd-console] Dropped late response write (status ${statusCode}): headers already sent`);
+    return;
+  }
   const body = JSON.stringify(payload);
   res.writeHead(statusCode, {
     'Content-Type': 'application/json; charset=utf-8',
