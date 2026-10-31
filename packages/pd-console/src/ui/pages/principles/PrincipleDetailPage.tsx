@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useParams, useNavigate, useLocation, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { PageShell } from "../../components/layout/page-shell.js";
@@ -15,18 +15,16 @@ import {
   fetchPrincipleReceipts,
   fetchEvidenceAudit,
   fetchOwnerDecisionView,
-  approveApproval,
-  rejectApproval,
-  editApproval,
   disableActivation,
 } from "../../api.js";
+import { ApprovalSubjectReading } from "../focus/ApprovalSubjectReading.js";
 import type { PrincipleReceiptsData, EvidenceAuditData } from "../../api.js";
 import type { OwnerDecisionViewCore, Action as OwnerAction } from "@principles/core/runtime-v2";
 import { ReceiptCoverageDisclosure, getReceiptSourceStatusLabelKey } from "../../components/receipts/ReceiptCoverageDisclosure.js";
 import { formatDate } from "../../utils/format-date.js";
 import { localizeAggregatedBlocker } from "../../utils/blocker-localization.js";
 import { groupByReasonCode, formatGroupedReasonLine } from "../../utils/attention-presentation.js";
-import { splitReadingTitleBody } from "../../utils/reading-layout.js";
+import { splitReadingTitleBody, truncateByCodePoints } from "../../utils/reading-layout.js";
 import type { OwnerGovernanceView } from '@principles/core/runtime-v2';
 import type {
   PrincipleDetail,
@@ -264,9 +262,14 @@ export function PrincipleDetailPage() {
   const { t, i18n } = useTranslation("pages");
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const navigationState: unknown = location.state;
+  const requestedReturn: unknown = navigationState !== null && typeof navigationState === 'object' && Object.hasOwn(navigationState, 'returnTo') ? Reflect.get(navigationState, 'returnTo') : null;
+  const returnTo = typeof requestedReturn === 'string' && (requestedReturn === '/principles' || requestedReturn.startsWith('/principles?') || requestedReturn === '/focus' || requestedReturn.startsWith('/focus?')) ? requestedReturn : '/principles';
 
   const [principle, setPrinciple] = useState<PrincipleDetail | null>(null);
   const [approvalGroup, setApprovalGroup] = useState<ApprovalGroup | null>(null);
+  const [approvalGroupUnavailable, setApprovalGroupUnavailable] = useState(false);
   const [lifecycle, setLifecycle] = useState<LifecycleMetricsData | null>(null);
   const [trajectory, setTrajectory] = useState<TrajectoryData | null>(null);
   const [governance, setGovernance] = useState<OwnerGovernanceView | null>(null);
@@ -280,6 +283,7 @@ export function PrincipleDetailPage() {
   const [loadingEvidenceKind, setLoadingEvidenceKind] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const detailEpoch = useRef(0);
 
   // Decision action state — driven by backend available_actions only.
   const [pendingAction, setPendingAction] = useState<OwnerAction | null>(null);
@@ -295,9 +299,12 @@ export function PrincipleDetailPage() {
   // Fetch data
   const loadData = useCallback(async () => {
     if (!id) return;
+    const epoch = ++detailEpoch.current;
     setLoading(true);
+    setLoadingEvidenceKind(null);
     setError(null);
     setApprovalGroup(null); // Clear previous approval group to prevent stale actionability (P1)
+    setApprovalGroupUnavailable(false);
     setGovernance(null);
     setGovernanceUnavailable(null);
     setOwnerDecision(null);
@@ -315,6 +322,7 @@ export function PrincipleDetailPage() {
         fetchPrincipleReceipts(id),
         fetchEvidenceAudit('principle', id),
       ]);
+      if (epoch !== detailEpoch.current) return;
 
       if (!pResult.success) {
         setError(pResult.error ?? "Failed to load principle");
@@ -334,6 +342,9 @@ export function PrincipleDetailPage() {
         setApprovalGroup(group ?? null);
       } else {
         setApprovalGroup(null);
+        // The grouped list is the only source of pending approval records here;
+        // swallowing the failure would hide the decision surface without a word.
+        setApprovalGroupUnavailable(true);
       }
 
       const lData = lResult.success ? validateLifecycleMetrics(lResult.data) : null;
@@ -374,15 +385,19 @@ export function PrincipleDetailPage() {
         setEvidenceAudit(null);
       }
     } catch (err) {
+      if (epoch !== detailEpoch.current) return;
       setError(err instanceof Error ? err.message : "Unknown error");
       setApprovalGroup(null);
+      setApprovalGroupUnavailable(true);
     } finally {
-      setLoading(false);
+      if (epoch === detailEpoch.current) setLoading(false);
     }
   }, [id]);
 
   useEffect(() => {
-    loadData();
+    setPendingAction(null); setRejectReason(''); setNewArtifactId(''); setApproveNote(''); setActionLoading(false);
+    void loadData();
+    return () => { detailEpoch.current++; };
   }, [loadData]);
 
   const loadOlderEvidence = async (kind: EvidenceAuditData["deliveries"][number]["kind"]): Promise<void> => {
@@ -390,8 +405,10 @@ export function PrincipleDetailPage() {
     const page = evidenceAudit.pages[kind];
     if (!page.hasMore || !page.nextCursor) return;
     setLoadingEvidenceKind(kind);
+    const epoch = detailEpoch.current;
     try {
       const result = await fetchEvidenceAudit('principle', id, { kind, after: page.nextCursor });
+      if (epoch !== detailEpoch.current) return;
       if (!result.success || !result.data) return;
       if (result.data.status !== 'ok') {
         toast.error(result.data.reason ?? '读取更早的干预证据失败');
@@ -409,9 +426,10 @@ export function PrincipleDetailPage() {
           .map((entry) => [`${entry.evidenceId}:${entry.field}:${entry.missingKey}`, entry])).values()],
       }));
     } catch (err) {
+      if (epoch !== detailEpoch.current) return;
       toast.error(err instanceof Error ? err.message : '读取更早的干预证据失败');
     } finally {
-      setLoadingEvidenceKind(null);
+      if (epoch === detailEpoch.current) setLoadingEvidenceKind(null);
     }
   };
 
@@ -419,9 +437,11 @@ export function PrincipleDetailPage() {
   // The view's actions are advisory; every submission goes through the real
   // mutation service. On failure: show the service reason, invalidate stale
   // actions, re-GET the view. Never auto-retry a mutation.
-  const submitOwnerAction = async (action: OwnerAction, reason?: string, note?: string): Promise<void> => {
+  const submitOwnerAction = async (action: OwnerAction): Promise<void> => {
     if (actionLoading) return;
+    if (action.semantic !== 'disable') return;
     setActionLoading(true);
+    const epoch = detailEpoch.current;
     try {
       let failed = false;
       let failureDetail = '';
@@ -431,34 +451,7 @@ export function PrincipleDetailPage() {
           failureDetail = `${result.error ?? ''}${result.nextAction ? ` ${result.nextAction}` : ''}`.trim();
         }
       };
-      if (action.semantic === 'approve') {
-        const approvalId = actionTargetId(action, 'approval');
-        if (approvalId === null) {
-          toast.error(t("principles.detail.ownerDecision.invalidTarget", { defaultValue: "动作目标缺失，无法提交。" }));
-          return;
-        }
-        const approveResult = await approveApproval(approvalId, note);
-        settle(approveResult);
-        // PRI-890: non-fatal server warnings (e.g. prompt injection budget
-        // exclusion) must reach the Owner on this path too, not vanish.
-        if (approveResult.success && typeof approveResult.data?.warning === 'string') {
-          toast.warning(approveResult.data.warning, { duration: 15000 });
-        }
-      } else if (action.semantic === 'reject') {
-        const approvalId = actionTargetId(action, 'approval');
-        if (approvalId === null) {
-          toast.error(t("principles.detail.ownerDecision.invalidTarget", { defaultValue: "动作目标缺失，无法提交。" }));
-          return;
-        }
-        settle(await rejectApproval(approvalId, reason ?? ""));
-      } else if (action.semantic === 'edit_approval') {
-        const approvalId = actionTargetId(action, 'approval');
-        if (approvalId === null || reason === undefined || newArtifactId.trim() === '') {
-          toast.error(t("principles.detail.ownerDecision.invalidTarget", { defaultValue: "动作目标缺失，无法提交。" }));
-          return;
-        }
-        settle(await editApproval(approvalId, newArtifactId.trim(), reason));
-      } else if (action.semantic === 'disable') {
+      if (action.semantic === 'disable') {
         const activationId = actionTargetId(action, 'activation');
         if (activationId === null) {
           toast.error(t("principles.detail.ownerDecision.invalidTarget", { defaultValue: "动作目标缺失，无法提交。" }));
@@ -468,6 +461,7 @@ export function PrincipleDetailPage() {
       } else {
         return; // unknown semantics are never rendered; belt-and-suspenders
       }
+      if (epoch !== detailEpoch.current) return;
       if (!failed) {
         toast.success(t("principles.detail.ownerDecision.actionDone", { defaultValue: "操作已提交。" }));
       } else {
@@ -479,15 +473,18 @@ export function PrincipleDetailPage() {
         }));
       }
     } catch (err) {
+      if (epoch !== detailEpoch.current) return;
       toast.error(err instanceof Error ? err.message : String(err));
     } finally {
-      setActionLoading(false);
-      setPendingAction(null);
-      setRejectReason("");
-      setNewArtifactId("");
-      setApproveNote("");
-      // Invalidate the stale action list and re-derive from a fresh GET.
-      await loadData();
+      if (epoch === detailEpoch.current) {
+        setActionLoading(false);
+        setPendingAction(null);
+        setRejectReason("");
+        setNewArtifactId("");
+        setApproveNote("");
+        // Invalidate the stale action list and re-derive from a fresh GET.
+        await loadData();
+      }
     }
   };
 
@@ -503,7 +500,7 @@ export function PrincipleDetailPage() {
   if (error || !principle) {
     return (
       <PageShell>
-        <Button variant="ghost" onClick={() => navigate("/principles")} className="mb-4">
+        <Button variant="ghost" onClick={() => navigate(returnTo)} className="mb-4">
           ← {t("principles.detail.backToList")}
         </Button>
         <div className="border border-danger/30 rounded-[var(--radius-md)] p-4">
@@ -526,13 +523,15 @@ export function PrincipleDetailPage() {
     ? ownerDecision.learnedPrinciple.value.text
     : undefined;
   const learnedKnown = learnedText !== undefined;
+  const learnedPreview = learnedText === undefined ? undefined : truncateByCodePoints(learnedText, 240);
+  const learnedTruncated = learnedPreview !== learnedText;
   const headlineLayout = splitReadingTitleBody(learnedText ?? principle.text);
 
   return (
     <PageShell>
       <div className="animate-[pdFadeIn_400ms_ease-out]">
       {/* Back link */}
-      <Button variant="ghost" onClick={() => navigate("/principles")} className="mb-4 -ml-2">
+      <Button variant="ghost" onClick={() => navigate(returnTo)} className="mb-4 -ml-2">
         ← {t("principles.detail.backToList")}
       </Button>
 
@@ -565,9 +564,6 @@ export function PrincipleDetailPage() {
         </p>
         {/* Modify wording — DISABLED (MVP3, F.5 honest constraint) */}
         <div className="flex items-center gap-3">
-          <Button variant="outline" size="sm" disabled>
-            {t("principles.detail.modifyWording")}
-          </Button>
           <span className="text-ink-4 text-[13px]">
             {t("principles.detail.modifyWordingNote")}
           </span>
@@ -607,12 +603,6 @@ export function PrincipleDetailPage() {
               </span>
             </div>
 
-            {/* 1. 发生了什么 */}
-            <OwnerNarrativeBlock
-              testId="owner-decision-incident"
-              label={t("principles.detail.ownerDecision.incident", { defaultValue: "发生了什么" })}
-              field={ownerDecision.incidentSummary}
-            />
             {/* 2. 学到了什么 */}
             <div className="mt-4" data-testid="owner-decision-learned">
               <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
@@ -621,8 +611,9 @@ export function PrincipleDetailPage() {
               {ownerDecision.learnedPrinciple.status === 'known' ? (
                 <>
                   <p className="mt-1 text-ink-2 text-[15px] leading-relaxed whitespace-pre-wrap break-words">
-                    {learnedText}
+                    {learnedPreview}
                   </p>
+                  {learnedTruncated && <details className="mt-3 text-sm text-ink-2"><summary className="cursor-pointer text-gov">{t('principles.detail.fullRule')}</summary><p className="mt-3 whitespace-pre-wrap break-words leading-relaxed">{learnedText}</p></details>}
                   <p className="mt-1 text-ink-4 text-[12px]">
                     {t("principles.detail.ownerDecision.sourceTierLabel", {
                       defaultValue: "来源：{{tier}}（未经改写）",
@@ -636,12 +627,191 @@ export function PrincipleDetailPage() {
                 </p>
               )}
             </div>
+            {/* 8. Owner Decision — backend-assessed actions only */}
+              {/* S3 finding (AI User QA): decided subjects were invisible on the
+                  Detail page — the Owner could not see WHEN/HOW this principle
+                  was approved. Render completed decisions as history. */}
+              {ownerDecision.decisionSubjects.some((subject) => subject.state !== 'pending') && (
+                <div className="mt-3" data-testid="owner-decision-history">
+                  <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
+                    {t("principles.detail.ownerDecision.history", { defaultValue: "决定历史" })}
+                  </p>
+                  <ul className="mt-1 space-y-1 text-[13px] text-ink-2">
+                    {ownerDecision.decisionSubjects.filter((subject) => subject.state !== 'pending').map((subject) => {
+                      const decidedAt = subject.targetRefs.find((target) => target.kind === 'approval')?.recordedAt;
+                      const stateKey = `principles.detail.ownerDecision.historyState.${subject.state}`;
+                      return (
+                        <li key={`hist-${subject.key}`}>
+                          {t(stateKey, { defaultValue: subject.state })}
+                          {decidedAt !== undefined ? ` · ${decidedAt.slice(0, 10)}` : ''}
+                          {' · '}{t(`principles.detail.ownerDecision.channel.${subject.channel}`, { defaultValue: subject.channel })}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              )}
+              <div className="mt-5 border-t border-line pt-4" data-testid="owner-decision-actions">
+              <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
+                {t("principles.detail.ownerDecision.decision", { defaultValue: "你的决定" })}
+              </p>
+              {ownerDecision.availableActions.length === 0 && (
+                <p className="mt-1 text-ink-3 text-[13px]">
+                  {t("principles.detail.ownerDecision.noActions", { defaultValue: "当前没有可以执行的操作。" })}
+                </p>
+              )}
+              {approvalGroupUnavailable && ownerDecision.availableActions.length > 0 && (
+                <div role="alert" className="mt-2 text-[13px] leading-relaxed text-amber" data-testid="detail-approvals-unavailable">
+                  <p>{t('focus.workbench.approvalsUnavailable')}</p>
+                  <button type="button" onClick={() => { void loadData(); }} className="mt-1 text-gov underline">{t('focus.workbench.retry')}</button>
+                </div>
+              )}
+              {approvalGroup?.records.filter(record => record.status === 'pending').map(record => {
+                const allowedActions = ownerDecision.availableActions
+                  .filter(action => actionTargetId(action, 'approval') === record.id)
+                  .map(action => action.semantic)
+                  .filter((semantic): semantic is 'approve' | 'reject' | 'edit_approval' => semantic === 'approve' || semantic === 'reject' || semantic === 'edit_approval');
+                // A sibling's broken revision review must not block this record;
+                // without any per-record defect the group flag still covers the
+                // "multiple versions pending" ambiguity.
+                const revisionReviewUnavailable = record.revisionReviewUnavailable
+                  ?? (approvalGroup.records.some(entry => entry.status === 'pending' && entry.revisionReviewUnavailable === true)
+                    ? false : approvalGroup.revisionReviewUnavailable);
+                return <details key={record.id} className="mt-4 rounded border border-line p-4" data-testid="detail-approval-review">
+                  <summary className="cursor-pointer text-sm text-gov">{t('focus.workbench.proposal')} · {t(`principles.detail.ownerDecision.channel.${record.channel}`, { defaultValue: record.channel })}</summary>
+                  <div className="mt-5"><ApprovalSubjectReading principleId={principle.id} approvalId={record.id} artifactId={record.artifactId} channel={record.channel}
+                    showPrincipleLink={false}
+                    revisionReview={new Set(approvalGroup.records.filter(entry => entry.status === 'pending').map(entry => entry.artifactId)).size === 1 ? approvalGroup.revisionReview : undefined}
+                    revisionReviewUnavailable={revisionReviewUnavailable}
+                    allowedActions={allowedActions}
+                    lockedReason={ownerDecision.availableActions.some(action => actionTargetId(action, 'approval') === record.id) ? undefined : t('focus.workbench.permissionsUnknown')}
+                    onResolved={message => { toast.success(message); void loadData(); }} /></div>
+                </details>;
+              })}
+              <div className="mt-2 flex flex-wrap gap-3">
+                {ownerDecision.availableActions.filter(action => action.semantic === 'disable').map((action) => (
+                  <Button
+                    key={action.key}
+                    variant={action.semantic === 'reject' ? 'destructive' : action.semantic === 'disable' ? 'outline' : 'default'}
+                    size="sm"
+                    disabled={actionLoading}
+                    data-action-semantic={action.semantic}
+                    onClick={() => {
+                      setRejectReason("");
+                      setApproveNote("");
+                      setPendingAction(action);
+                    }}
+                  >
+                    {localizeActionLabel(action, t)}
+                  </Button>
+                ))}
+              </div>
+              {ownerDecision.blockers.length > 0 && (
+                <ul className="mt-3 space-y-1 text-[12px] text-ink-3">
+                  {ownerDecision.blockers.map((blocker, index) => (
+                    <li key={`blk-${index}`} data-testid="owner-decision-blocker">
+                      {localizeAggregatedBlocker(blocker.reason, t)}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {/* ── Action confirmation (SPEC §8.4) ───────────────────────────
+                  Rendered inside the decision region, not at the page root: a
+                  click that only changes visibility must land where the Owner
+                  is looking (PRI-947). */}
+              {pendingAction !== null && (
+                <div className="border-t border-line pt-6 mt-6" data-testid="owner-decision-confirm">
+                  <SectionTitle>{pendingAction.label}</SectionTitle>
+                  <div className="mt-2 p-3 bg-gov/5 border border-gov/20 rounded-[var(--radius-md)]">
+                    {pendingAction.expectedConsequence.status === 'known' && (
+                      <div className="mb-3">
+                        {pendingAction.expectedConsequence.value.map((item, index) => (
+                          <p key={`exp-${index}`} className="text-ink-2 text-[13px] leading-relaxed mb-1">{item.text}</p>
+                        ))}
+                      </div>
+                    )}
+                    <p className="text-ink-2 text-[13px] mb-3">{pendingAction.confirmation.text}</p>
+                    {pendingAction.requirements.some((req) => req.name === 'newArtifactId') && (
+                      <>
+                        <label className="block font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-2">
+                          {t("principles.detail.editNewArtifactLabel", { defaultValue: "新的已验证工件 ID" })}
+                        </label>
+                        <input
+                          type="text"
+                          value={newArtifactId}
+                          onChange={(e) => setNewArtifactId(e.target.value)}
+                          placeholder={t("principles.detail.editNewArtifactPlaceholder", { defaultValue: "输入新的已验证工件 ID" })}
+                          className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-[13px] mb-2 font-mono focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
+                          aria-label={t("principles.detail.editNewArtifactPlaceholder", { defaultValue: "输入新的已验证工件 ID" })}
+                        />
+                      </>
+                    )}
+                    {pendingAction.requirements.some((req) => req.name === 'reason') && (
+                      <>
+                        <label className="block font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-2">
+                          {t("principles.detail.rejectReasonLabel", { defaultValue: "拒绝原因" })}
+                        </label>
+                        <textarea
+                          value={rejectReason}
+                          onChange={(e) => setRejectReason(e.target.value)}
+                          placeholder={t("principles.detail.rejectReasonPlaceholder")}
+                          className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-[13px] min-h-[80px] resize-y focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
+                          aria-label={t("principles.detail.rejectReasonPlaceholder")}
+                        />
+                      </>
+                    )}
+                    {pendingAction.requirements.some((req) => req.name === 'note') && (
+                      <>
+                        <label className="block font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-2">
+                          {t("principles.detail.approveNoteLabel", { defaultValue: "批准备注（可选）" })}
+                        </label>
+                        <textarea
+                          data-testid="owner-decision-note"
+                          value={approveNote}
+                          onChange={(e) => setApproveNote(e.target.value)}
+                          placeholder={pendingAction.requirements.find((req) => req.name === 'note')?.ownerText
+                            ?? t("principles.detail.approveNotePlaceholder", { defaultValue: "写下批准的理由（可留空）" })}
+                          className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-[13px] min-h-[80px] resize-y focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
+                          aria-label={t("principles.detail.approveNoteLabel", { defaultValue: "批准备注（可选）" })}
+                        />
+                      </>
+                    )}
+                    <div className="flex gap-2 mt-3">
+                      <Button
+                        variant={pendingAction.semantic === 'reject' ? 'destructive' : 'default'}
+                        size="sm"
+                        disabled={actionLoading
+                          || (pendingAction.requirements.some((req) => req.name === 'reason') && !rejectReason.trim())
+                          || (pendingAction.requirements.some((req) => req.name === 'newArtifactId') && !newArtifactId.trim())}
+                        onClick={() => {
+                          const action = pendingAction;
+                          void submitOwnerAction(action);
+                        }}
+                      >
+                        {t("principles.detail.confirm", { defaultValue: "确认" })}
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => { setPendingAction(null); setRejectReason(""); setNewArtifactId(""); setApproveNote(""); }}>
+                        {t("principles.detail.cancel")}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+            <details className="mt-5 border-t border-line pt-4" data-testid="principle-formation-disclosure"><summary className="cursor-pointer text-sm text-gov">{t('principles.detail.formationDisclosure')}</summary><div className="mt-4">
+            {/* 1. 发生了什么 */}
+            <OwnerNarrativeBlock
+              testId="owner-decision-incident"
+              label={t("principles.detail.ownerDecision.incident", { defaultValue: "发生了什么" })}
+              field={ownerDecision.incidentSummary}
+            />
             {/* 3. 为什么 */}
             <OwnerNarrativeBlock
               testId="owner-decision-rationale"
               label={t("principles.detail.ownerDecision.rationale", { defaultValue: "为什么这么判断" })}
               field={ownerDecision.rationale}
             />
+            </div></details>
             {/* 4. 什么时候适用 */}
             <OwnerNarrativeBlock
               testId="owner-decision-applicability"
@@ -749,180 +919,6 @@ export function PrincipleDetailPage() {
               )}
             </div>
 
-            {/* 8. Owner Decision — backend-assessed actions only */}
-              {/* S3 finding (AI User QA): decided subjects were invisible on the
-                  Detail page — the Owner could not see WHEN/HOW this principle
-                  was approved. Render completed decisions as history. */}
-              {ownerDecision.decisionSubjects.some((subject) => subject.state !== 'pending') && (
-                <div className="mt-3" data-testid="owner-decision-history">
-                  <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
-                    {t("principles.detail.ownerDecision.history", { defaultValue: "决定历史" })}
-                  </p>
-                  <ul className="mt-1 space-y-1 text-[13px] text-ink-2">
-                    {ownerDecision.decisionSubjects.filter((subject) => subject.state !== 'pending').map((subject) => {
-                      const decidedAt = subject.targetRefs.find((target) => target.kind === 'approval')?.recordedAt;
-                      const stateKey = `principles.detail.ownerDecision.historyState.${subject.state}`;
-                      return (
-                        <li key={`hist-${subject.key}`}>
-                          {t(stateKey, { defaultValue: subject.state })}
-                          {decidedAt !== undefined ? ` · ${decidedAt.slice(0, 10)}` : ''}
-                          {' · '}{t(`principles.detail.ownerDecision.channel.${subject.channel}`, { defaultValue: subject.channel })}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              )}
-              <div className="mt-5 border-t border-line pt-4" data-testid="owner-decision-actions">
-              <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
-                {t("principles.detail.ownerDecision.decision", { defaultValue: "你的决定" })}
-              </p>
-              {ownerDecision.availableActions.length === 0 && (
-                <p className="mt-1 text-ink-3 text-[13px]">
-                  {t("principles.detail.ownerDecision.noActions", { defaultValue: "当前没有可以执行的操作。" })}
-                </p>
-              )}
-              {/* Fix 1 (review P1): per-subject decision material. Each pending
-                  decision shows ITS OWN revision's material — never another
-                  revision's text. Principle-level learnedPrinciple above stays
-                  the overview summary only. */}
-              {ownerDecision.decisionSubjects.filter((subject) => subject.state === 'pending').length > 0 && (
-                <div className="mt-3 space-y-3" data-testid="owner-decision-subject-materials">
-                  {ownerDecision.decisionSubjects.filter((subject) => subject.state === 'pending').map((subject) => (
-                    <div key={subject.key} className="rounded-[var(--radius-sm)] border border-line p-3" data-subject-key={subject.key}>
-                      <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-4">
-                        {t("principles.detail.ownerDecision.subjectMaterial", { defaultValue: "这项决定的材料" })}
-                      </p>
-                      {subject.decisionMaterial.learnedPrinciple.status === 'known' ? (
-                        subject.decisionMaterial.learnedPrinciple.value.map((item, index) => (
-                          <p key={`sm-${index}`} className="mt-1 text-ink-2 text-[13px] leading-relaxed">{item.text}</p>
-                        ))
-                      ) : (
-                        <p className="mt-1 text-amber text-[13px]">{subject.decisionMaterial.learnedPrinciple.reason.ownerText}</p>
-                      )}
-                      {subject.decisionMaterial.consequence.status === 'known' && (
-                        <p className="mt-1 text-ink-3 text-[12px] leading-relaxed">
-                          {subject.decisionMaterial.consequence.value.map((item) => item.text).join(' ')}
-                        </p>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-              <div className="mt-2 flex flex-wrap gap-3">
-                {ownerDecision.availableActions.map((action) => (
-                  <Button
-                    key={action.key}
-                    variant={action.semantic === 'reject' ? 'destructive' : action.semantic === 'disable' ? 'outline' : 'default'}
-                    size="sm"
-                    disabled={actionLoading}
-                    data-action-semantic={action.semantic}
-                    onClick={() => {
-                      setRejectReason("");
-                      setApproveNote("");
-                      setPendingAction(action);
-                    }}
-                  >
-                    {localizeActionLabel(action, t)}
-                  </Button>
-                ))}
-              </div>
-              {ownerDecision.blockers.length > 0 && (
-                <ul className="mt-3 space-y-1 text-[12px] text-ink-3">
-                  {ownerDecision.blockers.map((blocker, index) => (
-                    <li key={`blk-${index}`} data-testid="owner-decision-blocker">
-                      {localizeAggregatedBlocker(blocker.reason, t)}
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {/* ── Action confirmation (SPEC §8.4) ───────────────────────────
-                  Rendered inside the decision region, not at the page root: a
-                  click that only changes visibility must land where the Owner
-                  is looking (PRI-947). */}
-              {pendingAction !== null && (
-                <div className="border-t border-line pt-6 mt-6" data-testid="owner-decision-confirm">
-                  <SectionTitle>{pendingAction.label}</SectionTitle>
-                  <div className="mt-2 p-3 bg-gov/5 border border-gov/20 rounded-[var(--radius-md)]">
-                    {pendingAction.expectedConsequence.status === 'known' && (
-                      <div className="mb-3">
-                        {pendingAction.expectedConsequence.value.map((item, index) => (
-                          <p key={`exp-${index}`} className="text-ink-2 text-[13px] leading-relaxed mb-1">{item.text}</p>
-                        ))}
-                      </div>
-                    )}
-                    <p className="text-ink-2 text-[13px] mb-3">{pendingAction.confirmation.text}</p>
-                    {pendingAction.requirements.some((req) => req.name === 'newArtifactId') && (
-                      <>
-                        <label className="block font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-2">
-                          {t("principles.detail.editNewArtifactLabel", { defaultValue: "新的已验证工件 ID" })}
-                        </label>
-                        <input
-                          type="text"
-                          value={newArtifactId}
-                          onChange={(e) => setNewArtifactId(e.target.value)}
-                          placeholder={t("principles.detail.editNewArtifactPlaceholder", { defaultValue: "输入新的已验证工件 ID" })}
-                          className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-[13px] mb-2 font-mono focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
-                          aria-label={t("principles.detail.editNewArtifactPlaceholder", { defaultValue: "输入新的已验证工件 ID" })}
-                        />
-                      </>
-                    )}
-                    {pendingAction.requirements.some((req) => req.name === 'reason') && (
-                      <>
-                        <label className="block font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-2">
-                          {t("principles.detail.rejectReasonLabel", { defaultValue: "拒绝原因" })}
-                        </label>
-                        <textarea
-                          value={rejectReason}
-                          onChange={(e) => setRejectReason(e.target.value)}
-                          placeholder={t("principles.detail.rejectReasonPlaceholder")}
-                          className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-[13px] min-h-[80px] resize-y focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
-                          aria-label={t("principles.detail.rejectReasonPlaceholder")}
-                        />
-                      </>
-                    )}
-                    {pendingAction.requirements.some((req) => req.name === 'note') && (
-                      <>
-                        <label className="block font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-2">
-                          {t("principles.detail.approveNoteLabel", { defaultValue: "批准备注（可选）" })}
-                        </label>
-                        <textarea
-                          data-testid="owner-decision-note"
-                          value={approveNote}
-                          onChange={(e) => setApproveNote(e.target.value)}
-                          placeholder={pendingAction.requirements.find((req) => req.name === 'note')?.ownerText
-                            ?? t("principles.detail.approveNotePlaceholder", { defaultValue: "写下批准的理由（可留空）" })}
-                          className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-[13px] min-h-[80px] resize-y focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
-                          aria-label={t("principles.detail.approveNoteLabel", { defaultValue: "批准备注（可选）" })}
-                        />
-                      </>
-                    )}
-                    <div className="flex gap-2 mt-3">
-                      <Button
-                        variant={pendingAction.semantic === 'reject' ? 'destructive' : 'default'}
-                        size="sm"
-                        disabled={actionLoading
-                          || (pendingAction.requirements.some((req) => req.name === 'reason') && !rejectReason.trim())
-                          || (pendingAction.requirements.some((req) => req.name === 'newArtifactId') && !newArtifactId.trim())}
-                        onClick={() => {
-                          const action = pendingAction;
-                          void submitOwnerAction(
-                            action,
-                            rejectReason.trim() === '' ? undefined : rejectReason.trim(),
-                            approveNote.trim() === '' ? undefined : approveNote.trim(),
-                          );
-                        }}
-                      >
-                        {t("principles.detail.confirm", { defaultValue: "确认" })}
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => { setPendingAction(null); setRejectReason(""); setNewArtifactId(""); setApproveNote(""); }}>
-                        {t("principles.detail.cancel")}
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
           </div>
         </section>
       )}
@@ -1207,6 +1203,7 @@ export function PrincipleDetailPage() {
         </section>
       )}
 
+      <details className="mb-8 border-t border-line pt-4" data-testid="principle-extra-context"><summary className="cursor-pointer text-sm text-gov">{t('principles.detail.extraContext')}</summary><div className="mt-5">
       {/* ── Layer 2: Why (technical proposal fields — original texts) ────── */}
       <section className="mb-8">
         <SectionTitle>{t("principles.detail.whyExists")}</SectionTitle>
@@ -1323,6 +1320,7 @@ export function PrincipleDetailPage() {
         </div>
       </section>
 
+      </div></details>
       {/* ── Layer 3: Full trajectory (collapsed by default, D section) ──── */}
       <details className="mb-8 border border-line rounded-[var(--radius-md)]">
         <summary className="px-4 py-3 cursor-pointer font-mono text-[11px] uppercase tracking-[0.1em] text-ink-3 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov">

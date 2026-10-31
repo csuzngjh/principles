@@ -169,7 +169,7 @@ function stageKindLabel(t: (key: string) => string, stageKind: string | null): s
 }
 
 /** Inline in Governance Focus; assignment, rule approval and live promotion remain separate. */
-export function RuleCandidateBindingPanel() {
+export function RuleCandidateBindingPanel({ candidateId, onChanged }: { candidateId?: string; onChanged?: () => void } = {}) {
   const { t } = useTranslation();
   const [queue, setQueue] = useState<RuleBindingQueueView | null>(null);
   const [review, setReview] = useState<RuleBindingReviewView | null>(null);
@@ -194,10 +194,11 @@ export function RuleCandidateBindingPanel() {
     else setError([result.error, result.nextAction].filter(Boolean).join(' ') || t('pages.focus.ruleBinding.unavailable'));
     setBusy(false);
   }
+  useEffect(() => { if (candidateId) void load(candidateId); }, [candidateId]);
   function closeReview() { setOpenCandidateId(''); setReview(null); setSearch(''); setReason(''); }
   async function refreshQueue() {
     const result = await fetchRuleBindingQueue();
-    if (result.success) setQueue(result.data);
+    if (result.success) { setQueue(result.data); onChanged?.(); }
   }
   async function decide(action: 'bind' | 'revoke') {
     if (!review) return;
@@ -264,7 +265,7 @@ export function RuleCandidateBindingPanel() {
   }
 
   if ((queue === null || queue.items.length === 0) && !error) return null;
-  const groups = groupRuleBindingQueue(queue?.items ?? []);
+  const groups = groupRuleBindingQueue((queue?.items ?? []).filter(item => candidateId === undefined || item.candidateId === candidateId));
   const visibleGroups = showAllGroups ? groups : groups.slice(0, COLLAPSED_GROUP_LIMIT);
   const bound = review?.currentBinding?.action === 'bind';
   return <section className="mb-7 rounded border border-line p-4" data-testid="rule-binding-panel" aria-label={t('pages.focus.ruleBinding.title')}>

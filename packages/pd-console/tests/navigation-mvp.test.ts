@@ -229,7 +229,7 @@ describe('Console Rebuild Navigation — CR2', () => {
 
     it('the scanner sees the in-product links, not an empty set', () => {
       const unique = new Set(targets.map((t) => `${t.file} -> ${t.to}`));
-      expect(unique.has('pages/focus/FocusPage.tsx -> /pain')).toBe(true);
+      expect(unique.has('pages/focus/FocusPage.tsx -> /activation')).toBe(true);
       expect(
         unique.has('pages/principles/PrincipleDetailPage.tsx -> /pain'),
       ).toBe(true);

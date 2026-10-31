@@ -5,6 +5,7 @@ import {
   ApprovalQueue,
   RUNTIME_V2_PRINCIPLE_BUDGET,
   detectPromptReplacementTarget,
+  computeArtifactDigest,
   SqliteActivationStateStore,
 } from '@principles/core/runtime-v2';
 import {
@@ -72,7 +73,7 @@ export interface ApprovalGroup {
    */
   promptBudgetTierFit?: 'fits_all_tiers' | 'model_dependent' | 'exceeds_max_tier' | 'unconfirmed';
   revisionReviewUnavailable?: boolean;
-  revisionReview?: { oldStatement: string; newStatement: string; intentFields: Record<string, string> };
+  revisionReview?: { artifactId: string; artifactDigest: string; oldStatement: string; newStatement: string; intentFields: Record<string, string> };
   /**
    * PRI-940: the pinned artifact no longer exists in pi_artifacts (typically
    * superseded by a newer scribe revision). There is no contentJson, so
@@ -87,6 +88,12 @@ export interface ApprovalGroup {
     artifactId: string;
     channel: string;
     createdAt: string;
+    /**
+     * This record's own revision review is incomplete (the group flag also
+     * covers the multi-pending ambiguity, so readers must not use it to block
+     * an intact sibling approval).
+     */
+    revisionReviewUnavailable?: boolean;
   }[];
 }
 
@@ -317,7 +324,7 @@ export class ApprovalsGroupedConsoleModel {
                       if (typeof value === 'string') intentFields[key] = value;
                     }
                   }
-                  revisionReviews.set(artifact.artifactId, { oldStatement, newStatement, intentFields });
+                  revisionReviews.set(artifact.artifactId, { artifactId: artifact.artifactId, artifactDigest: computeArtifactDigest(artifact), oldStatement, newStatement, intentFields });
                   break;
                 }
               }
@@ -356,6 +363,7 @@ export class ApprovalsGroupedConsoleModel {
         channel: string;
         createdAt: string;
         status: 'pending' | 'approved' | 'rejected';
+        revisionReviewUnavailable?: boolean;
       }[]>();
 
       for (const approval of allApprovals) {
@@ -376,6 +384,7 @@ export class ApprovalsGroupedConsoleModel {
           status: approval.status === 'approved' || approval.status === 'rejected'
             ? approval.status
             : 'pending',
+          ...(revisionReviewUnavailable.has(approval.artifactId) ? { revisionReviewUnavailable: true } : {}),
         });
       }
 

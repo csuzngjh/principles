@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { ApprovalStatus, InternalizationChannel } from '@principles/core/runtime-v2';
-import { MVP_CHANNELS } from '@principles/core/runtime-v2';
+import { isApprovalReviewGuard, MVP_CHANNELS } from '@principles/core/runtime-v2';
 import { ApprovalsConsoleModel, type ApproveWithActivationResult, type ReopenApprovalResult } from '../models/ApprovalsConsoleModel.js';
 import { sendSuccess, sendError, sendNotFound, sendBadRequest } from '../utils/response.js';
 import { parseQuery, readBody } from '../utils/request.js';
@@ -137,6 +137,11 @@ export async function handleApprovalsRoute(
       const body = await readBody(req);
       const parsed = parseJsonBody(body, res);
       if (!parsed) return;
+      const expectedReview = Object.hasOwn(parsed, 'expectedReview') ? parsed.expectedReview : undefined;
+      if (Object.hasOwn(parsed, 'expectedReview') && (!isApprovalReviewGuard(expectedReview) || expectedReview.approvalId !== approvalId || expectedReview.artifactState !== 'present')) {
+        sendBadRequest(res, 'expectedReview must identify this approval and its exact reviewed artifact/version');
+        return;
+      }
       if (Object.hasOwn(parsed, 'note') && typeof parsed.note !== 'string') {
         sendBadRequest(res, 'note must be a string');
         return;
@@ -172,9 +177,12 @@ export async function handleApprovalsRoute(
         intentReviewed: parsed.intentReviewed === true,
         ...(typeof parsed.reviewedArtifactId === 'string' ? { reviewedArtifactId: parsed.reviewedArtifactId } : {}),
         retryActivation: parsed.retryActivation === true,
+        expectedReview: isApprovalReviewGuard(expectedReview) ? expectedReview : undefined,
       });
       if (!result.ok) {
-        if (result.error === 'not_found') {
+        if (result.error === 'stale_review') {
+          sendError(res, 409, 'stale_review', result.reason, { reason: 'stale_review', nextAction: result.nextAction });
+        } else if (result.error === 'not_found') {
           sendNotFound(res, 'Approval ' + approvalId + ' not found');
         } else if (result.error === 'unsupported_channel') {
           sendError(res, 403, 'unsupported_channel', `Cannot approve unsupported channel. Only MVP proven channels (${MVP_CHANNEL_LIST}) can be approved.`);
@@ -186,7 +194,7 @@ export async function handleApprovalsRoute(
             500,
             'activation_failed',
             `Approval was ${result.approvalRolledBack ? 'rolled back to pending' : 'approved but activation failed'}. Reason: ${result.reason}`,
-            { nextAction: result.nextAction ?? 'Inspect or regenerate the rule artifact, verify it is validated, then retry approval.' },
+            { reason: 'activation_failed', approvalRolledBack: result.approvalRolledBack, nextAction: result.nextAction ?? 'Inspect or regenerate the rule artifact, verify it is validated, then retry approval.' },
           );
         } else if (result.error === 'prompt_capacity_refused') {
           // R-B2: refused BEFORE any governance write — the approval stays
@@ -247,6 +255,11 @@ export async function handleApprovalsRoute(
       const body = await readBody(req);
       const parsed = parseJsonBody(body, res);
       if (!parsed) return;
+      const expectedReview = Object.hasOwn(parsed, 'expectedReview') ? parsed.expectedReview : undefined;
+      if (Object.hasOwn(parsed, 'expectedReview') && (!isApprovalReviewGuard(expectedReview) || expectedReview.approvalId !== approvalId)) {
+        sendBadRequest(res, 'expectedReview must identify this approval and its exact reviewed artifact/version');
+        return;
+      }
       if (!Object.hasOwn(parsed, 'reason') || typeof parsed.reason !== 'string') {
         sendBadRequest(res, 'reason is required and must be a string');
         return;
@@ -256,9 +269,11 @@ export async function handleApprovalsRoute(
         return;
       }
 
-      const result = await model.reject(approvalId, 'operator', parsed.reason);
+      const result = await model.reject(approvalId, 'operator', parsed.reason, isApprovalReviewGuard(expectedReview) ? expectedReview : undefined);
       if (!result.ok) {
-        if (result.error === 'not_found') {
+        if (result.error === 'stale_review') {
+          sendError(res, 409, 'stale_review', result.reason, { reason: 'stale_review', nextAction: result.nextAction });
+        } else if (result.error === 'not_found') {
           sendNotFound(res, 'Approval ' + approvalId + ' not found');
         } else if (result.error === 'unsupported_channel') {
           sendError(res, 403, 'unsupported_channel', `Cannot reject unsupported channel. Only MVP proven channels (${MVP_CHANNEL_LIST}) can be operated on.`);
@@ -335,6 +350,11 @@ export async function handleApprovalsRoute(
       const body = await readBody(req);
       const parsed = parseJsonBody(body, res);
       if (!parsed) return;
+      const expectedReview = Object.hasOwn(parsed, 'expectedReview') ? parsed.expectedReview : undefined;
+      if (Object.hasOwn(parsed, 'expectedReview') && (!isApprovalReviewGuard(expectedReview) || expectedReview.approvalId !== approvalId || expectedReview.artifactState !== 'present')) {
+        sendBadRequest(res, 'expectedReview must identify this approval and its exact reviewed artifact/version');
+        return;
+      }
       if (!Object.hasOwn(parsed, 'newArtifactId') || typeof parsed.newArtifactId !== 'string') {
         sendBadRequest(res, 'newArtifactId is required and must be a string');
         return;
@@ -348,9 +368,11 @@ export async function handleApprovalsRoute(
         return;
       }
 
-      const result = await model.editApproval({ approvalId, editedBy: 'operator', newArtifactId: parsed.newArtifactId, editReason: parsed.editReason });
+      const result = await model.editApproval({ expectedReview: isApprovalReviewGuard(expectedReview) ? expectedReview : undefined, approvalId, editedBy: 'operator', newArtifactId: parsed.newArtifactId, editReason: parsed.editReason });
       if (!result.ok) {
-        if (result.error === 'not_found') {
+        if (result.error === 'stale_review') {
+          sendError(res, 409, 'stale_review', result.reason, { reason: 'stale_review', nextAction: result.nextAction });
+        } else if (result.error === 'not_found') {
           sendNotFound(res, 'Approval ' + approvalId + ' not found');
         } else if (result.error === 'already_decided') {
           sendError(res, 409, 'conflict', 'Approval already decided: ' + (result.status ?? 'unknown'));

@@ -70,9 +70,19 @@ describe("切片1 R5 — 审批记录数不得称为行为证据", () => {
     expect((value ?? "").match(/\{\{count\}\}/g)).toHaveLength(1);
   });
 
-  it("FocusPage 的 evidenceSummary 消费仍使用 records.length（口径来源不变）", () => {
+  it("单对象工作台按事项计数，不把审批数量冒充行为证据", () => {
     const src = readSource("../../src/ui/pages/focus/FocusPage.tsx");
-    expect(src).toContain('t("pages.focus.evidenceSummary", { count: group.records.length })');
+    const workbench = readSource("../../src/ui/pages/focus/OwnerWorkbench.tsx");
+    expect(src).toContain("pendingGroups.flatMap");
+    expect(src).toContain("group.records.filter(record => record.status === 'pending')");
+    expect(src).toContain("count: workItems.length");
+    expect(workbench).toContain("count: items.length");
+    for (const locale of [en, zh]) {
+      const workbenchCopy = getOwnRecord(locale.focus, "workbench");
+      const count = workbenchCopy && getOwnString(workbenchCopy, "count");
+      expect(count).toContain("{{count}}");
+      expect(count).not.toMatch(/evidence|证据/i);
+    }
   });
 });
 
@@ -145,15 +155,15 @@ describe("切片1 R2/R3 — 标题/正文分层与换行保留", () => {
     expect(src).toContain("splitReadingTitleBody");
   });
 
-  it("FocusPage 候选正文容器保留换行（whitespace-pre-wrap）且有可定位 testid", () => {
-    const src = readSource("../../src/ui/pages/focus/FocusPage.tsx");
-    expect(src).toMatch(/candidate-body-\$\{group\.principleId\}/);
-    const bodyMatch = src.match(/data-testid=\{`candidate-body-\$\{group\.principleId\}`\}[^>]*/);
-    expect(bodyMatch).toBeDefined();
-    // 正文容器必须在同一个 className 中同时具备 pre-wrap 与 break 词（长 ID/路径安全换行）
-    const container = src.slice(src.indexOf("candidate-body-${group.principleId}") - 400, src.indexOf("candidate-body-${group.principleId}") + 400);
-    expect(container).toContain("whitespace-pre-wrap");
-    expect(container).toMatch(/break-words|overflow-wrap/);
+  it("Focus 接入的准确全文容器保留换行与长词换行，并区分预览和全文", () => {
+    expect(readSource("../../src/ui/pages/focus/FocusPage.tsx")).toContain("<ApprovalSubjectReading");
+    const src = readSource("../../src/ui/pages/focus/ApprovalSubjectReading.tsx");
+    const fullBody = src.match(/<div className="[^"]*">\{bodyText\}<\/div>/);
+    expect(fullBody).toBeTruthy();
+    expect(fullBody?.[0]).toContain("whitespace-pre-wrap");
+    expect(fullBody?.[0]).toMatch(/break-words|overflow-wrap/);
+    expect(src).toContain("pages.focus.workbench.fullText");
+    expect(src).toContain("pages.focus.workbench.textPreview");
   });
 
   it("PrincipleDetailPage h1 不再直接承载整段规则正文（经分层取短标题）", () => {
@@ -172,6 +182,20 @@ describe("切片1 R2/R3 — 标题/正文分层与换行保留", () => {
     const block = src.slice(idx, idx + 900);
     expect(block).toContain("{learnedText}");
     expect(block).toContain("whitespace-pre-wrap");
+  });
+
+  it("正文/标题预览按码点截断，不使用 UTF-16 slice（避免孤立代理项显示为替换字符）", () => {
+    const detail = readSource("../../src/ui/pages/principles/PrincipleDetailPage.tsx");
+    expect(detail).toContain("truncateByCodePoints(learnedText, 240)");
+    expect(detail).not.toContain("learnedText.slice(0, 240)");
+
+    const reading = readSource("../../src/ui/pages/focus/ApprovalSubjectReading.tsx");
+    expect(reading).toContain("truncateByCodePoints(bodyText, 240)");
+    expect(reading).not.toContain("bodyText.slice(0, 240)");
+
+    const list = readSource("../../src/ui/pages/principles/PrinciplesPage.tsx");
+    expect(list).toContain("truncateByCodePoints(p.text, 80)");
+    expect(list).not.toContain("p.text.slice(0, 80)");
   });
 });
 

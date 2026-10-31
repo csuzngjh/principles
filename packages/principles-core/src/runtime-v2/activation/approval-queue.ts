@@ -1,3 +1,4 @@
+import type { ApprovalReviewGuard } from './approval-review-guard.js';
 import type { InternalizationChannel } from '../internalization/peer-runner-contracts.js';
 import type {
   ApprovalDecisionResult,
@@ -41,22 +42,24 @@ export class ApprovalQueue {
     return this.store.listPending(filter);
   }
 
-  async approve(approvalId: string, decidedBy: string, note?: string): Promise<ApprovalDecisionResult> {
+  // eslint-disable-next-line @typescript-eslint/max-params -- preserve the existing positional CLI contract with an additive optional review guard
+  async approve(approvalId: string, decidedBy: string, note?: string, expectedReview?: ApprovalReviewGuard): Promise<ApprovalDecisionResult> {
     const existing = await this.store.getById(approvalId);
     if (!existing) return { ok: false, error: 'not_found' };
     if (existing.status !== 'pending') {
       return { ok: false, error: 'already_decided', status: existing.status };
     }
-    return this.store.approve(approvalId, decidedBy, note);
+    return this.store.approve(approvalId, decidedBy, note, expectedReview);
   }
 
-  async reject(approvalId: string, decidedBy: string, reason: string): Promise<ApprovalDecisionResult> {
+  // eslint-disable-next-line @typescript-eslint/max-params -- preserve the existing positional CLI contract with an additive optional review guard
+  async reject(approvalId: string, decidedBy: string, reason: string, expectedReview?: ApprovalReviewGuard): Promise<ApprovalDecisionResult> {
     const existing = await this.store.getById(approvalId);
     if (!existing) return { ok: false, error: 'not_found' };
     if (existing.status !== 'pending') {
       return { ok: false, error: 'already_decided', status: existing.status };
     }
-    return this.store.reject(approvalId, decidedBy, reason);
+    return this.store.reject(approvalId, decidedBy, reason, expectedReview);
   }
 
   async listAll(filter?: ApprovalListFilter): Promise<ApprovalRecord[]> {

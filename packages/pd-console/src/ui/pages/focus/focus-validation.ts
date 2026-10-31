@@ -49,12 +49,18 @@ function validateApprovalGroup(raw: unknown): ApprovalGroup | null {
     ) {
       return null;
     }
+    let recordRevisionReviewUnavailable: boolean | undefined;
+    if (Object.hasOwn(r, "revisionReviewUnavailable")) {
+      if (typeof r.revisionReviewUnavailable !== "boolean") return null;
+      recordRevisionReviewUnavailable = r.revisionReviewUnavailable;
+    }
     validRecords.push({
       id: r.id,
       artifactId: r.artifactId,
       channel: r.channel,
       createdAt: r.createdAt,
       status: r.status,
+      ...(recordRevisionReviewUnavailable !== undefined ? { revisionReviewUnavailable: recordRevisionReviewUnavailable } : {}),
     });
   }
   // Wave 7: candidateDescription is optional — present when backend could
@@ -97,6 +103,25 @@ function validateApprovalGroup(raw: unknown): ApprovalGroup | null {
     if (typeof unavailable !== "boolean") return null;
     artifactUnavailable = unavailable;
   }
+  let revisionReviewUnavailable: boolean | undefined;
+  if (Object.hasOwn(raw, 'revisionReviewUnavailable')) {
+    const { revisionReviewUnavailable: unavailable } = raw;
+    if (typeof unavailable !== 'boolean') return null;
+    revisionReviewUnavailable = unavailable;
+  }
+  let revisionReview: ApprovalGroup['revisionReview'];
+  if (Object.hasOwn(raw, 'revisionReview')) {
+    const review = raw.revisionReview;
+    if (!isRecord(review) || typeof review.oldStatement !== 'string' || typeof review.newStatement !== 'string' || !isRecord(review.intentFields)) return null;
+    const intentFields: Record<string, string> = {};
+    for (const [key, value] of Object.entries(review.intentFields)) {
+      if (typeof value !== 'string') return null;
+      intentFields[key] = value;
+    }
+    revisionReview = { oldStatement: review.oldStatement, newStatement: review.newStatement, intentFields,
+      ...(typeof review.artifactId === 'string' ? { artifactId: review.artifactId } : {}),
+      ...(typeof review.artifactDigest === 'string' && /^sha256:[a-f0-9]{64}$/.test(review.artifactDigest) ? { artifactDigest: review.artifactDigest } : {}) };
+  }
   return {
     principleId,
     principleTitle,
@@ -105,6 +130,8 @@ function validateApprovalGroup(raw: unknown): ApprovalGroup | null {
     fitsPromptBudget,
     promptBudgetTierFit,
     artifactUnavailable,
+    revisionReviewUnavailable,
+    revisionReview,
     records: validRecords,
   };
 }

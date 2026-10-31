@@ -9,16 +9,28 @@
  * - 旧「编辑」按钮显示「替换待审版本」；
  * - 320px 窄视口无横向溢出（重排代理验证；200%/400% 真缩放属 Q4，另行人工）。
  */
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 const READABILITY_PRINCIPLE = 'e2e00000-0000-4000-8000-00000000000b';
+
+async function openReadability(page: Page) {
+  const item = page.getByTestId('owner-work-item').and(page.locator('[data-item-key="approval:apr-readability-long"]'));
+  await expect(item).toBeVisible();
+  await item.click();
+  const reading = page.getByTestId('owner-work-reading');
+  const disclosure = reading.locator('details').filter({ has: page.locator('summary', { hasText: '展开完整正文' }) }).first();
+  await disclosure.locator(':scope > summary').click();
+  const body = disclosure.locator(':scope > div');
+  await expect(body).toBeVisible();
+  return { body, reading };
+}
 
 test.describe('SPEC-PD-CONSOLE-READABILITY-002 切片1 — Focus 长文阅读分层', () => {
   test('长规则候选：短标题预览 + 逐字全文正文块（换行保留）', async ({ page }) => {
     await page.goto('/#/focus');
     await page.waitForLoadState('networkidle');
 
-    const body = page.getByTestId(`candidate-body-${READABILITY_PRINCIPLE}`);
+    const { body } = await openReadability(page);
     await expect(body).toBeVisible();
 
     // R1/R2：正文逐字保留（scribe 分支 title — statement，无替换字符注入）
@@ -41,7 +53,7 @@ test.describe('SPEC-PD-CONSOLE-READABILITY-002 切片1 — Focus 长文阅读分
     expect(Number(fontWeight)).toBeLessThan(600);
 
     // R2：标题只承载短预览（码点 ≤ 25，含省略号），不承载整段正文
-    const title = page.getByTestId(`candidate-title-${READABILITY_PRINCIPLE}`);
+    const title = page.getByTestId('owner-work-reading').getByRole('heading', { level: 2 });
     await expect(title).toBeVisible();
     const titleText = (await title.textContent()) ?? '';
     expect(Array.from(titleText).length).toBeLessThanOrEqual(25);
@@ -52,10 +64,13 @@ test.describe('SPEC-PD-CONSOLE-READABILITY-002 切片1 — Focus 长文阅读分
     await page.goto('/#/focus');
     await page.waitForLoadState('networkidle');
 
-    // R5：group.records.length 的标签是审批记录数，不是行为证据数
-    const card = page.locator('article', { has: page.getByTestId(`candidate-body-${READABILITY_PRINCIPLE}`) });
-    await expect(card).toBeVisible();
-    await expect(card).toContainText(/审批记录[：:]\s*\d+\s*条|Approval records[：:]\s*\d+/);
+    // 004 changes the count to selected work items, never behavior evidence.
+    const count = await page.getByTestId('owner-work-item').count();
+    expect(count).toBeGreaterThan(0);
+    const list = page.getByTestId('owner-workbench').locator('nav');
+    await expect(list).toContainText(`${count} 项`);
+    await expect(list.locator('h2')).not.toContainText('证据');
+    await openReadability(page);
     // R6：旧「编辑」按钮现为「替换待审版本」
     const editBtn = page.getByTestId(`edit-btn-${READABILITY_PRINCIPLE}`);
     await expect(editBtn).toContainText(/替换待审版本|Replace pending version/);
@@ -66,7 +81,7 @@ test.describe('SPEC-PD-CONSOLE-READABILITY-002 切片1 — Focus 长文阅读分
     await page.goto('/#/focus');
     await page.waitForLoadState('networkidle');
 
-    const body = page.getByTestId(`candidate-body-${READABILITY_PRINCIPLE}`);
+    const { body } = await openReadability(page);
     await expect(body).toBeVisible();
 
     const overflow = await page.evaluate(() => ({
@@ -102,7 +117,7 @@ test.describe('SPEC-PD-CONSOLE-READABILITY-002 切片1 — Focus 长文阅读分
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto('/#/focus');
     await page.waitForLoadState('networkidle');
-    await page.getByTestId(`candidate-body-${READABILITY_PRINCIPLE}`).waitFor();
+    await openReadability(page);
     await page.screenshot({ path: '../../.tmp/console-readable/screenshots/focus-1440.png', fullPage: true });
 
     await page.setViewportSize({ width: 320, height: 700 });

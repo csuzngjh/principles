@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
 import { PageShell } from "../../components/layout/page-shell.js";
 import { PageLoading } from "../../components/layout/page-loading.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
@@ -10,32 +9,26 @@ import { ShinyText } from "../../components/ui/shiny-text.js";
 import {
   fetchGovernanceQueue,
   fetchApprovalsGrouped,
-  approveApproval,
-  rejectApproval,
-  editApproval,
   fetchAllActivations,
   fetchOwnerDecisions,
+  fetchRuleBindingQueue,
 } from "../../api.js";
 import type {
   GovernanceQueueData,
   ApprovalsGroupedData,
-  ApprovalGroup,
   StagnationSignal,
   DegradedSignal,
   ActivationRecord,
 } from "../../api.js";
 import type { OwnerDecisionItemData } from "../../utils/validators.js";
-import type { PromptInjectionBudgetStatus } from "../../utils/validators.js";
 import { selectApprovalGroupDisplayTitle, showsUnlinkedCandidateNote, validateApprovalsGroupedData } from "./focus-validation.js";
 import { splitReadingTitleBody } from "../../utils/reading-layout.js";
+import { OwnerWorkbench, type OwnerWorkItem, type OwnerWorkItemKind } from "./OwnerWorkbench.js";
+import { ApprovalSubjectReading } from "./ApprovalSubjectReading.js";
+import type { RuleBindingQueueView } from "../../../shared/rule-candidate-binding-contract.js";
 import { OwnerDecisionCard } from "./OwnerDecisionCard.js";
-import { RuleCandidateBindingPanel } from './RuleCandidateBindingPanel.js';
-import { localizeApprovalWarning, splitApprovalWarnings } from "../../utils/approval-warning-localization.js";
+import { RuleCandidateBindingPanel, deriveRuleBindingCardState } from './RuleCandidateBindingPanel.js';
 
-/** PRI-908: how long the decided card stays visible before the pending list refresh removes it. */
-const DECIDED_REFRESH_DELAY_MS = 1600;
-/** PRI-908: per decision, at most this many warning toasts render individually; the rest aggregate into one (rc-9: nothing dropped). */
-const MAX_WARNING_TOASTS = 3;
 import { fetchGovernanceExperience, fetchOwnerDecisionInbox } from "../../api.js";
 import type { OwnerDecisionInboxData } from "../../api.js";
 import type {
@@ -136,68 +129,27 @@ export function partitionInboxForDisplay<T extends { principleId: string; inbox:
 
 /**
  * SPEC-PD-UIUX-001 R2 (Owner review round 2): the conclusion strip's headline
- * and total must agree with the objects actually on screen and with the inbox
- * response contract.
+ * must never claim the system is clear when the inbox response cannot back
+ * that claim.
  *
  * Modes (display-only; no permission derivation):
  * - 'unavailable' — inbox projection off (feature_disabled surfaces as
- *   ownerInbox===null with NO error) or the request failed: the pending count
- *   CANNOT be confirmed; never allClear.
+ *   ownerInbox===null with NO error) or the request failed.
  * - 'degraded' — the inbox answered HTTP-success but carries
  *   `degraded: { reason, nextAction }` (e.g. principle ledger unreadable, the
- *   server then returns EMPTY groups): counts cannot be trusted; the strip
- *   shows the server's reason + nextAction and never allClear.
- * - 'ok' — counts are trusted.
- *
- * Counting (S2): displayTotal = actionableCount + inbox pending items NOT
- * already represented by an on-screen action card. The association is the
- * verified principleId field (partition.unmatchedDecisions are inbox items
- * WITHOUT a card). One inbox item matching N cards of the same principle
- * counts the N cards (each is a distinct decision); disjoint sets sum.
+ *   server then returns EMPTY groups): the strip shows the server's reason.
+ * - 'ok' — the inbox answered without degradation.
  */
 export function deriveConclusionDisplay(input: {
   ownerInbox: { groups: { decision: unknown[] }; degraded?: { reason: string; nextAction: string } } | null;
   ownerInboxError: string | null;
-  partition: { pendingTotal: number; unmatchedDecisions: unknown[] } | null;
-  actionableCount: number;
 }): {
   mode: 'ok' | 'degraded' | 'unavailable';
-  displayTotal: number;
-  actionableCount: number;
   degraded?: { reason: string; nextAction: string };
 } {
-  if (input.ownerInbox === null || input.ownerInboxError !== null || input.partition === null) {
-    return { mode: 'unavailable', displayTotal: input.actionableCount, actionableCount: input.actionableCount };
-  }
-  const matchedDecisions = input.ownerInbox.groups.decision.length - input.partition.unmatchedDecisions.length;
-  const uncoveredInboxPending = Math.max(0, input.partition.pendingTotal - matchedDecisions);
-  const base = {
-    actionableCount: input.actionableCount,
-  };
-  if (input.ownerInbox.degraded !== undefined) {
-    return {
-      mode: 'degraded',
-      displayTotal: input.actionableCount + uncoveredInboxPending,
-      ...base,
-      degraded: input.ownerInbox.degraded,
-    };
-  }
-  return {
-    mode: 'ok',
-    displayTotal: input.actionableCount + uncoveredInboxPending,
-    ...base,
-  };
-}
-
-/**
- * SPEC-PD-UIUX-001 R2 (Owner review S3): EVERY conclusion branch must express
- * governance readiness the same way — "actionable now" is only claimable when
- * the actions are not locked. One matrix, one source.
- */
-export function resolveConclusionActionableKey(mode: 'ok' | 'degraded' | 'unavailable', locked: boolean): string {
-  if (locked) return "pages.focus.conclusion.actionableLocked";
-  if (mode === 'unavailable') return "pages.focus.conclusion.actionableWithoutTotal";
-  return "pages.focus.conclusion.actionableUnlocked";
+  if (input.ownerInbox === null || input.ownerInboxError !== null) return { mode: 'unavailable' };
+  if (input.ownerInbox.degraded !== undefined) return { mode: 'degraded', degraded: input.ownerInbox.degraded };
+  return { mode: 'ok' };
 }
 
 // ── i18n code mapping helpers ─────────────────────────────────────────────
@@ -284,21 +236,6 @@ export function deriveOwnerConfigureGuide(
 ): OwnerConfigureGuide | null {
   if (ownerIdentityConfiguration !== "missing") return null;
   return { docUrl: OWNER_CONFIGURE_DOC_URL, commands: OWNER_CONFIGURE_COMMANDS };
-}
-
-// ── Channel label helper ─────────────────────────────────────────────────────
-
-function getChannelLabel(channel: string, t: (key: string) => string): string {
-  switch (channel) {
-    case "prompt":
-      return t("pages.focus.channelPrompt");
-    case "defer_archive":
-      return t("pages.focus.channelDeferArchive");
-    case "code_tool_hook":
-      return t("pages.focus.channelCodeToolHook");
-    default:
-      return channel;
-  }
 }
 
 // ── Sub-components ───────────────────────────────────────────────────────────
@@ -397,591 +334,6 @@ function FeedbackStratification({
         </div>
       </div>
     </div>
-  );
-}
-
-function PendingReviewCard({
-  group,
-  actionsLockedReason,
-  onDecisionApplied,
-  promptInjection,
-  promptTargetHost,
-}: {
-  group: ApprovalGroup;
-  /** PRI-889: 与 OwnerDecisionCard 同一治理就绪门（PRI-787）——锁定时禁用动作并给出可见原因。 */
-  actionsLockedReason?: string;
-  onDecisionApplied: () => void;
-  /** PRI-908: 提示词注入预算现状（批准前预告"批了是否会生效"）。 */
-  promptInjection?: PromptInjectionBudgetStatus;
-  /** PD_PROMPT_CAPACITY_V1 R-A1/R-B2: 请求级目标宿主（未确认横幅中选择），随批准请求发送给写入前预检。 */
-  promptTargetHost?: "openclaw" | "codex" | "workbuddy";
-}) {
-  const { t } = useTranslation();
-  const navigate = useNavigate();
-  const primaryChannel = group.records[0]?.channel ?? "prompt";
-  const channelLabel = getChannelLabel(primaryChannel, t);
-  const isReversible = primaryChannel === "prompt" || primaryChannel === "defer_archive";
-  const actionsLocked = actionsLockedReason !== undefined;
-
-  // Inline review state (Wave 7: no more 404 jump to /principles/<fake-id>)
-  const [actionLoading, setActionLoading] = useState(false);
-  const [intentReviewed, setIntentReviewed] = useState(false);
-    useEffect(() => setIntentReviewed(false), [group]);
-  const [showRejectInput, setShowRejectInput] = useState(false);
-  const [rejectReason, setRejectReason] = useState("");
-  const [showEditInput, setShowEditInput] = useState(false);
-  const [editReason, setEditReason] = useState("");
-  const [newArtifactId, setNewArtifactId] = useState("");
-  // PRI-908: 决策成功后卡片先呈现终态（已批准/已拒绝）短暂停留，再刷新待办
-  // 列表移除卡片——避免"点了就消失"让 Owner 无法确认操作是否落地。
-  const [decidedOutcome, setDecidedOutcome] = useState<"approved" | "rejected" | null>(null);
-  const refreshTimerRef = useRef<number | null>(null);
-  useEffect(() => () => {
-    if (refreshTimerRef.current !== null) window.clearTimeout(refreshTimerRef.current);
-  }, []);
-
-  const isActionable = group.status === "pending" && group.records.some((r) => r.status === "pending");
-  const decisionDisabled = !isActionable || actionLoading || actionsLocked || decidedOutcome !== null;
-
-  function scheduleDecisionRefresh() {
-    if (refreshTimerRef.current !== null) window.clearTimeout(refreshTimerRef.current);
-    refreshTimerRef.current = window.setTimeout(() => onDecisionApplied(), DECIDED_REFRESH_DELAY_MS);
-  }
-
-  /** PRI-890/908: 非致命服务端警告必须抵达 Owner（rc-9），且必须说人话。 */
-  function notifySuccessWarnings(successWarnings: readonly string[]) {
-    const segments = successWarnings.flatMap((warning) => splitApprovalWarnings(warning));
-    const localized = segments.map((warning) => localizeApprovalWarning(warning, t));
-    // PR-1894: the raw server text is still preserved verbatim (rc-9 — never
-    // dropped), but it is operator-facing English, not Owner-facing prose. It
-    // used to be appended flat under the localized body, so the toast rendered
-    // as one mixed Chinese/English block and the machine text visually
-    // dominated the message. Collapse it behind a native <details> so the
-    // Owner reads plain language first and can still open the raw evidence.
-    const renderDetail = (detail: string) => (
-      <details className="mt-2 text-[11.5px] opacity-80">
-        <summary className="cursor-pointer select-none">
-          {t("pages.focus.approveWarningDetail", { defaultValue: "原始信息" })}
-        </summary>
-        <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px]">
-          {detail}
-        </pre>
-      </details>
-    );
-    for (const item of localized.slice(0, MAX_WARNING_TOASTS)) {
-      toast.warning(item.title, {
-        description: item.body
-          ? (<>{item.body}{renderDetail(item.detail)}</>)
-          // An unrecognized code degrades to the raw string as the whole
-          // message (rc-9) — there is no localized body to sit above it.
-          : item.detail,
-        duration: 15000,
-        action: item.activationAction
-          ? { label: t("pages.focus.goActivationCta", { defaultValue: "前往生效情况" }), onClick: () => navigate("/activation") }
-          : undefined,
-      });
-    }
-    const overflow = localized.slice(MAX_WARNING_TOASTS);
-    if (overflow.length > 0) {
-      toast.warning(t("pages.focus.approveWarning.overflowTitle", { defaultValue: "还有 {{count}} 条警告", count: overflow.length }), {
-        description: (
-          <>
-            {overflow.map((item) => (
-              <div key={item.detail} className="mb-1 last:mb-0">
-                <div>{item.title}</div>
-                {item.body ? <div>{item.body}</div> : null}
-                {renderDetail(item.detail)}
-              </div>
-            ))}
-          </>
-        ),
-        duration: 15000,
-      });
-    }
-  }
-
-  // Display title: prefer candidateDescription (human-readable) over principleTitle
-  // (which falls back to a fabricated principleId when the principle isn't in ledger).
-  // The selection rule and each degradation reason live in focus-validation
-  // (PRI-940 / PRI-941, contract-tested); the mutually exclusive notes below say
-  // why a particular card has no title.
-  const displayTitle = selectApprovalGroupDisplayTitle(group)
-    ?? t("pages.focus.untitledCandidate", { defaultValue: "待命名候选原则" });
-  const unlinkedCandidateNote = showsUnlinkedCandidateNote(group);
-  // SPEC-PD-CONSOLE-READABILITY-002 切片1（R2/R3/R7）：候选描述可能是整段规则
-  // 正文——不再整段充当加粗标题。短标题只作预览，逐字全文由正文块承载。
-  const readingLayout = splitReadingTitleBody(displayTitle);
-
-  async function applyDecisionToAllRecords(
-    action: "approve" | "reject",
-    reason?: string,
-  ): Promise<{ allSucceeded: boolean; failedCount: number; totalCount: number; failureReason?: string; successWarnings: string[] }> {
-    // Only process pending records — skip already-approved/rejected to avoid
-    // stable partial failures on mixed-status groups.
-    const pendingRecords = group.records.filter((r) => r.status === "pending");
-    const results: DecisionResult[] = [];
-    for (const record of pendingRecords) {
-      const result =
-        action === "approve"
-          ? await approveApproval(record.id, undefined, { targetHost: promptTargetHost, intentReviewed: group.revisionReview === undefined ? undefined : intentReviewed, reviewedArtifactId: record.artifactId })
-          : await rejectApproval(record.id, reason ?? "");
-      // PRI-890: preserve non-fatal server warnings (e.g. prompt injection
-      // budget exclusion) on successful decisions.
-      results.push(
-        result.success
-          ? { success: true, warning: result.data?.warning }
-          : { success: false, error: result.error ?? "unknown error", nextAction: result.nextAction },
-      );
-    }
-    return { ...summarizeDecisionResults(results), totalCount: pendingRecords.length };
-  }
-
-  const handleApprove = async () => {
-    if (!isActionable || actionLoading || decidedOutcome !== null || (group.revisionReviewUnavailable === true || (group.revisionReview !== undefined && !intentReviewed))) return;
-    setActionLoading(true);
-    try {
-      const { allSucceeded, failedCount, totalCount, failureReason, successWarnings } = await applyDecisionToAllRecords("approve");
-      if (allSucceeded) {
-        toast.success(t("pages.focus.approveSucceededCount", { defaultValue: "已批准 {{count}} 条原则", count: totalCount }));
-        // PRI-890: a committed activation can still be excluded from agent
-        // behavior (prompt injection budget saturated) — the server warning
-        // must reach the Owner, not vanish behind the success toast (rc-9).
-        // PRI-908: warnings render as localized plain-language toasts with an
-        // activation-page action, not raw English text.
-        notifySuccessWarnings(successWarnings);
-        setDecidedOutcome("approved");
-        scheduleDecisionRefresh();
-      } else {
-        toast.error(
-          t("pages.focus.partialFailure", {
-            defaultValue: `批准完成，但 ${failedCount}/${totalCount} 条记录失败。`,
-            failedCount,
-            totalCount,
-            reason: failureReason ?? t("pages.focus.unknownFailure", { defaultValue: "请检查服务日志。" }),
-          }),
-        );
-        onDecisionApplied();
-      }
-    } catch {
-      toast.error(t("pages.focus.approveFailed", { defaultValue: "批准失败，请稍后重试。" }));
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const handleReject = async () => {
-    if (!isActionable || actionLoading || decidedOutcome !== null || !rejectReason.trim()) return;
-    setActionLoading(true);
-    try {
-      const { allSucceeded, failedCount, totalCount, failureReason } = await applyDecisionToAllRecords("reject", rejectReason.trim());
-      if (allSucceeded) {
-        toast.success(t("pages.focus.rejectSucceeded", { defaultValue: "已拒绝" }));
-        setShowRejectInput(false);
-        setRejectReason("");
-        setDecidedOutcome("rejected");
-        scheduleDecisionRefresh();
-      } else {
-        toast.error(
-          t("pages.focus.partialFailure", {
-            defaultValue: `拒绝完成，但 ${failedCount}/${totalCount} 条记录失败。`,
-            failedCount,
-            totalCount,
-            reason: failureReason ?? t("pages.focus.unknownFailure", { defaultValue: "请检查服务日志。" }),
-          }),
-        );
-        onDecisionApplied();
-      }
-    } catch {
-      toast.error(t("pages.focus.rejectFailed", { defaultValue: "拒绝失败，请稍后重试。" }));
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const currentArtifactId = group.records.find((r) => r.status === "pending")?.artifactId ?? "";
-
-  const handleEdit = async () => {
-    if (!isActionable || actionLoading || decidedOutcome !== null || !editReason.trim() || !newArtifactId.trim()) return;
-    setActionLoading(true);
-    try {
-      const pendingRecords = group.records.filter((r) => r.status === "pending");
-      const results: DecisionResult[] = [];
-      for (const record of pendingRecords) {
-        const result = await editApproval(record.id, newArtifactId.trim(), editReason.trim());
-        results.push(
-          result.success
-            ? { success: true }
-            : { success: false, error: result.error, nextAction: result.nextAction },
-        );
-      }
-      const { allSucceeded, failedCount, failureReason } = summarizeDecisionResults(results);
-      const totalCount = results.length;
-      if (allSucceeded) {
-        toast.success(t("pages.focus.editSucceeded", { defaultValue: "已替换待审版本" }));
-        setShowEditInput(false);
-        setEditReason("");
-        setNewArtifactId("");
-        onDecisionApplied();
-      } else {
-        toast.error(
-          t("pages.focus.partialFailure", {
-            defaultValue: `替换完成，但 ${failedCount}/${totalCount} 条记录失败。`,
-            failedCount,
-            totalCount,
-            reason: failureReason ?? t("pages.focus.unknownFailure", { defaultValue: "请检查服务日志。" }),
-          }),
-        );
-        onDecisionApplied();
-      }
-    } catch {
-      toast.error(t("pages.focus.editFailed", { defaultValue: "替换失败，请稍后重试。" }));
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  return (
-    <article className="relative pl-[22px] py-[18px] pr-[18px] bg-panel border border-line rounded-[6px] transition-colors">
-      {/* Left border indicator */}
-      <div className="absolute left-0 top-0 bottom-0 w-[3px] rounded-l-[6px] bg-gov" />
-
-      {/* PRI-908: 决策落地终态——卡片停留片刻再从待办列表移除（rc-9：操作结果必须可见）。 */}
-      {decidedOutcome !== null && (
-        <div
-          className={`mb-3 rounded-[3px] border px-3 py-2 text-[12.5px] ${
-            decidedOutcome === "approved"
-              ? "border-green/40 bg-green/10 text-green"
-              : "border-line bg-surface/80 text-ink-3"
-          }`}
-          role="status"
-          data-testid={`decided-banner-${group.principleId}`}
-        >
-          {decidedOutcome === "approved"
-            ? t("pages.focus.decidedApproved", { defaultValue: "已批准 ✓ 正在写入生效记录…" })
-            : t("pages.focus.decidedRejected", { defaultValue: "已拒绝" })}
-        </div>
-      )}
-
-      {/* Tags row */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="inline-flex items-center border border-line rounded-[2px] px-[7px] py-1 font-mono text-[11px] text-ink-3 bg-surface/80 uppercase">
-          {channelLabel}
-        </span>
-        {isReversible && (
-          <span className="inline-flex items-center border border-amber/35 text-amber rounded-[2px] px-[7px] py-1 font-mono text-[11px] uppercase">
-            {primaryChannel === "prompt" ? t("pages.focus.tagReversible") : t("pages.focus.tagLowRisk")}
-          </span>
-        )}
-      </div>
-
-      {/* Title — human-readable candidate description, NOT the fabricated principleId.
-          切片1：标题只承载短预览（截断仅作预览），长文的逐字全文在正文块渲染。 */}
-      <div
-        className="mt-[14px] mb-2 font-semibold text-ink leading-snug"
-        data-testid={`candidate-title-${group.principleId}`}
-      >
-        {readingLayout.title}
-      </div>
-      {readingLayout.body !== null && (
-        <div
-          className="mb-2 text-[15px] leading-relaxed text-ink whitespace-pre-wrap break-words"
-          data-testid={`candidate-body-${group.principleId}`}
-        >
-          {readingLayout.body}
-        </div>
-      )}
-
-      {/* PRI-940: the pinned artifact is gone — degradation must be visible (rc-9),
-          not a silently blank card; the raw artifact ID stays reachable via the
-          edit section's current-artifact field for traceability. */}
-      {group.artifactUnavailable === true && (
-        <div
-          className="mb-2 text-[12.5px] leading-relaxed text-amber"
-          data-testid={`artifact-unavailable-${group.principleId}`}
-        >
-          {t("pages.focus.artifactUnavailableNote")}
-        </div>
-      )}
-
-      {/* PRI-941: the artifact exists but yields no description and its lineage
-          is unresolved — the title is empty for a different reason, so say which
-          one. Mutually exclusive with the note above by construction. */}
-      {unlinkedCandidateNote && (
-        <div
-          className="mb-2 text-[12.5px] leading-relaxed text-amber"
-          data-testid={`unlinked-candidate-${group.principleId}`}
-        >
-          {t("pages.focus.unlinkedCandidateNote")}
-        </div>
-      )}
-
-      {/* Evidence summary (inset well) */}
-      <div className="mt-2 px-3 py-2 bg-surface/60 border-l-2 border-gov text-ink-3 text-[13px] leading-snug">
-        {t("pages.focus.evidenceSummary", { count: group.records.length })}
-      </div>
-
-      {/* PRI-889: 治理就绪门锁定时给出可见原因（rc-9 — 禁用不允许是无声的）。 */}
-      {actionsLocked && (
-        <div
-          className="mt-3 rounded-[3px] border border-amber/40 bg-amber/5 p-3"
-          data-testid={`pending-actions-locked-${group.principleId}`}
-        >
-          <p className="text-ink-2 text-[12.5px] leading-relaxed">{actionsLockedReason}</p>
-          <Link
-            to="/settings"
-            data-testid={`pending-actions-locked-settings-${group.principleId}`}
-            className="mt-2 inline-flex items-center border border-line text-ink bg-surface rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors"
-          >
-            {t("pages.focus.ownerDecision.goSettingsCta")}
-          </Link>
-        </div>
-      )}
-
-      {/* PRI-908: 批准前预算预告——注入窗口已满即意味着"批准了也可能这一轮不生效"。
-          让 Owner 在决策前就知道，而不是事后道歉。
-          PR-1894: 两层条件都要满足才承诺轮转——(1) 生产路由确实轮转；
-          (2) 这条候选自身的序列化内容能装进预算。超预算的条目在任何一轮都
-          塞不进去，轮转救不了它，此时不得承诺"会自行轮到"。
-          PD_PROMPT_CAPACITY_V1 R-A2: 预测窗口（Console 无真实轮次键），并标注
-          计费范围——列表路由按选中行计费、共享路由按完整注入块计费，两个
-          数字不能混称为同一个"占用"。 */}
-      {/* PRI-1017/4.3: an unconfirmed route has no single current host, so a
-          numeric "used/budget" badge would impersonate whichever host the
-          payload lists first. Per-host facts live in the capacity banner. */}
-      {decidedOutcome === null && primaryChannel === "prompt" && promptInjection?.truncated === true && promptInjection.capacityStatus !== "unconfirmed" && (
-        <div
-          className="mt-3 rounded-[3px] border border-amber/40 bg-amber/5 px-3 py-2 text-[12.5px] text-amber"
-          data-testid={`approve-queue-badge-${group.principleId}`}
-        >
-          {promptInjection.productionRotates === true && group.fitsPromptBudget === true && group.promptBudgetTierFit === "model_dependent"
-            ? t("pages.focus.approveQueueBadgeRotationModelDependent", {
-                defaultValue: "批准后可能排队：提示词注入位已满（{{used}}/{{budget}} 字符）。这条原则的篇幅在较小上下文模型的注入预算内装不下，轮到它时也未必进入提示词——是否生效取决于当时模型的上限。",
-                used: promptInjection.usedChars,
-                budget: promptInjection.budget,
-              })
-            : promptInjection.productionRotates === true && group.fitsPromptBudget === true
-            ? t("pages.focus.approveQueueBadgeRotation", {
-                defaultValue: "批准后可能排队：提示词注入位已满（{{used}}/{{budget}} 字符）。当前按公平轮转选取，新原则会在后续轮次自行轮到，无需停用旧原则。",
-                used: promptInjection.usedChars,
-                budget: promptInjection.budget,
-              })
-            : promptInjection.productionRotates === true
-              ? t("pages.focus.approveQueueBadgeOversized", {
-                  defaultValue: "批准后可能排队：提示词注入位已满（{{used}}/{{budget}} 字符）。这条原则本身已超出注入位上限，轮转也无法让它进入提示词——需要先精简它的内容。",
-                  used: promptInjection.usedChars,
-                  budget: promptInjection.budget,
-                })
-              : t("pages.focus.approveQueueBadge", {
-                  defaultValue: "批准后可能排队：提示词注入位已满（{{used}}/{{budget}} 字符）。",
-                  used: promptInjection.usedChars,
-                  budget: promptInjection.budget,
-                })}
-          <div className="mt-1 text-ink-3 text-[11.5px]" data-testid={`approve-queue-badge-scope-${group.principleId}`}>
-            {promptInjection.route === "shared_render"
-              ? t("pages.focus.promptScopeShared")
-              : t("pages.focus.promptScopeList", {
-                  full: promptInjection.fullRenderChars !== undefined
-                    ? t("pages.focus.promptScopeFullRender", { count: promptInjection.fullRenderChars })
-                    : "",
-                })}
-            {promptInjection.hostKind !== undefined ? ` · ${promptInjection.hostKind === "openclaw" ? "OpenClaw" : promptInjection.hostKind === "workbuddy" ? "WorkBuddy" : "Codex"}` : ""}
-            {` · ${
-              // A "confirmed" claim is only renderable when the window is
-              // present: a payload missing it must not print "0 tokens".
-              promptInjection.budgetCapacityStatus === "confirmed" && promptInjection.budgetContextWindowTokens !== undefined
-                ? promptInjection.budgetObservedAt !== undefined
-                  // PRI-1017: the budget comes from the workspace's most
-                  // recent RUNTIME OBSERVATION (the last real injection) —
-                  // say so, with source + window + observation time. Never
-                  // present a past observation as a live confirmation.
-                  ? t("pages.focus.promptBudgetObservedNote", {
-                      defaultValue: "预算取自最近一次运行时观测（来源 {{source}}，上下文 {{window}} tokens，观测于 {{observedAt}}）",
-                      // PRI-1020: three-way source label — the owner-declared
-                      // basis reads as a declaration, never as a runtime fact.
-                      source: promptInjection.budgetCapacitySource === "pi_catalog_exact"
-                        ? t("pages.focus.budgetCapacitySourcePiCatalog", { defaultValue: "模型目录精确匹配" })
-                        : promptInjection.budgetCapacitySource === "operator_declared"
-                          ? t("pages.focus.budgetCapacitySourceOperatorDeclared", { defaultValue: "工作区配置声明" })
-                          : t("pages.focus.budgetCapacitySourceHostWindow", { defaultValue: "宿主有效上下文窗口" }),
-                      window: promptInjection.budgetContextWindowTokens,
-                      observedAt: promptInjection.budgetObservedAt,
-                    })
-                  : t("pages.focus.promptBudgetModelAwareNote", {
-                      defaultValue: "预算按已确认的模型上下文解析（{{window}} tokens{{sourceSuffix}}）",
-                      window: promptInjection.budgetContextWindowTokens,
-                      // PRI-1020: without an observation, a confirmed budget can
-                      // only come from the Owner's declaration — say so.
-                      sourceSuffix: promptInjection.budgetCapacitySource === "operator_declared"
-                        ? t("pages.focus.budgetCapacitySourceOperatorDeclaredSuffix", { defaultValue: "，来源: 工作区配置声明" })
-                        : "",
-                    })
-                : promptInjection.budgetObservedAt !== undefined
-                  // PRI-1017: a fallback that still carries an observation
-                  // timestamp IS the runtime's own honest fallback (the last
-                  // injection resolved 2000 with a reason). Saying "console
-                  // not bound to the runtime model" here would be false — the
-                  // console DID use the runtime's last observation.
-                  ? t("pages.focus.promptBudgetFallbackObservedNote", {
-                      defaultValue: "运行时最近一次观测未确认宿主容量，预算按固定回退估算（{{reason}}，观测于 {{observedAt}}）",
-                      reason: promptInjection.budgetFallbackReason !== undefined
-                        ? t(`pages.focus.budgetFallbackReason.${promptInjection.budgetFallbackReason}`, {
-                            defaultValue: promptInjection.budgetFallbackReason,
-                          })
-                        : "unknown",
-                      observedAt: promptInjection.budgetObservedAt,
-                    })
-                  : t("pages.focus.promptBudgetFallbackNote", {
-                      defaultValue: "按固定回退预算估算（控制台未绑定运行时模型{{reason}}）",
-                      reason: promptInjection.budgetFallbackReason !== undefined
-                        ? t("pages.focus.promptBudgetFallbackReasonSuffix", {
-                            defaultValue: "，原因: {{code}}",
-                            // The raw bounded code stays the default: it is the
-                            // grep-able identifier shared with events/logs. Locales
-                            // may override via pages.focus.budgetFallbackReason.<code>.
-                            code: t(`pages.focus.budgetFallbackReason.${promptInjection.budgetFallbackReason}`, {
-                              defaultValue: promptInjection.budgetFallbackReason,
-                            }),
-                          })
-                        : "",
-                    })
-            }`}
-          </div>
-        </div>
-      )}
-
-      {group.revisionReviewUnavailable === true && <p role="alert" className="mt-3 text-danger">{t("pages.focus.revisionReviewUnavailable")}</p>}
-      {group.revisionReview !== undefined && (
-        <div className="mt-3 border border-line p-3 text-[12.5px]" data-testid={`revision-intent-review-${group.principleId}`}>
-          <p>{t("pages.focus.revisionIntentReview", { defaultValue: "修订复核：确认新正文保留触发条件、行动要求和必要例外，并与沿用意图一致。" })}</p>
-          <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap">{group.revisionReview.oldStatement}</pre>
-          <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap">{group.revisionReview.newStatement}</pre>
-          <dl className="mt-2">
-            {Object.entries(group.revisionReview.intentFields).map(([key, value]) => <div key={key}><dt>{t(`pages.focus.intentField.${key}`, { defaultValue: key })}</dt><dd>{value}</dd></div>)}
-          </dl>
-          <label className="mt-2 flex gap-2">
-            <input type="checkbox" checked={intentReviewed} onChange={(event) => setIntentReviewed(event.target.checked)} />
-            {t("pages.focus.revisionIntentConfirmed", { defaultValue: "我已核对上述意图与新正文一致" })}
-          </label>
-        </div>
-      )}
-      {/* Inline review actions (Wave 7: no more 404 jump) */}
-      <div className="flex gap-2 mt-4 flex-wrap items-center">
-        <button
-          type="button"
-          onClick={handleApprove}
-          disabled={decisionDisabled || (group.revisionReviewUnavailable === true || (group.revisionReview !== undefined && !intentReviewed))}
-          data-testid={`approve-btn-${group.principleId}`}
-          className="inline-flex items-center border border-gov bg-gov text-paper rounded-[3px] px-[14px] py-[6px] text-[12.5px] font-medium hover:bg-gov-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
-        >
-          {actionLoading ? t("common.loading") + "…" : t("pages.focus.approveAction", { defaultValue: "批准" })}
-        </button>
-        <button
-          type="button"
-          onClick={() => { setShowEditInput((v) => !v); setShowRejectInput(false); }}
-          disabled={decisionDisabled}
-          data-testid={`edit-btn-${group.principleId}`}
-          className="inline-flex items-center border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
-        >
-          {t("pages.focus.editAction", { defaultValue: "替换待审版本" })}
-        </button>
-        <button
-          type="button"
-          onClick={() => { setShowRejectInput((v) => !v); setShowEditInput(false); }}
-          disabled={decisionDisabled}
-          data-testid={`reject-btn-${group.principleId}`}
-          className="inline-flex items-center border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
-        >
-          {t("pages.focus.rejectAction", { defaultValue: "拒绝" })}
-        </button>
-        {/* PRI-942: /pain is the only page rendering the evidence chain. */}
-        <Link
-          to="/pain"
-          className="inline-flex items-center text-gov text-[12.5px] hover:underline focus-visible:outline-2 focus-visible:outline-gov focus-visible:outline-offset-2"
-        >
-          {t("pages.focus.viewFullChain")}
-        </Link>
-      </div>
-
-      {/* Rejection reason input (inline, not dialog) */}
-      {showRejectInput && (
-        <div className="mt-3 p-3 border border-danger/20 rounded-[var(--radius-md)]">
-          <label className="block font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-2">
-            {t("pages.focus.rejectReasonLabel", { defaultValue: "拒绝原因（必填）" })}
-          </label>
-          <textarea
-            value={rejectReason}
-            onChange={(e) => setRejectReason(e.target.value)}
-            data-testid={`reject-reason-${group.principleId}`}
-            placeholder={t("pages.focus.rejectReasonPlaceholder", { defaultValue: "请说明拒绝原因" })}
-            className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-[13px] min-h-[80px] resize-y focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
-          />
-          <div className="flex gap-2 mt-2">
-            <button
-              type="button"
-              onClick={handleReject}
-              disabled={!rejectReason.trim() || actionLoading}
-              data-testid={`confirm-reject-${group.principleId}`}
-              className="inline-flex items-center border border-danger text-danger bg-surface rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:bg-danger/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {t("pages.focus.confirmReject", { defaultValue: "确认拒绝" })}
-            </button>
-            <button
-              type="button"
-              onClick={() => { setShowRejectInput(false); setRejectReason(""); }}
-              className="inline-flex items-center border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors"
-            >
-              {t("pages.focus.cancelAction", { defaultValue: "取消" })}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Edit revision input (inline, not dialog) */}
-      {showEditInput && (
-        <div className="mt-3 p-3 border border-gov/20 rounded-[var(--radius-md)]">
-          <label className="block font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3 mb-2">
-            {t("pages.focus.editReasonLabel", { defaultValue: "替换原因（必填）" })}
-          </label>
-          <div className="mb-2 text-ink-4 text-[12px] font-mono">
-            {t("pages.focus.currentArtifactLabel", { defaultValue: "当前工件" })}: {currentArtifactId}
-          </div>
-          <input
-            type="text"
-            value={newArtifactId}
-            onChange={(e) => setNewArtifactId(e.target.value)}
-            data-testid={`edit-new-artifact-${group.principleId}`}
-            placeholder={t("pages.focus.editNewArtifactPlaceholder", { defaultValue: "输入新的已验证工件 ID" })}
-            className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-[13px] mb-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
-            aria-label={t("pages.focus.editNewArtifactPlaceholder", { defaultValue: "输入新的已验证工件 ID" })}
-          />
-          <textarea
-            value={editReason}
-            onChange={(e) => setEditReason(e.target.value)}
-            data-testid={`edit-reason-${group.principleId}`}
-            placeholder={t("pages.focus.editReasonPlaceholder", { defaultValue: "请说明为什么需要替换这份待审版本" })}
-            className="w-full border border-line rounded-[var(--radius-md)] bg-surface text-ink px-3 py-2 text-[13px] min-h-[80px] resize-y focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
-          />
-          <div className="flex gap-2 mt-2">
-            <button
-              type="button"
-              onClick={handleEdit}
-              disabled={!editReason.trim() || !newArtifactId.trim() || actionLoading}
-              data-testid={`confirm-edit-${group.principleId}`}
-              className="inline-flex items-center border border-gov text-gov bg-surface rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:bg-gov/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {t("pages.focus.confirmEdit", { defaultValue: "确认替换" })}
-            </button>
-            <button
-              type="button"
-              onClick={() => { setShowEditInput(false); setEditReason(""); setNewArtifactId(""); }}
-              className="inline-flex items-center border border-line bg-surface text-ink rounded-[3px] px-[14px] py-[6px] text-[12.5px] hover:border-line-2 transition-colors"
-            >
-              {t("pages.focus.cancelAction", { defaultValue: "取消" })}
-            </button>
-          </div>
-        </div>
-      )}
-    </article>
   );
 }
 
@@ -1268,6 +620,25 @@ function ExperienceSummaryCard({ snapshot }: { snapshot: GovernanceExperienceSna
 // ── Main page component ──────────────────────────────────────────────────────
 
 type LoadingState = "loading" | "loaded" | "error";
+type FocusSource = 'summary' | 'approvals' | 'activations' | 'bindings' | 'decisions' | 'inbox';
+function decisionWorkKind(kind: string): OwnerWorkItemKind {
+  switch (kind) {
+    case 'rulecode_decision': return 'promotion';
+    case 'evaluator_review': return 'revision';
+    case 'rollout_review': return 'validation';
+    case 'activation_approval': return 'approval';
+    default: return 'unknown';
+  }
+}
+function approvalWorkKind(channel: string): OwnerWorkItemKind {
+  switch (channel) {
+    case 'prompt': return 'prompt';
+    case 'code_tool_hook': return 'rule';
+    case 'defer_archive': return 'archive';
+    default: return 'unknown';
+  }
+}
+const FOCUS_SOURCES: FocusSource[] = ['summary', 'approvals', 'activations', 'bindings', 'decisions', 'inbox'];
 
 export interface FocusPageProps {
   /** Feature flags from /api/v1/config/summary — gates the experience snapshot path. */
@@ -1285,6 +656,11 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
   // otherwise a transient legacy queue request goes out before the flag turns
   // experience mode on (wasted call + legacy-panel flash). Hold in `loading`.
   const flagsResolved = featureFlags !== undefined;
+  const [bindingQueue, setBindingQueue] = useState<RuleBindingQueueView | null>(null);
+  const [bindingError, setBindingError] = useState<string | null>(null);
+  const [completedMessage, setCompletedMessage] = useState<{ key: string; message: string } | null>(null);
+  const requestEpoch = useRef(0);
+  const [pendingSources, setPendingSources] = useState<FocusSource[]>(FOCUS_SOURCES);
   const [queueData, setQueueData] = useState<GovernanceQueueData | null>(null);
   const [experienceData, setExperienceData] = useState<GovernanceExperienceSnapshot | null>(null);
   const [groupedData, setGroupedData] = useState<ApprovalsGroupedData | null>(null);
@@ -1307,87 +683,71 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
   const [promptTargetHost, setPromptTargetHost] = useState<"openclaw" | "codex" | "workbuddy" | null>(null);
 
   const loadData = useCallback(async () => {
-    setLoadingState("loading");
+    const epoch = ++requestEpoch.current;
+    setLoadingState("loaded");
+    setPendingSources(FOCUS_SOURCES);
+    setExperienceData(null); setQueueData(null); setGroupedData(null);
+    setRuleCodeItems([]); setBindingQueue(null); setOwnerDecisionItems([]); setOwnerInbox(null);
     setErrorMessage(null);
     setGroupedErrorReason(null);
     setRuleCodeErrorReason(null);
+    setBindingError(null); setOwnerDecisionError(null); setOwnerInboxError(null);
 
-    const [experienceResult, queueResult, groupedResult, activationsResult] = await Promise.all([
-      experienceMode ? fetchGovernanceExperience() : Promise.resolve(null),
-      experienceMode ? Promise.resolve(null) : fetchGovernanceQueue(),
-      fetchApprovalsGrouped(promptTargetHost ?? undefined),
-      fetchAllActivations(promptTargetHost ?? undefined),
+    // Each source publishes independently. A stalled history/inbox request must
+    // not hide already available decisions; old request epochs cannot publish.
+    async function settle<T>(source: FocusSource, request: Promise<T>, apply: (value: T) => void, fail: (message: string) => void) {
+      try {
+        const result = await request;
+        if (epoch === requestEpoch.current) apply(result);
+      } catch (error) {
+        if (epoch === requestEpoch.current) fail(error instanceof Error ? error.message : t('pages.focus.loadError'));
+      } finally {
+        if (epoch === requestEpoch.current) setPendingSources(current => current.filter(item => item !== source));
+      }
+    }
+    await Promise.all([
+      experienceMode
+        ? settle('summary', fetchGovernanceExperience(), result => {
+          if (result.success) setExperienceData(result.data); else setErrorMessage(result.error);
+        }, setErrorMessage)
+        : settle('summary', fetchGovernanceQueue(), result => {
+          if (result.success) setQueueData(result.data); else setErrorMessage(result.error);
+        }, setErrorMessage),
+      settle('approvals', fetchApprovalsGrouped(promptTargetHost ?? undefined), result => {
+        if (!result.success) { setGroupedErrorReason(result.error); return; }
+        const data = validateApprovalsGroupedData(result.data);
+        setGroupedData(data);
+        if (data === null) setGroupedErrorReason(t('pages.focus.workbench.approvalsUnavailable'));
+      }, setGroupedErrorReason),
+      settle('activations', fetchAllActivations(promptTargetHost ?? undefined), result => {
+        if (result.success) setRuleCodeItems(result.data.activations.filter(item => item.channel === 'code_tool_hook' && item.status === 'active'));
+        else setRuleCodeErrorReason(result.error);
+      }, setRuleCodeErrorReason),
+      settle('bindings', fetchRuleBindingQueue(), result => {
+        if (result.success) setBindingQueue(result.data); else setBindingError(result.error);
+      }, setBindingError),
+      settle('decisions', fetchOwnerDecisions(), result => {
+        if (result.success) setOwnerDecisionItems(result.data.items); else setOwnerDecisionError(result.error);
+      }, setOwnerDecisionError),
+      settle('inbox', fetchOwnerDecisionInbox(), result => {
+        if (result.success) setOwnerInbox(result.data);
+        else if (result.reason !== 'feature_disabled') setOwnerInboxError(result.error);
+      }, setOwnerInboxError),
     ]);
-
-    if (experienceMode) {
-      if (experienceResult === null || !experienceResult.success) {
-        setLoadingState("error");
-        setErrorMessage(experienceResult === null ? t("pages.focus.experience.error.snapshotUnavailable") : experienceResult.error);
-        return;
-      }
-      setExperienceData(experienceResult.data);
-      setQueueData(null);
-    } else {
-      // Queue data is already validated by the API layer (validateGovernanceQueue)
-      if (queueResult === null || !queueResult.success) {
-        setLoadingState("error");
-        setErrorMessage(queueResult === null ? t("pages.focus.loadError") : queueResult.error);
-        return;
-      }
-      setQueueData(queueResult.data);
-      setExperienceData(null);
-    }
-
-    // Validate grouped data (ERR-002: degradation with reason)
-    if (!groupedResult.success) {
-      setGroupedData(null);
-      setGroupedErrorReason(groupedResult.error ?? "Approvals data unavailable");
-    } else {
-      const validatedGrouped = validateApprovalsGroupedData(groupedResult.data);
-      setGroupedData(validatedGrouped);
-      if (validatedGrouped === null) {
-        setGroupedErrorReason("Approvals data has unexpected shape");
-      }
-    }
-    if (activationsResult.success) {
-      setRuleCodeItems(
-        activationsResult.data.activations.filter(
-          (item) => item.channel === "code_tool_hook" && item.status === "active",
-        ),
-      );
-    } else {
-      setRuleCodeItems([]);
-      setRuleCodeErrorReason(activationsResult.error);
-    }
-
-    // PRI-629: 统一 Owner Inbox (decision-capable NHR + approvals + rulecode)。
-    // 投影失败不阻塞页面 (rc-9 降级 — 显示原因,治理摘要仍可用)。
-    const decisionsResult = await fetchOwnerDecisions();
-    if (decisionsResult.success) {
-      setOwnerDecisionItems(decisionsResult.data.items);
-      setOwnerDecisionError(null);
-    } else {
-      setOwnerDecisionItems([]);
-      setOwnerDecisionError(decisionsResult.error ?? "Owner decisions unavailable");
-    }
-
-    // Owner Decision Experience v1 inbox: failure degrades observably (rc-9),
-    // never blocking the rest of the focus page.
-    const ownerInboxResult = await fetchOwnerDecisionInbox();
-    if (ownerInboxResult.success) {
-      setOwnerInbox(ownerInboxResult.data);
-      setOwnerInboxError(null);
-    } else {
-      setOwnerInbox(null);
-      setOwnerInboxError(ownerInboxResult.reason === 'feature_disabled' ? null : (ownerInboxResult.error ?? "Owner decision inbox unavailable"));
-    }
-
-    setLoadingState("loaded");
   }, [experienceMode, t, promptTargetHost]);
+
+  function changePromptTargetHost(host: typeof promptTargetHost) {
+    if (host === promptTargetHost) return;
+    requestEpoch.current++;
+    setPendingSources(FOCUS_SOURCES);
+    setCompletedMessage(null);
+    setPromptTargetHost(host);
+  }
 
   useEffect(() => {
     if (!flagsResolved) return;
-    loadData();
+    void loadData();
+    return () => { requestEpoch.current++; };
   }, [flagsResolved, loadData]);
 
   // ── Loading state ────────────────────────────────────────────────────────
@@ -1423,9 +783,6 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
   const pendingGroups = groupedData?.groups.filter((g) => g.status === "pending") ?? [];
   const groupedAvailable = groupedData !== null;
   const decisionItems = selectDecisionSurfaceItems(ownerDecisionItems, groupedAvailable);
-  // Single source for "the inline approval cards are on screen" — the section
-  // count and the empty state must agree on it.
-  const showApprovalCards = groupedAvailable && pendingGroups.length > 0;
   const pendingCount = queueData?.pendingReviewCount ?? 0;
   const deviationCount = queueData?.behaviorDeviationCount ?? 0;
   const stagnationSignals = queueData?.stagnationSignals ?? [];
@@ -1442,8 +799,10 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
   const ruleCodeAlerts = ruleCodeItems.filter(item => item.enforcement === 'safety_isolated');
 
   // PRI-787: 决策动作被治理就绪门锁定时，必须在卡片上给出可见原因（rc-9 —
-  // 禁用不允许是无声的）。experienceData 未加载（null）时门默认放行、无锁定。
-  const ownerActionsLockedReason = experienceData === null
+  // 未知就绪状态或新宿主的材料仍在读取时，允许阅读，不放行动作。
+  const ownerActionsLockedReason = pendingSources.includes('summary') || (experienceMode && experienceData === null)
+    ? t("pages.focus.workbench.permissionsUnknown")
+    : experienceData === null
     || (experienceData.readiness.authenticationMode === "authenticated"
       && experienceData.readiness.ownerIdentityConfiguration === "configured")
     ? null
@@ -1470,21 +829,9 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
   const unmatchedInboxDecisions = inboxPartition?.unmatchedDecisions ?? [];
   // 待处理口径 (INV-01 lineage): decision + blocked-individual + recovery —
   // same three groups the inbox renders; historical unknowns stay explanatory.
-  const inboxPendingTotal = inboxPartition?.pendingTotal ?? 0;
-  // 可操作口径: the action cards actually on screen (decision cards + approval
-  // cards) — the same number the「需要你决定」section header shows.
-  const actionableCount = (ownerDecisionError === null ? decisionItems.length : 0)
-    + (showApprovalCards ? pendingGroups.length : 0);
   // Review round 2 (P2): the headline never claims allClear from the inbox
-  // alone, degraded payloads surface their reason, and the total is the
-  // association-deduped union of on-screen cards and inbox items — see
-  // deriveConclusionDisplay.
-  const conclusionDisplay = deriveConclusionDisplay({
-    ownerInbox,
-    ownerInboxError,
-    partition: inboxPartition,
-    actionableCount,
-  });
+  // alone; degraded payloads surface their reason — see deriveConclusionDisplay.
+  const conclusionDisplay = deriveConclusionDisplay({ ownerInbox, ownerInboxError });
 
   // Map codes to i18n text
   // Governance Recovery Actions v1: tasks_need_human_review interpolates the
@@ -1494,8 +841,38 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
   const stateReason = getStateReasonText(stateReasonCode, t, stateReasonCount);
   const nextAction = getNextActionText(nextActionCode, t);
 
+  const sourcesUncertain = pendingSources.length > 0 || conclusionDisplay.mode === 'degraded' || experienceData?.dataQuality.degraded === true
+    || ruleCodeErrorReason !== null || errorMessage !== null || ownerDecisionError !== null || groupedErrorReason !== null || bindingError !== null || ownerInboxError !== null;
+  const workItems: OwnerWorkItem[] = [
+    ...ruleCodePending.filter(item => !decisionItems.some(decision => decision.kind === 'rulecode_decision' && decision.taskId === item.activationId)).map(item => ({ key: `activation:${item.activationId}`, title: splitReadingTitleBody(t('pages.focus.workbench.rulePromotion')).title,
+      kind: 'promotion' as const, summary: t('pages.focus.workbench.promotionSummary'), reference: item.activationId,
+      content: <div className="text-sm leading-relaxed text-ink-2"><p>{t('pages.focus.workbench.promotionSummary')}</p><Link to={`/activation?activationId=${encodeURIComponent(item.activationId)}`} className="mt-4 inline-block text-gov underline">{t('pages.focus.workbench.openActivation')}</Link></div> })),
+    ...decisionItems.map(item => ({ key: `decision:${item.reviewKey}`, title: splitReadingTitleBody(item.title).title,
+      kind: decisionWorkKind(item.kind), summary: item.summary, reference: item.taskId,
+      content: <OwnerDecisionCard key={`${item.reviewKey}:${promptTargetHost ?? 'default'}`} item={item} governanceReady={ownerActionsLockedReason === null}
+        actionsLockedReason={ownerActionsLockedReason ?? undefined} onResolved={() => { setCompletedMessage({ key: `decision:${item.reviewKey}`, message: t('pages.focus.workbench.decisionRecorded') }); void loadData(); }} /> })),
+    ...pendingGroups.flatMap(group => group.records.filter(record => record.status === 'pending').map((record, index) => ({
+      key: `approval:${record.id}`, title: new Set(group.records.map(entry => entry.artifactId)).size > 1 ? t('pages.focus.workbench.versionNeedsReview', { index: index + 1 }) : splitReadingTitleBody(selectApprovalGroupDisplayTitle(group) ?? t('pages.focus.untitledCandidate')).title,
+      kind: approvalWorkKind(record.channel),
+      summary: t('pages.focus.workbench.approvalSummary'),
+      content: <ApprovalSubjectReading key={`${record.id}:${promptTargetHost ?? 'default'}`} principleId={group.principleId} approvalId={record.id} artifactId={record.artifactId} channel={record.channel} lockedReason={ownerActionsLockedReason ?? undefined}
+        targetHost={promptTargetHost ?? undefined} revisionReview={new Set(group.records.filter(entry => entry.status === 'pending').map(entry => entry.artifactId)).size === 1 ? group.revisionReview : undefined}
+        revisionReviewUnavailable={record.revisionReviewUnavailable ?? (group.records.some(entry => entry.status === 'pending' && entry.revisionReviewUnavailable === true) ? false : group.revisionReviewUnavailable)}
+        sourceUnlinked={showsUnlinkedCandidateNote(group)}
+        promptInjection={groupedData?.promptInjection}
+        budgetNotice={groupedData?.promptInjection?.truncated === true && groupedData.promptInjection.capacityStatus !== 'unconfirmed' ? t(
+          groupedData.promptInjection.productionRotates === true ? group.fitsPromptBudget === true ? group.promptBudgetTierFit === 'model_dependent'
+            ? 'pages.focus.approveQueueBadgeRotationModelDependent' : 'pages.focus.approveQueueBadgeRotation' : 'pages.focus.approveQueueBadgeOversized' : 'pages.focus.approveQueueBadge',
+          { used: groupedData.promptInjection.usedChars, budget: groupedData.promptInjection.budget }) : undefined}
+        onResolved={message => { setCompletedMessage({ key: `approval:${record.id}`, message }); void loadData(); }} />,
+    }))),
+    ...(bindingQueue?.items ?? []).filter(item => !['bound_generating', 'bound_advanced', 'bound_not_built'].includes(deriveRuleBindingCardState(item))).map(item => ({ key: `binding:${item.candidateId}`, title: splitReadingTitleBody(item.text).title,
+      kind: 'binding' as const, summary: item.pain.text ?? t('pages.focus.workbench.bindingSummary'), reference: item.candidateId,
+      content: <RuleCandidateBindingPanel key={item.candidateId} candidateId={item.candidateId} onChanged={() => { void loadData(); }} /> })),
+  ];
+
   return (
-    <PageShell>
+    <PageShell className="max-w-[1120px] owner-workbench-container">
       <div className="animate-[pdFadeIn_400ms_ease-out]">
       {/* Layer 1: Conclusion — eyebrow + title + subtitle */}
       <div className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase mb-3">
@@ -1508,10 +885,10 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
         brightness={0.5}
         disabled={pendingCount === 0}
       >
-        {t("pages.focus.title")}
+        {t('pages.focus.workbench.title')}
       </ShinyText>
       <p className="text-ink-3 text-[14px] max-w-[760px] leading-relaxed mb-7">
-        {t("pages.focus.subtitle")}
+        {t('pages.focus.workbench.subtitle')}
       </p>
 
       {/* SPEC-PD-UIUX-001 R2 Layer 1: 当前结论 — readiness, one lock reason,
@@ -1540,32 +917,13 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
             role="status"
             data-testid="focus-conclusion-badge"
           >
-            {experienceMode && experienceData !== null
+            {sourcesUncertain ? t('pages.focus.workbench.sourcesPending') : workItems.length > 0 ? t('pages.focus.workbench.title') : experienceMode && experienceData !== null
               ? t(EXPERIENCE_ATTENTION[experienceData.summary.primaryAttention].labelKey)
               : t(`pages.focus.stateLabel.${governanceState}`)}
           </span>
           <div className="text-ink-2 text-[13px] leading-relaxed" data-testid="focus-conclusion-counts">
-            {conclusionDisplay.mode === 'ok' && conclusionDisplay.displayTotal === 0 ? (
-              <span>{t("pages.focus.conclusion.allClear")}</span>
-            ) : conclusionDisplay.mode === 'unavailable' || conclusionDisplay.mode === 'degraded' ? (
-              <>
-                <span className="font-medium" data-testid="focus-conclusion-uncertain">{t("pages.focus.conclusion.pendingUncertain")}</span>
-                {conclusionDisplay.actionableCount > 0 && (
-                  <span className="text-ink-4">
-                    {" · "}
-                    {t(resolveConclusionActionableKey(conclusionDisplay.mode, ownerActionsLockedReason !== null), { count: conclusionDisplay.actionableCount })}
-                  </span>
-                )}
-              </>
-            ) : (
-              <>
-                <span className="font-medium">{t("pages.focus.conclusion.pendingTotal", { count: conclusionDisplay.displayTotal })}</span>
-                <span className="text-ink-4">
-                  {" · "}
-                  {t(resolveConclusionActionableKey(conclusionDisplay.mode, ownerActionsLockedReason !== null), { count: conclusionDisplay.actionableCount })}
-                </span>
-              </>
-            )}
+            <span className="font-medium">{t('pages.focus.workbench.count', { count: workItems.length })}</span>
+            {sourcesUncertain && <span className="ml-2 text-amber" data-testid="focus-conclusion-uncertain">{t('pages.focus.workbench.uncertain')}</span>}
           </div>
         </div>
         {conclusionDisplay.mode === 'degraded' && conclusionDisplay.degraded && (
@@ -1591,42 +949,26 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
             </Link>
           </div>
         )}
-        <p className="mt-2 text-ink-4 text-[11.5px] leading-relaxed" data-testid="focus-conclusion-scope-note">
-          {t("pages.focus.conclusion.countsNote")}
-        </p>
+        <details className="mt-2 text-ink-4 text-[11.5px] leading-relaxed"><summary className="cursor-pointer">{t('pages.focus.workbench.countExplanation')}</summary>
+          <p className="mt-2" data-testid="focus-conclusion-scope-note">{t("pages.focus.conclusion.countsNote")}</p>
+        </details>
       </section>
 
-      <RuleCandidateBindingPanel />
+      {(errorMessage || bindingError) && <div role="alert" className="mb-5 border-l-2 border-amber pl-3 text-sm leading-relaxed text-ink-3">
+        <p>{t('pages.focus.workbench.uncertain')}</p><p className="mt-1 text-[12px]">{errorMessage ?? bindingError}</p>
+        <button type="button" onClick={() => { void loadData(); }} className="mt-2 text-gov underline">{t('pages.focus.workbench.retry')}</button>
+      </div>}
+      {ruleCodeAlerts.length > 0 && <section role="alert" className="mb-5 border-l-2 border-danger pl-3 text-sm text-ink">
+        <p>{t('pages.focus.workbench.safetyAlert', { count: ruleCodeAlerts.length })}</p>
+        <Link to="/activation" className="mt-2 inline-block text-gov underline">{t('pages.focus.workbench.openActivation')}</Link>
+      </section>}
+      {groupedErrorReason && <p role="alert" className="mb-4 text-[13px] text-amber">{t('pages.focus.workbench.approvalsUnavailable')}</p>}
+      <OwnerWorkbench items={workItems} completed={completedMessage} uncertain={sourcesUncertain} />
 
       {/* PRI-629: 需要你决定 — 统一 Owner Inbox。两种治理摘要模式下都渲染;
           N = 真实可执行决策数 (INV-01),不是 lifecycle/NHR/failed 计数。 */}
       <section aria-label={t("pages.focus.ownerDecision.sectionTitle")} className="mb-7" data-testid="owner-decisions-section">
-        <div className="flex items-baseline gap-2 mb-3">
-          <SectionTitle>{t("pages.focus.ownerDecision.sectionTitle")}</SectionTitle>
-          <span className="font-mono text-ink-4 text-[12px]">
-            {ownerDecisionError !== null
-              ? t("pages.focus.ownerDecision.unavailable")
-              : `· ${decisionItems.length + (showApprovalCards ? pendingGroups.length : 0)}`}
-          </span>
-        </div>
-        {ownerDecisionError !== null && (
-          <p className="text-ink-4 text-[12.5px]">{t("pages.focus.ownerDecision.loadError")}</p>
-        )}
-        {ownerDecisionError === null && decisionItems.length === 0 && !showApprovalCards && (
-          <p className="text-ink-4 text-[13px]">{t("pages.focus.ownerDecision.empty")}</p>
-        )}
-        {decisionItems.map((item) => (
-          <OwnerDecisionCard
-            key={item.reviewKey}
-            item={item}
-            governanceReady={experienceData === null || (
-              experienceData.readiness.authenticationMode === "authenticated"
-              && experienceData.readiness.ownerIdentityConfiguration === "configured"
-            )}
-            actionsLockedReason={ownerActionsLockedReason ?? undefined}
-            onResolved={() => { void loadData(); }}
-          />
-        ))}
+        {ownerDecisionError !== null && <p role="alert" className="text-amber text-[13px]">{t('pages.focus.ownerDecision.loadError')}</p>}
         {/* 分组数据不可用时 OwnerDecisionCard 保持原渲染（含降级 CTA），决策不静默消失（rc-9）——见 selectDecisionSurfaceItems。 */}
         {/* PD_PROMPT_CAPACITY_V1 R-A1: 适用宿主会走不同路由且未选择目标宿主时，
             明确标注"当前宿主容量未确认"并分别展示各宿主的能力——不猜测 FIFO 或轮转。 */}
@@ -1690,7 +1032,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
                 <button
                   key={host}
                   type="button"
-                  onClick={() => setPromptTargetHost(host)}
+                  onClick={() => changePromptTargetHost(host)}
                   data-testid={`prompt-capacity-pick-${host}`}
                   className={`inline-flex items-center border rounded-[3px] px-[10px] py-[4px] transition-colors ${
                     promptTargetHost === host ? "border-amber bg-amber/10" : "border-line hover:border-line-2"
@@ -1702,7 +1044,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
               {promptTargetHost !== null && (
                 <button
                   type="button"
-                  onClick={() => setPromptTargetHost(null)}
+                  onClick={() => changePromptTargetHost(null)}
                   data-testid="prompt-capacity-pick-clear"
                   className="inline-flex items-center border border-line rounded-[3px] px-[10px] py-[4px] hover:border-line-2"
                 >
@@ -1713,16 +1055,6 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
           </div>
           );
         })()}
-        {groupedAvailable && pendingGroups.map((group) => (
-          <PendingReviewCard
-            key={group.principleId}
-            group={group}
-            actionsLockedReason={ownerActionsLockedReason ?? undefined}
-            promptInjection={groupedData.promptInjection}
-            promptTargetHost={promptTargetHost ?? undefined}
-            onDecisionApplied={() => { void loadData(); }}
-          />
-        ))}
       </section>
 
       {/* SPEC-PD-UIUX-001 R2 Layer 3: 被阻塞与需要恢复 — from the owner inbox.
@@ -1786,9 +1118,13 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
         )}
       </section>
 
+      <details className="mt-8 border-t border-line pt-5" data-testid="focus-runtime-records">
+        <summary className="cursor-pointer text-[14px] text-ink-3">{t('pages.focus.workbench.runtimeRecords')}</summary>
+        <div className="mt-5">
+          <details className="mb-6"><summary className="cursor-pointer text-sm text-gov">{t('pages.focus.ruleBinding.title')}</summary><RuleCandidateBindingPanel onChanged={() => { void loadData(); }} /></details>
       {/* Governance blocker/recovery follows the actual decision index so the
           first actionable card remains visible in common Companion viewports. */}
-      {experienceMode && experienceData !== null ? (
+      {experienceMode && experienceData !== null && !(experienceData.summary.primaryAttention === 'all_clear' && (sourcesUncertain || workItems.length > 0)) ? (
         <ExperienceSummaryCard snapshot={experienceData} />
       ) : !experienceMode ? (
         <div className="mb-7 px-[18px] py-[14px] bg-panel border border-line rounded-[6px]">
@@ -1854,7 +1190,7 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
         </>
       )}
 
-      {experienceMode && experienceData !== null && experienceData.summary.primaryAttention === "all_clear" && pendingGroups.length === 0 && (
+      {experienceMode && experienceData !== null && experienceData.summary.primaryAttention === "all_clear" && !sourcesUncertain && workItems.length === 0 && (
         <div className="mt-4">
           <OnboardingGuide />
         </div>
@@ -1924,10 +1260,11 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
       </section>
       )}
 
-      {/* Daily thought — reflection content, not governance status. Demoted to
-          secondary reading BELOW the evidence sections (SPEC-PD-UIUX-001 R2);
-          retained in BOTH modes with no persistence change (PRI-589 pending). */}
-      <DailyThoughtCard />
+        </div>
+      </details>
+
+      {/* Reflection remains visible below the decision workspace, outside runtime history. */}
+      <div className="mt-8"><DailyThoughtCard /></div>
 
       {/* Footer — one line (US-1.7) */}
       <footer className="mt-12 pt-6 border-t border-line text-ink-3 text-[13px]">

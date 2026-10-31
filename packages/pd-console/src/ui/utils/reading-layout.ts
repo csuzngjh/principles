@@ -32,7 +32,7 @@ function firstNonEmptyLine(text: string): string {
   return "";
 }
 
-function truncateByCodePoints(text: string, max: number): string {
+export function truncateByCodePoints(text: string, max: number): string {
   const chars = Array.from(text);
   if (chars.length <= max) return text;
   return `${chars.slice(0, max).join("")}…`;

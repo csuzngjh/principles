@@ -493,3 +493,35 @@
   background: color-mix(in srgb, var(--color-amber) 10%, var(--color-surface));
   color: var(--color-amber);
 }
+
+/* The workbench responds to usable content width, after the application sidebar. */
+.owner-workbench-container { container-type: inline-size; }
+.owner-workbench { display: grid; gap: 28px; }
+.owner-work-reading { border-top: 1px solid var(--color-line); padding-top: 24px; scroll-margin-top: 80px; }
+.owner-workbench:has(.owner-work-list-selected) .owner-work-list { display: none; }
+.owner-work-list {
+  max-height: 52dvh;
+  overflow-y: auto;
+  padding-right: 8px;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-ink-4) transparent;
+}
+@supports selector(::-webkit-scrollbar) {
+  .owner-work-list { scrollbar-width: auto; scrollbar-color: auto; }
+  .owner-work-list::-webkit-scrollbar { width: 6px; }
+  .owner-work-list::-webkit-scrollbar-track { background: transparent; }
+  .owner-work-list::-webkit-scrollbar-thumb { background: var(--color-ink-4); border-radius: 999px; }
+  .owner-work-list:hover::-webkit-scrollbar-thumb { background: var(--color-ink-3); }
+  .owner-work-list::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+}
+@media (forced-colors: active) {
+  .owner-work-list { scrollbar-color: auto; }
+  .owner-work-list::-webkit-scrollbar-thumb { background: ButtonText; }
+}
+@container (min-width: 900px) {
+  .owner-workbench { grid-template-columns: 272px minmax(0, 1fr); align-items: start; }
+  .owner-workbench:has(.owner-work-list-selected) .owner-work-list { display: block; }
+  .owner-work-list { max-height: 72dvh; }
+  .owner-work-reading { border-top: 0; border-left: 1px solid var(--color-line); padding-top: 0; padding-left: 28px; }
+}

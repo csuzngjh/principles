@@ -21,7 +21,10 @@ import {
   showsUnlinkedCandidateNote,
   validateApprovalsGroupedData as validateApprovalsGroupedDataReal,
 } from "../../src/ui/pages/focus/focus-validation.js";
-import { partitionInboxForDisplay, deriveConclusionDisplay, resolveConclusionActionableKey } from "../../src/ui/pages/focus/FocusPage.js";
+import { partitionInboxForDisplay, deriveConclusionDisplay } from "../../src/ui/pages/focus/FocusPage.js";
+
+const approvalReaderSource = fs.readFileSync(nodePath.resolve(__dirname, "../../src/ui/pages/focus/ApprovalSubjectReading.tsx"), "utf-8");
+const workbenchSource = fs.readFileSync(nodePath.resolve(__dirname, "../../src/ui/pages/focus/OwnerWorkbench.tsx"), "utf-8");
 
 // ── Mock the API module ──────────────────────────────────────────────────────
 
@@ -471,16 +474,18 @@ describe("FocusPage: unlinked note wiring contract (PRI-941)", () => {
   it("renders the note through the derived flag, not a one-off condition", () => {
     const src = fs.readFileSync(
       nodePath.resolve(__dirname, "../../src/ui/pages/focus/FocusPage.tsx"), "utf-8");
-    expect(src).toContain("const unlinkedCandidateNote = showsUnlinkedCandidateNote(group);");
-    expect(src).toContain("{unlinkedCandidateNote && (");
+    expect(src).toContain("sourceUnlinked={showsUnlinkedCandidateNote(group)}");
+    expect(approvalReaderSource).toContain("{sourceUnlinked && <p role=\"alert\"");
   });
 
   it("resolves the note copy through a key that exists in both languages", () => {
     const src = fs.readFileSync(
       nodePath.resolve(__dirname, "../../src/ui/pages/focus/FocusPage.tsx"), "utf-8");
-    expect(src).toContain('t("pages.focus.unlinkedCandidateNote")');
+    expect(src).toContain("<ApprovalSubjectReading");
+    expect(approvalReaderSource).toContain("t('pages.focus.workbench.sourceUnlinked')");
     for (const file of ["../../src/ui/i18n/en.json", "../../src/ui/i18n/zh-CN.json"]) {
-      const value = getOwnString(loadFocusI18n(file), "unlinkedCandidateNote");
+      const workbench = getOwnRecord(loadFocusI18n(file), "workbench");
+      const value = workbench && getOwnString(workbench, "sourceUnlinked");
       expect(typeof value, file).toBe("string");
       expect((value ?? "").length, file).toBeGreaterThan(10);
     }
@@ -495,10 +500,10 @@ describe("FocusPage: unlinked note wiring contract (PRI-941)", () => {
     // would bypass that rule entirely and put `unlinked:pi-art-…` back on the
     // card, so this pins that the title comes from the selector only.
     expect(src).not.toMatch(/\{\s*group\.principleTitle\s*\}/);
-    // SPEC-PD-CONSOLE-READABILITY-002 切片1：标题经 splitReadingTitleBody 分层后
-    // 渲染 readingLayout.title（displayTitle 的短预览）；不变量不变——标题只
-    // 来自选择器，不直渲分组键。全文另由 candidate-body 容器承载。
-    expect(src).toContain("{readingLayout.title}");
+    // 004 retains the safe title selector and renders its bounded title through
+    // the workbench; the selected object's exact body lives in its reader.
+    expect(src).toContain("splitReadingTitleBody(selectApprovalGroupDisplayTitle(group)");
+    expect(workbenchSource).toContain("{item.title}");
   });
 });
 
@@ -676,27 +681,30 @@ describe("FocusPage: PRI-889 decision surface selection", () => {
   });
 });
 
-describe("FocusPage: PRI-889 PendingReviewCard wiring contract", () => {
+describe("FocusPage: PRI-889 per-object approval reader wiring contract", () => {
   const focusSrc = fs.readFileSync(
     nodePath.resolve(__dirname, "../../src/ui/pages/focus/FocusPage.tsx"), "utf-8");
 
-  it("renders PendingReviewCard for pending approval groups in the decisions section", () => {
+  it("connects one guarded reader per pending approval object", () => {
     // PRI-768 v6-01: the Wave-7 component previously had no render site —
     // Owners had no clickable approve path in the browser.
-    expect(focusSrc).toContain("pendingGroups.map((group) => (");
-    expect(focusSrc).toContain("<PendingReviewCard");
+    expect(focusSrc).toContain("pendingGroups.flatMap");
+    expect(focusSrc).toContain("group.records.filter(record => record.status === 'pending')");
+    expect(focusSrc).toContain("<ApprovalSubjectReading");
+    expect(focusSrc).toContain("approvalId={record.id}");
+    expect(focusSrc).toContain("artifactId={record.artifactId}");
+    expect(focusSrc).toContain("channel={record.channel}");
+    expect(focusSrc).not.toContain("<PendingReviewCard");
   });
 
-  it("PendingReviewCard respects the PRI-787 governance lock with a visible reason (rc-9)", () => {
-    expect(focusSrc).toContain("pending-actions-locked-");
-    // All three action buttons are gated by the lock. PRI-908 folded the
-    // expression into `decisionDisabled` (adds the decided-state guard), so
-    // the guard checks the derivation includes the original three conditions.
-    expect(focusSrc).toContain(
-      "const decisionDisabled = !isActionable || actionLoading || actionsLocked || decidedOutcome !== null;",
-    );
-    const gated = focusSrc.match(/disabled=\{decisionDisabled(?: \|\|[^}]+)?\}/g) ?? [];
+  it("the approval reader respects the PRI-787 governance lock with a visible reason (rc-9)", () => {
+    expect(focusSrc).toContain("lockedReason={ownerActionsLockedReason ?? undefined}");
+    expect(approvalReaderSource).toContain('{lockedReason && <p role="alert"');
+    expect(approvalReaderSource).toContain("if (!review || busy || lockedReason || review.approval.status !== 'pending') return;");
+    // Approval, rejection and replacement stay locked; the form also uses the guarded submit.
+    const gated = approvalReaderSource.match(/disabled=\{[^}]*Boolean\(lockedReason\)[^}]*\}/g) ?? [];
     expect(gated.length).toBe(3);
+    expect(approvalReaderSource).toContain("void submit(mode)");
   });
 });
 
@@ -826,10 +834,9 @@ describe("SPEC-PD-UIUX-001 R2: partitionInboxForDisplay display semantics", () =
   });
 });
 
-// Owner review round 2: the conclusion headline/total must (S1) consume the
-// inbox `degraded` contract, (S2/Q1) report the association-deduped UNION of
-// on-screen cards and inbox items — not a max() of two partial counts — and
-// (S3) express governance readiness identically in every branch.
+// Owner review round 2: the conclusion headline must (S1) consume the
+// inbox `degraded` contract and never claim the system is clear when the
+// inbox answer cannot back that claim.
 describe("SPEC-PD-UIUX-001 R2 (review round 2): deriveConclusionDisplay", () => {
   function mkInbox(overrides?: Partial<{
     decisionCount: number;
@@ -842,122 +849,31 @@ describe("SPEC-PD-UIUX-001 R2 (review round 2): deriveConclusionDisplay", () => 
     return inbox;
   }
 
-  // ── S2/Q1 counting: association-deduped union ────────────────────────────
-
-  it("fully overlapping (1 inbox decision matched by 1 card) counts 1, not 2", () => {
-    const d = deriveConclusionDisplay({
-      ownerInbox: mkInbox({ decisionCount: 1 }),
-      ownerInboxError: null,
-      partition: { pendingTotal: 1, unmatchedDecisions: [] },
-      actionableCount: 1,
-    });
+  it("a healthy inbox payload reports ok", () => {
+    const d = deriveConclusionDisplay({ ownerInbox: mkInbox({ decisionCount: 1 }), ownerInboxError: null });
     expect(d.mode).toBe("ok");
-    expect(d.displayTotal).toBe(1);
-  });
-
-  it("fully disjoint (1 recovery item + 1 unlinked approval card) counts 2 (S2 regression)", () => {
-    const d = deriveConclusionDisplay({
-      ownerInbox: mkInbox({ decisionCount: 0 }),
-      ownerInboxError: null,
-      // pendingTotal=1 (the recovery item); the unlinked approval card is NOT
-      // in the inbox, matchedDecisions=0.
-      partition: { pendingTotal: 1, unmatchedDecisions: [] },
-      actionableCount: 1,
-    });
-    expect(d.displayTotal).toBe(2);
-  });
-
-  it("partially overlapping sets sum after dedup (matched card + unmatched decision + recovery)", () => {
-    const d = deriveConclusionDisplay({
-      ownerInbox: mkInbox({ decisionCount: 2 }),
-      ownerInboxError: null,
-      // 2 inbox decisions: d1 matched by the card, d2 unmatched; plus 1 recovery.
-      partition: { pendingTotal: 3, unmatchedDecisions: [{ principleId: "d2" }] },
-      actionableCount: 1,
-    });
-    expect(d.displayTotal).toBe(3);
-  });
-
-  it("same principle with TWO different decision cards counts both cards, inbox item once", () => {
-    const d = deriveConclusionDisplay({
-      ownerInbox: mkInbox({ decisionCount: 1 }),
-      ownerInboxError: null,
-      partition: { pendingTotal: 1, unmatchedDecisions: [] },
-      actionableCount: 2,
-    });
-    expect(d.displayTotal).toBe(2);
-  });
-
-  it("allClear requires ok mode AND a zero union count", () => {
-    const allClear = deriveConclusionDisplay({
-      ownerInbox: mkInbox(),
-      ownerInboxError: null,
-      partition: { pendingTotal: 0, unmatchedDecisions: [] },
-      actionableCount: 0,
-    });
-    expect(allClear.mode).toBe("ok");
-    expect(allClear.displayTotal).toBe(0);
+    expect(d.degraded).toBeUndefined();
   });
 
   // ── S1: the validated `degraded` contract is consumed, never swallowed ───
 
-  it("HTTP-success inbox with degraded field never reports allClear, carries reason + nextAction", () => {
+  it("HTTP-success inbox with degraded field carries reason + nextAction", () => {
     const degraded = { reason: "principle ledger unavailable", nextAction: "检查原则账本文件。" };
-    const d = deriveConclusionDisplay({
-      ownerInbox: mkInbox({ degraded }),
-      ownerInboxError: null,
-      partition: { pendingTotal: 0, unmatchedDecisions: [] },
-      actionableCount: 0,
-    });
-    // Even with all counts zero, degraded mode forbids the allClear headline.
+    const d = deriveConclusionDisplay({ ownerInbox: mkInbox({ degraded }), ownerInboxError: null });
     expect(d.mode).toBe("degraded");
-    expect(d.displayTotal).toBe(0);
     expect(d.degraded).toEqual(degraded);
   });
 
-  it("degraded mode still reports the actionable cards that ARE on screen", () => {
-    const d = deriveConclusionDisplay({
-      ownerInbox: mkInbox({ degraded: { reason: "r", nextAction: "n" } }),
-      ownerInboxError: null,
-      partition: { pendingTotal: 0, unmatchedDecisions: [] },
-      actionableCount: 3,
-    });
-    expect(d.mode).toBe("degraded");
-    expect(d.actionableCount).toBe(3);
-    expect(d.displayTotal).toBe(3);
-  });
+  // ── unavailable (feature_disabled / load failure) ────────────────────────
 
-  // ── unavailable (feature_disabled / load failure) unchanged ──────────────
-
-  it("feature-disabled inbox (null, no error) reports unavailable, count unconfirmed", () => {
-    const d = deriveConclusionDisplay({ ownerInbox: null, ownerInboxError: null, partition: null, actionableCount: 0 });
+  it("feature-disabled inbox (null, no error) reports unavailable", () => {
+    const d = deriveConclusionDisplay({ ownerInbox: null, ownerInboxError: null });
     expect(d.mode).toBe("unavailable");
-    expect(d.displayTotal).toBe(0);
   });
 
-  it("inbox load failure reports unavailable even with on-screen action cards", () => {
-    const d = deriveConclusionDisplay({ ownerInbox: null, ownerInboxError: "boom", partition: null, actionableCount: 3 });
+  it("inbox load failure reports unavailable", () => {
+    const d = deriveConclusionDisplay({ ownerInbox: null, ownerInboxError: "boom" });
     expect(d.mode).toBe("unavailable");
-    expect(d.actionableCount).toBe(3);
-  });
-});
-
-describe("SPEC-PD-UIUX-001 R2 (review round 2 S3): actionable wording respects the lock in EVERY branch", () => {
-  it("ok + unlocked → 'actionable now'", () => {
-    expect(resolveConclusionActionableKey("ok", false)).toBe("pages.focus.conclusion.actionableUnlocked");
-  });
-  it("ok + locked → locked wording (never 'actionable now')", () => {
-    expect(resolveConclusionActionableKey("ok", true)).toBe("pages.focus.conclusion.actionableLocked");
-  });
-  it("degraded follows the same readiness semantics as ok", () => {
-    expect(resolveConclusionActionableKey("degraded", false)).toBe("pages.focus.conclusion.actionableUnlocked");
-    expect(resolveConclusionActionableKey("degraded", true)).toBe("pages.focus.conclusion.actionableLocked");
-  });
-  it("unavailable + unlocked → 'actionable now' (cards ARE clickable)", () => {
-    expect(resolveConclusionActionableKey("unavailable", false)).toBe("pages.focus.conclusion.actionableWithoutTotal");
-  });
-  it("unavailable + locked → locked wording (S3 regression: no 'actionable now' next to disabled buttons)", () => {
-    expect(resolveConclusionActionableKey("unavailable", true)).toBe("pages.focus.conclusion.actionableLocked");
   });
 });
 
@@ -976,11 +892,13 @@ describe("SPEC-PD-UIUX-001 R2: Focus page reading order contract", () => {
     expect(attention).toBeGreaterThan(decisions);
   });
 
-  it("distinguishes pending vs actionable counts and keeps todos visible when locked", () => {
+  it("labels work item counts and keeps decisions and attention visible when locked", () => {
     expect(src).toContain('data-testid="focus-conclusion-counts"');
-    expect(src).toContain("pages.focus.conclusion.pendingTotal");
-    // The locked variant re-labels actionability instead of dropping the count.
-    expect(src).toContain("pages.focus.conclusion.actionableLocked");
+    expect(src).toContain("count: workItems.length");
+    expect(src).toContain("<OwnerWorkbench items={workItems}");
+    expect(src).toContain("sourcesUncertain");
+    expect(src).toContain("ownerActionsLockedReason");
+    expect(src).toContain('data-testid="owner-attention-section"');
     // Lock reason shows once, centrally, with a settings entry.
     expect(src).toContain('data-testid="focus-conclusion-lock"');
   });
@@ -1024,13 +942,14 @@ describe("FocusPage: PRI-1017 budget observation rendering contract", () => {
   ];
 
   it("never renders the numeric queue badge on an unconfirmed route (no first-host impersonation)", () => {
-    expect(focusSrc).toContain(
-      'promptInjection?.truncated === true && promptInjection.capacityStatus !== "unconfirmed"',
-    );
+    expect(focusSrc).toMatch(/budgetNotice=\{groupedData\?\.promptInjection\?\.truncated === true && groupedData\.promptInjection\.capacityStatus !== ['"]unconfirmed['"]/);
+    expect(focusSrc).toContain("promptInjection={groupedData?.promptInjection}");
+    expect(approvalReaderSource).toContain("{budgetNotice && channel === 'prompt'");
   });
 
   it("an observation-backed budget is labelled as a PAST observation, with source + window", () => {
-    expect(focusSrc).toContain('t("pages.focus.promptBudgetObservedNote"');
+    expect(approvalReaderSource).toContain("t('pages.focus.promptBudgetObservedNote'");
+    expect(approvalReaderSource).toContain("pages.focus.workbench.budgetBasis");
     for (const focus of [enFocus, zhFocus]) {
       const note = getOwnString(focus, "promptBudgetObservedNote") ?? "";
       expect(note).toContain("{{source}}");
@@ -1040,9 +959,8 @@ describe("FocusPage: PRI-1017 budget observation rendering contract", () => {
   });
 
   it("a confirmed claim is only rendered with a window present (never '0 tokens')", () => {
-    expect(focusSrc).toContain(
-      'promptInjection.budgetCapacityStatus === "confirmed" && promptInjection.budgetContextWindowTokens !== undefined',
-    );
+    expect(approvalReaderSource).toMatch(/promptInjection\.budgetCapacityStatus === ['"]confirmed['"] && promptInjection\.budgetContextWindowTokens !== undefined/);
+    expect(approvalReaderSource).not.toContain("promptInjection.budgetContextWindowTokens ?? 0");
     expect(focusSrc).not.toContain("promptInjection.budgetContextWindowTokens ?? 0");
   });
 
@@ -1063,7 +981,7 @@ describe("FocusPage: PRI-1017 budget observation rendering contract", () => {
   it("the fallback copy carries the bounded reason and, when available, the observation time", () => {
     // A usable runtime observation that is itself a fallback is NOT "console
     // not bound to the runtime model" — the console did use that observation.
-    expect(focusSrc).toContain('t("pages.focus.promptBudgetFallbackObservedNote"');
+    expect(approvalReaderSource).toContain("t('pages.focus.promptBudgetFallbackObservedNote'");
     for (const focus of [enFocus, zhFocus]) {
       expect(getOwnString(focus, "promptBudgetFallbackNote") ?? "").toContain("{{reason}}");
       expect(getOwnString(focus, "promptBudgetFallbackNote") ?? "").not.toContain("{{observed}}");

@@ -32,6 +32,8 @@ test.describe('PRI-1048 规则归属队列', () => {
   test('首屏计数与去重：唯一候选唯一卡片，候选数与反馈组数分开', async ({ page }) => {
     await loginAsOwner(page);
     await page.goto('/#/focus');
+    await page.getByTestId('focus-runtime-records').locator(':scope > summary').click();
+    await page.getByTestId('focus-runtime-records').locator('details > summary').filter({ hasText: '规则的正式原则归属' }).click();
     const panel = page.getByTestId('rule-binding-panel');
     await expect(panel).toBeVisible();
 
@@ -54,6 +56,8 @@ test.describe('PRI-1048 规则归属队列', () => {
   test('已关联受阻卡片回答三问：哪次反馈 / 卡在哪 / 要做什么', async ({ page }) => {
     await loginAsOwner(page);
     await page.goto('/#/focus');
+    await page.getByTestId('focus-runtime-records').locator(':scope > summary').click();
+    await page.getByTestId('focus-runtime-records').locator('details > summary').filter({ hasText: '规则的正式原则归属' }).click();
     const panel = page.getByTestId('rule-binding-panel');
     await expect(panel).toBeVisible();
 
@@ -92,6 +96,8 @@ test.describe('PRI-1048 规则归属队列', () => {
   test('允许的关联走到准确回执；stale 版本被拒（409）', async ({ page }) => {
     await loginAsOwner(page);
     await page.goto('/#/focus');
+    await page.getByTestId('focus-runtime-records').locator(':scope > summary').click();
+    await page.getByTestId('focus-runtime-records').locator('details > summary').filter({ hasText: '规则的正式原则归属' }).click();
     const panel = page.getByTestId('rule-binding-panel');
     await expect(panel).toBeVisible();
 
@@ -132,6 +138,8 @@ test.describe('PRI-1048 规则归属队列', () => {
     await page.setViewportSize({ width: 320, height: 900 });
     await loginAsOwner(page);
     await page.goto('/#/focus');
+    await page.getByTestId('focus-runtime-records').locator(':scope > summary').click();
+    await page.getByTestId('focus-runtime-records').locator('details > summary').filter({ hasText: '规则的正式原则归属' }).click();
     const panel = page.getByTestId('rule-binding-panel');
     await expect(panel).toBeVisible();
     const overflow = await panel.evaluate(element => element.scrollWidth - element.clientWidth);

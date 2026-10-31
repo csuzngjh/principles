@@ -1,0 +1,99 @@
+import { useEffect, useRef, type ReactNode } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import { Archive, CircleHelp, ClipboardCheck, Code2, FilePenLine, FlaskConical, Link2, MessageSquareText, ShieldCheck, type LucideIcon } from 'lucide-react';
+
+export type OwnerWorkItemKind = 'prompt' | 'rule' | 'promotion' | 'revision' | 'validation' | 'binding' | 'archive' | 'approval' | 'unknown';
+export interface OwnerWorkItem { key: string; title: string; kind: OwnerWorkItemKind; summary: string; reference?: string; content: ReactNode }
+
+// Type describes the decision, not an inferred urgency or permission.
+const KIND_PRESENTATION: Record<OwnerWorkItemKind, { icon: LucideIcon; label: string; style: string }> = {
+  prompt: { icon: MessageSquareText, label: 'promptReview', style: 'border-gov/30 bg-gov/10 text-gov' },
+  rule: { icon: Code2, label: 'ruleReview', style: 'border-ink-3/30 bg-ink-3/10 text-ink-2' },
+  promotion: { icon: ShieldCheck, label: 'rulePromotion', style: 'border-amber/30 bg-amber/10 text-ink-2' },
+  revision: { icon: FilePenLine, label: 'revisionDecision', style: 'border-amber/30 text-ink-2' },
+  validation: { icon: FlaskConical, label: 'validationReview', style: 'border-gov/30 text-gov' },
+  binding: { icon: Link2, label: 'bindingReview', style: 'border-gov/30 text-gov' },
+  archive: { icon: Archive, label: 'archiveReview', style: 'border-line bg-surface text-ink-3' },
+  approval: { icon: ClipboardCheck, label: 'approvalMaterialReview', style: 'border-line text-ink-2' },
+  unknown: { icon: CircleHelp, label: 'unknownReview', style: 'border-line text-ink-3' },
+};
+
+function WorkItemType({ kind }: { kind: OwnerWorkItemKind }) {
+  const { t } = useTranslation();
+  const { icon: Icon, label, style } = KIND_PRESENTATION[kind];
+  return <span data-testid="owner-work-type" data-kind={kind} className={`inline-flex max-w-full items-center gap-1.5 rounded-[4px] border px-2 py-1 text-[11px] font-medium leading-relaxed ${style}`}>
+    <Icon aria-hidden="true" className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+    {t(`pages.focus.workbench.${label}`)}
+  </span>;
+}
+
+/** Presentation only: list grouping never changes an action's identity or authority. */
+export function OwnerWorkbench({ items, completed, uncertain }: { items: OwnerWorkItem[]; completed: { key: string; message: string } | null; uncertain: boolean }) {
+  const { t } = useTranslation();
+  const [params, setParams] = useSearchParams();
+  const selectedKey = params.get('review') ?? '';
+  const selected = items.find(item => item.key === selectedKey);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const list = useRef<HTMLElement>(null);
+  const lastSelected = useRef('');
+  const listScroll = useRef(0);
+  // A deep link can arrive before the items do. `focusKey` only becomes the
+  // selection once the item exists, so the effect re-runs when it appears
+  // without stealing focus on every data refresh.
+  const focusKey = selected ? selectedKey : '';
+  useEffect(() => {
+    if (focusKey) {
+      heading.current?.focus({ preventScroll: true });
+      const reading = heading.current?.closest<HTMLElement>('[data-testid="owner-work-reading"]');
+      if (reading && (reading.getBoundingClientRect().top < 0 || reading.getBoundingClientRect().top > window.innerHeight - 100)) reading.scrollIntoView({ block: 'start' });
+      const current = list.current?.querySelector<HTMLElement>('[aria-current="true"]');
+      if (current && list.current && list.current.scrollHeight > list.current.clientHeight) {
+        list.current.scrollTop = Math.max(0, current.offsetTop - list.current.offsetTop - 24);
+      }
+    } else if (selectedKey) {
+      heading.current?.focus({ preventScroll: true });
+    } else if (lastSelected.current && list.current) {
+      list.current.scrollTop = listScroll.current;
+      const previous = Array.from(list.current.querySelectorAll<HTMLButtonElement>('[data-item-key]')).find(button => button.dataset.itemKey === lastSelected.current);
+      previous?.focus({ preventScroll: true });
+      if (previous && (previous.getBoundingClientRect().top < 0 || previous.getBoundingClientRect().bottom > window.innerHeight)) previous.scrollIntoView({ block: 'nearest' });
+    }
+  }, [focusKey, selectedKey]);
+  function choose(key: string) {
+    if (!key && selectedKey) { lastSelected.current = selectedKey; listScroll.current = list.current?.scrollTop ?? 0; }
+    const next = new URLSearchParams(params);
+    if (key) next.set('review', key); else next.delete('review');
+    setParams(next, { preventScrollReset: true });
+  }
+  const completedHere = completed?.key === selectedKey ? completed : null;
+  const selectedIndex = items.findIndex(item => item.key === selectedKey);
+  const nextItem = selectedIndex >= 0 ? items[selectedIndex + 1] : undefined;
+  return <section className="owner-workbench" data-testid="owner-workbench">
+    <nav ref={list} tabIndex={-1} className={`owner-work-list ${selected ? 'owner-work-list-selected' : ''}`} aria-label={t('pages.focus.workbench.list')}>
+      <div className="mb-3 flex items-baseline justify-between gap-3"><h2 className="text-[15px] font-medium text-ink">{t('pages.focus.workbench.list')}</h2><span className="text-[12px] text-ink-4">{t('pages.focus.workbench.count', { count: items.length })}</span></div>
+      {items.length === 0 && <p className="text-sm leading-relaxed text-ink-3">{t(uncertain ? 'pages.focus.workbench.uncertain' : 'pages.focus.workbench.empty')}</p>}
+      <ol className="space-y-2">{items.map(item => <li key={item.key}><button type="button" onClick={() => choose(item.key)} aria-current={selected?.key === item.key ? 'true' : undefined}
+        data-testid="owner-work-item" data-item-key={item.key} className={`w-full rounded-[6px] border px-4 py-4 text-left transition-colors focus-visible:outline-2 focus-visible:outline-gov ${selected?.key === item.key ? 'border-gov bg-gov/5' : 'border-line bg-panel hover:border-gov/50'}`}>
+        <span className="mb-3 block"><WorkItemType kind={item.kind} /></span><span className="block text-[14px] font-medium leading-relaxed text-ink break-words">{item.title}</span>
+        <span className="mt-2 block text-[12.5px] leading-relaxed text-ink-3 line-clamp-2">{item.summary}</span>
+        {item.reference && items.some(other => other.key !== item.key && other.title === item.title && other.summary === item.summary) && <span className="mt-2 block break-all font-mono text-[11px] text-ink-4">{item.reference}</span>}
+      </button></li>)}</ol>
+    </nav>
+    <div className="owner-work-reading min-w-0" data-testid="owner-work-reading">
+      {selected ? <>
+        <button type="button" className="mb-5 text-[13px] text-gov underline underline-offset-4" onClick={() => choose('')}>{t('pages.focus.workbench.back')}</button>
+        <div className="mb-3"><WorkItemType kind={selected.kind} /></div>
+        <h2 ref={heading} tabIndex={-1} className="mb-6 text-[22px] font-semibold leading-snug text-ink break-words">{selected.title}</h2>
+        <div key={selected.key}>{selected.content}</div>
+        <footer className="mt-7 border-t border-line pt-5"><p className="mb-3 text-[12.5px] text-ink-3">{t('pages.focus.workbench.readingEnd')}</p>
+          {nextItem && <button type="button" className="text-[13px] text-gov underline underline-offset-4" onClick={() => choose(nextItem.key)}>{t('pages.focus.workbench.next')}</button>}
+        </footer>
+      </> : <div className="py-10 text-ink-3">
+        <h2 ref={heading} tabIndex={-1} className="mb-3 text-[22px] font-medium text-ink">{t(completedHere ? 'pages.focus.workbench.completed' : selectedKey ? 'pages.focus.workbench.notCurrent' : 'pages.focus.workbench.startTitle')}</h2>
+        <p role={completedHere ? 'status' : undefined} className="max-w-[440px] text-[14px] leading-relaxed">{completedHere?.message ?? t(selectedKey ? 'pages.focus.workbench.notCurrentBody' : 'pages.focus.workbench.startBody')}</p>
+        {items[0] && <button type="button" className="mt-6 rounded-[4px] border border-gov bg-gov px-4 py-2.5 text-sm text-paper" onClick={() => choose(items[0]!.key)}>{t(completedHere ? 'pages.focus.workbench.next' : 'pages.focus.workbench.start')}</button>}
+      </div>}
+    </div>
+  </section>;
+}

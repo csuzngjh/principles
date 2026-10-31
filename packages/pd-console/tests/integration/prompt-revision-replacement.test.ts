@@ -12,6 +12,7 @@ import {
   buildOwnerRevisionArtifact,
   SqliteApprovalQueueStore,
   ApprovalQueue,
+  computeArtifactDigest,
 } from '@principles/core/runtime-v2';
 import { saveHostToolDeclaration } from '@principles/host-runtime';
 import { handleApprovalsRoute, disposeApprovalsModels } from '../../src/server/routes/approvals.js';
@@ -376,6 +377,17 @@ it('shows retained intent with the revision and refuses approval until it is rev
   expect(typeof approvalId).toBe('string');
   const groups = await new ApprovalsGroupedConsoleModel(tmpDir).getApprovalsGrouped('openclaw');
   const group = groups.groups.find((entry) => entry.principleId === SCENARIO_C.principle);
+  const revisionArtifactId = group?.revisionReview?.artifactId;
+  if (!revisionArtifactId) throw new Error('missing revision review identity');
+  const revisionArtifact = await new SqlitePIArtifactStore(sqliteConn).getArtifactById(revisionArtifactId);
+  if (!revisionArtifact) throw new Error('missing revision artifact');
+  expect(group?.revisionReview?.artifactDigest).toBe(computeArtifactDigest(revisionArtifact));
+  // A comparison read must become visibly stale even when the replacement ID is unchanged.
+  sqliteConn.getDb().prepare('UPDATE pi_artifacts SET content_json = ? WHERE artifact_id = ?').run(revisionArtifact.contentJson.replace('禁止忽略触发条件；提交前完成必要验证。', '比较后被修改的原则正文'), revisionArtifactId);
+  const changedArtifact = await new SqlitePIArtifactStore(sqliteConn).getArtifactById(revisionArtifactId);
+  if (!changedArtifact) throw new Error('missing changed revision artifact');
+  expect(group?.revisionReview?.artifactDigest).not.toBe(computeArtifactDigest(changedArtifact));
+  sqliteConn.getDb().prepare('UPDATE pi_artifacts SET content_json = ? WHERE artifact_id = ?').run(revisionArtifact.contentJson, revisionArtifactId);
   expect(group?.revisionReview?.oldStatement).toBe(SCENARIO_C.longStatement);
   expect(group?.revisionReview?.intentFields.ownerIntent).toBe('keep statements injectable');
   const refused = await fetchJson(`/api/v1/approvals/${approvalId}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ intentReviewed: false }) });
@@ -400,6 +412,18 @@ it('preserves the approved decision and the old live version after replacement p
 
 it('retries an approved failed replacement without rewriting the Owner decision', async () => {
   const row = sqliteConn.getDb().prepare("SELECT a.approval_id, a.decided_by FROM approvals a JOIN pi_artifacts p ON p.artifact_id = a.artifact_id WHERE p.source_principle_id = ? AND a.status = 'approved'").get(SCENARIO_C.principle) as { approval_id: string; decided_by: string };
+  const response = await fetchJson(`/api/v1/approvals/${row.approval_id}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ retryActivation: true, decidedBy: 'Bob' }) });
+  expect(response.status).toBe(200);
+  expect(sqliteConn.getDb().prepare('SELECT status, decided_by FROM approvals WHERE approval_id = ?').get(row.approval_id)).toEqual({ status: 'approved', decided_by: row.decided_by });
+  expect(sqliteConn.getDb().prepare('SELECT deactivated_at FROM activations WHERE artifact_id = ?').get(SCENARIO_C.artifactId)).not.toEqual({ deactivated_at: null });
+  expect(sqliteConn.getDb().prepare("SELECT owner_id FROM activation_decisions WHERE decision = 'supersede' AND artifact_id = ?").get(SCENARIO_C.artifactId)).toEqual({ owner_id: row.decided_by });
+});
+
+it('guarded recovery of an approved failed replacement preserves the original decision', async () => {
+  const row = sqliteConn.getDb().prepare("SELECT a.approval_id, a.decided_by FROM approvals a JOIN pi_artifacts p ON p.artifact_id = a.artifact_id WHERE p.source_principle_id = ? AND a.status = 'approved'").get(SCENARIO_C.principle) as { approval_id: string; decided_by: string };
+  const detail = await fetchJson(`/api/v1/approvals/${row.approval_id}`);
+  const data = getDataObject(detail.body);
+  if (!data || typeof data.review !== 'object' || data.review === null || !Object.hasOwn(data.review, 'expectedReview')) throw new Error('missing review guard');
   const response = await fetchJson(`/api/v1/approvals/${row.approval_id}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ retryActivation: true, decidedBy: 'Bob' }) });
   expect(response.status).toBe(200);
   expect(sqliteConn.getDb().prepare('SELECT status, decided_by FROM approvals WHERE approval_id = ?').get(row.approval_id)).toEqual({ status: 'approved', decided_by: row.decided_by });
@@ -449,6 +473,8 @@ it('blocks batch confirmation across different revisions and reports malformed p
   }
   const group = (await new ApprovalsGroupedConsoleModel(tmpDir).getApprovalsGrouped('openclaw')).groups.find((entry) => entry.principleId === principleId);
   expect(group?.revisionReviewUnavailable).toBe(true);
+  // Multi-pending ambiguity is a group fact, not a per-record defect.
+  expect(group?.records.some((entry) => entry.revisionReviewUnavailable === true)).toBe(false);
   const [firstId, secondId] = ids;
   const stale = await fetchJson(`/api/v1/approvals/apr_prompt_${secondId}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ intentReviewed: true, reviewedArtifactId: firstId }) });
   expect(stale.status).toBe(409);
@@ -457,6 +483,30 @@ it('blocks batch confirmation across different revisions and reports malformed p
   const damaged = (await new ApprovalsGroupedConsoleModel(tmpDir).getApprovalsGrouped('openclaw')).groups.find((entry) => entry.principleId === principleId);
   expect(damaged?.revisionReviewUnavailable).toBe(true);
   expect(damaged?.revisionReview).toBeUndefined();
+});
+
+it('scopes an unavailable revision review to its own record instead of the whole group', async () => {
+  const principleId = crypto.randomUUID();
+  const artifactId = `art-mixed-${principleId}`;
+  seedLedgerPrinciple(principleId, 'Before edits, verify callers.');
+  seedLiveOversizedActivation(`act_prompt_${principleId}`, artifactId, `task-${principleId}`, principleId, 'Before edits, verify callers.');
+  const store = new SqlitePIArtifactStore(sqliteConn);
+  const old = await store.getArtifactById(artifactId);
+  if (!old) throw new Error('missing old fixture');
+  const ids: string[] = [];
+  for (const statement of ['Before edits, verify all callers.', 'Skip caller checks.']) {
+    const built = await buildOwnerRevisionArtifact({ oldArtifact: old, newStatement: statement, editedBy: 'Alice', now: '2026-10-08T03:00:00Z' });
+    if (!built.ok) throw new Error('revision fixture failed');
+    await store.upsertArtifact({ ...built.draft, artifactKind: 'principle', sourceRuleId: undefined, validationStatus: 'validated', createdAt: '2026-10-08T03:00:00Z', updatedAt: '2026-10-08T03:00:00Z' });
+    await new ApprovalQueue(new SqliteApprovalQueueStore(sqliteConn)).enqueue({ artifactId: built.draft.artifactId, channel: 'prompt', riskLevel: 'low', confidence: 0.8, summary: 'mixed revision review', triggerReason: 'test' }, '2026-10-08T03:00:00Z');
+    ids.push(built.draft.artifactId);
+  }
+  // Only the second revision loses its own readable material.
+  sqliteConn.getDb().prepare('UPDATE pi_artifacts SET content_json = ? WHERE artifact_id = ?').run('{malformed', ids[1]);
+  const group = (await new ApprovalsGroupedConsoleModel(tmpDir).getApprovalsGrouped('openclaw')).groups.find((entry) => entry.principleId === principleId);
+  expect(group?.revisionReviewUnavailable).toBe(true);
+  expect(group?.records.find((entry) => entry.artifactId === ids[0])?.revisionReviewUnavailable).toBeUndefined();
+  expect(group?.records.find((entry) => entry.artifactId === ids[1])?.revisionReviewUnavailable).toBe(true);
 });
 
 it.each([

@@ -8,7 +8,7 @@
  * - R7：同一卡片主要规则正文只出现一次（短文本时 title-only，不重复）。
  */
 import { describe, it, expect } from "vitest";
-import { splitReadingTitleBody } from "../../src/ui/utils/reading-layout.js";
+import { splitReadingTitleBody, truncateByCodePoints } from "../../src/ui/utils/reading-layout.js";
 
 describe("splitReadingTitleBody — 标题/正文分层", () => {
   it("空输入回退空标题、无正文（调用方落到「待命名候选原则」）", () => {
@@ -96,5 +96,27 @@ describe("splitReadingTitleBody — 标题/正文分层", () => {
     const { title, body } = splitReadingTitleBody(text);
     expect(title).toBe("标题行");
     expect(body).toBe(text);
+  });
+});
+
+describe("truncateByCodePoints — 预览按码点截断（不产生孤立代理项）", () => {
+  it("不超过上限时原样返回，不追加省略号", () => {
+    expect(truncateByCodePoints("短文本", 80)).toBe("短文本");
+    expect(truncateByCodePoints("😀".repeat(80), 80)).toBe("😀".repeat(80));
+  });
+
+  it("超过上限时截前 max 个码点并追加省略号", () => {
+    const text = "长".repeat(100);
+    expect(truncateByCodePoints(text, 80)).toBe("长".repeat(80) + "…");
+  });
+
+  it("补充字符恰好落在截断边界时保留完整字符（240 预览档）", () => {
+    const text = "a".repeat(239) + "😀" + "尾部";
+    expect(truncateByCodePoints(text, 240)).toBe("a".repeat(239) + "😀" + "…");
+  });
+
+  it("补充字符落在 80 字标题档边界时保留完整字符", () => {
+    const text = "a".repeat(79) + "😀" + "b";
+    expect(truncateByCodePoints(text, 80)).toBe("a".repeat(79) + "😀" + "…");
   });
 });

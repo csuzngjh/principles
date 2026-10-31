@@ -1,3 +1,4 @@
+import type { ApprovalReviewGuard } from './approval-review-guard.js';
 import type { InternalizationChannel, PIArtifactKind, PIArtifactValidationStatus } from '../internalization/peer-runner-contracts.js';
 import type { RuleReliabilityFailure } from '../internalization/rule-reliability-validation.js';
 
@@ -264,7 +265,8 @@ export interface ApprovalFilter {
 export type ApprovalDecisionResult =
   | { ok: true; record: ApprovalRecord }
   | { ok: false; error: 'already_decided'; status: ApprovalStatus }
-  | { ok: false; error: 'not_found' };
+  | { ok: false; error: 'not_found' }
+  | { ok: false; error: 'stale_review'; reason: string; nextAction: string; status?: never };
 
 export interface ApprovalQueueStore {
   enqueue(input: ApprovalEnqueueInput, now: string): Promise<ApprovalRecord>;
@@ -272,8 +274,8 @@ export interface ApprovalQueueStore {
   listPending(filter?: ApprovalFilter): Promise<ApprovalRecord[]>;
   listAll(filter?: ApprovalListFilter): Promise<ApprovalRecord[]>;
   countByStatus(): Promise<ApprovalStats>;
-  approve(approvalId: string, decidedBy: string, note?: string): Promise<ApprovalDecisionResult>;
-  reject(approvalId: string, decidedBy: string, reason: string): Promise<ApprovalDecisionResult>;
+  approve(approvalId: string, decidedBy: string, note?: string, expectedReview?: ApprovalReviewGuard): Promise<ApprovalDecisionResult>;
+  reject(approvalId: string, decidedBy: string, reason: string, expectedReview?: ApprovalReviewGuard): Promise<ApprovalDecisionResult>;
   /** Roll back an approved approval to pending so it can be re-approved. Used when post-approval activation dispatch fails. */
   resetToPending(approvalId: string): Promise<{ ok: true } | { ok: false; error: 'not_found' | 'not_approved' }>;
   /**
@@ -287,6 +289,9 @@ export interface ApprovalQueueStore {
 }
 
 export interface ApprovalEditInput {
+  /** Captured by the service after validating the proposed replacement, never trusted from UI text. */
+  expectedNewArtifactDigest?: string;
+  expectedReview?: ApprovalReviewGuard;
   approvalId: string;
   editedBy: string;
   newArtifactId: string;

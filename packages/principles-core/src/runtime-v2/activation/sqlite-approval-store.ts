@@ -1,3 +1,5 @@
+import { matchesApprovalReview, staleApprovalReview, type ApprovalReviewGuard } from './approval-review-guard.js';
+import { isArtifactRevisionOf } from './activation-types.js';
 import type {
   ApprovalDecisionResult,
   ApprovalEditInput,
@@ -251,7 +253,8 @@ export class SqliteApprovalQueueStore implements ApprovalQueueStore {
     return stats;
   }
 
-  async approve(approvalId: string, decidedBy: string, note?: string): Promise<ApprovalDecisionResult> {
+  // eslint-disable-next-line @typescript-eslint/max-params -- preserve the existing positional CLI contract with an additive optional review guard
+  async approve(approvalId: string, decidedBy: string, note?: string, expectedReview?: ApprovalReviewGuard): Promise<ApprovalDecisionResult> {
     const db = this.connection.getDb();
     const now = new Date().toISOString();
     // The snapshot read, digest calculation, and decision update share one write
@@ -275,8 +278,10 @@ export class SqliteApprovalQueueStore implements ApprovalQueueStore {
       if (!approvalRow) throw new Error(`ApprovalQueue approve failed: malformed row for ${approvalId}`);
       const artifactRow: unknown = db.prepare('SELECT * FROM pi_artifacts WHERE artifact_id = ?').get(approvalRow.artifactId);
       if (!isPiArtifactRow(artifactRow)) {
+        if (expectedReview) { db.exec('COMMIT'); return staleApprovalReview(); }
         throw new Error(`ApprovalQueue approve failed: current PI artifact snapshot is missing or malformed for ${approvalRow.artifactId}`);
       }
+      if (expectedReview && !matchesApprovalReview(approvalRow, mapPiArtifactRow(artifactRow), expectedReview)) { db.exec('COMMIT'); return staleApprovalReview(); }
       const artifactDigest = computeArtifactDigest(mapPiArtifactRow(artifactRow));
       const record = mapRowToRecord(db.prepare(
         "UPDATE approvals SET status = 'approved', decided_at = ?, decided_by = ?, decision_note = ?, artifact_digest = ? WHERE approval_id = ? AND status = 'pending' RETURNING *"
@@ -290,7 +295,13 @@ export class SqliteApprovalQueueStore implements ApprovalQueueStore {
     }
   }
 
-  async reject(approvalId: string, decidedBy: string, reason: string): Promise<ApprovalDecisionResult> {
+  // eslint-disable-next-line @typescript-eslint/max-params -- preserve the existing positional CLI contract with an additive optional review guard
+  async reject(approvalId: string, decidedBy: string, reason: string, expectedReview?: ApprovalReviewGuard): Promise<ApprovalDecisionResult> {
+    if (expectedReview) return this.guardedMutation({ approvalId, guard: expectedReview, allowMissing: true, mutate: () => this.rejectUnchecked(approvalId, decidedBy, reason) });
+    return this.rejectUnchecked(approvalId, decidedBy, reason);
+  }
+
+  private rejectUnchecked(approvalId: string, decidedBy: string, reason: string): ApprovalDecisionResult {
     const db = this.connection.getDb();
     const now = new Date().toISOString();
     // Single atomic statement: UPDATE + RETURNING eliminates the race window
@@ -316,6 +327,11 @@ export class SqliteApprovalQueueStore implements ApprovalQueueStore {
   }
 
   async edit(input: ApprovalEditInput): Promise<ApprovalDecisionResult> {
+    if (input.expectedReview) return this.guardedMutation({ approvalId: input.approvalId, guard: input.expectedReview, allowMissing: false, mutate: () => this.editUnchecked(input), newArtifactId: input.newArtifactId, expectedNewArtifactDigest: input.expectedNewArtifactDigest });
+    return this.editUnchecked(input);
+  }
+
+  private editUnchecked(input: ApprovalEditInput): ApprovalDecisionResult {
     const db = this.connection.getDb();
     // Single atomic statement: UPDATE + RETURNING eliminates the race window
     // between UPDATE and subsequent SELECT (ERR-015 stale state pattern).
@@ -330,5 +346,29 @@ export class SqliteApprovalQueueStore implements ApprovalQueueStore {
       return { ok: false, error: 'already_decided', status: fresh.status as ApprovalStatus };
     }
     return { ok: true, record };
+  }
+
+  private guardedMutation(input: { approvalId: string; guard: ApprovalReviewGuard; allowMissing: boolean; mutate: () => ApprovalDecisionResult; newArtifactId?: string; expectedNewArtifactDigest?: string }): ApprovalDecisionResult {
+    const { approvalId, guard, allowMissing, mutate, newArtifactId } = input;
+    const db = this.connection.getDb();
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const current = mapRowToRecord(db.prepare('SELECT * FROM approvals WHERE approval_id = ?').get(approvalId));
+      let result: ApprovalDecisionResult;
+      if (!current) result = { ok: false, error: 'not_found' };
+      else if (current.status !== 'pending') result = { ok: false, error: 'already_decided', status: current.status };
+      else {
+        const raw: unknown = db.prepare('SELECT * FROM pi_artifacts WHERE artifact_id = ?').get(current.artifactId);
+        const artifact = isPiArtifactRow(raw) ? mapPiArtifactRow(raw) : null;
+        if ((raw !== undefined && artifact === null) || !matchesApprovalReview(current, artifact, guard, allowMissing)) result = staleApprovalReview();
+        else if (newArtifactId !== undefined) {
+          const replacement: unknown = db.prepare('SELECT * FROM pi_artifacts WHERE artifact_id = ?').get(newArtifactId);
+          result = artifact !== null && isPiArtifactRow(replacement) && replacement.validation_status === 'validated' && computeArtifactDigest(mapPiArtifactRow(replacement)) === input.expectedNewArtifactDigest && isArtifactRevisionOf(mapPiArtifactRow(replacement), artifact)
+            ? mutate() : staleApprovalReview();
+        } else result = mutate();
+      }
+      db.exec('COMMIT');
+      return result;
+    } catch (error) { try { db.exec('ROLLBACK'); } catch { /* Preserve the original transaction failure. */ } throw error; }
   }
 }

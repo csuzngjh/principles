@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, type ReactNode } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { PageShell } from "../../components/layout/page-shell.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
@@ -19,6 +19,7 @@ import type {
   OwnerDecisionLibraryData,
 } from "../../api.js";
 import { enumLabel } from "../../utils/enum-labels.js";
+import { splitReadingTitleBody, truncateByCodePoints } from "../../utils/reading-layout.js";
 import { formatDate } from "../../utils/format-date.js";
 import { PrinciplesViewNav } from "./PrinciplesViewNav.js";
 
@@ -29,6 +30,7 @@ type ReviewStatus = "pending" | "candidate" | "approved" | "rejected" | "parked"
 interface PrincipleCard {
   principleId: string;
   title: string;
+  searchText: string;
   /** Original title before fallback (shown in details when title is unreadable). PRI-332 */
   originalTitle: string;
   /** Whether the title was replaced with a bounded fallback. PRI-332 */
@@ -188,7 +190,6 @@ function validateApprovalsGrouped(data: unknown): ApprovalsGroupedData | null {
 // ── Component ───────────────────────────────────────────────────────────────
 export function PrinciplesPage() {
   const { t, i18n } = useTranslation("pages");
-  const navigate = useNavigate();
 
   const [principles, setPrinciples] = useState<PrincipleListItem[]>([]);
   const [approvalGroups, setApprovalGroups] = useState<ApprovalGroup[]>([]);
@@ -198,12 +199,19 @@ export function PrinciplesPage() {
   const [summary, setSummary] = useState<PrinciplesListData["summary"] | null>(null);
 
   // Search / filter / sort
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<ReviewStatus | "all">("all");
-  const [sortBy, setSortBy] = useState<"updatedAt" | "createdAt">("updatedAt");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const updateQuery = (key: string, value: string) => { const next = new URLSearchParams(searchParams); next.set(key, value); setSearchParams(next, { replace: true, preventScrollReset: true }); };
+  const search = searchParams.get('q') ?? '';
+  const setSearch = (value: string) => updateQuery('q', value);
+  const statusParam = searchParams.get('status');
+  const statusFilter: ReviewStatus | 'all' = statusParam === 'pending' || statusParam === 'candidate' || statusParam === 'approved' || statusParam === 'rejected' || statusParam === 'parked' ? statusParam : 'all';
+  const setStatusFilter = (value: ReviewStatus | 'all') => updateQuery('status', value);
+  const sortBy = searchParams.get('sort') === 'createdAt' ? 'createdAt' : 'updatedAt';
+  const setSortBy = (value: 'createdAt' | 'updatedAt') => updateQuery('sort', value);
   // PRI-629 (INV-02): 默认展示全部 — candidate 是生命周期而非待办,
   // "只看待决策"不再作为默认视图 (真实决策在治理焦点)。
-  const [filterMode, setFilterMode] = useState<'actionable' | 'all'>('all');
+  const filterMode = searchParams.get('mode') === 'actionable' ? 'actionable' : 'all';
+  const setFilterMode = (value: 'actionable' | 'all') => updateQuery('mode', value);
   const [categories, setCategories] = useState<Record<string, number> | undefined>();
   // Owner Decision Experience v1: backend semantic titles + decision states
   // (display-only — the page never re-derives decision qualification).
@@ -211,8 +219,11 @@ export function PrinciplesPage() {
   // PRI-956 (F15, D3): runtime status cannot be confirmed when set
   const [revocationUnavailable, setRevocationUnavailable] = useState<string | null>(null);
 
+  const requestEpoch = useRef(0);
+
   // Fetch data
   const loadData = useCallback(async () => {
+    const epoch = ++requestEpoch.current;
     setLoading(true);
     setError(null);
     try {
@@ -222,6 +233,7 @@ export function PrinciplesPage() {
         fetchOwnerDecisionLibrary(),
       ]);
 
+      if (epoch !== requestEpoch.current) return;
       setOwnerDecisionLibrary(dResult.success && dResult.data ? dResult.data : null);
 
       if (!pResult.success) {
@@ -245,14 +257,16 @@ export function PrinciplesPage() {
       const aData = aResult.success ? validateApprovalsGrouped(aResult.data) : null;
       setApprovalGroups(aData?.groups ?? []);
     } catch (err) {
+      if (epoch !== requestEpoch.current) return;
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
-      setLoading(false);
+      if (epoch === requestEpoch.current) setLoading(false);
     }
   }, [filterMode]);
 
   useEffect(() => {
-    loadData();
+    void loadData();
+    return () => { requestEpoch.current++; };
   }, [loadData]);
 
   // Build approval lookup
@@ -277,7 +291,7 @@ export function PrinciplesPage() {
     const semanticTitle = decision?.learnedPrinciple.status === 'known' ? decision.learnedPrinciple.text : undefined;
 
     // PRI-332: Determine display title with bounded fallback for unreadable titles
-    const rawTitle = p.triggerPattern || p.text.slice(0, 80);
+    const rawTitle = p.triggerPattern || truncateByCodePoints(p.text, 80);
     const detectedLang = p.detectedLanguage ?? 'unknown';
     const readWarningCode = p.readabilityWarningCode;
     let displayTitle = rawTitle;
@@ -294,7 +308,8 @@ export function PrinciplesPage() {
 
     return {
       principleId: p.id,
-      title: displayTitle,
+      title: splitReadingTitleBody(displayTitle).title,
+      searchText: semanticTitle ?? rawTitle,
       originalTitle: rawTitle,
       titleUsedFallback: usedFallback,
       text: p.text,
@@ -318,7 +333,7 @@ export function PrinciplesPage() {
       if (statusFilter !== "all" && c.status !== statusFilter) return false;
       if (search) {
         const q = search.toLowerCase();
-        if (!c.text.toLowerCase().includes(q) && !c.title.toLowerCase().includes(q))
+        if (!c.text.toLowerCase().includes(q) && !c.title.toLowerCase().includes(q) && !c.searchText.toLowerCase().includes(q))
           return false;
       }
       return true;
@@ -440,11 +455,12 @@ export function PrinciplesPage() {
 
       {/* PRI-558: metrics bar — bound to existing summary + derived latest update */}
       {!loading && !error && summary && (
-        <div className="flex flex-wrap border border-line rounded-[var(--radius-md)] bg-panel overflow-hidden mb-6">
+        <details className="mb-6 text-[12px] text-ink-3" data-testid="principle-library-overview"><summary className="cursor-pointer text-gov">{t('principles.libraryOverview')}</summary>
+        <div className="mt-3 flex flex-wrap border border-line rounded-[var(--radius-md)] bg-panel overflow-hidden">
           <Metric num={String(summary.total)} label={t("principles.metricDeposited")} />
           <Metric num={String(summary.active)} label={t("principles.metricActive")} />
           <Metric num={latestUpdatedAt ? formatDate(latestUpdatedAt, i18n.language) : "—"} label={t("principles.metricLatest")} />
-        </div>
+        </div></details>
       )}
 
       {/* Content */}
@@ -526,24 +542,14 @@ export function PrinciplesPage() {
             return (
               <article
                 key={card.principleId}
-                onClick={() => navigate(`/principles/${card.principleId}`)}
                 className={
-                  "relative bg-panel border border-line rounded-[var(--radius-md)] p-4 cursor-pointer " +
+                  "relative bg-panel border border-line rounded-[var(--radius-md)] p-5 " +
                   "border-l-[3px] " +
                   STATUS_BORDER[card.status] + " " +
                   "transition-[border-color,background,transform] duration-150 " +
-                  "hover:border-line-2 hover:bg-surface hover:-translate-y-px " +
+                  "hover:border-line-2 " +
                   "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov"
                 }
-                tabIndex={0}
-                role="link"
-                aria-label={card.title}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    navigate(`/principles/${card.principleId}`);
-                  }
-                }}
               >
                 {/* timeline node */}
                 <span
@@ -553,6 +559,22 @@ export function PrinciplesPage() {
                   }
                   aria-hidden="true"
                 />
+                <div className="mb-2 flex flex-wrap items-start justify-between gap-3">
+                  <h3 className="min-w-0 flex-1 text-[15px] font-semibold leading-relaxed text-ink"><Link className="rounded-sm hover:text-gov focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gov" to={`/principles/${card.principleId}`} state={{ returnTo: `/principles?${searchParams}` }}>{card.title}</Link></h3>
+                  <span className={`rounded-[2px] border px-2 py-1 text-[11px] ${STATUS_TEXT[card.status]}`}>{card.decisionState !== undefined ? t(`principles.ownerDecision.state.${card.decisionState}`, { defaultValue: card.decisionState }) : t(decision.labelKey)}</span>
+                </div>
+                {/* PRI-332 P1-5: Readability warning — rendered via i18n code, never raw English string */}
+                {card.readabilityWarningCode && (
+                  <div className="mb-2 px-3 py-1.5 bg-amber/5 border border-amber/20 rounded-[3px] text-ink-3 text-[12px] leading-snug">
+                    {t("principles.readabilityWarning." + card.readabilityWarningCode, { defaultValue: t("principles.readabilityFallbackTitle") })}
+                  </div>
+                )}
+
+                {card.text.trim() !== card.title.trim() && <p className="text-ink-3 text-[13px] line-clamp-2 leading-relaxed">{card.text}</p>}
+                {card.runtimeDeactivated === true && <p className="mt-3 text-[12px] text-amber" role="status">{t('principles.runtimeDeactivated')}</p>}
+                <details className="mt-4 border-t border-line/60 pt-3" data-testid="principle-context-disclosure">
+                  <summary className="cursor-pointer text-[12px] text-gov">{t('principles.contextDisclosure')}</summary>
+                  <div className="mt-4 space-y-3">
                 {/* Tags row */}
                 <div className="flex items-center gap-2 mb-2 flex-wrap">
                   <span
@@ -591,22 +613,12 @@ export function PrinciplesPage() {
                   )}
                 </div>
 
-                {/* PRI-332 P1-5: Readability warning — rendered via i18n code, never raw English string */}
-                {card.readabilityWarningCode && (
-                  <div className="mb-2 px-3 py-1.5 bg-amber/5 border border-amber/20 rounded-[3px] text-ink-3 text-[12px] leading-snug">
-                    {t("principles.readabilityWarning." + card.readabilityWarningCode, { defaultValue: t("principles.readabilityFallbackTitle") })}
-                  </div>
-                )}
-
                 {/* PRI-332: Language mismatch hint when principle language ≠ current UI language */}
                 {card.detectedLanguage && card.detectedLanguage !== 'unknown' && i18n.language && !i18n.language.startsWith(card.detectedLanguage) && (
                   <div className="mb-2 px-3 py-1.5 bg-surface/60 border-l-2 border-line rounded-[3px] text-ink-4 text-[12px] leading-snug">
                     {t("principles.languageMismatchHint", { lang: card.detectedLanguage === 'en' ? 'English' : '中文' })}
                   </div>
                 )}
-
-                {/* Title */}
-                <h3 className="font-semibold text-ink mb-1">{card.title}</h3>
 
                 {/* PRI-332: When title used fallback, show original technical text in collapsed details */}
                 {card.titleUsedFallback && card.originalTitle && (
@@ -619,11 +631,6 @@ export function PrinciplesPage() {
                     </div>
                   </details>
                 )}
-
-                {/* Text preview */}
-                <p className="text-ink-3 text-[13px] line-clamp-3 leading-relaxed">
-                  {card.text}
-                </p>
 
                 {/* Timestamp */}
                 <p className="font-mono text-[11px] text-ink-4 mt-2">
@@ -652,34 +659,10 @@ export function PrinciplesPage() {
                 <EvolutionBlock label={t("principles.blockBehavior")}>
                   {card.action ? card.action : t("principles.blockBehaviorFallback")}
                 </EvolutionBlock>
-                <div className="mt-3 pt-3 border-t border-line/60">
-                  <div className="flex items-center justify-between gap-3 bg-gov/5 border border-line rounded-[3px] px-3 py-2">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-mono text-[11px] uppercase tracking-[0.02em] text-ink-4">
-                        {t("principles.govDecision")}
-                      </span>
-                      <span
-                        className={
-                          "font-mono text-[11px] uppercase tracking-[0.02em] border rounded-[2px] px-2 py-0.5 " +
-                          STATUS_TEXT[card.status] +
-                          " border-current/20"
-                        }
-                      >
-                        {decision.glyph} {t(decision.labelKey)}
-                      </span>
-                      {card.runtimeDeactivated === true && (
-                        <span className="font-mono text-[11px] uppercase tracking-[0.02em] border rounded-[2px] px-2 py-0.5 border-amber-300 text-amber-700 bg-amber-50">
-                          {t("principles.runtimeDeactivated")}
-                        </span>
-                      )}
-                    </div>
-                    {decisionDate && (
-                      <span className="font-mono text-[11px] text-ink-4 whitespace-nowrap">
-                        {formatDate(decisionDate, i18n.language)}
-                      </span>
-                    )}
+                    {decisionDate && <p className="text-[11px] text-ink-4">{t('principles.govDecision')}: {formatDate(decisionDate, i18n.language)}</p>}
                   </div>
-                </div>
+                </details>
+                <Link className="mt-3 inline-block text-[12px] text-gov underline underline-offset-4" to={`/principles/${card.principleId}`} state={{ returnTo: `/principles?${searchParams}` }}>{t('principles.openDetails')}</Link>
               </article>
             );
           })}

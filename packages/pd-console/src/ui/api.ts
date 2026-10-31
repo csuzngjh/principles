@@ -1,3 +1,4 @@
+import { validateApprovalReview, type ApprovalReviewGuard, type ApprovalReviewData } from './utils/approval-review.js';
 import type { ApiResponse } from "../types.js";
 import type { OwnerDecisionsData, OwnerResolutionResultData, OwnerDecisionInboxData, OwnerDecisionLibraryData } from "./utils/validators.js";
 import type { DesignGateAction, DesignGateDecision, DesignGateDeclaration, DesignGateScope } from "@principles/core/runtime-v2/internalization/design-gate-facts";
@@ -809,30 +810,34 @@ async function fetchEvidenceAudit(
   );
 }
 
+export function fetchApprovalReview(approvalId: string): Promise<ApiResponse<ApprovalReviewData>> {
+  return request('/api/v1/approvals/' + encodeURIComponent(approvalId), undefined, validateApprovalReview);
+}
+
 // ── Approvals ─────────────────────────────────────────────────────────────────
 
-async function approveApproval(approvalId: string, note?: string, options?: { targetHost?: 'openclaw' | 'codex' | 'workbuddy'; intentReviewed?: boolean; reviewedArtifactId?: string }): Promise<ApiResponse<ApprovalRecordData>> {
+async function approveApproval(approvalId: string, note?: string, options?: { expectedReview?: ApprovalReviewGuard; targetHost?: 'openclaw' | 'codex' | 'workbuddy'; intentReviewed?: boolean; reviewedArtifactId?: string }): Promise<ApiResponse<ApprovalRecordData>> {
   return request<ApprovalRecordData>('/api/v1/approvals/' + encodeURIComponent(approvalId) + '/approve', {
     method: 'POST',
-    body: JSON.stringify({ note, ...(options?.targetHost !== undefined ? { host: options.targetHost } : {}), ...(options?.intentReviewed !== undefined ? { intentReviewed: options.intentReviewed, reviewedArtifactId: options.reviewedArtifactId } : {}) }),
+    body: JSON.stringify({ note, ...(options?.expectedReview === undefined ? {} : { expectedReview: options.expectedReview }), ...(options?.targetHost !== undefined ? { host: options.targetHost } : {}), ...(options?.intentReviewed !== undefined ? { intentReviewed: options.intentReviewed, reviewedArtifactId: options.reviewedArtifactId } : {}) }),
   }, validateApprovalRecordDirect);
 }
 
-async function rejectApproval(approvalId: string, reason: string): Promise<ApiResponse<ApprovalRecordData>> {
+async function rejectApproval(approvalId: string, reason: string, expectedReview?: ApprovalReviewGuard): Promise<ApiResponse<ApprovalRecordData>> {
   return request<ApprovalRecordData>('/api/v1/approvals/' + encodeURIComponent(approvalId) + '/reject', {
     method: 'POST',
-    body: JSON.stringify({ reason }),
+    body: JSON.stringify({ reason, ...(expectedReview === undefined ? {} : { expectedReview }) }),
   }, validateApprovalRecordDirect);
 }
 
 async function editApproval(
   approvalId: string,
   newArtifactId: string,
-  editReason: string,
+  editReason: string | { reason: string; expectedReview: ApprovalReviewGuard },
 ): Promise<ApiResponse<ApprovalRecordData>> {
   return request<ApprovalRecordData>('/api/v1/approvals/' + encodeURIComponent(approvalId) + '/edit', {
     method: 'POST',
-    body: JSON.stringify({ newArtifactId, editReason }),
+    body: JSON.stringify({ newArtifactId, editReason: typeof editReason === 'string' ? editReason : editReason.reason, ...(typeof editReason === 'string' ? {} : { expectedReview: editReason.expectedReview }) }),
   }, validateApprovalRecordDirect);
 }
 

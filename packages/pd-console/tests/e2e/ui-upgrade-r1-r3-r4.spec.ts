@@ -240,23 +240,24 @@ test.describe('R6 language switch syncs document.lang', () => {
 // ── R2 (review round): the conclusion headline must agree with the cards ────
 
 test.describe('R2 conclusion strip stays honest with on-screen cards', () => {
-  test('never claims allClear while pending approval cards are on screen (unlinked-approval case)', async ({ page }) => {
+  test('never claims the system is clear while pending approval cards are on screen (unlinked-approval case)', async ({ page }) => {
     // The seed workspace has pending approvals (click approve/reject/edit).
-    // If the inbox projection misses them, the displayTotal floor from the
-    // action cards must still prevent the 'nothing needs you' headline.
+    // The headline count is the workbench list count, so a pending card can
+    // never sit next to a "nothing needs you" claim.
     await page.goto('/#/focus');
     await page.waitForLoadState('networkidle');
         const conclusion = page.locator('[data-testid="focus-conclusion-counts"]');
     await expect(conclusion).toBeVisible();
-    const text = await conclusion.innerText();
-    expect(text).not.toContain('当前没有需要你处理的治理事项');
+    const listed = await page.getByTestId('owner-work-item').count();
+    expect(listed).toBeGreaterThan(0);
+    expect(await conclusion.innerText()).toContain(`${listed} 项`);
   });
 });
 
 // ── Owner review round 2 (P2 S1/S3/Q2): degraded + feature-off + resize ─────
 
 test.describe('R2 review round 2: degraded inbox, feature-off, drawer resize', () => {
-  test('degraded inbox payload surfaces the server reason and never claims allClear (S1)', async ({ page }) => {
+  test('degraded inbox payload surfaces the server reason and keeps the count honest (S1)', async ({ page }) => {
     await page.route('**/api/v1/principles/owner-decision-inbox', (route) =>
       route.fulfill({
         status: 200,
@@ -278,8 +279,9 @@ test.describe('R2 review round 2: degraded inbox, feature-off, drawer resize', (
     const strip = page.locator('[data-testid="focus-conclusion"]');
     await expect(strip).toBeVisible();
     const text = await strip.innerText();
-    expect(text).not.toContain('当前没有需要你处理的治理事项');
-    expect(text).toContain('待处理数暂不可确认');
+    expect(text).toContain('部分资料暂未读取，当前列表可能不完整。');
+    const listed = await page.getByTestId('owner-work-item').count();
+    expect(text).toContain(`${listed} 项`);
     // The server's own reason + nextAction are shown as the recovery entry.
     const degraded = page.locator('[data-testid="focus-conclusion-degraded"]');
     await expect(degraded).toBeVisible();
@@ -287,7 +289,7 @@ test.describe('R2 review round 2: degraded inbox, feature-off, drawer resize', (
     expect(await degraded.innerText()).toContain('检查原则账本文件。');
   });
 
-  test('feature-disabled inbox keeps cards, shows the uncertain headline; locked wording never contradicts disabled buttons (S3)', async ({ page }) => {
+  test('feature-disabled inbox keeps cards and locks actions with a visible reason (S3)', async ({ page }) => {
     await page.route('**/api/v1/principles/owner-decision-inbox', (route) =>
       route.fulfill({
         status: 403,
@@ -299,17 +301,17 @@ test.describe('R2 review round 2: degraded inbox, feature-off, drawer resize', (
     const counts = page.locator('[data-testid="focus-conclusion-counts"]');
     await expect(counts).toBeVisible();
     const text = await counts.innerText();
-    // Unavailable headline, never allClear.
-    expect(text).toContain('待处理数暂不可确认');
-    expect(text).not.toContain('当前没有需要你处理的治理事项');
-    // This e2e workspace runs --no-auth, so governance actions are LOCKED
-    // (PRI-787): the S3 regression was the contradictory pairing of the
-    // actionable-now count with the lock notice. The unified wording must
-    // name the lock, never claim actionability.
-    expect(text).not.toMatch(/现在可操作/);
-    expect(text).toContain('治理动作已锁定');
-    // Cards stay on screen.
-    await expect(page.locator('[data-testid="owner-decisions-section"]').locator('button, article, a').first()).toBeVisible();
+    // A deliberately disabled optional projection is not an outage: the count
+    // still equals the work items actually listed, with no lock contradiction.
+    const listed = await page.getByTestId('owner-work-item').count();
+    expect(text).toContain(`${listed} 项`);
+    // This e2e workspace runs --no-auth, so governance actions are LOCKED (PRI-787).
+    await expect(page.getByTestId('focus-conclusion-lock')).toContainText('决策动作已锁定');
+    // The exact approval remains discoverable and no-auth actions remain locked.
+    const item = page.getByTestId('owner-work-item').and(page.locator('[data-item-key="approval:apr-click-approve"]'));
+    await expect(item).toBeVisible();
+    await item.click();
+    await expect(page.getByTestId('approve-btn-e2e00000-0000-4000-8000-000000000008')).toBeDisabled();
   });
 
   test('drawer open at 390px closes when the window grows to desktop; main regains interaction (Q2)', async ({ page }) => {
