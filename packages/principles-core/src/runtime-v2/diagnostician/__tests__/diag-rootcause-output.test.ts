@@ -177,6 +177,19 @@ describe('DiagRootCauseOutputV1Schema', () => {
     expect(result.errors.some((e: string) => e.includes('evidenceRefs must have at least 1 item'))).toBe(true);
   });
 
+  it('rejects whitespace-only causalChain evidenceRefs elements', async () => {
+    const validator = new DefaultDiagRootCauseValidator();
+    const output = {
+      ...validOutput,
+      causalChain: [
+        { why: 1, statement: 'Valid why', evidenceRefs: ['   '] },
+      ],
+    };
+    const result = await validator.validate(output, 'task-001');
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e: string) => e.includes('evidenceRefs[0] must be a non-empty string'))).toBe(true);
+  });
+
   it('validates causalChain statement must be non-empty', async () => {
     const validator = new DefaultDiagRootCauseValidator();
     const output = {

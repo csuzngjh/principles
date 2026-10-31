@@ -81,7 +81,7 @@ function makeRouterOutput(): DiagnosticianOutputV1 {
 
 function makeContextPayload() {
   return {
-    sourceRefs: ['ref-1', 'ref-2'],
+    sourceRefs: ['ref-1', 'ref-2', 'owner_reported:cli'],
     conversationWindow: [],
     trajectorySummary: '',
     painSignal: { painId: 'pain-e2e-001', painType: 'tool_failure', source: 'test', reason: 'test reason', score: 70 },
@@ -979,7 +979,7 @@ describe('Diag chain e2e', () => {
         painType: 'tool_failure' as const,
         source: 'test-source',
         reason: 'test reason',
-        evidence: [{ sourceRef: 'src-1', note: 'some evidence note' }],
+        evidence: [{ sourceRef: 'owner_reported:cli', note: 'some evidence note' }],
       };
 
       const bridgeResult = await bridge.onPainDetected(painSignal);

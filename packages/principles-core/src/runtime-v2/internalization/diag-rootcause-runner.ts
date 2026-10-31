@@ -30,6 +30,11 @@ import type { IntentDocReader } from '../intent/intent-doc-reader-port.js';
 import { PDRuntimeError, type PDErrorCategory } from '../error-categories.js';
 import { hydratePITaskRecord } from './pitask-metadata.js';
 import { RootCausePromptBuilder } from '../diagnostician/rootcause-prompt-builder.js';
+import {
+  collectTrustedEvidenceRefs,
+  findUnboundEvidenceRefs,
+  formatUnboundEvidenceRefErrors,
+} from '../diagnostician/evidence-ref-binding.js';
 import { injectRunnerLineageIfAbsent } from './peer-runner-contracts.js';
 import { computeFeatureFlagsFromConfig, isFeatureEnabled } from '../config/pd-config-feature-flags.js';
 import { BasePeerRunner } from '../runner/base-peer-runner.js';
@@ -230,12 +235,21 @@ export class DiagRootCauseRunner extends BasePeerRunner<DiagRootCauseContext, Di
     });
   }
 
-  async validateOutput(output: unknown, taskId: string, _context: DiagRootCauseContext): Promise<PeerRunnerValidationResult> {
+  async validateOutput(output: unknown, taskId: string, context: DiagRootCauseContext): Promise<PeerRunnerValidationResult> {
     const result = await this.validator.validate(output, taskId);
+
+    // PRI-1059: structure is not provenance. Bind every cited evidence ref to
+    // the context this run actually received; a copied prompt example (or any
+    // fabricated reference) must fail before it can become a PIArtifact.
+    const trustedRefs = collectTrustedEvidenceRefs(context.painPayload);
+    const unbound = findUnboundEvidenceRefs(output, trustedRefs);
+    const bindingErrors = formatUnboundEvidenceRefErrors(unbound);
+
     return {
-      valid: result.valid,
-      errors: result.errors,
-      errorCategory: result.errorCategory as PDErrorCategory | undefined,
+      valid: result.valid && bindingErrors.length === 0,
+      errors: [...result.errors, ...bindingErrors],
+      errorCategory: (result.errorCategory as PDErrorCategory | undefined)
+        ?? (bindingErrors.length > 0 ? 'output_invalid' : undefined),
       warnings: result.warnings,
     };
   }

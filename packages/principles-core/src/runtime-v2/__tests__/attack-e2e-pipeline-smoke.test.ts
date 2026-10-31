@@ -150,10 +150,10 @@ class MockRuntimeAdapter implements PDRuntimeAdapter {
           diagnosisId: 'diag-mock',
           taskId: taskId,
           summary: 'Mock rootcause summary',
-          causalChain: [{ why: 1, statement: 'why', evidenceRefs: ['ref-1'] }],
+          causalChain: [{ why: 1, statement: 'why', evidenceRefs: ['attack-test'] }],
           rootCause: 'Design: Mock rootcause',
           rootCauseCategory: 'Design',
-          evidence: [{ sourceRef: 'ref-1', note: 'note' }],
+          evidence: [{ sourceRef: 'attack-test', note: 'note' }],
           confidence: 0.9,
         };
       } else if (taskId.includes('diag_distiller')) {
@@ -470,11 +470,19 @@ describe('Attack E2E: LLM output unreliability across pipeline handoffs', () => 
       painType: 'tool_failure',
       source: 'write',
       reason: 'Attack test: empty recommendations',
-      evidence: [{ sourceRef: 'test', note: 'Attack test evidence' }],
+      evidence: [{ sourceRef: 'attack-test', note: 'Attack test evidence' }],
     });
 
     expect(result.status).toMatch(/^(failed|retried)$/);
     expect(result.candidateIds).toEqual([]);
+
+    // The failure must come from the router's empty recommendations, not from
+    // Stage A rejecting the evidence reference. Both predecessors must finish.
+    const parentTaskId = 'diagnosis_pain_attack_6';
+    const taskA = await stateManager.getTask(`diag_rootcause-${parentTaskId}`);
+    const taskB = await stateManager.getTask(`diag_distiller-${parentTaskId}`);
+    expect(taskA?.status).toBe('succeeded');
+    expect(taskB?.status).toBe('succeeded');
   });
 
   it('ATTACK-7: LLM returns unknown recommendation kind — route must defer safely', () => {
