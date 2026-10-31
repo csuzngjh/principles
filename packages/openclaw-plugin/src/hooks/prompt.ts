@@ -10,7 +10,7 @@ import type { ContextInjectionConfig } from '../types.js';
 // Routing guidance is no longer injected into prompts.
 import { extractSummary, getHistoryVersions, parseWorkingMemorySection, workingMemoryToInjection, autoCompressFocus, safeReadCurrentFocus } from '../core/focus-history.js';
 import { PathResolver } from '../core/path-resolver.js';
-import { RUNTIME_V2_PRINCIPLE_BUDGET, getPromptModelCatalog, operatorDeclaredContextWindow, resolvePromptBudget, trimToBudget, renderPrinciplesToDirectives, formatCorePrinciplesList, resolveOutputLanguage, DEFAULT_OUTPUT_LANGUAGE } from '@principles/core/runtime-v2';
+import { RUNTIME_V2_PRINCIPLE_BUDGET, getPromptModelCatalog, operatorDeclaredContextWindow, resolvePromptBudget, resolveTotalInjectionBudgetChars, trimToBudget, renderPrinciplesToDirectives, formatCorePrinciplesList, resolveOutputLanguage, DEFAULT_OUTPUT_LANGUAGE } from '@principles/core/runtime-v2';
 import type { PromptBudgetResolution, ResolvedOutputLanguage, PromptSelectionPolicy } from '@principles/core/runtime-v2';
 import { nextSessionTurnOrdinal } from '@principles/core/trajectory-store';
 import { truncateInjectionToBudget } from '@principles/core/prompt-builder';
@@ -141,6 +141,19 @@ function cachedReadFile(filePath: string, workspaceDir: string): string {
     }
     return '';
   }
+}
+
+/**
+ * PRI-1065: the Runtime V2 principle budget ACTUALLY applied to this build —
+ * the shared route's own resolution or the plugin-local one, otherwise the
+ * legacy constant. Both the injection event and the size guard read this one
+ * derivation, so the recorded budget and the enforced ceiling cannot drift.
+ */
+function appliedPrincipleBudgetChars(
+  shared: ActivePrinciplePromptResult | undefined,
+  local: PromptBudgetResolution | undefined,
+): number {
+  return shared?.budget ?? local?.budgetChars ?? RUNTIME_V2_PRINCIPLE_BUDGET;
 }
 
 /**
@@ -655,7 +668,7 @@ export async function handleBeforePromptBuild(
       // the same hook facts), or the plugin-local resolution. Never a
       // restated constant: a recorded budget that differs from the executed
       // one is a silent lie.
-      const v2EventBudget = sharedActivePrinciplePrompt?.budget ?? v2PromptBudget?.budgetChars ?? RUNTIME_V2_PRINCIPLE_BUDGET;
+      const v2EventBudget = appliedPrincipleBudgetChars(sharedActivePrinciplePrompt, v2PromptBudget);
       eventLog.recordRuntimeV2ActivationsInjected({
         hostKind: 'openclaw',
         eventId: randomUUID(),
@@ -843,11 +856,18 @@ export async function handleBeforePromptBuild(
   // thinking_os → reflection_log → reason: truncation → fallback.
   // PRI-467: intentBlockContent is passed so the guard can strip INTENT by
   // exact match before falling back to the nuclear option.
+  // PRI-1065: the total ceiling is the SAME model-aware principle budget the
+  // directives were rendered under plus a fixed background allowance — a
+  // large-window model must not have its background blocks squeezed out by a
+  // constant total (the former hard-coded 9000 did exactly that).
   const result = truncateInjectionToBudget(
     prependSystemContext,
     prependContext,
     appendSystemContext,
     {
+      totalBudgetChars: resolveTotalInjectionBudgetChars(
+        appliedPrincipleBudgetChars(sharedActivePrinciplePrompt, v2PromptBudget),
+      ),
       blocks: { projectContextContent, intentBlockContent, thinkingOsContent },
     }
   );
