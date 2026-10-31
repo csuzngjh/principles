@@ -1858,7 +1858,7 @@ export interface ExaminerReportData {
 
 export async function fetchExaminerOverview(): Promise<ApiResponse<ExaminerOverviewData>> {
   return request<ExaminerOverviewData>('/api/v1/examiner/overview', undefined, (v) => {
-    if (v !== null && typeof v === 'object' && Object.hasOwn(v as Record<string, unknown>, 'studies')) return v as ExaminerOverviewData;
+    if (v !== null && typeof v === 'object' && Object.hasOwn(v, 'studies')) return v as ExaminerOverviewData;
     return null;
   });
 }
