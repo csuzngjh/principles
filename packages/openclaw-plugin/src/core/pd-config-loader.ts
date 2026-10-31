@@ -70,14 +70,19 @@ export function resolveObserverConfig(
   const config = result.effective.config;
   const feature = config.features[observerFlagId];
   if (!feature?.enabled) {
-    return { enabled: false, readiness: 'disabled', ...base(result), ...emptyRuntime(), reason: `${observerFlagId} is disabled in .pd/config.yaml`, nextAction: `Set features.${observerFlagId}.enabled=true in .pd/config.yaml to enable` };
+    // PRI-1063 (review fix): flow mapping, single line. Feature ids are flat
+    // keys inside the EXISTING `features:` block — a standalone block would
+    // duplicate that key and fail YAML parsing.
+    return { enabled: false, readiness: 'disabled', ...base(result), ...emptyRuntime(), reason: `${observerFlagId} is disabled in .pd/config.yaml`, nextAction: `Enable it in .pd/config.yaml — in the existing "features:" block set ${observerFlagId}: {enabled: true} (one flat key, not nested)` };
   }
   if (!isInternalAgentName(observerAgentName)) {
     return { enabled: false, readiness: 'needs_setup', ...base(result), ...emptyRuntime(), reason: `Unknown agent name '${observerAgentName}'`, nextAction: `Use one of the known agent names: ${INTERNAL_AGENT_NAMES.join(', ')}` };
   }
   const agent = config.internalAgents.agents[observerAgentName];
   if (!agent?.enabled) {
-    return { enabled: false, readiness: 'disabled', ...base(result), ...emptyRuntime(), reason: `${observerFlagId} feature flag is enabled but internalAgents.agents.${observerAgentName}.enabled is false`, nextAction: `Set internalAgents.agents.${observerAgentName}.enabled=true in .pd/config.yaml, or disable features.${observerFlagId}` };
+    // PRI-1063 (review fix): internalAgents IS a genuinely nested path, so it
+    // is described as one; the feature id is flat. Both stay single-line.
+    return { enabled: false, readiness: 'disabled', ...base(result), ...emptyRuntime(), reason: `${observerFlagId} feature flag is enabled but internalAgents.agents.${observerAgentName}.enabled is false`, nextAction: `Enable the agent in .pd/config.yaml — this path IS nested: internalAgents > agents > ${observerAgentName} > enabled: true; or disable the flag instead (flat key): in the existing "features:" block set ${observerFlagId}: {enabled: false}` };
   }
   const runtimeProfileId = agent.runtimeProfile ?? config.internalAgents.defaultRuntime;
   const profile = config.runtimeProfiles[runtimeProfileId];

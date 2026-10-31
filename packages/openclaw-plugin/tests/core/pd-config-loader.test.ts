@@ -464,7 +464,12 @@ describe('Feature flag vs agent enabled mismatch', () => {
       expect(result.enabled).toBe(false);
       expect(result.readiness).toBe('disabled');
       expect(result.reason).toContain('enabled is false');
-      expect(result.nextAction).toContain('internalAgents.agents.correctionObserver.enabled=true');
+      // PRI-1063 (review fix): internalAgents IS a real nested path, so the
+      // hint describes it as one — but as a single line, and the alternative
+      // (disable the flag) must point at the flat features key.
+      expect(result.nextAction).toContain('internalAgents > agents > correctionObserver > enabled: true');
+      expect(result.nextAction).toContain('correction_observer: {enabled: false}');
+      expect(result.nextAction).not.toContain('\n');
     } finally { rmTmpDir(tmp); }
   });
 });
