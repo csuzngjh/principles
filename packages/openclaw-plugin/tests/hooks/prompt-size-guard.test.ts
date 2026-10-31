@@ -194,3 +194,52 @@ describe('Size guard: fail-closed', () => {
   });
 });
 
+
+// ─── PRI-1065: the ceiling follows the model-aware principle budget ─────────
+
+describe('Size guard: total ceiling derives from the applied principle budget (PRI-1065)', () => {
+  function sharedPrompt(
+    additionalContext: string,
+    budget: number,
+  ): Parameters<typeof import('../../src/hooks/prompt.js').handleBeforePromptBuild>[2] {
+    return {
+      additionalContext,
+      principleIds: ['p-1'],
+      activationIds: ['a-1'],
+      artifactIds: ['art-1'],
+      warnings: [],
+      budget,
+      truncated: false,
+    };
+  }
+
+  function ctx() {
+    return {
+      workspaceDir: '/fake/workspace',
+      trigger: 'heartbeat',
+      sessionId: 'test-session-123',
+      api: {
+        logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+        runtime: {},
+        config: {},
+      },
+    } as unknown as Parameters<typeof import('../../src/hooks/prompt.js').handleBeforePromptBuild>[1];
+  }
+
+  // Identical payload in both arms — ONLY the applied principle budget (and
+  // therefore the total ceiling) differs, so the assertion isolates the
+  // reconciliation this ticket introduces rather than ambient block sizes.
+  const DIRECTIVES = 'd'.repeat(12_000);
+
+  it('a 1M-window budget keeps background blocks that the legacy 9000 ceiling strips', async () => {
+    const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
+
+    const wide = await handleBeforePromptBuild(makeMinimalEvent(), ctx(), sharedPrompt(DIRECTIVES, 15_625));
+    expect(wide).toBeDefined();
+    expect(wide?.appendSystemContext ?? '').not.toContain('[WARNING: Context sections stripped');
+
+    const legacy = await handleBeforePromptBuild(makeMinimalEvent(), ctx(), sharedPrompt(DIRECTIVES, 2_000));
+    expect(legacy).toBeDefined();
+    expect(legacy?.appendSystemContext ?? '').toContain('[WARNING: Context sections stripped');
+  });
+});

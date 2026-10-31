@@ -1640,6 +1640,7 @@ export {
   TRUSTED_HOST_CONTEXT_WINDOW_SOURCES,
   isValidContextWindowTokens,
   promptBudgetCharsForContextWindow,
+  resolveTotalInjectionBudgetChars,
   classifySingleItemBudgetTier,
   resolvePromptBudget,
   createProductionGateDeps,

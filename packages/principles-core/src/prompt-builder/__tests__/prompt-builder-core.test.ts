@@ -298,7 +298,7 @@ describe('truncateInjectionToBudget', () => {
       withProjectContext('x'.repeat(3000));
     const result = truncateInjectionToBudget(ps, pc, ac, { diagnosticianMode: true });
     expect(result.appendSystemContext).toContain('Context sections stripped due to prompt size constraints');
-    expect(result.appendSystemContext).toContain('diagnostician-priority');
+    expect(result.appendSystemContext).toContain('Full context remains in the runtime state store');
     expect(result.prependSystemContext).toBe(ps);
     expect(result.prependContext).toBe(pc);
     expect(result.truncationLog).toContain('fallback');
@@ -388,5 +388,50 @@ describe('truncateInjectionToBudget', () => {
     expect(result.truncationLog).not.toContain('thinking_os');
     expect(result.appendSystemContext).not.toContain('<intent_anchor>');
     expect(result.appendSystemContext).toContain('<thinking_os>');
+  });
+});
+
+// ─── PRI-1065: model-aware total budget ──────────────────────────────────────
+
+describe('truncateInjectionToBudget with totalBudgetChars (PRI-1065)', () => {
+  const withProjectContext = (content: string) =>
+    `<project_context>\n${content}\n</project_context>`;
+
+  it('a raised ceiling lets a 1M-window turn keep its background blocks', () => {
+    // The audited failure: 720 governance + 5145 directives = 5865, plus a
+    // 3503-char CURRENT_FOCUS = 9368 > 9000 → the whole appendSystemContext
+    // was replaced. Under the reconciled ceiling (22625) the same turn fits.
+    const ps = 'g'.repeat(720 + 5145);
+    const pc = '';
+    const projContent = 'x'.repeat(3503);
+    const ac = withProjectContext(projContent);
+    expect(ps.length + pc.length + ac.length).toBeGreaterThan(9000);
+
+    const result = truncateInjectionToBudget(ps, pc, ac, { totalBudgetChars: 22_625 });
+    expect(result.truncated).toBe(false);
+    expect(result.truncationLog).toEqual([]);
+    expect(result.appendSystemContext).toBe(ac);
+  });
+
+  it('the raised ceiling still guards: content over it is stripped as before', () => {
+    const ps = 'g'.repeat(720);
+    const pc = '';
+    const ac = withProjectContext('x'.repeat(30_000));
+    const result = truncateInjectionToBudget(ps, pc, ac, { totalBudgetChars: 22_625 });
+    expect(result.truncated).toBe(true);
+    expect(result.truncationLog).toContain('project_context');
+  });
+
+  it('absent totalBudgetChars keeps the legacy 9000 boundary intact', () => {
+    const ps = 's';
+    const pc = 'p';
+    const overhead = ps.length + pc.length + '<project_context>\n\n</project_context>'.length;
+    // Exactly at the 9000 boundary fits; one char more trips the guard.
+    const fits = withProjectContext('x'.repeat(9000 - overhead));
+    expect(fits.length + ps.length + pc.length).toBe(9000);
+    expect(truncateInjectionToBudget(ps, pc, fits).truncated).toBe(false);
+
+    const over = withProjectContext('x'.repeat(9000 - overhead + 1));
+    expect(truncateInjectionToBudget(ps, pc, over).truncated).toBe(true);
   });
 });

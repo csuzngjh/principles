@@ -1,6 +1,6 @@
 {
   "barrel": "src/runtime-v2/index.ts",
-  "count": 1975,
+  "count": 1976,
   "names": [
     "ADMISSION_CONFIDENCE_THRESHOLD",
     "ADMISSION_POLICY_VERSION",
@@ -1904,6 +1904,7 @@
     "resolveScribeRunnerOptions",
     "resolveSourceKind",
     "resolveSummary",
+    "resolveTotalInjectionBudgetChars",
     "resumeOwnerEvidenceTask",
     "reviewStoreFromStateManager",
     "reviseRuleBindingOnce",

@@ -15,11 +15,21 @@
  *   5. fallback: only replaces appendSystemContext — prependSystemContext and
  *      prependContext are ALWAYS preserved (matching plugin behavior)
  *
+ * Budget: `options.totalBudgetChars` when the caller resolved a model-aware
+ * principle budget (PRI-1065: principle budget + background allowance), else
+ * the legacy 9000 constant.
+ *
  * Phase: PRI-75 Prompt Injection SDK Migration Phase 1
  */
 
 import type { SizeGuardOptions, TruncateResult } from './types.js';
 
+/**
+ * PRI-1065: legacy fallback ONLY. Production callers pass
+ * `SizeGuardOptions.totalBudgetChars` (= model-aware principle budget +
+ * background allowance) so the ceiling grows with the model window instead
+ * of squeezing background blocks out of a fixed total.
+ */
 const DEFAULT_BUDGET = 9000;
 
 /**
@@ -44,7 +54,7 @@ export function truncateInjectionToBudget(
 ): TruncateResult {
   const inDiagMode = options?.diagnosticianMode ?? false;
   const blocks = options?.blocks;
-  const budget = DEFAULT_BUDGET;
+  const budget = options?.totalBudgetChars ?? DEFAULT_BUDGET;
 
   let ps = prependSystemContext;
   let pc = prependContext;
@@ -155,7 +165,7 @@ export function truncateInjectionToBudget(
 ## 【CONTEXT SECTIONS】
 
 [WARNING: Context sections stripped due to prompt size constraints.
-This is a diagnostician-priority session — full context remains in the runtime state store.]
+Full context remains in the runtime state store.]
 `.trim();
     ac = fallbackContext;
     truncationLog.push('fallback');
