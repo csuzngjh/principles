@@ -1,6 +1,6 @@
 {
   "barrel": "src/runtime-v2/index.ts",
-  "count": 1975,
+  "count": 1977,
   "names": [
     "ADMISSION_CONFIDENCE_THRESHOLD",
     "ADMISSION_POLICY_VERSION",
@@ -876,6 +876,7 @@
     "PRODUCT_TELEMETRY_SNAPSHOT_SCHEMA_VERSION",
     "PRODUCT_TELEMETRY_TOP_LEVEL_FIELDS",
     "PROHIBITED_TELEMETRY_FIELD_TOKENS",
+    "PROMPT_BACKGROUND_ALLOWANCE_CHARS",
     "PROMPT_BUDGET_BASE_CHARS",
     "PROMPT_BUDGET_FALLBACK_CHARS",
     "PROMPT_BUDGET_HOST_KINDS",
@@ -1904,6 +1905,7 @@
     "resolveScribeRunnerOptions",
     "resolveSourceKind",
     "resolveSummary",
+    "resolveTotalInjectionBudgetChars",
     "resumeOwnerEvidenceTask",
     "reviewStoreFromStateManager",
     "reviseRuleBindingOnce",
