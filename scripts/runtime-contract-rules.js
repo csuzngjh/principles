@@ -1,11 +1,14 @@
 /**
  * Runtime Contract Rules — PRI-441 / Issue #996
  *
- * Pure single-line checker for the three Runtime Contract violation patterns
- * that map to real ERR entries (see docs/process/error-management/ERROR_PATTERN_INDEX.md EP-01):
+ * Pure single-line checker for the Runtime Contract violation patterns that map
+ * to real ERR entries (see docs/process/error-management/ERROR_PATTERN_INDEX.md):
  *   - ERR-001: `as` type-assertion bypasses runtime validation on untrusted data
  *   - ERR-005: `as Foo[]` array-element cast without per-element validation
  *   - ERR-013: `'key' in obj` on untrusted objects matches inherited properties
+ *   - ERR-175: user-visible text truncated by UTF-16 units splits surrogate
+ *     pairs (renders U+FFFD). Path-scoped: the caller must ask
+ *     isUiTextSurface(file) before applying it (see EP-11).
  *
  * This module is intentionally side-effect free and dependency free so it can be
  * unit-tested by direct import (mirrors scripts/check-repo-hygiene.js convention).
@@ -49,15 +52,30 @@ const SAFE_AS_TYPES = new Set([
 const SAFE_ARRAY_ELEMENT_TYPES = new Set(['unknown']);
 
 /**
- * Regex matching an exemption comment.
- * Group 1 = ERR ID (ERR-NNN), group 2 = non-empty reason.
- * A line that has the `runtime-contract-exempt:` marker but does NOT satisfy
- * this full regex is a malformed exemption (caller reports it as its own finding).
+ * Comment prefixes that can carry an exemption:
+ *   - `// ...`               (statements, .ts/.js)
+ *   - `/* ... *\/`           (block form)
+ *   - `{/* ... *\/}`          (JSX — markup has no line comments, so without
+ *                             this form a `.tsx` exemption cannot be written
+ *                             on the line that needs it)
  */
-export const EXEMPTION_RE = /\/\/\s*runtime-contract-exempt:\s*(ERR-\d+)\s+(\S.*)/;
+const EXEMPTION_PREFIX = String.raw`(?:\/\/|\/\*|\{\s*\/\*)`;
+
+/**
+ * Regex matching an exemption comment.
+ * Group 1 = ERR ID (ERR-NNN), group 2 = reason (closing comment marker is
+ * trimmed by parseExemption).
+ * A line that has the marker but does NOT satisfy this full regex is a
+ * malformed exemption (caller reports it as its own finding).
+ */
+export const EXEMPTION_RE = new RegExp(
+  `${EXEMPTION_PREFIX}\\s*runtime-contract-exempt:\\s*(ERR-\\d+)\\s+([^\\n]*)`,
+);
 
 /** Regex detecting ANY exemption-comment attempt (valid or malformed). */
-export const EXEMPTION_MARKER_RE = /\/\/\s*runtime-contract-exempt:/;
+export const EXEMPTION_MARKER_RE = new RegExp(
+  `${EXEMPTION_PREFIX}\\s*runtime-contract-exempt:`,
+);
 
 /**
  * Parse an exemption comment line.
@@ -77,7 +95,10 @@ export function parseExemption(line) {
   const match = EXEMPTION_RE.exec(line);
   if (!match) return 'MALFORMED';
   const errId = match[1];
-  const reason = match[2].trim();
+  // The reason group runs to end of line, so drop the closing marker of the
+  // block / JSX forms. A comment with only the marker and closing token ends up
+  // empty and is reported as MALFORMED.
+  const reason = match[2].replace(/\*\/\s*\}?\s*$/, '').trim();
   if (reason.length === 0) return 'MALFORMED';
   return { errId, reason };
 }
@@ -263,6 +284,106 @@ function detectErr001(line, ctx) {
     // Could not establish untrusted origin — do not flag.
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// ERR-175 — UI text truncated by UTF-16 code units.
+// ---------------------------------------------------------------------------
+
+/**
+ * Last camelCase / underscore-separated segment of the identifier immediately
+ * preceding the call, e.g. `props.item.bodyText` → `text`, `context` → `context`.
+ *
+ * @param {string} prefix
+ * @returns {string | null}
+ */
+function trailingIdentifierSegment(prefix) {
+  const match = /([A-Za-z_$][\w$]*)\s*$/.exec(prefix);
+  if (!match) return null;
+  const segments = match[1].split(/[_$]/).flatMap((part) => part.split(/(?=[A-Z])/));
+  const last = segments[segments.length - 1];
+  return last ? last.toLowerCase() : null;
+}
+
+/**
+ * Trailing identifier segments that carry Owner-visible text by convention.
+ * Deliberately a closed list: a `.slice(0, n)` on an array (`items`) or on an
+ * unrelated object (`context`) must stay clean.
+ */
+const TEXT_RECEIVER_SEGMENTS = new Set([
+  'text',
+  'body',
+  'statement',
+  'title',
+  'preview',
+  'content',
+  'description',
+  'summary',
+  'reason',
+  'message',
+  'msg',
+  'label',
+  'note',
+  'prompt',
+  'output',
+  'detail',
+  'candidate',
+  'pain',
+  'error',
+  'warning',
+]);
+
+/**
+ * ERR-175: shortening Owner-visible text with a UTF-16 code-unit API.
+ *
+ * `String.prototype.slice/substring/substr` count UTF-16 code units, so cutting
+ * a supplementary character (emoji, CJK Ext-B, …) in half leaves a lone
+ * surrogate that renders as U+FFFD (the replacement character). Truncate by
+ * code points instead —
+ * `truncateByCodePoints(text, max)` in `src/ui/utils/reading-layout.js`.
+ *
+ * Callers must apply this only to UI surfaces (see isUiTextSurface); the
+ * function itself is path-agnostic so it stays a pure, unit-testable rule.
+ *
+ * @param {string} line
+ * @returns {Violation | null}
+ */
+export function checkUiTextTruncation(line) {
+  if (typeof line !== 'string') return null;
+  const code = stripNoise(line);
+
+  // `.substring` / `.substr` exist only on strings — a `(0, …)` form is a
+  // prefix truncation wherever it appears. Other start offsets are ignored:
+  // they are not truncation, which is the failure this rule guards.
+  if (/\.\s*(?:substring|substr)\s*\(\s*0\s*,/.test(code)) {
+    return { ruleId: 'ERR-175' };
+  }
+
+  // `.slice(0, …)` is also an array API, so require a text-shaped receiver.
+  const re = /\.\s*slice\s*\(\s*0\s*,/g;
+  let match;
+  while ((match = re.exec(code)) !== null) {
+    const prefix = code.slice(0, match.index).replace(/[\s!?]+$/, '');
+    const segment = trailingIdentifierSegment(prefix);
+    if (segment !== null && TEXT_RECEIVER_SEGMENTS.has(segment)) {
+      return { ruleId: 'ERR-175' };
+    }
+  }
+  return null;
+}
+
+/**
+ * True when the ERR-175 rule applies to `file`: the Owner-visible console UI
+ * surface only. Widening this scope is a deliberate decision — every extra path
+ * adds false positives for text-shaped identifiers rendered outside the UI.
+ *
+ * @param {string} file - repository-relative path from the diff
+ * @returns {boolean}
+ */
+export function isUiTextSurface(file) {
+  if (typeof file !== 'string') return false;
+  const normalized = file.replace(/\\/g, '/');
+  return normalized.startsWith('packages/pd-console/src/ui/') && /\.(?:ts|tsx)$/.test(normalized);
 }
 
 /**
@@ -508,5 +629,10 @@ export const RULES = [
     id: 'ERR-013',
     title: '`in` operator on untrusted object matches inherited properties',
     autofix: 'Use `Object.hasOwn(obj, "key")`',
+  },
+  {
+    id: 'ERR-175',
+    title: 'user-visible text truncated by UTF-16 units splits surrogate pairs (renders U+FFFD)',
+    autofix: 'Use truncateByCodePoints(text, max) from src/ui/utils/reading-layout.js',
   },
 ];

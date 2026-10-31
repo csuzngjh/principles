@@ -443,7 +443,7 @@ For a task, pick the matching pattern cards, read the listed ERR records, and st
 <!-- error-pattern-routing
 {
   "id": "EP-11",
-  "risk": "low",
+  "risk": "medium",
   "pathSignals": [
     "i18n",
     "locales",
@@ -454,20 +454,24 @@ For a task, pick the matching pattern cards, read the listed ERR records, and st
     "placeholder=\"",
     "title=\"",
     "useTranslation",
-    "t('"
+    "t('",
+    ".slice(0,",
+    ".substring(0,",
+    "truncateByCodePoints"
   ],
   "requiredEvidence": [
-    "Every new user-facing string in an i18n-enabled component routes through t() with a key present in all locale files."
+    "Every new user-facing string in an i18n-enabled component routes through t() with a key present in all locale files.",
+    "Owner-visible text is shortened by code points (Array.from / truncateByCodePoints), never by UTF-16 units — a split surrogate pair renders as U+FFFD."
   ],
-  "enforcement": "advisory"
+  "enforcement": "mixed"
 }
 -->
 
-- **Use when**: adding any user-facing string (visible text, `aria-label`, `title`, `placeholder`, `alt`) in a component that already uses an i18n translation function (`t()`, `useTranslation`, `i18next`).
-- **Failure mode**: new strings are hardcoded in the source language (usually English) while the rest of the component routes text through `t()`, causing screen readers, tooltips, and visible text to read in a different language than the active UI locale.
-- **Must check**: every new string attribute in an i18n-enabled component uses `t()` with a translation key; corresponding keys are added to all locale files (`en.json`, `zh-CN.json`, etc.); interpolation parameters (e.g. `{{count}}`) are passed through `t()` options.
-- **Representative ERRs**: ERR-075.
-- **Automation target**: grep for `aria-label={`, `aria-label="`, `title="`, `placeholder="` in `.tsx` files that import `useTranslation`/`t()`; any match not using `t(...)` is a finding.
+- **Use when**: adding any user-facing string (visible text, `aria-label`, `title`, `placeholder`, `alt`) in a component that already uses an i18n translation function (`t()`, `useTranslation`, `i18next`); also when shortening a user-visible string for display (preview, truncation, `…` suffix).
+- **Failure mode**: new strings are hardcoded in the source language (usually English) while the rest of the component routes text through `t()`, causing screen readers, tooltips, and visible text to read in a different language than the active UI locale; **or Owner-visible text is truncated with `slice` / `substring` / `substr`, which count UTF-16 code units — cutting a supplementary character (emoji, CJK Ext-B) leaves a lone surrogate that renders as U+FFFD, so the Owner reads a damaged version of the very rule they are approving (ERR-175)**.
+- **Must check**: every new string attribute in an i18n-enabled component uses `t()` with a translation key; corresponding keys are added to all locale files (`en.json`, `zh-CN.json`, etc.); interpolation parameters (e.g. `{{count}}`) are passed through `t()` options; **for any display-length limit on text, layout the value with `truncateByCodePoints(text, max)` — do not slice a string by units, and do not treat "the literal has no U+FFFD today" as protection (the corruption is produced at runtime from whatever the user typed or the model returned)**.
+- **Representative ERRs**: ERR-075, ERR-175.
+- **Automation target**: grep for `aria-label={`, `aria-label="`, `title="`, `placeholder="` in `.tsx` files that import `useTranslation`/`t()`; any match not using `t(...)` is a finding. `check:runtime-contract` enforces ERR-175 on added/modified lines under `packages/pd-console/src/ui/**` (`.ts`/`.tsx`): `substring(0,` / `substr(0,` unconditionally, `slice(0,` when the receiver's trailing camelCase segment names text (array slicing such as `items.slice(0, 10)` stays clean).
 
 ### EP-12 Host Environment Contract
 
