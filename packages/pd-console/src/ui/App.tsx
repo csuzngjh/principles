@@ -20,6 +20,7 @@ import { CorePrinciplesPage } from "./pages/principles/CorePrinciplesPage.js";
 import { PrincipleDetailPage } from "./pages/principles/PrincipleDetailPage.js";
 import { ActivationPage } from "./pages/activation/ActivationPage.js";
 import { DebtPage } from "./pages/debt/DebtPage.js";
+import { ExaminerPage } from "./pages/examiner/ExaminerPage.js";
 import { ControlCenterPage } from "./pages/control-center/ControlCenterPage.js";
 import { SettingsPage } from "./pages/settings/SettingsPage.js";
 import { UpdatePage } from "./pages/settings/UpdatePage.js";
@@ -224,6 +225,7 @@ function AuthRoutes() {
                     <Route path="/principles/:id" element={<PrincipleDetailPage />} />
                     <Route path="/activation" element={<ActivationPage />} />
                     <Route path="/debt" element={<DebtPage />} />
+                    <Route path="/examiner" element={<ExaminerPage />} />
                     <Route path="/control-center" element={<ControlCenterPage />} />
                     <Route path="/settings" element={<SettingsPage />} />
                     <Route path="/update" element={<UpdatePage />} />

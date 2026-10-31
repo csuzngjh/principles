@@ -1771,3 +1771,147 @@ export interface PrincipleDetailRule {
 export interface PrincipleDetailData {
   principle: PrincipleDetail;
 }
+
+// ── Examiner (SPEC-PD-EXAMINER-001 v0.9 §8, offline-first) ────────────────────
+
+export interface ExaminerOverviewData {
+  spec: string;
+  executionScope: string;
+  gates: Record<string, string>;
+  hostInjectionCapability: Record<string, string>;
+  fullConclusionMinimumLevel: string;
+  studiesRoot: string;
+  studies: string[];
+}
+
+export interface ExaminerPrincipleItem {
+  id: string;
+  version: string;
+  text: string;
+  status: string;
+}
+
+export interface ExaminerStudyStatusData {
+  studyId: string;
+  experimentMode: string;
+  interventionType: string;
+  targetPrincipleId: string | null;
+  plannedPairs: number | null;
+  runStarted: boolean;
+  runFinished: boolean;
+  unitStates: Record<string, number>;
+  reportStatus: string | null;
+}
+
+export interface ExaminerPreflightCheck {
+  id: string;
+  severity: string;
+  ok: boolean;
+  detail: string;
+}
+
+export interface ExaminerPreflightData {
+  studyId: string;
+  ok: boolean;
+  status: string;
+  blockers: ExaminerPreflightCheck[];
+  warnings: ExaminerPreflightCheck[];
+  checks: ExaminerPreflightCheck[];
+}
+
+export interface ExaminerReportData {
+  studyId: string;
+  report: {
+    status: string;
+    scope?: { executionMode?: string; controlArm?: string; treatmentArm?: string };
+    examiner?: {
+      experimentMode: string;
+      interventionType: string;
+      targetPrincipleId: string | null;
+      primaryEndpoint: { id: string } | null;
+      applicability: { applicablePairs: number; notApplicablePairs: number };
+      itt: {
+        plannedApplicablePairs: number;
+        determinedPairs: number;
+        unknownPairs: number;
+        cells: Record<string, number>;
+        pointEstimate: { status: string; value?: number; numerator?: number; denominator?: number };
+        lowerBound: { status: string; value?: number };
+        upperBound: { status: string; value?: number };
+      };
+      treatmentFidelity: {
+        plannedTreatmentUnits: number;
+        contextPresent: number;
+        runtimeLoaded: number;
+        actualInjectionRate: { status: string; value?: number };
+        controlContamination: { units: number; ofControlChains: number };
+        capacityEvictions: { units: number };
+      };
+      randomization: { strategy: string; verified: boolean } | null;
+    } | null;
+    dimensions?: Record<string, unknown>;
+    limitations?: string[];
+  };
+  verification: { checks: { ok: boolean }[] };
+  note: string;
+}
+
+export async function fetchExaminerOverview(): Promise<ApiResponse<ExaminerOverviewData>> {
+  return request<ExaminerOverviewData>('/api/v1/examiner/overview', undefined, (v) => {
+    if (v !== null && typeof v === 'object' && Object.hasOwn(v as Record<string, unknown>, 'studies')) return v as ExaminerOverviewData;
+    return null;
+  });
+}
+
+export async function fetchExaminerPrinciples(): Promise<ApiResponse<{ principles: ExaminerPrincipleItem[] }>> {
+  return request<{ principles: ExaminerPrincipleItem[] }>('/api/v1/examiner/principles', undefined, (v) => {
+    if (v && typeof v === 'object' && Array.isArray((v as { principles?: unknown }).principles)) return v as { principles: ExaminerPrincipleItem[] };
+    return null;
+  });
+}
+
+export async function createExaminerStudy(input: { targetPrincipleId: string; experimentMode: string; repetitionsPerCase: number }): Promise<ApiResponse<{ studyId: string; experimentMode: string; plannedPairs: number | null; note: string }>> {
+  return request<{ studyId: string; experimentMode: string; plannedPairs: number | null; note: string }>(
+    '/api/v1/examiner/studies',
+    { method: 'POST', body: JSON.stringify(input) },
+    (v) => {
+      if (v && typeof (v as { studyId?: unknown }).studyId === 'string') return v as { studyId: string; experimentMode: string; plannedPairs: number | null; note: string };
+      return null;
+    },
+  );
+}
+
+export async function fetchExaminerStudyStatus(studyId: string): Promise<ApiResponse<ExaminerStudyStatusData>> {
+  return request<ExaminerStudyStatusData>(`/api/v1/examiner/studies/${encodeURIComponent(studyId)}`, undefined, (v) => {
+    if (v && typeof (v as { studyId?: unknown }).studyId === 'string') return v as ExaminerStudyStatusData;
+    return null;
+  });
+}
+
+export async function runExaminerPreflight(studyId: string): Promise<ApiResponse<ExaminerPreflightData>> {
+  return request<ExaminerPreflightData>(`/api/v1/examiner/studies/${encodeURIComponent(studyId)}/preflight`, { method: 'POST' }, (v) => {
+    if (v && typeof (v as { ok?: unknown }).ok === 'boolean') return v as ExaminerPreflightData;
+    return null;
+  });
+}
+
+export async function runExaminerStudy(studyId: string): Promise<ApiResponse<{ units: { unit: unknown; state: string }[] }>> {
+  return request<{ units: { unit: unknown; state: string }[] }>(`/api/v1/examiner/studies/${encodeURIComponent(studyId)}/run`, { method: 'POST', body: JSON.stringify({ mode: 'offline-stub' }) }, (v) => {
+    if (v && Array.isArray((v as { units?: unknown }).units)) return v as { units: { unit: unknown; state: string }[] };
+    return null;
+  });
+}
+
+export async function generateExaminerReport(studyId: string): Promise<ApiResponse<{ status: string; written: boolean }>> {
+  return request<{ status: string; written: boolean }>(`/api/v1/examiner/studies/${encodeURIComponent(studyId)}/report`, { method: 'POST' }, (v) => {
+    if (v && typeof (v as { status?: unknown }).status === 'string') return v as { status: string; written: boolean };
+    return null;
+  });
+}
+
+export async function fetchExaminerReport(studyId: string): Promise<ApiResponse<ExaminerReportData>> {
+  return request<ExaminerReportData>(`/api/v1/examiner/studies/${encodeURIComponent(studyId)}/report`, undefined, (v) => {
+    if (v && (v as { report?: unknown }).report) return v as ExaminerReportData;
+    return null;
+  });
+}

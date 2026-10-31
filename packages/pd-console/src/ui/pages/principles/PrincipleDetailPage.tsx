@@ -531,9 +531,20 @@ export function PrincipleDetailPage() {
     <PageShell>
       <div className="animate-[pdFadeIn_400ms_ease-out]">
       {/* Back link */}
-      <Button variant="ghost" onClick={() => navigate(returnTo)} className="mb-4 -ml-2">
-        ← {t("principles.detail.backToList")}
-      </Button>
+      <div className="mb-4 flex items-center justify-between">
+        <Button variant="ghost" onClick={() => navigate(returnTo)} className="-ml-2">
+          ← {t("principles.detail.backToList")}
+        </Button>
+        {/* SPEC-PD-EXAMINER-001 v0.9 §8.1: verification entry FROM the principle.
+            The Examiner page reads the ?principle= prefill (offline-stub only). */}
+        <Link
+          to={`/examiner?principle=${encodeURIComponent(String(id ?? ''))}`}
+          className="text-[13px] text-ink-3 underline decoration-dotted underline-offset-4 hover:text-ink"
+          data-testid="principle-detail-examiner-link"
+        >
+          {t("principles.detail.examinerEntry", { defaultValue: "验证此原则的行为效果 (Examiner)" })}
+        </Link>
+      </div>
 
       {/* ── Layer 1: Conclusion ─────────────────────────────────────────── */}
       <section className="mb-8">
