@@ -373,3 +373,323 @@
    `Verify Merge Gate` 已通过。
 
 **测试全绿不解锁 Gate 1、Gate 2 或 Phase 6；PR 保持 OPEN，未合并、未部署。**
+
+---
+
+# 第二轮：严格冻结模式下的定向整改（2026-11-01）
+
+> 本轮基线 HEAD：`110e2718c57888d25952310bef364dcaed4a9c06`（上一轮最终报告所在提交）。
+>
+> 裁定输入（Owner，原文要点）：“选择方案 2：严格冻结，lib 不改，不执行 rebind。”
+> 四个 rebind 文件保持字节级不变；`scripts/dev/principle-learning-lab/lib/*.mjs` 全部冻结；
+> 不运行 `rebind-exm-v4-freeze.mjs`；本轮只完成 P1-1/P1-4/P2-1/P2-2；P1-2/P1-3/P1-6 标记
+> `BLOCKED_BY_ARTIFACT_FREEZE`，不得伪装成已修复；不允许 implementationHash/packageHash
+> 与实际实现不一致；不允许通过跳过校验、修改基线或放宽 manifest 验证制造 PASS。
+>
+> 本轮提交：`50c769340`（代码与测试）→ 本报告所在提交（文档）。
+>
+> 结论适用范围与上一轮相同：离线工程链路；真实模型调用 = 0，真实宿主运行 = 0，
+> 生产写入 = 0，生产迁移 = 0，冻结产物改动 = 0。Gate 1 / Gate 2 / Phase 6 未解锁。
+
+---
+
+## A. 问题清单状态（本轮）
+
+| 项目 | 本轮状态 | 判定依据 |
+| --- | --- | --- |
+| P1-1 Console 写入隔离与历史资产保护 | **CONFIRMED → FIXED（本轮）** | canonical 解析 + 双向包含 + 每次写入前复验 + marker 作为常规文件信任锚；14 项边界测试；真实 HTTP 复核 |
+| P1-4 服务端强制执行 Preflight | **CONFIRMED → FIXED（本轮）** | 锁内复验后拒绝 → 409 `preflight_blocked`，零副作用（无 RUN_STARTED / 预约 / actor / lock） |
+| P2-1 Examiner DEV-only | **CONFIRMED → FIXED（本轮）** | `NODE_ENV=production` 为无条件硬门禁，DEV override 无法解除；构建产物 API 404 |
+| P2-2 Runner 锁生命周期 | **上一轮已修复 → 本轮回归确认（未改 runner）** | 锁内拒绝路径不残留 `writer.lock`；拒绝后合法运行可继续（既有测试 + 本轮锁内漂移用例） |
+| P1-2 注入证据链 | **CONFIRMED → BLOCKED_BY_ARTIFACT_FREEZE** | 库内改动属上一轮提交；本轮不改 lib、不重绑，按 Owner 指令不计为本轮 FIXED |
+| P1-3 Preregistration 跨文件冻结绑定 | **CONFIRMED → BLOCKED_BY_ARTIFACT_FREEZE** | 运行路径已能拒绝篡改/删除锚点；**本轮新发现报告生成路径缺口**（见 C4），修复必须改 lib |
+| P1-5 RuleCode 干预语义 | **上一轮已修复；本轮冻结不改动** | 库内 8 项语义测试仍全绿（回归），本轮无库内变更 |
+| P1-6 容量竞争进入最终报告 | **CONFIRMED → BLOCKED_BY_ARTIFACT_FREEZE** | 本轮实测报告 `capacity` 为 `RECORDED` 且与存储记录一致；任何进一步收口都需改 lib，按指令冻结 |
+
+说明：“BLOCKED_BY_ARTIFACT_FREEZE”在本报告中的含义是——**该条在本轮授权边界内不可关闭**，
+不是“缺陷仍原样存在”。凡属上一轮的库内修复，其代码仍在分支历史中且回归通过；但按 Owner
+指令（第 5 条），它们不得被表述为本轮已修复。
+
+---
+
+## B. 逐项证据
+
+### B1. P1-1 — canonical 写入边界（CONFIRMED → FIXED）
+
+- 根因（基线代码可复现）：`resolveStudyRoots` 仅做 `path.resolve`，`isInside` 是字符串前缀比较；
+  `realpathOrNull` 使用非 native 的 `realpathSync`，且只在部分入口调用。历史区成员身份被当作
+  可写权限；新建目录、run、report 三条写入路径各自检查、彼此不一致；ownership marker 只做
+  “存在即可”，且非独占创建。
+- 修改文件：
+  - `packages/pd-console/src/server/routes/examiner-executor.ts`
+    - `canonicalPathSync()`（:61）：对存在路径走 `fs.realpathSync.native`（跟随符号链接与
+      Windows junction）；对不存在路径取“最深的已存在祖先”解析后拼接剩余段；任何解析失败
+      一律 `null`（fail-closed）。
+    - `isSamePath()` / `isPathInside()`（:90/:95）：严格包含（相等不算包含），Windows 下大小写折叠。
+    - `resolveStudyRoots()`（:103）：可写根与历史区在启动时即取 canonical 形式。
+    - `writableRootProblem()`（:268）：同时检查**词法对**与**canonical 对**，任一方同根 / 互相包含
+      → `rootNotIsolated`；不可解析 → `unresolved`。
+    - `writableStudyDirProblem()`（:287）：单一写入边界判定（在 canonical 可写根内、且不在 canonical
+      历史区内），创建 / marker / run / report 四条路径共用。
+    - `resolveStudyAccess()`（:232）：枚举名必须精确命中；可写区条目一旦解析越界即返回只读并给出稳定
+      原因；历史区条目解析后必须仍在历史区内，否则视为不存在。
+    - `verifyConsoleOwnership()`（:174）：marker 必须是**常规文件**（拒绝符号链接），`writableRoot`
+      以 canonical 形式与服务端根比较。
+    - `mintStudyHandle()`（:521）：`mkdir` 后重新解析根再铸造目录；`writeOwnershipMarker()` 以
+      `fs.openSync(path,'wx')` 独占创建；`materializeConsoleStudy()` 在 marker 写入前复核真实位置。
+    - `offlineStudyPass()` / `reportMaterialize()`（:439/:466）：入口复核边界；报告写入把复核放进
+      实际落盘前的 `canWrite()` 回调，目录在返回后被换成别名也会 fail-closed。
+  - `packages/pd-console/src/server/routes/examiner.ts`：历史条目 `readOnly` 时 `/run`、`/report`
+    一律 `403 study_read_only`；GET 报告保持可读。
+- 新增测试：`packages/pd-console/tests/server/routes/examiner-path-boundary.test.ts`（14 项）：
+  可写根本身/父目录/祖先指向历史区；历史区被别名访问；双向嵌套；不存在路径经符号链接祖先；
+  创建后目录被换成 junction；不可解析路径；marker 为符号链接；大小写与前缀伪包含；路由级
+  `POST /studies`（符号链接可写根 → 409 `writable_root_not_isolated`）与别名条目 run/report
+  拒绝且历史目录逐文件指纹不变。
+- 红 → 绿：以基线版 `examiner-executor.ts` / `examiner.ts` 运行新增用例 →
+  `Test Files 2 failed | Tests 14 failed | 15 passed (29)`；恢复修复版后 →
+  `Test Files 2 passed | Tests 29 passed`（`.tmp/redgreen/red.log`、`.tmp/redgreen/green.log`）。
+- 真实 HTTP 复核（`.tmp/browser-acceptance/http-verify.json`、`http-verify-extra.json`）：
+  - `POST /studies` 且可写根为指向历史区的 junction → `409 writable_root_not_isolated`，
+    overview 给出同一原因；历史区 145 条指纹前后 0 差异。
+  - 历史 Study：GET 200 + `readOnly: true`；`POST /run` → 403；`POST /report` → 403；
+    `GET /report` → 200。
+- 仍有限制：`realpath` 解析与后续写入之间仍存在操作系统级竞态窗口（已通过“每次写入前复验 +
+  独占创建 + 常规文件锚”压缩到最小，但不是原子事务）。对已存在的历史文件不做内容级校验
+  （那是 v4 冻结守卫的职责）。
+
+### B2. P1-4 / P2-2 — 锁内复验与拒绝零副作用（CONFIRMED → FIXED）
+
+- 根因：服务端 preflight 与 runner 的加锁/`RUN_STARTED` 之间没有对同一冻结事实的独立复验；
+  拒绝路径若发生在加锁之后，异常类型也无法映射为结构化 HTTP 响应。
+- 修改文件：`packages/pd-console/src/server/routes/examiner.ts`
+  - `isFrozenStudyDriftError()`（:73 区域）：按契约名匹配动态模块抛出的 `FrozenStudyDriftError`；
+  - `driftProblems()`（:89）：把 drift 明细作为契约输出，但清洗路径形态并限长（240 字符 × 20 条），
+    拒绝载荷不含绝对路径或解析器文本；
+  - `/run` 捕获顺序：`ExaminerPreflightBlockedError` → 409（结构化 `blockers`）；
+    `FrozenStudyDriftError` → 409 `blockers:[{id:'frozen_study_drift', problems}]`；其余 → 500 稳定码。
+- 新增测试（`examiner.test.ts`）：preflight 通过后改写 `judge-only/<case>.json` → `POST /run` 返回
+  409、`blockers[0].id === 'frozen_study_drift'`、问题的确指出 `judge-only goldHash drift`、
+  载荷不含路径/堆栈；目录指纹（排除空的 `runs/`）不变，无 `writer.lock`、无 `budget-ledger.jsonl`、
+  无 attempt、无 `RUN_STARTED`。
+- 真实 HTTP 复核：`EXM-C-38D30861-…` 返回 409 + `frozen_study_drift`；该 Study 的
+  `events.jsonl` 仍只有 `PREREGISTRATION_FROZEN`，`runs/` 为空，无锁文件与预算账本。
+- P2-2：runner 的“先校验 unitOrder、再加锁、`finally` 释放”为上一轮修复；本轮未改 runner，
+  回归测试与上述拒绝零副作用共同证明拒绝路径不泄漏锁。
+
+### B3. P2-1 — 生产构建无条件关闭（CONFIRMED → FIXED）
+
+- 根因：上一轮的判定允许 `PD_EXAMINER_DEV=1` 在任意运行时开启，且未把 `NODE_ENV=production`
+  作为硬门禁；生产 bundle 若带上该环境变量即可暴露研究面。
+- 修改：`examiner.ts:66` `isExaminerDevRuntime()` 首行 `if (env.NODE_ENV === 'production') return false;`；
+  随后才看 `PD_EXAMINER_DEV=1` 或模块 URL 是否以 `.ts` 结尾。
+- 测试：`examiner.test.ts` 两项（谓词在 production 下恒 false；production + override 时路由
+  404 `examiner_not_enabled`，env 保存/恢复）。
+- 构建产物复核（`http-verify-extra.json`）：以 `NODE_ENV=production PD_EXAMINER_DEV=1` 启动
+  `dist/server.js` → `/api/v1/examiner/overview` 返回 `404 examiner_not_enabled`；UI 侧此前在真实
+  浏览器中已被重定向到 `#/focus`，导航无 Examiner 入口。
+
+### B4. P1-2 / P1-3 / P1-6 — BLOCKED_BY_ARTIFACT_FREEZE
+
+三条均为 CONFIRMED（基线可复现），其库内实现属 `scripts/dev/principle-learning-lab/lib/*.mjs`
+（严格冻结）。本轮**没有**修改这些文件、**没有**运行 rebind、**没有**触碰四个 rebind 文件。
+
+本轮以真实运行复核了它们当前的可观测行为（不是“已修复”声明）：
+
+| 项目 | 本轮实测 | 结论 |
+| --- | --- | --- |
+| P1-2 注入证据链 | 正常 Study：treatment 4/4 `RUNTIME_LOADED`，producer/scope 均为 `offline-stub`；伪造 `scope='real-host'` → 报告 `REPORT_INVALID`，critical `examiner_injection_binding_mismatch` | 证据链绑定生效；但离线链上限只能是 `RUNTIME_LOADED`（≠真实宿主加载），剩余收口属 v5 |
+| P1-3 Preregistration 绑定 | 运行路径：四项冻结输入任一被改写 → 409；锚点事件被删除 → 409（“immutable preregistration anchor MISSING”）。报告路径：改写 → `REPORT_INVALID`；**删除锚点 → `REPORT_PENDING` 且 0 findings** | 运行路径成立；**报告路径存在真实缺口**，必须改 lib，本轮冻结阻断 |
+| P1-6 容量竞争 | 报告 `capacity.status = RECORDED`，`selectionRule = examiner-offline:skip_and_continue_v1:id-asc`，`storedRecordAgrees = true`，evictions 0（真实 0），非目标保留字段齐全 | 当前行为符合设计；任何进一步收口需改 lib，按指令冻结 |
+
+**本轮新发现的缺口（P1-3，报告路径）**：`lib/challenge-behavior-report.mjs` 在生成报告时调用
+`verifyExaminerStudyBindings(studyDir, { requireAnchor: false })`；当锚点被删除时返回
+`anchor: 'MISSING'`。现有分支只处理 `MISMATCH`、`NOT_CHECKED` 与 `VERIFIED`，`MISSING`
+落到“无 finding”路径，于是已执行过的 Study 仍生成 `REPORT_PENDING`、`criticalCount = 0`、
+`bindings.verified = true`。运行路径不受影响（409）。这属于**报告是否允许缺失锚点**的问题，
+答案是“当前允许”——本轮无法关闭，列入 v5。
+
+### B5. P1-5 — 本轮不改动
+
+RuleCode 独立性证据要求、`INTERVENTION_NOT_IDENTIFIABLE`、`bundled_intervention` 等语义为上一轮
+库内修复，属冻结范围。本轮 8 项相关测试（`examiner-v09` §2）回归全绿；本轮未新增或修改该逻辑。
+
+---
+
+## C. 安全边界问答
+
+| 问题 | 答案 | 证据 |
+| --- | --- | --- |
+| 历史研究目录是否只读？ | 是。GET 可读，`POST /run` 与 `POST /report` 一律 403 `study_read_only`；服务端 `readOnly: true` 由归属判定产生，不由客户端决定 | `http-verify.json` A2（FULL/ISO 各 4 项请求）；历史区 145 条指纹前后 0 差异 |
+| 是否存在符号链接 / junction 绕过？ | 已测试的类别均不可绕过：可写根本身、父目录、祖先、历史区别名、双向嵌套、新建目录经链接祖先、创建后目录被换成 junction、marker 为链接，全部 fail-closed | 14 项边界测试 + A10 真实进程复核（409 `writable_root_not_isolated`） |
+| 注入证据的最高证明等级？ | 离线作用域最高 `RUNTIME_LOADED`，且必须由离线运行时签发的 receipt 支撑；离线 producer 声明 `real-host` 一律判 `REPORT_INVALID` | S13 实测 critical `examiner_injection_binding_mismatch`；`examiner-v09` 证据链测试 |
+| 是否存在 actor 伪造路径？ | Console 执行只注入脚本化离线 actor；离线 actor 不能签发 real-host scope 的 receipt；receipt 与同一 promptHash 绑定 | 同上；报告 `limitations` 明确“model/host identity UNKNOWN” |
+| Preregistration 锚点是否可重写？ | 锚点只追加；运行路径对“被删除 / 被改写”均拒绝（409）。**报告路径目前不拒绝“被删除”** | 运行：A4/A5 409；报告：S10 `REPORT_INVALID`（改写），S11 `REPORT_PENDING`（删除，缺口） |
+| 报告是否允许缺失锚点？ | **当前允许**（已执行 Study 仍生成 `REPORT_PENDING`、0 findings）。这是 P1-3 的未关闭缺口 | `http-verify.json` A8 |
+| UNKNOWN 是否被展示为 0？ | 否。ITT 用 `unknownPairs` 单列并固定分母；Fidelity 缺失 sidecar → `PARTIAL_UNKNOWN`；容量缺失 → `UNKNOWN`，isolated → `NOT_APPLICABLE`，只有真实无挤出才是 0 | `examiner-v09` 统计测试；本轮正常 Study：ITT planned 2 / determined 2 / unknown 0；fidelity coverage `COMPLETE` |
+
+---
+
+## D. 研究可信度
+
+| 维度 | 本轮结论 | 证据 |
+| --- | --- | --- |
+| Preregistration 绑定 | 正常 Study：`anchor: VERIFIED`，`bindingHash e9cbc6049b0ac3005f1b99857e042379af0b0cd19751ca32be3b9b6a4e3fcfd1`；改写 → 运行 409 / 报告 INVALID；删除锚点 → 运行 409，报告缺口（见 C） | `http-verify.json`；Study `EXM-C-BAD7D11C-…` 报告 |
+| RuleCode 独立性 | 缺失证据 → UNKNOWN → 不可执行；只有证据证明不可拆分才声明 `bundled_intervention`（上一轮库内实现，本轮回归 8/8） | `examiner-v09` §2 |
+| 证据 ↔ attempt 绑定 | attempt 必须绑定同一 promptHash 的 chain 与 receipt；跨作用域、异 prompt、重复 sidecar 均被拒绝或降级 | S13；`examiner-v09` §7 |
+| 未验证证据的降级 | 无 receipt 最高 `SELECTED`；缺 sidecar → UNKNOWN（不读作“未注入”）；注入失败不从 ITT 剔除 | `examiner-v09` §7；报告 `treatmentFidelity.rule` |
+| 是否把模拟描述为真实模型执行 | 否。报告 `scope` / `limitations` 明确 offline、无模型/宿主身份与真实成本；本报告所有结论限定为离线工程验证 | 报告 `limitations`；本文件抬头 |
+
+正常离线 Study（`EXM-C-BAD7D11C-F372-4678-BE9B-D54F30FD25BF`）实测：plannedPairs 4、
+8 个 unit 全部 `SUCCEEDED`、preflight `READY_FOR_OFFLINE_EXECUTION`、报告 `REPORT_PENDING`
+（离线金标待人工）、ITT 1（planned 2 / determined 2 / unknown 0 / 不适用 2）、Fidelity
+planned 4 / CONTEXT_PRESENT+ 4 / RUNTIME_LOADED 4 / 控制污染 0 / 未解析 0 / coverage `COMPLETE`、
+容量 `RECORDED`（treatment eligible 1，交付 `pri-target`）。
+
+---
+
+## E. EXM-MVP-001-v4 四个 rebind 文件状态
+
+本轮**未修改、未重新生成、未回滚**四个文件；以下哈希取自本轮工作区实测，且与 HEAD
+（`110e2718c`）一致。授权状态：**本轮未获授权修改；保持冻结。**
+
+| 文件 | 当前文件 SHA-256 | 本轮变化 | 授权状态 |
+| --- | --- | --- | --- |
+| `blind-review/receipts.template.json` | `38feef770e972cfc165fd1720e9c06e4aeec9d89d9dcedd03b8647fb4d99a6e8` | 无 | 未授权修改；冻结 |
+| `expected-replay.json` | `984546eac6925e4680f802b79cf959be10a45d7545d0cd33b987da256b140ebe` | 无 | 未授权修改；冻结 |
+| `package-manifest.json` | `13a79c0978cf0161ee70cd57fe6e5d18b5eff551eda33f943de04a2d3fef850d` | 无 | 未授权修改；冻结 |
+| `review-subject.json` | `3c4c0e2680be9f7ab1ca75dc2129d9ca8e3530ab03d4cba1fad6fde7580c5d02` | 无 | 未授权修改；冻结 |
+
+包内既有绑定（与上一轮报告一致，本轮未移动）：
+
+- `packageHash`：`5790d22b69285cb6c7aea217e1b7084baf3964acedf03036ca338c422e751050`
+- `executionsHash`：`97e2d4e78710616a18945fcbb9d823420a3cd716d2e58de67e1c817d15844751`
+- `subjectHash`：`a5bece09fab5c9c5d3d49e4c24da060c62d427718d6afcc545be36325f51b132`
+- `reportHash`：`4e6ad88ce92cd8483bd2d3363ee30560a7d689842dddd1e80ef22d5fdb4ccad8`
+
+一致性校验（约束第 6 条）：`package-manifest.json` 的 `implementation.files` 共 44 条，
+逐条与实际 `scripts/dev/principle-learning-lab/lib/*.mjs` 字节 SHA-256 比对 **44/44 一致**；
+本轮未产生任何 implementationHash / packageHash 与实际实现不一致的情况。
+`principle-learning-lab-frozen-package` 7/7 通过、`human-review-intake` 5/5 通过。
+
+---
+
+## F. 验收清单（14 项）
+
+| # | 验收项 | 结果 | 证据 |
+| --- | --- | --- | --- |
+| 1 | DEV 导航可见 Examiner 入口 | PASS | 真实浏览器（原则详情 DEV 入口 → 目标 `pri-target` 预选） |
+| 2 | 历史 Study 可查看 | PASS | GET 200 + `readOnly: true`（FULL/ISO） |
+| 3 | 历史 Study `POST /run` 被拒绝 | PASS | 403 `study_read_only`（浏览器网络 + HTTP 复核） |
+| 4 | 历史 Study `POST /report` 被拒绝 | PASS | 403 `study_read_only` |
+| 5 | 指向历史区的别名写入被拒绝 | PASS | 浏览器：仅别名名 404、撞名别名 403；进程级：409 `writable_root_not_isolated` |
+| 6 | 新建 Study | PASS | `EXM-C-BAD7D11C-…`（服务端铸造） |
+| 7 | Preflight | PASS | `READY_FOR_OFFLINE_EXECUTION` |
+| 8 | 离线 stub 运行完成 | PASS | 8/8 unit `SUCCEEDED` |
+| 9 | 生成报告 | PASS | `REPORT_PENDING`（离线金标），ITT / Fidelity / 容量齐全 |
+| 10 | 篡改绑定 → 报告拒绝 | PASS | `REPORT_INVALID`：`preregistration_hash_drift` + `examiner_preregistration_binding_unreadable` |
+| 11 | 删除锚点 → 报告拒绝 | **FAIL（缺口）** | 运行路径 409；报告路径仍 `REPORT_PENDING`、0 findings → P1-3 缺口，冻结阻断 |
+| 12 | 并发/锁内漂移 → 409 | PASS | 409 `preflight_blocked` / `frozen_study_drift`，零副作用 |
+| 13 | 跨作用域 receipt 误用被拒绝 | PASS | `REPORT_INVALID` / `examiner_injection_binding_mismatch` |
+| 14 | 生产模式 API 不可用 | PASS | `NODE_ENV=production` + `PD_EXAMINER_DEV=1` → 404 `examiner_not_enabled`；UI 重定向 `#/focus` |
+
+说明：本轮浏览器会话中应用内浏览器面板处于隐藏状态，截图工具返回
+`NATIVE_BROWSER_VIEWPORT_UNAVAILABLE`，因此以 DOM 快照、网络请求记录与落盘 Study 文件为证据；
+第 3/4/5/11/12/13/14 项另以独立 HTTP 进程复核并写入
+`.tmp/browser-acceptance/http-verify.json` / `http-verify-extra.json`（`.tmp/` 不入库，git-15）。
+服务进程已停止，端口 3179–3184 无 LISTENING 残留。
+
+---
+
+## G. 本地门禁与全量回归
+
+| 门禁 | 结果 | 证据 |
+| --- | --- | --- |
+| 新增安全测试红 → 绿 | 14 failed / 15 passed (29) → 29 passed | `.tmp/redgreen/red.log`、`green.log` |
+| pd-console 全量 | 164 files / **3045 passed + 1 expected fail**，exit 0 | `.tmp/examiner-e2e/console-tests-full-v2.log` |
+| 实验脚本相关套件（8 文件） | **207 passed**（含 examiner-v09、challenge-1b、frozen-package、human-review-intake、owner-content-review、productization-entry、challenge-examiner、human-review-signature） | `.tmp/examiner-e2e/scripts-lab-suites-v2.log` |
+| 类型检查 | `tsc --noEmit` exit 0 | `.tmp/examiner-e2e/tsc-v2.log` |
+| Lint（改动文件） | 0 errors（2 条“被忽略的测试文件”警告） | `.tmp/examiner-e2e/eslint-v2.log` |
+| 生产构建（含 dist 卫生） | exit 0 | `.tmp/browser-acceptance/build.log` |
+| Runtime Contract | 0 new violations（扫描 `origin/main...HEAD`，含本轮提交） | 本轮复核输出 |
+| 历史资产 | 145 条指纹（95 文件 + 50 目录）前后 0 差异；FULL/ISO 各 47 文件 | `.tmp/browser-acceptance/historical-*.json` |
+
+CI（推送后补记）：`Verify Merge Gate`、`CodeQL`、pd-console E2E、Release Reproducibility 的结果
+将在本轮文档提交推送后以增量提交补记；在此之前不声称任何 CI 为绿。
+
+---
+
+## H. EXM-MVP-001-v5 修复方案（下一版本，需 Owner 授权后执行）
+
+目标：在不触碰 v4 任何字节的前提下，关闭 P1-3 报告路径缺口，并为 P1-2/P1-6 的收口提供
+可验证的实现与冻结流程。
+
+### H1. 需要修改的文件
+
+1. `scripts/dev/principle-learning-lab/lib/challenge-behavior-report.mjs`
+   - 报告路径改为“锚点必需”：`verifyExaminerStudyBindings(studyDir, { requireAnchor: true })`，
+     或显式处理 `anchor: 'MISSING'` 分支 → critical finding（例如
+     `examiner_preregistration_anchor_missing`）并把 `status` 置为 `REPORT_INVALID`；
+   - 对“已有执行记录但锚点缺失”的 Study，禁止输出 `REPORT_PENDING` + 0 findings；
+   - 保持对历史 `EXM-V09-ACC-*` 只读展示的兼容（这些 Study 的锚点状态按既有规则处理，
+     不改写其文件）。
+2. `scripts/dev/principle-learning-lab/lib/examiner-study.mjs`
+   - `verifyExaminerStudyBindings` 的返回值约定显式化：区分 `anchor: 'MISSING'` 与
+     `'NOT_CHECKED'`，并让调用方无法把 `MISSING` 当作成功；
+   - 如需，增加 `anchorProblem` 字段供报告/运行两个消费方复用（同一事实只有一个判定）。
+3. `scripts/__tests__/principle-learning-lab-examiner-v09.test.ts`
+   - 新增：锚点删除 → 报告拒绝；锚点删除 → 运行拒绝（已有）；
+   - 新增：锚点存在但绑定被一致重写 → 报告 `REPORT_INVALID`（已有运行侧用例）；
+   - 新增：历史 Study 的报告路径不因新规则产生误报。
+4. 视 P1-2/P1-6 收口需要（仅在有具体缺口时）：
+   - `lib/challenge-statistics.mjs`（容量 / Fidelity 的 UNKNOWN 语义）
+   - `lib/challenge-runner.mjs`（receipt 绑定与 readiness 的进一步收紧）
+
+### H2. 哈希变化
+
+- `implementationHash`：上述任一 `lib/*.mjs` 变更都会改变 44 文件集合的实现绑定；
+- `packageHash`：由 `implementationHash` 与包内内容共同派生，必然移动；
+- 四个 rebind 文件全部移动：`package-manifest.json`（实现绑定与派生哈希）、
+  `expected-replay.json`、`review-subject.json`、`blind-review/receipts.template.json`；
+- 由它们派生的：`blind-review/SHA256SUMS.json`、`GOLD-BLIND-REVIEW-v5.zip`、
+  `docs/research/*` 验收文档、`owner-content-review` 账本绑定、v5 证据日志，
+  以及 `HISTORICAL_FROZEN_ASSET_BASELINE.sha256` 从 v3 升级到 v4；
+- 不得移动：Owner 复核过的执行（`executionsHash`）、Gold 决策、mapping / gold 哈希、
+  历史 Study 文件集合。任何移动都视为失败（fail-closed）。
+
+### H3. 重新冻结流程
+
+1. **新建** `challenge-studies/EXM-MVP-001-v5/`（从 v4 复制，v4 目录保持字节不变）；
+2. 实施 H1 的库内变更并在同分支完成单元/回归测试；
+3. 以 v4 的 rebind 流程为模板，对 **v5** 重新生成实现绑定及派生哈希
+   （不运行 `rebind-exm-v4-freeze.mjs` 指向 v4，也不改写 v4 的任何文件）；
+4. 运行既有完整性守卫：`verifyOfflinePackage` / `replayExmPackage` 必须证明
+   “除实现绑定及其派生外逐字节不变”；
+5. 基线文件升级为 v4 版本，delta 明确列出“新增 v5 包 + 派生文档”，并断言 v4 的 4 个文件
+   仍在基线中且未变；
+6. 冻结完成后由 Owner 审核并签字；未签字前不得被 CI/产品路径消费。
+
+### H4. 回归验证要求
+
+- 锚点删除：运行 409 **且** 报告拒绝（`REPORT_INVALID` 或 4xx）——本次缺口的核心用例；
+- 锚点重写 / 绑定一致重写：运行 409、报告 `REPORT_INVALID`；
+- 跨作用域 receipt：`REPORT_INVALID`；无 receipt 最高 `SELECTED`；缺 sidecar → UNKNOWN；
+- 容量：缺失 → UNKNOWN，isolated → NOT_APPLICABLE，篡改存储记录 → critical finding；
+- 历史 `EXM-V09-ACC-*` 逐文件 SHA-256 快照前后一致；
+- 全量：`scripts` 套件、`pd-console` 套件、`check:runtime-contract`、CodeQL（0 新告警）、
+  `Verify Merge Gate` 全绿；
+- 全程真实模型调用 = 0、真实宿主运行 = 0，报告继续标注离线边界。
+
+---
+
+## I. 本轮裁定
+
+**BLOCKED_ON_OWNER_DECISION**
+
+- 本轮授权范围（P1-1 / P1-4 / P2-1 / P2-2）**已全部完成**，并有新增测试、真实浏览器与独立
+  HTTP 复核支撑；全量本地套件、类型检查、Lint、构建、Runtime Contract 均绿。
+- P1-2 / P1-3 / P1-6 按 Owner 指令标记 `BLOCKED_BY_ARTIFACT_FREEZE`；其中 P1-3 的报告路径
+  缺口（锚点删除仍生成 `REPORT_PENDING`）是本轮新确认、且**必须改 lib 才能关闭**的真实缺口。
+- 因此本轮不宣称整改整体完成；remaining work 需要 Owner 授权 EXM-MVP-001-v5（见 H 节）。
+- 四个 rebind 文件与全部冻结产物本轮零改动；实现绑定 44/44 一致。
+- PR 保持 OPEN，未合并、未部署；Gate 1 / Gate 2 / Phase 6 未解锁。
