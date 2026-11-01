@@ -6,7 +6,7 @@
 | 任务 | SPEC-PD-AGENT-CAPABILITY-API-001 v0.5（OG-1 冻结）的 Gate 3 单变更集实施 |
 | 实施工单 | PRI-1068（In Review） |
 | 实施基线 | origin/main `797d2e9fd`（2026-11-01 fetch；比 DELTA-AUDIT 基线 `0d0ea7eb5` 新 8 个提交，全部经并发修改复核确认零交集） |
-| 最终 HEAD | `535737f3d`（实现 commit `bf7191f85` + origin/main git-7 刷新 merge） |
+| 最终 HEAD | `892228d95`（实现 `bf7191f85` + 报告 `f994c040f` + 夹具合规修复 `e8168902a`/`892228d95` + origin/main git-7 刷新 merges；PR CI 26/26 绿） |
 | PR | [#2270](https://github.com/csuzngjh/principles/pull/2270)（OPEN，待 Owner 评审；AI 不合并） |
 | 实施形态 | 单变更集 + 单次 git-7 刷新 merge；独立 worktree `D:\Code\_worktrees\principles\PRI-1068-pain-recall-extraction`（writer=zcode，租约+git lock 持有） |
 | 黄金生成记录 | 生成脚本 `.tmp/pain-recall-golden/generate-goldens.mjs`（worktree 内，gitignored）；生成时点 = 删除旧实现**之前**、built CLI 为旧路径实现（base `797d2e9fd` 构建）；MANIFEST.json 含全部夹具与输出 SHA-256 |
@@ -15,10 +15,10 @@
 
 ## 1. 最终裁定
 
-**PASS_WITH_LIMITATIONS**
+**PASS**
 
-- 全部授权范围（READINESS §1–§16）已实施并分层验证：黄金等价、只读矩阵、Capability 契约、架构守卫、发布治理、实机验收全部通过；
-- limitations（均不阻塞合并，逐项见 §7）：①PR CI 结果待确认（本地等价证据已分层提供，CI 若红按归因修复）；②Mimosa 深度扫描后台运行中（本报告提交时补充结论，不宣称安全结论）；③一处已知计时 flake（与本 diff 零交集，已给隔离证据）。
+- 全部授权范围（READINESS §1–§16）已实施并分层验证：黄金等价、只读矩阵、Capability 契约、架构守卫、发布治理、实机验收全部通过；**PR CI 26/26 全绿（含 Verify Merge Gate 全量门）**；Mimosa 深扫 0/648 涉及本 PR 文件。
+- 遗留观察（不阻塞合并，见 §7）：一处与本次 diff 零交集的已知计时 flake（已给隔离复测证据）。
 
 ## 2. 基线与变更
 
@@ -74,8 +74,8 @@
 | lint / typecheck | PASS 0 errors | core+pd-cli 全部涉改文件 eslint；两包 `tsc --noEmit` |
 | 架构回归 | PASS 493/493 | `architecture-regression.test.ts`（IO seam/barrel/DAG/REQUIRED_SOURCE_FILES） |
 | release-locks | PASS | `node scripts/check-release-locks.mjs` exit 0 |
-| PR CI | 首轮 Verify Merge Gate 红（generated-artifacts 拒绝 `.pd/state.db` 检入）→ 已改为扁平 `.fixture` 存储+物化重放并本地复跑门禁 PASS / 2102 pd-cli 全量绿，等待重跑 | PR #2270 checks |
-| Mimosa 深扫 | 运行中 | job `scan-job-mvxiqw9a`（结论后补，不预宣称） |
+| PR CI | **PASS 26/26（含 Verify Merge Gate 全量 `verify:merge`）**，HEAD `892228d95` 与本地一致 | PR #2270 checks（两轮修复：①generated-artifacts 拒绝 `.pd/` 检入→扁平 `.fixture` 存储+物化重放；②CI 检出无空目录 `ws-empty`→helper 容忍零文件工作区，完整性测试保真） |
+| Mimosa 深扫 | **完成：0/648 findings 涉及本 PR 任何变更文件**（静态边界 static_only_no_runtime_execution；648 条为全仓既有启发式存量，扫描 seal `sha256:de1d61a9…`，job `scan-job-mvxiqw9a`） | `~/.mimosa/security-scans/.../scan-2026-11-01T07-39-49.../`（findings.json 交叉比对脚本 `.tmp/pain-recall-golden/scan-vs-changed.cjs`） |
 
 ## 6. 发布治理
 
@@ -87,11 +87,11 @@
 
 | 项 | 状态 | 阻止合并？ |
 |---|---|---|
-| PR CI | 运行中（本地分层等价证据已提供） | 视结果；本次引入的红必修 |
-| Mimosa 深扫 | 后台运行中（静态边界） | 否（补充性证据；hook 多次 enobufs 故启动正式扫描） |
+| PR CI | **26/26 PASS**（Verify Merge Gate 含 generated-artifacts/error-handbook/全部 typecheck/build/lint/test:guard-contracts 等） | 已绿 |
+| Mimosa 深扫 | **完成：0/648 涉及本 PR 变更文件**（静态边界） | 否 |
 | pi-ai 计时 flake | 已记录（隔离绿，零交集；历史 `.pd-test-temp` flaky 同类） | 否 |
 | Gate 4 全部内容（MCP Server/SDK/32KiB/10s/取消/D-06/WB 实机） | **未实施**（OG-3 另行授权） | 否（明确出界） |
-| 未验证场景 | CI Linux 环境下黄金夹具字节稳定性已由 `.gitattributes -text` 机制保证，但尚无 CI 实跑记录（PR CI 将首次证明） | 否 |
+| 未验证场景 | 无遗留（CI Linux 已实跑黄金语料字节稳定：Test pd-cli PASS） | — |
 
 ## 8. 最终边界声明
 
