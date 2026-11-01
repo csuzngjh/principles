@@ -279,7 +279,8 @@ export type WorkspaceDiscoverySource =
   | 'cwd'
   | 'env_var'
   | 'openclaw_default'
-  | 'openclaw_plugin_config';
+  | 'openclaw_plugin_config'
+  | 'workbuddy_default';
 
 /**
  * Result of workspace.default discovery from config files.
@@ -510,6 +511,16 @@ export function discoverWorkspaceDefault(): WorkspaceDiscoveryResult | null {
   if (pluginConfig?.workspace) {
     candidates.push({ dir: pluginConfig.workspace, source: 'openclaw_plugin_config' });
   }
+
+  // 4. WorkBuddy governance workspace (~/.workbuddy/pd-workspace) — PRI-1064:
+  //    a --host workbuddy install initializes exactly this workspace and the
+  //    hook/worker chain runs against it. Without this candidate, every pd
+  //    command on a workbuddy-only machine demands an explicit --workspace,
+  //    which the install feedback ranked as a first-run blocker.
+  candidates.push({
+    dir: path.join(homeDir, '.workbuddy', 'pd-workspace'),
+    source: 'workbuddy_default',
+  });
 
   // Search each candidate for .pd/config.yaml with workspace.default
   for (const { dir, source } of candidates) {

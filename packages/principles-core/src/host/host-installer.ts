@@ -104,6 +104,19 @@ export interface HostInstallResult {
   readonly reason?: string;
   /** Operator-facing next action (rc-9 / cli-6-output-next-action). */
   readonly nextAction: string;
+  /**
+   * PRI-1064: machine-readable governance switch state the installer summary
+   * surfaces (the "Install complete!" screen must never leave the operator
+   * unknowing whether hooks will actually run). Optional: hosts without a
+   * governance gate simply omit it.
+   */
+  readonly governance?: {
+    readonly enabled: boolean;
+    /** True when the effective OFF state came from the Owner's explicit opt-out. */
+    readonly explicitOptOut: boolean;
+    readonly keywordPainEnabled?: boolean;
+    readonly configPath?: string;
+  };
 }
 
 export interface HostUninstallResult {
