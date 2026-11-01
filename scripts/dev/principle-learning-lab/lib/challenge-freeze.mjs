@@ -182,9 +182,34 @@ export function offlinePackageManifest(dir) {
   return { ...core, packageHash: hashOfCanonical(core) };
 }
 
+function describePackageDrift(recorded, actual) {
+  const moved = (before, after, key) => {
+    const beforeMap = new Map((before ?? []).map((entry) => [entry[key], entry.sha256]));
+    const afterMap = new Map((after ?? []).map((entry) => [entry[key], entry.sha256]));
+    return [...new Set([...beforeMap.keys(), ...afterMap.keys()])]
+      .filter((name) => beforeMap.get(name) !== afterMap.get(name));
+  };
+  return {
+    movedFiles: moved(recorded.files, actual.files, 'path'),
+    movedImplementation: moved(recorded.implementation?.files, actual.implementation?.files, 'name'),
+  };
+}
+
 export function verifyOfflinePackage(dir) {
   const recorded = JSON.parse(fs.readFileSync(path.join(dir, 'package-manifest.json'), 'utf8'));
   const actual = offlinePackageManifest(dir);
-  if (hashOfCanonical(recorded) !== hashOfCanonical(actual)) throw new Error('OFFLINE_PACKAGE_DRIFT');
+  if (hashOfCanonical(recorded) !== hashOfCanonical(actual)) {
+    const { movedFiles, movedImplementation } = describePackageDrift(recorded, actual);
+    const detail = [
+      movedFiles.length ? `package files moved: ${movedFiles.join(', ')}` : null,
+      movedImplementation.length ? `implementation binding moved: ${movedImplementation.join(', ')}` : null,
+    ].filter(Boolean).join('; ') || 'package-manifest.json itself differs from the package bytes';
+    // The rebinder is the only sanctioned writer, and it refuses unexpected
+    // package-file movement, so pointing at it never legitimizes tampering.
+    throw new Error(`OFFLINE_PACKAGE_DRIFT (${detail}). `
+      + 'An intentional lib change is rebound with '
+      + '`node scripts/dev/principle-learning-lab/rebind-exm-v4-freeze.mjs --record-evidence`; '
+      + 'the tool refuses unexpected package-file movement, so never edit package bytes to silence this check.');
+  }
   return actual;
 }

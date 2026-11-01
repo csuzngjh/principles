@@ -43,7 +43,7 @@
       },
       {
         "name": "challenge-behavior-report.mjs",
-        "sha256": "591afdcae99d1e42ec69163c390f75fd249f8ffb33411f559ecd7be2a70365c5"
+        "sha256": "307e9dadebd386481f9beeb1d800aa9c0e81637ae007b5c307121d80db689d40"
       },
       {
         "name": "challenge-compile.mjs",
@@ -59,7 +59,7 @@
       },
       {
         "name": "challenge-freeze.mjs",
-        "sha256": "e40fc00684392cb9763a184128cd029a5594b5b6a029df1fc4e7e5802c94ca50"
+        "sha256": "86d1ed1cc4d9d8699c2cdbe5dc604a3a636249a3740442f13cd7a1b6cba56764"
       },
       {
         "name": "challenge-isolation-contract.mjs",
@@ -202,7 +202,7 @@
     },
     {
       "path": "blind-review/receipts.template.json",
-      "sha256": "38feef770e972cfc165fd1720e9c06e4aeec9d89d9dcedd03b8647fb4d99a6e8"
+      "sha256": "092b05e0c9d008bf9ea4287a9496bee442e510e020dbed35ffcb0b6585263cba"
     },
     {
       "path": "blind-review/review-form.json",
@@ -210,7 +210,7 @@
     },
     {
       "path": "expected-replay.json",
-      "sha256": "984546eac6925e4680f802b79cf959be10a45d7545d0cd33b987da256b140ebe"
+      "sha256": "d7186fceef187caef75cbed012650031c67f938d3bfbf9d8825a32bec18e12ff"
     },
     {
       "path": "gold-review.json",
@@ -254,7 +254,7 @@
     },
     {
       "path": "review-subject.json",
-      "sha256": "3c4c0e2680be9f7ab1ca75dc2129d9ca8e3530ab03d4cba1fad6fde7580c5d02"
+      "sha256": "73dfd4280b5e23b1db757cece5ebcfd980d3d909e84d7b15209d4849f42d1a0d"
     },
     {
       "path": "revision.json",
@@ -269,5 +269,5 @@
       "sha256": "8c96f68ebfcd0ff71c1625cef036d6ef7f4f82785a303f45ff4a45952df9185c"
     }
   ],
-  "packageHash": "5790d22b69285cb6c7aea217e1b7084baf3960acedf03036ca338c422e751050"
+  "packageHash": "d5075b1191d4c80c3cf421223ccdf625c9cd1c615a02fb6c7513ad1a4d2044fc"
 }
