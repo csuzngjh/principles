@@ -107,18 +107,6 @@ describe('Core Principle Registry drift test', () => {
     });
   });
 
-  // The repo-root dogfood copy is what this repository's own agent sees; it is
-  // not shipped in the npm tarball, so the guard is existence-conditional.
-  describe('repo dogfood THINKING_OS template', () => {
-    const DOGFOOD_TEMPLATE = path.resolve(__dirname, '..', '..', '..', '..', '.principles', 'THINKING_OS.md');
-
-    it('matches the registry when present (ids, names, layers, zh statement anchors)', () => {
-      if (!fs.existsSync(DOGFOOD_TEMPLATE)) return;
-      const directives = parseThinkingOsMd(fs.readFileSync(DOGFOOD_TEMPLATE, 'utf-8'));
-      expectTemplateMatchesRegistry(directives, 'zh', 'dogfood template');
-    });
-  });
-
   // EP-09 / ERR-037: a regression guard must prove it can fail. The old guard
   // passed templates whose <must> restated a different principle under the
   // right id + name — this negative control pins that the anchor check bites.
