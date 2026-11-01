@@ -286,6 +286,23 @@ function main() {
     }
   }
 
+  // ---- Step 4b: Git hooks ----
+  // `lefthook`'s dependency postinstall rewrites the SHARED hooks directory
+  // with that worktree's absolute binary path (PRI-962). Restore the
+  // path-independent dispatcher after every install, including --skip-install
+  // runs that inherit a stale shared entry.
+  console.log('\nStep 4b: Git hooks (path-independent dispatcher)');
+  {
+    const hooksInstaller = path.join(repoRoot, 'scripts', 'dev', 'install-git-hooks.mjs');
+    if (!fs.existsSync(hooksInstaller)) {
+      logStep('fail', `hook installer missing: ${hooksInstaller}`);
+    } else {
+      const ok = run(`"${process.execPath}" "${hooksInstaller}" --strict`, { cwd: repoRoot, dryRun: args.dryRun });
+      if (ok) logStep('ok', 'git hooks dispatcher installed');
+      else logStep('fail', 'git hooks installation failed (commit/push hooks would otherwise use a stale binary)');
+    }
+  }
+
   // ---- Step 5: Build verification ----
   console.log('\nStep 5: Build verification');
   if (args.skipBuild) {
