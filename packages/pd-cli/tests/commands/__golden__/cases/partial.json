@@ -1,0 +1,12 @@
+{
+  "name": "partial",
+  "exitCode": 0,
+  "stdout": "{\n  \"schemaVersion\": \"pd.pain-recall.v1\",\n  \"status\": \"partial\",\n  \"principle\": {\n    \"requestedId\": \"55555555-5555-4555-8555-555555555555\",\n    \"canonicalId\": \"55555555-5555-4555-8555-555555555555\",\n    \"identityStatus\": \"resolved\",\n    \"text\": \"Partial scenario principle\"\n  },\n  \"query\": {\n    \"limit\": 3,\n    \"contextUsedForRanking\": false,\n    \"truncated\": false\n  },\n  \"results\": [\n    {\n      \"painId\": \"pain-golden-reuse-001\",\n      \"association\": {\n        \"type\": \"explicit_reuse\",\n        \"confidence\": \"explicit\",\n        \"evidenceRefs\": [\n          {\n            \"kind\": \"reuse_evidence\",\n            \"candidateId\": \"cand-bbbbbbbb-2222-4222-8222-222222222222\",\n            \"decidedAt\": \"2026-10-02T00:00:00.000Z\"\n          }\n        ]\n      },\n      \"pain\": {\n        \"occurredAt\": \"2026-10-01T10:00:00.000Z\",\n        \"source\": \"tool_failure\",\n        \"host\": \"unknown\",\n        \"score\": 80,\n        \"severity\": \"moderate\",\n        \"reason\": \"tool failed with permission error\",\n        \"text\": \"persisted evidence note\",\n        \"rawStatement\": null\n      },\n      \"diagnoses\": [],\n      \"correctionEvidence\": null,\n      \"availability\": {\n        \"painEvent\": \"available\",\n        \"diagnoses\": \"unreadable\",\n        \"correctionEvidence\": \"unreadable\"\n      },\n      \"lineage\": [\n        {\n          \"from\": \"principle:55555555-5555-4555-8555-555555555555\",\n          \"to\": \"pain-golden-reuse-001\",\n          \"relation\": \"reuse_evidence_pain_id\"\n        }\n      ]\n    }\n  ],\n  \"summary\": {\n    \"returned\": 1,\n    \"availableCandidates\": 1,\n    \"truncated\": false\n  },\n  \"sources\": {\n    \"ledger\": \"ok\",\n    \"trajectoryDb\": \"ok\",\n    \"stateDb\": \"unreadable\"\n  },\n  \"unresolvedAssociations\": [\n    {\n      \"candidateId\": \"cand-llllllll-1111-4111-8111-111111111111\",\n      \"reason\": \"state_db_unavailable\"\n    }\n  ]\n}\n",
+  "argvRecorded": [
+    "pain",
+    "recall",
+    "--principle-id",
+    "55555555-5555-4555-8555-555555555555",
+    "--json"
+  ]
+}

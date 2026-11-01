@@ -1,0 +1,12 @@
+{
+  "name": "principle-not-found",
+  "exitCode": 1,
+  "stdout": "{\n  \"schemaVersion\": \"pd.pain-recall.v1\",\n  \"status\": \"principle_not_found\",\n  \"principle\": {\n    \"requestedId\": \"99999999-9999-4999-8999-999999999999\",\n    \"canonicalId\": null,\n    \"identityStatus\": \"not_found\"\n  },\n  \"query\": {\n    \"limit\": 3,\n    \"contextUsedForRanking\": false,\n    \"truncated\": false\n  },\n  \"results\": [],\n  \"summary\": {\n    \"returned\": 0,\n    \"availableCandidates\": 0,\n    \"truncated\": false\n  },\n  \"sources\": {\n    \"ledger\": \"ok\",\n    \"trajectoryDb\": \"not_checked\",\n    \"stateDb\": \"not_checked\"\n  },\n  \"unresolvedAssociations\": []\n}\n",
+  "argvRecorded": [
+    "pain",
+    "recall",
+    "--principle-id",
+    "99999999-9999-4999-8999-999999999999",
+    "--json"
+  ]
+}

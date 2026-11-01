@@ -38,10 +38,11 @@
     },
     {
       "name": "read-model",
-      "description": "Read-only composite models that query state.db and the file ledger to produce operator-facing snapshots (operator health, pain chain, pruning, schema conformance, internalization chain integrity, activation compatibility). No writes — pure read paths exposed for CLI and console reuse.",
+      "description": "Read-only composite models that query state.db and the file ledger to produce operator-facing snapshots (operator health, pain chain, pain recall, pruning, schema conformance, internalization chain integrity, activation compatibility). No writes — pure read paths exposed for CLI and console reuse. The pain-recall read model's temp-directory I/O is WAL read-only snapshot staging only (system temp root, cleaned on success and failure paths): the business workspace is never written, and a missing database is never created.",
       "files": [
         "runtime-v2/operator-health-read-model.ts",
         "runtime-v2/pain-chain-read-model.ts",
+        "runtime-v2/pain-recall-read-model.ts",
         "runtime-v2/pruning-read-model.ts",
         "runtime-v2/schema-conformance-read-model.ts",
         "runtime-v2/internalization-chain-integrity-read-model.ts",

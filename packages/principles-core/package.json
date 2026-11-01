@@ -1,6 +1,6 @@
 {
   "name": "@principles/core",
-  "version": "1.297.11",
+  "version": "1.298.0",
   "description": "Pure-logic core of Principles Disciple, an AI Agent Governance System - pain signal capture and principle proposal (no I/O)",
   "type": "module",
   "main": "./dist/index.js",
@@ -33,6 +33,14 @@
     "./runtime-v2": {
       "types": "./dist/runtime-v2/index.d.ts",
       "default": "./dist/runtime-v2/index.js"
+    },
+    "./runtime-v2/pain-recall": {
+      "types": "./dist/runtime-v2/pain-recall-read-model.d.ts",
+      "default": "./dist/runtime-v2/pain-recall-read-model.js"
+    },
+    "./runtime-v2/pain-recall-capability": {
+      "types": "./dist/runtime-v2/pain-recall-capability.d.ts",
+      "default": "./dist/runtime-v2/pain-recall-capability.js"
     },
     "./runtime-v2/receipt-coverage": {
       "types": "./dist/runtime-v2/receipt-coverage.d.ts",

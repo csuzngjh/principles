@@ -1,0 +1,12 @@
+{
+  "name": "no-matches",
+  "exitCode": 0,
+  "stdout": "{\n  \"schemaVersion\": \"pd.pain-recall.v1\",\n  \"status\": \"no_matches\",\n  \"principle\": {\n    \"requestedId\": \"33333333-3333-4333-8333-333333333333\",\n    \"canonicalId\": \"33333333-3333-4333-8333-333333333333\",\n    \"identityStatus\": \"resolved\",\n    \"text\": \"Lonely principle with no edges\"\n  },\n  \"query\": {\n    \"limit\": 3,\n    \"contextUsedForRanking\": false,\n    \"truncated\": false\n  },\n  \"results\": [],\n  \"summary\": {\n    \"returned\": 0,\n    \"availableCandidates\": 0,\n    \"truncated\": false\n  },\n  \"sources\": {\n    \"ledger\": \"ok\",\n    \"trajectoryDb\": \"ok\",\n    \"stateDb\": \"ok\"\n  },\n  \"unresolvedAssociations\": []\n}\n",
+  "argvRecorded": [
+    "pain",
+    "recall",
+    "--principle-id",
+    "33333333-3333-4333-8333-333333333333",
+    "--json"
+  ]
+}

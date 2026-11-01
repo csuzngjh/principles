@@ -1,0 +1,36 @@
+{
+  "_tree": {
+    "principles": {
+      "55555555-5555-4555-8555-555555555555": {
+        "id": "55555555-5555-4555-8555-555555555555",
+        "version": 1,
+        "text": "Partial scenario principle",
+        "triggerPattern": "when in doubt",
+        "action": "verify first",
+        "status": "active",
+        "derivedFromPainIds": [
+          "cand-llllllll-1111-4111-8111-111111111111"
+        ],
+        "reuseEvidence": [
+          {
+            "painId": "pain-golden-reuse-001",
+            "candidateId": "cand-bbbbbbbb-2222-4222-8222-222222222222",
+            "decision": "reuse",
+            "actor": {
+              "kind": "owner",
+              "id": "owner-golden"
+            },
+            "reason": "same underlying pain",
+            "decidedAt": "2026-10-02T00:00:00.000Z"
+          }
+        ],
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "updatedAt": "2026-01-01T00:00:00.000Z"
+      }
+    },
+    "rules": {},
+    "implementations": {},
+    "metrics": {},
+    "lastUpdated": "2026-01-01T00:00:00.000Z"
+  }
+}
