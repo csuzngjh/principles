@@ -1402,7 +1402,7 @@ function isPreAnchorHistoricalStudy(binding) {
  * trusted, so the report cannot present absence of evidence as evidence of
  * absence.
  */
-function untrustedTreatmentFidelity(plannedTreatmentUnits) {
+function untrustedTreatmentFidelity(plannedTreatmentUnits, reason = 'preregistration anchor missing') {
   return {
     metric: 'TreatmentFidelity',
     status: 'UNKNOWN',
@@ -1414,7 +1414,7 @@ function untrustedTreatmentFidelity(plannedTreatmentUnits) {
     hostAccepted: null,
     contextPresent: null,
     runtimeLoaded: null,
-    actualInjectionRate: { status: 'NOT_ESTIMABLE', reason: 'preregistration anchor missing — injection evidence cannot be attributed' },
+    actualInjectionRate: { status: 'NOT_ESTIMABLE', reason: `${reason} — injection evidence cannot be attributed` },
     controlContamination: { units: null, ofControlChains: null },
     nonTargetRetention: {
       eligible: null,
@@ -1422,13 +1422,38 @@ function untrustedTreatmentFidelity(plannedTreatmentUnits) {
       deliveredInControl: null,
       treatmentRetentionRate: null,
       controlRetentionRate: null,
-      note: 'preregistration anchor missing — capacity records are not trusted',
+      note: `${reason} — capacity records are not trusted`,
     },
     capacityEvictions: { units: null, details: [] },
     unresolvedTreatmentUnits: plannedTreatmentUnits,
-    coverage: { status: 'UNKNOWN', note: 'preregistration anchor missing — no planned treatment unit has an attributable evidence chain' },
+    coverage: { status: 'UNKNOWN', note: `${reason} — no planned treatment unit has an attributable evidence chain` },
     rule: 'fidelity is a mechanism observability record — the actually-injected subset may NEVER replace the ITT primary analysis; an unverifiable injection downgrades causal attribution but never deletes assigned units',
   };
+}
+
+const V09_IDENTITY_ARTIFACTS = Object.freeze(['pair-assignment.json', 'examiner-arm-configs.json', 'heps-principles.json']);
+
+/**
+ * P1-3.1: deleting examiner-manifest.json must not be a cheaper bypass than
+ * deleting the anchor. A study that still carries any v0.9 identity marker is
+ * an examiner study and cannot be downgraded to a plain Report V2; only a
+ * study with NO v0.9 marker (a genuine pre-v0.9 study) may omit the block.
+ */
+function detectV09StudyIdentity(studyDir) {
+  const markers = [];
+  const readMaybe = (file) => {
+    try { return JSON.parse(fs.readFileSync(path.join(studyDir, file), 'utf8')); } catch { return null; }
+  };
+  const prereg = readMaybe('preregistration.json');
+  if (prereg && typeof prereg.examiner?.manifestHash === 'string' && prereg.examiner.manifestHash !== '') {
+    markers.push('preregistration.json:examiner.manifestHash');
+  }
+  const hashes = readMaybe('hashes.json');
+  if (hashes && hashes.examinerManifestHash) markers.push('hashes.json:examinerManifestHash');
+  for (const file of V09_IDENTITY_ARTIFACTS) {
+    if (fs.existsSync(path.join(studyDir, file))) markers.push(file);
+  }
+  return { present: markers.length > 0, markers };
 }
 
 /**
@@ -1442,7 +1467,39 @@ function buildExaminerBlockMaybe(studyDir, {
   addFinding, caseById, planUnits, plannedPairSet, rollupsByUnit, controlArm, treatmentArm, replayedAdjudications,
 }) {
   const manifestPath = path.join(studyDir, 'examiner-manifest.json');
-  if (!fs.existsSync(manifestPath)) return null;
+  if (!fs.existsSync(manifestPath)) {
+    // P1-3.1: a v0.9 study that deletes the whole identity record must not
+    // silently lose the examiner block (and with it every integrity check).
+    const identity = detectV09StudyIdentity(studyDir);
+    if (!identity.present) return null;
+    const plannedTreatmentUnits = planUnits.filter((u) => u.armId === treatmentArm).length;
+    addFinding('examiner_manifest_missing', 'critical', 'examiner-manifest.json',
+      `the study still carries v0.9 examiner identity (${identity.markers.join(', ')}) — deleting the manifest cannot downgrade it to a plain Report V2`);
+    return {
+      specVersion: 'SPEC-PD-EXAMINER-001 v0.9',
+      manifestHash: null,
+      error: 'examiner_manifest_missing',
+      applicability: { applicablePairs: null, notApplicablePairs: null },
+      itt: {
+        metric: 'ITT',
+        status: 'NOT_ESTIMABLE',
+        reason: 'examiner-manifest.json is missing — the primary endpoint and its applicability rule cannot be re-derived',
+        plannedApplicablePairs: null,
+        determinedPairs: null,
+        unknownPairs: null,
+        pointEstimate: { status: 'NOT_ESTIMABLE', reason: 'examiner manifest missing' },
+        lowerBound: { status: 'NOT_ESTIMABLE', value: null },
+        upperBound: { status: 'NOT_ESTIMABLE', value: null },
+      },
+      treatmentFidelity: untrustedTreatmentFidelity(plannedTreatmentUnits, 'examiner manifest missing'),
+      randomization: null,
+      injectionEvidence: {
+        attribution: 'UNAVAILABLE — examiner-manifest.json is missing',
+        note: 'no injection evidence is scanned or counted without the frozen study manifest; an unknown injection state is never reported as zero',
+      },
+      evidence: 'UNTRUSTED — the study identity files exist but examiner-manifest.json is missing; ITT/Fidelity/capacity cannot certify this study',
+    };
+  }
   let exManifest = null;
   try {
     exManifest = readJsonFile(manifestPath);
@@ -2073,9 +2130,12 @@ export function buildBehaviorReportV2(studyDir, { now } = {}) {
   });
   const vbdr = computeVBDR(vbdrCases);
 
-  // --- v0.9 examiner block (OPTIONAL — only when examiner-manifest.json exists).
-  // Historical studies without a manifest produce byte-identical reports; the
-  // block adds the dual-mode contract facts: ITT over applicable planned pairs,
+  // --- v0.9 examiner block (OPTIONAL only for genuine pre-v0.9 studies).
+  // A study with examiner-manifest.json always gets the block; a study that
+  // still carries v0.9 identity markers but deleted the manifest gets a
+  // critical finding instead of silently losing the block (P1-3.1). Historical
+  // studies without any v0.9 marker produce byte-identical reports; the block
+  // adds the dual-mode contract facts: ITT over applicable planned pairs,
   // Treatment Fidelity from the runner-produced injection evidence chains, and
   // the frozen randomization record. All inputs are verified (fail-closed) and
   // every count is recomputable from the raw artifacts listed.

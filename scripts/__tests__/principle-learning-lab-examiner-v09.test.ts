@@ -1175,6 +1175,76 @@ describe('v0.9 §13.D anchor-missing fail-closed policy', () => {
 });
 
 // ---------------------------------------------------------------------------
+// P1-3.1 — deleting the whole examiner-manifest.json must not be a cheaper
+// bypass than deleting the anchor. A study that still carries v0.9 identity
+// markers cannot be downgraded to a plain Report V2; a genuine pre-v0.9 study
+// (no markers at all) keeps the original optional-block behaviour.
+// ---------------------------------------------------------------------------
+describe('v0.9 §13.D manifest deletion cannot downgrade an examiner study', () => {
+  const eventsOf = (dir: string) => fs.readFileSync(path.join(dir, 'events.jsonl'), 'utf8')
+    .split('\n').filter((line) => line.trim() !== '').map((line) => JSON.parse(line));
+
+  it('deleting examiner-manifest.json keeps the block, raises a critical finding and REPORT_INVALID', async () => {
+    const parent = mkdtemp('v09-p31-manifest-delete');
+    const dir = path.join(parent, 'EXM-V09-NOMANIFEST');
+    writeExaminerStudyArtifacts({ ...assembleStudyInputs({ mode: 'full_library_incremental' }), studyDir: dir });
+    await runExaminerStudy(dir);
+    fs.rmSync(path.join(dir, 'examiner-manifest.json'), { force: true });
+
+    const report = buildBehaviorReportV2(dir, { now: NOW });
+    const finding = report.integrity.findings.find((f: any) => f.id === 'examiner_manifest_missing');
+    expect(finding).toBeDefined();
+    expect(finding.severity).toBe('critical');
+    expect(report.status).toBe('REPORT_INVALID');
+    expect(report.bindings.verified).toBe(false);
+    // The block is NOT silently dropped: it states why it cannot be computed.
+    expect(report.examiner).toBeDefined();
+    expect(report.examiner.error).toBe('examiner_manifest_missing');
+    expect(report.examiner.preregistrationBinding).toBeUndefined();
+    expect(report.examiner.capacity).toBeUndefined();
+    // Unknown is reported as UNKNOWN, never as 0, and no legacy scan runs.
+    expect(report.examiner.treatmentFidelity.status).toBe('UNKNOWN');
+    expect(report.examiner.treatmentFidelity.contextPresent).toBeNull();
+    expect(report.examiner.treatmentFidelity.unresolvedTreatmentUnits).toBe(2);
+    expect(report.examiner.injectionEvidence.treatmentChains).toBeUndefined();
+    expect(report.integrity.findings.some((f: any) => String(f.id).startsWith('examiner_injection_'))).toBe(false);
+    expect(renderBehaviorReportV2Markdown(report)).toContain('treatment fidelity: UNKNOWN');
+
+    // The write gate must refuse to mark it READY even when called twice.
+    const first = writeBehaviorReportV2(dir, { now: NOW });
+    expect(first.status).toBe('REPORT_INVALID');
+    expect(first.eventAppended).toBe(false);
+    const second = writeBehaviorReportV2(dir, { now: NOW });
+    expect(second.status).toBe('REPORT_INVALID');
+    expect(second.eventAppended).toBe(false);
+    expect(eventsOf(dir).some((e: any) => e.type === 'REPORT_READY_V2')).toBe(false);
+  });
+
+  it('a study without any v0.9 identity marker keeps the original behaviour (no examiner block, no finding)', () => {
+    const parent = mkdtemp('v09-p31-pre-v09');
+    const dir = path.join(parent, 'CEB-LEGACY-SHAPE');
+    writeExaminerStudyArtifacts({ ...assembleStudyInputs({ mode: 'isolated_principle' }), studyDir: dir });
+    for (const file of ['examiner-manifest.json', 'pair-assignment.json', 'examiner-arm-configs.json', 'heps-principles.json']) {
+      fs.rmSync(path.join(dir, file), { force: true });
+    }
+    const readJson = (rel: string) => JSON.parse(fs.readFileSync(path.join(dir, rel), 'utf8'));
+    const writeJson = (rel: string, value: unknown) => fs.writeFileSync(path.join(dir, rel), `${JSON.stringify(value, null, 2)}\n`);
+    const prereg = readJson('preregistration.json');
+    delete prereg.examiner;
+    writeJson('preregistration.json', prereg);
+    const hashes = readJson('hashes.json');
+    delete hashes.examinerManifestHash;
+    hashes.preregistrationHash.value = hashOfCanonical(prereg);
+    writeJson('hashes.json', hashes);
+
+    const report = buildBehaviorReportV2(dir, { now: NOW });
+    expect(report.examiner).toBeUndefined();
+    expect(report.integrity.findings.some((f: any) => f.id === 'examiner_manifest_missing')).toBe(false);
+    expect(report.integrity.findings.some((f: any) => String(f.id).startsWith('examiner_'))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // P1-5 — RuleCode intervention identifiability (no default independence)
 // ---------------------------------------------------------------------------
 describe('v0.9 §2 RuleCode identifiability', () => {
