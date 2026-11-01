@@ -47,4 +47,16 @@ describe('frozen EXM-MVP-001 is executable evidence, not a hash-only snapshot', 
       expect(() => verifyOfflinePackage(source)).not.toThrow();
     });
   }
+  it('names the drifted file and the sanctioned rebind command in the drift error', () => {
+    const copy = fs.mkdtempSync(path.join(os.tmpdir(), 'exm-drift-hint-'));
+    fs.cpSync(source, copy, { recursive: true });
+    const target = path.join(copy, 'inputs.json');
+    const data = JSON.parse(fs.readFileSync(target, 'utf8'));
+    data.unreviewedChange = true;
+    fs.writeFileSync(target, JSON.stringify(data));
+    let message = '';
+    try { verifyOfflinePackage(copy); } catch (error) { message = (error as Error).message; }
+    expect(message).toMatch(/^OFFLINE_PACKAGE_DRIFT \(package files moved: .*inputs\.json\)/);
+    expect(message).toContain('rebind-exm-v4-freeze.mjs --record-evidence');
+  });
 });

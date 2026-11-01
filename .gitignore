@@ -78,10 +78,9 @@ packages/create-principles-disciple/release-manager/
 packages/create-principles-disciple/workbuddy-adapter/
 
 # Local environment and state
-# .claude/ is ignored except for skills (shared with team)
-!.claude/
-.claude/*
-!.claude/skills/
+# .claude/ and .zcode/ are local host tooling; never committed.
+.claude/
+.zcode/
 claude/
 .planning/
 # Anchored to the checkout root: an unanchored `plans/` would also match
