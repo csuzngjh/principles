@@ -527,7 +527,7 @@ jobs:
           cat "$STAGE/${{ matrix.platform }}-${{ matrix.arch }}-abi$ABI/asset-meta.json"
 
       - name: Upload platform asset
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-asset-${{ matrix.platform }}-${{ matrix.arch }}-node${{ matrix.node }}
           path: ${{ runner.temp }}/platform-asset
@@ -732,7 +732,7 @@ jobs:
 
       - name: Upload publication for review
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-metadata-${{ github.run_number }}
           path: ${{ runner.temp }}/metadata-repo
