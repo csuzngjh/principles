@@ -45,6 +45,8 @@ Artificer 850s → Evaluator `approved`，契约反例 81/81（79 + 2 项官方�
 `lint` 0 error（仅既有 warning）；`typecheck:pd-console`、`build:ui` 通过；`@principles/core` 构建通过；core 全量 8761+ 项通过，host-runtime 625 项通过，pd-console 3062 项通过。
 并行跑全量时出现 `principle-tree-ledger.atomic-write`、`reuse-shortlist`、`restart-safety.e2e`、console 的 owner-review/governance 若干超时与 Windows `EBUSY`，均已单独复跑通过（耗时下降一半以上），属本机并行负载噪音，非本次改动引入。
 
+satellite bundle 体积预算随之超限（`rulehost-evidence.js` dev 559,348 > 旧上限 553,489，因为该 satellite 打包共享 runtime）。按门禁自身要求在同一 PR 内重定基到 baseline 452,000 / max 565,000，注释记录实测值与后续方向（修订操作只服务 Console，barrel 收窄可回收这部分字节）。
+
 ### 未证明（不得由本轮冒充）
 
 原生宿主现场（真实 Codex 会话里的 design declaration、受控测试写入、shadow 事件随新 digest 增长、Console 新审批/上线、紧急恢复实操）未执行；生产安装、真实 Owner 审批、现场效果均无结论。原生版本混装风险仍存在：旧 Codex 运行时缺 `recoveryControl` 会按合同版本拒绝执行新工件（fail-closed、可见 warning），但不会替 Owner 报告“该工件在你当前运行时不被执行”，这是已知残余。
