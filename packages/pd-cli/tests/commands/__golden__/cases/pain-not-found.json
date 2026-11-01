@@ -1,0 +1,14 @@
+{
+  "name": "pain-not-found",
+  "exitCode": 1,
+  "stdout": "{\n  \"schemaVersion\": \"pd.pain-recall.v1\",\n  \"status\": \"pain_not_found\",\n  \"principle\": {\n    \"requestedId\": \"11111111-1111-4111-8111-111111111111\",\n    \"canonicalId\": null,\n    \"identityStatus\": \"not_found\"\n  },\n  \"query\": {\n    \"limit\": 3,\n    \"painId\": \"pain-golden-orphan-004\",\n    \"contextUsedForRanking\": false,\n    \"truncated\": false\n  },\n  \"results\": [],\n  \"summary\": {\n    \"returned\": 0,\n    \"availableCandidates\": 0,\n    \"truncated\": false\n  },\n  \"sources\": {\n    \"ledger\": \"ok\",\n    \"trajectoryDb\": \"ok\",\n    \"stateDb\": \"ok\"\n  },\n  \"unresolvedAssociations\": [],\n  \"statusDetail\": \"not_associated\"\n}\n",
+  "argvRecorded": [
+    "pain",
+    "recall",
+    "--principle-id",
+    "11111111-1111-4111-8111-111111111111",
+    "--pain-id",
+    "pain-golden-orphan-004",
+    "--json"
+  ]
+}

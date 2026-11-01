@@ -13,6 +13,10 @@ import * as pathSync from 'path';
 const REQUIRED_SOURCE_FILES = [
   'pain-to-principle-service.ts',
   'pain-chain-read-model.ts',
+  // PRI-1068 (SPEC-PD-AGENT-CAPABILITY-API-001 v0.5): pain-recall read model
+  // migrated from pd-cli services + the od-a-v1 capability facade.
+  'pain-recall-read-model.ts',
+  'pain-recall-capability.ts',
   'pain-signal-bridge.ts',
   'pain-signal-runtime-factory.ts',
   'pain-signal-observability.ts',

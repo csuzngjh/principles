@@ -1,0 +1,10 @@
+{
+  "name": "param-error-missing-principle-id",
+  "exitCode": 1,
+  "stdout": "{\n  \"status\": \"failed\",\n  \"reason\": \"principle_id_required\",\n  \"message\": \"--principle-id <id> is required and must be a non-empty canonical ledger principle id\",\n  \"nextAction\": \"Pass the principle's canonical ledger id (a UUID), e.g. pd pain recall --principle-id <uuid> --json.\"\n}\n",
+  "argvRecorded": [
+    "pain",
+    "recall",
+    "--json"
+  ]
+}

@@ -253,3 +253,11 @@ packages/website/.wrangler/
 # plus a stated reason.
 /docs/audit/
 /artifacts/
+
+# ── Golden CLI-equivalence fixtures (PRI-1068) ──────────────────────────────
+# The pain-recall golden corpus pins CHECKED-IN workspace bytes (ledger JSON +
+# trajectory.db + state.db, hash-anchored by tests/commands/__golden__/MANIFEST.json).
+# The runtime-state ignore rules above (.state/, .pd/, *.db, ledger filename)
+# must not swallow this corpus. Narrow negation, this subtree only.
+!packages/pd-cli/tests/commands/__golden__/
+!packages/pd-cli/tests/commands/__golden__/**

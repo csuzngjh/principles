@@ -1,0 +1,131 @@
+{
+  "schema": "pd-pain-recall-golden/1",
+  "generatedAt": "2026-11-01T06:15:01.102Z",
+  "generator": ".tmp/pain-recall-golden/generate-goldens.mjs",
+  "cliEntry": "packages/pd-cli/dist/index.js (built from the PRE-migration source; see PR description)",
+  "baseCommit": "797d2e9fdfeabcbbb0c740979787fccfb67e7cea",
+  "workspaces": {
+    "ws-ok": {
+      ".pd/state.db": "2d25ae60fbd3c031c5598b5f60ee8cbc1205491a6a0a922957743fcccd0ca269",
+      ".state/principle_training_state.json": "03b078b2e0a48cf3e9a80863f730ea0c3229f5be08afe6a70598efcfe9ecc26d",
+      ".state/trajectory.db": "5ce55a774ef50e361ebefba83db6392d03f8c22b146effb009a3c20d627effcd"
+    },
+    "ws-trunc": {
+      ".pd/state.db": "484c38c349b83b97b8c3ecb33e84f8fd8bdfc2e1d096a63017c5fec6d683c29f",
+      ".state/principle_training_state.json": "cb632176f499463011d04046ec732fd975b3e27509d25fbac2980019152cfa3d",
+      ".state/trajectory.db": "3d45f145e014c7be1f347ea718fbf8c05fd12f902583836c7e112c0f01b6ece1"
+    },
+    "ws-partial": {
+      ".pd/state.db": "dfe798bc2d2bdfcf81abd7456f83f1c55db4b264866a31d9acd875064dabb14d",
+      ".state/principle_training_state.json": "5b61dd5ed818ca8992e40892a8f048f587e867e64fbd8577ae801d5b1ff06cc4",
+      ".state/trajectory.db": "49133ebde8265361f0d4a1b327a0dc837a8ec1dec3df82d6327f4aae58c024b4"
+    },
+    "ws-empty": {}
+  },
+  "cases": {
+    "ok-full": {
+      "workspace": "ws-ok",
+      "exitCode": 0,
+      "stdoutSha256": "f7b56256f15e106dbce105a9cd8d5530a2905678368988dd82d825dd5f6c3216",
+      "caseFileSha256": "25847b8029ef9793e11668845df08f51832dd352fd02be0f136582402f10d884",
+      "argvRecorded": [
+        "pain",
+        "recall",
+        "--principle-id",
+        "11111111-1111-4111-8111-111111111111",
+        "--json"
+      ]
+    },
+    "default-limit-truncation": {
+      "workspace": "ws-trunc",
+      "exitCode": 0,
+      "stdoutSha256": "e8a81b6064d2b3324cebcf6d6133b59664da1191ded372492b486c93206c4e44",
+      "caseFileSha256": "450f2015dcb0ec5f5d7556ad11c45380a753319544299db2d7103e37c07d131f",
+      "argvRecorded": [
+        "pain",
+        "recall",
+        "--principle-id",
+        "44444444-4444-4444-8444-444444444444",
+        "--json"
+      ]
+    },
+    "no-matches": {
+      "workspace": "ws-ok",
+      "exitCode": 0,
+      "stdoutSha256": "7d2728728165040bc5f265d8ff75996d1cacf5dd56435b0492f94350506be1a3",
+      "caseFileSha256": "35186a69e1962e9f81c4ac7e43bb12de17eaa9e3b7e46318762a7b37375d81f8",
+      "argvRecorded": [
+        "pain",
+        "recall",
+        "--principle-id",
+        "33333333-3333-4333-8333-333333333333",
+        "--json"
+      ]
+    },
+    "partial": {
+      "workspace": "ws-partial",
+      "exitCode": 0,
+      "stdoutSha256": "fd9b173aabb1b14ce5e4f410ebb88125958d975a95de78ff46cfffd833954056",
+      "caseFileSha256": "72782516596df497a9585c9bd5b7dfd14c8fd83c821cd0e187d2904919ef786e",
+      "argvRecorded": [
+        "pain",
+        "recall",
+        "--principle-id",
+        "55555555-5555-4555-8555-555555555555",
+        "--json"
+      ]
+    },
+    "principle-not-found": {
+      "workspace": "ws-ok",
+      "exitCode": 1,
+      "stdoutSha256": "716a6adfd6fed385669c022cf1fcdde6a1af327360f82f79fc197e4e5b2defc4",
+      "caseFileSha256": "a4c866567ee5da722da1d4e313b93ff8e1762a17d60d8555c030099cc8ae7cc0",
+      "argvRecorded": [
+        "pain",
+        "recall",
+        "--principle-id",
+        "99999999-9999-4999-8999-999999999999",
+        "--json"
+      ]
+    },
+    "pain-not-found": {
+      "workspace": "ws-ok",
+      "exitCode": 1,
+      "stdoutSha256": "999ac8d282f85bc8946f30b8d1a598dc9ba898d285d94be75b71748fe3b3bc7b",
+      "caseFileSha256": "8fac0362e7d7b9a23f7707ae96f8d6ee48fc978fba5c7f3a32a501d3b167a0bc",
+      "argvRecorded": [
+        "pain",
+        "recall",
+        "--principle-id",
+        "11111111-1111-4111-8111-111111111111",
+        "--pain-id",
+        "pain-golden-orphan-004",
+        "--json"
+      ]
+    },
+    "param-error-missing-principle-id": {
+      "workspace": "ws-ok",
+      "exitCode": 1,
+      "stdoutSha256": "4207933be4b4bc2d3bd518c436cce2515cb05822157443c37e23fdc8dbbfc660",
+      "caseFileSha256": "f6c1cc1f415d006290c40f35138bdf9ff702d71d7eeecdbae624b1fabb70629f",
+      "argvRecorded": [
+        "pain",
+        "recall",
+        "--json"
+      ]
+    },
+    "source-missing": {
+      "workspace": "ws-empty",
+      "exitCode": 1,
+      "stdoutSha256": "2e5071f8b2b60a8ae2bdf0e7c06f23ffaba36ae72e4dabe7be05e8acc9432ee7",
+      "caseFileSha256": "26c5b5ea0e0e2b7b92b0edb9c215a008160c0967ced2d427c9541035542b53f3",
+      "argvRecorded": [
+        "pain",
+        "recall",
+        "--principle-id",
+        "11111111-1111-4111-8111-111111111111",
+        "--json"
+      ]
+    }
+  }
+}

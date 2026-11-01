@@ -60,9 +60,10 @@ import * as fs from 'fs';
 import * as crypto from 'crypto';
 import * as os from 'os';
 import * as path from 'path';
-import { readLedgerFileState } from '@principles/core/principle-tree-ledger';
-import { openTrajectoryDbReadonly } from '@principles/core/trajectory-store';
-import { RuntimeStateManager } from '@principles/core/runtime-v2';
+import { readLedgerFileState } from '../principle-tree-ledger.js';
+import { openTrajectoryDbReadonly } from '../trajectory-store.js';
+import { RuntimeStateManager } from './store/runtime-state-manager.js';
+import { painRecallSnapshotTestHooks, type SnapshotStatsLike } from './pain-recall-snapshot-hooks.js';
 
 export const PAIN_RECALL_SCHEMA_VERSION = 'pd.pain-recall.v1';
 
@@ -261,26 +262,8 @@ function safeParseRecord(json: string): Record<string, unknown> | null {
 
 type ReadonlyOpenPlan = 'direct' | 'stage' | 'unverifiable';
 
-/**
- * Deterministic fault-injection seam for snapshot-race tests — the same
- * pattern as the runtime's databaseFactory seam (PR #2192). Every field is
- * undefined in production; tests assign, then clear in a finally block.
- */
-export const painRecallSnapshotTestHooks: {
-  /** Replaces statSync for fingerprinting/classification (throw to simulate EACCES/EIO). */
-  statSync?: (path: string) => fs.Stats;
-  /** Replaces mkdtempSync for staging-root creation (throw to simulate failure). */
-  mkdtempSync?: (prefix: string) => string;
-  /** Called after each source→staging copyFileSync with (source, staged). */
-  afterCopyFile?: (source: string, stagedPath: string) => void;
-  /**
-   * Called between the T1 main fingerprint read and the T1 wal fingerprint
-   * read — the exact window a concurrent writer can hide in when the pair is
-   * sampled non-atomically. Tests use it to inject a deterministic
-   * commit→checkpoint→close cycle inside the re-check.
-   */
-  afterT1MainFingerprint?: (sourceDbPath: string) => void;
-} = {};
+// The fault-injection seam itself (painRecallSnapshotTestHooks) lives in the
+// internal pain-recall-snapshot-hooks.ts module — see its header there.
 
 function isEnoent(err: unknown): boolean {
   if (!isRecord(err)) return false;
@@ -322,7 +305,7 @@ function hashFileStreaming(filePath: string): string | null {
 }
 
 function fingerprintFile(filePath: string): FileFingerprint {
-  let stats: fs.Stats;
+  let stats: SnapshotStatsLike;
   try {
     stats = (painRecallSnapshotTestHooks.statSync ?? fs.statSync)(filePath);
   } catch (err: unknown) {

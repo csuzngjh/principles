@@ -11,6 +11,13 @@
  * live writer (sidecars present, un-checkpointed committed frames), empty
  * `-wal` (post-TRUNCATE checkpoint), crashed-writer trio, and mixed
  * WAL/journal databases.
+ *
+ * Migrated with the read model into @principles/core (SPEC v0.5 §11 A): the
+ * service import is now relative; the fault-injection seam lives in the
+ * internal pain-recall-snapshot-hooks module. Every hook-injection case also
+ * asserts the injector actually fired (READINESS §11 injection-sanity rule) —
+ * a silently-dead hook would otherwise make race/injection cases pass
+ * vacuously.
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import * as fs from 'fs';
@@ -19,7 +26,8 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import Database from 'better-sqlite3';
 
-import { recallPains, painRecallSnapshotTestHooks } from '../../src/services/pain-recall.js';
+import { recallPains } from '../pain-recall-read-model.js';
+import { painRecallSnapshotTestHooks } from '../pain-recall-snapshot-hooks.js';
 
 const P1 = '11111111-1111-4111-8111-111111111111';
 const PAIN_1 = 'pain-readonly-001';
@@ -125,7 +133,7 @@ function makeWalWorkspace(): string {
   const parsed = JSON.parse(fs.readFileSync(ledgerPath, 'utf8')) as {
     _tree: { principles: Record<string, Record<string, unknown>> };
   };
-  parsed._tree.principles[P1]!.reuseEvidence = [
+  parsed._tree.principles[P1]!.reuseEvidence = [ // eslint-disable-line @typescript-eslint/no-non-null-assertion -- fixture key written above
     { painId: PAIN_1, candidateId: 'cand-1', decidedAt: '2026-01-02T00:00:00.000Z' },
     { painId: PAIN_2, candidateId: 'cand-2', decidedAt: '2026-01-03T00:00:00.000Z' },
   ];
@@ -263,9 +271,9 @@ describe('recallPains: WAL-mode strict read-only (production journal mode)', () 
     const parsed = JSON.parse(fs.readFileSync(ledgerPath, 'utf8')) as {
       _tree: { principles: Record<string, { reuseEvidence?: unknown[] }> };
     };
-    const evidence = (parsed._tree.principles[P1]!.reuseEvidence ?? []) as Record<string, unknown>[];
+    const evidence = (parsed._tree.principles[P1]!.reuseEvidence ?? []) as Record<string, unknown>[]; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- fixture key written above
     evidence.push({ painId: 'pain-readonly-003', candidateId: 'cand-3', decidedAt: '2026-01-04T00:00:00.000Z' });
-    parsed._tree.principles[P1]!.reuseEvidence = evidence;
+    parsed._tree.principles[P1]!.reuseEvidence = evidence; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- fixture key written above
     fs.writeFileSync(ledgerPath, JSON.stringify(parsed));
     const stateBefore = fs.readdirSync(path.join(dir, '.state')).sort();
     const pdBefore = fs.readdirSync(path.join(dir, '.pd')).sort();
@@ -335,9 +343,9 @@ describe('recallPains: WAL-mode strict read-only (production journal mode)', () 
     const crashParsed = JSON.parse(fs.readFileSync(crashLedger, 'utf8')) as {
       _tree: { principles: Record<string, { reuseEvidence?: unknown[] }> };
     };
-    const evidence = (crashParsed._tree.principles[P1]!.reuseEvidence ?? []) as Record<string, unknown>[];
+    const evidence = (crashParsed._tree.principles[P1]!.reuseEvidence ?? []) as Record<string, unknown>[]; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- fixture key written above
     evidence.push({ painId: 'pain-readonly-004', candidateId: 'cand-4', decidedAt: '2026-01-04T00:00:00.000Z' });
-    crashParsed._tree.principles[P1]!.reuseEvidence = evidence;
+    crashParsed._tree.principles[P1]!.reuseEvidence = evidence; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- fixture key written above
     fs.writeFileSync(crashLedger, JSON.stringify(crashParsed));
 
     const crashTdb = path.join(crashDir, '.state', 'trajectory.db');
@@ -386,9 +394,9 @@ describe('recallPains: WAL-mode strict read-only (production journal mode)', () 
     const crashParsed = JSON.parse(fs.readFileSync(crashLedger, 'utf8')) as {
       _tree: { principles: Record<string, { reuseEvidence?: unknown[] }> };
     };
-    const evidence = (crashParsed._tree.principles[P1]!.reuseEvidence ?? []) as Record<string, unknown>[];
+    const evidence = (crashParsed._tree.principles[P1]!.reuseEvidence ?? []) as Record<string, unknown>[]; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- fixture key written above
     evidence.push({ painId: 'pain-readonly-005', candidateId: 'cand-5', decidedAt: '2026-01-05T00:00:00.000Z' });
-    crashParsed._tree.principles[P1]!.reuseEvidence = evidence;
+    crashParsed._tree.principles[P1]!.reuseEvidence = evidence; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- fixture key written above
     fs.writeFileSync(crashLedger, JSON.stringify(crashParsed));
 
     const crashTdb = path.join(crashDir, '.state', 'trajectory.db');
@@ -465,19 +473,28 @@ describe('recallPains: deterministic snapshot-race and failure injection', () =>
     delete painRecallSnapshotTestHooks.afterCopyFile;
   });
 
-  function injectAfterCopyOn(target: string, mutate: (source: string, staged: string) => void): void {
+  /** Inject an afterCopyFile hook for `target` that also counts firings, so
+   * each injection case can prove the injector actually ran (a silently dead
+   * hook would make the case pass vacuously — READINESS §11). */
+  function injectAfterCopyOn(target: string, mutate: (source: string, staged: string) => void): { calls: number } {
+    const counter = { calls: 0 };
     painRecallSnapshotTestHooks.afterCopyFile = (source: string, staged: string) => {
-      if (source === target) mutate(source, staged);
+      if (source === target) {
+        counter.calls += 1;
+        mutate(source, staged);
+      }
     };
+    return counter;
   }
 
   it('writer modifies the main file mid-snapshot: fingerprint drift rejects the copy (race-1)', async () => {
     const dir = makeWalWorkspace();
     const tdbPath = path.join(dir, '.state', 'trajectory.db');
-    injectAfterCopyOn(tdbPath, (source) => {
+    const inj = injectAfterCopyOn(tdbPath, (source) => {
       fs.appendFileSync(source, 'writer-race-byte'); // simulate a writer committing into the main file
     });
     const result = await recallPains(dir, { requestedPrincipleId: P1, limit: 3 });
+    expect(inj.calls).toBeGreaterThan(0); // injection sanity
     // The post-copy source fingerprint no longer matches → trajectory is
     // unreadable, never a possibly-stale ok/no_matches.
     expect(result.status).toBe('source_unreadable');
@@ -488,10 +505,11 @@ describe('recallPains: deterministic snapshot-race and failure injection', () =>
     const dir = makeWalWorkspace(); // quiet: no -wal at snapshot start
     const tdbPath = path.join(dir, '.state', 'trajectory.db');
     expect(fs.existsSync(`${tdbPath}-wal`)).toBe(false);
-    injectAfterCopyOn(tdbPath, () => {
+    const inj = injectAfterCopyOn(tdbPath, () => {
       fs.writeFileSync(`${tdbPath}-wal`, Buffer.from('simulated-wal-commit')); // wal appears mid-snapshot
     });
     const result = await recallPains(dir, { requestedPrincipleId: P1, limit: 3 });
+    expect(inj.calls).toBeGreaterThan(0); // injection sanity
     expect(result.status).toBe('source_unreadable');
     expect(result.sources.trajectoryDb).toBe('unreadable');
   });
@@ -521,14 +539,14 @@ describe('recallPains: deterministic snapshot-race and failure injection', () =>
     const ledger = JSON.parse(fs.readFileSync(ledgerPath, 'utf8')) as {
       _tree: { principles: Record<string, { reuseEvidence?: unknown[] }> };
     };
-    const evidence = (ledger._tree.principles[P1]!.reuseEvidence ?? []) as Record<string, unknown>[];
+    const evidence = (ledger._tree.principles[P1]!.reuseEvidence ?? []) as Record<string, unknown>[]; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- fixture key written above
     evidence.push({ painId: 'pain-race-006', candidateId: 'cand-race', decidedAt: '2026-01-06T00:00:00.000Z' });
-    ledger._tree.principles[P1]!.reuseEvidence = evidence;
+    ledger._tree.principles[P1]!.reuseEvidence = evidence; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- fixture key written above
     fs.writeFileSync(ledgerPath, JSON.stringify(ledger));
 
     const tdbPath = path.join(dir, '.state', 'trajectory.db');
     const mainBefore = sha256(tdbPath);
-    injectAfterCopyOn(`${tdbPath}-wal`, (source) => {
+    const inj = injectAfterCopyOn(`${tdbPath}-wal`, (source) => {
       // Simulate checkpoint completion + wal removal mid-snapshot: the main
       // file is rewritten and the -wal disappears at the endpoint.
       fs.rmSync(source);
@@ -537,6 +555,7 @@ describe('recallPains: deterministic snapshot-race and failure injection', () =>
 
     const result = await recallPains(dir, { requestedPrincipleId: P1, limit: 10 });
 
+    expect(inj.calls).toBeGreaterThan(0); // injection sanity
     // Accepting the already-copied pair would return ok with pain-race-006
     // from the deleted wal; the drifted endpoint fingerprints must reject it.
     expect(result.status).toBe('source_unreadable');
@@ -550,10 +569,11 @@ describe('recallPains: deterministic snapshot-race and failure injection', () =>
     const tdbPath = path.join(dir, '.state', 'trajectory.db');
     const stateDbPath = path.join(dir, '.pd', 'state.db');
     const before = { t: sha256(tdbPath), s: sha256(stateDbPath) };
-    injectAfterCopyOn(tdbPath, (_source, staged) => {
+    const inj = injectAfterCopyOn(tdbPath, (_source, staged) => {
       fs.writeFileSync(staged, Buffer.from('tampered-copy-bytes')); // torn/corrupted copy
     });
     const result = await recallPains(dir, { requestedPrincipleId: P1, limit: 3 });
+    expect(inj.calls).toBeGreaterThan(0); // injection sanity
     expect(result.status).toBe('source_unreadable');
     expect(result.sources.trajectoryDb).toBe('unreadable');
     // The workspace itself was never touched by the failed staging.
@@ -567,15 +587,18 @@ describe('recallPains: deterministic snapshot-race and failure injection', () =>
     const stateDbPath = path.join(dir, '.pd', 'state.db');
     const before = { t: sha256(tdbPath), s: sha256(stateDbPath), dirState: fs.readdirSync(path.join(dir, '.state')).sort() };
     const realStat = fs.statSync.bind(fs);
+    const walStatCalls = { count: 0 };
     painRecallSnapshotTestHooks.statSync = (p: string) => {
       if (p.endsWith('-wal')) {
-        const err = new Error('EACCES: permission denied, stat (simulated)') as NodeJS.ErrnoException;
+        walStatCalls.count += 1;
+        const err = new Error('EACCES: permission denied, stat (simulated)') as Error & { code?: string };
         err.code = 'EACCES';
         throw err;
       }
       return realStat(p);
     };
     const result = await recallPains(dir, { requestedPrincipleId: P1, limit: 3 });
+    expect(walStatCalls.count).toBeGreaterThan(0); // injection sanity: the stat replacement fired
     // P2-1: an undecidable -wal state is unverifiable → source unreadable.
     expect(result.status).toBe('source_unreadable');
     expect(result.sources.trajectoryDb).toBe('unreadable');
@@ -588,10 +611,13 @@ describe('recallPains: deterministic snapshot-race and failure injection', () =>
   it('mkdtemp failure: no throw, sources degrade per contract, nothing to leak (inj-mkdtemp-throw)', async () => {
     const dir = makeWalWorkspace();
     const stateDirFiles = fs.readdirSync(path.join(dir, '.state')).sort();
+    const mkdtempCalls = { count: 0 };
     painRecallSnapshotTestHooks.mkdtempSync = () => {
+      mkdtempCalls.count += 1;
       throw new Error('simulated mkdtemp failure (EACCES)');
     };
     const result = await recallPains(dir, { requestedPrincipleId: P1, limit: 3 });
+    expect(mkdtempCalls.count).toBeGreaterThan(0); // injection sanity: mkdtemp replacement fired
     // P2-2: mkdtemp is inside the staging error boundary — the query returns
     // a classified result instead of throwing; state.db degrades while
     // trajectory.db (the pain authority) fails as source_unreadable.
@@ -610,10 +636,13 @@ describe('recallPains: deterministic snapshot-race and failure injection', () =>
       createdRoots.push(created);
       return created;
     };
+    const copyHookCalls = { count: 0 };
     painRecallSnapshotTestHooks.afterCopyFile = () => {
+      copyHookCalls.count += 1;
       throw new Error('simulated copy failure after staging');
     };
     const result = await recallPains(dir, { requestedPrincipleId: P1, limit: 3 });
+    expect(copyHookCalls.count).toBeGreaterThan(0); // injection sanity: the failing hook fired
     expect(result.status).toBe('source_unreadable');
     expect(createdRoots.length).toBeGreaterThanOrEqual(2); // state.db + trajectory.db both staged
     for (const root of createdRoots) {
@@ -628,7 +657,7 @@ describe('recallPains: deterministic snapshot-race and failure injection', () =>
   it('real SQLite ABA full cycle mid-snapshot (commit→checkpoint→wal delete) is rejected (aba-1)', async () => {
     const dir = makeWalWorkspace();
     const tdbPath = path.join(dir, '.state', 'trajectory.db');
-    injectAfterCopyOn(tdbPath, (source) => {
+    const inj = injectAfterCopyOn(tdbPath, (source) => {
       // A real writer completes the ENTIRE commit cycle inside the fingerprint
       // window: insert → commit → checkpoint → close (wal removed).
       const writer = new Database(source);
@@ -639,6 +668,7 @@ describe('recallPains: deterministic snapshot-race and failure injection', () =>
       writer.close();
     });
     const result = await recallPains(dir, { requestedPrincipleId: P1, limit: 10 });
+    expect(inj.calls).toBeGreaterThan(0); // injection sanity
     // The commit survived to the endpoint: the file change counter and the
     // checkpointed pages force the main bytes away from T0, so the endpoint
     // re-check MUST reject instead of returning a pre-commit view.
@@ -651,7 +681,7 @@ describe('recallPains: deterministic snapshot-race and failure injection', () =>
     const dir = makeWalWorkspace();
     const tdbPath = path.join(dir, '.state', 'trajectory.db');
     const mainBefore = sha256(tdbPath);
-    injectAfterCopyOn(tdbPath, (source) => {
+    const inj = injectAfterCopyOn(tdbPath, (source) => {
       // Writer writes into the -wal but NEVER commits; close rolls back and
       // removes the wal. The main file never changes.
       const writer = new Database(source);
@@ -662,6 +692,7 @@ describe('recallPains: deterministic snapshot-race and failure injection', () =>
       writer.close(); // rolls the open transaction back
     });
     const result = await recallPains(dir, { requestedPrincipleId: P1, limit: 10 });
+    expect(inj.calls).toBeGreaterThan(0); // injection sanity
     // The endpoint state genuinely is the T0 state (rollback left no trace),
     // so acceptance is the correct, fresh answer — and the uncommitted row
     // must not appear.
@@ -677,7 +708,7 @@ describe('recallPains: deterministic snapshot-race and failure injection', () =>
     const tdbPath = path.join(dir, '.state', 'trajectory.db');
     const mainBefore = sha256(tdbPath);
     const m0 = fs.readFileSync(tdbPath);
-    injectAfterCopyOn(tdbPath, (source) => {
+    const inj = injectAfterCopyOn(tdbPath, (source) => {
       // Real commit → checkpoint → close, THEN a non-SQLite byte-level
       // restore of the T0 main image (the directive's endpoint-equal case).
       const writer = new Database(source);
@@ -689,6 +720,7 @@ describe('recallPains: deterministic snapshot-race and failure injection', () =>
       fs.writeFileSync(source, m0);
     });
     const result = await recallPains(dir, { requestedPrincipleId: P1, limit: 10 });
+    expect(inj.calls).toBeGreaterThan(0); // injection sanity
     // After the byte restore the CURRENT database state is M0 — the staged
     // copy equals it, so returning it is fresh (never a stale view), and the
     // restored-away row is not part of that state.
@@ -709,10 +741,12 @@ describe('recallPains: deterministic snapshot-race and failure injection', () =>
       createdRoots.push(created);
       return created;
     };
-    injectAfterCopyOn(tdbPath, (source) => {
+    const inj = injectAfterCopyOn(tdbPath, (source) => {
       fs.rmSync(source); // source vanishes after the copy
     });
     const result = await recallPains(dir, { requestedPrincipleId: P1, limit: 10 });
+    expect(inj.calls).toBeGreaterThan(0); // injection sanity
+    expect(createdRoots.length).toBeGreaterThan(0); // mkdtemp replacement fired
     // The snapshot staging rejected (T1 re-check: present → absent), and the
     // post-failure classification reports the file as it now IS — missing —
     // per the "missing stays missing" contract. Either way: no ok, no
@@ -727,10 +761,11 @@ describe('recallPains: deterministic snapshot-race and failure injection', () =>
   it('state.db changed mid-snapshot: state degrades unreadable while verifiable results survive (aba-5)', async () => {
     const dir = makeWalWorkspace();
     const sdbPath = path.join(dir, '.pd', 'state.db');
-    injectAfterCopyOn(sdbPath, (source) => {
+    const inj = injectAfterCopyOn(sdbPath, (source) => {
       fs.appendFileSync(source, 'writer-race-byte'); // state.db raced mid-snapshot
     });
     const result = await recallPains(dir, { requestedPrincipleId: P1, limit: 3 });
+    expect(inj.calls).toBeGreaterThan(0); // injection sanity
     // trajectory.db (the pain authority) still reads; state.db degrades per
     // its optional-source contract while the reuse-evidence rows survive.
     expect(result.sources.trajectoryDb).toBe('ok');
@@ -749,14 +784,17 @@ describe('recallPains: deterministic snapshot-race and failure injection', () =>
     delete painRecallSnapshotTestHooks.afterT1MainFingerprint;
   });
 
-  function injectMidRecheckCycle(targetSuffix: string, insertSql: string): void {
+  function injectMidRecheckCycle(targetSuffix: string, insertSql: string): { calls: number } {
+    const counter = { calls: 0 };
     painRecallSnapshotTestHooks.afterT1MainFingerprint = (sourceDbPath: string) => {
       if (!sourceDbPath.endsWith(targetSuffix)) return; // only the targeted database
+      counter.calls += 1;
       const writer = new Database(sourceDbPath);
       writer.exec(insertSql);
       writer.pragma('wal_checkpoint(TRUNCATE)');
       writer.close(); // commits, checkpoints, and deletes the wal
     };
+    return counter;
   }
 
   it('writer completes commit+checkpoint+wal-delete between the two T1 reads: stale snapshot must be rejected (interleave-1)', async () => {
@@ -768,18 +806,19 @@ describe('recallPains: deterministic snapshot-race and failure injection', () =>
     const ledger = JSON.parse(fs.readFileSync(ledgerPath, 'utf8')) as {
       _tree: { principles: Record<string, { reuseEvidence?: unknown[] }> };
     };
-    const evidence = (ledger._tree.principles[P1]!.reuseEvidence ?? []) as Record<string, unknown>[];
+    const evidence = (ledger._tree.principles[P1]!.reuseEvidence ?? []) as Record<string, unknown>[]; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- fixture key written above
     evidence.push({ painId: 'pain-interleave-1', candidateId: 'cand-il1', decidedAt: '2026-01-07T00:00:00.000Z' });
-    ledger._tree.principles[P1]!.reuseEvidence = evidence;
+    ledger._tree.principles[P1]!.reuseEvidence = evidence; // eslint-disable-line @typescript-eslint/no-non-null-assertion -- fixture key written above
     fs.writeFileSync(ledgerPath, JSON.stringify(ledger));
 
     const mainBefore = sha256(tdbPath);
-    injectMidRecheckCycle('trajectory.db', `INSERT INTO pain_events
+    const inj = injectMidRecheckCycle('trajectory.db', `INSERT INTO pain_events
         (session_id, source, score, reason, severity, origin, confidence, text, canonical_pain_id, runtime_task_id, host_kind, created_at)
       VALUES ('il1', 'manual', 10, 'mid-recheck commit', 'moderate', 'user_manual', NULL, NULL, 'pain-interleave-1', NULL, NULL, '2026-10-09T10:00:00.000Z')`);
 
     const result = await recallPains(dir, { requestedPrincipleId: P1, limit: 10 });
 
+    expect(inj.calls).toBeGreaterThan(0); // injection sanity: the mid-recheck hook fired
     // Precondition proofs: the injected cycle really committed + checkpointed
     // + deleted the wal, and the endpoint main is no longer M0.
     expect(fs.existsSync(`${tdbPath}-wal`)).toBe(false);
@@ -810,12 +849,13 @@ describe('recallPains: deterministic snapshot-race and failure injection', () =>
     const dir = makeWalWorkspace();
     const sdbPath = path.join(dir, '.pd', 'state.db');
     const filesBefore = fs.readdirSync(path.join(dir, '.pd')).sort();
-    injectMidRecheckCycle('state.db', `INSERT INTO pain_diagnoses
+    const inj = injectMidRecheckCycle('state.db', `INSERT INTO pain_diagnoses
         (id, pain_id, task_id, diagnosis_id, category, root_cause, evidence_json, confidence, artifact_id, created_at)
       VALUES ('diag-il2', '${PAIN_1}', 'task-il2', 'diagnosis-il2', 'Tooling', 'mid-recheck diagnosis', '[]', 0.9, NULL, '2026-10-09T11:00:00.000Z')`);
 
     const result = await recallPains(dir, { requestedPrincipleId: P1, limit: 3 });
 
+    expect(inj.calls).toBeGreaterThan(0); // injection sanity: the mid-recheck hook fired
     expect(fs.existsSync(`${sdbPath}-wal`)).toBe(false); // cycle completed
     // state.db is an optional source: it degrades unreadable while the
     // trajectory-verified rows survive — distinct from interleave-1's
