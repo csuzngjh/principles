@@ -5,7 +5,7 @@ import path from 'node:path';
 import { SqliteConnection } from '../../store/sqlite-connection.js';
 import { SqliteActivationStateStore } from '../sqlite-activation-state-store.js';
 import { detectRuleReplacementTarget } from '../rule-replacement.js';
-import type { ActivationStatusRecord } from '../activation-types.js';
+import type { ActivationStatusRecord, PIArtifactSnapshot } from '../activation-types.js';
 
 /**
  * SPEC-RULECODE-APPROVED-REVISION-001 §A/§B (core level): a revised RuleCode
@@ -53,6 +53,26 @@ async function seedShadow(store: SqliteActivationStateStore, activationId: strin
     activatedAt: '2026-11-01T00:00:00.000Z',
     deactivatedAt: null,
   });
+}
+
+/** Typed snapshot lookup; the store rows are untyped SQLite records. */
+function artifactLookup(connection: SqliteConnection) {
+  return async (artifactId: string): Promise<PIArtifactSnapshot | null> => {
+    const row = connection.getDb().prepare('SELECT * FROM pi_artifacts WHERE artifact_id = ?').get(artifactId) as Record<string, unknown> | undefined;
+    if (!row) return null;
+    const snapshot: PIArtifactSnapshot = {
+      artifactId: String(row.artifact_id),
+      artifactKind: 'rule',
+      sourceTaskId: String(row.source_task_id),
+      sourceRuleId: String(row.source_rule_id),
+      lineageArtifactIds: [],
+      validationStatus: 'validated',
+      contentJson: String(row.content_json),
+      createdAt: String(row.created_at),
+      updatedAt: String(row.updated_at),
+    };
+    return snapshot;
+  };
 }
 
 const newRecord = (artifactId: string, activationId: string): ActivationStatusRecord => ({
@@ -181,15 +201,7 @@ describe('SPEC-RULECODE-APPROVED-REVISION-001 §B: rule activation replacement',
 
       const detection = await detectRuleReplacementTarget({
         approvalArtifactId: 'art-new',
-        getArtifactById: async (id) => {
-          const row = connection.getDb().prepare('SELECT * FROM pi_artifacts WHERE artifact_id = ?').get(id) as Record<string, unknown> | undefined;
-          if (!row) return null;
-          return {
-            artifactId: String(row.artifact_id), artifactKind: String(row.artifact_kind), sourceTaskId: String(row.source_task_id),
-            sourceRuleId: String(row.source_rule_id), lineageArtifactIds: [], validationStatus: 'validated',
-            contentJson: String(row.content_json), createdAt: String(row.created_at), updatedAt: String(row.updated_at),
-          };
-        },
+        getArtifactById: artifactLookup(connection),
         listRuleActivations: () => store.listCodeToolHookActivations(),
       });
       expect(detection).toEqual({ ok: true, target: { supersededActivationId: 'act-old', supersededArtifactId: 'art-old' } });
@@ -197,15 +209,7 @@ describe('SPEC-RULECODE-APPROVED-REVISION-001 §B: rule activation replacement',
       connection.getDb().prepare("UPDATE activations SET action='code_tool_hook_live_activate' WHERE activation_id='act-old'").run();
       const liveRefusal = await detectRuleReplacementTarget({
         approvalArtifactId: 'art-new',
-        getArtifactById: async (id) => {
-          const row = connection.getDb().prepare('SELECT * FROM pi_artifacts WHERE artifact_id = ?').get(id) as Record<string, unknown> | undefined;
-          if (!row) return null;
-          return {
-            artifactId: String(row.artifact_id), artifactKind: String(row.artifact_kind), sourceTaskId: String(row.source_task_id),
-            sourceRuleId: String(row.source_rule_id), lineageArtifactIds: [], validationStatus: 'validated',
-            contentJson: String(row.content_json), createdAt: String(row.created_at), updatedAt: String(row.updated_at),
-          };
-        },
+        getArtifactById: artifactLookup(connection),
         listRuleActivations: () => store.listCodeToolHookActivations(),
       });
       expect(liveRefusal.ok).toBe(false);
