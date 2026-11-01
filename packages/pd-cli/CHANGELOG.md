@@ -1,5 +1,17 @@
 # @principles/pd-cli
 
+## 1.162.5
+
+### Patch Changes
+
+- 0dc1272: Governance is ON by default at install time (an explicit enabled:false opt-out
+  is preserved and stated), the install summary prints a first-class governance
+  state line via the new optional HostInstallResult.governance field, pd-cli
+  workspace discovery learns the WorkBuddy governance workspace, and the
+  global-pd warning names the always-available node invocation. (PRI-1064)
+- Updated dependencies [0dc1272]
+  - @principles/core@1.297.11
+
 ## 1.162.4
 
 ### Patch Changes
