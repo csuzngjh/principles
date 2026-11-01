@@ -23,7 +23,7 @@
 1. 在你的项目里开启 Thinking OS 指引（`/pd-context thinking on`），观察该模型是否成功防范 AI 犯错。
 2. 收集它成功防范 AI 犯错的截图或日志。
 3. Fork 本仓库。
-4. 将你的提议直接添加到 `THINKING_OS.md` 文件中。
+4. 将你的提议添加到 Thinking OS 模板：`packages/openclaw-plugin/templates/langs/<lang>/principles/THINKING_OS.md`；工作区副本 `templates/workspace/.principles/THINKING_OS.md` 必须与之保持一致（有漂移测试把守）。
 5. 提交 Pull Request，并在 PR 描述中详细说明：
    * 这个模型解决的核心痛点是什么？
    * 它的可观测触发条件是什么？
@@ -40,6 +40,21 @@
 3. **提交规范**:
    * 我们的 commit message 遵循 [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) 规范（例如 `feat:`, `fix:`, `docs:`）。
    * Pull Request 请尽可能说明修改的背景与前因后果。
+
+## 📁 仓库根目录：进版本控制的点路径 vs 本机状态
+
+根目录下的点目录混着两类完全不同的东西 —— 仓库内容与本机运行时状态。
+在这里增删任何东西之前，先看这张表：
+
+| 路径 | 是什么 | 是否入库 |
+| --- | --- | --- |
+| `.agents/plugins/marketplace.json` | Codex 插件市场清单，属于交付输入：`pd-locate.cjs` / `pd-status.cjs` 读取它，`codex-plugin-bundle.test.ts` 断言它。本机 Codex 的市场源指向当前检出，所以它必须留在这一路径。 | 是 |
+| `.changeset/`、`.github/` | 发布意图与 CI 配置。 | 是 |
+| `.claude/`、`.zcode/`、`.agents/skills/` | 本机宿主工具与按机器安装的智能体技能。 | 否（已忽略） |
+| `.principles/`、`.state/` | PD 工作区运行时状态，由运行中的系统写入，可从 `packages/openclaw-plugin/templates/workspace/` 重建。 | 否（已忽略） |
+
+被忽略路径下的文件绝不应被纳入版本控制。一旦出现，那是仓库的缺陷：
+在 PR 里用 `git rm` 摘除，不要靠手工维持。
 
 ## 🐛 报告问题 (Bug Reports)
 
