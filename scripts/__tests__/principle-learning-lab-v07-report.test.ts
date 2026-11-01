@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { makeExaminerV3Case, makeExaminerV2CalibrationPair } from './fixtures/examiner-v07.mjs';
+import { makeExaminerV3Case, makeExaminerV2CalibrationPair } from '../dev/principle-learning-lab/lib/examiner-v07-cases.mjs';
 import { hashOfCanonical, challengeImplementationManifest, freezeMapping } from '../dev/principle-learning-lab/lib/challenge-freeze.mjs';
 import { compileCase, compileSuite } from '../dev/principle-learning-lab/lib/challenge-compile.mjs';
 import { buildStudyArms } from '../dev/principle-learning-lab/lib/challenge-arms.mjs';

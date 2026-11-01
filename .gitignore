@@ -69,6 +69,9 @@ packages/openclaw-plugin/skills
 
 # create-principles-disciple: bundled plugin (build artifact)
 packages/create-principles-disciple/plugin/
+# Examiner research-engine subset copied into console/lab by bundle-plugin.mjs
+# (generated from scripts/dev/principle-learning-lab — never a second source)
+packages/create-principles-disciple/console/lab/
 packages/create-principles-disciple/host-runtime/
 # PRI-624: codex-adapter payload component built by bundle-plugin.mjs
 packages/create-principles-disciple/codex-adapter/
@@ -78,10 +81,9 @@ packages/create-principles-disciple/release-manager/
 packages/create-principles-disciple/workbuddy-adapter/
 
 # Local environment and state
-# .claude/ is ignored except for skills (shared with team)
-!.claude/
-.claude/*
-!.claude/skills/
+# .claude/ and .zcode/ are local host tooling; never committed.
+.claude/
+.zcode/
 claude/
 .planning/
 # Anchored to the checkout root: an unanchored `plans/` would also match

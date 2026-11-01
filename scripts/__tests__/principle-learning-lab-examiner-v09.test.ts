@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { makeExaminerV3Case } from './fixtures/examiner-v07.mjs';
+import { makeExaminerV3Case } from '../dev/principle-learning-lab/lib/examiner-v07-cases.mjs';
 import { hashOfCanonical, freezeMapping } from '../dev/principle-learning-lab/lib/challenge-freeze.mjs';
 import { runChallengeStudy, verifyExaminerArmConfigsFrozen, resolveDispatchUnits } from '../dev/principle-learning-lab/lib/challenge-runner.mjs';
 import { createScriptedStub, buildOfflineRuntimeReceipt } from '../dev/principle-learning-lab/lib/challenge-actor.mjs';

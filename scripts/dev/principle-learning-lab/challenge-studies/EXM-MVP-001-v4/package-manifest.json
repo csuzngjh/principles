@@ -43,7 +43,7 @@
       },
       {
         "name": "challenge-behavior-report.mjs",
-        "sha256": "591afdcae99d1e42ec69163c390f75fd249f8ffb33411f559ecd7be2a70365c5"
+        "sha256": "307e9dadebd386481f9beeb1d800aa9c0e81637ae007b5c307121d80db689d40"
       },
       {
         "name": "challenge-compile.mjs",
@@ -59,7 +59,7 @@
       },
       {
         "name": "challenge-freeze.mjs",
-        "sha256": "e40fc00684392cb9763a184128cd029a5594b5b6a029df1fc4e7e5802c94ca50"
+        "sha256": "86d1ed1cc4d9d8699c2cdbe5dc604a3a636249a3740442f13cd7a1b6cba56764"
       },
       {
         "name": "challenge-isolation-contract.mjs",
@@ -134,6 +134,14 @@
         "sha256": "f643d0e22283c382211608b3d67ae4b7336ad3ac54c866a78d3058861d318d33"
       },
       {
+        "name": "examiner-v07-cases.mjs",
+        "sha256": "fd8aabb7fce66de5ef8fe2d2dfa599c3a73eb1bffb646ec377d422e69a250054"
+      },
+      {
+        "name": "examiner-v2-cases.mjs",
+        "sha256": "3d9010db2724de67f2fe77033c93e1300cf9f02e6a97ad28940977dbeedba44a"
+      },
+      {
         "name": "fixture.mjs",
         "sha256": "88201e78cd35088062bad47684692fe6b00413bd3a3c9437b088547843ed84dc"
       },
@@ -202,7 +210,7 @@
     },
     {
       "path": "blind-review/receipts.template.json",
-      "sha256": "38feef770e972cfc165fd1720e9c06e4aeec9d89d9dcedd03b8647fb4d99a6e8"
+      "sha256": "15027eb82bf408dbd6071e3e5d3ad4d59e54db4230825a68094794134af379eb"
     },
     {
       "path": "blind-review/review-form.json",
@@ -210,7 +218,7 @@
     },
     {
       "path": "expected-replay.json",
-      "sha256": "984546eac6925e4680f802b79cf959be10a45d7545d0cd33b987da256b140ebe"
+      "sha256": "02628e13129ee4edd90ff725a07bfd977939413c344ef02ab77bf6ab21c8ba1b"
     },
     {
       "path": "gold-review.json",
@@ -254,7 +262,7 @@
     },
     {
       "path": "review-subject.json",
-      "sha256": "3c4c0e2680be9f7ab1ca75dc2129d9ca8e3530ab03d4cba1fad6fde7580c5d02"
+      "sha256": "3a6c41e1080b02c8478754aaf9798f8406846775cb74b3335bc088af13cad7ff"
     },
     {
       "path": "revision.json",
@@ -269,5 +277,5 @@
       "sha256": "8c96f68ebfcd0ff71c1625cef036d6ef7f4f82785a303f45ff4a45952df9185c"
     }
   ],
-  "packageHash": "5790d22b69285cb6c7aea217e1b7084baf3960acedf03036ca338c422e751050"
+  "packageHash": "6ddd80d945d9997c5cf2f0f5f2989fc48b4150f1fb773be9de651920b986d281"
 }

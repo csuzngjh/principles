@@ -1,6 +1,6 @@
 {
   "name": "principles-disciple-monorepo",
-  "version": "2.6.0",
+  "version": "2.7.0",
   "description": "Principles Disciple - OpenClaw Plugin Monorepo",
   "private": true,
   "license": "Apache-2.0",
@@ -10,6 +10,7 @@
   ],
   "scripts": {
     "build": "npm run build --workspace=@principles/core && npm run build --workspace=@principles/install-layout && npm run build --workspace=@principles/host-runtime && npm run build --workspace=@principles/codex-adapter && npm run build --workspace=@principles/workbuddy-adapter && npm run build --workspace=principles-disciple && npm run build --workspace=@principles/pd-cli && npm run build --workspace=create-principles-disciple && npm run build --workspace=@principles/pd-console",
+    "postinstall": "node scripts/dev/install-git-hooks.mjs --quiet",
     "test:host-adapters": "npm run build && npm test --workspace=@principles/codex-adapter && npm test --workspace=@principles/workbuddy-adapter",
     "lint": "npm run build --workspace=@principles/core && npm run build --workspace=@principles/install-layout && npm run build --workspace=@principles/host-runtime && node scripts/lint-by-package.mjs",
     "lint:fix": "npm run build --workspace=@principles/core && npm run build --workspace=@principles/install-layout && npm run build --workspace=@principles/host-runtime && node scripts/lint-by-package.mjs --fix",
@@ -39,6 +40,7 @@
     "dev:worktree:check": "node scripts/dev/check-dev-worktree.mjs",
     "dev:worktree:bootstrap": "node scripts/dev/bootstrap-worktree.mjs",
     "dev:worktree:ready": "node scripts/dev/worktree-ready.mjs",
+    "dev:hooks:install": "node scripts/dev/install-git-hooks.mjs",
     "dev:worktree:claim": "node scripts/dev/worktree-claim.mjs",
     "dev:worktree:release": "node scripts/dev/worktree-release.mjs",
     "dev:worktree:cleanup": "node scripts/dev/cleanup-task-worktree.mjs",

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { examinerV2CalibrationCases } from './fixtures/examiner-v2.mjs';
+import { examinerV2CalibrationCases } from '../dev/principle-learning-lab/lib/examiner-v2-cases.mjs';
 import { makeExaminerProductizationFixture } from './fixtures/examiner-productization-fixture.mjs';
 import { runExaminerRequest } from '../dev/principle-learning-lab/lib/challenge-examiner.mjs';
 import { compileCase } from '../dev/principle-learning-lab/lib/challenge-compile.mjs';

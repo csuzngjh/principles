@@ -99,10 +99,16 @@ export function isPathInside(root: string, candidate: string): boolean {
   return c !== r && c.startsWith(prefix);
 }
 
-/** Resolve the two roots once. `PD_EXAMINER_STUDIES_ROOT` overrides the WRITABLE root only. */
-export function resolveStudyRoots(labRoot: string): StudyRoots {
+/**
+ * Resolve the two roots once. Console-created studies are WORKSPACE DATA, not
+ * repository content: they default to `<dataRoot>/studies`, where the caller
+ * passes `<workspace>/.pd/examiner`. `PD_EXAMINER_STUDIES_ROOT` overrides the
+ * WRITABLE root only (tests / operators). The historical research assets ship
+ * with the lab payload (absent in an installation → an empty read-only list).
+ */
+export function resolveStudyRoots(labRoot: string, dataRoot: string): StudyRoots {
   const override = process.env.PD_EXAMINER_STUDIES_ROOT;
-  const writable = override ? path.resolve(override) : path.join(path.resolve(labRoot), 'examiner-console-studies');
+  const writable = override ? path.resolve(override) : path.join(path.resolve(dataRoot), 'studies');
   const historical = path.join(path.resolve(labRoot), 'examiner-studies');
   // Canonical forms when resolvable; the unresolved form is kept so the
   // boundary gates below can fail closed with a stable reason.
@@ -619,7 +625,7 @@ export async function materializeConsoleStudy(
  * never real-host behavior.
  */
 export async function materializeOfflineStudy(modules: LabModules, labRoot: string, inputs: CreateStudyInputs): Promise<{ manifest: Record<string, unknown>; pairAssignment: Record<string, unknown> }> {
-  const fixtureUrl = pathToFileURL(path.join(labRoot, '..', '..', '__tests__', 'fixtures', 'examiner-v07.mjs')).href;
+  const fixtureUrl = pathToFileURL(path.join(labRoot, 'lib', 'examiner-v07-cases.mjs')).href;
   const fixture = (await import(fixtureUrl)) as { makeExaminerV3Case: (options: Record<string, unknown>) => Record<string, unknown> };
   const freezeUrl = pathToFileURL(path.join(labRoot, 'lib', 'challenge-freeze.mjs')).href;
   const freeze = (await import(freezeUrl)) as { hashOfCanonical: (value: unknown) => string; freezeMapping: (mapping: Record<string, unknown>) => { mappingHash: string } };

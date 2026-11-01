@@ -1,5 +1,5 @@
 // Offline controlled sources only: these receipts are not human Gold review.
-import { hashOfCanonical } from '../../dev/principle-learning-lab/lib/challenge-freeze.mjs';
+import { hashOfCanonical } from './challenge-freeze.mjs';
 
 export function makeExaminerV2Case({ unknown = false, boundary = false, deploy = false, conjunction = false } = {}) {
   const definitions = [

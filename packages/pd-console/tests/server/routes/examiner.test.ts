@@ -9,16 +9,17 @@
  * and request input never constructs study paths (enumeration membership).
  *
  * Studies are created under PD_EXAMINER_STUDIES_ROOT (a temp dir) so test
- * runs never touch the repository's committed research artifacts.
+ * runs never touch the repository's committed research artifacts — one test
+ * pins the production default, `<workspace>/.pd/examiner/studies`.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createHash } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { handleExaminerRoute, isExaminerDevRuntime } from '../../../src/server/routes/examiner.js';
+import { handleExaminerRoute, resolveLabRoot } from '../../../src/server/routes/examiner.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', '..');
 const historicalStudiesRoot = path.join(repoRoot, 'scripts', 'dev', 'principle-learning-lab', 'examiner-studies');
@@ -454,33 +455,64 @@ describe('Examiner Console run gate (v0.9 §5)', () => {
   });
 });
 
-describe('Examiner DEV-only capability gate (v0.9 §8, P2-1)', () => {
-  it('is decided by the server runtime, never by a client-settable flag', () => {
-    expect(isExaminerDevRuntime('file:///app/packages/pd-console/dist/server.js', {})).toBe(false);
-    expect(isExaminerDevRuntime('file:///app/packages/pd-console/src/server/routes/examiner.ts', {})).toBe(true);
-    expect(isExaminerDevRuntime('file:///app/dist/server.js', { PD_EXAMINER_DEV: '1' })).toBe(true);
+describe('Examiner product surface (ships with the console payload)', () => {
+  it('resolves the lab from an explicit override, the installed sibling, or the repository layout', () => {
+    const installedConsole = path.join(tempDir, 'console');
+    const installedLab = path.join(installedConsole, 'lab');
+    fs.mkdirSync(path.join(installedLab, 'lib'), { recursive: true });
+    fs.writeFileSync(path.join(installedLab, 'lib', 'examiner-study.mjs'), 'export {};');
+    const installedModule = pathToFileURL(path.join(installedConsole, 'dist', 'server', 'routes', 'examiner.js')).href;
+
+    // installed layout: <console>/lab sits next to <console>/dist
+    expect(resolveLabRoot(installedModule, {})).toBe(installedLab);
+    // repository layout: this checkout's scripts/dev lab (no console/lab present)
+    const repoModule = pathToFileURL(path.join(repoRoot, 'packages', 'pd-console', 'dist', 'server', 'routes', 'examiner.js')).href;
+    expect(resolveLabRoot(repoModule, {})).toBe(path.join(repoRoot, 'scripts', 'dev', 'principle-learning-lab'));
+    // explicit override wins over both
+    expect(resolveLabRoot(repoModule, { PD_EXAMINER_LAB_ROOT: installedLab })).toBe(installedLab);
+
+    // a candidate without the entry module is not evidence of a lab
+    const emptyConsole = path.join(tempDir, 'no-lab-console');
+    fs.mkdirSync(path.join(emptyConsole, 'lab', 'lib'), { recursive: true });
+    const emptyModule = pathToFileURL(path.join(emptyConsole, 'dist', 'server', 'routes', 'examiner.js')).href;
+    expect(resolveLabRoot(emptyModule, { PD_EXAMINER_LAB_ROOT: path.join(emptyConsole, 'lab') })).toBeNull();
   });
 
-  it('NODE_ENV=production is an unconditional hard gate the DEV override cannot lift', () => {
-    expect(isExaminerDevRuntime('file:///app/packages/pd-console/src/server/routes/examiner.ts', { NODE_ENV: 'production' })).toBe(false);
-    expect(isExaminerDevRuntime('file:///app/dist/server.js', { NODE_ENV: 'production', PD_EXAMINER_DEV: '1' })).toBe(false);
-    expect(isExaminerDevRuntime('file:///app/dist/server.js', { NODE_ENV: 'development', PD_EXAMINER_DEV: '1' })).toBe(true);
-  });
-
-  it('the route answers 404 in production even when PD_EXAMINER_DEV=1 is set', async () => {
+  it('serves the offline research panel in a production runtime (no dev-only gate)', async () => {
     const previousNodeEnv = process.env.NODE_ENV;
     const previousDev = process.env.PD_EXAMINER_DEV;
     process.env.NODE_ENV = 'production';
     process.env.PD_EXAMINER_DEV = '1';
     try {
       const res = await call('GET', '/overview');
-      expect(res.statusCode).toBe(404);
-      expect(res.body.error).toBe('examiner_not_enabled');
+      expect(res.statusCode).toBe(200);
+      expect(res.body.data.gates.gate4_product_integration).toContain('ACTIVE');
+      expect(res.body.data.executionScope).toContain('offline-stub only');
     } finally {
       if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
       else process.env.NODE_ENV = previousNodeEnv;
       if (previousDev === undefined) delete process.env.PD_EXAMINER_DEV;
       else process.env.PD_EXAMINER_DEV = previousDev;
+    }
+  });
+
+  it('stores new studies as workspace data under <workspace>/.pd/examiner/studies by default', async () => {
+    delete process.env.PD_EXAMINER_STUDIES_ROOT;
+    try {
+      const created = await call('POST', '/studies', { targetPrincipleId: 'pri-target' });
+      expect(created.statusCode).toBe(200);
+      const studyId = created.body.data.studyId as string;
+      const defaultRoot = path.join(workspaceDir, '.pd', 'examiner', 'studies');
+      expect(fs.existsSync(path.join(defaultRoot, studyId, 'examiner-manifest.json'))).toBe(true);
+
+      const overview = await call('GET', '/overview');
+      expect(overview.body.data.studiesAreWorkspaceData).toBe(true);
+      expect(path.resolve(overview.body.data.writableStudiesRoot).toLowerCase())
+        .toBe(fs.realpathSync.native(defaultRoot).toLowerCase());
+      // The repository's research lab is never a console write target.
+      expect(fs.existsSync(path.join(repoRoot, 'scripts', 'dev', 'principle-learning-lab', 'examiner-console-studies'))).toBe(false);
+    } finally {
+      process.env.PD_EXAMINER_STUDIES_ROOT = studiesRoot;
     }
   });
 });

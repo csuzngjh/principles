@@ -2083,7 +2083,7 @@
       "runDone": "Offline execution finished: {{count}} units succeeded.",
       "reportGenerated": "Report generated ({{status}}).",
       "errors": {
-        "unavailable": "Examiner dev tooling is unavailable in this installation.",
+        "unavailable": "The Examiner research engine is unavailable in this installation (the installer payload does not include the research modules).",
         "create": "Failed to create the study.",
         "preflight": "Preflight failed.",
         "run": "Offline execution failed.",
