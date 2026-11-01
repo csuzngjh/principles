@@ -58,8 +58,12 @@ describe('approved shadow revision uses one immutable-artifact budget (real SQLi
     ledger = { resolveForCandidate: async () => identity, withLockedRuleCandidateIdentity: (_id, callback) => callback(identity) };
     await manager.piArtifactStore.createArtifact({ artifactId: 'approved-old', artifactKind: 'rule', sourceTaskId: ids.evaluator,
       sourcePrincipleId: PRINCIPLE, lineageArtifactIds: [], validationStatus: 'validated', createdAt: NOW, updatedAt: NOW,
+      // Sized like a real approved artifact: the regenerable trace material
+      // dominates (~130k in production) and must not gate or flood the revision.
       contentJson: JSON.stringify({ identityResolution: { candidateId, principleId: PRINCIPLE, basis: 'owner_rule_binding', bindingRevision: 1,
-        decisionId: 'binding-decision' }, implementationCode: 'old-noncompliant-code' }) });
+        decisionId: 'binding-decision' }, implementationCode: 'old-noncompliant-code',
+        intentContract: { ownerIntent: 'Require approval before governed changes.' },
+        goldenTrace: `// GENERATED-TRACE-MARKER\n${'x'.repeat(110_000)}` }) });
     const approvals = new SqliteApprovalQueueStore(manager.connection);
     const approval = await approvals.enqueue({ artifactId: 'approved-old', channel: 'code_tool_hook', riskLevel: 'high' }, NOW);
     expect((await approvals.approve(approval.approvalId, 'owner')).ok).toBe(true);
@@ -88,6 +92,32 @@ describe('approved shadow revision uses one immutable-artifact budget (real SQLi
     return pi;
   }
 
+  /** A second approved shadow activation whose rule contract alone is unreasonably large. */
+  async function activateOversizedArtifact() {
+    const manager = handle.stateManager;
+    // The revision-wave artifact path, so the row lands at the evaluator's
+    // current epoch instead of colliding with the original artifact.
+    await manager.piArtifactStore.upsertArtifact({ artifactId: 'approved-huge', artifactKind: 'rule', sourceTaskId: ids.evaluator,
+      sourcePrincipleId: PRINCIPLE, lineageArtifactIds: [], validationStatus: 'validated', createdAt: NOW, updatedAt: NOW,
+      contentJson: JSON.stringify({ identityResolution: { candidateId, principleId: PRINCIPLE, basis: 'owner_rule_binding', bindingRevision: 1,
+        decisionId: 'binding-decision' }, implementationCode: 'y'.repeat(60_000) }) });
+    const approvals = new SqliteApprovalQueueStore(manager.connection);
+    const queued = await approvals.enqueue({ artifactId: 'approved-huge', channel: 'code_tool_hook', riskLevel: 'high' }, NOW);
+    expect((await approvals.approve(queued.approvalId, 'owner')).ok).toBe(true);
+    await new SqliteActivationStateStore(manager.connection).recordActivation({ activationId: 'shadow-huge', artifactId: 'approved-huge',
+      idempotencyKey: 'approved-huge::code_tool_hook', channel: 'code_tool_hook', action: 'code_tool_hook_shadow_activate',
+      targetRef: 'impl://huge', activatedAt: NOW, deactivatedAt: null });
+  }
+
+  it('refuses an oversized rule contract at preview, before the Owner writes feedback, with zero mutation', async () => {
+    await activateOversizedArtifact();
+    const before = await snapshot();
+    expect(await previewApprovedRuleRevision({ stateManager: handle.stateManager, ledger, activationId: 'shadow-huge' }))
+      .toMatchObject({ status: 'refused', reason: 'revision_source_exceeds_feedback_bound' });
+    expect(await snapshot()).toEqual(before);
+    expect((await meta()).approvedRuleRevisions).toBeUndefined();
+  });
+
   it('preview is read-only, and the consumed source correction does not prevent the separate approved-artifact revision', async () => {
     const before = await snapshot();
     const input = await request();
@@ -106,6 +136,10 @@ describe('approved shadow revision uses one immutable-artifact budget (real SQLi
     expect(pi.sourceCorrectionCauseId).toBe('rule-source-correction:old:1');
     expect(pi.revisionFeedback).toContain('old-noncompliant-code');
     expect(pi.revisionFeedback).toContain(input.feedback);
+    // The previous rule's code contract travels; its generated trace does not.
+    expect(pi.revisionFeedback).toContain('Require approval before governed changes.');
+    expect(pi.revisionFeedback).not.toContain('GENERATED-TRACE-MARKER');
+    expect(pi.revisionFeedback.length).toBeLessThan(10_000);
     expect(pi.approvedRuleRevisions).toHaveLength(1);
   });
 
@@ -121,8 +155,7 @@ describe('approved shadow revision uses one immutable-artifact budget (real SQLi
     } finally { await other.close(); }
   });
 
-  it.each(['digest', 'artifact', 'binding', 'control', 'epoch', 'feedback', 'actor'] as const)('refuses stale/invalid %s with zero mutation', async field => {
-    const input = await request();
+  it.each(['digest', 'artifact', 'binding', 'control', 'epoch', 'feedback', 'actor'] as const)('refuses stale/invalid %s with zero mutation', async field => {    const input = await request();
     const before = await snapshot();
     const overrides = field === 'digest' ? { expectedArtifactDigest: 'sha256:' + '0'.repeat(64) }
       : field === 'artifact' ? { expectedArtifactId: 'unrelated' }

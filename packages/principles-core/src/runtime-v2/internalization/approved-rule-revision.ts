@@ -24,7 +24,37 @@ interface RevisionBaseArgs {
   readonly activationId: string;
 }
 type Refused = { status: 'refused'; reason: string; nextAction: string };
-const refused = (reason: string): Refused => ({ status: 'refused', reason, nextAction: 'Refresh this activation revision preview and inspect its original approval and task chain.' });
+const refused = (reason: string, nextAction = 'Refresh this activation revision preview and inspect its original approval and task chain.'): Refused => ({ status: 'refused', reason, nextAction });
+
+/**
+ * The revision carries the parts of the approved artifact a correction must not
+ * lose: the compiled rule and the intent it implements. Generated traces,
+ * adversarial replays, evidence refs and prior approvals stay in the store —
+ * they are re-derived by the normal chain, and copying them would hand the
+ * model stale expectations instead of a fix (a real approved artifact is
+ * ~130k chars, mostly regenerable trace material).
+ */
+const REVISION_SOURCE_FIELDS = ['implementationCode', 'intentContract', 'affectedTools', 'ruleHostInputContract', 'painReasonSummary'] as const;
+const MAX_REVISION_SOURCE_CHARS = 48_000;
+
+function revisionSource(artifact: { readonly contentJson: string }): { status: 'ready'; text: string } | Refused {
+  let content: unknown;
+  try { content = JSON.parse(artifact.contentJson); } catch { return refused('approved_artifact_content_invalid'); }
+  if (typeof content !== 'object' || content === null || Array.isArray(content)) return refused('approved_artifact_content_invalid');
+  const projection: Record<string, unknown> = {};
+  for (const field of REVISION_SOURCE_FIELDS) {
+    const value = Reflect.get(content, field);
+    if (value !== undefined) projection[field] = value;
+  }
+  if (typeof projection.implementationCode !== 'string' || projection.implementationCode.trim() === '') {
+    return refused('approved_artifact_implementation_missing');
+  }
+  const text = JSON.stringify(projection);
+  if (text.length > MAX_REVISION_SOURCE_CHARS) {
+    return refused('revision_source_exceeds_feedback_bound', 'Inspect the approved artifact directly; this revision carries only its rule code and intent, and this one exceeds the bound.');
+  }
+  return { status: 'ready', text };
+}
 export type ApprovedRuleRevisionPreview = Refused | {
   status: 'ready'; activationId: string; candidateId: string; principleId: string; artificerTaskId: string;
   expectedArtifactId: string; expectedArtifactDigest: string; expectedBindingRevision: number;
@@ -75,10 +105,15 @@ async function resolveTarget(args: RevisionBaseArgs) {
   const approval = (await new SqliteApprovalQueueStore(stateManager.connection).listAll({ status: 'approved', channel: 'code_tool_hook' }))
     .find(row => row.artifactId === artifact.artifactId && row.artifactDigest === artifactDigest);
   if (!approval) return refused('immutable_artifact_approval_required');
+  // Preview and mutation must agree: an artifact this entry cannot carry is
+  // reported before the Owner types feedback, not after.
+  const source = revisionSource(artifact);
+  if (source.status !== 'ready') return source;
   const control = await new SqliteActivationSafetyStore(stateManager.connection).getControlState(activation.activationId);
   if (!control) return refused('activation_control_missing');
   return { status: 'resolved' as const, activation, artifact, artifactDigest, approval, control, candidateId,
-    identity, bindingRevision: identity.bindingRevision, bindingDecisionId: identity.decisionId, scribe, artificer, artificerPi, evaluator, rollout };
+    identity, bindingRevision: identity.bindingRevision, bindingDecisionId: identity.decisionId, scribe, artificer, artificerPi, evaluator, rollout,
+    source: source.text };
 }
 
 function priorRevision(target: Awaited<ReturnType<typeof resolveTarget>>) {
@@ -119,7 +154,6 @@ export async function reviseApprovedRuleOnce(args: ReviseApprovedRuleOnceArgs): 
   if (previous) return { status: 'already_started', artificerTaskId: target.artificer.taskId, causeId: previous.causeId, taskRevisionEpoch: previous.taskRevisionEpoch };
   const stopped = chainRefusal(target);
   if (stopped) return stopped;
-  if (target.artifact.contentJson.length > 64000) return refused('revision_source_exceeds_feedback_bound');
   if (args.expectedBindingRevision !== target.identity.bindingRevision || args.expectedControlVersion !== target.control.version
     || args.expectedTaskRevisionEpoch !== (target.artificerPi.revisionCount ?? 0)) return refused('revision_snapshot_stale');
   if (typeof args.ledger.withLockedRuleCandidateIdentity !== 'function') return refused('binding_lock_unavailable');
@@ -133,7 +167,7 @@ export async function reviseApprovedRuleOnce(args: ReviseApprovedRuleOnceArgs): 
     feedback: args.feedback.trim(), consumedAt: new Date().toISOString() };
   // Existing Artificer buildContext/prompt consumes this exact validated field.
   // Evidence and implementation are data, never a replacement for the intent contract.
-  const revisionFeedback = `Owner authorized one revision of approved artifact ${target.artifact.artifactId} (${target.artifactDigest}).\n<owner_revision_feedback>\n${args.feedback.trim()}\n</owner_revision_feedback>\nPreserve the original intent, trusted facts and evidence. Official recovery controls must remain reachable across unavailable context and the rule's applicable fact states: consume the host-owned action.recoveryControl marker and action classification; do not invent a pd-prefix or command whitelist. Keep the original principle's behavior for governed actions and neutral/fault states. Run independent quality and recovery-composition checks; new artifacts require fresh Owner approval.\n<previous_approved_artifact>\n${target.artifact.contentJson}\n</previous_approved_artifact>`;
+  const revisionFeedback = `Owner authorized one revision of approved artifact ${target.artifact.artifactId} (${target.artifactDigest}).\n<owner_revision_feedback>\n${args.feedback.trim()}\n</owner_revision_feedback>\nPreserve the original intent, trusted facts and evidence. Official recovery controls must remain reachable across unavailable context and the rule's applicable fact states: consume the host-owned action.recoveryControl marker and action classification; do not invent a pd-prefix or command whitelist. Keep the original principle's behavior for governed actions and neutral/fault states. Run independent quality and recovery-composition checks; new artifacts require fresh Owner approval.\n<previous_approved_artifact_rule>\n${target.source}\n</previous_approved_artifact_rule>\nThis carries only the approved rule's code contract and intent. Its golden traces, adversarial results, evidence refs and approvals are NOT included: re-derive them from the original intent and evidence instead of assuming the removed versions still hold.`;
   const metadata = mergePITaskMetadata(target.artificerPi, { revisionCount: epoch, revisionCauseId: causeId, revisionFeedback,
     runnerDecision: undefined, completionIntent: undefined, humanReviewContext: undefined,
     approvedRuleRevisions: [...(target.artificerPi.approvedRuleRevisions ?? []), receipt] });

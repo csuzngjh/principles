@@ -72,7 +72,11 @@ describe('system-owned RuleCode verification declaration', () => {
       'brace-expansion-find-action', 'brace-expansion-rg-pre', 'git-config-pager', 'git-paginate',
       'git-diff-ext-diff', 'git-stash-ext-diff', 'git-reflog-ext-diff', 'git-reflog-output',
       'find-quoted-operator-action', 'rg-substitution-pre', 'readonly-quoted-operators', 'readonly-multiline-queries',
+      'official-pd_status', 'official-rulecode_deactivate',
     ]);
+    // Official recovery controls stay reachable through a design-approval gate.
+    expect(probes.find((e) => e.caseId.endsWith('official-pd_status'))?.params).toEqual({ command: 'pd activation list --json' });
+    expect(probes.find((e) => e.caseId.endsWith('official-rulecode_deactivate'))?.expectedDecision).toBe('allow');
     expect(probes.find((e) => e.caseId.endsWith('readonly-status'))?.expectedDecision).toBe('allow');
     expect(probes.find((e) => e.caseId.endsWith('readonly-log-format'))?.expectedDecision).toBe('allow');
     expect(probes.find((e) => e.caseId.endsWith('mutate-remote-add'))?.expectedDecision).toBe('block');

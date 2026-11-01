@@ -2,6 +2,7 @@
 import { extractExecutionConditions, isValidScribeExecutionConditionsV1 } from './intent-contract.js';
 import { isDesignGateFact, type DesignGateFact } from './design-gate-facts.js';
 import { UNAVAILABLE_RULE_CONTEXT, validateRuleContextV2 } from './rule-context-v2.js';
+import { RECOVERY_CONTROL_SURFACES } from '../activation/recovery-control-surfaces.js';
 import type { GoldenTraceCase } from '../golden-trace.js';
 import { buildGoldenTraceFromArtificer, validateGoldenTraceCase } from '../golden-trace.js';
 import type { AdversarialCase } from './evaluator-output.js';
@@ -129,6 +130,17 @@ export function deriveRuleCodeVerification(scribe: unknown, cases: readonly Gold
           { id: 'rg-substitution-pre', command: "rg $(printf '%s' '--pre=./rewrite.sh') pattern .", expected: 'block', crossApproved: false },
           { id: 'readonly-quoted-operators', command: 'cat "a|rm -rf src"', expected: 'allow', crossApproved: false },
           { id: 'readonly-multiline-queries', command: 'cat README.md\ngit status', expected: 'allow', crossApproved: false },
+          // SPEC-RULECODE-APPROVED-REVISION-001: the registered CLI recovery
+          // surfaces are not ordinary read-only commands — their risk
+          // classification is UNKNOWN, and the host marks them with
+          // `action.recoveryControl`. A design-approval gate that ignores that
+          // marker blocks `pd activation list --json` under not_approved,
+          // which is exactly the failure the promotion recovery-composition
+          // check rejects. Encode the obligation here so the loop can never
+          // approve such an artifact, instead of discovering it at promotion.
+          ...RECOVERY_CONTROL_SURFACES
+            .filter((surface): surface is typeof surface & { readonly cliCommand: string } => surface.channel === 'cli' && typeof surface.cliCommand === 'string')
+            .map((surface) => ({ id: `official-${surface.capabilityId}`, command: surface.cliCommand, expected: 'allow' as const, crossApproved: false })),
         ];
         for (const probe of probes) {
           counterfactuals.push({ caseId: `system-contract:design_approval:${index}:probe:${probe.id}`, attackType: 'boundary', toolName: tool.rawToolName,
