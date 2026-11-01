@@ -153,7 +153,8 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
   }
   const { flags } = computeFeatureFlagsFromConfig(config.effective);
   if (flags['host.workbuddy']?.enabled !== true) {
-    return { ...base, mode: 'paused', reason: 'host.workbuddy_disabled', nextAction: 'Set features.host.workbuddy.enabled=true in the governance workspace .pd/config.yaml to enable WorkBuddy PD behavior.' };
+    // PRI-1063 (review fix): single-line flow mapping — see pd-hook.ts.
+    return { ...base, mode: 'paused', reason: 'host.workbuddy_disabled', nextAction: 'Enable WorkBuddy PD behavior in the governance workspace .pd/config.yaml — in the existing "features:" block set host.workbuddy: {enabled: true} (one flat key, not nested).' };
   }
 
   const consumerFlag = loadFeatureFlagFromConfig(workspaceDir, 'internalization_auto_consumer', { info: (m) => logger.info(m), warn: (m) => logger.warn(m) });

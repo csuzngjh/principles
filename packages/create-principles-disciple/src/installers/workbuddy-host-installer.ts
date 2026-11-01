@@ -1478,7 +1478,11 @@ export class WorkBuddyHostInstaller implements HostInstaller {
             configPath: governanceDefaults.configPath,
           },
       reason: `Registered ${WORKBUDDY_PLUGIN_KEY} via ${registration.mode}${registration.mode === 'engine' ? '' : ` (engine unreachable: ${registration.engineNote})`}. Governance workspace initialized at ${p.governanceDir}${governance.dbInit === 'skipped' ? ` (${governance.note})` : ''}.${profileNote}${governanceDefaultsNote}`,
-      nextAction: `${effectiveNote}${governance.dbInit === 'skipped' ? ` After the install, run "pd runtime init --workspace ${p.governanceDir}" to create the governance databases.` : ''} To disable keyword Pain, set features.workbuddy_live_keyword_pain.enabled=false; to disable all WorkBuddy governance, set features.host.workbuddy.enabled=false.${pendingRebindNote}`,
+      // PRI-1063 copy (single-line flat-key flow mapping) carried over from
+      // main; the "Existing workspaces retain their prior settings" sentence is
+      // deliberately dropped — PRI-1064 turns governance ON for those
+      // workspaces, so keeping it would state the opposite of what happens.
+      nextAction: `${effectiveNote}${governance.dbInit === 'skipped' ? ` After the install, run "pd runtime init --workspace ${p.governanceDir}" to create the governance databases.` : ''} To disable, edit ${path.join(p.governanceDir, '.pd', 'config.yaml')} — each flag id is ONE flat key (not nested). In the existing "features:" block set workbuddy_live_keyword_pain: {enabled: false} to disable keyword Pain only, or host.workbuddy: {enabled: false} to disable all WorkBuddy governance.${pendingRebindNote}`,
     };
   }
 
