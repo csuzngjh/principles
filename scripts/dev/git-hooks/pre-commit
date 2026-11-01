@@ -7,6 +7,13 @@
 # from the CURRENT worktree at run time, so any worktree may reinstall hooks
 # without changing behaviour for the others.
 
+# lefthook's own hooks honour this before touching the environment. Keep the
+# same meaning here: the skip must work even when node or the dispatcher is
+# missing, which is exactly when an operator needs the escape hatch.
+if [ "${LEFTHOOK:-}" = "0" ]; then
+  exit 0
+fi
+
 top=$(git rev-parse --show-toplevel 2>/dev/null)
 if [ -z "$top" ]; then
   echo "[pd-hooks] not inside a git worktree" >&2

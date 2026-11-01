@@ -51,7 +51,9 @@ function ensureExecutable(target) {
   if (process.platform === 'win32') return;
   try {
     const mode = fs.statSync(target).mode;
-    if ((mode & 0o111) === 0) fs.chmodSync(target, 0o755);
+    // Git runs a hook only when its owner can execute it; any other exec bit
+    // is irrelevant (and would let `0641` masquerade as installed).
+    if ((mode & 0o100) === 0) fs.chmodSync(target, 0o755);
   } catch {
     /* the next run reports the real failure if the file is unreadable */
   }

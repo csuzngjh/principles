@@ -118,10 +118,11 @@ beforeEach(async () => {
   await git(worktreeA, 'config', 'core.hooksPath', hooksDir);
   await git(worktreeA, 'worktree', 'add', '-b', 'ai/pri962-b', worktreeB);
 
-  for (const dir of [worktreeA, worktreeB]) {
-    seedDispatcher(dir);
-    seedFakeLefthook(dir, 'local');
-  }
+  for (const dir of [worktreeA, worktreeB]) seedDispatcher(dir);
+  // Distinct labels: the marker must show which worktree's binary ran, not
+  // merely that SOME local lefthook ran.
+  seedFakeLefthook(worktreeA, 'local-A');
+  seedFakeLefthook(worktreeB, 'local-B');
   fs.writeFileSync(path.join(worktreeA, 'lefthook.yml'), 'project: A\n', 'utf-8');
   fs.writeFileSync(path.join(worktreeB, 'lefthook.yml'), 'project: B\n', 'utf-8');
 });
@@ -132,7 +133,7 @@ afterEach(() => {
 
 describe('shared git hook dispatcher (PRI-962)', () => {
   it('installs a dispatcher with no worktree-specific path', async () => {
-    const installed = await runNode([INSTALLER], { cwd: worktreeA });
+    const installed = await runNode([INSTALLER, '--strict'], { cwd: worktreeA });
     expect(installed.code, installed.stderr).toBe(0);
 
     for (const name of HOOK_NAMES) {
@@ -148,11 +149,11 @@ describe('shared git hook dispatcher (PRI-962)', () => {
   });
 
   it('keeps the shared entry byte-identical when another worktree installs or lefthook clobbers it', async () => {
-    expect((await runNode([INSTALLER], { cwd: worktreeA })).code).toBe(0);
+    expect((await runNode([INSTALLER, '--strict'], { cwd: worktreeA })).code).toBe(0);
     const before = fs.readFileSync(path.join(hooksDir, 'pre-commit'));
 
     // Installing from a second worktree must not change the shared content.
-    expect((await runNode([INSTALLER], { cwd: worktreeB })).code).toBe(0);
+    expect((await runNode([INSTALLER, '--strict'], { cwd: worktreeB })).code).toBe(0);
     expect(fs.readFileSync(path.join(hooksDir, 'pre-commit')).equals(before)).toBe(true);
 
     // Reproduce the dependency postinstall rewrite this ticket is about.
@@ -161,12 +162,12 @@ describe('shared git hook dispatcher (PRI-962)', () => {
       '#!/bin/sh\nexec "D:/Code/_worktrees/other/node_modules/lefthook.exe" run pre-commit "$@"\n',
       'utf-8'
     );
-    expect((await runNode([INSTALLER], { cwd: worktreeB })).code).toBe(0);
+    expect((await runNode([INSTALLER, '--strict'], { cwd: worktreeB })).code).toBe(0);
     expect(fs.readFileSync(path.join(hooksDir, 'pre-commit')).equals(before)).toBe(true);
   });
 
   it("runs each worktree's own lefthook binary and lefthook.yml", async () => {
-    expect((await runNode([INSTALLER], { cwd: worktreeA })).code).toBe(0);
+    expect((await runNode([INSTALLER, '--strict'], { cwd: worktreeA })).code).toBe(0);
     const marker = path.join(root, 'marker.ndjson');
 
     const result = await withEnv(
@@ -182,16 +183,18 @@ describe('shared git hook dispatcher (PRI-962)', () => {
 
     const calls = readCalls(marker);
     expect(calls).toHaveLength(2);
-    expect(calls[0].label).toBe('local');
+    expect(calls[0].label).toBe('local-A');
     expect(path.resolve(calls[0].cwd)).toBe(path.resolve(worktreeA));
     expect(calls[0].argv.slice(0, 2)).toEqual(['run', 'pre-commit']);
     expect(calls[0].config).toBe('project: A\n');
+    expect(calls[1].label).toBe('local-B');
     expect(path.resolve(calls[1].cwd)).toBe(path.resolve(worktreeB));
+    expect(calls[1].argv.slice(0, 2)).toEqual(['run', 'pre-commit']);
     expect(calls[1].config).toBe('project: B\n');
   });
 
   it('fails loudly with an install command when the worktree has no local lefthook', async () => {
-    expect((await runNode([INSTALLER], { cwd: worktreeA })).code).toBe(0);
+    expect((await runNode([INSTALLER, '--strict'], { cwd: worktreeA })).code).toBe(0);
     fs.rmSync(path.join(worktreeB, 'node_modules'), { recursive: true, force: true });
 
     const result = await withEnv(
@@ -206,8 +209,11 @@ describe('shared git hook dispatcher (PRI-962)', () => {
   });
 
   it('honours LEFTHOOK=0 as an intentional skip without local dependencies', async () => {
-    expect((await runNode([INSTALLER], { cwd: worktreeA })).code).toBe(0);
+    expect((await runNode([INSTALLER, '--strict'], { cwd: worktreeA })).code).toBe(0);
     fs.rmSync(path.join(worktreeB, 'node_modules'), { recursive: true, force: true });
+    // Drop the dispatcher too: the escape hatch has to run before the shell's
+    // own dependency checks, which are exactly what a broken worktree trips on.
+    fs.rmSync(path.join(worktreeB, 'scripts', 'dev', 'run-lefthook-hook.mjs'));
     const marker = path.join(root, 'marker-skip.ndjson');
 
     const result = await withEnv(
@@ -236,6 +242,31 @@ describe('shared git hook dispatcher (PRI-962)', () => {
     expect(calls[0].argv.slice(0, 2)).toEqual(['run', 'pre-commit']);
   });
 
+  it('executes the installed pre-push hook and forwards the push arguments', async () => {
+    expect((await runNode([INSTALLER, '--strict'], { cwd: worktreeA })).code).toBe(0);
+
+    const remote = path.join(root, 'origin.git');
+    await run('git', ['init', '--bare', '-b', 'main', remote]);
+    await git(worktreeA, 'remote', 'add', 'origin', remote);
+    await commitFile(worktreeA, 'pushed.txt', 'push me');
+
+    const marker = path.join(root, 'marker-push.ndjson');
+    const pushed = await withEnv(
+      { PRI962_MARKER: marker, LEFTHOOK_BIN: undefined, LEFTHOOK: undefined },
+      () => run('git', ['push', 'origin', 'HEAD:refs/heads/pre-push-test'], { cwd: worktreeA })
+    );
+
+    expect(pushed.code, pushed.stderr).toBe(0);
+    const calls = readCalls(marker);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].label).toBe('local-A');
+    expect(path.resolve(calls[0].cwd)).toBe(path.resolve(worktreeA));
+    // git passes <remote-name> <remote-url> as arguments; the ref updates
+    // themselves arrive on stdin, so the shell wrapper must not touch "$@".
+    expect(calls[0].argv.slice(0, 3)).toEqual(['run', 'pre-push', 'origin']);
+    expect(calls[0].argv[3]).toContain('origin.git');
+  });
+
   it('is wired into npm postinstall and the worktree bootstrap', () => {
     const repoRoot = path.resolve(DEV_SCRIPTS_DIR, '..', '..');
     const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf-8')) as {
@@ -245,6 +276,12 @@ describe('shared git hook dispatcher (PRI-962)', () => {
     expect(pkg.scripts['dev:hooks:install']).toContain('install-git-hooks.mjs');
 
     const setup = fs.readFileSync(path.join(repoRoot, 'scripts', 'setup-worktree.mjs'), 'utf-8');
-    expect(setup).toContain('install-git-hooks.mjs');
+    // Step 4b behaviour is covered through the installer itself above; here we
+    // only guard the wiring, so require a live (uncommented) `run(` call.
+    const step4b = setup
+      .split('\n')
+      .filter((line) => !line.trimStart().startsWith('//'))
+      .find((line) => line.includes('hooksInstaller}') && line.includes('--strict'));
+    expect(step4b, 'setup-worktree must run the hook installer in strict mode').toMatch(/=\s*run\(/);
   });
 });
