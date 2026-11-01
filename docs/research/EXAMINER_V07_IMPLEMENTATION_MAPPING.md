@@ -88,7 +88,7 @@ v0.7 真实缺口（本轮实施）：① Principle Conformance 无独立维度�
 | `scripts/__tests__/principle-learning-lab-v07-statistics.test.ts` | 新增 | 统计复算 |
 | `scripts/__tests__/principle-learning-lab-v07-isolation.test.ts` | 新增 | 隔离负向 |
 | `scripts/__tests__/principle-learning-lab-v07-report.test.ts` | 新增 | Report V2/重放/分母 |
-| `scripts/__tests__/fixtures/examiner-v07.mjs` | 新增 | v3 案例构造器 + 六策略动作 |
+| `scripts/dev/principle-learning-lab/lib/examiner-v07-cases.mjs` | 新增 | v3 案例构造器 + 六策略动作 |
 | 研究文档 ×5 | 新增 | 本文件 + IMPLEMENTATION_REPORT / CALIBRATION_REPORT / GOLD_REVIEW_PACKAGE / GATE_ASSESSMENT |
 
 依赖方向：statistics/isolation-contract 无外部依赖（纯函数）；scorer 依赖 env（既有）；report 依赖 scorer/replay（既有）。无生产包改动，无新 npm 依赖。

@@ -2077,7 +2077,7 @@
       "runDone": "离线执行完成：{{count}} 个单元成功。",
       "reportGenerated": "报告已生成（{{status}}）。",
       "errors": {
-        "unavailable": "Examiner 开发工具在此安装中不可用。",
+        "unavailable": "Examiner 研究引擎在此安装中不可用（安装包未包含研究模块）。",
         "create": "创建 Study 失败。",
         "preflight": "预检失败。",
         "run": "离线执行失败。",

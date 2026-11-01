@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { makeExaminerV2Case, observeV2, reportV2 } from './fixtures/examiner-v2.mjs';
+import { makeExaminerV2Case, observeV2, reportV2 } from '../dev/principle-learning-lab/lib/examiner-v2-cases.mjs';
 import { buildClaimEnvironment, newClaimRunState, stepClaimEnvironment } from '../dev/principle-learning-lab/lib/claim-evidence-env.mjs';
 import { adjudicateClaimEvidence } from '../dev/principle-learning-lab/lib/claim-evidence-scorer.mjs';
 import { offlinePackageManifest, verifyOfflinePackage } from '../dev/principle-learning-lab/lib/challenge-freeze.mjs';

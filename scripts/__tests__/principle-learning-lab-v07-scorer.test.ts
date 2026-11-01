@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   makeExaminerV3Case, examinerV3CalibrationCases, examinerV3SupplementalScenarios,
-} from './fixtures/examiner-v07.mjs';
-import { makeExaminerV2Case } from './fixtures/examiner-v2.mjs';
+} from '../dev/principle-learning-lab/lib/examiner-v07-cases.mjs';
+import { makeExaminerV2Case } from '../dev/principle-learning-lab/lib/examiner-v2-cases.mjs';
 import {
   buildClaimEnvironment, newClaimRunState, stepClaimEnvironment,
 } from '../dev/principle-learning-lab/lib/claim-evidence-env.mjs';

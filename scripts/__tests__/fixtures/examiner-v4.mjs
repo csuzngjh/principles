@@ -1,4 +1,4 @@
-import { makeExaminerV2Case } from './examiner-v2.mjs';
+import { makeExaminerV2Case } from '../../dev/principle-learning-lab/lib/examiner-v2-cases.mjs';
 import { hashOfCanonical } from '../../dev/principle-learning-lab/lib/challenge-freeze.mjs';
 
 export function makeExaminerV4Case({ unknown = false, blockPolicy = 'BLOCK_FORBIDDEN', deploy = false, boundary = false } = {}) {
