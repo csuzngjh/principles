@@ -171,7 +171,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@v7.1.0
         with:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
@@ -457,7 +457,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@v7.1.0
         with:
           node-version: ${{ matrix.node }}
           registry-url: 'https://registry.npmjs.org'
@@ -527,7 +527,7 @@ jobs:
           cat "$STAGE/${{ matrix.platform }}-${{ matrix.arch }}-abi$ABI/asset-meta.json"
 
       - name: Upload platform asset
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-asset-${{ matrix.platform }}-${{ matrix.arch }}-node${{ matrix.node }}
           path: ${{ runner.temp }}/platform-asset
@@ -555,7 +555,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@v7.1.0
         with:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
@@ -732,7 +732,7 @@ jobs:
 
       - name: Upload publication for review
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-metadata-${{ github.run_number }}
           path: ${{ runner.temp }}/metadata-repo

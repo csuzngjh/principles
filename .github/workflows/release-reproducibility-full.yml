@@ -48,7 +48,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ inputs.ref || github.sha }}
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
           node-version: ${{ matrix.node }}
           cache: npm
@@ -112,7 +112,7 @@ jobs:
           PD_RELEASE_SMOKE_PUBLICATION: ${{ runner.temp }}/pd-publication-two
       - name: Upload upgrade-gate diagnostics on failure
         if: matrix.runner == 'ubuntu-24.04' && matrix.node == '22.22.2' && failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: upgrade-gate-diagnostics-linux
           path: upgrade-gate-diagnostics
@@ -123,7 +123,7 @@ jobs:
       # its N-1 payload from THIS exact asset).
       - name: Upload release asset for the windows upgrade gate
         if: matrix.runner == 'windows-2025' && matrix.node == '22.22.2'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-asset-windows
           path: ${{ runner.temp }}/pd-publication-two
@@ -153,7 +153,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ inputs.ref || github.sha }}
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
           node-version: '22.22.2'
           cache: npm
@@ -191,7 +191,7 @@ jobs:
           PD_RELEASE_SMOKE_PUBLICATION: ${{ runner.temp }}/pd-publication-two
       - name: Upload upgrade-gate diagnostics on failure
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: upgrade-gate-diagnostics-windows
           path: upgrade-gate-diagnostics
