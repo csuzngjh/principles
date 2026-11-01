@@ -1,4 +1,4 @@
-import type { ActivationStateReadModel, ActivationStatusRecord, PromptReplacementCommit, PromptReplacementOutcome } from './activation-types.js';
+import type { ActivationReplacementCommit, ActivationReplacementOutcome, ActivationStateReadModel, ActivationStatusRecord, PromptReplacementCommit, PromptReplacementOutcome } from './activation-types.js';
 import type { SqliteConnection } from '../store/sqlite-connection.js';
 import { createHash } from 'node:crypto';
 import { isArtifactRevisionOf, type ArtifactLineageIdentity } from './activation-types.js';
@@ -197,76 +197,109 @@ export class SqliteActivationStateStore implements ActivationStateReadModel {
    * the supersede inside the same transaction instead of failing.
    */
   async replacePromptActivation(input: PromptReplacementCommit): Promise<PromptReplacementOutcome> {
-    const db = this.connection.getDb();
+    return this.replaceActivationAtomically(input, {
+      channel: 'prompt', action: 'prompt_activate', errorPrefix: 'replacePromptActivation', approvalSource: 'prompt approval',
+      liveDescription: 'live prompt activation',
+    });
+  }
+
+  /**
+   * SPEC-RULECODE-APPROVED-REVISION-001 §B: the same one-transaction
+   * replacement for a revised RuleCode artifact. A bounded revision lands as a
+   * NEW immutable artifact of the SAME evaluator task; approving it must retire
+   * the superseded shadow atomically — never stop-old-then-start-new.
+   */
+  async replaceRuleActivation(input: ActivationReplacementCommit): Promise<ActivationReplacementOutcome> {
+    return this.replaceActivationAtomically(input, {
+      channel: 'code_tool_hook', action: 'code_tool_hook_shadow_activate', errorPrefix: 'replaceRuleActivation', approvalSource: 'rule approval',
+      liveDescription: 'live rule shadow activation',
+    });
+  }
+
+  private replaceActivationAtomically(input: PromptReplacementCommit, cfg: {
+    channel: ActivationStatusRecord['channel']; action: ActivationStatusRecord['action']; errorPrefix: string; approvalSource: string; liveDescription: string;
+  }): PromptReplacementOutcome {    const db = this.connection.getDb();
     const { newRecord } = input;
     if (newRecord.activationId === input.supersededActivationId) {
-      throw new Error('replacePromptActivation: new and superseded activation ids must be distinct');
+      throw new Error(`${cfg.errorPrefix}: new and superseded activation ids must be distinct`);
     }
-    if (newRecord.channel !== 'prompt' || newRecord.action !== 'prompt_activate' || newRecord.deactivatedAt !== null) {
-      throw new Error('replacePromptActivation: replacement must be a live prompt activation');
+    if (newRecord.channel !== cfg.channel || newRecord.action !== cfg.action || newRecord.deactivatedAt !== null) {
+      throw new Error(`${cfg.errorPrefix}: replacement must be a ${cfg.liveDescription}`);
     }
-    if (newRecord.idempotencyKey !== `${newRecord.artifactId}::prompt`) {
-      throw new Error('replacePromptActivation: idempotency key must identify the new artifact and channel');
+    if (newRecord.idempotencyKey !== `${newRecord.artifactId}::${cfg.channel}`) {
+      throw new Error(`${cfg.errorPrefix}: idempotency key must identify the new artifact and channel`);
     }
-    const supersedeKey = `supersede-prompt:${newRecord.activationId}:${input.supersededActivationId}`;
+    const supersedeKey = `supersede-${cfg.channel}:${newRecord.activationId}:${input.supersededActivationId}`;
     db.exec('BEGIN IMMEDIATE');
     try {
       const oldRows = db.prepare('SELECT * FROM activations WHERE activation_id = ? AND artifact_id = ?').all(input.supersededActivationId, input.supersededArtifactId);
       const [oldRaw] = oldRows;
       const old = mapRowToRecord(oldRaw);
-      if (oldRows.length !== 1 || old === null || old.channel !== 'prompt' || old.action !== 'prompt_activate'
+      if (oldRows.length !== 1 || old === null || old.channel !== cfg.channel || old.action !== cfg.action
         || old.artifactId !== input.supersededArtifactId) {
-        throw new Error('replacePromptActivation: superseded activation is not a live prompt activation of the expected artifact');
+        throw new Error(`${cfg.errorPrefix}: superseded activation is not a ${cfg.liveDescription} of the expected artifact`);
       }
       const oldArtifact = db.prepare('SELECT * FROM pi_artifacts WHERE artifact_id = ?').get(old.artifactId);
       if (!isRecord(oldArtifact) || typeof oldArtifact.content_json !== 'string') {
-        throw new Error('replacePromptActivation: superseded artifact is unavailable');
+        throw new Error(`${cfg.errorPrefix}: superseded artifact is unavailable`);
       }
       const newArtifact = db.prepare('SELECT * FROM pi_artifacts WHERE artifact_id = ?').get(newRecord.artifactId);
-      if (!isRecord(newArtifact)) throw new Error('replacePromptActivation: new artifact is unavailable');
+      if (!isRecord(newArtifact)) throw new Error(`${cfg.errorPrefix}: new artifact is unavailable`);
       // Known source identities must agree even when lineage points at the old
       // artifact. Missing legacy identities are not invented or migrated.
       if (typeof oldArtifact.source_principle_id === 'string' && typeof newArtifact.source_principle_id === 'string'
         && oldArtifact.source_principle_id !== newArtifact.source_principle_id) {
-        throw new Error('replacePromptActivation: replacement artifacts belong to different principles');
+        throw new Error(`${cfg.errorPrefix}: replacement artifacts belong to different principles`);
       }
       const oldIdentity = readArtifactIdentity(oldArtifact, old.artifactId);
       const newIdentity = readArtifactIdentity(newArtifact, newRecord.artifactId);
       if (oldIdentity === null || newIdentity === null || !isArtifactRevisionOf(newIdentity, oldIdentity)) {
-        throw new Error('replacePromptActivation: artifacts have no verified revision relationship');
+        throw new Error(`${cfg.errorPrefix}: artifacts have no verified revision relationship`);
       }
       const digest = `sha256:${createHash('sha256').update(JSON.stringify({ artifact_id: old.artifactId, content_json: oldArtifact.content_json }), 'utf8').digest('hex')}`;
       const newRaw = db.prepare('SELECT * FROM activations WHERE idempotency_key = ?').get(newRecord.idempotencyKey);
       const existing = newRaw === undefined ? null : mapRowToRecord(newRaw);
       if (newRaw !== undefined && (existing === null || existing.activationId !== newRecord.activationId
-        || existing.artifactId !== newRecord.artifactId || existing.channel !== 'prompt'
-        || existing.action !== 'prompt_activate' || existing.targetRef !== newRecord.targetRef || existing.deactivatedAt !== null)) {
-        throw new Error('replacePromptActivation: new activation identity conflicts with the stored version');
+        || existing.artifactId !== newRecord.artifactId || existing.channel !== cfg.channel
+        || existing.action !== cfg.action || existing.targetRef !== newRecord.targetRef || existing.deactivatedAt !== null)) {
+        throw new Error(`${cfg.errorPrefix}: new activation identity conflicts with the stored version`);
       }
       const decision = db.prepare('SELECT * FROM activation_decisions WHERE idempotency_key = ?').get(supersedeKey);
       if (decision !== undefined && (!isRecord(decision) || decision.activation_id !== old.activationId
         || decision.artifact_id !== old.artifactId || decision.decision !== 'supersede'
         || decision.artifact_digest !== digest)) {
-        throw new Error('replacePromptActivation: supersede decision conflicts with this replacement');
+        throw new Error(`${cfg.errorPrefix}: supersede decision conflicts with this replacement`);
       }
       if (old.deactivatedAt !== null) {
         if (existing === null || decision === undefined) {
-          throw new Error('replacePromptActivation: superseded activation is inactive without a completed replacement');
+          throw new Error(`${cfg.errorPrefix}: superseded activation is inactive without a completed replacement`);
         }
         db.exec('COMMIT');
         return { status: 'already_replaced', newActivationId: existing.activationId, supersededActivationId: old.activationId, supersedeDecisionId: supersedeKey };
       }
       if (existing === null) {
         const artifactExists = db.prepare('SELECT 1 FROM pi_artifacts WHERE artifact_id = ?').get(newRecord.artifactId);
-        if (artifactExists === undefined) throw new Error('replacePromptActivation: new artifact is unavailable');
+        if (artifactExists === undefined) throw new Error(`${cfg.errorPrefix}: new artifact is unavailable`);
         const collisions = db.prepare('SELECT 1 FROM activations WHERE activation_id = ?').all(newRecord.activationId);
-        if (collisions.length !== 0) throw new Error('replacePromptActivation: new activation identity is already occupied');
+        if (collisions.length !== 0) throw new Error(`${cfg.errorPrefix}: new activation identity is already occupied`);
         db.prepare(`
           INSERT INTO activations
             (activation_id, idempotency_key, artifact_id, channel, action, target_ref, activated_at, promoted_at, deactivated_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
         `).run(newRecord.activationId, newRecord.idempotencyKey, newRecord.artifactId, newRecord.channel,
           newRecord.action, newRecord.targetRef, newRecord.activatedAt, newRecord.promotedAt ?? null);
+        // Every RuleCode activation owns its control state (PK = activation_id).
+        // A replacement inserts the activation row directly, so it must seed the
+        // control state here too — a row without it is skipped by the gate as
+        // activation_control_state_invalid and the new version would never be
+        // evaluated (the whole point of the revision).
+        if (newRecord.channel === 'code_tool_hook') {
+          db.prepare(`
+            INSERT OR IGNORE INTO activation_control_states
+              (activation_id, enforcement, isolation_decision_id, version, updated_at)
+            VALUES (?, 'eligible', NULL, 1, ?)
+          `).run(newRecord.activationId, newRecord.activatedAt);
+        }
       }
       if (decision === undefined) {
         db.prepare(`
@@ -275,14 +308,14 @@ export class SqliteActivationStateStore implements ActivationStateReadModel {
              decision, principal_kind, owner_id, authentication_method, credential_id, reason_code, note, decided_at)
           VALUES (?, ?, 'activation', ?, ?, ?, 'supersede', 'configured_owner', ?, 'system', NULL, ?, ?, ?)
         `).run(supersedeKey, supersedeKey, old.activationId, old.artifactId, digest, input.decidedBy,
-          input.reasonCode, `${input.note} Approved by ${input.decidedBy} via prompt approval.`, input.decidedAt);
+          input.reasonCode, `${input.note} Approved by ${input.decidedBy} via ${cfg.approvalSource}.`, input.decidedAt);
       }
       const deactivationTime = isRecord(decision) && typeof decision.decided_at === 'string' ? decision.decided_at : input.decidedAt;
       const update = db.prepare(`
         UPDATE activations SET deactivated_at = ?
-        WHERE activation_id = ? AND artifact_id = ? AND channel = 'prompt' AND deactivated_at IS NULL
-      `).run(deactivationTime, old.activationId, old.artifactId);
-      if (update.changes !== 1) throw new Error('replacePromptActivation: superseded activation changed during commit');
+        WHERE activation_id = ? AND artifact_id = ? AND channel = ? AND deactivated_at IS NULL
+      `).run(deactivationTime, old.activationId, old.artifactId, cfg.channel);
+      if (update.changes !== 1) throw new Error(`${cfg.errorPrefix}: superseded activation changed during commit`);
       db.exec('COMMIT');
       return { status: existing === null ? 'replaced' : 'already_replaced', newActivationId: newRecord.activationId, supersededActivationId: old.activationId, supersedeDecisionId: supersedeKey };
     } catch (error) {

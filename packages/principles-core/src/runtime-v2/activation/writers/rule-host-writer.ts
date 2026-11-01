@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { PIArtifactSnapshot, CanActivateResult, ChannelWriter, WriterInput, WriterResult, ActivationRiskLevel, ApprovalEnqueueInput } from '../activation-types.js';
 import type { RefinerRuleHostGateDeps, RefinerRuleHostGateResult } from '../../internalization/refiner-rulehost-gate.js';
 import { evaluateRefinerRuleHostGate } from '../../internalization/refiner-rulehost-gate.js';
@@ -374,10 +375,22 @@ export class RuleHostWriter implements ChannelWriter {
     // production tool calls with no observation window. Shadow-first
     // gives the owner a reversible observation phase before any live
     // enforcement.
+    //
+    // SPEC-RULECODE-APPROVED-REVISION-001 (§A versioned identity): a bounded
+    // revision produces a NEW immutable artifact for the SAME evaluator task,
+    // so a ruleId-only identity made every version share one activation_id and
+    // one target_ref. Two live rows then collided on the primary review handle
+    // and the gate skipped the whole target_ref group. The version segment is
+    // derived from the artifact itself — the same immutable artifact always
+    // yields the same identity (idempotent re-approval), a different artifact
+    // never collides — matching PromptWriter's
+    // `act_prompt_${principleId}_sha256(artifactId)` convention rather than
+    // inventing a new scheme.
+    const artifactVersion = createHash('sha256').update(artifact.artifactId, 'utf8').digest('hex');
     return {
-      activationId: `act_code_${ruleId}`,
+      activationId: `act_code_${ruleId}_${artifactVersion}`,
       action: 'code_tool_hook_shadow_activate',
-      targetRef: `impl://${ruleId}`,
+      targetRef: `impl://${ruleId}_${artifactVersion}`,
     };
   }
 

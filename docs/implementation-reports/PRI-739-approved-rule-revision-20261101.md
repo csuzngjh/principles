@@ -92,3 +92,41 @@ satellite bundle 体积预算随之超限（`rulehost-evidence.js` dev 559,348 >
 ## Error Experience / Task Risk Contract
 
 EP-01/08：输入、摘要、回执严格校验，身份服务端解析。EP-02/09：真实 HTTP、SQLite 与共享输入构造器测试，避免只测内部帮助函数。EP-03：失败返回明确 reason/nextAction。EP-05/06：本轮 cause、epoch、旧工件和反馈绑定，保留旧额度与历史。EP-11：新增文案双语。EP-13：复用既有组件/样式，不新增主题规则。EP-04：本轮不增加 CLI 变更入口。独立评审记录和最终 diff 路由在提交前复核。
+
+## P1 补丁（2026-11-01 晚）：版本化激活身份与原子替换
+
+独立评审在隔离工作区批准新工件后，数据库出现两条活动 shadow（工件不同，`activation_id` 与 `target_ref` 相同），Console 审阅直接报「requires exactly one RuleCode activation」，生产 gate 按 `target_ref` 分组后跳过整组。根因是身份重复，不是覆盖旧行。证据见同目录 `REPORT` 之外的隔离复现：审批 1 次 → 2 行激活、0 行 `supersede`、控制状态仍 1 条。
+
+### 改动
+
+- `rule-host-writer.ts`：身份由不可变工件派生 `act_code_${ruleId}_${sha256(artifactId)}` / `impl://${ruleId}_${sha256(artifactId)}`，沿用 `PromptWriter` 既有约定；同工件幂等、跨版本必不同。
+- `sqlite-activation-state-store.ts`：`replacePromptActivation` 与新增的 `replaceRuleActivation` 共用同一原子事务实现；插入新激活行时**同时 seed 控制状态**（否则 gate 以 `activation_control_state_invalid` 跳过新版本——与身份问题同源）；停用语句按渠道参数化。
+- `rule-replacement.ts`（新）：`detectRuleReplacementTarget` 只认同一 evaluator 链的 shadow，目标为 live 或候选多于一条即拒绝。
+- `activation-dispatcher.ts`：code_tool_hook 也走替换分支（首次激活 + `already_activated` 恢复），替换失败把原因透传到 `nextAction`，不再吞掉。
+- `ApprovalsConsoleModel.ts`：审批时对 code_tool_hook 同样探测 supersede 目标；`activation_failed` 透传 dispatcher 的 `nextAction`；新增 `rule_replacement_refused` 错误分支与路由映射。
+
+### 真实验收（隔离工作区，生产库零改动）
+
+| 项 | 结果 |
+|---|---|
+| 基线 | 1 条 live shadow（run_3）+ 1 条 pending 审批（真实模型产物 run_4） |
+| 真实 `ApprovalsConsoleModel.approve`（带 CAS 审阅） | `activated`，`supersededActivationId` 指向 run_3 |
+| 激活表 | 2 行：run_3 已停用、run_4 live；**0 个重复 `activation_id`** |
+| 控制状态 | 2 条，各自 `eligible` / version 1 |
+| `supersede` 决策 | 1 条 |
+| Console 审阅 | 按新 `activation_id` 唯一解析，无「exactly one」报错 |
+| 重放同一审批 | `already_decided`，激活行数不变 |
+| 生产 gate（真实 VM 沙箱） | `evaluations` 中 `activationId` = 新 id、`hostKind=codex`；`not_approved` 下 `git commit` 记 **block**（shadow 不阻止实际动作），只读与 `pd activation list --json` **allow**，`approved` **allow**；无 `duplicate_active_activation`、无 `activation_control_state_invalid` |
+| 旧工件 | 生产恢复组合检查对 run_3 仍 `ok:false`（`probe-pd-status`），新工件 `ok:true` |
+| 两连接同时批准 | 一次 `activated` + 一次 `already_decided`；0 重复；`supersede` 决策 1 条 |
+| 替换事务中断 | `rule_replacement_failed` 且审批回 pending；激活表只剩 run_3 且**未停用**；0 `supersede` 决策 |
+
+`unknown` 事实走既有 required-fact 契约：`rule_required_fact_unavailable` 记账并跳过评估，实际动作放行（中性），未把未知当作否决。
+
+### 固化测试
+
+`activation/__tests__/rule-replacement.test.ts`（原子替换、幂等重放、失败回滚、同身份拒绝、探测只认同链且拒绝 live）；`rule-host-writer.test.ts` 改为断言版本化身份并新增「同工件稳定 / 跨版本不同」；barrel 快照同步。
+
+### 仍未执行（NOT RUN）
+
+生产发布与安装、native Codex 现场、真实 Owner 审批、shadow 事件随新 digest 的真实增长、Console 新审批上线与紧急恢复实操。安装后的验收步骤：在目标 workspace 批准修订工件 → 确认 `activations` 中只有一条 `deactivated_at IS NULL` 且 `artifact_id` 为新工件 → 触发一次受管写入，确认 gate `evaluations[].activationId` 为新 id 且判定为 block（shadow 不拦）→ 旧 `activation_id` 无新增证据。

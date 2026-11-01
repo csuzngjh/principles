@@ -186,7 +186,7 @@ export async function handleApprovalsRoute(
           sendNotFound(res, 'Approval ' + approvalId + ' not found');
         } else if (result.error === 'unsupported_channel') {
           sendError(res, 403, 'unsupported_channel', `Cannot approve unsupported channel. Only MVP proven channels (${MVP_CHANNEL_LIST}) can be approved.`);
-        } else if (result.error === 'prompt_replacement_refused') {
+        } else if (result.error === 'prompt_replacement_refused' || result.error === 'rule_replacement_refused') {
           sendError(res, 409, result.error, result.reason, { nextAction: result.nextAction });
         } else if (result.error === 'activation_failed') {
           sendError(

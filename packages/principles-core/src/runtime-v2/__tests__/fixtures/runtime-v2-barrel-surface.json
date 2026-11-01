@@ -1,6 +1,6 @@
 {
   "barrel": "src/runtime-v2/index.ts",
-  "count": 1983,
+  "count": 1984,
   "names": [
     "ADMISSION_CONFIDENCE_THRESHOLD",
     "ADMISSION_POLICY_VERSION",
@@ -1674,6 +1674,7 @@
     "deriveWorkspaceScopeId",
     "detectHardGateFailureFromArtifact",
     "detectPromptReplacementTarget",
+    "detectRuleReplacementTarget",
     "determineNextAction",
     "determineState",
     "diffParams",

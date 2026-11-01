@@ -1647,6 +1647,7 @@ export {
   compileHardenedRuleEvaluator,
   ApprovalCompletionService,
   detectPromptReplacementTarget,
+  detectRuleReplacementTarget,
   buildOwnerRevisionArtifact,
   revisionDigest,
   buildPromotionEvidenceSnapshot,

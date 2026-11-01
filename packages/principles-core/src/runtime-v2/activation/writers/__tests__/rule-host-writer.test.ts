@@ -1,8 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
+import { createHash } from 'node:crypto';
 import type { PIArtifactSnapshot, WriterInput } from '../../activation-types.js';
 import type { RefinerRuleHostGateDeps, RefinerRuleHostGateResult } from '../../../internalization/refiner-rulehost-gate.js';
 import type { RefinerSandboxResult } from '../../../internalization/refiner-sandbox-wrapper.js';
 import type { GoldenTrace } from '../../../golden-trace.js';
+
+const sha256 = (value: string): string => createHash('sha256').update(value, 'utf8').digest('hex');
 
 const SUCCESSFUL_SANDBOX_RESULT: RefinerSandboxResult = {
   success: true,
@@ -270,7 +273,25 @@ describe('RuleHostWriter', () => {
     const writer = new RuleHostWriter({ gateDeps: makeGateDeps() });
     const artifact = makeRuleArtifact();
     const result = await writer.activate(makeWriterInput(), artifact);
-    expect(result.activationId).toBe('act_code_R_001');
+    // SPEC-RULECODE-APPROVED-REVISION-001 §A: identity carries the immutable
+    // artifact version, so a revised artifact can never reuse this handle.
+    expect(result.activationId).toBe(`act_code_R_001_${sha256('art-rule-001')}`);
+    expect(result.targetRef).toBe(`impl://R_001_${sha256('art-rule-001')}`);
+  });
+
+  it('keeps the identity stable for one artifact and distinct across versions', async () => {
+    const { RuleHostWriter } = await importWriter();
+    const writer = new RuleHostWriter({ gateDeps: makeGateDeps() });
+    // Same immutable artifact, repeated approval dispatch: one identity.
+    const first = await writer.activate(makeWriterInput(), makeRuleArtifact());
+    const again = await writer.activate(makeWriterInput(), makeRuleArtifact());
+    expect(again.activationId).toBe(first.activationId);
+    expect(again.targetRef).toBe(first.targetRef);
+    // A bounded revision produces a different artifact of the SAME evaluator
+    // task and rule id; the handles must not collide or be treated as one target.
+    const revised = await writer.activate(makeWriterInput(), makeRuleArtifact({ artifactId: 'art-rule-002' }));
+    expect(revised.activationId).not.toBe(first.activationId);
+    expect(revised.targetRef).not.toBe(first.targetRef);
   });
 
   it('rejects artifact with empty GoldenTrace cases', async () => {
@@ -338,8 +359,8 @@ describe('RuleHostWriter', () => {
     const writer = new RuleHostWriter({ gateDeps: makeGateDeps() });
     const artifact = makeRuleArtifact({ sourceRuleId: 'R_CUSTOM_42' });
     const result = await writer.activate(makeWriterInput(), artifact);
-    expect(result.activationId).toBe('act_code_R_CUSTOM_42');
-    expect(result.targetRef).toBe('impl://R_CUSTOM_42');
+    expect(result.activationId).toBe(`act_code_R_CUSTOM_42_${sha256('art-rule-001')}`);
+    expect(result.targetRef).toBe(`impl://R_CUSTOM_42_${sha256('art-rule-001')}`);
   });
 
   it('falls back to principleId when sourceRuleId is missing', async () => {
@@ -347,7 +368,7 @@ describe('RuleHostWriter', () => {
     const writer = new RuleHostWriter({ gateDeps: makeGateDeps() });
     const artifact = makeRuleArtifact({ sourceRuleId: undefined });
     const result = await writer.activate(makeWriterInput(), artifact);
-    expect(result.activationId).toBe('act_code_P_001');
+    expect(result.activationId).toBe(`act_code_P_001_${sha256('art-rule-001')}`);
   });
 
   it('rejects artifact where goldenTrace is not a valid object', async () => {
