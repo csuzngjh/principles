@@ -1,0 +1,36 @@
+#!/bin/sh
+# PD shared git hook dispatcher (PRI-962). This file is INSTALLED, not edited:
+# change the tracked template at scripts/dev/git-hooks/pre-commit, then re-run
+# `npm run dev:hooks:install`.
+#
+# No worktree-specific path appears here. lefthook and its config are resolved
+# from the CURRENT worktree at run time, so any worktree may reinstall hooks
+# without changing behaviour for the others.
+
+# lefthook's own hooks honour this before touching the environment. Keep the
+# same meaning here: the skip must work even when node or the dispatcher is
+# missing, which is exactly when an operator needs the escape hatch.
+if [ "${LEFTHOOK:-}" = "0" ]; then
+  exit 0
+fi
+
+top=$(git rev-parse --show-toplevel 2>/dev/null)
+if [ -z "$top" ]; then
+  echo "[pd-hooks] not inside a git worktree" >&2
+  exit 1
+fi
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "[pd-hooks] Node.js is required to run git hooks." >&2
+  echo "[pd-hooks] Install Node.js, then run: npm run dev:worktree:bootstrap" >&2
+  exit 1
+fi
+
+dispatcher="$top/scripts/dev/run-lefthook-hook.mjs"
+if [ ! -f "$dispatcher" ]; then
+  echo "[pd-hooks] missing shared hook dispatcher: $dispatcher" >&2
+  echo "[pd-hooks] this worktree predates PRI-962; merge/rebase it or run: npm run dev:worktree:bootstrap" >&2
+  exit 1
+fi
+
+exec node "$dispatcher" pre-commit "$@"
