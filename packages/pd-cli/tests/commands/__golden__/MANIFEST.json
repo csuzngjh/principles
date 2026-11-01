@@ -5,22 +5,22 @@
   "cliEntry": "packages/pd-cli/dist/index.js (built from the PRE-migration source; see PR description)",
   "baseCommit": "797d2e9fdfeabcbbb0c740979787fccfb67e7cea",
   "workspaces": {
+    "ws-empty": {},
     "ws-ok": {
-      ".pd/state.db": "2d25ae60fbd3c031c5598b5f60ee8cbc1205491a6a0a922957743fcccd0ca269",
-      ".state/principle_training_state.json": "03b078b2e0a48cf3e9a80863f730ea0c3229f5be08afe6a70598efcfe9ecc26d",
-      ".state/trajectory.db": "5ce55a774ef50e361ebefba83db6392d03f8c22b146effb009a3c20d627effcd"
-    },
-    "ws-trunc": {
-      ".pd/state.db": "484c38c349b83b97b8c3ecb33e84f8fd8bdfc2e1d096a63017c5fec6d683c29f",
-      ".state/principle_training_state.json": "cb632176f499463011d04046ec732fd975b3e27509d25fbac2980019152cfa3d",
-      ".state/trajectory.db": "3d45f145e014c7be1f347ea718fbf8c05fd12f902583836c7e112c0f01b6ece1"
+      "pd-state.db.fixture": "2d25ae60fbd3c031c5598b5f60ee8cbc1205491a6a0a922957743fcccd0ca269",
+      "state-ledger.json.fixture": "03b078b2e0a48cf3e9a80863f730ea0c3229f5be08afe6a70598efcfe9ecc26d",
+      "state-trajectory.db.fixture": "5ce55a774ef50e361ebefba83db6392d03f8c22b146effb009a3c20d627effcd"
     },
     "ws-partial": {
-      ".pd/state.db": "dfe798bc2d2bdfcf81abd7456f83f1c55db4b264866a31d9acd875064dabb14d",
-      ".state/principle_training_state.json": "5b61dd5ed818ca8992e40892a8f048f587e867e64fbd8577ae801d5b1ff06cc4",
-      ".state/trajectory.db": "49133ebde8265361f0d4a1b327a0dc837a8ec1dec3df82d6327f4aae58c024b4"
+      "pd-state.db.fixture": "dfe798bc2d2bdfcf81abd7456f83f1c55db4b264866a31d9acd875064dabb14d",
+      "state-ledger.json.fixture": "5b61dd5ed818ca8992e40892a8f048f587e867e64fbd8577ae801d5b1ff06cc4",
+      "state-trajectory.db.fixture": "49133ebde8265361f0d4a1b327a0dc837a8ec1dec3df82d6327f4aae58c024b4"
     },
-    "ws-empty": {}
+    "ws-trunc": {
+      "pd-state.db.fixture": "484c38c349b83b97b8c3ecb33e84f8fd8bdfc2e1d096a63017c5fec6d683c29f",
+      "state-ledger.json.fixture": "cb632176f499463011d04046ec732fd975b3e27509d25fbac2980019152cfa3d",
+      "state-trajectory.db.fixture": "3d45f145e014c7be1f347ea718fbf8c05fd12f902583836c7e112c0f01b6ece1"
+    }
   },
   "cases": {
     "ok-full": {

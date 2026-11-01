@@ -23,8 +23,8 @@
 ## 2. 基线与变更
 
 - origin/main 基线：`797d2e9fd`；最终 HEAD：`535737f3d`；PR：#2270。
-- 修改：`commands/pain-recall.ts`（1 行 import）、`pain-recall.test.ts`（拆分留壳）、`io-seam-registry.json`、core `package.json`（+2 exports 键）、`architecture-regression.test.ts`（+2 房例条目）、`.gitignore`/`.gitattributes`（黄金子树定向例外）。
-- 新增：`pain-recall-read-model.ts`（git 识别为 rename 96%）、`pain-recall-snapshot-hooks.ts`、`pain-recall-capability.ts`、四份 core 测试（readonly/service/capability/architecture-guards）、`pain-recall.golden.test.ts`、`tests/helpers/golden-replay.ts`、`__golden__/`（4 工作区 + 8 黄金 + MANIFEST）、changeset。
+- 修改：`commands/pain-recall.ts`（1 行 import）、`pain-recall.test.ts`（拆分留壳）、`io-seam-registry.json`、core `package.json`（+2 exports 键）、`architecture-regression.test.ts`（+2 房例条目）、`.gitattributes`（黄金语料子树 `-text` 字节钉定）。
+- 新增：`pain-recall-read-model.ts`（git 识别为 rename 96%）、`pain-recall-snapshot-hooks.ts`、`pain-recall-capability.ts`、四份 core 测试（readonly/service/capability/architecture-guards）、`pain-recall.golden.test.ts`、`tests/helpers/golden-replay.ts`（`.fixture` 存储→显式映射→临时目录物化→真实子进程重放）、`__golden__/`（4 工作区×扁平 fixture + 8 黄金 + MANIFEST）、changeset。**夹具存储合规**：语料不含任何 `.pd/`、`.state/`、`*.db` 或 ledger 文件名（generated-artifacts 门禁与 gitignore 规则零触碰，`.gitignore` 零修改）。
 - 删除：`pd-cli/src/services/pain-recall.ts`、`pd-cli/tests/commands/pain-recall-readonly.test.ts`（均迁移）。
 
 ## 3. 架构交付
@@ -44,7 +44,7 @@
 | DENY 字段无泄露 | 哨兵植入测试（reason/text/rootCause/correction/sessionId/decidedAt 六哨兵）信封全文零命中（含 error/warnings 路径）；实机验收复测零命中；`statusDetail` 键全文零出现 |
 | 输入校验有效 | unknown 逐字段守卫；拒绝一切未声明属性；非法值（0/负/11/99/非整/非数/超长/空/非对象）全部 `invalid_input` 且 read model 零调用（mock 计数断言） |
 | limit 上限有效 | [1,10] 边界 + 默认 3 + >10 候选夹具（12 条）截断语义诚实（`truncated:true`） |
-| 工作区只读 | 25 用例矩阵 + 黄金重放前后 SHA-256 全等 + 实机验收字节哈希不变 |
+| 工作区只读 | 25 用例矩阵 + 黄金重放对物化工作区前后 SHA-256 全等（每用例 workspaceIntact 断言）+ 实机验收字节哈希不变 |
 | 测试钩子未进公共 API | G-2 源级+运行时双重断言（hooks 不在任一子路径/任何 exports 键）；service/capability 测试内运行时键集合精确快照 |
 | G-1 完整扫描 | 生产/测试域完整互斥（计数总和=全量文件）；六类正负自测全过；`__tests__` 外 `*.test.ts` 盲区关闭且有专项负例 |
 | G-2/G-3 | G-2 导出面（源级+运行时+package.json exports 映射精确断言）；G-3 pd-cli 零 capability 引用/子路径唯一消费点/旧路径零残留 |
@@ -74,7 +74,7 @@
 | lint / typecheck | PASS 0 errors | core+pd-cli 全部涉改文件 eslint；两包 `tsc --noEmit` |
 | 架构回归 | PASS 493/493 | `architecture-regression.test.ts`（IO seam/barrel/DAG/REQUIRED_SOURCE_FILES） |
 | release-locks | PASS | `node scripts/check-release-locks.mjs` exit 0 |
-| PR CI | 运行中 | PR #2270 checks（红则按归因修复后更新本报告） |
+| PR CI | 首轮 Verify Merge Gate 红（generated-artifacts 拒绝 `.pd/state.db` 检入）→ 已改为扁平 `.fixture` 存储+物化重放并本地复跑门禁 PASS / 2102 pd-cli 全量绿，等待重跑 | PR #2270 checks |
 | Mimosa 深扫 | 运行中 | job `scan-job-mvxiqw9a`（结论后补，不预宣称） |
 
 ## 6. 发布治理
