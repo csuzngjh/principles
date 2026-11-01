@@ -267,7 +267,11 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
   const { flags } = computeFeatureFlagsFromConfig(config.effective);
   if (flags['host.workbuddy']?.enabled !== true) {
     // OD-03: default OFF; observable skip, no dispatch, no workspace writes.
-    return neutralWithDiagnostics([diagnostic('skipped', 'host.workbuddy_disabled', 'Set features.host.workbuddy.enabled=true in the WorkBuddy governance workspace config to enable PD for WorkBuddy.')]);
+    // PRI-1063 (review fix): `diagnostic()` collapses every whitespace run,
+    // so the hint is a single-line flow mapping; and since every real config
+    // already has a `features:` block, it must be ADDED to that block rather
+    // than pasted as a second top-level one (that is a duplicate-key error).
+    return neutralWithDiagnostics([diagnostic('skipped', 'host.workbuddy_disabled', 'Enable PD for WorkBuddy in the governance workspace config (~/.workbuddy/pd-workspace/.pd/config.yaml) — in the existing "features:" block set host.workbuddy: {enabled: true} (one flat key, not nested).')]);
   }
   const evidenceEnabled = flags.principle_receipt_ledger?.enabled === true;
 

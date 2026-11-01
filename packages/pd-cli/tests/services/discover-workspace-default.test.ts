@@ -192,6 +192,40 @@ describe('discoverWorkspaceDefault — cwd discovery (PRI-957)', () => {
     stderrSpy.mockRestore();
   });
 
+  it('discovers the WorkBuddy governance workspace as a default location (PRI-1064)', () => {
+    // A --host workbuddy install initializes exactly ~/.workbuddy/pd-workspace
+    // and the hook/worker chain runs against it. Without this candidate every
+    // pd command on a workbuddy-only machine demanded an explicit --workspace.
+    const wbWs = path.join(fakeHome, '.workbuddy', 'pd-workspace');
+    fs.mkdirSync(path.join(wbWs, '.pd'), { recursive: true });
+    fs.writeFileSync(path.join(wbWs, '.pd', 'config.yaml'), configWithDefault(wbWs), 'utf8');
+    const notAWorkspace = path.join(workRoot, 'plain-dir-wb');
+    fs.mkdirSync(notAWorkspace, { recursive: true });
+    stubEnvironment(notAWorkspace);
+
+    const result = discoverWorkspaceDefault();
+
+    expect(result!.kind).toBe('resolved');
+    expect(result!.source).toBe('workbuddy_default');
+    expect(result!.workspaceDefault).toBe(canonicalPath(wbWs));
+  });
+
+  it('keeps the OpenClaw default ahead of WorkBuddy when both exist (stable multi-host order)', () => {
+    const openclawWs = path.join(fakeHome, '.openclaw', 'workspace');
+    fs.mkdirSync(path.join(openclawWs, '.pd'), { recursive: true });
+    fs.writeFileSync(path.join(openclawWs, '.pd', 'config.yaml'), configWithDefault(openclawWs), 'utf8');
+    const wbWs = path.join(fakeHome, '.workbuddy', 'pd-workspace');
+    fs.mkdirSync(path.join(wbWs, '.pd'), { recursive: true });
+    fs.writeFileSync(path.join(wbWs, '.pd', 'config.yaml'), configWithDefault(wbWs), 'utf8');
+    const notAWorkspace = path.join(workRoot, 'plain-dir-both');
+    fs.mkdirSync(notAWorkspace, { recursive: true });
+    stubEnvironment(notAWorkspace);
+
+    const result = discoverWorkspaceDefault();
+
+    expect(result!.source).toBe('openclaw_default');
+  });
+
   it('warns when the directory being stood in points its config somewhere else', () => {
     // ERR-117 / rc-9: the CLI chain follows the declared default while the
     // hook chain follows the nearest directory, so "I ran the query against a
