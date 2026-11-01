@@ -328,6 +328,22 @@ describe('Examiner Console write isolation (v0.9 §1)', () => {
     expect(correctedWrite.statusCode).not.toBe(403);
   });
 
+  it('treats an unreadable ownership marker as read-only without leaking exception text', async () => {
+    const studyId = 'EXM-C-BROKENMARK01';
+    const studyDir = path.join(studiesRoot, studyId);
+    fs.mkdirSync(studyDir, { recursive: true });
+    fs.writeFileSync(path.join(studyDir, 'examiner-manifest.json'), JSON.stringify({ studyId }));
+    fs.writeFileSync(path.join(studyDir, '.console-study-owner.json'), '{ not json');
+
+    const status = await call('GET', `/studies/${studyId}`);
+    expect(status.statusCode).toBe(200);
+    expect(status.body.data.readOnly).toBe(true);
+    expect(status.body.data.access).toContain('unreadable');
+    // The refusal reason is our own vocabulary: no parser message, no paths.
+    expect(status.body.data.access).not.toContain('SyntaxError');
+    expect(status.body.data.access).not.toContain(studiesRoot);
+  });
+
   it('refuses to create studies when the writable root is not separated from the historical research area', async () => {
     process.env.PD_EXAMINER_STUDIES_ROOT = historicalStudiesRoot;
     try {
