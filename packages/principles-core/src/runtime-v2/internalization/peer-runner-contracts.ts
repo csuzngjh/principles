@@ -17,7 +17,7 @@
 import type { TaskRecord } from '../task-status.js';
 import type { PIArtifactRecord } from './pi-artifact.js';
 import { PDRuntimeError } from '../error-categories.js';
-import type { RepairPayload, RunnerDecision, RolloutRevisionPayload, RunnerCompletionIntent, HumanReviewContext, OwnerResolutionRecord, FailedTaskRecoveryAuditRecord, IntentBasisVerificationRecordV1, SourceFaultBackoffRecordV1, SourceCorrectionReceiptV1 } from './pitask-metadata.js';
+import type { RepairPayload, RunnerDecision, RolloutRevisionPayload, RunnerCompletionIntent, HumanReviewContext, OwnerResolutionRecord, FailedTaskRecoveryAuditRecord, IntentBasisVerificationRecordV1, SourceFaultBackoffRecordV1, SourceCorrectionReceiptV1, ApprovedRuleRevisionReceiptV1 } from './pitask-metadata.js';
 import type { OwnerEvidenceSelection } from './evidence-readiness.js';
 
 /** A revision consumes its successful run, never an earlier artifact kept for audit. */
@@ -190,6 +190,7 @@ export interface PITaskRecord extends TaskRecord {
   sourceCorrectionCauseId?: string;
   /** SPEC-PRI-1047: authorization + consumption receipt (see pitask-metadata.ts). */
   sourceCorrectionReceipt?: SourceCorrectionReceiptV1;
+  approvedRuleRevisions?: readonly ApprovedRuleRevisionReceiptV1[];
   /** Rollout needs_revision routing payload; present on rollout_reviewer tasks that routed a revision. */
   rolloutRevisionPayload?: RolloutRevisionPayload;
   /**

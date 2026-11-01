@@ -390,3 +390,40 @@ describe('PRI-439 Phase 3: Golden Trace replay produces non-null normalizedPath'
     expect(input.action.normalizedPath).toBe('custom/path.ts');
   });
 });
+
+
+describe('host-owned recovery controls preserve exact official access', () => {
+  it.each([
+    ['pd activation list --json', 'pd_status'],
+    ['pd activation list --json --workspace "C:/workspace with spaces"', 'pd_status'],
+    ['pd activation deactivate --activation-id act_123', 'rulecode_deactivate'],
+    ['pd activation deactivate --activation-id act_123 -w /workspace', 'rulecode_deactivate'],
+  ])('recognizes %s', async (command, expected) => {
+    const { buildRuleHostAction } = await import('../rule-host-input-builder.js');
+    const { classifyCommandRisk } = await import('../bash-risk.js');
+    expect(classifyCommandRisk(command)).not.toBe('safe');
+    expect(buildRuleHostAction('Bash', { command }, '/workspace', { canonicalKind: 'execute' }).recoveryControl).toBe(expected);
+  });
+  it.each([
+    'pd activation list --json && rm file', 'pd activation list --json > result',
+    'pd activation list --json | cat', 'pd activation list --json\npd activation promote',
+    'pd activation list --json $(touch file)', 'pd activation list --json `touch file`',
+    'env pd activation list --json', 'command pd activation list --json',
+    '/tmp/pd activation list --json', 'echo pd activation list --json',
+    'pd activation promote --activation-id act_123', 'pd activation list --json --unknown',
+    'pd activation list --json --workspace --json',
+    'pd activation list --json --workspace /a --workspace /b',
+    'pd activation deactivate --activation-id "$ID"',
+    'pd activation deactivate --activation-id --json',
+    'pd activation deactivate --activation-id act_123 --reason-code x',
+  ])('does not grant control authority to %s', async (command) => {
+    const { buildRuleHostAction } = await import('../rule-host-input-builder.js');
+    expect(buildRuleHostAction('Bash', { command, recoveryControl: 'pd_status' }, '/workspace', { canonicalKind: 'execute' }).recoveryControl).toBeUndefined();
+  });
+  it('ignores params authority and non-execute tools', async () => {
+    const { buildRuleHostAction } = await import('../rule-host-input-builder.js');
+    const params = { command: 'pd activation list --json', recoveryControl: 'rulecode_deactivate' };
+    expect(buildRuleHostAction('read', params, '/workspace', { canonicalKind: 'read' }).recoveryControl).toBeUndefined();
+    expect(buildRuleHostAction('Bash', params, '/workspace', { canonicalKind: 'execute' }).recoveryControl).toBe('pd_status');
+  });
+});

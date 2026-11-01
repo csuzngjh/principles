@@ -396,7 +396,7 @@ describe('PRI-861 — painReasonSummary echo into the production rule artifact',
     expect(ruleArtifact).toBeDefined();
     if (!ruleArtifact) return;
     const ruleContent = JSON.parse(ruleArtifact.contentJson) as Record<string, unknown>;
-    expect(ruleContent.ruleHostInputContract).toEqual({ version: 1, contextVersion: 2, hostKinds: ['openclaw'] });
+    expect(ruleContent.ruleHostInputContract).toEqual({ version: 2, contextVersion: 2, hostKinds: ['openclaw'] });
   }, 60_000);
 
   it('system stamps required fact kinds from validated Scribe conditions, never the model claim', async () => {
@@ -435,7 +435,7 @@ describe('PRI-861 — painReasonSummary echo into the production rule artifact',
     if (!ruleArtifact) return;
     const ruleContent = JSON.parse(ruleArtifact.contentJson) as Record<string, unknown>;
     expect(ruleContent.ruleHostInputContract).toEqual({
-      version: 1,
+      version: 2,
       contextVersion: 2,
       hostKinds: ['openclaw'],
       requiredFactKinds: ['design_approval'],

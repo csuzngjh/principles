@@ -3,7 +3,7 @@
  * host declaration, same-artifact Owner approval, and (for live) promotion
  * digest binding must all be present before the production gate evaluates it.
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -78,7 +78,8 @@ function baseArtifactRow(contentJson: string): PiArtifactRow {
 
 interface SeedOptions {
   action: 'code_tool_hook_live_activate' | 'code_tool_hook_shadow_activate';
-  contract?: { version: number; contextVersion: number; hostKinds: string[]; requiredFactKinds?: string[] };
+  // Deliberately permit malformed versions to exercise the production reader.
+  contract?: { version: unknown; contextVersion: number; hostKinds: string[]; requiredFactKinds?: string[] };
   approved?: boolean;
   promoted?: boolean;
   implementationCode?: string;
@@ -235,6 +236,69 @@ afterEach(() => {
 });
 
 describe('production RuleHost gate — Codex V2 artifact qualification', () => {
+  it.each([1, 2])('mixed new gate / old core keeps contract%s on its supported boundary', async version => {
+    const workspaceDir = tempWorkspace();
+    const connection = await seedCodexRule(workspaceDir, {
+      action: 'code_tool_hook_live_activate', approved: true, promoted: true,
+      contract: { version, contextVersion: 2, hostKinds: ['codex'] },
+    });
+    vi.doMock('@principles/core/runtime-v2', async importOriginal => {
+      const core = await importOriginal<typeof import('@principles/core/runtime-v2')>();
+      return { ...core, buildRuleHostAction: (...args: Parameters<typeof core.buildRuleHostAction>) => {
+        const legacyAction = { ...core.buildRuleHostAction(...args) };
+        delete legacyAction.recoveryControl;
+        return legacyAction;
+      } };
+    });
+    try {
+      vi.resetModules();
+      const { createProductionRuleHostGate: createMixedGate } = await import('../src/production-rulehost-gate.js');
+      const calls: { ruleCount: number; input: unknown }[] = [];
+      const gate = createMixedGate({ hostKind: 'codex', projectDir: 'C:/pd-mixed-runtime',
+        ruleContextProvider: () => AVAILABLE_CONTEXT, implementationRuntime: trackingRuntime(calls) });
+      const result = await gate(gateEvent(workspaceDir, '/etc/shadow'));
+      if (version === 2) {
+        expect(result.warnings?.join('\n')).toContain('codex_rule_context_v2_unqualified');
+        expect(calls).toEqual([]);
+      } else {
+        expect(result.decision).toBe('deny');
+        expect(calls.some(call => call.ruleCount === 1)).toBe(true);
+      }
+    } finally {
+      vi.doUnmock('@principles/core/runtime-v2');
+      vi.resetModules();
+      connection.close();
+    }
+  });
+
+  it.each(['codex', 'workbuddy'] as const)('input contract2 uses the actual recovery marker on %s and does not exempt promotion', async hostKind => {
+    const workspaceDir = tempWorkspace();
+    const connection = await seedCodexRule(workspaceDir, {
+      action: 'code_tool_hook_live_activate', approved: true, promoted: true,
+      contract: { version: 2, contextVersion: 2, hostKinds: [hostKind] },
+      implementationCode: `function evaluate(input) {
+        return input.action.recoveryControl === 'pd_status'
+          ? {decision:'allow',matched:false,reason:'SYSTEM_RECOVERY_MARKER_PRESENT'}
+          : {decision:'block',matched:true,reason:'NOT_A_RECOVERY_CONTROL'};
+      }`,
+    });
+    try {
+      const gate = createProductionRuleHostGate({
+        hostKind, projectDir: 'C:/pd-input-contract2', toolSemantics: codexToolSemanticsResult.registry,
+        ruleContextProvider: () => AVAILABLE_CONTEXT,
+        implementationRuntime: createNodeRuleImplementationRuntime(),
+      });
+      const recovery = await gate(bashEvent(workspaceDir, { command: 'pd activation list --json' }));
+      expect(recovery.decision).toBe('allow');
+      expect(recovery.metadata?.evaluations).toEqual(expect.arrayContaining([
+        expect.objectContaining({ activationMode: 'live', matched: false, decision: 'allow', hostKind }),
+      ]));
+      const promotion = await gate(bashEvent(workspaceDir, { command: 'pd activation promote --activation-id original' }));
+      expect(promotion.decision).toBe('deny');
+      expect(promotion.reason).toBe('NOT_A_RECOVERY_CONTROL');
+    } finally { connection.close(); }
+  });
+
   it('does not let an approved old shadow inherit a forged Codex contract or replacement code', async () => {
     const workspaceDir = tempWorkspace();
     const connection = await seedCodexRule(workspaceDir, {
@@ -273,6 +337,8 @@ describe('production RuleHost gate — Codex V2 artifact qualification', () => {
 
   it.each([
     { label: 'missing replay contract marker', contract: undefined, approved: true, action: 'code_tool_hook_shadow_activate' as const, promoted: false },
+    { label: 'future input contract is unsupported', contract: { version: 3, contextVersion: 2, hostKinds: ['codex'] }, approved: true, action: 'code_tool_hook_shadow_activate' as const, promoted: false },
+    { label: 'string input version is invalid', contract: { version: '2', contextVersion: 2, hostKinds: ['codex'] }, approved: true, action: 'code_tool_hook_shadow_activate' as const, promoted: false },
     { label: 'contract names another host', contract: { version: 1, contextVersion: 2, hostKinds: ['openclaw'] }, approved: true, action: 'code_tool_hook_shadow_activate' as const, promoted: false },
     { label: 'same-artifact Owner approval is missing', contract: { version: 1, contextVersion: 2, hostKinds: ['codex'] }, approved: false, action: 'code_tool_hook_shadow_activate' as const, promoted: false },
     { label: 'live activation has no promotion digest', contract: { version: 1, contextVersion: 2, hostKinds: ['codex'] }, approved: true, action: 'code_tool_hook_live_activate' as const, promoted: false },

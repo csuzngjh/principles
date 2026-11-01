@@ -19,6 +19,7 @@
  *   6. Empty/null       (null / '' / undefined, /project)
  */
 
+import { identifyRecoveryControl } from './bash-risk.js';
 import type { RuleHostInput } from './rule-host-contracts.js';
 import type { CanonicalKind } from './rule-context-v2.js';
 
@@ -323,9 +324,14 @@ export function buildRuleHostAction(
   const normalizedPath = extractedPath.isPath
     ? normalizePathPure(extractedPath.value, projectDir)
     : extractedPath.value;
+  const command = params.command ?? params.args;
+  const recoveryControl = effectiveOptions.isBashTool && typeof command === 'string'
+    ? identifyRecoveryControl(command)
+    : undefined;
   return {
     toolName,
     normalizedPath,
+    ...(recoveryControl ? { recoveryControl } : {}),
     paramsSummary: { ...params },
     ...(effectiveOptions.canonicalKind !== undefined
       ? { canonicalKind: effectiveOptions.canonicalKind }

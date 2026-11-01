@@ -13,6 +13,10 @@ import {
   collectOpenClawPromotionChecks,
   summarizeRuleCodeShadowEvents,
   buildPromotionEvidenceSnapshot,
+  createRuntimeStateHandle,
+  PrincipleTreeLedgerAdapter,
+  previewApprovedRuleRevision,
+  reviseApprovedRuleOnce,
 } from '@principles/core/runtime-v2';
 import type { ActivationStatusRecord, PIArtifactRecord, PIArtifactSnapshot, PromotionReadinessResult, PromotionEvidenceSnapshot, ActivationControlState, ActivationDecisionRecord, GlobalRuleCodePause, OwnerPromotionActor, OwnerPromotionResult } from '@principles/core/runtime-v2';
 import type { RecoveryCapabilityEvidence, RecoveryReachabilityEvidence } from '@principles/core/runtime-v2';
@@ -28,6 +32,7 @@ import {
   writeGovernanceAction,
   type GovernanceAuditWriter,
 } from 'principles-disciple/governance-audit';
+import type { ApprovedRuleRevisionRequest } from '../../shared/approved-rule-revision-contract.js';
 
 /**
  * Type guard for parsed JSON objects (rc-2-no-as-bypass).
@@ -273,6 +278,26 @@ export class ActivationsConsoleModel {
   constructor(workspaceDir: string, governanceAuditWriter: GovernanceAuditWriter = writeGovernanceAction) {
     this.workspaceDir = workspaceDir;
     this.governanceAuditWriter = governanceAuditWriter;
+  }
+
+  async previewApprovedRuleRevision(activationId: string) {
+    const handle = await createRuntimeStateHandle({ workspaceDir: this.workspaceDir, readonly: true, bootstrapIfMissing: false });
+    try {
+      const ledger = new PrincipleTreeLedgerAdapter({ stateDir: path.join(this.workspaceDir, '.state') });
+      return await previewApprovedRuleRevision({ stateManager: handle.stateManager,
+        ledger: { resolveForCandidate: async id => ledger.resolveCandidatePrincipleIdentity(id, 'rule'),
+          withLockedRuleCandidateIdentity: (id, operation) => ledger.withLockedRuleCandidateIdentity(id, operation) }, activationId });
+    } finally { await handle.close(); }
+  }
+
+  async reviseApprovedRuleOnce(activationId: string, input: ApprovedRuleRevisionRequest, actor: OwnerPromotionActor) {
+    const handle = await createRuntimeStateHandle({ workspaceDir: this.workspaceDir, bootstrapIfMissing: false });
+    try {
+      const ledger = new PrincipleTreeLedgerAdapter({ stateDir: path.join(this.workspaceDir, '.state') });
+      return await reviseApprovedRuleOnce({ stateManager: handle.stateManager,
+        ledger: { resolveForCandidate: async id => ledger.resolveCandidatePrincipleIdentity(id, 'rule'),
+          withLockedRuleCandidateIdentity: (id, operation) => ledger.withLockedRuleCandidateIdentity(id, operation) }, activationId, ...input, actor });
+    } finally { await handle.close(); }
   }
 
   async getActivations(targetHost?: PromptInjectionTargetHost): Promise<ActivationsResponse> {

@@ -85,7 +85,7 @@ describe('ArtificerPromptBuilder', () => {
     // SPEC-RULECODE-QUALITY-001 A2 — bumped v12 → v13: closest-per-call-proxy
     // and params-precondition guidance deleted (self-filled approval source),
     // conditional INTENT EXECUTION CONDITIONS block added.
-    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v15');
+    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v16');
   });
 
   // ── PRI-741: canonicalKind-first contract + host semantic projection ──
@@ -248,7 +248,7 @@ describe('PRI-484 / PRI-780 Artificer prompt context contract', () => {
   });
 
   it('declares the contract version bump history v1 → … → v13 (PRI-634 PR-A, PRI-700, PRI-741, PRI-780, PRI-817, PRI-839, PD v2 Phase 1 r3, PD v2 Phase 1 closeout, review round, SPEC-RULECODE-QUALITY-001 A2)', () => {
-    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v15');
+    expect(ARTIFICER_PROMPT_CONTRACT_VERSION).toBe('artificer-output-v2.prompt.v16');
   });
 
   // PD v2 Phase 1 host acceptance (2026-10-10): validateV2OutputContract rejects
@@ -343,6 +343,9 @@ describe('PRI-484 / PRI-780 Artificer prompt context contract', () => {
       },
     });
     expect(systemPrompt).toContain('input.context.facts.designGate');
+    expect(systemPrompt).toContain('input.action.recoveryControl');
+    expect(systemPrompt).toContain('not a universal exemption for unrelated rule intent');
+    expect(systemPrompt).toContain('Never infer it from paramsSummary.recoveryControl');
     expect(systemPrompt).toContain('approved');
     expect(systemPrompt).toContain('not_approved');
     expect(systemPrompt).toContain('not_required');

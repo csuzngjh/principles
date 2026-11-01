@@ -3851,7 +3851,10 @@ export class EvaluatorRunner extends BasePeerRunner<EvaluatorContext, EvaluatorO
       ...(requiresContextVersion === 2 ? { requiresContextVersion } : {}),
       ...(hasHostInputContract ? {
         ruleHostInputContract: {
-          version: 1,
+          // Input v2 adds host-owned recovery-control semantics. Old Codex /
+          // WorkBuddy gates strictly reject this version rather than running
+          // a new rule with an older action builder that omits the marker.
+          version: 2,
           contextVersion: 2,
           hostKinds: [...hostKinds],
           ...(requiredFactKinds !== undefined ? { requiredFactKinds } : {}),

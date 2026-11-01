@@ -5,6 +5,8 @@ import type { DesignGateAction, DesignGateDecision, DesignGateDeclaration, Desig
 import { clearStoredToken, loadStoredToken, storeToken } from "./utils/token-storage.js";
 import type { RuleBindingReviewView, RuleBindingQueueView } from '../shared/rule-candidate-binding-contract.js';
 import type { RuleCandidateBindingRequest } from '@principles/core/runtime-v2';
+import { validateApprovedRuleRevisionPreview, validateApprovedRuleRevisionResult } from '../shared/approved-rule-revision-contract.js';
+import type { ApprovedRuleRevisionPreview, ApprovedRuleRevisionRequest, ApprovedRuleRevisionResult } from '../shared/approved-rule-revision-contract.js';
 import { validateBindingReview, validateBindingQueue, validateBindingMutation, validateBindingRevise } from './utils/rule-binding-validators.js';
 import {
   validateErrorResponse,
@@ -1178,6 +1180,16 @@ async function disableActivation(activationId: string): Promise<ApiResponse<Disa
 
 async function fetchRuleCodeOwnerReview(activationId: string): Promise<ApiResponse<RuleCodeOwnerReviewData>> {
   return request(`/api/v1/activations/${encodeURIComponent(activationId)}/owner-review`, undefined, validateRuleCodeOwnerReview);
+}
+
+export async function fetchApprovedRuleRevisionPreview(activationId: string): Promise<ApiResponse<ApprovedRuleRevisionPreview>> {
+  return request(`/api/v1/activations/${encodeURIComponent(activationId)}/rule-revision-preview`, undefined, validateApprovedRuleRevisionPreview);
+}
+
+export async function reviseApprovedRuleOnce(activationId: string, input: ApprovedRuleRevisionRequest): Promise<ApiResponse<ApprovedRuleRevisionResult>> {
+  return request(`/api/v1/activations/${encodeURIComponent(activationId)}/revise-rule-once`, {
+    method: 'POST', body: JSON.stringify(input),
+  }, validateApprovedRuleRevisionResult);
 }
 
 // PD_PROMPT_CAPACITY_V1 R-B3: Owner-initiated "modify to injectable version" —

@@ -32,6 +32,8 @@ export interface RuleHostInput {
      * never throw.
      */
     canonicalKind?: CanonicalKind;
+    /** Host-verified official recovery operation; never supplied by tool params. */
+    recoveryControl?: 'pd_status' | 'rulecode_deactivate';
   };
   workspace: {
     isRiskPath: boolean;
