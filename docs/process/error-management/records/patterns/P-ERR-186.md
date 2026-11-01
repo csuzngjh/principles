@@ -2,8 +2,8 @@
 {
   "schemaVersion": 1,
   "recordType": "pattern",
-  "recordId": "P-ERR-185",
-  "displayId": "ERR-185",
+  "recordId": "P-ERR-186",
+  "displayId": "ERR-186",
   "title": "Frozen evidence package binds its producer source; editing lab lib/*.mjs without rerunning the rebinder leaves main CI red",
   "status": "active",
   "category": "Missing Tests & Verification",
