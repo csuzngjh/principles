@@ -23,7 +23,6 @@ import { useTranslation } from "react-i18next";
 import { useNotifications } from "../notifications/useNotifications.js";
 import { clearToken } from "../../api.js";
 import { cn } from "../../../lib/utils.js";
-import { IS_DEV } from "../../utils/runtime-mode.js";
 import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from "../ui/sheet.js";
 
 function ThresholdMark({ className }: { className?: string }) {
@@ -53,12 +52,11 @@ const mainNavItems = [
 ];
 
 /**
- * P2-1: the Examiner is a DEV-only research surface. The navigation entry is
- * derived from the build-time mode, so a production bundle never advertises a
- * capability the server refuses.
+ * The Examiner is a shipped product surface: the offline research panel ships
+ * with the console payload, so the navigation entry is build-mode independent.
  */
-export function visibleMainNavItems(isDev: boolean) {
-  return isDev ? mainNavItems : mainNavItems.filter((item) => item.id !== "examiner");
+export function visibleMainNavItems() {
+  return mainNavItems;
 }
 
 const toolNavItems = [
@@ -110,7 +108,7 @@ function SidebarContent({
       {/* Main nav */}
       <nav className="flex-1 py-2 overflow-y-auto" aria-label={t("components.sidebar.navigation", { defaultValue: "主导航" })}>
         <div className="px-2">
-          {visibleMainNavItems(IS_DEV).map((item) => {
+          {visibleMainNavItems().map((item) => {
             const Icon = item.icon;
             const active = isActive(item.href);
             return (

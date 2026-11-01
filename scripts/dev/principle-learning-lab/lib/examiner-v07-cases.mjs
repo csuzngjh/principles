@@ -15,8 +15,8 @@
 //               requests bounded at 2;
 //   exceptions— when current evidence is pre-attached in the task context,
 //               the fresh-verification requirement is suspended.
-import { makeExaminerV2Case } from './examiner-v2.mjs';
-import { hashOfCanonical } from '../../dev/principle-learning-lab/lib/challenge-freeze.mjs';
+import { makeExaminerV2Case } from './examiner-v2-cases.mjs';
+import { hashOfCanonical } from './challenge-freeze.mjs';
 
 export function makeExaminerV3Case({
   deploy = false,

@@ -8,6 +8,7 @@ import { promisify } from 'util';
 // PRI-907 (RAH-3): shared release-hygiene contract (same artifact classes as
 // check-dist-hygiene.mjs / check-workspace-artifacts.mjs — ERR-149 / EP-14).
 import { skipTestArtifacts, collectTestArtifacts } from '../../../scripts/build/test-artifacts.mjs';
+import { collectLabModuleClosure, LAB_ENTRY_MODULES } from '../../../scripts/build/lab-payload.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -67,6 +68,16 @@ const PD_CLI_SRC = join(ROOT_DIR, 'packages', 'pd-cli');
 const PD_CLI_DEST = join(OUTPUT_ROOT, 'pd-cli');
 const CONSOLE_SRC = join(ROOT_DIR, 'packages', 'pd-console');
 const CONSOLE_DEST = join(OUTPUT_ROOT, 'console');
+// The Examiner research engine is NOT a package: it is the repository's
+// principle-learning-lab. The console loads it dynamically, so the installer
+// payload carries the runtime subset under console/lab (the console resolves
+// `../lab` from its own dist/server/routes before falling back to the
+// repository layout). The subset is the transitive import closure of the
+// modules the console imports by name (scripts/build/lab-payload.mjs) — never
+// the whole lab lib, which also holds files that have no business on a user
+// machine.
+const LAB_SRC = join(ROOT_DIR, 'scripts', 'dev', 'principle-learning-lab');
+const LAB_DEST = join(CONSOLE_DEST, 'lab');
 const CORE_SRC = join(ROOT_DIR, 'packages', 'principles-core');
 const CORE_DEST = join(OUTPUT_ROOT, 'core');
 const HOST_RUNTIME_SRC = join(ROOT_DIR, 'packages', 'host-runtime');
@@ -195,6 +206,10 @@ function findNpmCliJs() {
     join(prefixDir, 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
   ].find(p => existsSync(p));
 }
+
+// The lab closure is fail-loud by owner (scripts/build/lab-payload.mjs): a
+// missing module or an import escaping lib/ throws and stops the bundle
+// instead of shipping a console whose Examiner page answers 503.
 
 // PRI-907 (RAH-3): every recursive payload copy skips compiled test artifacts
 // (same contract as the per-package build gates — ERR-149 / EP-14).
@@ -394,6 +409,22 @@ for (const item of CONSOLE_REQUIRED) {
   const dest = join(CONSOLE_DEST, item);
   log(`  Copying console/${item}...`);
   copyPayloadTree(src, dest);
+}
+
+{
+  const labModules = collectLabModuleClosure(LAB_SRC);
+  log(`  Copying console/lab/lib (${labModules.length} research modules)...`);
+  for (const rel of labModules) {
+    const dest = join(LAB_DEST, rel);
+    mkdirSync(dirname(dest), { recursive: true });
+    copyFileSync(join(LAB_SRC, rel), dest);
+  }
+  for (const rel of LAB_ENTRY_MODULES) {
+    if (!existsSync(join(LAB_DEST, rel))) {
+      console.error(`❌ Lab payload is incomplete after copy: console/lab/${rel}`);
+      process.exit(1);
+    }
+  }
 }
 
 log('\n✅ Plugin + pd-cli + pd-console bundled successfully!');

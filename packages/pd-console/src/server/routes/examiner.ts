@@ -3,10 +3,13 @@
  *
  * Product entry for the Examiner research pipeline on top of the existing
  * principle-learning-lab (single research engine — no parallel Runner/Ledger/
- * Scorer/Report). This round is authorized for the LOCAL DEV environment
- * only: the lab lives in the repository under scripts/dev/, so in an
- * installed runtime the routes answer 503 `examiner_dev_tooling_unavailable`
- * instead of pretending.
+ * Scorer/Report). The lab runtime subset ships WITH the console payload
+ * (`console/lab`), so this surface is available in an installed runtime; a
+ * developer checkout is served from the repository's scripts/dev/ lab.
+ *
+ * Offline only: every study carries SYNTHETIC_OFFLINE gold and is executed by
+ * the deterministic local stub. Real model calls and real host runs stay
+ * behind the Owner-authorization / Stage R gate and are refused here.
  *
  * Surface (all offline, zero real model/host calls):
  *   GET  /api/v1/examiner/overview                  — gates, host capability, study list
@@ -26,14 +29,15 @@
  * the experiment mode as a boolean. No request string crosses into the
  * research pipeline, and no request value constructs a path.
  *
- * Two roots (P1-1): NEW console studies are written under
- * `examiner-console-studies/` and require the server's own ownership marker;
- * the committed `examiner-studies/` research assets are visible but ALWAYS
- * read-only here (POST /run and POST /report answer 403). The frozen
- * `challenge-studies/` area is never a write target. Real-host execution is
- * refused by this route class itself.
+ * Two roots (P1-1): NEW console studies are WORKSPACE DATA — written under
+ * `<workspace>/.pd/examiner/studies` — and require the server's own ownership
+ * marker; the committed `examiner-studies/` research assets that travel with
+ * the lab payload are visible but ALWAYS read-only here (POST /run and
+ * POST /report answer 403). The frozen `challenge-studies/` area is never a
+ * write target. Real-host execution is refused by this route class itself.
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sendSuccess, sendError, sendNotFound } from '../utils/response.js';
@@ -49,29 +53,32 @@ type HostCapability = Record<string, string>;
 
 /* eslint-disable @typescript-eslint/max-params -- node:http handler signature (req, res, workspaceDir, subPath) matches every other route */
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(here, '..', '..', '..', '..', '..');
-const labRoot = path.join(repoRoot, 'scripts', 'dev', 'principle-learning-lab');
+const LAB_ENTRY = path.join('lib', 'examiner-study.mjs');
 const PRINCIPLE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const STUDY_ROUTE_PATTERN = /^\/studies\/([A-Za-z0-9-]+)(\/[^/]*)?$/;
 
 /**
- * P2-1: the Examiner is a DEV-ONLY capability. The gate is SERVER-SIDE and
- * cannot be set by a client — it reads only the running module's own URL and
- * the operator's environment: a source run (tsx/vitest, import.meta.url ends
- * with .ts) or an explicit `PD_EXAMINER_DEV=1`. `NODE_ENV=production` is an
- * UNCONDITIONAL hard gate: not even the DEV override can enable the surface
- * there, so a production build (`dist/server.js`) answers 404 — never 503.
+ * Locate the principle-learning-lab payload. Two layouts are legitimate and
+ * both are resolved from THIS module's own location — never from a request:
+ *
+ *   installed   <console>/lab                     (shipped by the installer)
+ *   repository  <repo>/scripts/dev/principle-learning-lab
+ *
+ * `PD_EXAMINER_LAB_ROOT` overrides both (operators / tests). A candidate only
+ * counts when the lab entry module is actually present, so a half-copied
+ * payload fails closed into the 503 branch instead of half-working.
  */
-export function isExaminerDevRuntime(moduleUrl: string, env: Record<string, string | undefined> = process.env): boolean {
-  if (env.NODE_ENV === 'production') return false;
-  if (env.PD_EXAMINER_DEV === '1') return true;
-  return moduleUrl.endsWith('.ts');
+export function resolveLabRoot(moduleUrl: string, env: Record<string, string | undefined> = process.env): string | null {
+  const here = path.dirname(fileURLToPath(moduleUrl));
+  const candidates = [
+    env.PD_EXAMINER_LAB_ROOT ? path.resolve(env.PD_EXAMINER_LAB_ROOT) : null,
+    path.resolve(here, '..', '..', '..', 'lab'),
+    path.resolve(here, '..', '..', '..', '..', '..', 'scripts', 'dev', 'principle-learning-lab'),
+  ].filter((candidate): candidate is string => candidate !== null);
+  return candidates.find((candidate) => fs.existsSync(path.join(candidate, LAB_ENTRY))) ?? null;
 }
 
-function examinerDevEnabled(): boolean {
-  return isExaminerDevRuntime(import.meta.url);
-}
+const labRoot = resolveLabRoot(import.meta.url);
 
 type DriftError = Error & { details?: unknown };
 
@@ -114,6 +121,10 @@ let labUnavailableReason: string | null = null;
 
 async function loadLab(): Promise<HostCapability | null> {
   if (hostCapability) return hostCapability;
+  if (!labRoot) {
+    labUnavailableReason = 'the principle-learning-lab payload was not found (expected <console>/lab or the repository scripts/dev lab)';
+    return null;
+  }
   try {
     labModules = await loadLabModules(labRoot);
     hostCapability = await loadHostCapability(labRoot);
@@ -157,17 +168,13 @@ export async function handleExaminerRoute(
   workspaceDir: string,
   subPath: string,
 ): Promise<void> {
-  if (!examinerDevEnabled()) {
-    sendError(res, 404, 'examiner_not_enabled', 'The Examiner research surface is a local-dev capability and is not enabled in this runtime');
-    return;
-  }
   const lab = await loadLab();
-  if (!lab || !labModules) {
-    sendError(res, 503, 'examiner_dev_tooling_unavailable', `Examiner dev tooling is not available in this installation (the principle-learning-lab lives in the repository's scripts/dev area): ${labUnavailableReason ?? 'unknown reason'}`);
+  if (!lab || !labModules || !labRoot) {
+    sendError(res, 503, 'examiner_lab_unavailable', `the Examiner research engine could not be loaded from this installation: ${labUnavailableReason ?? 'unknown reason'}`);
     return;
   }
   const method = req.method ?? 'GET';
-  const roots = resolveStudyRoots(labRoot);
+  const roots = resolveStudyRoots(labRoot, path.join(workspaceDir, '.pd', 'examiner'));
   const context: StudyContext = { labRoot, roots };
   const rootProblem = writableRootProblem(roots);
 
@@ -177,17 +184,18 @@ export async function handleExaminerRoute(
     const historical = listStudyNames(roots.historical);
     sendSuccess(res, {
       spec: 'SPEC-PD-EXAMINER-001 v0.9',
-      executionScope: 'offline-stub only — real model calls and real host runs are NOT authorized this round',
+      executionScope: 'offline-stub only — every study uses SYNTHETIC_OFFLINE gold and the deterministic local stub; this panel validates the research contract, never real host behavior',
       gates: {
         gate1_challenge_trust: 'BLOCKED — independent human Gold review has not been performed for any Examiner suite (code tests can never substitute)',
         gate2_behavior_evaluation: 'NOT_READY — requires Gate 1 + real-host authorization',
         gate3_llm_authoring: 'NOT_STARTED',
-        gate4_product_integration: 'NOT_STARTED (local-dev console integration; the production UI/API is disabled)',
+        gate4_product_integration: 'ACTIVE — the offline research panel (create / run / report) ships with the console; real model calls and real host runs stay refused under this gate',
       },
       hostInjectionCapability: lab,
       fullConclusionMinimumLevel: 'CONTEXT_PRESENT',
       writableStudiesRoot: roots.writable,
       historicalStudiesRoot: roots.historical,
+      studiesAreWorkspaceData: true,
       rootProblem,
       studies: [...writable, ...historical.filter((name) => !writable.includes(name))],
       readOnlyStudies: [

@@ -227,14 +227,10 @@ function AuthRoutes() {
                     <Route path="/principles/:id" element={<PrincipleDetailPage />} />
                     <Route path="/activation" element={<ActivationPage />} />
                     <Route path="/debt" element={<DebtPage />} />
-                    {/* P2-1: the Examiner surface is DEV-only. In a production
-                        build the route is not mounted at all — a direct visit
-                        redirects instead of showing an operable page. */}
-                    {IS_DEV ? (
-                      <Route path="/examiner" element={<ExaminerPage />} />
-                    ) : (
-                      <Route path="/examiner" element={<Navigate to="/focus" replace />} />
-                    )}
+                    {/* The Examiner offline research panel is a shipped
+                        surface: mounted in every build. Real-host execution
+                        stays refused by the server, not by hiding the page. */}
+                    <Route path="/examiner" element={<ExaminerPage />} />
                     <Route path="/control-center" element={<ControlCenterPage />} />
                     <Route path="/settings" element={<SettingsPage />} />
                     <Route path="/update" element={<UpdatePage />} />

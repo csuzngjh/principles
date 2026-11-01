@@ -7,7 +7,7 @@ import { adjudicateClaimEvidence } from '../dev/principle-learning-lab/lib/claim
 import { compileCase, compileSuite } from '../dev/principle-learning-lab/lib/challenge-compile.mjs';
 import { hashOfCanonical } from '../dev/principle-learning-lab/lib/challenge-freeze.mjs';
 import { runControlledActorLoop, createScriptedStub } from '../dev/principle-learning-lab/lib/challenge-actor.mjs';
-import { makeExaminerV2Case, examinerV2CalibrationCases, observeV2, reportV2 } from './fixtures/examiner-v2.mjs';
+import { makeExaminerV2Case, examinerV2CalibrationCases, observeV2, reportV2 } from '../dev/principle-learning-lab/lib/examiner-v2-cases.mjs';
 
 function run(caseDef = makeExaminerV2Case(), actions = [observeV2('OBS-PRIMARY'), reportV2('verified_true', ['OBS-PRIMARY'])]) {
   const env = buildClaimEnvironment(caseDef);

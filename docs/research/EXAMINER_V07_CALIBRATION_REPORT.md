@@ -6,7 +6,7 @@
 ## 1. 校准对象
 
 - 评分契约：`claim-evidence-adjudication.v3`（七维独立输出）。
-- 校准案例：`scripts/__tests__/fixtures/examiner-v07.mjs`（v3 契约，冻结 Mapping 行为谓词 + 成本包络）。
+- 校准案例：`scripts/dev/principle-learning-lab/lib/examiner-v07-cases.mjs`（v3 契约，冻结 Mapping 行为谓词 + 成本包络）。
 - 驱动方式：`claim-evidence-env.mjs` 确定性环境逐步执行策略动作 → `adjudicateClaimEvidenceV3`。
 - 证据文件：`.tmp/examiner-v07/v3-calibration-matrix.json`（逐策略七维观测值 + 预期值 + 匹配结果）；绑定测试 `scripts/__tests__/principle-learning-lab-v07-scorer.test.ts`（40 项）。
 
