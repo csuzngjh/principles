@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { makeExaminerV4Case, v4Uncertainty } from './fixtures/examiner-v4.mjs';
-import { observeV2, reportV2 } from './fixtures/examiner-v2.mjs';
+import { observeV2, reportV2 } from '../dev/principle-learning-lab/lib/examiner-v2-cases.mjs';
 import { buildClaimEnvironment, newClaimRunState, stepClaimEnvironment } from '../dev/principle-learning-lab/lib/claim-evidence-env.mjs';
 import { adjudicateClaimEvidence } from '../dev/principle-learning-lab/lib/claim-evidence-scorer.mjs';
 

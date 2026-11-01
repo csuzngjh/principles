@@ -23,7 +23,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { makeExaminerV3Case } from '../../__tests__/fixtures/examiner-v07.mjs';
+import { makeExaminerV3Case } from './lib/examiner-v07-cases.mjs';
 import { hashOfCanonical, freezeMapping } from './lib/challenge-freeze.mjs';
 import { runChallengeStudy } from './lib/challenge-runner.mjs';
 import { createScriptedStub } from './lib/challenge-actor.mjs';
