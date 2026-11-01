@@ -402,6 +402,8 @@ export interface PITaskMetadata {
   sourceCorrectionCauseId?: string;
   /** SPEC-PRI-1047 修复 B: 授权 + 消费回执（见 SourceCorrectionReceiptV1）。 */
   sourceCorrectionReceipt?: SourceCorrectionReceiptV1;
+  /** Immutable consumption history; a new request/binding never replenishes an approved artifact. */
+  approvedRuleRevisions?: readonly ApprovedRuleRevisionReceiptV1[];
   /**
    * Rollout reviewer needs_revision 的修订路由载荷: 记录修订目标 stage、
    * 迭代号与来源,保证 revision budget 可判定 (MVP_CORE_LOOP_CONTRACT INV-07)。
@@ -512,6 +514,42 @@ export type TrustedFactResolutionKind = 'approved' | 'not_approved' | 'not_requi
  * 已消费；失败路径零写入零消费。reopenOutcome 由 orchestrator 的定点
  * CAS 续接分支在原 Artificer 重开完成后回填（undefined = 尚未处理）。
  */
+export interface ApprovedRuleRevisionReceiptV1 {
+  readonly version: 1;
+  readonly activationId: string;
+  readonly artifactId: string;
+  readonly artifactDigest: string;
+  readonly approvalId: string;
+  readonly candidateId: string;
+  readonly principleId: string;
+  readonly bindingRevision: number;
+  readonly bindingDecisionId: string;
+  readonly controlVersion: number;
+  readonly taskRevisionEpoch: number;
+  readonly causeId: string;
+  readonly requestId: string;
+  readonly ownerId: string;
+  readonly credentialId: string;
+  readonly feedback: string;
+  readonly consumedAt: string;
+}
+
+function isApprovedRuleRevisionReceipt(value: unknown): value is ApprovedRuleRevisionReceiptV1 {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  if (Reflect.get(value, 'version') !== 1) return false;
+  for (const key of ['activationId', 'artifactId', 'artifactDigest', 'approvalId', 'candidateId', 'principleId', 'bindingDecisionId', 'causeId', 'requestId', 'ownerId', 'credentialId', 'feedback', 'consumedAt']) {
+    const field: unknown = Reflect.get(value, key);
+    if (typeof field !== 'string' || field.trim() === '') return false;
+  }
+  const digest: unknown = Reflect.get(value, 'artifactDigest');
+  if (typeof digest !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(digest)) return false;
+  for (const key of ['bindingRevision', 'controlVersion', 'taskRevisionEpoch']) {
+    const field: unknown = Reflect.get(value, key);
+    if (typeof field !== 'number' || !Number.isSafeInteger(field) || field < 1) return false;
+  }
+  return true;
+}
+
 export interface SourceCorrectionReceiptV1 {
   readonly version: 1;
   readonly candidateId: string;
@@ -744,6 +782,7 @@ export function serializePITaskMetadata(metadata: PITaskMetadata): string {
       ruleBindingRevisionCauseId: metadata.ruleBindingRevisionCauseId,
       sourceCorrectionCauseId: metadata.sourceCorrectionCauseId,
       sourceCorrectionReceipt: metadata.sourceCorrectionReceipt,
+      approvedRuleRevisions: metadata.approvedRuleRevisions,
       rolloutRevisionPayload: metadata.rolloutRevisionPayload,
       completionIntent: metadata.completionIntent,
       humanReviewContext: metadata.humanReviewContext,
@@ -788,6 +827,7 @@ export function mergePITaskMetadata(base: PITaskRecord, overrides: Partial<PITas
     ruleBindingRevisionCauseId: base.ruleBindingRevisionCauseId,
     sourceCorrectionCauseId: base.sourceCorrectionCauseId,
     sourceCorrectionReceipt: base.sourceCorrectionReceipt,
+    approvedRuleRevisions: base.approvedRuleRevisions,
     rolloutRevisionPayload: base.rolloutRevisionPayload,
     completionIntent: base.completionIntent,
     humanReviewContext: base.humanReviewContext,
@@ -1135,6 +1175,11 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
     ({ sourceCorrectionReceipt } = m);
   }
 
+  let approvedRuleRevisions: readonly ApprovedRuleRevisionReceiptV1[] | undefined;
+  if (Object.hasOwn(m, 'approvedRuleRevisions') && m.approvedRuleRevisions !== undefined) {
+    if (!Array.isArray(m.approvedRuleRevisions) || !m.approvedRuleRevisions.every(isApprovedRuleRevisionReceipt)) return null;
+    ({ approvedRuleRevisions } = m);
+  }
   // rolloutRevisionPayload: optional, full validation (rc-1/rc-4).
   let rolloutRevisionPayload: RolloutRevisionPayload | undefined;
   if (Object.hasOwn(m, 'rolloutRevisionPayload') && m.rolloutRevisionPayload !== undefined) {
@@ -1287,6 +1332,7 @@ export function parsePITaskMetadata(diagnosticJson: string): PITaskMetadata | nu
     ruleBindingRevisionCauseId: typeof m.ruleBindingRevisionCauseId === 'string' ? m.ruleBindingRevisionCauseId : undefined,
     sourceCorrectionCauseId: typeof m.sourceCorrectionCauseId === 'string' ? m.sourceCorrectionCauseId : undefined,
     sourceCorrectionReceipt,
+    approvedRuleRevisions,
     rolloutRevisionPayload,
     completionIntent,
     humanReviewContext,
@@ -1351,6 +1397,7 @@ export function hydratePITaskRecord(task: TaskRecord): PITaskRecord | null {
     ruleBindingRevisionCauseId: meta.ruleBindingRevisionCauseId,
     sourceCorrectionCauseId: meta.sourceCorrectionCauseId,
     sourceCorrectionReceipt: meta.sourceCorrectionReceipt,
+    approvedRuleRevisions: meta.approvedRuleRevisions,
     rolloutRevisionPayload: meta.rolloutRevisionPayload,
     completionIntent: meta.completionIntent,
     humanReviewContext: meta.humanReviewContext,

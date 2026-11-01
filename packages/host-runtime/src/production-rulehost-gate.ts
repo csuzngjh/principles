@@ -11,6 +11,7 @@ import {
   validateRuleContextV2,
   validateRuleHostResult,
   verifyPiArtifactRowDigest,
+  RECOVERY_CONTROL_SURFACES,
   type LoadedImplementation,
   type RuleContextV2,
   type RuleHostEvaluatedEventData,
@@ -38,6 +39,14 @@ const WARNING_LIMIT = 500;
 const MAX_WARNINGS = 16;
 const GATE_DEADLINE_MS = 3_000;
 const ARTIFACT_CONTENT_BYTES = 512 * 1024;
+
+// Check the actual imported builder, not an installed-package version string:
+// a mixed host-runtime/core deployment must not claim input-v2 support.
+const RECOVERY_INPUT_V2_AVAILABLE = RECOVERY_CONTROL_SURFACES
+  .filter(surface => surface.channel === 'cli')
+  .every(surface => typeof surface.cliCommand === 'string'
+    && buildRuleHostAction('recovery-contract-probe', { command: surface.cliCommand }, '/', { canonicalKind: 'execute' })
+      .recoveryControl === surface.capabilityId);
 
 function boundedWarning(reason: string, nextAction: string): string {
   return `${reason}; nextAction=${nextAction}`.replace(/\s+/g, ' ').slice(0, WARNING_LIMIT);
@@ -437,7 +446,9 @@ export function createProductionRuleHostGate(options: ProductionRuleHostGateOpti
                     contentBindingVerified = false;
                   }
                 }
-                if (!isRecord(contract) || contract.version !== 1 || contract.contextVersion !== 2
+                if (!isRecord(contract)
+                  || (contract.version !== 1 && !(contract.version === 2 && RECOVERY_INPUT_V2_AVAILABLE))
+                  || contract.contextVersion !== 2
                   || !Array.isArray(hosts) || !hosts.every((host: unknown) => typeof host === 'string')
                   || !hosts.includes(options.hostKind) || row.owner_approved !== 1
                   || !contentBindingVerified) {

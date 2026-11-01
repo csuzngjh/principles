@@ -430,6 +430,12 @@ describe('PRI-1041 L2 declared verification uses system context, not model cases
     if (kind === 'execute' && helpers && typeof helpers.getBashRisk === 'function' && helpers.getBashRisk() === 'safe') {
       return { decision: 'allow', matched: false, reason: 'host-classified read-only command outside the gate face' };
     }
+    // SPEC-RULECODE-APPROVED-REVISION-001: official recovery controls are not
+    // safely-classified commands; only the host-owned marker keeps them
+    // reachable (system counterfactual official-pd_status enforces it).
+    if (kind === 'execute' && input.action && (input.action.recoveryControl === 'pd_status' || input.action.recoveryControl === 'rulecode_deactivate')) {
+      return { decision: 'allow', matched: false, reason: 'official recovery control stays reachable' };
+    }
     var fact = input.context && input.context.facts.designGate;
     if (fact && fact.requiresApproval && fact.resolution === 'not_approved') return { decision: 'block', matched: true, reason: 'denied' };
     return { decision: 'allow', matched: false, reason: 'not explicitly denied' };

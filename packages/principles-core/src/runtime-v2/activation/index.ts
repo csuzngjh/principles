@@ -115,6 +115,10 @@ export {
   buildOwnerRevisionArtifact,
   revisionDigest,
 } from './prompt-replacement.js';
+
+// SPEC-RULECODE-APPROVED-REVISION-001 §B: RuleCode version replacement detection.
+export { detectRuleReplacementTarget } from './rule-replacement.js';
+export type { RuleReplacementTarget, RuleReplacementDetection } from './rule-replacement.js';
 export type {
   PromptReplacementTarget,
   PromptReplacementDetection,

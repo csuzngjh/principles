@@ -584,7 +584,7 @@ async activate(artifact, context): Promise<ActivationOutcome> {
   });
 
   return {
-    activationId: `act_code_${implId}`,
+    activationId: `act_code_${ruleId}_${sha256(artifactId)}`, // versioned per immutable artifact (SPEC-RULECODE-APPROVED-REVISION-001)
     channelTarget: `ledger://${implId}`,
     activatedAt: new Date().toISOString(),
   };

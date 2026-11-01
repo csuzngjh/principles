@@ -48,7 +48,15 @@ export const SIZE_BUDGETS = {
   },
   'rulehost-evidence.js': {
     production: { baseline: 60244, max: 66268 },
-    development: { baseline: 442791, max: 553489 },
+    // Rebaselined 2026-11-01 (PRI-739), superseding the 2026-09-24 figures in
+    // docs/release/bundle-budget-audit.md §2: the bounded approved-rule
+    // revision, the host recovery-control marker and the official-recovery
+    // evaluation obligation all live in the shared runtime this satellite
+    // bundles. Measured 562,140 (Windows local) / 559,348 (CI Linux) with the
+    // change, 559,348 without this commit's share of it. Follow-up candidate:
+    // the revision operation is Console-only and should not need to travel
+    // here at all — narrowing the barrel would pay this back.
+    development: { baseline: 452000, max: 565000 },
   },
 };
 

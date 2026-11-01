@@ -22,6 +22,7 @@ import {
 import { resolveActivationPrincipleId } from './low-risk-writers.js';
 import { resolveLedgerActivationId, type LedgerIdentityLookupDeps } from './ledger-identity.js';
 import { detectPromptReplacementTarget } from './prompt-replacement.js';
+import { detectRuleReplacementTarget } from './rule-replacement.js';
 
 /**
  * rc-2 type guard: narrow unknown to Record<string, unknown> without `as`.
@@ -233,9 +234,13 @@ export class ActivationDispatcher {
 
     const idempotencyKey = input.idempotencyKey ?? makeIdempotencyKey(input.artifactId, input.channel);
 
-    if (input.channel === 'prompt' && input.supersedeActivationId !== undefined
-      && typeof this.stateReadModel.replacePromptActivation !== 'function') {
-      return { decision: 'refused', channel: input.channel, reason: 'prompt_replacement_not_supported', nextAction: 'use a store supporting atomic prompt replacement' };
+    if (input.supersedeActivationId !== undefined) {
+      const capability = this.replacementCapability(input.channel);
+      if (capability === null) {
+        return input.channel === 'prompt'
+          ? { decision: 'refused', channel: input.channel, reason: 'prompt_replacement_not_supported', nextAction: 'use a store supporting atomic prompt replacement' }
+          : { decision: 'refused', channel: input.channel, reason: 'rule_replacement_not_supported', nextAction: 'use a store supporting atomic activation replacement' };
+      }
     }
     const existingResult = await this.checkIdempotency(idempotencyKey, input.artifactId);
     if (existingResult.decision) {
@@ -253,20 +258,34 @@ export class ActivationDispatcher {
           if (typeof this.stateReadModel.replacePromptActivation !== 'function') return { decision: 'refused', channel: input.channel, reason: 'prompt_replacement_not_supported', nextAction: 'use a store supporting atomic prompt replacement' };
         }
       }
+      // SPEC-RULECODE-APPROVED-REVISION-001 §B: the same recovery for a revised
+      // RuleCode artifact — the new version may already be live from a plain
+      // activation, while its superseded shadow is still armed.
+      if (existingResult.decision.decision === 'already_activated' && input.channel === 'code_tool_hook'
+        && input.supersedeActivationId === undefined) {
+        const detection = await detectRuleReplacementTarget({
+          approvalArtifactId: artifact.artifactId,
+          getArtifactById: (id) => this.artifactReadModel.getArtifactById(id),
+          listRuleActivations: () => this.stateReadModel.listCodeToolHookActivations(),
+        });
+        if (!detection.ok) return { decision: 'refused', channel: input.channel, reason: detection.error, nextAction: detection.nextAction };
+        if (detection.target !== null) {
+          input = { ...input, supersedeActivationId: detection.target.supersededActivationId, supersedeArtifactId: detection.target.supersededArtifactId };
+        }
+      }
       // PD_PROMPT_CAPACITY_V1 R-B3 recovery: the new artifact is already live
       // (e.g. it was activated earlier through a non-replacement path) but the
       // supersede has not completed. Finish it atomically instead of returning
       // a half-replaced state as plain already_activated.
       if (existingResult.decision.decision === 'already_activated'
         && input.supersedeActivationId !== undefined
-        && input.channel === 'prompt'
-        && typeof this.stateReadModel.replacePromptActivation === 'function') {
+        && this.replacementCapability(input.channel) !== null) {
         if (input.rolloutDecision !== 'approved') {
-          return { decision: 'refused', channel: input.channel, reason: 'prompt_replacement_requires_approved_dispatch', nextAction: 'complete replacement through the approved artifact workflow' };
+          return { decision: 'refused', channel: input.channel, reason: `${input.channel === 'prompt' ? 'prompt' : 'rule'}_replacement_requires_approved_dispatch`, nextAction: 'complete replacement through the approved artifact workflow' };
         }
         const refusal = await this.verifyApprovedDispatch(input);
         if (refusal !== null) return refusal;
-        const recoveryArtifactId = await this.readSupersededArtifactId(input.supersedeActivationId, input.supersedeArtifactId);
+        const recoveryArtifactId = await this.readSupersededArtifactId(input.supersedeActivationId, input.supersedeArtifactId, input.channel);
         if (recoveryArtifactId === null) {
           return {
             decision: 'refused',
@@ -276,7 +295,10 @@ export class ActivationDispatcher {
           };
         }
         try {
-          const outcome = await this.stateReadModel.replacePromptActivation({
+          // Call through the store: an unbound method reference loses `this`.
+          const replace = input.channel === 'prompt' ? this.stateReadModel.replacePromptActivation : this.stateReadModel.replaceRuleActivation;
+          if (replace === undefined) throw new Error('replacement_capability_vanished');
+          const outcome = await replace.call(this.stateReadModel, {
             newRecord: {
               activationId: existingResult.decision.activationId,
               idempotencyKey,
@@ -291,7 +313,7 @@ export class ActivationDispatcher {
             supersededArtifactId: recoveryArtifactId,
             decidedBy: await this.readSupersedeApprovalOwner(input),
             decidedAt: input.now,
-            reasonCode: 'prompt_revision_replacement',
+            reasonCode: input.channel === 'prompt' ? 'prompt_revision_replacement' : 'rule_revision_replacement',
             note: `Superseded by ${existingResult.decision.activationId} (artifact ${input.artifactId}).`,
           });
           return { ...existingResult.decision, supersededActivationId: outcome.supersededActivationId };
@@ -467,40 +489,43 @@ export class ActivationDispatcher {
       // decision, and the old version's deactivation (no stop-old-start-new
       // window). Falls through to plain recordActivation when no supersede
       // target was detected or the store lacks the seam.
-      if (input.channel === 'prompt'
-        && input.supersedeActivationId !== undefined
-        && typeof this.stateReadModel.replacePromptActivation === 'function') {
-        const supersededArtifactId = await this.readSupersededArtifactId(input.supersedeActivationId, input.supersedeArtifactId);
+      if (input.supersedeActivationId !== undefined && this.replacementCapability(input.channel) !== null) {
+        const supersededArtifactId = await this.readSupersededArtifactId(input.supersedeActivationId, input.supersedeArtifactId, input.channel);
         if (supersededArtifactId === null) {
           return {
             decision: 'refused',
-            reason: `prompt_replacement_target_unreadable: cannot resolve artifact of activation ${input.supersedeActivationId}`,
+            reason: `${input.channel === 'prompt' ? 'prompt' : 'rule'}_replacement_target_unreadable: cannot resolve artifact of activation ${input.supersedeActivationId}`,
             nextAction: 'check activations/pi_artifacts consistency for the superseded version, then retry',
             channel: input.channel,
           };
         }
         let outcome;
         try {
-          outcome = await this.stateReadModel.replacePromptActivation({
-          newRecord: {
-            activationId: writerResult.activationId,
-            idempotencyKey,
-            artifactId: input.artifactId,
-            channel: input.channel,
-            action: writerResult.action,
-            targetRef: writerResult.targetRef,
-            activatedAt: input.now,
-            deactivatedAt: null,
-          },
-          supersededActivationId: input.supersedeActivationId,
-          supersededArtifactId,
-          decidedBy: await this.readSupersedeApprovalOwner(input),
-          decidedAt: input.now,
-          reasonCode: 'prompt_revision_replacement',
-          note: `Superseded by ${writerResult.activationId} (artifact ${input.artifactId}).`,
+          const replace = input.channel === 'prompt' ? this.stateReadModel.replacePromptActivation : this.stateReadModel.replaceRuleActivation;
+          if (replace === undefined) throw new Error('replacement_capability_vanished');
+          outcome = await replace.call(this.stateReadModel, {
+            newRecord: {
+              activationId: writerResult.activationId,
+              idempotencyKey,
+              artifactId: input.artifactId,
+              channel: input.channel,
+              action: writerResult.action,
+              targetRef: writerResult.targetRef,
+              activatedAt: input.now,
+              deactivatedAt: null,
+            },
+            supersededActivationId: input.supersedeActivationId,
+            supersededArtifactId,
+            decidedBy: await this.readSupersedeApprovalOwner(input),
+            decidedAt: input.now,
+            reasonCode: input.channel === 'prompt' ? 'prompt_revision_replacement' : 'rule_revision_replacement',
+            note: `Superseded by ${writerResult.activationId} (artifact ${input.artifactId}).`,
           });
-        } catch {
-          return { decision: 'refused', channel: input.channel, reason: 'prompt_replacement_failed', nextAction: 'inspect activations and version lineage, then retry completion; the prior activation is preserved' };
+        } catch (replacementError) {
+          // The transaction already rolled back; carry WHY so the Owner/operator
+          // is not left with an opaque "failed" (rc-9: no silent swallow).
+          const cause = replacementError instanceof Error ? replacementError.message.slice(0, 300) : String(replacementError).slice(0, 300);
+          return { decision: 'refused', channel: input.channel, reason: `${input.channel === 'prompt' ? 'prompt' : 'rule'}_replacement_failed`, nextAction: `inspect activations and version lineage, then retry completion; the prior activation is preserved. cause=${cause}` };
         }
         return {
           decision: 'activated',
@@ -600,14 +625,24 @@ export class ActivationDispatcher {
   }
   private async readSupersedeApprovalOwner(input: DispatchInput): Promise<string> {
     const record = input.approvalId === undefined ? null : await this.approvalQueueStore?.getById(input.approvalId);
-    if (!record || record.status !== 'approved' || record.artifactId !== input.artifactId || record.channel !== 'prompt') {
-      throw new Error('prompt replacement requires the matching approved decision');
+    if (!record || record.status !== 'approved' || record.artifactId !== input.artifactId || record.channel !== input.channel) {
+      throw new Error(`${input.channel === 'prompt' ? 'prompt' : 'rule'} replacement requires the matching approved decision`);
     }
     return record.decidedBy ?? 'unknown';
   }
-  private async readSupersededArtifactId(activationId: string, artifactId?: string): Promise<string | null> {
+
+  /** Which atomic-replacement seam (if any) the wired store offers for this channel. */
+  private replacementCapability(channel: DispatchInput['channel']): 'prompt' | 'rule' | null {
+    if (channel === 'prompt') return typeof this.stateReadModel.replacePromptActivation === 'function' ? 'prompt' : null;
+    if (channel === 'code_tool_hook') return typeof this.stateReadModel.replaceRuleActivation === 'function' ? 'rule' : null;
+    return null;
+  }
+
+  private async readSupersededArtifactId(activationId: string, artifactId?: string, channel: DispatchInput['channel'] = 'prompt'): Promise<string | null> {
     try {
-      const activations = await this.stateReadModel.listPromptActivations(true);
+      const activations = channel === 'prompt'
+        ? await this.stateReadModel.listPromptActivations(true)
+        : await this.stateReadModel.listCodeToolHookActivations(true);
       const matchingId = activations.filter((activation) => activation.activationId === activationId);
       const liveMatches = matchingId.filter((activation) => activation.deactivatedAt === null);
       const matches = artifactId !== undefined

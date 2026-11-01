@@ -1647,6 +1647,7 @@ export {
   compileHardenedRuleEvaluator,
   ApprovalCompletionService,
   detectPromptReplacementTarget,
+  detectRuleReplacementTarget,
   buildOwnerRevisionArtifact,
   revisionDigest,
   buildPromotionEvidenceSnapshot,
@@ -2371,6 +2372,8 @@ export { SqliteDesignGateStore, DesignGateStoreError } from './store/design-gate
 export type { CandidatePrincipleIdentityResolution, RuleCandidateBindingRequest, RuleCandidateBindingMutationResult } from './types/rule-candidate-binding.js';
 export { reviseRuleBindingOnce, resolveRuleBindingRevisionTarget } from './internalization/rule-binding-revision.js';
 export { reviseRuleSourceOnce, previewRuleSourceCorrection, SOURCE_CORRECTION_STOP_REASON_CODES } from './internalization/rule-source-correction.js';
+export { previewApprovedRuleRevision, reviseApprovedRuleOnce, MAX_APPROVED_RULE_REVISION_FEEDBACK_LENGTH } from './internalization/approved-rule-revision.js';
+export type { ApprovedRuleRevisionLedger, ApprovedRuleRevisionPreview, ApprovedRuleRevisionResult, ReviseApprovedRuleOnceArgs } from './internalization/approved-rule-revision.js';
 export type { ReviseRuleSourceOnceArgs, ReviseRuleSourceOnceResult, RuleSourceCorrectionPreview } from './internalization/rule-source-correction.js';
 
 export { ApprovalReviewGuardSchema, isApprovalReviewGuard } from './activation/approval-review-guard.js';

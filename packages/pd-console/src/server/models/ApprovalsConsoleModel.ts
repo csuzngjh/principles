@@ -25,6 +25,7 @@ import {
   mapConfidenceToLabel,
   isArtifactRevisionOf,
   detectPromptReplacementTarget,
+  detectRuleReplacementTarget,
   buildOwnerRevisionArtifact,
   PrincipleTreeLedgerAdapter,
   MVP_CHANNELS,
@@ -128,6 +129,7 @@ export type ApproveWithActivationResult =
   | { ok: false; error: 'unsupported_channel'; channel: string }
   | { ok: false; error: 'activation_failed'; reason: string; approvalRolledBack: boolean; nextAction?: string }
   | { ok: false; error: 'prompt_replacement_refused'; reason: string; nextAction: string }
+  | { ok: false; error: 'rule_replacement_refused'; reason: string; nextAction: string }
   /**
    * PD_PROMPT_CAPACITY_V1 R-B2: the prompt-channel write gate refused BEFORE
    * any governance write. The approval stays pending, the artifact stays
@@ -288,6 +290,34 @@ export class ApprovalsConsoleModel {
         try { connection.close(); } catch { /* best-effort */ }
       }
     }
+    // SPEC-RULECODE-APPROVED-REVISION-001 §B: approving a revised RuleCode
+    // artifact replaces its superseded shadow in the SAME transaction as the
+    // new activation (no stop-old-then-start-new window). Detection is
+    // fail-closed on ambiguity and refuses to shadow an already-live rule.
+    if (existing.channel === 'code_tool_hook' && (existing.status === 'pending' || (existing.status === 'approved' && options?.retryActivation === true))) {
+      const { connection } = this.createReadContext();
+      try {
+        const ruleArtifactStore = new SqlitePIArtifactStore(connection);
+        const detection = await detectRuleReplacementTarget({
+          approvalArtifactId: existing.artifactId,
+          getArtifactById: async (id: string) => ruleArtifactStore.getArtifactById(id),
+          listRuleActivations: async () => new SqliteActivationStateStore(connection).listCodeToolHookActivations(),
+        });
+        if (!detection.ok) {
+          // An unreadable NEW artifact is not a replacement decision: the
+          // activation path already reports it with a precise reason and the
+          // established status code. Only replacement-specific refusals stop here.
+          if (!detection.error.startsWith('rule_replacement_artifact_unreadable')) {
+            return { ok: false, error: 'rule_replacement_refused', reason: detection.error, nextAction: detection.nextAction };
+          }
+        } else {
+          supersedeActivationId = detection.target?.supersededActivationId;
+          supersedeArtifactId = detection.target?.supersededArtifactId;
+        }
+      } finally {
+        try { connection.close(); } catch { /* best-effort */ }
+      }
+    }
     const { queue: writeQueue, connection: writeConnection } = this.createWriteContext();
     let approvalResult: ApprovalDecisionResult;
     try {
@@ -325,7 +355,12 @@ export class ApprovalsConsoleModel {
           try { rollbackConnection.close(); } catch { /* best-effort */ }
         }
       } catch { /* best-effort rollback */ }
-      return { ok: false, error: 'activation_failed', reason: detail, approvalRolledBack };
+      // Carry the dispatcher's nextAction (it names the concrete cause for a
+      // replacement failure); without it the Owner only sees a stable code.
+      const activationNextAction = 'nextAction' in activation && typeof activation.nextAction === 'string'
+        ? activation.nextAction : undefined;
+      return { ok: false, error: 'activation_failed', reason: detail, approvalRolledBack,
+        ...(activationNextAction !== undefined ? { nextAction: activationNextAction } : {}) };
     }
 
     // P1 #4 fix: when activation is skipped (feature flag disabled), surface

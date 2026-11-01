@@ -3,6 +3,8 @@ import { ActivationsConsoleModel } from '../models/ActivationsConsoleModel.js';
 import { ApprovalsConsoleModel } from '../models/ApprovalsConsoleModel.js';
 import { sendSuccess, sendError, sendNotFound } from '../utils/response.js';
 import type { OwnerPromotionActor } from '@principles/core/runtime-v2';
+import { validateApprovedRuleRevisionRequest } from '../../shared/approved-rule-revision-contract.js';
+import type { ApprovedRuleRevisionRequest } from '../../shared/approved-rule-revision-contract.js';
 
 const MAX_BODY_SIZE = 1024 * 1024; // 1 MB
 
@@ -106,6 +108,32 @@ export async function handleActivationsRoute(
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       sendError(res, 500, 'activations_error', message);
+    }
+    return;
+  }
+
+  const revisionMatch = /^\/([^/]+)\/(rule-revision-preview|revise-rule-once)$/.exec(subPath);
+  if (revisionMatch && ((req.method === 'GET' && revisionMatch[2] === 'rule-revision-preview')
+    || (req.method === 'POST' && revisionMatch[2] === 'revise-rule-once'))) {
+    const actor = authority?.ownerActor;
+    if (!actor) { sendError(res, 403, 'owner_authentication_required', 'This revision requires the configured Owner identity.', { nextAction: 'Authenticate as the configured Owner in the Console.' }); return; }
+    const [, rawId] = revisionMatch;
+    if (!rawId) { sendError(res, 400, 'invalid_id', 'Activation ID is missing'); return; }
+    let activationId: string;
+    try { activationId = decodeURIComponent(rawId); }
+    catch { sendError(res, 400, 'invalid_id', 'Activation ID contains invalid URI encoding'); return; }
+    let input: ApprovedRuleRevisionRequest | null | undefined;
+    if (req.method === 'POST') {
+      try { input = validateApprovedRuleRevisionRequest(await readJson(req)); }
+      catch (err: unknown) { const message = err instanceof Error ? err.message : String(err); sendError(res, message === 'payload_too_large' ? 413 : 400, 'validation_error', message); return; }
+      if (!input) { sendError(res, 400, 'validation_error', 'Revision requires the reviewed artifact, digest, binding/control/task versions, requestId and 1–4000 characters of directed feedback.', { nextAction: 'Refresh the revision preview and describe the required correction.' }); return; }
+    }
+    try {
+      const model = getModel(workspaceDir);
+      sendSuccess(res, input ? await model.reviseApprovedRuleOnce(activationId, input, actor) : await model.previewApprovedRuleRevision(activationId));
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      sendError(res, 500, 'rule_revision_unavailable', message, { nextAction: 'Refresh the revision preview; keep the current rule in shadow.' });
     }
     return;
   }

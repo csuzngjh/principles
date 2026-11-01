@@ -35,6 +35,9 @@ interface ParityFixture {
 }
 
 const FIXTURES: readonly ParityFixture[] = [
+  { label: 'official status', toolName: 'bash', params: { command: 'pd activation list --json' } },
+  { label: 'official deactivate', toolName: 'bash', params: { command: 'pd activation deactivate --activation-id act_123' } },
+  { label: 'forged marker', toolName: 'bash', params: { command: 'echo spoof', recoveryControl: 'pd_status' } },
   { label: 'write tool with absolute path', toolName: 'write_file', params: { file_path: '/workspace/project/src/a.ts', content: 'x' } },
   { label: 'write tool with relative path', toolName: 'edit', params: { path: 'src/a.ts', old_string: 'a', new_string: 'b' } },
   { label: 'bash tool, mutation target', toolName: 'bash', params: { command: 'rm -rf /workspace/project/build' } },
@@ -65,6 +68,7 @@ describe('replay/production input parity (SPEC §12 Phase 2)', () => {
         { projectDir: PROJECT_DIR, toolSemantics },
       );
 
+      expect(replayInput.action.recoveryControl).toBe(productionAction.recoveryControl);
       expect(replayInput.action.toolName).toBe(productionAction.toolName);
       expect(replayInput.action.canonicalKind).toBe(productionAction.canonicalKind);
       expect(replayInput.action.normalizedPath).toBe(productionAction.normalizedPath);

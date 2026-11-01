@@ -33,6 +33,8 @@ function restoreLiteralShellChars(token: string): string {
   return token.replaceAll(LITERAL_OPERATOR_MARKER, '');
 }
 
+import { RECOVERY_CONTROL_SURFACES } from '../activation/recovery-control-surfaces.js';
+
 // ── 结构层 tokenizer ─────────────────────────────────────────────────────────
 
 /** 引号感知的 tokenizer；无法解析（引号未闭合等）返回 null。 */
@@ -125,6 +127,41 @@ function tokenize(input: string): string[] | null {
   if (state !== 'plain') return null;
   if (hasCurrent || current) tokens.push(current);
   return tokens;
+}
+
+/** Host-owned recognition of the deliberately narrow registered CLI recovery surface.
+ * This is not a read-only classification or a general PD command exemption.
+ */
+export function identifyRecoveryControl(command: string): 'pd_status' | 'rulecode_deactivate' | undefined {
+  // Reject shell structure and expansion even inside quotes. A narrower literal
+  // subset is preferable to granting control authority to ambiguous shell input.
+  if (/[\\$`|;&<>()*?~{}]/.test(command)
+    || [...command].some((character) => character.charCodeAt(0) < 32)) return undefined;
+  const tokens = tokenize(command);
+  if (!tokens) return undefined;
+  const args = [...tokens];
+  const workspaceIndex = args.findIndex((arg) => arg === '-w' || arg === '--workspace');
+  if (workspaceIndex !== -1) {
+    const workspace = args[workspaceIndex + 1];
+    if (workspaceIndex !== args.length - 2 || !workspace || workspace.startsWith('-')) return undefined;
+    args.splice(workspaceIndex, 2);
+  }
+  for (const surface of RECOVERY_CONTROL_SURFACES) {
+    if (surface.channel !== 'cli' || !surface.cliCommand) continue;
+    if (surface.capabilityId !== 'pd_status' && surface.capabilityId !== 'rulecode_deactivate') continue;
+    const registered = tokenize(surface.cliCommand);
+    if (!registered || registered.length !== args.length) continue;
+    const matches = registered.every((token, index) => {
+      // The registry's recovery-probe value occupies the activation-id slot;
+      // only a literal, non-option ID may replace it.
+      if (surface.capabilityId === 'rulecode_deactivate' && registered[index - 1] === '--activation-id') {
+        return /^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/.test(args[index] ?? '');
+      }
+      return token === args[index];
+    });
+    if (matches) return surface.capabilityId;
+  }
+  return undefined;
 }
 
 /** 段（一条简单命令）的结构化视图。 */

@@ -14,6 +14,8 @@ import {
   readLedgerFileState,
   updatePrinciple,
   validateReuseEvidenceEntry,
+  getLedgerFilePathPublic,
+  withLock,
 } from '../../principle-tree-ledger.js';
 import { isCanonicalBindingPrincipleId } from '../principle-tree/rule-candidate-binding.js';
 import type { CandidatePrincipleIdentityResolution, RuleCandidateBindingSources, RuleCandidateBindingReview, RuleCandidateBindingMutation, RuleCandidateBindingMutationResult } from '../types/rule-candidate-binding.js';
@@ -72,6 +74,11 @@ export class PrincipleTreeLedgerAdapter implements LedgerAdapter {
   constructor(opts: { stateDir: string; reviewSources?: RuleCandidateBindingSources }) {
     this.#stateDir = opts.stateDir;
     this.#reviewSources = opts.reviewSources;
+  }
+
+  /** Keep the binding authority stable through a synchronous state-store CAS. */
+  withLockedRuleCandidateIdentity<T>(candidateId: string, operation: (identity: CandidatePrincipleIdentityResolution) => T): T {
+    return withLock(getLedgerFilePathPublic(this.#stateDir), () => operation(this.resolveCandidatePrincipleIdentity(candidateId, 'rule')));
   }
 
   /** One file snapshot; never combine availability and identity from separate reads. */

@@ -116,13 +116,20 @@ export interface ActivationStateReadModel {
    * Absent on stores without the capability (memory fakes in tests).
    */
   replacePromptActivation?(input: PromptReplacementCommit): Promise<PromptReplacementOutcome>;
+  /**
+   * SPEC-RULECODE-APPROVED-REVISION-001 §B (optional seam — real variation:
+   * RuleCode version replacement): commit the revised artifact's activation,
+   * deactivate the superseded shadow, and append the immutable supersede
+   * decision in ONE transaction. Absent on stores without the capability.
+   */
+  replaceRuleActivation?(input: ActivationReplacementCommit): Promise<ActivationReplacementOutcome>;
 }
 
 /** R-B3: one-shot atomic replacement commit (see replacePromptActivation). */
 export interface PromptReplacementCommit {
-  /** The new activation row exactly as the PromptWriter produced it. */
+  /** The new activation row exactly as the writer produced it. */
   newRecord: ActivationStatusRecord;
-  /** Live prompt activation of the PRIOR artifact version being replaced. */
+  /** Live activation of the PRIOR artifact version being replaced. */
   supersededActivationId: string;
   supersededArtifactId: string;
   /** Owner identity recorded on the immutable supersede decision row. */
@@ -131,6 +138,10 @@ export interface PromptReplacementCommit {
   reasonCode: string;
   note: string;
 }
+
+/** Same commit shape for the RuleCode channel; the store validates the channel. */
+export type ActivationReplacementCommit = PromptReplacementCommit;
+export type ActivationReplacementOutcome = PromptReplacementOutcome;
 
 export type PromptReplacementOutcome =
   | { status: 'replaced'; newActivationId: string; supersededActivationId: string; supersedeDecisionId: string }

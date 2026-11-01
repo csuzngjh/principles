@@ -1317,6 +1317,14 @@ describe('PRI-1041 declared fact verification through the real Runner and sandbo
     if (kind === 'execute' && helpers && typeof helpers.getBashRisk === 'function' && helpers.getBashRisk() === 'safe') {
       return { decision: 'allow', matched: false, reason: 'host-classified read-only command outside the gate face' };
     }
+    // SPEC-RULECODE-APPROVED-REVISION-001: official recovery controls are not
+    // read-only by classification (risk is unknown), so they are only
+    // reachable through the host-owned action.recoveryControl marker, which the
+    // system counterfactual official-pd_status / official-rulecode_deactivate
+    // enforces.
+    if (kind === 'execute' && input.action && (input.action.recoveryControl === 'pd_status' || input.action.recoveryControl === 'rulecode_deactivate')) {
+      return { decision: 'allow', matched: false, reason: 'official recovery control stays reachable' };
+    }
     var fact = input.context && input.context.facts && input.context.facts.designGate;
     if (fact && fact.requiresApproval && fact.resolution === 'not_approved') return { decision: 'block', matched: true, reason: 'scoped explicit rejection' };
     return { decision: 'allow', matched: false, reason: 'no explicit scoped rejection' };

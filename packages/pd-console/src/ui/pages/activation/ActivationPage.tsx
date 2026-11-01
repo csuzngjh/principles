@@ -13,6 +13,8 @@ import {
   fetchLifecycleMetrics,
   fetchReceiptCounts,
   fetchRuleCodeOwnerReview,
+  fetchApprovedRuleRevisionPreview,
+  reviseApprovedRuleOnce,
   proposePromptRevision,
   ruleCodeDecision,
   pauseAllRuleCode,
@@ -35,6 +37,7 @@ import {
 } from "./ActivationValidators.js";
 import { enumLabel } from "../../utils/enum-labels.js";
 import { formatDate } from "../../utils/format-date.js";
+import type { ApprovedRuleRevisionPreview, ApprovedRuleRevisionRequest } from '../../../shared/approved-rule-revision-contract.js';
 
 // SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001: per-host fit is a TIER verdict, not
 // a bare boolean — "depends on the model" must render as its own state,
@@ -78,6 +81,70 @@ function CapabilityBoundaryDeclaration() {
       {t("pages.activation.boundaryText")}
     </div>
   );
+}
+
+function ApprovedRuleRevisionPanel({ activationId, onChanged }: { activationId: string; onChanged: () => void }) {
+  const { t } = useTranslation();
+  const [preview, setPreview] = useState<ApprovedRuleRevisionPreview | null>(null);
+  const [feedback, setFeedback] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  // A concurrent/earlier revision already holds this artifact's budget. That is
+  // not this request succeeding, and the feedback just typed was NOT recorded.
+  const [alreadyStarted, setAlreadyStarted] = useState(false);
+  // Preserve the exact request across a transport retry; a new ID is not a new
+  // budget (the server's budget is anchored on the artifact digest + receipt,
+  // so editing the feedback and resending cannot spend a second round).
+  const [pendingRequestId, setPendingRequestId] = useState<string | null>(null);
+  const load = useCallback(async () => {
+    const result = await fetchApprovedRuleRevisionPreview(activationId);
+    if (result.success) { setPreview(result.data); setError(null); } else setError(result.error);
+  }, [activationId]);
+  useEffect(() => { void load(); }, [load]);
+  const revise = async () => {
+    if (preview?.status !== 'ready') return;
+    const input: ApprovedRuleRevisionRequest = {
+      expectedArtifactId: preview.expectedArtifactId, expectedArtifactDigest: preview.expectedArtifactDigest,
+      expectedBindingRevision: preview.expectedBindingRevision, expectedControlVersion: preview.expectedControlVersion,
+      expectedTaskRevisionEpoch: preview.expectedTaskRevisionEpoch,
+      requestId: pendingRequestId ?? crypto.randomUUID(), feedback: feedback.trim(),
+    };
+    setPendingRequestId(input.requestId); setBusy(true); setError(null);
+    const result = await reviseApprovedRuleOnce(activationId, input);
+    setBusy(false);
+    if (!result.success) { setError(result.error); return; }
+    if (result.data.status === 'refused') {
+      setPendingRequestId(null);
+      // Take the server verdict as the current view: if the refresh below also
+      // fails, the stale `ready` form must not stay submittable.
+      setPreview(result.data);
+      setError(result.data.nextAction);
+      await load();
+      return;
+    }
+    if (result.data.status === 'already_started') {
+      toast.info(t('pages.activation.ruleRevisionAlreadyExists'));
+      setAlreadyStarted(true);
+      return;
+    }
+    // Announce before onChanged(): the parent reload unmounts this panel, and a
+    // panel-local confirmation would disappear with it.
+    toast.success(t('pages.activation.ruleRevisionStarted'));
+    setSubmitted(true); onChanged();
+  };
+  return <div className="mt-3 rounded border border-line p-3 text-[12px] text-ink-3" data-testid={`approved-rule-revision-${activationId}`}>
+    <div className="font-medium text-ink">{t('pages.activation.ruleRevisionTitle')}</div>
+    <p className="mt-1">{t('pages.activation.ruleRevisionBoundary')}</p>
+    {error && <p role="alert" className="mt-2 text-danger">{error}</p>}
+    {alreadyStarted ? <div className="mt-2"><p role="status">{t('pages.activation.ruleRevisionAlreadyExists')}</p><Link to="/focus" className="mt-1 inline-block text-gov underline">{t('pages.activation.ruleRevisionReviewQueue')}</Link></div>
+      : submitted ? <div className="mt-2"><p role="status" className="text-green">{t('pages.activation.ruleRevisionStarted')}</p><Link to="/focus" className="mt-1 inline-block text-gov underline">{t('pages.activation.ruleRevisionReviewQueue')}</Link></div>
+      : preview?.status === 'ready' ? <>
+        <label className="mt-2 block">{t('pages.activation.ruleRevisionFeedback')}<textarea value={feedback} maxLength={4000} disabled={busy} onChange={event => { setFeedback(event.target.value); setPendingRequestId(null); }} className="mt-1 min-h-20 w-full rounded border border-line bg-panel px-3 py-2 text-ink" /></label>
+        <Button disabled={busy || feedback.trim().length === 0} onClick={() => void revise()}>{t('pages.activation.ruleRevisionOnce')}</Button>
+      </> : preview?.status === 'refused' ? <p className="mt-2">{preview.nextAction}</p>
+        : <p className="mt-2">{t('pages.activation.ownerDecisionLoading')}</p>}
+  </div>;
 }
 
 function RuleCodeOwnerPanel({ record, onChanged }: { record: ActivationRecord; onChanged: () => void }) {
@@ -130,6 +197,7 @@ function RuleCodeOwnerPanel({ record, onChanged }: { record: ActivationRecord; o
     {review.liveMetrics.representativeSamples.length > 0 && <details className="mt-2 text-[12px]"><summary className="cursor-pointer text-gov">{t('pages.activation.representativeSamples')}</summary>{review.liveMetrics.representativeSamples.map((sample, index) => <div key={`${sample.toolName}-${index}`} className="font-mono text-ink-3">{sample.toolName} · {sample.decision} · {sample.pathCategory}</div>)}</details>}
     {review.decisions.length > 0 && <details className="mt-2 text-[12px]"><summary className="cursor-pointer text-gov">{t('pages.activation.ownerDecisionHistory')}</summary>{review.decisions.map(decision => <div key={decision.decisionId} className="mt-1 border-l border-line pl-2 text-ink-3"><span className="font-mono">{decision.decidedAt}</span> · {decision.decision} · {decision.principalKind}:{decision.actorId} · {decision.authenticationMethod} · {decision.reasonCode}{decision.note ? ` · ${decision.note}` : ''}</div>)}</details>}
     <div className="mt-2 text-[11px] text-ink-4">{t('pages.activation.circuitConditions')}</div>
+    {record.action === 'code_tool_hook_shadow_activate' && <ApprovedRuleRevisionPanel activationId={record.activationId} onChanged={onChanged} />}
     {review.readiness.status === 'evidence_insufficient' && <label className="mt-3 block text-[12px] text-ink-3">{t('pages.activation.overrideReason')}<select value={overrideReason} onChange={event => setOverrideReason(event.target.value)} className="mt-1 w-full rounded border border-line bg-panel px-3 py-2 text-ink"><option value="rare_behavior">{t('pages.activation.overrideRareBehavior')}</option><option value="controlled_rollout">{t('pages.activation.overrideControlledRollout')}</option><option value="owner_accepts_limited_evidence">{t('pages.activation.overrideOwnerAccepts')}</option></select></label>}
     <input value={note} onChange={event => setNote(event.target.value)} placeholder={t('pages.activation.ownerReviewNote')} className="mt-3 w-full rounded border border-line bg-panel px-3 py-2 text-[12px] text-ink" />
     <div className="mt-3 flex flex-wrap gap-2">

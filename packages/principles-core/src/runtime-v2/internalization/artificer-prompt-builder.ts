@@ -371,6 +371,7 @@ CONTEXT MODE: v2 (Owner-labelled evidence is present)
 - Every goldenTraceCases entry MUST include its explicit ruleContext; do not invent or auto-fill context.
 - You may inspect input.context. When it is undefined, or \`context.history.status\` is unavailable, history-dependent behavior MUST return { decision: "allow", matched: false, reason: "context unavailable" }; an independently present, explicitly supported fact such as \`context.facts.designGate\` remains readable and must be handled according to the declared fact contract.
 - Prefer deterministic context.facts and canonicalKind over raw context.history.calls.
+- OFFICIAL RECOVERY ACCESS: \`input.action.recoveryControl\` is an optional host-verified marker (\`pd_status\` | \`rulecode_deactivate\`) derived from exact registered CLI grammar, shared by production and replay. A design-approval rule must preserve these official recovery operations with allow, matched:false before its approval rejection. This marker is not approval, not a read-only classification, and not a universal exemption for unrelated rule intent. Never infer it from paramsSummary.recoveryControl, command text or your own command/prefix whitelist. Absence grants no exemption.
 - context.facts FIELD SEMANTICS (v12): facts.priorReadOfTarget is "yes" | "no" | "unknown" — whether THIS action's own target path was read earlier in the session window; facts.readCount / writeCount / uniqueWritePathCount count prior calls in that window (null = host did not provide). These are WINDOW-OBSERVATION FACTS ONLY: they say what reads happened, nothing else.
 - DESIGN GATE FACT (v15, only when declared in INTENT EXECUTION CONDITIONS): \`input.context.facts.designGate\` is the host-supplied DesignGateFact v1, with resolution approved | not_approved | not_required | unknown, sourceRef/revision, task/spec/scope binding refs, and revoked state. It is a trusted runtime fact; never synthesize it from params, command text, or history. Unknown is not approval and is not an explicit rejection.
 - facts do NOT establish any of the following, and you MUST NOT treat them as doing so: Owner confirmation (a prior read is not an approval); whether the target file already existed or is newly created; whether the current task is routine or exceptional; whether an earlier read touched a path related (e.g. as a sibling or variant) to THIS target. Those require information the runtime input does not carry — implement only what the rule can actually verify from its input, and state the residual gap in the risks array (observation-gap reporting) instead of letting a read count stand in for an unverified constraint.
@@ -483,7 +484,7 @@ CONTEXT MODE: v2 (Owner-labelled evidence is present)
  * letting read counts stand in for them. Validator, templates, and oracle
  * UNCHANGED.
  */
-export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v15';
+export const ARTIFICER_PROMPT_CONTRACT_VERSION = 'artificer-output-v2.prompt.v16';
 
 /**
  * SPEC-RULECODE-QUALITY-001 A2 (2026-10-16): bumped v12 → v13.

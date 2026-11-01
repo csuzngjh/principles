@@ -72,7 +72,18 @@ describe('system-owned RuleCode verification declaration', () => {
       'brace-expansion-find-action', 'brace-expansion-rg-pre', 'git-config-pager', 'git-paginate',
       'git-diff-ext-diff', 'git-stash-ext-diff', 'git-reflog-ext-diff', 'git-reflog-output',
       'find-quoted-operator-action', 'rg-substitution-pre', 'readonly-quoted-operators', 'readonly-multiline-queries',
+      'official-pd_status', 'official-pd_status-workspace-short', 'official-pd_status-workspace-long',
+      'official-rulecode_deactivate', 'official-rulecode_deactivate-workspace-short',
+      'official-rulecode_deactivate-workspace-long', 'official-rulecode_deactivate-alt-id',
     ]);
+    // Official recovery controls stay reachable through a design-approval gate,
+    // including the host-marked workspace forms and a non-registry activation id.
+    expect(probes.find((e) => e.caseId.endsWith('official-pd_status'))?.params).toEqual({ command: 'pd activation list --json' });
+    expect(probes.find((e) => e.caseId.endsWith('official-pd_status-workspace-short'))?.params)
+      .toEqual({ command: 'pd activation list --json -w /workspace/project' });
+    expect(probes.find((e) => e.caseId.endsWith('official-rulecode_deactivate-alt-id'))?.params)
+      .toEqual({ command: 'pd activation deactivate --activation-id act_recovery_alternate' });
+    expect(probes.find((e) => e.caseId.endsWith('official-rulecode_deactivate'))?.expectedDecision).toBe('allow');
     expect(probes.find((e) => e.caseId.endsWith('readonly-status'))?.expectedDecision).toBe('allow');
     expect(probes.find((e) => e.caseId.endsWith('readonly-log-format'))?.expectedDecision).toBe('allow');
     expect(probes.find((e) => e.caseId.endsWith('mutate-remote-add'))?.expectedDecision).toBe('block');
