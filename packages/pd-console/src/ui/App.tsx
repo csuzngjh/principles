@@ -20,6 +20,7 @@ import { CorePrinciplesPage } from "./pages/principles/CorePrinciplesPage.js";
 import { PrincipleDetailPage } from "./pages/principles/PrincipleDetailPage.js";
 import { ActivationPage } from "./pages/activation/ActivationPage.js";
 import { DebtPage } from "./pages/debt/DebtPage.js";
+import { ExaminerPage } from "./pages/examiner/ExaminerPage.js";
 import { ControlCenterPage } from "./pages/control-center/ControlCenterPage.js";
 import { SettingsPage } from "./pages/settings/SettingsPage.js";
 import { UpdatePage } from "./pages/settings/UpdatePage.js";
@@ -30,8 +31,10 @@ import { DesignSystemPage } from "./pages/design-system/DesignSystemPage.js";
 import { WelcomePage } from "./pages/welcome/WelcomePage.js";
 import { getOnboardingState } from "./utils/onboarding-state.js";
 
-// Vite replaces import.meta.env.DEV with a boolean literal at build time.
-// The cast avoids TS2339 without needing a generated .d.ts file.
+// Vite replaces import.meta.env.DEV with a boolean literal at build time, so a
+// production bundle resolves this to false and dead-code elimination drops the
+// DEV-only routes from the shipped UI. `utils/runtime-mode.ts` exports the same
+// value for components rendered outside this module; both read the same define.
 const IS_DEV = (import.meta as unknown as { env: { DEV: boolean } }).env.DEV;
 
 /**
@@ -224,6 +227,14 @@ function AuthRoutes() {
                     <Route path="/principles/:id" element={<PrincipleDetailPage />} />
                     <Route path="/activation" element={<ActivationPage />} />
                     <Route path="/debt" element={<DebtPage />} />
+                    {/* P2-1: the Examiner surface is DEV-only. In a production
+                        build the route is not mounted at all — a direct visit
+                        redirects instead of showing an operable page. */}
+                    {IS_DEV ? (
+                      <Route path="/examiner" element={<ExaminerPage />} />
+                    ) : (
+                      <Route path="/examiner" element={<Navigate to="/focus" replace />} />
+                    )}
                     <Route path="/control-center" element={<ControlCenterPage />} />
                     <Route path="/settings" element={<SettingsPage />} />
                     <Route path="/update" element={<UpdatePage />} />

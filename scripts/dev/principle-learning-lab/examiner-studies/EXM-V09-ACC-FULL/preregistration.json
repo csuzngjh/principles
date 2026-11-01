@@ -1,0 +1,32 @@
+{
+  "studyId": "EXM-V09-ACC-FULL",
+  "schema": "challenge-preregistration.v1",
+  "status": "FROZEN",
+  "arms": [
+    {
+      "armId": "A",
+      "name": "EXAMINER_CONTROL",
+      "contentMode": "library"
+    },
+    {
+      "armId": "B",
+      "name": "EXAMINER_TREATMENT",
+      "contentMode": "library"
+    }
+  ],
+  "controlArm": "A",
+  "treatmentArm": "B",
+  "repetitions": {
+    "planned": 2
+  },
+  "commonContext": {
+    "text": "Shared offline research context v0.9 acceptance. Synthetic calibration cases — offline contract validation only."
+  },
+  "delivery": {
+    "budgetChars": 2000
+  },
+  "examiner": {
+    "manifestHash": "2025643b341efe3931c94f4ebed526320fb1b7958e0b0946a81a485fc2cd30f6",
+    "pairAssignmentHash": "6e1cf43d2513bea56f1fbd22edae13300b6fd00d1ce4e4f730cea39fbbdf126a"
+  }
+}

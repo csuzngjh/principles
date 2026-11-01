@@ -1,0 +1,42 @@
+{
+  "schema": "examiner-injection-evidence.v1",
+  "producedBy": "runner-offline-stub",
+  "scope": "offline-stub",
+  "armId": "B",
+  "principleHash": "df6f0b703453b13ac8d06688f1f431e9e37a82d15826fb1f96ba997a26ffaadb",
+  "expectedLevel": "RUNTIME_LOADED",
+  "stages": {
+    "CONFIGURED": {
+      "evidenceRef": "arm-configs.json#arm-B",
+      "contentHash": "df6f0b703453b13ac8d06688f1f431e9e37a82d15826fb1f96ba997a26ffaadb",
+      "note": "arm payload CONFIGURED from the frozen study materials"
+    },
+    "SELECTED": {
+      "evidenceRef": "arm-selection:B",
+      "contentHash": "df6f0b703453b13ac8d06688f1f431e9e37a82d15826fb1f96ba997a26ffaadb",
+      "note": "offline deterministic selection: the arm payload is the complete selection output for this arm"
+    },
+    "SUBMITTED": {
+      "evidenceRef": "actor-prompt:B",
+      "contentHash": "8171f2e4b40a0a80b54787339ce47010d16f69828dbd7748c6a24591139a2ff0",
+      "note": "composed actor prompt submitted to the offline actor transport"
+    },
+    "HOST_ACCEPTED": {
+      "evidenceRef": "offline-actor-transport:B",
+      "contentHash": "8171f2e4b40a0a80b54787339ce47010d16f69828dbd7748c6a24591139a2ff0",
+      "note": "offline-stub scope: the actor transport IS the host boundary — acceptance is the transport handing the prompt to the controlled actor loop (never a claim about a real host)"
+    },
+    "CONTEXT_PRESENT": {
+      "evidenceRef": "prompt-contains-payload:B",
+      "contentHash": "8171f2e4b40a0a80b54787339ce47010d16f69828dbd7748c6a24591139a2ff0",
+      "note": "payload text verified verbatim inside the composed actor-visible prompt"
+    },
+    "RUNTIME_LOADED": {
+      "evidenceRef": "runs/EXM-V09-ACC-03/B/r2/a1.json",
+      "contentHash": "8171f2e4b40a0a80b54787339ce47010d16f69828dbd7748c6a24591139a2ff0",
+      "note": "offline actor loop consumed the prompt (attempt record binds the executed trace)"
+    }
+  },
+  "provenLevel": "RUNTIME_LOADED",
+  "chainHash": "04d763b0a152cf4eab9d702f461135f99641f84261e3de8f65f0f2f8ecb396f5"
+}

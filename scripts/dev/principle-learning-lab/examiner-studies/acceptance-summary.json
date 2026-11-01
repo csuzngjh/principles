@@ -1,0 +1,302 @@
+{
+  "generatedAt": "2026-11-01T00:00:00Z",
+  "spec": "SPEC-PD-EXAMINER-001 v0.9",
+  "outRoot": "D:\\Code\\_worktrees\\principles\\adhoc-20261031-examiner-v09-7f3k2q-examiner-v09\\scripts\\dev\\principle-learning-lab\\examiner-studies",
+  "repetitions": 2,
+  "studies": [
+    {
+      "studyId": "EXM-V09-ACC-ISO",
+      "mode": "isolated_principle",
+      "studyDir": "D:\\Code\\_worktrees\\principles\\adhoc-20261031-examiner-v09-7f3k2q-examiner-v09\\scripts\\dev\\principle-learning-lab\\examiner-studies\\EXM-V09-ACC-ISO",
+      "plannedPairs": 6,
+      "units": [
+        {
+          "unit": "EXM-V09-ACC-01/A/r1",
+          "state": "SUCCEEDED"
+        },
+        {
+          "unit": "EXM-V09-ACC-01/B/r1",
+          "state": "SUCCEEDED"
+        },
+        {
+          "unit": "EXM-V09-ACC-01/B/r2",
+          "state": "SUCCEEDED"
+        },
+        {
+          "unit": "EXM-V09-ACC-01/A/r2",
+          "state": "SUCCEEDED"
+        },
+        {
+          "unit": "EXM-V09-ACC-02/A/r1",
+          "state": "SUCCEEDED"
+        },
+        {
+          "unit": "EXM-V09-ACC-02/B/r1",
+          "state": "SUCCEEDED"
+        },
+        {
+          "unit": "EXM-V09-ACC-02/B/r2",
+          "state": "SUCCEEDED"
+        },
+        {
+          "unit": "EXM-V09-ACC-02/A/r2",
+          "state": "SUCCEEDED"
+        },
+        {
+          "unit": "EXM-V09-ACC-03/A/r1",
+          "state": "SUCCEEDED"
+        },
+        {
+          "unit": "EXM-V09-ACC-03/B/r1",
+          "state": "SUCCEEDED"
+        },
+        {
+          "unit": "EXM-V09-ACC-03/B/r2",
+          "state": "SUCCEEDED"
+        },
+        {
+          "unit": "EXM-V09-ACC-03/A/r2",
+          "state": "SUCCEEDED"
+        }
+      ],
+      "preflightStatus": "READY_FOR_OFFLINE_EXECUTION",
+      "reportStatus": "REPORT_PENDING",
+      "itt": {
+        "metric": "ITT",
+        "formula": "d_i = F_control − F_treatment per preregistered applicable pair; Δ_ITT = Σd_i / N with N = planned applicable pairs (fixed denominator, never shrunken)",
+        "plannedApplicablePairs": 4,
+        "determinedPairs": 4,
+        "unknownPairs": 0,
+        "cells": {
+          "controlFailedTreatmentCorrected": 2,
+          "controlOkTreatmentFailed": 0,
+          "bothFailed": 2,
+          "bothOk": 0
+        },
+        "pointEstimate": {
+          "status": "ESTIMABLE",
+          "numerator": 2,
+          "denominator": 4,
+          "value": 0.5,
+          "condition": "every planned applicable pair fully determined (preregistered missing-handling: report bounds otherwise)"
+        },
+        "lowerBound": {
+          "status": "ESTIMABLE",
+          "numerator": 2,
+          "denominator": 4,
+          "value": 0.5
+        },
+        "upperBound": {
+          "status": "ESTIMABLE",
+          "numerator": 2,
+          "denominator": 4,
+          "value": 0.5
+        },
+        "rule": "positive = target failure reduced under the assigned strategy; injection failures stay IN (they are the strategy failing, not noise); UNKNOWN is never deleted, converted to PASS/FAIL, or imputed"
+      },
+      "treatmentFidelity": {
+        "metric": "TreatmentFidelity",
+        "plannedTreatmentUnits": 6,
+        "evidencedChains": 6,
+        "configured": 6,
+        "selected": 6,
+        "submitted": 6,
+        "hostAccepted": 6,
+        "contextPresent": 6,
+        "runtimeLoaded": 6,
+        "actualInjectionRate": {
+          "status": "ESTIMABLE",
+          "numerator": 6,
+          "denominator": 6,
+          "value": 1,
+          "definition": "CONTEXT_PRESENT or higher per §7.3 — SUBMITTED alone never counts as injection"
+        },
+        "controlContamination": {
+          "units": 0,
+          "ofControlChains": 6
+        },
+        "nonTargetRetention": {
+          "eligible": 0,
+          "deliveredInTreatment": null,
+          "deliveredInControl": null,
+          "treatmentRetentionRate": null,
+          "controlRetentionRate": null,
+          "note": "no non-target retention facts supplied (isolated mode: structurally all OFF)"
+        },
+        "capacityEvictions": {
+          "units": 0,
+          "details": []
+        },
+        "rule": "fidelity is a mechanism observability record — the actually-injected subset may NEVER replace the ITT primary analysis; an unverifiable injection downgrades causal attribution but never deletes assigned units"
+      },
+      "applicability": {
+        "applicablePairs": 4,
+        "notApplicablePairs": 2
+      },
+      "randomization": {
+        "strategy": "balanced-randomized",
+        "seed": "v09-acceptance-iso-20261101",
+        "plannedPairs": 6,
+        "balance": {
+          "controlFirst": 3,
+          "treatmentFirst": 3
+        },
+        "assignmentHash": "ec0811cf2a80ac32a53f7443681c6959cb9644b77d354246cff75e145e4d213f",
+        "verified": true
+      },
+      "chainsVerified": true,
+      "replayVerified": true,
+      "PASS": true
+    },
+    {
+      "studyId": "EXM-V09-ACC-FULL",
+      "mode": "full_library_incremental",
+      "studyDir": "D:\\Code\\_worktrees\\principles\\adhoc-20261031-examiner-v09-7f3k2q-examiner-v09\\scripts\\dev\\principle-learning-lab\\examiner-studies\\EXM-V09-ACC-FULL",
+      "plannedPairs": 6,
+      "units": [
+        {
+          "unit": "EXM-V09-ACC-01/A/r1",
+          "state": "SUCCEEDED"
+        },
+        {
+          "unit": "EXM-V09-ACC-01/B/r1",
+          "state": "SUCCEEDED"
+        },
+        {
+          "unit": "EXM-V09-ACC-01/B/r2",
+          "state": "SUCCEEDED"
+        },
+        {
+          "unit": "EXM-V09-ACC-01/A/r2",
+          "state": "SUCCEEDED"
+        },
+        {
+          "unit": "EXM-V09-ACC-02/A/r1",
+          "state": "SUCCEEDED"
+        },
+        {
+          "unit": "EXM-V09-ACC-02/B/r1",
+          "state": "SUCCEEDED"
+        },
+        {
+          "unit": "EXM-V09-ACC-02/B/r2",
+          "state": "SUCCEEDED"
+        },
+        {
+          "unit": "EXM-V09-ACC-02/A/r2",
+          "state": "SUCCEEDED"
+        },
+        {
+          "unit": "EXM-V09-ACC-03/A/r1",
+          "state": "SUCCEEDED"
+        },
+        {
+          "unit": "EXM-V09-ACC-03/B/r1",
+          "state": "SUCCEEDED"
+        },
+        {
+          "unit": "EXM-V09-ACC-03/B/r2",
+          "state": "SUCCEEDED"
+        },
+        {
+          "unit": "EXM-V09-ACC-03/A/r2",
+          "state": "SUCCEEDED"
+        }
+      ],
+      "preflightStatus": "READY_FOR_OFFLINE_EXECUTION",
+      "reportStatus": "REPORT_PENDING",
+      "itt": {
+        "metric": "ITT",
+        "formula": "d_i = F_control − F_treatment per preregistered applicable pair; Δ_ITT = Σd_i / N with N = planned applicable pairs (fixed denominator, never shrunken)",
+        "plannedApplicablePairs": 4,
+        "determinedPairs": 4,
+        "unknownPairs": 0,
+        "cells": {
+          "controlFailedTreatmentCorrected": 2,
+          "controlOkTreatmentFailed": 0,
+          "bothFailed": 2,
+          "bothOk": 0
+        },
+        "pointEstimate": {
+          "status": "ESTIMABLE",
+          "numerator": 2,
+          "denominator": 4,
+          "value": 0.5,
+          "condition": "every planned applicable pair fully determined (preregistered missing-handling: report bounds otherwise)"
+        },
+        "lowerBound": {
+          "status": "ESTIMABLE",
+          "numerator": 2,
+          "denominator": 4,
+          "value": 0.5
+        },
+        "upperBound": {
+          "status": "ESTIMABLE",
+          "numerator": 2,
+          "denominator": 4,
+          "value": 0.5
+        },
+        "rule": "positive = target failure reduced under the assigned strategy; injection failures stay IN (they are the strategy failing, not noise); UNKNOWN is never deleted, converted to PASS/FAIL, or imputed"
+      },
+      "treatmentFidelity": {
+        "metric": "TreatmentFidelity",
+        "plannedTreatmentUnits": 6,
+        "evidencedChains": 6,
+        "configured": 6,
+        "selected": 6,
+        "submitted": 6,
+        "hostAccepted": 6,
+        "contextPresent": 6,
+        "runtimeLoaded": 6,
+        "actualInjectionRate": {
+          "status": "ESTIMABLE",
+          "numerator": 6,
+          "denominator": 6,
+          "value": 1,
+          "definition": "CONTEXT_PRESENT or higher per §7.3 — SUBMITTED alone never counts as injection"
+        },
+        "controlContamination": {
+          "units": 0,
+          "ofControlChains": 6
+        },
+        "nonTargetRetention": {
+          "eligible": 0,
+          "deliveredInTreatment": null,
+          "deliveredInControl": null,
+          "treatmentRetentionRate": null,
+          "controlRetentionRate": null,
+          "note": "no non-target retention facts supplied (isolated mode: structurally all OFF)"
+        },
+        "capacityEvictions": {
+          "units": 0,
+          "details": []
+        },
+        "rule": "fidelity is a mechanism observability record — the actually-injected subset may NEVER replace the ITT primary analysis; an unverifiable injection downgrades causal attribution but never deletes assigned units"
+      },
+      "applicability": {
+        "applicablePairs": 4,
+        "notApplicablePairs": 2
+      },
+      "randomization": {
+        "strategy": "balanced-randomized",
+        "seed": "v09-acceptance-full-20261101",
+        "plannedPairs": 6,
+        "balance": {
+          "controlFirst": 3,
+          "treatmentFirst": 3
+        },
+        "assignmentHash": "6e1cf43d2513bea56f1fbd22edae13300b6fd00d1ce4e4f730cea39fbbdf126a",
+        "verified": true
+      },
+      "chainsVerified": true,
+      "replayVerified": true,
+      "PASS": true
+    }
+  ],
+  "historicalBaseline": {
+    "ok": true,
+    "checked": 593,
+    "mismatches": []
+  },
+  "PASS": true
+}

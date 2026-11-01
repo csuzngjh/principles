@@ -1,0 +1,84 @@
+{
+  "schema": "examiner-arm-payloads.v1",
+  "mode": "full_library_incremental",
+  "budgetChars": 2000,
+  "ordering": "id-asc",
+  "arms": {
+    "control": {
+      "payloadText": "<principle id=\"PD-ACC-P1\" version=\"v1\">undefined</principle>\n<principle id=\"PD-ACC-P2\" version=\"v2\">undefined</principle>",
+      "payloadHash": "0177ccec2e18e49d5d0c977458c8fbe09c0d29d809dbc98c205a7210c16de3a2",
+      "deliveredIds": [
+        "PD-ACC-P1",
+        "PD-ACC-P2"
+      ],
+      "contentMode": "library"
+    },
+    "treatment": {
+      "payloadText": "<principle id=\"PD-ACC-P1\" version=\"v1\">undefined</principle>\n<principle id=\"PD-ACC-P2\" version=\"v2\">undefined</principle>\n<principle id=\"PD-ACC-TARGET\" version=\"v1\">结论不得超越观察：对目标对象的断言必须先以当前证据核实。</principle>",
+      "payloadHash": "df6f0b703453b13ac8d06688f1f431e9e37a82d15826fb1f96ba997a26ffaadb",
+      "deliveredIds": [
+        "PD-ACC-P1",
+        "PD-ACC-P2",
+        "PD-ACC-TARGET"
+      ],
+      "contentMode": "library"
+    }
+  },
+  "capacity": {
+    "control": {
+      "schema": "examiner-capacity-competition.v1",
+      "policy": "examiner-offline:id-asc",
+      "budgetChars": 2000,
+      "eligibleCount": 2,
+      "delivered": [
+        {
+          "id": "PD-ACC-P1",
+          "contentHash": "b77ada08f81b6ae42c6c9c0eea157828f1c6d5805bebe9df7f8bc8960d5fa5be"
+        },
+        {
+          "id": "PD-ACC-P2",
+          "contentHash": "8e40e18d2abc905f9f45525a64f044c4078a6accce30ee534be5abf9d9c762b8"
+        }
+      ],
+      "evicted": [],
+      "targetPrincipleId": "PD-ACC-TARGET",
+      "targetDelivered": false,
+      "deliveredContentHash": "2339c007c4a214b0a28e8102b0140120351f6a3c69a730b0a06cb42e8160432c",
+      "recordHash": "a70cf6e41b7132828d72e0d198eec8726a63ecdd1c3cec7ae58e855c00432906",
+      "armId": "A"
+    },
+    "treatment": {
+      "schema": "examiner-capacity-competition.v1",
+      "policy": "examiner-offline:id-asc",
+      "budgetChars": 2000,
+      "eligibleCount": 3,
+      "delivered": [
+        {
+          "id": "PD-ACC-P1",
+          "contentHash": "b77ada08f81b6ae42c6c9c0eea157828f1c6d5805bebe9df7f8bc8960d5fa5be"
+        },
+        {
+          "id": "PD-ACC-P2",
+          "contentHash": "8e40e18d2abc905f9f45525a64f044c4078a6accce30ee534be5abf9d9c762b8"
+        },
+        {
+          "id": "PD-ACC-TARGET",
+          "contentHash": "3a04fa9cb0183bb49d2c89575b8bad10e6e1e09fb2b9b7e9ed6cb38bb8b443e9"
+        }
+      ],
+      "evicted": [],
+      "targetPrincipleId": "PD-ACC-TARGET",
+      "targetDelivered": true,
+      "deliveredContentHash": "2bf541847bdb05f6b2f9cea039da6d8fdbf8e330e9cfdd83439fa27e25fbf3b6",
+      "recordHash": "197b07cf96e3f71879f81bd06ffc9ec9740df49b05581346cf9a667bbdab9d97",
+      "armId": "B"
+    }
+  },
+  "isolationAudit": {
+    "controlContainsTarget": false,
+    "treatmentContainsTarget": true,
+    "controlPayloadEmpty": false,
+    "problems": [],
+    "ok": true
+  }
+}

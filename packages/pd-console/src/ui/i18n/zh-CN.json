@@ -2022,6 +2022,68 @@
         "collapseHint": "点击折叠差异"
       }
     },
+    "examiner": {
+      "loading": "正在加载 Examiner…",
+      "title": "Examiner 验证",
+      "subtitle": "对目标原则进行受控 A/B 行为效果验证（离线优先）。",
+      "scope": {
+        "title": "执行范围与门禁"
+      },
+      "mode": {
+        "full": "完整原则库增量 A/B（默认）",
+        "isolated": "独立原则 A/B（诊断模式）"
+      },
+      "create": {
+        "title": "创建离线 Study",
+        "target": "目标原则（每次实验一条）",
+        "mode": "实验模式",
+        "repetitions": "每题重复次数",
+        "submit": "创建 Study",
+        "note": "使用合成校准题（SYNTHETIC_OFFLINE Gold）。Study 身份由服务端铸造，创建后不可覆盖。"
+      },
+      "studies": {
+        "title": "研究列表",
+        "empty": "还没有 Study。从上方创建一个离线 Study。"
+      },
+      "study": {
+        "title": "Study {{studyId}}",
+        "mode": "模式",
+        "intervention": "干预类型",
+        "target": "目标原则",
+        "plannedPairs": "计划配对",
+        "run": "执行",
+        "finished": "已完成",
+        "running": "进行中",
+        "notRun": "未执行",
+        "report": "报告",
+        "preflight": "运行预检",
+        "runOffline": "离线执行"
+      },
+      "preflight": {
+        "status": "预检状态"
+      },
+      "report": {
+        "title": "Report V2",
+        "target": "目标",
+        "endpoint": "主要终点",
+        "fidelity": "Treatment Fidelity（注入忠实度）",
+        "contamination": "Control 污染",
+        "evictions": "容量挤出",
+        "ittNote": "计划适用配对 {{planned}} · 完全确定 {{determined}} · 未知侧 {{unknown}} · 不适用 {{na}}（不进入分母）",
+        "noExaminerBlock": "该报告早于 v0.9 契约（无 examiner 区块）。",
+        "offlineNote": "离线 Stub 结果仅验证契约管线，绝不代表真实宿主行为。真实宿主实验需要拥有者单独授权。"
+      },
+      "created": "Study {{studyId}} 已创建。",
+      "runDone": "离线执行完成：{{count}} 个单元成功。",
+      "reportGenerated": "报告已生成（{{status}}）。",
+      "errors": {
+        "unavailable": "Examiner 开发工具在此安装中不可用。",
+        "create": "创建 Study 失败。",
+        "preflight": "预检失败。",
+        "run": "离线执行失败。",
+        "report": "报告生成失败。"
+      }
+    },
     "debt": {
       "eyebrow": "原则债务",
       "title": "原则债务管理",
@@ -2234,6 +2296,7 @@
       "principles": "原则审查",
       "activation": "生效情况",
       "debt": "原则债务",
+      "examiner": "Examiner 验证",
       "controlCenter": "控制中心",
       "reportProblem": "产品反馈",
       "failedTasks": "失败任务",

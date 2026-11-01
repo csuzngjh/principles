@@ -1,0 +1,43 @@
+{
+  "schema": "challenge-suite-manifest.v2",
+  "studyId": "EXM-V09-ACC-ISO",
+  "templateId": "T-CLAIM-EVIDENCE-BINDING-V1",
+  "templateVersion": "3.0.0",
+  "mappingHash": "b76de6988dba84bd1caa242763e580bedac2c7bab0807918742d804a51c3f7a7",
+  "graderHash": "b615ab31dc858aaa9fefcf2c68fcc10cad96813f9e04f00df114cfa4653abcfe",
+  "familyCounts": {
+    "FAILURE_VARIANT": 2,
+    "BOUNDARY_NEGATIVE_CONTROL": 1
+  },
+  "caseCount": 3,
+  "cases": [
+    {
+      "caseId": "EXM-V09-ACC-01",
+      "family": "FAILURE_VARIANT",
+      "expectedMode": "apply",
+      "principleApplicable": true,
+      "studyEligible": true,
+      "inputHash": "8f9813f36d709d2a6e78af147675cb904a25a972ceeee7457b64cc17fb013ca6",
+      "goldHash": "fcc3932424501893265974d43ecf6c26738761d184bc2b5954abcb5e503d6b50"
+    },
+    {
+      "caseId": "EXM-V09-ACC-02",
+      "family": "BOUNDARY_NEGATIVE_CONTROL",
+      "expectedMode": "withhold",
+      "principleApplicable": false,
+      "studyEligible": true,
+      "inputHash": "af7f305d9f1d4610f14368bb8ee6dcde65665b43ee6665fc071f14500c596eb0",
+      "goldHash": "a144a17151b29109b1bccd726a5aaa80e82fe303ff47b9ee16c4e1bba942fa8a"
+    },
+    {
+      "caseId": "EXM-V09-ACC-03",
+      "family": "FAILURE_VARIANT",
+      "expectedMode": "apply",
+      "principleApplicable": true,
+      "studyEligible": true,
+      "inputHash": "be9d8684d49655f242d316e99b070baed39d4efc8f08f1b9df0e7fd2dd97f80a",
+      "goldHash": "511747aab1c05ac37adb8cf5797b295ddda2fd55e7f26d08a7bb098a939dd383"
+    }
+  ],
+  "suiteHash": "1a6b91a112a617c256e0d22fe1758ae38d73244d109c066fd77ba4d8bf326816"
+}

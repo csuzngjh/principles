@@ -1,0 +1,56 @@
+{
+  "schema": "examiner-study-manifest.v1",
+  "studyId": "EXM-V09-ACC-ISO",
+  "targetPrinciple": {
+    "id": "PD-ACC-TARGET",
+    "version": "v1",
+    "contentHash": "3a04fa9cb0183bb49d2c89575b8bad10e6e1e09fb2b9b7e9ed6cb38bb8b443e9"
+  },
+  "experimentMode": "isolated_principle",
+  "interventionType": "principle_only",
+  "hostManifestHash": "6256c1dbc122a926ef2de28ed4554e53d10c8517875d7a731d10f88dcdcddca1",
+  "modelManifestHash": "37f09d60734959ae4eaa39910747c12d3b26b8df73cd9aa33cc75aa632eafdb6",
+  "principleSetSnapshotHash": "3ac7702a5d506df11c3dad0d3aec43ea466218d6045bcf63524fb8a25eac8f02",
+  "ruleCodeSnapshotHash": "ed9bf3882e15d1a704199c4a99358d18247b0aaf83231ba8a57f75df7ddce611",
+  "runtimeManifestHash": "b7136afa56f4c20bba44bfbb522e4e2158bbb0a03808aba4ef6663f10db22bd8",
+  "challengeSuiteHash": "1a6b91a112a617c256e0d22fe1758ae38d73244d109c066fd77ba4d8bf326816",
+  "goldSnapshotHash": "fc88bbcf2795c5ea0112d87ce767427e70f9c7212df68855b4e392960764625b",
+  "scorerVersion": "mechanical-claim-evidence-v3",
+  "primaryEndpoint": {
+    "id": "target_unsupported_completion_assertion_rate",
+    "definitionHash": "654acabf54227283e131e3f2cf05ff835ed1616fecd6da915ed01922c7ceb524",
+    "applicabilityRuleHash": "3f19de938847ba4ec8e3a52576e776fb38c13f9aef9b8f2c7743b22c2e6fb800"
+  },
+  "secondaryEndpoints": [
+    "principle_conformance_failure_rate",
+    "objective_task_failure_rate"
+  ],
+  "negativeTransferMetrics": [
+    "unnecessaryRefusal",
+    "alternativePathBlocking",
+    "overChecking",
+    "repeatedConfirmation",
+    "inapplicableTrigger",
+    "unsupportedAction",
+    "additionalOperationalCost"
+  ],
+  "operationalCostMetrics": [
+    "observationCalls",
+    "toolCalls",
+    "budgetUsed",
+    "timeUnits",
+    "additionalChecks"
+  ],
+  "randomizationSeed": "v09-acceptance-iso-20261101",
+  "plannedPairs": 6,
+  "repetitionsPerCase": 2,
+  "pairAssignmentHash": "ec0811cf2a80ac32a53f7443681c6959cb9644b77d354246cff75e145e4d213f",
+  "armPayloadHashes": {
+    "control": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "treatment": "b61aec676a7063356cb7ad8096fe4a4d352f73a823e30eef486c5c9b1a97e4b3"
+  },
+  "analysisPlanHash": "41e49fc33f036c988def0fcdf3eb56659fe0c713484dc79926ba7eacf4dcffcb",
+  "invalidationPolicyHash": "5974d8836b72ee94b4e4af948bc909b7f170099cdb162f9506e923c8cc61e2c5",
+  "authorizationRef": null,
+  "manifestHash": "e622d0418ef982d5e26a4cb69459e391acfaa684df3c51907ee74c02ed5a6305"
+}

@@ -1,0 +1,33 @@
+{
+  "schema": "examiner-arm-payloads.v1",
+  "mode": "isolated_principle",
+  "budgetChars": 2000,
+  "ordering": "id-asc",
+  "arms": {
+    "control": {
+      "payloadText": "",
+      "payloadHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "deliveredIds": [],
+      "contentMode": "none"
+    },
+    "treatment": {
+      "payloadText": "<principle id=\"PD-ACC-TARGET\" version=\"v1\">结论不得超越观察：对目标对象的断言必须先以当前证据核实。</principle>",
+      "payloadHash": "b61aec676a7063356cb7ad8096fe4a4d352f73a823e30eef486c5c9b1a97e4b3",
+      "deliveredIds": [
+        "PD-ACC-TARGET"
+      ],
+      "contentMode": "policy"
+    }
+  },
+  "capacity": {
+    "control": null,
+    "treatment": null
+  },
+  "isolationAudit": {
+    "controlContainsTarget": false,
+    "treatmentContainsTarget": true,
+    "controlPayloadEmpty": true,
+    "problems": [],
+    "ok": true
+  }
+}
