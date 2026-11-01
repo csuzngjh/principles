@@ -16,6 +16,7 @@
 | 修复提交（remediation） | `c4956990a`（`fix(examiner): v0.9 remediation — write isolation, run readiness, receipts, bindings`） |
 | main 刷新合并 | `cc5de3f2c`（`Merge remote-tracking branch 'origin/main'`） |
 | main 基线 | `0d0ea7eb560af15729f2a7f81b4e8a11a1bb0e8e` |
+| 本轮增量提交（时间顺序） | `eac8ca45a`（本报告初版）→ `b5d2ac6b1`（清算 CodeQL：TOCTOU 与异常文本回显）→ `01a62b9f6`（覆盖清洗后的拒绝路径） |
 | 最终 PR Head | 本报告所在提交（同一分支增量推送；PR 页面 `headRefOid`） |
 | 工作区 | `D:\Code\_worktrees\principles\adhoc-20261031-examiner-v09-7f3k2q-examiner-v09` |
 | 分支 | `ai/adhoc-20261031-examiner-v09-7f3k2q-examiner-v09`（原 PR #2257 分支，未新建 PR） |
@@ -59,7 +60,7 @@
   - 可写根 = 历史区 → 创建被 `409` 拒绝，历史列表不变。
   - `writeBehaviorReportV2` 权限拒绝：0 生成、0 锁、0 新文件，目录列表逐项一致。
 - 红 → 绿：修复前历史 Study 的 POST 返回 2xx 且可写；修复后以上测试全部通过
-  （`examiner.test.ts` 11/11、`examiner-v09` 73/73）。
+  （`examiner.test.ts` 12/12、`examiner-v09` 73/73）。
 - 仍有限制：无（本轮范围内）。
 
 ### B2. P1-4 服务端强制执行 Preflight（CONFIRMED → FIXED）
@@ -254,8 +255,8 @@
 
 - 完整套件：**163 files / 3027 passed + 1 expected fail，exit 0**（日志：
   `.tmp/examiner-e2e/console-tests-full.log`）。
-- 新增/扩展：`tests/server/routes/examiner.test.ts` 11/11；`examiner-dev-gating` 3/3；
-  `tsc --noEmit` 通过。
+- 新增/扩展：`tests/server/routes/examiner.test.ts` 12/12（含 ownership marker 不可读时
+  “只读 + 不回显异常文本”）；`examiner-dev-gating` 3/3；`tsc --noEmit` 通过。
 
 ### D3. 浏览器 E2E（真实 Chromium + 真实 Console 后端，离线 Stub）
 
@@ -295,15 +296,30 @@
 
 ### D5. CodeQL
 
-- 结果见 PR 状态（`Analyze (javascript-typescript)`）。本地无新增安全模式问题；
-  本报告不改动安全边界之外的行为。
+- 最终结果：**PASS**（check run `CodeQL` 与 workflow `Analyze (javascript-typescript)` 均绿）。
+- 过程中的真实发现（`eac8ca45a` 首次分析报 2 条新告警，已在本轮修复）：
+  1. `js/file-system-race`（high）— `tests/server/routes/examiner.test.ts` 的整目录指纹
+     辅助函数先用 `lstatSync` 判类型再 `readFileSync`，属 check-then-use。改为直接使用
+     `readdirSync(..., { withFileTypes: true })` 的 `Dirent` 类型，不再二次 stat。
+  2. `js/stack-trace-exposure`（medium）— sink 是既有的 `sendJson`（`response.ts:21`，
+     main 上本就有开放告警 #46），但本 PR 新增了到达该 sink 的数据流：Console 路由把
+     捕获异常的 `error.message` / `String(error)` 直接回显。改为响应只带稳定 reason code，
+     完整异常只进 Console server log；`preflight_blocked` 仍保留结构化 `blockers`。
+     新增测试验证不可读 marker 时“只读 + 不回显解析器文本/路径”。
+- 说明：这是“新数据流”，不是把 main 既有告警改绿；修复后该 PR 不再新增告警。
 
 ### D6. Merge Gate / PR 状态
 
-- `Verify Merge Gate`：刷新 main 后通过（此前一次失败是分支落后 versions PR 导致的
-  release-intent 误判；merge main 后 `base=0d0ea7eb56 head=cc5de3f2c5`，
-  `RELEASE_INTENT_GUARD PASS intent=create-principles-disciple:patch`）。
-- 全部 required checks 以 PR 页面为准；PR 保持 OPEN，未合并、未部署。
+- `Verify Merge Gate`：**PASS**（刷新 main 后；此前一次失败是分支落后 versions PR 导致的
+  release-intent 误判；merge main 后 `base=0d0ea7eb56`，`RELEASE_INTENT_GUARD PASS
+  intent=create-principles-disciple:patch`）。
+- 最终 head 的检查汇总：**25 pass / 1 skipping（CodeRabbit，仓库配置为跳过）/ 1 fail
+  （`codecov/patch`）**。
+- 分支保护要求的 status check 只有 `Verify Merge Gate`，已通过。
+- `codecov/patch` 为非必需的 advisory：83.37% of diff hit（目标 84.00%）。下降来自本轮新增的
+  防御性错误分支（异常清洗后的拒绝路径），非删/弱化测试；本地 Console 全量
+  （163 files / 3027 passed + 1 expected fail）与 scripts 全量（98 files / 1917 tests）均绿。
+- PR 保持 **OPEN**，未合并、未部署。
 
 ### D7. Release Reproducibility
 
@@ -342,7 +358,8 @@
 
 理由与限制：
 
-1. 所有 CONFIRMED 缺陷均已修复并有测试与真实浏览器验收支撑；两个全量套件本地全绿。
+1. 所有 CONFIRMED 缺陷均已修复并有测试与真实浏览器验收支撑；两个全量套件本地全绿；
+   最终 head 的 CI 25 项通过（含 `Verify Merge Gate` 与 `CodeQL`）。
 2. 本轮仅离线工程验证，`REAL_HOST_EXPERIMENT_VALIDATED` 不成立——这是本轮授权边界，
    不是缺陷。
 3. EXM-MVP-001-v4 的实现绑定按仓库既定 rebind 流程移动（研究内容未变），此动作需要 Owner
@@ -351,5 +368,8 @@
    原文件未改，修订版以新 Study ID 生成。
 5. 本机默认并发下 `workspace-lifecycle` 3 项存在负载性超时；限定 worker 后全绿，
    CI 结果为准。
+6. `codecov/patch`（非必需 advisory）为 83.37%（目标 84%）：本轮新增的防御性拒绝分支
+   覆盖不足 1 个百分点，未通过删减测试或注入无意义断言来凑数。分支保护要求的
+   `Verify Merge Gate` 已通过。
 
 **测试全绿不解锁 Gate 1、Gate 2 或 Phase 6；PR 保持 OPEN，未合并、未部署。**
