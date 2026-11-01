@@ -1,0 +1,78 @@
+{
+  "_tree": {
+    "principles": {
+      "44444444-4444-4444-8444-444444444444": {
+        "id": "44444444-4444-4444-8444-444444444444",
+        "version": 1,
+        "text": "Truncation scenario principle",
+        "triggerPattern": "when in doubt",
+        "action": "verify first",
+        "status": "active",
+        "derivedFromPainIds": [],
+        "reuseEvidence": [
+          {
+            "painId": "pain-golden-t-001",
+            "candidateId": "cand-t-001",
+            "decision": "reuse",
+            "actor": {
+              "kind": "owner",
+              "id": "owner-golden"
+            },
+            "reason": "same underlying pain",
+            "decidedAt": "2026-10-01T00:00:00.000Z"
+          },
+          {
+            "painId": "pain-golden-t-002",
+            "candidateId": "cand-t-002",
+            "decision": "reuse",
+            "actor": {
+              "kind": "owner",
+              "id": "owner-golden"
+            },
+            "reason": "same underlying pain",
+            "decidedAt": "2026-10-02T00:00:00.000Z"
+          },
+          {
+            "painId": "pain-golden-t-003",
+            "candidateId": "cand-t-003",
+            "decision": "reuse",
+            "actor": {
+              "kind": "owner",
+              "id": "owner-golden"
+            },
+            "reason": "same underlying pain",
+            "decidedAt": "2026-10-03T00:00:00.000Z"
+          },
+          {
+            "painId": "pain-golden-t-004",
+            "candidateId": "cand-t-004",
+            "decision": "reuse",
+            "actor": {
+              "kind": "owner",
+              "id": "owner-golden"
+            },
+            "reason": "same underlying pain",
+            "decidedAt": "2026-10-04T00:00:00.000Z"
+          },
+          {
+            "painId": "pain-golden-t-005",
+            "candidateId": "cand-t-005",
+            "decision": "reuse",
+            "actor": {
+              "kind": "owner",
+              "id": "owner-golden"
+            },
+            "reason": "same underlying pain",
+            "decidedAt": "2026-10-05T00:00:00.000Z"
+          }
+        ],
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "updatedAt": "2026-01-01T00:00:00.000Z"
+      }
+    },
+    "rules": {},
+    "implementations": {},
+    "metrics": {},
+    "lastUpdated": "2026-01-01T00:00:00.000Z"
+  }
+}
