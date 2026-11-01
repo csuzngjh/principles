@@ -72,6 +72,15 @@ function examinerDevEnabled(): boolean {
   return isExaminerDevRuntime(import.meta.url);
 }
 
+/**
+ * Responses carry stable reason codes, never raw exception text: a thrown
+ * message can embed absolute paths and other internals that are not
+ * Owner-facing information. The full error stays in the server log.
+ */
+function logRefusal(scope: string, error: unknown): void {
+  console.error(`[pd-console] examiner ${scope}:`, error);
+}
+
 let labModules: LabModules | null = null;
 let hostCapability: HostCapability | null = null;
 let labUnavailableReason: string | null = null;
@@ -83,7 +92,8 @@ async function loadLab(): Promise<HostCapability | null> {
     hostCapability = await loadHostCapability(labRoot);
     return hostCapability;
   } catch (error) {
-    labUnavailableReason = error instanceof Error ? error.message : String(error);
+    logRefusal('lab unavailable', error);
+    labUnavailableReason = 'lab tooling could not be loaded (details in the console server log)';
     labModules = null;
     hostCapability = null;
     return null;
@@ -214,7 +224,8 @@ export async function handleExaminerRoute(
         note: 'offline study created with SYNTHETIC gold — run preflight, then the offline-stub execution; results demonstrate the contract pipeline, never real host behavior',
       });
     } catch (error) {
-      sendError(res, 422, 'study_creation_refused', error instanceof Error ? error.message : String(error));
+      logRefusal('study creation refused', error);
+      sendError(res, 422, 'study_creation_refused', 'the study was refused before any file was written (details in the console server log)');
     }
     return;
   }
@@ -265,10 +276,13 @@ export async function handleExaminerRoute(
         sendSuccess(res, { studyId: access.studyId, units: summary.units.map((unit) => ({ unit: unit.unit, state: unit.state })) });
       } catch (error) {
         if (error instanceof ExaminerPreflightBlockedError) {
-          sendError(res, 409, 'preflight_blocked', `${error.message}; blockers: ${JSON.stringify(error.blockers)}`);
+          // Blockers are structured contract output (check ids + reasons), not
+          // exception text: they are the actionable part for the operator.
+          sendError(res, 409, 'preflight_blocked', `offline preflight blocked; blockers: ${JSON.stringify(error.blockers)}`);
           return;
         }
-        sendError(res, 500, 'offline_run_failed', error instanceof Error ? error.message : String(error));
+        logRefusal('offline run failed', error);
+        sendError(res, 500, 'offline_run_failed', 'the offline run failed (details in the console server log)');
       }
       return;
     }
@@ -297,7 +311,8 @@ export async function handleExaminerRoute(
         });
         sendSuccess(res, { studyId: access.studyId, status: result.status, written: result.written });
       } catch (error) {
-        sendError(res, 409, 'report_write_refused', error instanceof Error ? error.message : String(error));
+        logRefusal('report write refused', error);
+        sendError(res, 409, 'report_write_refused', 'the report was refused and no report file was written (details in the console server log)');
       }
       return;
     }

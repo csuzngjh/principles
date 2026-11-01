@@ -146,7 +146,10 @@ export function verifyConsoleOwnership(writableRoot: string, studyDir: string): 
     marker = readJsonObjectFile(markerPath);
     manifest = readStudyJson(studyDir, 'examiner-manifest.json');
   } catch (error) {
-    return { ok: false, reason: `ownership marker or manifest unreadable: ${error instanceof Error ? error.message : String(error)}` };
+    // The reason travels into HTTP payloads, so it must not carry raw
+    // exception text (paths/internals); the detail stays in the server log.
+    console.error('[pd-console] examiner ownership check failed:', error);
+    return { ok: false, reason: 'ownership marker or manifest is unreadable (details in the console server log)' };
   }
   const name = path.basename(studyDir);
   if (marker.schema !== OWNERSHIP_SCHEMA || marker.origin !== 'pd-console') {

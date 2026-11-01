@@ -31,13 +31,14 @@ const historicalStudiesRoot = path.join(repoRoot, 'scripts', 'dev', 'principle-l
 function fingerprintTree(root: string): Record<string, string> {
   const entries: Record<string, string> = {};
   const walk = (dir: string, rel: string): void => {
+    // Entry types come from the directory read itself. A separate lstat before
+    // each access is a check-then-use pattern (and a TOCTOU window).
     for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
       const abs = path.join(dir, entry.name);
       const relPath = rel ? `${rel}/${entry.name}` : entry.name;
-      const stat = fs.lstatSync(abs);
-      if (stat.isSymbolicLink()) {
+      if (entry.isSymbolicLink()) {
         entries[relPath] = `link:${fs.readlinkSync(abs)}`;
-      } else if (stat.isDirectory()) {
+      } else if (entry.isDirectory()) {
         entries[relPath] = 'dir';
         walk(abs, relPath);
       } else {
