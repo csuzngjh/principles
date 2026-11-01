@@ -693,3 +693,14 @@ CI（推送后补记）：`Verify Merge Gate`、`CodeQL`、pd-console E2E、Rele
 - 因此本轮不宣称整改整体完成；remaining work 需要 Owner 授权 EXM-MVP-001-v5（见 H 节）。
 - 四个 rebind 文件与全部冻结产物本轮零改动；实现绑定 44/44 一致。
 - PR 保持 OPEN，未合并、未部署；Gate 1 / Gate 2 / Phase 6 未解锁。
+
+---
+
+## J. CI 结果（推送后补记）
+
+- PR #2257 head：`a5263747c4c8d6feee314eecb15f08367538ec08`（与远端分支 ref 一致）。
+- 检查汇总：**26 pass / 1 skipping（CodeRabbit，仓库配置跳过）/ 0 fail**。
+- 关键检查：`Verify Merge Gate` PASS、`CodeQL` PASS、`Analyze (javascript-typescript)` PASS、
+  `Test pd-console` PASS、`e2e` PASS、`TypeScript Check (pd-console)` PASS、`Lint` PASS、
+  `Release Build Parity` PASS、`codecov/patch` PASS（本轮新增测试后不再为 advisory 失败）。
+- PR 状态保持 OPEN；未合并、未部署、未触发真实实验或生产迁移。
