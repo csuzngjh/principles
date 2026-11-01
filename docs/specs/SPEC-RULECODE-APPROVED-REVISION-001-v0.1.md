@@ -16,7 +16,7 @@
 
 Console现有RuleCode审阅页增加只读修订预览和“按反馈修订一次”；认证Owner请求→现有Console模型→core领域修订操作→既有SQLite任务/元数据事务→Worker Artificer→Evaluator→RolloutReviewer→新工件待审。复用现有修订反馈载体，不将反馈伪装原始Owner痛苦陈述。
 
-请求须绑定 activationId、旧artifactId/digest、candidate、绑定revision、控制version、当前任务epoch、requestId以及明确反馈。服务从可信绑定解析principle、task血缘和actor；客户端不可指定任意Actor/原则。
+请求须绑定 activationId、旧artifactId/digest、绑定revision、控制version、当前任务epoch、requestId以及明确反馈。服务从可信绑定解析candidate、principle、task血缘和actor；客户端不可指定任意Actor/原则。（v0.1 对齐实现：candidate 不作为请求字段——它由 activation→artifact→evaluator 血缘解析，并经旧工件 digest 与账本 identity receipt 双向校验；让客户端自证只会多一个可伪造的重复事实。）
 
 反馈限于本规则原意：只读与PD状态/官方恢复操作必须安全可达，真实未批准的受管变更应拦截，真实已批准/无需批准正常开发放行；未知事实不伪装明确否决。不可按某个历史命令全文或当前pain ID写特例。
 

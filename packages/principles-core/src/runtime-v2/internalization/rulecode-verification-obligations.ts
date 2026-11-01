@@ -138,9 +138,29 @@ export function deriveRuleCodeVerification(scribe: unknown, cases: readonly Gold
           // which is exactly the failure the promotion recovery-composition
           // check rejects. Encode the obligation here so the loop can never
           // approve such an artifact, instead of discovering it at promotion.
+          //
+          // The variants are part of the contract, not padding: the host
+          // marker accepts a trailing `-w`/`--workspace <path>` and any
+          // literal activation id, so a rule that only exempts the canonical
+          // string would pass these probes and still block a real official
+          // invocation.
           ...RECOVERY_CONTROL_SURFACES
             .filter((surface): surface is typeof surface & { readonly cliCommand: string } => surface.channel === 'cli' && typeof surface.cliCommand === 'string')
-            .map((surface) => ({ id: `official-${surface.capabilityId}`, command: surface.cliCommand, expected: 'allow' as const, crossApproved: false })),
+            .flatMap((surface) => {
+              const probeBase = `official-${surface.capabilityId}`;
+              const surfaceProbes = [
+                { id: probeBase, command: surface.cliCommand },
+                { id: `${probeBase}-workspace-short`, command: `${surface.cliCommand} -w /workspace/project` },
+                { id: `${probeBase}-workspace-long`, command: `${surface.cliCommand} --workspace "/workspace/project with spaces"` },
+              ];
+              // The registry probe hardcodes one activation id; a rule that
+              // matches that literal instead of the registered grammar would
+              // slip through. One different legal id pins the grammar.
+              if (surface.capabilityId === 'rulecode_deactivate') {
+                surfaceProbes.push({ id: `${probeBase}-alt-id`, command: surface.cliCommand.replace('recovery-probe', 'act_recovery_alternate') });
+              }
+              return surfaceProbes.map((probe) => ({ ...probe, expected: 'allow' as const, crossApproved: false }));
+            }),
         ];
         for (const probe of probes) {
           counterfactuals.push({ caseId: `system-contract:design_approval:${index}:probe:${probe.id}`, attackType: 'boundary', toolName: tool.rawToolName,

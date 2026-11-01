@@ -90,8 +90,10 @@ function ApprovedRuleRevisionPanel({ activationId, onChanged }: { activationId: 
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-  // Preserve the exact request across a transport retry; a new ID is not a new budget.
-  const [pending, setPending] = useState<ApprovedRuleRevisionRequest | null>(null);
+  // Preserve the exact request across a transport retry; a new ID is not a new
+  // budget (the server's budget is anchored on the artifact digest + receipt,
+  // so editing the feedback and resending cannot spend a second round).
+  const [pendingRequestId, setPendingRequestId] = useState<string | null>(null);
   const load = useCallback(async () => {
     const result = await fetchApprovedRuleRevisionPreview(activationId);
     if (result.success) { setPreview(result.data); setError(null); } else setError(result.error);
@@ -99,16 +101,20 @@ function ApprovedRuleRevisionPanel({ activationId, onChanged }: { activationId: 
   useEffect(() => { void load(); }, [load]);
   const revise = async () => {
     if (preview?.status !== 'ready') return;
-    const input = pending ?? {
+    const input: ApprovedRuleRevisionRequest = {
       expectedArtifactId: preview.expectedArtifactId, expectedArtifactDigest: preview.expectedArtifactDigest,
       expectedBindingRevision: preview.expectedBindingRevision, expectedControlVersion: preview.expectedControlVersion,
-      expectedTaskRevisionEpoch: preview.expectedTaskRevisionEpoch, requestId: crypto.randomUUID(), feedback: feedback.trim(),
+      expectedTaskRevisionEpoch: preview.expectedTaskRevisionEpoch,
+      requestId: pendingRequestId ?? crypto.randomUUID(), feedback: feedback.trim(),
     };
-    setPending(input); setBusy(true); setError(null);
+    setPendingRequestId(input.requestId); setBusy(true); setError(null);
     const result = await reviseApprovedRuleOnce(activationId, input);
     setBusy(false);
     if (!result.success) { setError(result.error); return; }
-    if (result.data.status === 'refused') { setPending(null); await load(); setError(result.data.nextAction); return; }
+    if (result.data.status === 'refused') { setPendingRequestId(null); await load(); setError(result.data.nextAction); return; }
+    // Announce before onChanged(): the parent reload unmounts this panel, and a
+    // panel-local confirmation would disappear with it.
+    toast.success(t('pages.activation.ruleRevisionStarted'));
     setSubmitted(true); onChanged();
   };
   return <div className="mt-3 rounded border border-line p-3 text-[12px] text-ink-3" data-testid={`approved-rule-revision-${activationId}`}>
@@ -117,7 +123,7 @@ function ApprovedRuleRevisionPanel({ activationId, onChanged }: { activationId: 
     {error && <p role="alert" className="mt-2 text-danger">{error}</p>}
     {submitted ? <div className="mt-2"><p role="status" className="text-green">{t('pages.activation.ruleRevisionStarted')}</p><Link to="/focus" className="mt-1 inline-block text-gov underline">{t('pages.activation.ruleRevisionReviewQueue')}</Link></div>
       : preview?.status === 'ready' ? <>
-        <label className="mt-2 block">{t('pages.activation.ruleRevisionFeedback')}<textarea value={feedback} maxLength={4000} disabled={busy || pending !== null} onChange={event => setFeedback(event.target.value)} className="mt-1 min-h-20 w-full rounded border border-line bg-panel px-3 py-2 text-ink" /></label>
+        <label className="mt-2 block">{t('pages.activation.ruleRevisionFeedback')}<textarea value={feedback} maxLength={4000} disabled={busy} onChange={event => { setFeedback(event.target.value); setPendingRequestId(null); }} className="mt-1 min-h-20 w-full rounded border border-line bg-panel px-3 py-2 text-ink" /></label>
         <Button disabled={busy || feedback.trim().length === 0} onClick={() => void revise()}>{t('pages.activation.ruleRevisionOnce')}</Button>
       </> : preview?.status === 'refused' ? <p className="mt-2">{preview.nextAction}</p>
         : <p className="mt-2">{t('pages.activation.ownerDecisionLoading')}</p>}

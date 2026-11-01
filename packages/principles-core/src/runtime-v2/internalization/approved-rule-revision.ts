@@ -87,12 +87,18 @@ async function resolveTarget(args: RevisionBaseArgs) {
   const candidateId = evaluatorPi.correlationId;
   const target = await resolveRuleBindingRevisionTarget(stateManager, candidateId);
   if (target.status !== 'ready') return target;
-  const tasks = await stateManager.listTasks();
-  const artificers = tasks.filter(task => task.taskKind === 'artificer' && evaluatorPi.dependencyTaskIds.includes(task.taskId)
+  // Two kind-scoped reads instead of a full `tasks` scan: the Console preview
+  // runs once per mounted shadow card, and hydration of unrelated history is
+  // pure cost there.
+  const [artificers, rollouts] = await Promise.all([
+    stateManager.listTasks({ taskKind: 'artificer' }),
+    stateManager.listTasks({ taskKind: 'rollout_reviewer' }),
+  ]);
+  const chainArtificers = artificers.filter(task => evaluatorPi.dependencyTaskIds.includes(task.taskId)
     && hydratePITaskRecord(task)?.dependencyTaskIds.includes(target.scribeTaskId));
-  const rollouts = tasks.filter(task => task.taskKind === 'rollout_reviewer' && hydratePITaskRecord(task)?.dependencyTaskIds.includes(evaluator.taskId));
-  const artificer = artificers.length === 1 ? artificers[0] : undefined;
-  const rollout = rollouts.length === 1 ? rollouts[0] : undefined;
+  const chainRollouts = rollouts.filter(task => hydratePITaskRecord(task)?.dependencyTaskIds.includes(evaluator.taskId));
+  const artificer = chainArtificers.length === 1 ? chainArtificers[0] : undefined;
+  const rollout = chainRollouts.length === 1 ? chainRollouts[0] : undefined;
   const scribe = await stateManager.getTask(target.scribeTaskId);
   const artificerPi = artificer ? hydratePITaskRecord(artificer) : null;
   if (!scribe || !artificer || !artificerPi || !rollout) return refused('approved_rule_chain_not_unique');
@@ -168,8 +174,24 @@ export async function reviseApprovedRuleOnce(args: ReviseApprovedRuleOnceArgs): 
   // Existing Artificer buildContext/prompt consumes this exact validated field.
   // Evidence and implementation are data, never a replacement for the intent contract.
   const revisionFeedback = `Owner authorized one revision of approved artifact ${target.artifact.artifactId} (${target.artifactDigest}).\n<owner_revision_feedback>\n${args.feedback.trim()}\n</owner_revision_feedback>\nPreserve the original intent, trusted facts and evidence. Official recovery controls must remain reachable across unavailable context and the rule's applicable fact states: consume the host-owned action.recoveryControl marker and action classification; do not invent a pd-prefix or command whitelist. Keep the original principle's behavior for governed actions and neutral/fault states. Run independent quality and recovery-composition checks; new artifacts require fresh Owner approval.\n<previous_approved_artifact_rule>\n${target.source}\n</previous_approved_artifact_rule>\nThis carries only the approved rule's code contract and intent. Its golden traces, adversarial results, evidence refs and approvals are NOT included: re-derive them from the original intent and evidence instead of assuming the removed versions still hold.`;
+  // An artificer that reached this artifact through an evaluator repair round
+  // still carries that round's instructions. The runner renders them into the
+  // prompt (and replays old adversarial evidence when diagnosticReplay failed),
+  // which would override the Owner's feedback and contradict the contract
+  // above that excludes those results. The structural fields stay: the repair
+  // completion branch and failed-task recovery read repairIteration and
+  // sourceEvaluatorTaskId. `requiredChanges` cannot be emptied — the metadata
+  // validator rejects an empty array, which would make the task unusable.
+  const carriedRepair = target.artificerPi.repairPayload;
+  const revisionRepairPayload = carriedRepair === undefined ? undefined : {
+    ...carriedRepair,
+    requiredChanges: ['Owner authorized a bounded revision of the approved artifact; follow the <owner_revision_feedback> block only. The superseded repair round\'s required changes do not apply to this round.'],
+    concerns: [] as readonly string[],
+    diagnosticReplay: undefined,
+    failureAttribution: undefined,
+  };
   const metadata = mergePITaskMetadata(target.artificerPi, { revisionCount: epoch, revisionCauseId: causeId, revisionFeedback,
-    runnerDecision: undefined, completionIntent: undefined, humanReviewContext: undefined,
+    runnerDecision: undefined, completionIntent: undefined, humanReviewContext: undefined, repairPayload: revisionRepairPayload,
     approvedRuleRevisions: [...(target.artificerPi.approvedRuleRevisions ?? []), receipt] });
   const committed = args.ledger.withLockedRuleCandidateIdentity(target.candidateId, identity => {
     if (identity.status !== 'resolved' || identity.basis !== 'owner_rule_binding' || identity.bindingRevision !== args.expectedBindingRevision

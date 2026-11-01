@@ -48,6 +48,19 @@ Artificer 850s → Evaluator `approved`，契约反例 81/81（79 + 2 项官方�
 
 satellite bundle 体积预算随之超限（`rulehost-evidence.js` dev 559,348 > 旧上限 553,489，因为该 satellite 打包共享 runtime）。按门禁自身要求在同一 PR 内重定基到 baseline 452,000 / max 565,000，注释记录实测值与后续方向（修订操作只服务 Console，barrel 收窄可回收这部分字节）。
 
+### 评审修正（CodeRabbit，2026-11-01 第二轮）
+
+七条意见里五条成立并已修，两条按下述理由未照做：
+
+- **官方恢复探针只覆盖规范命令**：`identifyRecoveryControl` 接受尾部 `-w`/`--workspace <path>` 与任意合法 activation id，而探针只有规范字符串——只豁免规范写法的规则会通过探针却拦住真实调用。现每个 CLI 恢复面生成规范、`-w`、`--workspace` 三种探针，停用命令再加一条不同合法 id（共 7 条）。
+- **修订轮会重放上一修复轮的指令**：已批准工件可能来自评估器修复轮，其 `repairPayload` 仍在元数据里，runner 会把它渲染进提示词，并在 `diagnosticReplay` 记录失败时去解析旧证据（解析不到直接 throw）。现保留结构字段（`repairIteration`/`sourceEvaluatorTaskId` 关系完成分支与恢复计数），把 `requiredChanges`/`concerns`/`diagnosticReplay`/`failureAttribution` 换成本轮语义。
+  评审建议「清空 `requiredChanges`」不可行：`isValidRepairPayload` 要求该数组非空，清空会使整条元数据校验失败、任务根本无法启动。
+- **预览每次都读整张 `tasks` 表**：改为按 `taskKind` 的两次过滤查询，交互不变（仍随面板加载，保住可发现性）。
+- **Console 两个交互缺陷**：成功提交先 `toast.success` 再 `onChanged()`（父级重载会卸载面板，面板内的确认会随之消失）；提交失败后输入框不再锁死——改反馈即作废旧 `requestId` 重发，不改则复用同一 `requestId` 重试，服务端额度锚是工件 digest＋回执，换 id 不会多消耗一轮。
+- **规范与实现不一致**：SPEC v0.1 第 19 行原本把 `candidate` 列为客户端必须绑定的字段，实现里它由服务端从激活血缘解析。已按实现修订该行并注明理由。
+- 未采纳一：要求官方恢复探针额外断言 `matched:false`。安全影响为零（仍是 allow），只是 shadow 统计口径；而 `GoldenTraceCase` 的 TypeBox schema 目前没有 `matched` 期望字段，补齐要扩既有 golden trace 契约并影响所有已存工件——记 follow-up。
+- 未采纳二：要求补「真实 Worker 入口执行修订后任务」的单测。现有真实模型两轮已证明 Artificer 重开后被真实执行并产出新工件、Evaluator 消费了它；单测层的 Worker 化改造属独立工作，记 follow-up。
+
 ### 未证明（不得由本轮冒充）
 
 原生宿主现场（真实 Codex 会话里的 design declaration、受控测试写入、shadow 事件随新 digest 增长、Console 新审批/上线、紧急恢复实操）未执行；生产安装、真实 Owner 审批、现场效果均无结论。原生版本混装风险仍存在：旧 Codex 运行时缺 `recoveryControl` 会按合同版本拒绝执行新工件（fail-closed、可见 warning），但不会替 Owner 报告“该工件在你当前运行时不被执行”，这是已知残余。

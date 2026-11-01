@@ -118,6 +118,30 @@ describe('approved shadow revision uses one immutable-artifact budget (real SQLi
     expect((await meta()).approvedRuleRevisions).toBeUndefined();
   });
 
+  it('a revision round supersedes the previous repair round instead of replaying its instructions', async () => {
+    const task = await handle.stateManager.getTask(ids.artificer);
+    const pi = task ? hydratePITaskRecord(task) : null;
+    if (!pi) throw new Error('fixture artificer missing');
+    // An approved artifact can come out of an evaluator repair round; its
+    // payload would otherwise be rendered into the revision prompt and its
+    // failed replay evidence re-resolved (the runner throws when that fails).
+    await handle.stateManager.updateTask(ids.artificer, { diagnosticJson: createPITaskDiagnosticJson(mergePITaskMetadata(pi, {
+      repairPayload: { requiredChanges: ['previous repair instruction'], concerns: ['old concern'], previousScore: 0.4,
+        repairIteration: 1, sourceArtificerArtifactId: 'old-artificer-artifact', sourceEvaluatorTaskId: ids.evaluator,
+        diagnosticReplay: { ran: true, passed: false, failedCaseCount: 3 } } })) });
+    expect(await reviseApprovedRuleOnce(await request())).toMatchObject({ status: 'started' });
+    const after = await meta();
+    const carried = after.repairPayload;
+    if (!carried) throw new Error('repair payload dropped; the completion branch depends on it');
+    expect(carried.requiredChanges.join(' ')).not.toContain('previous repair instruction');
+    expect(carried.requiredChanges.join(' ')).toContain('owner_revision_feedback');
+    expect(carried.concerns).toEqual([]);
+    expect(carried.diagnosticReplay).toBeUndefined();
+    // Structural identity survives: repair counting and stale-repair guards read it.
+    expect(carried.repairIteration).toBe(1);
+    expect(carried.sourceEvaluatorTaskId).toBe(ids.evaluator);
+  });
+
   it('preview is read-only, and the consumed source correction does not prevent the separate approved-artifact revision', async () => {
     const before = await snapshot();
     const input = await request();

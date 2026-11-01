@@ -498,7 +498,11 @@ describe('evaluateRefinerRuleHostGate', () => {
       .filter((entry) => entry.caseId.includes(':probe:official-'))
       .map((entry): GoldenTraceCase => ({ caseId: entry.caseId, kind: 'negative', toolName: entry.toolName,
         params: entry.params, expectedDecision: entry.expectedDecision, ruleContext: entry.ruleContext }));
-    expect(cases.map((entry) => entry.caseId.split(':probe:')[1]).sort()).toEqual(['official-pd_status', 'official-rulecode_deactivate']);
+    expect(cases.map((entry) => entry.caseId.split(':probe:')[1]).sort()).toEqual([
+      'official-pd_status', 'official-pd_status-workspace-long', 'official-pd_status-workspace-short',
+      'official-rulecode_deactivate', 'official-rulecode_deactivate-alt-id',
+      'official-rulecode_deactivate-workspace-long', 'official-rulecode_deactivate-workspace-short',
+    ]);
 
     // Ignores input.action.recoveryControl — the defect the revision targeted.
     const ignoringMarker = `function evaluate(input) {
