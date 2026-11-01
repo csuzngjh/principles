@@ -6,7 +6,7 @@
 | 任务 | SPEC-PD-AGENT-CAPABILITY-API-001 v0.5（OG-1 冻结）的 Gate 3 单变更集实施 |
 | 实施工单 | PRI-1068（In Review） |
 | 实施基线 | origin/main `797d2e9fd`（2026-11-01 fetch；比 DELTA-AUDIT 基线 `0d0ea7eb5` 新 8 个提交，全部经并发修改复核确认零交集） |
-| 提交追溯 | **实施主提交** `bf7191f85`（feat，单变更集）；**夹具合规修复** `e8168902a`（扁平 .fixture 存储+物化）与 `892228d95`（ws-empty 零文件工作区容忍）；**报告** `f994c040f`（初版）→ `df9d0a7ce`（终稿 PASS）；**main 刷新 merge** `3de36f661`/`890194ca9`（origin/main 推进后按 git-7 合入）；**CI 实际验证 HEAD = `890194ca9`（26/26 全绿的那个提交）**。评审修复轮（P1-1/P1-2/P2-3/P2-4/P2-5）的提交与 CI 结果见 §5 PR CI 行与 PR 页面——在修复轮 CI 转绿之前，本文 PASS 裁定对应 `890194ca9` 的实现面。 |
+| 提交追溯 | **实施主提交** `bf7191f85`（feat，单变更集）；**夹具合规修复** `e8168902a`（扁平 .fixture 存储+物化）与 `892228d95`（ws-empty 零文件工作区容忍）；**报告** `f994c040f`（初版）→ `df9d0a7ce`（终稿）；**main 刷新 merge** `3de36f661`/`890194ca9`；**评审修复轮** `2688d3991`（G-1 子路径检测+守卫自排除消除、OD-A 结构性自检、invalid_input data:null、黄金目录快照+子进程截止、SHA 追溯、FIXTURE_SUFFIX 删除）；**CI 26/26 验证 HEAD：round 1 = `890194ca9`、round 2（评审修复后）= `2688d3991`**。 |
 | PR | [#2270](https://github.com/csuzngjh/principles/pull/2270)（OPEN，待 Owner 评审；AI 不合并） |
 | 实施形态 | 单变更集 + 单次 git-7 刷新 merge；独立 worktree `D:\Code\_worktrees\principles\PRI-1068-pain-recall-extraction`（writer=zcode，租约+git lock 持有） |
 | 黄金生成记录 | 生成脚本 `.tmp/pain-recall-golden/generate-goldens.mjs`（worktree 内，gitignored）；生成时点 = 删除旧实现**之前**、built CLI 为旧路径实现（base `797d2e9fd` 构建）；MANIFEST.json 含全部夹具与输出 SHA-256 |
@@ -74,7 +74,7 @@
 | lint / typecheck | PASS 0 errors | core+pd-cli 全部涉改文件 eslint；两包 `tsc --noEmit` |
 | 架构回归 | PASS 493/493 | `architecture-regression.test.ts`（IO seam/barrel/DAG/REQUIRED_SOURCE_FILES） |
 | release-locks | PASS | `node scripts/check-release-locks.mjs` exit 0 |
-| PR CI | **PASS 26/26（含 Verify Merge Gate 全量 `verify:merge`），验证 HEAD `890194ca9`** | PR #2270 checks（两轮修复：①generated-artifacts 拒绝 `.pd/` 检入→扁平 `.fixture` 存储+物化重放；②CI 检出无空目录 `ws-empty`→helper 容忍零文件工作区，完整性测试保真。评审 round 2 修复推送后以新一轮 CI 为准） |
+| PR CI | **PASS 26/26（含 Verify Merge Gate 全量 `verify:merge`）× 2 轮**：round 1 @ `890194ca9`（实施面）；**round 2（评审修复）@ `2688d3991`** | PR #2270 checks（round 1 修复：①generated-artifacts 拒绝 `.pd/` 检入→扁平 `.fixture` 存储+物化重放；②CI 检出无空目录 `ws-empty`→helper 容忍零文件工作区。round 2：评审六项修复后复跑全绿） |
 | Mimosa 深扫 | **完成：0/648 findings 涉及本 PR 任何变更文件**（静态边界 static_only_no_runtime_execution；648 条为全仓既有启发式存量，扫描 seal `sha256:de1d61a9…`，job `scan-job-mvxiqw9a`） | `~/.mimosa/security-scans/.../scan-2026-11-01T07-39-49.../`（findings.json 交叉比对脚本 `.tmp/pain-recall-golden/scan-vs-changed.cjs`） |
 
 ## 6. 发布治理
