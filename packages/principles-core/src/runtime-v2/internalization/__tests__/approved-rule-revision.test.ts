@@ -134,12 +134,13 @@ describe('approved shadow revision uses one immutable-artifact budget (real SQLi
     expect(pi.maxAttempts).toBe(3);
     expect(pi.timeoutMs).toBe(1234);
     expect(pi.sourceCorrectionCauseId).toBe('rule-source-correction:old:1');
-    expect(pi.revisionFeedback).toContain('old-noncompliant-code');
-    expect(pi.revisionFeedback).toContain(input.feedback);
+    const feedback = pi.revisionFeedback ?? '';
+    expect(feedback).toContain('old-noncompliant-code');
+    expect(feedback).toContain(input.feedback);
     // The previous rule's code contract travels; its generated trace does not.
-    expect(pi.revisionFeedback).toContain('Require approval before governed changes.');
-    expect(pi.revisionFeedback).not.toContain('GENERATED-TRACE-MARKER');
-    expect(pi.revisionFeedback.length).toBeLessThan(10_000);
+    expect(feedback).toContain('Require approval before governed changes.');
+    expect(feedback).not.toContain('GENERATED-TRACE-MARKER');
+    expect(feedback.length).toBeLessThan(10_000);
     expect(pi.approvedRuleRevisions).toHaveLength(1);
   });
 
