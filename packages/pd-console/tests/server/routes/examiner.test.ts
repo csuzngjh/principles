@@ -400,6 +400,58 @@ describe('Examiner Console run gate (v0.9 §5)', () => {
     expect(retried.body.data.units.every((u: any) => u.state === 'SUCCEEDED')).toBe(true);
     expect(fs.existsSync(path.join(studyDir, 'runs', 'writer.lock'))).toBe(false);
   });
+
+  it('drift discovered only at LOCK TIME (after the server preflight passed) is a 409 with zero side effects', async () => {
+    const created = await call('POST', '/studies', {
+      targetPrincipleId: 'pri-target',
+      experimentMode: 'full_library_incremental',
+      repetitionsPerCase: 1,
+    });
+    expect(created.statusCode).toBe(200);
+    const studyId = created.body.data.studyId as string;
+    const studyDir = path.join(studiesRoot, studyId);
+
+    // First preflight passes: every file the console gate inspects is intact.
+    const preflight = await call('POST', `/studies/${studyId}/preflight`);
+    expect(preflight.body.data.ok).toBe(true);
+
+    // Drift a file only the RUNNER's under-lock verification re-hashes
+    // (judge-only gold). The console preflight does not read it, so this is
+    // exactly the "changed after preflight, caught under the lock" race.
+    const suite = readJsonFile(path.join(studyDir, 'suite-manifest.json'));
+    const caseId = suite.cases[0].caseId as string;
+    const judgeFile = path.join(studyDir, 'judge-only', `${caseId}.json`);
+    const judge = readJsonFile(judgeFile);
+    judge.extraActions = { ...(judge.extraActions ?? {}), deploy: !judge.extraActions?.deploy };
+    fs.writeFileSync(judgeFile, JSON.stringify(judge, null, 2));
+    const afterDrift = fingerprintTree(studyDir);
+
+    const run = await call('POST', `/studies/${studyId}/run`);
+    expect(run.statusCode).toBe(409);
+    expect(run.body.error).toBe('preflight_blocked');
+    expect(Array.isArray(run.body.blockers)).toBe(true);
+    expect(run.body.blockers[0].id).toBe('frozen_study_drift');
+    expect(run.body.blockers[0].problems.join(' ')).toContain('goldHash drift');
+    // No stack, no absolute path, no parser text in the operator payload.
+    const serialized = JSON.stringify(run.body);
+    expect(serialized).not.toContain(studyDir);
+    expect(serialized).not.toContain('FrozenStudyDriftError');
+    expect(serialized).not.toMatch(/\bat .*:\d+:\d+/);
+
+    // Zero side effects: no RUN_STARTED, no lock, no budget row, no attempt.
+    // (The lock acquisition may leave an EMPTY runs/ directory; it must hold
+    // nothing at all.)
+    const withoutRuns = (fp: Record<string, string>) =>
+      Object.fromEntries(Object.entries(fp).filter(([key]) => key !== 'runs' && !key.startsWith('runs/')));
+    expect(withoutRuns(fingerprintTree(studyDir))).toEqual(withoutRuns(afterDrift));
+    expect(fs.existsSync(path.join(studyDir, 'runs', 'writer.lock'))).toBe(false);
+    expect(fs.existsSync(path.join(studyDir, 'budget-ledger.jsonl'))).toBe(false);
+    expect(fs.existsSync(path.join(studyDir, 'runs', caseId))).toBe(false);
+    const runsDir = path.join(studyDir, 'runs');
+    expect(fs.existsSync(runsDir) ? fs.readdirSync(runsDir) : []).toEqual([]);
+    const eventsFile = path.join(studyDir, 'events.jsonl');
+    expect(fs.existsSync(eventsFile) ? fs.readFileSync(eventsFile, 'utf8') : '').not.toContain('RUN_STARTED');
+  });
 });
 
 describe('Examiner DEV-only capability gate (v0.9 §8, P2-1)', () => {
@@ -407,5 +459,28 @@ describe('Examiner DEV-only capability gate (v0.9 §8, P2-1)', () => {
     expect(isExaminerDevRuntime('file:///app/packages/pd-console/dist/server.js', {})).toBe(false);
     expect(isExaminerDevRuntime('file:///app/packages/pd-console/src/server/routes/examiner.ts', {})).toBe(true);
     expect(isExaminerDevRuntime('file:///app/dist/server.js', { PD_EXAMINER_DEV: '1' })).toBe(true);
+  });
+
+  it('NODE_ENV=production is an unconditional hard gate the DEV override cannot lift', () => {
+    expect(isExaminerDevRuntime('file:///app/packages/pd-console/src/server/routes/examiner.ts', { NODE_ENV: 'production' })).toBe(false);
+    expect(isExaminerDevRuntime('file:///app/dist/server.js', { NODE_ENV: 'production', PD_EXAMINER_DEV: '1' })).toBe(false);
+    expect(isExaminerDevRuntime('file:///app/dist/server.js', { NODE_ENV: 'development', PD_EXAMINER_DEV: '1' })).toBe(true);
+  });
+
+  it('the route answers 404 in production even when PD_EXAMINER_DEV=1 is set', async () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousDev = process.env.PD_EXAMINER_DEV;
+    process.env.NODE_ENV = 'production';
+    process.env.PD_EXAMINER_DEV = '1';
+    try {
+      const res = await call('GET', '/overview');
+      expect(res.statusCode).toBe(404);
+      expect(res.body.error).toBe('examiner_not_enabled');
+    } finally {
+      if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previousNodeEnv;
+      if (previousDev === undefined) delete process.env.PD_EXAMINER_DEV;
+      else process.env.PD_EXAMINER_DEV = previousDev;
+    }
   });
 });

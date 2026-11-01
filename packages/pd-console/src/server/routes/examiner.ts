@@ -59,17 +59,44 @@ const STUDY_ROUTE_PATTERN = /^\/studies\/([A-Za-z0-9-]+)(\/[^/]*)?$/;
  * P2-1: the Examiner is a DEV-ONLY capability. The gate is SERVER-SIDE and
  * cannot be set by a client — it reads only the running module's own URL and
  * the operator's environment: a source run (tsx/vitest, import.meta.url ends
- * with .ts) or an explicit `PD_EXAMINER_DEV=1`. A production build
- * (`dist/server.js`) has no lab tooling and answers 404 — never 503 — so the
- * capability simply does not exist there.
+ * with .ts) or an explicit `PD_EXAMINER_DEV=1`. `NODE_ENV=production` is an
+ * UNCONDITIONAL hard gate: not even the DEV override can enable the surface
+ * there, so a production build (`dist/server.js`) answers 404 — never 503.
  */
 export function isExaminerDevRuntime(moduleUrl: string, env: Record<string, string | undefined> = process.env): boolean {
+  if (env.NODE_ENV === 'production') return false;
   if (env.PD_EXAMINER_DEV === '1') return true;
   return moduleUrl.endsWith('.ts');
 }
 
 function examinerDevEnabled(): boolean {
   return isExaminerDevRuntime(import.meta.url);
+}
+
+type DriftError = Error & { details?: unknown };
+
+/** The runner's lock-time re-verification refusal (dynamic module: match the
+ *  contract name, not an instanceof across import boundaries). */
+function isFrozenStudyDriftError(error: unknown): error is DriftError {
+  return error instanceof Error && (error as { name?: unknown }).name === 'FrozenStudyDriftError';
+}
+
+/**
+ * Drift details are CONTRACT output (check names + case ids), but they travel
+ * into an HTTP payload: scrub anything path-shaped and bound the size so a
+ * refusal never leaks filesystem internals or parser text.
+ */
+function driftProblems(details: unknown): string[] {
+  if (typeof details !== 'string') return [];
+  return details
+    .split(';')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => part
+      .replace(/[A-Za-z]:[\\/][^\s;]*/g, '<path>')
+      .replace(/(^|[\s(=])\/[^\s;()]+/g, '$1<path>')
+      .slice(0, 240))
+    .slice(0, 20);
 }
 
 /**
@@ -275,10 +302,20 @@ export async function handleExaminerRoute(
         const summary = await offlineStudyPass(labModules, studyDir, context);
         sendSuccess(res, { studyId: access.studyId, units: summary.units.map((unit) => ({ unit: unit.unit, state: unit.state })) });
       } catch (error) {
+        // P1-4: both gates answer the same 409 shape. The server preflight
+        // refuses BEFORE RUN_STARTED; the runner re-verifies UNDER the study
+        // lock and refuses on drift discovered after that first check. Either
+        // way: no RUN_STARTED, no reservation, no actor, no attempt file.
         if (error instanceof ExaminerPreflightBlockedError) {
-          // Blockers are structured contract output (check ids + reasons), not
-          // exception text: they are the actionable part for the operator.
-          sendError(res, 409, 'preflight_blocked', `offline preflight blocked; blockers: ${JSON.stringify(error.blockers)}`);
+          sendError(res, 409, 'preflight_blocked', 'offline preflight blocked; no run started, no unit reserved, no actor created', {
+            blockers: error.blockers,
+          });
+          return;
+        }
+        if (isFrozenStudyDriftError(error)) {
+          sendError(res, 409, 'preflight_blocked', 'the frozen study drifted after preflight; no run started, no unit reserved, no actor created', {
+            blockers: [{ id: 'frozen_study_drift', problems: driftProblems(error.details) }],
+          });
           return;
         }
         logRefusal('offline run failed', error);
@@ -305,7 +342,7 @@ export async function handleExaminerRoute(
         return;
       }
       try {
-        const result = reportMaterialize(labModules, studyDir, new Date().toISOString(), () => {
+        const result = reportMaterialize(labModules, studyDir, new Date().toISOString(), context, () => {
           const check = verifyConsoleOwnership(roots.writable, studyDir);
           return check.ok ? { ok: true } : { ok: false, reason: check.reason };
         });

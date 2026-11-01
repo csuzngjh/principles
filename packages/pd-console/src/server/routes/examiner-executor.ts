@@ -43,28 +43,73 @@ export const CONSOLE_OWNERSHIP_MARKER = '.console-study-owner.json';
 const OWNERSHIP_SCHEMA = 'examiner-console-ownership.v1';
 const HANDLE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9-]*$/;
 
+/** Stable, Owner-facing boundary reasons — never paths or exception text. */
+export const STUDY_PATH_PROBLEM = {
+  unresolved: 'the study path cannot be resolved to a canonical location (fail-closed)',
+  notInside: 'the study directory resolves outside the writable console root',
+  historical: 'the study directory resolves inside the historical research area',
+  rootNotIsolated: 'the writable study root must be separate from the historical examiner-studies area',
+} as const;
+
+/**
+ * P1-1 canonical resolution. An existing path goes through `realpath`, which
+ * follows symlinks AND Windows junctions. A path that does not exist yet is
+ * resolved through its deepest EXISTING ancestor (so a symlinked parent can
+ * never hide an escape) and the remaining lexically-safe segments are
+ * appended. Any resolution failure is fail-closed (null).
+ */
+export function canonicalPathSync(target: string): string | null {
+  let current = path.resolve(target);
+  const remainder: string[] = [];
+  for (;;) {
+    let exists = false;
+    try {
+      fs.lstatSync(current);
+      exists = true;
+    } catch (error) {
+      const { code } = error as { code?: string };
+      if (code !== 'ENOENT' && code !== 'ENOTDIR') return null;
+    }
+    if (exists) {
+      try {
+        const real = fs.realpathSync.native(current);
+        return remainder.length > 0 ? path.join(real, ...remainder.reverse()) : real;
+      } catch {
+        return null;
+      }
+    }
+    const parent = path.dirname(current);
+    if (parent === current) return null;
+    remainder.push(path.basename(current));
+    current = parent;
+  }
+}
+
+const foldPath = (value: string): string => (process.platform === 'win32' ? value.toLowerCase() : value);
+
+export function isSamePath(a: string, b: string): boolean {
+  return foldPath(path.resolve(a)) === foldPath(path.resolve(b));
+}
+
+/** Strict containment: equal paths are NOT inside each other. */
+export function isPathInside(root: string, candidate: string): boolean {
+  const r = foldPath(path.resolve(root));
+  const c = foldPath(path.resolve(candidate));
+  const prefix = r.endsWith(path.sep) ? r : `${r}${path.sep}`;
+  return c !== r && c.startsWith(prefix);
+}
+
 /** Resolve the two roots once. `PD_EXAMINER_STUDIES_ROOT` overrides the WRITABLE root only. */
 export function resolveStudyRoots(labRoot: string): StudyRoots {
   const override = process.env.PD_EXAMINER_STUDIES_ROOT;
+  const writable = override ? path.resolve(override) : path.join(path.resolve(labRoot), 'examiner-console-studies');
+  const historical = path.join(path.resolve(labRoot), 'examiner-studies');
+  // Canonical forms when resolvable; the unresolved form is kept so the
+  // boundary gates below can fail closed with a stable reason.
   return {
-    writable: override ? path.resolve(override) : path.join(path.resolve(labRoot), 'examiner-console-studies'),
-    historical: path.join(path.resolve(labRoot), 'examiner-studies'),
+    writable: canonicalPathSync(writable) ?? writable,
+    historical: canonicalPathSync(historical) ?? historical,
   };
-}
-
-const normPath = (p: string): string => (process.platform === 'win32' ? p.toLowerCase() : p);
-const isInside = (root: string, candidate: string): boolean => {
-  const r = normPath(root);
-  const c = normPath(candidate);
-  return c !== r && c.startsWith(`${r}${path.sep}`);
-};
-
-function realpathOrNull(p: string): string | null {
-  try {
-    return fs.realpathSync(p);
-  } catch {
-    return null;
-  }
 }
 
 export function isJsonObject(value: unknown): value is Record<string, unknown> {
@@ -97,7 +142,7 @@ function readJsonObjectFile(file: string): Record<string, unknown> {
 export function readStudyJson(studyDir: string, rel: string): Record<string, unknown> {
   const root = path.resolve(studyDir);
   const file = path.resolve(root, rel);
-  if (!isInside(root, file)) throw new Error('invalid study file path');
+  if (!isPathInside(root, file)) throw new Error('invalid study file path');
   return readJsonObjectFile(file);
 }
 
@@ -127,10 +172,10 @@ export type StudyAccess = { dir: string; studyId: string; readOnly: boolean; rea
  * named like the marker is dropped beside it.
  */
 export function verifyConsoleOwnership(writableRoot: string, studyDir: string): { ok: boolean; reason: string } {
-  const rootReal = realpathOrNull(path.resolve(writableRoot));
-  const dirReal = realpathOrNull(path.resolve(studyDir));
-  if (!rootReal || !dirReal) return { ok: false, reason: 'study directory or writable root is unreadable' };
-  if (!isInside(rootReal, dirReal)) return { ok: false, reason: 'study directory resolves outside the writable console root' };
+  const rootReal = canonicalPathSync(writableRoot);
+  const dirReal = canonicalPathSync(studyDir);
+  if (!rootReal || !dirReal) return { ok: false, reason: STUDY_PATH_PROBLEM.unresolved };
+  if (!isPathInside(rootReal, dirReal)) return { ok: false, reason: STUDY_PATH_PROBLEM.notInside };
   let stat: fs.Stats;
   try {
     stat = fs.lstatSync(studyDir);
@@ -139,7 +184,17 @@ export function verifyConsoleOwnership(writableRoot: string, studyDir: string): 
   }
   if (stat.isSymbolicLink() || !stat.isDirectory()) return { ok: false, reason: 'study directory is not a real directory' };
   const markerPath = path.join(studyDir, CONSOLE_OWNERSHIP_MARKER);
-  if (!fs.existsSync(markerPath)) return { ok: false, reason: 'console ownership marker missing — the study was not created by this server' };
+  // The marker is the trust anchor: a symlink planted here would redirect the
+  // read outside the study, so it must be a regular file.
+  let markerStat: fs.Stats;
+  try {
+    markerStat = fs.lstatSync(markerPath);
+  } catch {
+    return { ok: false, reason: 'console ownership marker missing — the study was not created by this server' };
+  }
+  if (markerStat.isSymbolicLink() || !markerStat.isFile()) {
+    return { ok: false, reason: 'console ownership marker is not a regular file' };
+  }
   let marker: Record<string, unknown>;
   let manifest: Record<string, unknown>;
   try {
@@ -158,7 +213,10 @@ export function verifyConsoleOwnership(writableRoot: string, studyDir: string): 
   if (marker.studyId !== name || manifest.studyId !== name) {
     return { ok: false, reason: 'ownership marker / manifest studyId does not match the directory identity' };
   }
-  if (typeof marker.writableRoot !== 'string' || normPath(marker.writableRoot) !== normPath(rootReal)) {
+  // The marker names the root it was issued for; compare CANONICAL forms so a
+  // symlink/junction alias of the same root cannot pass (or be forged).
+  const markerRoot = typeof marker.writableRoot === 'string' ? canonicalPathSync(marker.writableRoot) : null;
+  if (!markerRoot || !isSamePath(markerRoot, rootReal)) {
     return { ok: false, reason: 'ownership marker was issued for a different writable root' };
   }
   return { ok: true, reason: 'server-owned console study' };
@@ -168,19 +226,31 @@ export function verifyConsoleOwnership(writableRoot: string, studyDir: string): 
  * Resolve a requested study by EXACT membership in the server's own
  * enumeration of BOTH roots. The returned path is always built from an
  * enumerated entry name; callers only select, never construct path segments.
+ * A writable entry that resolves outside the writable root (or into the
+ * historical area) is returned READ-ONLY with a stable boundary reason.
  */
 export function resolveStudyAccess(roots: StudyRoots, requested: string): StudyAccess | null {
   if (!HANDLE_PATTERN.test(requested)) return null;
-  const writableName = listStudyNames(roots.writable).find((entry) => entry === requested);
+  const writableRoot = canonicalPathSync(roots.writable) ?? path.resolve(roots.writable);
+  const writableName = listStudyNames(writableRoot).find((entry) => entry === requested);
   if (writableName) {
-    const dir = path.join(path.resolve(roots.writable), writableName);
+    const dir = path.join(writableRoot, writableName);
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define -- hoisted function declaration
+    const boundary = writableStudyDirProblem(roots, dir);
+    if (boundary) return { dir, studyId: writableName, readOnly: true, reason: boundary };
     const ownership = verifyConsoleOwnership(roots.writable, dir);
     return { dir, studyId: writableName, readOnly: !ownership.ok, reason: ownership.reason };
   }
-  const historicalName = listStudyNames(roots.historical).find((entry) => entry === requested);
+  const historicalRoot = canonicalPathSync(roots.historical) ?? path.resolve(roots.historical);
+  const historicalName = listStudyNames(historicalRoot).find((entry) => entry === requested);
   if (historicalName) {
+    const dir = path.join(historicalRoot, historicalName);
+    const dirReal = canonicalPathSync(dir);
+    const historicalReal = canonicalPathSync(roots.historical);
+    // An entry that resolves outside the historical root is not this study.
+    if (!dirReal || !historicalReal || !isPathInside(historicalReal, dirReal)) return null;
     return {
-      dir: path.join(path.resolve(roots.historical), historicalName),
+      dir: dirReal,
       studyId: historicalName,
       readOnly: true,
       reason: 'historical research asset — readable, never writable from the console',
@@ -189,13 +259,40 @@ export function resolveStudyAccess(roots: StudyRoots, requested: string): StudyA
   return null;
 }
 
-/** The writable root must never be (or contain) the historical research area. */
+/**
+ * The writable root must never be, contain, or be contained by the historical
+ * research area. Both the LEXICAL pair and the CANONICAL pair are checked:
+ * lexical catches obvious aliases, canonical catches symlink/junction aliases
+ * and their not-yet-existing descendants. Unresolvable roots fail closed.
+ */
 export function writableRootProblem(roots: StudyRoots): string | null {
-  const writable = path.resolve(roots.writable);
-  const historical = path.resolve(roots.historical);
-  if (normPath(writable) === normPath(historical) || isInside(historical, writable)) {
-    return 'the writable study root must be separate from the historical examiner-studies area';
+  const writableLexical = path.resolve(roots.writable);
+  const historicalLexical = path.resolve(roots.historical);
+  const writable = canonicalPathSync(writableLexical);
+  const historical = canonicalPathSync(historicalLexical);
+  if (!writable || !historical) return STUDY_PATH_PROBLEM.unresolved;
+  const pairs: [string, string][] = [[writableLexical, historicalLexical], [writable, historical]];
+  for (const [w, h] of pairs) {
+    if (isSamePath(w, h) || isPathInside(h, w) || isPathInside(w, h)) return STUDY_PATH_PROBLEM.rootNotIsolated;
   }
+  return null;
+}
+
+/**
+ * Unified write-boundary check for ONE study directory: inside the canonical
+ * writable root AND outside the canonical historical area. Used by every
+ * write path (creation, ownership marker, run, report) immediately before the
+ * mutation — a check done only at startup is not evidence about now.
+ */
+export function writableStudyDirProblem(roots: StudyRoots, studyDir: string): string | null {
+  const rootProblem = writableRootProblem(roots);
+  if (rootProblem) return rootProblem;
+  const writable = canonicalPathSync(roots.writable);
+  const historical = canonicalPathSync(roots.historical);
+  const dir = canonicalPathSync(studyDir);
+  if (!writable || !historical || !dir) return STUDY_PATH_PROBLEM.unresolved;
+  if (isSamePath(historical, dir) || isPathInside(historical, dir)) return STUDY_PATH_PROBLEM.historical;
+  if (!isPathInside(writable, dir)) return STUDY_PATH_PROBLEM.notInside;
   return null;
 }
 
@@ -273,11 +370,14 @@ export type StudyDirContext = { labRoot: string; roots: StudyRoots };
 
 function studyDirStatus(studyDir: string, context: StudyDirContext | undefined): { insideFrozenArea: boolean; collidesWithHistorical: boolean } {
   if (!context) return { insideFrozenArea: false, collidesWithHistorical: false };
-  const dirReal = realpathOrNull(studyDir) ?? path.resolve(studyDir);
+  const dirReal = canonicalPathSync(studyDir);
+  // Unresolvable is not "probably fine": report it as colliding so the
+  // fail-closed preflight refuses instead of running.
+  if (!dirReal) return { insideFrozenArea: true, collidesWithHistorical: true };
   const insideRoot = (root: string): boolean => {
-    const r = realpathOrNull(root);
-    if (!r) return false;
-    return normPath(r) === normPath(dirReal) || isInside(r, dirReal);
+    const real = canonicalPathSync(root);
+    if (!real) return true;
+    return isSamePath(real, dirReal) || isPathInside(real, dirReal);
   };
   return {
     insideFrozenArea: insideRoot(path.join(context.labRoot, 'challenge-studies')),
@@ -337,6 +437,13 @@ export function preflightCheck(
  * all, so no attempt is reserved and no actor is created.
  */
 export async function offlineStudyPass(modules: LabModules, studyDir: string, context?: StudyDirContext): Promise<{ units: Record<string, unknown>[] }> {
+  // The write boundary is re-evaluated here (not only at route start): a
+  // directory swapped for a symlink/junction after access resolution must not
+  // reach the runner.
+  if (context) {
+    const boundary = writableStudyDirProblem(context.roots, studyDir);
+    if (boundary) throw new ExaminerPreflightBlockedError([{ id: 'study_path_boundary', reason: boundary }]);
+  }
   const preflight = preflightCheck(modules, studyDir, context);
   if (!preflight.ok) throw new ExaminerPreflightBlockedError(preflight.blockers);
   const manifest = readStudyJson(studyDir, 'examiner-manifest.json');
@@ -360,9 +467,24 @@ export function reportMaterialize(
   modules: LabModules,
   studyDir: string,
   now: string,
+  context: StudyDirContext | undefined,
   canWrite: () => { ok: boolean; reason?: string },
 ): { status: string; written: boolean } {
-  return modules.report.writeBehaviorReportV2(studyDir, { now, canWrite });
+  if (context) {
+    const boundary = writableStudyDirProblem(context.roots, studyDir);
+    if (boundary) throw new ExaminerWriteRefusedError(boundary);
+  }
+  // The lab calls canWrite() immediately before writing; re-apply the boundary
+  // check there so a directory swapped AFTER this function returned still
+  // fails closed instead of writing into an alias.
+  const guardedCanWrite = (): { ok: boolean; reason?: string } => {
+    if (context) {
+      const boundary = writableStudyDirProblem(context.roots, studyDir);
+      if (boundary) return { ok: false, reason: boundary };
+    }
+    return canWrite();
+  };
+  return modules.report.writeBehaviorReportV2(studyDir, { now, canWrite: guardedCanWrite });
 }
 
 export function studyReportVerify(modules: LabModules, studyDir: string): { checks: { ok: boolean }[] } {
@@ -400,24 +522,43 @@ export function mintStudyHandle(roots: StudyRoots): { studyId: string; studyDir:
   const problem = writableRootProblem(roots);
   if (problem) throw new ExaminerWriteRefusedError(problem);
   fs.mkdirSync(roots.writable, { recursive: true });
+  // Re-resolve AFTER mkdir: the pre-mkdir check is not evidence about the
+  // directory that now exists (a parent could have become a link meanwhile).
+  const afterMkdir = writableRootProblem(roots);
+  if (afterMkdir) throw new ExaminerWriteRefusedError(afterMkdir);
+  const writableReal = canonicalPathSync(roots.writable);
+  if (!writableReal) throw new ExaminerWriteRefusedError(STUDY_PATH_PROBLEM.unresolved);
   const studyId = `EXM-C-${randomUUID().toUpperCase()}`;
   // A historical identity must never be reused for a new write target.
   if (listStudyNames(roots.historical).includes(studyId)) return null;
-  const candidate = path.join(path.resolve(roots.writable), studyId);
+  const candidate = path.join(writableReal, studyId);
   if (fs.existsSync(candidate)) return null;
   return { studyId, studyDir: candidate };
 }
 
-function writeOwnershipMarker(studyId: string, studyDir: string, writableRoot: string): void {
+function writeOwnershipMarker(studyId: string, studyDir: string, roots: StudyRoots): void {
+  // Write-time boundary re-check (creation may have taken a while).
+  const boundary = writableStudyDirProblem(roots, studyDir);
+  if (boundary) throw new ExaminerWriteRefusedError(boundary);
+  const rootReal = canonicalPathSync(roots.writable);
+  if (!rootReal) throw new ExaminerWriteRefusedError(STUDY_PATH_PROBLEM.unresolved);
   const marker = {
     schema: OWNERSHIP_SCHEMA,
     origin: 'pd-console',
     studyId,
-    writableRoot: realpathOrNull(path.resolve(writableRoot)) ?? path.resolve(writableRoot),
+    writableRoot: rootReal,
     createdAt: new Date().toISOString(),
   };
-  fs.writeFileSync(path.join(studyDir, CONSOLE_OWNERSHIP_MARKER), `${JSON.stringify(marker, null, 2)}\n`, 'utf8');
-  const check = verifyConsoleOwnership(writableRoot, studyDir);
+  // Exclusive create: never follow (or overwrite) a file/symlink that was
+  // planted inside the freshly minted directory.
+  const markerPath = path.join(studyDir, CONSOLE_OWNERSHIP_MARKER);
+  const fd = fs.openSync(markerPath, 'wx');
+  try {
+    fs.writeSync(fd, `${JSON.stringify(marker, null, 2)}\n`);
+  } finally {
+    fs.closeSync(fd);
+  }
+  const check = verifyConsoleOwnership(roots.writable, studyDir);
   if (!check.ok) throw new ExaminerWriteRefusedError(`console ownership marker was not accepted: ${check.reason}`);
 }
 
@@ -442,6 +583,8 @@ export async function materializeConsoleStudy(
 ): Promise<{ studyId: string; targetPrincipleId: string; manifestHash: unknown; plannedPairs: number | null }> {
   const target = selection.ledgerPrinciples[selection.targetIndex];
   if (!target) throw new Error('the target principle was not found in the workspace ledger');
+  const rootProblem = writableRootProblem(roots);
+  if (rootProblem) throw new ExaminerWriteRefusedError(rootProblem);
   const experimentMode: 'isolated_principle' | 'full_library_incremental' = selection.isolatedMode ? 'isolated_principle' : 'full_library_incremental';
   const minted = mintStudyHandle(roots);
   if (!minted) throw new Error('server-minted study handle collided — retry');
@@ -454,7 +597,11 @@ export async function materializeConsoleStudy(
     ledgerPrinciples: selection.ledgerPrinciples,
     repetitionsPerCase: selection.repetitionsPerCase,
   });
-  writeOwnershipMarker(minted.studyId, minted.studyDir, roots.writable);
+  // The lab created the directory tree; verify the REAL location before the
+  // ownership marker (the trust anchor) is written into it.
+  const boundary = writableStudyDirProblem(roots, minted.studyDir);
+  if (boundary) throw new ExaminerWriteRefusedError(boundary);
+  writeOwnershipMarker(minted.studyId, minted.studyDir, roots);
   const { pairs } = created.pairAssignment;
   return {
     studyId: minted.studyId,
