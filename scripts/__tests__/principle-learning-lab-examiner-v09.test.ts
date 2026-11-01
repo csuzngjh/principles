@@ -10,7 +10,7 @@ import { makeExaminerV3Case } from './fixtures/examiner-v07.mjs';
 import { hashOfCanonical, freezeMapping } from '../dev/principle-learning-lab/lib/challenge-freeze.mjs';
 import { runChallengeStudy, verifyExaminerArmConfigsFrozen, resolveDispatchUnits } from '../dev/principle-learning-lab/lib/challenge-runner.mjs';
 import { createScriptedStub, buildOfflineRuntimeReceipt } from '../dev/principle-learning-lab/lib/challenge-actor.mjs';
-import { buildBehaviorReportV2, writeBehaviorReportV2, verifyBehaviorReportV2 } from '../dev/principle-learning-lab/lib/challenge-behavior-report.mjs';
+import { buildBehaviorReportV2, writeBehaviorReportV2, verifyBehaviorReportV2, renderBehaviorReportV2Json, renderBehaviorReportV2Markdown } from '../dev/principle-learning-lab/lib/challenge-behavior-report.mjs';
 import { computeITT, computeTreatmentFidelity } from '../dev/principle-learning-lab/lib/challenge-statistics.mjs';
 import {
   buildHostEffectivePrincipleSet, verifyHostEffectivePrincipleSet,
@@ -52,13 +52,13 @@ function mkdtemp(tag: string): string {
   return dir;
 }
 
-function assembleStudyInputs({ mode, repetitionsPerCase = 1, caseDefs = null, ruleCodes = [] as any[], independence = true } = {}) {
+function assembleStudyInputs({ mode, repetitionsPerCase = 1, caseDefs = null, ruleCodes = [] as any[], independence = true, studyId = 'EXM-V09-STUDY' } = {}) {
   const caseList = caseDefs || [makeExaminerV3Case({ caseId: 'EXM-V09-T1' }), makeExaminerV3Case({ caseId: 'EXM-V09-T2', boundary: true })];
   const principleFrozen = { contentJson: { principleDraft: { statement: TARGET.text } } };
   const mapping: any = { schema: 'PainMechanismMappingV1', mappingId: 'PMM-V09', principleContentHash: hashOfCanonical(principleFrozen.contentJson), observedFailure: 'f', failureMechanism: 'assertion_without_observation', ownerGroundedGoal: 'g' };
   mapping.mappingHash = freezeMapping(mapping).mappingHash;
   return {
-    studyId: 'EXM-V09-STUDY',
+    studyId,
     experimentMode: mode,
     hepsPrinciples: { principles: PRINCIPLES, targetPrincipleId: TARGET.id, host: 'offline-stub' },
     ruleCodeFacts: { ruleCodes, principleRuleCodeIndependence: independence },
@@ -925,6 +925,252 @@ describe('v0.9 §13.D preregistration binding and immutable anchor', () => {
     const computed = computeExaminerStudyBindings(dir);
     expect(computed.ok).toBe(false);
     expect(computed.problems.join(' ')).toContain('payloadHash != rebuilt dual-mode payload');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P1-3 (round 2) — a missing anchor is fail-closed for every study that is not
+// an EXACTLY identified pre-anchor historical study.
+// ---------------------------------------------------------------------------
+describe('v0.9 §13.D anchor-missing fail-closed policy', () => {
+  const studyDirOf = (tag: string, studyId = 'EXM-V09-STUDY') => path.join(mkdtemp(tag), studyId);
+
+  function stripAnchorEvents(dir: string) {
+    const file = path.join(dir, 'events.jsonl');
+    const kept = fs.readFileSync(file, 'utf8').split('\n').filter((line) => line.trim() !== '')
+      .filter((line) => JSON.parse(line).type !== 'PREREGISTRATION_FROZEN');
+    fs.writeFileSync(file, `${kept.join('\n')}\n`);
+  }
+
+  function readEvents(dir: string) {
+    return fs.readFileSync(path.join(dir, 'events.jsonl'), 'utf8').split('\n').filter((line) => line.trim() !== '').map((line) => JSON.parse(line));
+  }
+
+  function writeEvents(dir: string, events: any[]) {
+    fs.writeFileSync(path.join(dir, 'events.jsonl'), `${events.map((e) => JSON.stringify(e)).join('\n')}\n`);
+  }
+
+  /** Internally consistent manifest rewrite (re-pin every pointer). */
+  function repinManifest(dir: string, mutate: (manifest: any) => void) {
+    const readJson = (rel: string) => JSON.parse(fs.readFileSync(path.join(dir, rel), 'utf8'));
+    const writeJson = (rel: string, value: unknown) => fs.writeFileSync(path.join(dir, rel), `${JSON.stringify(value, null, 2)}\n`);
+    const manifest = readJson('examiner-manifest.json');
+    mutate(manifest);
+    const { manifestHash, ...core } = manifest;
+    manifest.manifestHash = hashOfCanonical(core);
+    writeJson('examiner-manifest.json', manifest);
+    const prereg = readJson('preregistration.json');
+    prereg.examiner.manifestHash = manifest.manifestHash;
+    writeJson('preregistration.json', prereg);
+    const hashes = readJson('hashes.json');
+    hashes.examinerManifestHash.value = manifest.manifestHash;
+    hashes.preregistrationHash.value = hashOfCanonical(prereg);
+    writeJson('hashes.json', hashes);
+  }
+
+  it('A. a valid anchored study keeps binding + capacity + attributable fidelity', async () => {
+    const dir = studyDirOf('v09-p13-anchored', 'EXM-V09-ANCHORED');
+    writeExaminerStudyArtifacts({ ...assembleStudyInputs({ mode: 'full_library_incremental' }), studyDir: dir });
+    await runExaminerStudy(dir);
+    const report = buildBehaviorReportV2(dir, { now: NOW });
+    expect(report.examiner.preregistrationBinding).toEqual({
+      bindingHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      anchor: 'VERIFIED',
+    });
+    expect(report.examiner.capacity).toBeDefined();
+    expect(report.examiner.treatmentFidelity.status).toBeUndefined();
+    expect(report.examiner.treatmentFidelity.contextPresent).toBe(2);
+    expect(report.examiner.treatmentFidelity.runtimeLoaded).toBe(2);
+    expect(report.examiner.injectionEvidence.treatmentChains).toBe(2);
+    expect(report.bindings.verified).toBe(true);
+    expect(report.status).not.toBe('REPORT_INVALID');
+  });
+
+  it('B. deleting the anchor makes a new study UNTRUSTED: critical finding, INVALID, no legacy scan, no zero-disguised evidence', async () => {
+    const dir = studyDirOf('v09-p13-missing', 'EXM-V09-NOANCHOR');
+    writeExaminerStudyArtifacts({ ...assembleStudyInputs({ mode: 'full_library_incremental' }), studyDir: dir });
+    await runExaminerStudy(dir);
+    // The run produced real sidecars: if legacy scanning were used they would
+    // be counted, so a null count proves the fallback did not happen.
+    const sidecars: string[] = [];
+    const walk = (p: string) => {
+      for (const entry of fs.readdirSync(p, { withFileTypes: true })) {
+        const full = path.join(p, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (entry.name.startsWith('injection-evidence-')) sidecars.push(full);
+      }
+    };
+    walk(path.join(dir, 'runs'));
+    expect(sidecars.length).toBeGreaterThan(0);
+
+    stripAnchorEvents(dir);
+    expect(verifyExaminerStudyBindings(dir).anchor).toBe('MISSING');
+
+    const report = buildBehaviorReportV2(dir, { now: NOW });
+    const finding = report.integrity.findings.find((f: any) => f.id === 'examiner_preregistration_anchor_missing');
+    expect(finding).toBeDefined();
+    expect(finding.severity).toBe('critical');
+    expect(report.status).toBe('REPORT_INVALID');
+    expect(report.bindings.verified).toBe(false);
+    expect(report.examiner.preregistrationBinding).toBeUndefined();
+    expect(report.examiner.capacity).toBeUndefined();
+    // Unknown is reported as UNKNOWN, never as 0.
+    expect(report.examiner.treatmentFidelity.status).toBe('UNKNOWN');
+    expect(report.examiner.treatmentFidelity.contextPresent).toBeNull();
+    expect(report.examiner.treatmentFidelity.evidencedChains).toBeNull();
+    expect(report.examiner.treatmentFidelity.unresolvedTreatmentUnits).toBe(2);
+    expect(report.examiner.treatmentFidelity.nonTargetRetention.eligible).toBeNull();
+    expect(report.examiner.injectionEvidence.treatmentChains).toBeUndefined();
+    expect(report.examiner.injectionEvidence.controlChains).toBeUndefined();
+    // No legacy sidecar scan findings either.
+    expect(report.integrity.findings.some((f: any) => String(f.id).startsWith('examiner_injection_'))).toBe(false);
+    expect(renderBehaviorReportV2Markdown(report)).toContain('treatment fidelity: UNKNOWN');
+  });
+
+  it('C1. a tampered anchor bindingHash is a critical drift finding and never falls back to legacy', async () => {
+    const dir = studyDirOf('v09-p13-anchor-hash', 'EXM-V09-AHASH');
+    writeExaminerStudyArtifacts({ ...assembleStudyInputs({ mode: 'isolated_principle' }), studyDir: dir });
+    await runExaminerStudy(dir);
+    const events = readEvents(dir);
+    const anchor = events.find((e: any) => e.type === 'PREREGISTRATION_FROZEN');
+    anchor.bindingHash = 'f'.repeat(64);
+    writeEvents(dir, events);
+    expect(verifyExaminerStudyBindings(dir).anchor).toBe('MISMATCH');
+    const report = buildBehaviorReportV2(dir, { now: NOW });
+    expect(report.integrity.findings.some((f: any) => f.id === 'examiner_preregistration_binding_drift' && f.severity === 'critical')).toBe(true);
+    expect(report.examiner.preregistrationBinding).toBeUndefined();
+    expect(report.examiner.treatmentFidelity.status).toBe('UNKNOWN');
+    expect(report.status).toBe('REPORT_INVALID');
+    expect(report.bindings.verified).toBe(false);
+  });
+
+  it('C2. a structurally broken anchor event is rejected', async () => {
+    const dir = studyDirOf('v09-p13-anchor-structure', 'EXM-V09-ASTRUCT');
+    writeExaminerStudyArtifacts({ ...assembleStudyInputs({ mode: 'isolated_principle' }), studyDir: dir });
+    await runExaminerStudy(dir);
+    const events = readEvents(dir);
+    const anchor = events.find((e: any) => e.type === 'PREREGISTRATION_FROZEN');
+    delete anchor.binding;
+    writeEvents(dir, events);
+    expect(verifyExaminerStudyBindings(dir).anchor).toBe('MISMATCH');
+    const report = buildBehaviorReportV2(dir, { now: NOW });
+    expect(report.integrity.findings.some((f: any) => f.id === 'examiner_preregistration_binding_drift' && f.severity === 'critical')).toBe(true);
+    expect(report.status).toBe('REPORT_INVALID');
+  });
+
+  it('C3. a bound manifest modified after freezing is rejected (binding unreadable, INVALID)', async () => {
+    const dir = studyDirOf('v09-p13-manifest-tamper', 'EXM-V09-MTAMPER');
+    writeExaminerStudyArtifacts({ ...assembleStudyInputs({ mode: 'isolated_principle' }), studyDir: dir });
+    await runExaminerStudy(dir);
+    const manifestPath = path.join(dir, 'examiner-manifest.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    manifest.scorerVersion = 'forged-scorer-v9';
+    fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    expect(verifyExaminerStudyBindings(dir).anchor).toBe('NOT_CHECKED');
+    const report = buildBehaviorReportV2(dir, { now: NOW });
+    expect(report.integrity.findings.some((f: any) => f.id === 'examiner_preregistration_binding_unreadable' && f.severity === 'critical')).toBe(true);
+    expect(report.status).toBe('REPORT_INVALID');
+    expect(report.examiner.preregistrationBinding).toBeUndefined();
+    expect(report.examiner.treatmentFidelity.status).toBe('UNKNOWN');
+  });
+
+  it('C4. a modified preregistration hash pointer is rejected', async () => {
+    const dir = studyDirOf('v09-p13-prereg-hash', 'EXM-V09-PHASH');
+    writeExaminerStudyArtifacts({ ...assembleStudyInputs({ mode: 'isolated_principle' }), studyDir: dir });
+    await runExaminerStudy(dir);
+    const hashesPath = path.join(dir, 'hashes.json');
+    const hashes = JSON.parse(fs.readFileSync(hashesPath, 'utf8'));
+    hashes.preregistrationHash.value = 'f'.repeat(64);
+    fs.writeFileSync(hashesPath, `${JSON.stringify(hashes, null, 2)}\n`);
+    const verified = verifyExaminerStudyBindings(dir);
+    expect(verified.ok).toBe(false);
+    expect(verified.anchor).toBe('NOT_CHECKED');
+    const report = buildBehaviorReportV2(dir, { now: NOW });
+    expect(report.status).toBe('REPORT_INVALID');
+    expect(report.bindings.verified).toBe(false);
+  });
+
+  it('D. exactly identified pre-anchor historical studies keep the legacy path and their stored reports are untouched', () => {
+    for (const studyId of ['EXM-V09-ACC-ISO', 'EXM-V09-ACC-FULL']) {
+      const dir = path.join(labRoot, 'examiner-studies', studyId);
+      const storedJson = fs.readFileSync(path.join(dir, 'behavior-report-v2.json'));
+      const storedMd = fs.readFileSync(path.join(dir, 'behavior-report-v2.md'));
+      const stored = JSON.parse(storedJson.toString('utf8'));
+      const report = buildBehaviorReportV2(dir, { now: stored.generatedAt });
+      // Recognised historical identity: no anchor-missing failure, and the
+      // pre-anchor evidence path (not the UNKNOWN shape) is retained.
+      expect(report.integrity.findings.some((f: any) => f.id === 'examiner_preregistration_anchor_missing')).toBe(false);
+      expect(report.examiner.preregistrationBinding).toBeUndefined();
+      expect(report.examiner.treatmentFidelity.status).toBeUndefined();
+      expect(typeof report.examiner.treatmentFidelity.contextPresent).toBe('number');
+      expect(report.examiner.capacity).toBeUndefined();
+      // Status and the finding set are unchanged from the pre-fix report.
+      expect(report.status).toBe('REPORT_INVALID');
+      expect(report.integrity.findings.map((f: any) => `${f.severity}:${f.id}`))
+        .toEqual(['critical:denominator_unverifiable', 'critical:examiner_preregistration_binding_unreadable', 'critical:frozen_binding_drift']);
+      // Deterministic recomputation; the stored historical report files are
+      // never rewritten by report generation.
+      const again = buildBehaviorReportV2(dir, { now: stored.generatedAt });
+      expect(renderBehaviorReportV2Json(again)).toBe(renderBehaviorReportV2Json(report));
+      expect(renderBehaviorReportV2Markdown(again)).toBe(renderBehaviorReportV2Markdown(report));
+      expect(fs.readFileSync(path.join(dir, 'behavior-report-v2.json')).equals(storedJson)).toBe(true);
+      expect(fs.readFileSync(path.join(dir, 'behavior-report-v2.md')).equals(storedMd)).toBe(true);
+    }
+  });
+
+  it('D2. a custom pre-anchor study with a current-contract binding must not be treated as historical', () => {
+    const parent = mkdtemp('v09-p13-custom-legacy');
+    const dir = path.join(parent, 'EXM-V09-CUSTOM');
+    writeExaminerStudyArtifacts({ ...assembleStudyInputs({ mode: 'isolated_principle' }), studyDir: dir });
+    stripAnchorEvents(dir);
+    // bindings recompute cleanly under the current implementation, but the
+    // study is NOT in the exact historical identity table → fail closed.
+    expect(computeExaminerStudyBindings(dir).ok).toBe(true);
+    expect(verifyExaminerStudyBindings(dir).anchor).toBe('MISSING');
+    const report = buildBehaviorReportV2(dir, { now: NOW });
+    expect(report.integrity.findings.some((f: any) => f.id === 'examiner_preregistration_anchor_missing' && f.severity === 'critical')).toBe(true);
+    expect(report.status).toBe('REPORT_INVALID');
+  });
+
+  it('E. a study that only looks historical (EXM-V09-ACC-* prefix) without an anchor is rejected', () => {
+    const dir = studyDirOf('v09-p13-prefix-forge', 'EXM-V09-ACC-FORGED');
+    writeExaminerStudyArtifacts({ ...assembleStudyInputs({ mode: 'isolated_principle', studyId: 'EXM-V09-ACC-FORGED' }), studyDir: dir });
+    stripAnchorEvents(dir);
+    const report = buildBehaviorReportV2(dir, { now: NOW });
+    expect(report.integrity.findings.some((f: any) => f.id === 'examiner_preregistration_anchor_missing' && f.severity === 'critical')).toBe(true);
+    expect(report.status).toBe('REPORT_INVALID');
+    expect(report.bindings.verified).toBe(false);
+  });
+
+  it('E2. an unknown manifest version is fail-closed even with a consistent re-pin and an anchor', () => {
+    const dir = studyDirOf('v09-p13-unknown-version', 'EXM-V09-VUNKNOWN');
+    writeExaminerStudyArtifacts({ ...assembleStudyInputs({ mode: 'isolated_principle' }), studyDir: dir });
+    repinManifest(dir, (manifest) => { manifest.schema = 'examiner-study-manifest.v999'; });
+    expect(verifyExaminerStudyBindings(dir).anchor).toBe('NOT_CHECKED');
+    const report = buildBehaviorReportV2(dir, { now: NOW });
+    expect(report.status).toBe('REPORT_INVALID');
+    expect(report.bindings.verified).toBe(false);
+    expect(report.examiner.preregistrationBinding).toBeUndefined();
+    expect(report.examiner.treatmentFidelity.status).toBe('UNKNOWN');
+  });
+
+  it('F. the write gate never marks an unanchored study READY, and repeated writes cannot bypass it', async () => {
+    const dir = studyDirOf('v09-p13-write-gate', 'EXM-V09-WGATE');
+    writeExaminerStudyArtifacts({ ...assembleStudyInputs({ mode: 'isolated_principle' }), studyDir: dir });
+    await runExaminerStudy(dir);
+    stripAnchorEvents(dir);
+    const first = writeBehaviorReportV2(dir, { now: NOW });
+    expect(first.status).toBe('REPORT_INVALID');
+    expect(first.eventAppended).toBe(false);
+    const reportPath = path.join(dir, 'behavior-report-v2.json');
+    const firstRaw = fs.readFileSync(reportPath, 'utf8');
+    expect(JSON.parse(firstRaw).status).toBe('REPORT_INVALID');
+    expect(readEvents(dir).some((e: any) => e.type === 'REPORT_READY_V2')).toBe(false);
+    const second = writeBehaviorReportV2(dir, { now: NOW });
+    expect(second.status).toBe('REPORT_INVALID');
+    expect(second.eventAppended).toBe(false);
+    expect(fs.readFileSync(reportPath, 'utf8')).toBe(firstRaw);
+    expect(readEvents(dir).some((e: any) => e.type === 'REPORT_READY_V2')).toBe(false);
   });
 });
 

@@ -1362,6 +1362,75 @@ export function projectVBDRCase({
   };
 }
 
+// ---------------------------------------------------------------------------
+// P1-3 anchor policy — exact pre-anchor historical identities
+// ---------------------------------------------------------------------------
+//
+// The append-only PREREGISTRATION_FROZEN anchor was introduced after the two
+// acceptance studies below were frozen. They carry no anchor and must keep
+// their pre-anchor report path, so each is recognised by an EXACT identity:
+// studyId + a fingerprint over its immutable frozen artifacts. A missing
+// anchor alone is never sufficient, and the `EXM-V09-ACC-*` prefix is not
+// sufficient either — any unrecognised study without a valid anchor is
+// untrusted and can never certify a report.
+const PRE_ANCHOR_HISTORICAL_STUDIES = Object.freeze([
+  { studyId: 'EXM-V09-ACC-ISO', fingerprint: '952ede0722e338fd3bc1172c389457071df354f869043e8b267966ca653e30f8' },
+  { studyId: 'EXM-V09-ACC-FULL', fingerprint: '79a86f64d576a3c70c508fd69c6d99415b189092df9a1328d50954fd4f9140e2' },
+]);
+
+function preAnchorHistoricalFingerprint(binding) {
+  return hashOfCanonical({
+    studyId: binding.studyId,
+    manifestHash: binding.manifestHash,
+    pairAssignmentHash: binding.pairAssignmentHash,
+    preregistrationHash: binding.preregistrationHash,
+    suiteHash: binding.suiteHash,
+    mappingHash: binding.mappingHash,
+    principleContentHash: binding.principleContentHash,
+  });
+}
+
+function isPreAnchorHistoricalStudy(binding) {
+  if (!binding) return false;
+  const fingerprint = preAnchorHistoricalFingerprint(binding);
+  return PRE_ANCHOR_HISTORICAL_STUDIES.some((entry) => entry.studyId === binding.studyId && entry.fingerprint === fingerprint);
+}
+
+/**
+ * An untrusted (unanchored, unrecognised) study has no attributable injection
+ * evidence: every count is UNKNOWN — never 0 — and no capacity record is
+ * trusted, so the report cannot present absence of evidence as evidence of
+ * absence.
+ */
+function untrustedTreatmentFidelity(plannedTreatmentUnits) {
+  return {
+    metric: 'TreatmentFidelity',
+    status: 'UNKNOWN',
+    plannedTreatmentUnits,
+    evidencedChains: null,
+    configured: null,
+    selected: null,
+    submitted: null,
+    hostAccepted: null,
+    contextPresent: null,
+    runtimeLoaded: null,
+    actualInjectionRate: { status: 'NOT_ESTIMABLE', reason: 'preregistration anchor missing — injection evidence cannot be attributed' },
+    controlContamination: { units: null, ofControlChains: null },
+    nonTargetRetention: {
+      eligible: null,
+      deliveredInTreatment: null,
+      deliveredInControl: null,
+      treatmentRetentionRate: null,
+      controlRetentionRate: null,
+      note: 'preregistration anchor missing — capacity records are not trusted',
+    },
+    capacityEvictions: { units: null, details: [] },
+    unresolvedTreatmentUnits: plannedTreatmentUnits,
+    coverage: { status: 'UNKNOWN', note: 'preregistration anchor missing — no planned treatment unit has an attributable evidence chain' },
+    rule: 'fidelity is a mechanism observability record — the actually-injected subset may NEVER replace the ITT primary analysis; an unverifiable injection downgrades causal attribution but never deletes assigned units',
+  };
+}
+
 /**
  * v0.9 examiner block — computed ONLY when the study carries an
  * examiner-manifest.json (new v0.9 studies; historical studies are untouched).
@@ -1385,17 +1454,32 @@ function buildExaminerBlockMaybe(studyDir, {
   if (!manifestCheck.ok) {
     addFinding('examiner_manifest_drift', 'critical', 'examiner-manifest.json', manifestCheck.problems.join('; '));
   }
-  // P1-3: cross-file binding. Legacy studies predate the immutable anchor and
-  // keep their historical report byte-identical (no field, no finding); a
-  // study created by the anchored path must match its anchor exactly.
+  // P1-3: cross-file binding + immutable anchor. A study created by the
+  // anchored path must match its anchor exactly. Only an EXACTLY identified
+  // pre-anchor historical study may use the legacy (unanchored) evidence path;
+  // every other study without a valid anchor is untrusted and fails closed.
   let preregistrationBinding = null;
-  const bindings = verifyExaminerStudyBindings(studyDir, { requireAnchor: false });
+  let legacyEvidencePath = false;
+  // Default requireAnchor:true — a missing anchor is never silently tolerated.
+  const bindings = verifyExaminerStudyBindings(studyDir);
+  const preAnchorHistorical = isPreAnchorHistoricalStudy(bindings.binding);
   if (bindings.anchor === 'VERIFIED') {
     preregistrationBinding = { bindingHash: bindings.bindingHash, anchor: 'VERIFIED' };
-  } else if (bindings.anchor === 'MISMATCH' || (!bindings.ok && bindings.anchor !== 'NOT_CHECKED')) {
+  } else if (preAnchorHistorical && bindings.anchor !== 'MISMATCH') {
+    // Known historical identity: keep the pre-anchor path so its report stays
+    // unchanged. A binding that no longer recomputes under the current
+    // implementation is still reported as a critical finding.
+    legacyEvidencePath = true;
+    if (bindings.anchor === 'NOT_CHECKED') {
+      addFinding('examiner_preregistration_binding_unreadable', 'critical', 'examiner-manifest.json', (bindings.problems || ['binding recomputation failed']).join('; '));
+    }
+  } else if (bindings.anchor === 'MISMATCH') {
     addFinding('examiner_preregistration_binding_drift', 'critical', 'events.jsonl', (bindings.problems || ['binding mismatch']).join('; '));
   } else if (bindings.anchor === 'NOT_CHECKED') {
     addFinding('examiner_preregistration_binding_unreadable', 'critical', 'examiner-manifest.json', (bindings.problems || ['binding recomputation failed']).join('; '));
+  } else {
+    addFinding('examiner_preregistration_anchor_missing', 'critical', 'events.jsonl',
+      'immutable preregistration anchor MISSING — only a study created by the anchored path, or an exactly identified pre-anchor historical study, may produce a report');
   }
   // Pair assignment: the frozen randomization record.
   let pairAssignment = null;
@@ -1474,19 +1558,25 @@ function buildExaminerBlockMaybe(studyDir, {
   // reports stay byte-identical.
   const chains = preregistrationBinding
     ? collectBoundInjectionChains({ studyDir, studyId: exManifest.studyId, planUnits, rollupsByUnit, controlArm, treatmentArm, addFinding })
-    : scanLegacyInjectionChains({ studyDir, controlArm, treatmentArm, addFinding });
+    : legacyEvidencePath
+      ? scanLegacyInjectionChains({ studyDir, controlArm, treatmentArm, addFinding })
+      : null;
   // P1-6: full-library capacity competition recomputed from the frozen arm
   // configs/payloads (never a hardcoded 0), with the honest three-state answer.
   const capacity = preregistrationBinding ? recomputeExaminerCapacity({ studyDir, exManifest, addFinding }) : null;
   const plannedTreatmentUnits = planUnits.filter((u) => u.armId === treatmentArm).length;
-  const unresolvedTreatmentUnits = Math.max(0, plannedTreatmentUnits - chains.treatment.length);
-  const treatmentFidelity = computeTreatmentFidelity({
-    plannedTreatmentUnits,
-    chains: chains.treatment,
-    controlChains: chains.control,
-    ...(capacity && capacity.status === 'RECORDED' ? { nonTargetRetention: capacity.nonTargetRetention, capacityRecords: [capacity.control, capacity.treatment] } : {}),
-    ...(preregistrationBinding ? { unresolvedTreatmentUnits } : {}),
-  });
+  const unresolvedTreatmentUnits = chains === null
+    ? plannedTreatmentUnits
+    : Math.max(0, plannedTreatmentUnits - chains.treatment.length);
+  const treatmentFidelity = chains === null
+    ? untrustedTreatmentFidelity(plannedTreatmentUnits)
+    : computeTreatmentFidelity({
+      plannedTreatmentUnits,
+      chains: chains.treatment,
+      controlChains: chains.control,
+      ...(capacity && capacity.status === 'RECORDED' ? { nonTargetRetention: capacity.nonTargetRetention, capacityRecords: [capacity.control, capacity.treatment] } : {}),
+      ...(preregistrationBinding ? { unresolvedTreatmentUnits } : {}),
+    });
   return {
     specVersion: 'SPEC-PD-EXAMINER-001 v0.9',
     manifestHash: exManifest.manifestHash ?? null,
@@ -1509,17 +1599,24 @@ function buildExaminerBlockMaybe(studyDir, {
         verified: pairAssignmentVerified,
       }
       : null,
-    injectionEvidence: {
-      treatmentChains: chains.treatment.length,
-      controlChains: chains.control.length,
-      ...(preregistrationBinding ? {
-        attribution: 'chain-internal binding verified against each unit\u2019s saved primary attempt record',
-        duplicateAttemptSidecars: chains.duplicates,
-        unresolvedTreatmentUnits,
-      } : {}),
-      note: 'chains are runner-produced tamper-evident sidecars (offline-stub scope); SUBMITTED never equals RUNTIME_LOADED and declaration-only never counts',
-    },
-    evidence: 'ITT/Fidelity recomputable from pair-assignment.json + planUnits + injection-evidence sidecars + replayed adjudications',
+    injectionEvidence: chains === null
+      ? {
+        attribution: 'UNAVAILABLE — the study has no verified preregistration anchor',
+        note: 'injection evidence is neither scanned nor counted for an unanchored study; an unknown injection state is never reported as zero',
+      }
+      : {
+        treatmentChains: chains.treatment.length,
+        controlChains: chains.control.length,
+        ...(preregistrationBinding ? {
+          attribution: 'chain-internal binding verified against each unit\u2019s saved primary attempt record',
+          duplicateAttemptSidecars: chains.duplicates,
+          unresolvedTreatmentUnits,
+        } : {}),
+        note: 'chains are runner-produced tamper-evident sidecars (offline-stub scope); SUBMITTED never equals RUNTIME_LOADED and declaration-only never counts',
+      },
+    evidence: chains === null
+      ? 'UNTRUSTED — no verified preregistration anchor; ITT/Fidelity/capacity cannot certify this study'
+      : 'ITT/Fidelity recomputable from pair-assignment.json + planUnits + injection-evidence sidecars + replayed adjudications',
   };
 }
 
@@ -2229,7 +2326,11 @@ export function renderBehaviorReportV2Markdown(report) {
       push(`- ITT: ${itt.pointEstimate.status} — bounds [${itt.lowerBound.status === 'ESTIMABLE' ? itt.lowerBound.value : 'n/a'}, ${itt.upperBound.status === 'ESTIMABLE' ? itt.upperBound.value : 'n/a'}] over ${itt.plannedApplicablePairs} planned applicable pairs (${itt.unknownPairs} with unknown sides)`);
     }
     const fid = ex.treatmentFidelity;
-    push(`- treatment fidelity: CONTEXT_PRESENT+ ${fid.contextPresent}/${fid.plannedTreatmentUnits}, RUNTIME_LOADED ${fid.runtimeLoaded}, control contamination ${fid.controlContamination.units}`);
+    if (fid.status === 'UNKNOWN') {
+      push(`- treatment fidelity: UNKNOWN — ${fid.actualInjectionRate.reason}`);
+    } else {
+      push(`- treatment fidelity: CONTEXT_PRESENT+ ${fid.contextPresent}/${fid.plannedTreatmentUnits}, RUNTIME_LOADED ${fid.runtimeLoaded}, control contamination ${fid.controlContamination.units}`);
+    }
     push(`- randomization: ${ex.randomization ? `${ex.randomization.strategy} seed frozen, verified=${ex.randomization.verified}` : '(record missing)'}`);
     push('');
   }
