@@ -1378,6 +1378,7 @@
       "ruleRevisionFeedback": "需要修正什么（最多4000字）",
       "ruleRevisionOnce": "按反馈修订一次",
       "ruleRevisionStarted": "修订已排队。完成后将在待审列表出现；当前规则保持影子状态。",
+      "ruleRevisionAlreadyExists": "该工件已有修订，本次请求未启动新的修订。",
       "ownerReviewNote": "拥有者评审备注",
       "continueObserving": "继续观察",
       "rejectAfterShadow": "拒绝并停用",

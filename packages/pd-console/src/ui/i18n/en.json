@@ -1378,6 +1378,7 @@
       "ruleRevisionFeedback": "Required correction (up to 4000 characters)",
       "ruleRevisionOnce": "Revise once with feedback",
       "ruleRevisionStarted": "Revision queued. The result will appear for review; the current rule stays in shadow.",
+      "ruleRevisionAlreadyExists": "This artifact already has a revision; this request did not start a new one.",
       "ownerReviewNote": "Owner review note",
       "continueObserving": "Continue observing",
       "rejectAfterShadow": "Reject and deactivate",

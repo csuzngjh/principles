@@ -192,6 +192,11 @@ export async function reviseApprovedRuleOnce(args: ReviseApprovedRuleOnceArgs): 
   };
   const metadata = mergePITaskMetadata(target.artificerPi, { revisionCount: epoch, revisionCauseId: causeId, revisionFeedback,
     runnerDecision: undefined, completionIntent: undefined, humanReviewContext: undefined, repairPayload: revisionRepairPayload,
+    // A later adversarial loop round leaves its rejected cases here, and the
+    // prompt renders them as PRIOR ADVERSARIAL FAILURES to be fixed — stale
+    // work the approved round already settled, and contrary to this round's
+    // "those results are not carried" contract.
+    adversarialFeedback: undefined,
     approvedRuleRevisions: [...(target.artificerPi.approvedRuleRevisions ?? []), receipt] });
   const committed = args.ledger.withLockedRuleCandidateIdentity(target.candidateId, identity => {
     if (identity.status !== 'resolved' || identity.basis !== 'owner_rule_binding' || identity.bindingRevision !== args.expectedBindingRevision

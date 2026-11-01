@@ -126,11 +126,14 @@ describe('approved shadow revision uses one immutable-artifact budget (real SQLi
     // payload would otherwise be rendered into the revision prompt and its
     // failed replay evidence re-resolved (the runner throws when that fails).
     await handle.stateManager.updateTask(ids.artificer, { diagnosticJson: createPITaskDiagnosticJson(mergePITaskMetadata(pi, {
+      adversarialFeedback: 'PRIOR ADVERSARIAL FAILURES: case-old-rejected — must not reach the revision prompt',
       repairPayload: { requiredChanges: ['previous repair instruction'], concerns: ['old concern'], previousScore: 0.4,
         repairIteration: 1, sourceArtificerArtifactId: 'old-artificer-artifact', sourceEvaluatorTaskId: ids.evaluator,
         diagnosticReplay: { ran: true, passed: false, failedCaseCount: 3 } } })) });
     expect(await reviseApprovedRuleOnce(await request())).toMatchObject({ status: 'started' });
     const after = await meta();
+    // A rejected later adversarial round is stale work for this revision.
+    expect(after.adversarialFeedback).toBeUndefined();
     const carried = after.repairPayload;
     if (!carried) throw new Error('repair payload dropped; the completion branch depends on it');
     expect(carried.requiredChanges.join(' ')).not.toContain('previous repair instruction');

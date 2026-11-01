@@ -61,6 +61,12 @@ satellite bundle 体积预算随之超限（`rulehost-evidence.js` dev 559,348 >
 - 未采纳一：要求官方恢复探针额外断言 `matched:false`。安全影响为零（仍是 allow），只是 shadow 统计口径；而 `GoldenTraceCase` 的 TypeBox schema 目前没有 `matched` 期望字段，补齐要扩既有 golden trace 契约并影响所有已存工件——记 follow-up。
 - 未采纳二：要求补「真实 Worker 入口执行修订后任务」的单测。现有真实模型两轮已证明 Artificer 重开后被真实执行并产出新工件、Evaluator 消费了它；单测层的 Worker 化改造属独立工作，记 follow-up。
 
+增量重审又提三条，均成立并已修：
+
+- **残留 `adversarialFeedback`**：来自后续对抗轮的失败用例会被渲染成 PRIOR ADVERSARIAL FAILURES 要求模型处理，与本轮「不携带旧对抗结果」的约定冲突，可能让模型改动已批准代码。修订覆盖项里一并清除。
+- **拒绝后刷新失败仍留可提交的旧表单**：`refused` 现在直接用服务端结论替换本地预览，刷新再失败也不会留下过期的可提交表单。
+- **`already_started` 被当成成功**：核心不比较 requestId 或反馈内容，若首次成功响应丢失、Owner 改完反馈重发，新反馈不会被记录。现在单独显示中性提示（不显示"已排队"、不置 submitted），并补中英双语 key。
+
 ### 未证明（不得由本轮冒充）
 
 原生宿主现场（真实 Codex 会话里的 design declaration、受控测试写入、shadow 事件随新 digest 增长、Console 新审批/上线、紧急恢复实操）未执行；生产安装、真实 Owner 审批、现场效果均无结论。原生版本混装风险仍存在：旧 Codex 运行时缺 `recoveryControl` 会按合同版本拒绝执行新工件（fail-closed、可见 warning），但不会替 Owner 报告“该工件在你当前运行时不被执行”，这是已知残余。
