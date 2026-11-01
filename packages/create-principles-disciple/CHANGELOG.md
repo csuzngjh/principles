@@ -1,5 +1,28 @@
 # create-principles-disciple
 
+## 1.145.40
+
+### Patch Changes
+
+- 4930232: Run WorkBuddy hard preflights before any installation work: a Git Bash probe
+  plus exclusive-open probes on settings.json / installed_plugins.json refuse
+  the install within seconds (with a "fully exit WorkBuddy" nextAction) instead
+  of failing after minutes of npm work, and atomic config renames retry briefly
+  on Windows lock errnos (EPERM/EBUSY/EACCES). (PRI-1062)
+
+## 1.145.39
+
+### Patch Changes
+
+- 119bf4e: Make registry-installed bundled components executable: the pre-deployment
+  compatibility scan's bundled pd-cli now resolves every bundled component's
+  file:../ sibling deps through package-root node_modules links, and the
+  bundled graph's third-party runtime dependencies (@sinclair/typebox,
+  better-sqlite3, @earendil-works/pi-agent-core, @earendil-works/pi-ai, typebox,
+  undici, micromatch) are hoisted into the installer's top-level dependencies.
+  Upgrades from the registry no longer crash the scan with ERR_MODULE_NOT_FOUND.
+  (PRI-1060)
+
 ## 1.145.38
 
 ### Patch Changes
