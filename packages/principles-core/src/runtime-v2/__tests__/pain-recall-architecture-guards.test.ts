@@ -31,6 +31,38 @@ import * as pathSync from 'path';
 const CORE_SRC_ROOT = pathSync.resolve(__dirname, '..', '..'); // packages/principles-core/src
 const READ_MODEL_REL = 'runtime-v2/pain-recall-read-model.ts';
 
+/**
+ * The public subpath specifier that resolves (via the package exports map)
+ * to the read model's dist file. A production module importing the read
+ * model through the package surface is the same wiring violation as a
+ * relative import — G-1 must treat both forms identically (review round 2,
+ * P1-1). Deep imports under the subpath are equally forbidden.
+ */
+const READ_MODEL_PACKAGE_SPECIFIER = '@principles/core/runtime-v2/pain-recall';
+
+// ── FIXTURE-SPLITTING convention ─────────────────────────────────────────────
+// Every fixture specifier below is built by CONCATENATION (never written as
+// one complete literal): the guard's own source text then contains no
+// complete detectable specifier, so the real-tree scan above includes this
+// file with zero references and the self-scan test can pin that property.
+// (The old raw-text guard needed a whole-file carve-out instead — removed in
+// review round 2, P1-1.)
+const FIX_RM_REL = './pain-recall-read' + '-model.js';
+const FIX_RM_UP = '../pain-recall-read' + '-model.js';
+const FIX_RM_DEEP = './runtime-v2/pain-recall' + '-read-model.js';
+const FIX_RM_SUB_DEEP = READ_MODEL_PACKAGE_SPECIFIER + '/deep.js';
+
+/** Build one import-shaped fixture source around a (split-built) specifier. */
+function fixture(spec: string, kind: 'named' | 'side' | 'export' | 'dyn' | 'req'): string {
+  switch (kind) {
+    case 'named': return `import { recallPains } from '${spec}';`;
+    case 'side': return `import '${spec}';`;
+    case 'export': return `export { recallPains } from '${spec}';`;
+    case 'dyn': return `const m = await import('${spec}');`;
+    case 'req': return `const m = require('${spec}');`;
+  }
+}
+
 // ── Domain partitioning (pure, unit-tested below) ────────────────────────────
 
 export type ScanDomain = 'production' | 'test' | 'excluded';
@@ -63,10 +95,19 @@ function collectTsFiles(dir: string, acc: string[]): void {
   }
 }
 
-/** All module specifiers a source text routes to the read model — static
- * imports (named/default/namespace), side-effect imports, export-from
- * re-exports, dynamic import(), and require(). */
-export function readModelReferencesIn(source: string): string[] {
+/** Every module specifier a source text references — static imports
+ * (named/default/namespace/side-effect), export-from re-exports, dynamic
+ * import(), and require(). House regex pattern (same as the IO-seam guard's
+ * extractImportPaths). Why not the TypeScript AST (tried first for review
+ * round 2, P1-1): this package pins typescript@7 (the native compiler),
+ * whose JS surface no longer exposes createSourceFile/ScriptTarget at all,
+ * and reaching across to another package's compiler would be a new
+ * cross-package test dependency. The regex must therefore be paired with
+ * the FIXTURE-SPLITTING convention below so this guard file can scan itself
+ * with no carve-out: detector self-tests construct import-shaped fixture
+ * strings by CONCATENATION, so the guard's own source text never contains a
+ * complete detectable specifier (verified by the self-scan test). */
+export function extractModuleSpecifiers(source: string): string[] {
   const specifiers: string[] = [];
   // import … from 'mod' / export … from 'mod' (multiline-safe, house pattern)
   for (const m of source.matchAll(/(?:import|export)\s+[\s\S]*?from\s+['"]([^'"]+)['"]/g)) {
@@ -84,11 +125,22 @@ export function readModelReferencesIn(source: string): string[] {
   for (const m of source.matchAll(/require\s*\(\s*['"]([^'"]+)['"]\s*\)/g)) {
     if (m[1] != null && !specifiers.includes(m[1])) specifiers.push(m[1]);
   }
-  return specifiers.filter((spec) => {
-    if (!spec.endsWith('pain-recall-read-model.js')) return false;
-    return spec === './pain-recall-read-model.js' || spec === '../pain-recall-read-model.js'
-      || spec.endsWith('/pain-recall-read-model.js');
-  });
+  return specifiers;
+}
+
+/** True when a module specifier routes to the Pain Recall read model — via a
+ * relative path to its module file (any .js/.cjs/.mjs/.ts spelling, fail
+ * closed) OR via the public package subpath. */
+export function isReadModelSpecifier(specifier: string): boolean {
+  if (specifier === READ_MODEL_PACKAGE_SPECIFIER) return true;
+  if (specifier.startsWith(`${READ_MODEL_PACKAGE_SPECIFIER}/`)) return true; // deep import under the subpath
+  return /(^|\/)pain-recall-read-model\.[cm]?[jt]s$/u.test(specifier);
+}
+
+/** All module specifiers a source text routes to the read model (any of the
+ * reference forms covered by extractModuleSpecifiers). */
+export function readModelReferencesIn(source: string): string[] {
+  return extractModuleSpecifiers(source).filter(isReadModelSpecifier);
 }
 
 /** Resolve which domain a referencing file belongs to and whether that
@@ -153,16 +205,13 @@ describe('G-1: Read Model reference whitelist (domain-partitioned scan)', () => 
     ).toEqual(['runtime-v2/pain-recall-capability.ts']);
   });
 
-  it('test domain: only the three authorized test files reference the read model', () => {
-    // This guard file itself is EXCLUDED from the reference enumeration by an
-    // explicit, single-file carve-out: its detector self-tests embed
-    // read-model specifiers as DATA fixtures, which the raw-text detector
-    // cannot distinguish from real references. The carve-out removes ONLY
-    // this enumeration; the file still counts in the test-domain totals of
-    // the completeness assertion above (no scan gap is introduced).
-    const GUARD_SELF = 'runtime-v2/__tests__/pain-recall-architecture-guards.test.ts';
+  it('test domain: only the three authorized test files reference the read model (guard file included in the scan)', () => {
+    // NO carve-out (review round 2, P1-1): the AST-based detector reads real
+    // import declarations only, so this guard file's own fixture strings are
+    // data, not references — the file scans clean and participates in the
+    // enumeration like every other test file. The dedicated self-scan test
+    // below pins that property so it cannot silently regress.
     const testRefs = allEntries
-      .filter((e) => e.relPath !== GUARD_SELF)
       .filter((e) => classifyFile(e.relPath) === 'test' && readModelReferencesIn(e.source).length > 0)
       .map((e) => e.relPath)
       .sort();
@@ -174,6 +223,26 @@ describe('G-1: Read Model reference whitelist (domain-partitioned scan)', () => 
       'runtime-v2/__tests__/pain-recall-readonly.test.ts',
       'runtime-v2/__tests__/pain-recall-service.test.ts',
     ]);
+  });
+
+  it('this guard file scans clean under its own detector (no self-exclusion escape hatch)', () => {
+    // Completeness proof for the carve-out removal: the guard's real imports
+    // (vitest/fs/path/typescript) contain no read-model specifier, and its
+    // fixture strings must remain import-shaped DATA. If someone embeds a
+    // REAL read-model import here, this file would appear in the test-domain
+    // enumeration above AND this assertion fails.
+    const guardSelf = allEntries.find((e) => e.relPath === 'runtime-v2/__tests__/pain-recall-architecture-guards.test.ts');
+    if (guardSelf === undefined) throw new Error('G-1 scan missing the guard file itself');
+    expect(readModelReferencesIn(guardSelf.source)).toEqual([]);
+    // Every raw specifier the regex pulls out of this file (real imports
+    // vitest/fs/path + fixture template-interpolation fragments like
+    // `'${FIX_RM_REL}'`) must be a NON read-model string — a canary that
+    // keeps the fixture-splitting convention load-bearing: the moment
+    // someone writes a complete read-model specifier here, the enumeration
+    // test above fails AND this loop catches the raw string.
+    for (const spec of extractModuleSpecifiers(guardSelf.source)) {
+      expect(isReadModelSpecifier(spec), `guard file now carries a read-model specifier: ${spec}`).toBe(false);
+    }
   });
 
   it('the pain-recall trio contains no reverse dependency on pd-cli or host-runtime (repo-wide DAG has its own guard)', () => {
@@ -192,7 +261,7 @@ describe('G-1: Read Model reference whitelist (domain-partitioned scan)', () => 
 
   it('rule evaluator: legal facade production reference passes (self-test 1)', () => {
     expect(evaluateReferenceRule([
-      { relPath: 'runtime-v2/pain-recall-capability.ts', source: `import { recallPains } from './pain-recall-read-model.js';` },
+      { relPath: 'runtime-v2/pain-recall-capability.ts', source: fixture(FIX_RM_REL, 'named') },
     ])).toEqual([]);
   });
 
@@ -203,45 +272,71 @@ describe('G-1: Read Model reference whitelist (domain-partitioned scan)', () => 
       'runtime-v2/__tests__/pain-recall-capability.test.ts',
     ]) {
       expect(evaluateReferenceRule([
-        { relPath, source: `import { recallPains } from '../pain-recall-read-model.js';` },
+        { relPath, source: fixture(FIX_RM_UP, 'named') },
       ])).toEqual([]);
     }
   });
 
   it('rule evaluator: non-authorized PRODUCTION reference fails (self-test 3)', () => {
     const violations = evaluateReferenceRule([
-      { relPath: 'runtime-v2/some-other-service.ts', source: `import { recallPains } from './pain-recall-read-model.js';` },
-      { relPath: 'some-root-module.ts', source: `import x from './runtime-v2/pain-recall-read-model.js';` },
+      { relPath: 'runtime-v2/some-other-service.ts', source: fixture(FIX_RM_REL, 'named') },
+      { relPath: 'some-root-module.ts', source: `import x from '${FIX_RM_DEEP}';` },
     ]);
     expect(violations).toHaveLength(2);
   });
 
+  it('rule evaluator: PUBLIC SUBPATH references are detected like relative ones (self-test 3b, review P1-1)', () => {
+    // The subpath specifier resolves through the exports map to the read
+    // model's dist file — bypassing the detector by importing via the
+    // package surface must be impossible.
+    for (const kind of ['named', 'side', 'export', 'dyn', 'req'] as const) {
+      expect(readModelReferencesIn(fixture(READ_MODEL_PACKAGE_SPECIFIER, kind)), `subpath ${kind} not detected`).toHaveLength(1);
+    }
+    // Deep imports under the subpath are equally forbidden.
+    expect(readModelReferencesIn(fixture(FIX_RM_SUB_DEEP, 'named'))).toHaveLength(1);
+    // Non-authorized production file importing via the subpath → violation.
+    const violations = evaluateReferenceRule([
+      { relPath: 'runtime-v2/some-future-service.ts', source: fixture(READ_MODEL_PACKAGE_SPECIFIER, 'named') },
+    ]);
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toContain('not authorized');
+    // The capability subpath is a DIFFERENT surface and must not be confused
+    // with the read-model subpath (complete literal is safe here: it is not
+    // a read-model specifier).
+    expect(readModelReferencesIn(`import { x } from '@principles/core/runtime-v2/pain-recall-capability';`)).toEqual([]);
+    // Every module-suffix spelling of the read-model file name is the SAME
+    // forbidden target (fail closed).
+    for (const suffix of ['.js', '.ts', '.cjs', '.mjs']) {
+      const spec = FIX_RM_REL.replace(/\.js$/u, suffix);
+      expect(readModelReferencesIn(fixture(spec, 'named')), `suffix ${suffix} not detected`).toHaveLength(1);
+    }
+    expect(readModelReferencesIn(fixture('../store/pain-recall-read' + '-model.js', 'named'))).toHaveLength(1);
+  });
+
   it('rule evaluator: non-authorized TEST reference fails — including a *.test.ts OUTSIDE __tests__ (self-test 4, blind-spot regression)', () => {
     const violations = evaluateReferenceRule([
-      { relPath: 'runtime-v2/__tests__/unrelated.test.ts', source: `import { recallPains } from '../pain-recall-read-model.js';` },
+      { relPath: 'runtime-v2/__tests__/unrelated.test.ts', source: fixture(FIX_RM_UP, 'named') },
       // The old blind spot: a *.test.ts outside __tests__ used to escape both
       // the production scan and a __tests__-scoped test scan. It MUST be
       // classified as test-domain AND flagged as unauthorized here.
-      { relPath: 'runtime-v2/some-dir/stray-golden.test.ts', source: `import { recallPains } from '../pain-recall-read-model.js';` },
+      { relPath: 'runtime-v2/some-dir/stray-golden.test.ts', source: fixture(FIX_RM_UP, 'named') },
     ]);
     expect(violations).toHaveLength(2);
     expect(violations.every((v) => v.includes('not authorized'))).toBe(true);
   });
 
   it('detector: static import, side-effect import, re-export, dynamic import, and require are all recognized (self-test 5)', () => {
-    const forms = [
-      `import { recallPains } from './pain-recall-read-model.js';`,
-      `import './pain-recall-read-model.js';`,
-      `export { recallPains } from './pain-recall-read-model.js';`,
-      `const m = await import('./pain-recall-read-model.js');`,
-      `const m = require('./pain-recall-read-model.js');`,
-    ];
-    for (const form of forms) {
-      expect(readModelReferencesIn(form), `form not detected: ${form}`).toHaveLength(1);
+    for (const kind of ['named', 'side', 'export', 'dyn', 'req'] as const) {
+      expect(readModelReferencesIn(fixture(FIX_RM_REL, kind)), `relative ${kind} form not detected`).toHaveLength(1);
     }
     // A sibling module with a similar name must NOT match.
     expect(readModelReferencesIn(`import { x } from './pain-chain-read-model.js';`)).toEqual([]);
     expect(readModelReferencesIn(`import { x } from './pain-recall-capability.js';`)).toEqual([]);
+    // The fixture-splitting convention itself is load-bearing: a source that
+    // only contains SPLIT fragments must yield zero references (this guard
+    // file is exactly such a source — see the self-scan test).
+    const splitOnly = `const a = './pain-recall-read';\nconst b = '-model.js';\nconst c = a + b;`;
+    expect(readModelReferencesIn(splitOnly)).toEqual([]);
   });
 
   it('domain partition: exhaustive and mutually exclusive over synthetic paths (self-test 6)', () => {

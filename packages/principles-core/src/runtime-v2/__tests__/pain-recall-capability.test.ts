@@ -549,6 +549,73 @@ describe('recallPrinciplePainsCapability: OD-A DENY enforcement', () => {
     expect(serialized.includes('G3SENT-PAIN-REASON')).toBe(false);
   });
 
+  // ── Structural-path self-check (review round 2, P1-2): a forbidden key
+  //    hiding in an EMPTY array/object produces no leaf path at all — the
+  //    leaf-only walk was blind to it. These negative controls inject empty
+  //    containers and FAIL against the leaf-only implementation (a leaf-only
+  //    self-check would return a plain ok envelope here).
+
+  async function injectPainEventShape(shape: unknown): Promise<PainRecallCapabilityResult> {
+    const ws = await makeSentinelWorkspace();
+    vi.mocked(recallPains).mockImplementation(async () => {
+      const raw = await actualReadModel.recallPains(ws, { requestedPrincipleId: P1, limit: 10 });
+      expect(raw.status).toBe('ok');
+      return {
+        ...raw,
+        results: raw.results.map((r) => ({
+          ...r,
+          availability: { ...r.availability, painEvent: shape },
+        })),
+        // The deliberate type violation is the injection itself (§11 B-4:
+        // fail-closed negative control); the double cast states that
+        // intentionality to the compiler.
+      } as unknown as typeof raw;
+    });
+    return recallPrinciplePainsCapability({ workspaceDir: ws, principleId: P1, limit: 10 });
+  }
+
+  it('EMPTY-ARRAY injection of a non-whitelisted key is caught by the structural self-check (P1-2)', async () => {
+    // `painEvent: []` — a leaf-only walk emits NO path for an empty array,
+    // so the forbidden container shape would pass unnoticed. The structural
+    // check must flag `…availability.painEvent[]` (no whitelisted leaf can
+    // ever start with it) and withhold the envelope.
+    const envelope = await injectPainEventShape([]);
+    expect(envelope.status).toBe('unavailable');
+    expect(envelope.error?.code).toBe('disclosure_assertion_failed');
+    expect(envelope.data).toBeNull();
+    expect(JSON.stringify(envelope)).not.toContain('G3SENT');
+  });
+
+  it('EMPTY-OBJECT injection of a whitelisted-LEAF key is caught by the structural self-check (P1-2)', async () => {
+    // `painEvent: {}` — painEvent is a whitelisted LEAF; as an object it
+    // would need whitelisted descendants, and none exist. The structural
+    // check must reject the container shape even though every key inside is
+    // vacuous.
+    const envelope = await injectPainEventShape({});
+    expect(envelope.status).toBe('unavailable');
+    expect(envelope.error?.code).toBe('disclosure_assertion_failed');
+    expect(envelope.data).toBeNull();
+  });
+
+  it('reserved OUTER_STATUS row is fail-closed end-to-end: invalid_input + null data (review round 2, P2-3)', async () => {
+    // The read model never produces ambiguous_principle today (v0.5 F8), so
+    // drive the reserved row through the mocked read model: status must map
+    // to invalid_input with a generic error code and §7.2 null data — never
+    // a fabricated capability payload.
+    const ws = await makeSentinelWorkspace();
+    vi.mocked(recallPains).mockImplementation(async () => {
+      const raw = await actualReadModel.recallPains(ws, { requestedPrincipleId: P1, limit: 3 });
+      expect(raw.status).toBe('ok');
+      return { ...raw, status: 'ambiguous_principle' } as unknown as typeof raw;
+    });
+    const envelope = await recallPrinciplePainsCapability({ workspaceDir: ws, principleId: P1, limit: 3 });
+    expect(envelope.status).toBe('invalid_input');
+    expect(envelope.error?.code).toBe('invalid_input');
+    expect(envelope.data).toBeNull();
+    // No data payload leaked through the reserved branch.
+    expect(JSON.stringify(envelope)).not.toContain('G3SENT');
+  });
+
   it('reserved OUTER_STATUS row is pinned in source (ambiguous_principle is not fabricated)', () => {
     // The read model never produces ambiguous_principle (v0.5 F8), so the
     // reserved mapping row is unreachable end-to-end. Pin it at the source

@@ -9,12 +9,15 @@
  * diagnoses.*, correctionEvidence.*, lineage hops, statusDetail-as-data, …)
  * are structurally absent, never constructed-then-stripped.
  *
- * Every call re-asserts the leaf-key path set of the produced envelope
- * (collectPaths, array indices normalized to `[]`); any non-whitelisted leaf
- * fails closed: the violating payload is withheld and an `unavailable`
- * envelope with a stable internal error code is returned instead. The
- * production self-check does NOT include the Gate 2 experimental sentinel
- * regex — sentinel scanning is a test technique (see the capability tests).
+ * Every call re-asserts BOTH the leaf-key path set AND the structural
+ * container paths of the produced envelope (array indices normalized to
+ * `[]`); any non-whitelisted leaf — or any container that is not a proper
+ * ancestor of a whitelisted leaf (this catches a forbidden key hiding in an
+ * EMPTY array or object, which a leaf-only walk cannot see) — fails closed:
+ * the violating payload is withheld and an `unavailable` envelope with a
+ * stable internal error code is returned instead. The production self-check
+ * does NOT include the Gate 2 experimental sentinel regex — sentinel
+ * scanning is a test technique (see the capability tests).
  *
  * Layer contract (v0.5 §7.1): this facade is protocol-independent. It does
  * NOT build MCP `content` blocks, does NOT set `isError`, and contains no
@@ -214,7 +217,10 @@ function projectEnvelope(result: PainRecallResult): PainRecallCapabilityResult {
     capability: RECALL_PAIN_CAPABILITY_ID,
     disclosureProfile: OD_A_DISCLOSURE_PROFILE,
     status,
-    data: status === 'unavailable' ? null : {
+    // §7.2: data is null for BOTH unavailable and invalid_input (the
+    // reserved ambiguous→invalid_input row included — review round 2,
+    // P2-3). Every other status carries the projected data object.
+    data: status === 'unavailable' || status === 'invalid_input' ? null : {
       principle: {
         requestedId: result.principle.requestedId,
         identityStatus: result.principle.identityStatus,
@@ -258,9 +264,12 @@ function projectEnvelope(result: PainRecallResult): PainRecallCapabilityResult {
   };
 }
 
-/** Deep key-path walk (arrays normalized to `[]`) for whitelist assertions.
- * An empty array exposes no leaf data — no bare path is emitted. Gate 2
- * collectPaths, verbatim. */
+/** Deep key-path walk over the envelope for whitelist assertions. Leaves
+ * (primitives/null) contribute their exact path; every container additionally
+ * contributes a STRUCTURAL path — objects at `prefix`, arrays at
+ * `prefix + '[]'` — so a forbidden key cannot hide behind an EMPTY array or
+ * empty object (a leaf-only walk would see nothing at all; review round 2,
+ * P1-2). Gate 2's leaf-only collectPaths semantics remain for the leaf set. */
 function collectPaths(value: unknown, prefix: string, out: Set<string>): void {
   if (Array.isArray(value)) {
     for (const v of value) collectPaths(v, prefix + '[]', out);
@@ -273,21 +282,59 @@ function collectPaths(value: unknown, prefix: string, out: Set<string>): void {
   out.add(prefix);
 }
 
-/** Production self-check: leaf paths of the envelope that are not in the
- * frozen whitelist. Violations are reported to the caller (the facade), which
- * withholds the payload — the violating paths/values never leave this module.
+/** All structural container paths of the envelope: objects at their key path,
+ * arrays at their `[]`-normalized key path. Empty containers contribute ONLY
+ * a structural path — exactly the case a leaf-only walk cannot see. */
+function collectStructuralPaths(value: unknown, prefix: string, out: Set<string>): void {
+  if (Array.isArray(value)) {
+    if (prefix !== '') out.add(prefix + '[]');
+    for (const v of value) collectStructuralPaths(v, prefix + '[]', out);
+    return;
+  }
+  if (value !== null && typeof value === 'object') {
+    if (prefix !== '') out.add(prefix);
+    for (const [k, v] of Object.entries(value)) collectStructuralPaths(v, prefix ? prefix + '.' + k : k, out);
+    return;
+  }
+}
+
+const ALLOWED_PATH_LIST: readonly string[] = [...ALLOWED_PATHS];
+
+/** A structural container path is legal only when it is a proper ancestor of
+ * at least one whitelisted leaf path: objects must be followed by a whitelisted
+ * `structural.` descendant, arrays by a whitelisted `structural[]…` one. A
+ * whitelisted LEAF path made a container (e.g. someone turns `status` into an
+ * object) has no such descendant and fails here. */
+function isAllowedStructuralPath(structural: string, isArray: boolean): boolean {
+  const marker = isArray ? `${structural}[]` : `${structural}.`;
+  return ALLOWED_PATH_LIST.some((p) => p.startsWith(marker));
+}
+
+/** Production self-check: BOTH leaf paths and structural container paths of
+ * the envelope, against the frozen whitelist. Violations are returned to the
+ * facade, which withholds the whole payload — the violating paths/values
+ * never leave this module.
  *
  * §7.2 null form: `data: null` is the envelope's explicit empty marker for
  * the `unavailable` / `invalid_input` statuses. It surfaces as a bare `data`
  * leaf, which the frozen od-a-v1 path set does not list (the Gate 2
  * prototype never projected a null data) — the whitelist governs the
- * POPULATED shape of `data.*`, so the null marker is removed before the
- * diff, not tolerated anywhere else. */
-function collectPathViolations(envelope: PainRecallCapabilityResult): string[] {
-  const paths = new Set<string>();
-  collectPaths(envelope, '', paths);
-  if (envelope.data === null) paths.delete('data');
-  return [...paths].filter((p) => !ALLOWED_PATHS.has(p));
+ * POPULATED shape of `data.*`, so the null marker is exempted here and
+ * nowhere else. */
+function collectDisclosureViolations(envelope: PainRecallCapabilityResult): string[] {
+  const leafPaths = new Set<string>();
+  collectPaths(envelope, '', leafPaths);
+  if (envelope.data === null) leafPaths.delete('data');
+  const violations = [...leafPaths].filter((p) => !ALLOWED_PATHS.has(p));
+
+  const structuralPaths = new Set<string>();
+  collectStructuralPaths(envelope, '', structuralPaths);
+  for (const p of structuralPaths) {
+    const isArray = p.endsWith('[]');
+    const base = isArray ? p.slice(0, -2) : p;
+    if (!isAllowedStructuralPath(base, isArray)) violations.push(p);
+  }
+  return violations;
 }
 
 // ── Input validation (rc-1/rc-2: unknown in, field-by-field guards) ─────────
@@ -362,9 +409,9 @@ function envelopeShell(status: PainRecallCapabilityStatus, error: PainRecallCapa
  *
  * Duty sequence (v0.5 §7.1): validate input (fail-closed `invalid_input`,
  * the read model is never called on bad input) → `recallPains` on the trusted
- * workspace → OD-A projection (construction IS the whitelist) → leaf-path
- * self-check (violation ⇒ withhold the payload, return `unavailable`) →
- * return.
+ * workspace → OD-A projection (construction IS the whitelist) → leaf AND
+ * structural key-path self-check (violation ⇒ withhold the payload, return
+ * `unavailable`) → return.
  *
  * Resource constraint owned here (v0.5 §7.5.2, the only Core-layer limit):
  * `limit ∈ [1, 10]`, default `PAIN_RECALL_DEFAULT_LIMIT` (3); the returned
@@ -384,7 +431,7 @@ export async function recallPrinciplePainsCapability(
     limit: validated.value.limit,
   });
   const envelope = projectEnvelope(raw);
-  if (collectPathViolations(envelope).length > 0) {
+  if (collectDisclosureViolations(envelope).length > 0) {
     // Disclosure assertion failed: the payload is withheld (never returned),
     // and the message stays generic so a violating field cannot leak through
     // the failure channel either (values AND key paths stay internal).

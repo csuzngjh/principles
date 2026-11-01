@@ -28,9 +28,6 @@ import * as crypto from 'node:crypto';
 /** Identifier-shaped case names only — never interpolated into a command. */
 const CASE_NAME_RE = /^[a-z0-9-]{1,64}$/;
 
-/** Storage suffix marking committed fixture bytes (mapped on materialize). */
-const FIXTURE_SUFFIX = '.fixture';
-
 /**
  * Stored→runtime layout map. Fixture payloads live FLAT at the workspace
  * root with a `.fixture` suffix so the corpus never contains a `.pd/` or
@@ -44,6 +41,14 @@ const MATERIALIZE_MAP: Readonly<Record<string, string>> = {
   'state-trajectory.db.fixture': '.state/trajectory.db',
   'state-ledger.json.fixture': '.state/principle_training_state.json',
 };
+
+/**
+ * Hard deadline for one forked CLI replay (review round 2, P2-4): the child
+ * is SIGKILLed and the replay resolves with `timedOut: true` (which the
+ * golden test asserts false), so a hung CLI can never outlive the vitest
+ * process. Must stay comfortably BELOW the per-case 60_000 ms test timeout.
+ */
+const CHILD_DEADLINE_MS = 45_000;
 
 const P_OK = '11111111-1111-4111-8111-111111111111';
 const P_EMPTY = '33333333-3333-4333-8333-333333333333';
@@ -72,8 +77,11 @@ const GOLDEN_COMMANDS: Readonly<Record<string, GoldenCommand>> = {
 export interface GoldenReplayResult {
   stdout: string;
   exitCode: number;
-  /** Every file in the materialized workspace is byte-identical after the
-   * replay, and no new file appeared — the strict read-only contract. */
+  /** True when the child had to be killed at CHILD_DEADLINE_MS. */
+  timedOut: boolean;
+  /** Every file AND directory in the materialized workspace is identical
+   * after the replay — no new file, no new (even empty) directory, nothing
+   * mutated — the strict read-only contract (review round 2, P2-4). */
   workspaceIntact: boolean;
 }
 
@@ -104,6 +112,22 @@ function listFiles(root: string, rel = '', acc: string[] = []): string[] {
     const stat = fs.statSync(path.join(root, relPath));
     if (stat.isDirectory()) listFiles(root, relPath, acc);
     else acc.push(relPath);
+  }
+  return acc;
+}
+
+/** Recursive DIRECTORY list (posix-style relative paths, the workspace root
+ * itself excluded). Complements listFiles: the read-only contract covers
+ * directory structure too — a CLI that creates an empty directory must be
+ * detected even though an empty directory holds no files to hash (review
+ * round 2, P2-4). */
+function listDirs(root: string, rel = '', acc: string[] = []): string[] {
+  for (const name of fs.readdirSync(path.join(root, rel))) {
+    const relPath = rel ? `${rel}/${name}` : name;
+    if (fs.statSync(path.join(root, relPath)).isDirectory()) {
+      acc.push(relPath);
+      listDirs(root, relPath, acc);
+    }
   }
   return acc;
 }
@@ -144,30 +168,47 @@ export async function replayGoldenCase(caseName: string): Promise<GoldenReplayRe
   fs.mkdirSync(workspaceDir, { recursive: true }); // ws-empty materializes to an empty dir
   materializeWorkspace(storedDir, workspaceDir);
 
-  const before = new Map(listFiles(workspaceDir).map((rel) => [rel, sha256File(path.join(workspaceDir, ...rel.split('/')))]));
+  const beforeFiles = new Map(listFiles(workspaceDir).map((rel) => [rel, sha256File(path.join(workspaceDir, ...rel.split('/')))]));
+  const beforeDirs = new Set(listDirs(workspaceDir));
 
   const childArgv: string[] = ['pain', 'recall'];
   for (const element of command.elements) childArgv.push(element);
   childArgv.push('--workspace');
   childArgv.push(workspaceDir);
 
-  const result = await new Promise<{ stdout: string; exitCode: number }>((resolve) => {
+  const result = await new Promise<{ stdout: string; exitCode: number; timedOut: boolean }>((resolve) => {
     const child = fork(path.join(cliRoot, 'dist', 'index.js'), childArgv, {
       stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
     });
     let stdout = '';
+    let timedOut = false;
+    // P2-4: the vitest test timeout does NOT kill forked children — enforce
+    // an independent deadline here and terminate the child (default SIGTERM;
+    // unconditional on Windows) so a hung CLI can never outlive the worker.
+    // The timer is always cleared on exit/error.
+    const deadline = setTimeout(() => {
+      timedOut = true;
+      child.kill();
+    }, CHILD_DEADLINE_MS);
     child.stdout?.on('data', (chunk) => { stdout += String(chunk); });
-    child.on('error', () => resolve({ stdout: stdout.replace(/\r\n/g, '\n'), exitCode: 1 }));
-    child.on('exit', (code) => resolve({ stdout: stdout.replace(/\r\n/g, '\n'), exitCode: code ?? 1 }));
+    const settle = (exitCode: number): void => {
+      clearTimeout(deadline);
+      resolve({ stdout: stdout.replace(/\r\n/g, '\n'), exitCode, timedOut });
+    };
+    child.on('error', () => settle(1));
+    child.on('exit', (code) => settle(code ?? 1));
   });
 
   let workspaceIntact = true;
-  const after = listFiles(workspaceDir);
-  if (after.length !== before.size) {
+  const afterFiles = listFiles(workspaceDir);
+  const afterDirs = listDirs(workspaceDir);
+  if (afterDirs.length !== beforeDirs.size || afterDirs.some((d) => !beforeDirs.has(d))) {
+    workspaceIntact = false; // a new directory appeared (even an empty one)
+  } else if (afterFiles.length !== beforeFiles.size) {
     workspaceIntact = false;
   } else {
-    for (const rel of after) {
-      const expected = before.get(rel);
+    for (const rel of afterFiles) {
+      const expected = beforeFiles.get(rel);
       if (expected === undefined || sha256File(path.join(workspaceDir, ...rel.split('/'))) !== expected) {
         workspaceIntact = false;
         break;
@@ -181,5 +222,5 @@ export async function replayGoldenCase(caseName: string): Promise<GoldenReplayRe
     // Best effort: a leftover temp dir never affects correctness; the vitest
     // temp-lifecycle keeper sweeps leftovers.
   }
-  return { ...result, workspaceIntact };
+  return { ...result, timedOut: result.timedOut, workspaceIntact };
 }

@@ -6,7 +6,7 @@
 | 任务 | SPEC-PD-AGENT-CAPABILITY-API-001 v0.5（OG-1 冻结）的 Gate 3 单变更集实施 |
 | 实施工单 | PRI-1068（In Review） |
 | 实施基线 | origin/main `797d2e9fd`（2026-11-01 fetch；比 DELTA-AUDIT 基线 `0d0ea7eb5` 新 8 个提交，全部经并发修改复核确认零交集） |
-| 最终 HEAD | `892228d95`（实现 `bf7191f85` + 报告 `f994c040f` + 夹具合规修复 `e8168902a`/`892228d95` + origin/main git-7 刷新 merges；PR CI 26/26 绿） |
+| 提交追溯 | **实施主提交** `bf7191f85`（feat，单变更集）；**夹具合规修复** `e8168902a`（扁平 .fixture 存储+物化）与 `892228d95`（ws-empty 零文件工作区容忍）；**报告** `f994c040f`（初版）→ `df9d0a7ce`（终稿 PASS）；**main 刷新 merge** `3de36f661`/`890194ca9`（origin/main 推进后按 git-7 合入）；**CI 实际验证 HEAD = `890194ca9`（26/26 全绿的那个提交）**。评审修复轮（P1-1/P1-2/P2-3/P2-4/P2-5）的提交与 CI 结果见 §5 PR CI 行与 PR 页面——在修复轮 CI 转绿之前，本文 PASS 裁定对应 `890194ca9` 的实现面。 |
 | PR | [#2270](https://github.com/csuzngjh/principles/pull/2270)（OPEN，待 Owner 评审；AI 不合并） |
 | 实施形态 | 单变更集 + 单次 git-7 刷新 merge；独立 worktree `D:\Code\_worktrees\principles\PRI-1068-pain-recall-extraction`（writer=zcode，租约+git lock 持有） |
 | 黄金生成记录 | 生成脚本 `.tmp/pain-recall-golden/generate-goldens.mjs`（worktree 内，gitignored）；生成时点 = 删除旧实现**之前**、built CLI 为旧路径实现（base `797d2e9fd` 构建）；MANIFEST.json 含全部夹具与输出 SHA-256 |
@@ -22,7 +22,7 @@
 
 ## 2. 基线与变更
 
-- origin/main 基线：`797d2e9fd`；最终 HEAD：`535737f3d`；PR：#2270。
+- origin/main 基线：`797d2e9fd`；CI 已验证 HEAD：`890194ca9`；PR：#2270。完整提交追溯见 §头部表格（实施/修复/报告/merge 四类 SHA 已区分——评审 round 2 的 P2-5 修正）。
 - 修改：`commands/pain-recall.ts`（1 行 import）、`pain-recall.test.ts`（拆分留壳）、`io-seam-registry.json`、core `package.json`（+2 exports 键）、`architecture-regression.test.ts`（+2 房例条目）、`.gitattributes`（黄金语料子树 `-text` 字节钉定）。
 - 新增：`pain-recall-read-model.ts`（git 识别为 rename 96%）、`pain-recall-snapshot-hooks.ts`、`pain-recall-capability.ts`、四份 core 测试（readonly/service/capability/architecture-guards）、`pain-recall.golden.test.ts`、`tests/helpers/golden-replay.ts`（`.fixture` 存储→显式映射→临时目录物化→真实子进程重放）、`__golden__/`（4 工作区×扁平 fixture + 8 黄金 + MANIFEST）、changeset。**夹具存储合规**：语料不含任何 `.pd/`、`.state/`、`*.db` 或 ledger 文件名（generated-artifacts 门禁与 gitignore 规则零触碰，`.gitignore` 零修改）。
 - 删除：`pd-cli/src/services/pain-recall.ts`、`pd-cli/tests/commands/pain-recall-readonly.test.ts`（均迁移）。
@@ -74,7 +74,7 @@
 | lint / typecheck | PASS 0 errors | core+pd-cli 全部涉改文件 eslint；两包 `tsc --noEmit` |
 | 架构回归 | PASS 493/493 | `architecture-regression.test.ts`（IO seam/barrel/DAG/REQUIRED_SOURCE_FILES） |
 | release-locks | PASS | `node scripts/check-release-locks.mjs` exit 0 |
-| PR CI | **PASS 26/26（含 Verify Merge Gate 全量 `verify:merge`）**，HEAD `892228d95` 与本地一致 | PR #2270 checks（两轮修复：①generated-artifacts 拒绝 `.pd/` 检入→扁平 `.fixture` 存储+物化重放；②CI 检出无空目录 `ws-empty`→helper 容忍零文件工作区，完整性测试保真） |
+| PR CI | **PASS 26/26（含 Verify Merge Gate 全量 `verify:merge`），验证 HEAD `890194ca9`** | PR #2270 checks（两轮修复：①generated-artifacts 拒绝 `.pd/` 检入→扁平 `.fixture` 存储+物化重放；②CI 检出无空目录 `ws-empty`→helper 容忍零文件工作区，完整性测试保真。评审 round 2 修复推送后以新一轮 CI 为准） |
 | Mimosa 深扫 | **完成：0/648 findings 涉及本 PR 任何变更文件**（静态边界 static_only_no_runtime_execution；648 条为全仓既有启发式存量，扫描 seal `sha256:de1d61a9…`，job `scan-job-mvxiqw9a`） | `~/.mimosa/security-scans/.../scan-2026-11-01T07-39-49.../`（findings.json 交叉比对脚本 `.tmp/pain-recall-golden/scan-vs-changed.cjs`） |
 
 ## 6. 发布治理

@@ -24,6 +24,10 @@ import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import { replayGoldenCase, goldenCommandFor, listGoldenCaseNames } from '../helpers/golden-replay.js';
 
+/** The helper's child deadline (45s), restated for failure messages only —
+ * keep in sync with tests/helpers/golden-replay.ts. */
+const CHILD_DEADLINE_HINT = '45s replay deadline';
+
 const GOLDEN_ROOT = path.join(process.cwd(), 'tests', 'commands', '__golden__');
 
 interface GoldenCase {
@@ -99,8 +103,9 @@ describe('pd pain recall: golden equivalence (pre-migration outputs, migrated CL
     async (_name, golden) => {
       const entry = manifest.cases[golden.name];
       expect(entry, `manifest entry for ${golden.name}`).toBeDefined();
-      const { stdout, exitCode, workspaceIntact } = await replayGoldenCase(golden.name);
-      expect(workspaceIntact, `${golden.name}: replay mutated the materialized workspace`).toBe(true);
+      const { stdout, exitCode, timedOut, workspaceIntact } = await replayGoldenCase(golden.name);
+      expect(timedOut, `${golden.name}: CLI replay child killed at the ${CHILD_DEADLINE_HINT}`).toBe(false);
+      expect(workspaceIntact, `${golden.name}: replay mutated the materialized workspace (files or directories)`).toBe(true);
 
       if (stdout !== golden.stdout) {
         let i = 0;
