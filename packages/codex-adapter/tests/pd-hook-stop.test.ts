@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import * as yaml from 'js-yaml';
 import { getDefaultPdConfig } from '@principles/core/runtime-v2';
 import { processHookInvocation } from '../src/pd-hook.js';
 import { decodeCodexInput, CodexDecoderError } from '../src/codec/index.js';
@@ -63,7 +64,20 @@ describe('pd-hook Stop behavior', () => {
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toHaveLength(1);
     expect(result.stderr[0]).toContain('reason=feature_disabled');
-    expect(result.stderr[0]).toContain('codex_conversation_ingestion.enabled=true');
+    // PRI-1063 (review fix): `diagnostic()` collapses every whitespace run, so
+    // the hint must be a single-line flow mapping AND must tell the user to
+    // edit the existing `features:` block (a standalone block duplicates a key
+    // that every real config already has -> YAML parse error).
+    expect(result.stderr[0]).not.toContain('\n');
+    expect(result.stderr[0]).toContain('codex_conversation_ingestion: {enabled: true}');
+    expect(result.stderr[0]).toContain('existing "features:" block');
+    expect(result.stderr[0]).toContain('one flat key');
+    // The advertised snippet must really parse as ONE flat key.
+    const snippet = result.stderr[0].match(/([a-z_.]+): \{enabled: true\}/);
+    expect(snippet).not.toBeNull();
+    const parsed = yaml.load(`features:\n  ${snippet![0]}`) as { features: Record<string, unknown> };
+    expect(Object.keys(parsed.features)).toEqual(['codex_conversation_ingestion']);
+    expect(parsed.features.codex_conversation_ingestion).toEqual({ enabled: true });
   });
 
   it('flag off on the per-tool/prompt events stays fully quiet (no per-event noise, PR #1455 review P2)', async () => {
