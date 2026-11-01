@@ -114,8 +114,13 @@ function sha256File(filePath: string): string {
 
 /** Materialize the stored corpus workspace into `dest` using the explicit
  * stored→runtime layout map. An unknown stored file is a hard error (the
- * corpus layout is part of the checked-in contract). */
+ * corpus layout is part of the checked-in contract). A corpus workspace with
+ * ZERO stored files (ws-empty) has no directory in a fresh checkout — git
+ * cannot track empty directories — and materializes to an empty workspace;
+ * the corpus-integrity test proves every manifest-declared file exists
+ * before any replay runs, so this ENOENT tolerance cannot mask corruption. */
 function materializeWorkspace(storedDir: string, dest: string): void {
+  if (!fs.existsSync(storedDir)) return; // zero-file workspace (see docblock)
   for (const relPath of listFiles(storedDir)) {
     const targetRel = MATERIALIZE_MAP[relPath];
     if (targetRel === undefined) {
