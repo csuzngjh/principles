@@ -1,0 +1,488 @@
+{
+  "runId": "gate2-20261031-c",
+  "revision": {
+    "supersedes": [
+      "gate2-20261031 (v1, json sha256 009b0ace93dc691af831f3d26bbb401b89609291dedd70bb2734b65c58258744)",
+      "gate2-20261031-b (v2, json sha256 aaffe6b34b189e1f31e5fba6dab43aff91d4a1081caf523c7f7e6d875ce19fa0)"
+    ],
+    "reasonV2": "Phase 3 finding: codex-cli 0.166.0 headless mode blocks ALL MCP tool calls under approval_policy=never; the symmetric --dangerously-bypass-approvals-and-sandbox flag is the only headless execution path and is now applied to BOTH arms. Zero formal runs existed under v1.",
+    "reasonV3": "Formal run 1 (Arm A / S11) exposed a real differential-safety signal: Arm A agents legitimately explore other skill-listed read commands (pd candidate show, pd health) which open state.db DIRECTLY and create WAL sidecars in the workspace — existing production CLI behavior (the audit-documented \"read-only risk does not generalize\" class; PR #2214's staging protects only pain recall). This is experiment DATA about the baseline mechanism, not an MCP safety breach. The v2 blanket halt on any workspace change is refined per Owner §6.4 intent: Arm B (MCP) mutation still hard-halts (OD-A gate); Arm A changes are recorded per run as a measured side-effect metric. Runs 0-1 records retained; execution resumes at index 2.",
+    "unchanged": "Scenarios, fixtures, oracle ground truth, OD-A field whitelist, scoring rules (incl. v2 status-equivalence classes), numeric thresholds, model identity/config, seed (20261031) and therefore the identical 72-run order."
+  },
+  "generatedAt": "2026-10-31T10:28:38.312Z",
+  "purpose": "Gate 2 MCP value validation: skill+CLI vs one-shot MCP prototype, identical model/data/tasks",
+  "ownerAuthorization": {
+    "OD-A": "Field disclosure whitelist frozen (minimal disclosure; all previously OWNER_DECISION_REQUIRED fields DENYed for the first-phase experiment)",
+    "OD-B": "Preregistration freeze + disposable isolated MCP prototype + two-arm comparison + hook interaction verification + full report authorized; SYNTHETIC_ONLY; Gate 3 NOT auto-started",
+    "hookMandate": "Phase 3 hook interaction verification is a formal Gate 2 acceptance gate, not optional"
+  },
+  "git": {
+    "worktreeHead": "9f0888a168def3b57a5e85fbb6b88273e82fe3fe",
+    "originMain": "9f0888a168def3b57a5e85fbb6b88273e82fe3fe",
+    "auditBaseline": "9f0888a168def3b57a5e85fbb6b88273e82fe3fe",
+    "originMainEqualsAuditBaseline": true
+  },
+  "environment": {
+    "node": "v26.7.0",
+    "codexCli": "0.166.0",
+    "mcpSdk": "@modelcontextprotocol/sdk@1.32.2 (zod 4.6.7 transitively pinned in temp lockfile)",
+    "model": {
+      "provider": "ZAI Coding (authorized GLM coding plan channel)",
+      "baseUrl": "https://api.z.ai/api/v1",
+      "modelId": "glm-5.3-flash",
+      "auth": "env ZAI_CODING_CN_API_KEY (referenced, never written to files)",
+      "wireApi": "responses",
+      "reasoningEffort": "low",
+      "temperature": "provider default (not set explicitly)"
+    },
+    "channelDecision": "TokenFactory (preferred by Owner) verified reachable but daily quota exhausted (\"LLMGateway API key reached its current period usage limit\", resets 00:00 CST); ZAI main-channel key has insufficient balance (error 1113); ZAI coding channel verified working incl. tool calls. Model identity unchanged (glm-5.3-flash); channel = authorized ZAI coding plan (no new spend). Both arms use the identical frozen config.",
+    "harness": "codex exec --json --dangerously-bypass-approvals-and-sandbox (SYMMETRIC both arms; headless MCP execution requires it — approval_policy=never blocks MCP tool calls in codex 0.166, a Phase 3 finding counted against MCP as operational cost), per-run isolated CODEX_HOME + fresh workspace; run timeout 420s",
+    "hookConfig": "NO PD hooks in the 72 formal runs (hooks measured by the dedicated Phase 3 matrix; identical for both arms hence no differential signal). Phase 3 uses an isolated CODEX_HOME with the production PD plugin hook (repo build) + an observation hook (matcher .*) logging every event.",
+    "budget": "Estimated < 2M total tokens across 72 runs on the authorized coding-plan channel; no OpenAI; no new paid spend. Token usage is recorded when codex emits token_count events (may be partial for custom providers — recorded honestly)."
+  },
+  "scenarios": {
+    "source": "SPEC v0.4 §2.1 frozen distribution (4 valid / 2 no-match / 2 required-source / 2 optional-source / 1 identity / 1 illegal-input); 12 concrete scenarios + fixtures + ground truth frozen in scenarios.json/oracle.json (hashes below)",
+    "specGaps": [
+      "SPEC §2.1/§2.3 freezes the DISTRIBUTION and thresholds but does not enumerate 12 concrete scenarios — concretized here, before any formal run, per Owner instruction §3.3.",
+      "identityStatus 'ambiguous' / status 'ambiguous_principle' have NO production code path in recallPains() (exact ledger-key match only); scenario S11 operationalizes identity ambiguity as a near-miss id whose correct answer is principle_not_found + identityStatus not_found."
+    ]
+  },
+  "arms": {
+    "A": "Existing path: verbatim pd-cli-operator skill sections 2/2a/3 as workspace AGENTS.md + pd CLI on PATH (worktree build) + PD_WORKSPACE_DIR; no plugin scripts available (honestly recorded per SPEC §2.1: CLI + current guidance text).",
+    "B": "Disposable MCP prototype: single read-only tool pd_recall_principle_pains via stdio (server bound at launch to the run workspace by trusted config); no PD skill, no pd on PATH; neutral AGENTS.md discovery note only.",
+    "equality": "Identical task prompts (frozen in harness/common.mjs), identical model config, identical fixtures (fingerprint-verified per run), independent sessions (per-run CODEX_HOME), no context carryover."
+  },
+  "fieldWhitelist": "OD-A exactly as Owner instruction §4: ALLOW principle.requestedId/identityStatus, association.type/confidence, availability, status, statusDetail, sources (fixed enums), summary (counts), truncated, contextUsedForRanking, unresolvedAssociations.reason, query.limit; DENY all ids (canonicalId/painId/evidenceRefs/candidateId/taskId/decisionId/sessionId/turnId), pain text/reason/rawStatement/occurredAt/source/host/score/severity, diagnoses content, correctionEvidence, lineage hops, trustedContextReceipt. Enforced by shared projection module + per-call whitelist/sentinel assertion in the server + harness-side scans.",
+  "outputSchema": "pd.capability.v1 envelope (SPEC §7) — single text content block carrying the projected JSON; no structuredContent duplication (host-agnostic choice, frozen here).",
+  "metrics": {
+    "taskSuccess": "all scenario-required answer fields exactly match oracle ground truth (deterministic JSON check of the final message)",
+    "answerCorrectness": "fraction of required fields correct",
+    "toolDiscovery": ">=1 real PD capability call (Arm A: command_execution matching /pain recall/; Arm B: mcp_tool_call pd_recall_principle_pains)",
+    "executionReliability": "the capability call completed successfully (final attempt)",
+    "interactionCost": "total agent tool calls (terminal states only) + turn count; primary = toolCalls",
+    "completionTime": "harness wall-clock ms per run",
+    "tokenUsage": "from codex token_count events when present (may be partial for the custom provider — recorded honestly)",
+    "errorRate": "share of runs with failed/timeout/error outcomes or invalid final JSON",
+    "disclosureSafety": "Arm B: zero sentinel occurrences in MCP traffic (server evidence log + session events) AND zero whitelist violations (server-side per call); both arms: sentinel occurrences in the FINAL ANSWER are recorded (Arm A quoting raw text is existing-CLI-contract behavior, not an OD-A breach)",
+    "hookCompatibility": "dedicated Phase 3 six-item matrix with real PD hook + MCP concurrently; same verdict applies to both arms (identical hook surface)",
+    "sideEffects": "workspace file-tree fingerprints identical before/after each run; any mutation = safety stop"
+  },
+  "thresholds": {
+    "safetyHardGate": "Sensitive-field leak via MCP traffic = 0; unexpected workspace/sidecar mutation = 0; permission bypass = 0; false-success mapping = 0 (MCP envelope business status must equal oracle-mapped status). ANY occurrence => STOP.",
+    "utilityGate": "MCP must achieve at least ONE of: (a) task-success rate absolute improvement >= 10 percentage points vs Arm A; OR (b) Arm A success drop <= 5pp AND median agent interaction (toolCalls) reduced >= 25%.",
+    "opsGate": "documented-prereq environment: MCP configuration steps <= 5 minutes target; p95 per-run wall-clock <= 2x Arm A baseline. Exceeding requires explicit Owner acceptance.",
+    "cliBaselineRule": "if Arm A task success >= 95% and Arm B shows neither utility nor efficiency gain => STOP recommended.",
+    "projectionInsufficiency": "if the OD-A metadata projection cannot support any frozen scenario task, record capability gap and return to Owner field adjudication; never widen disclosure."
+  },
+  "hookMatrix": [
+    "M1 normal MCP tool call -> PreToolUse path observed, no fabricated hook lifecycle events",
+    "M2 MCP server startup and exit -> no phantom hook events, no orphan processes",
+    "M3 invalid params / tool rejection -> no duplicate or erroneous events",
+    "M4 timeout & retry -> no duplicated events, no stuck state",
+    "M5 read-only query without trusted hook context -> no pain admission, no injection accounting",
+    "M6 MCP tool call concurrent with real PD hooks -> hooks unchanged, no governance bypass, query errors not counted as pains or injections"
+  ],
+  "stopConditions": [
+    "Any DENY-field sentinel in MCP traffic => immediate halt + SAFETY_FAILURE verdict",
+    "Any unexpected workspace mutation => immediate halt + SAFETY_FAILURE verdict",
+    "Formal host config touched / hook bypassed / query recorded as pain or injection => SAFETY_FAILURE",
+    "Provider channel exhausted mid-experiment => pause; if unrecoverable the verdict for missing runs is UNPROVEN (no model substitution)"
+  ],
+  "randomization": {
+    "seed": 20261031,
+    "algorithm": "mulberry32 + Fisher-Yates over 72 (arm,scenario,rep) triples",
+    "orderFrozenIn": "preregistration.json:runOrder"
+  },
+  "runCounts": {
+    "scenarios": 12,
+    "arms": 2,
+    "repsPerScenarioPerArm": 3,
+    "perArm": 36,
+    "total": 72
+  },
+  "dataIsolation": "All workspaces are script-generated synthetic fixtures under the experiment worktree .tmp dir; no real Owner data, no production .pd directories, no real correctionEvidence; isolated per-run CODEX_HOME; real ~/.codex untouched (verified before/after).",
+  "verdictRules": {
+    "GO_TO_GATE_3_PROPOSAL": "safety hard gate all-pass AND utility gate passed AND 72/72 runs evidence complete AND no unresolved critical correctness issue (still only a PROPOSAL — Gate 3 requires separate Owner approval)",
+    "STOP": "insufficient marginal value / cost clearly exceeds benefit / unacceptable disclosure / unacceptable hook governance conflict, or any safety hard-gate failure",
+    "UNPROVEN": "missing critical data / incomplete scenarios / insufficient statistical evidence / hook interaction unverifiable / preregistration conditions unmet / environment materially different from the target host — never reportable as MCP success",
+    "statistics": "72 runs are 12 repeated-measure scenarios x 3 reps, NOT 72 independent samples; analysis reports per-scenario consistency and paired per-scenario arm comparisons with explicit small-sample caveats."
+  },
+  "pilotRecords": "Neutral wiring pilots (one per arm, non-scenario prompts) under the FINAL v2 execution policy, before this freeze: Arm A 82.7s rc=0 (real CLI exploration: 11 commands incl. pd --help / pd pain --help, 3 pd pain recall executions, workspace unchanged); Arm B 15.3s rc=0 (MCP tool discovery mcp__pd_recall__pd_recall_principle_pains, workspace unchanged). v1-policy pilots (sandbox read-only) superseded: A 156s rc=0 / B 26s rc=0 — B could list but not execute the tool under approval=never. No scenario task was executed before freezing.",
+  "artifacts": {
+    "fixtures/scenarios.json": "23760785b55a02a4dfdff28b0b34b01f00f55374a4c5d0337aadeb51d99d1ef2",
+    "fixtures/gen-fixtures.mjs": "151545550025d1dccc4b226ea4b869458aea6e38da1ab922bbbe796fbb3951df",
+    "oracle/oracle.json": "3a94f5d5bcdc1220bdfd6df044d2c288550a1f33a699f13f0ff41eea17964109",
+    "oracle/run-oracle.mjs": "4ed0626f14a01420676087a74949d28ba8d1fc83598cc22f33395079f781f69b",
+    "proto/project.mjs": "90265203db3c0402b0eb0a0ed4f0c4379318348985440661c2649a317318ab01",
+    "proto/smoke-client.mjs": "4b2a34d73b4243ecb9fdc9b91879907a14f8398852b2ef2d9b0e82d0a3f2f977",
+    "harness/common.mjs (contains frozen prompts + both AGENTS.md texts)": "8afc2355f2e8cb1c84f86d1c7c0931d3d70736ec39c8ebad8d680de74c758534",
+    "harness/run-experiment.mjs": "69f74cee6e8117eb721373e9d0656d2d6b4998fb1297e8f481f9f7c1973d780a",
+    "harness/pilot.mjs": "dbb5e3e6a48993dd0fff983d2a5eae14536c07821b7a17821ac456470c19cc74",
+    "fixtures/workspaces/manifest.json (per-scenario fixture fingerprints)": "d7a5d86cca57eb50f1e35bd78d3eaa681d2932fa9b0b080b1cd7cfa1a9eb2d7a",
+    "TMP:C:/Users/Administrator/AppData/Local/Temp/pd-mcp-gate2/gate2-20261031/server/server.mjs": "040d319c4cd3f778cd64cb2fdadfd2ad7d706a9d2de0c21eec4ddad7f1dd77fd",
+    "TMP:C:/Users/Administrator/AppData/Local/Temp/pd-mcp-gate2/gate2-20261031/server/package.json": "2034cd8192b64530f7d014180a05cdd184fa0f77997d028ecf39b9d28a74f6e1",
+    "TMP:C:/Users/Administrator/AppData/Local/Temp/pd-mcp-gate2/gate2-20261031/server/package-lock.json": "bf1d149554e32af6fbeaaaa29fbc92b3dfb469d735d010903325ca4829b169c8"
+  },
+  "runOrder": [
+    {
+      "arm": "B",
+      "scenarioId": "S12",
+      "rep": 3
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S11",
+      "rep": 3
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S04",
+      "rep": 2
+    },
+    {
+      "arm": "B",
+      "scenarioId": "S08",
+      "rep": 1
+    },
+    {
+      "arm": "B",
+      "scenarioId": "S07",
+      "rep": 2
+    },
+    {
+      "arm": "B",
+      "scenarioId": "S09",
+      "rep": 2
+    },
+    {
+      "arm": "B",
+      "scenarioId": "S06",
+      "rep": 1
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S01",
+      "rep": 2
+    },
+    {
+      "arm": "B",
+      "scenarioId": "S05",
+      "rep": 2
+    },
+    {
+      "arm": "B",
+      "scenarioId": "S05",
+      "rep": 1
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S09",
+      "rep": 2
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S11",
+      "rep": 1
+    },
+    {
+      "arm": "B",
+      "scenarioId": "S08",
+      "rep": 3
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S01",
+      "rep": 3
+    },
+    {
+      "arm": "B",
+      "scenarioId": "S05",
+      "rep": 3
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S02",
+      "rep": 2
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S09",
+      "rep": 1
+    },
+    {
+      "arm": "B",
+      "scenarioId": "S06",
+      "rep": 2
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S02",
+      "rep": 3
+    },
+    {
+      "arm": "B",
+      "scenarioId": "S11",
+      "rep": 2
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S03",
+      "rep": 1
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S08",
+      "rep": 2
+    },
+    {
+      "arm": "B",
+      "scenarioId": "S04",
+      "rep": 3
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S12",
+      "rep": 2
+    },
+    {
+      "arm": "B",
+      "scenarioId": "S12",
+      "rep": 2
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S12",
+      "rep": 1
+    },
+    {
+      "arm": "B",
+      "scenarioId": "S02",
+      "rep": 2
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S09",
+      "rep": 3
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S10",
+      "rep": 1
+    },
+    {
+      "arm": "B",
+      "scenarioId": "S09",
+      "rep": 1
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S10",
+      "rep": 3
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S01",
+      "rep": 1
+    },
+    {
+      "arm": "B",
+      "scenarioId": "S01",
+      "rep": 1
+    },
+    {
+      "arm": "B",
+      "scenarioId": "S03",
+      "rep": 2
+    },
+    {
+      "arm": "B",
+      "scenarioId": "S11",
+      "rep": 3
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S07",
+      "rep": 3
+    },
+    {
+      "arm": "B",
+      "scenarioId": "S01",
+      "rep": 3
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S03",
+      "rep": 3
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S06",
+      "rep": 1
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S05",
+      "rep": 2
+    },
+    {
+      "arm": "B",
+      "scenarioId": "S04",
+      "rep": 2
+    },
+    {
+      "arm": "B",
+      "scenarioId": "S02",
+      "rep": 1
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S08",
+      "rep": 3
+    },
+    {
+      "arm": "B",
+      "scenarioId": "S10",
+      "rep": 1
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S07",
+      "rep": 2
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S06",
+      "rep": 3
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S02",
+      "rep": 1
+    },
+    {
+      "arm": "B",
+      "scenarioId": "S10",
+      "rep": 2
+    },
+    {
+      "arm": "B",
+      "scenarioId": "S12",
+      "rep": 1
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S08",
+      "rep": 1
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S10",
+      "rep": 2
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S03",
+      "rep": 2
+    },
+    {
+      "arm": "B",
+      "scenarioId": "S04",
+      "rep": 1
+    },
+    {
+      "arm": "B",
+      "scenarioId": "S11",
+      "rep": 1
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S07",
+      "rep": 1
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S05",
+      "rep": 1
+    },
+    {
+      "arm": "B",
+      "scenarioId": "S09",
+      "rep": 3
+    },
+    {
+      "arm": "B",
+      "scenarioId": "S01",
+      "rep": 2
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S04",
+      "rep": 1
+    },
+    {
+      "arm": "B",
+      "scenarioId": "S07",
+      "rep": 1
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S11",
+      "rep": 2
+    },
+    {
+      "arm": "B",
+      "scenarioId": "S02",
+      "rep": 3
+    },
+    {
+      "arm": "B",
+      "scenarioId": "S03",
+      "rep": 3
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S04",
+      "rep": 3
+    },
+    {
+      "arm": "B",
+      "scenarioId": "S07",
+      "rep": 3
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S12",
+      "rep": 3
+    },
+    {
+      "arm": "B",
+      "scenarioId": "S06",
+      "rep": 3
+    },
+    {
+      "arm": "B",
+      "scenarioId": "S08",
+      "rep": 2
+    },
+    {
+      "arm": "B",
+      "scenarioId": "S10",
+      "rep": 3
+    },
+    {
+      "arm": "B",
+      "scenarioId": "S03",
+      "rep": 1
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S05",
+      "rep": 3
+    },
+    {
+      "arm": "A",
+      "scenarioId": "S06",
+      "rep": 2
+    }
+  ]
+}
