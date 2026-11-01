@@ -501,7 +501,7 @@ export function computeITT(pairs) {
  *   nonTargetRetention — { eligible: n, deliveredInTreatment: n, deliveredInControl: n }
  *   capacityRecords — full-library capacity competition records (treatment side)
  */
-export function computeTreatmentFidelity({ plannedTreatmentUnits, chains = [], controlChains = [], nonTargetRetention = null, capacityRecords = [] }) {
+export function computeTreatmentFidelity({ plannedTreatmentUnits, chains = [], controlChains = [], nonTargetRetention = null, capacityRecords = [], unresolvedTreatmentUnits = null }) {
   if (!Number.isInteger(plannedTreatmentUnits) || plannedTreatmentUnits < 0) throw new Error('computeTreatmentFidelity: plannedTreatmentUnits required');
   const count = (arr, level) => arr.filter((c) => c && c.ok !== false && c.provenLevel === level).length;
   const atLeast = (arr, level) => arr.filter((c) => c && c.ok !== false && c.provenLevel !== 'NONE'
@@ -534,7 +534,7 @@ export function computeTreatmentFidelity({ plannedTreatmentUnits, chains = [], c
     }
     : { eligible: 0, deliveredInTreatment: null, deliveredInControl: null, treatmentRetentionRate: null, controlRetentionRate: null, note: 'no non-target retention facts supplied (isolated mode: structurally all OFF)' };
   const evictions = capacityRecords.flatMap((record) => (record && Array.isArray(record.evicted) ? record.evicted.map((e) => ({ ...e, armId: record.armId || null })) : []));
-  return {
+  const fidelity = {
     metric: 'TreatmentFidelity',
     plannedTreatmentUnits,
     evidencedChains: chains.length,
@@ -551,8 +551,19 @@ export function computeTreatmentFidelity({ plannedTreatmentUnits, chains = [], c
     controlContamination: { units: contaminatedControl, ofControlChains: controlChains.length },
     nonTargetRetention: retention,
     capacityEvictions: { units: evictions.length, details: evictions },
-    rule: 'fidelity is a mechanism observability record — the actually-injected subset may NEVER replace the ITT primary analysis; an unverifiable injection downgrades causal attribution but never deletes assigned units',
   };
+  // P1-2: a planned unit with no VALID bound chain has an UNKNOWN injection
+  // status — it is not evidence of injection and not evidence of absence. Only
+  // supplied by callers that can bind chains to planned units (anchored
+  // studies); legacy reports omit these fields to stay byte-identical.
+  if (unresolvedTreatmentUnits !== null) {
+    fidelity.unresolvedTreatmentUnits = unresolvedTreatmentUnits;
+    fidelity.coverage = unresolvedTreatmentUnits === 0
+      ? { status: 'COMPLETE', note: 'every planned treatment unit supplied a bound, verified evidence chain' }
+      : { status: 'PARTIAL_UNKNOWN', note: `${unresolvedTreatmentUnits} planned treatment unit(s) have no bound, verified evidence chain — their injection status is UNKNOWN` };
+  }
+  fidelity.rule = 'fidelity is a mechanism observability record — the actually-injected subset may NEVER replace the ITT primary analysis; an unverifiable injection downgrades causal attribution but never deletes assigned units';
+  return fidelity;
 }
 
 const INJECTION_LEVEL_ORDER = ['NONE', 'CONFIGURED', 'SELECTED', 'SUBMITTED', 'HOST_ACCEPTED', 'CONTEXT_PRESENT', 'RUNTIME_LOADED'];

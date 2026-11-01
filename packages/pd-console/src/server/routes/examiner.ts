@@ -24,10 +24,14 @@
  * server-minted crypto-random handles. A request only SELECTS: the target
  * principle travels onward as an index into the server's own ledger list,
  * the experiment mode as a boolean. No request string crosses into the
- * research pipeline, and no request value constructs a path. Studies live
- * under the lab's examiner-studies/ area (never the frozen
- * challenge-studies/ area); historical reports are read-only; real-host
- * execution is refused by this route class itself.
+ * research pipeline, and no request value constructs a path.
+ *
+ * Two roots (P1-1): NEW console studies are written under
+ * `examiner-console-studies/` and require the server's own ownership marker;
+ * the committed `examiner-studies/` research assets are visible but ALWAYS
+ * read-only here (POST /run and POST /report answer 403). The frozen
+ * `challenge-studies/` area is never a write target. Real-host execution is
+ * refused by this route class itself.
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import path from 'node:path';
@@ -36,8 +40,9 @@ import { sendSuccess, sendError, sendNotFound } from '../utils/response.js';
 import { PrinciplesConsoleModel } from '../models/PrinciplesConsoleModel.js';
 import {
   loadLabModules, loadHostCapability, preflightCheck, offlineStudyPass, reportMaterialize,
-  listStudyNames, resolveExistingStudyDir, studyStatusPayload, studyReportPayload,
-  materializeConsoleStudy, type LabModules,
+  listStudyNames, resolveStudyAccess, resolveStudyRoots, studyStatusPayload, studyReportPayload,
+  materializeConsoleStudy, verifyConsoleOwnership, writableRootProblem, isJsonObject,
+  ExaminerPreflightBlockedError, type LabModules, type StudyRoots,
 } from './examiner-executor.js';
 
 type HostCapability = Record<string, string>;
@@ -51,13 +56,20 @@ const PRINCIPLE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const STUDY_ROUTE_PATTERN = /^\/studies\/([A-Za-z0-9-]+)(\/[^/]*)?$/;
 
 /**
- * Studies root: the lab's examiner-studies/ area by default; overridable via
- * PD_EXAMINER_STUDIES_ROOT (tests point it at a temp dir so test studies
- * never touch the repository's committed research artifacts).
+ * P2-1: the Examiner is a DEV-ONLY capability. The gate is SERVER-SIDE and
+ * cannot be set by a client — it reads only the running module's own URL and
+ * the operator's environment: a source run (tsx/vitest, import.meta.url ends
+ * with .ts) or an explicit `PD_EXAMINER_DEV=1`. A production build
+ * (`dist/server.js`) has no lab tooling and answers 404 — never 503 — so the
+ * capability simply does not exist there.
  */
-function examinerStudiesRoot(): string {
-  const override = process.env.PD_EXAMINER_STUDIES_ROOT;
-  return override ? path.resolve(override) : path.join(labRoot, 'examiner-studies');
+export function isExaminerDevRuntime(moduleUrl: string, env: Record<string, string | undefined> = process.env): boolean {
+  if (env.PD_EXAMINER_DEV === '1') return true;
+  return moduleUrl.endsWith('.ts');
+}
+
+function examinerDevEnabled(): boolean {
+  return isExaminerDevRuntime(import.meta.url);
 }
 
 let labModules: LabModules | null = null;
@@ -78,6 +90,9 @@ async function loadLab(): Promise<HostCapability | null> {
   }
 }
 
+/** Path + write-permission facts shared by run/report; never request-derived. */
+type StudyContext = { labRoot: string; roots: StudyRoots };
+
 function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   return new Promise((resolve) => {
     let raw = '';
@@ -90,7 +105,8 @@ function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
         return;
       }
       try {
-        resolve(JSON.parse(raw) as Record<string, unknown>);
+        const parsed: unknown = JSON.parse(raw);
+        resolve(isJsonObject(parsed) ? parsed : {});
       } catch {
         resolve({});
       }
@@ -104,15 +120,24 @@ export async function handleExaminerRoute(
   workspaceDir: string,
   subPath: string,
 ): Promise<void> {
+  if (!examinerDevEnabled()) {
+    sendError(res, 404, 'examiner_not_enabled', 'The Examiner research surface is a local-dev capability and is not enabled in this runtime');
+    return;
+  }
   const lab = await loadLab();
   if (!lab || !labModules) {
     sendError(res, 503, 'examiner_dev_tooling_unavailable', `Examiner dev tooling is not available in this installation (the principle-learning-lab lives in the repository's scripts/dev area): ${labUnavailableReason ?? 'unknown reason'}`);
     return;
   }
   const method = req.method ?? 'GET';
+  const roots = resolveStudyRoots(labRoot);
+  const context: StudyContext = { labRoot, roots };
+  const rootProblem = writableRootProblem(roots);
 
   // GET /overview
   if (subPath === '/overview' && method === 'GET') {
+    const writable = listStudyNames(roots.writable);
+    const historical = listStudyNames(roots.historical);
     sendSuccess(res, {
       spec: 'SPEC-PD-EXAMINER-001 v0.9',
       executionScope: 'offline-stub only — real model calls and real host runs are NOT authorized this round',
@@ -120,12 +145,18 @@ export async function handleExaminerRoute(
         gate1_challenge_trust: 'BLOCKED — independent human Gold review has not been performed for any Examiner suite (code tests can never substitute)',
         gate2_behavior_evaluation: 'NOT_READY — requires Gate 1 + real-host authorization',
         gate3_llm_authoring: 'NOT_STARTED',
-        gate4_product_integration: 'NOT_STARTED (this entry is the local-dev console integration)',
+        gate4_product_integration: 'NOT_STARTED (local-dev console integration; the production UI/API is disabled)',
       },
       hostInjectionCapability: lab,
       fullConclusionMinimumLevel: 'CONTEXT_PRESENT',
-      studiesRoot: examinerStudiesRoot(),
-      studies: listStudyNames(examinerStudiesRoot()),
+      writableStudiesRoot: roots.writable,
+      historicalStudiesRoot: roots.historical,
+      rootProblem,
+      studies: [...writable, ...historical.filter((name) => !writable.includes(name))],
+      readOnlyStudies: [
+        ...historical,
+        ...writable.filter((name) => !verifyConsoleOwnership(roots.writable, path.join(roots.writable, name)).ok),
+      ],
     });
     return;
   }
@@ -134,13 +165,17 @@ export async function handleExaminerRoute(
   if (subPath === '/principles' && method === 'GET') {
     const model = new PrinciplesConsoleModel(workspaceDir);
     const list = await model.listPrinciples();
-    const principles = (list.principles ?? []).map((p) => ({ id: p.id, version: 'ledger', text: p.text, status: p.status }));
+    const principles = (list.principles ?? []).map((p) => ({ id: p.id, version: 'ledger', text: p.text, status: p.status, ruleCount: p.ruleCount ?? 0 }));
     sendSuccess(res, { principles, note: 'study inputs are read from the workspace ledger (read-only); eligibility filtering happens inside the Examiner contract' });
     return;
   }
 
   // POST /studies — create an offline examiner study (identity server-minted)
   if (subPath === '/studies' && method === 'POST') {
+    if (rootProblem) {
+      sendError(res, 409, 'writable_root_not_isolated', rootProblem);
+      return;
+    }
     const body = await readBody(req);
     const requestedTarget = typeof body.targetPrincipleId === 'string' ? body.targetPrincipleId.trim() : '';
     const requestedMode = typeof body.experimentMode === 'string' ? body.experimentMode : '';
@@ -152,7 +187,7 @@ export async function handleExaminerRoute(
     }
     const model = new PrinciplesConsoleModel(workspaceDir);
     const list = await model.listPrinciples();
-    const ledgerPrinciples = (list.principles ?? []).map((p) => ({ id: p.id, version: 'ledger', text: p.text, status: p.status }));
+    const ledgerPrinciples = (list.principles ?? []).map((p) => ({ id: p.id, version: 'ledger', text: p.text, status: p.status, ruleCount: p.ruleCount ?? 0 }));
     // The request only SELECTS: the target travels onward as an INDEX into
     // the server's own ledger list (exact-match required) and the mode as a
     // BOOLEAN; the study identity/directory/seed are minted server-side. No
@@ -164,7 +199,7 @@ export async function handleExaminerRoute(
     }
     const isolatedMode = requestedMode === 'isolated_principle';
     try {
-      const created = await materializeConsoleStudy(labModules, labRoot, examinerStudiesRoot(), {
+      const created = await materializeConsoleStudy(labModules, labRoot, roots, {
         isolatedMode,
         targetIndex,
         ledgerPrinciples,
@@ -188,26 +223,30 @@ export async function handleExaminerRoute(
   const studyMatch = STUDY_ROUTE_PATTERN.exec(subPath);
   if (studyMatch && studyMatch[1]) {
     const rest = studyMatch[2] ?? '';
-    const studyDir = resolveExistingStudyDir(examinerStudiesRoot(), studyMatch[1]);
-    if (!studyDir) {
+    const access = resolveStudyAccess(roots, studyMatch[1]);
+    if (!access) {
       sendError(res, 404, 'study_not_found', 'study not found');
       return;
     }
+    const studyDir = access.dir;
 
     // GET status
     if (rest === '' && method === 'GET') {
-      sendSuccess(res, studyStatusPayload(studyDir));
+      sendSuccess(res, { ...studyStatusPayload(studyDir), readOnly: access.readOnly, access: access.reason });
       return;
     }
 
     // POST /preflight — the fail-closed gate over the frozen study facts
     if (rest === '/preflight' && method === 'POST') {
-      const preflight = preflightCheck(labModules, studyDir);
-      sendSuccess(res, { studyId: path.basename(studyDir), ok: preflight.ok, status: preflight.status, blockers: preflight.blockers, warnings: preflight.warnings, checks: preflight.checks });
+      const preflight = preflightCheck(labModules, studyDir, context);
+      sendSuccess(res, { studyId: access.studyId, ok: preflight.ok, status: preflight.status, blockers: preflight.blockers, warnings: preflight.warnings, checks: preflight.checks });
       return;
     }
 
-    // POST /run — offline-stub only; real modes are refused at THIS boundary
+    // POST /run — offline-stub only; real modes are refused at THIS boundary.
+    // P1-1/P1-4: the study must be server-owned and writable, and the SERVER
+    // preflight must pass BEFORE the runner is entered. A blocker returns 409
+    // with no RUN_STARTED event, no reservation and no actor creation.
     if (rest === '/run' && method === 'POST') {
       const body = await readBody(req);
       // Real execution needs an Owner-approved run-authorization.json plus the
@@ -217,31 +256,46 @@ export async function handleExaminerRoute(
         sendError(res, 403, 'real_execution_not_authorized', 'non-offline execution requires explicit Owner authorization (run-authorization.json + Stage R gate) — NOT GRANTED this round');
         return;
       }
+      if (access.readOnly) {
+        sendError(res, 403, 'study_read_only', `this study cannot be executed from the console: ${access.reason}`);
+        return;
+      }
       try {
-        const summary = await offlineStudyPass(labModules, studyDir);
-        sendSuccess(res, { studyId: path.basename(studyDir), units: summary.units.map((unit) => ({ unit: unit.unit, state: unit.state })) });
+        const summary = await offlineStudyPass(labModules, studyDir, context);
+        sendSuccess(res, { studyId: access.studyId, units: summary.units.map((unit) => ({ unit: unit.unit, state: unit.state })) });
       } catch (error) {
+        if (error instanceof ExaminerPreflightBlockedError) {
+          sendError(res, 409, 'preflight_blocked', `${error.message}; blockers: ${JSON.stringify(error.blockers)}`);
+          return;
+        }
         sendError(res, 500, 'offline_run_failed', error instanceof Error ? error.message : String(error));
       }
       return;
     }
 
-    // GET /report — read-only
+    // GET /report — read-only (historical studies stay readable)
     if (rest === '/report' && method === 'GET') {
       const payload = studyReportPayload(labModules, studyDir);
       if (!payload) {
         sendError(res, 404, 'report_not_generated', 'no Report V2 yet — run the offline execution first, then generate the report (the console never auto-reruns or rewrites history)');
         return;
       }
-      sendSuccess(res, payload);
+      sendSuccess(res, { ...payload, readOnly: access.readOnly });
       return;
     }
 
     // POST /report — generate (idempotent; refuses to overwrite a READY report)
     if (rest === '/report' && method === 'POST') {
+      if (access.readOnly) {
+        sendError(res, 403, 'study_read_only', `this study cannot be written from the console: ${access.reason}`);
+        return;
+      }
       try {
-        const result = reportMaterialize(labModules, studyDir, new Date().toISOString());
-        sendSuccess(res, { studyId: path.basename(studyDir), status: result.status, written: result.written });
+        const result = reportMaterialize(labModules, studyDir, new Date().toISOString(), () => {
+          const check = verifyConsoleOwnership(roots.writable, studyDir);
+          return check.ok ? { ok: true } : { ok: false, reason: check.reason };
+        });
+        sendSuccess(res, { studyId: access.studyId, status: result.status, written: result.written });
       } catch (error) {
         sendError(res, 409, 'report_write_refused', error instanceof Error ? error.message : String(error));
       }

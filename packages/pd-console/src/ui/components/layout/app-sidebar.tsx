@@ -23,6 +23,7 @@ import { useTranslation } from "react-i18next";
 import { useNotifications } from "../notifications/useNotifications.js";
 import { clearToken } from "../../api.js";
 import { cn } from "../../../lib/utils.js";
+import { IS_DEV } from "../../utils/runtime-mode.js";
 import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from "../ui/sheet.js";
 
 function ThresholdMark({ className }: { className?: string }) {
@@ -50,6 +51,15 @@ const mainNavItems = [
   { id: "examiner", labelKey: "components.sidebar.examiner", href: "/examiner", icon: FlaskConical },
   { id: "intent", labelKey: "components.sidebar.intent", href: "/intent", icon: Compass },
 ];
+
+/**
+ * P2-1: the Examiner is a DEV-only research surface. The navigation entry is
+ * derived from the build-time mode, so a production bundle never advertises a
+ * capability the server refuses.
+ */
+export function visibleMainNavItems(isDev: boolean) {
+  return isDev ? mainNavItems : mainNavItems.filter((item) => item.id !== "examiner");
+}
 
 const toolNavItems = [
   { id: "control-center", labelKey: "components.sidebar.controlCenter", href: "/control-center", icon: Settings },
@@ -100,7 +110,7 @@ function SidebarContent({
       {/* Main nav */}
       <nav className="flex-1 py-2 overflow-y-auto" aria-label={t("components.sidebar.navigation", { defaultValue: "主导航" })}>
         <div className="px-2">
-          {mainNavItems.map((item) => {
+          {visibleMainNavItems(IS_DEV).map((item) => {
             const Icon = item.icon;
             const active = isActive(item.href);
             return (

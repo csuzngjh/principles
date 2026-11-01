@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { makeExaminerV3Case } from './fixtures/examiner-v07.mjs';
 import { hashOfCanonical, freezeMapping } from '../dev/principle-learning-lab/lib/challenge-freeze.mjs';
 import { runChallengeStudy, verifyExaminerArmConfigsFrozen, resolveDispatchUnits } from '../dev/principle-learning-lab/lib/challenge-runner.mjs';
-import { createScriptedStub } from '../dev/principle-learning-lab/lib/challenge-actor.mjs';
+import { createScriptedStub, buildOfflineRuntimeReceipt } from '../dev/principle-learning-lab/lib/challenge-actor.mjs';
 import { buildBehaviorReportV2, writeBehaviorReportV2, verifyBehaviorReportV2 } from '../dev/principle-learning-lab/lib/challenge-behavior-report.mjs';
 import { computeITT, computeTreatmentFidelity } from '../dev/principle-learning-lab/lib/challenge-statistics.mjs';
 import {
@@ -19,6 +19,8 @@ import {
   assignPairs, verifyPairAssignment,
   buildExaminerStudyManifest, verifyExaminerManifest,
   buildDualModeArmPayloads, writeExaminerStudyArtifacts, runExaminerPreflight,
+  computeExaminerStudyBindings, verifyExaminerStudyBindings,
+  LIBRARY_SELECTION_RULE, renderLibraryPayload,
 } from '../dev/principle-learning-lab/lib/examiner-study.mjs';
 import {
   buildInjectionEvidenceChain, verifyInjectionEvidenceChain, collectOfflineStubInjectionEvidence,
@@ -297,24 +299,41 @@ describe('v0.9 §13.B isolation and randomization', () => {
 describe('v0.9 §7 injection evidence chain', () => {
   const validStage = (ref: string) => ({ evidenceRef: ref, contentHash: 'd'.repeat(64) });
   const H = 'a'.repeat(64);
+  const P = 'b'.repeat(64);
+  const R = 'c'.repeat(64);
+  // v2 chains are BOUND to one attempt: without these an attribution cannot be
+  // made (a sidecar's directory is never attribution evidence).
+  const BINDING = { studyId: 'EXM-V09-STUDY', caseId: 'EXM-V09-T1', armId: 'B', repetitionId: '1', attemptId: 'a1' };
+  const UNIT = { caseId: 'EXM-V09-T1', armId: 'B', repetitionId: '1', attemptId: 'a1' };
 
   it('provenLevel is the highest CONSECUTIVE evidenced level; SUBMITTED is never RUNTIME_LOADED', () => {
-    const submitted = buildInjectionEvidenceChain({ producedBy: 'runner-offline-stub', armId: 'A', principleHash: H, configured: validStage('cfg'), selected: validStage('sel'), submitted: validStage('sub') });
+    const submitted = buildInjectionEvidenceChain({ producedBy: 'runner-offline-stub', ...BINDING, principleHash: H, promptHash: P, configured: validStage('cfg'), selected: validStage('sel'), submitted: validStage('sub') });
     expect(submitted.provenLevel).toBe('SUBMITTED');
-    const full = buildInjectionEvidenceChain({ producedBy: 'runner-offline-stub', armId: 'B', principleHash: H, configured: validStage('cfg'), selected: validStage('sel'), submitted: validStage('sub'), hostAccepted: validStage('acc'), contextPresent: validStage('ctx'), runtimeLoaded: validStage('run') });
+    const full = buildInjectionEvidenceChain({ producedBy: 'runner-offline-stub', ...BINDING, principleHash: H, promptHash: P, receiptHash: R, configured: validStage('cfg'), selected: validStage('sel'), submitted: validStage('sub'), hostAccepted: validStage('acc'), contextPresent: validStage('ctx'), runtimeLoaded: validStage('run') });
     expect(full.provenLevel).toBe('RUNTIME_LOADED');
+    expect(verifyInjectionEvidenceChain(full, { requireLevel: 'RUNTIME_LOADED' }).ok).toBe(true);
   });
 
   it('a gapped chain is refused (each level presupposes its predecessor)', () => {
-    expect(() => buildInjectionEvidenceChain({ producedBy: 'runner-offline-stub', armId: 'A', principleHash: H, runtimeLoaded: validStage('run') })).toThrow(/gap/);
+    expect(() => buildInjectionEvidenceChain({ producedBy: 'runner-offline-stub', ...BINDING, principleHash: H, promptHash: P, receiptHash: R, runtimeLoaded: validStage('run') })).toThrow(/gap/);
   });
 
   it('declaration-only evidence (no evidenceRef) is refused at construction', () => {
-    expect(() => buildInjectionEvidenceChain({ producedBy: 'runner-offline-stub', armId: 'A', principleHash: H, configured: { note: 'declared true' } as any })).toThrow(/not evidence/);
+    expect(() => buildInjectionEvidenceChain({ producedBy: 'runner-offline-stub', ...BINDING, principleHash: H, configured: { note: 'declared true' } as any })).toThrow(/not evidence/);
+  });
+
+  it('RUNTIME_LOADED without the runtime receipt is refused by construction and unprovable in verification', () => {
+    // builder: cannot be expressed at all
+    expect(() => buildInjectionEvidenceChain({ producedBy: 'runner-offline-stub', ...BINDING, principleHash: H, promptHash: P, configured: validStage('cfg'), selected: validStage('sel'), submitted: validStage('sub'), hostAccepted: validStage('acc') })).toThrow(/runtime's own load receipt/);
+    // verifier: a legacy v1 chain that claimed it anyway is NOT_PROVEN
+    const legacy = { schema: 'examiner-injection-evidence.v1', producedBy: 'runner-offline-stub', scope: 'offline-stub', armId: 'B', principleHash: H, stages: { RUNTIME_LOADED: validStage('run') }, provenLevel: 'RUNTIME_LOADED' };
+    const v1 = { ...legacy, chainHash: hashOfCanonical(legacy) };
+    expect(verifyInjectionEvidenceChain(v1).ok).toBe(false);
+    expect(verifyInjectionEvidenceChain(v1).problems.join(' ')).toContain('without a runtime load receipt');
   });
 
   it('actor-produced chains are refused by producer whitelist; tampering breaks the chainHash', () => {
-    const chain = buildInjectionEvidenceChain({ producedBy: 'runner-offline-stub', armId: 'A', principleHash: H, configured: validStage('cfg') });
+    const chain = buildInjectionEvidenceChain({ producedBy: 'runner-offline-stub', ...BINDING, principleHash: H, configured: validStage('cfg') });
     const forged = { ...chain, producedBy: 'the-actor-itself' };
     expect(verifyInjectionEvidenceChain(forged).ok).toBe(false);
     const tampered = { ...chain, provenLevel: 'RUNTIME_LOADED' };
@@ -323,27 +342,66 @@ describe('v0.9 §7 injection evidence chain', () => {
     expect(verifyInjectionEvidenceChain(chain).ok).toBe(true);
   });
 
-  it('offline scope separation: an offline chain never satisfies a real-host requirement', () => {
-    const chain = buildInjectionEvidenceChain({ producedBy: 'runner-offline-stub', scope: 'offline-stub', armId: 'B', principleHash: H, configured: validStage('cfg') });
+  it('producer ↔ scope is bound: an offline producer can never mint (or satisfy) a real-host chain', () => {
+    const chain = buildInjectionEvidenceChain({ producedBy: 'runner-offline-stub', scope: 'offline-stub', ...BINDING, principleHash: H, configured: validStage('cfg') });
     expect(verifyInjectionEvidenceChain(chain, { requireScope: 'real-host' }).ok).toBe(false);
     expect(verifyInjectionEvidenceChain(chain, { requireScope: 'real-host' }).problems[0]).toContain('offline-stub chain can never prove a real-host');
+    expect(() => buildInjectionEvidenceChain({ producedBy: 'runner-offline-stub', scope: 'real-host', ...BINDING, principleHash: H, configured: validStage('cfg') })).toThrow(/must mint scope 'offline-stub'/);
+    expect(() => buildInjectionEvidenceChain({ producedBy: 'trusted-host-probe', scope: 'offline-stub', ...BINDING, principleHash: H, configured: validStage('cfg') })).toThrow(/never the offline-stub scope/);
   });
 
-  it('the offline collector proves the full chain about its own pipeline and refuses false presence', () => {
+  it('the offline collector binds the full chain to the runtime receipt of the SAME prompt', () => {
     const arm = { delivery: { payloadText: 'PAYLOAD-TEXT', payloadHash: 'e'.repeat(64) } };
-    const chain = collectOfflineStubInjectionEvidence({ armId: 'B', arm, armPrompt: 'task\n--- applied context ---\nPAYLOAD-TEXT', attemptRef: 'runs/x/B/r1/a1.json' });
+    const armPrompt = 'task\n--- applied context ---\nPAYLOAD-TEXT';
+    const receipt = buildOfflineRuntimeReceipt(armPrompt);
+    const chain = collectOfflineStubInjectionEvidence({ studyId: 'EXM-V09-STUDY', unit: UNIT, arm, armPrompt, receipt, attemptRef: 'runs/x/B/r1/a1.json' });
     expect(chain.provenLevel).toBe('RUNTIME_LOADED');
     expect(INJECTION_EVIDENCE_LEVELS).toContain(chain.provenLevel);
-    expect(() => collectOfflineStubInjectionEvidence({ armId: 'B', arm, armPrompt: 'task without the payload', attemptRef: 'r' })).toThrow(/CONTEXT_PRESENT failed/);
-    const control = collectOfflineStubInjectionEvidence({ armId: 'A', arm: { delivery: { payloadText: '', payloadHash: 'f'.repeat(64) } }, armPrompt: 'task\n--- applied context ---\n', attemptRef: 'r' });
-    expect(control.provenLevel).toBe('RUNTIME_LOADED');
+    expect(chain.receiptHash).toBe(receipt.receiptHash);
+    expect(chain.stages.RUNTIME_LOADED.evidenceRef).toContain('trace.runtimeReceipt');
+    const expected = { studyId: 'EXM-V09-STUDY', unitId: 'EXM-V09-T1/B/r1', caseId: 'EXM-V09-T1', armId: 'B', repetitionId: '1', attemptId: 'a1', promptHash: chain.promptHash };
+    expect(verifyInjectionEvidenceChain(chain, { requireLevel: 'RUNTIME_LOADED', expected }).ok).toBe(true);
+    // attribution is bound, not directory-inferred: the same chain cannot be
+    // re-attributed to another attempt.
+    expect(verifyInjectionEvidenceChain(chain, { expected: { ...expected, attemptId: 'a2' } }).ok).toBe(false);
+    expect(verifyInjectionEvidenceChain(chain, { expected: { ...expected, studyId: 'EXM-OTHER' } }).ok).toBe(false);
+  });
+
+  it('without a runtime receipt the collector stops at SELECTED — never SUBMITTED, never LOADED', () => {
+    const arm = { delivery: { payloadText: 'PAYLOAD-TEXT', payloadHash: 'e'.repeat(64) } };
+    const chain = collectOfflineStubInjectionEvidence({ studyId: 'EXM-V09-STUDY', unit: UNIT, arm, armPrompt: 'task\n--- applied context ---\nPAYLOAD-TEXT', attemptRef: 'runs/x/B/r1/a1.json' });
+    expect(chain.provenLevel).toBe('SELECTED');
+    expect(verifyInjectionEvidenceChain(chain, { requireLevel: 'SUBMITTED' }).ok).toBe(false);
+  });
+
+  it('a receipt for a DIFFERENT prompt, a forged receipt, or a payload that is not present are all refused', () => {
+    const arm = { delivery: { payloadText: 'PAYLOAD-TEXT', payloadHash: 'e'.repeat(64) } };
+    const armPrompt = 'task\n--- applied context ---\nPAYLOAD-TEXT';
+    const missingPrompt = 'task without the payload';
+    expect(() => collectOfflineStubInjectionEvidence({ studyId: 'EXM-V09-STUDY', unit: UNIT, arm, armPrompt: missingPrompt, receipt: buildOfflineRuntimeReceipt(missingPrompt), attemptRef: 'r' })).toThrow(/CONTEXT_PRESENT failed/);
+    const otherReceipt = buildOfflineRuntimeReceipt('a completely different prompt');
+    expect(() => collectOfflineStubInjectionEvidence({ studyId: 'EXM-V09-STUDY', unit: UNIT, arm, armPrompt, receipt: otherReceipt, attemptRef: 'r' })).toThrow(/DIFFERENT prompt/);
+    const forged = { ...buildOfflineRuntimeReceipt(armPrompt), receivedPromptHash: 'f'.repeat(64) };
+    expect(() => collectOfflineStubInjectionEvidence({ studyId: 'EXM-V09-STUDY', unit: UNIT, arm, armPrompt, receipt: forged, attemptRef: 'r' })).toThrow(/receipt invalid/);
+  });
+
+  it('the actor runtime issues its own receipt and refuses a second, different prompt', () => {
+    const actor = createScriptedStub({ actions: [], armPrompt: null });
+    const receipt = actor.loadArmPrompt('PROMPT-ONE');
+    expect(receipt.loaded).toBe(true);
+    expect(receipt.receivedPromptHash).not.toBe('PROMPT-ONE');
+    expect(actor.runtimeReceipt.receiptHash).toBe(receipt.receiptHash);
+    expect(actor.loadArmPrompt('PROMPT-ONE').receiptHash).toBe(receipt.receiptHash); // idempotent
+    expect(() => actor.loadArmPrompt('PROMPT-TWO')).toThrow(/DIFFERENT prompt/);
   });
 
   it('forbiddenContent contamination is recorded honestly on full-library controls', () => {
     const arm = { delivery: { payloadText: 'LIBRARY', payloadHash: 'e'.repeat(64) } };
-    const clean = collectOfflineStubInjectionEvidence({ armId: 'A', arm, armPrompt: 'task\n--- applied context ---\nLIBRARY', attemptRef: 'r', forbiddenContent: '结论不得超越观察' });
+    const prompt = 'task\n--- applied context ---\nLIBRARY';
+    const clean = collectOfflineStubInjectionEvidence({ studyId: 'EXM-V09-STUDY', unit: UNIT, arm, armPrompt: prompt, receipt: buildOfflineRuntimeReceipt(prompt), attemptRef: 'r', forbiddenContent: '结论不得超越观察' });
     expect(clean.stages.CONTEXT_PRESENT.forbiddenContentPresent).toBe(false);
-    const contaminated = collectOfflineStubInjectionEvidence({ armId: 'A', arm, armPrompt: 'task\n--- applied context ---\nLIBRARY\n结论不得超越观察', attemptRef: 'r', forbiddenContent: '结论不得超越观察' });
+    const contaminatedPrompt = 'task\n--- applied context ---\nLIBRARY\n结论不得超越观察';
+    const contaminated = collectOfflineStubInjectionEvidence({ studyId: 'EXM-V09-STUDY', unit: UNIT, arm, armPrompt: contaminatedPrompt, receipt: buildOfflineRuntimeReceipt(contaminatedPrompt), attemptRef: 'r', forbiddenContent: '结论不得超越观察' });
     expect(contaminated.stages.CONTEXT_PRESENT.forbiddenContentPresent).toBe(true);
   });
 });
@@ -525,7 +583,7 @@ describe('v0.9 end-to-end offline studies', () => {
       { id: 'PD-PT', version: 'v1', text: TARGET.text, status: 'active' },
     ];
     const heavyHeps = buildHostEffectivePrincipleSet({ principles: heavy, targetPrincipleId: 'PD-PT', host: 'offline-stub' });
-    const arms = buildDualModeArmPayloads({ mode: 'full_library_incremental', heps: heavyHeps, targetPrinciple: heavy[2], budgetChars: 1000 });
+    const arms = buildDualModeArmPayloads({ mode: 'full_library_incremental', heps: heavyHeps, targetPrinciple: heavy[2], principleFacts: heavy, budgetChars: 1000 });
     expect(arms.capacity.control.evicted.length + arms.capacity.control.delivered.length).toBe(2);
     expect(arms.capacity.treatment.targetDelivered).toBe(true);
     expect(arms.arms.treatment.deliveredIds).toContain('PD-PT');
@@ -579,13 +637,53 @@ describe('v0.9 end-to-end offline studies', () => {
     expect(events.some((e: any) => e.type === 'REPORT_READY_V2')).toBe(false);
   });
 
+  it('writeBehaviorReportV2 checks write permission BEFORE any generation, lock or file write', async () => {
+    const parent = mkdtemp('v09-write-refused');
+    const dir = path.join(parent, 'EXM-V09-R');
+    writeExaminerStudyArtifacts({ ...assembleStudyInputs({ mode: 'isolated_principle' }), studyDir: dir });
+    await runExaminerStudy(dir);
+    const before = fs.readdirSync(dir).sort();
+    let permissionChecks = 0;
+    expect(() => writeBehaviorReportV2(dir, {
+      now: NOW,
+      canWrite: () => {
+        permissionChecks += 1;
+        return { ok: false, reason: 'study was not created by this server' };
+      },
+    })).toThrow(/REPORT_WRITE_REFUSED: study was not created by this server/);
+    expect(permissionChecks).toBe(1);
+    // nothing was generated, locked or appended: the refusal is not a
+    // post-generation rollback
+    expect(fs.readdirSync(dir).sort()).toEqual(before);
+    expect(fs.existsSync(path.join(dir, 'behavior-report-v2.json'))).toBe(false);
+    expect(fs.existsSync(path.join(dir, 'runs', 'writer.lock'))).toBe(false);
+
+    // a throwing permission probe also fails closed
+    expect(() => writeBehaviorReportV2(dir, {
+      now: NOW,
+      canWrite: () => {
+        throw new Error('ownership probe unavailable');
+      },
+    })).toThrow(/ownership probe unavailable/);
+    expect(fs.existsSync(path.join(dir, 'behavior-report-v2.json'))).toBe(false);
+
+    // and a granted permission still produces the report
+    const written = writeBehaviorReportV2(dir, { now: NOW, canWrite: () => ({ ok: true }) });
+    expect(written.written).toBe(true);
+    expect(fs.existsSync(path.join(dir, 'behavior-report-v2.json'))).toBe(true);
+  });
+
   it('historical frozen assets stay byte-identical (baseline re-verification, root-bounded)', () => {
     const baselineFile = path.join(repoRoot, 'docs', 'implementation-reports', 'examiner-v09', 'HISTORICAL_FROZEN_ASSET_BASELINE.sha256');
     if (!fs.existsSync(baselineFile)) return;
     const mismatches: string[] = [];
+    let entries = 0;
     for (const line of fs.readFileSync(baselineFile, 'utf8').split('\n')) {
-      const match = line.match(/^([a-f0-9]{64}) \*?(.+)$/);
+      // A checkout may use CRLF; trimming keeps the entry count honest instead
+      // of silently matching nothing.
+      const match = line.trim().match(/^([a-f0-9]{64}) \*?(.+)$/);
       if (!match) continue;
+      entries += 1;
       const [, hash, rel] = match;
       const abs = path.resolve(repoRoot, rel.replaceAll('\\', '/'));
       // root boundary: every baseline entry must stay INSIDE the repository
@@ -597,6 +695,471 @@ describe('v0.9 end-to-end offline studies', () => {
       const actual = createHash('sha256').update(fs.readFileSync(abs)).digest('hex');
       if (actual !== hash) mismatches.push(`${rel}: hash changed`);
     }
+    expect(entries).toBeGreaterThan(500);
     expect(mismatches).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P2-2 — runner write-lock lifecycle (an invalid plan must not leak the lock)
+// ---------------------------------------------------------------------------
+describe('v0.9 runner write-lock lifecycle', () => {
+  it('an invalid unitOrder rejects BEFORE the lock: no lock file, no RUN_STARTED, no budget, next legal run acquires and releases', async () => {
+    const parent = mkdtemp('v09-lock-lifecycle');
+    const dir = path.join(parent, 'EXM-V09-LOCK');
+    writeExaminerStudyArtifacts({ ...assembleStudyInputs({ mode: 'isolated_principle' }), studyDir: dir });
+    const suite = JSON.parse(fs.readFileSync(path.join(dir, 'suite-manifest.json'), 'utf8'));
+    const actorFactory = () => createScriptedStub({
+      actions: [{ type: 'report', args: { claims: [{ factId: 'F1', verdict: 'verified_true', evidenceRefs: ['OBS-PRIMARY'] }] } }],
+    });
+    await expect(runChallengeStudy({
+      studyDir: dir,
+      plan: {
+        arms: ['A', 'B'],
+        cases: suite.cases.map((c: any) => c.caseId),
+        repetitions: ['1'],
+        // one unit short of the planned set — refused by resolveDispatchUnits
+        unitOrder: [{ caseId: suite.cases[0].caseId, armId: 'A', repetitionId: '1' }],
+      },
+      actorFactory,
+      execution: { mode: 'offline-stub' },
+    })).rejects.toThrow(/omits planned unit/);
+    expect(fs.existsSync(path.join(dir, 'runs', 'writer.lock'))).toBe(false);
+    const eventsFile = path.join(dir, 'events.jsonl');
+    const eventTypes = fs.existsSync(eventsFile)
+      ? fs.readFileSync(eventsFile, 'utf8').split('\n').filter((line) => line.trim() !== '').map((line) => JSON.parse(line).type)
+      : [];
+    expect(eventTypes).not.toContain('RUN_STARTED');
+    expect(fs.existsSync(path.join(dir, 'budget-ledger.jsonl'))).toBe(false);
+    // The same study is still usable: the rejection never wedged the lock.
+    const summary = await runExaminerStudy(dir);
+    expect(summary.units.every((u: any) => u.state === 'SUCCEEDED')).toBe(true);
+    expect(fs.existsSync(path.join(dir, 'runs', 'writer.lock'))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P1-2 — report-side injection evidence binding (duplicates / missing / drift)
+// ---------------------------------------------------------------------------
+describe('v0.9 §7 bound injection evidence in Report V2', () => {
+  async function ranStudy(tag: string) {
+    const parent = mkdtemp(tag);
+    const dir = path.join(parent, 'EXM-V09-INJ');
+    writeExaminerStudyArtifacts({ ...assembleStudyInputs({ mode: 'isolated_principle' }), studyDir: dir });
+    await runExaminerStudy(dir);
+    return dir;
+  }
+  const repDir = (dir: string, caseId: string, armId: string) => path.join(dir, 'runs', caseId, armId, 'r1');
+
+  it('a duplicated attempt sidecar is counted as a duplicate and never inflates Treatment Fidelity', async () => {
+    const dir = await ranStudy('v09-inj-duplicate');
+    const base = repDir(dir, 'EXM-V09-T1', 'B');
+    fs.copyFileSync(path.join(base, 'injection-evidence-a1.json'), path.join(base, 'injection-evidence-a2.json'));
+    const report = buildBehaviorReportV2(dir, { now: NOW });
+    expect(report.examiner.injectionEvidence.duplicateAttemptSidecars).toBe(1);
+    expect(report.examiner.injectionEvidence.treatmentChains).toBe(2);
+    expect(report.examiner.treatmentFidelity.contextPresent).toBe(2);
+    expect(report.examiner.treatmentFidelity.runtimeLoaded).toBe(2);
+    expect(report.integrity.findings.some((f: any) => f.id === 'examiner_injection_duplicate_attempts' && f.severity === 'warning')).toBe(true);
+    expect(report.status).not.toBe('REPORT_INVALID');
+  });
+
+  it('a missing evidence sidecar leaves the unit UNKNOWN (PARTIAL_UNKNOWN coverage), never "not injected"', async () => {
+    const dir = await ranStudy('v09-inj-missing');
+    fs.rmSync(path.join(repDir(dir, 'EXM-V09-T1', 'B'), 'injection-evidence-a1.json'));
+    const report = buildBehaviorReportV2(dir, { now: NOW });
+    expect(report.examiner.injectionEvidence.treatmentChains).toBe(1);
+    expect(report.examiner.injectionEvidence.unresolvedTreatmentUnits).toBe(1);
+    expect(report.examiner.treatmentFidelity.contextPresent).toBe(1);
+    expect(report.examiner.treatmentFidelity.unresolvedTreatmentUnits).toBe(1);
+    expect(report.examiner.treatmentFidelity.coverage.status).toBe('PARTIAL_UNKNOWN');
+    expect(report.integrity.findings.some((f: any) => f.id === 'examiner_injection_evidence_missing' && f.severity === 'warning')).toBe(true);
+    expect(report.status).not.toBe('REPORT_INVALID');
+  });
+
+  it('a treatment sidecar copied into the control directory is a critical binding mismatch', async () => {
+    const dir = await ranStudy('v09-inj-crossarm');
+    fs.copyFileSync(
+      path.join(repDir(dir, 'EXM-V09-T1', 'B'), 'injection-evidence-a1.json'),
+      path.join(repDir(dir, 'EXM-V09-T1', 'A'), 'injection-evidence-a1.json'),
+    );
+    const report = buildBehaviorReportV2(dir, { now: NOW });
+    expect(report.integrity.findings.some((f: any) => f.id === 'examiner_injection_binding_mismatch' && f.severity === 'critical')).toBe(true);
+    expect(report.status).toBe('REPORT_INVALID');
+  });
+
+  it('a tampered attempt trace (receipt for a different prompt) invalidates the evidence attribution', async () => {
+    const dir = await ranStudy('v09-inj-receipt');
+    const attemptPath = path.join(repDir(dir, 'EXM-V09-T2', 'B'), 'a1.json');
+    const attempt = JSON.parse(fs.readFileSync(attemptPath, 'utf8'));
+    attempt.trace.runtimeReceipt.receivedPromptHash = 'f'.repeat(64);
+    fs.writeFileSync(attemptPath, `${JSON.stringify(attempt, null, 2)}\n`);
+    const report = buildBehaviorReportV2(dir, { now: NOW });
+    expect(report.integrity.findings.some((f: any) => f.id === 'examiner_injection_binding_mismatch' && f.severity === 'critical')).toBe(true);
+    expect(report.status).toBe('REPORT_INVALID');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P1-3 — cross-file preregistration binding + immutable anchor
+// ---------------------------------------------------------------------------
+describe('v0.9 §13.D preregistration binding and immutable anchor', () => {
+  const readJson = (dir: string, rel: string) => JSON.parse(fs.readFileSync(path.join(dir, rel), 'utf8'));
+  const writeJson = (dir: string, rel: string, value: unknown) => fs.writeFileSync(path.join(dir, rel), `${JSON.stringify(value, null, 2)}\n`);
+
+  /** Recompute manifestHash + the two pointer records that carry it, so the
+   *  rewrite is INTERNALLY consistent — only the anchor can catch it. */
+  function repinManifest(dir: string, mutate: (manifest: any) => void) {
+    const manifest = readJson(dir, 'examiner-manifest.json');
+    mutate(manifest);
+    const { manifestHash, ...core } = manifest;
+    manifest.manifestHash = hashOfCanonical(core);
+    writeJson(dir, 'examiner-manifest.json', manifest);
+    const prereg = readJson(dir, 'preregistration.json');
+    prereg.examiner.manifestHash = manifest.manifestHash;
+    writeJson(dir, 'preregistration.json', prereg);
+    const hashes = readJson(dir, 'hashes.json');
+    hashes.examinerManifestHash.value = manifest.manifestHash;
+    hashes.preregistrationHash.value = hashOfCanonical(prereg);
+    writeJson(dir, 'hashes.json', hashes);
+    return manifest;
+  }
+
+  it('a seed change regenerated with a 4-way consistent assignment is still refused by the anchor', () => {
+    const parent = mkdtemp('v09-bind-seed');
+    const dirA = path.join(parent, 'A');
+    const dirB = path.join(parent, 'B');
+    const a = writeExaminerStudyArtifacts({ ...assembleStudyInputs({ mode: 'isolated_principle' }), studyDir: dirA });
+    const b = writeExaminerStudyArtifacts({ ...assembleStudyInputs({ mode: 'isolated_principle' }), seed: 'v09-seed-2', studyDir: dirB });
+    expect(b.bindingHash).not.toBe(a.bindingHash);
+    // pair-assignment hash + manifest.pairAssignmentHash/randomizationSeed +
+    // preregistration.examiner.pairAssignmentHash + hashes.pairAssignmentHash
+    for (const rel of ['pair-assignment.json', 'examiner-manifest.json', 'preregistration.json', 'hashes.json']) {
+      fs.copyFileSync(path.join(dirB, rel), path.join(dirA, rel));
+    }
+    const computed = computeExaminerStudyBindings(dirA);
+    expect(computed.problems).toEqual([]);
+    expect(computed.bindingHash).toBe(b.bindingHash);
+    const verified = verifyExaminerStudyBindings(dirA);
+    expect(verified.ok).toBe(false);
+    expect(verified.anchor).toBe('MISMATCH');
+    expect(verified.problems.join(' ')).toContain('rewritten after the anchor');
+    // and the report refuses to certify it
+    const report = buildBehaviorReportV2(dirA, { now: NOW });
+    expect(report.status).toBe('REPORT_INVALID');
+    expect(report.integrity.findings.some((f: any) => f.id === 'examiner_preregistration_binding_drift' && f.severity === 'critical')).toBe(true);
+  });
+
+  it('a manifest rewritten with a recomputed manifestHash (scorer change) cannot move the anchor', () => {
+    const dir = path.join(mkdtemp('v09-bind-manifest'), 'EXM-V09-M');
+    writeExaminerStudyArtifacts({ ...assembleStudyInputs({ mode: 'isolated_principle' }), studyDir: dir });
+    repinManifest(dir, (manifest) => { manifest.scorerVersion = 'forged-scorer-v9'; });
+    expect(computeExaminerStudyBindings(dir).problems).toEqual([]);
+    const verified = verifyExaminerStudyBindings(dir);
+    expect(verified.anchor).toBe('MISMATCH');
+    expect(verified.ok).toBe(false);
+  });
+
+  it('a consistently rewritten primary endpoint is caught (the anchor pins the endpoint hash)', () => {
+    const dir = path.join(mkdtemp('v09-bind-endpoint'), 'EXM-V09-E');
+    writeExaminerStudyArtifacts({ ...assembleStudyInputs({ mode: 'isolated_principle' }), studyDir: dir });
+    const before = computeExaminerStudyBindings(dir);
+    repinManifest(dir, (manifest) => { manifest.primaryEndpoint.id = 'principle_conformance_failure_rate'; });
+    const after = computeExaminerStudyBindings(dir);
+    expect(after.problems).toEqual([]);
+    expect(after.binding.primaryEndpointHash).not.toBe(before.binding.primaryEndpointHash);
+    expect(verifyExaminerStudyBindings(dir).anchor).toBe('MISMATCH');
+  });
+
+  it('HEPS + arm payloads + manifest rewritten together are internally consistent but cannot move the anchor', () => {
+    const dir = path.join(mkdtemp('v09-bind-heps'), 'EXM-V09-H');
+    writeExaminerStudyArtifacts({ ...assembleStudyInputs({ mode: 'full_library_incremental' }), studyDir: dir });
+    const hepsInput = readJson(dir, 'heps-principles.json');
+    const rewritten = hepsInput.principles.map((p: any) => (p.id === 'PD-P1' ? { ...p, text: 'A rewritten non-target principle statement.' } : p));
+    writeJson(dir, 'heps-principles.json', { ...hepsInput, principles: rewritten });
+    const heps = buildHostEffectivePrincipleSet({ principles: rewritten, targetPrincipleId: hepsInput.targetPrincipleId, host: hepsInput.host });
+    const arms = buildDualModeArmPayloads({
+      mode: 'full_library_incremental',
+      heps,
+      targetPrinciple: rewritten.find((p: any) => p.id === hepsInput.targetPrincipleId),
+      principleFacts: rewritten,
+      budgetChars: readJson(dir, 'examiner-arm-configs.json').budgetChars,
+    });
+    writeJson(dir, 'examiner-arm-configs.json', arms);
+    repinManifest(dir, (manifest) => {
+      manifest.principleSetSnapshotHash = heps.snapshotHash;
+      manifest.armPayloadHashes = { control: arms.arms.control.payloadHash, treatment: arms.arms.treatment.payloadHash };
+    });
+    expect(computeExaminerStudyBindings(dir).problems).toEqual([]);
+    expect(verifyExaminerStudyBindings(dir).anchor).toBe('MISMATCH');
+  });
+
+  it('a rewritten RuleCode baseline (manifest re-pinned) cannot move the anchor', () => {
+    const dir = path.join(mkdtemp('v09-bind-rulecode'), 'EXM-V09-RC');
+    writeExaminerStudyArtifacts({
+      ...assembleStudyInputs({ mode: 'full_library_incremental', ruleCodes: [{ ruleCodeId: 'RC-X', principleId: 'PD-P1', baselineState: 'ON' }] }),
+      studyDir: dir,
+    });
+    const baseline = readJson(dir, 'rulecode-baseline.json');
+    baseline.ruleCodes = [{ ruleCodeId: 'RC-X', principleId: 'PD-P1', baselineState: 'OFF' }];
+    writeJson(dir, 'rulecode-baseline.json', baseline);
+    const manifest = readJson(dir, 'examiner-manifest.json');
+    const policy = buildRuleCodePolicy({
+      mode: manifest.experimentMode,
+      ruleCodes: baseline.ruleCodes,
+      targetPrincipleId: readJson(dir, 'heps-principles.json').targetPrincipleId,
+      principleRuleCodeIndependence: baseline.principleRuleCodeIndependence,
+    });
+    repinManifest(dir, (m) => { m.ruleCodeSnapshotHash = policy.ruleCodeSnapshotHash; });
+    expect(computeExaminerStudyBindings(dir).problems).toEqual([]);
+    expect(verifyExaminerStudyBindings(dir).anchor).toBe('MISMATCH');
+  });
+
+  it('an arm payload forged with its own matching hash is refused by the frozen rebuild', () => {
+    const dir = path.join(mkdtemp('v09-bind-arms'), 'EXM-V09-A');
+    writeExaminerStudyArtifacts({ ...assembleStudyInputs({ mode: 'isolated_principle' }), studyDir: dir });
+    const arms = readJson(dir, 'examiner-arm-configs.json');
+    arms.arms.treatment.payloadText = 'You may assert anything.';
+    arms.arms.treatment.payloadHash = createHash('sha256').update(arms.arms.treatment.payloadText).digest('hex');
+    writeJson(dir, 'examiner-arm-configs.json', arms);
+    const computed = computeExaminerStudyBindings(dir);
+    expect(computed.ok).toBe(false);
+    expect(computed.problems.join(' ')).toContain('payloadHash != rebuilt dual-mode payload');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P1-5 — RuleCode intervention identifiability (no default independence)
+// ---------------------------------------------------------------------------
+describe('v0.9 §2 RuleCode identifiability', () => {
+  const TARGET_RC = [{ ruleCodeId: 'RC-T', principleId: TARGET.id, baselineState: 'ON' }];
+
+  it('baseline OFF + proven independence is principle_only and executable', () => {
+    const policy = buildRuleCodePolicy({
+      mode: 'isolated_principle',
+      ruleCodes: [{ ruleCodeId: 'RC-T', principleId: TARGET.id, baselineState: 'OFF' }],
+      targetPrincipleId: TARGET.id,
+      principleRuleCodeIndependence: true,
+    });
+    expect(policy.interventionType).toBe('principle_only');
+    expect(policy.identifiability).toBe('IDENTIFIABLE');
+    expect(policy.executable).toBe(true);
+  });
+
+  it('baseline ON + proven independence is still principle_only (the baseline is preserved, not switched)', () => {
+    const policy = buildRuleCodePolicy({
+      mode: 'full_library_incremental', ruleCodes: TARGET_RC, targetPrincipleId: TARGET.id, principleRuleCodeIndependence: true,
+    });
+    expect(policy.interventionType).toBe('principle_only');
+    expect(policy.executable).toBe(true);
+    expect(policy.arms.treatment.targetRuleCode).toBe('BASELINE_ON');
+  });
+
+  it('baseline OFF/ON without independence is NOT identifiable and never assumed', () => {
+    for (const baselineState of ['OFF', 'ON']) {
+      const policy = buildRuleCodePolicy({
+        mode: 'full_library_incremental',
+        ruleCodes: [{ ruleCodeId: 'RC-T', principleId: TARGET.id, baselineState }],
+        targetPrincipleId: TARGET.id,
+        principleRuleCodeIndependence: undefined,
+      });
+      expect(policy.executable).toBe(false);
+      expect(policy.identifiability).toBe('INTERVENTION_NOT_IDENTIFIABLE');
+      expect(policy.unresolvedEvidence).toContain('Principle/RuleCode independence');
+    }
+  });
+
+  it('independence = false is NOT identifiable (a bundle the frozen arms cannot deliver is refused)', () => {
+    const policy = buildRuleCodePolicy({
+      mode: 'full_library_incremental', ruleCodes: TARGET_RC, targetPrincipleId: TARGET.id, principleRuleCodeIndependence: false,
+    });
+    expect(policy.executable).toBe(false);
+    expect(policy.identifiability).toBe('INTERVENTION_NOT_IDENTIFIABLE');
+    expect(policy.couplingReason).toContain('cannot be controlled independently');
+  });
+
+  it('unresolved target RuleCode evidence is UNKNOWN, not zero', () => {
+    const policy = buildRuleCodePolicy({
+      mode: 'full_library_incremental',
+      ruleCodes: [{ ruleCodeId: 'RC-T', principleId: TARGET.id, baselineState: 'ON' }],
+      targetPrincipleId: TARGET.id,
+      principleRuleCodeIndependence: true,
+      targetRuleCodeCount: 2,
+    });
+    expect(policy.executable).toBe(false);
+    expect(policy.unresolvedEvidence).toContain('target RuleCode baseline state');
+  });
+
+  it('relabelling a coupled intervention as an executable bundle is refused (label != implementation)', () => {
+    const policy = buildRuleCodePolicy({
+      mode: 'full_library_incremental', ruleCodes: TARGET_RC, targetPrincipleId: TARGET.id, principleRuleCodeIndependence: true,
+    });
+    expect(policy.executable).toBe(true);
+    const forgedCore = { ...policy, interventionType: 'bundled_intervention' };
+    delete (forgedCore as any).ruleCodeSnapshotHash;
+    const forged = { ...forgedCore, ruleCodeSnapshotHash: hashOfCanonical(forgedCore) };
+    const check = verifyRuleCodePolicy(forged);
+    expect(check.ok).toBe(false);
+    expect(check.reason).toContain('relabelling the report is not implementing the bundle');
+    // and the frozen arm configuration shows no coupled switch at all
+    expect(policy.arms.control.targetRuleCode).toBe('BASELINE_ON');
+    expect(policy.arms.treatment.targetRuleCode).toBe('BASELINE_ON');
+  });
+
+  it('a target smuggled into the non-target library fails the arm isolation audit', () => {
+    const principles = [
+      { id: 'PD-P1', version: 'v1', text: `not target — ${TARGET.text}`, status: 'active' },
+      { id: TARGET.id, version: TARGET.version, text: TARGET.text, status: 'active' },
+    ];
+    const heps = buildHostEffectivePrincipleSet({ principles, targetPrincipleId: TARGET.id, host: 'offline-stub' });
+    const arms = buildDualModeArmPayloads({ mode: 'full_library_incremental', heps, targetPrinciple: principles[1], principleFacts: principles, budgetChars: 4000 });
+    expect(arms.isolationAudit.ok).toBe(false);
+    expect(arms.isolationAudit.problems.join(' ')).toContain('control payload contains the target principle text');
+  });
+
+  it('study creation refuses an intervention that cannot be delivered', () => {
+    const dir = path.join(mkdtemp('v09-rulecode-refusal'), 'EXM-V09-NI');
+    const inputs = assembleStudyInputs({ mode: 'full_library_incremental', ruleCodes: TARGET_RC });
+    // independence evidence truly absent (not defaulted to "true")
+    inputs.ruleCodeFacts = { ruleCodes: TARGET_RC, principleRuleCodeIndependence: undefined };
+    expect(() => writeExaminerStudyArtifacts({ ...inputs, studyDir: dir })).toThrow(/INTERVENTION_NOT_IDENTIFIABLE/);
+    expect(fs.existsSync(dir)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P1-6 — capacity competition enters the report (three-state, never a fake 0)
+// ---------------------------------------------------------------------------
+describe('v0.9 §2.2.5 capacity competition in Report V2', () => {
+  it('the library selection rule is honestly named and skip-and-continue is real', () => {
+    expect(LIBRARY_SELECTION_RULE).toBe('skip_and_continue_v1');
+    const out = renderLibraryPayload({
+      orderedPrinciples: [
+        { id: 'PD-P1', version: 'v1', text: 'x'.repeat(900) },
+        { id: 'PD-P2', version: 'v1', text: 'small' },
+      ],
+      budgetChars: 200,
+    });
+    // the first candidate cannot fit, but the later small one still ships —
+    // a prefix policy would have stopped here
+    expect(out.evicted.map((p: any) => p.id)).toEqual(['PD-P1']);
+    expect(out.delivered.map((p: any) => p.id)).toEqual(['PD-P2']);
+  });
+
+  it('isolated mode has no capacity competition (NOT_APPLICABLE, not 0)', async () => {
+    const dir = path.join(mkdtemp('v09-cap-isolated'), 'EXM-V09-CAPI');
+    writeExaminerStudyArtifacts({ ...assembleStudyInputs({ mode: 'isolated_principle' }), studyDir: dir });
+    await runExaminerStudy(dir);
+    const report = buildBehaviorReportV2(dir, { now: NOW });
+    expect(report.examiner.capacity.status).toBe('NOT_APPLICABLE');
+  });
+
+  it('a full-library study with room for everything records a REAL zero, not a missing value', async () => {
+    const dir = path.join(mkdtemp('v09-cap-zero'), 'EXM-V09-CAP0');
+    writeExaminerStudyArtifacts({ ...assembleStudyInputs({ mode: 'full_library_incremental' }), studyDir: dir });
+    await runExaminerStudy(dir);
+    const report = buildBehaviorReportV2(dir, { now: NOW });
+    const capacity = report.examiner.capacity;
+    expect(capacity.status).toBe('RECORDED');
+    expect(capacity.control.evictedIds).toEqual([]);
+    expect(capacity.treatment.evictedIds).toEqual([]);
+    expect(report.examiner.treatmentFidelity.capacityEvictions.units).toBe(0);
+    expect(capacity.storedRecordAgrees).toBe(true);
+  });
+
+  it('tight budget: eligible/delivered/evicted/target/non-target retention are recomputed and reported', async () => {
+    const longText = 'x'.repeat(500);
+    const target = { id: 'PD-P0', version: 'v1', text: TARGET.text, status: 'active' };
+    const principles = [
+      target,
+      { id: 'PD-P1', version: 'v1', text: longText, status: 'active' },
+      { id: 'PD-P2', version: 'v1', text: longText, status: 'active' },
+    ];
+    const dir = path.join(mkdtemp('v09-cap-tight'), 'EXM-V09-CAP');
+    writeExaminerStudyArtifacts({
+      ...assembleStudyInputs({ mode: 'full_library_incremental' }),
+      hepsPrinciples: { principles, targetPrincipleId: target.id, host: 'offline-stub' },
+      principleFrozen: { contentJson: { principleDraft: { statement: target.text } } },
+      budgetChars: 900,
+      studyDir: dir,
+    });
+    await runExaminerStudy(dir);
+    const report = buildBehaviorReportV2(dir, { now: NOW });
+    const capacity = report.examiner.capacity;
+    expect(capacity.status).toBe('RECORDED');
+    expect(capacity.budgetChars).toBe(900);
+    expect(capacity.control.eligibleCount).toBe(2);
+    expect(capacity.control.deliveredIds).toEqual(['PD-P1']);
+    expect(capacity.control.evictedIds).toEqual(['PD-P2']);
+    expect(capacity.treatment.eligibleCount).toBe(3);
+    expect(capacity.treatment.deliveredIds).toEqual(['PD-P0', 'PD-P1']);
+    expect(capacity.treatment.evictedIds).toEqual(['PD-P2']);
+    expect(capacity.treatment.targetDelivered).toBe(true);
+    expect(capacity.nonTargetRetention).toEqual({ eligible: 2, deliveredInControl: 1, deliveredInTreatment: 1 });
+    expect(capacity.storedRecordAgrees).toBe(true);
+    const fidelity = report.examiner.treatmentFidelity;
+    expect(fidelity.capacityEvictions.units).toBe(2);
+    expect(fidelity.capacityEvictions.details.map((e: any) => e.armId).sort()).toEqual(['A', 'B']);
+    expect(fidelity.nonTargetRetention.treatmentRetentionRate).toBe(0.5);
+    expect(report.status).not.toBe('REPORT_INVALID');
+  });
+
+  it('a tampered stored capacity record becomes a critical finding (the recomputation is the authority)', async () => {
+    const dir = path.join(mkdtemp('v09-cap-drift'), 'EXM-V09-CAPD');
+    writeExaminerStudyArtifacts({ ...assembleStudyInputs({ mode: 'full_library_incremental' }), studyDir: dir });
+    await runExaminerStudy(dir);
+    const armsPath = path.join(dir, 'examiner-arm-configs.json');
+    const arms = JSON.parse(fs.readFileSync(armsPath, 'utf8'));
+    // self-consistent edit (policy + matching recordHash) — only the frozen
+    // rebuild can expose it
+    const { recordHash: _ignoredHash, armId: _ignoredArm, ...core } = arms.capacity.control;
+    core.policy = 'fifo_prefix_v1';
+    arms.capacity.control = { ...core, armId: 'A', recordHash: hashOfCanonical(core) };
+    fs.writeFileSync(armsPath, `${JSON.stringify(arms, null, 2)}\n`);
+    const report = buildBehaviorReportV2(dir, { now: NOW });
+    expect(report.examiner.capacity.status).toBe('RECORDED');
+    expect(report.examiner.capacity.storedRecordAgrees).toBe(false);
+    expect(report.integrity.findings.some((f: any) => f.id === 'examiner_capacity_record_drift' && f.severity === 'critical')).toBe(true);
+    expect(report.status).toBe('REPORT_INVALID');
+  });
+
+  it('missing capacity data is never read as "zero evictions"', async () => {
+    const dir = path.join(mkdtemp('v09-cap-missing'), 'EXM-V09-CAPX');
+    writeExaminerStudyArtifacts({ ...assembleStudyInputs({ mode: 'full_library_incremental' }), studyDir: dir });
+    await runExaminerStudy(dir);
+    const armsPath = path.join(dir, 'examiner-arm-configs.json');
+    const arms = JSON.parse(fs.readFileSync(armsPath, 'utf8'));
+    delete arms.capacity;
+    fs.writeFileSync(armsPath, `${JSON.stringify(arms, null, 2)}\n`);
+    const report = buildBehaviorReportV2(dir, { now: NOW });
+    expect(report.status).toBe('REPORT_INVALID');
+    // either the binding gate or the capacity recomputation must flag it; a
+    // numeric 0 eviction claim is never produced from missing data
+    expect(report.integrity.findings.some((f: any) => f.severity === 'critical')).toBe(true);
+    if (report.examiner.capacity) {
+      expect(report.examiner.capacity.storedRecordAgrees).toBe(false);
+    }
+  });
+
+  it('a target principle that does not fit the budget is refused, not silently evicted', () => {
+    const principles = [
+      { id: 'PD-P1', version: 'v1', text: 'x'.repeat(500), status: 'active' },
+      { id: TARGET.id, version: TARGET.version, text: TARGET.text, status: 'active' },
+    ];
+    const heps = buildHostEffectivePrincipleSet({ principles, targetPrincipleId: TARGET.id, host: 'offline-stub' });
+    expect(() => buildDualModeArmPayloads({
+      mode: 'full_library_incremental', heps, targetPrinciple: principles[1], principleFacts: principles, budgetChars: 50,
+    })).toThrow(/target principle does not fit the budget/);
+  });
+
+  it('a HEPS entry without resolvable text is refused rather than rendered as undefined', () => {
+    const principles = [
+      { id: 'PD-P1', version: 'v1', text: 'Library principle.', status: 'active' },
+      { id: TARGET.id, version: TARGET.version, text: TARGET.text, status: 'active' },
+    ];
+    const heps = buildHostEffectivePrincipleSet({ principles, targetPrincipleId: TARGET.id, host: 'offline-stub' });
+    expect(() => buildDualModeArmPayloads({
+      mode: 'full_library_incremental', heps, targetPrinciple: principles[1], budgetChars: 4000,
+    })).toThrow(/no frozen text for library principle 'PD-P1'/);
   });
 });

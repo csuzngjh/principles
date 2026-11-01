@@ -43,7 +43,7 @@ import { buildStudyArms, auditArmIsolation, composeArmPrompt } from './challenge
 import { verifyStageRAuthorization, isOfflineStubActor, readStudyPlanHash, readObservedHostEvidence, readStageRAuthorization, readAuthorizationRevocations } from './challenge-stage-r-gate.mjs';
 import { verifyF2ProbeEvidence } from './challenge-isolation-probe.mjs';
 import { collectOfflineStubInjectionEvidence } from './examiner-injection-evidence.mjs';
-import { verifyExaminerManifest, buildHostEffectivePrincipleSet, buildDualModeArmPayloads } from './examiner-study.mjs';
+import { verifyExaminerManifest, buildHostEffectivePrincipleSet, buildDualModeArmPayloads, verifyExaminerStudyBindings, buildRuleCodePolicy, verifyRuleCodePolicy } from './examiner-study.mjs';
 
 export class FrozenStudyDriftError extends Error {
   constructor(details) {
@@ -177,6 +177,11 @@ export const STUB_STRATEGIES = {
  * are shape-compatible across both study kinds.
  */
 export function verifyExaminerArmConfigsFrozen(studyDir) {
+  // P1-3: cross-file preregistration binding + immutable anchor FIRST — each
+  // frozen file proving itself is not enough; the files must agree with each
+  // other and with the anchor written at freeze time.
+  const bindings = verifyExaminerStudyBindings(studyDir);
+  if (!bindings.ok) throw new FrozenStudyDriftError(`preregistration bindings: ${bindings.problems.join('; ')}`);
   const exManifest = readJson(path.join(studyDir, 'examiner-manifest.json'));
   const hepsInput = readJson(path.join(studyDir, 'heps-principles.json'));
   const armConfigs = readJson(path.join(studyDir, 'examiner-arm-configs.json'));
@@ -199,6 +204,7 @@ export function verifyExaminerArmConfigsFrozen(studyDir) {
     mode: exManifest.experimentMode,
     heps,
     targetPrinciple: targetFact,
+    principleFacts: hepsInput.principles,
     budgetChars,
     ordering: armConfigs.ordering || 'id-asc',
   });
@@ -255,6 +261,62 @@ export function verifyExaminerArmConfigsFrozen(studyDir) {
 }
 
 export const RUNNER_EXECUTION_MODES = ['offline-stub', 'F1-direct-model', 'F2-real-host'];
+
+/**
+ * P1-4: study-level run readiness, evaluated under the study write lock and
+ * BEFORE RUN_STARTED. The console preflight is a convenience for the UI; this
+ * is the authority the execution path itself enforces, so a client that calls
+ * POST /run directly cannot skip it. Throws FrozenStudyDriftError on any
+ * blocker — the caller must then leave the ledger untouched (no RUN_STARTED,
+ * no reservation, no actor).
+ */
+export function verifyStudyRunReadiness(studyDir) {
+  // Examiner studies only. Legacy challenge suites keep their established
+  // per-unit SUITE_DRIFT conversion inside the dispatch loop; refusing them
+  // here would change behavior they are contractually tested for.
+  const examinerManifestPath = path.join(studyDir, 'examiner-manifest.json');
+  if (!fs.existsSync(examinerManifestPath)) return { frozen: null, armCheck: null, examiner: null };
+  const frozen = verifyFrozenStudy(studyDir);
+  const armCheck = verifyArmConfigsFrozen(studyDir); // bindings + immutable anchor
+  const exManifest = readJson(examinerManifestPath);
+  const hepsInput = readJson(path.join(studyDir, 'heps-principles.json'));
+  const rulecode = readJson(path.join(studyDir, 'rulecode-baseline.json'));
+  const problems = [];
+  let heps = null;
+  let policy = null;
+  try {
+    heps = buildHostEffectivePrincipleSet({
+      principles: hepsInput.principles,
+      targetPrincipleId: hepsInput.targetPrincipleId,
+      host: hepsInput.host,
+    });
+    if (heps.snapshotHash !== exManifest.principleSetSnapshotHash) problems.push('HEPS snapshot hash != manifest principleSetSnapshotHash');
+    if (!heps.target || heps.target.qualifies !== true) {
+      problems.push(`target principle '${String(hepsInput.targetPrincipleId)}' is not host-effective (${heps.target ? heps.target.exclusionReason : 'missing'})`);
+    }
+  } catch (e) {
+    problems.push(`HEPS rebuild failed: ${e.message}`);
+  }
+  try {
+    policy = buildRuleCodePolicy({
+      mode: exManifest.experimentMode,
+      ruleCodes: Array.isArray(rulecode.ruleCodes) ? rulecode.ruleCodes : [],
+      targetPrincipleId: hepsInput.targetPrincipleId,
+      principleRuleCodeIndependence: rulecode.principleRuleCodeIndependence,
+      targetRuleCodeCount: rulecode.targetRuleCodeCount ?? null,
+    });
+    const rcCheck = verifyRuleCodePolicy(policy);
+    if (!rcCheck.ok) problems.push(`RuleCode policy: ${rcCheck.reason}`);
+    if (policy.ruleCodeSnapshotHash !== exManifest.ruleCodeSnapshotHash) problems.push('RuleCode policy snapshot hash != manifest ruleCodeSnapshotHash');
+    if (policy.interventionType !== exManifest.interventionType) problems.push('RuleCode interventionType != manifest interventionType');
+    if (policy.executable !== true) problems.push(`INTERVENTION_NOT_IDENTIFIABLE: ${policy.couplingReason}`);
+  } catch (e) {
+    problems.push(`RuleCode policy rebuild failed: ${e.message}`);
+  }
+  if (problems.length > 0) throw new FrozenStudyDriftError(problems.join('; '));
+  return { frozen, armCheck, examiner: { heps, policy } };
+}
+
 
 /** Automatic dispatch stop: after this many CONSECUTIVE RESULT_UNKNOWN unit
  *  settlements in one run, every remaining unit is refused (UNKNOWN_STREAK_
@@ -360,15 +422,17 @@ export async function runChallengeStudy({
   // file inside a COPIED study dir; there is no in-memory override path.
   const authorizationRecord = isRealMode ? readStageRAuthorization(studyDir) : null;
   const adjudicate = deps.adjudicate || adjudicateClaimEvidence;
-  const ledger = createChallengeLedger(studyDir);
-  const lock = acquireStudyWriteLock(studyDir, { owner });
-  ledger.appendEvent({ type: 'RUN_STARTED', owner, plan });
   // v0.9 §3.3: a FROZEN randomized dispatch order (plan.unitOrder, produced by
   // the examiner pair assignment) replaces the deterministic triple loop when
   // supplied. Fail-closed validation: the order must cover EXACTLY the
   // planned unit set — an order that skips, duplicates or smuggles in units
   // is a tampered randomization, not a schedule.
+  // Validation runs BEFORE the lock and BEFORE RUN_STARTED: a rejected
+  // schedule must leave no ledger row and no residual write lock.
   const dispatchUnits = resolveDispatchUnits(plan);
+
+  const ledger = createChallengeLedger(studyDir);
+  const lock = acquireStudyWriteLock(studyDir, { owner });
 
   const summary = { studyId: null, units: [], interrupted: null, stoppedReason: null };
   const attemptId = plan.attemptId || 'a1';
@@ -388,6 +452,13 @@ export async function runChallengeStudy({
   // unchanged. Same run-scoped discipline as the unknown streak.
   let consecutiveCapacityFailures = 0;
   try {
+    // P1-4 server-enforced readiness: identity/path ownership are the caller's
+    // gate (the console resolves the directory from its own enumeration and
+    // verifies the write permission marker); the FROZEN study is re-verified
+    // here, under the lock, before any ledger row exists. Any drift refuses
+    // the run with no RUN_STARTED, no reservation and no actor.
+    verifyStudyRunReadiness(studyDir);
+    ledger.appendEvent({ type: 'RUN_STARTED', owner, plan });
     for (const dispatchUnit of dispatchUnits) {
       const { caseId, armId, repetitionId } = dispatchUnit;
       const unit = { caseId, armId, repetitionId, attemptId };
@@ -564,6 +635,20 @@ export async function runChallengeStudy({
         continue;
       }
       const executionMode = isRealMode ? declaredMode : null;
+      // P1-2 A: the offline runtime must actually RECEIVE and LOAD the composed
+      // arm prompt before anything is reserved. The runtime answers with its
+      // own receipt; a runtime without that capability (legacy stubs) simply
+      // produces none, and its evidence chain can never pass SUBMITTED.
+      let runtimeReceipt = null;
+      if (!isRealMode && typeof actor.loadArmPrompt === 'function') {
+        try {
+          runtimeReceipt = actor.loadArmPrompt(armPrompt);
+        } catch (e) {
+          ledger.appendEvent({ type: 'UNIT_REFUSED', unit, reason: 'offline_runtime_prompt_load_failed', detail: e.message });
+          summary.units.push({ unit, state: 'FAILED_KNOWN', refused: true, detail: `offline_runtime_prompt_load_failed: ${e.message}` });
+          continue;
+        }
+      }
       // NOT_STARTED or RESERVED_NOT_PREPARED (idempotent reservation)
       const reserve = ledger.reserveAttempt({ unit, maxAttemptsTotal, reason: `unit ${caseId}/${armId}/r${repetitionId}` });
       if (!reserve.ok) {
@@ -639,7 +724,7 @@ export async function runChallengeStudy({
         : null;
 
       try {
-        const { trace } = await runControlledActorLoop({ env, runState, caseVisible, actor, linkage, reserveRequest });
+        const { trace } = await runControlledActorLoop({ env, runState, caseVisible, actor, linkage, reserveRequest, runtimeReceipt });
         const adjudication = adjudicate({ caseDef, runState });
 
         const attempt = {
@@ -653,7 +738,7 @@ export async function runChallengeStudy({
           } : {}),
           actorKind: trace.actorKind,
           frozenRefs: linkage,
-          promptAudit: { armId, contentMode: arm.contentMode, payloadHash: arm.delivery.payloadHash, promptLength: prompt.length },
+          promptAudit: { armId, contentMode: arm.contentMode, payloadHash: arm.delivery.payloadHash, promptHash: sha256(prompt), promptLength: prompt.length },
           actorInputHash: linkage.inputHash,
           trace,
           adjudication,
@@ -670,14 +755,17 @@ export async function runChallengeStudy({
       // v0.9 §7.2 injection evidence (offline-stub scope): a SEPARATE
       // tamper-evident sidecar — the attempt record itself stays
       // byte-identical to the historical Phase 1B shape. The chain is
-      // produced by the RUNNER (never the actor) and proves what the offline
-      // pipeline can prove about its own CONFIGURED→RUNTIME_LOADED path.
+      // produced by the RUNNER from the RUNTIME's own load receipt, and is
+      // bound to this exact study/unit/attempt: without a receipt it stops at
+      // SELECTED instead of claiming a load nobody observed.
       let offlineChainInfo = null;
       if (!isRealMode) {
         const chain = collectOfflineStubInjectionEvidence({
-          armId,
+          studyId: frozen.studyId,
+          unit: { caseId, armId, repetitionId, attemptId },
           arm: armCheck.arms[armId],
           armPrompt: prompt,
+          receipt: runtimeReceipt,
           attemptRef: `runs/${caseId}/${armId}/r${repetitionId}/${attemptId}.json`,
           // Control arms of dual-mode studies must never carry the TARGET
           // principle text (the library itself is legitimate in mode B).

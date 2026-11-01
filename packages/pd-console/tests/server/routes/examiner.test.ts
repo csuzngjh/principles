@@ -13,10 +13,45 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { handleExaminerRoute } from '../../../src/server/routes/examiner.js';
+import { handleExaminerRoute, isExaminerDevRuntime } from '../../../src/server/routes/examiner.js';
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', '..');
+const historicalStudiesRoot = path.join(repoRoot, 'scripts', 'dev', 'principle-learning-lab', 'examiner-studies');
+
+/**
+ * Full-directory fingerprint (relative path → type/content/link-target hash).
+ * Used to prove a refused console action mutated NOTHING in a historical or
+ * frozen study — not even a lock file, ledger line or directory.
+ */
+function fingerprintTree(root: string): Record<string, string> {
+  const entries: Record<string, string> = {};
+  const walk = (dir: string, rel: string): void => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const abs = path.join(dir, entry.name);
+      const relPath = rel ? `${rel}/${entry.name}` : entry.name;
+      const stat = fs.lstatSync(abs);
+      if (stat.isSymbolicLink()) {
+        entries[relPath] = `link:${fs.readlinkSync(abs)}`;
+      } else if (stat.isDirectory()) {
+        entries[relPath] = 'dir';
+        walk(abs, relPath);
+      } else {
+        entries[relPath] = `file:${createHash('sha256').update(fs.readFileSync(abs)).digest('hex')}`;
+      }
+    }
+  };
+  walk(root, '');
+  return entries;
+}
+
+function readJsonFile(file: string): any {
+  return JSON.parse(fs.readFileSync(file, 'utf8'));
+}
 
 function createMockRequest(method: string, url: string, body?: unknown): IncomingMessage {
   const listeners: Record<string, Array<(chunk?: unknown) => void>> = {};
@@ -219,5 +254,141 @@ describe('Examiner Console API (offline-first, SPEC v0.9 §8)', () => {
     const traversal = await call('GET', '/studies/..%2F..%2Fetc');
     expect([400, 404]).toContain(traversal.statusCode);
     expect(traversal.body.data).toBeUndefined();
+  });
+});
+
+describe('Examiner Console write isolation (v0.9 §1)', () => {
+  it('historical acceptance studies are readable but every write is refused, and nothing changes on disk', async () => {
+    for (const studyId of ['EXM-V09-ACC-FULL', 'EXM-V09-ACC-ISO']) {
+      const studyDir = path.join(historicalStudiesRoot, studyId);
+      const before = fingerprintTree(studyDir);
+
+      const status = await call('GET', `/studies/${studyId}`);
+      expect(status.statusCode).toBe(200);
+      expect(status.body.data.readOnly).toBe(true);
+      expect(status.body.data.access).toContain('historical research asset');
+
+      const report = await call('GET', `/studies/${studyId}/report`);
+      expect(report.statusCode).toBe(200);
+      expect(report.body.data.readOnly).toBe(true);
+
+      const run = await call('POST', `/studies/${studyId}/run`);
+      expect(run.statusCode).toBe(403);
+      expect(run.body.error).toBe('study_read_only');
+
+      const write = await call('POST', `/studies/${studyId}/report`);
+      expect(write.statusCode).toBe(403);
+      expect(write.body.error).toBe('study_read_only');
+
+      expect(fingerprintTree(studyDir)).toEqual(before);
+    }
+  });
+
+  it('a directory under the writable root without a matching server marker is read-only (name membership is not ownership)', async () => {
+    const studyId = 'EXM-C-UNOWNED0001';
+    const studyDir = path.join(studiesRoot, studyId);
+    fs.mkdirSync(studyDir, { recursive: true });
+    fs.writeFileSync(path.join(studyDir, 'examiner-manifest.json'), JSON.stringify({ studyId }));
+
+    const unowned = await call('GET', `/studies/${studyId}`);
+    expect(unowned.statusCode).toBe(200);
+    expect(unowned.body.data.readOnly).toBe(true);
+    const unownedRun = await call('POST', `/studies/${studyId}/run`);
+    expect(unownedRun.statusCode).toBe(403);
+    expect(unownedRun.body.error).toBe('study_read_only');
+
+    // A forged marker that names a different study is still refused.
+    fs.writeFileSync(
+      path.join(studyDir, '.console-study-owner.json'),
+      JSON.stringify({
+        schema: 'examiner-console-ownership.v1',
+        origin: 'pd-console',
+        studyId: 'EXM-C-SOMEONE-ELSE',
+        writableRoot: fs.realpathSync(studiesRoot),
+      }),
+    );
+    const forged = await call('GET', `/studies/${studyId}`);
+    expect(forged.body.data.readOnly).toBe(true);
+
+    // Correcting the identity alone is not enough either: the manifest must
+    // agree and the marker must have been issued for this root.
+    fs.writeFileSync(
+      path.join(studyDir, '.console-study-owner.json'),
+      JSON.stringify({
+        schema: 'examiner-console-ownership.v1',
+        origin: 'pd-console',
+        studyId,
+        writableRoot: fs.realpathSync(studiesRoot),
+      }),
+    );
+    const corrected = await call('GET', `/studies/${studyId}`);
+    expect(corrected.body.data.readOnly).toBe(false);
+    const correctedWrite = await call('POST', `/studies/${studyId}/report`);
+    expect(correctedWrite.statusCode).not.toBe(403);
+  });
+
+  it('refuses to create studies when the writable root is not separated from the historical research area', async () => {
+    process.env.PD_EXAMINER_STUDIES_ROOT = historicalStudiesRoot;
+    try {
+      const res = await call('POST', '/studies', { targetPrincipleId: 'pri-target' });
+      expect(res.statusCode).toBe(409);
+      expect(res.body.error).toBe('writable_root_not_isolated');
+      // Nothing was enumerated or created in the historical area.
+      expect(fs.readdirSync(historicalStudiesRoot).sort()).toEqual(['EXM-V09-ACC-FULL', 'EXM-V09-ACC-ISO', 'acceptance-summary.json']);
+    } finally {
+      process.env.PD_EXAMINER_STUDIES_ROOT = studiesRoot;
+    }
+  });
+});
+
+describe('Examiner Console run gate (v0.9 §5)', () => {
+  it('POST /run refuses a study whose frozen artifacts drifted after preflight: 409, no RUN_STARTED, no lock, no ledger, no mutation', async () => {
+    const created = await call('POST', '/studies', {
+      targetPrincipleId: 'pri-target',
+      experimentMode: 'full_library_incremental',
+      repetitionsPerCase: 1,
+    });
+    expect(created.statusCode).toBe(200);
+    const studyId = created.body.data.studyId as string;
+    const studyDir = path.join(studiesRoot, studyId);
+
+    const preflight = await call('POST', `/studies/${studyId}/preflight`);
+    expect(preflight.body.data.ok).toBe(true);
+
+    // Rewrite a frozen fact. The rewrite is internally consistent (the HEPS
+    // snapshot is recomputed from its own file), so only the immutable anchor
+    // can catch it — the point of the cross-file binding.
+    const hepsFile = path.join(studyDir, 'heps-principles.json');
+    const heps = readJsonFile(hepsFile);
+    heps.principles = heps.principles.map((p: any) =>
+      p.id === heps.targetPrincipleId ? { ...p, text: `${p.text} (rewritten after preflight)` } : p,
+    );
+    fs.writeFileSync(hepsFile, JSON.stringify(heps, null, 2));
+    const before = fingerprintTree(studyDir);
+
+    const run = await call('POST', `/studies/${studyId}/run`);
+    expect(run.statusCode).toBe(409);
+    expect(run.body.error).toBe('preflight_blocked');
+
+    expect(fingerprintTree(studyDir)).toEqual(before);
+    expect(fs.existsSync(path.join(studyDir, 'runs', 'writer.lock'))).toBe(false);
+    expect(fs.existsSync(path.join(studyDir, 'budget-ledger.jsonl'))).toBe(false);
+    const eventsFile = path.join(studyDir, 'events.jsonl');
+    expect(fs.existsSync(eventsFile) ? fs.readFileSync(eventsFile, 'utf8') : '').not.toContain('RUN_STARTED');
+
+    // The study is not poisoned: restoring the frozen fact lets the run proceed.
+    fs.writeFileSync(hepsFile, JSON.stringify(heps, null, 2).replace(' (rewritten after preflight)', ''));
+    const retried = await call('POST', `/studies/${studyId}/run`);
+    expect(retried.statusCode).toBe(200);
+    expect(retried.body.data.units.every((u: any) => u.state === 'SUCCEEDED')).toBe(true);
+    expect(fs.existsSync(path.join(studyDir, 'runs', 'writer.lock'))).toBe(false);
+  });
+});
+
+describe('Examiner DEV-only capability gate (v0.9 §8, P2-1)', () => {
+  it('is decided by the server runtime, never by a client-settable flag', () => {
+    expect(isExaminerDevRuntime('file:///app/packages/pd-console/dist/server.js', {})).toBe(false);
+    expect(isExaminerDevRuntime('file:///app/packages/pd-console/src/server/routes/examiner.ts', {})).toBe(true);
+    expect(isExaminerDevRuntime('file:///app/dist/server.js', { PD_EXAMINER_DEV: '1' })).toBe(true);
   });
 });

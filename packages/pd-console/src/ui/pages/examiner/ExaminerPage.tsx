@@ -6,6 +6,7 @@ import { PageShell } from "../../components/layout/page-shell.js";
 import { PageLoading } from "../../components/layout/page-loading.js";
 import { SectionTitle } from "../../components/layout/section-title.js";
 import { Button } from "../../components/ui/button.js";
+import { truncateByCodePoints } from "../../utils/reading-layout.js";
 import { FlaskConical, ShieldCheck, Play, FileText, Loader2 } from "lucide-react";
 import {
   fetchExaminerOverview,
@@ -201,7 +202,7 @@ export function ExaminerPage(): React.ReactElement {
               >
                 {principles.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.id} — {p.text.slice(0, 60)}
+                    {p.id} — {truncateByCodePoints(p.text, 60)}
                   </option>
                 ))}
               </select>

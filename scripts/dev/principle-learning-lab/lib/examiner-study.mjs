@@ -22,9 +22,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { hashOfCanonical, sha256, challengeImplementationManifest } from './challenge-freeze.mjs';
+import { hashOfCanonical, sha256, challengeImplementationManifest, verifyCanonicalHash } from './challenge-freeze.mjs';
 import { compileCase, compileSuite } from './challenge-compile.mjs';
 import { recordCapacityCompetition } from './examiner-injection-evidence.mjs';
+import { createChallengeLedger } from './challenge-ledger.mjs';
 
 export const EXAMINER_MANIFEST_SCHEMA = 'examiner-study-manifest.v1';
 export const PAIR_ASSIGNMENT_SCHEMA = 'examiner-pair-assignment.v1';
@@ -165,13 +166,17 @@ export function verifyHostEffectivePrincipleSet(set) {
 
 /**
  * @param {Array<{ruleCodeId:string, principleId:string, baselineState:'ON'|'OFF'}>} ruleCodes
- * @param {boolean} principleRuleCodeIndependence — CAN the system toggle the
+ * @param {number} [targetRuleCodeCount] — how many RuleCodes the workspace
+ *   attributes to the target Principle. When it exceeds the resolved entries
+ *   the baseline is UNRESOLVED and no intervention claim can be made.
+ * @param {boolean} [principleRuleCodeIndependence] — CAN the system toggle the
  *   target Principle's prompt injection while holding its RuleCode at
- *   baseline? When false and the target's baseline RuleCode is ON, a
- *   full-library study is a bundled_intervention (§2.2.4) and an isolated
- *   study is structurally unable to hold RuleCode OFF → blocked.
+ *   baseline? NO DEFAULT: an omitted value is missing evidence, never an
+ *   implicit 'yes'. When the target has RuleCodes and independence is not
+ *   proven, the intervention is NOT IDENTIFIABLE (a `principle_only` label
+ *   would be a false claim, and a bundle nobody can deliver is not a bundle).
  */
-export function buildRuleCodePolicy({ mode, ruleCodes = [], targetPrincipleId, principleRuleCodeIndependence = true }) {
+export function buildRuleCodePolicy({ mode, ruleCodes = [], targetPrincipleId, principleRuleCodeIndependence, targetRuleCodeCount = null }) {
   assertMode(mode);
   if (!text(targetPrincipleId)) throw new Error('buildRuleCodePolicy: targetPrincipleId required');
   for (const rc of ruleCodes) {
@@ -179,43 +184,63 @@ export function buildRuleCodePolicy({ mode, ruleCodes = [], targetPrincipleId, p
       throw new Error(`buildRuleCodePolicy: ruleCode ${JSON.stringify(rc && rc.ruleCodeId)} needs ruleCodeId/principleId/baselineState(ON|OFF)`);
     }
   }
+  if (targetRuleCodeCount !== null && (!Number.isInteger(targetRuleCodeCount) || targetRuleCodeCount < 0)) {
+    throw new Error('buildRuleCodePolicy: targetRuleCodeCount must be a non-negative integer when supplied');
+  }
   const targetRuleCodes = ruleCodes.filter((rc) => rc.principleId === targetPrincipleId);
   const targetBaselineOn = targetRuleCodes.filter((rc) => rc.baselineState === 'ON');
+  const declaredTargetRuleCodeCount = targetRuleCodeCount === null ? targetRuleCodes.length : targetRuleCodeCount;
+  const unresolvedTargetRuleCodes = declaredTargetRuleCodeCount - targetRuleCodes.length;
   const baseline = Object.fromEntries(ruleCodes.map((rc) => [rc.ruleCodeId, rc.baselineState]).sort(([a], [b]) => (a < b ? -1 : 1)));
 
   let interventionType = 'principle_only';
   let couplingReason = null;
   let executable = true;
+  let identifiability = 'IDENTIFIABLE';
+  let unresolvedEvidence = [];
+  if (declaredTargetRuleCodeCount > 0) {
+    if (unresolvedTargetRuleCodes !== 0) {
+      interventionType = 'bundled_intervention';
+      identifiability = 'INTERVENTION_NOT_IDENTIFIABLE';
+      executable = false;
+      unresolvedEvidence = ['target RuleCode baseline state'];
+      couplingReason = `the workspace attributes ${declaredTargetRuleCodeCount} RuleCode(s) to the target Principle but only ${targetRuleCodes.length} were resolved — the RuleCode baseline is UNKNOWN, so neither principle_only nor a delivered bundle can be claimed`;
+    } else if (principleRuleCodeIndependence !== true && principleRuleCodeIndependence !== false) {
+      interventionType = 'bundled_intervention';
+      identifiability = 'INTERVENTION_NOT_IDENTIFIABLE';
+      executable = false;
+      unresolvedEvidence = ['Principle/RuleCode independence'];
+      couplingReason = `independence evidence is missing (${principleRuleCodeIndependence === undefined ? 'not supplied' : JSON.stringify(principleRuleCodeIndependence)}) for the target's RuleCode (${targetRuleCodes.map((rc) => rc.ruleCodeId).join(', ')}) — independent control is UNKNOWN, never assumed`;
+    } else if (principleRuleCodeIndependence === false) {
+      interventionType = 'bundled_intervention';
+      identifiability = 'INTERVENTION_NOT_IDENTIFIABLE';
+      executable = false;
+      couplingReason = `target Principle and its RuleCode (${targetRuleCodes.map((rc) => rc.ruleCodeId).join(', ')}) cannot be controlled independently; a bundled intervention is only real when the two arm configs actually switch the bundle together, and the frozen payload arms cannot — INTERVENTION_NOT_IDENTIFIABLE`;
+    }
+  }
+
   let control;
   let treatment;
   if (mode === 'isolated_principle') {
     // §2.1: EVERY PD RuleCode is OFF in BOTH arms — including the target's.
-    // If the target's baseline-ON RuleCode cannot be held OFF independently,
-    // the isolated design cannot exist honestly.
     control = { targetPrinciple: 'OFF', targetRuleCode: 'OFF', otherRuleCodes: 'ALL_OFF' };
     treatment = { targetPrinciple: 'ON', targetRuleCode: 'OFF', otherRuleCodes: 'ALL_OFF' };
-    if (targetBaselineOn.length > 0 && principleRuleCodeIndependence === false) {
-      interventionType = 'bundled_intervention';
-      couplingReason = `isolated mode requires the target's baseline-ON RuleCode (${targetBaselineOn.map((rc) => rc.ruleCodeId).join(', ')}) to be OFF in both arms, but Principle/RuleCode cannot be controlled independently`;
-      executable = false;
-    }
   } else {
     // §2.2.3: every RuleCode keeps its CURRENT BASELINE state in both arms —
     // a baseline-ON target RuleCode must NOT be switched off for the study.
     control = { targetPrinciple: 'OFF', targetRuleCode: targetBaselineOn.length > 0 ? 'BASELINE_ON' : 'BASELINE_OFF', otherRuleCodes: 'BASELINE_FROZEN' };
     treatment = { ...control, targetPrinciple: 'ON' };
-    if (targetBaselineOn.length > 0 && principleRuleCodeIndependence === false) {
-      interventionType = 'bundled_intervention';
-      couplingReason = `target Principle and its baseline-ON RuleCode (${targetBaselineOn.map((rc) => rc.ruleCodeId).join(', ')}) cannot be controlled independently — the intervention is the bundle, and the report may only attribute to the bundle`;
-    }
   }
   const snapshot = {
     mode,
     policy: mode === 'isolated_principle' ? 'ALL_OFF_BOTH_ARMS' : 'BASELINE_FROZEN_BOTH_ARMS',
     baseline,
     targetRuleCodes: targetRuleCodes.map((rc) => ({ ruleCodeId: rc.ruleCodeId, baselineState: rc.baselineState })).sort((a, b) => (a.ruleCodeId < b.ruleCodeId ? -1 : 1)),
-    principleRuleCodeIndependence,
+    declaredTargetRuleCodeCount,
+    principleRuleCodeIndependence: principleRuleCodeIndependence === true ? true : principleRuleCodeIndependence === false ? false : null,
     interventionType,
+    identifiability,
+    unresolvedEvidence,
     couplingReason,
     executable,
     arms: { control, treatment },
@@ -232,7 +257,22 @@ export function verifyRuleCodePolicy(policy) {
   if (!HASH_RE.test(String(ruleCodeSnapshotHash)) || hashOfCanonical(core) !== ruleCodeSnapshotHash) {
     return { ok: false, reason: 'ruleCodeSnapshotHash mismatch — the RuleCode policy was modified after freezing' };
   }
-  return { ok: true };
+  const problems = [];
+  if (!INTERVENTION_TYPES.includes(policy.interventionType)) problems.push(`interventionType '${String(policy.interventionType)}' unsupported`);
+  const expectedIdentifiability = policy.executable === false ? 'INTERVENTION_NOT_IDENTIFIABLE' : 'IDENTIFIABLE';
+  if (policy.identifiability !== expectedIdentifiability) {
+    problems.push(`identifiability '${String(policy.identifiability)}' contradicts executable=${String(policy.executable)}`);
+  }
+  if (policy.interventionType === 'bundled_intervention' && policy.executable === true) {
+    problems.push('bundled_intervention declared as executable without verifiable coupled arm configs — relabelling the report is not implementing the bundle');
+  }
+  if (Number(policy.declaredTargetRuleCodeCount) > 0 && typeof policy.principleRuleCodeIndependence !== 'boolean') {
+    problems.push('target RuleCodes exist but independence evidence is missing — independent control is UNKNOWN, not assumed');
+  }
+  if (policy.interventionType === 'principle_only' && policy.executable === false) {
+    problems.push('principle_only cannot be declared non-executable — a coupled intervention must be labelled bundled/not-identifiable');
+  }
+  return problems.length === 0 ? { ok: true } : { ok: false, reason: problems.join('; ') };
 }
 
 // ---------------------------------------------------------------------------
@@ -488,6 +528,275 @@ export function verifyExaminerManifest(manifest) {
 }
 
 // ---------------------------------------------------------------------------
+// §4.1 cross-file preregistration binding + immutable anchor
+// ---------------------------------------------------------------------------
+//
+// Every frozen study file only proves ITSELF (a recomputed manifestHash says
+// nothing about pair-assignment.json). Preflight/runner/report each rebuilt a
+// subset from different inputs, so a file that was edited in a mutually
+// consistent way (e.g. heps-principles.json + arm configs) could pass every
+// single-file check while the preregistered facts no longer agreed. The
+// binding below re-derives EVERY link from the files on disk and records the
+// resulting bundle hash once, at creation time, as an append-only ledger
+// anchor: after that, rewriting the frozen files cannot move the anchor.
+
+export const PREREG_BINDING_SCHEMA = 'examiner-study-bindings.v1';
+export const PREREG_ANCHOR_SCHEMA = 'examiner-preregistration-anchor.v1';
+export const PREREGISTRATION_ANCHOR_EVENT = 'PREREGISTRATION_FROZEN';
+
+function readBindingsJson(studyDir, rel) {
+  const root = path.resolve(studyDir);
+  const file = path.resolve(root, rel);
+  const norm = (p) => (process.platform === 'win32' ? p.toLowerCase() : p);
+  if (norm(file) !== norm(root) && !norm(file).startsWith(`${norm(root)}${path.sep}`)) {
+    throw new Error(`study file '${rel}' escapes the study directory`);
+  }
+  if (!fs.existsSync(file)) throw new Error(`study file '${rel}' missing`);
+  return JSON.parse(fs.readFileSync(file, 'utf8'));
+}
+
+const setOf = (values) => new Set(values.map(String));
+
+/**
+ * Recompute the complete preregistration picture from the files on disk:
+ * manifest ↔ preregistration ↔ pair assignment ↔ HEPS ↔ RuleCode baseline ↔
+ * arm configs ↔ suite ↔ mapping ↔ scoring contract ↔ hashes.json. PURE with
+ * respect to the study (reads only; writes nothing).
+ *
+ * @returns { ok, problems[], binding, bindingHash }
+ */
+export function computeExaminerStudyBindings(studyDir) {
+  const problems = [];
+  const push = (detail) => problems.push(detail);
+  let files;
+  try {
+    files = {
+      manifest: readBindingsJson(studyDir, 'examiner-manifest.json'),
+      prereg: readBindingsJson(studyDir, 'preregistration.json'),
+      pair: readBindingsJson(studyDir, 'pair-assignment.json'),
+      hepsInput: readBindingsJson(studyDir, 'heps-principles.json'),
+      rulecode: readBindingsJson(studyDir, 'rulecode-baseline.json'),
+      arms: readBindingsJson(studyDir, 'examiner-arm-configs.json'),
+      suite: readBindingsJson(studyDir, 'suite-manifest.json'),
+      mapping: readBindingsJson(studyDir, 'pain-mechanism-mapping.json'),
+      scoring: readBindingsJson(studyDir, 'scoring-contract.json'),
+      principle: readBindingsJson(studyDir, 'principle-frozen.json'),
+      inputManifest: readBindingsJson(studyDir, 'input-manifest.json'),
+      hashes: readBindingsJson(studyDir, 'hashes.json'),
+    };
+  } catch (e) {
+    return { ok: false, problems: [e.message], binding: null, bindingHash: null };
+  }
+  const { manifest, prereg, pair, hepsInput, rulecode, arms, suite, mapping, scoring, principle, inputManifest, hashes } = files;
+
+  const manifestCheck = verifyExaminerManifest(manifest);
+  if (!manifestCheck.ok) push(`manifest: ${manifestCheck.problems.join('; ')}`);
+
+  // --- preregistration ↔ manifest -----------------------------------------
+  if (prereg.schema !== 'challenge-preregistration.v1') push(`preregistration schema '${String(prereg.schema)}' unsupported`);
+  if (prereg.status !== 'FROZEN') push(`preregistration status '${String(prereg.status)}' is not FROZEN`);
+  if (prereg.studyId !== manifest.studyId) push(`preregistration studyId '${String(prereg.studyId)}' != manifest '${String(manifest.studyId)}'`);
+  const examiner = prereg.examiner || {};
+  if (examiner.manifestHash !== manifest.manifestHash) push('preregistration.examiner.manifestHash != manifest.manifestHash');
+  if (examiner.pairAssignmentHash !== pair.assignmentHash) push('preregistration.examiner.pairAssignmentHash != pair-assignment.assignmentHash');
+  if (prereg.controlArm !== 'A' || prereg.treatmentArm !== 'B') push('preregistration control/treatment arm must be A/B');
+  if (!Number.isInteger(prereg.repetitions?.planned) || prereg.repetitions.planned !== manifest.repetitionsPerCase) {
+    push(`preregistration.repetitions.planned '${String(prereg.repetitions?.planned)}' != manifest.repetitionsPerCase '${String(manifest.repetitionsPerCase)}'`);
+  }
+  const preregistrationHash = hashOfCanonical(prereg);
+  if (hashes.preregistrationHash?.value !== preregistrationHash) push('hashes.preregistrationHash != recomputed preregistration hash');
+
+  // --- pair assignment ↔ manifest ↔ suite ----------------------------------
+  const pairCheck = verifyPairAssignment(pair);
+  if (!pairCheck.ok) push(`pair assignment: ${pairCheck.reason}`);
+  if (pair.assignmentHash !== manifest.pairAssignmentHash) push('pair assignment hash != manifest.pairAssignmentHash');
+  if (pair.seed !== manifest.randomizationSeed) push(`pair assignment seed '${String(pair.seed)}' != manifest randomizationSeed '${String(manifest.randomizationSeed)}'`);
+  if (!Array.isArray(pair.pairs) || pair.pairs.length !== manifest.plannedPairs) {
+    push(`pair assignment plannedPairs '${String(pair.pairs?.length)}' != manifest.plannedPairs '${String(manifest.plannedPairs)}'`);
+  }
+  const suiteCases = Array.isArray(suite.cases) ? suite.cases.map((c) => c.caseId) : [];
+  const pairCases = Array.isArray(pair.pairs) ? [...setOf(pair.pairs.map((p) => p.caseId))] : [];
+  if (pairCases.length !== suiteCases.length || pairCases.some((id) => !suiteCases.includes(id))) {
+    push('pair assignment cases do not cover the frozen suite cases exactly');
+  }
+  if (Array.isArray(pair.unitOrder)) {
+    const expectedUnits = new Set();
+    for (const p of pair.pairs || []) {
+      for (const armId of ['A', 'B']) expectedUnits.add(`${p.caseId}/${armId}/r${String(p.repetitionId)}`);
+    }
+    const orderUnits = pair.unitOrder.map((u) => `${u.caseId}/${u.armId}/r${String(u.repetitionId)}`);
+    if (orderUnits.length !== expectedUnits.size || orderUnits.some((k) => !expectedUnits.has(k))) {
+      push('pair assignment unitOrder does not cover the planned unit set exactly');
+    }
+  } else {
+    push('pair assignment unitOrder missing — the frozen dispatch order is required');
+  }
+
+  // --- suite ↔ scoring ↔ mapping ↔ principle ------------------------------
+  const suiteCheck = verifyCanonicalHash(suite, suite.suiteHash, { stripFields: ['suiteHash'] });
+  if (!suiteCheck.ok) push('suite-manifest suiteHash drift');
+  if (suite.suiteHash !== manifest.challengeSuiteHash) push('suite hash != manifest.challengeSuiteHash');
+  if (hashes.suiteHash?.value !== suite.suiteHash) push('hashes.suiteHash != suite-manifest.suiteHash');
+  const graderHash = hashOfCanonical(scoring);
+  if (hashes.graderHash?.value !== graderHash) push('hashes.graderHash != recomputed scoring contract hash');
+  if (suite.graderHash !== graderHash) push('suite manifest graderHash != scoring contract hash');
+  if (hashOfCanonical(scoring.implementation) !== hashOfCanonical(challengeImplementationManifest())) {
+    push('scoring-contract implementation manifest drifted from the current lab implementation');
+  }
+  if (!verifyCanonicalHash(mapping, mapping.mappingHash, { stripFields: ['mappingHash'] }).ok) push('mappingHash drift');
+  const principleContentHash = hashOfCanonical(principle.contentJson);
+  if (inputManifest.expectedSourceHashes?.principleContentHash !== principleContentHash) push('principle content hash != input-manifest expectation');
+  if (mapping.principleContentHash !== principleContentHash) push('mapping.principleContentHash != principle content hash');
+  if (hashes.principleContentHash?.value !== principleContentHash) push('hashes.principleContentHash != principle content hash');
+  const targetContentFact = (hepsInput.principles || []).find((p) => p.id === hepsInput.targetPrincipleId);
+  if (targetContentFact && manifest.targetPrinciple?.contentHash !== hashOfCanonical({ id: targetContentFact.id, version: targetContentFact.version, text: targetContentFact.text })) {
+    push('manifest targetPrinciple.contentHash != the HEPS target principle content');
+  }
+  if (suite.mappingHash !== mapping.mappingHash) push('suite manifest mappingHash != mapping mappingHash');
+  if (hashes.mappingHash?.value !== mapping.mappingHash) push('hashes.mappingHash != mapping mappingHash');
+
+  // --- HEPS ↔ manifest ----------------------------------------------------
+  let heps = null;
+  let targetFact = null;
+  try {
+    heps = buildHostEffectivePrincipleSet({ principles: hepsInput.principles, targetPrincipleId: hepsInput.targetPrincipleId, host: hepsInput.host });
+    const hepsCheck = verifyHostEffectivePrincipleSet(heps);
+    if (!hepsCheck.ok) push(`HEPS snapshot: ${hepsCheck.reason}`);
+    if (heps.snapshotHash !== manifest.principleSetSnapshotHash) push('HEPS snapshot hash != manifest principleSetSnapshotHash');
+    targetFact = (hepsInput.principles || []).find((p) => p.id === hepsInput.targetPrincipleId) || null;
+    if (!targetFact) push(`target principle '${String(hepsInput.targetPrincipleId)}' missing from heps-principles.json`);
+    if (manifest.targetPrinciple?.id !== hepsInput.targetPrincipleId) push('manifest targetPrinciple.id != heps-principles targetPrincipleId');
+  } catch (e) {
+    push(`HEPS rebuild failed: ${e.message}`);
+  }
+
+  // --- RuleCode baseline ↔ manifest --------------------------------------
+  if (rulecode.ruleCodes !== undefined) {
+    try {
+      const policy = buildRuleCodePolicy({
+        mode: manifest.experimentMode,
+        ruleCodes: rulecode.ruleCodes,
+        targetPrincipleId: hepsInput.targetPrincipleId,
+        principleRuleCodeIndependence: rulecode.principleRuleCodeIndependence,
+        targetRuleCodeCount: rulecode.targetRuleCodeCount ?? null,
+      });
+      if (policy.ruleCodeSnapshotHash !== manifest.ruleCodeSnapshotHash) push('RuleCode policy snapshot hash != manifest ruleCodeSnapshotHash');
+      if (policy.interventionType !== manifest.interventionType) push('RuleCode interventionType != manifest interventionType');
+      if (policy.executable !== true || policy.identifiability !== 'IDENTIFIABLE') {
+        push(`RuleCode intervention is not identifiable (${policy.identifiability}): ${policy.couplingReason || 'no reason recorded'}`);
+      }
+    } catch (e) {
+      push(`RuleCode policy rebuild failed: ${e.message}`);
+    }
+  } else {
+    push('rulecode-baseline.json missing ruleCodes');
+  }
+
+  // --- arm configs ↔ manifest ↔ prereg ------------------------------------
+  let armPayloadHashes = null;
+  if (heps && targetFact) {
+    try {
+      const budgetChars = Number.isInteger(arms.budgetChars) ? arms.budgetChars : null;
+      if (budgetChars === null) push('examiner-arm-configs budgetChars must be an integer');
+      if (prereg.delivery?.budgetChars !== budgetChars) push('preregistration.delivery.budgetChars != arm configs budgetChars');
+      const rebuilt = buildDualModeArmPayloads({
+        mode: manifest.experimentMode,
+        heps,
+        targetPrinciple: targetFact,
+        principleFacts: hepsInput.principles,
+        budgetChars,
+        ordering: arms.ordering || 'id-asc',
+      });
+      if (!rebuilt.isolationAudit.ok) push(`arm isolation audit: ${rebuilt.isolationAudit.problems.join('; ')}`);
+      for (const [side, armId] of [['control', 'A'], ['treatment', 'B']]) {
+        const stored = arms.arms?.[side];
+        if (!stored) { push(`arm config ${side} missing`); continue; }
+        if (stored.payloadHash !== rebuilt.arms[side].payloadHash) push(`arm ${armId} payloadHash != rebuilt dual-mode payload`);
+        if (typeof stored.payloadText === 'string' && sha256(stored.payloadText) !== stored.payloadHash) push(`arm ${armId} payloadText does not match its payloadHash`);
+        if (manifest.armPayloadHashes && manifest.armPayloadHashes[side] !== rebuilt.arms[side].payloadHash) push(`manifest armPayloadHashes.${side} != rebuilt payload`);
+      }
+      armPayloadHashes = {
+        control: rebuilt.arms.control.payloadHash,
+        treatment: rebuilt.arms.treatment.payloadHash,
+      };
+      if (manifest.armPayloadHashes && (manifest.armPayloadHashes.control !== armPayloadHashes.control || manifest.armPayloadHashes.treatment !== armPayloadHashes.treatment)) {
+        push('manifest armPayloadHashes != rebuilt arm payloads');
+      }
+    } catch (e) {
+      push(`arm payload rebuild failed: ${e.message}`);
+    }
+  }
+
+  if (hashes.examinerManifestHash?.value !== manifest.manifestHash) push('hashes.examinerManifestHash != manifest.manifestHash');
+  if (hashes.pairAssignmentHash?.value !== pair.assignmentHash) push('hashes.pairAssignmentHash != pair assignment hash');
+
+  const binding = {
+    schema: PREREG_BINDING_SCHEMA,
+    studyId: manifest.studyId ?? null,
+    experimentMode: manifest.experimentMode ?? null,
+    interventionType: manifest.interventionType ?? null,
+    targetPrincipleId: hepsInput.targetPrincipleId ?? null,
+    manifestHash: manifest.manifestHash ?? null,
+    pairAssignmentHash: pair.assignmentHash ?? null,
+    preregistrationHash,
+    suiteHash: suite.suiteHash ?? null,
+    mappingHash: mapping.mappingHash ?? null,
+    graderHash,
+    principleContentHash,
+    principleSetSnapshotHash: heps ? heps.snapshotHash : (manifest.principleSetSnapshotHash ?? null),
+    ruleCodeSnapshotHash: manifest.ruleCodeSnapshotHash ?? null,
+    // The frozen primary endpoint rides in the anchor: changing the statistical
+    // definition after freezing (even with every file re-hashed) moves this.
+    primaryEndpointHash: hashOfCanonical(manifest.primaryEndpoint ?? null),
+    armPayloadHashes,
+    plannedPairs: manifest.plannedPairs ?? null,
+    repetitionsPerCase: manifest.repetitionsPerCase ?? null,
+  };
+  return { ok: problems.length === 0, problems, binding, bindingHash: hashOfCanonical(binding) };
+}
+
+/**
+ * Fail-closed cross-file verification for an existing study: the recomputed
+ * binding must hold AND match the append-only anchor written at creation.
+ * A study whose frozen files were rewritten after freezing (even
+ * consistently) cannot move the anchor and is refused.
+ */
+export function verifyExaminerStudyBindings(studyDir, { requireAnchor = true } = {}) {
+  const computed = computeExaminerStudyBindings(studyDir);
+  if (!computed.ok) return { ...computed, anchor: 'NOT_CHECKED' };
+  const eventsFile = path.join(studyDir, 'events.jsonl');
+  const events = fs.existsSync(eventsFile)
+    ? fs.readFileSync(eventsFile, 'utf8').split('\n').filter((line) => line.trim() !== '').map((line) => {
+      try { return JSON.parse(line); } catch { return null; }
+    }).filter(Boolean)
+    : [];
+  const anchors = events.filter((e) => e && e.type === PREREGISTRATION_ANCHOR_EVENT);
+  const problems = [];
+  let anchor = 'MISSING';
+  if (anchors.length === 0) {
+    if (requireAnchor) problems.push('immutable preregistration anchor MISSING — the study was not frozen by the anchored creation path');
+  } else if (anchors.length > 1) {
+    problems.push(`multiple preregistration anchors (${anchors.length}) — the append-only freeze record was duplicated`);
+    anchor = 'MISMATCH';
+  } else {
+    const record = anchors[0];
+    anchor = 'VERIFIED';
+    if (record.schema !== PREREG_ANCHOR_SCHEMA) { problems.push(`anchor schema '${String(record.schema)}' unsupported`); anchor = 'MISMATCH'; }
+    if (record.studyId !== computed.binding.studyId) { problems.push('anchor studyId != manifest studyId'); anchor = 'MISMATCH'; }
+    if (record.bindingHash !== computed.bindingHash) {
+      problems.push('anchor bindingHash != recomputed binding — the frozen files were rewritten after the anchor was written');
+      anchor = 'MISMATCH';
+    }
+    if (!record.binding || hashOfCanonical(record.binding) !== record.bindingHash) {
+      problems.push('anchor binding payload does not match its own bindingHash');
+      anchor = 'MISMATCH';
+    }
+  }
+  return { ...computed, ok: problems.length === 0, problems: problems.length > 0 ? problems : [], anchor };
+}
+
+
+// ---------------------------------------------------------------------------
 // §2 dual-mode arm payload construction (offline deterministic rendering)
 // ---------------------------------------------------------------------------
 
@@ -498,10 +807,15 @@ export function renderPrincipleDirective(principle) {
 
 /**
  * Render an ordered principle set under the frozen char budget with the
- * deterministic FIFO-prefix policy (legacy_fifo_prefix_v1 semantics: fill in
- * order, first non-fitting item ends the fill — eviction, never truncation).
- * Returns { payloadText, delivered, evicted }.
+ * deterministic SKIP-AND-CONTINUE policy: walk the order and deliver every
+ * principle that still fits, so a late small principle may be delivered after
+ * an earlier one was evicted. This was historically mislabelled
+ * 'legacy_fifo_prefix_v1' (a prefix policy stops at the first non-fitting
+ * item), so the honest name is 'skip_and_continue_v1' — the SELECTION RULE
+ * itself is unchanged. Returns { payloadText, delivered, evicted }.
  */
+export const LIBRARY_SELECTION_RULE = 'skip_and_continue_v1';
+
 export function renderLibraryPayload({ orderedPrinciples, budgetChars }) {
   if (!Array.isArray(orderedPrinciples)) throw new Error('renderLibraryPayload: orderedPrinciples required');
   if (!Number.isInteger(budgetChars) || budgetChars <= 0) throw new Error('renderLibraryPayload: budgetChars must be a positive integer');
@@ -535,9 +849,14 @@ export function renderLibraryPayload({ orderedPrinciples, budgetChars }) {
  *
  * @param {object} heps — buildHostEffectivePrincipleSet output
  * @param {object} targetPrinciple — { id, version, text } (frozen)
- * @param {object} [options] — { budgetChars = 2000, ordering = 'id-asc' }
+ * @param {object} [options] — { budgetChars = 2000, ordering = 'id-asc', principleFacts }
+ *   `principleFacts` (the full-principle facts the HEPS was built from) is
+ *   REQUIRED for full-library mode: the HEPS snapshot carries identity +
+ *   contentHash only, so without the facts the delivered library text cannot
+ *   be rendered. Rendering a placeholder instead is refused — a payload that
+ *   says "undefined" is not the frozen library.
  */
-export function buildDualModeArmPayloads({ mode, heps, targetPrinciple, budgetChars = 2000, ordering = 'id-asc' }) {
+export function buildDualModeArmPayloads({ mode, heps, targetPrinciple, principleFacts = null, budgetChars = 2000, ordering = 'id-asc' }) {
   assertMode(mode);
   if (!heps || !Array.isArray(heps.baseLibrary)) throw new Error('buildDualModeArmPayloads: heps (buildHostEffectivePrincipleSet output) required');
   if (!targetPrinciple || !text(targetPrinciple.id) || !text(targetPrinciple.version) || !text(targetPrinciple.text)) {
@@ -548,7 +867,22 @@ export function buildDualModeArmPayloads({ mode, heps, targetPrinciple, budgetCh
   const orderBy = (list) => (ordering === 'id-asc'
     ? list.slice().sort((a, b) => (a.id < b.id ? -1 : 1))
     : list.slice().sort((a, b) => ((b.priority ?? 0) - (a.priority ?? 0)) || (a.id < b.id ? -1 : 1)));
-  const baseLibrary = heps.baseLibrary.map(withHash);
+  const factById = new Map((Array.isArray(principleFacts) ? principleFacts : []).map((p) => [p && p.id, p]));
+  // Resolve the frozen TEXT for a HEPS entry and prove it hashes back to the
+  // frozen contentHash — a mismatched or missing text is a refusal, never a
+  // silently rendered placeholder.
+  const resolveLibraryEntry = (entry) => {
+    const fact = factById.get(entry.id);
+    const resolvedText = fact && text(fact.text) ? fact.text : entry.text;
+    if (!text(resolvedText)) {
+      throw new Error(`buildDualModeArmPayloads: no frozen text for library principle '${entry.id}' — pass principleFacts (a payload carrying 'undefined' is refused)`);
+    }
+    const contentHash = hashOfCanonical({ id: entry.id, version: entry.version, text: resolvedText });
+    if (entry.contentHash && entry.contentHash !== contentHash) {
+      throw new Error(`buildDualModeArmPayloads: library principle '${entry.id}' text does not match its frozen contentHash`);
+    }
+    return { id: entry.id, version: entry.version, text: resolvedText, contentHash, ...(entry.priority !== undefined ? { priority: entry.priority } : {}) };
+  };
 
   let control;
   let treatment;
@@ -561,11 +895,12 @@ export function buildDualModeArmPayloads({ mode, heps, targetPrinciple, budgetCh
   } else {
     // §2.2: non-target set frozen in BOTH arms; the target is the only
     // difference. Evictions under the shared budget are recorded per arm.
+    const baseLibrary = heps.baseLibrary.map(resolveLibraryEntry);
     control = renderLibraryPayload({ orderedPrinciples: orderBy(baseLibrary), budgetChars });
     treatment = renderLibraryPayload({ orderedPrinciples: orderBy([...baseLibrary, target]), budgetChars });
-    controlCapacity = recordCapacityCompetition({ eligible: baseLibrary, delivered: control.delivered, budgetChars, policy: `examiner-offline:${ordering}`, targetPrincipleId: target.id });
+    controlCapacity = recordCapacityCompetition({ eligible: baseLibrary, delivered: control.delivered, budgetChars, policy: `examiner-offline:${LIBRARY_SELECTION_RULE}:${ordering}`, targetPrincipleId: target.id });
     controlCapacity.armId = 'A';
-    treatmentCapacity = recordCapacityCompetition({ eligible: [...baseLibrary, target], delivered: treatment.delivered, budgetChars, policy: `examiner-offline:${ordering}`, targetPrincipleId: target.id });
+    treatmentCapacity = recordCapacityCompetition({ eligible: [...baseLibrary, target], delivered: treatment.delivered, budgetChars, policy: `examiner-offline:${LIBRARY_SELECTION_RULE}:${ordering}`, targetPrincipleId: target.id });
     treatmentCapacity.armId = 'B';
   }
   if (treatment.evicted.some((p) => p.id === target.id)) {
@@ -639,8 +974,11 @@ export function writeExaminerStudyArtifacts(input) {
   if (!targetFact) throw new Error('writeExaminerStudyArtifacts: target principle not present in hepsPrinciples.principles');
 
   const heps = buildHostEffectivePrincipleSet({ principles: hepsPrinciples.principles, targetPrincipleId: hepsPrinciples.targetPrincipleId, host: hepsPrinciples.host });
-  const ruleCodePolicy = buildRuleCodePolicy({ mode: input.experimentMode, ruleCodes: ruleCodeFacts.ruleCodes, targetPrincipleId: hepsPrinciples.targetPrincipleId, principleRuleCodeIndependence: ruleCodeFacts.principleRuleCodeIndependence });
-  const armPayloads = buildDualModeArmPayloads({ mode: input.experimentMode, heps, targetPrinciple: targetFact, budgetChars, ordering });
+  const ruleCodePolicy = buildRuleCodePolicy({ mode: input.experimentMode, ruleCodes: ruleCodeFacts.ruleCodes, targetPrincipleId: hepsPrinciples.targetPrincipleId, principleRuleCodeIndependence: ruleCodeFacts.principleRuleCodeIndependence, targetRuleCodeCount: ruleCodeFacts.targetRuleCodeCount ?? null });
+  if (ruleCodePolicy.executable === false) {
+    throw new Error(`writeExaminerStudyArtifacts: INTERVENTION_NOT_IDENTIFIABLE — ${ruleCodePolicy.couplingReason} (the study cannot be preregistered with an intervention that cannot be delivered)`);
+  }
+  const armPayloads = buildDualModeArmPayloads({ mode: input.experimentMode, heps, targetPrinciple: targetFact, principleFacts: hepsPrinciples.principles, budgetChars, ordering });
   if (!armPayloads.isolationAudit.ok) throw new Error(`writeExaminerStudyArtifacts: arm isolation audit failed: ${armPayloads.isolationAudit.problems.join('; ')}`);
   const primaryEndpoint = definePrimaryEndpoint({ id: input.primaryEndpointId });
   const pairAssignment = assignPairs({ cases: caseDefs.map((c) => c.caseId), repetitionsPerCase, seed });
@@ -696,7 +1034,11 @@ export function writeExaminerStudyArtifacts(input) {
   }
   writeJson('examiner-manifest.json', manifest);
   writeJson('heps-principles.json', hepsPrinciples);
-  writeJson('rulecode-baseline.json', { ruleCodes: ruleCodeFacts.ruleCodes, principleRuleCodeIndependence: ruleCodeFacts.principleRuleCodeIndependence });
+  writeJson('rulecode-baseline.json', {
+    ruleCodes: ruleCodeFacts.ruleCodes,
+    principleRuleCodeIndependence: ruleCodeFacts.principleRuleCodeIndependence ?? null,
+    targetRuleCodeCount: ruleCodeFacts.targetRuleCodeCount ?? null,
+  });
   writeJson('examiner-arm-configs.json', armPayloads);
   writeJson('pair-assignment.json', pairAssignment);
   writeJson('preregistration.json', prereg);
@@ -714,7 +1056,24 @@ export function writeExaminerStudyArtifacts(input) {
     examinerManifestHash: { value: manifest.manifestHash },
     pairAssignmentHash: { value: pairAssignment.assignmentHash },
   });
-  return { studyDir, manifest, pairAssignment, heps, ruleCodePolicy, armPayloads, suiteManifest };
+  // Cross-file self-check BEFORE the identity is published: a study whose
+  // files do not agree with each other is not a valid preregistration.
+  const bindings = computeExaminerStudyBindings(studyDir);
+  if (!bindings.ok) {
+    fs.rmSync(studyDir, { recursive: true, force: true });
+    throw new Error(`writeExaminerStudyArtifacts: written artifacts are internally inconsistent (${bindings.problems.join('; ')}) — nothing was published`);
+  }
+  // The immutable anchor: one append-only ledger row recorded at freeze time.
+  // Later verification recomputes the binding and must find it unchanged.
+  createChallengeLedger(studyDir).appendEvent({
+    type: PREREGISTRATION_ANCHOR_EVENT,
+    owner: 'examiner-study-freeze',
+    schema: PREREG_ANCHOR_SCHEMA,
+    studyId: input.studyId,
+    bindingHash: bindings.bindingHash,
+    binding: bindings.binding,
+  });
+  return { studyDir, manifest, pairAssignment, heps, ruleCodePolicy, armPayloads, suiteManifest, bindingHash: bindings.bindingHash };
 }
 
 /**
@@ -733,7 +1092,7 @@ export function writeExaminerStudyArtifacts(input) {
 export function runExaminerPreflight(input) {
   const checks = [];
   const check = (id, severity, ok, detail) => checks.push({ id, severity, ok: ok === true, detail });
-  const { manifest, heps, ruleCodePolicy, pairAssignment, primaryEndpoint, armConfigs, isolation, goldStatus, injectionCapability, authorization, studyDirStatus } = input || {};
+  const { manifest, heps, ruleCodePolicy, pairAssignment, primaryEndpoint, armConfigs, isolation, goldStatus, injectionCapability, authorization, studyDirStatus, bindings } = input || {};
 
   const manifestCheck = verifyExaminerManifest(manifest);
   check('manifest_verifiable', 'blocker', manifestCheck.ok, manifestCheck.ok ? 'manifest hash verified' : (manifestCheck.problems || ['no manifest']).join('; '));
@@ -744,17 +1103,30 @@ export function runExaminerPreflight(input) {
       heps.target && heps.target.qualifies ? `target '${heps.target.id}' qualifies for host-effective status` : `target Principle is not host-effective (${heps.target ? heps.target.exclusionReason : 'missing'}) — an ineligible intervention cannot be studied`);
   }
   const rcCheck = verifyRuleCodePolicy(ruleCodePolicy);
-  check('rulecode_policy_verified', 'blocker', rcCheck.ok, rcCheck.ok ? `RuleCode policy ${ruleCodePolicy.policy} verified (interventionType=${ruleCodePolicy.interventionType})` : rcCheck.reason);
+  check('rulecode_policy_verified', 'blocker', rcCheck.ok, rcCheck.ok ? `RuleCode policy ${ruleCodePolicy.policy} verified (interventionType=${ruleCodePolicy.interventionType}, identifiability=${ruleCodePolicy.identifiability})` : rcCheck.reason);
   if (ruleCodePolicy) {
     check('rulecode_policy_executable', 'blocker', ruleCodePolicy.executable !== false,
-      ruleCodePolicy.executable !== false ? 'RuleCode policy executable under current controllability facts' : `not executable: ${ruleCodePolicy.couplingReason}`);
+      ruleCodePolicy.executable !== false ? 'RuleCode policy executable under current controllability facts' : `INTERVENTION_NOT_IDENTIFIABLE: ${ruleCodePolicy.couplingReason}`);
     check('bundled_intervention_declared', ruleCodePolicy.interventionType === 'bundled_intervention' ? 'warning' : 'info', true,
       ruleCodePolicy.interventionType === 'bundled_intervention'
-        ? `BUNDLED intervention declared — conclusions may only attribute to the Principle+RuleCode bundle (${ruleCodePolicy.couplingReason})`
+        ? `BUNDLED intervention declared — conclusions may only attribute to the Principle+RuleCode bundle, never to the Principle alone (${ruleCodePolicy.couplingReason})`
+          + (ruleCodePolicy.unresolvedEvidence?.length ? ` [unresolved evidence: ${ruleCodePolicy.unresolvedEvidence.join(', ')}]` : '')
         : 'principle_only intervention — the target Principle is the only treatment variable');
   }
   const pairCheck = verifyPairAssignment(pairAssignment);
   check('pair_assignment_verified', 'blocker', pairCheck.ok, pairCheck.ok ? `${pairAssignment.pairs.length} pairs, balanced ${pairAssignment.balance.controlFirst}/${pairAssignment.balance.treatmentFirst}, seed frozen` : pairCheck.reason);
+  // P1-3: every frozen file only proves itself; this check folds in the
+  // cross-file binding + immutable anchor computed from the study directory.
+  // It is a blocker whenever the caller supplies a binding verdict (the
+  // production paths always do), so a study whose files were rewritten in a
+  // mutually consistent way can never pass preflight.
+  if (bindings !== undefined && bindings !== null) {
+    const ok = bindings.ok === true && bindings.anchor === 'VERIFIED';
+    check('preregistration_bindings_verified', 'blocker', ok,
+      ok
+        ? `cross-file preregistration binding ${String(bindings.bindingHash).slice(0, 12)}… matches the immutable anchor`
+        : `preregistration binding not verified: ${(bindings.problems || ['anchor not verified']).join('; ')}`);
+  }
 
   // A/B contrast: the arms may differ ONLY in the target principle. In
   // isolated mode that is empty-vs-target; in full-library mode BOTH carry

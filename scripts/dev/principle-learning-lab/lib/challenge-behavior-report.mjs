@@ -60,8 +60,9 @@ import {
   computeBFRR, computePCR, computeFIR, computePairedEffect, computeVBDR, causalAttributionStatus, buildPlannedPairs,
   computeITT, computeTreatmentFidelity,
 } from './challenge-statistics.mjs';
-import { verifyExaminerManifest, verifyPairAssignment, definePrimaryEndpoint, evaluatePrimaryEndpointF } from './examiner-study.mjs';
+import { verifyExaminerManifest, verifyPairAssignment, definePrimaryEndpoint, evaluatePrimaryEndpointF, verifyExaminerStudyBindings, buildDualModeArmPayloads, buildHostEffectivePrincipleSet } from './examiner-study.mjs';
 import { verifyInjectionEvidenceChain } from './examiner-injection-evidence.mjs';
+import { verifyOfflineRuntimeReceipt } from './challenge-actor.mjs';
 
 import { sha256, verifyCanonicalHash } from './challenge-freeze.mjs';
 import { verifyFrozenStudy, isCapacityFailureDetail } from './challenge-runner.mjs';
@@ -1384,6 +1385,18 @@ function buildExaminerBlockMaybe(studyDir, {
   if (!manifestCheck.ok) {
     addFinding('examiner_manifest_drift', 'critical', 'examiner-manifest.json', manifestCheck.problems.join('; '));
   }
+  // P1-3: cross-file binding. Legacy studies predate the immutable anchor and
+  // keep their historical report byte-identical (no field, no finding); a
+  // study created by the anchored path must match its anchor exactly.
+  let preregistrationBinding = null;
+  const bindings = verifyExaminerStudyBindings(studyDir, { requireAnchor: false });
+  if (bindings.anchor === 'VERIFIED') {
+    preregistrationBinding = { bindingHash: bindings.bindingHash, anchor: 'VERIFIED' };
+  } else if (bindings.anchor === 'MISMATCH' || (!bindings.ok && bindings.anchor !== 'NOT_CHECKED')) {
+    addFinding('examiner_preregistration_binding_drift', 'critical', 'events.jsonl', (bindings.problems || ['binding mismatch']).join('; '));
+  } else if (bindings.anchor === 'NOT_CHECKED') {
+    addFinding('examiner_preregistration_binding_unreadable', 'critical', 'examiner-manifest.json', (bindings.problems || ['binding recomputation failed']).join('; '));
+  }
   // Pair assignment: the frozen randomization record.
   let pairAssignment = null;
   try {
@@ -1452,43 +1465,32 @@ function buildExaminerBlockMaybe(studyDir, {
   // Injection evidence chains (runner-produced sidecars) — verified, then fed
   // to fidelity. Control chains prove the absence hash; any control chain
   // proving a real payload at CONTEXT_PRESENT+ is contamination.
-  const chains = { treatment: [], control: [] };
-  const runsDir = path.join(studyDir, 'runs');
-  if (fs.existsSync(runsDir)) {
-    for (const caseDir of fs.readdirSync(runsDir).sort()) {
-      const casePath = path.join(runsDir, caseDir);
-      if (!fs.statSync(casePath).isDirectory()) continue;
-      for (const armDir of fs.readdirSync(casePath).sort()) {
-        const armPath = path.join(casePath, armDir);
-        if (!fs.statSync(armPath).isDirectory()) continue;
-        for (const repDir of fs.readdirSync(armPath).sort()) {
-          const repPath = path.join(armPath, repDir);
-          if (!fs.statSync(repPath).isDirectory()) continue;
-          for (const file of fs.readdirSync(repPath).sort()) {
-            if (!file.startsWith('injection-evidence-') || !file.endsWith('.json')) continue;
-            try {
-              const chain = readJsonFile(path.join(repPath, file));
-              const verified = verifyInjectionEvidenceChain(chain);
-              const forbiddenPresent = chain.stages && chain.stages.CONTEXT_PRESENT && chain.stages.CONTEXT_PRESENT.forbiddenContentPresent;
-              const entry = { ok: verified.ok, provenLevel: verified.provenLevel, principleHash: chain.principleHash, chainHash: chain.chainHash, ...(forbiddenPresent !== undefined ? { forbiddenContentPresent: forbiddenPresent } : {}) };
-              if (armDir === treatmentArm) chains.treatment.push(entry);
-              else if (armDir === controlArm) chains.control.push(entry);
-            } catch (e) {
-              addFinding('injection_evidence_unreadable', 'critical', `runs/${caseDir}/${armDir}/${repDir}/${file}`, e.message);
-            }
-          }
-        }
-      }
-    }
-  }
+  // P1-2: for an ANCHORED study attribution comes from the chain's own binding
+  // (study/unit/case/arm/repetition/attempt + prompt/receipt hash) checked
+  // against the SAVED primary attempt record — never from the directory a
+  // sidecar happens to sit in. One planned unit contributes at most ONE chain
+  // (its primary attempt), so duplicate attempts cannot inflate fidelity.
+  // Legacy studies predate v2 binding and keep the historical scan so their
+  // reports stay byte-identical.
+  const chains = preregistrationBinding
+    ? collectBoundInjectionChains({ studyDir, studyId: exManifest.studyId, planUnits, rollupsByUnit, controlArm, treatmentArm, addFinding })
+    : scanLegacyInjectionChains({ studyDir, controlArm, treatmentArm, addFinding });
+  // P1-6: full-library capacity competition recomputed from the frozen arm
+  // configs/payloads (never a hardcoded 0), with the honest three-state answer.
+  const capacity = preregistrationBinding ? recomputeExaminerCapacity({ studyDir, exManifest, addFinding }) : null;
+  const plannedTreatmentUnits = planUnits.filter((u) => u.armId === treatmentArm).length;
+  const unresolvedTreatmentUnits = Math.max(0, plannedTreatmentUnits - chains.treatment.length);
   const treatmentFidelity = computeTreatmentFidelity({
-    plannedTreatmentUnits: planUnits.filter((u) => u.armId === treatmentArm).length,
+    plannedTreatmentUnits,
     chains: chains.treatment,
     controlChains: chains.control,
+    ...(capacity && capacity.status === 'RECORDED' ? { nonTargetRetention: capacity.nonTargetRetention, capacityRecords: [capacity.control, capacity.treatment] } : {}),
+    ...(preregistrationBinding ? { unresolvedTreatmentUnits } : {}),
   });
   return {
     specVersion: 'SPEC-PD-EXAMINER-001 v0.9',
     manifestHash: exManifest.manifestHash ?? null,
+    ...(preregistrationBinding ? { preregistrationBinding } : {}),
     experimentMode: exManifest.experimentMode ?? null,
     interventionType: exManifest.interventionType ?? null,
     targetPrincipleId: exManifest.targetPrinciple ? exManifest.targetPrinciple.id : null,
@@ -1496,6 +1498,7 @@ function buildExaminerBlockMaybe(studyDir, {
     applicability: { applicablePairs: applicablePairs.length, notApplicablePairs },
     itt,
     treatmentFidelity,
+    ...(capacity ? { capacity } : {}),
     randomization: pairAssignment
       ? {
         strategy: pairAssignment.strategy,
@@ -1509,10 +1512,212 @@ function buildExaminerBlockMaybe(studyDir, {
     injectionEvidence: {
       treatmentChains: chains.treatment.length,
       controlChains: chains.control.length,
+      ...(preregistrationBinding ? {
+        attribution: 'chain-internal binding verified against each unit\u2019s saved primary attempt record',
+        duplicateAttemptSidecars: chains.duplicates,
+        unresolvedTreatmentUnits,
+      } : {}),
       note: 'chains are runner-produced tamper-evident sidecars (offline-stub scope); SUBMITTED never equals RUNTIME_LOADED and declaration-only never counts',
     },
     evidence: 'ITT/Fidelity recomputable from pair-assignment.json + planUnits + injection-evidence sidecars + replayed adjudications',
   };
+}
+
+const evidenceUnitKey = (u) => `${u.caseId}/${u.armId}/r${String(u.repetitionId)}`;
+
+/**
+ * Anchored-study chain collector. For every PLANNED unit it reads the sidecar
+ * of that unit's PRIMARY attempt only and verifies the full binding against
+ * the saved attempt record: the attempt must exist and succeed, its
+ * promptAudit.promptHash must equal the chain's promptHash, its trace must
+ * carry the runtime's own receipt (hash-valid, same prompt), and the chain's
+ * receiptHash must be that receipt. Anything else leaves the unit UNKNOWN —
+ * the unit is never silently counted as injected or not-injected.
+ */
+function collectBoundInjectionChains({ studyDir, studyId, planUnits, rollupsByUnit, controlArm, treatmentArm, addFinding }) {
+  const chains = { treatment: [], control: [], duplicates: 0 };
+  const seen = new Set();
+  const units = [...planUnits].sort((a, b) => evidenceUnitKey(a).localeCompare(evidenceUnitKey(b)));
+  for (const unit of units) {
+    const key = evidenceUnitKey(unit);
+    if (seen.has(key)) { chains.duplicates += 1; continue; }
+    seen.add(key);
+    const repDir = path.join(studyDir, 'runs', unit.caseId, unit.armId, `r${String(unit.repetitionId)}`);
+    const sidecars = fs.existsSync(repDir)
+      ? fs.readdirSync(repDir).filter((f) => f.startsWith('injection-evidence-') && f.endsWith('.json')).sort()
+      : [];
+    if (sidecars.length > 1) {
+      chains.duplicates += sidecars.length - 1;
+      addFinding('examiner_injection_duplicate_attempts', 'warning', `runs/${unit.caseId}/${unit.armId}/r${String(unit.repetitionId)}`,
+        `${sidecars.length} evidence sidecars exist for one planned unit — only the primary attempt counts; duplicates never inflate Treatment Fidelity`);
+    }
+    const rollup = rollupsByUnit.get(key);
+    const primaryAttempt = rollup && rollup.currentState === 'succeeded' && rollup.primaryAttempt ? String(rollup.primaryAttempt) : null;
+    if (!primaryAttempt) continue; // unresolved: no successful primary attempt
+    const sidecarPath = path.join(repDir, `injection-evidence-${primaryAttempt}.json`);
+    if (!fs.existsSync(sidecarPath)) {
+      addFinding('examiner_injection_evidence_missing', 'warning', `runs/${unit.caseId}/${unit.armId}/r${String(unit.repetitionId)}/injection-evidence-${primaryAttempt}.json`,
+        'the unit succeeded but produced no injection evidence chain — its injection status is UNKNOWN');
+      continue;
+    }
+    const relSubject = `runs/${unit.caseId}/${unit.armId}/r${String(unit.repetitionId)}/injection-evidence-${primaryAttempt}.json`;
+    let chain;
+    let attempt;
+    try {
+      chain = readJsonFile(sidecarPath);
+      attempt = readJsonFile(path.join(repDir, `${primaryAttempt}.json`));
+    } catch (e) {
+      addFinding('injection_evidence_unreadable', 'critical', relSubject, e.message);
+      continue;
+    }
+    const fail = (detail) => addFinding('examiner_injection_binding_mismatch', 'critical', relSubject, detail);
+    const attemptUnit = attempt.unit || {};
+    if (attemptUnit.caseId !== unit.caseId || attemptUnit.armId !== unit.armId
+      || String(attemptUnit.repetitionId) !== String(unit.repetitionId) || String(attemptUnit.attemptId) !== primaryAttempt) {
+      fail('the saved attempt record belongs to a different unit than the planned one');
+      continue;
+    }
+    const promptHash = attempt.promptAudit && attempt.promptAudit.promptHash;
+    const traceReceipt = attempt.trace && attempt.trace.runtimeReceipt;
+    const receiptCheck = verifyOfflineRuntimeReceipt(traceReceipt);
+    if (!receiptCheck.ok) {
+      fail(`the attempt trace carries no valid runtime load receipt (${receiptCheck.problems.join('; ')}) — RUNTIME_LOADED cannot be claimed`);
+      continue;
+    }
+    if (traceReceipt.receivedPromptHash !== promptHash) {
+      fail('the runtime receipt is for a different prompt than the attempt recorded');
+      continue;
+    }
+    const expected = {
+      studyId,
+      unitId: key,
+      caseId: unit.caseId,
+      armId: unit.armId,
+      repetitionId: String(unit.repetitionId),
+      attemptId: primaryAttempt,
+      promptHash,
+    };
+    const verified = verifyInjectionEvidenceChain(chain, { expected });
+    if (!verified.ok) {
+      fail(verified.problems.join('; '));
+      continue;
+    }
+    if (chain.receiptHash !== traceReceipt.receiptHash) {
+      fail('the chain receiptHash is not the receipt in the saved attempt trace');
+      continue;
+    }
+    const forbiddenPresent = chain.stages && chain.stages.CONTEXT_PRESENT && chain.stages.CONTEXT_PRESENT.forbiddenContentPresent;
+    const entry = {
+      ok: true,
+      provenLevel: chain.provenLevel,
+      principleHash: chain.principleHash,
+      chainHash: chain.chainHash,
+      unitId: key,
+      attemptId: primaryAttempt,
+      ...(forbiddenPresent !== undefined ? { forbiddenContentPresent: forbiddenPresent } : {}),
+    };
+    if (unit.armId === treatmentArm) chains.treatment.push(entry);
+    else if (unit.armId === controlArm) chains.control.push(entry);
+  }
+  return chains;
+}
+
+/** Historical (pre-anchor) scan: kept verbatim so legacy reports stay stable. */
+function scanLegacyInjectionChains({ studyDir, controlArm, treatmentArm, addFinding }) {
+  const chains = { treatment: [], control: [] };
+  const runsDir = path.join(studyDir, 'runs');
+  if (!fs.existsSync(runsDir)) return chains;
+  for (const caseDir of fs.readdirSync(runsDir).sort()) {
+    const casePath = path.join(runsDir, caseDir);
+    if (!fs.statSync(casePath).isDirectory()) continue;
+    for (const armDir of fs.readdirSync(casePath).sort()) {
+      const armPath = path.join(casePath, armDir);
+      if (!fs.statSync(armPath).isDirectory()) continue;
+      for (const repDir of fs.readdirSync(armPath).sort()) {
+        const repPath = path.join(armPath, repDir);
+        if (!fs.statSync(repPath).isDirectory()) continue;
+        for (const file of fs.readdirSync(repPath).sort()) {
+          if (!file.startsWith('injection-evidence-') || !file.endsWith('.json')) continue;
+          try {
+            const chain = readJsonFile(path.join(repPath, file));
+            const verified = verifyInjectionEvidenceChain(chain);
+            const forbiddenPresent = chain.stages && chain.stages.CONTEXT_PRESENT && chain.stages.CONTEXT_PRESENT.forbiddenContentPresent;
+            const entry = { ok: verified.ok, provenLevel: verified.provenLevel, principleHash: chain.principleHash, chainHash: chain.chainHash, ...(forbiddenPresent !== undefined ? { forbiddenContentPresent: forbiddenPresent } : {}) };
+            if (armDir === treatmentArm) chains.treatment.push(entry);
+            else if (armDir === controlArm) chains.control.push(entry);
+          } catch (e) {
+            addFinding('injection_evidence_unreadable', 'critical', `runs/${caseDir}/${armDir}/${repDir}/${file}`, e.message);
+          }
+        }
+      }
+    }
+  }
+  return chains;
+}
+
+/**
+ * §2.2.5 capacity competition for the report — rebuilt from the FROZEN HEPS +
+ * target principle + budget/ordering, never read from the mutable creation
+ * record as the authority (the stored record is only cross-checked). Three
+ * states: NOT_APPLICABLE (isolated mode), UNKNOWN (cannot recompute), or
+ * RECORDED (counts are real, including a genuine 0).
+ */
+function recomputeExaminerCapacity({ studyDir, exManifest, addFinding }) {
+  if (exManifest.experimentMode === 'isolated_principle') {
+    return { status: 'NOT_APPLICABLE', reason: 'isolated mode: the control payload is EMPTY and the treatment carries the target only — no capacity competition exists' };
+  }
+  if (exManifest.experimentMode !== 'full_library_incremental') {
+    return { status: 'UNKNOWN', reason: `experiment mode '${String(exManifest.experimentMode)}' has no capacity definition` };
+  }
+  try {
+    const hepsInput = readJsonFile(path.join(studyDir, 'heps-principles.json'));
+    const armConfigs = readJsonFile(path.join(studyDir, 'examiner-arm-configs.json'));
+    const heps = buildHostEffectivePrincipleSet({ principles: hepsInput.principles, targetPrincipleId: hepsInput.targetPrincipleId, host: hepsInput.host });
+    const targetFact = (hepsInput.principles || []).find((p) => p.id === hepsInput.targetPrincipleId);
+    if (!targetFact) throw new Error('target principle missing from heps-principles.json');
+    const budgetChars = Number.isInteger(armConfigs.budgetChars) ? armConfigs.budgetChars : null;
+    if (budgetChars === null) throw new Error('examiner-arm-configs budgetChars missing — capacity cannot be bounded');
+    const rebuilt = buildDualModeArmPayloads({ mode: exManifest.experimentMode, heps, targetPrinciple: targetFact, principleFacts: hepsInput.principles, budgetChars, ordering: armConfigs.ordering || 'id-asc' });
+    const factsOf = (record) => (record ? {
+      armId: record.armId,
+      policy: record.policy,
+      budgetChars: record.budgetChars,
+      eligibleCount: record.eligibleCount,
+      deliveredIds: record.delivered.map((p) => p.id).sort(),
+      evictedIds: record.evicted.map((p) => p.id).sort(),
+      // `evicted` keeps the record shape computeTreatmentFidelity consumes so
+      // capacity evictions reach the report instead of being counted as 0.
+      evicted: record.evicted.map((p) => ({ id: p.id, contentHash: p.contentHash })),
+      targetDelivered: record.targetDelivered,
+      recordHash: record.recordHash,
+    } : null);
+    const control = factsOf(rebuilt.capacity.control);
+    const treatment = factsOf(rebuilt.capacity.treatment);
+    if (!control || !treatment) throw new Error('rebuilt arm payloads carry no capacity record');
+    const stored = armConfigs.capacity || {};
+    const storedAgrees = stored.control?.recordHash === control.recordHash && stored.treatment?.recordHash === treatment.recordHash;
+    if (!storedAgrees) {
+      addFinding('examiner_capacity_record_drift', 'critical', 'examiner-arm-configs.json',
+        'the stored capacity competition record does not match a recomputation from the frozen HEPS + budget — the report uses the recomputation');
+    }
+    const targetId = targetFact.id;
+    return {
+      status: 'RECORDED',
+      selectionRule: control.policy,
+      budgetChars,
+      control,
+      treatment,
+      storedRecordAgrees: storedAgrees,
+      nonTargetRetention: {
+        eligible: control.eligibleCount,
+        deliveredInControl: control.deliveredIds.filter((id) => id !== targetId).length,
+        deliveredInTreatment: treatment.deliveredIds.filter((id) => id !== targetId).length,
+      },
+    };
+  } catch (e) {
+    addFinding('examiner_capacity_uncomputable', 'critical', 'examiner-arm-configs.json', e.message);
+    return { status: 'UNKNOWN', reason: e.message };
+  }
 }
 
 export function buildBehaviorReportV2(studyDir, { now } = {}) {
@@ -2044,10 +2249,23 @@ export function renderBehaviorReportV2Markdown(report) {
   return lines.join('\n');
 }
 
-export function writeBehaviorReportV2(studyDir, { now, owner = 'behavior-report-generator-v2' } = {}) {
+/**
+ * Write the §10 Report V2 artifact.
+ *
+ * `canWrite` (optional) is the caller's write-permission gate: it runs BEFORE
+ * lock acquisition and BEFORE any generation, so a read-only study is refused
+ * without a report being computed, a lock being taken, or an event appended.
+ * `REPORT_READY_V2` is an idempotency signal only — never a permission check.
+ */
+export function writeBehaviorReportV2(studyDir, { now, owner = 'behavior-report-generator-v2', canWrite = null } = {}) {
   if (now === undefined || now === null) throw new Error('writeBehaviorReportV2: now required (ISO-8601)');
   normalizeNow(now);
   assertNotFrozenStudyArea(studyDir);
+  if (canWrite !== null) {
+    if (typeof canWrite !== 'function') throw new Error('writeBehaviorReportV2: canWrite must be a function returning { ok, reason }');
+    const permission = canWrite(studyDir);
+    if (!permission || permission.ok !== true) throw new Error(`REPORT_WRITE_REFUSED: ${permission?.reason ?? 'write permission not granted'}`);
+  }
   const jsonPath = path.join(studyDir, REPORT_JSON_V2);
   const mdPath = path.join(studyDir, REPORT_MD_V2);
   acquireStudyWriteLock(studyDir, { owner });
