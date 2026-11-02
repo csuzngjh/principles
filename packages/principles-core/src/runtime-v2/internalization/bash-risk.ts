@@ -481,7 +481,8 @@ function isReadonlyPowerShellShape(command: string, args: readonly string[]): bo
   if (grammar === undefined) return 'unknown';
   let positionalOnly = false;
   for (let i = 0; i < args.length; i += 1) {
-    const token = args[i] as string;
+    const token = args[i];
+    if (token === undefined) return 'unknown';
     if (positionalOnly) continue;
     // PowerShell treats a bare `--` as end-of-parameters.
     if (token === '--') {
