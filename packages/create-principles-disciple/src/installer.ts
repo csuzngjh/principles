@@ -1,6 +1,6 @@
 import { existsSync, lstatSync, mkdtempSync, readdirSync, realpathSync, statSync, readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync, cpSync, renameSync, chmodSync, symlinkSync, type Dirent, type Stats } from 'fs';
 import { tmpdir } from 'os';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomInt, randomUUID } from 'node:crypto';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import fse from 'fs-extra';
 import * as path from 'path';
@@ -146,6 +146,12 @@ const PD_CLI_VERIFICATION_TIMEOUT_MS = 30_000;
 const STORY_A_VERIFICATION_TIMEOUT_MS = 30_000;
 const CONSOLE_HEALTH_CHECK_TIMEOUT_MS = 8_000;
 const CONSOLE_WARMUP_TIME_MS = 6_000;
+// P0-2 (SPEC v1.2 §5 step 6): bounded exit-join windows for the verification
+// child — SIGTERM wait, then SIGKILL wait. Bounded so a wedged child can never
+// hang the install forever; the join RESULT (not a guess) decides whether
+// destructive directory operations may proceed.
+const CONSOLE_CHILD_GRACEFUL_EXIT_TIMEOUT_MS = 5_000;
+const CONSOLE_CHILD_KILL_EXIT_TIMEOUT_MS = 5_000;
 
 // 端口范围常量。PD_CONSOLE_PORT_BASE 允许在操作系统保留了大段端口
 // (如 Windows excludedportrange) 的机器上整体平移探测窗口；未设置时
@@ -1154,6 +1160,24 @@ export function migrateLegacyPdBackups(): void {
 }
 
 /**
+ * P0-3 (SPEC v1.2 §17 / PRI-1070 comment §2): backup step failed midway and
+ * the compensation (undo of the already-moved extension tree) ALSO failed —
+ * the installer is holding the moved backup paths so the failure handler can
+ * still restore them. Never silently dropped.
+ */
+export class BackupIntegrityError extends Error {
+  readonly extensionBackupDir: string | null;
+  readonly runtimeBackupDir: string | null;
+
+  constructor(message: string, extensionBackupDir: string | null, runtimeBackupDir: string | null) {
+    super(message);
+    this.name = 'BackupIntegrityError';
+    this.extensionBackupDir = extensionBackupDir;
+    this.runtimeBackupDir = runtimeBackupDir;
+  }
+}
+
+/**
  * Exported for real-filesystem tests (tests/backup-location.test.ts).
  */
 export function backupExistingInstall(host: HostTarget = 'openclaw'): BackupResult {
@@ -1170,9 +1194,13 @@ export function backupExistingInstall(host: HostTarget = 'openclaw'): BackupResu
   const timestamp = Date.now();
   const backupDir = hasExt ? path.join(backupsDir, `principles-disciple.backup.${timestamp}`) : null;
   const runtimeBackupDir = hasRuntime ? path.join(getPdRuntimeBackupsDir(), `runtime.backup.${timestamp}`) : null;
+  let extMoved = false;
   try {
     mkdirSync(backupsDir, { recursive: true });
-    if (backupDir) renameSync(extDir, backupDir);
+    if (backupDir) {
+      renameSync(extDir, backupDir);
+      extMoved = true;
+    }
     if (runtimeBackupDir) {
       mkdirSync(getPdRuntimeBackupsDir(), { recursive: true });
       renameSync(runtimeDir, runtimeBackupDir);
@@ -1180,30 +1208,132 @@ export function backupExistingInstall(host: HostTarget = 'openclaw'): BackupResu
     logger.info(`Backed up existing install to ${backupDir ?? runtimeBackupDir}`);
     return { type: 'backed_up', backupDir, runtimeBackupDir };
   } catch (e) {
+    // P0-3 (PRI-1070 comment §2): a PARTIAL backup (extension moved, runtime
+    // move failed) used to escape with no path information — the caller then
+    // ran restoreBackup(null, null), a no-op that silently stranded the moved
+    // extension tree. Compensate first: put the moved tree back. Only when
+    // even the compensation fails does the BackupIntegrityError carry the
+    // moved paths out for the failure handler.
+    if (extMoved && backupDir && existsSync(backupDir) && !existsSync(extDir)) {
+      try {
+        renameSync(backupDir, extDir);
+        extMoved = false;
+      } catch (undoError) {
+        throw new BackupIntegrityError(
+          `Could not backup existing install at ${extDir}: ${e instanceof Error ? e.message : String(e)}; compensation ALSO failed: ${undoError instanceof Error ? undoError.message : String(undoError)}. The moved extension backup is preserved at ${backupDir} — re-running the installer will restore it.`,
+          backupDir,
+          null,
+        );
+      }
+    }
     throw new Error(`Could not backup existing install at ${extDir}: ${e instanceof Error ? e.message : String(e)}. Aborting to prevent data loss — resolve the lock or rename manually and re-run.`, { cause: e });
   }
 }
 
-function restoreBackup(backupDir: string | null, runtimeBackupDir: string | null): { restored: boolean; error?: string } {
-  if ((!backupDir || !existsSync(backupDir)) && (!runtimeBackupDir || !existsSync(runtimeBackupDir))) return { restored: true };
+/** P0-3 (SPEC v1.2 §17): per-tree restore outcome — never one fuzzy boolean. */
+export interface TreeRestoreResult {
+  readonly tree: 'extension' | 'runtime';
+  readonly status: 'restored' | 'no_backup' | 'failed';
+  readonly detail?: string;
+  /** Directories that MUST be preserved for a later manual/automatic retry. */
+  readonly preservedDirs: readonly string[];
+}
+
+export interface RestoreBackupResult {
+  readonly restored: boolean;
+  readonly partial: boolean;
+  readonly extension?: TreeRestoreResult;
+  readonly runtime?: TreeRestoreResult;
+  readonly error?: string;
+}
+
+/**
+ * Restore ONE tree rename-aside (P0-3, PRI-1070; SPEC v1.2 §17):
+ *
+ *   1. live target exists → rename it aside to `<target>.restore-quarantine.<ts>`
+ *      (same-volume rename; NEVER a recursive delete — the R8 experiment
+ *      proved a live process's mapped .node makes rmSync die with EPERM
+ *      halfway through, while a directory rename succeeds).
+ *   2. rename the backup onto the target.
+ *   3. success → best-effort delete of the quarantine (residue is reported,
+ *      never fatal).
+ *   step 2 failure → try to rename the quarantine back (undo the aside);
+ *   if even that fails, BOTH the backup and the quarantine are reported in
+ *   `preservedDirs` and nothing was destroyed (I-2).
+ *
+ * Idempotent: once the backup has landed, a re-run sees `no_backup` and the
+ * already-restored tree stays in place.
+ */
+function restoreTreeAside(tree: 'extension' | 'runtime', backupDir: string | null, targetDir: string): TreeRestoreResult {
+  if (!backupDir || !existsSync(backupDir)) {
+    return { tree, status: 'no_backup', preservedDirs: [] };
+  }
+  let quarantine: string | null = null;
+  try {
+    if (existsSync(targetDir)) {
+      quarantine = `${targetDir}.restore-quarantine.${Date.now()}`;
+      renameSync(targetDir, quarantine);
+    }
+    renameSync(backupDir, targetDir);
+    let residue = '';
+    if (quarantine !== null) {
+      try {
+        rmSync(quarantine, { recursive: true, force: true });
+      } catch (e) {
+        residue = `; quarantine residue left at ${quarantine} (${e instanceof Error ? e.message : String(e)})`;
+      }
+    }
+    return { tree, status: 'restored', detail: residue.length > 0 ? `restored${residue}` : undefined, preservedDirs: [] };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    let undo = false;
+    if (quarantine !== null && existsSync(quarantine) && !existsSync(targetDir)) {
+      try {
+        renameSync(quarantine, targetDir);
+        undo = true;
+      } catch {
+        undo = false;
+      }
+    }
+    const preserved: string[] = [backupDir];
+    if (quarantine !== null && !undo) preserved.push(quarantine);
+    return {
+      tree,
+      status: 'failed',
+      detail: `restore failed: ${msg}; aside-undo=${undo ? 'ok (live tree back in place)' : 'failed'}`,
+      preservedDirs: preserved,
+    };
+  }
+}
+
+/**
+ * P0-3/P0-4: restore both trees with per-tree outcomes. `restored: true` only
+ * when every tree is genuinely back (or had no backup to apply). A partial
+ * restore is reported as such — never as success, never as rolled_back.
+ */
+export function restoreBackup(backupDir: string | null, runtimeBackupDir: string | null): RestoreBackupResult {
   const extDir = getPluginExtDir();
   const runtimeDir = getPdRuntimeDir();
-  try {
-    if (backupDir && existsSync(extDir)) {
-      rmSync(extDir, { recursive: true, force: true });
-    }
-    if (backupDir && existsSync(backupDir)) renameSync(backupDir, extDir);
-    if (runtimeBackupDir && existsSync(runtimeBackupDir)) {
-      if (existsSync(runtimeDir)) rmSync(runtimeDir, { recursive: true, force: true });
-      renameSync(runtimeBackupDir, runtimeDir);
-    }
+  const extension = backupDir !== null || runtimeBackupDir !== null
+    ? restoreTreeAside('extension', backupDir, extDir)
+    : { tree: 'extension' as const, status: 'no_backup' as const, preservedDirs: [] };
+  const runtime = backupDir !== null || runtimeBackupDir !== null
+    ? restoreTreeAside('runtime', runtimeBackupDir, runtimeDir)
+    : { tree: 'runtime' as const, status: 'no_backup' as const, preservedDirs: [] };
+  const restored = extension.status !== 'failed' && runtime.status !== 'failed';
+  const partial = !restored;
+  if (restored && (extension.status === 'restored' || runtime.status === 'restored')) {
     logger.info('Restored previous install from backup');
-    return { restored: true };
-  } catch (e) {
-    const msg = `Failed to restore backup: ${e instanceof Error ? e.message : String(e)}`;
-    logger.error(msg);
-    return { restored: false, error: msg };
+  } else if (partial) {
+    logger.error(`Partial restore: extension=${extension.status} runtime=${runtime.status}`);
   }
+  return {
+    restored,
+    partial,
+    extension,
+    runtime,
+    ...(partial ? { error: `extension=${extension.status}${extension.detail ? ` (${extension.detail})` : ''}; runtime=${runtime.status}${runtime.detail ? ` (${runtime.detail})` : ''}; preserved=${[...extension.preservedDirs, ...runtime.preservedDirs].join(', ') || 'none'}` } : {}),
+  };
 }
 
 /**
@@ -2877,12 +3007,146 @@ async function installConsoleDependencies(): Promise<void> {
 
 const CONSOLE_PORT_MAX_RETRIES = 3;
 
-async function verifyConsole(workspaceDir: string): Promise<{ ok: boolean; url: string; process: ChildProcess | null; reason?: string }> {
+// ─── PRI-1069 / PRI-1070 (G1, SPEC v1.2): child lifecycle + probe identity ───
+
+export interface ChildJoinResult {
+  readonly exited: boolean;
+  readonly exitCode: number | null;
+  readonly signal: string | null;
+  readonly timedOut: boolean;
+  readonly escalation: 'already_exited' | 'sigterm' | 'sigkill';
+}
+
+/**
+ * P0-2 (SPEC v1.2 §5 step 6 / invariant I-4): terminate a child and WAIT for
+ * its real exit event before anyone touches the directories it may hold.
+ *
+ * Discipline proven by the R8 Windows experiment (2026-11-02, real
+ * better-sqlite3 .node): subscribing to 'exit' AFTER the kill signal loses
+ * the event — the listener must be attached BEFORE the signal is sent.
+ * Graceful SIGTERM first, bounded wait, then SIGKILL, then a second bounded
+ * wait. If even that does not confirm exit, `exited: false` is returned and
+ * the caller MUST NOT perform destructive directory operations (defer to a
+ * recovery state instead).
+ */
+export async function terminateAndJoinChild(
+  child: ChildProcess,
+  options: { gracefulTimeoutMs?: number; killTimeoutMs?: number } = {},
+): Promise<ChildJoinResult> {
+  const gracefulTimeoutMs = options.gracefulTimeoutMs ?? CONSOLE_CHILD_GRACEFUL_EXIT_TIMEOUT_MS;
+  const killTimeoutMs = options.killTimeoutMs ?? CONSOLE_CHILD_KILL_EXIT_TIMEOUT_MS;
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return { exited: true, exitCode: child.exitCode, signal: child.signalCode, timedOut: false, escalation: 'already_exited' };
+  }
+  const joinExit = (ms: number): Promise<{ code: number | null; signal: string | null } | 'timeout'> =>
+    new Promise((resolve) => {
+      const timer = setTimeout(() => resolve('timeout'), ms);
+      child.once('exit', (code, signal) => {
+        clearTimeout(timer);
+        resolve({ code, signal });
+      });
+    });
+  try { child.kill('SIGTERM'); } catch { /* already gone — the join decides */ }
+  let joined = await joinExit(gracefulTimeoutMs);
+  if (joined !== 'timeout') {
+    return { exited: true, exitCode: joined.code, signal: joined.signal, timedOut: false, escalation: 'sigterm' };
+  }
+  try { child.kill('SIGKILL'); } catch { /* already gone — the join decides */ }
+  joined = await joinExit(killTimeoutMs);
+  if (joined !== 'timeout') {
+    return { exited: true, exitCode: joined.code, signal: joined.signal, timedOut: true, escalation: 'sigkill' };
+  }
+  return { exited: false, exitCode: null, signal: null, timedOut: true, escalation: 'sigkill' };
+}
+
+/** One probe attempt's diagnostics (SPEC v1.2 §14: attempt-level records;
+ * the nonce VALUE itself is never recorded — only the match outcome). */
+export interface ConsoleVerifyAttempt {
+  readonly port: number;
+  readonly pid: number | null;
+  readonly outcome:
+    | 'verified'
+    | 'identity_mismatch'
+    | 'http_error_status'
+    | 'bad_body'
+    | 'request_error'
+    | 'child_exited_early'
+    | 'join_failed';
+  readonly httpStatus?: number;
+  readonly exitCode?: number | null;
+  readonly signal?: string | null;
+  readonly stderrTail?: string;
+  readonly detail?: string;
+}
+
+export class ConsoleVerifyError extends Error {
+  readonly attempts: readonly ConsoleVerifyAttempt[];
+  readonly hadJoinFailure: boolean;
+
+  constructor(message: string, attempts: readonly ConsoleVerifyAttempt[]) {
+    super(message);
+    this.name = 'ConsoleVerifyError';
+    this.attempts = attempts;
+    this.hadJoinFailure = attempts.some((attempt) => attempt.outcome === 'join_failed');
+  }
+}
+
+/**
+ * PD Console health shape, bound to the posture we launched (rc-5: Object.hasOwn
+ * for untrusted keys).
+ *
+ * P1-B: `data.overall` is the PD-specific discriminative field — the generic
+ * { success: true } envelope alone matches any service. PRI-1054 review P2:
+ * `data.authenticationMode` must equal the launched posture, because that is the
+ * same fact `pd console open` refuses on (`console_authentication_mode_mismatch`).
+ * Without it the installer certified ANY healthy PD console on 3100..3119 as
+ * "the console I just launched", including a pre-existing no-auth one that
+ * `pd console open` had already refused to adopt.
+ *
+ * (Hoisted above the G1 P0-1 identity verifier — its first caller in file
+ * order — for no-use-before-define discipline; the autolaunch probe below
+ * shares this same shape contract.)
+ */
+function isLaunchedConsoleHealth(payload: unknown, expectedMode: 'authenticated' | 'no_auth'): boolean {
+  if (typeof payload !== 'object' || payload === null) return false;
+  if (!Object.hasOwn(payload, 'success') || Reflect.get(payload, 'success') !== true) return false;
+  if (!Object.hasOwn(payload, 'data')) return false;
+  const data = Reflect.get(payload, 'data');
+  if (typeof data !== 'object' || data === null) return false;
+  if (!Object.hasOwn(data, 'overall')) return false;
+  const overall = Reflect.get(data, 'overall');
+  if (overall !== 'healthy' && overall !== 'degraded' && overall !== 'error') return false;
+  if (!Object.hasOwn(data, 'authenticationMode')) return false;
+  return Reflect.get(data, 'authenticationMode') === expectedMode;
+}
+
+/** sendUnauthorized's envelope — the only responder worth offering the token to. */
+function isConsoleUnauthorizedEnvelope(payload: unknown): boolean {
+  if (typeof payload !== 'object' || payload === null) return false;
+  return Object.hasOwn(payload, 'success') && Reflect.get(payload, 'success') === false
+    && Object.hasOwn(payload, 'error') && Reflect.get(payload, 'error') === 'unauthorized';
+}
+
+/** P0-1 (SPEC v1.2 §7 / invariant I-3): the response must prove it came from
+ * THIS child — a one-shot nonce injected through the child env and echoed by
+ * /api/health. An old console, another local service, or a proxy returning
+ * 200+JSON cannot know the value, so they all fail closed here. The nonce
+ * value never enters logs or diagnostics. */
+function isVerifiedConsoleIdentity(payload: unknown, expectedNonce: string): boolean {
+  if (!isLaunchedConsoleHealth(payload, 'no_auth')) return false;
+  const data = Reflect.get(payload as object, 'data');
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) return false;
+  if (!Object.hasOwn(data, 'verifyNonce')) return false;
+  return Reflect.get(data, 'verifyNonce') === expectedNonce;
+}
+
+/** Exported for real-subprocess tests (tests/console-verify-identity.test.ts). */
+export async function verifyConsole(workspaceDir: string): Promise<{ ok: boolean; url: string; process: ChildProcess | null; attempts: readonly ConsoleVerifyAttempt[] }> {
   const consoleDest = getInstalledConsoleDir();
   const serverEntry = path.join(consoleDest, 'dist', 'server.js');
 
   if (!existsSync(serverEntry)) {
-    return { ok: false, url: '', process: null, reason: 'Console server entry not found' };
+    return { ok: false, url: '', process: null, attempts: [{ port: 0, pid: null, outcome: 'child_exited_early', detail: 'Console server entry not found' }] };
   }
 
   // EP-06 regression guard (PR #1169): verify the web UI bundle exists BEFORE
@@ -2891,14 +3155,14 @@ async function verifyConsole(workspaceDir: string): Promise<{ ok: boolean; url: 
   // for new users. npm install --ignore-scripts can remove dist/ in edge cases.
   const webIndex = path.join(consoleDest, 'dist', 'web', 'index.html');
   if (!existsSync(webIndex)) {
-    return { ok: false, url: '', process: null, reason: 'Console web UI (dist/web/index.html) not found — bundle may be corrupted or npm install removed dist/. Re-run: npx create-principles-disciple' };
+    return { ok: false, url: '', process: null, attempts: [{ port: 0, pid: null, outcome: 'child_exited_early', detail: 'Console web UI (dist/web/index.html) not found — bundle may be corrupted or npm install removed dist/.' }] };
   }
 
   // Build a shuffled port list to avoid retrying the same port
   const portRange: number[] = [];
   for (let p = CONSOLE_PORT_RANGE_MIN; p <= CONSOLE_PORT_RANGE_MAX; p++) portRange.push(p);
   for (let i = portRange.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = randomInt(i + 1);
     const a = portRange[i];
     const b = portRange[j];
     if (a === undefined || b === undefined) continue;
@@ -2907,9 +3171,15 @@ async function verifyConsole(workspaceDir: string): Promise<{ ok: boolean; url: 
   }
   const portsToTry = portRange.slice(0, CONSOLE_PORT_MAX_RETRIES);
 
-  let lastReason = '';
+  const attempts: ConsoleVerifyAttempt[] = [];
 
   for (const port of portsToTry) {
+    // P0-1: fresh one-shot nonce per attempt (SPEC v1.2 §14), injected via
+    // the parent env so the spawn below (env: { ...process.env }) passes it
+    // to the child. Never argv (visible in process listings), never logged.
+    // Cleared at every attempt exit below; attempts are strictly serial.
+    const nonce = randomUUID();
+    process.env.PD_CONSOLE_VERIFY_NONCE = nonce;
     const child = spawn(process.execPath, [serverEntry, '--workspace', workspaceDir, '--port', String(port), '--no-auth', '--host', '127.0.0.1'], {
       stdio: 'pipe',
       env: { ...process.env },
@@ -2918,32 +3188,33 @@ async function verifyConsole(workspaceDir: string): Promise<{ ok: boolean; url: 
 
     let childExited = false;
     let childExitCode: number | null = null;
+    let childExitSignal: string | null = null;
     let childStderr = '';
-    let childStdout = '';
-    child.on('exit', (code) => {
+    child.on('exit', (code, signal) => {
       childExited = true;
       childExitCode = code;
+      childExitSignal = signal;
     });
     child.stderr?.on('data', (chunk: Buffer) => {
-      childStderr += chunk.toString();
-    });
-    child.stdout?.on('data', (chunk: Buffer) => {
-      childStdout += chunk.toString();
+      if (childStderr.length < 4000) childStderr += chunk.toString();
     });
 
     await new Promise<void>((resolve) => { setTimeout(resolve, CONSOLE_WARMUP_TIME_MS); });
 
     if (childExited) {
-      lastReason = `Console process exited prematurely with code ${childExitCode} on port ${port}. Stderr: ${childStderr.slice(0, 500)}`;
+      delete process.env.PD_CONSOLE_VERIFY_NONCE;
+      attempts.push({ port, pid: child.pid ?? null, outcome: 'child_exited_early', exitCode: childExitCode, signal: childExitSignal, stderrTail: childStderr.slice(-300) });
       continue; // Try next port
     }
 
-    const url = `http://127.0.0.1:${port}`;
+    const healthUrl = new URL('/api/health', `http://127.0.0.1:${port}`);
     let ok = false;
     let reason = '';
+    let reasonKind: 'http_error_status' | 'bad_body' | 'request_error' | 'identity_mismatch' = 'bad_body';
+    let httpStatus: number | undefined;
     try {
       const result = await new Promise<{ statusCode: number; body: string }>((resolve, reject) => {
-        const req = http.get(`${url}/api/health`, (res) => {
+        const req = http.get(healthUrl, (res) => {
           const chunks: Buffer[] = [];
           res.on('data', (chunk: Buffer) => chunks.push(chunk));
           res.on('end', () => {
@@ -2953,42 +3224,71 @@ async function verifyConsole(workspaceDir: string): Promise<{ ok: boolean; url: 
         req.on('error', reject);
         req.setTimeout(CONSOLE_HEALTH_CHECK_TIMEOUT_MS, () => { req.destroy(); reject(new Error('health check timeout')); });
       });
+      httpStatus = result.statusCode;
 
       if (result.statusCode !== 200) {
-        reason = `Console /api/health returned HTTP ${result.statusCode} (expected 200)`;
+        // SPEC v1.2 §14: a 502 (or any non-200) is recorded as an observed
+        // fact with UNKNOWN attribution — we do NOT guess whether the
+        // responder was PD, a proxy, or another local service (PRI-1069).
+        reason = `Console /api/health returned HTTP ${result.statusCode} (expected 200); responder identity unknown`;
+        reasonKind = 'http_error_status';
       } else if (!result.body || result.body.trim().length === 0) {
         reason = 'Console /api/health returned empty body';
+        reasonKind = 'bad_body';
       } else {
         try {
           const parsed: unknown = JSON.parse(result.body);
           if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
             reason = 'Console /api/health returned non-object JSON';
+            reasonKind = 'bad_body';
+          } else if (!isVerifiedConsoleIdentity(parsed, nonce)) {
+            // P0-1 fail-closed: a 200 JSON object that cannot echo THIS
+            // attempt's nonce is some other responder (old console, foreign
+            // local service, proxy) — never "verified".
+            reason = 'Health responder did not prove this launch instance (nonce/shape mismatch) — rejected';
+            reasonKind = 'identity_mismatch';
           } else {
             ok = true;
           }
         } catch {
           reason = 'Console /api/health returned malformed JSON';
+          reasonKind = 'bad_body';
         }
       }
     } catch (e) {
-      reason = `Console health check failed on port ${port}: ${e instanceof Error ? e.message : String(e)}. Stderr: ${childStderr.slice(0, 300)}. Stdout: ${childStdout.slice(0, 300)}`;
+      reason = `Console health check failed on port ${port}: ${e instanceof Error ? e.message : String(e)}. Stderr: ${childStderr.slice(-300)}`;
+      reasonKind = 'request_error';
     }
 
     if (!ok) {
-      try { child.kill('SIGTERM'); } catch { /* ignore */ }
-      try {
-        if (!childExited) {
-          child.kill('SIGKILL');
-        }
-      } catch { /* ignore */ }
-      lastReason = reason;
+      // P0-2: bounded terminate + REAL exit join before moving on; the child
+      // may hold native-module handles inside the runtime tree a later
+      // restore would rename/delete (R8: a mapped .node kills rmSync with
+      // EPERM, while a same-volume directory rename survives).
+      const join = await terminateAndJoinChild(child);
+      delete process.env.PD_CONSOLE_VERIFY_NONCE;
+      const outcome: ConsoleVerifyAttempt['outcome'] = join.exited ? reasonKind : 'join_failed';
+      attempts.push({
+        port,
+        pid: child.pid ?? null,
+        outcome,
+        httpStatus,
+        exitCode: join.exitCode,
+        signal: join.signal,
+        stderrTail: childStderr.slice(-300),
+        ...(join.exited
+          ? (reason.length > 0 ? { detail: reason } : {})
+          : { detail: `${reason}; child NOT confirmed exited after SIGKILL — destructive operations must be deferred` }),
+      });
       continue; // Try next port
     }
 
-    return { ok: true, url, process: child };
+    delete process.env.PD_CONSOLE_VERIFY_NONCE;
+    attempts.push({ port, pid: child.pid ?? null, outcome: 'verified', httpStatus: 200 });
+    return { ok: true, url: healthUrl.toString(), process: child, attempts };
   }
 
-  return { ok: false, url: '', process: null, reason: `All ${CONSOLE_PORT_MAX_RETRIES} port attempts failed. Last: ${lastReason}` };
+  return { ok: false, url: '', process: null, attempts };
 }
 
 // ─── Task 8: auto-launch console at end of successful install ────────────────
@@ -3057,38 +3357,6 @@ function requestConsoleHealth(
     req.on('error', () => resolve(null));
     req.setTimeout(timeoutMs, () => { req.destroy(); resolve(null); });
   });
-}
-
-/**
- * PD Console health shape, bound to the posture we launched (rc-5: Object.hasOwn
- * for untrusted keys).
- *
- * P1-B: `data.overall` is the PD-specific discriminative field — the generic
- * { success: true } envelope alone matches any service. PRI-1054 review P2:
- * `data.authenticationMode` must equal the launched posture, because that is the
- * same fact `pd console open` refuses on (`console_authentication_mode_mismatch`).
- * Without it the installer certified ANY healthy PD console on 3100..3119 as
- * "the console I just launched", including a pre-existing no-auth one that
- * `pd console open` had already refused to adopt.
- */
-function isLaunchedConsoleHealth(payload: unknown, expectedMode: 'authenticated' | 'no_auth'): boolean {
-  if (typeof payload !== 'object' || payload === null) return false;
-  if (!Object.hasOwn(payload, 'success') || Reflect.get(payload, 'success') !== true) return false;
-  if (!Object.hasOwn(payload, 'data')) return false;
-  const data = Reflect.get(payload, 'data');
-  if (typeof data !== 'object' || data === null) return false;
-  if (!Object.hasOwn(data, 'overall')) return false;
-  const overall = Reflect.get(data, 'overall');
-  if (overall !== 'healthy' && overall !== 'degraded' && overall !== 'error') return false;
-  if (!Object.hasOwn(data, 'authenticationMode')) return false;
-  return Reflect.get(data, 'authenticationMode') === expectedMode;
-}
-
-/** sendUnauthorized's envelope — the only responder worth offering the token to. */
-function isConsoleUnauthorizedEnvelope(payload: unknown): boolean {
-  if (typeof payload !== 'object' || payload === null) return false;
-  return Object.hasOwn(payload, 'success') && Reflect.get(payload, 'success') === false
-    && Object.hasOwn(payload, 'error') && Reflect.get(payload, 'error') === 'unauthorized';
 }
 
 /**
@@ -3984,12 +4252,18 @@ export async function install(
   // the caller receives (a finally block cannot rewrite an inline return).
   let pendingResult: InstallResult | undefined;
 
-  const killConsoleChild = () => {
-    if (consoleProcess) {
-      try { consoleProcess.kill('SIGTERM'); } catch { /* ignore */ }
-      try { consoleProcess.kill('SIGKILL'); } catch { /* ignore */ }
-      consoleProcess = null;
+  // P0-2: bounded terminate + exit join. The join result decides whether
+  // destructive directory operations may proceed — an unconfirmed child may
+  // hold native-module handles inside the runtime tree (R8 experiment).
+  const killConsoleChild = async (): Promise<ChildJoinResult | null> => {
+    if (!consoleProcess) return null;
+    const child = consoleProcess;
+    consoleProcess = null;
+    const join = await terminateAndJoinChild(child);
+    if (!join.exited) {
+      logger.error(`Console child (pid=${child.pid ?? '?'}) could not be confirmed exited after SIGKILL (graceful ${CONSOLE_CHILD_GRACEFUL_EXIT_TIMEOUT_MS}ms + kill ${CONSOLE_CHILD_KILL_EXIT_TIMEOUT_MS}ms)`);
     }
+    return join;
   };
 
   try {
@@ -4181,7 +4455,15 @@ export async function install(
       components.consoleEntrypoint = consoleVerify.url;
       consoleProcess = consoleVerify.process;
     } else {
-      throw new Error(`Console verification failed: ${consoleVerify.reason ?? 'unknown'}. Installation rolled back — plugin and CLI are not activated.`);
+      // SPEC v1.2 §14: attempt-level diagnostics travel with the failure so
+      // the journal records every port/PID/status/identity outcome.
+      const attemptsSummary = consoleVerify.attempts
+        .map((a) => `port=${a.port} pid=${a.pid ?? '?'} outcome=${a.outcome}${a.httpStatus !== undefined ? ` http=${a.httpStatus}` : ''}${a.stderrTail ? ` stderr="${a.stderrTail.slice(-160)}"` : ''}`)
+        .join(' | ');
+      throw new ConsoleVerifyError(
+        `Console verification failed: all ${CONSOLE_PORT_MAX_RETRIES} port attempts failed (${attemptsSummary}). Installation rolled back — plugin and CLI are not activated.`,
+        consoleVerify.attempts,
+      );
     }
     stepIndex++;
     // ADR-0024 D-2: the console probe passed — the staged installation is live.
@@ -4384,7 +4666,10 @@ export async function install(
       spinner.succeed('Install complete!');
     }
 
-    killConsoleChild();
+    // P0-2: terminate + join the verified child before any later step that
+    // may touch the runtime tree (here: none destructive, but a wedged child
+    // must not leak past the install either).
+    await killConsoleChild();
 
     // Task 8: auto-launch console via `pd console open` (reuses PRI-300
     // handleConsoleOpen — no new launcher subsystem). Opens the browser to
@@ -4439,7 +4724,11 @@ export async function install(
   } catch (error) {
     if (spinner) spinner.fail('Install failed');
 
-    killConsoleChild();
+    // P0-2: terminate + join the child BEFORE any restore attempt. An
+    // unconfirmed child may hold native-module handles inside the runtime
+    // tree; restoring under it is exactly the PRI-1069 failure mode (EPERM
+    // mid-delete, half-restored runtime).
+    const childJoin = await killConsoleChild();
 
     // ADR-0024 D-2: record the outcome (journal may be null when the throw
     // happened before the transaction was planned — zero side effects then).
@@ -4447,15 +4736,46 @@ export async function install(
     // file must end at exactly one terminal state (the strict reader rejects
     // any transition after a terminal one), so the outcome is either-or:
     // - backup restored (a real rollback happened) → `rolled_back`
-    // - no backup existed (mutation never started) or restore failed → `failed`
+    // - no backup existed (mutation never started), restore failed, or
+    //   restore deferred (child unconfirmed) → `failed`
     const errorMsgRaw = error instanceof Error ? error.message : String(error);
-    const restoreResult = restoreBackup(backupDir, runtimeBackupDir);
+    const childUnconfirmed = childJoin !== null && !childJoin.exited;
+    const probeHadJoinFailure = error instanceof ConsoleVerifyError && error.hadJoinFailure;
+    let restoreResult: RestoreBackupResult;
+    let restoreDeferred = false;
+    if (childUnconfirmed || probeHadJoinFailure) {
+      // I-4 (SPEC v1.2 §17): an unconfirmed probe child forbids destructive
+      // directory operations. Keep everything on disk; surface a machine-
+      // readable marker the recovery scan (P0-4) will NOT skip.
+      restoreDeferred = true;
+      restoreResult = {
+        restored: false,
+        partial: true,
+        error: `child (pid=${childJoin && !childJoin.exited ? 'unconfirmed' : 'probe-child'}) not confirmed exited; destructive restore deferred`,
+      };
+    } else if (error instanceof BackupIntegrityError) {
+      // P0-3: the backup step itself failed midway and its compensation also
+      // failed — restore from the paths the error carries.
+      restoreResult = restoreBackup(error.extensionBackupDir ?? backupDir, error.runtimeBackupDir ?? runtimeBackupDir);
+    } else {
+      restoreResult = restoreBackup(backupDir, runtimeBackupDir);
+    }
     if (journal) {
-      const restoreFailed = Boolean(backupDir || runtimeBackupDir) && !restoreResult.restored;
-      const detail = restoreFailed
-        ? `${errorMsgRaw}; backup restore FAILED: ${restoreResult.error ?? 'unknown'}`
-        : errorMsgRaw;
-      if ((backupDir || runtimeBackupDir) && restoreResult.restored) {
+      const hadBackup = Boolean(backupDir || runtimeBackupDir) || error instanceof BackupIntegrityError;
+      const restoreFailed = hadBackup && !restoreResult.restored;
+      let detail: string;
+      if (restoreDeferred) {
+        detail = `restore_deferred: ${restoreResult.error ?? 'child not confirmed exited'}; backups and live trees preserved at extension=${backupDir ?? '-'} runtime=${runtimeBackupDir ?? '-'}; close the reported processes and re-run the installer to retry recovery`;
+      } else if (restoreFailed) {
+        // P0-4: machine-readable marker prefix — the recovery list (Console
+        // recoveryStatus) must surface terminal-failed transactions whose
+        // PHYSICAL install was left inconsistent instead of skipping them.
+        const preserved = [...(restoreResult.extension?.preservedDirs ?? []), ...(restoreResult.runtime?.preservedDirs ?? [])];
+        detail = `restore_incomplete: ${restoreResult.error ?? 'unknown'}; preserved=[${preserved.join(', ')}]; extension=${restoreResult.extension?.status ?? 'n/a'} runtime=${restoreResult.runtime?.status ?? 'n/a'}; re-run the installer to retry recovery`;
+      } else {
+        detail = errorMsgRaw;
+      }
+      if (!restoreDeferred && !restoreFailed && hadBackup && restoreResult.restored) {
         journalInstallerTransitionDegrading(journal, journal.lastState, 'rolled_back', detail);
       } else {
         journalInstallerTransitionDegrading(journal, journal.lastState, 'failed', detail);
@@ -4471,7 +4791,9 @@ export async function install(
     const isLockError = /EPERM|EBUSY|EACCES|operation not permitted/i.test(errorMsg);
     const extDir = getPluginExtDir();
     // EP-11: all operator-visible failure/rollback text goes through t().
-    const hasBackup = Boolean(backupDir || runtimeBackupDir);
+    // P0-3: a BackupIntegrityError means a tree IS displaced into a backup
+    // location even though the local variables are still null — count it.
+    const hasBackup = Boolean(backupDir || runtimeBackupDir) || error instanceof BackupIntegrityError;
     // CP-6 (2026-09-05 investigation, E-003/E-014): a FRESH install (no
     // pre-existing install → no backup) that failed mid-deployment used to
     // leave ~/.pd/runtime and the extension copy fully populated while the

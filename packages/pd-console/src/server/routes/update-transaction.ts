@@ -20,6 +20,18 @@ type LayoutModule = typeof updateSurfaceModule;
  * pattern doubles as the path-traversal guard for the journal file name (rc-1). */
 const TRANSACTION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 
+/**
+ * PRI-1069/1070 (G1 P0-4, SPEC v1.2 §17): machine-readable markers the
+ * installer prefixes to a terminal `failed` detail when the PHYSICAL install
+ * was left inconsistent — `restore_incomplete:` (a restore ran but a tree did
+ * not land / could not be proven back) or `restore_deferred:` (destructive
+ * restore withheld because a child process could not be confirmed exited).
+ * Such transactions used to be skipped by the `terminal` fast-path below,
+ * which is exactly how a half-restored runtime stayed invisible to the
+ * Owner (the PRI-1069 field report).
+ */
+const RESTORE_INCONSISTENCY_MARKER = /restore_(incomplete|deferred):/;
+
 interface JournalFact {
   readonly transactionId: string;
   readonly exists: boolean;
@@ -124,6 +136,10 @@ async function recoveryStatus(res: ServerResponse): Promise<void> {
   const unfinished: JournalFact[] = [];
   const superseded: { transactionId: string; reason: string }[] = [];
   const broken: { transactionId: string; reason: string }[] = [];
+  // P0-4: terminal `failed` transactions whose detail carries a restore
+  // inconsistency marker — the install on disk is NOT what the terminal state
+  // implies. They must stay visible in the recovery list.
+  const recoveryRequired: { transactionId: string; reason: string }[] = [];
   // PRI-896: a non-terminal journal is only an ALARM if the product's own
   // recovery decision cannot explain it away. The live release record is the
   // evidence for that, so a missing/corrupt active record means NO evidence —
@@ -149,7 +165,20 @@ async function recoveryStatus(res: ServerResponse): Promise<void> {
     try {
       const read = journal.readTransactionJournalForRecovery(path.join(paths.transactionsDir, entry.name));
       const fact = factFromTransitions(journal, transactionId, read);
-      if (fact.terminal) continue;
+      if (fact.terminal) {
+        // P0-4: terminal facts are normally closed history — EXCEPT a
+        // `failed` whose detail says the physical restore did not (or could
+        // not) complete. That combination is a live recovery need hiding
+        // behind a terminal state; skipping it is how PRI-1069 stayed
+        // invisible. rc-9: reported with its own bucket, never dropped.
+        const lastDetail = fact.transitions.length > 0
+          ? (fact.transitions[fact.transitions.length - 1]?.detail ?? '')
+          : '';
+        if (fact.lastState === 'failed' && RESTORE_INCONSISTENCY_MARKER.test(lastDetail)) {
+          recoveryRequired.push({ transactionId, reason: lastDetail.slice(0, 400) });
+        }
+        continue;
+      }
       const outcome = journal.recoverUnfinishedTransaction({
         transitions: read.transitions,
         activeRecord,
@@ -169,10 +198,11 @@ async function recoveryStatus(res: ServerResponse): Promise<void> {
   }
   unfinished.sort((a, b) => (b.lastAt ?? '').localeCompare(a.lastAt ?? ''));
   sendSuccess(res, {
-    needsRecovery: unfinished.length > 0 || broken.length > 0,
+    needsRecovery: unfinished.length > 0 || broken.length > 0 || recoveryRequired.length > 0,
     unfinished,
     superseded,
     broken,
+    recoveryRequired,
     // rc-9: when the active record could not be read, the recovery decision had
     // no live-release evidence, so every non-terminal journal is conservatively
     // treated as an alarm. Surfacing this explains WHY the alarm persists and
@@ -183,7 +213,9 @@ async function recoveryStatus(res: ServerResponse): Promise<void> {
       ? activeRecordUnreadable
         ? 'The active release record (active.json) could not be read, so no transaction can be proven superseded and every unfinished one is reported. Repair active.json (re-run the official installer recovery), then re-check recovery before starting a new update.'
         : 'An update transaction did not reach a terminal state. Review its phase, then continue, roll back, or repair through the official installer before starting a new update.'
-      : undefined,
+      : recoveryRequired.length > 0
+        ? 'A completed-but-failed update left the physical installation inconsistent (restore incomplete or deferred). Close any running PD processes, then re-run the official installer to retry recovery before starting a new update.'
+        : undefined,
   });
 }
 
