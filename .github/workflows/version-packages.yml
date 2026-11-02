@@ -33,6 +33,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - name: Require main ref
+        # PRI-1014: a workflow_dispatch from a feature branch would materialize
+        # unpublished code as a Version PR. Push events are already main-only.
+        run: test "${GITHUB_REF}" = "refs/heads/main" || { echo "::error::dispatch must run on refs/heads/main"; exit 1; }
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
           # The action pushes with its own github-token; the checkout
@@ -40,15 +45,6 @@ jobs:
           persist-credentials: false
           # Cohort detection may need first-parent history.
           fetch-depth: 100
-
-      - name: Fetch existing Version PR branch
-        # PRI-1014: changesets/action does `git checkout changeset-release/main`
-        # before materializing. If that ref is absent, it creates a branch from
-        # main and then its ref update is rejected when the Version PR branch
-        # already exists. The script fetches ONLY this bot branch and tolerates
-        # its absence (normal after a Version PR merge), leaving ordinary
-        # checkouts and PR flows untouched.
-        run: node scripts/release/fetch-version-pr-branch.mjs
 
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
@@ -84,10 +80,12 @@ jobs:
           # PD owns tags/releases in the publish train (SPEC §16/§25/§26).
           create-github-releases: false
           push-git-tags: false
-          # PRI-1014: the GitHub API force-update path returned
-          # "Reference cannot be updated" once the Version PR branch tip had
-          # diverged from main. The action's Git CLI push path is the supported
-          # way to rebuild that bot branch; it uses the same github-token below.
+          # PRI-1014: GitHub's API ref update cannot update the bot branch once
+          # its tip has diverged from main ("Reference cannot be updated"). The
+          # action's Git CLI push path rebuilds and force-pushes that branch
+          # instead, using the github-token below. Do NOT pre-create a local
+          # changeset-release/main: `prepareBranch` would see a normal
+          # "Switched to branch" and then fail on `checkout -b` (exit 128).
           push-with-git-cli: true
           # Manual workflow_dispatch must never inherit the operator's current
           # branch as the PR base; the Version PR always targets main.

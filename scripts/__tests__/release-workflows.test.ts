@@ -330,13 +330,34 @@ describe('version-packages.yml — rolling Version PR automation', () => {
     expect(onBlock).not.toHaveProperty('pull_request');
   });
 
-  it('fetches the existing Version PR branch before the action runs', () => {
+  it('never pre-creates changeset-release/main as a LOCAL branch before the action (P0)', () => {
     const t = text();
-    // The executable fetch logic (existing branch and absent branch) is
-    // covered against a real git remote in fetch-version-pr-branch.test.ts.
-    // This pins that the workflow actually runs that script before the action.
-    expect(t).toContain('node scripts/release/fetch-version-pr-branch.mjs');
-    expect(t.indexOf('fetch-version-pr-branch.mjs')).toBeLessThan(t.indexOf('changesets/action@'));
+    // changesets/action v2.1.2 `prepareBranch` runs:
+    //   git checkout <branch>
+    //   if stderr lacks "Switched to a new branch <branch>": git checkout -b
+    //   git reset --hard context.sha
+    // A pre-existing LOCAL branch makes the first checkout print
+    // "Switched to branch", so the action runs `checkout -b` and dies with
+    // "a branch named ... already exists" (exit 128). Fetching the branch into
+    // refs/heads is therefore worse than not fetching it at all; the action
+    // recreates the branch and the CLI force push below replaces its content.
+    // Adding a local-branch fetch step back MUST turn this test red.
+    expect(t).not.toContain('git fetch');
+    expect(t).not.toContain('fetch-version-pr-branch.mjs');
+    expect(t).not.toContain('refs/heads/changeset-release/main');
+    const doc = loadWorkflow(rel) as {
+      jobs?: Record<string, { steps?: Array<{ name?: string }> }>;
+    };
+    const steps = doc.jobs?.version?.steps ?? [];
+    expect(steps.some((step) => step.name === 'Fetch existing Version PR branch')).toBe(false);
+  });
+
+  it('requires workflow_dispatch to run on refs/heads/main', () => {
+    const t = text();
+    // A feature-branch dispatch would materialize unpublished code as a
+    // Version PR. The hard gate fails before checkout.
+    expect(t).toContain('test "${GITHUB_REF}" = "refs/heads/main"');
+    expect(t).toContain('dispatch must run on refs/heads/main');
   });
 
   it('uses the action Git CLI push path and an explicit main PR base (PRI-1014)', () => {
