@@ -134,3 +134,40 @@ describe('G4-6: release manifest integrity', () => {
     expect(SERVER_VERSION).toBe(pkg.version);
   });
 });
+
+describe('G4-7: one launcher, three payloads (SPEC §3.3)', () => {
+  const CANONICAL = path.join(REPO_ROOT, 'plugins', 'principles-disciple', 'mcp', 'launcher.cjs');
+  const COPIES = [
+    path.join(REPO_ROOT, 'packages', 'workbuddy-adapter', 'plugin', 'mcp', 'launcher.cjs'),
+    path.join(REPO_ROOT, 'packages', 'openclaw-plugin', 'mcp', 'launcher.cjs'),
+  ];
+
+  it('the canonical launcher ships in the Codex plugin payload', () => {
+    expect(fs.existsSync(CANONICAL)).toBe(true);
+  });
+
+  it('every host payload carries a byte-identical launcher copy', () => {
+    const canonical = fs.readFileSync(CANONICAL, 'utf8');
+    for (const copy of COPIES) {
+      expect(fs.existsSync(copy), `${copy} must exist`).toBe(true);
+      expect(fs.readFileSync(copy, 'utf8'), `${copy} must be byte-identical to the canonical launcher`).toBe(canonical);
+    }
+  });
+
+  it('the Codex plugin declares its .mcp.json via the manifest mcpServers path form', () => {
+    const manifest = readJson(path.join(REPO_ROOT, 'plugins', 'principles-disciple', '.codex-plugin', 'plugin.json'));
+    expect(manifest.mcpServers).toBe('./.mcp.json');
+    const mcpJson = readJson(path.join(REPO_ROOT, 'plugins', 'principles-disciple', '.mcp.json'));
+    const server = (mcpJson.mcpServers as Record<string, { command: string; args: string[]; cwd: string }>)['pd-recall'];
+    expect(server?.command).toBe('node');
+    expect(server?.args).toEqual(['./mcp/launcher.cjs']);
+    expect(server?.cwd).toBe('.');
+  });
+
+  it('the launcher contains no machine-specific absolute paths (static payload)', () => {
+    const canonical = fs.readFileSync(CANONICAL, 'utf8');
+    expect(canonical).not.toMatch(/[A-Z]:\\\\/);
+    expect(canonical).not.toContain('USERPROFILE');
+    expect(canonical).not.toContain('process.cwd()');
+  });
+});

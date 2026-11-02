@@ -27,11 +27,15 @@ function fixture(extraEnv: Record<string, string> = {}) {
   const adapter = path.join(runtime, 'node_modules', '@principles', 'codex-adapter', 'dist');
   fs.mkdirSync(adapter, { recursive: true });
   fs.writeFileSync(path.join(adapter, 'pd-hook.js'), '');
-  const pins = JSON.parse(fs.readFileSync(path.join(repo, 'plugins', 'principles-disciple', 'runtime-version.json'), 'utf8')) as { codexAdapter: string; hostRuntime: string; core: string };
+  // The MCP server entry the launcher binding points at must exist as a file.
+  const mcpEntry = path.join(runtime, 'node_modules', '@principles', 'pd-mcp-server', 'dist', 'index.js');
+  fs.mkdirSync(path.dirname(mcpEntry), { recursive: true });
+  fs.writeFileSync(mcpEntry, '// fabricated entry for the registration fixture\n');
+  const pins = JSON.parse(fs.readFileSync(path.join(repo, 'plugins', 'principles-disciple', 'runtime-version.json'), 'utf8')) as { codexAdapter: string; hostRuntime: string; core: string; mcpServer: string };
   // PRI-1046: setup verifies the installed manifests, not only the adapter entry,
   // so the fixture must fabricate the bytes a genuinely satisfied pin leaves
   // behind. The marker alone is no longer enough to short-circuit the install.
-  for (const [name, version] of [['codex-adapter', pins.codexAdapter], ['host-runtime', pins.hostRuntime], ['core', pins.core]] as const) {
+  for (const [name, version] of [['codex-adapter', pins.codexAdapter], ['host-runtime', pins.hostRuntime], ['core', pins.core], ['pd-mcp-server', pins.mcpServer]] as const) {
     const packageDir = path.join(runtime, 'node_modules', '@principles', name);
     fs.mkdirSync(packageDir, { recursive: true });
     fs.writeFileSync(path.join(packageDir, 'package.json'), JSON.stringify({ name: `@principles/${name}`, version }));

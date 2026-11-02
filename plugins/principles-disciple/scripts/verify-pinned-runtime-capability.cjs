@@ -73,7 +73,7 @@ function readPins(pluginRoot) {
   } catch (error) {
     fail('runtime_version_file_invalid:' + String(error && error.message).slice(0, 160), 'run from a plugin checkout that contains runtime-version.json');
   }
-  for (const key of ['codexAdapter', 'hostRuntime', 'core']) {
+  for (const key of ['codexAdapter', 'hostRuntime', 'core', 'mcpServer']) {
     if (typeof pins[key] !== 'string' || pins[key].length === 0) {
       fail('runtime_version_file_invalid:missing_' + key, 'repair runtime-version.json before probing');
     }
@@ -84,7 +84,7 @@ function readPins(pluginRoot) {
 function installPinnedRuntime(pins) {
   // Pin values come from our own runtime-version.json — enforce a strict
   // version-token shape anyway, so shell assembly below can never be abused.
-  for (const key of ['codexAdapter', 'hostRuntime', 'core']) {
+  for (const key of ['codexAdapter', 'hostRuntime', 'core', 'mcpServer']) {
     if (!/^[A-Za-z0-9.+-]+$/.test(pins[key])) {
       fail('runtime_version_file_invalid:bad_token:' + key, 'pin versions must be plain semver tokens');
     }
@@ -94,7 +94,8 @@ function installPinnedRuntime(pins) {
   const command = 'npm install --no-audit --no-fund --loglevel=error --omit=dev '
     + '@principles/codex-adapter@' + pins.codexAdapter
     + ' @principles/host-runtime@' + pins.hostRuntime
-    + ' @principles/core@' + pins.core;
+    + ' @principles/core@' + pins.core
+    + ' @principles/pd-mcp-server@' + pins.mcpServer;
   const install = spawnSync(command, { cwd: runtimeDir, encoding: 'utf8', timeout: 300_000, shell: true, windowsHide: true });
   if (install.status !== 0) {
     fail('probe_runtime_install_failed:' + String(install.stderr || install.stdout || '').slice(0, 300).replace(/\s+/g, ' '), 'check network/npm access, or whether the pinned versions are published');
