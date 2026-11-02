@@ -164,12 +164,17 @@ function stringOrUndefined(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
-/** Bounded episode/effect/outcome sample summary from the payload (untrusted). */
+/**
+ * Bounded episode/effect/outcome sample summary from the payload (untrusted).
+ * Shortened by CODE POINTS — a UTF-16 slice can split a surrogate pair and
+ * render U+FFFD in the Owner-facing panel (EP-11).
+ */
 function recordSummary(payload: unknown): string {
   if (!isRecord(payload)) return '';
   const candidate = payload.observationSummary ?? payload.actionSummary ?? payload.feedbackText ?? payload.resultSummary;
   const text = typeof candidate === 'string' ? candidate : '';
-  return text.length > 160 ? `${text.slice(0, 157)}…` : text;
+  const codePoints = Array.from(text);
+  return codePoints.length > 160 ? `${codePoints.slice(0, 157).join('')}…` : text;
 }
 
 export class ExaminerEvidenceModel {

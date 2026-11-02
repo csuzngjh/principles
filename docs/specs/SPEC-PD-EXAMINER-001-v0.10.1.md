@@ -2,7 +2,7 @@
 ## Owner-controlled Behavioral Evaluation Workflow
 
 **版本：** v0.10.1  
-**状态：** IMPLEMENTING — Owner 自主执行授权（FULL AUTONOMOUS MANDATE 2026-11-03）；实现范围以 §Owner Decision 的默认允许清单为界（离线实现 / 真实浏览器验收 / 只读生产 Evidence；真实模型调用与真实宿主实验保持拒绝，直至另行授权）  
+**状态：** READY_FOR_OWNER_REVIEW — 自主实施已完成（2026-11-03，见 docs/reports/EXAMINER_V0101_END_TO_END_ACCEPTANCE.md 与 EXAMINER_V0101_FINAL_DELIVERY.md）；F2 集成+Dry-run 完成、真实模型调用与真实宿主实验保持零调用直至另行授权  
 **日期：** 2026-11-03  
 **源码基线：** `main@9a2bd5efbdfeea5c01468f1beff5f86e4078c3ae`（v0.9 已随 PR #2257 于 2026-11-01 合并）  
 **前置版本：** SPEC-PD-EXAMINER-001 v0.9 / v0.10  
