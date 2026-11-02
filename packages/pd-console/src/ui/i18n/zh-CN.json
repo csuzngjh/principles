@@ -1827,6 +1827,8 @@
       "reasonLabel": "原因：",
       "recoveryBanner": "检测到未完成的更新事务",
       "recoveryItem": "事务 {{id}} 停留在阶段「{{phase}}」",
+      "recoveryRequiredBanner": "一次失败的更新使安装处于不一致状态（需要恢复）",
+      "recoveryRequiredItem": "失败事务 {{id}} 需要恢复——请重新运行官方安装器",
       "inProgressToast": "更新事务已受理，正在后台执行；请勿重复点击。",
       "inProgressPanel": "更新进行中",
       "inProgressPhase": "当前阶段：{{phase}}",

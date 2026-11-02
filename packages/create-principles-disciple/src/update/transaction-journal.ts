@@ -13,8 +13,8 @@
  * or an explicit safe refusal — never a hybrid.
  */
 
-import { appendFileSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { appendFileSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { writeRecordAtomically } from './atomic-file.js';
 
 export const TRANSACTION_STATES = [
@@ -496,5 +496,104 @@ export function recoverUnfinishedTransaction(input: {
     reason: 'activation_interrupted_without_previous',
     nextAction: 'Activation was interrupted before any confirmed generation existed. Re-run the official installer to install a complete release.',
   };
+}
+
+/**
+ * PRI-1069/1070 (G1 P0-4, SPEC v1.2 §17): machine-readable detail prefixes the
+ * installer writes on a terminal `failed` when the PHYSICAL install was left
+ * inconsistent — `restore_incomplete:` (a restore ran but a tree did not land
+ * or could not be proven back), `restore_deferred:` (destructive restore
+ * withheld because a child process could not be confirmed exited), or
+ * `install_residue:` (fresh-install cleanup could not remove everything this
+ * run deployed). Recovery surfaces must NOT skip such transactions merely
+ * because their journal is terminal — that wholesale skip is how the
+ * PRI-1069 half-restored runtime stayed invisible.
+ */
+export const RESTORE_INCONSISTENCY_MARKER = /restore_(incomplete|deferred):|install_residue:/;
+
+/**
+ * The sidecar that marks a recovery-pending failed transaction as RESOLVED.
+ * Journals are append-only and end at exactly one terminal state, so recovery
+ * completion cannot be written into the old journal file; a separate record
+ * keyed by the recovered transaction id is the smallest auditable fact.
+ */
+export interface RecoveryResolution {
+  readonly schemaVersion: 1;
+  /** The failed transaction this record closes out. */
+  readonly resolvedTransactionId: string;
+  /** The install/transaction that physically restored (or superseded) it. */
+  readonly resolvedByTransactionId: string;
+  readonly resolvedAt: string;
+}
+
+function recoveryResolutionPath(transactionsDir: string, transactionId: string): string {
+  return join(transactionsDir, `${transactionId}.recovered.json`);
+}
+
+/** True when a resolution record exists for the given failed transaction. */
+export function hasRecoveryResolution(transactionsDir: string, transactionId: string): boolean {
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(transactionId)) return false;
+  return existsSync(recoveryResolutionPath(transactionsDir, transactionId));
+}
+
+/**
+ * Records that a recovery-pending failed transaction has been physically
+ * recovered by a later completed install. Written ONLY after that install
+ * journaled `confirmed` — never speculatively (the alarm must persist until
+ * real physical recovery evidence exists).
+ */
+export function writeRecoveryResolution(
+  transactionsDir: string,
+  input: { resolvedTransactionId: string; resolvedByTransactionId: string },
+): void {
+  for (const id of [input.resolvedTransactionId, input.resolvedByTransactionId]) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(id)) {
+      throw new TransactionJournalError('journal_field_invalid', `Recovery resolution: invalid transaction id ${JSON.stringify(id)}.`);
+    }
+  }
+  const record: RecoveryResolution = {
+    schemaVersion: 1,
+    resolvedTransactionId: input.resolvedTransactionId,
+    resolvedByTransactionId: input.resolvedByTransactionId,
+    resolvedAt: new Date().toISOString(),
+  };
+  writeRecordAtomically(recoveryResolutionPath(transactionsDir, input.resolvedTransactionId), `${JSON.stringify(record, null, 2)}\n`);
+}
+
+/**
+ * Scans the transactions directory (read-only) for terminal `failed` journals
+ * whose final detail carries a restore-inconsistency marker and that have no
+ * resolution record yet — the exact set recovery surfaces must keep visible
+ * and the set a recovering install must NOT prune backups against.
+ * Unreadable journals are skipped (the strict reader can reject torn or
+ * corrupt files; those are already reported by the recovery surfaces).
+ */
+export function findRecoveryPendingTransactionIds(transactionsDir: string): string[] {
+  let entries: string[];
+  try {
+    entries = readdirSync(transactionsDir);
+  } catch {
+    return [];
+  }
+  const pending: string[] = [];
+  for (const name of entries) {
+    if (!name.endsWith('.jsonl')) continue;
+    const transactionId = name.slice(0, -'.jsonl'.length);
+    if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(transactionId)) continue;
+    if (hasRecoveryResolution(transactionsDir, transactionId)) continue;
+    try {
+      if (!statSync(join(transactionsDir, name)).isFile()) continue;
+      const { transitions } = readJournalLines(join(transactionsDir, name), { recoveryAware: true });
+      const last = transitions[transitions.length - 1];
+      if (last === undefined) continue;
+      if (last.to !== 'failed') continue;
+      if (typeof last.detail === 'string' && RESTORE_INCONSISTENCY_MARKER.test(last.detail)) {
+        pending.push(transactionId);
+      }
+    } catch {
+      // Unreadable/corrupt journal — not this scanner's alarm channel.
+    }
+  }
+  return pending.sort();
 }
 

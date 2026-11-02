@@ -285,6 +285,24 @@ export function UpdatePage() {
         </div>
       )}
 
+      {/* PRI-1069/1070 (G1 P0-4): terminal-failed transactions that left the
+          physical install inconsistent must be just as visible as unfinished
+          ones — a banner only keyed on `unfinished` is how the PRI-1069
+          half-restored runtime stayed invisible (review 2026-11-02). */}
+      {recoveryData?.needsRecovery && recoveryData.recoveryRequired.length > 0 && (
+        <div className="mb-6 p-4 bg-amber/5 border border-amber/35 rounded-[6px] text-[13px] leading-relaxed text-ink-2" role="alert">
+          <p className="font-medium text-amber">{t("pages.update.recoveryRequiredBanner")}</p>
+          {recoveryData.recoveryRequired.slice(0, 3).map((item) => (
+            <p key={item.transactionId} className="mt-1 font-mono text-[12px] text-ink-3">
+              {t("pages.update.recoveryRequiredItem", { id: item.transactionId })}
+            </p>
+          ))}
+          {recoveryData.nextAction && (
+            <p className="mt-2 text-[12px] text-ink-3">{recoveryData.nextAction}</p>
+          )}
+        </div>
+      )}
+
       {/* Layer 1: Conclusion — eyebrow + title + subtitle */}
       <div className="font-mono text-[12px] tracking-[0.14em] text-ink-3 uppercase mb-3">
         {t("pages.update.eyebrow")}

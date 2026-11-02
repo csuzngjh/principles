@@ -5,6 +5,17 @@ import { sendSuccess, sendError } from '../utils/response.js';
 
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
+/**
+ * PRI-1069/G1 P0-1 (SPEC v1.2 §14): one-shot launcher nonce, read once at
+ * process start. The installer spawns this server with
+ * PD_CONSOLE_VERIFY_NONCE in the child env; the health response echoes it so
+ * the probe can bind the answer to THIS child instance. Absent on normal
+ * (user-launched) consoles. Never logged.
+ */
+const VERIFY_NONCE = process.env.PD_CONSOLE_VERIFY_NONCE && process.env.PD_CONSOLE_VERIFY_NONCE.length > 0
+  ? process.env.PD_CONSOLE_VERIFY_NONCE
+  : null;
+
 interface CachedModel {
   model: HealthCheckModel;
   cachedAt: number;
@@ -86,6 +97,13 @@ export async function handleHealthRoute(
       ...health,
       authenticationMode: options.authenticationMode,
       codexGovernance,
+      // PRI-1069/G1 P0-1: installer identity binding. When the launching
+      // installer passes a one-shot nonce via env, echo it back so the probe
+      // can prove THIS child answered — an old console, another local service,
+      // or a proxy 502 cannot know the value. The nonce is short-lived,
+      // machine-local, never logged here, and absent entirely for consoles
+      // launched without it (normal user launches), keeping the legacy shape.
+      ...(VERIFY_NONCE !== null ? { verifyNonce: VERIFY_NONCE } : {}),
     });
   } catch (error) {
     // A SYSTEM-health failure (checkSystemHealth threw) is a different fact
