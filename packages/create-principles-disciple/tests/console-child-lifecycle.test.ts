@@ -38,14 +38,18 @@ fs.writeFileSync(SELF_EXIT, 'process.exit(0);\n');
 const ALIVE_IGNORE = path.join(tmpDir, 'alive-ignore-signals.cjs');
 // Windows: SIGTERM/SIGKILL are hard terminates that cannot be ignored, so
 // this fixture only matters on POSIX — where it must ignore SIGTERM to force
-// the SIGKILL escalation path.
-fs.writeFileSync(ALIVE_IGNORE, 'process.on(\'SIGTERM\', () => {});\nsetInterval(() => {}, 1000);\n');
+// the SIGKILL escalation path. It announces readiness over the fork IPC
+// channel AFTER the handler is registered: a fixed sleep cannot guarantee the
+// handler is installed, and a slow start would let SIGTERM default-kill the
+// child and break the escalation assertion (review 2026-11-02).
+fs.writeFileSync(ALIVE_IGNORE, 'process.on(\'SIGTERM\', () => {});\nprocess.send?.(\'ready\');\nsetInterval(() => {}, 1000);\n');
 
-/** Launch a fixture script as a real Node child (argument array, no shell). */
+/** Launch a fixture script as a real Node child (argument array, no shell).
+ * fork() requires an explicit 'ipc' slot whenever stdio is given as an array. */
 async function launchChild(script: string): Promise<ChildProcess> {
   const childProcessModule: typeof import('node:child_process') = await import('node:child_process');
   const launch = childProcessModule.fork;
-  const child = launch(script, [], { stdio: 'ignore' });
+  const child = launch(script, [], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] }) as ChildProcess;
   spawned.push(child);
   return child;
 }
@@ -78,8 +82,15 @@ describe('terminateAndJoinChild (P0-2)', () => {
       // contract is covered by the stub case below instead.
       return;
     }
-    const child = await launchChild(ALIVE_IGNORE);
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    const child = await launchChild(ALIVE_IGNORE, { stdio: 'ipc' });
+    // Wait for the fixture's IPC readiness signal — its SIGTERM handler is
+    // guaranteed registered once received (no fixed-sleep race).
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('fixture never announced readiness')), 10_000);
+      child.on('message', (message) => {
+        if (message === 'ready') { clearTimeout(timer); resolve(); }
+      });
+    });
     const join = await terminateAndJoinChild(child, { gracefulTimeoutMs: 300, killTimeoutMs: 8000 });
     expect(join.exited).toBe(true);
     expect(join.escalation).toBe('sigkill');

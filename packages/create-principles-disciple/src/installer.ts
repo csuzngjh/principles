@@ -63,8 +63,10 @@ import { RELEASE_METADATA_URL_ENV, normalizeReleaseMetadataUrl } from './update/
 import { provisionBootstrapTrustRoot, TrustRootValidationError } from './update/trust-root-provisioning.js';
 import {
   appendJournalTransition,
+  findRecoveryPendingTransactionIds,
   readActiveRecord,
   writeActiveRecord,
+  writeRecoveryResolution,
   type ActiveRecord,
   type ReleaseMetadataDigestSource,
   type TransactionState,
@@ -1217,7 +1219,6 @@ export function backupExistingInstall(host: HostTarget = 'openclaw'): BackupResu
     if (extMoved && backupDir && existsSync(backupDir) && !existsSync(extDir)) {
       try {
         renameSync(backupDir, extDir);
-        extMoved = false;
       } catch (undoError) {
         throw new BackupIntegrityError(
           `Could not backup existing install at ${extDir}: ${e instanceof Error ? e.message : String(e)}; compensation ALSO failed: ${undoError instanceof Error ? undoError.message : String(undoError)}. The moved extension backup is preserved at ${backupDir} — re-running the installer will restore it.`,
@@ -3149,12 +3150,12 @@ function isVerifiedConsoleIdentity(payload: unknown, expectedNonce: string): boo
 }
 
 /** Exported for real-subprocess tests (tests/console-verify-identity.test.ts). */
-export async function verifyConsole(workspaceDir: string): Promise<{ ok: boolean; url: string; process: ChildProcess | null; attempts: readonly ConsoleVerifyAttempt[] }> {
+export async function verifyConsole(workspaceDir: string): Promise<{ ok: boolean; url: string; process: ChildProcess | null; attempts: readonly ConsoleVerifyAttempt[]; unconfirmedChildren: readonly ChildProcess[] }> {
   const consoleDest = getInstalledConsoleDir();
   const serverEntry = path.join(consoleDest, 'dist', 'server.js');
 
   if (!existsSync(serverEntry)) {
-    return { ok: false, url: '', process: null, attempts: [{ port: 0, pid: null, outcome: 'child_exited_early', detail: 'Console server entry not found' }] };
+    return { ok: false, url: '', process: null, attempts: [{ port: 0, pid: null, outcome: 'child_exited_early', detail: 'Console server entry not found' }], unconfirmedChildren: [] };
   }
 
   // EP-06 regression guard (PR #1169): verify the web UI bundle exists BEFORE
@@ -3163,7 +3164,7 @@ export async function verifyConsole(workspaceDir: string): Promise<{ ok: boolean
   // for new users. npm install --ignore-scripts can remove dist/ in edge cases.
   const webIndex = path.join(consoleDest, 'dist', 'web', 'index.html');
   if (!existsSync(webIndex)) {
-    return { ok: false, url: '', process: null, attempts: [{ port: 0, pid: null, outcome: 'child_exited_early', detail: 'Console web UI (dist/web/index.html) not found — bundle may be corrupted or npm install removed dist/.' }] };
+    return { ok: false, url: '', process: null, attempts: [{ port: 0, pid: null, outcome: 'child_exited_early', detail: 'Console web UI (dist/web/index.html) not found — bundle may be corrupted or npm install removed dist/.' }], unconfirmedChildren: [] };
   }
 
   // Build a shuffled port list to avoid retrying the same port
@@ -3180,6 +3181,11 @@ export async function verifyConsole(workspaceDir: string): Promise<{ ok: boolean
   const portsToTry = portRange.slice(0, CONSOLE_PORT_MAX_RETRIES);
 
   const attempts: ConsoleVerifyAttempt[] = [];
+  // Probe children whose exit could NOT be confirmed (join_failed). They stay
+  // owned by the caller even when a later port attempt verifies — an orphan
+  // probe child holding runtime-tree handles must never be dropped on the
+  // floor (review 2026-11-02, Major: verifyConsole success path).
+  const unconfirmedChildren: ChildProcess[] = [];
 
   for (const port of portsToTry) {
     // P0-1: fresh one-shot nonce per attempt (SPEC v1.2 §14), injected via
@@ -3276,6 +3282,7 @@ export async function verifyConsole(workspaceDir: string): Promise<{ ok: boolean
       const join = await terminateAndJoinChild(child);
       delete process.env.PD_CONSOLE_VERIFY_NONCE;
       const outcome: ConsoleVerifyAttempt['outcome'] = join.exited ? reasonKind : 'join_failed';
+      if (!join.exited) unconfirmedChildren.push(child);
       attempts.push({
         port,
         pid: child.pid ?? null,
@@ -3288,15 +3295,19 @@ export async function verifyConsole(workspaceDir: string): Promise<{ ok: boolean
           ? (reason.length > 0 ? { detail: reason } : {})
           : { detail: `${reason}; child NOT confirmed exited after SIGKILL — destructive operations must be deferred` }),
       });
+      // A join_failed attempt does NOT fail the whole probe — the next port
+      // may still verify — but the unconfirmed child must stay owned: it is
+      // carried out in `unconfirmedChildren` so the caller terminates (and
+      // waits on) every probe child before any destructive directory op.
       continue; // Try next port
     }
 
     delete process.env.PD_CONSOLE_VERIFY_NONCE;
     attempts.push({ port, pid: child.pid ?? null, outcome: 'verified', httpStatus: 200 });
-    return { ok: true, url: healthUrl.toString(), process: child, attempts };
+    return { ok: true, url: healthUrl.toString(), process: child, attempts, unconfirmedChildren };
   }
 
-  return { ok: false, url: '', process: null, attempts };
+  return { ok: false, url: '', process: null, attempts, unconfirmedChildren };
 }
 
 // ─── Task 8: auto-launch console at end of successful install ────────────────
@@ -4246,6 +4257,10 @@ export async function install(
   const components: ComponentStatus = { plugin: 'skipped', cli: 'skipped', console: 'skipped' };
   const verification: VerificationResult = { features: 'skipped', storyA: 'skipped' };
   let consoleProcess: ChildProcess | null = null;
+  // P0-2 (review 2026-11-02 Major): probe children from earlier port attempts
+  // whose exit could not be confirmed. They ride along until the terminal
+  // join below — a later verified port never orphans them.
+  let unconfirmedProbeChildren: ChildProcess[] = [];
   let stepIndex = 0;
   // CP-6: true once the run has started deploying runtime components (after
   // the backup step). With no pre-existing install (no backup), a failure
@@ -4260,18 +4275,30 @@ export async function install(
   // the caller receives (a finally block cannot rewrite an inline return).
   let pendingResult: InstallResult | undefined;
 
-  // P0-2: bounded terminate + exit join. The join result decides whether
-  // destructive directory operations may proceed — an unconfirmed child may
-  // hold native-module handles inside the runtime tree (R8 experiment).
+  // P0-2: bounded terminate + exit join over EVERY probe child we still own
+  // (the verified child plus any earlier unconfirmed ones). The aggregated
+  // join result decides whether destructive directory operations may proceed
+  // — an unconfirmed child may hold native-module handles inside the runtime
+  // tree (R8 experiment).
   const killConsoleChild = async (): Promise<ChildJoinResult | null> => {
-    if (!consoleProcess) return null;
-    const child = consoleProcess;
-    consoleProcess = null;
-    const join = await terminateAndJoinChild(child);
-    if (!join.exited) {
-      logger.error(`Console child (pid=${child.pid ?? '?'}) could not be confirmed exited after SIGKILL (graceful ${CONSOLE_CHILD_GRACEFUL_EXIT_TIMEOUT_MS}ms + kill ${CONSOLE_CHILD_KILL_EXIT_TIMEOUT_MS}ms)`);
+    const targets: ChildProcess[] = [...unconfirmedProbeChildren];
+    unconfirmedProbeChildren = [];
+    if (consoleProcess) {
+      targets.push(consoleProcess);
+      consoleProcess = null;
     }
-    return join;
+    if (targets.length === 0) return null;
+    let aggregated: ChildJoinResult | null = null;
+    for (const child of targets) {
+      const join = await terminateAndJoinChild(child);
+      if (!join.exited) {
+        logger.error(`Console child (pid=${child.pid ?? '?'}) could not be confirmed exited after SIGKILL (graceful ${CONSOLE_CHILD_GRACEFUL_EXIT_TIMEOUT_MS}ms + kill ${CONSOLE_CHILD_KILL_EXIT_TIMEOUT_MS}ms)`);
+      }
+      // Worst result wins: one unconfirmed child must gate destructive
+      // operations even when every other child exited cleanly.
+      if (aggregated === null || !join.exited) aggregated = join;
+    }
+    return aggregated;
   };
 
   try {
@@ -4458,18 +4485,22 @@ export async function install(
 
     if (spinner) updateProgress(spinner, stepIndex, 'Verifying pd-console...');
     const consoleVerify = await verifyConsole(options.workspaceDir);
+    unconfirmedProbeChildren.push(...consoleVerify.unconfirmedChildren);
     if (consoleVerify.ok) {
       components.console = 'configured';
       components.consoleEntrypoint = consoleVerify.url;
       consoleProcess = consoleVerify.process;
     } else {
       // SPEC v1.2 §14: attempt-level diagnostics travel with the failure so
-      // the journal records every port/PID/status/identity outcome.
+      // the journal records every port/PID/status/identity outcome. The
+      // message states ONLY the probe fact — whether anything was rolled back
+      // is decided by the actual restore below and reported there (review
+      // 2026-11-02: never claim "rolled back" before the restore ran).
       const attemptsSummary = consoleVerify.attempts
         .map((a) => `port=${a.port} pid=${a.pid ?? '?'} outcome=${a.outcome}${a.httpStatus !== undefined ? ` http=${a.httpStatus}` : ''}${a.stderrTail ? ` stderr="${a.stderrTail.slice(-160)}"` : ''}`)
         .join(' | ');
       throw new ConsoleVerifyError(
-        `Console verification failed: all ${CONSOLE_PORT_MAX_RETRIES} port attempts failed (${attemptsSummary}). Installation rolled back — plugin and CLI are not activated.`,
+        `Console verification failed: all ${CONSOLE_PORT_MAX_RETRIES} port attempts failed (${attemptsSummary}). Installation was not activated.`,
         consoleVerify.attempts,
       );
     }
@@ -4566,7 +4597,10 @@ export async function install(
       });
       verification.storyA = 'passed';
     } catch (e) {
-      throw new Error(`Demo verification failed: ${e instanceof Error ? e.message : String(e)}. Installation rolled back — plugin and CLI are not activated.`, { cause: e });
+      // Same discipline as ConsoleVerifyError (review 2026-11-02): state the
+      // probe fact only — the actual rollback outcome is journaled and
+      // reported by the failure handler below, never pre-claimed here.
+      throw new Error(`Demo verification failed: ${e instanceof Error ? e.message : String(e)}. Installation was not activated.`, { cause: e });
     }
     stepIndex++;
 
@@ -4663,13 +4697,43 @@ export async function install(
     // runtime set is RETAINED as the supported previous release (rollback /
     // data-compat window material); only OLDER retained sets beyond the newest
     // are pruned. Deletion of the freshest backup would strand code rollback.
-    retainSupersededBackup(backupDir, runtimeBackupDir);
+    // Review 2026-11-02 (Major: data integrity): while a PRIOR failed
+    // transaction is still recovery-pending (restore_incomplete/deferred/
+    // install_residue marker, no resolution record), pruning OLDER backup
+    // sets could destroy the last good version's backup — the newest set here
+    // is this run's just-superseded (possibly half-deployed) tree, and the
+    // old "current + one previous" window cannot protect the original. Skip
+    // pruning for this run; it resumes once the pending set is resolved
+    // (written below, at confirm time) on a subsequent install.
+    const { transactionsDir } = resolvePdHomePaths(getPdDir());
+    const recoveryPendingBeforePrune = findRecoveryPendingTransactionIds(transactionsDir);
+    if (recoveryPendingBeforePrune.length > 0) {
+      logger.warn(`Recovery pending for ${recoveryPendingBeforePrune.length} prior failed transaction(s) (${recoveryPendingBeforePrune.join(', ')}) — keeping ALL backup sets this run (no pruning); normal retention resumes on the next install after this one confirms.`);
+    } else {
+      retainSupersededBackup(backupDir, runtimeBackupDir);
+    }
     // ADR-0024 D-2: retention/pruning of OLDER sets is the commit point of the
     // transaction.
     journalInstallerTransitionDegrading(journal, journal.lastState, 'confirmed', 'previous release retained; older sets pruned; install complete');
     // PRI-709 P0-2: active.json is the deployment identity source, written
     // journal-first — after `confirmed`, never before it.
     commitInstallerActiveRecord(journal);
+    // G1 (review 2026-11-02 Minor: recovery alarm never clears): now that this
+    // install physically completed (confirmed), any prior recovery-pending
+    // failed transaction it just superseded IS resolved — record that fact so
+    // recovery surfaces stop alarming about it. Fail-safe: resolution writing
+    // is best-effort; an unwritable record keeps the alarm (conservative).
+    for (const pendingId of recoveryPendingBeforePrune) {
+      try {
+        writeRecoveryResolution(transactionsDir, {
+          resolvedTransactionId: pendingId,
+          resolvedByTransactionId: journal.transactionId,
+        });
+        logger.info(`Recorded recovery resolution: failed transaction ${pendingId} superseded by ${journal.transactionId}`);
+      } catch (resolutionError) {
+        logger.warn(`Could not record recovery resolution for ${pendingId} (alarm stays): ${resolutionError instanceof Error ? resolutionError.message : String(resolutionError)}`);
+      }
+    }
     if (spinner) {
       spinner.succeed('Install complete!');
     }
@@ -4768,27 +4832,6 @@ export async function install(
     } else {
       restoreResult = restoreBackup(backupDir, runtimeBackupDir);
     }
-    if (journal) {
-      const hadBackup = Boolean(backupDir || runtimeBackupDir) || error instanceof BackupIntegrityError;
-      const restoreFailed = hadBackup && !restoreResult.restored;
-      let detail: string;
-      if (restoreDeferred) {
-        detail = `restore_deferred: ${restoreResult.error ?? 'child not confirmed exited'}; backups and live trees preserved at extension=${backupDir ?? '-'} runtime=${runtimeBackupDir ?? '-'}; close the reported processes and re-run the installer to retry recovery`;
-      } else if (restoreFailed) {
-        // P0-4: machine-readable marker prefix — the recovery list (Console
-        // recoveryStatus) must surface terminal-failed transactions whose
-        // PHYSICAL install was left inconsistent instead of skipping them.
-        const preserved = [...(restoreResult.extension?.preservedDirs ?? []), ...(restoreResult.runtime?.preservedDirs ?? [])];
-        detail = `restore_incomplete: ${restoreResult.error ?? 'unknown'}; preserved=[${preserved.join(', ')}]; extension=${restoreResult.extension?.status ?? 'n/a'} runtime=${restoreResult.runtime?.status ?? 'n/a'}; re-run the installer to retry recovery`;
-      } else {
-        detail = errorMsgRaw;
-      }
-      if (!restoreDeferred && !restoreFailed && hadBackup && restoreResult.restored) {
-        journalInstallerTransitionDegrading(journal, journal.lastState, 'rolled_back', detail);
-      } else {
-        journalInstallerTransitionDegrading(journal, journal.lastState, 'failed', detail);
-      }
-    }
 
     const errorMsg = errorMsgRaw;
     // ERR-046 / rc-9: never claim a restore that didn't happen. When backupDir
@@ -4817,9 +4860,53 @@ export async function install(
     // permission-restricted, freshCleanup.failed names the residue (rc-9).
     // hasBackup=true keeps its restore path, and a lock error before
     // mutationStarted=true correctly keeps the no-changes messages below.
-    const freshCleanup = !hasBackup && mutationStarted
+    // Review 2026-11-02 (Major/Minor): the cleanup is computed BEFORE the
+    // journal write so PARTIAL-clean residue can be journaled with a machine-
+    // readable marker (`install_residue:`) instead of vanishing behind a
+    // terminal `failed`; and restore_deferred FORBIDS it — the probe child may
+    // still hold runtime-tree handles, and rmSync under it is the exact
+    // PRI-1069 failure mode.
+    const freshCleanup = !hasBackup && mutationStarted && !restoreDeferred
       ? cleanUnactivatedFreshInstall()
       : undefined;
+
+    if (journal) {
+      const restoreFailed = hasBackup && !restoreResult.restored;
+      const freshResidue = !hasBackup && freshCleanup !== undefined && freshCleanup.failed.length > 0;
+      // SPEC v1.2 §14: attempt-level diagnostics ride along in the recovery
+      // markers too — the recovery list reads journal details, not thrown
+      // error objects (review 2026-11-02 Minor).
+      const attemptsNote = error instanceof ConsoleVerifyError && error.attempts.length > 0
+        ? ` attempts=[${error.attempts.map((a) => `port=${a.port} pid=${a.pid ?? '?'} outcome=${a.outcome}${a.httpStatus !== undefined ? ` http=${a.httpStatus}` : ''}${a.exitCode !== undefined ? ` exit=${a.exitCode}` : ''}`).join(', ')}];`
+        : '';
+      let detail: string;
+      if (restoreDeferred) {
+        detail = `restore_deferred:${attemptsNote} ${restoreResult.error ?? 'child not confirmed exited'}; backups and live trees preserved at extension=${backupDir ?? '-'} runtime=${runtimeBackupDir ?? '-'}; close the reported processes and re-run the installer to retry recovery`;
+      } else if (restoreFailed) {
+        // P0-4: machine-readable marker prefix — the recovery list (Console
+        // recoveryStatus) must surface terminal-failed transactions whose
+        // PHYSICAL install was left inconsistent instead of skipping them.
+        const preserved = [...(restoreResult.extension?.preservedDirs ?? []), ...(restoreResult.runtime?.preservedDirs ?? [])];
+        detail = `restore_incomplete:${attemptsNote} ${restoreResult.error ?? 'unknown'}; preserved=[${preserved.join(', ')}]; extension=${restoreResult.extension?.status ?? 'n/a'} runtime=${restoreResult.runtime?.status ?? 'n/a'}; re-run the installer to retry recovery`;
+      } else if (freshResidue && freshCleanup !== undefined) {
+        detail = `install_residue: fresh-install cleanup left residue: ${freshCleanup.failed.map((f) => `${f.dir} (${f.error})`).join(', ')}; ${errorMsgRaw}`;
+      } else if (hasBackup && restoreResult.restored) {
+        // A successful rollback that still left quarantine residue must name
+        // it in the journal (review 2026-11-02 Minor: residue invisible in
+        // the rolled_back path).
+        const residueNotes = [restoreResult.extension?.detail, restoreResult.runtime?.detail]
+          .filter((note): note is string => typeof note === 'string' && note.length > 0 && note.includes('residue'));
+        detail = residueNotes.length > 0 ? `${errorMsgRaw}; restore notes: ${residueNotes.join('; ')}` : errorMsgRaw;
+      } else {
+        detail = errorMsgRaw;
+      }
+      if (!restoreDeferred && !restoreFailed && hasBackup && restoreResult.restored) {
+        journalInstallerTransitionDegrading(journal, journal.lastState, 'rolled_back', detail);
+      } else {
+        journalInstallerTransitionDegrading(journal, journal.lastState, 'failed', detail);
+      }
+    }
+
     // PRI-697 review P1: the global pd shim is a side effect OUTSIDE the
     // runtime/extension trees both cleanup paths above address. Whatever
     // the backup state, files THIS run created in the npm global bin dir

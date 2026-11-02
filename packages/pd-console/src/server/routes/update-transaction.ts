@@ -23,14 +23,13 @@ const TRANSACTION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 /**
  * PRI-1069/1070 (G1 P0-4, SPEC v1.2 §17): machine-readable markers the
  * installer prefixes to a terminal `failed` detail when the PHYSICAL install
- * was left inconsistent — `restore_incomplete:` (a restore ran but a tree did
- * not land / could not be proven back) or `restore_deferred:` (destructive
- * restore withheld because a child process could not be confirmed exited).
- * Such transactions used to be skipped by the `terminal` fast-path below,
- * which is exactly how a half-restored runtime stayed invisible to the
- * Owner (the PRI-1069 field report).
+ * was left inconsistent. The marker regex is OWNED by the installer's shared
+ * transaction-journal module (single authority — it also serves the
+ * install-side recovery-pending scanner); this route consumes it through the
+ * `update-console` seam. Such transactions used to be skipped by the
+ * `terminal` fast-path below, which is exactly how a half-restored runtime
+ * stayed invisible to the Owner (the PRI-1069 field report).
  */
-const RESTORE_INCONSISTENCY_MARKER = /restore_(incomplete|deferred):/;
 
 interface JournalFact {
   readonly transactionId: string;
@@ -174,8 +173,14 @@ async function recoveryStatus(res: ServerResponse): Promise<void> {
         const lastDetail = fact.transitions.length > 0
           ? (fact.transitions[fact.transitions.length - 1]?.detail ?? '')
           : '';
-        if (fact.lastState === 'failed' && RESTORE_INCONSISTENCY_MARKER.test(lastDetail)) {
-          recoveryRequired.push({ transactionId, reason: lastDetail.slice(0, 400) });
+        if (fact.lastState === 'failed' && journal.RESTORE_INCONSISTENCY_MARKER.test(lastDetail)) {
+          // A later completed install records a `<txid>.recovered.json`
+          // resolution (journal module authority); until then the alarm
+          // stays. Skip only on real resolution evidence (review 2026-11-02:
+          // never clear the alarm just because time passed).
+          if (!journal.hasRecoveryResolution(paths.transactionsDir, transactionId)) {
+            recoveryRequired.push({ transactionId, reason: lastDetail.slice(0, 400) });
+          }
         }
         continue;
       }
@@ -253,6 +258,41 @@ async function recoveryResolve(res: ServerResponse, req: IncomingMessage): Promi
   }
   try {
     const read = journal.readTransactionJournalForRecovery(journalPath);
+    // Review 2026-11-02 (consistency): a terminal `failed` carrying a restore
+    // inconsistency marker must get the SAME verdict from both recovery
+    // surfaces. The generic decision below would answer `old_confirmed`
+    // ("previously confirmed release remains active") with no nextAction —
+    // read as "nothing to do" while the status endpoint demands repair. The
+    // generic decision cannot see physical state; refuse explicitly instead.
+    const last = read.transitions[read.transitions.length - 1];
+    if (last !== undefined && last.to === 'failed'
+      && typeof last.detail === 'string' && journal.RESTORE_INCONSISTENCY_MARKER.test(last.detail)) {
+      if (journal.hasRecoveryResolution(paths.transactionsDir, transactionId)) {
+        // Resolved by a later completed install — report that instead of the
+        // stale refusal.
+        sendSuccess(res, {
+          ok: true,
+          transactionId,
+          outcome: {
+            kind: 'old_confirmed',
+            releaseId: null,
+            generation: null,
+            reason: `transaction ended in failed with a restore-inconsistency marker but a later install recorded its recovery; the previously confirmed release remains active`,
+          },
+        });
+        return;
+      }
+      sendSuccess(res, {
+        ok: true,
+        transactionId,
+        outcome: {
+          kind: 'explicit_refusal',
+          reason: last.detail.slice(0, 400),
+          nextAction: 'A completed-but-failed update left the physical installation inconsistent (restore incomplete or deferred). Close any running PD processes, then re-run the official installer to retry recovery before starting a new update.',
+        },
+      });
+      return;
+    }
     const activeRecord = journal.readActiveRecord(paths.activeRecordPath);
     const outcome = journal.recoverUnfinishedTransaction({
       transitions: read.transitions,

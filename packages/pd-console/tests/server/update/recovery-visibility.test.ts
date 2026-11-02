@@ -52,6 +52,10 @@ describe('P0-4 recovery visibility of restore-inconsistent terminal failures', (
           await handleUpdateTransactionRoute(req, res, '/recovery');
           return;
         }
+        if (req.url === '/api/update/recovery/resolve') {
+          await handleUpdateTransactionRoute(req, res, '/recovery/resolve');
+          return;
+        }
         res.statusCode = 404;
         res.end();
       })();
@@ -113,5 +117,69 @@ describe('P0-4 recovery visibility of restore-inconsistent terminal failures', (
     const recovery = await getRecovery();
     expect(recovery.needsRecovery).toBe(false);
     expect(recovery.recoveryRequired ?? []).toHaveLength(0);
+  });
+
+  it('a marker failed transaction WITH a recovery resolution record is NOT alarmed (alarm clears only on evidence)', async () => {
+    const txid = 'update-1793533600004-ef012345';
+    writeJournal(home, txid, [
+      { at: '2026-11-01T03:25:44.000Z', from: null, to: 'planned', transactionId: txid, releaseId: 'r1', productVersion: '2.7.0', generation: 1 },
+      { at: '2026-11-01T03:38:06.000Z', from: 'planned', to: 'failed', transactionId: txid, releaseId: 'r1', productVersion: '2.7.0', generation: 1, detail: 'restore_deferred: child not confirmed exited; destructive restore deferred' },
+    ]);
+    const before = await getRecovery();
+    expect(before.needsRecovery).toBe(true);
+    expect((before.recoveryRequired ?? []).some((r) => r.transactionId === txid)).toBe(true);
+
+    // A later completed install records the resolution sidecar.
+    const { writeFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    writeFileSync(
+      join(mocks.fakeHome, '.pd', 'transactions', `${txid}.recovered.json`),
+      JSON.stringify({ schemaVersion: 1, resolvedTransactionId: txid, resolvedByTransactionId: 'update-1793533600099-aaaa0001', resolvedAt: '2026-11-01T04:00:00.000Z' }, null, 2),
+      'utf8',
+    );
+    const after = await getRecovery();
+    expect(after.needsRecovery).toBe(false);
+    expect(after.recoveryRequired ?? []).toHaveLength(0);
+  });
+
+  it('POST /recovery/resolve refuses a marker-carrying failed transaction with a consistent nextAction', async () => {
+    const txid = 'update-1793533600005-f0123456';
+    writeJournal(home, txid, [
+      { at: '2026-11-01T03:25:44.000Z', from: null, to: 'planned', transactionId: txid, releaseId: 'r1', productVersion: '2.7.0', generation: 1 },
+      { at: '2026-11-01T03:38:06.000Z', from: 'planned', to: 'failed', transactionId: txid, releaseId: 'r1', productVersion: '2.7.0', generation: 1, detail: 'restore_incomplete: extension=restored runtime=failed; preserved=[<backup>]; re-run the installer to retry recovery' },
+    ]);
+    const response = await fetch(`${base}/api/update/recovery/resolve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ transactionId: txid }),
+    });
+    const body = (await response.json()) as { success: boolean; data: { ok: boolean; outcome: { kind: string; reason?: string; nextAction?: string } } };
+    expect(body.success).toBe(true);
+    expect(body.data.ok).toBe(true);
+    expect(body.data.outcome.kind).toBe('explicit_refusal');
+    expect(body.data.outcome.nextAction).toContain('re-run the official installer');
+  });
+
+  it('POST /recovery/resolve reports a resolved marker transaction as old_confirmed (resolution evidence)', async () => {
+    const txid = 'update-1793533600006-01234567';
+    writeJournal(home, txid, [
+      { at: '2026-11-01T03:25:44.000Z', from: null, to: 'planned', transactionId: txid, releaseId: 'r1', productVersion: '2.7.0', generation: 1 },
+      { at: '2026-11-01T03:38:06.000Z', from: 'planned', to: 'failed', transactionId: txid, releaseId: 'r1', productVersion: '2.7.0', generation: 1, detail: 'restore_incomplete: runtime=failed' },
+    ]);
+    const { writeFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    writeFileSync(
+      join(mocks.fakeHome, '.pd', 'transactions', `${txid}.recovered.json`),
+      JSON.stringify({ schemaVersion: 1, resolvedTransactionId: txid, resolvedByTransactionId: 'update-1793533600098-bbbb0002', resolvedAt: '2026-11-01T04:10:00.000Z' }, null, 2),
+      'utf8',
+    );
+    const response = await fetch(`${base}/api/update/recovery/resolve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ transactionId: txid }),
+    });
+    const body = (await response.json()) as { success: boolean; data: { ok: boolean; outcome: { kind: string; reason: string } } };
+    expect(body.data.outcome.kind).toBe('old_confirmed');
+    expect(body.data.outcome.reason).toContain('recorded its recovery');
   });
 });

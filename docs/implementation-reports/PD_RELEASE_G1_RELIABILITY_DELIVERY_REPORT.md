@@ -75,7 +75,7 @@
 
 ### C.5 P0-5 更新生命周期与兼容性核验（无代码缺陷，记录结论）
 
-- 更新事务由**旧版本 runtime** 执行（Console→旧 executor→旧 RM→动态 import 旧 installer.js）；修复发布后存量用户的**下一次**更新仍走旧代码——本次修复对存量用户的生效路径 = 旧代码在探针失败时进入 `restore_deferred` 类安全路径的稳定性**不受本次影响**（旧代码原样），新代码从修复版本安装起生效。executor 协议（ping|inspect|check|apply）跨版本稳定；bootstrap executor 投递 digest 校验在成功尾部重投，不阻断旧代码执行当前事务。
+- 更新事务由**旧版本 runtime** 执行（Console→旧 executor→旧 RM→动态 import 旧 installer.js）；修复发布后存量用户的**下一次**更新仍走旧代码——**旧安装器没有任何 `restore_deferred` 保护**：它不 join 子进程、失败路径无条件执行 restoreBackup，本 PR 的全部安全路径（deferred/aside/标记）只存在于**修复后的安装器**，且要等该修复版本被安装之后才在用户机器上生效（2026-11-02 评审纠正：初版报告此处表述有误）。存量用户在修复版本落地前的更新仍暴露在旧缺陷下——这是发布节奏的产品事实，只能靠尽快发布缓解。executor 协议（ping|inspect|check|apply）跨版本稳定；bootstrap executor 投递 digest 校验在成功尾部重投，不阻断旧代码执行当前事务。
 - Windows .node 实验结论（修复方案的平台依据）：加载中模块的**同卷目录 rename 成功**、rmSync EPERM——故回滚关键路径已不含对 live 树的递归删除。
 
 ## D. 测试结果
@@ -120,7 +120,7 @@
 | 维度 | 变更 |
 |---|---|
 | 新增公共抽象 | 3（terminateAndJoinChild、ConsoleVerifyAttempt/ConsoleVerifyError、BackupIntegrityError+TreeRestoreResult/RestoreBackupResult——全部为已证实风险的直接表达，零实现之外的新框架） |
-| 新增状态/持久化 | 0（复用 journal detail 字段 + 机器可读前缀，无平行状态机、无新状态枚举） |
+| 新增状态/持久化 | 1（评审后新增：`<txid>.recovered.json` 恢复解决记录——journal 追加只读导致恢复完成无法回写旧 journal，sidecar 是最小可审计事实；由 confirm 后的安装写入，缺失时警报保守保留）+ 复用 journal detail 字段 + 机器可读前缀（无平行状态机、无新状态枚举） |
 | 新增依赖 | 0 |
 | 新增服务/进程/flag | 0 |
 | 删除 | 旧 delete-then-rename restoreBackup；无 join 的 kill；nonceless 探针判据 |
@@ -144,5 +144,32 @@
 1. `3a72d2a51` docs(specs): SPEC v1.2 — Reliability First
 2. `fda5c6e2a` fix(installer,console): G1 P0 四项修复 + 18 测试
 3. `cddefbd71` test: harness 适配 + TOCTOU 防御
+4. `10177873b` fix(changeset): 发布意图声明修正
+5. （评审修复轮）见 §I
 
-回滚方式：revert 三个提交即可（无 schema/数据迁移、无持久化状态变更、无 flag）。
+回滚方式：revert 相应提交即可（恢复解决记录为独立 sidecar 文件，revert 后旧记录只是不再被读取，无迁移负担）。
+
+## I. 评审修复轮（2026-11-02，PR #2282 评审意见全部采纳）
+
+经逐条核实，评审的 3 Major + 9 Minor + 1 CodeQL + 1 nitpick **全部属实**，修复如下：
+
+| # | 评审发现 | 修复 |
+|---|---|---|
+| M1 | fresh 安装清理残留对恢复列表不可见 | catch 先算 freshCleanup 再写 journal；部分清理残留 → `install_residue:` 标记（共享 marker 权威迁移至 transaction-journal.ts，含三前缀） |
+| M2 | join_failed 的探针 child 在后续端口成功时被遗忘 | verifyConsole 返回 `unconfirmedChildren`；install 持有并在 killConsoleChild 聚合 join；任一未确认 → restore_deferred |
+| M3 | 重试安装的 retainSupersededBackup 会剪掉旧好版本备份 | 存在未解决恢复待处理事务时跳过本轮剪枝；confirm 后写解决记录，下次安装恢复常规保留 |
+| Major(UI) | Console UI 丢弃 recoveryRequired 桶 | validators 保留该桶；UpdatePage 新增恢复需求横幅（en/zh i18n） |
+| m1 | 报告 C.5 错称旧代码有 deferred 保护 | 措辞已纠正（明确旧安装器无任何保护，修复版本安装后才生效） |
+| m2 | F-31 物理 State 未全检 | 轻量部分本轮落地（install_residue 标记）；恢复 GET 做全量物理审计需独立设计（成本/复杂度），列为 G 级 follow-up，不在本 PR 扩围 |
+| m3 | 隔离区残留不上报 | rolled_back detail 追加含 residue 的分树 detail |
+| m4 | 探针错误预声明"已回滚" | ConsoleVerifyError 与 demo 失败 throw 改为仅陈述事实（"Installation was not activated."），回滚状态由实际恢复结果报告 |
+| m5 | deferred 下 freshCleanup 仍删目录 | freshCleanup 条件加 `!restoreDeferred` |
+| m6 | deferred/incomplete detail 丢失 attempt 诊断 | 两分支 detail 注入 attempts=[port/pid/outcome/http/exit] 摘要 |
+| m7 | 恢复后警报永不清除 | `<txid>.recovered.json` 解决记录（confirm 后写入；recoveryStatus 与 resolve 端点均先查记录；缺失=警报保留） |
+| m8 | resolve 端点与 status 判定不一致 | resolve 对 failed+marker 返回 explicit_refusal + 一致 nextAction；已解决的返回 old_confirmed+resolution 理由 |
+| m9 | POSIX fixture 400ms 固定等待竞态 | fork IPC 就绪信号替代固定 sleep |
+| CQL | extMoved 无用赋值 | 移除 |
+| nitpick | health echo 无真实路由回归 | health-nonce-echo.test.ts：resetModules + 动态导入真实 handler，双向断言（有 env 回显/无 env 不出现） |
+
+评审明确排除项：M2 评审建议的"不因 join_failed 拒绝成功结果"被采纳（保留成功路径，仅携带未确认 child）；m2 的全量物理审计按 SPEC §16/§17 交叉核对要求另行设计，不塞入本轮。
+
