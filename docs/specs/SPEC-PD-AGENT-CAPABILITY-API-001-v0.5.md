@@ -4,17 +4,17 @@
 | 字段 | 内容 |
 |---|---|
 | SPEC ID | SPEC-PD-AGENT-CAPABILITY-API-001 |
-| 版本 | **v0.5-proposed** |
-| 状态 | PROPOSED — 待 Owner 以 **OG-1** 采信后冻结 |
+| 版本 | **v0.5-frozen** |
+| 状态 | **FROZEN — OG-1 已采信（2026-11-01），本 SPEC 是当前有效的 Gate 3 实施契约；Gate 3 已按 OG-2 实施完成并合并（PR #2270，merge `f15a5a6a6`，2026-11-01）。本 SPEC 不构成 Gate 4 授权。** |
 | 类型 | 架构与接口契约；**Gate 3 实施的直接规范**；不构成 MCP Server 实施授权 |
 | 调查基线 | csuzngjh/principles origin/main `0d0ea7eb560af15729f2a7f81b4e8a11a1bb0e8e`（2026-11-01） |
 | 版本沿革 | v0.2-draft（2026-10-28，`docs/specs/SPEC-PD-AGENT-CAPABILITY-API-001-v0.2.md`）→ v0.4-draft（基线 `3a2de95c8`，`docs/specs/SPEC-PD-AGENT-CAPABILITY-API-001.md`）→ **本版**。v0.3 原件从未入主干（v0.4 已声明）。 |
 | 本版上游证据 | ① PD-MCP-ARCHITECTURE-DELTA-AUDIT-20261031；② PD-MCP-GATE2-001（72 运行，`GO_TO_GATE_3_PROPOSAL`）；③ PD-MCP-HOOK-INTEGRATION-VERIFICATION-001（`READY_FOR_GATE_3_PROPOSAL`）；④ PD-MCP-GATE3-PROPOSAL-001（原版 + OPTIMIZED 评审版）；⑤ PD-MCP-GATE3-LATEST-SOURCE-DELTA-AUDIT（基线复核，2026-11-01） |
-| Owner 决策输入 | 2026-11-01 Owner 九项已决事项（见 §14 决策记录） |
+| Owner 决策输入 | 2026-11-01 Owner 九项已决事项 + **OG-1（SPEC v0.5 采信）与 OG-2（Gate 3 实施授权）均已确认**（见 §14 决策记录） |
 | 本版目标 | 冻结 Gate 3 实施所需的全部契约：Read Model 迁移、Capability Facade（含 OD-A 披露策略）、CLI 兼容硬约束、MCP 边界（仅契约）、Hook 协作、测试与验收、停止条件 |
 | 明确非目标 | 不实现 MCP Server、不引入 MCP SDK、不修改 Hook/宿主配置/生产治理逻辑、不创建 pd-application、不做数据库迁移、不覆盖 Agent-facing CLI 的输出披露（Owner 已决：OD-A 首期仅辖 MCP） |
 
-> **使用约定**：本文"要求"条款 = Gate 3 实施与验收的强制契约；"事实"条款 = 基线 `0d0ea7eb5` 的源码现实（引用见 DELTA-AUDIT §F 证据索引）；仍待 Owner 裁决的数值以 ⏳ 标注。本文与 `PD-MCP-GATE3-IMPLEMENTATION-READINESS-001.md`（机械实施清单）配套使用：本文件定**契约**，该文件定**步骤**。
+> **使用约定**：本文"要求"条款 = Gate 3 实施与验收的强制契约；"事实"条款 = 基线 `0d0ea7eb5` 的源码现实（引用见 DELTA-AUDIT §F 证据索引）；原以 ⏳ 标注的三项数值已随 OG-1 确认（§7.5）。本文与 `PD-MCP-GATE3-IMPLEMENTATION-READINESS-001.md`（机械实施清单）配套使用：本文件定**契约**，该文件定**步骤**。
 
 ---
 
@@ -207,9 +207,9 @@ PainRecallCapabilityResult
 - **契约测试**：字段树快照 + DENY 哨兵扫描（§11 测试矩阵 B 组）。
 - profile 变更治理：`od-a-v1` → 任何变更 = 新 profile 版本 + Owner 裁决 + 契约测试快照更新；实现者不得静默改白名单。
 
-### 7.5 资源限制与责任归属 ⏳
+### 7.5 资源限制与责任归属（已随 OG-1 确认）
 
-以下三项数值为 **v0.5 冻结提案，随 OG-1 一并确认**（数值保留原提案，不调整；v0.4 §7.2 提出、Gate 2 原型 10s 已实测、OPTIMIZED D-03 要求 Owner 明确）。**三项分属两个责任层级、两个实施 Gate**——不得混同：
+以下三项数值及其责任归属已随 OG-1 一并确认（2026-11-01；数值保留原提案未调整，责任分层未变；v0.4 §7.2 提出、Gate 2 原型 10s 已实测、OPTIMIZED D-03 曾要求 Owner 明确——现已明确）。**三项分属两个责任层级、两个实施 Gate**——不得混同；后两项仍属 Gate 4，不得因本文档收口提前迁入 Core：
 
 #### 7.5.1 责任归属总表
 
@@ -393,11 +393,11 @@ principle.text · unresolvedAssociations[].{painId,candidateId} · statusDetail�
 | 阶段 | 内容 | 授权 | 状态 |
 |---|---|---|---|
 | Gate 3 Proposal | 原版 + OPTIMIZED + Owner 九项裁决 | — | ✅ 完成 |
-| **P1：本 SPEC v0.5** | 契约冻结（含 ⏳ 数值确认） | **OG-1** | 本文档 |
-| Gate 3 Implementation（P2+P3） | Read Model 迁移 + Facade + 子路径 + CLI 接线 + 测试拆分（单变更集） | **OG-2** | READY_PENDING_OG2 |
-| Gate 4（P4） | MCP Adapter 新包 + 单工具 + 进程安全 + 宿主验证 | **OG-3** | BLOCKED（D-06 待决 + WB 前置） |
-| Optional Hook Adaptation（P5） | 写类工具治理映射 | **OG-4** | 设计位 |
-| Gate 5（P6） | 逐宿主验收 | **OG-5** | BLOCKED |
+| **P1：本 SPEC v0.5** | 契约冻结（含三项数值及责任归属确认） | **OG-1** | ✅ DONE（2026-11-01 采信冻结） |
+| Gate 3 Implementation（P2+P3） | Read Model 迁移 + Facade + 子路径 + CLI 接线 + 测试拆分（单变更集） | **OG-2** | ✅ DONE（2026-11-01，PR #2270 已由 Owner 合并 `f15a5a6a6`；PRI-1068 Done；最终验收见 `PD-MCP-GATE3-IMPLEMENTATION-REPORT-001.md` 附录） |
+| Gate 4（P4） | MCP Adapter 新包 + 单工具 + 进程安全 + 宿主验证 | **OG-3** | **BLOCKED — PENDING_OG3（OG-3 未授权；D-06 进程风险待 Owner 接受 + WB 实机验证前置）** |
+| Optional Hook Adaptation（P5） | 写类工具治理映射 | **OG-4** | 设计位（未授权） |
+| Gate 5（P6） | 逐宿主验收 | **OG-5** | BLOCKED（未授权） |
 
 ### 13.1 Gate 3 实施停止条件（任一触发即停）
 
@@ -423,20 +423,33 @@ principle.text · unresolvedAssociations[].{painId,candidateId} · statusDetail�
 | ✅8 | Gate 3 只做共享能力抽取、披露契约、CLI 迁移 | §4.1 |
 | ✅9 | Gate 4 另行授权 | §13 表 |
 
-**仍待 Owner（详见 PD-MCP-GATE3-OWNER-DECISION-CARD.md）**：OG-1 本 SPEC 采信（含 §7.5 三项数值**及其责任归属**确认：10 条=Core Capability（Gate 3）；32 KiB 与 10s=Gate 4 MCP Adapter）；OG-2 实施授权；D-06 进程风险接受（Gate 4 前置）；WB 实机验证安排（Gate 4 前置）；（远期）OG-4/OG-5。
+**决策状态（2026-11-02 记录收口更新；完整证据见 `PD-MCP-GATE3-OWNER-DECISION-CARD.md` §〇）**：
+
+| 决策 | 状态 | 依据 |
+|---|---|---|
+| OG-1：采信本 SPEC v0.5 为 Gate 3 实施契约（含 §7.5 三项数值**及其责任归属**：10 条=Core Capability（Gate 3）；32 KiB 与 10s=Gate 4 MCP Adapter） | ✅ DONE（2026-11-01） | Owner 任务书批准；实施记录见 PRI-1068 工单描述与 PR #2270 Owner Review Card |
+| OG-2：Gate 3 实施授权 | ✅ DONE（2026-11-01） | 同上；Owner 于 2026-11-01T10:23:37Z 亲自合并 PR #2270（merge `f15a5a6a6`）构成最终裁决 |
+| Gate 3 实施 | ✅ DONE | PR #2270 已合并；PRI-1068 Done；CI 26/26 全绿（含 Verify Merge Gate） |
+| OG-3：Gate 4 实施授权 | ❌ NOT AUTHORIZED | 无 Owner 授权记录；本 SPEC 与本次文档收口均不构成 OG-3 |
+| D-06：MCP Server 进程风险接受 | ⬜ PENDING | 仍是 Gate 4 准入条件；**OG-1/OG-2 的完成不构成对该风险的接受** |
+| WorkBuddy 实机 MCP 验证 | ⬜ PENDING | Gate 4 前置 |
+| （远期）OG-4 / OG-5 | ⬜ 未启动 | 触发条件出现后另行授权 |
+
+> 证据精度说明：OG-1/OG-2 原始任务书的精确审批时间戳未在仓库证据中存档，以上记录精确到日期（2026-11-01）；日期来自 PRI-1068 工单描述（"OG-1 已批准、OG-2 已授权"）与 PR #2270 Owner Review Card 的实施记录，并经 Owner 亲自合并 PR #2270 的动作佐证。
 
 ## 15. 本版状态与完成条件
 
 - [x] 最新基线复核完成（DELTA-AUDIT，十项 CONFIRMED）
 - [x] OD-A 白名单从冻结工件逐字段恢复并哈希验证
 - [x] Read Model / Facade / CLI / MCP 边界四层契约成文
-- [x] 状态映射、错误语义、输出断言冻结（数值三项 ⏳ 随 OG-1）
+- [x] 状态映射、错误语义、输出断言冻结（数值三项已随 OG-1 确认）
 - [x] 测试矩阵与停止条件冻结
 - [x] 实施机械清单配套（READINESS 文档）
-- [ ] **OG-1：Owner 采信本 SPEC（冻结生效）**
-- [ ] OG-2：实施授权（独立动作）
+- [x] **OG-1：Owner 采信本 SPEC（2026-11-01，冻结生效）**
+- [x] OG-2：实施授权（2026-11-01，独立动作已完成）
+- [x] Gate 3 Implementation 完成（PR #2270 已由 Owner 合并，merge `f15a5a6a6`）
 
-**本 SPEC 不授权任何代码变更。Gate 3 Implementation 以 OG-2 为唯一启动条件。**
+**本 SPEC 是当前有效的 Gate 3 实施契约；Gate 3 已按 OG-2 完成实施与合并。本 SPEC 不构成 Gate 4 授权——Gate 4（MCP Adapter）以 OG-3 为唯一启动条件，且 D-06 进程风险接受与 WorkBuddy 实机验证是其前置。**
 
 ---
 
@@ -454,4 +467,4 @@ principle.text · unresolvedAssociations[].{painId,candidateId} · statusDetail�
 
 ## 17. 结论
 
-**一套权威业务读取（Read Model）、一个受限披露出口（Capability Facade）、两个并列交付入口（CLI 现在、MCP Gate 4）、Hook 独立观测——OD-A 只辖 MCP 响应、CLI 契约零变化、全部只读证明随行迁移。** 本 SPEC 达到冻结条件，待 OG-1。
+**一套权威业务读取（Read Model）、一个受限披露出口（Capability Facade）、两个并列交付入口（CLI 现在、MCP Gate 4）、Hook 独立观测——OD-A 只辖 MCP 响应、CLI 契约零变化、全部只读证明随行迁移。** 本 SPEC 已由 OG-1 采信冻结（2026-11-01），并已作为 Gate 3 实施契约完成实施与合并（PR #2270）；Gate 4 尚未授权（OG-3 未决），D-06 与 WB 实机验证仍为其前置。

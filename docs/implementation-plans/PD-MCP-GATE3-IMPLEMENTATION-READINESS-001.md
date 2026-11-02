@@ -3,7 +3,7 @@
 
 | 字段 | 内容 |
 |---|---|
-| 文档性质 | 实施准备（设计交付）；**不构成实施授权**——启动条件 = SPEC v0.5 获 OG-1 采信 + OG-2 授权 |
+| 文档性质 | 实施准备（设计交付）；**不构成实施授权**——启动条件 = SPEC v0.5 获 OG-1 采信 + OG-2 授权。**执行状态（2026-11-02 收口更新）：OG-1/OG-2 已确认，本清单已按授权于 2026-11-01 执行完毕（PR #2270 已由 Owner 合并，PRI-1068 Done）——本文保留为实施过程记录与防错设计参考，不再要求重复执行；最终证据见 `PD-MCP-GATE3-IMPLEMENTATION-REPORT-001.md`（含 Post-Merge Closeout Addendum）** |
 | 契约依据 | `docs/specs/SPEC-PD-AGENT-CAPABILITY-API-001-v0.5.md`（下称 v0.5） |
 | 事实依据 | `docs/implementation-reports/PD-MCP-GATE3-LATEST-SOURCE-DELTA-AUDIT.md`（基线 `0d0ea7eb5`，下称 DELTA-AUDIT） |
 | 决策依据 | `docs/implementation-reports/PD-MCP-GATE3-OWNER-DECISION-CARD.md` + 2026-11-01 Owner 九项已决 |
@@ -272,13 +272,15 @@ export async function recallPrinciplePainsCapability(
 
 ## 16. 实施前最终核对单（PR 开工时执行）
 
-- [ ] OG-1 已采信 SPEC v0.5（含 §7.5 数值）；OG-2 已授权
-- [ ] `git log 796000a10..<当日HEAD> -- packages/pd-cli/src/services/pain-recall.ts` 确认零外部修改
-- [ ] 独立 worktree（`npm run dev:worktree -- PRI-<id> pain-recall-extraction`）+ claim + bootstrap READY
-- [ ] 黄金夹具与黄金 JSON 在删除旧路径前生成并检入（记录 SHA-256）
-- [ ] §1 全表步骤在单变更集内完成；§14 停止条件全程有效
-- [ ] **范围自检**：diff 中无任何 Gate 4 Adapter 职责（32 KiB 预算、10s 超时/取消、MCP 协议类型——见 §17 与 §14 P1-6）
-- [ ] PR 描述附：Complexity Delta（v0.5 §1 已述）+ Owner Review Card + 本文引用
+> **执行状态（2026-11-02 收口更新）：本核对单已按 OG-1/OG-2 于 2026-11-01 执行完毕，下列条目全部满足。** 逐项执行证据见 `PD-MCP-GATE3-IMPLEMENTATION-REPORT-001.md` §2–§7 及其 Post-Merge Closeout Addendum（§9）。复选框保留原始清单语义，仅标记完成状态；**本文档不再要求对 Gate 3 重复执行**。
+
+- [x] OG-1 已采信 SPEC v0.5（含 §7.5 数值）；OG-2 已授权（2026-11-01；决策记录见 OWNER-DECISION-CARD §〇）
+- [x] `git log 796000a10..<当日HEAD> -- packages/pd-cli/src/services/pain-recall.ts` 确认零外部修改（实施基线 `797d2e9fd` 复核通过，报告 §2）
+- [x] 独立 worktree（`npm run dev:worktree -- PRI-<id> pain-recall-extraction`）+ claim + bootstrap READY（`PRI-1068-pain-recall-extraction`，报告 §头部表格）
+- [x] 黄金夹具与黄金 JSON 在删除旧路径前生成并检入（记录 SHA-256）（报告 §头部"黄金生成记录"）
+- [x] §1 全表步骤在单变更集内完成；§14 停止条件全程有效（报告 §2/§5；P0/P1 零触发记录）
+- [x] **范围自检**：diff 中无任何 Gate 4 Adapter 职责（32 KiB 预算、10s 超时/取消、MCP 协议类型——见 §17 与 §14 P1-6）（报告 §8 最终边界声明）
+- [x] PR 描述附：Complexity Delta（v0.5 §1 已述）+ Owner Review Card + 本文引用（PR #2270 描述在档）
 
 ---
 

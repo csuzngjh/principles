@@ -12,6 +12,8 @@
 | 下游交付 | 本报告 + `SPEC-PD-AGENT-CAPABILITY-API-001-v0.5.md` + `PD-MCP-GATE3-IMPLEMENTATION-READINESS-001.md` + `PD-MCP-GATE3-OWNER-DECISION-CARD.md` |
 | 执行边界 | 只读审计/读历史 PR/写上述四份设计文档；零生产源码/测试/package.json/lockfile/Hook/CLI 改动；零 PR/push/merge |
 
+> **后续状态注记（2026-11-02 文档收口追加，不改写本报告任何历史结论）**：本报告为 2026-11-01 基线 `0d0ea7eb5` 时点的审计快照。文中"READY_PENDING_OG2"等状态表述均为审计时点结论；此后 OG-1（SPEC v0.5 采信）与 OG-2（Gate 3 实施授权）已于 2026-11-01 确认，Gate 3 已实施并由 Owner 合并（PR #2270，merge `f15a5a6a6`）。当前权威决策状态见 `PD-MCP-GATE3-OWNER-DECISION-CARD.md` §〇 与 `SPEC-PD-AGENT-CAPABILITY-API-001-v0.5.md` 状态行。
+
 **结论标记约定**：每项结论标注 CONFIRMED（本轮在 `0d0ea7eb5` 直证）/ CHANGED（与对照基线相比有变化）/ OBSOLETE（前轮结论已失效）/ NOT_VERIFIED。所有行号为**本轮工作区现测**，未沿用旧报告行号。
 
 **基线保护记录**：主 checkout 既有未提交修改（6 删除跟踪文件 + 多个未跟踪路径，含 `docs/specs/PD-MCP-GATE3-PROPOSAL-001-OPTIMIZED.md`、`docs/specs/SPEC-PD-AGENT-CAPABILITY-API-001-v0.2.md`、`docs/proposals/` 等）本轮零触碰；两个前置 worktree（gate2 / hook-verify）只读访问；%TEMP% 证据只读 + 哈希计算；代码调查全部在独立审计 worktree。

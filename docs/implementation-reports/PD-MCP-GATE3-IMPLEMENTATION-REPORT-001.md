@@ -4,10 +4,10 @@
 | 字段 | 内容 |
 |---|---|
 | 任务 | SPEC-PD-AGENT-CAPABILITY-API-001 v0.5（OG-1 冻结）的 Gate 3 单变更集实施 |
-| 实施工单 | PRI-1068（In Review） |
+| 实施工单 | PRI-1068（In Review；**实施时点状态，合并后已置 Done——见 §9 附录**） |
 | 实施基线 | origin/main `797d2e9fd`（2026-11-01 fetch；比 DELTA-AUDIT 基线 `0d0ea7eb5` 新 8 个提交，全部经并发修改复核确认零交集） |
 | 提交追溯 | **实施主提交** `bf7191f85`（feat，单变更集）；**夹具合规修复** `e8168902a`（扁平 .fixture 存储+物化）与 `892228d95`（ws-empty 零文件工作区容忍）；**报告** `f994c040f`（初版）→ `df9d0a7ce`（终稿）；**main 刷新 merge** `3de36f661`/`890194ca9`；**评审修复轮** `2688d3991`（G-1 子路径检测+守卫自排除消除、OD-A 结构性自检、invalid_input data:null、黄金目录快照+子进程截止、SHA 追溯、FIXTURE_SUFFIX 删除）；**CI 26/26 验证 HEAD：round 1 = `890194ca9`、round 2（评审修复后）= `2688d3991`**。 |
-| PR | [#2270](https://github.com/csuzngjh/principles/pull/2270)（OPEN，待 Owner 评审；AI 不合并） |
+| PR | [#2270](https://github.com/csuzngjh/principles/pull/2270)（OPEN，待 Owner 评审；AI 不合并。**实施时点状态——现已由 Owner 合并：2026-11-01T10:23:37Z，merge `f15a5a6a6`，见 §9 附录**） |
 | 实施形态 | 单变更集 + 单次 git-7 刷新 merge；独立 worktree `D:\Code\_worktrees\principles\PRI-1068-pain-recall-extraction`（writer=zcode，租约+git lock 持有） |
 | 黄金生成记录 | 生成脚本 `.tmp/pain-recall-golden/generate-goldens.mjs`（worktree 内，gitignored）；生成时点 = 删除旧实现**之前**、built CLI 为旧路径实现（base `797d2e9fd` 构建）；MANIFEST.json 含全部夹具与输出 SHA-256 |
 
@@ -96,3 +96,44 @@
 ## 8. 最终边界声明
 
 本实施**未**：实现 MCP Server；引入 MCP SDK；修改 Hook/hooks.json/tool-semantics/宿主配置/生产治理逻辑；实现 Gate 4（32 KiB 响应预算、10 秒调用截止、取消机制、MCP 协议类型均未进入 Core/Facade——范围自检通过）；创建 pd-application；新增外部依赖/feature flag/数据库 schema/迁移；发布 npm；部署生产；合并 PR。**最终状态：READY_FOR_OWNER_REVIEW（PR #2270 OPEN）。**
+
+---
+
+## 9. Post-Merge Closeout Addendum（2026-11-02 记录收口追加）
+
+> 本节为**合并后收口附录**，于 2026-11-02 由 Owner 授权的文档一致性收口任务追加。上方 §1–§8 完整保留**实施交付时点状态**（当时 PR #2270 为 OPEN、PRI-1068 为 In Review）——不因本附录改写；实施时点的"待评审"表述不构成"实施时已合并"的假象。当前权威决策状态见 `PD-MCP-GATE3-OWNER-DECISION-CARD.md` §〇。
+
+### 9.1 最终合并状态
+
+| 项 | 值 |
+|---|---|
+| PR #2270 | **MERGED**（标题：feat(core): PD MCP Gate 3 — pain-recall Read Model + od-a-v1 Capability Facade (PRI-1068)） |
+| 合并时间 | 2026-11-01T10:23:37Z |
+| 合并人 | Owner `csuzngjh`（PD）亲自合并——AI 未执行合并 |
+| Merge commit | `f15a5a6a6de75b8e9ce7eb909fac1e137637665a` |
+| 合并前 CI | 26/26 全绿（含 Verify Merge Gate 全量门，验证 HEAD `2688d3991`，§5/§7 所载两轮证据） |
+| Linear | PRI-1068 置 **Done**（2026-11-01，紧随合并动作） |
+| 收口时主干 | `b98e7e339`（2026-11-02 fetch origin/main；`f15a5a6a6` 为其祖先，经 `git merge-base --is-ancestor` 验证） |
+
+### 9.2 后续版本联动 PR 对应关系（§6 发布治理的落地证据）
+
+| PR | 内容 | 合并时间 (UTC) | Merge commit |
+|---|---|---|---|
+| [#2274](https://github.com/csuzngjh/principles/pull/2274) | Version Packages（changesets 消费四包 changeset：core minor + pd-cli/plugin/installer patch） | 2026-11-01T12:20:42Z | `028bd1d8197cd5e6cd3187d3e6c0944848a95b9b` |
+| [#2276](https://github.com/csuzngjh/principles/pull/2276) | Version Packages | 2026-11-02T00:40:57Z | `0a1891dc148e850c30d4fb823ae0a816ec8e4cf8` |
+| [#2277](https://github.com/csuzngjh/principles/pull/2277) | 产品版本 bump 至 2.8.0 | 2026-11-02T01:39:40Z | `0ff5f9f031d83f8243f26c62881db4c13e6ab4ab` |
+| [#2278](https://github.com/csuzngjh/principles/pull/2278) | codex 已发布运行时 pins 刷新 | 2026-11-02T02:18:37Z | `b98e7e339d7061a5d9a06efef8991c4b2e4ce349` |
+
+四者均由 Owner 合并；即 §6/READINESS §12 所述"changesets → Version PR → publish 列车 → runtime pins 自动刷新"路径的实际执行记录。
+
+### 9.3 Gate 3 最终验收结论
+
+- **Gate 3 状态：DONE。** 实施交付时点裁定 PASS（§1）经 Owner 合并确认，无合并后回归记录。
+- 合并后运行时可解析性复核（2026-11-02，收口任务在基于 `b98e7e339` 新建 worktree 的 READY 检查中直证）：`@principles/core/runtime-v2/pain-recall`（Read Model 子路径）与 `@principles/core/runtime-v2/pain-recall-capability`（Capability 子路径）均真实解析到本 worktree 构建产物——L3 runtime resolve 全绿。
+- 决策链同步：OG-1（SPEC v0.5 采信）与 OG-2（实施授权）于 2026-11-01 确认；SPEC v0.5 状态已更新为 FROZEN；权威状态表见 `PD-MCP-GATE3-OWNER-DECISION-CARD.md` §〇。
+
+### 9.4 Gate 4 边界重申（本附录不改变）
+
+- **Gate 4（MCP Adapter）未获授权（OG-3 NOT AUTHORIZED）**；本次文档收口不构成 OG-3。
+- 未决前置保持原样：D-06 MCP Server 进程风险接受（**OG-1/OG-2/Gate 3 的完成不构成对该风险的接受**）；WorkBuddy 实机 MCP 验证；目标宿主审批模型重验；32 KiB 响应预算、10 秒调用截止、超时诚实性（不 false-success / 迟到结果不重发不误记）、底层取消语义、SDK 精确锁版、环境变量白名单与进程生命周期管理——全部仍属 Gate 4 范围（SPEC v0.5 §7.5.3/§7.5.4/§10.1，READINESS §17）。
+- Hook 治理覆盖现状不变：生产 matcher `Bash|apply_patch` 对 MCP 工具名零命中；是否扩展 matcher 属 OG-4 独立决策，不因本附录改变。
