@@ -105,6 +105,41 @@ async function runGuard(baseSha: string): Promise<{ code: number; stdout: string
   return sh(process.execPath, [GUARD, '--repo-root', repo], repo, { PR_BASE_SHA: baseSha });
 }
 
+/** CI shape: checkout is the merge ref; the PR base recorded on the PR is stale. */
+async function runGuardMergeRef(
+  staleBaseSha: string,
+  prHeadSha: string,
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  return sh(process.execPath, [GUARD, '--repo-root', repo], repo, {
+    PR_BASE_SHA: staleBaseSha,
+    PR_HEAD_SHA: prHeadSha,
+  });
+}
+
+/**
+ * Reproduce GitHub's PR merge-ref shape:
+ *   base(PR opened) -> main lands an EMPTY no-release changeset
+ *   base -> PR branch (one publishable change, optional own changeset)
+ *   merge commit: first parent = main tip, second parent = PR head
+ */
+async function simulateMergeRef(withPrChangeset: boolean): Promise<{ base: string; prHead: string }> {
+  const base = await git(['rev-parse', 'HEAD']);
+  await git(['checkout', '-b', 'pri964-pr']);
+  write('packages/core/src-merged.js', 'export {};\n');
+  if (withPrChangeset) write('.changeset/pri964-pr.md', changeset("'@principles/core': patch"));
+  const prHead = await commitAll('feat(core): PRI-964 PR change');
+  await git(['checkout', 'main']);
+  write('.changeset/main-no-release.md', '---\n---\n\nMain landed this after the PR opened.\n');
+  await commitAll('chore: main no-release changeset');
+  await git(['merge', '--no-ff', 'pri964-pr', '-m', 'merge PRI-964 PR']);
+  return { base, prHead };
+}
+
+async function cleanupMergeRef(base: string) {
+  await git(['reset', '--hard', base]);
+  await git(['branch', '-D', 'pri964-pr']);
+}
+
 /** npm is npm.cmd on Windows and needs a shell there (fixed args, no quoting hazards). */
 function npmSh(args: string[], cwd: string) {
   const isWin = process.platform === 'win32';
@@ -249,6 +284,32 @@ describe('guard: normal PR release-intent contract', () => {
     expect(r.code).toBe(1);
     expect(r.stderr).toContain('N-3');
     await git(['reset', '--hard', base]);
+  });
+
+  // PRI-964: CI checks out GitHub's merge ref, whose first parent is the LIVE
+  // main tip. Using the PR's stale recorded base made every main commit after
+  // PR-open part of "this PR" — an empty no-release changeset landed on main
+  // then produced a false red on the required check.
+  it('PRI-964: main changesets landed after PR open are not charged to the PR', async () => {
+    const { base, prHead } = await simulateMergeRef(true);
+    try {
+      const r = await runGuardMergeRef(base, prHead);
+      expect(r.code, r.stderr).toBe(0);
+      expect(r.stdout).toContain('RELEASE_INTENT_GUARD PASS mode=normal');
+    } finally {
+      await cleanupMergeRef(base);
+    }
+  });
+
+  it('PRI-964 negative control: a PR with no changeset of its own still fails', async () => {
+    const { base, prHead } = await simulateMergeRef(false);
+    try {
+      const r = await runGuardMergeRef(base, prHead);
+      expect(r.code).toBe(1);
+      expect(r.stderr).toContain('N-3');
+    } finally {
+      await cleanupMergeRef(base);
+    }
   });
 
   it('passes with a matching changeset (baseline for later tests)', async () => {

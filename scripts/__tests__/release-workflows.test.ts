@@ -316,6 +316,60 @@ describe('version-packages.yml — rolling Version PR automation', () => {
     expect(t).toContain('resolve-release-cohort.mjs --is-cohort');
     expect(t).toContain('gh workflow run publish-npm.yml --ref main -f cohort_sha=');
   });
+
+  // PRI-1014: the bot must be able to re-materialize an EXISTING Version PR
+  // branch. A checkout without that ref leaves `changeset-release/main`
+  // unknown to git; the action then rebuilds from main and its API ref update
+  // is rejected, permanently wedging the release train. These assertions pin
+  // the two halves of the fix without widening the workflow's trigger surface.
+  it('offers workflow_dispatch for human recovery but never widens PR triggers', () => {
+    const doc = loadWorkflow(rel) as Record<string, unknown>;
+    const onBlock = (doc.on ?? doc[String(true)]) as Record<string, unknown> | undefined;
+    expect(onBlock).toBeDefined();
+    expect(Object.keys(onBlock ?? {}).sort()).toEqual(['push', 'workflow_dispatch']);
+    expect(onBlock).not.toHaveProperty('pull_request');
+  });
+
+  it('never pre-creates changeset-release/main as a LOCAL branch before the action (P0)', () => {
+    const t = text();
+    // changesets/action v2.1.2 `prepareBranch` runs:
+    //   git checkout <branch>
+    //   if stderr lacks "Switched to a new branch <branch>": git checkout -b
+    //   git reset --hard context.sha
+    // A pre-existing LOCAL branch makes the first checkout print
+    // "Switched to branch", so the action runs `checkout -b` and dies with
+    // "a branch named ... already exists" (exit 128). Fetching the branch into
+    // refs/heads is therefore worse than not fetching it at all; the action
+    // recreates the branch and the CLI force push below replaces its content.
+    // Adding a local-branch fetch step back MUST turn this test red.
+    expect(t).not.toContain('git fetch');
+    expect(t).not.toContain('fetch-version-pr-branch.mjs');
+    expect(t).not.toContain('refs/heads/changeset-release/main');
+    const doc = loadWorkflow(rel) as {
+      jobs?: Record<string, { steps?: Array<{ name?: string }> }>;
+    };
+    const steps = doc.jobs?.version?.steps ?? [];
+    expect(steps.some((step) => step.name === 'Fetch existing Version PR branch')).toBe(false);
+  });
+
+  it('requires workflow_dispatch to run on refs/heads/main', () => {
+    const t = text();
+    // A feature-branch dispatch would materialize unpublished code as a
+    // Version PR. The hard gate fails before checkout.
+    expect(t).toContain('test "${GITHUB_REF}" = "refs/heads/main"');
+    expect(t).toContain('dispatch must run on refs/heads/main');
+  });
+
+  it('uses the action Git CLI push path and an explicit main PR base (PRI-1014)', () => {
+    const t = text();
+    // The GitHub API force-update path is what returned
+    // "Reference cannot be updated" on a branch whose tip had diverged from
+    // main. `push-with-git-cli` is the action's supported force-push path;
+    // `pr-base-branch: main` keeps a manual dispatch from targeting the
+    // operator's current branch by accident.
+    expect(t).toContain('push-with-git-cli: true');
+    expect(t).toContain('pr-base-branch: main');
+  });
 });
 
 describe('ci.yml — release intent guard is inside the required gate', () => {
@@ -323,7 +377,14 @@ describe('ci.yml — release intent guard is inside the required gate', () => {
     const t = fs.readFileSync(path.join(REPO_ROOT, '.github/workflows/ci.yml'), 'utf8');
     expect(t).toContain('Release intent guard (changesets)');
     expect(t).toContain('check-pr-release-intent.mjs');
-    expect(t).toContain('PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}');
+    // PRI-964: CI must not hand the GUARD the stale recorded base.sha; the
+    // guard derives the live base from the merge ref / origin/main. Scope the
+    // assertion to this step: the codex-pins `--check-base` probe legitimately
+    // still uses base.sha for its own diff.
+    const guardStep = t.slice(t.indexOf('Release intent guard (changesets)'));
+    const stepBody = guardStep.slice(0, guardStep.indexOf('Run canonical merge gate'));
+    expect(stepBody).toContain('PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}');
+    expect(stepBody).not.toContain('PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}');
   });
 });
 
