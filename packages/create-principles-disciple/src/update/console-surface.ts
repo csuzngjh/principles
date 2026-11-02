@@ -28,6 +28,8 @@ export {
   recoverUnfinishedTransaction,
   isTerminalTransactionState,
   readActiveRecord,
+  hasRecoveryResolution,
+  RESTORE_INCONSISTENCY_MARKER,
   type ActiveRecord,
   type JournalTransition,
   type RecoveryAwareJournalRead,

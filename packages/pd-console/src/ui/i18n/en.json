@@ -1827,6 +1827,8 @@
       "reasonLabel": "Reason: ",
       "recoveryBanner": "An unfinished update transaction was found",
       "recoveryItem": "Transaction {{id}} stopped at phase \"{{phase}}\"",
+      "recoveryRequiredBanner": "A failed update left the installation inconsistent (recovery required)",
+      "recoveryRequiredItem": "Failed transaction {{id}} needs recovery — re-run the official installer",
       "inProgressToast": "Update transaction accepted and running in the background; do not click again.",
       "inProgressPanel": "Update in progress",
       "inProgressPhase": "Current phase: {{phase}}",

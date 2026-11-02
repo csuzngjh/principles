@@ -111,7 +111,11 @@ function answerHealthy(httpMock: { get: ReturnType<typeof vi.fn> }): void {
     res.statusCode = 200;
     setImmediate(() => {
       cb(res);
-      res.emit('data', Buffer.from(JSON.stringify({ success: true, data: { overall: 'healthy' } })));
+      // G1 P0-1: while PD_CONSOLE_VERIFY_NONCE is set the caller is
+      // verifyConsole probing the freshly deployed console child (spawned
+      // --no-auth); a faithful fake answers in that posture and echoes the
+      // nonce, exactly like the real child's /api/health.
+      res.emit('data', Buffer.from(JSON.stringify({ success: true, data: { overall: 'healthy', authenticationMode: 'no_auth', ...(process.env.PD_CONSOLE_VERIFY_NONCE ? { verifyNonce: process.env.PD_CONSOLE_VERIFY_NONCE } : {}) } })));
       res.emit('end');
     });
     return { on: vi.fn(), setTimeout: vi.fn(), destroy: vi.fn() };

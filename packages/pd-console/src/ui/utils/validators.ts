@@ -2996,6 +2996,13 @@ export interface UpdateRecoveryData {
    */
   superseded: UpdateRecoverySuperseded[];
   /**
+   * PRI-1069/1070 (G1 P0-4): terminal `failed` transactions whose detail
+   * carries a restore-inconsistency marker — the physical install is NOT what
+   * the terminal state implies. They stay alarmed until a later completed
+   * install records their recovery.
+   */
+  recoveryRequired: { transactionId: string; reason: string }[];
+  /**
    * rc-9 (PRI-896/CR-2): active.json could not be read, so recovery had no
    * live-release evidence and every non-terminal journal is conservatively an
    * alarm. When true the alarm is retained for lack of a readable active
@@ -3037,7 +3044,15 @@ export function validateUpdateRecovery(v: unknown): UpdateRecoveryData | null {
       superseded.push({ transactionId: item.transactionId, reason: item.reason });
     }
   }
-  const result: UpdateRecoveryData = { needsRecovery: v.needsRecovery, unfinished, broken, superseded };
+  const recoveryRequired: { transactionId: string; reason: string }[] = [];
+  if (Object.hasOwn(v, 'recoveryRequired') && Array.isArray(v.recoveryRequired)) {
+    for (const item of v.recoveryRequired) {
+      if (!isObject(item) || !Object.hasOwn(item, 'transactionId') || !isString(item.transactionId)) continue;
+      if (!Object.hasOwn(item, 'reason') || !isString(item.reason)) continue;
+      recoveryRequired.push({ transactionId: item.transactionId, reason: item.reason });
+    }
+  }
+  const result: UpdateRecoveryData = { needsRecovery: v.needsRecovery, unfinished, broken, superseded, recoveryRequired };
   if (Object.hasOwn(v, 'activeRecordUnreadable') && typeof v.activeRecordUnreadable === 'boolean') {
     result.activeRecordUnreadable = v.activeRecordUnreadable;
   }
