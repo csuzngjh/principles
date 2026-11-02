@@ -484,10 +484,12 @@ describe('PRI-451 Wave 1: dead pain-diagnostic-track symbols removed', () => {
     expect(src).not.toMatch(/\brecordRuleMatch\s*\(/);
     // Pain Phase 0: the Semantic detection block (DetectionService) and the
     // LLM Paralysis trigger were retired — the GFI branch is the remaining
-    // pain source on this hook (bounded retirement is Phase C).
-    expect(src).not.toMatch(/DetectionService/);
-    expect(src).not.toMatch(/llm_paralysis/);
-    expect(src).not.toMatch(/stuckLoops/);
+    // pain source on this hook (bounded retirement is Phase C). Assertions
+    // use call/identifier syntax (this file's convention) so the retirement
+    // comments above the retired sites do not false-positive.
+    expect(src).not.toMatch(/\bDetectionService\s*\.\s*get\b/);
+    expect(src).not.toMatch(/'llm_paralysis'/);
+    expect(src).not.toMatch(/state\.stuckLoops/);
     // The GFI branch that feeds the shared write points must remain.
     expect(src).toMatch(/isGfiTriggered/);
     expect(src).toMatch(/user_empathy/);
