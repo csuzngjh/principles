@@ -332,13 +332,11 @@ describe('version-packages.yml — rolling Version PR automation', () => {
 
   it('fetches the existing Version PR branch before the action runs', () => {
     const t = text();
-    // The fetch is conditional: a fresh cycle (branch deleted after merge) must
-    // not fail the job, while an open Version PR branch must become visible to
-    // the action's `git checkout`.
-    expect(t).toContain('git ls-remote --exit-code --heads origin changeset-release/main');
-    expect(t).toContain('refs/heads/changeset-release/main:refs/heads/changeset-release/main');
-    expect(t.indexOf('git fetch')).toBeGreaterThan(-1);
-    expect(t.indexOf('git fetch')).toBeLessThan(t.indexOf('changesets/action@'));
+    // The executable fetch logic (existing branch and absent branch) is
+    // covered against a real git remote in fetch-version-pr-branch.test.ts.
+    // This pins that the workflow actually runs that script before the action.
+    expect(t).toContain('node scripts/release/fetch-version-pr-branch.mjs');
+    expect(t.indexOf('fetch-version-pr-branch.mjs')).toBeLessThan(t.indexOf('changesets/action@'));
   });
 
   it('uses the action Git CLI push path and an explicit main PR base (PRI-1014)', () => {

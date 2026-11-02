@@ -45,15 +45,10 @@ jobs:
         # PRI-1014: changesets/action does `git checkout changeset-release/main`
         # before materializing. If that ref is absent, it creates a branch from
         # main and then its ref update is rejected when the Version PR branch
-        # already exists. Fetch ONLY this bot branch, and tolerate its absence
-        # (normal case immediately after a Version PR merge), so ordinary
-        # checkouts and PR flows are untouched.
-        run: |
-          if git ls-remote --exit-code --heads origin changeset-release/main >/dev/null 2>&1; then
-            git fetch --no-tags origin "+refs/heads/changeset-release/main:refs/heads/changeset-release/main"
-          else
-            echo "No existing changeset-release/main branch — the action will create one."
-          fi
+        # already exists. The script fetches ONLY this bot branch and tolerates
+        # its absence (normal after a Version PR merge), leaving ordinary
+        # checkouts and PR flows untouched.
+        run: node scripts/release/fetch-version-pr-branch.mjs
 
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
