@@ -64,7 +64,7 @@ import {
 } from './examiner-study-inputs.js';
 import {
   appendConsoleRunEvent, mintRunId, readConsoleRuns, currentConsoleRun, recoverUnfinishedConsoleRuns,
-  hostDryRunPass, f2AuthorizationGate, CONSOLE_RUN_SCHEMA, CONSOLE_RUN_MODES, type ConsoleRunMode,
+  hostDryRunPass, f2AuthorizationGate, CONSOLE_RUN_SCHEMA, CONSOLE_RUN_MODES,
 } from './examiner-runs.js';
 
 type HostCapability = Record<string, string>;
@@ -74,7 +74,6 @@ type HostCapability = Record<string, string>;
 const LAB_ENTRY = path.join('lib', 'examiner-study.mjs');
 const PRINCIPLE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const STUDY_ROUTE_PATTERN = /^\/studies\/([A-Za-z0-9-]+)(\/[^/]*)?$/;
-const PRINCIPLE_EVIDENCE_PATTERN = /^\/principles\/([A-Za-z0-9][A-Za-z0-9._:-]{0,127})\/evidence$/;
 
 /**
  * Locate the principle-learning-lab payload. Two layouts are legitimate and
@@ -209,10 +208,15 @@ export async function handleExaminerRoute(
   // ── v0.10.1 §4/§5: production evidence aggregate (BEFORE the lab gate —
   // production evidence is a property of the workspace runtime, not of the
   // research engine; an installation without the lab still answers honestly).
-  const evidenceMatch = subPath.match(PRINCIPLE_EVIDENCE_PATTERN);
-  if (evidenceMatch?.[1] !== undefined && method === 'GET') {
+  // Segment parsing (no regex): /principles/<charset-validated-id>/evidence.
+  const evidencePrefix = '/principles/';
+  const evidenceSuffix = '/evidence';
+  const evidencePrincipleId = subPath.startsWith(evidencePrefix) && subPath.endsWith(evidenceSuffix)
+    ? subPath.slice(evidencePrefix.length, subPath.length - evidenceSuffix.length)
+    : null;
+  if (evidencePrincipleId !== null && PRINCIPLE_ID_PATTERN.test(evidencePrincipleId) && method === 'GET') {
     const model = new ExaminerEvidenceModel(workspaceDir);
-    const evidence = await model.getPrincipleEvidence(evidenceMatch[1]);
+    const evidence = await model.getPrincipleEvidence(evidencePrincipleId);
     if (!evidence) {
       sendError(res, 404, 'principle_not_found', 'the principle was not found in the workspace ledger');
       return;
@@ -442,7 +446,7 @@ export async function handleExaminerRoute(
         const acceptedAt = new Date().toISOString();
         appendConsoleRunEvent(roots, studyDir, {
           type: 'CONSOLE_RUN_ACCEPTED', schema: CONSOLE_RUN_SCHEMA, runId, studyId: access.studyId,
-          mode: requestedMode as ConsoleRunMode, acceptedAt, pid: process.pid, owner: 'pd-console',
+          mode: requestedMode, acceptedAt, pid: process.pid, owner: 'pd-console',
         });
         // Detached work: the accepted run settles itself through the study
         // ledger. The promise is intentionally not awaited (§12.3: long work
@@ -451,7 +455,7 @@ export async function handleExaminerRoute(
           const finishedAt = new Date().toISOString();
           try {
             if (requestedMode === 'host-dry-run') {
-              const dryRun = await hostDryRunPass(labModules, labRoot, studyDir, context);
+              const dryRun = await hostDryRunPass({ modules: labModules, labRoot, studyDir, context });
               appendConsoleRunEvent(roots, studyDir, {
                 type: dryRun.ok ? 'CONSOLE_RUN_FINISHED' : 'CONSOLE_RUN_FAILED',
                 schema: CONSOLE_RUN_SCHEMA, runId, studyId: access.studyId,
@@ -477,7 +481,7 @@ export async function handleExaminerRoute(
             logRefusal(`console run ${runId} failed`, error);
             appendConsoleRunEvent(roots, studyDir, {
               type: 'CONSOLE_RUN_FAILED', schema: CONSOLE_RUN_SCHEMA, runId, studyId: access.studyId,
-              mode: requestedMode as ConsoleRunMode, acceptedAt, pid: process.pid, owner: 'pd-console',
+              mode: requestedMode, acceptedAt, pid: process.pid, owner: 'pd-console',
               finishedAt, outcome: 'RUN_ERROR', reason: 'the console run failed (details in the console server log)',
             });
           }

@@ -35,7 +35,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
-import { canonicalPathSync, isPathInside, isJsonObject, preflightCheck, type LabModules, type StudyRoots } from './examiner-executor.js';
+import { canonicalPathSync, isJsonObject, preflightCheck, type LabModules, type StudyRoots } from './examiner-executor.js';
 
 export const CONSOLE_RUN_SCHEMA = 'examiner-console-run.v1';
 export const CONSOLE_RUN_EVENT_TYPES = ['CONSOLE_RUN_ACCEPTED', 'CONSOLE_RUN_FINISHED', 'CONSOLE_RUN_FAILED', 'CONSOLE_RUN_ABANDONED'] as const;
@@ -266,56 +266,59 @@ export interface HostDryRunResult {
  * deliberately a checklist, not a pass/fail black box — the Owner sees exactly
  * which prerequisite is missing before real execution can be requested.
  */
-export async function hostDryRunPass(modules: LabModules, labRoot: string, studyDir: string, context: { labRoot: string; roots: StudyRoots } | undefined): Promise<HostDryRunResult> {
+export async function hostDryRunPass(input: { modules: LabModules; labRoot: string; studyDir: string; context: { labRoot: string; roots: StudyRoots } | undefined }): Promise<HostDryRunResult> {
+  const { modules, labRoot, studyDir, context } = input;
   const checks: DryRunCheck[] = [];
-  const check = (id: string, severity: DryRunCheck['severity'], ok: boolean, detail: string) => checks.push({ id, severity, ok, detail });
+  const check = (entry: { id: string; ok: boolean; detail: string; severity?: DryRunCheck['severity'] }): void => {
+    checks.push({ id: entry.id, severity: entry.severity ?? 'blocker', ok: entry.ok, detail: entry.detail });
+  };
 
   // 1. The frozen offline contract must still verify.
   try {
     const preflight = preflightCheck(modules, studyDir, context);
-    check('offline_contract_preflight', 'blocker', preflight.ok, preflight.ok
+    check({ id: 'offline_contract_preflight', ok: preflight.ok, detail: preflight.ok
       ? 'the frozen study contract verified (manifest/HEPS/RuleCode/pairs/bindings)'
-      : `preflight blockers: ${preflight.blockers.map((b) => String((b as { id?: string }).id ?? 'unknown')).join(', ')}`);
+      : `preflight blockers: ${preflight.blockers.map((b) => String((b as { id?: string }).id ?? 'unknown')).join(', ')}` });
   } catch (error) {
-    check('offline_contract_preflight', 'blocker', false, `preflight could not run: ${(error as Error).message}`);
+    check({ id: 'offline_contract_preflight', ok: false, detail: `preflight could not run: ${(error as Error).message}` });
   }
 
   // 2. Stage R authorization: what the Owner has (or has not) issued.
   const stageR = await readStageR(labRoot, studyDir);
   const facts = stageRFacts(stageR.record);
   const authOk = stageR.present && facts.status === 'APPROVED' && facts.executionMode === 'F2-real-host' && !facts.revoked && !facts.halted;
-  check('stage_r_authorization', 'blocker', authOk, authOk
+  check({ id: 'stage_r_authorization', ok: authOk, detail: authOk
     ? `APPROVED F2-real-host authorization present (model ${facts.model ?? 'unspecified'}, validUntil ${facts.validUntil ?? 'unbounded'})`
     : stageR.present
       ? `a run-authorization.json exists but is not an approvable F2 record (status=${facts.status ?? 'unknown'}, mode=${facts.executionMode ?? 'unknown'}${facts.revoked ? ', REVOKED' : ''}${facts.halted ? ', HALTED' : ''})`
-      : 'no run-authorization.json in the study — the Owner must issue an APPROVED F2-real-host record before real execution');
+      : 'no run-authorization.json in the study — the Owner must issue an APPROVED F2-real-host record before real execution' });
 
   // 3. OpenClaw CLI probe — a LOCAL `--version` process, never a model call,
   //    delegated to the lab's read-only probe with NO executable argument
   //    (fixed default 'openclaw'; untrusted study data never picks binaries).
   let cliVersion: string | null = null;
   let hostOk = false;
-  let hostNote = '';
+  let hostNote: string;
   try {
     const hostUrl = pathToFileURL(path.join(labRoot, 'lib', 'challenge-openclaw-host.mjs')).href;
     const hostMod = (await import(hostUrl)) as { probeOpenClawCli?: (options?: Record<string, unknown>) => { ok: boolean; cliVersion: string | null; reason: string | null } };
     if (typeof hostMod.probeOpenClawCli !== 'function') {
       hostNote = 'the OpenClaw host module in this lab payload does not export the read-only CLI probe';
     } else {
-      const probe = hostMod.probeOpenClawCli();
-      hostOk = probe.ok === true;
-      cliVersion = probe.cliVersion;
-      hostNote = hostOk ? `OpenClaw CLI reachable (${cliVersion})` : `OpenClaw CLI not reachable: ${probe.reason ?? 'unknown reason'}`;
+      const { ok, cliVersion: probedVersion, reason } = hostMod.probeOpenClawCli();
+      hostOk = ok === true;
+      cliVersion = probedVersion;
+      hostNote = hostOk ? `OpenClaw CLI reachable (${cliVersion})` : `OpenClaw CLI not reachable: ${reason ?? 'unknown reason'}`;
     }
   } catch (error) {
     hostNote = `the OpenClaw CLI probe could not run (${(error as Error).message})`;
   }
-  check('host_cli_probe', 'blocker', hostOk, hostNote);
+  check({ id: 'host_cli_probe', ok: hostOk, detail: hostNote });
 
   // 4. Isolation workspace probe: per-arm round dirs must be creatable inside
   //    the writable study root (create + remove, nothing left behind).
   let isolationOk = false;
-  let isolationNote = '';
+  let isolationNote: string;
   try {
     const probeDir = path.join(studyDir, '.console-host-dry-run-probe');
     fs.mkdirSync(probeDir, { recursive: true });
@@ -327,13 +330,13 @@ export async function hostDryRunPass(modules: LabModules, labRoot: string, study
   } catch (error) {
     isolationNote = `round-directory creation failed: ${(error as Error).message}`;
   }
-  check('isolation_workspace_probe', 'blocker', isolationOk, isolationNote);
+  check({ id: 'isolation_workspace_probe', ok: isolationOk, detail: isolationNote });
 
   // 5. Evidence ceiling (informational — the capability table is frozen).
-  check('injection_capability_ceiling', 'info', true, 'OpenClaw prompt-delivery evidence ceiling is SUBMITTED (HOST_MAX_PROVABLE_LEVEL) — full-conclusion minimum CONTEXT_PRESENT can never be claimed from an OpenClaw prompt delivery');
+  check({ id: 'injection_capability_ceiling', ok: true, severity: 'info', detail: 'OpenClaw prompt-delivery evidence ceiling is SUBMITTED (HOST_MAX_PROVABLE_LEVEL) — full-conclusion minimum CONTEXT_PRESENT can never be claimed from an OpenClaw prompt delivery' });
 
   // 6. The dry-run's own zero-model-call guarantee.
-  check('model_calls_zero', 'info', true, 'this dry-run performs zero model/provider calls by construction (local CLI version probe + filesystem checks only)');
+  check({ id: 'model_calls_zero', ok: true, severity: 'info', detail: 'this dry-run performs zero model/provider calls by construction (local CLI version probe + filesystem checks only)' });
 
   return {
     ok: checks.every((entry) => entry.severity === 'info' || entry.ok),
