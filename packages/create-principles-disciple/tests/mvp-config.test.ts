@@ -1275,7 +1275,9 @@ describe('Console health check contract (HTTP 200 + parseable JSON)', () => {
     const installerPath = path.resolve(__dirname, '..', 'src', 'installer.ts');
     const content = fs.readFileSync(installerPath, 'utf-8');
     const verifySection = content.substring(content.indexOf('async function verifyConsole'));
-    expect(verifySection).toContain('exited prematurely');
+    // G1 P0-1/P0-2: premature exit is now an attempt outcome (real behavior
+    // covered by tests/console-verify-identity.test.ts against a real child).
+    expect(verifySection).toContain('child_exited_early');
   });
 
   it('verifyConsole kills child on failure with SIGKILL fallback', () => {

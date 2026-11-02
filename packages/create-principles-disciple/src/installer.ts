@@ -1271,8 +1271,16 @@ function restoreTreeAside(tree: 'extension' | 'runtime', backupDir: string | nul
   let quarantine: string | null = null;
   try {
     if (existsSync(targetDir)) {
-      quarantine = `${targetDir}.restore-quarantine.${Date.now()}`;
-      renameSync(targetDir, quarantine);
+      try {
+        quarantine = `${targetDir}.restore-quarantine.${Date.now()}`;
+        renameSync(targetDir, quarantine);
+      } catch (asideError) {
+        // TOCTOU guard: if the aside rename reports ENOENT the target is in
+        // fact already gone (e.g. handled concurrently) — there is nothing to
+        // set aside, and the restore itself below remains correct.
+        if ((asideError as { code?: string }).code !== 'ENOENT') throw asideError;
+        quarantine = null;
+      }
     }
     renameSync(backupDir, targetDir);
     let residue = '';

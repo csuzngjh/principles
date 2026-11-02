@@ -130,14 +130,19 @@ describe('install() release-manager dependency install + authority import smoke 
   function expectPreviousInstallRestored(): void {
     const renames = vi.mocked(fs.renameSync).mock.calls;
     for (const originalDir of [getPdRuntimeDir(), getPluginExtDir()]) {
-      const backupCalls = renames.filter(([source]) => source === originalDir);
-      expect(backupCalls).toHaveLength(1);
-      const backupCall = backupCalls[0]!;
-      expect(backupCall[1]).not.toBe(originalDir);
-      expect(renames).toContainEqual([backupCall[1], originalDir]);
+      // G1 P0-3 (rename-aside restore): the live tree moves out to a backup
+      // once; the restore may additionally ATTEMPT a quarantine aside of the
+      // live dir (ENOENT here — the mocked existsSync says present while the
+      // real tree already moved). Load-bearing: exactly one backup move-out,
+      // and the backup lands BACK on the original dir after it, in order.
+      const movesOut = renames.filter(([source]) => source === originalDir);
+      const backupCall = movesOut.find(([, destination]) => !String(destination).includes('restore-quarantine'));
+      expect(backupCall).toBeDefined();
+      expect(backupCall![1]).not.toBe(originalDir);
+      expect(renames).toContainEqual([backupCall![1], originalDir]);
       const restoreIndex = renames.findIndex(([source, destination]) =>
-        source === backupCall[1] && destination === originalDir);
-      expect(restoreIndex).toBeGreaterThan(renames.indexOf(backupCall));
+        source === backupCall![1] && destination === originalDir);
+      expect(restoreIndex).toBeGreaterThan(renames.indexOf(backupCall!));
     }
   }
 

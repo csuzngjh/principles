@@ -160,7 +160,16 @@ function stubHealth(
         cb?.(res);
         res.emit('data', Buffer.from(JSON.stringify({
           success: true,
-          data: { overall: 'healthy', authenticationMode: consoleAnswer?.mode ?? 'no_auth' },
+          // G1 P0-1: while PD_CONSOLE_VERIFY_NONCE is set, the caller is
+          // verifyConsole probing the freshly deployed console child — that
+          // child is spawned with --no-auth, so a faithful fake answers in
+          // the no_auth posture and echoes the nonce. Outside that window
+          // the autolaunch probe semantics (consoleAnswer.mode) apply.
+          data: {
+            overall: 'healthy',
+            authenticationMode: process.env.PD_CONSOLE_VERIFY_NONCE ? 'no_auth' : (consoleAnswer?.mode ?? 'no_auth'),
+            ...(process.env.PD_CONSOLE_VERIFY_NONCE ? { verifyNonce: process.env.PD_CONSOLE_VERIFY_NONCE } : {}),
+          },
         })));
         res.emit('end');
       });
