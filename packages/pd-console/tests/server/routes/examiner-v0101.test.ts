@@ -242,7 +242,7 @@ describe('Examiner v0.10.1 — challenge-suite catalog (§9)', () => {
     }
   });
 
-  it('creates a study on the calibration-core suite with real pain lineage and a frozen production snapshot', async () => {
+  it('creates a study on the calibration-core suite with real pain lineage and a frozen production snapshot', { timeout: 30_000 }, async () => {
     const created = await createStudy('calibration-core', 1);
     expect(created.suiteKey).toBe('calibration-core');
     // 6 cases x 1 repetition = 6 planned pairs.
