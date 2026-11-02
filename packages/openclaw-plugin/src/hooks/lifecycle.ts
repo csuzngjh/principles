@@ -9,7 +9,6 @@ import {
   mergeWorkingMemory,
 } from '../core/focus-history.js';
 import type { PluginHookBeforeResetEvent, PluginHookBeforeCompactionEvent, PluginHookAfterCompactionEvent, PluginHookAgentContext } from '../openclaw-sdk.js';
-import { emitPainDetectedEvent } from './pain.js';
 
 export async function handleBeforeReset(
   event: PluginHookBeforeResetEvent,
@@ -58,8 +57,6 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
   const {workspaceDir} = ctx;
 
   if (!workspaceDir) return;
-
-  const wctx = WorkspaceContext.fromHookContext(ctx);
 
   if (!fs.existsSync(sessionFile)) {
     if (ctx.logger?.debug) ctx.logger.debug(`[Pain Extractor] Session file not found: ${sessionFile}`);
@@ -138,7 +135,12 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
     painPoints.slice(-5).forEach((p, idx) => {
       entry += `- [Signal ${idx + 1}] ${p.replace(/\n/g, ' ')}\n`;
     });
-    entry += `\n### Review\n- Signals above are informational notes. Fatal-intercept signals were already emitted into the Runtime V2 pain chain. Review and act on them via pd-console: \`pd console open --workspace "<workspace>"\`.\n`;
+    // Pain Phase 0 (SPEC PD-PAIN-SEMANTICS-AND-DETECTION-ARCHITECTURE-001 §6.3):
+    // a fatal intercept is a host safety fact, not Owner-deviation Pain — the
+    // intercept_extraction pain_detected emission was removed. The notes below
+    // remain the observable failure record; report via /pd-pain if a hard
+    // intercept reflects a principle deviation.
+    entry += `\n### Review\n- Signals above are informational notes only (no Pain is created from them). If a hard intercept reflects a principle deviation, report it explicitly via /pd-pain; review via pd-console: \`pd console open --workspace "<workspace>"\`.\n`;
 
     try {
       const dir = path.dirname(dailyLogPath);
@@ -146,27 +148,8 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
       fs.appendFileSync(dailyLogPath, entry, 'utf8');
 
       // SEMANTIC_PAIN (confusion_samples.md) write removed (PRI-451 Wave 1):
-      // the file had zero readers. The MEMORY.md write above and the fatal-intercept
-      // emitPainDetectedEvent below are both LIVE and remain.
-
-      const hasFatal = painPoints.some(p => p.includes('[FATAL INTERCEPT]'));
-      if (hasFatal) {
-        // Emit via the Runtime v2 pain chain — no .pain_flag file written
-        emitPainDetectedEvent(wctx, {
-          ts: new Date().toISOString(),
-          type: 'pain_detected',
-          data: {
-            painId: `intercept_${Date.now()}`,
-            painType: 'tool_failure' as const,
-            source: 'intercept_extraction',
-            reason: 'Hard intercept detected in session history compaction.',
-            score: 100,
-            sessionId: ctx.sessionId || 'unknown',
-            agentId: ctx.agentId,
-            hostKind: 'openclaw',
-          },
-        });
-      }
+      // the file had zero readers. The MEMORY.md write above remains the
+      // observable failure record.
     } catch (err) {
       ctx.logger?.error?.(`[PD:Lifecycle] Failed to write pain signals: ${String(err)}`);
     }

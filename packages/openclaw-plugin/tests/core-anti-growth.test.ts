@@ -59,7 +59,8 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     'paths.ts',
     'workspace-dir-validation.ts',
     'rule-implementation-runtime.ts',
-    'detection-service.ts',
+    // detection-service.ts removed (Pain Phase 0): the Semantic detection
+    // execution path was retired with its only caller (llm.ts detect call).
     'dictionary-service.ts',
     // I/O boundary
     'trajectory.ts',
@@ -84,7 +85,7 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     'code-implementation-storage.ts',
     'dictionary.ts',
     'system-logger.ts',
-    'detection-funnel.ts',
+    // detection-funnel.ts removed (Pain Phase 0) with detection-service.ts.
     // Anonymous Product Telemetry v1 (PRI-595~603, ADR-0021): one-time-init
     // trigger shell wiring the host-neutral telemetry service (logic lives in
     // @principles/host-runtime product-telemetry) into the plugin lifecycle.
