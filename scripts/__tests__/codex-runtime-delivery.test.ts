@@ -96,8 +96,11 @@ describe('Codex runtime delivery authority and discoverability', () => {
       expect(caught).toBeInstanceOf(Error);
       const message = caught instanceof Error ? caught.message : String(caught);
       expect(message).toContain('@principles/core@1.297.0');
-      expect(message).toContain('15');
-      expect(calls).toBeLessThanOrEqual(4);
+      expect(message).toContain('15000ms');
+      expect(message).toContain('nextAction');
+      // It really consumed the whole budget: 4 reads at t=0/5/10/15s.
+      expect(calls).toBe(4);
+      expect(clock).toBe(15_000);
     });
 
     it('a different current cohort fails immediately instead of waiting for the wrong target', () => {

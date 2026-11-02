@@ -84,7 +84,7 @@ export function waitForPublishedCohort({
     const remaining = deadline - now();
     if (remaining <= 0) {
       throw new Error(
-        `published cohort incomplete after ${timeoutMs}ms; missing: ${missing.length > 0 ? missing.join(', ') : 'registry did not report any package state'}`,
+        `published cohort incomplete after ${timeoutMs}ms; missing: ${missing.length > 0 ? missing.join(', ') : 'registry did not report any package state'}; nextAction: retry the current release train once npm registry propagation completes`,
       );
     }
     sleep(Math.min(intervalMs, remaining));
