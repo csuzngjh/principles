@@ -47,7 +47,13 @@ export const SIZE_BUDGETS = {
     development: { baseline: 693112, max: 866390 },
   },
   'rulehost-evidence.js': {
-    production: { baseline: 60244, max: 66268 },
+    production: { baseline: 67422, max: 74164 },
+    // Rebaselined 2026-11-02: Windows PowerShell read-only query cmdlets
+    // (Get-Content / Get-ChildItem / Select-String / …) are classified by the
+    // shared bash-risk classifier this satellite bundles. Production measured
+    // 67,422 in CI and locally; trimming command families changed only ~440
+    // bytes, so the growth is the classifier shape path, not the strings.
+    // Development measured 570,388 (Windows local; inline sourcemaps).
     // Rebaselined 2026-11-01 (PRI-739), superseding the 2026-09-24 figures in
     // docs/release/bundle-budget-audit.md §2: the bounded approved-rule
     // revision, the host recovery-control marker and the official-recovery
@@ -56,7 +62,7 @@ export const SIZE_BUDGETS = {
     // change, 559,348 without this commit's share of it. Follow-up candidate:
     // the revision operation is Console-only and should not need to travel
     // here at all — narrowing the barrel would pay this back.
-    development: { baseline: 452000, max: 565000 },
+    development: { baseline: 570388, max: 712985 },
   },
 };
 
