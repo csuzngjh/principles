@@ -1,5 +1,12 @@
 # create-principles-disciple
 
+## 1.146.4
+
+### Patch Changes
+
+- 9286940: Bump @inquirer/prompts from 8.7.4 to 8.7.5 (installer runtime dependency).
+- 7f07f12: Bump @radix-ui/react-alert-dialog from 1.1.23 to 1.2.1 (runtime dependency of pd-console, shipped inside the installer bundle).
+
 ## 1.146.3
 
 ### Patch Changes
