@@ -1,5 +1,12 @@
 # create-principles-disciple
 
+## 1.146.6
+
+### Patch Changes
+
+- ded64b1: Dependency bump: @earendil-works/pi-ai from 1.2.0 to 1.4.0 (installer runtime dependency, shipped inside create-principles-disciple).
+- a0dc3aa: Dependency bump: tuf-js from 6.0.0 to 6.0.1 (installer runtime dependency, shipped inside create-principles-disciple).
+
 ## 1.146.5
 
 ### Patch Changes
