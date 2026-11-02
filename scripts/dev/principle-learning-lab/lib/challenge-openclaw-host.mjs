@@ -138,6 +138,23 @@ function probeOpenclawVersion(openclawBin, openclawPrefixArgs, versionProbe) {
   return version;
 }
 
+/**
+ * SPEC-PD-EXAMINER-001 v0.10.1 §12.3 — read-only CLI reachability probe for
+ * the Console host dry-run. Same local `--version` process as transport
+ * creation, but NEVER throws and never creates anything: the result is a
+ * structured verdict the dry-run can show as a Gate 2 prerequisite. The
+ * binary defaults to the FIXED literal 'openclaw'; callers that pass an
+ * executable path take responsibility for it (the console never does).
+ */
+export function probeOpenClawCli({ openclawBin = 'openclaw', openclawPrefixArgs = [], versionProbe = null } = {}) {
+  try {
+    const version = probeOpenclawVersion(openclawBin, openclawPrefixArgs, versionProbe);
+    return { ok: true, cliVersion: version, reason: null };
+  } catch (err) {
+    return { ok: false, cliVersion: null, reason: err && err.message ? err.message : String(err) };
+  }
+}
+
 /** Same suffix discipline as verifyF2ProbeEvidence.sameModel — a provider-
  *  prefixed model id ("zai/glm-5.3-flash") matches its bare id. */
 const sameModel = (a, b) => a === b || (typeof a === 'string' && typeof b === 'string' && (a.endsWith(`/${b}`) || b.endsWith(`/${a}`)));

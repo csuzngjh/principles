@@ -523,6 +523,19 @@ export type CreateStudyInputs = {
   repetitionsPerCase: number;
 };
 
+/**
+ * v0.10.1 host-backed inputs (SPEC §4/§6/§7): the frozen production snapshot,
+ * the runtime-derived RuleCode facts and the real pain lineage. All gathered
+ * by the caller (examiner-study-inputs) from existing authorities; this layer
+ * only freezes them into the study directory. Suite CASES are compiled here
+ * with the minted study handle (case ids are study-scoped).
+ */
+export type HostBackedStudyInputs = {
+  productionSnapshot: Record<string, unknown>;
+  ruleCodeFacts: { ruleCodes: { ruleCodeId: string; principleId: string; baselineState: 'ON' | 'OFF' }[]; principleRuleCodeIndependence: boolean | null; targetRuleCodeCount: number };
+  painRefs: string[];
+};
+
 /** Server-minted study handle + directory (crypto-random; never request-derived). */
 export function mintStudyHandle(roots: StudyRoots): { studyId: string; studyDir: string } | null {
   const problem = writableRootProblem(roots);
@@ -585,6 +598,10 @@ export async function materializeConsoleStudy(
     targetIndex: number;
     ledgerPrinciples: { id: string; version: string; text: string; status: string; ruleCount?: number }[];
     repetitionsPerCase: number;
+    /** v0.10.1: catalog suite key (validated by the caller against the fixed list). */
+    suiteKey?: string;
+    /** v0.10.1: host-backed inputs (production snapshot / RuleCode facts / pain refs). */
+    hostBacked?: HostBackedStudyInputs;
   },
 ): Promise<{ studyId: string; targetPrincipleId: string; manifestHash: unknown; plannedPairs: number | null }> {
   const target = selection.ledgerPrinciples[selection.targetIndex];
@@ -602,6 +619,8 @@ export async function materializeConsoleStudy(
     target,
     ledgerPrinciples: selection.ledgerPrinciples,
     repetitionsPerCase: selection.repetitionsPerCase,
+    suiteKey: selection.suiteKey,
+    hostBacked: selection.hostBacked,
   });
   // The lab created the directory tree; verify the REAL location before the
   // ownership marker (the trust anchor) is written into it.
@@ -623,40 +642,65 @@ export async function materializeConsoleStudy(
  * receives already-validated server data only. Synthetic calibration cases
  * with SYNTHETIC_OFFLINE gold provenance — offline contract validation,
  * never real-host behavior.
+ *
+ * v0.10.1: when `hostBacked` inputs are supplied, the study freezes the
+ * caller-selected suite cases, the RUNTIME-derived RuleCode facts and the
+ * real pain lineage, and `production-snapshot.json` records where the A/B
+ * starting point differs from production (SPEC §4.4/§6.4). The frozen
+ * binding files the lab verifies are unchanged — the snapshot is an
+ * additional frozen fact, hashed by nothing that the runner recomputes, so
+ * appending it after writeExaminerStudyArtifacts keeps every existing
+ * verification intact (events.jsonl rides the same discipline).
  */
-export async function materializeOfflineStudy(modules: LabModules, labRoot: string, inputs: CreateStudyInputs): Promise<{ manifest: Record<string, unknown>; pairAssignment: Record<string, unknown> }> {
+export async function materializeOfflineStudy(modules: LabModules, labRoot: string, inputs: CreateStudyInputs & { suiteKey?: string; hostBacked?: HostBackedStudyInputs }): Promise<{ manifest: Record<string, unknown>; pairAssignment: Record<string, unknown> }> {
   const fixtureUrl = pathToFileURL(path.join(labRoot, 'lib', 'examiner-v07-cases.mjs')).href;
   const fixture = (await import(fixtureUrl)) as { makeExaminerV3Case: (options: Record<string, unknown>) => Record<string, unknown> };
   const freezeUrl = pathToFileURL(path.join(labRoot, 'lib', 'challenge-freeze.mjs')).href;
   const freeze = (await import(freezeUrl)) as { hashOfCanonical: (value: unknown) => string; freezeMapping: (mapping: Record<string, unknown>) => { mappingHash: string } };
-  const caseDefs = [
-    fixture.makeExaminerV3Case({ caseId: `${inputs.studyId}-CASE-01` }),
-    fixture.makeExaminerV3Case({ caseId: `${inputs.studyId}-CASE-02`, boundary: true }),
-  ];
+  // v0.10.1 §9: a catalog suite key compiles the selected variants under the
+  // MINTED study handle (case ids are study-scoped); absent key = v0.9 default.
+  let caseDefs: Record<string, unknown>[];
+  if (typeof inputs.suiteKey === 'string') {
+    const { suiteCaseDefs, isSuiteKey } = await import('./examiner-study-inputs.js');
+    if (!isSuiteKey(inputs.suiteKey)) throw new Error(`materializeOfflineStudy: unknown suite key '${inputs.suiteKey}'`);
+    caseDefs = await suiteCaseDefs(labRoot, inputs.studyId, inputs.suiteKey);
+  } else {
+    caseDefs = [
+      fixture.makeExaminerV3Case({ caseId: `${inputs.studyId}-CASE-01` }),
+      fixture.makeExaminerV3Case({ caseId: `${inputs.studyId}-CASE-02`, boundary: true }),
+    ];
+  }
   const principleFrozen = { contentJson: { principleDraft: { statement: inputs.target.text } } };
+  const painRefs = inputs.hostBacked?.painRefs ?? [];
   const mapping: Record<string, unknown> = {
     schema: 'PainMechanismMappingV1',
     mappingId: `PMM-${inputs.studyId}`,
     principleContentHash: freeze.hashOfCanonical(principleFrozen.contentJson),
-    observedFailure: 'console-originated offline calibration (synthetic)',
+    observedFailure: painRefs.length > 0
+      ? `console-originated offline calibration mapped to the target principle's real pain lineage (${painRefs.join(', ')})`
+      : 'console-originated offline calibration (synthetic)',
     failureMechanism: 'assertion_without_observation',
     ownerGroundedGoal: 'offline contract validation for the console entry',
+    painRefs,
   };
   mapping.mappingHash = freeze.freezeMapping(mapping).mappingHash;
-  return modules.study.writeExaminerStudyArtifacts({
+  const ruleCodeFacts = inputs.hostBacked?.ruleCodeFacts ?? {
+    // P1-5 fallback (pre-v0.10.1 shape): ledger rule count as the only fact.
+    ruleCodes: [],
+    principleRuleCodeIndependence: (inputs.target.ruleCount ?? 0) === 0 ? true : null,
+    targetRuleCodeCount: inputs.target.ruleCount ?? 0,
+  };
+  const writeResult = modules.study.writeExaminerStudyArtifacts({
     studyId: inputs.studyId,
     experimentMode: inputs.experimentMode,
     hepsPrinciples: { principles: inputs.ledgerPrinciples, targetPrincipleId: inputs.target.id, host: 'offline-stub' },
-    // P1-5: RuleCode facts are EVIDENCE, never a default. The ledger projects
-    // only the count of RuleCodes bound to the principle; absent individual
-    // RuleCode ids that count is passed as unresolved evidence, which makes the
-    // policy INTERVENTION_NOT_IDENTIFIABLE and the creation refuse (422).
-    // A zero count is a real, evidenced fact: no RuleCode exists to couple.
-    ruleCodeFacts: {
-      ruleCodes: [],
-      principleRuleCodeIndependence: (inputs.target.ruleCount ?? 0) === 0 ? true : null,
-      targetRuleCodeCount: inputs.target.ruleCount ?? 0,
-    },
+    // P1-5: RuleCode facts are EVIDENCE, never a default. With hostBacked
+    // inputs the facts come from RUNTIME activation rows cross-checked against
+    // the ledger count (examiner-study-inputs.deriveStudyRuleCodeFacts); an
+    // unresolvable attribution still lands as INTERVENTION_NOT_IDENTIFIABLE,
+    // which makes the creation refuse (422). A zero count on BOTH sources is
+    // a real, evidenced fact: no RuleCode exists to couple.
+    ruleCodeFacts,
     caseDefs,
     principleFrozen,
     mapping,
@@ -673,4 +717,12 @@ export async function materializeOfflineStudy(modules: LabModules, labRoot: stri
     goldProvenance: 'SYNTHETIC_OFFLINE',
     studyDir: inputs.studyDir,
   });
+  if (inputs.hostBacked?.productionSnapshot) {
+    // Additional frozen fact (SPEC §4.4/§6.4): the production baseline the
+    // A/B starting point diverges from. Written AFTER the lab's binding
+    // verification — the same append-after-freeze discipline as the event
+    // ledger; the verified binding files are never touched.
+    fs.writeFileSync(path.join(inputs.studyDir, 'production-snapshot.json'), `${JSON.stringify(inputs.hostBacked.productionSnapshot, null, 2)}\n`, 'utf8');
+  }
+  return writeResult;
 }

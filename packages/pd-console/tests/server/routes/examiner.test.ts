@@ -188,7 +188,10 @@ describe('Examiner Console API (offline-first, SPEC v0.9 §8)', () => {
     const { statusCode, body } = await call('GET', '/overview');
     expect(statusCode).toBe(200);
     expect(body.data.gates.gate1_challenge_trust).toContain('BLOCKED');
-    expect(body.data.executionScope).toContain('offline-stub only');
+    // v0.10.1 (intentional contract change): the scope line now also names the
+    // host dry-run and the authorization boundary instead of "offline-stub only".
+    expect(body.data.spec).toBe('SPEC-PD-EXAMINER-001 v0.10.1');
+    expect(body.data.executionScope).toContain('ZERO model calls');
     expect(body.data.hostInjectionCapability['offline-stub']).toBe('RUNTIME_LOADED');
     expect(Array.isArray(body.data.studies)).toBe(true);
   });
@@ -487,7 +490,8 @@ describe('Examiner product surface (ships with the console payload)', () => {
       const res = await call('GET', '/overview');
       expect(res.statusCode).toBe(200);
       expect(res.body.data.gates.gate4_product_integration).toContain('ACTIVE');
-      expect(res.body.data.executionScope).toContain('offline-stub only');
+      // v0.10.1 scope line (intentional contract change from "offline-stub only").
+      expect(res.body.data.executionScope).toContain('ZERO model calls');
     } finally {
       if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
       else process.env.NODE_ENV = previousNodeEnv;

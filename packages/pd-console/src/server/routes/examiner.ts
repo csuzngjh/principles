@@ -1,5 +1,5 @@
 /**
- * SPEC-PD-EXAMINER-001 v0.9 §8 — Examiner Console API (offline-first).
+ * SPEC-PD-EXAMINER-001 v0.9 §8 + v0.10.1 §4/§5/§6/§12 — Examiner Console API.
  *
  * Product entry for the Examiner research pipeline on top of the existing
  * principle-learning-lab (single research engine — no parallel Runner/Ledger/
@@ -7,47 +7,65 @@
  * (`console/lab`), so this surface is available in an installed runtime; a
  * developer checkout is served from the repository's scripts/dev/ lab.
  *
- * Offline only: every study carries SYNTHETIC_OFFLINE gold and is executed by
- * the deterministic local stub. Real model calls and real host runs stay
- * behind the Owner-authorization / Stage R gate and are refused here.
- *
- * Surface (all offline, zero real model/host calls):
- *   GET  /api/v1/examiner/overview                  — gates, host capability, study list
- *   GET  /api/v1/examiner/principles                — workspace principles as study inputs
- *   POST /api/v1/examiner/studies                   — create an offline examiner study
- *   GET  /api/v1/examiner/studies/:studyId          — manifest + execution + report status
- *   POST /api/v1/examiner/studies/:studyId/preflight — fail-closed preflight
- *   POST /api/v1/examiner/studies/:studyId/run      — offline-stub execution (real modes refused)
- *   GET  /api/v1/examiner/studies/:studyId/report   — Report V2 (read-only)
- *   POST /api/v1/examiner/studies/:studyId/report   — generate Report V2 (idempotent)
+ * Surface:
+ *   v0.9 (offline-first, semantics unchanged):
+ *     GET  /api/v1/examiner/overview
+ *     GET  /api/v1/examiner/principles
+ *     POST /api/v1/examiner/studies                   (v0.10.1: + suiteKey)
+ *     GET  /api/v1/examiner/studies/:studyId
+ *     POST /api/v1/examiner/studies/:studyId/preflight
+ *     POST /api/v1/examiner/studies/:studyId/run      (offline-stub, synchronous)
+ *     GET  /api/v1/examiner/studies/:studyId/report
+ *     POST /api/v1/examiner/studies/:studyId/report
+ *   v0.10.1:
+ *     GET  /api/v1/examiner/principles/:id/evidence   — production evidence aggregate
+ *     GET  /api/v1/examiner/suites                    — challenge-suite catalog
+ *     GET  /api/v1/examiner/hosts/openclaw/readiness  — host readiness projection
+ *     POST /api/v1/examiner/studies/:studyId/run      — modes 'host-dry-run' /
+ *       'f2-real-host' follow the §12.3 async contract: 202 + runId, state
+ *       derived from the study ledger, one live run per study, restart
+ *       recovery, RESULT_UNKNOWN never auto-retried, f2 gated on an APPROVED
+ *       Stage R authorization bound to the frozen study.
  *
  * Safety contract: this route layer contains NO filesystem access — every
  * study path is resolved inside examiner-executor by exact membership in the
  * server's own directory enumeration, and study identities are always
  * server-minted crypto-random handles. A request only SELECTS: the target
  * principle travels onward as an index into the server's own ledger list,
- * the experiment mode as a boolean. No request string crosses into the
- * research pipeline, and no request value constructs a path.
+ * the experiment mode as a boolean, the suite as a fixed-catalog key. No
+ * request string crosses into the research pipeline, no request value
+ * constructs a path, and no request value selects an executable.
  *
  * Two roots (P1-1): NEW console studies are WORKSPACE DATA — written under
  * `<workspace>/.pd/examiner/studies` — and require the server's own ownership
  * marker; the committed `examiner-studies/` research assets that travel with
  * the lab payload are visible but ALWAYS read-only here (POST /run and
  * POST /report answer 403). The frozen `challenge-studies/` area is never a
- * write target. Real-host execution is refused by this route class itself.
+ * write target. Real-host execution is refused until an APPROVED Stage R
+ * authorization exists inside the study — and the runner re-verifies that
+ * authority per unit regardless.
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { sendSuccess, sendError, sendNotFound } from '../utils/response.js';
+import { sendSuccess, sendError, sendNotFound, sendJson } from '../utils/response.js';
 import { PrinciplesConsoleModel } from '../models/PrinciplesConsoleModel.js';
+import { ExaminerEvidenceModel } from '../models/ExaminerEvidenceModel.js';
 import {
   loadLabModules, loadHostCapability, preflightCheck, offlineStudyPass, reportMaterialize,
   listStudyNames, resolveStudyAccess, resolveStudyRoots, studyStatusPayload, studyReportPayload,
   materializeConsoleStudy, verifyConsoleOwnership, writableRootProblem, isJsonObject,
   ExaminerPreflightBlockedError, type LabModules, type StudyRoots,
 } from './examiner-executor.js';
+import {
+  listSuiteCatalog, isSuiteKey, gatherProductionSnapshot, deriveStudyRuleCodeFacts,
+  readProductionSnapshot,
+} from './examiner-study-inputs.js';
+import {
+  appendConsoleRunEvent, mintRunId, readConsoleRuns, currentConsoleRun, recoverUnfinishedConsoleRuns,
+  hostDryRunPass, f2AuthorizationGate, CONSOLE_RUN_SCHEMA, CONSOLE_RUN_MODES, type ConsoleRunMode,
+} from './examiner-runs.js';
 
 type HostCapability = Record<string, string>;
 
@@ -56,6 +74,7 @@ type HostCapability = Record<string, string>;
 const LAB_ENTRY = path.join('lib', 'examiner-study.mjs');
 const PRINCIPLE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const STUDY_ROUTE_PATTERN = /^\/studies\/([A-Za-z0-9-]+)(\/[^/]*)?$/;
+const PRINCIPLE_EVIDENCE_PATTERN = /^\/principles\/([A-Za-z0-9][A-Za-z0-9._:-]{0,127})\/evidence$/;
 
 /**
  * Locate the principle-learning-lab payload. Two layouts are legitimate and
@@ -138,6 +157,23 @@ async function loadLab(): Promise<HostCapability | null> {
   }
 }
 
+/**
+ * v0.10.1 §12.3 restart recovery runs ONCE per process per writable root,
+ * lazily on the first examiner request touching studies — a crashed holder's
+ * unfinished console run becomes CONSOLE_RUN_ABANDONED (RESULT_UNKNOWN,
+ * never retried) before any status/run request can observe or extend it.
+ */
+const recoveredRoots = new Set<string>();
+async function ensureConsoleRunRecovery(roots: StudyRoots): Promise<void> {
+  if (recoveredRoots.has(roots.writable)) return;
+  recoveredRoots.add(roots.writable);
+  try {
+    await recoverUnfinishedConsoleRuns(roots);
+  } catch (error) {
+    logRefusal('run recovery', error);
+  }
+}
+
 /** Path + write-permission facts shared by run/report; never request-derived. */
 type StudyContext = { labRoot: string; roots: StudyRoots };
 
@@ -168,28 +204,45 @@ export async function handleExaminerRoute(
   workspaceDir: string,
   subPath: string,
 ): Promise<void> {
+  const method = req.method ?? 'GET';
+
+  // ── v0.10.1 §4/§5: production evidence aggregate (BEFORE the lab gate —
+  // production evidence is a property of the workspace runtime, not of the
+  // research engine; an installation without the lab still answers honestly).
+  const evidenceMatch = subPath.match(PRINCIPLE_EVIDENCE_PATTERN);
+  if (evidenceMatch?.[1] !== undefined && method === 'GET') {
+    const model = new ExaminerEvidenceModel(workspaceDir);
+    const evidence = await model.getPrincipleEvidence(evidenceMatch[1]);
+    if (!evidence) {
+      sendError(res, 404, 'principle_not_found', 'the principle was not found in the workspace ledger');
+      return;
+    }
+    sendSuccess(res, { ...evidence });
+    return;
+  }
+
   const lab = await loadLab();
   if (!lab || !labModules || !labRoot) {
     sendError(res, 503, 'examiner_lab_unavailable', `the Examiner research engine could not be loaded from this installation: ${labUnavailableReason ?? 'unknown reason'}`);
     return;
   }
-  const method = req.method ?? 'GET';
   const roots = resolveStudyRoots(labRoot, path.join(workspaceDir, '.pd', 'examiner'));
   const context: StudyContext = { labRoot, roots };
   const rootProblem = writableRootProblem(roots);
+  await ensureConsoleRunRecovery(roots);
 
   // GET /overview
   if (subPath === '/overview' && method === 'GET') {
     const writable = listStudyNames(roots.writable);
     const historical = listStudyNames(roots.historical);
     sendSuccess(res, {
-      spec: 'SPEC-PD-EXAMINER-001 v0.9',
-      executionScope: 'offline-stub only — every study uses SYNTHETIC_OFFLINE gold and the deterministic local stub; this panel validates the research contract, never real host behavior',
+      spec: 'SPEC-PD-EXAMINER-001 v0.10.1',
+      executionScope: 'offline-stub studies validate the research contract; host dry-run checks F2 readiness with ZERO model calls; real host runs require an APPROVED Stage R authorization inside the study and stay refused otherwise',
       gates: {
         gate1_challenge_trust: 'BLOCKED — independent human Gold review has not been performed for any Examiner suite (code tests can never substitute)',
         gate2_behavior_evaluation: 'NOT_READY — requires Gate 1 + real-host authorization',
         gate3_llm_authoring: 'NOT_STARTED',
-        gate4_product_integration: 'ACTIVE — the offline research panel (create / run / report) ships with the console; real model calls and real host runs stay refused under this gate',
+        gate4_product_integration: 'ACTIVE — the offline research panel (create / run / report) ships with the console; v0.10.1 adds production evidence, host-backed study inputs and the async run contract; real model calls and real host runs stay refused under this gate',
       },
       hostInjectionCapability: lab,
       fullConclusionMinimumLevel: 'CONTEXT_PRESENT',
@@ -215,6 +268,30 @@ export async function handleExaminerRoute(
     return;
   }
 
+  // ── v0.10.1 §9: challenge-suite catalog (server-fixed keys, read-only).
+  if (subPath === '/suites' && method === 'GET') {
+    const suites = await listSuiteCatalog(labRoot);
+    sendSuccess(res, { suites, note: 'every suite reuses the lab\u2019s authored calibration case variants; gold is SYNTHETIC_OFFLINE until Gate 1 (independent human Gold review) passes' });
+    return;
+  }
+
+  // ── v0.10.1 §6.2: OpenClaw host readiness (workspace-level, zero model calls).
+  if (subPath === '/hosts/openclaw/readiness' && method === 'GET') {
+    sendSuccess(res, {
+      host: 'openclaw',
+      maxProvableInjectionLevel: lab.openclaw ?? 'SUBMITTED',
+      executionModes: ['offline-stub', 'host-dry-run', 'f2-real-host'],
+      requirements: [
+        { id: 'stage_r_authorization', detail: 'an APPROVED F2-real-host run-authorization.json inside the study, bound to its frozen suite hash (issued by the Owner — never by the console)' },
+        { id: 'host_cli', detail: 'the OpenClaw CLI reachable on PATH (verified by the per-study host dry-run local version probe)' },
+        { id: 'isolation', detail: 'per-arm round directories creatable inside the writable study root' },
+        { id: 'gate1_gold_trust', detail: 'independent human Gold review — currently BLOCKED, so real runs cannot produce formal effect conclusions even when authorized' },
+      ],
+      note: 'this readiness projection performs no host calls; run the per-study host dry-run for the live checklist',
+    });
+    return;
+  }
+
   // POST /studies — create an offline examiner study (identity server-minted)
   if (subPath === '/studies' && method === 'POST') {
     if (rootProblem) {
@@ -226,6 +303,9 @@ export async function handleExaminerRoute(
     const requestedMode = typeof body.experimentMode === 'string' ? body.experimentMode : '';
     const repetitionsRaw = Number(body.repetitionsPerCase);
     const repetitionsPerCase = Number.isInteger(repetitionsRaw) && repetitionsRaw >= 1 && repetitionsRaw <= 5 ? repetitionsRaw : 2;
+    // v0.10.1 §9: the suite travels as a CATALOG KEY (server-fixed list);
+    // anything unrecognized falls back to the v0.9 default suite.
+    const suiteKey = isSuiteKey(body.suiteKey) ? body.suiteKey : 'didactic-pair';
     if (!PRINCIPLE_ID_PATTERN.test(requestedTarget)) {
       sendError(res, 400, 'invalid_target_principle', 'targetPrincipleId required (charset-validated principle id; one target Principle per study)');
       return;
@@ -244,18 +324,35 @@ export async function handleExaminerRoute(
     }
     const isolatedMode = requestedMode === 'isolated_principle';
     try {
+      // v0.10.1 host-backed inputs (SPEC §4/§6/§7): freeze the production
+      // snapshot, derive RuleCode facts from RUNTIME activation truth,
+      // carry the real pain lineage and compile the selected suite's cases.
+      // The study handle is minted inside materializeConsoleStudy, so the
+      // suite cases are compiled with per-study ids there via a second pass
+      // (suiteCaseDefs is deterministic; the ids are re-minted below).
+      const snapshot = await gatherProductionSnapshot(workspaceDir, requestedTarget, 2000);
+      const detailOutput = await model.getPrincipleDetail(requestedTarget);
+      const painRefs = detailOutput?.principle.derivedFromPainIds ?? [];
       const created = await materializeConsoleStudy(labModules, labRoot, roots, {
         isolatedMode,
         targetIndex,
         ledgerPrinciples,
         repetitionsPerCase,
+        suiteKey,
+        hostBacked: {
+          productionSnapshot: snapshot as unknown as Record<string, unknown>,
+          ruleCodeFacts: deriveStudyRuleCodeFacts(snapshot),
+          painRefs,
+        },
       });
       sendSuccess(res, {
         studyId: created.studyId,
         targetPrincipleId: created.targetPrincipleId,
         experimentMode: isolatedMode ? 'isolated_principle' : 'full_library_incremental',
+        suiteKey,
         plannedPairs: created.plannedPairs,
         manifestHash: created.manifestHash,
+        productionSnapshotMarkers: snapshot.experimentVsProduction.markers,
         note: 'offline study created with SYNTHETIC gold — run preflight, then the offline-stub execution; results demonstrate the contract pipeline, never real host behavior',
       });
     } catch (error) {
@@ -278,7 +375,18 @@ export async function handleExaminerRoute(
 
     // GET status
     if (rest === '' && method === 'GET') {
-      sendSuccess(res, { ...studyStatusPayload(studyDir), readOnly: access.readOnly, access: access.reason });
+      const consoleRuns = readConsoleRuns(studyDir);
+      sendSuccess(res, {
+        ...studyStatusPayload(studyDir),
+        readOnly: access.readOnly,
+        access: access.reason,
+        productionSnapshot: readProductionSnapshot(studyDir),
+        consoleRuns: {
+          runs: consoleRuns.slice(-10),
+          current: currentConsoleRun(consoleRuns),
+          asyncModes: CONSOLE_RUN_MODES,
+        },
+      });
       return;
     }
 
@@ -296,16 +404,101 @@ export async function handleExaminerRoute(
     if (rest === '/run' && method === 'POST') {
       const body = await readBody(req);
       // Real execution needs an Owner-approved run-authorization.json plus the
-      // Stage R gate — this console route NEVER transports a caller-supplied
-      // mode into the runner; only the offline-stub default is reachable.
-      if (body.mode !== undefined && body.mode !== 'offline-stub') {
-        sendError(res, 403, 'real_execution_not_authorized', 'non-offline execution requires explicit Owner authorization (run-authorization.json + Stage R gate) — NOT GRANTED this round');
+      // Stage R gate. The reachable modes are fixed: offline-stub (v0.9,
+      // synchronous), host-dry-run / f2-real-host (v0.10.1 §12.3 async).
+      const requestedMode = typeof body.mode === 'string' ? body.mode : 'offline-stub';
+      if (requestedMode !== 'offline-stub' && !(CONSOLE_RUN_MODES as readonly string[]).includes(requestedMode)) {
+        sendError(res, 403, 'real_execution_not_authorized', `unknown execution mode '${requestedMode}' — allowed: offline-stub, host-dry-run, f2-real-host`);
         return;
       }
       if (access.readOnly) {
         sendError(res, 403, 'study_read_only', `this study cannot be executed from the console: ${access.reason}`);
         return;
       }
+
+      // ── v0.10.1 §12.3 async modes (host-dry-run / f2-real-host) ──
+      if (requestedMode === 'host-dry-run' || requestedMode === 'f2-real-host') {
+        const consoleRuns = readConsoleRuns(studyDir);
+        const running = currentConsoleRun(consoleRuns);
+        if (running) {
+          sendError(res, 409, 'run_in_progress', `console run ${running.runId} (${running.mode}) is still in progress for this study — wait for its terminal event or recover after a restart; never start a second run`, { runId: running.runId, mode: running.mode, acceptedAt: running.acceptedAt });
+          return;
+        }
+        // A synchronous offline run in flight (RUN_STARTED without
+        // RUN_FINISHED) also refuses: one execution at a time per study.
+        const statusNow = studyStatusPayload(studyDir);
+        if (statusNow.runStarted === true && statusNow.runFinished !== true) {
+          sendError(res, 409, 'run_in_progress', 'an offline execution is currently in progress for this study (RUN_STARTED without RUN_FINISHED) — wait for it to settle');
+          return;
+        }
+        if (requestedMode === 'f2-real-host') {
+          const gate = await f2AuthorizationGate(labRoot, studyDir);
+          if (!gate.authorized) {
+            sendError(res, 403, 'real_execution_not_authorized', `F2 real-host execution was refused: ${gate.reasons.join('; ')}`);
+            return;
+          }
+        }
+        const runId = mintRunId();
+        const acceptedAt = new Date().toISOString();
+        appendConsoleRunEvent(roots, studyDir, {
+          type: 'CONSOLE_RUN_ACCEPTED', schema: CONSOLE_RUN_SCHEMA, runId, studyId: access.studyId,
+          mode: requestedMode as ConsoleRunMode, acceptedAt, pid: process.pid, owner: 'pd-console',
+        });
+        // Detached work: the accepted run settles itself through the study
+        // ledger. The promise is intentionally not awaited (§12.3: long work
+        // never rides the HTTP request); all failures append terminal events.
+        void (async () => {
+          const finishedAt = new Date().toISOString();
+          try {
+            if (requestedMode === 'host-dry-run') {
+              const dryRun = await hostDryRunPass(labModules, labRoot, studyDir, context);
+              appendConsoleRunEvent(roots, studyDir, {
+                type: dryRun.ok ? 'CONSOLE_RUN_FINISHED' : 'CONSOLE_RUN_FAILED',
+                schema: CONSOLE_RUN_SCHEMA, runId, studyId: access.studyId,
+                mode: 'host-dry-run', acceptedAt, pid: process.pid, owner: 'pd-console',
+                finishedAt,
+                outcome: dryRun.ok ? 'DRY_RUN_CHECKS_PASSED' : 'DRY_RUN_CHECKS_FAILED',
+                reason: dryRun.ok ? undefined : `failing prerequisites: ${dryRun.checks.filter((entry) => !entry.ok && entry.severity !== 'info').map((entry) => entry.id).join(', ')}`,
+                checks: dryRun.checks,
+              });
+            } else {
+              // f2-real-host passed the console gate. Real console-driven
+              // execution is NOT enabled this round (SPEC §Owner Decision:
+              // real model calls require separate Owner authorization); the
+              // run settles LOUDLY with zero model calls — never a stub.
+              appendConsoleRunEvent(roots, studyDir, {
+                type: 'CONSOLE_RUN_FAILED', schema: CONSOLE_RUN_SCHEMA, runId, studyId: access.studyId,
+                mode: 'f2-real-host', acceptedAt, pid: process.pid, owner: 'pd-console',
+                finishedAt, outcome: 'F2_EXECUTION_NOT_ENABLED_THIS_ROUND',
+                reason: 'authorization was accepted, but console-driven F2 real execution stays disabled this round; use the lab F2 driver under Owner supervision; zero model calls were made',
+              });
+            }
+          } catch (error) {
+            logRefusal(`console run ${runId} failed`, error);
+            appendConsoleRunEvent(roots, studyDir, {
+              type: 'CONSOLE_RUN_FAILED', schema: CONSOLE_RUN_SCHEMA, runId, studyId: access.studyId,
+              mode: requestedMode as ConsoleRunMode, acceptedAt, pid: process.pid, owner: 'pd-console',
+              finishedAt, outcome: 'RUN_ERROR', reason: 'the console run failed (details in the console server log)',
+            });
+          }
+        })();
+        // 202 Accepted — the §12.3 async contract answer.
+        sendJson(res, 202, {
+          success: true,
+          data: {
+            studyId: access.studyId,
+            runId,
+            mode: requestedMode,
+            status: 'ACCEPTED',
+            note: requestedMode === 'host-dry-run'
+              ? 'host dry-run accepted — zero model calls; poll the study status for the console-run checklist'
+              : 'F2 real-host run accepted under the Owner authorization — poll the study status; the runner re-verifies the Stage R authority per unit',
+          },
+        });
+        return;
+      }
+
+      // ── v0.9 synchronous offline-stub path (unchanged, AC-02 compat) ──
       try {
         const summary = await offlineStudyPass(labModules, studyDir, context);
         sendSuccess(res, { studyId: access.studyId, units: summary.units.map((unit) => ({ unit: unit.unit, state: unit.state })) });
