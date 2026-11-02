@@ -2066,7 +2066,30 @@
         "notRun": "not run",
         "report": "Report",
         "preflight": "Run preflight",
-        "runOffline": "Run offline"
+        "runOffline": "Run offline",
+        "back": "Principle Evaluation",
+        "statusTitle": "Study status",
+        "readOnly": "Read-only study",
+        "openReport": "Open report",
+        "runDry": "Host dry-run",
+        "requestF2": "Request F2 real-host run",
+        "modesNote": "Offline-stub runs synchronously and validates the contract pipeline; Host dry-run executes asynchronously with ZERO model calls; F2 real-host runs require an APPROVED Stage R authorization inside this study.",
+        "accepted": {
+          "dryRun": "Host dry-run accepted — polling for the checklist.",
+          "f2": "F2 request accepted — polling for settlement."
+        },
+        "snapshot": {
+          "title": "Frozen production snapshot",
+          "frozenAt": "Frozen at",
+          "route": "Production route",
+          "budget": "Production budget",
+          "divergence": "Ledger-active without runtime activation",
+          "matchesProduction": "matches production configuration"
+        },
+        "runs": {
+          "title": "Console runs (async contract)",
+          "empty": "No console runs yet — use Host dry-run or an F2 request."
+        }
       },
       "preflight": {
         "status": "Preflight status"
@@ -2080,17 +2103,100 @@
         "evictions": "Capacity evictions",
         "ittNote": "planned applicable {{planned}} · determined {{determined}} · unknown sides {{unknown}} · NOT_APPLICABLE {{na}} (excluded from the denominator)",
         "noExaminerBlock": "This report predates the v0.9 contract (no examiner block).",
-        "offlineNote": "Offline-stub results validate the contract pipeline only — never real-host behavior. Real host experiments require separate Owner authorization."
+        "offlineNote": "Offline-stub results validate the contract pipeline only — never real-host behavior. Real host experiments require separate Owner authorization.",
+        "back": "Execution & Evidence",
+        "missing": "No Report V2 yet — run the offline execution on the study page first.",
+        "replay": "Replay verification",
+        "limitations": "Limitations",
+        "handoff": {
+          "title": "Owner decision handoff",
+          "note": "The report informs the decision; the Owner decides in the existing principle governance workflow. Examiner never mutates lifecycle, RuleCode or activation state by itself.",
+          "openGovernance": "Open principle governance",
+          "refresh": "Refresh report"
+        },
+        "production": {
+          "title": "Production observation (separate lane)",
+          "note": "Real-run evidence for the same principle. It complements the controlled A/B result above and is never merged into its numbers.",
+          "missing": "Production evidence for the target principle is unavailable here."
+        }
       },
       "created": "Study {{studyId}} created.",
       "runDone": "Offline execution finished: {{count}} units succeeded.",
       "reportGenerated": "Report generated ({{status}}).",
+      "evaluation": {
+        "title": "Principle Evaluation",
+        "configureCta": "Configure a study",
+        "noActive": "No active principles in this workspace — activate a principle before evaluating it.",
+        "loadingEvidence": "Loading production evidence…",
+        "refresh": "Refresh evidence",
+        "openGovernance": "Open principle governance",
+        "selectPrinciple": "Select a principle to see its production evidence.",
+        "openStudy": "Open"
+      },
+      "evidence": {
+        "runtimeDeactivated": "runtime revoked",
+        "ruleCount": "RuleCodes (ledger)",
+        "painRefs": "Pain lineage",
+        "evaluability": "Evaluability",
+        "painPrevented": "Pains prevented",
+        "activation": {
+          "title": "Runtime activation",
+          "promptRows": "Prompt activations",
+          "ruleCodeRows": "RuleCode activations"
+        },
+        "injection": {
+          "title": "Prompt injection (production projection)",
+          "noRows": "No injection rows for this principle (unavailable lanes are never reported as zero events).",
+          "budget": "Budget",
+          "projectionNote": "A projection forecasts what the production prompt path WOULD deliver — it is not proof the model consumed the content."
+        },
+        "receipts": {
+          "title": "Receipts",
+          "effects": "Effects",
+          "presence": "Presence"
+        },
+        "audit": {
+          "title": "Intervention evidence audit",
+          "deliveries": "Deliveries",
+          "applications": "Applications",
+          "episodes": "Episodes",
+          "effects": "Effects",
+          "outcomes": "Outcomes",
+          "unresolved": "Unresolved refs",
+          "ladder": "Confirmation ladder (never promoted)",
+          "asOf": "Audit as of"
+        },
+        "asOf": "Read at",
+        "outcomes": {
+          "title": "Owner outcomes (recent)"
+        }
+      },
+      "configure": {
+        "back": "Principle Evaluation",
+        "title": "Study Configuration",
+        "subtitle": "What exactly will this evaluation compare, and under which frozen inputs?",
+        "fullNote": "Control: the full host-effective library WITHOUT the target. Treatment: the same library WITH the target. The target is the only planned intervention variable.",
+        "isolatedNote": "Diagnostic mode: control is EMPTY (all PD principles off), treatment carries the target only.",
+        "suite": {
+          "title": "Challenge suite"
+        },
+        "readiness": {
+          "title": "Host execution readiness"
+        },
+        "difference": {
+          "title": "Experiment vs production configuration",
+          "note": "The study freezes its own budget and renders arms deterministically; the frozen production snapshot records every detected difference (markers such as EXPERIMENT_CONFIGURATION_DIFFERS_FROM_PRODUCTION)."
+        },
+        "summary": "Target {{target}} · suite {{suite}} · {{pairs}} planned pairs"
+      },
       "errors": {
         "unavailable": "The Examiner research engine is unavailable in this installation (the installer payload does not include the research modules).",
         "create": "Failed to create the study.",
         "preflight": "Preflight failed.",
         "run": "Offline execution failed.",
-        "report": "Report generation failed."
+        "report": "Report generation failed.",
+        "evidence": "Failed to load production evidence.",
+        "status": "Failed to load the study status."
       }
     },
     "debt": {

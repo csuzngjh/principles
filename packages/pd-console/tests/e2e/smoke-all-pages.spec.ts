@@ -12,6 +12,7 @@ const SMOKE_PAGES = [
   { path: '/#/principles', name: 'Principles' },
   { path: '/#/activation', name: 'Activation' },
   { path: '/#/debt', name: 'Debt' },
+  { path: '/#/examiner', name: 'Examiner' },
   { path: '/#/control-center', name: 'ControlCenter' },
   { path: '/#/settings', name: 'Settings' },
   { path: '/#/update', name: 'Update' },

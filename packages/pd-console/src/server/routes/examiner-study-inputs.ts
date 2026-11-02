@@ -139,7 +139,7 @@ export interface ProductionSnapshot {
     promptActivePrincipleIds: string[];
     /** Principles the production projection would inject right now. */
     projectedInjectedPrincipleIds: string[] | null;
-    ruleCodeActivations: { activationId: string; mode: string | null; status: string }[];
+    ruleCodeActivations: { activationId: string; principleId: string; mode: string | null; status: string }[];
   };
   ledgerActivePrincipleIds: string[];
   divergence: {
@@ -192,7 +192,7 @@ export async function gatherProductionSnapshot(workspaceDir: string, targetPrinc
     .map((row) => row.principleId))].sort();
   const ruleCodeActivations = activations.activations
     .filter((row) => row.channel === 'code_tool_hook')
-    .map((row) => ({ activationId: row.activationId, mode: row.mode ?? null, status: row.status }));
+    .map((row) => ({ activationId: row.activationId, principleId: row.principleId, mode: row.mode ?? null, status: row.status }));
 
   const principlesModel = new PrinciplesConsoleModel(workspaceDir);
   const list = await principlesModel.listPrinciples();
@@ -277,7 +277,11 @@ export interface StudyRuleCodeFacts {
  *     semantics: unresolved baseline refuses, never assumed OFF).
  */
 export function deriveStudyRuleCodeFacts(snapshot: ProductionSnapshot): StudyRuleCodeFacts {
-  const targetRows = snapshot.runtimeActivation.ruleCodeActivations;
+  // ONLY the rows bound to the TARGET principle count as its coupling — a
+  // RuleCode activation for a DIFFERENT principle is part of the frozen
+  // baseline, not the target's intervention variable (SPEC §7.2).
+  const targetRows = snapshot.runtimeActivation.ruleCodeActivations
+    .filter((row) => row.principleId === snapshot.targetPrincipleId);
   const targetRuleCodeCount = Math.max(targetRows.length, snapshot.targetPrinciple.ledgerRuleCount);
   const resolved = targetRows.map((row) => ({
     ruleCodeId: row.activationId,
@@ -287,7 +291,7 @@ export function deriveStudyRuleCodeFacts(snapshot: ProductionSnapshot): StudyRul
   const independence = targetRuleCodeCount === 0 ? true : null;
   const evidenceNote = targetRuleCodeCount === 0
     ? 'no RuleCode is attributed to the target principle by either the runtime activation table or the ledger — independence is an evidenced zero'
-    : `${targetRows.length} runtime RuleCode activation(s) and ${snapshot.targetPrinciple.ledgerRuleCount} ledger-attributed rule(s); independent control of prompt injection while holding these at baseline is UNPROVEN — INTERVENTION_NOT_IDENTIFIABLE unless separately evidenced`;
+    : `${targetRows.length} runtime RuleCode activation(s) and ${snapshot.targetPrinciple.ledgerRuleCount} ledger-attributed rule(s) bound to the TARGET; independent control of prompt injection while holding these at baseline is UNPROVEN — INTERVENTION_NOT_IDENTIFIABLE unless separately evidenced`;
   return { ruleCodes: resolved, principleRuleCodeIndependence: independence, targetRuleCodeCount, evidenceNote };
 }
 

@@ -2066,7 +2066,30 @@
         "notRun": "未执行",
         "report": "报告",
         "preflight": "运行预检",
-        "runOffline": "离线执行"
+        "runOffline": "离线执行",
+        "back": "原则评估",
+        "statusTitle": "Study 状态",
+        "readOnly": "只读 Study",
+        "openReport": "打开报告",
+        "runDry": "宿主演练",
+        "requestF2": "请求 F2 真实宿主运行",
+        "modesNote": "离线 Stub 同步执行并验证契约管线；宿主演练异步执行且零模型调用；F2 真实宿主运行需要本 Study 内存在已批准（APPROVED）的 Stage R 授权。",
+        "accepted": {
+          "dryRun": "宿主演练已受理——正在轮询检查清单。",
+          "f2": "F2 请求已受理——正在轮询结算结果。"
+        },
+        "snapshot": {
+          "title": "冻结生产快照",
+          "frozenAt": "冻结时间",
+          "route": "生产路由",
+          "budget": "生产预算",
+          "divergence": "账本 active 但运行时未激活",
+          "matchesProduction": "与生产配置一致"
+        },
+        "runs": {
+          "title": "控制台运行（异步契约）",
+          "empty": "尚无控制台运行——使用宿主演练或 F2 请求。"
+        }
       },
       "preflight": {
         "status": "预检状态"
@@ -2080,17 +2103,100 @@
         "evictions": "容量挤出",
         "ittNote": "计划适用配对 {{planned}} · 完全确定 {{determined}} · 未知侧 {{unknown}} · 不适用 {{na}}（不进入分母）",
         "noExaminerBlock": "该报告早于 v0.9 契约（无 examiner 区块）。",
-        "offlineNote": "离线 Stub 结果仅验证契约管线，绝不代表真实宿主行为。真实宿主实验需要拥有者单独授权。"
+        "offlineNote": "离线 Stub 结果仅验证契约管线，绝不代表真实宿主行为。真实宿主实验需要拥有者单独授权。",
+        "back": "执行与证据",
+        "missing": "尚无 Report V2——请先在 Study 页运行离线执行。",
+        "replay": "重放校验",
+        "limitations": "限制说明",
+        "handoff": {
+          "title": "拥有者决策交接",
+          "note": "报告为决策提供依据；拥有者在既有原则治理工作流中作出决定。Examiner 绝不自行变更生命周期、RuleCode 或激活状态。",
+          "openGovernance": "打开原则治理",
+          "refresh": "刷新报告"
+        },
+        "production": {
+          "title": "生产观察（独立通道）",
+          "note": "同一原则的真实运行证据。它与上方受控 A/B 结果互补，但绝不合并进其数字。",
+          "missing": "此处无法获取目标原则的生产证据。"
+        }
       },
       "created": "Study {{studyId}} 已创建。",
       "runDone": "离线执行完成：{{count}} 个单元成功。",
       "reportGenerated": "报告已生成（{{status}}）。",
+      "evaluation": {
+        "title": "原则评估",
+        "configureCta": "配置 Study",
+        "noActive": "此工作区没有 active 原则——请先激活一条原则再评估。",
+        "loadingEvidence": "正在加载生产证据…",
+        "refresh": "刷新证据",
+        "openGovernance": "打开原则治理",
+        "selectPrinciple": "选择一条原则查看其生产证据。",
+        "openStudy": "打开"
+      },
+      "evidence": {
+        "runtimeDeactivated": "运行时已撤销",
+        "ruleCount": "RuleCode（账本）",
+        "painRefs": "Pain 溯源",
+        "evaluability": "可评估性",
+        "painPrevented": "已预防 Pain",
+        "activation": {
+          "title": "运行时激活",
+          "promptRows": "提示词激活",
+          "ruleCodeRows": "RuleCode 激活"
+        },
+        "injection": {
+          "title": "提示词注入（生产投影）",
+          "noRows": "该原则暂无注入行（不可用的数据通道绝不会显示为零事件）。",
+          "budget": "预算",
+          "projectionNote": "投影只预测生产注入路径“会”投递什么——它不是模型已消费内容的证明。"
+        },
+        "receipts": {
+          "title": "回执",
+          "effects": "效果",
+          "presence": "存在"
+        },
+        "audit": {
+          "title": "干预证据审计",
+          "deliveries": "投递",
+          "applications": "应用",
+          "episodes": "行为事件",
+          "effects": "效果",
+          "outcomes": "结果",
+          "unresolved": "未解析引用",
+          "ladder": "确认阶梯（绝不自动升级）",
+          "asOf": "审计截至"
+        },
+        "asOf": "读取时间",
+        "outcomes": {
+          "title": "拥有者结果反馈（最近）"
+        }
+      },
+      "configure": {
+        "back": "原则评估",
+        "title": "Study 配置",
+        "subtitle": "这次评估究竟比较什么？在哪些冻结输入之下？",
+        "fullNote": "对照组：不含目标原则的完整宿主生效库。实验组：同一库 + 目标原则。目标原则是唯一计划干预变量。",
+        "isolatedNote": "诊断模式：对照组为空（所有 PD 原则关闭），实验组仅含目标原则。",
+        "suite": {
+          "title": "Challenge 套件"
+        },
+        "readiness": {
+          "title": "宿主执行就绪"
+        },
+        "difference": {
+          "title": "实验与生产配置差异",
+          "note": "Study 冻结自己的预算并确定性渲染两组；冻结的生产快照记录每一处检测到的差异（如 EXPERIMENT_CONFIGURATION_DIFFERS_FROM_PRODUCTION 标记）。"
+        },
+        "summary": "目标 {{target}} · 套件 {{suite}} · 计划 {{pairs}} 对"
+      },
       "errors": {
         "unavailable": "Examiner 研究引擎在此安装中不可用（安装包未包含研究模块）。",
         "create": "创建 Study 失败。",
         "preflight": "预检失败。",
         "run": "离线执行失败。",
-        "report": "报告生成失败。"
+        "report": "报告生成失败。",
+        "evidence": "加载生产证据失败。",
+        "status": "加载 Study 状态失败。"
       }
     },
     "debt": {

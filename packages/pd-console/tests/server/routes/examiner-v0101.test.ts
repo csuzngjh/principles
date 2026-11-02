@@ -27,6 +27,7 @@ import os from 'node:os';
 import { handleExaminerRoute } from '../../../src/server/routes/examiner.js';
 import { readConsoleRuns, recoverUnfinishedConsoleRuns, appendConsoleRunEvent, mintRunId, CONSOLE_RUN_SCHEMA, type ConsoleRunMode } from '../../../src/server/routes/examiner-runs.js';
 import { resolveStudyRoots } from '../../../src/server/routes/examiner-executor.js';
+import { deriveStudyRuleCodeFacts, type ProductionSnapshot } from '../../../src/server/routes/examiner-study-inputs.js';
 
 const STUDY_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9-]*$/;
 
@@ -264,6 +265,45 @@ describe('Examiner v0.10.1 — challenge-suite catalog (§9)', () => {
     const created = await createStudy('not-a-suite', 2);
     expect(created.suiteKey).toBe('didactic-pair');
     expect(created.plannedPairs).toBe(4);
+  });
+
+  it('RuleCode coupling is TARGET-scoped: other principles\' rulecodes never block a clean target (§7.2 regression)', () => {
+    // Found on the e2e workspace: workspace-wide rulecode rows were once
+    // counted as the target's coupling, refusing every clean study. A row
+    // bound to a DIFFERENT principle is baseline, not the target's variable.
+    const snapshot = {
+      schema: 'examiner-production-snapshot.v1',
+      asOf: '2026-11-03T00:00:00Z',
+      targetPrincipleId: 'pri-target',
+      promptRoute: { status: 'unconfirmed', routeName: null, note: '' },
+      budget: { chars: null, capacitySource: null, capacityStatus: null, policyVersion: null, unit: 'utf16-chars' as const },
+      runtimeActivation: {
+        promptActivePrincipleIds: ['pri-target'],
+        projectedInjectedPrincipleIds: null,
+        ruleCodeActivations: [
+          { activationId: 'act-rule-shadow', principleId: 'pri-OTHER', mode: 'shadow' as const, status: 'active' },
+          { activationId: 'act-rule-live', principleId: 'pri-OTHER', mode: 'live' as const, status: 'active' },
+        ],
+      },
+      ledgerActivePrincipleIds: ['pri-target', 'pri-OTHER'],
+      divergence: { activeInLedgerNotRuntime: [], activeInLedgerNotProjected: null },
+      targetPrinciple: { runtimePromptActive: true, projectedInjected: null, ruleCodeActivationCount: 0, ledgerRuleCount: 0 },
+      experimentVsProduction: { studyBudgetChars: 2000, productionBudgetChars: null, markers: [], note: '' },
+    } as unknown as ProductionSnapshot;
+    const facts = deriveStudyRuleCodeFacts(snapshot);
+    expect(facts.targetRuleCodeCount).toBe(0);
+    expect(facts.principleRuleCodeIndependence).toBe(true);
+    expect(facts.ruleCodes).toEqual([]);
+
+    // A row bound to the TARGET itself IS a coupling → independence unproven.
+    const coupled = deriveStudyRuleCodeFacts({
+      ...snapshot,
+      runtimeActivation: { ...snapshot.runtimeActivation, ruleCodeActivations: [{ activationId: 'act-mine', principleId: 'pri-target', mode: 'live' as const, status: 'active' }] },
+      targetPrinciple: { ...snapshot.targetPrinciple, ruleCodeActivationCount: 1 },
+    } as unknown as ProductionSnapshot);
+    expect(coupled.targetRuleCodeCount).toBe(1);
+    expect(coupled.principleRuleCodeIndependence).toBeNull();
+    expect(coupled.ruleCodes[0]).toEqual({ ruleCodeId: 'act-mine', principleId: 'pri-target', baselineState: 'ON' });
   });
 });
 

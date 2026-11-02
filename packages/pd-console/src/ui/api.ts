@@ -1813,6 +1813,11 @@ export interface ExaminerStudyStatusData {
   runFinished: boolean;
   unitStates: Record<string, number>;
   reportStatus: string | null;
+  /** v0.10.1: read-only boundary + production snapshot + async console runs. */
+  readOnly?: boolean;
+  access?: string;
+  productionSnapshot?: ExaminerProductionSnapshot | null;
+  consoleRuns?: { runs: ExaminerConsoleRun[]; current: ExaminerConsoleRun | null; asyncModes: string[] };
 }
 
 export interface ExaminerPreflightCheck {
@@ -1882,12 +1887,12 @@ export async function fetchExaminerPrinciples(): Promise<ApiResponse<{ principle
   });
 }
 
-export async function createExaminerStudy(input: { targetPrincipleId: string; experimentMode: string; repetitionsPerCase: number }): Promise<ApiResponse<{ studyId: string; experimentMode: string; plannedPairs: number | null; note: string }>> {
-  return request<{ studyId: string; experimentMode: string; plannedPairs: number | null; note: string }>(
+export async function createExaminerStudy(input: { targetPrincipleId: string; experimentMode: string; repetitionsPerCase: number; suiteKey?: string }): Promise<ApiResponse<{ studyId: string; experimentMode: string; plannedPairs: number | null; suiteKey?: string; productionSnapshotMarkers?: string[]; note: string }>> {
+  return request<{ studyId: string; experimentMode: string; plannedPairs: number | null; suiteKey?: string; productionSnapshotMarkers?: string[]; note: string }>(
     '/api/v1/examiner/studies',
     { method: 'POST', body: JSON.stringify(input) },
     (v) => {
-      if (v && typeof (v as { studyId?: unknown }).studyId === 'string') return v as { studyId: string; experimentMode: string; plannedPairs: number | null; note: string };
+      if (v && typeof (v as { studyId?: unknown }).studyId === 'string') return v as { studyId: string; experimentMode: string; plannedPairs: number | null; suiteKey?: string; productionSnapshotMarkers?: string[]; note: string };
       return null;
     },
   );
@@ -1926,4 +1931,147 @@ export async function fetchExaminerReport(studyId: string): Promise<ApiResponse<
     if (v && (v as { report?: unknown }).report) return v as ExaminerReportData;
     return null;
   });
+}
+
+// ── Examiner v0.10.1 (production evidence · suites · async runs) ────────────
+
+export interface ExaminerEvidenceLaneStatus {
+  status: string;
+  reason?: string;
+  nextAction?: string;
+}
+
+export interface ExaminerEvidenceData {
+  asOf: string;
+  principleId: string;
+  principle: {
+    id: string;
+    text: string;
+    status: string;
+    ruleCount: number;
+    derivedFromPainIds: string[];
+    evaluability: string;
+    painPreventedCount: number;
+    adherenceRate: number;
+    valueScore: number;
+    runtimeDeactivated?: boolean;
+    ledgerStatusNote: string;
+  };
+  activation: ExaminerEvidenceLaneStatus & {
+    prompt: { activationId: string; action: string; status: string; activatedAt: string | null; deactivatedAt: string | null; enforcement?: string; warning?: string }[];
+    ruleCode: { activationId: string; action: string; mode?: string; status: string; enforcement?: string; targetRef: string; warning?: string }[];
+    promptInjectionRoute?: unknown;
+  };
+  injection: {
+    status: 'available' | 'degraded';
+    globalReason?: string;
+    statuses: { activationId: string; status: string; inCurrentWindow?: boolean; costChars?: number; budget?: number; route?: string; reason?: string }[];
+    budgetProvenance?: { capacitySource?: string; capacityStatus?: string; contextWindowTokens?: number; policyVersion?: string; fallbackReason?: string };
+    warnings: string[];
+  };
+  receipts: ExaminerEvidenceLaneStatus & {
+    effectCount: number;
+    presenceCount: number;
+    lastEffectAt?: string | null;
+    coverage?: unknown;
+    events?: unknown[];
+  };
+  evidenceAudit: ExaminerEvidenceLaneStatus & {
+    counts: { deliveries: number; applications: number; episodes: number; effects: number; outcomes: number };
+    deliveryConfirmations: { prepared: number; submitted: number; hostAccepted: number; contextPresent: number; runtimeLoaded: number };
+    applicationProof: { agentClaimed: number; runtimeVerified: number };
+    unresolvedReferences: number;
+    capabilityDeclarations: { hostKind: string; capability: string; status: string; maxConfirmation?: string; note?: string }[];
+    samples: {
+      deliveries: { evidenceId: string; recordedAt: string; sourceKind: string; confirmation: string; outcome: string; targetKind: string }[];
+      applications: { evidenceId: string; recordedAt: string; sourceKind: string; proofMethod: string; action: string }[];
+      episodes: { evidenceId: string; recordedAt: string; sourceKind: string; summary: string }[];
+      effects: { evidenceId: string; recordedAt: string; sourceKind: string; summary: string }[];
+      outcomes: { evidenceId: string; recordedAt: string; sourceKind: string; summary: string }[];
+    };
+    asOf: string | null;
+    coverage?: unknown;
+  };
+}
+
+export async function fetchExaminerPrincipleEvidence(principleId: string): Promise<ApiResponse<ExaminerEvidenceData>> {
+  return request<ExaminerEvidenceData>(`/api/v1/examiner/principles/${encodeURIComponent(principleId)}/evidence`, undefined, (v) => {
+    if (v && typeof (v as { principleId?: unknown }).principleId === 'string' && (v as { principle?: unknown }).principle) return v as ExaminerEvidenceData;
+    return null;
+  });
+}
+
+export interface ExaminerSuiteItem {
+  key: string;
+  title: string;
+  description: string;
+  caseCount: number;
+  variantLabels: string[];
+  goldProvenance: string;
+  goldGate: string;
+  suiteHash: string | null;
+}
+
+export async function fetchExaminerSuites(): Promise<ApiResponse<{ suites: ExaminerSuiteItem[]; note: string }>> {
+  return request<{ suites: ExaminerSuiteItem[]; note: string }>('/api/v1/examiner/suites', undefined, (v) => {
+    if (v && Array.isArray((v as { suites?: unknown }).suites)) return v as { suites: ExaminerSuiteItem[]; note: string };
+    return null;
+  });
+}
+
+export interface ExaminerHostReadiness {
+  host: string;
+  maxProvableInjectionLevel: string;
+  executionModes: string[];
+  requirements: { id: string; detail: string }[];
+  note: string;
+}
+
+export async function fetchExaminerHostReadiness(): Promise<ApiResponse<ExaminerHostReadiness>> {
+  return request<ExaminerHostReadiness>('/api/v1/examiner/hosts/openclaw/readiness', undefined, (v) => {
+    if (v && typeof (v as { host?: unknown }).host === 'string' && Array.isArray((v as { requirements?: unknown }).requirements)) return v as ExaminerHostReadiness;
+    return null;
+  });
+}
+
+export interface ExaminerConsoleRun {
+  runId: string;
+  mode: string;
+  status: 'RUNNING' | 'FINISHED' | 'FAILED' | 'ABANDONED';
+  acceptedAt: string;
+  finishedAt: string | null;
+  outcome: string | null;
+  reason: string | null;
+}
+
+export interface ExaminerProductionSnapshot {
+  schema: string;
+  asOf: string;
+  targetPrincipleId: string;
+  promptRoute: { status: string; routeName: string | null; note: string };
+  budget: { chars: number | null; capacitySource: string | null; capacityStatus: string | null; policyVersion: string | null; unit: string };
+  runtimeActivation: { promptActivePrincipleIds: string[]; projectedInjectedPrincipleIds: string[] | null; ruleCodeActivations: { activationId: string; mode: string | null; status: string }[] };
+  ledgerActivePrincipleIds: string[];
+  divergence: { activeInLedgerNotRuntime: string[]; activeInLedgerNotProjected: string[] | null };
+  targetPrinciple: { runtimePromptActive: boolean; projectedInjected: boolean | null; ruleCodeActivationCount: number; ledgerRuleCount: number };
+  experimentVsProduction: { studyBudgetChars: number; productionBudgetChars: number | null; markers: string[]; note: string };
+}
+
+export interface ExaminerAsyncRunAccepted {
+  studyId: string;
+  runId: string;
+  mode: string;
+  status: string;
+  note: string;
+}
+
+export async function startExaminerAsyncRun(studyId: string, mode: 'host-dry-run' | 'f2-real-host'): Promise<ApiResponse<ExaminerAsyncRunAccepted>> {
+  return request<ExaminerAsyncRunAccepted>(
+    `/api/v1/examiner/studies/${encodeURIComponent(studyId)}/run`,
+    { method: 'POST', body: JSON.stringify({ mode }) },
+    (v) => {
+      if (v && typeof (v as { runId?: unknown }).runId === 'string') return v as ExaminerAsyncRunAccepted;
+      return null;
+    },
+  );
 }
