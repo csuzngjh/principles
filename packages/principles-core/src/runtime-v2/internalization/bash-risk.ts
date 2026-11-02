@@ -15,6 +15,8 @@
  *   - 仅 POSIX 风格 tokenizer（单/双引号、结构算子、重定向、$()/``）；
  *     不实现变量展开、glob 语义、进程替换（>(  <( → unknown）。
  *   - 只读是显式白名单子集；清单外的命令一律 unknown（不是 safe）。
+ *   - 只读白名单同时覆盖有界 POSIX 命令族与 Windows PowerShell 查询 cmdlet
+ *     （仅完整 cmdlet 名称 + 显式参数表；缩写参数与两字母别名保守归 unknown）。
  *   - git 仅识别显式全局选项集；未识别的子命令前选项 → unknown。
  *   - 命令替换递归深度上限 3。
  *
@@ -407,6 +409,113 @@ function isReadonlyStdoutShape(command: string, args: readonly string[]): boolea
   return true;
 }
 
+// ── Windows PowerShell 只读查询 cmdlet ───────────────────────────────────────
+//
+// PowerShell 是大小写不敏感的，且读文件/目录的常用入口是 Get-Content /
+// Get-ChildItem / Select-String；只按 POSIX 名称分类会把它们判成 unknown，
+// 使“只读执行放行”的规则在 Windows 上误拦真实读操作。这里只接受**完整
+// cmdlet 名称**：缩写参数（-Lit）与两字母别名（gc/gci/sls）一律不获得
+// safe，保持“正面证据优先”的保守边界。参数表是 allow-list：未列出的
+// 开关/参数会让整条命令回到 unknown，而不是默认可信。
+//
+// 这些 cmdlet 本身没有写文件参数；输出重定向与管道由链级结构检查另行处理
+// （hasOutputRedirect → normal，无法解释的段 → unknown）。
+
+interface PowerShellReadonlyGrammar {
+  readonly switches: ReadonlySet<string>;
+  readonly valued: ReadonlySet<string>;
+}
+
+const PS_COMMON_SWITCHES: readonly string[] = ['verbose', 'debug'];
+const PS_COMMON_VALUED: readonly string[] = [
+  'erroraction', 'warningaction', 'informationaction', 'progressaction',
+  'errorvariable', 'warningvariable', 'informationvariable',
+  'outvariable', 'outbuffer', 'pipelinevariable',
+];
+
+function psGrammar(switches: readonly string[], valued: readonly string[]): PowerShellReadonlyGrammar {
+  return {
+    switches: new Set([...PS_COMMON_SWITCHES, ...switches]),
+    valued: new Set([...PS_COMMON_VALUED, ...valued]),
+  };
+}
+
+const POWERSHELL_READONLY_COMMANDS: Readonly<Record<string, PowerShellReadonlyGrammar>> = Object.freeze({
+  'get-content': psGrammar(
+    ['raw', 'force', 'wait', 'asbytestream'],
+    ['path', 'literalpath', 'totalcount', 'first', 'tail', 'last', 'encoding', 'delimiter', 'readcount', 'stream', 'credential'],
+  ),
+  'get-childitem': psGrammar(
+    ['recurse', 'force', 'name', 'file', 'directory', 'hidden', 'readonly', 'system', 'followsymlink'],
+    ['path', 'literalpath', 'filter', 'include', 'exclude', 'depth', 'attributes', 'credential'],
+  ),
+  'get-item': psGrammar(
+    ['force', 'followsymlink'],
+    ['path', 'literalpath', 'filter', 'include', 'exclude', 'stream', 'credential'],
+  ),
+  'get-itemproperty': psGrammar(
+    ['force'],
+    ['path', 'literalpath', 'name', 'filter', 'include', 'exclude', 'credential'],
+  ),
+  'select-string': psGrammar(
+    ['simplematch', 'casesensitive', 'notmatch', 'allmatches', 'quiet', 'list', 'raw'],
+    ['pattern', 'path', 'literalpath', 'inputobject', 'encoding', 'context', 'include', 'exclude', 'credential'],
+  ),
+  'test-path': psGrammar(
+    ['isvalid'],
+    ['path', 'literalpath', 'pathtype', 'filter', 'credential'],
+  ),
+  'resolve-path': psGrammar(
+    ['relative'],
+    ['path', 'literalpath', 'relativebasepath', 'credential'],
+  ),
+  'get-location': psGrammar(
+    ['stack'],
+    ['psprovider', 'psdrive'],
+  ),
+});
+
+/** PowerShell 查询形状：仅完整 cmdlet 名 + allow-list 参数；未知参数 → unknown。 */
+function isReadonlyPowerShellShape(command: string, args: readonly string[]): boolean | 'unknown' {
+  const grammar = POWERSHELL_READONLY_COMMANDS[command.toLowerCase()];
+  if (grammar === undefined) return 'unknown';
+  let positionalOnly = false;
+  for (let i = 0; i < args.length; i += 1) {
+    const token = args[i] as string;
+    if (positionalOnly) continue;
+    // PowerShell treats a bare `--` as end-of-parameters.
+    if (token === '--') {
+      positionalOnly = true;
+      continue;
+    }
+    // A lone `-` is a positional value (stdin/here-string), not a parameter.
+    if (!token.startsWith('-') || token === '-') continue;
+    const body = token.slice(1);
+    const colon = body.indexOf(':');
+    const rawName = colon === -1 ? body : body.slice(0, colon);
+    const name = rawName.toLowerCase();
+    if (name.length === 0) return 'unknown';
+    if (colon !== -1) {
+      // `-Name:value` — PowerShell's inline value syntax.
+      if (body.length === colon + 1) return 'unknown';
+      if (grammar.valued.has(name)) continue;
+      if (grammar.switches.has(name)) {
+        const flag = body.slice(colon + 1).toLowerCase();
+        if (flag === 'true' || flag === 'false' || flag === '$true' || flag === '$false') continue;
+      }
+      return 'unknown';
+    }
+    if (grammar.switches.has(name)) continue;
+    if (grammar.valued.has(name)) {
+      if (args[i + 1] === undefined) return 'unknown';
+      i += 1;
+      continue;
+    }
+    return 'unknown';
+  }
+  return true;
+}
+
 function isReadonlyGit(args: readonly string[]): boolean | 'unknown' {
   let i = 0;
   // 跳过显式全局选项，找到子命令。
@@ -470,6 +579,7 @@ function isReadonlyWithArgShape(command: string, args: readonly string[]): boole
   if (command === 'sort') return args.some((a) => a === '-o' || a === '--output' || a.startsWith('--output=') || a.startsWith('-o')) ? false : 'unknown';
   if (command === 'uniq') return args.filter((a) => !a.startsWith('-')).length > 1 ? false : 'unknown';
   if (STDOUT_QUERY_COMMANDS.has(command)) return isReadonlyStdoutShape(command, args);
+  if (Object.hasOwn(POWERSHELL_READONLY_COMMANDS, command.toLowerCase())) return isReadonlyPowerShellShape(command, args);
   // Positive evidence is limited to the audited command families above.
   return 'unknown';
 }
