@@ -219,16 +219,40 @@ function main() {
     const adapter = installed.codexAdapter;
     const hostRuntime = installed.hostRuntime;
     const core = installed.core;
+    const mcpServer = installed.mcpServer;
     if (adapter === 'not-installed') {
       push('runtime', 'degraded', 'runtime not installed in plugin data', 'Run the $pd-control setup skill to install the pinned runtime.');
     } else if (core === 'not-installed') {
       push('runtime', 'degraded', 'core runtime not installed in plugin data', 'Re-run $pd-control setup to install the pinned runtime.');
     } else if (pins === null || typeof pins.codexAdapter !== 'string' || typeof pins.hostRuntime !== 'string' || typeof pins.core !== 'string') {
       push('runtime', 'ok', `adapter@${adapter} host-runtime@${hostRuntime} core@${core} (pin unverified${root.ok ? '' : ' — plugin root not located'})`);
-    } else if (adapter !== pins.codexAdapter || hostRuntime !== pins.hostRuntime || core !== pins.core) {
-      push('runtime', 'degraded', `installed adapter@${adapter}+host-runtime@${hostRuntime}+core@${core} != pinned ${pins.codexAdapter}+${pins.hostRuntime}+${pins.core}`, 'Re-run $pd-control setup to realign the runtime with the pinned versions.');
+    } else if (adapter !== pins.codexAdapter || hostRuntime !== pins.hostRuntime || core !== pins.core
+      || (typeof pins.mcpServer === 'string' && mcpServer !== pins.mcpServer)) {
+      const pinnedSuffix = typeof pins.mcpServer === 'string' ? `+mcp-server@${pins.mcpServer}` : '';
+      push('runtime', 'degraded', `installed adapter@${adapter}+host-runtime@${hostRuntime}+core@${core}+mcp-server@${mcpServer} != pinned ${pins.codexAdapter}+${pins.hostRuntime}+${pins.core}${pinnedSuffix}`, 'Re-run $pd-control setup to realign the runtime with the pinned versions.');
     } else {
-      push('runtime', 'ok', `adapter@${adapter} host-runtime@${hostRuntime} core@${core} (pinned match)`);
+      push('runtime', 'ok', `adapter@${adapter} host-runtime@${hostRuntime} core@${core} mcp-server@${mcpServer} (pinned match)`);
+    }
+    // Gate 4 (PRI-1071): the MCP binding beside the plugin payload is what the
+    // launcher reads; a plugin reinstall (codex plugin add) resets the payload
+    // and drops it — surfaced as CONFIG_MISSING, never silently ignored.
+    if (root.ok && typeof pins?.mcpServer === 'string') {
+      const bindingPath = path.join(root.pluginRoot, 'mcp-binding.json');
+      try {
+        const binding = JSON.parse(fs.readFileSync(bindingPath, 'utf8'));
+        const bindingOk = binding !== null && typeof binding === 'object'
+          && binding.schemaVersion === 'pd.mcp-binding.v1'
+          && binding.host === 'codex'
+          && typeof binding.workspaceDir === 'string' && path.isAbsolute(binding.workspaceDir)
+          && typeof binding.serverEntry === 'string' && path.isAbsolute(binding.serverEntry);
+        if (bindingOk) {
+          push('mcpBinding', 'ok', `pd-recall bound to ${path.basename(binding.serverEntry)} (host ${binding.host})`);
+        } else {
+          push('mcpBinding', 'degraded', 'mcp-binding.json exists but is malformed', 'Re-run $pd-control setup to regenerate mcp-binding.json.');
+        }
+      } catch {
+        push('mcpBinding', 'degraded', 'mcp-binding.json missing (plugin reinstalled without setup?)', 'Re-run $pd-control setup to write mcp-binding.json; the MCP server refuses to start without it (fail-closed).');
+      }
     }
   } else {
     push('runtime', 'degraded', data.reason, `${data.nextAction} Then run $pd-control setup.`);

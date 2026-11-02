@@ -55,7 +55,7 @@ function runNpm(args, options) {
 }
 
 function parseArgs(argv) {
-  const out = { pluginRoot: undefined, pluginData: undefined, workspace: undefined, adapterSource: undefined, hostRuntimeSource: undefined, skipInit: false, json: false, ingest: undefined };
+  const out = { pluginRoot: undefined, pluginData: undefined, workspace: undefined, adapterSource: undefined, hostRuntimeSource: undefined, coreSource: undefined, mcpServerSource: undefined, skipInit: false, json: false, ingest: undefined };
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--plugin-root') {
       const value = requireFlagValue(argv, i, '--plugin-root');
@@ -69,11 +69,11 @@ function parseArgs(argv) {
       const value = requireFlagValue(argv, i, '--workspace');
       if (!value.ok) return { error: value.reason, nextAction: value.nextAction };
       out.workspace = value.value; i += 1;
-    } else if (argv[i] === '--adapter-source' || argv[i] === '--host-runtime-source' || argv[i] === '--core-source') {
+    } else if (argv[i] === '--adapter-source' || argv[i] === '--host-runtime-source' || argv[i] === '--core-source' || argv[i] === '--mcp-server-source') {
       const flag = argv[i];
       const value = requireFlagValue(argv, i, flag);
       if (!value.ok) return { error: value.reason, nextAction: value.nextAction };
-      const key = flag === '--adapter-source' ? 'adapterSource' : flag === '--host-runtime-source' ? 'hostRuntimeSource' : 'coreSource';
+      const key = flag === '--adapter-source' ? 'adapterSource' : flag === '--host-runtime-source' ? 'hostRuntimeSource' : flag === '--core-source' ? 'coreSource' : 'mcpServerSource';
       out[key] = path.resolve(value.value); i += 1;
     } else if (argv[i] === '--skip-init') out.skipInit = true;
     else if (argv[i] === '--json') out.json = true;
@@ -85,7 +85,7 @@ function parseArgs(argv) {
       }
       out.ingest = value.value; i += 1;
     }
-    else return { error: `unknown_argument:${argv[i]}`, nextAction: 'Supported: --plugin-root <dir> --plugin-data <dir> --workspace <dir> --adapter-source <dir> --host-runtime-source <dir> --core-source <dir> --skip-init --ingest accept|decline|skip --json' };
+    else return { error: `unknown_argument:${argv[i]}`, nextAction: 'Supported: --plugin-root <dir> --plugin-data <dir> --workspace <dir> --adapter-source <dir> --host-runtime-source <dir> --core-source <dir> --mcp-server-source <dir> --skip-init --ingest accept|decline|skip --json' };
   }
   return out;
 }
@@ -93,6 +93,16 @@ function parseArgs(argv) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.error) { fail(args.error, args.nextAction ?? 'Check the argument list.'); return; }
+  // Pre-publish/test wiring: the mcpServer pin rides the release train, so a
+  // cohort younger than the published set (e.g. the PR that INTRODUCES the
+  // pin) cannot resolve @principles/pd-mcp-server from the registry yet. The
+  // explicit --mcp-server-source flag always wins; this env fallback exists
+  // for harnesses that cannot extend argv (CI flows, spawn-constrained
+  // harnesses) and is documented in the plugin README.
+  if (!args.mcpServerSource) {
+    const envSource = process.env.PD_SETUP_MCP_SERVER_SOURCE;
+    if (typeof envSource === 'string' && envSource.length > 0) args.mcpServerSource = path.resolve(envSource);
+  }
   // Workspace-selection parity with hooks and the owner scripts (ERR-117):
   // they resolve through locateWorkspace — an initialized user workspace wins
   // over the project, and a broken user config fails loud instead of silently
@@ -138,7 +148,7 @@ async function main() {
     fail(`runtime_version_file_invalid:${error.message.slice(0, 160)}`, 'Reinstall the plugin (codex plugin remove principles-disciple@principles && codex plugin add principles-disciple@principles).');
     return;
   }
-  const desired = { codexAdapter: pins.codexAdapter, hostRuntime: pins.hostRuntime, core: pins.core };
+  const desired = { codexAdapter: pins.codexAdapter, hostRuntime: pins.hostRuntime, core: pins.core, mcpServer: pins.mcpServer };
   if (args.adapterSource) {
     let sourcePackage;
     try { sourcePackage = JSON.parse(fs.readFileSync(path.join(args.adapterSource, 'package.json'), 'utf8')); }
@@ -169,6 +179,16 @@ async function main() {
       fail('core_source_invalid', 'The built core name/version must match the plugin runtime pin (runtime-version.json).'); return;
     }
   }
+  if (args.mcpServerSource) {
+    let sourcePackage;
+    try { sourcePackage = JSON.parse(fs.readFileSync(path.join(args.mcpServerSource, 'package.json'), 'utf8')); }
+    catch { fail('mcp_server_source_invalid', 'Pass the built @principles/pd-mcp-server package directory containing package.json and dist/index.js.'); return; }
+    if (!sourcePackage || sourcePackage.name !== '@principles/pd-mcp-server'
+      || sourcePackage.version !== desired.mcpServer
+      || !fs.existsSync(path.join(args.mcpServerSource, 'dist', 'index.js'))) {
+      fail('mcp_server_source_invalid', 'The built MCP server name/version must match the plugin runtime pin (runtime-version.json).'); return;
+    }
+  }
   const missingPins = Object.entries(desired)
     .filter(([, value]) => typeof value !== 'string' || value.length === 0)
     .map(([key]) => key);
@@ -185,7 +205,9 @@ async function main() {
     if (!adapterSource && typeof marker.adapterSource === 'string') adapterSource = marker.adapterSource;
     if (marker.codexAdapter === desired.codexAdapter
       && marker.hostRuntime === desired.hostRuntime
-      && marker.core === desired.core && !args.adapterSource && !args.hostRuntimeSource && !args.coreSource) installNeeded = false;
+      && marker.core === desired.core
+      && marker.mcpServer === desired.mcpServer
+      && !args.adapterSource && !args.hostRuntimeSource && !args.coreSource && !args.mcpServerSource) installNeeded = false;
   } catch { /* no/broken marker → install */ }
   // PRI-1046: a marker is a claim, not evidence. It used to be written from the
   // desired pins without ever reading the installed bytes, so a silently
@@ -201,14 +223,17 @@ async function main() {
   // can log `placeDep … REPLACE` + `REMOVE node_modules/…` and still exit 0, so
   // the acceptance test is always the bytes on disk.
   const adapterEntry = path.join(runtimeDir, 'node_modules', '@principles', 'codex-adapter', 'dist', 'pd-hook.js');
+  const mcpServerEntry = path.join(runtimeDir, 'node_modules', '@principles', 'pd-mcp-server', 'dist', 'index.js');
   const attestRuntime = () => {
     const verified = verifyInstalledRuntime(runtimeDir, desired);
     const adapterEntryPresent = fs.existsSync(adapterEntry);
-    return { verified, adapterEntryPresent, ok: verified.ok && adapterEntryPresent };
+    const mcpServerEntryPresent = fs.existsSync(mcpServerEntry);
+    return { verified, adapterEntryPresent, mcpServerEntryPresent, ok: verified.ok && adapterEntryPresent && mcpServerEntryPresent };
   };
   const attestationDetail = (attestation) => {
     const rows = attestation.verified.mismatched.map((row) => `${row.packageName}@${row.installed}!=${row.pinned}`);
     if (!attestation.adapterEntryPresent) rows.push('codex-adapter/dist/pd-hook.js:missing');
+    if (!attestation.mcpServerEntryPresent) rows.push('pd-mcp-server/dist/index.js:missing');
     return rows.join(',');
   };
   const installRuntime = () => runNpm(
@@ -219,10 +244,11 @@ async function main() {
       // at 0 and the failure stays loud — the bytes below decide acceptance, so
       // a retry could only lengthen a real network error, never mask a drop.
       '--fetch-retries=0', '--fetch-timeout=60000',
-      ...(args.adapterSource || args.hostRuntimeSource || args.coreSource ? ['--install-links'] : []),
+      ...(args.adapterSource || args.hostRuntimeSource || args.coreSource || args.mcpServerSource ? ['--install-links'] : []),
       args.adapterSource ? `file:${args.adapterSource}` : `@principles/codex-adapter@${desired.codexAdapter}`,
       args.hostRuntimeSource ? `file:${args.hostRuntimeSource}` : `@principles/host-runtime@${desired.hostRuntime}`,
       args.coreSource ? `file:${args.coreSource}` : `@principles/core@${desired.core}`,
+      args.mcpServerSource ? `file:${args.mcpServerSource}` : `@principles/pd-mcp-server@${desired.mcpServer}`,
     ],
     { cwd: runtimeDir, stdio: ['ignore', 'pipe', 'pipe'], timeout: 600_000 },
   );
@@ -291,6 +317,24 @@ async function main() {
     initResult = 'initialized';
   }
 
+  // 3b. Gate 4 (PRI-1071): write the PD-owned MCP binding file beside the
+  //     plugin payload. The launcher (mcp/launcher.cjs, started by the
+  //     plugin's .mcp.json) reads it and injects the trusted env — this is
+  //     the single authority for the business workspaceDir (SPEC-PD-MCP-
+  //     GATE4-001 §3.5). Idempotent: rewritten on every setup so a plugin
+  //     update (codex plugin add) that resets the payload directory
+  //     restores the binding on the next setup run.
+  const bindingPath = path.join(root.pluginRoot, 'mcp-binding.json');
+  const mcpBinding = {
+    schemaVersion: 'pd.mcp-binding.v1',
+    host: 'codex',
+    workspaceDir,
+    serverEntry: mcpServerEntry,
+    versions: { mcpServer: desired.mcpServer, core: desired.core },
+    writtenAt: new Date().toISOString(),
+  };
+  fs.writeFileSync(bindingPath, JSON.stringify(mcpBinding, null, 2) + '\n', 'utf8');
+
   // The Marketplace installer must register its workspace too: the retired
   // global-hook installer no longer reaches writeInstallManifest. Companion
   // discovers workers only from this existing installer-owned manifest.
@@ -324,6 +368,7 @@ async function main() {
     workspace: workspaceDir,
     workspaceConfig: fs.existsSync(configPath) ? 'present' : 'absent (run pd runtime init without --skip-init, or create .pd/config.yaml)',
     workspaceInit: initResult,
+    mcp: { binding: bindingPath, server: `@principles/pd-mcp-server@${desired.mcpServer}`, tool: 'pd_recall_principle_pains', nextAction: 'Restart Codex (or start a new session) so the pd-recall MCP server starts; verify with `codex mcp list`.' },
     workerRegistration,
     ingestionConsent: consent.outcome,
     ...(consent.note ? { ingestionConsentNote: consent.note } : {}),
@@ -335,6 +380,7 @@ async function main() {
     console.log(`  runtime   : @principles/codex-adapter@${desired.codexAdapter} + host-runtime@${desired.hostRuntime} + core@${desired.core} (${report.runtimeInstalled})`);
     if (runtimeRepair) console.log(`  repaired  : reinstalled from a clean tree after npm left unattested bytes (${runtimeRepair.firstMismatch})`);
     console.log(`  workspace : ${workspaceDir} — config ${report.workspaceConfig}`);
+    console.log(`  mcp       : @principles/pd-mcp-server@${desired.mcpServer} bound (pd-recall; restart Codex to activate)`);
     console.log(`  ingestion : ${report.ingestionConsent}${consent.note ? ` (${consent.note})` : ''}`);
     console.log(`  worker    : ${workerRegistration.status} — ${workerRegistration.nextAction}`);
     console.log(`  next      : ${report.hookTrustNextAction}`);

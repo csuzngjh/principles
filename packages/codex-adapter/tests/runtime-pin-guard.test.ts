@@ -33,9 +33,9 @@ const PLUGIN_ROOT = path.join(repoRoot, 'plugins', 'principles-disciple');
 describe('PRI-1040 installed-runtime cohort guard', () => {
   const pinsPath = path.join(PLUGIN_ROOT, 'runtime-version.json');
 
-  it('runtime-version.json exists and pins all three runtime packages with plain semver', () => {
-    const pins = JSON.parse(fs.readFileSync(pinsPath, 'utf8')) as { codexAdapter: string; hostRuntime: string; core: string };
-    for (const key of ['codexAdapter', 'hostRuntime', 'core'] as const) {
+  it('runtime-version.json exists and pins all four runtime packages with plain semver', () => {
+    const pins = JSON.parse(fs.readFileSync(pinsPath, 'utf8')) as { codexAdapter: string; hostRuntime: string; core: string; mcpServer: string };
+    for (const key of ['codexAdapter', 'hostRuntime', 'core', 'mcpServer'] as const) {
       expect(pins[key], `pin ${key} must be present`).toBeTruthy();
       expect(pins[key], `pin ${key} must be exact semver (no ranges): ${pins[key]}`).toMatch(/^\d+\.\d+\.\d+$/);
     }
