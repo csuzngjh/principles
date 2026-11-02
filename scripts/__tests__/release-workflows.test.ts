@@ -323,7 +323,14 @@ describe('ci.yml — release intent guard is inside the required gate', () => {
     const t = fs.readFileSync(path.join(REPO_ROOT, '.github/workflows/ci.yml'), 'utf8');
     expect(t).toContain('Release intent guard (changesets)');
     expect(t).toContain('check-pr-release-intent.mjs');
-    expect(t).toContain('PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}');
+    // PRI-964: CI must not hand the GUARD the stale recorded base.sha; the
+    // guard derives the live base from the merge ref / origin/main. Scope the
+    // assertion to this step: the codex-pins `--check-base` probe legitimately
+    // still uses base.sha for its own diff.
+    const guardStep = t.slice(t.indexOf('Release intent guard (changesets)'));
+    const stepBody = guardStep.slice(0, guardStep.indexOf('Run canonical merge gate'));
+    expect(stepBody).toContain('PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}');
+    expect(stepBody).not.toContain('PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}');
   });
 });
 

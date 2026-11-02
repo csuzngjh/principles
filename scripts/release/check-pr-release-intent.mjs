@@ -27,13 +27,17 @@
  *
  * Usage (CI verify-merge step, local verify:merge, and pre-push):
  *   node scripts/release/check-pr-release-intent.mjs
- * Env: PR_BASE_SHA (base SHA of the pull request). Falls back to the
- * merge-base of origin/main and HEAD (strict — task-branch local runs are
- * authoritative). A final HEAD~1 fallback (no differing main ref, e.g. on
- * the main checkout itself) degrades the run to ADVISORY: findings are
- * reported as a warning, never a verdict, because HEAD~1 cannot represent
- * a PR base (PRI-917 v0.3.2: a missing changeset escaped to CI exactly
- * because this guard was CI-only — it now also runs in local verify:merge).
+ * Env: PR_HEAD_SHA (CI pull_request head SHA, PRI-964) — when supplied, the
+ * base is the merge-ref first parent (live base tip) or origin/main's
+ * merge-base with HEAD; the stale recorded base.sha is never used.
+ * PR_BASE_SHA remains the explicit-base override for local runs/tests.
+ * Without either, the guard uses the merge-base of origin/main and HEAD
+ * (strict — task-branch local runs are authoritative). A final HEAD~1
+ * fallback (no differing main ref, e.g. on the main checkout itself)
+ * degrades the run to ADVISORY: findings are reported as a warning, never a
+ * verdict, because HEAD~1 cannot represent a PR base (PRI-917 v0.3.2: a
+ * missing changeset escaped to CI exactly because this guard was CI-only —
+ * it now also runs in local verify:merge).
  */
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
@@ -66,10 +70,47 @@ function git(args) {
 }
 
 function resolveBase() {
+  const head = git(['rev-parse', 'HEAD']).trim();
+
+  // PRI-964: CI checks out GitHub's pull_request merge ref. Its FIRST parent is
+  // the live base-branch tip that GitHub merged the PR into; the PR's recorded
+  // base.sha is frozen at PR-open time and goes stale as main advances. Using
+  // it charged main's later commits (including no-release changesets) to the
+  // PR. When the event's head SHA is supplied, prove HEAD is the merge ref
+  // (second parent == PR head) and use its first parent instead of the stale
+  // base. If CI checks out the PR head directly, the origin/main merge-base is
+  // the correct base.
+  const prHead = process.env.PR_HEAD_SHA;
+  if (prHead && /^[0-9a-f]{7,40}$/.test(prHead)) {
+    if (head !== prHead) {
+      const firstParent = git(['rev-list', '--parents', '-n', '1', head]).trim().split(/\s+/);
+      if (firstParent.length >= 3 && firstParent[2] === prHead) {
+        return { sha: firstParent[1], advisory: false };
+      }
+    }
+    const originMain = (() => {
+      try {
+        return git(['rev-parse', '--verify', 'origin/main^{commit}']).trim();
+      } catch {
+        return null;
+      }
+    })();
+    if (originMain) {
+      try {
+        return { sha: git(['merge-base', originMain, head]).trim(), advisory: false };
+      } catch {
+        // Unrelated histories — no usable PR base from origin/main.
+      }
+    }
+    console.warn(
+      'RELEASE_INTENT_GUARD ADVISORY: PR_HEAD_SHA was supplied but neither the merge-ref first parent nor origin/main could prove the base — falling back to HEAD~1.',
+    );
+    return { sha: `${head}~1`, advisory: true };
+  }
+
   if (process.env.PR_BASE_SHA && /^[0-9a-f]{7,40}$/.test(process.env.PR_BASE_SHA)) {
     return { sha: process.env.PR_BASE_SHA, advisory: false };
   }
-  const head = git(['rev-parse', 'HEAD']).trim();
   // origin/main is the fetch authority for the PR base. The old logic
   // skipped it when it equals HEAD (`sha === head: continue`) and fell back
   // to the LOCAL `main` ref — which can be arbitrarily stale on long-lived
