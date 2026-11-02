@@ -53,13 +53,13 @@ export function ExaminerEvidencePanel({ evidence, compact = false }: { evidence:
           )}
           <div className="mt-2 grid gap-1 text-xs">
             <div>{t('pages.examiner.evidence.activation.promptRows')}: <span className="font-mono">{activation.prompt.length}</span></div>
-            {activation.prompt.slice(0, 4).map((row) => (
+            {activation.prompt.filter((_, index) => index < 4).map((row) => (
               <div key={row.activationId} className="font-mono text-[11px] text-muted-foreground">
                 {row.status} · {row.action}{row.enforcement ? ` · ${row.enforcement}` : ''}
               </div>
             ))}
             <div className="mt-1">{t('pages.examiner.evidence.activation.ruleCodeRows')}: <span className="font-mono">{activation.ruleCode.length}</span></div>
-            {activation.ruleCode.slice(0, 4).map((row) => (
+            {activation.ruleCode.filter((_, index) => index < 4).map((row) => (
               <div key={row.activationId} className="font-mono text-[11px] text-muted-foreground">
                 {row.mode ?? 'mode?'} · {row.status} · {row.enforcement ?? '—'}
               </div>
@@ -81,7 +81,7 @@ export function ExaminerEvidencePanel({ evidence, compact = false }: { evidence:
             {injection.statuses.length === 0 && (
               <div className="text-muted-foreground">{t('pages.examiner.evidence.injection.noRows')}</div>
             )}
-            {injection.statuses.slice(0, 4).map((row) => (
+            {injection.statuses.filter((_, index) => index < 4).map((row) => (
               <div key={row.activationId} className="font-mono text-[11px]">
                 {row.status}
                 {row.inCurrentWindow !== undefined ? ` · window:${String(row.inCurrentWindow)}` : ''}

@@ -295,19 +295,25 @@ export function deriveStudyRuleCodeFacts(snapshot: ProductionSnapshot): StudyRul
   return { ruleCodes: resolved, principleRuleCodeIndependence: independence, targetRuleCodeCount, evidenceNote };
 }
 
-/** Read a study's frozen production snapshot (read-only; null when absent). */
-export function readProductionSnapshot(studyDir: string): ProductionSnapshot | null {
+/**
+ * Read a study's frozen production snapshot for DISPLAY (read-only; null when
+ * absent/unrecognized). The snapshot is frozen study data, not a trusted
+ * contract: the return type stays a plain untrusted record (rc-1) — no typed
+ * facade over parsed JSON.
+ */
+/** rc-1/rc-2: plain-object type guard over parsed JSON (no `as` narrowing). */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function readProductionSnapshot(studyDir: string): Record<string, unknown> | null {
   const file = path.join(studyDir, 'production-snapshot.json');
   if (!fs.existsSync(file)) return null;
   try {
     const parsed: unknown = JSON.parse(fs.readFileSync(file, 'utf8'));
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
-    const record = parsed as Record<string, unknown>;
-    if (record.schema !== 'examiner-production-snapshot.v1') return null;
-    // The snapshot is frozen study data, not a trusted contract: return the
-    // parsed object only for display purposes; hash-bearing consumers must
-    // treat it as untrusted (rc-1). We surface it as a plain record.
-    return parsed as ProductionSnapshot;
+    if (!isPlainObject(parsed)) return null;
+    if (parsed.schema !== 'examiner-production-snapshot.v1') return null;
+    return parsed;
   } catch {
     return null;
   }

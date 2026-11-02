@@ -344,7 +344,7 @@ export async function handleExaminerRoute(
         repetitionsPerCase,
         suiteKey,
         hostBacked: {
-          productionSnapshot: snapshot as unknown as Record<string, unknown>,
+          productionSnapshot: { ...snapshot },
           ruleCodeFacts: deriveStudyRuleCodeFacts(snapshot),
           painRefs,
         },

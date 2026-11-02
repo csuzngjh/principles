@@ -178,8 +178,8 @@ export async function recoverUnfinishedConsoleRuns(roots: StudyRoots): Promise<{
     try {
       const accepted = fs.readFileSync(file, 'utf8').split('\n')
         .filter(Boolean)
-        .map((line) => JSON.parse(line) as Record<string, unknown>)
-        .filter((row) => row.type === 'CONSOLE_RUN_ACCEPTED' && row.runId === running.runId)
+        .map((line): unknown => JSON.parse(line))
+        .filter((row): row is Record<string, unknown> => isJsonObject(row) && row.type === 'CONSOLE_RUN_ACCEPTED' && row.runId === running.runId)
         .pop();
       const pid = typeof accepted?.pid === 'number' ? accepted.pid : 0;
       if (processAlive(pid)) continue;
@@ -383,8 +383,14 @@ export async function f2AuthorizationGate(labRoot: string, studyDir: string): Pr
   const manifestFile = path.join(studyDir, 'examiner-manifest.json');
   const suiteFile = path.join(studyDir, 'suite-manifest.json');
   try {
-    const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8')) as Record<string, unknown>;
-    const suite = JSON.parse(fs.readFileSync(suiteFile, 'utf8')) as Record<string, unknown>;
+    const manifestParsed: unknown = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+    const suiteParsed: unknown = JSON.parse(fs.readFileSync(suiteFile, 'utf8'));
+    if (!isJsonObject(manifestParsed) || !isJsonObject(suiteParsed)) {
+      reasons.push('the frozen study files are not JSON objects');
+      return { authorized: false, reasons, record: stageR.record };
+    }
+    const manifest = manifestParsed;
+    const suite = suiteParsed;
     if (typeof record.studyId === 'string' && record.studyId !== manifest.studyId) {
       reasons.push('the authorization is bound to a different study id');
     }
