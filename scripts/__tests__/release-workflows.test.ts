@@ -316,6 +316,41 @@ describe('version-packages.yml — rolling Version PR automation', () => {
     expect(t).toContain('resolve-release-cohort.mjs --is-cohort');
     expect(t).toContain('gh workflow run publish-npm.yml --ref main -f cohort_sha=');
   });
+
+  // PRI-1014: the bot must be able to re-materialize an EXISTING Version PR
+  // branch. A checkout without that ref leaves `changeset-release/main`
+  // unknown to git; the action then rebuilds from main and its API ref update
+  // is rejected, permanently wedging the release train. These assertions pin
+  // the two halves of the fix without widening the workflow's trigger surface.
+  it('offers workflow_dispatch for human recovery but never widens PR triggers', () => {
+    const doc = loadWorkflow(rel) as Record<string, unknown>;
+    const onBlock = (doc.on ?? doc[String(true)]) as Record<string, unknown> | undefined;
+    expect(onBlock).toBeDefined();
+    expect(Object.keys(onBlock ?? {}).sort()).toEqual(['push', 'workflow_dispatch']);
+    expect(onBlock).not.toHaveProperty('pull_request');
+  });
+
+  it('fetches the existing Version PR branch before the action runs', () => {
+    const t = text();
+    // The fetch is conditional: a fresh cycle (branch deleted after merge) must
+    // not fail the job, while an open Version PR branch must become visible to
+    // the action's `git checkout`.
+    expect(t).toContain('git ls-remote --exit-code --heads origin changeset-release/main');
+    expect(t).toContain('refs/heads/changeset-release/main:refs/heads/changeset-release/main');
+    expect(t.indexOf('git fetch')).toBeGreaterThan(-1);
+    expect(t.indexOf('git fetch')).toBeLessThan(t.indexOf('changesets/action@'));
+  });
+
+  it('uses the action Git CLI push path and an explicit main PR base (PRI-1014)', () => {
+    const t = text();
+    // The GitHub API force-update path is what returned
+    // "Reference cannot be updated" on a branch whose tip had diverged from
+    // main. `push-with-git-cli` is the action's supported force-push path;
+    // `pr-base-branch: main` keeps a manual dispatch from targeting the
+    // operator's current branch by accident.
+    expect(t).toContain('push-with-git-cli: true');
+    expect(t).toContain('pr-base-branch: main');
+  });
 });
 
 describe('ci.yml — release intent guard is inside the required gate', () => {

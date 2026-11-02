@@ -13,6 +13,9 @@ name: Version Packages
 on:
   push:
     branches: [main]
+  # PRI-1014: human recovery entry for a wedged Version PR branch. The
+  # workflow still never runs for pull_request events.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -32,11 +35,25 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
-          # The action pushes via its own token through the GitHub API;
-          # the checkout credential is not needed and stays out of scope.
+          # The action pushes with its own github-token; the checkout
+          # credential is not needed and stays out of scope.
           persist-credentials: false
           # Cohort detection may need first-parent history.
           fetch-depth: 100
+
+      - name: Fetch existing Version PR branch
+        # PRI-1014: changesets/action does `git checkout changeset-release/main`
+        # before materializing. If that ref is absent, it creates a branch from
+        # main and then its ref update is rejected when the Version PR branch
+        # already exists. Fetch ONLY this bot branch, and tolerate its absence
+        # (normal case immediately after a Version PR merge), so ordinary
+        # checkouts and PR flows are untouched.
+        run: |
+          if git ls-remote --exit-code --heads origin changeset-release/main >/dev/null 2>&1; then
+            git fetch --no-tags origin "+refs/heads/changeset-release/main:refs/heads/changeset-release/main"
+          else
+            echo "No existing changeset-release/main branch — the action will create one."
+          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
@@ -72,6 +89,14 @@ jobs:
           # PD owns tags/releases in the publish train (SPEC §16/§25/§26).
           create-github-releases: false
           push-git-tags: false
+          # PRI-1014: the GitHub API force-update path returned
+          # "Reference cannot be updated" once the Version PR branch tip had
+          # diverged from main. The action's Git CLI push path is the supported
+          # way to rebuild that bot branch; it uses the same github-token below.
+          push-with-git-cli: true
+          # Manual workflow_dispatch must never inherit the operator's current
+          # branch as the PR base; the Version PR always targets main.
+          pr-base-branch: main
           # PD_VERSION_PR_TOKEN (a fine-grained PAT with contents:write +
           # pull-requests:write) is REQUIRED on this repository: the repo
           # setting does not permit GITHUB_TOKEN to create pull requests
