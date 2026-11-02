@@ -6,8 +6,26 @@
 | 文档性质 | 决策记录卡（设计交付）；随本轮四文件一并提交 Owner |
 | 配套文件 | ① `docs/implementation-reports/PD-MCP-GATE3-LATEST-SOURCE-DELTA-AUDIT.md`（事实）② `docs/specs/SPEC-PD-AGENT-CAPABILITY-API-001-v0.5.md`（契约）③ `docs/implementation-plans/PD-MCP-GATE3-IMPLEMENTATION-READINESS-001.md`（实施） |
 | 基线 | origin/main `0d0ea7eb5`（2026-11-01 复核） |
-| 修订记录 | r2（2026-11-01 最终修订轮）：①G-1 守卫拆分生产/测试分域（消除与测试迁移的规则冲突）；②三项数值限制责任归属分层（10 条=Core Capability/Gate 3；32 KiB 与 10s=Gate 4 MCP Adapter，READINESS §17 成文为 Gate 4 验收前置） |
-| 裁定 | **SPEC v0.5：READY（待 OG-1 采信冻结）｜Gate 3 实施：READY_PENDING_OG2** |
+| 修订记录 | r2（2026-11-01 最终修订轮）：①G-1 守卫拆分生产/测试分域（消除与测试迁移的规则冲突）；②三项数值限制责任归属分层（10 条=Core Capability/Gate 3；32 KiB 与 10s=Gate 4 MCP Adapter，READINESS §17 成文为 Gate 4 验收前置）<br>**r3（2026-11-02 记录收口）：决策状态更新见 §〇——OG-1/OG-2/Gate 3 实施=DONE；OG-3=NOT AUTHORIZED；D-06/WB 实机/Gate 4 宿主审批模型=PENDING** |
+| 裁定 | 交付时点裁定：**SPEC v0.5：READY（待 OG-1 采信冻结）｜Gate 3 实施：READY_PENDING_OG2**（历史）；**当前状态见 §〇 决策状态总表（OG-1/OG-2 已完成，Gate 3 已实施合并，OG-3 未授权）** |
+
+---
+
+## 〇、决策状态总表（2026-11-02 记录收口更新）
+
+本文其余章节保留 2026-11-01 设计交付时点状态（"待决-1/待决-2"等为当时的开放项）。以下为收口后的权威决策状态：
+
+| 决策 | 状态 | 日期 | 证据 |
+|---|---|---|---|
+| OG-1：SPEC v0.5 采信（冻结生效，含三项数值及责任归属确认） | **DONE** | 2026-11-01 | Owner 任务书批准；PRI-1068 工单描述（"OG-1 已批准、OG-2 已授权"）+ PR #2270 Owner Review Card 实施记录 |
+| OG-2：Gate 3 实施授权 | **DONE** | 2026-11-01 | 同上；**Owner 于 2026-11-01T10:23:37Z 亲自合并 PR #2270（merge commit `f15a5a6a6de75b8e9ce7eb909fac1e137637665a`）构成最终裁决** |
+| Gate 3 实施 | **DONE** | 2026-11-01 | PR #2270 MERGED；PRI-1068 = Done；CI 26/26 全绿（含 Verify Merge Gate）；最终交付报告 `PD-MCP-GATE3-IMPLEMENTATION-REPORT-001.md`（含 Post-Merge Closeout Addendum） |
+| OG-3：Gate 4 实施授权 | **NOT AUTHORIZED** | — | 无 Owner 授权记录；SPEC v0.5、本卡与 2026-11-02 文档收口均不构成 OG-3 |
+| D-06：MCP Server 进程安全风险接受 | **PENDING** | — | 仍是 Gate 4 准入条件（见下 §三 待决-3）；**OG-1/OG-2/Gate 3 的完成不构成对该风险的接受** |
+| WorkBuddy 实机 MCP 验证 | **PENDING** | — | Gate 4 前置（现 DOC_VERIFIED_RUNTIME_NOT_VERIFIED；见下 §三 待决-4） |
+| Gate 4 宿主审批模型 | **PENDING** | — | Codex 0.166.0 无头 MCP 调用审批阻塞为版本实测事实；实验中的危险旁路参数不得作为生产方案；目标宿主版本须在 Gate 4 重验（SPEC v0.5 §10.2） |
+
+**证据精度说明**：OG-1/OG-2 原始任务书的精确审批时间戳未在仓库证据中存档，记录精确到日期（2026-11-01）；日期依据为 PRI-1068 工单创建描述与 PR #2270 Owner Review Card 的书面记录，并经 Owner 亲自合并 PR #2270 的仓库动作佐证。后续版本联动：#2274（Version Packages）、#2276（Version Packages）、#2277（产品版本 2.8.0）、#2278（codex runtime pins）均已合并——发布治理路径（changesets → Version PR → publish → pins 自动刷新）按 SPEC v0.5 F10 落地完毕。
 
 ---
 
@@ -39,7 +57,7 @@
 
 ## 三、仍需 Owner 决定的事项
 
-### 待决-1｜OG-1：采信 SPEC v0.5（冻结生效）——**本轮唯一必需决策**（状态：待 Owner 确认，未预批）
+### 待决-1｜OG-1：采信 SPEC v0.5（冻结生效）——**本轮唯一必需决策**（✅ 已完成 DONE，见 §〇；下文保留原评审记录）
 
 - **决策内容**：批准 `docs/specs/SPEC-PD-AGENT-CAPABILITY-API-001-v0.5.md` 作为 **Gate 3 实施契约**，并确认以下三项数值**及其责任归属**（v0.5 §7.5.1；数值保留原提案，未作调整）：
 
@@ -53,18 +71,18 @@
 - **不决策的影响**：v0.5 保持 PROPOSED；OG-2 无法启动。
 - **建议**：批准（三项数值均有实测或既有常量依据；责任分层已消除"Adapter 约束误入 Core"的歧义）。
 
-### 待决-2｜OG-2：Gate 3 实施授权（独立动作，前置 = 待决-1）
+### 待决-2｜OG-2：Gate 3 实施授权（独立动作，前置 = 待决-1）（✅ 已完成 DONE，见 §〇；下文保留原评审记录）
 
 - **内容**：授权按 READINESS 文档执行单变更集实施（Read Model 迁移 + Capability Facade + 双子路径 + CLI 接线 + 测试拆分 + 守卫/黄金/泄露测试 + changeset）。
 - **建议时点**：OG-1 之后任意时点；实施 PR 开工时按 READINESS §16 核对单执行（含 pain-recall.ts 零并发修改复核）。
 - **规模预期**：移动 895 行 + 新增约 500-700 行（Facade+测试+守卫）+ 接线约 20 行级改动；单 PR；单次 revert 可回滚。
 
-### 待决-3｜D-06：MCP Server 进程风险接受（**Gate 4 前置，不阻塞 Gate 3**）
+### 待决-3｜D-06：MCP Server 进程风险接受（⬜ 仍 PENDING——**Gate 4 前置**；见 §〇）
 
 - **问题**：是否接受首期 MCP Server 与启动用户同权限、无 OS 级文件/网络隔离（应用层只读 ≠ 进程只读；stdio ≠ 网络隔离；对被攻陷进程/恶意依赖无隔离）。
 - **建议**：在 Gate 4 立项时裁决；若不接受，Gate 4 前需增加并验证 OS 级隔离方案（成本显著上升）。
 
-### 待决-4｜WorkBuddy 实机合成验证（**Gate 4 前置，不阻塞 Gate 3**）
+### 待决-4｜WorkBuddy 实机合成验证（⬜ 仍 PENDING——**Gate 4 前置**；见 §〇）
 
 - **问题**：WB 宿主实机 MCP 验证（现 DOC_VERIFIED_RUNTIME_NOT_VERIFIED）是否列为 Gate 4 前置，或明确延期并接受单宿主（Codex）先行。
 - **建议**：列为 Gate 4 前置（Hook 验证报告原建议）；或批注延期。
@@ -78,6 +96,8 @@
 
 ## 四、五问快答（金字塔顶）
 
+> （2026-11-01 设计交付时点快照；其中"待决"状态已变化——当前权威状态见 §〇。）
+
 | 问题 | 答案 | 依据 |
 |---|---|---|
 | 最新源码是否仍支持方案 C？ | **YES——CONFIRMED**（架构面零变化；机制级直证补齐） | DELTA-AUDIT §B/§C |
@@ -90,5 +110,5 @@
 
 - 本轮授权动作：只读源码审计 + 历史 PR 阅读 + 四份设计文档创建 + 只读哈希/构建验证。
 - 本轮零改动：未修改任何生产源码/测试/package.json/lockfile/Hook/CLI/宿主配置；未创建 PR/push/merge/deploy；未触碰 `~/.codex` 与 WorkBuddy 配置。
-- **本轮结束后停止，等待 Owner 授权 OG-2**；不自动进入 Gate 3 实施或 Gate 4。
+- **本轮结束后停止，等待 Owner 授权 OG-2**；不自动进入 Gate 3 实施或 Gate 4。（历史声明：OG-2 已于 2026-11-01 获授权、Gate 3 已实施合并；当前状态以 §〇 为准。）
 - 审计 worktree（`adhoc-20261101-mcp-gate3-audit2-7fd2e0`）零自产工件，交付后释放租约并清理；两个前置 worktree 与 %TEMP% 证据保持原样待 Owner 处置。
