@@ -488,6 +488,31 @@ describe('Real packaged install smoke test', () => {
     }
   }, 60_000);
 
+  it('tarball ships no console dist/ui tsc tree (G2 payload trim)', () => {
+    // G2 (SPEC-PD-RELEASE-FOOTPRINT-001 §6, artifact-size-audit D9/P5):
+    // console dist/ui is the tsc image of src/ui — the browser runs the
+    // prebuilt dist/web bundle and the server imports nothing from dist/ui
+    // (consumer audit 2026-11-02). The bundle filters it out; this contract
+    // fails loud if a future bundle change re-ships ~1.5 MiB of dead UI
+    // modules into every npm download and installed runtime.
+    const listing = execFileSync('tar', ['-tf', path.basename(tarballPath)], {
+      stdio: 'pipe',
+      maxBuffer: 32 * 1024 * 1024,
+      cwd: path.dirname(tarballPath),
+    }).toString();
+
+    expect(
+      listing.includes('package/console/dist/ui/'),
+      'console dist/ui (tsc UI tree, no payload consumer) must not ship',
+    ).toBe(false);
+
+    // Keep-side guard: the trimmed console payload must still carry the
+    // artifacts the installed runtime actually resolves.
+    expect(listing.includes('package/console/dist/server.js')).toBe(true);
+    expect(listing.includes('package/console/dist/server/index.js')).toBe(true);
+    expect(listing.includes('package/console/dist/web/index.html')).toBe(true);
+  }, 60_000);
+
   it('pd console starts and /api/health returns 200 on loopback', async () => {
     const installedConsoleDir = getInstalledConsoleDir(tempHomeDir);
     const serverEntry = path.join(installedConsoleDir, 'dist', 'server.js');

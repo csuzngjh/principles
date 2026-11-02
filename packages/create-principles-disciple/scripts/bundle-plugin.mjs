@@ -9,6 +9,11 @@ import { promisify } from 'util';
 // check-dist-hygiene.mjs / check-workspace-artifacts.mjs — ERR-149 / EP-14).
 import { skipTestArtifacts, collectTestArtifacts } from '../../../scripts/build/test-artifacts.mjs';
 import { collectLabModuleClosure, LAB_ENTRY_MODULES } from '../../../scripts/build/lab-payload.mjs';
+import {
+  collectReleaseManagerPayload,
+  RELEASE_MANAGER_ENTRY_MODULES,
+  RELEASE_MANAGER_KNOWN_ORPHANS,
+} from './release-manager-payload.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -183,7 +188,9 @@ const INSTALL_LAYOUT_REQUIRED = [
 
 // Named after the providing package dir (parity-gate convention:
 // providerSlug.toUpperCase().replace(/-/g,'_') + '_REQUIRED'), even though the
-// payload directory is the shorter `release-manager`.
+// payload directory is the shorter `release-manager`. Build-output gate only —
+// since the G2 trim the SHIPPED file set is the runtime closure computed by
+// collectReleaseManagerPayload() (see the copy loop below), not this list.
 const CREATE_PRINCIPLES_DISCIPLE_REQUIRED = [
   'dist',
   'dist/update/release-manager-authority.js',
@@ -213,13 +220,32 @@ function findNpmCliJs() {
 
 // PRI-907 (RAH-3): every recursive payload copy skips compiled test artifacts
 // (same contract as the per-package build gates — ERR-149 / EP-14).
-function copyPayloadTree(src, dest) {
+// `filter` lets a component narrow its own tree further (console dist/ui
+// exclusion below); it composes with skipTestArtifacts at the call site.
+function copyPayloadTree(src, dest, filter = skipTestArtifacts) {
   try {
-    cpSync(src, dest, { recursive: true, filter: skipTestArtifacts });
+    cpSync(src, dest, { recursive: true, filter });
   } catch {
     mkdirSync(dirname(dest), { recursive: true });
     copyFileSync(src, dest);
   }
+}
+
+// G2 payload trim (SPEC-PD-RELEASE-FOOTPRINT-001 §6): console dist/ui is the
+// tsc image of src/ui. The browser runs the prebuilt dist/web bundle (i18n
+// JSON inlined by esbuild at build time) and the server imports nothing from
+// dist/ui — consumer audit 2026-11-02 on 99b3a1143
+// (docs/release/artifact-size-audit.md D9/P5): zero static/dynamic imports,
+// no require.resolve, no runtime fs reads, package is private with no
+// exports, and no user-machine UI rebuild scenario exists (no src/, no
+// build toolchain in the payload). The payload must not carry it; the
+// in-repo tsc output stays for dev/typecheck. Guarded fail-loud in the
+// console-bundle verification block below.
+function skipConsoleUiTree(sourcePath) {
+  if (!skipTestArtifacts(sourcePath)) return false;
+  const rel = relative(CONSOLE_SRC, sourcePath);
+  const uiTree = join('dist', 'ui');
+  return !(rel === uiTree || rel.startsWith(uiTree + sep));
 }
 
 // PRI-907 (RAH-3): last-line defense before the payload leaves the machine —
@@ -408,7 +434,9 @@ for (const item of CONSOLE_REQUIRED) {
   const src = join(CONSOLE_SRC, item);
   const dest = join(CONSOLE_DEST, item);
   log(`  Copying console/${item}...`);
-  copyPayloadTree(src, dest);
+  // G2: skipConsoleUiTree drops dist/ui from the shipped console tree (see
+  // its comment for the consumer evidence); a no-op for the leaf entries.
+  copyPayloadTree(src, dest, skipConsoleUiTree);
 }
 
 {
@@ -537,13 +565,44 @@ if (existsSync(RELEASE_MANAGER_DEST)) {
   rmSync(RELEASE_MANAGER_DEST, { recursive: true, force: true });
 }
 mkdirSync(RELEASE_MANAGER_DEST, { recursive: true });
-for (const item of CREATE_PRINCIPLES_DISCIPLE_REQUIRED) {
-  const src = join(RELEASE_MANAGER_SRC, item);
-  const dest = join(RELEASE_MANAGER_DEST, item);
-  log(`  Copying release-manager/${item}...`);
-  copyPayloadTree(src, dest);
+// G2 (artifact-size-audit D8/P6): the release-manager component ships the
+// RUNTIME update-seam closure only (console seam + deployed bootstrap
+// executor + install-time authority probe), not a full second copy of the
+// installer CLI dist. The keep-set is the transitive-import closure computed
+// from the compiled dist (scripts/release-manager-payload.mjs — shared with
+// its guard test), so a new runtime import is tracked automatically. The
+// npm CLI package keeps shipping its own complete dist; CLI-only modules
+// (index/uninstaller/prompts), test-only update modules, the publisher and
+// the compile-time-only .d.ts/.js.map artifacts stay out of this component.
+const releaseManagerModules = collectReleaseManagerPayload(RELEASE_MANAGER_SRC);
+for (const rel of releaseManagerModules) {
+  const dest = join(RELEASE_MANAGER_DEST, rel);
+  mkdirSync(dirname(dest), { recursive: true });
+  copyPayloadTree(join(RELEASE_MANAGER_SRC, rel), dest);
 }
-log(`   Release Manager: ${RELEASE_MANAGER_DEST}`);
+copyPayloadTree(
+  join(RELEASE_MANAGER_SRC, 'package.json'),
+  join(RELEASE_MANAGER_DEST, 'package.json'),
+);
+log(`  Release Manager: ${RELEASE_MANAGER_DEST} (${releaseManagerModules.length} runtime modules)`);
+
+// G2: in-place verification of the narrowed component — catches a future
+// edit that reverts the copy loop to whole-dist shipping.
+for (const rel of RELEASE_MANAGER_ENTRY_MODULES) {
+  if (!existsSync(join(RELEASE_MANAGER_DEST, rel))) {
+    console.error(`❌ release-manager payload is missing runtime entry ${rel}`);
+    console.error('   nextAction: the copy loop must ship the collectReleaseManagerPayload() closure.');
+    process.exit(1);
+  }
+}
+for (const orphan of RELEASE_MANAGER_KNOWN_ORPHANS) {
+  if (existsSync(join(RELEASE_MANAGER_DEST, orphan))) {
+    console.error(`❌ release-manager payload ships trimmed module ${orphan}`);
+    console.error('   nextAction: keep the closure-based copy, or re-run the payload consumer audit and update release-manager-payload.mjs deliberately.');
+    process.exit(1);
+  }
+}
+log('  ✅ release-manager payload carries only the update-seam closure');
 
 log('\n🔧 Rewriting bundled dependencies (@principles/core, @principles/host-runtime, @principles/install-layout, principles-disciple)...');
 
@@ -990,6 +1049,17 @@ if (readFileSync(consoleAppJs, 'utf-8').includes('sourceMappingURL')) {
   process.exit(1);
 }
 log('  ✅ console web bundle is a production build (no dev sourcemarkers)');
+
+// G2: dist/ui must not reach the payload (see skipConsoleUiTree). Fails loud
+// if a future REQUIRED/filter change re-ships the tsc UI tree.
+const consoleDistUi = join(CONSOLE_DEST, 'dist', 'ui');
+if (existsSync(consoleDistUi)) {
+  console.error(`❌ console dist/ui reached the payload (${consoleDistUi}).`);
+  console.error('   The tsc UI tree has no payload consumer (audit 2026-11-02, artifact-size-audit D9).');
+  console.error('   nextAction: restore the skipConsoleUiTree filter on the console copy, or re-run the consumer audit before re-shipping it.');
+  process.exit(1);
+}
+log('  ✅ console dist/ui absent from payload (server serves dist/web only)');
 
 log('\n✅ Console bundle verified!');
 
