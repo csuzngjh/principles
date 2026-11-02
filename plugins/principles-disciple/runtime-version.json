@@ -1,6 +1,6 @@
 {
   "codexAdapter": "0.6.2",
-  "hostRuntime": "0.14.3",
-  "core": "1.297.11",
+  "hostRuntime": "0.14.4",
+  "core": "1.298.1",
   "note": "PRI-1040 published target cohort. Exact versions only: the packaged capability check installs these pins and exercises Owner controls, Codex V2 suspension, and DesignGate fact validation against package bytes. Release gates do not use floating latest or compare pins with unreleased monorepo versions."
 }
