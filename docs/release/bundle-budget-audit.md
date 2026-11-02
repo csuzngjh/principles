@@ -50,9 +50,9 @@ mission 例举的 `size: 70786` 与 governance-audit production 实测逐字节�
 
 | artifact | prod raw | dev raw | 触发原因 |
 |---|---|---|---|
-| rulehost-evidence.js | **67,422** | 570,212（Windows local；CI Linux 通常略低） | Windows PowerShell 只读查询 cmdlet 的形状分类进入共享 bash-risk；该 satellite 打包共享 runtime |
+| rulehost-evidence.js | **67,422** | 570,388（Windows local；CI Linux 通常略低） | Windows PowerShell 只读查询 cmdlet 的形状分类进入共享 bash-risk；该 satellite 打包共享 runtime |
 
-预算：production baseline 67,422 / max 74,164（+10%）；development baseline 570,212 / max 712,765（+25%）。§2 表中 2026-09-24 的旧测量保留为历史记录。
+预算：production baseline 67,422 / max 74,164（+10%）；development baseline 570,388 / max 712,985（+25%）。§2 表中 2026-09-24 的旧测量保留为历史记录。
 
 移除 5 个 cmdlet 族仅减少约 440 bytes，说明增长来自分类形状路径本身，而非命令字符串表；后续如要回收，优先考虑收窄该 satellite 的 barrel（与 PRI-739 的 follow-up 同向）。
 

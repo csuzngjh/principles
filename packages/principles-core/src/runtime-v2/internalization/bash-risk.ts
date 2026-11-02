@@ -476,13 +476,14 @@ const POWERSHELL_READONLY_COMMANDS: Readonly<Record<string, PowerShellReadonlyGr
 });
 
 /** PowerShell 查询形状：仅完整 cmdlet 名 + allow-list 参数；未知参数 → unknown。 */
-function isReadonlyPowerShellShape(command: string, args: readonly string[]): boolean | 'unknown' {
-  const grammar = POWERSHELL_READONLY_COMMANDS[command.toLowerCase()];
-  if (grammar === undefined) return 'unknown';
+function isReadonlyPowerShellShape(grammar: PowerShellReadonlyGrammar, args: readonly string[]): boolean | 'unknown' {
   let positionalOnly = false;
-  for (let i = 0; i < args.length; i += 1) {
-    const token = args[i];
-    if (token === undefined) return 'unknown';
+  let skipNextValue = false;
+  for (const token of args) {
+    if (skipNextValue) {
+      skipNextValue = false;
+      continue;
+    }
     if (positionalOnly) continue;
     // PowerShell treats a bare `--` as end-of-parameters.
     if (token === '--') {
@@ -502,19 +503,21 @@ function isReadonlyPowerShellShape(command: string, args: readonly string[]): bo
       if (grammar.valued.has(name)) continue;
       if (grammar.switches.has(name)) {
         const flag = body.slice(colon + 1).toLowerCase();
-        if (flag === 'true' || flag === 'false' || flag === '$true' || flag === '$false') continue;
+        // A `$`-prefixed literal (`$true`) is an expansion and already
+        // degrades the whole command to unknown before this point.
+        if (flag === 'true' || flag === 'false') continue;
       }
       return 'unknown';
     }
     if (grammar.switches.has(name)) continue;
     if (grammar.valued.has(name)) {
-      if (args[i + 1] === undefined) return 'unknown';
-      i += 1;
+      skipNextValue = true;
       continue;
     }
     return 'unknown';
   }
-  return true;
+  // A trailing value-taking parameter without its value is not verifiable.
+  return skipNextValue ? 'unknown' : true;
 }
 
 function isReadonlyGit(args: readonly string[]): boolean | 'unknown' {
@@ -580,7 +583,8 @@ function isReadonlyWithArgShape(command: string, args: readonly string[]): boole
   if (command === 'sort') return args.some((a) => a === '-o' || a === '--output' || a.startsWith('--output=') || a.startsWith('-o')) ? false : 'unknown';
   if (command === 'uniq') return args.filter((a) => !a.startsWith('-')).length > 1 ? false : 'unknown';
   if (STDOUT_QUERY_COMMANDS.has(command)) return isReadonlyStdoutShape(command, args);
-  if (Object.hasOwn(POWERSHELL_READONLY_COMMANDS, command.toLowerCase())) return isReadonlyPowerShellShape(command, args);
+  const readonlyGrammar = POWERSHELL_READONLY_COMMANDS[command.toLowerCase()];
+  if (readonlyGrammar !== undefined) return isReadonlyPowerShellShape(readonlyGrammar, args);
   // Positive evidence is limited to the audited command families above.
   return 'unknown';
 }

@@ -53,7 +53,7 @@ export const SIZE_BUDGETS = {
     // shared bash-risk classifier this satellite bundles. Production measured
     // 67,422 in CI and locally; trimming command families changed only ~440
     // bytes, so the growth is the classifier shape path, not the strings.
-    // Development measured 570,212 (Windows local; inline sourcemaps).
+    // Development measured 570,388 (Windows local; inline sourcemaps).
     // Rebaselined 2026-11-01 (PRI-739), superseding the 2026-09-24 figures in
     // docs/release/bundle-budget-audit.md §2: the bounded approved-rule
     // revision, the host recovery-control marker and the official-recovery
@@ -62,7 +62,7 @@ export const SIZE_BUDGETS = {
     // change, 559,348 without this commit's share of it. Follow-up candidate:
     // the revision operation is Console-only and should not need to travel
     // here at all — narrowing the barrel would pay this back.
-    development: { baseline: 570212, max: 712765 },
+    development: { baseline: 570388, max: 712985 },
   },
 };
 
