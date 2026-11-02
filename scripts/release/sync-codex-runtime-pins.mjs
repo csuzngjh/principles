@@ -43,6 +43,54 @@ export function assertNoDowngrade(current, target) {
   }
 }
 
+/** PRI-1067: propagation budget for the maintenance leg (2s after publish is real). */
+export const PUBLISH_WAIT_TIMEOUT_MS = 60_000;
+export const PUBLISH_WAIT_INTERVAL_MS = 5_000;
+
+function sleepSync(ms) {
+  if (ms <= 0) return;
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * Resolve the current cohort, waiting through npm's propagation window.
+ *
+ * A registry QUERY failure must not be retried as "not published": the resolver
+ * exits non-zero for that case and `resolve()` throws, so the error propagates
+ * immediately. Only a successful resolve that reports `publishComplete:false`
+ * is retried, within an explicit interval and total budget. On budget
+ * exhaustion the error names every package still missing, never a generic
+ * "not the current cohort".
+ */
+export function waitForPublishedCohort({
+  sha,
+  resolve,
+  timeoutMs = PUBLISH_WAIT_TIMEOUT_MS,
+  intervalMs = PUBLISH_WAIT_INTERVAL_MS,
+  now = () => Date.now(),
+  sleep = sleepSync,
+}) {
+  if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error('cohort must be an exact 40-character SHA');
+  const deadline = now() + timeoutMs;
+  for (;;) {
+    const latest = resolve();
+    if (latest?.cohort !== true || latest.sha !== sha) {
+      throw new Error(`target is not the current release cohort (expected ${sha}, got ${latest?.sha ?? 'none'})`);
+    }
+    if (latest.publishComplete === true) return latest;
+    const missing = (Array.isArray(latest.packages) ? latest.packages : [])
+      .filter(pkg => pkg?.published !== true)
+      .map(pkg => `${String(pkg?.name)}@${String(pkg?.version)}`);
+    const remaining = deadline - now();
+    if (remaining <= 0) {
+      throw new Error(
+        `published cohort incomplete after ${timeoutMs}ms; missing: ${missing.length > 0 ? missing.join(', ') : 'registry did not report any package state'}`,
+      );
+    }
+    sleep(Math.min(intervalMs, remaining));
+  }
+}
+
 async function main() {
   const flag = process.argv[2], value = process.argv[3];
   if (!['--cohort', '--check-base'].includes(flag) || !value || process.argv.length !== 4) throw new Error('usage: sync-codex-runtime-pins.mjs --cohort <sha> | --check-base <sha>');
@@ -61,8 +109,12 @@ async function main() {
   if (cohort.cohort !== true || cohort.sha !== value) throw new Error('unproven release cohort');
   // A delayed run must not overwrite a maintenance branch for a newer cohort.
   // Reuse the same main-spine authority as the daily publish reconciliation.
-  const latest = JSON.parse(execFileSync(process.execPath, [path.join(root, 'scripts/release/resolve-release-cohort.mjs')], { cwd: root, encoding: 'utf8' }));
-  if (latest.cohort !== true || latest.sha !== value || latest.publishComplete !== true) throw new Error('target is not the current fully published cohort; retry the current release train');
+  // PRI-1067: npm publication returning is not registry visibility; wait a
+  // bounded amount instead of treating the first packument read as final.
+  const latest = waitForPublishedCohort({
+    sha: value,
+    resolve: () => JSON.parse(execFileSync(process.execPath, [path.join(root, 'scripts/release/resolve-release-cohort.mjs')], { cwd: root, encoding: 'utf8' })),
+  });
   const target = nextPins(cohort.versions);
   // All three exact packages must exist before any file mutation/PR creation.
   for (const [key, name] of Object.entries(packages)) {
