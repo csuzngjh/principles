@@ -1,0 +1,49 @@
+{
+  "name": "@principles/pd-mcp-server",
+  "version": "0.1.0",
+  "description": "Principles Disciple MCP Server — the single shared MCP server implementation for the three PD hosts (Codex, OpenClaw, WorkBuddy). Read-only pain recall through the Gate 3 Capability (SPEC-PD-MCP-GATE4-001).",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "scripts": {
+    "clean": "node ../../scripts/build/clean-dist.mjs",
+    "build": "npm run clean && tsc -p tsconfig.build.json && node ../../scripts/build/check-dist-hygiene.mjs",
+    "test": "npm run build && vitest run",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint \"src/**/*.ts\""
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.4.0",
+    "@principles/core": "^1.298.2",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "2.4.0",
+    "@types/node": "^26.4.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.0"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/csuzngjh/principles.git",
+    "directory": "packages/pd-mcp-server"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
