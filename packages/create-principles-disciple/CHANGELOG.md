@@ -1,5 +1,18 @@
 # create-principles-disciple
 
+## 1.146.4
+
+### Patch Changes
+
+- 9286940: Bump @inquirer/prompts from 8.7.4 to 8.7.5 (installer runtime dependency).
+- 7f07f12: Bump @radix-ui/react-alert-dialog from 1.1.23 to 1.2.1 (runtime dependency of pd-console, shipped inside the installer bundle).
+
+## 1.146.3
+
+### Patch Changes
+
+- a625198: PRI-1069/1070 G1 reliability (installer + pd-console, shipped inside create-principles-disciple): installer console verification now binds each probe attempt to the launched child via a one-shot nonce (old-console/foreign/proxy healthy responses are rejected fail-closed) and records attempt-level diagnostics; the probe child is terminated with a real bounded exit join, and an unconfirmed child defers destructive restore (restore_deferred). Rollback no longer deletes the live tree before restoring the backup — same-volume rename-aside with per-tree outcomes, partial-backup compensation, and machine-readable restore_incomplete markers that the Console recovery surface reports as needsRecovery instead of skipping terminal failures.
+
 ## 1.146.2
 
 ### Patch Changes
