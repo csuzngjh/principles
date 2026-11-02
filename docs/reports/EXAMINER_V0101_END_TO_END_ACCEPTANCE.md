@@ -95,7 +95,7 @@ F2_INTEGRATION_IMPLEMENTED  ✅（readiness+授权门+异步契约+dry-run）
 ASYNC_EXECUTION_CONTRACT_VERIFIED ✅（202/409/恢复/幂等/RESULT_UNKNOWN 不重试）
 BROWSER_ACCEPTANCE_PASS     ✅（A–F + 7 截图）
 SECURITY_REGRESSION_PASS    ✅（Mimosa 写入拦截全修复；越权/路径/只读/并发/历史不可变负向测试绿）
-CI_PASS                     ⏳ PR 推送后由 GitHub Actions 权威判定（本地全量回归绿）
+CI_PASS                     ✅（PR #2301 CI 全 required 门禁 PASS：Verify Merge Gate / pd-console / e2e / shared runtime / create-principles-disciple / packaged install smoke；仅剩 CodeQL 存量幽灵告警（非 required，告警创建时间均早于本 PR）与 codecov/patch 咨询性 79.21% vs 84.18%（UI 为主变更的已知特征）非阻断）
 DOCUMENTATION_COMPLETE      ✅（SPEC/审计/验收/交付四件套）
 
 最终交付状态：READY_FOR_OWNER_REVIEW
