@@ -62,7 +62,7 @@ import { execFile } from 'node:child_process';
 
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal() as Record<string, unknown>;
-  const { EventEmitter } = await import('node:events') as typeof import('node:events');
+  const { EventEmitter } = await import('node:events') as unknown as typeof import('node:events');
   return {
     ...actual,
     // Host-neutral workspace `pd runtime init` + npm dependency resolution
@@ -323,7 +323,7 @@ describe('install() routes the LLM runtime profile into the WorkBuddy governance
     // 1. The governance config (the file worker/console/hooks read) carries
     //    the install profile with the generateConfigYamlContent write shape.
     const governance = readGovernanceConfig(lab);
-    const pdDefault = governance.runtimeProfiles['pd.default'];
+    const pdDefault = governance.runtimeProfiles['pd.default']!;
     expect(pdDefault, 'governance runtimeProfiles.pd.default missing').toBeDefined();
     expect(pdDefault['type']).toBe('pi-ai');
     expect(pdDefault['provider']).toBe('openai');
@@ -332,7 +332,7 @@ describe('install() routes the LLM runtime profile into the WorkBuddy governance
 
     // 2. The diagnostician binding + defaultRuntime resolve to that profile.
     expect(governance.internalAgents.defaultRuntime).toBe('pd.default');
-    const diagnostician = governance.internalAgents.agents['diagnostician'];
+    const diagnostician = governance.internalAgents.agents['diagnostician']!;
     expect(diagnostician).toBeDefined();
     expect(diagnostician['runtimeProfile']).toBe('pd.default');
 
@@ -362,7 +362,7 @@ describe('install() routes the LLM runtime profile into the WorkBuddy governance
     expect(projectRaw).not.toContain('WB_TEST_KEY');
     expect(projectRaw).not.toContain('test-model');
     const projectConfig = yaml.load(projectRaw) as GovernanceRawConfig;
-    expect(projectConfig.runtimeProfiles['pd.default']['provider']).toBe('');
+    expect(projectConfig.runtimeProfiles['pd.default']!['provider']).toBe('');
   });
 
   it('round-4 R3: --base-url lands in the governance profile and reaches the binding resolver; a malformed base-url fails loud with nothing written', { timeout: 240_000 }, async () => {
@@ -380,7 +380,7 @@ describe('install() routes the LLM runtime profile into the WorkBuddy governance
     expect(result.success, `install failed: ${result.error ?? result.reason} Next: ${result.nextAction}`).toBe(true);
 
     const governance = readGovernanceConfig(lab);
-    expect(governance.runtimeProfiles['pd.default']['baseUrl']).toBe('https://llm.example.test/v1');
+    expect(governance.runtimeProfiles['pd.default']!['baseUrl']).toBe('https://llm.example.test/v1');
 
     const loaded = loadPdConfigForPlugin(lab.governanceDir);
     expect(loaded.ok, `loader errors: ${JSON.stringify(loaded.errors)}`).toBe(true);
@@ -412,8 +412,8 @@ describe('install() routes the LLM runtime profile into the WorkBuddy governance
 
     const governance = readGovernanceConfig(lab);
     // Exactly what `pd runtime init` wrote — untouched by the installer.
-    expect(governance.runtimeProfiles['pd.default']['provider']).toBe('');
-    expect(governance.runtimeProfiles['pd.default']['apiKeyEnv']).toBe('');
+    expect(governance.runtimeProfiles['pd.default']!['provider']).toBe('');
+    expect(governance.runtimeProfiles['pd.default']!['apiKeyEnv']).toBe('');
     expect(governance.internalAgents.defaultRuntime).toBe('pd.default');
     // Round-4 S1 authority contract: fresh init seeds NO explicit per-agent
     // runtimeProfile rows — agents inherit defaultRuntime. This is precisely
@@ -421,7 +421,7 @@ describe('install() routes the LLM runtime profile into the WorkBuddy governance
     // learning chain (and what keeps the vanilla default resolving every
     // agent to the pi-ai default, asserted below through the REAL loader).
     expect(governance.internalAgents.agents['diagnostician']).toBeDefined();
-    expect(governance.internalAgents.agents['diagnostician']['runtimeProfile']).toBeUndefined();
+    expect(governance.internalAgents.agents['diagnostician']!['runtimeProfile']).toBeUndefined();
     const loaded = loadPdConfigForPlugin(lab.governanceDir);
     expect(loaded.ok).toBe(true);
     const diagnostician = resolveAgentRuntimeBinding(loaded.effective, 'diagnostician');
@@ -460,32 +460,32 @@ describe('install() routes the LLM runtime profile into the WorkBuddy governance
 
     const governance = readGovernanceConfig(lab);
     // Explicit install override applied to pd.default + diagnostician/defaultRuntime…
-    expect(governance.runtimeProfiles['pd.default']['provider']).toBe('openai');
+    expect(governance.runtimeProfiles['pd.default']!['provider']).toBe('openai');
     expect(governance.internalAgents.defaultRuntime).toBe('pd.default');
-    expect(governance.internalAgents.agents['diagnostician']['runtimeProfile']).toBe('pd.default');
+    expect(governance.internalAgents.agents['diagnostician']!['runtimeProfile']).toBe('pd.default');
     // …while the Owner's own profile and the scribe binding stay intact.
-    const ownerCustom = governance.runtimeProfiles['owner.custom'];
+    const ownerCustom = governance.runtimeProfiles['owner.custom']!;
     expect(ownerCustom).toBeDefined();
     expect(ownerCustom['provider']).toBe('owner-provider');
     expect(ownerCustom['apiKeyEnv']).toBe('OWNER_CUSTOM_KEY_ENV');
-    expect(governance.internalAgents.agents['scribe']['runtimeProfile']).toBe('owner.custom');
+    expect(governance.internalAgents.agents['scribe']!['runtimeProfile']).toBe('owner.custom');
     expect(loadPdConfigForPlugin(lab.governanceDir).ok).toBe(true);
   });
 
   it('existing non-empty pd.default with NO install profile is left untouched', { timeout: 240_000 }, async () => {
     const lab = currentLab();
     seedGovernanceWorkspace(lab, (config) => {
-      config.runtimeProfiles['pd.default']['provider'] = 'owner-provider';
-      config.runtimeProfiles['pd.default']['model'] = 'owner-model';
-      config.runtimeProfiles['pd.default']['apiKeyEnv'] = 'OWNER_DEFAULT_KEY_ENV';
+      config.runtimeProfiles['pd.default']!['provider'] = 'owner-provider';
+      config.runtimeProfiles['pd.default']!['model'] = 'owner-model';
+      config.runtimeProfiles['pd.default']!['apiKeyEnv'] = 'OWNER_DEFAULT_KEY_ENV';
     });
 
     const result = await install(baseOptions(lab), lab.payloadDir, { quiet: true });
     expect(result.success, `install failed: ${result.error ?? result.reason} Next: ${result.nextAction}`).toBe(true);
 
     const governance = readGovernanceConfig(lab);
-    expect(governance.runtimeProfiles['pd.default']['provider']).toBe('owner-provider');
-    expect(governance.runtimeProfiles['pd.default']['apiKeyEnv']).toBe('OWNER_DEFAULT_KEY_ENV');
+    expect(governance.runtimeProfiles['pd.default']!['provider']).toBe('owner-provider');
+    expect(governance.runtimeProfiles['pd.default']!['apiKeyEnv']).toBe('OWNER_DEFAULT_KEY_ENV');
     expect(governance.internalAgents.defaultRuntime).toBe('pd.default');
     expect(loadPdConfigForPlugin(lab.governanceDir).ok).toBe(true);
   });
@@ -511,7 +511,7 @@ describe('install() routes the LLM runtime profile into the WorkBuddy governance
       // No partial write: the governance config still holds the runtime-init
       // default state (the profile never landed half-way).
       const governance = readGovernanceConfig(lab);
-      expect(governance.runtimeProfiles['pd.default']['provider']).toBe('');
+      expect(governance.runtimeProfiles['pd.default']!['provider']).toBe('');
       expect(governance.internalAgents.defaultRuntime).toBe('pd.default');
     } finally {
       fs.chmodSync(path.dirname(lab.governanceConfigPath), 0o755);
@@ -556,7 +556,7 @@ describe('round-4 S1: fresh install binds the whole learning chain to the instal
 
     // S2: the written profile carries the per-provider default model.
     const governance = readGovernanceConfig(lab);
-    expect(governance.runtimeProfiles['pd.default']['model']).toBe('gpt-4o-mini');
+    expect(governance.runtimeProfiles['pd.default']!['model']).toBe('gpt-4o-mini');
 
     // S1: EVERY internal agent — the diagnostician AND the whole
     // dreamer→philosopher→scribe→artificer→evaluator→rolloutReviewer chain
@@ -616,7 +616,7 @@ describe('round-4 S1: fresh install binds the whole learning chain to the instal
     expect(governance.internalAgents.defaultRuntime).toBe('pd.default');
     for (const name of INTERNAL_AGENT_NAMES) {
       if (name === 'diagnostician') continue; // the declared install override
-      expect(governance.internalAgents.agents[name]['runtimeProfile'], name).toBe('openclaw.default');
+      expect(governance.internalAgents.agents[name]!['runtimeProfile'], name).toBe('openclaw.default');
     }
 
     // …and the installer result names them honestly as pending-config items.
@@ -661,7 +661,7 @@ describe('round-4 S1: fresh install binds the whole learning chain to the instal
     expect(result.success, `install failed: ${result.error ?? result.reason} Next: ${result.nextAction}`).toBe(true);
 
     const governance = readGovernanceConfig(lab);
-    expect(governance.internalAgents.agents['dreamer']['enabled']).toBe(false);
+    expect(governance.internalAgents.agents['dreamer']!['enabled']).toBe(false);
 
     const loaded = loadPdConfigForPlugin(lab.governanceDir);
     expect(loaded.ok).toBe(true);
@@ -721,7 +721,7 @@ describe('round-4 S2: model resolution at the governance write boundary', () => 
 
     // No partial write: still exactly what `pd runtime init` laid down.
     const governance = readGovernanceConfig(lab);
-    expect(governance.runtimeProfiles['pd.default']['provider']).toBe('');
+    expect(governance.runtimeProfiles['pd.default']!['provider']).toBe('');
     expect(governance.internalAgents.defaultRuntime).toBe('pd.default');
   });
 
@@ -746,9 +746,9 @@ describe('round-4 S2: model resolution at the governance write boundary', () => 
     const governance = readGovernanceConfig(lab);
     // The three install-collected fields win; the omitted model does NOT
     // clobber the existing valid one.
-    expect(governance.runtimeProfiles['pd.default']['provider']).toBe('openai');
-    expect(governance.runtimeProfiles['pd.default']['apiKeyEnv']).toBe('WB_TEST_KEY');
-    expect(governance.runtimeProfiles['pd.default']['model']).toBe('owner-model');
+    expect(governance.runtimeProfiles['pd.default']!['provider']).toBe('openai');
+    expect(governance.runtimeProfiles['pd.default']!['apiKeyEnv']).toBe('WB_TEST_KEY');
+    expect(governance.runtimeProfiles['pd.default']!['model']).toBe('owner-model');
 
     const loaded = loadPdConfigForPlugin(lab.governanceDir);
     expect(loaded.ok).toBe(true);

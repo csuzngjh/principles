@@ -169,7 +169,7 @@ describe('gate matrix: PRI-697 message/mode pairing + PRI-898 shim-gate decoupli
   let savedLegacyNpmInstall: string | undefined;
   let savedSkipShim: string | undefined;
   let savedSkipUpgrade: string | undefined;
-  let savedLang: 'zh' | 'en';
+  let savedLang: 'zh' | 'en' = 'en';
   let infoLines: string[];
 
   beforeEach(async () => {

@@ -78,7 +78,7 @@ describe('CodexHostInstaller.install — retirement (Slice D, SPEC rev 2 §17)',
   it('offers explicit migration when a legacy PD registration is detected', async () => {
     // hooks.json contains a PD-owned marker group with the legacy async PostToolUse.
     mockExistsSync.mockReturnValue(true);
-    mockReadFileSync.mockImplementation((candidate: string | Buffer) => {
+    mockReadFileSync.mockImplementation((candidate: Parameters<typeof fs.readFileSync>[0], _options?: unknown) => {
       if (String(candidate).endsWith('hooks.json')) {
         return JSON.stringify({
           PostToolUse: [{
@@ -116,7 +116,7 @@ describe('detectLegacyCodexHookRegistration', () => {
   });
 
   it('detects PD-owned groups and the legacy async PostToolUse shape', () => {
-    mockReadFileSync.mockImplementation((candidate: string | Buffer) => {
+    mockReadFileSync.mockImplementation((candidate: Parameters<typeof fs.readFileSync>[0], _options?: unknown) => {
       if (String(candidate).endsWith('hooks.json')) {
         return JSON.stringify({
           PreToolUse: [{ matcher: 'Bash|apply_patch', hooks: [{ type: 'command', command: 'node x' }], __pd_marker: 'pd-owned' }],
@@ -131,7 +131,7 @@ describe('detectLegacyCodexHookRegistration', () => {
   });
 
   it('returns detected=false when there are no PD marker groups', () => {
-    mockReadFileSync.mockImplementation((candidate: string | Buffer) => {
+    mockReadFileSync.mockImplementation((candidate: Parameters<typeof fs.readFileSync>[0], _options?: unknown) => {
       if (String(candidate).endsWith('hooks.json')) {
         return JSON.stringify({ PreToolUse: [{ matcher: '.*', hooks: [{ type: 'command', command: 'other-tool' }] }] });
       }
@@ -183,7 +183,7 @@ describe('detectLegacyCodexHookRegistration', () => {
       },
     ];
     for (const fixture of fixtures) {
-      mockReadFileSync.mockImplementation((candidate: string | Buffer) => {
+      mockReadFileSync.mockImplementation((candidate: Parameters<typeof fs.readFileSync>[0], _options?: unknown) => {
         if (String(candidate).endsWith('hooks.json')) return fixture.json;
         throw new Error('unexpected read');
       });

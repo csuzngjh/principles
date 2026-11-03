@@ -220,7 +220,7 @@ describe('PRI-697 review P1: global pd shim transaction lifecycle', () => {
     expect((shimResult as { createdPaths: string[] }).createdPaths.map((p) => realPath.resolve(p)).sort()).toEqual(expected);
     // The written shim forwards to the sandboxed local bin — the marker the
     // uninstaller's ownership check relies on (symmetric cleanup).
-    expect(realFs.readFileSync(realPath.join(globalBinDir, SHIM_BASENAMES[0]), 'utf-8')).toContain(getInstalledBinDir());
+    expect(realFs.readFileSync(realPath.join(globalBinDir, SHIM_BASENAMES[0]!), 'utf-8')).toContain(getInstalledBinDir());
     if (process.platform === 'win32') {
       // PRI-898 SP1: the extensionless Git Bash shim is an sh script (LF
       // newlines — CRLF breaks the shebang line under MSYS) forwarding to
@@ -234,7 +234,7 @@ describe('PRI-697 review P1: global pd shim transaction lifecycle', () => {
   });
 
   it('never overwrites a foreign (non-PD) pd command in the npm global bin dir', async () => {
-    const foreignPath = realPath.join(globalBinDir, SHIM_BASENAMES[0]);
+    const foreignPath = realPath.join(globalBinDir, SHIM_BASENAMES[0]!);
     realFs.writeFileSync(foreignPath, '#!/bin/sh\nexec some-other-tool\n', 'utf-8');
 
     const result = await install({ ...baseInstallOptions, workspaceDir }, fixtureDir, { quiet: true });
@@ -253,8 +253,8 @@ describe('PRI-697 review P1: global pd shim transaction lifecycle', () => {
     expect(firstRun.error).toMatch(/PD CLI verification failed/);
 
     const legacyBin = realPath.join(sandboxRoot, '.openclaw', 'extensions', 'principles-disciple', 'bin');
-    const shimPath = realPath.join(globalBinDir, SHIM_BASENAMES[0]);
-    const legacyTarget = realPath.join(legacyBin, SHIM_BASENAMES[0]);
+    const shimPath = realPath.join(globalBinDir, SHIM_BASENAMES[0]!);
+    const legacyTarget = realPath.join(legacyBin, SHIM_BASENAMES[0]!);
     const content = process.platform === 'win32'
       ? `@echo off\r\ncall "${legacyTarget}" %*\r\n`
       : `#!/usr/bin/env sh\nexec "${legacyTarget}" "$@"\n`;
@@ -275,8 +275,8 @@ describe('PRI-697 review P1: global pd shim transaction lifecycle', () => {
   it('preserves an external script that only mentions a legacy PD path', async () => {
     const firstRun = await install({ ...baseInstallOptions, workspaceDir }, fixtureDir, { quiet: true });
     expect(firstRun.error).toMatch(/PD CLI verification failed/);
-    const target = realPath.join(sandboxRoot, '.openclaw', 'extensions', 'principles-disciple', 'bin', SHIM_BASENAMES[0]);
-    const shimPath = realPath.join(globalBinDir, SHIM_BASENAMES[0]);
+    const target = realPath.join(sandboxRoot, '.openclaw', 'extensions', 'principles-disciple', 'bin', SHIM_BASENAMES[0]!);
+    const shimPath = realPath.join(globalBinDir, SHIM_BASENAMES[0]!);
     const content = process.platform === 'win32'
       ? `@echo off\r\nrem Former PD entry: "${target}"\r\nother-tool %*\r\n`
       : `#!/usr/bin/env sh\n# Former PD entry: "${target}"\nexec other-tool "$@"\n`;
@@ -299,7 +299,7 @@ describe('PRI-697 review P1: global pd shim transaction lifecycle', () => {
     // getInstalledBinDir() resolves (inside the sandboxed HOME) — the
     // ownership classifier's PD-owned marker.
     const installedBinDir = getInstalledBinDir();
-    const shimPath = realPath.join(globalBinDir, SHIM_BASENAMES[0]);
+    const shimPath = realPath.join(globalBinDir, SHIM_BASENAMES[0]!);
     realFs.writeFileSync(shimPath, `#!/bin/sh\nexec "${realPath.join(installedBinDir, 'pd')}" "$@"\n`, 'utf-8');
 
     const shimResult = installGlobalPdShim();

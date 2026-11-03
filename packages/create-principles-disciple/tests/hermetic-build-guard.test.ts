@@ -26,6 +26,12 @@ async function expectScriptRefusal(script: string, args: readonly string[], mess
     timeout: 60_000,
   }).then(() => undefined, (error: unknown) => error);
   expect(failure).toBeDefined();
+  // Stage 2 (PRI-1099): `error` is an undeclared identifier — `typeof` on an
+  // unresolvable reference yields "undefined", so this guard ALWAYS returns
+  // early and the stderr assertion below never runs. Fixing the identifier
+  // activates a stale expectation (`requires` vs the script's `require`), i.e.
+  // it needs an assertion change and therefore stays out of the Stage 1
+  // mechanical pass. Left as-is here to keep runtime behaviour identical.
   if (typeof error === 'undefined') return;
   const stderr = typeof (failure as { stderr?: unknown }).stderr === 'string'
     ? String((failure as { stderr: string }).stderr)

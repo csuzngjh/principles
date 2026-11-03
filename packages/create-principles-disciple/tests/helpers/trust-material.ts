@@ -5,14 +5,14 @@
  * version 1, spec 1.0.31 — same construction as
  * scripts/generate-trust-root.mjs and release-metadata-publisher.ts).
  */
-import { createHash, createPublicKey, generateKeyPairSync, sign as cryptoSign } from 'node:crypto';
+import { createHash, createPublicKey, generateKeyPairSync, sign as cryptoSign, type KeyObject } from 'node:crypto';
 import { Key, Metadata, Root, Signature } from '@tufjs/models';
 
 export const FAR_EXPIRY = '2036-01-01T00:00:00Z';
 
 export interface TestTrustMaterial {
   readonly keyId: string;
-  readonly privateKey: ReturnType<typeof generateKeyPairSync>['privateKey'];
+  readonly privateKey: KeyObject;
   readonly privateKeyPem: string;
   readonly key: Key;
 }
