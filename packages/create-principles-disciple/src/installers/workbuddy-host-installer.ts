@@ -93,35 +93,6 @@ const WORKBUDDY_PAYLOAD_FILES = [
   ...WORKBUDDY_REQUIRED_SKILLS.map((skill) => path.join('skills', skill, 'SKILL.md')),
 ];
 
-/**
- * Cache-binding comparison for the idempotent path. `writtenAt` is a
- * per-install timestamp, so comparing raw bytes would force a cache refresh
- * on every run; comparing the rest proves the launcher will read the same
- * workspace/entry/versions the marketplace copy declares. Absent on both
- * sides is a match (no MCP payload); absent on one side is drift.
- */
-function mcpBindingMatches(sourceDir: string, cacheDir: string): boolean {
-  const bindingFile = 'mcp-binding.json';
-  const read = (dir: string): Record<string, unknown> | null | undefined => {
-    const file = path.join(dir, bindingFile);
-    if (!existsSync(file)) return undefined;
-    try {
-      const parsed: unknown = JSON.parse(readFileSync(file, 'utf-8'));
-      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
-      const { writtenAt: _writtenAt, ...rest } = parsed as Record<string, unknown>;
-      return rest;
-    } catch {
-      return null;
-    }
-  };
-  const source = read(sourceDir);
-  const cached = read(cacheDir);
-  if (source === undefined && cached === undefined) return true;
-  if (source === undefined || cached === undefined || source === null || cached === null) return false;
-  return JSON.stringify(source) === JSON.stringify(cached);
-}
-
-
 /** Engine CLI shipped with WorkBuddy Desktop (probe P01 frozen path). */
 export const WORKBUDDY_ENGINE_RELATIVE = ['resources', 'app.asar.unpacked', 'cli', 'dist', 'codebuddy-lite-wb.mjs'];
 
@@ -138,6 +109,34 @@ const GOVERNANCE_INIT_TIMEOUT_MS = 180_000;
 // ─── Type guards (rc-2: no `as` bypass) ─────────────────────────────────────
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Cache-binding comparison for the idempotent path. `writtenAt` is a
+ * per-install timestamp, so comparing raw bytes would force a cache refresh
+ * on every run; comparing the rest proves the launcher will read the same
+ * workspace/entry/versions the marketplace copy declares. Absent on both
+ * sides is a match (no MCP payload); absent on one side is drift.
+ */
+function mcpBindingMatches(sourceDir: string, cacheDir: string): boolean {
+  const bindingFile = 'mcp-binding.json';
+  const read = (dir: string): Record<string, unknown> | null | undefined => {
+    const file = path.join(dir, bindingFile);
+    if (!existsSync(file)) return undefined;
+    try {
+      const parsed: unknown = JSON.parse(readFileSync(file, 'utf-8'));
+      if (!isRecord(parsed)) return null;
+      const { writtenAt: _writtenAt, ...rest } = parsed;
+      return rest;
+    } catch {
+      return null;
+    }
+  };
+  const source = read(sourceDir);
+  const cached = read(cacheDir);
+  if (source === undefined && cached === undefined) return true;
+  if (source === undefined || cached === undefined || source === null || cached === null) return false;
+  return JSON.stringify(source) === JSON.stringify(cached);
 }
 
 /** Native v2 stores scope records as an array; old PD installs used one object. */
