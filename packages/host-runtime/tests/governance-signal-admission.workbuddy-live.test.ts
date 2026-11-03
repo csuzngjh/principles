@@ -102,33 +102,48 @@ describe('assessWorkbuddyLiveKeyword — 共享词库参数（AUDIT-P3-01）', (
     });
   });
 
-  it('传入共享 store：earned-high 学习词与 seed high 词均可触发；未达门槛的学习词不可', () => {
+  it('传入共享 store：学习词永不直通；降级词即使 owner_promoted 也只作候选', () => {
     writeLearnedStore([
-      { term: '方向完全反了', weight: 0.9, source: 'llm', truePositiveCount: 3, falsePositiveCount: 0 }, // earned-high
-      { term: '可能不太对', weight: 0.9, source: 'llm', truePositiveCount: 1, falsePositiveCount: 0 }, // 未达 TP 门槛 → ambiguous
-      { term: '我说的是', weight: 0.75, source: 'user', truePositiveCount: 0, falsePositiveCount: 0 }, // owner_promoted ≥0.7
+      { term: '方向完全反了', weight: 0.9, source: 'llm', truePositiveCount: 3, falsePositiveCount: 0 },
+      { term: '可能不太对', weight: 0.9, source: 'llm', truePositiveCount: 1, falsePositiveCount: 0 },
+      { term: '我说的是', weight: 0.75, source: 'user', truePositiveCount: 0, falsePositiveCount: 0 },
     ]);
     // store 解析走生产路径（含 mtime 缓存与降级），与 pd-hook 使用同一入口。
     const store = resolveSharedCorrectionKeywordStoreForDetection(workspaceDir);
 
-    expect(assessWorkbuddyLiveKeyword('方向完全反了，停下', 's', store).matched).toBe(true);
+    // SPEC v0.3 §3.2.3：历史 TP≥3 的学习词不再获得 STRONG 直通。
+    expect(assessWorkbuddyLiveKeyword('方向完全反了，停下', 's', store).matched).toBe(false);
+    expect(store.terms['方向完全反了']?.precision).toBe('ambiguous');
     expect(assessWorkbuddyLiveKeyword('可能不太对', 's', store).matched).toBe(false);
-    expect(assessWorkbuddyLiveKeyword('我说的是另一个文件', 's', store).matched).toBe(true);
+    // 降级词无论来源都只能作候选（§3.2.1）。
+    expect(assessWorkbuddyLiveKeyword('我说的是另一个文件', 's', store).matched).toBe(false);
+    expect(store.terms['我说的是']?.precision).toBe('ambiguous');
     // 学习词同样受 startsWith 预过滤约束（转述不触发）。
     expect(assessWorkbuddyLiveKeyword('他说方向完全反了', 's', store).matched).toBe(false);
+    // 真实 seed high 词仍走确定性路径（现有能力不回退）。
+    expect(assessWorkbuddyLiveKeyword('这是错的', 's', store).matched).toBe(true);
   });
 });
 
 describe('admitTrustedWorkbuddyLiveCorrection — 共享词库准入契约（AUDIT-P3-01/P3-04）', () => {
-  it('earned-high 学习词经完整准入产生一条 canonical Pain，且重复投递幂等', () => {
+  it('学习词不再直通；seed high 词仍准入且重复投递幂等', () => {
     writeLearnedStore([
       { term: '方向完全反了', weight: 0.9, source: 'llm', truePositiveCount: 3, falsePositiveCount: 0 },
     ]);
-    const event = nativeEvent({ prompt: '方向完全反了，停下' });
+    // SPEC v0.3 §3.2.3：历史高精度学习词不能直接产生 Pain，但会落成
+    // Stage-2 优先候选（pending，零 Pain / 零任务 / 零额度）。
+    const learned = admitTrustedWorkbuddyLiveCorrection({
+      workspaceDir,
+      rawEvent: nativeEvent({ prompt: '方向完全反了，停下', generation_id: 'wb-live-gen-1a' }),
+    });
+    expect(learned.ok).toBe(true);
+    expect(learned.outcomes?.[0]).toMatchObject({ disposition: 'pending_llm_review', duplicate: false });
+    expect(painCount()).toBe(0);
 
+    // 真实 seed high 词保持现有能力，且重复投递幂等。
+    const event = nativeEvent({ prompt: '这是错的，停下', generation_id: 'wb-live-gen-1b' });
     const first = admitTrustedWorkbuddyLiveCorrection({ workspaceDir, rawEvent: event });
     if (!first.ok) throw new Error(`admission degraded: ${first.reason} / ${first.nextAction}`);
-    expect(first.ok).toBe(true);
     expect(first.outcomes?.[0]).toMatchObject({ disposition: 'admitted', duplicate: false });
     expect(painCount()).toBe(1);
 
@@ -138,7 +153,7 @@ describe('admitTrustedWorkbuddyLiveCorrection — 共享词库准入契约（AUD
     expect(painCount()).toBe(1);
   });
 
-  it('未达 high 门槛的学习词不产生 Pain、不写 marker', () => {
+  it('未达 high 门槛的学习词只落 pending 候选，不产生 Pain', () => {
     writeLearnedStore([
       { term: '可能不太对', weight: 0.9, source: 'llm', truePositiveCount: 1, falsePositiveCount: 0 },
     ]);
@@ -147,7 +162,7 @@ describe('admitTrustedWorkbuddyLiveCorrection — 共享词库准入契约（AUD
       rawEvent: nativeEvent({ prompt: '可能不太对' , generation_id: 'wb-live-gen-2' }),
     });
     expect(result.ok).toBe(true);
-    expect(result.outcomes).toEqual([]);
+    expect(result.outcomes?.[0]).toMatchObject({ disposition: 'pending_llm_review' });
     expect(painCount()).toBe(0);
   });
 

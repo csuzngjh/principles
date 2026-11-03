@@ -50,9 +50,18 @@ import {
   sanitizeString,
   boundCorrectionEvidenceText,
   MAX_EVIDENCE_VALUE_CHARS,
+  evaluateStage2ConfidenceGate,
+  evaluatePainIngress,
+  STAGE2_MAX_ATTEMPTS,
+  PENDING_CANDIDATE_TTL_MS,
   type GovernanceHostKind,
+  type IngressEvidenceEntry,
+  type PainIngressReport,
+  type PainProvenance,
+  type LlmClassificationResult,
   type SignalCollectorConfig,
   type SignalCollectorOutput,
+  type Stage2GateVerdict,
   type UnifiedKeywordStore,
 } from '@principles/core/runtime-v2';
 import {
@@ -106,19 +115,23 @@ const KEYWORD_STORE_FILE = 'correction_keywords.json';
 /** seed/owner_promoted 词进入高精度 deterministic path 的权重阈值 */
 export const HIGH_PRECISION_LEARNED_WEIGHT = 0.7;
 
-/** PRI-788 G3: llm 学习词 earned precision 的 TP 门槛（且要求零 FP） */
-export const EARNED_PRECISION_MIN_TP = 3;
-
 /** 高精度纠正短语 overlay(已验证的确定性 STRONG 路径,不属于 learner seed 集) */
 export const HIGH_PRECISION_CORRECTION_OVERLAY: readonly (readonly [string, number])[] = [
   ['这是错的', 0.9],
   ['不要自作主张', 0.9],
   ['不应该这么做', 0.9],
   // PRI-788 G3(Owner 批准清单):中文高精度纠正句式
-  ['我说的是', 0.9],
   ['不是让你', 0.85],
   ['谁让你', 0.85],
   ['又搞错', 0.8],
+];
+
+/**
+ * SPEC v0.3 §3.2.1 降级词：口语高频、可被嵌入引用或否定句，不构成 high。
+ * 它们仍是候选（进入 Stage 2），但永不直达 STRONG。
+ */
+export const AMBIGUOUS_CORRECTION_OVERLAY: readonly (readonly [string, number])[] = [
+  ['我说的是', 0.9],
   ['都说了', 0.8],
 ];
 
@@ -159,21 +172,17 @@ function mapLearnedSource(source: string): UnifiedKeywordStore['terms'][string][
 }
 
 /**
- * PRI-788 G3 earned precision：llm 学习词不再恒为 ambiguous——确认证据达标
- * （TP ≥ 3 且零 FP）时升 high，出现任一 FP 即降回 ambiguous。安全姿态不变：
- * LLM 单次建议无法自升 STRONG，必须积累 LLM 确认的正例。owner_promoted 仍按
- * 权重判定（Owner 显式决策不受证据门槛约束）。
+ * SPEC v0.3 §3.2.3（D5）：llm 学习词永不自升 high。历史 TP/FP 计数可以保留为
+ * 学习证据，但「TP≥3 且零 FP → 直通」的 PRI-788 G3 行为被显式逆转：学习词
+ * 只能作为 Stage 2 优先候选，由 LLM 分类 + 统一准入判断。
+ * owner_promoted（Owner 显式决策）一般按权重判定，但降级词例外。
  */
-function precisionFor(
-  source: string,
-  weight: number,
-  stats?: { truePositiveCount?: number; falsePositiveCount?: number },
-): 'high' | 'ambiguous' {
-  if (source === 'llm') {
-    const tp = stats?.truePositiveCount ?? 0;
-    const fp = stats?.falsePositiveCount ?? 0;
-    return tp >= EARNED_PRECISION_MIN_TP && fp === 0 ? 'high' : 'ambiguous';
-  }
+const ALWAYS_AMBIGUOUS_TERMS: ReadonlySet<string> = new Set(AMBIGUOUS_CORRECTION_OVERLAY.map(([term]) => term));
+
+function precisionFor(source: string, term: string, weight: number): 'high' | 'ambiguous' {
+  // SPEC v0.3 §3.2.1: 降级词无论来源（含 owner_promoted）都只能作候选。
+  if (ALWAYS_AMBIGUOUS_TERMS.has(term)) return 'ambiguous';
+  if (source === 'llm') return 'ambiguous';
   return weight >= HIGH_PRECISION_LEARNED_WEIGHT ? 'high' : 'ambiguous';
 }
 
@@ -192,7 +201,7 @@ function projectLearnedStore(raw: unknown): { terms: UnifiedKeywordStore['terms'
       term,
       category: 'correction',
       weight,
-      precision: precisionFor(kw.source, weight, kw),
+      precision: precisionFor(kw.source, term, weight),
       source: mapLearnedSource(kw.source),
     };
     if (kw.source === 'llm') learnedCount += 1;
@@ -207,6 +216,10 @@ export function buildSharedSeedKeywordStore(): UnifiedKeywordStore {
   }
   for (const [term, weight] of EMPATHY_SEED_OVERLAY) {
     terms[term] = { term, category: 'empathy', weight, precision: 'ambiguous', source: 'seed' };
+  }
+  for (const [term, weight] of AMBIGUOUS_CORRECTION_OVERLAY) {
+    if (Object.hasOwn(terms, term)) continue;
+    terms[term] = { term, category: 'correction', weight, precision: 'ambiguous', source: 'seed' };
   }
   for (const kw of CORRECTION_SEED_KEYWORDS) {
     if (Object.hasOwn(terms, kw.term)) continue;
@@ -504,6 +517,10 @@ export type GovernanceAdmissionOutcome =
   | { disposition: 'not_a_signal'; kind: 'user_correction'; logicalObservationKey: string }
   | { disposition: 'not_admitted'; kind: 'tool_failure'; logicalObservationKey: string; reason: string }
   | { disposition: 'rate_limited'; kind: 'user_correction'; logicalObservationKey: string }
+  /** Ambiguous Stage-1 candidate persisted for Stage 2 review (SPEC §4.4.8). */
+  | { disposition: 'pending_llm_review'; kind: 'user_correction'; logicalObservationKey: string; duplicate: boolean }
+  /** Redelivery of a candidate that already reached a non-admitted terminal state. */
+  | { disposition: 'resolved_none' | 'abandoned'; kind: 'user_correction'; logicalObservationKey: string; reason: string | null }
   | Degradation;
 
 /** Internal control-flow signals thrown inside the admission transaction. */
@@ -560,18 +577,23 @@ interface CorrectionPainArgs {
   candidate: GovernanceCorrectionCandidate;
   workspaceDir: string;
   painId: string;
-  detection: SignalCollectorOutput | undefined;
+  reason: string;
   nowIso: string;
 }
 
-function insertCorrectionPain({ db, candidate, workspaceDir, painId, detection, nowIso }: CorrectionPainArgs): string {
-  const reason = candidate.explicitOwnerStatement === true
-    ? candidate.explicitChannel === 'codex_explicit_agent'
+/** ONE reason builder for inline admission and the pending→admitted transition. */
+function correctionReason(candidate: GovernanceCorrectionCandidate, matchedTerms: readonly string[]): string {
+  if (candidate.explicitOwnerStatement === true) {
+    return candidate.explicitChannel === 'codex_explicit_agent'
       ? 'Codex explicit owner statement (agent-assisted, no prefix)'
-      : `${candidate.hostKind === 'workbuddy' ? 'WorkBuddy' : 'Codex'} explicit owner statement (PD记录痛苦 prefix)`
-    : detection !== undefined && detection.matchedTerms.length > 0
-      ? `User correction detected: ${detection.matchedTerms.join(', ')}`
-      : 'User correction detected';
+      : `${candidate.hostKind === 'workbuddy' ? 'WorkBuddy' : 'Codex'} explicit owner statement (PD记录痛苦 prefix)`;
+  }
+  return matchedTerms.length > 0
+    ? `User correction detected: ${matchedTerms.join(', ')}`
+    : 'User correction detected';
+}
+
+function insertCorrectionPain({ db, candidate, workspaceDir, painId, reason, nowIso }: CorrectionPainArgs): string {
   // P1-1 privacy (review round 2): the FULL raw text must pass through the
   // sanitizer BEFORE any truncation — sanitizeString's own contract is
   // redact → path-replace → bound. Slicing first would split a token that
@@ -608,7 +630,7 @@ interface GovernanceTaskSubmissionPayload {
  * admission path and the WorkBuddy bare-pain sweep must produce the SAME
  * shape, differing only in the attributed host and the pain facts.
  */
-function toolFailureTaskPayload(fields: {
+function buildToolFailureTaskPayload(fields: {
   hostKind: GovernanceHostKind;
   logicalObservationKey: string;
   sessionId: string;
@@ -616,7 +638,7 @@ function toolFailureTaskPayload(fields: {
   reason: string;
   score: number;
   workspaceDir: string;
-}): string {
+}): GovernanceTaskSubmissionPayload {
   // P1-1 privacy (review round 2): sanitize the FULL text before any
   // truncation — a token crossing the 200-char boundary must be redacted, not
   // split into a fragment that survives verbatim. sanitizeString bounds itself.
@@ -629,10 +651,14 @@ function toolFailureTaskPayload(fields: {
     hostKind: fields.hostKind,
     evidence: [{ sourceRef: `governance_observation:${fields.logicalObservationKey}`, note: sanitizeString(fields.reason || fields.toolName, fields.workspaceDir) }],
   };
-  return JSON.stringify(payload);
+  return payload;
 }
 
-function taskSubmissionPayload(candidate: GovernanceSignalCandidate, workspaceDir: string, details: { reason: string; canonicalPainId?: string }): string {
+function toolFailureTaskPayload(fields: Parameters<typeof buildToolFailureTaskPayload>[0]): string {
+  return JSON.stringify(buildToolFailureTaskPayload(fields));
+}
+
+function buildTaskSubmissionPayload(candidate: GovernanceSignalCandidate, workspaceDir: string, details: { reason: string; canonicalPainId?: string }): GovernanceTaskSubmissionPayload {
   const {reason,canonicalPainId} = details;
   if (candidate.kind === 'user_correction') {
     // P1-1 privacy (review round 2): sanitize the FULL text before any
@@ -664,9 +690,9 @@ function taskSubmissionPayload(candidate: GovernanceSignalCandidate, workspaceDi
           : { text: sanitizeString(candidate.text, workspaceDir), classification: 'owner_statement' as const, channel: candidate.explicitChannel === 'codex_explicit_agent' ? 'codex_explicit_agent' as const : 'codex_explicit_prefix' as const } }
         : {}),
     };
-    return JSON.stringify(payload);
+    return payload;
   }
-  return toolFailureTaskPayload({
+  return buildToolFailureTaskPayload({
     hostKind: candidate.hostKind,
     logicalObservationKey: candidate.logicalObservationKey,
     sessionId: candidate.rootSessionId,
@@ -675,6 +701,10 @@ function taskSubmissionPayload(candidate: GovernanceSignalCandidate, workspaceDi
     score: 70,
     workspaceDir,
   });
+}
+
+function taskSubmissionPayload(candidate: GovernanceSignalCandidate, workspaceDir: string, details: { reason: string; canonicalPainId?: string }): string {
+  return JSON.stringify(buildTaskSubmissionPayload(candidate, workspaceDir, details));
 }
 
 /** The marker identity columns both admission paths (inline candidate and bare-pain sweep) share. */
@@ -702,6 +732,295 @@ function insertAdmissionMarker({ db, identity, canonicalPainId, ruleVersion, rea
     VALUES (?, ?, ?, ?, ?, 'admitted', ?, NULL, ?, ?, ?, ?, ?)`)
     .run(identity.hostKind, identity.logicalObservationKey, identity.rolloutIdentity, identity.rootSessionId, identity.signalKind, canonicalPainId,
       ruleVersion, reason.slice(0, MAX_REASON_BOUND) || null, payloadJson, nowIso, nowIso);
+}
+
+// ─── Pending LLM review state machine (SPEC v0.3 §4.4 / §4.4.8) ─────────────
+//
+// Ambiguous Stage-1 candidates are no longer silently dropped: they get a
+// `pending_llm_review` marker in the SAME table (zero DDL). The marker's
+// `task_payload_json` carries two lifecycle shapes:
+//  - pending:   { kind:'pending_llm_review', task_payload, review, trigger }
+//  - terminal:  { kind:'pending_review_terminal', decision, reason, ... }
+// `isGovernanceTaskPayload` rejects both shapes, so a pending/terminal row can
+// never be mistaken for an admitted task payload (fail-loud at ensure time).
+
+/** A claim older than this may be re-claimed (worker crashed mid-review). */
+const PENDING_REVIEW_CLAIM_TTL_MS = 10 * 60 * 1000;
+
+interface Stage2ReviewRecord {
+  readonly verdict: Stage2GateVerdict;
+  readonly confidence: number | null;
+  readonly reason: string;
+}
+
+interface PendingReviewMeta {
+  attempts: number;
+  ruleVersion: number | null;
+  claimedAt?: string;
+  lastAttemptAt?: string;
+  lastReason?: string;
+  reviewResult?: Stage2ReviewRecord;
+}
+
+interface PendingReviewPayload {
+  readonly kind: 'pending_llm_review';
+  /**
+   * Canonical pain id derived from host identity facts BEFORE review. Persisted
+   * so admission at settle time uses the identical id even though
+   * `trigger.text` may have been sanitized/bounded (rc-6).
+   */
+  readonly pain_id: string;
+  readonly task_payload: GovernanceTaskSubmissionPayload;
+  readonly review: PendingReviewMeta;
+  readonly trigger: {
+    readonly text: string;
+    readonly matchedTerms: readonly string[];
+    readonly hostTurnId: string;
+  };
+}
+
+/** Internal control-flow signal for a lost pending CAS race. */
+class PendingCasLost extends Error {
+  constructor() {
+    super('pending_cas_lost');
+    this.name = 'PendingCasLost';
+  }
+}
+
+export interface PendingCorrectionCandidate {
+  readonly logicalObservationKey: string;
+  readonly hostKind: 'codex' | 'workbuddy';
+  readonly rolloutIdentity: string;
+  readonly rootSessionId: string;
+  readonly hostTurnId: string;
+  readonly text: string;
+  readonly matchedTerms: readonly string[];
+  readonly attempts: number;
+  readonly claimedAt: string | null;
+  readonly reviewResult: Stage2ReviewRecord | null;
+  readonly createdAt: string;
+}
+
+function parsePendingReviewMeta(value: unknown): PendingReviewMeta | null {
+  if (!isRecord(value)) return null;
+  const attempts = own(value, 'attempts');
+  if (typeof attempts !== 'number' || !Number.isSafeInteger(attempts) || attempts < 0) return null;
+  const ruleVersion = own(value, 'ruleVersion');
+  if (ruleVersion !== null && ruleVersion !== undefined && (typeof ruleVersion !== 'number' || !Number.isSafeInteger(ruleVersion))) return null;
+  const claimedAt = own(value, 'claimedAt');
+  if (claimedAt !== undefined && typeof claimedAt !== 'string') return null;
+  const lastAttemptAt = own(value, 'lastAttemptAt');
+  if (lastAttemptAt !== undefined && typeof lastAttemptAt !== 'string') return null;
+  const lastReason = own(value, 'lastReason');
+  if (lastReason !== undefined && typeof lastReason !== 'string') return null;
+
+  const reviewRaw = own(value, 'reviewResult');
+  let reviewResult: Stage2ReviewRecord | undefined;
+  if (reviewRaw !== undefined) {
+    if (!isRecord(reviewRaw)) return null;
+    const verdict = own(reviewRaw, 'verdict');
+    if (verdict !== 'correction' && verdict !== 'none' && verdict !== 'unclassified_empathy'
+      && verdict !== 'pending_low_confidence' && verdict !== 'pending_llm_error') return null;
+    const confidence = own(reviewRaw, 'confidence');
+    if (confidence !== null && (typeof confidence !== 'number' || !Number.isFinite(confidence))) return null;
+    const normalizedConfidence: number | null = typeof confidence === 'number' ? confidence : null;
+    const reason = own(reviewRaw, 'reason');
+    if (typeof reason !== 'string') return null;
+    reviewResult = { verdict, confidence: normalizedConfidence, reason };
+  }
+
+  return {
+    attempts,
+    ruleVersion: typeof ruleVersion === 'number' ? ruleVersion : null,
+    ...(typeof claimedAt === 'string' ? { claimedAt } : {}),
+    ...(typeof lastAttemptAt === 'string' ? { lastAttemptAt } : {}),
+    ...(typeof lastReason === 'string' ? { lastReason } : {}),
+    ...(reviewResult !== undefined ? { reviewResult } : {}),
+  };
+}
+
+function parsePendingReviewPayload(raw: unknown): PendingReviewPayload | null {
+  if (!isRecord(raw)) return null;
+  if (own(raw, 'kind') !== 'pending_llm_review') return null;
+  const painId = own(raw, 'pain_id');
+  if (typeof painId !== 'string' || painId.length === 0) return null;
+  const taskPayload = own(raw, 'task_payload');
+  // Declared later in this module (function declaration, hoisted); the shape
+  // guard is the single validator shared with ensureGovernanceDiagnosticianTask.
+  // eslint-disable-next-line @typescript-eslint/no-use-before-define
+  if (!isGovernanceTaskPayload(taskPayload)) return null;
+  const review = parsePendingReviewMeta(own(raw, 'review'));
+  if (review === null) return null;
+  const trigger = own(raw, 'trigger');
+  if (!isRecord(trigger)) return null;
+  const text = own(trigger, 'text');
+  const hostTurnId = own(trigger, 'hostTurnId');
+  const matchedTerms = own(trigger, 'matchedTerms');
+  if (typeof text !== 'string' || typeof hostTurnId !== 'string' || !Array.isArray(matchedTerms)) return null;
+  const normalizedTerms: string[] = [];
+  for (const term of matchedTerms) {
+    if (typeof term !== 'string') return null;
+    normalizedTerms.push(term);
+  }
+  return {
+    kind: 'pending_llm_review',
+    pain_id: painId,
+    task_payload: taskPayload,
+    review,
+    trigger: { text, matchedTerms: normalizedTerms, hostTurnId },
+  };
+}
+
+function buildPendingReviewPayload(args: {
+  candidate: GovernanceCorrectionCandidate;
+  workspaceDir: string;
+  painId: string;
+  matchedTerms: readonly string[];
+  ruleVersion: number | null;
+}): PendingReviewPayload {
+  const {candidate, workspaceDir, painId, matchedTerms, ruleVersion} = args;
+  const reason = correctionReason(candidate, matchedTerms);
+  return {
+    kind: 'pending_llm_review',
+    pain_id: painId,
+    task_payload: buildTaskSubmissionPayload(candidate, workspaceDir, { reason, canonicalPainId: painId }),
+    review: { attempts: 0, ruleVersion, lastReason: 'ambiguous_candidate' },
+    trigger: {
+      text: sanitizeString(candidate.text, workspaceDir),
+      matchedTerms: [...matchedTerms],
+      hostTurnId: candidate.hostTurnId,
+    },
+  };
+}
+
+function pendingTerminalPayload(args: {
+  decision: 'resolved_none' | 'abandoned';
+  reason: string;
+  attempts: number;
+  confidence: number | null;
+  nowIso: string;
+}): string {
+  return JSON.stringify({
+    kind: 'pending_review_terminal',
+    decision: args.decision,
+    reason: args.reason,
+    confidence: args.confidence,
+    attempts: args.attempts,
+    settledAt: args.nowIso,
+  });
+}
+
+// ─── PainIngress facts for automatic corrections (SPEC v0.3 §5) ─────────────
+
+interface CorrectionIngressFacts {
+  readonly hostKind: 'codex' | 'workbuddy';
+  readonly logicalObservationKey: string;
+  readonly rolloutIdentity: string;
+  readonly rootSessionId: string;
+  readonly hostTurnId: string;
+  readonly painId: string;
+  readonly reason: string;
+  readonly evidence: readonly IngressEvidenceEntry[];
+}
+
+/**
+ * Build the ONE PainIngressReport for an automatic keyword/Stage-2 correction.
+ * Evidence is always present (the trigger text), so a bound automatic signal
+ * evaluates to `submit` — the mapping must never degrade it to
+ * observation_only (SPEC §5 hard requirement).
+ */
+function buildCorrectionIngressReport(facts: CorrectionIngressFacts): PainIngressReport {
+  const [first, ...rest] = facts.evidence;
+  const bundle: PainIngressReport['evidence'] = first === undefined
+    ? { status: 'unavailable', reason: 'evidence_invalid' }
+    : { status: 'available', entries: [first, ...rest] };
+  const correlation: PainIngressReport['correlation'] = facts.hostKind === 'codex'
+    ? {
+      status: 'bound',
+      hostKind: 'codex',
+      rootSessionId: facts.rootSessionId,
+      rolloutIdentity: facts.rolloutIdentity,
+      logicalObservationKey: facts.logicalObservationKey,
+      hostTurnId: facts.hostTurnId,
+    }
+    : {
+      status: 'bound',
+      hostKind: 'workbuddy',
+      sessionId: facts.rootSessionId,
+      logicalObservationKey: facts.logicalObservationKey,
+    };
+  return {
+    identity: { kind: 'host_observation', observationId: facts.painId },
+    painType: 'user_frustration',
+    source: 'user_correction',
+    reason: facts.reason,
+    score: GOVERNANCE_STRONG_PAIN_SCORE,
+    origin: {
+      kind: 'automatic_hook',
+      source: facts.hostKind === 'codex' ? 'codex:user_prompt' : 'workbuddy:user_prompt_submit',
+    },
+    correlation,
+    evidence: bundle,
+  };
+}
+
+function correctionIngressEvidence(args: {
+  hostKind: 'codex' | 'workbuddy';
+  logicalObservationKey: string;
+  text: string;
+  workspaceDir: string;
+}): IngressEvidenceEntry[] {
+  return [{
+    kind: 'behavior_trace',
+    sourceRef: args.hostKind === 'workbuddy'
+      ? 'pain_event:' + args.logicalObservationKey
+      : 'governance_observation:' + args.logicalObservationKey,
+    note: sanitizeString(args.text, args.workspaceDir),
+  }];
+}
+
+/**
+ * Run the shared ingress semantics BEFORE any Pain/limit/marker side effect
+ * (v0.3.1 §1.2). A refusal/observation-only signal becomes a terminal
+ * `abandoned(reasonCode)` marker with zero Pain, zero quota.
+ */
+function ingressTerminalReason(facts: CorrectionIngressFacts): string | null {
+  const decision = evaluatePainIngress(buildCorrectionIngressReport(facts));
+  if (decision.action === 'refuse' || decision.action === 'observation_only') {
+    return decision.reasonCode;
+  }
+  return null;
+}
+
+function insertTerminalCorrectionMarker(args: {
+  db: Database.Database;
+  candidate: GovernanceCorrectionCandidate;
+  decision: 'abandoned';
+  reason: string;
+  ruleVersion: number | null;
+  nowIso: string;
+}): void {
+  args.db.prepare(`INSERT INTO governance_signal_admissions
+    (host_kind, logical_observation_key, rollout_identity, root_session_id, signal_kind, decision, canonical_pain_id, diagnostician_task_id, rule_version, reason, task_payload_json, created_at, updated_at)
+    VALUES (?, ?, ?, ?, 'user_correction', 'abandoned', NULL, NULL, ?, ?, ?, ?, ?)`)
+    .run(args.candidate.hostKind, args.candidate.logicalObservationKey, args.candidate.rolloutIdentity, args.candidate.rootSessionId,
+      args.ruleVersion, args.reason.slice(0, MAX_REASON_BOUND),
+      pendingTerminalPayload({ decision: 'abandoned', reason: args.reason, attempts: 0, confidence: null, nowIso: args.nowIso }), args.nowIso, args.nowIso);
+}
+
+/** Insert the pending marker. UNIQUE-violation races are resolved by the caller. */
+function insertPendingCorrectionMarker(args: {
+  db: Database.Database;
+  candidate: GovernanceCorrectionCandidate;
+  ruleVersion: number | null;
+  payloadJson: string;
+  nowIso: string;
+}): void {
+  args.db.prepare(`INSERT INTO governance_signal_admissions
+    (host_kind, logical_observation_key, rollout_identity, root_session_id, signal_kind, decision, canonical_pain_id, diagnostician_task_id, rule_version, reason, task_payload_json, created_at, updated_at)
+    VALUES (?, ?, ?, ?, 'user_correction', 'pending_llm_review', NULL, NULL, ?, ?, ?, ?, ?)`)
+    .run(args.candidate.hostKind, args.candidate.logicalObservationKey, args.candidate.rolloutIdentity, args.candidate.rootSessionId,
+      args.ruleVersion, 'ambiguous correction candidate awaiting Stage 2 review', args.payloadJson, args.nowIso, args.nowIso);
 }
 
 /**
@@ -768,10 +1087,117 @@ function admitCorrection({ db, candidate, workspaceDir, now, nowIso, keywordStor
       && detection.output.isSignal
       && detection.output.strength === 'STRONG'
       && detection.output.matchedPrecision === 'high');
+
+  // v0.3.1 §1.2: shared ingress semantics run BEFORE any Pain/limit/marker
+  // side effect. Explicit Owner statements keep their own admission authority
+  // (their origin is owner_manual, not an automatic hook).
+  if (!isExplicit) {
+    const { painId } = deriveProductionCorrectionPainIdentity({
+      workspaceDir,
+      sessionId: candidate.rootSessionId,
+      occurrenceId: candidate.hostTurnId,
+      text: candidate.text,
+    });
+    const ingressReason = ingressTerminalReason({
+      hostKind: candidate.hostKind,
+      logicalObservationKey: candidate.logicalObservationKey,
+      rolloutIdentity: candidate.rolloutIdentity,
+      rootSessionId: candidate.rootSessionId,
+      hostTurnId: candidate.hostTurnId,
+      painId,
+      reason: correctionReason(candidate, detection?.output.matchedTerms ?? []),
+      evidence: correctionIngressEvidence({
+        hostKind: candidate.hostKind,
+        logicalObservationKey: candidate.logicalObservationKey,
+        text: candidate.text,
+        workspaceDir,
+      }),
+    });
+    if (ingressReason !== null) {
+      try {
+        insertTerminalCorrectionMarker({
+          db,
+          candidate,
+          decision: 'abandoned',
+          reason: ingressReason,
+          ruleVersion: detection?.ruleVersion ?? null,
+          nowIso,
+        });
+      } catch (error) {
+        const existing = db.prepare('SELECT * FROM governance_signal_admissions WHERE logical_observation_key = ?').get(candidate.logicalObservationKey);
+        if (isRecord(existing)) {
+          const existingReason = rowField(existing, 'reason');
+          return {
+            disposition: 'abandoned',
+            kind: 'user_correction',
+            logicalObservationKey: candidate.logicalObservationKey,
+            reason: typeof existingReason === 'string' ? existingReason : ingressReason,
+          };
+        }
+        throw error;
+      }
+      return { disposition: 'abandoned', kind: 'user_correction', logicalObservationKey: candidate.logicalObservationKey, reason: ingressReason };
+    }
+  }
+
   if (!isStrongHighPrecision) {
-    // Ordinary conversation / weak negation / ambiguous candidates: no pain,
-    // no task, no quota, and no marker (SPEC §18 scenario 6 — silence).
-    return { disposition: 'not_a_signal', kind: 'user_correction', logicalObservationKey: candidate.logicalObservationKey };
+    const ambiguousTerms = detection?.output.matchedTerms ?? [];
+    const isAmbiguousCandidate = detection !== undefined
+      && detection.output.matchedPrecision === 'ambiguous'
+      && ambiguousTerms.length > 0;
+    if (!isAmbiguousCandidate) {
+      // Ordinary conversation / zero-hit discovery: no pain, no task, no quota,
+      // and no marker (SPEC §18 scenario 6).
+      return { disposition: 'not_a_signal', kind: 'user_correction', logicalObservationKey: candidate.logicalObservationKey };
+    }
+    // SPEC §4.4.8: ambiguous candidates become auditable pending rows (the
+    // explicit change from the old "silence" contract). The canonical id is
+    // derived from host identity facts — identical before and after review.
+    const { painId } = deriveProductionCorrectionPainIdentity({
+      workspaceDir,
+      sessionId: candidate.rootSessionId,
+      occurrenceId: candidate.hostTurnId,
+      text: candidate.text,
+    });
+    const ruleVersion = detection?.ruleVersion ?? null;
+    try {
+      insertPendingCorrectionMarker({
+        db,
+        candidate,
+        ruleVersion,
+        payloadJson: JSON.stringify(buildPendingReviewPayload({
+          candidate,
+          workspaceDir,
+          painId,
+          matchedTerms: ambiguousTerms,
+          ruleVersion,
+        })),
+        nowIso,
+      });
+    } catch (error) {
+      // Concurrent redelivery hit UNIQUE: converge on the durable row instead
+      // of surfacing a governance failure (rc-7 fresh re-read).
+      const existing = db.prepare('SELECT * FROM governance_signal_admissions WHERE logical_observation_key = ?').get(candidate.logicalObservationKey);
+      if (isRecord(existing)) {
+        const decision = rowField(existing, 'decision');
+        if (decision === 'pending_llm_review') {
+          return { disposition: 'pending_llm_review', kind: 'user_correction', logicalObservationKey: candidate.logicalObservationKey, duplicate: true };
+        }
+        if (decision === 'resolved_none' || decision === 'abandoned') {
+          const reason = rowField(existing, 'reason');
+          return { disposition: decision, kind: 'user_correction', logicalObservationKey: candidate.logicalObservationKey, reason: typeof reason === 'string' ? reason : null };
+        }
+        if (decision === 'admitted') {
+          const canonicalPainId = rowField(existing, 'canonical_pain_id');
+          const taskId = rowField(existing, 'diagnostician_task_id');
+          if (typeof canonicalPainId === 'string') {
+            return { disposition: 'already_admitted', kind: 'user_correction', logicalObservationKey: candidate.logicalObservationKey, canonicalPainId, diagnosticianTaskId: typeof taskId === 'string' ? taskId : null };
+          }
+        }
+      }
+      throw error;
+    }
+    return { disposition: 'pending_llm_review', kind: 'user_correction', logicalObservationKey: candidate.logicalObservationKey, duplicate: false };
   }
 
   const { painId } = deriveProductionCorrectionPainIdentity({
@@ -802,7 +1228,7 @@ function admitCorrection({ db, candidate, workspaceDir, now, nowIso, keywordStor
         if (!tryConsumeRateLimit({ db, rootSessionId: candidate.rootSessionId, ruleVersion: rateLimitRuleVersion, now })) {
           throw new RateLimitedSignal();
         }
-        reason = insertCorrectionPain({ db, candidate, workspaceDir, painId, detection: detection?.output, nowIso });
+        reason = insertCorrectionPain({ db, candidate, workspaceDir, painId, reason: correctionReason(candidate, detection?.output.matchedTerms ?? []), nowIso });
       }
       insertAdmissionMarker({
         db,
@@ -951,13 +1377,27 @@ function admitOne({ db, candidate, workspaceDir, now, nowIso, keywordStore, onDe
 
   const marker = db.prepare('SELECT * FROM governance_signal_admissions WHERE logical_observation_key = ?').get(candidate.logicalObservationKey);
   if (isRecord(marker)) {
+    // SPEC v0.3 §4.4.3 pending guard: a redelivered candidate whose marker is
+    // pending/terminal must return that semantic — never a bogus
+    // `already_admitted` with an empty canonical id.
+    const decision = rowField(marker, 'decision');
+    if (decision === 'pending_llm_review') {
+      return { disposition: 'pending_llm_review', kind: 'user_correction', logicalObservationKey: candidate.logicalObservationKey, duplicate: true };
+    }
+    if (decision === 'resolved_none' || decision === 'abandoned') {
+      const reason = rowField(marker, 'reason');
+      return { disposition: decision, kind: 'user_correction', logicalObservationKey: candidate.logicalObservationKey, reason: typeof reason === 'string' ? reason : null };
+    }
     const canonicalPainId = rowField(marker, 'canonical_pain_id');
     const taskId = rowField(marker, 'diagnostician_task_id');
+    if (typeof canonicalPainId !== 'string' || canonicalPainId.length === 0) {
+      return { ok: false, reason: 'admission_marker_corrupt', nextAction: 'Inspect governance_signal_admissions for an admitted row with a missing canonical_pain_id; do not re-admit into a corrupt marker.' };
+    }
     return {
       disposition: 'already_admitted',
       kind: candidate.kind,
       logicalObservationKey: candidate.logicalObservationKey,
-      canonicalPainId: typeof canonicalPainId === 'string' ? canonicalPainId : '',
+      canonicalPainId,
       diagnosticianTaskId: typeof taskId === 'string' ? taskId : null,
     };
   }
@@ -1031,6 +1471,365 @@ export function admitGovernanceSignals(input: AdmitGovernanceSignalsInput): Admi
   return admitGovernanceSignalsInternal(input);
 }
 
+// ─── Pending Stage-2 review lifecycle (worker-facing) ───────────────────────
+
+export interface PendingReviewResult {
+  readonly ok: true;
+  readonly disposition: 'admitted' | 'resolved_none' | 'pending' | 'abandoned' | 'concurrent_loss' | 'not_pending';
+  readonly logicalObservationKey: string;
+  readonly canonicalPainId?: string;
+  readonly taskId?: string;
+  readonly attempts: number;
+  readonly reason: string | null;
+}
+
+export type PendingReviewCallResult = PendingReviewResult | Degradation;
+
+export interface ClaimPendingCandidatesInput {
+  readonly workspaceDir: string;
+  readonly limit?: number;
+  readonly now?: Date;
+  readonly databaseFactory?: ObservationDatabaseFactory;
+}
+
+export type ClaimPendingCandidatesResult =
+  | { ok: true; candidates: readonly PendingCorrectionCandidate[]; expired: number }
+  | Degradation;
+
+
+function pendingReviewMarkerRow(db: Database.Database, key: string): Record<string, unknown> | null {
+  const row = db.prepare('SELECT * FROM governance_signal_admissions WHERE logical_observation_key = ?').get(key);
+  return isRecord(row) ? row : null;
+}
+
+function parsePendingRow(row: Record<string, unknown>): { payloadText: string; payload: PendingReviewPayload; createdAt: string; hostKind: string; rolloutIdentity: string; rootSessionId: string } | null {
+  const payloadText = rowField(row, 'task_payload_json');
+  const createdAt = rowField(row, 'created_at');
+  const hostKind = rowField(row, 'host_kind');
+  const rolloutIdentity = rowField(row, 'rollout_identity');
+  const rootSessionId = rowField(row, 'root_session_id');
+  if (typeof payloadText !== 'string' || typeof createdAt !== 'string' || typeof hostKind !== 'string'
+    || typeof rolloutIdentity !== 'string' || typeof rootSessionId !== 'string') return null;
+  if (hostKind !== 'codex' && hostKind !== 'workbuddy') return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(payloadText);
+  } catch {
+    return null;
+  }
+  const payload = parsePendingReviewPayload(parsed);
+  if (payload === null) return null;
+  return { payloadText, payload, createdAt, hostKind, rolloutIdentity, rootSessionId };
+}
+
+/**
+ * Claim bounded pending candidates with an optimistic CAS on the exact payload
+ * text. Rows whose claim is younger than PENDING_REVIEW_CLAIM_TTL_MS are
+ * skipped (another worker is reviewing them); TTL-expired rows become
+ * `abandoned(ttl_expired)` here, before any LLM work.
+ */
+export function claimPendingCorrectionCandidates(input: ClaimPendingCandidatesInput): ClaimPendingCandidatesResult {
+  const opened = openAdmissionStore(input.workspaceDir, input.databaseFactory);
+  if (!('db' in opened)) return opened;
+  const { db, close } = opened;
+  const now = input.now ?? new Date();
+  const nowIso = now.toISOString();
+  const limit = Math.min(Math.max(input.limit ?? 2, 1), 8);
+  const candidates: PendingCorrectionCandidate[] = [];
+  let expired = 0;
+  try {
+    const rows = db.prepare(`SELECT * FROM governance_signal_admissions
+      WHERE decision = 'pending_llm_review' ORDER BY id LIMIT ?`).all(limit * 3);
+    for (const row of rows) {
+      if (candidates.length >= limit) break;
+      if (!isRecord(row)) continue;
+      const key = rowField(row, 'logical_observation_key');
+      if (typeof key !== 'string') continue;
+      const parsed = parsePendingRow(row);
+      if (parsed === null) {
+        // Corrupt pending payload: fail loud into a terminal row so it cannot
+        // poison every future batch (rc-3), with no Pain and no task.
+        db.prepare(`UPDATE governance_signal_admissions
+          SET decision = 'abandoned', reason = ?, task_payload_json = ?, updated_at = ?
+          WHERE logical_observation_key = ? AND decision = 'pending_llm_review'`)
+          .run('invalid_pending_payload', pendingTerminalPayload({ decision: 'abandoned', reason: 'invalid_pending_payload', attempts: 0, confidence: null, nowIso }), nowIso, key);
+        expired += 1;
+        continue;
+      }
+      const ageMs = Date.parse(parsed.createdAt);
+      if (!Number.isFinite(ageMs) || now.getTime() - ageMs >= PENDING_CANDIDATE_TTL_MS) {
+        db.prepare(`UPDATE governance_signal_admissions
+          SET decision = 'abandoned', reason = ?, task_payload_json = ?, updated_at = ?
+          WHERE logical_observation_key = ? AND decision = 'pending_llm_review'`)
+          .run('ttl_expired', pendingTerminalPayload({ decision: 'abandoned', reason: 'ttl_expired', attempts: parsed.payload.review.attempts, confidence: null, nowIso }), nowIso, key);
+        expired += 1;
+        continue;
+      }
+      const {claimedAt} = parsed.payload.review;
+      const hasReviewResult = parsed.payload.review.reviewResult !== undefined;
+      if (!hasReviewResult && typeof claimedAt === 'string') {
+        const claimedMs = Date.parse(claimedAt);
+        if (Number.isFinite(claimedMs) && now.getTime() - claimedMs < PENDING_REVIEW_CLAIM_TTL_MS) continue;
+      }
+      if (!hasReviewResult) {
+        const nextPayload: PendingReviewPayload = { ...parsed.payload, review: { ...parsed.payload.review, claimedAt: nowIso } };
+        const {changes} = db.prepare(`UPDATE governance_signal_admissions SET task_payload_json = ?, updated_at = ?
+          WHERE logical_observation_key = ? AND decision = 'pending_llm_review' AND task_payload_json = ?`)
+          .run(JSON.stringify(nextPayload), nowIso, key, parsed.payloadText);
+        if (changes !== 1) continue; // another worker won the claim
+      }
+      candidates.push({
+        logicalObservationKey: key,
+        hostKind: parsed.hostKind === 'workbuddy' ? 'workbuddy' : 'codex',
+        rolloutIdentity: parsed.rolloutIdentity,
+        rootSessionId: parsed.rootSessionId,
+        hostTurnId: parsed.payload.trigger.hostTurnId,
+        text: parsed.payload.trigger.text,
+        matchedTerms: parsed.payload.trigger.matchedTerms,
+        attempts: parsed.payload.review.attempts,
+        claimedAt: hasReviewResult ? null : nowIso,
+        reviewResult: parsed.payload.review.reviewResult ?? null,
+        createdAt: parsed.createdAt,
+      });
+    }
+    return { ok: true, candidates, expired };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200);
+    return { ok: false, reason: `pending_claim_failed:${detail}`, nextAction: 'inspect the workspace trajectory database; pending rows remain durable' };
+  } finally {
+    close();
+  }
+}
+
+export interface CompletePendingReviewInput {
+  readonly workspaceDir: string;
+  readonly logicalObservationKey: string;
+  /** `null` = the classifier produced no usable verdict (timeout/exception). */
+  readonly llmResult: LlmClassificationResult | null;
+  readonly now?: Date;
+  readonly databaseFactory?: ObservationDatabaseFactory;
+}
+
+/**
+ * Durable Phase 1: persist the Stage-2 verdict + attempts into the pending
+ * payload (CAS on the payload text). A crash after this commit loses no LLM
+ * result; `settlePendingCorrection` finishes the transition without re-calling.
+ */
+export function recordPendingCorrectionReview(input: CompletePendingReviewInput): PendingReviewCallResult {
+  const opened = openAdmissionStore(input.workspaceDir, input.databaseFactory);
+  if (!('db' in opened)) return opened;
+  const { db, close } = opened;
+  const now = input.now ?? new Date();
+  const nowIso = now.toISOString();
+  try {
+    const row = pendingReviewMarkerRow(db, input.logicalObservationKey);
+    if (row === null) return { ok: true, disposition: 'not_pending', logicalObservationKey: input.logicalObservationKey, attempts: 0, reason: 'marker_missing' };
+    if (rowField(row, 'decision') !== 'pending_llm_review') {
+      return { ok: true, disposition: 'not_pending', logicalObservationKey: input.logicalObservationKey, attempts: 0, reason: 'marker_not_pending' };
+    }
+    const parsed = parsePendingRow(row);
+    if (parsed === null) {
+      return { ok: false, reason: 'pending_payload_invalid', nextAction: 'inspect the pending marker payload; the row stays pending until repaired' };
+    }
+    const gate = evaluateStage2ConfidenceGate(input.llmResult);
+    const attempts = parsed.payload.review.attempts + 1;
+    const reviewResult: Stage2ReviewRecord = { verdict: gate.verdict, confidence: gate.confidence, reason: gate.reason };
+    const nextPayload: PendingReviewPayload = {
+      ...parsed.payload,
+      review: {
+        ...parsed.payload.review,
+        attempts,
+        reviewResult,
+        lastAttemptAt: nowIso,
+        lastReason: gate.verdict,
+        // Keep the claim stamp so a parallel worker skips this row; a crash
+        // after this commit is handled by the reviewResult-present path.
+        claimedAt: nowIso,
+      },
+    };
+    const {changes} = db.prepare(`UPDATE governance_signal_admissions SET task_payload_json = ?, updated_at = ?
+      WHERE logical_observation_key = ? AND decision = 'pending_llm_review' AND task_payload_json = ?`)
+      .run(JSON.stringify(nextPayload), nowIso, input.logicalObservationKey, parsed.payloadText);
+    if (changes !== 1) {
+      return { ok: true, disposition: 'concurrent_loss', logicalObservationKey: input.logicalObservationKey, attempts: parsed.payload.review.attempts, reason: 'payload_changed' };
+    }
+    return {
+      ok: true,
+      disposition: 'pending',
+      logicalObservationKey: input.logicalObservationKey,
+      attempts,
+      reason: gate.reason,
+    };
+  } finally {
+    close();
+  }
+}
+
+export interface SettlePendingReviewInput {
+  readonly workspaceDir: string;
+  readonly logicalObservationKey: string;
+  readonly now?: Date;
+  readonly databaseFactory?: ObservationDatabaseFactory;
+}
+
+/**
+ * Durable Phase 2: apply the persisted verdict. Correction → admitted (CAS,
+ * pain dedup, rate limit, marker swap); confident none → resolved_none;
+ * low-confidence/error/empathy → pending until MAX_ATTEMPTS or TTL; rate
+ * limiting rolls the transaction back and leaves the row pending without
+ * consuming another attempt (no LLM happened here).
+ */
+export async function settlePendingCorrection(input: SettlePendingReviewInput): Promise<PendingReviewCallResult> {
+  const workspaceDir = path.resolve(input.workspaceDir);
+  const opened = openAdmissionStore(input.workspaceDir, input.databaseFactory);
+  if (!('db' in opened)) return opened;
+  const { db, close } = opened;
+  const now = input.now ?? new Date();
+  const nowIso = now.toISOString();
+  try {
+    const row = pendingReviewMarkerRow(db, input.logicalObservationKey);
+    if (row === null) return { ok: true, disposition: 'not_pending', logicalObservationKey: input.logicalObservationKey, attempts: 0, reason: 'marker_missing' };
+    const decision = rowField(row, 'decision');
+    if (decision === 'admitted') {
+      const canonicalPainId = rowField(row, 'canonical_pain_id');
+      const taskId = rowField(row, 'diagnostician_task_id');
+      return { ok: true, disposition: 'admitted', logicalObservationKey: input.logicalObservationKey, ...(typeof canonicalPainId === 'string' ? { canonicalPainId } : {}), ...(typeof taskId === 'string' ? { taskId } : {}), attempts: 0, reason: null };
+    }
+    if (decision !== 'pending_llm_review') {
+      const reason = rowField(row, 'reason');
+      return { ok: true, disposition: 'not_pending', logicalObservationKey: input.logicalObservationKey, attempts: 0, reason: typeof reason === 'string' ? reason : null };
+    }
+    const parsed = parsePendingRow(row);
+    if (parsed === null) {
+      return { ok: false, reason: 'pending_payload_invalid', nextAction: 'inspect the pending marker payload; the row stays pending until repaired' };
+    }
+    const { payload, createdAt, rootSessionId, rolloutIdentity, hostKind } = parsed;
+    const review = payload.review.reviewResult;
+    if (review === undefined) {
+      return { ok: true, disposition: 'pending', logicalObservationKey: input.logicalObservationKey, attempts: payload.review.attempts, reason: 'review_not_recorded' };
+    }
+    const ageMs = Date.parse(createdAt);
+    const ttlExpired = Number.isFinite(ageMs) && now.getTime() - ageMs >= PENDING_CANDIDATE_TTL_MS;
+
+    // TTL bounds EVERY pending verdict, including a late correction: a candidate
+    // that sat past the window is no longer trustworthy evidence.
+    if (ttlExpired) {
+      db.prepare(`UPDATE governance_signal_admissions SET decision = 'abandoned', reason = ?, task_payload_json = ?, updated_at = ?
+        WHERE logical_observation_key = ? AND decision = 'pending_llm_review'`)
+        .run('ttl_expired', pendingTerminalPayload({ decision: 'abandoned', reason: 'ttl_expired', attempts: payload.review.attempts, confidence: review.confidence, nowIso }), nowIso, input.logicalObservationKey);
+      return { ok: true, disposition: 'abandoned', logicalObservationKey: input.logicalObservationKey, attempts: payload.review.attempts, reason: 'ttl_expired' };
+    }
+
+    if (review.verdict !== 'correction' && review.verdict !== 'none') {
+      if (payload.review.attempts >= STAGE2_MAX_ATTEMPTS) {
+        const reason = review.verdict === 'pending_llm_error' ? 'llm_error' : 'low_confidence';
+        db.prepare(`UPDATE governance_signal_admissions SET decision = 'abandoned', reason = ?, task_payload_json = ?, updated_at = ?
+          WHERE logical_observation_key = ? AND decision = 'pending_llm_review'`)
+          .run(reason, pendingTerminalPayload({ decision: 'abandoned', reason, attempts: payload.review.attempts, confidence: review.confidence, nowIso }), nowIso, input.logicalObservationKey);
+        return { ok: true, disposition: 'abandoned', logicalObservationKey: input.logicalObservationKey, attempts: payload.review.attempts, reason };
+      }
+      return { ok: true, disposition: 'pending', logicalObservationKey: input.logicalObservationKey, attempts: payload.review.attempts, reason: review.verdict };
+    }
+
+    if (review.verdict === 'none') {
+      db.prepare(`UPDATE governance_signal_admissions SET decision = 'resolved_none', reason = ?, task_payload_json = ?, updated_at = ?
+        WHERE logical_observation_key = ? AND decision = 'pending_llm_review'`)
+        .run(review.reason.slice(0, MAX_REASON_BOUND) || 'stage2_none', pendingTerminalPayload({ decision: 'resolved_none', reason: review.reason, attempts: payload.review.attempts, confidence: review.confidence, nowIso }), nowIso, input.logicalObservationKey);
+      return { ok: true, disposition: 'resolved_none', logicalObservationKey: input.logicalObservationKey, attempts: payload.review.attempts, reason: review.reason };
+    }
+
+    // Correction → Pain Admission. The canonical id was derived pre-review from
+    // host identity facts; recompute it here from the same facts so the two
+    // stages cannot drift (rc-6).
+    const candidate: GovernanceCorrectionCandidate = {
+      kind: 'user_correction',
+      hostKind: hostKind === 'workbuddy' ? 'workbuddy' : 'codex',
+      logicalObservationKey: input.logicalObservationKey,
+      rolloutIdentity,
+      rootSessionId,
+      hostTurnId: payload.trigger.hostTurnId,
+      text: payload.trigger.text,
+      observedAt: createdAt,
+    };
+    // rc-6: reuse the id derived BEFORE review (the persisted trigger text may
+    // be sanitized/truncated, so re-deriving from it would change the hash).
+    const painId = payload.pain_id;
+    const reason = correctionReason(candidate, payload.trigger.matchedTerms);
+    // v0.3.1 §1.2: the shared ingress decision precedes the admitted CAS.
+    const ingressReason = ingressTerminalReason({
+      hostKind: candidate.hostKind,
+      logicalObservationKey: input.logicalObservationKey,
+      rolloutIdentity,
+      rootSessionId,
+      hostTurnId: candidate.hostTurnId,
+      painId,
+      reason,
+      evidence: payload.task_payload.evidence.map((entry) => ({
+        kind: 'behavior_trace' as const,
+        sourceRef: entry.sourceRef,
+        note: entry.note,
+      })),
+    });
+    if (ingressReason !== null) {
+      db.prepare(`UPDATE governance_signal_admissions SET decision = 'abandoned', reason = ?, task_payload_json = ?, updated_at = ?
+        WHERE logical_observation_key = ? AND decision = 'pending_llm_review'`)
+        .run(ingressReason, pendingTerminalPayload({ decision: 'abandoned', reason: ingressReason, attempts: payload.review.attempts, confidence: review.confidence, nowIso }), nowIso, input.logicalObservationKey);
+      return { ok: true, disposition: 'abandoned', logicalObservationKey: input.logicalObservationKey, attempts: payload.review.attempts, reason: ingressReason };
+    }
+    let duplicate = false;
+    try {
+      db.transaction(() => {
+        const {changes} = db.prepare(`UPDATE governance_signal_admissions
+          SET decision = 'admitted', canonical_pain_id = ?, rule_version = ?, reason = ?, task_payload_json = ?, updated_at = ?
+          WHERE logical_observation_key = ? AND decision = 'pending_llm_review'`)
+          .run(painId, payload.review.ruleVersion, reason.slice(0, MAX_REASON_BOUND),
+            JSON.stringify(payload.task_payload), nowIso, input.logicalObservationKey);
+        if (changes !== 1) throw new PendingCasLost();
+        if (db.prepare('SELECT 1 FROM pain_events WHERE canonical_pain_id = ?').get(painId) !== undefined) {
+          duplicate = true;
+          db.prepare('UPDATE pain_events SET host_kind = ? WHERE canonical_pain_id = ? AND host_kind IS NULL').run(candidate.hostKind, painId);
+        } else {
+          const ruleVersion = payload.review.ruleVersion ?? EXPLICIT_OWNER_STATEMENT_RULE_VERSION;
+          if (!tryConsumeRateLimit({ db, rootSessionId: candidate.rootSessionId, ruleVersion, now })) throw new RateLimitedSignal();
+          insertCorrectionPain({ db, candidate, workspaceDir, painId, reason, nowIso });
+        }
+      })();
+    } catch (error) {
+      if (error instanceof PendingCasLost) {
+        return { ok: true, disposition: 'concurrent_loss', logicalObservationKey: input.logicalObservationKey, attempts: payload.review.attempts, reason: 'cas_lost' };
+      }
+      if (error instanceof RateLimitedSignal) {
+        // Non-LLM failure: the row stays pending with its attempts unchanged
+        // (the review result is already durable). TTL eventually bounds it.
+        return { ok: true, disposition: 'pending', logicalObservationKey: input.logicalObservationKey, attempts: payload.review.attempts, reason: 'rate_limited' };
+      }
+      throw error;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define -- declared below; function declarations are hoisted
+    const ensured = await ensureGovernanceDiagnosticianTask({
+      workspaceDir,
+      logicalObservationKey: input.logicalObservationKey,
+      canonicalPainId: painId,
+      ...(input.databaseFactory ? { databaseFactory: input.databaseFactory } : {}),
+    });
+    return {
+      ok: true,
+      disposition: 'admitted',
+      logicalObservationKey: input.logicalObservationKey,
+      canonicalPainId: painId,
+      attempts: payload.review.attempts,
+      reason: duplicate ? 'duplicate_pain' : reason,
+      ...(ensured.ok ? { taskId: ensured.taskId } : {}),
+    };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200);
+    return { ok: false, reason: `pending_settle_failed:${detail}`, nextAction: 'inspect the workspace trajectory database; admitted rows are durably recoverable via reconcile' };
+  } finally {
+    close();
+  }
+}
+
+
 /** P0: a four-term projection of existing canonical high-precision seeds. */
 const WORKBUDDY_AUTO_TERMS = new Set(['这是错的', '不要自作主张', '不应该这么做', '又搞错']);
 const WORKBUDDY_MAX_PROMPT_BYTES = 16 * 1024;
@@ -1063,6 +1862,41 @@ export function resolveSharedCorrectionKeywordStoreForDetection(workspaceDir: st
  * store parameter is how the shared live vocabulary enters (AUDIT-P3-01);
  * omitted, the check keeps the P0 four-term projection (backward compatible).
  */
+export type WorkbuddyCorrectionCandidateKind = 'strong' | 'ambiguous' | 'none';
+
+/**
+ * Shared WorkBuddy Stage-1 assessment. `strong` may admit inline (no LLM);
+ * `ambiguous` persists a pending Stage-2 candidate (zero LLM in the hook);
+ * `none` writes nothing. The startsWith pre-filter (SPEC P-5) is retained
+ * until the cross-host negative matrix authorizes its retirement.
+ */
+export function assessWorkbuddyCorrectionCandidate(
+  text: string,
+  sessionId: string,
+  store?: UnifiedKeywordStore,
+): {
+  kind: WorkbuddyCorrectionCandidateKind;
+  reason: 'matched' | 'not_a_signal' | 'prompt_too_large';
+} {
+  if (Buffer.byteLength(text, 'utf8') > WORKBUDDY_MAX_PROMPT_BYTES) {
+    return { kind: 'none', reason: 'prompt_too_large' };
+  }
+  const resolved = store ?? workbuddyP0KeywordStore();
+  // Prefer precision to recall: reject quoted/embedded/reported phrases.
+  if (!Object.keys(resolved.terms).some(term => text.trimStart().toLowerCase().startsWith(term.toLowerCase()))) {
+    return { kind: 'none', reason: 'not_a_signal' };
+  }
+  const out = collectSync(text, sessionId, resolved, SYNC_DETECTION_CONFIG, new Date().toISOString());
+  const strong = out.isSignal && out.strength === 'STRONG' &&
+    out.type === 'correction' && out.matchedPrecision === 'high';
+  if (strong) return { kind: 'strong', reason: 'matched' };
+  if (out.matchedPrecision === 'ambiguous' && out.matchedTerms.length > 0) {
+    return { kind: 'ambiguous', reason: 'matched' };
+  }
+  return { kind: 'none', reason: 'not_a_signal' };
+}
+
+/** Backward-compatible boolean view: only `strong` counts as matched. */
 export function assessWorkbuddyLiveKeyword(
   text: string,
   sessionId: string,
@@ -1070,18 +1904,11 @@ export function assessWorkbuddyLiveKeyword(
 ): {
   matched: boolean; reason: 'matched' | 'not_a_signal' | 'prompt_too_large';
 } {
-  if (Buffer.byteLength(text, 'utf8') > WORKBUDDY_MAX_PROMPT_BYTES) {
-    return { matched: false, reason: 'prompt_too_large' };
-  }
-  const resolved = store ?? workbuddyP0KeywordStore();
-  // Prefer precision to recall: reject quoted/embedded/reported phrases.
-  if (!Object.keys(resolved.terms).some(term => text.trimStart().toLowerCase().startsWith(term.toLowerCase()))) {
-    return { matched: false, reason: 'not_a_signal' };
-  }
-  const out = collectSync(text, sessionId, resolved, SYNC_DETECTION_CONFIG, new Date().toISOString());
-  const matched = out.isSignal && out.strength === 'STRONG' &&
-    out.type === 'correction' && out.matchedPrecision === 'high';
-  return { matched, reason: matched ? 'matched' : 'not_a_signal' };
+  const assessment = assessWorkbuddyCorrectionCandidate(text, sessionId, store);
+  return {
+    matched: assessment.kind === 'strong',
+    reason: assessment.kind === 'strong' ? 'matched' : assessment.reason,
+  };
 }
 
 /**
@@ -1120,7 +1947,8 @@ export function admitTrustedWorkbuddyLiveCorrection(input: {
   // 词与 admitOne 的检测判定不会漂移。自动 Pain 仍只允许 high 精度 correction
   // 词（两道门各自强制），无 LLM、无 transcript 读取。
   const sharedStore = resolveSharedCorrectionKeywordStoreForDetection(input.workspaceDir);
-  if (!assessWorkbuddyLiveKeyword(prompt, sessionId, sharedStore).matched) {
+  const assessment = assessWorkbuddyCorrectionCandidate(prompt, sessionId, sharedStore);
+  if (assessment.kind === 'none') {
     return { ok: true, outcomes: [] };
   }
   const nativeIdentity = JSON.stringify(['workbuddy', sessionId, generationId]);
@@ -1233,6 +2061,41 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
       return { ok: false, reason: 'admission_task_payload_invalid', nextAction: 're-admit the signal or run reconciliation after repairing the workspace state' };
     }
 
+    // SPEC v0.3.1 §1.2: provenance is DERIVED from the marker's ingress facts,
+    // never hardcoded. The marker is host-context-bound by construction, and
+    // its payload carries the evidence entries that make this a `submit`.
+    const rolloutIdentity = rowField(marker, 'rollout_identity');
+    const markerKey = input.logicalObservationKey;
+    const hostTurnId = payloadParsed.hostKind === 'codex'
+      ? (markerKey.split('|')[2] ?? markerKey)
+      : (markerKey.lastIndexOf('|') > 0 ? markerKey.slice(0, markerKey.lastIndexOf('|')) : markerKey);
+    const markerHostKind = payloadParsed.hostKind;
+    const ingressEvidence = payloadParsed.evidence.map((entry) => ({
+      kind: 'behavior_trace' as const,
+      sourceRef: entry.sourceRef,
+      note: entry.note,
+    }));
+    let provenance: PainProvenance;
+    if (markerHostKind === 'codex' || markerHostKind === 'workbuddy') {
+      const ingressDecision = evaluatePainIngress(buildCorrectionIngressReport({
+        hostKind: markerHostKind,
+        logicalObservationKey: markerKey,
+        rolloutIdentity: typeof rolloutIdentity === 'string' ? rolloutIdentity : '',
+        rootSessionId: payloadParsed.sessionId,
+        hostTurnId,
+        painId: input.canonicalPainId,
+        reason: payloadParsed.reason,
+        evidence: ingressEvidence,
+      }));
+      provenance = ingressDecision.action === 'submit' || ingressDecision.action === 'degrade'
+        ? ingressDecision.legacy.provenance
+        : 'automatic_hook';
+    } else {
+      // OpenClaw markers do not flow through this governance seam today; keep
+      // the historical provenance rather than inventing an ingress report.
+      provenance = 'host_context_bound';
+    }
+
     const taskId = createDiagnosticianTaskId(input.canonicalPainId);
 
     // Cross-store crash recovery (SPEC §13): a task may already exist from a
@@ -1266,7 +2129,7 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
           reason: payloadParsed.reason,
           score: payloadParsed.score,
           sessionId: payloadParsed.sessionId,
-          provenance: 'host_context_bound',
+          provenance,
           // The admitting host comes from the marker's own payload — the ONE
           // durable attribution fact (existing codex markers keep 'codex',
           // workbuddy markers attribute 'workbuddy').
@@ -1736,7 +2599,7 @@ export function readGovernanceAdmissionCounts(args: { workspaceDir: string; data
     const admissions = db.prepare(`SELECT
         SUM(CASE WHEN decision = 'admitted' THEN 1 ELSE 0 END) AS admitted,
         SUM(CASE WHEN decision = 'admitted' AND diagnostician_task_id IS NULL THEN 1 ELSE 0 END) AS admitted_without_task,
-        MAX(created_at) AS last_admission
+        MAX(CASE WHEN decision = 'admitted' THEN created_at END) AS last_admission
       FROM governance_signal_admissions`).get();
     if (!isRecord(admissions)) {
       return { ok: false, reason: 'governance_admission_counts_unavailable', nextAction: 'Inspect the governance_signal_admissions table in the workspace trajectory.db.' };

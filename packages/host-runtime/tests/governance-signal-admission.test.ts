@@ -212,7 +212,7 @@ describe('shared correction detector (SPEC §12)', () => {
   });
 });
 
-describe('earned precision (PRI-788 G3)', () => {
+describe('learned keyword gate — PRI-788 G3 reversal (SPEC v0.3 §3.2.3)', () => {
   // 单调递增的测试 mtime：Date.now() 粒度可能粗于两次写入间隔，若两次调用拿到
   // 同一个值，文件缓存不会失效、重新加载行为不被验证，断言会随机失败。
   let learnerMtimeMs = 0;
@@ -237,27 +237,52 @@ describe('earned precision (PRI-788 G3)', () => {
     return resolved.terms[term];
   }
 
-  it('llm-learned term with TP>=3 and zero FP earns high precision; any FP keeps it ambiguous', () => {
+  it('llm-learned terms never earn high precision, regardless of TP/FP history', () => {
     writeLearnerFile([
-      { term: '先确认再改', weight: 0.8, source: 'llm', truePositiveCount: 3, falsePositiveCount: 0 },
+      // 历史上完美的计数也不再获得 STRONG 直通（D5 逆转）。
+      { term: '先确认再改', weight: 0.8, source: 'llm', truePositiveCount: 30, falsePositiveCount: 0 },
       { term: '又错了', weight: 0.8, source: 'llm', truePositiveCount: 2, falsePositiveCount: 0 },
       { term: '重来', weight: 0.8, source: 'llm', truePositiveCount: 5, falsePositiveCount: 1 },
     ]);
-    expect(resolveTerm('先确认再改')?.precision).toBe('high');
-    expect(resolveTerm('又错了')?.precision).toBe('ambiguous');
-    expect(resolveTerm('重来')?.precision).toBe('ambiguous');
+    for (const term of ['先确认再改', '又错了', '重来']) {
+      expect(resolveTerm(term)?.precision).toBe('ambiguous');
+    }
   });
 
-  it('llm term below the TP threshold stays ambiguous; losing evidence demotes a previously earned term', () => {
+  it('learned term is a Stage-2 candidate but the sync admission path never creates Pain', () => {
     writeLearnerFile([
       { term: '先确认再改', weight: 0.8, source: 'llm', truePositiveCount: 3, falsePositiveCount: 0 },
     ]);
-    expect(resolveTerm('先确认再改')?.precision).toBe('high');
+    const detection = evaluateCorrectionSignal({
+      workspaceDir,
+      text: '先确认再改这个文件',
+      sessionId: 's1',
+      detectedAt: NOW.toISOString(),
+    });
+    // 学习词仍能进入候选（可被 Stage 2 看到）……
+    expect(detection.output.matchedPrecision).toBe('ambiguous');
+    expect(detection.output.matchedTerms).toContain('先确认再改');
+    // ……但同步高精度路径不产生 STRONG，因此不产生 Pain。
+    expect(detection.output.isSignal).toBe(false);
+    const result = admitGovernanceSignals({
+      workspaceDir,
+      candidates: [correction({ text: '先确认再改这个文件', logicalObservationKey: 'codex|r1|t1|user', rolloutIdentity: 'r1' })],
+      now: NOW,
+    });
+    expect(result.ok).toBe(true);
+    // 学习词现在成为可审计的 pending 候选（Stage 2 优先候选），仍不产生 Pain。
+    expect(result.outcomes?.[0]).toMatchObject({ disposition: 'pending_llm_review' });
+    expect(withTrajectory((db) => db.prepare('SELECT COUNT(*) AS n FROM pain_events').get())).toEqual({ n: 0 });
+    expect(withTrajectory((db) => db.prepare('SELECT decision FROM governance_signal_admissions').all())).toEqual([{ decision: 'pending_llm_review' }]);
+  });
 
+  it('low-evidence learned terms stay gated (no bypass of the existing precision rules)', () => {
     writeLearnerFile([
-      { term: '先确认再改', weight: 0.8, source: 'llm', truePositiveCount: 3, falsePositiveCount: 2 },
+      { term: '先确认再改', weight: 0.8, source: 'llm', truePositiveCount: 3, falsePositiveCount: 0 },
+      { term: '低质量词', weight: 0.3, source: 'user' },
     ]);
     expect(resolveTerm('先确认再改')?.precision).toBe('ambiguous');
+    expect(resolveTerm('低质量词')?.precision).toBe('ambiguous');
   });
 
   it('非整数/负数/越界计数不通过校验，词项被拒绝（不能借伪造证据进 high）', () => {
@@ -266,13 +291,13 @@ describe('earned precision (PRI-788 G3)', () => {
       { term: '伪造证据', weight: 0.8, source: 'llm', truePositiveCount: 3.1, falsePositiveCount: 0 },
       { term: '负证据', weight: 0.8, source: 'llm', truePositiveCount: 9, falsePositiveCount: -1 },
       { term: '越界证据', weight: 0.8, source: 'llm', truePositiveCount: Number.MAX_SAFE_INTEGER + 1, falsePositiveCount: 0 },
-      // 合法整数计数仍照常升 high
+      // 合法整数计数通过校验，但学习词仍只作候选（G3 逆转）
       { term: '先确认再改', weight: 0.8, source: 'llm', truePositiveCount: 3, falsePositiveCount: 0 },
     ]);
     expect(resolveTerm('伪造证据')).toBeUndefined();
     expect(resolveTerm('负证据')).toBeUndefined();
     expect(resolveTerm('越界证据')).toBeUndefined();
-    expect(resolveTerm('先确认再改')?.precision).toBe('high');
+    expect(resolveTerm('先确认再改')?.precision).toBe('ambiguous');
   });
 
   it('owner-promoted terms keep the weight-based rule (Owner decision not gated by evidence)', () => {
@@ -294,9 +319,79 @@ describe('earned precision (PRI-788 G3)', () => {
     });
     expect(detection.output.matchedPrecision).toBe('high');
     expect(detection.output.strength).toBe('STRONG');
-    for (const seed of ['我说的是', '不是让你', '谁让你', '又搞错', '都说了']) {
+    for (const seed of ['不是让你', '谁让你', '又搞错']) {
       expect(buildSharedSeedKeywordStore().terms[seed]?.precision).toBe('high');
     }
+    // SPEC v0.3 §3.2.1：口语高频/可嵌入引用的两个句式降级为候选，不再直通。
+    for (const seed of ['我说的是', '都说了']) {
+      expect(buildSharedSeedKeywordStore().terms[seed]?.precision).toBe('ambiguous');
+    }
+  });
+});
+
+describe('P-1 semantic guards on the shared Codex/WorkBuddy detector (SPEC v0.3 §3.2.2)', () => {
+  it('`他说这是错的` never reaches STRONG through the bare-substring Codex path', () => {
+    const detection = evaluateCorrectionSignal({
+      workspaceDir,
+      text: '他说这是错的',
+      sessionId: 's1',
+      detectedAt: NOW.toISOString(),
+      store: buildSharedSeedKeywordStore(),
+    });
+    expect(detection.output.isSignal).toBe(false);
+    expect(detection.output.matchedPrecision).toBe('ambiguous');
+    expect(detection.output.matchedTerms).toContain('这是错的');
+  });
+
+  it('quoted third-party words alone are not a candidate at all', () => {
+    const detection = evaluateCorrectionSignal({
+      workspaceDir,
+      text: '他说“这是错的”，但我不确定',
+      sessionId: 's1',
+      detectedAt: NOW.toISOString(),
+      store: buildSharedSeedKeywordStore(),
+    });
+    expect(detection.output.isSignal).toBe(false);
+    expect(detection.output.matchedTerms).toEqual([]);
+  });
+
+  it('downgraded colloquial terms stay candidates, never STRONG', () => {
+    for (const text of ['我说的是这个文件', '都说了别改这个']) {
+      const detection = evaluateCorrectionSignal({
+        workspaceDir,
+        text,
+        sessionId: 's1',
+        detectedAt: NOW.toISOString(),
+        store: buildSharedSeedKeywordStore(),
+      });
+      expect(detection.output.isSignal).toBe(false);
+      expect(detection.output.matchedPrecision).toBe('ambiguous');
+    }
+  });
+
+  it('ordinary requirement changes produce no signal and no candidate', () => {
+    const detection = evaluateCorrectionSignal({
+      workspaceDir,
+      text: '请把按钮改成蓝色',
+      sessionId: 's1',
+      detectedAt: NOW.toISOString(),
+      store: buildSharedSeedKeywordStore(),
+    });
+    expect(detection.output.isSignal).toBe(false);
+    expect(detection.output.matchedTerms).toEqual([]);
+  });
+
+  it('an inconsistent Codex lineage is refused by PainIngress: zero Pain, terminal abandoned marker', () => {
+    // rc-6: the logical key does not embed this rollout identity.
+    const result = admit([correction({
+      text: '这是错的',
+      rolloutIdentity: 'rollout-actual',
+      logicalObservationKey: 'codex|rollout-other|turn-9|user',
+    })]);
+    expect(result.ok).toBe(true);
+    expect(result.outcomes?.[0]).toMatchObject({ disposition: 'abandoned', reason: 'lineage_mismatch' });
+    expect(withTrajectory((db) => db.prepare('SELECT COUNT(*) AS n FROM pain_events').get())).toEqual({ n: 0 });
+    expect(withTrajectory((db) => db.prepare('SELECT decision, reason FROM governance_signal_admissions').get())).toEqual({ decision: 'abandoned', reason: 'lineage_mismatch' });
   });
 });
 
@@ -710,7 +805,9 @@ describe('diagnostician continuation (SPEC §13)', () => {
       state.close();
     }
     const parsed = JSON.parse(diagnosticJson) as Record<string, unknown>;
-    expect(parsed.provenance).toBe('host_context_bound');
+    // SPEC v0.3.1 §1.2: provenance is derived from the ingress facts
+    // (automatic hook), never hardcoded to host_context_bound.
+    expect(parsed.provenance).toBe('automatic_hook');
     expect(parsed.hostKind).toBe('codex');
     const evidence = parsed.evidence as { sourceRef: string; note: string }[];
     // SanitizeString bounds to MAX_EVIDENCE_VALUE_CHARS + '___TRUNCATED___' (200 + 13 = 213).

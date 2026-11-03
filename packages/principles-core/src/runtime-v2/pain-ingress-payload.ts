@@ -52,6 +52,18 @@ export type PainIngressCorrelationV1 =
       hostTurnId: string;
       traceId?: string;
     }
+  /**
+   * SPEC v0.3 §5: WorkBuddy is a governed host with its own native identity
+   * (session + generation), never an OpenClaw or Codex shape.
+   */
+  | {
+      status: 'bound';
+      hostKind: 'workbuddy';
+      sessionId: string;
+      generationId?: string;
+      logicalObservationKey?: string;
+      traceId?: string;
+    }
   | { status: 'unbound'; reason: 'external_cli' | 'missing_host_session' };
 
 export type PainIngressEvidenceClassV1 =
@@ -173,6 +185,15 @@ export function parseCorrelation(value: unknown): { value: PainCorrelation; erro
       logicalObservationKey: value.logicalObservationKey as string,
       hostTurnId: value.hostTurnId as string,
     };
+    if (typeof value.traceId === 'string') correlation.traceId = value.traceId;
+    return { value: correlation };
+  }
+  if (value.hostKind === 'workbuddy') {
+    if (!hasOwnString(value, 'sessionId')) return { error: 'workbuddy_lineage_incomplete' };
+    if (isSentinelSessionId(value.sessionId as string)) return { error: 'session_sentinel_invalid' };
+    const correlation: PainCorrelation = { status: 'bound', hostKind: 'workbuddy', sessionId: value.sessionId as string };
+    if (typeof value.generationId === 'string') correlation.generationId = value.generationId;
+    if (typeof value.logicalObservationKey === 'string') correlation.logicalObservationKey = value.logicalObservationKey;
     if (typeof value.traceId === 'string') correlation.traceId = value.traceId;
     return { value: correlation };
   }
