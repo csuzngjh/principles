@@ -1006,6 +1006,19 @@ describe("FocusPage: PRI-1017 budget observation rendering contract", () => {
     expect(focusSrc).toContain('data-testid={`prompt-capacity-pick-${host}`}');
   });
 
+  it("PRI-1066: per-host truncation never renders as a permanent 「已满」", () => {
+    // The rotating list route queues the entries that did not fit for later
+    // turns; only the non-rotating shared render may say "not all entered".
+    expect(focusSrc).toContain('entry.route === "legacy_trim"');
+    expect(focusSrc).toContain('t("pages.focus.promptCapacityPerHostRotating")');
+    for (const focus of [enFocus, zhFocus]) {
+      expect(getOwnString(focus, "promptCapacityPerHostFull") ?? "").not.toContain("已满");
+      expect(getOwnString(focus, "promptCapacityPerHostFull") ?? "").not.toContain("full");
+      const rotating = getOwnString(focus, "promptCapacityPerHostRotating") ?? "";
+      expect(rotating.length).toBeGreaterThan(10);
+    }
+  });
+
   it("the fallback copy carries the bounded reason and, when available, the observation time", () => {
     // A usable runtime observation that is itself a fallback is NOT "console
     // not bound to the runtime model" — the console did use that observation.

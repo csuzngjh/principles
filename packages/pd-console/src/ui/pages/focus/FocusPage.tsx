@@ -1025,7 +1025,15 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
                       // observation or its own honest fallback) — never the
                       // shared headline number.
                       budget: entry.budget ?? unconfirmed.budget,
-                      full: entry.truncated ? t("pages.focus.promptCapacityPerHostFull") : "",
+                      // PRI-1066: `truncated` never means "the budget is full
+                      // forever". On the rotating list route the entries that
+                      // did not fit are queued for later turns; only the
+                      // non-rotating shared render genuinely stops here.
+                      full: entry.truncated
+                        ? entry.route === "legacy_trim"
+                          ? t("pages.focus.promptCapacityPerHostRotating")
+                          : t("pages.focus.promptCapacityPerHostFull")
+                        : "",
                       observed: entry.budgetObservedAt !== undefined
                         ? t("pages.focus.promptCapacityPerHostObserved", {
                             defaultValue: "（预算来自该宿主最近一次运行时观测，观测于 {{observedAt}}）",
