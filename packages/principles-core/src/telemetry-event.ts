@@ -543,11 +543,10 @@ export const TelemetryEventType = Type.Union([
   Type.Literal('rollout_revision_record_failed'),
   Type.Literal('rollout_revision_route_failed'),
   Type.Literal('rollout_revision_routed'),
-  // Singles (admission/evidence-triage + refusal paths)
-  Type.Literal('admission_decision'),
-  Type.Literal('diagnosis_task_created'),
-  Type.Literal('evidence_only_recorded'),
-  Type.Literal('skipped_refused'),
+  // Pain Phase 0 (SPEC-PD-PAIN-SEMANTICS-AND-DETECTION-ARCHITECTURE-001 §6):
+  // the admission event singles (admission_decision, diagnosis_task_created,
+  // evidence_only_recorded, skipped_refused) were pruned — their only
+  // producers were the dead admission-event factories with zero consumers.
 ]);
 
 // eslint-disable-next-line @typescript-eslint/no-redeclare

@@ -13,8 +13,6 @@ import { describe, it, expect } from 'vitest';
 import {
   resolveSourceKind,
   buildToolFailureObservation,
-  buildLlmDetectionObservation,
-  buildEmpathyObservation,
   buildManualPainObservation,
   type RawObservation,
 } from '../observation-resolver.js';
@@ -163,50 +161,22 @@ describe('buildToolFailureObservation', () => {
   });
 });
 
-describe('buildLlmDetectionObservation', () => {
-  it('builds observation with detectionSource and isGfiTriggered', () => {
-    const o = buildLlmDetectionObservation({ detectionSource: 'llm_loop', isGfiTriggered: true });
-    expect(o.detectionSource).toBe('llm_loop');
-    expect(o.isGfiTriggered).toBe(true);
-    expect(o.observedAt).toBeTruthy();
+// ── Pain Phase 0 negative regression ────────────────────────────────────────
+// The retired observation builders (buildLlmDetectionObservation,
+// buildEmpathyObservation — zero production callers) must stay gone. Inline
+// RawObservation literals cover the same resolveSourceKind mappings below.
+
+describe('Pain Phase 0: retired observation builders stay removed', () => {
+  it('llm detection mapping is still reachable via inline RawObservation (semantic)', () => {
+    expect(resolveSourceKind(obs({ detectionSource: 'llm_loop', isGfiTriggered: false }))).toBe('semantic');
   });
 
-  it('feeds into resolveSourceKind correctly', () => {
-    const o = buildLlmDetectionObservation({ detectionSource: 'llm_loop', isGfiTriggered: false });
-    expect(resolveSourceKind(o)).toBe('semantic');
-  });
-});
-
-// ── PRI-454: New builders for empathy and manual pain paths ─────────────────
-
-describe('buildEmpathyObservation (PRI-454)', () => {
-  it('builds observation with detectionSource and isGfiTriggered', () => {
-    const o = buildEmpathyObservation({ detectionSource: 'user_empathy', isGfiTriggered: true });
-    expect(o.detectionSource).toBe('user_empathy');
-    expect(o.isGfiTriggered).toBe(true);
-    expect(o.observedAt).toBeTruthy();
-  });
-
-  it('includes sessionId when provided', () => {
-    const o = buildEmpathyObservation({ detectionSource: 'user_empathy', isGfiTriggered: true, sessionId: 'sess-123' });
-    expect(o.sessionId).toBe('sess-123');
-  });
-
-  it('sessionId is undefined when not provided', () => {
-    const o = buildEmpathyObservation({ detectionSource: 'user_empathy', isGfiTriggered: false });
-    expect(o.sessionId).toBeUndefined();
-  });
-
-  it('isGfiTriggered=true → resolveSourceKind returns gfi_threshold', () => {
-    const o = buildEmpathyObservation({ detectionSource: 'user_empathy', isGfiTriggered: true });
-    expect(resolveSourceKind(o)).toBe('gfi_threshold');
-  });
-
-  it('isGfiTriggered=false → resolveSourceKind returns empathy_inferred', () => {
-    const o = buildEmpathyObservation({ detectionSource: 'user_empathy', isGfiTriggered: false });
-    expect(resolveSourceKind(o)).toBe('empathy_inferred');
+  it('GFI mapping is still reachable via inline RawObservation (gfi_threshold)', () => {
+    expect(resolveSourceKind(obs({ detectionSource: 'user_empathy', isGfiTriggered: true }))).toBe('gfi_threshold');
   });
 });
+
+// ── PRI-454: manual pain path builder stays live ────────────────────────────
 
 describe('buildManualPainObservation (PRI-454)', () => {
   it('builds observation with isManualEntry=true', () => {

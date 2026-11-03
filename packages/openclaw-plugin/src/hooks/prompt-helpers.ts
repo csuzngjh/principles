@@ -130,7 +130,8 @@ Principles Disciple (PD) provides governance boundaries for this session.
  * A main agent emitting them itself would corrupt that evidence channel, so
  * normal output must keep them out. (PRI-819: the stale claim that "the
  * empathy observer subagent" handles detection was removed — detection is
- * owned by signal-collector-host / DetectionService.)
+ * owned by signal-collector-host; the DetectionService funnel was retired in
+ * Pain Phase 0.)
  *
  * Pure logic — returns a constant string.
  */

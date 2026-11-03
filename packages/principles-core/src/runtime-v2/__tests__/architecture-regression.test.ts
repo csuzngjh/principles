@@ -285,7 +285,8 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   // LOCKSTEP twin of packages/host-runtime/src/degraded-enforcement-marker.ts
   // (the plugin cannot import @principles/host-runtime).
   'degraded-enforcement-marker.ts',
-  'detection-service.ts',
+  // detection-service.ts removed (Pain Phase 0) with the retired Semantic
+  // detection execution path (its only caller was the llm.ts detect call).
   'schema/migrations/index.ts',
   'dictionary-service.ts',
   'schema/index.ts',
@@ -333,10 +334,9 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   // @principles/host-runtime product-telemetry) into the OpenClaw plugin
   // lifecycle. Plugin-specific because the trigger point is plugin-owned.
   'product-telemetry-trigger.ts',
-  // PRI-446: now a thin shell wiring DetectionFunnelCore (core runtime-v2/detection)
-  // with crypto.createHash + PainDictionary. Kept here because it owns the
-  // crypto + dictionary I/O boundary.
-  'detection-funnel.ts',
+  // Pain Phase 0 (2026-11-02): detection-funnel.ts removed together with
+  // detection-service.ts — its only consumer was the retired Semantic
+  // detection execution path.
   'migration.ts',
   'file-store.ts',
   'pd-task-store.ts',
@@ -501,7 +501,11 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // 2026-10-28 legacy principle-injection removal: Removed
     // principle-injection.ts (re-export shim of the legacy evolution-block
     // selector, now unused) (95 → 94).
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(94);
+    // 2026-11-02 Pain Phase 0: Removed detection-service.ts +
+    // detection-funnel.ts (94 → 92) — the Semantic detection execution path
+    // was retired with its only caller (llm.ts detect call)
+    // (SPEC PD-PAIN-SEMANTICS-AND-DETECTION-ARCHITECTURE-001 §6).
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(92);
   });
 });
 

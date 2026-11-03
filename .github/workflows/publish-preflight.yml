@@ -15,9 +15,9 @@ name: Publish Preflight (no writes)
 #   5. optional validation-evidence reuse (validation_run_id) verifies;
 #   6. (rehearsal job) every pending package leg runs the REAL control
 #      path from the publish action in dry_run mode: exact-state check,
-#      bounded dependency wait, cohort builds, npm pack dry-run, installer
-#      identity stamp + tarball verification — everything except the
-#      upload. A rehearsal is never evidence of a published version.
+#      bounded dependency wait, cohort builds, non-installer dry-run pack,
+#      and installer immutable-candidate pack/overlay/final verification —
+#      everything except the upload. A rehearsal is never evidence of a published version.
 #
 # This workflow holds NO write permissions and must never gain any.
 
@@ -234,8 +234,9 @@ jobs:
           echo "Train product identity (at cohort SHA): $VERSION"
 
       # The REAL publish action in dry_run mode: identical control path
-      # (exact-state check, bounded dependency wait, builds, dry-run pack,
-      # installer identity stamp + tarball verification) minus the upload.
+      # (exact-state check, bounded dependency wait, builds, non-installer
+      # dry-run pack, installer immutable-candidate pack/overlay/verification)
+      # minus the upload.
       # The placeholder token is never used — no step that could spend it
       # runs in this mode, and this job holds no id-token permission.
       - name: Rehearse 1/8 @principles/core
