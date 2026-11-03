@@ -228,18 +228,53 @@ YES 项论证：public 包是 SPEC G4-01 的直接交付物（零实现替代不
 
 > 未删除、未批量 dismiss 任何评论；未再次请求无法处理 131 文件的 full review（改为关键模块人工复核）。
 
-### 7.5 真实 OpenClaw Gateway 隔离验收 — NOT RUN
+### 7.5 真实 OpenClaw Gateway 隔离验收 — 已执行
 
-本机无 `openclaw` CLI（`Get-Command openclaw` 未找到），按证据纪律记为 **NOT RUN**，不以 launcher 进程测试冒充 Gateway 隔离证据。Owner 可执行：
+**结论先行**：原结论「本机无 `openclaw` CLI → NOT RUN」**被推翻**。`openclaw@2026.10.10` 确实已安装，只是全局副本处于不完整状态（无 bin shim、`@openclaw/fs-safe` 缺 `package.json`）。改用隔离安装后完成了真实 Gateway 验收：真实进程启动、真实插件安装根装载、插件启动写入 binding、A→B 切换、同一安装根的数据隔离，以及三类拒绝启动。
 
-```bash
-# 前置：安装 OpenClaw CLI，准备隔离 profile（不改 Owner 日常配置）
-openclaw --profile <isolated> gateway start
-openclaw --profile <isolated> plugins add ./plugins/principles-disciple
-# 切工作区 A/B 后重载，验证 binding 与声明一致、拒绝旧工作区数据
-```
+**隔离环境**
 
-现有最强运行时证据：`mcp-launcher-workspace-isolation.test.ts` 的同一安装根重载/切换用例（真实 launcher + 真实服务进程），以及 `mcp-binding-isolation.test.ts` 的确定性故障注入。
+- CLI：`D:\pd-labs\openclaw-gateway\prefix`，`npm install -g openclaw@2026.10.10 --no-audit --no-fund`（`added 360 packages`，exit 0，`OpenClaw 2026.10.10 (7dc3350)`）。
+- HOME / USERPROFILE：`D:\pd-labs\openclaw-gateway\home`（独立 `.openclaw` 配置与独立 `.pd\runtime\pd-mcp-server`），不写 Owner 日常宿主配置。
+- 插件安装根（唯一）：`home\.openclaw\extensions\principles-disciple`，由 `openclaw plugins install <repo>/packages/openclaw-plugin --force --accept-capabilities` 复制；`plugins inspect --runtime` 返回 `status: "loaded"` 且列出 `mcpServers`。
+- 工作区：A = `D:\pd-labs\openclaw-gateway\workspaces\A`（ledger 仅 `principle-only-in-workspace-x`），B = `...\workspaces\B`（仅 `principle-only-in-workspace-y`）。
+- Gateway：`openclaw gateway run --port 18888 --verbose`（前台真实进程；`gateway health --json` 成功，`plugins.loaded` 含 `principles-disciple`，`errors: []`）。
+- 声明：`home\.openclaw\principles-disciple.json`（`{"workspace": ...}`）；binding：`extensions\principles-disciple\mcp-binding.json`。
+
+**验收结果（逐项）**
+
+| # | 验收项 | 观测证据 | 结果 |
+|---|---|---|---|
+| 1 | Gateway 启动 | `gateway health` ok；插件 `principles-disciple` loaded；`errors: []` | pass |
+| 2 | 插件启动写 binding | 声明 A 时 binding `workspaceDir` = workspace A，`runtimeDir`/`serverEntry` 指向隔离 runtime（0.1.0） | pass |
+| 3 | 启动指纹（A） | 同一安装根 launcher 启动事件 `workspaceDirHash = 1fdec6d06110fd15`（= sha256(realpath(A)) 前 16） | pass |
+| 4 | A 数据隔离 | 同一安装根查 X → `status: unavailable` / `errorCode: source_missing`；查 Y → `principle_not_found` | pass |
+| 5 | A→B 切换 | 声明改为 B 后重启 Gateway，binding 重写为 B；启动指纹 `23e0a88184749767`（= B） | pass（经重启） |
+| 6 | B 数据隔离 | 同一安装根查 Y → `source_missing`；查 X → `principle_not_found` | pass |
+| 7 | 重载 | `plugins reload principles-disciple --json` 失败：`EPERM` symlink，`generation 2 replacement not applied` | 未通过（环境限制） |
+| 8 | 拒绝启动：声明缺失（插件已删 binding） | launcher exit 1，`binding_missing` | pass |
+| 9 | 拒绝启动：旧 binding + 无声明 | launcher exit 1，`workspace_declaration_missing` | pass |
+| 10 | 拒绝启动：binding A + 声明 B | launcher exit 1，`binding_workspace_not_declared` | pass |
+
+**方法边界（诚实区分已覆盖 / 未覆盖）**
+
+- 工具级调用使用官方 MCP stdio client 连接**同一个已安装的 `extensions\principles-disciple\mcp\launcher.cjs`**（不是两个独立 payload 的 fixture），真实子进程、真实 HOME、真实声明与 binding 文件读取；每次 A/B 判定都先核对启动指纹与声明一致。
+- **未覆盖**：Gateway agent 会话内的工具调用。隔离 HOME 没有模型凭据，无法建立 agent turn，因此该层未执行；未用替身测试掩盖。
+- **未覆盖**：`plugins reload` 的进程内生效。Windows 隔离安装下该命令因 symlink `EPERM` 未能应用新 generation，故 A→B 由 Gateway 重启验证；这是环境限制，不是产品缺陷。
+- 首次启动曾继承本机环境变量 `PD_WORKSPACE_DIR=D:\.openclaw\workspace`，导致 binding 指向该值；在隔离运行中显式清除 `PD_WORKSPACE_DIR` / `OPENCLAW_WORKSPACE` 后重跑，binding 才指向 A。该变量为宿主注入，非 PD 回退行为。
+
+**全局 `openclaw` 副本残缺的归因（Owner 环境，未修复）**
+
+- 事实：`C:\Users\Administrator\AppData\Roaming\npm\node_modules\openclaw`（创建 14:53:08、最后写 14:55:03）无 `openclaw` / `.cmd` / `.ps1` shim；`node openclaw.mjs --version` 报 `package lifecycle is incomplete` + `Cannot find module ...@openclaw\fs-safe\json`。
+- 结构证据：该副本内 `@openclaw\fs-safe` 只有 `dist` / `docs` / `LICENSE`，**缺 `package.json` / README / CHANGELOG**；npm 暂存目录 `.openclaw-oHGnns6k`（创建 14:52:29）残留完整包树；无全局 `.package-lock.json`。这是**中断的 npm 全局安装**形态，不是脚本被跳过。
+- 排除 `--ignore-scripts`：`npm config get ignore-scripts` = `false`；本会话隔离安装同样收到 `allowScripts` 警告（`@google/genai` / `esbuild` / `protobufjs` / `openclaw`），但 `openclaw --version` 正常，`@openclaw\fs-safe` 含 `package.json`。两者对照说明 allowScripts 警告不是全局副本损坏的成因。
+- 命令证据：本会话工具历史中**没有** `npm i -g openclaw` 或等价命令；14:5x 的 npm debug log 已被后续日志覆盖（当前仅存 18:xx 起 10 个）；同期存在多个其他 Trae 会话与 Owner 终端活动（PSReadLine history 含 `iwr -useb https://openclaw.ai/install.ps1 | iex` 与多次 `npm install -g openclaw@latest`）。**结论：可判定为中断的全局安装，但无法归因到具体会话；不做模糊归责，也未修复该全局副本。**
+
+**对 Owner 机器的副作用（如实记录）**
+
+- 本轮误创建 `C:\Users\Administrator\.pd\runtime\pd-mcp-server`：PowerShell 中 `$home` 是只读变量，赋值静默失败，路径落到真实 HOME（创建时间 19:05:07）。发现后先删除 junction 链接（`Directory.Delete(link, false)`，不遍历目标），再删除该目录；复查 `~/.pd/runtime` 各组件创建时间为 11/2，`pd-mcp-server` 已不存在，**未覆盖任何既有文件**。随后改用 `$labHome` 重做，未再触碰真实 HOME。
+- 全局损坏副本 `AppData\Roaming\npm\node_modules\openclaw` **原样保留**，未执行 `npm i -g` 修复，未删除、未改动。
+- 未写入 Owner 日常 `~/.openclaw` 配置；隔离运行期间对 `D:\.openclaw\workspace` 只有读取，未写入任何文件。
 
 ### 7.6 main 同步与验证证据
 
@@ -253,8 +288,8 @@ openclaw --profile <isolated> plugins add ./plugins/principles-disciple
 
 ### 7.7 未解决风险与 Owner 后续验收
 
-1. **OpenClaw Gateway 隔离**：NOT RUN（本机无 CLI）；需 Owner 在隔离 profile 执行 §7.5 流程。
+1. **OpenClaw Gateway 隔离**：已执行（§7.5，真实 Gateway + 同一安装根的 A/B 隔离与三类拒绝启动均通过）。残余未覆盖：Gateway agent 会话内的工具调用（隔离 HOME 无模型凭据）；`plugins reload` 进程内生效（Windows symlink `EPERM`，改用重启验证）。
 2. **Codex/WB 模型级 10/10**：仍受配额/交互登录限制（承接第三轮结论）。
 3. **website 测试 Windows CRLF 误报**：建议单独 issue 修 `filter` 保留 `\r` 的写法；本轮不改。
 4. **Codecov patch 覆盖**：新增失败分支已由故障注入覆盖；如需绝对覆盖数字以 CI codecov 为准。
-5. **推送与合并**：本轮**未推送、未合并**；等待 Owner 决定。
+5. **推送与合并**：已推送到 PR #2304（非破坏路径），CI 在 `6593e4839` 上 27 项 required/advisory check 全部 pass（CodeRabbit skipping）；**未合并**。推送后 `origin/main` 前进到 `86a16a43f`，PR 变为 CONFLICTING（`.github/workflows/publish-preflight.yml` 与 main 新增的 leg id/summary 冲突），等待 Owner 决定是否刷新合并。
