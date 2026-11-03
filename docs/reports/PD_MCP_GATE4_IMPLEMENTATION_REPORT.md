@@ -268,7 +268,10 @@ YES 项论证：public 包是 SPEC G4-01 的直接交付物（零实现替代不
 - 事实：`C:\Users\Administrator\AppData\Roaming\npm\node_modules\openclaw`（创建 14:53:08、最后写 14:55:03）无 `openclaw` / `.cmd` / `.ps1` shim；`node openclaw.mjs --version` 报 `package lifecycle is incomplete` + `Cannot find module ...@openclaw\fs-safe\json`。
 - 结构证据：该副本内 `@openclaw\fs-safe` 只有 `dist` / `docs` / `LICENSE`，**缺 `package.json` / README / CHANGELOG**；npm 暂存目录 `.openclaw-oHGnns6k`（创建 14:52:29）残留完整包树；无全局 `.package-lock.json`。这是**中断的 npm 全局安装**形态，不是脚本被跳过。
 - 排除 `--ignore-scripts`：`npm config get ignore-scripts` = `false`；本会话隔离安装同样收到 `allowScripts` 警告（`@google/genai` / `esbuild` / `protobufjs` / `openclaw`），但 `openclaw --version` 正常，`@openclaw\fs-safe` 含 `package.json`。两者对照说明 allowScripts 警告不是全局副本损坏的成因。
-- 命令证据：本会话工具历史中**没有** `npm i -g openclaw` 或等价命令；14:5x 的 npm debug log 已被后续日志覆盖（当前仅存 18:xx 起 10 个）；同期存在多个其他 Trae 会话与 Owner 终端活动（PSReadLine history 含 `iwr -useb https://openclaw.ai/install.ps1 | iex` 与多次 `npm install -g openclaw@latest`）。**结论：可判定为中断的全局安装，但无法归因到具体会话；不做模糊归责，也未修复该全局副本。**
+- 生命周期标记：包内残留 `.openclaw-lifecycle-pending`（内容 `pending`，创建 14:53:08，与包目录创建同秒）；该包 `scripts.postinstall = node scripts/postinstall-bundled-plugins.mjs`。postinstall 成功时该标记会被清除（隔离安装对照：标记不存在）。
+- A/B 对照（同一版本 2026.10.10，全局 vs 隔离）：生命周期标记 有/无；`@openclaw\fs-safe\package.json` 缺/有；npm bin shim 缺 3 个/有 3 个；npm 暂存目录残留/无。四项同时成立，说明 reify 在 build / bin-link 阶段被中断，而不是"脚本被跳过"。
+- 日志缺失原因：`npm config get logs-max` = `10`（npm 仅保留最近 10 个 debug log）；14:5x 的日志被 18:xx 起的后续全局安装（如 18:42 `hyperframes`）按该策略自动清理，不是人为覆盖。
+- 命令证据：本会话工具历史中**没有** `npm i -g openclaw` 或等价命令；同期存在多个其他 Trae 会话与 Owner 终端活动（PSReadLine history 含 `iwr -useb https://openclaw.ai/install.ps1 | iex` 与多次 `npm install -g openclaw@latest`）。**结论：可判定为中断的全局安装，但无法归因到具体会话；不做模糊归责，也未修复该全局副本。**
 
 **对 Owner 机器的副作用（如实记录）**
 
@@ -293,3 +296,4 @@ YES 项论证：public 包是 SPEC G4-01 的直接交付物（零实现替代不
 3. **website 测试 Windows CRLF 误报**：建议单独 issue 修 `filter` 保留 `\r` 的写法；本轮不改。
 4. **Codecov patch 覆盖**：新增失败分支已由故障注入覆盖；如需绝对覆盖数字以 CI codecov 为准。
 5. **推送与合并**：已推送到 PR #2304（非破坏路径），CI 在 `6593e4839` 上 27 项 required/advisory check 全部 pass（CodeRabbit skipping）；**未合并**。推送后 `origin/main` 前进到 `86a16a43f`，PR 变为 CONFLICTING（`.github/workflows/publish-preflight.yml` 与 main 新增的 leg id/summary 冲突），等待 Owner 决定是否刷新合并。
+6. **最新 head 的 CI 投递**：`6593e4839..05b27d811` 仅有 `docs/reports/**` 改动（非 docs 改动为空）。PR-event 投递丢失后按 `ci.yml` 既定补救以 `workflow_dispatch` 复跑：`CI Impact Gate` 判为 docs-only，14 个测试腿按设计 skipped，`Verify Merge Gate` / `CI Impact Gate` / `Telemetry Union Guard` 均 success。全量套件的真实证据仍是 `6593e4839`；dispatch 运行不挂到 PR 页面，PR 的 checks 列表只显示 `CodeRabbit skipping`。
