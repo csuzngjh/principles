@@ -588,8 +588,12 @@ jobs:
       - name: Build dependencies
         # Superset of the five former jobs' dependency sets: core +
         # install-layout + host-runtime + plugin (parity needs the plugin).
+        # The codex delivery contract launches the REAL built pd-mcp-server
+        # bytes, so that package is built here too (core first: its dist is
+        # the server's compile-time dependency).
         run: |
           npm run build --workspace=@principles/core
+          npm run build --workspace=@principles/pd-mcp-server
           npm run build --workspace=@principles/install-layout
           npm run build --workspace=@principles/host-runtime
           npm run build --workspace=principles-disciple

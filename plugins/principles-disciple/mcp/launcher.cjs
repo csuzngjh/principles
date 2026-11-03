@@ -39,9 +39,9 @@ const { pathToFileURL } = require('url');
 
 const BINDING_SCHEMA = 'pd.mcp-binding.v1';
 // Ownership stamp (SPEC §7.5/§11.3): installers and `pd health` prove that a
-// registered `mcp/launcher.cjs` really is PD's launcher by reading THIS stamp
-// plus the binding schema below — never by the file name alone.
-const PD_LAUNCHER_ID = 'pd-mcp-launcher.v1';
+// registered `mcp/launcher.cjs` really is PD's launcher by finding the stamp
+// `pd-mcp-launcher.v1` in this file's bytes plus the binding schema above —
+// never by the file name alone. Keep the stamp literally present.
 const KNOWN_HOSTS = ['codex', 'openclaw', 'workbuddy'];
 // The payload marker that identifies which host owns THIS launcher copy.
 const HOST_MARKERS = [

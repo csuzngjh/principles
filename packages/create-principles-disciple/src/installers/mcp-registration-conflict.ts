@@ -121,21 +121,28 @@ function readLauncherIdentity(file: string): 'pd' | 'other' | 'unverifiable' {
   } catch {
     return 'unverifiable';
   }
-  let stat: fs.Stats;
+  // Read through ONE open descriptor: a stat-then-read pair leaves a window in
+  // which the path can be swapped (CodeQL js/file-system-race). fstat+read on
+  // the same handle validates and reads the same file instance.
+  let fd: number;
   try {
-    stat = fs.statSync(real);
+    fd = fs.openSync(real, 'r');
   } catch {
     return 'unverifiable';
   }
-  if (!stat.isFile()) return 'unverifiable';
-  if (stat.size > MAX_LAUNCHER_BYTES) return 'other';
-  let content: string;
   try {
-    content = fs.readFileSync(real, 'utf8');
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile()) return 'unverifiable';
+    if (stat.size > MAX_LAUNCHER_BYTES) return 'other';
+    const buffer = Buffer.alloc(stat.size);
+    fs.readSync(fd, buffer, 0, stat.size, 0);
+    const content = buffer.toString('utf8');
+    return content.includes(PD_LAUNCHER_ID) && content.includes(PD_BINDING_SCHEMA_MARKER) ? 'pd' : 'other';
   } catch {
     return 'unverifiable';
+  } finally {
+    fs.closeSync(fd);
   }
-  return content.includes(PD_LAUNCHER_ID) && content.includes(PD_BINDING_SCHEMA_MARKER) ? 'pd' : 'other';
 }
 
 /** Is this arg shaped like a PD launcher argument at all (`.../mcp/launcher.cjs`)? */
