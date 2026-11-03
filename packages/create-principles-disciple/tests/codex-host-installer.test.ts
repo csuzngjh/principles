@@ -12,7 +12,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as childProcess from 'child_process';
 import { CodexHostInstaller, detectLegacyCodexHookRegistration } from '../src/installers/codex-host-installer.js';
-import { parseLegacyCodexHooksRegistration } from '@principles/core/host';
+import { parseLegacyCodexHooksRegistration, type HostInstallContext } from '@principles/core/host';
 
 // Mock fs (hoisted). vi.mock is hoisted by vitest before imports execute,
 // so the CodexHostInstaller module sees the mocked fs.
@@ -39,6 +39,15 @@ vi.mock('os', () => ({
 }));
 
 describe('CodexHostInstaller.install — retirement (Slice D, SPEC rev 2 §17)', () => {
+  // The host identity is expressed by the CodexHostInstaller instance itself;
+  // the remaining context fields are unused by the retired install() path.
+  const codexContext: HostInstallContext = {
+    workspaceDir: '/home/user/workspace',
+    pluginDir: '/home/user/plugin',
+    language: 'en',
+    mode: 'smart',
+  };
+
   const mockExistsSync = vi.spyOn(fs, 'existsSync');
   const mockReadFileSync = vi.spyOn(fs, 'readFileSync');
   const mockWriteFileSync = vi.spyOn(fs, 'writeFileSync');
@@ -58,7 +67,7 @@ describe('CodexHostInstaller.install — retirement (Slice D, SPEC rev 2 §17)',
 
   it('refuses new registrations with the Marketplace plugin as the supported path', async () => {
     const installer = new CodexHostInstaller();
-    const result = await installer.install({ workspaceDir: '/home/user/workspace', host: 'codex' });
+    const result = await installer.install(codexContext);
 
     expect(result.success).toBe(false);
     expect(result.reason).toContain('retired');
@@ -67,7 +76,7 @@ describe('CodexHostInstaller.install — retirement (Slice D, SPEC rev 2 §17)',
 
   it('NEVER writes hook registrations, wrapper, or marker — and never touches any workspace config (R1-4)', async () => {
     const installer = new CodexHostInstaller();
-    await installer.install({ workspaceDir: '/home/user/workspace', host: 'codex' });
+    await installer.install(codexContext);
 
     expect(mockWriteFileSync).not.toHaveBeenCalled();
     expect(mockMkdirSync).not.toHaveBeenCalled();
@@ -92,7 +101,7 @@ describe('CodexHostInstaller.install — retirement (Slice D, SPEC rev 2 §17)',
     });
 
     const installer = new CodexHostInstaller();
-    const result = await installer.install({ workspaceDir: '/home/user/workspace', host: 'codex' });
+    const result = await installer.install(codexContext);
 
     expect(result.success).toBe(false);
     expect(result.reason).toContain('legacy');

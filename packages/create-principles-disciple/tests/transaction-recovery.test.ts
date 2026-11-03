@@ -73,6 +73,7 @@ function activeRecord(generation: number, releaseId: string, digest: string, tra
     releaseMetadataDigest: digest,
     previousReleaseId: generation > 1 ? OLD_RELEASE : null,
     transactionId,
+    productVersion: releaseId === NEW_RELEASE ? '1.223.0' : '1.222.0',
   };
 }
 

@@ -387,6 +387,8 @@ describe('install() routes the LLM runtime profile into the WorkBuddy governance
     const binding = resolveAgentRuntimeBinding(loaded.effective, 'diagnostician');
     expect(binding.ok).toBe(true);
     if (!binding.ok) return;
+    // Discriminated narrowing: only the pi-ai profile carries an endpoint.
+    if (binding.profile.type !== 'pi-ai') throw new Error(`expected pi-ai profile, got ${binding.profile.type}`);
     expect(binding.profile.baseUrl).toBe('https://llm.example.test/v1');
 
     // Malformed endpoint → fail loud at the write boundary (rc-3), no write.
