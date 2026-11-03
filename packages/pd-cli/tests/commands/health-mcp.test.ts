@@ -320,3 +320,56 @@ describe('assessMcpHealth — workbuddy layout', () => {
     });
   });
 });
+
+describe('assessMcpHealth — same-name registration conflict (SPEC §7.5/§11.3)', () => {
+  it('codex: user-tier pd-recall owned by another server degrades to CONFIG_DRIFT', () => {
+    withHome((home) => {
+      const fixture = makeCodexFixture(home);
+      fs.mkdirSync(fixture.codexHome, { recursive: true });
+      fs.writeFileSync(
+        path.join(fixture.codexHome, 'config.toml'),
+        '[mcp_servers.pd-recall]\ncommand = "npx"\nargs = ["-y", "other-mcp"]\n',
+      );
+      const section = assessCodex(fixture);
+      expect(section.status).toBe('CONFIG_DRIFT');
+      expect(section.reason).toBe('mcp_same_name_conflict');
+      expect(section.registrationConflict.verdict).toBe('conflict');
+      expect(section.nextAction).toContain('must not overwrite');
+    });
+  });
+
+  it('openclaw: operator same-name server degrades; different names stay HEALTHY', () => {
+    withHome((home) => {
+      makeSharedFixture(home, 'openclaw');
+      const configPath = path.join(home, '.openclaw', 'openclaw.json');
+      writeJson(configPath, { mcp: { servers: { 'pd-recall': { command: 'python', args: ['other.py'] } } } });
+      const conflict = assessMcpHealth({ host: 'openclaw', homeDir: home });
+      expect(conflict.status).toBe('CONFIG_DRIFT');
+      expect(conflict.reason).toBe('mcp_same_name_conflict');
+      expect(conflict.registrationConflict.verdict).toBe('conflict');
+
+      writeJson(configPath, { mcp: { servers: { comfyui: { command: 'node', args: ['comfyui-mcp'] } } } });
+      const coexist = assessMcpHealth({ host: 'openclaw', homeDir: home });
+      expect(coexist.status).toBe('HEALTHY');
+      expect(coexist.registrationConflict.verdict).toBe('other_servers_only');
+    });
+  });
+
+  it('workbuddy: a same-name user-level server degrades; malformed file is unverifiable', () => {
+    withHome((home) => {
+      makeSharedFixture(home, 'workbuddy');
+      const configPath = path.join(home, '.workbuddy', 'mcp.json');
+      writeJson(configPath, { mcpServers: { 'pd-recall': { type: 'streamableHttp', url: 'https://example/mcp' } } });
+      const conflict = assessMcpHealth({ host: 'workbuddy', homeDir: home });
+      expect(conflict.status).toBe('CONFIG_DRIFT');
+      expect(conflict.reason).toBe('mcp_same_name_conflict');
+      expect(conflict.registrationConflict.verdict).toBe('conflict');
+
+      fs.writeFileSync(configPath, '{ not json');
+      const malformed = assessMcpHealth({ host: 'workbuddy', homeDir: home });
+      expect(malformed.status).toBe('CONFIG_DRIFT');
+      expect(malformed.reason).toBe('mcp_registration_unverifiable');
+      expect(malformed.registrationConflict.verdict).toBe('unverifiable');
+    });
+  });
+});
