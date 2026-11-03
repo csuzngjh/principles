@@ -125,7 +125,7 @@ async function createStudy(): Promise<void> {
 /** Wait until the console run settles (the async contract settles via events). */
 async function waitForSettle(studyId: string, runId: string): Promise<void> {
   for (let i = 0; i < 150; i += 1) {
-    const runs = readConsoleRuns(studyDirOf(studyId));
+    const runs = readConsoleRuns(resolveStudyRootsFromLab(), studyDirOf(studyId));
     const found = runs.find((run) => run.runId === runId);
     if (found && found.status !== 'RUNNING') return;
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -339,7 +339,7 @@ registry.then(/返回 409 run_in_progress 且未追加新运行事件$/, () => {
 });
 
 registry.then(/追加 CONSOLE_RUN_ABANDONED 且 outcome=RESULT_UNKNOWN$/, () => {
-  const runs = readConsoleRuns(studyDirOf(lastStudyId));
+  const runs = readConsoleRuns(resolveStudyRootsFromLab(), studyDirOf(lastStudyId));
   const abandoned = runs.find((run) => run.runId === 'RUN-C-DEAD');
   expect(abandoned?.status).toBe('ABANDONED');
   expect(abandoned?.outcome).toBe('RESULT_UNKNOWN');
@@ -357,7 +357,7 @@ registry.then(/恢复后可受理新运行而废弃运行保持 ABANDONED$/, asy
   void accepted;
   expect(res?.statusCode).toBe(202);
   await waitForSettle(lastStudyId, body.data.runId);
-  expect(readConsoleRuns(studyDirOf(lastStudyId)).find((run) => run.runId === 'RUN-C-DEAD')?.status).toBe('ABANDONED');
+  expect(readConsoleRuns(resolveStudyRootsFromLab(), studyDirOf(lastStudyId)).find((run) => run.runId === 'RUN-C-DEAD')?.status).toBe('ABANDONED');
 });
 
 registry.then(/返回 403 real_execution_not_authorized 且未追加运行事件$/, () => {
@@ -374,7 +374,7 @@ registry.then(/仍返回 403 且原因指明 APPROVED required$/, () => {
 registry.then(/运行结算为 FAILED 且 outcome=F2_EXECUTION_NOT_ENABLED_THIS_ROUND$/, async () => {
   const runId = body.data.runId;
   await waitForSettle(lastStudyId, runId);
-  const runs = readConsoleRuns(studyDirOf(lastStudyId));
+  const runs = readConsoleRuns(resolveStudyRootsFromLab(), studyDirOf(lastStudyId));
   expect(runs.find((run) => run.runId === runId)?.outcome).toBe('F2_EXECUTION_NOT_ENABLED_THIS_ROUND');
 });
 

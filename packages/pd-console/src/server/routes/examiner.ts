@@ -54,7 +54,7 @@ import { PrinciplesConsoleModel } from '../models/PrinciplesConsoleModel.js';
 import { ExaminerEvidenceModel } from '../models/ExaminerEvidenceModel.js';
 import {
   loadLabModules, loadHostCapability, preflightCheck, offlineStudyPass, reportMaterialize,
-  listStudyNames, resolveStudyAccess, resolveStudyRoots, studyStatusPayload, studyReportPayload,
+  listStudyNames, resolveStudyAccess, resolveStudyRoots, studyReportPayload,
   materializeConsoleStudy, verifyConsoleOwnership, writableRootProblem, isJsonObject,
   ExaminerPreflightBlockedError, type LabModules, type StudyRoots,
 } from './examiner-executor.js';
@@ -65,7 +65,8 @@ import {
 import {
   appendConsoleRunEvent, readConsoleRuns, currentConsoleRun, recoverUnfinishedConsoleRuns,
   acceptConsoleRun, hostDryRunPass, f2AuthorizationGate, CONSOLE_RUN_SCHEMA, CONSOLE_RUN_MODES,
-  ConsoleRunInProgressError, ConsoleLedgerUnreadableError,
+  ConsoleRunInProgressError, ConsoleLedgerUnreadableError, studyStatusPayload,
+  assertOfflineAdmissionAllowed,
 } from './examiner-runs.js';
 
 type HostCapability = Record<string, string>;
@@ -385,7 +386,7 @@ export async function handleExaminerRoute(
       let consoleRuns: ReturnType<typeof readConsoleRuns> | null = null;
       let ledgerProblem: { code: string; message: string } | null = null;
       try {
-        consoleRuns = readConsoleRuns(studyDir);
+        consoleRuns = readConsoleRuns(roots, studyDir);
       } catch (error) {
         if (error instanceof ConsoleLedgerUnreadableError) {
           ledgerProblem = { code: error.code, message: error.message };
@@ -394,7 +395,7 @@ export async function handleExaminerRoute(
         }
       }
       sendSuccess(res, {
-        ...studyStatusPayload(studyDir),
+        ...studyStatusPayload(roots, studyDir),
         readOnly: access.readOnly,
         access: access.reason,
         productionSnapshot: readProductionSnapshot(studyDir),
@@ -532,13 +533,26 @@ export async function handleExaminerRoute(
 
       // ── v0.9 synchronous offline-stub path (unchanged, AC-02 compat) ──
       try {
-        const summary = await offlineStudyPass(labModules, studyDir, context);
+        // P1-3 (offline→async): the admission check runs INSIDE the lab's study
+        // write lock, before RUN_STARTED/reservation/actor. The callback lives
+        // here (composition root) so executor↔runs stay acyclic.
+        const summary = await offlineStudyPass(labModules, studyDir, context, () => assertOfflineAdmissionAllowed(roots, studyDir));
         sendSuccess(res, { studyId: access.studyId, units: summary.units.map((unit) => ({ unit: unit.unit, state: unit.state })) });
       } catch (error) {
         // P1-4: both gates answer the same 409 shape. The server preflight
         // refuses BEFORE RUN_STARTED; the runner re-verifies UNDER the study
         // lock and refuses on drift discovered after that first check. Either
         // way: no RUN_STARTED, no reservation, no actor, no attempt file.
+        if (error instanceof ConsoleRunInProgressError) {
+          sendError(res, 409, 'run_in_progress', 'an execution is already running for this study; no run started, no unit reserved, no actor created', {
+            runId: error.runId, mode: error.mode, acceptedAt: error.acceptedAt,
+          });
+          return;
+        }
+        if (error instanceof ConsoleLedgerUnreadableError) {
+          sendError(res, 500, 'console_ledger_unreadable', 'the study event ledger is unreadable; refusing to start an offline run (fail-closed)', { code: error.code });
+          return;
+        }
         if (error instanceof ExaminerPreflightBlockedError) {
           sendError(res, 409, 'preflight_blocked', 'offline preflight blocked; no run started, no unit reserved, no actor created', {
             blockers: error.blockers,

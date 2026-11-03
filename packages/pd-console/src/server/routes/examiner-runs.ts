@@ -35,7 +35,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
-import { canonicalPathSync, isJsonObject, preflightCheck, type LabModules, type StudyRoots } from './examiner-executor.js';
+import {
+  canonicalPathSync, isJsonObject, isPathInside, isSamePath, preflightCheck, readStudyJson,
+  type LabModules, type StudyRoots,
+} from './examiner-executor.js';
 
 export const CONSOLE_RUN_SCHEMA = 'examiner-console-run.v1';
 export const CONSOLE_RUN_EVENT_TYPES = ['CONSOLE_RUN_ACCEPTED', 'CONSOLE_RUN_FINISHED', 'CONSOLE_RUN_FAILED', 'CONSOLE_RUN_ABANDONED'] as const;
@@ -76,76 +79,7 @@ export interface ConsoleRunState {
   reason: string | null;
 }
 
-/**
- * Resolve `<studyDir>/events.jsonl` and prove the resolved target stays inside
- * `root` (fail-closed null). Every ledger read/append in this module goes
- * through this boundary check — a directory swapped for a link after access
- * resolution can never redirect the append outside the writable root.
- */
-function ledgerFileInside(root: string, studyDir: string): string | null {
-  const target = path.resolve(studyDir, 'events.jsonl');
-  const rootPrefix = root.endsWith(path.sep) ? root : `${root}${path.sep}`;
-  if (target.startsWith(rootPrefix)) return target;
-  return null;
-}
-
-/** Append one console-run lifecycle event to the study's events ledger. */
-export function appendConsoleRunEvent(roots: StudyRoots, studyDir: string, event: ConsoleRunEvent): void {
-  const writableReal = canonicalPathSync(roots.writable);
-  if (!writableReal) throw new Error('console run ledger: the writable study root cannot be resolved (fail-closed)');
-  const file = ledgerFileInside(writableReal, studyDir);
-  if (!file) throw new Error('console run ledger: the events file resolves outside the writable study root (fail-closed)');
-  // P1-6: the ledger itself must be a regular file inside the boundary — a
-  // symlink planted at events.jsonl (or its replacement mid-flight) must not
-  // redirect the append. First append on a fresh study creates it exclusively.
-  if (fs.existsSync(file)) {
-    const stat = fs.lstatSync(file);
-    if (stat.isSymbolicLink() || !stat.isFile()) {
-      throw new Error('console run ledger: the events file is not a regular file (symlink or special file refused)');
-    }
-    fs.appendFileSync(file, `${JSON.stringify(event)}\n`, 'utf8');
-  } else {
-    // 'wx' exclusive create: a pre-planted symlink at this exact path fails
-    // the create instead of being followed.
-    const fd = fs.openSync(file, 'wx');
-    try {
-      fs.writeSync(fd, `${JSON.stringify(event)}\n`);
-    } finally {
-      fs.closeSync(fd);
-    }
-  }
-}
-
-/** True when the ledger has RUN_STARTED without a following RUN_FINISHED. */
-function offlineExecutionInFlight(studyDir: string): boolean {
-  const file = path.join(studyDir, 'events.jsonl');
-  if (!fs.existsSync(file)) return false;
-  let started = false;
-  let finished = false;
-  for (const line of fs.readFileSync(file, 'utf8').split('\n').filter(Boolean)) {
-    try {
-      const row: unknown = JSON.parse(line);
-      if (!isJsonObject(row) || typeof row.type !== 'string') continue;
-      if (row.type === 'RUN_STARTED') started = true;
-      if (row.type === 'RUN_FINISHED') finished = true;
-    } catch {
-      // Corrupt lines are refused by readConsoleRuns on the acceptance path;
-      // this scan only refines the in-flight check.
-    }
-  }
-  return started && !finished;
-}
-
-export class OfflineRunInFlightError extends Error {
-  constructor() {
-    super('an offline execution is currently in progress for this study (RUN_STARTED without RUN_FINISHED)');
-    this.name = 'OfflineRunInFlightError';
-  }
-}
-
-export function mintRunId(): string {
-  return `RUN-C-${randomUUID().toUpperCase()}`;
-}
+// ── Secure events.jsonl access (single-fd, identity-pinned) ─────────────────
 
 /**
  * P1-4: the study's event ledger is UNREADABLE for a reason the Owner must
@@ -161,25 +95,313 @@ export class ConsoleLedgerUnreadableError extends Error {
   }
 }
 
-/** Derive the console-run states from the study ledger (never stored separately). */
-export function readConsoleRuns(studyDir: string): ConsoleRunState[] {
-  const file = path.join(studyDir, 'events.jsonl');
-  if (!fs.existsSync(file)) return [];
+/**
+ * SECURITY CONTRACT (P1 TOCTOU):
+ *
+ * `events.jsonl` is the single source of truth for console runs. Every
+ * read/write goes through one file-descriptor session:
+ *
+ *   1. the study directory is resolved canonically and proven to live inside
+ *      the WRITABLE root and outside the HISTORICAL root;
+ *   2. its directory identity (dev+ino) is captured BEFORE the open;
+ *   3. on Linux the directory itself is opened (O_DIRECTORY|O_NOFOLLOW) and the
+ *      ledger is opened RELATIVE to that held fd via `/proc/self/fd/<n>`, so the
+ *      kernel resolves the parent atomically — a path swap cannot redirect it;
+ *   4. the ledger is opened with O_NOFOLLOW (no final-component link) and
+ *      created exclusively (O_CREAT|O_EXCL) when absent;
+ *   5. the FILE is fstat-ed and must be a regular file, and the DIRECTORY
+ *      identity is re-verified through the held fd;
+ *   6. the same fd performs the read/write (no path re-open), and writes loop
+ *      until the whole payload is stored;
+ *   7. on platforms without `/proc/self/fd` (Windows/macOS) the directory
+ *      identity is re-stat-ed after the open and the file's canonical path must
+ *      still be exactly `<studyReal>/events.jsonl` BEFORE any read/write —
+ *      a swap is refused, never followed. This is the documented weaker
+ *      mechanism; see the class comment on residual windows.
+ *
+ * Failure classes stay distinct and fail-closed: absent (only legitimate
+ * first-run), corrupt, permission denied, symlink/junction, identity change.
+ */
+const O_NOFOLLOW = typeof fs.constants.O_NOFOLLOW === 'number' ? fs.constants.O_NOFOLLOW : 0;
+const O_DIRECTORY = typeof fs.constants.O_DIRECTORY === 'number' ? fs.constants.O_DIRECTORY : 0;
+const LEDGER_READ_CHUNK = 64 * 1024;
+
+interface DirIdentity { dev: bigint; ino: bigint; }
+interface OpenedLedger { fd: number; dirFd: number | null; created: boolean; }
+
+function errorCode(error: unknown): string {
+  return (error as { code?: string }).code ?? 'unknown';
+}
+
+function identityOf(target: string): DirIdentity | null {
+  try {
+    const stat = fs.statSync(target, { bigint: true });
+    return { dev: stat.dev, ino: stat.ino };
+  } catch {
+    return null;
+  }
+}
+
+function sameIdentity(a: DirIdentity | null, b: DirIdentity | null): boolean {
+  return a !== null && b !== null && a.dev === b.dev && a.ino === b.ino;
+}
+
+function ledgerUnreadable(message: string): Error {
+  return new ConsoleLedgerUnreadableError('ledger_unreadable', message);
+}
+
+/** Resolve + prove the study directory boundary (fail-closed, never string-only). */
+function resolveLedgerStudyDir(roots: StudyRoots, studyDir: string): string {
+  const studyReal = canonicalPathSync(studyDir);
+  if (!studyReal) throw ledgerUnreadable('the study directory cannot be resolved to a canonical location (fail-closed)');
+  // Identity, not just prefix: a directory swapped for a SIBLING inside the
+  // writable root still resolves to a different basename. The console only
+  // ever addresses `<root>/<studyId>`, so any mismatch is a swap, not a study.
+  if (path.basename(studyReal) !== path.basename(path.resolve(studyDir))) {
+    throw ledgerUnreadable('the study directory resolved to a different entry name — path swap refused (fail-closed)');
+  }
+  const writableReal = canonicalPathSync(roots.writable) ?? roots.writable;
+  if (!isPathInside(writableReal, studyReal)) {
+    throw ledgerUnreadable('the study directory resolves outside the writable console root (fail-closed)');
+  }
+  const historicalReal = canonicalPathSync(roots.historical) ?? roots.historical;
+  if (isSamePath(historicalReal, studyReal) || isPathInside(historicalReal, studyReal)) {
+    throw ledgerUnreadable('the study directory resolves inside the historical research area (fail-closed)');
+  }
+  return studyReal;
+}
+
+/** Linux-only atomic parent binding; null means "use the documented fallback". */
+function openPinnedStudyDir(studyReal: string): number | null {
+  if (process.platform !== 'linux') return null;
+  try {
+    return fs.openSync(studyReal, fs.constants.O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+  } catch (error) {
+    throw ledgerUnreadable(`the study directory cannot be opened safely (${errorCode(error)})`);
+  }
+}
+
+function closeQuietly(fd: number | null): void {
+  if (fd === null) return;
+  try { fs.closeSync(fd); } catch { /* already closed */ }
+}
+
+/** Remove ONLY a ledger this call created, and only through a verified parent. */
+function discardCreatedLedger(dirFd: number | null, studyReal: string): void {
+  try {
+    const expected = path.join(studyReal, 'events.jsonl');
+    if (dirFd !== null) {
+      fs.unlinkSync(`/proc/self/fd/${dirFd}/events.jsonl`);
+      return;
+    }
+    const real = canonicalPathSync(expected);
+    if (real && isSamePath(real, expected)) fs.unlinkSync(real);
+  } catch {
+    // Leftover empty file is reported by the caller's fail-closed error.
+  }
+}
+
+/**
+ * Open the ledger for `read` or `append` under the identity contract above.
+ * Returns null ONLY when the ledger is absent in read mode (first-run case).
+ */
+function openLedger(roots: StudyRoots, studyDir: string, mode: 'read' | 'append'): OpenedLedger | null {
+  const studyReal = resolveLedgerStudyDir(roots, studyDir);
+  const dirBefore = identityOf(studyReal);
+  if (!dirBefore) throw ledgerUnreadable('the study directory identity cannot be established (fail-closed)');
+  const dirFd = openPinnedStudyDir(studyReal);
+  const target = dirFd !== null ? `/proc/self/fd/${dirFd}/events.jsonl` : path.join(studyReal, 'events.jsonl');
+  let fd: number | null = null;
+  let created = false;
+  try {
+    if (mode === 'read') {
+      try {
+        fd = fs.openSync(target, fs.constants.O_RDONLY | O_NOFOLLOW);
+      } catch (error) {
+        if (errorCode(error) === 'ENOENT') {
+          closeQuietly(dirFd);
+          return null; // genuinely absent ledger — the only empty case
+        }
+        throw ledgerUnreadable(`the study event ledger cannot be opened (${errorCode(error)})`);
+      }
+    } else {
+      try {
+        fd = fs.openSync(target, fs.constants.O_WRONLY | fs.constants.O_APPEND | O_NOFOLLOW);
+      } catch (error) {
+        if (errorCode(error) !== 'ENOENT') {
+          throw ledgerUnreadable(`the study event ledger cannot be opened for append (${errorCode(error)})`);
+        }
+        try {
+          fd = fs.openSync(target, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_APPEND | O_NOFOLLOW);
+          created = true;
+        } catch (createError) {
+          throw ledgerUnreadable(`the study event ledger cannot be created exclusively (${errorCode(createError)})`);
+        }
+      }
+    }
+    const fileStat = fs.fstatSync(fd, { bigint: true });
+    if (!fileStat.isFile()) {
+      throw ledgerUnreadable('the study event ledger is not a regular file (symlink or special file refused)');
+    }
+    if (dirFd !== null) {
+      const dirStat = fs.fstatSync(dirFd, { bigint: true });
+      if (!dirStat.isDirectory() || !sameIdentity({ dev: dirStat.dev, ino: dirStat.ino }, dirBefore)) {
+        throw ledgerUnreadable('the study directory identity changed while the ledger was opened (fail-closed)');
+      }
+    } else {
+      // Documented fallback (Windows/macOS): identity re-check + exact canonical
+      // path of the ledger, evaluated AFTER the open and BEFORE any read/write.
+      if (!sameIdentity(identityOf(studyReal), dirBefore)) {
+        throw ledgerUnreadable('the study directory identity changed while the ledger was opened (fail-closed)');
+      }
+      const fileReal = canonicalPathSync(path.join(studyReal, 'events.jsonl'));
+      if (!fileReal || !isSamePath(fileReal, path.join(studyReal, 'events.jsonl'))) {
+        throw ledgerUnreadable('the study event ledger path resolves elsewhere (symlink or junction refused)');
+      }
+    }
+    return { fd, dirFd, created };
+  } catch (error) {
+    if (created) discardCreatedLedger(dirFd, studyReal);
+    closeQuietly(fd);
+    closeQuietly(dirFd);
+    throw error;
+  }
+}
+
+/** Read the WHOLE ledger through the verified fd (no path re-open). */
+function readAllFromFd(fd: number): string {
+  const chunks: Buffer[] = [];
+  const buffer = Buffer.alloc(LEDGER_READ_CHUNK);
+  let position = 0;
+  for (;;) {
+    const readBytes = fs.readSync(fd, buffer, 0, buffer.length, position);
+    if (readBytes === 0) break;
+    chunks.push(Buffer.from(buffer.subarray(0, readBytes)));
+    position += readBytes;
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+/** Write the WHOLE payload; a short write is retried, zero progress fails closed. */
+function writeAllToFd(fd: number, text: string): void {
+  const payload = Buffer.from(text, 'utf8');
+  let written = 0;
+  while (written < payload.length) {
+    const chunk = fs.writeSync(fd, payload, written, payload.length - written);
+    if (chunk <= 0) throw new Error('the study event ledger write made no progress (fail-closed)');
+    written += chunk;
+  }
+}
+
+export interface OwnedProbeDir { path: string; dev: bigint; ino: bigint; }
+export interface StudyDirPin { real: string; dev: bigint; ino: bigint; }
+
+/**
+ * Remove the dry-run probe directory ONLY when it is still the exact plain
+ * directory this run created (identity dev+ino), still resolves inside the
+ * same study directory, and the study directory itself has not been swapped.
+ * Any unprovable case keeps the residue and reports why — an unknown path is
+ * never deleted.
+ */
+export function removeProbeDirIfStillOwned(probe: OwnedProbeDir, study: StudyDirPin): { removed: boolean; reason?: string } {
   let stat: fs.Stats;
   try {
-    stat = fs.lstatSync(file);
+    stat = fs.lstatSync(probe.path);
   } catch (error) {
-    throw new ConsoleLedgerUnreadableError('ledger_unreadable', `the study event ledger could not be stat-ed: ${(error as Error).message}`);
+    return { removed: false, reason: `the probe path cannot be stat-ed (${errorCode(error)})` };
   }
-  if (stat.isSymbolicLink() || !stat.isFile()) {
-    throw new ConsoleLedgerUnreadableError('ledger_unreadable', 'the study event ledger is not a regular file (symlink or special file refused)');
+  if (stat.isSymbolicLink() || !stat.isDirectory()) {
+    return { removed: false, reason: 'the probe path is no longer a plain directory' };
   }
-  let lines: string[];
+  if (!sameIdentity(identityOf(probe.path), { dev: probe.dev, ino: probe.ino })) {
+    return { removed: false, reason: 'the probe directory identity changed' };
+  }
+  if (!sameIdentity(identityOf(study.real), { dev: study.dev, ino: study.ino })) {
+    return { removed: false, reason: 'the study directory identity changed' };
+  }
+  const probeReal = canonicalPathSync(probe.path);
+  if (!probeReal || !isPathInside(study.real, probeReal)) {
+    return { removed: false, reason: 'the probe directory no longer resolves inside the study' };
+  }
   try {
-    lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean);
+    fs.rmSync(probe.path, { recursive: true, force: true });
   } catch (error) {
-    throw new ConsoleLedgerUnreadableError('ledger_unreadable', `the study event ledger could not be read: ${(error as Error).message}`);
+    return { removed: false, reason: `removal failed (${errorCode(error)})` };
   }
+  try {
+    fs.lstatSync(probe.path);
+    return { removed: false, reason: 'the probe path still exists after removal' };
+  } catch (error) {
+    if (errorCode(error) === 'ENOENT') return { removed: true };
+    return { removed: false, reason: `post-removal verification failed (${errorCode(error)})` };
+  }
+}
+
+/** Safe ledger text reader: null ONLY when the ledger is legitimately absent. */
+function readLedgerText(roots: StudyRoots, studyDir: string): string | null {
+  const opened = openLedger(roots, studyDir, 'read');
+  if (!opened) return null;
+  try {
+    return readAllFromFd(opened.fd);
+  } catch (error) {
+    throw new ConsoleLedgerUnreadableError('ledger_unreadable', `the study event ledger could not be read (${(error as Error).message})`);
+  } finally {
+    closeQuietly(opened.fd);
+    closeQuietly(opened.dirFd);
+  }
+}
+
+/** Append one console-run lifecycle event to the study's events ledger. */
+export function appendConsoleRunEvent(roots: StudyRoots, studyDir: string, event: ConsoleRunEvent): void {
+  const opened = openLedger(roots, studyDir, 'append');
+  if (!opened) throw ledgerUnreadable('the study event ledger could not be opened for append (fail-closed)');
+  try {
+    writeAllToFd(opened.fd, `${JSON.stringify(event)}\n`);
+  } finally {
+    closeQuietly(opened.fd);
+    closeQuietly(opened.dirFd);
+  }
+}
+
+/** True when the ledger has RUN_STARTED without a following RUN_FINISHED. */
+function offlineExecutionInFlight(roots: StudyRoots, studyDir: string): boolean {
+  const text = readLedgerText(roots, studyDir);
+  if (text === null) return false;
+  let started = false;
+  let finished = false;
+  const lines = text.split('\n').filter(Boolean);
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? '';
+    let row: unknown;
+    try {
+      row = JSON.parse(line);
+    } catch (error) {
+      // A corrupt ledger is NEVER "no offline execution": refuse it here too.
+      throw new ConsoleLedgerUnreadableError('ledger_corrupt', `the study event ledger is corrupt at line ${index + 1} (JSON parse failed: ${(error as Error).message}) — refuse rather than treat as idle`);
+    }
+    if (!isJsonObject(row) || typeof row.type !== 'string') continue;
+    if (row.type === 'RUN_STARTED') started = true;
+    if (row.type === 'RUN_FINISHED') finished = true;
+  }
+  return started && !finished;
+}
+
+export class OfflineRunInFlightError extends Error {
+  constructor() {
+    super('an offline execution is currently in progress for this study (RUN_STARTED without RUN_FINISHED)');
+    this.name = 'OfflineRunInFlightError';
+  }
+}
+
+export function mintRunId(): string {
+  return `RUN-C-${randomUUID().toUpperCase()}`;
+}
+
+/** Derive the console-run states from the study ledger (never stored separately). */
+export function readConsoleRuns(roots: StudyRoots, studyDir: string): ConsoleRunState[] {
+  const text = readLedgerText(roots, studyDir);
+  if (text === null) return [];
+  const lines: string[] = text.split('\n').filter(Boolean);
   const runs = new Map<string, ConsoleRunState>();
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index] ?? '';
@@ -212,6 +434,59 @@ export function readConsoleRuns(studyDir: string): ConsoleRunState[] {
 
 export function currentConsoleRun(runs: ConsoleRunState[]): ConsoleRunState | null {
   return runs.find((run) => run.status === 'RUNNING') ?? null;
+}
+
+/**
+ * Study status projection (manifest + ledger settlement counts + report status).
+ * The DISPLAY projection tolerates single corrupt lines — the authoritative
+ * console-run reader refuses them and the route reports `ledgerProblem` — but
+ * it reads the ledger through the SAME secure fd boundary (never by path).
+ */
+export function studyStatusPayload(roots: StudyRoots, studyDir: string): Record<string, unknown> {
+  const manifest = readStudyJson(studyDir, 'examiner-manifest.json');
+  let events: Record<string, unknown>[] = [];
+  try {
+    const text = readLedgerText(roots, studyDir);
+    if (text !== null) {
+      events = text.trim().split('\n').filter(Boolean)
+        .map((line): Record<string, unknown> | null => {
+          try {
+            const parsed: unknown = JSON.parse(line);
+            return isJsonObject(parsed) ? parsed : null;
+          } catch {
+            return null;
+          }
+        })
+        .filter((row): row is Record<string, unknown> => row !== null);
+    }
+  } catch (error) {
+    if (!(error instanceof ConsoleLedgerUnreadableError)) throw error;
+    // The status route surfaces the structured ledgerProblem; this projection
+    // must not turn "unreadable" into fabricated clean zeroes.
+    events = [];
+  }
+  const counts: Record<string, number> = {};
+  for (const event of events) {
+    if (typeof event.type !== 'string' || !event.type.startsWith('UNIT_FINISHED')) continue;
+    const result = String(event.result ?? 'UNKNOWN');
+    counts[result] = (counts[result] ?? 0) + 1;
+  }
+  const target = isJsonObject(manifest.targetPrinciple) && typeof manifest.targetPrinciple.id === 'string'
+    ? manifest.targetPrinciple.id
+    : null;
+  const reportExists = fs.existsSync(path.join(studyDir, 'behavior-report-v2.json'));
+  const report = reportExists ? readStudyJson(studyDir, 'behavior-report-v2.json') : null;
+  return {
+    studyId: path.basename(studyDir),
+    experimentMode: manifest.experimentMode,
+    interventionType: manifest.interventionType,
+    targetPrincipleId: target,
+    plannedPairs: manifest.plannedPairs,
+    runStarted: events.some((event) => event.type === 'RUN_STARTED'),
+    runFinished: events.some((event) => event.type === 'RUN_FINISHED'),
+    unitStates: counts,
+    reportStatus: report ? report.status : null,
+  };
 }
 
 /**
@@ -260,12 +535,12 @@ export async function acceptConsoleRun(
   try {
     // Everything below is INSIDE the lock. A ledger that cannot be honestly
     // read refuses the acceptance (P1-4B) — never an empty-arrays guess.
-    const runs = readConsoleRuns(studyDir);
+    const runs = readConsoleRuns(roots, studyDir);
     const running = currentConsoleRun(runs);
     if (running) throw new ConsoleRunInProgressError(running);
     // A synchronous offline run in flight (RUN_STARTED without RUN_FINISHED)
     // also refuses: one execution at a time per study.
-    if (offlineExecutionInFlight(studyDir)) throw new OfflineRunInFlightError();
+    if (offlineExecutionInFlight(roots, studyDir)) throw new OfflineRunInFlightError();
     const runId = mintRunId();
     const acceptedAt = new Date().toISOString();
     appendConsoleRunEvent(roots, studyDir, {
@@ -281,6 +556,18 @@ export async function acceptConsoleRun(
       // lab's lock TTL discipline governs recovery.
     }
   }
+}
+
+/**
+ * Offline→async half of the single-active contract (P1-3).
+ *
+ * The lab runner calls this UNDER the study write lock, BEFORE RUN_STARTED,
+ * attempt reservation or actor creation. The caller (route layer) supplies it
+ * so `examiner-runs` and `examiner-executor` never import each other.
+ */
+export function assertOfflineAdmissionAllowed(roots: StudyRoots, studyDir: string): void {
+  const running = currentConsoleRun(readConsoleRuns(roots, studyDir));
+  if (running) throw new ConsoleRunInProgressError(running);
 }
 
 /** Best-effort liveness probe for the process that accepted a run. */
@@ -320,7 +607,7 @@ export async function recoverUnfinishedConsoleRuns(roots: StudyRoots): Promise<{
     // for "no runs" in) the others — skip it loudly and keep scanning.
     let runs: ConsoleRunState[];
     try {
-      runs = readConsoleRuns(dirReal);
+      runs = readConsoleRuns(roots, dirReal);
     } catch (error) {
       if (error instanceof ConsoleLedgerUnreadableError) {
         console.error(`[pd-console] examiner run recovery: study ${entry.name} ledger ${error.code} — skipped (not treated as no-runs): ${error.message}`);
@@ -331,10 +618,10 @@ export async function recoverUnfinishedConsoleRuns(roots: StudyRoots): Promise<{
     const running = currentConsoleRun(runs);
     if (!running) continue;
     // The accepting pid is only recoverable from the raw ACCEPTED event.
-    const file = path.resolve(dirReal, 'events.jsonl');
-    if (!file.startsWith(rootPrefix)) continue;
     try {
-      const accepted = fs.readFileSync(file, 'utf8').split('\n')
+      const text = readLedgerText(roots, dirReal);
+      if (text === null) continue;
+      const accepted = text.split('\n')
         .filter(Boolean)
         .map((line): unknown => JSON.parse(line))
         .filter((row): row is Record<string, unknown> => isJsonObject(row) && row.type === 'CONSOLE_RUN_ACCEPTED' && row.runId === running.runId)
@@ -474,37 +761,47 @@ export async function hostDryRunPass(input: { modules: LabModules; labRoot: stri
   check({ id: 'host_cli_probe', ok: hostOk, detail: hostNote });
 
   // 4. Isolation workspace probe: per-arm round dirs must be creatable inside
-  //    the writable study root. P1-6: an EXCLUSIVE mkdtemp probe (random
-  //    suffix, never following a pre-planted name) inside the study dir, and
-  //    the removal re-verifies the target is still the directory we created.
+  //    the writable study root. P1-2: EXCLUSIVE mkdtemp (random suffix, never a
+  //    fixed name), the study directory is re-verified through the ledger
+  //    boundary first, the created directory's identity is captured, the marker
+  //    is created exclusively with O_NOFOLLOW, and cleanup removes ONLY the
+  //    directory this run created while its identity and containment still
+  //    verify. If identity cannot be proven the residue is KEPT and reported.
   let isolationOk = false;
   let isolationNote: string;
+  let probeDir: string | null = null;
   try {
-    const probeDir = fs.mkdtempSync(path.join(studyDir, '.console-host-dry-run-probe-'));
-    let removed = false;
-    try {
-      const probeReal = canonicalPathSync(probeDir);
-      const studyReal = canonicalPathSync(studyDir);
-      if (!probeReal || !studyReal || !probeReal.startsWith(studyReal + path.sep)) {
-        throw new Error('the probe directory resolved outside the study — refusal, never cleanup of an unknown path');
-      }
-      const marker = path.join(probeDir, 'round-write.txt');
-      const markerFd = fs.openSync(marker, 'wx');
-      try {
-        fs.writeSync(markerFd, 'probe');
-      } finally {
-        fs.closeSync(markerFd);
-      }
-      removed = true;
-    } finally {
-      if (removed) {
-        fs.rmSync(probeDir, { recursive: true, force: true });
-      }
+    const studyReal = context ? resolveLedgerStudyDir(context.roots, studyDir) : canonicalPathSync(studyDir);
+    const studyIdentity = studyReal ? identityOf(studyReal) : null;
+    if (!studyReal || !studyIdentity) throw new Error('the study directory identity cannot be established (fail-closed)');
+    probeDir = fs.mkdtempSync(path.join(studyReal, '.console-host-dry-run-probe-'));
+    const probeStat = fs.lstatSync(probeDir);
+    if (probeStat.isSymbolicLink() || !probeStat.isDirectory()) throw new Error('the probe path is not a plain directory (fail-closed)');
+    const probeIdentity = identityOf(probeDir);
+    if (!probeIdentity) throw new Error('the probe directory identity cannot be established (fail-closed)');
+    const probeReal = canonicalPathSync(probeDir);
+    if (!probeReal || !isPathInside(studyReal, probeReal)) {
+      throw new Error('the probe directory resolved outside the study — refusal, never cleanup of an unknown path');
     }
+    const marker = path.join(probeDir, 'round-write.txt');
+    const markerFd = fs.openSync(marker, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | O_NOFOLLOW);
+    try {
+      const markerStat = fs.fstatSync(markerFd, { bigint: true });
+      if (!markerStat.isFile()) throw new Error('the probe marker is not a regular file (fail-closed)');
+      writeAllToFd(markerFd, 'probe');
+    } finally {
+      closeQuietly(markerFd);
+    }
+    const removal = removeProbeDirIfStillOwned(
+      { path: probeDir, dev: probeIdentity.dev, ino: probeIdentity.ino },
+      { real: studyReal, dev: studyIdentity.dev, ino: studyIdentity.ino },
+    );
+    if (!removal.removed) throw new Error(`the probe directory was NOT removed (${removal.reason ?? 'unknown reason'}) — residue kept, never an unknown-path delete`);
     isolationOk = !fs.existsSync(probeDir);
     isolationNote = isolationOk ? 'round-directory creation verified inside the writable study root (exclusive temp dir created + removed, no residue)' : 'the probe directory could not be removed — residue left behind';
   } catch (error) {
-    isolationNote = `round-directory creation failed: ${(error as Error).message}`;
+    const residue = probeDir !== null && fs.existsSync(probeDir) ? ` (residue kept: ${probeDir})` : '';
+    isolationNote = `round-directory creation failed: ${(error as Error).message}${residue}`;
   }
   check({ id: 'isolation_workspace_probe', ok: isolationOk, detail: isolationNote });
 

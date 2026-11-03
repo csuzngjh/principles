@@ -27,9 +27,10 @@ import os from 'node:os';
 import { handleExaminerRoute } from '../../../src/server/routes/examiner.js';
 import {
   readConsoleRuns, recoverUnfinishedConsoleRuns, appendConsoleRunEvent, mintRunId,
-  CONSOLE_RUN_SCHEMA, ConsoleLedgerUnreadableError, type ConsoleRunMode,
+  CONSOLE_RUN_SCHEMA, ConsoleLedgerUnreadableError, removeProbeDirIfStillOwned,
+  type ConsoleRunMode,
 } from '../../../src/server/routes/examiner-runs.js';
-import { resolveStudyRoots } from '../../../src/server/routes/examiner-executor.js';
+import { resolveStudyRoots, loadLabModules, offlineStudyPass } from '../../../src/server/routes/examiner-executor.js';
 import { disposeReceiptsModels } from '../../../src/server/routes/receipts.js';
 
 const STUDY_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9-]*$/;
@@ -165,7 +166,7 @@ async function createStudy(suiteKey = 'didactic-pair'): Promise<string> {
 async function waitForTerminalRun(studyId: string, runId: string, timeoutMs = 30_000): Promise<any> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const runs = readConsoleRuns(studyDirOf(studyId));
+    const runs = readConsoleRuns(resolveRoots(), studyDirOf(studyId));
     const found = runs.find((run) => run.runId === runId);
     if (found && found.status !== 'RUNNING') return found;
     if (Date.now() > deadline) throw new Error(`console run ${runId} did not settle in ${timeoutMs}ms`);
@@ -444,17 +445,17 @@ describe('P1-4 — atomic acceptance under the study lock + fail-loud ledger', (
     expect(refused.body.error).toBe('console_ledger_unreadable');
     const status = await call('GET', `/studies/${studyId}`);
     expect(status.body.data.consoleRuns.ledgerProblem.code).toBe('ledger_corrupt');
-    expect(() => readConsoleRuns(studyDirOf(studyId))).toThrow(ConsoleLedgerUnreadableError);
+    expect(() => readConsoleRuns(resolveRoots(), studyDirOf(studyId))).toThrow(ConsoleLedgerUnreadableError);
   });
 
   it('readConsoleRuns distinguishes ENOENT (empty) from a corrupt ledger (throw)', () => {
-    const fresh = path.join(tempDir, 'fresh-study');
+    const fresh = path.join(studiesRoot, 'fresh-study');
     fs.mkdirSync(fresh, { recursive: true });
-    expect(readConsoleRuns(fresh)).toEqual([]);
-    const corrupt = path.join(tempDir, 'corrupt-study');
+    expect(readConsoleRuns(resolveRoots(), fresh)).toEqual([]);
+    const corrupt = path.join(studiesRoot, 'corrupt-study');
     fs.mkdirSync(corrupt, { recursive: true });
     fs.writeFileSync(path.join(corrupt, 'events.jsonl'), '{broken\n');
-    expect(() => readConsoleRuns(corrupt)).toThrow(ConsoleLedgerUnreadableError);
+    expect(() => readConsoleRuns(resolveRoots(), corrupt)).toThrow(ConsoleLedgerUnreadableError);
   });
 
   it('a settled run timestamps finishedAt AFTER acceptedAt (settlement time, not request time)', async () => {
@@ -480,27 +481,43 @@ describe('P1-4 — atomic acceptance under the study lock + fail-loud ledger', (
 // ── P1-6: symlink / planted-link refusals ───────────────────────────────────
 
 describe('P1-6 — path and temp-file symlink safety', () => {
-  it('a ledger REPLACED by a symlink pointing outside the workspace is refused (acceptance + read)', async () => {
+  it('a ledger REPLACED by a link to an outside target is refused — external sentinel unchanged', async () => {
     const studyId = await createStudy();
-    const ledger = path.join(studyDirOf(studyId), 'events.jsonl');
-    const outside = path.join(tempDir, 'outside-ledger.jsonl');
-    fs.writeFileSync(outside, '{}\n');
+    const studyDir = studyDirOf(studyId);
+    const ledger = path.join(studyDir, 'events.jsonl');
+    const outsideDir = path.join(tempDir, 'outside-ledger-target');
+    fs.mkdirSync(outsideDir, { recursive: true });
+    const sentinel = path.join(outsideDir, 'sentinel.txt');
+    fs.writeFileSync(sentinel, 'SENTINEL');
+    const decoyLedger = path.join(outsideDir, 'events.jsonl');
+    const decoyBefore = '{"type":"CONSOLE_RUN_ACCEPTED","sentinel":true}\n';
+    fs.writeFileSync(decoyLedger, decoyBefore);
     fs.rmSync(ledger);
+    // Linux: a real file symlink. Windows without symlink privilege: a
+    // directory junction is still a REAL replacement attack (not a skip).
+    let linkedAs: 'file' | 'junction' = 'file';
     try {
-      fs.symlinkSync(outside, ledger, 'file');
+      fs.symlinkSync(sentinel, ledger, 'file');
     } catch (error) {
-      const { code } = error as { code?: string };
-      if (code === 'EPERM') {
-        console.warn('skipping file-symlink case: this platform refuses unprivileged symlinks (Linux CI covers it)');
-        return;
-      }
-      throw error;
+      const code = (error as { code?: string }).code;
+      if (code !== 'EPERM' && code !== 'EACCES') throw error;
+      linkedAs = 'junction';
+      fs.symlinkSync(outsideDir, ledger, 'junction');
     }
     const refused = await call('POST', `/studies/${studyId}/run`, { mode: 'host-dry-run' });
     expect(refused.statusCode).toBe(500);
     expect(refused.body.error).toBe('console_ledger_unreadable');
-    expect(() => readConsoleRuns(studyDirOf(studyId))).toThrow(ConsoleLedgerUnreadableError);
-    expect(fs.readlinkSync(ledger)).toBe(outside);
+    expect(() => readConsoleRuns(resolveRoots(), studyDir)).toThrow(ConsoleLedgerUnreadableError);
+    // The attack target was never read from or written to.
+    expect(fs.readFileSync(sentinel, 'utf8')).toBe('SENTINEL');
+    expect(fs.readFileSync(decoyLedger, 'utf8')).toBe(decoyBefore);
+    if (linkedAs === 'file') {
+      expect(fs.readlinkSync(ledger)).toBe(sentinel);
+    } else {
+      expect(fs.lstatSync(ledger).isSymbolicLink()).toBe(true);
+    }
+    // Unlink ONLY the link (never recurse through it).
+    fs.unlinkSync(ledger);
   });
 
   it('a study directory swapped for a symlink is skipped by recovery and refused for writes', async () => {
@@ -512,13 +529,42 @@ describe('P1-6 — path and temp-file symlink safety', () => {
     // Swap the directory for a link to a decoy OUTSIDE the studies root.
     const decoy = path.join(tempDir, 'decoy-study');
     fs.mkdirSync(decoy, { recursive: true });
+    const decoySentinel = path.join(decoy, 'sentinel.txt');
+    fs.writeFileSync(decoySentinel, 'SENTINEL');
     fs.copyFileSync(path.join(studyDirOf(studyId), 'events.jsonl'), path.join(decoy, 'events.jsonl'));
+    const decoyEventsBefore = fs.readFileSync(path.join(decoy, 'events.jsonl'), 'utf8');
     fs.rmSync(studyDirOf(studyId), { recursive: true });
     fs.symlinkSync(decoy, studyDirOf(studyId), 'junction');
     const recovered = await recoverUnfinishedConsoleRuns(resolveRoots());
     expect(recovered).toEqual([]);
-    // The decoy was never written through the link.
-    expect(fs.readFileSync(path.join(decoy, 'events.jsonl'), 'utf8')).not.toContain('CONSOLE_RUN_ABANDONED');
+    // The route refuses the swapped study and never writes through the link.
+    const status = await call('GET', `/studies/${studyId}`);
+    expect(status.statusCode).toBeGreaterThanOrEqual(400);
+    const run = await call('POST', `/studies/${studyId}/run`, { mode: 'host-dry-run' });
+    expect(run.statusCode).toBeGreaterThanOrEqual(400);
+    expect(fs.readFileSync(path.join(decoy, 'events.jsonl'), 'utf8')).toBe(decoyEventsBefore);
+    expect(fs.readFileSync(decoySentinel, 'utf8')).toBe('SENTINEL');
+    fs.unlinkSync(studyDirOf(studyId)); // remove the junction only
+  });
+
+  it('a study directory swapped to a SIBLING inside the writable root is refused (entry-name identity, not prefix)', async () => {
+    const studyAId = await createStudy();
+    const studyBId = await createStudy();
+    const dirA = studyDirOf(studyAId);
+    const dirB = studyDirOf(studyBId);
+    const sentinelB = path.join(dirB, 'sentinel.txt');
+    fs.writeFileSync(sentinelB, 'SENTINEL');
+    const decoyEventsBefore = fs.readFileSync(path.join(dirB, 'events.jsonl'), 'utf8');
+    fs.rmSync(dirA, { recursive: true });
+    fs.symlinkSync(dirB, dirA, 'junction');
+    expect(() => readConsoleRuns(resolveRoots(), dirA)).toThrow(ConsoleLedgerUnreadableError);
+    expect(() => appendConsoleRunEvent(resolveRoots(), dirA, {
+      type: 'CONSOLE_RUN_ACCEPTED', schema: CONSOLE_RUN_SCHEMA, runId: 'RUN-C-SIBLING', studyId: studyAId,
+      mode: 'host-dry-run' as ConsoleRunMode, acceptedAt: new Date().toISOString(), pid: process.pid, owner: 'pd-console',
+    })).toThrow(ConsoleLedgerUnreadableError);
+    expect(fs.readFileSync(path.join(dirB, 'events.jsonl'), 'utf8')).toBe(decoyEventsBefore);
+    expect(fs.readFileSync(sentinelB, 'utf8')).toBe('SENTINEL');
+    fs.unlinkSync(dirA);
   });
 
   it('the dry-run probe leaves NO fixed-name residue (exclusive temp dir)', async () => {
@@ -552,5 +598,98 @@ describe('P1-6 — path and temp-file symlink safety', () => {
     // The probe never wrote through the planted link: its target stays empty.
     expect(fs.readdirSync(decoy)).toEqual([]);
     fs.rmSync(legacyName, { force: true });
+  });
+
+  it('cleanup removes ONLY the probe directory this run created (identity + containment guard)', () => {
+    const studyDir = path.join(studiesRoot, 'cleanup-guard-study');
+    fs.mkdirSync(studyDir, { recursive: true });
+    const studyReal = fs.realpathSync.native(studyDir);
+    const studyStat = fs.statSync(studyReal, { bigint: true });
+    const studyPin = { real: studyReal, dev: studyStat.dev, ino: studyStat.ino };
+
+    // 1. Our own untouched directory is removed.
+    const own = fs.mkdtempSync(path.join(studyReal, '.probe-'));
+    const ownStat = fs.statSync(own, { bigint: true });
+    expect(removeProbeDirIfStillOwned({ path: own, dev: ownStat.dev, ino: ownStat.ino }, studyPin)).toEqual({ removed: true });
+    expect(fs.existsSync(own)).toBe(false);
+
+    // 2. A mismatched identity (a different directory) is NEVER removed.
+    const other = fs.mkdtempSync(path.join(tempDir, 'other-probe-'));
+    fs.writeFileSync(path.join(other, 'sentinel.txt'), 'SENTINEL');
+    const otherStat = fs.statSync(other, { bigint: true });
+    const mismatch = removeProbeDirIfStillOwned(
+      { path: other, dev: otherStat.dev + 1n, ino: otherStat.ino },
+      studyPin,
+    );
+    expect(mismatch.removed).toBe(false);
+    expect(fs.readFileSync(path.join(other, 'sentinel.txt'), 'utf8')).toBe('SENTINEL');
+
+    // 3. The path replaced by a junction to the other directory keeps residue.
+    const replaced = fs.mkdtempSync(path.join(studyReal, '.probe-'));
+    const replacedStat = fs.statSync(replaced, { bigint: true });
+    fs.rmSync(replaced, { recursive: true });
+    fs.symlinkSync(other, replaced, 'junction');
+    const linked = removeProbeDirIfStillOwned({ path: replaced, dev: replacedStat.dev, ino: replacedStat.ino }, studyPin);
+    expect(linked.removed).toBe(false);
+    expect(fs.readFileSync(path.join(other, 'sentinel.txt'), 'utf8')).toBe('SENTINEL');
+    fs.unlinkSync(replaced);
+  });
+});
+
+// ── Single-active: both directions, deterministic barriers (no sleeps) ─────
+
+describe('single-active — offline ↔ async mutual exclusion under the study lock', () => {
+  function writeSentinel(): string {
+    const file = path.join(tempDir, 'race-sentinel.txt');
+    fs.writeFileSync(file, 'SENTINEL');
+    return file;
+  }
+
+  it('an ACCEPTED console run refuses the OFFLINE entry — no RUN_STARTED, no reservation', async () => {
+    const studyId = await createStudy();
+    const studyDir = studyDirOf(studyId);
+    appendConsoleRunEvent(resolveRoots(), studyDir, {
+      type: 'CONSOLE_RUN_ACCEPTED', schema: CONSOLE_RUN_SCHEMA, runId: 'RUN-C-ACTIVE', studyId,
+      mode: 'host-dry-run' as ConsoleRunMode, acceptedAt: new Date().toISOString(), pid: process.pid, owner: 'pd-console',
+    });
+    const sentinel = writeSentinel();
+    const refused = await call('POST', `/studies/${studyId}/run`, { mode: 'offline-stub' });
+    expect(refused.statusCode).toBe(409);
+    expect(refused.body.error).toBe('run_in_progress');
+    const events = readEvents(studyId);
+    expect(events.some((event) => event.type === 'RUN_STARTED')).toBe(false);
+    expect(fs.existsSync(path.join(studyDir, 'budget-ledger.jsonl'))).toBe(false);
+    expect(fs.readFileSync(sentinel, 'utf8')).toBe('SENTINEL');
+  });
+
+  it('an OFFLINE run holding the lock refuses the ASYNC entry — no CONSOLE_RUN_ACCEPTED', async () => {
+    const studyId = await createStudy();
+    const studyDir = studyDirOf(studyId);
+    const labRoot = path.join(repoRoot, 'scripts', 'dev', 'principle-learning-lab');
+    const modules = await loadLabModules(labRoot);
+    const roots = resolveRoots();
+    const sentinel = writeSentinel();
+
+    let signalEntered: () => void = () => {};
+    const entered = new Promise<void>((resolve) => { signalEntered = resolve; });
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => { release = resolve; });
+
+    const offline = offlineStudyPass(modules, studyDir, { labRoot, roots }, async () => {
+      signalEntered();
+      await held; // barrier: the offline run holds the study lock here
+    });
+    await entered;
+
+    const asyncRun = await call('POST', `/studies/${studyId}/run`, { mode: 'host-dry-run' });
+    expect(asyncRun.statusCode).toBe(409);
+    expect(readEvents(studyId).some((event) => event.type === 'CONSOLE_RUN_ACCEPTED')).toBe(false);
+    expect(fs.readFileSync(sentinel, 'utf8')).toBe('SENTINEL');
+
+    release();
+    await offline;
+    const finalEvents = readEvents(studyId);
+    expect(finalEvents.some((event) => event.type === 'RUN_STARTED')).toBe(true);
+    expect(finalEvents.some((event) => event.type === 'RUN_FINISHED')).toBe(true);
   });
 });

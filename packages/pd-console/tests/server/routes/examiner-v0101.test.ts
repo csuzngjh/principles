@@ -467,14 +467,14 @@ describe('Examiner v0.10.1 — async execution contract (§12.3)', () => {
     expect(recovered).toEqual([{ studyId: created.studyId, runId: 'RUN-C-DEAD' }]);
     // Second recovery is a no-op — the run is terminal now.
     expect(await recoverUnfinishedConsoleRuns(roots)).toEqual([]);
-    const runs = readConsoleRuns(studyDirOf(created.studyId));
+    const runs = readConsoleRuns(resolveStudyRootsFromLab(), studyDirOf(created.studyId));
     expect(runs.find((run) => run.runId === 'RUN-C-DEAD')?.status).toBe('ABANDONED');
     expect(runs.find((run) => run.runId === 'RUN-C-DEAD')?.outcome).toBe('RESULT_UNKNOWN');
     // After recovery a NEW run may be started (the abandoned one is never retried).
     const again = await call('POST', `/studies/${created.studyId}/run`, { mode: 'host-dry-run' });
     expect(again.statusCode).toBe(202);
     await waitForTerminalRun(created.studyId, again.body.data.runId);
-    const final = readConsoleRuns(studyDirOf(created.studyId)).filter((run) => run.runId === 'RUN-C-DEAD');
+    const final = readConsoleRuns(resolveStudyRootsFromLab(), studyDirOf(created.studyId)).filter((run) => run.runId === 'RUN-C-DEAD');
     expect(final).toHaveLength(1);
     expect(final[0].status).toBe('ABANDONED');
   });

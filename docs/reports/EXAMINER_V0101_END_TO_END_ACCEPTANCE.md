@@ -178,3 +178,79 @@ Owner 评审提出六项 P1；本轮完成代码、定位并修复两处真实�
 4. CodeQL（非 required）对本 PR 改动行报 8 high + 1 note：`js/file-system-race` ×3 与 `js/insecure-temporary-file` ×1 位于 P1-6 的 lstat→append / 独占创建序列（Node 未暴露 `O_NOFOLLOW`，彻底消除需另行设计），`js/user-controlled-bypass` ×4 位于 `/studies/:id` 路由分发（正则匹配门控，属静态分析模式告警）；另 1 note 为未使用的 `SectionTitle` import。均未在 required gate 内，建议合并前由 Owner 安排一次独立安全复核，不在本轮扩大修改。
 
 **本轮结论**：六项 P1 全部 PASS；两处缺陷均有可复现的红灯证据与修复后绿灯证据；真实模型调用 0；PR 保持 OPEN，等待 Owner 授权合并。
+
+---
+
+## 11. 最后一轮：安全与单活执行约束收口（2026-11-03，trae）
+
+### 11.1 修复摘要
+
+| 项 | 改动 | 结果 |
+|---|---|---|
+| P1 events.jsonl 读写竞态 | `examiner-runs.ts` 新增单 fd 安全边界：canonical 边界（writable 内 / historical 外）+ 目录身份 dev+ino + **Linux `/proc/self/fd` 原子父目录绑定** + `O_NOFOLLOW` + `O_CREAT\|O_EXCL` + `fstat` 普通文件校验 + 同 fd 读写 + 完整写入循环 | PASS |
+| P1 host dry-run 临时目录 | 随机独占 `mkdtemp` 目录先验身份，marker `O_EXCL\|O_NOFOLLOW`，清理前重验目录/Study 身份与 realpath 归属；不可证明时保留残留并报告 | PASS |
+| P1 双向单活 | lab `runChallengeStudy` 新增可注入 `admissionCheck`，在 study write lock 内、`RUN_STARTED`/reservation/actor **之前**执行；route 层用 `assertOfflineAdmissionAllowed` 读同一 `events.jsonl`；异步入口原有锁内检查保留 | PASS |
+| P2 CodeQL 收口 | TOCTOU 三类告警改用 fd 边界；清理 unused `SectionTitle` import；`user-controlled-bypass` 4 条为路由选择器模式误报（见 11.4） | 见 11.4 |
+
+### 11.2 安全整改证据（根因 → 修复 → 攻击场景 → 回归 → 结果）
+
+| 攻击场景 | 修复前 | 修复后（真实输出） | sentinel |
+|---|---|---|---|
+| `events.jsonl` 被替换为指向工作区外的文件 symlink（Linux）／目录 junction（无 symlink 权限的 Windows 同样可复现） | `existsSync`→`lstat`→`append/read` 按路径重开，可被替换窗口利用 | `POST /run` → **500 `console_ledger_unreadable`**；`readConsoleRuns` 抛 `ConsoleLedgerUnreadableError`；link 原样保留 | 外部 `sentinel.txt` 与 decoy `events.jsonl` 字节不变 |
+| Study 目录被替换为指向 writable 外 decoy 的 junction | 仅字符串前缀/事后检查 | GET/POST 均 **≥400**；recovery 返回 `[]` 且不写 decoy | decoy `events.jsonl` 与 sentinel 字节不变 |
+| Study 目录被替换为 **writable 内 sibling** 的 junction（同名解析混淆） | canonical 后仍然落在 writable 内 | 入口名一致性校验拒绝（`resolved to a different entry name`）；读写均抛 `ConsoleLedgerUnreadableError` | sibling 的 ledger 与 sentinel 字节不变 |
+| ledger 存在损坏行 | 可能被当作“无运行” | 明确 `ledger_corrupt`（带行号）；离线入口同样拒绝（500） | 不变 |
+| 预置固定名探针链接 | 旧实现固定名可被预植 | 随机 `mkdtemp` 不跟随旧固定名 junction，诱饵目录零写入 | 诱饵目录为空 |
+| 清理竞态（探针目录被替换/身份变化） | 直接 `rmSync` | `removeProbeDirIfStillOwned`：身份不匹配/是链接/realpath 外移 → **不删除**并报告残留 | 其他目录 sentinel 不变 |
+
+**攻击复现真实输出**（临时脚本，位于 `.tmp/`，未入库，已清理）：
+```text
+PRE-FIX  decoy ledger now: "{\"type\":\"DECOY_SEED\"}\n{\"type\":\"PWNED_OUTSIDE_ROOT\"}"
+PRE-FIX  escape: WRITE REACHED OUTSIDE THE STUDY ROOT
+POST-FIX outcome: REFUSED: the study directory resolved to a different entry name — path swap refused (fail-closed)
+POST-FIX decoy unchanged: true
+POST-FIX sentinel untouched: SENTINEL
+```
+
+**平台差异（诚实裁定）**：
+- **Linux（CI/生产 Linux 运行时）**：目录 fd（`O_DIRECTORY|O_NOFOLLOW`）+ `/proc/self/fd/<n>` 相对打开，父目录身份由内核原子绑定；文件 `O_NOFOLLOW` + `fstat` + 同 fd 读写。**无 TOCTOU 残余窗口。**
+- **Windows / macOS**：Node 未暴露 `openat`/`O_NOFOLLOW`（本机实测 `O_NOFOLLOW=undefined`）。采用「open → fstat 普通文件 → 目录 dev+ino 前后一致 →  ledger canonical 路径必须仍等于 `<studyReal>/events.jsonl` → 之后才读/写」的 fail-closed 顺序。**残余窗口**：仅当攻击者在 open 与校验之间把目录连续换走再换回（双重切换，需对同一用户工作区目录有写权限）时可能未检出；一旦校验通过，已打开的 fd 无法被路径替换改写。鉴于攻击者模型是“同一 OS 用户下的进程”（其本就可读写该工作区），该残余不构成跨边界越权；**裁定：可接受**，不阻断 READY_FOR_OWNER_REVIEW，但记录为本轮平台限制。
+- 两平台测试均为**真实执行**（Windows 用目录 junction、Linux 用真实 symlink），不依赖 skip 取得 PASS。
+
+### 11.3 并发验证（确定性屏障，无 sleep）
+
+| 场景 | 结果 |
+|---|---|
+| A 两个异步同时提交 | 一个 202、一个 409（既有用例） |
+| B Console Run 已 ACCEPTED → offline-stub | **409 `run_in_progress`**；无 `RUN_STARTED`；无 `budget-ledger.jsonl`（无 reservation）；sentinel 不变 |
+| C offline 持有写锁（admissionCheck 屏障） → host-dry-run | **409**；无 `CONSOLE_RUN_ACCEPTED`；屏障释放后离线运行写出 `RUN_STARTED`+`RUN_FINISHED` |
+| D 两入口真并发 | 由 B/C 双向构造：任一入口持锁时另一入口被拒，不会出现两个 RUNNING/多余 `RUN_STARTED`/未被拒请求的 actor |
+
+### 11.4 CodeQL 处理与剩余风险
+
+- `js/file-system-race` ×3、`js/insecure-temporary-file` ×1（`examiner-runs.ts` 106/110/179）：**真实风险模式**，已用单 fd 边界整改；需以最新 HEAD 的 CI 扫描确认告警消失（本轮最终 CI 结果见 11.6）。
+- `js/user-controlled-bypass` ×4（`examiner.ts` 372/422/442）：**误报证据**——这些 `if` 是 `/studies/:id` 的正则路由选择器；真正的敏感动作在其后被 `resolveStudyAccess`（服务器自枚举 + Study ID 白名单 + canonical 边界 + ownership marker）控制。未做代码改动，也未全局关闭规则。
+- `js/unused-local-variable` ×1：已删除未使用的 `SectionTitle` import。
+- **剩余 High 是否可利用**：整改后 TOCTOU 类在 Linux 无残余；Windows/macOS 残余仅限「同用户已具备写权限 + 双重目录切换」，不构成越界读写。`user-controlled-bypass` 无可利用路径。
+
+### 11.5 真实测试数字
+
+| 套件 | 结果 |
+|---|---|
+| pd-console 全量 | **171 files / 3129 passed + 1 expected fail（0 failed）** |
+| Examiner 定向（v09 路由、v0101、repair、path-boundary、BDD） | **5 files 全通过**；repair 文件 **22 例** |
+| lab 契约 | **95/95** |
+| 历史基线 | `ok=true checked=593 mismatches=0`（基线 v7→v8，delta 恰四文件） |
+| Playwright E2E（真实浏览器） | **6/6** |
+| tsc / eslint / check-runtime-contract | PASS / 0 error / 0 new violations |
+| 真实模型调用 / 生产状态变更 | **0 / 0** |
+
+### 11.6 Git 与 CI
+
+- 基线：本轮起点 `8bc27a10e`（与 `origin/main` 同步）；增量提交见下方最终报告。
+- Required CI 在最终 HEAD 由 CI 判定（本报告不预设绿）。
+
+### 11.7 Follow-up
+
+1. 若未来 Owner 要求 Windows/macOS 也达到 Linux 级原子绑定，需要 native addon 或改用 `openat` 封装；纯 Node API 无法提供，届时另立 SPEC，不得在本 PR 内以字符串检查冒充解决。
+2. ledger 读路径的 fd 循环读已改为分块（64KB），超大 ledger 仍为全量内存解析（未新增流式解析，避免扩大范围）。

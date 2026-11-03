@@ -302,45 +302,6 @@ export function writableStudyDirProblem(roots: StudyRoots, studyDir: string): st
   return null;
 }
 
-/** Study status projection (manifest + ledger settlement counts + report status). */
-export function studyStatusPayload(studyDir: string): Record<string, unknown> {
-  const manifest = readStudyJson(studyDir, 'examiner-manifest.json');
-  const eventsFile = path.join(studyDir, 'events.jsonl');
-  // P1-4B: the DISPLAY projection tolerates single corrupt lines (the
-  // authoritative console-run reader refuses them — see examiner-runs);
-  // counts derived here just skip what cannot be classified.
-  const events: Record<string, unknown>[] = fs.existsSync(eventsFile)
-    ? fs.readFileSync(eventsFile, 'utf8').trim().split('\n').filter(Boolean)
-      .map((line): Record<string, unknown> | null => {
-        try {
-          return asJsonObject(JSON.parse(line), eventsFile);
-        } catch {
-          return null;
-        }
-      })
-      .filter((row): row is Record<string, unknown> => row !== null)
-    : [];
-  const counts: Record<string, number> = {};
-  for (const event of events) {
-    if (typeof event.type !== 'string' || !event.type.startsWith('UNIT_FINISHED')) continue;
-    const result = String(event.result ?? 'UNKNOWN');
-    counts[result] = (counts[result] ?? 0) + 1;
-  }
-  const reportExists = fs.existsSync(path.join(studyDir, 'behavior-report-v2.json'));
-  const report = reportExists ? readStudyJson(studyDir, 'behavior-report-v2.json') : null;
-  return {
-    studyId: path.basename(studyDir),
-    experimentMode: manifest.experimentMode,
-    interventionType: manifest.interventionType,
-    targetPrincipleId: stringField(manifest.targetPrinciple, 'id'),
-    plannedPairs: manifest.plannedPairs,
-    runStarted: events.some((event) => event.type === 'RUN_STARTED'),
-    runFinished: events.some((event) => event.type === 'RUN_FINISHED'),
-    unitStates: counts,
-    reportStatus: report ? (report.status) : null,
-  };
-}
-
 /** Read-only Report V2 payload + replay verification. */
 export function studyReportPayload(modules: LabModules, studyDir: string): Record<string, unknown> | null {
   if (!fs.existsSync(path.join(studyDir, 'behavior-report-v2.json'))) return null;
@@ -453,7 +414,12 @@ export function preflightCheck(
  * before RUN_STARTED — but a blocker here means the runner is not called at
  * all, so no attempt is reserved and no actor is created.
  */
-export async function offlineStudyPass(modules: LabModules, studyDir: string, context?: StudyDirContext): Promise<{ units: Record<string, unknown>[] }> {
+export async function offlineStudyPass(
+  modules: LabModules,
+  studyDir: string,
+  context?: StudyDirContext,
+  admissionCheck?: (input: { studyDir: string }) => void | Promise<void>,
+): Promise<{ units: Record<string, unknown>[] }> {
   // The write boundary is re-evaluated here (not only at route start): a
   // directory swapped for a symlink/junction after access resolution must not
   // reach the runner.
@@ -477,6 +443,9 @@ export async function offlineStudyPass(modules: LabModules, studyDir: string, co
     },
     actorFactory: ({ armId }: { armId: string }) => modules.actor.createScriptedStub({ actions: didacticActions(armId) }),
     execution: { mode: 'offline-stub' },
+    // P1-3: the runner invokes this UNDER the study write lock, before
+    // RUN_STARTED / reservation / actor creation. Supplied by the route layer.
+    ...(admissionCheck ? { admissionCheck } : {}),
   });
 }
 
