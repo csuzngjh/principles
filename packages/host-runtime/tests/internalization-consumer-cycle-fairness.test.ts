@@ -82,6 +82,20 @@ async function seedTask(workspaceDir: string, taskId: string, taskKind: string, 
   });
 }
 
+async function seedInvalidMetadataTask(workspaceDir: string, taskId: string, taskKind = 'dreamer'): Promise<void> {
+  await withState(workspaceDir, async (sm) => {
+    await sm.createTask({
+      taskId,
+      taskKind,
+      status: 'pending',
+      attemptCount: 0,
+      maxAttempts: 3,
+      // `{}` cannot hydrate into a valid PI task → invalidMetadataCount.
+      diagnosticJson: '{}',
+    });
+  });
+}
+
 function markSucceeded(runner: unknown): void {
   vi.spyOn(runner.prototype, 'run').mockImplementation(async function (this: { stateManager: RuntimeStateManager }, taskId: string) {
     await this.stateManager.markTaskSucceeded(taskId, 'test://run');
@@ -178,6 +192,41 @@ describe('PRI-954 oldest-ready-stage-first fairness', () => {
     // stage is expected chain behavior, not batching).
     expect(statuses.get('dreamer-1-corr-fair-prompt')).toBe('succeeded');
     expect(statuses.get('dreamer-2-corr-fair-prompt')).toBe('pending');
+  });
+
+  // PRI-988: a queue whose only pending tasks failed hydration must not look
+  // like a plain empty queue on the heartbeat telemetry. The SKIP event now
+  // carries the snapshot's diagnosis, with the existing MAX_SAMPLES bound.
+  it('PRI-988: no_ready_tasks SKIP carries hydration failure counts and bounded samples', async () => {
+    const workspace = makeWorkspace();
+    const ids = ['invalid-1', 'invalid-2', 'invalid-3', 'invalid-4'];
+    for (const id of ids) await seedInvalidMetadataTask(workspace, id);
+
+    const events: Array<{ event: string; payload: string }> = [];
+    const outcome = await runInternalizationConsumerCycle(workspace, {
+      owner: 'test',
+      logLabel: 'SKIP',
+      logger,
+      emitEvent: (event, payload) => events.push({ event, payload }),
+    });
+    expect(outcome.ran).toBe(false);
+    expect(outcome.skipReason).toBe('no_ready_tasks');
+
+    const skip = events.find((entry) => entry.event === 'INTERNALIZATION_CONSUMER_SKIP');
+    expect(skip).toBeDefined();
+    const payload = JSON.parse(skip?.payload ?? '{}') as {
+      reason?: string;
+      readyTaskCount?: number;
+      invalidMetadataCount?: number;
+      sampleInvalidTaskIds?: string[];
+      noReadyTasks?: { reason: string; inspectedCount: number } | null;
+    };
+    expect(payload.reason).toBe('no_ready_tasks');
+    expect(payload.readyTaskCount).toBe(0);
+    expect(payload.invalidMetadataCount).toBe(4);
+    // MAX_SAMPLES is 3 in the owning read model — never the full queue.
+    expect(payload.sampleInvalidTaskIds).toEqual(ids.slice(0, 3));
+    expect(payload.noReadyTasks).toEqual({ reason: 'all_hydration_failed', inspectedCount: 4 });
   });
 
   it('G: empty queue degrades as no_ready_tasks and the next cycle resumes', async () => {
