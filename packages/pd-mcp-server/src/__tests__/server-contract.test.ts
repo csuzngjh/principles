@@ -203,3 +203,20 @@ describe('single text content block (§4.6)', () => {
     await h.client.close();
   });
 });
+
+describe('response budget (§4.7)', () => {
+  it('withholds an over-budget envelope with isError instead of truncating it', async () => {
+    const h = await makeHarness(async () => {
+      const oversized = envelope('ok');
+      // 32 KiB budget + 1 byte is enough to cross it once JSON framing is added.
+      oversized.warnings = [`oversized-warning:${'x'.repeat(33_000)}`];
+      return oversized;
+    });
+    const result = await h.client.callTool({ name: TOOL_NAME, arguments: { principleId: 'p-1' } });
+    expect(result.isError).toBe(true);
+    const text = textOf(result);
+    expect(text).toContain('response_budget_exceeded');
+    expect(text).not.toContain('x'.repeat(1000));
+    await h.client.close();
+  });
+});

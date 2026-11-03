@@ -992,8 +992,9 @@ describe('first-run $pd-control setup (real user flow)', () => {
     // @principles/pd-mcp-server ships on the same release train as the other
     // pins but is younger than the published cohort on this branch — feed the
     // flow a minimal LOCAL source package (name/version per the pin file) via
-    // the documented env fallback; the real install path stays exercised and
-    // server behavior is covered by @principles/pd-mcp-server's own suite.
+    // the documented env fallback. The real install path stays exercised, and
+    // the launcher probe below replaces the placeholder bytes with the real
+    // built server to prove discovery (server behavior also has its own suite).
     const pinsForSource: unknown = JSON.parse(fs.readFileSync(path.join(pluginDir, 'runtime-version.json'), 'utf8'));
     if (!isRecord(pinsForSource) || typeof pinsForSource.mcpServer !== 'string') {
       throw new Error('runtime pin file is missing the mcpServer version');
@@ -1072,6 +1073,41 @@ describe('first-run $pd-control setup (real user flow)', () => {
       core: pins.core,
       mcpServer: pins.mcpServer,
     });
+
+    // CodeRabbit (PR #2304): a first-run fixture that ships a comment-only
+    // dist/index.js proves nothing about the installed MCP server. Launch the
+    // REAL built server bytes through the shipped launcher and require discovery,
+    // so a placeholder install can no longer pass this test.
+    const realServerDist = path.join(repoRoot, 'packages', 'pd-mcp-server', 'dist');
+    const installedServerDist = path.join(pluginData, 'runtime', 'node_modules', '@principles', 'pd-mcp-server', 'dist');
+    fs.cpSync(realServerDist, installedServerDist, { recursive: true });
+    // The npm-installed package has no nested node_modules (deps are hoisted in
+    // the runtime tree); link the registry deps the server imports so the launch
+    // resolves exactly as it does from the installed runtime directory.
+    for (const dep of ['@modelcontextprotocol/server', 'zod']) {
+      const link = path.join(pluginData, 'runtime', 'node_modules', dep);
+      if (!fs.existsSync(link)) {
+        fs.mkdirSync(path.dirname(link), { recursive: true });
+        fs.symlinkSync(path.join(repoRoot, 'node_modules', dep), link, 'junction');
+      }
+    }
+    const discovery = spawnSync(process.execPath, [path.join(cachePlugin, 'mcp', 'launcher.cjs')], {
+      cwd: workspace,
+      encoding: 'utf8',
+      timeout: 30_000,
+      env: {
+        ...process.env,
+        CODEX_HOME: path.join(fakeHome, '.codex'),
+        HOME: fakeHome,
+        USERPROFILE: fakeHome,
+        HOMEDRIVE: path.parse(fakeHome).root.slice(0, 2),
+        HOMEPATH: fakeHome.slice(2).split(path.sep).join('/'),
+        PLUGIN_DATA: undefined,
+      },
+      input: `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'first-run-probe', version: '1' } } })}\n${JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' })}\n`,
+    });
+    expect(discovery.status, discovery.stderr.slice(0, 600)).toBe(0);
+    expect(discovery.stdout).toContain('pd_recall_principle_pains');
 
     // PRI-810 regression guard: the freshly installed runtime must satisfy the
     // Owner emergency-control capability contract (global pause / safety
