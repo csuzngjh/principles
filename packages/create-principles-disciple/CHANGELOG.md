@@ -1,5 +1,22 @@
 # create-principles-disciple
 
+## 1.147.0
+
+### Minor Changes
+
+- b37c67f: Gate 4-F (PRI-1071): the installer bundles and deploys `@principles/pd-mcp-server` as a runtime sibling component (release-locks, release asset, npm-distributed components and files manifest all carry it). The WorkBuddy host installer writes the MCP launcher binding during marketplace materialization. Payloads older than the component deploy unaffected — the MCP server then fails closed with an honest missing-entry state.
+
+### Patch Changes
+
+- d825694: Gate 4 (PRI-1071) third remediation round — context isolation, real rollback acceptance, and registration-conflict safety:
+  
+  - OpenClaw: the host-wide `mcp-binding.json` is written only from an explicitly declared PD workspace (`PD_WORKSPACE_DIR` / `OPENCLAW_WORKSPACE` / `principles-disciple.json`). Without one, the stale binding is removed and `pd-recall` fails closed (`binding_missing`) instead of binding the `main` agent's workspace for every agent. Per-agent hooks keep their existing workspace resolution.
+  - WorkBuddy installer: unchanged transaction semantics, now proven by a real fault injection — a read-only `installed_plugins.json` fails the registration commit after the cache swap, and the previous cache/binding/settings/registry are restored byte-for-byte, after which the real launcher still completes initialize / tools/list / tools/call.
+  - All three hosts: a same-name MCP registration owned by another server stops the install/setup BEFORE any config, binding, or cache write; a PD-owned same-name entry is reused idempotently; different names coexist; malformed or unattributable configs fail closed. `pd health` reports `CONFIG_DRIFT` with `mcp_same_name_conflict` / `mcp_registration_unverifiable`.
+  - `pd-mcp-server` startup logs a workspace fingerprint (SHA-256 prefix, never the path) so operators and acceptance runs can prove which workspace a process bound.
+- Updated dependencies [fb70a87]
+  - @principles/install-layout@0.4.1
+
 ## 1.146.10
 
 ### Patch Changes
