@@ -20,7 +20,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createHash } from 'node:crypto';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -35,33 +35,38 @@ import { disposeReceiptsModels } from '../../../src/server/routes/receipts.js';
 const STUDY_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9-]*$/;
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', '..');
-// Warm the lab engine during vitest's COLLECT phase (fork startup) instead of
-// inside the first test's timeout window: the route's first dynamic import of
-// examiner-study.mjs then hits the already-populated ESM cache. Under parallel
-// forks, several files cold-loading the lab simultaneously caused I/O storms
-// that blew even a 240s in-test timeout — collect time is unbounded by it.
-await import(pathToFileURL(path.join(repoRoot, 'scripts', 'dev', 'principle-learning-lab', 'lib', 'examiner-study.mjs')).href);
 
 function createMockRequest(method: string, url: string, body?: unknown): IncomingMessage {
-  const listeners: Record<string, Array<(chunk?: unknown) => void>> = {};
+  // A BUFFERING request double, never a timer. handleExaminerRoute awaits real
+  // I/O before it reaches readBody (the lab cold-load on the first request of
+  // a process, startup recovery on the first request per root). A
+  // `setTimeout(..., 0)` emitter loses that race on the first request — the
+  // body events fire before any listener exists, readBody's promise never
+  // settles, and the test deadlocks (this was the long-standing local hang).
+  // A real IncomingMessage buffers the body until a consumer subscribes;
+  // this double does the same: it emits the buffered body at the moment the
+  // reader subscribes to 'end' (readBody subscribes 'data' then 'end' in one
+  // synchronous block), so no macrotask can intervene.
+  const listeners: { data: Array<(chunk: Buffer) => void>; end: Array<() => void> } = { data: [], end: [] };
+  let emitted = false;
   const req = {
     method,
     url,
-    on(event: string, handler: (chunk?: unknown) => void) {
-      listeners[event] = listeners[event] ?? [];
-      listeners[event].push(handler);
+    on(event: 'data' | 'end', handler: (chunk?: unknown) => void) {
+      if (event === 'end') {
+        listeners.end.push(handler as () => void);
+        if (!emitted) {
+          emitted = true;
+          const payload = body === undefined ? null : Buffer.from(JSON.stringify(body));
+          if (payload !== null) for (const dataHandler of listeners.data) dataHandler(payload);
+          for (const endHandler of listeners.end) endHandler();
+        }
+      } else {
+        listeners.data.push(handler as (chunk: Buffer) => void);
+      }
+      return req;
     },
   };
-  if (body !== undefined) {
-    setTimeout(() => {
-      for (const handler of listeners.data ?? []) handler(Buffer.from(JSON.stringify(body)));
-      for (const handler of listeners.end ?? []) handler();
-    }, 0);
-  } else {
-    setTimeout(() => {
-      for (const handler of listeners.end ?? []) handler();
-    }, 0);
-  }
   return req as unknown as IncomingMessage;
 }
 
@@ -171,12 +176,7 @@ async function waitForTerminalRun(studyId: string, runId: string, timeoutMs = 30
 // ── P1-1: the production snapshot is INSIDE the freeze chain ────────────────
 
 describe('P1-1 — production snapshot inside the preregistration binding chain', () => {
-  // Cold-load safety net: under heavy parallel forks on a real-time-scanning
-// filesystem, the first lab-touching test can wait minutes on module parsing
-// (collect-time warmup already covers the common case; this bound only keeps
-// the local run deterministic). CI (Linux) never approaches it; a REAL
-// regression still fails loudly via assertions, not this timeout.
-it('a fresh study verifies with the snapshot hash-bound (manifest → binding → anchor)', { timeout: 600_000 }, async () => {
+  it('a fresh study verifies with the snapshot hash-bound (manifest → binding → anchor)', async () => {
     const studyId = await createStudy();
     const studyDir = studyDirOf(studyId);
     const manifest = JSON.parse(fs.readFileSync(path.join(studyDir, 'examiner-manifest.json'), 'utf8'));

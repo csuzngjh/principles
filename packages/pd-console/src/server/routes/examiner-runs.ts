@@ -43,6 +43,11 @@ export type ConsoleRunMode = 'host-dry-run' | 'f2-real-host';
 export type ConsoleRunEventType = (typeof CONSOLE_RUN_EVENT_TYPES)[number];
 export const CONSOLE_RUN_MODES: readonly ConsoleRunMode[] = ['host-dry-run', 'f2-real-host'];
 
+/** rc-2: real runtime guard for an untrusted mode value (no `as` narrowing). */
+function isConsoleRunMode(value: string): value is ConsoleRunMode {
+  return CONSOLE_RUN_MODES.some((mode) => mode === value);
+}
+
 /** Directory-name allowlist for the recovery scan (same charset as study handles). */
 const STUDY_DIR_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
@@ -186,7 +191,10 @@ export function readConsoleRuns(studyDir: string): ConsoleRunState[] {
     }
     if (!isJsonObject(parsed) || typeof parsed.type !== 'string' || !(CONSOLE_RUN_EVENT_TYPES as readonly string[]).includes(parsed.type)) continue;
     if (parsed.schema !== CONSOLE_RUN_SCHEMA || typeof parsed.runId !== 'string' || typeof parsed.mode !== 'string') continue;
-    const mode = parsed.mode as ConsoleRunMode;
+    // rc-2: an untrusted mode string is narrowed by a real guard, never `as`.
+    // A value outside the two supported modes is not a console-run event.
+    const mode = isConsoleRunMode(parsed.mode) ? parsed.mode : null;
+    if (mode === null) continue;
     const acceptedAt = typeof parsed.acceptedAt === 'string' ? parsed.acceptedAt : '';
     const existing = runs.get(parsed.runId) ?? { runId: parsed.runId, mode, status: 'RUNNING', acceptedAt, finishedAt: null, outcome: null, reason: null };
     if (parsed.type === 'CONSOLE_RUN_ACCEPTED') {
