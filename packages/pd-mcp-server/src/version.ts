@@ -1,8 +1,10 @@
 /**
  * Server identity — SPEC-PD-MCP-GATE4-001 §9.3 release manifest anchor.
  *
- * SERVER_VERSION is bumped by changesets together with the package version;
- * a unit test pins it to package.json so the two cannot drift.
+ * SERVER_VERSION mirrors the package version through the release
+ * materialization step (`syncMcpServerVersionMirror` in
+ * scripts/release/lib/version-plan.mjs); changesets alone rewrites only
+ * package.json. A unit test pins it to package.json so the two cannot drift.
  */
 export const SERVER_NAME = 'pd-mcp-server' as const;
 
