@@ -23,6 +23,13 @@ if (workbuddyAdapterPresent) {
 } else {
   console.error('[check-release-locks] packages/workbuddy-adapter absent — skipping its lock verification (pre-integration baseline).');
 }
+// Gate 4 (PRI-1071): same REQUIRED-once-present gate as generate-release-locks.
+const mcpServerPresent = existsSync(join(root, 'packages', 'pd-mcp-server', 'package.json'));
+if (mcpServerPresent) {
+  components.push('pd-mcp-server');
+} else {
+  console.error('[check-release-locks] packages/pd-mcp-server absent — skipping its lock verification (pre-Gate-4 baseline).');
+}
 const stagingRoot = mkdtempSync(join(tmpdir(), 'pd-check-release-locks-'));
 const npmCommand = process.platform === 'win32' ? (process.env.ComSpec ?? 'cmd.exe') : 'npm';
 const npmArgs = (args) => process.platform === 'win32' ? ['/d', '/s', '/c', ['npm', ...args].join(' ')] : args;

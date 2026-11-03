@@ -21,6 +21,14 @@ if (workbuddyAdapterPresent) {
 } else {
   console.error('[generate-release-locks] packages/workbuddy-adapter absent — no lock generated for it (pre-integration baseline).');
 }
+// Gate 4 (PRI-1071): the shared MCP server rides the same release-lock train
+// (same PRESENT gate convention as the WorkBuddy adapter).
+const mcpServerPresent = existsSync(join(root, 'packages', 'pd-mcp-server', 'package.json'));
+if (mcpServerPresent) {
+  components.push('pd-mcp-server');
+} else {
+  console.error('[generate-release-locks] packages/pd-mcp-server absent — no lock generated for it (pre-Gate-4 baseline).');
+}
 const stagingRoot = mkdtempSync(join(tmpdir(), 'pd-generate-release-locks-'));
 
 // Run npm through the running Node binary's own toolchain (same resolution as
