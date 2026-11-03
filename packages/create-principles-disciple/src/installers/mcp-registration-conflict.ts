@@ -258,7 +258,12 @@ interface TomlMcpEntry {
 function parseTomlScalarString(raw: string): string | undefined {
   const value = raw.trim();
   if (value.startsWith('"') && value.endsWith('"')) {
-    try { return JSON.parse(value) as string; } catch { return undefined; }
+    try {
+      const parsed: unknown = JSON.parse(value);
+      return typeof parsed === 'string' ? parsed : undefined;
+    } catch {
+      return undefined;
+    }
   }
   if (value.startsWith("'") && value.endsWith("'")) return value.slice(1, -1);
   return undefined;
