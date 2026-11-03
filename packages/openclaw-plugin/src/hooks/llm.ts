@@ -1,7 +1,6 @@
 import type { PluginHookLlmOutputEvent, PluginHookAgentContext, TokenUsage } from '../openclaw-sdk.js';
 import { trackLlmOutput, resetFriction, getInjectedPrincipleIds } from '../core/session-tracker.js';
 import { normalizeSeverity } from '../core/empathy-types.js';
-import { DetectionService } from '../core/detection-service.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
 import { sanitizeAssistantText } from './message-sanitize.js';
 import { emitPainDetectedEvent } from './pain.js';
@@ -128,15 +127,6 @@ export function extractEmpathySignal(text: string): EmpathySignal {
     return { detected: false, severity: 'mild', confidence: 1 };
 }
 
-export function isEmpathyAuditPayload(text: string): boolean {
-    if (!text || typeof text !== 'string') return false;
-    const trimmed = text.trim();
-    if (/^\{[\s\S]*"damageDetected"[\s\S]*\}$/.test(trimmed)) return true;
-    if (/^<empathy\s+([^>]*)\/?>/i.test(trimmed)) return true;
-    if (/^\s*\[EMOTIONAL_DAMAGE_DETECTED(?::(mild|moderate|severe))?\]\s*$/i.test(trimmed)) return true;
-    return false;
-}
-
 /**
  * Extract enhanced fields from lastAssistant (complete AssistantMessage) in hook payload.
  * Pure function — no I/O, no side effects. ERR-001 compliant.
@@ -243,21 +233,15 @@ export function handleLlmOutput(
         ctx.logger?.warn?.(`[PD:LLM] Failed to record task outcome: ${String(error)}`);
     }
 
-    // ── Track B: Semantic Pain Detection (V1.3.0 Funnel) ──
-    const detectionText = isEmpathyAuditPayload(text) ? '' : text;
-    const detectionService = DetectionService.get(wctx.stateDir);
-    const detection = detectionService.detect(detectionText);
+    // ── Pain emission (SPEC PD-PAIN-SEMANTICS-AND-DETECTION-ARCHITECTURE-001
+    // Phase 0): the legacy Semantic Confusion detection path (DetectionService
+    // funnel) was retired — error is not Pain. Its detection branch and Pain
+    // writes are gone; the shared write points below are now fed exclusively
+    // by the GFI branch (whose bounded retirement is Phase C).
 
-    // recordRuleMatch call removed (PRI-451 Wave 1): dead code — its only
-    // consumer was stats.pain.rulesMatched (dead counter, removed in Wave 1.5).
-
-    let painScore = detection.detected ? (detection.severity || 0) : 0;
-    let source = detection.detected
-        ? (detection.ruleId ? `llm_${detection.ruleId.toLowerCase()}` : `llm_${detection.source}`)
-        : '';
-    let matchedReason = detection.detected
-        ? `Agent triggered pain detection (Source: ${detection.source}${detection.ruleId ? `, Rule: ${detection.ruleId}` : ''})`
-        : '';
+    let painScore = 0;
+    let source = '';
+    let matchedReason = '';
 
     // ═══ Natural Language Rollback Detection ═══
     const rollbackMatch = /^\s*\[EMPATHY_ROLLBACK_REQUEST\]\s*$/m.exec(text);
@@ -280,19 +264,11 @@ export function handleLlmOutput(
         }
     }
 
-    // 3. Paralysis Check (from session state tracker)
-    const stuckThreshold = config.get('thresholds.stuck_loops_trigger') || 3;
-    const inputThreshold = config.get('thresholds.cognitive_paralysis_input') || 4000;
-    const paralysisScore = config.get('scores.paralysis') || 40;
+    // Phase 0 retirement: the LLM Paralysis trigger (stuckLoops over
+    // threshold) previously assigned painScore/source here — removed for the
+    // same error-is-not-Pain reason as the Semantic branch above.
 
-    if (state.stuckLoops >= stuckThreshold && state.totalInputTokens > inputThreshold && painScore < paralysisScore) {
-        painScore = paralysisScore;
-        source = 'llm_paralysis';
-        matchedReason = `Agent is stuck in low-output loops (${state.stuckLoops} consecutive turns with tiny output but huge context), indicating cognitive paralysis.`;
-    }
-
-    // If a semantic pain threshold is crossed, only valuable episodes enter Runtime v2.
-    // Lower-signal detections remain in the event log/GFI layer for accumulation.
+    // If a pain threshold is crossed, only valuable episodes enter Runtime v2.
     const painTriggerThreshold = config.get('thresholds.pain_trigger') || 30;
 
     // GFI-triggered pain: when accumulated friction crosses highGfi threshold,
