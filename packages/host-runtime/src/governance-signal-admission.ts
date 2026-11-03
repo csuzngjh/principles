@@ -384,8 +384,8 @@ const ADMISSION_CREATE_STATEMENTS = [
 function ensureGovernanceAdmissionSchema(db: Database.Database): void {
   db.transaction(() => {
     for (const statement of ADMISSION_CREATE_STATEMENTS) db.exec(statement);
-    // SPEC-CODEX-PAIN-CLOSURE-001 CR-01: this store also writes tool_calls
-    // (admitToolFailure); make sure the host tool-use-id join column exists on
+    // SPEC-CODEX-PAIN-CLOSURE-001 CR-01: trajectory evidence writers persist
+    // tool_calls; make sure the host tool-use-id join column exists on
     // workspaces whose base schema predates it (idempotent additive ALTER —
     // only when the table itself exists: governance-only databases without a
     // tool_calls table are a valid pre-existing state, not an error).
