@@ -16,6 +16,14 @@ const fs = require('fs');
 const path = require('path');
 const { codexDir, compareVersionDirs, locatePluginData, locatePluginRoot, locateWorkspace, pdCliCommand, readInstalledRuntimeVersions, requireFlagValue, resolvePluginSourceSnapshot } = require('./pd-locate.cjs');
 
+/** Case-insensitive on Windows, where the same directory can resolve with a
+ * different drive-letter case than the one setup recorded. */
+function samePath(left, right) {
+  const a = path.resolve(left);
+  const b = path.resolve(right);
+  return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+}
+
 function parseArgs(argv) {
   const out = { pluginRoot: undefined, pluginData: undefined, workspace: undefined, json: false, pdHealth: false };
   for (let i = 0; i < argv.length; i += 1) {
@@ -208,6 +216,9 @@ function main() {
     push('snapshot', 'ok', 'installed snapshot freshness not verifiable (plugin_root_not_located)');
   }
 
+  const workspaceDir = path.resolve(args.workspace ?? process.cwd());
+  const ws = locateWorkspace(workspaceDir);
+
   const data = locatePluginData(args.pluginData);
   if (data.ok) {
     const runtimeDir = path.join(data.pluginData, 'runtime');
@@ -224,6 +235,10 @@ function main() {
       push('runtime', 'degraded', 'runtime not installed in plugin data', 'Run the $pd-control setup skill to install the pinned runtime.');
     } else if (core === 'not-installed') {
       push('runtime', 'degraded', 'core runtime not installed in plugin data', 'Re-run $pd-control setup to install the pinned runtime.');
+    } else if (pins !== null && typeof pins.mcpServer !== 'string') {
+      // rc-9: pd-setup rejects a pin file without mcpServer (missing_pins), so
+      // a status "pinned match" here would be a health false-positive.
+      push('runtime', 'degraded', 'runtime-version.json has no mcpServer pin (pd-setup rejects this pin file)', 'Reinstall the plugin so runtime-version.json carries the mcpServer pin, then re-run $pd-control setup.');
     } else if (pins === null || typeof pins.codexAdapter !== 'string' || typeof pins.hostRuntime !== 'string' || typeof pins.core !== 'string') {
       push('runtime', 'ok', `adapter@${adapter} host-runtime@${hostRuntime} core@${core} (pin unverified${root.ok ? '' : ' — plugin root not located'})`);
     } else if (adapter !== pins.codexAdapter || hostRuntime !== pins.hostRuntime || core !== pins.core
@@ -244,11 +259,26 @@ function main() {
           && binding.schemaVersion === 'pd.mcp-binding.v1'
           && binding.host === 'codex'
           && typeof binding.workspaceDir === 'string' && path.isAbsolute(binding.workspaceDir)
-          && typeof binding.serverEntry === 'string' && path.isAbsolute(binding.serverEntry);
-        if (bindingOk) {
-          push('mcpBinding', 'ok', `pd-recall bound to ${path.basename(binding.serverEntry)} (host ${binding.host})`);
+          && typeof binding.runtimeDir === 'string' && path.isAbsolute(binding.runtimeDir)
+          && typeof binding.serverEntry === 'string' && path.isAbsolute(binding.serverEntry)
+          && path.resolve(binding.serverEntry) === path.resolve(path.join(binding.runtimeDir, 'node_modules', '@principles', 'pd-mcp-server', 'dist', 'index.js'))
+          && binding.versions !== null && typeof binding.versions === 'object'
+          && typeof binding.versions.mcpServer === 'string'
+          && binding.versions.mcpServer === mcpServer;
+        // A binding whose targets vanished (or that serves a DIFFERENT
+        // workspace than the one being inspected) makes the launcher fail or
+        // silently feed this host another workspace's evidence — status must
+        // not call that healthy.
+        const targetsPresent = bindingOk && fs.existsSync(binding.workspaceDir) && fs.existsSync(binding.serverEntry);
+        const boundWorkspace = !ws.ok || (bindingOk && samePath(binding.workspaceDir, ws.workspaceDir));
+        if (bindingOk && targetsPresent && boundWorkspace) {
+          push('mcpBinding', 'ok', `pd-recall bound to mcp-server@${binding.versions.mcpServer} (host ${binding.host})`);
+        } else if (bindingOk && !targetsPresent) {
+          push('mcpBinding', 'degraded', 'mcp-binding.json points at a missing workspace or MCP server entry', 'Re-run $pd-control setup to rebind the workspace and reinstall the pinned MCP server entry.');
+        } else if (bindingOk && !boundWorkspace) {
+          push('mcpBinding', 'degraded', `mcp-binding.json is bound to ${binding.workspaceDir}, not the selected workspace ${ws.workspaceDir} (pd-recall would keep serving the bound one)`, 'Re-run $pd-control setup in this workspace to rebind pd-recall.');
         } else {
-          push('mcpBinding', 'degraded', 'mcp-binding.json exists but is malformed', 'Re-run $pd-control setup to regenerate mcp-binding.json.');
+          push('mcpBinding', 'degraded', 'mcp-binding.json exists but is malformed or does not match the installed MCP server', 'Re-run $pd-control setup to regenerate mcp-binding.json.');
         }
       } catch {
         push('mcpBinding', 'degraded', 'mcp-binding.json missing (plugin reinstalled without setup?)', 'Re-run $pd-control setup to write mcp-binding.json; the MCP server refuses to start without it (fail-closed).');
@@ -258,8 +288,6 @@ function main() {
     push('runtime', 'degraded', data.reason, `${data.nextAction} Then run $pd-control setup.`);
   }
 
-  const workspaceDir = path.resolve(args.workspace ?? process.cwd());
-  const ws = locateWorkspace(workspaceDir);
   if (ws.ok) {
     const flag = readHostCodexFlag(path.join(ws.workspaceDir, '.pd', 'config.yaml'));
     if (flag.enabled === true) push('workspace', 'ok', `${ws.workspaceDir} — host.codex enabled (config override)`);

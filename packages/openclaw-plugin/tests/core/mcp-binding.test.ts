@@ -15,6 +15,7 @@ import {
   buildMcpBinding,
   canonicalMcpServerEntry,
   ensureMcpBinding,
+  invalidateMcpBinding,
   MCP_BINDING_HOST,
   MCP_BINDING_SCHEMA,
 } from '../../src/core/mcp-binding.js';
@@ -47,6 +48,7 @@ describe('ensureMcpBinding (Gate 4)', () => {
     expect(binding.schemaVersion).toBe(MCP_BINDING_SCHEMA);
     expect(binding.host).toBe(MCP_BINDING_HOST);
     expect(binding.workspaceDir).toBe(ws);
+    expect(binding.runtimeDir).toBe(path.join(home, '.pd', 'runtime'));
     expect(binding.serverEntry).toBe(entry);
     expect(binding.versions.mcpServer).toBe('0.1.0');
     fs.rmSync(home, { recursive: true, force: true });
@@ -109,11 +111,55 @@ describe('ensureMcpBinding (Gate 4)', () => {
     fs.rmSync(home, { recursive: true, force: true });
   });
 
-  it('buildMcpBinding carries the schema, host, workspace and entry verbatim', () => {
-    const binding = buildMcpBinding('C:\\ws', 'C:\\pd\\server.js');
+  it('buildMcpBinding carries the schema, host, workspace, runtime and entry verbatim', () => {
+    const binding = buildMcpBinding('C:\\ws', 'C:\\pd\\runtime', 'C:\\pd\\runtime\\pd-mcp-server\\dist\\index.js');
     expect(binding.schemaVersion).toBe(MCP_BINDING_SCHEMA);
     expect(binding.host).toBe(MCP_BINDING_HOST);
     expect(binding.workspaceDir).toBe('C:\\ws');
-    expect(binding.serverEntry).toBe('C:\\pd\\server.js');
+    expect(binding.runtimeDir).toBe('C:\\pd\\runtime');
+    expect(binding.serverEntry).toBe('C:\\pd\\runtime\\pd-mcp-server\\dist\\index.js');
+  });
+
+  it('rewrites when only the installed server version changed', () => {
+    const home = tempRoot('pd-oc-bind-home-');
+    const extRoot = tempRoot('pd-oc-bind-ext-');
+    fabricateServer(home, '0.1.0');
+    const ws = path.join(home, 'ws');
+    fs.mkdirSync(ws, { recursive: true });
+    expect(ensureMcpBinding(ws, extRoot, home).written).toBe(true);
+
+    fabricateServer(home, '0.2.0');
+    const rebound = ensureMcpBinding(ws, extRoot, home);
+    expect(rebound.written).toBe(true);
+    const binding = JSON.parse(fs.readFileSync(path.join(extRoot, 'mcp-binding.json'), 'utf8'));
+    expect(binding.versions.mcpServer).toBe('0.2.0');
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(extRoot, { recursive: true, force: true });
+  });
+});
+
+describe('invalidateMcpBinding (§3.5 fail-closed)', () => {
+  it('removes a stale binding and is a no-op when it is already absent', () => {
+    const extRoot = tempRoot('pd-oc-invalidate-');
+    expect(invalidateMcpBinding(extRoot)).toEqual({ ok: true, removed: false });
+
+    fs.writeFileSync(path.join(extRoot, 'mcp-binding.json'), '{"host":"openclaw"}');
+    expect(invalidateMcpBinding(extRoot)).toEqual({ ok: true, removed: true });
+    expect(fs.existsSync(path.join(extRoot, 'mcp-binding.json'))).toBe(false);
+    fs.rmSync(extRoot, { recursive: true, force: true });
+  });
+
+  it('reports a structured failure instead of throwing when removal fails', () => {
+    const extRoot = tempRoot('pd-oc-invalidate-');
+    // A non-empty DIRECTORY at the binding path cannot be removed by the
+    // non-recursive force delete, which is exactly the "cannot clean up" case.
+    fs.mkdirSync(path.join(extRoot, 'mcp-binding.json'));
+    fs.writeFileSync(path.join(extRoot, 'mcp-binding.json', 'keep.txt'), 'x');
+
+    const outcome = invalidateMcpBinding(extRoot);
+    expect(outcome.ok).toBe(false);
+    expect(outcome.removed).toBe(false);
+    expect(outcome.reason).toMatch(/^remove_failed:/);
+    fs.rmSync(extRoot, { recursive: true, force: true });
   });
 });

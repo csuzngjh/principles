@@ -33,6 +33,9 @@ on:
       # here alters the asset and must trigger Tier 1. Matches the impact
       # resolver's release scope (RELEASE_ASSET_REACHABLE_DIRS).
       - 'packages/codex-adapter/**'
+      # Gate 4 (PRI-1071): pd-mcp-server is a REQUIRED_COMPONENTS member and
+      # owns its own release lock; a change here alters the asset bytes.
+      - 'packages/pd-mcp-server/**'
       - 'package-lock.json'
       - '.github/workflows/release-reproducibility*.yml'
   workflow_dispatch:
@@ -82,6 +85,9 @@ jobs:
           npm run build --workspace=principles-disciple
           npm run build --workspace=@principles/pd-cli
           npm run build --workspace=@principles/pd-console
+          # Gate 4 (PRI-1071): build the MCP server before the installer
+          # bundles it (the bundle script also self-builds on clean checkouts).
+          npm run build --workspace=@principles/pd-mcp-server
           npm run build --workspace=create-principles-disciple
       - name: Compute the content-addressed build identity
         run: |

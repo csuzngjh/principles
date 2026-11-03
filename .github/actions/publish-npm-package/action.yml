@@ -21,7 +21,7 @@ description: >-
   checkout, while every manifest, build script and package payload comes
   from the cohort checkout at the workspace root — fixing publish tooling
   must never require burning a new product version. Closing steps (tag /
-  GitHub Release / ClawHub) live in finalize-npm-release, AFTER all eight
+  GitHub Release / ClawHub) live in finalize-npm-release, AFTER all nine
   npm legs — they must never block an unuploaded package.
 inputs:
   pkg_dir:
@@ -241,6 +241,9 @@ runs:
           npm run build:types --workspace=principles-disciple
           build_once @principles/codex-adapter build packages/codex-adapter
           build_once @principles/workbuddy-adapter build packages/workbuddy-adapter
+          # Gate 4 (PRI-1071): bundle-plugin.mjs copies the MCP server dist
+          # verbatim; its own leg uses the same build-once entry.
+          build_once @principles/pd-mcp-server build packages/pd-mcp-server
           build_once @principles/pd-cli build packages/pd-cli
           cd packages/create-principles-disciple && npm run build
           npm run build --workspace=@principles/pd-console
@@ -252,6 +255,10 @@ runs:
           build_once @principles/codex-adapter build packages/codex-adapter
         elif [ "$PKG_DIR" = "workbuddy-adapter" ]; then
           build_once @principles/workbuddy-adapter build packages/workbuddy-adapter
+        elif [ "$PKG_DIR" = "pd-mcp-server" ]; then
+          # Gate 4 (PRI-1071): the shared MCP server's dist is a required
+          # installer payload input (bundle-plugin.mjs copies it verbatim).
+          build_once @principles/pd-mcp-server build packages/pd-mcp-server
         else
           # No silent no-op: an unmapped leg would pack without dist/ and ship
           # a package whose `files` entries simply are not there (PRI-979).

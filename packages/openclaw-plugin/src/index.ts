@@ -16,7 +16,7 @@ import type {
 import * as path from 'path';
 import * as os from 'os';
 import { loadFeatureFlagFromConfig } from './core/pd-config-loader.js';
-import { ensureMcpBinding } from './core/mcp-binding.js';
+import { ensureMcpBinding, invalidateMcpBinding } from './core/mcp-binding.js';
 import { scheduleTelemetryExportForWorkspace } from './core/product-telemetry-trigger.js';
 import { checkConversationAccessConfig, getPluginEntry, ensureConversationAccessInConfig, isExplicitConversationAccessOptOut } from './core/config-health.js';
 export { checkConversationAccessConfig, getPluginEntry, ensureConversationAccessInConfig, isExplicitConversationAccessOptOut } from './core/config-health.js';
@@ -174,6 +174,21 @@ const plugin = {
       if (toolIssue) {
         api.logger.error(`[PD:health] Tool hook workspaceDir is INVALID: "${toolWorkspaceDir}" - ${toolIssue}`);
         api.logger.error(`[PD:health] Tool hook events will be written to the WRONG .state directory!`);
+        // SPEC §3.5: the launcher may only run against a CONFIRMED workspace.
+        // Leaving the previous binding on disk would keep serving the last
+        // resolved workspace's evidence, so remove it and let the launcher
+        // fail closed (binding_missing) until resolution succeeds again.
+        try {
+          const extensionRoot = PathResolver.getExtensionRoot() ?? process.cwd();
+          const invalidated = invalidateMcpBinding(extensionRoot);
+          if (invalidated.removed) {
+            api.logger.warn('[PD:health] removed stale mcp-binding.json: pd-recall MCP stays fail-closed until a workspace is confirmed');
+          } else if (!invalidated.ok) {
+            api.logger.warn(`[PD:health] mcp-binding removal failed: ${invalidated.reason}`);
+          }
+        } catch (err) {
+          api.logger.warn(`[PD:health] mcp-binding removal failed: ${String(err instanceof Error ? err.message : err)}`);
+        }
       } else {
         api.logger.info(`[PD:health] Tool hook workspaceDir OK: "${toolWorkspaceDir}"`);
         // Gate 4 (PRI-1071): keep the launcher binding in lockstep with the
@@ -185,7 +200,7 @@ const plugin = {
           const bindingOutcome = ensureMcpBinding(toolWorkspaceDir, extensionRoot, os.homedir());
           if (bindingOutcome.ok && bindingOutcome.written) {
             api.logger.info('[PD:health] mcp-binding.json updated for the pd-recall MCP server (restart the gateway to apply)');
-          } else if (!bindingOutcome.ok && bindingOutcome.reason !== 'mcp_server_component_missing') {
+          } else if (!bindingOutcome.ok) {
             api.logger.warn(`[PD:health] mcp-binding update skipped: ${bindingOutcome.reason}`);
           }
         } catch (err) {

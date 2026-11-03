@@ -86,6 +86,9 @@ describe('real plugin setup connects the existing Companion worker', () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('worker_registration_failed');
     expect(fs.readFileSync(manifest, 'utf8')).toBe('{broken');
+    // Gate 4: the MCP binding is written only after registration succeeds, so
+    // a failed setup never leaves a binding the next launcher would trust.
+    expect(fs.existsSync(path.join(repo, 'plugins', 'principles-disciple', 'mcp-binding.json'))).toBe(false);
   });
 
   it('reports manual processing explicitly when no canonical installation exists', () => {
@@ -151,6 +154,22 @@ describe('pd-setup attests the installed runtime bytes', () => {
     const result = run();
     expect(result.status, result.stderr).toBe(0);
     expect(JSON.parse(result.stdout).runtimeInstalled).toBe('already-present');
+  });
+
+  it('refuses to short-circuit a marker that recorded a local MCP source', () => {
+    // A local --mcp-server-source install must not be silently reused after the
+    // operator stops passing the source: the registry package has to replace
+    // those bytes. The unreachable registry makes the forced reinstall loud.
+    const { runtime, pins, run } = fixture(unreachableRegistry);
+    fs.writeFileSync(path.join(runtime, '.pd-runtime.json'), JSON.stringify({
+      ...pins,
+      mcpServerSource: path.join(os.tmpdir(), 'pd-gone-local-mcp-source'),
+    }));
+    const result = run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('runtime_install_failed');
+    // The failed reinstall must not rewrite the marker as if it had succeeded.
+    expect(fs.readFileSync(path.join(runtime, '.pd-runtime.json'), 'utf8')).not.toContain('installedAt');
   });
 
   it('refuses a marker whose claim the installed bytes contradict', () => {

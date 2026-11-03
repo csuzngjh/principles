@@ -2,10 +2,10 @@
 // Computes a content-addressed build identity for the release asset.
 //
 // The identity hashes every input that determines the asset's bytes:
-//   1. All six committed release-lock files (dependency resolution)
-//   2. The source tree of all six release components (esbuild inputs)
+//   1. All committed release-lock files (dependency resolution)
+//   2. The source tree of the release components (tsc/esbuild inputs)
 //   3. The build scripts that produce the asset (bundle-plugin, builder,
-//      deterministic-archive, build-self-contained-release)
+//      deterministic-archive, build-self-contained-release, MCP build)
 //   4. SOURCE_DATE_EPOCH (archive mtime normalization)
 //   5. The exact npm/better-sqlite3/prebuildify versions from the lock
 //
@@ -49,7 +49,7 @@ function hashDirectory(dir, extensions = null) {
 
 const lockRoot = join(INSTALLER_ROOT, 'release-locks');
 const lockHash = createHash('sha256');
-for (const component of ['core', 'host-runtime', 'plugin', 'pd-cli', 'console', 'install-layout']) {
+for (const component of ['core', 'host-runtime', 'plugin', 'pd-cli', 'console', 'install-layout', 'pd-mcp-server']) {
   const lockPath = join(lockRoot, component, 'package-lock.json');
   lockHash.update(component);
   lockHash.update(readFileSync(lockPath));
@@ -63,6 +63,7 @@ for (const script of [
   'scripts/build-self-contained-release.mjs',
   'scripts/deterministic-release-archive.mjs',
   'scripts/sqlite-prebuild-pruning.mjs',
+  'scripts/mcp-server-build.mjs',
 ]) {
   scriptHashes[script] = hashFile(join(INSTALLER_ROOT, script));
 }
@@ -77,6 +78,7 @@ const sourceRoots = {
   'pd-cli': join(ROOT, 'packages', 'pd-cli', 'src'),
   'console': join(ROOT, 'packages', 'pd-console', 'src'),
   'install-layout': join(ROOT, 'packages', 'install-layout', 'src'),
+  'pd-mcp-server': join(ROOT, 'packages', 'pd-mcp-server', 'src'),
 };
 const sourceHashes = {};
 for (const [name, dir] of Object.entries(sourceRoots)) {

@@ -17,7 +17,7 @@ import {
   recallPrinciplePainsCapability,
   type PainRecallCapabilityResult,
 } from '@principles/core/runtime-v2/pain-recall-capability';
-import { runWithDeadline, OrphanLimiter, DEFAULT_DEADLINE_MS } from './deadline.js';
+import { runWithDeadline, OrphanLimiter, AdmissionLimiter, DEFAULT_DEADLINE_MS } from './deadline.js';
 import { assembleResult, adapterFailureEnvelope, textResult, type ToolResult } from './envelope.js';
 import { RESPONSE_BUDGET_BYTES, withinBudget } from './budget.js';
 import { createLogger, sanitizeErrorKind, stderrSink } from './logging.js';
@@ -76,7 +76,11 @@ export interface PdMcpServerOptions {
 
 export interface PdMcpServerHandle {
   readonly mcpServer: McpServer;
+  /** Timeout stragglers tracked until their underlying work settles. */
   readonly orphans: OrphanLimiter;
+  /** Executing-call capacity; admission is reserved before the capability is
+   * invoked and released only on real settlement (§4.7). */
+  readonly admissions: AdmissionLimiter;
   /** Lifecycle flag: once closing, in-flight work drains and new calls get
    * the shutting-down failure (§5.5). */
   beginShutdown(): void;
@@ -112,6 +116,7 @@ export function createPdMcpServer(options: PdMcpServerOptions): PdMcpServerHandl
   } = options;
 
   const orphans = new OrphanLimiter();
+  const admissions = new AdmissionLimiter();
   let shuttingDown = false;
 
   const mcpServer = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });
@@ -133,16 +138,31 @@ export function createPdMcpServer(options: PdMcpServerOptions): PdMcpServerHandl
     },
     async (rawInput: unknown): Promise<ToolResult> => {
       const startedAt = Date.now();
-      // §4.7: the window covers validation → capability → projection →
+      // §4.7 admission: reserve execution capacity SYNCHRONOUSLY at handler
+      // entry, before any await and before the capability is called. Without
+      // this, N concurrent requests all pass an orphan-count check while none
+      // has timed out yet and N > limit capability calls start.
+      if (shuttingDown) {
+        log('warn', 'tool_call_refused_shutting_down', { durationMs: Date.now() - startedAt });
+        return shuttingDownResult();
+      }
+      if (!admissions.tryAcquire()) {
+        log('warn', 'tool_call_refused_saturated', {
+          durationMs: Date.now() - startedAt,
+          active: admissions.active,
+          max: admissions.max,
+        });
+        return executionFailedResult(
+          'The server is already executing the maximum number of concurrent calls; retry shortly.'
+        );
+      }
+      // The window covers validation → capability → projection →
       // serialization; validation of the parsed input is part of the race.
+      // The `finally` releases capacity when the UNDERLYING work actually
+      // settles — a deadline stops the wait, not the reservation. An orphan
+      // therefore keeps its slot until its promise resolves/rejects.
       const outcome = await runWithDeadline(
         async () => {
-          if (shuttingDown) {
-            return { kind: 'shuttingDown' as const };
-          }
-          if (orphans.saturated) {
-            return { kind: 'saturated' as const };
-          }
           try {
             // The SDK already validated against the zod schema; parse again
             // for the typed value (idempotent) and count it inside the window.
@@ -160,6 +180,8 @@ export function createPdMcpServer(options: PdMcpServerOptions): PdMcpServerHandl
             // raw exception (message/stack may carry paths or internals)
             // must NEVER reach the SDK's default handler-error path.
             return { kind: 'exception' as const, errorKind: sanitizeErrorKind(err) };
+          } finally {
+            admissions.release();
           }
         },
         deadlineMs,
@@ -187,16 +209,6 @@ export function createPdMcpServer(options: PdMcpServerOptions): PdMcpServerHandl
             }
             return textResult(failureJson, true);
           }
-          case 'shuttingDown': {
-            log('warn', 'tool_call_refused_shutting_down', { durationMs });
-            return shuttingDownResult();
-          }
-          case 'saturated': {
-            log('warn', 'tool_call_refused_saturated', { durationMs, orphans: orphans.size });
-            return executionFailedResult(
-              'The server is still draining earlier timed-out calls; retry shortly.'
-            );
-          }
           case 'exception': {
             // Sanitized category only — no message, no stack, no paths.
             log('error', 'tool_call_unexpected_exception', { durationMs, errorKind: outcome.value.errorKind });
@@ -207,8 +219,14 @@ export function createPdMcpServer(options: PdMcpServerOptions): PdMcpServerHandl
         }
       }
       // Deadline exceeded (§4.7): stop waiting, suppress the late result,
-      // report an Adapter execution failure. Not underlying cancellation.
-      log('warn', 'tool_call_deadline_exceeded', { durationMs, deadlineMs, orphans: orphans.size });
+      // report an Adapter execution failure. Not underlying cancellation:
+      // the capacity slot stays reserved until the orphan settles.
+      log('warn', 'tool_call_deadline_exceeded', {
+        durationMs,
+        deadlineMs,
+        active: admissions.active,
+        orphans: orphans.size,
+      });
       return executionFailedResult(
         `The call exceeded the ${deadlineMs} ms deadline; the late result is suppressed and will not be delivered.`
       );
@@ -218,9 +236,10 @@ export function createPdMcpServer(options: PdMcpServerOptions): PdMcpServerHandl
   return {
     mcpServer,
     orphans,
+    admissions,
     beginShutdown() {
       shuttingDown = true;
-      log('info', 'shutdown_begun', { orphans: orphans.size });
+      log('info', 'shutdown_begun', { orphans: orphans.size, active: admissions.active });
     },
     isShuttingDown() {
       return shuttingDown;

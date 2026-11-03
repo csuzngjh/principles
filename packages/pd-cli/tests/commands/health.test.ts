@@ -168,6 +168,9 @@ describe('handleHealth', () => {
       expect(jsonOutput.candidateLedgerConsistency.status).toBe('ok');
       expect(jsonOutput.candidateLedgerConsistency.missing).toBe(0);
       expect(jsonOutput.pdStateDb.exists).toBe(false);
+      // PRI-1071 Gate 4: the shared MCP section is part of the report.
+      expect(jsonOutput.mcp.host).toBe('openclaw');
+      expect(typeof jsonOutput.mcp.status).toBe('string');
     });
 
     it('outputs readable text format', async () => {
@@ -181,6 +184,7 @@ describe('handleHealth', () => {
       expect(allOutput).toContain('ledger.totalPrinciples: 5');
       expect(allOutput).toContain('candidateLedgerConsistency.status: ok');
       expect(allOutput).toContain('pdStateDb.exists: false');
+      expect(allOutput).toContain('mcp.status: ');
     });
 
     it('reports the reliability readiness section (PRI-662) — declared workspace', async () => {

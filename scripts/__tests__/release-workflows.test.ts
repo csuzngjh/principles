@@ -160,8 +160,8 @@ describe('publish-npm-package action — exact committed version (T17-T23)', () 
   it('publish legs carry no closing steps — they live in finalize-npm-release (PRI-886)', () => {
     const t = text();
     // Closing steps moved to the separate finalize action that runs AFTER
-    // all eight npm legs: a tag/release/marketplace failure must never
-    // block an unuploaded npm package.
+    // every npm leg: a tag/release/marketplace failure must never block an
+    // unuploaded npm package.
     expect(t).not.toContain('Reconcile Git tag');
     expect(t).not.toContain('gh release create');
     expect(t).not.toContain('clawhub package publish');

@@ -11,10 +11,11 @@ import {
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 describe('Codex runtime delivery authority and discoverability', () => {
-  it('requires all three exact cohort identities, including core, without floating latest', () => {
-    const versions = { '@principles/codex-adapter': '0.5.14', '@principles/host-runtime': '0.14.0', '@principles/core': '1.297.0' };
-    expect(nextPins(versions)).toEqual({ codexAdapter: '0.5.14', hostRuntime: '0.14.0', core: '1.297.0' });
+  it('requires all four exact cohort identities, including core and the MCP server, without floating latest', () => {
+    const versions = { '@principles/codex-adapter': '0.5.14', '@principles/host-runtime': '0.14.0', '@principles/core': '1.297.0', '@principles/pd-mcp-server': '0.1.0' };
+    expect(nextPins(versions)).toEqual({ codexAdapter: '0.5.14', hostRuntime: '0.14.0', core: '1.297.0', mcpServer: '0.1.0' });
     expect(() => nextPins({ ...versions, '@principles/core': 'latest' })).toThrow();
+    expect(() => nextPins({ ...versions, '@principles/pd-mcp-server': '^0.1.0' })).toThrow();
     expect(() => nextPins({ '@principles/codex-adapter': '0.5.14' })).toThrow();
   });
   it('payload edits must increase the host cache version; unrelated docs do not', () => {
@@ -24,8 +25,9 @@ describe('Codex runtime delivery authority and discoverability', () => {
     expect(() => checkMetadata('0.2.0', '0.2.0', false)).not.toThrow();
   });
   it('a delayed older release run cannot roll back a newer plugin cohort', () => {
-    const current = { codexAdapter: '0.5.14', hostRuntime: '0.14.0', core: '1.297.0' };
+    const current = { codexAdapter: '0.5.14', hostRuntime: '0.14.0', core: '1.297.0', mcpServer: '0.1.0' };
     expect(() => assertNoDowngrade(current, { ...current, core: '1.296.0' })).toThrow(/stale cohort/);
+    expect(() => assertNoDowngrade(current, { ...current, mcpServer: '0.0.9' })).toThrow(/stale cohort/);
     expect(() => assertNoDowngrade(current, current)).not.toThrow();
     expect(() => assertNoDowngrade(current, { ...current, core: '1.298.0' })).not.toThrow();
   });
@@ -131,11 +133,20 @@ describe('Codex runtime delivery authority and discoverability', () => {
     });
   });
 
-  it('production CI probes package bytes and publication reconciles a separate maintenance PR', () => {
+  it('production CI probes the PR-built runtime bytes and publication reconciles a separate maintenance PR', () => {
     const ci = fs.readFileSync(path.join(root, '.github/workflows/ci.yml'), 'utf8');
     const train = fs.readFileSync(path.join(root, '.github/workflows/publish-npm.yml'), 'utf8');
-    expect(ci).toContain('run: npm run check:runtime-pin');
+    // PRI-1071 P1-4E: pd-mcp-server@0.1.0 is unpublished while the PR is in
+    // review, so PR CI must NOT pull the pin cohort from the registry. It
+    // installs the tarballs this PR builds into an isolated runtime and
+    // probes those bytes; the published-cohort probe stays in the
+    // post-publication maintenance job.
+    expect(ci).not.toContain('run: npm run check:runtime-pin');
+    expect(ci).toContain('npm pack --ignore-scripts --pack-destination');
+    expect(ci).toContain('verify-pinned-runtime-capability.cjs --runtime-dir');
+    expect(ci).toContain('scripts/ci/verify-installed-mcp-server.mjs');
     expect(ci).toContain('sync-codex-runtime-pins.mjs --check-base');
+    expect(train).toContain('run: npm run check:runtime-pin');
     expect(train).toContain('sync-codex-runtime-pins.mjs --cohort');
     expect(train).toContain('needs.publish-full-product.result == \'success\'');
     expect(train).toContain('BRANCH=codex/runtime-pins-maintenance');

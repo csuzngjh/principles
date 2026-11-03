@@ -7,7 +7,7 @@
 | 配套文件 | ① `docs/implementation-reports/PD-MCP-GATE3-LATEST-SOURCE-DELTA-AUDIT.md`（事实）② `docs/specs/SPEC-PD-AGENT-CAPABILITY-API-001-v0.5.md`（契约）③ `docs/implementation-plans/PD-MCP-GATE3-IMPLEMENTATION-READINESS-001.md`（实施） |
 | 基线 | origin/main `0d0ea7eb5`（2026-11-01 复核） |
 | 修订记录 | r2（2026-11-01 最终修订轮）：①G-1 守卫拆分生产/测试分域（消除与测试迁移的规则冲突）；②三项数值限制责任归属分层（10 条=Core Capability/Gate 3；32 KiB 与 10s=Gate 4 MCP Adapter，READINESS §17 成文为 Gate 4 验收前置）<br>**r3（2026-11-02 记录收口）：决策状态更新见 §〇——OG-1/OG-2/Gate 3 实施=DONE；OG-3=NOT AUTHORIZED；D-06/WB 实机/Gate 4 宿主审批模型=PENDING**<br>**r4（2026-11-02 OG-3 授权同步）：D-06=OWNER_CONFIRMED（方案 A：MCP Server 与启动宿主同 Windows 用户权限，首期仅只读 Tool，产品文档须明示残余风险）；OG-3=AUTHORIZED（Owner 2026-11-02 对话指令，范围=Gate 4-A～4-F 隔离环境内完整实施，明确不含正式发布/远端推送/合并 PR/生产部署/修改 Owner 日常宿主配置；实施工单 PRI-1071；产品合同=SPEC-PD-MCP-GATE4-001 v1.2）；WB 实机验证与宿主审批模型转入 Gate 4-A～4-F 执行项** |
-| 裁定 | 交付时点裁定：**SPEC v0.5：READY（待 OG-1 采信冻结）｜Gate 3 实施：READY_PENDING_OG2**（历史）；**当前状态见 §〇 决策状态总表（OG-1/OG-2 已完成，Gate 3 已实施合并，OG-3 未授权）** |
+| 裁定 | 交付时点裁定：**SPEC v0.5：READY（待 OG-1 采信冻结）｜Gate 3 实施：READY_PENDING_OG2**（历史）；**当前状态见 §〇 决策状态总表（OG-1/OG-2 已完成，Gate 3 已实施合并，OG-3 已授权）** |
 
 ---
 

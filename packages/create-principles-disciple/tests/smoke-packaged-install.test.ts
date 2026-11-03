@@ -213,6 +213,11 @@ describe('Real packaged install smoke test', () => {
     expect(tarOutput).toContain('core/');
     expect(tarOutput).toContain('install-layout/dist/index.js');
     expect(tarOutput).toContain('plugin/dist/governance-audit.js');
+    // Gate 4 (PRI-1071): the installer tarball must carry the shared MCP
+    // server payload; a package built without it leaves pd-recall unavailable
+    // (fail-closed) even though the rest of PD installs.
+    expect(tarOutput).toContain('pd-mcp-server/dist/index.js');
+    expect(tarOutput).toContain('pd-mcp-server/package.json');
   }, 60_000);
 
   it('install to clean temp HOME succeeds', async () => {
@@ -241,6 +246,11 @@ describe('Real packaged install smoke test', () => {
     expect(pluginPkgJson.dependencies?.['better-sqlite3']).toBeDefined();
     expect(pluginPkgJson.dependencies?.['@principles/host-runtime']).toBeUndefined();
     expect(pluginPkgJson.devDependencies?.['@principles/host-runtime']).toBeUndefined();
+
+    // Gate 4 (PRI-1071): the npm package ships a complete MCP server component.
+    const mcpServerPkgDir = path.join(tempHomeDir, 'node_modules', 'create-principles-disciple', 'pd-mcp-server');
+    expect(fs.existsSync(path.join(mcpServerPkgDir, 'dist', 'index.js'))).toBe(true);
+    expect(fs.existsSync(path.join(mcpServerPkgDir, 'package.json'))).toBe(true);
   }, 240_000);
 
   it('production self-contained bundle installs with no npm invocation', async () => {
@@ -326,6 +336,16 @@ describe('Real packaged install smoke test', () => {
       const verification = obj['verification'] as Record<string, unknown>;
       expect(verification['storyA']).toBe('passed');
     }
+
+    // Gate 4 (PRI-1071): the installed runtime carries the canonical MCP
+    // server entry and its materialized runtime deps (the launchers point at
+    // ~/.pd/runtime/pd-mcp-server/dist/index.js).
+    const installedMcpDir = path.join(tempHomeDir, '.pd', 'runtime', 'pd-mcp-server');
+    expect(fs.existsSync(path.join(installedMcpDir, 'dist', 'index.js'))).toBe(true);
+    expect(fs.existsSync(path.join(installedMcpDir, 'package.json'))).toBe(true);
+    expect(fs.existsSync(path.join(installedMcpDir, 'node_modules', '@modelcontextprotocol', 'server'))).toBe(true);
+    expect(fs.existsSync(path.join(installedMcpDir, 'node_modules', 'zod'))).toBe(true);
+
     expect(npmWasInvoked).toBe(false);
   }, 600_000);
 
@@ -426,10 +446,15 @@ describe('Real packaged install smoke test', () => {
       for (const name of ['PROFILE.json', 'PROFILE.schema.json']) {
         const rel = `package/plugin/templates/workspace/.principles/${name}`;
         // cwd + relative tarball name: an absolute C:\… path makes GNU tar
-        // treat "C:" as a remote host on Windows.
-        execFileSync('tar', ['-xzf', path.basename(tarballPath), '-C', extractRoot, rel], {
+        // treat "C:" as a remote host on Windows — including inside -C, so
+        // the extraction root is entered via cwd instead of a flag.
+        const tarballArg = path
+          .relative(extractRoot, tarballPath)
+          .split(path.sep)
+          .join('/');
+        execFileSync('tar', ['-xzf', tarballArg, rel], {
           stdio: 'pipe',
-          cwd: path.dirname(tarballPath),
+          cwd: extractRoot,
         });
         const extracted = path.resolve(extractRoot, rel);
         expect(extracted.startsWith(extractRoot + path.sep)).toBe(true);

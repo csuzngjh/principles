@@ -5,7 +5,7 @@
 | 字段 | 内容 |
 |---|---|
 | 实施工单 | PRI-1071（In Progress） |
-| 基线 | origin/main `457bbf0fc`；分支 `ai/PRI-1071-mcp-gate4` |
+| 基线 | origin/main `457bbf0fc` → 整改后同步至 origin/main `9ef8d607d`（2026-11-03）；分支 `ai/PRI-1071-mcp-gate4`（PR #2304） |
 | 验收日期 | 2026-11-02 ～ 2026-11-03 |
 | 证据环境 | 全部隔离环境（隔离 CODEX_HOME / `--profile gate4` / 隔离 CODEBUDDY_CONFIG_DIR）；零 Owner 日常宿主配置写入 |
 | 支持判定 | 见 §4 判定表——两宿主 RUNTIME_VERIFIED，一宿主 IMPLEMENTED_NOT_RUNTIME_VERIFIED（诚实边界，见 §3.3） |
@@ -20,12 +20,12 @@
 | 工具发现 | 每宿主 20/20 | **20/20 × 3** | 同上（tools/list 每轮断言唯一 Tool + 名称） |
 | 真实 Tool 调用 | 每宿主 10/10 | **20/20 × 3**（超出门槛） | 同上（每轮 tools/call 断言 pd.capability.v1 envelope） |
 | 单次调用时延 | ≤10s | **≤1.05s**（P95 远低于门槛） | 同上 maxDurationMs |
-| 响应边界 32768/32769 | 均通过 | **包级契约测试钉住**（32768 逐字节通过/32769 → response_budget_exceeded 非静默截断） | `packages/pd-mcp-server/src/__tests__/budget-boundary.test.ts`（52/52 套件内） |
+| 响应边界 32768/32769 | 均通过 | **包级契约测试钉住**（32768 逐字节通过/32769 → response_budget_exceeded 非静默截断） | `packages/pd-mcp-server/src/__tests__/budget-boundary.test.ts`（84/84 套件内） |
 | 正常关闭 | ≥10 次 | **每宿主形态 20 次干净关停** | quant-probe shutdownOk 20/20 ×3 + 包级真实进程 10 次循环测试 |
-| 重复安装幂等 | ≥3 次 | **Codex：plugin add ×3（0.3.0→重装→0.3.1）幂等**；WB/OC 安装器幂等由 installer 测试覆盖 | Phase C 隔离记录 + workbuddy-host-installer 56/56 |
-| 更新失败回滚 | 故障注入 | **包级（binding 损坏 fail-closed + 恢复闭环已验证）；installer 事务机制复用既有单槽+备份（未重复造轮子）** | corrupt-binding 探针 + pd-setup 恢复闭环 |
+| 重复安装幂等 | ≥3 次 | **Codex：plugin add ×3（0.3.0→重装→0.3.1）幂等**；WB/OC 安装器幂等由 installer 测试覆盖 | Phase C 隔离记录 + workbuddy-host-installer 58/58 |
+| 更新失败回滚 | 故障注入 | **未验证**：尚无更新失败注入后上一可用版本恢复且可调用的证据 | corrupt-binding fail-closed + pd-setup 手动恢复不满足该门槛；installer 回滚为继承的既有单槽+备份机制，本 PR 未对其做 MCP 更新失败注入 |
 | 配置保护 | 无关配置零变化 | **Codex：用户级 e2e-other MCP 保留；OC：operator mcp.servers 保留；WB：settings 其余字段保留** | Phase C/D/E 各卸载段记录 |
-| 非回归 | 全绿 | **pd-mcp-server 52/52；core pain-recall 93/93；codex-adapter 全套 exit 0；installer WB 56/56；openclaw-plugin 2308 绿（4 预存在失败与 main 完全一致）** | 2026-11-03 各套件运行日志 |
+| 非回归 | 全绿 | **pd-mcp-server 84/84；pd-cli MCP health 54/54；core pain-recall 93/93（core 全套 586 通过）；codex-adapter 362 passed / 1 skipped；installer WB 58/58；openclaw-plugin 2314 passed / 4 failed（3 文件 4 测试与 main 基线逐字一致，Windows tar/EPERM/宿主路径环境性，非本分支回归）；发布列车契约 36/36；scripts 套件 3 处真实回归已修，其余失败项隔离复跑全绿（90/90、26/26）** | 2026-11-03 各套件运行日志（`.tmp/test-*.log`） |
 
 ---
 
@@ -51,7 +51,7 @@
 | **真实模型驱动的 tools/call** | ✅ | zai/glm-5.3-flash 真实 turn：模型调用 `pd-recall__pd_recall_principle_pains`，逐字返回 `status: unavailable / error.code: source_missing`（空工作区真实 Capability 行为）——**三宿主中唯一在真实会话内完成的模型级调用** |
 | binding 由插件写入（运行时解析 workspace） | ✅ 设计+单测 | mcp-binding.ts（5 单测：写入/幂等/组件缺失跳过/写失败结构化）；隔离环境观察：组件缺席时诚实跳过且不阻断（G4-07） |
 | 生命周期：卸载保留 operator mcp.servers / 插件 hooks 全程健康 | ✅ | uninstall 后 `mcp list` 仅剩 e2e-other；PD surface-guard 日志全程无错误 |
-| 非回归 | ✅ | openclaw-plugin 2308 绿（4 预存在失败与 main 一致，已逐字对照） |
+| 非回归 | ✅ | openclaw-plugin 2314 passed / 4 failed（3 文件 4 测试与 main 基线逐字一致，环境性） |
 
 ## 4. WorkBuddy Desktop 5.9.2 — IMPLEMENTED_NOT_RUNTIME_VERIFIED（模型级）
 
@@ -62,7 +62,7 @@
 | WB 形态 launcher 协议 E2E（20/20 量化 + 单轮） | ✅ | quant-probe workbuddy 形态 20/20；占位符展开后 spawn 形态与宿主一致 |
 | 生命周期：engine uninstall（cache 移除、settings 保留） | ✅ | 引擎 uninstall + settings.json 核验 |
 | **真实会话内模型驱动 tools/call** | ⏸ BLOCKED_BY_HOST_AUTH | Desktop 会话令牌为 DPAPI 绑定、不可文件移植；`/login` 需交互式浏览器签到——隔离环境无法无头完成。**不以此降低判定；后续补验路径见 §5** |
-| 非回归 | ✅ | workbuddy-adapter 构建绿 + installer WB 面 56/56 |
+| 非回归 | ✅ | workbuddy-adapter 构建绿 + installer WB 面 58/58 |
 
 ## 5. 判定表与补验路径
 
@@ -84,14 +84,15 @@
 
 | 项 | 值 |
 |---|---|
-| PD release | 2.8.0（本分支基线） |
-| @principles/core | 1.298.2（workspace）/ pin 列车 1.298.1 |
-| @principles/pd-mcp-server | 0.1.0 |
+| PD release | 2.8.0（仓库根 version） |
+| @principles/core | 2.0.0（workspace）；Codex payload pin 列车仍为 1.298.1（PRI-1040 published cohort，发布时由 release 流程刷新） |
+| @principles/pd-mcp-server | 0.1.0（**本分支尚未发布**；CI/安装验收一律使用 PR 构建的本地 tarball，不访问 npm） |
 | MCP SDK | `@modelcontextprotocol/server@2.4.0`（exact）+ `@modelcontextprotocol/core@2.4.0`（传递）+ `zod@4.6.7`（exact） |
-| Node 运行时 | v26.7.0（engines ≥20） |
+| Release Lock | `packages/create-principles-disciple/release-locks/pd-mcp-server/package-lock.json`（lockfileVersion 3，SDK exact 2.4.0，由 `npm run generate:release-locks` 生成，`check:release-locks` 以 `npm ci --omit=dev --ignore-scripts --legacy-peer-deps --install-links` 验证） |
+| Node 运行时 | v26.7.0（engines ≥20）；CI 为 node 22（MCP 测试）/ node 24（codex-plugin-delivery） |
 | Capability 协议 | pd.capability.v1 |
 | 披露 profile | od-a-v1 |
 | Codex 插件 | 0.3.0（payload 版本，pins 含 mcpServer 0.1.0） |
-| OpenClaw 插件 | 2.2.12（manifest mcpServers + mcp/ 随包） |
+| OpenClaw 插件 | 2.2.13（manifest mcpServers + mcp/ 随包） |
 | WorkBuddy 插件 | 0.2.2（payload，defaultEnabled:false） |
 | 已验收宿主版本 | Codex CLI 0.166.0；OpenClaw 2026.10.5 (1b58cb9)；WorkBuddy Desktop 5.9.2（Electron 37.10.3-43） |

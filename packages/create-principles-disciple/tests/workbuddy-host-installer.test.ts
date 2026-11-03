@@ -70,6 +70,9 @@ function writePluginSkeleton(pluginDir: string, version = '0.3.0'): void {
   fs.cpSync(path.resolve(__dirname, '../../workbuddy-adapter/plugin/skills'), path.join(pluginDir, 'skills'), { recursive: true });
   fs.mkdirSync(path.join(pluginDir, 'scripts'), { recursive: true });
   fs.copyFileSync(path.resolve(__dirname, '../../workbuddy-adapter/plugin/scripts/pd-control.cjs'), path.join(pluginDir, 'scripts', 'pd-control.cjs'));
+  // Gate 4: the payload contract (and the cache freshness check) includes the
+  // launcher; a skeleton without it would make every reinstall look stale.
+  fs.cpSync(path.resolve(__dirname, '../../workbuddy-adapter/plugin/mcp'), path.join(pluginDir, 'mcp'), { recursive: true });
 
   fs.mkdirSync(path.join(pluginDir, '.codebuddy-plugin'), { recursive: true });
   fs.writeFileSync(
@@ -315,8 +318,66 @@ describe('WorkBuddyHostInstaller.install — engine registration path', () => {
     expect(binding.host).toBe('workbuddy');
     // Frozen governance workspace SSoT (getWorkbuddyWorkspaceDir).
     expect(binding.workspaceDir).toBe(path.join(created.home, '.workbuddy', 'pd-workspace'));
+    // Gate 4 P2: the launcher validates serverEntry against this recorded
+    // runtime root and the Install Layout SSoT component dir.
+    expect(binding.runtimeDir).toBe(path.join(created.home, '.pd', 'runtime'));
     expect(binding.serverEntry).toBe(mcpEntry);
     expect(binding.versions).toMatchObject({ mcpServer: '0.1.0' });
+  });
+
+  it('refreshes a same-version cache whose MCP binding drifted from the marketplace payload (Gate 4)', async () => {
+    const created = lab();
+    const mcpEntry = path.join(created.home, '.pd', 'runtime', 'pd-mcp-server', 'dist', 'index.js');
+    fs.mkdirSync(path.dirname(mcpEntry), { recursive: true });
+    fs.writeFileSync(mcpEntry, '// fabricated MCP server entry\n');
+    fs.writeFileSync(
+      path.join(created.home, '.pd', 'runtime', 'pd-mcp-server', 'package.json'),
+      JSON.stringify({ name: '@principles/pd-mcp-server', version: '0.1.0' }, null, 2),
+    );
+    const first = await created.installer.install(installCtx(created));
+    expect(first.success).toBe(true);
+
+    const cacheBindingPath = path.join(
+      created.configDir, 'plugins', 'cache', WORKBUDDY_MARKETPLACE_NAME, WORKBUDDY_PLUGIN_NAME, '0.3.0', 'mcp-binding.json',
+    );
+    const cached = readJson(cacheBindingPath);
+    // A cache written by an earlier install could still bind ANOTHER
+    // workspace; reusing it would keep pd-recall serving that workspace.
+    fs.writeFileSync(cacheBindingPath, JSON.stringify({
+      ...cached,
+      workspaceDir: path.join(created.home, 'stale-workspace'),
+      writtenAt: new Date(0).toISOString(),
+    }, null, 2));
+
+    const second = await created.installer.install(installCtx(created));
+    expect(second.success).toBe(true);
+    expect(second.configAction).toBe('updated');
+    const refreshed = readJson(cacheBindingPath);
+    expect(refreshed.workspaceDir).toBe(path.join(created.home, '.workbuddy', 'pd-workspace'));
+  });
+
+  it('treats a binding that differs only by writtenAt as the same cache (idempotent reinstall)', async () => {
+    const created = lab();
+    const mcpEntry = path.join(created.home, '.pd', 'runtime', 'pd-mcp-server', 'dist', 'index.js');
+    fs.mkdirSync(path.dirname(mcpEntry), { recursive: true });
+    fs.writeFileSync(mcpEntry, '// fabricated MCP server entry\n');
+    fs.writeFileSync(
+      path.join(created.home, '.pd', 'runtime', 'pd-mcp-server', 'package.json'),
+      JSON.stringify({ name: '@principles/pd-mcp-server', version: '0.1.0' }, null, 2),
+    );
+    expect((await created.installer.install(installCtx(created))).success).toBe(true);
+
+    const cacheBindingPath = path.join(
+      created.configDir, 'plugins', 'cache', WORKBUDDY_MARKETPLACE_NAME, WORKBUDDY_PLUGIN_NAME, '0.3.0', 'mcp-binding.json',
+    );
+    fs.writeFileSync(cacheBindingPath, JSON.stringify({
+      ...readJson(cacheBindingPath),
+      writtenAt: new Date(0).toISOString(),
+    }, null, 2));
+
+    const second = await created.installer.install(installCtx(created));
+    expect(second.success).toBe(true);
+    expect(second.configAction).toBe('preserved');
   });
 
   it('skips the MCP binding with a structured note when the server component is absent (G4-07)', async () => {

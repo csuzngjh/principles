@@ -475,7 +475,7 @@ describe('drill 8: product (cohort) vs tools checkout separation', () => {
     expect(t).toContain('ref: ${{ inputs.tools_ref || github.sha }}');
     expect(t).toContain('path: release-tools');
     // The publish action is loaded FROM the tools checkout.
-    expect(t.match(/uses: \.\/release-tools\/\.github\/actions\/publish-npm-package/g)?.length).toBe(8);
+    expect(t.match(/uses: \.\/release-tools\/\.github\/actions\/publish-npm-package/g)?.length).toBe(9);
     expect(t).toContain('uses: ./release-tools/.github/actions/finalize-npm-release');
   });
 
@@ -776,9 +776,9 @@ describe('drill 10: closing-step isolation (workflow structure)', () => {
   const finalizeText = () => fs.readFileSync(path.join(REPO_ROOT, '.github', 'actions', 'finalize-npm-release', 'action.yml'), 'utf8');
   const actionText = () => fs.readFileSync(path.join(REPO_ROOT, '.github', 'actions', 'publish-npm-package', 'action.yml'), 'utf8');
 
-  it('the train job has exactly eight npm legs and ZERO closing steps', () => {
+  it('the train job has exactly nine npm legs and ZERO closing steps', () => {
     const t = trainText();
-    expect(t.match(/uses: \.\/release-tools\/\.github\/actions\/publish-npm-package/g)?.length).toBe(8);
+    expect(t.match(/uses: \.\/release-tools\/\.github\/actions\/publish-npm-package/g)?.length).toBe(9);
     for (const banned of ['Reconcile Git tag', 'gh release create', 'clawhub package publish', 'git push origin "$TAG"']) {
       expect(t).not.toContain(banned);
     }
@@ -821,7 +821,7 @@ describe('drill 10: closing-step isolation (workflow structure)', () => {
 
   it('the rehearsal/preflight workflow never uploads (dry_run legs, no write permissions)', () => {
     const p = fs.readFileSync(path.join(REPO_ROOT, '.github', 'workflows', 'publish-preflight.yml'), 'utf8');
-    expect(p.match(/dry_run: true/g)?.length).toBe(8);
+    expect(p.match(/dry_run: true/g)?.length).toBe(9);
     expect(p).not.toContain('id-token: write');
     expect(p).not.toContain('contents: write');
     expect(p).not.toContain('actions: write');

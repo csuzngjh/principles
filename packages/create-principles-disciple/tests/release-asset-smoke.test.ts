@@ -9,7 +9,7 @@ import { isReleaseReadPathContained } from './release-containment';
 import { cleanupReleaseSmokeRoot } from './release-smoke-cleanup';
 
 const INSTALLER_DIR = path.resolve(__dirname, '..');
-const COMPONENT_NAMES = ['plugin', 'console', 'core', 'pd-cli', 'host-runtime', 'install-layout'];
+const COMPONENT_NAMES = ['plugin', 'console', 'core', 'pd-cli', 'host-runtime', 'install-layout', 'pd-mcp-server'];
 const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'pd-release-smoke-'));
 // CI builds the publication twice, byte-compares the archives, then points
 // this smoke at the second build via PD_RELEASE_SMOKE_PUBLICATION. Every
@@ -194,6 +194,17 @@ describe('production self-contained release asset', () => {
     expect(assetPackage).toMatchObject({ version: sourceVersion });
   });
 
+  it('ships the shared MCP server component with its runtime dependencies', () => {
+    // Gate 4 (PRI-1071): release assets must carry the MCP server payload and
+    // its vendored SDK deps — the self-contained installer only checks for
+    // declared dependency directories, never installs from the registry.
+    const mcpDir = path.join(assetDir, 'pd-mcp-server');
+    expect(fs.existsSync(path.join(mcpDir, 'dist', 'index.js'))).toBe(true);
+    expect(fs.existsSync(path.join(mcpDir, 'package.json'))).toBe(true);
+    expect(fs.existsSync(path.join(mcpDir, 'node_modules', '@modelcontextprotocol', 'server'))).toBe(true);
+    expect(fs.existsSync(path.join(mcpDir, 'node_modules', 'zod'))).toBe(true);
+  });
+
   it('contains no symlinks after build-only npm links are removed', () => {
     timePhase('symlink-scan', () => {
       const visit = (directory: string): void => {
@@ -242,5 +253,7 @@ describe('production self-contained release asset', () => {
     }
     expect(result).toMatchObject({ success: true, components: { plugin: 'verified', console: 'configured' }, verification: { storyA: 'passed' } });
     expect(fs.existsSync(npmMarker)).toBe(false);
+    // Gate 4 (PRI-1071): the installed runtime exposes the canonical MCP entry.
+    expect(fs.existsSync(path.join(homeDir, '.pd', 'runtime', 'pd-mcp-server', 'dist', 'index.js'))).toBe(true);
   }, 600_000);
 });

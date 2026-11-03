@@ -13,10 +13,16 @@
 
 export const DEFAULT_DEADLINE_MS = 10_000 as const;
 
-/** Upper bound on still-running timed-out operations. While saturated, new
- * calls fail fast instead of piling more orphans (§4.7 “限制仍在运行的超时
- * 任务数量”). Small by design: a read-only recall that takes >10 s is already
- * pathological; four concurrent ones is a stuck host, not load. */
+/** Upper bound on concurrently EXECUTING capability calls (§4.7). Admission
+ * is reserved synchronously before the capability is called, so the bound is
+ * real even when every in-flight call later outlives its deadline. Small by
+ * design: a read-only recall that takes >10 s is already pathological; four
+ * concurrent ones is a stuck host, not load. */
+export const MAX_CONCURRENT_CALLS = 4 as const;
+
+/** Upper bound on still-running timed-out operations. Orphans are a subset of
+ * admitted calls; this registry keeps their settlement observable even after
+ * the caller stopped waiting (§4.7 “限制仍在运行的超时任务数量”). */
 export const MAX_TRACKED_ORPHANS = 4 as const;
 
 export type DeadlineOutcome<T> =
@@ -35,6 +41,7 @@ export async function runWithDeadline<T>(
   deadlineMs: number,
   onOrphan?: (orphaned: Promise<T>) => boolean
 ): Promise<DeadlineOutcome<T>> {
+  const startedAt = Date.now();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timerPromise = new Promise<void>((resolveTimer) => {
     timer = setTimeout(() => resolveTimer(), deadlineMs);
@@ -48,7 +55,14 @@ export async function runWithDeadline<T>(
   ]);
   if (winner.kind === 'value') {
     if (timer !== undefined) clearTimeout(timer);
-    return { ok: true, value: winner.value };
+    // The timer cannot fire while synchronous work blocks the loop, so a value
+    // that raced in just before the deadline but finished assembling after it
+    // would otherwise be reported as an in-time success. The window covers
+    // validation → capability → projection → serialization (§4.7): past the
+    // deadline, this is a miss. The underlying promise already settled, so no
+    // orphan exists and no capacity is left reserved.
+    if (Date.now() - startedAt < deadlineMs) return { ok: true, value: winner.value };
+    return { ok: false, timedOut: true };
   }
   if (onOrphan) onOrphan(work);
   // Observe settlement so a rejected orphan never becomes an unhandled
@@ -89,5 +103,54 @@ export class OrphanLimiter {
       this.#orphans.delete(observed);
     });
     return true;
+  }
+}
+
+/**
+ * Synchronous admission semaphore for executing capability calls (§4.7).
+ *
+ * The previous design only counted already-timed-out stragglers, so N requests
+ * could all pass the saturation check before any of them timed out and then
+ * start N > limit capability calls. Admission is now reserved at handler entry
+ * — BEFORE the capability is invoked — and released only when the underlying
+ * work actually settles (normal completion, exception, or an orphaned call
+ * that outlived its deadline). A timeout therefore stops the WAIT, never the
+ * capacity reservation.
+ */
+export class AdmissionLimiter {
+  readonly #max: number;
+  #active = 0;
+
+  constructor(max: number = MAX_CONCURRENT_CALLS) {
+    if (!Number.isInteger(max) || max < 1) throw new Error('admission limit must be a positive integer');
+    this.#max = max;
+  }
+
+  get max(): number {
+    return this.#max;
+  }
+
+  /** Number of admitted calls whose underlying work has not settled yet. */
+  get active(): number {
+    return this.#active;
+  }
+
+  get saturated(): boolean {
+    return this.#active >= this.#max;
+  }
+
+  /** Reserve one execution slot. Never awaits — the check and the reservation
+   * are one synchronous step, so concurrent handlers cannot both pass. */
+  tryAcquire(): boolean {
+    if (this.saturated) return false;
+    this.#active += 1;
+    return true;
+  }
+
+  /** Release a previously reserved slot. Exactly one release per successful
+   * acquire; underflow is a programming error and fails loud. */
+  release(): void {
+    if (this.#active <= 0) throw new Error('admission release without a matching acquire');
+    this.#active -= 1;
   }
 }
