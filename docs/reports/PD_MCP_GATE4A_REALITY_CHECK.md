@@ -191,3 +191,14 @@ Gate 3 基线复核：worktree `PRI-1071-mcp-gate4` 上 `vitest run pain-recall`
 - 未验证项均已标注且全部落在 Gate 4-C/D/E 执行项内（宿主真实 E2E）。
 
 **Gate 4-A：PASS。按 OG-3 授权直接进入 Gate 4-B。**
+
+---
+
+## 10. 快照更新说明（第三轮整改后，2026-11-03）
+
+本文是 Gate 4-A 的**历史核验快照**，以下事实在整改后发生变化，阅读实现现状时以新报告为准：
+
+- §4 表格中 OpenClaw binding 写入者为“PD installer（物化 extensions 副本时写入）”；整改后改为**插件启动健康检查仅在显式 PD 工作区时写入**，无显式声明即 fail-closed（见 `PD_MCP_GATE4_LIFECYCLE_ACCEPTANCE.md` §4.1）。
+- §6 第 1 条“workspaceDir 唯一来源”仍成立；补充约束：来源必须由 Owner **显式声明**，不得从 main agent / cwd / HOME / 宿主默认推断。
+- 三宿主同名注册：§2.1/§2.2 记录的宿主优先级语义仍是事实，但 PD 侧已增加安装前冲突门（见 LIFECYCLE §2.1）。
+- 版本/HEAD 引用不再固定为核验当日快照；当前状态见 PR #2304 与 `PD_MCP_GATE4_IMPLEMENTATION_REPORT.md`。
