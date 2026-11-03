@@ -3,8 +3,14 @@
  *
  * Every regular file, in sorted POSIX-relative order, framed as
  * `<rel>\0<size>\0<bytes>` — so renames, additions, deletions and byte
- * changes all move the digest. Symlinks and other special entries are not
- * followed or hashed (build outputs never contain them).
+ * changes all move the digest.
+ *
+ * Symlinks and other special entries are NOT tolerated: they are not hashed
+ * (following them could read outside dist and would make the digest depend on
+ * a file the build did not produce), and ignoring them would let a symlink
+ * appear/disappear/retarget without moving the digest — i.e. a false reuse.
+ * No build script in this repository emits them, so encountering one means the
+ * tree is not a trustworthy build result: fail closed (throw), never skip.
  *
  * Returns null when dist/ is missing or holds no regular file: an empty
  * dist is never a reusable build result.
@@ -21,6 +27,11 @@ export function digestDist(root) {
       const child = join(current, entry.name);
       if (entry.isDirectory()) visit(child);
       else if (entry.isFile()) files.push(child);
+      else {
+        throw new Error(
+          `dist contains a non-regular entry (symlink or special file): ${child} — refusing to treat this tree as a reusable build result`
+        );
+      }
     }
   };
   visit(root);
