@@ -1130,6 +1130,7 @@ describe('Registry-resolved bundled pd-cli execution (PRI-1060)', () => {
                   readJsonFile(path.resolve(INSTALLER_DIR, '..', 'install-layout', 'package.json')),
                   'version',
                 ),
+                registryVersions,
               });
         if (cohortNote === null) throw installErr;
         console.warn(`[pri-1060] pre-publish cohort window — skipping: ${cohortNote}`);
