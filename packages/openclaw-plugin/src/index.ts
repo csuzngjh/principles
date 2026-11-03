@@ -203,10 +203,20 @@ export function syncMcpBindingFromExplicitWorkspace(options: {
         source: explicit.source,
       };
     }
+    // rc-9: never report a safety property this failure did not achieve. Only
+    // a genuinely absent MCP component has the "re-install" remedy; any other
+    // failure leaves the PREVIOUS binding on disk, so say that.
+    const componentMissing = outcome.reason === 'mcp_server_component_missing';
     return {
       status: 'unavailable',
       reason: outcome.reason ?? 'mcp_binding_write_failed',
-      nextAction: 'Re-run the PD host setup so ~/.pd/runtime/pd-mcp-server is installed, then restart OpenClaw. pd-recall stays fail-closed until the binding exists.',
+      nextAction: componentMissing
+        ? 'Re-run the PD host setup so ~/.pd/runtime/pd-mcp-server is installed, then restart OpenClaw. pd-recall stays fail-closed until the binding exists.'
+        : 'PD FAILED to write the binding for the declared workspace, so the previous mcp-binding.json (a DIFFERENT workspace) may still be on disk. ' +
+          'The launcher refuses to start unless the binding matches the explicit declaration, so no other workspace is served — but fix the failure ' +
+          `(check write access to ${options.extensionRoot}) and restart the OpenClaw gateway.`,
+      workspaceDir: explicit.workspaceDir,
+      source: explicit.source,
     };
   }
   const invalidated = invalidateMcpBinding(options.extensionRoot);
@@ -216,9 +226,13 @@ export function syncMcpBindingFromExplicitWorkspace(options: {
   return {
     status: invalidated.ok ? 'invalidated' : 'unavailable',
     reason: invalidated.ok ? declaredReason : (invalidated.reason ?? 'mcp_binding_remove_failed'),
-    nextAction:
-      'pd-recall MCP is fail-closed because the PD governance workspace is not explicitly configured; hooks keep their per-agent workspaces. ' +
-      'Declare ONE PD workspace (set PD_WORKSPACE_DIR, or add {"workspace":"<absolute dir>"} to ~/.openclaw/principles-disciple.json), then restart the OpenClaw gateway.',
+    // rc-9: a failed removal is NOT fail-closed. Say so plainly instead of
+    // reporting a safety property the filesystem refused to grant.
+    nextAction: invalidated.ok
+      ? 'pd-recall MCP is fail-closed because the PD governance workspace is not explicitly configured; hooks keep their per-agent workspaces. ' +
+        'Declare ONE PD workspace (set PD_WORKSPACE_DIR, or add {"workspace":"<absolute dir>"} to ~/.openclaw/principles-disciple.json), then restart the OpenClaw gateway.'
+      : 'PD FAILED to remove the stale mcp-binding.json, so the old binding file is still on disk (the launcher separately refuses to start unless the binding matches the explicitly declared workspace). ' +
+        `Delete ${path.join(options.extensionRoot, 'mcp-binding.json')} manually, then declare ONE PD workspace and restart the OpenClaw gateway.`,
   };
 }
 

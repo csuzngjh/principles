@@ -149,4 +149,76 @@ describe('syncMcpBindingFromExplicitWorkspace (§3.5 fail-closed, multi-agent)',
     expect(invalidateMcpBinding(extRoot)).toEqual({ ok: true, removed: false });
     fs.rmSync(extRoot, { recursive: true, force: true });
   });
+
+  // ─── Fault injection: no "safe" story may survive a failed write/remove ───
+  // Deterministic, cross-platform levers that do not depend on POSIX/Windows
+  // permission semantics:
+  //   * the atomic writer's temp path occupied by a DIRECTORY → EISDIR;
+  //   * the binding path occupied by a NON-EMPTY DIRECTORY → unlink impossible.
+  function blockAtomicWriteTarget(extRoot: string): void {
+    const target = path.join(extRoot, `.mcp-binding.json.${process.pid}.tmp`);
+    fs.mkdirSync(target, { recursive: true });
+    fs.writeFileSync(path.join(target, 'occupied'), 'x');
+  }
+
+  function blockBindingRemoval(binding: string): void {
+    fs.rmSync(binding, { force: true });
+    fs.mkdirSync(binding, { recursive: true });
+    fs.writeFileSync(path.join(binding, 'occupied'), 'x');
+  }
+
+  it('A→B update write FAILURE must not report a trusted binding', () => {
+    const home = tempRoot('pd-oc-iso-home-');
+    const extRoot = tempRoot('pd-oc-iso-ext-');
+    fabricateServer(home);
+    const workspaceA = path.join(home, 'ws-a');
+    const workspaceB = path.join(home, 'ws-b');
+    fs.mkdirSync(workspaceA, { recursive: true });
+    fs.mkdirSync(workspaceB, { recursive: true });
+    fs.writeFileSync(bindingPath(extRoot), JSON.stringify({ schemaVersion: 'pd.mcp-binding.v1', host: 'openclaw', workspaceDir: workspaceA }));
+
+    blockAtomicWriteTarget(extRoot);
+    const result = syncMcpBindingFromExplicitWorkspace({
+      extensionRoot: extRoot,
+      homeDir: home,
+      resolver: () => ({ workspaceDir: workspaceB, source: 'pd_env' }),
+    });
+    fs.rmSync(path.join(extRoot, `.mcp-binding.json.${process.pid}.tmp`), { recursive: true, force: true });
+
+    expect(result.status).toBe('unavailable');
+    // The stale A binding is STILL on disk — the plugin must not claim it is safe.
+    expect(JSON.parse(fs.readFileSync(bindingPath(extRoot), 'utf8')).workspaceDir).toBe(workspaceA);
+    expect(result.nextAction).toContain('FAILED');
+    expect(result.nextAction).not.toMatch(/MCP is fail-closed/);
+    console.log('[gate4-evidence]', JSON.stringify({
+      fault: 'binding_write_failed', status: result.status, reason: result.reason,
+      bindingOnDisk: workspaceA, declared: workspaceB, nextAction: result.nextAction,
+    }));
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(extRoot, { recursive: true, force: true });
+  });
+
+  it('no explicit workspace + FAILED binding removal must not claim fail-closed', () => {
+    const home = tempRoot('pd-oc-iso-home-');
+    const extRoot = tempRoot('pd-oc-iso-ext-');
+    fabricateServer(home);
+    blockBindingRemoval(bindingPath(extRoot));
+
+    const result = syncMcpBindingFromExplicitWorkspace({
+      extensionRoot: extRoot,
+      homeDir: home,
+      resolver: () => null,
+    });
+
+    expect(result.status).toBe('unavailable');
+    expect(fs.existsSync(bindingPath(extRoot))).toBe(true);
+    expect(result.nextAction).toContain('FAILED');
+    expect(result.nextAction).not.toMatch(/MCP is fail-closed/);
+    console.log('[gate4-evidence]', JSON.stringify({
+      fault: 'binding_remove_failed', status: result.status, reason: result.reason,
+      bindingStillOnDisk: true, nextAction: result.nextAction,
+    }));
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(extRoot, { recursive: true, force: true });
+  });
 });

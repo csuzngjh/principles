@@ -185,11 +185,14 @@ const PD_CONFIG_FILENAME = 'principles-disciple.json';
  * a bad value would ignore a perfectly good pointer further down the list.
  * Refusals are pushed into `rejected` so the caller can report them.
  */
-function loadWorkspaceFromPdConfigFile(rejected: RejectedWorkspaceCandidate[]): string | null {
+function loadWorkspaceFromPdConfigFile(
+  rejected: RejectedWorkspaceCandidate[],
+  options: { includeCwdConfig?: boolean } = {},
+): string | null {
   const candidates = [
     path.join(os.homedir(), '.openclaw', PD_CONFIG_FILENAME),
     path.join(os.homedir(), '.principles', PD_CONFIG_FILENAME),
-    path.join(process.cwd(), PD_CONFIG_FILENAME),
+    ...(options.includeCwdConfig === false ? [] : [path.join(process.cwd(), PD_CONFIG_FILENAME)]),
   ];
 
   for (const configPath of candidates) {
@@ -351,7 +354,23 @@ function resolveExplicitPdSources(): CanonicalWorkspaceResult | null {
  * (invalidate a previously written binding) instead of inferring a default.
  */
 export function resolveExplicitPdWorkspaceDir(): CanonicalWorkspaceResult | null {
-  return resolveExplicitPdSources();
+  return resolveDeclaredWorkspaceDir(mcpBindingWorkspaceCandidates()).resolved;
+}
+
+/**
+ * Candidates for the HOST-WIDE MCP binding: identical to the hook candidates
+ * except the `process.cwd()` config file. The MCP server's cwd belongs to
+ * whichever host/agent launched it, so a pointer found there is a
+ * process-location inference, not an Owner declaration. The launcher
+ * (`mcp/launcher.cjs`) re-derives exactly this list at startup — writer and
+ * gate must agree, or a binding could be written that the gate rejects.
+ */
+function mcpBindingWorkspaceCandidates(): ReadonlyArray<readonly [CanonicalWorkspaceSource, DeclaredCandidateReader]> {
+  return [
+    ['pd_env', () => process.env.PD_WORKSPACE_DIR],
+    ['openclaw_env', () => process.env.OPENCLAW_WORKSPACE],
+    ['pd_config', (rejected) => loadWorkspaceFromPdConfigFile(rejected, { includeCwdConfig: false })],
+  ];
 }
 
 // ── Hook Workspace Resolution (PRI-259) ────────────────────────────────

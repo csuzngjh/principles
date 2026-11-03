@@ -12,6 +12,7 @@
  *     return not_found, never that workspace's data (no cross-workspace leak).
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { spawnSync } from 'node:child_process';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { createHash } from 'node:crypto';
@@ -99,21 +100,71 @@ interface Connected {
   stderrText(): string;
 }
 
-async function connectLauncher(payloadRoot: string): Promise<Connected> {
+/**
+ * The developer machine may export PD_WORKSPACE_DIR / OPENCLAW_WORKSPACE
+ * (Owner's daily environment). A launch probe must control its declaration
+ * explicitly, otherwise it would inherit an unrelated workspace.
+ */
+function launcherEnv(homeDir: string, extraEnv: Record<string, string> = {}): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value === undefined) continue;
+    if (key === 'PD_WORKSPACE_DIR' || key === 'OPENCLAW_WORKSPACE') continue;
+    env[key] = value;
+  }
+  return { ...env, HOME: homeDir, USERPROFILE: homeDir, ...extraEnv };
+}
+
+async function connectLauncher(
+  payloadRoot: string,
+  options: { homeDir?: string; extraEnv?: Record<string, string> } = {},
+): Promise<Connected> {
   let stderr = '';
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [path.join(payloadRoot, 'mcp', 'launcher.cjs')],
     cwd: path.join(tempRoot, 'neutral-cwd'),
-    env: { ...process.env },
+    env: launcherEnv(options.homeDir ?? process.env.HOME ?? '', options.extraEnv),
     stderr: 'pipe',
   });
   const stream = transport.stderr as Readable | undefined;
   stream?.setEncoding('utf8');
   stream?.on('data', (chunk: string) => { stderr += chunk; });
   const client = new Client({ name: 'pd-isolation-probe', version: '0.0.0' });
-  await client.connect(transport);
+  try {
+    await client.connect(transport);
+  } catch (error) {
+    throw new Error(`${error instanceof Error ? error.message : String(error)}\n--- launcher stderr ---\n${stderr}`);
+  }
   return { client, stderrText: () => stderr };
+}
+
+/**
+ * Owner-explicit declaration as a REAL user would write it:
+ * `~/.openclaw/principles-disciple.json`. The launcher re-derives this at
+ * startup, so a stale binding cannot be trusted just because the plugin wrote
+ * it earlier.
+ */
+function makeDeclaredHome(name: string, workspaceDir: string | undefined): string {
+  const homeDir = path.join(tempRoot, `${name}-home`);
+  fs.mkdirSync(path.join(homeDir, '.openclaw'), { recursive: true });
+  if (workspaceDir !== undefined) {
+    fs.writeFileSync(
+      path.join(homeDir, '.openclaw', 'principles-disciple.json'),
+      JSON.stringify({ workspace: workspaceDir }, null, 2),
+    );
+  }
+  return homeDir;
+}
+
+function runLauncherExpectingRefusal(payloadRoot: string, homeDir: string, extraEnv: Record<string, string> = {}): { status: number | null; stderr: string } {
+  const run = spawnSync(process.execPath, [path.join(payloadRoot, 'mcp', 'launcher.cjs')], {
+    cwd: path.join(tempRoot, 'neutral-cwd'),
+    env: launcherEnv(homeDir, extraEnv),
+    encoding: 'utf8',
+    timeout: 20000,
+  });
+  return { status: run.status, stderr: run.stderr };
 }
 
 async function recall(client: Client, principleId: string): Promise<{ status: string; errorCode: string | null; returned: number; identityStatus: string | null }> {
@@ -152,7 +203,8 @@ describe('OpenClaw multi-workspace MCP isolation (real launcher process)', () =>
 
   it('Agent X process serves workspace X only (fingerprint + data), never workspace Y', async () => {
     const payloadX = makePayload('agent-x', path.join(tempRoot, 'workspace-x'));
-    const connected = await connectLauncher(payloadX);
+    const homeX = makeDeclaredHome('agent-x', path.join(tempRoot, 'workspace-x'));
+    const connected = await connectLauncher(payloadX, { homeDir: homeX });
     try {
       const startup = connected.stderrText()
         .split('\n')
@@ -188,7 +240,8 @@ describe('OpenClaw multi-workspace MCP isolation (real launcher process)', () =>
 
   it('Agent Y process serves workspace Y only, never workspace X', async () => {
     const payloadY = makePayload('agent-y', path.join(tempRoot, 'workspace-y'));
-    const connected = await connectLauncher(payloadY);
+    const homeY = makeDeclaredHome('agent-y', path.join(tempRoot, 'workspace-y'));
+    const connected = await connectLauncher(payloadY, { homeDir: homeY });
     try {
       const startup = connected.stderrText()
         .split('\n')
@@ -211,6 +264,99 @@ describe('OpenClaw multi-workspace MCP isolation (real launcher process)', () =>
   it('a payload without a binding fails closed before any MCP traffic', async () => {
     const payload = makePayload('agent-no-binding', path.join(tempRoot, 'workspace-x'));
     fs.rmSync(path.join(payload, 'mcp-binding.json'));
-    await expect(connectLauncher(payload)).rejects.toThrow();
+    const home = makeDeclaredHome('agent-no-binding', path.join(tempRoot, 'workspace-x'));
+    await expect(connectLauncher(payload, { homeDir: home })).rejects.toThrow();
   }, 20000);
+
+  it('refuses to start when the OWNER declaration no longer matches the binding (A→B not committed)', () => {
+    // Binding still A (the B write failed in the plugin) while the Owner has
+    // switched the declaration to B: the launcher must not serve A.
+    const payload = makePayload('agent-stale-a', path.join(tempRoot, 'workspace-x'));
+    const homeB = makeDeclaredHome('agent-stale-a', path.join(tempRoot, 'workspace-y'));
+    const run = runLauncherExpectingRefusal(payload, homeB);
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain('binding_workspace_not_declared');
+    console.log('[gate4-evidence]', JSON.stringify({
+      host: 'openclaw', fault: 'stale_binding_after_failed_write',
+      bindingWorkspace: path.join(tempRoot, 'workspace-x'),
+      declaredWorkspace: path.join(tempRoot, 'workspace-y'),
+      launcherExit: run.status, launcherStderr: run.stderr.trim(),
+    }));
+  });
+
+  it('refuses to start when NO PD workspace is explicitly declared (stale binding not trusted)', () => {
+    const payload = makePayload('agent-undeclared', path.join(tempRoot, 'workspace-x'));
+    const home = makeDeclaredHome('agent-undeclared', undefined);
+    const run = runLauncherExpectingRefusal(payload, home);
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain('workspace_declaration_missing');
+    console.log('[gate4-evidence]', JSON.stringify({
+      host: 'openclaw', fault: 'no_explicit_declaration',
+      bindingWorkspace: path.join(tempRoot, 'workspace-x'),
+      launcherExit: run.status, launcherStderr: run.stderr.trim(),
+    }));
+  });
+
+  it('ONE install root: reload after a workspace switch serves only the newly declared workspace', async () => {
+    // The same physical plugin install root is reused for every agent on the
+    // host, so isolation cannot come from payload separation. Bind X, serve X;
+    // then re-bind the SAME root to Y and re-launch: Y only, never X. A process
+    // started before the switch keeps its own binding until it is restarted —
+    // that is why the gate compares the declared workspace at launch.
+    const payload = makePayload('shared-root', path.join(tempRoot, 'workspace-x'));
+    const homeX = makeDeclaredHome('shared-root-x', path.join(tempRoot, 'workspace-x'));
+    const homeY = makeDeclaredHome('shared-root-y', path.join(tempRoot, 'workspace-y'));
+
+    const first = await connectLauncher(payload, { homeDir: homeX });
+    const firstStartup = first.stderrText()
+      .split('\n')
+      .filter((line) => line.trim().length > 0)
+      .map((line) => JSON.parse(line) as { event?: string; workspaceFingerprint?: string })
+      .find((entry) => entry.event === 'startup');
+    expect(firstStartup?.workspaceFingerprint).toBe(fingerprint(path.join(tempRoot, 'workspace-x')));
+    await first.client.close();
+
+    // Owner switches the declaration to Y; the plugin rewrite of the binding is
+    // the only thing that moves the host-wide pointer.
+    const bindingFile = path.join(payload, 'mcp-binding.json');
+    const binding = JSON.parse(fs.readFileSync(bindingFile, 'utf8')) as Record<string, unknown>;
+    fs.writeFileSync(bindingFile, JSON.stringify({ ...binding, workspaceDir: path.join(tempRoot, 'workspace-y') }));
+    const second = await connectLauncher(payload, { homeDir: homeY });
+    const secondStartup = second.stderrText()
+      .split('\n')
+      .filter((line) => line.trim().length > 0)
+      .map((line) => JSON.parse(line) as { event?: string; workspaceFingerprint?: string })
+      .find((entry) => entry.event === 'startup');
+    expect(secondStartup?.workspaceFingerprint).toBe(fingerprint(path.join(tempRoot, 'workspace-y')));
+    const crossX = await recall(second.client, P_X);
+    expect(crossX.status).toBe('not_found');
+    expect(crossX.returned).toBe(0);
+    const ownY = await recall(second.client, P_Y);
+    expect(ownY.status).toBe('unavailable');
+    expect(ownY.errorCode).toBe('source_missing');
+    await second.client.close();
+    console.log('[gate4-evidence]', JSON.stringify({
+      host: 'openclaw', installRoot: payload, processOneFingerprint: firstStartup?.workspaceFingerprint,
+      processTwoFingerprint: secondStartup?.workspaceFingerprint, crossWorkspaceRows: crossX.returned,
+    }));
+  }, 30000);
+
+  it('honours PD_WORKSPACE_DIR as the declaration source', async () => {
+    const payload = makePayload('agent-env-declared', path.join(tempRoot, 'workspace-y'));
+    const home = makeDeclaredHome('agent-env-declared', undefined);
+    const connected = await connectLauncher(payload, {
+      homeDir: home,
+      extraEnv: { PD_WORKSPACE_DIR: path.join(tempRoot, 'workspace-y') },
+    });
+    try {
+      const startup = connected.stderrText()
+        .split('\n')
+        .filter((line) => line.trim().length > 0)
+        .map((line) => JSON.parse(line) as { event?: string; workspaceFingerprint?: string })
+        .find((entry) => entry.event === 'startup');
+      expect(startup?.workspaceFingerprint).toBe(fingerprint(path.join(tempRoot, 'workspace-y')));
+    } finally {
+      await connected.client.close();
+    }
+  }, 30000);
 });

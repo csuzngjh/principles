@@ -33,10 +33,15 @@
 'use strict';
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { pathToFileURL } = require('url');
 
 const BINDING_SCHEMA = 'pd.mcp-binding.v1';
+// Ownership stamp (SPEC §7.5/§11.3): installers and `pd health` prove that a
+// registered `mcp/launcher.cjs` really is PD's launcher by reading THIS stamp
+// plus the binding schema below — never by the file name alone.
+const PD_LAUNCHER_ID = 'pd-mcp-launcher.v1';
 const KNOWN_HOSTS = ['codex', 'openclaw', 'workbuddy'];
 // The payload marker that identifies which host owns THIS launcher copy.
 const HOST_MARKERS = [
@@ -82,6 +87,76 @@ function samePath(left, right) {
 function isInside(parent, child) {
   const relative = path.relative(parent, child);
   return relative !== '' && relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative);
+}
+
+const PD_CONFIG_FILENAME = 'principles-disciple.json';
+
+/** A declared workspace must be one fixed, real directory — never HOME or a drive root. */
+function isUsableWorkspaceDir(candidate) {
+  if (typeof candidate !== 'string' || candidate.length === 0 || !path.isAbsolute(candidate)) return false;
+  const resolved = path.resolve(candidate);
+  if (samePath(resolved, os.homedir())) return false;
+  if (samePath(resolved, path.parse(resolved).root)) return false;
+  try {
+    return fs.statSync(resolved).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/** First trustworthy `workspace` pointer among the PD config files (rg-1: untrusted files). */
+function readConfigWorkspace(files) {
+  for (const file of files) {
+    let raw;
+    try {
+      raw = fs.readFileSync(file, 'utf8');
+    } catch {
+      continue;
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+    if (!isRecord(parsed) || !Object.hasOwn(parsed, 'workspace')) continue;
+    const value = parsed.workspace;
+    if (typeof value !== 'string' || value.trim().length === 0) continue;
+    return value.trim();
+  }
+  return undefined;
+}
+
+/**
+ * Re-derive the OWNER-DECLARED workspace exactly as the plugin's MCP binding
+ * writer does (env `PD_WORKSPACE_DIR` → `OPENCLAW_WORKSPACE` → PD config files
+ * under HOME). Deliberately NO `cwd`, HOME-as-workspace, agent, or host-default
+ * inference: those describe where a session runs, not which state tree owns
+ * governance for every agent of the host (SPEC §3.5).
+ */
+function resolveDeclaredWorkspaceDir() {
+  const home = os.homedir();
+  const readers = [
+    () => process.env.PD_WORKSPACE_DIR,
+    () => process.env.OPENCLAW_WORKSPACE,
+    () => readConfigWorkspace([
+      path.join(home, '.openclaw', PD_CONFIG_FILENAME),
+      path.join(home, '.principles', PD_CONFIG_FILENAME),
+    ]),
+  ];
+  let sawDeclaration = false;
+  for (const read of readers) {
+    let value;
+    try {
+      value = read();
+    } catch {
+      continue;
+    }
+    if (typeof value !== 'string' || value.trim().length === 0) continue;
+    sawDeclaration = true;
+    if (isUsableWorkspaceDir(value.trim())) return { workspaceDir: path.resolve(value.trim()) };
+  }
+  return { reason: sawDeclaration ? 'workspace_declaration_invalid' : 'workspace_declaration_missing' };
 }
 
 const pluginRoot = path.join(__dirname, '..');
@@ -218,6 +293,34 @@ try {
 }
 if (!workspaceStat.isDirectory()) {
   fail('binding_workspace_not_directory', 'Re-run the PD host setup so the binding points at the governance workspace directory.');
+}
+
+// ── OpenClaw workspace-declaration gate (SPEC §3.5, final safety closure) ──
+// The OpenClaw binding is HOST-WIDE while agents have per-agent workspaces, so
+// a binding may only be trusted while it still matches the workspace the Owner
+// EXPLICITLY declared. The plugin's startup health check cannot be the last
+// line of defence: it runs after registration and may fail, skip, or lag a
+// workspace switch. Re-derive the declaration HERE, at launch, and refuse
+// otherwise — a stale binding must never serve the previous workspace's
+// evidence to another agent. Codex/WorkBuddy have a single user-level workspace
+// and their binding writer is the authority; the gate is OpenClaw-only.
+if (host === 'openclaw') {
+  const declared = resolveDeclaredWorkspaceDir();
+  if (declared.workspaceDir === undefined) {
+    fail(
+      declared.reason,
+      'pd-recall refuses to start because the PD governance workspace is not explicitly declared. ' +
+      'Declare ONE PD workspace (set PD_WORKSPACE_DIR or OPENCLAW_WORKSPACE, or add ' +
+      '{"workspace":"<absolute dir>"} to ~/.openclaw/principles-disciple.json), then restart the OpenClaw gateway.',
+    );
+  }
+  if (!samePath(declared.workspaceDir, binding.workspaceDir)) {
+    fail(
+      'binding_workspace_not_declared',
+      'mcp-binding.json does not match the explicitly declared PD workspace (a workspace switch was never committed). ' +
+      'Restart the OpenClaw gateway so the PD plugin rewrites the binding for the declared workspace.',
+    );
+  }
 }
 
 // The binding is the ONLY authority for the business workspace (SPEC §3.5):

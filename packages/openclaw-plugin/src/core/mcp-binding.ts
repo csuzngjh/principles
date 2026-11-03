@@ -94,6 +94,28 @@ export function invalidateMcpBinding(extensionRoot: string): { ok: boolean; remo
   }
 }
 
+/**
+ * Atomic replace: the launcher may read this file at any moment, so a reader
+ * must never observe a truncated or half-written binding. A temp file in the
+ * same directory + rename gives that on every platform, and mirrors the
+ * Codex/WorkBuddy binding writers (same file-integrity discipline, no new
+ * config subsystem).
+ */
+function writeBindingAtomically(file: string, value: unknown): void {
+  const temp = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.tmp`);
+  try {
+    fs.writeFileSync(temp, JSON.stringify(value, null, 2) + '\n', 'utf8');
+    fs.renameSync(temp, file);
+  } catch (err) {
+    try {
+      fs.rmSync(temp, { force: true });
+    } catch {
+      /* best-effort cleanup of our own temp file */
+    }
+    throw err;
+  }
+}
+
 export function ensureMcpBinding(workspaceDir: string | undefined, extensionRoot: string, homeDir: string): McpBindingOutcome {
   try {
     const runtimeDir = canonicalRuntimeDir(homeDir);
@@ -132,7 +154,7 @@ export function ensureMcpBinding(workspaceDir: string | undefined, extensionRoot
     ) {
       return { ok: true, written: false, serverEntry };
     }
-    fs.writeFileSync(bindingPath, JSON.stringify(desired, null, 2) + '\n', 'utf8');
+    writeBindingAtomically(bindingPath, desired);
     return { ok: true, written: true, serverEntry };
   } catch (err) {
     return { ok: false, reason: `write_failed:${err instanceof Error ? err.message.slice(0, 120) : String(err).slice(0, 120)}` };
