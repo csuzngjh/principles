@@ -225,7 +225,12 @@ describe('PRI-954 oldest-ready-stage-first fairness', () => {
     expect(payload.readyTaskCount).toBe(0);
     expect(payload.invalidMetadataCount).toBe(4);
     // MAX_SAMPLES is 3 in the owning read model — never the full queue.
-    expect(payload.sampleInvalidTaskIds).toEqual(ids.slice(0, 3));
+    // `listTasks` has no ORDER BY, so the sampled set (not its order) is the
+    // contract: exactly 3 distinct ids, all drawn from the seeded invalid rows.
+    const sampled = payload.sampleInvalidTaskIds ?? [];
+    expect(sampled).toHaveLength(3);
+    expect(new Set(sampled).size).toBe(3);
+    expect(sampled.every((id) => ids.includes(id))).toBe(true);
     expect(payload.noReadyTasks).toEqual({ reason: 'all_hydration_failed', inspectedCount: 4 });
   });
 

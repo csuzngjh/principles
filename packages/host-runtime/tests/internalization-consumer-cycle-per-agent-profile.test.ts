@@ -196,7 +196,12 @@ describe('runInternalizationConsumerCycle — PRI-719 per-agent runtime profile'
     // queue diagnosis, even though this cycle has a ready task that no kind
     // could lease. `noReadyTasks` is null (the queue is not "no ready tasks");
     // the hydration counters are still explicit.
-    const finalSkip = events.find((e) => e.event === 'INTERNALIZATION_CONSUMER_SKIP' && e.payload.includes('"decision"'));
+    const finalSkips = events.filter(
+      (e) => e.event === 'INTERNALIZATION_CONSUMER_SKIP'
+        && e.payload.includes('"decision"')
+        && !e.payload.includes('"taskKind"'),
+    );
+    const finalSkip = finalSkips[finalSkips.length - 1];
     expect(finalSkip).toBeDefined();
     const finalPayload = JSON.parse(finalSkip?.payload ?? '{}') as {
       invalidMetadataCount?: number;
