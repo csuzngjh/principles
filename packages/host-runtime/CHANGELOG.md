@@ -1,5 +1,11 @@
 # @principles/host-runtime
 
+## 0.14.6
+
+### Patch Changes
+
+- 6595b42: PRI-988: `INTERNALIZATION_CONSUMER_SKIP` events now carry the queue's `noReadyTasks`, `invalidMetadataCount` and bounded `sampleInvalidTaskIds` diagnostics, so heartbeat telemetry distinguishes an empty queue from hydration failures.
+
 ## 0.14.5
 
 ### Patch Changes
