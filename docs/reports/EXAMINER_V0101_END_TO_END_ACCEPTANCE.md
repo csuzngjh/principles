@@ -228,10 +228,19 @@ POST-FIX sentinel untouched: SENTINEL
 
 ### 11.4 CodeQL 处理与剩余风险
 
-- `js/file-system-race` ×3、`js/insecure-temporary-file` ×1（`examiner-runs.ts` 106/110/179）：**真实风险模式**，已用单 fd 边界整改；需以最新 HEAD 的 CI 扫描确认告警消失（本轮最终 CI 结果见 11.6）。
-- `js/user-controlled-bypass` ×4（`examiner.ts` 372/422/442）：**误报证据**——这些 `if` 是 `/studies/:id` 的正则路由选择器；真正的敏感动作在其后被 `resolveStudyAccess`（服务器自枚举 + Study ID 白名单 + canonical 边界 + ownership marker）控制。未做代码改动，也未全局关闭规则。
-- `js/unused-local-variable` ×1：已删除未使用的 `SectionTitle` import。
-- **剩余 High 是否可利用**：整改后 TOCTOU 类在 Linux 无残余；Windows/macOS 残余仅限「同用户已具备写权限 + 双重目录切换」，不构成越界读写。`user-controlled-bypass` 无可利用路径。
+最新 HEAD 的 CodeQL 扫描结果（GitHub code scanning API，PR #2301）：
+
+| 告警 | 规则 | 处置 | 依据 |
+|---|---|---|---|
+| 811/812/813 | `js/file-system-race` | **fixed** | 单 fd 边界整改（canonical 边界 + 目录身份 + Linux `/proc/self/fd` 原子绑定 + `O_NOFOLLOW` + `fstat` + 同 fd 读写） |
+| 814/804 | `js/insecure-temporary-file` | **fixed** | 探针改为随机独占 `mkdtemp` + 身份校验的受限清理（804 为同类的既有告警） |
+| 809 | `js/unused-local-variable` | **fixed** | 删除未使用的 `SectionTitle` import |
+| 805/806 | `js/user-controlled-bypass`（`/studies/:id` 正则路由选择器） | **dismissed：false positive** | 敏感动作在其后由 `resolveStudyAccess`（服务器自枚举 + Study ID 字符集白名单 + canonical 边界 + ownership marker）控制；非匹配直接 404 |
+| 807 | `js/user-controlled-bypass`（`/run` 路由选择器） | **dismissed：false positive** | 进入执行前先经 mode 白名单、`readOnly` 拒绝、preflight/Stage R 门禁 |
+| 808 | `js/user-controlled-bypass`（F2 模式分支） | **dismissed：false positive** | 选择 `f2-real-host` 只会**增加** Stage R 门禁，不能跳过任何检查；其余可达模式不触达真实宿主 |
+
+- 4 条误报通过 GitHub code scanning dismissal API 标记（`dismissed_reason=false positive`，附验证说明），**未全局关闭规则、未削弱任何校验**。
+- **剩余 High 告警：0（open）**；不存在可利用的真实安全问题。CodeQL 规则本身保持启用。
 
 ### 11.5 真实测试数字
 

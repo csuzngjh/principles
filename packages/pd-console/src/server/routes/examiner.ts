@@ -370,7 +370,7 @@ export async function handleExaminerRoute(
 
   // /studies/:studyId[/...]
   const studyMatch = STUDY_ROUTE_PATTERN.exec(subPath);
-  // lgtm[js/user-controlled-bypass] — FALSE POSITIVE: this is a route
+  // CodeQL js/user-controlled-bypass (dismissed as false positive): this is a route
   // SELECTOR, not an authorization decision. Every privileged action below
   // runs only after resolveStudyAccess() (server-side enumeration + study-id
   // charset allowlist + canonical boundary + ownership marker); a non-match
@@ -425,7 +425,7 @@ export async function handleExaminerRoute(
     // P1-1/P1-4: the study must be server-owned and writable, and the SERVER
     // preflight must pass BEFORE the runner is entered. A blocker returns 409
     // with no RUN_STARTED event, no reservation and no actor creation.
-    // lgtm[js/user-controlled-bypass] — FALSE POSITIVE: route selector. The
+    // CodeQL js/user-controlled-bypass (dismissed as false positive): route selector. The
     // mode allowlist, access.readOnly refusal and the preflight/Stage R gates
     // below all run before any execution side effect.
     if (rest === '/run' && method === 'POST') {
@@ -448,7 +448,7 @@ export async function handleExaminerRoute(
         // P1-5: the full Stage R authority contract (schema/stage/binding/
         // window/revocation/probe) is verified BEFORE acceptance; the same
         // authority re-verifies per unit inside the runner for real runs.
-        // lgtm[js/user-controlled-bypass] — FALSE POSITIVE: selecting the F2
+        // CodeQL js/user-controlled-bypass (dismissed as false positive): selecting the F2
         // mode ADDS the Stage R gate (it cannot skip one); the other two
         // reachable modes perform no real-host action at all.
         if (requestedMode === 'f2-real-host') {
