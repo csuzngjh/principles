@@ -5,10 +5,10 @@
 | 字段 | 内容 |
 |---|---|
 | 实施工单 | PRI-1071（In Progress） |
-| 基线 | origin/main `457bbf0fc` → 整改后同步至 origin/main `9ef8d607d`（2026-11-03）；整改最终 head `db33190b8`；分支 `ai/PRI-1071-mcp-gate4`（PR #2304） |
+| 基线 | origin/main `9ef8d607d`（2026-11-03）；上一轮整改 head `2fa6c54ed`；第三轮整改提交见 PR #2304 时间线（本报告不预判最终 head）；分支 `ai/PRI-1071-mcp-gate4` |
 | 验收日期 | 2026-11-02 ～ 2026-11-03 |
-| 证据环境 | 全部隔离环境（隔离 CODEX_HOME / `--profile gate4` / 隔离 CODEBUDDY_CONFIG_DIR）；零 Owner 日常宿主配置写入 |
-| 支持判定 | 见 §4 判定表——两宿主 RUNTIME_VERIFIED，一宿主 IMPLEMENTED_NOT_RUNTIME_VERIFIED（诚实边界，见 §3.3） |
+| 证据环境 | 全部隔离环境（隔离 CODEX_HOME / `--profile gate4` / 隔离 CODEBUDDY_CONFIG_DIR / 临时 HOME）；零 Owner 日常宿主配置写入 |
+| 支持判定 | 见 §5 判定表——两宿主 RUNTIME_VERIFIED，一宿主 IMPLEMENTED_NOT_RUNTIME_VERIFIED（诚实边界） |
 
 ---
 
@@ -23,8 +23,9 @@
 | 响应边界 32768/32769 | 均通过 | **包级契约测试钉住**（32768 逐字节通过/32769 → response_budget_exceeded 非静默截断） | `packages/pd-mcp-server/src/__tests__/budget-boundary.test.ts`（84/84 套件内） |
 | 正常关闭 | ≥10 次 | **每宿主形态 20 次干净关停** | quant-probe shutdownOk 20/20 ×3 + 包级真实进程 10 次循环测试 |
 | 重复安装幂等 | ≥3 次 | **Codex：plugin add ×3（0.3.0→重装→0.3.1）幂等**；WB/OC 安装器幂等由 installer 测试覆盖 | Phase C 隔离记录 + workbuddy-host-installer 58/58 |
-| 更新失败回滚 | 故障注入 | **未验证**：尚无更新失败注入后上一可用版本恢复且可调用的证据 | corrupt-binding fail-closed + pd-setup 手动恢复不满足该门槛；installer 回滚为继承的既有单槽+备份机制，本 PR 未对其做 MCP 更新失败注入 |
+| 更新失败回滚 | 故障注入 | **PASS（第三轮，2026-11-03）**：真实 WorkBuddy 临时环境，注册提交在 cache swap 后失败 → 旧 cache 逐文件 sha256 恢复、旧 binding 保留、settings/registry 字节不变、staging 清理；恢复后真实 launcher initialize/tools/list/tools/call 成功 | `packages/create-principles-disciple/tests/workbuddy-update-rollback-fault-injection.test.ts`（真实故障注入 + 真实进程）；详见 LIFECYCLE §2.2 |
 | 配置保护 | 无关配置零变化 | **Codex：用户级 e2e-other MCP 保留；OC：operator mcp.servers 保留；WB：settings 其余字段保留** | Phase C/D/E 各卸载段记录 |
+| 同名冲突 | 明确报告且不覆盖 | **PASS（第三轮，2026-11-03）**：三宿主同名第三方 server → 安装前停止；原配置 sha256/mtime 不变；PD 同名 → 幂等；不同名共存；损坏/归属不明 → fail-closed | `packages/create-principles-disciple/tests/mcp-registration-conflict.test.ts` 14/14；`packages/pd-cli/tests/commands/health-mcp.test.ts` 19/19；详见 LIFECYCLE §2.1 |
 | 非回归 | 全绿 | **pd-mcp-server 84/84；pd-cli MCP health 54/54；core pain-recall 93/93（core 全套 586 通过）；codex-adapter 362 passed / 1 skipped；installer WB 58/58；openclaw-plugin 2314 passed / 4 failed（3 文件 4 测试与 main 基线逐字一致，Windows tar/EPERM/宿主路径环境性，非本分支回归）；发布列车契约 36/36；scripts 套件 3 处真实回归已修，其余失败项隔离复跑全绿（90/90、26/26）** | 2026-11-03 各套件运行日志（`.tmp/test-*.log`） |
 
 ---
@@ -74,7 +75,13 @@
 
 **SPEC §13 完成标准对照**：三宿主未全部达到模型级 RUNTIME_VERIFIED——按 SPEC §13/§14.1 诚实声明：**Gate 4 整体尚未达到"完整交付"判定**；两宿主 RUNTIME_VERIFIED + 一宿主 IMPLEMENTED_NOT_RUNTIME_VERIFIED 是本分支的真实状态。剩余两项补验（Codex 模型级 × 配额恢复；WB 模型级 × 一次交互式登录）均无实现工作，仅执行验证。
 
-### §5.1 补验清单（Owner 协助项）
+### §5.1 第三轮整改补充（2026-11-03）
+
+- 更新失败回滚、同名冲突两项门槛已从“未验证/未通过”转为 **PASS**（证据见 §1 表）。
+- OpenClaw 多工作区隔离：MCP binding 仅由显式 PD 工作区写入；无显式配置时 fail-closed；真实双 workspace 进程证据见 LIFECYCLE §4.1。
+- 历史结论（更新失败未验证、同名冲突未实现、OpenClaw 单 binding 限制）保留在 LIFECYCLE §5 历史快照中，不删除。
+
+### §5.2 补验清单（Owner 协助项）
 1. **Codex 模型级 10/10**：Owner OpenAI 配额恢复（2026-11-06）后，在隔离 CODEX_HOME 重跑一次 `codex exec` 调用会话即可（全部夹具已就绪于 `.tmp/codex-e2e/`）。
 2. **WB 模型级 10/10**：需要一次 WorkBuddy Desktop 交互式 `/login`（或 Owner 在日常环境接受 pd-recall server 信任提示）。隔离环境无法替代此宿主认证。
 

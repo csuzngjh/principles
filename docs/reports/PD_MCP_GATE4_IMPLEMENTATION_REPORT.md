@@ -6,9 +6,9 @@
 |---|---|
 | 实施工单 | PRI-1071（In Progress） |
 | 授权 | OG-3 AUTHORIZED（2026-11-02，隔离环境 4-A～4-F）；D-06 方案 A OWNER_CONFIRMED（Decision Card §〇 r4） |
-| 基线 | origin/main `457bbf0fc` → 整改后同步至 origin/main `9ef8d607d`（2026-11-03）；整改最终 head `db33190b8`；分支 `ai/PRI-1071-mcp-gate4`（worktree `D:\Code\_worktrees\principles\PRI-1071-mcp-gate4`） |
-| 交付形态 | PR #2304（OPEN，未合并）；整改提交已推送到分支，等待 Owner 审阅。**未合并/未发布/未部署** |
-| 状态 | **Gate 4 主体完成并完成整改轮；两宿主 RUNTIME_VERIFIED，一宿主 IMPLEMENTED_NOT_RUNTIME_VERIFIED（外部条件阻断，补验路径明确）** |
+| 基线 | origin/main `9ef8d607d`（2026-11-03）；上一轮整改 head `2fa6c54ed`；第三轮整改提交见 PR #2304 时间线（本报告不预判最终 head）；分支 `ai/PRI-1071-mcp-gate4`（worktree `D:\Code\_worktrees\principles\PRI-1071-mcp-gate4`） |
+| 交付形态 | PR #2304（OPEN，未合并）；第三轮整改提交已推送到分支，等待 Owner 审阅。**未合并/未发布/未部署** |
+| 状态 | **Gate 4 主体完成；三项阻断项（OpenClaw 多工作区隔离 / WorkBuddy 更新失败回滚 / 三宿主同名冲突）已闭环；两宿主 RUNTIME_VERIFIED，一宿主 IMPLEMENTED_NOT_RUNTIME_VERIFIED（外部条件阻断，补验路径明确）** |
 
 ---
 
@@ -38,6 +38,16 @@
 | P2 pd health | 复用 `pd health` 增 MCP 只读诊断（安装/入口/版本 pin/binding schema/host/workspace/canonical/宿主配置/restart）；不可判定输出 `unverified`；不启动 server、不执行业务 Tool | `health-mcp.ts`；health 套件 54/54（含 health-mcp 16） |
 | P2 CodeQL | `workspace-binding.test.ts` 改用 `mkdtemp` + 独占创建 + `finally` 清理 | `workspace-binding.test.ts`；CodeQL 状态见 PR 检查 |
 
+## 1.1a 第三轮整改（2026-11-03，Owner 最终阻断项）
+
+| 阻断项 | 根因 | 修复 | 测试 / 真实运行证据 |
+|---|---|---|---|
+| P0-1 OpenClaw 多工作区 Binding 错配 | 健康检查用 `{ agentId: 'main' }` 解析 workspace 并写唯一 binding；多 Agent 时 MCP 绑定 main 的工作区，造成跨工作区原则经验召回泄漏 | `resolveExplicitPdWorkspaceDir()` 只接受 Owner 显式声明（`PD_WORKSPACE_DIR`/`OPENCLAW_WORKSPACE`/`principles-disciple.json`）；`syncMcpBindingFromExplicitWorkspace()` 无显式声明时删除旧 binding（fail-closed）；`pd-mcp-server` startup 日志增加 workspace fingerprint（哈希，非路径）供进程级取证 | `mcp-binding-isolation.test.ts` 6/6；`mcp-launcher-workspace-isolation.test.ts` 3/3（真实 launcher 子进程 + 真实 MCP client；X/Y 指纹与数据互不交叉；无 binding → 连接拒绝） |
+| P0-2 WorkBuddy 更新失败回滚 | 既有验收只有 corrupt-binding / pd-setup 恢复，不证明「真实故障后旧版本恢复并可继续提供 MCP」 | 复用既有 staging/backup/rollback 事务；测试以**真实只读 `installed_plugins.json`** 在 cache swap 后注入提交失败 | `workbuddy-update-rollback-fault-injection.test.ts`：`workbuddy_registration_commit_failed` + 旧 cache 逐文件 sha256 一致 + settings/registry sha256 不变 + staging 清理 + 真实 launcher initialize/tools/list/tools/call 返回旧工作区数据 |
+| P0-3 三宿主同名注册冲突 | SPEC §7.5/§11.3 要求同名冲突明确报告并停止，PD 侧无检测 | 新增只读分类器 `mcp-registration-conflict.ts`（A 同名 PD → 幂等；B 同名他方 → 安装前停止；C 不同名 → 共存；D 损坏/归属不明 → fail-closed）；接入 OpenClaw/WorkBuddy installer、Codex `$pd-control setup`、`pd health` | `mcp-registration-conflict.test.ts` 14/14（三宿主配置 sha256/mtime 前后不变、marketplace/settings/cache/plugin-data 零创建）；`health-mcp.test.ts` 19/19（`CONFIG_DRIFT` + reason/nextAction） |
+
+本轮未新增 daemon / 数据库 / Feature Flag / 持久化状态 / 第二套注册管理系统；未改动 Gate 3 Capability、三宿主插件架构与 Hook/CLI 合同。
+
 ## 1.2 Release Lock 可复现性
 
 `npm run generate:release-locks` 连续生成，10 个 `release-locks/**/package-lock.json` 的 sha256 前后一致；`check:release-locks` 逐组件 `npm ci` 通过（0 失败）。`pd-mcp-server` lock 的 sha256 = `28be450bfafbe0fda7d13a20abd0b5d09906729c379e784d12706b1f112234bf`；解析结果：`@modelcontextprotocol/client@2.4.0`、`@modelcontextprotocol/core@2.4.0`、`@modelcontextprotocol/server@2.4.0`、`zod@4.6.7`。
@@ -46,11 +56,11 @@
 
 | 评审项（路径） | 判定 | 处置与证据 |
 |---|---|---|
-| `deadline.ts:56` 截止后成功判定 | 属实 | 已加 `startedAt` 耗时复检；`deadline.test.ts` 覆盖 |
+| `deadline.ts:56` 截止后成功判定 | 属实（历史） | 已加 `startedAt` 耗时复检（`deadline.ts` `runWithDeadline` `Date.now() - startedAt < deadlineMs`）；`deadline.test.ts` 覆盖 |
 | `bundle-plugin.mjs` 缺组件时陈旧输出 | 属实 | `else` 分支 `rmSync(MCP_SERVER_DEST)`（423–430 行） |
 | launcher `schemaVersion` 未脱敏 | 属实 | `schemaKind` 白名单字符 + 60 字符上限；三份 launcher 字节同源 |
 | OpenClaw workspace 无法解析时旧 binding 残留 | 属实 | `invalidateMcpBinding()` fail-closed（`index.ts:183`） |
-| OpenClaw 多 agent 固定绑定 `main` | 属实，但属单绑定架构边界 | 按指令不重新设计三宿主架构；LIFECYCLE §4 与本文 §3 显式记录为 follow-up |
+| OpenClaw 多 agent 固定绑定 `main` | 属实（第三轮已修复） | 不再从 `main` 推断：`syncMcpBindingFromExplicitWorkspace()` 仅接受显式 PD 工作区，无显式声明即删除旧 binding；真实双 workspace 进程证据见 §1.1a / LIFECYCLE §4.1 |
 | OpenClaw 缺组件无结构化 warning | 属实 | `ensureMcpBinding` 返回 `mcp_server_component_missing`，健康检查日志输出 |
 | `pd-setup` marker 未记录 MCP 来源 | 属实 | marker 增 `mcpServerSource`；来源标志存在即禁用短路 |
 | `pd-setup` 先写 binding 后注册 worker | 属实 | binding 写入移到 `registerWorkspaceWorker` 成功之后（352–354 行） |
@@ -58,10 +68,10 @@
 | `pd-status` 未检查 binding 目标存在 | 属实 | `targetsPresent`（workspaceDir + serverEntry） |
 | `pd-status` 未校验 `--workspace` 一致 | 属实 | `boundWorkspace`（samePath 比较） |
 | `verify-pinned-runtime-capability` 未装 MCP pin | 属实 | 四 pin 校验 + 安装 `@principles/pd-mcp-server@${pins.mcpServer}` |
-| 生命周期表“同名冲突 ✅” | 属实 | 改为 ❌ PARTIAL（PD 无冲突检测/报告） |
-| 生命周期表“更新失败恢复上一版本 ✅” | 属实 | 改为未验证/手动 `$pd-control setup`，注明继承机制 |
-| 宿主矩阵“更新失败回滚” | 属实 | 改为未验证 |
-| 实施报告“更新/恢复/卸载全过” | 属实 | 改为“更新失败回滚未验证”，写明继承机制 |
+| 生命周期表“同名冲突 ✅” | 属实（历史）；第三轮已补齐实现 | 第三轮新增安装前冲突门 + 测试后恢复 ✅（见 §1.1a P0-3；历史结论保留于 LIFECYCLE §5） |
+| 生命周期表“更新失败恢复上一版本 ✅” | 属实（历史）；第三轮已补齐验收 | 第三轮真实故障注入验证 WorkBuddy 回滚（见 §1.1a P0-2；历史结论保留于 LIFECYCLE §5） |
+| 宿主矩阵“更新失败回滚” | 属实（历史）；第三轮已补齐验收 | 更新为 PASS（真实注入 + 恢复后 MCP 调用） |
+| 实施报告“更新/恢复/卸载全过” | 属实（历史）；第三轮已补齐验收 | 更新为“更新失败回滚 PASS（WorkBuddy 安装器级）”，Codex 宿主清 payload 的手动恢复边界仍保留 |
 | SPEC §17 OG-3 状态 | 属实 | 增加“当前状态/历史状态”分段，NOT_AUTHORIZED 标为历史 |
 | 决策卡 r3 记录 | 属实 | r3 的 NOT_AUTHORIZED 标注“已被 r4 取代，仅作历史” |
 | `installer.ts` 忽略 `installBundledMcpServer` 返回值 | 属实 | `if (mcpServerInstalled)` 后才链接/装依赖 |
@@ -110,10 +120,10 @@
 
 ## 3. 验收结论（细节见 HOST_ACCEPTANCE_MATRIX / LIFECYCLE_ACCEPTANCE）
 
-- 量化门槛：20/20 握手 ×3 形态、20/20 发现 ×3、20/20 真实调用 ×3（门槛 10）、≤1.05s/轮、32768/32769 包级钉住、关停 20×3 + 包级 10 循环、重复安装 ×3 幂等、**更新成功/卸载/配置保护已验证**；**更新失败回滚未验证**（binding 损坏 fail-closed 与 pd-setup 手动恢复只证明检测与恢复动作，不证明"恢复上一可用版本且可调用"；installer 回滚为继承的既有机制，本 PR 未对 MCP 更新失败做故障注入）。
+- 量化门槛：20/20 握手 ×3 形态、20/20 发现 ×3、20/20 真实调用 ×3（门槛 10）、≤1.05s/轮、32768/32769 包级钉住、关停 20×3 + 包级 10 循环、重复安装 ×3 幂等、**更新成功/卸载/配置保护已验证**；**更新失败回滚已由第三轮真实故障注入验证 PASS**（§1.1a；历史“未验证”结论保留于 LIFECYCLE §5 历史快照）。
 - 非回归（2026-11-03 实跑）：pd-mcp-server 84/84；pd-cli MCP health 54/54；core pain-recall 93/93（core 全套 586 通过）；codex-adapter 362 passed / 1 skipped；installer WB 58/58；openclaw-plugin 2314 passed / 4 failed（3 文件 4 测试与 main 基线逐字一致，Windows tar/EPERM/宿主路径环境性）；发布列车契约 36/36；scripts 套件 3 处真实回归已修，其余失败项隔离复跑全绿（90/90、26/26）。
-- **同名冲突检测未实现**：宿主优先级行为已验证，但 PD 侧不检测、不报告、不停止安装（SPEC §7.5/§11.3），生命周期表标记未通过。
-- **多 agent 单绑定限制**：OpenClaw 健康检查以 `main` 解析 workspace 写入唯一 binding；未配置 PD 显式工作区时，其他 agent 的 MCP 调用会读到 `main` 工作区数据（既有单绑定架构限制，重新设计三宿主插件架构不在本轮范围）。
+- **同名冲突检测已闭环（第三轮）**：三宿主安装前统一分类（A 幂等 / B 冲突停止 / C 共存 / D fail-closed），冲突时配置 sha256/mtime 不变；`pd health` 同步报告。历史“未实现”结论保留于 LIFECYCLE §5。
+- **多 agent 单 binding 已闭环（第三轮）**：binding 仅由显式 PD 工作区写入；无显式声明时删除旧 binding，launcher fail-closed；hooks 仍按 agent 各自 workspace。真实双 workspace 进程证据见 LIFECYCLE §4.1。
 - 宿主判定：**Codex RUNTIME_VERIFIED（集成面；模型级调用被 Owner OpenAI 配额阻断至 11-06）；OpenClaw RUNTIME_VERIFIED（含真实模型级调用——三宿主唯一）；WorkBuddy IMPLEMENTED_NOT_RUNTIME_VERIFIED（Desktop 令牌不可文件移植，需一次交互式登录）**。
 - 按 SPEC §13：**尚未宣布"完整交付"**——剩余为两项纯执行验证（无实现工作）。
 
@@ -141,10 +151,11 @@ YES 项论证：public 包是 SPEC G4-01 的直接交付物（零实现替代不
 
 ## 6. 遗留（follow-up 候选，未自动实施）
 
-1. 同名冲突检测与"明确报告并停止安装"（SPEC §7.5/§11.3）——当前未实现，生命周期验收标记未通过。
-2. MCP 更新失败注入 + 上一可用版本自动恢复（当前仅 pd-status 检出 + 手动 `$pd-control setup`）。
+1. ~~同名冲突检测与"明确报告并停止安装"（SPEC §7.5/§11.3）~~——第三轮已实现（§1.1a P0-3）。
+2. ~~MCP 更新失败注入 + 上一可用版本恢复~~——WorkBuddy 安装器级回滚已由第三轮真实注入验证（§1.1a P0-2）；Codex 宿主更新清 payload 后的 binding 手动恢复仍保留（属宿主插件机制，非 PD installer 事务）。
 3. Codex 模型级 10/10 补验（配额恢复后，夹具就绪）——Owner 补验项，不在本轮 CI 模拟。
 4. WB 模型级 10/10 补验（需一次交互式登录）——Owner 补验项，不在本轮 CI 模拟。
-5. 多 agent 单 binding 限制（OpenClaw 以 `main` 解析 workspace）——属既有架构，重新设计不在本轮范围。
-6. OpenClaw declared-surface consent 文案的产品化润色（现走宿主通用 consent 流）。
-7. install-layout 兼容孪生退役：`packages/create-principles-disciple/src/mcp-server-layout-compat.ts` 仅为规避"已安装版本尚无 `getMcpServerEntry`/`mcpServerDir`"的 PRI-669 缺陷类；待下一个含 `.changeset/mcp-install-layout-entry.md` 的 install-layout 版本发布并进入 runtime pin 后，删除孪生并直接使用发布的导出。
+5. ~~多 agent 单 binding 限制（OpenClaw 以 `main` 解析 workspace）~~——第三轮已改为显式工作区 + fail-closed（§1.1a P0-1）。
+6. `deadline.ts` 同步组装跨截止的复检、launcher schema 脱敏、pd-status mcpServer pin 早前整改已包含；CodeRabbit 仍显示未解决的历史线程以代码/测试复核为准。
+7. OpenClaw declared-surface consent 文案的产品化润色（现走宿主通用 consent 流）。
+8. install-layout 兼容孪生退役：`packages/create-principles-disciple/src/mcp-server-layout-compat.ts` 仅为规避"已安装版本尚无 `getMcpServerEntry`/`mcpServerDir`"的 PRI-669 缺陷类；待下一个含 `.changeset/mcp-install-layout-entry.md` 的 install-layout 版本发布并进入 runtime pin 后，删除孪生并直接使用发布的导出。
