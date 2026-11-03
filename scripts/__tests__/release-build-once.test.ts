@@ -19,7 +19,37 @@ const OTHER_COHORT = 'b'.repeat(40);
 
 type Fixture = { root: string; pkgDir: string; counter: string; ledger: string };
 
-function createFixture(options: { failBuild?: boolean } = {}): Fixture {
+// A file symlink needs privilege on Windows; a directory junction does not.
+// Both are "non-regular entries" for digestDist, so the fixture prefers a file
+// symlink and falls back to a junction so this fails-closed case also runs on
+// the Windows dev box (CI is ubuntu either way).
+function canSymlink(): boolean {
+  const probeRoot = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'pd-g32-symlink-probe-'));
+  try {
+    fs.writeFileSync(path.join(probeRoot, 'target'), 'x');
+    try {
+      fs.symlinkSync('target', path.join(probeRoot, 'link'));
+      return true;
+    } catch {
+      fs.mkdirSync(path.join(probeRoot, 'targetdir'));
+      fs.symlinkSync(path.join(probeRoot, 'targetdir'), path.join(probeRoot, 'linkdir'), 'junction');
+      return true;
+    }
+  } catch {
+    return false;
+  } finally {
+    fs.rmSync(probeRoot, { recursive: true, force: true });
+  }
+}
+
+/** Errno code from an unknown thrown value, without a type assertion. */
+function errnoCode(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return undefined;
+  const code: unknown = Reflect.get(error, 'code');
+  return typeof code === 'string' ? code : undefined;
+}
+
+function createFixture(options: { failBuild?: boolean; emitSymlink?: boolean } = {}): Fixture {
   const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'pd-g32-build-once-'));
   const pkgDir = path.join(root, 'pkgs', 'demo');
   fs.mkdirSync(pkgDir, { recursive: true });
@@ -44,6 +74,15 @@ function createFixture(options: { failBuild?: boolean } = {}): Fixture {
     "fs.mkdirSync(path.join(__dirname, 'dist', 'sub'), { recursive: true });",
     "fs.writeFileSync(path.join(__dirname, 'dist', 'index.js'), 'export const v = 1;\\n');",
     "fs.writeFileSync(path.join(__dirname, 'dist', 'sub', 'b.js'), 'export const b = 2;\\n');",
+    ...(options.emitSymlink
+      ? [
+          "try { fs.symlinkSync('index.js', path.join(__dirname, 'dist', 'link.js')); }",
+          "catch (error) {",
+          "  if (error.code !== 'EPERM' && error.code !== 'EACCES') throw error;",
+          "  fs.symlinkSync(path.join(__dirname, 'dist', 'sub'), path.join(__dirname, 'dist', 'linkdir'), 'junction');",
+          "}",
+        ]
+      : []),
     '',
   ].join('\n'));
   return { root, pkgDir, counter, ledger: path.join(root, 'ledger', 'pd-built-once.json') };
@@ -187,6 +226,18 @@ describe('build-once (G3.2) — job-scoped ledger with artifact identity', () =>
       fs.rmSync(fx.root, { recursive: true, force: true });
     }
   }, 120_000);
+
+  it.skipIf(!canSymlink())('fails closed when a build emits a symlink into dist (never records it)', () => {
+    const fx = createFixture({ emitSymlink: true });
+    try {
+      const result = runBuildOnce(fx);
+      expect(result.status, out(result)).not.toBe(0);
+      expect(out(result)).toContain('not a regular-file artifact');
+      expect(fs.existsSync(fx.ledger)).toBe(false);
+    } finally {
+      fs.rmSync(fx.root, { recursive: true, force: true });
+    }
+  }, 120_000);
 });
 
 describe('digestDist — deterministic dist identity', () => {
@@ -210,6 +261,64 @@ describe('digestDist — deterministic dist identity', () => {
 
       fs.renameSync(path.join(dist, 'nested', 'b.js'), path.join(dist, 'nested', 'c.js'));
       expect(digestDist(dist)).not.toBe(base);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(!canSymlink())('refuses a dist containing a symlink instead of silently ignoring it', () => {
+    const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'pd-g32-digest-symlink-'));
+    try {
+      const dist = path.join(root, 'dist');
+      fs.mkdirSync(dist, { recursive: true });
+      fs.writeFileSync(path.join(dist, 'a.js'), 'a');
+      const base = digestDist(dist);
+      try {
+        fs.symlinkSync('a.js', path.join(dist, 'link.js'));
+      } catch (error) {
+        const code = errnoCode(error);
+        if (code !== 'EPERM' && code !== 'EACCES') throw error;
+        fs.mkdirSync(path.join(dist, 'sub'));
+        fs.symlinkSync(path.join(dist, 'sub'), path.join(dist, 'linkdir'), 'junction');
+      }
+      // Before the fix a symlink was neither hashed nor reported, so this
+      // returned the SAME digest while the emitted artifact changed.
+      expect(() => digestDist(dist)).toThrow(/non-regular entry/);
+      expect(base).toMatch(/^[a-f0-9]{64}$/);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(!canSymlink())('fails closed when the dist ROOT is a symlink instead of following it', () => {
+    const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'pd-g32-digest-root-symlink-'));
+    try {
+      const external = path.join(root, 'external');
+      fs.mkdirSync(external, { recursive: true });
+      fs.writeFileSync(path.join(external, 'a.js'), 'a');
+      // A directory junction needs no file-symlink privilege on Windows.
+      const linked = path.join(root, 'dist');
+      fs.symlinkSync(external, linked, 'junction');
+      // Before the fix the root symlink was followed, so an external tree got a
+      // valid-looking digest while the package's own dist/ was never read.
+      expect(() => digestDist(linked)).toThrow(/dist root is a symlink/);
+
+      const dangling = path.join(root, 'dangling-dist');
+      fs.symlinkSync(path.join(root, 'missing-target'), dangling, 'junction');
+      // Before the fix existsSync() reported false, so a dangling root symlink
+      // was silently classified as a missing dist.
+      expect(() => digestDist(dangling)).toThrow(/dist root is a symlink/);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('fails closed when the dist root is not a directory', () => {
+    const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'pd-g32-digest-root-file-'));
+    try {
+      const notADirectory = path.join(root, 'dist');
+      fs.writeFileSync(notADirectory, 'not a directory');
+      expect(() => digestDist(notADirectory)).toThrow(/dist root is not a directory/);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }

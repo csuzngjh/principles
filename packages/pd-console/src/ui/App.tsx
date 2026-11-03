@@ -21,6 +21,9 @@ import { PrincipleDetailPage } from "./pages/principles/PrincipleDetailPage.js";
 import { ActivationPage } from "./pages/activation/ActivationPage.js";
 import { DebtPage } from "./pages/debt/DebtPage.js";
 import { ExaminerPage } from "./pages/examiner/ExaminerPage.js";
+import { ExaminerConfigurePage } from "./pages/examiner/ExaminerConfigurePage.js";
+import { ExaminerStudyPage } from "./pages/examiner/ExaminerStudyPage.js";
+import { ExaminerReportPage } from "./pages/examiner/ExaminerReportPage.js";
 import { ControlCenterPage } from "./pages/control-center/ControlCenterPage.js";
 import { SettingsPage } from "./pages/settings/SettingsPage.js";
 import { UpdatePage } from "./pages/settings/UpdatePage.js";
@@ -227,10 +230,15 @@ function AuthRoutes() {
                     <Route path="/principles/:id" element={<PrincipleDetailPage />} />
                     <Route path="/activation" element={<ActivationPage />} />
                     <Route path="/debt" element={<DebtPage />} />
-                    {/* The Examiner offline research panel is a shipped
-                        surface: mounted in every build. Real-host execution
-                        stays refused by the server, not by hiding the page. */}
+                    {/* The Examiner panel is a shipped surface: mounted in
+                        every build. Real-host execution stays refused by the
+                        server, not by hiding the page. v0.10.1: the single
+                        v0.9 page became a four-page Owner journey
+                        (evaluation → configure → study → report). */}
                     <Route path="/examiner" element={<ExaminerPage />} />
+                    <Route path="/examiner/configure" element={<ExaminerConfigurePage />} />
+                    <Route path="/examiner/studies/:studyId" element={<ExaminerStudyPage />} />
+                    <Route path="/examiner/studies/:studyId/report" element={<ExaminerReportPage />} />
                     <Route path="/control-center" element={<ControlCenterPage />} />
                     <Route path="/settings" element={<SettingsPage />} />
                     <Route path="/update" element={<UpdatePage />} />

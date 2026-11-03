@@ -1,22 +1,22 @@
-{"status":"CALIBRATION_REPLAYED_GOLD_REVIEW_PENDING","packageHash":"d5075b1191d4c80c3cf421223ccdf625c9cd1c615a02fb6c7513ad1a4d2044fc","reportHash":"526b1df2206943f2faf66e1e6a7bc965a90188f6510b21118f62af163baafaec","executions":9,"observedNodeVersion":"26.7.0"}
+{"status":"CALIBRATION_REPLAYED_GOLD_REVIEW_PENDING","packageHash":"39e6a4a12f6a44e3bbeb5fccd85eac6df80ea69266e534c49b5f805e6d731623","reportHash":"5569f40e4b5b3b2c7881e71fe22c242efddcf0f9552df7660685002cfeab8371","executions":9,"observedNodeVersion":"26.7.0"}
 replay exit=0
-{"ok":false,"status":"GOLD_REVIEW_PENDING","subjectHash":"d4251684e98ab1aad8bb41dd8e54df4cc9f29009e2e679a0cfd2dda7beca3951","reasonCode":"INDEPENDENT_HUMAN_REVIEW_REQUIRED","nextAction":"Owner designates a human reviewer; supply signed mapping/Gold receipts and the independently pinned authority file."}
+{"ok":false,"status":"GOLD_REVIEW_PENDING","subjectHash":"ac9f4dd3fe9af802b5625c345842eb011a6cb16967b93b15d27994e5fa26c261","reasonCode":"INDEPENDENT_HUMAN_REVIEW_REQUIRED","nextAction":"Owner designates a human reviewer; supply signed mapping/Gold receipts and the independently pinned authority file."}
 human-gate exit=1
 
-[1m[30m[46m RUN [49m[39m[22m [36mv5.0.0 [39m[90mD:/Code/_worktrees/principles/adhoc-20261101-v4-rebind-ci-green-55f69e/scripts[39m
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.0 [39m[90mD:/Code/_worktrees/principles/adhoc-20261103-examiner-v0101/scripts[39m
 
-[temp-lifecycle] .pd-test-temp: removed 7, kept 74
-[temp-lifecycle] TMPDIR -> D:\Code\_worktrees\principles\.pd-test-temp\vitest-20261101-135031-24467e
- [32m✓[39m __tests__/principle-learning-lab-owner-content-review.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 13[2mms[22m[39m
- [32m✓[39m __tests__/principle-learning-lab-examiner-productization-entry.test.ts [2m([22m[2m32 tests[22m[2m)[22m[32m 106[2mms[22m[39m
- [32m✓[39m __tests__/principle-learning-lab-frozen-package.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 210[2mms[22m[39m
- [32m✓[39m __tests__/principle-learning-lab-human-review-intake.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 341[2mms[22m[39m
+[temp-lifecycle] .pd-test-temp: kept 77
+[temp-lifecycle] TMPDIR -> D:\Code\_worktrees\principles\.pd-test-temp\vitest-20261103-133502-679d2d
+ [32m✓[39m __tests__/principle-learning-lab-owner-content-review.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+ [32m✓[39m __tests__/principle-learning-lab-examiner-productization-entry.test.ts [2m([22m[2m32 tests[22m[2m)[22m[32m 97[2mms[22m[39m
+ [32m✓[39m __tests__/principle-learning-lab-frozen-package.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 231[2mms[22m[39m
+ [32m✓[39m __tests__/principle-learning-lab-human-review-intake.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 378[2mms[22m[39m
 
 [2m Test Files [22m [1m[32m4 passed[39m[22m[90m (4)[39m
 [2m      Tests [22m [1m[32m50 passed[39m[22m[90m (50)[39m
-[2m   Start at [22m 13:50:30
-[2m   Duration [22m 786ms[2m (tests 51%, transform 34%, import 14%, worker 1%)[22m
+[2m   Start at [22m 13:35:02
+[2m   Duration [22m 710ms[2m (tests 55%, transform 31%, import 14%, worker 1%)[22m
 executions identical to the previous freeze: true
 report rows identical to the previous freeze (only implementationHash moved): true
-zip subjectHash d4251684e98ab1aad8bb41dd8e54df4cc9f29009e2e679a0cfd2dda7beca3951 matches receipts.template.json
-GOLD-BLIND-REVIEW-v4.zip sha256 fdbf818c89740eda3124d4e63089f82661332e91f7db67cbb0e50ad02ef1d8e0 (19 entries)
+zip subjectHash ac9f4dd3fe9af802b5625c345842eb011a6cb16967b93b15d27994e5fa26c261 matches receipts.template.json
+GOLD-BLIND-REVIEW-v4.zip sha256 9c68b93f3b62ce6ce7d7537ad029c5e59ca0424e98acb6ba35b8490ded728d59 (19 entries)
