@@ -72,7 +72,9 @@ Semantics:
   fields kept their semantics, so pre-existing observations remained valid and
   no observation cache was invalidated. SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001
   v0.3 later bumped the policy to `model_aware_v2`; v1 events are counted as
-  `foreignPolicyEventsSkipped` by the reader (visible, never silently dropped).
+  `foreignPolicyEventsSkipped` by the reader (reader-layer only — the Console
+  projection `selectConsoleRuntimeBudgetFacts` does not carry this counter,
+  so it is not Owner-visible), never silently dropped.
 - Console surfaces (grouped badge, activations status, post-approval
   warning) fall back to the DECLARED basis when no fresh runtime observation
   exists. A fresh observation still outranks the declaration in the forecast

@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import {
   getInstallLayoutPaths,
   getConsoleServerEntry,
+  getMcpServerEntry,
   getWorkbuddyWorkspaceDir,
   installManifestHostsForPersist,
   parseInstallManifest,
@@ -25,6 +26,9 @@ describe('install layout', () => {
     expect(paths.pluginDir).toContain('plugin');
     expect(paths.installLayoutDir).toContain('install-layout');
     expect(getConsoleServerEntry(result.paths, 'canonical')).toContain('.pd');
+    // Gate 4 (PRI-1071): one SSoT for the shared MCP server component/entry.
+    expect(paths.mcpServerDir).toBe(path.join(paths.runtimeDir, 'pd-mcp-server'));
+    expect(getMcpServerEntry(paths)).toBe(path.join(paths.runtimeDir, 'pd-mcp-server', 'dist', 'index.js'));
   });
 
   it('falls back to legacy only when the old extension exists', () => {

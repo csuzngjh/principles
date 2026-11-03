@@ -127,11 +127,12 @@ describe('PRI-920 settled-install topology invariants', () => {
     process.env.PD_SKIP_CONSOLE_AUTOLAUNCH = '1';
     setLanguage('en');
 
-    for (const component of ['core', 'host-runtime', 'codex-adapter', 'plugin', 'pd-cli', 'console', 'install-layout', 'release-manager']) {
+    for (const component of ['core', 'host-runtime', 'codex-adapter', 'plugin', 'pd-cli', 'console', 'install-layout', 'release-manager', 'pd-mcp-server']) {
       realFs.mkdirSync(realPath.join(fixtureDir, component, 'dist'), { recursive: true });
       realFs.writeFileSync(realPath.join(fixtureDir, component, 'package.json'), JSON.stringify({ name: `@principles/${component}`, version: PAYLOAD_VERSION }));
       realFs.writeFileSync(realPath.join(fixtureDir, component, 'dist', 'entry.js'), `export const component = '${component}';\n`);
     }
+    realFs.writeFileSync(realPath.join(fixtureDir, 'pd-mcp-server', 'dist', 'index.js'), 'export {};\n');
     realFs.writeFileSync(realPath.join(fixtureDir, 'plugin', 'openclaw.plugin.json'), JSON.stringify({ name: 'principles-disciple', activation: { onCapabilities: ['hook'] } }));
     realFs.writeFileSync(realPath.join(fixtureDir, 'pd-cli', 'dist', 'index.js'), 'module.exports = {};\n');
     realFs.mkdirSync(realPath.join(fixtureDir, 'release-manager', 'dist', 'update'), { recursive: true });

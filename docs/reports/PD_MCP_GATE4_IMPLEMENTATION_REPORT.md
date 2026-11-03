@@ -1,0 +1,304 @@
+# PD_MCP_GATE4_IMPLEMENTATION_REPORT
+
+# Gate 4 实施报告（SPEC-PD-MCP-GATE4-001 v1.2 → 代码/测试/宿主证据）
+
+| 字段 | 内容 |
+|---|---|
+| 实施工单 | PRI-1071（In Progress） |
+| 授权 | OG-3 AUTHORIZED（2026-11-02，隔离环境 4-A～4-F）；D-06 方案 A OWNER_CONFIRMED（Decision Card §〇 r4） |
+| 基线 | origin/main `9ef8d607d`（2026-11-03）；上一轮整改 head `2fa6c54ed`；第三轮整改提交见 PR #2304 时间线（本报告不预判最终 head）；分支 `ai/PRI-1071-mcp-gate4`（worktree `D:\Code\_worktrees\principles\PRI-1071-mcp-gate4`） |
+| 交付形态 | PR #2304（OPEN，未合并）；第三轮整改提交已推送到分支，等待 Owner 审阅。**未合并/未发布/未部署** |
+| 状态 | **Gate 4 主体完成；三项阻断项（OpenClaw 多工作区隔离 / WorkBuddy 更新失败回滚 / 三宿主同名冲突）已闭环；两宿主 RUNTIME_VERIFIED，一宿主 IMPLEMENTED_NOT_RUNTIME_VERIFIED（外部条件阻断，补验路径明确）** |
+
+---
+
+## 1. 提交序列（Gate 4 主体 + 整改轮）
+
+| 提交 | 内容 |
+|---|---|
+| `64385e2e3` | 治理记录 r4（OG-3/D-06）+ SPEC v1.2 入库（头改 ACCEPTED，正文合同未动） |
+| `f3f99959f` | Gate 4-A REALITY_CHECK（三宿主核验 + SDK 冻结 + 绑定冻结；含 Codex 真实运行探针） |
+| `e8a5f7ba7` | Gate 4-B：`packages/pd-mcp-server`（整改后 7 文件 / 84 测试：协议契约/预算边界/deadline 并发准入/绑定/真实进程 stdio/G4-1..G4-7 守卫） |
+| `0b690008e` | Gate 4-C：Codex 插件内置 MCP（.mcp.json + launcher + 四包 pin 列车 + pd-setup binding + pd-status 检测） |
+| `382b635ff` | Codex 测试卫生（repo 载荷保护 + repair 路径 stub source） |
+| `add5476dc` | Gate 4-D：OpenClaw manifest mcpServers |
+| `59229d44a` | Gate 4-E：WorkBuddy 插件 .mcp.json（v0.2.2，defaultEnabled:false 保持） |
+| `ca05f1fbc` | Gate 4-F：installer 组件打包 + 三宿主 binding 写入 + 卸载语义 + 测试 |
+
+## 1.1 整改轮（2026-11-03，Owner 整改指令 v1.0）
+
+| 项 | 整改内容 | 证据 |
+|---|---|---|
+| P1-1 Deadline 并发准入 | `AdmissionLimiter.tryAcquire()` 在 Capability 调用前同步预留；超时只停止等待、不释放容量；容量仅在底层真实结算（完成/异常/孤儿结算）后释放；保留 10s deadline 与迟到结果抑制 | `deadline.ts` / `server.ts`；`deadline.test.ts` 真实并发：6 并发仅 4 启动、超限请求未启动即拒绝、超时后 active 仍为 4、结算 2 个后恰好再准入 2 个、全路径释放后 active/orphan=0；MCP 套件 84/84 |
+| P1-2 Release Lock | 新增 `release-locks/pd-mcp-server/package-lock.json`（lockfileVersion 3；`@modelcontextprotocol/server@2.4.0` exact、`zod@4.6.7` exact），由仓库既有 `generate:release-locks` 生成 | `check:release-locks` 以 `npm ci --omit=dev --ignore-scripts --legacy-peer-deps --install-links` 验证 10 个组件通过；生成前后 sha256 对比见 §1.2 |
+| P1-3 干净环境构建 | 统一构建顺序 pd-mcp-server → installer → plugin bundle → release asset；`mcp-server-build.mjs` 为共享构建入口；bundle 缺组件时删除陈旧载荷，禁止携带本地残留 dist | 干净临时 HOME + 无 npm 的 self-contained 安装 smoke 15/15（532s）；release asset smoke 5/5（656s，含 "installs from pipeline output without invoking npm" 与 canonical MCP entry 断言） |
+| P1-4 守卫/发布列车/交付 | Runtime Writer 精确 allowlist；核心架构守卫精确登记（不删守卫）；`runtime-version.json` 四包 pin；发布列车 9 腿（pd-mcp-server 为第 5 腿）；Codex 插件交付 CI 使用 PR 构建的本地 tarball + 隔离安装验证，不访问 npm | `check:runtime-writers` PASS（10 条均带理由）；architecture-regression 493；`codex-runtime-delivery` / `publish-recovery` 契约测试；CI `codex-plugin-delivery` job |
+| P1-5 MCP 测试入 CI 与 verify:merge | 新增 CI job `test-pd-mcp-server`（node 22）；`verify:merge` 显式运行 `npm test --workspace=@principles/pd-mcp-server`；覆盖 initialize/tools-list/tools-call/Schema/32KiB/deadline/并发准入与孤儿释放/stdout 纯协议/stderr 脱敏/isError 映射/workspace fail-closed/子进程关闭/安装包运行验证 | `.github/workflows/ci.yml`；根 `package.json` verify:merge；MCP 84/84 |
+| P2 Binding 安全 | 三宿主 launcher 统一 canonical entry、realpath 逃逸、Host/Schema/版本 pin 交叉校验；非法/伪造/跨宿主 fail-closed；workspace 无法解析时 `invalidateMcpBinding` 使旧 binding 失效 | launcher-binding 27 测试、workspace-binding 9 测试；三份 launcher 字节同源守卫 |
+| P2 pd health | 复用 `pd health` 增 MCP 只读诊断（安装/入口/版本 pin/binding schema/host/workspace/canonical/宿主配置/restart）；不可判定输出 `unverified`；不启动 server、不执行业务 Tool | `health-mcp.ts`；health 套件 54/54（含 health-mcp 16） |
+| P2 CodeQL | `workspace-binding.test.ts` 改用 `mkdtemp` + 独占创建 + `finally` 清理 | `workspace-binding.test.ts`；CodeQL 状态见 PR 检查 |
+
+## 1.1a 第三轮整改（2026-11-03，Owner 最终阻断项）
+
+| 阻断项 | 根因 | 修复 | 测试 / 真实运行证据 |
+|---|---|---|---|
+| P0-1 OpenClaw 多工作区 Binding 错配 | 健康检查用 `{ agentId: 'main' }` 解析 workspace 并写唯一 binding；多 Agent 时 MCP 绑定 main 的工作区，造成跨工作区原则经验召回泄漏 | `resolveExplicitPdWorkspaceDir()` 只接受 Owner 显式声明（`PD_WORKSPACE_DIR`/`OPENCLAW_WORKSPACE`/`principles-disciple.json`）；`syncMcpBindingFromExplicitWorkspace()` 无显式声明时删除旧 binding（fail-closed）；`pd-mcp-server` startup 日志增加 workspace fingerprint（哈希，非路径）供进程级取证 | `mcp-binding-isolation.test.ts` 6/6；`mcp-launcher-workspace-isolation.test.ts` 3/3（真实 launcher 子进程 + 真实 MCP client；X/Y 指纹与数据互不交叉；无 binding → 连接拒绝） |
+| P0-2 WorkBuddy 更新失败回滚 | 既有验收只有 corrupt-binding / pd-setup 恢复，不证明「真实故障后旧版本恢复并可继续提供 MCP」 | 复用既有 staging/backup/rollback 事务；测试以跨平台真实 OS 失败在 cache swap 后注入提交失败（Windows 文件只读 / POSIX 父目录非可写） | `workbuddy-update-rollback-fault-injection.test.ts`：`workbuddy_registration_commit_failed` + 旧 cache 逐文件 sha256 一致 + settings/registry sha256 不变 + staging 清理 + 真实 launcher initialize/tools/list/tools/call 返回旧工作区数据 |
+| P0-3 三宿主同名注册冲突 | SPEC §7.5/§11.3 要求同名冲突明确报告并停止，PD 侧无检测 | 新增只读分类器 `mcp-registration-conflict.ts`（A 同名 PD → 幂等；B 同名他方 → 安装前停止；C 不同名 → 共存；D 损坏/归属不明 → fail-closed）；接入 OpenClaw/WorkBuddy installer、Codex `$pd-control setup`、`pd health` | `mcp-registration-conflict.test.ts` 14/14（三宿主配置 sha256/mtime 前后不变、marketplace/settings/cache/plugin-data 零创建）；`health-mcp.test.ts` 19/19（`CONFIG_DRIFT` + reason/nextAction） |
+
+本轮未新增 daemon / 数据库 / Feature Flag / 持久化状态 / 第二套注册管理系统；未改动 Gate 3 Capability、三宿主插件架构与 Hook/CLI 合同。
+
+## 1.2 Release Lock 可复现性
+
+`npm run generate:release-locks` 连续生成，10 个 `release-locks/**/package-lock.json` 的 sha256 前后一致；`check:release-locks` 逐组件 `npm ci` 通过（0 失败）。`pd-mcp-server` lock 的 sha256 = `28be450bfafbe0fda7d13a20abd0b5d09906729c379e784d12706b1f112234bf`；解析结果：`@modelcontextprotocol/client@2.4.0`、`@modelcontextprotocol/core@2.4.0`、`@modelcontextprotocol/server@2.4.0`、`zod@4.6.7`。
+
+## 1.3 整改轮评审处置（CodeRabbit 21 条 + CodeQL 1 条，逐条在当前 head 复核）
+
+| 评审项（路径） | 判定 | 处置与证据 |
+|---|---|---|
+| `deadline.ts:56` 截止后成功判定 | 属实（历史） | 已加 `startedAt` 耗时复检（`deadline.ts` `runWithDeadline` `Date.now() - startedAt < deadlineMs`）；`deadline.test.ts` 覆盖 |
+| `bundle-plugin.mjs` 缺组件时陈旧输出 | 属实 | `else` 分支 `rmSync(MCP_SERVER_DEST)`（423–430 行） |
+| launcher `schemaVersion` 未脱敏 | 属实 | `schemaKind` 白名单字符 + 60 字符上限；三份 launcher 字节同源 |
+| OpenClaw workspace 无法解析时旧 binding 残留 | 属实 | `invalidateMcpBinding()` fail-closed（`index.ts:183`） |
+| OpenClaw 多 agent 固定绑定 `main` | 属实（第三轮已修复） | 不再从 `main` 推断：`syncMcpBindingFromExplicitWorkspace()` 仅接受显式 PD 工作区，无显式声明即删除旧 binding；真实双 workspace 进程证据见 §1.1a / LIFECYCLE §4.1 |
+| OpenClaw 缺组件无结构化 warning | 属实 | `ensureMcpBinding` 返回 `mcp_server_component_missing`，健康检查日志输出 |
+| `pd-setup` marker 未记录 MCP 来源 | 属实 | marker 增 `mcpServerSource`；来源标志存在即禁用短路 |
+| `pd-setup` 先写 binding 后注册 worker | 属实 | binding 写入移到 `registerWorkspaceWorker` 成功之后（352–354 行） |
+| `pd-status` 缺 `mcpServer` pin 仍报 ok | 属实 | 缺失/非字符串 → `degraded` |
+| `pd-status` 未检查 binding 目标存在 | 属实 | `targetsPresent`（workspaceDir + serverEntry） |
+| `pd-status` 未校验 `--workspace` 一致 | 属实 | `boundWorkspace`（samePath 比较） |
+| `verify-pinned-runtime-capability` 未装 MCP pin | 属实 | 四 pin 校验 + 安装 `@principles/pd-mcp-server@${pins.mcpServer}` |
+| 生命周期表“同名冲突 ✅” | 属实（历史）；第三轮已补齐实现 | 第三轮新增安装前冲突门 + 测试后恢复 ✅（见 §1.1a P0-3；历史结论保留于 LIFECYCLE §5） |
+| 生命周期表“更新失败恢复上一版本 ✅” | 属实（历史）；第三轮已补齐验收 | 第三轮真实故障注入验证 WorkBuddy 回滚（见 §1.1a P0-2；历史结论保留于 LIFECYCLE §5） |
+| 宿主矩阵“更新失败回滚” | 属实（历史）；第三轮已补齐验收 | 更新为 PASS（真实注入 + 恢复后 MCP 调用） |
+| 实施报告“更新/恢复/卸载全过” | 属实（历史）；第三轮已补齐验收 | 更新为“更新失败回滚 PASS（WorkBuddy 安装器级）”，Codex 宿主清 payload 的手动恢复边界仍保留 |
+| SPEC §17 OG-3 状态 | 属实 | 增加“当前状态/历史状态”分段，NOT_AUTHORIZED 标为历史 |
+| 决策卡 r3 记录 | 属实 | r3 的 NOT_AUTHORIZED 标注“已被 r4 取代，仅作历史” |
+| `installer.ts` 忽略 `installBundledMcpServer` 返回值 | 属实 | `if (mcpServerInstalled)` 后才链接/装依赖 |
+| npm 分发路径缺 MCP 运行依赖 | 属实 | `installMcpServerDependencies()` + `ensureComponentFileDependencyLinks()` |
+| WorkBuddy 同版本重装未同步 cache binding | 属实 | `pluginCacheMatchesPayload` 纳入 `mcpBindingMatches`（忽略 `writtenAt`），不一致即刷新 cache |
+| CodeQL 810 测试临时文件 | 属实 | `workspace-binding.test.ts` 改用 `withTempDir`/`mkdtemp`；新 CodeQL 分析复核（PR merge ref 0 open alerts） |
+| 测试夹具未随 `pd-mcp-server` 必需组件更新 | 属实（CI 实跑发现） | 10 个安装/资产夹具补 `pd-mcp-server/package.json` + `dist/index.js`，WorkBuddy skeleton 补 `mcp/launcher.cjs`；**未放宽任何生产校验**（提交 `db33190b8`） |
+
+本轮 CI 额外发现并修复两项：
+- `mcpBindingMatches` 的 `as Record<string, unknown>` 触发 `check:runtime-contract` ERR-001；已改为文件内 `isRecord` 守卫（提交 `f342709cf`）。
+- 生产代码把 `pd-mcp-server` 纳入安装器/发布资产必需组件后，10 个测试夹具仍按旧组件清单构造载荷，导致 `Test create-principles-disciple` 59 个用例在同一根因失败；夹具已镜像生产载荷契约（提交 `db33190b8`）。修复后本地 10 个套件 112 用例全绿，CI 该 job 转绿。
+
+## 1.4 整改轮最终 CI 实跑（head `db33190b8`，2026-11-03）
+
+| Workflow run | 结果 |
+|---|---|
+| CI `41583148953` | **success** — 17/17 jobs |
+| CodeQL `41583148899` | **success**（`Analyze (javascript-typescript)` PASS；PR merge ref 0 open alerts） |
+| PR Checks `41583148898` | success |
+| Release Reproducibility `41583148992` | success |
+| pd-console E2E `41583148999` | success |
+| Repo Health Check `41583148952` | success |
+
+17 个 CI job 全部 PASS：Verify Merge Gate（212s）、Lint、Test pd-mcp-server（41s）、Test principles-core（97s）、Test create-principles-disciple（364s，含本轮夹具修复）、Test OpenClaw Plugin、Build OpenClaw Plugin、Test shared runtime & adapters、Test release asset smoke、Test packaged install smoke、Codex plugin delivery contract、Release Build Parity、Test pd-cli、Test pd-console、TypeScript Check (pd-console)、CI Impact Gate、Telemetry Union Guard。
+
+**唯一红项（advisory，非合并必需）**：`codecov/patch` 83.82% < target 84.42%；11 行未覆盖，其中 `packages/openclaw-plugin/src/index.ts` 10 行（37.50%）、`src/core/mcp-binding.ts` 1 行（98.07%），均属启动健康检查接线分支。分支保护仅要求 `Verify Merge Gate`（已 PASS），故该项不阻塞合并；未为凑覆盖率制造测试。
+
+## 2. 架构落点（与 SPEC §3 逐条对应）
+
+```text
+宿主进程 ──spawn──> node <插件载荷>/mcp/launcher.cjs   （零依赖 canonical launcher，三宿主字节同源，G4-7 钉住）
+                        │ 读 <载荷根>/mcp-binding.json  （PD 自有，机器级；三宿主各有唯一写入者）
+                        │   Codex: pd-setup（安装后接线，插件 add 后重跑）
+                        │   OpenClaw: 插件启动健康检查（与 hooks 同源运行时 workspace 解析）
+                        │   WorkBuddy: installer 物化 marketplace 时（frozen workspace SSoT）
+                        └ require(serverEntry=~/.pd/runtime/pd-mcp-server/dist/index.js)（in-process）
+                                    │
+                          pd-mcp-server（SDK @modelcontextprotocol/server@2.4.0 exact）
+                                    │ 唯一 Tool pd_recall_principle_pains（readOnlyHint:true 诚实）
+                                    └ @principles/core/runtime-v2/pain-recall-capability（Gate 3 Facade，OD-A v1）
+```
+
+- **32 KiB / 10s 归 Adapter**（budget.ts/deadline.ts）；**10 条/OD-A 归 Core**（未复制）；isError 两类映射严格服从 Gate 3 v0.5 §10.1。
+- **fail-closed**：binding 缺失/损坏/相对路径/目录不存在 → exit 1 前置；无 cwd/HOME 业务回退。
+- **守卫 G4-1..G4-7**（机械）：Core 零 MCP SDK；Capability 子路径唯一业务入口；无 CLI 子进程查询；pd-cli 独立；exact pin；版本一致；launcher 三载荷字节同源。
+
+## 3. 验收结论（细节见 HOST_ACCEPTANCE_MATRIX / LIFECYCLE_ACCEPTANCE）
+
+- 量化门槛：20/20 握手 ×3 形态、20/20 发现 ×3、20/20 真实调用 ×3（门槛 10）、≤1.05s/轮、32768/32769 包级钉住、关停 20×3 + 包级 10 循环、重复安装 ×3 幂等、**更新成功/卸载/配置保护已验证**；**更新失败回滚已由第三轮真实故障注入验证 PASS**（§1.1a；历史“未验证”结论保留于 LIFECYCLE §5 历史快照）。
+- 非回归（2026-11-03 实跑）：pd-mcp-server 84/84；pd-cli MCP health 54/54；core pain-recall 93/93（core 全套 586 通过）；codex-adapter 362 passed / 1 skipped；installer WB 58/58；openclaw-plugin 2314 passed / 4 failed（3 文件 4 测试与 main 基线逐字一致，Windows tar/EPERM/宿主路径环境性）；发布列车契约 36/36；scripts 套件 3 处真实回归已修，其余失败项隔离复跑全绿（90/90、26/26）。
+- **同名冲突检测已闭环（第三轮）**：三宿主安装前统一分类（A 幂等 / B 冲突停止 / C 共存 / D fail-closed），冲突时配置 sha256/mtime 不变；`pd health` 同步报告。历史“未实现”结论保留于 LIFECYCLE §5。
+- **多 agent 单 binding 已闭环（第三轮）**：binding 仅由显式 PD 工作区写入；无显式声明时删除旧 binding，launcher fail-closed；hooks 仍按 agent 各自 workspace。真实双 workspace 进程证据见 LIFECYCLE §4.1。
+- 宿主判定：**Codex RUNTIME_VERIFIED（集成面；模型级调用被 Owner OpenAI 配额阻断至 11-06）；OpenClaw RUNTIME_VERIFIED（含真实模型级调用——三宿主唯一）；WorkBuddy IMPLEMENTED_NOT_RUNTIME_VERIFIED（Desktop 令牌不可文件移植，需一次交互式登录）**。
+- 按 SPEC §13：**尚未宣布"完整交付"**——剩余为两项纯执行验证（无实现工作）。
+
+## 4. 复杂度增量（§13 Constitution gate）
+
+```text
+New durable source of truth: NO（binding 是派生接线文件，写入者唯一/宿主各一）
+New persisted schema/state:  NO（binding 为 JSON 文件，无新库/迁移）
+New subsystem/service/background process: NO（无 daemon；server 为宿主子进程）
+New public abstraction/interface: YES — @principles/pd-mcp-server 包 + pd.mcp-binding.v1 契约
+New runtime feature flag: NO
+New cross-package dependency: YES — pd-mcp-server→core（经既有公共子路径）+ SDK（仅此包）
+New host/platform-specific behavior: YES — 三宿主插件内嵌 MCP 配置（SPEC 产品目标本身）
+New external/network capability: NO（stdio only，无联网）
+```
+
+YES 项论证：public 包是 SPEC G4-01 的直接交付物（零实现替代不存在）；跨包依赖方向被 G4-1/G4-2 机械守卫；宿主行为是产品合同本身。回滚：整分支单 revert；运行态回滚 = 卸载插件/binding 删除即 fail-closed 停服，不影响 PD 其他能力。
+
+## 5. 授权边界遵守声明
+
+- 未修改 Owner 日常宿主配置（全部隔离环境：CODEX_HOME / openclaw --profile / CODEBUDDY_CONFIG_DIR）。
+- 已创建 PR #2304 并推送整改提交；**未合并、未发布 npm、未发布正式 PD Release、未部署生产、未修改 Linear 状态**。
+- 未扩大 Tool 范围（仍唯一只读）、未改 Hook/CLI/RuleHost/RuleCode 合同。
+- 一次事故自纠：commit 0b690008e 曾误含 repo 载荷下的机器级 mcp-binding.json（fixture 副作用）——amend 移除 + fixture 清理 + 文件内顺序卫生测试防再犯。
+
+## 6. 遗留（follow-up 候选，未自动实施）
+
+1. ~~同名冲突检测与"明确报告并停止安装"（SPEC §7.5/§11.3）~~——第三轮已实现（§1.1a P0-3）。
+2. ~~MCP 更新失败注入 + 上一可用版本恢复~~——WorkBuddy 安装器级回滚已由第三轮真实注入验证（§1.1a P0-2）；Codex 宿主更新清 payload 后的 binding 手动恢复仍保留（属宿主插件机制，非 PD installer 事务）。
+3. Codex 模型级 10/10 补验（配额恢复后，夹具就绪）——Owner 补验项，不在本轮 CI 模拟。
+4. WB 模型级 10/10 补验（需一次交互式登录）——Owner 补验项，不在本轮 CI 模拟。
+5. ~~多 agent 单 binding 限制（OpenClaw 以 `main` 解析 workspace）~~——第三轮已改为显式工作区 + fail-closed（§1.1a P0-1）。
+6. `deadline.ts` 同步组装跨截止的复检、launcher schema 脱敏、pd-status mcpServer pin 早前整改已包含；CodeRabbit 仍显示未解决的历史线程以代码/测试复核为准。
+7. OpenClaw declared-surface consent 文案的产品化润色（现走宿主通用 consent 流）。
+8. install-layout 兼容孪生退役：`packages/create-principles-disciple/src/mcp-server-layout-compat.ts` 仅为规避"已安装版本尚无 `getMcpServerEntry`/`mcpServerDir`"的 PRI-669 缺陷类；待下一个含 `.changeset/mcp-install-layout-entry.md` 的 install-layout 版本发布并进入 runtime pin 后，删除孪生并直接使用发布的导出。
+
+## 7. 第四轮 — Final MCP Safety Closure（2026-11-03）
+
+> 本轮仅收口 SPEC-PD-MCP-GATE4-001 v1.2 的 P1 安全缺口 + P2 文件完整性 + 历史评审处置；
+> 未改 SPEC、未加 Tool、未扩 Hook、未新增服务/数据库/安装体系、未写 Owner 生产宿主配置、未发布、未合并。
+
+### 7.1 P1-A — 三宿主 MCP 所有权误判
+
+**根因**：`entryOwnership()` 与 `pd-setup.cjs` 的 Codex 扫描仅以 `node` + `mcp/launcher.cjs` 目录形状判定 `pd_owned`。任何第三方产品只要同名同形即被误判为 PD，导致冲突规则 A（幂等）误命中并跳过冲突门。
+
+**初始修复**（三宿主同一规则）：
+- 内容证明：launcher 自身带 `pd-mcp-launcher.v1` + `pd.mcp-binding.v1` 双戳；安装器/`pd-setup`/`pd health` 读取真实文件字节判定，文件名不再构成所有权。
+- 原始根路径捷径后来发现仍不足以证明宿主归属，见下方补充复核；当前 `pdLauncherRoots` 仅作为真实路径边界，不再单独授予 `pd_owned`。
+- 无法确认一律 fail-closed：相对路径、含模板占位、非 Node 命令、非 launcher 形状 → `other`/`unverifiable`，绝不 `pd_owned`。
+- 冲突时只读检查，不写配置；回归断言 config SHA-256 不变、不同名 MCP 共存。
+
+**补充复核 — P1-A2：跨宿主 Launcher 身份混淆**：
+- 三个 Launcher 文件字节相同，内容双戳不能证明宿主身份；现要求同时验证插件根唯一宿主 Marker：Codex `.codex-plugin/plugin.json`（`name=principles-disciple`）、OpenClaw `openclaw.plugin.json`（`id=principles-disciple`）、WorkBuddy `.codebuddy-plugin/plugin.json`（`name=principles-disciple`）。
+- 同时验证真实 Launcher 路径、真实插件根与 Marker 文件；Marker 必须是根内普通文件且 JSON 身份字段匹配。已知 payload root 下的路径若 realpath 越界（含 symlink/junction）一律 `unverifiable`，不再走根路径捷径。
+- 三个入口统一按调用宿主传递 expectedHost；跨宿主 Launcher → `conflict`，缺失/歧义 Marker 或真实路径越界 → `unverifiable`。两者都阻断幂等放行。
+
+证据：`mcp-registration-conflict.test.ts` 25/25（含四种跨宿主组合、同宿主通过、Codex Junction 越界及真实 `pd-setup` 阻断）；`health-mcp.test.ts` 28/28（含三宿主同宿主通过、四种跨宿主组合及 Codex Junction 越界）。
+
+### 7.2 P1-B — OpenClaw binding 最终启动门禁
+
+**根因**：此前只由插件注册后的健康检查写/删 binding，launcher 启动时无条件信任磁盘 binding。A→B 写入失败、或删除失败时，旧 A 的 binding 仍被信任。
+
+**修复**：
+- launcher 在**启动阶段**独立重算"显式 Owner 声明"（`PD_WORKSPACE_DIR` → `OPENCLAW_WORKSPACE` → `~/.openclaw/principles-disciple.json` → `~/.principles/principles-disciple.json`；**排除 cwd**）。
+- 声明缺失/非法/binding 不匹配 → 拒绝启动（`workspace_declaration_missing` / `workspace_declaration_invalid` / `binding_workspace_not_declared`）。
+- 插件侧写/删失败时不再声称 fail-closed（rc-9），明确告知旧 binding 可能仍在磁盘。
+- 健康检查仍保留为运行期观测，但不再是唯一门禁。
+
+证据：`mcp-launcher-workspace-isolation.test.ts` 7/7（含同一安装根重载切换、A→B 未提交、声明缺失、`PD_WORKSPACE_DIR` 来源）；`mcp-binding-isolation.test.ts` 8/8（临时文件被目录占位阻塞写入、binding 被非空目录阻塞删除）；`launcher-binding.test.ts` 27/27；`pd-mcp-server` 全套 85/85。
+
+### 7.3 P2 — binding 原子写入
+
+`mcp-binding.ts`（`writeBindingAtomically`）、`pd-setup.cjs`（`writeFileAtomic`）、`workbuddy-host-installer.ts`（`writeFileAtomicSync`）统一为同目录临时文件 + `renameSync`，失败清理自身临时文件。未引入通用配置子系统；Codex/WorkBuddy 语义不变。
+
+### 7.4 CodeRabbit 历史评审处置矩阵（28 项，全部有结论）
+
+| 评论 ID / 来源 | 位置 | 结论 | 证据 |
+|---|---|---|---|
+| 4449765973 CodeQL | workspace-binding.test.ts:65 | 已修复 | 改用 `mkdtempSync` 私有目录 |
+| 4450365846 | GATE3 决策卡:9 | 已修复 | OG-3 当前行改 AUTHORIZED + 历史标注 |
+| 4450365852 | HOST_ACCEPTANCE_MATRIX:24 | 已修复 | 第 26 行改为第三轮真实回滚注入 PASS |
+| 4450365866 | IMPLEMENTATION_REPORT:49 | 已修复 | 生命周期结论区分已验证/继承项 |
+| 4450365885 | LIFECYCLE_ACCEPTANCE:17 | 已修复 | 同名冲突已实现并更新矩阵 |
+| 4450365895 | SPEC:1365（§17） | 已修复 | §17 标当前 AUTHORIZED + 历史快照（未改冻结条款） |
+| 4450365911 | launcher.cjs:57 | 已修复 | schemaVersion 过滤/截断 + 敌意值测试 |
+| 4450365927 | mcp-binding.ts:77 | 已修复 | 无法解析时 `invalidateMcpBinding` + 删除失败注入 |
+| 4450365935 | index.ts:185 | 已修复（不采纳 per-agent binding） | 移除硬编码 `main`，仅显式声明写入；SPEC §3.5 单一 binding |
+| 4450365941 | index.ts:190 | 已修复 | `mcp_server_component_missing` 分流 nextAction + warn |
+| 4450365957 | workspace-binding.test.ts:65 | 已修复 | 同 CodeQL（`mkdtempSync`） |
+| 4450365967 | deadline.ts:49 | 已修复 | 判定加入耗时检查 + `deadline.test.ts` 12/12 |
+| 4450365974 | pd-setup.cjs:210 | 已修复 | marker 记录 `mcpServerSource`，变化即重装 |
+| 4450365983 | pd-setup.cjs:336 | 已修复 | `registerWorkspaceWorker` 成功后才写 binding |
+| 4450365986 | pd-status.cjs:230 | 已修复 | 缺 pin 时降级并给出 nextAction |
+| 4450365996 | pd-status.cjs:249 | 已修复 | 校验工作区与服务入口存在 |
+| 4450366008 | pd-status.cjs:249 | 已修复 | binding 工作区与 `--workspace` 比对 |
+| 4450366018 | verify-pinned:98 | 已过时 | pd-mcp-server 已进入发布矩阵（publish-npm.yml 5/9） |
+| 4450373871 | LIFECYCLE:20 | 已修复 | PASS 限定为已注入验证项 |
+| 4450373875 | bundle-plugin.mjs:563 | 已修复 | 组件缺失时删除旧 `pd-mcp-server` 输出 |
+| 4450373882 | installer.ts:4461 | 已修复 | 失败跳过 link + `installMcpServerDependencies` |
+| 4450373892 | workbuddy-host-installer.ts:1408 | 已修复 | `mcpBindingMatches` + `pluginCacheMatchesPayload` 强制刷新缓存 |
+| R1 review body | mcp-binding 写入 | 已修复 | 原子替换（§7.3） |
+| R2 review body | deadline 在途调用 | 已修复 | 在途计数拒绝超额调用 |
+| R3 review body | REALITY_CHECK 表格 | 已修复 | 顶部更正 + 表格单元格改为插件健康检查 |
+| R4 review body | 首次运行测试 | 已修复 | 真实 dist 经 launcher 启动并断言 `tools/list` |
+| R5 review body | server 层 budget | 已修复 | `server-contract.test.ts` 新增 over-budget 用例 |
+| R6 review body | launcher serverEntry | 已修复 | `samePath` + 安装版本 pin 交叉校验 |
+
+> 未删除、未批量 dismiss 任何评论；未再次请求无法处理 131 文件的 full review（改为关键模块人工复核）。
+
+### 7.5 真实 OpenClaw Gateway 隔离验收 — 已执行
+
+**结论先行**：原结论「本机无 `openclaw` CLI → NOT RUN」**被推翻**。`openclaw@2026.10.10` 确实已安装，只是全局副本处于不完整状态（无 bin shim、`@openclaw/fs-safe` 缺 `package.json`）。改用隔离安装后完成了真实 Gateway 验收：真实进程启动、真实插件安装根装载、插件启动写入 binding、A→B 切换、同一安装根的数据隔离，以及三类拒绝启动。
+
+**隔离环境**
+
+- CLI：`D:\pd-labs\openclaw-gateway\prefix`，`npm install -g openclaw@2026.10.10 --no-audit --no-fund`（`added 360 packages`，exit 0，`OpenClaw 2026.10.10 (7dc3350)`）。
+- HOME / USERPROFILE：`D:\pd-labs\openclaw-gateway\home`（独立 `.openclaw` 配置与独立 `.pd\runtime\pd-mcp-server`），不写 Owner 日常宿主配置。
+- 插件安装根（唯一）：`home\.openclaw\extensions\principles-disciple`，由 `openclaw plugins install <repo>/packages/openclaw-plugin --force --accept-capabilities` 复制；`plugins inspect --runtime` 返回 `status: "loaded"` 且列出 `mcpServers`。
+- 工作区：A = `D:\pd-labs\openclaw-gateway\workspaces\A`（ledger 仅 `principle-only-in-workspace-x`），B = `...\workspaces\B`（仅 `principle-only-in-workspace-y`）。
+- Gateway：`openclaw gateway run --port 18888 --verbose`（前台真实进程；`gateway health --json` 成功，`plugins.loaded` 含 `principles-disciple`，`errors: []`）。
+- 声明：`home\.openclaw\principles-disciple.json`（`{"workspace": ...}`）；binding：`extensions\principles-disciple\mcp-binding.json`。
+
+**验收结果（逐项）**
+
+| # | 验收项 | 观测证据 | 结果 |
+|---|---|---|---|
+| 1 | Gateway 启动 | `gateway health` ok；插件 `principles-disciple` loaded；`errors: []` | pass |
+| 2 | 插件启动写 binding | 声明 A 时 binding `workspaceDir` = workspace A，`runtimeDir`/`serverEntry` 指向隔离 runtime（0.1.0） | pass |
+| 3 | 启动指纹（A） | 同一安装根 launcher 启动事件 `workspaceFingerprint = 1fdec6d06110fd15`（= sha256(realpath(A)) 前 16） | pass |
+| 4 | A 数据隔离 | 同一安装根查 X → `status: unavailable` / `errorCode: source_missing`；查 Y → `status: not_found` / `errorCode: principle_not_found`（`returned: 0`, `identityStatus: not_found`） | pass |
+| 5 | A→B 切换 | 声明改为 B 后重启 Gateway，binding 重写为 B；启动指纹 `23e0a88184749767`（= B） | pass（经重启） |
+| 6 | B 数据隔离 | 同一安装根查 Y → `source_missing`；查 X → `principle_not_found` | pass |
+| 7 | 重载 | `plugins reload principles-disciple --json` 失败：`EPERM` symlink，`generation 2 replacement not applied` | 未通过（环境限制） |
+| 8 | 拒绝启动：声明缺失（插件已删 binding） | launcher exit 1，`binding_missing` | pass |
+| 9 | 拒绝启动：旧 binding + 无声明 | launcher exit 1，`workspace_declaration_missing` | pass |
+| 10 | 拒绝启动：binding A + 声明 B | launcher exit 1，`binding_workspace_not_declared` | pass |
+
+**方法边界（诚实区分已覆盖 / 未覆盖）**
+
+- 工具级调用使用官方 MCP stdio client 连接**同一个已安装的 `extensions\principles-disciple\mcp\launcher.cjs`**（不是两个独立 payload 的 fixture），真实子进程、真实 HOME、真实声明与 binding 文件读取；每次 A/B 判定都先核对启动指纹与声明一致。
+- **未覆盖**：Gateway agent 会话内的工具调用。隔离 HOME 没有模型凭据，无法建立 agent turn，因此该层未执行；未用替身测试掩盖。
+- **未覆盖**：`plugins reload` 的进程内生效。Windows 隔离安装下该命令因 symlink `EPERM` 未能应用新 generation，故 A→B 由 Gateway 重启验证；这是环境限制，不是产品缺陷。
+- 首次启动曾继承本机环境变量 `PD_WORKSPACE_DIR=D:\.openclaw\workspace`，导致 binding 指向该值；在隔离运行中显式清除 `PD_WORKSPACE_DIR` / `OPENCLAW_WORKSPACE` 后重跑，binding 才指向 A。该变量为宿主注入，非 PD 回退行为。
+
+**全局 `openclaw` 副本残缺的归因（Owner 环境，未修复）**
+
+- 事实：`C:\Users\Administrator\AppData\Roaming\npm\node_modules\openclaw`（创建 14:53:08、最后写 14:55:03）无 `openclaw` / `.cmd` / `.ps1` shim；`node openclaw.mjs --version` 报 `package lifecycle is incomplete` + `Cannot find module ...@openclaw\fs-safe\json`。
+- 结构证据：该副本内 `@openclaw\fs-safe` 只有 `dist` / `docs` / `LICENSE`，**缺 `package.json` / README / CHANGELOG**；npm 暂存目录 `.openclaw-oHGnns6k`（创建 14:52:29）残留完整包树；无全局 `.package-lock.json`。这是**中断的 npm 全局安装**形态，不是脚本被跳过。
+- 排除 `--ignore-scripts`：`npm config get ignore-scripts` = `false`；本会话隔离安装同样收到 `allowScripts` 警告（`@google/genai` / `esbuild` / `protobufjs` / `openclaw`），但 `openclaw --version` 正常，`@openclaw\fs-safe` 含 `package.json`。两者对照说明 allowScripts 警告不是全局副本损坏的成因。
+- 生命周期标记：包内残留 `.openclaw-lifecycle-pending`（内容 `pending`，创建 14:53:08，与包目录创建同秒）；该包 `scripts.postinstall = node scripts/postinstall-bundled-plugins.mjs`。postinstall 成功时该标记会被清除（隔离安装对照：标记不存在）。
+- A/B 对照（同一版本 2026.10.10，全局 vs 隔离）：生命周期标记 有/无；`@openclaw\fs-safe\package.json` 缺/有；npm bin shim 缺 3 个/有 3 个；npm 暂存目录残留/无。四项同时成立，说明 reify 在 build / bin-link 阶段被中断，而不是"脚本被跳过"。
+- 日志缺失原因：`npm config get logs-max` = `10`（npm 仅保留最近 10 个 debug log）；14:5x 的日志被 18:xx 起的后续全局安装（如 18:42 `hyperframes`）按该策略自动清理，不是人为覆盖。
+- 命令证据：本会话工具历史中**没有** `npm i -g openclaw` 或等价命令；同期存在多个其他 Trae 会话与 Owner 终端活动（PSReadLine history 含 `iwr -useb https://openclaw.ai/install.ps1 | iex` 与多次 `npm install -g openclaw@latest`）。**结论：可判定为中断的全局安装，但无法归因到具体会话；不做模糊归责，也未修复该全局副本。**
+
+**对 Owner 机器的副作用（如实记录）**
+
+- 本轮误创建 `C:\Users\Administrator\.pd\runtime\pd-mcp-server`：PowerShell 中 `$home` 是只读变量，赋值静默失败，路径落到真实 HOME（创建时间 19:05:07）。发现后先删除 junction 链接（`Directory.Delete(link, false)`，不遍历目标），再删除该目录；复查 `~/.pd/runtime` 各组件创建时间为 11/2，`pd-mcp-server` 已不存在，**未覆盖任何既有文件**。随后改用 `$labHome` 重做，未再触碰真实 HOME。
+- 全局损坏副本 `AppData\Roaming\npm\node_modules\openclaw` **原样保留**，未执行 `npm i -g` 修复，未删除、未改动。
+- 未写入 Owner 日常 `~/.openclaw` 配置；隔离运行期间对 `D:\.openclaw\workspace` 只有读取，未写入任何文件。
+
+### 7.6 main 同步与验证证据
+
+- rebase 前基线：`2f73090e6`；基线 main：`8e0cdc607`（`origin/main`）。
+- 已 `git rebase origin/main`，4 个重叠文件无冲突、无冲突标记；本地分支保留 25 个独立提交；**未推送**。
+- 代码整改最终 HEAD：`48eb2f9c0`（rebased）；本报告随后单独提交。
+- 定向/包级：MCP conflict 18/18、WorkBuddy 回滚注入 1/1、OpenClaw binding+launcher 15/15、pd-cli health 20/20、Codex plugin delivery 62/62、pd-mcp-server 85/85、release-workflows 45/45、release asset smoke 5/5。
+- 门禁：`lint` 12/12 包 ok；`build` 全包通过；`check:pipeline-contract`、`check:workspace-artifacts`、`check:release-artifact-hygiene`、`check:guard-contracts`、`check:runtime-contract`、`check:docs-structure`、`check:error-handbook`、`check:runtime-writers`、类型检查（core/pd-cli/install-layout/openclaw-plugin/pd-console/pd-companion）全部通过。
+- 发布可复现：两次独立构建 `asset.tar` SHA-256 完全相同（`323ddbb...`），`release-asset-smoke` 5/5。
+- 唯一失败：`packages/website` 的 `homepage-contract` 摄像机字幕断言。**环境性预存在**：本分支相对 `origin/main` 对 `packages/website/**` 零改动；VTT 为 `i/lf w/crlf`（core.autocrlf=true），测试用 `filter(...)` 保留行尾 `\r` 导致 Windows 本地误报；Linux CI 检出 LF 不受影响。未修改该无关测试。
+
+### 7.7 未解决风险与 Owner 后续验收
+
+1. **OpenClaw Gateway 隔离**：已执行（§7.5，真实 Gateway + 同一安装根的 A/B 隔离与三类拒绝启动均通过）。残余未覆盖：Gateway agent 会话内的工具调用（隔离 HOME 无模型凭据）；`plugins reload` 进程内生效（Windows symlink `EPERM`，改用重启验证）。
+2. **Codex/WB 模型级 10/10**：仍受配额/交互登录限制（承接第三轮结论）。
+3. **website 测试 Windows CRLF 误报**：建议单独 issue 修 `filter` 保留 `\r` 的写法；本轮不改。
+4. **Codecov patch 覆盖**：新增失败分支已由故障注入覆盖；如需绝对覆盖数字以 CI codecov 为准。
+5. **推送与合并**：已推送到 PR #2304（非破坏路径），CI 在 `6593e4839` 上 27 项 required/advisory check 全部 pass（CodeRabbit skipping）；**未合并**。推送后 `origin/main` 前进到 `86a16a43f`，PR 变为 CONFLICTING（`.github/workflows/publish-preflight.yml` 与 main 新增的 leg id/summary 冲突），等待 Owner 决定是否刷新合并。
+6. **最新 head 的 CI 投递**：`6593e4839..05b27d811` 仅有 `docs/reports/**` 改动（非 docs 改动为空）。PR 自 `origin/main` 前进后变为 CONFLICTING，GitHub 不再生成新的合成合并提交：`refs/pull/2304/merge` 仍停在 `10:53:45Z` 的 `Merge 6593e4839 into 8e0cdc607`，最新 head 不是其祖先，因此 `pull_request` 事件不再产生 CI / CodeQL / Repo Health / PR Checks / pd-console E2E / Release Reproducibility 运行——这是冲突的直接后果，不是平台投递故障。按 `ci.yml` 既定补救以 `workflow_dispatch` 复跑：`CI Impact Gate` 判为 docs-only，14 个测试腿按设计 skipped，`Verify Merge Gate` / `CI Impact Gate` / `Telemetry Union Guard` 均 success。全量套件的真实证据仍是 `6593e4839`（27 项非 skipped check 全 pass）；dispatch 运行不挂到 PR 页面，PR 的 checks 列表只显示 `CodeRabbit skipping`。

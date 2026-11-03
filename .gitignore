@@ -77,6 +77,8 @@ packages/create-principles-disciple/host-runtime/
 packages/create-principles-disciple/codex-adapter/
 # PRI-672: release-manager payload component built by bundle-plugin.mjs
 packages/create-principles-disciple/release-manager/
+# PRI-1071 Gate 4: pd-mcp-server payload component built by bundle-plugin.mjs
+packages/create-principles-disciple/pd-mcp-server/
 # WorkBuddy third host: workbuddy-adapter payload component built by bundle-plugin.mjs
 packages/create-principles-disciple/workbuddy-adapter/
 

@@ -295,10 +295,11 @@ describe('install() gateway lock pre-flight', () => {
     const actualOs = await vi.importActual<typeof import('node:os')>('node:os');
     const realPath = await vi.importActual<typeof import('node:path')>('node:path');
     npmBundleFixtureDir = actualFs.mkdtempSync(realPath.join(actualFs.realpathSync.native(actualOs.tmpdir()), 'pd-npm-bundle-'));
-    for (const component of ['core', 'host-runtime', 'codex-adapter', 'plugin', 'pd-cli', 'console', 'install-layout', 'release-manager']) {
+    for (const component of ['core', 'host-runtime', 'codex-adapter', 'plugin', 'pd-cli', 'console', 'install-layout', 'release-manager', 'pd-mcp-server']) {
       actualFs.mkdirSync(realPath.join(npmBundleFixtureDir, component, 'dist'), { recursive: true });
       actualFs.writeFileSync(realPath.join(npmBundleFixtureDir, component, 'package.json'), JSON.stringify({ name: `@principles/${component}`, version: '0.0.0' }));
     }
+    actualFs.writeFileSync(realPath.join(npmBundleFixtureDir, 'pd-mcp-server', 'dist', 'index.js'), 'export {};');
     // Exact-shape components the form-gate checks beyond package.json+dist
     // (mirror of installBundledReleaseManagerPackage / installConsole demands).
     actualFs.mkdirSync(realPath.join(npmBundleFixtureDir, 'release-manager', 'dist', 'update'), { recursive: true });
@@ -583,10 +584,11 @@ describe('install() failure-path honesty (CP-6) and workspace creation (CP-9)', 
     const actualOs = await vi.importActual<typeof import('node:os')>('node:os');
     const realPath = await vi.importActual<typeof import('node:path')>('node:path');
     fixtureDir = actualFs.mkdtempSync(realPath.join(actualFs.realpathSync.native(actualOs.tmpdir()), 'pd-cp6-npm-bundle-'));
-    for (const component of ['core', 'host-runtime', 'codex-adapter', 'plugin', 'pd-cli', 'console', 'install-layout', 'release-manager']) {
+    for (const component of ['core', 'host-runtime', 'codex-adapter', 'plugin', 'pd-cli', 'console', 'install-layout', 'release-manager', 'pd-mcp-server']) {
       actualFs.mkdirSync(realPath.join(fixtureDir, component, 'dist'), { recursive: true });
       actualFs.writeFileSync(realPath.join(fixtureDir, component, 'package.json'), JSON.stringify({ name: `@principles/${component}`, version: '0.0.0' }));
     }
+    actualFs.writeFileSync(realPath.join(fixtureDir, 'pd-mcp-server', 'dist', 'index.js'), 'export {};');
     actualFs.writeFileSync(realPath.join(fixtureDir, 'plugin', 'openclaw.plugin.json'), JSON.stringify({ name: 'principles-disciple', activation: { onCapabilities: ['hook'] } }));
     actualFs.mkdirSync(realPath.join(fixtureDir, 'release-manager', 'dist', 'update'), { recursive: true });
     actualFs.writeFileSync(realPath.join(fixtureDir, 'release-manager', 'dist', 'update', 'release-manager-authority.js'), 'export {};');

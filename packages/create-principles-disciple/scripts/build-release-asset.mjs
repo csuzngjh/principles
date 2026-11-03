@@ -22,8 +22,10 @@ import { detectLocalMusl, pruneForeignSqlitePrebuilds, resolveKeepPrebuildName }
 // still fails loud below.
 const SOURCE_REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const WORKBUDDY_ADAPTER_IN_SOURCE = existsSync(join(SOURCE_REPO_ROOT, 'packages', 'workbuddy-adapter', 'package.json'));
+const MCP_SERVER_IN_SOURCE = existsSync(join(SOURCE_REPO_ROOT, 'packages', 'pd-mcp-server', 'package.json'));
 const REQUIRED_COMPONENTS = ['plugin', 'console', 'core', 'pd-cli', 'host-runtime', 'install-layout', 'release-manager', 'codex-adapter']
-  .concat(WORKBUDDY_ADAPTER_IN_SOURCE ? ['workbuddy-adapter'] : []);
+  .concat(WORKBUDDY_ADAPTER_IN_SOURCE ? ['workbuddy-adapter'] : [])
+  .concat(MCP_SERVER_IN_SOURCE ? ['pd-mcp-server'] : []);
 
 function isPathWithin(directory, candidate) {
   const candidateRelativePath = relative(directory, candidate);

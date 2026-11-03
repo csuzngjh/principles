@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "pd-recall": {
+      "command": "node",
+      "args": ["./mcp/launcher.cjs"],
+      "cwd": "."
+    }
+  }
+}

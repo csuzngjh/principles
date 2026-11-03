@@ -22,6 +22,8 @@ import {
   resolveWorkspaceHostToolSemantics,
 } from '@principles/host-runtime';
 import { handleHealthCodex } from './health-codex.js';
+import { assessMcpHealth, formatMcpHealthLines } from './health-mcp.js';
+import type { McpHealthSection } from './health-mcp.js';
 
 interface LastSuccessfulChain {
   painId?: string;
@@ -94,6 +96,13 @@ interface WorkspaceHealth {
   candidateLedgerConsistency: { status: 'ok' | 'degraded'; missing: number };
   reliability: ReliabilityHealth;
   /**
+   * PRI-1071 Gate 4: shared MCP lifecycle diagnostics (binding, install,
+   * version, host config, restart) for the selected host. Read-only and
+   * independent of the ledger — an MCP problem never changes the exit code
+   * here; Codex reporting escalates it via warnings.
+   */
+  mcp: McpHealthSection;
+  /**
    * PRI-939 Option A: last semantic reuse evaluation degradation read from the
    * workspace's own critical-events.jsonl (same durable sink the gate writes).
    * Read-only summary — the authority stays the event file itself.
@@ -157,6 +166,8 @@ function assessReuseEvaluationTelemetry(workspaceDir: string): ReuseEvaluationHe
 interface HealthOptions {
   workspace?: string;
   json?: boolean;
+  /** MCP diagnostics host. Defaults to openclaw (the historical `pd health` host). */
+  host?: 'openclaw' | 'workbuddy';
 }
 
 function painChainTraceToLastSuccessfulChain(trace: PainChainTrace): LastSuccessfulChain {
@@ -193,6 +204,7 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
 
   const { missingLedgerCount } = await auditCandidateLedgerConsistency(workspaceDir);
   const reliability = assessReliability(workspaceDir);
+  const mcp = assessMcpHealth({ host: opts.host === 'workbuddy' ? 'workbuddy' : 'openclaw' });
 
   let candidatesTotal = 0, candidatesConsumed = 0, candidatesPending = 0;
   let tasksTotal = 0;
@@ -220,6 +232,7 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
         missing: missingLedgerCount,
       },
       reliability,
+      mcp,
       reuseEvaluation: assessReuseEvaluationTelemetry(workspaceDir),
       lastSuccessfulChain,
     };
@@ -258,6 +271,7 @@ export async function handleHealth(opts: HealthOptions = {}): Promise<void> {
       console.log(`reliability.reason: ${health.reliability.reason}`);
       console.log(`reliability.nextAction: ${health.reliability.nextAction}`);
     }
+    for (const line of formatMcpHealthLines(health.mcp)) console.log(line);
     console.log(`reuseEvaluation.criticalEventsFile: ${health.reuseEvaluation.criticalEventsFile}`);
     if (health.reuseEvaluation.lastUnavailable) {
       console.log('reuseEvaluation.lastUnavailable:');
@@ -354,23 +368,23 @@ export function registerHealthCommand(program: Command, handlers: HealthCommandH
     .description('Show health diagnostics for all workspaces')
     .option('-w, --workspace <path>', 'Workspace directory')
     .option('--json', 'Output raw JSON')
-    .option('--host <host>', 'Host to inspect (openclaw|codex). Defaults to openclaw workspace health.')
+    .option('--host <host>', 'Host to inspect (openclaw|codex|workbuddy). Defaults to openclaw workspace health.')
     .action(async (opts) => {
       const host = opts.host ?? 'openclaw';
-      if (host !== 'codex' && host !== 'openclaw') {
+      if (host !== 'codex' && host !== 'openclaw' && host !== 'workbuddy') {
         // cli-2: exit-stops — return after setting exitCode.
         if (opts.json) {
           console.log(JSON.stringify({
             ok: false,
             reason: 'invalid_host',
             host,
-            nextAction: `Use a supported host: openclaw or codex.`,
+            nextAction: `Use a supported host: openclaw, codex or workbuddy.`,
           }));
           process.exitCode = 1;
           return;
         }
-        console.error(`Invalid --host "${host}". Supported hosts: openclaw, codex.`);
-        console.error(`nextAction: run \`pd health --host openclaw\` or \`pd health --host codex\`.`);
+        console.error(`Invalid --host "${host}". Supported hosts: openclaw, codex, workbuddy.`);
+        console.error(`nextAction: run \`pd health --host openclaw\`, \`pd health --host codex\` or \`pd health --host workbuddy\`.`);
         process.exitCode = 1;
         return;
       }
@@ -378,6 +392,6 @@ export function registerHealthCommand(program: Command, handlers: HealthCommandH
         await codexHandler(opts);
         return;
       }
-      await healthHandler(opts);
+      await healthHandler({ ...opts, host });
     });
 }

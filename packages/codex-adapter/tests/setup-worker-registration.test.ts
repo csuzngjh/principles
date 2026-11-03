@@ -7,7 +7,14 @@ import { fileURLToPath } from 'node:url';
 
 const repo = fileURLToPath(new URL('../../../', import.meta.url));
 const roots: string[] = [];
-afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
+afterEach(() => {
+  for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
+  // Gate 4: this fixture runs pd-setup against the REPO plugin payload (its
+  // historical shape), which now writes mcp-binding.json into the plugin
+  // root — a machine-specific file that must never linger in the checkout.
+  const leakedBinding = path.join(repo, 'plugins', 'principles-disciple', 'mcp-binding.json');
+  if (fs.existsSync(leakedBinding)) fs.rmSync(leakedBinding, { force: true });
+});
 
 function fixture(extraEnv: Record<string, string> = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-setup-worker-'));
@@ -27,11 +34,15 @@ function fixture(extraEnv: Record<string, string> = {}) {
   const adapter = path.join(runtime, 'node_modules', '@principles', 'codex-adapter', 'dist');
   fs.mkdirSync(adapter, { recursive: true });
   fs.writeFileSync(path.join(adapter, 'pd-hook.js'), '');
-  const pins = JSON.parse(fs.readFileSync(path.join(repo, 'plugins', 'principles-disciple', 'runtime-version.json'), 'utf8')) as { codexAdapter: string; hostRuntime: string; core: string };
+  // The MCP server entry the launcher binding points at must exist as a file.
+  const mcpEntry = path.join(runtime, 'node_modules', '@principles', 'pd-mcp-server', 'dist', 'index.js');
+  fs.mkdirSync(path.dirname(mcpEntry), { recursive: true });
+  fs.writeFileSync(mcpEntry, '// fabricated entry for the registration fixture\n');
+  const pins = JSON.parse(fs.readFileSync(path.join(repo, 'plugins', 'principles-disciple', 'runtime-version.json'), 'utf8')) as { codexAdapter: string; hostRuntime: string; core: string; mcpServer: string };
   // PRI-1046: setup verifies the installed manifests, not only the adapter entry,
   // so the fixture must fabricate the bytes a genuinely satisfied pin leaves
   // behind. The marker alone is no longer enough to short-circuit the install.
-  for (const [name, version] of [['codex-adapter', pins.codexAdapter], ['host-runtime', pins.hostRuntime], ['core', pins.core]] as const) {
+  for (const [name, version] of [['codex-adapter', pins.codexAdapter], ['host-runtime', pins.hostRuntime], ['core', pins.core], ['pd-mcp-server', pins.mcpServer]] as const) {
     const packageDir = path.join(runtime, 'node_modules', '@principles', name);
     fs.mkdirSync(packageDir, { recursive: true });
     fs.writeFileSync(path.join(packageDir, 'package.json'), JSON.stringify({ name: `@principles/${name}`, version }));
@@ -75,6 +86,9 @@ describe('real plugin setup connects the existing Companion worker', () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('worker_registration_failed');
     expect(fs.readFileSync(manifest, 'utf8')).toBe('{broken');
+    // Gate 4: the MCP binding is written only after registration succeeds, so
+    // a failed setup never leaves a binding the next launcher would trust.
+    expect(fs.existsSync(path.join(repo, 'plugins', 'principles-disciple', 'mcp-binding.json'))).toBe(false);
   });
 
   it('reports manual processing explicitly when no canonical installation exists', () => {
@@ -142,6 +156,22 @@ describe('pd-setup attests the installed runtime bytes', () => {
     expect(JSON.parse(result.stdout).runtimeInstalled).toBe('already-present');
   });
 
+  it('refuses to short-circuit a marker that recorded a local MCP source', () => {
+    // A local --mcp-server-source install must not be silently reused after the
+    // operator stops passing the source: the registry package has to replace
+    // those bytes. The unreachable registry makes the forced reinstall loud.
+    const { runtime, pins, run } = fixture(unreachableRegistry);
+    fs.writeFileSync(path.join(runtime, '.pd-runtime.json'), JSON.stringify({
+      ...pins,
+      mcpServerSource: path.join(os.tmpdir(), 'pd-gone-local-mcp-source'),
+    }));
+    const result = run();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('runtime_install_failed');
+    // The failed reinstall must not rewrite the marker as if it had succeeded.
+    expect(fs.readFileSync(path.join(runtime, '.pd-runtime.json'), 'utf8')).not.toContain('installedAt');
+  });
+
   it('refuses a marker whose claim the installed bytes contradict', () => {
     const { runtime, run } = fixture(unreachableRegistry);
     // The npm silent-drop shape: the marker claims the core pin while the
@@ -187,6 +217,13 @@ describe('pd-setup repairs a runtime tree npm claimed to install', () => {
   it('reinstalls once from a clean tree, then still fails loud when no bytes arrive', () => {
     const { home, workspace, runtime, pins } = fixture();
     const sources = buildSources(pins);
+    // Pre-publish wiring (see fixture): the mcpServer pin is younger than the
+    // published cohort here, so the retry resolves it from a local stub source
+    // instead of the registry — same path the other three local sources use.
+    const mcpStub = path.join(path.dirname(sources.adapter), 'pd-mcp-server');
+    fs.mkdirSync(path.join(mcpStub, 'dist'), { recursive: true });
+    fs.writeFileSync(path.join(mcpStub, 'package.json'), JSON.stringify({ name: '@principles/pd-mcp-server', version: pins.mcpServer }));
+    fs.writeFileSync(path.join(mcpStub, 'dist', 'index.js'), '');
     // `package-lock-only` makes the real npm resolve the three local packages,
     // write a lockfile and exit 0 without populating node_modules — the exact
     // "success without bytes" shape, produced offline and deterministically.
@@ -201,7 +238,7 @@ describe('pd-setup repairs a runtime tree npm claimed to install', () => {
       encoding: 'utf8', timeout: 240_000,
       env: {
         ...process.env, HOME: home, USERPROFILE: home, CODEX_HOME: path.join(home, '.codex'),
-        npm_config_package_lock_only: 'true',
+        npm_config_package_lock_only: 'true', PD_SETUP_MCP_SERVER_SOURCE: mcpStub,
       },
     });
     expect(result.status, result.stdout).toBe(1);
@@ -218,4 +255,14 @@ describe('pd-setup repairs a runtime tree npm claimed to install', () => {
     // npm genuinely ran again after the reset: the retry rewrote the lockfile.
     expect(fs.existsSync(path.join(runtime, 'package-lock.json'))).toBe(true);
   }, 300_000);
+});
+
+// Gate 4 (PRI-1071), runs LAST in this file (in-file order is sequential, so
+// it cannot race the afterEach cleanup above): mcp-binding.json is
+// machine-specific and lives only in INSTALLED plugin copies written by
+// $pd-control setup — it must never linger in the repo checkout payload.
+describe('repo payload hygiene (Gate 4)', () => {
+  it('the shipped plugin payload contains no machine-specific mcp-binding.json', () => {
+    expect(fs.existsSync(path.join(repo, 'plugins', 'principles-disciple', 'mcp-binding.json'))).toBe(false);
+  });
 });

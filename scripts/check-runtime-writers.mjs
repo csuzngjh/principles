@@ -46,6 +46,10 @@ export const ALLOWED_RUNTIME_WRITERS = [
     reason: 'Removes orphaned workspace-scoped export locks beside the workspace state file — never the canonical runtime tree.',
   },
   {
+    file: 'packages/openclaw-plugin/src/core/mcp-binding.ts',
+    reason: 'Writes ONLY the PD-owned mcp-binding.json beside the plugin payload root (extensionRoot); the canonical runtime tree appears solely in a read-only existsSync/readFileSync probe of ~/.pd/runtime/pd-mcp-server/dist/index.js, and layout ownership stays with @principles/install-layout (Gate 4, SPEC §3.5).',
+  },
+  {
     file: 'packages/pd-companion/scripts/verify-package.mjs',
     reason: 'CI package verifier: rmSync target is its own mkdtemp extraction dir; install.json is read-only.',
   },
@@ -56,6 +60,10 @@ export const ALLOWED_RUNTIME_WRITERS = [
   {
     file: 'scripts/check-runtime-writers.mjs',
     reason: 'This gate: the pattern match is against its own regex literals; it only reads the repository.',
+  },
+  {
+    file: 'scripts/ci/verify-installed-mcp-server.mjs',
+    reason: 'CI installed-byte verifier (PRI-1071 P1-4E/P1-5): --runtime-dir is READ ONLY (existsSync/readFileSync/realpathSync only); the sole mutations are mkdirSync/rmSync of its own mkdtemp workspace under os.tmpdir(), removed in the same run — never the canonical runtime tree.',
   },
   {
     file: 'scripts/dev/codex-owner-journey-e2e.mjs',

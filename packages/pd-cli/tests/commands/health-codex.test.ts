@@ -242,6 +242,9 @@ describe('pd health --host codex — §15 ready semantics', () => {
     expect(report.readyBlockers).toHaveLength(0);
     expect(report.host).toBe('codex');
     expect(report.codexIngestionMinVersion).toBe('0.148.0');
+    // PRI-1071 Gate 4: the shared MCP diagnostics ride along with every report.
+    expect((report.mcp as { host: string }).host).toBe('codex');
+    expect(typeof (report.mcp as { status: string }).status).toBe('string');
     expect((report.consent as { state: string }).state).toBe('granted');
     expect((report.workspaceInit as { initialized: boolean }).initialized).toBe(true);
     expect((report.observations as { operational: number }).operational).toBe(3);

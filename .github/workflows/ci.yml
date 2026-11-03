@@ -23,9 +23,9 @@ jobs:
   codex-plugin-delivery:
     name: Codex plugin delivery contract
     needs: impact
-    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.plugin) }}
+    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.plugin || fromJSON(needs.impact.outputs.impact).scopes.mcpServer) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
@@ -34,13 +34,50 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
           node-version: '24'
+          cache: 'npm'
       - name: Check discoverable plugin metadata
         if: github.event_name == 'pull_request'
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: node scripts/release/sync-codex-runtime-pins.mjs --check-base "$PR_BASE_SHA"
-      - name: Probe exact published runtime capability
-        run: npm run check:runtime-pin
+      # PRI-1071 P1-4E: pd-mcp-server@0.1.0 is not published yet, so the
+      # historical published-cohort probe (`check:runtime-pin --install`,
+      # which pulls every pin from the registry) cannot run on a PR. Verify
+      # the SAME delivery contract against the packages THIS PR builds:
+      # isolated tarball install (no @principles copy comes from the
+      # registry), the S1-S8 installed-bytes capability probe, then a real
+      # stdio start of the installed MCP server. The registry cohort check
+      # remains in the publish train, after the version is actually public.
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Build the PR runtime cohort (dependency order)
+        run: |
+          npm run build --workspace=@principles/core
+          npm run build --workspace=@principles/install-layout
+          npm run build --workspace=@principles/host-runtime
+          npm run build --workspace=@principles/codex-adapter
+          npm run build --workspace=@principles/pd-mcp-server
+      - name: Pack the PR runtime cohort as tarballs
+        run: |
+          TARBALL_DIR="$RUNNER_TEMP/pd-runtime-tarballs"
+          mkdir -p "$TARBALL_DIR"
+          npm pack --ignore-scripts --pack-destination "$TARBALL_DIR" \
+            --workspace=@principles/core \
+            --workspace=@principles/install-layout \
+            --workspace=@principles/host-runtime \
+            --workspace=@principles/codex-adapter \
+            --workspace=@principles/pd-mcp-server
+          ls -1 "$TARBALL_DIR"
+      - name: Install the PR runtime into an isolated directory
+        run: |
+          RUNTIME_DIR="$RUNNER_TEMP/pd-runtime"
+          mkdir -p "$RUNTIME_DIR"
+          printf '{"name":"pd-codex-runtime","private":true}\n' > "$RUNTIME_DIR/package.json"
+          (cd "$RUNTIME_DIR" && npm install --no-audit --no-fund --omit=dev "$RUNNER_TEMP"/pd-runtime-tarballs/*.tgz)
+      - name: Probe the installed cohort (Owner controls / Codex V2 / DesignGate)
+        run: node plugins/principles-disciple/scripts/verify-pinned-runtime-capability.cjs --runtime-dir "$RUNNER_TEMP/pd-runtime" --workspace "$RUNNER_TEMP/pd-probe-workspace"
+      - name: Start the installed MCP server over real stdio
+        run: node scripts/ci/verify-installed-mcp-server.mjs --runtime-dir "$RUNNER_TEMP/pd-runtime" --workspace "$RUNNER_TEMP/pd-mcp-workspace"
 
   # CI Impact Resolver — SCOPE GATE (shadow 2026-09-22 → 2026-10-27, live
   # since then). Computes the affected verification scopes from the real
@@ -275,6 +312,37 @@ jobs:
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 
+  test-pd-mcp-server:
+    name: Test pd-mcp-server
+    needs: impact
+    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.mcpServer) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Rebuild native modules (better-sqlite3)
+        run: npm rebuild better-sqlite3
+
+      # The package's own test script builds dist/ first; the Gate 3
+      # capability it imports comes from the workspace-linked core dist.
+      - name: Build dependency (principles-core)
+        run: npm run build --workspace=@principles/core
+
+      - name: Test (unit + real-process stdio contract)
+        run: npm test --workspace=@principles/pd-mcp-server
+
   test-pd-cli:
     name: Test pd-cli
     needs: impact
@@ -394,6 +462,7 @@ jobs:
           npm run build --workspace=@principles/host-runtime
           npm run build --workspace=@principles/codex-adapter
           npm run build --workspace=@principles/workbuddy-adapter
+          npm run build --workspace=@principles/pd-mcp-server
           npm run build:bundle --workspace=principles-disciple
           npm run build --workspace=principles-disciple
           npm run build --workspace=create-principles-disciple
@@ -434,6 +503,7 @@ jobs:
           npm run build --workspace=@principles/host-runtime
           npm run build --workspace=@principles/codex-adapter
           npm run build --workspace=@principles/workbuddy-adapter
+          npm run build --workspace=@principles/pd-mcp-server
           npm run build:bundle --workspace=principles-disciple
           npm run build --workspace=principles-disciple
           npm run build --workspace=create-principles-disciple
@@ -474,6 +544,7 @@ jobs:
           npm run build --workspace=@principles/host-runtime
           npm run build --workspace=@principles/codex-adapter
           npm run build --workspace=@principles/workbuddy-adapter
+          npm run build --workspace=@principles/pd-mcp-server
           npm run build:bundle --workspace=principles-disciple
           npm run build --workspace=principles-disciple
           npm run build --workspace=create-principles-disciple
@@ -517,8 +588,12 @@ jobs:
       - name: Build dependencies
         # Superset of the five former jobs' dependency sets: core +
         # install-layout + host-runtime + plugin (parity needs the plugin).
+        # The codex delivery contract launches the REAL built pd-mcp-server
+        # bytes, so that package is built here too (core first: its dist is
+        # the server's compile-time dependency).
         run: |
           npm run build --workspace=@principles/core
+          npm run build --workspace=@principles/pd-mcp-server
           npm run build --workspace=@principles/install-layout
           npm run build --workspace=@principles/host-runtime
           npm run build --workspace=principles-disciple

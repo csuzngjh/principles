@@ -291,12 +291,13 @@ function readRepoSources() {
 describe('release train × action lifecycle guard (H2)', () => {
   const sources = readRepoSources();
 
-  it('covers the eight-package train that is actually published', () => {
+  it('covers the nine-package train that is actually published', () => {
     expect(sources.trainDirs).toEqual([
       'principles-core',
       'install-layout',
       'host-runtime',
       'codex-adapter',
+      'pd-mcp-server',
       'workbuddy-adapter',
       'openclaw-plugin',
       'pd-cli',

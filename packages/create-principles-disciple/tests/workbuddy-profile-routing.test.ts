@@ -142,6 +142,9 @@ function writeWorkbuddyPluginSkeleton(pluginDir: string, version = '0.3.0'): voi
   );
   fs.mkdirSync(path.join(pluginDir, 'scripts'), { recursive: true });
   fs.writeFileSync(path.join(pluginDir, 'scripts', 'wrapper.cjs'), '// test wrapper placeholder\n');
+  // Gate 4: the production payload ships the MCP launcher the host spawns.
+  fs.mkdirSync(path.join(pluginDir, 'mcp'), { recursive: true });
+  fs.writeFileSync(path.join(pluginDir, 'mcp', 'launcher.cjs'), '// test MCP launcher placeholder\n');
 }
 
 interface Lab {
@@ -159,13 +162,15 @@ function makeLab(): Lab {
   const payloadDir = path.join(sandbox, 'payload');
 
   // npm-distributed payload fixture (the shape the form gate demands).
-  for (const component of ['core', 'host-runtime', 'codex-adapter', 'plugin', 'pd-cli', 'console', 'install-layout', 'release-manager']) {
+  for (const component of ['core', 'host-runtime', 'codex-adapter', 'plugin', 'pd-cli', 'console', 'install-layout', 'release-manager', 'pd-mcp-server']) {
     fs.mkdirSync(path.join(payloadDir, component, 'dist'), { recursive: true });
     fs.writeFileSync(path.join(payloadDir, component, 'package.json'), JSON.stringify({ name: `@principles/${component}`, version: PAYLOAD_VERSION }));
     fs.writeFileSync(path.join(payloadDir, component, 'dist', 'entry.js'), `export const component = '${component}';\n`);
   }
   // pd-cli entry: loader shim to the REAL dist (governance init really runs).
   fs.writeFileSync(path.join(payloadDir, 'pd-cli', 'dist', 'index.js'), pdCliLauncherContent());
+  // MCP server entry: the installer deploys it at dist/index.js.
+  fs.writeFileSync(path.join(payloadDir, 'pd-mcp-server', 'dist', 'index.js'), 'export {};\n');
   fs.writeFileSync(path.join(payloadDir, 'pd-cli', 'dist', 'bundle.js'), 'export {};\n');
   fs.writeFileSync(path.join(payloadDir, 'plugin', 'openclaw.plugin.json'), JSON.stringify({ name: 'principles-disciple', activation: { onCapabilities: ['hook'] } }));
   fs.writeFileSync(path.join(payloadDir, 'console', 'dist', 'server.js'), 'export {};');

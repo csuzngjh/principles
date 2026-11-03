@@ -185,11 +185,14 @@ const PD_CONFIG_FILENAME = 'principles-disciple.json';
  * a bad value would ignore a perfectly good pointer further down the list.
  * Refusals are pushed into `rejected` so the caller can report them.
  */
-function loadWorkspaceFromPdConfigFile(rejected: RejectedWorkspaceCandidate[]): string | null {
+function loadWorkspaceFromPdConfigFile(
+  rejected: RejectedWorkspaceCandidate[],
+  options: { includeCwdConfig?: boolean } = {},
+): string | null {
   const candidates = [
     path.join(os.homedir(), '.openclaw', PD_CONFIG_FILENAME),
     path.join(os.homedir(), '.principles', PD_CONFIG_FILENAME),
-    path.join(process.cwd(), PD_CONFIG_FILENAME),
+    ...(options.includeCwdConfig === false ? [] : [path.join(process.cwd(), PD_CONFIG_FILENAME)]),
   ];
 
   for (const configPath of candidates) {
@@ -332,6 +335,42 @@ function resolveExplicitPdSourcesWithDiagnostics(): DeclaredWorkspaceResolution 
 
 function resolveExplicitPdSources(): CanonicalWorkspaceResult | null {
   return resolveExplicitPdSourcesWithDiagnostics().resolved;
+}
+
+/**
+ * Resolve ONLY owner-declared PD workspace sources (env vars + config file),
+ * without any host/agent/default inference.
+ *
+ * Gate 4 (PRI-1071): the MCP launcher binding is host-wide (one binding file
+ * per plugin payload), so it may only record a workspace the Owner explicitly
+ * declared. A resolved `main` agent workspace, `ctx.workspaceDir` of whichever
+ * agent happened to load the plugin, `process.cwd()` or `~/.openclaw/workspace`
+ * all describe WHERE A SESSION RUNS — never which state tree owns governance
+ * for every agent of the host. In a multi-agent OpenClaw install those differ,
+ * and binding one agent's workspace would serve that agent's Pain evidence to
+ * every other agent (cross-workspace recall leakage).
+ *
+ * Returns `null` when no explicit source resolves; callers must fail closed
+ * (invalidate a previously written binding) instead of inferring a default.
+ */
+export function resolveExplicitPdWorkspaceDir(): CanonicalWorkspaceResult | null {
+  return resolveDeclaredWorkspaceDir(mcpBindingWorkspaceCandidates()).resolved;
+}
+
+/**
+ * Candidates for the HOST-WIDE MCP binding: identical to the hook candidates
+ * except the `process.cwd()` config file. The MCP server's cwd belongs to
+ * whichever host/agent launched it, so a pointer found there is a
+ * process-location inference, not an Owner declaration. The launcher
+ * (`mcp/launcher.cjs`) re-derives exactly this list at startup — writer and
+ * gate must agree, or a binding could be written that the gate rejects.
+ */
+function mcpBindingWorkspaceCandidates(): ReadonlyArray<readonly [CanonicalWorkspaceSource, DeclaredCandidateReader]> {
+  return [
+    ['pd_env', () => process.env.PD_WORKSPACE_DIR],
+    ['openclaw_env', () => process.env.OPENCLAW_WORKSPACE],
+    ['pd_config', (rejected) => loadWorkspaceFromPdConfigFile(rejected, { includeCwdConfig: false })],
+  ];
 }
 
 // ── Hook Workspace Resolution (PRI-259) ────────────────────────────────

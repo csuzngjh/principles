@@ -158,6 +158,7 @@ const RUNTIME_PACKAGE_NAMES = {
   codexAdapter: '@principles/codex-adapter',
   hostRuntime: '@principles/host-runtime',
   core: '@principles/core',
+  mcpServer: '@principles/pd-mcp-server',
 };
 
 function readInstalledRuntimeVersions(runtimeDir) {
@@ -176,6 +177,7 @@ function readInstalledRuntimeVersions(runtimeDir) {
     codexAdapter: read(RUNTIME_PACKAGE_NAMES.codexAdapter),
     hostRuntime: read(RUNTIME_PACKAGE_NAMES.hostRuntime),
     core: read(RUNTIME_PACKAGE_NAMES.core),
+    mcpServer: read(RUNTIME_PACKAGE_NAMES.mcpServer),
   };
 }
 

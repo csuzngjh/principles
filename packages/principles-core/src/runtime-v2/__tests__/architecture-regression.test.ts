@@ -334,6 +334,12 @@ const KNOWN_PLUGIN_CORE_FILES = new Set([
   // @principles/host-runtime product-telemetry) into the OpenClaw plugin
   // lifecycle. Plugin-specific because the trigger point is plugin-owned.
   'product-telemetry-trigger.ts',
+  // Gate 4 (PRI-1071): plugin I/O boundary — reads/writes the PD-owned
+  // mcp-binding.json beside the plugin payload (host-specific filesystem
+  // path + component presence checks). Pure resolution/validation logic is
+  // exercised through the module's public functions; the launcher remains
+  // the only consumer at runtime.
+  'mcp-binding.ts',
   // Pain Phase 0 (2026-11-02): detection-funnel.ts removed together with
   // detection-service.ts — its only consumer was the retired Semantic
   // detection execution path.
@@ -505,7 +511,10 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // detection-funnel.ts (94 → 92) — the Semantic detection execution path
     // was retired with its only caller (llm.ts detect call)
     // (SPEC PD-PAIN-SEMANTICS-AND-DETECTION-ARCHITECTURE-001 §6).
-    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(92);
+    // Gate 4 (PRI-1071): Added mcp-binding.ts (92 → 93) — plugin I/O boundary
+    // for the PD-owned mcp-binding.json (host filesystem + component presence),
+    // consumed by the OpenClaw startup health check and the host launcher.
+    expect(KNOWN_PLUGIN_CORE_FILES.size).toBe(93);
   });
 });
 
