@@ -56,6 +56,7 @@ import {
   type InstallHost,
 } from '@principles/install-layout';
 import { atomicReplaceTextFile, errnoCode } from '../utils/config-file-io.js';
+import { checkMcpRegistrationConflict } from './mcp-registration-conflict.js';
 import { resolveMcpServerDir, resolveMcpServerEntry } from '../mcp-server-layout-compat.js';
 import { getHomeDir, generateConfigYamlContent, getConfigYamlPath, resolveDefaultModelForProvider, isValidHttpBaseUrl } from '../mvp-config.js';
 import type {
@@ -1420,6 +1421,24 @@ export class WorkBuddyHostInstaller implements HostInstaller {
       };
     }
     const {payload} = payloadFind;
+
+    // 3b. SPEC §7.5/§11.3: a same-name user-level MCP server must stop the
+    // install BEFORE any marketplace/cache/registration write. The check is
+    // read-only and leaves the offending file untouched.
+    const mcpConflict = checkMcpRegistrationConflict('workbuddy', {
+      homeDir: this.deps.homeDir(),
+      workbuddyConfigDir: p.configDir,
+    });
+    if (!mcpConflict.ok) {
+      return {
+        success: false,
+        hostId: this.hostId,
+        configPath: p.settingsPath,
+        configAction: 'skipped',
+        reason: mcpConflict.reason,
+        nextAction: mcpConflict.nextAction,
+      };
+    }
 
     // 4. Materialize the PD-owned marketplace (source stays inside its root).
     try {

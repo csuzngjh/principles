@@ -77,6 +77,15 @@ export interface McpHealthSection {
     launcher: string | null;
   };
   workspace: { dir: string | null; exists: McpTri };
+  /**
+   * SPEC §7.5/§11.3 same-name registration verdict, read-only. `conflict`
+   * means another MCP server owns `pd-recall`; `unverifiable` means the entry
+   * exists but its ownership cannot be proven. Neither is healthy.
+   */
+  registrationConflict: {
+    configPath: string;
+    verdict: 'absent' | 'other_servers_only' | 'pd_owned' | 'conflict' | 'unverifiable' | 'unverified';
+  };
   restart: { required: McpTri; reason: string | null };
   /** Static health never spawns the server (SPEC §7.8 read-only default). */
   probe: { performed: false; reason: string };
@@ -271,15 +280,140 @@ function assessHostConfig(hostConfigPath: string): McpHealthSection['hostConfig'
   return { path: hostConfigPath, registered: launcher !== null, launcher };
 }
 
+type ConflictVerdict = McpHealthSection['registrationConflict']['verdict'];
+
+function registrationConfigPath(host: McpHealthHost, homeDir: string, env: { CODEX_HOME?: string }): string {
+  if (host === 'codex') {
+    const codexHome = env.CODEX_HOME !== undefined && env.CODEX_HOME.length > 0 ? env.CODEX_HOME : path.join(homeDir, '.codex');
+    return path.join(codexHome, 'config.toml');
+  }
+  if (host === 'openclaw') return path.join(homeDir, '.openclaw', 'openclaw.json');
+  return path.join(homeDir, '.workbuddy', 'mcp.json');
+}
+
+function launcherOwnsEntry(entry: Record<string, unknown>): ConflictVerdict {
+  const command = readString(entry, 'command');
+  const url = readString(entry, 'url');
+  if (command === null) return url !== null ? 'conflict' : 'unverifiable';
+  const base = path.basename(command).toLowerCase();
+  if (base !== 'node' && base !== 'node.exe' && base !== path.basename(process.execPath).toLowerCase()) return 'conflict';
+  const args = Array.isArray(entry.args) ? entry.args.filter((arg): arg is string => typeof arg === 'string') : null;
+  if (args === null) return 'unverifiable';
+  const owned = args.some((arg) => path.basename(arg.replace(/\\/g, '/')) === 'launcher.cjs'
+    && path.basename(path.dirname(arg.replace(/\\/g, '/'))) === 'mcp');
+  return owned ? 'pd_owned' : 'conflict';
+}
+
+function classifyJsonServers(servers: unknown): ConflictVerdict {
+  if (!isRecord(servers)) return 'unverifiable';
+  if (!Object.hasOwn(servers, 'pd-recall')) return Object.keys(servers).length === 0 ? 'absent' : 'other_servers_only';
+  const entry = servers['pd-recall'];
+  return isRecord(entry) ? launcherOwnsEntry(entry) : 'unverifiable';
+}
+
+const TOML_PD_SECTION = /^\s*\[\s*mcp_servers\.(?:"pd-recall"|'pd-recall'|pd-recall)\s*\]\s*(?:#.*)?$/;
+const TOML_PD_CHILD = /^\s*\[\s*mcp_servers\.(?:"pd-recall"|'pd-recall'|pd-recall)\./;
+
+/**
+ * Minimal Codex `config.toml` reader for the `pd-recall` entry. Every
+ * `mcp_servers` construct this scan cannot model is `unverifiable`, never
+ * "absent" (rc-1: unknown ownership must not read as a free name).
+ */
+function classifyCodexToml(raw: string): ConflictVerdict {
+  let inPd = false;
+  let found = false;
+  let opaque = false;
+  let command: string | null = null;
+  let args: unknown = null;
+  let url: string | null = null;
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0 || trimmed.startsWith('#')) continue;
+    if (/^\s*\[/.test(line)) {
+      if (TOML_PD_SECTION.test(line)) {
+        inPd = true;
+        found = true;
+      } else {
+        inPd = false;
+        if (TOML_PD_CHILD.test(line)) found = true;
+      }
+      continue;
+    }
+    if (/^\s*mcp_servers\s*=/.test(line)) {
+      // Inline table form — ownership unknowable.
+      found = true;
+      opaque = true;
+      inPd = false;
+      continue;
+    }
+    if (!inPd) continue;
+    const pair = /^\s*(command|args|url)\s*=\s*(.*)$/.exec(line);
+    if (!pair) continue;
+    const [, key, value] = pair;
+    if (key === undefined || value === undefined) continue;
+    if (key === 'command') {
+      command = /^"(.*)"$/.exec(value.trim())?.[1] ?? (/^'(.*)'$/.exec(value.trim())?.[1] ?? null);
+      if (command === null) opaque = true;
+    } else if (key === 'url') {
+      url = /^"(.*)"$/.exec(value.trim())?.[1] ?? (/^'(.*)'$/.exec(value.trim())?.[1] ?? null);
+      if (url === null) opaque = true;
+    } else {
+      try {
+        const parsed: unknown = JSON.parse(value.trim().replace(/'/g, '"'));
+        args = Array.isArray(parsed) ? parsed : null;
+      } catch {
+        args = null;
+      }
+      if (args === null) opaque = true;
+    }
+  }
+  if (!found) return 'absent';
+  if (opaque) return 'unverifiable';
+  const entry: Record<string, unknown> = {};
+  if (command !== null) entry.command = command;
+  if (args !== null) entry.args = args;
+  if (url !== null) entry.url = url;
+  return launcherOwnsEntry(entry);
+}
+
+function assessRegistrationConflict(host: McpHealthHost, homeDir: string, env: { CODEX_HOME?: string }): ConflictVerdict {
+  const configPath = registrationConfigPath(host, homeDir, env);
+  let raw: string;
+  try {
+    raw = fs.readFileSync(configPath, 'utf8');
+  } catch (error) {
+    const code = isRecord(error) && typeof error.code === 'string' ? error.code : null;
+    return code === 'ENOENT' || code === 'ENOTDIR' ? 'absent' : 'unverified';
+  }
+  if (host === 'codex') return classifyCodexToml(raw);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return 'unverifiable';
+  }
+  if (!isRecord(parsed)) return 'unverifiable';
+  if (host === 'openclaw') {
+    if (parsed.mcp === undefined) return 'absent';
+    if (!isRecord(parsed.mcp)) return 'unverifiable';
+    if (parsed.mcp.servers === undefined) return 'absent';
+    return classifyJsonServers(parsed.mcp.servers);
+  }
+  if (parsed.mcpServers === undefined) return 'absent';
+  return classifyJsonServers(parsed.mcpServers);
+}
+
 interface BaseSectionInput {
   host: McpHealthHost;
   layout: ResolvedLayout;
+  homeDir: string;
+  env: { CODEX_HOME?: string };
   status: McpHealthStatus;
   reason: string;
   nextAction: string;
 }
 
-function baseSection({ host, layout, status, reason, nextAction }: BaseSectionInput): McpHealthSection {
+function baseSection({ host, layout, homeDir, env, status, reason, nextAction }: BaseSectionInput): McpHealthSection {
   const entry = path.join(layout.defaultRuntimeDir, ...SERVER_ENTRY_SEGMENTS[host]);
   return {
     host,
@@ -307,6 +441,10 @@ function baseSection({ host, layout, status, reason, nextAction }: BaseSectionIn
     },
     hostConfig: assessHostConfig(layout.hostConfigPath),
     workspace: { dir: null, exists: 'unverified' },
+    registrationConflict: {
+      configPath: registrationConfigPath(host, homeDir, env),
+      verdict: 'unverified',
+    },
     restart: { required: 'unverified', reason: null },
     probe: { performed: false, reason: 'health_is_read_only_and_does_not_spawn_the_server' },
     reason,
@@ -322,11 +460,19 @@ export function assessMcpHealth(options: AssessOptions): McpHealthSection {
     return baseSection({
       host,
       layout,
+      homeDir,
+      env: options.env ?? {},
       status: layout.status ?? 'NOT_INSTALLED',
       reason: layout.reason ?? 'install_state_unverified',
       nextAction: layout.nextAction ?? SETUP_NEXT_ACTION,
     });
   }
+
+  // SPEC §7.5/§11.3: a same-name registration owned by another server (or an
+  // ownership that cannot be proven) precedes every other layer — PD must not
+  // register on top of it, so the host's MCP wiring is NOT healthy.
+  const conflictConfigPath = registrationConfigPath(host, homeDir, options.env ?? {});
+  const registrationConflict = assessRegistrationConflict(host, homeDir, options.env ?? {});
 
   const bindingRecord = readJsonRecord(layout.bindingPath);
   const bindingExists = exists(layout.bindingPath);
@@ -433,6 +579,20 @@ export function assessMcpHealth(options: AssessOptions): McpHealthSection {
     }
   };
 
+  if (registrationConflict === 'conflict') {
+    degrade(
+      'CONFIG_DRIFT',
+      'mcp_same_name_conflict',
+      `Another MCP server owns "${'pd-recall'}" in ${conflictConfigPath}. PD must not overwrite or delete it: remove/rename that entry yourself, then re-install PD and restart the host.`,
+    );
+  } else if (registrationConflict === 'unverifiable' || registrationConflict === 'unverified') {
+    degrade(
+      'CONFIG_DRIFT',
+      'mcp_registration_unverifiable',
+      `The "${'pd-recall'}" ownership in ${conflictConfigPath} cannot be verified. Inspect it manually; PD never guesses whether an existing entry is its own.`,
+    );
+  }
+
   if (!bindingExists) {
     degrade('CONFIG_MISSING', 'mcp_binding_missing', SETUP_NEXT_ACTION);
   } else if (bindingRecord === null) {
@@ -486,6 +646,7 @@ export function assessMcpHealth(options: AssessOptions): McpHealthSection {
     binding,
     hostConfig,
     workspace,
+    registrationConflict: { configPath: conflictConfigPath, verdict: registrationConflict },
     restart,
     probe: { performed: false, reason: 'health_is_read_only_and_does_not_spawn_the_server' },
     ...(reason !== undefined ? { reason, nextAction } : {}),
@@ -513,6 +674,8 @@ export function formatMcpHealthLines(section: McpHealthSection): string[] {
     `mcp.binding.versionMatchesInstalled: ${tri(section.binding.versionMatchesInstalled)}`,
     `mcp.hostConfig.path: ${section.hostConfig.path}`,
     `mcp.hostConfig.registered: ${tri(section.hostConfig.registered)}`,
+    `mcp.registrationConflict.path: ${section.registrationConflict.configPath}`,
+    `mcp.registrationConflict.verdict: ${section.registrationConflict.verdict}`,
     `mcp.workspace.exists: ${tri(section.workspace.exists)}`,
     `mcp.restart.required: ${tri(section.restart.required)}${section.restart.reason !== null ? ` (${section.restart.reason})` : ''}`,
   ];

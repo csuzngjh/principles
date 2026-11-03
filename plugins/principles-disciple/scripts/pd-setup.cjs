@@ -54,6 +54,143 @@ function runNpm(args, options) {
   return spawnSync(cli.node, [...cli.args, ...args], { encoding: 'utf8', ...options, ...(cli.shell ? { shell: true } : {}) });
 }
 
+// ─── Codex MCP same-name conflict gate (SPEC-PD-MCP-GATE4-001 §7.5/§11.3) ───
+// The user-level `[mcp_servers.pd-recall]` tier overrides the plugin tier, so
+// a same-name server owned by someone else must stop setup BEFORE the runtime
+// install/binding write. Read-only; never edits the user config.
+const PD_MCP_SERVER_NAME = 'pd-recall';
+
+function tomlScalar(rawValue) {
+  const value = rawValue.trim();
+  if (value.startsWith('"') && value.endsWith('"')) {
+    try { return JSON.parse(value); } catch { return undefined; }
+  }
+  if (value.startsWith("'") && value.endsWith("'")) return value.slice(1, -1);
+  return undefined;
+}
+
+function tomlArray(rawValue) {
+  const value = rawValue.trim();
+  if (!value.startsWith('[') || !value.endsWith(']')) return undefined;
+  const inner = value.slice(1, -1).trim();
+  if (inner.length === 0) return [];
+  const parts = inner.split(',').map((part) => part.trim()).filter((part) => part.length > 0);
+  const out = [];
+  for (const part of parts) {
+    const parsed = tomlScalar(part);
+    if (parsed === undefined) return undefined;
+    out.push(parsed);
+  }
+  return out;
+}
+
+function scanCodexPdRecallEntry(configPath) {
+  let raw;
+  try { raw = fs.readFileSync(configPath, 'utf8'); } catch (error) {
+    if (error && error.code === 'ENOENT') return { state: 'absent' };
+    return { state: 'unverifiable', why: 'unreadable' };
+  }
+  const entry = { command: undefined, args: undefined, url: undefined, opaque: false };
+  let found = false;
+  let table;
+  let multilineArgs;
+  for (const line of raw.split(/\r?\n/)) {
+    if (multilineArgs !== undefined) {
+      const close = line.indexOf(']');
+      const segment = close === -1 ? line : line.slice(0, close);
+      const parsed = tomlScalar(segment.replace(/,$/, '').trim());
+      if (parsed !== undefined) multilineArgs.push(parsed);
+      if (close !== -1) { entry.args = multilineArgs; multilineArgs = undefined; }
+      continue;
+    }
+    const trimmed = line.trim();
+    if (trimmed.length === 0 || trimmed.startsWith('#')) continue;
+    const header = /^\s*\[\[?([^\]]+)\]\]?\s*(?:#.*)?$/.exec(line);
+    if (header) {
+      const parts = header[1].split('.').map((part) => part.trim().replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1'));
+      if (parts[0] === 'mcp_servers' && parts[1] === PD_MCP_SERVER_NAME) {
+        found = true;
+        table = parts.length === 2 ? 'server' : 'child';
+      } else {
+        table = undefined;
+      }
+      continue;
+    }
+    if (/^\s*mcp_servers\s*=/.test(line)) {
+      // Inline-table form PD cannot model: ownership is unknowable.
+      found = true;
+      entry.opaque = true;
+      table = undefined;
+      continue;
+    }
+    if (table === undefined) {
+      const dotted = /^\s*mcp_servers\.(?:"([^"]+)"|'([^']+)'|([A-Za-z0-9_-]+))\.(command|args|url)\s*=\s*(.*)$/.exec(line);
+      if (dotted && (dotted[1] ?? dotted[2] ?? dotted[3]) === PD_MCP_SERVER_NAME) {
+        found = true;
+        const key = dotted[4];
+        const value = dotted[5];
+        if (key === 'command') entry.command = tomlScalar(value);
+        else if (key === 'url') entry.url = tomlScalar(value);
+        else {
+          const parsed = tomlArray(value);
+          if (parsed !== undefined) entry.args = parsed;
+          else if (value.trim().startsWith('[')) multilineArgs = [];
+          else entry.opaque = true;
+        }
+      }
+      continue;
+    }
+    if (table !== 'server') continue;
+    const pair = /^\s*(command|args|url)\s*=\s*(.*)$/.exec(line);
+    if (!pair) continue;
+    if (pair[1] === 'command') {
+      entry.command = tomlScalar(pair[2]);
+      if (entry.command === undefined) entry.opaque = true;
+    } else if (pair[1] === 'url') {
+      entry.url = tomlScalar(pair[2]);
+      if (entry.url === undefined) entry.opaque = true;
+    } else {
+      const parsed = tomlArray(pair[2]);
+      if (parsed !== undefined) entry.args = parsed;
+      else if (pair[2].trim().startsWith('[')) multilineArgs = [];
+      else entry.opaque = true;
+    }
+  }
+  if (!found) return { state: 'absent' };
+  if (entry.opaque) return { state: 'unverifiable', why: 'unparsable_mcp_servers_construct' };
+  const command = typeof entry.command === 'string' ? entry.command : undefined;
+  const args = Array.isArray(entry.args) ? entry.args : undefined;
+  if (command === undefined) return { state: typeof entry.url === 'string' ? 'other' : 'unverifiable', why: 'no_command' };
+  const commandBase = path.basename(command).toLowerCase();
+  const nodeBase = path.basename(process.execPath).toLowerCase();
+  if (commandBase !== 'node' && commandBase !== 'node.exe' && commandBase !== nodeBase) return { state: 'other', why: 'different_command' };
+  if (args === undefined) return { state: 'unverifiable', why: 'args_missing' };
+  const isPdLauncher = args.some((arg) => path.basename(arg.replace(/\\/g, '/')) === 'launcher.cjs'
+    && path.basename(path.dirname(arg.replace(/\\/g, '/'))) === 'mcp');
+  return isPdLauncher ? { state: 'pd_owned' } : { state: 'other', why: 'different_args' };
+}
+
+function checkCodexMcpServerConflict() {
+  const codexHome = process.env.CODEX_HOME && process.env.CODEX_HOME.length > 0
+    ? process.env.CODEX_HOME
+    : path.join(os.homedir(), '.codex');
+  const configPath = path.join(codexHome, 'config.toml');
+  const result = scanCodexPdRecallEntry(configPath);
+  if (result.state === 'absent' || result.state === 'pd_owned') return { ok: true, state: result.state };
+  if (result.state === 'other') {
+    return {
+      ok: false,
+      reason: `mcp_same_name_conflict: ${configPath} already registers a DIFFERENT MCP server named "${PD_MCP_SERVER_NAME}" (user config overrides the PD plugin tier). Nothing was installed or written.`,
+      nextAction: `Remove or rename the third-party [mcp_servers.${PD_MCP_SERVER_NAME}] table in ${configPath} yourself, then re-run $pd-control setup. PD does not overwrite another server's registration.`,
+    };
+  }
+  return {
+    ok: false,
+    reason: `mcp_registration_unverifiable: ${configPath} declares "${PD_MCP_SERVER_NAME}" in a form whose ownership cannot be verified (${result.why}). Nothing was installed or written.`,
+    nextAction: `Inspect ${configPath} manually and remove/repair the "${PD_MCP_SERVER_NAME}" entry, then re-run $pd-control setup.`,
+  };
+}
+
 function parseArgs(argv) {
   const out = { pluginRoot: undefined, pluginData: undefined, workspace: undefined, adapterSource: undefined, hostRuntimeSource: undefined, coreSource: undefined, mcpServerSource: undefined, skipInit: false, json: false, ingest: undefined };
   for (let i = 0; i < argv.length; i += 1) {
@@ -138,6 +275,11 @@ async function main() {
   //    but never creates the directory (verified on-device, 0.147.0).
   const root = locatePluginRoot(args.pluginRoot);
   if (!root.ok) { fail(root.reason, root.nextAction); return; }
+  // SPEC §7.5/§11.3: check the user-level MCP name BEFORE ensurePluginData /
+  // runtime install / binding write. A conflict or unverifiable ownership must
+  // leave the machine byte-identical.
+  const mcpConflict = checkCodexMcpServerConflict();
+  if (!mcpConflict.ok) { fail(mcpConflict.reason, mcpConflict.nextAction); return; }
   const data = ensurePluginData(args.pluginData, root);
   if (!data.ok) { fail(data.reason, data.nextAction); return; }
 
