@@ -1,7 +1,7 @@
 ---
 "@principles/core": patch
 "@principles/host-runtime": patch
-"@principles/pd-console": patch
+"@principles/pd-cli": patch
 "@principles/workbuddy-adapter": patch
 "create-principles-disciple": patch
 ---
