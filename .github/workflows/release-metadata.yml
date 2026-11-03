@@ -497,6 +497,13 @@ jobs:
           npm run build --workspace=@principles/pd-console
 
       - name: Build release asset
+        env:
+          # G3.2: the step above JUST ran the official console chain; bundle-plugin
+          # reuses that dist instead of rebuilding it, after its freshness gate
+          # (complete + production-mode + not older than src + hygiene) passes —
+          # any failed condition fails this step loud. Set ONLY here: the
+          # reproducibility workflows must keep two fully independent builds.
+          PD_BUNDLE_SKIP_CONSOLE_BUILD: '1'
         run: |
           # Deterministic archive: fixed mtime from the SHARED source epoch
           # so the same source always yields the same per-platform bytes.
