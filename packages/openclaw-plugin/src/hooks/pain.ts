@@ -1,23 +1,23 @@
 /**
  * Pain Hook — PRI-326 decomposed
  *
- * After-tool-call hook that captures tool failures and emits pain signals.
+ * After-tool-call hook. Phase A retired every automatic Pain admission that
+ * was triggered by a technical tool failure: failures are still classified,
+ * recorded in the trajectory, and tracked for GFI health, but they never
+ * create a Pain Event or a Diagnostician task by themselves.
  *
- * Pipeline stages (delegated to after-tool-call-helpers):
+ * Remaining stages (delegated to after-tool-call-helpers):
  *   1. classifyToolCallOutcome    — determine failure/success + source
  *   2. buildToolCallObservation   — normalize event into observation
  *   3. handleFrictionTracking     — GFI, event log, trajectory recording
- *   4. evaluatePainAdmission      — triage + gate evaluation
- *   5. emitPainIfAdmitted         — pain signal emission
  *
  * The manual pain path (toolName === 'pain') remains inline because it
- * has a different control flow (early return, no triage, no gate on cooldown).
+ * has a different control flow (early return, Owner-explicit admission).
  */
 
 import * as fs from 'fs';
 import { normalizeProfile } from '../core/profile.js';
 import { getSession, trackFriction } from '../core/session-tracker.js';
-import type { SessionState } from '../core/session-tracker.js';
 import { computeHash } from '../utils/hashing.js';
 import { SystemLogger } from '../core/system-logger.js';
 import { WorkspaceContext } from '../core/workspace-context.js';
@@ -33,7 +33,6 @@ import { isSharedCooldownActive, markSharedEpisodeAsDiagnosed } from './trigger-
 import { buildManualPainObservation, resolveSourceKind } from './raw-observation-adapter.js';
 import { evaluateEvidenceTriage } from './triage-adapter.js';
 import type { ProductionPainEnrichment } from '@principles/host-runtime';
-import type { HostEventResult } from '@principles/core/host';
 
 import {
   classifyToolCallOutcome,
@@ -41,60 +40,9 @@ import {
   handleFrictionTrackingForFailure,
   handleFrictionTrackingForSuccess,
   recordHygieneTracking,
-  evaluatePainAdmissionForToolCall,
-  emitPainIfAdmitted,
 } from './after-tool-call-helpers.js';
 
-import { buildTrajectoryEvidence } from './trajectory-evidence.js';
 import { ingressDecisionForPluginPain } from './pain-ingress-adapter.js';
-export { buildTrajectoryEvidence };
-
-const pendingPainContinuations = new Set<Promise<void>>();
-const PAIN_CONTINUATION_TIMEOUT_MS = 30_000;
-
-function logPainContinuationFailure(workspaceDir: string, reason: string): void {
-  try {
-    SystemLogger.log(workspaceDir, 'PAIN_CONTINUATION_FAILED', JSON.stringify({
-      reason: reason.slice(0, 200),
-      nextAction: 'inspect the admitted pain and retry diagnosis from the persisted canonical pain ID',
-    }));
-  } catch {
-    // Logging must not turn a best-effort continuation into an unhandled rejection.
-  }
-}
-
-/**
- * Host-owned best-effort continuation after durable shared persistence.
- * The hook may return once SQLite commits, while rejections remain observable
- * and tests/shutdown code can explicitly drain scheduled work.
- */
-export function schedulePainContinuation(workspaceDir: string, continuation: Promise<void>): void {
-  let finished = false;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const bounded = new Promise<void>((resolve) => {
-    const finish = (reason?: string): void => {
-      if (finished) return;
-      finished = true;
-      if (timer !== undefined) clearTimeout(timer);
-      if (reason) logPainContinuationFailure(workspaceDir, reason);
-      resolve();
-    };
-    continuation.then(
-      () => finish(),
-      (error: unknown) => finish(error instanceof Error ? error.message : String(error)),
-    );
-    timer = setTimeout(() => finish(`pain_continuation_timeout:${PAIN_CONTINUATION_TIMEOUT_MS}ms`), PAIN_CONTINUATION_TIMEOUT_MS);
-  });
-  const observed = bounded.finally(() => {
-    if (timer !== undefined) clearTimeout(timer);
-    pendingPainContinuations.delete(observed);
-  });
-  pendingPainContinuations.add(observed);
-}
-
-export async function drainPainContinuationsForTest(): Promise<void> {
-  await Promise.all([...pendingPainContinuations]);
-}
 
 // ── Service Factory ─────────────────────────────────────────────────────────
 
@@ -121,7 +69,7 @@ function createPainToPrincipleService(wctx: WorkspaceContext): PainToPrincipleSe
   });
 }
 
-// buildTrajectoryEvidence is in ./trajectory-evidence.ts (re-exported above)
+// Trajectory evidence acquisition lives in ./trajectory-evidence.ts.
 
 // ── Pain Event Emission ─────────────────────────────────────────────────────
 
@@ -390,11 +338,9 @@ export function handleAfterToolCall(
   // ── Stage 2: Build Observation ──
   const observation = buildToolCallObservation(event, outcome, effectiveWorkspaceDir, profile);
 
-  let latestFailureState: SessionState | undefined;
-
   if (outcome.isFailure) {
     // ── Stage 3a: Friction + Recording (Failure) ──
-    latestFailureState = handleFrictionTrackingForFailure(
+    handleFrictionTrackingForFailure(
       sessionId, event, outcome, observation, gfiBefore, effectiveWorkspaceDir, config, wctx
     );
   } else {
@@ -403,23 +349,9 @@ export function handleAfterToolCall(
       sessionId, event, outcome, observation, gfiBefore, effectiveWorkspaceDir, wctx
     );
 
-    // ── Stage 4b: Hygiene Tracking (Success only) ──
+    // ── Stage 3c: Hygiene Tracking (Success only) ──
     recordHygieneTracking(event, observation, wctx);
   }
-
-  // ── Stage 5: Pain Admission ──
-  const admission = evaluatePainAdmissionForToolCall(
-    event, observation, outcome, latestFailureState, sessionState, sessionId, effectiveWorkspaceDir, config
-  );
-
-  if (admission.stage === 'not_applicable') {
-    return;
-  }
-
-  // ── Stage 6: Emit Pain (only if admitted) ──
-  emitPainIfAdmitted(
-    wctx, event, observation, outcome, admission, sessionId, ctx.agentId, effectiveWorkspaceDir, emitPainDetectedEvent
-  );
 }
 
 /**
@@ -451,68 +383,16 @@ export function prepareOrdinaryAfterToolCallForSharedRuntime(
   const rawEventId = Object.hasOwn(event, 'toolUseId') ? event.toolUseId
     : Object.hasOwn(event, 'toolCallId') ? event.toolCallId
     : undefined;
-  let latestFailureState: SessionState | undefined;
   if (outcome.isFailure) {
-    latestFailureState = handleFrictionTrackingForFailure(sessionId, event, outcome, observation, gfiBefore, ctx.workspaceDir, wctx.config, wctx, { recordTrajectory: false });
+    handleFrictionTrackingForFailure(sessionId, event, outcome, observation, gfiBefore, ctx.workspaceDir, wctx.config, wctx, { recordTrajectory: false });
   } else {
     handleFrictionTrackingForSuccess(sessionId, event, outcome, observation, gfiBefore, ctx.workspaceDir, wctx, { recordTrajectory: false });
     recordHygieneTracking(event, observation, wctx);
   }
-  return {
-    ...(typeof rawEventId === 'string' && rawEventId.trim().length > 0 ? { eventId: `openclaw:${rawEventId}` } : {}),
-    painScore: observation.painScore,
-    isRisky: observation.isRisk,
-    consecutiveErrors: (latestFailureState ?? sessionState)?.consecutiveErrors ?? 0,
-    relativePath: observation.relPath,
-    errorHash: observation.errorHash,
-    agentId: ctx.agentId,
-    evidence: buildTrajectoryEvidence(wctx, sessionId),
-  };
-}
-
-function metadataString(metadata: Readonly<Record<string, unknown>>, key: string): string | null {
-  const value = Object.hasOwn(metadata, key) ? metadata[key] : undefined;
-  return typeof value === 'string' && value.trim().length > 0 ? value : null;
-}
-
-/** Restore OpenClaw-owned pain UX/diagnosis after the shared atomic evidence write. */
-export function handleSharedPainEvidenceResult(
-  event: PluginHookAfterToolCallEvent,
-  ctx: PluginHookToolContext & { workspaceDir: string },
-  result: HostEventResult,
-): void {
-  const metadata = result.metadata;
-  if (!metadata || metadata.admitted !== true || metadata.duplicate === true) return;
-  const painId = metadataString(metadata, 'painId');
-  const failureSource = metadataString(metadata, 'failureSource');
-  const relativePath = metadataString(metadata, 'relativePath');
-  const triggerReason = metadataString(metadata, 'triggerReason');
-  const score = metadata.painScore;
-  if (!painId || !failureSource || !relativePath || !triggerReason || typeof score !== 'number' || !Number.isFinite(score)) {
-    SystemLogger.log(ctx.workspaceDir, 'SHARED_PAIN_RESULT_INVALID', JSON.stringify({ reason: 'shared_pain_metadata_invalid', nextAction: 'inspect host-runtime after-tool result metadata' }));
-    return;
-  }
-  const wctx = WorkspaceContext.fromHookContextExplicit(ctx);
-  const sessionId = ctx.sessionId || 'unknown';
-  const traceId = metadataString(metadata, 'eventId') ?? createTraceId();
-  const reason = `Tool ${event.toolName} failed on ${relativePath}`;
-  wctx.eventLog.recordPainSignal(sessionId, { score, source: failureSource, reason, isRisky: metadata.isRisky === true });
-  const rawEvidence = metadata.evidence;
-  const evidence = Array.isArray(rawEvidence)
-    ? rawEvidence.filter((entry): entry is { sourceRef: string; note: string } => typeof entry === 'object' && entry !== null && !Array.isArray(entry)
-      && typeof Object.getOwnPropertyDescriptor(entry, 'sourceRef')?.value === 'string'
-      && typeof Object.getOwnPropertyDescriptor(entry, 'note')?.value === 'string').slice(0, 8)
-    : [];
-  schedulePainContinuation(ctx.workspaceDir, emitPainDetectedEvent(wctx, {
-    ts: new Date().toISOString(), type: 'pain_detected', data: {
-      painId, painType: 'tool_failure', source: event.toolName,
-      reason: `${reason}; diagnosticGate=${triggerReason}`, score, sessionId, traceId,
-      agentId: ctx.agentId,
-      // Inline evidence from the shared atomic writer — real behavior traces
-      // the ingress adapter passes through (provenance is ingress-derived).
-      evidence,
-    },
-  }, { recordObservability: false }));
+  // The shared kernel still owns the atomic tool_calls row. Phase A retired
+  // the pain admission that used to ride on this enrichment; only the stable
+  // event identity remains meaningful.
+  return typeof rawEventId === 'string' && rawEventId.trim().length > 0 ? { eventId: `openclaw:${rawEventId}` } : {};
 }
 
 // ── Manual Pain Handler ─────────────────────────────────────────────────────

@@ -17,7 +17,6 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { HostEvent } from '@principles/core/host';
 import { createProductionHostRuntime } from '../src/index.js';
 import {
-  deriveProductionToolPainIdentity,
   recordVerifiedToolOutcomes,
 } from '../src/production-pain-evidence.js';
 
@@ -82,7 +81,7 @@ describe('CR-01 three-valued outcome classification (PRI-960)', () => {
     const workspaceDir = workspaceWithTrajectory();
     const runtime = createProductionHostRuntime();
     const result = await runtime.dispatch(toolEvent(workspaceDir, toolOutput));
-    expect(result.metadata).toEqual(expect.objectContaining({ outcome: 'failure', admitted: false }));
+    expect(result.metadata).toEqual(expect.objectContaining({ outcome: 'failure' }));
     const row = readRow(workspaceDir, 'SELECT outcome, exit_code FROM tool_calls');
     expect(row.outcome).toBe('failure');
     expect(row.exit_code).not.toBe(0);
@@ -97,7 +96,7 @@ describe('CR-01 three-valued outcome classification (PRI-960)', () => {
     const workspaceDir = workspaceWithTrajectory();
     const runtime = createProductionHostRuntime();
     const result = await runtime.dispatch(toolEvent(workspaceDir, toolOutput));
-    expect(result.metadata).toEqual(expect.objectContaining({ outcome: 'success', admitted: false }));
+    expect(result.metadata).toEqual(expect.objectContaining({ outcome: 'success' }));
     expect(readRow(workspaceDir, 'SELECT outcome FROM tool_calls').outcome).toBe('success');
   });
 
@@ -113,7 +112,6 @@ describe('CR-01 three-valued outcome classification (PRI-960)', () => {
       outcome: 'unknown',
       outcomeReason: 'text_only_response',
       exitCode: null,
-      admitted: false,
     }));
     const row = readRow(workspaceDir, 'SELECT outcome, exit_code FROM tool_calls');
     expect(row.outcome).toBe('unknown');
@@ -126,21 +124,6 @@ describe('CR-01 three-valued outcome classification (PRI-960)', () => {
     const result = await runtime.dispatch(toolEvent(workspaceDir, { error: 'EACCES permission denied' }));
     expect(result.metadata).toEqual(expect.objectContaining({ outcome: 'failure' }));
     expect(readRow(workspaceDir, 'SELECT outcome FROM tool_calls').outcome).toBe('failure');
-  });
-
-  it('exposes the classification through the public identity derivation (parity with the installed pure function)', () => {
-    const stringIdentity = deriveProductionToolPainIdentity({
-      workspaceDir: 'D:/ws/probe', sessionId: 's', toolName: 'Bash',
-      toolInput: { invocation: 'probe-alpha' }, toolOutput: 'probe summary: 1 failed', source: 'codex:post_tool_use',
-    });
-    expect(stringIdentity.outcome.outcome).toBe('unknown');
-    expect(stringIdentity.outcome.exitCode).toBeNull();
-    const snakeIdentity = deriveProductionToolPainIdentity({
-      workspaceDir: 'D:/ws/probe', sessionId: 's', toolName: 'Bash',
-      toolInput: { invocation: 'probe-alpha' }, toolOutput: { exit_code: 1 }, source: 'codex:post_tool_use',
-    });
-    expect(snakeIdentity.outcome.outcome).toBe('failure');
-    expect(snakeIdentity.outcome.exitCode).toBe(1);
   });
 
   it('records the host tool-call id and dedupes replays by it even after a verified upgrade changed the row', async () => {

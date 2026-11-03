@@ -6,9 +6,9 @@
  *
  * Tests verify:
  * - All source kinds have descriptors registered
- * - Every descriptor has required fields (kind, defaultDecision, reason, nextAction, canUpgrade)
+ * - Every descriptor has required fields (kind, defaultDecision, reason, nextAction)
  * - Descriptor invariants (owner_reported always admit, tool_failure never admit, etc.)
- * - canUpgrade flag is correctly set for upgradable kinds
+ * - Every non-owner source is decision-final (Phase A: no upgrade path)
  *
  * ERR checklist:
  * - ERR-002: Every descriptor carries reason + nextAction
@@ -63,7 +63,6 @@ describe('SOURCE_DESCRIPTORS registry', () => {
       expect(descriptor.nextAction).toBeDefined();
       expect(typeof descriptor.nextAction).toBe('string');
       expect(descriptor.nextAction.length).toBeGreaterThan(0);
-      expect(typeof descriptor.canUpgrade).toBe('boolean');
     }
   });
 });
@@ -140,10 +139,10 @@ describe('Descriptor decision invariants', () => {
     expect(descriptor?.defaultDecision).toBe('health_only');
   });
 
-  it('rulehost_block has defaultDecision=evidence_only with canUpgrade=true', () => {
+  it('rulehost_block has defaultDecision=evidence_only (Phase A: no upgrade path)', () => {
     const descriptor = getSourceDescriptor('rulehost_block');
     expect(descriptor?.defaultDecision).toBe('evidence_only');
-    expect(descriptor?.canUpgrade).toBe(true);
+    expect(descriptor?.defaultDecision).not.toBe('admit');
   });
 
   it('empathy_inferred has defaultDecision=owner_confirm (never directly admit)', () => {
@@ -179,32 +178,29 @@ describe('Descriptor decision invariants', () => {
   });
 });
 
-// ── canUpgrade Flag ────────────────────────────────────────────────────────────
+// ── Descriptor Decision Finality (Phase A) ────────────────────────────────────
 
-describe('canUpgrade flag', () => {
-  it('only rulehost_block has canUpgrade=true', () => {
+describe('descriptor decision finality', () => {
+  it('no descriptor admits except owner-reported / owner-requested', () => {
     for (const [kind, descriptor] of SOURCE_DESCRIPTORS) {
-      if (kind === 'rulehost_block') {
-        expect(descriptor.canUpgrade).toBe(true);
-      } else {
-        expect(descriptor.canUpgrade).toBe(false);
-      }
+      if (kind === 'owner_reported' || kind === 'agent_on_owner_request') continue;
+      expect(descriptor.defaultDecision).not.toBe('admit');
     }
   });
 
-  it('owner_reported cannot be upgraded (highest confidence)', () => {
-    const descriptor = getSourceDescriptor('owner_reported');
-    expect(descriptor?.canUpgrade).toBe(false);
-  });
-
-  it('tool_failure cannot be upgraded (infrastructure noise)', () => {
+  it('tool_failure is evidence-only (never a behavioral Pain by itself)', () => {
     const descriptor = getSourceDescriptor('tool_failure');
-    expect(descriptor?.canUpgrade).toBe(false);
+    expect(descriptor?.defaultDecision).toBe('evidence_only');
   });
 
-  it('empathy_inferred cannot be upgraded (requires owner confirmation)', () => {
+  it('rulehost_block is evidence-only (never an automatic Pain)', () => {
+    const descriptor = getSourceDescriptor('rulehost_block');
+    expect(descriptor?.defaultDecision).toBe('evidence_only');
+  });
+
+  it('empathy_inferred requires owner confirmation', () => {
     const descriptor = getSourceDescriptor('empathy_inferred');
-    expect(descriptor?.canUpgrade).toBe(false);
+    expect(descriptor?.defaultDecision).toBe('owner_confirm');
   });
 });
 
@@ -217,12 +213,10 @@ describe('Descriptor reason quality', () => {
     expect(descriptor?.reason.toLowerCase()).toContain('highest');
   });
 
-  it('tool_failure reason mentions infrastructure or ADR-0014', () => {
+  it('tool_failure reason states it is a technical trajectory fact, not Pain', () => {
     const descriptor = getSourceDescriptor('tool_failure');
-    expect(
-      descriptor?.reason.toLowerCase().includes('infrastructure') ||
-      descriptor?.reason.includes('ADR-0014')
-    ).toBe(true);
+    expect(descriptor?.reason.toLowerCase()).toContain('technical');
+    expect(descriptor?.reason.toLowerCase()).toContain('pain');
   });
 
   it('empathy_inferred reason mentions owner confirmation or PRODUCT_IDENTITY', () => {
@@ -239,11 +233,11 @@ describe('Descriptor reason quality', () => {
     expect(descriptor?.reason.toLowerCase()).toContain('alone');
   });
 
-  it('rulehost_block reason mentions near-miss or evidence', () => {
+  it('rulehost_block reason mentions evidence or correction', () => {
     const descriptor = getSourceDescriptor('rulehost_block');
     expect(
-      descriptor?.reason.toLowerCase().includes('near-miss') ||
-      descriptor?.reason.toLowerCase().includes('evidence')
+      descriptor?.reason.toLowerCase().includes('evidence') ||
+      descriptor?.reason.toLowerCase().includes('correction')
     ).toBe(true);
   });
 });

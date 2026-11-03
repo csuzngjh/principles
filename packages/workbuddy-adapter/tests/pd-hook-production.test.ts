@@ -19,7 +19,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import Database from 'better-sqlite3';
-import { admitBareHostPains } from '@principles/host-runtime';
 import {
   SqliteActivationSafetyStore,
   SqliteApprovalQueueStore,
@@ -218,7 +217,7 @@ describe('P06 workspace semantics: A/B projects share ONE governance workspace',
 });
 
 describe('PostToolUseFailure subscription (OD-02 evidence-driven, engine 2.161.0 re-verified 2026-10-13)', () => {
-  it('routes the real thrown-Write-error payload through the shared pain path: failure evidence WITH error attribution, and honestly BELOW the bare-pain admission floor', async () => {
+  it('routes the real thrown-Write-error payload through the shared pain path: failure evidence WITH error attribution and no Pain (Phase A)', () => {
     const { home, governance } = productionHome();
     makeTrajectory(governance);
     const project = makeProjectDir(home, 'ptuf');
@@ -265,13 +264,21 @@ describe('PostToolUseFailure subscription (OD-02 evidence-driven, engine 2.161.0
     expect(parsed.data?.toolName).toBe('Write');
     expect(parsed.data?.error).toContain('File has not been read yet');
 
-    // The worker's bare-pain admission sweep (score>=70 floor) confirms there
-    // is nothing to queue for this shape: policy exclusion, nothing stranded.
-    const sweep = await admitBareHostPains({ workspaceDir: governance, hostKind: 'workbuddy' });
-    expect(sweep.ok).toBe(true);
-    expect(sweep.admitted).toBe(0);
-    expect(sweep.ensured).toBe(0);
-    expect(sweep.skippedInvalid).toBe(0);
+    // Phase A retired the bare-pain admission sweep: a technical tool failure
+    // is trajectory + health evidence only and must never leave an admission
+    // marker or a Diagnostician task behind.
+    const db2 = new Database(path.join(governance, '.state', 'trajectory.db'), { readonly: true });
+    try {
+      // No admission ever runs, so the marker table itself is never created.
+      const markerTable = db2
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'governance_signal_admissions'")
+        .get();
+      if (markerTable) {
+        expect(db2.prepare('SELECT COUNT(*) AS n FROM governance_signal_admissions').get()).toEqual({ n: 0 });
+      }
+    } finally {
+      db2.close();
+    }
   });
 
   it('decoder keeps PostToolUseFailure honest: a missing thrown error fails loud instead of becoming a success', () => {

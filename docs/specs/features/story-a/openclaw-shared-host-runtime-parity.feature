@@ -42,6 +42,7 @@ Feature: OpenClaw shared host runtime preserves MVP behavior
     When OpenClaw reports an owner pain signal after a tool call
     Then a pain evidence row is persisted in the workspace trajectory
 
-  Scenario: An ordinary failed write is admitted through the shared pain kernel
+  Scenario: An ordinary failed write is recorded as technical evidence, not automatic Pain
     When OpenClaw reports a failed write to a risky path
-    Then one lineaged automatic pain and its tool evidence are persisted
+    Then the failed tool call is recorded as trajectory evidence
+    And no automatic Pain or admission marker is created

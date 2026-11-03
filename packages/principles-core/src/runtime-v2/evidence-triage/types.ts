@@ -76,30 +76,18 @@ export interface TriageResult {
  *
  * The plugin adapter is responsible for constructing this from hook context.
  * All fields are required to avoid silent defaults (ERR-002).
+ *
+ * Phase A: triage no longer carries upgrade context (`isUnsafeHighConfidence`,
+ * `isRisky`, `consecutiveErrors`). Technical failures and RuleHost blocks are
+ * evidence/trajectory facts, not automatic Pain admissions.
  */
 export interface TriageInput {
   /** Classified source kind */
   readonly sourceKind: SourceKind;
   /** Pain score (0-100) */
   readonly score: number;
-  /** Whether the action is high-confidence unsafe (for rulehost_block) */
-  readonly isUnsafeHighConfidence?: boolean;
   /** Provenance: how was this pain observed? */
   readonly provenance?: 'host_context_bound' | 'owner_reported_no_host_trace' | 'automatic_hook';
-  /**
-   * Whether the failed action was risky/irreversible.
-   *
-   * Migrated from the plugin triage-adapter (PRI-446): a risky action with
-   * a high pain score upgrades an evidence_only decision to admit.
-   */
-  readonly isRisky?: boolean;
-  /**
-   * Number of consecutive failures observed for the current session/tool.
-   *
-   * Migrated from the plugin triage-adapter (PRI-446): repeated failures
-   * (>= RISKY_HIGH_SCORE_THRESHOLD) upgrade an evidence_only decision to admit.
-   */
-  readonly consecutiveErrors?: number;
 }
 
 // ── Source Kind Validation ───────────────────────────────────────────────────

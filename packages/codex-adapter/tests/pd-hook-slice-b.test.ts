@@ -182,7 +182,7 @@ describe('pd-hook Slice B admission (production executable, ingestion flag on)',
     state.close();
   });
 
-  it('one real tool failure via live PostToolUse + Stop transcript replay → one pain, one task', async () => {
+  it('one real tool failure via live PostToolUse + Stop transcript replay → trajectory only, zero pain and zero task', async () => {
     const ws = sliceBWorkspace();
     const live = await invokeHook(ws, postToolUsePayload(ws));
     expect(live.status).toBe(0);
@@ -202,14 +202,20 @@ describe('pd-hook Slice B admission (production executable, ingestion flag on)',
       toolObservations: db.prepare("SELECT COUNT(*) AS n FROM governance_observations WHERE kind = 'tool_call'").get(),
     };
     db.close();
-    expect(counts.pains).toEqual({ n: 1 });
+    // Phase A: the failure is real trajectory evidence (one row, deduped across
+    // live + replay) and NEVER becomes an admitted Pain or a Diagnosis.
+    expect(counts.pains).toEqual({ n: 0 });
     expect(counts.calls).toEqual({ n: 1 });
-    expect(counts.markers).toEqual({ n: 1 });
+    expect(counts.markers).toEqual({ n: 0 });
     expect(counts.toolObservations).toEqual({ n: 1 });
 
-    const state = stateDbOf(ws.root);
-    expect(state.prepare("SELECT COUNT(*) AS n FROM tasks WHERE task_kind = 'diagnostician'").get()).toEqual({ n: 1 });
-    state.close();
+    // Phase A: no admission means no Diagnostician task — and in this
+    // tool-only workspace the governor state DB is never even created.
+    if (fs.existsSync(path.join(ws.root, '.pd', 'state.db'))) {
+      const state = stateDbOf(ws.root);
+      expect(state.prepare("SELECT COUNT(*) AS n FROM tasks WHERE task_kind = 'diagnostician'").get()).toEqual({ n: 0 });
+      state.close();
+    }
   });
 
   it('the STRONG persisted bucket rate-limits the sixth distinct correction across fresh processes', async () => {
@@ -304,14 +310,18 @@ registry.when('the Stop transcript replay of the same tool call is ingested', as
   const result = await invokeHook(bddWs, stopPayload(bddWs));
   expect(result.status).toBe(0);
 });
-registry.then('exactly one tool pain and one pending Diagnostician task exist', () => {
+registry.then('exactly one tool-call evidence row exists and no pain or task was created', () => {
   const db = trajectoryOf(bddWs.root);
-  expect(db.prepare('SELECT COUNT(*) AS n FROM pain_events').get()).toEqual({ n: 1 });
+  expect(db.prepare('SELECT COUNT(*) AS n FROM pain_events').get()).toEqual({ n: 0 });
   expect(db.prepare('SELECT COUNT(*) AS n FROM tool_calls').get()).toEqual({ n: 1 });
   db.close();
-  const state = stateDbOf(bddWs.root);
-  expect(state.prepare("SELECT COUNT(*) AS n FROM tasks WHERE task_kind = 'diagnostician'").get()).toEqual({ n: 1 });
-  state.close();
+  // Phase A: a tool-only workspace has no admission and therefore no
+  // governor state DB (and certainly no Diagnostician task).
+  if (fs.existsSync(path.join(bddWs.root, '.pd', 'state.db'))) {
+    const state = stateDbOf(bddWs.root);
+    expect(state.prepare("SELECT COUNT(*) AS n FROM tasks WHERE task_kind = 'diagnostician'").get()).toEqual({ n: 0 });
+    state.close();
+  }
 });
 
 defineFeature(fs.readFileSync(resolveFeaturePath('docs/specs/features/codex-governance/codex-signal-admission.feature'), 'utf8'), registry);

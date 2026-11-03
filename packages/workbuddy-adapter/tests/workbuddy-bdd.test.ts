@@ -591,35 +591,16 @@ registry.then(/^the user prompt still reaches the model$/, () => {
   expect(state.result!.status).toBe(0);
 });
 
-// ── Feature: workbuddy-owner-loop — full learning (real LLM, gated) ─────────
-// The scenario binds to the REAL production chain end to end: a labeled
-// SYNTHETIC-PROTOCOL eligible signal (fixture-shaped Write-failure PostToolUse
-// payload through the real dist entry — the only eligible class on engine
-// 2.161.0, see probe-write-failure-shapes.mjs), real worker admission, the
-// REAL LLM diagnostician, the real full-chain downstream, and Owner approval +
-// withdrawal through the REAL product entry (`pd activation approve|deactivate`).
-// Provider availability gates the run at runtime: without a key, or on a
-// provider rate limit (diagnostician failed/retry_wait with
-// runs.error_category='rate_limit'), the scenario is SKIPPED with the explicit
-// BLOCKED reason. An EMPTY queue at the deadline is a FAIL, never a BLOCKED
-// (review §4 P2-e) — the two are distinguished by runs.error_category.
-// Acceptance is IDENTITY-CHAIN correlated (P2): the approval is selected by ID
-// from this scenario's own chain (admission → candidates → chain tasks →
-// artifacts → approvals), and each candidate is verified on ITS production
-// channel — prompt → injection + withdrawal; code_tool_hook → durable rows
-// (shadow per the production writer, no injection assertion, no live
-// promotion); implementation/defer → the not_internalizable POLICY terminal,
-// reported explicitly (never a provider BLOCKED, never an injection PASS).
-// R2 (round-4, Owner mandate): this feature REQUIRES a completed principle
-// chain — the injection step FAILS loud (never a vacuous return) when the
-// chain has no prompt-channel principle approval to verify, and the
-// withdrawal step always asserts the post-withdraw stop. The policy terminal
-// stays an explicit SCENARIO-LEVEL classification (skip with the
-// POLICY-TERMINAL reason), never a silent skip of an individual step.
+// ── Feature: workbuddy-owner-loop — tool failure is trajectory only ─────────
+// Phase A retired the tool-failure-driven admission, so the former real-LLM
+// learning chain (admission → diagnostician → proposal → approval → injection
+// → withdrawal) no longer has an automatic trigger for WorkBuddy. This
+// scenario binds to the REAL production entry instead: a labeled
+// SYNTHETIC-PROTOCOL Write-failure PostToolUse payload through the real dist
+// entry proves the failure is recorded as trajectory evidence and never
+// becomes a Pain, an admission marker, or a Diagnostician task.
 registry.when(/^WorkBuddy reports a real tool failure through the hook \(eligible: synthetic-protocol Write failure via the real entry\)$/, () => {
-  state.scenarioStartedAt = Date.now();
   freshGovernance();
-  enableRealLlmProfile();
   // SYNTHETIC-PROTOCOL input (evidence class 2, labeled): a real-shaped
   // Write-failure PostToolUse payload delivered through the REAL dist entry —
   // not a fabricated store row and not a real engine turn.
@@ -631,317 +612,35 @@ registry.when(/^WorkBuddy reports a real tool failure through the hook \(eligibl
   })), 'PostToolUse');
   expect(state.result!.status).toBe(0);
 });
-registry.then(/^the failure is admitted as evidence and reaches a pending diagnostician task$/, async () => {
+registry.then(/^the failure is recorded as trajectory evidence with no Pain and no diagnostician task$/, async () => {
   const { runWorkbuddyWorkspaceWorkerCycle } = await import('../src/worker/workspace-worker.js');
   const { disposePainSignalBridgesForWorkspace } = await import('@principles/core/runtime-v2');
+  // Phase A: the failed tool call is technical trajectory evidence. The worker
+  // cycle runs normally but must never admit it as a Pain or queue a diagnosis.
   const first = await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: state.governance! });
-  expect(first.report?.admission?.ok).toBe(true);
-  expect(first.report?.reconcile.ok).toBe(true);
-  // The admission marker lives in the TRAJECTORY store (.state/trajectory.db)
-  // — the former state.db query threw "no such table" (review §4 P2-b).
+  expect(first.mode).toBe('ready');
+  expect(first.report?.diagnostician).toBeNull();
+
   const traj = new Database(path.join(state.governance!, '.state', 'trajectory.db'), { readonly: true });
-  const marker = traj.prepare("SELECT diagnostician_task_id FROM governance_signal_admissions WHERE host_kind = 'workbuddy'").get() as { diagnostician_task_id: string } | undefined;
-  traj.close();
-  expect(marker).toBeDefined();
-  // Identity-chain anchor (P2): every later acceptance decision correlates
-  // from THIS task id — never from a queue-wide pending[0] pick.
-  state.diagnosticianTaskId = marker!.diagnostician_task_id;
-  // Tasks live in the governance state store (.pd/state.db).
-  const db = new Database(path.join(state.governance!, '.pd', 'state.db'), { readonly: true });
-  const task = marker
-    ? db.prepare('SELECT status FROM tasks WHERE task_id = ?').get(marker.diagnostician_task_id) as { status: string } | undefined
-    : undefined;
-  db.close();
-  // Observability (rc-9): make the admission-cycle state visible in the
-  // vitest output — the durable runs row is the error-category authority.
-  const runsCategory = marker ? latestRunErrorCategory(state.governance!, marker.diagnostician_task_id) : undefined;
-  console.error(`[bdd-learning] admission-cycle: report=${JSON.stringify(first.report?.diagnostician)} task=${task?.status ?? 'none'} runs.error_category=${runsCategory ?? 'none'}`);
-  // The SAME cycle already ran the diagnostician once — a provider rate limit
-  // surfaces here (task terminal-failed "rate limit degraded" or retry_wait
-  // with runs.error_category='rate_limit'). Remember it so this and the
-  // advance step can skip honestly; a terminal failure WITHOUT rate_limit is
-  // a real chain defect and fails loud with the reason.
-  if (task && (task.status === 'failed' || task.status === 'retry_wait')) {
-    const category = runsCategory ?? first.report?.diagnostician?.errorCategory;
-    if (category === 'rate_limit') {
-      state.providerRateLimited = `task=${marker!.diagnostician_task_id}`;
-    } else if (task.status === 'failed') {
-      throw new Error(`diagnostician failed terminally (error_category=${category ?? 'none'}): ${(first.report?.diagnostician?.message ?? 'no message').slice(0, 300)}`);
+  try {
+    expect(traj.prepare('SELECT COUNT(*) AS n FROM tool_calls').get()).toEqual({ n: 1 });
+    expect(traj.prepare('SELECT COUNT(*) AS n FROM pain_events').get()).toEqual({ n: 0 });
+    expect(traj.prepare('SELECT COUNT(*) AS n FROM governance_signal_admissions').get()).toEqual({ n: 0 });
+  } finally {
+    traj.close();
+  }
+
+  // No admission means no queue entry: the governor state DB is never created.
+  if (fs.existsSync(path.join(state.governance!, '.pd', 'state.db'))) {
+    const db = new Database(path.join(state.governance!, '.pd', 'state.db'), { readonly: true });
+    try {
+      expect(db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE task_kind = 'diagnostician'").get()).toEqual({ n: 0 });
+    } finally {
+      db.close();
     }
   }
-  const allowedStatuses = ['pending', 'succeeded', 'retry_wait', 'leased'];
-  if (state.providerRateLimited) allowedStatuses.push('failed');
-  expect(allowedStatuses).toContain(task?.status);
-  // Release the cached pain-signal bridge handle the cycle created — without
-  // this the Windows afterAll temp sweep hits EPERM (the worker suite's
-  // afterEach does the same).
   await disposePainSignalBridgesForWorkspace(state.governance!).catch(() => undefined);
 });
-registry.when(/^the background worker advances it toward a reviewable proposal$/, async () => {
-  const { runWorkbuddyWorkspaceWorkerCycle } = await import('../src/worker/workspace-worker.js');
-  const { disposePainSignalBridgesForWorkspace } = await import('@principles/core/runtime-v2');
-  try {
-    // Bounded chain drive: admission → diagnostician (REAL LLM via the
-    // pi-ai.real profile) → downstream full chain → approval queue.
-    state.approval = undefined;
-    state.chain = undefined;
-    state.approvalOutcomes = undefined;
-    if (state.providerRateLimited) {
-      throw new BlockedScenarioError(`BLOCKED: the real LLM provider already rate-limited the diagnostician (${state.providerRateLimited}, runs.error_category=rate_limit) — chain verified up to the LLM boundary; re-run when the provider quota resets`);
-    }
-    expect(state.diagnosticianTaskId).toBeTruthy();
-    // WALL-CLOCK bound measured from the SCENARIO start: a cycle is never
-    // STARTED after 13 scenario-minutes (diagnosis with the real LLM takes
-    // minutes and the downstream dreamer-seed → candidate-intake → approval
-    // cadence adds 6-10 more), so the last cycle (≤5 min provider timeout)
-    // always finishes inside the 1500s vitest budget — the scenario ends in
-    // this step's own classification, never in a vitest timeout.
-    const startedAt = state.scenarioStartedAt ?? Date.now();
-    const cycleStartDeadline = startedAt + 780_000;
-    let lastReport = 'no cycle ran';
-    for (let cycle = 0; ; cycle++) {
-      if (Date.now() >= cycleStartDeadline) break;
-      const result = await runWorkbuddyWorkspaceWorkerCycle({ workspaceDir: state.governance! });
-      const diag = result.report?.diagnostician;
-      console.error(`[bdd-learning] cycle ${cycle}: mode=${result.mode} diag=${JSON.stringify(diag)} downstreamSkip=${result.report?.downstream && 'skipReason' in result.report.downstream ? result.report.downstream.skipReason : undefined}`);
-      if (diag?.status === 'skipped' && diag.message === 'capability_disabled') {
-        // Config defect, not provider state: the pi-ai.real profile did not
-        // resolve — failing silently through empty cycles would be a fake
-        // FAIL reason (rc-3).
-        throw new Error(`diagnostician capability disabled: ${capabilityNextAction(result)}`);
-      }
-      if (diag && (diag.status === 'failed' || diag.status === 'retried' || diag.status === 'degraded')) {
-        // Durable runs row is the error-category authority (rc-4: do not trust
-        // one report shape); the report field is the fallback.
-        const category = latestRunErrorCategory(state.governance!, diag.taskId) ?? diag.errorCategory;
-        if (category === 'rate_limit') {
-          throw new BlockedScenarioError(`BLOCKED: the real LLM provider rate-limited the diagnostician (task=${diag.taskId}, runs.error_category=rate_limit) — chain verified up to the LLM boundary; re-run when the provider quota resets`);
-        }
-        if (diag.status === 'retried') { await new Promise((resolve) => setTimeout(resolve, 20_000)); continue; } // transient backoff — keep cycling
-        throw new Error(`diagnostician ${diag.status} (error_category=${category ?? 'none'}): ${(diag.message ?? 'no message').slice(0, 300)}`);
-      }
-      // P2 identity-chain selection: only approvals traceable to THIS
-      // scenario's diagnostician task are acceptable — never pending[0].
-      const chain = readLearningChain(state.governance!, state.diagnosticianTaskId!);
-      if (chain !== null && chain.pendingApprovals.length > 0) {
-        state.chain = chain;
-        state.approval = selectPrimaryApproval(chain);
-        console.error(`[bdd-learning] identity chain reached approvals: ${chainSummary(chain)}`);
-        return;
-      }
-      // Policy terminal (rc-9 explicit SCENARIO-LEVEL classification, NOT a
-      // provider BLOCKED and never a fake injection PASS): every candidate's
-      // production disposition is the intake policy refusal — no approval row
-      // will EVER exist for this chain, so cycling to the deadline would be
-      // dishonest. Round-5 R2a: this BDD feature IS the full-principle
-      // scenario — a DETERMINISTIC policy refusal means its required chain
-      // did NOT run, so it FAILS the scenario (plain thrown Error, never
-      // ctx.skip). The policy-refusal CONTRACT has its own dedicated scenario
-      // in the acceptance script (`--scenario policy-refusal`); throwing
-      // BlockedScenarioError here let the suite exit 0 without a principle
-      // chain — exactly the vacuous pass this remediation closes.
-      if (chain !== null && chain.candidates.length > 0 && chain.candidates.every((c) => candidateDisposition(chain, c) === 'policy_terminal')) {
-        throw new Error(`FAIL (policy terminal, not a provider BLOCKED): every candidate of diagnostician task ${chain.diagnosticianTaskId} ends at the not_internalizable intake policy refusal (approvals row absent BY DESIGN): ${chainSummary(chain)} — the full-principle scenario requires an actionable prompt candidate, so full principle learning did NOT run in this scenario. The policy-refusal contract is verified by the dedicated policy-refusal scenario, not by this feature.`);
-      }
-      // Admission terminal (rc-7 loop-state freshness): every ACTIONABLE
-      // candidate's persisted confidence is below the admission gate's
-      // threshold, so it can never be admitted and no approval can ever
-      // appear. Fail loud NOW with that root cause instead of cycling.
-      const actionable = chain?.candidates.filter((c) => !POLICY_TERMINAL_KINDS.has(c.recommendation_kind)) ?? [];
-      const admissionDead = actionable.length > 0 && actionable.every((c) => c.confidence === null || c.confidence < ADMISSION_CONFIDENCE_THRESHOLD);
-      if (admissionDead) {
-        throw new Error(`FAIL: every actionable candidate of diagnostician task ${chain!.diagnosticianTaskId} is below the admission confidence threshold (${ADMISSION_CONFIDENCE_THRESHOLD}) — the admission gate can never admit them, so no approval can ever be reached: ${chainSummary(chain!)} (intake gate decision needs_evidence; nextAction: re-run the diagnosis with sufficient confidence/evidence or review manually)`);
-      }
-      lastReport = JSON.stringify({ mode: result.mode, admission: result.report?.admission, diagnostician: diag, downstreamSkip: result.report?.downstream && 'skipReason' in result.report.downstream ? result.report.downstream.skipReason : undefined, chain: chain === null ? 'stores-unreadable' : `${chain.candidates.length} candidate(s): ${chainSummary(chain)}` }).slice(0, 500);
-      await new Promise((resolve) => setTimeout(resolve, 20_000));
-    }
-    // Window exhausted — classify from the DURABLE state, never a bare
-    // timeout: rate_limit anywhere → honest BLOCKED; an unprocessed queue
-    // without rate-limit evidence is a FAIL with that evidence (review
-    // §4 P2-e — an empty queue is never a BLOCKED).
-    let taskStatus = 'none';
-    let finalCategory: string | undefined;
-    const traj = new Database(path.join(state.governance!, '.state', 'trajectory.db'), { readonly: true });
-    const marker = traj.prepare("SELECT diagnostician_task_id FROM governance_signal_admissions WHERE host_kind = 'workbuddy'").get() as { diagnostician_task_id: string } | undefined;
-    traj.close();
-    if (marker) {
-      finalCategory = latestRunErrorCategory(state.governance!, marker.diagnostician_task_id);
-      const db = new Database(path.join(state.governance!, '.pd', 'state.db'), { readonly: true });
-      const task = db.prepare('SELECT status FROM tasks WHERE task_id = ?').get(marker.diagnostician_task_id) as { status: string } | undefined;
-      db.close();
-      taskStatus = task?.status ?? 'missing';
-    }
-    if (finalCategory === 'rate_limit') {
-      throw new BlockedScenarioError(`BLOCKED: the real LLM provider did not complete the diagnostician inside the acceptance window (task=${taskStatus}, runs.error_category=rate_limit) — chain verified up to the LLM boundary; re-run when the provider quota resets`);
-    }
-    // P2: a queue-wide pending row that the identity chain cannot trace to
-    // this scenario's task is a correlation defect — fail loud, never adopt it.
-    const chain = state.diagnosticianTaskId ? readLearningChain(state.governance!, state.diagnosticianTaskId) : null;
-    const anyPending = readPendingApprovals(state.governance!);
-    if (anyPending.length > 0 && (chain === null || chain.pendingApprovals.length === 0)) {
-      throw new Error(`FAIL: ${anyPending.length} pending approval row(s) exist but NONE is traceable to this scenario's diagnostician task (identity chain broken; candidates=${chain ? chainSummary(chain) : 'none resolvable'})`);
-    }
-    throw new Error(`FAIL: the chain did not reach a pending approval within the bounded window (task=${taskStatus}, runs.error_category=${finalCategory ?? 'none'}); last=${lastReport}`);
-  } finally {
-    // Release the cached bridge handles (Windows temp sweep EPERM otherwise).
-    await disposePainSignalBridgesForWorkspace(state.governance!).catch(() => undefined);
-  }
-});
-registry.then(/^the Owner sees the pending work on the existing approval surfaces$/, () => {
-  // Owner visibility on the REAL approval surfaces' store: the pending row
-  // the surfaces read (approvals, state.db) — found BY ITS ID from this
-  // scenario's identity chain, with NO queue-wide fallback (P2).
-  expect(state.approval).toBeDefined();
-  const pending = readPendingApprovals(state.governance!);
-  expect(pending.length).toBeGreaterThan(0);
-  const row = pending.find((p) => p.approval_id === state.approval!.approval_id);
-  expect(row).toBeDefined();
-  state.approval = row;
-  expect(state.approval!.artifact_id.startsWith('pi-art-')).toBe(true);
-});
-registry.when(/^the Owner approves the learned principle through the real product approval entry$/, () => {
-  expect(state.chain).toBeDefined();
-  expect(state.chain!.pendingApprovals.length).toBeGreaterThan(0);
-  // Approve EVERY pending approval of this scenario's identity chain; each
-  // candidate is later verified on its own production channel. Channel-aware
-  // (review round-3 §3): principle candidates MUST approve clean (prompt
-  // contract); rule candidates activate through the rule-host-writer whose
-  // default is the authorized SHADOW decision — a non-zero approve there is
-  // reported with full CLI output so the contract state can be verified
-  // instead of guessed.
-  state.approvalOutcomes = [];
-  for (const row of state.chain!.pendingApprovals) {
-    const kind = candidateForApprovalArtifact(state.chain!, row.artifact_id)?.recommendation_kind ?? 'unknown';
-    const approve = pdCli([
-      'activation', 'approve',
-      '--approval-id', row.approval_id,
-      '--workspace', state.governance!,
-      '--decided-by', 'wb-bdd-owner',
-      '--json',
-    ]);
-    let parsed: { ok?: boolean; activationId?: string } = {};
-    try { parsed = JSON.parse(approve.stdout || '{}') as { ok?: boolean; activationId?: string }; } catch { /* assertion below fails loud on non-JSON */ }
-    if (kind === 'principle') {
-      expect(approve.status, `principle approve failed: status=${approve.status} stdout=${(approve.stdout || '').slice(0, 500)} stderr=${(approve.stderr || '').slice(0, 300)}`).toBe(0);
-      expect(parsed.ok, `principle approve not ok: stdout=${(approve.stdout || '').slice(0, 500)}`).toBe(true);
-    } else if (approve.status !== 0) {
-      console.error(`[bdd-learning] approve of ${kind} candidate exited ${approve.status}: stdout=${(approve.stdout || '').slice(0, 300)} stderr=${(approve.stderr || '').slice(0, 300)}`);
-    }
-    state.approvalOutcomes.push({
-      approval: row,
-      candidateKind: kind,
-      approveOk: parsed.ok === true,
-      activationId: parsed.activationId,
-    });
-    if (row.approval_id === state.approval!.approval_id && parsed.activationId) {
-      state.activationId = parsed.activationId;
-    }
-  }
-});
-registry.then(/^the approval is recorded from pending to approved with a live activation$/, () => {
-  expect(state.approvalOutcomes!.length).toBeGreaterThan(0);
-  const db = new Database(path.join(state.governance!, '.pd', 'state.db'), { readonly: true });
-  try {
-    for (const outcome of state.approvalOutcomes!) {
-      const approval = db.prepare('SELECT status, decided_at, decided_by FROM approvals WHERE approval_id = ?').get(outcome.approval.approval_id) as { status: string; decided_at: string | null; decided_by: string | null } | undefined;
-      expect(approval?.status).toBe('approved');
-      expect(approval?.decided_at).toBeTruthy();
-      expect(approval?.decided_by).toBe('wb-bdd-owner');
-      const activation = db.prepare('SELECT activation_id, channel, action, deactivated_at FROM activations WHERE artifact_id = ?').get(outcome.approval.artifact_id) as { activation_id: string; channel: string; action: string; deactivated_at: string | null } | undefined;
-      expect(activation).toBeDefined();
-      expect(activation!.deactivated_at).toBeNull();
-      // Channel dispatch (P2): assertions follow the candidate's PRODUCTION
-      // channel — a rule candidate is never measured with the prompt ruler.
-      if (activation!.channel === 'prompt') {
-        expect(activation!.action).toBe('prompt_activate');
-      } else if (activation!.channel === 'code_tool_hook') {
-        // The production RuleHostWriter persists the shadow action; the
-        // shadow→live promotion is a separate Owner path. Assert the durable
-        // action IS a code_tool_hook action (read, never hardcoded, never
-        // promoted by this scenario) and record what production wrote.
-        expect(activation!.action.startsWith('code_tool_hook_')).toBe(true);
-        console.error(`[bdd-learning] rule candidate (kind=${outcome.candidateKind}) activation verified on its own channel: action=${activation!.action} (production writer value; live promotion is a separate Owner path)`);
-      } else {
-        throw new Error(`FAIL: unexpected activation channel '${activation!.channel}' for artifact ${outcome.approval.artifact_id} (kind=${outcome.candidateKind})`);
-      }
-      if (!outcome.activationId && activation) outcome.activationId = activation.activation_id;
-    }
-  } finally {
-    db.close();
-  }
-});
-registry.then(/^the next turn carries the learned principle directive$/, () => {
-  expect(state.approval).toBeDefined();
-  // R2 (Owner mandate): this feature REQUIRES a completed principle chain. A
-  // non-prompt primary means THIS scenario's chain produced NO principle
-  // approval to verify — FAIL loud with the chain evidence. The former
-  // `return` here reported scenario success without a principle chain (the
-  // exact R2 defect: a rule-only chain passed vacuously). Channel dispatch
-  // stays where it belongs — the approve/activation steps measure each
-  // candidate on its own production channel — but the injection contract
-  // exists ONLY on the prompt channel, and only a prompt-channel approval
-  // satisfies this required step. Policy-terminal chains never reach this
-  // step (the advance step classifies them at scenario level first).
-  expect(
-    state.approval!.channel,
-    `FAIL: this scenario requires a completed principle chain, but the primary approval channel is '${state.approval!.channel}' (chain: ${state.chain ? chainSummary(state.chain) : 'n/a'}) — no principle approval exists to verify; a rule/shadow row can never substitute for the required injection leg`,
-  ).toBe('prompt');
-  // PRODUCTION read contract: the chain artifact is the FULL ScribeOutput, and
-  // the prompt channel resolves content.text falling back to
-  // content.principleDraft.statement (prompt-activation-reader-contract) —
-  // real drafts only carry the nested statement.
-  const db = new Database(path.join(state.governance!, '.pd', 'state.db'), { readonly: true });
-  let resolvedText = '';
-  try {
-    const row = db.prepare('SELECT content_json FROM pi_artifacts WHERE artifact_id = ?').get(state.approval!.artifact_id) as { content_json: string } | undefined;
-    const content = JSON.parse(row?.content_json ?? '{}') as { text?: unknown; principleDraft?: { statement?: unknown } };
-    if (typeof content.text === 'string' && content.text.length > 0) resolvedText = content.text;
-    else if (typeof content.principleDraft?.statement === 'string' && content.principleDraft.statement.length > 0) resolvedText = content.principleDraft.statement;
-  } finally {
-    db.close();
-  }
-  expect(resolvedText.length).toBeGreaterThan(0);
-  const probe = resolvedText.split(/\s+/).filter((word) => word.length > 4).slice(0, 4).join(' ');
-  expect(probe.length).toBeGreaterThan(0);
-  state.learnedProbe = probe;
-  const result = runEntry(state.home!, JSON.stringify(fixturePayload('user-prompt-submit.json', { cwd: state.project, session_id: 'bdd-learn-inject' })), 'UserPromptSubmit');
-  expect(result.status).toBe(0);
-  const output = JSON.parse(result.stdout) as { hookSpecificOutput?: { additionalContext?: string } };
-  expect(output.hookSpecificOutput?.additionalContext ?? '').toContain(probe);
-});
-registry.then(/^withdrawing the learned principle stops future governance$/, () => {
-  expect(state.activationId).toBeDefined();
-  // R2 (Owner mandate): the scenario requires a completed principle chain, so
-  // the prompt injection leg MUST have run and produced the learned probe.
-  // The former non-prompt fallback (durable-row-only verification) let this
-  // step pass without the injection leg it exists to reverse — a vacuous
-  // path of the same R2 class. Channel dispatch stays in the approve/
-  // activation steps; this step always asserts its own requirement:
-  // deactivate through the REAL product entry, the durable row flips, and
-  // the next turn no longer injects the withdrawn statement.
-  expect(
-    state.learnedProbe,
-    'FAIL: the prompt injection leg did not run, so there is no injected statement to withdraw (this feature requires a completed principle chain)',
-  ).toBeDefined();
-  // REAL product entry for withdrawal: `pd activation deactivate` (the same
-  // CLI surface the Owner uses).
-  const deactivate = pdCli(['activation', 'deactivate', '--activation-id', state.activationId!, '--workspace', state.governance!], 60_000);
-  expect(deactivate.status).toBe(0);
-  // Durable reversibility on the store the CLI drives.
-  const db = new Database(path.join(state.governance!, '.pd', 'state.db'), { readonly: true });
-  try {
-    const row = db.prepare('SELECT deactivated_at FROM activations WHERE activation_id = ?').get(state.activationId) as { deactivated_at: string | null } | undefined;
-    expect(row).toBeDefined();
-    expect(row!.deactivated_at).toBeTruthy();
-  } finally {
-    db.close();
-  }
-  // The next turn must not inject the withdrawn statement.
-  const result = runEntry(state.home!, JSON.stringify(fixturePayload('user-prompt-submit.json', { cwd: state.project, session_id: 'bdd-learn-withdraw' })), 'UserPromptSubmit');
-  expect(result.status).toBe(0);
-  expect(result.stdout).not.toContain(state.learnedProbe!);
-});
-
 const featureDir = resolveFeaturePath('docs/specs/features/story-a');
 // The real-LLM learning scenario needs minutes (provider latency + worker
 // cycles) — give every BDD scenario a generous timeout instead of the 30s

@@ -19,7 +19,6 @@ import {
   buildToolFailureObservation,
   type RawObservation,
   evaluateEvidenceTriage,
-  isHighConfidenceUnsafeAction,
 } from '../../src/hooks/triage-adapter.js';
 
 // ── resolveSourceKind: Tool Failure Path ─────────────────────────────────────
@@ -204,32 +203,11 @@ describe('evaluateEvidenceTriage', () => {
     expect(result.decision).toBe('owner_confirm');
   });
 
-  it('admits rulehost_block when isUnsafeHighConfidence is true', () => {
-    const result = evaluateEvidenceTriage('rulehost_block', 80, { isUnsafeHighConfidence: true });
-    expect(result.decision).toBe('admit');
-  });
-
-  it('returns evidence_only for rulehost_block when isUnsafeHighConfidence is false', () => {
-    const result = evaluateEvidenceTriage('rulehost_block', 80, { isUnsafeHighConfidence: false });
-    expect(result.decision).toBe('evidence_only');
-  });
-});
-
-// ── isHighConfidenceUnsafeAction ─────────────────────────────────────────────
-
-describe('isHighConfidenceUnsafeAction', () => {
-  it('returns true when isRisky and score >= 70', () => {
-    expect(isHighConfidenceUnsafeAction(70, true)).toBe(true);
-    expect(isHighConfidenceUnsafeAction(90, true)).toBe(true);
-  });
-
-  it('returns false when score < 70', () => {
-    expect(isHighConfidenceUnsafeAction(45, true)).toBe(false);
-    expect(isHighConfidenceUnsafeAction(69, true)).toBe(false);
-  });
-
-  it('returns false when not risky', () => {
-    expect(isHighConfidenceUnsafeAction(90, false)).toBe(false);
+  it('never admits rulehost_block at any score (Phase A: no upgrade path)', () => {
+    for (const score of [45, 70, 80, 100]) {
+      const result = evaluateEvidenceTriage('rulehost_block', score);
+      expect(result.decision).toBe('evidence_only');
+    }
   });
 });
 
@@ -284,17 +262,10 @@ describe('evidence-only cooldown contract', () => {
     expect(result.decision).not.toBe('admit');
   });
 
-  it('rulehost_block WITHOUT isUnsafeHighConfidence returns evidence_only — no admit', () => {
-    const result = evaluateEvidenceTriage('rulehost_block', 45);
+  it('rulehost_block never reaches admit (Phase A: correct blocks are not Owner pain)', () => {
+    const result = evaluateEvidenceTriage('rulehost_block', 80);
     expect(result.decision).toBe('evidence_only');
     expect(result.decision).not.toBe('admit');
-  });
-
-  it('rulehost_block WITH isUnsafeHighConfidence=true upgrades to admit', () => {
-    // This is the ONLY path where rulehost_block reaches the gate
-    const result = evaluateEvidenceTriage('rulehost_block', 80, { isUnsafeHighConfidence: true });
-    expect(result.decision).toBe('admit');
-    expect(result.reason).toContain('unsafe');
   });
 
   it('every LLM-typical source kind produces non-admit decision (cooldown-safe)', () => {
