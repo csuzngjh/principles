@@ -165,7 +165,7 @@ export function recordGateBlockAndReturn(
   logger: { warn?: (_message: string) => void; error?: (_message: string) => void; info?: (_message: string) => void }
    
 ): PluginHookBeforeToolCallResult {
-  const { filePath, reason, toolName, sessionId, blockSource } = blockCtx;
+  const { filePath, reason, toolName, blockSource } = blockCtx;
   // Legacy hook path always has a resolvable path (gate.ts returns before
   // calling this when none can be extracted); the coercion only satisfies
   // the widened BlockContext contract for display/risk-matching contexts.
