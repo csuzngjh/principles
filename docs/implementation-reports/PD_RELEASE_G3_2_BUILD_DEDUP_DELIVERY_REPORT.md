@@ -195,8 +195,11 @@
   无法证明未来不会出现 → 采用 **fail-closed**：
   - `digestDist()` 遇到非普通文件抛错，不再静默忽略；
   - `build-once.mjs` 复用检查阶段视为“不可复用 → 重建”，构建后仍出现则 `exit 1` 且不记账。
+- `dist/` **根路径本身**也用 `lstat` 检查：根为 symlink/junction 或非目录时抛错；
+    悬空根 symlink 不再被 `existsSync` 误判为“dist 缺失”。
 - 回归：`release-build-once.test.ts` 新增 2 项（构建产出 symlink → 失败且无 ledger；digest 直接调用 →
   抛 `non-regular entry`）；Windows 无符号链接权限时用 junction 覆盖同一代码路径。
+  独立复审补充（P2）：根目录 symlink/junction、悬空根 symlink、根为普通文件各 1 项断言，均 fail-closed。
 
 ### A6. Follow-up 状态（以代码与实际执行证据判定）
 | # | Follow-up | 状态 | 依据 |

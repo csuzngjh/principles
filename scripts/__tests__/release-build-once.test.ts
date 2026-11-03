@@ -289,4 +289,38 @@ describe('digestDist — deterministic dist identity', () => {
       fs.rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it.skipIf(!canSymlink())('fails closed when the dist ROOT is a symlink instead of following it', () => {
+    const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'pd-g32-digest-root-symlink-'));
+    try {
+      const external = path.join(root, 'external');
+      fs.mkdirSync(external, { recursive: true });
+      fs.writeFileSync(path.join(external, 'a.js'), 'a');
+      // A directory junction needs no file-symlink privilege on Windows.
+      const linked = path.join(root, 'dist');
+      fs.symlinkSync(external, linked, 'junction');
+      // Before the fix the root symlink was followed, so an external tree got a
+      // valid-looking digest while the package's own dist/ was never read.
+      expect(() => digestDist(linked)).toThrow(/dist root is a symlink/);
+
+      const dangling = path.join(root, 'dangling-dist');
+      fs.symlinkSync(path.join(root, 'missing-target'), dangling, 'junction');
+      // Before the fix existsSync() reported false, so a dangling root symlink
+      // was silently classified as a missing dist.
+      expect(() => digestDist(dangling)).toThrow(/dist root is a symlink/);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('fails closed when the dist root is not a directory', () => {
+    const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'pd-g32-digest-root-file-'));
+    try {
+      const notADirectory = path.join(root, 'dist');
+      fs.writeFileSync(notADirectory, 'not a directory');
+      expect(() => digestDist(notADirectory)).toThrow(/dist root is not a directory/);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
