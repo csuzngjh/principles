@@ -4,6 +4,7 @@
 '@principles/codex-adapter': minor
 '@principles/workbuddy-adapter': minor
 'principles-disciple': minor
+'create-principles-disciple': patch
 '@principles/pd-cli': patch
 ---
 
