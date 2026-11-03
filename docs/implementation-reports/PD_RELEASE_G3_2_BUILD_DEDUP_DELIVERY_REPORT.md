@@ -147,13 +147,15 @@
 |---|---|---|---|---|
 | 41561315808 | `a107d8a8…` | success | success | failure（仅 `Reconcile Codex plugin runtime maintenance PR`） |
 | 41567130757 | `3bcbc8c6…` | success | success | failure（同一 job） |
+| 41578899039 | `9ef8d607…` | **success** | **success** | failure（同一 job）；installer 于 05:31Z 发布 |
 
 - npm 侧真实发布：`@principles/core@2.0.0`、`codex-adapter@0.6.3`、`workbuddy-adapter@0.2.17`、
   `principles-disciple@2.2.13`、`@principles/pd-cli@1.162.8`、`create-principles-disciple@1.146.7`
-  于 02:39–02:57Z 发布；`@principles/host-runtime@0.14.6` 于 03:50Z 由 cohort `3bcbc8c` 发布。
+  于 02:39–02:57Z 发布；`@principles/host-runtime@0.14.6` 于 03:50Z 由 cohort `3bcbc8c` 发布；
+  `create-principles-disciple@1.146.8` 于 05:31Z 由 cohort `9ef8d607` 发布。
 - run 级 failure 不是 npm 发布失败：八条 npm leg 与 finalize 均 success。
-- `41578899039`（cohort `9ef8d607…`）在本次收尾时仍 in_progress：15/15 matrix 已 success，
-  Windows N-1 upgrade gate 进行中，publish job 尚未创建 → 该 cohort 的发布状态 **NOT RUN**。
+- `create-principles-disciple@1.146.8` 是**首次真实执行 candidate tarball → `npm publish <tgz>` → provenance**
+  的发布：gitHead=`9ef8d607…`，attestation subject sha512 == registry `dist.integrity`（MATCH）。
 
 ### A3. Provenance 验证（真实 registry，非 mock）
 对上述已发布版本逐个读取 `/-/npm/v1/attestations/<name>@<version>`，解码 in-toto Statement，
@@ -167,12 +169,12 @@
 | @principles/workbuddy-adapter | 0.2.17 | 存在 | MATCH |
 | principles-disciple | 2.2.13 | 存在 | MATCH |
 | @principles/pd-cli | 1.162.8 | 存在 | MATCH |
-| create-principles-disciple | 1.146.7 | 存在 | MATCH |
+| create-principles-disciple | 1.146.7 / **1.146.8** | 存在 | MATCH |
 | @principles/install-layout | 0.4.0 | 存在 | MATCH |
 
 结论：上文 “provenance 真实 attestation 未演练” 对 **目录发布路径** 已可更正为 **已验证**；
-但这 8 次发布均发生在 G3.1/G3.2 合并之前（tools checkout 早于 #2305/#2309），
-因此 **candidate tarball publish 路径的真实 provenance 仍未演练**（待 `41578899039` 发布 job 完成）。
+且 `1.146.8`（05:31Z）是 **candidate tarball publish 路径** 的首次真实执行，subject 同样 MATCH。
+本 PR 泛化后的“七包 candidate”尚未在真实 run 中执行（需下一次 Owner 授权的发布）。
 
 ### A4. Build-once 正确性审查（代码 + 测试证据）
 | 问题 | 结论 | 证据 |
@@ -203,7 +205,7 @@
 | 2 | build-once train shared-dist | **DEFERRED** | 涉及 TOOLS/PRODUCT 版本偏移；本轮不实施，需单独方案 |
 | 3 | release-metadata Console 2→1 skip flag | **COMPLETED**（实现+单测）；生产执行 **NOT RUN** | `release-metadata.yml` 仅 asset step 设 flag；`console-dist-freshness.test.ts`；合并后无 release-metadata run |
 | 4 | 跨 leg build-once 记账重构 | **DEFERRED** | 同上，需单独方案；本 PR 未引入跨 leg 全局状态 |
-| 5 | provenance 首真实 cohort 验证 | **COMPLETED**（目录发布路径，见 A3）；candidate tarball 路径 **NOT RUN** | 8 包 subject MATCH；新路径待 41578899039 |
+| 5 | provenance 首真实 cohort 验证 | **COMPLETED**：目录发布路径（A3）+ candidate tarball 路径（installer 1.146.8）；七包泛化路径待下一次发布 | 9 个版本 subject MATCH |
 
 ---
 
