@@ -4040,7 +4040,10 @@ describe('SEC-BASE-1: supply chain provenance guards', () => {
     } catch {
       action = '';
     }
-    expect(`${workflow}\n${action}`).toMatch(/npm\s+publish\s+--provenance/);
+    // G3.1/G3.1-A: the publish target is the VERIFIED candidate tarball, so an
+    // explicit argument may sit between `publish` and `--provenance`. The
+    // invariant is unchanged: the publish command carries --provenance.
+    expect(`${workflow}\n${action}`).toMatch(/npm\s+publish\s+(?:\S+\s+)?--provenance/);
   });
 
   it('publish-npm.yml uses npm ci --ignore-scripts', () => {
