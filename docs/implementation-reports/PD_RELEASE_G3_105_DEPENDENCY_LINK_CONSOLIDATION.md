@@ -211,9 +211,9 @@ tests/global-shim-lifecycle.test.ts           pass
 
 ---
 
-## 9. Linear 工单阻塞
+## 9. Linear 工单
 
-- 尝试：`linear.cjs create --title "[P2] Installer 依赖链接逻辑合并（G3 §10.5）" ...`
-- 结果：`linear_graphql_error` —— 工作区触发 **free issue limit**（“Workspace ... has reached its free issue limit”），无法创建新工单；非网络/权限问题。
+- 工单：**PRI-1100** — <https://linear.app/principlesdisciple/issue/PRI-1100/p2-installer-兄弟依赖链接逻辑合并g3-105>
+- 首次 `create` 曾返回 `linear_graphql_error`（工作区 free issue limit）；重试后成功。
 - 已检索既有工单：无对应 G3 §10.5 工单（PRI-912/913 是 `@principles/core` canonical junction 及其生命周期，属上游而非本任务）。
-- 因此 PR 暂不含工单号，需 Owner 决定：升级 Linear / 腾出配额后补建，或明确复用某张既有工单（不得由 AI 自行改动已完成工单）。
+- PR 标题含 `(PRI-1100)`，正文第一行 `Fixes PRI-1100`。
