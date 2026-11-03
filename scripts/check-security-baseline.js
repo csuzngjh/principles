@@ -86,7 +86,10 @@ function readText(relPath) {
   if (content !== null) {
     check(
       'npm publish uses --provenance',
-      /npm\s+publish\s+--provenance/.test(publishSurface),
+      // G3.1/G3.1-A: the publish target is the verified candidate tarball, so
+      // an explicit argument may sit between `publish` and `--provenance`.
+      // The invariant is unchanged: the publish command carries --provenance.
+      /npm\s+publish\s+(?:\S+\s+)?--provenance/.test(publishSurface),
       'publish surface (publish-npm.yml + publish-npm-package action) missing `npm publish --provenance`',
       'Add --provenance flag to npm publish step',
     );

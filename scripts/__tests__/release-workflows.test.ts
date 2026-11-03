@@ -144,7 +144,12 @@ describe('publish-npm-package action — exact committed version (T17-T23)', () 
   it('gates every version-producing step on ABSENT (idempotent skip, T22)', () => {
     const doc = loadWorkflow(rel) as { runs?: { steps?: Array<{ if?: string; name?: string }> } };
     const steps = doc.runs?.steps ?? [];
-    const gatedNames = ['Verify registry dependencies are published', 'Build target package', 'Publish exact committed version', 'Pack and verify immutable installer candidate'];
+    const gatedNames = [
+      'Verify registry dependencies are published',
+      'Build target package',
+      'Pack and verify immutable candidate',
+      'Publish exact committed version',
+    ];
     for (const name of gatedNames) {
       const step = steps.find((s) => s.name === name);
       expect(step, `step ${name}`).toBeDefined();
@@ -194,50 +199,43 @@ describe('publish-npm-package action — exact committed version (T17-T23)', () 
     expect(branch('create-principles-disciple')).toContain('build_once @principles/workbuddy-adapter build packages/workbuddy-adapter');
   });
 
-  it('routes installer publication through the verified candidate and retains non-installer dry-run checks', () => {
+  it('routes EVERY train package through the verified candidate and publishes that tarball (G3.1-A)', () => {
     const doc = loadWorkflow(rel) as {
       runs?: { steps?: Array<{ id?: string; if?: string; name?: string; run?: string; env?: Record<string, unknown> }> };
     };
     const steps = doc.runs?.steps ?? [];
-    const dryRun = steps.find((s) => s.name === 'Verify non-installer package dry-run');
-    expect(dryRun?.if).toContain("inputs.pkg_dir != 'create-principles-disciple'");
-    expect(dryRun?.run).toContain('npm pack --dry-run');
 
-    const candidate = steps.find((s) => s.name === 'Pack and verify immutable installer candidate');
+    // The old non-installer path (a dry-run pack whose output was discarded)
+    // is gone: one pack produces the published artifact.
+    expect(steps.find((s) => s.name === 'Verify non-installer package dry-run')).toBeUndefined();
+    expect(steps.some((s) => /^\s*npm pack/m.test(s.run ?? ''))).toBe(false);
+
+    const candidate = steps.find((s) => s.name === 'Pack and verify immutable candidate');
     expect(candidate?.id).toBe('candidate');
-    expect(candidate?.if).toContain("inputs.pkg_dir == 'create-principles-disciple'");
+    // Candidate is no longer installer-only; it runs for every ABSENT leg.
+    expect(candidate?.if).toBe("${{ steps.exact.outputs.status == 'ABSENT' }}");
     expect(String(candidate?.env?.TOOLS_DIR)).toContain('inputs.tools_dir');
+    expect(String(candidate?.env?.PACKAGE_NAME)).toContain('inputs.npm_name');
     expect(candidate?.run).toContain('prepare-npm-candidate.mjs');
+    expect(candidate?.run).toContain('--package-name "$PACKAGE_NAME"');
     expect(candidate?.run).toContain('--cohort "$COHORT"');
     expect(candidate?.run).toContain('--github-output "$GITHUB_OUTPUT"');
-    expect(candidate?.run).not.toContain('npm pack --dry-run');
+    // Legacy lifecycle owners are materialized by the build step instead.
+    expect(candidate?.run).toContain('SKIP_PACK_SCRIPTS');
+    expect(candidate?.run).toContain('openclaw-plugin');
+    expect(candidate?.run).toContain('pd-cli');
+    expect(candidate?.run).toContain('--skip-pack-scripts');
+    // The stamp contract stays installer-only.
+    expect(candidate?.run).toContain('--product-version "$PRODUCT_VERSION"');
 
     const publish = steps.find((s) => s.name === 'Publish exact committed version');
     expect(String(publish?.env?.CANDIDATE_TARBALL)).toContain('steps.candidate.outputs.tarball');
     expect(String(publish?.env?.CANDIDATE_SHA512_HEX)).toContain('steps.candidate.outputs.sha512_hex');
-    expect(publish?.run).toContain('npm publish "$PUBLISH_TARGET" --provenance --access public');
-    expect(publish?.run).toContain('npm publish --provenance --access public');
     expect(publish?.run).toContain('ACTUAL_SHA512_HEX');
-  });
-
-  it('non-installer package dry-run: a cosmetic head preview must never own the exit verdict', () => {
-    // Cohort d6fa4055 aborted at 5/7 (principles-disciple) with the log
-    // ending at "Build verification passed!" and NO npm error anywhere. Cause:
-    // `npm pack --dry-run 2>&1 | head -50` — head closed the pipe after 50
-    // lines while the inner prepack (build:production && build:types, ~50
-    // lines plus npm banners) was still writing, so it died on EPIPE, npm
-    // pack exited 1, and `set -o pipefail` turned a log truncation into a
-    // failed release. The step must capture the real exit code first and
-    // only then preview.
-    const doc = loadWorkflow(rel) as { runs?: { steps?: Array<{ name?: string; run?: string }> } };
-    const dryRun = doc.runs?.steps?.find((s) => s.name === 'Verify non-installer package dry-run');
-    expect(dryRun?.run).toBeDefined();
-    const script = dryRun!.run!;
-    expect(script).toContain('pack_status=$?');
-    expect(script).toContain('exit "$pack_status"');
-    expect(script).not.toMatch(/npm pack --dry-run\s+2>&1\s*\|\s*head/);
-    // The preview is preserved so the step still reads as a dry-run report.
-    expect(script).toContain('head -50 "$pack_log"');
+    expect(publish?.run).toContain('npm publish "$CANDIDATE_TARBALL" --provenance --access public');
+    // No directory-publish fallback survives, for any package.
+    expect(publish?.run).not.toMatch(/npm publish --provenance --access public/);
+    expect(publish?.run).not.toContain('cd "packages/');
   });
 });
 
@@ -545,10 +543,14 @@ describe('G3.2 build-once — train legs reuse only identity-verified builds', (
     }
   });
 
-  it('never build-onces the plugin: its own prepack rewrites dist into another variant', () => {
+  it('never build-onces the plugin: its leg executes the production prepack variant explicitly', () => {
     const run = buildStep().run!;
     expect(run).not.toMatch(/build_once\s+principles-disciple/);
-    expect(branch('openclaw-plugin')).toContain('npm run build --workspace=principles-disciple');
+    // G3.1-A: the plugin's prepack IS its build, so the leg runs those exact
+    // scripts once and the candidate pack uses --ignore-scripts.
+    expect(branch('openclaw-plugin')).toContain('npm run build:production --workspace=principles-disciple');
+    expect(branch('openclaw-plugin')).toContain('npm run build:types --workspace=principles-disciple');
+    expect(branch('openclaw-plugin')).not.toContain('npm run build --workspace=principles-disciple');
     expect(branch('pd-cli')).toContain('npm run build --workspace=principles-disciple');
     // The installer branch keeps every single-site build unconditional.
     const installer = branch('create-principles-disciple');

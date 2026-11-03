@@ -90,9 +90,19 @@ if (entry !== undefined) {
     reasons.push(error.message);
   }
   if (currentVersion !== undefined && entry.version !== currentVersion) reasons.push(`recorded version ${entry.version} != current ${currentVersion}`);
-  const currentDigest = digestDist(distDir);
+  let currentDigest;
+  try {
+    currentDigest = digestDist(distDir);
+  } catch (error) {
+    // A dist with symlinks/special entries is not a reusable artifact. Rebuild
+    // (the build replaces dist); if the rebuild still emits one, the post-build
+    // digest below fails the step instead of recording an untrustworthy result.
+    reasons.push(error.message);
+  }
   if (currentDigest === null) reasons.push('dist/ is missing or empty');
-  else if (entry.distSha256 !== currentDigest) reasons.push('dist/ content changed since it was recorded (SHA-256 mismatch)');
+  else if (currentDigest !== undefined && entry.distSha256 !== currentDigest) {
+    reasons.push('dist/ content changed since it was recorded (SHA-256 mismatch)');
+  }
 
   if (reasons.length === 0) {
     console.log(`build-once: ${key} reused for cohort ${cohort.slice(0, 12)} (version ${currentVersion}, dist sha256 ${currentDigest.slice(0, 16)}…)`);
@@ -117,7 +127,13 @@ if (!npmCliJs) {
 
 execFileSync(process.execPath, [npmCliJs, 'run', script, '--workspace', workspace], { stdio: 'inherit' });
 
-const builtDigest = digestDist(distDir);
+let builtDigest;
+try {
+  builtDigest = digestDist(distDir);
+} catch (error) {
+  console.error(`build-once: ${key} built a dist/ tree that is not a regular-file artifact — refusing to record it: ${error.message}`);
+  process.exit(1);
+}
 if (builtDigest === null) {
   console.error(`build-once: ${key} completed but ${distDir} is missing or empty — refusing to record`);
   process.exit(1);

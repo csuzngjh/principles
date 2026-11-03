@@ -3,24 +3,51 @@
  *
  * Every regular file, in sorted POSIX-relative order, framed as
  * `<rel>\0<size>\0<bytes>` — so renames, additions, deletions and byte
- * changes all move the digest. Symlinks and other special entries are not
- * followed or hashed (build outputs never contain them).
+ * changes all move the digest.
+ *
+ * Symlinks and other special entries are NOT tolerated — including the dist/
+ * root itself, which is inspected with lstat so a root symlink is never
+ * followed: they are not hashed (following them could read outside dist and
+ * would make the digest depend on a file the build did not produce), and
+ * ignoring them would let a symlink appear/disappear/retarget without moving
+ * the digest — i.e. a false reuse. No build script in this repository emits
+ * them, so encountering one means the tree is not a trustworthy build result:
+ * fail closed (throw), never skip.
  *
  * Returns null when dist/ is missing or holds no regular file: an empty
  * dist is never a reusable build result.
  */
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 
 export function digestDist(root) {
-  if (!existsSync(root)) return null;
+  let rootStat;
+  try {
+    rootStat = lstatSync(root);
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+  if (rootStat.isSymbolicLink()) {
+    throw new Error(
+      `dist root is a symlink (or junction): ${root} — refusing to treat its target as a reusable build result`
+    );
+  }
+  if (!rootStat.isDirectory()) {
+    throw new Error(`dist root is not a directory: ${root} — refusing to treat it as a reusable build result`);
+  }
   const files = [];
   const visit = (current) => {
     for (const entry of readdirSync(current, { withFileTypes: true })) {
       const child = join(current, entry.name);
       if (entry.isDirectory()) visit(child);
       else if (entry.isFile()) files.push(child);
+      else {
+        throw new Error(
+          `dist contains a non-regular entry (symlink or special file): ${child} — refusing to treat this tree as a reusable build result`
+        );
+      }
     }
   };
   visit(root);
