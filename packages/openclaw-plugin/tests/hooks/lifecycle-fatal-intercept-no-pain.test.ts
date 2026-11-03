@@ -42,7 +42,7 @@ beforeEach(() => {
 });
 
 describe('Pain Phase 0: Fatal Intercept produces no Pain but keeps its failure record', () => {
-  it('hard-abort snapshot → memory note written, pain_detected NOT emitted', async () => {
+  it('hard-abort snapshot → operational note written, pain_detected NOT emitted', async () => {
     const workspaceDir = makeWorkspace();
     const sessionFile = path.join(workspaceDir, 'session.jsonl');
     const jsonl = [
@@ -65,17 +65,30 @@ describe('Pain Phase 0: Fatal Intercept produces no Pain but keeps its failure r
     // 1. No Pain: the retired emit path must never fire.
     expect(emitPainDetectedEvent).not.toHaveBeenCalled();
 
-    // 2. Failure fact preserved: the daily memory note still records the
-    //    intercept observably (health record, informational only).
+    // 2. Operational record preserved: the daily memory note still records
+    //    the intercept observably (timestamps + verbatim signal content).
     const [dateStr] = new Date().toISOString().split('T');
     const dailyLog = path.join(workspaceDir, PD_DIRS.MEMORY, `${dateStr}.md`);
     expect(fs.existsSync(dailyLog)).toBe(true);
     const content = fs.readFileSync(dailyLog, 'utf8');
+    expect(content).toContain('## [');
     expect(content).toContain('[FATAL INTERCEPT]');
     expect(content).toContain('attempting the forbidden action');
-    // 3. The review text no longer claims the signal entered the pain chain.
+    // 3. Operational classification: the old Pain-titled sections are gone.
+    expect(content).toContain('Session Operational Signals (Pre-Compaction)');
+    expect(content).toContain('Operational Signals extracted from session transcript');
+    expect(content).toContain('not Pain admission evidence');
+    expect(content).not.toContain('Consolidated Pain');
+    expect(content).not.toContain('Pain Signals');
+    // 4. The review text no longer claims the signal entered the pain chain.
     expect(content).not.toContain('emitted into the Runtime V2 pain chain');
     expect(content).not.toContain('intercept_extraction');
+
+    // 5. Safety interception fact unchanged: the extractor still logs the
+    //    hard-abort snapshot detection (host-side protection unaffected).
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.stringContaining('Detected hard-abort snapshot (runId: run-fatal-1)'),
+    );
   });
 
   it('non-fatal sessions write nothing and emit nothing', async () => {

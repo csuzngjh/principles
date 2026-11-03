@@ -130,17 +130,17 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
     const dailyLogPath = path.join(workspaceDir, PD_DIRS.MEMORY, `${dateStr}.md`);
     const timestamp = new Date().toISOString();
     
-    let entry = `\n## [${timestamp}] Consolidated Pain (Pre-Compaction)\n\n`;
-    entry += `### Pain Signals extracted from session transcript\n`;
+    let entry = `\n## [${timestamp}] Session Operational Signals (Pre-Compaction)\n\n`;
+    entry += `### Operational Signals extracted from session transcript\n`;
     painPoints.slice(-5).forEach((p, idx) => {
       entry += `- [Signal ${idx + 1}] ${p.replace(/\n/g, ' ')}\n`;
     });
     // Pain Phase 0 (SPEC PD-PAIN-SEMANTICS-AND-DETECTION-ARCHITECTURE-001 §6.3):
     // a fatal intercept is a host safety fact, not Owner-deviation Pain — the
-    // intercept_extraction pain_detected emission was removed. The notes below
-    // remain the observable failure record; report via /pd-pain if a hard
-    // intercept reflects a principle deviation.
-    entry += `\n### Review\n- Signals above are informational notes only (no Pain is created from them). If a hard intercept reflects a principle deviation, report it explicitly via /pd-pain; review via pd-console: \`pd console open --workspace "<workspace>"\`.\n`;
+    // intercept_extraction pain_detected emission was removed. These are
+    // operational notes, NOT Pain admission evidence; report via /pd-pain if a
+    // hard intercept reflects a principle deviation.
+    entry += `\n### Review\n- These entries are operational notes only. They are not Pain admission evidence. If a hard intercept reflects a principle deviation, report it explicitly via /pd-pain. Review via pd-console: \`pd console open --workspace "<workspace>"\`.\n`;
 
     try {
       const dir = path.dirname(dailyLogPath);
@@ -149,9 +149,9 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
 
       // SEMANTIC_PAIN (confusion_samples.md) write removed (PRI-451 Wave 1):
       // the file had zero readers. The MEMORY.md write above remains the
-      // observable failure record.
+      // observable operational failure record.
     } catch (err) {
-      ctx.logger?.error?.(`[PD:Lifecycle] Failed to write pain signals: ${String(err)}`);
+      ctx.logger?.error?.(`[PD:Lifecycle] Failed to write operational signals: ${String(err)}`);
     }
   }
 }
