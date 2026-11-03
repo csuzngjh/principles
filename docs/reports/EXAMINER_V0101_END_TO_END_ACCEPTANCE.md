@@ -101,3 +101,79 @@ DOCUMENTATION_COMPLETE      ✅（SPEC/审计/验收/交付四件套）
 最终交付状态：READY_FOR_OWNER_REVIEW
 F2：集成完成 · Dry-run 完成 · 真实执行未授权（零真实模型调用）
 ```
+
+---
+
+## 10. P1 Repair 轮次（2026-11-03，接手者 trae）
+
+Owner 评审提出六项 P1；本轮完成代码、定位并修复两处真实缺陷（一处测试死锁、一处仅在真实 seed 工作区暴露的冻结链表示不匹配），并补做全量回归 + 真实浏览器 E2E。
+
+### 10.1 六项 P1 验收矩阵
+
+| P1 | 结果 | 证据 |
+|---|---|---|
+| P1-1 快照进入冻结链 | PASS | 4 用例：正常创建→preflight PASS（manifest hash=canonical(snapshot)，anchor.binding 带快照 hash）/篡改→FAIL/删除→FAIL/连改 manifest+hashes.json→FAIL（anchor 不可再生） |
+| P1-2 Runtime Activation 降级 | PASS | 无 state.db → status=degraded + ACTIVATION_DATA_DEGRADED marker + reason/nextAction，independence 绝不=true；展示列表 50 条截断，统计用完整计数 |
+| P1-3 证据分页真相 | PASS | 55 条 → counts=50 + pages.delivery.hasMore=true + nextCursor；7 条 → 精确 7 + hasMore=false |
+| P1-4 异步原子受理 + 账本 fail-loud | PASS | 并发两 run → [202,409] 且恰 1 条 ACCEPTED；坏账本 → 500 console_ledger_unreadable + status.ledgerProblem(ledger_corrupt)；ENOENT≠corrupt；finishedAt≥acceptedAt；recovery 跳过坏账本 study |
+| P1-5 Stage R 全量契约 | PASS | 复用 lab `verifyStageRAuthorization`；薄 APPROVED/错 studyId/过期/probe FAILED/错 suite 全部 403；完整合成记录 → 202 → 响亮 `F2_EXECUTION_NOT_ENABLED_THIS_ROUND`（零模型调用、无 RUN_STARTED） |
+| P1-6 路径/临时文件安全 | PASS | ledger 被替换为外指 symlink → 拒绝；study 目录换 junction → recovery 跳过且 decoy 未被写；dry-run 探针无固定名残留 |
+
+### 10.2 缺陷一：P1 专项测试死锁（根因已定位并修复）
+
+- **症状**：`examiner-v0101-p1-repair.test.ts > P1-1 > a fresh study verifies` 在 240s/600s 均挂起；本轮实测即使在**单独首跑**也必现（与上一轮"首跑绿"的记录不符，环境更冷/更快后竞态方向反转）。其余 14 例始终绿。
+- **根因**：mock `IncomingMessage` 用 `setTimeout(..., 0)` 派发 body，而 `handleExaminerRoute` 在到达 `readBody` 之前要 `await loadLab()`（进程内首个请求的 lab 冷加载，真实异步 I/O）与首个 root 的启动恢复。首个请求期间 0ms 计时器先触发，`readBody` 之后才订阅 `data`/`end` → 事件丢失 → `readBody` 的 Promise 永不 settle → 死锁。后续请求走模块级 memo（`hostCapability`）热路径，全程微任务，计时器排不到，因此全部通过。
+- **可观测证据**：临时插桩输出 `[diag] mock emits body; data listeners = 0 end listeners = 0` 恰好出现一次（首个请求），且该请求从未出现 `readBody got end`；其余每次都是 `data listeners = 1`.
+- **修复**：request double 改为**缓冲式**：在 reader 订阅 `'end'` 时同步回放已缓冲的 body（等价于真实 `IncomingMessage` 的缓冲语义），任何 macrotask 都无法插入。同时删除无效的 collect 期 lab 预热 import 与 600s 超时（超时只是掩盖症状）。首例耗时 ~0.37s。
+- **反向验证**：`examiner.test.ts` 在前 + repair 在后、`--no-file-parallelism` → 30/30 PASS；repair 单跑 15/15 PASS。未使用 `--isolate` 掩盖，也未调大 timeout/retry/skip。
+- **CI 说明（诚实）**：上一轮"CI 从未复现"的表述不成立——该测试文件此前未提交，CI 从未执行过它。修复后测试已入库并由 CI 真实执行。
+
+### 10.3 缺陷二：真实 seed 工作区 422（E2E 红灯 → 绿）
+
+- **红灯**：`examiner-journey.spec.ts` 场景 B：`POST /api/v1/examiner/studies` 返回 **422**，服务端拒绝原因 `production-snapshot.json hash != manifest.productionSnapshotHash`（三次 retry 同结果）。
+- **根因**：lab 的 canonical hasher 保留「值为 `undefined` 的对象键」（输出字面量 `"key":undefined`），而 `JSON.stringify` 落盘时丢弃该键。console 快照在**健康通道**下恰好携带 `undefined` 字段（`reason`/`nextAction`/`capacitySource` 等只在降级时赋值），于是内存哈希与磁盘文件哈希不一致，被冻结链判为篡改。单元 fixture 的降级通道把这些字段都填上了，所以 32 个路由用例全绿，只有真实 seed 工作区暴露。
+- **修复**（在冻结链属主 `writeExaminerStudyArtifacts` 内）：入参快照先归一化为「即将落盘的 JSON 表示」，manifest hash 与写文件都用同一个归一化值；binding 校验不变（仍校验磁盘字节）。
+- **红/绿证据**：同一 payload 对 seed 工作区 POST：修前 422 / 修后 **200**（`EXM-C-AAD9BF6C-…`，suiteKey=calibration-core）；`examiner-journey.spec.ts` A–F **6/6 PASS**。
+
+### 10.4 本轮验证结果（真实命令输出）
+
+| 套件 | 结果 |
+|---|---|
+| pd-console 全量 vitest（`--maxWorkers=2`） | **171 files PASS / 3121 passed + 1 expected fail (3122)** |
+| P1 专项 15 + v0101 17 | **32/32 PASS** |
+| lab 契约（examiner-v09 + payload closure + human-review intake） | **95/95 PASS** |
+| `run-examiner-v09-acceptance` 历史基线 | `ok=true checked=593 mismatches=0, OVERALL PASS` |
+| Playwright E2E（examiner-journey，真实浏览器 + 真实后端 + 真实研究管线） | **6/6 PASS** |
+| `tsc --noEmit` | PASS |
+| `eslint`（改动 TS） | 0 error |
+| `check-runtime-contract` | 0 new violations（已用真实 guard 替换 `as ConsoleRunMode`） |
+| `pre-push-fast` | PASS |
+| 真实模型调用 | **0** |
+| 生产状态变更 | **0**（全部临时工作区；历史 acceptance 资产回滚为字节一致） |
+| Required CI | 推送后由 CI 判定（本报告不预设绿） |
+
+### 10.5 冻结链 rebind 与历史基线
+
+- `examiner-study.mjs` 属实现绑定目录，两轮改动均触发 `OFFLINE_PACKAGE_DRIFT`。按既有程序 `rebind-exm-v4-freeze.mjs --record-evidence` 闭合，且历史基线 v6→**v7** 前滚，delta 恰好四个文件：
+  `blind-review/receipts.template.json`、`expected-replay.json`、`package-manifest.json`、`review-subject.json`。
+- `executionsHash` 全程不变（`97e2d4e7…`），所有报告行除 `implementationHash` 外不变 → 研究输入、Gold 决策、执行与评分均未移动。
+- `run-examiner-v09-acceptance` 会重生成 `examiner-studies/` 下的验收产物；本轮已回滚，历史只读资产保持字节一致（E2E 场景 F 仍通过）。
+
+### 10.6 仍未实现 / 未验证（如实）
+
+| 项 | 状态 | 说明 |
+|---|---|---|
+| F2 Transport（console 内真实执行组合） | 未实现 | 安装版 lab payload 闭包不含 F2 transport 模块；受理后显式 `F2_EXECUTION_NOT_ENABLED_THIS_ROUND`，零模型调用 |
+| F2 真实执行授权 | 未授权 | 需 Owner 单独授权；本轮 F2 状态保持 `NOT_ENABLED_THIS_ROUND` |
+| Gate 1 独立人审 | 未进行 | 全部套件仍为 SYNTHETIC_OFFLINE gold |
+| 安装包支持 | 未验证 | 本轮未构建/安装打包产物（packaged install smoke 交由 CI） |
+| 生产部署 | 未执行 | 红线：不部署 |
+| PR 合并 | 未执行 | 红线：Owner 逐次授权前不合并 |
+
+### 10.7 Follow-up（刻意未纳入本轮）
+
+1. `readBody` 在真实 `IncomingMessage` 上无超时上限；若上游中间件提前消费 body，会表现为挂起而非结构化失败。产品边界内暂不新增（当前无此中间件），记录为后续。
+2. 首次请求的 lab 冷加载走模块级 memo；若未来需要多 workspace 并发，可评估预热策略（本轮已删除无效的 collect 预热）。
+3. 冻结链的 canonical hasher 对 `undefined` 键的行为与其他 frozen 产物一致但语义易误读；可考虑在 lab 内统一「先 JSON 归一化再哈希」，超出本轮范围。
+
+**本轮结论**：六项 P1 全部 PASS；两处缺陷均有可复现的红灯证据与修复后绿灯证据；真实模型调用 0；PR 保持 OPEN，等待 Owner 授权合并。
