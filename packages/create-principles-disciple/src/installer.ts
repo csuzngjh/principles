@@ -197,10 +197,6 @@ function installsWorkbuddy(host: HostTarget): boolean {
   return host === 'workbuddy' || host === 'all';
 }
 
-function installedPluginDir(): string {
-  return getInstalledPluginDir();
-}
-
 function pluginInstallDirs(): string[] {
   return installsOpenClaw(activeHostTarget)
     ? [getInstalledPluginDir(), getPluginExtDir()]
@@ -2253,77 +2249,13 @@ function syncPdCli(pluginDir: string): { ok: boolean; globalShim: GlobalPdShimRe
     cpSync(bundledNodeModules, path.join(installedPdCliDir, 'node_modules'), { recursive: true });
   }
 
-  // Create node_modules/@principles/core symlink so pd-cli can resolve
-  // its @principles/core dependency (rewritten to "file:../core" by bundle-plugin.mjs).
-  // Without this, `node dist/index.js --version` fails because static imports
-  // from @principles/core/runtime-v2 cannot be resolved.
-  const coreLinkDir = path.join(installedPdCliDir, 'node_modules', '@principles');
-  const coreLinkTarget = path.join(getPdRuntimeDir(), 'core');
-  mkdirSync(coreLinkDir, { recursive: true });
-  const coreLinkPath = path.join(coreLinkDir, 'core');
-  if (!existsSync(coreLinkPath)) {
-    if (isWindows()) {
-      // On Windows, use a junction (directory symlink) which doesn't require elevated privileges
-      symlinkSync(coreLinkTarget, coreLinkPath, 'junction');
-    } else {
-      // On Unix, use a relative symlink for portability
-      symlinkSync('../../../core', coreLinkPath, 'dir');
-    }
-  }
-
-  // Create node_modules/@principles/host-runtime symlink so pd-cli can resolve
-  // its @principles/host-runtime dependency (rewritten to "file:../host-runtime"
-  // by bundle-plugin.mjs). Without this, `pd --version` crashes with
-  // ERR_MODULE_NOT_FOUND because pd-cli statically imports createProductionHostRuntime.
-  // host-runtime's own better-sqlite3 / js-yaml / @principles/core dependencies
-  // resolve through the plugin's <ext>/node_modules/ (shared via Node's upward
-  // module resolution), so no separate npm install is needed.
-  const hostRuntimeLinkTarget = path.join(getPdRuntimeDir(), 'host-runtime');
-  const hostRuntimeLinkPath = path.join(coreLinkDir, 'host-runtime');
-  if (!existsSync(hostRuntimeLinkPath)) {
-    if (isWindows()) {
-      symlinkSync(hostRuntimeLinkTarget, hostRuntimeLinkPath, 'junction');
-    } else {
-      symlinkSync('../../../host-runtime', hostRuntimeLinkPath, 'dir');
-    }
-  }
-
-  // Create node_modules/@principles/codex-adapter symlink so pd-cli can resolve
-  // its @principles/codex-adapter dependency (rewritten to
-  // "file:../codex-adapter" by bundle-plugin.mjs). Without this, `pd codex
-  // worker` crashes with ERR_MODULE_NOT_FOUND (PRI-624).
-  const codexAdapterLinkTarget = path.join(getPdRuntimeDir(), 'codex-adapter');
-  const codexAdapterLinkPath = path.join(coreLinkDir, 'codex-adapter');
-  if (!existsSync(codexAdapterLinkPath)) {
-    if (isWindows()) {
-      symlinkSync(codexAdapterLinkTarget, codexAdapterLinkPath, 'junction');
-    } else {
-      symlinkSync('../../../codex-adapter', codexAdapterLinkPath, 'dir');
-    }
-  }
-
-  // Create node_modules/principles-disciple symlink so pd-cli can resolve
-  // its principles-disciple dependency (the plugin package, rewritten to
-  // "file:../plugin" by bundle-plugin.mjs). The plugin is installed at the
-  // extension dir root (getPluginExtDir()), so the symlink target is the
-  // ext dir itself — Node resolves `import 'principles-disciple'` via the
-  // plugin's package.json exports field.
-  // Without this, `pd runtime init` crashes with ERR_MODULE_NOT_FOUND
-  // because runtime-init.ts statically imports initTrajectorySchema.
-  const pdLinkDir = path.join(installedPdCliDir, 'node_modules');
-  const pdLinkTarget = installedPluginDir();
-  mkdirSync(pdLinkDir, { recursive: true });
-  const pdLinkPath = path.join(pdLinkDir, 'principles-disciple');
-  if (!existsSync(pdLinkPath)) {
-    if (isWindows()) {
-      symlinkSync(pdLinkTarget, pdLinkPath, 'junction');
-    } else {
-      // Relative from <ext>/pd-cli/node_modules/ to <ext>/: go up twice
-      // (node_modules → pd-cli → ext)
-      symlinkSync('../../', pdLinkPath, 'dir');
-    }
-  }
-
+  // G3 §10.5: the pd-cli sibling links (core / host-runtime / codex-adapter /
+  // workbuddy-adapter / install-layout / principles-disciple) are NO LONGER
+  // hand-rolled here. install() materializes them via
+  // ensurePdCliResolution() AFTER installPdCliDependencies(), so a physical
+  // copy produced by the dependency stage can never be silently kept — this
+  // block used to short-circuit on existsSync() and leave npm-materialized
+  // copies in place.
   tryUpgradePdCliFromNpm(installedPdCliDir);
 
   const installedBinDir = getInstalledBinDir();
@@ -2509,28 +2441,11 @@ function installConsole(consoleDir: string): void {
   rmSync(consoleDest, { recursive: true, force: true });
   cpSync(consoleSrc, consoleDest, { recursive: true });
 
-  const pluginLinkPath = path.join(consoleDest, 'node_modules', 'principles-disciple');
-  mkdirSync(path.dirname(pluginLinkPath), { recursive: true });
-  if (!existsSync(pluginLinkPath)) {
-    if (isWindows()) {
-      symlinkSync(installedPluginDir(), pluginLinkPath, 'junction');
-    } else {
-      symlinkSync(path.relative(path.dirname(pluginLinkPath), installedPluginDir()), pluginLinkPath, 'dir');
-    }
-  }
-
-  // PRI-672: console resolves its create-principles-disciple dependency (the
-  // ReleaseManager authority module, rewritten to file:../release-manager by
-  // bundle-plugin.mjs) through this link into ~/.pd/runtime.
-  const releaseManagerLinkPath = path.join(consoleDest, 'node_modules', 'create-principles-disciple');
-  if (!existsSync(releaseManagerLinkPath)) {
-    mkdirSync(path.dirname(releaseManagerLinkPath), { recursive: true });
-    if (isWindows()) {
-      symlinkSync(getInstalledReleaseManagerDir(), releaseManagerLinkPath, 'junction');
-    } else {
-      symlinkSync(path.relative(path.dirname(releaseManagerLinkPath), getInstalledReleaseManagerDir()), releaseManagerLinkPath, 'dir');
-    }
-  }
+  // G3 §10.5: the console's sibling links (core / host-runtime / install-layout
+  // / principles-disciple / create-principles-disciple) are materialized by
+  // ensureConsoleResolution() AFTER installConsoleDependencies() — see
+  // ensurePdCliResolution() for why the old existsSync() short-circuit was
+  // removed instead of kept.
 }
 
 function getInstalledCoreDir(): string {
@@ -2688,6 +2603,11 @@ function ensureComponentFileDependencyLinks(componentDir: string, componentLabel
     if (!existsSync(siblingDir)) {
       throw new Error(`${componentLabel} depends on ${ref} but the sibling runtime component is missing: ${siblingDir}`);
     }
+    // rc-1: the dependency NAME is manifest input too — it becomes a path
+    // segment under node_modules, so a crafted name must not escape it.
+    if (!/^(@[A-Za-z0-9._-]+\/)?[A-Za-z0-9._-]+$/.test(name)) {
+      throw new Error(`Installed ${componentLabel} declares an unsupported dependency name "${name}".`);
+    }
     const linkPath = path.join(componentDir, 'node_modules', name);
     let stat: Stats | undefined;
     try {
@@ -2712,6 +2632,32 @@ function ensureComponentFileDependencyLinks(componentDir: string, componentLabel
       symlinkSync(path.relative(path.dirname(linkPath), siblingDir), linkPath, 'dir');
     }
   }
+}
+
+/**
+ * G3 §10.5: materialize the INSTALLED pd-cli's `file:../` sibling links
+ * (core / host-runtime / codex-adapter / workbuddy-adapter / install-layout /
+ * principles-disciple) through the shared helper. Replaces the hand-rolled
+ * per-dependency blocks that used to live in syncPdCli(): those short-circuited
+ * on existsSync(), so an npm-materialized physical copy silently won over the
+ * intended runtime sibling.
+ *
+ * Ordering contract: MUST run after installPdCliDependencies() (the dependency
+ * stage is what can (re)materialize node_modules) AND after every sibling is
+ * deployed. A missing sibling fails the install loud (the helper).
+ */
+export function ensurePdCliResolution(): void {
+  ensureComponentFileDependencyLinks(getInstalledPdCliDir(), '@principles/pd-cli');
+}
+
+/**
+ * G3 §10.5: same contract for the INSTALLED pd-console (core / host-runtime /
+ * install-layout / principles-disciple / create-principles-disciple). Runs
+ * after installConsoleDependencies() so npm-materialized copies are corrected
+ * instead of silently kept.
+ */
+export function ensureConsoleResolution(): void {
+  ensureComponentFileDependencyLinks(getInstalledConsoleDir(), '@principles/pd-console');
 }
 
 /**
@@ -4498,6 +4444,10 @@ export async function install(
     const pdCliSync = syncPdCli(pluginDir);
     if (pdCliSync.globalShim !== null) globalShimRecord = pdCliSync.globalShim;
     await installPdCliDependencies();
+    // G3 §10.5: materialize the sibling links AFTER the dependency stage — every
+    // sibling component is already deployed at this point, and a physical copy
+    // the dependency stage produced is now corrected rather than silently kept.
+    ensurePdCliResolution();
     stepIndex++;
 
     if (spinner) updateProgress(spinner, stepIndex, 'Preparing core library for pd-cli...');
@@ -4528,6 +4478,10 @@ export async function install(
 
     if (spinner) updateProgress(spinner, stepIndex, 'Validating bundled console dependencies...');
     await installConsoleDependencies();
+    // G3 §10.5: same ordering contract as pd-cli — links after the dependency
+    // stage, with every console sibling (plugin / release-manager / core /
+    // host-runtime / install-layout) already deployed.
+    ensureConsoleResolution();
     stepIndex++;
 
     // PRI-912 (SPEC-P1′-A): dedup the plugin's bundled @principles/core copy

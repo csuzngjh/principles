@@ -532,11 +532,10 @@ function countPayloadFiles(dir: string): number {
  * pd-cli. The rename-never-followed-a-junction proof now uses the
  * codex-adapter core slot — the ONE slot the installer guarantees as a
  * canonical LINK (expectCanonicalRuntimeLayout's documented invariant). The
- * pd-cli `@principles/core` slot is a PHYSICAL copy by construction
- * (self-contained payloads materialize file:../core via npm ci
- * --install-links; syncPdCli then copies node_modules wholesale, so the
- * post-copy link creation is skipped) AND this scenario additionally injects
- * the PRI-665 physical duplicate into exactly that slot — asserting
+ * pd-cli `@principles/core` slot is a PHYSICAL copy in this upgrade path
+ * (/apply-full deploys the payload tree verbatim; the fresh-install path's
+ * ensurePdCliResolution() link pass does not run here) AND this scenario
+ * additionally injects the PRI-665 physical duplicate into exactly that slot — asserting
  * link-ness there was self-defeating and failed the publish release matrix
  * (ubuntu-24.04, node 22.22.2; the test is excluded from test:fast so the
  * PR never ran it). The physical slot instead proves the complementary
