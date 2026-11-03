@@ -103,9 +103,13 @@ async function replayLiveInjectionExpectation(workspaceDir: string): Promise<{
   }
 }
 
+// Each entry bills ~413 chars on the legacy route, so the active 4000-char
+// budget admits 9 of 11 — the same 9/2 split the old 2000-char budget produced
+// with 200-char texts. Scaling the fixture keeps the FIFO/rotation contrast
+// meaningful across a policy recalibration.
 const FIFO_11 = Array.from({ length: 11 }, (_, i) => ({
   principleId: `P_FIFO_${String(i + 1).padStart(2, '0')}`,
-  text: 'X'.repeat(200),
+  text: 'X'.repeat(400),
 }));
 
 describe('buildLivePromptInjectionProjection (PR #1844 production path alignment)', () => {
@@ -173,9 +177,8 @@ describe('buildLivePromptInjectionProjection (PR #1844 production path alignment
 
     const projection = await buildLivePromptInjectionProjection({ workspaceDir });
 
-    // trimToBudget arithmetic: header 32c + 11 × ("- [P_FIFO_NN] " + 200c + \n)
-    // = each 215c → exactly 9 fit under the 2000c cap (2000 - 33 = 1967 ≥
-    // 9 × 214 + 8 separators), the 10th does not.
+    // trimToBudget arithmetic: header 32c + 11 × ("- [P_FIFO_NN] " + 400c + \n)
+    // = each 413c → exactly 9 fit under the active budget, the 10th does not.
     expect(projection.route).toBe('legacy_trim');
     expect(projection.truncated).toBe(true);
     expect(projection.injectedPrincipleIds).toHaveLength(9);

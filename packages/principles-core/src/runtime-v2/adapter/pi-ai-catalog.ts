@@ -33,6 +33,17 @@ export function isBuiltinPiAiProvider(provider: string): boolean {
  */
 let promptModelCatalogMemo: PromptModelCatalog | undefined;
 
+/**
+ * PRI-1066 exact-key normalization: host-supplied model ids reach PD as
+ * arbitrary strings (hooks, configs, wrappers). Trim + case-fold is a
+ * DETERMINISTIC exact-key normalization, not a fuzzy match — it only makes
+ * `GLM-5.3-Flash ` and `glm-5.3-flash` resolve to the SAME catalog entry,
+ * never to a different model. Provider ids are normalized the same way.
+ */
+function normalizeCatalogKey(value: string): string {
+  return value.trim().toLowerCase();
+}
+
 export function getPromptModelCatalog(): PromptModelCatalog {
   if (promptModelCatalogMemo !== undefined) return promptModelCatalogMemo;
   const byModelIdIndex = new Map<string, PromptModelCatalogEntry[]>();
@@ -48,21 +59,23 @@ export function getPromptModelCatalog(): PromptModelCatalog {
         modelId: model.id,
         contextWindowTokens: model.contextWindow,
       };
-      const bucket = byModelIdIndex.get(model.id);
+      const key = normalizeCatalogKey(model.id);
+      const bucket = byModelIdIndex.get(key);
       if (bucket) bucket.push(entry);
-      else byModelIdIndex.set(model.id, [entry]);
+      else byModelIdIndex.set(key, [entry]);
     }
   }
   promptModelCatalogMemo = {
     exact(providerId, modelId) {
       // getModel is the same generated-table read as the index; go through
       // the index so `exact` and `byModelId` can never disagree.
+      const normalizedProvider = normalizeCatalogKey(providerId);
       return byModelIdIndex
-        .get(modelId)
-        ?.find((entry) => entry.provider === providerId);
+        .get(normalizeCatalogKey(modelId))
+        ?.find((entry) => normalizeCatalogKey(entry.provider) === normalizedProvider);
     },
     byModelId(modelId) {
-      return byModelIdIndex.get(modelId) ?? [];
+      return byModelIdIndex.get(normalizeCatalogKey(modelId)) ?? [];
     },
   };
   return promptModelCatalogMemo;

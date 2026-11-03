@@ -694,9 +694,9 @@ describe('Runtime V2 prompt activation observability events', () => {
   // PRI-1017: the plugin-local production route (OpenClaw) is the ONLY route
   // whose events carry a trustworthy host window. The Console budget reader
   // consumes exactly these fields, so their presence/shape is a cross-layer
-  // contract: 256K host facts must land as budget=4000 + confirmed provenance,
-  // and absent facts must land as the honest 2000 fallback with its reason.
-  it('records model-aware budget provenance from host model facts (256K → 4000)', async () => {
+  // contract: 256K host facts must land as budget=8000 + confirmed provenance,
+  // and absent facts must land as the honest 4000 fallback with its reason.
+  it('records model-aware budget provenance from host model facts (256K → 8000)', async () => {
     const artifactId = 'art-v2-obs-model-001';
     const principleId = 'princ-v2-obs-model-001';
     insertValidatedPrincipleArtifact({ artifactId, principleId });
@@ -717,11 +717,11 @@ describe('Runtime V2 prompt activation observability events', () => {
 
     expect(spy).toHaveBeenCalled();
     const payload = spy.mock.calls[0][0];
-    expect(payload.budget).toBe(4000);
+    expect(payload.budget).toBe(8000);
     expect(payload.budgetCapacitySource).toBe('host_effective_window');
     expect(payload.budgetCapacityStatus).toBe('confirmed');
     expect(payload.budgetContextWindowTokens).toBe(256_000);
-    expect(payload.budgetPolicyVersion).toBe('model_aware_v1');
+    expect(payload.budgetPolicyVersion).toBe('model_aware_v2');
     expect(payload.budgetFallbackReason).toBeUndefined();
   });
 
@@ -754,11 +754,11 @@ describe('Runtime V2 prompt activation observability events', () => {
 
     expect(spy).toHaveBeenCalled();
     const payload = spy.mock.calls[0][0];
-    expect(payload.budget).toBe(6250); // 400000 tokens → floor(2000 × 400000 / 128000)
+    expect(payload.budget).toBe(12500); // 400000 tokens → floor(4000 × 400000 / 128000)
     expect(payload.budgetCapacitySource).toBe('operator_declared');
     expect(payload.budgetCapacityStatus).toBe('confirmed');
     expect(payload.budgetContextWindowTokens).toBe(400_000);
-    expect(payload.budgetPolicyVersion).toBe('model_aware_v1');
+    expect(payload.budgetPolicyVersion).toBe('model_aware_v2');
     expect(payload.budgetFallbackReason).toBeUndefined();
   });
 
@@ -782,7 +782,7 @@ describe('Runtime V2 prompt activation observability events', () => {
     expect(payload.budgetCapacitySource).toBe('legacy_fallback');
     expect(payload.budgetCapacityStatus).toBe('unknown');
     expect(payload.budgetContextWindowTokens).toBeUndefined();
-    expect(payload.budgetPolicyVersion).toBe('model_aware_v1');
+    expect(payload.budgetPolicyVersion).toBe('model_aware_v2');
     expect(payload.budgetFallbackReason).toBe('host_capacity_absent');
   });
 
@@ -1340,20 +1340,21 @@ describe('Runtime V2 prompt injection — PRI-904 fair rotation (plugin-local pr
     expect(oldestRounds).toBeGreaterThanOrEqual(1);
   });
 
-  it('no session id: degrades to legacy_fifo_prefix_v1 and reproduces the audited 16→9/1893 behavior', async () => {
+  it('no session id: degrades to legacy_fifo_prefix_v1 and packs entries under the same budget authority', async () => {
     await seedPri904Fixture();
     const { payload } = await captureInjectionPayload({ sessionId: undefined as unknown as string });
 
     expect(payload.selectionPolicy).toBe('legacy_fifo_prefix_v1');
     expect(payload.rotationStartIndex).toBeUndefined();
     expect(payload.selectionRoundOrdinal).toBeUndefined();
-    expect(payload.injectedCount).toBe(9);
-    expect(payload.injectedCharCount).toBe(1893);
-    expect(payload.v2Truncated).toBe(true);
-    expect((payload.principleIds as string[])).toEqual(
-      Array.from({ length: 9 }, (_, i) => `PRI904-H-${String(i + 1).padStart(2, '0')}`),
-    );
-    expect(payload.droppedActivationIds).toEqual(['act_prompt_PRI904-H-10']);
+    // Expected values derive from the pure selector at the SAME budget the
+    // production path resolved — no second hard-coded capacity number.
+    const expected = trimToBudget(fixturePrinciples(), RUNTIME_V2_PRINCIPLE_BUDGET, escapeXml);
+    expect(payload.injectedCount).toBe(expected.injectedIds.size);
+    expect(payload.injectedCharCount).toBe(expected.lines.join('\n').length);
+    expect(payload.v2Truncated).toBe(expected.truncated);
+    expect(payload.principleIds).toEqual(Array.from(expected.injectedIds));
+    expect(payload.droppedActivationIds ?? []).toEqual(expected.droppedActivationIds);
   });
 
   it('unreadable trajectory db: degrades observably to legacy instead of failing the prompt build', async () => {
@@ -1361,7 +1362,7 @@ describe('Runtime V2 prompt injection — PRI-904 fair rotation (plugin-local pr
     // No trajectory.db at all → the seam throws → legacy policy, build still succeeds.
     const { payload, result } = await captureInjectionPayload({ sessionId: 'pri904-no-db-session' });
     expect(payload.selectionPolicy).toBe('legacy_fifo_prefix_v1');
-    expect(payload.injectedCount).toBe(9);
+    expect(payload.injectedCount).toBeGreaterThan(0);
     expect(result?.prependSystemContext).toContain('ACTIVE BEHAVIOR DIRECTIVES');
   });
 

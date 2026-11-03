@@ -11,7 +11,8 @@ export interface SizeGuardOptions {
    * PRI-1065: total character ceiling for all three components. Callers that
    * resolved a model-aware principle budget pass it here
    * (`resolveTotalInjectionBudgetChars`) so the ceiling grows with the window
-   * instead of pinning the total to the legacy constant. Absent ⇒ 9000.
+   * instead of pinning the total to the legacy constant. Absent ⇒ the
+   * policy's unknown-capacity total (11000 at v2: 4000 principle + 7000 background).
    */
   totalBudgetChars?: number;
   /** Content strings for exact-match replacement (matching plugin behavior) */

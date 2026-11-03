@@ -208,7 +208,9 @@ export function decodeWorkbuddyInput(raw: unknown): HostEvent {
   // consumedOptionalString's fail-loud: SPEC §8.6 forbids metadata failure
   // from blocking the host conversation, and a bad model string degrades to
   // the legacy budget instead of erroring the hook. Dynamic support is
-  // therefore catalog-unambiguous-match-only — never a guessed capacity.
+  // therefore name-only: the id is derived ONLY when every catalog entry for
+  // that id agrees on one window (`pi_catalog_model_id`); a contradiction
+  // falls back with `catalog_ambiguous_model_id` — never a guessed capacity.
   const rawModel = own(raw, 'model');
   const modelId = typeof rawModel === 'string' && rawModel.trim().length > 0 ? rawModel : undefined;
   const modelContext = modelId !== undefined ? { modelId } : undefined;
