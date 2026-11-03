@@ -163,14 +163,44 @@ runs:
     - name: Build target package
       if: ${{ steps.exact.outputs.status == 'ABSENT' }}
       shell: bash
+      env:
+        TOOLS_DIR: ${{ inputs.tools_dir }}
+        COHORT: ${{ inputs.cohort_sha }}
       run: |
+        set -euo pipefail
         PKG_DIR="${{ inputs.pkg_dir }}"
+        # G3.2 build-once: every leg runs in ONE job against ONE cohort
+        # checkout, so a (workspace, script) pair already built by an EARLIER
+        # LEG has identical inputs here. build-once.mjs reuses it only when its
+        # job-scoped ledger records THIS cohort, the same package version and a
+        # dist/ SHA-256 that still matches disk; any mismatch is announced as a
+        # ::warning:: and the package is rebuilt (never a silent skip/fallback).
+        # Absolute paths: later branches cd into a package directory.
+        ROOT_ABS="$(pwd)"
+        TOOLS_ABS="$(cd "$TOOLS_DIR" && pwd)"
+        build_once() {
+          node "$TOOLS_ABS/scripts/release/build-once.mjs" \
+            --workspace "$1" --script "$2" --dir "$ROOT_ABS/$3" --cohort "$COHORT"
+        }
+        # Preamble-built packages (core, install-layout, host-runtime): every
+        # caller of this action (publish-npm train AND publish-preflight
+        # rehearsal) builds them in its own preamble, in this job, at this
+        # cohort, before any leg. A leg rebuild is a pure duplicate (G3.2), so
+        # the leg VERIFIES the preamble output instead — fail-closed, never a
+        # silent rebuild and never a pack without dist/ (PRI-979).
+        assert_preamble_dist() {
+          if [ ! -s "$ROOT_ABS/packages/$1/dist/index.js" ]; then
+            echo "::error::packages/$1/dist/index.js is missing — the caller's preamble must build $1 before this leg runs (G3.2 contract)."
+            exit 1
+          fi
+          echo "Verified preamble build of $1 (no rebuild)."
+        }
         if [ "$PKG_DIR" = "principles-core" ]; then
-          # Built by the train job itself ("Build core") before any leg runs:
-          # core has no workspace dependency, so nothing here is missing.
-          # Listed explicitly so the mapping below stays exhaustive.
-          :
+          assert_preamble_dist principles-core
         elif [ "$PKG_DIR" = "openclaw-plugin" ]; then
+          # NOT build-once: the plugin's own prepack (build:production +
+          # build:types) rewrites dist/ into a different variant during this
+          # leg's pack/publish, so a recorded `build` would no longer match disk.
           npm run build --workspace=principles-disciple
         elif [ "$PKG_DIR" = "pd-cli" ]; then
           # pd-cli imports types from principles-disciple AND from
@@ -183,9 +213,9 @@ runs:
           # leaving no dist/ for pd-cli's tsc (run 35834470066, TS2307 x4;
           # same class as PRI-979).
           npm run build --workspace=principles-disciple
-          npm run build --workspace=@principles/codex-adapter
-          npm run build --workspace=@principles/workbuddy-adapter
-          npm run build --workspace=@principles/pd-cli
+          build_once @principles/codex-adapter build packages/codex-adapter
+          build_once @principles/workbuddy-adapter build packages/workbuddy-adapter
+          build_once @principles/pd-cli build packages/pd-cli
         elif [ "$PKG_DIR" = "create-principles-disciple" ]; then
           # esbuild first (cleans dist, produces bundle.js), then tsc
           # --emitDeclarationOnly. codex-adapter must be built before the
@@ -197,19 +227,19 @@ runs:
           export PD_BUNDLE_PRESERVE_SOURCE_VERSIONS=1
           npm run build:production --workspace=principles-disciple
           npm run build:types --workspace=principles-disciple
-          npm run build --workspace=@principles/codex-adapter
-          npm run build --workspace=@principles/workbuddy-adapter
-          npm run build --workspace=@principles/pd-cli
+          build_once @principles/codex-adapter build packages/codex-adapter
+          build_once @principles/workbuddy-adapter build packages/workbuddy-adapter
+          build_once @principles/pd-cli build packages/pd-cli
           cd packages/create-principles-disciple && npm run build
           npm run build --workspace=@principles/pd-console
         elif [ "$PKG_DIR" = "host-runtime" ]; then
-          npm run build --workspace=@principles/host-runtime
+          assert_preamble_dist host-runtime
         elif [ "$PKG_DIR" = "install-layout" ]; then
-          npm run build --workspace=@principles/install-layout
+          assert_preamble_dist install-layout
         elif [ "$PKG_DIR" = "codex-adapter" ]; then
-          npm run build --workspace=@principles/codex-adapter
+          build_once @principles/codex-adapter build packages/codex-adapter
         elif [ "$PKG_DIR" = "workbuddy-adapter" ]; then
-          npm run build --workspace=@principles/workbuddy-adapter
+          build_once @principles/workbuddy-adapter build packages/workbuddy-adapter
         else
           # No silent no-op: an unmapped leg would pack without dist/ and ship
           # a package whose `files` entries simply are not there (PRI-979).
