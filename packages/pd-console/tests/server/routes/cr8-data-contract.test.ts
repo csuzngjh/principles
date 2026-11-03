@@ -526,9 +526,9 @@ describe('CR8 Backend Data Contract Routes', () => {
             sessionId: 'route-budget',
             workspaceDir: tmpDir,
             activationIds: [],
-            budget: 4000,
+            budget: 8000,
             hostKind: 'workbuddy',
-            budgetPolicyVersion: 'model_aware_v1',
+            budgetPolicyVersion: 'model_aware_v2',
             budgetCapacitySource: 'host_effective_window',
             budgetCapacityStatus: 'confirmed',
             budgetContextWindowTokens: 256000,
@@ -545,7 +545,7 @@ describe('CR8 Backend Data Contract Routes', () => {
       expect(isRecord(promptInjection)).toBe(true);
       expect(promptInjection!['hostKind']).toBe('workbuddy');
       expect(promptInjection!['capacityStatus']).toBe('confirmed');
-      expect(promptInjection!['budget']).toBe(4000);
+      expect(promptInjection!['budget']).toBe(8000);
       expect(promptInjection!['budgetCapacitySource']).toBe('host_effective_window');
       expect(promptInjection!['budgetContextWindowTokens']).toBe(256000);
       expect(typeof promptInjection!['budgetObservedAt']).toBe('string');

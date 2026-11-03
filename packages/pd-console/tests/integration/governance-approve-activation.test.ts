@@ -241,9 +241,9 @@ function appendRawInjectionEvent(ts: string, data: Record<string, unknown>): voi
         principleIds: [],
         injectedCount: 0,
         injectedCharCount: 0,
-        budget: 2000,
+        budget: 4000,
         hostKind: 'openclaw',
-        budgetPolicyVersion: 'model_aware_v1',
+        budgetPolicyVersion: 'model_aware_v2',
         ...data,
       },
     }) + '\n',
@@ -763,12 +763,18 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
   //        surfaced as a non-fatal warning, never silently swallowed.
 
   it('approve warns when the prompt injection budget is saturated (PRI-890, rc-9)', async () => {
-    // Saturate the 2000c FIFO budget: seed 8 older prompt activations whose
-    // directives (~380c each) exceed the cap well before the 9th arrives.
+    // Pin the empty-basis fallback (4000c) so a leftover runtime observation
+    // from an earlier test cannot widen the window and mask saturation.
+    deactivateActivePromptActivations();
+    clearRuntimeBudgetLogs();
+    ensureDefaultConfig();
+    // Saturate the 4000c budget: on the list route an entry costs ~232c
+    // (~983c on the shared render route), so 24 fillers exceed the cap on
+    // both routes well before the 25th arrives.
     const fillerText = 'F'.repeat(220);
     const db = sqliteConn.getDb();
     const base = Date.now();
-    for (let i = 0; i < 8; i += 1) {
+    for (let i = 0; i < 24; i += 1) {
       const artifactId = `art-budget-filler-${i}-${base}`;
       const principleId = newPrincipleId();
       seedLedgerPrinciple(principleId, fillerText);
@@ -784,7 +790,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
         `${artifactId}::prompt`,
         artifactId,
         `ledger://${principleId}`,
-        new Date(base - (8 - i) * 60_000).toISOString(),
+        new Date(base - (i + 1) * 60_000).toISOString(),
       );
     }
 
@@ -833,44 +839,44 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
   // runtime budget observation. These tests drive the real approve route (real
   // SQLite + real EventLog) across all four budget bases.
 
-  it('approve warning runs under the observed 256K → 4000 budget and names its basis + observation time', async () => {
+  it('approve warning runs under the observed 256K → 8000 budget and names its basis + observation time', async () => {
     deactivateActivePromptActivations();
     clearRuntimeBudgetLogs();
     ensureDefaultConfig();
-    await seedActivePromptFillers('obs4000', 24, 220);
+    await seedActivePromptFillers('obs4000', 40, 220);
     await dispatchRuntimeInjection({ contextTokenBudget: 256_000, contextWindowSource: 'model', modelId: 'claude-sonnet-4-5' });
 
     const warning = await approveFreshPromptPrinciple('obs4000', 'N'.repeat(220));
     expect(warning).withContext('observed-budget exclusion must surface a warning').toBeDefined();
     // The forecast ran under the OBSERVED budget, not the console fallback.
-    expect(warning).toContain('(4000c');
+    expect(warning).toContain('(8000c');
     expect(warning).toContain('budget basis=runtime_observation (openclaw, observed at ');
     expect(warning).toContain('injection_budget_queued');
     clearRuntimeBudgetLogs();
   });
 
-  it('approve warning runs under a usable runtime FALLBACK observation (2000) and carries the runtime reason', async () => {
+  it('approve warning runs under a usable runtime FALLBACK observation (4000) and carries the runtime reason', async () => {
     deactivateActivePromptActivations();
     clearRuntimeBudgetLogs();
     ensureDefaultConfig();
-    await seedActivePromptFillers('obsfallback', 8, 220);
+    await seedActivePromptFillers('obsfallback', 20, 220);
     // No model context: the runtime itself honestly resolves the fixed fallback.
     await dispatchRuntimeInjection();
 
     const warning = await approveFreshPromptPrinciple('obsfallback', 'N'.repeat(220));
     expect(warning).toBeDefined();
-    expect(warning).toContain('(2000c');
+    expect(warning).toContain('(4000c');
     expect(warning).toContain('budget basis=runtime_observation_fallback (openclaw, runtime reason=host_capacity_absent, observed at ');
     clearRuntimeBudgetLogs();
   });
 
-  it('a stale observation is never presented as current: approve warning falls back to 2000 and says so', async () => {
+  it('a stale observation is never presented as current: approve warning falls back to 4000 and says so', async () => {
     deactivateActivePromptActivations();
     clearRuntimeBudgetLogs();
     ensureDefaultConfig();
-    await seedActivePromptFillers('obsstale', 8, 220);
+    await seedActivePromptFillers('obsstale', 20, 220);
     appendRawInjectionEvent(new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(), {
-      budget: 4000,
+      budget: 8000,
       budgetCapacitySource: 'host_effective_window',
       budgetCapacityStatus: 'confirmed',
       budgetContextWindowTokens: 256_000,
@@ -878,7 +884,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
 
     const warning = await approveFreshPromptPrinciple('obsstale', 'N'.repeat(220));
     expect(warning).toBeDefined();
-    expect(warning).toContain('(2000c');
+    expect(warning).toContain('(4000c');
     expect(warning).toContain('budget basis=fixed_fallback (the runtime budget observation for openclaw is stale');
     clearRuntimeBudgetLogs();
   });
@@ -887,11 +893,11 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     deactivateActivePromptActivations();
     clearRuntimeBudgetLogs();
     ensureDefaultConfig();
-    await seedActivePromptFillers('obsnone', 8, 220);
+    await seedActivePromptFillers('obsnone', 20, 220);
 
     const warning = await approveFreshPromptPrinciple('obsnone', 'N'.repeat(220));
     expect(warning).toBeDefined();
-    expect(warning).toContain('(2000c');
+    expect(warning).toContain('(4000c');
     expect(warning).toContain('budget basis=fixed_fallback (no runtime budget observation for openclaw)');
   });
 
@@ -934,7 +940,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
       // codex: a usable observation that is itself the runtime's honest fallback.
       appendRawInjectionEvent(new Date().toISOString(), {
         hostKind: 'codex',
-        budget: 2000,
+        budget: 4000,
         budgetCapacitySource: 'legacy_fallback',
         budgetCapacityStatus: 'unknown',
         budgetFallbackReason: 'host_capacity_absent',
@@ -942,7 +948,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
       // workbuddy: only a 48h-old observation exists, so it must not be used.
       appendRawInjectionEvent(new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(), {
         hostKind: 'workbuddy',
-        budget: 4000,
+        budget: 8000,
         budgetCapacitySource: 'host_effective_window',
         budgetCapacityStatus: 'confirmed',
         budgetContextWindowTokens: 256_000,
@@ -961,14 +967,14 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
 
       // Observed: the host's own number plus the time it was observed.
       const openclaw = byHost.get('openclaw');
-      expect(openclaw?.['budget']).toBe(4000);
+      expect(openclaw?.['budget']).toBe(8000);
       expect(typeof openclaw?.['budgetObservedAt']).toBe('string');
       expect(openclaw?.['budgetFallbackReason']).toBeUndefined();
 
       // Runtime fallback: a fact the runtime really recorded, labelled as a
       // fallback and traceable to the runtime's own reason.
       const codex = byHost.get('codex');
-      expect(codex?.['budget']).toBe(2000);
+      expect(codex?.['budget']).toBe(4000);
       expect(codex?.['budgetCapacitySource']).toBe('legacy_fallback');
       expect(codex?.['budgetFallbackReason']).toBe('host_capacity_absent');
       expect(typeof codex?.['budgetObservedAt']).toBe('string');
@@ -976,7 +982,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
       // Stale-only: the console fallback, the stale reason, and NO timestamp —
       // the old observation is never presented as the current budget.
       const workbuddy = byHost.get('workbuddy');
-      expect(workbuddy?.['budget']).toBe(2000);
+      expect(workbuddy?.['budget']).toBe(4000);
       expect(workbuddy?.['budgetFallbackReason']).toBe('runtime_budget_observation_stale');
       expect(workbuddy?.['budgetObservedAt']).toBeUndefined();
     } finally {
@@ -1015,7 +1021,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
       await dispatchRuntimeInjection({ contextTokenBudget: 256_000, contextWindowSource: 'model', modelId: 'claude-sonnet-4-5' });
       appendRawInjectionEvent(new Date().toISOString(), {
         hostKind: 'codex',
-        budget: 2000,
+        budget: 4000,
         budgetCapacitySource: 'legacy_fallback',
         budgetCapacityStatus: 'unknown',
         budgetFallbackReason: 'host_capacity_absent',
@@ -1071,7 +1077,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
 
     try {
       // Saturate the shared renderer: a few very long principles blow the
-      // 2000c cap well before the new one is considered.
+      // 4000c cap well before the new one is considered.
       const db = sqliteConn.getDb();
       const base = Date.now();
       for (let i = 0; i < 3; i += 1) {
@@ -1149,7 +1155,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
       .run(new Date().toISOString());
     const db = sqliteConn.getDb();
     const base = Date.now();
-    const hugeText = 'H'.repeat(17000);
+    const hugeText = 'H'.repeat(34000);
     for (let i = 0; i < 2; i += 1) {
       const artifactId = `art-oversize-filler-${i}-${base}`;
       const principleId = newPrincipleId();
@@ -1277,10 +1283,10 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     const artifactId = `art-oversized-${base}`;
     const approvalId = `apr-oversized-${base}`;
     const principleId = newPrincipleId();
-    seedLedgerPrinciple(principleId, 'O'.repeat(17000));
+    seedLedgerPrinciple(principleId, 'O'.repeat(34000));
     await seedPrincipleArtifact(artifactId, {
       sourcePrincipleId: principleId,
-      contentJson: { principleId, text: 'O'.repeat(17000) },
+      contentJson: { principleId, text: 'O'.repeat(34000) },
     });
     await seedPendingApproval(approvalId, artifactId, 'prompt');
 
@@ -1334,7 +1340,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
       sourceRuleId: undefined,
       lineageArtifactIds: [],
       validationStatus: 'validated',
-      contentJson: JSON.stringify({ principleId, text: 'L'.repeat(17000) }),
+      contentJson: JSON.stringify({ principleId, text: 'L'.repeat(34000) }),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
@@ -1392,9 +1398,9 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
   });
 
   it('SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §6: cross-host aggregation stays monotone — a shared-route-only overflow does NOT brand the entry oversized everywhere (real counterexample)', async () => {
-    // 15400-char statement: list route bills ≈15474 (model_dependent —
-    // injectable on larger-context models), shared route bills ≈16163
-    // (exceeds the 16000 max tier). The OLD aggregation (any host exceeds →
+    // 31600-char statement: list route bills ≈31674 (model_dependent —
+    // injectable on larger-context models), shared route bills ≈32363
+    // (exceeds the 32000 max tier). The OLD aggregation (any host exceeds →
     // exceeds) reported exceeds_max_tier, wrongly telling an OpenClaw owner
     // this entry could never inject. Route is unconfirmed here (openclaw
     // declaration removed, flag off) so the per-host aggregation runs.
@@ -1402,10 +1408,10 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     const artifactId = `art-agg-cx-${base}`;
     const approvalId = `apr-agg-cx-${base}`;
     const principleId = newPrincipleId();
-    seedLedgerPrinciple(principleId, 'M'.repeat(15400));
+    seedLedgerPrinciple(principleId, 'M'.repeat(31600));
     await seedPrincipleArtifact(artifactId, {
       sourcePrincipleId: principleId,
-      contentJson: { principleId, text: 'M'.repeat(15400) },
+      contentJson: { principleId, text: 'M'.repeat(31600) },
     });
     await seedPendingApproval(approvalId, artifactId, 'prompt');
 
@@ -1435,7 +1441,7 @@ describe('Governance Approve → Activation Cross-Table Consistency', () => {
     const base = Date.now();
     // 预算接近占满：一条恰好装满列表预算的已激活原则。
     const header = 'Runtime V2 activated principles:';
-    const fillerLen = 2000 - header.length - 1 - `- [${'F'.repeat(0)}] `.length - 60 - 1; // leave ~60 chars room: single new entry still fits alone
+    const fillerLen = 4000 - header.length - 1 - `- [${'F'.repeat(0)}] `.length - 60 - 1; // leave ~60 chars room: single new entry still fits alone
     const fillerPrinciple = newPrincipleId();
     seedLedgerPrinciple(fillerPrinciple, 'F'.repeat(fillerLen));
     const fillerArtifact = `art-window-filler-${base}`;

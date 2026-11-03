@@ -1,6 +1,17 @@
 import type { ActivationStatusRecord } from './activation-types.js';
 
-export const RUNTIME_V2_PRINCIPLE_BUDGET = 2000;
+/**
+ * Reference principle budget for a 128K-token window (UTF-16 code units).
+ *
+ * This is the SAME anchor as `PROMPT_BUDGET_BASE_CHARS` (prompt-budget-policy):
+ * the historical fixed budget and the current fallback for hosts with no
+ * capacity fact. v2 recalibration (PRI-1066) raised it 2000 → 4000 because
+ * Owner-visible capacity ran out after a few activations; it is a policy
+ * anchor, not a measured optimum. Events computed under the previous value
+ * carry the old `policyVersion` and are skipped (and counted) by the reader
+ * instead of being silently reinterpreted.
+ */
+export const RUNTIME_V2_PRINCIPLE_BUDGET = 4000;
 
 export interface ActivatedPrinciple {
   principleId: string;

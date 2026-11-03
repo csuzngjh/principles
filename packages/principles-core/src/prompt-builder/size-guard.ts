@@ -22,6 +22,7 @@
  * Phase: PRI-75 Prompt Injection SDK Migration Phase 1
  */
 
+import { PROMPT_TOTAL_INJECTION_FALLBACK_CHARS } from '../runtime-v2/activation/prompt-budget-policy.js';
 import type { SizeGuardOptions, TruncateResult } from './types.js';
 
 /**
@@ -29,8 +30,12 @@ import type { SizeGuardOptions, TruncateResult } from './types.js';
  * `SizeGuardOptions.totalBudgetChars` (= model-aware principle budget +
  * background allowance) so the ceiling grows with the model window instead
  * of squeezing background blocks out of a fixed total.
+ *
+ * PRI-1066: derived from the ONE budget authority above instead of a frozen
+ * 9000 — the fallback total moves with `PROMPT_BUDGET_FALLBACK_CHARS`, so a
+ * policy recalibration cannot leave this call site behind.
  */
-const DEFAULT_BUDGET = 9000;
+const DEFAULT_BUDGET = PROMPT_TOTAL_INJECTION_FALLBACK_CHARS;
 
 /**
  * Truncates the combined prompt injection to fit within budget.

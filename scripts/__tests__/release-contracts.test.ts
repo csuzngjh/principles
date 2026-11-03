@@ -228,6 +228,12 @@ async function seedRepo(dir: string) {
     JSON.stringify({ name: 'principles-disciple', version: '1.0.0' }, null, 2) + '\n',
     dir,
   );
+  // Mirrored component (SPEC-PD-MCP-GATE4-001 §9.3): materialization rewrites
+  // its SERVER_VERSION constant, so the Version-PR allowlist must cover it by
+  // DECLARATION (COMPONENT_MIRRORS), not by a hand-written path list.
+  write('packages/pd-mcp-server/package.json', pkg('@principles/pd-mcp-server', '1.0.0'), dir);
+  write('packages/pd-mcp-server/index.js', "module.exports = 'mcp';\n", dir);
+  write('packages/pd-mcp-server/src/version.ts', "export const SERVER_VERSION = '1.0.0' as const;\n", dir);
   write('packages/create-principles-disciple/package.json', pkg('create-principles-disciple', '1.0.0'), dir);
   write('packages/create-principles-disciple/index.js', "module.exports = 'installer';\n", dir);
   // Runtime pin artifact (C5 territory — must never be touched by a Version PR).
@@ -432,6 +438,23 @@ describe('guard: normal PR release-intent contract', () => {
     await git(['reset', '--hard', base]);
   });
 
+  // The Version-PR allowlist now derives from the component-mirror
+  // declarations, so version-mirror paths are no longer "outside the Version
+  // PR". That widening must NOT launder a normal PR: rewriting the mirrored
+  // constant with no changeset is still a release-affecting change without
+  // declared intent.
+  it('N-3: hand-editing the mirrored SERVER_VERSION in a normal PR still fails', async () => {
+    const base = await git(['rev-parse', 'HEAD']);
+    write('packages/pd-mcp-server/src/version.ts', "export const SERVER_VERSION = '9.9.9' as const;\n");
+    await commitAll('chore(mcp): hand-edited server version');
+    const r = await runGuard(base);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('N-3');
+    expect(r.stderr).toContain('@principles/pd-mcp-server');
+    expect(r.stdout).not.toContain('mode=version-pr');
+    await git(['reset', '--hard', base]);
+  });
+
   // Companion desktop release-prep exemption (2026-10-16): the private
   // desktop-only package can never materialize a version through the Version
   // Packages PR (changesets ignores private packages), so its release-prep PR
@@ -523,6 +546,36 @@ describe('guard: normal PR release-intent contract', () => {
 });
 
 describe('version-pr: Version Packages PR contract', () => {
+  // 2026-11-03 regression: syncMcpServerVersionMirror made every generated
+  // Version Packages PR rewrite packages/pd-mcp-server/src/version.ts, while
+  // the allowlist still listed only openclaw.plugin.json. The guard judged
+  // the bot's PR as mode=normal and the release train stopped on PR #2317.
+  it('version-PR allowlist follows the mirror declarations: a SERVER_VERSION mirror rewrite is Version-PR traffic', async () => {
+    const mirrorRepo = path.join(root, 'mirror-repo');
+    await seedRepo(mirrorRepo);
+    await writeIn(mirrorRepo, '.changeset/mcp.md', changeset("'@principles/pd-mcp-server': patch"));
+    await commitAll('chore: pending mcp changeset', mirrorRepo);
+    const pre = await git(['rev-parse', 'HEAD'], mirrorRepo);
+
+    const m = await sh(process.execPath, [MATERIALIZE, '--repo-root', mirrorRepo], mirrorRepo, {
+      PD_RELEASE_RETRY_DELAY_MS: '1',
+    });
+    expect(m.code).toBe(0);
+    // The materialization really rewrote the mirror, so it IS part of the diff.
+    expect(fs.readFileSync(path.join(mirrorRepo, 'packages/pd-mcp-server/src/version.ts'), 'utf8')).toContain(
+      "SERVER_VERSION = '1.0.1'",
+    );
+    const head = await commitAll('chore: version packages [version-packages]', mirrorRepo);
+    const diff = await git(['diff', '--name-only', `${pre}..${head}`], mirrorRepo);
+    expect(diff).toContain('packages/pd-mcp-server/src/version.ts');
+    expect(diff).toContain('packages/pd-mcp-server/package.json');
+
+    const r = await sh(process.execPath, [GUARD, '--repo-root', mirrorRepo], mirrorRepo, { PR_BASE_SHA: pre });
+    expect(r.code, r.stderr).toBe(0);
+    expect(r.stdout).toContain('RELEASE_INTENT_GUARD PASS mode=version-pr');
+    expect(r.stdout).toContain('@principles/pd-mcp-server@1.0.1');
+  }, 300000);
+
   it('T2/T3/T10/T14/T16/T5/T15: materialization reproduces; independent versions; containment; mirror; ghost untouched', async () => {
     write('.changeset/core.md', changeset("'@principles/core': patch"));
     write('.changeset/plugin.md', changeset("'principles-disciple': minor"));

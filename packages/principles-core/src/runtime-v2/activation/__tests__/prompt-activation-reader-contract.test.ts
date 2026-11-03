@@ -7,6 +7,7 @@ import {
   renderPrinciplesToDirectives,
   RUNTIME_V2_PRINCIPLE_BUDGET,
 } from '../prompt-activation-reader-contract.js';
+import { PROMPT_BUDGET_BASE_CHARS } from '../prompt-budget-policy.js';
 import type { ActivationStatusRecord } from '../activation-types.js';
 
 function makeActivation(overrides: Partial<ActivationStatusRecord> = {}): ActivationStatusRecord {
@@ -450,8 +451,8 @@ describe('prompt-activation-reader-contract', () => {
   });
 
   describe('RUNTIME_V2_PRINCIPLE_BUDGET', () => {
-    it('is 2000', () => {
-      expect(RUNTIME_V2_PRINCIPLE_BUDGET).toBe(2000);
+    it('is the policy base budget (single source of truth)', () => {
+      expect(RUNTIME_V2_PRINCIPLE_BUDGET).toBe(PROMPT_BUDGET_BASE_CHARS);
     });
   });
 });

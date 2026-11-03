@@ -5,7 +5,8 @@
  * regression blocks for that retired behavior were deleted in PRI-887.
  *
  * Covers:
- * 1. Size guard: injection stays under MAX_INJECTION_SIZE (9000)
+ * 1. Size guard: injection stays under the derived total ceiling
+ *    (principle budget + 7000 background; 11000 at the v2 fallback)
  * 2. Fail-closed: never returns injection over limit
  */
 
@@ -132,7 +133,7 @@ function makeMinimalEvent(): Parameters<typeof import('../../src/hooks/prompt.js
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe('Size guard: fail-closed', () => {
-  it('never returns a combined injection that exceeds MAX_INJECTION_SIZE (9000)', async () => {
+  it('never returns a combined injection that exceeds the total ceiling (11000 = 4000 principle + 7000 background)', async () => {
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
 
     // One large pending task to trigger diagnostician priority mode
@@ -157,7 +158,7 @@ describe('Size guard: fail-closed', () => {
       (result?.prependContext?.length ?? 0) +
       (result?.appendSystemContext?.length ?? 0);
 
-    expect(totalSize).toBeLessThanOrEqual(9000);
+    expect(totalSize).toBeLessThanOrEqual(11_000);
   });
 
   it('strips project_context and thinking_os when inDiagMode and over limit', async () => {
@@ -189,8 +190,8 @@ describe('Size guard: fail-closed', () => {
       (result?.prependContext?.length ?? 0) +
       (result?.appendSystemContext?.length ?? 0);
 
-    // Must stay within MAX_INJECTION_SIZE (9000)
-    expect(combined).toBeLessThanOrEqual(9000);
+    // Must stay within the derived total ceiling (4000 + 7000).
+    expect(combined).toBeLessThanOrEqual(11_000);
   });
 });
 
@@ -231,14 +232,14 @@ describe('Size guard: total ceiling derives from the applied principle budget (P
   // reconciliation this ticket introduces rather than ambient block sizes.
   const DIRECTIVES = 'd'.repeat(12_000);
 
-  it('a 1M-window budget keeps background blocks that the legacy 9000 ceiling strips', async () => {
+  it('a 1M-window budget keeps background blocks that the legacy fallback ceiling strips', async () => {
     const { handleBeforePromptBuild } = await import('../../src/hooks/prompt.js');
 
-    const wide = await handleBeforePromptBuild(makeMinimalEvent(), ctx(), sharedPrompt(DIRECTIVES, 15_625));
+    const wide = await handleBeforePromptBuild(makeMinimalEvent(), ctx(), sharedPrompt(DIRECTIVES, 31_250));
     expect(wide).toBeDefined();
     expect(wide?.appendSystemContext ?? '').not.toContain('[WARNING: Context sections stripped');
 
-    const legacy = await handleBeforePromptBuild(makeMinimalEvent(), ctx(), sharedPrompt(DIRECTIVES, 2_000));
+    const legacy = await handleBeforePromptBuild(makeMinimalEvent(), ctx(), sharedPrompt(DIRECTIVES, 4_000));
     expect(legacy).toBeDefined();
     expect(legacy?.appendSystemContext ?? '').toContain('[WARNING: Context sections stripped');
   });
