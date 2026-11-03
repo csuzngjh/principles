@@ -720,4 +720,22 @@ describe('single-active — offline ↔ async mutual exclusion under the study l
     expect(fs.readdirSync(ledger)).toEqual([]);
     expect(fs.readFileSync(sentinel, 'utf8')).toBe('SENTINEL');
   });
+
+  it('a FINISHED offline run does not block acceptance, and a >64KB ledger is read through the fd loop', async () => {
+    const studyId = await createStudy();
+    const studyDir = studyDirOf(studyId);
+    // A large field forces the chunked fd reader past the first 64KB block;
+    // the RUN_STARTED+RUN_FINISHED pair means no offline run is in flight.
+    const padding = 'x'.repeat(70_000);
+    fs.appendFileSync(
+      path.join(studyDir, 'events.jsonl'),
+      `${JSON.stringify({ type: 'RUN_STARTED', owner: 'lab-runner', plan: {}, padding })}\n${JSON.stringify({ type: 'RUN_FINISHED', owner: 'lab-runner' })}\n`,
+    );
+    const sentinel = writeSentinel();
+    const accepted = await call('POST', `/studies/${studyId}/run`, { mode: 'host-dry-run' });
+    expect(accepted.statusCode).toBe(202);
+    await waitForTerminalRun(studyId, accepted.body.data.runId);
+    expect(readConsoleRuns(resolveRoots(), studyDir).filter((run) => run.runId === accepted.body.data.runId)).toHaveLength(1);
+    expect(fs.readFileSync(sentinel, 'utf8')).toBe('SENTINEL');
+  });
 });

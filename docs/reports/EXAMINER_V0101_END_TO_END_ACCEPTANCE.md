@@ -248,8 +248,8 @@ POST-FIX sentinel untouched: SENTINEL
 
 | 套件 | 结果 |
 |---|---|
-| pd-console 全量 | **171 files / 3131 passed + 1 expected fail（0 failed）** |
-| Examiner 定向（v09 路由、v0101、repair、path-boundary、BDD） | **5 files 全通过**；repair 文件 **24 例** |
+| pd-console 全量 | **171 files / 3132 passed + 1 expected fail（0 failed）** |
+| Examiner 定向（v09 路由、v0101、repair、path-boundary、BDD） | **5 files 全通过**；repair 文件 **25 例** |
 | lab 契约 | **95/95** |
 | 历史基线 | `ok=true checked=593 mismatches=0`（基线 v7→v8，delta 恰四文件） |
 | Playwright E2E（真实浏览器） | **6/6** |
