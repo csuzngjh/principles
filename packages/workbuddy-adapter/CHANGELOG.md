@@ -1,5 +1,13 @@
 # @principles/workbuddy-adapter
 
+## 0.2.17
+
+### Patch Changes
+
+- Updated dependencies [5fa6fc9]
+  - @principles/core@2.0.0
+  - @principles/host-runtime@0.14.5
+
 ## 0.2.16
 
 ### Patch Changes
