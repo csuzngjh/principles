@@ -54,8 +54,278 @@ function runNpm(args, options) {
   return spawnSync(cli.node, [...cli.args, ...args], { encoding: 'utf8', ...options, ...(cli.shell ? { shell: true } : {}) });
 }
 
+// ─── Codex MCP same-name conflict gate (SPEC-PD-MCP-GATE4-001 §7.5/§11.3) ───
+// The user-level `[mcp_servers.pd-recall]` tier overrides the plugin tier, so
+// a same-name server owned by someone else must stop setup BEFORE the runtime
+// install/binding write. Read-only; never edits the user config.
+const PD_MCP_SERVER_NAME = 'pd-recall';
+
+function tomlScalar(rawValue) {
+  const value = rawValue.trim();
+  if (value.startsWith('"') && value.endsWith('"')) {
+    try { return JSON.parse(value); } catch { return undefined; }
+  }
+  if (value.startsWith("'") && value.endsWith("'")) return value.slice(1, -1);
+  return undefined;
+}
+
+function tomlArray(rawValue) {
+  const value = rawValue.trim();
+  if (!value.startsWith('[') || !value.endsWith(']')) return undefined;
+  const inner = value.slice(1, -1).trim();
+  if (inner.length === 0) return [];
+  const parts = inner.split(',').map((part) => part.trim()).filter((part) => part.length > 0);
+  const out = [];
+  for (const part of parts) {
+    const parsed = tomlScalar(part);
+    if (parsed === undefined) return undefined;
+    out.push(parsed);
+  }
+  return out;
+}
+
+function writeFileAtomic(file, contents) {
+  const temp = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.tmp`);
+  try {
+    fs.writeFileSync(temp, contents, 'utf8');
+    fs.renameSync(temp, file);
+  } catch (error) {
+    try {
+      fs.rmSync(temp, { force: true });
+    } catch {
+      /* best-effort cleanup of our own temp file */
+    }
+    throw error;
+  }
+}
+
+function scanCodexPdRecallEntry(configPath, pluginRoot) {
+  let raw;
+  try { raw = fs.readFileSync(configPath, 'utf8'); } catch (error) {
+    if (error && error.code === 'ENOENT') return { state: 'absent' };
+    return { state: 'unverifiable', why: 'unreadable' };
+  }
+  const entry = { command: undefined, args: undefined, url: undefined, opaque: false };
+  let found = false;
+  let table;
+  let multilineArgs;
+  for (const line of raw.split(/\r?\n/)) {
+    if (multilineArgs !== undefined) {
+      const close = line.indexOf(']');
+      const segment = close === -1 ? line : line.slice(0, close);
+      const parsed = tomlScalar(segment.replace(/,$/, '').trim());
+      if (parsed !== undefined) multilineArgs.push(parsed);
+      if (close !== -1) { entry.args = multilineArgs; multilineArgs = undefined; }
+      continue;
+    }
+    const trimmed = line.trim();
+    if (trimmed.length === 0 || trimmed.startsWith('#')) continue;
+    const header = /^\s*\[\[?([^\]]+)\]\]?\s*(?:#.*)?$/.exec(line);
+    if (header) {
+      const parts = header[1].split('.').map((part) => part.trim().replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1'));
+      if (parts[0] === 'mcp_servers' && parts[1] === PD_MCP_SERVER_NAME) {
+        found = true;
+        table = parts.length === 2 ? 'server' : 'child';
+      } else {
+        table = undefined;
+      }
+      continue;
+    }
+    if (/^\s*mcp_servers\s*=/.test(line)) {
+      // Inline-table form PD cannot model: ownership is unknowable.
+      found = true;
+      entry.opaque = true;
+      table = undefined;
+      continue;
+    }
+    if (table === undefined) {
+      const dotted = /^\s*mcp_servers\.(?:"([^"]+)"|'([^']+)'|([A-Za-z0-9_-]+))\.(command|args|url)\s*=\s*(.*)$/.exec(line);
+      if (dotted && (dotted[1] ?? dotted[2] ?? dotted[3]) === PD_MCP_SERVER_NAME) {
+        found = true;
+        const key = dotted[4];
+        const value = dotted[5];
+        if (key === 'command') entry.command = tomlScalar(value);
+        else if (key === 'url') entry.url = tomlScalar(value);
+        else {
+          const parsed = tomlArray(value);
+          if (parsed !== undefined) entry.args = parsed;
+          else if (value.trim().startsWith('[')) multilineArgs = [];
+          else entry.opaque = true;
+        }
+      }
+      continue;
+    }
+    if (table !== 'server') continue;
+    const pair = /^\s*(command|args|url)\s*=\s*(.*)$/.exec(line);
+    if (!pair) continue;
+    if (pair[1] === 'command') {
+      entry.command = tomlScalar(pair[2]);
+      if (entry.command === undefined) entry.opaque = true;
+    } else if (pair[1] === 'url') {
+      entry.url = tomlScalar(pair[2]);
+      if (entry.url === undefined) entry.opaque = true;
+    } else {
+      const parsed = tomlArray(pair[2]);
+      if (parsed !== undefined) entry.args = parsed;
+      else if (pair[2].trim().startsWith('[')) multilineArgs = [];
+      else entry.opaque = true;
+    }
+  }
+  if (!found) return { state: 'absent' };
+  if (entry.opaque) return { state: 'unverifiable', why: 'unparsable_mcp_servers_construct' };
+  const command = typeof entry.command === 'string' ? entry.command : undefined;
+  const args = Array.isArray(entry.args) ? entry.args : undefined;
+  if (command === undefined) return { state: typeof entry.url === 'string' ? 'other' : 'unverifiable', why: 'no_command' };
+  const commandBase = path.basename(command).toLowerCase();
+  const nodeBase = path.basename(process.execPath).toLowerCase();
+  if (commandBase !== 'node' && commandBase !== 'node.exe' && commandBase !== nodeBase) return { state: 'other', why: 'different_command' };
+  if (args === undefined) return { state: 'unverifiable', why: 'args_missing' };
+  const launcherArg = args.find((arg) => path.basename(arg.replace(/\\/g, '/')) === 'launcher.cjs'
+    && path.basename(path.dirname(arg.replace(/\\/g, '/'))) === 'mcp');
+  if (launcherArg === undefined) return { state: 'other', why: 'different_args' };
+  const identity = launcherIdentity(launcherArg, 'codex', pluginRoot);
+  if (identity === 'pd_owned') return { state: 'pd_owned' };
+  if (identity === 'other') return { state: 'other', why: 'different_launcher_identity' };
+  return { state: 'unverifiable', why: 'launcher_identity_unverifiable' };
+}
+
+// SPEC §7.5/§11.3: a registered `mcp/launcher.cjs` proves ownership by IDENTITY
+// (PD content stamps plus the unique host manifest marker) — never by the file
+// NAME or a lexical path. A third-party product may ship the same launcher name.
+const PD_LAUNCHER_ID = 'pd-mcp-launcher.v1';
+const PD_BINDING_SCHEMA_MARKER = 'pd.mcp-binding.v1';
+const MAX_LAUNCHER_BYTES = 512 * 1024;
+
+const HOST_MARKERS = {
+  codex: ['.codex-plugin', 'plugin.json'],
+  openclaw: ['openclaw.plugin.json'],
+  workbuddy: ['.codebuddy-plugin', 'plugin.json'],
+};
+
+function isPathWithin(child, parent) {
+  const relative = path.relative(parent, child);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function isPathInside(parent, child) {
+  try {
+    const realParent = fs.realpathSync(parent);
+    const realChild = fs.realpathSync(child);
+    return isPathWithin(realChild, realParent);
+  } catch {
+    return false;
+  }
+}
+
+function pluginHostIdentity(pluginRoot, expectedHost) {
+  let realRoot;
+  try {
+    realRoot = fs.realpathSync(pluginRoot);
+  } catch {
+    return 'unverifiable';
+  }
+  const detected = [];
+  for (const [host, markerParts] of Object.entries(HOST_MARKERS)) {
+    const markerPath = path.join(realRoot, ...markerParts);
+    let markerStat;
+    try {
+      markerStat = fs.lstatSync(markerPath);
+    } catch (error) {
+      if (error && error.code === 'ENOENT') continue;
+      return 'unverifiable';
+    }
+    if (!markerStat.isFile() || markerStat.isSymbolicLink()) return 'unverifiable';
+    let realMarker;
+    try {
+      realMarker = fs.realpathSync(markerPath);
+    } catch {
+      return 'unverifiable';
+    }
+    if (!isPathWithin(realMarker, realRoot)) return 'unverifiable';
+    let markerRecord;
+    try {
+      markerRecord = JSON.parse(fs.readFileSync(realMarker, 'utf8'));
+    } catch {
+      return 'unverifiable';
+    }
+    const markerKey = host === 'openclaw' ? 'id' : 'name';
+    if (!markerRecord || typeof markerRecord !== 'object' || Array.isArray(markerRecord)
+      || markerRecord[markerKey] !== 'principles-disciple') return 'unverifiable';
+    detected.push(host);
+  }
+  if (detected.length !== 1) return 'unverifiable';
+  return detected[0] === expectedHost ? 'match' : 'other';
+}
+
+function launcherIdentity(file, expectedHost, pluginRoot) {
+  if (typeof file !== 'string' || file.length === 0 || file.includes('${') || !path.isAbsolute(file)) {
+    // Relative args and unresolved host placeholders depend on a cwd/variable
+    // the config does not fix: ownership is unprovable (fail-closed).
+    return 'unverifiable';
+  }
+  const resolved = path.resolve(file);
+  let real;
+  try {
+    real = fs.realpathSync(resolved);
+  } catch {
+    return 'unverifiable';
+  }
+  if (path.basename(real).toLowerCase() !== 'launcher.cjs'
+    || path.basename(path.dirname(real)).toLowerCase() !== 'mcp') return 'other';
+
+  // The known Codex plugin root is a path boundary, not an ownership bypass.
+  // A junction/symlink under it must resolve back inside its real directory.
+  if (pluginRoot !== undefined && isPathWithin(resolved, path.resolve(pluginRoot))
+    && !isPathInside(pluginRoot, real)) return 'unverifiable';
+
+  // One open descriptor: fstat+read on the same handle removes the
+  // stat-then-read window (CodeQL js/file-system-race).
+  let fd;
+  try {
+    fd = fs.openSync(real, 'r');
+  } catch {
+    return 'unverifiable';
+  }
+  try {
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile()) return 'unverifiable';
+    if (stat.size > MAX_LAUNCHER_BYTES) return 'other';
+    const buffer = Buffer.alloc(stat.size);
+    fs.readSync(fd, buffer, 0, stat.size, 0);
+    const content = buffer.toString('utf8');
+    if (!content.includes(PD_LAUNCHER_ID) || !content.includes(PD_BINDING_SCHEMA_MARKER)) return 'other';
+    const hostIdentity = pluginHostIdentity(path.dirname(path.dirname(real)), expectedHost);
+    return hostIdentity === 'match' ? 'pd_owned' : hostIdentity;
+  } catch {
+    return 'unverifiable';
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function checkCodexMcpServerConflict(pluginRoot) {
+  const codexHome = process.env.CODEX_HOME && process.env.CODEX_HOME.length > 0
+    ? process.env.CODEX_HOME
+    : path.join(os.homedir(), '.codex');
+  const configPath = path.join(codexHome, 'config.toml');
+  const result = scanCodexPdRecallEntry(configPath, pluginRoot);
+  if (result.state === 'absent' || result.state === 'pd_owned') return { ok: true, state: result.state };
+  if (result.state === 'other') {
+    return {
+      ok: false,
+      reason: `mcp_same_name_conflict: ${configPath} registers "${PD_MCP_SERVER_NAME}" with a launcher not owned by Codex (third-party or another PD host; user config overrides the plugin tier). Nothing was installed or written.`,
+      nextAction: `Point [mcp_servers.${PD_MCP_SERVER_NAME}] at the Codex plugin's own absolute mcp/launcher.cjs path, or remove/rename the foreign entry in ${configPath}, then re-run $pd-control setup. PD never reuses another host's launcher.`,
+    };
+  }
+  return {
+    ok: false,
+    reason: `mcp_registration_unverifiable: ${configPath} declares "${PD_MCP_SERVER_NAME}" in a form whose ownership cannot be verified (${result.why}). Nothing was installed or written.`,
+    nextAction: `Inspect ${configPath} manually and remove/repair the "${PD_MCP_SERVER_NAME}" entry, then re-run $pd-control setup.`,
+  };
+}
+
 function parseArgs(argv) {
-  const out = { pluginRoot: undefined, pluginData: undefined, workspace: undefined, adapterSource: undefined, hostRuntimeSource: undefined, skipInit: false, json: false, ingest: undefined };
+  const out = { pluginRoot: undefined, pluginData: undefined, workspace: undefined, adapterSource: undefined, hostRuntimeSource: undefined, coreSource: undefined, mcpServerSource: undefined, skipInit: false, json: false, ingest: undefined };
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--plugin-root') {
       const value = requireFlagValue(argv, i, '--plugin-root');
@@ -69,11 +339,11 @@ function parseArgs(argv) {
       const value = requireFlagValue(argv, i, '--workspace');
       if (!value.ok) return { error: value.reason, nextAction: value.nextAction };
       out.workspace = value.value; i += 1;
-    } else if (argv[i] === '--adapter-source' || argv[i] === '--host-runtime-source' || argv[i] === '--core-source') {
+    } else if (argv[i] === '--adapter-source' || argv[i] === '--host-runtime-source' || argv[i] === '--core-source' || argv[i] === '--mcp-server-source') {
       const flag = argv[i];
       const value = requireFlagValue(argv, i, flag);
       if (!value.ok) return { error: value.reason, nextAction: value.nextAction };
-      const key = flag === '--adapter-source' ? 'adapterSource' : flag === '--host-runtime-source' ? 'hostRuntimeSource' : 'coreSource';
+      const key = flag === '--adapter-source' ? 'adapterSource' : flag === '--host-runtime-source' ? 'hostRuntimeSource' : flag === '--core-source' ? 'coreSource' : 'mcpServerSource';
       out[key] = path.resolve(value.value); i += 1;
     } else if (argv[i] === '--skip-init') out.skipInit = true;
     else if (argv[i] === '--json') out.json = true;
@@ -85,7 +355,7 @@ function parseArgs(argv) {
       }
       out.ingest = value.value; i += 1;
     }
-    else return { error: `unknown_argument:${argv[i]}`, nextAction: 'Supported: --plugin-root <dir> --plugin-data <dir> --workspace <dir> --adapter-source <dir> --host-runtime-source <dir> --core-source <dir> --skip-init --ingest accept|decline|skip --json' };
+    else return { error: `unknown_argument:${argv[i]}`, nextAction: 'Supported: --plugin-root <dir> --plugin-data <dir> --workspace <dir> --adapter-source <dir> --host-runtime-source <dir> --core-source <dir> --mcp-server-source <dir> --skip-init --ingest accept|decline|skip --json' };
   }
   return out;
 }
@@ -93,6 +363,16 @@ function parseArgs(argv) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.error) { fail(args.error, args.nextAction ?? 'Check the argument list.'); return; }
+  // Pre-publish/test wiring: the mcpServer pin rides the release train, so a
+  // cohort younger than the published set (e.g. the PR that INTRODUCES the
+  // pin) cannot resolve @principles/pd-mcp-server from the registry yet. The
+  // explicit --mcp-server-source flag always wins; this env fallback exists
+  // for harnesses that cannot extend argv (CI flows, spawn-constrained
+  // harnesses) and is documented in the plugin README.
+  if (!args.mcpServerSource) {
+    const envSource = process.env.PD_SETUP_MCP_SERVER_SOURCE;
+    if (typeof envSource === 'string' && envSource.length > 0) args.mcpServerSource = path.resolve(envSource);
+  }
   // Workspace-selection parity with hooks and the owner scripts (ERR-117):
   // they resolve through locateWorkspace — an initialized user workspace wins
   // over the project, and a broken user config fails loud instead of silently
@@ -128,6 +408,11 @@ async function main() {
   //    but never creates the directory (verified on-device, 0.147.0).
   const root = locatePluginRoot(args.pluginRoot);
   if (!root.ok) { fail(root.reason, root.nextAction); return; }
+  // SPEC §7.5/§11.3: check the user-level MCP name BEFORE ensurePluginData /
+  // runtime install / binding write. A conflict or unverifiable ownership must
+  // leave the machine byte-identical.
+  const mcpConflict = checkCodexMcpServerConflict(root.pluginRoot);
+  if (!mcpConflict.ok) { fail(mcpConflict.reason, mcpConflict.nextAction); return; }
   const data = ensurePluginData(args.pluginData, root);
   if (!data.ok) { fail(data.reason, data.nextAction); return; }
 
@@ -138,7 +423,7 @@ async function main() {
     fail(`runtime_version_file_invalid:${error.message.slice(0, 160)}`, 'Reinstall the plugin (codex plugin remove principles-disciple@principles && codex plugin add principles-disciple@principles).');
     return;
   }
-  const desired = { codexAdapter: pins.codexAdapter, hostRuntime: pins.hostRuntime, core: pins.core };
+  const desired = { codexAdapter: pins.codexAdapter, hostRuntime: pins.hostRuntime, core: pins.core, mcpServer: pins.mcpServer };
   if (args.adapterSource) {
     let sourcePackage;
     try { sourcePackage = JSON.parse(fs.readFileSync(path.join(args.adapterSource, 'package.json'), 'utf8')); }
@@ -169,6 +454,16 @@ async function main() {
       fail('core_source_invalid', 'The built core name/version must match the plugin runtime pin (runtime-version.json).'); return;
     }
   }
+  if (args.mcpServerSource) {
+    let sourcePackage;
+    try { sourcePackage = JSON.parse(fs.readFileSync(path.join(args.mcpServerSource, 'package.json'), 'utf8')); }
+    catch { fail('mcp_server_source_invalid', 'Pass the built @principles/pd-mcp-server package directory containing package.json and dist/index.js.'); return; }
+    if (!sourcePackage || sourcePackage.name !== '@principles/pd-mcp-server'
+      || sourcePackage.version !== desired.mcpServer
+      || !fs.existsSync(path.join(args.mcpServerSource, 'dist', 'index.js'))) {
+      fail('mcp_server_source_invalid', 'The built MCP server name/version must match the plugin runtime pin (runtime-version.json).'); return;
+    }
+  }
   const missingPins = Object.entries(desired)
     .filter(([, value]) => typeof value !== 'string' || value.length === 0)
     .map(([key]) => key);
@@ -185,7 +480,13 @@ async function main() {
     if (!adapterSource && typeof marker.adapterSource === 'string') adapterSource = marker.adapterSource;
     if (marker.codexAdapter === desired.codexAdapter
       && marker.hostRuntime === desired.hostRuntime
-      && marker.core === desired.core && !args.adapterSource && !args.hostRuntimeSource && !args.coreSource) installNeeded = false;
+      && marker.core === desired.core
+      && marker.mcpServer === desired.mcpServer
+      && !args.adapterSource && !args.hostRuntimeSource && !args.coreSource && !args.mcpServerSource
+      // rc-9: a marker that recorded a LOCAL MCP package must not short-circuit
+      // a later run without --mcp-server-source — the retained build would keep
+      // being reused while the operator expects the registry package.
+      && typeof marker.mcpServerSource !== 'string') installNeeded = false;
   } catch { /* no/broken marker → install */ }
   // PRI-1046: a marker is a claim, not evidence. It used to be written from the
   // desired pins without ever reading the installed bytes, so a silently
@@ -201,14 +502,17 @@ async function main() {
   // can log `placeDep … REPLACE` + `REMOVE node_modules/…` and still exit 0, so
   // the acceptance test is always the bytes on disk.
   const adapterEntry = path.join(runtimeDir, 'node_modules', '@principles', 'codex-adapter', 'dist', 'pd-hook.js');
+  const mcpServerEntry = path.join(runtimeDir, 'node_modules', '@principles', 'pd-mcp-server', 'dist', 'index.js');
   const attestRuntime = () => {
     const verified = verifyInstalledRuntime(runtimeDir, desired);
     const adapterEntryPresent = fs.existsSync(adapterEntry);
-    return { verified, adapterEntryPresent, ok: verified.ok && adapterEntryPresent };
+    const mcpServerEntryPresent = fs.existsSync(mcpServerEntry);
+    return { verified, adapterEntryPresent, mcpServerEntryPresent, ok: verified.ok && adapterEntryPresent && mcpServerEntryPresent };
   };
   const attestationDetail = (attestation) => {
     const rows = attestation.verified.mismatched.map((row) => `${row.packageName}@${row.installed}!=${row.pinned}`);
     if (!attestation.adapterEntryPresent) rows.push('codex-adapter/dist/pd-hook.js:missing');
+    if (!attestation.mcpServerEntryPresent) rows.push('pd-mcp-server/dist/index.js:missing');
     return rows.join(',');
   };
   const installRuntime = () => runNpm(
@@ -219,10 +523,11 @@ async function main() {
       // at 0 and the failure stays loud — the bytes below decide acceptance, so
       // a retry could only lengthen a real network error, never mask a drop.
       '--fetch-retries=0', '--fetch-timeout=60000',
-      ...(args.adapterSource || args.hostRuntimeSource || args.coreSource ? ['--install-links'] : []),
+      ...(args.adapterSource || args.hostRuntimeSource || args.coreSource || args.mcpServerSource ? ['--install-links'] : []),
       args.adapterSource ? `file:${args.adapterSource}` : `@principles/codex-adapter@${desired.codexAdapter}`,
       args.hostRuntimeSource ? `file:${args.hostRuntimeSource}` : `@principles/host-runtime@${desired.hostRuntime}`,
       args.coreSource ? `file:${args.coreSource}` : `@principles/core@${desired.core}`,
+      args.mcpServerSource ? `file:${args.mcpServerSource}` : `@principles/pd-mcp-server@${desired.mcpServer}`,
     ],
     { cwd: runtimeDir, stdio: ['ignore', 'pipe', 'pipe'], timeout: 600_000 },
   );
@@ -269,7 +574,7 @@ async function main() {
   // The marker is the short-circuit for every later run, so it may be written
   // only after the bytes it claims were read and agreed (PRI-1046).
   if (installNeeded) {
-    fs.writeFileSync(markerPath, JSON.stringify({ ...desired, ...(args.adapterSource ? { adapterSource: args.adapterSource } : {}), ...(args.hostRuntimeSource ? { hostRuntimeSource: args.hostRuntimeSource } : {}), ...(args.coreSource ? { coreSource: args.coreSource } : {}), installedAt: new Date().toISOString() }, null, 2));
+    fs.writeFileSync(markerPath, JSON.stringify({ ...desired, ...(args.adapterSource ? { adapterSource: args.adapterSource } : {}), ...(args.hostRuntimeSource ? { hostRuntimeSource: args.hostRuntimeSource } : {}), ...(args.coreSource ? { coreSource: args.coreSource } : {}), ...(args.mcpServerSource ? { mcpServerSource: args.mcpServerSource } : {}), installedAt: new Date().toISOString() }, null, 2));
   }
 
   // 3. Workspace init through the existing production command.
@@ -291,6 +596,24 @@ async function main() {
     initResult = 'initialized';
   }
 
+  // 3b. Gate 4 (PRI-1071): write the PD-owned MCP binding file beside the
+  //     plugin payload. The launcher (mcp/launcher.cjs, started by the
+  //     plugin's .mcp.json) reads it and injects the trusted env — this is
+  //     the single authority for the business workspaceDir (SPEC-PD-MCP-
+  //     GATE4-001 §3.5). Idempotent: rewritten on every setup so a plugin
+  //     update (codex plugin add) that resets the payload directory
+  //     restores the binding on the next setup run.
+  const bindingPath = path.join(root.pluginRoot, 'mcp-binding.json');
+  const mcpBinding = {
+    schemaVersion: 'pd.mcp-binding.v1',
+    host: 'codex',
+    workspaceDir,
+    runtimeDir,
+    serverEntry: mcpServerEntry,
+    versions: { mcpServer: desired.mcpServer, core: desired.core },
+    writtenAt: new Date().toISOString(),
+  };
+
   // The Marketplace installer must register its workspace too: the retired
   // global-hook installer no longer reaches writeInstallManifest. Companion
   // discovers workers only from this existing installer-owned manifest.
@@ -301,6 +624,11 @@ async function main() {
     fail(`worker_registration_failed:${error.message.slice(0, 160)}`, 'Restore the canonical PD install manifest/runtime and re-run $pd-control setup. The existing manifest was not replaced.');
     return;
   }
+  // Written only after registration succeeded: a failed setup must not leave a
+  // binding that the next MCP launch would trust. Atomic replace (temp + rename)
+  // so a launcher reading concurrently never sees a truncated binding — the
+  // same file-integrity discipline as the OpenClaw plugin and WorkBuddy writers.
+  writeFileAtomic(bindingPath, JSON.stringify(mcpBinding, null, 2) + '\n');
 
   // 4. Codex conversation-ingestion consent (PRI-625, G2A frozen disclosure).
   //    The disclosure text ALWAYS comes from the installed pd CLI
@@ -324,6 +652,7 @@ async function main() {
     workspace: workspaceDir,
     workspaceConfig: fs.existsSync(configPath) ? 'present' : 'absent (run pd runtime init without --skip-init, or create .pd/config.yaml)',
     workspaceInit: initResult,
+    mcp: { binding: bindingPath, server: `@principles/pd-mcp-server@${desired.mcpServer}`, tool: 'pd_recall_principle_pains', nextAction: 'Restart Codex (or start a new session) so the pd-recall MCP server starts; verify with `codex mcp list`.' },
     workerRegistration,
     ingestionConsent: consent.outcome,
     ...(consent.note ? { ingestionConsentNote: consent.note } : {}),
@@ -335,6 +664,7 @@ async function main() {
     console.log(`  runtime   : @principles/codex-adapter@${desired.codexAdapter} + host-runtime@${desired.hostRuntime} + core@${desired.core} (${report.runtimeInstalled})`);
     if (runtimeRepair) console.log(`  repaired  : reinstalled from a clean tree after npm left unattested bytes (${runtimeRepair.firstMismatch})`);
     console.log(`  workspace : ${workspaceDir} — config ${report.workspaceConfig}`);
+    console.log(`  mcp       : @principles/pd-mcp-server@${desired.mcpServer} bound (pd-recall; restart Codex to activate)`);
     console.log(`  ingestion : ${report.ingestionConsent}${consent.note ? ` (${consent.note})` : ''}`);
     console.log(`  worker    : ${workerRegistration.status} — ${workerRegistration.nextAction}`);
     console.log(`  next      : ${report.hookTrustNextAction}`);

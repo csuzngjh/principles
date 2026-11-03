@@ -30,6 +30,7 @@ import type {
   HostDetectResult,
 } from '@principles/core/host';
 import { validateOpenClawConfig } from '../mvp-config.js';
+import { classifyOpenClawConfigObject } from './mcp-registration-conflict.js';
 
 // PRI-343: Keep in sync with @principles/core CONVERSATION_ACCESS_CONFIG_KEY
 const CONVERSATION_ACCESS_CONFIG_KEY = 'allowConversationAccess';
@@ -158,6 +159,26 @@ export class OpenClawHostInstaller implements HostInstaller {
 
       // rc-2: isRecord narrows config to Record<string, unknown> without `as` cast.
       const configObj = isRecord(config) ? { ...config } : {};
+
+      // SPEC §7.5/§11.3: the operator `mcp.servers["pd-recall"]` tier overrides
+      // plugin-owned MCP servers. A same-name server owned by someone else must
+      // STOP the install BEFORE any write — never be overwritten, never be
+      // discovered after the fact and "rolled back".
+      // Ownership is proven by PD's own extension root OR by the launcher's
+      // content stamps — never by the `mcp/launcher.cjs` file NAME alone.
+      const mcpConflict = classifyOpenClawConfigObject(configObj, configPath, {
+        pdLauncherRoots: [path.join(configDir, 'extensions', 'principles-disciple')],
+      });
+      if (!mcpConflict.ok) {
+        return {
+          success: false,
+          hostId: this.hostId,
+          configPath,
+          configAction: 'skipped',
+          reason: mcpConflict.reason,
+          nextAction: mcpConflict.nextAction,
+        };
+      }
 
       // Ensure plugins.allow includes principles-disciple
       if (!configObj.plugins) configObj.plugins = {};

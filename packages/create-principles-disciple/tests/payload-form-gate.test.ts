@@ -56,10 +56,11 @@ describe('install payload form-gate (npm-distributed shape)', () => {
     const actualOs = await vi.importActual<typeof import('node:os')>('node:os');
     const realPath = await vi.importActual<typeof import('node:path')>('node:path');
     fixtureDir = actualFs.mkdtempSync(realPath.join(actualFs.realpathSync.native(actualOs.tmpdir()), 'pd-form-gate-'));
-    for (const component of ['core', 'host-runtime', 'codex-adapter', 'plugin', 'pd-cli', 'console', 'install-layout', 'release-manager']) {
+    for (const component of ['core', 'host-runtime', 'codex-adapter', 'plugin', 'pd-cli', 'console', 'install-layout', 'release-manager', 'pd-mcp-server']) {
       actualFs.mkdirSync(realPath.join(fixtureDir, component, 'dist'), { recursive: true });
       actualFs.writeFileSync(realPath.join(fixtureDir, component, 'package.json'), JSON.stringify({ name: `@principles/${component}`, version: '0.0.0' }));
     }
+    actualFs.writeFileSync(realPath.join(fixtureDir, 'pd-mcp-server', 'dist', 'index.js'), 'export {};');
     // Components whose install steps demand more than package.json+dist.
     actualFs.mkdirSync(realPath.join(fixtureDir, 'release-manager', 'dist', 'update'), { recursive: true });
     actualFs.writeFileSync(realPath.join(fixtureDir, 'release-manager', 'dist', 'update', 'release-manager-authority.js'), 'export {};');
@@ -203,10 +204,11 @@ describe('gate matrix: PRI-697 message/mode pairing + PRI-898 shim-gate decoupli
     const actualOs = await vi.importActual<typeof import('node:os')>('node:os');
     const realPath = await vi.importActual<typeof import('node:path')>('node:path');
     const dir = actualFs.mkdtempSync(realPath.join(actualFs.realpathSync.native(actualOs.tmpdir()), 'pd-697-npm-bundle-'));
-    for (const component of ['core', 'host-runtime', 'codex-adapter', 'plugin', 'pd-cli', 'console', 'install-layout', 'release-manager']) {
+    for (const component of ['core', 'host-runtime', 'codex-adapter', 'plugin', 'pd-cli', 'console', 'install-layout', 'release-manager', 'pd-mcp-server']) {
       actualFs.mkdirSync(realPath.join(dir, component, 'dist'), { recursive: true });
       actualFs.writeFileSync(realPath.join(dir, component, 'package.json'), JSON.stringify({ name: `@principles/${component}`, version: '0.0.0' }));
     }
+    actualFs.writeFileSync(realPath.join(dir, 'pd-mcp-server', 'dist', 'index.js'), 'export {};');
     actualFs.mkdirSync(realPath.join(dir, 'release-manager', 'dist', 'update'), { recursive: true });
     actualFs.writeFileSync(realPath.join(dir, 'release-manager', 'dist', 'update', 'release-manager-authority.js'), 'export {};');
     actualFs.writeFileSync(realPath.join(dir, 'release-manager', 'dist', 'update', 'console-surface.js'), 'export {};');

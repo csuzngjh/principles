@@ -45,9 +45,9 @@ describe('ci.yml impact scope-gate contract', () => {
 
   it('every job gated on impact keeps the fail-open condition shape', () => {
     const gated = Object.entries(jobs).filter(([, j]) => [].concat(j.needs ?? []).includes('impact'));
-    // The design currently gates 13 jobs; a shrinking gate set is a design
+    // The design currently gates 14 jobs; a shrinking gate set is a design
     // change that should show up in this test's diff.
-    expect(gated.length).toBe(13);
+    expect(gated.length).toBe(14);
     for (const [id, job] of gated) {
       const expr = job.if ?? '';
       // The ${{ }} wrapper matters as much as the status function: a bare

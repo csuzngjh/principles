@@ -41,6 +41,8 @@ import {
   CODEX_INGESTION_DISCLOSURE_VERSION,
 } from '@principles/host-runtime';
 import { assessCodexInstall, CODEX_INSTALL_NEXT_ACTIONS } from './health-codex-install.js';
+import { assessMcpHealth, formatMcpHealthLines } from './health-mcp.js';
+import type { McpHealthSection } from './health-mcp.js';
 import type * as CodexAdapterModule from '@principles/codex-adapter';
 import { getInstallLayoutPaths, parseInstallManifest } from '@principles/install-layout';
 import { SqliteConnection, SqliteTaskStore, computeFeatureFlagsFromConfig, isFeatureEnabled } from '@principles/core/runtime-v2';
@@ -157,6 +159,8 @@ interface CodexHealthReport {
     cliStatus: 'supported' | 'unsupported_below' | 'unverified_above' | 'unknown';
     cliStatusSource: 'current_cli' | 'last_rollout' | 'none';
   }>;
+  /** PRI-1071 Gate 4: shared MCP lifecycle diagnostics (read-only). */
+  mcp: McpHealthSection;
   /** §15: ready is true only under the full §15 conjunction; unknown ⇒ not ready. */
   ready: boolean;
   readyBlockers: string[];
@@ -554,6 +558,14 @@ export async function handleHealthCodex(opts: CodexHealthOptions = {}): Promise<
   }
 
   // ── §15 ready conjunction ──────────────────────────────────────────────────
+  // PRI-1071 Gate 4: the shared MCP recall surface is reported separately.
+  // It is NOT part of the §15 ingestion/closure conjunction — a missing MCP
+  // binding must be visible and actionable, but it must not reclassify the
+  // (independent) Codex ingestion readiness contract.
+  const mcp = assessMcpHealth({ host: 'codex', homeDir: os.homedir(), env: process.env });
+  if (mcp.status !== 'HEALTHY') {
+    warnings.push(`mcp: ${mcp.status} — ${mcp.reason ?? 'unverified'}. ${mcp.nextAction ?? ''}`.trim());
+  }
   if (!hostCodexEnabled) noteReadyBlocker('host.codex', 'disabled');
   if (workerEvaluation.mode === 'paused') noteReadyBlocker('worker', workerEvaluation.reason);
   const adapterVersion = readPackageVersion('@principles/codex-adapter');
@@ -603,6 +615,7 @@ export async function handleHealthCodex(opts: CodexHealthOptions = {}): Promise<
           cliStatusSource: install.cliStatusSource,
         }
       : { reason: install.reason, nextAction: install.nextAction },
+    mcp,
     ready,
     readyBlockers: readyBlockers.slice(0, 12),
     warnings,
@@ -637,6 +650,7 @@ export async function handleHealthCodex(opts: CodexHealthOptions = {}): Promise<
   }
   line('codexIngestionMinVersion', report.codexIngestionMinVersion);
   line('codexIngestionVerifiedVersion', report.codexIngestionVerifiedVersion);
+  for (const mcpLine of formatMcpHealthLines(report.mcp)) console.log(mcpLine);
   line('featureFlag.host.codex', `${String(report.featureFlag.enabled)} (${report.featureFlag.source})`);
   if ('enabled' in report.ingestionFlag) {
     line('ingestionFlag.codex_conversation_ingestion', `${String(report.ingestionFlag.enabled)} (${report.ingestionFlag.source})`);

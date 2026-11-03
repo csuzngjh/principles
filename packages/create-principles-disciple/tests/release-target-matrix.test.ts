@@ -240,6 +240,7 @@ describe('native release target matrix', () => {
       'install-layout',
       'host-runtime',
       'codex-adapter',
+      'pd-mcp-server',
       'workbuddy-adapter',
       'openclaw-plugin',
       'pd-cli',

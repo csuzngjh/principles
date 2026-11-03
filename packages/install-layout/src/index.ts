@@ -77,6 +77,14 @@ export interface InstallLayoutPaths {
    * the same way the Codex hook resolves the canonical runtime.
    */
   workbuddyAdapterDir: string;
+  /**
+   * Gate 4 (PRI-1071): the shared read-only MCP server component (payload dir
+   * pd-mcp-server/, npm name @principles/pd-mcp-server). This is the Install
+   * Layout SSoT for the canonical server entry OpenClaw/WorkBuddy launchers
+   * bind to; Codex keeps its plugin-data runtime layout and records that dir
+   * in its own binding.
+   */
+  mcpServerDir: string;
 }
 
 export interface LayoutResolution {
@@ -233,7 +241,18 @@ export function getInstallLayoutPaths(homeDir: string): InstallLayoutPaths {
     releaseManagerDir: path.join(runtimeDir, 'release-manager'),
     codexAdapterDir: path.join(runtimeDir, 'codex-adapter'),
     workbuddyAdapterDir: path.join(runtimeDir, 'workbuddy-adapter'),
+    mcpServerDir: path.join(runtimeDir, 'pd-mcp-server'),
   };
+}
+
+/**
+ * Canonical installed MCP server entry for the shared runtime layout
+ * (~/.pd/runtime/pd-mcp-server/dist/index.js). Launchers, binding writers and
+ * health diagnostics derive the path from this single owner instead of each
+ * repeating the segment list.
+ */
+export function getMcpServerEntry(paths: InstallLayoutPaths): string {
+  return path.join(paths.mcpServerDir, 'dist', 'index.js');
 }
 
 /**

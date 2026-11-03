@@ -19,8 +19,12 @@ function createFixture(): { inputDir: string; outputDir: string } {
   // component — the fixture mirrors that same conditional so the two lists
   // cannot drift apart again.
   const workbuddyAdapterInSource = fs.existsSync(path.resolve(__dirname, '..', '..', '..', 'packages', 'workbuddy-adapter', 'package.json'));
+  // Gate 4: the script appends 'pd-mcp-server' exactly when the source tree
+  // carries packages/pd-mcp-server/package.json — mirror that same condition.
+  const mcpServerInSource = fs.existsSync(path.resolve(__dirname, '..', '..', '..', 'packages', 'pd-mcp-server', 'package.json'));
   const components = ['plugin', 'console', 'core', 'pd-cli', 'host-runtime', 'install-layout', 'release-manager', 'codex-adapter']
-    .concat(workbuddyAdapterInSource ? ['workbuddy-adapter'] : []);
+    .concat(workbuddyAdapterInSource ? ['workbuddy-adapter'] : [])
+    .concat(mcpServerInSource ? ['pd-mcp-server'] : []);
   for (const component of components) {
     fs.mkdirSync(path.join(inputDir, component, 'node_modules', 'runtime-dependency'), { recursive: true });
     fs.writeFileSync(path.join(inputDir, component, 'package.json'), JSON.stringify({

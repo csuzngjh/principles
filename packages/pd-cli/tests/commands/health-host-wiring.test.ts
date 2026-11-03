@@ -59,6 +59,14 @@ describe('cli-7: pd health --host flag wiring (production registration)', () => 
     expect(mockHandleHealthCodex).toHaveBeenCalledWith(expect.objectContaining({ workspace: '/some/path' }));
   });
 
+  it('dispatches to handleHealth when --host workbuddy is passed (MCP diagnostics host)', async () => {
+    const program = buildHealthCommand();
+    await program.parseAsync(['node', 'pd', 'health', '--host', 'workbuddy', '--json']);
+    expect(mockHandleHealth).toHaveBeenCalledTimes(1);
+    expect(mockHandleHealth).toHaveBeenCalledWith(expect.objectContaining({ host: 'workbuddy', json: true }));
+    expect(mockHandleHealthCodex).not.toHaveBeenCalled();
+  });
+
   it('rejects an unknown --host value without dispatching', async () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const program = buildHealthCommand();

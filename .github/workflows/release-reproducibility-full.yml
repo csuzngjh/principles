@@ -60,6 +60,8 @@ jobs:
           npm run build --workspace=principles-disciple
           npm run build --workspace=@principles/pd-cli
           npm run build --workspace=@principles/pd-console
+          # Gate 4 (PRI-1071): MCP server before the installer bundle.
+          npm run build --workspace=@principles/pd-mcp-server
           npm run build --workspace=create-principles-disciple
       - name: Build the real production asset twice and compare bytes
         shell: bash
@@ -168,6 +170,8 @@ jobs:
           npm run build --workspace=principles-disciple
           npm run build --workspace=@principles/pd-cli
           npm run build --workspace=@principles/pd-console
+          # Gate 4 (PRI-1071): MCP server before the installer bundle.
+          npm run build --workspace=@principles/pd-mcp-server
           npm run build --workspace=create-principles-disciple
       - name: Download the double-build-verified windows release asset
         uses: actions/download-artifact@v8

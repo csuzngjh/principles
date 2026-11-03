@@ -96,7 +96,7 @@ describe('publish-preflight.yml — summary is derived from per-leg evidence (H1
 
     const preflightText = fs.readFileSync(path.join(REPO_ROOT, PREFLIGHT), 'utf8');
     const trainOrder = /^\s*TRAIN_ORDER: ([a-z0-9,_-]+)$/m.exec(preflightText)?.[1].split(',') ?? [];
-    expect(trainOrder).toHaveLength(8);
+    expect(trainOrder).toHaveLength(9);
     // A package added to the train without a rehearsal leg would silently
     // shrink the evidence the summary is allowed to describe.
     expect(legSteps).toHaveLength(trainOrder.length);

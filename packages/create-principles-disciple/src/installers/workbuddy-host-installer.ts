@@ -56,6 +56,8 @@ import {
   type InstallHost,
 } from '@principles/install-layout';
 import { atomicReplaceTextFile, errnoCode } from '../utils/config-file-io.js';
+import { checkMcpRegistrationConflict } from './mcp-registration-conflict.js';
+import { resolveMcpServerDir, resolveMcpServerEntry } from '../mcp-server-layout-compat.js';
 import { getHomeDir, generateConfigYamlContent, getConfigYamlPath, resolveDefaultModelForProvider, isValidHttpBaseUrl } from '../mvp-config.js';
 import type {
   HostInstaller,
@@ -86,11 +88,11 @@ const WORKBUDDY_REQUIRED_SKILLS = ['pd-cli-operator', 'pd-pain-signal', 'pd-revi
 const WORKBUDDY_PAYLOAD_FILES = [
   path.join('.codebuddy-plugin', 'plugin.json'),
   path.join('hooks', 'hooks.json'),
+  path.join('mcp', 'launcher.cjs'),
   path.join('scripts', 'wrapper.cjs'),
   path.join('scripts', 'pd-control.cjs'),
   ...WORKBUDDY_REQUIRED_SKILLS.map((skill) => path.join('skills', skill, 'SKILL.md')),
 ];
-
 
 /** Engine CLI shipped with WorkBuddy Desktop (probe P01 frozen path). */
 export const WORKBUDDY_ENGINE_RELATIVE = ['resources', 'app.asar.unpacked', 'cli', 'dist', 'codebuddy-lite-wb.mjs'];
@@ -108,6 +110,54 @@ const GOVERNANCE_INIT_TIMEOUT_MS = 180_000;
 // ─── Type guards (rc-2: no `as` bypass) ─────────────────────────────────────
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Atomic replace for the binding file (same discipline as the OpenClaw plugin
+ * writer and `$pd-control setup`): a reader must never observe a truncated
+ * binding. No generic config subsystem — one helper next to its only use.
+ */
+function writeFileAtomicSync(file: string, contents: string): void {
+  const temp = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.tmp`);
+  try {
+    writeFileSync(temp, contents, 'utf-8');
+    renameSync(temp, file);
+  } catch (error) {
+    try {
+      rmSync(temp, { force: true });
+    } catch {
+      /* best-effort cleanup of our own temp file */
+    }
+    throw error;
+  }
+}
+
+/**
+ * Cache-binding comparison for the idempotent path. `writtenAt` is a
+ * per-install timestamp, so comparing raw bytes would force a cache refresh
+ * on every run; comparing the rest proves the launcher will read the same
+ * workspace/entry/versions the marketplace copy declares. Absent on both
+ * sides is a match (no MCP payload); absent on one side is drift.
+ */
+function mcpBindingMatches(sourceDir: string, cacheDir: string): boolean {
+  const bindingFile = 'mcp-binding.json';
+  const read = (dir: string): Record<string, unknown> | null | undefined => {
+    const file = path.join(dir, bindingFile);
+    if (!existsSync(file)) return undefined;
+    try {
+      const parsed: unknown = JSON.parse(readFileSync(file, 'utf-8'));
+      if (!isRecord(parsed)) return null;
+      const { writtenAt: _writtenAt, ...rest } = parsed;
+      return rest;
+    } catch {
+      return null;
+    }
+  };
+  const source = read(sourceDir);
+  const cached = read(cacheDir);
+  if (source === undefined && cached === undefined) return true;
+  if (source === undefined || cached === undefined || source === null || cached === null) return false;
+  return JSON.stringify(source) === JSON.stringify(cached);
 }
 
 /** Native v2 stores scope records as an array; old PD installs used one object. */
@@ -1221,6 +1271,44 @@ function materializeMarketplace(marketplaceRoot: string, pluginDir: string): voi
   cpSync(pluginDir, path.join(marketplaceRoot, WORKBUDDY_PLUGIN_NAME), { recursive: true });
 }
 
+/**
+ * Gate 4 (PRI-1071): write the launcher binding into the marketplace payload
+ * copy — the frozen governance workspace (getWorkbuddyWorkspaceDir SSoT) and
+ * the canonical installed MCP server entry. Written only when the server
+ * component exists (an older runtime without it stays honestly absent; the
+ * launcher then fails closed with binding_missing — equally recoverable by
+ * re-running the installer). A failure degrades to a structured note (G4-07:
+ * MCP unavailability must not break the WorkBuddy host install).
+ */
+function writeWorkbuddyMcpBinding(marketplaceRoot: string, homeDir: string): { ok: boolean; reason?: string } {
+  try {
+    const layout = getInstallLayoutPaths(homeDir);
+    // Gate 4 P2: the launcher validates serverEntry against this recorded
+    // runtime root + the Install Layout SSoT component dir, so the binding
+    // cannot point the host at arbitrary JavaScript.
+    const serverEntry = resolveMcpServerEntry(layout);
+    if (!existsSync(serverEntry)) return { ok: false, reason: 'mcp_server_component_missing' };
+    let mcpServerVersion = 'unknown';
+    try {
+      const manifest = JSON.parse(readFileSync(path.join(resolveMcpServerDir(layout), 'package.json'), 'utf-8')) as { version?: unknown };
+      if (typeof manifest.version === 'string') mcpServerVersion = manifest.version;
+    } catch { /* version stays unknown (rc-3: never coerce) */ }
+    const binding = {
+      schemaVersion: 'pd.mcp-binding.v1',
+      host: 'workbuddy',
+      workspaceDir: getWorkbuddyWorkspaceDir(homeDir),
+      runtimeDir: layout.runtimeDir,
+      serverEntry,
+      versions: { mcpServer: mcpServerVersion },
+      writtenAt: new Date().toISOString(),
+    };
+    writeFileAtomicSync(path.join(marketplaceRoot, WORKBUDDY_PLUGIN_NAME, 'mcp-binding.json'), JSON.stringify(binding, null, 2) + '\n');
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, reason: `write_failed:${error instanceof Error ? error.message.slice(0, 120) : String(error).slice(0, 120)}` };
+  }
+}
+
 export class WorkBuddyHostInstaller implements HostInstaller {
   readonly hostId = 'workbuddy';
 
@@ -1354,6 +1442,27 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     }
     const {payload} = payloadFind;
 
+    // 3b. SPEC §7.5/§11.3: a same-name user-level MCP server must stop the
+    // install BEFORE any marketplace/cache/registration write. The check is
+    // read-only and leaves the offending file untouched.
+    const mcpConflict = checkMcpRegistrationConflict('workbuddy', {
+      homeDir: this.deps.homeDir(),
+      workbuddyConfigDir: p.configDir,
+      // Ownership is proven by the payload PD ships OR by launcher content
+      // stamps — never by the `mcp/launcher.cjs` file NAME alone.
+      pdLauncherRoots: [payload.pluginDir],
+    });
+    if (!mcpConflict.ok) {
+      return {
+        success: false,
+        hostId: this.hostId,
+        configPath: p.settingsPath,
+        configAction: 'skipped',
+        reason: mcpConflict.reason,
+        nextAction: mcpConflict.nextAction,
+      };
+    }
+
     // 4. Materialize the PD-owned marketplace (source stays inside its root).
     try {
       materializeMarketplace(p.marketplaceRoot, payload.pluginDir);
@@ -1367,6 +1476,11 @@ export class WorkBuddyHostInstaller implements HostInstaller {
         nextAction: `Check permissions under ${path.dirname(p.marketplaceRoot)} and re-run the installer.`,
       };
     }
+
+    // 4b. Gate 4 (PRI-1071): bind the pd-recall MCP launcher to the frozen
+    // governance workspace. Degrades to a note — the host install itself is
+    // unaffected when the MCP component is missing or the write fails.
+    const mcpBinding = writeWorkbuddyMcpBinding(p.marketplaceRoot, this.deps.homeDir());
 
     // 5. Register: engine commands first; observable direct-write fallback.
     const registration = this.registerPlugin(details, payload.version);
@@ -1477,7 +1591,7 @@ export class WorkBuddyHostInstaller implements HostInstaller {
             keywordPainEnabled: !governanceDefaults.keywordExplicitOff,
             configPath: governanceDefaults.configPath,
           },
-      reason: `Registered ${WORKBUDDY_PLUGIN_KEY} via ${registration.mode}${registration.mode === 'engine' ? '' : ` (engine unreachable: ${registration.engineNote})`}. Governance workspace initialized at ${p.governanceDir}${governance.dbInit === 'skipped' ? ` (${governance.note})` : ''}.${profileNote}${governanceDefaultsNote}`,
+      reason: `Registered ${WORKBUDDY_PLUGIN_KEY} via ${registration.mode}${registration.mode === 'engine' ? '' : ` (engine unreachable: ${registration.engineNote})`}. Governance workspace initialized at ${p.governanceDir}${governance.dbInit === 'skipped' ? ` (${governance.note})` : ''}.${profileNote}${governanceDefaultsNote}${mcpBinding.ok ? ' pd-recall MCP binding written.' : ` pd-recall MCP binding skipped (${mcpBinding.reason ?? 'unknown'}).`}`,
       // PRI-1063 copy (single-line flat-key flow mapping) carried over from
       // main; the "Existing workspaces retain their prior settings" sentence is
       // deliberately dropped — PRI-1064 turns governance ON for those
@@ -1652,7 +1766,8 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     if (!isRecord(entry) || entry.version !== version || entryInstallPath !== path.resolve(cacheDir)) return false;
     const sourceDir = path.join(p.marketplaceRoot, WORKBUDDY_PLUGIN_NAME);
     try {
-      return WORKBUDDY_PAYLOAD_FILES.every((file) => readFileSync(path.join(sourceDir, file)).equals(readFileSync(path.join(cacheDir, file))));
+      const filesMatch = WORKBUDDY_PAYLOAD_FILES.every((file) => readFileSync(path.join(sourceDir, file)).equals(readFileSync(path.join(cacheDir, file))));
+      return filesMatch && mcpBindingMatches(sourceDir, cacheDir);
     } catch {
       return false;
     }

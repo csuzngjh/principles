@@ -7,7 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { fetchExactManifest } from './lib/registry-client.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const packages = { codexAdapter: '@principles/codex-adapter', hostRuntime: '@principles/host-runtime', core: '@principles/core' };
+// mcpServer (Gate 4, PRI-1071) rides the same exact-pin release train.
+const packages = { codexAdapter: '@principles/codex-adapter', hostRuntime: '@principles/host-runtime', core: '@principles/core', mcpServer: '@principles/pd-mcp-server' };
 const plugin = 'plugins/principles-disciple/';
 const pinsFile = plugin + 'runtime-version.json';
 const metadataFile = plugin + '.codex-plugin/plugin.json';
@@ -36,6 +37,9 @@ export function checkMetadata(baseVersion, nextVersion, payloadChanged) {
 
 export function assertNoDowngrade(current, target) {
   for (const key of Object.keys(packages)) {
+    // A key absent from the existing pins file is the FIRST introduction of
+    // that component (e.g. mcpServer in Gate 4) — nothing to downgrade.
+    if (current[key] === undefined) continue;
     if (typeof current[key] !== 'string' || !/^\d+\.\d+\.\d+$/.test(current[key])) throw new Error(`invalid existing pin: ${key}`);
     const before = current[key].split('.').map(Number), after = target[key].split('.').map(Number);
     const first = after.findIndex((value, i) => value !== before[i]);

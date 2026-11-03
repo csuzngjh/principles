@@ -39,7 +39,8 @@ import {
 import { getHostInstallers, type HostTarget } from './installers/index.js';
 import { runWorkbuddyEarlyPreflight } from './installers/workbuddy-host-installer.js';
 import type { HostInstallContext, HostInstallResult } from '@principles/core/host';
-import { INSTALL_LAYOUT_VERSION, getWorkbuddyWorkspaceDir, installManifestHostsForPersist, mergeInstallManifestWorkspaces, parseInstallManifest } from '@principles/install-layout';
+import { INSTALL_LAYOUT_VERSION, getInstallLayoutPaths, getWorkbuddyWorkspaceDir, installManifestHostsForPersist, mergeInstallManifestWorkspaces, parseInstallManifest } from '@principles/install-layout';
+import { resolveMcpServerDir } from './mcp-server-layout-compat.js';
 import { detectOpenClawMainWorkspaceDivergence } from './utils/workspace-divergence.js';
 import { applySkillLanguageSelection, type SkillLanguage } from './skill-language.js';
 import {
@@ -838,6 +839,7 @@ const NPM_DISTRIBUTED_COMPONENTS = [
   ['PD CLI', 'pd-cli'],
   ['Console', 'console'],
   ['Install layout', 'install-layout'],
+  ['MCP server', 'pd-mcp-server'],
 ] as const;
 
 // Components whose install step demands MORE than the generic
@@ -1000,6 +1002,7 @@ const SELF_CONTAINED_COMPONENTS = [
   ['PD CLI', 'pd-cli'],
   ['Console', 'console'],
   ['Install layout', 'install-layout'],
+  ['MCP server', 'pd-mcp-server'],
 ] as const;
 
 export async function preflightSelfContainedReleaseAsset(assetDir: string): Promise<void> {
@@ -2546,6 +2549,45 @@ function getInstalledWorkbuddyAdapterDir(): string {
   return path.join(getPdRuntimeDir(), 'workbuddy-adapter');
 }
 
+/**
+ * Gate 4 (PRI-1071): the shared MCP server installs as a runtime sibling so
+ * the three host launchers can point their PD-owned bindings at one canonical
+ * entry (~/.pd/runtime/pd-mcp-server/dist/index.js).
+ */
+function getInstalledMcpServerDir(): string {
+  return resolveMcpServerDir(getInstallLayoutPaths(getHomeDir()));
+}
+
+/**
+ * Gate 4 (PRI-1071): deploy the bundled @principles/pd-mcp-server the same
+ * way as the codex/workbuddy adapters. Observable skip (not a failure) for
+ * installer builds older than the component — the host launchers then fail
+ * closed at launch with the honest "server entry missing" state (SPEC §3.5).
+ * Link materialization happens via ensureComponentFileDependencyLinks AFTER
+ * all siblings exist (same ordering contract as the codex adapter).
+ */
+function installBundledMcpServer(pluginDir: string): boolean {
+  const mcpServerSrc = path.join(pluginDir, 'pd-mcp-server');
+  const mcpServerDest = getInstalledMcpServerDir();
+
+  if (!existsSync(mcpServerSrc)) {
+    logger.warn(
+      `Bundled @principles/pd-mcp-server not found in this installer package (${mcpServerSrc}) — the pd-recall MCP tool stays unavailable in this deployment. Hook/CLI/Console installation is unaffected.`,
+    );
+    return false;
+  }
+
+  const mcpServerPkgJson = path.join(mcpServerSrc, 'package.json');
+  const mcpServerDistEntry = path.join(mcpServerSrc, 'dist', 'index.js');
+  if (!existsSync(mcpServerPkgJson) || !existsSync(mcpServerDistEntry)) {
+    throw new Error('Bundled @principles/pd-mcp-server is incomplete (missing package.json / dist/index.js). Package may be corrupted.');
+  }
+
+  rmSync(mcpServerDest, { recursive: true, force: true });
+  cpSync(mcpServerSrc, mcpServerDest, { recursive: true });
+  return true;
+}
+
 function installBundledCore(pluginDir: string): void {
   const coreSrc = path.join(pluginDir, 'core');
   const coreDest = getInstalledCoreDir();
@@ -3012,6 +3054,10 @@ async function installPdCliDependencies(): Promise<void> {
 async function installConsoleDependencies(): Promise<void> {
   const consoleDest = getInstalledConsoleDir();
   await prepareComponentDependencies(consoleDest, 'Console');
+}
+
+async function installMcpServerDependencies(): Promise<void> {
+  await prepareComponentDependencies(getInstalledMcpServerDir(), 'MCP server');
 }
 
 const CONSOLE_PORT_MAX_RETRIES = 3;
@@ -4412,6 +4458,20 @@ export async function install(
     // installer builds is an observable skip, not a failure.
     installBundledWorkbuddyAdapter(pluginDir);
     ensureWorkbuddyAdapterResolution();
+
+    // Gate 4 (PRI-1071): the shared MCP server refreshes with the runtime so
+    // the host launchers' bindings always point at the current canonical
+    // entry. Older installer payloads skip observably (the launchers fail
+    // closed at start with the honest missing-entry state).
+    const mcpServerInstalled = installBundledMcpServer(pluginDir);
+    if (mcpServerInstalled) {
+      ensureComponentFileDependencyLinks(getInstalledMcpServerDir(), 'pd-mcp-server');
+      // The npm-distributed payload ships only dist/ + package.json, and the
+      // MCP server keeps @modelcontextprotocol/server + zod as registry deps
+      // (unlike the file:-linked siblings). Without this pass the launcher
+      // starts an entry whose imports cannot resolve.
+      await installMcpServerDependencies();
+    }
 
     if (spinner) updateProgress(spinner, stepIndex, 'Installing release-manager authority module...');
     installBundledReleaseManagerPackage(pluginDir);

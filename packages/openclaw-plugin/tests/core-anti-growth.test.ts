@@ -132,6 +132,11 @@ describe('PRI-212 plugin core anti-growth guard', () => {
     // <workspace>/.state/signal-health.json + mkdir + SYSTEM log 上报）。
     // 纯计数/跨日归零策略亦在此文件，但价值在于持久化契约而非领域逻辑。
     'signal-health.ts',
+    // Gate 4 (PRI-1071): MCP binding writer — plugin I/O boundary. Writes the
+    // PD-owned mcp-binding.json beside the plugin payload from the SAME
+    // resolved workspace the hooks use (fs read/write + canonical runtime
+    // path probe); the launcher consumes it fail-closed.
+    'mcp-binding.ts',
   ] as const;
 
   // Category 6: Test files

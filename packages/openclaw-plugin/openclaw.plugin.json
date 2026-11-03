@@ -12,6 +12,15 @@
   "skills": [
     "templates/langs/zh/skills"
   ],
+  "mcpServers": {
+    "pd-recall": {
+      "transport": "stdio",
+      "command": "node",
+      "args": [
+        "./mcp/launcher.cjs"
+      ]
+    }
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,

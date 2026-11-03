@@ -6,8 +6,8 @@
 | 文档性质 | 决策记录卡（设计交付）；随本轮四文件一并提交 Owner |
 | 配套文件 | ① `docs/implementation-reports/PD-MCP-GATE3-LATEST-SOURCE-DELTA-AUDIT.md`（事实）② `docs/specs/SPEC-PD-AGENT-CAPABILITY-API-001-v0.5.md`（契约）③ `docs/implementation-plans/PD-MCP-GATE3-IMPLEMENTATION-READINESS-001.md`（实施） |
 | 基线 | origin/main `0d0ea7eb5`（2026-11-01 复核） |
-| 修订记录 | r2（2026-11-01 最终修订轮）：①G-1 守卫拆分生产/测试分域（消除与测试迁移的规则冲突）；②三项数值限制责任归属分层（10 条=Core Capability/Gate 3；32 KiB 与 10s=Gate 4 MCP Adapter，READINESS §17 成文为 Gate 4 验收前置）<br>**r3（2026-11-02 记录收口）：决策状态更新见 §〇——OG-1/OG-2/Gate 3 实施=DONE；OG-3=NOT AUTHORIZED；D-06/WB 实机/Gate 4 宿主审批模型=PENDING** |
-| 裁定 | 交付时点裁定：**SPEC v0.5：READY（待 OG-1 采信冻结）｜Gate 3 实施：READY_PENDING_OG2**（历史）；**当前状态见 §〇 决策状态总表（OG-1/OG-2 已完成，Gate 3 已实施合并，OG-3 未授权）** |
+| 修订记录 | r2（2026-11-01 最终修订轮）：①G-1 守卫拆分生产/测试分域（消除与测试迁移的规则冲突）；②三项数值限制责任归属分层（10 条=Core Capability/Gate 3；32 KiB 与 10s=Gate 4 MCP Adapter，READINESS §17 成文为 Gate 4 验收前置）<br>**r3（2026-11-02 记录收口）：决策状态更新见 §〇——OG-1/OG-2/Gate 3 实施=DONE；OG-3=NOT AUTHORIZED（**该状态已被 r4 取代，仅作历史记录**）；D-06/WB 实机/Gate 4 宿主审批模型=PENDING**<br>**r4（2026-11-02 OG-3 授权同步）：D-06=OWNER_CONFIRMED（方案 A：MCP Server 与启动宿主同 Windows 用户权限，首期仅只读 Tool，产品文档须明示残余风险）；OG-3=AUTHORIZED（Owner 2026-11-02 对话指令，范围=Gate 4-A～4-F 隔离环境内完整实施，明确不含正式发布/远端推送/合并 PR/生产部署/修改 Owner 日常宿主配置；实施工单 PRI-1071；产品合同=SPEC-PD-MCP-GATE4-001 v1.2）；WB 实机验证与宿主审批模型转入 Gate 4-A～4-F 执行项** |
+| 裁定 | 交付时点裁定：**SPEC v0.5：READY（待 OG-1 采信冻结）｜Gate 3 实施：READY_PENDING_OG2**（历史）；**当前状态见 §〇 决策状态总表（OG-1/OG-2 已完成，Gate 3 已实施合并，OG-3 已授权）** |
 
 ---
 
@@ -20,8 +20,8 @@
 | OG-1：SPEC v0.5 采信（冻结生效，含三项数值及责任归属确认） | **DONE** | 2026-11-01 | Owner 任务书批准；PRI-1068 工单描述（"OG-1 已批准、OG-2 已授权"）+ PR #2270 Owner Review Card 实施记录 |
 | OG-2：Gate 3 实施授权 | **DONE** | 2026-11-01 | 同上；**Owner 于 2026-11-01T10:23:37Z 亲自合并 PR #2270（merge commit `f15a5a6a6de75b8e9ce7eb909fac1e137637665a`）构成最终裁决** |
 | Gate 3 实施 | **DONE** | 2026-11-01 | PR #2270 MERGED；PRI-1068 = Done；CI 26/26 全绿（含 Verify Merge Gate）；最终交付报告 `PD-MCP-GATE3-IMPLEMENTATION-REPORT-001.md`（含 Post-Merge Closeout Addendum） |
-| OG-3：Gate 4 实施授权 | **NOT AUTHORIZED** | — | 无 Owner 授权记录；SPEC v0.5、本卡与 2026-11-02 文档收口均不构成 OG-3 |
-| D-06：MCP Server 进程安全风险接受 | **PENDING** | — | 仍是 Gate 4 准入条件（见下 §三 待决-3）；**OG-1/OG-2/Gate 3 的完成不构成对该风险的接受** |
+| OG-3：Gate 4 实施授权 | **AUTHORIZED** | 2026-11-02 | Owner 对话指令明确授权（r4 同步）：隔离环境内 Gate 4-A～4-F 完整实施；**不含**正式发布、远端推送、合并 PR、生产部署、修改 Owner 日常宿主配置；实施工单 PRI-1071；产品合同 SPEC-PD-MCP-GATE4-001 v1.2。历史状态（NOT AUTHORIZED，截至 r3）保留于历史记录 |
+| D-06：MCP Server 进程安全风险接受 | **OWNER_CONFIRMED（方案 A）** | 2026-11-02 | Owner 2026-11-02 对话指令确认（r4 同步）：接受 MCP Server 与启动宿主同 Windows 用户权限运行、无 OS 级隔离；首期仅提供只读 Tool；残余风险（文件访问/环境继承/网络能力/宿主 Sandbox 不自动约束子进程）须在产品文档中明确说明。历史状态（PENDING，截至 r3）保留于 §三 待决-3 |
 | WorkBuddy 实机 MCP 验证 | **PENDING** | — | Gate 4 前置（现 DOC_VERIFIED_RUNTIME_NOT_VERIFIED；见下 §三 待决-4） |
 | Gate 4 宿主审批模型 | **PENDING** | — | Codex 0.166.0 无头 MCP 调用审批阻塞为版本实测事实；实验中的危险旁路参数不得作为生产方案；目标宿主版本须在 Gate 4 重验（SPEC v0.5 §10.2） |
 
@@ -77,7 +77,7 @@
 - **建议时点**：OG-1 之后任意时点；实施 PR 开工时按 READINESS §16 核对单执行（含 pain-recall.ts 零并发修改复核）。
 - **规模预期**：移动 895 行 + 新增约 500-700 行（Facade+测试+守卫）+ 接线约 20 行级改动；单 PR；单次 revert 可回滚。
 
-### 待决-3｜D-06：MCP Server 进程风险接受（⬜ 仍 PENDING——**Gate 4 前置**；见 §〇）
+### 待决-3｜D-06：MCP Server 进程风险接受（✅ 已完成 OWNER_CONFIRMED（方案 A），2026-11-02，见 §〇 r4；下文保留原评审记录）
 
 - **问题**：是否接受首期 MCP Server 与启动用户同权限、无 OS 级文件/网络隔离（应用层只读 ≠ 进程只读；stdio ≠ 网络隔离；对被攻陷进程/恶意依赖无隔离）。
 - **建议**：在 Gate 4 立项时裁决；若不接受，Gate 4 前需增加并验证 OS 级隔离方案（成本显著上升）。
