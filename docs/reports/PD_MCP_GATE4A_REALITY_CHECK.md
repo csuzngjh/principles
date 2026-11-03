@@ -140,7 +140,7 @@ Gate 3 基线复核：worktree `PRI-1071-mcp-gate4` 上 `vitest run pain-recall`
 | 宿主 | MCP 配置形态 | launcher 定位方式 | binding 写入者 |
 |---|---|---|---|
 | Codex | 插件载荷 `.mcp.json`（仓库静态）：`command:"node", args:["./mcp/launcher.cjs"], cwd:"."` | `cwd:"."` → 已安装插件 cache 根（真实运行证实）+ `__dirname` | `pd-setup`（安装后机器级接线步骤；插件 add 重装后需重跑，pd-status/health 检测 CONFIG_MISSING） |
-| OpenClaw | manifest `mcpServers`（PD installer 物化部署副本）：`transport:"stdio", command:"node", args:["./mcp/launcher.cjs"]`（默认 cwd=插件根） | 相对路径按插件根解析（源码证实） | PD installer（物化 extensions 副本时写入） |
+| OpenClaw | manifest `mcpServers`（PD installer 物化部署副本）：`transport:"stdio", command:"node", args:["./mcp/launcher.cjs"]`（默认 cwd=插件根） | 相对路径按插件根解析（源码证实） | OpenClaw 插件启动健康检查（**仅显式 PD 工作区**；installer 不写；见顶部更正 1） |
 | WorkBuddy | 插件载荷 `.mcp.json`：`command:"node", args:["${CODEBUDDY_PLUGIN_ROOT}/mcp/launcher.cjs"], cwd:"${CODEBUDDY_PLUGIN_ROOT}"` | 占位符展开（miora 同模式） | PD installer（物化 marketplace 载荷时写入；引擎复制进 cache） |
 
 **不采用**：Native Tool Bridge（无必要）；用户级 `codex mcp add` 默认化（SPEC §6.2 禁止）；常驻 daemon（§5.2 禁止）； PLUGIN_ROOT/PLUGIN_DATA env 依赖（Codex legacy 实测不注入）。
