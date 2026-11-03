@@ -633,6 +633,21 @@ describe('P1-6 — path and temp-file symlink safety', () => {
     expect(linked.removed).toBe(false);
     expect(fs.readFileSync(path.join(other, 'sentinel.txt'), 'utf8')).toBe('SENTINEL');
     fs.unlinkSync(replaced);
+
+    // 4. A vanished path cannot be stat-ed: never a deletion decision.
+    const vanished = path.join(studyReal, '.probe-vanished');
+    expect(removeProbeDirIfStillOwned({ path: vanished, dev: 1n, ino: 1n }, studyPin))
+      .toEqual({ removed: false, reason: 'the probe path cannot be stat-ed (ENOENT)' });
+
+    // 5. A changed STUDY identity refuses even for our own untouched directory.
+    const own2 = fs.mkdtempSync(path.join(studyReal, '.probe-'));
+    const own2Stat = fs.statSync(own2, { bigint: true });
+    expect(removeProbeDirIfStillOwned(
+      { path: own2, dev: own2Stat.dev, ino: own2Stat.ino },
+      { real: studyPin.real, dev: studyPin.dev + 1n, ino: studyPin.ino },
+    )).toEqual({ removed: false, reason: 'the study directory identity changed' });
+    expect(fs.existsSync(own2)).toBe(true);
+    fs.rmSync(own2, { recursive: true });
   });
 });
 
