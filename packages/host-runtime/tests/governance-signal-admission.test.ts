@@ -39,6 +39,7 @@ let workspaceDir: string;
 
 beforeEach(() => {
   workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-gov-admission-'));
+  seededObservationKeys.clear();
   fs.mkdirSync(path.join(workspaceDir, '.state'), { recursive: true });
   const sqlite = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
   for (const statement of BASELINE_DDL) sqlite.prepare(statement).run();
@@ -119,8 +120,59 @@ function toolFailure(overrides: Partial<GovernanceToolFailureCandidate> = {}): G
   };
 }
 
+/**
+ * Production precondition: Codex admission only receives a correction after
+ * ingestion has persisted the triggering user observation. Seed the same
+ * durable row here so the suite exercises the real evidence path instead of
+ * the retired `governance_observation:<key>` fabrication. Without a persisted
+ * row, admission correctly degrades to `observation_only`.
+ */
+const seededObservationKeys = new Set<string>();
+
+function seedCodexEvidence(candidate: GovernanceCorrectionCandidate): void {
+  if (candidate.hostKind !== 'codex') return;
+  if (seededObservationKeys.has(candidate.logicalObservationKey)) return;
+  ingestGovernanceObservations({
+    workspaceDir,
+    rollout: {
+      hostKind: 'codex',
+      rolloutIdentity: candidate.rolloutIdentity,
+      rootSessionId: candidate.rootSessionId,
+    },
+    observations: [{
+      hostKind: 'codex',
+      rolloutIdentity: candidate.rolloutIdentity,
+      rootSessionId: candidate.rootSessionId,
+      hostTurnId: candidate.hostTurnId,
+      kind: 'user_turn',
+      logicalObservationKey: candidate.logicalObservationKey,
+      visibleText: candidate.text,
+      source: 'live_hook',
+      completeness: 'complete',
+      observedAt: NOW.toISOString(),
+    }],
+    now: NOW,
+  });
+  seededObservationKeys.add(candidate.logicalObservationKey);
+}
+
 function admit(candidates: readonly (GovernanceCorrectionCandidate | GovernanceToolFailureCandidate)[], now: Date = NOW) {
+  for (const candidate of candidates) {
+    if (candidate.kind === 'user_correction') seedCodexEvidence(candidate);
+  }
   return admitGovernanceSignals({ workspaceDir, candidates, now, keywordStore: buildSharedSeedKeywordStore() });
+}
+
+/** Same production precondition, but with an explicit keyword store (rule-version tests). */
+function admitDirect(
+  candidates: readonly (GovernanceCorrectionCandidate | GovernanceToolFailureCandidate)[],
+  keywordStore?: ReturnType<typeof buildSharedSeedKeywordStore>,
+  now: Date = NOW,
+) {
+  for (const candidate of candidates) {
+    if (candidate.kind === 'user_correction') seedCodexEvidence(candidate);
+  }
+  return admitGovernanceSignals({ workspaceDir, candidates, now, ...(keywordStore !== undefined ? { keywordStore } : {}) });
 }
 
 it('adds nullable tool-call project scope to legacy trajectory schema without assigning old rows a cwd', () => {
@@ -264,11 +316,7 @@ describe('learned keyword gate — PRI-788 G3 reversal (SPEC v0.3 §3.2.3)', () 
     expect(detection.output.matchedTerms).toContain('先确认再改');
     // ……但同步高精度路径不产生 STRONG，因此不产生 Pain。
     expect(detection.output.isSignal).toBe(false);
-    const result = admitGovernanceSignals({
-      workspaceDir,
-      candidates: [correction({ text: '先确认再改这个文件', logicalObservationKey: 'codex|r1|t1|user', rolloutIdentity: 'r1' })],
-      now: NOW,
-    });
+    const result = admitDirect([correction({ text: '先确认再改这个文件', logicalObservationKey: 'codex|r1|t1|user', rolloutIdentity: 'r1' })]);
     expect(result.ok).toBe(true);
     // 学习词现在成为可审计的 pending 候选（Stage 2 优先候选），仍不产生 Pain。
     expect(result.outcomes?.[0]).toMatchObject({ disposition: 'pending_llm_review' });
@@ -575,9 +623,9 @@ describe('persisted STRONG rate-limit bucket (SPEC §12 / ADR-0020 §11.3)', () 
     const storeV2 = buildSharedSeedKeywordStore();
     const storeV3 = { ...storeV2, version: 3 };
     for (let i = 0; i < GOVERNANCE_STRONG_RATE_LIMIT_PER_HOUR; i += 1) {
-      admitGovernanceSignals({ workspaceDir, candidates: [correction({ text: '不要自作主张,版本切换是错的', logicalObservationKey: `codex|rollout-1|turn-w${i}|user`, hostTurnId: `turn-w${i}` })], now: NOW, keywordStore: storeV2 });
+      admitDirect([correction({ text: '不要自作主张,版本切换是错的', logicalObservationKey: `codex|rollout-1|turn-w${i}|user`, hostTurnId: `turn-w${i}` })], storeV2);
     }
-    const result = admitGovernanceSignals({ workspaceDir, candidates: [correction({ text: '不要自作主张,版本切换是错的', logicalObservationKey: 'codex|rollout-1|turn-v9|user', hostTurnId: 'turn-v9' })], now: NOW, keywordStore: storeV3 });
+    const result = admitDirect([correction({ text: '不要自作主张,版本切换是错的', logicalObservationKey: 'codex|rollout-1|turn-v9|user', hostTurnId: 'turn-v9' })], storeV3);
     expect(result.outcomes?.[0]).toMatchObject({ disposition: 'admitted' });
   });
 
@@ -591,8 +639,9 @@ describe('persisted STRONG rate-limit bucket (SPEC §12 / ADR-0020 §11.3)', () 
     // Warm up the governance schema with a no-write admission (ordinary text)
     // so the assertions below can read the tables regardless of lock outcome.
     admit([correction({ text: '普通预热', logicalObservationKey: 'codex|rollout-1|turn-warm|user', hostTurnId: 'turn-warm' })]);
-    // Hold an exclusive write lock so the admission transaction cannot commit;
-    // whatever it may have staged (bucket + pain) must roll back entirely.
+    // Production precondition seeded BEFORE the lock: the admission transaction
+    // itself must fail under the exclusive writer and roll back completely.
+    seedCodexEvidence(correction());
     const blocker = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
     try {
       blocker.pragma('busy_timeout = 50');
@@ -1040,6 +1089,15 @@ describe('P1-1 privacy: raw correction secrets sanitized before persistence (SPE
 describe('P1-2 continuation crash recovery (SPEC §13)', () => {
   it('promotion failure remains visible but does not block task recovery', async () => {
     admit([correction()]);
+    // Simulate a legacy marker admitted before the evidence-backed contract: the
+    // durable observation is gone, so promotion has no rollout substrate. The
+    // marker itself stays durable and the task must still be created.
+    const writable = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+    try {
+      writable.prepare('DELETE FROM governance_rollouts WHERE rollout_identity = ?').run('rollout-1');
+    } finally {
+      writable.close();
+    }
     const first = await reconcileGovernanceContinuation({ workspaceDir, conversationIngestionEnabled: true });
     expect(first.ok).toBe(false);
     expect(first.degradations.some((entry) => entry.includes('rollout_not_found'))).toBe(true);
@@ -1048,6 +1106,16 @@ describe('P1-2 continuation crash recovery (SPEC §13)', () => {
       .not.toEqual({ diagnostician_task_id: null });
 
     ingestRollout('turn-1');
+    // Re-bind the surviving observation to the re-ingested rollout row, as the
+    // ingestion store would after healing a partially persisted rollout.
+    const rebind = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+    try {
+      rebind.prepare(`UPDATE governance_observations
+        SET rollout_row_id = (SELECT id FROM governance_rollouts WHERE rollout_identity = 'rollout-1')
+        WHERE rollout_identity = 'rollout-1'`).run();
+    } finally {
+      rebind.close();
+    }
     const recovered = await reconcileGovernanceContinuation({ workspaceDir, conversationIngestionEnabled: true });
     expect(recovered.ok).toBe(true);
     expect(recovered.tasksEnsured).toBe(0);

@@ -95,6 +95,20 @@ function stateDbTaskIds(root: string): string[] {
   }
 }
 
+/** Durable admission payload — the evidence basis the task is created from. */
+function markerPayload(root: string, key: string): { evidence: { sourceRef: string; note: string }[]; correctionEvidence?: Record<string, unknown> } {
+  const db = trajectoryOf(root);
+  try {
+    const row = db.prepare('SELECT task_payload_json FROM governance_signal_admissions WHERE logical_observation_key = ?').get(key) as { task_payload_json?: string } | undefined;
+    if (typeof row?.task_payload_json !== 'string') throw new Error(`marker payload missing: ${key}`);
+    const parsed: unknown = JSON.parse(row.task_payload_json);
+    if (typeof parsed !== 'object' || parsed === null) throw new Error('marker payload is not an object');
+    return parsed as { evidence: { sourceRef: string; note: string }[]; correctionEvidence?: Record<string, unknown> };
+  } finally {
+    db.close();
+  }
+}
+
 describe('CR-07 prefix parse (deterministic, current-prompt only)', () => {
   it('accepts the exact fullwidth-colon prefix and extracts the statement', () => {
     expect(parseOwnerStatementPrefix('PD记录痛苦：重构前要先看已有实现')).toEqual({ matched: true, text: '重构前要先看已有实现' });
@@ -123,6 +137,16 @@ describe('CR-07 explicit statement through the production hook', () => {
     // FIRST submission of a fresh rollout promotes its evidence window instead
     // of degrading with rollout_not_found/trigger_not_found.
     expect(receivedLine).not.toContain('promotion_degraded');
+    expect(receivedLine).not.toContain('ingress_degraded');
+    // Real observation → the payload cites its real identifier; no degrade.
+    const payload = markerPayload(ws.root, `codex|${ROOT_ROLLOUT}|${TURN_1}|user`);
+    expect(payload.evidence).toMatchObject([
+      { sourceRef: `governance_observation:codex|${ROOT_ROLLOUT}|${TURN_1}|user` },
+    ]);
+    expect(payload.correctionEvidence).toMatchObject({
+      classification: 'owner_statement',
+      channel: 'codex_explicit_prefix',
+    });
     const db = trajectoryOf(ws.root);
     const pains = db.prepare('SELECT canonical_pain_id, source FROM pain_events').all() as { canonical_pain_id: string; source: string }[];
     const markers = db.prepare('SELECT logical_observation_key, diagnostician_task_id FROM governance_signal_admissions').all() as { logical_observation_key: string; diagnostician_task_id: string }[];
@@ -192,6 +216,19 @@ describe('CR-07 explicit statement through the production hook', () => {
     // Accurate disclosure: promotion was SKIPPED because ingestion is
     // consent-gated off — not a misleading trigger/rollout_not_found.
     expect(receivedLine).toContain('promotion_degraded:conversation_ingestion_disabled');
+    // P1 evidence honesty: no persisted observation exists, so admission
+    // degrades the Owner Manual statement and says so on the receipt.
+    expect(receivedLine).toContain('ingress_degraded:');
+    expect(receivedLine).toContain('trajectory_unavailable');
+    const key = `codex|${ROOT_ROLLOUT}|${TURN_1}|user`;
+    const payload = markerPayload(ws.root, key);
+    // No fabricated `governance_observation:` trace; the Owner statement itself
+    // is preserved as correction evidence.
+    expect(payload.evidence).toEqual([]);
+    expect(payload.correctionEvidence).toMatchObject({
+      classification: 'owner_statement',
+      channel: 'codex_explicit_prefix',
+    });
     const db = trajectoryOf(ws.root);
     expect((db.prepare('SELECT COUNT(*) AS n FROM pain_events').get() as { n: number }).n).toBe(1);
     // Privacy boundary: no session observation, no rollout row, no checkpoint.

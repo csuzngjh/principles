@@ -32,28 +32,32 @@ function rows(workspace: string, sql: string) {
 function invoke(ws: ReturnType<typeof setup>, overrides: Record<string, unknown> = {}) {
   return runEntry(ws.home, JSON.stringify({ ...ws.payload, ...overrides }), 'UserPromptSubmit');
 }
-describe('P0 WorkBuddy live keyword Pain', () => {
-  it('writes one canonical Pain and one task with a real Pain sourceRef (no transcript)', () => {
+describe('P0 WorkBuddy live keyword Pain (P1 review round 3: no fabricated evidence)', () => {
+  it('has no persisted behavior evidence → observation_only (no Pain, no task, no quota)', () => {
     const ws = setup();
     const r = invoke(ws, { transcript_path: path.join(ws.home, 'must-not-open.jsonl') });
     expect(r.status).toBe(0);
     expect(r.stdout).toBe('');
-    const pains = rows(ws.workspace, 'SELECT canonical_pain_id, host_kind, source FROM pain_events');
-    expect(pains).toHaveLength(1);
-    expect(pains[0]).toMatchObject({ canonical_pain_id: expect.any(String), host_kind: 'workbuddy', source: 'user_correction' });
-    const markers = rows(ws.workspace, 'SELECT task_payload_json, diagnostician_task_id FROM governance_signal_admissions');
+    expect(rows(ws.workspace, 'SELECT canonical_pain_id FROM pain_events')).toHaveLength(0);
+    const markers = rows(ws.workspace, 'SELECT decision, reason, task_payload_json, diagnostician_task_id FROM governance_signal_admissions');
     expect(markers).toHaveLength(1);
-    const marker = markers[0]!;
-    expect(marker.diagnostician_task_id).toEqual(expect.any(String));
-    const payload = JSON.parse(String(marker.task_payload_json)) as { evidence: { sourceRef: string }[]; hostKind: string };
-    expect(payload.hostKind).toBe('workbuddy');
-    expect(payload.evidence).toHaveLength(1);
-    expect(payload.evidence[0]!.sourceRef).toBe('pain_event:' + pains[0]!.canonical_pain_id);
+    expect(markers[0]).toMatchObject({ decision: 'abandoned' });
+    expect(String(markers[0]!.reason).length).toBeGreaterThan(0);
+    expect(markers[0]!.diagnostician_task_id).toBeNull();
+    // No `pain_event:` pseudo-trace may be persisted anywhere.
+    expect(String(markers[0]!.task_payload_json ?? '')).not.toContain('pain_event:');
     expect(fs.existsSync(path.join(ws.home, 'must-not-open.jsonl'))).toBe(false);
-    const state = new Database(path.join(ws.workspace, '.pd', 'state.db'), { readonly: true });
-    try {
-      expect(state.prepare("SELECT COUNT(*) AS n FROM tasks WHERE task_kind='diagnostician'").get()).toEqual({ n: 1 });
-    } finally { state.close(); }
+    // No Diagnostician task store was even created: the abandoned marker never
+    // reached ensureGovernanceDiagnosticianTask.
+    const statePath = path.join(ws.workspace, '.pd', 'state.db');
+    if (fs.existsSync(statePath)) {
+      const state = new Database(statePath, { readonly: true });
+      try {
+        expect(state.prepare("SELECT COUNT(*) AS n FROM tasks WHERE task_kind='diagnostician'").get()).toEqual({ n: 0 });
+      } finally { state.close(); }
+    } else {
+      expect(fs.existsSync(statePath)).toBe(false);
+    }
   });
   it('is off by default or if host is off and preserves existing explicit paths', () => {
     for (const ws of [setup(false), setup(true, false)]) {
@@ -66,13 +70,14 @@ describe('P0 WorkBuddy live keyword Pain', () => {
     expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(1);
     expect(rows(ws.workspace, 'SELECT * FROM governance_signal_admissions')).toHaveLength(1);
   });
-  it('deduplicates replay, but preserves independent native turns', () => {
+  it('deduplicates replay, but keeps independent native turns as separate observations', () => {
     const ws = setup();
     expect(invoke(ws).status).toBe(0);
     expect(invoke(ws).status).toBe(0);
-    expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(1);
+    expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(0);
+    expect(rows(ws.workspace, 'SELECT * FROM governance_signal_admissions')).toHaveLength(1);
     expect(invoke(ws, { generation_id: 'native-p0-turn-2' }).status).toBe(0);
-    expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(2);
+    expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(0);
     expect(rows(ws.workspace, 'SELECT * FROM governance_signal_admissions')).toHaveLength(2);
   });
   it('ignores internal continuations, missing native ids, quotes, empathy, weak and oversized prompts', () => {
@@ -92,15 +97,16 @@ describe('P0 WorkBuddy live keyword Pain', () => {
     }
     expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(0);
   });
-  it('respects shared five-per-hour limit', () => {
+  it('never consumes the shared five-per-hour quota without real evidence', () => {
     const ws = setup();
     for (let i = 0; i < 6; i += 1) expect(invoke(ws, { generation_id: 'quota-' + i }).status).toBe(0);
-    expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(5);
+    expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(0);
+    expect(rows(ws.workspace, 'SELECT * FROM governance_signal_admissions')).toHaveLength(6);
   });
 
   // SPEC v0.3 §3.2.3 (D5 reverse): learned keywords are Stage-2 candidates only.
-  // The WorkBuddy hook has no async Stage 2, so they never produce Pain directly.
-  it('learned terms never trigger live Pain; P0 seed terms keep working', () => {
+  // Without persisted trust evidence they now settle as observation_only.
+  it('learned terms never trigger live Pain; P0 seed terms also need real evidence', () => {
     const ws = setup();
     fs.writeFileSync(path.join(ws.workspace, '.state', 'correction_keywords.json'), JSON.stringify({
       keywords: [
@@ -116,9 +122,9 @@ describe('P0 WorkBuddy live keyword Pain', () => {
     // 转述（词不在句首）→ 仍为零。
     expect(invoke(ws, { prompt: '他说方向完全反了', generation_id: 'native-learned-3' }).status).toBe(0);
     expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(0);
-    // P0 seed 四词行为不回归（默认 prompt = 这是错的…）。
+    // P0 seed 四词仍被识别，但同样没有持久化证据 → observation_only。
     expect(invoke(ws, { generation_id: 'native-learned-4' }).status).toBe(0);
-    expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(1);
-    expect(rows(ws.workspace, 'SELECT host_kind FROM pain_events')[0]).toMatchObject({ host_kind: 'workbuddy' });
+    expect(rows(ws.workspace, 'SELECT * FROM pain_events')).toHaveLength(0);
+    expect(rows(ws.workspace, "SELECT decision FROM governance_signal_admissions WHERE decision='abandoned'")).toHaveLength(3);
   });
 });

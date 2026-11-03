@@ -26,6 +26,33 @@ const BASELINE_DDL = [
   'CREATE TABLE tool_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, tool_name TEXT NOT NULL, outcome TEXT NOT NULL, duration_ms INTEGER, exit_code INTEGER, error_type TEXT, error_message TEXT, gfi_before REAL, gfi_after REAL, params_json TEXT NOT NULL, result_preview TEXT, created_at TEXT NOT NULL)',
   'CREATE TABLE pain_events (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, source TEXT NOT NULL, score REAL NOT NULL, reason TEXT, severity TEXT, origin TEXT, confidence REAL, text TEXT, canonical_pain_id TEXT, runtime_task_id TEXT, host_kind TEXT, created_at TEXT NOT NULL)',
   'CREATE UNIQUE INDEX idx_pain_events_canonical_pain_id ON pain_events(canonical_pain_id) WHERE canonical_pain_id IS NOT NULL',
+  `CREATE TABLE IF NOT EXISTS governance_observations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rollout_row_id INTEGER NOT NULL,
+    host_kind TEXT NOT NULL,
+    rollout_identity TEXT NOT NULL,
+    root_session_id TEXT NOT NULL,
+    host_turn_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    logical_key TEXT NOT NULL,
+    transcript_record_key TEXT,
+    source_order INTEGER,
+    source_ordinal INTEGER,
+    assistant_item_id TEXT,
+    phase TEXT,
+    tool_use_id TEXT,
+    transcript_tool_call_id TEXT,
+    visible_text TEXT,
+    sanitized_tool_facts_json TEXT,
+    source TEXT NOT NULL,
+    completeness TEXT NOT NULL,
+    retention_class TEXT NOT NULL DEFAULT 'operational',
+    observed_at TEXT NOT NULL,
+    promoted_at TEXT,
+    promotion_ref TEXT,
+    expired_at TEXT,
+    UNIQUE(logical_key)
+  )`,
 ];
 
 let workspaceDir: string;
@@ -130,7 +157,22 @@ function automaticCorrection(): GovernanceCorrectionCandidate {
   };
 }
 
-function admit(candidate: GovernanceCorrectionCandidate): string {
+function seedObservation(candidate: GovernanceCorrectionCandidate): void {
+  const sqlite = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+  try {
+    sqlite.prepare(`INSERT OR IGNORE INTO governance_observations
+      (rollout_row_id, host_kind, rollout_identity, root_session_id, host_turn_id, kind, logical_key, source, completeness, observed_at)
+      VALUES (1, ?, ?, ?, ?, 'message', ?, 'transcript', 'bounded', ?)`)
+      .run(candidate.hostKind, candidate.rolloutIdentity, candidate.rootSessionId, candidate.hostTurnId, candidate.logicalObservationKey, NOW.toISOString());
+  } finally {
+    sqlite.close();
+  }
+}
+
+function admit(candidate: GovernanceCorrectionCandidate, options: { withObservation?: boolean } = {}): string {
+  // Codex production lineage: ingestion persisted the observation before
+  // admission. Tests that exercise ingestion OFF pass withObservation:false.
+  if (options.withObservation !== false) seedObservation(candidate);
   const result = admitGovernanceSignals({ workspaceDir, candidates: [candidate], now: NOW });
   if (!result.ok) throw new Error(`${result.reason} / ${result.nextAction}`);
   const outcome = result.outcomes?.[0];
@@ -141,17 +183,18 @@ function admit(candidate: GovernanceCorrectionCandidate): string {
 }
 
 describe('Owner Manual vs Automatic Hook ingress (P1-2)', () => {
-  it('Codex explicit Owner statement is owner_manual → host_context_bound (degrade, honest empty evidence)', async () => {
-    const painId = admit(codexExplicit());
+  it('Codex explicit Owner statement WITHOUT a persisted observation degrades honestly (no fabricated trace)', async () => {
+    // Ingestion OFF: the Owner statement still produces a Pain + task, but there
+    // is no observation row to cite. The fix must NOT synthesize one.
+    const painId = admit(codexExplicit(), { withObservation: false });
     const ensured = await ensureGovernanceDiagnosticianTask({
       workspaceDir,
       logicalObservationKey: 'codex|rollout-ex|turn-ex|user',
       canonicalPainId: painId,
     });
     if (!ensured.ok) throw new Error(`${ensured.reason} / ${ensured.nextAction}`);
-    // Codex has a real governance observation entry, so the owner_manual
-    // report submits; the key assertion is that it is NOT automatic_hook.
-    expect(ensured.ingressWarning).toBeUndefined();
+    expect(ensured.ingressWarning).toBeDefined();
+    expect(ensured.ingressWarning).toContain('trajectory_unavailable');
 
     const diagnostic = readDiagnosticJson();
     expect(diagnostic.provenance).toBe('host_context_bound');
@@ -161,12 +204,32 @@ describe('Owner Manual vs Automatic Hook ingress (P1-2)', () => {
       channel: 'codex_explicit_prefix',
       text: 'PD记录痛苦：这是错的',
     });
-    expect(Array.isArray(diagnostic.evidence)).toBe(true);
+    // No fake `governance_observation:<key>` / `pain_event:<id>` behavior trace.
+    expect(diagnostic.evidence).toEqual([]);
+  });
+
+  it('Codex explicit Owner statement WITH a real observation cites the real identifier', async () => {
+    const painId = admit(codexExplicit());
+    const ensured = await ensureGovernanceDiagnosticianTask({
+      workspaceDir,
+      logicalObservationKey: 'codex|rollout-ex|turn-ex|user',
+      canonicalPainId: painId,
+    });
+    if (!ensured.ok) throw new Error(`${ensured.reason} / ${ensured.nextAction}`);
+    expect(ensured.ingressWarning).toBeUndefined();
+
+    const diagnostic = readDiagnosticJson();
+    expect(diagnostic.provenance).toBe('host_context_bound');
+    expect(diagnostic.evidence).toMatchObject([
+      { sourceRef: 'governance_observation:codex|rollout-ex|turn-ex|user' },
+    ]);
   });
 
   it('WorkBuddy explicit Owner statement is owner_manual → host_context_bound (degrade, no transcript evidence)', async () => {
     const candidate = workbuddyExplicit();
-    const painId = admit(candidate);
+    // Production WorkBuddy has no governance_observations writer, so there is
+    // no persisted trace to cite — the explicit statement degrades honestly.
+    const painId = admit(candidate, { withObservation: false });
     const ensured = await ensureGovernanceDiagnosticianTask({
       workspaceDir,
       logicalObservationKey: candidate.logicalObservationKey,
@@ -177,6 +240,7 @@ describe('Owner Manual vs Automatic Hook ingress (P1-2)', () => {
     const diagnostic = readDiagnosticJson();
     expect(diagnostic.provenance).toBe('host_context_bound');
     expect(diagnostic.hostKind).toBe('workbuddy');
+    expect(diagnostic.evidence).toEqual([]);
     expect(diagnostic.correctionEvidence).toMatchObject({
       classification: 'owner_statement',
       channel: 'workbuddy_explicit_prefix',

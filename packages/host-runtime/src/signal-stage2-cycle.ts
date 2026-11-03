@@ -120,15 +120,15 @@ export async function runStage2CorrectionCycle(input: Stage2CorrectionCycleInput
 
   /**
    * Release our claim when classification has NOT started. The release is
-   * guarded inside gsa (never clears a durable reviewResult, CAS on the claim
-   * stamp), so a concurrent worker's state cannot be touched.
+   * guarded inside gsa (never clears a durable reviewResult, CAS on the
+   * fencing token), so a concurrent worker's state cannot be touched.
    */
   const releaseClaim = (candidate: PendingCorrectionCandidate): void => {
-    if (candidate.claimedAt === null) return;
+    if (candidate.claimToken === null) return;
     const released = releasePendingCorrectionClaim({
       workspaceDir: input.workspaceDir,
       logicalObservationKey: candidate.logicalObservationKey,
-      claimedAt: candidate.claimedAt,
+      claimToken: candidate.claimToken,
     });
     if (!released.ok) {
       degradations.push(`${candidate.logicalObservationKey}:claim_release_failed:${released.reason}`);
@@ -166,9 +166,18 @@ export async function runStage2CorrectionCycle(input: Stage2CorrectionCycleInput
         // outer race (v0.3.1 §2.2); an outer timeout does not cancel a
         // provider request that the adapter does not support cancelling.
         const llm = await withTimeout(input.classifier(candidate.text, { timeoutMs }), timeoutMs);
+        const { claimToken } = candidate;
+        if (claimToken === null) {
+          // A freshly claimed candidate always carries a token; its absence
+          // means the claim was consumed elsewhere — do not write without it.
+          degradations.push(`${candidate.logicalObservationKey}:claim_token_missing`);
+          skipped += 1;
+          continue;
+        }
         const recorded = recordPendingCorrectionReview({
           workspaceDir: input.workspaceDir,
           logicalObservationKey: candidate.logicalObservationKey,
+          claimToken,
           llmResult: llm,
           now,
         });
@@ -190,6 +199,9 @@ export async function runStage2CorrectionCycle(input: Stage2CorrectionCycleInput
       const settled = await settlePendingCorrection({
         workspaceDir: input.workspaceDir,
         logicalObservationKey: candidate.logicalObservationKey,
+        // Fencing token only when this cycle holds the claim; crash recovery
+        // of an already durable reviewResult settles without one.
+        ...(candidate.claimToken !== null ? { claimToken: candidate.claimToken } : {}),
         now,
       });
       if (!settled.ok) {

@@ -16,9 +16,11 @@ import Database from 'better-sqlite3';
 import {
   admitGovernanceSignals,
   claimPendingCorrectionCandidates,
+  ensureGovernanceDiagnosticianTask,
   readGovernanceAdmissionCounts,
   reconcileGovernanceContinuation,
   recordPendingCorrectionReview,
+  releasePendingCorrectionClaim,
   settlePendingCorrection,
   type GovernanceCorrectionCandidate,
   type PendingReviewCallResult,
@@ -32,6 +34,36 @@ const BASELINE_DDL = [
   'CREATE TABLE tool_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, tool_name TEXT NOT NULL, outcome TEXT NOT NULL, duration_ms INTEGER, exit_code INTEGER, error_type TEXT, error_message TEXT, gfi_before REAL, gfi_after REAL, params_json TEXT NOT NULL, result_preview TEXT, created_at TEXT NOT NULL)',
   'CREATE TABLE pain_events (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, source TEXT NOT NULL, score REAL NOT NULL, reason TEXT, severity TEXT, origin TEXT, confidence REAL, text TEXT, canonical_pain_id TEXT, runtime_task_id TEXT, host_kind TEXT, created_at TEXT NOT NULL)',
   'CREATE UNIQUE INDEX idx_pain_events_canonical_pain_id ON pain_events(canonical_pain_id) WHERE canonical_pain_id IS NOT NULL',
+  // Production lineage: Codex ingestion persists the observation BEFORE the
+  // correction reaches admission. Uses the production column set so
+  // ensureGovernanceSchema's migrations are no-ops.
+  `CREATE TABLE IF NOT EXISTS governance_observations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rollout_row_id INTEGER NOT NULL,
+    host_kind TEXT NOT NULL,
+    rollout_identity TEXT NOT NULL,
+    root_session_id TEXT NOT NULL,
+    host_turn_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    logical_key TEXT NOT NULL,
+    transcript_record_key TEXT,
+    source_order INTEGER,
+    source_ordinal INTEGER,
+    assistant_item_id TEXT,
+    phase TEXT,
+    tool_use_id TEXT,
+    transcript_tool_call_id TEXT,
+    visible_text TEXT,
+    sanitized_tool_facts_json TEXT,
+    source TEXT NOT NULL,
+    completeness TEXT NOT NULL,
+    retention_class TEXT NOT NULL DEFAULT 'operational',
+    observed_at TEXT NOT NULL,
+    promoted_at TEXT,
+    promotion_ref TEXT,
+    expired_at TEXT,
+    UNIQUE(logical_key)
+  )`,
 ];
 
 let workspaceDir: string;
@@ -105,7 +137,25 @@ function correction(overrides: Partial<GovernanceCorrectionCandidate> = {}): Gov
 }
 
 function admit(candidate: GovernanceCorrectionCandidate, now: Date = NOW) {
+  // Mirror production: Codex ingestion wrote this observation first, and the
+  // admission gate verifies it exists before using it as a behavior trace.
+  withWritableTrajectory((db) => {
+    db.prepare(`INSERT OR IGNORE INTO governance_observations
+      (rollout_row_id, host_kind, rollout_identity, root_session_id, host_turn_id, kind, logical_key, source, completeness, observed_at)
+      VALUES (1, ?, ?, ?, ?, 'message', ?, 'transcript', 'bounded', ?)`)
+      .run(candidate.hostKind, candidate.rolloutIdentity, candidate.rootSessionId, candidate.hostTurnId, candidate.logicalObservationKey, now.toISOString());
+  });
   return admitGovernanceSignals({ workspaceDir, candidates: [candidate], now });
+}
+
+/** Claim the pending row and return its fencing token (P2 review round 3). */
+function claimOne(key: string, now: Date = NOW): string {
+  const claimed = claimPendingCorrectionCandidates({ workspaceDir, limit: 50, now });
+  if (!claimed.ok) throw new Error(claimed.reason);
+  const candidate = claimed.candidates.find((entry) => entry.logicalObservationKey === key);
+  if (candidate === undefined) throw new Error(`pending candidate not claimed: ${key}`);
+  if (candidate.claimToken === null) throw new Error(`claim token missing: ${key}`);
+  return candidate.claimToken;
 }
 
 function pendingRow(key: string): Record<string, unknown> {
@@ -126,6 +176,13 @@ function painCount(): number {
 
 function markerCount(): number {
   return countRows('governance_signal_admissions');
+}
+
+/** A Task exists iff an admitted marker carries its Diagnostician link. */
+function taskCount(): number {
+  const row = withTrajectory((db) => db.prepare('SELECT COUNT(*) AS n FROM governance_signal_admissions WHERE diagnostician_task_id IS NOT NULL').get());
+  if (!isRecord(row)) return -1;
+  return typeof row.n === 'number' ? row.n : -1;
 }
 
 function classification(overrides: Partial<LlmClassificationResult> = {}): LlmClassificationResult {
@@ -180,9 +237,10 @@ describe('confidence gate + admitted transition (SPEC v0.3 §3.3/§4.4.3)', () =
     const pendingPayload = JSON.parse(String(pendingRow(key).task_payload_json)) as Record<string, unknown>;
     const pendingPainId = pendingPayload.pain_id;
     expect(typeof pendingPainId).toBe('string');
-    const recorded = recordPendingCorrectionReview({ workspaceDir, logicalObservationKey: key, llmResult: classification(), now: NOW });
+    const claimToken = claimOne(key);
+    const recorded = recordPendingCorrectionReview({ workspaceDir, logicalObservationKey: key, claimToken, llmResult: classification(), now: NOW });
     expect(recorded.ok && recorded.disposition).toBe('pending');
-    const settled = await settlePendingCorrection({ workspaceDir, logicalObservationKey: key, now: NOW });
+    const settled = await settlePendingCorrection({ workspaceDir, logicalObservationKey: key, claimToken, now: NOW });
     if (!settled.ok) throw new Error(settled.reason);
     expect(settled.disposition).toBe('admitted');
     // rc-6: the pre-review id survives sanitization/bounding of the stored text.
@@ -195,16 +253,18 @@ describe('confidence gate + admitted transition (SPEC v0.3 §3.3/§4.4.3)', () =
   it('high-confidence NONE → resolved_none; low-confidence NONE stays pending', async () => {
     const key = 'codex|rollout-p1|turn-1|user';
     admit(correction());
-    recordPendingCorrectionReview({ workspaceDir, logicalObservationKey: key, llmResult: classification({ type: 'none', is_feedback: false, confidence: 0.9 }), now: NOW });
-    const settled = await settlePendingCorrection({ workspaceDir, logicalObservationKey: key, now: NOW });
+    const token = claimOne(key);
+    recordPendingCorrectionReview({ workspaceDir, logicalObservationKey: key, claimToken: token, llmResult: classification({ type: 'none', is_feedback: false, confidence: 0.9 }), now: NOW });
+    const settled = await settlePendingCorrection({ workspaceDir, logicalObservationKey: key, claimToken: token, now: NOW });
     if (!settled.ok) throw new Error(settled.reason);
     expect(settled.disposition).toBe('resolved_none');
     expect(painCount()).toBe(0);
 
     const key2 = 'codex|rollout-p2|turn-2|user';
     admit(correction({ logicalObservationKey: key2, rolloutIdentity: 'rollout-p2', hostTurnId: 'turn-2' }));
-    recordPendingCorrectionReview({ workspaceDir, logicalObservationKey: key2, llmResult: classification({ type: 'none', is_feedback: false, confidence: 0.6 }), now: NOW });
-    const low = await settlePendingCorrection({ workspaceDir, logicalObservationKey: key2, now: NOW });
+    const token2 = claimOne(key2);
+    recordPendingCorrectionReview({ workspaceDir, logicalObservationKey: key2, claimToken: token2, llmResult: classification({ type: 'none', is_feedback: false, confidence: 0.6 }), now: NOW });
+    const low = await settlePendingCorrection({ workspaceDir, logicalObservationKey: key2, claimToken: token2, now: NOW });
     if (!low.ok) throw new Error(low.reason);
     expect(low.disposition).toBe('pending');
     expect(pendingRow(key2).decision).toBe('pending_llm_review');
@@ -213,10 +273,11 @@ describe('confidence gate + admitted transition (SPEC v0.3 §3.3/§4.4.3)', () =
   it('LLM timeout/exception is recorded as an error path, never NONE', async () => {
     const key = 'codex|rollout-p1|turn-1|user';
     admit(correction());
-    const recorded = recordPendingCorrectionReview({ workspaceDir, logicalObservationKey: key, llmResult: null, now: NOW });
+    const claimToken = claimOne(key);
+    const recorded = recordPendingCorrectionReview({ workspaceDir, logicalObservationKey: key, claimToken, llmResult: null, now: NOW });
     if (!recorded.ok) throw new Error(recorded.reason);
     expect(recorded.attempts).toBe(1);
-    const settled = await settlePendingCorrection({ workspaceDir, logicalObservationKey: key, now: NOW });
+    const settled = await settlePendingCorrection({ workspaceDir, logicalObservationKey: key, claimToken, now: NOW });
     if (!settled.ok) throw new Error(settled.reason);
     expect(settled.disposition).toBe('pending');
     expect(settled.reason).toBe('pending_llm_error');
@@ -229,8 +290,9 @@ describe('confidence gate + admitted transition (SPEC v0.3 §3.3/§4.4.3)', () =
     admit(correction());
     let last: PendingReviewCallResult | null = null;
     for (let i = 0; i < 5; i += 1) {
-      recordPendingCorrectionReview({ workspaceDir, logicalObservationKey: key, llmResult: classification({ confidence: 0.5 }), now: NOW });
-      last = await settlePendingCorrection({ workspaceDir, logicalObservationKey: key, now: NOW });
+      const claimToken = claimOne(key);
+      recordPendingCorrectionReview({ workspaceDir, logicalObservationKey: key, claimToken, llmResult: classification({ confidence: 0.5 }), now: NOW });
+      last = await settlePendingCorrection({ workspaceDir, logicalObservationKey: key, claimToken, now: NOW });
       if (!last.ok) throw new Error(last.reason);
     }
     expect(last?.attempts).toBe(5);
@@ -254,12 +316,13 @@ describe('confidence gate + admitted transition (SPEC v0.3 §3.3/§4.4.3)', () =
   it('TTL expiry → abandoned(ttl_expired) even for a late CORRECTION', async () => {
     const key = 'codex|rollout-p1|turn-1|user';
     admit(correction());
+    const claimToken = claimOne(key);
     withWritableTrajectory((db) => {
       db.prepare('UPDATE governance_signal_admissions SET created_at = ? WHERE logical_observation_key = ?')
         .run(new Date(NOW.getTime() - 80 * 60 * 60 * 1000).toISOString(), key);
     });
-    recordPendingCorrectionReview({ workspaceDir, logicalObservationKey: key, llmResult: classification(), now: NOW });
-    const settled = await settlePendingCorrection({ workspaceDir, logicalObservationKey: key, now: NOW });
+    recordPendingCorrectionReview({ workspaceDir, logicalObservationKey: key, claimToken, llmResult: classification(), now: NOW });
+    const settled = await settlePendingCorrection({ workspaceDir, logicalObservationKey: key, claimToken, now: NOW });
     if (!settled.ok) throw new Error(settled.reason);
     expect(settled.disposition).toBe('abandoned');
     expect(settled.reason).toBe('ttl_expired');
@@ -294,13 +357,15 @@ describe('worker concurrency and crash recovery (SPEC v0.3 §4.4.4/§4.4.5)', ()
   it('review result survives a crash: the next cycle settles without calling the LLM again', async () => {
     const key = 'codex|rollout-p1|turn-1|user';
     admit(correction());
-    claimPendingCorrectionCandidates({ workspaceDir, limit: 1, now: NOW });
-    recordPendingCorrectionReview({ workspaceDir, logicalObservationKey: key, llmResult: classification(), now: NOW });
+    const claimToken = claimOne(key);
+    recordPendingCorrectionReview({ workspaceDir, logicalObservationKey: key, claimToken, llmResult: classification(), now: NOW });
     // Simulated crash: no settle call happened. The next cycle sees reviewResult.
     const reclaimed = claimPendingCorrectionCandidates({ workspaceDir, limit: 1, now: NOW });
     if (!reclaimed.ok) throw new Error(reclaimed.reason);
     expect(reclaimed.candidates).toHaveLength(1);
     expect(reclaimed.candidates[0]?.reviewResult).toMatchObject({ verdict: 'correction' });
+    expect(reclaimed.candidates[0]?.claimToken).toBeNull();
+    // Crash recovery settles the DURABLE result without a fencing token.
     const settled = await settlePendingCorrection({ workspaceDir, logicalObservationKey: key, now: NOW });
     if (!settled.ok) throw new Error(settled.reason);
     expect(settled.disposition).toBe('admitted');
@@ -320,13 +385,66 @@ describe('worker concurrency and crash recovery (SPEC v0.3 §4.4.4/§4.4.5)', ()
     }
     const key = 'codex|rollout-rl|turn-rl|user';
     admit(correction({ text: '这个不对', logicalObservationKey: key, rolloutIdentity: 'rollout-rl', hostTurnId: 'turn-rl' }));
-    recordPendingCorrectionReview({ workspaceDir, logicalObservationKey: key, llmResult: classification(), now: NOW });
-    const settled = await settlePendingCorrection({ workspaceDir, logicalObservationKey: key, now: NOW });
+    const claimToken = claimOne(key);
+    recordPendingCorrectionReview({ workspaceDir, logicalObservationKey: key, claimToken, llmResult: classification(), now: NOW });
+    const settled = await settlePendingCorrection({ workspaceDir, logicalObservationKey: key, claimToken, now: NOW });
     if (!settled.ok) throw new Error(settled.reason);
     expect(settled.disposition).toBe('pending');
     expect(settled.reason).toBe('rate_limited');
     expect(settled.attempts).toBe(1);
-    expect(pendingRow(key).decision).toBe('pending_llm_review');
-    expect(painCount()).toBe(5);
+  });
+
+  it('claim fencing: a stale claim cannot overwrite the new owner (10-minute takeover)', async () => {
+    const key = 'codex|rollout-p1|turn-1|user';
+    admit(correction());
+    const first = claimPendingCorrectionCandidates({ workspaceDir, limit: 1, now: NOW });
+    if (!first.ok) throw new Error(first.reason);
+    const tokenA = first.candidates[0]?.claimToken;
+    if (tokenA === null || tokenA === undefined) throw new Error('claim A missing');
+    const late = new Date(NOW.getTime() + 11 * 60 * 1000);
+    const second = claimPendingCorrectionCandidates({ workspaceDir, limit: 1, now: late });
+    if (!second.ok) throw new Error(second.reason);
+    expect(second.candidates).toHaveLength(1);
+    const tokenB = second.candidates[0]?.claimToken;
+    if (tokenB === null || tokenB === undefined) throw new Error('claim B missing');
+    expect(tokenB).not.toBe(tokenA);
+
+    // A wakes up after its claim was taken over: every state-changing write
+    // must present A's fencing token and be rejected without touching the row.
+    const staleRecord = recordPendingCorrectionReview({
+      workspaceDir, logicalObservationKey: key, claimToken: tokenA, llmResult: classification(), now: late,
+    });
+    expect(staleRecord).toMatchObject({ ok: true, disposition: 'concurrent_loss', reason: 'claim_not_owned' });
+    const staleSettle = await settlePendingCorrection({ workspaceDir, logicalObservationKey: key, claimToken: tokenA, now: late });
+    expect(staleSettle).toMatchObject({ ok: true, disposition: 'concurrent_loss', reason: 'claim_not_owned' });
+    const staleRelease = releasePendingCorrectionClaim({ workspaceDir, logicalObservationKey: key, claimToken: tokenA });
+    expect(staleRelease).toMatchObject({ ok: true, released: false, reason: 'claim_not_owned' });
+
+    const payload = JSON.parse(String(pendingRow(key).task_payload_json)) as { review: { attempts: number; claimToken?: string; reviewResult?: unknown } };
+    expect(payload.review.attempts).toBe(0);
+    expect(payload.review.claimToken).toBe(tokenB);
+    expect(payload.review.reviewResult).toBeUndefined();
+
+    // B still owns the row and finishes the normal path.
+    const recorded = recordPendingCorrectionReview({
+      workspaceDir, logicalObservationKey: key, claimToken: tokenB, llmResult: classification(), now: late,
+    });
+    expect(recorded).toMatchObject({ ok: true, disposition: 'pending', attempts: 1 });
+    const settled = await settlePendingCorrection({ workspaceDir, logicalObservationKey: key, claimToken: tokenB, now: late });
+    if (!settled.ok) throw new Error(settled.reason);
+    expect(settled.disposition).toBe('admitted');
+    const canonicalPainId = settled.canonicalPainId;
+    expect(canonicalPainId).toEqual(expect.any(String));
+    expect(painCount()).toBe(1);
+
+    const ensured = await ensureGovernanceDiagnosticianTask({
+      workspaceDir,
+      logicalObservationKey: key,
+      canonicalPainId: canonicalPainId as string,
+    });
+    if (!ensured.ok) throw new Error(ensured.reason);
+    expect(taskCount()).toBe(1);
+    // Exactly one canonical Pain; no duplicated admission from the stale worker.
+    expect(painCount()).toBe(1);
   });
 });

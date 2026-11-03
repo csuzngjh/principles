@@ -24,6 +24,33 @@ const BASELINE_DDL = [
   'CREATE TABLE tool_calls (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, tool_name TEXT NOT NULL, outcome TEXT NOT NULL, duration_ms INTEGER, exit_code INTEGER, error_type TEXT, error_message TEXT, gfi_before REAL, gfi_after REAL, params_json TEXT NOT NULL, result_preview TEXT, created_at TEXT NOT NULL)',
   'CREATE TABLE pain_events (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, source TEXT NOT NULL, score REAL NOT NULL, reason TEXT, severity TEXT, origin TEXT, confidence REAL, text TEXT, canonical_pain_id TEXT, runtime_task_id TEXT, host_kind TEXT, created_at TEXT NOT NULL)',
   'CREATE UNIQUE INDEX idx_pain_events_canonical_pain_id ON pain_events(canonical_pain_id) WHERE canonical_pain_id IS NOT NULL',
+  `CREATE TABLE IF NOT EXISTS governance_observations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rollout_row_id INTEGER NOT NULL,
+    host_kind TEXT NOT NULL,
+    rollout_identity TEXT NOT NULL,
+    root_session_id TEXT NOT NULL,
+    host_turn_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    logical_key TEXT NOT NULL,
+    transcript_record_key TEXT,
+    source_order INTEGER,
+    source_ordinal INTEGER,
+    assistant_item_id TEXT,
+    phase TEXT,
+    tool_use_id TEXT,
+    transcript_tool_call_id TEXT,
+    visible_text TEXT,
+    sanitized_tool_facts_json TEXT,
+    source TEXT NOT NULL,
+    completeness TEXT NOT NULL,
+    retention_class TEXT NOT NULL DEFAULT 'operational',
+    observed_at TEXT NOT NULL,
+    promoted_at TEXT,
+    promotion_ref TEXT,
+    expired_at TEXT,
+    UNIQUE(logical_key)
+  )`,
 ];
 
 let workspaceDir: string;
@@ -74,7 +101,19 @@ function correction(index: number): GovernanceCorrectionCandidate {
 }
 
 function admit(index: number): void {
-  const result = admitGovernanceSignals({ workspaceDir, candidates: [correction(index)], now: NOW });
+  // Production lineage: the Codex observation exists before admission. Without
+  // it the shared ingress would (correctly) settle as observation_only.
+  const observation = correction(index);
+  const sqlite = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+  try {
+    sqlite.prepare(`INSERT OR IGNORE INTO governance_observations
+      (rollout_row_id, host_kind, rollout_identity, root_session_id, host_turn_id, kind, logical_key, source, completeness, observed_at)
+      VALUES (1, ?, ?, ?, ?, 'message', ?, 'transcript', 'bounded', ?)`)
+      .run(observation.hostKind, observation.rolloutIdentity, observation.rootSessionId, observation.hostTurnId, observation.logicalObservationKey, NOW.toISOString());
+  } finally {
+    sqlite.close();
+  }
+  const result = admitGovernanceSignals({ workspaceDir, candidates: [observation], now: NOW });
   if (!result.ok) throw new Error(result.reason);
 }
 
@@ -147,9 +186,14 @@ describe('runStage2CorrectionCycle (SPEC v0.3 §4.4.7 / v0.3.1 §2)', () => {
 
   it('a durable review result still settles when no classifier is available (crash recovery)', async () => {
     admit(1);
+    const claimed = claimPendingCorrectionCandidates({ workspaceDir, limit: 1, now: NOW });
+    if (!claimed.ok) throw new Error(claimed.reason);
+    const claimToken = claimed.candidates[0]?.claimToken;
+    if (claimToken === null || claimToken === undefined) throw new Error('claim token missing');
     recordPendingCorrectionReview({
       workspaceDir,
       logicalObservationKey: 'codex|rollout-s2|turn-1|user',
+      claimToken,
       llmResult: classification(),
       now: NOW,
     });
@@ -287,9 +331,9 @@ describe('runStage2CorrectionCycle (SPEC v0.3 §4.4.7 / v0.3.1 §2)', () => {
     if (!immediate.ok) throw new Error(immediate.reason);
     expect(immediate.candidates).toHaveLength(1);
     // Return the probe claim so the real next cycle can own it.
-    const probeClaim = immediate.candidates[0]?.claimedAt;
+    const probeClaim = immediate.candidates[0]?.claimToken;
     if (probeClaim !== null && probeClaim !== undefined) {
-      releasePendingCorrectionClaim({ workspaceDir, logicalObservationKey: 'codex|rollout-s2|turn-1|user', claimedAt: probeClaim });
+      releasePendingCorrectionClaim({ workspaceDir, logicalObservationKey: 'codex|rollout-s2|turn-1|user', claimToken: probeClaim });
     }
     const next = await runStage2CorrectionCycle({ workspaceDir, classifier: classifier(classification()), now: NOW });
     expect(next.admitted).toBe(1);
@@ -327,23 +371,28 @@ describe('runStage2CorrectionCycle (SPEC v0.3 §4.4.7 / v0.3.1 §2)', () => {
 
   it('P2-2: a durable reviewResult is never cleared by claim release', async () => {
     admit(1);
+    const claimed = claimPendingCorrectionCandidates({ workspaceDir, limit: 1, now: NOW });
+    if (!claimed.ok) throw new Error(claimed.reason);
+    const claimToken = claimed.candidates[0]?.claimToken;
+    if (claimToken === null || claimToken === undefined) throw new Error('claim token missing');
     recordPendingCorrectionReview({
       workspaceDir,
       logicalObservationKey: 'codex|rollout-s2|turn-1|user',
+      claimToken,
       llmResult: classification({ confidence: 0.5 }),
       now: NOW,
     });
     const released = releasePendingCorrectionClaim({
       workspaceDir,
       logicalObservationKey: 'codex|rollout-s2|turn-1|user',
-      claimedAt: 'not-the-current-claim',
+      claimToken: 'not-the-current-claim',
     });
     if (!released.ok) throw new Error(released.reason);
     expect(released.released).toBe(false);
     expect(released.reason).toBe('review_already_persisted');
-    const claimed = claimPendingCorrectionCandidates({ workspaceDir, limit: 1, now: NOW });
-    if (!claimed.ok) throw new Error(claimed.reason);
-    expect(claimed.candidates[0]?.reviewResult).toMatchObject({ verdict: 'pending_low_confidence' });
+    const reclaimed = claimPendingCorrectionCandidates({ workspaceDir, limit: 1, now: NOW });
+    if (!reclaimed.ok) throw new Error(reclaimed.reason);
+    expect(reclaimed.candidates[0]?.reviewResult).toMatchObject({ verdict: 'pending_low_confidence' });
   });
 
   it('a slow classification is bounded by the aggregate budget', async () => {

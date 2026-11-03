@@ -356,6 +356,17 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
                     data: { hostKind: 'workbuddy', outcome: outcome.disposition, duplicate: outcome.duplicate },
                   });
                 } catch { /* Evidence-log failure must not block the prompt. */ }
+              } else if (outcome.disposition === 'abandoned') {
+                // P1 review round 3: an automatic correction needs REAL
+                // persisted behavior evidence. WorkBuddy has no observation
+                // store, so the shared ingress correctly settles as
+                // observation_only — no Pain, no task, no quota, and no
+                // fabricated `pain_event:` trace.
+                autoDiagnostics.push(diagnostic(
+                  'skipped',
+                  'workbuddy_keyword_observation_only:' + outcome.reason,
+                  'No persisted behavior evidence exists for this automatic correction; no Pain was created.',
+                ));
               } else if (outcome.disposition === 'rate_limited') {
                 autoDiagnostics.push(diagnostic('degraded', 'workbuddy_keyword_rate_limited', 'Per-session strong signal limit reached; no new Pain was created.'));
               }

@@ -44,6 +44,12 @@ export type RecordOwnerStatementResult =
      * rollout to promote from). The receipt discloses it instead of failing.
      */
     promotionDegraded?: string;
+    /**
+     * PainIngress warning when the Owner statement legitimately degraded
+     * (e.g. ingestion OFF → no persisted observation to use as behavior
+     * evidence). The Pain + task still exist; the receipt discloses the basis.
+     */
+    ingressWarning?: string;
   }
   | {
     status: 'rejected';
@@ -174,5 +180,6 @@ export async function recordExplicitOwnerStatement(args: {
     disposition: outcome.disposition === 'already_admitted' ? 'already_admitted' : 'admitted',
     logicalObservationKey: candidate.logicalObservationKey,
     ...(promotionDegraded !== undefined ? { promotionDegraded } : {}),
+    ...(ensured.ingressWarning !== undefined ? { ingressWarning: ensured.ingressWarning } : {}),
   };
 }

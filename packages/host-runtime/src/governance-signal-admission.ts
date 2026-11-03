@@ -33,6 +33,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
 import {
   collectSync,
@@ -658,8 +659,39 @@ function toolFailureTaskPayload(fields: Parameters<typeof buildToolFailureTaskPa
   return JSON.stringify(buildToolFailureTaskPayload(fields));
 }
 
-function buildTaskSubmissionPayload(candidate: GovernanceSignalCandidate, workspaceDir: string, details: { reason: string; canonicalPainId?: string }): GovernanceTaskSubmissionPayload {
-  const {reason,canonicalPainId} = details;
+/**
+ * P1 (review round 3): a `behavior_trace` may only name a row that EXISTS in
+ * trajectory.db with the SAME lineage tuple. WorkBuddy currently has no
+ * observation writer, so an automatic WorkBuddy correction usually has no
+ * persisted behavior evidence and evaluates to `observation_only`. Never
+ * synthesize a trace from the Pain id, prompt text, session id, or logical key.
+ */
+function persistedBehaviorTraceEvidence(args: {
+  db: Database.Database;
+  hostKind: GovernanceHostKind;
+  logicalObservationKey: string;
+  rolloutIdentity: string;
+  rootSessionId: string;
+  hostTurnId: string;
+  text: string;
+  workspaceDir: string;
+}): IngressEvidenceEntry[] {
+  const row = args.db.prepare(`SELECT visible_text FROM governance_observations
+    WHERE logical_key = ? AND host_kind = ? AND rollout_identity = ? AND root_session_id = ? AND host_turn_id = ?`)
+    .get(args.logicalObservationKey, args.hostKind, args.rolloutIdentity, args.rootSessionId, args.hostTurnId);
+  if (!isRecord(row)) return [];
+  // The durable observation is the authority for the note: it was sanitized at
+  // ingestion. Only when it carries no text do we sanitize the caller's copy.
+  const storedText = rowField(row, 'visible_text');
+  return [{
+    kind: 'behavior_trace',
+    sourceRef: `governance_observation:${args.logicalObservationKey}`,
+    note: typeof storedText === 'string' ? storedText : sanitizeString(args.text, args.workspaceDir),
+  }];
+}
+
+function buildTaskSubmissionPayload(candidate: GovernanceSignalCandidate, workspaceDir: string, details: { reason: string; db: Database.Database }): GovernanceTaskSubmissionPayload {
+  const {reason,db} = details;
   if (candidate.kind === 'user_correction') {
     // P1-1 privacy (review round 2): sanitize the FULL text before any
     // truncation — a token crossing the 200-char boundary must be redacted, not
@@ -671,16 +703,16 @@ function buildTaskSubmissionPayload(candidate: GovernanceSignalCandidate, worksp
       score: GOVERNANCE_STRONG_PAIN_SCORE,
       sessionId: candidate.rootSessionId,
       hostKind: candidate.hostKind,
-      // WorkBuddy explicit intake has no transcript observation to promote.
-      // The classified Owner statement is its input basis, not a pseudo-trace.
-      evidence: candidate.hostKind === 'workbuddy'
-        ? candidate.explicitOwnerStatement === true ? [] : [{
-          // WorkBuddy has no governance_observation, anchor to the canonical
-          // Pain persisted in this same trajectory.db transaction.
-          sourceRef: 'pain_event:' + (canonicalPainId ?? ''),
-          note: sanitizeString(candidate.text, workspaceDir),
-        }]
-        : [{ sourceRef: 'governance_observation:' + candidate.logicalObservationKey, note: sanitizeString(candidate.text, workspaceDir) }],
+      evidence: persistedBehaviorTraceEvidence({
+        db,
+        hostKind: candidate.hostKind,
+        logicalObservationKey: candidate.logicalObservationKey,
+        rolloutIdentity: candidate.rolloutIdentity,
+        rootSessionId: candidate.rootSessionId,
+        hostTurnId: candidate.hostTurnId,
+        text: candidate.text,
+        workspaceDir,
+      }),
       // SPEC-CODEX-PAIN-CLOSURE-001 CR-02 (merged from main): an explicit
       // Owner statement rides as classified correction evidence — never
       // summarized by an AI, never inside evidence[] pseudo-trace entries.
@@ -703,7 +735,7 @@ function buildTaskSubmissionPayload(candidate: GovernanceSignalCandidate, worksp
   });
 }
 
-function taskSubmissionPayload(candidate: GovernanceSignalCandidate, workspaceDir: string, details: { reason: string; canonicalPainId?: string }): string {
+function taskSubmissionPayload(candidate: GovernanceSignalCandidate, workspaceDir: string, details: { reason: string; db: Database.Database }): string {
   return JSON.stringify(buildTaskSubmissionPayload(candidate, workspaceDir, details));
 }
 
@@ -757,6 +789,13 @@ interface PendingReviewMeta {
   attempts: number;
   ruleVersion: number | null;
   claimedAt?: string;
+  /**
+   * Fencing token for the claim (`claimedAt` stays the TTL clock only).
+   * Every write that depends on current claim ownership must present the
+   * identical token; a worker whose claim was taken over is rejected instead
+   * of overwriting the new owner's state.
+   */
+  claimToken?: string;
   lastAttemptAt?: string;
   lastReason?: string;
   reviewResult?: Stage2ReviewRecord;
@@ -797,6 +836,7 @@ export interface PendingCorrectionCandidate {
   readonly matchedTerms: readonly string[];
   readonly attempts: number;
   readonly claimedAt: string | null;
+  readonly claimToken: string | null;
   readonly reviewResult: Stage2ReviewRecord | null;
   readonly createdAt: string;
 }
@@ -809,6 +849,8 @@ function parsePendingReviewMeta(value: unknown): PendingReviewMeta | null {
   if (ruleVersion !== null && ruleVersion !== undefined && (typeof ruleVersion !== 'number' || !Number.isSafeInteger(ruleVersion))) return null;
   const claimedAt = own(value, 'claimedAt');
   if (claimedAt !== undefined && typeof claimedAt !== 'string') return null;
+  const claimToken = own(value, 'claimToken');
+  if (claimToken !== undefined && typeof claimToken !== 'string') return null;
   const lastAttemptAt = own(value, 'lastAttemptAt');
   if (lastAttemptAt !== undefined && typeof lastAttemptAt !== 'string') return null;
   const lastReason = own(value, 'lastReason');
@@ -833,6 +875,7 @@ function parsePendingReviewMeta(value: unknown): PendingReviewMeta | null {
     attempts,
     ruleVersion: typeof ruleVersion === 'number' ? ruleVersion : null,
     ...(typeof claimedAt === 'string' ? { claimedAt } : {}),
+    ...(typeof claimToken === 'string' ? { claimToken } : {}),
     ...(typeof lastAttemptAt === 'string' ? { lastAttemptAt } : {}),
     ...(typeof lastReason === 'string' ? { lastReason } : {}),
     ...(reviewResult !== undefined ? { reviewResult } : {}),
@@ -874,16 +917,17 @@ function parsePendingReviewPayload(raw: unknown): PendingReviewPayload | null {
 function buildPendingReviewPayload(args: {
   candidate: GovernanceCorrectionCandidate;
   workspaceDir: string;
+  db: Database.Database;
   painId: string;
   matchedTerms: readonly string[];
   ruleVersion: number | null;
 }): PendingReviewPayload {
-  const {candidate, workspaceDir, painId, matchedTerms, ruleVersion} = args;
+  const {candidate,workspaceDir,db,painId,matchedTerms,ruleVersion} = args;
   const reason = correctionReason(candidate, matchedTerms);
   return {
     kind: 'pending_llm_review',
     pain_id: painId,
-    task_payload: buildTaskSubmissionPayload(candidate, workspaceDir, { reason, canonicalPainId: painId }),
+    task_payload: buildTaskSubmissionPayload(candidate, workspaceDir, { reason, db }),
     review: { attempts: 0, ruleVersion, lastReason: 'ambiguous_candidate' },
     trigger: {
       text: sanitizeString(candidate.text, workspaceDir),
@@ -1028,18 +1072,18 @@ function ownerExplicitChannel(candidate: GovernanceCorrectionCandidate): 'codex_
 }
 
 function correctionIngressEvidence(args: {
+  db: Database.Database;
   hostKind: 'codex' | 'workbuddy';
   logicalObservationKey: string;
+  rolloutIdentity: string;
+  rootSessionId: string;
+  hostTurnId: string;
   text: string;
   workspaceDir: string;
 }): IngressEvidenceEntry[] {
-  return [{
-    kind: 'behavior_trace',
-    sourceRef: args.hostKind === 'workbuddy'
-      ? 'pain_event:' + args.logicalObservationKey
-      : 'governance_observation:' + args.logicalObservationKey,
-    note: sanitizeString(args.text, args.workspaceDir),
-  }];
+  // Real persisted behavior evidence only (P1 review round 3). No Pain-id /
+  // logical-key / session-id pseudo-traces — WorkBuddy yields no evidence here.
+  return persistedBehaviorTraceEvidence(args);
 }
 
 /**
@@ -1151,6 +1195,18 @@ function admitCorrection({ db, candidate, workspaceDir, now, nowIso, keywordStor
       && detection.output.strength === 'STRONG'
       && detection.output.matchedPrecision === 'high');
 
+  // Ordinary conversation / zero-hit discovery is decided BEFORE the ingress
+  // gate: it has no Pain, no task, no quota, and no marker (SPEC §18 scenario
+  // 6). Ingress evidence only governs actual signals — running it first would
+  // turn silence into an audit row and mask `not_a_signal`.
+  const ambiguousTerms = detection?.output.matchedTerms ?? [];
+  const isAmbiguousCandidate = detection !== undefined
+    && detection.output.matchedPrecision === 'ambiguous'
+    && ambiguousTerms.length > 0;
+  if (!isStrongHighPrecision && !isAmbiguousCandidate) {
+    return { disposition: 'not_a_signal', kind: 'user_correction', logicalObservationKey: candidate.logicalObservationKey };
+  }
+
   // v0.3.1 §1.2: shared ingress semantics run BEFORE any Pain/limit/marker
   // side effect — for explicit Owner statements AND automatic hooks. The
   // origin/channel are derived from the signal's real source.
@@ -1172,16 +1228,20 @@ function admitCorrection({ db, candidate, workspaceDir, now, nowIso, keywordStor
         hostTurnId: candidate.hostTurnId,
         painId,
         reason: ingressReasonValue,
-        // Codex has a real governance observation anchor; WorkBuddy explicit
-        // intake has no transcript evidence and must degrade honestly.
-        evidence: candidate.hostKind === 'codex'
-          ? correctionIngressEvidence({
-            hostKind: 'codex',
-            logicalObservationKey: candidate.logicalObservationKey,
-            text: candidate.text,
-            workspaceDir,
-          })
-          : [],
+        // Codex has a real governance observation anchor when ingestion
+        // persisted one; otherwise (ingestion disabled) the statement degrades
+        // to the Owner Manual path instead of fabricating a trace. WorkBuddy
+        // explicit intake has no transcript evidence and degrades honestly.
+        evidence: correctionIngressEvidence({
+          db,
+          hostKind: candidate.hostKind,
+          logicalObservationKey: candidate.logicalObservationKey,
+          rolloutIdentity: candidate.rolloutIdentity,
+          rootSessionId: candidate.rootSessionId,
+          hostTurnId: candidate.hostTurnId,
+          text: candidate.text,
+          workspaceDir,
+        }),
       }))
       : evaluatePainIngress(buildCorrectionIngressReport({
         hostKind: candidate.hostKind,
@@ -1192,8 +1252,12 @@ function admitCorrection({ db, candidate, workspaceDir, now, nowIso, keywordStor
         painId,
         reason: ingressReasonValue,
         evidence: correctionIngressEvidence({
+          db,
           hostKind: candidate.hostKind,
           logicalObservationKey: candidate.logicalObservationKey,
+          rolloutIdentity: candidate.rolloutIdentity,
+          rootSessionId: candidate.rootSessionId,
+          hostTurnId: candidate.hostTurnId,
           text: candidate.text,
           workspaceDir,
         }),
@@ -1229,15 +1293,6 @@ function admitCorrection({ db, candidate, workspaceDir, now, nowIso, keywordStor
   }
 
   if (!isStrongHighPrecision) {
-    const ambiguousTerms = detection?.output.matchedTerms ?? [];
-    const isAmbiguousCandidate = detection !== undefined
-      && detection.output.matchedPrecision === 'ambiguous'
-      && ambiguousTerms.length > 0;
-    if (!isAmbiguousCandidate) {
-      // Ordinary conversation / zero-hit discovery: no pain, no task, no quota,
-      // and no marker (SPEC §18 scenario 6).
-      return { disposition: 'not_a_signal', kind: 'user_correction', logicalObservationKey: candidate.logicalObservationKey };
-    }
     // SPEC §4.4.8: ambiguous candidates become auditable pending rows (the
     // explicit change from the old "silence" contract). The canonical id is
     // derived from host identity facts — identical before and after review.
@@ -1256,6 +1311,7 @@ function admitCorrection({ db, candidate, workspaceDir, now, nowIso, keywordStor
         payloadJson: JSON.stringify(buildPendingReviewPayload({
           candidate,
           workspaceDir,
+          db,
           painId,
           matchedTerms: ambiguousTerms,
           ruleVersion,
@@ -1326,7 +1382,7 @@ function admitCorrection({ db, candidate, workspaceDir, now, nowIso, keywordStor
         // detection, so `detection` is optional — no ruleVersion exists for them.
         ruleVersion: detection?.ruleVersion ?? null,
         reason,
-        payloadJson: taskSubmissionPayload(candidate, workspaceDir, { reason, canonicalPainId: painId }),
+        payloadJson: taskSubmissionPayload(candidate, workspaceDir, { reason, db }),
         nowIso,
       });
     })();
@@ -1433,7 +1489,7 @@ function admitToolFailure({ db, candidate, workspaceDir, nowIso }: AdmitToolFail
         canonicalPainId: painId,
         ruleVersion: null,
         reason: sanitizeString(reason, workspaceDir),
-        payloadJson: taskSubmissionPayload(candidate, workspaceDir, { reason }),
+        payloadJson: taskSubmissionPayload(candidate, workspaceDir, { reason, db }),
         nowIso,
       });
     }
@@ -1659,8 +1715,11 @@ export function claimPendingCorrectionCandidates(input: ClaimPendingCandidatesIn
         const claimedMs = Date.parse(claimedAt);
         if (Number.isFinite(claimedMs) && now.getTime() - claimedMs < PENDING_REVIEW_CLAIM_TTL_MS) continue;
       }
+      let claimToken: string | null = null;
       if (!hasReviewResult) {
-        const nextPayload: PendingReviewPayload = { ...parsed.payload, review: { ...parsed.payload.review, claimedAt: nowIso } };
+        // `claimedAt` is the TTL clock; the random token is the fencing identity.
+        claimToken = randomUUID();
+        const nextPayload: PendingReviewPayload = { ...parsed.payload, review: { ...parsed.payload.review, claimedAt: nowIso, claimToken } };
         const {changes} = db.prepare(`UPDATE governance_signal_admissions SET task_payload_json = ?, updated_at = ?
           WHERE logical_observation_key = ? AND decision = 'pending_llm_review' AND task_payload_json = ?`)
           .run(JSON.stringify(nextPayload), nowIso, key, parsed.payloadText);
@@ -1676,6 +1735,7 @@ export function claimPendingCorrectionCandidates(input: ClaimPendingCandidatesIn
         matchedTerms: parsed.payload.trigger.matchedTerms,
         attempts: parsed.payload.review.attempts,
         claimedAt: hasReviewResult ? null : nowIso,
+        claimToken,
         reviewResult: parsed.payload.review.reviewResult ?? null,
         createdAt: parsed.createdAt,
       });
@@ -1692,8 +1752,8 @@ export function claimPendingCorrectionCandidates(input: ClaimPendingCandidatesIn
 export interface ReleasePendingClaimInput {
   readonly workspaceDir: string;
   readonly logicalObservationKey: string;
-  /** The claim stamp returned by `claimPendingCorrectionCandidates`. */
-  readonly claimedAt: string;
+  /** The fencing token returned by `claimPendingCorrectionCandidates`. */
+  readonly claimToken: string;
   readonly databaseFactory?: ObservationDatabaseFactory;
 }
 
@@ -1709,7 +1769,7 @@ export type ReleasePendingClaimResult =
  * - only `pending_llm_review` rows;
  * - never when a durable reviewResult exists (that outcome must be consumed by
  *   settle, not thrown away);
- * - the persisted claim stamp must still be the one this worker took;
+ * - the persisted claim token must still be the one this worker took;
  * - CAS on the exact payload text, so a concurrent worker's state is untouched.
  */
 export function releasePendingCorrectionClaim(input: ReleasePendingClaimInput): ReleasePendingClaimResult {
@@ -1727,11 +1787,12 @@ export function releasePendingCorrectionClaim(input: ReleasePendingClaimInput): 
     if (parsed.payload.review.reviewResult !== undefined) {
       return { ok: true, released: false, reason: 'review_already_persisted' };
     }
-    const currentClaim = parsed.payload.review.claimedAt;
+    const currentClaim = parsed.payload.review.claimToken;
     if (currentClaim === undefined) return { ok: true, released: false, reason: 'claim_absent' };
-    if (currentClaim !== input.claimedAt) return { ok: true, released: false, reason: 'claim_not_owned' };
-    const { claimedAt: _consumedClaim, ...reviewWithoutClaim } = parsed.payload.review;
+    if (currentClaim !== input.claimToken) return { ok: true, released: false, reason: 'claim_not_owned' };
+    const { claimedAt: _consumedClaim, claimToken: _consumedToken, ...reviewWithoutClaim } = parsed.payload.review;
     void _consumedClaim;
+    void _consumedToken;
     const nextPayload: PendingReviewPayload = { ...parsed.payload, review: reviewWithoutClaim };
     const { changes } = db.prepare(`UPDATE governance_signal_admissions SET task_payload_json = ?, updated_at = ?
       WHERE logical_observation_key = ? AND decision = 'pending_llm_review' AND task_payload_json = ?`)
@@ -1746,6 +1807,8 @@ export function releasePendingCorrectionClaim(input: ReleasePendingClaimInput): 
 export interface CompletePendingReviewInput {
   readonly workspaceDir: string;
   readonly logicalObservationKey: string;
+  /** Fencing token from `claimPendingCorrectionCandidates`; required. */
+  readonly claimToken: string;
   /** `null` = the classifier produced no usable verdict (timeout/exception). */
   readonly llmResult: LlmClassificationResult | null;
   readonly now?: Date;
@@ -1773,6 +1836,13 @@ export function recordPendingCorrectionReview(input: CompletePendingReviewInput)
     if (parsed === null) {
       return { ok: false, reason: 'pending_payload_invalid', nextAction: 'inspect the pending marker payload; the row stays pending until repaired' };
     }
+    // Fencing: if another worker re-claimed this row (our claim exceeded the
+    // 10-minute TTL and was taken over), our verdict must NOT overwrite the
+    // new owner's state. Compare the fencing token, not only the payload text.
+    const currentClaimToken = parsed.payload.review.claimToken;
+    if (currentClaimToken === undefined || currentClaimToken !== input.claimToken) {
+      return { ok: true, disposition: 'concurrent_loss', logicalObservationKey: input.logicalObservationKey, attempts: parsed.payload.review.attempts, reason: 'claim_not_owned' };
+    }
     const gate = evaluateStage2ConfidenceGate(input.llmResult);
     const attempts = parsed.payload.review.attempts + 1;
     const reviewResult: Stage2ReviewRecord = { verdict: gate.verdict, confidence: gate.confidence, reason: gate.reason };
@@ -1784,9 +1854,8 @@ export function recordPendingCorrectionReview(input: CompletePendingReviewInput)
         reviewResult,
         lastAttemptAt: nowIso,
         lastReason: gate.verdict,
-        // Keep the claim stamp so a parallel worker skips this row; a crash
-        // after this commit is handled by the reviewResult-present path.
-        claimedAt: nowIso,
+        // Keep the SAME claim stamp/token so a parallel worker skips this row;
+        // a crash after this commit is handled by the reviewResult-present path.
       },
     };
     const {changes} = db.prepare(`UPDATE governance_signal_admissions SET task_payload_json = ?, updated_at = ?
@@ -1810,6 +1879,11 @@ export function recordPendingCorrectionReview(input: CompletePendingReviewInput)
 export interface SettlePendingReviewInput {
   readonly workspaceDir: string;
   readonly logicalObservationKey: string;
+  /**
+   * Fencing token when this worker recorded the verdict in the current cycle.
+   * Omitted only for crash recovery of an ALREADY persisted reviewResult.
+   */
+  readonly claimToken?: string;
   readonly now?: Date;
   readonly databaseFactory?: ObservationDatabaseFactory;
 }
@@ -1846,6 +1920,15 @@ export async function settlePendingCorrection(input: SettlePendingReviewInput): 
       return { ok: false, reason: 'pending_payload_invalid', nextAction: 'inspect the pending marker payload; the row stays pending until repaired' };
     }
     const { payload, payloadText, createdAt, rootSessionId, rolloutIdentity, hostKind } = parsed;
+    // Fencing: a settlement that depends on this worker's claim must still hold
+    // that claim. Omitted token = crash recovery of an already durable result,
+    // which any successor may finish (reviewResult is the durable evidence).
+    if (input.claimToken !== undefined) {
+      const currentClaimToken = payload.review.claimToken;
+      if (currentClaimToken === undefined || currentClaimToken !== input.claimToken) {
+        return { ok: true, disposition: 'concurrent_loss', logicalObservationKey: input.logicalObservationKey, attempts: payload.review.attempts, reason: 'claim_not_owned' };
+      }
+    }
     const review = payload.review.reviewResult;
     if (review === undefined) {
       return { ok: true, disposition: 'pending', logicalObservationKey: input.logicalObservationKey, attempts: payload.review.attempts, reason: 'review_not_recorded' };
@@ -1877,12 +1960,14 @@ export async function settlePendingCorrection(input: SettlePendingReviewInput): 
         return { ok: true, disposition: 'abandoned', logicalObservationKey: input.logicalObservationKey, attempts: payload.review.attempts, reason };
       }
       // Retryable verdict: consume the review result and release the claim so
-      // the next worker cycle re-claims and calls the LLM again. The property
-      // must be ABSENT (claim logic tests `reviewResult !== undefined`), and
-      // the CAS must use the exact payload we read (concurrent-settle guard).
-      const { reviewResult: _consumedReview, claimedAt: _consumedClaim, ...retainedReview } = payload.review;
+      // the next worker cycle re-claims and calls the LLM again. Both claim
+      // properties must be ABSENT (claim logic tests `reviewResult !==
+      // undefined` / `claimToken`), and the CAS must use the exact payload we
+      // read (concurrent-settle guard).
+      const { reviewResult: _consumedReview, claimedAt: _consumedClaim, claimToken: _consumedToken, ...retainedReview } = payload.review;
       void _consumedReview;
       void _consumedClaim;
+      void _consumedToken;
       const nextPayload: PendingReviewPayload = {
         ...payload,
         review: { ...retainedReview, lastAttemptAt: nowIso, lastReason: review.verdict },
@@ -1924,6 +2009,10 @@ export async function settlePendingCorrection(input: SettlePendingReviewInput): 
     const painId = payload.pain_id;
     const reason = correctionReason(candidate, payload.trigger.matchedTerms);
     // v0.3.1 §1.2: the shared ingress decision precedes the admitted CAS.
+    // P1 review round 3: re-derive evidence from trajectory.db instead of
+    // trusting whatever the pending payload recorded. A pending candidate with
+    // no real persisted observation (e.g. WorkBuddy automatic) cannot be
+    // admitted — it settles as observation_only with zero Pain/quota.
     const ingressReason = ingressTerminalReason({
       hostKind: candidate.hostKind,
       logicalObservationKey: input.logicalObservationKey,
@@ -1932,11 +2021,16 @@ export async function settlePendingCorrection(input: SettlePendingReviewInput): 
       hostTurnId: candidate.hostTurnId,
       painId,
       reason,
-      evidence: payload.task_payload.evidence.map((entry) => ({
-        kind: 'behavior_trace' as const,
-        sourceRef: entry.sourceRef,
-        note: entry.note,
-      })),
+      evidence: correctionIngressEvidence({
+        db,
+        hostKind: candidate.hostKind,
+        logicalObservationKey: input.logicalObservationKey,
+        rolloutIdentity,
+        rootSessionId,
+        hostTurnId: candidate.hostTurnId,
+        text: payload.trigger.text,
+        workspaceDir,
+      }),
     });
     if (ingressReason !== null) {
       const { changes } = db.prepare(`UPDATE governance_signal_admissions SET decision = 'abandoned', reason = ?, task_payload_json = ?, updated_at = ?
@@ -2254,14 +2348,33 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
       ? (markerKey.split('|')[2] ?? markerKey)
       : (markerKey.lastIndexOf('|') > 0 ? markerKey.slice(0, markerKey.lastIndexOf('|')) : markerKey);
     const markerHostKind = payloadParsed.hostKind;
-    const ingressEvidence = payloadParsed.evidence.map((entry) => ({
-      kind: 'behavior_trace' as const,
-      sourceRef: entry.sourceRef,
-      note: entry.note,
-    }));
+    // P1 review round 3: never trust the payload's evidence list — re-derive it
+    // from trajectory.db with the full lineage tuple. A marker that references a
+    // non-existent observation (or a WorkBuddy automatic correction) evaluates
+    // to observation_only and fails closed below.
+    // A tool_failure pain is its own persisted evidence (the pain row), not a
+    // correction claim about behavior — the correction re-derivation must not
+    // run for it. Only corrections are gated on a real observation.
+    const isCorrectionPayload = payloadParsed.painType !== 'tool_failure';
+    const ingressEvidence: IngressEvidenceEntry[] = isCorrectionPayload && (markerHostKind === 'codex' || markerHostKind === 'workbuddy')
+      ? correctionIngressEvidence({
+        db,
+        hostKind: markerHostKind,
+        logicalObservationKey: markerKey,
+        rolloutIdentity: typeof rolloutIdentity === 'string' ? rolloutIdentity : '',
+        rootSessionId: payloadParsed.sessionId,
+        hostTurnId,
+        text: payloadParsed.reason,
+        workspaceDir,
+      })
+      : payloadParsed.evidence.map((entry) => ({
+        kind: 'behavior_trace' as const,
+        sourceRef: entry.sourceRef,
+        note: entry.note,
+      }));
     let provenance: PainProvenance;
     let ingressWarning: string | undefined;
-    if (markerHostKind === 'codex' || markerHostKind === 'workbuddy') {
+    if (isCorrectionPayload && (markerHostKind === 'codex' || markerHostKind === 'workbuddy')) {
       // SPEC v0.3 §5 / v0.3.1 §1.2: rebuild the report from the marker's REAL
       // source. An explicit Owner statement is owner_manual (manual_pain_id,
       // correctionEvidence channel); everything else is the automatic hook.
@@ -2361,7 +2474,7 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
           // durable attribution fact (existing codex markers keep 'codex',
           // workbuddy markers attribute 'workbuddy').
           hostKind: payloadParsed.hostKind,
-          evidence: [...payloadParsed.evidence],
+          evidence: [...ingressEvidence],
           // CR-02: replay the explicit Owner statement verbatim (classified,
           // channel-disclosed) so re-created tasks keep the same input basis.
           ...(payloadParsed.correctionEvidence !== undefined
