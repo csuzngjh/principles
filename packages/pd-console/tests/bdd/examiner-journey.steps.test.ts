@@ -42,20 +42,32 @@ let coupledTarget = false;
 
 function call(method: string, subPath: string, payload?: unknown): Promise<void> {
   return new Promise((resolve, reject) => {
-    const listeners: Record<string, Array<(chunk?: unknown) => void>> = {};
+    // Buffering request double: emit the body when the reader subscribes to
+    // 'end', never on a timer. handleExaminerRoute awaits real I/O before
+    // readBody (the one-time lab cold load on the first request), so a
+    // `setTimeout(..., 0)` emitter loses 'data'/'end' before listeners exist
+    // and readBody never settles (reproduced: `bdd call timeout: POST
+    // /studies` under a filtered -t run).
+    const raw = payload === undefined ? '' : JSON.stringify(payload);
+    const listeners: { data: Array<(chunk: Buffer) => void>; end: Array<() => void> } = { data: [], end: [] };
+    let emitted = false;
     const req = {
       method,
       url: subPath,
-      on(event: string, handler: (chunk?: unknown) => void) {
-        listeners[event] = listeners[event] ?? [];
-        listeners[event].push(handler);
+      on(event: 'data' | 'end', handler: (chunk?: unknown) => void) {
+        if (event === 'end') {
+          listeners.end.push(handler as () => void);
+          if (!emitted) {
+            emitted = true;
+            if (raw !== '') for (const dataHandler of listeners.data) dataHandler(Buffer.from(raw));
+            for (const endHandler of listeners.end) endHandler();
+          }
+        } else {
+          listeners.data.push(handler as (chunk: Buffer) => void);
+        }
+        return req;
       },
     } as unknown as IncomingMessage;
-    const raw = payload === undefined ? '' : JSON.stringify(payload);
-    setTimeout(() => {
-      if (raw !== '') for (const handler of listeners.data ?? []) handler(Buffer.from(raw));
-      for (const handler of listeners.end ?? []) handler();
-    }, 0);
     const response = {
       headersSent: false,
       statusCode: 200,

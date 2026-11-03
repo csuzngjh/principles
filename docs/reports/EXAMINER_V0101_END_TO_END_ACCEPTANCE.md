@@ -266,3 +266,24 @@ POST-FIX sentinel untouched: SENTINEL
 
 1. 若未来 Owner 要求 Windows/macOS 也达到 Linux 级原子绑定，需要 native addon 或改用 `openat` 封装；纯 Node API 无法提供，届时另立 SPEC，不得在本 PR 内以字符串检查冒充解决。
 2. ledger 读路径的 fd 循环读已改为分块（64KB），超大 ledger 仍为全量内存解析（未新增流式解析，避免扩大范围）。
+
+### 11.8 CodeRabbit 复核（review 针对 `1f6a290d8`，当前 HEAD 其后仅新增测试）
+
+CodeRabbit 结论为 `CHANGES_REQUESTED`（commit `1f6a290d8`），后自动产生一条 `DISMISSED` 摘要。逐条核实：
+
+| # | 文件/行 | 观点 | 当前状态 | 判定 |
+|---|---|---|---|---|
+| 1 | `docs/architecture/PRI-749-runtime-readiness-audit.md:24` | §1 称 17 处漂移，§4 只有 G-1..G-12 且含代码侧条目，缺少计数口径 | 文档确实前后不一致（§4 为 12 行，其中 G-1/G-12 非 workspace 漂移） | **属实，但超出本轮 Examiner 安全/单活范围** → follow-up（文档准确性） |
+| 2 | `docs/architecture/PRI-751-ai-developer-complexity-audit.md:1` | `docs/architecture/README.md` 未索引本 PR 新增的 10 份报告 | README 中确无 PRI-749/751/762/PD-complexity 条目 | **属实，但属无关文档治理** → follow-up（README 索引） |
+| 3 | `docs/architecture/PRI-762-pain-admission-flag-reality-review.md:72/74` | 第 1.4 节“不会改变任何用户可观察行为”与同表“unknown-flag 告警可观察”冲突 | 第 68 行已写明未知键产生 `unknown flag ignored` 告警；第 74 行的绝对化表述确实冲突 | **属实，但属无关审计文档** → follow-up（措辞修正） |
+| 4 | `packages/pd-console/tests/bdd/examiner-journey.steps.test.ts:58-62` | BDD 请求替身用 `setTimeout(0)` 派发，冷启动首个 `POST /studies` 丢事件 → `bdd call timeout` | **真实缺陷**（与 repair/v0101 已修的同一死锁类；BDD 文件此前漏改） | **已修复**（缓冲式替身：订阅 `end` 时同步回放） |
+| 5 | `packages/pd-console/tests/bdd/examiner-journey.steps.test.ts:149-152`（nitpick） | RuleCode 耦合场景只用账本 `ruleIds` 构造 422，未写 runtime activation 行；建议补夹具/断言 | 现状属实；生产代码不受影响，运行时耦合已由 repair/v0101 专项用例钉住 | **有效建议，超范围** → follow-up（P3 测试保真度） |
+
+**红灯→绿灯证据（#4）**：
+```text
+修复前：npx vitest run tests/bdd/examiner-journey.steps.test.ts -t "单活运行"
+        × 单活运行…… 100024ms → bdd call timeout: POST /studies
+修复后：同命令 → ✓ 单活运行…… 378ms；整文件 11/11 PASS
+```
+
+未关闭规则、未削弱校验、未对 #1/#2/#3/#5 做代码改动；CodeRabbit 评论保持原状（未 dismiss）。
