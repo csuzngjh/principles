@@ -978,6 +978,34 @@ describe("FocusPage: PRI-1017 budget observation rendering contract", () => {
     }
   });
 
+  // PRI-1066: the banner was a standing nag — every Focus load (no state
+  // change) listed three "（已满）" lines. `truncated` is the NORMAL rotation
+  // state, so it can never be the trigger; only a host that cannot fit even
+  // one principle (zero chars injected while candidates exist) is a real,
+  // actionable starvation.
+  it("PRI-1066: the capacity banner appears only when a host is genuinely starved", () => {
+    expect(focusSrc).toContain("const starvedHosts = perHost.filter(");
+    expect(focusSrc).toContain("(entry) => entry.usedChars === 0 && entry.truncated,");
+    expect(focusSrc).toContain("if (starvedHosts.length === 0) return null;");
+    // Rotation must NOT be a trigger (the pre-PRI-1066 nag).
+    expect(focusSrc).not.toContain("const fullHosts = perHost.filter((entry) => entry.truncated);");
+  });
+
+  it("PRI-1066: starvation collapses into ONE summary line; details are opt-in", () => {
+    expect(focusSrc).toContain('t("pages.focus.promptCapacityStarved"');
+    expect(focusSrc).toContain('<details className="mt-1">');
+    expect(focusSrc).toContain('data-testid="prompt-capacity-details-toggle"');
+    for (const focus of [enFocus, zhFocus]) {
+      expect(getOwnString(focus, "promptCapacityStarved") ?? "").toContain("{{count}}");
+      expect(getOwnString(focus, "promptCapacityDetails") ?? "").not.toBe("");
+      // The rotation-nag copy must be gone from both locales.
+      expect(getOwnString(focus, "promptCapacityAllFull")).toBeUndefined();
+      expect(getOwnString(focus, "promptCapacitySomeFull")).toBeUndefined();
+    }
+    // The host picker stays available in every state.
+    expect(focusSrc).toContain('data-testid={`prompt-capacity-pick-${host}`}');
+  });
+
   it("the fallback copy carries the bounded reason and, when available, the observation time", () => {
     // A usable runtime observation that is itself a fallback is NOT "console
     // not bound to the runtime model" — the console did use that observation.

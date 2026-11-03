@@ -24,30 +24,30 @@ function fakeCatalog(entries: { provider: string; modelId: string; contextWindow
   };
 }
 
-describe('promptBudgetCharsForContextWindow (SPEC §4.2 formula, v0.2 bounds)', () => {
+describe('promptBudgetCharsForContextWindow (SPEC §4.2 formula, v0.3 bounds)', () => {
   it('maps the reference table exactly (32K/64K clamp UP to the measured floor)', () => {
-    // Raw formula values: 32K→500, 64K→1000 — both below the measured
-    // usable floor (1250), so both clamp UP. Below the floor the shared
-    // route injects ZERO principles (audited defect).
+    // Raw formula values: 32K→1000 — below the measured usable floor (1250),
+    // so it clamps UP. Below the floor the shared route injects ZERO
+    // principles (audited defect).
     expect(promptBudgetCharsForContextWindow(32_000)).toBe(1250);
-    expect(promptBudgetCharsForContextWindow(64_000)).toBe(1250);
-    expect(promptBudgetCharsForContextWindow(128_000)).toBe(2000);
-    expect(promptBudgetCharsForContextWindow(256_000)).toBe(4000);
-    // 1M maps to floor(2000 × 1_000_000 / 128_000) = 15625 — the 16000 cap
+    expect(promptBudgetCharsForContextWindow(64_000)).toBe(2000);
+    expect(promptBudgetCharsForContextWindow(128_000)).toBe(4000);
+    expect(promptBudgetCharsForContextWindow(256_000)).toBe(8000);
+    // 1M maps to floor(4000 × 1_000_000 / 128_000) = 31250 — the 32000 cap
     // is an upper bound, not a value the formula must reach.
-    expect(promptBudgetCharsForContextWindow(1_000_000)).toBe(15625);
+    expect(promptBudgetCharsForContextWindow(1_000_000)).toBe(31250);
     // The cap is reached only at ≥ 1.024M tokens.
-    expect(promptBudgetCharsForContextWindow(1_024_000)).toBe(16000);
-    expect(promptBudgetCharsForContextWindow(2_000_000)).toBe(16000);
+    expect(promptBudgetCharsForContextWindow(1_024_000)).toBe(32000);
+    expect(promptBudgetCharsForContextWindow(2_000_000)).toBe(32000);
   });
 
   it('floors below the minimum tier and never exceeds the hard ceiling', () => {
-    // 16K would scale to 250 chars — clamped up to the 1250 floor.
+    // 16K would scale to 512 chars — clamped up to the 1250 floor.
     expect(promptBudgetCharsForContextWindow(16_384)).toBe(PROMPT_BUDGET_MIN_CHARS);
-    // A plausibly-large window would scale far beyond 16000 — clamped down.
+    // A plausibly-large window would scale far beyond 32000 — clamped down.
     expect(promptBudgetCharsForContextWindow(10_000_000)).toBe(PROMPT_BUDGET_MAX_CHARS);
-    // Non-integer scaling floors down: 200K → 3125.
-    expect(promptBudgetCharsForContextWindow(200_000)).toBe(3125);
+    // Non-integer scaling floors down: 200K → 6250.
+    expect(promptBudgetCharsForContextWindow(200_000)).toBe(6250);
   });
 
   it('returns the legacy fallback for invalid windows instead of a fake tier', () => {
@@ -71,34 +71,36 @@ describe('isValidContextWindowTokens (rc-1/rc-2 runtime validation)', () => {
   });
 });
 
-describe('classifySingleItemBudgetTier (SPEC §6.3, v0.2 bounds)', () => {
-  it('classifies against the supported [1250, 16000] budget range', () => {
+describe('classifySingleItemBudgetTier (SPEC §6.3, v0.3 bounds)', () => {
+  it('classifies against the supported [1250, 32000] budget range', () => {
     expect(classifySingleItemBudgetTier(0)).toBe('fits_all_tiers');
     expect(classifySingleItemBudgetTier(1249)).toBe('fits_all_tiers');
     expect(classifySingleItemBudgetTier(1250)).toBe('fits_all_tiers');
     expect(classifySingleItemBudgetTier(1251)).toBe('model_dependent');
     expect(classifySingleItemBudgetTier(2000)).toBe('model_dependent');
-    expect(classifySingleItemBudgetTier(16000)).toBe('model_dependent');
-    expect(classifySingleItemBudgetTier(16001)).toBe('exceeds_max_tier');
+    expect(classifySingleItemBudgetTier(32000)).toBe('model_dependent');
+    expect(classifySingleItemBudgetTier(32001)).toBe('exceeds_max_tier');
   });
 });
 
-describe('resolvePromptBudget priority chain (SPEC §4.3 v0.2)', () => {
+describe('resolvePromptBudget priority chain (SPEC §4.3 v0.3)', () => {
   const catalog = fakeCatalog([
     { provider: 'p1', modelId: 'model-x', contextWindowTokens: 200_000 },
     { provider: 'p2', modelId: 'model-x', contextWindowTokens: 200_000 },
     { provider: 'p3', modelId: 'model-x', contextWindowTokens: 64_000 },
     { provider: 'p1', modelId: 'model-y', contextWindowTokens: 1_000_000 },
+    { provider: 'p4', modelId: 'model-z', contextWindowTokens: 200_000 },
+    { provider: 'p5', modelId: 'model-z', contextWindowTokens: 200_000 },
   ]);
 
   it('resolves the legacy fallback with a bounded reason code when no facts exist', () => {
     const result = resolvePromptBudget();
     expect(result).toMatchObject({
-      budgetChars: 2000,
+      budgetChars: 4000,
       capacitySource: 'legacy_fallback',
       capacityStatus: 'unknown',
       contextWindowTokens: null,
-      policyVersion: 'model_aware_v1',
+      policyVersion: 'model_aware_v2',
     });
     expect(result.fallbackReason).toBe('host_capacity_absent');
   });
@@ -110,7 +112,7 @@ describe('resolvePromptBudget priority chain (SPEC §4.3 v0.2)', () => {
       catalog,
     });
     expect(result).toMatchObject({
-      budgetChars: 4000,
+      budgetChars: 8000,
       capacitySource: 'host_effective_window',
       capacityStatus: 'confirmed',
       contextWindowTokens: 256_000,
@@ -135,7 +137,7 @@ describe('resolvePromptBudget priority chain (SPEC §4.3 v0.2)', () => {
       catalog,
     });
     expect(result.capacitySource).toBe('pi_catalog_exact');
-    expect(result.budgetChars).toBe(3125);
+    expect(result.budgetChars).toBe(6250);
   });
 
   it('unknown/absent host source values are untrusted; the code survives a catalog rescue', () => {
@@ -174,7 +176,7 @@ describe('resolvePromptBudget priority chain (SPEC §4.3 v0.2)', () => {
       catalog,
     });
     expect(result).toMatchObject({
-      budgetChars: 15625,
+      budgetChars: 31250,
       capacitySource: 'pi_catalog_exact',
       capacityStatus: 'confirmed',
       contextWindowTokens: 1_000_000,
@@ -190,7 +192,7 @@ describe('resolvePromptBudget priority chain (SPEC §4.3 v0.2)', () => {
     expect(result.fallbackReason).toBe('catalog_no_exact_match');
   });
 
-  it('v0.2 trust amendment: provider-less lookups NEVER confirm — ambiguous names report ambiguity', () => {
+  it('provider-less conflicting names still fall back — never pick a provider by guess', () => {
     const result = resolvePromptBudget({
       modelIdentity: { modelId: 'model-x' },
       catalog,
@@ -198,17 +200,22 @@ describe('resolvePromptBudget priority chain (SPEC §4.3 v0.2)', () => {
     expect(result.capacitySource).toBe('legacy_fallback');
     expect(result.capacityStatus).toBe('unknown');
     expect(result.fallbackReason).toBe('catalog_ambiguous_model_id');
-    expect(result.budgetChars).toBe(2000);
+    expect(result.budgetChars).toBe(4000);
   });
 
-  it('provider-less unanimous names STILL fall back (custom-endpoint risk), with their own code', () => {
-    const result = resolvePromptBudget({
-      modelIdentity: { modelId: 'model-y' },
-      catalog,
-    });
-    expect(result.capacitySource).toBe('legacy_fallback');
-    expect(result.fallbackReason).toBe('catalog_provider_absent');
-    expect(result.budgetChars).toBe(2000);
+  it('v0.3: a provider-less UNANIMOUS name derives the window (weakest catalog tier)', () => {
+    // One-provider id (model-y) and multi-provider unanimous id (model-z):
+    // both give exactly one catalog answer, so the window is usable.
+    for (const [modelId, window] of [['model-y', 1_000_000], ['model-z', 200_000]] as const) {
+      const result = resolvePromptBudget({ modelIdentity: { modelId }, catalog });
+      expect(result, `modelId=${modelId}`).toMatchObject({
+        capacitySource: 'pi_catalog_model_id',
+        capacityStatus: 'confirmed',
+        contextWindowTokens: window,
+        budgetChars: promptBudgetCharsForContextWindow(window),
+      });
+      expect(result.fallbackReason).toBeUndefined();
+    }
   });
 
   it('provider-less with no catalog hits falls back honestly', () => {
@@ -229,7 +236,7 @@ describe('resolvePromptBudget priority chain (SPEC §4.3 v0.2)', () => {
     const result = resolvePromptBudget({ modelIdentity: { providerId: 'p1', modelId: 'model-y' } });
     expect(result.capacitySource).toBe('legacy_fallback');
     expect(result.fallbackReason).toBe('catalog_unavailable');
-    expect(result.budgetChars).toBe(2000);
+    expect(result.budgetChars).toBe(4000);
   });
 
   it('invalid catalog metadata degrades rather than poisoning the budget', () => {
@@ -273,14 +280,14 @@ describe('getPromptModelCatalog against the installed pi-ai 1.2.0 catalog', () =
     const exact = catalog.exact('anthropic', 'claude-sonnet-4-5');
     expect(exact).toBeDefined();
     expect(exact?.contextWindowTokens).toBe(200_000);
-    // 200K → floor(2000 × 200000 / 128000) = 3125, under the 16000 ceiling.
+    // 200K → floor(4000 × 200000 / 128000) = 6250, under the 32000 ceiling.
     const resolved = resolvePromptBudget({
       modelIdentity: { providerId: 'anthropic', modelId: 'claude-sonnet-4-5' },
       catalog,
     });
     expect(resolved).toMatchObject({
       capacitySource: 'pi_catalog_exact',
-      budgetChars: 3125,
+      budgetChars: 6250,
       contextWindowTokens: 200_000,
     });
   });
@@ -301,6 +308,21 @@ describe('getPromptModelCatalog against the installed pi-ai 1.2.0 catalog', () =
     });
     expect(resolved.capacitySource).toBe('legacy_fallback');
     expect(resolved.fallbackReason).toBe('catalog_ambiguous_model_id');
+    expect(resolved.budgetChars).toBe(4000);
+  });
+
+  it('v0.3: a real provider-less unanimous id derives its window', () => {
+    // claude-opus-5: five providers, all 1M — exactly one catalog answer.
+    const resolved = resolvePromptBudget({
+      modelIdentity: { modelId: 'claude-opus-5' },
+      catalog: getPromptModelCatalog(),
+    });
+    expect(resolved).toMatchObject({
+      capacitySource: 'pi_catalog_model_id',
+      capacityStatus: 'confirmed',
+      contextWindowTokens: 1_000_000,
+      budgetChars: 31250,
+    });
   });
 
   it('custom/nonexistent provider ids never inherit another provider capacity (SPEC §2.2)', () => {
@@ -310,7 +332,7 @@ describe('getPromptModelCatalog against the installed pi-ai 1.2.0 catalog', () =
     });
     expect(resolved.capacitySource).toBe('legacy_fallback');
     expect(resolved.fallbackReason).toBe('catalog_no_exact_match');
-    expect(resolved.budgetChars).toBe(2000);
+    expect(resolved.budgetChars).toBe(4000);
   });
 });
 
@@ -322,11 +344,11 @@ describe('resolvePromptBudget tier 0: operator_declared (PRI-1020)', () => {
       modelIdentity: { providerId: 'p1', modelId: 'model-y' },
     });
     expect(result).toMatchObject({
-      budgetChars: 4096,
+      budgetChars: 8192,
       capacitySource: 'operator_declared',
       capacityStatus: 'confirmed',
       contextWindowTokens: 262_144,
-      policyVersion: 'model_aware_v1',
+      policyVersion: 'model_aware_v2',
     });
     expect(result.fallbackReason).toBeUndefined();
   });
@@ -334,16 +356,16 @@ describe('resolvePromptBudget tier 0: operator_declared (PRI-1020)', () => {
   it('resolves confirmed from the declaration alone (no host facts, no catalog)', () => {
     const result = resolvePromptBudget({ operatorDeclared: { contextWindowTokens: 1_000_000 } });
     expect(result).toMatchObject({
-      budgetChars: 15_625,
+      budgetChars: 31_250,
       capacitySource: 'operator_declared',
       capacityStatus: 'confirmed',
       contextWindowTokens: 1_000_000,
     });
   });
 
-  it('clamps at the policy ceiling (1M+ windows cap at 16000 chars)', () => {
+  it('clamps at the policy ceiling (1M+ windows cap at 32000 chars)', () => {
     const result = resolvePromptBudget({ operatorDeclared: { contextWindowTokens: 10_000_000 } });
-    expect(result.budgetChars).toBe(16_000);
+    expect(result.budgetChars).toBe(32_000);
     expect(result.capacitySource).toBe('operator_declared');
   });
 
@@ -351,7 +373,7 @@ describe('resolvePromptBudget tier 0: operator_declared (PRI-1020)', () => {
     for (const bad of [500, 200_000.5, 200_000_000, '262144', null]) {
       const result = resolvePromptBudget({ operatorDeclared: { contextWindowTokens: bad } });
       expect(result.capacitySource, `declared=${String(bad)}`).toBe('legacy_fallback');
-      expect(result.budgetChars).toBe(2000);
+      expect(result.budgetChars).toBe(4000);
       expect(result.fallbackReason).toBe('host_capacity_absent');
     }
   });
@@ -362,33 +384,32 @@ describe('resolvePromptBudget tier 0: operator_declared (PRI-1020)', () => {
       hostCapacity: { contextTokenBudget: 256_000, contextWindowSource: 'modelsConfig' },
     });
     expect(result.capacitySource).toBe('host_effective_window');
-    expect(result.budgetChars).toBe(4000);
+    expect(result.budgetChars).toBe(8000);
   });
 });
 
 describe('resolveTotalInjectionBudgetChars (PRI-1065 total-ceiling reconciliation)', () => {
-  it('keeps the historical 9000 total at the reference window (backward compatible)', () => {
-    // 128K → principle budget 2000 + 7000 background allowance = the legacy
-    // hard-coded size-guard constant. Existing behavior must not change.
-    expect(resolveTotalInjectionBudgetChars(promptBudgetCharsForContextWindow(128_000))).toBe(9000);
-    expect(resolveTotalInjectionBudgetChars(PROMPT_BUDGET_FALLBACK_CHARS)).toBe(9000);
+  it('folds the fixed background allowance onto the reference budget', () => {
+    // v2 (PRI-1066): 128K → principle budget 4000 + 7000 background = 11000.
+    expect(resolveTotalInjectionBudgetChars(promptBudgetCharsForContextWindow(128_000))).toBe(11_000);
+    expect(resolveTotalInjectionBudgetChars(PROMPT_BUDGET_FALLBACK_CHARS)).toBe(11_000);
   });
 
   it('grows the ceiling with the model window instead of pinning it', () => {
     expect(resolveTotalInjectionBudgetChars(PROMPT_BUDGET_MIN_CHARS)).toBe(8250);
-    expect(resolveTotalInjectionBudgetChars(promptBudgetCharsForContextWindow(1_000_000))).toBe(22_625);
-    expect(resolveTotalInjectionBudgetChars(PROMPT_BUDGET_MAX_CHARS)).toBe(23_000);
+    expect(resolveTotalInjectionBudgetChars(promptBudgetCharsForContextWindow(1_000_000))).toBe(38_250);
+    expect(resolveTotalInjectionBudgetChars(PROMPT_BUDGET_MAX_CHARS)).toBe(39_000);
   });
 
   it('composes with the resolver: a 1M window leaves room for background blocks', () => {
-    // The audited failure: 15625 principle budget with 5145 injected chars
-    // left only 9000-5865=3135 for background under the old constant. The
-    // reconciled ceiling leaves 22625-5865=16760.
+    // Under the old ceiling (9000) the 1M case left 3135 chars for
+    // background even though the model had 15625 chars of principle budget;
+    // the reconciled ceiling leaves 38250-5865=32385.
     const resolution = resolvePromptBudget({ operatorDeclared: { contextWindowTokens: 1_000_000 } });
     const total = resolveTotalInjectionBudgetChars(resolution.budgetChars);
-    expect(resolution.budgetChars).toBe(15_625);
-    expect(total).toBe(22_625);
-    expect(total - (720 + 5145)).toBeGreaterThan(10_000);
+    expect(resolution.budgetChars).toBe(31_250);
+    expect(total).toBe(38_250);
+    expect(total - (720 + 5145)).toBeGreaterThan(20_000);
   });
 
   it('is monotonic: a larger principle budget never lowers the total ceiling', () => {

@@ -287,6 +287,9 @@
       "evidenceSummary": "Approval records: {{count}}",
       "untitledCandidate": "Untitled candidate principle",
       "promptCapacityUnconfirmed": "Host capacity unconfirmed: the applicable hosts of this workspace take different injection routes; the numbers below are not bound to a specific host.",
+      "promptCapacityStarved": "{{count}} host(s) cannot fit even one principle within their current injection budget; principles will not take effect there.",
+      "promptCapacityDetails": "Show per-host capacity details",
+      "promptCapacityPerHostCatalogMatched": " (budget derived from a unanimous catalog match on the model id)",
       "promptCapacitySharedRoute": "shared injection (billed on the full injected block)",
       "promptCapacityListRoute": "list injection (billed on the selected lines)",
       "promptCapacityPerHostEntry": "{{host}}: {{billing}} — {{used}}/{{budget}} chars{{full}}{{observed}}",
@@ -306,6 +309,7 @@
       "promptBudgetFallbackObservedSuffix": "; the runtime's most recent observation was at {{observedAt}}",
       "budgetCapacitySourceHostWindow": "host effective context window",
       "budgetCapacitySourcePiCatalog": "exact model catalog match",
+      "budgetCapacitySourcePiCatalogModelId": "unanimous model-id catalog match",
       "budgetCapacitySourceOperatorDeclared": "workspace config declaration",
       "budgetCapacitySourceOperatorDeclaredSuffix": ", source: workspace config declaration",
       "budgetFallbackReason": {

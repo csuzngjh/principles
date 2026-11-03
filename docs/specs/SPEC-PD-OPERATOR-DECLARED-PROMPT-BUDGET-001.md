@@ -1,7 +1,7 @@
 # SPEC-PD-OPERATOR-DECLARED-PROMPT-BUDGET-001
 
 Status: Draft → Implemented (PRI-1020, 2026-10-22)
-Amends: SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §4.3 (priority chain) — policy version stays `model_aware_v1`
+Amends: SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 §4.3 (priority chain) — policy version was `model_aware_v1` when implemented; §4.3 is now superseded by that SPEC's v0.3 (`model_aware_v2`, PRI-1066 recalibration)
 
 ## 1. Problem
 
@@ -63,9 +63,11 @@ Semantics:
   reader accepts `operator_declared` as a confirmed source with the same
   coherence rules (window present, exact formula budget, no fallback
   reason); incoherent values are dropped, never guessed.
-- `budgetPolicyVersion` stays `model_aware_v1`: existing fields keep their
-  semantics, so pre-existing observations remain valid and no observation
-  cache is invalidated.
+- `budgetPolicyVersion` was `model_aware_v1` at implementation time: existing
+  fields kept their semantics, so pre-existing observations remained valid and
+  no observation cache was invalidated. SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001
+  v0.3 later bumped the policy to `model_aware_v2`; v1 events are counted as
+  `foreignPolicyEventsSkipped` by the reader (visible, never silently dropped).
 - Console surfaces (grouped badge, activations status, post-approval
   warning) fall back to the DECLARED basis when no fresh runtime observation
   exists. A fresh observation still outranks the declaration in the forecast

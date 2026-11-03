@@ -287,6 +287,9 @@
       "evidenceSummary": "审批记录：{{count}} 条",
       "untitledCandidate": "待命名候选原则",
       "promptCapacityUnconfirmed": "当前宿主容量未确认：本工作区适用的宿主会走不同的注入路由，以下数字未绑定具体宿主。",
+      "promptCapacityStarved": "{{count}} 个宿主当前的注入预算连一条原则都装不下，原则在这些宿主上不会生效。",
+      "promptCapacityDetails": "查看各宿主容量明细",
+      "promptCapacityPerHostCatalogMatched": "（预算按模型目录同名一致窗口推算）",
       "promptCapacitySharedRoute": "共享注入（按完整注入块计费）",
       "promptCapacityListRoute": "列表注入（按选中行计费）",
       "promptCapacityPerHostEntry": "{{host}}：{{billing}} — {{used}}/{{budget}} 字符{{full}}{{observed}}",
@@ -306,6 +309,7 @@
       "promptBudgetFallbackObservedSuffix": "；运行时最近一次观测于 {{observedAt}}",
       "budgetCapacitySourceHostWindow": "宿主有效上下文窗口",
       "budgetCapacitySourcePiCatalog": "模型目录精确匹配",
+      "budgetCapacitySourcePiCatalogModelId": "模型目录同名一致匹配",
       "budgetCapacitySourceOperatorDeclared": "工作区配置声明",
       "budgetCapacitySourceOperatorDeclaredSuffix": "，来源: 工作区配置声明",
       "budgetFallbackReason": {

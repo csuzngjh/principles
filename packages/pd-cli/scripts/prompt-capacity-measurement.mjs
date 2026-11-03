@@ -29,6 +29,7 @@ import {
   PROMPT_BUDGET_BASE_CHARS,
   PROMPT_BUDGET_MAX_CHARS,
   PROMPT_BUDGET_MIN_CHARS,
+  PROMPT_BUDGET_POLICY_VERSION,
   PROMPT_BUDGET_REFERENCE_CONTEXT_WINDOW_TOKENS,
   SqliteConnection,
   SqliteActivationStateStore,
@@ -242,6 +243,66 @@ async function budgetCandidateReplay() {
 }
 
 /**
+ * PRI-1066: before/after comparison on the SAME candidates, through the REAL
+ * production serializers. `BEFORE = 2000` is the pre-recalibration baseline
+ * (base 2000 / max 16000); `AFTER` is the live policy constant. Both routes
+ * are run explicitly under each budget so the delta is measured, not
+ * extrapolated: the list route via `trimToBudget(charBudget)`, the shared
+ * route via `buildActivePrinciplePromptContext({promptBudget})`.
+ */
+async function budgetBeforeAfterReplay() {
+  const dir = makeWorkspace({ sharedFlag: true });
+  seedCandidates(dir, { short: 14, long: 2, oversized: 0 });
+  const { principles } = await readPromptActivationCandidates({ workspaceDir: dir });
+  const rounds = 40;
+  const listAt = (budgetChars) => {
+    let injectedSum = 0, usedSum = 0;
+    for (let k = 0; k < rounds; k += 1) {
+      const trimmed = trimToBudget(principles, budgetChars, escapeXml, k % Math.max(principles.length, 1));
+      injectedSum += [...trimmed.injectedIds].length;
+      usedSum += trimmed.lines.join('\n').length;
+    }
+    return { avgInjected: +(injectedSum / rounds).toFixed(2), avgUsedChars: Math.round(usedSum / rounds) };
+  };
+  const resolutionAt = (budgetChars) => ({
+    budgetChars,
+    capacitySource: 'legacy_fallback',
+    capacityStatus: 'unknown',
+    contextWindowTokens: null,
+    policyVersion: PROMPT_BUDGET_POLICY_VERSION,
+    fallbackReason: 'host_capacity_absent',
+  });
+  const sharedAt = async (budgetChars) => {
+    const fifo = await buildActivePrinciplePromptContext({ workspaceDir: dir, promptBudget: resolutionAt(budgetChars) });
+    let rotationSum = 0;
+    for (let k = 0; k < rounds; k += 1) {
+      const ctx = await buildActivePrinciplePromptContext({ workspaceDir: dir, roundKey: k, promptBudget: resolutionAt(budgetChars) });
+      rotationSum += ctx.principleIds.length;
+    }
+    return {
+      fifoInjected: fifo.principleIds.length,
+      fifoUsedChars: fifo.additionalContext.length,
+      fifoTruncated: fifo.truncated,
+      rotationAvgInjected: +(rotationSum / rounds).toFixed(2),
+      oversized: (fifo.oversizedActivationIds ?? []).length,
+    };
+  };
+  // Historical baseline (pre-recalibration v1 base = 2000). Deliberately a
+  // literal: the BEFORE value is a fixed past fact, not a live policy value.
+  const beforeChars = 2000;
+  const afterChars = RUNTIME_V2_PRINCIPLE_BUDGET;
+  const result = {
+    scenario: 'same 16 persisted candidates (14 × 60 chars, 2 × 1200 chars), 40 forced round keys, both routes via the REAL production serializers',
+    beforeChars,
+    afterChars,
+    before: { list: listAt(beforeChars), shared: await sharedAt(beforeChars) },
+    after: { list: listAt(afterChars), shared: await sharedAt(afterChars) },
+  };
+  fs.rmSync(dir, { recursive: true, force: true });
+  return result;
+}
+
+/**
  * SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 Phase 4: capacity-tier measurement.
  *
  * For each tier (32K/64K/128K/256K/1M/unknown) resolve the budget through
@@ -382,6 +443,8 @@ async function main() {
     }
   }
   const sharedDispatchEvidence = await modelAwareSharedDispatchEvidence();
+  // PRI-1066: measured before/after on the same candidates.
+  const beforeAfter = await budgetBeforeAfterReplay();
 
   const sanityWs = makeWorkspace({});
   const routeSanity = resolvePromptInjectionRouteDecision({ workspaceDir: sanityWs, targetHost: undefined });
@@ -458,7 +521,7 @@ async function main() {
     spec: 'SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001',
     unit: 'utf16_code_units (String.prototype.length — NOT model tokens)',
     policy: {
-      version: 'model_aware_v1',
+      version: PROMPT_BUDGET_POLICY_VERSION,
       // Interpolated from the live constants so the narrative can never
       // drift from the policy this script actually runs (v0.2 fix: the
       // hand-written string still said 500/4000 after the re-bound).
@@ -476,6 +539,7 @@ async function main() {
     },
     scenario: `16 persisted candidates (14 × 60 chars, 2 × 1200 chars) per tier workspace, ${TIER_ROUNDS} forced round keys on the list route; shared route runs the same resolution through buildActivePrinciplePromptContext`,
     tiers: tierScenarios,
+    beforeAfter,
     sharedDispatchEvidence,
     catalogNote: 'catalog metadata is available in-process via getPromptModelCatalog() (installed pi-ai 1.2.0 static catalog); no network calls are made at any point',
     pdTokenCost: null,
@@ -489,7 +553,7 @@ async function main() {
   ma.push('');
   ma.push(`生成时间：${maPayload.generatedAt}　测量入口：\`packages/pd-cli/scripts/prompt-capacity-measurement.mjs\`（真实生产构建器 + 受控临时工作区）。`);
   ma.push('');
-  ma.push(`政策：\`${maPayload.policy.formula}\`（下限 ${PROMPT_BUDGET_MIN_CHARS} / 目标上限 ${PROMPT_BUDGET_MAX_CHARS} / 未知回退 ${RUNTIME_V2_PRINCIPLE_BUDGET} 字符，UTF-16 字符，**不是 token**）。下限为实测锚定：共享路由单条最小有效原则完整渲染 849 字符（自报关）/ 1204 字符（自报开），任何更低下限都会复现 32K 零注入缺陷；上限为目标值，1M 档位按公式精确得出 15625，不假装恰好等于上限。`);
+  ma.push(`政策：\`${maPayload.policy.formula}\`（下限 ${PROMPT_BUDGET_MIN_CHARS} / 目标上限 ${PROMPT_BUDGET_MAX_CHARS} / 未知回退 ${RUNTIME_V2_PRINCIPLE_BUDGET} 字符，UTF-16 字符，**不是 token**）。下限为实测锚定：共享路由单条最小有效原则完整渲染 849 字符（自报关）/ 1204 字符（自报开），任何更低下限都会复现 32K 零注入缺陷；上限为目标值，1M 档位按公式精确得出 ${promptBudgetCharsForContextWindow(1_000_000)}，不假装恰好等于上限。`);
   ma.push('');
   ma.push('## 容量档位 × 两路由对照');
   ma.push('');
@@ -500,10 +564,21 @@ async function main() {
   }
   ma.push('');
   ma.push('要点：');
-  ma.push('- 未知容量档位如实回退 2000 字符（`legacy_fallback` / `unknown` + 有界原因码），与既有生产行为一致；无任何伪造的动态支持。');
-  ma.push('- 1M 档位预算按公式精确为 15625 字符（≥1.024M 才触顶 16000）——上限是目标边界，不是必须达到的固定值。');
+  ma.push(`- 未知容量档位如实回退 ${RUNTIME_V2_PRINCIPLE_BUDGET} 字符（\`legacy_fallback\` / \`unknown\` + 有界原因码），与既有生产行为一致；无任何伪造的动态支持。`);
+  ma.push(`- 1M 档位预算按公式精确为 ${promptBudgetCharsForContextWindow(1_000_000)} 字符（≥${Math.ceil(PROMPT_BUDGET_MAX_CHARS * PROMPT_BUDGET_REFERENCE_CONTEXT_WINDOW_TOKENS / PROMPT_BUDGET_BASE_CHARS)} token 才触顶 ${PROMPT_BUDGET_MAX_CHARS}）——上限是目标边界，不是必须达到的固定值。`);
   ma.push('- 32K 档位（=下限 1250）经真实生产构建器验证：共享路由在自报开/关两种状态下均至少完整注入一条最小有效原则（v0.1 的 500 下限在该档位注入 0 条，已修复并以回归测试钉住）。');
   ma.push('- 超长排除/截断语义在各档位下与既有选择器一致（同一 `trimToBudget` 与共享渲染路径，只是预算数值变化）。');
+  ma.push('');
+  ma.push('## 改动前后对比（同一批候选，真实生产序列化器实测）');
+  ma.push('');
+  ma.push(`同一批 16 条候选（14 × 60 字符 + 2 × 1200 字符）、40 个受控 round key，分别以旧预算 ${beforeAfter.beforeChars} 与新预算 ${beforeAfter.afterChars} 跑真实选择器/渲染器：`);
+  ma.push('');
+  ma.push('| 路由 | 旧预算注入条数 | 新预算注入条数 | 旧预算占用字符 | 新预算占用字符 |');
+  ma.push('| --- | --- | --- | --- | --- |');
+  ma.push(`| 列表路由（轮转均值） | ${beforeAfter.before.list.avgInjected} | ${beforeAfter.after.list.avgInjected} | ${beforeAfter.before.list.avgUsedChars} | ${beforeAfter.after.list.avgUsedChars} |`);
+  ma.push(`| 共享路由（轮转均值） | ${beforeAfter.before.shared.rotationAvgInjected} | ${beforeAfter.after.shared.rotationAvgInjected} | ${beforeAfter.before.shared.fifoUsedChars}（FIFO） | ${beforeAfter.after.shared.fifoUsedChars}（FIFO） |`);
+  ma.push('');
+  ma.push(`共享路由 FIFO 注入：旧 ${beforeAfter.before.shared.fifoInjected} 条 → 新 ${beforeAfter.after.shared.fifoInjected} 条；旧预算截断=${beforeAfter.before.shared.fifoTruncated}，新预算截断=${beforeAfter.after.shared.fifoTruncated}。`);
   ma.push('');
   ma.push('## 共享路径真实 dispatch 预算来源证据（生产 createProductionHostRuntime）');
   ma.push('');
