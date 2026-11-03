@@ -139,11 +139,12 @@ describe('install() — gateway restart failure rides the success result (PRI-72
     // Real payload fixture: every component the npm-distributed form gate and
     // the fse.copy deployment steps consume.
     payloadDir = realFs.realpathSync.native(realFs.mkdtempSync(path.join(os.tmpdir(), 'pd-gateway-notice-payload-')));
-    for (const component of ['core', 'host-runtime', 'codex-adapter', 'plugin', 'pd-cli', 'console', 'install-layout', 'release-manager']) {
+    for (const component of ['core', 'host-runtime', 'codex-adapter', 'plugin', 'pd-cli', 'console', 'install-layout', 'release-manager', 'pd-mcp-server']) {
       realFs.mkdirSync(path.join(payloadDir, component, 'dist'), { recursive: true });
       realFs.writeFileSync(path.join(payloadDir, component, 'package.json'), JSON.stringify({ name: `@principles/${component}`, version: '1.74.1' }));
     }
     // Exact-shape files real-fs probes demand inside the payload.
+    realFs.writeFileSync(path.join(payloadDir, 'pd-mcp-server', 'dist', 'index.js'), 'export {};\n');
     realFs.writeFileSync(path.join(payloadDir, 'pd-cli', 'dist', 'index.js'), 'export {};\n');
     realFs.writeFileSync(path.join(payloadDir, 'pd-cli', 'dist', 'bundle.js'), 'export {};\n');
     realFs.writeFileSync(path.join(payloadDir, 'plugin', 'openclaw.plugin.json'), PLUGIN_MANIFEST);

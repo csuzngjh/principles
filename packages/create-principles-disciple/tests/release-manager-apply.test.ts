@@ -56,7 +56,7 @@ afterEach(async () => {
   await disposeShadowFixtures();
 });
 
-const COMPONENTS = ['core', 'host-runtime', 'plugin', 'pd-cli', 'console', 'install-layout'] as const;
+const COMPONENTS = ['core', 'host-runtime', 'plugin', 'pd-cli', 'console', 'install-layout', 'pd-mcp-server'] as const;
 
 /**
  * Build a minimal but REAL self-contained release asset and tarball its
@@ -76,6 +76,8 @@ function buildReleaseAssetPayload(root: string): Buffer {
     fs.mkdirSync(path.join(root, component), { recursive: true });
     fs.writeFileSync(path.join(root, component, 'package.json'), `${JSON.stringify({ name: component, version: '1.223.0' })}\n`);
   }
+  fs.mkdirSync(path.join(root, 'pd-mcp-server', 'dist'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'pd-mcp-server', 'dist', 'index.js'), 'export {};\n');
   const manifest = createReleaseAssetManifest(root);
   fs.writeFileSync(path.join(root, '_release', 'manifest.json'), `${JSON.stringify(manifest)}\n`);
   // cwd + relative output path: the same Windows-tar discipline as the

@@ -203,10 +203,11 @@ describe('install() — console auto-launch inherits the authentication posture 
     // Real payload fixture: every component the npm-distributed form gate and
     // the fse.copy deployment steps consume.
     payloadDir = realFs.realpathSync.native(realFs.mkdtempSync(path.join(os.tmpdir(), 'pd-autolaunch-posture-payload-')));
-    for (const component of ['core', 'host-runtime', 'codex-adapter', 'plugin', 'pd-cli', 'console', 'install-layout', 'release-manager']) {
+    for (const component of ['core', 'host-runtime', 'codex-adapter', 'plugin', 'pd-cli', 'console', 'install-layout', 'release-manager', 'pd-mcp-server']) {
       realFs.mkdirSync(path.join(payloadDir, component, 'dist'), { recursive: true });
       realFs.writeFileSync(path.join(payloadDir, component, 'package.json'), JSON.stringify({ name: `@principles/${component}`, version: '1.74.1' }));
     }
+    realFs.writeFileSync(path.join(payloadDir, 'pd-mcp-server', 'dist', 'index.js'), 'export {};\n');
     realFs.writeFileSync(path.join(payloadDir, 'pd-cli', 'dist', 'index.js'), 'export {};\n');
     realFs.writeFileSync(path.join(payloadDir, 'pd-cli', 'dist', 'bundle.js'), 'export {};\n');
     realFs.writeFileSync(path.join(payloadDir, 'plugin', 'openclaw.plugin.json'), PLUGIN_MANIFEST);
