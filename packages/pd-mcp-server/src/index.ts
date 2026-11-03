@@ -14,6 +14,8 @@
  * console.log's; logs go through the sanitized stderr logger.
  */
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
+import { createHash } from 'node:crypto';
+import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createPdMcpServer } from './server.js';
 import { resolveWorkspaceBinding } from './workspace.js';
@@ -43,7 +45,15 @@ export async function main(env: Record<string, unknown> = process.env): Promise<
     return 1;
   }
 
-  stderrLog('info', 'startup', { host: binding.binding.host ?? 'unspecified' });
+  // Workspace fingerprint (NOT the path): lets operators and acceptance runs
+  // prove WHICH workspace this process bound without leaking a directory
+  // (§10 forbids logging full paths). Multi-agent hosts must never see two
+  // different fingerprints for the same binding.
+  const workspaceFingerprint = createHash('sha256')
+    .update(path.resolve(binding.binding.workspaceDir))
+    .digest('hex')
+    .slice(0, 16);
+  stderrLog('info', 'startup', { host: binding.binding.host ?? 'unspecified', workspaceFingerprint });
 
   const handle = createPdMcpServer({ workspaceDir: binding.binding.workspaceDir, host: binding.binding.host });
   const transport = new StdioServerTransport();

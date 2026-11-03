@@ -334,6 +334,26 @@ function resolveExplicitPdSources(): CanonicalWorkspaceResult | null {
   return resolveExplicitPdSourcesWithDiagnostics().resolved;
 }
 
+/**
+ * Resolve ONLY owner-declared PD workspace sources (env vars + config file),
+ * without any host/agent/default inference.
+ *
+ * Gate 4 (PRI-1071): the MCP launcher binding is host-wide (one binding file
+ * per plugin payload), so it may only record a workspace the Owner explicitly
+ * declared. A resolved `main` agent workspace, `ctx.workspaceDir` of whichever
+ * agent happened to load the plugin, `process.cwd()` or `~/.openclaw/workspace`
+ * all describe WHERE A SESSION RUNS — never which state tree owns governance
+ * for every agent of the host. In a multi-agent OpenClaw install those differ,
+ * and binding one agent's workspace would serve that agent's Pain evidence to
+ * every other agent (cross-workspace recall leakage).
+ *
+ * Returns `null` when no explicit source resolves; callers must fail closed
+ * (invalidate a previously written binding) instead of inferring a default.
+ */
+export function resolveExplicitPdWorkspaceDir(): CanonicalWorkspaceResult | null {
+  return resolveExplicitPdSources();
+}
+
 // ── Hook Workspace Resolution (PRI-259) ────────────────────────────────
 
 export type HookWorkspaceSource = CanonicalWorkspaceSource | 'openclaw_context' | 'openclaw_api';
