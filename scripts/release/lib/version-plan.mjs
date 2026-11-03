@@ -122,6 +122,42 @@ export function syncPluginVersionMirror(cwd) {
   return true;
 }
 
+/**
+ * Approved component mirror (SPEC-PD-MCP-GATE4-001 §9.3): the pd-mcp-server
+ * `SERVER_VERSION` constant mirrors its package version.
+ *
+ * changesets rewrites only `package.json`; without this step the constant
+ * stays at the previous minor and the G4-6 guard fails on the generated
+ * Version Packages PR (CI 2026-11-03: expected '0.1.0' to be '0.2.0').
+ */
+export function syncMcpServerVersionMirror(cwd) {
+  const pkgPath = path.join(cwd, 'packages', 'pd-mcp-server', 'package.json');
+  const mirrorPath = path.join(cwd, 'packages', 'pd-mcp-server', 'src', 'version.ts');
+  // Direct reads with E-loop recovery instead of existsSync-then-read —
+  // same TOCTOU reasoning as syncPluginVersionMirror above.
+  let version;
+  let source;
+  try {
+    version = JSON.parse(fs.readFileSync(pkgPath, 'utf8')).version;
+    source = fs.readFileSync(mirrorPath, 'utf8');
+  } catch {
+    return false;
+  }
+  // A present mirror without the declaration is a broken contract, not a
+  // no-op: fail loud instead of silently shipping a stale identity (rc-3).
+  const declaration = /export const SERVER_VERSION = '[^']*' as const;/;
+  if (!declaration.test(source)) {
+    throw new Error(`pd-mcp-server/src/version.ts has no SERVER_VERSION declaration: ${mirrorPath}`);
+  }
+  const next = source.replace(
+    /(export const SERVER_VERSION = ')[^']*(' as const;)/,
+    `$1${version}$2`,
+  );
+  if (next === source) return false;
+  fs.writeFileSync(mirrorPath, next);
+  return true;
+}
+
 function extractArchive(repoRoot, sha, dest) {
   fs.mkdirSync(dest, { recursive: true });
   // Feed git archive straight into tar's stdin (cwd-relative, no absolute
