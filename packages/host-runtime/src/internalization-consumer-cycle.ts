@@ -421,6 +421,11 @@ export async function runInternalizationConsumerCycle(
       emitEvent('INTERNALIZATION_CONSUMER_SKIP', JSON.stringify({
         reason: decision.reason,
         readyTaskCount: snapshot.readyTasks.length,
+        // PRI-988: the heartbeat must carry the queue's own diagnosis. The
+        // sample list is already bounded by MAX_SAMPLES in the read model.
+        noReadyTasks: snapshot.noReadyTasks,
+        invalidMetadataCount: snapshot.invalidMetadataCount,
+        sampleInvalidTaskIds: snapshot.sampleInvalidTaskIds,
       }));
       return { ran: false, skipReason: decision.reason };
     }
@@ -701,7 +706,14 @@ export async function runInternalizationConsumerCycle(
         lastSkipReason = undefined;
       }
       // A: 预算由周期 finally 统一执行 (每周期恰一次,含 backlog 场景)
-      const skipPayload: Record<string, unknown> = { decision: lastSkipDecision };
+      const skipPayload: Record<string, unknown> = {
+        decision: lastSkipDecision,
+        // PRI-988: same diagnosis as the decision-gate SKIP above, so a
+        // heartbeat cannot hide hydration failures behind "no_ready_tasks".
+        noReadyTasks: snapshot.noReadyTasks,
+        invalidMetadataCount: snapshot.invalidMetadataCount,
+        sampleInvalidTaskIds: snapshot.sampleInvalidTaskIds,
+      };
       if (lastSkipReason) {
         skipPayload.reason = lastSkipReason;
       }

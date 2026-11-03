@@ -49,6 +49,7 @@
     "dev:workspace:health": "node scripts/dev/workspace-health.mjs",
     "dev:workspace:cleanup": "node scripts/dev/workspace-cleanup.mjs",
     "dev:lease": "node scripts/dev/workspace-lease.mjs",
+    "advisory:test-reality": "node scripts/dev/advisory-test-reality.mjs",
     "dev:closure-lab": "node scripts/dev/pipeline-closure-lab/generate.mjs",
     "dev:evolution-evidence": "node scripts/dev/pipeline-evolution/collect-evidence.mjs",
     "dev:pl-pilot": "node scripts/dev/principle-learning-lab/run-pilot.mjs",

@@ -192,6 +192,25 @@ describe('runInternalizationConsumerCycle — PRI-719 per-agent runtime profile'
     expect(skip).toBeDefined();
     expect(skip?.payload).toContain('SCRIBE_KEY');
 
+    // PRI-988: the FINAL no-wake SKIP (the heartbeat event) must also carry the
+    // queue diagnosis, even though this cycle has a ready task that no kind
+    // could lease. `noReadyTasks` is null (the queue is not "no ready tasks");
+    // the hydration counters are still explicit.
+    const finalSkips = events.filter(
+      (e) => e.event === 'INTERNALIZATION_CONSUMER_SKIP'
+        && e.payload.includes('"decision"')
+        && !e.payload.includes('"taskKind"'),
+    );
+    const finalSkip = finalSkips[finalSkips.length - 1];
+    expect(finalSkip).toBeDefined();
+    const finalPayload = JSON.parse(finalSkip?.payload ?? '{}') as {
+      invalidMetadataCount?: number;
+      sampleInvalidTaskIds?: string[];
+    };
+    expect(finalPayload.invalidMetadataCount).toBe(0);
+    expect(finalPayload.sampleInvalidTaskIds).toEqual([]);
+    expect(finalPayload).toHaveProperty('noReadyTasks', null);
+
     // After the scribe task is satisfied out-of-band, the artificer runs on
     // its own (unaffected) profile.
     const handle = await createRuntimeStateHandle({ workspaceDir: workspace, readonly: false });
