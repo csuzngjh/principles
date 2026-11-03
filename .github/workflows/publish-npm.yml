@@ -308,6 +308,9 @@ jobs:
       # Common builds in dependency order: install-layout BEFORE host-runtime
       # — host-runtime's TypeScript build imports @principles/install-layout,
       # whose types entry does not exist after a clean `npm ci`.
+      # G3.2: these preamble builds are the ONLY builds of core, install-layout
+      # and host-runtime in the job — their legs verify the preamble dist
+      # instead of rebuilding it (publish-npm-package/action.yml).
       - name: Build core
         run: npm run build --workspace=@principles/core
 

@@ -24,4 +24,11 @@ describe('Examiner product surface', () => {
     expect(appSource).toContain('<Route path="/examiner" element={<ExaminerPage />} />');
     expect(appSource).not.toContain('path="/examiner" element={<Navigate');
   });
+
+  // v0.10.1 §10: the full four-page Owner journey ships with the console.
+  it('the v0.10.1 four-page journey is mounted unconditionally', () => {
+    expect(appSource).toContain('<Route path="/examiner/configure" element={<ExaminerConfigurePage />} />');
+    expect(appSource).toContain('<Route path="/examiner/studies/:studyId" element={<ExaminerStudyPage />} />');
+    expect(appSource).toContain('<Route path="/examiner/studies/:studyId/report" element={<ExaminerReportPage />} />');
+  });
 });

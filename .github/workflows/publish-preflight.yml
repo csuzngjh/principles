@@ -15,9 +15,9 @@ name: Publish Preflight (no writes)
 #   5. optional validation-evidence reuse (validation_run_id) verifies;
 #   6. (rehearsal job) every pending package leg runs the REAL control
 #      path from the publish action in dry_run mode: exact-state check,
-#      bounded dependency wait, cohort builds, npm pack dry-run, installer
-#      identity stamp + tarball verification — everything except the
-#      upload. A rehearsal is never evidence of a published version.
+#      bounded dependency wait, cohort builds, and the ONE immutable-candidate
+#      pack/overlay/final verification — everything except the upload. A
+#      rehearsal is never evidence of a published version.
 #
 # This workflow holds NO write permissions and must never gain any.
 
@@ -109,8 +109,11 @@ jobs:
             .github/actions/finalize-npm-release/action.yml \
             scripts/release/registry-exact.mjs \
             scripts/release/deps-preflight.mjs \
+            scripts/release/prepare-npm-candidate.mjs \
+            scripts/release/build-once.mjs \
             scripts/release/verify-validation-evidence.mjs \
             scripts/release/verify-publish-outcome.mjs \
+            scripts/release/preflight-summary.mjs \
             scripts/release/resolve-release-cohort.mjs; do
             test -f "release-tools/$f" || { echo "::error::tools checkout is missing $f — the trusted tools SHA cannot drive the train."; exit 1; }
           done
@@ -234,11 +237,12 @@ jobs:
           echo "Train product identity (at cohort SHA): $VERSION"
 
       # The REAL publish action in dry_run mode: identical control path
-      # (exact-state check, bounded dependency wait, builds, dry-run pack,
-      # installer identity stamp + tarball verification) minus the upload.
+      # (exact-state check, bounded dependency wait, builds, and the ONE
+      # immutable-candidate pack/overlay/verification) minus the upload.
       # The placeholder token is never used — no step that could spend it
       # runs in this mode, and this job holds no id-token permission.
       - name: Rehearse 1/8 @principles/core
+        id: leg1
         uses: ./release-tools/.github/actions/publish-npm-package
         with:
           pkg_dir: principles-core
@@ -250,6 +254,7 @@ jobs:
           dry_run: true
 
       - name: Rehearse 2/8 @principles/install-layout
+        id: leg2
         uses: ./release-tools/.github/actions/publish-npm-package
         with:
           pkg_dir: install-layout
@@ -261,6 +266,7 @@ jobs:
           dry_run: true
 
       - name: Rehearse 3/8 @principles/host-runtime
+        id: leg3
         uses: ./release-tools/.github/actions/publish-npm-package
         with:
           pkg_dir: host-runtime
@@ -272,6 +278,7 @@ jobs:
           dry_run: true
 
       - name: Rehearse 4/8 @principles/codex-adapter
+        id: leg4
         uses: ./release-tools/.github/actions/publish-npm-package
         with:
           pkg_dir: codex-adapter
@@ -283,6 +290,7 @@ jobs:
           dry_run: true
 
       - name: Rehearse 5/8 @principles/workbuddy-adapter
+        id: leg5
         uses: ./release-tools/.github/actions/publish-npm-package
         with:
           pkg_dir: workbuddy-adapter
@@ -294,6 +302,7 @@ jobs:
           dry_run: true
 
       - name: Rehearse 6/8 principles-disciple (plugin)
+        id: leg6
         uses: ./release-tools/.github/actions/publish-npm-package
         with:
           pkg_dir: openclaw-plugin
@@ -305,6 +314,7 @@ jobs:
           dry_run: true
 
       - name: Rehearse 7/8 @principles/pd-cli
+        id: leg7
         uses: ./release-tools/.github/actions/publish-npm-package
         with:
           pkg_dir: pd-cli
@@ -316,6 +326,7 @@ jobs:
           dry_run: true
 
       - name: Rehearse 8/8 create-principles-disciple (installer)
+        id: leg8
         uses: ./release-tools/.github/actions/publish-npm-package
         with:
           pkg_dir: create-principles-disciple
@@ -328,10 +339,19 @@ jobs:
           dry_run: true
 
       - name: Rehearsal summary (explicitly NOT a publish)
+        # Derived from each leg's OWN evidence (the action's leg_status output,
+        # classified from the candidate file + SHA-512 + manifest), never from
+        # step success: a leg that resolved PRESENT_MATCH / PRESENT_PRIOR packed
+        # nothing, and the summary must say so. `always()` keeps a failed leg
+        # visible instead of dropping the summary entirely (G3-R3 H1).
+        if: always()
+        env:
+          STEPS_CONTEXT: ${{ toJSON(steps) }}
+          CONTROL_PLANE: ${{ needs.preflight-checks.result }}
         run: |
-          {
-            echo "## Preflight rehearsal complete"
-            echo ""
-            echo "All eight legs ran the real publish control path in dry_run mode and packed real artifacts from the cohort build."
-            echo "NO npm upload, tag, or GitHub Release happened. This is NOT evidence of a published version."
-          } >> "$GITHUB_STEP_SUMMARY"
+          set -euo pipefail
+          node release-tools/scripts/release/preflight-summary.mjs summary \
+            --steps-json "$STEPS_CONTEXT" \
+            --control-plane "$CONTROL_PLANE" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "A rehearsal is NOT evidence of a published version." >> "$GITHUB_STEP_SUMMARY"

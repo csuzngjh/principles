@@ -1,5 +1,33 @@
 # create-principles-disciple
 
+## 1.146.9
+
+### Patch Changes
+
+- bc268a4: Examiner v0.10.1 — Owner-controlled Behavioral Evaluation productization (SPEC-PD-EXAMINER-001 v0.10.1), shipped through the installer's pd-console payload. The single v0.9 page becomes a four-page Owner journey: Principle Evaluation (per-principle production evidence aggregate — runtime activation, prompt-injection projection with budget provenance, receipts, the intervention-evidence audit with an unpromoted confirmation ladder and agent_claimed/runtime_verified split; degraded lanes carry reason + nextAction, never "zero events"), Study Configuration (fixed challenge-suite catalog with the Gate 1 Gold boundary, host readiness requirements, honest experiment-vs-production difference), Execution & Evidence (frozen production snapshot with EXPERIMENT_CONFIGURATION_DIFFERS_FROM_PRODUCTION markers, fail-closed preflight, three run modes) and Evaluation Report (Report V2 ITT/fidelity/replay, limitations, a SEPARATE production-observation lane and the Owner decision handoff into the existing governance workflow — no new decision system). New read-only APIs: GET /examiner/principles/:id/evidence (before the lab gate — workspace facts, not lab facts), GET /examiner/suites, GET /examiner/hosts/openclaw/readiness. Study creation freezes real inputs: suite-selected cases (didactic-pair default / calibration-core six worlds), RUNTIME-derived RuleCode facts (target-scoped — other principles' rulecodes are baseline, a coupled target refuses with INTERVENTION_NOT_IDENTIFIABLE), real pain lineage in the frozen mapping, and production-snapshot.json. Async execution contract (§12.3): host-dry-run / f2-real-host answer 202 + runId with state derived from the study's existing events ledger, one live run per study (409 duplicate/in-flight), restart recovery to ABANDONED/RESULT_UNKNOWN (never auto-retried), zero model calls in dry-run (local OpenClaw CLI version probe via the lab's new read-only probeOpenClawCli), and F2 gated on an APPROVED Stage R authorization bound to the frozen study — accepted-and-bound settles loudly as NOT-ENABLED-THIS-ROUND with zero model calls. Acceptance: 14 route tests + 11 BDD scenarios + 6-scenario real-browser E2E journey (incl. the coupled-target refusal and historical-assets read-only) all green; i18n en/zh at full key parity under terminology governance.
+
+## 1.146.8
+
+### Patch Changes
+
+- 0cea461: G3.2 build deduplication: build-once ledger with artifact identity (cohort+version+dist SHA-256), preamble verify for core/install-layout/host-runtime, Console skip flag with freshness gate. Cross-platform fixes: ERR-045 npm spawn, GNU tar relative paths, sha512sum backslash stripping.
+
+## 1.146.7
+
+### Patch Changes
+
+- 5fa6fc9: **BREAKING CHANGE** — Pain Phase 0 safe cleanup (SPEC-PD-PAIN-SEMANTICS-AND-DETECTION-ARCHITECTURE-001 v0.3 §6/§9, Phase 0). `@principles/core/runtime-v2` is a published subpath of the public npm package `@principles/core` (declared in `packages/principles-core/package.json` `exports`), and the following 13 symbols that were exported from it at baseline `9a2bd5efb` are **removed**. Any external consumer importing them must migrate; import sites inside this monorepo are zero (grep-verified) and none are re-added as deprecated stubs.
+  
+  Removed public exports:
+  
+  - Types: `AdmissionDecisionEvent`, `DiagnosisTaskCreatedEvent`, `EvidenceOnlyRecordedEvent`, `SkippedRefusedEvent`, `AdmissionEvent`
+  - Functions: `createAdmissionDecisionEvent`, `createDiagnosisTaskCreatedEvent`, `createEvidenceOnlyRecordedEvent`, `createSkippedRefusedEvent`, `serializeAdmissionEvent`, `validateEventPrivacy`
+  - Builders: `buildLlmDetectionObservation`, `buildEmpathyObservation`
+  
+  (All 13 were verified present in the `runtime-v2` barrel at the pre-change baseline; they had zero production consumers across the monorepo and no deprecated aliases are provided.)
+  
+  Behavioral retirement (same release): error is not Pain — the legacy Semantic Confusion detection execution path (llm.ts DetectionService funnel + detection-service.ts + detection-funnel.ts) and the LLM Paralysis trigger (stuckLoops branch) no longer create Pain events; the shared event-log/trajectory write points are now fed exclusively by the GFI branch, which is untouched (bounded retirement is Phase C; GFI differential behavior pinned by new tests). Fatal Intercept (before_compaction) no longer fabricates a tool_failure Pain with score 100 bypassing Evidence Triage/TriggerController; the safety interception and informational operational notes remain. Correction Sample Reject no longer produces host Pain from either writer (plugin TrajectoryDatabase + core trajectory-store mirror + the /pd-samples direct emit) — approve/reject, reason and sample_reviews audit rows are unchanged. The retired `thresholds.stuck_loops_trigger` and `scores.paralysis` pain_settings keys are removed from defaults (old files containing them still load — unknown keys are ignored). Historical pain_events rows (`llm_*`, `llm_paralysis`, `intercept_extraction`, `correction_rejected`) remain readable; no schema change, no new flags, no new abstractions. Net code deletion across 4 deleted modules; integrations unaffected beyond the removed imports.
+
 ## 1.146.6
 
 ### Patch Changes

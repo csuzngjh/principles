@@ -144,7 +144,12 @@ describe('publish-npm-package action — exact committed version (T17-T23)', () 
   it('gates every version-producing step on ABSENT (idempotent skip, T22)', () => {
     const doc = loadWorkflow(rel) as { runs?: { steps?: Array<{ if?: string; name?: string }> } };
     const steps = doc.runs?.steps ?? [];
-    const gatedNames = ['Verify registry dependencies are published', 'Build target package', 'Publish exact committed version', 'Verify the packed installer tarball carries the product identity'];
+    const gatedNames = [
+      'Verify registry dependencies are published',
+      'Build target package',
+      'Pack and verify immutable candidate',
+      'Publish exact committed version',
+    ];
     for (const name of gatedNames) {
       const step = steps.find((s) => s.name === name);
       expect(step, `step ${name}`).toBeDefined();
@@ -182,31 +187,55 @@ describe('publish-npm-package action — exact committed version (T17-T23)', () 
       const next = run.indexOf('elif [ "$PKG_DIR" = ', start);
       return next === -1 ? run.slice(start) : run.slice(start, next);
     };
-    expect(branch('pd-cli')).toContain('npm run build --workspace=@principles/codex-adapter');
+    // G3.2: the leg still guarantees the build itself — build_once builds
+    // whenever no identity-verified entry from an EARLIER leg of this job
+    // exists (an upstream PRESENT_PRIOR leg records nothing), and only reuses
+    // a dist whose cohort, version and SHA-256 still match
+    // (release-build-once.test.ts proves the rebuild-on-miss behavior).
+    expect(branch('pd-cli')).toContain('build_once @principles/codex-adapter build packages/codex-adapter');
     // @principles/workbuddy-adapter is a pd-cli runtime import too
     // (commands/workbuddy-worker) — same rule, same failure class.
-    expect(branch('pd-cli')).toContain('npm run build --workspace=@principles/workbuddy-adapter');
-    expect(branch('create-principles-disciple')).toContain('npm run build --workspace=@principles/workbuddy-adapter');
+    expect(branch('pd-cli')).toContain('build_once @principles/workbuddy-adapter build packages/workbuddy-adapter');
+    expect(branch('create-principles-disciple')).toContain('build_once @principles/workbuddy-adapter build packages/workbuddy-adapter');
   });
 
-  it('Verify package dry-run: a cosmetic head preview must never own the exit verdict', () => {
-    // Cohort d6fa4055 aborted at 5/7 (principles-disciple) with the log
-    // ending at "Build verification passed!" and NO npm error anywhere. Cause:
-    // `npm pack --dry-run 2>&1 | head -50` — head closed the pipe after 50
-    // lines while the inner prepack (build:production && build:types, ~50
-    // lines plus npm banners) was still writing, so it died on EPIPE, npm
-    // pack exited 1, and `set -o pipefail` turned a log truncation into a
-    // failed release. The step must capture the real exit code first and
-    // only then preview.
-    const doc = loadWorkflow(rel) as { runs?: { steps?: Array<{ name?: string; run?: string }> } };
-    const dryRun = doc.runs?.steps?.find((s) => s.name === 'Verify package dry-run');
-    expect(dryRun?.run).toBeDefined();
-    const script = dryRun!.run!;
-    expect(script).toContain('pack_status=$?');
-    expect(script).toContain('exit "$pack_status"');
-    expect(script).not.toMatch(/npm pack --dry-run\s+2>&1\s*\|\s*head/);
-    // The preview is preserved so the step still reads as a dry-run report.
-    expect(script).toContain('head -50 "$pack_log"');
+  it('routes EVERY train package through the verified candidate and publishes that tarball (G3.1-A)', () => {
+    const doc = loadWorkflow(rel) as {
+      runs?: { steps?: Array<{ id?: string; if?: string; name?: string; run?: string; env?: Record<string, unknown> }> };
+    };
+    const steps = doc.runs?.steps ?? [];
+
+    // The old non-installer path (a dry-run pack whose output was discarded)
+    // is gone: one pack produces the published artifact.
+    expect(steps.find((s) => s.name === 'Verify non-installer package dry-run')).toBeUndefined();
+    expect(steps.some((s) => /^\s*npm pack/m.test(s.run ?? ''))).toBe(false);
+
+    const candidate = steps.find((s) => s.name === 'Pack and verify immutable candidate');
+    expect(candidate?.id).toBe('candidate');
+    // Candidate is no longer installer-only; it runs for every ABSENT leg.
+    expect(candidate?.if).toBe("${{ steps.exact.outputs.status == 'ABSENT' }}");
+    expect(String(candidate?.env?.TOOLS_DIR)).toContain('inputs.tools_dir');
+    expect(String(candidate?.env?.PACKAGE_NAME)).toContain('inputs.npm_name');
+    expect(candidate?.run).toContain('prepare-npm-candidate.mjs');
+    expect(candidate?.run).toContain('--package-name "$PACKAGE_NAME"');
+    expect(candidate?.run).toContain('--cohort "$COHORT"');
+    expect(candidate?.run).toContain('--github-output "$GITHUB_OUTPUT"');
+    // Legacy lifecycle owners are materialized by the build step instead.
+    expect(candidate?.run).toContain('SKIP_PACK_SCRIPTS');
+    expect(candidate?.run).toContain('openclaw-plugin');
+    expect(candidate?.run).toContain('pd-cli');
+    expect(candidate?.run).toContain('--skip-pack-scripts');
+    // The stamp contract stays installer-only.
+    expect(candidate?.run).toContain('--product-version "$PRODUCT_VERSION"');
+
+    const publish = steps.find((s) => s.name === 'Publish exact committed version');
+    expect(String(publish?.env?.CANDIDATE_TARBALL)).toContain('steps.candidate.outputs.tarball');
+    expect(String(publish?.env?.CANDIDATE_SHA512_HEX)).toContain('steps.candidate.outputs.sha512_hex');
+    expect(publish?.run).toContain('ACTUAL_SHA512_HEX');
+    expect(publish?.run).toContain('npm publish "$CANDIDATE_TARBALL" --provenance --access public');
+    // No directory-publish fallback survives, for any package.
+    expect(publish?.run).not.toMatch(/npm publish --provenance --access public/);
+    expect(publish?.run).not.toContain('cd "packages/');
   });
 });
 
@@ -469,5 +498,152 @@ describe('bundle-plugin — cohort version source (SPEC §21)', () => {
   it('the train sets the preserve-source env before building the installer', () => {
     const t = fs.readFileSync(path.join(REPO_ROOT, '.github/actions/publish-npm-package/action.yml'), 'utf8');
     expect(t).toContain('export PD_BUNDLE_PRESERVE_SOURCE_VERSIONS=1');
+  });
+});
+
+// G3.2 build deduplication: structural pins. Behavioral evidence lives in
+// release-build-once.test.ts (ledger identity contract) and
+// packages/create-principles-disciple/tests/console-dist-freshness.test.ts
+// (skip-flag freshness gate).
+describe('G3.2 build-once — train legs reuse only identity-verified builds', () => {
+  const actionRel = '.github/actions/publish-npm-package/action.yml';
+  type Step = { name?: string; run?: string; env?: Record<string, unknown>; uses?: string };
+  const buildStep = (): Step => {
+    const doc = loadWorkflow(actionRel) as { runs?: { steps?: Step[] } };
+    const step = doc.runs?.steps?.find((s) => s.name === 'Build target package');
+    expect(step?.run).toBeDefined();
+    return step!;
+  };
+  const branch = (dir: string) => {
+    const run = buildStep().run!;
+    const start = run.indexOf(`[ "$PKG_DIR" = "${dir}" ]`);
+    expect(start, `no build branch for ${dir}`).toBeGreaterThan(-1);
+    const next = run.indexOf('elif [ "$PKG_DIR" = ', start + 1);
+    return next === -1 ? run.slice(start) : run.slice(start, next);
+  };
+
+  it('wires build_once through the TOOLS checkout with the cohort identity', () => {
+    const step = buildStep();
+    expect(String(step.env?.TOOLS_DIR)).toContain('inputs.tools_dir');
+    expect(String(step.env?.COHORT)).toContain('inputs.cohort_sha');
+    expect(step.run).toContain('node "$TOOLS_ABS/scripts/release/build-once.mjs"');
+    expect(step.run).toContain('--cohort "$COHORT"');
+  });
+
+  it('every adapter/pd-cli build site goes through build_once (no plain duplicate left)', () => {
+    const run = buildStep().run!;
+    for (const ws of ['@principles/codex-adapter', '@principles/workbuddy-adapter', '@principles/pd-cli']) {
+      expect(run, `plain rebuild of ${ws} survived`).not.toContain(`npm run build --workspace=${ws}`);
+    }
+    expect(branch('codex-adapter')).toContain('build_once @principles/codex-adapter build packages/codex-adapter');
+    expect(branch('workbuddy-adapter')).toContain('build_once @principles/workbuddy-adapter build packages/workbuddy-adapter');
+    for (const dir of ['pd-cli', 'create-principles-disciple']) {
+      expect(branch(dir)).toContain('build_once @principles/pd-cli build packages/pd-cli');
+      expect(branch(dir)).toContain('build_once @principles/codex-adapter build packages/codex-adapter');
+    }
+  });
+
+  it('never build-onces the plugin: its leg executes the production prepack variant explicitly', () => {
+    const run = buildStep().run!;
+    expect(run).not.toMatch(/build_once\s+principles-disciple/);
+    // G3.1-A: the plugin's prepack IS its build, so the leg runs those exact
+    // scripts once and the candidate pack uses --ignore-scripts.
+    expect(branch('openclaw-plugin')).toContain('npm run build:production --workspace=principles-disciple');
+    expect(branch('openclaw-plugin')).toContain('npm run build:types --workspace=principles-disciple');
+    expect(branch('openclaw-plugin')).not.toContain('npm run build --workspace=principles-disciple');
+    expect(branch('pd-cli')).toContain('npm run build --workspace=principles-disciple');
+    // The installer branch keeps every single-site build unconditional.
+    const installer = branch('create-principles-disciple');
+    expect(installer).toContain('npm run build:production --workspace=principles-disciple');
+    expect(installer).toContain('npm run build:types --workspace=principles-disciple');
+    expect(installer).toContain('cd packages/create-principles-disciple && npm run build');
+    expect(installer).toContain('npm run build --workspace=@principles/pd-console');
+  });
+
+  it('preamble-built packages are verified fail-closed in their legs, never rebuilt', () => {
+    const run = buildStep().run!;
+    expect(run).toContain('assert_preamble_dist()');
+    expect(run).toMatch(/packages\/\$1\/dist\/index\.js/);
+    expect(run).toContain('exit 1');
+    for (const [dir, ws] of [
+      ['principles-core', '@principles/core'],
+      ['install-layout', '@principles/install-layout'],
+      ['host-runtime', '@principles/host-runtime'],
+    ] as const) {
+      expect(branch(dir)).toContain(`assert_preamble_dist ${dir}`);
+      expect(branch(dir), `${dir} leg must not rebuild`).not.toContain(`npm run build --workspace=${ws}`);
+    }
+  });
+
+  it('every caller of the action builds core/install-layout/host-runtime in its preamble BEFORE the first leg', () => {
+    for (const rel of ['.github/workflows/publish-npm.yml', '.github/workflows/publish-preflight.yml']) {
+      const doc = loadWorkflow(rel) as { jobs?: Record<string, { steps?: Step[] }> };
+      const legJobs = Object.values(doc.jobs ?? {}).filter((job) =>
+        (job.steps ?? []).some((s) => String(s.uses ?? '').includes('publish-npm-package')),
+      );
+      expect(legJobs.length, `${rel} has a job using the publish action`).toBeGreaterThan(0);
+      for (const job of legJobs) {
+        const steps = job.steps ?? [];
+        const firstLeg = steps.findIndex((s) => String(s.uses ?? '').includes('publish-npm-package'));
+        for (const ws of ['@principles/core', '@principles/install-layout', '@principles/host-runtime']) {
+          const at = steps.findIndex((s) => String(s.run ?? '').includes(`npm run build --workspace=${ws}`));
+          expect(at, `${rel}: preamble build of ${ws}`).toBeGreaterThan(-1);
+          expect(at, `${rel}: ${ws} must be built before the first leg`).toBeLessThan(firstLeg);
+        }
+      }
+    }
+  });
+});
+
+describe('G3.2 console skip flag — set only where the console was just built', () => {
+  type Step = { name?: string; run?: string; env?: Record<string, unknown> };
+  const read = (rel: string) => fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8');
+
+  it('bundle-plugin gates the skip on the exact flag and the freshness check, and builds otherwise', () => {
+    const t = read('packages/create-principles-disciple/scripts/bundle-plugin.mjs');
+    expect(t).toContain("process.env.PD_BUNDLE_SKIP_CONSOLE_BUILD === '1'");
+    expect(t).toContain('assertConsoleDistFresh(CONSOLE_SRC)');
+    // The unflagged path still runs the official console build chain.
+    expect(t).toMatch(/} else \{[\s\S]*?'run', 'build', '--workspace=@principles\/pd-console'/);
+  });
+
+  it('release-metadata sets the flag ONLY on the asset step, right after the step that builds console', () => {
+    const doc = loadWorkflow('.github/workflows/release-metadata.yml') as { jobs?: Record<string, { steps?: Step[] }> };
+    const flagged: Array<{ job: string; index: number; steps: Step[] }> = [];
+    for (const [jobName, job] of Object.entries(doc.jobs ?? {})) {
+      (job.steps ?? []).forEach((step, index) => {
+        if (step.env && Object.hasOwn(step.env, 'PD_BUNDLE_SKIP_CONSOLE_BUILD')) {
+          flagged.push({ job: jobName, index, steps: job.steps ?? [] });
+        }
+      });
+    }
+    expect(flagged).toHaveLength(1);
+    const { index, steps } = flagged[0];
+    expect(steps[index].name).toBe('Build release asset');
+    expect(String(steps[index].env?.PD_BUNDLE_SKIP_CONSOLE_BUILD)).toBe('1');
+    expect(steps[index].run).toContain('build:release-asset');
+    const previous = steps[index - 1];
+    expect(previous?.name).toBe('Build release payload components');
+    expect(previous?.run).toContain('npm run build --workspace=@principles/pd-console');
+  });
+
+  it('no job-level or workflow-level env leaks the flag into other steps', () => {
+    // The per-step parse above cannot see `env:` at workflow/job level; a
+    // single textual occurrence (the asset step's env line) rules that out.
+    const t = read('.github/workflows/release-metadata.yml');
+    expect(t.match(/PD_BUNDLE_SKIP_CONSOLE_BUILD/g)).toHaveLength(1);
+  });
+
+  it('reproducibility workflows never set the flag and keep two independent builds', () => {
+    for (const rel of ['.github/workflows/release-reproducibility.yml', '.github/workflows/release-reproducibility-full.yml']) {
+      expect(read(rel), rel).not.toContain('PD_BUNDLE_SKIP_CONSOLE_BUILD');
+    }
+    const full = read('.github/workflows/release-reproducibility-full.yml');
+    expect(full.match(/build-self-contained-release\.mjs --output/g)?.length).toBe(2);
+    expect(full).toContain('compare-release-archives.mjs');
+    // No other workflow or action sets it either.
+    for (const rel of ['.github/workflows/publish-npm.yml', '.github/workflows/publish-preflight.yml', '.github/actions/publish-npm-package/action.yml']) {
+      expect(read(rel), rel).not.toContain('PD_BUNDLE_SKIP_CONSOLE_BUILD');
+    }
   });
 });

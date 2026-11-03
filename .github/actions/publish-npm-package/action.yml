@@ -12,6 +12,10 @@ description: >-
   the PRODUCT at the cohort SHA (workspace root), the TOOLS at a trusted
   reviewed SHA (tools_dir), and run setup-node (registry-url), npm ci, and
   the common core/install-layout/host-runtime builds before invoking.
+  IMMUTABLE CANDIDATE (G3.1 + G3.1-A): every ABSENT leg packs ONE candidate
+  tarball, verifies its identity/file set and publishes that exact file. npm
+  tarball publishes run no lifecycle scripts, so the uploaded bytes are the
+  verified bytes; there is no directory-publish path.
   PRODUCT vs TOOLS separation (PRI-886): this action file and every
   scripts/release/* control script it calls come from the tools_dir
   checkout, while every manifest, build script and package payload comes
@@ -47,11 +51,10 @@ inputs:
   dry_run:
     description: >-
       Rehearsal mode (PRI-886): run the ENTIRE control path — exact-state
-      check, dependency preflight wait, builds, dry-run pack, installer
-      identity stamp + tarball verification — but skip the actual npm
-      upload. Used by the no-write preflight workflow so publish-flow
-      defects surface before the expensive matrix, without consuming a
-      real registry version.
+      check, dependency preflight wait, builds, and the ONE immutable-candidate
+      pack/overlay/final verification — but skip the actual npm upload. Used by
+      the no-write preflight workflow so publish-flow defects surface before
+      the expensive matrix, without consuming a real registry version.
     required: false
     type: boolean
     default: false
@@ -63,6 +66,31 @@ inputs:
     required: false
     type: string
     default: ''
+# Evidence-derived leg results (PD Release G3-R3 H1). The caller aggregates
+# these instead of inferring "packed" from step success: a leg that resolved
+# PRESENT_MATCH / PRESENT_PRIOR packed nothing at all.
+outputs:
+  leg_status:
+    description: 'PACKED | SKIPPED_PRESENT | FAILED | UNKNOWN — classified from observed evidence, never from job success'
+    value: ${{ steps.summary.outputs.leg_status }}
+  leg_reason:
+    description: 'Why the leg reached that status (empty when the evidence is complete)'
+    value: ${{ steps.summary.outputs.leg_reason }}
+  leg_pack_attempted:
+    description: "true when this leg entered the candidate-pack path (registry state ABSENT)"
+    value: ${{ steps.summary.outputs.leg_pack_attempted }}
+  npm_name:
+    description: 'npm package name for this leg'
+    value: ${{ inputs.npm_name }}
+  package_version:
+    description: 'Version committed at the cohort SHA'
+    value: ${{ steps.exact.outputs.version }}
+  registry_status:
+    description: 'registry-exact status for this exact name@version'
+    value: ${{ steps.exact.outputs.status }}
+  candidate_sha512_hex:
+    description: 'SHA-512 (hex) of the verified candidate, empty when no candidate was packed'
+    value: ${{ steps.candidate.outputs.sha512_hex }}
 
 runs:
   using: composite
@@ -163,15 +191,50 @@ runs:
     - name: Build target package
       if: ${{ steps.exact.outputs.status == 'ABSENT' }}
       shell: bash
+      env:
+        TOOLS_DIR: ${{ inputs.tools_dir }}
+        COHORT: ${{ inputs.cohort_sha }}
       run: |
+        set -euo pipefail
         PKG_DIR="${{ inputs.pkg_dir }}"
+        # G3.2 build-once: every leg runs in ONE job against ONE cohort
+        # checkout, so a (workspace, script) pair already built by an EARLIER
+        # LEG has identical inputs here. build-once.mjs reuses it only when its
+        # job-scoped ledger records THIS cohort, the same package version and a
+        # dist/ SHA-256 that still matches disk; any mismatch is announced as a
+        # ::warning:: and the package is rebuilt (never a silent skip/fallback).
+        # Absolute paths: later branches cd into a package directory.
+        ROOT_ABS="$(pwd)"
+        TOOLS_ABS="$(cd "$TOOLS_DIR" && pwd)"
+        build_once() {
+          node "$TOOLS_ABS/scripts/release/build-once.mjs" \
+            --workspace "$1" --script "$2" --dir "$ROOT_ABS/$3" --cohort "$COHORT"
+        }
+        # Preamble-built packages (core, install-layout, host-runtime): every
+        # caller of this action (publish-npm train AND publish-preflight
+        # rehearsal) builds them in its own preamble, in this job, at this
+        # cohort, before any leg. A leg rebuild is a pure duplicate (G3.2), so
+        # the leg VERIFIES the preamble output instead — fail-closed, never a
+        # silent rebuild and never a pack without dist/ (PRI-979).
+        assert_preamble_dist() {
+          if [ ! -s "$ROOT_ABS/packages/$1/dist/index.js" ]; then
+            echo "::error::packages/$1/dist/index.js is missing — the caller's preamble must build $1 before this leg runs (G3.2 contract)."
+            exit 1
+          fi
+          echo "Verified preamble build of $1 (no rebuild)."
+        }
         if [ "$PKG_DIR" = "principles-core" ]; then
-          # Built by the train job itself ("Build core") before any leg runs:
-          # core has no workspace dependency, so nothing here is missing.
-          # Listed explicitly so the mapping below stays exhaustive.
-          :
+          assert_preamble_dist principles-core
         elif [ "$PKG_DIR" = "openclaw-plugin" ]; then
-          npm run build --workspace=principles-disciple
+          # G3.1-A: the plugin's prepack (build:production && build:types) IS
+          # its build. It is executed HERE, exactly once, and the candidate
+          # pack runs with --ignore-scripts. Previously `npm pack --dry-run`
+          # and the directory `npm publish` each ran that prepack again, so the
+          # production bundle was built three times for one published artifact.
+          # build:production cleans dist and emits the production bundle;
+          # build:types emits the declarations the package `types` field needs.
+          npm run build:production --workspace=principles-disciple
+          npm run build:types --workspace=principles-disciple
         elif [ "$PKG_DIR" = "pd-cli" ]; then
           # pd-cli imports types from principles-disciple AND from
           # @principles/codex-adapter (codex-worker / codex-ingest-catchup /
@@ -182,10 +245,14 @@ runs:
           # and every ABSENT-gated step — including its build — is skipped,
           # leaving no dist/ for pd-cli's tsc (run 35834470066, TS2307 x4;
           # same class as PRI-979).
+          # G3.1-A: pd-cli's prepack is exactly `npm run build`, which is the
+          # build_once command below — so the candidate pack uses
+          # --ignore-scripts and that build still happens exactly once (or is
+          # reused only when the ledger's cohort/version/dist identity matches).
           npm run build --workspace=principles-disciple
-          npm run build --workspace=@principles/codex-adapter
-          npm run build --workspace=@principles/workbuddy-adapter
-          npm run build --workspace=@principles/pd-cli
+          build_once @principles/codex-adapter build packages/codex-adapter
+          build_once @principles/workbuddy-adapter build packages/workbuddy-adapter
+          build_once @principles/pd-cli build packages/pd-cli
         elif [ "$PKG_DIR" = "create-principles-disciple" ]; then
           # esbuild first (cleans dist, produces bundle.js), then tsc
           # --emitDeclarationOnly. codex-adapter must be built before the
@@ -197,50 +264,25 @@ runs:
           export PD_BUNDLE_PRESERVE_SOURCE_VERSIONS=1
           npm run build:production --workspace=principles-disciple
           npm run build:types --workspace=principles-disciple
-          npm run build --workspace=@principles/codex-adapter
-          npm run build --workspace=@principles/workbuddy-adapter
-          npm run build --workspace=@principles/pd-cli
+          build_once @principles/codex-adapter build packages/codex-adapter
+          build_once @principles/workbuddy-adapter build packages/workbuddy-adapter
+          build_once @principles/pd-cli build packages/pd-cli
           cd packages/create-principles-disciple && npm run build
           npm run build --workspace=@principles/pd-console
         elif [ "$PKG_DIR" = "host-runtime" ]; then
-          npm run build --workspace=@principles/host-runtime
+          assert_preamble_dist host-runtime
         elif [ "$PKG_DIR" = "install-layout" ]; then
-          npm run build --workspace=@principles/install-layout
+          assert_preamble_dist install-layout
         elif [ "$PKG_DIR" = "codex-adapter" ]; then
-          npm run build --workspace=@principles/codex-adapter
+          build_once @principles/codex-adapter build packages/codex-adapter
         elif [ "$PKG_DIR" = "workbuddy-adapter" ]; then
-          npm run build --workspace=@principles/workbuddy-adapter
+          build_once @principles/workbuddy-adapter build packages/workbuddy-adapter
         else
           # No silent no-op: an unmapped leg would pack without dist/ and ship
           # a package whose `files` entries simply are not there (PRI-979).
           echo "::error::No build branch for pkg_dir=$PKG_DIR in publish-npm-package/action.yml — add one before adding a train leg."
           exit 1
         fi
-
-    - name: Verify package dry-run
-      if: ${{ steps.exact.outputs.status == 'ABSENT' }}
-      shell: bash
-      run: |
-        set -o pipefail
-        cd "packages/${{ inputs.pkg_dir }}"
-        # Capture the full pack output first, then preview its head. Piping
-        # npm straight into `head` closed the read end after 50 lines while
-        # npm was still writing, so the inner prepack (build:production &&
-        # build:types — ~50 lines on its own, plus npm lifecycle banners)
-        # died on EPIPE, `npm pack` exited 1, and `pipefail` promoted a
-        # purely cosmetic log truncation into a failed release: cohort
-        # d6fa4055 aborted at 5/7 with no npm error visible in the log.
-        # The preview must never own the verdict.
-        pack_log="$(mktemp)"
-        npm pack --dry-run > "$pack_log" 2>&1
-        pack_status=$?
-        head -50 "$pack_log"
-        if [ "$pack_status" -ne 0 ]; then
-          echo "::error::npm pack --dry-run failed (exit $pack_status); full output follows"
-          cat "$pack_log"
-        fi
-        rm -f "$pack_log"
-        exit "$pack_status"
 
     - name: Stamp npm payload product identity
       # Unchanged authority (SPEC v0.3 §12): the installer payload carries
@@ -269,46 +311,67 @@ runs:
           console.log(`Stamped npm payload product identity: version=${version} commit=${sourceCommit.slice(0, 12)}`);
         ' "$VERSION" "$SOURCE_COMMIT"
 
-    - name: Verify the packed installer tarball carries the product identity
-      # PRI-874: the stamp must survive into the ACTUAL npm tarball (files[]
-      # inclusion, prepack effects) — checking the working directory is not
-      # evidence. Final pre-publish identity gate for the installer leg.
-      # PRI-881: pack into an isolated directory and verify the single
-      # tarball it produces — `npm pack --json` stdout is polluted by the
-      # prepack (build + bundle) progress lines. Restored into the exact-
-      # version train by the changesets cutover merge (SPEC v1.2 §20
-      # preserves this gate; tarball identity verification is unchanged
-      # authority). Runs only when this leg will actually publish (ABSENT);
-      # the already-published skip path has a verified registry tarball.
-      if: ${{ steps.exact.outputs.status == 'ABSENT' && inputs.pkg_dir == 'create-principles-disciple' }}
+    - name: Pack and verify immutable candidate
+      id: candidate
+      # The ONLY pack for this leg (G3.1 + G3.1-A). The helper runs one npm
+      # pack, overlays the cohort gitHead in an unpacked copy, deterministically
+      # repacks it, verifies the final tarball, and emits its SHA-512. Publish
+      # consumes exactly that file, so the uploaded bytes are the verified
+      # bytes for EVERY train package, not just the installer.
+      if: ${{ steps.exact.outputs.status == 'ABSENT' }}
       shell: bash
+      env:
+        TOOLS_DIR: ${{ inputs.tools_dir }}
+        PACKAGE_DIR: packages/${{ inputs.pkg_dir }}
+        PKG_DIR: ${{ inputs.pkg_dir }}
+        PACKAGE_NAME: ${{ inputs.npm_name }}
+        COHORT: ${{ inputs.cohort_sha }}
+        PACKAGE_VERSION: ${{ steps.exact.outputs.version }}
+        PRODUCT_VERSION: ${{ inputs.product_identity_version }}
       run: |
-        VERSION="${{ inputs.product_identity_version }}"
-        node -e '
-          const { execFileSync } = require("node:child_process");
-          const { readFileSync, mkdtempSync, readdirSync, rmSync } = require("node:fs");
-          const { join } = require("node:path");
-          const { tmpdir } = require("node:os");
-          const expected = process.argv[1];
-          const work = mkdtempSync(join(tmpdir(), "pd-tarball-identity-"));
-          try {
-            execFileSync("npm", ["pack", "--pack-destination", work], { encoding: "utf8", cwd: "packages/create-principles-disciple" });
-            const artifacts = readdirSync(work).filter((f) => f.endsWith(".tgz"));
-            if (artifacts.length !== 1) {
-              throw new Error(`expected exactly one packed tarball, got: ${JSON.stringify(artifacts)}`);
-            }
-            execFileSync("tar", ["-xzf", join(work, artifacts[0]), "-C", work, "package/_release/product-identity.json"]);
-            const identity = JSON.parse(readFileSync(join(work, "package", "_release", "product-identity.json"), "utf8"));
-            if (identity.productVersion !== expected) {
-              throw new Error(`Packed tarball identity ${JSON.stringify(identity.productVersion)} != resolved product identity ${JSON.stringify(expected)}`);
-            }
-            console.log(`Tarball identity verified: version=${identity.productVersion} commit=${String(identity.sourceCommit).slice(0, 12)}`);
-          } finally {
-            rmSync(work, { recursive: true, force: true });
-          }
-        ' "$VERSION"
+        set -euo pipefail
+        if [[ ! "$PACKAGE_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+          echo "::error::Refusing candidate: package version is not strict x.y.z: $PACKAGE_VERSION"
+          exit 1
+        fi
+        # Packages whose leg builds the prepack variant EXPLICITLY in "Build
+        # target package" must not let pack run that lifecycle a second time.
+        # Every other package's prepack/prepare (if any) belongs to the one
+        # pack below — this is the same lifecycle the old dry-run pack ran,
+        # except its output is now the verified published artifact.
+        SKIP_PACK_SCRIPTS=0
+        if [ "$PKG_DIR" = "openclaw-plugin" ] || [ "$PKG_DIR" = "pd-cli" ]; then
+          SKIP_PACK_SCRIPTS=1
+          # With the lifecycle skipped, a broken build branch would publish a
+          # stale or empty dist. Fail closed instead of packing it.
+          if [ ! -s "$PACKAGE_DIR/dist/index.js" ]; then
+            echo "::error::$PACKAGE_DIR/dist/index.js is missing — this leg must build its payload before the candidate pack."
+            exit 1
+          fi
+        fi
+        CANDIDATE_DIR="$(mktemp -d "$RUNNER_TEMP/pd-candidate.XXXXXX")"
+        SAFE_NAME="$(printf '%s' "$PACKAGE_NAME" | sed 's#^@##; s#/#-#g')"
+        FINAL_TARBALL="$CANDIDATE_DIR/$SAFE_NAME-$PACKAGE_VERSION.tgz"
+        ARGS=(
+          --package-dir "$PACKAGE_DIR"
+          --package-name "$PACKAGE_NAME"
+          --output "$FINAL_TARBALL"
+          --cohort "$COHORT"
+          --package-version "$PACKAGE_VERSION"
+          --github-output "$GITHUB_OUTPUT"
+        )
+        # Only the installer carries the product-identity stamp contract.
+        if [ -n "$PRODUCT_VERSION" ]; then
+          ARGS+=(--product-version "$PRODUCT_VERSION")
+        fi
+        if [ "$SKIP_PACK_SCRIPTS" = "1" ]; then
+          ARGS+=(--skip-pack-scripts)
+        fi
+        node "$TOOLS_DIR/scripts/release/prepare-npm-candidate.mjs" "${ARGS[@]}"
+        test -s "$FINAL_TARBALL"
 
     - name: Publish exact committed version
+      id: publish
       if: ${{ steps.exact.outputs.status == 'ABSENT' }}
       shell: bash
       env:
@@ -317,33 +380,48 @@ runs:
         NAME: ${{ inputs.npm_name }}
         VERSION: ${{ steps.exact.outputs.version }}
         DRY_RUN: ${{ inputs.dry_run }}
+        CANDIDATE_TARBALL: ${{ steps.candidate.outputs.tarball }}
+        CANDIDATE_SHA512_HEX: ${{ steps.candidate.outputs.sha512_hex }}
         NODE_AUTH_TOKEN: ${{ inputs.npm_token }}
       run: |
+        # Re-hash the same immutable file immediately before the upload. This
+        # binds the publish command to the bytes verified in the candidate step
+        # for EVERY package; there is no directory-publish fallback.
+        if [ -z "$CANDIDATE_TARBALL" ] || [ ! -s "$CANDIDATE_TARBALL" ]; then
+          echo "::error::Candidate tarball is missing; refusing to publish anything else."
+          exit 1
+        fi
+        if [[ ! "$CANDIDATE_SHA512_HEX" =~ ^[a-f0-9]{128}$ ]]; then
+          echo "::error::Candidate SHA-512 output is missing or malformed."
+          exit 1
+        fi
+        # coreutils checksum tools prefix the whole line with a backslash in
+        # escaped mode (file name containing a backslash — Windows dev paths).
+        # The hash itself is plain hex, so stripping backslashes is exact.
+        ACTUAL_SHA512_HEX="$(sha512sum "$CANDIDATE_TARBALL" | cut -d' ' -f1 | tr -d '\\')"
+        if [ "$ACTUAL_SHA512_HEX" != "$CANDIDATE_SHA512_HEX" ]; then
+          echo "::error::Candidate changed after verification; refusing to publish."
+          exit 1
+        fi
+
         # Rehearsal gate decided in BASH, not in a step-level `if`
         # expression: GitHub expressions coerce across boolean/string in
-        # ways that are not reliable for input gating — the preflight
-        # rehearsal (run 35666369142) proved a boolean-inequality gate on
-        # this input OPENED for a boolean true and attempted a real
-        # upload (blocked only by the job's missing id-token). Env values
-        # are always strings; this comparison is exact.
+        # ways that are not reliable for input gating. Env values are
+        # always strings; this comparison is exact.
         if [ "$DRY_RUN" = "true" ]; then
-          echo "DRY RUN (rehearsal): the real npm upload is SKIPPED; the packed artifact and control-path checks above are the rehearsal evidence."
+          echo "DRY RUN (rehearsal): immutable candidate verified (sha512=$CANDIDATE_SHA512_HEX); the real npm upload is SKIPPED."
           exit 0
         fi
-        # Resolve the tools checkout to an ABSOLUTE path BEFORE cd-ing into
-        # the package directory — the failure fallback below must stay
-        # valid from inside packages/<dir> (rehearsal run 35666369142:
-        # relative release-tools/ resolved to packages/<dir>/release-tools
-        # and crashed with MODULE_NOT_FOUND instead of deciding).
+
         TOOLS_ABS="$(cd "$TOOLS_DIR" && pwd)"
-        cd "packages/${{ inputs.pkg_dir }}"
         echo "Publishing exact committed version $NAME@$VERSION (no bump, no reset)."
-        # An npm exit code is not always the truth: the upload can land and
-        # the ack get lost. On failure, re-verify the registry exact state
-        # from the TOOLS checkout before deciding — PRESENT_MATCH from the
-        # cohort commit continues, anything else fails loud (PRI-886).
+        # npm's tarball-spec publish path runs NO pack/prepublish lifecycle, so
+        # it cannot rebuild or replace the verified bytes; provenance attests
+        # exactly this uploaded tarball.
+        # On failure, re-verify registry exact state: PRESENT_MATCH from the
+        # cohort commit continues; anything else fails loud (PRI-886).
         set +e
-        npm publish --provenance --access public
+        npm publish "$CANDIDATE_TARBALL" --provenance --access public
         CODE=$?
         set -e
         if [ "$CODE" -ne 0 ]; then
@@ -352,22 +430,71 @@ runs:
         fi
 
     - name: Summary
+      id: summary
+      # Evidence-derived (PD Release G3-R3 H1): the status is classified from
+      # the candidate file, its SHA-512 and its packed manifest — never from
+      # "this step ran". `always()` makes a failed leg report UNKNOWN instead
+      # of silently omitting the line.
+      if: always()
       shell: bash
+      env:
+        TOOLS_DIR: ${{ inputs.tools_dir }}
+        REGISTRY_STATUS: ${{ steps.exact.outputs.status }}
+        PACKAGE_NAME: ${{ inputs.npm_name }}
+        PACKAGE_VERSION: ${{ steps.exact.outputs.version }}
+        COHORT: ${{ inputs.cohort_sha }}
+        CANDIDATE_TARBALL: ${{ steps.candidate.outputs.tarball }}
+        CANDIDATE_SHA512_HEX: ${{ steps.candidate.outputs.sha512_hex }}
+        DRY_RUN: ${{ inputs.dry_run }}
+        PUBLISH_OUTCOME: ${{ steps.publish.outcome }}
       run: |
-        echo "## Release Step Summary" >> "$GITHUB_STEP_SUMMARY"
-        echo "" >> "$GITHUB_STEP_SUMMARY"
-        echo "| Item | Value |" >> "$GITHUB_STEP_SUMMARY"
-        echo "|------|-------|" >> "$GITHUB_STEP_SUMMARY"
-        echo "| Package | \`${{ inputs.npm_name }}\` |" >> "$GITHUB_STEP_SUMMARY"
-        echo "| Version | \`${{ steps.exact.outputs.version }}\` (committed at cohort SHA) |" >> "$GITHUB_STEP_SUMMARY"
-        echo "| Registry state | \`${{ steps.exact.outputs.status }}\` |" >> "$GITHUB_STEP_SUMMARY"
-        echo "| Cohort | \`${{ inputs.cohort_sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
-        echo "| Tools | \`${{ inputs.tools_dir }}\` |" >> "$GITHUB_STEP_SUMMARY"
-        echo "" >> "$GITHUB_STEP_SUMMARY"
-        if [ "${{ steps.exact.outputs.status }}" = "ABSENT" ] && [ "${{ inputs.dry_run }}" = "true" ]; then
-          echo "REHEARSAL ONLY — control path exercised and artifact packed, but NO npm upload happened; this is not evidence of a published version." >> "$GITHUB_STEP_SUMMARY"
-        elif [ "${{ steps.exact.outputs.status }}" = "ABSENT" ]; then
-          echo "Published exact committed version to npm." >> "$GITHUB_STEP_SUMMARY"
-        else
-          echo "npm upload skipped (${{ steps.exact.outputs.status }}) — closing steps reconciled." >> "$GITHUB_STEP_SUMMARY"
-        fi
+        set -euo pipefail
+        LEG_OUT=$(node "$TOOLS_DIR/scripts/release/preflight-summary.mjs" leg \
+          --registry-status "$REGISTRY_STATUS" \
+          --tarball "$CANDIDATE_TARBALL" \
+          --sha512-hex "$CANDIDATE_SHA512_HEX" \
+          --package-name "$PACKAGE_NAME" \
+          --package-version "$PACKAGE_VERSION" \
+          --cohort "$COHORT" \
+          --github-output "$GITHUB_OUTPUT")
+        echo "$LEG_OUT"
+        LEG_STATUS=$(printf '%s\n' "$LEG_OUT" | sed -n 's/^leg_status=//p')
+        LEG_REASON=$(printf '%s\n' "$LEG_OUT" | sed -n 's/^leg_reason=//p')
+        {
+          echo "## Release Step Summary"
+          echo ""
+          echo "| Item | Value |"
+          echo "|------|-------|"
+          echo "| Package | \`$PACKAGE_NAME\` |"
+          echo "| Version | \`$PACKAGE_VERSION\` (committed at cohort SHA) |"
+          echo "| Registry state | \`$REGISTRY_STATUS\` |"
+          echo "| Leg status | \`$LEG_STATUS\` |"
+          echo "| Evidence | $LEG_REASON |"
+          echo "| Cohort | \`$COHORT\` |"
+          if [ -n "${CANDIDATE_SHA512_HEX:-}" ]; then
+            echo "| Candidate SHA-512 (hex) | \`$CANDIDATE_SHA512_HEX\` |"
+          fi
+          echo ""
+          case "$LEG_STATUS" in
+            PACKED)
+              echo "Candidate artifact independently re-verified in this step (file + SHA-512 + name/version/cohort)."
+              if [ "$DRY_RUN" = "true" ]; then
+                if [ "$PUBLISH_OUTCOME" = "success" ]; then
+                  echo "REHEARSAL ONLY — the control path and artifact were verified, but NO npm upload happened; this is not evidence of a published version."
+                else
+                  echo "REHEARSAL DID NOT COMPLETE — the candidate artifact is verified, but the control path did not reach its end; no packaging claim is made."
+                fi
+              elif [ "$PUBLISH_OUTCOME" = "success" ]; then
+                echo "Published exact committed version to npm."
+              else
+                echo "Candidate verified, but the npm upload did NOT complete (see the failed publish step) — this is not evidence of a published version."
+              fi
+              ;;
+            SKIPPED_PRESENT)
+              echo "npm upload skipped ($REGISTRY_STATUS) — closing steps reconciled."
+              ;;
+            *)
+              echo "Candidate artifact could NOT be verified ($LEG_REASON); no packaging-success claim is made."
+              ;;
+          esac
+        } >> "$GITHUB_STEP_SUMMARY"

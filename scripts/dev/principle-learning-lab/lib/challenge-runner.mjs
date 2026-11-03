@@ -410,6 +410,7 @@ export async function runChallengeStudy({
   owner = 'challenge-runner',
   deps = {},
   execution = null,
+  admissionCheck = null,
 }) {
   const declaredMode = execution && execution.mode !== undefined ? execution.mode : 'offline-stub';
   if (!RUNNER_EXECUTION_MODES.includes(declaredMode)) {
@@ -452,6 +453,14 @@ export async function runChallengeStudy({
   // unchanged. Same run-scoped discipline as the unknown streak.
   let consecutiveCapacityFailures = 0;
   try {
+    // P1-3 (offline↔async single-active): the caller-injected admission check
+    // runs FIRST under this study write lock — before RUN_STARTED, before any
+    // attempt reservation and before any actor is constructed. A refusal here
+    // throws, the lock is released by the catch below, and the ledger keeps no
+    // half-started run.
+    if (typeof admissionCheck === 'function') {
+      await admissionCheck({ studyDir });
+    }
     // P1-4 server-enforced readiness: identity/path ownership are the caller's
     // gate (the console resolves the directory from its own enumeration and
     // verifies the write permission marker); the FROZEN study is re-verified
