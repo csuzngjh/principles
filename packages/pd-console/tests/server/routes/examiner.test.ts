@@ -188,7 +188,10 @@ describe('Examiner Console API (offline-first, SPEC v0.9 §8)', () => {
     const { statusCode, body } = await call('GET', '/overview');
     expect(statusCode).toBe(200);
     expect(body.data.gates.gate1_challenge_trust).toContain('BLOCKED');
-    expect(body.data.executionScope).toContain('offline-stub only');
+    // v0.10.1 (intentional contract change): the scope line now also names the
+    // host dry-run and the authorization boundary instead of "offline-stub only".
+    expect(body.data.spec).toBe('SPEC-PD-EXAMINER-001 v0.10.1');
+    expect(body.data.executionScope).toContain('ZERO model calls');
     expect(body.data.hostInjectionCapability['offline-stub']).toBe('RUNTIME_LOADED');
     expect(Array.isArray(body.data.studies)).toBe(true);
   });
@@ -232,6 +235,39 @@ describe('Examiner Console API (offline-first, SPEC v0.9 §8)', () => {
     expect(['REPORT_PENDING', 'REPORT_INCONCLUSIVE']).toContain(fetched.body.data.report.status);
   });
 
+  it('a later RUN_STARTED after an earlier RUN_FINISHED is NOT reported as finished', async () => {
+    const created = await call('POST', '/studies', { targetPrincipleId: 'pri-target', repetitionsPerCase: 1 });
+    expect(created.statusCode).toBe(200);
+    const studyId = created.body.data.studyId as string;
+    const run = await call('POST', `/studies/${studyId}/run`);
+    expect(run.statusCode).toBe(200);
+    // A second run has started; the first run's finish must not make the
+    // study look complete while the second run is still in flight.
+    fs.appendFileSync(path.join(studiesRoot, studyId, 'events.jsonl'), `${JSON.stringify({ type: 'RUN_STARTED', owner: 'challenge-runner', plan: {} })}\n`);
+    const status = await call('GET', `/studies/${studyId}`);
+    expect(status.body.data.runStarted).toBe(true);
+    expect(status.body.data.runFinished).toBe(false);
+  });
+
+  it('core principles answer 404 on the production-evidence route (not 500)', async () => {
+    const res = await call('GET', '/principles/T-01/evidence');
+    expect(res.statusCode).toBe(404);
+    expect(res.body.error).toBe('principle_not_found');
+  });
+
+  it('production evidence keeps ledger facts when state.db exists but cannot be read', async () => {
+    // A directory at the DB path makes the SQLite open fail — the ACTIVATION
+    // lane must degrade with reason/nextAction, never fail the whole route.
+    fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
+    fs.mkdirSync(path.join(workspaceDir, '.pd', 'state.db'));
+    const res = await call('GET', '/principles/pri-target/evidence');
+    expect(res.statusCode).toBe(200);
+    expect(res.body.data.activation.status).toBe('degraded');
+    expect(res.body.data.activation.reason).toContain('activation read failed');
+    expect(typeof res.body.data.activation.nextAction).toBe('string');
+    expect(res.body.data.principle.id).toBe('pri-target');
+  });
+
   it('refuses real execution modes at the route boundary (403, no runner call)', async () => {
     const created = await call('POST', '/studies', { targetPrincipleId: 'pri-target' });
     const studyId = created.body.data.studyId as string;
@@ -269,6 +305,10 @@ describe('Examiner Console write isolation (v0.9 §1)', () => {
       expect(status.statusCode).toBe(200);
       expect(status.body.data.readOnly).toBe(true);
       expect(status.body.data.access).toContain('historical research asset');
+      // Read-only does NOT mean unreadable: the secure ledger reader must
+      // still expose the recorded run history (reads allowed, append refused).
+      expect(status.body.data.runStarted).toBe(true);
+      expect(status.body.data.runFinished).toBe(true);
 
       const report = await call('GET', `/studies/${studyId}/report`);
       expect(report.statusCode).toBe(200);
@@ -487,7 +527,8 @@ describe('Examiner product surface (ships with the console payload)', () => {
       const res = await call('GET', '/overview');
       expect(res.statusCode).toBe(200);
       expect(res.body.data.gates.gate4_product_integration).toContain('ACTIVE');
-      expect(res.body.data.executionScope).toContain('offline-stub only');
+      // v0.10.1 scope line (intentional contract change from "offline-stub only").
+      expect(res.body.data.executionScope).toContain('ZERO model calls');
     } finally {
       if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
       else process.env.NODE_ENV = previousNodeEnv;

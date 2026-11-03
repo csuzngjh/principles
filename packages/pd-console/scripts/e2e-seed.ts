@@ -325,6 +325,17 @@ insertRuleActivation.run(
   'act-rule-live-e2e', 'idem-rule-live-e2e', 'artifact-rule-owner-live',
   'code_tool_hook_live_activate', 'impl://rule-owner-live', eightDaysAgo, eightDaysAgo,
 );
+// SPEC-PD-EXAMINER-001 v0.10.1 §7.2 browser-level negative: a live rulecode
+// activation bound to p-003 makes every Examiner study on p-003 refuse with
+// INTERVENTION_NOT_IDENTIFIABLE at creation time (runtime-sourced evidence).
+insertPiArtifact.run(
+  'artifact-rule-p003', 'rule', 'task-rule-p003', 'p-003',
+  '["artifact-diag-output-1"]', 'validated', ownerReviewRuleContent('rule-p003', 'p-003'), now, now,
+);
+insertRuleActivation.run(
+  'act-rule-p003', 'idem-rule-p003', 'artifact-rule-p003',
+  'code_tool_hook_live_activate', 'impl://rule-p003', eightDaysAgo, eightDaysAgo,
+);
 stateDb.prepare(`
   INSERT INTO activation_control_states (activation_id, enforcement, isolation_decision_id, version, updated_at)
   VALUES (?, 'eligible', NULL, 1, ?)
@@ -791,6 +802,52 @@ const ledgerPrinciples: Record<string, ReturnType<typeof seededLedgerPrinciple>>
     updatedAt: now,
   },
   [PRINCIPLE_IDS.promptConfig]: seededLedgerPrinciple(PRINCIPLE_IDS.promptConfig, '配置变更需确认'),
+  // SPEC-PD-EXAMINER-001 v0.10.1: an ACTIVE principle with NO RuleCode
+  // coupling (p-001 carries the seeded shadow+live rulecode activations, so
+  // Examiner study creation on it must honestly refuse with
+  // INTERVENTION_NOT_IDENTIFIABLE). p-002 is the clean study target — its
+  // pain lineage exercises the frozen production snapshot path.
+  'p-002': {
+    id: 'p-002',
+    status: 'active',
+    text: '结论不得超越观察：对目标对象的断言必须先以当前证据核实。',
+    triggerPattern: 'on-report-claim',
+    action: '任何结论必须引用已观察证据，不得凭空断言',
+    evaluability: 'deterministic',
+    priority: 'P1',
+    scope: 'general',
+    domain: '',
+    valueScore: 0,
+    adherenceRate: 0,
+    painPreventedCount: 0,
+    ruleIds: [],
+    conflictsWithPrincipleIds: [],
+    derivedFromPainIds: ['pain-e2e-1'],
+    createdAt: eightDaysAgo,
+    updatedAt: now,
+  },
+  // SPEC v0.10.1 §7.2: ACTIVE but COUPLED (act-rule-p003 live rulecode
+  // activation bound above) — the browser-level negative target: creating a
+  // study on p-003 must refuse (INTERVENTION_NOT_IDENTIFIABLE, 422).
+  'p-003': {
+    id: 'p-003',
+    status: 'active',
+    text: '危险操作必须二次确认（含 RuleCode 强制）。',
+    triggerPattern: 'on-dangerous-op',
+    action: '执行危险操作前必须获得二次确认',
+    evaluability: 'deterministic',
+    priority: 'P0',
+    scope: 'general',
+    domain: '',
+    valueScore: 0,
+    adherenceRate: 0,
+    painPreventedCount: 0,
+    ruleIds: ['rule-p003'],
+    conflictsWithPrincipleIds: [],
+    derivedFromPainIds: ['pain-e2e-1'],
+    createdAt: eightDaysAgo,
+    updatedAt: now,
+  },
   [PRINCIPLE_IDS.promptBdd]: seededLedgerPrinciple(PRINCIPLE_IDS.promptBdd, 'BDD 审批隔离原则', ['pain-e2e-bdd']),
   [PRINCIPLE_IDS.experience]: seededLedgerPrinciple(PRINCIPLE_IDS.experience, '治理体验快照验证原则', ['pain-e2e-exp']),
   [PRINCIPLE_IDS.hookRootCause]: seededLedgerPrinciple(PRINCIPLE_IDS.hookRootCause, '错误后必须分析根因', ['pain-e2e-hook']),

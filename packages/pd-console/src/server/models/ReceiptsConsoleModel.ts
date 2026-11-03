@@ -272,7 +272,21 @@ export class ReceiptsConsoleModel {
           coverage: unreadCoverage('unavailable', 'ledger_table_missing', 'update_plugin'),
         };
       }
-      throw err;
+      // An unreadable state.db (permissions, corruption) must degrade, not
+      // throw: the documented read-path contract is degraded-over-500, so the
+      // evidence route keeps its ledger facts and shows WHY receipts are absent.
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        status: 'degraded',
+        reason: `receipt ledger read failed: ${message}`,
+        nextAction: 'Run pd runtime diagnostics to check workspace .pd/state.db readability',
+        principleId,
+        effectCount: 0,
+        presenceCount: 0,
+        lastEffectAt: null,
+        events: [],
+        coverage: unreadCoverage('unavailable', 'receipt_read_failed', 'run_runtime_diagnostics'),
+      };
     } finally {
       conn.close();
     }
