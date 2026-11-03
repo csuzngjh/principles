@@ -1004,6 +1004,15 @@ export function writeExaminerStudyArtifacts(input) {
   } = input;
   if (!studyDir || typeof studyDir !== 'string') throw new Error('writeExaminerStudyArtifacts: studyDir required');
   if (fs.existsSync(studyDir)) throw new Error(`writeExaminerStudyArtifacts: '${studyDir}' already exists — a study identity is created once; overwriting is refused (create a NEW study id instead)`);
+  // P1-1/rc-1: the production snapshot arrives as external runtime data. Freeze
+  // it as the JSON it will be STORED as: canonical hashing keeps object keys
+  // whose value is `undefined`, while JSON serialization drops them — hashing
+  // the raw in-memory object would disagree with the file on disk and report
+  // false drift. Binding verification hashes the written bytes; the manifest
+  // must hash the same representation.
+  const frozenProductionSnapshot = productionSnapshot === null
+    ? null
+    : JSON.parse(JSON.stringify(productionSnapshot));
   const frozenArea = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'challenge-studies');
   const resolved = path.resolve(studyDir);
   const norm = (p) => (process.platform === 'win32' ? p.toLowerCase() : p);
@@ -1053,7 +1062,7 @@ export function writeExaminerStudyArtifacts(input) {
     authorizationRef,
     // P1-1: the snapshot is gathered BEFORE the freeze and rides the full
     // manifest → binding → anchor chain (no post-freeze append can touch it).
-    ...(productionSnapshot !== null ? { productionSnapshotHash: hashOfCanonical(productionSnapshot) } : {}),
+    ...(frozenProductionSnapshot !== null ? { productionSnapshotHash: hashOfCanonical(frozenProductionSnapshot) } : {}),
   });
   const prereg = {
     studyId: input.studyId,
@@ -1091,7 +1100,7 @@ export function writeExaminerStudyArtifacts(input) {
   writeJson('pain-mechanism-mapping.json', mapping);
   // P1-1: the production baseline freezes WITH the study (inside the binding
   // verification below) — not as a post-freeze append.
-  if (productionSnapshot !== null) writeJson('production-snapshot.json', productionSnapshot);
+  if (frozenProductionSnapshot !== null) writeJson('production-snapshot.json', frozenProductionSnapshot);
   writeJson('input-manifest.json', { expectedSourceHashes: { principleContentHash: hashOfCanonical(principleFrozen.contentJson) } });
   writeJson('hashes.json', {
     preregistrationHash: { value: hashOfCanonical(prereg) },

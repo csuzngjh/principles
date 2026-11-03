@@ -131,7 +131,7 @@
       },
       {
         "name": "examiner-study.mjs",
-        "sha256": "e1bc58544fbda15e1e420233e2942b186e81500956cf0955b3cf11f207914e76"
+        "sha256": "59d200c06047d25aafaf75808b1e9021d51bd3804899257a60ef828d3a6601fb"
       },
       {
         "name": "examiner-v07-cases.mjs",
@@ -210,7 +210,7 @@
     },
     {
       "path": "blind-review/receipts.template.json",
-      "sha256": "8e2019c01da38e2c445ef72110c3829e50fa4f8287080250feb1cdbe4a905c2f"
+      "sha256": "b225f030cdc5aa45a65053982be2acd6571c5d0b86f3db3eb8b2745aa84ef9c0"
     },
     {
       "path": "blind-review/review-form.json",
@@ -218,7 +218,7 @@
     },
     {
       "path": "expected-replay.json",
-      "sha256": "ef3e23fa51712a38a360a12340f4774438d6615428c615c9ba31608be556811b"
+      "sha256": "a69110eb9babf46722c36338899a4ffcd949a0162b8011e7ebb2e4755231d408"
     },
     {
       "path": "gold-review.json",
@@ -262,7 +262,7 @@
     },
     {
       "path": "review-subject.json",
-      "sha256": "b4da33c79612eaa5bec461d6fc53db4c488dfc3b60f159804f1674c189587e6e"
+      "sha256": "f372053cac8d26a6a4904a880786eb1536233b6a943c1e64000ea8520b4c91d9"
     },
     {
       "path": "revision.json",
@@ -277,5 +277,5 @@
       "sha256": "8c96f68ebfcd0ff71c1625cef036d6ef7f4f82785a303f45ff4a45952df9185c"
     }
   ],
-  "packageHash": "c1b5b3d8bd3804740b7c7ae9772397533d8d98828b095038b6cca26e26e02ba6"
+  "packageHash": "bf05ea62ea05cb9c3f1101ef179627b0e05f4e2933ee6d01fa5b329b49ab732a"
 }
