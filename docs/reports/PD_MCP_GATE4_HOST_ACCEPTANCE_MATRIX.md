@@ -5,7 +5,7 @@
 | 字段 | 内容 |
 |---|---|
 | 实施工单 | PRI-1071（In Progress） |
-| 基线 | origin/main `457bbf0fc` → 整改后同步至 origin/main `9ef8d607d`（2026-11-03）；分支 `ai/PRI-1071-mcp-gate4`（PR #2304） |
+| 基线 | origin/main `457bbf0fc` → 整改后同步至 origin/main `9ef8d607d`（2026-11-03）；整改最终 head `db33190b8`；分支 `ai/PRI-1071-mcp-gate4`（PR #2304） |
 | 验收日期 | 2026-11-02 ～ 2026-11-03 |
 | 证据环境 | 全部隔离环境（隔离 CODEX_HOME / `--profile gate4` / 隔离 CODEBUDDY_CONFIG_DIR）；零 Owner 日常宿主配置写入 |
 | 支持判定 | 见 §4 判定表——两宿主 RUNTIME_VERIFIED，一宿主 IMPLEMENTED_NOT_RUNTIME_VERIFIED（诚实边界，见 §3.3） |
