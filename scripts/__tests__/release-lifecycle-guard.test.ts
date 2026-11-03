@@ -7,6 +7,10 @@
 // would be silently skipped by `--ignore-scripts`, and a changed/removed
 // explicit build command would silently ship stale or empty dist/.
 //
+// `prepublish` is a separate class: npm no longer runs it at all (see the
+// measured order pinned below), so it is fail-closed for EVERY train package,
+// not only the --ignore-scripts ones.
+//
 // This test derives its facts from the real sources (the train order in
 // publish-npm.yml, each package.json, and the action's bash) and fails when the
 // two sides stop agreeing. No runtime npm behaviour is changed.
@@ -35,10 +39,20 @@ const ACTION_REL = '.github/actions/publish-npm-package/action.yml';
 const TRAIN_REL = '.github/workflows/publish-npm.yml';
 
 // npm hooks that `npm pack` executes from the package's own manifest.
-const PACK_TIME_HOOKS = ['prepublish', 'prepare', 'prepack', 'postpack'];
+//
+// Measured 2026-11-03 with npm 11.19.0 (the major Node 24, which the release
+// workflow pins, ships): `npm pack` ran prepack → prepare → postpack. It did
+// NOT run prepublish.
+const PACK_TIME_HOOKS = ['prepare', 'prepack', 'postpack'];
 // Hooks that only run for a DIRECTORY publish. This train publishes a
 // pre-packed tarball, so the tarball's own manifest never executes these.
+// Measured: directory publish ran prepublishOnly → prepack → prepare →
+// postpack → publish → postpublish; tarball publish ran NO hook at all.
 const PUBLISH_ONLY_HOOKS = ['prepublishOnly', 'publish', 'postpublish'];
+// Hooks npm NEVER executes for this release chain (deprecated `prepublish`).
+// Fail-closed for every package: only an explicit build command in the leg's
+// branch (proven by these tests) may justify a declaration.
+const NEVER_RUN_HOOKS = ['prepublish'];
 
 type Manifest = { name?: string; version?: string; scripts?: Record<string, string> };
 type BranchCommand = { script: string; workspace: string; source: string };
@@ -191,6 +205,20 @@ export function auditLifecycleGuard(input: {
       hooks.filter((hook) => typeof scripts[hook] === 'string' && scripts[hook].trim() !== '');
     const packHooks = presentHooks(PACK_TIME_HOOKS);
     const publishOnlyHooks = presentHooks(PUBLISH_ONLY_HOOKS);
+    const neverRunHooks = presentHooks(NEVER_RUN_HOOKS);
+
+    // Deprecated hooks npm never executes here are fail-closed for EVERY
+    // package — being outside SKIP_PACK_SCRIPTS is not a justification, because
+    // pack and tarball publish skip them equally. The only opening is the
+    // release build invoking the hook ITSELF for this package (proven here),
+    // so an equivalent build elsewhere cannot quietly strand a dead hook.
+    for (const hook of neverRunHooks) {
+      if (!coveredByExplicitBuild([hook], commands, packageName)) {
+        violations.push(
+          `${dir}: ${hook} (${scripts[hook]}) never runs in this release chain (npm pack and tarball publish both skip it) — only an explicit "npm run ${hook}" in this leg's build branch may justify it`,
+        );
+      }
+    }
 
     if (skipDirs.includes(dir)) {
       // Nothing in the package manifest runs: every hook needs an explicit,
@@ -297,11 +325,23 @@ describe('release train × action lifecycle guard (H2)', () => {
     ).toEqual([]);
   });
 
+  it('classifies every npm lifecycle hook exactly once (prepublish measured as never-run)', () => {
+    const allHooks = [...PACK_TIME_HOOKS, ...PUBLISH_ONLY_HOOKS, ...NEVER_RUN_HOOKS];
+    expect(new Set(allHooks).size).toBe(allHooks.length);
+    // Probe pin (npm 11.19.0): `npm pack` ran prepack → prepare → postpack and
+    // `prepublish` appeared in neither pack nor publish. Keep it out of the
+    // pack-time class so a non-skipped declaration is not silently trusted.
+    expect(NEVER_RUN_HOOKS).toEqual(['prepublish']);
+    expect(PACK_TIME_HOOKS).not.toContain('prepublish');
+  });
+
   it('covers every publish-relevant lifecycle hook of every train package', () => {
     const audited: Record<string, string[]> = {};
     for (const dir of sources.trainDirs) {
       const scripts = sources.packages[dir].scripts ?? {};
-      audited[dir] = [...PACK_TIME_HOOKS, ...PUBLISH_ONLY_HOOKS].filter((hook) => typeof scripts[hook] === 'string');
+      audited[dir] = [...PACK_TIME_HOOKS, ...PUBLISH_ONLY_HOOKS, ...NEVER_RUN_HOOKS].filter(
+        (hook) => typeof scripts[hook] === 'string',
+      );
     }
     // Current facts: only the plugin/pd-cli declare prepack; the installer's
     // prepublishOnly duplicates its prepack exactly.
@@ -342,6 +382,35 @@ describe('lifecycle guard — negative mutations must fail (H2)', () => {
   function withBuildRun(mutatedRun: string) {
     return parseBuildBranches(mutatedRun, sources.packageNameOf);
   }
+
+  it('fails when a non-skipped package gains an unrunnable prepublish', () => {
+    // Not being in SKIP_PACK_SCRIPTS does NOT make `prepublish` executed: the
+    // probe showed npm pack and tarball publish both skip it.
+    const violations = audit({ packages: withScript('codex-adapter', 'prepublish', 'npm run build:types') });
+    expect(violations.join('\n')).toMatch(
+      /codex-adapter: prepublish \(npm run build:types\) never runs in this release chain/,
+    );
+  });
+
+  it('fails when a skipped package gains an unrunnable prepublish', () => {
+    const violations = audit({ packages: withScript('pd-cli', 'prepublish', 'npm run build') });
+    expect(violations.join('\n')).toMatch(/pd-cli: prepublish \(npm run build\) never runs in this release chain/);
+  });
+
+  it('accepts prepublish only when the build branch invokes that hook explicitly', () => {
+    // The sanctioned opening: the leg's build runs `npm run prepublish` for the
+    // package itself. An equivalent `npm run build` elsewhere stays fail-closed
+    // (see the negative test above) so a dead hook cannot look alive.
+    const mutatedRun = actionStepText(sources.action, 'Build target package').replace(
+      /(elif \[ "\$PKG_DIR" = "codex-adapter" \]; then\n( *)build_once @principles\/codex-adapter build packages\/codex-adapter)/,
+      '$1\n$2cd packages/codex-adapter && npm run prepublish',
+    );
+    const violations = audit({
+      packages: withScript('codex-adapter', 'prepublish', 'npm run build'),
+      branches: withBuildRun(mutatedRun),
+    });
+    expect(violations).toEqual([]);
+  });
 
   it('fails when a skipped package gains an unmapped prepare', () => {
     const violations = audit({ packages: withScript('openclaw-plugin', 'prepare', 'npm run build') });
