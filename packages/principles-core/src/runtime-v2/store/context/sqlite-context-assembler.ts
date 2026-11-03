@@ -56,6 +56,14 @@ function normalizedProvenance(dt: DiagnosticianTaskRecord): (typeof PAIN_PROVENA
   return undefined;
 }
 
+/**
+ * SPEC v0.3 §5: the diagnostician context must keep the admitting host —
+ * losing `workbuddy` here silently degrades attribution to "unknown host".
+ */
+function resolveDiagnosticianHostKind(value: string | undefined): 'openclaw' | 'codex' | 'workbuddy' | undefined {
+  return value === 'openclaw' || value === 'codex' || value === 'workbuddy' ? value : undefined;
+}
+
 // ── SqliteContextAssembler ──
 
 export class SqliteContextAssembler implements ContextAssembler {
@@ -450,10 +458,7 @@ export class SqliteContextAssembler implements ContextAssembler {
             provenance: Object.hasOwn(parsed, 'provenance') && (isPainProvenance(parsed.provenance) || parsed.provenance === 'openclaw_context_bound')
               ? (isPainProvenance(parsed.provenance) ? parsed.provenance : 'host_context_bound')
               : undefined,
-            hostKind: SqliteContextAssembler.extractStringField(parsed, 'hostKind') === 'openclaw'
-              || SqliteContextAssembler.extractStringField(parsed, 'hostKind') === 'codex'
-              ? SqliteContextAssembler.extractStringField(parsed, 'hostKind') as 'openclaw' | 'codex' | 'workbuddy'
-              : undefined,
+            hostKind: resolveDiagnosticianHostKind(SqliteContextAssembler.extractStringField(parsed, 'hostKind')),
             provenanceReason: SqliteContextAssembler.extractStringField(parsed, 'provenanceReason'),
             evidence: SqliteContextAssembler.extractEvidence(parsed),
             correctionEvidence: SqliteContextAssembler.extractCorrectionEvidence(parsed),

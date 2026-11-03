@@ -138,6 +138,8 @@ function buildLegacy(report: PainIngressReport, evidence: IngressEvidenceEntry[]
     legacy.hostKind = report.correlation.hostKind;
     if (report.correlation.hostKind === 'openclaw') {
       legacy.sessionId = report.correlation.sessionId;
+    } else if (report.correlation.hostKind === 'workbuddy') {
+      legacy.sessionId = report.correlation.sessionId;
     } else {
       // Parity with the existing Codex admission path (it passes the root
       // session as the legacy sessionId); the FULL unflattened lineage

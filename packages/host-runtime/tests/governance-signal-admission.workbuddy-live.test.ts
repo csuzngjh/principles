@@ -1,15 +1,13 @@
 /**
- * AUDIT-P3-01 / AUDIT-P3-04 (2026-10-21) — WorkBuddy live-keyword 检测的直接
- * host-runtime 单测 + 共享学习词库接入契约。
+ * AUDIT-P3-01 / AUDIT-P3-04（2026-10-21），P1 评审整改（round 3）后更新。
  *
- * 之前这两个函数（assessWorkbuddyLiveKeyword / admitTrustedWorkbuddyLiveCorrection）
- * 只有 workbuddy-adapter 的间接（真实 hook 进程）覆盖，本文件补齐包内直接边界：
- *  - 词表契约：只有「共享 live 词库中满足 high 门槛的 correction 词」可触发
- *    自动 Pain（seed ≥0.7 / owner_promoted ≥0.7 / earned-high TP≥3 且零 FP）；
- *  - 安全边界：startsWith 预过滤、原生事件门、显式前缀保留、双 flag、幂等；
- *  - 降级：词库文件损坏 → seed-only（P0 四词仍在）。
+ * WorkBuddy 没有任何持久化的 governance_observations 存储，因此“自动关键词
+ * 纠正”无法提供真实、可验证、已持久化的行为证据。共享 ingress 会将其判为
+ * `observation_only`：不产生 Pain、不建 Task、不消耗额度，也不再用
+ * `pain_event:<canonicalPainId>` 伪造 behavior_trace。
  *
- * SPEC：docs/specs/SPEC-PD-CROSS-HOST-KEYWORD-PAIN-001-v0.2.md §4
+ * 本文件仍覆盖词表契约（D5 学习词不直通、startsWith 预过滤、原生事件门、
+ * 双 flag、幂等）——只是准入结果从 admitted/pending 变为 abandoned。
  */
 import { beforeEach, afterEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
@@ -86,6 +84,15 @@ function painCount(): number {
   }
 }
 
+function markerRows(): Array<{ decision: string; reason: string | null }> {
+  const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+  try {
+    return db.prepare('SELECT decision, reason FROM governance_signal_admissions ORDER BY logical_observation_key').all() as Array<{ decision: string; reason: string | null }>;
+  } finally {
+    db.close();
+  }
+}
+
 describe('assessWorkbuddyLiveKeyword — 共享词库参数（AUDIT-P3-01）', () => {
   it('缺省 store 保持 P0 四词行为（向后兼容）', () => {
     // P0 词命中。
@@ -102,43 +109,69 @@ describe('assessWorkbuddyLiveKeyword — 共享词库参数（AUDIT-P3-01）', (
     });
   });
 
-  it('传入共享 store：earned-high 学习词与 seed high 词均可触发；未达门槛的学习词不可', () => {
+  it('传入共享 store：学习词永不直通；降级词即使 owner_promoted 也只作候选', () => {
     writeLearnedStore([
-      { term: '方向完全反了', weight: 0.9, source: 'llm', truePositiveCount: 3, falsePositiveCount: 0 }, // earned-high
-      { term: '可能不太对', weight: 0.9, source: 'llm', truePositiveCount: 1, falsePositiveCount: 0 }, // 未达 TP 门槛 → ambiguous
-      { term: '我说的是', weight: 0.75, source: 'user', truePositiveCount: 0, falsePositiveCount: 0 }, // owner_promoted ≥0.7
+      { term: '方向完全反了', weight: 0.9, source: 'llm', truePositiveCount: 3, falsePositiveCount: 0 },
+      { term: '可能不太对', weight: 0.9, source: 'llm', truePositiveCount: 1, falsePositiveCount: 0 },
+      { term: '我说的是', weight: 0.75, source: 'user', truePositiveCount: 0, falsePositiveCount: 0 },
     ]);
     // store 解析走生产路径（含 mtime 缓存与降级），与 pd-hook 使用同一入口。
     const store = resolveSharedCorrectionKeywordStoreForDetection(workspaceDir);
 
-    expect(assessWorkbuddyLiveKeyword('方向完全反了，停下', 's', store).matched).toBe(true);
+    // SPEC v0.3 §3.2.3：历史 TP≥3 的学习词不再获得 STRONG 直通。
+    expect(assessWorkbuddyLiveKeyword('方向完全反了，停下', 's', store).matched).toBe(false);
+    expect(store.terms['方向完全反了']?.precision).toBe('ambiguous');
     expect(assessWorkbuddyLiveKeyword('可能不太对', 's', store).matched).toBe(false);
-    expect(assessWorkbuddyLiveKeyword('我说的是另一个文件', 's', store).matched).toBe(true);
+    // 降级词无论来源都只能作候选（§3.2.1）。
+    expect(assessWorkbuddyLiveKeyword('我说的是另一个文件', 's', store).matched).toBe(false);
+    expect(store.terms['我说的是']?.precision).toBe('ambiguous');
     // 学习词同样受 startsWith 预过滤约束（转述不触发）。
     expect(assessWorkbuddyLiveKeyword('他说方向完全反了', 's', store).matched).toBe(false);
+    // 真实 seed high 词仍走确定性路径（现有能力不回退）。
+    expect(assessWorkbuddyLiveKeyword('这是错的', 's', store).matched).toBe(true);
   });
 });
 
 describe('admitTrustedWorkbuddyLiveCorrection — 共享词库准入契约（AUDIT-P3-01/P3-04）', () => {
-  it('earned-high 学习词经完整准入产生一条 canonical Pain，且重复投递幂等', () => {
+  it('学习词与 seed high 词都不再产生 Pain：无持久化行为证据 → observation_only', () => {
     writeLearnedStore([
       { term: '方向完全反了', weight: 0.9, source: 'llm', truePositiveCount: 3, falsePositiveCount: 0 },
     ]);
-    const event = nativeEvent({ prompt: '方向完全反了，停下' });
+    // SPEC v0.3 §3.2.3：历史高精度学习词不能直接产生 Pain。
+    const learned = admitTrustedWorkbuddyLiveCorrection({
+      workspaceDir,
+      rawEvent: nativeEvent({ prompt: '方向完全反了，停下', generation_id: 'wb-live-gen-1a' }),
+    });
+    expect(learned.ok).toBe(true);
+    expect(learned.outcomes?.[0]).toMatchObject({ disposition: 'abandoned' });
+    expect(painCount()).toBe(0);
 
+    // 自动纠正没有真实持久化证据 → 判 observation_only，不再伪造 pain_event。
+    const event = nativeEvent({ prompt: '这是错的，停下', generation_id: 'wb-live-gen-1b' });
     const first = admitTrustedWorkbuddyLiveCorrection({ workspaceDir, rawEvent: event });
     if (!first.ok) throw new Error(`admission degraded: ${first.reason} / ${first.nextAction}`);
-    expect(first.ok).toBe(true);
-    expect(first.outcomes?.[0]).toMatchObject({ disposition: 'admitted', duplicate: false });
-    expect(painCount()).toBe(1);
+    expect(first.outcomes?.[0]).toMatchObject({ disposition: 'abandoned' });
+    expect(painCount()).toBe(0);
 
     const replay = admitTrustedWorkbuddyLiveCorrection({ workspaceDir, rawEvent: event });
     expect(replay.ok).toBe(true);
-    expect(replay.outcomes?.[0]).toMatchObject({ disposition: 'already_admitted' });
-    expect(painCount()).toBe(1);
+    expect(replay.outcomes?.[0]).toMatchObject({ disposition: 'abandoned' });
+    expect(painCount()).toBe(0);
+    // Two deliveries of the same generation reuse ONE terminal marker.
+    const markers = markerRows();
+    expect(markers).toHaveLength(2);
+    expect(markers.every((marker) => marker.decision === 'abandoned')).toBe(true);
+    // No fabricated `pain_event:` trace survives in any persisted payload.
+    const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
+    try {
+      const payloads = db.prepare('SELECT task_payload_json FROM governance_signal_admissions').all() as Array<{ task_payload_json: string | null }>;
+      expect(payloads.some((row) => (row.task_payload_json ?? '').includes('pain_event:'))).toBe(false);
+    } finally {
+      db.close();
+    }
   });
 
-  it('未达 high 门槛的学习词不产生 Pain、不写 marker', () => {
+  it('未达 high 门槛的学习词同样 observation_only，不落 pending', () => {
     writeLearnedStore([
       { term: '可能不太对', weight: 0.9, source: 'llm', truePositiveCount: 1, falsePositiveCount: 0 },
     ]);
@@ -147,19 +180,19 @@ describe('admitTrustedWorkbuddyLiveCorrection — 共享词库准入契约（AUD
       rawEvent: nativeEvent({ prompt: '可能不太对' , generation_id: 'wb-live-gen-2' }),
     });
     expect(result.ok).toBe(true);
-    expect(result.outcomes).toEqual([]);
+    expect(result.outcomes?.[0]).toMatchObject({ disposition: 'abandoned' });
     expect(painCount()).toBe(0);
   });
 
-  it('词库文件损坏 → 降级 seed-only：P0 四词仍可触发（降级不静默致死）', () => {
+  it('词库文件损坏 → 降级 seed-only：P0 四词仍被识别，但没有证据仍 observation_only', () => {
     fs.writeFileSync(path.join(workspaceDir, '.state', 'correction_keywords.json'), '{ malformed');
     const result = admitTrustedWorkbuddyLiveCorrection({
       workspaceDir,
       rawEvent: nativeEvent({ prompt: '不要自作主张' , generation_id: 'wb-live-gen-3' }),
     });
     expect(result.ok).toBe(true);
-    expect(result.outcomes?.[0]).toMatchObject({ disposition: 'admitted' });
-    expect(painCount()).toBe(1);
+    expect(result.outcomes?.[0]).toMatchObject({ disposition: 'abandoned' });
+    expect(painCount()).toBe(0);
   });
 
   it('安全边界：内部续接、无效原生事件、显式前缀、flag 关闭各自拒绝', async () => {
