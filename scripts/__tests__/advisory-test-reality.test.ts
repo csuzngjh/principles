@@ -81,8 +81,30 @@ function makeAllRepo(): string {
       '  const fixture = "expect(() => parse(\'bad\')).toThrow();";',
       '});',
       '',
+      "it('closed block comment prefix is still scanned', () => {",
+      "  /* closed */ expect(() => parse('bad')).toThrow();",
+      '});',
+      '',
+      "it('assertion before unclosed block comment is still scanned', () => {",
+      "  expect(() => parse('bad')).toThrow(); /* opens",
+      '  */',
+      '});',
+      '',
+      "it('bare Error identifier and generic regex are not discriminators', () => {",
+      "  expect(() => parse('bad')).toThrow(Error);",
+      "  expect(() => parse('bad')).toThrow(/error/i);",
+      '});',
+      '',
     ].join('\n'),
   );
+  commitAll(root, 'fixture');
+  return root;
+}
+
+function makeRepoWithLines(lines: string[]): string {
+  const root = initRepo();
+  fs.mkdirSync(path.join(root, 'tests'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'tests', 'sample.test.ts'), [...lines, ''].join('\n'));
   commitAll(root, 'fixture');
   return root;
 }
@@ -135,15 +157,68 @@ describe('advisory-test-reality.mjs (PRI-965)', () => {
       files: number;
       items: Array<{ path: string; line: number; kind: string; assertion: string }>;
     };
-    expect(report.assertions).toBe(4);
+    expect(report.assertions).toBe(8);
     expect(report.files).toBe(1);
-    expect(report.items.map((item) => item.line).sort((a, b) => a - b)).toEqual([2, 16, 20, 40]);
-    expect(report.items.map((item) => item.kind).sort()).toEqual([
-      'bare-toThrow',
-      'bare-toThrow',
-      'generic-no-call',
-      'generic-no-call',
+    expect(report.items.filter((item) => item.kind === 'bare-toThrow')).toHaveLength(6);
+    expect(report.items.filter((item) => item.kind === 'generic-no-call')).toHaveLength(2);
+    expect(report.items.map((item) => item.assertion)).toEqual(
+      expect.arrayContaining([
+        "expect(() => parse('bad')).toThrow();",
+        "expect(() => parse('bad')).toThrow(new Error());",
+        'expect(fn).not.toHaveBeenCalled();',
+        'expect(vi.fn()).not.toHaveBeenCalled();',
+        "/* closed */ expect(() => parse('bad')).toThrow();",
+        "expect(() => parse('bad')).toThrow(); /* opens",
+        "expect(() => parse('bad')).toThrow(Error);",
+        "expect(() => parse('bad')).toThrow(/error/i);",
+      ]),
+    );
+  });
+
+  it('still reports an assertion after a closed block comment prefix', () => {
+    const root = makeRepoWithLines([
+      "it('closed prefix', () => {",
+      "  /* closed */ expect(() => parse('bad')).toThrow();",
+      '});',
     ]);
+    const result = spawnSync(process.execPath, [SCRIPT, '--root', root, '--all', '--json'], { encoding: 'utf8' });
+    expect(result.status, result.stderr).toBe(0);
+    const report = JSON.parse(result.stdout) as { assertions: number; items: Array<{ assertion: string }> };
+    expect(report.assertions).toBe(1);
+    expect(report.items[0]?.assertion).toContain('/* closed */');
+  });
+
+  it('still reports an assertion before an unclosed block comment opener', () => {
+    const root = makeRepoWithLines([
+      "it('unclosed opener', () => {",
+      "  expect(() => parse('bad')).toThrow(); /* opens",
+      '  */',
+      '});',
+    ]);
+    const result = spawnSync(process.execPath, [SCRIPT, '--root', root, '--all', '--json'], { encoding: 'utf8' });
+    expect(result.status, result.stderr).toBe(0);
+    const report = JSON.parse(result.stdout) as { assertions: number; items: Array<{ assertion: string }> };
+    expect(report.assertions).toBe(1);
+    expect(report.items[0]?.assertion).toContain('/* opens');
+  });
+
+  it('treats bare Error and /error/i as non-discriminators', () => {
+    const root = makeRepoWithLines([
+      "it('generic errors', () => {",
+      "  expect(() => parse('bad')).toThrow(Error);",
+      "  expect(() => parse('bad')).toThrow(/error/i);",
+      '});',
+    ]);
+    const result = spawnSync(process.execPath, [SCRIPT, '--root', root, '--all', '--json'], { encoding: 'utf8' });
+    expect(result.status, result.stderr).toBe(0);
+    const report = JSON.parse(result.stdout) as { assertions: number; items: Array<{ assertion: string }> };
+    expect(report.assertions).toBe(2);
+    expect(report.items.map((item) => item.assertion)).toEqual(
+      expect.arrayContaining([
+        "expect(() => parse('bad')).toThrow(Error);",
+        "expect(() => parse('bad')).toThrow(/error/i);",
+      ]),
+    );
   });
 
   it('scans a --base diff and only reports added lines', () => {

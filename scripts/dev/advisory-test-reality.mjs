@@ -12,6 +12,11 @@
 //
 // Default mode scans the diff <base>...HEAD for ADDED lines in test files.
 // --all scans every git-tracked test file (false-positive measurement).
+//
+// Generic error shapes are deliberately treated as NO discriminator:
+// `new Error()`, `new Error`, `Error`, and `/error/i` carry no branch identity.
+// Do not "simplify" them into markers — that would silently disable the
+// `toThrow(new Error())` reminder.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -57,6 +62,8 @@ function codeOnly(line, state) {
       if (ch === '*' && line[i + 1] === '/') {
         state.blockComment = false;
         i += 1;
+        out += '  '; // consume TWO characters, keep the column offset intact
+        continue;
       }
       out += ' ';
       continue;
@@ -156,7 +163,10 @@ function findAssertions(text) {
   for (let index = 0; index < lines.length; index += 1) {
     const raw = lines[index];
     const code = codeOnly(raw, state);
-    if (state.blockComment) continue;
+    // A line can contain a real assertion AND then open a block comment; the
+    // state flag alone must not drop it. Only a fully comment/string line is
+    // skipped.
+    if (!code.trim()) continue;
     if (/\.not\.toThrow\s*\(/.test(code)) continue;
 
     const toThrow = code.search(/\b(?:rejects\.)?toThrow\s*\(/);
