@@ -132,7 +132,14 @@ export async function extractPainFromSessionFile(sessionFile: string, ctx: Plugi
     
     let entry = `\n## [${timestamp}] Session Operational Signals (Pre-Compaction)\n\n`;
     entry += `### Operational Signals extracted from session transcript\n`;
-    painPoints.slice(-5).forEach((p, idx) => {
+    // Fatal intercepts are kept in FULL: with the Phase 0 pain-emission
+    // retirement these notes are their only durable record, and the plain
+    // slice(-5) cap would let later ordinary signals push a hard intercept
+    // out of observability entirely. Other signals keep the recent-5 cap.
+    const fatalSignals = painPoints.filter((p) => p.includes('[FATAL INTERCEPT]'));
+    const otherSignals = painPoints.filter((p) => !p.includes('[FATAL INTERCEPT]'));
+    const visibleSignals = [...fatalSignals, ...otherSignals.slice(-5)];
+    visibleSignals.forEach((p, idx) => {
       entry += `- [Signal ${idx + 1}] ${p.replace(/\n/g, ' ')}\n`;
     });
     // Pain Phase 0 (SPEC PD-PAIN-SEMANTICS-AND-DETECTION-ARCHITECTURE-001 §6.3):

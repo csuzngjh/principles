@@ -109,4 +109,43 @@ describe('Pain Phase 0: Fatal Intercept produces no Pain but keeps its failure r
     const [dateStr] = new Date().toISOString().split('T');
     expect(fs.existsSync(path.join(workspaceDir, PD_DIRS.MEMORY, `${dateStr}.md`))).toBe(false);
   });
+
+  it('keeps EVERY fatal intercept even when 6+ later ordinary signals would push it out of the recent-5 cap', async () => {
+    const workspaceDir = makeWorkspace();
+    const sessionFile = path.join(workspaceDir, 'session.jsonl');
+    // Transcript order: one hard abort FIRST, then six oversized-truncation
+    // ordinary signals. The plain slice(-5) cap would drop the intercept —
+    // with the pain emission retired these notes are its only durable record.
+    const lines = [
+      JSON.stringify({ role: 'assistant', content: 'attempting the forbidden action', openclawAbort: { aborted: true, origin: 'rpc', runId: 'run-fatal-cap' } }),
+      ...Array.from({ length: 6 }, (_, i) => JSON.stringify({
+        role: 'assistant',
+        content: `reading oversized file number ${i}`,
+        __openclaw: { truncated: true, reason: 'oversized' },
+      })),
+    ].join('\n');
+    fs.writeFileSync(sessionFile, lines, 'utf8');
+
+    await extractPainFromSessionFile(sessionFile, {
+      workspaceDir,
+      sessionId: 'sess-cap',
+    } as never);
+
+    expect(emitPainDetectedEvent).not.toHaveBeenCalled();
+
+    const [dateStr] = new Date().toISOString().split('T');
+    const dailyLog = path.join(workspaceDir, PD_DIRS.MEMORY, `${dateStr}.md`);
+    const content = fs.readFileSync(dailyLog, 'utf8');
+
+    // 1. The fatal intercept survives the cap (full retention for hard aborts).
+    expect(content).toContain('[FATAL INTERCEPT]');
+    expect(content).toContain('attempting the forbidden action');
+    // 2. Ordinary signals keep the recent-5 cap: 6 driven → the 5 most
+    //    recent appear (files 1..5), the oldest ordinary one is capped out.
+    const ordinaryKept = Array.from({ length: 6 }, (_, i) => content.includes(`oversized file number ${i}`));
+    expect(ordinaryKept.filter(Boolean)).toHaveLength(5);
+    expect(content.includes('oversized file number 0')).toBe(false);
+    // 3. Still zero Pain (retirement contract unchanged by the cap fix).
+    expect(content).toContain('Session Operational Signals');
+  });
 });
