@@ -194,6 +194,15 @@ Owner / operator 如何观察它确实生效？
 | ___ | PASS / FAIL | ___ |
 | ___ | PASS / FAIL | ___ |
 
+### Failure-path test obligation (advisory, EP-09)
+
+新增每一条失败分支测试，必须同时给出：
+
+1. **生产判别输入**：用生产分支真正会产出的判别状态/输入喂进去，而不是手写一个生产永远到不了的 fixture。
+2. **positive control**：故意让该分支不被走到时，这条测试必须变红。
+
+`npm run advisory:test-reality` 是 **non-blocking / 不阻断合并**：findings 不改变退出码；只有参数错误或扫描失败才 fail-loud（非零退出）。不得接入 `verify:merge` 失败链。
+
 ### Production-path evidence
 
 本次是否验证了真实 consumer / wiring？
