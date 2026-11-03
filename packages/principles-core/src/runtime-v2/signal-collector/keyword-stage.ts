@@ -147,7 +147,12 @@ export function scanKeywords(text: string, store: UnifiedKeywordStore): KeywordS
       // quoted-only: 不进入任何结果（引号内不单独构成信号，也不消耗候选）。
       continue;
     }
-    if (findOccurrences(normalized, lowered).length > 0) {
+    // P2-1: quote protection applies to EVERY precision, not just high. A
+    // phrase that only appears inside a quotation is not the Owner speaking;
+    // at least one occurrence must be outside the paired quotes.
+    const hasOutsideQuotes = findOccurrences(normalized, lowered)
+      .some((index) => !isInsideQuotes(index, index + lowered.length, quotedRanges));
+    if (hasOutsideQuotes) {
       ambiguousHits.push({ term, category: kw.category });
     }
   }

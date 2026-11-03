@@ -17,7 +17,9 @@ import type { SignalLlmClassifier } from './signal-classifier.js';
 import {
   claimPendingCorrectionCandidates,
   recordPendingCorrectionReview,
+  releasePendingCorrectionClaim,
   settlePendingCorrection,
+  type PendingCorrectionCandidate,
   type PendingReviewResult,
 } from './governance-signal-admission.js';
 
@@ -93,7 +95,8 @@ function emptyReport(
 
 export async function runStage2CorrectionCycle(input: Stage2CorrectionCycleInput): Promise<Stage2CorrectionCycleReport> {
   const classifierState = input.classifierState ?? (input.classifier === null ? 'unavailable' : 'used');
-  const startedAt = Date.now();
+  // Monotonic clock for the aggregate budget; wall clock stays for DB/TTL.
+  const startedAt = performance.now();
   const now = input.now ?? new Date();
   const maxCandidates = Math.min(Math.max(input.maxCandidates ?? DEFAULT_MAX_CANDIDATES, 1), DEFAULT_MAX_CANDIDATES);
   const budgetMs = Math.max(0, input.aggregateBudgetMs ?? DEFAULT_AGGREGATE_BUDGET_MS);
@@ -103,7 +106,7 @@ export async function runStage2CorrectionCycle(input: Stage2CorrectionCycleInput
   if (!claimedResult.ok) {
     return {
       ...emptyReport(classifierState, claimedResult.reason, claimedResult.nextAction),
-      durationMs: Date.now() - startedAt,
+      durationMs: Math.round(performance.now() - startedAt),
       degradations: [claimedResult.reason],
     };
   }
@@ -115,6 +118,23 @@ export async function runStage2CorrectionCycle(input: Stage2CorrectionCycleInput
   let skipped = 0;
   const degradations: string[] = [];
 
+  /**
+   * Release our claim when classification has NOT started. The release is
+   * guarded inside gsa (never clears a durable reviewResult, CAS on the claim
+   * stamp), so a concurrent worker's state cannot be touched.
+   */
+  const releaseClaim = (candidate: PendingCorrectionCandidate): void => {
+    if (candidate.claimedAt === null) return;
+    const released = releasePendingCorrectionClaim({
+      workspaceDir: input.workspaceDir,
+      logicalObservationKey: candidate.logicalObservationKey,
+      claimedAt: candidate.claimedAt,
+    });
+    if (!released.ok) {
+      degradations.push(`${candidate.logicalObservationKey}:claim_release_failed:${released.reason}`);
+    }
+  };
+
   const tally = (outcome: PendingReviewResult): void => {
     if (outcome.disposition === 'admitted') admitted += 1;
     else if (outcome.disposition === 'resolved_none') resolvedNone += 1;
@@ -124,9 +144,10 @@ export async function runStage2CorrectionCycle(input: Stage2CorrectionCycleInput
   };
 
   for (const candidate of claimedResult.candidates) {
-    const elapsed = Date.now() - startedAt;
+    const elapsed = performance.now() - startedAt;
     const remaining = budgetMs - elapsed;
     if (remaining <= 0) {
+      releaseClaim(candidate);
       skipped += 1;
       continue;
     }
@@ -134,13 +155,17 @@ export async function runStage2CorrectionCycle(input: Stage2CorrectionCycleInput
       let review = candidate.reviewResult;
       if (review === null) {
         if (input.classifier === null) {
-          // No LLM configured/available: the candidate stays pending (no
-          // attempt consumed). It is NOT a negative verdict.
+          // No LLM configured/available: release the claim (no attempt
+          // consumed) so a later cycle can retry immediately. NOT a verdict.
+          releaseClaim(candidate);
           skipped += 1;
           continue;
         }
-        const timeoutMs = Math.min(classificationTimeoutMs, remaining);
-        const llm = await withTimeout(input.classifier(candidate.text), timeoutMs);
+        const timeoutMs = Math.max(1, Math.min(classificationTimeoutMs, remaining));
+        // The remaining budget goes INTO the adapter request as well as the
+        // outer race (v0.3.1 §2.2); an outer timeout does not cancel a
+        // provider request that the adapter does not support cancelling.
+        const llm = await withTimeout(input.classifier(candidate.text, { timeoutMs }), timeoutMs);
         const recorded = recordPendingCorrectionReview({
           workspaceDir: input.workspaceDir,
           logicalObservationKey: candidate.logicalObservationKey,
@@ -148,6 +173,9 @@ export async function runStage2CorrectionCycle(input: Stage2CorrectionCycleInput
           now,
         });
         if (!recorded.ok) {
+          // Nothing durable was written; release so the next cycle retries
+          // instead of waiting out the claim TTL.
+          releaseClaim(candidate);
           degradations.push(`${candidate.logicalObservationKey}:${recorded.reason}`);
           skipped += 1;
           continue;
@@ -176,6 +204,8 @@ export async function runStage2CorrectionCycle(input: Stage2CorrectionCycleInput
         reason: settled.reason,
       }));
     } catch (error) {
+      // Guarded release: a durable reviewResult is never cleared here.
+      releaseClaim(candidate);
       const detail = error instanceof Error ? error.message.slice(0, 160) : String(error).slice(0, 160);
       degradations.push(`${candidate.logicalObservationKey}:stage2_failed:${detail}`);
       skipped += 1;
@@ -192,7 +222,7 @@ export async function runStage2CorrectionCycle(input: Stage2CorrectionCycleInput
     stillPending,
     skipped,
     expired: claimedResult.expired,
-    durationMs: Date.now() - startedAt,
+    durationMs: Math.round(performance.now() - startedAt),
     ...(degradations.length > 0
       ? { reason: 'stage2_correction_degradations', nextAction: 'Inspect the per-candidate degradations; pending candidates remain durable and retry next cycle.' }
       : {}),

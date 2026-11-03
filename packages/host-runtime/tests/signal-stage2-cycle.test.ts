@@ -10,7 +10,9 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import {
   admitGovernanceSignals,
+  claimPendingCorrectionCandidates,
   recordPendingCorrectionReview,
+  releasePendingCorrectionClaim,
   type GovernanceCorrectionCandidate,
 } from '../src/governance-signal-admission.js';
 import { runStage2CorrectionCycle } from '../src/signal-stage2-cycle.js';
@@ -182,6 +184,166 @@ describe('runStage2CorrectionCycle (SPEC v0.3 §4.4.7 / v0.3.1 §2)', () => {
     expect(report.admitted).toBe(0);
     expect(decisionOf(1)).toBe('pending_llm_review');
     expect(decisionOf(2)).toBe('pending_llm_review');
+  });
+
+  it('P1-1: five real worker cycles retry low confidence and then abandon at attempts=5', async () => {
+    admit(1);
+    let calls = 0;
+    const low = async (): Promise<LlmClassificationResult | null> => {
+      calls += 1;
+      return classification({ confidence: 0.5 });
+    };
+    let last: Awaited<ReturnType<typeof runStage2CorrectionCycle>> | null = null;
+    for (let i = 0; i < 5; i += 1) {
+      last = await runStage2CorrectionCycle({ workspaceDir, classifier: low, now: NOW });
+    }
+    expect(calls).toBe(5);
+    expect(last?.abandoned).toBe(1);
+    expect(last?.stillPending).toBe(0);
+    expect(decisionOf(1)).toBe('abandoned');
+    expect(count("SELECT COUNT(*) AS n FROM governance_signal_admissions WHERE decision = 'abandoned' AND reason = 'low_confidence'")).toBe(1);
+    expect(count('SELECT COUNT(*) AS n FROM pain_events')).toBe(0);
+  });
+
+  it('P1-1: five real worker cycles with LLM errors abandon with llm_error (never NONE)', async () => {
+    admit(1);
+    let calls = 0;
+    const broken = async (): Promise<LlmClassificationResult | null> => {
+      calls += 1;
+      return null;
+    };
+    for (let i = 0; i < 5; i += 1) {
+      await runStage2CorrectionCycle({ workspaceDir, classifier: broken, now: NOW });
+    }
+    expect(calls).toBe(5);
+    expect(decisionOf(1)).toBe('abandoned');
+    expect(count("SELECT COUNT(*) AS n FROM governance_signal_admissions WHERE decision = 'abandoned' AND reason = 'llm_error'")).toBe(1);
+    expect(count('SELECT COUNT(*) AS n FROM pain_events')).toBe(0);
+  });
+
+  it('P1-1: low confidence then high-confidence CORRECTION admits on the second cycle', async () => {
+    admit(1);
+    let calls = 0;
+    const verdicts = [classification({ confidence: 0.5 }), classification()];
+    const alternating = async (): Promise<LlmClassificationResult | null> => {
+      const verdict = verdicts[Math.min(calls, verdicts.length - 1)] ?? classification();
+      calls += 1;
+      return verdict;
+    };
+    const first = await runStage2CorrectionCycle({ workspaceDir, classifier: alternating, now: NOW });
+    expect(first.stillPending).toBe(1);
+    const second = await runStage2CorrectionCycle({ workspaceDir, classifier: alternating, now: NOW });
+    expect(second.admitted).toBe(1);
+    expect(count('SELECT COUNT(*) AS n FROM pain_events')).toBe(1);
+    expect(count('SELECT COUNT(*) AS n FROM governance_signal_admissions WHERE diagnostician_task_id IS NOT NULL')).toBe(1);
+  });
+
+  it('P1-1: low confidence then high-confidence NONE resolves none on the second cycle', async () => {
+    admit(1);
+    let calls = 0;
+    const verdicts = [
+      classification({ confidence: 0.5 }),
+      classification({ is_feedback: false, type: 'none', confidence: 0.9 }),
+    ];
+    const alternating = async (): Promise<LlmClassificationResult | null> => {
+      const verdict = verdicts[Math.min(calls, verdicts.length - 1)] ?? classification();
+      calls += 1;
+      return verdict;
+    };
+    await runStage2CorrectionCycle({ workspaceDir, classifier: alternating, now: NOW });
+    const second = await runStage2CorrectionCycle({ workspaceDir, classifier: alternating, now: NOW });
+    expect(second.resolvedNone).toBe(1);
+    expect(decisionOf(1)).toBe('resolved_none');
+    expect(count('SELECT COUNT(*) AS n FROM pain_events')).toBe(0);
+  });
+
+  it('P1-1: two concurrent workers classify once and admit once', async () => {
+    admit(1);
+    let calls = 0;
+    const slowHigh = async (): Promise<LlmClassificationResult | null> => {
+      calls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return classification();
+    };
+    const [a, b] = await Promise.all([
+      runStage2CorrectionCycle({ workspaceDir, classifier: slowHigh, now: NOW }),
+      runStage2CorrectionCycle({ workspaceDir, classifier: slowHigh, now: NOW }),
+    ]);
+    expect(calls).toBe(1);
+    expect(a.admitted + b.admitted).toBe(1);
+    expect(count('SELECT COUNT(*) AS n FROM pain_events')).toBe(1);
+  });
+
+  it('P2-2: aggregateBudgetMs=0 releases the claim so the next cycle runs immediately', async () => {
+    admit(1);
+    const zero = await runStage2CorrectionCycle({
+      workspaceDir,
+      classifier: classifier(classification()),
+      aggregateBudgetMs: 0,
+      now: NOW,
+    });
+    expect(zero.skipped).toBe(1);
+    const immediate = claimPendingCorrectionCandidates({ workspaceDir, limit: 1, now: NOW });
+    if (!immediate.ok) throw new Error(immediate.reason);
+    expect(immediate.candidates).toHaveLength(1);
+    // Return the probe claim so the real next cycle can own it.
+    const probeClaim = immediate.candidates[0]?.claimedAt;
+    if (probeClaim !== null && probeClaim !== undefined) {
+      releasePendingCorrectionClaim({ workspaceDir, logicalObservationKey: 'codex|rollout-s2|turn-1|user', claimedAt: probeClaim });
+    }
+    const next = await runStage2CorrectionCycle({ workspaceDir, classifier: classifier(classification()), now: NOW });
+    expect(next.admitted).toBe(1);
+  });
+
+  it('P2-2: an unavailable classifier releases the claim without consuming an attempt', async () => {
+    admit(1);
+    const absent = await runStage2CorrectionCycle({ workspaceDir, classifier: null, now: NOW });
+    expect(absent.skipped).toBe(1);
+    const restored = await runStage2CorrectionCycle({ workspaceDir, classifier: classifier(classification()), now: NOW });
+    expect(restored.admitted).toBe(1);
+    // One real classification, so exactly one attempt was recorded.
+    expect(count('SELECT COUNT(*) AS n FROM pain_events')).toBe(1);
+  });
+
+  it('P2-2: the remaining aggregate budget is passed into the classifier call', async () => {
+    admit(1);
+    let receivedTimeout: number | null = null;
+    const capture = async (_text: string, options?: { timeoutMs?: number }): Promise<LlmClassificationResult | null> => {
+      receivedTimeout = options?.timeoutMs ?? null;
+      return classification();
+    };
+    const report = await runStage2CorrectionCycle({
+      workspaceDir,
+      classifier: capture,
+      aggregateBudgetMs: 1000,
+      classificationTimeoutMs: 5000,
+      now: NOW,
+    });
+    expect(report.admitted).toBe(1);
+    expect(receivedTimeout).not.toBeNull();
+    expect(receivedTimeout ?? 0).toBeGreaterThan(0);
+    expect(receivedTimeout ?? 0).toBeLessThanOrEqual(1000);
+  });
+
+  it('P2-2: a durable reviewResult is never cleared by claim release', async () => {
+    admit(1);
+    recordPendingCorrectionReview({
+      workspaceDir,
+      logicalObservationKey: 'codex|rollout-s2|turn-1|user',
+      llmResult: classification({ confidence: 0.5 }),
+      now: NOW,
+    });
+    const released = releasePendingCorrectionClaim({
+      workspaceDir,
+      logicalObservationKey: 'codex|rollout-s2|turn-1|user',
+      claimedAt: 'not-the-current-claim',
+    });
+    if (!released.ok) throw new Error(released.reason);
+    expect(released.released).toBe(false);
+    expect(released.reason).toBe('review_already_persisted');
+    const claimed = claimPendingCorrectionCandidates({ workspaceDir, limit: 1, now: NOW });
+    if (!claimed.ok) throw new Error(claimed.reason);
+    expect(claimed.candidates[0]?.reviewResult).toMatchObject({ verdict: 'pending_low_confidence' });
   });
 
   it('a slow classification is bounded by the aggregate budget', async () => {

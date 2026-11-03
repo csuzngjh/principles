@@ -23,7 +23,19 @@ import {
 } from '@principles/core/runtime-v2';
 import { loadPdConfigForPlugin } from './pd-config.js';
 
-export type SignalLlmClassifier = (text: string) => Promise<LlmClassificationResult | null>;
+export interface SignalClassifierCallOptions {
+  /**
+   * Per-call timeout override. The worker passes the cycle's REMAINING
+   * aggregate budget so the real adapter request (startRun/poll deadline)
+   * uses that budget instead of relying on an outer Promise race.
+   */
+  readonly timeoutMs?: number;
+}
+
+export type SignalLlmClassifier = (
+  text: string,
+  options?: SignalClassifierCallOptions,
+) => Promise<LlmClassificationResult | null>;
 
 export interface SignalClassifierProfile {
   readonly provider: string;
@@ -64,20 +76,23 @@ export function createSignalLlmClassifier(
     maxRepairAttempts: 1,
   });
 
-  return async (text: string): Promise<LlmClassificationResult | null> => {
+  return async (text: string, callOptions?: SignalClassifierCallOptions): Promise<LlmClassificationResult | null> => {
     const prompt = buildLlmPrompt(text);
+    // v0.3.1 §2.2: the effective timeout is the worker's remaining budget,
+    // and it is handed to the adapter itself (not only to an outer race).
+    const effectiveTimeoutMs = callOptions?.timeoutMs ?? timeoutMs;
     try {
       const handle = await adapter.startRun({
         agentSpec: { agentId: 'signal-collector', schemaVersion: '1' },
         inputPayload: { prompt },
         contextItems: [],
-        timeoutMs,
+        timeoutMs: effectiveTimeoutMs,
         outputSchemaRef: 'signal-classification-output-v1',
         systemPrompt: SIGNAL_CLASSIFIER_SYSTEM_PROMPT,
       });
       let status = await adapter.pollRun(handle.runId);
-      const deadline = Date.now() + timeoutMs;
-      while (status.status === 'running' && Date.now() < deadline) {
+      const deadline = performance.now() + effectiveTimeoutMs;
+      while (status.status === 'running' && performance.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, 500));
         status = await adapter.pollRun(handle.runId);
       }

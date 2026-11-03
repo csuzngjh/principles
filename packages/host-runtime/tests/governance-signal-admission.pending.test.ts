@@ -23,6 +23,7 @@ import {
   type GovernanceCorrectionCandidate,
   type PendingReviewCallResult,
 } from '../src/governance-signal-admission.js';
+import { EARNED_PRECISION_MIN_TP } from '../src/index.js';
 import { getDefaultPdConfig, invalidatePainSignalBridge } from '@principles/core/runtime-v2';
 import type { LlmClassificationResult } from '@principles/core/runtime-v2';
 
@@ -237,6 +238,17 @@ describe('confidence gate + admitted transition (SPEC v0.3 §3.3/§4.4.3)', () =
     expect(last?.reason).toBe('low_confidence');
     expect(painCount()).toBe(0);
     expect(withTrajectory((db) => db.prepare('SELECT COUNT(*) AS n FROM governance_signal_admissions WHERE decision = ?').get('abandoned'))).toEqual({ n: 1 });
+    // D6: the terminal payload keeps ONLY the Owner-approved minimal fields.
+    const terminal = withTrajectory((db) => db.prepare('SELECT task_payload_json FROM governance_signal_admissions WHERE decision = ?').get('abandoned'));
+    if (!isRecord(terminal) || typeof terminal.task_payload_json !== 'string') throw new Error('terminal payload missing');
+    const parsed: unknown = JSON.parse(terminal.task_payload_json);
+    if (!isRecord(parsed)) throw new Error('terminal payload not an object');
+    expect(Object.keys(parsed).sort()).toEqual(['attempts', 'confidence', 'decision', 'reason', 'settledAt']);
+    expect(parsed).toMatchObject({ decision: 'abandoned', reason: 'low_confidence', attempts: 5 });
+  });
+
+  it('P2-3: EARNED_PRECISION_MIN_TP stays exported (deprecated) but grants no precision', () => {
+    expect(EARNED_PRECISION_MIN_TP).toBe(3);
   });
 
   it('TTL expiry → abandoned(ttl_expired) even for a late CORRECTION', async () => {

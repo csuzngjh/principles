@@ -480,7 +480,7 @@ export interface GovernanceCorrectionCandidate {
    * Owner words bound to the host-written live turn context). Audit-only:
    * admission, rate limit and idempotency are identical either way.
    */
-  readonly explicitChannel?: 'codex_explicit_prefix' | 'codex_explicit_agent';
+  readonly explicitChannel?: 'codex_explicit_prefix' | 'codex_explicit_agent' | 'workbuddy_explicit_prefix';
 }
 
 export interface GovernanceToolFailureCandidate {
@@ -893,6 +893,13 @@ function buildPendingReviewPayload(args: {
   };
 }
 
+/**
+ * @deprecated SPEC v0.3 §3.2.3 (D5) retired earned precision: learned keywords
+ * are Stage-2 candidates only. This constant is retained ONLY for public API
+ * compatibility; no admission code consults it.
+ */
+export const EARNED_PRECISION_MIN_TP = 3;
+
 function pendingTerminalPayload(args: {
   decision: 'resolved_none' | 'abandoned';
   reason: string;
@@ -900,8 +907,9 @@ function pendingTerminalPayload(args: {
   confidence: number | null;
   nowIso: string;
 }): string {
+  // D6: the Owner-approved minimal terminal field set. No trigger text,
+  // matchedTerms, reviewResult, or other classification detail survives.
   return JSON.stringify({
-    kind: 'pending_review_terminal',
     decision: args.decision,
     reason: args.reason,
     confidence: args.confidence,
@@ -962,6 +970,61 @@ function buildCorrectionIngressReport(facts: CorrectionIngressFacts): PainIngres
     correlation,
     evidence: bundle,
   };
+}
+
+interface OwnerCorrectionIngressFacts {
+  readonly hostKind: 'codex' | 'workbuddy';
+  readonly channel: 'codex_explicit_prefix' | 'codex_explicit_agent' | 'workbuddy_explicit_prefix';
+  readonly logicalObservationKey: string;
+  readonly rolloutIdentity: string;
+  readonly rootSessionId: string;
+  readonly hostTurnId: string;
+  readonly painId: string;
+  readonly reason: string;
+  readonly evidence: readonly IngressEvidenceEntry[];
+}
+
+/**
+ * SPEC v0.3 §5: an explicit Owner statement is `owner_manual`, keeps its
+ * correctionEvidence channel, and uses `manual_pain_id` identity — it must
+ * never be rebuilt as an automatic hook. Bound owner reports with no transcript
+ * evidence legitimately evaluate to `degrade`, never `observation_only`.
+ */
+function buildOwnerCorrectionIngressReport(facts: OwnerCorrectionIngressFacts): PainIngressReport {
+  const [first, ...rest] = facts.evidence;
+  const bundle: PainIngressReport['evidence'] = first === undefined
+    ? { status: 'unavailable', reason: 'trajectory_unavailable' }
+    : { status: 'available', entries: [first, ...rest] };
+  const correlation: PainIngressReport['correlation'] = facts.hostKind === 'codex'
+    ? {
+      status: 'bound',
+      hostKind: 'codex',
+      rootSessionId: facts.rootSessionId,
+      rolloutIdentity: facts.rolloutIdentity,
+      logicalObservationKey: facts.logicalObservationKey,
+      hostTurnId: facts.hostTurnId,
+    }
+    : {
+      status: 'bound',
+      hostKind: 'workbuddy',
+      sessionId: facts.rootSessionId,
+      logicalObservationKey: facts.logicalObservationKey,
+    };
+  return {
+    identity: { kind: 'manual_pain_id', painId: facts.painId },
+    painType: 'user_frustration',
+    source: 'user_correction',
+    reason: facts.reason,
+    score: GOVERNANCE_STRONG_PAIN_SCORE,
+    origin: { kind: 'owner_manual', channel: facts.channel },
+    correlation,
+    evidence: bundle,
+  };
+}
+
+function ownerExplicitChannel(candidate: GovernanceCorrectionCandidate): 'codex_explicit_prefix' | 'codex_explicit_agent' | 'workbuddy_explicit_prefix' {
+  if (candidate.explicitChannel !== undefined) return candidate.explicitChannel;
+  return candidate.hostKind === 'workbuddy' ? 'workbuddy_explicit_prefix' : 'codex_explicit_prefix';
 }
 
 function correctionIngressEvidence(args: {
@@ -1089,30 +1152,55 @@ function admitCorrection({ db, candidate, workspaceDir, now, nowIso, keywordStor
       && detection.output.matchedPrecision === 'high');
 
   // v0.3.1 §1.2: shared ingress semantics run BEFORE any Pain/limit/marker
-  // side effect. Explicit Owner statements keep their own admission authority
-  // (their origin is owner_manual, not an automatic hook).
-  if (!isExplicit) {
+  // side effect — for explicit Owner statements AND automatic hooks. The
+  // origin/channel are derived from the signal's real source.
+  {
     const { painId } = deriveProductionCorrectionPainIdentity({
       workspaceDir,
       sessionId: candidate.rootSessionId,
       occurrenceId: candidate.hostTurnId,
       text: candidate.text,
     });
-    const ingressReason = ingressTerminalReason({
-      hostKind: candidate.hostKind,
-      logicalObservationKey: candidate.logicalObservationKey,
-      rolloutIdentity: candidate.rolloutIdentity,
-      rootSessionId: candidate.rootSessionId,
-      hostTurnId: candidate.hostTurnId,
-      painId,
-      reason: correctionReason(candidate, detection?.output.matchedTerms ?? []),
-      evidence: correctionIngressEvidence({
+    const ingressReasonValue = correctionReason(candidate, detection?.output.matchedTerms ?? []);
+    const ingressDecision = isExplicit
+      ? evaluatePainIngress(buildOwnerCorrectionIngressReport({
+        hostKind: candidate.hostKind,
+        channel: ownerExplicitChannel(candidate),
+        logicalObservationKey: candidate.logicalObservationKey,
+        rolloutIdentity: candidate.rolloutIdentity,
+        rootSessionId: candidate.rootSessionId,
+        hostTurnId: candidate.hostTurnId,
+        painId,
+        reason: ingressReasonValue,
+        // Codex has a real governance observation anchor; WorkBuddy explicit
+        // intake has no transcript evidence and must degrade honestly.
+        evidence: candidate.hostKind === 'codex'
+          ? correctionIngressEvidence({
+            hostKind: 'codex',
+            logicalObservationKey: candidate.logicalObservationKey,
+            text: candidate.text,
+            workspaceDir,
+          })
+          : [],
+      }))
+      : evaluatePainIngress(buildCorrectionIngressReport({
         hostKind: candidate.hostKind,
         logicalObservationKey: candidate.logicalObservationKey,
-        text: candidate.text,
-        workspaceDir,
-      }),
-    });
+        rolloutIdentity: candidate.rolloutIdentity,
+        rootSessionId: candidate.rootSessionId,
+        hostTurnId: candidate.hostTurnId,
+        painId,
+        reason: ingressReasonValue,
+        evidence: correctionIngressEvidence({
+          hostKind: candidate.hostKind,
+          logicalObservationKey: candidate.logicalObservationKey,
+          text: candidate.text,
+          workspaceDir,
+        }),
+      }));
+    const ingressReason = ingressDecision.action === 'refuse' || ingressDecision.action === 'observation_only'
+      ? ingressDecision.reasonCode
+      : null;
     if (ingressReason !== null) {
       try {
         insertTerminalCorrectionMarker({
@@ -1601,6 +1689,60 @@ export function claimPendingCorrectionCandidates(input: ClaimPendingCandidatesIn
   }
 }
 
+export interface ReleasePendingClaimInput {
+  readonly workspaceDir: string;
+  readonly logicalObservationKey: string;
+  /** The claim stamp returned by `claimPendingCorrectionCandidates`. */
+  readonly claimedAt: string;
+  readonly databaseFactory?: ObservationDatabaseFactory;
+}
+
+export type ReleasePendingClaimResult =
+  | { ok: true; released: boolean; reason: 'released' | 'not_pending' | 'review_already_persisted' | 'claim_not_owned' | 'claim_changed' | 'claim_absent' }
+  | Degradation;
+
+/**
+ * Release THIS worker's claim when no classification started (budget exhausted
+ * or classifier unavailable), so the next cycle can re-claim immediately.
+ *
+ * Guard rails:
+ * - only `pending_llm_review` rows;
+ * - never when a durable reviewResult exists (that outcome must be consumed by
+ *   settle, not thrown away);
+ * - the persisted claim stamp must still be the one this worker took;
+ * - CAS on the exact payload text, so a concurrent worker's state is untouched.
+ */
+export function releasePendingCorrectionClaim(input: ReleasePendingClaimInput): ReleasePendingClaimResult {
+  const opened = openAdmissionStore(input.workspaceDir, input.databaseFactory);
+  if (!('db' in opened)) return opened;
+  const { db, close } = opened;
+  try {
+    const row = pendingReviewMarkerRow(db, input.logicalObservationKey);
+    if (row === null) return { ok: true, released: false, reason: 'not_pending' };
+    if (rowField(row, 'decision') !== 'pending_llm_review') {
+      return { ok: true, released: false, reason: 'not_pending' };
+    }
+    const parsed = parsePendingRow(row);
+    if (parsed === null) return { ok: true, released: false, reason: 'claim_changed' };
+    if (parsed.payload.review.reviewResult !== undefined) {
+      return { ok: true, released: false, reason: 'review_already_persisted' };
+    }
+    const currentClaim = parsed.payload.review.claimedAt;
+    if (currentClaim === undefined) return { ok: true, released: false, reason: 'claim_absent' };
+    if (currentClaim !== input.claimedAt) return { ok: true, released: false, reason: 'claim_not_owned' };
+    const { claimedAt: _consumedClaim, ...reviewWithoutClaim } = parsed.payload.review;
+    void _consumedClaim;
+    const nextPayload: PendingReviewPayload = { ...parsed.payload, review: reviewWithoutClaim };
+    const { changes } = db.prepare(`UPDATE governance_signal_admissions SET task_payload_json = ?, updated_at = ?
+      WHERE logical_observation_key = ? AND decision = 'pending_llm_review' AND task_payload_json = ?`)
+      .run(JSON.stringify(nextPayload), new Date().toISOString(), input.logicalObservationKey, parsed.payloadText);
+    if (changes !== 1) return { ok: true, released: false, reason: 'claim_changed' };
+    return { ok: true, released: true, reason: 'released' };
+  } finally {
+    close();
+  }
+}
+
 export interface CompletePendingReviewInput {
   readonly workspaceDir: string;
   readonly logicalObservationKey: string;
@@ -1703,7 +1845,7 @@ export async function settlePendingCorrection(input: SettlePendingReviewInput): 
     if (parsed === null) {
       return { ok: false, reason: 'pending_payload_invalid', nextAction: 'inspect the pending marker payload; the row stays pending until repaired' };
     }
-    const { payload, createdAt, rootSessionId, rolloutIdentity, hostKind } = parsed;
+    const { payload, payloadText, createdAt, rootSessionId, rolloutIdentity, hostKind } = parsed;
     const review = payload.review.reviewResult;
     if (review === undefined) {
       return { ok: true, disposition: 'pending', logicalObservationKey: input.logicalObservationKey, attempts: payload.review.attempts, reason: 'review_not_recorded' };
@@ -1714,27 +1856,53 @@ export async function settlePendingCorrection(input: SettlePendingReviewInput): 
     // TTL bounds EVERY pending verdict, including a late correction: a candidate
     // that sat past the window is no longer trustworthy evidence.
     if (ttlExpired) {
-      db.prepare(`UPDATE governance_signal_admissions SET decision = 'abandoned', reason = ?, task_payload_json = ?, updated_at = ?
-        WHERE logical_observation_key = ? AND decision = 'pending_llm_review'`)
-        .run('ttl_expired', pendingTerminalPayload({ decision: 'abandoned', reason: 'ttl_expired', attempts: payload.review.attempts, confidence: review.confidence, nowIso }), nowIso, input.logicalObservationKey);
+      const { changes } = db.prepare(`UPDATE governance_signal_admissions SET decision = 'abandoned', reason = ?, task_payload_json = ?, updated_at = ?
+        WHERE logical_observation_key = ? AND decision = 'pending_llm_review' AND task_payload_json = ?`)
+        .run('ttl_expired', pendingTerminalPayload({ decision: 'abandoned', reason: 'ttl_expired', attempts: payload.review.attempts, confidence: review.confidence, nowIso }), nowIso, input.logicalObservationKey, payloadText);
+      if (changes !== 1) {
+        return { ok: true, disposition: 'concurrent_loss', logicalObservationKey: input.logicalObservationKey, attempts: payload.review.attempts, reason: 'cas_lost' };
+      }
       return { ok: true, disposition: 'abandoned', logicalObservationKey: input.logicalObservationKey, attempts: payload.review.attempts, reason: 'ttl_expired' };
     }
 
     if (review.verdict !== 'correction' && review.verdict !== 'none') {
       if (payload.review.attempts >= STAGE2_MAX_ATTEMPTS) {
         const reason = review.verdict === 'pending_llm_error' ? 'llm_error' : 'low_confidence';
-        db.prepare(`UPDATE governance_signal_admissions SET decision = 'abandoned', reason = ?, task_payload_json = ?, updated_at = ?
-          WHERE logical_observation_key = ? AND decision = 'pending_llm_review'`)
-          .run(reason, pendingTerminalPayload({ decision: 'abandoned', reason, attempts: payload.review.attempts, confidence: review.confidence, nowIso }), nowIso, input.logicalObservationKey);
+        const { changes } = db.prepare(`UPDATE governance_signal_admissions SET decision = 'abandoned', reason = ?, task_payload_json = ?, updated_at = ?
+          WHERE logical_observation_key = ? AND decision = 'pending_llm_review' AND task_payload_json = ?`)
+          .run(reason, pendingTerminalPayload({ decision: 'abandoned', reason, attempts: payload.review.attempts, confidence: review.confidence, nowIso }), nowIso, input.logicalObservationKey, payloadText);
+        if (changes !== 1) {
+          return { ok: true, disposition: 'concurrent_loss', logicalObservationKey: input.logicalObservationKey, attempts: payload.review.attempts, reason: 'cas_lost' };
+        }
         return { ok: true, disposition: 'abandoned', logicalObservationKey: input.logicalObservationKey, attempts: payload.review.attempts, reason };
+      }
+      // Retryable verdict: consume the review result and release the claim so
+      // the next worker cycle re-claims and calls the LLM again. The property
+      // must be ABSENT (claim logic tests `reviewResult !== undefined`), and
+      // the CAS must use the exact payload we read (concurrent-settle guard).
+      const { reviewResult: _consumedReview, claimedAt: _consumedClaim, ...retainedReview } = payload.review;
+      void _consumedReview;
+      void _consumedClaim;
+      const nextPayload: PendingReviewPayload = {
+        ...payload,
+        review: { ...retainedReview, lastAttemptAt: nowIso, lastReason: review.verdict },
+      };
+      const { changes } = db.prepare(`UPDATE governance_signal_admissions SET task_payload_json = ?, updated_at = ?
+        WHERE logical_observation_key = ? AND decision = 'pending_llm_review' AND task_payload_json = ?`)
+        .run(JSON.stringify(nextPayload), nowIso, input.logicalObservationKey, payloadText);
+      if (changes !== 1) {
+        return { ok: true, disposition: 'concurrent_loss', logicalObservationKey: input.logicalObservationKey, attempts: payload.review.attempts, reason: 'cas_lost' };
       }
       return { ok: true, disposition: 'pending', logicalObservationKey: input.logicalObservationKey, attempts: payload.review.attempts, reason: review.verdict };
     }
 
     if (review.verdict === 'none') {
-      db.prepare(`UPDATE governance_signal_admissions SET decision = 'resolved_none', reason = ?, task_payload_json = ?, updated_at = ?
-        WHERE logical_observation_key = ? AND decision = 'pending_llm_review'`)
-        .run(review.reason.slice(0, MAX_REASON_BOUND) || 'stage2_none', pendingTerminalPayload({ decision: 'resolved_none', reason: review.reason, attempts: payload.review.attempts, confidence: review.confidence, nowIso }), nowIso, input.logicalObservationKey);
+      const { changes } = db.prepare(`UPDATE governance_signal_admissions SET decision = 'resolved_none', reason = ?, task_payload_json = ?, updated_at = ?
+        WHERE logical_observation_key = ? AND decision = 'pending_llm_review' AND task_payload_json = ?`)
+        .run(review.reason.slice(0, MAX_REASON_BOUND) || 'stage2_none', pendingTerminalPayload({ decision: 'resolved_none', reason: review.reason, attempts: payload.review.attempts, confidence: review.confidence, nowIso }), nowIso, input.logicalObservationKey, payloadText);
+      if (changes !== 1) {
+        return { ok: true, disposition: 'concurrent_loss', logicalObservationKey: input.logicalObservationKey, attempts: payload.review.attempts, reason: 'cas_lost' };
+      }
       return { ok: true, disposition: 'resolved_none', logicalObservationKey: input.logicalObservationKey, attempts: payload.review.attempts, reason: review.reason };
     }
 
@@ -1771,9 +1939,12 @@ export async function settlePendingCorrection(input: SettlePendingReviewInput): 
       })),
     });
     if (ingressReason !== null) {
-      db.prepare(`UPDATE governance_signal_admissions SET decision = 'abandoned', reason = ?, task_payload_json = ?, updated_at = ?
-        WHERE logical_observation_key = ? AND decision = 'pending_llm_review'`)
-        .run(ingressReason, pendingTerminalPayload({ decision: 'abandoned', reason: ingressReason, attempts: payload.review.attempts, confidence: review.confidence, nowIso }), nowIso, input.logicalObservationKey);
+      const { changes } = db.prepare(`UPDATE governance_signal_admissions SET decision = 'abandoned', reason = ?, task_payload_json = ?, updated_at = ?
+        WHERE logical_observation_key = ? AND decision = 'pending_llm_review' AND task_payload_json = ?`)
+        .run(ingressReason, pendingTerminalPayload({ decision: 'abandoned', reason: ingressReason, attempts: payload.review.attempts, confidence: review.confidence, nowIso }), nowIso, input.logicalObservationKey, payloadText);
+      if (changes !== 1) {
+        return { ok: true, disposition: 'concurrent_loss', logicalObservationKey: input.logicalObservationKey, attempts: payload.review.attempts, reason: 'cas_lost' };
+      }
       return { ok: true, disposition: 'abandoned', logicalObservationKey: input.logicalObservationKey, attempts: payload.review.attempts, reason: ingressReason };
     }
     let duplicate = false;
@@ -2022,7 +2193,15 @@ export interface EnsureGovernanceTaskInput {
 }
 
 export type EnsureGovernanceTaskResult =
-  | { ok: true; taskId: string; created: boolean; duplicate: boolean; linkRepaired: boolean }
+  | {
+    ok: true;
+    taskId: string;
+    created: boolean;
+    duplicate: boolean;
+    linkRepaired: boolean;
+    /** Present when the Owner-manual ingress legitimately degraded (honest empty evidence). */
+    ingressWarning?: string;
+  }
   | Degradation;
 
 /**
@@ -2044,13 +2223,18 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
   try {
     const marker = db.prepare('SELECT * FROM governance_signal_admissions WHERE logical_observation_key = ? AND canonical_pain_id = ?').get(input.logicalObservationKey, input.canonicalPainId);
     const existingTaskId = rowField(marker, 'diagnostician_task_id');
-    if (isRecord(marker) && typeof existingTaskId === 'string' && existingTaskId.length > 0) {
-      return { ok: true, taskId: existingTaskId, created: false, duplicate: true, linkRepaired: false };
-    }
     if (!isRecord(marker)) {
       return { ok: false, reason: 'admission_marker_not_found', nextAction: 'admit the signal before ensuring its Diagnostician continuation' };
     }
     const payloadRaw = rowField(marker, 'task_payload_json');
+    // Legacy linked marker: an old admitted row may carry no payload at all.
+    // The task already exists, there is no ingress fact to rebuild, and
+    // demanding a payload here would starve reconciliation forever. A PRESENT
+    // but inconsistent payload still fails closed below.
+    if (typeof existingTaskId === 'string' && existingTaskId.length > 0
+      && (payloadRaw === null || payloadRaw === undefined)) {
+      return { ok: true, taskId: existingTaskId, created: false, duplicate: true, linkRepaired: false };
+    }
     let payloadParsed: unknown;
     try {
       payloadParsed = typeof payloadRaw === 'string' ? JSON.parse(payloadRaw) : null;
@@ -2076,24 +2260,67 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
       note: entry.note,
     }));
     let provenance: PainProvenance;
+    let ingressWarning: string | undefined;
     if (markerHostKind === 'codex' || markerHostKind === 'workbuddy') {
-      const ingressDecision = evaluatePainIngress(buildCorrectionIngressReport({
-        hostKind: markerHostKind,
-        logicalObservationKey: markerKey,
-        rolloutIdentity: typeof rolloutIdentity === 'string' ? rolloutIdentity : '',
-        rootSessionId: payloadParsed.sessionId,
-        hostTurnId,
-        painId: input.canonicalPainId,
-        reason: payloadParsed.reason,
-        evidence: ingressEvidence,
-      }));
-      provenance = ingressDecision.action === 'submit' || ingressDecision.action === 'degrade'
-        ? ingressDecision.legacy.provenance
-        : 'automatic_hook';
+      // SPEC v0.3 §5 / v0.3.1 §1.2: rebuild the report from the marker's REAL
+      // source. An explicit Owner statement is owner_manual (manual_pain_id,
+      // correctionEvidence channel); everything else is the automatic hook.
+      const ownerChannel = payloadParsed.correctionEvidence?.channel;
+      const ingressDecision = ownerChannel !== undefined
+        ? evaluatePainIngress(buildOwnerCorrectionIngressReport({
+          hostKind: markerHostKind,
+          channel: ownerChannel,
+          logicalObservationKey: markerKey,
+          rolloutIdentity: typeof rolloutIdentity === 'string' ? rolloutIdentity : '',
+          rootSessionId: payloadParsed.sessionId,
+          hostTurnId,
+          painId: input.canonicalPainId,
+          reason: payloadParsed.reason,
+          // CR-02: never fabricate transcript evidence for an Owner statement;
+          // an empty list is the honest basis and bound explicit reports
+          // legitimately degrade.
+          evidence: ingressEvidence,
+        }))
+        : evaluatePainIngress(buildCorrectionIngressReport({
+          hostKind: markerHostKind,
+          logicalObservationKey: markerKey,
+          rolloutIdentity: typeof rolloutIdentity === 'string' ? rolloutIdentity : '',
+          rootSessionId: payloadParsed.sessionId,
+          hostTurnId,
+          painId: input.canonicalPainId,
+          reason: payloadParsed.reason,
+          evidence: ingressEvidence,
+        }));
+      if (ingressDecision.action === 'refuse' || ingressDecision.action === 'observation_only') {
+        // Fail closed: an inconsistent/evidence-less admitted marker must not
+        // silently become a task (and must never be relabelled automatic_hook).
+        return {
+          ok: false,
+          reason: `pain_ingress_${ingressDecision.reasonCode}`,
+          nextAction: ingressDecision.action === 'refuse' ? ingressDecision.nextAction : ingressDecision.note,
+        };
+      }
+      const { legacy: { provenance: decidedProvenance } } = ingressDecision;
+      provenance = decidedProvenance;
+      if (ingressDecision.action === 'degrade') ingressWarning = ingressDecision.warning;
     } else {
       // OpenClaw markers do not flow through this governance seam today; keep
       // the historical provenance rather than inventing an ingress report.
       provenance = 'host_context_bound';
+    }
+
+    // Recovery path: a task link already exists. The ingress decision above
+    // still ran, so an inconsistent admitted marker fails closed instead of
+    // being reported as a healthy duplicate.
+    if (typeof existingTaskId === 'string' && existingTaskId.length > 0) {
+      return {
+        ok: true,
+        taskId: existingTaskId,
+        created: false,
+        duplicate: true,
+        linkRepaired: false,
+        ...(ingressWarning !== undefined ? { ingressWarning } : {}),
+      };
     }
 
     const taskId = createDiagnosticianTaskId(input.canonicalPainId);
@@ -2169,6 +2396,7 @@ export async function ensureGovernanceDiagnosticianTask(input: EnsureGovernanceT
         // The link was just written because the task already existed → a real
         // Case B repair (not a no-op on an already-linked marker).
         linkRepaired: existing !== null,
+        ...(ingressWarning !== undefined ? { ingressWarning } : {}),
       };
     } finally {
       await stateManager.close().catch(() => undefined);

@@ -37,7 +37,15 @@ export const PAIN_INGRESS_PAYLOAD_VERSION = 'v1';
 export type PainIngressOriginV1 =
   | {
       kind: 'owner_manual';
-      channel: 'openclaw_command' | 'cli_explicit_session' | 'external_cli_unbound';
+      channel:
+        | 'openclaw_command'
+        | 'cli_explicit_session'
+        | 'external_cli_unbound'
+        // SPEC v0.3 §5: governed-host explicit statements keep their own
+        // channel identity instead of being flattened into a generic one.
+        | 'codex_explicit_prefix'
+        | 'codex_explicit_agent'
+        | 'workbuddy_explicit_prefix';
     }
   | { kind: 'automatic_hook'; source: string };
 
@@ -140,7 +148,8 @@ export function parseOrigin(value: unknown): PainOrigin | null {
   if (!isRecord(value)) return null;
   if (value.kind === 'owner_manual') {
     const {channel} = value;
-    if (channel === 'openclaw_command' || channel === 'cli_explicit_session' || channel === 'external_cli_unbound') {
+    if (channel === 'openclaw_command' || channel === 'cli_explicit_session' || channel === 'external_cli_unbound'
+      || channel === 'codex_explicit_prefix' || channel === 'codex_explicit_agent' || channel === 'workbuddy_explicit_prefix') {
       return { kind: 'owner_manual', channel };
     }
     return null;
@@ -324,7 +333,11 @@ export function validateOriginCorrelationInvariant(
   if (origin.channel === 'external_cli_unbound' && correlation.status === 'bound') {
     return 'origin_correlation_mismatch';
   }
-  if (origin.channel === 'cli_explicit_session' && correlation.status === 'unbound') {
+  const requiresBoundCorrelation = origin.channel === 'cli_explicit_session'
+    || origin.channel === 'codex_explicit_prefix'
+    || origin.channel === 'codex_explicit_agent'
+    || origin.channel === 'workbuddy_explicit_prefix';
+  if (requiresBoundCorrelation && correlation.status === 'unbound') {
     return 'origin_correlation_mismatch';
   }
   return null;

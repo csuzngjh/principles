@@ -103,6 +103,27 @@ describe('P-1 semantic guards (SPEC v0.3 §3.2.2)', () => {
     expect(result.needsLlmConfirmation).toBe(true);
   });
 
+  it('P2-1: ambiguous terms inside paired quotes alone produce no candidate', () => {
+    for (const text of ['他说“我说的是另一个文件”', '他说“都说了”']) {
+      const result = scanKeywords(text, store);
+      expect(result.matched).toBe(false);
+      expect(result.matchedTerms).toEqual([]);
+    }
+  });
+
+  it('P2-1: an ambiguous term outside the quotes still hits when the same term is also quoted', () => {
+    const result = scanKeywords('他说“都说了”，都说了别改', store);
+    expect(result.matched).toBe(true);
+    expect(result.matchedPrecision).toBe('ambiguous');
+    expect(result.matchedTerms).toContain('都说了');
+  });
+
+  it('P2-1: normal ambiguous speech outside quotes still enters Stage 2', () => {
+    const result = scanKeywords('我说的是这个文件', store);
+    expect(result.matched).toBe(true);
+    expect(result.matchedPrecision).toBe('ambiguous');
+  });
+
   it('ordinary requirement change / information addition produces no signal', () => {
     for (const text of ['请把按钮改成蓝色', '顺便补充一下测试用例', '这个需求我改主意了，用另一个方案']) {
       const result = scanKeywords(text, store);
