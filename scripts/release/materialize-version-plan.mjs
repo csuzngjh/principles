@@ -21,7 +21,12 @@
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readPendingChangesets, runChangesetVersion, syncPluginVersionMirror } from './lib/version-plan.mjs';
+import {
+  readPendingChangesets,
+  runChangesetVersion,
+  syncMcpServerVersionMirror,
+  syncPluginVersionMirror,
+} from './lib/version-plan.mjs';
 
 function argValue(flag) {
   const i = process.argv.indexOf(flag);
@@ -51,6 +56,10 @@ if (versionRun.status !== 0) {
 
 if (syncPluginVersionMirror(repoRoot)) {
   console.log('Synced component mirror: packages/openclaw-plugin/openclaw.plugin.json');
+}
+
+if (syncMcpServerVersionMirror(repoRoot)) {
+  console.log('Synced component mirror: packages/pd-mcp-server/src/version.ts');
 }
 
 // Lockfile materialization (SPEC §13). npm is npm.cmd on Windows, and
