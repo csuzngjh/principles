@@ -223,6 +223,8 @@ POST-FIX sentinel untouched: SENTINEL
 |---|---|
 | A 两个异步同时提交 | 一个 202、一个 409（既有用例） |
 | B Console Run 已 ACCEPTED → offline-stub | **409 `run_in_progress`**；无 `RUN_STARTED`；无 `budget-ledger.jsonl`（无 reservation）；sentinel 不变 |
+| B2 坏账本 → offline-stub | **500 `console_ledger_unreadable`**；无 `RUN_STARTED`；sentinel 不变 |
+| B3 ledger 路径被换成目录 → append | 抛 `ConsoleLedgerUnreadableError`（非普通文件拒绝）；目录保持空；sentinel 不变 |
 | C offline 持有写锁（admissionCheck 屏障） → host-dry-run | **409**；无 `CONSOLE_RUN_ACCEPTED`；屏障释放后离线运行写出 `RUN_STARTED`+`RUN_FINISHED` |
 | D 两入口真并发 | 由 B/C 双向构造：任一入口持锁时另一入口被拒，不会出现两个 RUNNING/多余 `RUN_STARTED`/未被拒请求的 actor |
 
@@ -246,8 +248,8 @@ POST-FIX sentinel untouched: SENTINEL
 
 | 套件 | 结果 |
 |---|---|
-| pd-console 全量 | **171 files / 3129 passed + 1 expected fail（0 failed）** |
-| Examiner 定向（v09 路由、v0101、repair、path-boundary、BDD） | **5 files 全通过**；repair 文件 **22 例** |
+| pd-console 全量 | **171 files / 3131 passed + 1 expected fail（0 failed）** |
+| Examiner 定向（v09 路由、v0101、repair、path-boundary、BDD） | **5 files 全通过**；repair 文件 **24 例** |
 | lab 契约 | **95/95** |
 | 历史基线 | `ok=true checked=593 mismatches=0`（基线 v7→v8，delta 恰四文件） |
 | Playwright E2E（真实浏览器） | **6/6** |
@@ -256,8 +258,9 @@ POST-FIX sentinel untouched: SENTINEL
 
 ### 11.6 Git 与 CI
 
-- 基线：本轮起点 `8bc27a10e`（与 `origin/main` 同步）；增量提交见下方最终报告。
-- Required CI 在最终 HEAD 由 CI 判定（本报告不预设绿）。
+- 本轮起点 `8bc27a10e`；增量提交：`9d54352dd`（fd 安全边界 + 探针清理 + 双向单活 + 测试）、`b3223c070`（rebind + 基线 v8）、`2a526aa80`（CodeQL 误报注释）、`3def661e5`（报告 CodeQL 处置）、最后一个提交（新增离线坏账本/目录 ledger 两例拒绝测试，SHA 见推送记录）。
+- 分支与 `origin/main` 同步（0 behind）；未合并、未部署。
+- CI 结果以最终 HEAD 的 `gh pr checks` 为准（既有结论：`Verify Merge Gate` / `e2e` / `packaged install smoke` / `release asset smoke` 等 required 项 PASS，CodeQL PASS）。
 
 ### 11.7 Follow-up
 

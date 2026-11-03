@@ -692,4 +692,32 @@ describe('single-active — offline ↔ async mutual exclusion under the study l
     expect(finalEvents.some((event) => event.type === 'RUN_STARTED')).toBe(true);
     expect(finalEvents.some((event) => event.type === 'RUN_FINISHED')).toBe(true);
   });
+
+  it('a CORRUPT ledger refuses the OFFLINE entry — 500, no RUN_STARTED', async () => {
+    const studyId = await createStudy();
+    const studyDir = studyDirOf(studyId);
+    fs.appendFileSync(path.join(studyDir, 'events.jsonl'), 'this is not json\n');
+    const sentinel = writeSentinel();
+    const refused = await call('POST', `/studies/${studyId}/run`, { mode: 'offline-stub' });
+    expect(refused.statusCode).toBe(500);
+    expect(refused.body.error).toBe('console_ledger_unreadable');
+    const raw = fs.readFileSync(path.join(studyDir, 'events.jsonl'), 'utf8');
+    expect(raw).not.toContain('"RUN_STARTED"');
+    expect(fs.readFileSync(sentinel, 'utf8')).toBe('SENTINEL');
+  });
+
+  it('append refuses a ledger path that is a directory (not a regular file)', async () => {
+    const studyId = await createStudy();
+    const studyDir = studyDirOf(studyId);
+    const ledger = path.join(studyDir, 'events.jsonl');
+    fs.rmSync(ledger);
+    fs.mkdirSync(ledger, { recursive: true });
+    const sentinel = writeSentinel();
+    expect(() => appendConsoleRunEvent(resolveRoots(), studyDir, {
+      type: 'CONSOLE_RUN_ACCEPTED', schema: CONSOLE_RUN_SCHEMA, runId: 'RUN-C-DIR-LEDGER', studyId,
+      mode: 'host-dry-run' as ConsoleRunMode, acceptedAt: new Date().toISOString(), pid: process.pid, owner: 'pd-console',
+    })).toThrow(ConsoleLedgerUnreadableError);
+    expect(fs.readdirSync(ledger)).toEqual([]);
+    expect(fs.readFileSync(sentinel, 'utf8')).toBe('SENTINEL');
+  });
 });
