@@ -11,5 +11,10 @@
     "sourceMap": false
   },
   "include": ["src/**/*", "tests/**/*"],
+  // tests/bdd/** is excluded on purpose, not silently: update-system.steps.ts
+  // imports ../../../pd-cli/{src,tests/bdd/support}, so including it here
+  // compiles pd-cli sources into this package's program. A Stage 3 probe
+  // produced 8 errors (5 in this file, 3 inside pd-cli's bdd harness); fixing
+  // the pd-cli side belongs to PRI-1099's other-package rollout.
   "exclude": ["node_modules", "dist", "tests/bdd/**"]
 }
