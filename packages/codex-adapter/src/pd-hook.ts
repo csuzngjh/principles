@@ -374,9 +374,12 @@ export async function processHookInvocation(rawStdin: string, _env: EnvMap = pro
           const promotionNotice = receipt.promotionDegraded === 'conversation_ingestion_disabled'
             ? '会话证据提升已跳过：会话摄取未启用（按隐私边界未读取会话内容，也未写入会话观察）'
             : `会话证据提升暂不可用：${receipt.promotionDegraded}`;
-          explicitReceiptContext = `[PD] 已收到痛苦反馈（painId=${receipt.painId}, taskId=${receipt.taskId}${receipt.disposition === 'already_admitted' ? ', 重复提交已合并为同一信号' : ''}）。后台将自动诊断；请在回复中如实转述本回执，不要声称仍在等待用户输入，也不要虚构诊断结论。${receipt.promotionDegraded !== undefined ? `（注意：${promotionNotice}；诊断仍会基于你提交的陈述进行。）` : ''}`;
+          const ingressNotice = receipt.ingressWarning !== undefined
+            ? `行为证据缺失，已按 Owner 陈述降级准入：${receipt.ingressWarning}`
+            : undefined;
+          explicitReceiptContext = `[PD] 已收到痛苦反馈（painId=${receipt.painId}, taskId=${receipt.taskId}${receipt.disposition === 'already_admitted' ? ', 重复提交已合并为同一信号' : ''}）。后台将自动诊断；请在回复中如实转述本回执，不要声称仍在等待用户输入，也不要虚构诊断结论。${receipt.promotionDegraded !== undefined ? `（注意：${promotionNotice}；诊断仍会基于你提交的陈述进行。）` : ''}${ingressNotice !== undefined ? `（注意：${ingressNotice}；诊断仍会基于你提交的陈述进行。）` : ''}`;
           explicitDiagnostics.push(diagnostic(
-            `owner_statement_received:${receipt.painId}:${receipt.taskId}${receipt.promotionDegraded !== undefined ? `:promotion_degraded:${receipt.promotionDegraded}` : ''}`,
+            `owner_statement_received:${receipt.painId}:${receipt.taskId}${receipt.promotionDegraded !== undefined ? `:promotion_degraded:${receipt.promotionDegraded}` : ''}${receipt.ingressWarning !== undefined ? `:ingress_degraded:${receipt.ingressWarning}` : ''}`,
             'Durable enqueue complete; the workspace worker continues diagnosis in the background.',
           ));
         } else {

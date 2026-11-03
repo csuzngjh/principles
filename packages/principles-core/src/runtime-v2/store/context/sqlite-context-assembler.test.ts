@@ -54,7 +54,7 @@ function createMockTaskStore(tasks: Map<string, DiagnosticianTaskRecord>): TaskS
 }
 
 function makeDiagnosticianTask(
-  overrides?: Partial<DiagnosticianTaskRecord>,
+  overrides?: Partial<DiagnosticianTaskRecord> & { diagnosticJson?: string },
 ): DiagnosticianTaskRecord {
   const now = new Date().toISOString();
   return {
@@ -72,6 +72,7 @@ function makeDiagnosticianTask(
     source: overrides?.source,
     sessionIdHint: overrides?.sessionIdHint,
     agentIdHint: overrides?.agentIdHint,
+    ...(overrides?.diagnosticJson !== undefined ? { diagnosticJson: overrides.diagnosticJson } : {}),
   };
 }
 
@@ -352,6 +353,20 @@ describe('SqliteContextAssembler', () => {
       expect(payload.diagnosisTarget.severity).toBe('critical');
       expect(payload.diagnosisTarget.painId).toBe('pain-456');
       expect(payload.diagnosisTarget.sessionIdHint).toBe('sess-789');
+    } finally { cleanupFixture(f); }
+  });
+
+  it('diagnosisTarget keeps the WorkBuddy hostKind (SPEC v0.3 §5 — no silent downgrade)', async () => {
+    const task = makeDiagnosticianTask({
+      taskId: 'task_wb_host',
+      diagnosticJson: JSON.stringify({ hostKind: 'workbuddy', reasonSummary: 'WorkBuddy correction' }),
+    });
+    const tasks = new Map([[task.taskId, task]]);
+    const f = createFixture(tasks);
+    try {
+      await createRunWithPayloads(f, task.taskId, { inputPayload: 'input', outputPayload: 'output' });
+      const payload = await f.assembler.assemble(task.taskId);
+      expect(payload.diagnosisTarget.hostKind).toBe('workbuddy');
     } finally { cleanupFixture(f); }
   });
 

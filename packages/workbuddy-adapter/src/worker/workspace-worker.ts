@@ -47,11 +47,15 @@ import {
   loadFeatureFlagFromConfig,
   reconcileGovernanceContinuation,
   runInternalizationConsumerCycle,
+  runStage2CorrectionCycle,
+  createSignalClassifierForWorkspace,
   saveHostToolDeclaration,
   type AdmitBareHostPainsResult,
   type InternalizationConsumerCycleOutcome,
   type ConsumerCycleLogger,
   type ReconcileGovernanceContinuationResult,
+  type SignalLlmClassifier,
+  type Stage2CorrectionCycleReport,
 } from '@principles/host-runtime';
 import { WORKBUDDY_TOOL_SEMANTICS, WORKBUDDY_TOOL_SEMANTIC_MAPPINGS } from '../tool-semantics.js';
 
@@ -74,6 +78,8 @@ export interface WorkbuddyWorkerCycleStepReport {
     readonly nextAction?: string;
   } | null;
   readonly downstream: InternalizationConsumerCycleOutcome | null;
+  /** Phase B Stage-2 review step (always last, ≤2 candidates / ≤60s aggregate). */
+  readonly stage2?: Stage2CorrectionCycleReport;
 }
 
 export interface WorkbuddyWorkerCycleResult {
@@ -91,6 +97,9 @@ export interface WorkbuddyWorkerCycleOptions {
   readonly emitEvent?: (event: string, payloadJson: string) => void;
   /** Cap on diagnostician candidates inspected per cycle (default 5). */
   readonly diagnosticianCandidateLimit?: number;
+  /** Stage-2 classifier injection (tests); undefined = resolve from config. */
+  readonly stage2Classifier?: SignalLlmClassifier | null;
+  readonly stage2AggregateBudgetMs?: number;
 }
 
 const WORKER_OWNER = 'companion-worker';
@@ -269,17 +278,39 @@ export async function runWorkbuddyWorkspaceWorkerCycle(options: WorkbuddyWorkerC
     hostKinds: ['workbuddy'],
   });
 
+  // Step 7 (SPEC v0.3.1 §2) — Stage-2 correction review, ALWAYS last.
+  const stage2Resolution = options.stage2Classifier === undefined
+    ? createSignalClassifierForWorkspace(workspaceDir)
+    : null;
+  const stage2Classifier = options.stage2Classifier !== undefined
+    ? options.stage2Classifier
+    : (stage2Resolution?.ok === true ? stage2Resolution.classifier : null);
+  const stage2ClassifierState = options.stage2Classifier === null
+    ? 'disabled'
+    : stage2Classifier === null
+      ? (stage2Resolution !== null && !stage2Resolution.ok && stage2Resolution.readiness === 'disabled' ? 'disabled' : 'unavailable')
+      : 'used';
+  const stage2 = await runStage2CorrectionCycle({
+    workspaceDir,
+    classifier: stage2Classifier,
+    classifierState: stage2ClassifierState,
+    ...(options.stage2AggregateBudgetMs !== undefined ? { aggregateBudgetMs: options.stage2AggregateBudgetMs } : {}),
+    ...(options.now !== undefined ? { now: options.now } : {}),
+    onEvent: emitEvent,
+  });
+
   const degradedReason: string | undefined
     = !reconcile.ok ? `reconcile:${reconcile.reason ?? 'failed'}`
     : !admission.ok ? `admission:${admission.reason ?? 'failed'}`
     : diagnostician?.status === 'failed' && diagnostician.errorCategory !== 'lease_conflict' ? `diagnostician_failed:${diagnostician.message ?? 'max_attempts_exceeded'}`
     : diagnostician?.status === 'degraded' ? `diagnostician_degraded:${diagnostician.message ?? 'unknown'}`
     : downstream.skipReason === 'runtime_config_error' || downstream.skipReason === 'cycle_error' || downstream.skipReason === 'config_malformed' ? `downstream:${downstream.skipReason}`
+    : !stage2.ok ? `stage2:${stage2.reason ?? 'failed'}`
     : undefined;
   return {
     ...base,
     mode: degradedReason !== undefined ? 'degraded' : 'ready',
     ...(degradedReason !== undefined ? { reason: degradedReason, nextAction: 'Inspect the governance workspace .pd/config.yaml runtime profile and the per-step report above; the worker retries automatically on the next cycle.' } : {}),
-    report: { reconcile, admission, diagnostician, downstream },
+    report: { reconcile, admission, diagnostician, downstream, stage2 },
   };
 }

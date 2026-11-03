@@ -2272,6 +2272,11 @@ export {
   collectSync,
   mapLlmResultToOutput,
   buildEvidence,
+  STAGE2_CONFIRM_THRESHOLD,
+  STAGE2_NONE_THRESHOLD,
+  STAGE2_MAX_ATTEMPTS,
+  PENDING_CANDIDATE_TTL_MS,
+  evaluateStage2ConfidenceGate,
 } from './signal-collector/index.js';
 export type {
   KeywordCategory,
@@ -2290,6 +2295,9 @@ export type {
   PayloadResolveResult,
   ClassifierPayloadPath,
   SignalClassificationOutputV1,
+  Stage2GateVerdict,
+  Stage2GateResult,
+  Stage2Thresholds,
 } from './signal-collector/index.js';
 
 // Intervention Evidence — PD v2 Phase 1 Evidence Foundation (ADR-0027).

@@ -39,6 +39,7 @@ let workspaceDir: string;
 
 beforeEach(() => {
   workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-gov-admission-'));
+  seededObservationKeys.clear();
   fs.mkdirSync(path.join(workspaceDir, '.state'), { recursive: true });
   const sqlite = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
   for (const statement of BASELINE_DDL) sqlite.prepare(statement).run();
@@ -119,8 +120,59 @@ function toolFailure(overrides: Partial<GovernanceToolFailureCandidate> = {}): G
   };
 }
 
+/**
+ * Production precondition: Codex admission only receives a correction after
+ * ingestion has persisted the triggering user observation. Seed the same
+ * durable row here so the suite exercises the real evidence path instead of
+ * the retired `governance_observation:<key>` fabrication. Without a persisted
+ * row, admission correctly degrades to `observation_only`.
+ */
+const seededObservationKeys = new Set<string>();
+
+function seedCodexEvidence(candidate: GovernanceCorrectionCandidate): void {
+  if (candidate.hostKind !== 'codex') return;
+  if (seededObservationKeys.has(candidate.logicalObservationKey)) return;
+  ingestGovernanceObservations({
+    workspaceDir,
+    rollout: {
+      hostKind: 'codex',
+      rolloutIdentity: candidate.rolloutIdentity,
+      rootSessionId: candidate.rootSessionId,
+    },
+    observations: [{
+      hostKind: 'codex',
+      rolloutIdentity: candidate.rolloutIdentity,
+      rootSessionId: candidate.rootSessionId,
+      hostTurnId: candidate.hostTurnId,
+      kind: 'user_turn',
+      logicalObservationKey: candidate.logicalObservationKey,
+      visibleText: candidate.text,
+      source: 'live_hook',
+      completeness: 'complete',
+      observedAt: NOW.toISOString(),
+    }],
+    now: NOW,
+  });
+  seededObservationKeys.add(candidate.logicalObservationKey);
+}
+
 function admit(candidates: readonly (GovernanceCorrectionCandidate | GovernanceToolFailureCandidate)[], now: Date = NOW) {
+  for (const candidate of candidates) {
+    if (candidate.kind === 'user_correction') seedCodexEvidence(candidate);
+  }
   return admitGovernanceSignals({ workspaceDir, candidates, now, keywordStore: buildSharedSeedKeywordStore() });
+}
+
+/** Same production precondition, but with an explicit keyword store (rule-version tests). */
+function admitDirect(
+  candidates: readonly (GovernanceCorrectionCandidate | GovernanceToolFailureCandidate)[],
+  keywordStore?: ReturnType<typeof buildSharedSeedKeywordStore>,
+  now: Date = NOW,
+) {
+  for (const candidate of candidates) {
+    if (candidate.kind === 'user_correction') seedCodexEvidence(candidate);
+  }
+  return admitGovernanceSignals({ workspaceDir, candidates, now, ...(keywordStore !== undefined ? { keywordStore } : {}) });
 }
 
 it('adds nullable tool-call project scope to legacy trajectory schema without assigning old rows a cwd', () => {
@@ -212,7 +264,7 @@ describe('shared correction detector (SPEC §12)', () => {
   });
 });
 
-describe('earned precision (PRI-788 G3)', () => {
+describe('learned keyword gate — PRI-788 G3 reversal (SPEC v0.3 §3.2.3)', () => {
   // 单调递增的测试 mtime：Date.now() 粒度可能粗于两次写入间隔，若两次调用拿到
   // 同一个值，文件缓存不会失效、重新加载行为不被验证，断言会随机失败。
   let learnerMtimeMs = 0;
@@ -237,27 +289,48 @@ describe('earned precision (PRI-788 G3)', () => {
     return resolved.terms[term];
   }
 
-  it('llm-learned term with TP>=3 and zero FP earns high precision; any FP keeps it ambiguous', () => {
+  it('llm-learned terms never earn high precision, regardless of TP/FP history', () => {
     writeLearnerFile([
-      { term: '先确认再改', weight: 0.8, source: 'llm', truePositiveCount: 3, falsePositiveCount: 0 },
+      // 历史上完美的计数也不再获得 STRONG 直通（D5 逆转）。
+      { term: '先确认再改', weight: 0.8, source: 'llm', truePositiveCount: 30, falsePositiveCount: 0 },
       { term: '又错了', weight: 0.8, source: 'llm', truePositiveCount: 2, falsePositiveCount: 0 },
       { term: '重来', weight: 0.8, source: 'llm', truePositiveCount: 5, falsePositiveCount: 1 },
     ]);
-    expect(resolveTerm('先确认再改')?.precision).toBe('high');
-    expect(resolveTerm('又错了')?.precision).toBe('ambiguous');
-    expect(resolveTerm('重来')?.precision).toBe('ambiguous');
+    for (const term of ['先确认再改', '又错了', '重来']) {
+      expect(resolveTerm(term)?.precision).toBe('ambiguous');
+    }
   });
 
-  it('llm term below the TP threshold stays ambiguous; losing evidence demotes a previously earned term', () => {
+  it('learned term is a Stage-2 candidate but the sync admission path never creates Pain', () => {
     writeLearnerFile([
       { term: '先确认再改', weight: 0.8, source: 'llm', truePositiveCount: 3, falsePositiveCount: 0 },
     ]);
-    expect(resolveTerm('先确认再改')?.precision).toBe('high');
+    const detection = evaluateCorrectionSignal({
+      workspaceDir,
+      text: '先确认再改这个文件',
+      sessionId: 's1',
+      detectedAt: NOW.toISOString(),
+    });
+    // 学习词仍能进入候选（可被 Stage 2 看到）……
+    expect(detection.output.matchedPrecision).toBe('ambiguous');
+    expect(detection.output.matchedTerms).toContain('先确认再改');
+    // ……但同步高精度路径不产生 STRONG，因此不产生 Pain。
+    expect(detection.output.isSignal).toBe(false);
+    const result = admitDirect([correction({ text: '先确认再改这个文件', logicalObservationKey: 'codex|r1|t1|user', rolloutIdentity: 'r1' })]);
+    expect(result.ok).toBe(true);
+    // 学习词现在成为可审计的 pending 候选（Stage 2 优先候选），仍不产生 Pain。
+    expect(result.outcomes?.[0]).toMatchObject({ disposition: 'pending_llm_review' });
+    expect(withTrajectory((db) => db.prepare('SELECT COUNT(*) AS n FROM pain_events').get())).toEqual({ n: 0 });
+    expect(withTrajectory((db) => db.prepare('SELECT decision FROM governance_signal_admissions').all())).toEqual([{ decision: 'pending_llm_review' }]);
+  });
 
+  it('low-evidence learned terms stay gated (no bypass of the existing precision rules)', () => {
     writeLearnerFile([
-      { term: '先确认再改', weight: 0.8, source: 'llm', truePositiveCount: 3, falsePositiveCount: 2 },
+      { term: '先确认再改', weight: 0.8, source: 'llm', truePositiveCount: 3, falsePositiveCount: 0 },
+      { term: '低质量词', weight: 0.3, source: 'user' },
     ]);
     expect(resolveTerm('先确认再改')?.precision).toBe('ambiguous');
+    expect(resolveTerm('低质量词')?.precision).toBe('ambiguous');
   });
 
   it('非整数/负数/越界计数不通过校验，词项被拒绝（不能借伪造证据进 high）', () => {
@@ -266,13 +339,13 @@ describe('earned precision (PRI-788 G3)', () => {
       { term: '伪造证据', weight: 0.8, source: 'llm', truePositiveCount: 3.1, falsePositiveCount: 0 },
       { term: '负证据', weight: 0.8, source: 'llm', truePositiveCount: 9, falsePositiveCount: -1 },
       { term: '越界证据', weight: 0.8, source: 'llm', truePositiveCount: Number.MAX_SAFE_INTEGER + 1, falsePositiveCount: 0 },
-      // 合法整数计数仍照常升 high
+      // 合法整数计数通过校验，但学习词仍只作候选（G3 逆转）
       { term: '先确认再改', weight: 0.8, source: 'llm', truePositiveCount: 3, falsePositiveCount: 0 },
     ]);
     expect(resolveTerm('伪造证据')).toBeUndefined();
     expect(resolveTerm('负证据')).toBeUndefined();
     expect(resolveTerm('越界证据')).toBeUndefined();
-    expect(resolveTerm('先确认再改')?.precision).toBe('high');
+    expect(resolveTerm('先确认再改')?.precision).toBe('ambiguous');
   });
 
   it('owner-promoted terms keep the weight-based rule (Owner decision not gated by evidence)', () => {
@@ -294,9 +367,79 @@ describe('earned precision (PRI-788 G3)', () => {
     });
     expect(detection.output.matchedPrecision).toBe('high');
     expect(detection.output.strength).toBe('STRONG');
-    for (const seed of ['我说的是', '不是让你', '谁让你', '又搞错', '都说了']) {
+    for (const seed of ['不是让你', '谁让你', '又搞错']) {
       expect(buildSharedSeedKeywordStore().terms[seed]?.precision).toBe('high');
     }
+    // SPEC v0.3 §3.2.1：口语高频/可嵌入引用的两个句式降级为候选，不再直通。
+    for (const seed of ['我说的是', '都说了']) {
+      expect(buildSharedSeedKeywordStore().terms[seed]?.precision).toBe('ambiguous');
+    }
+  });
+});
+
+describe('P-1 semantic guards on the shared Codex/WorkBuddy detector (SPEC v0.3 §3.2.2)', () => {
+  it('`他说这是错的` never reaches STRONG through the bare-substring Codex path', () => {
+    const detection = evaluateCorrectionSignal({
+      workspaceDir,
+      text: '他说这是错的',
+      sessionId: 's1',
+      detectedAt: NOW.toISOString(),
+      store: buildSharedSeedKeywordStore(),
+    });
+    expect(detection.output.isSignal).toBe(false);
+    expect(detection.output.matchedPrecision).toBe('ambiguous');
+    expect(detection.output.matchedTerms).toContain('这是错的');
+  });
+
+  it('quoted third-party words alone are not a candidate at all', () => {
+    const detection = evaluateCorrectionSignal({
+      workspaceDir,
+      text: '他说“这是错的”，但我不确定',
+      sessionId: 's1',
+      detectedAt: NOW.toISOString(),
+      store: buildSharedSeedKeywordStore(),
+    });
+    expect(detection.output.isSignal).toBe(false);
+    expect(detection.output.matchedTerms).toEqual([]);
+  });
+
+  it('downgraded colloquial terms stay candidates, never STRONG', () => {
+    for (const text of ['我说的是这个文件', '都说了别改这个']) {
+      const detection = evaluateCorrectionSignal({
+        workspaceDir,
+        text,
+        sessionId: 's1',
+        detectedAt: NOW.toISOString(),
+        store: buildSharedSeedKeywordStore(),
+      });
+      expect(detection.output.isSignal).toBe(false);
+      expect(detection.output.matchedPrecision).toBe('ambiguous');
+    }
+  });
+
+  it('ordinary requirement changes produce no signal and no candidate', () => {
+    const detection = evaluateCorrectionSignal({
+      workspaceDir,
+      text: '请把按钮改成蓝色',
+      sessionId: 's1',
+      detectedAt: NOW.toISOString(),
+      store: buildSharedSeedKeywordStore(),
+    });
+    expect(detection.output.isSignal).toBe(false);
+    expect(detection.output.matchedTerms).toEqual([]);
+  });
+
+  it('an inconsistent Codex lineage is refused by PainIngress: zero Pain, terminal abandoned marker', () => {
+    // rc-6: the logical key does not embed this rollout identity.
+    const result = admit([correction({
+      text: '这是错的',
+      rolloutIdentity: 'rollout-actual',
+      logicalObservationKey: 'codex|rollout-other|turn-9|user',
+    })]);
+    expect(result.ok).toBe(true);
+    expect(result.outcomes?.[0]).toMatchObject({ disposition: 'abandoned', reason: 'lineage_mismatch' });
+    expect(withTrajectory((db) => db.prepare('SELECT COUNT(*) AS n FROM pain_events').get())).toEqual({ n: 0 });
+    expect(withTrajectory((db) => db.prepare('SELECT decision, reason FROM governance_signal_admissions').get())).toEqual({ decision: 'abandoned', reason: 'lineage_mismatch' });
   });
 });
 
@@ -480,9 +623,9 @@ describe('persisted STRONG rate-limit bucket (SPEC §12 / ADR-0020 §11.3)', () 
     const storeV2 = buildSharedSeedKeywordStore();
     const storeV3 = { ...storeV2, version: 3 };
     for (let i = 0; i < GOVERNANCE_STRONG_RATE_LIMIT_PER_HOUR; i += 1) {
-      admitGovernanceSignals({ workspaceDir, candidates: [correction({ text: '不要自作主张,版本切换是错的', logicalObservationKey: `codex|rollout-1|turn-w${i}|user`, hostTurnId: `turn-w${i}` })], now: NOW, keywordStore: storeV2 });
+      admitDirect([correction({ text: '不要自作主张,版本切换是错的', logicalObservationKey: `codex|rollout-1|turn-w${i}|user`, hostTurnId: `turn-w${i}` })], storeV2);
     }
-    const result = admitGovernanceSignals({ workspaceDir, candidates: [correction({ text: '不要自作主张,版本切换是错的', logicalObservationKey: 'codex|rollout-1|turn-v9|user', hostTurnId: 'turn-v9' })], now: NOW, keywordStore: storeV3 });
+    const result = admitDirect([correction({ text: '不要自作主张,版本切换是错的', logicalObservationKey: 'codex|rollout-1|turn-v9|user', hostTurnId: 'turn-v9' })], storeV3);
     expect(result.outcomes?.[0]).toMatchObject({ disposition: 'admitted' });
   });
 
@@ -496,8 +639,9 @@ describe('persisted STRONG rate-limit bucket (SPEC §12 / ADR-0020 §11.3)', () 
     // Warm up the governance schema with a no-write admission (ordinary text)
     // so the assertions below can read the tables regardless of lock outcome.
     admit([correction({ text: '普通预热', logicalObservationKey: 'codex|rollout-1|turn-warm|user', hostTurnId: 'turn-warm' })]);
-    // Hold an exclusive write lock so the admission transaction cannot commit;
-    // whatever it may have staged (bucket + pain) must roll back entirely.
+    // Production precondition seeded BEFORE the lock: the admission transaction
+    // itself must fail under the exclusive writer and roll back completely.
+    seedCodexEvidence(correction());
     const blocker = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
     try {
       blocker.pragma('busy_timeout = 50');
@@ -710,7 +854,9 @@ describe('diagnostician continuation (SPEC §13)', () => {
       state.close();
     }
     const parsed = JSON.parse(diagnosticJson) as Record<string, unknown>;
-    expect(parsed.provenance).toBe('host_context_bound');
+    // SPEC v0.3.1 §1.2: provenance is derived from the ingress facts
+    // (automatic hook), never hardcoded to host_context_bound.
+    expect(parsed.provenance).toBe('automatic_hook');
     expect(parsed.hostKind).toBe('codex');
     const evidence = parsed.evidence as { sourceRef: string; note: string }[];
     // SanitizeString bounds to MAX_EVIDENCE_VALUE_CHARS + '___TRUNCATED___' (200 + 13 = 213).
@@ -943,6 +1089,15 @@ describe('P1-1 privacy: raw correction secrets sanitized before persistence (SPE
 describe('P1-2 continuation crash recovery (SPEC §13)', () => {
   it('promotion failure remains visible but does not block task recovery', async () => {
     admit([correction()]);
+    // Simulate a legacy marker admitted before the evidence-backed contract: the
+    // durable observation is gone, so promotion has no rollout substrate. The
+    // marker itself stays durable and the task must still be created.
+    const writable = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+    try {
+      writable.prepare('DELETE FROM governance_rollouts WHERE rollout_identity = ?').run('rollout-1');
+    } finally {
+      writable.close();
+    }
     const first = await reconcileGovernanceContinuation({ workspaceDir, conversationIngestionEnabled: true });
     expect(first.ok).toBe(false);
     expect(first.degradations.some((entry) => entry.includes('rollout_not_found'))).toBe(true);
@@ -951,6 +1106,16 @@ describe('P1-2 continuation crash recovery (SPEC §13)', () => {
       .not.toEqual({ diagnostician_task_id: null });
 
     ingestRollout('turn-1');
+    // Re-bind the surviving observation to the re-ingested rollout row, as the
+    // ingestion store would after healing a partially persisted rollout.
+    const rebind = new Database(path.join(workspaceDir, '.state', 'trajectory.db'));
+    try {
+      rebind.prepare(`UPDATE governance_observations
+        SET rollout_row_id = (SELECT id FROM governance_rollouts WHERE rollout_identity = 'rollout-1')
+        WHERE rollout_identity = 'rollout-1'`).run();
+    } finally {
+      rebind.close();
+    }
     const recovered = await reconcileGovernanceContinuation({ workspaceDir, conversationIngestionEnabled: true });
     expect(recovered.ok).toBe(true);
     expect(recovered.tasksEnsured).toBe(0);
