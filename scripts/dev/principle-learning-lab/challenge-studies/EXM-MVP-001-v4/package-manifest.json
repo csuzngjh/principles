@@ -87,7 +87,7 @@
       },
       {
         "name": "challenge-runner.mjs",
-        "sha256": "b5d22214cd73ed532c9a671db7c6a999e45c863df15f3d7215da92ae531186ec"
+        "sha256": "6cbdf0ceac6d4e7582e56dd39e9252ecc8fa694153d07328c7908692e9f55e05"
       },
       {
         "name": "challenge-skeleton.mjs",
@@ -210,7 +210,7 @@
     },
     {
       "path": "blind-review/receipts.template.json",
-      "sha256": "b225f030cdc5aa45a65053982be2acd6571c5d0b86f3db3eb8b2745aa84ef9c0"
+      "sha256": "97de69338f3be4008f2b17f5ebce36f918cfa1fa908530f42a41f072987b8275"
     },
     {
       "path": "blind-review/review-form.json",
@@ -218,7 +218,7 @@
     },
     {
       "path": "expected-replay.json",
-      "sha256": "a69110eb9babf46722c36338899a4ffcd949a0162b8011e7ebb2e4755231d408"
+      "sha256": "12aef14c31c43219a83840df5d4c725e32cc8fa869c61e2fb9857e7f51902e57"
     },
     {
       "path": "gold-review.json",
@@ -262,7 +262,7 @@
     },
     {
       "path": "review-subject.json",
-      "sha256": "f372053cac8d26a6a4904a880786eb1536233b6a943c1e64000ea8520b4c91d9"
+      "sha256": "d01028655150c66ce9bc97a35d8543080b25c29cd3b1fc9a3c96d7460c596a48"
     },
     {
       "path": "revision.json",
@@ -277,5 +277,5 @@
       "sha256": "8c96f68ebfcd0ff71c1625cef036d6ef7f4f82785a303f45ff4a45952df9185c"
     }
   ],
-  "packageHash": "bf05ea62ea05cb9c3f1101ef179627b0e05f4e2933ee6d01fa5b329b49ab732a"
+  "packageHash": "39e6a4a12f6a44e3bbeb5fccd85eac6df80ea69266e534c49b5f805e6d731623"
 }
