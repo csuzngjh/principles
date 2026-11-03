@@ -42,13 +42,16 @@ export interface PainSettings {
     thresholds: {
         pain_trigger: number;
         cognitive_paralysis_input: number;
-        stuck_loops_trigger: number;
+        // Pain Phase 0: stuck_loops_trigger retired with the LLM Paralysis
+        // pain trigger (its only consumer); old pain_settings.json files
+        // carrying the key still load — unknown keys are ignored.
         semantic_min_score: number;
         promotion_count_threshold: number;
         promotion_similarity_threshold: number;
     };
     scores: {
-        paralysis: number;
+        // Pain Phase 0: scores.paralysis retired with the LLM Paralysis pain
+        // trigger (its only consumer); old config files still load.
         default_confusion: number;
         default_loop: number;
         tool_failure_friction: number;
@@ -112,13 +115,13 @@ export const DEFAULT_SETTINGS: PainSettings = {
     thresholds: {
         pain_trigger: 40, // Increased tolerance before forcing a stop
         cognitive_paralysis_input: 4000,
-        stuck_loops_trigger: 4, // Allow more retries before calling it a loop
+        // Pain Phase 0: stuck_loops_trigger / scores.paralysis defaults
+        // retired with the LLM Paralysis pain trigger (their only consumers).
         semantic_min_score: 0.7,
         promotion_count_threshold: 3,
         promotion_similarity_threshold: 0.8
     },
     scores: {
-        paralysis: 45, // Must be >= pain_trigger (40) so llm_paralysis can trigger diagnosis (PRI-274)
         default_confusion: 30,
         default_loop: 40,
         tool_failure_friction: 15, // Reduced from 30. A failing tool shouldn't instantly cripple the AI

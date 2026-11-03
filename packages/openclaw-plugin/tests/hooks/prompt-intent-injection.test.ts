@@ -120,7 +120,8 @@ vi.mock('../../src/hooks/trigger-cooldown-tracker.js', () => ({
 }));
 
 vi.mock('../../src/hooks/raw-observation-adapter.js', () => ({
-  buildEmpathyObservation: vi.fn(),
+  // Pain Phase 0: buildEmpathyObservation mock key removed with the retired
+  // builder (zero production callers).
   resolveSourceKind: vi.fn().mockReturnValue('unknown'),
 }));
 

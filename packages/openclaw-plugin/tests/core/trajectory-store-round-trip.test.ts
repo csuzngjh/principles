@@ -131,7 +131,7 @@ describe('trajectory writer→reader path alignment (PRI-753)', () => {
     expect(task?.priority).toBe('medium');
   });
 
-  it('rejecting a sample through the core store records the correction_rejected pain event', () => {
+  it('rejecting a sample through the core store creates NO pain event (Pain Phase 0)', () => {
     const workspaceDir = makeWorkspace();
     const sessionId = 'session-reject';
 
@@ -167,12 +167,22 @@ describe('trajectory writer→reader path alignment (PRI-753)', () => {
 
     const db = new Database(path.join(workspaceDir, '.state', 'trajectory.db'), { readonly: true });
     try {
+      // Pain Phase 0 (SPEC §6.4): sample rejection is learning-quality
+      // feedback, not host Pain — both former writers (plugin
+      // recordCorrectionRejectedPain + core store mirror) were removed, so a
+      // reject must leave pain_events untouched (no row, no duplicate).
       const pain = db
-        .prepare("SELECT source, session_id, host_kind FROM pain_events WHERE source = 'correction_rejected'")
-        .all() as Array<{ source: string; session_id: string; host_kind: string | null }>;
-      expect(pain).toHaveLength(1);
-      expect(pain[0]?.session_id).toBe(sessionId);
-      expect(pain[0]?.host_kind).toBe('openclaw');
+        .prepare("SELECT source, session_id FROM pain_events WHERE source = 'correction_rejected'")
+        .all() as Array<{ source: string; session_id: string }>;
+      expect(pain).toHaveLength(0);
+
+      // The review decision + reason remain the durable learning record.
+      const reviews = db
+        .prepare('SELECT sample_id, review_status, note FROM sample_reviews')
+        .all() as Array<{ sample_id: string; review_status: string; note: string | null }>;
+      expect(reviews).toHaveLength(1);
+      expect(reviews[0]?.review_status).toBe('rejected');
+      expect(reviews[0]?.note).toBe('bad fix');
     } finally {
       db.close();
     }
