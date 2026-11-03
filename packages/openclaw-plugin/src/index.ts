@@ -14,7 +14,9 @@ import type {
   PluginHookBeforeMessageWriteEvent,
 } from './openclaw-sdk.js';
 import * as path from 'path';
+import * as os from 'os';
 import { loadFeatureFlagFromConfig } from './core/pd-config-loader.js';
+import { ensureMcpBinding } from './core/mcp-binding.js';
 import { scheduleTelemetryExportForWorkspace } from './core/product-telemetry-trigger.js';
 import { checkConversationAccessConfig, getPluginEntry, ensureConversationAccessInConfig, isExplicitConversationAccessOptOut } from './core/config-health.js';
 export { checkConversationAccessConfig, getPluginEntry, ensureConversationAccessInConfig, isExplicitConversationAccessOptOut } from './core/config-health.js';
@@ -174,6 +176,21 @@ const plugin = {
         api.logger.error(`[PD:health] Tool hook events will be written to the WRONG .state directory!`);
       } else {
         api.logger.info(`[PD:health] Tool hook workspaceDir OK: "${toolWorkspaceDir}"`);
+        // Gate 4 (PRI-1071): keep the launcher binding in lockstep with the
+        // SAME resolved workspace the hooks use — written only when it
+        // changed; failure degrades to a warning (MCP stays fail-closed at
+        // launch, PD's other functions are unaffected).
+        try {
+          const extensionRoot = PathResolver.getExtensionRoot() ?? process.cwd();
+          const bindingOutcome = ensureMcpBinding(toolWorkspaceDir, extensionRoot, os.homedir());
+          if (bindingOutcome.ok && bindingOutcome.written) {
+            api.logger.info('[PD:health] mcp-binding.json updated for the pd-recall MCP server (restart the gateway to apply)');
+          } else if (!bindingOutcome.ok && bindingOutcome.reason !== 'mcp_server_component_missing') {
+            api.logger.warn(`[PD:health] mcp-binding update skipped: ${bindingOutcome.reason}`);
+          }
+        } catch (err) {
+          api.logger.warn(`[PD:health] mcp-binding update failed: ${String(err instanceof Error ? err.message : err)}`);
+        }
       }
 
       // PRI-343: Check allowConversationAccess — auto-fix if missing/false, warn if fix fails.

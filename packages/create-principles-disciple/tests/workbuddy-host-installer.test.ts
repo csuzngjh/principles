@@ -295,8 +295,40 @@ describe('WorkBuddyHostInstaller.install — engine registration path', () => {
     expect(created.installer.detectDetails().governanceInitialized).toBe(true);
   });
 
-  it('merges the workbuddy host into an existing manifest without dropping codex/openclaw or unknown keys', async () => {
+  it('writes the pd-recall MCP binding into the marketplace payload when the server component is deployed (Gate 4)', async () => {
     const created = lab();
+    // Simulate installBundledMcpServer having deployed the shared component.
+    const mcpEntry = path.join(created.home, '.pd', 'runtime', 'pd-mcp-server', 'dist', 'index.js');
+    fs.mkdirSync(path.dirname(mcpEntry), { recursive: true });
+    fs.writeFileSync(mcpEntry, '// fabricated MCP server entry\n');
+    fs.writeFileSync(
+      path.join(created.home, '.pd', 'runtime', 'pd-mcp-server', 'package.json'),
+      JSON.stringify({ name: '@principles/pd-mcp-server', version: '0.1.0' }, null, 2),
+    );
+
+    const result = await created.installer.install(installCtx(created));
+    expect(result.success).toBe(true);
+    expect(result.reason).toContain('pd-recall MCP binding written');
+
+    const binding = readJson(path.join(created.home, '.pd', 'workbuddy-marketplace', 'principles-disciple', 'mcp-binding.json'));
+    expect(binding.schemaVersion).toBe('pd.mcp-binding.v1');
+    expect(binding.host).toBe('workbuddy');
+    // Frozen governance workspace SSoT (getWorkbuddyWorkspaceDir).
+    expect(binding.workspaceDir).toBe(path.join(created.home, '.workbuddy', 'pd-workspace'));
+    expect(binding.serverEntry).toBe(mcpEntry);
+    expect(binding.versions).toMatchObject({ mcpServer: '0.1.0' });
+  });
+
+  it('skips the MCP binding with a structured note when the server component is absent (G4-07)', async () => {
+    const created = lab();
+    const result = await created.installer.install(installCtx(created));
+    expect(result.success).toBe(true);
+    expect(result.reason).toContain('pd-recall MCP binding skipped');
+    expect(result.reason).toContain('mcp_server_component_missing');
+    expect(fs.existsSync(path.join(created.home, '.pd', 'workbuddy-marketplace', 'principles-disciple', 'mcp-binding.json'))).toBe(false);
+  });
+
+  it('merges the workbuddy host into an existing manifest without dropping codex/openclaw or unknown keys', async () => {    const created = lab();
     fs.mkdirSync(path.join(created.home, '.pd'), { recursive: true });
     // The manifest validator requires ABSOLUTE workspace paths, and
     // `path.isAbsolute` is platform-dependent: the hard-coded 'D:/elsewhere/ws'

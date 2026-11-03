@@ -1221,6 +1221,40 @@ function materializeMarketplace(marketplaceRoot: string, pluginDir: string): voi
   cpSync(pluginDir, path.join(marketplaceRoot, WORKBUDDY_PLUGIN_NAME), { recursive: true });
 }
 
+/**
+ * Gate 4 (PRI-1071): write the launcher binding into the marketplace payload
+ * copy — the frozen governance workspace (getWorkbuddyWorkspaceDir SSoT) and
+ * the canonical installed MCP server entry. Written only when the server
+ * component exists (an older runtime without it stays honestly absent; the
+ * launcher then fails closed with binding_missing — equally recoverable by
+ * re-running the installer). A failure degrades to a structured note (G4-07:
+ * MCP unavailability must not break the WorkBuddy host install).
+ */
+function writeWorkbuddyMcpBinding(marketplaceRoot: string, homeDir: string): { ok: boolean; reason?: string } {
+  try {
+    const layout = getInstallLayoutPaths(homeDir);
+    const serverEntry = path.join(layout.runtimeDir, 'pd-mcp-server', 'dist', 'index.js');
+    if (!existsSync(serverEntry)) return { ok: false, reason: 'mcp_server_component_missing' };
+    let mcpServerVersion = 'unknown';
+    try {
+      const manifest = JSON.parse(readFileSync(path.join(layout.runtimeDir, 'pd-mcp-server', 'package.json'), 'utf-8')) as { version?: unknown };
+      if (typeof manifest.version === 'string') mcpServerVersion = manifest.version;
+    } catch { /* version stays unknown (rc-3: never coerce) */ }
+    const binding = {
+      schemaVersion: 'pd.mcp-binding.v1',
+      host: 'workbuddy',
+      workspaceDir: getWorkbuddyWorkspaceDir(homeDir),
+      serverEntry,
+      versions: { mcpServer: mcpServerVersion },
+      writtenAt: new Date().toISOString(),
+    };
+    writeFileSync(path.join(marketplaceRoot, WORKBUDDY_PLUGIN_NAME, 'mcp-binding.json'), JSON.stringify(binding, null, 2) + '\n', 'utf-8');
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, reason: `write_failed:${error instanceof Error ? error.message.slice(0, 120) : String(error).slice(0, 120)}` };
+  }
+}
+
 export class WorkBuddyHostInstaller implements HostInstaller {
   readonly hostId = 'workbuddy';
 
@@ -1368,6 +1402,11 @@ export class WorkBuddyHostInstaller implements HostInstaller {
       };
     }
 
+    // 4b. Gate 4 (PRI-1071): bind the pd-recall MCP launcher to the frozen
+    // governance workspace. Degrades to a note — the host install itself is
+    // unaffected when the MCP component is missing or the write fails.
+    const mcpBinding = writeWorkbuddyMcpBinding(p.marketplaceRoot, this.deps.homeDir());
+
     // 5. Register: engine commands first; observable direct-write fallback.
     const registration = this.registerPlugin(details, payload.version);
     if (!registration.ok) {
@@ -1477,7 +1516,7 @@ export class WorkBuddyHostInstaller implements HostInstaller {
             keywordPainEnabled: !governanceDefaults.keywordExplicitOff,
             configPath: governanceDefaults.configPath,
           },
-      reason: `Registered ${WORKBUDDY_PLUGIN_KEY} via ${registration.mode}${registration.mode === 'engine' ? '' : ` (engine unreachable: ${registration.engineNote})`}. Governance workspace initialized at ${p.governanceDir}${governance.dbInit === 'skipped' ? ` (${governance.note})` : ''}.${profileNote}${governanceDefaultsNote}`,
+      reason: `Registered ${WORKBUDDY_PLUGIN_KEY} via ${registration.mode}${registration.mode === 'engine' ? '' : ` (engine unreachable: ${registration.engineNote})`}. Governance workspace initialized at ${p.governanceDir}${governance.dbInit === 'skipped' ? ` (${governance.note})` : ''}.${profileNote}${governanceDefaultsNote}${mcpBinding.ok ? ' pd-recall MCP binding written.' : ` pd-recall MCP binding skipped (${mcpBinding.reason ?? 'unknown'}).`}`,
       // PRI-1063 copy (single-line flat-key flow mapping) carried over from
       // main; the "Existing workspaces retain their prior settings" sentence is
       // deliberately dropped — PRI-1064 turns governance ON for those

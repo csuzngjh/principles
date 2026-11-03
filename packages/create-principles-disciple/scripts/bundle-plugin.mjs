@@ -103,6 +103,13 @@ const CODEX_ADAPTER_DEST = join(OUTPUT_ROOT, 'codex-adapter');
 const WORKBUDDY_ADAPTER_SRC = join(ROOT_DIR, 'packages', 'workbuddy-adapter');
 const WORKBUDDY_ADAPTER_DEST = join(OUTPUT_ROOT, 'workbuddy-adapter');
 const WORKBUDDY_ADAPTER_PRESENT = existsSync(join(WORKBUDDY_ADAPTER_SRC, 'package.json'));
+// Gate 4 (PRI-1071): the shared MCP server bundles as a runtime sibling like
+// codex-adapter. Same PRESENT gate convention — the package exists in the
+// source tree from Gate 4-B on, so a missing manifest here means a broken
+// checkout, and the loud skip keeps pre-integration baselines bundling.
+const MCP_SERVER_SRC = join(ROOT_DIR, 'packages', 'pd-mcp-server');
+const MCP_SERVER_DEST = join(OUTPUT_ROOT, 'pd-mcp-server');
+const MCP_SERVER_PRESENT = existsSync(join(MCP_SERVER_SRC, 'package.json'));
 const INSTALL_LAYOUT_SRC = join(ROOT_DIR, 'packages', 'install-layout');
 const INSTALL_LAYOUT_DEST = join(OUTPUT_ROOT, 'install-layout');
 // PRI-672: the ReleaseManager authority module ships as its own payload
@@ -182,6 +189,12 @@ const WORKBUDDY_ADAPTER_REQUIRED = [
 ];
 
 const INSTALL_LAYOUT_REQUIRED = [
+  'dist',
+  'dist/index.js',
+  'package.json',
+];
+
+const MCP_SERVER_REQUIRED = [
   'dist',
   'dist/index.js',
   'package.json',
@@ -345,6 +358,20 @@ if (WORKBUDDY_ADAPTER_PRESENT) {
   log('  ⚠️  packages/workbuddy-adapter is NOT present in this source tree — bundling WITHOUT the WorkBuddy host payload.');
   log('      Installs from this build cannot serve --host workbuddy (the host installer reports workbuddy_adapter_payload_missing).');
   log('      This is expected only on pre-integration baselines; release builds MUST carry the component.');
+}
+
+if (MCP_SERVER_PRESENT) {
+  for (const item of MCP_SERVER_REQUIRED) {
+    const src = join(MCP_SERVER_SRC, item);
+    if (!existsSync(src)) {
+      console.error(`❌ Required pd-mcp-server item not found: ${src}`);
+      console.error('   Run: cd packages/pd-mcp-server && npm run build');
+      process.exit(1);
+    }
+  }
+} else {
+  log('  ⚠️  packages/pd-mcp-server is NOT present in this source tree — bundling WITHOUT the MCP server component (Gate 4).');
+  log('      Installs from this build cannot serve the pd-recall MCP tool; hosts report the server entry missing (fail-closed).');
 }
 
 if (existsSync(PLUGIN_DEST)) {
@@ -537,6 +564,20 @@ if (WORKBUDDY_ADAPTER_PRESENT) {
     copyPayloadTree(src, join(WORKBUDDY_ADAPTER_DEST, item));
   }
   log(`   WorkBuddy Adapter: ${WORKBUDDY_ADAPTER_DEST}`);
+}
+
+if (MCP_SERVER_PRESENT) {
+  if (existsSync(MCP_SERVER_DEST)) {
+    log('  Removing old pd-mcp-server/ directory...');
+    rmSync(MCP_SERVER_DEST, { recursive: true, force: true });
+  }
+  mkdirSync(MCP_SERVER_DEST, { recursive: true });
+  for (const item of ['dist', 'package.json']) {
+    const src = join(MCP_SERVER_SRC, item);
+    log(`  Copying pd-mcp-server/${item}...`);
+    copyPayloadTree(src, join(MCP_SERVER_DEST, item));
+  }
+  log(`   MCP Server: ${MCP_SERVER_DEST}`);
 }
 
 if (existsSync(INSTALL_LAYOUT_DEST)) {
@@ -739,6 +780,10 @@ rewriteBundledDependency(join(CODEX_ADAPTER_DEST, 'package.json'), 'codex-adapte
 rewriteBundledDependency(join(WORKBUDDY_ADAPTER_DEST, 'package.json'), 'workbuddy-adapter', '@principles/core', 'file:../core');
 rewriteBundledDependency(join(WORKBUDDY_ADAPTER_DEST, 'package.json'), 'workbuddy-adapter', '@principles/host-runtime', 'file:../host-runtime');
 rewriteBundledDependency(join(WORKBUDDY_ADAPTER_DEST, 'package.json'), 'workbuddy-adapter', '@principles/install-layout', 'file:../install-layout');
+// Gate 4 (PRI-1071): the MCP server resolves core from the sibling component;
+// @modelcontextprotocol/server and zod stay registry deps (pinned exact) and
+// materialize per platform at install time. No-op when the component is absent.
+rewriteBundledDependency(join(MCP_SERVER_DEST, 'package.json'), 'pd-mcp-server', '@principles/core', 'file:../core');
 rewriteBundledDependency(join(CONSOLE_DEST, 'package.json'), 'console', '@principles/core', 'file:../core');
 // console statically imports OPENCLAW_HOST_LIVENESS_CONTRACT at runtime for the
 // RuleCode owner live-decision readiness checks. Rewrite to a local file reference
@@ -854,6 +899,12 @@ if (BUILD_SELF_CONTAINED_ASSET) {
     // bundled copy is not requirable from outside the engine.
     ...(WORKBUDDY_ADAPTER_PRESENT
       ? [installBundledRuntimeDependencies(WORKBUDDY_ADAPTER_DEST, 'workbuddy-adapter')]
+      : []),
+    // Gate 4 (PRI-1071): the MCP server ships its own @modelcontextprotocol/
+    // server + zod trees; the file:../core sibling materializes via
+    // --install-links. No-op when the component is absent from this build.
+    ...(MCP_SERVER_PRESENT
+      ? [installBundledRuntimeDependencies(MCP_SERVER_DEST, 'pd-mcp-server')]
       : []),
   ]);
   log('  ✅ plugin ships lean (self-contained dist + its single native module; no core copy)');

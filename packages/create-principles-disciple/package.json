@@ -26,6 +26,7 @@
     "host-runtime",
     "codex-adapter",
     "workbuddy-adapter",
+    "pd-mcp-server",
     "install-layout",
     "release-manager",
     "trust/root.json",
