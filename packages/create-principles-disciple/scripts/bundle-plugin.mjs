@@ -14,6 +14,7 @@ import {
   RELEASE_MANAGER_ENTRY_MODULES,
   RELEASE_MANAGER_KNOWN_ORPHANS,
 } from './release-manager-payload.mjs';
+import { assertConsoleDistFresh } from './console-dist-freshness.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -399,7 +400,24 @@ for (const item of PD_CLI_REQUIRED) {
 // (OPT-001: the console `build` script itself carries --production for the UI step, so every
 // official caller — this script, release-metadata, publish action, reproducibility — ships the
 // minified browser bundle without threading flags; dev iteration and e2e keep calling build:ui.)
-{
+// G3.2: PD_BUNDLE_SKIP_CONSOLE_BUILD=1 lets a release path that has JUST run
+// the official console chain (release-metadata asset legs — the explicit
+// `npm run build --workspace=@principles/pd-console` step right before
+// build:release-asset) skip the second identical build here. It is a skip of
+// a VERIFIED build, never a way to avoid building: assertConsoleDistFresh()
+// fails loud on a missing, incomplete, stale, dev-mode or test-polluted dist.
+// Only release-metadata.yml sets it; reproducibility workflows never do
+// (their two builds must stay fully independent), and manual/local `npm pack`
+// leaves it unset so this script still builds console itself.
+if (process.env.PD_BUNDLE_SKIP_CONSOLE_BUILD === '1') {
+  try {
+    assertConsoleDistFresh(CONSOLE_SRC);
+  } catch (error) {
+    console.error(`❌ ${error.message}`);
+    process.exit(1);
+  }
+  log('  Skipping @principles/pd-console build (PD_BUNDLE_SKIP_CONSOLE_BUILD=1): existing dist verified fresh, complete and production-mode');
+} else {
   const npmCliJs = findNpmCliJs();
   if (!npmCliJs) {
     console.error('❌ npm-cli.js not found next to the running Node binary — cannot build @principles/pd-console before bundling.');
