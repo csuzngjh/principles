@@ -41,7 +41,7 @@
 
 ### 2.2 WorkBuddy 更新失败回滚（第三轮，2026-11-03）
 
-- 场景：真实临时 HOME → 安装 v0.3.0（engine 不可达的 direct-write 路径）→ 创建旧 cache + 有效 `mcp-binding.json` + settings/registry → 修改同版本 payload → **真实故障注入**：`installed_plugins.json` 置只读，使注册提交在「旧 cache 已备份、新 cache 已替换」之后失败。
+- 场景：真实临时 HOME → 安装 v0.3.0（engine 不可达的 direct-write 路径）→ 创建旧 cache + 有效 `mcp-binding.json` + settings/registry → 修改同版本 payload → **真实故障注入**（跨平台真实 OS 失败，无 mock 接缝）：Windows 下 `installed_plugins.json` 置只读使原子 rename 失败；POSIX 下 rename 不受文件只读限制，因此将 registry 所在父目录置非可写，使提交阶段的备份/临时写入失败。两种失败都发生在「旧 cache 已备份、新 cache 已替换」之后。
 - 实测：安装器返回 `workbuddy_registration_commit_failed` 并声明 `Previous cache and registration state restored`；旧 cache 逐文件 sha256 与注入前一致（含 binding），settings/registry sha256 不变；staging 与 cache backup 无残留。
 - 恢复后真实 launcher（cache 内 `mcp/launcher.cjs`，cwd=cache 根）完成 initialize → tools/list（唯一 Tool + readOnlyHint）→ tools/call：旧工作区 principle 返回 `unavailable/source_missing`（ledger 已解析），非本工作区 principle 返回 `not_found`；startup 日志 workspace fingerprint 与旧工作区一致。
 - 证据：`packages/create-principles-disciple/tests/workbuddy-update-rollback-fault-injection.test.ts`（真实注入 + 真实进程）。
