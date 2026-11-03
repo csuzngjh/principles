@@ -355,6 +355,30 @@ describe('assessMcpHealth — same-name registration conflict (SPEC §7.5/§11.3
     });
   });
 
+  it('openclaw: a same-name THIRD-PARTY mcp/launcher.cjs is a conflict, never PD', () => {
+    withHome((home) => {
+      makeSharedFixture(home, 'openclaw');
+      const foreign = path.join(home, 'other-product', 'mcp', 'launcher.cjs');
+      fs.mkdirSync(path.dirname(foreign), { recursive: true });
+      fs.writeFileSync(foreign, '// third-party product launcher\n');
+      const configPath = path.join(home, '.openclaw', 'openclaw.json');
+      writeJson(configPath, { mcp: { servers: { 'pd-recall': { command: 'node', args: [foreign] } } } });
+      const foreignSection = assessMcpHealth({ host: 'openclaw', homeDir: home });
+      expect(foreignSection.status).toBe('CONFIG_DRIFT');
+      expect(foreignSection.reason).toBe('mcp_same_name_conflict');
+      expect(foreignSection.registrationConflict.verdict).toBe('conflict');
+
+      writeJson(configPath, { mcp: { servers: { 'pd-recall': { command: 'node', args: ['./mcp/launcher.cjs'] } } } });
+      const relative = assessMcpHealth({ host: 'openclaw', homeDir: home });
+      expect(relative.status).toBe('CONFIG_DRIFT');
+      expect(relative.reason).toBe('mcp_registration_unverifiable');
+      console.log('[gate4-evidence]', JSON.stringify({
+        host: 'openclaw', foreignVerdict: foreignSection.registrationConflict.verdict,
+        relativeVerdict: relative.registrationConflict.verdict,
+      }));
+    });
+  });
+
   it('workbuddy: a same-name user-level server degrades; malformed file is unverifiable', () => {
     withHome((home) => {
       makeSharedFixture(home, 'workbuddy');

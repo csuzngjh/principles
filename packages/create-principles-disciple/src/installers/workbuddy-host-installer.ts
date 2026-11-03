@@ -113,6 +113,26 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * Atomic replace for the binding file (same discipline as the OpenClaw plugin
+ * writer and `$pd-control setup`): a reader must never observe a truncated
+ * binding. No generic config subsystem — one helper next to its only use.
+ */
+function writeFileAtomicSync(file: string, contents: string): void {
+  const temp = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.tmp`);
+  try {
+    writeFileSync(temp, contents, 'utf-8');
+    renameSync(temp, file);
+  } catch (error) {
+    try {
+      rmSync(temp, { force: true });
+    } catch {
+      /* best-effort cleanup of our own temp file */
+    }
+    throw error;
+  }
+}
+
+/**
  * Cache-binding comparison for the idempotent path. `writtenAt` is a
  * per-install timestamp, so comparing raw bytes would force a cache refresh
  * on every run; comparing the rest proves the launcher will read the same
@@ -1282,7 +1302,7 @@ function writeWorkbuddyMcpBinding(marketplaceRoot: string, homeDir: string): { o
       versions: { mcpServer: mcpServerVersion },
       writtenAt: new Date().toISOString(),
     };
-    writeFileSync(path.join(marketplaceRoot, WORKBUDDY_PLUGIN_NAME, 'mcp-binding.json'), JSON.stringify(binding, null, 2) + '\n', 'utf-8');
+    writeFileAtomicSync(path.join(marketplaceRoot, WORKBUDDY_PLUGIN_NAME, 'mcp-binding.json'), JSON.stringify(binding, null, 2) + '\n');
     return { ok: true };
   } catch (error) {
     return { ok: false, reason: `write_failed:${error instanceof Error ? error.message.slice(0, 120) : String(error).slice(0, 120)}` };
@@ -1428,6 +1448,9 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     const mcpConflict = checkMcpRegistrationConflict('workbuddy', {
       homeDir: this.deps.homeDir(),
       workbuddyConfigDir: p.configDir,
+      // Ownership is proven by the payload PD ships OR by launcher content
+      // stamps — never by the `mcp/launcher.cjs` file NAME alone.
+      pdLauncherRoots: [payload.pluginDir],
     });
     if (!mcpConflict.ok) {
       return {

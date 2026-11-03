@@ -84,7 +84,22 @@ function tomlArray(rawValue) {
   return out;
 }
 
-function scanCodexPdRecallEntry(configPath) {
+function writeFileAtomic(file, contents) {
+  const temp = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.tmp`);
+  try {
+    fs.writeFileSync(temp, contents, 'utf8');
+    fs.renameSync(temp, file);
+  } catch (error) {
+    try {
+      fs.rmSync(temp, { force: true });
+    } catch {
+      /* best-effort cleanup of our own temp file */
+    }
+    throw error;
+  }
+}
+
+function scanCodexPdRecallEntry(configPath, pluginRoot) {
   let raw;
   try { raw = fs.readFileSync(configPath, 'utf8'); } catch (error) {
     if (error && error.code === 'ENOENT') return { state: 'absent' };
@@ -165,17 +180,69 @@ function scanCodexPdRecallEntry(configPath) {
   const nodeBase = path.basename(process.execPath).toLowerCase();
   if (commandBase !== 'node' && commandBase !== 'node.exe' && commandBase !== nodeBase) return { state: 'other', why: 'different_command' };
   if (args === undefined) return { state: 'unverifiable', why: 'args_missing' };
-  const isPdLauncher = args.some((arg) => path.basename(arg.replace(/\\/g, '/')) === 'launcher.cjs'
+  const launcherArg = args.find((arg) => path.basename(arg.replace(/\\/g, '/')) === 'launcher.cjs'
     && path.basename(path.dirname(arg.replace(/\\/g, '/'))) === 'mcp');
-  return isPdLauncher ? { state: 'pd_owned' } : { state: 'other', why: 'different_args' };
+  if (launcherArg === undefined) return { state: 'other', why: 'different_args' };
+  const identity = launcherIdentity(launcherArg, pluginRoot);
+  if (identity === 'pd_owned') return { state: 'pd_owned' };
+  if (identity === 'other') return { state: 'other', why: 'different_launcher_identity' };
+  return { state: 'unverifiable', why: 'launcher_identity_unverifiable' };
 }
 
-function checkCodexMcpServerConflict() {
+// SPEC §7.5/§11.3: a registered `mcp/launcher.cjs` proves ownership by IDENTITY
+// (PD's own plugin root, or the launcher's content stamps) — never by the file
+// NAME. A third-party product may legitimately ship `mcp/launcher.cjs` too.
+const PD_LAUNCHER_ID = 'pd-mcp-launcher.v1';
+const PD_BINDING_SCHEMA_MARKER = 'pd.mcp-binding.v1';
+const MAX_LAUNCHER_BYTES = 512 * 1024;
+
+function isPathInside(parent, child) {
+  try {
+    const realParent = fs.realpathSync(parent);
+    const relative = path.relative(realParent, child);
+    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+  } catch {
+    return false;
+  }
+}
+
+function launcherIdentity(file, pluginRoot) {
+  if (typeof file !== 'string' || file.length === 0 || file.includes('${') || !path.isAbsolute(file)) {
+    // Relative args and unresolved host placeholders depend on a cwd/variable
+    // the config does not fix: ownership is unprovable (fail-closed).
+    return 'unverifiable';
+  }
+  const resolved = path.resolve(file);
+  if (pluginRoot !== undefined && isPathInside(pluginRoot, resolved)) return 'pd_owned';
+  let real;
+  try {
+    real = fs.realpathSync(resolved);
+  } catch {
+    return 'unverifiable';
+  }
+  let stat;
+  try {
+    stat = fs.statSync(real);
+  } catch {
+    return 'unverifiable';
+  }
+  if (!stat.isFile()) return 'unverifiable';
+  if (stat.size > MAX_LAUNCHER_BYTES) return 'other';
+  let content;
+  try {
+    content = fs.readFileSync(real, 'utf8');
+  } catch {
+    return 'unverifiable';
+  }
+  return content.includes(PD_LAUNCHER_ID) && content.includes(PD_BINDING_SCHEMA_MARKER) ? 'pd_owned' : 'other';
+}
+
+function checkCodexMcpServerConflict(pluginRoot) {
   const codexHome = process.env.CODEX_HOME && process.env.CODEX_HOME.length > 0
     ? process.env.CODEX_HOME
     : path.join(os.homedir(), '.codex');
   const configPath = path.join(codexHome, 'config.toml');
-  const result = scanCodexPdRecallEntry(configPath);
+  const result = scanCodexPdRecallEntry(configPath, pluginRoot);
   if (result.state === 'absent' || result.state === 'pd_owned') return { ok: true, state: result.state };
   if (result.state === 'other') {
     return {
@@ -278,7 +345,7 @@ async function main() {
   // SPEC §7.5/§11.3: check the user-level MCP name BEFORE ensurePluginData /
   // runtime install / binding write. A conflict or unverifiable ownership must
   // leave the machine byte-identical.
-  const mcpConflict = checkCodexMcpServerConflict();
+  const mcpConflict = checkCodexMcpServerConflict(root.pluginRoot);
   if (!mcpConflict.ok) { fail(mcpConflict.reason, mcpConflict.nextAction); return; }
   const data = ensurePluginData(args.pluginData, root);
   if (!data.ok) { fail(data.reason, data.nextAction); return; }
@@ -492,8 +559,10 @@ async function main() {
     return;
   }
   // Written only after registration succeeded: a failed setup must not leave a
-  // binding that the next MCP launch would trust.
-  fs.writeFileSync(bindingPath, JSON.stringify(mcpBinding, null, 2) + '\n', 'utf8');
+  // binding that the next MCP launch would trust. Atomic replace (temp + rename)
+  // so a launcher reading concurrently never sees a truncated binding — the
+  // same file-integrity discipline as the OpenClaw plugin and WorkBuddy writers.
+  writeFileAtomic(bindingPath, JSON.stringify(mcpBinding, null, 2) + '\n');
 
   // 4. Codex conversation-ingestion consent (PRI-625, G2A frozen disclosure).
   //    The disclosure text ALWAYS comes from the installed pd CLI

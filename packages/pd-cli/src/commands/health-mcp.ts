@@ -291,7 +291,53 @@ function registrationConfigPath(host: McpHealthHost, homeDir: string, env: { COD
   return path.join(homeDir, '.workbuddy', 'mcp.json');
 }
 
-function launcherOwnsEntry(entry: Record<string, unknown>): ConflictVerdict {
+const PD_LAUNCHER_ID = 'pd-mcp-launcher.v1';
+const PD_BINDING_SCHEMA_MARKER = 'pd.mcp-binding.v1';
+const MAX_LAUNCHER_BYTES = 512 * 1024;
+
+function isInsideRoot(child: string, root: string): boolean {
+  try {
+    const realRoot = fs.realpathSync(root);
+    const relative = path.relative(realRoot, child);
+    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * SPEC §7.5/§11.3: prove the launcher is PD's by IDENTITY — PD's own payload
+ * root, or the launcher's content stamps. A file merely NAMED `launcher.cjs`
+ * belongs to nobody in particular.
+ */
+function launcherIdentity(file: string, pdRoots: readonly string[]): ConflictVerdict {
+  if (file.includes('${') || !path.isAbsolute(file)) return 'unverifiable';
+  const resolved = path.resolve(file);
+  if (pdRoots.some((root) => isInsideRoot(resolved, root))) return 'pd_owned';
+  let real: string;
+  try {
+    real = fs.realpathSync(resolved);
+  } catch {
+    return 'unverifiable';
+  }
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(real);
+  } catch {
+    return 'unverifiable';
+  }
+  if (!stat.isFile()) return 'unverifiable';
+  if (stat.size > MAX_LAUNCHER_BYTES) return 'conflict';
+  let content: string;
+  try {
+    content = fs.readFileSync(real, 'utf8');
+  } catch {
+    return 'unverifiable';
+  }
+  return content.includes(PD_LAUNCHER_ID) && content.includes(PD_BINDING_SCHEMA_MARKER) ? 'pd_owned' : 'conflict';
+}
+
+function launcherOwnsEntry(entry: Record<string, unknown>, pdRoots: readonly string[]): ConflictVerdict {
   const command = readString(entry, 'command');
   const url = readString(entry, 'url');
   if (command === null) return url !== null ? 'conflict' : 'unverifiable';
@@ -299,16 +345,17 @@ function launcherOwnsEntry(entry: Record<string, unknown>): ConflictVerdict {
   if (base !== 'node' && base !== 'node.exe' && base !== path.basename(process.execPath).toLowerCase()) return 'conflict';
   const args = Array.isArray(entry.args) ? entry.args.filter((arg): arg is string => typeof arg === 'string') : null;
   if (args === null) return 'unverifiable';
-  const owned = args.some((arg) => path.basename(arg.replace(/\\/g, '/')) === 'launcher.cjs'
+  const launcherArg = args.find((arg) => path.basename(arg.replace(/\\/g, '/')) === 'launcher.cjs'
     && path.basename(path.dirname(arg.replace(/\\/g, '/'))) === 'mcp');
-  return owned ? 'pd_owned' : 'conflict';
+  if (launcherArg === undefined) return 'conflict';
+  return launcherIdentity(launcherArg, pdRoots);
 }
 
-function classifyJsonServers(servers: unknown): ConflictVerdict {
+function classifyJsonServers(servers: unknown, pdRoots: readonly string[]): ConflictVerdict {
   if (!isRecord(servers)) return 'unverifiable';
   if (!Object.hasOwn(servers, 'pd-recall')) return Object.keys(servers).length === 0 ? 'absent' : 'other_servers_only';
   const entry = servers['pd-recall'];
-  return isRecord(entry) ? launcherOwnsEntry(entry) : 'unverifiable';
+  return isRecord(entry) ? launcherOwnsEntry(entry, pdRoots) : 'unverifiable';
 }
 
 const TOML_PD_SECTION = /^\s*\[\s*mcp_servers\.(?:"pd-recall"|'pd-recall'|pd-recall)\s*\]\s*(?:#.*)?$/;
@@ -319,7 +366,7 @@ const TOML_PD_CHILD = /^\s*\[\s*mcp_servers\.(?:"pd-recall"|'pd-recall'|pd-recal
  * `mcp_servers` construct this scan cannot model is `unverifiable`, never
  * "absent" (rc-1: unknown ownership must not read as a free name).
  */
-function classifyCodexToml(raw: string): ConflictVerdict {
+function classifyCodexToml(raw: string, pdRoots: readonly string[]): ConflictVerdict {
   let inPd = false;
   let found = false;
   let opaque = false;
@@ -373,10 +420,16 @@ function classifyCodexToml(raw: string): ConflictVerdict {
   if (command !== null) entry.command = command;
   if (args !== null) entry.args = args;
   if (url !== null) entry.url = url;
-  return launcherOwnsEntry(entry);
+  return launcherOwnsEntry(entry, pdRoots);
 }
 
-function assessRegistrationConflict(host: McpHealthHost, homeDir: string, env: { CODEX_HOME?: string }): ConflictVerdict {
+function assessRegistrationConflict(input: {
+  host: McpHealthHost;
+  homeDir: string;
+  env: { CODEX_HOME?: string };
+  pdRoots: readonly string[];
+}): ConflictVerdict {
+  const { host, homeDir, env, pdRoots } = input;
   const configPath = registrationConfigPath(host, homeDir, env);
   let raw: string;
   try {
@@ -385,7 +438,7 @@ function assessRegistrationConflict(host: McpHealthHost, homeDir: string, env: {
     const code = isRecord(error) && typeof error.code === 'string' ? error.code : null;
     return code === 'ENOENT' || code === 'ENOTDIR' ? 'absent' : 'unverified';
   }
-  if (host === 'codex') return classifyCodexToml(raw);
+  if (host === 'codex') return classifyCodexToml(raw, pdRoots);
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -397,10 +450,10 @@ function assessRegistrationConflict(host: McpHealthHost, homeDir: string, env: {
     if (parsed.mcp === undefined) return 'absent';
     if (!isRecord(parsed.mcp)) return 'unverifiable';
     if (parsed.mcp.servers === undefined) return 'absent';
-    return classifyJsonServers(parsed.mcp.servers);
+    return classifyJsonServers(parsed.mcp.servers, pdRoots);
   }
   if (parsed.mcpServers === undefined) return 'absent';
-  return classifyJsonServers(parsed.mcpServers);
+  return classifyJsonServers(parsed.mcpServers, pdRoots);
 }
 
 interface BaseSectionInput {
@@ -472,7 +525,7 @@ export function assessMcpHealth(options: AssessOptions): McpHealthSection {
   // ownership that cannot be proven) precedes every other layer — PD must not
   // register on top of it, so the host's MCP wiring is NOT healthy.
   const conflictConfigPath = registrationConfigPath(host, homeDir, options.env ?? {});
-  const registrationConflict = assessRegistrationConflict(host, homeDir, options.env ?? {});
+  const registrationConflict = assessRegistrationConflict({ host, homeDir, env: options.env ?? {}, pdRoots: [layout.payloadRoot] });
 
   const bindingRecord = readJsonRecord(layout.bindingPath);
   const bindingExists = exists(layout.bindingPath);

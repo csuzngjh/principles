@@ -164,7 +164,11 @@ export class OpenClawHostInstaller implements HostInstaller {
       // plugin-owned MCP servers. A same-name server owned by someone else must
       // STOP the install BEFORE any write — never be overwritten, never be
       // discovered after the fact and "rolled back".
-      const mcpConflict = classifyOpenClawConfigObject(configObj, configPath);
+      // Ownership is proven by PD's own extension root OR by the launcher's
+      // content stamps — never by the `mcp/launcher.cjs` file NAME alone.
+      const mcpConflict = classifyOpenClawConfigObject(configObj, configPath, {
+        pdLauncherRoots: [path.join(configDir, 'extensions', 'principles-disciple')],
+      });
       if (!mcpConflict.ok) {
         return {
           success: false,

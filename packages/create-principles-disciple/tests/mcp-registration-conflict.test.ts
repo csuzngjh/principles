@@ -44,6 +44,28 @@ function sha256(file: string): string {
   return createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
 
+/** A real PD launcher copy (carries PD_LAUNCHER_ID + pd.mcp-binding.v1). */
+function writePdLauncherAt(root: string): string {
+  const dir = path.join(root, 'mcp');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 'launcher.cjs');
+  fs.copyFileSync(path.join(REPO_ROOT, 'plugins', 'principles-disciple', 'mcp', 'launcher.cjs'), file);
+  return file;
+}
+
+/** A third-party product's launcher: same file NAME at `mcp/launcher.cjs`. */
+function writeForeignLauncherAt(root: string): string {
+  const dir = path.join(root, 'mcp');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 'launcher.cjs');
+  fs.writeFileSync(file, '// third-party product launcher — same file name, different owner\nprocess.exit(0);\n');
+  return file;
+}
+
+function tomlPath(file: string): string {
+  return file.replace(/\\/g, '\\\\');
+}
+
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-mcp-conflict-'));
   state.home = home;
@@ -77,10 +99,44 @@ describe('checkMcpRegistrationConflict — Codex config.toml', () => {
     expect(result).toMatchObject({ ok: true, state: 'other_servers_only' });
   });
 
-  it('same name pointing at PD launcher is PD-owned (idempotent)', () => {
-    writeCodex('[mcp_servers.pd-recall]\ncommand = "node"\nargs = ["C:\\\\pd\\\\plugins\\\\principles-disciple\\\\mcp\\\\launcher.cjs"]\n');
+  it('same name pointing at the REAL PD launcher is PD-owned (idempotent)', () => {
+    const launcher = writePdLauncherAt(path.join(home, 'pd-plugin'));
+    writeCodex(`[mcp_servers.pd-recall]\ncommand = "node"\nargs = ["${tomlPath(launcher)}"]\n`);
     const result = checkMcpRegistrationConflict('codex', { homeDir: home });
     expect(result).toMatchObject({ ok: true, state: 'pd_owned' });
+  });
+
+  it('same name pointing at a THIRD-PARTY mcp/launcher.cjs is a conflict', () => {
+    const foreign = writeForeignLauncherAt(path.join(home, 'other-product'));
+    const file = writeCodex(`[mcp_servers.pd-recall]\ncommand = "node"\nargs = ["${tomlPath(foreign)}"]\n`);
+    const before = sha256(file);
+    const result = checkMcpRegistrationConflict('codex', { homeDir: home });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('expected refusal');
+    expect(result.kind).toBe('conflict');
+    expect(result.reason).toContain('mcp_same_name_conflict');
+    expect(sha256(file)).toBe(before);
+    console.log('[gate4-evidence]', JSON.stringify({
+      host: 'codex', kind: 'conflict', foreignLauncher: foreign, sha256Before: before, sha256After: sha256(file),
+    }));
+  });
+
+  it('a RELATIVE launcher path cannot prove ownership (unverifiable)', () => {
+    writeCodex('[mcp_servers.pd-recall]\ncommand = "node"\nargs = ["./mcp/launcher.cjs"]\n');
+    const result = checkMcpRegistrationConflict('codex', { homeDir: home });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('expected refusal');
+    expect(result.kind).toBe('unverifiable');
+  });
+
+  it('a caller-owned PD plugin root is accepted without reading bytes', () => {
+    const root = path.join(home, 'codex-plugin');
+    const launcher = writeForeignLauncherAt(root); // content irrelevant: caller owns the root
+    writeCodex(`[mcp_servers.pd-recall]\ncommand = "node"\nargs = ["${tomlPath(launcher)}"]\n`);
+    expect(checkMcpRegistrationConflict('codex', { homeDir: home, pdLauncherRoots: [root] })).toMatchObject({
+      ok: true,
+      state: 'pd_owned',
+    });
   });
 
   it('same name pointing at ANOTHER server is a conflict', () => {
@@ -127,8 +183,26 @@ describe('checkMcpRegistrationConflict — OpenClaw openclaw.json', () => {
     writeOpenClaw({ mcp: { servers: { comfyui: { command: 'node', args: ['comfyui-mcp'] } } } });
     expect(checkMcpRegistrationConflict('openclaw', { homeDir: home })).toMatchObject({ ok: true, state: 'other_servers_only' });
 
-    writeOpenClaw({ mcp: { servers: { 'pd-recall': { command: 'node', args: ['./mcp/launcher.cjs'] } } } });
+    const pdLauncher = writePdLauncherAt(path.join(home, 'pd-plugin'));
+    writeOpenClaw({ mcp: { servers: { 'pd-recall': { command: 'node', args: [pdLauncher] } } } });
     expect(checkMcpRegistrationConflict('openclaw', { homeDir: home })).toMatchObject({ ok: true, state: 'pd_owned' });
+
+    // Same file name, same arg shape, different product: must NOT be trusted.
+    const foreignLauncher = writeForeignLauncherAt(path.join(home, 'other-product'));
+    const foreignFile = writeOpenClaw({ mcp: { servers: { 'pd-recall': { command: 'node', args: [foreignLauncher] } } } });
+    const foreignBefore = sha256(foreignFile);
+    const foreign = checkMcpRegistrationConflict('openclaw', { homeDir: home });
+    expect(foreign.ok).toBe(false);
+    if (foreign.ok) throw new Error('expected refusal');
+    expect(foreign.kind).toBe('conflict');
+    expect(sha256(foreignFile)).toBe(foreignBefore);
+
+    // A relative arg depends on a cwd the config does not fix.
+    writeOpenClaw({ mcp: { servers: { 'pd-recall': { command: 'node', args: ['./mcp/launcher.cjs'] } } } });
+    const relative = checkMcpRegistrationConflict('openclaw', { homeDir: home });
+    expect(relative.ok).toBe(false);
+    if (relative.ok) throw new Error('expected refusal');
+    expect(relative.kind).toBe('unverifiable');
 
     const conflictFile = writeOpenClaw({ mcp: { servers: { 'pd-recall': { command: 'python', args: ['other_mcp.py'] } } } });
     const before = sha256(conflictFile);
@@ -151,6 +225,15 @@ describe('checkMcpRegistrationConflict — WorkBuddy mcp.json', () => {
     const file = path.join(configDir, 'mcp.json');
     fs.writeFileSync(file, JSON.stringify({ mcpServers: { 'pd-recall': { type: 'stdio', command: 'node', args: ['${CODEBUDDY_PLUGIN_ROOT}/mcp/launcher.cjs'] } } }, null, 2));
     expect(resolveMcpRegistrationConfigPath('workbuddy', { homeDir: home, workbuddyConfigDir: configDir })).toBe(file);
+    // An unresolved host placeholder is NOT ownership proof: the variable could
+    // expand to any plugin root, including a third party's.
+    const placeholder = checkMcpRegistrationConflict('workbuddy', { homeDir: home, workbuddyConfigDir: configDir });
+    expect(placeholder.ok).toBe(false);
+    if (placeholder.ok) throw new Error('expected refusal');
+    expect(placeholder.kind).toBe('unverifiable');
+
+    const pdLauncher = writePdLauncherAt(path.join(home, 'pd-plugin'));
+    fs.writeFileSync(file, JSON.stringify({ mcpServers: { 'pd-recall': { type: 'stdio', command: 'node', args: [pdLauncher] } } }, null, 2));
     expect(checkMcpRegistrationConflict('workbuddy', { homeDir: home, workbuddyConfigDir: configDir })).toMatchObject({ ok: true, state: 'pd_owned' });
 
     fs.writeFileSync(file, JSON.stringify({ mcpServers: { lighthouse: { type: 'streamableHttp', url: 'https://example/mcp' } } }, null, 2));
@@ -319,5 +402,36 @@ describe('Codex $pd-control setup conflict gate (real script)', () => {
       host: 'codex', configPath, exitStatus: run.status, stderr: run.stderr.trim(),
       sha256Before: before, sha256After: sha256(configPath), pluginDataCreated: false,
     }));
+  });
+
+  it('a third-party absolute mcp/launcher.cjs and a relative path both stop the setup', () => {
+    const codexHome = path.join(home, '.codex');
+    const configPath = path.join(codexHome, 'config.toml');
+    fs.mkdirSync(codexHome, { recursive: true });
+    const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'test-market', 'principles-disciple', '0.1.0');
+    fs.mkdirSync(path.join(pluginRoot, '.codex-plugin'), { recursive: true });
+    fs.writeFileSync(path.join(pluginRoot, '.codex-plugin', 'plugin.json'), JSON.stringify({ name: WORKBUDDY_PLUGIN_NAME }));
+
+    const foreign = writeForeignLauncherAt(path.join(home, 'other-product'));
+    const cases: Array<{ args: string; expected: string }> = [
+      { args: `"${tomlPath(foreign)}"`, expected: 'mcp_same_name_conflict' },
+      { args: '"./mcp/launcher.cjs"', expected: 'mcp_registration_unverifiable' },
+    ];
+    for (const testCase of cases) {
+      fs.writeFileSync(configPath, `[mcp_servers.pd-recall]\ncommand = "node"\nargs = [${testCase.args}]\n`);
+      const before = sha256(configPath);
+      const run = spawnSync(process.execPath, [PD_SETUP, '--plugin-root', pluginRoot, '--skip-init', '--json'], {
+        encoding: 'utf8',
+        env: { ...process.env, CODEX_HOME: codexHome },
+        timeout: 60000,
+      });
+      expect(run.status).toBe(1);
+      expect(run.stderr).toContain(testCase.expected);
+      expect(sha256(configPath)).toBe(before);
+      console.log('[gate4-evidence]', JSON.stringify({
+        host: 'codex', args: testCase.args, exitStatus: run.status,
+        stderr: run.stderr.trim(), sha256Before: before, sha256After: sha256(configPath),
+      }));
+    }
   });
 });

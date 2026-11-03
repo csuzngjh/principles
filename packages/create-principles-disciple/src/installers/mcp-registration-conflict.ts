@@ -55,7 +55,21 @@ export interface McpRegistrationCheckOptions {
   codexHome?: string;
   /** WorkBuddy config root override; defaults to <home>/.workbuddy. */
   workbuddyConfigDir?: string;
+  /**
+   * Authoritative PD plugin roots this caller owns (e.g. the Codex plugin root
+   * `$pd-control setup` is running from, or the OpenClaw extension dir). A
+   * registered launcher inside one of them is PD's own WITHOUT reading bytes;
+   * everything else must prove itself by content.
+   */
+  pdLauncherRoots?: readonly string[];
 }
+
+/** Stamp carried by PD's own launcher (see mcp/launcher.cjs `PD_LAUNCHER_ID`). */
+const PD_LAUNCHER_ID = 'pd-mcp-launcher.v1';
+/** Second stamp: the launcher's own binding-schema constant. Filename alone proves nothing. */
+const PD_BINDING_SCHEMA_MARKER = 'pd.mcp-binding.v1';
+/** A launcher is a small script; refuse to slurp arbitrary large files. */
+const MAX_LAUNCHER_BYTES = 512 * 1024;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -82,7 +96,57 @@ export function resolveMcpRegistrationConfigPath(host: McpConflictHost, options:
 }
 
 /** Does this entry launch PD's own zero-dependency launcher? */
-function entryOwnership(entry: unknown): 'pd_owned' | 'other' | 'unverifiable' {
+type EntryOwnership = 'pd_owned' | 'other' | 'unverifiable';
+
+function isInsideRoot(child: string, root: string): boolean {
+  try {
+    const realRoot = fs.realpathSync(root);
+    const relative = path.relative(realRoot, child);
+    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Prove launcher identity by CONTENT: PD's launcher carries its own stamp and
+ * its binding-schema constant. A third-party `mcp/launcher.cjs` (the same file
+ * NAME at a different product) fails this check even though the filename and
+ * argument shape match — the previous rule was exactly that mistake.
+ */
+function readLauncherIdentity(file: string): 'pd' | 'other' | 'unverifiable' {
+  let real: string;
+  try {
+    real = fs.realpathSync(file);
+  } catch {
+    return 'unverifiable';
+  }
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(real);
+  } catch {
+    return 'unverifiable';
+  }
+  if (!stat.isFile()) return 'unverifiable';
+  if (stat.size > MAX_LAUNCHER_BYTES) return 'other';
+  let content: string;
+  try {
+    content = fs.readFileSync(real, 'utf8');
+  } catch {
+    return 'unverifiable';
+  }
+  return content.includes(PD_LAUNCHER_ID) && content.includes(PD_BINDING_SCHEMA_MARKER) ? 'pd' : 'other';
+}
+
+/** Is this arg shaped like a PD launcher argument at all (`.../mcp/launcher.cjs`)? */
+function launcherArgPath(arg: string): string | undefined {
+  const normalized = arg.replace(/\\/g, '/');
+  if (path.basename(normalized) !== 'launcher.cjs') return undefined;
+  if (path.basename(path.dirname(normalized)) !== 'mcp') return undefined;
+  return arg;
+}
+
+function entryOwnership(entry: unknown, options: McpRegistrationCheckOptions = {}): EntryOwnership {
   if (!isRecord(entry)) return 'unverifiable';
   const command = typeof entry.command === 'string' ? entry.command : undefined;
   const args = Array.isArray(entry.args) ? entry.args.filter((arg): arg is string => typeof arg === 'string') : undefined;
@@ -97,9 +161,17 @@ function entryOwnership(entry: unknown): 'pd_owned' | 'other' | 'unverifiable' {
     return 'other';
   }
   if (args === undefined) return 'unverifiable';
-  const launcher = args.find((arg) => path.basename(arg.replace(/\\/g, '/')) === 'launcher.cjs'
-    && path.basename(path.dirname(arg.replace(/\\/g, '/'))) === 'mcp');
-  return launcher !== undefined ? 'pd_owned' : 'other';
+  const candidate = args.map(launcherArgPath).find((arg) => arg !== undefined);
+  if (candidate === undefined) return 'other';
+  // Relative args and unresolved host placeholders (${CODEBUDDY_PLUGIN_ROOT})
+  // depend on a cwd/variable the config does not fix: ownership is unprovable.
+  if (candidate.includes('${') || !path.isAbsolute(candidate)) return 'unverifiable';
+  const resolved = path.resolve(candidate);
+  const roots = options.pdLauncherRoots ?? [];
+  if (roots.some((root) => isInsideRoot(resolved, root))) return 'pd_owned';
+  const identity = readLauncherIdentity(resolved);
+  if (identity === 'pd') return 'pd_owned';
+  return identity === 'other' ? 'other' : 'unverifiable';
 }
 
 function classifyEntryPresence(input: {
@@ -107,10 +179,11 @@ function classifyEntryPresence(input: {
   entry: unknown;
   host: McpConflictHost;
   configPath: string;
+  ownershipOptions?: McpRegistrationCheckOptions;
 }): McpRegistrationCheck {
-  const { present, entry, host, configPath } = input;
+  const { present, entry, host, configPath, ownershipOptions } = input;
   if (!present) return { ok: true, host, configPath, state: 'absent' };
-  const ownership = entryOwnership(entry);
+  const ownership = entryOwnership(entry, ownershipOptions);
   if (ownership === 'pd_owned') return { ok: true, host, configPath, state: 'pd_owned' };
   if (ownership === 'unverifiable') {
     return {
@@ -118,8 +191,8 @@ function classifyEntryPresence(input: {
       host,
       configPath,
       kind: 'unverifiable',
-      reason: `mcp_registration_unverifiable: ${configPath} declares mcpServers["${PD_MCP_SERVER_NAME}"] but its ownership (command/args) cannot be verified. No PD write was performed.`,
-      nextAction: `Inspect ${configPath} manually: remove or rename the "${PD_MCP_SERVER_NAME}" entry if it is not PD's, or repair it to point at PD's mcp/launcher.cjs, then re-run the installer. PD never guesses ownership.`,
+      reason: `mcp_registration_unverifiable: ${configPath} declares mcpServers["${PD_MCP_SERVER_NAME}"] but its launcher identity cannot be proven (relative path, unresolved placeholder, or unreadable file). No PD write was performed.`,
+      nextAction: `Inspect ${configPath} manually: point the "${PD_MCP_SERVER_NAME}" entry at PD's absolute mcp/launcher.cjs path, remove it if it is not PD's, then re-run the installer. PD never guesses ownership from a file name.`,
     };
   }
   return {
@@ -154,6 +227,7 @@ function readJsonObject(configPath: string): { ok: true; value: Record<string, u
 function classifyJsonHost(
   host: 'openclaw' | 'workbuddy',
   configPath: string,
+  options: McpRegistrationCheckOptions = {},
 ): McpRegistrationCheck {
   const file = readJsonObject(configPath);
   if (!file.ok) {
@@ -192,7 +266,7 @@ function classifyJsonHost(
     };
   }
   const present = Object.hasOwn(servers, PD_MCP_SERVER_NAME);
-  if (present) return classifyEntryPresence({ present: true, entry: servers[PD_MCP_SERVER_NAME], host, configPath });
+  if (present) return classifyEntryPresence({ present: true, entry: servers[PD_MCP_SERVER_NAME], host, configPath, ownershipOptions: options });
   return {
     ok: true,
     host,
@@ -204,6 +278,7 @@ function classifyJsonHost(
 export function classifyOpenClawConfigObject(
   config: Record<string, unknown>,
   configPath: string,
+  options: McpRegistrationCheckOptions = {},
 ): McpRegistrationCheck {
   const { mcp } = config;
   if (mcp === undefined) return { ok: true, host: 'openclaw', configPath, state: 'absent' };
@@ -230,7 +305,7 @@ export function classifyOpenClawConfigObject(
     };
   }
   if (Object.hasOwn(servers, PD_MCP_SERVER_NAME)) {
-    return classifyEntryPresence({ present: true, entry: servers[PD_MCP_SERVER_NAME], host: 'openclaw', configPath });
+    return classifyEntryPresence({ present: true, entry: servers[PD_MCP_SERVER_NAME], host: 'openclaw', configPath, ownershipOptions: options });
   }
   return {
     ok: true,
@@ -384,7 +459,7 @@ function scanCodexToml(raw: string): { entry?: TomlMcpEntry; otherServers: boole
   return found ? { entry, otherServers } : { otherServers };
 }
 
-function classifyCodex(configPath: string): McpRegistrationCheck {
+function classifyCodex(configPath: string, options: McpRegistrationCheckOptions = {}): McpRegistrationCheck {
   let raw: string;
   try {
     raw = fs.readFileSync(configPath, 'utf8');
@@ -414,7 +489,7 @@ function classifyCodex(configPath: string): McpRegistrationCheck {
       nextAction: `Inspect ${configPath} manually (PD only understands [mcp_servers.<name>] tables and dotted mcp_servers.<name>.* keys), then re-run the installer.`,
     };
   }
-  const ownership = entryOwnership({ command: entry.command, args: entry.args, url: entry.url });
+  const ownership = entryOwnership({ command: entry.command, args: entry.args, url: entry.url }, options);
   if (ownership === 'pd_owned') return { ok: true, host: 'codex', configPath, state: 'pd_owned' };
   if (ownership === 'unverifiable') {
     return {
@@ -441,6 +516,6 @@ export function checkMcpRegistrationConflict(
   options: McpRegistrationCheckOptions = {},
 ): McpRegistrationCheck {
   const configPath = resolveMcpRegistrationConfigPath(host, options);
-  if (host === 'codex') return classifyCodex(configPath);
-  return classifyJsonHost(host, configPath);
+  if (host === 'codex') return classifyCodex(configPath, options);
+  return classifyJsonHost(host, configPath, options);
 }
