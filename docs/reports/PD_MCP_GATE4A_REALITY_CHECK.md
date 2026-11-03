@@ -12,7 +12,7 @@
 
 > **同步说明（2026-11-03 Gate 4 整改轮；历史正文保留，不追改快照）**
 >
-> 本文件是 2026-11-02 Gate 4-A 的冻结快照。整改轮把基线同步到 origin/main `9ef8d607d`，全部工作仍在 PR #2304（`ai/PRI-1071-mcp-gate4`）。以下两处实现已由后续 Gate 推进，正文按历史记录保留：
+> 本文件是 2026-11-02 Gate 4-A 的冻结快照。整改轮把基线同步到 origin/main `9ef8d607d`，全部工作仍在 PR #2304（`ai/PRI-1071-mcp-gate4`），整改最终 head 为 `db33190b8`（2026-11-03）；PR 状态与 CI 结果以 `PD_MCP_GATE4_IMPLEMENTATION_REPORT.md` §1.3/§1.4 为准。以下两处实现已由后续 Gate 推进，正文按历史记录保留：
 >
 > 1. §4 接入方式表把 OpenClaw 的 binding 写入者记为 "PD installer（物化 extensions 副本时写入）"。实际实现为 OpenClaw 插件启动健康检查（`packages/openclaw-plugin/src/core/mcp-binding.ts`，与 hooks 同源解析 workspace），installer 物化 extensions 副本时不写 binding；整改轮又补上"workspace 无法解析时使旧 binding 失效"的 fail-closed 行为。
 > 2. §6 绑定策略的 fail-closed 现在由三份字节一致的 launcher 执行（canonical entry、realpath 逃逸、Host/Schema/版本 pin 交叉校验），并由 `launcher-binding.test.ts` 机械钉住；WorkBuddy 的 binding 仍由 installer 在物化 marketplace 时写入，Codex 仍由 pd-setup 写入。

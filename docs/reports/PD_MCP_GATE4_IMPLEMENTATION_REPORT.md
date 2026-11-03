@@ -6,7 +6,7 @@
 |---|---|
 | 实施工单 | PRI-1071（In Progress） |
 | 授权 | OG-3 AUTHORIZED（2026-11-02，隔离环境 4-A～4-F）；D-06 方案 A OWNER_CONFIRMED（Decision Card §〇 r4） |
-| 基线 | origin/main `457bbf0fc` → 整改后同步至 origin/main `9ef8d607d`（2026-11-03）；分支 `ai/PRI-1071-mcp-gate4`（worktree `D:\Code\_worktrees\principles\PRI-1071-mcp-gate4`） |
+| 基线 | origin/main `457bbf0fc` → 整改后同步至 origin/main `9ef8d607d`（2026-11-03）；整改最终 head `db33190b8`；分支 `ai/PRI-1071-mcp-gate4`（worktree `D:\Code\_worktrees\principles\PRI-1071-mcp-gate4`） |
 | 交付形态 | PR #2304（OPEN，未合并）；整改提交已推送到分支，等待 Owner 审阅。**未合并/未发布/未部署** |
 | 状态 | **Gate 4 主体完成并完成整改轮；两宿主 RUNTIME_VERIFIED，一宿主 IMPLEMENTED_NOT_RUNTIME_VERIFIED（外部条件阻断，补验路径明确）** |
 
@@ -30,7 +30,7 @@
 | 项 | 整改内容 | 证据 |
 |---|---|---|
 | P1-1 Deadline 并发准入 | `AdmissionLimiter.tryAcquire()` 在 Capability 调用前同步预留；超时只停止等待、不释放容量；容量仅在底层真实结算（完成/异常/孤儿结算）后释放；保留 10s deadline 与迟到结果抑制 | `deadline.ts` / `server.ts`；`deadline.test.ts` 真实并发：6 并发仅 4 启动、超限请求未启动即拒绝、超时后 active 仍为 4、结算 2 个后恰好再准入 2 个、全路径释放后 active/orphan=0；MCP 套件 84/84 |
-| P1-2 Release Lock | 新增 `release-locks/pd-mcp-server/package-lock.json`（lockfileVersion 3；`@modelcontextprotocol/server@2.4.0` exact、`zod@4.6.7` exact），由仓库既有 `generate:release-locks` 生成 | `check:release-locks` 以 `npm ci --omit=dev --ignore-scripts --legacy-peer-deps --install-links` 验证 9 个组件通过；生成前后 sha256 对比见 §1.2 |
+| P1-2 Release Lock | 新增 `release-locks/pd-mcp-server/package-lock.json`（lockfileVersion 3；`@modelcontextprotocol/server@2.4.0` exact、`zod@4.6.7` exact），由仓库既有 `generate:release-locks` 生成 | `check:release-locks` 以 `npm ci --omit=dev --ignore-scripts --legacy-peer-deps --install-links` 验证 10 个组件通过；生成前后 sha256 对比见 §1.2 |
 | P1-3 干净环境构建 | 统一构建顺序 pd-mcp-server → installer → plugin bundle → release asset；`mcp-server-build.mjs` 为共享构建入口；bundle 缺组件时删除陈旧载荷，禁止携带本地残留 dist | 干净临时 HOME + 无 npm 的 self-contained 安装 smoke 15/15（532s）；release asset smoke 5/5（656s，含 "installs from pipeline output without invoking npm" 与 canonical MCP entry 断言） |
 | P1-4 守卫/发布列车/交付 | Runtime Writer 精确 allowlist；核心架构守卫精确登记（不删守卫）；`runtime-version.json` 四包 pin；发布列车 9 腿（pd-mcp-server 为第 5 腿）；Codex 插件交付 CI 使用 PR 构建的本地 tarball + 隔离安装验证，不访问 npm | `check:runtime-writers` PASS（10 条均带理由）；architecture-regression 493；`codex-runtime-delivery` / `publish-recovery` 契约测试；CI `codex-plugin-delivery` job |
 | P1-5 MCP 测试入 CI 与 verify:merge | 新增 CI job `test-pd-mcp-server`（node 22）；`verify:merge` 显式运行 `npm test --workspace=@principles/pd-mcp-server`；覆盖 initialize/tools-list/tools-call/Schema/32KiB/deadline/并发准入与孤儿释放/stdout 纯协议/stderr 脱敏/isError 映射/workspace fail-closed/子进程关闭/安装包运行验证 | `.github/workflows/ci.yml`；根 `package.json` verify:merge；MCP 84/84 |
@@ -40,7 +40,54 @@
 
 ## 1.2 Release Lock 可复现性
 
-`npm run generate:release-locks` 连续生成，9 个 `release-locks/**/package-lock.json` 的 sha256 前后一致；`check:release-locks` 逐组件 `npm ci` 通过（0 失败）。
+`npm run generate:release-locks` 连续生成，10 个 `release-locks/**/package-lock.json` 的 sha256 前后一致；`check:release-locks` 逐组件 `npm ci` 通过（0 失败）。`pd-mcp-server` lock 的 sha256 = `28be450bfafbe0fda7d13a20abd0b5d09906729c379e784d12706b1f112234bf`；解析结果：`@modelcontextprotocol/client@2.4.0`、`@modelcontextprotocol/core@2.4.0`、`@modelcontextprotocol/server@2.4.0`、`zod@4.6.7`。
+
+## 1.3 整改轮评审处置（CodeRabbit 21 条 + CodeQL 1 条，逐条在当前 head 复核）
+
+| 评审项（路径） | 判定 | 处置与证据 |
+|---|---|---|
+| `deadline.ts:56` 截止后成功判定 | 属实 | 已加 `startedAt` 耗时复检；`deadline.test.ts` 覆盖 |
+| `bundle-plugin.mjs` 缺组件时陈旧输出 | 属实 | `else` 分支 `rmSync(MCP_SERVER_DEST)`（423–430 行） |
+| launcher `schemaVersion` 未脱敏 | 属实 | `schemaKind` 白名单字符 + 60 字符上限；三份 launcher 字节同源 |
+| OpenClaw workspace 无法解析时旧 binding 残留 | 属实 | `invalidateMcpBinding()` fail-closed（`index.ts:183`） |
+| OpenClaw 多 agent 固定绑定 `main` | 属实，但属单绑定架构边界 | 按指令不重新设计三宿主架构；LIFECYCLE §4 与本文 §3 显式记录为 follow-up |
+| OpenClaw 缺组件无结构化 warning | 属实 | `ensureMcpBinding` 返回 `mcp_server_component_missing`，健康检查日志输出 |
+| `pd-setup` marker 未记录 MCP 来源 | 属实 | marker 增 `mcpServerSource`；来源标志存在即禁用短路 |
+| `pd-setup` 先写 binding 后注册 worker | 属实 | binding 写入移到 `registerWorkspaceWorker` 成功之后（352–354 行） |
+| `pd-status` 缺 `mcpServer` pin 仍报 ok | 属实 | 缺失/非字符串 → `degraded` |
+| `pd-status` 未检查 binding 目标存在 | 属实 | `targetsPresent`（workspaceDir + serverEntry） |
+| `pd-status` 未校验 `--workspace` 一致 | 属实 | `boundWorkspace`（samePath 比较） |
+| `verify-pinned-runtime-capability` 未装 MCP pin | 属实 | 四 pin 校验 + 安装 `@principles/pd-mcp-server@${pins.mcpServer}` |
+| 生命周期表“同名冲突 ✅” | 属实 | 改为 ❌ PARTIAL（PD 无冲突检测/报告） |
+| 生命周期表“更新失败恢复上一版本 ✅” | 属实 | 改为未验证/手动 `$pd-control setup`，注明继承机制 |
+| 宿主矩阵“更新失败回滚” | 属实 | 改为未验证 |
+| 实施报告“更新/恢复/卸载全过” | 属实 | 改为“更新失败回滚未验证”，写明继承机制 |
+| SPEC §17 OG-3 状态 | 属实 | 增加“当前状态/历史状态”分段，NOT_AUTHORIZED 标为历史 |
+| 决策卡 r3 记录 | 属实 | r3 的 NOT_AUTHORIZED 标注“已被 r4 取代，仅作历史” |
+| `installer.ts` 忽略 `installBundledMcpServer` 返回值 | 属实 | `if (mcpServerInstalled)` 后才链接/装依赖 |
+| npm 分发路径缺 MCP 运行依赖 | 属实 | `installMcpServerDependencies()` + `ensureComponentFileDependencyLinks()` |
+| WorkBuddy 同版本重装未同步 cache binding | 属实 | `pluginCacheMatchesPayload` 纳入 `mcpBindingMatches`（忽略 `writtenAt`），不一致即刷新 cache |
+| CodeQL 810 测试临时文件 | 属实 | `workspace-binding.test.ts` 改用 `withTempDir`/`mkdtemp`；新 CodeQL 分析复核（PR merge ref 0 open alerts） |
+| 测试夹具未随 `pd-mcp-server` 必需组件更新 | 属实（CI 实跑发现） | 10 个安装/资产夹具补 `pd-mcp-server/package.json` + `dist/index.js`，WorkBuddy skeleton 补 `mcp/launcher.cjs`；**未放宽任何生产校验**（提交 `db33190b8`） |
+
+本轮 CI 额外发现并修复两项：
+- `mcpBindingMatches` 的 `as Record<string, unknown>` 触发 `check:runtime-contract` ERR-001；已改为文件内 `isRecord` 守卫（提交 `f342709cf`）。
+- 生产代码把 `pd-mcp-server` 纳入安装器/发布资产必需组件后，10 个测试夹具仍按旧组件清单构造载荷，导致 `Test create-principles-disciple` 59 个用例在同一根因失败；夹具已镜像生产载荷契约（提交 `db33190b8`）。修复后本地 10 个套件 112 用例全绿，CI 该 job 转绿。
+
+## 1.4 整改轮最终 CI 实跑（head `db33190b8`，2026-11-03）
+
+| Workflow run | 结果 |
+|---|---|
+| CI `41583148953` | **success** — 17/17 jobs |
+| CodeQL `41583148899` | **success**（`Analyze (javascript-typescript)` PASS；PR merge ref 0 open alerts） |
+| PR Checks `41583148898` | success |
+| Release Reproducibility `41583148992` | success |
+| pd-console E2E `41583148999` | success |
+| Repo Health Check `41583148952` | success |
+
+17 个 CI job 全部 PASS：Verify Merge Gate（212s）、Lint、Test pd-mcp-server（41s）、Test principles-core（97s）、Test create-principles-disciple（364s，含本轮夹具修复）、Test OpenClaw Plugin、Build OpenClaw Plugin、Test shared runtime & adapters、Test release asset smoke、Test packaged install smoke、Codex plugin delivery contract、Release Build Parity、Test pd-cli、Test pd-console、TypeScript Check (pd-console)、CI Impact Gate、Telemetry Union Guard。
+
+**唯一红项（advisory，非合并必需）**：`codecov/patch` 83.82% < target 84.42%；11 行未覆盖，其中 `packages/openclaw-plugin/src/index.ts` 10 行（37.50%）、`src/core/mcp-binding.ts` 1 行（98.07%），均属启动健康检查接线分支。分支保护仅要求 `Verify Merge Gate`（已 PASS），故该项不阻塞合并；未为凑覆盖率制造测试。
 
 ## 2. 架构落点（与 SPEC §3 逐条对应）
 
