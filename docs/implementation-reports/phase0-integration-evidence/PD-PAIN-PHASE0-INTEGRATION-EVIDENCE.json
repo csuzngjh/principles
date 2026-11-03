@@ -1,0 +1,191 @@
+{
+  "schemaVersion": "pd-phase0-integration-evidence/v1",
+  "spec": "SPEC-PD-PAIN-SEMANTICS-AND-DETECTION-ARCHITECTURE-001 Phase 0 (PR #2296)",
+  "runAt": "2026-11-03T01:02:44.078Z",
+  "checkoutHeadSha": "5ba66030f8004e4e7c965c0643a7baa4d1db14db",
+  "environment": {
+    "productionDistOfThisCheckout": true,
+    "realHookEntryPoints": [
+      "handleBeforeCompaction",
+      "handleSamplesCommand",
+      "handleAfterToolCall",
+      "handleLlmOutput"
+    ],
+    "realSqlite": true,
+    "realLlmExecuted": false,
+    "realOpenclawHostExperiment": false,
+    "realProductionDataTouched": false,
+    "isolatedWorkspacePath": "C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\pd-phase0-integration-FfDtHx",
+    "isolatedWorkspaceRemovedAfterRun": true,
+    "sqlAccess": "better-sqlite3 readonly connections over the production writers' trajectory.db; all parameterized"
+  },
+  "scenarios": {
+    "S1 fatal-intercept: note yes / pain no": {
+      "pass": true,
+      "inputs": {
+        "hook": "handleBeforeCompaction",
+        "sessionFileLines": [
+          "assistant msg",
+          "assistant msg + openclawAbort{aborted:true,runId:run-fatal-i}"
+        ]
+      },
+      "sqlQueries": [
+        "SELECT source, score FROM pain_events WHERE source = 'intercept_extraction'",
+        "SELECT COUNT(*) n FROM assistant_turns WHERE session_id = ?"
+      ],
+      "interceptPainRows": 0,
+      "memoryNoteHasFailureFact": true,
+      "misleadingTextGone": true,
+      "assistantTurnsRecorded": true
+    },
+    "S2 sample reject: review saved / pain+task none": {
+      "pass": true,
+      "inputs": {
+        "command": "review reject <sampleId> not a real fix",
+        "minedSampleId": "sample_31b59194b3c6"
+      },
+      "sqlQueries": [
+        "SELECT source, score FROM pain_events WHERE source = 'correction_rejected'",
+        "SELECT review_status FROM correction_samples WHERE sample_id = ?",
+        "SELECT note FROM sample_reviews WHERE sample_id = ?"
+      ],
+      "commandText": "Sample sample_31b59194b3c6 marked as rejected.",
+      "correctionRejectedPainRows": 0,
+      "reviewStatus": "rejected",
+      "reviewNote": "not a real fix"
+    },
+    "S3 explicit pain: signal+event+pipeline created": {
+      "pass": true,
+      "inputs": {
+        "hook": "handleAfterToolCall",
+        "event": {
+          "toolName": "pain",
+          "params": {
+            "input": "integration check: agent ignored my instruction"
+          }
+        }
+      },
+      "sqlQueries": [
+        "SELECT source, score FROM pain_events WHERE source = 'manual'",
+        "SELECT COUNT(*) n FROM pain_events WHERE session_id = ? AND source = 'manual'"
+      ],
+      "manualPainSignalRows": 1,
+      "trajectoryPainEventRows": 1,
+      "diagnosticEvidence": {
+        "painDetectedEvents": 1,
+        "painRecordedEvents": 1,
+        "manualAdmissionLogged": true
+      }
+    },
+    "S4a semantic/paralysis: zero old-source pain rows from real hook chain": {
+      "pass": true,
+      "inputs": {
+        "session": "s4-semantic",
+        "hook": "handleLlmOutput",
+        "llmOutputCalls": [
+          {
+            "kind": "plain error text",
+            "text": "Error: ENOENT: no such file or directory, open /x/y",
+            "usage": {
+              "input": 500,
+              "output": 900
+            }
+          },
+          {
+            "kind": "semantic confusion text",
+            "text": "I'm sorry, but I'm still getting an error. I apologize for the confusion.",
+            "usage": {
+              "input": 500,
+              "output": 900
+            }
+          },
+          {
+            "kind": "stuck-loop shape x5",
+            "text": "k",
+            "usage": {
+              "input": 99999,
+              "output": 20
+            },
+            "repeats": 5
+          }
+        ]
+      },
+      "sqlQueries": [
+        "SELECT source, score FROM pain_events WHERE session_id = ? AND (source LIKE 'llm_%')",
+        "SELECT source, COUNT(*) n FROM pain_events WHERE session_id = ? GROUP BY source",
+        "SELECT COUNT(*) n FROM assistant_turns WHERE session_id = ?"
+      ],
+      "llmSourcePainRows": 0,
+      "allPainRowsBySource": [],
+      "assistantTurnsRecorded": 7,
+      "painDetectedEventsForSession": 0,
+      "stuckLoopTurnsDriven": 5
+    },
+    "S4b GFI positive control: real friction → clamp row, evidence-only (no diagnose emit)": {
+      "pass": true,
+      "inputs": {
+        "session": "s4-gfi",
+        "failingAfterToolCalls": {
+          "event": {
+            "toolName": "exec",
+            "result": {
+              "exitCode": 1,
+              "details": {
+                "exitCode": 1
+              }
+            },
+            "error": "command failed with exit code 1"
+          },
+          "count": 30
+        },
+        "llmOutputCall": {
+          "kind": "single llm_output after friction accumulation",
+          "text": "assistant reply after repeated failures",
+          "usage": {
+            "input": 900,
+            "output": 700
+          }
+        }
+      },
+      "sqlQueries": [
+        "SELECT source, score, reason, origin, host_kind, created_at, canonical_pain_id IS NOT NULL AS hasCanonical FROM pain_events WHERE session_id = ? AND source = 'user_empathy'",
+        "SELECT gfi_before, gfi_after FROM tool_calls WHERE session_id = ? AND gfi_after IS NOT NULL ORDER BY rowid DESC LIMIT 3",
+        "SELECT COUNT(*) n FROM pain_events WHERE session_id = ? AND source IN ('tool_failure','dispatch_error')"
+      ],
+      "userEmpathyPainRowsRaw": [
+        {
+          "source": "user_empathy",
+          "score": 60,
+          "reason": "Accumulated GFI (1286.3) crossed highGfi threshold (70). Source: empathy keyword friction.",
+          "origin": "system_infer",
+          "host_kind": "openclaw",
+          "created_at": "2026-11-03T01:02:43.981Z",
+          "hasCanonical": 1
+        }
+      ],
+      "realFailureCallsDriven": 30,
+      "userEmpathyPainRows": 1,
+      "gfiAtCrossing": 1286.3,
+      "clampedScore": 60,
+      "origin": "system_infer",
+      "hostKind": "openclaw",
+      "toolCallsGfiHealthColumnsRaw": [
+        {
+          "gfi_before": 1241.25,
+          "gfi_after": 1286.25
+        },
+        {
+          "gfi_before": 1196.25,
+          "gfi_after": 1241.25
+        },
+        {
+          "gfi_before": 1151.25,
+          "gfi_after": 1196.25
+        }
+      ],
+      "toolFailurePainRowsPreExisting": 0,
+      "painDetectedEventsForSession": 0
+    }
+  },
+  "overallVerdict": "PASS"
+}

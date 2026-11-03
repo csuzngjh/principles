@@ -2139,6 +2139,10 @@ export type {
 } from './feedback/index.js';
 
 // Evidence triage — PEAT-B1 + B2
+// Pain Phase 0: admission event factories (create*Event, serialize, privacy
+// validator + their types) and the unused observation builders
+// (buildLlmDetectionObservation, buildEmpathyObservation) were removed —
+// zero production consumers across the monorepo.
 export type {
   SourceKind,
   TriageDecision,
@@ -2149,11 +2153,6 @@ export type {
   TriggerOutcome,
   TriggerDecision,
   TriggerControllerInput,
-  AdmissionDecisionEvent,
-  DiagnosisTaskCreatedEvent,
-  EvidenceOnlyRecordedEvent,
-  SkippedRefusedEvent,
-  AdmissionEvent,
 } from './evidence-triage/index.js';
 export {
   isSourceKind,
@@ -2164,19 +2163,11 @@ export {
   REPEATED_FAILURE_THRESHOLD,
   resolveSourceKind,
   buildToolFailureObservation,
-  buildLlmDetectionObservation,
-  buildEmpathyObservation,
   buildManualPainObservation,
   evaluateTriggerController,
   shouldCreateTask,
   isAdmittedOutcome,
   isSkippedOutcome,
-  createAdmissionDecisionEvent,
-  createDiagnosisTaskCreatedEvent,
-  createEvidenceOnlyRecordedEvent,
-  createSkippedRefusedEvent,
-  serializeAdmissionEvent,
-  validateEventPrivacy,
 } from './evidence-triage/index.js';
 
 // Detection funnel — PRI-446 (pure logic migrated from plugin)

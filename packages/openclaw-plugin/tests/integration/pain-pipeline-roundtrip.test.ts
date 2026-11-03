@@ -229,12 +229,15 @@ describe('PRI-453: Pain pipeline round-trip invariants', () => {
   // ═══════════════════════════════════════════════════════════════════════
 
   describe('PRI-640 host attribution invariants', () => {
+    // Pain Phase 0: lifecycle.ts removed from the emit-site list — its only
+    // emission was the Fatal Intercept path retired by SPEC §6.3 (a host
+    // safety fact is not Owner-deviation Pain). The remaining four sites keep
+    // the invariant.
     const HOST_SOURCES: ReadonlyArray<[string, string]> = [
       ['after-tool-call-helpers', AFTER_TOOL_CALL_HELPERS],
       ['pain hook', PAIN],
       ['llm hook', LLM],
       ['gate-block-helper', GATE_BLOCK_HELPER],
-      ['lifecycle', LIFECYCLE],
     ];
 
     it('every OpenClaw hook file still emits pain_detected (attribution now centralized in the funnel)', () => {
