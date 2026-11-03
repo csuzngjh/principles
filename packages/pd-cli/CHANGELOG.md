@@ -1,5 +1,27 @@
 # @principles/pd-cli
 
+## 1.163.0
+
+### Minor Changes
+
+- fb70a87: Gate 4 (PRI-1071): `pd health --host <codex|openclaw|workbuddy>` now reports read-only MCP lifecycle diagnostics for the shared `pd-recall` server — installed payload/entry presence, installed version vs Runtime Pin (Codex) or binding pin (OpenClaw/WorkBuddy), PD-owned `mcp-binding.json` schema/host/workspace/canonical-entry/symlink checks, host MCP config registration, and restart-required state. Unknown layers report `unverified` with a reason + next action; the command never spawns the server or executes a business Tool.
+
+### Patch Changes
+
+- d825694: Gate 4 (PRI-1071) third remediation round — context isolation, real rollback acceptance, and registration-conflict safety:
+  
+  - OpenClaw: the host-wide `mcp-binding.json` is written only from an explicitly declared PD workspace (`PD_WORKSPACE_DIR` / `OPENCLAW_WORKSPACE` / `principles-disciple.json`). Without one, the stale binding is removed and `pd-recall` fails closed (`binding_missing`) instead of binding the `main` agent's workspace for every agent. Per-agent hooks keep their existing workspace resolution.
+  - WorkBuddy installer: unchanged transaction semantics, now proven by a real fault injection — a read-only `installed_plugins.json` fails the registration commit after the cache swap, and the previous cache/binding/settings/registry are restored byte-for-byte, after which the real launcher still completes initialize / tools/list / tools/call.
+  - All three hosts: a same-name MCP registration owned by another server stops the install/setup BEFORE any config, binding, or cache write; a PD-owned same-name entry is reused idempotently; different names coexist; malformed or unattributable configs fail closed. `pd health` reports `CONFIG_DRIFT` with `mcp_same_name_conflict` / `mcp_registration_unverifiable`.
+  - `pd-mcp-server` startup logs a workspace fingerprint (SHA-256 prefix, never the path) so operators and acceptance runs can prove which workspace a process bound.
+- Updated dependencies [d825694]
+- Updated dependencies [fb70a87]
+- Updated dependencies [b37c67f]
+- Updated dependencies [b37c67f]
+  - principles-disciple@2.4.0
+  - @principles/install-layout@0.4.1
+  - @principles/workbuddy-adapter@0.4.0
+
 ## 1.162.9
 
 ### Patch Changes
