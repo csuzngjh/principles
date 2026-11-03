@@ -294,32 +294,95 @@ function registrationConfigPath(host: McpHealthHost, homeDir: string, env: { COD
 const PD_LAUNCHER_ID = 'pd-mcp-launcher.v1';
 const PD_BINDING_SCHEMA_MARKER = 'pd.mcp-binding.v1';
 const MAX_LAUNCHER_BYTES = 512 * 1024;
+const HOST_MARKERS: Record<McpHealthHost, string[]> = {
+  codex: ['.codex-plugin', 'plugin.json'],
+  openclaw: ['openclaw.plugin.json'],
+  workbuddy: ['.codebuddy-plugin', 'plugin.json'],
+};
 
+function isPathWithin(child: string, root: string): boolean {
+  const relative = path.relative(root, child);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+/** Resolve BOTH sides before checking containment; lexical paths are not trust boundaries. */
 function isInsideRoot(child: string, root: string): boolean {
   try {
     const realRoot = fs.realpathSync(root);
-    const relative = path.relative(realRoot, child);
-    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+    const realChild = fs.realpathSync(child);
+    return isPathWithin(realChild, realRoot);
   } catch {
     return false;
   }
 }
 
+function pluginHostIdentity(pluginRoot: string, expectedHost: McpHealthHost): 'match' | 'other' | 'unverifiable' {
+  let realRoot: string;
+  try {
+    realRoot = fs.realpathSync(pluginRoot);
+  } catch {
+    return 'unverifiable';
+  }
+  const detected: McpHealthHost[] = [];
+  for (const host of Object.keys(HOST_MARKERS) as McpHealthHost[]) {
+    const markerPath = path.join(realRoot, ...HOST_MARKERS[host]);
+    let markerStat: fs.Stats;
+    try {
+      markerStat = fs.lstatSync(markerPath);
+    } catch (error) {
+      const code = isRecord(error) && typeof error.code === 'string' ? error.code : null;
+      if (code === 'ENOENT') continue;
+      return 'unverifiable';
+    }
+    if (!markerStat.isFile() || markerStat.isSymbolicLink()) return 'unverifiable';
+    let realMarker: string;
+    try {
+      realMarker = fs.realpathSync(markerPath);
+    } catch {
+      return 'unverifiable';
+    }
+    if (!isPathWithin(realMarker, realRoot)) return 'unverifiable';
+    let markerRecord: unknown;
+    try {
+      markerRecord = JSON.parse(fs.readFileSync(realMarker, 'utf8'));
+    } catch {
+      return 'unverifiable';
+    }
+    const markerKey = host === 'openclaw' ? 'id' : 'name';
+    if (!isRecord(markerRecord) || markerRecord[markerKey] !== 'principles-disciple') return 'unverifiable';
+    detected.push(host);
+  }
+  if (detected.length !== 1) return 'unverifiable';
+  return detected[0] === expectedHost ? 'match' : 'other';
+}
+
 /**
- * SPEC §7.5/§11.3: prove the launcher is PD's by IDENTITY — PD's own payload
- * root, or the launcher's content stamps. A file merely NAMED `launcher.cjs`
- * belongs to nobody in particular.
+ * SPEC §7.5/§11.3: prove launcher identity by content AND its unique host
+ * marker. The three launchers are byte-identical, so content stamps alone
+ * cannot establish which host payload owns the file.
  */
-function launcherIdentity(file: string, pdRoots: readonly string[]): ConflictVerdict {
+function launcherIdentity(
+  file: string,
+  pdRoots: readonly string[],
+  expectedHost: McpHealthHost,
+): ConflictVerdict {
   if (file.includes('${') || !path.isAbsolute(file)) return 'unverifiable';
   const resolved = path.resolve(file);
-  if (pdRoots.some((root) => isInsideRoot(resolved, root))) return 'pd_owned';
   let real: string;
   try {
     real = fs.realpathSync(resolved);
   } catch {
     return 'unverifiable';
   }
+  if (path.basename(real).toLowerCase() !== 'launcher.cjs'
+    || path.basename(path.dirname(real)).toLowerCase() !== 'mcp') return 'conflict';
+
+  // A path under a known payload root must resolve inside its real directory;
+  // a junction/symlink cannot borrow the root's host marker.
+  for (const root of pdRoots) {
+    if (isPathWithin(resolved, path.resolve(root)) && !isInsideRoot(real, root)) return 'unverifiable';
+  }
+
   // One open descriptor: fstat+read on the same handle removes the
   // stat-then-read window (CodeQL js/file-system-race).
   let fd: number;
@@ -335,7 +398,9 @@ function launcherIdentity(file: string, pdRoots: readonly string[]): ConflictVer
     const buffer = Buffer.alloc(stat.size);
     fs.readSync(fd, buffer, 0, stat.size, 0);
     const content = buffer.toString('utf8');
-    return content.includes(PD_LAUNCHER_ID) && content.includes(PD_BINDING_SCHEMA_MARKER) ? 'pd_owned' : 'conflict';
+    if (!content.includes(PD_LAUNCHER_ID) || !content.includes(PD_BINDING_SCHEMA_MARKER)) return 'conflict';
+    const hostIdentity = pluginHostIdentity(path.dirname(path.dirname(real)), expectedHost);
+    return hostIdentity === 'match' ? 'pd_owned' : hostIdentity === 'other' ? 'conflict' : 'unverifiable';
   } catch {
     return 'unverifiable';
   } finally {
@@ -343,7 +408,11 @@ function launcherIdentity(file: string, pdRoots: readonly string[]): ConflictVer
   }
 }
 
-function launcherOwnsEntry(entry: Record<string, unknown>, pdRoots: readonly string[]): ConflictVerdict {
+function launcherOwnsEntry(
+  entry: Record<string, unknown>,
+  pdRoots: readonly string[],
+  expectedHost: McpHealthHost,
+): ConflictVerdict {
   const command = readString(entry, 'command');
   const url = readString(entry, 'url');
   if (command === null) return url !== null ? 'conflict' : 'unverifiable';
@@ -354,14 +423,18 @@ function launcherOwnsEntry(entry: Record<string, unknown>, pdRoots: readonly str
   const launcherArg = args.find((arg) => path.basename(arg.replace(/\\/g, '/')) === 'launcher.cjs'
     && path.basename(path.dirname(arg.replace(/\\/g, '/'))) === 'mcp');
   if (launcherArg === undefined) return 'conflict';
-  return launcherIdentity(launcherArg, pdRoots);
+  return launcherIdentity(launcherArg, pdRoots, expectedHost);
 }
 
-function classifyJsonServers(servers: unknown, pdRoots: readonly string[]): ConflictVerdict {
+function classifyJsonServers(
+  servers: unknown,
+  pdRoots: readonly string[],
+  expectedHost: McpHealthHost,
+): ConflictVerdict {
   if (!isRecord(servers)) return 'unverifiable';
   if (!Object.hasOwn(servers, 'pd-recall')) return Object.keys(servers).length === 0 ? 'absent' : 'other_servers_only';
   const entry = servers['pd-recall'];
-  return isRecord(entry) ? launcherOwnsEntry(entry, pdRoots) : 'unverifiable';
+  return isRecord(entry) ? launcherOwnsEntry(entry, pdRoots, expectedHost) : 'unverifiable';
 }
 
 const TOML_PD_SECTION = /^\s*\[\s*mcp_servers\.(?:"pd-recall"|'pd-recall'|pd-recall)\s*\]\s*(?:#.*)?$/;
@@ -426,7 +499,7 @@ function classifyCodexToml(raw: string, pdRoots: readonly string[]): ConflictVer
   if (command !== null) entry.command = command;
   if (args !== null) entry.args = args;
   if (url !== null) entry.url = url;
-  return launcherOwnsEntry(entry, pdRoots);
+  return launcherOwnsEntry(entry, pdRoots, 'codex');
 }
 
 function assessRegistrationConflict(input: {
@@ -456,10 +529,10 @@ function assessRegistrationConflict(input: {
     if (parsed.mcp === undefined) return 'absent';
     if (!isRecord(parsed.mcp)) return 'unverifiable';
     if (parsed.mcp.servers === undefined) return 'absent';
-    return classifyJsonServers(parsed.mcp.servers, pdRoots);
+    return classifyJsonServers(parsed.mcp.servers, pdRoots, host);
   }
   if (parsed.mcpServers === undefined) return 'absent';
-  return classifyJsonServers(parsed.mcpServers, pdRoots);
+  return classifyJsonServers(parsed.mcpServers, pdRoots, host);
 }
 
 interface BaseSectionInput {
@@ -642,7 +715,7 @@ export function assessMcpHealth(options: AssessOptions): McpHealthSection {
     degrade(
       'CONFIG_DRIFT',
       'mcp_same_name_conflict',
-      `Another MCP server owns "${'pd-recall'}" in ${conflictConfigPath}. PD must not overwrite or delete it: remove/rename that entry yourself, then re-install PD and restart the host.`,
+      `The "${'pd-recall'}" launcher in ${conflictConfigPath} is not owned by ${host} (it may belong to a third party or another PD host). Point it at this host's own launcher or remove/rename the foreign entry, then re-install PD and restart the host.`,
     );
   } else if (registrationConflict === 'unverifiable' || registrationConflict === 'unverified') {
     degrade(

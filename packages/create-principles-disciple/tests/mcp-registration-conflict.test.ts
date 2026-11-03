@@ -44,8 +44,26 @@ function sha256(file: string): string {
   return createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
 
-/** A real PD launcher copy (carries PD_LAUNCHER_ID + pd.mcp-binding.v1). */
-function writePdLauncherAt(root: string): string {
+type FixtureHost = 'codex' | 'openclaw' | 'workbuddy';
+
+const HOST_MARKER_PATHS: Record<FixtureHost, string[]> = {
+  codex: ['.codex-plugin', 'plugin.json'],
+  openclaw: ['openclaw.plugin.json'],
+  workbuddy: ['.codebuddy-plugin', 'plugin.json'],
+};
+
+function writeHostMarker(root: string, host: FixtureHost): void {
+  const markerPath = path.join(root, ...HOST_MARKER_PATHS[host]);
+  fs.mkdirSync(path.dirname(markerPath), { recursive: true });
+  const marker = host === 'openclaw'
+    ? { id: 'principles-disciple', name: 'Principles Disciple', host }
+    : { name: 'principles-disciple', host };
+  fs.writeFileSync(markerPath, JSON.stringify(marker));
+}
+
+/** A real PD launcher copy with the manifest marker for its actual host. */
+function writePdLauncherAt(root: string, host: FixtureHost): string {
+  writeHostMarker(root, host);
   const dir = path.join(root, 'mcp');
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, 'launcher.cjs');
@@ -60,6 +78,19 @@ function writeForeignLauncherAt(root: string): string {
   const file = path.join(dir, 'launcher.cjs');
   fs.writeFileSync(file, '// third-party product launcher — same file name, different owner\nprocess.exit(0);\n');
   return file;
+}
+
+function writeHostRegistration(host: FixtureHost, launcher: string): string {
+  const configPath = resolveMcpRegistrationConfigPath(host, { homeDir: home });
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  if (host === 'codex') {
+    fs.writeFileSync(configPath, `[mcp_servers.pd-recall]\ncommand = "node"\nargs = ["${tomlPath(launcher)}"]\n`);
+  } else if (host === 'openclaw') {
+    fs.writeFileSync(configPath, JSON.stringify({ mcp: { servers: { 'pd-recall': { command: 'node', args: [launcher] } } } }, null, 2));
+  } else {
+    fs.writeFileSync(configPath, JSON.stringify({ mcpServers: { 'pd-recall': { command: 'node', args: [launcher] } } }, null, 2));
+  }
+  return configPath;
 }
 
 function tomlPath(file: string): string {
@@ -100,7 +131,7 @@ describe('checkMcpRegistrationConflict — Codex config.toml', () => {
   });
 
   it('same name pointing at the REAL PD launcher is PD-owned (idempotent)', () => {
-    const launcher = writePdLauncherAt(path.join(home, 'pd-plugin'));
+    const launcher = writePdLauncherAt(path.join(home, 'pd-plugin'), 'codex');
     writeCodex(`[mcp_servers.pd-recall]\ncommand = "node"\nargs = ["${tomlPath(launcher)}"]\n`);
     const result = checkMcpRegistrationConflict('codex', { homeDir: home });
     expect(result).toMatchObject({ ok: true, state: 'pd_owned' });
@@ -129,9 +160,9 @@ describe('checkMcpRegistrationConflict — Codex config.toml', () => {
     expect(result.kind).toBe('unverifiable');
   });
 
-  it('a caller-owned PD plugin root is accepted without reading bytes', () => {
+  it('a caller-owned PD plugin root is accepted only after content and host-marker verification', () => {
     const root = path.join(home, 'codex-plugin');
-    const launcher = writeForeignLauncherAt(root); // content irrelevant: caller owns the root
+    const launcher = writePdLauncherAt(root, 'codex'); // caller-owned root must still carry the Codex host marker
     writeCodex(`[mcp_servers.pd-recall]\ncommand = "node"\nargs = ["${tomlPath(launcher)}"]\n`);
     expect(checkMcpRegistrationConflict('codex', { homeDir: home, pdLauncherRoots: [root] })).toMatchObject({
       ok: true,
@@ -183,7 +214,7 @@ describe('checkMcpRegistrationConflict — OpenClaw openclaw.json', () => {
     writeOpenClaw({ mcp: { servers: { comfyui: { command: 'node', args: ['comfyui-mcp'] } } } });
     expect(checkMcpRegistrationConflict('openclaw', { homeDir: home })).toMatchObject({ ok: true, state: 'other_servers_only' });
 
-    const pdLauncher = writePdLauncherAt(path.join(home, 'pd-plugin'));
+    const pdLauncher = writePdLauncherAt(path.join(home, 'pd-plugin'), 'openclaw');
     writeOpenClaw({ mcp: { servers: { 'pd-recall': { command: 'node', args: [pdLauncher] } } } });
     expect(checkMcpRegistrationConflict('openclaw', { homeDir: home })).toMatchObject({ ok: true, state: 'pd_owned' });
 
@@ -232,7 +263,7 @@ describe('checkMcpRegistrationConflict — WorkBuddy mcp.json', () => {
     if (placeholder.ok) throw new Error('expected refusal');
     expect(placeholder.kind).toBe('unverifiable');
 
-    const pdLauncher = writePdLauncherAt(path.join(home, 'pd-plugin'));
+    const pdLauncher = writePdLauncherAt(path.join(home, 'pd-plugin'), 'workbuddy');
     fs.writeFileSync(file, JSON.stringify({ mcpServers: { 'pd-recall': { type: 'stdio', command: 'node', args: [pdLauncher] } } }, null, 2));
     expect(checkMcpRegistrationConflict('workbuddy', { homeDir: home, workbuddyConfigDir: configDir })).toMatchObject({ ok: true, state: 'pd_owned' });
 
@@ -254,6 +285,53 @@ describe('checkMcpRegistrationConflict — WorkBuddy mcp.json', () => {
     if (malformed.ok) throw new Error('expected refusal');
     expect(malformed.kind).toBe('unverifiable');
     expect(sha256(file)).toBe(malformedBefore);
+  });
+});
+
+describe('host-scoped launcher identity', () => {
+  it.each([
+    ['codex', 'openclaw'],
+    ['codex', 'workbuddy'],
+    ['openclaw', 'codex'],
+    ['workbuddy', 'codex'],
+  ] as const)('%s blocks a %s launcher registered as pd-recall', (expectedHost, launcherHost) => {
+    const launcher = writePdLauncherAt(path.join(home, `source-${launcherHost}`), launcherHost);
+    const configPath = writeHostRegistration(expectedHost, launcher);
+    const before = sha256(configPath);
+    const mtimeBefore = fs.statSync(configPath).mtimeMs;
+
+    const result = checkMcpRegistrationConflict(expectedHost, { homeDir: home });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('cross-host launcher must not be PD-owned');
+    expect(['conflict', 'unverifiable']).toContain(result.kind);
+    expect(sha256(configPath)).toBe(before);
+    expect(fs.statSync(configPath).mtimeMs).toBe(mtimeBefore);
+  });
+
+  it('blocks a cross-host directory symlink even when its lexical path is inside the trusted Codex root', () => {
+    const codexRoot = path.join(home, 'codex-plugin');
+    writeHostMarker(codexRoot, 'codex');
+    const openclawLauncher = writePdLauncherAt(path.join(home, 'openclaw-plugin'), 'openclaw');
+    const codexMcpDir = path.join(codexRoot, 'mcp');
+    fs.symlinkSync(
+      path.dirname(openclawLauncher),
+      codexMcpDir,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+    const launcher = path.join(codexMcpDir, 'launcher.cjs');
+    const configPath = writeHostRegistration('codex', launcher);
+    const before = sha256(configPath);
+    const mtimeBefore = fs.statSync(configPath).mtimeMs;
+
+    const result = checkMcpRegistrationConflict('codex', {
+      homeDir: home,
+      pdLauncherRoots: [codexRoot],
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('symlink escape must not be PD-owned');
+    expect(['conflict', 'unverifiable']).toContain(result.kind);
+    expect(sha256(configPath)).toBe(before);
+    expect(fs.statSync(configPath).mtimeMs).toBe(mtimeBefore);
   });
 });
 
@@ -433,5 +511,54 @@ describe('Codex $pd-control setup conflict gate (real script)', () => {
         stderr: run.stderr.trim(), sha256Before: before, sha256After: sha256(configPath),
       }));
     }
+  });
+
+  it('Codex setup blocks an OpenClaw launcher despite the matching PD content stamps', () => {
+    const codexHome = path.join(home, '.codex');
+    const configPath = path.join(codexHome, 'config.toml');
+    fs.mkdirSync(codexHome, { recursive: true });
+    const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'test-market', 'principles-disciple', '0.1.0');
+    writeHostMarker(pluginRoot, 'codex');
+    const openclawLauncher = writePdLauncherAt(path.join(home, 'openclaw-plugin'), 'openclaw');
+    fs.writeFileSync(configPath, `[mcp_servers.pd-recall]\ncommand = "node"\nargs = ["${tomlPath(openclawLauncher)}"]\n`);
+    const before = sha256(configPath);
+    const mtimeBefore = fs.statSync(configPath).mtimeMs;
+
+    const run = spawnSync(process.execPath, [PD_SETUP, '--plugin-root', pluginRoot, '--skip-init', '--json'], {
+      encoding: 'utf8',
+      env: { ...process.env, CODEX_HOME: codexHome },
+      timeout: 60000,
+    });
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain('mcp_same_name_conflict');
+    expect(sha256(configPath)).toBe(before);
+    expect(fs.statSync(configPath).mtimeMs).toBe(mtimeBefore);
+    expect(fs.existsSync(path.join(codexHome, 'plugins', 'data'))).toBe(false);
+  });
+
+  it('Codex setup blocks a cross-host junction escaping its trusted plugin root', () => {
+    const codexHome = path.join(home, '.codex');
+    const configPath = path.join(codexHome, 'config.toml');
+    fs.mkdirSync(codexHome, { recursive: true });
+    const pluginRoot = path.join(codexHome, 'plugins', 'cache', 'test-market', 'principles-disciple', '0.1.0');
+    writeHostMarker(pluginRoot, 'codex');
+    const openclawLauncher = writePdLauncherAt(path.join(home, 'openclaw-plugin'), 'openclaw');
+    const codexMcpDir = path.join(pluginRoot, 'mcp');
+    fs.symlinkSync(path.dirname(openclawLauncher), codexMcpDir, process.platform === 'win32' ? 'junction' : 'dir');
+    const launcher = path.join(codexMcpDir, 'launcher.cjs');
+    fs.writeFileSync(configPath, `[mcp_servers.pd-recall]\ncommand = "node"\nargs = ["${tomlPath(launcher)}"]\n`);
+    const before = sha256(configPath);
+    const mtimeBefore = fs.statSync(configPath).mtimeMs;
+
+    const run = spawnSync(process.execPath, [PD_SETUP, '--plugin-root', pluginRoot, '--skip-init', '--json'], {
+      encoding: 'utf8',
+      env: { ...process.env, CODEX_HOME: codexHome },
+      timeout: 60000,
+    });
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain('mcp_registration_unverifiable');
+    expect(sha256(configPath)).toBe(before);
+    expect(fs.statSync(configPath).mtimeMs).toBe(mtimeBefore);
+    expect(fs.existsSync(path.join(codexHome, 'plugins', 'data'))).toBe(false);
   });
 });

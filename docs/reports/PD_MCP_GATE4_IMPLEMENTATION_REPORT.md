@@ -169,13 +169,18 @@ YES 项论证：public 包是 SPEC G4-01 的直接交付物（零实现替代不
 
 **根因**：`entryOwnership()` 与 `pd-setup.cjs` 的 Codex 扫描仅以 `node` + `mcp/launcher.cjs` 目录形状判定 `pd_owned`。任何第三方产品只要同名同形即被误判为 PD，导致冲突规则 A（幂等）误命中并跳过冲突门。
 
-**修复**（三宿主同一规则）：
+**初始修复**（三宿主同一规则）：
 - 内容证明：launcher 自身带 `pd-mcp-launcher.v1` + `pd.mcp-binding.v1` 双戳；安装器/`pd-setup`/`pd health` 读取真实文件字节判定，文件名不再构成所有权。
-- 权威路径：调用方可传 `pdLauncherRoots`（install-layout 已知根），根内即 `pd_owned`。
+- 原始根路径捷径后来发现仍不足以证明宿主归属，见下方补充复核；当前 `pdLauncherRoots` 仅作为真实路径边界，不再单独授予 `pd_owned`。
 - 无法确认一律 fail-closed：相对路径、含模板占位、非 Node 命令、非 launcher 形状 → `other`/`unverifiable`，绝不 `pd_owned`。
 - 冲突时只读检查，不写配置；回归断言 config SHA-256 不变、不同名 MCP 共存。
 
-证据：`packages/create-principles-disciple/src/installers/mcp-registration-conflict.ts`（`readLauncherIdentity`/`entryOwnership`）、`plugins/principles-disciple/scripts/pd-setup.cjs`（`launcherIdentity`）、`packages/pd-cli/src/commands/health-mcp.ts`（`launcherIdentity`）；测试 `mcp-registration-conflict.test.ts` 18/18、`health-mcp.test.ts` 20/20。
+**补充复核 — P1-A2：跨宿主 Launcher 身份混淆**：
+- 三个 Launcher 文件字节相同，内容双戳不能证明宿主身份；现要求同时验证插件根唯一宿主 Marker：Codex `.codex-plugin/plugin.json`（`name=principles-disciple`）、OpenClaw `openclaw.plugin.json`（`id=principles-disciple`）、WorkBuddy `.codebuddy-plugin/plugin.json`（`name=principles-disciple`）。
+- 同时验证真实 Launcher 路径、真实插件根与 Marker 文件；Marker 必须是根内普通文件且 JSON 身份字段匹配。已知 payload root 下的路径若 realpath 越界（含 symlink/junction）一律 `unverifiable`，不再走根路径捷径。
+- 三个入口统一按调用宿主传递 expectedHost；跨宿主 Launcher → `conflict`，缺失/歧义 Marker 或真实路径越界 → `unverifiable`。两者都阻断幂等放行。
+
+证据：`mcp-registration-conflict.test.ts` 25/25（含四种跨宿主组合、同宿主通过、Codex Junction 越界及真实 `pd-setup` 阻断）；`health-mcp.test.ts` 28/28（含三宿主同宿主通过、四种跨宿主组合及 Codex Junction 越界）。
 
 ### 7.2 P1-B — OpenClaw binding 最终启动门禁
 

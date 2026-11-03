@@ -56,10 +56,9 @@ export interface McpRegistrationCheckOptions {
   /** WorkBuddy config root override; defaults to <home>/.workbuddy. */
   workbuddyConfigDir?: string;
   /**
-   * Authoritative PD plugin roots this caller owns (e.g. the Codex plugin root
-   * `$pd-control setup` is running from, or the OpenClaw extension dir). A
-   * registered launcher inside one of them is PD's own WITHOUT reading bytes;
-   * everything else must prove itself by content.
+   * Known payload roots for this host. A lexical path under one of these roots
+   * must also resolve inside its real path; root membership alone never proves
+   * ownership. Launcher bytes and the root's host marker are still verified.
    */
   pdLauncherRoots?: readonly string[];
 }
@@ -98,29 +97,91 @@ export function resolveMcpRegistrationConfigPath(host: McpConflictHost, options:
 /** Does this entry launch PD's own zero-dependency launcher? */
 type EntryOwnership = 'pd_owned' | 'other' | 'unverifiable';
 
+const HOST_MARKER_PATHS: Record<McpConflictHost, string[]> = {
+  codex: ['.codex-plugin', 'plugin.json'],
+  openclaw: ['openclaw.plugin.json'],
+  workbuddy: ['.codebuddy-plugin', 'plugin.json'],
+};
+
+function isPathWithin(child: string, root: string): boolean {
+  const relative = path.relative(root, child);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+/** Resolve BOTH sides before checking containment; lexical paths are not trust boundaries. */
 function isInsideRoot(child: string, root: string): boolean {
   try {
     const realRoot = fs.realpathSync(root);
-    const relative = path.relative(realRoot, child);
-    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+    const realChild = fs.realpathSync(child);
+    return isPathWithin(realChild, realRoot);
   } catch {
     return false;
   }
 }
 
+function readPluginHostIdentity(pluginRoot: string, expectedHost: McpConflictHost): 'match' | 'other' | 'unverifiable' {
+  const realRoot = fs.realpathSync(pluginRoot);
+  const detected: McpConflictHost[] = [];
+  for (const host of Object.keys(HOST_MARKER_PATHS) as McpConflictHost[]) {
+    const markerPath = path.join(realRoot, ...HOST_MARKER_PATHS[host]);
+    let markerStat: fs.Stats;
+    try {
+      markerStat = fs.lstatSync(markerPath);
+    } catch (error) {
+      if (isRecord(error) && error.code === 'ENOENT') continue;
+      return 'unverifiable';
+    }
+    // Marker files are identity evidence, not links to identity evidence.
+    if (!markerStat.isFile() || markerStat.isSymbolicLink()) return 'unverifiable';
+    let realMarker: string;
+    try {
+      realMarker = fs.realpathSync(markerPath);
+    } catch {
+      return 'unverifiable';
+    }
+    if (!isPathWithin(realMarker, realRoot)) return 'unverifiable';
+    let markerRecord: unknown;
+    try {
+      markerRecord = JSON.parse(fs.readFileSync(realMarker, 'utf8'));
+    } catch {
+      return 'unverifiable';
+    }
+    const markerKey = host === 'openclaw' ? 'id' : 'name';
+    if (!isRecord(markerRecord) || markerRecord[markerKey] !== 'principles-disciple') return 'unverifiable';
+    detected.push(host);
+  }
+  if (detected.length !== 1) return 'unverifiable';
+  return detected[0] === expectedHost ? 'match' : 'other';
+}
+
 /**
- * Prove launcher identity by CONTENT: PD's launcher carries its own stamp and
- * its binding-schema constant. A third-party `mcp/launcher.cjs` (the same file
- * NAME at a different product) fails this check even though the filename and
- * argument shape match — the previous rule was exactly that mistake.
+ * Prove launcher identity by BOTH content and host ownership. The launcher
+ * copies are intentionally byte-identical across hosts, so their containing
+ * plugin root's unique manifest marker is part of the identity contract.
  */
-function readLauncherIdentity(file: string): 'pd' | 'other' | 'unverifiable' {
+function readLauncherIdentity(
+  file: string,
+  expectedHost: McpConflictHost,
+  trustedRoots: readonly string[] = [],
+): 'pd' | 'other' | 'unverifiable' {
   let real: string;
   try {
     real = fs.realpathSync(file);
   } catch {
     return 'unverifiable';
   }
+  if (path.basename(real).toLowerCase() !== 'launcher.cjs'
+    || path.basename(path.dirname(real)).toLowerCase() !== 'mcp') return 'other';
+
+  // If the configured path is lexically under a known payload root, its real
+  // target must remain under that root. This blocks file/directory symlink and
+  // junction escapes before any ownership shortcut can be considered.
+  const lexicalFile = path.resolve(file);
+  for (const root of trustedRoots) {
+    const lexicalRoot = path.resolve(root);
+    if (isPathWithin(lexicalFile, lexicalRoot) && !isInsideRoot(real, root)) return 'unverifiable';
+  }
+
   // Read through ONE open descriptor: a stat-then-read pair leaves a window in
   // which the path can be swapped (CodeQL js/file-system-race). fstat+read on
   // the same handle validates and reads the same file instance.
@@ -137,7 +198,11 @@ function readLauncherIdentity(file: string): 'pd' | 'other' | 'unverifiable' {
     const buffer = Buffer.alloc(stat.size);
     fs.readSync(fd, buffer, 0, stat.size, 0);
     const content = buffer.toString('utf8');
-    return content.includes(PD_LAUNCHER_ID) && content.includes(PD_BINDING_SCHEMA_MARKER) ? 'pd' : 'other';
+    if (!content.includes(PD_LAUNCHER_ID) || !content.includes(PD_BINDING_SCHEMA_MARKER)) return 'other';
+
+    const pluginRoot = path.dirname(path.dirname(real));
+    const hostIdentity = readPluginHostIdentity(pluginRoot, expectedHost);
+    return hostIdentity === 'match' ? 'pd' : hostIdentity;
   } catch {
     return 'unverifiable';
   } finally {
@@ -153,7 +218,11 @@ function launcherArgPath(arg: string): string | undefined {
   return arg;
 }
 
-function entryOwnership(entry: unknown, options: McpRegistrationCheckOptions = {}): EntryOwnership {
+function entryOwnership(
+  entry: unknown,
+  expectedHost: McpConflictHost,
+  options: McpRegistrationCheckOptions = {},
+): EntryOwnership {
   if (!isRecord(entry)) return 'unverifiable';
   const command = typeof entry.command === 'string' ? entry.command : undefined;
   const args = Array.isArray(entry.args) ? entry.args.filter((arg): arg is string => typeof arg === 'string') : undefined;
@@ -174,9 +243,7 @@ function entryOwnership(entry: unknown, options: McpRegistrationCheckOptions = {
   // depend on a cwd/variable the config does not fix: ownership is unprovable.
   if (candidate.includes('${') || !path.isAbsolute(candidate)) return 'unverifiable';
   const resolved = path.resolve(candidate);
-  const roots = options.pdLauncherRoots ?? [];
-  if (roots.some((root) => isInsideRoot(resolved, root))) return 'pd_owned';
-  const identity = readLauncherIdentity(resolved);
+  const identity = readLauncherIdentity(resolved, expectedHost, options.pdLauncherRoots ?? []);
   if (identity === 'pd') return 'pd_owned';
   return identity === 'other' ? 'other' : 'unverifiable';
 }
@@ -190,7 +257,7 @@ function classifyEntryPresence(input: {
 }): McpRegistrationCheck {
   const { present, entry, host, configPath, ownershipOptions } = input;
   if (!present) return { ok: true, host, configPath, state: 'absent' };
-  const ownership = entryOwnership(entry, ownershipOptions);
+  const ownership = entryOwnership(entry, host, ownershipOptions);
   if (ownership === 'pd_owned') return { ok: true, host, configPath, state: 'pd_owned' };
   if (ownership === 'unverifiable') {
     return {
@@ -207,8 +274,8 @@ function classifyEntryPresence(input: {
     host,
     configPath,
     kind: 'conflict',
-    reason: `mcp_same_name_conflict: ${configPath} already registers a DIFFERENT MCP server named "${PD_MCP_SERVER_NAME}". The installer stopped before any write; the existing entry was left byte-identical.`,
-    nextAction: `Remove or rename the third-party "${PD_MCP_SERVER_NAME}" entry in ${configPath} yourself, then re-run the installer. PD does not overwrite or delete another server's registration.`,
+    reason: `mcp_same_name_conflict: ${configPath} registers "${PD_MCP_SERVER_NAME}" with a launcher not owned by ${host} (third-party or another PD host). The installer stopped before any write; the existing entry was left byte-identical.`,
+    nextAction: `Point "${PD_MCP_SERVER_NAME}" at ${host}'s own absolute mcp/launcher.cjs path, or remove/rename the foreign entry in ${configPath}, then re-run the installer. PD never reuses another host's launcher.`,
   };
 }
 
@@ -496,7 +563,7 @@ function classifyCodex(configPath: string, options: McpRegistrationCheckOptions 
       nextAction: `Inspect ${configPath} manually (PD only understands [mcp_servers.<name>] tables and dotted mcp_servers.<name>.* keys), then re-run the installer.`,
     };
   }
-  const ownership = entryOwnership({ command: entry.command, args: entry.args, url: entry.url }, options);
+  const ownership = entryOwnership({ command: entry.command, args: entry.args, url: entry.url }, 'codex', options);
   if (ownership === 'pd_owned') return { ok: true, host: 'codex', configPath, state: 'pd_owned' };
   if (ownership === 'unverifiable') {
     return {
@@ -513,8 +580,8 @@ function classifyCodex(configPath: string, options: McpRegistrationCheckOptions 
     host: 'codex',
     configPath,
     kind: 'conflict',
-    reason: `mcp_same_name_conflict: ${configPath} already registers a DIFFERENT MCP server named "${PD_MCP_SERVER_NAME}" (user tier overrides the PD plugin tier). The installer stopped before any write; the existing entry was left byte-identical.`,
-    nextAction: `Remove or rename the third-party [mcp_servers.${PD_MCP_SERVER_NAME}] table in ${configPath} yourself, then re-run the installer. PD does not overwrite or delete another server's registration.`,
+    reason: `mcp_same_name_conflict: ${configPath} registers "${PD_MCP_SERVER_NAME}" with a launcher not owned by Codex (third-party or another PD host; user tier overrides the plugin tier). The installer stopped before any write; the existing entry was left byte-identical.`,
+    nextAction: `Point [mcp_servers.${PD_MCP_SERVER_NAME}] at the Codex plugin's own absolute mcp/launcher.cjs path, or remove/rename the foreign entry in ${configPath}, then re-run $pd-control setup. PD never reuses another host's launcher.`,
   };
 }
 

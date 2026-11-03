@@ -16,6 +16,42 @@ import { assessMcpHealth } from '../../src/commands/health-mcp.js';
 
 const SCHEMA = 'pd.mcp-binding.v1';
 const WORKSPACE_NAME = 'ws';
+type Host = 'codex' | 'openclaw' | 'workbuddy';
+
+function writePdLauncher(root: string, host: Host): string {
+  const markerPath = host === 'codex'
+    ? path.join(root, '.codex-plugin', 'plugin.json')
+    : host === 'openclaw'
+      ? path.join(root, 'openclaw.plugin.json')
+      : path.join(root, '.codebuddy-plugin', 'plugin.json');
+  if (!fs.existsSync(markerPath)) {
+    writeJson(markerPath, host === 'openclaw'
+      ? { id: 'principles-disciple', name: 'Principles Disciple', host }
+      : { name: 'principles-disciple', host });
+  }
+  const launcher = path.join(root, 'mcp', 'launcher.cjs');
+  fs.mkdirSync(path.dirname(launcher), { recursive: true });
+  fs.writeFileSync(launcher, `// pd-mcp-launcher.v1\nconst bindingSchema = 'pd.mcp-binding.v1';\n`);
+  return launcher;
+}
+
+function writeHostConfig(home: string, host: Host, launcher: string): string {
+  if (host === 'codex') {
+    const file = path.join(home, '.codex', 'config.toml');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const escapedLauncher = launcher.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    fs.writeFileSync(file, `[mcp_servers.pd-recall]\ncommand = "node"\nargs = ["${escapedLauncher}"]\n`);
+    return file;
+  }
+  if (host === 'openclaw') {
+    const file = path.join(home, '.openclaw', 'openclaw.json');
+    writeJson(file, { mcp: { servers: { 'pd-recall': { command: 'node', args: [launcher] } } } });
+    return file;
+  }
+  const file = path.join(home, '.workbuddy', 'mcp.json');
+  writeJson(file, { mcpServers: { 'pd-recall': { command: 'node', args: [launcher] } } });
+  return file;
+}
 
 function withHome<T>(fn: (home: string) => T): T {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pd-health-mcp-'));
@@ -55,6 +91,8 @@ interface CodexFixture {
 function makeCodexFixture(home: string, opts: { installedVersion?: string; pinVersion?: string | null } = {}): CodexFixture {
   const codexHome = path.join(home, '.codex');
   const payloadRoot = path.join(codexHome, 'plugins', 'cache', 'principles', 'principles-disciple', '0.1.0');
+  writeJson(path.join(payloadRoot, '.codex-plugin', 'plugin.json'), { name: 'principles-disciple' });
+  writePdLauncher(payloadRoot, 'codex');
   const runtimeDir = path.join(codexHome, 'plugins', 'data', 'principles-disciple-principles', 'runtime');
   const serverEntry = path.join(runtimeDir, 'node_modules', '@principles', 'pd-mcp-server', 'dist', 'index.js');
   const pinVersion = opts.pinVersion === undefined ? '0.1.0' : opts.pinVersion;
@@ -112,6 +150,10 @@ function makeSharedFixture(home: string, host: 'openclaw' | 'workbuddy'): Shared
       mcpServers: { 'pd-recall': { command: 'node', args: ['./mcp/launcher.cjs'], cwd: '.' } },
     });
   }
+  if (host === 'workbuddy') {
+    writeJson(path.join(payloadRoot, '.codebuddy-plugin', 'plugin.json'), { name: 'principles-disciple' });
+  }
+  writePdLauncher(payloadRoot, host);
   writeMcpPackage(path.join(runtimeDir, 'pd-mcp-server'), '0.1.0');
   const bindingPath = path.join(payloadRoot, 'mcp-binding.json');
   writeJson(bindingPath, {
@@ -334,7 +376,7 @@ describe('assessMcpHealth — same-name registration conflict (SPEC §7.5/§11.3
       expect(section.status).toBe('CONFIG_DRIFT');
       expect(section.reason).toBe('mcp_same_name_conflict');
       expect(section.registrationConflict.verdict).toBe('conflict');
-      expect(section.nextAction).toContain('must not overwrite');
+      expect(section.nextAction).toContain('not owned by codex');
     });
   });
 
@@ -394,6 +436,53 @@ describe('assessMcpHealth — same-name registration conflict (SPEC §7.5/§11.3
       expect(malformed.status).toBe('CONFIG_DRIFT');
       expect(malformed.reason).toBe('mcp_registration_unverifiable');
       expect(malformed.registrationConflict.verdict).toBe('unverifiable');
+    });
+  });
+
+  it.each(['codex', 'openclaw', 'workbuddy'] as const)('%s accepts its own marked PD launcher', (host) => {
+    withHome((home) => {
+      const payloadRoot = host === 'codex'
+        ? makeCodexFixture(home).payloadRoot
+        : makeSharedFixture(home, host).payloadRoot;
+      const launcher = path.join(payloadRoot, 'mcp', 'launcher.cjs');
+      writeHostConfig(home, host, launcher);
+      const section = assessMcpHealth({ host, homeDir: home, env: {} });
+      expect(section.registrationConflict.verdict).toBe('pd_owned');
+      expect(section.status).toBe('HEALTHY');
+    });
+  });
+
+  it.each([
+    ['codex', 'openclaw'],
+    ['codex', 'workbuddy'],
+    ['openclaw', 'codex'],
+    ['workbuddy', 'codex'],
+  ] as const)('%s health blocks a %s launcher with valid PD content stamps', (expectedHost, launcherHost) => {
+    withHome((home) => {
+      if (expectedHost === 'codex') makeCodexFixture(home);
+      else makeSharedFixture(home, expectedHost);
+      const foreignLauncher = writePdLauncher(path.join(home, `source-${launcherHost}`), launcherHost);
+      writeHostConfig(home, expectedHost, foreignLauncher);
+      const section = assessMcpHealth({ host: expectedHost, homeDir: home, env: {} });
+      expect(section.status).toBe('CONFIG_DRIFT');
+      expect(section.reason).toBe('mcp_same_name_conflict');
+      expect(section.registrationConflict.verdict).toBe('conflict');
+    });
+  });
+
+  it('Codex health blocks a cross-host junction that escapes its trusted payload root', () => {
+    withHome((home) => {
+      const fixture = makeCodexFixture(home);
+      const openclawLauncher = writePdLauncher(path.join(home, 'openclaw-source'), 'openclaw');
+      const codexMcpDir = path.join(fixture.payloadRoot, 'mcp');
+      fs.rmSync(codexMcpDir, { recursive: true, force: true });
+      fs.symlinkSync(path.dirname(openclawLauncher), codexMcpDir, process.platform === 'win32' ? 'junction' : 'dir');
+      writeHostConfig(home, 'codex', path.join(codexMcpDir, 'launcher.cjs'));
+
+      const section = assessCodex(fixture);
+      expect(section.status).toBe('CONFIG_DRIFT');
+      expect(section.reason).toBe('mcp_registration_unverifiable');
+      expect(section.registrationConflict.verdict).toBe('unverifiable');
     });
   });
 });
