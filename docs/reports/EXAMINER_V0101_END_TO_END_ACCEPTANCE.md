@@ -150,7 +150,7 @@ Owner 评审提出六项 P1；本轮完成代码、定位并修复两处真实�
 | `pre-push-fast` | PASS |
 | 真实模型调用 | **0** |
 | 生产状态变更 | **0**（全部临时工作区；历史 acceptance 资产回滚为字节一致） |
-| Required CI | 推送后由 CI 判定（本报告不预设绿） |
+| Required CI | **PASS**（分支保护唯一 required 项 `Verify Merge Gate` 通过，HEAD `81cb62e76`；其余 24 项绿。2 项非 required：CodeQL 静态告警 8 high + 1 note、codecov/patch 咨询性） |
 
 ### 10.5 冻结链 rebind 与历史基线
 
@@ -175,5 +175,6 @@ Owner 评审提出六项 P1；本轮完成代码、定位并修复两处真实�
 1. `readBody` 在真实 `IncomingMessage` 上无超时上限；若上游中间件提前消费 body，会表现为挂起而非结构化失败。产品边界内暂不新增（当前无此中间件），记录为后续。
 2. 首次请求的 lab 冷加载走模块级 memo；若未来需要多 workspace 并发，可评估预热策略（本轮已删除无效的 collect 预热）。
 3. 冻结链的 canonical hasher 对 `undefined` 键的行为与其他 frozen 产物一致但语义易误读；可考虑在 lab 内统一「先 JSON 归一化再哈希」，超出本轮范围。
+4. CodeQL（非 required）对本 PR 改动行报 8 high + 1 note：`js/file-system-race` ×3 与 `js/insecure-temporary-file` ×1 位于 P1-6 的 lstat→append / 独占创建序列（Node 未暴露 `O_NOFOLLOW`，彻底消除需另行设计），`js/user-controlled-bypass` ×4 位于 `/studies/:id` 路由分发（正则匹配门控，属静态分析模式告警）；另 1 note 为未使用的 `SectionTitle` import。均未在 required gate 内，建议合并前由 Owner 安排一次独立安全复核，不在本轮扩大修改。
 
 **本轮结论**：六项 P1 全部 PASS；两处缺陷均有可复现的红灯证据与修复后绿灯证据；真实模型调用 0；PR 保持 OPEN，等待 Owner 授权合并。
