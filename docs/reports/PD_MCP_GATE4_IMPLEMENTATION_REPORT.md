@@ -247,8 +247,8 @@ YES 项论证：public 包是 SPEC G4-01 的直接交付物（零实现替代不
 |---|---|---|---|
 | 1 | Gateway 启动 | `gateway health` ok；插件 `principles-disciple` loaded；`errors: []` | pass |
 | 2 | 插件启动写 binding | 声明 A 时 binding `workspaceDir` = workspace A，`runtimeDir`/`serverEntry` 指向隔离 runtime（0.1.0） | pass |
-| 3 | 启动指纹（A） | 同一安装根 launcher 启动事件 `workspaceDirHash = 1fdec6d06110fd15`（= sha256(realpath(A)) 前 16） | pass |
-| 4 | A 数据隔离 | 同一安装根查 X → `status: unavailable` / `errorCode: source_missing`；查 Y → `principle_not_found` | pass |
+| 3 | 启动指纹（A） | 同一安装根 launcher 启动事件 `workspaceFingerprint = 1fdec6d06110fd15`（= sha256(realpath(A)) 前 16） | pass |
+| 4 | A 数据隔离 | 同一安装根查 X → `status: unavailable` / `errorCode: source_missing`；查 Y → `status: not_found` / `errorCode: principle_not_found`（`returned: 0`, `identityStatus: not_found`） | pass |
 | 5 | A→B 切换 | 声明改为 B 后重启 Gateway，binding 重写为 B；启动指纹 `23e0a88184749767`（= B） | pass（经重启） |
 | 6 | B 数据隔离 | 同一安装根查 Y → `source_missing`；查 X → `principle_not_found` | pass |
 | 7 | 重载 | `plugins reload principles-disciple --json` 失败：`EPERM` symlink，`generation 2 replacement not applied` | 未通过（环境限制） |
