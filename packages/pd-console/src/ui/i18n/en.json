@@ -297,6 +297,7 @@
       "promptCapacityPerHostRotating": " (not all entered this turn; the rest rotate in on later turns)",
       "promptCapacityPerHostDeclared": "(budget from the workspace config declaration)",
       "promptCapacityPerHostObserved": " (budget from this host's most recent runtime observation at {{observedAt}})",
+      "promptCapacityPickHint": "Review/approve for a target host:",
       "promptCapacityViewAsHost": "View as {{host}}",
       "promptCapacityClearHost": "Clear selection",
       "promptScopeShared": "Forecast window (shared route, billed on the full injected block, unit=chars)",

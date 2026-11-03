@@ -28,6 +28,7 @@ import { ApprovalSubjectReading } from "./ApprovalSubjectReading.js";
 import type { RuleBindingQueueView } from "../../../shared/rule-candidate-binding-contract.js";
 import { OwnerDecisionCard } from "./OwnerDecisionCard.js";
 import { RuleCandidateBindingPanel, deriveRuleBindingCardState } from './RuleCandidateBindingPanel.js';
+import { PromptCapacitySection } from "./PromptCapacitySection.js";
 
 import { fetchGovernanceExperience, fetchOwnerDecisionInbox } from "../../api.js";
 import type { OwnerDecisionInboxData } from "../../api.js";
@@ -970,133 +971,16 @@ export function FocusPage({ featureFlags }: FocusPageProps) {
       <section aria-label={t("pages.focus.ownerDecision.sectionTitle")} className="mb-7" data-testid="owner-decisions-section">
         {ownerDecisionError !== null && <p role="alert" className="text-amber text-[13px]">{t('pages.focus.ownerDecision.loadError')}</p>}
         {/* 分组数据不可用时 OwnerDecisionCard 保持原渲染（含降级 CTA），决策不静默消失（rc-9）——见 selectDecisionSurfaceItems。 */}
-        {/* PD_PROMPT_CAPACITY_V1 R-A1: 适用宿主会走不同路由且未选择目标宿主时，
-            明确标注"当前宿主容量未确认"并分别展示各宿主的能力——不猜测 FIFO 或轮转。 */}
-        {(() => {
-          const unconfirmed = groupedData?.promptInjection;
-          if (unconfirmed === undefined || unconfirmed.capacityStatus !== "unconfirmed") return null;
-          const perHost = unconfirmed.perHost ?? [];
-          // PRI-1066: `truncated` is the NORMAL rotation state — an approved
-          // principle that does not fit this turn is queued behind rotation by
-          // design (see `PromptInjectionBudgetStatus.truncated`). Rendering a
-          // warning for it turned every Focus page load (which is not a state
-          // change) into a standing nag about a limit the Owner cannot act on.
-          //
-          // Only a genuinely broken state is worth an interruption: a host
-          // whose budget cannot hold even ONE principle injects nothing at
-          // all (`usedChars === 0` while candidates exist). That is a real
-          // starvation the Owner can fix (declare a larger budget or shrink
-          // the principle), and it is rare, so it cannot become background
-          // noise. Budget provenance stays available on the Activation page.
-          const starvedHosts = perHost.filter(
-            (entry) => entry.usedChars === 0 && entry.truncated,
-          );
-          if (starvedHosts.length === 0) return null;
-          return (
-          <div
-            className="mb-4 rounded-[3px] border border-amber/40 bg-amber/5 px-3 py-2 text-[12.5px] leading-relaxed text-amber"
-            data-testid="prompt-capacity-unconfirmed-banner"
-          >
-            <p data-testid="prompt-capacity-summary">
-              {t("pages.focus.promptCapacityStarved", {
-                defaultValue: "{{count}} 个宿主当前的注入预算连一条原则都装不下，原则在这些宿主上不会生效。",
-                count: starvedHosts.length,
-              })}
-            </p>
-            <details className="mt-1">
-              <summary className="cursor-pointer text-ink-2" data-testid="prompt-capacity-details-toggle">
-                {t("pages.focus.promptCapacityDetails", { defaultValue: "查看各宿主容量明细" })}
-              </summary>
-              <p className="mt-1 text-ink-2">
-                {t("pages.focus.promptCapacityUnconfirmed", {
-                  defaultValue: "当前宿主容量未确认：本工作区适用的宿主会走不同的注入路由，以下数字未绑定具体宿主。",
-                })}
-              </p>
-              <ul className="mt-1 list-disc pl-5">
-                {perHost.map((entry) => (
-                  <li key={entry.hostKind} data-testid={`prompt-capacity-perhost-${entry.hostKind}`}>
-                    {t("pages.focus.promptCapacityPerHostEntry", {
-                      host: entry.hostKind === "openclaw" ? "OpenClaw" : entry.hostKind === "workbuddy" ? "WorkBuddy" : "Codex",
-                      billing: entry.route === "shared_render"
-                        ? t("pages.focus.promptCapacitySharedRoute")
-                        : t("pages.focus.promptCapacityListRoute"),
-                      used: entry.usedChars,
-                      // PRI-1017: each host shows ITS OWN budget basis (runtime
-                      // observation or its own honest fallback) — never the
-                      // shared headline number.
-                      budget: entry.budget ?? unconfirmed.budget,
-                      // PRI-1066: `truncated` never means "the budget is full
-                      // forever". On the rotating list route the entries that
-                      // did not fit are queued for later turns; only the
-                      // non-rotating shared render genuinely stops here.
-                      full: entry.truncated
-                        ? entry.route === "legacy_trim"
-                          ? t("pages.focus.promptCapacityPerHostRotating")
-                          : t("pages.focus.promptCapacityPerHostFull")
-                        : "",
-                      observed: entry.budgetObservedAt !== undefined
-                        ? t("pages.focus.promptCapacityPerHostObserved", {
-                            defaultValue: "（预算来自该宿主最近一次运行时观测，观测于 {{observedAt}}）",
-                            observedAt: entry.budgetObservedAt,
-                          })
-                        // PRI-1020: a declared basis is the Owner's own config
-                        // fact — label it as a declaration, never as an
-                        // observation.
-                        : entry.budgetCapacitySource === "operator_declared"
-                          ? t("pages.focus.promptCapacityPerHostDeclared", {
-                              defaultValue: "（预算来自工作区配置声明）",
-                            })
-                          // PRI-1066: a name-only catalog match is a derived
-                          // window, not a host observation — say which.
-                          : entry.budgetCapacitySource === "pi_catalog_model_id"
-                            ? t("pages.focus.promptCapacityPerHostCatalogMatched", {
-                                defaultValue: "（预算按模型目录同名一致窗口推算）",
-                              })
-                            : "",
-                    })}
-                    {entry.budgetFallbackReason !== undefined && (
-                      <span data-testid={`prompt-capacity-perhost-reason-${entry.hostKind}`}>
-                        {" · "}
-                        {t(`pages.focus.budgetFallbackReason.${entry.budgetFallbackReason}`, {
-                          defaultValue: entry.budgetFallbackReason,
-                        })}
-                      </span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </details>
-            {unconfirmed.nextAction !== undefined && (
-              <p className="mt-1 text-ink-2">{unconfirmed.nextAction}</p>
-            )}
-            <div className="mt-2 flex gap-2">
-              {(["openclaw", "codex", "workbuddy"] as const).map((host) => (
-                <button
-                  key={host}
-                  type="button"
-                  onClick={() => changePromptTargetHost(host)}
-                  data-testid={`prompt-capacity-pick-${host}`}
-                  className={`inline-flex items-center border rounded-[3px] px-[10px] py-[4px] transition-colors ${
-                    promptTargetHost === host ? "border-amber bg-amber/10" : "border-line hover:border-line-2"
-                  }`}
-                >
-                  {t("pages.focus.promptCapacityViewAsHost", { host: host === "openclaw" ? "OpenClaw" : host === "workbuddy" ? "WorkBuddy" : "Codex" })}
-                </button>
-              ))}
-              {promptTargetHost !== null && (
-                <button
-                  type="button"
-                  onClick={() => changePromptTargetHost(null)}
-                  data-testid="prompt-capacity-pick-clear"
-                  className="inline-flex items-center border border-line rounded-[3px] px-[10px] py-[4px] hover:border-line-2"
-                >
-                  {t("pages.focus.promptCapacityClearHost", { defaultValue: "清除选择" })}
-                </button>
-              )}
-            </div>
-          </div>
-          );
-        })()}
+        {/* PD_PROMPT_CAPACITY_V1 R-A1 / PRI-1066: the host picker must stay
+            reachable whenever the capacity route is unconfirmed — it is the
+            only way to request approvals while `abstraction_layer_v1` is OFF.
+            The starvation banner is rendered by the section only for a true
+            `usedChars === 0` case; `truncated` alone is normal rotation. */}
+        <PromptCapacitySection
+          promptInjection={groupedData?.promptInjection}
+          promptTargetHost={promptTargetHost}
+          onChangeHost={changePromptTargetHost}
+        />
       </section>
 
       {/* SPEC-PD-UIUX-001 R2 Layer 3: 被阻塞与需要恢复 — from the owner inbox.

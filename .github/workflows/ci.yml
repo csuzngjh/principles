@@ -492,9 +492,9 @@ jobs:
   test-shared-runtime:
     name: Test shared runtime & adapters
     needs: impact
-    # Any of the five consolidated suites' scopes (parity needs plugin; the
+    # Any of the consolidated suites' scopes (parity needs plugin; the
     # scripts suite is covered by broad — root scripts/ changes broaden).
-    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.hostRuntime || fromJSON(needs.impact.outputs.impact).scopes.installLayout || fromJSON(needs.impact.outputs.impact).scopes.codexAdapter || fromJSON(needs.impact.outputs.impact).scopes.plugin || fromJSON(needs.impact.outputs.impact).scopes.companion) }}
+    if: ${{ !cancelled() && (needs.impact.result != 'success' || fromJSON(needs.impact.outputs.impact).scopes.hostRuntime || fromJSON(needs.impact.outputs.impact).scopes.installLayout || fromJSON(needs.impact.outputs.impact).scopes.codexAdapter || fromJSON(needs.impact.outputs.impact).scopes.workbuddyAdapter || fromJSON(needs.impact.outputs.impact).scopes.plugin || fromJSON(needs.impact.outputs.impact).scopes.companion) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -549,6 +549,12 @@ jobs:
 
       - name: Test codex-adapter
         run: npm test --workspace=@principles/codex-adapter
+
+      # PRI-1066: workbuddy-adapter had a scope in the impact resolver but no
+      # job consumed it, so a v2 contract-test regression there could not fail
+      # CI. Keep the same suite shape as codex-adapter (core is built above).
+      - name: Test workbuddy-adapter
+        run: npm test --workspace=@principles/workbuddy-adapter
 
       # Companion unit tests exercise the pure lib layer only — the electron
       # binary is not needed on Linux.

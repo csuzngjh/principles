@@ -459,7 +459,7 @@ async function main() {
     scenarios,
     sharedPathWithEvents: withEvents,
     budgetCandidateReplay: replay,
-    decision: 'defaults unchanged: both routes keep their existing 2000 budget scope, serializers, and selectors; no migration initiated by this task (fixed decision per SPEC §1/§6)',
+    decision: `defaults unchanged: both routes keep their existing ${RUNTIME_V2_PRINCIPLE_BUDGET} budget scope, serializers, and selectors; no migration initiated by this task (fixed decision per SPEC §1/§6)`,
   };
   fs.mkdirSync(path.dirname(OUT_JSON), { recursive: true });
   fs.writeFileSync(OUT_JSON, JSON.stringify(payload, null, 2), 'utf8');
@@ -469,7 +469,7 @@ async function main() {
   lines.push('');
   lines.push(`生成时间：${payload.generatedAt}　测量入口：\`packages/pd-cli/scripts/prompt-capacity-measurement.mjs\`（可复现；合成样本 + 临时受控工作区 + 真实生产构建器）。`);
   lines.push('');
-  lines.push('预算 = 2000 UTF-16 字符（`String.prototype.length`），**不是模型 token**。PD token 成本 = null（无 tokenizer/模型绑定；整请求 usage 不可归属为 PD 输出）。');
+  lines.push(`预算 = ${RUNTIME_V2_PRINCIPLE_BUDGET} UTF-16 字符（\`String.prototype.length\`），**不是模型 token**。PD token 成本 = null（无 tokenizer/模型绑定；整请求 usage 不可归属为 PD 输出）。`);
   lines.push('');
   lines.push('## 场景对照（40 轮）');
   lines.push('');
@@ -491,7 +491,7 @@ async function main() {
   lines.push('要点：');
   lines.push('- 列表路由按选中行计费，共享路由按完整注入块计费——同一候选集合的“占用”两个数字差异即模板开销（包装+自报脚注），不能混称。');
   lines.push('- `list-fifo-degraded` = 轮次来源丢失（会话重启/无 user_turn）时插件的真实降级路径：FIFO 前缀打包，尾部候选结构性饥饿——这就是 AC-03 要求区分“轮转机会”与“FIFO 不承诺”的实证。');
-  lines.push('- 超长候选（2100 字符正文）在两种路由下都不可单独装入，与轮转无关（AC-02/AC-05 实证）。');
+  lines.push('- 超长候选由本次测量按当前预算实测判定（`oversizedActivationIds`），与轮转无关（AC-02/AC-05 实证）；不假定任何固定正文字符数必然超长。');
   lines.push('');
   lines.push('## 受控共享路径 + 事件证据（AC-12 接线证明）');
   lines.push('');
@@ -506,7 +506,7 @@ async function main() {
   lines.push('```');
   lines.push('');
   lines.push('结论（本任务固定决策，未发起迁移确认）：');
-  lines.push(`- 保持两条路由各自的 2000 计费口径、serializer 与选择器不变。`);
+  lines.push(`- 保持两条路由各自的 ${RUNTIME_V2_PRINCIPLE_BUDGET} 计费口径、serializer 与选择器不变。`);
   lines.push(`- 受控模拟中完整渲染口径平均注入 ${replay.sharedForcedRotationAvgInjected} 条，列表口径平均 ${replay.listRouteAvgInjected} 条；两条路使用相同 16 个持久化候选，forced round keys 是模拟输入，不代表真实用户轮次。`);
   lines.push('- 模板收益：共享口径把包装/脚注计入预算，计量更诚实，但等价于隐性降预算；回退成本：路由口径迁移影响所有已激活原则的装入性判定，需要独立迁移任务与真实行为数据。');
   lines.push('- 未验证行为改善：本报告只有注入/字符事实；模型遵守率、历史真实注入率、最佳预算均未知（unknown），不得以“平均选中更多/更少”当作行为改善。');
@@ -576,7 +576,7 @@ async function main() {
   ma.push('| 路由 | 旧预算注入条数 | 新预算注入条数 | 旧预算占用字符 | 新预算占用字符 |');
   ma.push('| --- | --- | --- | --- | --- |');
   ma.push(`| 列表路由（轮转均值） | ${beforeAfter.before.list.avgInjected} | ${beforeAfter.after.list.avgInjected} | ${beforeAfter.before.list.avgUsedChars} | ${beforeAfter.after.list.avgUsedChars} |`);
-  ma.push(`| 共享路由（轮转均值） | ${beforeAfter.before.shared.rotationAvgInjected} | ${beforeAfter.after.shared.rotationAvgInjected} | ${beforeAfter.before.shared.fifoUsedChars}（FIFO） | ${beforeAfter.after.shared.fifoUsedChars}（FIFO） |`);
+  ma.push(`| 共享路由（FIFO 单次构建） | ${beforeAfter.before.shared.fifoInjected} | ${beforeAfter.after.shared.fifoInjected} | ${beforeAfter.before.shared.fifoUsedChars} | ${beforeAfter.after.shared.fifoUsedChars} |`);
   ma.push('');
   ma.push(`共享路由 FIFO 注入：旧 ${beforeAfter.before.shared.fifoInjected} 条 → 新 ${beforeAfter.after.shared.fifoInjected} 条；旧预算截断=${beforeAfter.before.shared.fifoTruncated}，新预算截断=${beforeAfter.after.shared.fifoTruncated}。`);
   ma.push('');

@@ -297,6 +297,7 @@
       "promptCapacityPerHostRotating": "（本轮未全部入窗口，未入条目会在后续轮次轮到）",
       "promptCapacityPerHostDeclared": "（预算来自工作区配置声明）",
       "promptCapacityPerHostObserved": "（预算来自该宿主最近一次运行时观测，观测于 {{observedAt}}）",
+      "promptCapacityPickHint": "按目标宿主查看/审批：",
       "promptCapacityViewAsHost": "按 {{host}} 查看",
       "promptCapacityClearHost": "清除选择",
       "promptScopeShared": "预测窗口（共享注入路由，按完整注入块计费，单位=字符）",

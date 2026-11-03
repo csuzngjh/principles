@@ -248,6 +248,26 @@ describe('resolvePromptBudget priority chain (SPEC §4.3 v0.3)', () => {
     ).toBe('catalog_metadata_invalid');
   });
 
+  // PRI-1066 P2: the same-name scan must not let ENTRY ORDER pick the reason.
+  // "[valid, invalid]" used to report `catalog_ambiguous_model_id` while
+  // "[invalid, valid]" reported `catalog_metadata_invalid`.
+  it('provider-less: an invalid entry is a metadata defect regardless of its position', () => {
+    const validFirst = fakeCatalog([
+      { provider: 'p1', modelId: 'dup-bad', contextWindowTokens: 200_000 },
+      { provider: 'p2', modelId: 'dup-bad', contextWindowTokens: Number.NaN },
+    ]);
+    const invalidFirst = fakeCatalog([
+      { provider: 'p2', modelId: 'dup-bad', contextWindowTokens: Number.NaN },
+      { provider: 'p1', modelId: 'dup-bad', contextWindowTokens: 200_000 },
+    ]);
+    for (const ordering of [validFirst, invalidFirst]) {
+      const result = resolvePromptBudget({ modelIdentity: { modelId: 'dup-bad' }, catalog: ordering });
+      expect(result.capacitySource).toBe('legacy_fallback');
+      expect(result.fallbackReason).toBe('catalog_metadata_invalid');
+      expect(result.budgetChars).toBe(4000);
+    }
+  });
+
   it('fallback reasons stay within the closed code set (event-safe)', () => {
     const CODES = new Set([
       'host_capacity_absent', 'host_capacity_source_untrusted', 'host_capacity_invalid_value',

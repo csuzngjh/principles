@@ -15,9 +15,13 @@ capacity only, via two paths:
 
 Real-machine evidence (2026-10-21, installed 2.3.9): Codex and WorkBuddy
 adapters forward model identity ONLY — neither carries a window fact, and
-custom model ids (proxies, local deployments) never match the catalog. Their
-budget is therefore locked to the `legacy_fallback` 2000 chars forever, even
-when the running model has a 256K+ window. The Owner has no remedy. #2097
+custom model ids (proxies, local deployments) never match the catalog. Under
+policy v1 their budget was therefore locked to the `legacy_fallback` 2000
+chars, even when the running model had a 256K+ window. The Owner's only
+remedy was the declaration below. (v0.3 of
+SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001, PRI-1066, later raised the fallback to
+4000 chars and derives a window from a catalog-unanimous model id, but a
+provider-qualified id that misses the catalog still falls back.) #2097
 (PRI-1017) made the Console honest about this, but honesty does not raise the
 budget.
 
@@ -40,8 +44,9 @@ Semantics:
   `host_effective_window` > `pi_catalog_exact` > `legacy_fallback`
   (Owner decision 2026-10-22: the declaration is the workspace's final
   authority and must be able to override a mis-reporting host).
-- The declared window feeds the SAME formula:
-  `budget = clamp(floor(2000 × window / 128000), 1250, 16000)`.
+- The declared window feeds the SAME formula as the runtime policy
+  (`model_aware_v2`, SPEC-PD-MODEL-AWARE-PROMPT-BUDGET-001 v0.3):
+  `budget = clamp(floor(4000 × window / 128000), 1250, 32000)`.
 - Resolution is per host: `hosts[hostKind] ?? declaredContextWindowTokens`.
 - `capacityStatus: 'confirmed'` — an authored explicit cap is the same trust
   class as upstream `agentContextTokens`.
@@ -96,6 +101,6 @@ pd-cli `config doctor` read-only display.
 - Console model tests: declared basis drives grouped/activations forecasts
   with no observation; fresh observation still wins; wire contract accepts
   the payload.
-- Real machine (post-install): declare 262144 → Console badge /4096 without
-  waiting for observations → injection event `budget=4096
-  budgetCapacitySource=operator_declared` → delete declaration → 2000.
+- Real machine (post-install): declare 262144 → Console badge /8192 without
+  waiting for observations → injection event `budget=8192
+  budgetCapacitySource=operator_declared` → delete declaration → 4000.

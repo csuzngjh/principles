@@ -361,12 +361,15 @@ function resolveFromCatalog(input: ResolvePromptBudgetInput | undefined, hostSta
     return primary('catalog_no_match_for_model_id', modelId);
   }
   const [first] = matches;
-  if (first === undefined || !isValidContextWindowTokens(first.contextWindowTokens)) {
+  // Any invalid context window is a metadata defect regardless of ENTRY ORDER:
+  // "[valid, invalid]" must not be reported as `catalog_ambiguous_model_id`
+  // while "[invalid, valid]" reports `catalog_metadata_invalid` (rc-3 — never
+  // let a malformed fact survive as a weaker verdict just because a good
+  // entry happened to come first).
+  if (first === undefined || !matches.every((entry) => isValidContextWindowTokens(entry.contextWindowTokens))) {
     return primary('catalog_metadata_invalid', modelId);
   }
-  const unanimous = matches.every(
-    (entry) => entry.contextWindowTokens === first.contextWindowTokens && isValidContextWindowTokens(entry.contextWindowTokens),
-  );
+  const unanimous = matches.every((entry) => entry.contextWindowTokens === first.contextWindowTokens);
   if (!unanimous) {
     return primary('catalog_ambiguous_model_id', modelId);
   }
