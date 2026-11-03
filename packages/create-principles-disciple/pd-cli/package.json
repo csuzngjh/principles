@@ -1,6 +1,6 @@
 {
   "name": "@principles/pd-cli",
-  "version": "1.155.3",
+  "version": "1.162.8",
   "description": "PD CLI — Pain recording, sample management, and governance tasks for Principles Disciple",
   "type": "module",
   "bin": {
@@ -8,7 +8,9 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE",
+    "NOTICE"
   ],
   "scripts": {
     "build": "npm run clean && tsc -p tsconfig.build.json && node ../../scripts/build/check-dist-hygiene.mjs",

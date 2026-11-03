@@ -471,6 +471,36 @@ describe('review-round regressions (PR #1316 review)', () => {
     expect(runtimeCheck?.detail).toContain(`core@${installedCore}`);
     expect(runtimeCheck?.detail).toContain(`pinned ${pins.codexAdapter}+${pins.hostRuntime}+${pins.core}+mcp-server@${pins.mcpServer}`);
   }, 60_000);
+
+  it('pd-status degrades when runtime-version.json has no mcpServer pin (pd-setup would reject it)', () => {
+    const workspace = tempDir('pd-status-nopin-ws-');
+    fs.mkdirSync(path.join(workspace, '.pd'), { recursive: true });
+    fs.writeFileSync(path.join(workspace, '.pd', 'config.yaml'), JSON.stringify({ features: {} }), 'utf8');
+    const dataDir = tempDir('pd-status-nopin-data-');
+    const pins = JSON.parse(fs.readFileSync(path.join(pluginDir, 'runtime-version.json'), 'utf8')) as {
+      codexAdapter: string; hostRuntime: string; core: string; mcpServer: string;
+    };
+    const withoutMcpPin: Record<string, string> = { ...pins };
+    delete withoutMcpPin.mcpServer;
+    const fakeRoot = tempDir('pd-status-nopin-root-');
+    fs.mkdirSync(path.join(fakeRoot, '.codex-plugin'), { recursive: true });
+    fs.writeFileSync(path.join(fakeRoot, '.codex-plugin', 'plugin.json'), JSON.stringify({ name: 'principles-disciple', version: '0.0.1' }), 'utf8');
+    fs.writeFileSync(path.join(fakeRoot, 'runtime-version.json'), JSON.stringify(withoutMcpPin), 'utf8');
+    const runtimePackages = path.join(dataDir, 'runtime', 'node_modules', '@principles');
+    for (const [name, version] of [['codex-adapter', pins.codexAdapter], ['host-runtime', pins.hostRuntime], ['core', pins.core], ['pd-mcp-server', pins.mcpServer]]) {
+      const packageDir = path.join(runtimePackages, name);
+      fs.mkdirSync(packageDir, { recursive: true });
+      fs.writeFileSync(path.join(packageDir, 'package.json'), JSON.stringify({ name: `@principles/${name}`, version }), 'utf8');
+    }
+    const result = spawnSync(process.execPath, [path.join(pluginDir, 'scripts', 'pd-status.cjs'),
+      '--plugin-root', fakeRoot, '--plugin-data', dataDir, '--workspace', workspace, '--json'],
+      { cwd: workspace, encoding: 'utf8', timeout: 30_000 });
+    const report = JSON.parse(result.stdout) as { checks: Array<{ name: string; state: string; detail?: string }> };
+    const runtimeCheck = report.checks.find((check) => check.name === 'runtime');
+    expect(runtimeCheck?.state).toBe('degraded');
+    expect(runtimeCheck?.detail).toContain('mcpServer pin');
+    expect(runtimeCheck?.detail).not.toContain('pinned match');
+  }, 60_000);
 });
 
 describe('pd-cli discovery Windows fallback (pd-locate)', () => {
@@ -596,12 +626,17 @@ describe('installed snapshot freshness and runtime reset (pd-locate/pd-status, P
     // self-consistent: it must be caught by comparing with the SOURCE.
     fs.copyFileSync(path.join(pluginDir, 'runtime-version.json'), path.join(root, 'runtime-version.json'));
     // Gate 4: a structurally valid MCP binding so the mcpBinding status check
-    // reports ok on this fabricated root (pd-status validates shape only).
+    // reports ok on this fabricated root (pd-status validates shape + the
+    // canonical entry + the installed server version).
+    const seededPins = JSON.parse(fs.readFileSync(path.join(pluginDir, 'runtime-version.json'), 'utf8')) as { mcpServer: string };
+    const seedRuntimeDir = path.join(os.tmpdir(), 'pd-marketplace-seed-runtime');
     fs.writeFileSync(path.join(root, 'mcp-binding.json'), JSON.stringify({
       schemaVersion: 'pd.mcp-binding.v1',
       host: 'codex',
       workspaceDir: path.join(os.tmpdir(), 'pd-marketplace-seed-ws'),
-      serverEntry: path.join(os.tmpdir(), 'pd-marketplace-seed-server.js'),
+      runtimeDir: seedRuntimeDir,
+      serverEntry: path.join(seedRuntimeDir, 'node_modules', '@principles', 'pd-mcp-server', 'dist', 'index.js'),
+      versions: { mcpServer: seededPins.mcpServer },
     }), 'utf8');
     const sourceDir = path.join(home, 'marketplace-source');
     fs.mkdirSync(path.join(sourceDir, '.codex-plugin'), { recursive: true });
@@ -628,14 +663,35 @@ describe('installed snapshot freshness and runtime reset (pd-locate/pd-status, P
       fs.mkdirSync(packageDir, { recursive: true });
       fs.writeFileSync(path.join(packageDir, 'package.json'), JSON.stringify({ name: `@principles/${name}`, version }), 'utf8');
     }
+    // The launcher's canonical entry must exist for the binding to be healthy.
+    const entry = path.join(dataDir, 'runtime', 'node_modules', '@principles', 'pd-mcp-server', 'dist', 'index.js');
+    fs.mkdirSync(path.dirname(entry), { recursive: true });
+    fs.writeFileSync(entry, '// fabricated entry for the status fixture\n', 'utf8');
   }
 
-  function statusReport(seeded: ReturnType<typeof seedMarketplace>) {
+  function statusReport(
+    seeded: ReturnType<typeof seedMarketplace>,
+    options: { bindWorkspace?: string; removeServerEntry?: boolean } = {}
+  ) {
     const workspace = tempDir('pd-marketplace-ws-');
     fs.mkdirSync(path.join(workspace, '.pd'), { recursive: true });
     fs.writeFileSync(path.join(workspace, '.pd', 'config.yaml'), JSON.stringify({ features: {} }), 'utf8');
     const dataDir = tempDir('pd-marketplace-data-');
     seedPinnedRuntime(dataDir);
+    // Bind exactly like pd-setup would: the reported workspace, the data-dir
+    // runtime, and the canonical entry the launcher verifies.
+    const pins = JSON.parse(fs.readFileSync(path.join(pluginDir, 'runtime-version.json'), 'utf8')) as Pins;
+    const runtimeDir = path.join(dataDir, 'runtime');
+    const serverEntry = path.join(runtimeDir, 'node_modules', '@principles', 'pd-mcp-server', 'dist', 'index.js');
+    fs.writeFileSync(path.join(seeded.root, 'mcp-binding.json'), JSON.stringify({
+      schemaVersion: 'pd.mcp-binding.v1',
+      host: 'codex',
+      workspaceDir: options.bindWorkspace ?? workspace,
+      runtimeDir,
+      serverEntry,
+      versions: { mcpServer: pins.mcpServer, core: pins.core },
+    }), 'utf8');
+    if (options.removeServerEntry) fs.rmSync(serverEntry, { force: true });
     const result = spawnSync(process.execPath, [path.join(pluginDir, 'scripts', 'pd-status.cjs'),
       '--plugin-root', seeded.root, '--plugin-data', dataDir, '--workspace', workspace, '--json'],
       {
@@ -672,11 +728,15 @@ describe('installed snapshot freshness and runtime reset (pd-locate/pd-status, P
     fs.writeFileSync(path.join(root, '.codex-plugin', 'plugin.json'), JSON.stringify({ name: 'principles-disciple', version: options.installed }), 'utf8');
     fs.copyFileSync(path.join(pluginDir, 'runtime-version.json'), path.join(root, 'runtime-version.json'));
     // Gate 4: valid MCP binding shape (see seedMarketplace).
+    const seededPins = JSON.parse(fs.readFileSync(path.join(pluginDir, 'runtime-version.json'), 'utf8')) as { mcpServer: string };
+    const seedRuntimeDir = path.join(os.tmpdir(), 'pd-repo-marketplace-seed-runtime');
     fs.writeFileSync(path.join(root, 'mcp-binding.json'), JSON.stringify({
       schemaVersion: 'pd.mcp-binding.v1',
       host: 'codex',
       workspaceDir: path.join(os.tmpdir(), 'pd-repo-marketplace-seed-ws'),
-      serverEntry: path.join(os.tmpdir(), 'pd-repo-marketplace-seed-server.js'),
+      runtimeDir: seedRuntimeDir,
+      serverEntry: path.join(seedRuntimeDir, 'node_modules', '@principles', 'pd-mcp-server', 'dist', 'index.js'),
+      versions: { mcpServer: seededPins.mcpServer },
     }), 'utf8');
     const marketplaceRoot = path.join(home, 'repo-checkout');
     const pluginRoot = path.join(marketplaceRoot, 'plugins', 'principles-disciple');
@@ -746,6 +806,22 @@ describe('installed snapshot freshness and runtime reset (pd-locate/pd-status, P
     const ahead = statusReport(seedMarketplace({ installed: '0.2.6', source: '0.2.5' }));
     expect(ahead.snapshot?.state).toBe('ok');
     expect(ahead.snapshot?.detail).toContain('is newer than its marketplace source');
+  }, 90_000);
+
+  it('degrades mcpBinding when pd-recall serves a different workspace than --workspace', () => {
+    const elsewhere = tempDir('pd-status-other-ws-');
+    const report = statusReport(seedMarketplace({ installed: '0.2.5', source: '0.2.5' }), { bindWorkspace: elsewhere });
+    const binding = report.report.checks.find((check) => check.name === 'mcpBinding');
+    expect(binding?.state).toBe('degraded');
+    expect(binding?.detail).toContain('bound to');
+    expect(binding?.nextAction).toContain('$pd-control setup');
+  }, 90_000);
+
+  it('degrades mcpBinding when the recorded MCP server entry is gone', () => {
+    const report = statusReport(seedMarketplace({ installed: '0.2.5', source: '0.2.5' }), { removeServerEntry: true });
+    const binding = report.report.checks.find((check) => check.name === 'mcpBinding');
+    expect(binding?.state).toBe('degraded');
+    expect(binding?.detail).toContain('missing workspace or MCP server entry');
   }, 90_000);
 
   it('separates "nothing to compare" from "comparison blocked by broken state" (rc-9)', () => {
@@ -968,7 +1044,9 @@ describe('first-run $pd-control setup (real user flow)', () => {
       expect(mcpBinding.schemaVersion).toBe('pd.mcp-binding.v1');
       expect(mcpBinding.host).toBe('codex');
       expect(mcpBinding.workspaceDir).toBe(workspace);
+      expect(mcpBinding.runtimeDir).toBe(path.join(pluginData, 'runtime'));
       expect(mcpBinding.serverEntry).toBe(path.join(pluginData, 'runtime', 'node_modules', '@principles', 'pd-mcp-server', 'dist', 'index.js'));
+      expect(mcpBinding.versions).toEqual({ mcpServer: pins.mcpServer, core: pins.core });
     } else {
       throw new Error('mcp-binding.json is malformed');
     }

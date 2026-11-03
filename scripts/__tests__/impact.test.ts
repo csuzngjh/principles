@@ -51,6 +51,7 @@ const FIXTURE_PACKAGES: Array<{ dir: string; name: string; deps?: Record<string,
   },
   { dir: 'pd-companion', name: '@principles/pd-companion', deps: { '@principles/install-layout': '0.1.0' } },
   { dir: 'workbuddy-adapter', name: '@principles/workbuddy-adapter', deps: { '@principles/core': '^1.74.1', '@principles/host-runtime': '^0.1.0', '@principles/install-layout': '0.1.0' } },
+  { dir: 'pd-mcp-server', name: '@principles/pd-mcp-server', deps: { '@principles/core': '^2.0.0' } },
   {
     dir: 'pd-console',
     name: '@principles/pd-console',
@@ -156,6 +157,7 @@ describe('impact resolver — package semantics', () => {
         '@principles/host-runtime',
         '@principles/pd-cli',
         '@principles/pd-console',
+        '@principles/pd-mcp-server',
         '@principles/website',
         'principles-disciple',
       ].sort()
@@ -163,6 +165,7 @@ describe('impact resolver — package semantics', () => {
     expect(out.scopes.core).toBe(true);
     expect(out.scopes.hostRuntime).toBe(true);
     expect(out.scopes.workbuddyAdapter).toBe(true);
+    expect(out.scopes.mcpServer).toBe(true);
     expect(out.scopes.plugin).toBe(true);
     expect(out.scopes.cli).toBe(true);
     expect(out.scopes.console).toBe(true);
@@ -205,6 +208,18 @@ describe('impact resolver — package semantics', () => {
     expect(out.affectedPackages).toEqual(['@principles/workbuddy-adapter']);
     expect(out.scopes.release).toBe(false);
   }, 60_000);
+  it('pd-mcp-server-only change → dedicated mcpServer scope + release asset component', async () => {
+    const head = await commit({ 'packages/pd-mcp-server/src/change.ts': 'export const x = 1;\n' }, 'mcp');
+    const out = await impact('HEAD~1', head);
+    expect(out.scopes.mcpServer).toBe(true);
+    expect(out.scopes.plugin).toBe(false);
+    expect(out.changedPackages).toContain('@principles/pd-mcp-server');
+    expect(out.affectedPackages).toEqual(['@principles/pd-mcp-server']);
+    // pd-mcp-server is bundled into the self-contained release asset.
+    expect(out.scopes.release).toBe(true);
+    expect(out.reasons.release).toContain('component');
+  }, 60_000);
+
   it('cli-only change → cli scope only', async () => {
     const head = await commit({ 'packages/pd-cli/src/change.ts': 'export const x = 1;\n' }, 'cli');
     const out = await impact('HEAD~1', head);

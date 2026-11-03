@@ -6,7 +6,7 @@ name: Publish Preflight (no writes)
 # creating a tag, or cutting a GitHub Release —
 #
 #   1. the cohort resolves (or the explicit SHA is a real cohort);
-#   2. registry connectivity and the exact name@version state of all eight
+#   2. registry connectivity and the exact name@version state of all nine
 #      packages against the cohort manifests (ABSENT / prior-publish
 #      ancestry tolerated like the train, conflicts fail loud);
 #   3. the static dependency plan (ranges + topological order);
@@ -118,13 +118,13 @@ jobs:
 
       - name: Verify static dependency plan (ranges + order, no registry)
         env:
-          TRAIN_ORDER: principles-core,install-layout,host-runtime,codex-adapter,workbuddy-adapter,openclaw-plugin,pd-cli,create-principles-disciple
+          TRAIN_ORDER: principles-core,install-layout,host-runtime,codex-adapter,pd-mcp-server,workbuddy-adapter,openclaw-plugin,pd-cli,create-principles-disciple
         run: |
           set -euo pipefail
           node release-tools/scripts/release/deps-preflight.mjs \
             --workspace-root . --order "$TRAIN_ORDER" --static-only
 
-      - name: Registry connectivity + exact version state (all eight)
+      - name: Registry connectivity + exact version state (all nine)
         id: registry
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_READ_TOKEN || secrets.NPM_TOKEN }}
@@ -132,7 +132,7 @@ jobs:
         run: |
           set -euo pipefail
           PENDING="[]"
-          for DIR in principles-core install-layout host-runtime codex-adapter workbuddy-adapter openclaw-plugin pd-cli create-principles-disciple; do
+          for DIR in principles-core install-layout host-runtime codex-adapter pd-mcp-server workbuddy-adapter openclaw-plugin pd-cli create-principles-disciple; do
             NAME=$(node -p "require('./packages/'+'$DIR'+'/package.json').name")
             VERSION=$(node -p "require('./packages/'+'$DIR'+'/package.json').version")
             node release-tools/scripts/release/registry-exact.mjs "$NAME" "$VERSION" \
@@ -191,7 +191,7 @@ jobs:
       # The same order the train publishes in — ONE copy per job, never one
       # per leg: a leg-local literal is how a package gets wired into the
       # train but left out of the rehearsal (PRI-979).
-      TRAIN_ORDER: principles-core,install-layout,host-runtime,codex-adapter,workbuddy-adapter,openclaw-plugin,pd-cli,create-principles-disciple
+      TRAIN_ORDER: principles-core,install-layout,host-runtime,codex-adapter,pd-mcp-server,workbuddy-adapter,openclaw-plugin,pd-cli,create-principles-disciple
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
@@ -239,7 +239,7 @@ jobs:
       # minus the upload.
       # The placeholder token is never used — no step that could spend it
       # runs in this mode, and this job holds no id-token permission.
-      - name: Rehearse 1/8 @principles/core
+      - name: Rehearse 1/9 @principles/core
         uses: ./release-tools/.github/actions/publish-npm-package
         with:
           pkg_dir: principles-core
@@ -250,7 +250,7 @@ jobs:
           npm_token: preflight-rehearsal-no-upload
           dry_run: true
 
-      - name: Rehearse 2/8 @principles/install-layout
+      - name: Rehearse 2/9 @principles/install-layout
         uses: ./release-tools/.github/actions/publish-npm-package
         with:
           pkg_dir: install-layout
@@ -261,7 +261,7 @@ jobs:
           npm_token: preflight-rehearsal-no-upload
           dry_run: true
 
-      - name: Rehearse 3/8 @principles/host-runtime
+      - name: Rehearse 3/9 @principles/host-runtime
         uses: ./release-tools/.github/actions/publish-npm-package
         with:
           pkg_dir: host-runtime
@@ -272,7 +272,7 @@ jobs:
           npm_token: preflight-rehearsal-no-upload
           dry_run: true
 
-      - name: Rehearse 4/8 @principles/codex-adapter
+      - name: Rehearse 4/9 @principles/codex-adapter
         uses: ./release-tools/.github/actions/publish-npm-package
         with:
           pkg_dir: codex-adapter
@@ -283,7 +283,18 @@ jobs:
           npm_token: preflight-rehearsal-no-upload
           dry_run: true
 
-      - name: Rehearse 5/8 @principles/workbuddy-adapter
+      - name: Rehearse 5/9 @principles/pd-mcp-server
+        uses: ./release-tools/.github/actions/publish-npm-package
+        with:
+          pkg_dir: pd-mcp-server
+          npm_name: '@principles/pd-mcp-server'
+          cohort_sha: ${{ needs.preflight-checks.outputs.cohort_sha }}
+          tools_dir: release-tools
+          train_order: ${{ env.TRAIN_ORDER }}
+          npm_token: preflight-rehearsal-no-upload
+          dry_run: true
+
+      - name: Rehearse 6/9 @principles/workbuddy-adapter
         uses: ./release-tools/.github/actions/publish-npm-package
         with:
           pkg_dir: workbuddy-adapter
@@ -294,7 +305,7 @@ jobs:
           npm_token: preflight-rehearsal-no-upload
           dry_run: true
 
-      - name: Rehearse 6/8 principles-disciple (plugin)
+      - name: Rehearse 7/9 principles-disciple (plugin)
         uses: ./release-tools/.github/actions/publish-npm-package
         with:
           pkg_dir: openclaw-plugin
@@ -305,7 +316,7 @@ jobs:
           npm_token: preflight-rehearsal-no-upload
           dry_run: true
 
-      - name: Rehearse 7/8 @principles/pd-cli
+      - name: Rehearse 8/9 @principles/pd-cli
         uses: ./release-tools/.github/actions/publish-npm-package
         with:
           pkg_dir: pd-cli
@@ -316,7 +327,7 @@ jobs:
           npm_token: preflight-rehearsal-no-upload
           dry_run: true
 
-      - name: Rehearse 8/8 create-principles-disciple (installer)
+      - name: Rehearse 9/9 create-principles-disciple (installer)
         uses: ./release-tools/.github/actions/publish-npm-package
         with:
           pkg_dir: create-principles-disciple
@@ -333,6 +344,6 @@ jobs:
           {
             echo "## Preflight rehearsal complete"
             echo ""
-            echo "All eight legs ran the real publish control path in dry_run mode and packed real artifacts from the cohort build."
+            echo "All nine legs ran the real publish control path in dry_run mode and packed real artifacts from the cohort build."
             echo "NO npm upload, tag, or GitHub Release happened. This is NOT evidence of a published version."
           } >> "$GITHUB_STEP_SUMMARY"

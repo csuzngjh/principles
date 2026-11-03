@@ -42,6 +42,7 @@ const SCOPE_BY_DIR = {
   'host-runtime': 'hostRuntime',
   'codex-adapter': 'codexAdapter',
   'workbuddy-adapter': 'workbuddyAdapter',
+  'pd-mcp-server': 'mcpServer',
   'openclaw-plugin': 'plugin',
   'pd-cli': 'cli',
   'pd-console': 'console',
@@ -56,6 +57,7 @@ const ALL_PACKAGE_SCOPES = [
   'hostRuntime',
   'codexAdapter',
   'workbuddyAdapter',
+  'mcpServer',
   'plugin',
   'cli',
   'console',
@@ -81,12 +83,13 @@ const RELEASE_PATHS = [
 ];
 
 // Direct components of the self-contained release asset + the release
-// construction itself — verbatim from build-release-asset.mjs
-// REQUIRED_COMPONENTS ('plugin', 'console', 'core', 'pd-cli', 'host-runtime',
-// 'install-layout') plus the installer package. codex-adapter is included
-// because it is bundled into pd-cli's node_modules inside the asset (pd-cli
-// declares it as a runtime dependency). pd-companion and website are NOT
-// part of the asset (separate delivery surfaces).
+// construction itself — from build-release-asset.mjs REQUIRED_COMPONENTS
+// ('plugin', 'console', 'core', 'pd-cli', 'host-runtime', 'install-layout'
+// plus codex-adapter, and pd-mcp-server since Gate 4 / PRI-1071) and the
+// installer package. codex-adapter is also bundled into pd-cli's
+// node_modules inside the asset (pd-cli declares it as a runtime dependency).
+// pd-companion and website are NOT part of the asset (separate delivery
+// surfaces).
 const RELEASE_ASSET_REACHABLE_DIRS = new Set([
   'openclaw-plugin',
   'pd-console',
@@ -96,6 +99,7 @@ const RELEASE_ASSET_REACHABLE_DIRS = new Set([
   'install-layout',
   'create-principles-disciple',
   'codex-adapter',
+  'pd-mcp-server',
 ]);
 
 function parseArgs(argv) {

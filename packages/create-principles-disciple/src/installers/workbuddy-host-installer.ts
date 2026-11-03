@@ -56,6 +56,7 @@ import {
   type InstallHost,
 } from '@principles/install-layout';
 import { atomicReplaceTextFile, errnoCode } from '../utils/config-file-io.js';
+import { resolveMcpServerDir, resolveMcpServerEntry } from '../mcp-server-layout-compat.js';
 import { getHomeDir, generateConfigYamlContent, getConfigYamlPath, resolveDefaultModelForProvider, isValidHttpBaseUrl } from '../mvp-config.js';
 import type {
   HostInstaller,
@@ -86,10 +87,39 @@ const WORKBUDDY_REQUIRED_SKILLS = ['pd-cli-operator', 'pd-pain-signal', 'pd-revi
 const WORKBUDDY_PAYLOAD_FILES = [
   path.join('.codebuddy-plugin', 'plugin.json'),
   path.join('hooks', 'hooks.json'),
+  path.join('mcp', 'launcher.cjs'),
   path.join('scripts', 'wrapper.cjs'),
   path.join('scripts', 'pd-control.cjs'),
   ...WORKBUDDY_REQUIRED_SKILLS.map((skill) => path.join('skills', skill, 'SKILL.md')),
 ];
+
+/**
+ * Cache-binding comparison for the idempotent path. `writtenAt` is a
+ * per-install timestamp, so comparing raw bytes would force a cache refresh
+ * on every run; comparing the rest proves the launcher will read the same
+ * workspace/entry/versions the marketplace copy declares. Absent on both
+ * sides is a match (no MCP payload); absent on one side is drift.
+ */
+function mcpBindingMatches(sourceDir: string, cacheDir: string): boolean {
+  const bindingFile = 'mcp-binding.json';
+  const read = (dir: string): Record<string, unknown> | null | undefined => {
+    const file = path.join(dir, bindingFile);
+    if (!existsSync(file)) return undefined;
+    try {
+      const parsed: unknown = JSON.parse(readFileSync(file, 'utf-8'));
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
+      const { writtenAt: _writtenAt, ...rest } = parsed as Record<string, unknown>;
+      return rest;
+    } catch {
+      return null;
+    }
+  };
+  const source = read(sourceDir);
+  const cached = read(cacheDir);
+  if (source === undefined && cached === undefined) return true;
+  if (source === undefined || cached === undefined || source === null || cached === null) return false;
+  return JSON.stringify(source) === JSON.stringify(cached);
+}
 
 
 /** Engine CLI shipped with WorkBuddy Desktop (probe P01 frozen path). */
@@ -1233,17 +1263,21 @@ function materializeMarketplace(marketplaceRoot: string, pluginDir: string): voi
 function writeWorkbuddyMcpBinding(marketplaceRoot: string, homeDir: string): { ok: boolean; reason?: string } {
   try {
     const layout = getInstallLayoutPaths(homeDir);
-    const serverEntry = path.join(layout.runtimeDir, 'pd-mcp-server', 'dist', 'index.js');
+    // Gate 4 P2: the launcher validates serverEntry against this recorded
+    // runtime root + the Install Layout SSoT component dir, so the binding
+    // cannot point the host at arbitrary JavaScript.
+    const serverEntry = resolveMcpServerEntry(layout);
     if (!existsSync(serverEntry)) return { ok: false, reason: 'mcp_server_component_missing' };
     let mcpServerVersion = 'unknown';
     try {
-      const manifest = JSON.parse(readFileSync(path.join(layout.runtimeDir, 'pd-mcp-server', 'package.json'), 'utf-8')) as { version?: unknown };
+      const manifest = JSON.parse(readFileSync(path.join(resolveMcpServerDir(layout), 'package.json'), 'utf-8')) as { version?: unknown };
       if (typeof manifest.version === 'string') mcpServerVersion = manifest.version;
     } catch { /* version stays unknown (rc-3: never coerce) */ }
     const binding = {
       schemaVersion: 'pd.mcp-binding.v1',
       host: 'workbuddy',
       workspaceDir: getWorkbuddyWorkspaceDir(homeDir),
+      runtimeDir: layout.runtimeDir,
       serverEntry,
       versions: { mcpServer: mcpServerVersion },
       writtenAt: new Date().toISOString(),
@@ -1691,7 +1725,8 @@ export class WorkBuddyHostInstaller implements HostInstaller {
     if (!isRecord(entry) || entry.version !== version || entryInstallPath !== path.resolve(cacheDir)) return false;
     const sourceDir = path.join(p.marketplaceRoot, WORKBUDDY_PLUGIN_NAME);
     try {
-      return WORKBUDDY_PAYLOAD_FILES.every((file) => readFileSync(path.join(sourceDir, file)).equals(readFileSync(path.join(cacheDir, file))));
+      const filesMatch = WORKBUDDY_PAYLOAD_FILES.every((file) => readFileSync(path.join(sourceDir, file)).equals(readFileSync(path.join(cacheDir, file))));
+      return filesMatch && mcpBindingMatches(sourceDir, cacheDir);
     } catch {
       return false;
     }

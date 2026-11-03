@@ -207,7 +207,11 @@ async function main() {
       && marker.hostRuntime === desired.hostRuntime
       && marker.core === desired.core
       && marker.mcpServer === desired.mcpServer
-      && !args.adapterSource && !args.hostRuntimeSource && !args.coreSource && !args.mcpServerSource) installNeeded = false;
+      && !args.adapterSource && !args.hostRuntimeSource && !args.coreSource && !args.mcpServerSource
+      // rc-9: a marker that recorded a LOCAL MCP package must not short-circuit
+      // a later run without --mcp-server-source — the retained build would keep
+      // being reused while the operator expects the registry package.
+      && typeof marker.mcpServerSource !== 'string') installNeeded = false;
   } catch { /* no/broken marker → install */ }
   // PRI-1046: a marker is a claim, not evidence. It used to be written from the
   // desired pins without ever reading the installed bytes, so a silently
@@ -295,7 +299,7 @@ async function main() {
   // The marker is the short-circuit for every later run, so it may be written
   // only after the bytes it claims were read and agreed (PRI-1046).
   if (installNeeded) {
-    fs.writeFileSync(markerPath, JSON.stringify({ ...desired, ...(args.adapterSource ? { adapterSource: args.adapterSource } : {}), ...(args.hostRuntimeSource ? { hostRuntimeSource: args.hostRuntimeSource } : {}), ...(args.coreSource ? { coreSource: args.coreSource } : {}), installedAt: new Date().toISOString() }, null, 2));
+    fs.writeFileSync(markerPath, JSON.stringify({ ...desired, ...(args.adapterSource ? { adapterSource: args.adapterSource } : {}), ...(args.hostRuntimeSource ? { hostRuntimeSource: args.hostRuntimeSource } : {}), ...(args.coreSource ? { coreSource: args.coreSource } : {}), ...(args.mcpServerSource ? { mcpServerSource: args.mcpServerSource } : {}), installedAt: new Date().toISOString() }, null, 2));
   }
 
   // 3. Workspace init through the existing production command.
@@ -329,11 +333,11 @@ async function main() {
     schemaVersion: 'pd.mcp-binding.v1',
     host: 'codex',
     workspaceDir,
+    runtimeDir,
     serverEntry: mcpServerEntry,
     versions: { mcpServer: desired.mcpServer, core: desired.core },
     writtenAt: new Date().toISOString(),
   };
-  fs.writeFileSync(bindingPath, JSON.stringify(mcpBinding, null, 2) + '\n', 'utf8');
 
   // The Marketplace installer must register its workspace too: the retired
   // global-hook installer no longer reaches writeInstallManifest. Companion
@@ -345,6 +349,9 @@ async function main() {
     fail(`worker_registration_failed:${error.message.slice(0, 160)}`, 'Restore the canonical PD install manifest/runtime and re-run $pd-control setup. The existing manifest was not replaced.');
     return;
   }
+  // Written only after registration succeeded: a failed setup must not leave a
+  // binding that the next MCP launch would trust.
+  fs.writeFileSync(bindingPath, JSON.stringify(mcpBinding, null, 2) + '\n', 'utf8');
 
   // 4. Codex conversation-ingestion consent (PRI-625, G2A frozen disclosure).
   //    The disclosure text ALWAYS comes from the installed pd CLI

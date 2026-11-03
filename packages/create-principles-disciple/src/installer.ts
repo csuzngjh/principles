@@ -39,7 +39,8 @@ import {
 import { getHostInstallers, type HostTarget } from './installers/index.js';
 import { runWorkbuddyEarlyPreflight } from './installers/workbuddy-host-installer.js';
 import type { HostInstallContext, HostInstallResult } from '@principles/core/host';
-import { INSTALL_LAYOUT_VERSION, getWorkbuddyWorkspaceDir, installManifestHostsForPersist, mergeInstallManifestWorkspaces, parseInstallManifest } from '@principles/install-layout';
+import { INSTALL_LAYOUT_VERSION, getInstallLayoutPaths, getWorkbuddyWorkspaceDir, installManifestHostsForPersist, mergeInstallManifestWorkspaces, parseInstallManifest } from '@principles/install-layout';
+import { resolveMcpServerDir } from './mcp-server-layout-compat.js';
 import { detectOpenClawMainWorkspaceDivergence } from './utils/workspace-divergence.js';
 import { applySkillLanguageSelection, type SkillLanguage } from './skill-language.js';
 import {
@@ -1001,6 +1002,7 @@ const SELF_CONTAINED_COMPONENTS = [
   ['PD CLI', 'pd-cli'],
   ['Console', 'console'],
   ['Install layout', 'install-layout'],
+  ['MCP server', 'pd-mcp-server'],
 ] as const;
 
 export async function preflightSelfContainedReleaseAsset(assetDir: string): Promise<void> {
@@ -2553,7 +2555,7 @@ function getInstalledWorkbuddyAdapterDir(): string {
  * entry (~/.pd/runtime/pd-mcp-server/dist/index.js).
  */
 function getInstalledMcpServerDir(): string {
-  return path.join(getPdRuntimeDir(), 'pd-mcp-server');
+  return resolveMcpServerDir(getInstallLayoutPaths(getHomeDir()));
 }
 
 /**
@@ -3052,6 +3054,10 @@ async function installPdCliDependencies(): Promise<void> {
 async function installConsoleDependencies(): Promise<void> {
   const consoleDest = getInstalledConsoleDir();
   await prepareComponentDependencies(consoleDest, 'Console');
+}
+
+async function installMcpServerDependencies(): Promise<void> {
+  await prepareComponentDependencies(getInstalledMcpServerDir(), 'MCP server');
 }
 
 const CONSOLE_PORT_MAX_RETRIES = 3;
@@ -4457,8 +4463,15 @@ export async function install(
     // the host launchers' bindings always point at the current canonical
     // entry. Older installer payloads skip observably (the launchers fail
     // closed at start with the honest missing-entry state).
-    installBundledMcpServer(pluginDir);
-    ensureComponentFileDependencyLinks(getInstalledMcpServerDir(), 'pd-mcp-server');
+    const mcpServerInstalled = installBundledMcpServer(pluginDir);
+    if (mcpServerInstalled) {
+      ensureComponentFileDependencyLinks(getInstalledMcpServerDir(), 'pd-mcp-server');
+      // The npm-distributed payload ships only dist/ + package.json, and the
+      // MCP server keeps @modelcontextprotocol/server + zod as registry deps
+      // (unlike the file:-linked siblings). Without this pass the launcher
+      // starts an entry whose imports cannot resolve.
+      await installMcpServerDependencies();
+    }
 
     if (spinner) updateProgress(spinner, stepIndex, 'Installing release-manager authority module...');
     installBundledReleaseManagerPackage(pluginDir);
