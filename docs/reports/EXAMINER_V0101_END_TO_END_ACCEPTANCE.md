@@ -113,19 +113,19 @@ Owner 评审提出六项 P1；本轮完成代码、定位并修复两处真实�
 | P1 | 结果 | 证据 |
 |---|---|---|
 | P1-1 快照进入冻结链 | PASS | 4 用例：正常创建→preflight PASS（manifest hash=canonical(snapshot)，anchor.binding 带快照 hash）/篡改→FAIL/删除→FAIL/连改 manifest+hashes.json→FAIL（anchor 不可再生） |
-| P1-2 Runtime Activation 降级 | PASS | 无 state.db → status=degraded + ACTIVATION_DATA_DEGRADED marker + reason/nextAction，independence 绝不=true；展示列表 50 条截断，统计用完整计数 |
-| P1-3 证据分页真相 | PASS | 55 条 → counts=50 + pages.delivery.hasMore=true + nextCursor；7 条 → 精确 7 + hasMore=false |
+| P1-2 Runtime Activation 降级 | PASS | 无 state.db → status=degraded + ACTIVATION_DATA_DEGRADED marker + reason/nextAction，independence 绝不=true；**activation 表缺失 → 同样 degraded（专测）**；展示列表 50 条截断，统计用完整计数（50 行展示 + 51 总计 → 统计仍为 51） |
+| P1-3 证据分页真相 | PASS | 55 条 → counts=50 + pages.delivery.hasMore=true + nextCursor；7 条 → 精确 7 + hasMore=false；**恰好 50 条 → hasMore=false（边界）**；**分页按类别独立：delivery 与 effect 同时饱和均 hasMore=true，application/outcome 为 false** |
 | P1-4 异步原子受理 + 账本 fail-loud | PASS | 并发两 run → [202,409] 且恰 1 条 ACCEPTED；坏账本 → 500 console_ledger_unreadable + status.ledgerProblem(ledger_corrupt)；ENOENT≠corrupt；finishedAt≥acceptedAt；recovery 跳过坏账本 study |
 | P1-5 Stage R 全量契约 | PASS | 复用 lab `verifyStageRAuthorization`；薄 APPROVED/错 studyId/过期/probe FAILED/错 suite 全部 403；完整合成记录 → 202 → 响亮 `F2_EXECUTION_NOT_ENABLED_THIS_ROUND`（零模型调用、无 RUN_STARTED） |
-| P1-6 路径/临时文件安全 | PASS | ledger 被替换为外指 symlink → 拒绝；study 目录换 junction → recovery 跳过且 decoy 未被写；dry-run 探针无固定名残留 |
+| P1-6 路径/临时文件安全 | PASS | ledger 被替换为外指 symlink → 拒绝；study 目录换 junction → recovery 跳过且 decoy 未被写；dry-run 探针无固定名残留；**在旧固定名探针位置预植 junction → 不被跟随、诱饵目录零写入（专测）** |
 
 ### 10.2 缺陷一：P1 专项测试死锁（根因已定位并修复）
 
-- **症状**：`examiner-v0101-p1-repair.test.ts > P1-1 > a fresh study verifies` 在 240s/600s 均挂起；本轮实测即使在**单独首跑**也必现（与上一轮"首跑绿"的记录不符，环境更冷/更快后竞态方向反转）。其余 14 例始终绿。
+- **症状**：`examiner-v0101-p1-repair.test.ts > P1-1 > a fresh study verifies` 在 240s/600s 均挂起；本轮实测即使在**单独首跑**也必现（与上一轮"首跑绿"的记录不符，环境更冷/更快后竞态方向反转）。其余用例始终绿（文件现为 18 例）。
 - **根因**：mock `IncomingMessage` 用 `setTimeout(..., 0)` 派发 body，而 `handleExaminerRoute` 在到达 `readBody` 之前要 `await loadLab()`（进程内首个请求的 lab 冷加载，真实异步 I/O）与首个 root 的启动恢复。首个请求期间 0ms 计时器先触发，`readBody` 之后才订阅 `data`/`end` → 事件丢失 → `readBody` 的 Promise 永不 settle → 死锁。后续请求走模块级 memo（`hostCapability`）热路径，全程微任务，计时器排不到，因此全部通过。
 - **可观测证据**：临时插桩输出 `[diag] mock emits body; data listeners = 0 end listeners = 0` 恰好出现一次（首个请求），且该请求从未出现 `readBody got end`；其余每次都是 `data listeners = 1`.
 - **修复**：request double 改为**缓冲式**：在 reader 订阅 `'end'` 时同步回放已缓冲的 body（等价于真实 `IncomingMessage` 的缓冲语义），任何 macrotask 都无法插入。同时删除无效的 collect 期 lab 预热 import 与 600s 超时（超时只是掩盖症状）。首例耗时 ~0.37s。
-- **反向验证**：`examiner.test.ts` 在前 + repair 在后、`--no-file-parallelism` → 30/30 PASS；repair 单跑 15/15 PASS。未使用 `--isolate` 掩盖，也未调大 timeout/retry/skip。
+- **反向验证**：`examiner.test.ts` 在前 + repair 在后、`--no-file-parallelism` → **33/33 PASS**；repair 单跑 **18/18 PASS**。未使用 `--isolate` 掩盖，也未调大 timeout/retry/skip。同类的 timer 派发 mock 也已从 `examiner-v0101.test.ts` 移除，避免同一失败类在兄弟套件潜伏。
 - **CI 说明（诚实）**：上一轮"CI 从未复现"的表述不成立——该测试文件此前未提交，CI 从未执行过它。修复后测试已入库并由 CI 真实执行。
 
 ### 10.3 缺陷二：真实 seed 工作区 422（E2E 红灯 → 绿）
@@ -139,8 +139,8 @@ Owner 评审提出六项 P1；本轮完成代码、定位并修复两处真实�
 
 | 套件 | 结果 |
 |---|---|
-| pd-console 全量 vitest（`--maxWorkers=2`） | **171 files PASS / 3121 passed + 1 expected fail (3122)** |
-| P1 专项 15 + v0101 17 | **32/32 PASS** |
+| pd-console 全量 vitest（`--maxWorkers=2`） | **171 files PASS / 3125 passed + 1 expected fail (3126)** |
+| P1 专项 18 + v0101 18 | **36/36 PASS**（新增覆盖：恰好 50 / 按类别分页 / activation 表缺失 / 旧固定名探针 links） |
 | lab 契约（examiner-v09 + payload closure + human-review intake） | **95/95 PASS** |
 | `run-examiner-v09-acceptance` 历史基线 | `ok=true checked=593 mismatches=0, OVERALL PASS` |
 | Playwright E2E（examiner-journey，真实浏览器 + 真实后端 + 真实研究管线） | **6/6 PASS** |

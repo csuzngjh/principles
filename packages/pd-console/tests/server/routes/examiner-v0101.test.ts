@@ -29,29 +29,34 @@ import { handleExaminerRoute } from '../../../src/server/routes/examiner.js';
 import { readConsoleRuns, recoverUnfinishedConsoleRuns, appendConsoleRunEvent, mintRunId, CONSOLE_RUN_SCHEMA, type ConsoleRunMode } from '../../../src/server/routes/examiner-runs.js';
 import { resolveStudyRoots } from '../../../src/server/routes/examiner-executor.js';
 import { deriveStudyRuleCodeFacts, type ProductionSnapshot } from '../../../src/server/routes/examiner-study-inputs.js';
+import { ActivationsConsoleModel } from '../../../src/server/models/ActivationsConsoleModel.js';
 
 const STUDY_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9-]*$/;
 
 function createMockRequest(method: string, url: string, body?: unknown): IncomingMessage {
-  const listeners: Record<string, Array<(chunk?: unknown) => void>> = {};
+  // Buffering request double (same contract as the P1 repair suite): emits the
+  // body when the reader subscribes to 'end', so a first request that awaits
+  // real I/O (the one-time lab cold load) cannot lose the events to a timer.
+  const listeners: { data: Array<(chunk: Buffer) => void>; end: Array<() => void> } = { data: [], end: [] };
+  let emitted = false;
   const req = {
     method,
     url,
-    on(event: string, handler: (chunk?: unknown) => void) {
-      listeners[event] = listeners[event] ?? [];
-      listeners[event].push(handler);
+    on(event: 'data' | 'end', handler: (chunk?: unknown) => void) {
+      if (event === 'end') {
+        listeners.end.push(handler as () => void);
+        if (!emitted) {
+          emitted = true;
+          const payload = body === undefined ? null : Buffer.from(JSON.stringify(body));
+          if (payload !== null) for (const dataHandler of listeners.data) dataHandler(payload);
+          for (const endHandler of listeners.end) endHandler();
+        }
+      } else {
+        listeners.data.push(handler as (chunk: Buffer) => void);
+      }
+      return req;
     },
   };
-  if (body !== undefined) {
-    setTimeout(() => {
-      for (const handler of listeners.data ?? []) handler(Buffer.from(JSON.stringify(body)));
-      for (const handler of listeners.end ?? []) handler();
-    }, 0);
-  } else {
-    setTimeout(() => {
-      for (const handler of listeners.end ?? []) handler();
-    }, 0);
-  }
   return req as unknown as IncomingMessage;
 }
 
@@ -307,6 +312,21 @@ describe('Examiner v0.10.1 — challenge-suite catalog (§9)', () => {
     expect(coupled.targetRuleCodeCount).toBe(1);
     expect(coupled.principleRuleCodeIndependence).toBeNull();
     expect(coupled.ruleCodes[0]).toEqual({ ruleCodeId: 'act-mine', principleId: 'pri-target', baselineState: 'ON' });
+
+    // P1-2: the owner-visible list stays capped at 50, but the STATISTICS must
+    // use the complete pre-truncation count — the 51st coupling row cannot vanish.
+    const capped = deriveStudyRuleCodeFacts({
+      ...snapshot,
+      runtimeActivation: {
+        ...snapshot.runtimeActivation,
+        ruleCodeActivations: Array.from({ length: 50 }, (_, index) => ({ activationId: `act-cap-${index}`, principleId: 'pri-target', mode: 'live' as const, status: 'active' })),
+        ruleCodeActivationTotal: 51,
+      },
+      targetPrinciple: { ...snapshot.targetPrinciple, ruleCodeActivationCount: 51 },
+    } as unknown as ProductionSnapshot);
+    expect(capped.targetRuleCodeCount).toBe(51);
+    expect(capped.ruleCodes).toHaveLength(50);
+    expect(capped.principleRuleCodeIndependence).toBeNull();
   });
 
   // P1-2: a degraded activation read is UNKNOWN truth — independence is never
@@ -337,6 +357,8 @@ describe('Examiner v0.10.1 — challenge-suite catalog (§9)', () => {
     expect(facts.ruleCodes).toEqual([]);
     expect(facts.evidenceNote).toContain('DEGRADED');
     expect(facts.evidenceNote).toContain('state.db not found');
+    // The Owner must see BOTH why and what to do next.
+    expect(facts.evidenceNote).toContain('next: Run pd runtime diagnostics to check workspace state');
 
     // Degraded + ledger-attributed rules → unresolved count still refuses.
     const degradedCoupled = deriveStudyRuleCodeFacts({
@@ -345,6 +367,32 @@ describe('Examiner v0.10.1 — challenge-suite catalog (§9)', () => {
     } as unknown as ProductionSnapshot);
     expect(degradedCoupled.targetRuleCodeCount).toBe(2);
     expect(degradedCoupled.principleRuleCodeIndependence).toBeNull();
+  });
+});
+
+describe('Examiner v0.10.1 — activation schema degradation (§6.4)', () => {
+  it('a state.db WITHOUT the activation table is DEGRADED — never "zero activations"', async () => {
+    // A workspace whose state.db exists but predates the activation schema:
+    // the read model must say "table not found" with a next action, and the
+    // snapshots derived from it must never conclude independence.
+    const Database = (await import('better-sqlite3')).default;
+    fs.mkdirSync(path.join(workspaceDir, '.pd'), { recursive: true });
+    const db = new Database(path.join(workspaceDir, '.pd', 'state.db'));
+    try {
+      db.exec('CREATE TABLE unrelated (id TEXT)');
+    } finally {
+      db.close();
+    }
+    const model = new ActivationsConsoleModel(workspaceDir);
+    try {
+      const read = await model.getActivations();
+      expect(read.status).toBe('degraded');
+      expect(read.activations).toEqual([]);
+      expect(read.reason).toContain('activation table not found');
+      expect(typeof read.nextAction).toBe('string');
+    } finally {
+      model.dispose();
+    }
   });
 });
 

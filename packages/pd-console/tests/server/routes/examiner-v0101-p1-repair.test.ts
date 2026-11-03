@@ -337,6 +337,86 @@ describe('P1-3 — evidence pagination passes through (loaded counts + hasMore)'
     expect(audit.pages.delivery.hasMore).toBe(false);
     expect(audit.anyHasMore).toBe(false);
   });
+
+  it('EXACTLY 50 deliveries report hasMore=false — the window boundary is not "more"', async () => {
+    const evidenceDir = path.join(workspaceDir, '.pd');
+    fs.mkdirSync(evidenceDir, { recursive: true });
+    const { getInterventionEvidenceIngress } = await import('@principles/host-runtime');
+    const ingress = getInterventionEvidenceIngress();
+    const batch = Array.from({ length: 50 }, (_, index) => ({
+      observationKey: `openclaw|delivery|agent_context|sess-boundary|run-${index}|act-p1`,
+      sourceLocator: `openclaw-plugin-event-log:sess-boundary:${index}`,
+      kind: 'delivery',
+      nativeRefs: { hostKind: 'openclaw', sessionId: 'sess-boundary', runId: `run-${index}` },
+      principleId: 'pri-target',
+      contentRef: { principleId: 'pri-target', payloadDigest: 'sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef', resolution: 'resolved' },
+      activationRef: { activationId: 'act-p1', sourceSnapshotDigest: 'sha256:fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321' },
+      payload: { targetKind: 'agent_context', confirmation: 'submitted', outcome: 'attempted' },
+    }));
+    const result = ingress.appendObservationBatch({ workspaceDir, batch: {
+      evidenceScopeId: ingress.evidenceScopeIdFor(workspaceDir),
+      sourceKind: 'openclaw_plugin_event_log' as const,
+      adapterVersion: 'p1-repair@1',
+      recordedAt: new Date().toISOString(),
+      observations: batch as never,
+    } });
+    expect(result.ok, `ingress refused: ${result.reason ?? 'unknown'}`).toBe(true);
+    const evidence = await call('GET', '/principles/pri-target/evidence');
+    const audit = evidence.body.data.evidenceAudit;
+    expect(audit.counts.deliveries).toBe(50);
+    expect(audit.pages.delivery.hasMore).toBe(false);
+    expect(audit.anyHasMore).toBe(false);
+  });
+
+  it('pagination is PER KIND: two saturated kinds both report hasMore; unsaturated kinds do not', async () => {
+    const evidenceDir = path.join(workspaceDir, '.pd');
+    fs.mkdirSync(evidenceDir, { recursive: true });
+    const { getInterventionEvidenceIngress } = await import('@principles/host-runtime');
+    const ingress = getInterventionEvidenceIngress();
+    const recordedAt = new Date().toISOString();
+    const deliveries = Array.from({ length: 55 }, (_, index) => ({
+      observationKey: `openclaw|delivery|agent_context|sess-multi|run-${index}|act-p1`,
+      sourceLocator: `openclaw-plugin-event-log:sess-multi:d${index}`,
+      kind: 'delivery',
+      nativeRefs: { hostKind: 'openclaw', sessionId: 'sess-multi', runId: `run-${index}` },
+      principleId: 'pri-target',
+      contentRef: { principleId: 'pri-target', payloadDigest: 'sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef', resolution: 'resolved' },
+      activationRef: { activationId: 'act-p1', sourceSnapshotDigest: 'sha256:fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321' },
+      payload: { targetKind: 'agent_context', confirmation: 'submitted', outcome: 'attempted' },
+    }));
+    const effects = Array.from({ length: 55 }, (_, index) => ({
+      observationKey: `openclaw|effect|observed|sess-multi|e${index}`,
+      sourceLocator: `openclaw-plugin-event-log:sess-multi:e${index}`,
+      kind: 'effect',
+      nativeRefs: { hostKind: 'openclaw', sessionId: 'sess-multi', runId: `run-${index}` },
+      principleId: 'pri-target',
+      episodeKey: `openclaw|episode|sess-multi|${index}`,
+      contentRef: { principleId: 'pri-target', payloadDigest: 'sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef', resolution: 'resolved' },
+      payload: { status: 'observed', observationSummary: `effect ${index}` },
+    }));
+    const scope = ingress.evidenceScopeIdFor(workspaceDir);
+    const append = (observations: unknown[]) => ingress.appendObservationBatch({ workspaceDir, batch: {
+      evidenceScopeId: scope,
+      sourceKind: 'openclaw_plugin_event_log' as const,
+      adapterVersion: 'p1-repair@1',
+      recordedAt,
+      observations: observations as never,
+    } });
+    const first = append(deliveries);
+    expect(first.ok, `ingress refused deliveries: ${first.reason ?? 'unknown'}`).toBe(true);
+    // The ingress caps ONE batch at 64 observations; saturation is per kind.
+    const second = append(effects);
+    expect(second.ok, `ingress refused effects: ${second.reason ?? 'unknown'}`).toBe(true);
+    const evidence = await call('GET', '/principles/pri-target/evidence');
+    const audit = evidence.body.data.evidenceAudit;
+    expect(audit.counts.deliveries).toBe(50);
+    expect(audit.counts.effects).toBe(50);
+    expect(audit.pages.delivery.hasMore).toBe(true);
+    expect(audit.pages.effect.hasMore).toBe(true);
+    expect(audit.pages.application.hasMore).toBe(false);
+    expect(audit.pages.outcome.hasMore).toBe(false);
+    expect(audit.anyHasMore).toBe(true);
+  });
 });
 
 // ── P1-4: atomic single-live acceptance + honest ledger reads ───────────────
@@ -448,5 +528,29 @@ describe('P1-6 — path and temp-file symlink safety', () => {
     await waitForTerminalRun(studyId, run.body.data.runId);
     const entries = fs.readdirSync(studyDirOf(studyId));
     expect(entries.some((name) => name.startsWith('.console-host-dry-run-probe'))).toBe(false);
+  });
+
+  it('a link planted at the LEGACY fixed probe name is never followed (random exclusive recipe)', async () => {
+    const studyId = await createStudy();
+    const studyDir = studyDirOf(studyId);
+    const decoy = path.join(tempDir, 'probe-decoy');
+    fs.mkdirSync(decoy, { recursive: true });
+    const legacyName = path.join(studyDir, '.console-host-dry-run-probe');
+    try {
+      fs.symlinkSync(decoy, legacyName, 'junction');
+    } catch (error) {
+      const { code } = error as { code?: string };
+      if (code === 'EPERM') {
+        console.warn('skipping junction case: this platform refuses unprivileged links (Linux CI covers it)');
+        return;
+      }
+      throw error;
+    }
+    const run = await call('POST', `/studies/${studyId}/run`, { mode: 'host-dry-run' });
+    expect(run.statusCode).toBe(202);
+    await waitForTerminalRun(studyId, run.body.data.runId);
+    // The probe never wrote through the planted link: its target stays empty.
+    expect(fs.readdirSync(decoy)).toEqual([]);
+    fs.rmSync(legacyName, { force: true });
   });
 });
