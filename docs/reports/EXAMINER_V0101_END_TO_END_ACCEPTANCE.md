@@ -287,3 +287,41 @@ CodeRabbit 结论为 `CHANGES_REQUESTED`（commit `1f6a290d8`），后自动产�
 ```
 
 未关闭规则、未削弱校验、未对 #1/#2/#3/#5 做代码改动；CodeRabbit 评论保持原状（未 dismiss）。
+
+### 11.9 CodeRabbit inline 评论逐条核实（20 条，review 提交于 `1f6a290d8`；API 的 `commit_id` 被 GitHub 映射为当前 HEAD `4fbb3c81e`）
+
+取证方式：`gh pr view 2301 --json reviews`（CHANGES_REQUESTED 于 06:59，DISMISSED 摘要于 07:00）+ `gh api repos/csuzngjh/principles/pulls/2301/comments --paginate`（20 条 inline）+ `gh pr view --json comments`。逐条对照当前源码/真实执行：
+
+| # | 文件:行 | 观点摘要 | 当前代码实际状态 | 判定 |
+|---|---|---|---|---|
+| 1 | `docs/architecture/PRI-737-post-merge-reality-check.md:136` | `check-runs` 25 项与 23+1+2=26 自相矛盾 | `gh api .../commits/cbee081a6/check-runs` 实测 **33 项：22 success / 1 failure / 10 skipped** | **属实 → 已修正**（文档改为 33/22/1/10） |
+| 2 | `ExaminerEvidenceModel.ts:209` | `getActivations()` 非缺表错误会抛，整个证据接口 500 | 确认 `getActivations()` 在 L321/L372 `throw err`；新增 try/catch → activation lane `degraded` + reason/nextAction | **真实缺陷 → 已修复**（新增用例：`state.db` 为目录时接口仍 200、ledger 事实保留） |
+| 3 | `examiner-runs.ts:430` | 终态 `checks` 未进 `ConsoleRunState`/状态接口/前端 | 确认丢字段；已加 `checks?` 并在 FINISHED/FAILED 分支保留，api 类型与 Study 页渲染逐项 PASS/FAIL | **真实缺陷 → 已修复**（用例断言状态接口含 `stage_r_authorization`） |
+| 4 | `examiner-runs.ts:485` | 同一 Study 二次运行期间，旧 `RUN_FINISHED` 仍让页面显示已完成 | 确认 `some(RUN_FINISHED)` 语义错误；改为「最后一次 `RUN_STARTED` 之后才有 `RUN_FINISHED`」；`offlineExecutionInFlight` 同步修正 | **真实缺陷 → 已修复**（用例：追加二次 `RUN_STARTED` 后 `runFinished=false`） |
+| 5 | `examiner-runs.ts:646` | 恢复/结算写入未持 study 写锁，可能把已完成运行标 ABANDONED 或重复写入 | 确认真实；`withStudyWriteLock` 统一锁，恢复在锁内重读终态，异步结算经 `appendConsoleRunEventLocked` 持锁追加 | **真实缺陷 → 已修复**（新增用例：他方持锁 → 恢复零写入；释放后恰好一条 ABANDONED） |
+| 6 | `examiner.ts:175` | 恢复扫描失败后根目录被永久标记已恢复 | 确认 `Set` 先加后扫；改为缓存 in-flight Promise，失败 `delete` 以便下次重试 | **真实缺陷 → 已修复** |
+| 7 | `examiner.ts:221` | 核心原则证据接口返回 500，应 404 | 确认 `getPrincipleDetail` 对核心 ID 抛 `CorePrincipleNotGovernedError`；模型捕获后返回 null → 既定 404 | **真实缺陷 → 已修复**（用例 `/principles/T-01/evidence` → 404） |
+| 8 | `examiner.ts:350` | 创建 Study 未按运行时激活状态过滤原则 | 确认 `ledgerPrinciples` 未带 `promptActivated`；但改动会改变研究设计语义与冻结输入（Heavy lift） | **属实，超出本轮安全/单活范围** → follow-up（需 Owner 审定研究设计） |
+| 9 | `ExaminerConfigurePage.tsx:64` | 套件目录加载失败无提示且仍可创建 | 确认仅原则失败才置错；新增 `suiteError` 横幅并禁用创建 | **真实缺陷 → 已修复** |
+| 10 | `ExaminerReportPage.tsx:59` | 报告在证据请求完成后才 `setReport`，证据慢则一直 loading | 确认；改为先提交报告/缺失/错误状态，证据独立随后加载 | **真实缺陷 → 已修复** |
+| 11 | `ExaminerReportPage.tsx:58` | `request()` 丢错误码，`report_not_generated` 判定失效 | 确认 `request()` 只取 message；`ApiResponse` 增加 `code` 字段并在失败分支回填，页面改用 `code` | **真实缺陷 → 已修复** |
+| 12 | `ExaminerStudyPage.tsx:127` | `consoleRuns.ledgerProblem` 未在页面展示 | 确认；api 类型补字段，Study 页新增不可信账本告警条 | **真实缺陷 → 已修复** |
+| 13 | `tests/e2e/examiner-journey.spec.ts:155` | D 场景接受 `OK` 或 `FAILED`，校验失败仍通过 | 确认；改为只接受 `OK` | **真实缺陷（测试保真度）→ 已修复** |
+| 14 | `tests/e2e/examiner-journey.spec.ts:198` | F 场景 `if (historicalVisible)` 可整体跳过断言 | 确认；改为无条件 `toBeVisible` 后点击并断言只读 | **真实缺陷（测试保真度）→ 已修复** |
+| 15 | `docs/architecture/PRI-760-flag-reality-matrix.md:24` | 摘要 ACTIVE 41 与 47 行表（40 ACTIVE/2 DEAD/5 GONE）不符 | 实测表格 47 行，ACTIVE 40 行 | **属实 → 已修正**（41→40，并写合计） |
+| 16 | `docs/specs/SPEC-PD-EXAMINER-001-v0.10.1.md:129` | §1.4 第 7 项未注明本版本 F2 真实执行限制 | 确认；已补充 `F2_EXECUTION_NOT_ENABLED_THIS_ROUND` 说明 | **属实 → 已修正**（文档） |
+| 17 | `examiner-runs.ts:468` | 安全读取同时拒绝历史根，历史 Study 状态显示未运行 | 确认本轮硬化引入的回归；`resolveLedgerStudyDir` 改为模式感知：**read 允许历史根、append 一律拒绝**，身份/fstat 契约不变 | **真实缺陷（本轮回归）→ 已修复**（EXM-V09-ACC-* 状态恢复 `runStarted/runFinished=true`，用例钉住） |
+| 18 | `examiner-runs.ts:734` | dry-run 的 `stage_r_authorization` 只用 4 字段，未复用 F2 权威门禁 | 确认；dry-run 改调 `f2AuthorizationGate`（绑定/有效期/退役表/探测证据全覆盖），只影响就绪结论准确性 | **真实缺陷 → 已修复** |
+| 19 | `examiner-study-inputs.ts:307` | `rulecode-baseline` 未记录非目标 RuleCode 基线状态（SPEC §7.2） | 确认只保留目标行；扩展会改变冻结研究输入与基线哈希 | **属实，超出本轮范围** → follow-up（研究设计 + freeze 链变更） |
+| 20 | `ExaminerPage.tsx:51`（Major） | 切换原则时旧证据请求可覆盖新选择（A→B→A 也不可仅比 ID） | 确认无序号保护；新增单调请求序号，仅最新请求可写 evidence/loading | **真实缺陷 → 已修复** |
+
+**修复后验证（真实输出）**：
+```text
+pd-console 定向：4 files / 73 tests PASS（新增：历史只读仍可读、二次 RUN_STARTED、核心原则 404、激活库不可读降级、恢复持锁）
+pd-console 全量：171 files / 3134 passed + 1 expected fail（首轮 2 个 5s 超时，单独复跑 53/53 PASS，属既有 flaky）
+tsc --noEmit：PASS；eslint（改动文件）：0 error
+Playwright E2E（真实浏览器）：6/6 PASS（含收紧后的 D 只接受 OK、F 无条件断言）
+lab 契约 + 历史基线：86/86 PASS（未改 lab 代码，无需 rebind）
+```
+
+未关闭规则、未削弱校验、未加 retry、未调 timeout；评论保持原状（未 dismiss）。#8/#19 仅记录为 follow-up，未改代码。

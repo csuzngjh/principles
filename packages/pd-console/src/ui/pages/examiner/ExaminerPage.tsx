@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
@@ -39,10 +39,17 @@ export function ExaminerPage(): React.ReactElement {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Monotonic request sequence: a slower earlier response must never overwrite
+  // the panel for the principle the Owner selected last (including A→B→A,
+  // where comparing ids alone would accept the stale A response).
+  const evidenceRequestSeq = useRef(0);
   const loadEvidence = useCallback(async (principleId: string) => {
+    const seq = evidenceRequestSeq.current + 1;
+    evidenceRequestSeq.current = seq;
     setEvidenceLoading(true);
     setEvidence(null);
     const response = await fetchExaminerPrincipleEvidence(principleId);
+    if (evidenceRequestSeq.current !== seq) return;
     setEvidenceLoading(false);
     if (!response.success) {
       toast.error(response.error ?? t('pages.examiner.errors.evidence'));

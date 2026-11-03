@@ -63,10 +63,10 @@ import {
   readProductionSnapshot,
 } from './examiner-study-inputs.js';
 import {
-  appendConsoleRunEvent, readConsoleRuns, currentConsoleRun, recoverUnfinishedConsoleRuns,
+  appendConsoleRunEventLocked, readConsoleRuns, currentConsoleRun, recoverUnfinishedConsoleRuns,
   acceptConsoleRun, hostDryRunPass, f2AuthorizationGate, CONSOLE_RUN_SCHEMA, CONSOLE_RUN_MODES,
   ConsoleRunInProgressError, ConsoleLedgerUnreadableError, studyStatusPayload,
-  assertOfflineAdmissionAllowed,
+  assertOfflineAdmissionAllowed, type ConsoleRunEvent,
 } from './examiner-runs.js';
 
 type HostCapability = Record<string, string>;
@@ -164,15 +164,22 @@ async function loadLab(): Promise<HostCapability | null> {
  * unfinished console run becomes CONSOLE_RUN_ABANDONED (RESULT_UNKNOWN,
  * never retried) before any status/run request can observe or extend it.
  */
-const recoveredRoots = new Set<string>();
-async function ensureConsoleRunRecovery(roots: StudyRoots): Promise<void> {
-  if (recoveredRoots.has(roots.writable)) return;
-  recoveredRoots.add(roots.writable);
-  try {
-    await recoverUnfinishedConsoleRuns(roots);
-  } catch (error) {
-    logRefusal('run recovery', error);
-  }
+const recoveryInFlight = new Map<string, Promise<void>>();
+async function ensureConsoleRunRecovery(roots: StudyRoots, labRootDir: string): Promise<void> {
+  const key = roots.writable;
+  const pending = recoveryInFlight.get(key);
+  if (pending) return pending;
+  // Cache the IN-FLIGHT promise, not a "done" flag: a transient scan failure
+  // (an unavailable studies root) must be retried by the next request instead
+  // of leaving a crashed run blocking this study for the process lifetime.
+  const attempt = recoverUnfinishedConsoleRuns(roots, labRootDir)
+    .then(() => undefined)
+    .catch((error) => {
+      recoveryInFlight.delete(key);
+      logRefusal('run recovery', error);
+    });
+  recoveryInFlight.set(key, attempt);
+  return attempt;
 }
 
 /** Path + write-permission facts shared by run/report; never request-derived. */
@@ -235,7 +242,7 @@ export async function handleExaminerRoute(
   const roots = resolveStudyRoots(labRoot, path.join(workspaceDir, '.pd', 'examiner'));
   const context: StudyContext = { labRoot, roots };
   const rootProblem = writableRootProblem(roots);
-  await ensureConsoleRunRecovery(roots);
+  await ensureConsoleRunRecovery(roots, labRoot);
 
   // GET /overview
   if (subPath === '/overview' && method === 'GET') {
@@ -491,10 +498,11 @@ export async function handleExaminerRoute(
         // never rides the HTTP request); all failures append terminal events.
         // finishedAt is taken at SETTLEMENT time (P1-4C), never up front.
         void (async () => {
+          let terminal: ConsoleRunEvent;
           try {
             if (requestedMode === 'host-dry-run') {
               const dryRun = await hostDryRunPass({ modules: labModules, labRoot, studyDir, context });
-              appendConsoleRunEvent(roots, studyDir, {
+              terminal = {
                 type: dryRun.ok ? 'CONSOLE_RUN_FINISHED' : 'CONSOLE_RUN_FAILED',
                 schema: CONSOLE_RUN_SCHEMA, runId, studyId: access.studyId,
                 mode: 'host-dry-run', acceptedAt, pid: process.pid, owner: 'pd-console',
@@ -502,28 +510,36 @@ export async function handleExaminerRoute(
                 outcome: dryRun.ok ? 'DRY_RUN_CHECKS_PASSED' : 'DRY_RUN_CHECKS_FAILED',
                 reason: dryRun.ok ? undefined : `failing prerequisites: ${dryRun.checks.filter((entry) => !entry.ok && entry.severity !== 'info').map((entry) => entry.id).join(', ')}`,
                 checks: dryRun.checks,
-              });
+              };
             } else {
               // f2-real-host passed the console gate. Real console-driven
               // execution is NOT enabled this round (SPEC §Owner Decision:
               // real model calls require separate Owner authorization); the
               // run settles LOUDLY with zero model calls — never a stub.
-              appendConsoleRunEvent(roots, studyDir, {
+              terminal = {
                 type: 'CONSOLE_RUN_FAILED', schema: CONSOLE_RUN_SCHEMA, runId, studyId: access.studyId,
                 mode: 'f2-real-host', acceptedAt, pid: process.pid, owner: 'pd-console',
                 finishedAt: new Date().toISOString(),
                 outcome: 'F2_EXECUTION_NOT_ENABLED_THIS_ROUND',
                 reason: 'authorization was accepted, but console-driven F2 real execution stays disabled this round; use the lab F2 driver under Owner supervision; zero model calls were made',
-              });
+              };
             }
           } catch (error) {
             logRefusal(`console run ${runId} failed`, error);
-            appendConsoleRunEvent(roots, studyDir, {
+            terminal = {
               type: 'CONSOLE_RUN_FAILED', schema: CONSOLE_RUN_SCHEMA, runId, studyId: access.studyId,
               mode: requestedMode, acceptedAt, pid: process.pid, owner: 'pd-console',
               finishedAt: new Date().toISOString(),
               outcome: 'RUN_ERROR', reason: 'the console run failed (details in the console server log)',
-            });
+            };
+          }
+          // The terminal event is appended UNDER the study write lock: startup
+          // recovery takes the same lock and re-reads the terminal state there,
+          // so a settled run can never be turned into ABANDONED afterwards.
+          try {
+            await appendConsoleRunEventLocked({ labRoot, roots, studyDir }, terminal);
+          } catch (error) {
+            logRefusal(`console run ${runId} terminal event could not be appended`, error);
           }
         })();
         // 202 Accepted — the §12.3 async contract answer.

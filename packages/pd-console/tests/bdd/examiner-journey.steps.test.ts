@@ -243,7 +243,7 @@ registry.when(/Owner 再次以 host-dry-run 请求运行$/, async () => {
 });
 
 registry.when(/执行启动恢复扫描$/, async () => {
-  await recoverUnfinishedConsoleRuns(resolveStudyRootsFromLab());
+  await recoverUnfinishedConsoleRuns(resolveStudyRootsFromLab(), labRootFromLayout());
 });
 
 registry.when(/Owner 请求 f2-real-host 运行$/, async () => {
@@ -359,7 +359,7 @@ registry.then(/追加 CONSOLE_RUN_ABANDONED 且 outcome=RESULT_UNKNOWN$/, () => 
 
 registry.then(/重复扫描不再产生新的放弃事件$/, async () => {
   const before = eventsOf(lastStudyId).filter((event) => event.type === 'CONSOLE_RUN_ABANDONED').length;
-  await recoverUnfinishedConsoleRuns(resolveStudyRootsFromLab());
+  await recoverUnfinishedConsoleRuns(resolveStudyRootsFromLab(), labRootFromLayout());
   const after = eventsOf(lastStudyId).filter((event) => event.type === 'CONSOLE_RUN_ABANDONED').length;
   expect(after).toBe(before);
 });
@@ -454,11 +454,14 @@ function buildFullF2AuthorizationFixture(studyId: string): Record<string, unknow
   };
 }
 
-function resolveStudyRootsFromLab() {
-  const labRoot = process.env.PD_EXAMINER_LAB_ROOT
+function labRootFromLayout(): string {
+  return process.env.PD_EXAMINER_LAB_ROOT
     ? path.resolve(process.env.PD_EXAMINER_LAB_ROOT)
     : path.join(repoRoot, 'scripts', 'dev', 'principle-learning-lab');
-  return resolveStudyRoots(labRoot, path.join(workspaceDir, '.pd', 'examiner'));
+}
+
+function resolveStudyRootsFromLab() {
+  return resolveStudyRoots(labRootFromLayout(), path.join(workspaceDir, '.pd', 'examiner'));
 }
 
 beforeEach(() => {

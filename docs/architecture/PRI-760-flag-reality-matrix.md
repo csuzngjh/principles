@@ -16,7 +16,7 @@
 
 - 注册 flag **47 个**（core 9 / quiet 36 / gone 2），单一 SSoT `feature-flag-contract.ts:DEFAULT_FEATURE_FLAGS`；
   `pd-config-defaults.ts` 的 registry 由 contract 派生（非第二真值，仅映射 category/enabled）。
-- **ACTIVE：41**（含 `code_tool_hook`/`defer_archive`/`prompt` channel 三旗）。
+- **ACTIVE：40**（含 `code_tool_hook`/`defer_archive`/`prompt` channel 三旗）；40 + DEAD 2 + GONE 5 = 47。
 - **DEAD（零可执行消费者）2 个**：`painEvidenceAdmission`、`painEvidenceAdmissionDefault`
   （涉 pain pipeline = protected zone → 走 SPEC，不直接删码）。
 - **GONE（墓碑）5 个**：`evolution_worker`、`internalization_core_grounding`、`empathy_observer`

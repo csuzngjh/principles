@@ -40,6 +40,7 @@ export function ExaminerConfigurePage(): React.ReactElement {
   const [repetitions, setRepetitions] = useState(2);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [suiteError, setSuiteError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -59,6 +60,7 @@ export function ExaminerConfigurePage(): React.ReactElement {
       if (prefillPrinciple !== null && active.some((p) => p.id === prefillPrinciple)) setTargetPrincipleId(prefillPrinciple);
       else if (active[0] !== undefined) setTargetPrincipleId(active[0].id);
       if (suitesResponse.success) setSuites(suitesResponse.data.suites);
+      else setSuiteError(suitesResponse.error ?? t('pages.examiner.errors.unavailable'));
       if (readinessResponse.success) setReadiness(readinessResponse.data);
     })();
     return () => {
@@ -158,6 +160,11 @@ export function ExaminerConfigurePage(): React.ReactElement {
           {/* Suite selection */}
           <div className="grid content-start gap-3 rounded-lg border bg-card p-4 text-sm" data-testid="examiner-configure-suite">
             <div className="font-medium">{t('pages.examiner.configure.suite.title')}</div>
+            {suiteError !== null && (
+              <p className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-[11px] text-destructive" data-testid="examiner-suite-error">
+                {suiteError}
+              </p>
+            )}
             {suites.map((suite) => (
               <button
                 key={suite.key}
@@ -214,7 +221,7 @@ export function ExaminerConfigurePage(): React.ReactElement {
                 pairs: (selectedSuite?.caseCount ?? 2) * repetitions,
               })}
             </span>
-            <Button onClick={() => void handleCreate()} disabled={targetPrincipleId === '' || busy} data-testid="examiner-create-button">
+            <Button onClick={() => void handleCreate()} disabled={targetPrincipleId === '' || busy || suiteError !== null} data-testid="examiner-create-button">
               {busy ? <Loader2 className="size-4 animate-spin" /> : <FlaskConical className="size-4" />}
               {t('pages.examiner.create.submit')}
               <ArrowRight className="size-4" />

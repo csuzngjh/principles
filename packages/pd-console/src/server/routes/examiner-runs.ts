@@ -77,6 +77,8 @@ export interface ConsoleRunState {
   finishedAt: string | null;
   outcome: string | null;
   reason: string | null;
+  /** The dry-run checklist carried by the terminal event (never re-invented). */
+  checks?: unknown[];
 }
 
 // ── Secure events.jsonl access (single-fd, identity-pinned) ─────────────────
@@ -151,7 +153,7 @@ function ledgerUnreadable(message: string): Error {
 }
 
 /** Resolve + prove the study directory boundary (fail-closed, never string-only). */
-function resolveLedgerStudyDir(roots: StudyRoots, studyDir: string): string {
+function resolveLedgerStudyDir(roots: StudyRoots, studyDir: string, mode: 'read' | 'append'): string {
   const studyReal = canonicalPathSync(studyDir);
   if (!studyReal) throw ledgerUnreadable('the study directory cannot be resolved to a canonical location (fail-closed)');
   // Identity, not just prefix: a directory swapped for a SIBLING inside the
@@ -160,13 +162,17 @@ function resolveLedgerStudyDir(roots: StudyRoots, studyDir: string): string {
   if (path.basename(studyReal) !== path.basename(path.resolve(studyDir))) {
     throw ledgerUnreadable('the study directory resolved to a different entry name — path swap refused (fail-closed)');
   }
+  const historicalReal = canonicalPathSync(roots.historical) ?? roots.historical;
+  // Historical research assets are READ-ONLY, never unwritable-unknown: the
+  // status projection must still show their recorded run history. Reads are
+  // allowed under the same identity/fstat contract; every append is refused.
+  if (isSamePath(historicalReal, studyReal) || isPathInside(historicalReal, studyReal)) {
+    if (mode === 'append') throw ledgerUnreadable('the study directory resolves inside the historical research area — writes are refused (fail-closed)');
+    return studyReal;
+  }
   const writableReal = canonicalPathSync(roots.writable) ?? roots.writable;
   if (!isPathInside(writableReal, studyReal)) {
     throw ledgerUnreadable('the study directory resolves outside the writable console root (fail-closed)');
-  }
-  const historicalReal = canonicalPathSync(roots.historical) ?? roots.historical;
-  if (isSamePath(historicalReal, studyReal) || isPathInside(historicalReal, studyReal)) {
-    throw ledgerUnreadable('the study directory resolves inside the historical research area (fail-closed)');
   }
   return studyReal;
 }
@@ -206,7 +212,7 @@ function discardCreatedLedger(dirFd: number | null, studyReal: string): void {
  * Returns null ONLY when the ledger is absent in read mode (first-run case).
  */
 function openLedger(roots: StudyRoots, studyDir: string, mode: 'read' | 'append'): OpenedLedger | null {
-  const studyReal = resolveLedgerStudyDir(roots, studyDir);
+  const studyReal = resolveLedgerStudyDir(roots, studyDir, mode);
   const dirBefore = identityOf(studyReal);
   if (!dirBefore) throw ledgerUnreadable('the study directory identity cannot be established (fail-closed)');
   const dirFd = openPinnedStudyDir(studyReal);
@@ -363,12 +369,12 @@ export function appendConsoleRunEvent(roots: StudyRoots, studyDir: string, event
   }
 }
 
-/** True when the ledger has RUN_STARTED without a following RUN_FINISHED. */
+/** True when the LATEST RUN_STARTED has no following RUN_FINISHED. */
 function offlineExecutionInFlight(roots: StudyRoots, studyDir: string): boolean {
   const text = readLedgerText(roots, studyDir);
   if (text === null) return false;
   let started = false;
-  let finished = false;
+  let finishedAfterStart = false;
   const lines = text.split('\n').filter(Boolean);
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index] ?? '';
@@ -380,10 +386,16 @@ function offlineExecutionInFlight(roots: StudyRoots, studyDir: string): boolean 
       throw new ConsoleLedgerUnreadableError('ledger_corrupt', `the study event ledger is corrupt at line ${index + 1} (JSON parse failed: ${(error as Error).message}) — refuse rather than treat as idle`);
     }
     if (!isJsonObject(row) || typeof row.type !== 'string') continue;
-    if (row.type === 'RUN_STARTED') started = true;
-    if (row.type === 'RUN_FINISHED') finished = true;
+    // A finish from an EARLIER run must not mask a later in-flight run: only
+    // a RUN_FINISHED AFTER the latest RUN_STARTED settles the current one.
+    if (row.type === 'RUN_STARTED') {
+      started = true;
+      finishedAfterStart = false;
+    } else if (row.type === 'RUN_FINISHED' && started) {
+      finishedAfterStart = true;
+    }
   }
-  return started && !finished;
+  return started && !finishedAfterStart;
 }
 
 export class OfflineRunInFlightError extends Error {
@@ -418,13 +430,14 @@ export function readConsoleRuns(roots: StudyRoots, studyDir: string): ConsoleRun
     const mode = isConsoleRunMode(parsed.mode) ? parsed.mode : null;
     if (mode === null) continue;
     const acceptedAt = typeof parsed.acceptedAt === 'string' ? parsed.acceptedAt : '';
+    const checks = Array.isArray(parsed.checks) ? parsed.checks : undefined;
     const existing = runs.get(parsed.runId) ?? { runId: parsed.runId, mode, status: 'RUNNING', acceptedAt, finishedAt: null, outcome: null, reason: null };
     if (parsed.type === 'CONSOLE_RUN_ACCEPTED') {
       runs.set(parsed.runId, { ...existing, status: 'RUNNING', acceptedAt, finishedAt: null, outcome: null, reason: null });
     } else if (parsed.type === 'CONSOLE_RUN_FINISHED') {
-      runs.set(parsed.runId, { ...existing, status: 'FINISHED', finishedAt: typeof parsed.finishedAt === 'string' ? parsed.finishedAt : null, outcome: typeof parsed.outcome === 'string' ? parsed.outcome : null, reason: typeof parsed.reason === 'string' ? parsed.reason : null });
+      runs.set(parsed.runId, { ...existing, status: 'FINISHED', finishedAt: typeof parsed.finishedAt === 'string' ? parsed.finishedAt : null, outcome: typeof parsed.outcome === 'string' ? parsed.outcome : null, reason: typeof parsed.reason === 'string' ? parsed.reason : null, ...(checks !== undefined ? { checks } : {}) });
     } else if (parsed.type === 'CONSOLE_RUN_FAILED') {
-      runs.set(parsed.runId, { ...existing, status: 'FAILED', finishedAt: typeof parsed.finishedAt === 'string' ? parsed.finishedAt : null, outcome: typeof parsed.outcome === 'string' ? parsed.outcome : null, reason: typeof parsed.reason === 'string' ? parsed.reason : null });
+      runs.set(parsed.runId, { ...existing, status: 'FAILED', finishedAt: typeof parsed.finishedAt === 'string' ? parsed.finishedAt : null, outcome: typeof parsed.outcome === 'string' ? parsed.outcome : null, reason: typeof parsed.reason === 'string' ? parsed.reason : null, ...(checks !== undefined ? { checks } : {}) });
     } else if (parsed.type === 'CONSOLE_RUN_ABANDONED') {
       runs.set(parsed.runId, { ...existing, status: 'ABANDONED', finishedAt: typeof parsed.finishedAt === 'string' ? parsed.finishedAt : null, outcome: 'RESULT_UNKNOWN', reason: typeof parsed.reason === 'string' ? parsed.reason : 'unknown' });
     }
@@ -474,6 +487,20 @@ export function studyStatusPayload(roots: StudyRoots, studyDir: string): Record<
   const target = isJsonObject(manifest.targetPrinciple) && typeof manifest.targetPrinciple.id === 'string'
     ? manifest.targetPrinciple.id
     : null;
+  // A run is "finished" only when the LATEST RUN_STARTED has a following
+  // RUN_FINISHED. A finish from an earlier run must never make a later
+  // in-flight run look complete (the Owner would see "finished" and the page
+  // would stop polling while the run is still executing).
+  let runStarted = false;
+  let runFinished = false;
+  for (const event of events) {
+    if (event.type === 'RUN_STARTED') {
+      runStarted = true;
+      runFinished = false;
+    } else if (event.type === 'RUN_FINISHED' && runStarted) {
+      runFinished = true;
+    }
+  }
   const reportExists = fs.existsSync(path.join(studyDir, 'behavior-report-v2.json'));
   const report = reportExists ? readStudyJson(studyDir, 'behavior-report-v2.json') : null;
   return {
@@ -482,8 +509,8 @@ export function studyStatusPayload(roots: StudyRoots, studyDir: string): Record<
     interventionType: manifest.interventionType,
     targetPrincipleId: target,
     plannedPairs: manifest.plannedPairs,
-    runStarted: events.some((event) => event.type === 'RUN_STARTED'),
-    runFinished: events.some((event) => event.type === 'RUN_FINISHED'),
+    runStarted,
+    runFinished,
     unitStates: counts,
     reportStatus: report ? report.status : null,
   };
@@ -516,23 +543,51 @@ export interface ConsoleRunAcceptance {
   acceptedAt: string;
 }
 
+interface StudyLockModule {
+  acquireStudyWriteLock: (dir: string, options: { owner: string }) => unknown;
+  releaseStudyWriteLock: (dir: string, options: { owner: string }) => unknown;
+}
+
+/** Load the lab's authoritative single-writer lock (dynamic — no package edge). */
+async function loadStudyLock(labRoot: string): Promise<StudyLockModule> {
+  const ledgerUrl = pathToFileURL(path.join(labRoot, 'lib', 'challenge-ledger.mjs')).href;
+  const mod = (await import(ledgerUrl)) as Partial<StudyLockModule>;
+  if (typeof mod.acquireStudyWriteLock !== 'function' || typeof mod.releaseStudyWriteLock !== 'function') {
+    throw new Error('the lab payload does not export the study write lock — refusing an unguarded ledger settlement');
+  }
+  return { acquireStudyWriteLock: mod.acquireStudyWriteLock, releaseStudyWriteLock: mod.releaseStudyWriteLock };
+}
+
+/**
+ * Run `operation` under the SAME study write lock the offline runner holds.
+ * Acceptance, recovery and async settlement all use this one lock, so a
+ * terminal event can never land between another writer's check and append.
+ */
+async function withStudyWriteLock<T>(
+  input: { labRoot: string; studyDir: string; owner: string },
+  operation: () => T | Promise<T>,
+): Promise<T> {
+  const lock = await loadStudyLock(input.labRoot);
+  lock.acquireStudyWriteLock(input.studyDir, { owner: input.owner });
+  try {
+    return await operation();
+  } finally {
+    try {
+      lock.releaseStudyWriteLock(input.studyDir, { owner: input.owner });
+    } catch {
+      // An unreleaseable lock stays on disk (crash-holder semantics); the
+      // lab's lock discipline governs recovery.
+    }
+  }
+}
+
 export async function acceptConsoleRun(
   roots: StudyRoots,
   studyDir: string,
   inputs: { studyId: string; mode: ConsoleRunMode; labRoot: string },
 ): Promise<ConsoleRunAcceptance> {
-  const ledgerUrl = pathToFileURL(path.join(inputs.labRoot, 'lib', 'challenge-ledger.mjs')).href;
-  const ledgerMod = (await import(ledgerUrl)) as {
-    acquireStudyWriteLock: (dir: string, options: { owner: string }) => unknown;
-    releaseStudyWriteLock: (dir: string, options: { owner: string }) => unknown;
-    StudyLockError?: new (...args: unknown[]) => Error;
-  };
-  if (typeof ledgerMod.acquireStudyWriteLock !== 'function' || typeof ledgerMod.releaseStudyWriteLock !== 'function') {
-    throw new Error('the lab payload does not export the study write lock — cannot accept console runs safely');
-  }
   const owner = `pd-console-accept-${process.pid}`;
-  ledgerMod.acquireStudyWriteLock(studyDir, { owner });
-  try {
+  return withStudyWriteLock({ labRoot: inputs.labRoot, studyDir, owner }, () => {
     // Everything below is INSIDE the lock. A ledger that cannot be honestly
     // read refuses the acceptance (P1-4B) — never an empty-arrays guess.
     const runs = readConsoleRuns(roots, studyDir);
@@ -548,14 +603,23 @@ export async function acceptConsoleRun(
       mode: inputs.mode, acceptedAt, pid: process.pid, owner: 'pd-console',
     });
     return { runId, acceptedAt };
-  } finally {
-    try {
-      ledgerMod.releaseStudyWriteLock(studyDir, { owner });
-    } catch {
-      // An unreleaseable lock stays on disk (crash-holder semantics); the
-      // lab's lock TTL discipline governs recovery.
-    }
-  }
+  });
+}
+
+/**
+ * Append an async run's TERMINAL event under the study write lock. Recovery
+ * (which also holds the lock) therefore either sees the terminal event and
+ * skips, or appends ABANDONED first and the later terminal event wins — an
+ * already-settled run can never be reported as ABANDONED.
+ */
+export async function appendConsoleRunEventLocked(
+  input: { labRoot: string; roots: StudyRoots; studyDir: string },
+  event: ConsoleRunEvent,
+): Promise<void> {
+  await withStudyWriteLock(
+    { labRoot: input.labRoot, studyDir: input.studyDir, owner: `pd-console-settle-${process.pid}` },
+    () => appendConsoleRunEvent(input.roots, input.studyDir, event),
+  );
 }
 
 /**
@@ -593,7 +657,7 @@ export function processAlive(pid: number): boolean {
  * INSIDE the writable root, and every ledger access re-proves containment at
  * the point of use — a symlinked/junctioned entry is skipped, never followed.
  */
-export async function recoverUnfinishedConsoleRuns(roots: StudyRoots): Promise<{ studyId: string; runId: string }[]> {
+export async function recoverUnfinishedConsoleRuns(roots: StudyRoots, labRoot: string): Promise<{ studyId: string; runId: string }[]> {
   const recovered: { studyId: string; runId: string }[] = [];
   const writableReal = canonicalPathSync(roots.writable);
   if (!writableReal || !fs.existsSync(roots.writable)) return recovered;
@@ -628,21 +692,33 @@ export async function recoverUnfinishedConsoleRuns(roots: StudyRoots): Promise<{
         .pop();
       const pid = typeof accepted?.pid === 'number' ? accepted.pid : 0;
       if (processAlive(pid)) continue;
-      appendConsoleRunEvent(roots, dirReal, {
-        type: 'CONSOLE_RUN_ABANDONED',
-        schema: CONSOLE_RUN_SCHEMA,
-        runId: running.runId,
-        studyId: entry.name,
-        mode: running.mode,
-        acceptedAt: running.acceptedAt,
-        pid,
-        owner: 'pd-console',
-        finishedAt: new Date().toISOString(),
-        outcome: 'RESULT_UNKNOWN',
-        reason: 'server_restart — the accepting process is gone; the attempt stays RESULT_UNKNOWN and is never auto-retried',
+      // The check-and-append below runs under the SAME lock the async
+      // settlement takes. Re-reading inside the lock proves the run is still
+      // unfinished: a terminal event that landed in between wins, and two
+      // concurrent recoveries cannot both append ABANDONED.
+      await withStudyWriteLock({ labRoot, studyDir: dirReal, owner: `pd-console-recover-${process.pid}` }, () => {
+        const fresh = currentConsoleRun(readConsoleRuns(roots, dirReal));
+        if (!fresh || fresh.runId !== running.runId) return;
+        appendConsoleRunEvent(roots, dirReal, {
+          type: 'CONSOLE_RUN_ABANDONED',
+          schema: CONSOLE_RUN_SCHEMA,
+          runId: running.runId,
+          studyId: entry.name,
+          mode: running.mode,
+          acceptedAt: running.acceptedAt,
+          pid,
+          owner: 'pd-console',
+          finishedAt: new Date().toISOString(),
+          outcome: 'RESULT_UNKNOWN',
+          reason: 'server_restart — the accepting process is gone; the attempt stays RESULT_UNKNOWN and is never auto-retried',
+        });
+        recovered.push({ studyId: entry.name, runId: running.runId });
       });
-      recovered.push({ studyId: entry.name, runId: running.runId });
-    } catch {
+    } catch (error) {
+      if ((error as Error).name === 'StudyLockError') {
+        console.error(`[pd-console] examiner run recovery: study ${entry.name} is locked by another writer — skipped (that writer settles it)`);
+        continue;
+      }
       // An unreadable ledger is reported by the status route; recovery skips it.
     }
   }
@@ -728,15 +804,24 @@ export async function hostDryRunPass(input: { modules: LabModules; labRoot: stri
     check({ id: 'offline_contract_preflight', ok: false, detail: `preflight could not run: ${(error as Error).message}` });
   }
 
-  // 2. Stage R authorization: what the Owner has (or has not) issued.
-  const stageR = await readStageR(labRoot, studyDir);
-  const facts = stageRFacts(stageR.record);
-  const authOk = stageR.present && facts.status === 'APPROVED' && facts.executionMode === 'F2-real-host' && !facts.revoked && !facts.halted;
+  // 2. Stage R authorization — the SAME authoritative verifier the F2 request
+  //    uses (schema, stage/status, the full study binding, the validity
+  //    window, the retirement registry, revocation/halted and probe evidence).
+  //    A dry-run must never report readiness on a weaker subset than the gate.
+  let gate: F2GateResult;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-use-before-define -- hoisted declaration (the gate section follows the dry-run section)
+    gate = await f2AuthorizationGate(labRoot, studyDir);
+  } catch (error) {
+    gate = { authorized: false, reasons: [`the Stage R gate could not run (${(error as Error).message})`], record: null };
+  }
+  const facts = stageRFacts(gate.record);
+  const authOk = gate.authorized;
   check({ id: 'stage_r_authorization', ok: authOk, detail: authOk
-    ? `APPROVED F2-real-host authorization present (model ${facts.model ?? 'unspecified'}, validUntil ${facts.validUntil ?? 'unbounded'})`
-    : stageR.present
-      ? `a run-authorization.json exists but is not an approvable F2 record (status=${facts.status ?? 'unknown'}, mode=${facts.executionMode ?? 'unknown'}${facts.revoked ? ', REVOKED' : ''}${facts.halted ? ', HALTED' : ''})`
-      : 'no run-authorization.json in the study — the Owner must issue an APPROVED F2-real-host record before real execution' });
+    ? `APPROVED F2-real-host authorization verified by the lab Stage R gate (model ${facts.model ?? 'unspecified'}, validUntil ${facts.validUntil ?? 'unbounded'})`
+    : gate.reasons.length > 0
+      ? `Stage R gate refused: ${gate.reasons.join('; ')}`
+      : 'Stage R gate refused the authorization record' });
 
   // 3. OpenClaw CLI probe — a LOCAL `--version` process, never a model call,
   //    delegated to the lab's read-only probe with NO executable argument
@@ -771,7 +856,7 @@ export async function hostDryRunPass(input: { modules: LabModules; labRoot: stri
   let isolationNote: string;
   let probeDir: string | null = null;
   try {
-    const studyReal = context ? resolveLedgerStudyDir(context.roots, studyDir) : canonicalPathSync(studyDir);
+    const studyReal = context ? resolveLedgerStudyDir(context.roots, studyDir, 'append') : canonicalPathSync(studyDir);
     const studyIdentity = studyReal ? identityOf(studyReal) : null;
     if (!studyReal || !studyIdentity) throw new Error('the study directory identity cannot be established (fail-closed)');
     probeDir = fs.mkdtempSync(path.join(studyReal, '.console-host-dry-run-probe-'));
@@ -815,7 +900,7 @@ export async function hostDryRunPass(input: { modules: LabModules; labRoot: stri
     ok: checks.every((entry) => entry.severity === 'info' || entry.ok),
     checks,
     authorization: {
-      present: stageR.present,
+      present: gate.record !== null,
       status: facts.status,
       executionMode: facts.executionMode,
       model: facts.model,

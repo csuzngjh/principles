@@ -43,20 +43,21 @@ export function ExaminerReportPage(): React.ReactElement {
         fetchExaminerStudyStatus(studyId),
       ]);
       if (cancelled) return;
-      if (statusResponse.success) {
-        setReadOnly(statusResponse.data.readOnly === true);
-        const targetId = statusResponse.data.targetPrincipleId;
-        if (typeof targetId === 'string' && targetId !== '') {
-          const evidenceResponse = await fetchExaminerPrincipleEvidence(targetId);
-          if (!cancelled && evidenceResponse.success) setEvidence(evidenceResponse.data);
-        }
-      }
+      if (statusResponse.success) setReadOnly(statusResponse.data.readOnly === true);
+      // Commit the REPORT state first: the production-evidence aggregate is a
+      // separate, optional lane and must never hold the report behind its own
+      // slow request.
       if (!reportResponse.success) {
-        if (reportResponse.error?.includes('report_not_generated')) setMissing(true);
+        if (reportResponse.code === 'report_not_generated') setMissing(true);
         else setError(reportResponse.error ?? t('pages.examiner.errors.report'));
-        return;
+      } else {
+        setReport(reportResponse.data);
       }
-      setReport(reportResponse.data);
+      const targetId = statusResponse.success ? statusResponse.data.targetPrincipleId : null;
+      if (typeof targetId === 'string' && targetId !== '') {
+        const evidenceResponse = await fetchExaminerPrincipleEvidence(targetId);
+        if (!cancelled && evidenceResponse.success) setEvidence(evidenceResponse.data);
+      }
     })();
     return () => {
       cancelled = true;

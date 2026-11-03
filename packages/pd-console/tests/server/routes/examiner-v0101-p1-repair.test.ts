@@ -116,9 +116,10 @@ function readEvents(studyId: string): Record<string, unknown>[] {
   return fs.readFileSync(path.join(studyDirOf(studyId), 'events.jsonl'), 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
+const LAB_ROOT = path.join(repoRoot, 'scripts', 'dev', 'principle-learning-lab');
+
 function resolveRoots() {
-  const labRoot = path.join(repoRoot, 'scripts', 'dev', 'principle-learning-lab');
-  return resolveStudyRoots(labRoot, path.join(workspaceDir, '.pd', 'examiner'));
+  return resolveStudyRoots(LAB_ROOT, path.join(workspaceDir, '.pd', 'examiner'));
 }
 
 beforeEach(() => {
@@ -466,6 +467,26 @@ describe('P1-4 — atomic acceptance under the study lock + fail-loud ledger', (
     expect(new Date(settled.finishedAt).getTime()).toBeGreaterThanOrEqual(new Date(settled.acceptedAt).getTime());
   });
 
+  it('recovery takes the study write lock — a lock held by another writer leaves the run untouched', async () => {
+    const studyId = await createStudy();
+    appendConsoleRunEvent(resolveRoots(), studyDirOf(studyId), {
+      type: 'CONSOLE_RUN_ACCEPTED', schema: CONSOLE_RUN_SCHEMA, runId: mintRunId(), studyId,
+      mode: 'host-dry-run' as ConsoleRunMode, acceptedAt: new Date().toISOString(), pid: 999_999_999, owner: 'pd-console',
+    });
+    const lockPath = path.join(studyDirOf(studyId), 'runs', 'writer.lock');
+    fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+    fs.writeFileSync(lockPath, JSON.stringify({ owner: 'concurrent-writer', acquiredSeq: Date.now() }));
+    // Another writer holds the lock: recovery must NOT append ABANDONED, and
+    // must not throw. It re-reads and appends only once the lock is free.
+    const skipped = await recoverUnfinishedConsoleRuns(resolveRoots(), LAB_ROOT);
+    expect(skipped).toEqual([]);
+    expect(readEvents(studyId).filter((event) => event.type === 'CONSOLE_RUN_ABANDONED')).toHaveLength(0);
+    fs.rmSync(lockPath);
+    const recovered = await recoverUnfinishedConsoleRuns(resolveRoots(), LAB_ROOT);
+    expect(recovered).toHaveLength(1);
+    expect(readEvents(studyId).filter((event) => event.type === 'CONSOLE_RUN_ABANDONED')).toHaveLength(1);
+  });
+
   it('recovery skips a study with an unreadable ledger instead of treating it as no-runs', async () => {
     const studyId = await createStudy();
     appendConsoleRunEvent(resolveRoots(), studyDirOf(studyId), {
@@ -473,7 +494,7 @@ describe('P1-4 — atomic acceptance under the study lock + fail-loud ledger', (
       mode: 'host-dry-run' as ConsoleRunMode, acceptedAt: new Date().toISOString(), pid: 999_999_999, owner: 'pd-console',
     });
     fs.appendFileSync(path.join(studyDirOf(studyId), 'events.jsonl'), 'corrupt line\n');
-    const recovered = await recoverUnfinishedConsoleRuns(resolveRoots());
+    const recovered = await recoverUnfinishedConsoleRuns(resolveRoots(), LAB_ROOT);
     expect(recovered).toEqual([]);
   });
 });
@@ -535,7 +556,7 @@ describe('P1-6 — path and temp-file symlink safety', () => {
     const decoyEventsBefore = fs.readFileSync(path.join(decoy, 'events.jsonl'), 'utf8');
     fs.rmSync(studyDirOf(studyId), { recursive: true });
     fs.symlinkSync(decoy, studyDirOf(studyId), 'junction');
-    const recovered = await recoverUnfinishedConsoleRuns(resolveRoots());
+    const recovered = await recoverUnfinishedConsoleRuns(resolveRoots(), LAB_ROOT);
     expect(recovered).toEqual([]);
     // The route refuses the swapped study and never writes through the link.
     const status = await call('GET', `/studies/${studyId}`);

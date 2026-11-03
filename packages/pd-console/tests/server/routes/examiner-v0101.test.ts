@@ -419,6 +419,12 @@ describe('Examiner v0.10.1 — async execution contract (§12.3)', () => {
     // No authorization record exists in a fresh study → the dry-run FAILS its
     // prerequisite checklist loudly (that IS the Owner-facing answer).
     expect(['DRY_RUN_CHECKS_FAILED', 'DRY_RUN_CHECKS_PASSED']).toContain(settled.outcome);
+    // The status projection carries the SAME checklist the ledger recorded:
+    // the Owner sees per-check results, not just the aggregate outcome.
+    const status = await call('GET', `/studies/${created.studyId}`);
+    const listed = status.body.data.consoleRuns.runs.find((entry: any) => entry.runId === run.body.data.runId);
+    expect(listed).toBeTruthy();
+    expect((listed.checks as any[]).map((check) => check.id)).toContain('stage_r_authorization');
     // The ledger carries the full checklist with the zero-model-call guarantee.
     const events = readEvents(created.studyId);
     const settledEvent = events.find((event) => event.runId === run.body.data.runId && event.type !== 'CONSOLE_RUN_ACCEPTED');
@@ -463,10 +469,10 @@ describe('Examiner v0.10.1 — async execution contract (§12.3)', () => {
       mode: 'host-dry-run' as ConsoleRunMode, acceptedAt: new Date().toISOString(), pid: 999_999_999, owner: 'pd-console',
     });
     const roots = resolveStudyRootsFromLab();
-    const recovered = await recoverUnfinishedConsoleRuns(roots);
+    const recovered = await recoverUnfinishedConsoleRuns(roots, labRootFromLayout());
     expect(recovered).toEqual([{ studyId: created.studyId, runId: 'RUN-C-DEAD' }]);
     // Second recovery is a no-op — the run is terminal now.
-    expect(await recoverUnfinishedConsoleRuns(roots)).toEqual([]);
+    expect(await recoverUnfinishedConsoleRuns(roots, labRootFromLayout())).toEqual([]);
     const runs = readConsoleRuns(resolveStudyRootsFromLab(), studyDirOf(created.studyId));
     expect(runs.find((run) => run.runId === 'RUN-C-DEAD')?.status).toBe('ABANDONED');
     expect(runs.find((run) => run.runId === 'RUN-C-DEAD')?.outcome).toBe('RESULT_UNKNOWN');
@@ -638,12 +644,15 @@ function canonicalHash(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
 }
 
-/** Resolve study roots the way the route does (lab root from the module layout). */
-function resolveStudyRootsFromLab() {
-  // The tests run from the repository: the lab root is the scripts/dev lab.
+/** The lab root the route resolves (module layout, overridable for packaged installs). */
+function labRootFromLayout(): string {
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', '..');
-  const labRoot = process.env.PD_EXAMINER_LAB_ROOT
+  return process.env.PD_EXAMINER_LAB_ROOT
     ? path.resolve(process.env.PD_EXAMINER_LAB_ROOT)
     : path.join(repoRoot, 'scripts', 'dev', 'principle-learning-lab');
-  return resolveStudyRoots(labRoot, path.join(workspaceDir, '.pd', 'examiner'));
+}
+
+/** Resolve study roots the way the route does (lab root from the module layout). */
+function resolveStudyRootsFromLab() {
+  return resolveStudyRoots(labRootFromLayout(), path.join(workspaceDir, '.pd', 'examiner'));
 }

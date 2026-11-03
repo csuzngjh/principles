@@ -2089,7 +2089,8 @@
         },
         "runs": {
           "title": "Console runs (async contract)",
-          "empty": "No console runs yet — use Host dry-run or an F2 request."
+          "empty": "No console runs yet — use Host dry-run or an F2 request.",
+          "ledgerProblem": "The run ledger cannot be read — the history below is NOT trustworthy"
         }
       },
       "preflight": {

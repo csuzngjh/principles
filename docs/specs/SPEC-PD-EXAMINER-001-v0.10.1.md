@@ -123,7 +123,7 @@ Owner 应当能够：
 4. 查看生产行为证据和历史评估。
 5. 创建受控 A/B Study。
 6. 检查真实宿主和实验准备状态。
-7. 在授权后执行 OpenClaw 受控实验。
+7. 在授权后执行 OpenClaw 受控实验（本版本仅完成授权前置、Dry-run 与拒绝路径；真实 F2 执行保持 `F2_EXECUTION_NOT_ENABLED_THIS_ROUND`，需 Owner 另行授权）。
 8. 查看行为变化、负迁移、成本和证据限制。
 9. 进入现有 Principle 决策与生命周期工作流。
 

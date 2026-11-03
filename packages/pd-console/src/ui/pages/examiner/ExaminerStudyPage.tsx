@@ -251,6 +251,11 @@ export function ExaminerStudyPage(): React.ReactElement {
           )}
 
           <SectionTitle>{t('pages.examiner.study.runs.title')}</SectionTitle>
+          {consoleRuns?.ledgerProblem && (
+            <div className="mb-2 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive" data-testid="examiner-console-runs-problem">
+              {t('pages.examiner.study.runs.ledgerProblem')}: {consoleRuns.ledgerProblem.message}
+            </div>
+          )}
           <div className="grid gap-2 rounded-lg border bg-card p-4 text-xs" data-testid="examiner-console-runs">
             {runs.length === 0 && <p className="text-muted-foreground">{t('pages.examiner.study.runs.empty')}</p>}
             {runs.map((run) => (
@@ -264,6 +269,15 @@ export function ExaminerStudyPage(): React.ReactElement {
                   {run.outcome !== null && <span className="font-mono text-[10px]">{run.outcome}</span>}
                 </div>
                 {run.reason !== null && <div className="mt-1 text-muted-foreground">{run.reason}</div>}
+                {run.checks !== undefined && run.checks.length > 0 && (
+                  <ul className="mt-1 grid gap-0.5 font-mono text-[10px]" data-testid={`examiner-console-run-checks-${run.runId}`}>
+                    {run.checks.map((check) => (
+                      <li key={check.id} className={check.ok ? 'text-emerald-700 dark:text-emerald-400' : 'text-destructive'}>
+                        {check.ok ? 'PASS' : 'FAIL'} · {check.id}: {check.detail}
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             ))}
           </div>

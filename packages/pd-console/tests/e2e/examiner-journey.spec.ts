@@ -147,7 +147,9 @@ test.describe('Examiner v0.10.1 — four-page Owner journey (real browser, real 
     // Controlled A/B result blocks.
     await expect(page.getByTestId('examiner-report-itt')).toBeVisible();
     await expect(page.getByTestId('examiner-report-fidelity')).toBeVisible();
-    await expect(page.getByTestId('examiner-report-verification')).toContainText(/OK|FAILED/);
+    // A report whose replay verification fails is NOT an acceptable outcome:
+    // the scenario must fail, not pass on the FAILED label.
+    await expect(page.getByTestId('examiner-report-verification')).toContainText('OK');
     await expect(page.getByTestId('examiner-report-offline-note')).toContainText(/never real-host behavior|绝不代表真实宿主行为/);
 
     // The production observation is a SEPARATE lane on the same page.
@@ -187,14 +189,14 @@ test.describe('Examiner v0.10.1 — four-page Owner journey (real browser, real 
     await page.goto('/#/examiner');
     await expect(page.getByTestId('examiner-page-title')).toBeVisible({ timeout: 20_000 });
     // The committed acceptance studies appear in the list (repo checkout lab).
+    // The entry MUST be present: a conditional "if visible" would silently
+    // pass the scenario when the read-only boundary regressed.
     const historical = page.getByTestId('examiner-study-EXM-V09-ACC-ISO');
-    const historicalVisible = await historical.isVisible().catch(() => false);
-    if (historicalVisible) {
-      await historical.click();
-      await expect(page.getByTestId('examiner-study-readonly')).toBeVisible({ timeout: 20_000 });
-      await expect(page.getByTestId('examiner-run-button')).toBeDisabled();
-      await expect(page.getByTestId('examiner-report-button')).toBeDisabled();
-    }
+    await expect(historical).toBeVisible({ timeout: 20_000 });
+    await historical.click();
+    await expect(page.getByTestId('examiner-study-readonly')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId('examiner-run-button')).toBeDisabled();
+    await expect(page.getByTestId('examiner-report-button')).toBeDisabled();
     expect(errors, `errors:\n${errors.join('\n')}`).toEqual([]);
   });
 });

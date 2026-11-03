@@ -226,6 +226,7 @@ async function request<T = unknown>(
         }
       }
       let errorMessage = `HTTP ${response.status}`;
+      let errorCode: string | undefined;
       let nextAction: string | undefined;
       let reason: string | undefined;
       try {
@@ -237,6 +238,12 @@ async function request<T = unknown>(
           } else if (parsed.error) {
             errorMessage = parsed.error;
           }
+          // The human-readable message and the stable machine code are
+          // separate facts: keep the code so callers can branch on it
+          // (e.g. report_not_generated) without string-matching prose.
+          if (parsed.error) {
+            ({ error: errorCode } = parsed);
+          }
           if (parsed.reason) {
             ({ reason } = parsed);
           }
@@ -247,7 +254,7 @@ async function request<T = unknown>(
       } catch {
         // ignore parse errors
       }
-      return { success: false, error: errorMessage, reason, nextAction, status: response.status };
+      return { success: false, error: errorMessage, code: errorCode, reason, nextAction, status: response.status };
     }
 
     const raw = await response.json();
@@ -1817,7 +1824,13 @@ export interface ExaminerStudyStatusData {
   readOnly?: boolean;
   access?: string;
   productionSnapshot?: ExaminerProductionSnapshot | null;
-  consoleRuns?: { runs: ExaminerConsoleRun[]; current: ExaminerConsoleRun | null; asyncModes: string[] };
+  consoleRuns?: {
+    runs: ExaminerConsoleRun[];
+    current: ExaminerConsoleRun | null;
+    asyncModes: string[];
+    /** Present when the ledger is corrupt/unreadable (the runs are NOT zero). */
+    ledgerProblem?: { code: string; message: string } | null;
+  };
 }
 
 export interface ExaminerPreflightCheck {
@@ -2037,6 +2050,13 @@ export async function fetchExaminerHostReadiness(): Promise<ApiResponse<Examiner
   });
 }
 
+export interface ExaminerConsoleRunCheck {
+  id: string;
+  severity: string;
+  ok: boolean;
+  detail: string;
+}
+
 export interface ExaminerConsoleRun {
   runId: string;
   mode: string;
@@ -2045,6 +2065,8 @@ export interface ExaminerConsoleRun {
   finishedAt: string | null;
   outcome: string | null;
   reason: string | null;
+  /** The dry-run checklist recorded on the terminal ledger event. */
+  checks?: ExaminerConsoleRunCheck[];
 }
 
 export interface ExaminerProductionSnapshot {

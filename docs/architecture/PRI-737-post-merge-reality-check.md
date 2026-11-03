@@ -136,7 +136,7 @@ Runtime-v2 无对 Evolution Worker 的依赖。确认项：
 
 ## 1. CI（最新 main `cbee081a6`，权威门禁）
 
-`gh api .../commits/cbee081a6/check-runs` → 25 项：**23 success / 1 failure / 2 skipped**（skipped 为 `PR <-> Linear link`、`CI failure reminder`，按设计跳过）。
+`gh api .../commits/cbee081a6/check-runs` → 33 项：**22 success / 1 failure / 10 skipped**（skipped 为 `PR <-> Linear link` ×5、`CI failure reminder` ×5，按设计跳过；分项合计与总数一致）。
 
 success 项含：`Verify Merge Gate`、`Lint`、`Build OpenClaw Plugin`、`Release Build Parity`、`TypeScript Check (pd-console)`、`Test principles-core` / `pd-cli` / `pd-console` / `pd-companion` / `host-runtime` / `codex-adapter` / `scripts` / `create-principles-disciple`、`Test OpenClaw Plugin (unit)` / `(integration)` / `(coverage)`、`Test host runtime parity`、`Test packaged install smoke`、`Test release asset smoke`、`Analyze (javascript-typescript)`。
 

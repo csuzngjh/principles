@@ -29,8 +29,8 @@ import type { ReceiptEvidenceCoverage } from '@principles/core/runtime-v2';
 import type { PromptInjectionRouteSummaryWire } from '../../shared/prompt-injection-contract.js';
 import type { PrincipleReceipts } from './ReceiptsConsoleModel.js';
 import { ReceiptsConsoleModel } from './ReceiptsConsoleModel.js';
-import { PrinciplesConsoleModel } from './PrinciplesConsoleModel.js';
-import { ActivationsConsoleModel } from './ActivationsConsoleModel.js';
+import { PrinciplesConsoleModel, CorePrincipleNotGovernedError } from './PrinciplesConsoleModel.js';
+import { ActivationsConsoleModel, type ActivationsResponse } from './ActivationsConsoleModel.js';
 
 /** Bounded per-kind sample shown on the evaluation page (audit stays paged). */
 const AUDIT_SAMPLE_LIMIT = 5;
@@ -201,14 +201,35 @@ export class ExaminerEvidenceModel {
 
     // 1. Ledger facts (the authoritative principle asset source).
     const principlesModel = new PrinciplesConsoleModel(this.workspaceDir);
-    const detailOutput = await principlesModel.getPrincipleDetail(principleId);
+    let detailOutput: Awaited<ReturnType<PrinciplesConsoleModel['getPrincipleDetail']>>;
+    try {
+      detailOutput = await principlesModel.getPrincipleDetail(principleId);
+    } catch (error) {
+      // Core principles are not workspace-governed objects: they have no
+      // production-evidence aggregate here, so the route answers the same
+      // 404 as any other principle absent from the workspace ledger.
+      if (error instanceof CorePrincipleNotGovernedError) return null;
+      throw error;
+    }
     if (!detailOutput) return null;
     const detail = detailOutput.principle;
 
     // 2. Activation lifecycle rows (prompt + RuleCode lanes) — full reuse of
-    //    the activations read model, filtered to this principle.
+    //    the activations read model, filtered to this principle. A read error
+    //    degrades the ACTIVATION lane only: the ledger facts below still
+    //    answer, and the lane carries reason + nextAction (never "zero").
     const activationsModel = new ActivationsConsoleModel(this.workspaceDir);
-    const activations = await activationsModel.getActivations();
+    let activations: ActivationsResponse;
+    try {
+      activations = await activationsModel.getActivations();
+    } catch (error) {
+      activations = {
+        activations: [],
+        status: 'degraded',
+        reason: `activation read failed: ${error instanceof Error ? error.message : String(error)}`,
+        nextAction: 'check workspace .pd/state.db readability and the activation schema',
+      };
+    }
     const rows = activations.activations.filter((row) => row.principleId === principleId);
     const activation: ExaminerActivationProjection = {
       status: activations.status,
