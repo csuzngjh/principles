@@ -158,6 +158,34 @@ export function syncMcpServerVersionMirror(cwd) {
   return true;
 }
 
+/**
+ * Component mirror declarations — the ONE authority for "which non
+ * package.json/CHANGELOG.md files does release materialization rewrite"
+ * (SPEC §15.1; SPEC-PD-MCP-GATE4-001 §9.3).
+ *
+ * The Version-PR allowlist and the reproduction steps are derived from this
+ * list, and so is the materialization command. A new mirror therefore cannot
+ * be shipped by the bot while being rejected by the guard — the 2026-11-03
+ * drift was exactly that: syncMcpServerVersionMirror started rewriting
+ * `pd-mcp-server/src/version.ts`, but the allowlist stayed a hand-written
+ * list, so the generated Version Packages PR failed as mode=normal.
+ */
+export const COMPONENT_MIRRORS = [
+  { target: 'packages/openclaw-plugin/openclaw.plugin.json', sync: syncPluginVersionMirror },
+  { target: 'packages/pd-mcp-server/src/version.ts', sync: syncMcpServerVersionMirror },
+];
+
+const MIRROR_TARGETS = new Set(COMPONENT_MIRRORS.map((m) => m.target));
+
+/** Run every declared mirror sync; returns the targets that were rewritten. */
+export function syncComponentVersionMirrors(cwd) {
+  const synced = [];
+  for (const mirror of COMPONENT_MIRRORS) {
+    if (mirror.sync(cwd)) synced.push(mirror.target);
+  }
+  return synced;
+}
+
 function extractArchive(repoRoot, sha, dest) {
   fs.mkdirSync(dest, { recursive: true });
   // Feed git archive straight into tar's stdin (cwd-relative, no absolute
@@ -201,11 +229,14 @@ function normalizeChangelogText(text) {
     .replace(/ \[([0-9a-f]{7,40})\]/gm, '');
 }
 
-/** Files a Version PR may touch (SPEC §12.2). */
+/**
+ * Files a Version PR may touch (SPEC §12.2). Mirror targets come from the
+ * COMPONENT_MIRRORS declarations above — never a second hand-written list.
+ */
 export function isAllowedVersionPrPath(relPath) {
   if (relPath === 'package-lock.json') return true;
   if (relPath.startsWith('.changeset/')) return true;
-  if (relPath === 'packages/openclaw-plugin/openclaw.plugin.json') return true;
+  if (MIRROR_TARGETS.has(relPath)) return true;
   const m = /^packages\/([^/]+)\/(.+)$/.exec(relPath);
   if (!m) return false;
   return m[2] === 'package.json' || m[2] === 'CHANGELOG.md';
@@ -283,14 +314,15 @@ export async function reproduceVersionMaterialization({ repoRoot, baseSha, headS
     }
 
     // The same materialization the bot runs (SPEC §12.3): changeset version
-    // then the approved mirror sync. Lockfile materialization is validated
-    // structurally instead of regenerated (no network in guards).
+    // then EVERY declared component mirror sync — one declaration, so a new
+    // mirror cannot be missed here either. Lockfile materialization is
+    // validated structurally instead of regenerated (no network in guards).
     const versionRun = runChangesetVersion(tmp);
     if (versionRun.status !== 0) {
       reasons.push(`changeset version failed in reproduction: ${versionRun.stderr.slice(0, 300)}`);
       return { reproducible: false, identity: 'normal', reasons, releases: [] };
     }
-    syncPluginVersionMirror(tmp);
+    syncComponentVersionMirrors(tmp);
 
     // 1) changed file set equality with what materialization produced
     for (const rel of changed) {
