@@ -38,7 +38,7 @@ import process from 'node:process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { appendEventLogLine, redactTelemetryString, isRuleHostEvaluatedEventData } from '@principles/core/runtime-v2';
 import type { HostEventEmitter, HostEventResult } from '@principles/core/host';
-import { createProductionHostRuntime, createWorkbuddyRuleContextProvider, loadPdConfigForPlugin, parseOwnerStatementPrefix, assessWorkbuddyLiveKeyword, resolveSharedCorrectionKeywordStoreForDetection, admitTrustedWorkbuddyLiveCorrection, ensureGovernanceDiagnosticianTask } from '@principles/host-runtime';
+import { createProductionHostRuntime, createWorkbuddyRuleContextProvider, loadPdConfigForPlugin, parseOwnerStatementPrefix, assessWorkbuddyCorrectionCandidate, resolveSharedCorrectionKeywordStoreForDetection, admitTrustedWorkbuddyLiveCorrection, ensureGovernanceDiagnosticianTask } from '@principles/host-runtime';
 import { computeFeatureFlagsFromConfig } from '@principles/core/runtime-v2';
 import { WorkBuddyHooksHostAdapter } from './host-adapter.js';
 import { WORKBUDDY_TOOL_SEMANTICS } from './tool-semantics.js';
@@ -302,13 +302,14 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
           typeof prompt === 'string' && !explicitReserved) {
         // AUDIT-P3-01: 预检与 admitTrustedWorkbuddyLiveCorrection 内部使用同一份
         // 共享 live 词库（seed ∪ learned）——预检不会漏掉学习词，也不会比准入
-        // 更宽。startsWith 预过滤与 matched 判据不变（无 LLM、无 transcript）。
-        const matched = assessWorkbuddyLiveKeyword(
+        // 更宽。startsWith 预过滤保持（SPEC P-5）；歧义候选只落 pending，
+        // 同步 hook 内零 LLM。
+        const matched = assessWorkbuddyCorrectionCandidate(
           prompt,
           event.context.sessionId,
           resolveSharedCorrectionKeywordStoreForDetection(resolution.workspaceDir),
         );
-        if (matched.matched) {
+        if (matched.kind !== 'none') {
           const admitted = admitTrustedWorkbuddyLiveCorrection({
             workspaceDir: resolution.workspaceDir,
             rawEvent: parsed,
@@ -343,12 +344,35 @@ export async function processWorkbuddyHookInvocation(rawStdin: string, channelEv
                     });
                   } catch { /* Evidence-log failure must not block the prompt. */ }
                 }
+              } else if (outcome.disposition === 'pending_llm_review') {
+                // Ambiguous Stage-1 candidate persisted for the worker's
+                // bounded Stage-2 step. No Pain, no task, no quota consumed.
+                try {
+                  appendEventLogLine(path.join(resolution.workspaceDir, '.state'), {
+                    ts: new Date().toISOString(),
+                    type: 'workbuddy_keyword_pending_review',
+                    category: 'detected',
+                    sessionId: event.context.sessionId,
+                    data: { hostKind: 'workbuddy', outcome: outcome.disposition, duplicate: outcome.duplicate },
+                  });
+                } catch { /* Evidence-log failure must not block the prompt. */ }
+              } else if (outcome.disposition === 'abandoned') {
+                // P1 review round 3: an automatic correction needs REAL
+                // persisted behavior evidence. WorkBuddy has no observation
+                // store, so the shared ingress correctly settles as
+                // observation_only — no Pain, no task, no quota, and no
+                // fabricated `pain_event:` trace.
+                autoDiagnostics.push(diagnostic(
+                  'skipped',
+                  'workbuddy_keyword_observation_only:' + outcome.reason,
+                  'No persisted behavior evidence exists for this automatic correction; no Pain was created.',
+                ));
               } else if (outcome.disposition === 'rate_limited') {
                 autoDiagnostics.push(diagnostic('degraded', 'workbuddy_keyword_rate_limited', 'Per-session strong signal limit reached; no new Pain was created.'));
               }
             }
           }
-        } else if (matched.reason === 'prompt_too_large') {
+        } else if (matched.reason === 'prompt_too_large' && matched.kind === 'none') {
           autoDiagnostics.push(diagnostic('degraded', 'workbuddy_keyword_prompt_too_large', 'Oversized prompt was not scanned or persisted as a keyword signal.'));
         }
       }

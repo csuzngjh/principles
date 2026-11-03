@@ -44,6 +44,12 @@ export type RecordOwnerStatementResult =
      * rollout to promote from). The receipt discloses it instead of failing.
      */
     promotionDegraded?: string;
+    /**
+     * PainIngress warning when the Owner statement legitimately degraded
+     * (e.g. ingestion OFF → no persisted observation to use as behavior
+     * evidence). The Pain + task still exist; the receipt discloses the basis.
+     */
+    ingressWarning?: string;
   }
   | {
     status: 'rejected';
@@ -125,6 +131,11 @@ export async function recordExplicitOwnerStatement(args: {
   if (outcome.disposition === 'rate_limited') {
     return { status: 'rejected', reason: 'rate_limited', nextAction: 'The per-root-session correction quota (5/hour) is exhausted; resubmit later — the statement was NOT recorded.' };
   }
+  if (outcome.disposition !== 'admitted' && outcome.disposition !== 'already_admitted') {
+    // An explicit Owner statement bypasses keyword detection entirely, so it
+    // can never legitimately land in the Stage-2 review state machine.
+    return { status: 'rejected', reason: 'continuation_failed', nextAction: `unexpected admission disposition for an explicit statement: ${outcome.disposition}` };
+  }
 
   // Promotion runs BEFORE the task enqueue (deliberate): the durable task is
   // the receipt's hard guarantee, and promoting first closes the window in
@@ -169,5 +180,6 @@ export async function recordExplicitOwnerStatement(args: {
     disposition: outcome.disposition === 'already_admitted' ? 'already_admitted' : 'admitted',
     logicalObservationKey: candidate.logicalObservationKey,
     ...(promotionDegraded !== undefined ? { promotionDegraded } : {}),
+    ...(ensured.ingressWarning !== undefined ? { ingressWarning: ensured.ingressWarning } : {}),
   };
 }

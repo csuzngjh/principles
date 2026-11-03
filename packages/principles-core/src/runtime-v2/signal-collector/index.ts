@@ -10,3 +10,13 @@ export {
   type ClassifierPayloadPath,
 } from './llm-stage.js';
 export { collectSync, mapLlmResultToOutput, buildEvidence } from './signal-collector.js';
+export {
+  STAGE2_CONFIRM_THRESHOLD,
+  STAGE2_NONE_THRESHOLD,
+  STAGE2_MAX_ATTEMPTS,
+  PENDING_CANDIDATE_TTL_MS,
+  evaluateStage2ConfidenceGate,
+  type Stage2GateVerdict,
+  type Stage2GateResult,
+  type Stage2Thresholds,
+} from './confidence-gate.js';

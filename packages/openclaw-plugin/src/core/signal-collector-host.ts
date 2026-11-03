@@ -21,11 +21,7 @@
 import {
   collectSync,
   mapLlmResultToOutput,
-  buildLlmPrompt,
-  SIGNAL_CLASSIFIER_SYSTEM_PROMPT,
-  resolveLlmClassificationPayload,
-  safeStringifyPreview,
-  PiAiRuntimeAdapter,
+  evaluateStage2ConfidenceGate,
   type UnifiedKeywordStore,
   type SignalCollectorConfig,
   type SignalCollectorOutput,
@@ -33,6 +29,7 @@ import {
 import {
   GOVERNANCE_STRONG_PAIN_SCORE,
   GOVERNANCE_STRONG_RATE_LIMIT_PER_HOUR,
+  createSignalLlmClassifier,
   deriveProductionCorrectionPainIdentity,
 } from '@principles/host-runtime';
 import { createHash } from 'node:crypto';
@@ -309,6 +306,14 @@ export class SignalCollectorHost {
       }
       const llmDetectedAt = new Date().toISOString();
       if (llmResult) {
+        // SPEC v0.3 §3.3 P-3：低置信度结果既不能准入，也不能当 NONE 结论。
+        const gate = evaluateStage2ConfidenceGate(llmResult);
+        if (gate.verdict === 'pending_low_confidence') {
+          SystemLogger.log(this.wctx.workspaceDir, 'SIGNAL_LOW_CONFIDENCE_QUEUED',
+            `confidence=${String(gate.confidence)} below threshold; queued for batch confirmation`);
+          this.queueUnconfirmedForBatch(pending, 'low_confidence');
+          return;
+        }
         confirmed = mapLlmResultToOutput(llmResult, pending.text, pending.sessionId, this.config, llmDetectedAt);
       } else {
         // 超时/不可用返回 null 同样没有 verdict —— 入队一次后结束（rc-1，降级不静默）。
@@ -542,6 +547,12 @@ export class SignalCollectorHost {
       return { disposition: 'failed', detail: `classifier threw: ${String(e)}` };
     }
     if (!llmResult) return { disposition: 'failed', detail: 'classifier unavailable' };
+    // SPEC v0.3 §3.3 P-3：低置信度不是终态——failed 让调用方 attempts++，
+    // 达上限转 abandoned；不确定性的保留与 LLM 通道故障使用同一状态机。
+    const gate = evaluateStage2ConfidenceGate(llmResult);
+    if (gate.verdict === 'pending_low_confidence') {
+      return { disposition: 'failed', detail: `low_confidence (${String(gate.confidence)})` };
+    }
     const confirmed = mapLlmResultToOutput(llmResult, item.excerpt, item.sessionId, this.config, new Date().toISOString());
     // PRI-2053 归因边界：恢复侧没有 Stage1 快照，只能使用入队时已验证的词集。
     // 旧格式队列项无法恢复当时的类别 → 保守降级为空集：不把推测类别当作事实，
@@ -804,77 +815,26 @@ export function createSignalLlmClassifierFromConfig(
       return null;
     }
 
-    const adapter = new PiAiRuntimeAdapter({
-      provider: cfg.provider,
-      model: cfg.model,
-      apiKeyEnv: cfg.apiKeyEnv,
-      timeoutMs: cfg.timeoutMs ?? 30_000,
-      // PRI-788 G3: profile 的 maxTokens 透传（思考型本地模型小 token 预算会返回空）
-      maxTokens: cfg.maxTokens ?? undefined,
-      baseUrl: cfg.baseUrl ?? undefined,
-      workspace: wctx.workspaceDir,
-      // Stage2 只产 5 个字段的 JSON。实测同一 profile / 同 5 条真实消息：
-      // tool_call_first 与 json_mode_first 都只需 1 次 HTTP 请求（合计 36.2s vs
-      // 11.5s，单次最高 23.9s vs 3.5s）——差别在尾部延迟而不在往返次数。
-      // json_mode_first 也不依赖 provider 的 tool-call 支持；修复上限收到 1 次
-      // （超时与重试同样占用与主模型共享的端点额度，不是本地 CPU）。
-      outputPathStrategy: 'json_mode_first',
-      maxRepairAttempts: 1,
-    });
-
-    // 包装成 SignalLlmClassifier:内部调 startRun/pollRun/fetchOutput。
-    // Runtime contract (MVP_CORE_LOOP_CONTRACT INV-01): startRun 携带
-    // outputSchemaRef='signal-classification-output-v1',adapter 负责 JSON
-    // extraction + schema validation(+bounded repair),分类器 canonical 路径
-    // 直接消费 validated structured payload;string payload 仅作其他 adapter
-    // 的 compatibility fallback(不再有 object→stringify→parse 补丁路径)。
-    const classifier: SignalLlmClassifier = async (text: string, _promptTemplate: string) => {
-      void _promptTemplate;  // 用 core 的 buildLlmPrompt(标准化的),不用外部传入
-      const prompt = buildLlmPrompt(text);
-      try {
-      const handle = await adapter.startRun({
-        agentSpec: { agentId: 'signal-collector', schemaVersion: '1' },
-        inputPayload: { prompt },
-        contextItems: [],
+    // B4: the adapter call lives in @principles/host-runtime so Codex and
+    // WorkBuddy workers consume the SAME Stage-2 implementation.
+    const shared = createSignalLlmClassifier(
+      {
+        provider: cfg.provider,
+        model: cfg.model,
+        apiKeyEnv: cfg.apiKeyEnv,
         timeoutMs: cfg.timeoutMs ?? 30_000,
-        outputSchemaRef: 'signal-classification-output-v1',
-        // PRI-633: 角色声明走 system 通道,消息只含任务数据。
-        systemPrompt: SIGNAL_CLASSIFIER_SYSTEM_PROMPT,
-      });
-        let status = await adapter.pollRun(handle.runId);
-        const deadline = Date.now() + (cfg.timeoutMs ?? 30_000);
-        while (status.status === 'running' && Date.now() < deadline) {
-          await new Promise((r) => setTimeout(r, 500));
-          status = await adapter.pollRun(handle.runId);
-        }
-        if (status.status !== 'succeeded') {
-          SystemLogger.log(wctx.workspaceDir, 'SIGNAL_LLM_TIMEOUT', JSON.stringify({ status: status.status }));
-          return null;
-        }
-        const output = await adapter.fetchOutput(handle.runId);
-        const resolved = resolveLlmClassificationPayload(output?.payload);
-
-        if (resolved.path === 'structured' && resolved.value) {
-          return resolved.value;
-        }
-        if ((resolved.path === 'legacy_string' || resolved.path === 'legacy_envelope') && resolved.value) {
-          SystemLogger.log(wctx.workspaceDir, 'SIGNAL_LLM_LEGACY_STRING_PAYLOAD',
-            `adapter payload path=${resolved.path} (no outputSchemaRef support); parsed via legacy path`);
-          return resolved.value;
-        }
-
-        // invalid — 带 bounded preview 降级 (rc-8/rc-9,ISSUE-022: 不可诊断的
-        // PARSE_FAIL 是审计开放项,preview 必须有界)。
-        SystemLogger.log(wctx.workspaceDir, 'SIGNAL_LLM_PARSE_FAIL',
-          `unusable classifier payload path=${resolved.path}: ${safeStringifyPreview(output?.payload)}`);
-        return null;
-      } catch (e) {
-        SystemLogger.log(wctx.workspaceDir, 'SIGNAL_LLM_FAILED', String(e).slice(0, 200));
-        return null;
-      }
+        // PRI-788 G3: profile 的 maxTokens 透传（思考型本地模型小 token 预算会返回空）
+        ...(cfg.maxTokens !== null && cfg.maxTokens !== undefined ? { maxTokens: cfg.maxTokens } : {}),
+        ...(cfg.baseUrl !== null && cfg.baseUrl !== undefined ? { baseUrl: cfg.baseUrl } : {}),
+      },
+      wctx.workspaceDir,
+      { log: (event, detail) => SystemLogger.log(wctx.workspaceDir, event, detail) },
+    );
+    // Keep the historical two-argument classifier signature at this boundary.
+    return async (text: string, _promptTemplate: string) => {
+      void _promptTemplate;
+      return shared(text);
     };
-
-    return classifier;
   } catch (e) {
     logger?.warn?.(`[PD:Signal] createSignalLlmClassifierFromConfig failed: ${String(e)}`);
     return null;

@@ -66,6 +66,31 @@ inputs:
     required: false
     type: string
     default: ''
+# Evidence-derived leg results (PD Release G3-R3 H1). The caller aggregates
+# these instead of inferring "packed" from step success: a leg that resolved
+# PRESENT_MATCH / PRESENT_PRIOR packed nothing at all.
+outputs:
+  leg_status:
+    description: 'PACKED | SKIPPED_PRESENT | FAILED | UNKNOWN — classified from observed evidence, never from job success'
+    value: ${{ steps.summary.outputs.leg_status }}
+  leg_reason:
+    description: 'Why the leg reached that status (empty when the evidence is complete)'
+    value: ${{ steps.summary.outputs.leg_reason }}
+  leg_pack_attempted:
+    description: "true when this leg entered the candidate-pack path (registry state ABSENT)"
+    value: ${{ steps.summary.outputs.leg_pack_attempted }}
+  npm_name:
+    description: 'npm package name for this leg'
+    value: ${{ inputs.npm_name }}
+  package_version:
+    description: 'Version committed at the cohort SHA'
+    value: ${{ steps.exact.outputs.version }}
+  registry_status:
+    description: 'registry-exact status for this exact name@version'
+    value: ${{ steps.exact.outputs.status }}
+  candidate_sha512_hex:
+    description: 'SHA-512 (hex) of the verified candidate, empty when no candidate was packed'
+    value: ${{ steps.candidate.outputs.sha512_hex }}
 
 runs:
   using: composite
@@ -353,6 +378,7 @@ runs:
         test -s "$FINAL_TARBALL"
 
     - name: Publish exact committed version
+      id: publish
       if: ${{ steps.exact.outputs.status == 'ABSENT' }}
       shell: bash
       env:
@@ -411,27 +437,71 @@ runs:
         fi
 
     - name: Summary
+      id: summary
+      # Evidence-derived (PD Release G3-R3 H1): the status is classified from
+      # the candidate file, its SHA-512 and its packed manifest — never from
+      # "this step ran". `always()` makes a failed leg report UNKNOWN instead
+      # of silently omitting the line.
+      if: always()
       shell: bash
       env:
+        TOOLS_DIR: ${{ inputs.tools_dir }}
+        REGISTRY_STATUS: ${{ steps.exact.outputs.status }}
+        PACKAGE_NAME: ${{ inputs.npm_name }}
+        PACKAGE_VERSION: ${{ steps.exact.outputs.version }}
+        COHORT: ${{ inputs.cohort_sha }}
+        CANDIDATE_TARBALL: ${{ steps.candidate.outputs.tarball }}
         CANDIDATE_SHA512_HEX: ${{ steps.candidate.outputs.sha512_hex }}
+        DRY_RUN: ${{ inputs.dry_run }}
+        PUBLISH_OUTCOME: ${{ steps.publish.outcome }}
       run: |
-        echo "## Release Step Summary" >> "$GITHUB_STEP_SUMMARY"
-        echo "" >> "$GITHUB_STEP_SUMMARY"
-        echo "| Item | Value |" >> "$GITHUB_STEP_SUMMARY"
-        echo "|------|-------|" >> "$GITHUB_STEP_SUMMARY"
-        echo "| Package | \`${{ inputs.npm_name }}\` |" >> "$GITHUB_STEP_SUMMARY"
-        echo "| Version | \`${{ steps.exact.outputs.version }}\` (committed at cohort SHA) |" >> "$GITHUB_STEP_SUMMARY"
-        echo "| Registry state | \`${{ steps.exact.outputs.status }}\` |" >> "$GITHUB_STEP_SUMMARY"
-        echo "| Cohort | \`${{ inputs.cohort_sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
-        echo "| Tools | \`${{ inputs.tools_dir }}\` |" >> "$GITHUB_STEP_SUMMARY"
-        if [ -n "$CANDIDATE_SHA512_HEX" ]; then
-          echo "| Candidate SHA-512 (hex) | \`$CANDIDATE_SHA512_HEX\` |" >> "$GITHUB_STEP_SUMMARY"
-        fi
-        echo "" >> "$GITHUB_STEP_SUMMARY"
-        if [ "${{ steps.exact.outputs.status }}" = "ABSENT" ] && [ "${{ inputs.dry_run }}" = "true" ]; then
-          echo "REHEARSAL ONLY — control path exercised and artifact verified, but NO npm upload happened; this is not evidence of a published version." >> "$GITHUB_STEP_SUMMARY"
-        elif [ "${{ steps.exact.outputs.status }}" = "ABSENT" ]; then
-          echo "Published exact committed version to npm." >> "$GITHUB_STEP_SUMMARY"
-        else
-          echo "npm upload skipped (${{ steps.exact.outputs.status }}) — closing steps reconciled." >> "$GITHUB_STEP_SUMMARY"
-        fi
+        set -euo pipefail
+        LEG_OUT=$(node "$TOOLS_DIR/scripts/release/preflight-summary.mjs" leg \
+          --registry-status "$REGISTRY_STATUS" \
+          --tarball "$CANDIDATE_TARBALL" \
+          --sha512-hex "$CANDIDATE_SHA512_HEX" \
+          --package-name "$PACKAGE_NAME" \
+          --package-version "$PACKAGE_VERSION" \
+          --cohort "$COHORT" \
+          --github-output "$GITHUB_OUTPUT")
+        echo "$LEG_OUT"
+        LEG_STATUS=$(printf '%s\n' "$LEG_OUT" | sed -n 's/^leg_status=//p')
+        LEG_REASON=$(printf '%s\n' "$LEG_OUT" | sed -n 's/^leg_reason=//p')
+        {
+          echo "## Release Step Summary"
+          echo ""
+          echo "| Item | Value |"
+          echo "|------|-------|"
+          echo "| Package | \`$PACKAGE_NAME\` |"
+          echo "| Version | \`$PACKAGE_VERSION\` (committed at cohort SHA) |"
+          echo "| Registry state | \`$REGISTRY_STATUS\` |"
+          echo "| Leg status | \`$LEG_STATUS\` |"
+          echo "| Evidence | $LEG_REASON |"
+          echo "| Cohort | \`$COHORT\` |"
+          if [ -n "${CANDIDATE_SHA512_HEX:-}" ]; then
+            echo "| Candidate SHA-512 (hex) | \`$CANDIDATE_SHA512_HEX\` |"
+          fi
+          echo ""
+          case "$LEG_STATUS" in
+            PACKED)
+              echo "Candidate artifact independently re-verified in this step (file + SHA-512 + name/version/cohort)."
+              if [ "$DRY_RUN" = "true" ]; then
+                if [ "$PUBLISH_OUTCOME" = "success" ]; then
+                  echo "REHEARSAL ONLY — the control path and artifact were verified, but NO npm upload happened; this is not evidence of a published version."
+                else
+                  echo "REHEARSAL DID NOT COMPLETE — the candidate artifact is verified, but the control path did not reach its end; no packaging claim is made."
+                fi
+              elif [ "$PUBLISH_OUTCOME" = "success" ]; then
+                echo "Published exact committed version to npm."
+              else
+                echo "Candidate verified, but the npm upload did NOT complete (see the failed publish step) — this is not evidence of a published version."
+              fi
+              ;;
+            SKIPPED_PRESENT)
+              echo "npm upload skipped ($REGISTRY_STATUS) — closing steps reconciled."
+              ;;
+            *)
+              echo "Candidate artifact could NOT be verified ($LEG_REASON); no packaging-success claim is made."
+              ;;
+          esac
+        } >> "$GITHUB_STEP_SUMMARY"

@@ -51,7 +51,7 @@ function makeWorkspace(): string {
 /** 小睡确保共享 store 的 mtime 缓存判定稳定（两次磁盘写在同 ms 内不碰撞）。 */
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-describe('PRI-812 earned-high promotion/demotion round-trip (real files)', () => {
+describe('learned keyword gate (PRI-788 G3 reversed, SPEC v0.3 §3.2.3) — real files', () => {
   let workspaceDir: string;
   let stateDir: string;
 
@@ -64,7 +64,7 @@ describe('PRI-812 earned-high promotion/demotion round-trip (real files)', () =>
     fs.mkdirSync(stateDir, { recursive: true });
   });
 
-  it('llm term: TP 2→ambiguous, TP 3→high (promotion via real store file)', () => {
+  it('llm term stays ambiguous at TP 2 and TP 3 (no direct STRONG promotion)', () => {
     const learner = CorrectionCueLearner.get(stateDir);
     learner.add({ term: LEARNED_TERM, weight: 0.5, source: 'llm' });
 
@@ -77,12 +77,11 @@ describe('PRI-812 earned-high promotion/demotion round-trip (real files)', () =>
 
     learner.recordTruePositive(LEARNED_TERM); // TP = 3
     const tp3 = liveStore.resolve().terms[LEARNED_TERM];
-    expect(tp3?.precision).toBe('high');
+    expect(tp3?.precision).toBe('ambiguous');
     expect(tp3?.source).toBe('llm_learned');
   });
 
-  it('earned high → confirmed FP → store reload → ambiguous (demotion, §10)', async () => {
-    // ── 升级：llm 词 TP=3, FP=0 → high ─────────────────────────────────────
+  it('learned term never enters the STRONG fast path; a confirmed FP keeps it ambiguous', async () => {
     const learner = CorrectionCueLearner.get(stateDir);
     learner.add({ term: LEARNED_TERM, weight: 0.5, source: 'llm' });
     learner.recordTruePositive(LEARNED_TERM);
@@ -92,7 +91,7 @@ describe('PRI-812 earned-high promotion/demotion round-trip (real files)', () =>
     const liveStore = createLiveSignalKeywordStore({ workspaceDir } as never);
     const storeProvider = () => liveStore.resolve();
 
-    // 生产检测路径确认 high 投影真实生效：确定性 STRONG 快速路径
+    // SPEC v0.3 §3.2.3: TP≥3 does NOT grant STRONG; detectSync must not emit Pain.
     const host = new SignalCollectorHost({ workspaceDir, stateDir } as never, {
       keywordStoreProvider: storeProvider,
       llmClassifier: vi.fn(),
@@ -100,7 +99,7 @@ describe('PRI-812 earned-high promotion/demotion round-trip (real files)', () =>
     });
     host.detectSync(`请${LEARNED_TERM}，不要直接上线`, 'sess-roundtrip', 'user', { turnIndex: 1 });
     await sleep(20);
-    expect(emitPainDetectedEvent).toHaveBeenCalledTimes(1);
+    expect(emitPainDetectedEvent).not.toHaveBeenCalled();
 
     const beforeEntry = liveStore.resolve().terms[LEARNED_TERM];
     const beforeKeyword = learner.getStore().keywords.find((k) => k.term === LEARNED_TERM);
@@ -109,7 +108,7 @@ describe('PRI-812 earned-high promotion/demotion round-trip (real files)', () =>
       fp: beforeKeyword?.falsePositiveCount ?? 0,
       precision: beforeEntry?.precision,
     };
-    expect(before).toEqual({ tp: 3, fp: 0, precision: 'high' });
+    expect(before).toEqual({ tp: 3, fp: 0, precision: 'ambiguous' });
 
     // ── 反证：observer FP-only 裁决经生产入口 applyResult 进入 learner ──────
     await sleep(20);
@@ -159,7 +158,7 @@ describe('PRI-812 earned-high promotion/demotion round-trip (real files)', () =>
     learner.add({ term: OWNER_TERM, weight: 0.9, source: 'user' });
 
     const liveStore = createLiveSignalKeywordStore({ workspaceDir } as never);
-    expect(liveStore.resolve().terms[LEARNED_TERM]?.precision).toBe('high');
+    expect(liveStore.resolve().terms[LEARNED_TERM]?.precision).toBe('ambiguous');
     expect(liveStore.resolve().terms[OWNER_TERM]?.precision).toBe('high');
     expect(liveStore.resolve().terms[OWNER_TERM]?.source).toBe('owner_promoted');
 
@@ -188,7 +187,7 @@ describe('PRI-812 earned-high promotion/demotion round-trip (real files)', () =>
       'utf-8',
     );
     const liveStore = createLiveSignalKeywordStore({ workspaceDir } as never);
-    // earned precision 只看 TP/FP：hitCount=7 的陈旧值既不阻止升 high 也不参与决策
-    expect(liveStore.resolve().terms[LEARNED_TERM]?.precision).toBe('high');
+    // hitCount=7 的陈旧值不参与决策；学习词在任何计数下都只作候选
+    expect(liveStore.resolve().terms[LEARNED_TERM]?.precision).toBe('ambiguous');
   });
 });

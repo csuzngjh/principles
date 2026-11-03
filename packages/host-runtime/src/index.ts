@@ -35,6 +35,8 @@ export * from './rule-implementation-runtime.js';
 export * from './production-pain-evidence.js';
 export * from './governance-observation-store.js';
 export * from './governance-signal-admission.js';
+export * from './signal-classifier.js';
+export * from './signal-stage2-cycle.js';
 export * from './host-liveness-contract.js';
 // PRI-624 Slice C: shared internalization consumer execution (OpenClaw
 // auto-consumer + Companion workspace worker call the same cycle).
