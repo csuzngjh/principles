@@ -1,5 +1,11 @@
 # create-principles-disciple
 
+## 1.146.8
+
+### Patch Changes
+
+- 0cea461: G3.2 build deduplication: build-once ledger with artifact identity (cohort+version+dist SHA-256), preamble verify for core/install-layout/host-runtime, Console skip flag with freshness gate. Cross-platform fixes: ERR-045 npm spawn, GNU tar relative paths, sha512sum backslash stripping.
+
 ## 1.146.7
 
 ### Patch Changes
