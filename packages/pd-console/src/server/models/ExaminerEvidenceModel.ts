@@ -59,11 +59,22 @@ export interface ExaminerEvidenceRecordSample {
   summary: string;
 }
 
+/** P1-3: per-kind pagination truth, passed through verbatim from the audit. */
+export interface ExaminerEvidenceKindPage {
+  hasMore: boolean;
+  nextCursor: { recordedAt: string; evidenceId: string } | null;
+}
+
 export interface ExaminerEvidenceAuditProjection {
   status: 'ok' | 'degraded';
   reason?: string;
   nextAction?: string;
+  /** P1-3: LOADED counts (the audit page window) — never presented as totals. */
   counts: { deliveries: number; applications: number; episodes: number; effects: number; outcomes: number };
+  /** P1-3: pagination truth per kind — hasMore=true means MORE records exist. */
+  pages: Record<'delivery' | 'application' | 'behavior_episode' | 'effect' | 'outcome', ExaminerEvidenceKindPage>;
+  /** True when ANY kind reports hasMore — the UI shows a "more exist" band. */
+  anyHasMore: boolean;
   /** Delivery confirmations observed in the audit window (never promoted). */
   deliveryConfirmations: { prepared: number; submitted: number; hostAccepted: number; contextPresent: number; runtimeLoaded: number };
   /** Application proof split — agent claims are NOT runtime verification. */
@@ -277,6 +288,17 @@ export class ExaminerEvidenceModel {
       else if (proof === 'agent_claimed') applicationProof.agentClaimed += 1;
     }
 
+    // P1-3: pagination truth rides through verbatim — the counts above are
+    // LOADED-window sizes, and hasMore per kind tells the Owner more records
+    // exist beyond this read.
+    const pages = {
+      delivery: { hasMore: audit.pages.delivery.hasMore, nextCursor: audit.pages.delivery.nextCursor },
+      application: { hasMore: audit.pages.application.hasMore, nextCursor: audit.pages.application.nextCursor },
+      behavior_episode: { hasMore: audit.pages.behavior_episode.hasMore, nextCursor: audit.pages.behavior_episode.nextCursor },
+      effect: { hasMore: audit.pages.effect.hasMore, nextCursor: audit.pages.effect.nextCursor },
+      outcome: { hasMore: audit.pages.outcome.hasMore, nextCursor: audit.pages.outcome.nextCursor },
+    };
+    const anyHasMore = Object.values(pages).some((page) => page.hasMore);
     const evidenceAudit: ExaminerEvidenceAuditProjection = {
       status: audit.status,
       reason: audit.reason,
@@ -288,6 +310,8 @@ export class ExaminerEvidenceModel {
         effects: audit.effects.length,
         outcomes: audit.outcomes.length,
       },
+      pages,
+      anyHasMore,
       deliveryConfirmations,
       applicationProof,
       unresolvedReferences: audit.unresolvedReferences.length,

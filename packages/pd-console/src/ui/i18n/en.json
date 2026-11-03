@@ -2084,6 +2084,7 @@
           "route": "Production route",
           "budget": "Production budget",
           "divergence": "Ledger-active without runtime activation",
+          "activationDegraded": "Activation data was UNAVAILABLE at freeze time (truth unknown, not zero)",
           "matchesProduction": "matches production configuration"
         },
         "runs": {
@@ -2163,6 +2164,8 @@
           "effects": "Effects",
           "outcomes": "Outcomes",
           "unresolved": "Unresolved refs",
+          "loadedSuffix": "(loaded; more exist)",
+          "hasMoreNote": "More records exist beyond this read window — the counts above are the LOADED page, not the evidence total.",
           "ladder": "Confirmation ladder (never promoted)",
           "asOf": "Audit as of"
         },

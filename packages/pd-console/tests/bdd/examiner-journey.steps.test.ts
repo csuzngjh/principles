@@ -16,6 +16,7 @@ import { beforeEach, afterEach, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createStepRegistry, defineFeature } from '../../../principles-core/tests/bdd/support/vitest-bdd.js';
@@ -194,11 +195,10 @@ registry.given(/同一 Study 写入了状态非 APPROVED 的授权记录$/, asyn
 registry.given(/一个可写 Study 写入了绑定本 Study 冻结套件的 APPROVED F2 授权记录$/, async () => {
   writeLedger();
   await createStudy();
-  const suite = JSON.parse(fs.readFileSync(path.join(studyDirOf(lastStudyId), 'suite-manifest.json'), 'utf8'));
-  fs.writeFileSync(path.join(studyDirOf(lastStudyId), 'run-authorization.json'), JSON.stringify({
-    schema: 'challenge-stage-authorization.v1', stage: 'R', status: 'APPROVED',
-    studyId: lastStudyId, suiteHash: suite.suiteHash, executionMode: 'F2-real-host',
-  }));
+  // P1-5: the gate enforces the FULL Stage R contract — the fixture carries
+  // every field the authoritative verifier checks (bindings, budget, window,
+  // actor identity, F2 probe evidence). Synthetic only; nothing executes.
+  fs.writeFileSync(path.join(studyDirOf(lastStudyId), 'run-authorization.json'), JSON.stringify(buildFullF2AuthorizationFixture(lastStudyId)));
 });
 
 registry.given(/历史研究资产 EXM-V09-ACC-ISO 存在于研究引擎$/, () => {
@@ -368,7 +368,7 @@ registry.then(/返回 403 real_execution_not_authorized 且未追加运行事件
 
 registry.then(/仍返回 403 且原因指明 APPROVED required$/, () => {
   expect(res?.statusCode).toBe(403);
-  expect(body.message).toContain('APPROVED required');
+  expect(body.message).toContain('is not APPROVED');
 });
 
 registry.then(/运行结算为 FAILED 且 outcome=F2_EXECUTION_NOT_ENABLED_THIS_ROUND$/, async () => {
@@ -386,6 +386,61 @@ registry.then(/返回 readOnly=true 与边界原因$/, () => {
   expect(body.data.readOnly).toBe(true);
   expect(typeof body.data.access).toBe('string');
 });
+
+/**
+ * P1-5 fixture: a COMPLETE synthetic Stage R authorization carrying every
+ * field the authoritative verifier enforces (bindings, budget, window,
+ * actor identity, F2 probe evidence). Hashes replicate the lab's canonical
+ * hashing (sorted keys, JSON.stringify, sha256). Synthetic only — nothing
+ * executes, no host, no model.
+ */
+function buildFullF2AuthorizationFixture(studyId: string): Record<string, unknown> {
+  const studyDir = studyDirOf(studyId);
+  const manifest = JSON.parse(fs.readFileSync(path.join(studyDir, 'examiner-manifest.json'), 'utf8'));
+  const suite = JSON.parse(fs.readFileSync(path.join(studyDir, 'suite-manifest.json'), 'utf8'));
+  const mapping = JSON.parse(fs.readFileSync(path.join(studyDir, 'pain-mechanism-mapping.json'), 'utf8'));
+  const scoring = JSON.parse(fs.readFileSync(path.join(studyDir, 'scoring-contract.json'), 'utf8'));
+  const prereg = JSON.parse(fs.readFileSync(path.join(studyDir, 'preregistration.json'), 'utf8'));
+  const canonicalHash = (value: unknown): string => {
+    const canonical = (input: unknown): unknown => {
+      if (Array.isArray(input)) return input.map(canonical);
+      if (input !== null && typeof input === 'object') {
+        const entries = Object.entries(input as Record<string, unknown>).filter(([, v]) => v !== undefined);
+        return Object.fromEntries(entries.sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, v]) => [k, canonical(v)]));
+      }
+      return input;
+    };
+    return createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
+  };
+  return {
+    schema: 'challenge-stage-authorization.v1',
+    stage: 'R',
+    status: 'APPROVED',
+    purpose: 'isolated BDD fixture — no real host, no model calls',
+    studyId,
+    suiteHash: suite.suiteHash,
+    mappingHash: mapping.mappingHash,
+    graderHash: canonicalHash(scoring),
+    studyPlanHash: canonicalHash(prereg),
+    requestedActorIdentity: 'synthetic-bdd-fixture-actor',
+    executionMode: 'F2-real-host',
+    arms: ['A', 'B'],
+    cases: (suite.cases as { caseId: string }[]).map((entry) => entry.caseId),
+    repetitions: [String(manifest.repetitionsPerCase ?? 1)],
+    attemptCap: 4,
+    requestCap: 32,
+    requestTimeoutMs: 240_000,
+    maxRequestsPerAttempt: 8,
+    isolationAcceptance: {
+      realHostProbe: { status: 'PASSED', ticketId: 'synthetic-probe-ticket', evidenceRef: 'synthetic-probe-evidence (no real probe executed)', suiteHash: suite.suiteHash },
+    },
+    issuedBy: 'bdd-fixture',
+    validFrom: new Date(Date.now() - 60_000).toISOString(),
+    validUntil: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+    revoked: false,
+    halted: false,
+  };
+}
 
 function resolveStudyRootsFromLab() {
   const labRoot = process.env.PD_EXAMINER_LAB_ROOT

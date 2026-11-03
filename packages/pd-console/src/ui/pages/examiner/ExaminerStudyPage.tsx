@@ -227,6 +227,14 @@ export function ExaminerStudyPage(): React.ReactElement {
                 <div>
                   {t('pages.examiner.study.snapshot.divergence')}: <span className="font-mono">{snapshot.divergence.activeInLedgerNotRuntime.length}</span>
                 </div>
+                {/* P1-2: a degraded activation read is shown with its reason —
+                    the frozen baseline is UNKNOWN, never silently "zero". */}
+                {snapshot.runtimeActivation?.status === 'degraded' && (
+                  <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-amber-700 dark:text-amber-400" data-testid="examiner-study-snapshot-activation-degraded">
+                    {t('pages.examiner.study.snapshot.activationDegraded')}: {snapshot.runtimeActivation.reason ?? ''}
+                    {snapshot.runtimeActivation.nextAction ? ` → ${snapshot.runtimeActivation.nextAction}` : ''}
+                  </div>
+                )}
                 <div className="flex flex-wrap gap-1" data-testid="examiner-study-snapshot-markers">
                   {snapshot.experimentVsProduction.markers.map((marker) => (
                     <span key={marker} className="rounded bg-amber-500/15 px-2 py-0.5 font-mono text-[10px] text-amber-700 dark:text-amber-400">{marker}</span>

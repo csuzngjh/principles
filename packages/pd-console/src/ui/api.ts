@@ -1978,6 +1978,9 @@ export interface ExaminerEvidenceData {
   };
   evidenceAudit: ExaminerEvidenceLaneStatus & {
     counts: { deliveries: number; applications: number; episodes: number; effects: number; outcomes: number };
+    /** P1-3: pagination truth — hasMore=true means MORE records exist beyond this read. */
+    pages?: Record<'delivery' | 'application' | 'behavior_episode' | 'effect' | 'outcome', { hasMore: boolean; nextCursor: { recordedAt: string; evidenceId: string } | null }>;
+    anyHasMore?: boolean;
     deliveryConfirmations: { prepared: number; submitted: number; hostAccepted: number; contextPresent: number; runtimeLoaded: number };
     applicationProof: { agentClaimed: number; runtimeVerified: number };
     unresolvedReferences: number;
@@ -2050,7 +2053,17 @@ export interface ExaminerProductionSnapshot {
   targetPrincipleId: string;
   promptRoute: { status: string; routeName: string | null; note: string };
   budget: { chars: number | null; capacitySource: string | null; capacityStatus: string | null; policyVersion: string | null; unit: string };
-  runtimeActivation: { promptActivePrincipleIds: string[]; projectedInjectedPrincipleIds: string[] | null; ruleCodeActivations: { activationId: string; mode: string | null; status: string }[] };
+  runtimeActivation: {
+    /** P1-2: the activation read model verdict — degraded means UNKNOWN truth. */
+    status?: 'ok' | 'degraded';
+    reason?: string;
+    nextAction?: string;
+    promptActivePrincipleIds: string[];
+    projectedInjectedPrincipleIds: string[] | null;
+    ruleCodeActivations: { activationId: string; mode: string | null; status: string }[];
+    /** P1-2: complete workspace-wide count (display list is capped at 50). */
+    ruleCodeActivationTotal?: number;
+  };
   ledgerActivePrincipleIds: string[];
   divergence: { activeInLedgerNotRuntime: string[]; activeInLedgerNotProjected: string[] | null };
   targetPrinciple: { runtimePromptActive: boolean; projectedInjected: boolean | null; ruleCodeActivationCount: number; ledgerRuleCount: number };

@@ -2084,6 +2084,7 @@
           "route": "生产路由",
           "budget": "生产预算",
           "divergence": "账本 active 但运行时未激活",
+          "activationDegraded": "冻结时激活数据不可用（真相未知，绝非零）",
           "matchesProduction": "与生产配置一致"
         },
         "runs": {
@@ -2163,6 +2164,8 @@
           "effects": "效果",
           "outcomes": "结果",
           "unresolved": "未解析引用",
+          "loadedSuffix": "（已加载，仍有更多）",
+          "hasMoreNote": "本读取窗口之外仍有记录——上方数字是已加载的分页，不是证据总量。",
           "ladder": "确认阶梯（绝不自动升级）",
           "asOf": "审计截至"
         },

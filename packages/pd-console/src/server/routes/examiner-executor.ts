@@ -306,8 +306,19 @@ export function writableStudyDirProblem(roots: StudyRoots, studyDir: string): st
 export function studyStatusPayload(studyDir: string): Record<string, unknown> {
   const manifest = readStudyJson(studyDir, 'examiner-manifest.json');
   const eventsFile = path.join(studyDir, 'events.jsonl');
+  // P1-4B: the DISPLAY projection tolerates single corrupt lines (the
+  // authoritative console-run reader refuses them — see examiner-runs);
+  // counts derived here just skip what cannot be classified.
   const events: Record<string, unknown>[] = fs.existsSync(eventsFile)
-    ? fs.readFileSync(eventsFile, 'utf8').trim().split('\n').filter(Boolean).map((line) => asJsonObject(JSON.parse(line), eventsFile))
+    ? fs.readFileSync(eventsFile, 'utf8').trim().split('\n').filter(Boolean)
+      .map((line): Record<string, unknown> | null => {
+        try {
+          return asJsonObject(JSON.parse(line), eventsFile);
+        } catch {
+          return null;
+        }
+      })
+      .filter((row): row is Record<string, unknown> => row !== null)
     : [];
   const counts: Record<string, number> = {};
   for (const event of events) {
@@ -716,13 +727,10 @@ export async function materializeOfflineStudy(modules: LabModules, labRoot: stri
     invalidationPolicy: { hard: ['preregistration tampered', 'gold leak', 'shared memory across arms'], infrastructure: 'single failures stay UNKNOWN' },
     goldProvenance: 'SYNTHETIC_OFFLINE',
     studyDir: inputs.studyDir,
+    // P1-1: the production baseline freezes WITH the study — hash-bound into
+    // the manifest, the binding and the anchor; post-freeze modification is
+    // drift that preflight/runner refuse.
+    ...(inputs.hostBacked?.productionSnapshot ? { productionSnapshot: inputs.hostBacked.productionSnapshot } : {}),
   });
-  if (inputs.hostBacked?.productionSnapshot) {
-    // Additional frozen fact (SPEC §4.4/§6.4): the production baseline the
-    // A/B starting point diverges from. Written AFTER the lab's binding
-    // verification — the same append-after-freeze discipline as the event
-    // ledger; the verified binding files are never touched.
-    fs.writeFileSync(path.join(inputs.studyDir, 'production-snapshot.json'), `${JSON.stringify(inputs.hostBacked.productionSnapshot, null, 2)}\n`, 'utf8');
-  }
   return writeResult;
 }

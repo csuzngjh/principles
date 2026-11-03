@@ -135,11 +135,25 @@ export interface ProductionSnapshot {
     unit: 'utf16-chars';
   };
   runtimeActivation: {
+    /**
+     * The activation read model's own verdict ('ok' | 'degraded'). P1-2: a
+     * degraded read (missing state.db / table / unreadable) means the runtime
+     * truth is UNKNOWN — an empty row list here is NEVER "zero activations".
+     */
+    status: 'ok' | 'degraded';
+    reason?: string;
+    nextAction?: string;
     /** Principles with an ACTIVE prompt activation row (runtime truth). */
     promptActivePrincipleIds: string[];
     /** Principles the production projection would inject right now. */
     projectedInjectedPrincipleIds: string[] | null;
+    /** Bounded display list — NEVER the statistics basis (see ruleCodeCount). */
     ruleCodeActivations: { activationId: string; principleId: string; mode: string | null; status: string }[];
+    /**
+     * P1-2: the COMPLETE workspace-wide code_tool_hook row count, computed
+     * before any display truncation (the UI list above is capped at 50).
+     */
+    ruleCodeActivationTotal: number;
   };
   ledgerActivePrincipleIds: string[];
   divergence: {
@@ -212,6 +226,9 @@ export async function gatherProductionSnapshot(workspaceDir: string, targetPrinc
   if (activeInLedgerNotProjected !== null && activeInLedgerNotProjected.length > 0) {
     markers.push('PROJECTION_EVICTS_ACTIVE_LIBRARY_PRINCIPLES');
   }
+  // P1-2: a degraded activation read is an Owner-visible freeze condition —
+  // the runtime truth is UNKNOWN, never "zero activations".
+  if (activations.status !== 'ok') markers.push('ACTIVATION_DATA_DEGRADED');
 
   return {
     schema: 'examiner-production-snapshot.v1',
@@ -232,9 +249,13 @@ export async function gatherProductionSnapshot(workspaceDir: string, targetPrinc
       unit: 'utf16-chars',
     },
     runtimeActivation: {
+      status: activations.status,
+      reason: activations.reason,
+      nextAction: activations.nextAction,
       promptActivePrincipleIds,
       projectedInjectedPrincipleIds: projectedInjectedIds,
       ruleCodeActivations: ruleCodeActivations.slice(0, 50),
+      ruleCodeActivationTotal: ruleCodeActivations.length,
     },
     ledgerActivePrincipleIds,
     divergence: {
@@ -277,21 +298,37 @@ export interface StudyRuleCodeFacts {
  *     semantics: unresolved baseline refuses, never assumed OFF).
  */
 export function deriveStudyRuleCodeFacts(snapshot: ProductionSnapshot): StudyRuleCodeFacts {
+  // P1-2: a degraded activation read means the runtime truth is UNKNOWN — an
+  // empty row list is NEVER "zero activations". Independence may only be the
+  // evidenced TRUE when the read model reported status=ok.
+  const activationDegraded = snapshot.runtimeActivation.status !== 'ok';
   // ONLY the rows bound to the TARGET principle count as its coupling — a
   // RuleCode activation for a DIFFERENT principle is part of the frozen
   // baseline, not the target's intervention variable (SPEC §7.2).
-  const targetRows = snapshot.runtimeActivation.ruleCodeActivations
-    .filter((row) => row.principleId === snapshot.targetPrincipleId);
-  const targetRuleCodeCount = Math.max(targetRows.length, snapshot.targetPrinciple.ledgerRuleCount);
+  const targetRows = activationDegraded
+    ? []
+    : snapshot.runtimeActivation.ruleCodeActivations
+      .filter((row) => row.principleId === snapshot.targetPrincipleId);
+  // Statistics come from the COMPLETE counts (never the 50-row display list):
+  // the snapshot freezes ruleCodeActivationTotal for the whole workspace and
+  // ruleCodeActivationCount for the target, both computed pre-truncation.
+  const targetRuleCodeCount = Math.max(
+    snapshot.targetPrinciple.ruleCodeActivationCount,
+    snapshot.targetPrinciple.ledgerRuleCount,
+  );
   const resolved = targetRows.map((row) => ({
     ruleCodeId: row.activationId,
     principleId: snapshot.targetPrincipleId,
     baselineState: row.mode === 'live' && row.status === 'active' ? 'ON' as const : 'OFF' as const,
   }));
-  const independence = targetRuleCodeCount === 0 ? true : null;
-  const evidenceNote = targetRuleCodeCount === 0
-    ? 'no RuleCode is attributed to the target principle by either the runtime activation table or the ledger — independence is an evidenced zero'
-    : `${targetRows.length} runtime RuleCode activation(s) and ${snapshot.targetPrinciple.ledgerRuleCount} ledger-attributed rule(s) bound to the TARGET; independent control of prompt injection while holding these at baseline is UNPROVEN — INTERVENTION_NOT_IDENTIFIABLE unless separately evidenced`;
+  const independence = !activationDegraded && targetRuleCodeCount === 0 ? true : null;
+  const degradedNote = activationDegraded
+    ? `RUNTIME ACTIVATION DATA DEGRADED (${snapshot.runtimeActivation.reason ?? 'unknown reason'}; next: ${snapshot.runtimeActivation.nextAction ?? 'inspect the workspace runtime state'}) — the activation truth is UNKNOWN, so independence is never assumed; ${snapshot.targetPrinciple.ledgerRuleCount} ledger-attributed rule(s) remain the only count evidence`
+    : null;
+  const evidenceNote = degradedNote
+    ?? (targetRuleCodeCount === 0
+      ? 'no RuleCode is attributed to the target principle by either the runtime activation table or the ledger — independence is an evidenced zero'
+      : `${targetRows.length} runtime RuleCode activation(s) and ${snapshot.targetPrinciple.ledgerRuleCount} ledger-attributed rule(s) bound to the TARGET; independent control of prompt injection while holding these at baseline is UNPROVEN — INTERVENTION_NOT_IDENTIFIABLE unless separately evidenced`);
   return { ruleCodes: resolved, principleRuleCodeIndependence: independence, targetRuleCodeCount, evidenceNote };
 }
 

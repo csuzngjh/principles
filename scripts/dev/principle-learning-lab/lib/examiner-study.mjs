@@ -455,6 +455,7 @@ export function buildExaminerStudyManifest({
   invalidationPolicy,
   armPayloadHashes = null,
   authorizationRef = null,
+  productionSnapshotHash = null,
 }) {
   if (!text(studyId)) throw new Error('buildExaminerStudyManifest: studyId required');
   if (!/^[A-Z0-9][A-Z0-9-]*$/.test(studyId)) throw new Error(`buildExaminerStudyManifest: studyId '${studyId}' must be UPPER-CASE with digits/dashes`);
@@ -511,6 +512,11 @@ export function buildExaminerStudyManifest({
     analysisPlanHash: hashOfCanonical(analysisPlan),
     invalidationPolicyHash: hashOfCanonical(invalidationPolicy),
     authorizationRef,
+    // v0.10.1 P1-1: the frozen production snapshot rides INSIDE the manifest
+    // (and therefore inside the manifestHash → binding → anchor chain).
+    // Conditional like armPayloadHashes so a v0.9-shaped manifest stays
+    // byte-identical with the historical field set.
+    ...(productionSnapshotHash ? { productionSnapshotHash } : {}),
   };
   return { ...core, manifestHash: hashOfCanonical(core) };
 }
@@ -730,6 +736,36 @@ export function computeExaminerStudyBindings(studyDir) {
   if (hashes.examinerManifestHash?.value !== manifest.manifestHash) push('hashes.examinerManifestHash != manifest.manifestHash');
   if (hashes.pairAssignmentHash?.value !== pair.assignmentHash) push('hashes.pairAssignmentHash != pair assignment hash');
 
+  // --- production snapshot (v0.10.1 §4.4/§6.4) ------------------------------
+  // The frozen production baseline is PART of the preregistration evidence:
+  // when the file exists it is hash-bound to the manifest and the binding; a
+  // missing file beside a manifest that declares a snapshot hash is drift;
+  // no file AND no manifest field is the v0.9 legacy shape (verified studies
+  // keep recomputing the exact historical binding). The snapshot content
+  // carries no self-hash, so the chain snapshot→manifestHash→binding→anchor
+  // has no cycle.
+  let productionSnapshotHash = null;
+  const snapshotPath = path.join(studyDir, 'production-snapshot.json');
+  if (fs.existsSync(snapshotPath)) {
+    let snapshotParsed;
+    try {
+      snapshotParsed = JSON.parse(fs.readFileSync(snapshotPath, 'utf8'));
+    } catch (e) {
+      push(`production-snapshot.json is not valid JSON: ${e.message}`);
+      snapshotParsed = null;
+    }
+    if (snapshotParsed !== null && typeof snapshotParsed === 'object' && !Array.isArray(snapshotParsed)) {
+      productionSnapshotHash = hashOfCanonical(snapshotParsed);
+      if (manifest.productionSnapshotHash !== productionSnapshotHash) {
+        push('production-snapshot.json hash != manifest.productionSnapshotHash — the frozen production baseline was modified after freezing');
+      }
+    } else if (snapshotParsed !== null) {
+      push('production-snapshot.json must be a JSON object');
+    }
+  } else if (manifest.productionSnapshotHash !== undefined) {
+    push('manifest.productionSnapshotHash declared but production-snapshot.json is missing — the frozen production baseline cannot be verified');
+  }
+
   const binding = {
     schema: PREREG_BINDING_SCHEMA,
     studyId: manifest.studyId ?? null,
@@ -749,6 +785,9 @@ export function computeExaminerStudyBindings(studyDir) {
     // definition after freezing (even with every file re-hashed) moves this.
     primaryEndpointHash: hashOfCanonical(manifest.primaryEndpoint ?? null),
     armPayloadHashes,
+    // P1-1: present ONLY when the study freezes a production snapshot — the
+    // v0.9 historical binding field set stays byte-identical otherwise.
+    ...(productionSnapshotHash ? { productionSnapshotHash } : {}),
     plannedPairs: manifest.plannedPairs ?? null,
     repetitionsPerCase: manifest.repetitionsPerCase ?? null,
   };
@@ -961,6 +1000,7 @@ export function writeExaminerStudyArtifacts(input) {
     analysisPlan, invalidationPolicy, hostManifest, modelManifest,
     scorerVersion, seed, repetitionsPerCase, authorizationRef = null,
     goldProvenance = 'SYNTHETIC_OFFLINE',
+    productionSnapshot = null,
   } = input;
   if (!studyDir || typeof studyDir !== 'string') throw new Error('writeExaminerStudyArtifacts: studyDir required');
   if (fs.existsSync(studyDir)) throw new Error(`writeExaminerStudyArtifacts: '${studyDir}' already exists — a study identity is created once; overwriting is refused (create a NEW study id instead)`);
@@ -1011,6 +1051,9 @@ export function writeExaminerStudyArtifacts(input) {
     invalidationPolicy,
     armPayloadHashes: { control: armPayloads.arms.control.payloadHash, treatment: armPayloads.arms.treatment.payloadHash },
     authorizationRef,
+    // P1-1: the snapshot is gathered BEFORE the freeze and rides the full
+    // manifest → binding → anchor chain (no post-freeze append can touch it).
+    ...(productionSnapshot !== null ? { productionSnapshotHash: hashOfCanonical(productionSnapshot) } : {}),
   });
   const prereg = {
     studyId: input.studyId,
@@ -1046,6 +1089,9 @@ export function writeExaminerStudyArtifacts(input) {
   writeJson('scoring-contract.json', scoringContract);
   writeJson('principle-frozen.json', principleFrozen);
   writeJson('pain-mechanism-mapping.json', mapping);
+  // P1-1: the production baseline freezes WITH the study (inside the binding
+  // verification below) — not as a post-freeze append.
+  if (productionSnapshot !== null) writeJson('production-snapshot.json', productionSnapshot);
   writeJson('input-manifest.json', { expectedSourceHashes: { principleContentHash: hashOfCanonical(principleFrozen.contentJson) } });
   writeJson('hashes.json', {
     preregistrationHash: { value: hashOfCanonical(prereg) },

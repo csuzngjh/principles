@@ -63,8 +63,9 @@ import {
   readProductionSnapshot,
 } from './examiner-study-inputs.js';
 import {
-  appendConsoleRunEvent, mintRunId, readConsoleRuns, currentConsoleRun, recoverUnfinishedConsoleRuns,
-  hostDryRunPass, f2AuthorizationGate, CONSOLE_RUN_SCHEMA, CONSOLE_RUN_MODES,
+  appendConsoleRunEvent, readConsoleRuns, currentConsoleRun, recoverUnfinishedConsoleRuns,
+  acceptConsoleRun, hostDryRunPass, f2AuthorizationGate, CONSOLE_RUN_SCHEMA, CONSOLE_RUN_MODES,
+  ConsoleRunInProgressError, ConsoleLedgerUnreadableError,
 } from './examiner-runs.js';
 
 type HostCapability = Record<string, string>;
@@ -379,16 +380,29 @@ export async function handleExaminerRoute(
 
     // GET status
     if (rest === '' && method === 'GET') {
-      const consoleRuns = readConsoleRuns(studyDir);
+      // P1-4B: an unreadable ledger is reported STRUCTURALLY on the read path
+      // (rc-9) and refuses runs on the write path — never shown as "no runs".
+      let consoleRuns: ReturnType<typeof readConsoleRuns> | null = null;
+      let ledgerProblem: { code: string; message: string } | null = null;
+      try {
+        consoleRuns = readConsoleRuns(studyDir);
+      } catch (error) {
+        if (error instanceof ConsoleLedgerUnreadableError) {
+          ledgerProblem = { code: error.code, message: error.message };
+        } else {
+          throw error;
+        }
+      }
       sendSuccess(res, {
         ...studyStatusPayload(studyDir),
         readOnly: access.readOnly,
         access: access.reason,
         productionSnapshot: readProductionSnapshot(studyDir),
         consoleRuns: {
-          runs: consoleRuns.slice(-10),
-          current: currentConsoleRun(consoleRuns),
+          runs: consoleRuns === null ? [] : consoleRuns.slice(-10),
+          current: consoleRuns === null ? null : currentConsoleRun(consoleRuns),
           asyncModes: CONSOLE_RUN_MODES,
+          ledgerProblem,
         },
       });
       return;
@@ -422,19 +436,9 @@ export async function handleExaminerRoute(
 
       // ── v0.10.1 §12.3 async modes (host-dry-run / f2-real-host) ──
       if (requestedMode === 'host-dry-run' || requestedMode === 'f2-real-host') {
-        const consoleRuns = readConsoleRuns(studyDir);
-        const running = currentConsoleRun(consoleRuns);
-        if (running) {
-          sendError(res, 409, 'run_in_progress', `console run ${running.runId} (${running.mode}) is still in progress for this study — wait for its terminal event or recover after a restart; never start a second run`, { runId: running.runId, mode: running.mode, acceptedAt: running.acceptedAt });
-          return;
-        }
-        // A synchronous offline run in flight (RUN_STARTED without
-        // RUN_FINISHED) also refuses: one execution at a time per study.
-        const statusNow = studyStatusPayload(studyDir);
-        if (statusNow.runStarted === true && statusNow.runFinished !== true) {
-          sendError(res, 409, 'run_in_progress', 'an offline execution is currently in progress for this study (RUN_STARTED without RUN_FINISHED) — wait for it to settle');
-          return;
-        }
+        // P1-5: the full Stage R authority contract (schema/stage/binding/
+        // window/revocation/probe) is verified BEFORE acceptance; the same
+        // authority re-verifies per unit inside the runner for real runs.
         if (requestedMode === 'f2-real-host') {
           const gate = await f2AuthorizationGate(labRoot, studyDir);
           if (!gate.authorized) {
@@ -442,17 +446,39 @@ export async function handleExaminerRoute(
             return;
           }
         }
-        const runId = mintRunId();
-        const acceptedAt = new Date().toISOString();
-        appendConsoleRunEvent(roots, studyDir, {
-          type: 'CONSOLE_RUN_ACCEPTED', schema: CONSOLE_RUN_SCHEMA, runId, studyId: access.studyId,
-          mode: requestedMode, acceptedAt, pid: process.pid, owner: 'pd-console',
-        });
+        // P1-4: read-check-verify-append acceptance happens ATOMICALLY under
+        // the existing lab study write lock — two concurrent requests can
+        // never both pass. A corrupt/unreadable ledger refuses the run.
+        let acceptance: { runId: string; acceptedAt: string };
+        try {
+          acceptance = await acceptConsoleRun(roots, studyDir, { studyId: access.studyId, mode: requestedMode, labRoot });
+        } catch (error) {
+          if (error instanceof ConsoleRunInProgressError) {
+            sendError(res, 409, 'run_in_progress', `console run ${error.runId} (${error.mode}) is still in progress for this study — wait for its terminal event or recover after a restart; never start a second run`, { runId: error.runId, mode: error.mode, acceptedAt: error.acceptedAt });
+            return;
+          }
+          if ((error as Error).name === 'OfflineRunInFlightError') {
+            sendError(res, 409, 'run_in_progress', 'an offline execution is currently in progress for this study (RUN_STARTED without RUN_FINISHED) — wait for it to settle');
+            return;
+          }
+          if ((error as Error).name === 'StudyLockError') {
+            sendError(res, 409, 'run_in_progress', 'another writer holds the study lock right now (a concurrent acceptance or the offline runner) — exactly one run may start; retry after the holder settles');
+            return;
+          }
+          if (error instanceof ConsoleLedgerUnreadableError) {
+            sendError(res, 500, 'console_ledger_unreadable', `the run was refused because the study event ledger could not be honestly read (${error.code}): ${error.message} — the ledger is never auto-cleared or rebuilt`);
+            return;
+          }
+          logRefusal('console run acceptance failed', error);
+          sendError(res, 500, 'run_acceptance_failed', 'the run could not be accepted (details in the console server log)');
+          return;
+        }
+        const { runId, acceptedAt } = acceptance;
         // Detached work: the accepted run settles itself through the study
         // ledger. The promise is intentionally not awaited (§12.3: long work
         // never rides the HTTP request); all failures append terminal events.
+        // finishedAt is taken at SETTLEMENT time (P1-4C), never up front.
         void (async () => {
-          const finishedAt = new Date().toISOString();
           try {
             if (requestedMode === 'host-dry-run') {
               const dryRun = await hostDryRunPass({ modules: labModules, labRoot, studyDir, context });
@@ -460,7 +486,7 @@ export async function handleExaminerRoute(
                 type: dryRun.ok ? 'CONSOLE_RUN_FINISHED' : 'CONSOLE_RUN_FAILED',
                 schema: CONSOLE_RUN_SCHEMA, runId, studyId: access.studyId,
                 mode: 'host-dry-run', acceptedAt, pid: process.pid, owner: 'pd-console',
-                finishedAt,
+                finishedAt: new Date().toISOString(),
                 outcome: dryRun.ok ? 'DRY_RUN_CHECKS_PASSED' : 'DRY_RUN_CHECKS_FAILED',
                 reason: dryRun.ok ? undefined : `failing prerequisites: ${dryRun.checks.filter((entry) => !entry.ok && entry.severity !== 'info').map((entry) => entry.id).join(', ')}`,
                 checks: dryRun.checks,
@@ -473,7 +499,8 @@ export async function handleExaminerRoute(
               appendConsoleRunEvent(roots, studyDir, {
                 type: 'CONSOLE_RUN_FAILED', schema: CONSOLE_RUN_SCHEMA, runId, studyId: access.studyId,
                 mode: 'f2-real-host', acceptedAt, pid: process.pid, owner: 'pd-console',
-                finishedAt, outcome: 'F2_EXECUTION_NOT_ENABLED_THIS_ROUND',
+                finishedAt: new Date().toISOString(),
+                outcome: 'F2_EXECUTION_NOT_ENABLED_THIS_ROUND',
                 reason: 'authorization was accepted, but console-driven F2 real execution stays disabled this round; use the lab F2 driver under Owner supervision; zero model calls were made',
               });
             }
@@ -482,7 +509,8 @@ export async function handleExaminerRoute(
             appendConsoleRunEvent(roots, studyDir, {
               type: 'CONSOLE_RUN_FAILED', schema: CONSOLE_RUN_SCHEMA, runId, studyId: access.studyId,
               mode: requestedMode, acceptedAt, pid: process.pid, owner: 'pd-console',
-              finishedAt, outcome: 'RUN_ERROR', reason: 'the console run failed (details in the console server log)',
+              finishedAt: new Date().toISOString(),
+              outcome: 'RUN_ERROR', reason: 'the console run failed (details in the console server log)',
             });
           }
         })();

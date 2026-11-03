@@ -20,6 +20,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -278,12 +279,14 @@ describe('Examiner v0.10.1 — challenge-suite catalog (§9)', () => {
       promptRoute: { status: 'unconfirmed', routeName: null, note: '' },
       budget: { chars: null, capacitySource: null, capacityStatus: null, policyVersion: null, unit: 'utf16-chars' as const },
       runtimeActivation: {
+        status: 'ok' as const,
         promptActivePrincipleIds: ['pri-target'],
         projectedInjectedPrincipleIds: null,
         ruleCodeActivations: [
           { activationId: 'act-rule-shadow', principleId: 'pri-OTHER', mode: 'shadow' as const, status: 'active' },
           { activationId: 'act-rule-live', principleId: 'pri-OTHER', mode: 'live' as const, status: 'active' },
         ],
+        ruleCodeActivationTotal: 2,
       },
       ledgerActivePrincipleIds: ['pri-target', 'pri-OTHER'],
       divergence: { activeInLedgerNotRuntime: [], activeInLedgerNotProjected: null },
@@ -298,12 +301,50 @@ describe('Examiner v0.10.1 — challenge-suite catalog (§9)', () => {
     // A row bound to the TARGET itself IS a coupling → independence unproven.
     const coupled = deriveStudyRuleCodeFacts({
       ...snapshot,
-      runtimeActivation: { ...snapshot.runtimeActivation, ruleCodeActivations: [{ activationId: 'act-mine', principleId: 'pri-target', mode: 'live' as const, status: 'active' }] },
+      runtimeActivation: { ...snapshot.runtimeActivation, ruleCodeActivations: [{ activationId: 'act-mine', principleId: 'pri-target', mode: 'live' as const, status: 'active' }], ruleCodeActivationTotal: 3 },
       targetPrinciple: { ...snapshot.targetPrinciple, ruleCodeActivationCount: 1 },
     } as unknown as ProductionSnapshot);
     expect(coupled.targetRuleCodeCount).toBe(1);
     expect(coupled.principleRuleCodeIndependence).toBeNull();
     expect(coupled.ruleCodes[0]).toEqual({ ruleCodeId: 'act-mine', principleId: 'pri-target', baselineState: 'ON' });
+  });
+
+  // P1-2: a degraded activation read is UNKNOWN truth — independence is never
+  // TRUE from an empty row list, and the Owner sees the reason + next action.
+  it('a DEGRADED activation read never yields independence=true (zero rows ≠ zero activations)', () => {
+    const degraded = {
+      schema: 'examiner-production-snapshot.v1',
+      asOf: '2026-11-03T00:00:00Z',
+      targetPrincipleId: 'pri-target',
+      promptRoute: { status: 'unconfirmed', routeName: null, note: '' },
+      budget: { chars: null, capacitySource: null, capacityStatus: null, policyVersion: null, unit: 'utf16-chars' as const },
+      runtimeActivation: {
+        status: 'degraded' as const,
+        reason: 'state.db not found — workspace may not be initialized',
+        nextAction: 'Run pd runtime diagnostics to check workspace state',
+        promptActivePrincipleIds: [],
+        projectedInjectedPrincipleIds: null,
+        ruleCodeActivations: [],
+        ruleCodeActivationTotal: 0,
+      },
+      ledgerActivePrincipleIds: ['pri-target'],
+      divergence: { activeInLedgerNotRuntime: [], activeInLedgerNotProjected: null },
+      targetPrinciple: { runtimePromptActive: false, projectedInjected: null, ruleCodeActivationCount: 0, ledgerRuleCount: 0 },
+      experimentVsProduction: { studyBudgetChars: 2000, productionBudgetChars: null, markers: ['ACTIVATION_DATA_DEGRADED'], note: '' },
+    } as unknown as ProductionSnapshot;
+    const facts = deriveStudyRuleCodeFacts(degraded);
+    expect(facts.principleRuleCodeIndependence).toBeNull();
+    expect(facts.ruleCodes).toEqual([]);
+    expect(facts.evidenceNote).toContain('DEGRADED');
+    expect(facts.evidenceNote).toContain('state.db not found');
+
+    // Degraded + ledger-attributed rules → unresolved count still refuses.
+    const degradedCoupled = deriveStudyRuleCodeFacts({
+      ...degraded,
+      targetPrinciple: { ...degraded.targetPrinciple, ledgerRuleCount: 2 },
+    } as unknown as ProductionSnapshot);
+    expect(degradedCoupled.targetRuleCodeCount).toBe(2);
+    expect(degradedCoupled.principleRuleCodeIndependence).toBeNull();
   });
 });
 
@@ -391,8 +432,8 @@ describe('Examiner v0.10.1 — async execution contract (§12.3)', () => {
   });
 });
 
-describe('Examiner v0.10.1 — F2 authorization gate (§12.3/§13)', () => {
-  it('refuses f2-real-host without an authorization record (403, structured reasons, no run event)', async () => {
+describe('Examiner v0.10.1 — F2 authorization gate (§12.3/§13, full Stage R contract)', () => {
+  it('refuses f2-real-host without an authorization record (403, structured reasons, no run event)', { timeout: 45_000 }, async () => {
     const created = await createStudy();
     const res = await call('POST', `/studies/${created.studyId}/run`, { mode: 'f2-real-host' });
     expect(res.statusCode).toBe(403);
@@ -401,7 +442,7 @@ describe('Examiner v0.10.1 — F2 authorization gate (§12.3/§13)', () => {
     expect(readEvents(created.studyId).some((event) => event.type === 'CONSOLE_RUN_ACCEPTED')).toBe(false);
   });
 
-  it('refuses a record that is not an APPROVED F2 record bound to this study', async () => {
+  it('refuses a record that is not an APPROVED F2 record bound to this study', { timeout: 45_000 }, async () => {
     const created = await createStudy();
     const studyDir = studyDirOf(created.studyId);
     const suite = JSON.parse(fs.readFileSync(path.join(studyDir, 'suite-manifest.json'), 'utf8'));
@@ -411,25 +452,66 @@ describe('Examiner v0.10.1 — F2 authorization gate (§12.3/§13)', () => {
     }));
     const res = await call('POST', `/studies/${created.studyId}/run`, { mode: 'f2-real-host' });
     expect(res.statusCode).toBe(403);
-    expect(res.body.message).toContain('APPROVED required');
+    expect(res.body.message).toContain("is not APPROVED");
 
-    fs.writeFileSync(path.join(studyDir, 'run-authorization.json'), JSON.stringify({
-      schema: 'challenge-stage-authorization.v1', stage: 'R', status: 'APPROVED',
-      studyId: 'EXM-OTHER', suiteHash: suite.suiteHash, executionMode: 'F2-real-host',
-    }));
-    const bound = await call('POST', `/studies/${created.studyId}/run`, { mode: 'f2-real-host' });
-    expect(bound.statusCode).toBe(403);
-    expect(bound.body.message).toContain('different study id');
-  });
-
-  it('accepts a bound APPROVED record with 202, then settles LOUDLY as not-executed-this-round with zero model calls', async () => {
-    const created = await createStudy();
-    const studyDir = studyDirOf(created.studyId);
-    const suite = JSON.parse(fs.readFileSync(path.join(studyDir, 'suite-manifest.json'), 'utf8'));
+    // P1-5: a merely-APPROVED record without the full binding set also fails —
+    // status alone is never authorization.
     fs.writeFileSync(path.join(studyDir, 'run-authorization.json'), JSON.stringify({
       schema: 'challenge-stage-authorization.v1', stage: 'R', status: 'APPROVED',
       studyId: created.studyId, suiteHash: suite.suiteHash, executionMode: 'F2-real-host',
     }));
+    const thin = await call('POST', `/studies/${created.studyId}/run`, { mode: 'f2-real-host' });
+    expect(thin.statusCode).toBe(403);
+    expect(thin.body.message).toContain('binding mismatch');
+
+    // Wrong study id on an otherwise complete record still refuses.
+    const complete = buildFullF2Authorization(created.studyId);
+    fs.writeFileSync(path.join(studyDir, 'run-authorization.json'), JSON.stringify({ ...complete, studyId: 'EXM-OTHER' }));
+    const bound = await call('POST', `/studies/${created.studyId}/run`, { mode: 'f2-real-host' });
+    expect(bound.statusCode).toBe(403);
+    expect(bound.body.message).toContain('binding mismatch on studyId');
+  });
+
+  it('refuses an expired authorization window even when every binding matches', { timeout: 45_000 }, async () => {
+    const created = await createStudy();
+    const complete = buildFullF2Authorization(created.studyId);
+    const past = new Date(Date.now() - 7 * 24 * 3600 * 1000);
+    fs.writeFileSync(path.join(studyDirOf(created.studyId), 'run-authorization.json'), JSON.stringify({
+      ...complete,
+      validFrom: past.toISOString(),
+      validUntil: new Date(past.getTime() + 1000).toISOString(),
+    }));
+    const res = await call('POST', `/studies/${created.studyId}/run`, { mode: 'f2-real-host' });
+    expect(res.statusCode).toBe(403);
+    expect(res.body.message).toContain('expired');
+  });
+
+  it('refuses an F2 record whose realHostProbe evidence is missing or bound to another suite', { timeout: 45_000 }, async () => {
+    const created = await createStudy();
+    const studyDir = studyDirOf(created.studyId);
+    const complete = buildFullF2Authorization(created.studyId);
+    fs.writeFileSync(path.join(studyDir, 'run-authorization.json'), JSON.stringify({
+      ...complete,
+      isolationAcceptance: { realHostProbe: { status: 'FAILED', ticketId: 't', evidenceRef: 'e', suiteHash: complete.suiteHash } },
+    }));
+    const failedProbe = await call('POST', `/studies/${created.studyId}/run`, { mode: 'f2-real-host' });
+    expect(failedProbe.statusCode).toBe(403);
+    expect(failedProbe.body.message).toContain('PASSED');
+
+    fs.writeFileSync(path.join(studyDir, 'run-authorization.json'), JSON.stringify({
+      ...complete,
+      isolationAcceptance: { realHostProbe: { status: 'PASSED', ticketId: 't', evidenceRef: 'e', suiteHash: 'sha256:' + '0'.repeat(64) } },
+    }));
+    const foreignSuite = await call('POST', `/studies/${created.studyId}/run`, { mode: 'f2-real-host' });
+    expect(foreignSuite.statusCode).toBe(403);
+    expect(foreignSuite.body.message).toContain('different frozen suite');
+  });
+
+  it('accepts a fully bound APPROVED record with 202, then settles LOUDLY as not-executed-this-round with zero model calls', { timeout: 45_000 }, async () => {
+    const created = await createStudy();
+    const studyDir = studyDirOf(created.studyId);
+    const complete = buildFullF2Authorization(created.studyId);
+    fs.writeFileSync(path.join(studyDir, 'run-authorization.json'), JSON.stringify(complete));
     const res = await call('POST', `/studies/${created.studyId}/run`, { mode: 'f2-real-host' });
     expect(res.statusCode).toBe(202);
     const settled = await waitForTerminalRun(created.studyId, res.body.data.runId);
@@ -442,6 +524,71 @@ describe('Examiner v0.10.1 — F2 authorization gate (§12.3/§13)', () => {
     expect(events.some((event) => event.type === 'CONSOLE_RUN_FAILED')).toBe(true);
   });
 });
+
+/**
+ * Build a COMPLETE synthetic Stage R authorization (every field the lab's
+ * authoritative verifier enforces) bound to a study's frozen facts. Isolated
+ * test fixture only — no host, no model, no real execution. Hashes replicate
+ * the lab's canonical hashing (sorted keys, JSON.stringify, sha256 — the same
+ * algorithm hashOfCanonical/readStudyPlanHash use); importing the lab modules
+ * directly from a vitest fork deadlocks, so the algorithm is reproduced here.
+ */
+function buildFullF2Authorization(studyId: string): Record<string, unknown> {
+  const studyDir = studyDirOf(studyId);
+  const manifest = JSON.parse(fs.readFileSync(path.join(studyDir, 'examiner-manifest.json'), 'utf8'));
+  const suite = JSON.parse(fs.readFileSync(path.join(studyDir, 'suite-manifest.json'), 'utf8'));
+  const mapping = JSON.parse(fs.readFileSync(path.join(studyDir, 'pain-mechanism-mapping.json'), 'utf8'));
+  const scoring = JSON.parse(fs.readFileSync(path.join(studyDir, 'scoring-contract.json'), 'utf8'));
+  const prereg = JSON.parse(fs.readFileSync(path.join(studyDir, 'preregistration.json'), 'utf8'));
+  const caseIds = (suite.cases as { caseId: string }[]).map((entry) => entry.caseId);
+  const reps = String(manifest.repetitionsPerCase ?? 1);
+  return {
+    schema: 'challenge-stage-authorization.v1',
+    stage: 'R',
+    status: 'APPROVED',
+    purpose: 'isolated synthetic fixture — no real host, no model calls',
+    studyId,
+    suiteHash: suite.suiteHash,
+    mappingHash: mapping.mappingHash,
+    graderHash: canonicalHash(scoring),
+    studyPlanHash: canonicalHash(prereg),
+    requestedActorIdentity: 'synthetic-fixture-actor',
+    executionMode: 'F2-real-host',
+    arms: ['A', 'B'],
+    cases: caseIds,
+    repetitions: [reps],
+    attemptCap: 4,
+    requestCap: 32,
+    requestTimeoutMs: 240_000,
+    maxRequestsPerAttempt: 8,
+    isolationAcceptance: {
+      realHostProbe: {
+        status: 'PASSED',
+        ticketId: 'synthetic-probe-ticket',
+        evidenceRef: 'synthetic-probe-evidence (no real probe executed)',
+        suiteHash: suite.suiteHash,
+      },
+    },
+    issuedBy: 'test-fixture',
+    validFrom: new Date(Date.now() - 60_000).toISOString(),
+    validUntil: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+    revoked: false,
+    halted: false,
+  };
+}
+
+/** Canonical hash identical to the lab's hashOfCanonical (sorted keys). */
+function canonicalHash(value: unknown): string {
+  const canonical = (input: unknown): unknown => {
+    if (Array.isArray(input)) return input.map(canonical);
+    if (input !== null && typeof input === 'object') {
+      const entries = Object.entries(input as Record<string, unknown>).filter(([, v]) => v !== undefined);
+      return Object.fromEntries(entries.sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, v]) => [k, canonical(v)]));
+    }
+    return input;
+  };
+  return createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
+}
 
 /** Resolve study roots the way the route does (lab root from the module layout). */
 function resolveStudyRootsFromLab() {

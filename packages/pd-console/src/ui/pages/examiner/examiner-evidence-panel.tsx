@@ -123,14 +123,21 @@ export function ExaminerEvidencePanel({ evidence, compact = false }: { evidence:
             </span>
           </div>
           {evidenceAudit.reason && <p className="mt-1 text-xs text-muted-foreground">{evidenceAudit.reason}</p>}
-          <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-3">
-            <div>{t('pages.examiner.evidence.audit.deliveries')}: <span className="font-mono">{evidenceAudit.counts.deliveries}</span></div>
-            <div>{t('pages.examiner.evidence.audit.applications')}: <span className="font-mono">{evidenceAudit.counts.applications}</span></div>
-            <div>{t('pages.examiner.evidence.audit.episodes')}: <span className="font-mono">{evidenceAudit.counts.episodes}</span></div>
-            <div>{t('pages.examiner.evidence.audit.effects')}: <span className="font-mono">{evidenceAudit.counts.effects}</span></div>
-            <div>{t('pages.examiner.evidence.audit.outcomes')}: <span className="font-mono">{evidenceAudit.counts.outcomes}</span></div>
+          {/* P1-3: these are LOADED counts. hasMore kinds are named explicitly —
+              a loaded window is never presented as the total. */}
+          <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-3" data-testid="examiner-evidence-counts">
+            <div>{t('pages.examiner.evidence.audit.deliveries')}: <span className="font-mono">{evidenceAudit.counts.deliveries}</span>{evidenceAudit.pages?.delivery?.hasMore ? ` ${t('pages.examiner.evidence.audit.loadedSuffix')}` : ''}</div>
+            <div>{t('pages.examiner.evidence.audit.applications')}: <span className="font-mono">{evidenceAudit.counts.applications}</span>{evidenceAudit.pages?.application?.hasMore ? ` ${t('pages.examiner.evidence.audit.loadedSuffix')}` : ''}</div>
+            <div>{t('pages.examiner.evidence.audit.episodes')}: <span className="font-mono">{evidenceAudit.counts.episodes}</span>{evidenceAudit.pages?.behavior_episode?.hasMore ? ` ${t('pages.examiner.evidence.audit.loadedSuffix')}` : ''}</div>
+            <div>{t('pages.examiner.evidence.audit.effects')}: <span className="font-mono">{evidenceAudit.counts.effects}</span>{evidenceAudit.pages?.effect?.hasMore ? ` ${t('pages.examiner.evidence.audit.loadedSuffix')}` : ''}</div>
+            <div>{t('pages.examiner.evidence.audit.outcomes')}: <span className="font-mono">{evidenceAudit.counts.outcomes}</span>{evidenceAudit.pages?.outcome?.hasMore ? ` ${t('pages.examiner.evidence.audit.loadedSuffix')}` : ''}</div>
             <div>{t('pages.examiner.evidence.audit.unresolved')}: <span className="font-mono">{evidenceAudit.unresolvedReferences}</span></div>
           </div>
+          {evidenceAudit.anyHasMore && (
+            <p className="mt-2 rounded-md border border-sky-500/40 bg-sky-500/10 p-2 text-[11px] text-sky-700 dark:text-sky-400" data-testid="examiner-evidence-hasmore">
+              {t('pages.examiner.evidence.audit.hasMoreNote')}
+            </p>
+          )}
           <div className="mt-2 rounded-md border p-2 text-[11px]" data-testid="examiner-evidence-ladder">
             <div className="font-medium">{t('pages.examiner.evidence.audit.ladder')}</div>
             <div className="mt-1 grid grid-cols-2 gap-x-3 text-muted-foreground sm:grid-cols-3">
